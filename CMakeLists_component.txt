@@ -1,0 +1,182 @@
+# Tether ESP-IDF Component CMakeLists.txt
+# This file is used when Tether is included as an ESP-IDF component
+
+# Collect sources based on Kconfig options
+set(TETHER_SRCS "")
+set(TETHER_INCLUDE_DIRS "include")
+
+# Always include shared sources
+file(GLOB_RECURSE SHARED_SRCS "src/shared/*.cpp")
+list(APPEND TETHER_SRCS ${SHARED_SRCS})
+
+# EtherCAT
+if(CONFIG_TETHER_ENABLE_ETHERCAT)
+    file(GLOB_RECURSE ETHERCAT_SRCS "src/ethercat/*.cpp")
+    list(APPEND TETHER_SRCS ${ETHERCAT_SRCS})
+endif()
+
+# CiA profiles
+if(CONFIG_TETHER_ENABLE_CIA301)
+    file(GLOB_RECURSE CIA301_SRCS "src/cia301/*.cpp")
+    list(APPEND TETHER_SRCS ${CIA301_SRCS})
+endif()
+
+if(CONFIG_TETHER_ENABLE_CIA401)
+    file(GLOB_RECURSE CIA401_SRCS "src/cia401/*.cpp")
+    list(APPEND TETHER_SRCS ${CIA401_SRCS})
+endif()
+
+if(CONFIG_TETHER_ENABLE_CIA402)
+    file(GLOB_RECURSE CIA402_SRCS "src/cia402/*.cpp")
+    list(APPEND TETHER_SRCS ${CIA402_SRCS})
+endif()
+
+if(CONFIG_TETHER_ENABLE_CIA404)
+    file(GLOB_RECURSE CIA404_SRCS "src/cia404/*.cpp")
+    list(APPEND TETHER_SRCS ${CIA404_SRCS})
+endif()
+
+if(CONFIG_TETHER_ENABLE_CIA405)
+    file(GLOB_RECURSE CIA405_SRCS "src/cia405/*.cpp")
+    list(APPEND TETHER_SRCS ${CIA405_SRCS})
+endif()
+
+if(CONFIG_TETHER_ENABLE_CIA406)
+    file(GLOB_RECURSE CIA406_SRCS "src/cia406/*.cpp")
+    list(APPEND TETHER_SRCS ${CIA406_SRCS})
+endif()
+
+if(CONFIG_TETHER_ENABLE_CIA408)
+    file(GLOB_RECURSE CIA408_SRCS "src/cia408/*.cpp")
+    list(APPEND TETHER_SRCS ${CIA408_SRCS})
+endif()
+
+if(CONFIG_TETHER_ENABLE_CIA410)
+    file(GLOB_RECURSE CIA410_SRCS "src/cia410/*.cpp")
+    list(APPEND TETHER_SRCS ${CIA410_SRCS})
+endif()
+
+if(CONFIG_TETHER_ENABLE_CIA417)
+    file(GLOB_RECURSE CIA417_SRCS "src/cia417/*.cpp")
+    list(APPEND TETHER_SRCS ${CIA417_SRCS})
+endif()
+
+if(CONFIG_TETHER_ENABLE_CIA430)
+    file(GLOB_RECURSE CIA430_SRCS "src/cia430/*.cpp")
+    list(APPEND TETHER_SRCS ${CIA430_SRCS})
+endif()
+
+# GCode
+if(CONFIG_TETHER_ENABLE_GCODE)
+    file(GLOB_RECURSE GCODE_SRCS "src/gcode/*.cpp")
+    list(APPEND TETHER_SRCS ${GCODE_SRCS})
+endif()
+
+# Motion control
+if(CONFIG_TETHER_ENABLE_MOTION)
+    file(GLOB_RECURSE MOTION_SRCS "src/motion/*.cpp")
+    list(APPEND TETHER_SRCS ${MOTION_SRCS})
+endif()
+
+# Control algorithms
+if(CONFIG_TETHER_ENABLE_CONTROL)
+    file(GLOB_RECURSE CONTROL_SRCS "src/control/*.cpp")
+    list(APPEND TETHER_SRCS ${CONTROL_SRCS})
+endif()
+
+# FSoE
+if(CONFIG_TETHER_ENABLE_FSOE)
+    file(GLOB_RECURSE FSOE_SRCS "src/fsoe/*.cpp")
+    list(APPEND TETHER_SRCS ${FSOE_SRCS})
+endif()
+
+# HAL - ESP32 implementation
+file(GLOB HAL_COMMON_SRCS "src/hal/*.cpp")
+file(GLOB HAL_ESP32_SRCS "src/hal/esp32/*.cpp")
+list(APPEND TETHER_SRCS ${HAL_COMMON_SRCS} ${HAL_ESP32_SRCS})
+
+# SII parser
+file(GLOB_RECURSE SII_SRCS "src/sii/*.cpp")
+list(APPEND TETHER_SRCS ${SII_SRCS})
+
+# Reset handling  
+file(GLOB_RECURSE RESET_SRCS "src/reset/*.cpp")
+list(APPEND TETHER_SRCS ${RESET_SRCS})
+
+# FMMU
+file(GLOB_RECURSE FMMU_SRCS "src/fmmu/*.cpp")
+list(APPEND TETHER_SRCS ${FMMU_SRCS})
+
+# ETG5000
+file(GLOB_RECURSE ETG5000_SRCS "src/etg5000/*.cpp")
+list(APPEND TETHER_SRCS ${ETG5000_SRCS})
+
+# Check if we have any sources
+if(NOT TETHER_SRCS)
+    message(WARNING "No Tether sources found - creating placeholder")
+    set(TETHER_SRCS "src/placeholder.cpp")
+endif()
+
+idf_component_register(
+    SRCS ${TETHER_SRCS}
+    INCLUDE_DIRS ${TETHER_INCLUDE_DIRS}
+    REQUIRES esp_eth esp_timer esp_driver_gptimer driver
+)
+
+# The AS715N register/PDO list headers use C++20 facilities (std::span).
+# Ensure the ESP-IDF component target is also built as C++20.
+set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 20)
+set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD_REQUIRED ON)
+set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_EXTENSIONS ON)
+
+# Add compile definitions based on Kconfig
+target_compile_definitions(${COMPONENT_LIB} PUBLIC
+    TETHER_ESP32=1
+    GCODE_STANDALONE_CAPI=1
+)
+
+# Force-enable EtherCAT for local coverage builds when Kconfig is not processed
+# (safe: this only defines the compile-time flag so host stubs are not compiled)
+target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_ETHERCAT=1)
+
+if(CONFIG_TETHER_ENABLE_ETHERCAT)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_ETHERCAT=1)
+    # Indicate we are compiling the full EtherCAT master implementation.
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_COMPILE_MASTER=1)
+endif()
+
+if(CONFIG_TETHER_ENABLE_CIA402)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_CIA402=1)
+endif()
+
+if(CONFIG_TETHER_ENABLE_CIA301)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_CIA301=1)
+endif()
+
+if(CONFIG_TETHER_ENABLE_CIA401)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_CIA401=1)
+endif()
+
+if(CONFIG_TETHER_ENABLE_CIA406)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_CIA406=1)
+endif()
+
+if(CONFIG_TETHER_ENABLE_GCODE)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_GCODE=1)
+endif()
+
+if(CONFIG_TETHER_ENABLE_MOTION)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_MOTION=1)
+endif()
+
+if(CONFIG_TETHER_ENABLE_CONTROL)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_CONTROL=1)
+endif()
+
+if(CONFIG_TETHER_ENABLE_FSOE)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_FSOE=1)
+endif()
+
+if(CONFIG_TETHER_ENABLE_KINEMATICS)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_KINEMATICS=1)
+endif()

@@ -1,0 +1,9 @@
+# Optional dependencies for slipstream
+# Core functionality requires only Python 3.6+
+
+# For serial port support (recommended)
+pyserial>=3.5
+
+# For development/testing
+pytest>=6.0
+pytest-cov>=2.10

@@ -1,0 +1,226 @@
+menu "Tether Library Configuration"
+
+    config TETHER_ENABLE_ETHERCAT
+        bool "Enable EtherCAT protocol support"
+        default y
+        help
+            Enable EtherCAT industrial protocol support including CoE, FoE, VoE.
+
+    config TETHER_ENABLE_CIA402
+        bool "Enable CiA 402 drive profile"
+        default y
+        depends on TETHER_ENABLE_ETHERCAT
+        help
+            Enable CiA 402 drive profile for servo and stepper motor control.
+
+    config TETHER_ENABLE_CIA301
+        bool "Enable CiA 301 CANopen"
+        default y
+        depends on TETHER_ENABLE_ETHERCAT
+        help
+            Enable CiA 301 CANopen-over-EtherCAT (CoE) support.
+
+    config TETHER_ENABLE_CIA401
+        bool "Enable CiA 401 I/O profile"
+        default y
+        depends on TETHER_ENABLE_CIA301
+        help
+            Enable CiA 401 generic I/O module profile.
+
+    config TETHER_ENABLE_CIA404
+        bool "Enable CiA 404 measuring devices"
+        default n
+        depends on TETHER_ENABLE_CIA301
+        help
+            Enable CiA 404 measuring device profile support.
+
+    config TETHER_ENABLE_CIA405
+        bool "Enable CiA 405 PLC profile"
+        default n
+        depends on TETHER_ENABLE_CIA301
+        help
+            Enable CiA 405 Programmable Logic Controller profile.
+
+    config TETHER_ENABLE_CIA406
+        bool "Enable CiA 406 encoder profile"
+        default y
+        depends on TETHER_ENABLE_CIA301
+        help
+            Enable CiA 406 rotary and linear encoder profile.
+
+    config TETHER_ENABLE_CIA408
+        bool "Enable CiA 408 valve profile"
+        default n
+        depends on TETHER_ENABLE_CIA301
+        help
+            Enable CiA 408 hydraulic/pneumatic valve profile.
+
+    config TETHER_ENABLE_CIA410
+        bool "Enable CiA 410 inclinometer profile"
+        default n
+        depends on TETHER_ENABLE_CIA301
+        help
+            Enable CiA 410 inclinometer/tilt sensor profile.
+
+    config TETHER_ENABLE_CIA417
+        bool "Enable CiA 417 lift profile"
+        default n
+        depends on TETHER_ENABLE_CIA301
+        help
+            Enable CiA 417 lift control profile.
+
+    config TETHER_ENABLE_CIA430
+        bool "Enable CiA 430 meter profile"
+        default n
+        depends on TETHER_ENABLE_CIA301
+        help
+            Enable CiA 430 utility meter profile.
+
+    config TETHER_ENABLE_GCODE
+        bool "Enable GCode interpreter"
+        default y
+        help
+            Enable GCode interpreter for CNC/3D printing control.
+
+    config TETHER_ENABLE_MOTION
+        bool "Enable motion control"
+        default y
+        depends on TETHER_ENABLE_GCODE
+        help
+            Enable advanced motion control including trajectory planning.
+
+    config TETHER_ENABLE_CONTROL
+        bool "Enable control algorithms"
+        default y
+        help
+            Enable PID, state-space, and other control algorithms.
+
+    config TETHER_ENABLE_FSOE
+        bool "Enable FSoE (Functional Safety)"
+        default n
+        depends on TETHER_ENABLE_ETHERCAT
+        help
+            Enable Functional Safety over EtherCAT protocol support.
+
+    config TETHER_ENABLE_KINEMATICS
+        bool "Enable kinematics"
+        default y
+        depends on TETHER_ENABLE_MOTION
+        help
+            Enable forward/inverse kinematics for robotic control.
+
+    menu "EtherCAT Distributed Clock (DC)"
+        depends on TETHER_ENABLE_ETHERCAT
+
+        config TETHER_DC_CYCLE_PERIOD_US
+            int "DC loop period (microseconds)"
+            default 1000
+            range 100 10000
+            help
+                Period of the DC realtime loop in microseconds.
+                Default is 1000us (1kHz).
+
+        config TETHER_DC_SYNC_INTERVAL_CYCLES
+            int "DC sync interval (cycles)"
+            default 10
+            range 1 100
+            help
+                Number of DC loop cycles between SYNC frame transmissions.
+
+        config TETHER_DC_SYNC0_CYCLE_TIME_NS
+            int "SYNC0 cycle time (nanoseconds)"
+            default 1000000
+            range 0 100000000
+            help
+                SYNC0 signal cycle time in nanoseconds.
+
+        config TETHER_DC_ENABLE_SYNC0
+            bool "Enable SYNC0 signal"
+            default y
+            help
+                Enable SYNC0 signal generation for DC synchronization.
+
+        config TETHER_DC_ENABLE_SYNC1
+            bool "Enable SYNC1 signal"
+            default y
+            help
+                Enable SYNC1 signal generation.
+    endmenu
+
+    menu "Fault Detection"
+        depends on TETHER_ENABLE_ETHERCAT
+
+        config TETHER_FAULT_AUTO_RESET
+            bool "Enable automatic fault reset"
+            default y
+            help
+                Automatically attempt to reset drive faults.
+
+        config TETHER_FAULT_RESET_COOLDOWN_MS
+            int "Fault reset cooldown (milliseconds)"
+            default 2000
+            range 500 30000
+            depends on TETHER_FAULT_AUTO_RESET
+            help
+                Minimum time between automatic fault reset attempts.
+
+        config TETHER_FAULT_MAX_RESET_ATTEMPTS
+            int "Maximum fault reset attempts"
+            default 10
+            range 1 100
+            depends on TETHER_FAULT_AUTO_RESET
+            help
+                Maximum number of automatic fault reset attempts before giving up.
+    endmenu
+
+    menu "GCode Configuration"
+        depends on TETHER_ENABLE_GCODE
+
+        config TETHER_GCODE_MAX_AXES
+            int "Maximum number of axes"
+            default 6
+            range 3 9
+            help
+                Maximum number of axes supported by the GCode interpreter.
+
+        config TETHER_GCODE_LOOKAHEAD_SIZE
+            int "Lookahead buffer size"
+            default 16
+            range 4 64
+            help
+                Number of moves in the lookahead buffer for velocity planning.
+
+        config TETHER_GCODE_PATH_TOLERANCE_UM
+            int "Default path tolerance (micrometers)"
+            default 50
+            range 1 1000
+            help
+                Default path tolerance for G64 path blending in micrometers.
+    endmenu
+
+    menu "Motion Control Configuration"
+        depends on TETHER_ENABLE_MOTION
+
+        config TETHER_MOTION_MAX_VELOCITY
+            int "Maximum velocity (mm/min)"
+            default 10000
+            range 100 100000
+            help
+                Maximum allowed velocity in mm/min.
+
+        config TETHER_MOTION_MAX_ACCELERATION
+            int "Maximum acceleration (mm/s^2)"
+            default 500
+            range 10 10000
+            help
+                Maximum allowed acceleration in mm/s^2.
+
+        config TETHER_MOTION_JUNCTION_DEVIATION
+            int "Junction deviation (micrometers)"
+            default 50
+            range 1 500
+            help
+                Junction deviation for path smoothing in micrometers.
+    endmenu
+
+endmenu

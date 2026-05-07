@@ -1,0 +1,591 @@
+/**
+ * @file main.cpp
+ * @brief G-code parsing and trajectory generation benchmark tool
+ * 
+ * Benchmarks the performance of:
+ * - Parsing G-code files into block structures
+ * - Generating motion segments from blocks
+ * - Approximating paths with fixed time steps (5ms, 1ms, 0.5ms)
+ * - Approximating paths with fixed deviation tolerances (1μm, 5μm, 10μm)
+ * 
+ * Memory-optimized: Uses streaming computation with O(1) memory for trajectory
+ * generation, tracking only statistics without storing all trajectory points.
+ */
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <sys/resource.h>
+
+#include "tether/gcode/GCodeLite.hpp"
+
+using Clock = std::chrono::high_resolution_clock;
+using Duration = std::chrono::duration<double, std::milli>;
+
+// Memory limit: 6GB
+constexpr size_t MEMORY_LIMIT_BYTES = 6ULL * 1024 * 1024 * 1024;
+
+// Get current memory usage in bytes (RSS)
+size_t get_memory_usage_bytes() {
+    struct rusage usage;
+    getrusage(RUSAGE_SELF, &usage);
+    return static_cast<size_t>(usage.ru_maxrss) * 1024;  // ru_maxrss is in KB on Linux
+}
+
+std::string format_memory(size_t bytes) {
+    std::ostringstream oss;
+    if (bytes < 1024) {
+        oss << bytes << " B";
+    } else if (bytes < 1024 * 1024) {
+        oss << std::fixed << std::setprecision(2) << (bytes / 1024.0) << " KB";
+    } else if (bytes < 1024ULL * 1024 * 1024) {
+        oss << std::fixed << std::setprecision(2) << (bytes / (1024.0 * 1024.0)) << " MB";
+    } else {
+        oss << std::fixed << std::setprecision(2) << (bytes / (1024.0 * 1024.0 * 1024.0)) << " GB";
+    }
+    return oss.str();
+}
+
+// Timer helper class for consistent measurement
+class Timer {
+public:
+    Clock::time_point m_start;
+    
+    void start() { m_start = Clock::now(); }
+    
+    double elapsed_ms() const {
+        return Duration(Clock::now() - m_start).count();
+    }
+    
+    void report(const char* name, size_t count = 0) const {
+        double ms = Duration(Clock::now() - m_start).count();
+        std::cout << std::setw(45) << std::left << name << " ";
+        std::cout << std::setw(10) << std::right << std::fixed << std::setprecision(2) << ms << " ms";
+        if (count > 0) {
+            std::cout << "  (" << count << " items)";
+        }
+        std::cout << "\n";
+    }
+};
+
+// Get file size in bytes
+size_t get_file_size(const std::string& path) {
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    return file.is_open() ? static_cast<size_t>(file.tellg()) : 0;
+}
+
+// Count lines in file
+size_t count_lines(const std::string& path) {
+    std::ifstream file(path);
+    return std::count(std::istreambuf_iterator<char>(file),
+                      std::istreambuf_iterator<char>(), '\n');
+}
+
+// Format bytes for human readability
+std::string format_bytes(size_t bytes) {
+    std::ostringstream oss;
+    if (bytes < 1024) {
+        oss << bytes << " B";
+    } else if (bytes < 1024 * 1024) {
+        oss << std::fixed << std::setprecision(2) << (bytes / 1024.0) << " KB";
+    } else {
+        oss << std::fixed << std::setprecision(2) << (bytes / (1024.0 * 1024.0)) << " MB";
+    }
+    return oss.str();
+}
+
+// Benchmark file loading (raw I/O)
+std::string benchmark_file_load(const std::string& path, Timer& timer) {
+    timer.start();
+    
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "Error: Cannot open file: " << path << "\n";
+        return "";
+    }
+    
+    // Get file size
+    file.seekg(0, std::ios::end);
+    size_t size = file.tellg();
+    file.seekg(0, std::ios::beg);
+    
+    // Read entire file
+    std::string content(size, '\0');
+    file.read(&content[0], size);
+    
+    timer.report("1. File I/O (read into memory)", size);
+    return content;
+}
+
+// Benchmark parsing
+size_t benchmark_parse(GCodeParserHandle parser, const std::string& content, Timer& timer) {
+    timer.start();
+    
+    GCodeErrorCode err = gcode_parser_parse_string(parser, content.c_str(), content.size());
+    if (err != GCODE_OK) {
+        std::cerr << "Error: Parse failed: " << gcode_get_last_error() << "\n";
+        return 0;
+    }
+    
+    size_t block_count = gcode_parser_block_count(parser);
+    timer.report("2. Parse G-code to blocks", block_count);
+    return block_count;
+}
+
+// Benchmark motion segment generation
+size_t benchmark_interpret(GCodeInterpreterHandle interp, GCodeParserHandle parser, Timer& timer) {
+    timer.start();
+    
+    GCodeErrorCode err = gcode_interpreter_load_blocks(interp, parser);
+    if (err != GCODE_OK) {
+        std::cerr << "Error: Interpret failed: " << gcode_get_last_error() << "\n";
+        return 0;
+    }
+    
+    size_t segment_count = gcode_interpreter_segment_count(interp);
+    timer.report("3. Generate motion segments", segment_count);
+    return segment_count;
+}
+
+// Compute total path length from segments
+double compute_path_length(GCodeInterpreterHandle interp) {
+    size_t count = gcode_interpreter_segment_count(interp);
+    double total_length = 0;
+    
+    for (size_t i = 0; i < count; ++i) {
+        GCodeMotionSegment seg;
+        if (gcode_interpreter_get_segment(interp, i, &seg) == GCODE_OK) {
+            total_length += seg.segment_length;
+        }
+    }
+    return total_length;
+}
+
+// Compute total time from segments
+double compute_total_time(GCodeInterpreterHandle interp) {
+    size_t count = gcode_interpreter_segment_count(interp);
+    double total_time = 0;
+    
+    for (size_t i = 0; i < count; ++i) {
+        GCodeMotionSegment seg;
+        if (gcode_interpreter_get_segment(interp, i, &seg) == GCODE_OK) {
+            total_time += seg.segment_time;
+        }
+    }
+    return total_time;
+}
+
+// Benchmark trajectory generation with fixed time step
+struct TrajectoryStats {
+    size_t point_count;
+    double total_time;    // machining time (seconds)
+    double total_length;  // path length (mm)
+};
+
+// Memory-efficient streaming trajectory generation (O(1) memory)
+// Only accumulates statistics without storing all points
+// Optimized with inlined interpolation for hot paths
+TrajectoryStats benchmark_trajectory_time_step(
+    GCodeInterpreterHandle interp,
+    double time_step_s,
+    Timer& timer
+) {
+    timer.start();
+    
+    TrajectoryStats stats{};
+    size_t segment_count = gcode_interpreter_segment_count(interp);
+    
+    // Streaming computation - only keep track of last position, no point storage
+    double current_time = 0;
+    double last_x = 0, last_y = 0, last_z = 0;
+    bool has_last = false;
+    
+    for (size_t i = 0; i < segment_count; ++i) {
+        GCodeMotionSegment seg;
+        if (gcode_interpreter_get_segment(interp, i, &seg) != GCODE_OK) {
+            continue;
+        }
+        
+        if (seg.segment_time <= 0) continue;
+        
+        // Number of steps for this segment
+        size_t steps = std::max(size_t(1), static_cast<size_t>(std::ceil(seg.segment_time / time_step_s)));
+        const double inv_steps = 1.0 / static_cast<double>(steps);
+        const bool is_linear = (seg.motion_type <= 1 || seg.motion_type == 4);
+        
+        // Pre-compute for linear interpolation
+        const double dx_seg = seg.end.coords[0] - seg.start.coords[0];
+        const double dy_seg = seg.end.coords[1] - seg.start.coords[1];
+        const double dz_seg = seg.end.coords[2] - seg.start.coords[2];
+        const double start_x = seg.start.coords[0];
+        const double start_y = seg.start.coords[1];
+        const double start_z = seg.start.coords[2];
+        
+        if (is_linear) {
+            // Optimized loop for linear moves (most common)
+            for (size_t j = 0; j <= steps; ++j) {
+                const double t = static_cast<double>(j) * inv_steps;
+                
+                // Inline linear interpolation
+                const double x = start_x + dx_seg * t;
+                const double y = start_y + dy_seg * t;
+                const double z = start_z + dz_seg * t;
+                
+                if (has_last) {
+                    const double dx = x - last_x;
+                    const double dy = y - last_y;
+                    const double dz = z - last_z;
+                    stats.total_length += std::sqrt(dx*dx + dy*dy + dz*dz);
+                }
+                last_x = x;
+                last_y = y;
+                last_z = z;
+                has_last = true;
+                
+                stats.point_count++;
+            }
+        } else {
+            // Arc interpolation via API
+            for (size_t j = 0; j <= steps; ++j) {
+                const double t = static_cast<double>(j) * inv_steps;
+                
+                GCodePosition pos;
+                gcode_segment_interpolate(&seg, t, &pos);
+                
+                if (has_last) {
+                    const double dx = pos.coords[0] - last_x;
+                    const double dy = pos.coords[1] - last_y;
+                    const double dz = pos.coords[2] - last_z;
+                    stats.total_length += std::sqrt(dx*dx + dy*dy + dz*dz);
+                }
+                last_x = pos.coords[0];
+                last_y = pos.coords[1];
+                last_z = pos.coords[2];
+                has_last = true;
+                
+                stats.point_count++;
+            }
+        }
+        
+        current_time += seg.segment_time;
+    }
+    
+    stats.total_time = current_time;
+    
+    return stats;
+}
+
+// Memory-efficient streaming trajectory generation with fixed deviation tolerance
+// Only accumulates statistics without storing all points (O(1) memory)
+// Optimized with inlined interpolation for hot paths
+TrajectoryStats benchmark_trajectory_deviation(
+    GCodeInterpreterHandle interp,
+    double max_deviation_mm,
+    Timer& timer
+) {
+    timer.start();
+    
+    TrajectoryStats stats{};
+    size_t segment_count = gcode_interpreter_segment_count(interp);
+    
+    // Streaming computation - only keep track of last position
+    double current_time = 0;
+    double last_x = 0, last_y = 0, last_z = 0;
+    bool has_last = false;
+    
+    for (size_t i = 0; i < segment_count; ++i) {
+        GCodeMotionSegment seg;
+        if (gcode_interpreter_get_segment(interp, i, &seg) != GCODE_OK) {
+            continue;
+        }
+        
+        if (seg.segment_length <= 0) continue;
+        
+        size_t steps = 1;
+        const bool is_linear = (seg.motion_type <= 1 || seg.motion_type == 4);
+        
+        // For linear moves, compute steps based on length and deviation
+        if (is_linear) {
+            // Linear: any deviation from linear is 0, so use minimum steps
+            // But we still need to discretize for control, so use length-based
+            steps = std::max(size_t(1), static_cast<size_t>(std::ceil(seg.segment_length / max_deviation_mm)));
+        } else if (seg.motion_type == 2 || seg.motion_type == 3) {
+            // Arc: compute steps based on chord error
+            if (seg.arc_radius > 0 && max_deviation_mm > 0) {
+                double ratio = max_deviation_mm / seg.arc_radius;
+                if (ratio < 1.0) {
+                    double angle_per_step = 2.0 * std::acos(1.0 - ratio);
+                    if (angle_per_step > 0) {
+                        steps = static_cast<size_t>(std::ceil(std::fabs(seg.arc_sweep) / angle_per_step));
+                    }
+                }
+            }
+            steps = std::max(steps, size_t(4));  // Minimum 4 steps for arcs
+        }
+        
+        // Cap maximum steps per segment to avoid explosion
+        steps = std::min(steps, size_t(100000));
+        
+        // Pre-compute common values for this segment
+        const double inv_steps = 1.0 / static_cast<double>(steps);
+        const double dx_seg = seg.end.coords[0] - seg.start.coords[0];
+        const double dy_seg = seg.end.coords[1] - seg.start.coords[1];
+        const double dz_seg = seg.end.coords[2] - seg.start.coords[2];
+        const double start_x = seg.start.coords[0];
+        const double start_y = seg.start.coords[1];
+        const double start_z = seg.start.coords[2];
+        
+        // Optimized loop for linear moves (most common case)
+        if (is_linear) {
+            for (size_t j = 0; j <= steps; ++j) {
+                const double t = static_cast<double>(j) * inv_steps;
+                
+                // Inline linear interpolation - much faster than function call
+                const double x = start_x + dx_seg * t;
+                const double y = start_y + dy_seg * t;
+                const double z = start_z + dz_seg * t;
+                
+                if (has_last) {
+                    const double dx = x - last_x;
+                    const double dy = y - last_y;
+                    const double dz = z - last_z;
+                    stats.total_length += std::sqrt(dx*dx + dy*dy + dz*dz);
+                }
+                last_x = x;
+                last_y = y;
+                last_z = z;
+                has_last = true;
+                
+                stats.point_count++;
+            }
+        } else {
+            // Arc interpolation - use the API function
+            for (size_t j = 0; j <= steps; ++j) {
+                const double t = static_cast<double>(j) * inv_steps;
+                
+                GCodePosition pos;
+                gcode_segment_interpolate(&seg, t, &pos);
+                
+                if (has_last) {
+                    const double dx = pos.coords[0] - last_x;
+                    const double dy = pos.coords[1] - last_y;
+                    const double dz = pos.coords[2] - last_z;
+                    stats.total_length += std::sqrt(dx*dx + dy*dy + dz*dz);
+                }
+                last_x = pos.coords[0];
+                last_y = pos.coords[1];
+                last_z = pos.coords[2];
+                has_last = true;
+                
+                stats.point_count++;
+            }
+        }
+        
+        current_time += seg.segment_time;
+    }
+    
+    stats.total_time = current_time;
+    
+    return stats;
+}
+
+void print_separator() {
+    std::cout << std::string(70, '-') << "\n";
+}
+
+int main(int argc, char* argv[]) {
+    // Set memory limit to 6GB
+    struct rlimit mem_limit;
+    mem_limit.rlim_cur = MEMORY_LIMIT_BYTES;
+    mem_limit.rlim_max = MEMORY_LIMIT_BYTES;
+    if (setrlimit(RLIMIT_AS, &mem_limit) != 0) {
+        std::cerr << "Warning: Could not set memory limit to 6GB\n";
+    }
+    
+    if (argc < 2) {
+        std::cerr << "Usage: " << argv[0] << " <gcode_file>\n";
+        std::cerr << "\nBenchmarks G-code parsing and trajectory generation performance.\n";
+        std::cerr << "Memory limit: " << format_memory(MEMORY_LIMIT_BYTES) << "\n";
+        return 1;
+    }
+    
+    const std::string filename = argv[1];
+    
+    // Print file info
+    size_t file_size = get_file_size(filename);
+    size_t line_count = count_lines(filename);
+    
+    std::cout << "\n";
+    std::cout << "═══════════════════════════════════════════════════════════════════════\n";
+    std::cout << "                    G-CODE PERFORMANCE BENCHMARK\n";
+    std::cout << "═══════════════════════════════════════════════════════════════════════\n";
+    std::cout << "\n";
+    std::cout << "File: " << filename << "\n";
+    std::cout << "Size: " << format_bytes(file_size) << " (" << line_count << " lines)\n";
+    std::cout << "Memory limit: " << format_memory(MEMORY_LIMIT_BYTES) << "\n";
+    std::cout << "Initial memory: " << format_memory(get_memory_usage_bytes()) << "\n";
+    std::cout << "\n";
+    
+    Timer timer;
+    Timer total_timer;
+    total_timer.start();
+    
+    // =========================================================================
+    // Phase 1: File Loading and Parsing
+    // =========================================================================
+    print_separator();
+    std::cout << "PHASE 1: PARSING\n";
+    print_separator();
+    
+    std::string content = benchmark_file_load(filename, timer);
+    if (content.empty()) {
+        return 1;
+    }
+    
+    GCodeParserHandle parser = gcode_parser_create();
+    if (!parser) {
+        std::cerr << "Error: Failed to create parser\n";
+        return 1;
+    }
+    
+    size_t block_count = benchmark_parse(parser, content, timer);
+    if (block_count == 0) {
+        gcode_parser_destroy(parser);
+        return 1;
+    }
+    
+    std::cout << "   Memory after parsing: " << format_memory(get_memory_usage_bytes()) << "\n";
+    
+    // Free file content to reduce memory footprint
+    content.clear();
+    content.shrink_to_fit();
+    
+    // =========================================================================
+    // Phase 2: Interpretation (Motion Segment Generation)
+    // =========================================================================
+    print_separator();
+    std::cout << "PHASE 2: INTERPRETATION\n";
+    print_separator();
+    
+    GCodeInterpreterHandle interp = gcode_interpreter_create();
+    if (!interp) {
+        std::cerr << "Error: Failed to create interpreter\n";
+        gcode_parser_destroy(parser);
+        return 1;
+    }
+    
+    // Configure machine
+    GCodeMachineConfig config{};
+    config.min_x = -1000; config.max_x = 1000;
+    config.min_y = -1000; config.max_y = 1000;
+    config.min_z = -500;  config.max_z = 500;
+    config.min_a = -360;  config.max_a = 360;
+    config.min_b = -360;  config.max_b = 360;
+    config.min_c = -360;  config.max_c = 360;
+    config.max_velocity_linear = 6000;
+    config.max_velocity_angular = 3600;
+    config.max_acceleration = 1000;
+    config.max_jerk = 10000;
+    config.default_feed_rate = 1000;
+    config.rapid_feed_rate = 6000;
+    config.use_metric = true;
+    config.kinematics_type = 0;
+    
+    gcode_interpreter_configure(interp, &config);
+    
+    size_t segment_count = benchmark_interpret(interp, parser, timer);
+    
+    // Compute path statistics
+    timer.start();
+    double path_length = compute_path_length(interp);
+    double machining_time = compute_total_time(interp);
+    timer.report("   Compute path length", 0);
+    
+    std::cout << "\n";
+    std::cout << "   Path length:    " << std::fixed << std::setprecision(2) << path_length << " mm\n";
+    std::cout << "   Machining time: " << std::fixed << std::setprecision(2) << machining_time << " s";
+    if (machining_time > 60) {
+        std::cout << " (" << std::fixed << std::setprecision(1) << machining_time / 60.0 << " min)";
+    }
+    std::cout << "\n";
+    std::cout << "   Memory after interpretation: " << format_memory(get_memory_usage_bytes()) << "\n";
+    
+    // =========================================================================
+    // Phase 3: Fixed Time Step Trajectory
+    // =========================================================================
+    print_separator();
+    std::cout << "PHASE 3: TRAJECTORY (FIXED TIME STEP)\n";
+    print_separator();
+    
+    struct TimeStepTest {
+        const char* name;
+        double step_s;
+    } time_tests[] = {
+        {"4a. Trajectory at 5ms steps", 0.005},
+        {"4b. Trajectory at 1ms steps", 0.001},
+        {"4c. Trajectory at 0.5ms steps", 0.0005},
+    };
+    
+    for (const auto& test : time_tests) {
+        timer.start();
+        auto stats = benchmark_trajectory_time_step(interp, test.step_s, timer);
+        timer.report(test.name, stats.point_count);
+    }
+    
+    // =========================================================================
+    // Phase 4: Fixed Deviation Trajectory
+    // =========================================================================
+    print_separator();
+    std::cout << "PHASE 4: TRAJECTORY (FIXED DEVIATION)\n";
+    print_separator();
+    
+    struct DeviationTest {
+        const char* name;
+        double deviation_mm;
+    } deviation_tests[] = {
+        {"5a. Trajectory at 10μm deviation", 0.010},
+        {"5b. Trajectory at 5μm deviation",  0.005},
+        {"5c. Trajectory at 1μm deviation",  0.001},
+    };
+    
+    for (const auto& test : deviation_tests) {
+        timer.start();
+        auto stats = benchmark_trajectory_deviation(interp, test.deviation_mm, timer);
+        timer.report(test.name, stats.point_count);
+    }
+    
+    // =========================================================================
+    // Summary
+    // =========================================================================
+    print_separator();
+    std::cout << "SUMMARY\n";
+    print_separator();
+    total_timer.report("Total benchmark time");
+    std::cout << "   Peak memory: " << format_memory(get_memory_usage_bytes()) << "\n";
+    
+    // Print throughput metrics
+    double total_ms = Duration(Clock::now() - total_timer.m_start).count();
+    double lines_per_sec = line_count / (total_ms / 1000.0);
+    double mb_per_sec = (file_size / (1024.0 * 1024.0)) / (total_ms / 1000.0);
+    
+    std::cout << "\n";
+    std::cout << "Throughput:\n";
+    std::cout << "   " << std::fixed << std::setprecision(0) << lines_per_sec << " lines/second\n";
+    std::cout << "   " << std::fixed << std::setprecision(2) << mb_per_sec << " MB/second\n";
+    
+    // Cleanup
+    gcode_interpreter_destroy(interp);
+    gcode_parser_destroy(parser);
+    
+    std::cout << "\n═══════════════════════════════════════════════════════════════════════\n";
+    
+    return 0;
+}

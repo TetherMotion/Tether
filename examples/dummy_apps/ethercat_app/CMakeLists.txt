@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.16)
+project(DummyEtherCATApp C CXX)
+set(CMAKE_CXX_STANDARD 20)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../.. Tether EXCLUDE_FROM_ALL)
+add_executable(dummy_ethercat_app main.cpp)
+target_link_libraries(dummy_ethercat_app PRIVATE tether::ethercat_master)

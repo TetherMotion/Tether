@@ -1,0 +1,17 @@
+## Tether ESP-IDF Component Manifest
+## This allows the Tether library to be used as an ESP-IDF component
+
+description: "Tether - Industrial Control Library (EtherCAT, GCode, Motion Control)"
+version: "1.0.0"
+url: "https://github.com/your-repo/tether"
+
+dependencies:
+  idf:
+    version: ">=5.0.0"
+
+targets:
+  - esp32
+  - esp32s2
+  - esp32s3
+  - esp32c3
+  - esp32c6

@@ -1,0 +1,24 @@
+# Build directory
+build/
+
+# Compiled Python extension modules
+*.so
+*.pyd
+*.cpython-*.so
+
+# CMake artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# pip / packaging
+*.egg-info/
+dist/
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Local install artifacts
+pip-wheel-metadata/

@@ -1,0 +1,12 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# Platform-specific dependencies
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_dependency(Threads)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/TetherTargets.cmake")
+
+check_required_components(Tether)

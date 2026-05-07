@@ -1,0 +1,9 @@
+# Build directories
+build/
+build_*/
+_deps/
+
+# CMake generated files
+CTestTestfile.cmake
+TetherConfig.cmake
+TetherConfigVersion.cmake

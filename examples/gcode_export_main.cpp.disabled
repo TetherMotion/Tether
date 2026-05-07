@@ -1,0 +1,492 @@
+/**
+ * @file main.cpp
+ * @brief G-code Export Tool - Export toolpaths to SVG and CSV with kinematic analysis
+ * 
+ * Features:
+ * - Export to SVG for visualization
+ * - Export to CSV with position, velocity, acceleration, jerk for all axes
+ * - Multiple approximation strategies (FixedTime, FixedDeviation, Trapezoidal, SCurve)
+ * - Kinematic limit compliance checking
+ * - Statistical analysis
+ * 
+ * Usage:
+ *   gcode_export [options] <gcode_file>
+ * 
+ * Options:
+ *   -o, --output <base>     Output filename base (default: input basename)
+ *   --svg                   Export SVG (enabled by default)
+ *   --no-svg                Disable SVG export
+ *   --csv                   Export trajectory CSV (enabled by default)
+ *   --no-csv                Disable CSV export
+ *   --stats                 Export statistics CSV
+ *   
+ *   --strategy <name>       Approximation strategy: FixedTime, FixedDeviation, Trapezoidal, SCurve
+ *   --time-step <ms>        Time step in milliseconds (default: 1.0)
+ *   --deviation <um>        Max chord deviation in micrometers (default: 5.0)
+ *   
+ *   --max-velocity <mm/min> Maximum velocity (default: 6000)
+ *   --max-accel <mm/s²>     Maximum acceleration (default: 1000)
+ *   --max-jerk <mm/s³>      Maximum jerk (default: 10000)
+ *   
+ *   --check-limits          Check kinematic limit compliance
+ *   --axes <list>           Axes to include (e.g., "XYZ" or "XYZABC")
+ *   
+ *   -v, --verbose           Verbose output
+ *   -h, --help              Show help
+ */
+
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <vector>
+#include <cstring>
+#include <algorithm>
+#include <iomanip>
+
+#include "tether/gcode/GCodeLite.hpp"
+#include "gcode/motion/G64CornerMode.hpp"
+#include "TrajectoryAnalyzer.hpp"
+#include "SVGExporter.hpp"
+#include "CSVExporter.hpp"
+
+using namespace GCodeExport;
+
+// Command line options
+struct Options {
+    std::string inputFile;
+    std::string outputBase;
+    
+    bool exportSVG = true;
+    bool exportCSV = true;
+    bool exportStats = true;
+    bool checkLimits = true;
+    
+    std::string strategy = "FixedTime";
+    double timeStepMs = 1.0;
+    double deviationUm = 5.0;
+    
+    double maxVelocity = 6000.0;    // mm/min
+    double maxAccel = 1000.0;       // mm/s²
+    double maxJerk = 10000.0;       // mm/s³
+    
+    // Path blending options
+    bool enableBlending = true;
+    double blendTolerance = 0.0;    // 0 = use G64 P from file, >0 = override
+    
+    std::string axes = "XYZABC";
+    bool verbose = false;
+};
+
+void printUsage(const char* progName) {
+    std::cout << "G-code Export Tool - Export toolpaths to SVG and CSV\n\n";
+    std::cout << "Usage: " << progName << " [options] <gcode_file>\n\n";
+    std::cout << "Output Options:\n";
+    std::cout << "  -o, --output <base>     Output filename base\n";
+    std::cout << "  --svg / --no-svg        Enable/disable SVG export (default: enabled)\n";
+    std::cout << "  --csv / --no-csv        Enable/disable CSV export (default: enabled)\n";
+    std::cout << "  --stats                 Export statistics CSV\n";
+    std::cout << "\nApproximation Options:\n";
+    std::cout << "  --strategy <name>       Strategy: FixedTime, FixedDeviation, Trapezoidal, SCurve\n";
+    std::cout << "  --time-step <ms>        Time step (default: 1.0 ms)\n";
+    std::cout << "  --deviation <um>        Max deviation (default: 5.0 µm)\n";
+    std::cout << "\nPath Blending:\n";
+    std::cout << "  --blend / --no-blend    Enable/disable G64 path blending (default: enabled)\n";
+    std::cout << "  --blend-tol <mm>        Override G64 P tolerance (0 = use file value)\n";
+    std::cout << "\nKinematic Limits:\n";
+    std::cout << "  --max-velocity <mm/min> (default: 6000)\n";
+    std::cout << "  --max-accel <mm/s²>     (default: 1000)\n";
+    std::cout << "  --max-jerk <mm/s³>      (default: 10000)\n";
+    std::cout << "  --check-limits          Check limit compliance\n";
+    std::cout << "\nOther:\n";
+    std::cout << "  --axes <list>           Axes to include (default: XYZABC)\n";
+    std::cout << "  -v, --verbose           Verbose output\n";
+    std::cout << "  -h, --help              Show this help\n";
+}
+
+bool parseArgs(int argc, char* argv[], Options& opts) {
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        
+        if (arg == "-h" || arg == "--help") {
+            printUsage(argv[0]);
+            return false;
+        }
+        else if (arg == "-v" || arg == "--verbose") {
+            opts.verbose = true;
+        }
+        else if (arg == "-o" || arg == "--output") {
+            if (++i >= argc) { std::cerr << "Missing argument for " << arg << "\n"; return false; }
+            opts.outputBase = argv[i];
+        }
+        else if (arg == "--svg") {
+            opts.exportSVG = true;
+        }
+        else if (arg == "--no-svg") {
+            opts.exportSVG = false;
+        }
+        else if (arg == "--csv") {
+            opts.exportCSV = true;
+        }
+        else if (arg == "--no-csv") {
+            opts.exportCSV = false;
+        }
+        else if (arg == "--stats") {
+            opts.exportStats = true;
+        }
+        else if (arg == "--strategy") {
+            if (++i >= argc) { std::cerr << "Missing argument for " << arg << "\n"; return false; }
+            opts.strategy = argv[i];
+        }
+        else if (arg == "--time-step") {
+            if (++i >= argc) { std::cerr << "Missing argument for " << arg << "\n"; return false; }
+            opts.timeStepMs = std::stod(argv[i]);
+        }
+        else if (arg == "--deviation") {
+            if (++i >= argc) { std::cerr << "Missing argument for " << arg << "\n"; return false; }
+            opts.deviationUm = std::stod(argv[i]);
+        }
+        else if (arg == "--blend") {
+            opts.enableBlending = true;
+        }
+        else if (arg == "--no-blend") {
+            opts.enableBlending = false;
+        }
+        else if (arg == "--blend-tol") {
+            if (++i >= argc) { std::cerr << "Missing argument for " << arg << "\n"; return false; }
+            opts.blendTolerance = std::stod(argv[i]);
+        }
+        else if (arg == "--max-velocity") {
+            if (++i >= argc) { std::cerr << "Missing argument for " << arg << "\n"; return false; }
+            opts.maxVelocity = std::stod(argv[i]);
+        }
+        else if (arg == "--max-accel") {
+            if (++i >= argc) { std::cerr << "Missing argument for " << arg << "\n"; return false; }
+            opts.maxAccel = std::stod(argv[i]);
+        }
+        else if (arg == "--max-jerk") {
+            if (++i >= argc) { std::cerr << "Missing argument for " << arg << "\n"; return false; }
+            opts.maxJerk = std::stod(argv[i]);
+        }
+        else if (arg == "--check-limits") {
+            opts.checkLimits = true;
+        }
+        else if (arg == "--axes") {
+            if (++i >= argc) { std::cerr << "Missing argument for " << arg << "\n"; return false; }
+            opts.axes = argv[i];
+        }
+        else if (arg[0] == '-') {
+            std::cerr << "Unknown option: " << arg << "\n";
+            return false;
+        }
+        else {
+            opts.inputFile = arg;
+        }
+    }
+    
+    if (opts.inputFile.empty()) {
+        std::cerr << "Error: No input file specified\n";
+        printUsage(argv[0]);
+        return false;
+    }
+    
+    // Default output base
+    if (opts.outputBase.empty()) {
+        opts.outputBase = opts.inputFile;
+        size_t dot = opts.outputBase.rfind('.');
+        if (dot != std::string::npos) {
+            opts.outputBase = opts.outputBase.substr(0, dot);
+        }
+    }
+    
+    return true;
+}
+
+std::bitset<9> parseAxes(const std::string& axes) {
+    std::bitset<9> result;
+    const char* axisChars = "XYZABCUVW";
+    
+    for (char c : axes) {
+        for (int i = 0; i < 9; ++i) {
+            if (std::toupper(c) == axisChars[i]) {
+                result[i] = true;
+                break;
+            }
+        }
+    }
+    
+    return result;
+}
+
+int main(int argc, char* argv[]) {
+    Options opts;
+    if (!parseArgs(argc, argv, opts)) {
+        return 1;
+    }
+    
+    if (opts.verbose) {
+        std::cout << "G-code Export Tool\n";
+        std::cout << "==================\n";
+        std::cout << "Input: " << opts.inputFile << "\n";
+        std::cout << "Output base: " << opts.outputBase << "\n";
+        std::cout << "Strategy: " << opts.strategy << "\n";
+        std::cout << "Max velocity: " << opts.maxVelocity << " mm/min\n";
+        std::cout << "Max acceleration: " << opts.maxAccel << " mm/s²\n";
+        std::cout << "Max jerk: " << opts.maxJerk << " mm/s³\n";
+        std::cout << "\n";
+    }
+    
+    // Create parser
+    GCodeParserHandle parser = gcode_parser_create();
+    if (!parser) {
+        std::cerr << "Error: Failed to create parser\n";
+        return 1;
+    }
+    
+    // Parse file
+    if (opts.verbose) std::cout << "Parsing G-code file...\n";
+    
+    GCodeErrorCode err = gcode_parser_parse_file(parser, opts.inputFile.c_str());
+    if (err != GCODE_OK) {
+        std::cerr << "Error: Parse failed: " << gcode_get_last_error() << "\n";
+        gcode_parser_destroy(parser);
+        return 1;
+    }
+    
+    size_t blockCount = gcode_parser_block_count(parser);
+    if (opts.verbose) {
+        std::cout << "  Parsed " << blockCount << " blocks\n";
+    }
+    
+    // Create interpreter
+    GCodeInterpreterHandle interp = gcode_interpreter_create();
+    if (!interp) {
+        std::cerr << "Error: Failed to create interpreter\n";
+        gcode_parser_destroy(parser);
+        return 1;
+    }
+    
+    // Configure machine limits
+    GCodeMachineConfig machineConfig{};
+    machineConfig.max_velocity_linear = opts.maxVelocity;
+    machineConfig.max_acceleration = opts.maxAccel;
+    machineConfig.max_jerk = opts.maxJerk;
+    machineConfig.default_feed_rate = 1000;
+    machineConfig.rapid_feed_rate = opts.maxVelocity;
+    machineConfig.use_metric = true;
+    
+    gcode_interpreter_configure(interp, &machineConfig);
+    
+    // Interpret blocks
+    if (opts.verbose) std::cout << "Generating motion segments...\n";
+    
+    err = gcode_interpreter_load_blocks(interp, parser);
+    if (err != GCODE_OK) {
+        std::cerr << "Error: Interpretation failed: " << gcode_get_last_error() << "\n";
+        gcode_interpreter_destroy(interp);
+        gcode_parser_destroy(parser);
+        return 1;
+    }
+    
+    size_t segmentCount = gcode_interpreter_segment_count(interp);
+    if (opts.verbose) {
+        std::cout << "  Generated " << segmentCount << " segments\n";
+    }
+    
+    // Collect segments
+    std::vector<GCodeMotionSegment> segments(segmentCount);
+    for (size_t i = 0; i < segmentCount; ++i) {
+        gcode_interpreter_get_segment(interp, i, &segments[i]);
+    }
+    
+    // Configure analysis
+    AnalysisConfig analysisConfig;
+    analysisConfig.timeStep = opts.timeStepMs / 1000.0;
+    analysisConfig.maxChordError = opts.deviationUm / 1000.0;
+    analysisConfig.limits.maxVelocityLinear = opts.maxVelocity;
+    analysisConfig.limits.maxAcceleration = opts.maxAccel;
+    analysisConfig.limits.maxJerk = opts.maxJerk;
+    
+    // Generate trajectory
+    if (opts.verbose) std::cout << "Generating trajectory with " << opts.strategy << " strategy...\n";
+    
+    std::vector<TrajectorySample> samples;
+    auto strategy = ApproximationFactory::create(opts.strategy);
+    if (!strategy) {
+        std::cerr << "Error: Unknown strategy: " << opts.strategy << "\n";
+        gcode_interpreter_destroy(interp);
+        gcode_parser_destroy(parser);
+        return 1;
+    }
+    
+    strategy->configure("timeStep", opts.timeStepMs / 1000.0);
+    strategy->configure("maxDeviation", opts.deviationUm / 1000.0);
+    
+    // Convert C API segments to C++ PlanningSegments
+    std::vector<GCode::PlanningSegment> cppSegments;
+    for (const auto& cseg : segments) {
+        GCode::PlanningSegment seg;
+        for (size_t j = 0; j < 9; ++j) {
+            seg.start[j] = cseg.start.coords[j];
+            seg.end[j] = cseg.end.coords[j];
+            seg.center[j] = cseg.center.coords[j];
+        }
+        seg.motionType = static_cast<GCode::SegmentMotionType>(cseg.motion_type);
+        seg.plane = static_cast<GCode::InterpolationPlane>(cseg.plane);
+        seg.feedRate = cseg.feed_rate;
+        seg.arcRadius = cseg.arc_radius;
+        seg.arcSweep = cseg.arc_sweep;
+        seg.segmentLength = cseg.segment_length;
+        seg.segmentTime = cseg.segment_time;
+        seg.blockIndex = cseg.block_index;
+        seg.isRapid = cseg.is_rapid;
+        cppSegments.push_back(seg);
+    }
+    
+    // Apply G64 path blending if enabled
+    if (opts.enableBlending && cppSegments.size() >= 2) {
+        GCode::G64CornerConfig blendConfig;
+        if (opts.blendTolerance > 0) {
+            blendConfig.pathTolerance = opts.blendTolerance;
+        } else {
+            // Default tolerance - should come from G64 P in the file
+            // TODO: Get this from interpreter state
+            blendConfig.pathTolerance = 0.5;  // Default 0.5mm
+        }
+        
+        if (opts.verbose) {
+            std::cout << "Applying G64 path blending (P=" << blendConfig.pathTolerance << "mm)...\n";
+        }
+        
+        GCode::G64PathBlender blender(blendConfig);
+        std::vector<GCode::PlanningSegment> blendedSegments = blender.blend(cppSegments);
+        
+        if (opts.verbose) {
+            std::cout << "  Blended " << cppSegments.size() << " -> " << blendedSegments.size() << " segments\n";
+            std::cout << "  Processed " << blender.cornerAnalyses().size() << " corners\n";
+            
+            // Debug: print segment start/end positions
+            for (size_t i = 0; i < blendedSegments.size(); ++i) {
+                const auto& seg = blendedSegments[i];
+                std::cout << "  Seg " << i << ": (" << seg.start[0] << "," << seg.start[1] << ")"
+                          << " -> (" << seg.end[0] << "," << seg.end[1] << ")"
+                          << " len=" << seg.segmentLength << " time=" << seg.segmentTime 
+                          << " type=" << static_cast<int>(seg.motionType);
+                if (seg.isArc()) {
+                    std::cout << " center=(" << seg.center[0] << "," << seg.center[1] << ")"
+                              << " r=" << seg.arcRadius << " sweep=" << seg.arcSweep;
+                }
+                std::cout << "\n";
+            }
+        }
+        
+        cppSegments = std::move(blendedSegments);
+    }
+    
+    samples = strategy->generateTrajectory(cppSegments, analysisConfig.limits);
+    
+    if (opts.verbose) {
+        std::cout << "  Generated " << samples.size() << " trajectory samples\n";
+    }
+    
+    // Compute statistics
+    TrajectoryAnalyzer analyzer(analysisConfig);
+    TrajectoryStatistics stats = analyzer.computeStatistics(samples);
+    
+    if (opts.verbose) {
+        std::cout << "\nTrajectory Statistics:\n";
+        std::cout << "  Duration: " << std::fixed << std::setprecision(2) << stats.duration << " s\n";
+        std::cout << "  Path length: " << stats.pathLength << " mm\n";
+        std::cout << "  Max velocity: " << stats.maxLinearVelocity << " mm/s\n";
+        std::cout << "  Max acceleration: " << stats.maxLinearAcceleration << " mm/s²\n";
+        std::cout << "  Max jerk: " << stats.maxLinearJerk << " mm/s³\n";
+    }
+    
+    // Check limits
+    if (opts.checkLimits) {
+        if (stats.meetsLimits) {
+            if (opts.verbose) std::cout << "\n✓ All kinematic limits satisfied\n";
+        } else {
+            std::cout << "\n⚠ Kinematic limit violations detected: " << stats.violations.size() << "\n";
+            
+            // Show first few violations
+            size_t showCount = std::min(stats.violations.size(), size_t(5));
+            for (size_t i = 0; i < showCount; ++i) {
+                const auto& v = stats.violations[i];
+                std::cout << "  t=" << std::fixed << std::setprecision(3) << v.time << "s: "
+                          << v.limitType << " = " << v.value << " (limit: " << v.limit 
+                          << ", +" << std::setprecision(1) << v.overshoot << "%)\n";
+            }
+            if (stats.violations.size() > showCount) {
+                std::cout << "  ... and " << (stats.violations.size() - showCount) << " more\n";
+            }
+        }
+    }
+    
+    // Export
+    int exportCount = 0;
+    
+    // Configure CSV exporter
+    CSVConfig csvConfig;
+    csvConfig.includeAxes = parseAxes(opts.axes);
+    
+    // Configure SVG exporter
+    SVGConfig svgConfig;
+    
+    if (opts.exportSVG) {
+        std::string svgFile = opts.outputBase + ".svg";
+        if (opts.verbose) std::cout << "\nExporting SVG: " << svgFile << "\n";
+        
+        SVGExporter svg(svgConfig);
+        if (svg.exportToFile(samples, svgFile)) {
+            ++exportCount;
+            if (opts.verbose) std::cout << "  ✓ SVG exported\n";
+        } else {
+            std::cerr << "  ✗ SVG export failed\n";
+        }
+    }
+    
+    if (opts.exportCSV) {
+        std::string csvFile = opts.outputBase + "_trajectory.csv";
+        if (opts.verbose) std::cout << "Exporting CSV: " << csvFile << "\n";
+        
+        CSVExporter csv(csvConfig);
+        if (csv.exportToFile(samples, csvFile)) {
+            ++exportCount;
+            if (opts.verbose) std::cout << "  ✓ CSV exported\n";
+        } else {
+            std::cerr << "  ✗ CSV export failed\n";
+        }
+    }
+    
+    if (opts.exportStats) {
+        std::string statsFile = opts.outputBase + "_statistics.csv";
+        if (opts.verbose) std::cout << "Exporting statistics: " << statsFile << "\n";
+        
+        CSVExporter csv(csvConfig);
+        if (csv.exportStatistics(stats, statsFile)) {
+            ++exportCount;
+            if (opts.verbose) std::cout << "  ✓ Statistics exported\n";
+        } else {
+            std::cerr << "  ✗ Statistics export failed\n";
+        }
+        
+        // Export violations if any
+        if (!stats.violations.empty()) {
+            std::string violFile = opts.outputBase + "_violations.csv";
+            if (csv.exportViolations(stats.violations, violFile)) {
+                ++exportCount;
+                if (opts.verbose) std::cout << "  ✓ Violations exported: " << violFile << "\n";
+            }
+        }
+    }
+    
+    // Cleanup
+    gcode_interpreter_destroy(interp);
+    gcode_parser_destroy(parser);
+    
+    if (opts.verbose) {
+        std::cout << "\nDone. Exported " << exportCount << " files.\n";
+    }
+    
+    return stats.meetsLimits ? 0 : 2;
+}

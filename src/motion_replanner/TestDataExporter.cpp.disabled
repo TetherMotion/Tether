@@ -1,0 +1,1456 @@
+/**
+ * @file TestDataExporter.cpp
+ * @brief Implementation of test data exporters
+ */
+
+#include "TestDataExporter.hpp"
+#include <ctime>
+#include <chrono>
+#include <algorithm>
+#include <filesystem>
+#include <cmath>
+
+namespace MotionReplanner {
+
+//=============================================================================
+// DataExporter Base Implementation
+//=============================================================================
+
+DataExporter::DataExporter(const ExportConfig& config) : config_(config) {}
+
+std::string DataExporter::formatDouble(double value) const {
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(config_.precision) << value;
+    return ss.str();
+}
+
+std::string DataExporter::escapeCSV(const std::string& str) const {
+    if (str.find(config_.delimiter) != std::string::npos ||
+        str.find('"') != std::string::npos ||
+        str.find('\n') != std::string::npos) {
+        std::string escaped = str;
+        size_t pos = 0;
+        while ((pos = escaped.find('"', pos)) != std::string::npos) {
+            escaped.insert(pos, "\"");
+            pos += 2;
+        }
+        return "\"" + escaped + "\"";
+    }
+    return str;
+}
+
+std::string DataExporter::escapeJSON(const std::string& str) const {
+    std::string result;
+    for (char c : str) {
+        switch (c) {
+            case '"':  result += "\\\""; break;
+            case '\\': result += "\\\\"; break;
+            case '\n': result += "\\n"; break;
+            case '\r': result += "\\r"; break;
+            case '\t': result += "\\t"; break;
+            default: result += c;
+        }
+    }
+    return result;
+}
+
+std::string DataExporter::getCurrentTimestamp() const {
+    auto now = std::chrono::system_clock::now();
+    auto time = std::chrono::system_clock::to_time_t(now);
+    std::ostringstream ss;
+    ss << std::put_time(std::localtime(&time), config_.timestampFormat.c_str());
+    return ss.str();
+}
+
+//=============================================================================
+// TrajectoryExporter Implementation
+//=============================================================================
+
+bool TrajectoryExporter::exportTrajectory(const std::string& filename,
+    const std::vector<GCodeExport::TrajectorySample>& desired,
+    const std::vector<GCodeExport::TrajectorySample>& actual) {
+    
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+    
+    if (config_.format == ExportFormat::JSON || config_.format == ExportFormat::JSONPretty) {
+        writeJSONTrajectory(file, desired, actual);
+    } else {
+        writeCSVTrajectory(file, desired, actual);
+    }
+    
+    return file.good();
+}
+
+void TrajectoryExporter::writeCSVTrajectory(std::ostream& out,
+    const std::vector<GCodeExport::TrajectorySample>& desired,
+    const std::vector<GCodeExport::TrajectorySample>& actual) {
+    
+    char d = config_.delimiter;
+    
+    if (config_.includeHeader) {
+        out << "time" << d
+            << "desired_x" << d << "desired_y" << d << "desired_z" << d
+            << "desired_vx" << d << "desired_vy" << d << "desired_vz" << d
+            << "actual_x" << d << "actual_y" << d << "actual_z" << d
+            << "actual_vx" << d << "actual_vy" << d << "actual_vz" << d
+            << "error_x" << d << "error_y" << d << "error_z" << d
+            << "error_magnitude\n";
+    }
+    
+    size_t n = std::min(desired.size(), actual.size());
+    for (size_t i = 0; i < n; i += config_.downsampleFactor) {
+        const auto& des = desired[i];
+        const auto& act = actual[i];
+        
+        double ex = des.position[0] - act.position[0];
+        double ey = des.position[1] - act.position[1];
+        double ez = des.position[2] - act.position[2];
+        double emag = std::sqrt(ex*ex + ey*ey + ez*ez);
+        
+        out << formatDouble(des.time) << d
+            << formatDouble(des.position[0]) << d
+            << formatDouble(des.position[1]) << d
+            << formatDouble(des.position[2]) << d
+            << formatDouble(des.velocity[0]) << d
+            << formatDouble(des.velocity[1]) << d
+            << formatDouble(des.velocity[2]) << d
+            << formatDouble(act.position[0]) << d
+            << formatDouble(act.position[1]) << d
+            << formatDouble(act.position[2]) << d
+            << formatDouble(act.velocity[0]) << d
+            << formatDouble(act.velocity[1]) << d
+            << formatDouble(act.velocity[2]) << d
+            << formatDouble(ex) << d
+            << formatDouble(ey) << d
+            << formatDouble(ez) << d
+            << formatDouble(emag) << "\n";
+    }
+}
+
+void TrajectoryExporter::writeJSONTrajectory(std::ostream& out,
+    const std::vector<GCodeExport::TrajectorySample>& desired,
+    const std::vector<GCodeExport::TrajectorySample>& actual) {
+    
+    bool pretty = (config_.format == ExportFormat::JSONPretty);
+    JSONBuilder json(pretty);
+    
+    json.beginObject();
+    
+    if (config_.includeMetadata) {
+        json.key("metadata");
+        json.beginObject();
+        json.keyValue("testName", metadata_.testName);
+        json.keyValue("timestamp", getCurrentTimestamp());
+        json.keyValue("sampleCount", static_cast<int>(desired.size()));
+        json.endObject();
+    }
+    
+    // Desired trajectory
+    json.key("desired");
+    json.beginObject();
+    {
+        std::vector<double> time, x, y, z, vx, vy, vz;
+        for (const auto& s : desired) {
+            time.push_back(s.time);
+            x.push_back(s.position[0]);
+            y.push_back(s.position[1]);
+            z.push_back(s.position[2]);
+            vx.push_back(s.velocity[0]);
+            vy.push_back(s.velocity[1]);
+            vz.push_back(s.velocity[2]);
+        }
+        json.doubleArray("time", time);
+        json.doubleArray("x", x);
+        json.doubleArray("y", y);
+        json.doubleArray("z", z);
+        json.doubleArray("vx", vx);
+        json.doubleArray("vy", vy);
+        json.doubleArray("vz", vz);
+    }
+    json.endObject();
+    
+    // Actual trajectory
+    json.key("actual");
+    json.beginObject();
+    {
+        std::vector<double> time, x, y, z, vx, vy, vz;
+        for (const auto& s : actual) {
+            time.push_back(s.time);
+            x.push_back(s.position[0]);
+            y.push_back(s.position[1]);
+            z.push_back(s.position[2]);
+            vx.push_back(s.velocity[0]);
+            vy.push_back(s.velocity[1]);
+            vz.push_back(s.velocity[2]);
+        }
+        json.doubleArray("time", time);
+        json.doubleArray("x", x);
+        json.doubleArray("y", y);
+        json.doubleArray("z", z);
+        json.doubleArray("vx", vx);
+        json.doubleArray("vy", vy);
+        json.doubleArray("vz", vz);
+    }
+    json.endObject();
+    
+    json.endObject();
+    
+    out << json.str();
+}
+
+bool TrajectoryExporter::exportTrackingErrors(const std::string& filename,
+    const std::vector<TrackingError>& errors) {
+    
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+    
+    char d = config_.delimiter;
+    
+    if (config_.includeHeader) {
+        file << "time" << d
+             << "error_x" << d << "error_y" << d << "error_z" << d
+             << "combined_position_error" << d
+             << "velocity_error_x" << d
+             << "lag_error" << d
+             << "contour_error" << d
+             << "is_critical_point\n";
+    }
+    
+    for (const auto& e : errors) {
+        file << formatDouble(e.timestamp) << d
+             << formatDouble(e.positionError[0]) << d
+             << formatDouble(e.positionError[1]) << d
+             << formatDouble(e.positionError[2]) << d
+             << formatDouble(e.combinedPositionError) << d
+             << formatDouble(e.velocityError[0]) << d
+             << formatDouble(e.lagError) << d
+             << formatDouble(e.contourError) << d
+             << (e.isCriticalPoint ? "1" : "0") << "\n";
+    }
+    
+    return file.good();
+}
+
+bool TrajectoryExporter::exportSegmentPerformance(const std::string& filename,
+    const std::vector<SegmentPerformance>& segments) {
+    
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+    
+    char d = config_.delimiter;
+    
+    if (config_.includeHeader) {
+        file << "segment_index" << d
+             << "commanded_feedrate" << d << "achieved_mean_feedrate" << d
+             << "achieved_min_feedrate" << d << "achieved_max_feedrate" << d
+             << "commanded_accel" << d
+             << "max_error" << d << "mean_error" << d << "\n";
+    }
+    
+    for (const auto& seg : segments) {
+        file << seg.segmentIndex << d
+             << formatDouble(seg.commandedFeedRate) << d
+             << formatDouble(seg.achievedMeanFeedRate) << d
+             << formatDouble(seg.achievedMinFeedRate) << d
+             << formatDouble(seg.achievedMaxFeedRate) << d
+             << formatDouble(seg.commandedAccel) << d
+             << formatDouble(seg.positionStats.maxError) << d
+             << formatDouble(seg.positionStats.meanError) << "\n";
+    }
+    
+    return file.good();
+}
+
+bool TrajectoryExporter::exportErrorStatistics(const std::string& filename,
+    const ErrorStatistics& stats) {
+    
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+    
+    if (config_.format == ExportFormat::JSON || config_.format == ExportFormat::JSONPretty) {
+        JSONBuilder json(config_.format == ExportFormat::JSONPretty);
+        
+        json.beginObject();
+        json.keyValue("sampleCount", static_cast<int>(stats.sampleCount));
+        json.keyValue("minError", stats.minError);
+        json.keyValue("maxError", stats.maxError);
+        json.keyValue("meanError", stats.meanError);
+        json.keyValue("geometricMean", stats.geometricMean);
+        json.keyValue("stdDev", stats.stdDev);
+        json.keyValue("rmsError", stats.rmsError);
+        
+        json.key("percentiles");
+        json.beginObject();
+        json.keyValue("p95", stats.p95Error);
+        json.keyValue("p99", stats.p99Error);
+        json.endObject();
+        
+        json.key("cornerAnalysis");
+        json.beginObject();
+        json.keyValue("cornerCount", static_cast<int>(stats.cornerCount));
+        json.keyValue("maxCornerError", stats.maxCornerError);
+        json.keyValue("meanCornerError", stats.meanCornerError);
+        json.endObject();
+        
+        json.key("axisErrors");
+        json.beginObject();
+        for (size_t i = 0; i < 3; ++i) {
+            std::string axis = std::string(1, "XYZ"[i]);
+            json.key(axis);
+            json.beginObject();
+            json.keyValue("mean", stats.axisErrors[i].meanError);
+            json.keyValue("max", stats.axisErrors[i].maxError);
+            json.keyValue("stdDev", stats.axisErrors[i].stdDevError);
+            json.endObject();
+        }
+        json.endObject();
+        
+        json.endObject();
+        
+        file << json.str();
+    } else {
+        file << "Metric,Value\n"
+             << "SampleCount," << stats.count << "\n"
+             << "MinError," << formatDouble(stats.minError) << "\n"
+             << "MaxError," << formatDouble(stats.maxError) << "\n"
+             << "MeanError," << formatDouble(stats.meanError) << "\n"
+             << "GeometricMean," << formatDouble(stats.geometricMeanError) << "\n"
+             << "StdDev," << formatDouble(stats.stdDevError) << "\n"
+             << "RMSError," << formatDouble(stats.rmsError) << "\n"
+             << "P50," << formatDouble(stats.percentile50) << "\n"
+             << "P90," << formatDouble(stats.percentile90) << "\n"
+             << "P95," << formatDouble(stats.percentile95) << "\n"
+             << "P99," << formatDouble(stats.percentile99) << "\n"
+             << "CornerCount," << stats.cornerCount << "\n"
+             << "MaxCornerError," << formatDouble(stats.maxCornerError) << "\n"
+             << "MeanCornerError," << formatDouble(stats.meanCornerError) << "\n";
+    }
+    
+    return file.good();
+}
+
+bool TrajectoryExporter::exportSuggestions(const std::string& filename,
+    const std::vector<ParameterSuggestion>& suggestions) {
+    
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+    
+    char d = config_.delimiter;
+    
+    if (config_.includeHeader) {
+        file << "segment_id" << d
+             << "parameter" << d
+             << "current_value" << d << "suggested_value" << d
+             << "expected_improvement" << d
+             << "confidence" << d
+             << "reason\n";
+    }
+    
+    for (const auto& sug : suggestions) {
+        file << sug.segmentId << d
+             << escapeCSV(sug.parameterName) << d
+             << formatDouble(sug.currentValue) << d
+             << formatDouble(sug.suggestedValue) << d
+             << formatDouble(sug.expectedImprovement) << d
+             << formatDouble(sug.confidence) << d
+             << escapeCSV(sug.reason) << "\n";
+    }
+    
+    return file.good();
+}
+
+//=============================================================================
+// HeatmapExporter Implementation
+//=============================================================================
+
+bool HeatmapExporter::exportHeatmap1D(const std::string& filename, const Heatmap1D& heatmap) {
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+    
+    auto data = heatmap.getData();
+    char d = config_.delimiter;
+    
+    if (config_.includeHeader) {
+        file << "position" << d
+             << "velocity_limit" << d << "acceleration_limit" << d
+             << "max_error" << d << "mean_error" << d
+             << "sample_count\n";
+    }
+    
+    for (const auto& cell : data) {
+        file << formatDouble(cell.position) << d
+             << formatDouble(cell.metrics.velocityLimit) << d
+             << formatDouble(cell.metrics.accelerationLimit) << d
+             << formatDouble(cell.metrics.maxError) << d
+             << formatDouble(cell.metrics.meanError) << d
+             << cell.metrics.sampleCount << "\n";
+    }
+    
+    return file.good();
+}
+
+bool HeatmapExporter::exportHeatmap2D(const std::string& filename, const Heatmap2D& heatmap) {
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+    
+    if (config_.format == ExportFormat::Numpy) {
+        writeNumpyHeatmap2D(file, heatmap);
+    } else if (config_.format == ExportFormat::JSON || config_.format == ExportFormat::JSONPretty) {
+        writeJSONHeatmap2D(file, heatmap);
+    } else {
+        writeCSVHeatmap2D(file, heatmap);
+    }
+    
+    return file.good();
+}
+
+void HeatmapExporter::writeCSVHeatmap2D(std::ostream& out, const Heatmap2D& heatmap) {
+    auto [velocityLimit, accelLimit] = heatmap.getGrids();
+    char d = config_.delimiter;
+    
+    auto config = heatmap.getConfig();
+    int rows = config.resolution2D;
+    int cols = config.resolution2D;
+    
+    out << "# Velocity Limit Grid\n";
+    for (int j = 0; j < rows; ++j) {
+        for (int i = 0; i < cols; ++i) {
+            if (i > 0) out << d;
+            out << formatDouble(velocityLimit[j * cols + i]);
+        }
+        out << "\n";
+    }
+    
+    out << "\n# Acceleration Limit Grid\n";
+    for (int j = 0; j < rows; ++j) {
+        for (int i = 0; i < cols; ++i) {
+            if (i > 0) out << d;
+            out << formatDouble(accelLimit[j * cols + i]);
+        }
+        out << "\n";
+    }
+}
+
+void HeatmapExporter::writeJSONHeatmap2D(std::ostream& out, const Heatmap2D& heatmap) {
+    auto [velocityLimit, accelLimit] = heatmap.getGrids();
+    auto config = heatmap.getConfig();
+    bool pretty = (config_.format == ExportFormat::JSONPretty);
+    
+    JSONBuilder json(pretty);
+    
+    json.beginObject();
+    
+    json.key("config");
+    json.beginObject();
+    json.keyValue("resolution", config.resolution2D);
+    json.key("minBounds");
+    json.doubleArray({config.minBounds[0], config.minBounds[1], config.minBounds[2]});
+    json.key("maxBounds");
+    json.doubleArray({config.maxBounds[0], config.maxBounds[1], config.maxBounds[2]});
+    json.endObject();
+    
+    json.doubleArray("velocityLimit", velocityLimit);
+    json.doubleArray("accelerationLimit", accelLimit);
+    
+    json.endObject();
+    
+    out << json.str();
+}
+
+void HeatmapExporter::writeNumpyHeatmap2D(std::ostream& out, const Heatmap2D& heatmap) {
+    auto [velocityLimit, accelLimit] = heatmap.getGrids();
+    auto config = heatmap.getConfig();
+    
+    // NumPy .npy format header
+    // Magic number + version
+    out.write("\x93NUMPY", 6);
+    out.put(0x01);  // Major version
+    out.put(0x00);  // Minor version
+    
+    // Build header string
+    std::ostringstream header;
+    header << "{'descr': '<f8', 'fortran_order': False, 'shape': ("
+           << config.resolution2D << ", " << config.resolution2D << ", 2), }";
+    
+    std::string headerStr = header.str();
+    // Pad to multiple of 64
+    size_t padding = 64 - ((10 + headerStr.size()) % 64);
+    headerStr += std::string(padding - 1, ' ') + '\n';
+    
+    uint16_t headerLen = static_cast<uint16_t>(headerStr.size());
+    out.write(reinterpret_cast<char*>(&headerLen), 2);
+    out << headerStr;
+    
+    // Write data
+    for (size_t i = 0; i < velocityLimit.size(); ++i) {
+        double v = velocityLimit[i];
+        double a = accelLimit[i];
+        out.write(reinterpret_cast<char*>(&v), sizeof(double));
+        out.write(reinterpret_cast<char*>(&a), sizeof(double));
+    }
+}
+
+bool HeatmapExporter::exportHeatmap3D(const std::string& filename, const Heatmap3D& heatmap) {
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+    
+    char d = config_.delimiter;
+    
+    if (config_.includeHeader) {
+        file << "x" << d << "y" << d << "z" << d
+             << "velocity_limit" << d << "acceleration_limit" << d
+             << "max_error" << d << "sample_count\n";
+    }
+    
+    auto data = heatmap.getAllVoxels();
+    for (const auto& [coord, metrics] : data) {
+        file << formatDouble(std::get<0>(coord)) << d
+             << formatDouble(std::get<1>(coord)) << d
+             << formatDouble(std::get<2>(coord)) << d
+             << formatDouble(metrics.velocityLimit) << d
+             << formatDouble(metrics.accelerationLimit) << d
+             << formatDouble(metrics.maxError) << d
+             << metrics.sampleCount << "\n";
+    }
+    
+    return file.good();
+}
+
+bool HeatmapExporter::exportDifferentialHeatmap(const std::string& filename,
+    const DifferentialHeatmap& heatmap) {
+    
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+    
+    // Export as 2D grid with differences
+    auto differences = heatmap.getDifferences();
+    auto config = heatmap.getConfig();
+    char d = config_.delimiter;
+    
+    int rows = config.resolution2D;
+    int cols = config.resolution2D;
+    
+    // Header with bounds info
+    file << "# Differential Heatmap\n";
+    file << "# Bounds: " << config.minBounds[0] << " to " << config.maxBounds[0] << " (U), "
+         << config.minBounds[1] << " to " << config.maxBounds[1] << " (V)\n";
+    
+    for (int j = 0; j < rows; ++j) {
+        for (int i = 0; i < cols; ++i) {
+            if (i > 0) file << d;
+            file << formatDouble(differences[j * cols + i]);
+        }
+        file << "\n";
+    }
+    
+    return file.good();
+}
+
+bool HeatmapExporter::exportSuggestedLimits(const std::string& filename,
+    const SuggestedLimits& limits) {
+    
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+    
+    JSONBuilder json(true);
+    
+    json.beginObject();
+    
+    json.key("globalLimits");
+    json.beginObject();
+    json.keyValue("maxVelocity", limits.maxVelocity);
+    json.keyValue("maxAcceleration", limits.maxAcceleration);
+    json.keyValue("maxJerk", limits.maxJerk);
+    json.endObject();
+    
+    json.key("perAxisLimits");
+    json.beginArray();
+    for (size_t i = 0; i < limits.perAxisVelocity.size(); ++i) {
+        json.beginObject();
+        json.keyValue("axis", static_cast<int>(i));
+        json.keyValue("velocity", limits.perAxisVelocity[i]);
+        json.keyValue("acceleration", limits.perAxisAcceleration[i]);
+        json.endObject();
+    }
+    json.endArray();
+    
+    json.key("regionLimits");
+    json.beginArray();
+    for (const auto& region : limits.regionLimits) {
+        json.beginObject();
+        json.keyValue("x", region.x);
+        json.keyValue("y", region.y);
+        json.keyValue("z", region.z);
+        json.keyValue("radius", region.radius);
+        json.keyValue("velocity", region.velocityLimit);
+        json.keyValue("acceleration", region.accelerationLimit);
+        json.endObject();
+    }
+    json.endArray();
+    
+    json.keyValue("confidence", limits.confidence);
+    json.keyValue("marginPercent", limits.marginPercent);
+    
+    json.endObject();
+    
+    file << json.str();
+    return file.good();
+}
+
+//=============================================================================
+// TestResultExporter Implementation
+//=============================================================================
+
+bool TestResultExporter::exportTestResult(const std::string& filename, const TestResult& result) {
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+    
+    if (config_.format == ExportFormat::JSON || config_.format == ExportFormat::JSONPretty) {
+        writeJSONTestResult(file, result);
+    } else {
+        writeCSVTestResult(file, result);
+    }
+    
+    return file.good();
+}
+
+void TestResultExporter::writeCSVTestResult(std::ostream& out, const TestResult& result) {
+    char d = config_.delimiter;
+    
+    // Metadata section
+    out << "# Test: " << result.testName << "\n";
+    out << "# Type: " << result.testType << "\n";
+    out << "# Passed: " << (result.passed ? "Yes" : "No") << "\n\n";
+    
+    // Summary statistics
+    out << "Metric" << d << "Value\n";
+    out << "MaxError" << d << formatDouble(result.maxPositionError) << "\n";
+    out << "MeanError" << d << formatDouble(result.meanPositionError) << "\n";
+    out << "MaxVelocityError" << d << formatDouble(result.maxVelocityError) << "\n";
+    out << "SettlingTime" << d << formatDouble(result.settlingTime) << "\n";
+    out << "Duration" << d << formatDouble(result.duration) << "\n\n";
+    
+    // Trajectory data
+    out << "time" << d
+        << "desired_x" << d << "desired_y" << d << "desired_z" << d
+        << "actual_x" << d << "actual_y" << d << "actual_z\n";
+    
+    size_t n = std::min(result.desiredSamples.size(), result.actualSamples.size());
+    for (size_t i = 0; i < n; ++i) {
+        const auto& des = result.desiredSamples[i];
+        const auto& act = result.actualSamples[i];
+        
+        out << formatDouble(des.timestamp) << d
+            << formatDouble(des.position[0]) << d
+            << formatDouble(des.position[1]) << d
+            << formatDouble(des.position[2]) << d
+            << formatDouble(act.position[0]) << d
+            << formatDouble(act.position[1]) << d
+            << formatDouble(act.position[2]) << "\n";
+    }
+}
+
+void TestResultExporter::writeJSONTestResult(std::ostream& out, const TestResult& result) {
+    bool pretty = (config_.format == ExportFormat::JSONPretty);
+    JSONBuilder json(pretty);
+    
+    json.beginObject();
+    
+    json.keyValue("testName", result.testName);
+    json.keyValue("testType", result.testType);
+    json.keyValue("passed", result.passed);
+    
+    json.key("statistics");
+    json.beginObject();
+    json.keyValue("maxPositionError", result.maxPositionError);
+    json.keyValue("meanPositionError", result.meanPositionError);
+    json.keyValue("maxVelocityError", result.maxVelocityError);
+    json.keyValue("settlingTime", result.settlingTime);
+    json.keyValue("duration", result.duration);
+    json.endObject();
+    
+    // Trajectory arrays
+    json.key("desired");
+    json.beginObject();
+    {
+        std::vector<double> t, x, y, z;
+        for (const auto& s : result.desiredSamples) {
+            t.push_back(s.timestamp);
+            x.push_back(s.position[0]);
+            y.push_back(s.position[1]);
+            z.push_back(s.position[2]);
+        }
+        json.doubleArray("time", t);
+        json.doubleArray("x", x);
+        json.doubleArray("y", y);
+        json.doubleArray("z", z);
+    }
+    json.endObject();
+    
+    json.key("actual");
+    json.beginObject();
+    {
+        std::vector<double> t, x, y, z;
+        for (const auto& s : result.actualSamples) {
+            t.push_back(s.timestamp);
+            x.push_back(s.position[0]);
+            y.push_back(s.position[1]);
+            z.push_back(s.position[2]);
+        }
+        json.doubleArray("time", t);
+        json.doubleArray("x", x);
+        json.doubleArray("y", y);
+        json.doubleArray("z", z);
+    }
+    json.endObject();
+    
+    json.endObject();
+    
+    out << json.str();
+}
+
+bool TestResultExporter::exportFrictionModel(const std::string& filename,
+    const FrictionIdentificationResult& result) {
+    
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+    
+    JSONBuilder json(true);
+    
+    json.beginObject();
+    
+    json.key("bestModel");
+    json.beginObject();
+    json.keyValue("type", result.bestModel.modelName());
+    json.keyValue("coulombForce", result.bestModel.coulombForce);
+    json.keyValue("staticFriction", result.bestModel.staticFriction);
+    json.keyValue("viscousCoeff", result.bestModel.viscousCoeff);
+    json.keyValue("stribeckVelocity", result.bestModel.stribeckVelocity);
+    json.keyValue("rSquared", result.bestModel.rSquared);
+    json.endObject();
+    
+    json.keyValue("isSymmetric", result.isSymmetric);
+    json.keyValue("asymmetryRatio", result.asymmetryRatio);
+    
+    json.doubleArray("velocities", result.velocities);
+    json.doubleArray("forces", result.forces);
+    json.doubleArray("fittedForces", result.fittedForces);
+    
+    json.endObject();
+    
+    file << json.str();
+    return file.good();
+}
+
+bool TestResultExporter::exportDelayIdentification(const std::string& filename,
+    const DelayIdentificationResult& result) {
+    
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+    
+    JSONBuilder json(true);
+    
+    json.beginObject();
+    json.keyValue("transportDelay", result.transportDelay);
+    json.keyValue("confidence", result.delayConfidence);
+    json.keyValue("crossCorrelation", result.crossCorrelation);
+    json.keyValue("crossCorrelationLag", result.crossCorrelationLag);
+    json.keyValue("samplingPeriod", result.samplingPeriod);
+    json.keyValue("riseTime", result.riseTime);
+    json.keyValue("settlingTime", result.settlingTime);
+    json.keyValue("overshoot", result.overshoot);
+    json.endObject();
+    
+    file << json.str();
+    return file.good();
+}
+
+bool TestResultExporter::exportPIDAssessment(const std::string& filename,
+    const PIDTuningAssessment& assessment) {
+    
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+    
+    JSONBuilder json(true);
+    
+    json.beginObject();
+    
+    json.key("observedGains");
+    json.beginObject();
+    json.keyValue("Kp", assessment.observedKp);
+    json.keyValue("Ki", assessment.observedKi);
+    json.keyValue("Kd", assessment.observedKd);
+    json.endObject();
+    
+    json.key("performance");
+    json.beginObject();
+    json.keyValue("steadyStateError", assessment.steadyStateError);
+    json.keyValue("riseTime", assessment.riseTime);
+    json.keyValue("settlingTime", assessment.settlingTime);
+    json.keyValue("overshoot", assessment.overshoot);
+    json.keyValue("dampingRatio", assessment.dampingRatio);
+    json.keyValue("naturalFrequency", assessment.naturalFrequency);
+    json.endObject();
+    
+    json.key("scores");
+    json.beginObject();
+    json.keyValue("stability", assessment.stabilityScore);
+    json.keyValue("response", assessment.responseScore);
+    json.keyValue("accuracy", assessment.accuracyScore);
+    json.keyValue("overall", assessment.overallScore);
+    json.endObject();
+    
+    json.key("suggestedGains");
+    json.beginObject();
+    json.keyValue("Kp", assessment.suggestedKp);
+    json.keyValue("Ki", assessment.suggestedKi);
+    json.keyValue("Kd", assessment.suggestedKd);
+    json.endObject();
+    
+    json.keyValue("tuningAdvice", assessment.tuningAdvice);
+    
+    json.key("issues");
+    json.beginArray();
+    for (const auto& issue : assessment.issues) {
+        json.value(issue);
+    }
+    json.endArray();
+    
+    json.key("recommendations");
+    json.beginArray();
+    for (const auto& rec : assessment.recommendations) {
+        json.value(rec);
+    }
+    json.endArray();
+    
+    json.endObject();
+    
+    file << json.str();
+    return file.good();
+}
+
+bool TestResultExporter::exportDynamicsModel(const std::string& filename,
+    const DynamicsIdentificationResult& result) {
+    
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+    
+    JSONBuilder json(true);
+    
+    json.beginObject();
+    
+    json.key("firstOrder");
+    json.beginObject();
+    json.keyValue("gain", result.gain);
+    json.keyValue("timeConstant", result.timeConstant);
+    json.endObject();
+    
+    json.key("secondOrder");
+    json.beginObject();
+    json.keyValue("naturalFrequency", result.naturalFrequency);
+    json.keyValue("dampingRatio", result.dampingRatio);
+    json.endObject();
+    
+    json.keyValue("systemOrder", result.systemOrder);
+    json.keyValue("bandwidthHz", result.bandwidthHz);
+    json.keyValue("phaseMarginDeg", result.phaseMarginDeg);
+    json.keyValue("gainMarginDb", result.gainMarginDb);
+    
+    if (!result.frequencies.empty()) {
+        json.doubleArray("frequencies", result.frequencies);
+        json.doubleArray("magnitudeDb", result.magnitudeDb);
+        json.doubleArray("phaseDeg", result.phaseDeg);
+    }
+    
+    json.endObject();
+    
+    file << json.str();
+    return file.good();
+}
+
+//=============================================================================
+// BatchExporter Implementation
+//=============================================================================
+
+BatchExporter::BatchExporter(const std::string& outputDir, const ExportConfig& config)
+    : outputDir_(outputDir), config_(config) {
+    std::filesystem::create_directories(outputDir);
+}
+
+std::string BatchExporter::makeFilename(const std::string& baseName, const std::string& extension) {
+    std::string filename = outputDir_ + "/";
+    if (!prefix_.empty()) {
+        filename += prefix_ + "_";
+    }
+    filename += baseName + "." + extension;
+    generatedFiles_.push_back(filename);
+    return filename;
+}
+
+void BatchExporter::exportReplannerData(const MotionReplanner& replanner) {
+    TrajectoryExporter exporter(config_);
+    
+    auto stats = replanner.getStatistics();
+    exporter.exportErrorStatistics(makeFilename("error_statistics", "json"), stats);
+    
+    auto errors = replanner.getTrackingErrors();
+    exporter.exportTrackingErrors(makeFilename("tracking_errors", "csv"), errors);
+    
+    auto segments = replanner.getSegmentPerformance();
+    exporter.exportSegmentPerformance(makeFilename("segment_performance", "csv"), segments);
+    
+    auto suggestions = replanner.getSuggestions();
+    exporter.exportSuggestions(makeFilename("suggestions", "csv"), suggestions);
+}
+
+void BatchExporter::exportHeatmapData(const HeatmapBuilder& builder) {
+    HeatmapExporter exporter(config_);
+    
+    // Export 2D heatmaps for each plane
+    auto xyHeatmap = builder.getHeatmap2D(HeatmapPlane::XY);
+    exporter.exportHeatmap2D(makeFilename("heatmap_xy", "csv"), xyHeatmap);
+    
+    auto xzHeatmap = builder.getHeatmap2D(HeatmapPlane::XZ);
+    exporter.exportHeatmap2D(makeFilename("heatmap_xz", "csv"), xzHeatmap);
+    
+    auto yzHeatmap = builder.getHeatmap2D(HeatmapPlane::YZ);
+    exporter.exportHeatmap2D(makeFilename("heatmap_yz", "csv"), yzHeatmap);
+    
+    // Export 3D heatmap
+    auto heatmap3D = builder.getHeatmap3D();
+    exporter.exportHeatmap3D(makeFilename("heatmap_3d", "csv"), heatmap3D);
+    
+    // Export per-axis 1D heatmaps
+    for (int axis = 0; axis < 3; ++axis) {
+        auto heatmap1D = builder.getHeatmap1D(axis);
+        std::string name = "heatmap_axis_" + std::string(1, "XYZ"[axis]);
+        exporter.exportHeatmap1D(makeFilename(name, "csv"), heatmap1D);
+    }
+    
+    // Export suggested limits
+    auto limits = builder.getSuggestedLimits();
+    exporter.exportSuggestedLimits(makeFilename("suggested_limits", "json"), limits);
+}
+
+void BatchExporter::exportTestResults(const std::vector<TestResult>& results) {
+    TestResultExporter exporter(config_);
+    
+    for (size_t i = 0; i < results.size(); ++i) {
+        std::string name = results[i].testName;
+        // Sanitize filename
+        std::replace(name.begin(), name.end(), ' ', '_');
+        std::replace(name.begin(), name.end(), '/', '_');
+        
+        std::string ext = (config_.format == ExportFormat::JSON) ? "json" : "csv";
+        exporter.exportTestResult(makeFilename("test_" + name, ext), results[i]);
+    }
+}
+
+void BatchExporter::exportIdentificationData(const SystemIdentifier& identifier,
+    const DelayIdentificationResult& delay,
+    const FrictionIdentificationResult& friction,
+    const PIDTuningAssessment& pid) {
+    
+    TestResultExporter exporter(config_);
+    
+    exporter.exportDelayIdentification(makeFilename("delay_identification", "json"), delay);
+    exporter.exportFrictionModel(makeFilename("friction_model", "json"), friction);
+    exporter.exportPIDAssessment(makeFilename("pid_assessment", "json"), pid);
+}
+
+bool BatchExporter::generateManifest(const std::string& filename) {
+    std::ofstream file(outputDir_ + "/" + filename);
+    if (!file.is_open()) return false;
+    
+    JSONBuilder json(true);
+    
+    json.beginObject();
+    json.keyValue("timestamp", DataExporter(config_).getCurrentTimestamp());
+    json.keyValue("fileCount", static_cast<int>(generatedFiles_.size()));
+    
+    json.key("files");
+    json.beginArray();
+    for (const auto& f : generatedFiles_) {
+        json.value(f);
+    }
+    json.endArray();
+    
+    json.endObject();
+    
+    file << json.str();
+    return file.good();
+}
+
+//=============================================================================
+// StreamingExporter Implementation
+//=============================================================================
+
+StreamingExporter::StreamingExporter(const std::string& filename, const ExportConfig& config)
+    : filename_(filename), config_(config), bytesWritten_(0), headerWritten_(false) {}
+
+StreamingExporter::~StreamingExporter() {
+    close();
+}
+
+bool StreamingExporter::open() {
+    file_.open(filename_);
+    return file_.is_open();
+}
+
+void StreamingExporter::close() {
+    if (file_.is_open()) {
+        file_.close();
+    }
+}
+
+void StreamingExporter::writeHeader(const std::vector<std::string>& columns) {
+    if (!file_.is_open() || headerWritten_) return;
+    
+    for (size_t i = 0; i < columns.size(); ++i) {
+        if (i > 0) file_ << config_.delimiter;
+        file_ << columns[i];
+    }
+    file_ << "\n";
+    
+    headerWritten_ = true;
+    bytesWritten_ = file_.tellp();
+}
+
+void StreamingExporter::writeRow(const std::vector<double>& values) {
+    if (!file_.is_open()) return;
+    
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) file_ << config_.delimiter;
+        file_ << std::fixed << std::setprecision(config_.precision) << values[i];
+    }
+    file_ << "\n";
+    
+    bytesWritten_ = file_.tellp();
+}
+
+void StreamingExporter::writeRow(const std::vector<std::string>& values) {
+    if (!file_.is_open()) return;
+    
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) file_ << config_.delimiter;
+        file_ << values[i];
+    }
+    file_ << "\n";
+    
+    bytesWritten_ = file_.tellp();
+}
+
+void StreamingExporter::writeSample(const GCodeExport::TrajectorySample& desired,
+                                    const GCodeExport::TrajectorySample& actual) {
+    if (!file_.is_open()) return;
+    
+    if (!headerWritten_) {
+        writeHeader({"time", "dx", "dy", "dz", "dvx", "dvy", "dvz",
+                     "ax", "ay", "az", "avx", "avy", "avz"});
+    }
+    
+    writeRow({desired.time,
+              desired.position[0], desired.position[1], desired.position[2],
+              desired.velocity[0], desired.velocity[1], desired.velocity[2],
+              actual.position[0], actual.position[1], actual.position[2],
+              actual.velocity[0], actual.velocity[1], actual.velocity[2]});
+}
+
+void StreamingExporter::writeError(const TrackingError& error) {
+    if (!file_.is_open()) return;
+    
+    if (!headerWritten_) {
+        writeHeader({"time", "ex", "ey", "ez", "emag", "verr", "lag", "contour", "corner"});
+    }
+    
+    file_ << std::fixed << std::setprecision(config_.precision)
+          << error.timestamp << config_.delimiter
+          << error.positionError[0] << config_.delimiter
+          << error.positionError[1] << config_.delimiter
+          << error.positionError[2] << config_.delimiter
+          << error.errorMagnitude << config_.delimiter
+          << error.velocityError << config_.delimiter
+          << error.lagError << config_.delimiter
+          << error.contourError << config_.delimiter
+          << (error.isCorner ? 1 : 0) << "\n";
+    
+    bytesWritten_ = file_.tellp();
+}
+
+void StreamingExporter::flush() {
+    if (file_.is_open()) {
+        file_.flush();
+    }
+}
+
+//=============================================================================
+// ReportGenerator Implementation
+//=============================================================================
+
+ReportGenerator::ReportGenerator() {}
+
+void ReportGenerator::addSection(const ReportSection& section) {
+    sections_.push_back(section);
+}
+
+void ReportGenerator::addSummary(const std::vector<TestResult>& results) {
+    ReportSection section;
+    section.title = "Test Summary";
+    
+    std::ostringstream ss;
+    ss << "## Overview\n\n";
+    ss << "Total tests: " << results.size() << "\n\n";
+    
+    int passed = 0, failed = 0;
+    for (const auto& r : results) {
+        if (r.passed) passed++;
+        else failed++;
+    }
+    
+    ss << "- Passed: " << passed << "\n";
+    ss << "- Failed: " << failed << "\n\n";
+    
+    ss << "## Results\n\n";
+    ss << "| Test Name | Type | Max Error | Mean Error | Status |\n";
+    ss << "|-----------|------|-----------|------------|--------|\n";
+    
+    for (const auto& r : results) {
+        ss << "| " << r.testName
+           << " | " << r.testType
+           << " | " << std::fixed << std::setprecision(4) << r.maxPositionError
+           << " | " << r.meanPositionError
+           << " | " << (r.passed ? "✓ Pass" : "✗ Fail") << " |\n";
+    }
+    
+    section.content = ss.str();
+    sections_.push_back(section);
+}
+
+void ReportGenerator::addErrorStatistics(const ErrorStatistics& stats) {
+    ReportSection section;
+    section.title = "Error Statistics";
+    
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(6);
+    
+    ss << "## Position Error Analysis\n\n";
+    ss << "| Metric | Value |\n";
+    ss << "|--------|-------|\n";
+    ss << "| Sample Count | " << stats.count << " |\n";
+    ss << "| Min Error | " << stats.minError << " mm |\n";
+    ss << "| Max Error | " << stats.maxError << " mm |\n";
+    ss << "| Mean Error | " << stats.meanError << " mm |\n";
+    ss << "| Geometric Mean | " << stats.geometricMeanError << " mm |\n";
+    ss << "| Std Dev | " << stats.stdDevError << " mm |\n";
+    ss << "| RMS Error | " << stats.rmsError << " mm |\n\n";
+    
+    ss << "## Percentiles\n\n";
+    ss << "| Percentile | Value |\n";
+    ss << "|------------|-------|\n";
+    ss << "| 50th (Median) | " << stats.percentile50 << " mm |\n";
+    ss << "| 90th | " << stats.percentile90 << " mm |\n";
+    ss << "| 95th | " << stats.percentile95 << " mm |\n";
+    ss << "| 99th | " << stats.percentile99 << " mm |\n\n";
+    
+    if (stats.cornerCount > 0) {
+        ss << "## Corner Analysis\n\n";
+        ss << "| Metric | Value |\n";
+        ss << "|--------|-------|\n";
+        ss << "| Corner Count | " << stats.cornerCount << " |\n";
+        ss << "| Max Corner Error | " << stats.maxCornerError << " mm |\n";
+        ss << "| Mean Corner Error | " << stats.meanCornerError << " mm |\n";
+    }
+    
+    section.content = ss.str();
+    sections_.push_back(section);
+}
+
+void ReportGenerator::addSystemIdentification(const DelayIdentificationResult& delay,
+    const FrictionIdentificationResult& friction,
+    const PIDTuningAssessment& pid) {
+    
+    ReportSection section;
+    section.title = "System Identification";
+    
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(4);
+    
+    ss << "## Transport Delay\n\n";
+    ss << "- Delay: " << delay.transportDelay * 1000 << " ms\n";
+    ss << "- Confidence: " << delay.delayConfidence * 100 << "%\n";
+    ss << "- Rise Time: " << delay.riseTime * 1000 << " ms\n";
+    ss << "- Settling Time: " << delay.settlingTime * 1000 << " ms\n";
+    ss << "- Overshoot: " << delay.overshoot << "%\n\n";
+    
+    ss << "## Friction Model\n\n";
+    ss << "Best fit: **" << friction.bestModel.modelName() << "**\n\n";
+    ss << "| Parameter | Value |\n";
+    ss << "|-----------|-------|\n";
+    ss << "| Coulomb Force | " << friction.bestModel.coulombForce << " N |\n";
+    ss << "| Static Friction | " << friction.bestModel.staticFriction << " N |\n";
+    ss << "| Viscous Coeff | " << friction.bestModel.viscousCoeff << " N/(m/s) |\n";
+    ss << "| R² | " << friction.bestModel.rSquared << " |\n\n";
+    
+    ss << "Direction symmetry: " << (friction.isSymmetric ? "Symmetric" : "Asymmetric") << "\n\n";
+    
+    ss << "## PID Tuning Assessment\n\n";
+    ss << "Overall Score: **" << pid.overallScore << "/100**\n\n";
+    ss << "| Metric | Score |\n";
+    ss << "|--------|-------|\n";
+    ss << "| Stability | " << pid.stabilityScore << " |\n";
+    ss << "| Response | " << pid.responseScore << " |\n";
+    ss << "| Accuracy | " << pid.accuracyScore << " |\n\n";
+    
+    if (!pid.issues.empty()) {
+        ss << "### Issues\n\n";
+        for (const auto& issue : pid.issues) {
+            ss << "- " << issue << "\n";
+        }
+        ss << "\n";
+    }
+    
+    if (!pid.recommendations.empty()) {
+        ss << "### Recommendations\n\n";
+        for (const auto& rec : pid.recommendations) {
+            ss << "- " << rec << "\n";
+        }
+        ss << "\n";
+    }
+    
+    section.content = ss.str();
+    sections_.push_back(section);
+}
+
+void ReportGenerator::addRecommendations(const std::vector<ParameterSuggestion>& suggestions) {
+    ReportSection section;
+    section.title = "Parameter Recommendations";
+    
+    std::ostringstream ss;
+    ss << "## Suggested Changes\n\n";
+    
+    ss << "| Segment | Parameter | Current | Suggested | Improvement | Confidence |\n";
+    ss << "|---------|-----------|---------|-----------|-------------|------------|\n";
+    
+    for (const auto& sug : suggestions) {
+        ss << "| " << sug.segmentId
+           << " | " << sug.parameterName
+           << " | " << std::fixed << std::setprecision(2) << sug.currentValue
+           << " | " << sug.suggestedValue
+           << " | " << sug.expectedImprovement * 100 << "%"
+           << " | " << sug.confidence * 100 << "% |\n";
+    }
+    
+    section.content = ss.str();
+    sections_.push_back(section);
+}
+
+bool ReportGenerator::exportMarkdown(const std::string& filename) {
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+    
+    file << "# Motion Test Report\n\n";
+    file << "Generated: " << DataExporter().getCurrentTimestamp() << "\n\n";
+    file << "---\n\n";
+    
+    for (const auto& section : sections_) {
+        file << "# " << section.title << "\n\n";
+        file << section.content << "\n\n";
+        file << "---\n\n";
+    }
+    
+    return file.good();
+}
+
+bool ReportGenerator::exportHTML(const std::string& filename) {
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+    
+    file << "<!DOCTYPE html>\n<html>\n<head>\n";
+    file << "<title>Motion Test Report</title>\n";
+    file << "<style>\n";
+    file << "body { font-family: sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; }\n";
+    file << "table { border-collapse: collapse; width: 100%; margin: 20px 0; }\n";
+    file << "th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }\n";
+    file << "th { background-color: #4CAF50; color: white; }\n";
+    file << "tr:nth-child(even) { background-color: #f2f2f2; }\n";
+    file << ".pass { color: green; }\n";
+    file << ".fail { color: red; }\n";
+    file << "</style>\n</head>\n<body>\n";
+    
+    file << "<h1>Motion Test Report</h1>\n";
+    file << "<p>Generated: " << DataExporter().getCurrentTimestamp() << "</p>\n";
+    
+    // Note: Full HTML generation would convert Markdown to HTML
+    // For now, wrap content in <pre> tags
+    for (const auto& section : sections_) {
+        file << "<h2>" << section.title << "</h2>\n";
+        file << "<pre>" << section.content << "</pre>\n";
+    }
+    
+    file << "</body>\n</html>\n";
+    
+    return file.good();
+}
+
+bool ReportGenerator::exportLaTeX(const std::string& filename) {
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+    
+    file << "\\documentclass{article}\n";
+    file << "\\usepackage{booktabs}\n";
+    file << "\\usepackage{graphicx}\n";
+    file << "\\begin{document}\n\n";
+    
+    file << "\\title{Motion Test Report}\n";
+    file << "\\date{" << DataExporter().getCurrentTimestamp() << "}\n";
+    file << "\\maketitle\n\n";
+    
+    for (const auto& section : sections_) {
+        file << "\\section{" << section.title << "}\n";
+        // Convert Markdown to LaTeX (simplified)
+        file << "\\begin{verbatim}\n" << section.content << "\n\\end{verbatim}\n\n";
+    }
+    
+    file << "\\end{document}\n";
+    
+    return file.good();
+}
+
+//=============================================================================
+// JSONBuilder Implementation
+//=============================================================================
+
+JSONBuilder::JSONBuilder(bool pretty)
+    : pretty_(pretty), indent_(0), needComma_(false) {}
+
+void JSONBuilder::newline() {
+    if (pretty_) {
+        ss_ << "\n" << std::string(indent_ * 2, ' ');
+    }
+}
+
+void JSONBuilder::comma() {
+    if (needComma_) {
+        ss_ << ",";
+    }
+    needComma_ = true;
+}
+
+void JSONBuilder::beginObject() {
+    comma();
+    ss_ << "{";
+    indent_++;
+    needComma_ = false;
+}
+
+void JSONBuilder::endObject() {
+    indent_--;
+    newline();
+    ss_ << "}";
+    needComma_ = true;
+}
+
+void JSONBuilder::beginArray() {
+    comma();
+    ss_ << "[";
+    indent_++;
+    needComma_ = false;
+}
+
+void JSONBuilder::endArray() {
+    indent_--;
+    if (pretty_) ss_ << "\n" << std::string(indent_ * 2, ' ');
+    ss_ << "]";
+    needComma_ = true;
+}
+
+void JSONBuilder::key(const std::string& k) {
+    comma();
+    newline();
+    ss_ << "\"" << k << "\": ";
+    needComma_ = false;
+}
+
+void JSONBuilder::value(const std::string& v) {
+    comma();
+    if (pretty_ && needComma_) newline();
+    ss_ << "\"" << v << "\"";
+}
+
+void JSONBuilder::value(double v) {
+    comma();
+    if (pretty_ && needComma_) newline();
+    if (std::isnan(v) || std::isinf(v)) {
+        ss_ << "null";
+    } else {
+        ss_ << std::fixed << std::setprecision(6) << v;
+    }
+}
+
+void JSONBuilder::value(int v) {
+    comma();
+    if (pretty_ && needComma_) newline();
+    ss_ << v;
+}
+
+void JSONBuilder::value(bool v) {
+    comma();
+    if (pretty_ && needComma_) newline();
+    ss_ << (v ? "true" : "false");
+}
+
+void JSONBuilder::valueNull() {
+    comma();
+    if (pretty_ && needComma_) newline();
+    ss_ << "null";
+}
+
+void JSONBuilder::keyValue(const std::string& k, const std::string& v) {
+    key(k);
+    ss_ << "\"" << v << "\"";
+    needComma_ = true;
+}
+
+void JSONBuilder::keyValue(const std::string& k, double v) {
+    key(k);
+    if (std::isnan(v) || std::isinf(v)) {
+        ss_ << "null";
+    } else {
+        ss_ << std::fixed << std::setprecision(6) << v;
+    }
+    needComma_ = true;
+}
+
+void JSONBuilder::keyValue(const std::string& k, int v) {
+    key(k);
+    ss_ << v;
+    needComma_ = true;
+}
+
+void JSONBuilder::keyValue(const std::string& k, bool v) {
+    key(k);
+    ss_ << (v ? "true" : "false");
+    needComma_ = true;
+}
+
+void JSONBuilder::doubleArray(const std::string& k, const std::vector<double>& values) {
+    key(k);
+    doubleArray(values);
+}
+
+void JSONBuilder::doubleArray(const std::vector<double>& values) {
+    ss_ << "[";
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) ss_ << ", ";
+        if (std::isnan(values[i]) || std::isinf(values[i])) {
+            ss_ << "null";
+        } else {
+            ss_ << std::fixed << std::setprecision(6) << values[i];
+        }
+    }
+    ss_ << "]";
+    needComma_ = true;
+}
+
+} // namespace MotionReplanner

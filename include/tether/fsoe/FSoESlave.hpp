@@ -1,0 +1,569 @@
+/**
+ * @file FSoESlave.hpp
+ * @brief FSoE (Fail-Safe over EtherCAT) Slave Implementation
+ *
+ * Provides complete FSoE safety protocol implementation for EtherCAT slaves.
+ *
+ * Features:
+ * - Complete FSoE state machine (ETG.5100 compliant)
+ * - CRC-16 calculation and verification
+ * - Watchdog monitoring with configurable timeout
+ * - Session management with sequence numbers
+ * - Safe I/O data exchange
+ * - Fail-safe state handling
+ * - Error injection for testing
+ * - Configurable safety integrity level (SIL1-SIL3)
+ *
+ * ## FSoE State Machine
+ *
+ * ```
+ *                    ┌─────────────────┐
+ *                    │      RESET      │◄────────────────┐
+ *                    └────────┬────────┘                 │
+ *                             │ (Init)                   │
+ *                    ┌────────▼────────┐                 │
+ *                    │     SESSION     │─────────────────┤
+ *                    └────────┬────────┘                 │
+ *                             │ (Session OK)             │
+ *                    ┌────────▼────────┐                 │
+ *                    │   CONNECTION    │─────────────────┤
+ *                    └────────┬────────┘                 │ (Error)
+ *                             │ (Params OK)              │
+ *                    ┌────────▼────────┐                 │
+ *                    │    PARAMETER    │─────────────────┤
+ *                    └────────┬────────┘                 │
+ *                             │ (Config OK)              │
+ *                    ┌────────▼────────┐                 │
+ *                    │      DATA       │◄──────┐         │
+ *                    └────────┬────────┘       │         │
+ *                             │ (Error)        │(Recover)│
+ *                    ┌────────▼────────┐       │         │
+ *                    │    FAIL-SAFE    │───────┘─────────┘
+ *                    └─────────────────┘
+ * ```
+ */
+
+#pragma once
+
+#include "fsoe/FSoEDefs.hpp"
+#include <array>
+#include <atomic>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <span>
+#include <vector>
+
+namespace FSoE {
+
+// ============================================================================
+// Error Injection Types (for testing)
+// ============================================================================
+
+/**
+ * @brief FSoE error injection configuration for testing
+ */
+struct FSoEErrorInjection {
+    bool enabled = false;
+    
+    // CRC errors
+    bool injectCRCError = false;
+    uint32_t crcErrorRate = 0;       // 0 = every packet, 1 = every other, etc.
+    uint32_t crcErrorCounter = 0;
+    
+    // Sequence errors
+    bool injectSequenceError = false;
+    int8_t sequenceOffset = 0;       // Add this to sequence number
+    
+    // Connection ID errors
+    bool injectConnIdError = false;
+    uint16_t fakeConnId = 0;
+    
+    // Watchdog simulation
+    bool simulateWatchdogTimeout = false;
+    uint32_t watchdogDelayMs = 0;
+    
+    // Data corruption
+    bool corruptData = false;
+    uint8_t corruptBitMask = 0xFF;
+    size_t corruptByteIndex = 0;
+    
+    // Complete frame drop
+    bool dropFrames = false;
+    uint32_t dropRate = 0;
+    uint32_t dropCounter = 0;
+    
+    // Delayed response
+    bool delayResponse = false;
+    uint32_t delayMs = 0;
+    
+    // State machine interference
+    bool forceFailSafe = false;
+    bool preventRecovery = false;
+    
+    void reset() {
+        enabled = false;
+        injectCRCError = false;
+        injectSequenceError = false;
+        injectConnIdError = false;
+        simulateWatchdogTimeout = false;
+        corruptData = false;
+        dropFrames = false;
+        delayResponse = false;
+        forceFailSafe = false;
+        preventRecovery = false;
+        crcErrorCounter = 0;
+        dropCounter = 0;
+    }
+};
+
+// ============================================================================
+// FSoE Slave Configuration
+// ============================================================================
+
+/**
+ * @brief FSoE slave configuration
+ */
+struct FSoESlaveConfig {
+    // Identity
+    uint16_t slaveAddress = 0;         ///< EtherCAT slave address
+    uint16_t connectionId = 0;         ///< FSoE connection ID (assigned by master)
+    uint16_t safetyAddress = 0;        ///< FSoE safety address
+    
+    // Safety level
+    uint8_t safetyLevel = SIL::SIL2;   ///< Required SIL level
+    
+    // Timing
+    uint16_t watchdogTimeoutMs = 100;  ///< Watchdog timeout (ms)
+    uint16_t connectionTimeoutMs = 1000; ///< Connection timeout (ms)
+    uint16_t sessionTimeoutMs = 5000;  ///< Session establishment timeout (ms)
+    
+    // Data configuration
+    uint8_t safeInputSize = 0;         ///< Safe input data size (bytes)
+    uint8_t safeOutputSize = 0;        ///< Safe output data size (bytes)
+    std::array<uint8_t, 16> failSafeInputs{};   ///< Fail-safe input values
+    std::array<uint8_t, 16> failSafeOutputs{};  ///< Fail-safe output values
+    
+    // Behavior configuration
+    bool autoRecoveryEnabled = true;   ///< Automatically recover from fail-safe
+    uint32_t recoveryDelayMs = 1000;   ///< Delay before attempting recovery
+    bool strictCrcCheck = true;        ///< Reject all CRC errors
+    bool strictSequenceCheck = true;   ///< Reject sequence errors
+    
+    // Error handling
+    bool treatCrcErrorAsCritical = true;
+    bool treatSequenceErrorAsCritical = true;
+    bool treatTimeoutAsCritical = true;
+    bool treatConnIdErrorAsCritical = true;
+    
+    // Diagnostics
+    bool enableDiagnostics = true;
+    uint32_t maxErrorLogEntries = 100;
+};
+
+// ============================================================================
+// FSoE Diagnostic Entry
+// ============================================================================
+
+struct FSoEDiagnosticEntry {
+    uint64_t timestamp;
+    uint16_t errorCode;
+    uint8_t  state;
+    uint8_t  sequenceNumber;
+    uint16_t connectionId;
+    char message[64];
+};
+
+// ============================================================================
+// FSoE Slave Statistics
+// ============================================================================
+
+struct FSoESlaveStats {
+    // Frame counters
+    uint64_t framesReceived = 0;
+    uint64_t framesSent = 0;
+    uint64_t validFrames = 0;
+    uint64_t invalidFrames = 0;
+    
+    // Error counters
+    uint32_t crcErrors = 0;
+    uint32_t sequenceErrors = 0;
+    uint32_t connectionIdErrors = 0;
+    uint32_t watchdogTimeouts = 0;
+    uint32_t commandErrors = 0;
+    uint32_t dataLengthErrors = 0;
+    
+    // State counters
+    uint32_t sessionResets = 0;
+    uint32_t failSafeActivations = 0;
+    uint32_t recoveryAttempts = 0;
+    uint32_t successfulRecoveries = 0;
+    
+    // Timing
+    uint64_t lastValidFrameTime = 0;
+    uint64_t longestGapMs = 0;
+    uint32_t avgCycleTimeUs = 0;
+    uint32_t maxCycleTimeUs = 0;
+    uint32_t minCycleTimeUs = UINT32_MAX;
+    
+    void reset() {
+        framesReceived = 0;
+        framesSent = 0;
+        validFrames = 0;
+        invalidFrames = 0;
+        crcErrors = 0;
+        sequenceErrors = 0;
+        connectionIdErrors = 0;
+        watchdogTimeouts = 0;
+        commandErrors = 0;
+        dataLengthErrors = 0;
+        sessionResets = 0;
+        failSafeActivations = 0;
+        recoveryAttempts = 0;
+        successfulRecoveries = 0;
+        lastValidFrameTime = 0;
+        longestGapMs = 0;
+        avgCycleTimeUs = 0;
+        maxCycleTimeUs = 0;
+        minCycleTimeUs = UINT32_MAX;
+    }
+};
+
+// ============================================================================
+// Callback Types
+// ============================================================================
+
+using FSoEStateCallback = std::function<void(uint8_t oldState, uint8_t newState)>;
+using FSoEErrorCallback = std::function<void(uint16_t errorCode, bool isCritical)>;
+using FSoEFailSafeCallback = std::function<void()>;
+using FSoEDataValidCallback = std::function<void(const uint8_t* data, size_t len)>;
+using FSoERecoveryCallback = std::function<bool()>;  // Return true to allow recovery
+
+// ============================================================================
+// FSoE Slave Class
+// ============================================================================
+
+/**
+ * @brief FSoE Slave Implementation
+ *
+ * Complete FSoE safety protocol handler for EtherCAT slaves.
+ */
+class FSoESlave {
+public:
+    explicit FSoESlave(const FSoESlaveConfig& config);
+    ~FSoESlave();
+    
+    // Non-copyable
+    FSoESlave(const FSoESlave&) = delete;
+    FSoESlave& operator=(const FSoESlave&) = delete;
+    
+    // ========================================================================
+    // Initialization
+    // ========================================================================
+    
+    /**
+     * @brief Initialize FSoE slave
+     * @return true on success
+     */
+    bool initialize();
+    
+    /**
+     * @brief Check if initialized
+     */
+    bool isInitialized() const { return initialized_; }
+    
+    /**
+     * @brief Get configuration
+     */
+    const FSoESlaveConfig& getConfig() const { return config_; }
+    
+    /**
+     * @brief Reconfigure (must be in RESET state)
+     */
+    bool reconfigure(const FSoESlaveConfig& config);
+    
+    // ========================================================================
+    // State Machine
+    // ========================================================================
+    
+    /**
+     * @brief Get current FSoE state
+     */
+    uint8_t getState() const { return state_; }
+    
+    /**
+     * @brief Get state name
+     */
+    const char* getStateName() const;
+    
+    /**
+     * @brief Check if in operational (DATA) state
+     */
+    bool isOperational() const { return state_ == ConnectionState::Data; }
+    
+    /**
+     * @brief Check if in fail-safe state
+     */
+    bool isFailSafe() const { return state_ == ConnectionState::FailSafe || failSafeActive_; }
+    
+    /**
+     * @brief Check if error occurred
+     */
+    bool hasError() const { return state_ == ConnectionState::Error || lastError_ != ErrorCode::NoError; }
+    
+    /**
+     * @brief Get last error code
+     */
+    uint16_t getLastError() const { return lastError_; }
+    
+    /**
+     * @brief Reset state machine
+     */
+    void reset();
+    
+    /**
+     * @brief Force transition to fail-safe state
+     */
+    void triggerFailSafe(uint16_t errorCode = ErrorCode::ApplicationError);
+    
+    /**
+     * @brief Attempt recovery from fail-safe
+     * @return true if recovery initiated
+     */
+    bool attemptRecovery();
+    
+    // ========================================================================
+    // Frame Processing
+    // ========================================================================
+    
+    /**
+     * @brief Process incoming FSoE frame from master
+     * @param data Frame data
+     * @param len Frame length
+     * @return true if frame was valid
+     */
+    bool processRxFrame(const uint8_t* data, size_t len);
+    
+    /**
+     * @brief Prepare outgoing FSoE frame to master
+     * @param data Buffer for frame
+     * @param maxLen Maximum buffer size
+     * @return Actual frame size, 0 on error
+     */
+    size_t prepareTxFrame(uint8_t* data, size_t maxLen);
+    
+    /**
+     * @brief Update state machine (call periodically)
+     * @param currentTimeMs Current time in milliseconds
+     */
+    void update(uint64_t currentTimeMs);
+    
+    // ========================================================================
+    // Safe Data Access
+    // ========================================================================
+    
+    /**
+     * @brief Set safe input data (slave -> master)
+     * @param data Input data
+     * @param len Length
+     * @return true on success
+     */
+    bool setSafeInputs(const uint8_t* data, size_t len);
+
+    /**
+     * @brief Write the raw slave-to-master process image.
+     */
+    bool writeInputProcessData(std::span<const uint8_t> data);
+    
+    /**
+     * @brief Get safe output data (master -> slave)
+     * @param data Buffer for output data
+     * @param len Buffer length
+     * @return Actual data length, 0 if no valid data
+     */
+    size_t getSafeOutputs(uint8_t* data, size_t len) const;
+
+    /**
+     * @brief Read the raw master-to-slave process image.
+     */
+    size_t readOutputProcessData(std::span<uint8_t> data) const;
+
+    /**
+     * @brief Return the currently published slave-to-master process image.
+     */
+    std::vector<uint8_t> inputProcessData() const;
+
+    /**
+     * @brief Return the last valid master-to-slave process image.
+     */
+    std::vector<uint8_t> outputProcessData() const;
+    
+    /**
+     * @brief Check if safe outputs are valid
+     */
+    bool areSafeOutputsValid() const { return dataValid_ && isOperational(); }
+    
+    /**
+     * @brief Apply fail-safe values to outputs
+     */
+    void applyFailSafeOutputs();
+    
+    // ========================================================================
+    // Bit-level Safe I/O
+    // ========================================================================
+    
+    bool getSafeOutputBit(uint8_t bitIndex) const;
+    bool setSafeInputBit(uint8_t bitIndex, bool value);
+    
+    // ========================================================================
+    // Callbacks
+    // ========================================================================
+    
+    void setStateCallback(FSoEStateCallback callback) { stateCallback_ = callback; }
+    void setErrorCallback(FSoEErrorCallback callback) { errorCallback_ = callback; }
+    void setFailSafeCallback(FSoEFailSafeCallback callback) { failSafeCallback_ = callback; }
+    void setDataValidCallback(FSoEDataValidCallback callback) { dataValidCallback_ = callback; }
+    void setRecoveryCallback(FSoERecoveryCallback callback) { recoveryCallback_ = callback; }
+    
+    // ========================================================================
+    // Statistics and Diagnostics
+    // ========================================================================
+    
+    /**
+     * @brief Get statistics
+     */
+    const FSoESlaveStats& getStats() const { return stats_; }
+    
+    /**
+     * @brief Reset statistics
+     */
+    void resetStats() { stats_.reset(); }
+    
+    /**
+     * @brief Get diagnostic log
+     */
+    const std::vector<FSoEDiagnosticEntry>& getDiagnostics() const { return diagnostics_; }
+    
+    /**
+     * @brief Clear diagnostic log
+     */
+    void clearDiagnostics() { diagnostics_.clear(); }
+    
+    // ========================================================================
+    // Error Injection (Testing)
+    // ========================================================================
+    
+    /**
+     * @brief Get error injection configuration (mutable)
+     */
+    FSoEErrorInjection& getErrorInjection() { return errorInjection_; }
+    
+    /**
+     * @brief Set error injection configuration
+     */
+    void setErrorInjection(const FSoEErrorInjection& injection) { errorInjection_ = injection; }
+    
+    /**
+     * @brief Check if error injection is enabled
+     */
+    bool isErrorInjectionEnabled() const { return errorInjection_.enabled; }
+
+private:
+    // ========================================================================
+    // Internal Methods
+    // ========================================================================
+    
+    void transitionTo(uint8_t newState);
+    bool validateFrame(const uint8_t* data, size_t len);
+    bool validateCRC(const uint8_t* data, size_t len);
+    bool validateSequence(uint8_t seqNum);
+    bool validateConnectionId(uint16_t connId);
+    uint16_t calculateCRC(const uint8_t* data, size_t len);
+    
+    void processSessionReset(const uint8_t* data, size_t len);
+    void processConnection(const uint8_t* data, size_t len);
+    void processParameter(const uint8_t* data, size_t len);
+    void processData(const uint8_t* data, size_t len);
+    
+    size_t buildSessionResponse(uint8_t* data, size_t maxLen);
+    size_t buildConnectionResponse(uint8_t* data, size_t maxLen);
+    size_t buildParameterResponse(uint8_t* data, size_t maxLen);
+    size_t buildDataResponse(uint8_t* data, size_t maxLen);
+    size_t buildFailSafeResponse(uint8_t* data, size_t maxLen);
+    
+    void handleWatchdog(uint64_t currentTimeMs);
+    void handleTimeout(uint64_t currentTimeMs);
+    void handleError(uint16_t errorCode, bool isCritical);
+    void logDiagnostic(uint16_t errorCode, const char* message);
+    
+    bool shouldInjectCRCError();
+    bool shouldDropFrame();
+    void applyDataCorruption(uint8_t* data, size_t len);
+    
+    // ========================================================================
+    // Member Variables
+    // ========================================================================
+    
+    FSoESlaveConfig config_;
+    bool initialized_ = false;
+    
+    // State machine
+    std::atomic<uint8_t> state_{ConnectionState::Reset};
+    uint16_t lastError_ = ErrorCode::NoError;
+    bool failSafeActive_ = false;
+    bool dataValid_ = false;
+    
+    // Session/sequence management
+    uint16_t sessionId_ = 0;
+    uint16_t currentConnectionId_ = 0;
+    uint8_t expectedSequence_ = 0;
+    uint8_t txSequence_ = 0;
+    
+    // Timing
+    uint64_t lastValidFrameMs_ = 0;
+    uint64_t stateEntryTimeMs_ = 0;
+    uint64_t lastUpdateTimeMs_ = 0;
+    uint64_t recoveryAttemptTimeMs_ = 0;
+    
+    // Data buffers
+    std::array<uint8_t, 16> safeInputs_{};
+    std::array<uint8_t, 16> safeOutputs_{};
+    std::array<uint8_t, 32> rxBuffer_{};
+    std::array<uint8_t, 32> txBuffer_{};
+    
+    // Callbacks
+    FSoEStateCallback stateCallback_;
+    FSoEErrorCallback errorCallback_;
+    FSoEFailSafeCallback failSafeCallback_;
+    FSoEDataValidCallback dataValidCallback_;
+    FSoERecoveryCallback recoveryCallback_;
+    
+    // Statistics and diagnostics
+    FSoESlaveStats stats_;
+    std::vector<FSoEDiagnosticEntry> diagnostics_;
+    
+    // Error injection
+    FSoEErrorInjection errorInjection_;
+    
+    // Thread safety
+    mutable std::recursive_mutex mutex_;
+};
+
+// ============================================================================
+// CRC-16 Utilities (FSoE specific polynomial)
+// ============================================================================
+
+namespace CRC {
+    /**
+     * @brief Calculate FSoE CRC-16 (polynomial 0x755B)
+     */
+    uint16_t calculateFSoECRC(const uint8_t* data, size_t len);
+    
+    /**
+     * @brief Verify FSoE CRC
+     */
+    bool verifyFSoECRC(const uint8_t* data, size_t len);
+}
+
+} // namespace FSoE
