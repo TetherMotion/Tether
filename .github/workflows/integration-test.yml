@@ -32,7 +32,9 @@ jobs:
           -DTETHER_BUILD_TESTS=ON \
           -DTETHER_BUILD_SIMULATION=ON \
           -DTETHER_BUILD_ETHERCAT_MASTER=ON \
-          -DTETHER_BUILD_PYTHON_BINDINGS=OFF
+          -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
+          -DTETHER_BUILD_EXTRACT_ESI=OFF \
+          -DTETHER_BUILD_DESTABILIZER=OFF
         cmake --build build --parallel $(nproc)
     
     - name: Run integration tests

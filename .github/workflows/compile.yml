@@ -27,7 +27,11 @@ jobs:
     
     - name: Build
       run: |
-        cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DTETHER_BUILD_PYTHON_BINDINGS=OFF
+        cmake -S . -B build \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
+          -DTETHER_BUILD_EXTRACT_ESI=OFF \
+          -DTETHER_BUILD_DESTABILIZER=OFF
         cmake --build build --parallel $(nproc)
     
     - name: Verify build artifacts
