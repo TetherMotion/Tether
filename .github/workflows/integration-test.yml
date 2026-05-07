@@ -25,31 +25,9 @@ jobs:
           libc6-dev \
           make
     
-    - name: Configure CMake with integration test options
+    - name: Build with integration tests
       run: |
-        cmake -S . -B build \
-          -DCMAKE_BUILD_TYPE=Debug \
-          -DTETHER_BUILD_TESTS=ON \
-          -DTETHER_BUILD_SIMULATION=ON \
-          -DTETHER_BUILD_ETHERCAT_MASTER=ON
-    
-    - name: Build
-      run: |
-        cmake --build build --parallel $(nproc)
-    
-    - name: Run integration tests
-      run: |
-        ctest --test-dir build \
-          --output-on-failure \
-          --verbose \
-          -L integration
-    
-    - name: Run all tests with extended output
-      run: |
-        ctest --test-dir build \
-          --output-on-failure \
-          --verbose \
-          -R "integration|ethercat|simulation"
+        ./build.sh -d build -t Debug -r --ctest-args "-R integration|ethercat|simulation"
     
     - name: Upload integration test results
       if: always()

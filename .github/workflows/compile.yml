@@ -25,13 +25,9 @@ jobs:
           libc6-dev \
           make
     
-    - name: Configure CMake
-      run: |
-        cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-    
     - name: Build
       run: |
-        cmake --build build --parallel $(nproc)
+        ./build.sh -d build -t Release
     
     - name: Verify build artifacts
       run: |

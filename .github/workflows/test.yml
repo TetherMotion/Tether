@@ -25,17 +25,9 @@ jobs:
           libc6-dev \
           make
     
-    - name: Configure CMake
+    - name: Build with tests
       run: |
-        cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DTETHER_BUILD_TESTS=ON
-    
-    - name: Build
-      run: |
-        cmake --build build --parallel $(nproc)
-    
-    - name: Run tests
-      run: |
-        ctest --test-dir build --output-on-failure --verbose
+        ./build.sh -d build -t Debug -r
     
     - name: Upload test results
       if: always()
