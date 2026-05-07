@@ -1,0 +1,39 @@
+name: Compile
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  compile:
+    name: Compile Tether
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake \
+          g++ \
+          gcc \
+          libc6-dev \
+          make
+    
+    - name: Configure CMake
+      run: |
+        cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+    
+    - name: Build
+      run: |
+        cmake --build build --parallel $(nproc)
+    
+    - name: Verify build artifacts
+      run: |
+        ls -la build/bin/
+        ls -la build/lib/

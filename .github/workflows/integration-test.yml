@@ -1,0 +1,59 @@
+name: Integration Test
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  integration-test:
+    name: Run Integration Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake \
+          g++ \
+          gcc \
+          libc6-dev \
+          make
+    
+    - name: Configure CMake with integration test options
+      run: |
+        cmake -S . -B build \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DTETHER_BUILD_TESTS=ON \
+          -DTETHER_BUILD_SIMULATION=ON \
+          -DTETHER_BUILD_ETHERCAT_MASTER=ON
+    
+    - name: Build
+      run: |
+        cmake --build build --parallel $(nproc)
+    
+    - name: Run integration tests
+      run: |
+        ctest --test-dir build \
+          --output-on-failure \
+          --verbose \
+          -L integration
+    
+    - name: Run all tests with extended output
+      run: |
+        ctest --test-dir build \
+          --output-on-failure \
+          --verbose \
+          -R "integration|ethercat|simulation"
+    
+    - name: Upload integration test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: integration-test-results
+        path: build/Testing/
