@@ -27,9 +27,18 @@ jobs:
           lcov \
           gcovr
     
-    - name: Build with coverage
+    - name: Configure and build with coverage
       run: |
-        ./build.sh -d build -t Debug -c -r
+        cmake -S . -B build \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DTETHER_BUILD_TESTS=ON \
+          -DTETHER_ENABLE_COVERAGE=ON \
+          -DTETHER_BUILD_PYTHON_BINDINGS=OFF
+        cmake --build build --parallel $(nproc)
+    
+    - name: Run tests
+      run: |
+        ctest --test-dir build --output-on-failure
     
     - name: Generate coverage report with lcov
       run: |

@@ -25,9 +25,19 @@ jobs:
           libc6-dev \
           make
     
-    - name: Build with integration tests
+    - name: Configure and build
       run: |
-        ./build.sh -d build -t Debug -r --ctest-args "-R integration|ethercat|simulation"
+        cmake -S . -B build \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DTETHER_BUILD_TESTS=ON \
+          -DTETHER_BUILD_SIMULATION=ON \
+          -DTETHER_BUILD_ETHERCAT_MASTER=ON \
+          -DTETHER_BUILD_PYTHON_BINDINGS=OFF
+        cmake --build build --parallel $(nproc)
+    
+    - name: Run integration tests
+      run: |
+        ctest --test-dir build --output-on-failure -R "integration|ethercat|simulation"
     
     - name: Upload integration test results
       if: always()

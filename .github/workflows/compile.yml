@@ -27,7 +27,8 @@ jobs:
     
     - name: Build
       run: |
-        ./build.sh -d build -t Release
+        cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DTETHER_BUILD_PYTHON_BINDINGS=OFF
+        cmake --build build --parallel $(nproc)
     
     - name: Verify build artifacts
       run: |

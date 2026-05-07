@@ -25,9 +25,14 @@ jobs:
           libc6-dev \
           make
     
-    - name: Build with tests
+    - name: Configure and build
       run: |
-        ./build.sh -d build -t Debug -r
+        cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DTETHER_BUILD_TESTS=ON -DTETHER_BUILD_PYTHON_BINDINGS=OFF
+        cmake --build build --parallel $(nproc)
+    
+    - name: Run tests
+      run: |
+        ctest --test-dir build --output-on-failure
     
     - name: Upload test results
       if: always()
