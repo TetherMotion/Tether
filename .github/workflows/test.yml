@@ -31,8 +31,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=Debug \
           -DTETHER_BUILD_TESTS=ON \
           -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
-          -DTETHER_BUILD_EXTRACT_ESI=OFF \
-          -DTETHER_BUILD_DESTABILIZER=OFF
+          -DTETHER_BUILD_EXTRACT_ESI=OFF
         cmake --build build --parallel $(nproc)
     
     - name: Run tests

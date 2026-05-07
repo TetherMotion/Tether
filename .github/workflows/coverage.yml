@@ -34,8 +34,7 @@ jobs:
           -DTETHER_BUILD_TESTS=ON \
           -DTETHER_ENABLE_COVERAGE=ON \
           -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
-          -DTETHER_BUILD_EXTRACT_ESI=OFF \
-          -DTETHER_BUILD_DESTABILIZER=OFF
+          -DTETHER_BUILD_EXTRACT_ESI=OFF
         cmake --build build --parallel $(nproc)
     
     - name: Run tests
