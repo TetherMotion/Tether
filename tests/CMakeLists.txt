@@ -12,6 +12,9 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 
+# Include GoogleTest for gtest_discover_tests
+include(GoogleTest)
+
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/mocks)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/motion)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/gcode)
@@ -311,7 +314,6 @@ target_compile_definitions(tether_tests PRIVATE
     TEST_PROJECT_ROOT=\"${CMAKE_SOURCE_DIR}\"
 )
 
-include(GoogleTest)
 gtest_discover_tests(tether_tests)
 
 add_executable(tether_fsoe_integration_tests
