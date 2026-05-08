@@ -11,13 +11,8 @@ env:
 
 jobs:
   test-modules:
-    name: Test ${{ matrix.module }} with ${{ matrix.sanitizer }}
+    name: Test Modules with Sanitizers
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        module: [control, destabilizer, simulation, motion, motion_planner, slave, esi, export]
-        sanitizer: [asan, tsan]
     
     steps:
     - name: Checkout code
@@ -27,12 +22,11 @@ jobs:
       uses: actions/cache@v4
       with:
         path: |
-          build-${{ matrix.module }}-${{ matrix.sanitizer }}
+          build-modules-sanitizers
           ~/.cache/ccache
-        key: ${{ runner.os }}-cmake-${{ matrix.module }}-${{ matrix.sanitizer }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cpp', '**/*.h', '**/*.hpp') }}
+        key: ${{ runner.os }}-cmake-modules-sanitizers-${{ hashFiles('**/CMakeLists.txt', '**/*.cpp', '**/*.h', '**/*.hpp') }}
         restore-keys: |
-          ${{ runner.os }}-cmake-${{ matrix.module }}-${{ matrix.sanitizer }}-
-          ${{ runner.os }}-cmake-${{ matrix.module }}-
+          ${{ runner.os }}-cmake-modules-sanitizers-
           ${{ runner.os }}-cmake-
 
     - name: Install dependencies
@@ -52,15 +46,11 @@ jobs:
         ccache -M 5G
         ccache -s
 
-    - name: Configure and build with ${{ matrix.sanitizer }}
+    - name: Configure and build with ASAN
       run: |
-        if [ "${{ matrix.sanitizer }}" = "asan" ]; then
-          SANITIZER_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g"
-        elif [ "${{ matrix.sanitizer }}" = "tsan" ]; then
-          SANITIZER_FLAGS="-fsanitize=thread -g"
-        fi
+        SANITIZER_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g"
         
-        cmake -S . -B build-${{ matrix.module }}-${{ matrix.sanitizer }} \
+        cmake -S . -B build-modules-asan \
           -DCMAKE_BUILD_TYPE=Debug \
           -DTETHER_BUILD_TESTS=ON \
           -DTETHER_BUILD_MODULE_TESTS=ON \
@@ -73,19 +63,92 @@ jobs:
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           
-        cmake --build build-${{ matrix.module }}-${{ matrix.sanitizer }} --target tether_${{ matrix.module }}_tests --parallel $(nproc)
+        cmake --build build-modules-asan --parallel $(nproc)
 
-    - name: Run ${{ matrix.module }} tests with ${{ matrix.sanitizer }}
+    - name: Configure and build with TSAN
       run: |
-        if [ "${{ matrix.sanitizer }}" = "asan" ]; then
-          export ASAN_OPTIONS=detect_leaks=1:halt_on_error=0
-        elif [ "${{ matrix.sanitizer }}" = "tsan" ]; then
-          export TSAN_OPTIONS=halt_on_error=0
-        fi
+        SANITIZER_FLAGS="-fsanitize=thread -g"
         
-        ctest --test-dir build-${{ matrix.module }}-${{ matrix.sanitizer }} \
-          --output-on-failure \
-          -R "^tether_${{ matrix.module }}_tests"
+        cmake -S . -B build-modules-tsan \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DTETHER_BUILD_TESTS=ON \
+          -DTETHER_BUILD_MODULE_TESTS=ON \
+          -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
+          -DTETHER_BUILD_EXTRACT_ESI=OFF \
+          -DTETHER_BUILD_DESTABILIZER=ON \
+          -DCMAKE_CXX_FLAGS="${SANITIZER_FLAGS}" \
+          -DCMAKE_C_FLAGS="${SANITIZER_FLAGS}" \
+          -DCMAKE_EXE_LINKER_FLAGS="${SANITIZER_FLAGS}" \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          
+        cmake --build build-modules-tsan --parallel $(nproc)
+
+    - name: Run all module tests with ASAN in parallel
+      run: |
+        export ASAN_OPTIONS=detect_leaks=1:halt_on_error=0
+        
+        modules=("control" "destabilizer" "simulation" "motion" "motion_planner" "slave" "esi" "export")
+        pids=()
+        
+        for module in "${modules[@]}"; do
+          echo "Running $module with ASAN..."
+          ctest --test-dir build-modules-asan \
+            --output-on-failure \
+            -R "^tether_${module}_tests" > "asan_${module}.log" 2>&1 &
+          pids+=($!)
+        done
+        
+        failed=()
+        for i in "${!pids[@]}"; do
+          if ! wait "${pids[$i]}"; then
+            failed+=("${modules[$i]}")
+          fi
+        done
+        
+        echo "=== ASAN Test Results ==="
+        for module in "${modules[@]}"; do
+          echo "--- $module (ASAN) ---"
+          cat "asan_${module}.log"
+        done
+        
+        if [ ${#failed[@]} -gt 0 ]; then
+          echo "Failed modules with ASAN: ${failed[*]}"
+          exit 1
+        fi
+
+    - name: Run all module tests with TSAN in parallel
+      run: |
+        export TSAN_OPTIONS=halt_on_error=0
+        
+        modules=("control" "destabilizer" "simulation" "motion" "motion_planner" "slave" "esi" "export")
+        pids=()
+        
+        for module in "${modules[@]}"; do
+          echo "Running $module with TSAN..."
+          ctest --test-dir build-modules-tsan \
+            --output-on-failure \
+            -R "^tether_${module}_tests" > "tsan_${module}.log" 2>&1 &
+          pids+=($!)
+        done
+        
+        failed=()
+        for i in "${!pids[@]}"; do
+          if ! wait "${pids[$i]}"; then
+            failed+=("${modules[$i]}")
+          fi
+        done
+        
+        echo "=== TSAN Test Results ==="
+        for module in "${modules[@]}"; do
+          echo "--- $module (TSAN) ---"
+          cat "tsan_${module}.log"
+        done
+        
+        if [ ${#failed[@]} -gt 0 ]; then
+          echo "Failed modules with TSAN: ${failed[*]}"
+          exit 1
+        fi
 
     - name: Show ccache stats
       if: always()
@@ -95,5 +158,7 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: test-results-${{ matrix.module }}-${{ matrix.sanitizer }}
-        path: build-${{ matrix.module }}-${{ matrix.sanitizer }}/Testing/
+        name: test-results-modules-sanitizers
+        path: |
+          asan_*.log
+          tsan_*.log
