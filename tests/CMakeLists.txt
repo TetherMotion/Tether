@@ -139,44 +139,56 @@ if(NOT TETHER_BUILD_IO_PROTOCOL)
     list(FILTER IO_TEST_SOURCES EXCLUDE REGEX ".*test_io_datalogging_extra\\.cpp$")
 endif()
 
-# Create module test executables
-create_module_test(control
-    "${CONTROL_TEST_SOURCES}"
-    "tether_common;tether_hal;tether_gcode;tether_motion_control;tether_motion_planner;tether_controls;tether_export;tether_ethercat_common;tether_ethercat_master;tether_ethercat_slave;tether_simulation;tether_destabilizer"
-    ""
-)
+# Create module test executables (only if sources exist)
+if(CONTROL_TEST_SOURCES)
+    create_module_test(control
+        "${CONTROL_TEST_SOURCES}"
+        "tether_common;tether_hal;tether_gcode;tether_motion_control;tether_motion_planner;tether_controls;tether_export;tether_ethercat_common;tether_ethercat_master;tether_ethercat_slave;tether_simulation;tether_destabilizer"
+        ""
+    )
+endif()
 
-create_module_test(dc
-    "${DC_TEST_SOURCES}"
-    "tether_common;tether_ethercat_common"
-    ""
-)
+if(DC_TEST_SOURCES)
+    create_module_test(dc
+        "${DC_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common"
+        ""
+    )
+endif()
 
-create_module_test(destabilizer
-    "${DESTABILIZER_TEST_SOURCES}"
-    "tether_common;tether_destabilizer"
-    ""
-)
+if(DESTABILIZER_TEST_SOURCES)
+    create_module_test(destabilizer
+        "${DESTABILIZER_TEST_SOURCES}"
+        "tether_common;tether_destabilizer"
+        ""
+    )
+endif()
 
-create_module_test(ethercat
-    "${ETHERCAT_TEST_SOURCES};${ETHERCAT_MOCK_SOURCES}"
-    "tether_common;tether_ethercat_common;tether_ethercat_master;tether_ethercat_slave"
-    ""
-)
+if(ETHERCAT_TEST_SOURCES)
+    create_module_test(ethercat
+        "${ETHERCAT_TEST_SOURCES};${ETHERCAT_MOCK_SOURCES}"
+        "tether_common;tether_ethercat_common;tether_ethercat_master;tether_ethercat_slave"
+        ""
+    )
+endif()
 
-create_module_test(gcode
-    "${GCODE_TEST_SOURCES}"
-    "tether_common;tether_gcode"
-    ""
-)
+if(GCODE_TEST_SOURCES)
+    create_module_test(gcode
+        "${GCODE_TEST_SOURCES}"
+        "tether_common;tether_gcode"
+        ""
+    )
+endif()
 
-create_module_test(hal
-    "${HAL_TEST_SOURCES}"
-    "tether_common;tether_hal"
-    ""
-)
+if(HAL_TEST_SOURCES)
+    create_module_test(hal
+        "${HAL_TEST_SOURCES}"
+        "tether_common;tether_hal"
+        ""
+    )
+endif()
 
-if(TETHER_BUILD_IO_PROTOCOL)
+if(TETHER_BUILD_IO_PROTOCOL AND IO_TEST_SOURCES)
     create_module_test(io
         "${IO_TEST_SOURCES}"
         "tether_common;tether_io_protocol"
@@ -184,77 +196,101 @@ if(TETHER_BUILD_IO_PROTOCOL)
     )
 endif()
 
-create_module_test(motion
-    "${MOTION_TEST_SOURCES}"
-    "tether_common;tether_motion_control;tether_ethercat_common"
-    ""
-)
+if(MOTION_TEST_SOURCES)
+    create_module_test(motion
+        "${MOTION_TEST_SOURCES}"
+        "tether_common;tether_motion_control;tether_ethercat_common"
+        ""
+    )
+endif()
 
-create_module_test(motion_planner
-    "${MOTION_PLANNER_TEST_SOURCES}"
-    "tether_common;tether_motion_control;tether_motion_planner;tether_ethercat_common"
-    ""
-)
+if(MOTION_PLANNER_TEST_SOURCES)
+    create_module_test(motion_planner
+        "${MOTION_PLANNER_TEST_SOURCES}"
+        "tether_common;tether_motion_control;tether_motion_planner;tether_ethercat_common"
+        ""
+    )
+endif()
 
-create_module_test(motion_replanner
-    "${MOTION_REPLANNER_TEST_SOURCES}"
-    "tether_common;tether_motion_control;tether_motion_replanner;tether_ethercat_common"
-    ""
-)
+if(MOTION_REPLANNER_TEST_SOURCES)
+    create_module_test(motion_replanner
+        "${MOTION_REPLANNER_TEST_SOURCES}"
+        "tether_common;tether_motion_control;tether_motion_replanner;tether_ethercat_common"
+        ""
+    )
+endif()
 
-create_module_test(profiles
-    "${PROFILES_TEST_SOURCES}"
-    "tether_common;tether_ethercat_common"
-    ""
-)
+if(PROFILES_TEST_SOURCES)
+    create_module_test(profiles
+        "${PROFILES_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common"
+        ""
+    )
+endif()
 
-create_module_test(simulation
-    "${SIMULATION_TEST_SOURCES}"
-    "tether_common;tether_simulation"
-    ""
-)
+if(SIMULATION_TEST_SOURCES)
+    create_module_test(simulation
+        "${SIMULATION_TEST_SOURCES}"
+        "tether_common;tether_simulation"
+        ""
+    )
+endif()
 
-create_module_test(slave
-    "${SLAVE_TEST_SOURCES}"
-    "tether_common;tether_ethercat_common;tether_ethercat_slave"
-    ""
-)
+if(SLAVE_TEST_SOURCES)
+    create_module_test(slave
+        "${SLAVE_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common;tether_ethercat_slave"
+        ""
+    )
+endif()
 
-create_module_test(sii
-    "${SII_TEST_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/sii/mocks_private/raw_transport_test_stubs.cpp"
-    "tether_common;tether_ethercat_common"
-    ""
-)
+if(SII_TEST_SOURCES)
+    create_module_test(sii
+        "${SII_TEST_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/sii/mocks_private/raw_transport_test_stubs.cpp"
+        "tether_common;tether_ethercat_common"
+        ""
+    )
+endif()
 
-create_module_test(esi
-    "${ESI_TEST_SOURCES}"
-    "tether_common;tether_ethercat_common"
-    ""
-)
+if(ESI_TEST_SOURCES)
+    create_module_test(esi
+        "${ESI_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common"
+        ""
+    )
+endif()
 
-create_module_test(mailbox
-    "${MAILBOX_TEST_SOURCES}"
-    "tether_common;tether_ethercat_common"
-    ""
-)
+if(MAILBOX_TEST_SOURCES)
+    create_module_test(mailbox
+        "${MAILBOX_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common"
+        ""
+    )
+endif()
 
-create_module_test(slave_emulation
-    "${SLAVE_EMULATION_TEST_SOURCES}"
-    "tether_common;tether_ethercat_common"
-    ""
-)
+if(SLAVE_EMULATION_TEST_SOURCES)
+    create_module_test(slave_emulation
+        "${SLAVE_EMULATION_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common"
+        ""
+    )
+endif()
 
-create_module_test(export
-    "${EXPORT_TEST_SOURCES}"
-    "tether_common;tether_export"
-    ""
-)
+if(EXPORT_TEST_SOURCES)
+    create_module_test(export
+        "${EXPORT_TEST_SOURCES}"
+        "tether_common;tether_export"
+        ""
+    )
+endif()
 
-create_module_test(replanner
-    "${REPLANNER_TEST_SOURCES}"
-    "tether_common;tether_motion_replanner"
-    ""
-)
+if(REPLANNER_TEST_SOURCES)
+    create_module_test(replanner
+        "${REPLANNER_TEST_SOURCES}"
+        "tether_common;tether_motion_replanner"
+        ""
+    )
+endif()
 
 # Keep the original tether_tests for backward compatibility (all tests combined)
 list(FILTER ALL_TEST_SOURCES EXCLUDE REGEX ".*main\\.cpp$")
