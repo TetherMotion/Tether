@@ -1,0 +1,104 @@
+name: Test Modules with Sanitizers
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  test-modules:
+    name: Test ${{ matrix.module }} with ${{ matrix.sanitizer }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [control, dc, destabilizer, ethercat, gcode, hal, motion, motion_planner, motion_replanner, profiles, simulation, slave, sii, esi, mailbox, slave_emulation, export, replanner]
+        sanitizer: [asan, tsan]
+        exclude:
+          # Exclude TSan for modules that are known to have issues
+          - module: ethercat
+            sanitizer: tsan
+          - module: control
+            sanitizer: tsan
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Cache CMake build
+      uses: actions/cache@v4
+      with:
+        path: |
+          build-${{ matrix.module }}-${{ matrix.sanitizer }}
+          ~/.cache/ccache
+        key: ${{ runner.os }}-cmake-${{ matrix.module }}-${{ matrix.sanitizer }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cpp', '**/*.h', '**/*.hpp') }}
+        restore-keys: |
+          ${{ runner.os }}-cmake-${{ matrix.module }}-${{ matrix.sanitizer }}-
+          ${{ runner.os }}-cmake-${{ matrix.module }}-
+          ${{ runner.os }}-cmake-
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake \
+          g++ \
+          gcc \
+          libc6-dev \
+          make \
+          ccache
+
+    - name: Configure ccache
+      run: |
+        echo "CCACHE_DIR=~/.cache/ccache" >> $GITHUB_ENV
+        ccache -M 5G
+        ccache -s
+
+    - name: Configure and build with ${{ matrix.sanitizer }}
+      run: |
+        if [ "${{ matrix.sanitizer }}" = "asan" ]; then
+          SANITIZER_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g"
+        elif [ "${{ matrix.sanitizer }}" = "tsan" ]; then
+          SANITIZER_FLAGS="-fsanitize=thread -g"
+        fi
+        
+        cmake -S . -B build-${{ matrix.module }}-${{ matrix.sanitizer }} \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DTETHER_BUILD_TESTS=ON \
+          -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
+          -DTETHER_BUILD_EXTRACT_ESI=OFF \
+          -DTETHER_BUILD_DESTABILIZER=ON \
+          -DCMAKE_CXX_FLAGS="${SANITIZER_FLAGS}" \
+          -DCMAKE_C_FLAGS="${SANITIZER_FLAGS}" \
+          -DCMAKE_EXE_LINKER_FLAGS="${SANITIZER_FLAGS}" \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          
+        cmake --build build-${{ matrix.module }}-${{ matrix.sanitizer }} --target tether_${{ matrix.module }}_tests --parallel $(nproc)
+
+    - name: Run ${{ matrix.module }} tests with ${{ matrix.sanitizer }}
+      run: |
+        if [ "${{ matrix.sanitizer }}" = "asan" ]; then
+          export ASAN_OPTIONS=detect_leaks=1:halt_on_error=0
+        elif [ "${{ matrix.sanitizer }}" = "tsan" ]; then
+          export TSAN_OPTIONS=halt_on_error=0
+        fi
+        
+        ctest --test-dir build-${{ matrix.module }}-${{ matrix.sanitizer }} \
+          --output-on-failure \
+          -R "^tether_${{ matrix.module }}_tests"
+
+    - name: Show ccache stats
+      if: always()
+      run: ccache -s
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-${{ matrix.module }}-${{ matrix.sanitizer }}
+        path: build-${{ matrix.module }}-${{ matrix.sanitizer }}/Testing/

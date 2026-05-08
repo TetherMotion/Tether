@@ -52,68 +52,210 @@ file(GLOB_RECURSE ALL_TEST_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/*.cpp"
 )
 
-list(FILTER ALL_TEST_SOURCES EXCLUDE REGEX ".*main\\.cpp$")
-list(FILTER ALL_TEST_SOURCES EXCLUDE REGEX ".*mocks_private/.*")
-# Exclude test files that require SLIPStream when IO protocol is disabled
+# Helper function to create module test executable
+function(create_module_test MODULE_NAME SOURCES LIBS DEFINITIONS)
+    list(FILTER SOURCES EXCLUDE REGEX ".*main\\.cpp$")
+    list(FILTER SOURCES EXCLUDE REGEX ".*mocks_private/.*")
+    
+    add_executable(tether_${MODULE_NAME}_tests
+        main.cpp
+        ${SOURCES}
+    )
+    
+    target_include_directories(tether_${MODULE_NAME}_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/mocks
+        ${CMAKE_CURRENT_SOURCE_DIR}/mocks/esp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/export
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_replanner
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_planner
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src
+    )
+    
+    target_link_libraries(tether_${MODULE_NAME}_tests PRIVATE
+        ${LIBS}
+        GTest::gtest
+        GTest::gtest_main
+        GTest::gmock
+        GTest::gmock_main
+    )
+    
+    target_compile_definitions(tether_${MODULE_NAME}_tests PRIVATE
+        UNIT_TEST_HOST=1
+        GCODE_STANDALONE_CAPI=1
+        TETHER_ENABLE_ETHERCAT=1
+        TETHER_COMPILE_MASTER=1
+        TEST_PROJECT_ROOT=\"${CMAKE_SOURCE_DIR}\"
+        ${DEFINITIONS}
+    )
+    
+    gtest_discover_tests(tether_${MODULE_NAME}_tests)
+endfunction()
+
+# Collect test sources by module
+file(GLOB_RECURSE CONTROL_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/control/*.cpp")
+file(GLOB_RECURSE DC_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/dc/*.cpp")
+file(GLOB_RECURSE DESTABILIZER_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/destabilizer/*.cpp")
+file(GLOB_RECURSE ETHERCAT_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/*.cpp")
+file(GLOB_RECURSE GCODE_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/gcode/*.cpp")
+file(GLOB_RECURSE HAL_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/hal/*.cpp")
+file(GLOB_RECURSE IO_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/io/*.cpp")
+file(GLOB_RECURSE MOTION_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/motion/*.cpp")
+file(GLOB_RECURSE MOTION_PLANNER_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/*.cpp")
+file(GLOB_RECURSE MOTION_REPLANNER_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/*.cpp")
+file(GLOB_RECURSE PROFILES_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/*.cpp")
+file(GLOB_RECURSE SIMULATION_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/simulation/*.cpp")
+file(GLOB_RECURSE SLAVE_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/slave/*.cpp")
+file(GLOB_RECURSE SII_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/sii/*.cpp")
+file(GLOB_RECURSE ESI_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/esi/*.cpp")
+file(GLOB_RECURSE MAILBOX_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/mailbox/*.cpp")
+file(GLOB_RECURSE SLAVE_EMULATION_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/slave_emulation/*.cpp")
+file(GLOB_RECURSE EXPORT_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/export/*.cpp")
+file(GLOB_RECURSE REPLANNER_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/replanner/*.cpp")
+
+# Add common mock sources
+set(COMMON_MOCK_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/sii/mocks_private/raw_transport_test_stubs.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mocks/test_submanagers.cpp"
+)
+
+# Filter IO tests if IO protocol is disabled
 if(NOT TETHER_BUILD_IO_PROTOCOL)
-    list(FILTER ALL_TEST_SOURCES EXCLUDE REGEX ".*test_io_server_integration\\.cpp$")
-    list(FILTER ALL_TEST_SOURCES EXCLUDE REGEX ".*test_io_session\\.cpp$")
-    list(FILTER ALL_TEST_SOURCES EXCLUDE REGEX ".*test_io_session_integration\\.cpp$")
-    list(FILTER ALL_TEST_SOURCES EXCLUDE REGEX ".*test_io_tcp_transport\\.cpp$")
-    list(FILTER ALL_TEST_SOURCES EXCLUDE REGEX ".*test_io_threshold_filter\\.cpp$")
-    list(FILTER ALL_TEST_SOURCES EXCLUDE REGEX ".*test_io_threshold_filter_extra\\.cpp$")
-    list(FILTER ALL_TEST_SOURCES EXCLUDE REGEX ".*test_io_serial_transport\\.cpp$")
-    list(FILTER ALL_TEST_SOURCES EXCLUDE REGEX ".*test_io_registry\\.cpp$")
-    list(FILTER ALL_TEST_SOURCES EXCLUDE REGEX ".*test_io_registry_extra\\.cpp$")
-    list(FILTER ALL_TEST_SOURCES EXCLUDE REGEX ".*test_io_datalogging\\.cpp$")
-    list(FILTER ALL_TEST_SOURCES EXCLUDE REGEX ".*test_io_datalogging_extra\\.cpp$")
+    list(FILTER IO_TEST_SOURCES EXCLUDE REGEX ".*test_io_server_integration\\.cpp$")
+    list(FILTER IO_TEST_SOURCES EXCLUDE REGEX ".*test_io_session\\.cpp$")
+    list(FILTER IO_TEST_SOURCES EXCLUDE REGEX ".*test_io_session_integration\\.cpp$")
+    list(FILTER IO_TEST_SOURCES EXCLUDE REGEX ".*test_io_tcp_transport\\.cpp$")
+    list(FILTER IO_TEST_SOURCES EXCLUDE REGEX ".*test_io_threshold_filter\\.cpp$")
+    list(FILTER IO_TEST_SOURCES EXCLUDE REGEX ".*test_io_threshold_filter_extra\\.cpp$")
+    list(FILTER IO_TEST_SOURCES EXCLUDE REGEX ".*test_io_serial_transport\\.cpp$")
+    list(FILTER IO_TEST_SOURCES EXCLUDE REGEX ".*test_io_registry\\.cpp$")
+    list(FILTER IO_TEST_SOURCES EXCLUDE REGEX ".*test_io_registry_extra\\.cpp$")
+    list(FILTER IO_TEST_SOURCES EXCLUDE REGEX ".*test_io_datalogging\\.cpp$")
+    list(FILTER IO_TEST_SOURCES EXCLUDE REGEX ".*test_io_datalogging_extra\\.cpp$")
 endif()
 
-list(APPEND ALL_TEST_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/sii/mocks_private/raw_transport_test_stubs.cpp"
+# Create module test executables
+create_module_test(control
+    "${CONTROL_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "tether_common;tether_hal;tether_gcode;tether_motion_control;tether_motion_planner;tether_controls;tether_export;tether_ethercat_common;tether_ethercat_master;tether_ethercat_slave;tether_simulation;tether_destabilizer"
+    ""
 )
 
-list(APPEND ALL_TEST_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/mocks/test_submanagers.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_sync_manager_validation.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_host_stubs.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_dc_configuration_validation.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_ethercat_retry.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_ethercat_retry_smoke.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_pdo_api.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_pdo_to_string.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_pdo_utils.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_mailbox_utils.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_pdo_manager.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_fault_detection.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_write_verify.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_sdo_async.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_foe.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_dc.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_realtime_loop.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_jitter_monitor.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_fmmu_manager.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/test_60xxParameters.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_retry_global.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_voe_eoe.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_fault_names_coverage.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_dc_consistency_coverage.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_dc_manager_coverage.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_fault_detector_coverage.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_ethercat_master_coverage.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_master_frame_coverage.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_ethercat_slave.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_EtherCATReset_coverage.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_EtherCATResetController_coverage.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/esi/test_esi_parser.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/esi/test_esi_axia_sm_count.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_integration_paired.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/profiles/test_as715n_errc11_integration.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_dc_utils.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_sync_manager_utils.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/test_sync_manager.cpp"
+create_module_test(dc
+    "${DC_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "tether_common;tether_ethercat_common"
+    ""
 )
 
+create_module_test(destabilizer
+    "${DESTABILIZER_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "tether_common;tether_destabilizer"
+    ""
+)
+
+create_module_test(ethercat
+    "${ETHERCAT_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "tether_common;tether_ethercat_common;tether_ethercat_master;tether_ethercat_slave"
+    ""
+)
+
+create_module_test(gcode
+    "${GCODE_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "tether_common;tether_gcode"
+    ""
+)
+
+create_module_test(hal
+    "${HAL_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "tether_common;tether_hal"
+    ""
+)
+
+if(TETHER_BUILD_IO_PROTOCOL)
+    create_module_test(io
+        "${IO_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+        "tether_common;tether_io_protocol"
+        ""
+    )
+endif()
+
+create_module_test(motion
+    "${MOTION_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "tether_common;tether_motion_control;tether_ethercat_common"
+    ""
+)
+
+create_module_test(motion_planner
+    "${MOTION_PLANNER_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "tether_common;tether_motion_control;tether_motion_planner;tether_ethercat_common"
+    ""
+)
+
+create_module_test(motion_replanner
+    "${MOTION_REPLANNER_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "tether_common;tether_motion_control;tether_motion_replanner;tether_ethercat_common"
+    ""
+)
+
+create_module_test(profiles
+    "${PROFILES_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "tether_common;tether_ethercat_common"
+    ""
+)
+
+create_module_test(simulation
+    "${SIMULATION_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "tether_common;tether_simulation"
+    ""
+)
+
+create_module_test(slave
+    "${SLAVE_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "tether_common;tether_ethercat_common;tether_ethercat_slave"
+    ""
+)
+
+create_module_test(sii
+    "${SII_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "tether_common;tether_ethercat_common"
+    ""
+)
+
+create_module_test(esi
+    "${ESI_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "tether_common;tether_ethercat_common"
+    ""
+)
+
+create_module_test(mailbox
+    "${MAILBOX_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "tether_common;tether_ethercat_common"
+    ""
+)
+
+create_module_test(slave_emulation
+    "${SLAVE_EMULATION_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "tether_common;tether_ethercat_common"
+    ""
+)
+
+create_module_test(export
+    "${EXPORT_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "tether_common;tether_export"
+    ""
+)
+
+create_module_test(replanner
+    "${REPLANNER_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "tether_common;tether_motion_replanner"
+    ""
+)
+
+# Keep the original tether_tests for backward compatibility (all tests combined)
+list(FILTER ALL_TEST_SOURCES EXCLUDE REGEX ".*main\\.cpp$")
+list(FILTER ALL_TEST_SOURCES EXCLUDE REGEX ".*mocks_private/.*")
 if(NOT ALL_TEST_SOURCES)
     message(WARNING "No test sources found, creating placeholder test")
     file(WRITE ${CMAKE_CURRENT_SOURCE_DIR}/placeholder_test.cpp
