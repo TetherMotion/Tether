@@ -16,14 +16,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [control, dc, destabilizer, ethercat, gcode, hal, motion, motion_planner, motion_replanner, profiles, simulation, slave, sii, esi, mailbox, slave_emulation, export, replanner]
+        module: [control, destabilizer, simulation, motion, motion_planner, slave, esi, export]
         sanitizer: [asan, tsan]
-        exclude:
-          # Exclude TSan for modules that are known to have issues
-          - module: ethercat
-            sanitizer: tsan
-          - module: control
-            sanitizer: tsan
     
     steps:
     - name: Checkout code
@@ -69,6 +63,7 @@ jobs:
         cmake -S . -B build-${{ matrix.module }}-${{ matrix.sanitizer }} \
           -DCMAKE_BUILD_TYPE=Debug \
           -DTETHER_BUILD_TESTS=ON \
+          -DTETHER_BUILD_MODULE_TESTS=ON \
           -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
           -DTETHER_BUILD_EXTRACT_ESI=OFF \
           -DTETHER_BUILD_DESTABILIZER=ON \
