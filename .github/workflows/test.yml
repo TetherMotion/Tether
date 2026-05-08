@@ -46,3 +46,46 @@ jobs:
       with:
         name: test-results
         path: build/Testing/
+
+  test-thread-sanitizer:
+    name: Run Unit Tests with ThreadSanitizer
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake \
+          g++ \
+          gcc \
+          libc6-dev \
+          make
+    
+    - name: Configure and build with TSan
+      run: |
+        cmake -S . -B build-tsan \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DTETHER_BUILD_TESTS=ON \
+          -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
+          -DTETHER_BUILD_EXTRACT_ESI=OFF \
+          -DCMAKE_CXX_FLAGS="-fsanitize=thread -g" \
+          -DCMAKE_C_FLAGS="-fsanitize=thread -g" \
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
+        cmake --build build-tsan --parallel $(nproc)
+    
+    - name: Run specific failing tests with TSan
+      run: |
+        ctest --test-dir build-tsan --output-on-failure -R "FaultDetectorLifecycleTest.ShutdownClearsCallback|FaultDetectorPollTest.PollHealthySlave"
+    
+    - name: Upload TSan test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: tsan-test-results
+        path: build-tsan/Testing/
