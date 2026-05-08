@@ -63,7 +63,11 @@ jobs:
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           
-        cmake --build build-modules-asan --parallel $(nproc)
+        # Build only the module test targets we need
+        modules=("control" "destabilizer" "simulation" "motion" "motion_planner" "slave" "esi" "export")
+        for module in "${modules[@]}"; do
+          cmake --build build-modules-asan --target tether_${module}_tests --parallel $(nproc)
+        done
 
     - name: Configure and build with TSAN
       run: |
@@ -82,7 +86,11 @@ jobs:
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           
-        cmake --build build-modules-tsan --parallel $(nproc)
+        # Build only the module test targets we need
+        modules=("control" "destabilizer" "simulation" "motion" "motion_planner" "slave" "esi" "export")
+        for module in "${modules[@]}"; do
+          cmake --build build-modules-tsan --target tether_${module}_tests --parallel $(nproc)
+        done
 
     - name: Run all module tests with ASAN in parallel
       run: |
