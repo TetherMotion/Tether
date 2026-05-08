@@ -118,8 +118,8 @@ file(GLOB_RECURSE SLAVE_EMULATION_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/slav
 file(GLOB_RECURSE EXPORT_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/export/*.cpp")
 file(GLOB_RECURSE REPLANNER_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/replanner/*.cpp")
 
-# Add common mock sources
-set(COMMON_MOCK_SOURCES
+# Add common mock sources (only for modules that need them)
+set(ETHERCAT_MOCK_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/sii/mocks_private/raw_transport_test_stubs.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/mocks/test_submanagers.cpp"
 )
@@ -141,117 +141,117 @@ endif()
 
 # Create module test executables
 create_module_test(control
-    "${CONTROL_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "${CONTROL_TEST_SOURCES}"
     "tether_common;tether_hal;tether_gcode;tether_motion_control;tether_motion_planner;tether_controls;tether_export;tether_ethercat_common;tether_ethercat_master;tether_ethercat_slave;tether_simulation;tether_destabilizer"
     ""
 )
 
 create_module_test(dc
-    "${DC_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "${DC_TEST_SOURCES}"
     "tether_common;tether_ethercat_common"
     ""
 )
 
 create_module_test(destabilizer
-    "${DESTABILIZER_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "${DESTABILIZER_TEST_SOURCES}"
     "tether_common;tether_destabilizer"
     ""
 )
 
 create_module_test(ethercat
-    "${ETHERCAT_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "${ETHERCAT_TEST_SOURCES};${ETHERCAT_MOCK_SOURCES}"
     "tether_common;tether_ethercat_common;tether_ethercat_master;tether_ethercat_slave"
     ""
 )
 
 create_module_test(gcode
-    "${GCODE_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "${GCODE_TEST_SOURCES}"
     "tether_common;tether_gcode"
     ""
 )
 
 create_module_test(hal
-    "${HAL_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "${HAL_TEST_SOURCES}"
     "tether_common;tether_hal"
     ""
 )
 
 if(TETHER_BUILD_IO_PROTOCOL)
     create_module_test(io
-        "${IO_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+        "${IO_TEST_SOURCES}"
         "tether_common;tether_io_protocol"
         ""
     )
 endif()
 
 create_module_test(motion
-    "${MOTION_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "${MOTION_TEST_SOURCES}"
     "tether_common;tether_motion_control;tether_ethercat_common"
     ""
 )
 
 create_module_test(motion_planner
-    "${MOTION_PLANNER_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "${MOTION_PLANNER_TEST_SOURCES}"
     "tether_common;tether_motion_control;tether_motion_planner;tether_ethercat_common"
     ""
 )
 
 create_module_test(motion_replanner
-    "${MOTION_REPLANNER_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "${MOTION_REPLANNER_TEST_SOURCES}"
     "tether_common;tether_motion_control;tether_motion_replanner;tether_ethercat_common"
     ""
 )
 
 create_module_test(profiles
-    "${PROFILES_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "${PROFILES_TEST_SOURCES}"
     "tether_common;tether_ethercat_common"
     ""
 )
 
 create_module_test(simulation
-    "${SIMULATION_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "${SIMULATION_TEST_SOURCES}"
     "tether_common;tether_simulation"
     ""
 )
 
 create_module_test(slave
-    "${SLAVE_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "${SLAVE_TEST_SOURCES}"
     "tether_common;tether_ethercat_common;tether_ethercat_slave"
     ""
 )
 
 create_module_test(sii
-    "${SII_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "${SII_TEST_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/sii/mocks_private/raw_transport_test_stubs.cpp"
     "tether_common;tether_ethercat_common"
     ""
 )
 
 create_module_test(esi
-    "${ESI_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "${ESI_TEST_SOURCES}"
     "tether_common;tether_ethercat_common"
     ""
 )
 
 create_module_test(mailbox
-    "${MAILBOX_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "${MAILBOX_TEST_SOURCES}"
     "tether_common;tether_ethercat_common"
     ""
 )
 
 create_module_test(slave_emulation
-    "${SLAVE_EMULATION_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "${SLAVE_EMULATION_TEST_SOURCES}"
     "tether_common;tether_ethercat_common"
     ""
 )
 
 create_module_test(export
-    "${EXPORT_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "${EXPORT_TEST_SOURCES}"
     "tether_common;tether_export"
     ""
 )
 
 create_module_test(replanner
-    "${REPLANNER_TEST_SOURCES};${COMMON_MOCK_SOURCES}"
+    "${REPLANNER_TEST_SOURCES}"
     "tether_common;tether_motion_replanner"
     ""
 )
