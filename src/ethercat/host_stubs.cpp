@@ -62,6 +62,7 @@ extern "C" bool ecm_sdo_write(uint16_t slave_addr, uint16_t index, uint8_t subin
 }
 
 // Minimal platform stubs
+namespace EtherCAT {
 namespace Platform {
 
 PlatformFile* create_file() { return nullptr; }
@@ -91,7 +92,6 @@ uint32_t enter_critical() { return 0; }
 void exit_critical(uint32_t) { }
 
 } // namespace Platform
-
 // Note: dc_set_pdo_enabled is now implemented in dc_init.cpp, no stub needed
 
 } // namespace EtherCAT
