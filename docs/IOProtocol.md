@@ -348,7 +348,7 @@ Link in your application:
 target_link_libraries(my_app PRIVATE tether_io_protocol)
 ```
 
-The component automatically builds `libSLIPStream` as a static library and links it.
+The component automatically builds `libSLIPspeed` as a static library and links it.
 
 ## Wire format
 

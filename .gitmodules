@@ -1,0 +1,3 @@
+[submodule "components/libSLIPspeed"]
+	path = components/libSLIPspeed
+	url = https://github.com/ulikoehler/libSLIPspeed

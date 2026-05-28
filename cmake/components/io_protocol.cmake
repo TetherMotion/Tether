@@ -2,27 +2,27 @@
 # SLIP-based parameter/signal streaming protocol with transport layer
 
 # ---------------------------------------------------------------------------
-# libSLIPStream submodule
+# libSLIPspeed submodule
 # ---------------------------------------------------------------------------
-set(LIBSLIPSTREAM_DIR ${TETHER_ROOT}/components/libSLIPStream)
-if(NOT EXISTS ${LIBSLIPSTREAM_DIR}/include)
-    message(WARNING "libSLIPStream submodule not checked out at ${LIBSLIPSTREAM_DIR}; skipping tether_io_protocol")
+set(LIBSLIPSPEED_DIR ${TETHER_ROOT}/components/libSLIPspeed)
+if(NOT EXISTS ${LIBSLIPSPEED_DIR}/include)
+    message(WARNING "libSLIPspeed submodule not checked out at ${LIBSLIPSPEED_DIR}; skipping tether_io_protocol")
     return()
 endif()
 
-# Build libSLIPStream as a static library
-add_library(slipstream STATIC
-    ${LIBSLIPSTREAM_DIR}/src/Buffer.cpp
-    ${LIBSLIPSTREAM_DIR}/src/Decoder.cpp
-    ${LIBSLIPSTREAM_DIR}/src/Encoder.cpp
+# Build libSLIPspeed as a static library
+add_library(slipspeed STATIC
+    ${LIBSLIPSPEED_DIR}/src/Buffer.cpp
+    ${LIBSLIPSPEED_DIR}/src/Decoder.cpp
+    ${LIBSLIPSPEED_DIR}/src/Encoder.cpp
 )
 
-target_include_directories(slipstream PUBLIC
-    $<BUILD_INTERFACE:${LIBSLIPSTREAM_DIR}/include>
+target_include_directories(slipspeed PUBLIC
+    $<BUILD_INTERFACE:${LIBSLIPSPEED_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
 
-set_target_properties(slipstream PROPERTIES
+set_target_properties(slipspeed PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
@@ -66,7 +66,7 @@ target_include_directories(tether_io_protocol
 )
 
 target_link_libraries(tether_io_protocol
-    PUBLIC tether_common slipstream
+    PUBLIC tether_common slipspeed
 )
 
 # Pthreads for Server/Session threading
@@ -81,4 +81,4 @@ set_target_properties(tether_io_protocol PROPERTIES
 
 # Export for other components
 set(TETHER_IO_PROTOCOL_LIBRARY tether_io_protocol PARENT_SCOPE)
-set(TETHER_SLIPSTREAM_LIBRARY slipstream PARENT_SCOPE)
+set(TETHER_SLIPSPEED_LIBRARY slipspeed PARENT_SCOPE)

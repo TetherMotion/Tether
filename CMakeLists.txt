@@ -246,8 +246,8 @@ endif()
 if(TARGET tether_io_protocol)
     list(APPEND TETHER_ALL_COMPONENTS tether_io_protocol)
 endif()
-if(TARGET slipstream)
-    list(APPEND TETHER_ALL_COMPONENTS slipstream)
+if(TARGET slipspeed)
+    list(APPEND TETHER_ALL_COMPONENTS slipspeed)
 endif()
 
 # Create interface library that links all components
