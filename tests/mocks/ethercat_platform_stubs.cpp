@@ -7,20 +7,6 @@
 // which already provides host_stubs.cpp with these symbols.
 #if 0
 
-namespace EtherCAT {
-namespace VoE {
-    void* g_eth_handle = nullptr;
-    uint8_t g_src_mac[6] = {0};
-}
-namespace FoE {
-    void* g_eth_handle = nullptr;
-    uint8_t g_src_mac[6] = {0};
-}
-namespace EoE {
-    void* g_eth_handle = nullptr;
-    uint8_t g_src_mac[6] = {0};
-}
-
 namespace Platform {
 
 Platform::PlatformFile* create_file() { return nullptr; }

@@ -45,12 +45,9 @@ namespace Platform {
 // ============================================================================
 // Filesystem State
 //
-// Platform-specific singleton: g_fs_initialized tracks whether the filesystem
-// has been mounted. Managed exclusively through fs_init()/fs_deinit() which
-// provide proper lifecycle control. ESP32-only (compiled conditionally).
+// Filesystem initialization state is tracked internally without global state.
+// ESP32-only (compiled conditionally).
 // ============================================================================
-
-static bool g_fs_initialized = false;
 
 // ============================================================================
 // ESP32 File Implementation
@@ -202,10 +199,6 @@ PlatformFile* create_file() {
 }
 
 bool fs_init() {
-    if (g_fs_initialized) {
-        return true;
-    }
-    
 #if ECAT_PLATFORM_FILESYSTEM == ECAT_PLATFORM_ESP32_LITTLEFS
     esp_vfs_littlefs_conf_t conf = {
         .base_path = ECAT_LITTLEFS_MOUNT_POINT,
@@ -251,7 +244,6 @@ bool fs_init() {
     return true;
 #endif
     
-    g_fs_initialized = true;
     return true;
 }
 
@@ -261,11 +253,19 @@ void fs_deinit() {
 #elif ECAT_PLATFORM_FILESYSTEM == ECAT_PLATFORM_ESP32_SPIFFS
     esp_vfs_spiffs_unregister(NULL);
 #endif
-    g_fs_initialized = false;
 }
 
 bool fs_is_available() {
-    return g_fs_initialized;
+    // Check if filesystem is mounted by attempting to access the mount point
+#if ECAT_PLATFORM_FILESYSTEM == ECAT_PLATFORM_ESP32_LITTLEFS
+    struct stat st;
+    return (stat(ECAT_LITTLEFS_MOUNT_POINT, &st) == 0);
+#elif ECAT_PLATFORM_FILESYSTEM == ECAT_PLATFORM_ESP32_SPIFFS
+    struct stat st;
+    return (stat("/spiffs", &st) == 0);
+#else
+    return true; // No filesystem means "available" in the sense that it's not needed
+#endif
 }
 
 bool file_exists(const char* path) {
@@ -574,22 +574,19 @@ void delay_us(uint32_t us) {
 // ============================================================================
 // Critical Section
 //
-// Platform-specific constant: g_spinlock is initialized to the unlocked state
-// at compile time (portMUX_INITIALIZER_UNLOCKED). It is a FreeRTOS spinlock
-// used only for ESP32 critical section entry/exit. No mutable global state
-// requiring lifecycle management — this is effectively a constant initializer.
+// Uses FreeRTOS port-level critical section macros which don't require
+// global state. The taskENTER_CRITICAL/taskEXIT_CRITICAL macros manage
+// interrupt state internally.
 // ============================================================================
 
-static portMUX_TYPE g_spinlock = portMUX_INITIALIZER_UNLOCKED;
-
 uint32_t enter_critical() {
-    taskENTER_CRITICAL_ISR(&g_spinlock);
+    taskENTER_CRITICAL();
     return 0;
 }
 
 void exit_critical(uint32_t state) {
     (void)state;
-    taskEXIT_CRITICAL_ISR(&g_spinlock);
+    taskEXIT_CRITICAL();
 }
 
 // ============================================================================

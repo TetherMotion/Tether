@@ -61,21 +61,6 @@ extern "C" bool ecm_sdo_write(uint16_t slave_addr, uint16_t index, uint8_t subin
     (void)slave_addr; (void)index; (void)subindex; (void)data; (void)len; (void)use_configured_addr; return false;
 }
 
-// Minimal EtherCAT vendor/VoE/FoE/EoE globals for host builds (always present)
-namespace EtherCAT {
-namespace VoE {
-    void* g_eth_handle = nullptr;
-    uint8_t g_src_mac[6] = {0};
-}
-namespace FoE {
-    void* g_eth_handle = nullptr;
-    uint8_t g_src_mac[6] = {0};
-}
-namespace EoE {
-    void* g_eth_handle = nullptr;
-    uint8_t g_src_mac[6] = {0};
-}
-
 // Minimal platform stubs
 namespace Platform {
 

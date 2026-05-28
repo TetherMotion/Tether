@@ -648,28 +648,7 @@ CiA402 drive simulation (status word, control word state machine, motion simulat
 
 ## 5. All Global / Static Variables
 
-**Note:** Most global state has been refactored to instance-based implementations. The following sections document only the remaining platform-specific globals.
-
-### 5.1 `platform_esp32.cpp` — ESP32 platform globals
-
-| Variable | Type | Scope | Notes |
-|----------|------|-------|-------|
-| `g_fs_initialized` | `bool` | file-static | Tracks filesystem mount state (LittleFS/SPIFFS) |
-| `g_spinlock` | `portMUX_TYPE` | file-static | FreeRTOS spinlock for critical sections (compile-time constant initializer) |
-
-### 5.2 `host_stubs.cpp` — Host build stub globals
-
-| Variable | Type | Scope | Notes |
-|----------|------|-------|-------|
-| `g_eth_handle` | `void*` | namespace-scoped (VoE, FoE, EoE) | Stub for host builds only |
-| `g_src_mac[6]` | `uint8_t[6]` | namespace-scoped (VoE, FoE, EoE) | Stub for host builds only |
-
-### 5.3 `ethercat_platform_stubs.cpp` — Test stub globals
-
-| Variable | Type | Scope | Notes |
-|----------|------|-------|-------|
-| `g_eth_handle` | `void*` | namespace-scoped (VoE, FoE, EoE) | Test stub only |
-| `g_src_mac[6]` | `uint8_t[6]` | namespace-scoped (VoE, FoE, EoE) | Test stub only |
+**Note:** All global state has been removed from the codebase. The Tether component now uses exclusively instance-based implementations.
 
 ---
 
@@ -688,6 +667,8 @@ The following global state has been successfully refactored to instance-based im
 - **Fault detection:** `g_slave_faults`, `g_slave_count`, `g_initialized`, `g_fault_callback` → moved to `FaultDetector` instance
 - **Write-verify:** `g_config`, `g_enabled`, `g_stats` → moved to `WriteVerifier` instance
 - **Packet router:** `g_packet_router` → replaced by `TransactionRouter` instance
+- **Platform-specific (ESP32):** `g_fs_initialized` → replaced with runtime stat() check; `g_spinlock` → replaced with FreeRTOS taskENTER_CRITICAL/taskEXIT_CRITICAL macros
+- **Host build stubs:** `g_eth_handle`, `g_src_mac` → removed (unused stubs)
 
 ---
 
