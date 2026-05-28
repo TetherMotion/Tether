@@ -1,0 +1,351 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  compile:
+    name: Compile Debug Build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake \
+          g++ \
+          gcc \
+          libc6-dev \
+          make
+    
+    - name: Configure and build
+      run: |
+        cmake -S . -B build \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DTETHER_BUILD_TESTS=ON \
+          -DTETHER_BUILD_SIMULATION=ON \
+          -DTETHER_BUILD_ETHERCAT_MASTER=ON \
+          -DTETHER_BUILD_DESTABILIZER=ON \
+          -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
+          -DTETHER_BUILD_EXTRACT_ESI=OFF
+        cmake --build build --parallel $(nproc)
+    
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: debug-build
+        path: build/
+
+  unit-tests:
+    name: Run Unit Tests
+    runs-on: ubuntu-latest
+    needs: compile
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Download build artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: debug-build
+        path: build/
+    
+    - name: Run tests
+      run: |
+        ctest --test-dir build --output-on-failure
+    
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: unit-test-results
+        path: build/Testing/
+
+  integration-tests:
+    name: Run Integration Tests
+    runs-on: ubuntu-latest
+    needs: compile
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Download build artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: debug-build
+        path: build/
+    
+    - name: Run integration tests
+      run: |
+        ctest --test-dir build --output-on-failure -R "integration|ethercat|simulation"
+    
+    - name: Upload integration test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: integration-test-results
+        path: build/Testing/
+
+  coverage:
+    name: Generate Code Coverage
+    runs-on: ubuntu-latest
+    needs: compile
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake \
+          g++ \
+          gcc \
+          libc6-dev \
+          make \
+          lcov \
+          gcovr
+    
+    - name: Configure and build with coverage
+      run: |
+        cmake -S . -B build-coverage \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DTETHER_BUILD_TESTS=ON \
+          -DTETHER_BUILD_SIMULATION=ON \
+          -DTETHER_BUILD_ETHERCAT_MASTER=ON \
+          -DTETHER_BUILD_DESTABILIZER=ON \
+          -DTETHER_ENABLE_COVERAGE=ON \
+          -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
+          -DTETHER_BUILD_EXTRACT_ESI=OFF
+        cmake --build build-coverage --parallel $(nproc)
+    
+    - name: Run tests
+      run: |
+        ctest --test-dir build-coverage --output-on-failure
+    
+    - name: Generate coverage report with lcov
+      run: |
+        lcov --directory build-coverage --capture --output-file coverage.info
+        lcov --remove coverage.info '/usr/*' --output-file coverage.info
+        lcov --remove coverage.info '*/_deps/*' --output-file coverage.info
+        lcov --remove coverage.info '*/tests/*' --output-file coverage.info
+        lcov --list coverage.info
+    
+    - name: Generate coverage report with gcovr
+      run: |
+        gcovr --root . --build-directory build-coverage --xml --output coverage.xml
+        gcovr --root . --build-directory build-coverage --html --output coverage.html
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        files: ./coverage.info,./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+    
+    - name: Upload coverage artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-reports
+        path: |
+          coverage.info
+          coverage.xml
+          coverage.html
+
+  asan-tests:
+    name: Run Module Tests with ASAN
+    runs-on: ubuntu-latest
+    needs: compile
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake \
+          g++ \
+          gcc \
+          libc6-dev \
+          make \
+          ccache
+    
+    - name: Configure ccache
+      run: |
+        echo "CCACHE_DIR=~/.cache/ccache" >> $GITHUB_ENV
+        ccache -M 5G
+        ccache -s
+    
+    - name: Configure and build with ASAN
+      run: |
+        SANITIZER_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g"
+        
+        cmake -S . -B build-asan \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DTETHER_BUILD_TESTS=ON \
+          -DTETHER_BUILD_MODULE_TESTS=ON \
+          -DTETHER_BUILD_DESTABILIZER=ON \
+          -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
+          -DTETHER_BUILD_EXTRACT_ESI=OFF \
+          -DCMAKE_CXX_FLAGS="${SANITIZER_FLAGS}" \
+          -DCMAKE_C_FLAGS="${SANITIZER_FLAGS}" \
+          -DCMAKE_EXE_LINKER_FLAGS="${SANITIZER_FLAGS}" \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          
+        modules=("control" "destabilizer" "simulation" "motion" "motion_planner" "slave" "esi" "export")
+        for module in "${modules[@]}"; do
+          cmake --build build-asan --target tether_${module}_tests --parallel $(nproc)
+        done
+    
+    - name: Run all module tests with ASAN in parallel
+      run: |
+        export ASAN_OPTIONS=detect_leaks=1:halt_on_error=0
+        
+        modules=("control" "destabilizer" "simulation" "motion" "motion_planner" "slave" "esi" "export")
+        pids=()
+        
+        for module in "${modules[@]}"; do
+          echo "Running $module with ASAN..."
+          ctest --test-dir build-asan \
+            --output-on-failure \
+            -R "^tether_${module}_tests" > "asan_${module}.log" 2>&1 &
+          pids+=($!)
+        done
+        
+        failed=()
+        for i in "${!pids[@]}"; do
+          if ! wait "${pids[$i]}"; then
+            failed+=("${modules[$i]}")
+          fi
+        done
+        
+        echo "=== ASAN Test Results ==="
+        for module in "${modules[@]}"; do
+          echo "--- $module (ASAN) ---"
+          cat "asan_${module}.log"
+        done
+        
+        if [ ${#failed[@]} -gt 0 ]; then
+          echo "Failed modules with ASAN: ${failed[*]}"
+          exit 1
+        fi
+    
+    - name: Show ccache stats
+      if: always()
+      run: ccache -s
+    
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: asan-test-results
+        path: asan_*.log
+
+  tsan-tests:
+    name: Run Module Tests with TSAN
+    runs-on: ubuntu-latest
+    needs: compile
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake \
+          g++ \
+          gcc \
+          libc6-dev \
+          make \
+          ccache
+    
+    - name: Configure ccache
+      run: |
+        echo "CCACHE_DIR=~/.cache/ccache" >> $GITHUB_ENV
+        ccache -M 5G
+        ccache -s
+    
+    - name: Configure and build with TSAN
+      run: |
+        SANITIZER_FLAGS="-fsanitize=thread -g"
+        
+        cmake -S . -B build-tsan \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DTETHER_BUILD_TESTS=ON \
+          -DTETHER_BUILD_MODULE_TESTS=ON \
+          -DTETHER_BUILD_DESTABILIZER=ON \
+          -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
+          -DTETHER_BUILD_EXTRACT_ESI=OFF \
+          -DCMAKE_CXX_FLAGS="${SANITIZER_FLAGS}" \
+          -DCMAKE_C_FLAGS="${SANITIZER_FLAGS}" \
+          -DCMAKE_EXE_LINKER_FLAGS="${SANITIZER_FLAGS}" \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          
+        modules=("control" "destabilizer" "simulation" "motion" "motion_planner" "slave" "esi" "export")
+        for module in "${modules[@]}"; do
+          cmake --build build-tsan --target tether_${module}_tests --parallel $(nproc)
+        done
+    
+    - name: Run all module tests with TSAN in parallel
+      run: |
+        export TSAN_OPTIONS=halt_on_error=0
+        
+        modules=("control" "destabilizer" "simulation" "motion" "motion_planner" "slave" "esi" "export")
+        pids=()
+        
+        for module in "${modules[@]}"; do
+          echo "Running $module with TSAN..."
+          ctest --test-dir build-tsan \
+            --output-on-failure \
+            -R "^tether_${module}_tests" > "tsan_${module}.log" 2>&1 &
+          pids+=($!)
+        done
+        
+        failed=()
+        for i in "${!pids[@]}"; do
+          if ! wait "${pids[$i]}"; then
+            failed+=("${modules[$i]}")
+          fi
+        done
+        
+        echo "=== TSAN Test Results ==="
+        for module in "${modules[@]}"; do
+          echo "--- $module (TSAN) ---"
+          cat "tsan_${module}.log"
+        done
+        
+        if [ ${#failed[@]} -gt 0 ]; then
+          echo "Failed modules with TSAN: ${failed[*]}"
+          exit 1
+        fi
+    
+    - name: Show ccache stats
+      if: always()
+      run: ccache -s
+    
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: tsan-test-results
+        path: tsan_*.log
