@@ -151,257 +151,277 @@ Contains wire-format structures, register address constants, byte-order helpers,
 
 ### 3.1 `EtherCAT::Raw::` namespace (transport & master)
 
-| Function | File | Uses global state? | Notes |
-|----------|------|-------------------|-------|
-| `set_network_interface(NetworkInterface)` | transport.cpp | ✅ writes `g_network_iface` | |
-| `network_interface() → NetworkInterface&` | transport.cpp | ✅ reads `g_network_iface` | |
-| `send_raw_frame(iface, data, len)` | transport.cpp | ❌ | |
-| `set_aprd_cb(fn)` | transport.cpp | ✅ writes `g_aprd_cb` | |
-| `set_apwr_cb(fn)` | transport.cpp | ✅ writes `g_apwr_cb` | |
-| `push_aprd_response(RxDatagram)` | transport.cpp | ✅ writes `g_aprd_responses` | |
-| `clear_aprd_responses()` | transport.cpp | ✅ clears `g_aprd_responses` | |
-| `set_src_mac(mac[6])` | transport.cpp | ✅ writes `g_src_mac` | |
-| `get_src_mac(out[6])` | transport.cpp | ✅ reads `g_src_mac` | |
-| `send_single_datagram(mac, cmd, idx, adp, ado, data, len, wkc)` | transport.cpp | ✅ `g_network_iface` | Core datagram send |
-| `wait_for_response_idx(idx, timeout, out)` | transport.cpp | ✅ `g_aprd_responses` or router | Polls for response by index |
-| `wait_for_response_ado(ado, timeout, out)` | transport.cpp | ✅ | Polls for response by ADO |
-| `ec_apwr(mac, adp, ado, data, len, timeout)` | transport.cpp | ✅ `g_network_iface`, `g_apwr_cb` | Auto-increment position write |
-| `ec_apwr_u16(mac, adp, ado, value, timeout)` | transport.cpp | ✅ | Convenience wrapper |
-| `ec_aprd(mac, adp, ado, data, len, timeout)` | transport.cpp | ✅ `g_network_iface`, `g_aprd_cb` | Auto-increment position read |
-| `alloc_idx() → uint8_t` | runtime.cpp | ✅ `s_next_idx` | Allocates datagram index |
-| `reset_idx()` | runtime.cpp | ✅ `s_next_idx` | |
-| `rx_queue() → MessageQueue*` | runtime.cpp | ✅ `s_rx_dg_queue` | |
-| `txpdo_rx_queue() → MessageQueue*` | runtime.cpp | ✅ `s_txpdo_rx_queue` | |
-| `ensure_rx_queue()` | runtime.cpp | ✅ | |
-| `flush_rx_queue()` | runtime.cpp | ✅ `s_total_flushed`, `s_flush_calls` | |
-| `log_dedup_key(tag, msg) → string` | runtime.cpp | ❌ | |
-| `log_dedup(key, tag, msg)` | runtime.cpp | ✅ internal dedup map | |
-| `adp_for_slave_index(idx) → uint16_t` | runtime.cpp | ❌ | Pure computation |
-| `get_discovered_slave_count() → uint16_t` | master.cpp | ✅ `s_discovered_slave_count` | |
-| `build_scan_frame(mac, buf) → size_t` | master.cpp | ❌ | |
-| `discover_slaves(mac) → uint16_t` | master.cpp | ✅ `s_discovered_slave_count` | |
-| `set_preop_and_confirm(mac, nslaves)` | master.cpp | ✅ | Uses transport globals |
-| `master_task(arg)` | master.cpp | ✅ `s_master_running` | Task entry point |
-| `start_master_task(iface, mac)` | master.cpp | ✅ `s_master_thread`, `s_master_running` | |
-| `coe_sdo_upload(mac, adp, index, subindex, ...)` | coe_sdo.cpp | ✅ `s_mbx_write_count` | CoE SDO expedited upload |
-| `coe_sdo_download(mac, adp, index, subindex, ...)` | coe_sdo.cpp | ✅ `s_mbx_write_count` | CoE SDO expedited download |
-| `host_to_le16(v) → uint16_t` | internal.hpp | ❌ | Byte-order helper (inline) |
-| `host_to_le32(v) → uint32_t` | internal.hpp | ❌ | |
-| `le16_to_host(v) → uint16_t` | internal.hpp | ❌ | |
-| `le32_to_host(v) → uint32_t` | internal.hpp | ❌ | |
-| `buildAPRD(idx, slave_pos, ado, len) → StoredDatagram` | EtherCATRetry.cpp | ❌ | Pure builder |
-| `buildAPWR(idx, slave_pos, ado, data, len) → StoredDatagram` | EtherCATRetry.cpp | ❌ | |
-| `buildFPRD(idx, cfg_addr, ado, len) → StoredDatagram` | EtherCATRetry.cpp | ❌ | |
-| `buildFPWR(idx, cfg_addr, ado, data, len) → StoredDatagram` | EtherCATRetry.cpp | ❌ | |
-| `buildBRD(idx, ado, len) → StoredDatagram` | EtherCATRetry.cpp | ❌ | |
-| `buildBWR(idx, ado, data, len) → StoredDatagram` | EtherCATRetry.cpp | ❌ | |
-| `buildLRW(idx, logical_addr, data, len) → StoredDatagram` | EtherCATRetry.cpp | ❌ | |
-| `buildLRD(idx, logical_addr, len) → StoredDatagram` | EtherCATRetry.cpp | ❌ | |
-| `buildLWR(idx, logical_addr, data, len) → StoredDatagram` | EtherCATRetry.cpp | ❌ | |
-| `sii_read_string(mac, adp, string_num, out, cap) → bool` | eeprom_sii.cpp | ✅ uses `ec_aprd` | In both `Raw::` and `raw::` namespaces |
-| `configure_mailbox_from_sii(mac, adp, ...)` | eeprom_sii.cpp | ✅ uses `ec_aprd`/`ec_apwr` | |
+**Note:** Most of these functions have been refactored to instance-based implementations in `EtherCATMaster`. The following table documents legacy free functions that may still exist for backward compatibility.
+
+| Function | File | Notes |
+|----------|------|-------|
+| `set_network_interface(NetworkInterface)` | transport.cpp | **Deprecated** — use `EtherCATMaster` instance |
+| `network_interface() → NetworkInterface&` | transport.cpp | **Deprecated** — use `EtherCATMaster` instance |
+| `send_raw_frame(iface, data, len)` | transport.cpp | **Deprecated** — use `EtherCATMaster::sendRawFrame()` |
+| `set_aprd_cb(fn)` | transport.cpp | **Deprecated** — use `EtherCATMaster` instance |
+| `set_apwr_cb(fn)` | transport.cpp | **Deprecated** — use `EtherCATMaster` instance |
+| `push_aprd_response(RxDatagram)` | transport.cpp | **Deprecated** — use `EtherCATMaster` instance |
+| `clear_aprd_responses()` | transport.cpp | **Deprecated** — use `EtherCATMaster` instance |
+| `set_src_mac(mac[6])` | transport.cpp | **Deprecated** — use `EtherCATMaster` instance |
+| `get_src_mac(out[6])` | transport.cpp | **Deprecated** — use `EtherCATMaster` instance |
+| `send_single_datagram(mac, cmd, idx, adp, ado, data, len, wkc)` | transport.cpp | **Deprecated** — use `EtherCATMaster::sendSingleDatagram()` |
+| `wait_for_response_idx(idx, timeout, out)` | transport.cpp | **Deprecated** — use `EtherCATMaster::waitForResponseIdx()` |
+| `wait_for_response_ado(ado, timeout, out)` | transport.cpp | **Deprecated** — use `EtherCATMaster` instance |
+| `ec_apwr(mac, adp, ado, data, len, timeout)` | transport.cpp | **Deprecated** — use `EtherCATMaster::writeRegister()` |
+| `ec_apwr_u16(mac, adp, ado, value, timeout)` | transport.cpp | **Deprecated** — use `EtherCATMaster` instance |
+| `ec_aprd(mac, adp, ado, data, len, timeout)` | transport.cpp | **Deprecated** — use `EtherCATMaster::readRegister()` |
+| `alloc_idx() → uint8_t` | runtime.cpp | **Deprecated** — use `EtherCATMaster::allocIdx()` |
+| `reset_idx()` | runtime.cpp | **Deprecated** — use `EtherCATMaster` instance |
+| `rx_queue() → MessageQueue*` | runtime.cpp | **Deprecated** — use `EtherCATMaster` instance |
+| `txpdo_rx_queue() → MessageQueue*` | runtime.cpp | **Deprecated** — use `EtherCATMaster` instance |
+| `ensure_rx_queue()` | runtime.cpp | **Deprecated** — use `EtherCATMaster` instance |
+| `flush_rx_queue()` | runtime.cpp | **Deprecated** — use `EtherCATMaster` instance |
+| `log_dedup_key(tag, msg) → string` | runtime.cpp | Logging helper (stateless) |
+| `log_dedup(key, tag, msg)` | runtime.cpp | Logging helper (stateless) |
+| `adp_for_slave_index(idx) → uint16_t` | runtime.cpp | Pure computation (stateless) |
+| `get_discovered_slave_count() → uint16_t` | master.cpp | **Deprecated** — use `EtherCATMaster::getDiscoveredSlaveCount()` |
+| `build_scan_frame(mac, buf) → size_t` | master.cpp | **Deprecated** — use `EtherCATMaster` instance |
+| `discover_slaves(mac) → uint16_t` | master.cpp | **Deprecated** — use `EtherCATMaster::discoverSlaves()` |
+| `set_preop_and_confirm(mac, nslaves)` | master.cpp | **Deprecated** — use `EtherCATMaster` instance |
+| `master_task(arg)` | master.cpp | **Deprecated** — use `EtherCATMaster` instance |
+| `start_master_task(iface, mac)` | master.cpp | **Deprecated** — use `EtherCATMaster::start()` |
+| `coe_sdo_upload(mac, adp, index, subindex, ...)` | coe_sdo.cpp | **Deprecated** — use `EtherCATMaster::coeSdoUpload()` |
+| `coe_sdo_download(mac, adp, index, subindex, ...)` | coe_sdo.cpp | **Deprecated** — use `EtherCATMaster::coeSdoDownload()` |
+| `host_to_le16(v) → uint16_t` | internal.hpp | Byte-order helper (inline, stateless) |
+| `host_to_le32(v) → uint32_t` | internal.hpp | Byte-order helper (inline, stateless) |
+| `le16_to_host(v) → uint16_t` | internal.hpp | Byte-order helper (inline, stateless) |
+| `le32_to_host(v) → uint32_t` | internal.hpp | Byte-order helper (inline, stateless) |
+| `buildAPRD(idx, slave_pos, ado, len) → StoredDatagram` | EtherCATRetry.cpp | Pure builder (stateless) |
+| `buildAPWR(idx, slave_pos, ado, data, len) → StoredDatagram` | EtherCATRetry.cpp | Pure builder (stateless) |
+| `buildFPRD(idx, cfg_addr, ado, len) → StoredDatagram` | EtherCATRetry.cpp | Pure builder (stateless) |
+| `buildFPWR(idx, cfg_addr, ado, data, len) → StoredDatagram` | EtherCATRetry.cpp | Pure builder (stateless) |
+| `buildBRD(idx, ado, len) → StoredDatagram` | EtherCATRetry.cpp | Pure builder (stateless) |
+| `buildBWR(idx, ado, data, len) → StoredDatagram` | EtherCATRetry.cpp | Pure builder (stateless) |
+| `buildLRW(idx, logical_addr, data, len) → StoredDatagram` | EtherCATRetry.cpp | Pure builder (stateless) |
+| `buildLRD(idx, logical_addr, len) → StoredDatagram` | EtherCATRetry.cpp | Pure builder (stateless) |
+| `buildLWR(idx, logical_addr, data, len) → StoredDatagram` | EtherCATRetry.cpp | Pure builder (stateless) |
+| `sii_read_string(mac, adp, string_num, out, cap) → bool` | eeprom_sii.cpp | **Deprecated** — use `EtherCATMaster::siiReadString()` |
+| `configure_mailbox_from_sii(mac, adp, ...)` | eeprom_sii.cpp | **Deprecated** — use `EtherCATMaster` instance |
 
 ### 3.2 `EtherCAT::PDO::` namespace
 
-| Function | File | Uses global state? | Notes |
-|----------|------|-------------------|-------|
-| `pdo_init()` | sync_manager.cpp | ✅ `g_pdo_initialized`, `g_slave_configs`, `g_pdo_mapping`, `g_pdo_stats` | |
-| `pdo_deinit()` | sync_manager.cpp | ✅ clears globals | |
-| `pdo_get_mapping() → PDOMapping*` | sync_manager.cpp | ✅ `&g_pdo_mapping` | Returns pointer to global |
-| `pdo_get_slave_configs() → SlaveConfig*` | sync_manager.cpp | ✅ `g_slave_configs` | |
-| `pdo_configure_slave_sms(mac, slave_index)` | sync_manager.cpp | ✅ `g_slave_configs` | |
-| `pdo_configure_all_slave_sms(mac, count)` | sync_manager.cpp | ✅ | |
-| `pdo_finalize_mapping(slave_index)` | sync_manager.cpp | ✅ `g_slave_configs`, `g_pdo_mapping` | |
-| `pdo_get_stats() → PDOStats` | sync_manager.cpp | ✅ `g_pdo_stats` | |
-| `pdo_reset_stats()` | sync_manager.cpp | ✅ | |
-| `pdo_send_rxpdo(mac, mapping, entry_index)` | pdo_api.cpp | ✅ dispatches by address mode | |
-| `pdo_receive_txpdo(mac, mapping, entry_index)` | pdo_api.cpp | ✅ | |
-| `pdo_exchange_all(mac, mapping)` | pdo_api.cpp | ✅ | |
-| `pdo_exchange_lrw(mac, mapping)` | pdo_logical.cpp | ✅ `s_lrw_stats` | LRW-based exchange |
-| `pdo_get_lrw_stats() → LRWStats` | pdo_logical.cpp | ✅ | |
-| `pdo_set_separate_mode(bool)` | pdo_logical.cpp | ✅ `s_use_separate_commands` | |
-| `pdo_get_separate_mode() → bool` | pdo_logical.cpp | ✅ | |
-| `pdo_exchange_separate(mac, mapping)` | pdo_logical.cpp | ✅ `s_separate_stats` | |
-| `pdo_get_separate_stats()` | pdo_logical.cpp | ✅ | |
-| `pdo_set_physical_mode(bool)` | pdo_logical.cpp | ✅ | |
-| `pdo_get_physical_mode() → bool` | pdo_logical.cpp | ✅ | |
-| `pdo_exchange_physical(mac, mapping)` | pdo_transfer.cpp | ✅ | Position-based exchange |
-| `pdo_get_physical_stats()` | pdo_transfer.cpp | ✅ | |
-| `send_rxpdo_position(mac, entry)` | pdo_transfer.cpp | ✅ `s_rxpdo_debug_count` | static, internal |
-| `recv_txpdo_position(mac, entry)` | pdo_transfer.cpp | ✅ `s_txpdo_debug_count` | static, internal |
-| `send_rxpdo_configured(mac, entry)` | pdo_transfer.cpp | ✅ | static, internal |
-| `recv_txpdo_configured(mac, entry)` | pdo_transfer.cpp | ✅ | static, internal |
-| `send_rxpdo_broadcast(mac, entry)` | pdo_transfer.cpp | ✅ | static, internal |
-| `recv_txpdo_broadcast(mac, entry)` | pdo_transfer.cpp | ✅ | static, internal |
+**Note:** These functions have been refactored to instance-based implementations in `PDOManager`. The following table documents legacy free functions that may still exist for backward compatibility.
+
+| Function | File | Notes |
+|----------|------|-------|
+| `pdo_init()` | sync_manager.cpp | **Deprecated** — use `PDOManager::init()` |
+| `pdo_deinit()` | sync_manager.cpp | **Deprecated** — use `PDOManager::deinit()` |
+| `pdo_get_mapping() → PDOMapping*` | sync_manager.cpp | **Deprecated** — use `PDOManager::getMapping()` |
+| `pdo_get_slave_configs() → SlaveConfig*` | sync_manager.cpp | **Deprecated** — use `PDOManager::getSlaveConfigs()` |
+| `pdo_configure_slave_sms(mac, slave_index)` | sync_manager.cpp | **Deprecated** — use `PDOManager::configureSlaveSync()` |
+| `pdo_configure_all_slave_sms(mac, count)` | sync_manager.cpp | **Deprecated** — use `PDOManager::configureAllSlaveSync()` |
+| `pdo_finalize_mapping(slave_index)` | sync_manager.cpp | **Deprecated** — use `PDOManager` instance |
+| `pdo_get_stats() → PDOStats` | sync_manager.cpp | **Deprecated** — use `PDOManager` instance |
+| `pdo_reset_stats()` | sync_manager.cpp | **Deprecated** — use `PDOManager` instance |
+| `pdo_send_rxpdo(mac, mapping, entry_index)` | pdo_api.cpp | **Deprecated** — use `PDOManager::sendRxPDO()` |
+| `pdo_receive_txpdo(mac, mapping, entry_index)` | pdo_api.cpp | **Deprecated** — use `PDOManager::receiveTxPDO()` |
+| `pdo_exchange_all(mac, mapping)` | pdo_api.cpp | **Deprecated** — use `PDOManager::exchangeAll()` |
+| `pdo_exchange_lrw(mac, mapping)` | pdo_logical.cpp | **Deprecated** — use `PDOManager::exchangeLRW()` |
+| `pdo_get_lrw_stats() → LRWStats` | pdo_logical.cpp | **Deprecated** — use `PDOManager` instance |
+| `pdo_set_separate_mode(bool)` | pdo_logical.cpp | **Deprecated** — use `PDOManager` instance |
+| `pdo_get_separate_mode() → bool` | pdo_logical.cpp | **Deprecated** — use `PDOManager` instance |
+| `pdo_exchange_separate(mac, mapping)` | pdo_logical.cpp | **Deprecated** — use `PDOManager::exchangeSeparate()` |
+| `pdo_get_separate_stats()` | pdo_logical.cpp | **Deprecated** — use `PDOManager` instance |
+| `pdo_set_physical_mode(bool)` | pdo_logical.cpp | **Deprecated** — use `PDOManager` instance |
+| `pdo_get_physical_mode() → bool` | pdo_logical.cpp | **Deprecated** — use `PDOManager` instance |
+| `pdo_exchange_physical(mac, mapping)` | pdo_transfer.cpp | **Deprecated** — use `PDOManager::exchangePhysical()` |
+| `pdo_get_physical_stats()` | pdo_transfer.cpp | **Deprecated** — use `PDOManager` instance |
+| `send_rxpdo_position(mac, entry)` | pdo_transfer.cpp | **Deprecated** — internal helper |
+| `recv_txpdo_position(mac, entry)` | pdo_transfer.cpp | **Deprecated** — internal helper |
+| `send_rxpdo_configured(mac, entry)` | pdo_transfer.cpp | **Deprecated** — internal helper |
+| `recv_txpdo_configured(mac, entry)` | pdo_transfer.cpp | **Deprecated** — internal helper |
+| `send_rxpdo_broadcast(mac, entry)` | pdo_transfer.cpp | **Deprecated** — internal helper |
+| `recv_txpdo_broadcast(mac, entry)` | pdo_transfer.cpp | **Deprecated** — internal helper |
 
 ### 3.3 `EtherCAT::sdo::` namespace
 
-| Function | File | Uses global state? | Notes |
-|----------|------|-------------------|-------|
-| `sdo_init()` | sdo_async.cpp | ✅ `s_queue`, `s_worker_thread`, `s_shutdown_requested` | Starts worker thread |
-| `sdo_deinit()` | sdo_async.cpp | ✅ | Stops worker thread |
-| `sdo_configure_slave_mailbox(slave, wr_addr, wr_len, rd_addr, rd_len)` | sdo_async.cpp | ✅ `s_slave_mbx[]` | |
-| `sdo_configure_network(slave_count)` | sdo_async.cpp | ✅ | |
-| `sdo_configure_network(mac, slave_count)` | sdo_async.cpp | ✅ | Overload with auto-config |
-| `sdo_queue_request(req) → uint32_t` | sdo_async.cpp | ✅ `s_queue`, `s_next_request_id` | |
-| `sdo_is_complete(id) → bool` | sdo_async.cpp | ✅ `s_completed_responses` | |
-| `sdo_get_response(id) → SDOResponse` | sdo_async.cpp | ✅ | |
-| `sdo_cancel_request(id)` | sdo_async.cpp | ✅ | |
-| `sdo_pending_count() → size_t` | sdo_async.cpp | ✅ | |
-| `sdo_read_sync(mac, slave, idx, sub, buf, len, timeout) → SDOResponse` | EtherCATSDO.hpp | ✅ via `coe_sdo_upload` | Inline |
-| `sdo_write_sync(mac, slave, idx, sub, data, len, timeout) → SDOResponse` | EtherCATSDO.hpp | ✅ via `coe_sdo_download` | Inline |
-| `sdo_read_u8/u16/u32/i32(...)` | EtherCATSDO.hpp | ✅ | Inline type-safe helpers |
-| `sdo_write_u8/u16/u32/i32(...)` | EtherCATSDO.hpp | ✅ | |
-| `sdo_set_emergency_callback(cb)` | EtherCATSDO.hpp | ✅ | |
-| `sdo_get_last_emergency()` | EtherCATSDO.hpp | ✅ | |
-| `sdo_abort_code_str(code) → const char*` | sdo_async.cpp | ❌ | Pure lookup |
-| `sdo_processing_task()` | sdo_async.cpp | ✅ | Internal worker loop |
-| `execute_sdo_request(req) → SDOResponse` | sdo_async.cpp | ✅ | Internal |
+**Note:** These functions have been refactored to instance-based implementations in `SDOManager`. The following table documents legacy free functions that may still exist for backward compatibility.
+
+| Function | File | Notes |
+|----------|------|-------|
+| `sdo_init()` | sdo_async.cpp | **Deprecated** — use `SDOManager::init()` |
+| `sdo_deinit()` | sdo_async.cpp | **Deprecated** — use `SDOManager::deinit()` |
+| `sdo_configure_slave_mailbox(slave, wr_addr, wr_len, rd_addr, rd_len)` | sdo_async.cpp | **Deprecated** — use `SDOManager::configureSlaveMailbox()` |
+| `sdo_configure_network(slave_count)` | sdo_async.cpp | **Deprecated** — use `SDOManager::configureNetwork()` |
+| `sdo_configure_network(mac, slave_count)` | sdo_async.cpp | **Deprecated** — use `SDOManager::configureNetwork()` |
+| `sdo_queue_request(req) → uint32_t` | sdo_async.cpp | **Deprecated** — use `SDOManager::queueRequest()` |
+| `sdo_is_complete(id) → bool` | sdo_async.cpp | **Deprecated** — use `SDOManager::isComplete()` |
+| `sdo_get_response(id) → SDOResponse` | sdo_async.cpp | **Deprecated** — use `SDOManager::getResponse()` |
+| `sdo_cancel_request(id)` | sdo_async.cpp | **Deprecated** — use `SDOManager` instance |
+| `sdo_pending_count() → size_t` | sdo_async.cpp | **Deprecated** — use `SDOManager::pendingCount()` |
+| `sdo_read_sync(mac, slave, idx, sub, buf, len, timeout) → SDOResponse` | EtherCATSDO.hpp | **Deprecated** — use `SDOManager::readSync()` |
+| `sdo_write_sync(mac, slave, idx, sub, data, len, timeout) → SDOResponse` | EtherCATSDO.hpp | **Deprecated** — use `SDOManager::writeSync()` |
+| `sdo_read_u8/u16/u32/i32(...)` | EtherCATSDO.hpp | **Deprecated** — use `SDOManager` instance |
+| `sdo_write_u8/u16/u32/i32(...)` | EtherCATSDO.hpp | **Deprecated** — use `SDOManager` instance |
+| `sdo_set_emergency_callback(cb)` | EtherCATSDO.hpp | **Deprecated** — use `SDOManager` instance |
+| `sdo_get_last_emergency()` | EtherCATSDO.hpp | **Deprecated** — use `SDOManager` instance |
+| `sdo_abort_code_str(code) → const char*` | sdo_async.cpp | Pure lookup (stateless) |
+| `sdo_processing_task()` | sdo_async.cpp | **Deprecated** — internal worker loop |
+| `execute_sdo_request(req) → SDOResponse` | sdo_async.cpp | **Deprecated** — internal |
 
 ### 3.4 `EtherCAT::DC::` namespace
 
-| Function | File | Uses global state? | Notes |
-|----------|------|-------------------|-------|
-| `dc_init(config)` | dc_init.cpp | ✅ `g_dc_ctx`, `g_dc_timer`, `g_dc_mutex` | ESP32-specific |
-| `dc_start()` | dc_init.cpp | ✅ | |
-| `dc_stop()` | dc_init.cpp | ✅ | |
-| `dc_get_state() → DCState` | dc_init.cpp | ✅ | |
-| `dc_get_stats() → DCLoopStats` | dc_init.cpp | ✅ | |
-| `dc_get_context() → DCContext*` | dc_init.cpp | ✅ `&g_dc_ctx` | |
-| `dc_force_sync()` | dc_init.cpp | ✅ | |
-| `dc_set_pdo_enabled(bool)` | dc_init.cpp | ✅ | |
-| `dc_is_pdo_enabled() → bool` | dc_init.cpp | ✅ | |
-| `dc_slave_supported(mac, adp) → bool` | dc_sync.cpp | ✅ | Uses transport |
-| `dc_get_slave_offset(mac, adp) → int64_t` | dc_sync.cpp | ✅ | |
-| `dc_read_sync_config(mac, adp, ...)` | dc_sync.cpp | ✅ | |
-| `dc_reconfigure_sync(mac, adp, ...)` | dc_sync.cpp | ✅ | |
-| `dc_read_slave_capabilities(mac, adp)` | dc_sync.cpp | ✅ | Internal |
-| `dc_calc_propagation_delay(mac, adp)` | dc_sync.cpp | ✅ | Internal |
-| `dc_write_system_time_offset(mac, adp, offset)` | dc_sync.cpp | ✅ | |
-| `dc_update_sync_start_time(mac, adp)` | dc_sync.cpp | ✅ | |
-| `dc_configure_sync_signals(mac, adp, ...)` | dc_sync.cpp | ✅ | |
-| `dc_send_sync_frame(mac)` | dc_sync.cpp | ✅ | |
-| `dc_timer_callback(...)` | dc_realtime.cpp | ✅ | ISR callback |
-| `dc_realtime_task(arg)` | dc_realtime.cpp | ✅ `g_dc_sync_pending` | FreeRTOS task |
-| `dc_get_master_time_with_epoch()` | EtherCATDCConsistency.cpp | ✅ | |
-| `dc_format_time(ns) → string` | EtherCATDCConsistency.cpp | ❌ | |
-| `dc_read_slave_state(mac, adp) → SlaveDCState` | EtherCATDCConsistency.cpp | ✅ | |
-| `dc_run_consistency_checks(mac, count) → DCConsistencyReport` | EtherCATDCConsistency.cpp | ✅ | |
-| `dc_check_sync0_start_time(...)` | EtherCATDCConsistency.cpp | ✅ | |
-| `dc_check_propagation_delay(...)` | EtherCATDCConsistency.cpp | ✅ | |
-| `dc_check_system_time_offset(...)` | EtherCATDCConsistency.cpp | ✅ | |
-| `dc_check_sync_cycle_times(...)` | EtherCATDCConsistency.cpp | ✅ | |
-| `dc_log_slave_state(state)` | EtherCATDCConsistency.cpp | ❌ | Logging only |
-| **Weak C symbols** | dc_init.cpp | | |
-| `ecdc_get_master_time_ns() → uint64_t` | dc_init.cpp | ✅ | Can be overridden |
-| `ecdc_init_time_source()` | dc_init.cpp / dc_time_source.cpp | ✅ | |
-| `ecdc_deinit_time_source()` | dc_init.cpp / dc_time_source.cpp | ✅ | |
+**Note:** These functions have been refactored to instance-based implementations in `DCManager`/`EtherCATDC`. The following table documents legacy free functions that may still exist for backward compatibility.
+
+| Function | File | Notes |
+|----------|------|-------|
+| `dc_init(config)` | dc_init.cpp | **Deprecated** — use `DCManager::init()` |
+| `dc_start()` | dc_init.cpp | **Deprecated** — use `DCManager::start()` |
+| `dc_stop()` | dc_init.cpp | **Deprecated** — use `DCManager::stop()` |
+| `dc_get_state() → DCState` | dc_init.cpp | **Deprecated** — use `DCManager::getState()` |
+| `dc_get_stats() → DCLoopStats` | dc_init.cpp | **Deprecated** — use `DCManager::getStats()` |
+| `dc_get_context() → DCContext*` | dc_init.cpp | **Deprecated** — use `DCManager::getContext()` |
+| `dc_force_sync()` | dc_init.cpp | **Deprecated** — use `DCManager::forceSync()` |
+| `dc_set_pdo_enabled(bool)` | dc_init.cpp | **Deprecated** — use `DCManager` instance |
+| `dc_is_pdo_enabled() → bool` | dc_init.cpp | **Deprecated** — use `DCManager` instance |
+| `dc_slave_supported(mac, adp) → bool` | dc_sync.cpp | **Deprecated** — use `EtherCATDC` instance |
+| `dc_get_slave_offset(mac, adp) → int64_t` | dc_sync.cpp | **Deprecated** — use `EtherCATDC` instance |
+| `dc_read_sync_config(mac, adp, ...)` | dc_sync.cpp | **Deprecated** — use `EtherCATDC` instance |
+| `dc_reconfigure_sync(mac, adp, ...)` | dc_sync.cpp | **Deprecated** — use `EtherCATDC` instance |
+| `dc_read_slave_capabilities(mac, adp)` | dc_sync.cpp | **Deprecated** — internal |
+| `dc_calc_propagation_delay(mac, adp)` | dc_sync.cpp | **Deprecated** — internal |
+| `dc_write_system_time_offset(mac, adp, offset)` | dc_sync.cpp | **Deprecated** — use `EtherCATDC` instance |
+| `dc_update_sync_start_time(mac, adp)` | dc_sync.cpp | **Deprecated** — use `EtherCATDC` instance |
+| `dc_configure_sync_signals(mac, adp, ...)` | dc_sync.cpp | **Deprecated** — use `EtherCATDC` instance |
+| `dc_send_sync_frame(mac)` | dc_sync.cpp | **Deprecated** — use `EtherCATDC` instance |
+| `dc_timer_callback(...)` | dc_realtime.cpp | **Deprecated** — internal ISR callback |
+| `dc_realtime_task(arg)` | dc_realtime.cpp | **Deprecated** — internal FreeRTOS task |
+| `dc_get_master_time_with_epoch()` | EtherCATDCConsistency.cpp | **Deprecated** — use `EtherCATDC` instance |
+| `dc_format_time(ns) → string` | EtherCATDCConsistency.cpp | Pure formatting (stateless) |
+| `dc_read_slave_state(mac, adp) → SlaveDCState` | EtherCATDCConsistency.cpp | **Deprecated** — use `EtherCATDC` instance |
+| `dc_run_consistency_checks(mac, count) → DCConsistencyReport` | EtherCATDCConsistency.cpp | **Deprecated** — use `EtherCATDC` instance |
+| `dc_check_sync0_start_time(...)` | EtherCATDCConsistency.cpp | **Deprecated** — use `EtherCATDC` instance |
+| `dc_check_propagation_delay(...)` | EtherCATDCConsistency.cpp | **Deprecated** — use `EtherCATDC` instance |
+| `dc_check_system_time_offset(...)` | EtherCATDCConsistency.cpp | **Deprecated** — use `EtherCATDC` instance |
+| `dc_check_sync_cycle_times(...)` | EtherCATDCConsistency.cpp | **Deprecated** — use `EtherCATDC` instance |
+| `dc_log_slave_state(state)` | EtherCATDCConsistency.cpp | Logging only (stateless) |
+| **Weak C symbols** | dc_init.cpp | Platform time source overrides |
+| `ecdc_get_master_time_ns() → uint64_t` | dc_init.cpp | Platform time source (can be overridden) |
+| `ecdc_init_time_source()` | dc_init.cpp / dc_time_source.cpp | Platform time source init |
+| `ecdc_deinit_time_source()` | dc_init.cpp / dc_time_source.cpp | Platform time source deinit |
 
 ### 3.5 `EtherCAT::FoE::` namespace
 
-| Function | File | Uses global state? | Notes |
-|----------|------|-------------------|-------|
-| `foe_init()` | FoE.cpp | ✅ `g_initialized`, `g_foe_thread`, `g_running`, `g_stats`, `g_request_queue` | Mostly stubbed |
-| `foe_deinit()` | FoE.cpp | ✅ | |
-| `foe_upload_file(...)` | FoE.cpp | ✅ | Stub |
-| `foe_download_file(...)` | FoE.cpp | ✅ | Stub |
-| `foe_upload_memory(...)` | FoE.cpp | ✅ | Stub |
-| `foe_download_memory(...)` | FoE.cpp | ✅ | Stub |
-| `foe_get_status(handle)` | FoE.cpp | ✅ | |
-| `foe_get_stats()` | FoE.cpp | ✅ | |
+**Note:** These functions have been refactored to instance-based implementations in `FoEManager`. The following table documents legacy free functions that may still exist for backward compatibility.
+
+| Function | File | Notes |
+|----------|------|-------|
+| `foe_init()` | FoE.cpp | **Deprecated** — use `FoEManager::init()` |
+| `foe_deinit()` | FoE.cpp | **Deprecated** — use `FoEManager::deinit()` |
+| `foe_upload_file(...)` | FoE.cpp | **Deprecated** — use `FoEManager::uploadFile()` |
+| `foe_download_file(...)` | FoE.cpp | **Deprecated** — use `FoEManager::downloadFile()` |
+| `foe_upload_memory(...)` | FoE.cpp | **Deprecated** — use `FoEManager::uploadMemory()` |
+| `foe_download_memory(...)` | FoE.cpp | **Deprecated** — use `FoEManager::downloadMemory()` |
+| `foe_get_status(handle)` | FoE.cpp | **Deprecated** — use `FoEManager` instance |
+| `foe_get_stats()` | FoE.cpp | **Deprecated** — use `FoEManager::getStats()` |
 
 ### 3.6 `EtherCAT::VoE::` namespace
 
-| Function | File | Uses global state? | Notes |
-|----------|------|-------------------|-------|
-| `voe_init()` | VoE.cpp | ❌ | All stubs returning false |
-| `voe_deinit()` | VoE.cpp | ❌ | |
-| `voe_transact(...)` | VoE.cpp | ❌ | |
-| `voe_send(...)` | VoE.cpp | ❌ | |
-| `voe_queue_request(...)` | VoE.cpp | ❌ | |
-| `voe_register_handler(...)` | VoE.cpp | ❌ | |
-| `voe_get_stats()` | VoE.cpp | ❌ | |
+**Note:** These functions are stubs and have not been fully implemented.
+
+| Function | File | Notes |
+|----------|------|-------|
+| `voe_init()` | VoE.cpp | Stub (not implemented) |
+| `voe_deinit()` | VoE.cpp | Stub (not implemented) |
+| `voe_transact(...)` | VoE.cpp | Stub (not implemented) |
+| `voe_send(...)` | VoE.cpp | Stub (not implemented) |
+| `voe_queue_request(...)` | VoE.cpp | Stub (not implemented) |
+| `voe_register_handler(...)` | VoE.cpp | Stub (not implemented) |
+| `voe_get_stats()` | VoE.cpp | Stub (not implemented) |
 
 ### 3.7 `EtherCAT::EoE::` namespace
 
-| Function | File | Uses global state? | Notes |
-|----------|------|-------------------|-------|
-| `eoe_init()` | EoE.cpp | ❌ | All stubs |
-| `eoe_deinit()` | EoE.cpp | ❌ | |
-| `eoe_configure_slave(...)` | EoE.cpp | ❌ | |
-| `eoe_set_ip(...)` | EoE.cpp | ❌ | |
-| `eoe_send_frame(...)` | EoE.cpp | ❌ | |
-| `eoe_is_link_up(...)` | EoE.cpp | ❌ | |
-| `eoe_register_frame_callback(...)` | EoE.cpp | ❌ | |
-| `eoe_get_stats()` | EoE.cpp | ❌ | |
+**Note:** These functions are stubs and have not been fully implemented.
+
+| Function | File | Notes |
+|----------|------|-------|
+| `eoe_init()` | EoE.cpp | Stub (not implemented) |
+| `eoe_deinit()` | EoE.cpp | Stub (not implemented) |
+| `eoe_configure_slave(...)` | EoE.cpp | Stub (not implemented) |
+| `eoe_set_ip(...)` | EoE.cpp | Stub (not implemented) |
+| `eoe_send_frame(...)` | EoE.cpp | Stub (not implemented) |
+| `eoe_is_link_up(...)` | EoE.cpp | Stub (not implemented) |
+| `eoe_register_frame_callback(...)` | EoE.cpp | Stub (not implemented) |
+| `eoe_get_stats()` | EoE.cpp | Stub (not implemented) |
 
 ### 3.8 `EtherCAT::Verify::` namespace
 
-| Function | File | Uses global state? | Notes |
-|----------|------|-------------------|-------|
-| `set_config(config)` | EtherCATWriteVerify.cpp | ✅ `g_config` | |
-| `get_config() → WriteVerifyConfig&` | EtherCATWriteVerify.cpp | ✅ | |
-| `set_enabled(bool)` | EtherCATWriteVerify.cpp | ✅ `g_enabled` | |
-| `is_enabled() → bool` | EtherCATWriteVerify.cpp | ✅ | |
-| `get_stats() → WriteVerifyStats&` | EtherCATWriteVerify.cpp | ✅ `g_stats` | |
-| `reset_stats()` | EtherCATWriteVerify.cpp | ✅ | |
-| `log_stats()` | EtherCATWriteVerify.cpp | ✅ | |
-| `ec_apwr_verify(mac, adp, ado, data, len, timeout)` | EtherCATWriteVerify.cpp | ✅ `g_config`, `g_enabled`, `g_stats` | |
-| `ec_apwr_verify_u16(...)` | EtherCATWriteVerify.cpp | ✅ | Wrapper |
-| `ec_apwr_verify_u32(...)` | EtherCATWriteVerify.cpp | ✅ | Wrapper |
-| `ec_apwr_verify_u64(...)` | EtherCATWriteVerify.cpp | ✅ | Wrapper |
-| `ec_bwr_verify(...)` | EtherCATWriteVerify.cpp | ❌ | Stub |
+**Note:** These functions have been refactored to instance-based implementations in `WriteVerifier`. The following table documents legacy free functions that may still exist for backward compatibility.
+
+| Function | File | Notes |
+|----------|------|-------|
+| `set_config(config)` | EtherCATWriteVerify.cpp | **Deprecated** — use `WriteVerifier::setConfig()` |
+| `get_config() → WriteVerifyConfig&` | EtherCATWriteVerify.cpp | **Deprecated** — use `WriteVerifier::config()` |
+| `set_enabled(bool)` | EtherCATWriteVerify.cpp | **Deprecated** — use `WriteVerifier::setEnabled()` |
+| `is_enabled() → bool` | EtherCATWriteVerify.cpp | **Deprecated** — use `WriteVerifier::isEnabled()` |
+| `get_stats() → WriteVerifyStats&` | EtherCATWriteVerify.cpp | **Deprecated** — use `WriteVerifier::stats()` |
+| `reset_stats()` | EtherCATWriteVerify.cpp | **Deprecated** — use `WriteVerifier::resetStats()` |
+| `log_stats()` | EtherCATWriteVerify.cpp | **Deprecated** — use `WriteVerifier::logStats()` |
+| `ec_apwr_verify(mac, adp, ado, data, len, timeout)` | EtherCATWriteVerify.cpp | **Deprecated** — use `WriteVerifier::apwrVerify()` |
+| `ec_apwr_verify_u16(...)` | EtherCATWriteVerify.cpp | **Deprecated** — use `WriteVerifier::apwrVerifyU16()` |
+| `ec_apwr_verify_u32(...)` | EtherCATWriteVerify.cpp | **Deprecated** — use `WriteVerifier::apwrVerifyU32()` |
+| `ec_apwr_verify_u64(...)` | EtherCATWriteVerify.cpp | **Deprecated** — use `WriteVerifier::apwrVerifyU64()` |
+| `ec_bwr_verify(...)` | EtherCATWriteVerify.cpp | **Deprecated** — use `WriteVerifier::bwrVerify()` |
 
 ### 3.9 Fault Detection free functions
 
-| Function | File | Uses global state? |
-|----------|------|-------------------|
-| `fault_init(count)` | EtherCATFaultDetection.cpp | ✅ `g_slave_faults`, `g_slave_count`, `g_initialized` |
-| `fault_shutdown()` | EtherCATFaultDetection.cpp | ✅ |
-| `fault_poll(mac, slave_idx)` | EtherCATFaultDetection.cpp | ✅ |
-| `fault_poll_all(mac, count)` | EtherCATFaultDetection.cpp | ✅ |
-| `fault_get_state(slave_idx) → SlaveFaultState` | EtherCATFaultDetection.cpp | ✅ |
-| `fault_any_active() → bool` | EtherCATFaultDetection.cpp | ✅ |
-| `fault_clear(slave_idx)` | EtherCATFaultDetection.cpp | ✅ |
-| `fault_set_callback(cb)` | EtherCATFaultDetection.cpp | ✅ `g_fault_callback` |
-| `fault_diagnose(mac, slave_idx) → string` | EtherCATFaultDetection.cpp | ✅ |
-| `fault_diagnose_no_sync(slave_idx) → string` | EtherCATFaultDetection.cpp | ✅ |
-| `getALStatusCodeName(code) → const char*` | EtherCATFaultDetection.cpp | ❌ |
-| `getCiA402ErrorCodeName(code) → const char*` | EtherCATFaultDetection.cpp | ❌ |
-| `al_status_get_state_name(state) → const char*` | EtherCATFaultDetection.cpp | ❌ |
+**Note:** These functions have been refactored to instance-based implementations in `FaultDetector`. The following table documents legacy free functions that may still exist for backward compatibility.
+
+| Function | File | Notes |
+|----------|------|-------|
+| `fault_init(count)` | EtherCATFaultDetection.cpp | **Deprecated** — use `FaultDetector::init()` |
+| `fault_shutdown()` | EtherCATFaultDetection.cpp | **Deprecated** — use `FaultDetector::shutdown()` |
+| `fault_poll(mac, slave_idx)` | EtherCATFaultDetection.cpp | **Deprecated** — use `FaultDetector::poll()` |
+| `fault_poll_all(mac, count)` | EtherCATFaultDetection.cpp | **Deprecated** — use `FaultDetector::pollAll()` |
+| `fault_get_state(slave_idx) → SlaveFaultState` | EtherCATFaultDetection.cpp | **Deprecated** — use `FaultDetector::getState()` |
+| `fault_any_active() → bool` | EtherCATFaultDetection.cpp | **Deprecated** — use `FaultDetector::anyActive()` |
+| `fault_clear(slave_idx)` | EtherCATFaultDetection.cpp | **Deprecated** — use `FaultDetector::clear()` |
+| `fault_set_callback(cb)` | EtherCATFaultDetection.cpp | **Deprecated** — use `FaultDetector::setCallback()` |
+| `fault_diagnose(mac, slave_idx) → string` | EtherCATFaultDetection.cpp | **Deprecated** — use `FaultDetector::diagnose()` |
+| `fault_diagnose_no_sync(slave_idx) → string` | EtherCATFaultDetection.cpp | **Deprecated** — use `FaultDetector::diagnoseNoSync()` |
+| `getALStatusCodeName(code) → const char*` | EtherCATFaultDetection.cpp | Pure lookup (stateless) |
+| `getCiA402ErrorCodeName(code) → const char*` | EtherCATFaultDetection.cpp | Pure lookup (stateless) |
+| `al_status_get_state_name(state) → const char*` | EtherCATFaultDetection.cpp | Pure lookup (stateless) |
 
 ### 3.10 Top-level `EtherCAT::` namespace free functions
 
-| Function | File | Uses global state? | Notes |
-|----------|------|-------------------|-------|
-| `HandleRxFrame(data, len)` | EtherCATRaw.hpp / master.cpp | ✅ | Parses incoming Ethernet frame |
-| `StartMasterTask(...)` | master.cpp / host_shims.cpp | ✅ | Legacy startup shim |
-| `StartMasterTask(NetworkInterface, mac)` | master.cpp | ✅ | Generic overload |
-| `requestSlaveApplicationLayerState(slave_index, state_code)` | host_stubs.cpp | ✅ | Host-only minimal stub |
-| `transitionSlaveToPreOperational(slave_index)` | host_stubs.cpp | ✅ | Host-only minimal stub |
-| `readSlaveApplicationLayerState(slave_index, state_code)` | host_stubs.cpp | ✅ | Host-only minimal stub |
-| `ConfigureWatchdogs(mac, adp, ...)` | host_stubs.cpp | ✅ | |
-| `DisableWatchdogs(mac, adp)` | host_stubs.cpp | ✅ | |
-| `ReadWatchdogStatus(mac, adp)` | host_stubs.cpp | ✅ | |
+| Function | File | Notes |
+|----------|------|-------|
+| `HandleRxFrame(data, len)` | EtherCATRaw.hpp / master.cpp | **Deprecated** — use `EtherCATMaster::handleRxFrame()` |
+| `StartMasterTask(...)` | master.cpp / host_shims.cpp | **Deprecated** — use `EtherCATMaster::start()` |
+| `StartMasterTask(NetworkInterface, mac)` | master.cpp | **Deprecated** — use `EtherCATMaster::start()` |
+| `requestSlaveApplicationLayerState(slave_index, state_code)` | host_stubs.cpp | Host-only minimal stub |
+| `transitionSlaveToPreOperational(slave_index)` | host_stubs.cpp | Host-only minimal stub |
+| `readSlaveApplicationLayerState(slave_index, state_code)` | host_stubs.cpp | Host-only minimal stub |
+| `ConfigureWatchdogs(mac, adp, ...)` | host_stubs.cpp | Host-only minimal stub |
+| `DisableWatchdogs(mac, adp)` | host_stubs.cpp | Host-only minimal stub |
+| `ReadWatchdogStatus(mac, adp)` | host_stubs.cpp | Host-only minimal stub |
 
 ### 3.11 Packet Router free functions
 
-| Function | File | Uses global state? |
-|----------|------|-------------------|
-| `getPacketRouter() → ConditionalPacketRouter&` | ConditionalPacketRouter.cpp | ✅ `g_packet_router` |
-| `initPacketRouter() → bool` | ConditionalPacketRouter.cpp | ✅ |
-| `shutdownPacketRouter()` | ConditionalPacketRouter.cpp | ✅ |
+**Note:** These functions have been refactored to instance-based implementations. The global packet router has been replaced by `TransactionRouter`.
+
+| Function | File | Notes |
+|----------|------|-------|
+| `getPacketRouter() → ConditionalPacketRouter&` | ConditionalPacketRouter.cpp | **Deprecated** — use `EtherCATMaster::getPacketRouter()` |
+| `initPacketRouter() → bool` | ConditionalPacketRouter.cpp | **Deprecated** — use `EtherCATMaster` instance |
+| `shutdownPacketRouter()` | ConditionalPacketRouter.cpp | **Deprecated** — use `EtherCATMaster` instance |
 
 ### 3.12 Platform free functions (`EtherCAT::Platform::`)
 
-| Function | File | Uses global state? |
-|----------|------|-------------------|
-| `file_exists(path) → bool` | platform_esp32.cpp | ❌ |
-| `file_stat(path, info) → bool` | platform_esp32.cpp | ❌ |
-| `file_delete(path) → bool` | platform_esp32.cpp | ❌ |
-| `file_rename(old, new) → bool` | platform_esp32.cpp | ❌ |
-| `dir_create(path) → bool` | platform_esp32.cpp | ❌ |
-| `fs_init() → bool` | platform_esp32.cpp | ✅ `g_fs_initialized` |
+| Function | File | Notes |
+|----------|------|-------|
+| `file_exists(path) → bool` | platform_esp32.cpp | Platform filesystem API (stateless) |
+| `file_stat(path, info) → bool` | platform_esp32.cpp | Platform filesystem API (stateless) |
+| `file_delete(path) → bool` | platform_esp32.cpp | Platform filesystem API (stateless) |
+| `file_rename(old, new) → bool` | platform_esp32.cpp | Platform filesystem API (stateless) |
+| `dir_create(path) → bool` | platform_esp32.cpp | Platform filesystem API (stateless) |
+| `fs_init() → bool` | platform_esp32.cpp | Uses `g_fs_initialized` (platform-specific) |
 
 ---
 
@@ -628,139 +648,46 @@ CiA402 drive simulation (status word, control word state machine, motion simulat
 
 ## 5. All Global / Static Variables
 
-### 5.1 `transport.cpp` — Transport layer globals
+**Note:** Most global state has been refactored to instance-based implementations. The following sections document only the remaining platform-specific globals.
+
+### 5.1 `platform_esp32.cpp` — ESP32 platform globals
 
 | Variable | Type | Scope | Notes |
 |----------|------|-------|-------|
-| `g_network_iface` | `NetworkInterface` | file-static | **The** network interface used by all free functions |
-| `g_aprd_cb` | callback function | file-static | APRD callback |
-| `g_apwr_cb` | callback function | file-static | APWR callback |
-| `g_aprd_responses` | container | file-static | Response storage for polling |
-| `g_src_mac[6]` | `uint8_t[6]` | file-static | Source MAC address |
-| `s_tx_retry_count` | counter | file-static | |
-| `s_tx_fail_count` | counter | file-static | |
+| `g_fs_initialized` | `bool` | file-static | Tracks filesystem mount state (LittleFS/SPIFFS) |
+| `g_spinlock` | `portMUX_TYPE` | file-static | FreeRTOS spinlock for critical sections (compile-time constant initializer) |
 
-### 5.2 `runtime.cpp` — Queue management globals
+### 5.2 `host_stubs.cpp` — Host build stub globals
 
-| Variable | Type | Scope |
-|----------|------|-------|
-| `s_rx_dg_queue` | `MessageQueue*` | file-static |
-| `s_txpdo_rx_queue` | `MessageQueue*` | file-static |
-| `s_next_idx` | `uint8_t` | file-static |
-| `s_total_flushed` | counter | file-static |
-| `s_flush_calls` | counter | file-static |
+| Variable | Type | Scope | Notes |
+|----------|------|-------|-------|
+| `g_eth_handle` | `void*` | namespace-scoped (VoE, FoE, EoE) | Stub for host builds only |
+| `g_src_mac[6]` | `uint8_t[6]` | namespace-scoped (VoE, FoE, EoE) | Stub for host builds only |
 
-### 5.3 `master.cpp` — Master task globals
+### 5.3 `ethercat_platform_stubs.cpp` — Test stub globals
 
-| Variable | Type | Scope |
-|----------|------|-------|
-| `s_discovered_slave_count` | `uint16_t` | file-static |
-| `s_master_thread` | `std::thread` / `TaskHandle_t` | file-static |
-| `s_master_running` | `bool` | file-static |
+| Variable | Type | Scope | Notes |
+|----------|------|-------|-------|
+| `g_eth_handle` | `void*` | namespace-scoped (VoE, FoE, EoE) | Test stub only |
+| `g_src_mac[6]` | `uint8_t[6]` | namespace-scoped (VoE, FoE, EoE) | Test stub only |
 
-### 5.4 `sync_manager.cpp` — PDO globals
+---
 
-| Variable | Type | Scope |
-|----------|------|-------|
-| `g_slave_configs[kMaxPDOSlaves]` | `SlaveConfig[]` | **extern** (used by pdo_*.cpp) |
-| `g_pdo_mapping` | `PDOMapping` | **extern** |
-| `g_pdo_stats` | `PDOStats` | **extern** |
-| `g_pdo_initialized` | `bool` | file-static |
-| `g_slave_count` | `size_t` | file-static |
+## Historical Global State (Removed)
 
-### 5.5 `pdo_logical.cpp` — PDO exchange globals
+The following global state has been successfully refactored to instance-based implementations and no longer exists:
 
-| Variable | Type | Scope |
-|----------|------|-------|
-| `s_lrw_stats` | stats struct | file-static |
-| `s_separate_stats` | stats struct | file-static |
-| `s_use_separate_commands` | `bool` | file-static |
-
-### 5.6 `pdo_transfer.cpp` — PDO transfer globals
-
-| Variable | Type | Scope |
-|----------|------|-------|
-| `s_rxpdo_debug_count` | counter | file-static |
-| `s_rxpdo_confirmed_ok` | counter | file-static |
-| `s_rxpdo_confirmed_fail` | counter | file-static |
-| `s_txpdo_debug_count` | counter | file-static |
-
-### 5.7 `sdo_async.cpp` — SDO worker globals
-
-| Variable | Type | Scope |
-|----------|------|-------|
-| `s_queue` | queue container | file-static |
-| `s_queue_mutex` | `std::mutex` | file-static |
-| `s_queue_cv` | `std::condition_variable` | file-static |
-| `s_worker_thread` | `std::thread` | file-static |
-| `s_shutdown_requested` | `bool` | file-static |
-| `s_next_request_id` | `uint32_t` | file-static |
-| `s_slave_mbx[]` | mailbox config array | file-static |
-| `s_responses_mutex` | `std::mutex` | file-static |
-| `s_completed_responses` | map | file-static |
-
-### 5.8 `coe_sdo.cpp` — CoE SDO globals
-
-| Variable | Type | Scope |
-|----------|------|-------|
-| `s_mbx_write_count` | counter | file-static |
-
-### 5.9 `dc_init.cpp` — DC globals (ESP32)
-
-| Variable | Type | Scope |
-|----------|------|-------|
-| `g_dc_ctx` | `DCContext` | file-static / extern in dc_sync.cpp |
-| `g_dc_timer` | `gptimer_handle_t` | file-static |
-| `g_dc_mutex` | `SemaphoreHandle_t` | file-static |
-| `g_dc_event` | `std::unique_ptr<EtherCAT::HAL::IEvent>` | file-static |
-| `g_dc_sync_pending` | flag | file-static |
-
-### 5.10 `FoE.cpp` — FoE globals
-
-| Variable | Type | Scope |
-|----------|------|-------|
-| `g_initialized` | `bool` | file-static |
-| `g_foe_thread` | thread | file-static |
-| `g_running` | `bool` | file-static |
-| `g_stats` | stats struct | file-static |
-| `g_transfers[]` | transfer array | file-static |
-| `g_request_queue` | queue | file-static |
-
-### 5.11 `EtherCATFaultDetection.cpp` — Fault detection globals
-
-| Variable | Type | Scope |
-|----------|------|-------|
-| `g_slave_faults` | `std::vector<SlaveFaultState>` or array | file-static |
-| `g_slave_count` | `size_t` | file-static |
-| `g_initialized` | `bool` | file-static |
-| `g_fault_callback` | callback | file-static |
-
-### 5.12 `EtherCATWriteVerify.cpp` — Write-verify globals
-
-| Variable | Type | Scope |
-|----------|------|-------|
-| `g_config` | `WriteVerifyConfig` | file-static |
-| `g_enabled` | `bool` | file-static |
-| `g_stats` | `WriteVerifyStats` | file-static |
-
-### 5.13 `ConditionalPacketRouter.cpp` — Router global
-
-| Variable | Type | Scope |
-|----------|------|-------|
-| `g_packet_router` | `ConditionalPacketRouter` | file-static |
-
-### 5.14 `platform_esp32.cpp` — Platform global
-
-| Variable | Type | Scope |
-|----------|------|-------|
-| `g_fs_initialized` | `bool` | file-static |
-
-### 5.15 `host_stubs.cpp` — Host build globals
-
-| Variable | Type | Scope |
-|----------|------|-------|
-| `g_eth_handle` | opaque handle pointer | file-static |
-| `g_src_mac[6]` | `uint8_t[6]` | file-static |
+- **Transport layer:** `g_network_iface`, `g_aprd_cb`, `g_apwr_cb`, `g_aprd_responses`, `g_src_mac` → moved to `EtherCATMaster` instance
+- **Runtime queue:** `s_rx_dg_queue`, `s_txpdo_rx_queue`, `s_next_idx`, etc. → moved to instance state
+- **Master task:** `s_discovered_slave_count`, `s_master_thread`, `s_master_running` → moved to `EtherCATMaster` instance
+- **PDO:** `g_slave_configs`, `g_pdo_mapping`, `g_pdo_stats`, `g_pdo_initialized`, `g_slave_count` → moved to `PDOManager` instance
+- **PDO exchange:** `s_lrw_stats`, `s_separate_stats`, `s_use_separate_commands`, etc. → moved to instance state
+- **SDO:** `s_queue`, `s_worker_thread`, `s_shutdown_requested`, `s_slave_mbx[]`, etc. → moved to `SDOManager` instance
+- **DC:** `g_dc_ctx`, `g_dc_timer`, `g_dc_mutex`, `g_dc_event`, `g_dc_sync_pending` → moved to `DCManager`/`EtherCATDC` instance
+- **FoE:** `g_initialized`, `g_foe_thread`, `g_running`, `g_stats`, `g_transfers[]`, `g_request_queue` → moved to `FoEManager` instance
+- **Fault detection:** `g_slave_faults`, `g_slave_count`, `g_initialized`, `g_fault_callback` → moved to `FaultDetector` instance
+- **Write-verify:** `g_config`, `g_enabled`, `g_stats` → moved to `WriteVerifier` instance
+- **Packet router:** `g_packet_router` → replaced by `TransactionRouter` instance
 
 ---
 

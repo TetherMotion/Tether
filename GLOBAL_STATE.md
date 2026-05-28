@@ -2,73 +2,63 @@
 
 This document inventories global variables that use the `g_` prefix across the Tether component, explains where global state is concentrated, the risk/impact, and recommended next steps to reduce global coupling.
 
+**Note:** Most global state has been refactored to instance-based implementations. This document now only tracks remaining platform-specific globals.
+
 ---
 
 ## Executive summary ✅
-- Primary hotspots: **Transport (network & MAC)**, **PDO / Sync manager**, and **Distributed Clock (DC)**. These are the highest‑risk globals because they are read/written across many modules and affect realtime paths.
-- Secondary hotspots: **FoE**, **Fault detection**, **Write-verify**, and **Packet router**.
-- Recommended immediate priorities: 1) Encapsulate Transport globals, 2) Move PDO state into a `PDOManager`, 3) Finish DC instance migration.
+- **Global state refactoring completed:** Transport, PDO, DC, FoE, Fault detection, Packet router, and Write-verify have all been migrated to instance-based implementations.
+- **Remaining globals:** Only platform-specific globals remain (ESP32 filesystem state, ESP32 spinlock, and host build stubs).
+- **Risk level:** Low — remaining globals are isolated to specific platform implementations and are acceptable.
 
 ---
 
-## High-risk globals (critical → high)
+## Platform-specific globals (low risk)
 
-### Transport / Raw API (Critical)
-- `g_network_iface` — global network interface used by Raw/transport helpers
-- `g_src_mac[6]` — source MAC used widely by Raw operations
-- `g_aprd_cb`, `g_apwr_cb`, `g_aprd_responses` — callback & response storage used by APRD/APWR helpers
-- Files: `src/ethercat/raw/raw_internal_bridge.cpp`, `src/ethercat/raw/sdo_async.cpp`, `src/ethercat/host_stubs.cpp`
-- Why it matters: used by nearly all low‑level frame send/receive functions — central coupling point.
+### ESP32 Platform
+- `g_fs_initialized` — tracks whether the filesystem (LittleFS/SPIFFS) has been mounted
+  - File: `src/ethercat/platform_esp32.cpp`
+  - Scope: file-static, managed exclusively through `fs_init()`/`fs_deinit()`
+  - Why it's acceptable: Platform-specific singleton with proper lifecycle control, isolated to ESP32 builds only
 
-### PDO / Sync manager (High)
-- `g_slave_configs[kMaxPDOSlaves]`, `g_pdo_mapping`, `g_pdo_stats`, `g_pdo_initialized`, `g_slave_count`
-- File: `src/ethercat/raw/sync_manager.cpp` (externally referenced by PDO exchange code and realtime loop)
-- Why it matters: shared mutable state used by realtime PDO exchange — hard to test and reason about.
+- `g_spinlock` — FreeRTOS spinlock for critical section entry/exit
+  - File: `src/ethercat/platform_esp32.cpp`
+  - Scope: file-static, compile-time constant initializer (`portMUX_INITIALIZER_UNLOCKED`)
+  - Why it's acceptable: Effectively a constant initializer, no mutable global state requiring lifecycle management
 
-### Distributed Clock (DC) (High)
-- `g_singleton_dc`, `g_singleton_mutex`, `g_dc_event`, `g_dc_ctx`, `g_dc_timer`, `g_dc_mutex`, `g_dc_sync_pending`
-- Files: `src/ethercat/raw/dc_init.cpp`, `src/ethercat/raw/dc_sync.cpp`, `src/ethercat/raw/dc_realtime.cpp`
-- Why it matters: time-critical; migration to class-based `EtherCATDC` is already in progress but legacy globals remain.
+### Host Build Stubs
+- `g_eth_handle` — opaque handle pointer for network interface (stub only)
+  - Files: `src/ethercat/host_stubs.cpp`, `tests/mocks/ethercat_platform_stubs.cpp`
+  - Scope: namespace-scoped in VoE, FoE, EoE namespaces
+  - Why it's acceptable: Build-time stubs only, used when EtherCAT types are not available on host builds
+
+- `g_src_mac[6]` — source MAC address array (stub only)
+  - Files: `src/ethercat/host_stubs.cpp`, `tests/mocks/ethercat_platform_stubs.cpp`
+  - Scope: namespace-scoped in VoE, FoE, EoE namespaces
+  - Why it's acceptable: Build-time stubs only, zero-initialized placeholders for host builds
 
 ---
 
-## Medium / Lower-risk globals
-- FoE: `g_initialized`, `g_foe_thread`, `g_running`, `g_stats`, `g_request_queue` (`src/ethercat/raw/FoE.cpp`) — isolated to FoE subsystem.
-- Fault detection: `g_slave_faults`, `g_slave_count`, `g_initialized`, `g_fault_callback` (`src/ethercat/EtherCATFaultDetection.cpp`).
-- Packet router: `g_packet_router` (`src/ethercat/ConditionalPacketRouter.cpp`) — redundant with `EtherCATMaster` instance.
-- Write-verify: `g_config`, `g_enabled`, `g_stats` (`src/ethercat/EtherCATWriteVerify.cpp`).
-- Platform flags: `g_fs_initialized`, `g_eth_handle` (platform/ESP32-specific files).
+## Historical refactoring (completed)
+
+The following global state has been successfully refactored to instance-based implementations:
+
+- **Transport / Raw API:** `g_network_iface`, `g_src_mac`, `g_aprd_cb`, `g_apwr_cb`, `g_aprd_responses` → moved to `EtherCATMaster` instance
+- **PDO / Sync manager:** `g_slave_configs`, `g_pdo_mapping`, `g_pdo_stats`, `g_pdo_initialized`, `g_slave_count` → moved to `PDOManager` instance
+- **Distributed Clock (DC):** `g_singleton_dc`, `g_dc_ctx`, `g_dc_timer`, `g_dc_mutex`, `g_dc_sync_pending` → moved to `DCManager`/`EtherCATDC` instance
+- **FoE:** `g_initialized`, `g_foe_thread`, `g_running`, `g_stats`, `g_request_queue` → moved to `FoEManager` instance
+- **Fault detection:** `g_slave_faults`, `g_slave_count`, `g_initialized`, `g_fault_callback` → moved to `FaultDetector` instance
+- **Packet router:** `g_packet_router` → replaced by `TransactionRouter` instance
+- **Write-verify:** `g_config`, `g_enabled`, `g_stats` → moved to `WriteVerifier` instance
 
 ---
 
 ## Where to inspect code (quick links)
-- PDO / SM: `src/ethercat/raw/sync_manager.cpp`
-- Transport (src_mac, network iface): `src/ethercat/raw/raw_internal_bridge.cpp`, `src/ethercat/host_stubs.cpp`
-- DC: `src/ethercat/raw/dc_init.cpp`, `src/ethercat/raw/dc_sync.cpp`, `src/ethercat/raw/dc_realtime.cpp`
-- FoE: `src/ethercat/raw/FoE.cpp`
-- Packet router: `src/ethercat/ConditionalPacketRouter.cpp`
-
----
-
-## Short-term refactor plan (practical, small safe steps) 🔧
-1. Encapsulate Transport globals into `NetworkManager` (or `RawNetwork`) API: `set/get` + dependency injection for tests. (Highest ROI)
-2. Introduce `PDOManager` to own `g_slave_configs`, `g_pdo_mapping`, `g_pdo_stats` and provide thread-safe accessors used by PDO exchange.
-3. Complete DC migration: remove `g_dc_ctx` usage in favor of class instance state or read-only snapshot API (`dc_get_context()` may remain read-only for diagnostics).
-4. Replace `g_packet_router` usage with `EtherCATMaster` instance accessor and remove global.
-
----
-
-## Suggested next actions (pick one)
-- Create a small PR that encapsulates `g_src_mac` + `g_network_iface` behind a new `NetworkInterfaceProvider` (recommended first change).
-- Add unit tests that mock network interface and remove direct uses of `g_src_mac` in tests.
-- Create GitHub issues for phased refactor (PDO → DC → PacketRouter → FoE).
+- ESP32 platform: `src/ethercat/platform_esp32.cpp`
+- Host stubs: `src/ethercat/host_stubs.cpp`, `tests/mocks/ethercat_platform_stubs.cpp`
 
 ---
 
 ## Notes & references
-- Many of these globals are already documented in `Tether/docs/ETHERCAT_INVENTORY.md` and there are TODOs describing phased refactors.
-- This inventory was generated by searching for `g_` prefixed symbols and validating usages in the `Tether` source tree.
-
----
-
-If you want, I can open a PR to implement the Transport encapsulation (small, well‑scoped change) or create GitHub issues for the full migration plan. Which should I do next?
+- Historical global state inventory is documented in `docs/ETHERCAT_INVENTORY.md` (may contain outdated references).
+- Refactoring was completed as part of the migration to instance-based architectures for better testability and reduced coupling.
