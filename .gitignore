@@ -7,3 +7,9 @@ _deps/
 CTestTestfile.cmake
 TetherConfig.cmake
 TetherConfigVersion.cmake
+
+# Compiled executables in examples directory
+examples/*_native
+examples/g64_*
+examples/gcode_*
+examples/simple_*
