@@ -6,10 +6,12 @@
  * LinuxPairedNetworkInterface and verifies that the AS715N fault-detection
  * stack correctly parses the ErC1.1 (Synchronization loss / 0x0C11) fault.
  *
- * All register values are taken directly from the hardware capture log:
+ * All register values are taken directly from the hardware capture log.
+ * Note: this specific AS715N device maps mailbox SMs non-standardly:
+ *   MbxIn  (Receive, M→S) at SM0: addr=0x1000, len=256, ctrl=0x26
+ *   MbxOut (Send,    S→M) at SM1: addr=0x1400, len=256, ctrl=0x22
+ * (Standard ETG convention is SM0=MbxOut/S→M, SM1=MbxIn/M→S)
  *
- *   SM0 (master→slave mailbox): addr=0x1000, len=256, ctrl=0x26
- *   SM1 (slave→master mailbox): addr=0x1400, len=256, ctrl=0x22
  *   SDO 0x6041:00 StatusWord  = 0x1638  (fault bit set)
  *   SDO 0x203F:00 U32         = 0x00000C11  (external=0x0C11, internal=0x0000)
  *   SDO 0x603F:00             = 0x8700  (CiA402 EtherCAT communication error)
@@ -17,7 +19,7 @@
  * The slave emulator:
  *  - Responds to BRD / APRD / APWR commands for bus discovery and state management.
  *  - Emulates the SII EEPROM (returning correct mailbox words 20–24).
- *  - Implements CoE SDO upload (read) responses over the SM0/SM1 mailbox with
+ *  - Implements CoE SDO upload (read) responses over the mailbox with
  *    the exact data values above.
  */
 
@@ -69,12 +71,12 @@ using namespace EtherCAT::Drives;
  * | Register | Value               | Description                 |
  * |----------|--------------------|-----------------------------|
  * | 0x0130   | al_state_ (U16)   | AL Status                   |
- * | 0x0800   | SM0 config (8 B)  | start=0x1000 len=256 ctrl=0x26 |
- * | 0x0808   | SM1 config (8 B)  | start=0x1400 len=256 ctrl=0x22 |
+ * | 0x0800   | SM0 config (8 B)  | start=0x1000 len=256 ctrl=0x26 (device: MbxIn) |
+ * | 0x0808   | SM1 config (8 B)  | start=0x1400 len=256 ctrl=0x22 (device: MbxOut) |
  * | 0x0502   | EEPROM ctrl/stat  | busy=0, errors=0            |
  * | 0x0508   | EEPROM data (4 B) | two SII words at sii_addr_  |
- * | 0x1000   | SM0 mailbox (WR)  | CoE SDO requests from master |
- * | 0x1400   | SM1 mailbox (RD)  | CoE SDO responses to master  |
+ * | 0x1000   | MbxIn  (WR)       | CoE SDO requests from master |
+ * | 0x1400   | MbxOut (RD)       | CoE SDO responses to master  |
  */
 class AS715NErC11SlaveResponder {
 public:
@@ -92,8 +94,8 @@ public:
 
 private:
     // ---- Mailbox addresses (match real AS715N hardware) --------------------
-    static constexpr uint16_t kSmRecvAddr = 0x1000;  ///< SM0: master writes SDO request
-    static constexpr uint16_t kSmSendAddr = 0x1400;  ///< SM1: master reads SDO response
+    static constexpr uint16_t kSmRecvAddr = 0x1000;  ///< MbxIn:  master writes SDO request (on this device, mapped to SM0)
+    static constexpr uint16_t kSmSendAddr = 0x1400;  ///< MbxOut: master reads SDO response (on this device, mapped to SM1)
     static constexpr uint16_t kSmLen      = 256;
 
     // ---- Fault register values from hardware capture -----------------------
@@ -186,7 +188,7 @@ private:
             return;
         }
 
-        // SM0 config (0x0800, 8 bytes) — mailbox master→slave
+        // SM0 config (0x0800, 8 bytes) — on this device: MbxIn (M→S)
         if (ado == 0x0800 && len >= 8) {
             buf[0] = 0x00; buf[1] = 0x10;  // start = 0x1000
             buf[2] = 0x00; buf[3] = 0x01;  // len   = 256
@@ -203,7 +205,7 @@ private:
             return;
         }
 
-        // SM1 config (0x0808, 8 bytes) — mailbox slave→master
+        // SM1 config (0x0808, 8 bytes) — on this device: MbxOut (S→M)
         if (ado == 0x0808 && len >= 8) {
             buf[0] = 0x00; buf[1] = 0x14;  // start = 0x1400
             buf[2] = 0x00; buf[3] = 0x01;  // len   = 256
@@ -462,10 +464,10 @@ private:
      * |  9   | 0x0040 | Vendor ID high                  |
      * | 10   | 0x0715 | Product Code low (0x00000715)   |
      * | 11   | 0x0000 | Product Code high               |
-     * | 20   | 0x1000 | Std RX mailbox offset (SM0/M→S) |
-     * | 21   | 0x0100 | Std RX mailbox size = 256       |
-     * | 22   | 0x1400 | Std TX mailbox offset (SM1/S→M) |
-     * | 23   | 0x0100 | Std TX mailbox size = 256       |
+     * | 20   | 0x1000 | Std RX mailbox offset (MbxIn/M→S) |
+     * | 21   | 0x0100 | Std RX mailbox size = 256          |
+     * | 22   | 0x1400 | Std TX mailbox offset (MbxOut/S→M) |
+     * | 23   | 0x0100 | Std TX mailbox size = 256          |
      * | 24   | 0x000C | Protocols: CoE (bit2) + FoE (bit3)|
      */
     static uint16_t siiWord(uint16_t word_addr) {
@@ -474,9 +476,9 @@ private:
             case  9: return 0x0040;  // Vendor ID high
             case 10: return 0x0715;  // Product Code low (→ 0x00000715)
             case 11: return 0x0000;  // Product Code high
-            case 20: return 0x1000;  // Std mailbox receive offset (SM0)
+            case 20: return 0x1000;  // Std mailbox receive offset (MbxIn)
             case 21: return 0x0100;  // Std mailbox receive size = 256
-            case 22: return 0x1400;  // Std mailbox transmit offset (SM1)
+            case 22: return 0x1400;  // Std mailbox transmit offset (MbxOut)
             case 23: return 0x0100;  // Std mailbox transmit size = 256
             case 24: return 0x000C;  // Mailbox protocols: CoE + FoE
             default: return 0x0000;

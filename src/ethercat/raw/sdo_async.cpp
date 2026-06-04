@@ -153,8 +153,8 @@ void SDOManager::configureSlaveMailbox(uint16_t slave_index,
     slave_mbx_[slave_index].mbx_counter = 1;
     slave_mbx_[slave_index].configured  = true;
 
-    TETHER_LOGI(TAG, "Slave %u mailbox: Receive(SM0/MbxIn)=0x%04x/%u, Send(SM1/MbxOut)=0x%04x/%u",
-             slave_index, mbx_write_addr, mbx_write_len, mbx_read_addr, mbx_read_len);
+    TETHER_LOGI(TAG, "Slave %u mailbox: Send(SM0/MbxOut)=0x%04x/%u, Receive(SM1/MbxIn)=0x%04x/%u",
+             slave_index, mbx_read_addr, mbx_read_len, mbx_write_addr, mbx_write_len);
 }
 
 bool SDOManager::getSlaveMailbox(uint16_t slave_index,
@@ -167,15 +167,15 @@ bool SDOManager::getSlaveMailbox(uint16_t slave_index,
     // SDO subsystem always reflects the node's configured SyncManagers.
     const PDO::SlaveConfig* slave_configs = pdo_manager_ ? pdo_manager_->slaveConfigs() : nullptr;
     if (slave_configs) {
-        // Per SOEM convention: SM0 = Receive/MbxIn (M→S), SM1 = Send/MbxOut (S→M)
-        const auto& sm0 = slave_configs[slave_index].sm[0]; // SM0 = MailboxWrite (M→S)
-        const auto& sm1 = slave_configs[slave_index].sm[1]; // SM1 = MailboxRead  (S→M)
-        if (sm0.type == PDO::SyncManagerType::MailboxWrite ||
-            sm1.type == PDO::SyncManagerType::MailboxRead) {
-            if (mbx_write_addr) *mbx_write_addr = sm0.phys_start_addr;
-            if (mbx_write_len)  *mbx_write_len  = sm0.length;
-            if (mbx_read_addr)  *mbx_read_addr  = sm1.phys_start_addr;
-            if (mbx_read_len)   *mbx_read_len   = sm1.length;
+        // Standard EtherCAT convention: SM0 = Send/MbxOut (S→M), SM1 = Receive/MbxIn (M→S)
+        const auto& sm0 = slave_configs[slave_index].sm[0]; // SM0 = MailboxRead (S→M)
+        const auto& sm1 = slave_configs[slave_index].sm[1]; // SM1 = MailboxWrite (M→S)
+        if (sm0.type == PDO::SyncManagerType::MailboxRead ||
+            sm1.type == PDO::SyncManagerType::MailboxWrite) {
+            if (mbx_write_addr) *mbx_write_addr = sm1.phys_start_addr;
+            if (mbx_write_len)  *mbx_write_len  = sm1.length;
+            if (mbx_read_addr)  *mbx_read_addr  = sm0.phys_start_addr;
+            if (mbx_read_len)   *mbx_read_len   = sm0.length;
             return true;
         }
     }

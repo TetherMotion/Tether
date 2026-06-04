@@ -186,27 +186,27 @@ protected:
  */
 TEST_F(SIIMailboxParserTest, ValidMailboxConfiguration) {
     // Setup: Configure valid mailbox in mock EEPROM
-    // Per SOEM convention: SM0 (Receive/MbxIn) at lower address, SM1 (Send/MbxOut) at higher
-    // SII RX (slave receives, master writes, SM0) at LOWER address
-    // SII TX (slave transmits, master reads, SM1) at HIGHER address
+    // Standard EtherCAT convention: SM0 (Send/MbxOut), SM1 (Receive/MbxIn)
+    // SII RX (slave receives, master writes, SM1) at LOWER address
+    // SII TX (slave transmits, master reads, SM0) at HIGHER address
     mock_eeprom_.setValidMailbox(
-        0x1000, 128,   // RX: addr=0x1000, size=128 (Receive/SM0, lower addr)
-        0x1400, 64,    // TX: addr=0x1400, size=64  (Send/SM1, higher addr)
+        0x1000, 128,   // RX: addr=0x1000, size=128 (Receive/MbxIn/M→S, lower addr)
+        0x1400, 64,    // TX: addr=0x1400, size=64  (Send/MbxOut/S→M, higher addr)
         MBX_PROTO_COE | MBX_PROTO_EOE  // Protocols: CoE + EoE
     );
-    
+
     // Execute: Read mailbox configuration
     uint16_t wr_addr = 0, wr_len = 0, rd_addr = 0, rd_len = 0, proto = 0;
     bool result = configure_mailbox_from_sii(
         master_, 0x0000,  // slave 0
         &wr_addr, &wr_len, &rd_addr, &rd_len, &proto
     );
-    
+
     // Verify
     EXPECT_TRUE(result);
-    EXPECT_EQ(wr_addr, 0x1000);  // Master write = slave RX = Receive/SM0
+    EXPECT_EQ(wr_addr, 0x1000);  // Master write = slave RX = Receive/MbxIn
     EXPECT_EQ(wr_len, 128);
-    EXPECT_EQ(rd_addr, 0x1400);  // Master read = slave TX = Send/SM1
+    EXPECT_EQ(rd_addr, 0x1400);  // Master read = slave TX = Send/MbxOut
     EXPECT_EQ(rd_len, 64);
     EXPECT_EQ(proto, static_cast<uint16_t>(MBX_PROTO_COE | MBX_PROTO_EOE));
 }
@@ -312,9 +312,9 @@ TEST_F(SIIMailboxParserTest, NoMailboxFallsBackToDefaults) {
     
     // Verify: Should return defaults
     EXPECT_TRUE(result);
-    EXPECT_EQ(wr_addr, 0x1000);  // Default Receive addr (SM0, Receive/MbxIn, M→S)
+    EXPECT_EQ(wr_addr, 0x1000);  // Default Receive addr (MbxIn/M→S, SM1 per ETG standard)
     EXPECT_EQ(wr_len, 256);      // Default Receive size
-    EXPECT_EQ(rd_addr, 0x1400);  // Default Send addr (SM1, Send/MbxOut, S→M)
+    EXPECT_EQ(rd_addr, 0x1400);  // Default Send addr (MbxOut/S→M, SM0 per ETG standard)
     EXPECT_EQ(rd_len, 256);      // Default Send size
     EXPECT_EQ(proto, static_cast<uint16_t>(MBX_PROTO_COE | MBX_PROTO_EOE | MBX_PROTO_AOE));
 }

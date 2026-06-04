@@ -213,10 +213,10 @@ std::string SyncManagerAccessor::formatConfig(const RawHWConfig& cfg) const {
     // Detect conservative default mailbox configurations
     bool fallback = false;
     if (index_ == 0) {
-        // SM0 vendor default: start=0x1000, len=0x0100 (256), ctrl=0x26
+        // Standard ETG: SM0=MbxOut(S→M) ctrl=0x22. Some vendors use non-standard ctrl=0x26.
         fallback = (cfg.start_addr == 0x1000 && cfg.length == 256 && cfg.control == 0x26);
     } else if (index_ == 1) {
-        // SM1 vendor default: start=0x1400, len=0x0100 (256), ctrl=0x22
+        // Standard ETG: SM1=MbxIn(M→S) ctrl=0x26. Some vendors use non-standard ctrl=0x22.
         fallback = (cfg.start_addr == 0x1400 && cfg.length == 256 && cfg.control == 0x22);
     }
 

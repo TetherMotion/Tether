@@ -48,6 +48,8 @@
 #include <functional>
 #include "profiles/cia301/CiA301Defs.hpp"
 #include "profiles/cia301/CiA402Defs.hpp"
+#include "tether/drives/DynaDrive/Registers/Statusword.hpp"
+#include "tether/drives/DynaDrive/Registers/Controlword.hpp"
 
 // Forward declaration
 namespace EtherCAT { class EtherCATMaster; }
@@ -219,27 +221,13 @@ public:
     // DynaDrive Custom FSM (rsl_drive_sdk / ANYdrive)
     // ========================================================================
 
-    enum class DynaDriveState : uint8_t {
-        NA            = 0,
-        ColdStart     = 1,
-        WarmStart     = 2,
-        Configure     = 3,
-        Calibrate     = 4,
-        Standby       = 5,
-        MotorOp       = 6,
-        ControlOp     = 7,
-        Error         = 8,
-        Fatal         = 9,
-        MotorPreOp    = 10,
-        DeviceMissing = 11,
-        Unknown       = 255
-    };
+    using DynaDriveState = EtherCAT::Drives::Registers::DynaDrive::DynaDriveStateOptions;
 
     static DynaDriveState decodeDynaDriveState(uint32_t statusword);
     static const char* getDynaDriveStateName(DynaDriveState state);
 
     bool readDynaDriveStatusword(uint32_t& statusword);
-    bool sendDynaDriveControlword(uint16_t controlword_id);
+    bool sendDynaDriveControlword(EtherCAT::Drives::Registers::DynaDrive::DynaDriveControlwordOptions controlword);
     bool enableDynaDrive(uint32_t timeout_ms = 10000);
     bool disableDynaDrive();
     bool isDynaDriveControlOp();

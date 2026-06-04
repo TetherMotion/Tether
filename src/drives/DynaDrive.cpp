@@ -8,21 +8,22 @@
 namespace EtherCAT {
 namespace Drives {
 
-std::string dynaDriveStateName(uint8_t state_id) {
-    switch (state_id) {
-        case 0:  return "NA";
-        case 1:  return "ColdStart";
-        case 2:  return "WarmStart";
-        case 3:  return "Configure";
-        case 4:  return "Calibrate";
-        case 5:  return "Standby";
-        case 6:  return "MotorOp";
-        case 7:  return "ControlOp";
-        case 8:  return "Error";
-        case 9:  return "Fatal";
-        case 10: return "MotorPreOp";
-        case 11: return "DeviceMissing";
-        default: return "Unknown";
+std::string dynaDriveStateName(Registers::DynaDrive::DynaDriveStateOptions state) {
+    using SO = Registers::DynaDrive::DynaDriveStateOptions;
+    switch (state) {
+        case SO::NA:            return "NA";
+        case SO::ColdStart:     return "ColdStart";
+        case SO::WarmStart:     return "WarmStart";
+        case SO::Configure:     return "Configure";
+        case SO::Calibrate:     return "Calibrate";
+        case SO::Standby:       return "Standby";
+        case SO::MotorOp:       return "MotorOp";
+        case SO::ControlOp:     return "ControlOp";
+        case SO::Error:         return "Error";
+        case SO::Fatal:         return "Fatal";
+        case SO::MotorPreOp:    return "MotorPreOp";
+        case SO::DeviceMissing: return "DeviceMissing";
+        default:                return "Unknown";
     }
 }
 

@@ -161,10 +161,10 @@ TEST(SIIMailbox, SMControlValidationNoWarning) {
     MockSIIEEPROMLocal mock_ok;
     mock_ok.setValidMailbox(0x1400, 128, 0x1000, 64, 0x0004);
 
-    // SM0: mailbox mode + ECAT writes (master→slave, Receive/MbxIn): SM_CTRL_MODE_MAILBOX | SM_CTRL_DIR_WRITE | SM_CTRL_IRQ_PDI
-    uint8_t sm0_ok = static_cast<uint8_t>(0x02u | 0x04u | 0x20u); // 0x26
-    // SM1: mailbox mode + ECAT reads (slave→master, Send/MbxOut): SM_CTRL_MODE_MAILBOX | SM_CTRL_DIR_READ | SM_CTRL_IRQ_PDI
-    uint8_t sm1_ok = static_cast<uint8_t>(0x02u | 0x00u | 0x20u); // 0x22
+    // SM0: mailbox mode + ECAT reads (slave→master, Send/MbxOut): SM_CTRL_MODE_MAILBOX | SM_CTRL_DIR_READ | SM_CTRL_IRQ_PDI
+    uint8_t sm0_ok = static_cast<uint8_t>(0x02u | 0x00u | 0x20u); // 0x22
+    // SM1: mailbox mode + ECAT writes (master→slave, Receive/MbxIn): SM_CTRL_MODE_MAILBOX | SM_CTRL_DIR_WRITE | SM_CTRL_IRQ_PDI
+    uint8_t sm1_ok = static_cast<uint8_t>(0x02u | 0x04u | 0x20u); // 0x26
     mock_ok.setSMControl(0, sm0_ok);
     mock_ok.setSMControl(1, sm1_ok);
 

@@ -1110,8 +1110,8 @@ bool EtherCATMaster::autoConfigureMailbox(SlaveAddress slave_address, Tether::Pl
     
     // Step 2: Apply mailbox override to master    
     if (log_level >= Tether::Platform::LogLevel::Debug) {
-        TETHER_LOGD(local_tag, "[2/3] Applying mailbox configuration to master override...\n      Receive (M→S, SM0): addr=0x%04X len=%u\n      Send    (S→M, SM1): addr=0x%04X len=%u\n      Protocols: 0x%04X",
-                   wr_addr, (unsigned)wr_len, rd_addr, (unsigned)rd_len, proto);
+        TETHER_LOGD(local_tag, "[2/3] Applying mailbox configuration to master override...\n      Send    (S→M, SM0): addr=0x%04X len=%u\n      Receive (M→S, SM1): addr=0x%04X len=%u\n      Protocols: 0x%04X",
+                   rd_addr, (unsigned)rd_len, wr_addr, (unsigned)wr_len, proto);
         
         // Decode protocols for verbose logging
         std::string proto_str;
@@ -1157,12 +1157,12 @@ bool EtherCATMaster::autoConfigureMailbox(SlaveAddress slave_address, Tether::Pl
                          verify_rd == rd_addr && verify_rd_len == rd_len);
             
             if (match) {
-                TETHER_LOGD(local_tag, "      ✓ SDO subsystem mailbox verified: Receive(SM0)=0x%04X/%u Send(SM1)=0x%04X/%u",
-                           verify_wr, (unsigned)verify_wr_len, verify_rd, (unsigned)verify_rd_len);
+                TETHER_LOGD(local_tag, "      ✓ SDO subsystem mailbox verified: Send(SM0)=0x%04X/%u Receive(SM1)=0x%04X/%u",
+                           verify_rd, (unsigned)verify_rd_len, verify_wr, (unsigned)verify_wr_len);
             } else {
-                TETHER_LOGW(local_tag, "      ⚠ MISMATCH! SDO subsystem has Receive(SM0)=0x%04X/%u Send(SM1)=0x%04X/%u\n      Expected: Receive(SM0)=0x%04X/%u Send(SM1)=0x%04X/%u",
-                           verify_wr, (unsigned)verify_wr_len, verify_rd, (unsigned)verify_rd_len,
-                           wr_addr, (unsigned)wr_len, rd_addr, (unsigned)rd_len);
+                TETHER_LOGW(local_tag, "      ⚠ MISMATCH! SDO subsystem has Send(SM0)=0x%04X/%u Receive(SM1)=0x%04X/%u\n      Expected: Send(SM0)=0x%04X/%u Receive(SM1)=0x%04X/%u",
+                           verify_rd, (unsigned)verify_rd_len, verify_wr, (unsigned)verify_wr_len,
+                           rd_addr, (unsigned)rd_len, wr_addr, (unsigned)wr_len);
             }
         } else {
             TETHER_LOGE(local_tag, "      ✗ CRITICAL: SDO subsystem has NO mailbox configuration!\n      This indicates configureSlaveMailbox() failed.");
@@ -1175,8 +1175,8 @@ bool EtherCATMaster::autoConfigureMailbox(SlaveAddress slave_address, Tether::Pl
         TETHER_LOGD(local_tag, "======================================================================\n  ✓ MAILBOX AUTO-CONFIGURATION COMPLETE FOR SLAVE %u\n======================================================================",
                     (unsigned)slave_index);
     } else {
-        TETHER_LOGI(local_tag, "✓ Mailbox auto-configured for slave %u: Receive(SM0)=0x%04X/%u Send(SM1)=0x%04X/%u",
-                    (unsigned)slave_index, wr_addr, (unsigned)wr_len, rd_addr, (unsigned)rd_len);
+        TETHER_LOGI(local_tag, "✓ Mailbox auto-configured for slave %u: Send(SM0)=0x%04X/%u Receive(SM1)=0x%04X/%u",
+                    (unsigned)slave_index, rd_addr, (unsigned)rd_len, wr_addr, (unsigned)wr_len);
     }
     
     return true;
@@ -1581,11 +1581,11 @@ bool EtherCATMaster::forceMailboxDefaults(SlaveAddress slave_address)
 
     // Conservative hardcoded fallback values with smaller sizes for better compatibility
     // Use 128-byte mailboxes which are more commonly supported by simple devices
-    // Per SOEM convention: SM0 (Receive/MbxIn, M→S) at lower address,
-    //                      SM1 (Send/MbxOut, S→M) at higher address
-    constexpr uint16_t kHardcodedWrAddr = 0x1000;  // Receive/MbxIn (M→S, SM0)
+    // Standard EtherCAT convention: SM0 (Send/MbxOut, S→M),
+    //                               SM1 (Receive/MbxIn, M→S)
+    constexpr uint16_t kHardcodedWrAddr = 0x1000;  // Receive/MbxIn (M→S, SM1)
     constexpr uint16_t kHardcodedWrLen = 128;
-    constexpr uint16_t kHardcodedRdAddr = 0x1400;  // Send/MbxOut (S→M, SM1)
+    constexpr uint16_t kHardcodedRdAddr = 0x1400;  // Send/MbxOut (S→M, SM0)
     constexpr uint16_t kHardcodedRdLen = 128;
 
     if (slave_index >= PDO::kMaxPDOSlaves) return false;
@@ -1603,11 +1603,11 @@ bool EtherCATMaster::forceMailboxDefaults(SlaveAddress slave_address)
     uint16_t rd_len = kHardcodedRdLen;
 
     auto* slave_configs = pdo_->slaveConfigs();
-    // Standard EtherCAT mailbox SM convention (per SOEM / ETG 1000):
-    // SM0 = Receive/MbxIn (MASTER→SLAVE, control=0x26)
-    // SM1 = Send/MbxOut    (SLAVE→MASTER, control=0x22)
-    slave_configs[slave_index].sm[0] = PDO::SyncManagerConfig::mailbox_write(wr_addr, wr_len);  // SM0 = Receive/MbxIn (M→S)
-    slave_configs[slave_index].sm[1] = PDO::SyncManagerConfig::mailbox_read(rd_addr, rd_len);   // SM1 = Send/MbxOut (S→M)
+    // Standard EtherCAT mailbox SM convention:
+    // SM0 = Send/MbxOut    (SLAVE→MASTER, control=0x22)
+    // SM1 = Receive/MbxIn (MASTER→SLAVE, control=0x26)
+    slave_configs[slave_index].sm[0] = PDO::SyncManagerConfig::mailbox_read(rd_addr, rd_len);   // SM0 = Send/MbxOut (S→M)
+    slave_configs[slave_index].sm[1] = PDO::SyncManagerConfig::mailbox_write(wr_addr, wr_len);  // SM1 = Receive/MbxIn (M→S)
 
     std::vector<PDO::SyncManagerConfig> sm_vec;
     for (int i=0; i<4; ++i) sm_vec.push_back(slave_configs[slave_index].sm[i]);
@@ -1662,10 +1662,10 @@ void EtherCATMaster::masterTask()
                 auto& ov = m_mailbox_overrides_[i];
                 auto* slave_configs = pdo_->slaveConfigs();
                 if (slave_configs) {
-                    // Standard EtherCAT SM convention (per SOEM):
-                    // SM0 = Receive/MbxIn (M→S), SM1 = Send/MbxOut (S→M)
-                    slave_configs[i].sm[0] = PDO::SyncManagerConfig::mailbox_write(ov.wr_addr, ov.wr_len);
-                    slave_configs[i].sm[1] = PDO::SyncManagerConfig::mailbox_read(ov.rd_addr, ov.rd_len);
+                    // Standard EtherCAT SM convention:
+                    // SM0 = Send/MbxOut (S→M), SM1 = Receive/MbxIn (M→S)
+                    slave_configs[i].sm[0] = PDO::SyncManagerConfig::mailbox_read(ov.rd_addr, ov.rd_len);
+                    slave_configs[i].sm[1] = PDO::SyncManagerConfig::mailbox_write(ov.wr_addr, ov.wr_len);
                     const uint8_t* src_mac = src_mac_;
 
                     std::vector<PDO::SyncManagerConfig> sm_vec;
@@ -1690,12 +1690,12 @@ void EtherCATMaster::masterTask()
             if (configureMailboxFromSii(i,&wa,&wl,&ra,&rl,&mp)) {
                 TETHER_LOGI(TAG, "Slave %u: Mailbox from SII wr=0x%04X/%u rd=0x%04X/%u", i, wa, (unsigned)wl, ra, (unsigned)rl);
 
-                // Standard EtherCAT SM convention (per SOEM):
-                // SM0 = Receive/MbxIn (M→S), SM1 = Send/MbxOut (S→M)
+                // Standard EtherCAT SM convention:
+                // SM0 = Send/MbxOut (S→M), SM1 = Receive/MbxIn (M→S)
                 auto* slave_configs = pdo_->slaveConfigs();
                 if (slave_configs) {
-                    slave_configs[i].sm[0] = PDO::SyncManagerConfig::mailbox_write(wa, wl);
-                    slave_configs[i].sm[1] = PDO::SyncManagerConfig::mailbox_read(ra, rl);
+                    slave_configs[i].sm[0] = PDO::SyncManagerConfig::mailbox_read(ra, rl);
+                    slave_configs[i].sm[1] = PDO::SyncManagerConfig::mailbox_write(wa, wl);
                     pdo_->configureSlavesSMs(i);
                 }
                 // NOTE: SDO mailbox configuration is provided by the PDO SyncManager

@@ -266,12 +266,9 @@ private:
 
 inline bool Axia80Sensor::isAxia80Device()
 {
-    uint32_t vendor = 0, product = 0;
-    size_t sz = sizeof(vendor);
-    if (slave().sdoRead(Axia80::OD_IDENTITY, 1, &vendor, sz) != SlaveError::Ok) return false;
-    sz = sizeof(product);
-    if (slave().sdoRead(Axia80::OD_IDENTITY, 2, &product, sz) != SlaveError::Ok) return false;
-    return (vendor == Axia80::kVendorId) && (product == Axia80::kProductCode);
+    EtherCAT::SII::SIIIdentity id;
+    if (!EtherCAT::SII::readSIIIdentity(master_, slave_index_, id)) return false;
+    return (id.vendor_id == Axia80::kVendorId) && (id.product_code == Axia80::kProductCode);
 }
 
 inline bool Axia80Sensor::init(Tether::Platform::LogLevel log_level)

@@ -42,37 +42,37 @@ SyncManagerValidationResult SyncManagerValidation::validate(const std::vector<Sy
 
     // 2. Validate specific SM types if present
     
-    // SM0: MbxIn / Receive (MASTER→SLAVE, ECAT writes) — must be 0x26 (SOEM convention)
+    // SM0: MbxOut / Send (SLAVE→MASTER, ECAT reads) — must be 0x22
     if (configs.size() > 0) {
         const auto& sm = configs[0];
         if (sm.enable) {
-            if (sm.control != 0x26) {
-                 ss << "SM0 invalid control: expected 0x26 (MbxIn/MASTER→SLAVE), got 0x" << std::hex << (int)sm.control;
+            if (sm.control != 0x22) {
+                 ss << "SM0 invalid control: expected 0x22 (MbxOut/SLAVE→MASTER), got 0x" << std::hex << (int)sm.control;
                  return {false, ss.str()};
             }
         }
     }
 
-    // SM1: MbxOut / Send (SLAVE→MASTER, ECAT reads) — must be 0x22 (SOEM convention)
+    // SM1: MbxIn / Receive (MASTER→SLAVE, ECAT writes) — must be 0x26
     if (configs.size() > 1) {
         const auto& sm = configs[1];
         if (sm.enable) {
-            if (sm.control != 0x22) {
-                 ss << "SM1 invalid control: expected 0x22 (MbxOut/SLAVE→MASTER), got 0x" << std::hex << (int)sm.control;
+            if (sm.control != 0x26) {
+                 ss << "SM1 invalid control: expected 0x26 (MbxIn/MASTER→SLAVE), got 0x" << std::hex << (int)sm.control;
                  return {false, ss.str()};
             }
         }
     }
 
-    // Check mailbox address ordering: SM1 address should be > SM0 address
+    // Check mailbox address ordering: SM0 address should be < SM1 address
     // This is the typical convention but not strictly forbidden by the standard
     if (configs.size() > 1) {
         const auto& sm0 = configs[0];
         const auto& sm1 = configs[1];
         if (sm0.enable && sm1.enable) {
             if (sm1.phys_start_addr <= sm0.phys_start_addr) {
-                 ss << "WARNING: SM1 address (0x" << std::hex << sm1.phys_start_addr 
-                    << ") <= SM0 address (0x" << sm0.phys_start_addr 
+                 ss << "WARNING: SM1 address (0x" << std::hex << sm1.phys_start_addr
+                    << ") <= SM0 address (0x" << sm0.phys_start_addr
                     << "). This is unusual but not forbidden. Typical convention: SM0 < SM1";
                  // Don't fail, just log the warning
                  result.error_message = ss.str();
