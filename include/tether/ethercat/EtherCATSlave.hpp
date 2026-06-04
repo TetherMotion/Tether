@@ -57,6 +57,24 @@ class PDOManager;
 class DCManager;
 
 // ============================================================================
+// Global debug control
+// ============================================================================
+
+/**
+ * @brief Enable or disable detailed EtherCAT state machine debug logging
+ *
+ * When enabled, state transition methods will log detailed information about:
+ * - Why a state change is being attempted
+ * - Current state before transition
+ * - Requirements being checked (mailbox configured, PDO configured, etc.)
+ * - Whether requirements are fulfilled
+ * - Result of the transition attempt
+ *
+ * @param enable true to enable debug logging, false to disable
+ */
+void enableStateMachineDebug(bool enable);
+
+// ============================================================================
 // SlaveError — detailed error enum
 // ============================================================================
 

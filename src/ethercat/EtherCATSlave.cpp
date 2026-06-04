@@ -18,6 +18,13 @@ namespace EtherCAT {
 
 static const char* TAG = "EtherCATSlave";
 
+// Global debug flag for ethercat-statemachine
+static bool g_debug_statemachine = false;
+
+void enableStateMachineDebug(bool enable) {
+    g_debug_statemachine = enable;
+}
+
 // ============================================================================
 // EtherCATSlave
 // ============================================================================
@@ -136,6 +143,19 @@ SlaveError EtherCATSlave::transitionTo(SlaveState target) {
 }
 
 SlaveError EtherCATSlave::transitionToInit() {
+    if (g_debug_statemachine) {
+        SlaveState current_state;
+        readState(current_state);
+        TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
+        TETHER_LOGI(TAG, "║  State Machine Transition: Slave %u                          ║", index_);
+        TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
+        TETHER_LOGI(TAG, "║  Transition: %s => INIT", slaveStateToString(current_state));
+        TETHER_LOGI(TAG, "║  Reason:    Requested by user/application");
+        TETHER_LOGI(TAG, "║  Requirements: None (INIT is the base state)");
+        TETHER_LOGI(TAG, "║  Status:     Fulfilled - proceeding with transition");
+        TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
+    }
+    
     if (!master_.requestSlaveApplicationLayerState(index_, static_cast<uint8_t>(SlaveState::INIT))) {
         TETHER_LOGE( TAG,
             "Slave %u: Failed to transition to INIT", index_);
@@ -144,10 +164,34 @@ SlaveError EtherCATSlave::transitionToInit() {
     // Reset configuration flags when going back to INIT
     mailbox_configured_ = false;
     pdo_configured_ = false;
+    
+    if (g_debug_statemachine) {
+        TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
+        TETHER_LOGI(TAG, "║  Transition Result: Slave %u => INIT SUCCESS                  ║", index_);
+        TETHER_LOGI(TAG, "║  Configuration flags reset: mailbox=false, pdo=false          ║");
+        TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
+    }
+    
     return SlaveError::Ok;
 }
 
 SlaveError EtherCATSlave::transitionToPreOp() {
+    if (g_debug_statemachine) {
+        SlaveState current_state;
+        readState(current_state);
+        TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
+        TETHER_LOGI(TAG, "║  State Machine Transition: Slave %u                          ║", index_);
+        TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
+        TETHER_LOGI(TAG, "║  Transition: %s => PRE_OP", slaveStateToString(current_state));
+        TETHER_LOGI(TAG, "║  Reason:    Mailbox operations (SDO, FoE, etc.) require PRE_OP");
+        TETHER_LOGI(TAG, "║  Requirements:");
+        TETHER_LOGI(TAG, "║    - Mailbox (SM0/SM1) must be configured: %s", 
+                    mailbox_configured_ ? "✓ FULFILLED" : "✗ NOT FULFILLED");
+        TETHER_LOGI(TAG, "║  Status:     %s", 
+                    mailbox_configured_ ? "Fulfilled - proceeding with transition" : "NOT Fulfilled - transition blocked");
+        TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
+    }
+    
     if (!mailbox_configured_) {
         TETHER_LOGE( TAG,
             "Slave %u: Cannot transition to PRE_OP — mailbox (SM0/SM1) "
@@ -160,10 +204,33 @@ SlaveError EtherCATSlave::transitionToPreOp() {
             "Slave %u: Failed to transition to PRE_OP (transport error)", index_);
         return SlaveError::TransportError;
     }
+    
+    if (g_debug_statemachine) {
+        TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
+        TETHER_LOGI(TAG, "║  Transition Result: Slave %u => PRE_OP SUCCESS                ║", index_);
+        TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
+    }
+    
     return SlaveError::Ok;
 }
 
 SlaveError EtherCATSlave::transitionToSafeOp() {
+    if (g_debug_statemachine) {
+        SlaveState current_state;
+        readState(current_state);
+        TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
+        TETHER_LOGI(TAG, "║  State Machine Transition: Slave %u                          ║", index_);
+        TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
+        TETHER_LOGI(TAG, "║  Transition: %s => SAFE_OP", slaveStateToString(current_state));
+        TETHER_LOGI(TAG, "║  Reason:    Process data exchange requires SAFE_OP");
+        TETHER_LOGI(TAG, "║  Requirements:");
+        TETHER_LOGI(TAG, "║    - PDO sync-managers (SM2/SM3) must be configured: %s", 
+                    pdo_configured_ ? "✓ FULFILLED" : "✗ NOT FULFILLED");
+        TETHER_LOGI(TAG, "║  Status:     %s", 
+                    pdo_configured_ ? "Fulfilled - proceeding with transition" : "NOT Fulfilled - transition blocked");
+        TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
+    }
+    
     if (!pdo_configured_) {
         TETHER_LOGE( TAG,
             "Slave %u: Cannot transition to SAFE_OP — PDO sync-managers "
@@ -176,6 +243,13 @@ SlaveError EtherCATSlave::transitionToSafeOp() {
             "Slave %u: Failed to transition to SAFE_OP (transport error)", index_);
         return SlaveError::TransportError;
     }
+    
+    if (g_debug_statemachine) {
+        TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
+        TETHER_LOGI(TAG, "║  Transition Result: Slave %u => SAFE_OP SUCCESS               ║", index_);
+        TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
+    }
+    
     return SlaveError::Ok;
 }
 

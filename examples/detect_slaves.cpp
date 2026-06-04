@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
         .help("Network interface name (e.g. eth0, enp3s0)");
     program.add_argument("--debug")
         .default_value(std::string(""))
-        .help("Comma-separated debug flags. Known flags: sii-derivation, mailbox-configuration");
+        .help("Comma-separated debug flags. Known flags: sii-derivation, mailbox-configuration, ethercat-statemachine");
 
     try { program.parse_args(argc, argv); }
     catch (const std::runtime_error& err) {
@@ -83,7 +83,8 @@ int main(int argc, char** argv) {
     // Known debug flags
     const std::set<std::string> known_debug_flags = {
         "sii-derivation",
-        "mailbox-configuration"
+        "mailbox-configuration",
+        "ethercat-statemachine"
     };
 
     // Parse debug flags
