@@ -295,4 +295,104 @@ void SyncManagerAccessor::dumpPDOAssignments(const char* tag) const {
     }
 }
 
+// ============================================================================
+// Debug function: mailbox hardware configuration
+// ============================================================================
+
+void debugMailboxConfiguration(EtherCATMaster& master, uint16_t slave_index, const char* tag) {
+    TETHER_LOGI(tag, "\n╔══════════════════════════════════════════════════════════════╗\n║  Mailbox Hardware Configuration Debug (Slave %u)            ║\n╚══════════════════════════════════════════════════════════════╝\n", (unsigned)slave_index);
+
+    auto& slave = master.slave(slave_index);
+
+    // Helper to decode control register bits
+    auto decode_control = [](uint8_t ctrl) -> std::string {
+        std::ostringstream oss;
+        const uint8_t mode = ctrl & 0x03;
+        if (mode == 0x00) oss << "BUFFERED";
+        else if (mode == 0x02) oss << "MAILBOX";
+        else oss << "UNKNOWN(0x" << std::hex << (int)mode << ")";
+
+        oss << " ";
+        if (ctrl & 0x04) oss << "DIR_WRITE ";
+        else oss << "DIR_READ ";
+
+        if (ctrl & 0x08) oss << "IRQ_ECAT ";
+        if (ctrl & 0x10) oss << "IRQ_PDI ";
+        if (ctrl & 0x20) oss << "WATCHDOG ";
+        if (ctrl & 0x40) oss << "REPEAT_REQ ";
+
+        return oss.str();
+    };
+
+    // Read SM0 (Mailbox Send / Slave→Master)
+    TETHER_LOGI(tag, "\n📋 SM0 (Mailbox Send / Slave→Master)");
+    auto sm0 = slave.sm(0);
+    auto hw0 = sm0.readHardwareConfig();
+    if (hw0.read_ok) {
+        TETHER_LOGI(tag, "  Physical Register Base: 0x%04X", (unsigned)sm0.physRegisterBase());
+        TETHER_LOGI(tag, "  Start Address:          0x%04X", (unsigned)hw0.start_addr);
+        TETHER_LOGI(tag, "  Length:                 %u bytes", (unsigned)hw0.length);
+        TETHER_LOGI(tag, "  Control Register (0x%02X): %s", (unsigned)hw0.control, decode_control(hw0.control).c_str());
+        TETHER_LOGI(tag, "  Status Register:        0x%02X", (unsigned)hw0.status);
+        TETHER_LOGI(tag, "  Activate Register:      0x%02X (%s)", (unsigned)hw0.activate, hw0.isEnabled() ? "ENABLED" : "disabled");
+        TETHER_LOGI(tag, "  PDI Control:            0x%02X", (unsigned)hw0.pdi_ctrl);
+    } else {
+        TETHER_LOGE(tag, "  ❌ Failed to read SM0 hardware registers");
+    }
+
+    // Read SM1 (Mailbox Receive / Master→Slave)
+    TETHER_LOGI(tag, "\n📋 SM1 (Mailbox Receive / Master→Slave)");
+    auto sm1 = slave.sm(1);
+    auto hw1 = sm1.readHardwareConfig();
+    if (hw1.read_ok) {
+        TETHER_LOGI(tag, "  Physical Register Base: 0x%04X", (unsigned)sm1.physRegisterBase());
+        TETHER_LOGI(tag, "  Start Address:          0x%04X", (unsigned)hw1.start_addr);
+        TETHER_LOGI(tag, "  Length:                 %u bytes", (unsigned)hw1.length);
+        TETHER_LOGI(tag, "  Control Register (0x%02X): %s", (unsigned)hw1.control, decode_control(hw1.control).c_str());
+        TETHER_LOGI(tag, "  Status Register:        0x%02X", (unsigned)hw1.status);
+        TETHER_LOGI(tag, "  Activate Register:      0x%02X (%s)", (unsigned)hw1.activate, hw1.isEnabled() ? "ENABLED" : "disabled");
+        TETHER_LOGI(tag, "  PDI Control:            0x%02X", (unsigned)hw1.pdi_ctrl);
+    } else {
+        TETHER_LOGE(tag, "  ❌ Failed to read SM1 hardware registers");
+    }
+
+    // Read SM Watchdog status
+    TETHER_LOGI(tag, "\n📋 SM Watchdog Status (Register 0x0440)");
+    uint8_t wd[2] = {0};
+    if (master.readRegister(EtherCAT::SlaveAddress(slave_index), EtherCAT::SyncManager::kWatchdogStatusReg, wd, sizeof(wd), 200)) {
+        const uint16_t wdStatus = static_cast<uint16_t>(wd[0] | (static_cast<uint16_t>(wd[1]) << 8));
+        TETHER_LOGI(tag, "  Watchdog Status: 0x%04X %s", (unsigned)wdStatus, (wdStatus == 0) ? "(OK)" : "(EXPIRED!)");
+    } else {
+        TETHER_LOGW(tag, "  ⚠ Failed to read SM watchdog status register");
+    }
+
+    // Read CommType via SDO (if available)
+    TETHER_LOGI(tag, "\n📋 SM Communication Types (via SDO 0x1C00)");
+    uint8_t commType0 = 0xFF, commType1 = 0xFF;
+    SlaveError err0 = sm0.readCommType(commType0);
+    SlaveError err1 = sm1.readCommType(commType1);
+
+    if (err0 == SlaveError::Ok) {
+        const char* type0 = (commType0 == 0x01) ? "MailboxReceive" :
+                           (commType0 == 0x02) ? "MailboxSend" :
+                           (commType0 == 0x03) ? "ProcessOutput" :
+                           (commType0 == 0x04) ? "ProcessInput" :
+                           (commType0 == 0x00) ? "NotUsed" : "Unknown";
+        TETHER_LOGI(tag, "  SM0 CommType: 0x%02X (%s)", (unsigned)commType0, type0);
+    } else {
+        TETHER_LOGW(tag, "  ⚠ SM0 CommType read failed (SDO error)");
+    }
+
+    if (err1 == SlaveError::Ok) {
+        const char* type1 = (commType1 == 0x01) ? "MailboxReceive" :
+                           (commType1 == 0x02) ? "MailboxSend" :
+                           (commType1 == 0x03) ? "ProcessOutput" :
+                           (commType1 == 0x04) ? "ProcessInput" :
+                           (commType1 == 0x00) ? "NotUsed" : "Unknown";
+        TETHER_LOGI(tag, "  SM1 CommType: 0x%02X (%s)", (unsigned)commType1, type1);
+    } else {
+        TETHER_LOGW(tag, "  ⚠ SM1 CommType read failed (SDO error)");
+    }
+}
+
 } // namespace EtherCAT

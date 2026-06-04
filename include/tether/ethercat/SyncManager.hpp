@@ -49,6 +49,7 @@
 
 namespace EtherCAT {
     class EtherCATSlave;
+    class EtherCATMaster;
     enum class SlaveError : uint8_t;
 }
 
@@ -463,5 +464,18 @@ private:
     EtherCATSlave& slave_; ///< Owning slave
     uint8_t        index_; ///< SM index (0-based)
 };
+
+/**
+ * @brief Debug function to dump mailbox hardware register configuration.
+ *
+ * Reads and displays the actual hardware register configuration of SM0 and SM1
+ * (mailbox sync managers), showing start addresses, lengths, control register
+ * bits, and activation status.
+ *
+ * @param master        EtherCAT master instance
+ * @param slave_index   Slave index (0-based)
+ * @param tag           Logger tag
+ */
+void debugMailboxConfiguration(EtherCATMaster& master, uint16_t slave_index, const char* tag);
 
 } // namespace EtherCAT

@@ -21,6 +21,7 @@
 
 #include "tether/ethercat/EtherCATMaster.hpp"
 #include "tether/ethercat/EtherCATTypes.hpp"
+#include "tether/ethercat/SyncManager.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include "tether/sii/SIIReader.hpp"
 #include "tether/sii/SIIParser.hpp"
@@ -68,7 +69,7 @@ int main(int argc, char** argv) {
         .help("Network interface name (e.g. eth0, enp3s0)");
     program.add_argument("--debug")
         .default_value(std::string(""))
-        .help("Comma-separated debug flags (e.g. sii-derivation)");
+        .help("Comma-separated debug flags. Known flags: sii-derivation, mailbox-configuration");
 
     try { program.parse_args(argc, argv); }
     catch (const std::runtime_error& err) {
@@ -78,9 +79,16 @@ int main(int argc, char** argv) {
 
     std::string iface = program.get<std::string>("--interface");
     std::string debug_str = program.get<std::string>("--debug");
-    
+
+    // Known debug flags
+    const std::set<std::string> known_debug_flags = {
+        "sii-derivation",
+        "mailbox-configuration"
+    };
+
     // Parse debug flags
     std::set<std::string> debug_flags;
+    std::set<std::string> unknown_flags;
     if (!debug_str.empty()) {
         std::stringstream ss(debug_str);
         std::string flag;
@@ -90,7 +98,22 @@ int main(int argc, char** argv) {
             flag.erase(flag.find_last_not_of(" \t") + 1);
             if (!flag.empty()) {
                 debug_flags.insert(flag);
+                if (known_debug_flags.find(flag) == known_debug_flags.end()) {
+                    unknown_flags.insert(flag);
+                }
             }
+        }
+    }
+
+    // Warn about unknown debug flags
+    if (!unknown_flags.empty()) {
+        TETHER_LOGW(TAG, "Unknown debug flags:");
+        for (const auto& flag : unknown_flags) {
+            TETHER_LOGW(TAG, "  - %s", flag.c_str());
+        }
+        TETHER_LOGW(TAG, "Known debug flags:");
+        for (const auto& flag : known_debug_flags) {
+            TETHER_LOGW(TAG, "  - %s", flag.c_str());
         }
     }
     
@@ -179,6 +202,13 @@ int main(int argc, char** argv) {
         TETHER_LOGI(TAG, "\n=== SII Mailbox Derivation Debug ===");
         for (uint16_t i = 0; i < slaves; i++) {
             EtherCAT::SII::debugSIIMailboxDerivation(master, i, TAG);
+        }
+    }
+
+    if (debug_flags.count("mailbox-configuration") && slaves > 0) {
+        TETHER_LOGI(TAG, "\n=== Mailbox Hardware Configuration Debug ===");
+        for (uint16_t i = 0; i < slaves; i++) {
+            EtherCAT::debugMailboxConfiguration(master, i, TAG);
         }
     }
 
