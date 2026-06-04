@@ -22,6 +22,26 @@ endif()
 cmake_minimum_required(VERSION 3.16)
 project(Tether VERSION 2.0.0 LANGUAGES C CXX)
 
+# =============================================================================
+# Git Submodule Check
+# =============================================================================
+set(SUBMODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/components/libSLIPspeed")
+if(NOT EXISTS "${SUBMODULE_PATH}")
+    message(FATAL_ERROR
+        "Git submodule 'libSLIPspeed' is not initialized.\n"
+        "Please run the following command in the repository root:\n"
+        "  git submodule update --init\n"
+        "Then re-run CMake."
+    )
+elseif(NOT EXISTS "${SUBMODULE_PATH}/include/SLIPStream/Buffer.hpp")
+    message(FATAL_ERROR
+        "Git submodule 'libSLIPspeed' appears to be initialized but is empty or incomplete.\n"
+        "Please run the following command in the repository root:\n"
+        "  git submodule update --init\n"
+        "Then re-run CMake."
+    )
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
