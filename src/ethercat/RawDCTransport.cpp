@@ -20,16 +20,14 @@ bool RawDCTransport::readRegister(uint16_t slave_index, uint16_t reg_addr,
                                    void* data, uint16_t size,
                                    unsigned int timeout_ms)
 {
-    const uint16_t adp = EtherCATMaster::adpForSlaveIndex(slave_index);
-    return master_.readRegister(adp, reg_addr, data, size, timeout_ms);
+    return master_.readRegister(EtherCAT::SlaveAddress(slave_index), reg_addr, data, size, timeout_ms);
 }
 
 bool RawDCTransport::writeRegister(uint16_t slave_index, uint16_t reg_addr,
                                     const void* data, uint16_t size,
                                     unsigned int timeout_ms)
 {
-    const uint16_t adp = EtherCATMaster::adpForSlaveIndex(slave_index);
-    return master_.writeRegister(adp, reg_addr, data, size, timeout_ms);
+    return master_.writeRegister(EtherCAT::SlaveAddress(slave_index), reg_addr, data, size, timeout_ms);
 }
 
 bool RawDCTransport::sendSyncDatagram(uint16_t slave_index, uint16_t reg_addr,

@@ -377,7 +377,7 @@ public:
 
     // ---- SII / EEPROM ------------------------------------------------------
 
-    bool siiReadString(uint16_t adp, uint16_t string_number,
+    bool siiReadString(uint16_t slave_index, uint16_t string_number,
                        char* out, size_t out_cap);
 
     /**
@@ -389,7 +389,7 @@ public:
      */
     void logDiscoveredSlavesSummary(const char* tag = "EtherCAT");
 
-    bool configureMailboxFromSii(uint16_t adp,
+    bool configureMailboxFromSii(uint16_t slave_index,
                                  uint16_t* out_wr_addr, uint16_t* out_wr_len,
                                  uint16_t* out_rd_addr, uint16_t* out_rd_len,
                                  uint16_t* out_mbx_proto);
@@ -446,6 +446,11 @@ public:
     static uint16_t adpForSlaveIndex(uint16_t slave_index) {
         return physicalAddressForSlaveIndex(slave_index).raw();
     }
+
+    static constexpr SlaveAddress slaveAddressFromADP(uint16_t adp) {
+        return SlaveAddress((adp == 0x0000) ? 0 : static_cast<uint16_t>(0u - adp));
+    }
+
     static const char* getECStateName(uint8_t state);
 
     static bool resolvePhysicalSlaveIndex(SlaveAddress slave_address, uint16_t& slave_index_out);
@@ -534,7 +539,7 @@ private:
     // ---- Internal helpers --------------------------------------------------
     void masterTask();
     bool discoverSlaves();
-    bool setPreopAndConfirm(uint16_t adp);
+    bool setPreopAndConfirm(uint16_t slave_index);
     void ensureRxQueues();
     void flushRxQueue();
     void parseEtherCATFrame(const uint8_t* frame, size_t length);

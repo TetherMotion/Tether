@@ -47,7 +47,7 @@ class EtherCATMaster;
 namespace Raw {
     uint16_t adp_for_slave_index(uint16_t index) { (void)index; return 0; }
 
-    bool configure_mailbox_from_sii(EtherCATMaster& /*master*/, uint16_t /*adp*/,
+    bool configure_mailbox_from_sii(EtherCATMaster& /*master*/, uint16_t /*slave_index*/,
                                uint16_t* /*wr_addr*/, uint16_t* /*wr_len*/, uint16_t* /*rd_addr*/, uint16_t* /*rd_len*/, uint16_t* /*proto*/) {
         return false;
     }

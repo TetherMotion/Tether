@@ -26,12 +26,12 @@ static bool ec_eeprom_wait_not_busy_ap(EtherCATMaster& master, uint16_t adp, uin
 {
     auto start = std::chrono::steady_clock::now();
     auto deadline = start + std::chrono::milliseconds(timeout_ms);
-    
+
     while (true) {
         if (std::chrono::steady_clock::now() >= deadline) return false;
-        
+
         uint16_t estat_le = 0;
-        if (master.readRegister(adp, EC_REG_EEPSTAT, estat_le, 100)) {
+        if (master.readRegister(EtherCATMaster::slaveAddressFromADP(adp), EC_REG_EEPSTAT, estat_le, 100)) {
             const uint16_t estat = le16_to_host(estat_le);
             if (out_estat) *out_estat = estat;
             if ((estat & EC_ESTAT_BUSY) == 0) return true;
@@ -50,7 +50,7 @@ static bool ec_eeprom_read_u32_ap(EtherCATMaster& master, uint16_t adp, uint16_t
 
     if ((estat & EC_ESTAT_EMASK) != 0) {
         const uint16_t nop_le = host_to_le16(EC_ECMD_NOP);
-        (void)master.writeRegister(adp, EC_REG_EEPCTL, nop_le, 200);
+        (void)master.writeRegister(EtherCATMaster::slaveAddressFromADP(adp), EC_REG_EEPCTL, nop_le, 200);
     }
 
     int nackcnt = 0;
@@ -60,7 +60,7 @@ static bool ec_eeprom_read_u32_ap(EtherCATMaster& master, uint16_t adp, uint16_t
         cmd.addr_le = host_to_le16(eeprom_word_addr);
         cmd.d2_le = host_to_le16(0);
 
-        if (!master.writeRegister(adp, EC_REG_EEPCTL, cmd, 200)) return false;
+        if (!master.writeRegister(EtherCATMaster::slaveAddressFromADP(adp), EC_REG_EEPCTL, cmd, 200)) return false;
 
         delay_us(200);
         estat = 0;
@@ -73,8 +73,8 @@ static bool ec_eeprom_read_u32_ap(EtherCATMaster& master, uint16_t adp, uint16_t
         }
 
         uint32_t edat_le = 0;
-        if (!master.readRegister(adp, EC_REG_EEPDAT, edat_le, 200)) return false;
-        
+        if (!master.readRegister(EtherCATMaster::slaveAddressFromADP(adp), EC_REG_EEPDAT, edat_le, 200)) return false;
+
         if (out_u32) *out_u32 = le32_to_host(edat_le);
         return true;
     } while (nackcnt > 0 && nackcnt < 3);
@@ -151,7 +151,7 @@ static bool sii_get_byte(EtherCATMaster& master, uint16_t adp, uint16_t sii_byte
  */
 bool configure_mailbox_from_sii(
     EtherCATMaster& master,
-    uint16_t adp,
+    uint16_t slave_index,
     uint16_t *out_wr_addr,
     uint16_t *out_wr_len,
     uint16_t *out_rd_addr,
@@ -169,10 +169,6 @@ bool configure_mailbox_from_sii(
         EtherCAT::SII::MBX_PROTO_COE | EtherCAT::SII::MBX_PROTO_EOE | EtherCAT::SII::MBX_PROTO_AOE
     );
 
-    // Convert ADP to slave index for SII reader
-    // ADP: 0x0000=slave0, 0xFFFF=slave1, 0xFFFE=slave2, etc.
-    uint16_t slave_index = (adp == 0x0000) ? 0 : static_cast<uint16_t>(0 - adp);
-    
     // Try to read SII mailbox configuration
     EtherCAT::SII::SIIMailboxConfig mailbox;
     bool sii_ok = EtherCAT::SII::readSIIMailbox(master, slave_index, mailbox);
@@ -271,8 +267,8 @@ bool configure_mailbox_from_sii(
     auto read_sm = [&](uint16_t sm_base, unsigned sm_index) -> SmRegs {
         SmRegs r;
         uint8_t buf[8] = {0};
-        if (!master.readRegister(adp, sm_base, buf, sizeof(buf), 200)) {
-            TETHER_LOGD(TAG, "[MBOXTRACE] SM%u reg read failed (adp=0x%04X base=0x%04X)", sm_index, (unsigned)adp, (unsigned)sm_base);
+        if (!master.readRegister(EtherCAT::SlaveAddress(slave_index), sm_base, buf, sizeof(buf), 200)) {
+            TETHER_LOGD(TAG, "[MBOXTRACE] SM%u reg read failed (slave=%u base=0x%04X)", sm_index, (unsigned)slave_index, (unsigned)sm_base);
             return r;
         }
 
@@ -343,7 +339,7 @@ bool configure_mailbox_from_sii(
     auto check_sm_control = [&](uint16_t sm_base, unsigned sm_index){
         uint8_t ctrl = 0;
         uint16_t ctrl_addr = static_cast<uint16_t>(sm_base + 0x04u); // control offset
-        if (master.readRegister(adp, ctrl_addr, ctrl, 200)) {
+        if (master.readRegister(EtherCAT::SlaveAddress(slave_index), ctrl_addr, ctrl, 200)) {
                 using namespace EtherCAT::PDO;
             bool is_mailbox_mode = ((ctrl & SM_CTRL_MODE_MASK) == SM_CTRL_MODE_MAILBOX);
             bool is_receive_mbx = ((ctrl & SM_CTRL_DIR_WRITE) != 0);  // bit2=1: ECAT writes = M→S = Receive/MbxIn
@@ -377,7 +373,7 @@ bool configure_mailbox_from_sii(
                 }
             }
         } else {
-            TETHER_LOGD(TAG, "SM%u control read failed (adp=0x%04X, addr=0x%04X)", sm_index, (unsigned)adp, (unsigned)ctrl_addr);
+            TETHER_LOGD(TAG, "SM%u control read failed (slave=%u, addr=0x%04X)", sm_index, (unsigned)slave_index, (unsigned)ctrl_addr);
         }
     };
 
@@ -389,7 +385,10 @@ bool configure_mailbox_from_sii(
     return true;
 }
 
-bool sii_read_string(EtherCATMaster& master, uint16_t adp, uint16_t string_number, char *out, size_t out_cap) {
+bool sii_read_string(EtherCATMaster& master, uint16_t slave_index, uint16_t string_number, char *out, size_t out_cap) {
+    (void)master;
+    (void)slave_index;
+    (void)string_number;
     if (out) *out = '\0';
     return false;
 }
@@ -397,9 +396,9 @@ bool sii_read_string(EtherCATMaster& master, uint16_t adp, uint16_t string_numbe
 } // namespace Raw
 
 namespace raw {
-bool sii_read_string(EtherCATMaster& master, uint16_t adp, uint16_t string_number, char *out, size_t out_cap) {
+bool sii_read_string(EtherCATMaster& master, uint16_t slave_index, uint16_t string_number, char *out, size_t out_cap) {
     // Forward to the capitalized Raw implementation
-    return Raw::sii_read_string(master, adp, string_number, out, out_cap);
+    return Raw::sii_read_string(master, slave_index, string_number, out, out_cap);
 }
 
 } // namespace raw

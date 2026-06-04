@@ -40,7 +40,7 @@ static void diag_hexdump(const uint8_t *data, size_t len, size_t max_print = 64)
 static bool mbx_clear_read_area(EtherCATMaster& master, uint16_t adp, uint16_t mbx_read_addr)
 {
     const uint16_t zero_le = host_to_le16(0);
-    return master.writeRegister(adp, mbx_read_addr, zero_le, 200);
+    return master.writeRegister(EtherCATMaster::slaveAddressFromADP(adp), mbx_read_addr, zero_le, 200);
 }
 
 static void mbx_diag_dump_slave_state(EtherCATMaster& master, uint16_t adp, uint16_t mbx_wr_addr, uint16_t mbx_rd_addr)
@@ -53,12 +53,12 @@ static void mbx_diag_dump_slave_state(EtherCATMaster& master, uint16_t adp, uint
     uint8_t sm0_stat_act[2] = {0};
     uint8_t sm1_stat_act[2] = {0};
 
-    (void)master.readRegister(adp, 0x0130, al_status, 200);
-    (void)master.readRegister(adp, 0x0134, al_code, 200);
-    (void)master.readRegister(adp, 0x0800, sm0, sizeof(sm0), 200);
-    (void)master.readRegister(adp, 0x0808, sm1, sizeof(sm1), 200);
-    (void)master.readRegister(adp, 0x0805, sm0_stat_act, sizeof(sm0_stat_act), 200);
-    (void)master.readRegister(adp, 0x080D, sm1_stat_act, sizeof(sm1_stat_act), 200);
+    (void)master.readRegister(EtherCATMaster::slaveAddressFromADP(adp), 0x0130, al_status, 200);
+    (void)master.readRegister(EtherCATMaster::slaveAddressFromADP(adp), 0x0134, al_code, 200);
+    (void)master.readRegister(EtherCATMaster::slaveAddressFromADP(adp), 0x0800, sm0, sizeof(sm0), 200);
+    (void)master.readRegister(EtherCATMaster::slaveAddressFromADP(adp), 0x0808, sm1, sizeof(sm1), 200);
+    (void)master.readRegister(EtherCATMaster::slaveAddressFromADP(adp), 0x0805, sm0_stat_act, sizeof(sm0_stat_act), 200);
+    (void)master.readRegister(EtherCATMaster::slaveAddressFromADP(adp), 0x080D, sm1_stat_act, sizeof(sm1_stat_act), 200);
 
     const uint16_t al_s = le16_to_host(al_status);
     const uint16_t al_c = le16_to_host(al_code);
@@ -100,7 +100,7 @@ static bool mbx_apwr_with_wkc_probe(
 
     // Use the master's descriptive write API, which still pre-registers a waiter,
     // the response arrives before we start waiting.
-    if (master.writeRegister(adp, primary_addr, payload, payload_len, timeout_ms)) {
+    if (master.writeRegister(EtherCATMaster::slaveAddressFromADP(adp), primary_addr, payload, payload_len, timeout_ms)) {
         return true;
     }
 
@@ -108,7 +108,7 @@ static bool mbx_apwr_with_wkc_probe(
     TETHER_LOGW(TAG, "SDO mailbox APWR not acknowledged for adp=0x%04X addr=0x%04X (len=%u) after retries. Probing alt addr=0x%04X...",
                 adp, primary_addr, (unsigned)payload_len, alt_addr);
 
-    if (master.writeRegister(adp, alt_addr, payload, payload_len, timeout_ms)) {
+    if (master.writeRegister(EtherCATMaster::slaveAddressFromADP(adp), alt_addr, payload, payload_len, timeout_ms)) {
         if (out_used_alt) *out_used_alt = true;
         TETHER_LOGW(TAG, "SDO mailbox APWR acknowledged on alt addr=0x%04X. Treating mailbox wr/rd as swapped for this SDO op.",
                     alt_addr);
@@ -188,11 +188,11 @@ bool coe_sdo_upload(
     {
         // First, check SM0 status to see if mailbox is ready
         uint8_t sm0_status = 0;
-        (void)master.readRegister(adp, 0x0805, sm0_status, 100);
+        (void)master.readRegister(EtherCATMaster::slaveAddressFromADP(adp), 0x0805, sm0_status, 100);
         
         // Read AL_STATUS to verify we're in PRE_OP
         uint16_t al_status = 0;
-        (void)master.readRegister(adp, 0x0130, al_status, 100);
+        (void)master.readRegister(EtherCATMaster::slaveAddressFromADP(adp), 0x0130, al_status, 100);
         
         // Reduce logging spam - only log once every 1000 calls
         static uint32_t s_mbx_write_count = 0;
@@ -246,7 +246,7 @@ bool coe_sdo_upload(
         uint8_t sdo_cmd = 0;
         uint16_t r_len = 0;
         for (int attempt = 0; attempt < 50; attempt++) {
-            if (!master.readRegister(adp, mbx_read_addr, mbxbuf, static_cast<uint16_t>(mbx_read_len), 200)) {
+            if (!master.readRegister(EtherCATMaster::slaveAddressFromADP(adp), mbx_read_addr, mbxbuf, static_cast<uint16_t>(mbx_read_len), 200)) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
@@ -430,7 +430,7 @@ bool coe_sdo_upload(
             // Read segment response.
             bool got = false;
             for (int attempt2 = 0; attempt2 < 50; attempt2++) {
-                if (!master.readRegister(adp, mbx_read_addr, mbxbuf, static_cast<uint16_t>(mbx_read_len), 200)) {
+                if (!master.readRegister(EtherCATMaster::slaveAddressFromADP(adp), mbx_read_addr, mbxbuf, static_cast<uint16_t>(mbx_read_len), 200)) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     continue;
                 }
@@ -604,7 +604,7 @@ bool coe_sdo_download(
 
     // Poll mailbox read area for response
     for (int attempt = 0; attempt < 50; attempt++) {
-        if (!master.readRegister(adp, mbx_read_addr, mbxbuf, static_cast<uint16_t>(mbx_read_len), 500)) {
+        if (!master.readRegister(EtherCATMaster::slaveAddressFromADP(adp), mbx_read_addr, mbxbuf, static_cast<uint16_t>(mbx_read_len), 500)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }

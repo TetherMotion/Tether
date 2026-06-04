@@ -115,8 +115,8 @@ private:
     uint32_t m_timeout_ms{500};
     
     // Internal helpers
-    bool waitNotBusy(uint16_t adp, uint16_t* out_status);
-    bool readRaw32(uint16_t adp, uint16_t word_address, uint32_t* out);
+    bool waitNotBusy(uint16_t slave_index, uint16_t* out_status);
+    bool readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t* out);
     uint16_t adpForSlave(uint16_t slave_index);
 };
 

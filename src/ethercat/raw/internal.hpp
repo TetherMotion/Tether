@@ -572,7 +572,7 @@ uint16_t adp_for_slave_index(uint16_t slave_index);
  */
 bool configure_mailbox_from_sii(
     EtherCATMaster& master,
-    uint16_t adp,
+    uint16_t slave_index,
     uint16_t *out_wr_addr,
     uint16_t *out_wr_len,
     uint16_t *out_rd_addr,
@@ -582,7 +582,7 @@ bool configure_mailbox_from_sii(
 /**
  * @brief Read a string from slave SII (EEPROM)
  */
-bool sii_read_string(EtherCATMaster& master, uint16_t adp, uint16_t string_number, char *out, size_t out_cap);
+bool sii_read_string(EtherCATMaster& master, uint16_t slave_index, uint16_t string_number, char *out, size_t out_cap);
 
 // ============================================================================
 // CoE SDO Communication

@@ -467,11 +467,11 @@ public:
     
     bool apwr(uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int timeout_ms) override {
         if (!master_) return false;
-        return master_->writeRegister(adp, ado, data, len, timeout_ms);
+        return master_->writeRegister(EtherCATMaster::slaveAddressFromADP(adp), ado, data, len, timeout_ms);
     }
     bool aprd(uint16_t adp, uint16_t ado, void* out, uint16_t len, unsigned int timeout_ms) override {
         if (!master_) return false;
-        return master_->readRegister(adp, ado, out, len, timeout_ms);
+        return master_->readRegister(EtherCATMaster::slaveAddressFromADP(adp), ado, out, len, timeout_ms);
     }
     uint16_t adpForSlaveIndex(uint16_t slave_index) override {
         return EtherCAT::EtherCATMaster::adpForSlaveIndex(slave_index);

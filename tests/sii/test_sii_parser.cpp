@@ -249,7 +249,7 @@ TEST_F(SIIMailboxParserTest, MultipleProtocols) {
     mock_eeprom_.setValidMailbox(0x1000, 128, 0x1400, 64, all_protocols);
     
     uint16_t proto = 0;
-    bool result = configure_mailbox_from_sii(master_, 0x0000, nullptr, nullptr, 
+    bool result = configure_mailbox_from_sii(master_, 0, nullptr, nullptr, 
                                             nullptr, nullptr, &proto);
     
     EXPECT_TRUE(result);
@@ -263,7 +263,7 @@ TEST_F(SIIMailboxParserTest, LargeMailboxSize) {
     mock_eeprom_.setValidMailbox(0x1000, 1024, 0x1400, 1024, MBX_PROTO_COE);
     
     uint16_t wr_len = 0, rd_len = 0;
-    bool result = configure_mailbox_from_sii(master_, 0x0000, nullptr, &wr_len, 
+    bool result = configure_mailbox_from_sii(master_, 0, nullptr, &wr_len, 
                                             nullptr, &rd_len, nullptr);
     
     EXPECT_TRUE(result);
@@ -279,17 +279,17 @@ TEST_F(SIIMailboxParserTest, DifferentSlaveIndices) {
     
     // Slave 0 (ADP = 0x0000)
     uint16_t wr_addr = 0;
-    EXPECT_TRUE(configure_mailbox_from_sii(master_, 0x0000, &wr_addr, nullptr, 
+    EXPECT_TRUE(configure_mailbox_from_sii(master_, 0, &wr_addr, nullptr, 
                                           nullptr, nullptr, nullptr));
     EXPECT_EQ(wr_addr, 0x1000);
     
     // Slave 1 (ADP = 0xFFFF = -1)
-    EXPECT_TRUE(configure_mailbox_from_sii(master_, 0xFFFF, &wr_addr, nullptr, 
+    EXPECT_TRUE(configure_mailbox_from_sii(master_, 1, &wr_addr, nullptr,
                                           nullptr, nullptr, nullptr));
     EXPECT_EQ(wr_addr, 0x1000);
-    
+
     // Slave 2 (ADP = 0xFFFE = -2)
-    EXPECT_TRUE(configure_mailbox_from_sii(master_, 0xFFFE, &wr_addr, nullptr, 
+    EXPECT_TRUE(configure_mailbox_from_sii(master_, 2, &wr_addr, nullptr,
                                           nullptr, nullptr, nullptr));
     EXPECT_EQ(wr_addr, 0x1000);
 }
@@ -307,7 +307,7 @@ TEST_F(SIIMailboxParserTest, NoMailboxFallsBackToDefaults) {
     
     // Execute
     uint16_t wr_addr = 0, wr_len = 0, rd_addr = 0, rd_len = 0, proto = 0;
-    bool result = configure_mailbox_from_sii(master_, 0x0000, &wr_addr, &wr_len, 
+    bool result = configure_mailbox_from_sii(master_, 0, &wr_addr, &wr_len, 
                                             &rd_addr, &rd_len, &proto);
     
     // Verify: Should return defaults
@@ -328,7 +328,7 @@ TEST_F(SIIMailboxParserTest, FailedSIIReadFallsBackToDefaults) {
     
     // Execute
     uint16_t wr_addr = 0, wr_len = 0, rd_addr = 0, rd_len = 0, proto = 0;
-    bool result = configure_mailbox_from_sii(master_, 0x0000, &wr_addr, &wr_len, 
+    bool result = configure_mailbox_from_sii(master_, 0, &wr_addr, &wr_len, 
                                             &rd_addr, &rd_len, &proto);
     
     // Verify: Should still succeed with defaults
@@ -351,7 +351,7 @@ TEST_F(SIIMailboxParserTest, ZeroRxSizeFallsBack) {
     mock_eeprom_.setValidMailbox(0x1400, 0, 0x1000, 64, MBX_PROTO_COE);
     
     uint16_t wr_len = 0xAAAA;  // Sentinel value
-    bool result = configure_mailbox_from_sii(master_, 0x0000, nullptr, &wr_len, 
+    bool result = configure_mailbox_from_sii(master_, 0, nullptr, &wr_len, 
                                             nullptr, nullptr, nullptr);
     
     EXPECT_TRUE(result);
@@ -365,7 +365,7 @@ TEST_F(SIIMailboxParserTest, ZeroTxSizeFallsBack) {
     mock_eeprom_.setValidMailbox(0x1400, 128, 0x1000, 0, MBX_PROTO_COE);
     
     uint16_t rd_len = 0xAAAA;  // Sentinel value
-    bool result = configure_mailbox_from_sii(master_, 0x0000, nullptr, nullptr, 
+    bool result = configure_mailbox_from_sii(master_, 0, nullptr, nullptr, 
                                             nullptr, &rd_len, nullptr);
     
     EXPECT_TRUE(result);
@@ -379,7 +379,7 @@ TEST_F(SIIMailboxParserTest, BothZeroSizesFallBack) {
     mock_eeprom_.setValidMailbox(0x1400, 0, 0x1000, 0, MBX_PROTO_COE);
     
     uint16_t wr_addr = 0, wr_len = 0, rd_addr = 0, rd_len = 0;
-    bool result = configure_mailbox_from_sii(master_, 0x0000, &wr_addr, &wr_len, 
+    bool result = configure_mailbox_from_sii(master_, 0, &wr_addr, &wr_len, 
                                             &rd_addr, &rd_len, nullptr);
     
     EXPECT_TRUE(result);
@@ -397,7 +397,7 @@ TEST_F(SIIMailboxParserTest, OverlappingMailboxesFallBack) {
     mock_eeprom_.setValidMailbox(0x1000, 128, 0x1000, 64, MBX_PROTO_COE);
     
     uint16_t wr_addr = 0, rd_addr = 0;
-    bool result = configure_mailbox_from_sii(master_, 0x0000, &wr_addr, nullptr, 
+    bool result = configure_mailbox_from_sii(master_, 0, &wr_addr, nullptr, 
                                             &rd_addr, nullptr, nullptr);
     
     EXPECT_TRUE(result);
@@ -413,7 +413,7 @@ TEST_F(SIIMailboxParserTest, SmallMailboxAccepted) {
     mock_eeprom_.setValidMailbox(0x1400, 32, 0x1000, 32, MBX_PROTO_COE);
     
     uint16_t wr_len = 0, rd_len = 0;
-    bool result = configure_mailbox_from_sii(master_, 0x0000, nullptr, &wr_len, 
+    bool result = configure_mailbox_from_sii(master_, 0, nullptr, &wr_len, 
                                             nullptr, &rd_len, nullptr);
     
     EXPECT_TRUE(result);
@@ -429,7 +429,7 @@ TEST_F(SIIMailboxParserTest, VerySmallMailboxAcceptedWithWarning) {
     mock_eeprom_.setValidMailbox(0x1400, 16, 0x1000, 16, MBX_PROTO_COE);
     
     uint16_t wr_len = 0, rd_len = 0;
-    bool result = configure_mailbox_from_sii(master_, 0x0000, nullptr, &wr_len, 
+    bool result = configure_mailbox_from_sii(master_, 0, nullptr, &wr_len, 
                                             nullptr, &rd_len, nullptr);
     
     EXPECT_TRUE(result);
@@ -448,7 +448,7 @@ TEST_F(SIIMailboxParserTest, NullPointersHandled) {
     mock_eeprom_.setValidMailbox(0x1400, 128, 0x1000, 64, MBX_PROTO_COE);
     
     // Should not crash with NULL pointers
-    bool result = configure_mailbox_from_sii(master_, 0x0000, nullptr, nullptr, 
+    bool result = configure_mailbox_from_sii(master_, 0, nullptr, nullptr, 
                                             nullptr, nullptr, nullptr);
     
     EXPECT_TRUE(result);
@@ -463,7 +463,7 @@ TEST_F(SIIMailboxParserTest, PartialNullPointers) {
     uint16_t wr_addr = 0, proto = 0;
     
     // Only request write addr and protocols, others NULL
-    bool result = configure_mailbox_from_sii(master_, 0x0000, &wr_addr, nullptr, 
+    bool result = configure_mailbox_from_sii(master_, 0, &wr_addr, nullptr, 
                                             nullptr, nullptr, &proto);
     
     EXPECT_TRUE(result);
@@ -482,7 +482,7 @@ TEST_F(SIIMailboxParserTest, NoProtocolsSpecified) {
     mock_eeprom_.setValidMailbox(0x1400, 128, 0x1000, 64, 0);
     
     uint16_t proto = 0xFFFF;  // Sentinel
-    bool result = configure_mailbox_from_sii(master_, 0x0000, nullptr, nullptr, 
+    bool result = configure_mailbox_from_sii(master_, 0, nullptr, nullptr, 
                                             nullptr, nullptr, &proto);
     
     EXPECT_TRUE(result);
@@ -496,7 +496,7 @@ TEST_F(SIIMailboxParserTest, SingleProtocol) {
     mock_eeprom_.setValidMailbox(0x1400, 128, 0x1000, 64, MBX_PROTO_FOE);
     
     uint16_t proto = 0;
-    bool result = configure_mailbox_from_sii(master_, 0x0000, nullptr, nullptr, 
+    bool result = configure_mailbox_from_sii(master_, 0, nullptr, nullptr, 
                                             nullptr, nullptr, &proto);
     
     EXPECT_TRUE(result);
@@ -514,7 +514,7 @@ TEST_F(SIIMailboxParserTest, MaximumAddresses) {
     mock_eeprom_.setValidMailbox(0xFFFF, 128, 0xFFF0, 64, MBX_PROTO_COE);
     
     uint16_t wr_addr = 0, rd_addr = 0;
-    bool result = configure_mailbox_from_sii(master_, 0x0000, &wr_addr, nullptr, 
+    bool result = configure_mailbox_from_sii(master_, 0, &wr_addr, nullptr, 
                                             &rd_addr, nullptr, nullptr);
     
     EXPECT_TRUE(result);
@@ -530,7 +530,7 @@ TEST_F(SIIMailboxParserTest, ZeroAddresses) {
     mock_eeprom_.setValidMailbox(0x0100, 128, 0x0000, 64, MBX_PROTO_COE);
     
     uint16_t wr_addr = 0xFFFF, rd_addr = 0xFFFF;  // Sentinels
-    bool result = configure_mailbox_from_sii(master_, 0x0000, &wr_addr, nullptr, 
+    bool result = configure_mailbox_from_sii(master_, 0, &wr_addr, nullptr, 
                                             &rd_addr, nullptr, nullptr);
     
     EXPECT_TRUE(result);
@@ -549,7 +549,7 @@ TEST_F(SIIMailboxParserTest, MaximumSizes) {
     mock_eeprom_.setValidMailbox(0x1000, 0xFFFF, 0x2000, 0xFFFF, MBX_PROTO_COE);
     
     uint16_t wr_len = 0, rd_len = 0;
-    bool result = configure_mailbox_from_sii(master_, 0x0000, nullptr, &wr_len, 
+    bool result = configure_mailbox_from_sii(master_, 0, nullptr, &wr_len, 
                                             nullptr, &rd_len, nullptr);
     
     EXPECT_TRUE(result);
@@ -564,7 +564,7 @@ TEST_F(SIIMailboxParserTest, OddSizes) {
     mock_eeprom_.setValidMailbox(0x1400, 127, 0x1000, 63, MBX_PROTO_COE);
     
     uint16_t wr_len = 0, rd_len = 0;
-    bool result = configure_mailbox_from_sii(master_, 0x0000, nullptr, &wr_len, 
+    bool result = configure_mailbox_from_sii(master_, 0, nullptr, &wr_len, 
                                             nullptr, &rd_len, nullptr);
     
     EXPECT_TRUE(result);
@@ -592,7 +592,7 @@ TEST_F(SIIMailboxParserTest, BootstrapMailboxParsedButNotUsed) {
     
     // The function should return standard mailbox, not bootstrap
     uint16_t wr_addr = 0, rd_addr = 0;
-    bool result = configure_mailbox_from_sii(master_, 0x0000, &wr_addr, nullptr, 
+    bool result = configure_mailbox_from_sii(master_, 0, &wr_addr, nullptr, 
                                             &rd_addr, nullptr, nullptr);
     
     EXPECT_TRUE(result);
@@ -612,7 +612,7 @@ TEST_F(SIIMailboxParserTest, IdentityDataDoesNotAffectMailbox) {
     mock_eeprom_.setValidMailbox(0x1400, 128, 0x1000, 64, MBX_PROTO_COE);
     
     uint16_t wr_addr = 0;
-    bool result = configure_mailbox_from_sii(master_, 0x0000, &wr_addr, nullptr, 
+    bool result = configure_mailbox_from_sii(master_, 0, &wr_addr, nullptr, 
                                             nullptr, nullptr, nullptr);
     
     EXPECT_TRUE(result);
@@ -630,11 +630,11 @@ TEST_F(SIIMailboxParserTest, RepeatedCallsConsistent) {
     mock_eeprom_.setValidMailbox(0x1400, 128, 0x1000, 64, MBX_PROTO_COE);
     
     uint16_t wr_addr1 = 0, wr_len1 = 0, rd_addr1 = 0, rd_len1 = 0, proto1 = 0;
-    bool result1 = configure_mailbox_from_sii(master_, 0x0000, &wr_addr1, &wr_len1, 
+    bool result1 = configure_mailbox_from_sii(master_, 0, &wr_addr1, &wr_len1, 
                                              &rd_addr1, &rd_len1, &proto1);
     
     uint16_t wr_addr2 = 0, wr_len2 = 0, rd_addr2 = 0, rd_len2 = 0, proto2 = 0;
-    bool result2 = configure_mailbox_from_sii(master_, 0x0000, &wr_addr2, &wr_len2, 
+    bool result2 = configure_mailbox_from_sii(master_, 0, &wr_addr2, &wr_len2, 
                                              &rd_addr2, &rd_len2, &proto2);
     
     EXPECT_TRUE(result1);
@@ -654,14 +654,14 @@ TEST_F(SIIMailboxParserTest, DifferentDataProducesDifferentResults) {
     mock_eeprom_.setValidMailbox(0x1400, 128, 0x1000, 64, MBX_PROTO_COE);
     
     uint16_t wr_addr1 = 0, proto1 = 0;
-    configure_mailbox_from_sii(master_, 0x0000, &wr_addr1, nullptr, 
+    configure_mailbox_from_sii(master_, 0, &wr_addr1, nullptr, 
                               nullptr, nullptr, &proto1);
     
     // Second configuration (different)
     mock_eeprom_.setValidMailbox(0x2000, 256, 0x2200, 128, MBX_PROTO_FOE);
     
     uint16_t wr_addr2 = 0, proto2 = 0;
-    configure_mailbox_from_sii(master_, 0x0000, &wr_addr2, nullptr, 
+    configure_mailbox_from_sii(master_, 0, &wr_addr2, nullptr, 
                               nullptr, nullptr, &proto2);
     
     EXPECT_NE(wr_addr1, wr_addr2);
@@ -680,7 +680,7 @@ TEST_F(SIIMailboxParserTest, ManyConsecutiveCalls) {
     
     for (int i = 0; i < 100; i++) {
         uint16_t wr_addr = 0;
-        bool result = configure_mailbox_from_sii(master_, 0x0000, &wr_addr, nullptr, 
+        bool result = configure_mailbox_from_sii(master_, 0, &wr_addr, nullptr, 
                                                 nullptr, nullptr, nullptr);
         EXPECT_TRUE(result);
         EXPECT_EQ(wr_addr, 0x1400);

@@ -130,7 +130,7 @@ TEST(SIIMailbox, SMControlValidationLogsWarning) {
 
     uint16_t wr_addr = 0, wr_len = 0, rd_addr = 0, rd_len = 0, proto = 0;
 
-    bool ok = configure_mailbox_from_sii(master, 0x0000, &wr_addr, &wr_len, &rd_addr, &rd_len, &proto);
+    bool ok = configure_mailbox_from_sii(master, 0, &wr_addr, &wr_len, &rd_addr, &rd_len, &proto);
     EXPECT_TRUE(ok);
 
     // We expect warnings about both SM0 and SM1 and that the message includes a decoded description
@@ -173,7 +173,7 @@ TEST(SIIMailbox, SMControlValidationNoWarning) {
 
     uint16_t wr_addr = 0, wr_len = 0, rd_addr = 0, rd_len = 0, proto = 0;
 
-    bool ok = configure_mailbox_from_sii(master, 0x0000, &wr_addr, &wr_len, &rd_addr, &rd_len, &proto);
+    bool ok = configure_mailbox_from_sii(master, 0, &wr_addr, &wr_len, &rd_addr, &rd_len, &proto);
     EXPECT_TRUE(ok);
 
     bool saw_any_warning = false;

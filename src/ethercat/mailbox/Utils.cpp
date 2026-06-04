@@ -51,14 +51,13 @@ void dumpHeaderAndStatus(EtherCATMaster& master,
     master.slave(slave_idx).sm(1).dumpMailboxStatus(tag);
 
     // Peek at mailbox header content (mailbox-buffer-specific, not SM-register-specific)
-    uint16_t adp = EtherCATMaster::adpForSlaveIndex(slave_idx);
     uint16_t mbx_wr_addr = 0, mbx_wr_len = 0, mbx_rd_addr = 0, mbx_rd_len = 0;
     bool mbx_cfg = master.sdoManager().getSlaveMailbox(slave_idx,
                                                       &mbx_wr_addr, &mbx_wr_len,
                                                       &mbx_rd_addr, &mbx_rd_len);
     if (mbx_cfg) {
         uint8_t mbx_header[6] = {0};
-        if (master.readRegister(adp, mbx_wr_addr, mbx_header, sizeof(mbx_header), 200)) {
+        if (master.readRegister(SlaveAddress(slave_idx), mbx_wr_addr, mbx_header, sizeof(mbx_header), 200)) {
             uint16_t length   = mbx_header[0] | (mbx_header[1] << 8);
             uint16_t address  = mbx_header[2] | (mbx_header[3] << 8);
             uint8_t  channel  = mbx_header[4];
@@ -70,7 +69,7 @@ void dumpHeaderAndStatus(EtherCATMaster& master,
             TETHER_LOGW(tag, "[DEBUG] Mailbox WR read FAILED (addr=0x%04X)", mbx_wr_addr);
         }
 
-        if (master.readRegister(adp, mbx_rd_addr, mbx_header, sizeof(mbx_header), 200)) {
+        if (master.readRegister(SlaveAddress(slave_idx), mbx_rd_addr, mbx_header, sizeof(mbx_header), 200)) {
             uint16_t length   = mbx_header[0] | (mbx_header[1] << 8);
             uint16_t address  = mbx_header[2] | (mbx_header[3] << 8);
             uint8_t  channel  = mbx_header[4];
@@ -106,11 +105,10 @@ void dumpSlaveSyncAndMailboxInfo(const CiA402Drive& drive,
     }
 
     // read and log AL status + code
-    const uint16_t adp = EtherCATMaster::adpForSlaveIndex(slave_idx);
     uint8_t ast[2] = {0};
     uint8_t acd[2] = {0};
-    (void)master->readRegister(adp, static_cast<uint16_t>(0x0130), ast, sizeof(ast), 200);
-    (void)master->readRegister(adp, static_cast<uint16_t>(0x0134), acd, sizeof(acd), 200);
+    (void)master->readRegister(SlaveAddress(slave_idx), static_cast<uint16_t>(0x0130), ast, sizeof(ast), 200);
+    (void)master->readRegister(SlaveAddress(slave_idx), static_cast<uint16_t>(0x0134), acd, sizeof(acd), 200);
     const uint16_t al_status = static_cast<uint16_t>(ast[0] | (ast[1] << 8));
     const uint16_t al_code   = static_cast<uint16_t>(acd[0] | (acd[1] << 8));
     TETHER_LOGI(tag, "AL_STATUS=0x%04X (%s)%s | AL_STATUS_CODE=0x%04X (%s)",

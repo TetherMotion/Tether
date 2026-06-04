@@ -197,9 +197,8 @@ bool CiA402Drive::gotoSafeOp() {
     // Read final state and error for diagnostics
     uint8_t final_state = 0;
     m_master->readSlaveApplicationLayerState(m_slave_index, final_state);
-    uint16_t adp = EtherCATMaster::adpForSlaveIndex(m_slave_index);
     uint8_t asc[2] = {0};
-    m_master->readRegister(adp, 0x0134, asc, 2, 200);
+    m_master->readRegister(SlaveAddress(m_slave_index), 0x0134, asc, 2, 200);
     uint16_t al_code = asc[0] | (asc[1] << 8);
     TETHER_LOGE(TAG, "Slave %u: SAFE_OP not confirmed after 2s, state=0x%02X AL_CODE=0x%04X",
              m_slave_index, final_state, al_code);
@@ -231,9 +230,8 @@ bool CiA402Drive::gotoOp() {
             // Check for unexpected state (not SAFE_OP or OP)
             if (state != static_cast<uint8_t>(ECState::SafeOp) &&
                 state != static_cast<uint8_t>(ECState::Op)) {
-                uint16_t adp = EtherCATMaster::adpForSlaveIndex(m_slave_index);
                 uint8_t asc[2] = {0};
-                m_master->readRegister(adp, 0x0134, asc, 2, 200);
+                m_master->readRegister(SlaveAddress(m_slave_index), 0x0134, asc, 2, 200);
                 uint16_t al_code = asc[0] | (asc[1] << 8);
                 TETHER_LOGE(TAG, "Slave %u: Unexpected state 0x%02X during OP transition (AL_CODE=0x%04X)",
                          m_slave_index, state, al_code);
@@ -242,13 +240,12 @@ bool CiA402Drive::gotoOp() {
             // Re-request OP every second - some slaves need repeated requests
             if ((attempt % 10) == 9) {
                 m_master->requestSlaveApplicationLayerState(m_slave_index, static_cast<uint8_t>(ECState::Op) | 0x10);
-                uint16_t adp = EtherCATMaster::adpForSlaveIndex(m_slave_index);
                 // Read raw AL_STATUS (16-bit, including error bit)
                 uint16_t al_raw = 0;
-                m_master->readRegister(adp, 0x0130, al_raw, 200);
-                // Read AL_STATUS_CODE 
+                m_master->readRegister(SlaveAddress(m_slave_index), 0x0130, al_raw, 200);
+                // Read AL_STATUS_CODE
                 uint16_t al_code = 0;
-                m_master->readRegister(adp, 0x0134, al_code, 200);
+                m_master->readRegister(SlaveAddress(m_slave_index), 0x0134, al_code, 200);
                 // Read DC SYNC active register
                 uint8_t dc_sync_act = 0;
                 m_master->dc().get()->readRegister(m_slave_index, DCRegisters::DCSyncAct, &dc_sync_act, 1, 200);
@@ -263,7 +260,7 @@ bool CiA402Drive::gotoOp() {
                 m_master->dc().get()->readRegister(m_slave_index, DCRegisters::DCSyncLatch, &sync_latch, 1, 200);
                 // Read SM2 SM Event Request (0x0820) to see if outputs are being consumed
                 uint8_t sm2_event = 0;
-                m_master->readRegister(adp, 0x0820, sm2_event, 200);
+                m_master->readRegister(SlaveAddress(m_slave_index), 0x0820, sm2_event, 200);
                 // PDO exchange stats
                 auto pstats = m_master->pdo().getPhysicalStats();
                 TETHER_LOGI(TAG, "Slave %u: Still waiting for OP, AL_STATUS=0x%04X AL_CODE=0x%04X DC_SYNC_ACT=0x%02X DC_SysTime_lo=0x%08lX (%d ms)\n  PDO: fpwr_ok=%u fpwr_err=%u fprd_ok=%u fprd_err=%u  SYNC_LATCH=0x%02X SM2_EVT=0x%02X",
@@ -276,14 +273,13 @@ bool CiA402Drive::gotoOp() {
     // Read final state and error
     uint8_t final_state = 0;
     m_master->readSlaveApplicationLayerState(m_slave_index, final_state);
-    uint16_t adp = EtherCATMaster::adpForSlaveIndex(m_slave_index);
     uint8_t asc[2] = {0};
-    m_master->readRegister(adp, 0x0134, asc, 2, 200);
+    m_master->readRegister(SlaveAddress(m_slave_index), 0x0134, asc, 2, 200);
     uint16_t al_code = asc[0] | (asc[1] << 8);
-    
+
     // Also read full AL_STATUS for error flag
     uint16_t al_status = 0;
-    m_master->readRegister(adp, 0x0130, al_status, 200);
+    m_master->readRegister(SlaveAddress(m_slave_index), 0x0130, al_status, 200);
     
     // Read PDO exchange stats to diagnose if PDO was ever active
     auto pstats = m_master->pdo().getPhysicalStats();
@@ -369,35 +365,34 @@ bool CiA402Drive::transitionToOp(bool apply_pdo_mapping) {
         }
         
         // Re-write SM2/SM3 to slave with corrected lengths
-        const uint16_t adp = EtherCATMaster::adpForSlaveIndex(m_slave_index);
         // const uint8_t* src_mac = m_master->getSrcMac(); // Not used
         for (uint8_t sm = 2; sm < 4; sm++) {
             const auto& cfg = slave_configs[m_slave_index].sm[sm];
             if (cfg.type != PDO::SyncManagerType::Unused && cfg.phys_start_addr != 0) {
                 uint16_t base = static_cast<uint16_t>(0x0800 + sm * 8);
-                
+
                 // Disable SM first
                 uint8_t disable = 0x00;
-                m_master->writeRegister(adp, static_cast<uint16_t>(base + 6), &disable, 1, 200);
-                
+                m_master->writeRegister(SlaveAddress(m_slave_index), static_cast<uint16_t>(base + 6), &disable, 1, 200);
+
                 // Write physical address
                 uint16_t addr_le = cfg.phys_start_addr;
                 // Write the sync-manager registers with explicit little-endian fields.
                 uint8_t addr_buf[2] = {static_cast<uint8_t>(cfg.phys_start_addr & 0xFF),
                                        static_cast<uint8_t>((cfg.phys_start_addr >> 8) & 0xFF)};
-                m_master->writeRegister(adp, base, addr_buf, 2, 200);
-                
+                m_master->writeRegister(SlaveAddress(m_slave_index), base, addr_buf, 2, 200);
+
                 // Write length
                 uint8_t len_buf[2] = {static_cast<uint8_t>(cfg.length & 0xFF),
                                       static_cast<uint8_t>((cfg.length >> 8) & 0xFF)};
-                m_master->writeRegister(adp, static_cast<uint16_t>(base + 2), len_buf, 2, 200);
-                
+                m_master->writeRegister(SlaveAddress(m_slave_index), static_cast<uint16_t>(base + 2), len_buf, 2, 200);
+
                 // Write control
-                m_master->writeRegister(adp, static_cast<uint16_t>(base + 4), &cfg.control, 1, 200);
-                
+                m_master->writeRegister(SlaveAddress(m_slave_index), static_cast<uint16_t>(base + 4), &cfg.control, 1, 200);
+
                 // Enable SM
                 uint8_t activate = cfg.enable ? 0x01 : 0x00;
-                m_master->writeRegister(adp, static_cast<uint16_t>(base + 6), &activate, 1, 200);
+                m_master->writeRegister(SlaveAddress(m_slave_index), static_cast<uint16_t>(base + 6), &activate, 1, 200);
                 
                 TETHER_LOGI(TAG, "Slave %u: Re-wrote SM%u: Addr=0x%04X Len=%u Ctrl=0x%02X",
                          m_slave_index, sm, cfg.phys_start_addr, cfg.length, cfg.control);
@@ -436,11 +431,10 @@ bool CiA402Drive::transitionToOp(bool apply_pdo_mapping) {
     
     // DIAGNOSTIC: Read back SM2/SM3 and verify they're correct before OP request
     if (m_master) {
-        const uint16_t adp = EtherCATMaster::adpForSlaveIndex(m_slave_index);
         for (uint8_t sm = 2; sm <= 3; sm++) {
             uint16_t base = static_cast<uint16_t>(0x0800 + sm * 8);
             uint8_t sm_regs[8] = {0};
-            m_master->readRegister(adp, base, sm_regs, 8, 200);
+            m_master->readRegister(SlaveAddress(m_slave_index), base, sm_regs, 8, 200);
             uint16_t addr = sm_regs[0] | (sm_regs[1] << 8);
             uint16_t len  = sm_regs[2] | (sm_regs[3] << 8);
             uint8_t  ctrl = sm_regs[4];
@@ -452,7 +446,7 @@ bool CiA402Drive::transitionToOp(bool apply_pdo_mapping) {
         }
         // Read watchdog divider/counter
         uint16_t wdt_status = 0;
-        m_master->readRegister(adp, 0x0440, wdt_status, 200);
+        m_master->readRegister(SlaveAddress(m_slave_index), 0x0440, wdt_status, 200);
         TETHER_LOGI(TAG, "Slave %u: Watchdog Status=0x%04X", m_slave_index, wdt_status);
     }
     
@@ -510,10 +504,9 @@ bool CiA402Drive::transitionToOp(bool apply_pdo_mapping) {
     // Clear any pending error by writing Error Acknowledge + OP (0x18)
     // Some slaves need the ACK bit before accepting OP.
     if (m_master) {
-        const uint16_t adp = EtherCATMaster::adpForSlaveIndex(m_slave_index);
         // First ack any error in current state
         uint16_t ack = static_cast<uint16_t>(ECState::SafeOp) | 0x10;  // SAFE_OP + ACK
-        m_master->writeRegister(adp, 0x0120, ack);  // 0x0120 = AL_CONTROL
+        m_master->writeRegister(SlaveAddress(m_slave_index), 0x0120, ack);  // 0x0120 = AL_CONTROL
         Tether::Platform::Clock::instance().delayMilliseconds(50);
     }
     

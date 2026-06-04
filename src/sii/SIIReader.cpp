@@ -50,7 +50,7 @@ uint16_t SIIReader::adpForSlave(uint16_t slave_index) {
     return (slave_index == 0) ? 0x0000 : static_cast<uint16_t>(0 - slave_index);
 }
 
-bool SIIReader::waitNotBusy(uint16_t adp, uint16_t* out_status) {
+bool SIIReader::waitNotBusy(uint16_t slave_index, uint16_t* out_status) {
     const int64_t deadline_us = Tether::Platform::Clock::instance().getMicroseconds() + static_cast<int64_t>(m_timeout_ms) * 1000LL;
 
     while (true) {
@@ -59,7 +59,7 @@ bool SIIReader::waitNotBusy(uint16_t adp, uint16_t* out_status) {
         }
 
         uint16_t estat_le = 0;
-        if (m_master.readRegister(adp, EC_REG_EEPSTAT, estat_le, 100)) {
+        if (m_master.readRegister(EtherCATMaster::slaveAddressFromADP(adpForSlave(slave_index)), EC_REG_EEPSTAT, estat_le, 100)) {
             uint16_t estat = Raw::le16_to_host(estat_le);
             if (out_status) {
                 *out_status = estat;
@@ -72,20 +72,20 @@ bool SIIReader::waitNotBusy(uint16_t adp, uint16_t* out_status) {
     }
 }
 
-bool SIIReader::readRaw32(uint16_t adp, uint16_t word_address, uint32_t* out) {
+bool SIIReader::readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t* out) {
     if (out) *out = 0;
-    
+
     uint16_t estat = 0;
-    if (!waitNotBusy(adp, &estat)) {
+    if (!waitNotBusy(slave_index, &estat)) {
         return false;
     }
-    
+
     // Clear errors if present
     if ((estat & EC_ESTAT_EMASK) != 0) {
         uint16_t nop_le = Raw::host_to_le16(EC_ECMD_NOP);
-        m_master.writeRegister(adp, EC_REG_EEPCTL, nop_le, 200);
+        m_master.writeRegister(EtherCATMaster::slaveAddressFromADP(adpForSlave(slave_index)), EC_REG_EEPCTL, nop_le, 200);
     }
-    
+
     int nack_count = 0;
     do {
         // EEPROM read command structure
@@ -94,49 +94,48 @@ bool SIIReader::readRaw32(uint16_t adp, uint16_t word_address, uint32_t* out) {
             uint16_t addr_le;
             uint16_t d2_le;
         } cmd{};
-        
+
         cmd.comm_le = Raw::host_to_le16(EC_ECMD_READ);
         cmd.addr_le = Raw::host_to_le16(word_address);
         cmd.d2_le = 0;
-        
-        if (!m_master.writeRegister(adp, EC_REG_EEPCTL, cmd, 200)) {
+
+        if (!m_master.writeRegister(EtherCATMaster::slaveAddressFromADP(adpForSlave(slave_index)), EC_REG_EEPCTL, cmd, 200)) {
             return false;
         }
-        
+
         Tether::Platform::Clock::instance().delayMicroseconds(200);
-        
+
         estat = 0;
-        if (!waitNotBusy(adp, &estat)) {
+        if (!waitNotBusy(slave_index, &estat)) {
             return false;
         }
-        
+
         if ((estat & EC_ESTAT_NACK) != 0) {
             nack_count++;
             Tether::Platform::Clock::instance().delayMicroseconds(1000);
             continue;
         }
-        
+
         uint32_t edat_le = 0;
-        if (!m_master.readRegister(adp, EC_REG_EEPDAT, edat_le, 200)) {
+        if (!m_master.readRegister(EtherCATMaster::slaveAddressFromADP(adpForSlave(slave_index)), EC_REG_EEPDAT, edat_le, 200)) {
             return false;
         }
-        
+
         if (out) {
             *out = Raw::le32_to_host(edat_le);
         }
         return true;
-        
+
     } while (nack_count > 0 && nack_count < 3);
-    
+
     return false;
 }
 
 bool SIIReader::readWord(uint16_t slave_index, uint16_t word_address, uint16_t& out) {
     uint32_t dword = 0;
-    uint16_t adp = adpForSlave(slave_index);
     uint16_t aligned_addr = word_address & ~1u;  // Align to even address
-    
-    if (!readRaw32(adp, aligned_addr, &dword)) {
+
+    if (!readRaw32(slave_index, aligned_addr, &dword)) {
         return false;
     }
     
@@ -150,19 +149,17 @@ bool SIIReader::readWord(uint16_t slave_index, uint16_t word_address, uint16_t& 
 }
 
 bool SIIReader::readDWord(uint16_t slave_index, uint16_t word_address, uint32_t& out) {
-    uint16_t adp = adpForSlave(slave_index);
-    return readRaw32(adp, word_address, &out);
+    return readRaw32(slave_index, word_address, &out);
 }
 
 size_t SIIReader::readWords(uint16_t slave_index, uint16_t word_address,
                             uint16_t* buffer, size_t word_count) {
     size_t words_read = 0;
-    uint16_t adp = adpForSlave(slave_index);
-    
+
     // Read 2 words at a time (32-bit reads)
     for (size_t i = 0; i < word_count; i += 2) {
         uint32_t dword = 0;
-        if (!readRaw32(adp, static_cast<uint16_t>(word_address + i), &dword)) {
+        if (!readRaw32(slave_index, static_cast<uint16_t>(word_address + i), &dword)) {
             break;
         }
         
@@ -180,15 +177,14 @@ size_t SIIReader::readWords(uint16_t slave_index, uint16_t word_address,
 
 size_t SIIReader::readBytes(uint16_t slave_index, uint16_t byte_address,
                             uint8_t* buffer, size_t byte_count) {
-    uint16_t adp = adpForSlave(slave_index);
     size_t bytes_read = 0;
-    
+
     while (bytes_read < byte_count) {
         uint16_t word_addr = static_cast<uint16_t>((byte_address + bytes_read) >> 1);
         uint16_t aligned_word = word_addr & ~1u;
-        
+
         uint32_t dword = 0;
-        if (!readRaw32(adp, aligned_word, &dword)) {
+        if (!readRaw32(slave_index, aligned_word, &dword)) {
             break;
         }
         
@@ -218,17 +214,16 @@ bool SIIReader::readString(uint16_t slave_index, uint8_t string_index,
     buffer[0] = '\0';
     
     // Find string category
-    uint16_t adp = adpForSlave(slave_index);
     uint16_t byte_addr = SII_CATEGORY_START * 2;  // Convert word address to byte address
-    
+
     // Scan for string category
     while (true) {
         uint16_t cat_type = 0;
         uint16_t cat_size = 0;
-        
+
         // Read category header (2 words = 4 bytes)
         uint32_t header = 0;
-        if (!readRaw32(adp, byte_addr / 2, &header)) {
+        if (!readRaw32(slave_index, byte_addr / 2, &header)) {
             return false;
         }
         

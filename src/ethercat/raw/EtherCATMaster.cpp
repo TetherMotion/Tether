@@ -212,13 +212,13 @@ public:
     bool writeRegister(uint16_t adp, uint16_t ado,
                        const void* data, uint16_t len,
                        unsigned int timeout_ms) override {
-        return master_.writeRegister(adp, ado, data, len, timeout_ms);
+        return master_.writeRegister(EtherCATMaster::slaveAddressFromADP(adp), ado, data, len, timeout_ms);
     }
 
     bool readRegister(uint16_t adp, uint16_t ado,
                       void* data, uint16_t len,
                       unsigned int timeout_ms) override {
-        return master_.readRegister(adp, ado, data, len, timeout_ms);
+        return master_.readRegister(EtherCATMaster::slaveAddressFromADP(adp), ado, data, len, timeout_ms);
     }
 
     bool sendSingleDatagram(Command cmd, uint8_t idx,
@@ -255,14 +255,12 @@ public:
 
     bool readRegister(uint16_t slave_index, uint16_t reg_addr,
                       void* data, uint16_t size) override {
-        uint16_t adp = EtherCATMaster::adpForSlaveIndex(slave_index);
-        return master_.readRegister(adp, reg_addr, data, size, 50);
+        return master_.readRegister(SlaveAddress(slave_index), reg_addr, data, size, 50);
     }
 
     bool writeRegister(uint16_t slave_index, uint16_t reg_addr,
                        const void* data, uint16_t size) override {
-        uint16_t adp = EtherCATMaster::adpForSlaveIndex(slave_index);
-        return master_.writeRegister(adp, reg_addr, data, size, 50);
+        return master_.writeRegister(SlaveAddress(slave_index), reg_addr, data, size, 50);
     }
 
     uint64_t getTimestampMs() override {
@@ -575,7 +573,7 @@ bool EtherCATMaster::readSlaveApplicationLayerState(SlaveAddress slave_address, 
 
 bool EtherCATMaster::transitionSlaveToPreOperational(SlaveAddress slave_address)
 {
-    return setPreopAndConfirm(slave_address.raw());
+    return setPreopAndConfirm(slave_address.slavePosition());
 }
 
 bool EtherCATMaster::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
@@ -623,12 +621,11 @@ bool EtherCATMaster::configureProcessDataSyncManagersFromSii(SlaveAddress slave_
 
     if (!configured_any) {
         TETHER_LOGW(TAG, "SII has no SM2/SM3 data for slave %u, trying HW registers", slave_index);
-        const uint16_t adp = adpForSlaveIndex(slave_index);
 
         for (uint8_t sm = 2; sm < 4; sm++) {
             uint16_t base = static_cast<uint16_t>(0x0800 + sm * 8);
             uint8_t buf[8] = {0};
-            if (readRegister(adp, base, buf, sizeof(buf), 200)) {
+            if (readRegister(SlaveAddress(slave_index), base, buf, sizeof(buf), 200)) {
                 uint16_t addr = static_cast<uint16_t>(buf[0] | (buf[1] << 8));
                 uint16_t len  = static_cast<uint16_t>(buf[2] | (buf[3] << 8));
                 uint8_t  ctrl = buf[4];
@@ -663,25 +660,24 @@ bool EtherCATMaster::configureProcessDataSyncManagersFromSii(SlaveAddress slave_
 
     pdo_->finalizeMapping(slave_index);
 
-    const uint16_t adp = adpForSlaveIndex(slave_index);
     for (uint8_t sm = 2; sm < 4; sm++) {
         const auto& cfg = slave_configs[slave_index].sm[sm];
         if (cfg.type != PDO::SyncManagerType::Unused && cfg.phys_start_addr != 0) {
             uint16_t base = static_cast<uint16_t>(0x0800 + sm * 8);
 
             uint8_t disable = 0x00;
-            writeRegister(adp, static_cast<uint16_t>(base + 6), &disable, 1, 200);
+            writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 6), &disable, 1, 200);
 
             uint16_t addr_le = Raw::host_to_le16(cfg.phys_start_addr);
-            writeRegister(adp, base, &addr_le, 2, 200);
+            writeRegister(SlaveAddress(slave_index), base, &addr_le, 2, 200);
 
             uint16_t len_le = Raw::host_to_le16(cfg.length);
-            writeRegister(adp, static_cast<uint16_t>(base + 2), &len_le, 2, 200);
+            writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 2), &len_le, 2, 200);
 
-            writeRegister(adp, static_cast<uint16_t>(base + 4), &cfg.control, 1, 200);
+            writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 4), &cfg.control, 1, 200);
 
             uint8_t activate = cfg.enable ? 0x01 : 0x00;
-            writeRegister(adp, static_cast<uint16_t>(base + 6), &activate, 1, 200);
+            writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 6), &activate, 1, 200);
 
             TETHER_LOGI(TAG, "Wrote SM%u to slave %u: Addr=0x%04X Len=%u Ctrl=0x%02X Act=0x%02X",
                      sm, slave_index, cfg.phys_start_addr, cfg.length, cfg.control, activate);
@@ -1063,18 +1059,18 @@ bool EtherCATMaster::readWatchdogStatus(SlaveAddress slave_address,
 // SII / EEPROM — delegate to existing Raw:: functions for now
 // ============================================================================
 
-bool EtherCATMaster::siiReadString(uint16_t adp, uint16_t string_number,
+bool EtherCATMaster::siiReadString(uint16_t slave_index, uint16_t string_number,
                                     char* out, size_t out_cap)
 {
-    return Raw::sii_read_string(*this, adp, string_number, out, out_cap);
+    return Raw::sii_read_string(*this, slave_index, string_number, out, out_cap);
 }
 
-bool EtherCATMaster::configureMailboxFromSii(uint16_t adp,
+bool EtherCATMaster::configureMailboxFromSii(uint16_t slave_index,
                                               uint16_t* wr_addr, uint16_t* wr_len,
                                               uint16_t* rd_addr, uint16_t* rd_len,
                                               uint16_t* mbx_proto)
 {
-    return Raw::configure_mailbox_from_sii(*this, adp,
+    return Raw::configure_mailbox_from_sii(*this, slave_index,
                                            wr_addr, wr_len, rd_addr, rd_len,
                                            mbx_proto);
 }
@@ -1464,7 +1460,7 @@ bool EtherCATMaster::discoverSlaves()
 // Internal: set PRE_OP and confirm
 // ============================================================================
 
-bool EtherCATMaster::setPreopAndConfirm(uint16_t adp)
+bool EtherCATMaster::setPreopAndConfirm(uint16_t slave_index)
 {
     using namespace Raw;
 
@@ -1478,17 +1474,17 @@ bool EtherCATMaster::setPreopAndConfirm(uint16_t adp)
     for (int attempt = 1; attempt <= max_attempts; ++attempt) {
         // Read current AL status and decide whether to request PRE_OP
         uint16_t al_le = 0;
-        (void)readRegister(adp, EC_REG_AL_STATUS, al_le, 200);
+        (void)readRegister(SlaveAddress(slave_index), EC_REG_AL_STATUS, al_le, 200);
         const uint16_t al0 = le16_to_host(al_le);
         const bool has_error = (al0 & 0x0010u) != 0;
 
         const uint16_t req = static_cast<uint16_t>(0x0002u | (has_error ? 0x0010u : 0));
-        (void)writeRegister(adp, EC_REG_AL_CONTROL, req);
+        (void)writeRegister(SlaveAddress(slave_index), EC_REG_AL_CONTROL, req);
 
         // Wait for PRE_OP to become active
         for (int i = 0; i < inner_tries; i++) {
             uint16_t s_le = 0;
-            if (readRegister(adp, EC_REG_AL_STATUS, s_le, 200)) {
+            if (readRegister(SlaveAddress(slave_index), EC_REG_AL_STATUS, s_le, 200)) {
                 if ((le16_to_host(s_le) & 0x000Fu) == 0x0002u) {
                     if (attempt > 1) {
                         TETHER_LOGI(TAG, "setPreop: succeeded on attempt %d", attempt);
@@ -1501,14 +1497,14 @@ bool EtherCATMaster::setPreopAndConfirm(uint16_t adp)
 
         // If we reached here, the attempt failed — gather diagnostics and retry
         uint16_t s_le_fail = 0;
-        if (readRegister(adp, EC_REG_AL_STATUS, s_le_fail, 200)) {
+        if (readRegister(SlaveAddress(slave_index), EC_REG_AL_STATUS, s_le_fail, 200)) {
             const uint16_t al_raw = le16_to_host(s_le_fail);
             const char* state_name = EtherCAT::al_status_get_state_name(al_raw);
             const bool is_error = EtherCAT::al_status_has_error(al_raw);
 
             // Try to read AL_STATUS_CODE for more detail
             uint16_t al_code_le = 0;
-            const bool have_code = readRegister(adp, EC_REG_AL_STATUS_CODE, al_code_le, 200);
+            const bool have_code = readRegister(SlaveAddress(slave_index), EC_REG_AL_STATUS_CODE, al_code_le, 200);
             uint16_t al_code = have_code ? le16_to_host(al_code_le) : 0;
 
             if (is_error) {
@@ -1529,7 +1525,6 @@ bool EtherCATMaster::setPreopAndConfirm(uint16_t adp)
                 if ((al_code == static_cast<uint16_t>(ALStatusCode::InvalidMailboxConfig) ||
                      al_code == static_cast<uint16_t>(ALStatusCode::InvalidMailboxConfigPreOp)) &&
                     attempt == 1) {
-                    const uint16_t slave_index = (adp == 0x0000) ? 0 : static_cast<uint16_t>(0 - adp);
                     if (config_.enable_mailbox_fallback) {
                         TETHER_LOGW(TAG, "setPreop: AL_STATUS_CODE indicates invalid mailbox for slave %u — applying mailbox defaults (enable_mailbox_fallback=true)", slave_index);
                         if (forceMailboxDefaults(slave_index)) {
@@ -1546,9 +1541,7 @@ bool EtherCATMaster::setPreopAndConfirm(uint16_t adp)
             }
 
             // If AL_STATUS had an error bit set, issue a one-time fault diagnostic
-            // dump for this slave so users get actionable guidance. Compute slave
-            // index from ADP (0x0000 => slave 0, otherwise negative auto-increment).
-            const uint16_t slave_index = (adp == 0x0000) ? 0 : static_cast<uint16_t>(0 - adp);
+            // dump for this slave so users get actionable guidance.
             if (is_error) {
                 std::lock_guard<std::mutex> _lg(m_diag_mutex_);
                 if (m_diagnosed_slaves_.find(slave_index) == m_diagnosed_slaves_.end()) {
@@ -1564,7 +1557,7 @@ bool EtherCATMaster::setPreopAndConfirm(uint16_t adp)
         // Read SM0 (mailbox status) for additional context
         uint8_t sm0 = 0;
         const uint16_t sm0_ado = 0x0805; // SM0 status register
-        if (readRegister(adp, sm0_ado, sm0, 200)) {
+        if (readRegister(SlaveAddress(slave_index), sm0_ado, sm0, 200)) {
             TETHER_LOGW(TAG, "setPreop: SM0=0x%02X (mailbox status)", sm0);
         } else {
             TETHER_LOGW(TAG, "setPreop: SM0 read failed");
@@ -1648,16 +1641,14 @@ void EtherCATMaster::masterTask()
 
     // Configure mailbox and PRE_OP for each discovered slave
     for (uint16_t i = 0; i < n; i++) {
-        uint16_t adp = adpForSlaveIndex(i);
-
         // Force slave through INIT state to reset mailbox SM buffers.
         // If the slave was left in OP/SAFE_OP from a prior dirty session,
         // its SM0 mailbox buffer may contain stale unconsumed data (stat=0x48).
         // The INIT→PRE_OP transition clears this.
-        (void)writeRegister(adp, Raw::EC_REG_AL_CONTROL, static_cast<uint16_t>(0x0011));  // INIT + ACK
+        (void)writeRegister(SlaveAddress(i), Raw::EC_REG_AL_CONTROL, static_cast<uint16_t>(0x0011));  // INIT + ACK
         for (int w = 0; w < 20; w++) {
             uint16_t al_le = 0;
-            if (readRegister(adp, Raw::EC_REG_AL_STATUS, al_le, 200)) {
+            if (readRegister(SlaveAddress(i), Raw::EC_REG_AL_STATUS, al_le, 200)) {
                 if ((Raw::le16_to_host(al_le) & 0x000F) == 0x0001) break;  // INIT reached
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -1696,7 +1687,7 @@ void EtherCATMaster::masterTask()
 
         if (!applied_override) {
             uint16_t wa=0,wl=0,ra=0,rl=0,mp=0;
-            if (configureMailboxFromSii(adp,&wa,&wl,&ra,&rl,&mp)) {
+            if (configureMailboxFromSii(i,&wa,&wl,&ra,&rl,&mp)) {
                 TETHER_LOGI(TAG, "Slave %u: Mailbox from SII wr=0x%04X/%u rd=0x%04X/%u", i, wa, (unsigned)wl, ra, (unsigned)rl);
 
                 // Standard EtherCAT SM convention (per SOEM):
@@ -1717,7 +1708,7 @@ void EtherCATMaster::masterTask()
             }
         }
 
-        if (!setPreopAndConfirm(adp))
+        if (!setPreopAndConfirm(i))
             TETHER_LOGE(TAG, "Slave %u: Failed to set PRE_OP", i);
         else
             TETHER_LOGI(TAG, "Slave %u: PRE_OP confirmed", i);
@@ -1733,8 +1724,6 @@ void EtherCATMaster::logDiscoveredSlavesSummary(const char* tag)
     TETHER_LOGI(tag, "Discovered %u slave(s)", n);
 
     for (uint16_t i = 0; i < n; ++i) {
-        uint16_t adp = adpForSlaveIndex(i);
-
         EtherCAT::SII::SIIData sii_data;
         if (EtherCAT::SII::readSII(*this, i, sii_data)) {
             // Detailed summary handled by SII module
@@ -1745,17 +1734,17 @@ void EtherCATMaster::logDiscoveredSlavesSummary(const char* tag)
             EtherCAT::SII::SIIIdentity id;
             if (EtherCAT::SII::readSIIIdentity(*this, i, id)) {
                 char name_buf[64] = {0};
-                if (!siiReadString(adp, 1, name_buf, sizeof(name_buf)) &&
-                    !siiReadString(adp, 2, name_buf, sizeof(name_buf)) &&
-                    !siiReadString(adp, 3, name_buf, sizeof(name_buf))) {
+                if (!siiReadString(i, 1, name_buf, sizeof(name_buf)) &&
+                    !siiReadString(i, 2, name_buf, sizeof(name_buf)) &&
+                    !siiReadString(i, 3, name_buf, sizeof(name_buf))) {
                     strncpy(name_buf, "<unknown>", sizeof(name_buf));
                 }
 
                 TETHER_LOGI(tag, "Slave %u @ ADP=0x%04X Vendor=0x%08" PRIx32 " Product=0x%08" PRIx32 " Name='%s'",
-                         i, adp, id.vendor_id, id.product_code, name_buf);
+                         i, adpForSlaveIndex(i), id.vendor_id, id.product_code, name_buf);
             }
             else {
-                TETHER_LOGW(tag, "Slave %u @ ADP=0x%04X: unable to read SII/identity", i, adp);
+                TETHER_LOGW(tag, "Slave %u @ ADP=0x%04X: unable to read SII/identity", i, adpForSlaveIndex(i));
             }
         }
     }

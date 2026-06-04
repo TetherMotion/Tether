@@ -53,10 +53,9 @@ SyncManagerAccessor::readHardwareConfig(unsigned int timeout_ms) const {
     RawHWConfig cfg{};
     uint8_t buf[8] = {0};
 
-    const uint16_t adp  = slave_.master().adpForSlaveIndex(slave_.index());
     const uint16_t base = physRegisterBase();
 
-    cfg.read_ok = slave_.master().readRegister(adp, base, buf, sizeof(buf), timeout_ms);
+    cfg.read_ok = slave_.master().readRegister(EtherCAT::SlaveAddress(slave_.index()), base, buf, sizeof(buf), timeout_ms);
     if (!cfg.read_ok) {
         return cfg;
     }
@@ -248,11 +247,10 @@ void SyncManagerAccessor::dump(const char* tag) const {
 
 void SyncManagerAccessor::dumpMailboxStatus(const char* tag) const {
     // Read 2 bytes at register offset 5 (status + activate)
-    const uint16_t adp      = slave_.master().adpForSlaveIndex(slave_.index());
     const uint16_t statusOff = static_cast<uint16_t>(physRegisterBase() + EtherCAT::SyncManager::kRegOffsetStatus);
 
     uint8_t st[2] = {0};
-    const bool ok = slave_.master().readRegister(adp, statusOff, st, sizeof(st), 200);
+    const bool ok = slave_.master().readRegister(EtherCAT::SlaveAddress(slave_.index()), statusOff, st, sizeof(st), 200);
     if (ok) {
         TETHER_LOGI(tag, "SM%u: status=0x%02X activate=0x%02X (%s)",
                     static_cast<unsigned>(index_),
@@ -265,7 +263,7 @@ void SyncManagerAccessor::dumpMailboxStatus(const char* tag) const {
     // Also read the SM watchdog status register for mailbox SMs (SM0/SM1)
     if (index_ <= 1) {
         uint8_t wd[2] = {0};
-        if (slave_.master().readRegister(adp, EtherCAT::SyncManager::kWatchdogStatusReg, wd, sizeof(wd), 200)) {
+        if (slave_.master().readRegister(EtherCAT::SlaveAddress(slave_.index()), EtherCAT::SyncManager::kWatchdogStatusReg, wd, sizeof(wd), 200)) {
             const uint16_t wdStatus = static_cast<uint16_t>(wd[0] | (static_cast<uint16_t>(wd[1]) << 8));
             TETHER_LOGI(tag, "SM watchdog status=0x%04X %s",
                         static_cast<unsigned>(wdStatus),

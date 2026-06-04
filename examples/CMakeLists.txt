@@ -77,6 +77,11 @@ add_tether_example(dynadrive_sine_motion_native
 add_tether_example(detect_slaves
     LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common)
 
+# ---ATI Axia80 F/T Sensor streaming example ---
+# Streams 6-DOF force/torque data with engineering-unit conversion
+add_tether_example(axia80_stream
+    LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common)
+
 add_executable(tether_ui_backend
     tether_ui_backend.cpp
     WebSocketTransport.cpp)

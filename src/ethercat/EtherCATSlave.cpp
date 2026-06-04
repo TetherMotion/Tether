@@ -215,7 +215,7 @@ SlaveError EtherCATSlave::readState(SlaveState& state) {
 
 SlaveError EtherCATSlave::readALStatusCode(uint16_t& code) {
     uint16_t status = 0;
-    if (!master_.readRegister(adp(), reg::AL_STATUS_CODE, status)) {
+    if (!master_.readRegister(SlaveAddress(index_), reg::AL_STATUS_CODE, status)) {
         return SlaveError::TransportError;
     }
     code = status;
