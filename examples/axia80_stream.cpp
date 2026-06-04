@@ -63,14 +63,16 @@ int main(int argc, char** argv) {
         .default_value(std::string("eth0"))
         .help("Network interface name (e.g. eth0, enp3s0)");
     program.add_argument("--raw")
-        .default_value(false)
+        .default_value<bool>(false)
         .implicit_value(true)
         .help("Stream raw sensor counts instead of engineering units");
     program.add_argument("-s", "--slave")
+        .scan<'i', int>()
         .default_value(0)
         .help("Slave index on the bus (0-based)");
     program.add_argument("-t", "--time")
-        .default_value(0)
+        .scan<'g', double>()
+        .default_value(0.0)
         .help("Stream duration in seconds (0 = infinite until Ctrl-C)");
 
     try { program.parse_args(argc, argv); }
@@ -82,7 +84,7 @@ int main(int argc, char** argv) {
     std::string iface = program.get<std::string>("--interface");
     bool raw_mode = program.get<bool>("--raw");
     int slave_idx = program.get<int>("--slave");
-    int duration_sec = program.get<int>("--time");
+    double duration_sec = program.get<double>("--time");
 
     TETHER_LOGI(TAG, "axia80_stream (host) — interface: %s, raw: %s, slave: %d",
                 iface.c_str(), raw_mode ? "yes" : "no", slave_idx);
@@ -240,7 +242,7 @@ int main(int argc, char** argv) {
     std::cout << "-------------------------------------------------------------------------------\n";
 
     auto start_time = std::chrono::steady_clock::now();
-    auto end_time = start_time + std::chrono::seconds(duration_sec);
+    auto end_time = start_time + std::chrono::seconds(static_cast<int>(duration_sec));
     uint64_t cycle_count = 0;
 
     while (g_running.load()) {
