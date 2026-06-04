@@ -15,11 +15,14 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <set>
+#include <sstream>
 #include <thread>
 
 #include "tether/ethercat/EtherCATMaster.hpp"
 #include "tether/ethercat/EtherCATTypes.hpp"
 #include "tether/platform/EspCompat.hpp"
+#include "tether/sii/SIIReader.hpp"
 #include "tether/sii/SIIParser.hpp"
 
 #ifdef UNIT_TEST_HOST
@@ -63,6 +66,9 @@ int main(int argc, char** argv) {
     program.add_argument("-i", "--interface")
         .default_value(std::string("eth0"))
         .help("Network interface name (e.g. eth0, enp3s0)");
+    program.add_argument("--debug")
+        .default_value(std::string(""))
+        .help("Comma-separated debug flags (e.g. sii-derivation)");
 
     try { program.parse_args(argc, argv); }
     catch (const std::runtime_error& err) {
@@ -71,7 +77,27 @@ int main(int argc, char** argv) {
     }
 
     std::string iface = program.get<std::string>("--interface");
+    std::string debug_str = program.get<std::string>("--debug");
+    
+    // Parse debug flags
+    std::set<std::string> debug_flags;
+    if (!debug_str.empty()) {
+        std::stringstream ss(debug_str);
+        std::string flag;
+        while (std::getline(ss, flag, ',')) {
+            // Trim whitespace
+            flag.erase(0, flag.find_first_not_of(" \t"));
+            flag.erase(flag.find_last_not_of(" \t") + 1);
+            if (!flag.empty()) {
+                debug_flags.insert(flag);
+            }
+        }
+    }
+    
     TETHER_LOGI(TAG, "detect_slaves (host) — interface: %s", iface.c_str());
+    if (!debug_flags.empty()) {
+        TETHER_LOGI(TAG, "Debug flags: %s", debug_str.c_str());
+    }
 
     // ---- Open raw socket ----
     auto eth = EtherCAT::HAL::createDefaultEthernet();
@@ -147,6 +173,14 @@ int main(int argc, char** argv) {
     uint16_t slaves = master.getDiscoveredSlaveCount();
     TETHER_LOGI(TAG, "=== Discovered %u slave(s) ===", slaves);
     master.logDiscoveredSlavesSummary(TAG);
+
+    // ---- Debug output ----
+    if (debug_flags.count("sii-derivation") && slaves > 0) {
+        TETHER_LOGI(TAG, "\n=== SII Mailbox Derivation Debug ===");
+        for (uint16_t i = 0; i < slaves; i++) {
+            EtherCAT::SII::debugSIIMailboxDerivation(master, i, TAG);
+        }
+    }
 
     if (slaves == 0) {
         TETHER_LOGW(TAG, "No slaves found — check wiring, power, and interface name");

@@ -243,5 +243,22 @@ void logSIIPDOs(const SIIData& data, const char* tag);
  */
 void logSIISummary(const SIIData& data, uint16_t slave_index, const char* tag);
 
+/**
+ * @brief Debug SII mailbox derivation with step-by-step detail
+ * 
+ * This function provides extremely detailed logging of how mailbox configuration
+ * is derived from SII EEPROM, including:
+ * - Raw EEPROM word reads with addresses and values
+ * - Byte extraction from multi-byte reads
+ * - Field assignments and their meanings
+ * - Final SM0/SM1 configuration mapping
+ * - Protocol flag decoding
+ * 
+ * @param master EtherCATMaster instance for network I/O
+ * @param slave_index Slave index
+ * @param tag ESP_LOG tag
+ */
+void debugSIIMailboxDerivation(EtherCATMaster& master, uint16_t slave_index, const char* tag);
+
 } // namespace SII
 } // namespace EtherCAT

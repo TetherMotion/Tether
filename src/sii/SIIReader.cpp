@@ -903,41 +903,135 @@ void logSIIData(const SIIData& data, const char* tag) {
     
     // DC
     if (!data.dc_configs.empty()) {
-        TETHER_LOGI(tag, "\nSII DC Configurations:");
+        TETHER_LOGI(tag, "SII Distributed Clocks (%zu configured):", data.dc_configs.size());
         for (size_t i = 0; i < data.dc_configs.size(); i++) {
             const auto& dc = data.dc_configs[i];
-            TETHER_LOGI(tag, "  DC%zu: CycleTime0=%uns AssignActivate=0x%04X\n    SYNC0=%s SYNC1=%s",
-                     i, dc.cycle_time_0, dc.assign_activate,
-                     dc.sync0Enabled() ? "Enabled" : "Disabled",
-                     dc.sync1Enabled() ? "Enabled" : "Disabled");
+            TETHER_LOGI(tag, "  DC%zu: cycle0=%uns shift0=%uns sync0=%s sync1=%s",
+                     i, dc.cycle_time_0, dc.shift_time_0,
+                     dc.sync0Enabled() ? "on" : "off", dc.sync1Enabled() ? "on" : "off");
         }
     }
+}
+
+void debugSIIMailboxDerivation(EtherCATMaster& master, uint16_t slave_index, const char* tag) {
+    TETHER_LOGI(tag, "\n╔══════════════════════════════════════════════════════════════╗\n║  SII Mailbox Derivation Debug (Slave %u)                      ║\n╚══════════════════════════════════════════════════════════════╝\n", (unsigned)slave_index);
     
-    // CoE details
-    if (data.has_general) {
-        TETHER_LOGI(tag, "\nCoE Details: 0x%02X", data.general.coe_details);
-        if (data.general.coeEnableSdo()) TETHER_LOGI(tag, "  ✓ SDO");
-        if (data.general.coeEnableSdoInfo()) TETHER_LOGI(tag, "  ✓ SDO Info");
-        if (data.general.coeEnablePdoAssign()) TETHER_LOGI(tag, "  ✓ PDO Assignment");
-        if (data.general.coeEnablePdoConfig()) TETHER_LOGI(tag, "  ✓ PDO Configuration");
-        if (data.general.coeEnableUploadStartup()) TETHER_LOGI(tag, "  ✓ Upload at Startup");
-        if (data.general.coeEnableSdoComplete()) TETHER_LOGI(tag, "  ✓ Complete Access");
+    SIIReader reader(master);
+    
+    // Helper to log a word read with byte-level detail
+    auto log_word_read = [&](uint16_t word_addr, const char* field_name, uint16_t& out_value) -> bool {
+        if (!reader.readWord(slave_index, word_addr, out_value)) {
+            TETHER_LOGE(tag, "  ❌ Failed to read word 0x%04X (%s)", (unsigned)word_addr, field_name);
+            return false;
+        }
         
-        TETHER_LOGI(tag, "\nGeneral Flags: 0x%02X\n  LRW Support: %s", data.general.flags, 
-                 data.general.enableNotLRW() ? "NOT SUPPORTED (separate LRD/LWR only)" :
-                 data.general.enableLRW() ? "Explicitly Supported" : "Default (assumed supported)");
-        if (data.general.enableSafeOp()) TETHER_LOGI(tag, "  ✓ SafeOp (no outputs in Safe-Op)");
-    }
+        // Log word read
+        TETHER_LOGI(tag, "  📖 Read word 0x%04X (%s): 0x%04X (%u)",
+                 (unsigned)word_addr, field_name, (unsigned)out_value, (unsigned)out_value);
+        
+        // Log byte breakdown
+        uint8_t lo_byte = out_value & 0xFF;
+        uint8_t hi_byte = (out_value >> 8) & 0xFF;
+        TETHER_LOGI(tag, "     Byte breakdown: [0x%02X, 0x%02X] (little-endian: lo=0x%02X hi=0x%02X)",
+                 (unsigned)lo_byte, (unsigned)hi_byte, (unsigned)lo_byte, (unsigned)hi_byte);
+        
+        return true;
+    };
     
-    // Strings
-    if (data.strings.count() > 0) {
-        TETHER_LOGI(tag, "\nSII Strings (%zu):", data.strings.count());
-        for (size_t i = 1; i <= data.strings.count(); i++) {
-            TETHER_LOGI(tag, "  [%zu] \"%s\"", i, data.strings.getString(static_cast<uint8_t>(i)));
+    TETHER_LOGI(tag, "\n📋 STEP 1: Reading Bootstrap Mailbox Configuration (words 0x0014-0x0017)");
+    
+    uint16_t bootstrap_rx_offset = 0, bootstrap_rx_size = 0;
+    uint16_t bootstrap_tx_offset = 0, bootstrap_tx_size = 0;
+    
+    log_word_read(SII_BOOTSTRAP_RX_MBX_OFFSET, "Bootstrap RX Offset", bootstrap_rx_offset);
+    log_word_read(SII_BOOTSTRAP_RX_MBX_SIZE, "Bootstrap RX Size", bootstrap_rx_size);
+    log_word_read(SII_BOOTSTRAP_TX_MBX_OFFSET, "Bootstrap TX Offset", bootstrap_tx_offset);
+    log_word_read(SII_BOOTSTRAP_TX_MBX_SIZE, "Bootstrap TX Size", bootstrap_tx_size);
+    
+    TETHER_LOGI(tag, "\n📋 STEP 2: Reading Standard Mailbox Configuration (words 0x0018-0x001C)");
+    
+    uint16_t std_rx_offset = 0, std_rx_size = 0;
+    uint16_t std_tx_offset = 0, std_tx_size = 0;
+    uint16_t protocols = 0;
+    
+    log_word_read(SII_STD_RX_MBX_OFFSET, "Standard RX Offset", std_rx_offset);
+    log_word_read(SII_STD_RX_MBX_SIZE, "Standard RX Size", std_rx_size);
+    log_word_read(SII_STD_TX_MBX_OFFSET, "Standard TX Offset", std_tx_offset);
+    log_word_read(SII_STD_TX_MBX_SIZE, "Standard TX Size", std_tx_size);
+    log_word_read(SII_MAILBOX_PROTOCOLS, "Mailbox Protocols", protocols);
+    
+    TETHER_LOGI(tag, "\n📋 STEP 3: Field Assignments");
+    TETHER_LOGI(tag, "  Bootstrap Mailbox:");
+    TETHER_LOGI(tag, "    bootstrap_rx_offset  = 0x%04X (word 0x0014) → RX mailbox address (MbxIn, Master→Slave, SM1)",
+             (unsigned)bootstrap_rx_offset);
+    TETHER_LOGI(tag, "    bootstrap_rx_size    = 0x%04X (word 0x0015) → RX mailbox size in bytes",
+             (unsigned)bootstrap_rx_size);
+    TETHER_LOGI(tag, "    bootstrap_tx_offset  = 0x%04X (word 0x0016) → TX mailbox address (MbxOut, Slave→Master, SM0)",
+             (unsigned)bootstrap_tx_offset);
+    TETHER_LOGI(tag, "    bootstrap_tx_size    = 0x%04X (word 0x0017) → TX mailbox size in bytes",
+             (unsigned)bootstrap_tx_size);
+    
+    TETHER_LOGI(tag, "  Standard Mailbox:");
+    TETHER_LOGI(tag, "    std_rx_offset        = 0x%04X (word 0x0018) → RX mailbox address (MbxIn, Master→Slave, SM1)",
+             (unsigned)std_rx_offset);
+    TETHER_LOGI(tag, "    std_rx_size          = 0x%04X (word 0x0019) → RX mailbox size in bytes",
+             (unsigned)std_rx_size);
+    TETHER_LOGI(tag, "    std_tx_offset        = 0x%04X (word 0x001A) → TX mailbox address (MbxOut, Slave→Master, SM0)",
+             (unsigned)std_tx_offset);
+    TETHER_LOGI(tag, "    std_tx_size          = 0x%04X (word 0x001B) → TX mailbox size in bytes",
+             (unsigned)std_tx_size);
+    TETHER_LOGI(tag, "    protocols            = 0x%04X (word 0x001C) → Supported mailbox protocols",
+             (unsigned)protocols);
+    
+    TETHER_LOGI(tag, "\n📋 STEP 4: Protocol Flag Decoding");
+    TETHER_LOGI(tag, "  Protocol value: 0x%04X (%s)", (unsigned)protocols, getMailboxProtocolName(protocols));
+    TETHER_LOGI(tag, "  Bit breakdown:");
+    TETHER_LOGI(tag, "    Bit 0 (0x0001): AoE (ADS over EtherCAT)  = %s", (protocols & MBX_PROTO_AOE) ? "✓ Supported" : "✗ Not supported");
+    TETHER_LOGI(tag, "    Bit 1 (0x0002): EoE (Ethernet over EtherCAT) = %s", (protocols & MBX_PROTO_EOE) ? "✓ Supported" : "✗ Not supported");
+    TETHER_LOGI(tag, "    Bit 2 (0x0004): CoE (CANopen over EtherCAT) = %s", (protocols & MBX_PROTO_COE) ? "✓ Supported" : "✗ Not supported");
+    TETHER_LOGI(tag, "    Bit 3 (0x0008): FoE (File over EtherCAT)   = %s", (protocols & MBX_PROTO_FOE) ? "✓ Supported" : "✗ Not supported");
+    TETHER_LOGI(tag, "    Bit 4 (0x0010): SoE (Servo over EtherCAT)  = %s", (protocols & MBX_PROTO_SOE) ? "✓ Supported" : "✗ Not supported");
+    TETHER_LOGI(tag, "    Bit 5 (0x0020): VoE (Vendor over EtherCAT) = %s", (protocols & MBX_PROTO_VOE) ? "✓ Supported" : "✗ Not supported");
+    
+    TETHER_LOGI(tag, "\n📋 STEP 5: Sync Manager Mapping (EtherCAT Convention)");
+    TETHER_LOGI(tag, "  Per EtherCAT spec ETG.2010:");
+    TETHER_LOGI(tag, "    SM0 = Send mailbox (MbxOut) = Slave→Master direction");
+    TETHER_LOGI(tag, "    SM1 = Receive mailbox (MbxIn) = Master→Slave direction");
+    TETHER_LOGI(tag, "  SII terminology mapping:");
+    TETHER_LOGI(tag, "    std_tx  (SII word 0x001A/0x001B) → SM0 (Send/MbxOut/Slave→Master)");
+    TETHER_LOGI(tag, "    std_rx  (SII word 0x0018/0x0019) → SM1 (Receive/MbxIn/Master→Slave)");
+    
+    TETHER_LOGI(tag, "\n📋 STEP 6: Final Mailbox Configuration");
+    TETHER_LOGI(tag, "  SM0 (Send/MbxOut/Slave→Master):");
+    TETHER_LOGI(tag, "    Address = 0x%04X (from std_tx_offset at word 0x001A)", (unsigned)std_tx_offset);
+    TETHER_LOGI(tag, "    Size    = %u bytes (from std_tx_size at word 0x001B)", (unsigned)std_tx_size);
+    
+    TETHER_LOGI(tag, "  SM1 (Receive/MbxIn/Master→Slave):");
+    TETHER_LOGI(tag, "    Address = 0x%04X (from std_rx_offset at word 0x0018)", (unsigned)std_rx_offset);
+    TETHER_LOGI(tag, "    Size    = %u bytes (from std_rx_size at word 0x0019)", (unsigned)std_rx_size);
+    
+    TETHER_LOGI(tag, "  Supported Protocols: 0x%04X (%s)", (unsigned)protocols, getMailboxProtocolName(protocols));
+    
+    TETHER_LOGI(tag, "\n📋 STEP 7: Validation Checks");
+    bool has_mailbox = (std_rx_size > 0 && std_tx_size > 0);
+    TETHER_LOGI(tag, "  Has valid mailbox: %s", has_mailbox ? "✓ Yes" : "✗ No");
+    
+    if (has_mailbox) {
+        if (std_rx_size == 0 || std_tx_size == 0) {
+            TETHER_LOGW(tag, "  ⚠ WARNING: Zero-size mailbox detected");
+        }
+        if (std_rx_size < 32 || std_tx_size < 32) {
+            TETHER_LOGW(tag, "  ⚠ WARNING: Unusually small mailbox (< 32 bytes)");
+        }
+        if (std_rx_offset == std_tx_offset) {
+            TETHER_LOGW(tag, "  ⚠ WARNING: RX and TX mailboxes have same address");
+        }
+        if (std_tx_offset >= std_rx_offset) {
+            TETHER_LOGW(tag, "  ⚠ WARNING: Non-standard address ordering (SM0 >= SM1)");
         }
     }
     
-    TETHER_LOGI(tag, "\n═══════════════════════════════════════════════════════════════");
+    TETHER_LOGI(tag, "\n╔══════════════════════════════════════════════════════════════╗\n║  End of SII Mailbox Derivation Debug                          ║\n╚══════════════════════════════════════════════════════════════╝\n");
 }
 
 void logSIISummary(const SIIData& data, uint16_t slave_index, const char* tag) {
