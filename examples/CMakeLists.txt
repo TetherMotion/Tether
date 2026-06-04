@@ -67,6 +67,11 @@ add_tether_example(as715n_check_error_code
 add_tether_example(ethercat_dump_sii
     LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common)
 
+# ---DynaDrive Sine Motion Native Example ---
+# DynaDrive (ANYdrive / rsl_drive_sdk) position sine wave using Type-E PDOs
+add_tether_example(dynadrive_sine_motion_native
+    LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common)
+
 # ---EtherCAT slave detection example ---
 # Scans the bus, reports discovered slaves with SII summary
 add_tether_example(detect_slaves

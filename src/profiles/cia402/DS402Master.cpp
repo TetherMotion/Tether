@@ -70,13 +70,14 @@ void DS402Master::stopDistributedClocks()
 
 bool DS402Master::configureDrive(const DriveConfiguration& config)
 {
-    setSlaveAsDS402(config.slave_index);
     auto& drive = ensureDrive(config.slave_index);
     drive.setSDOTimeout(config.sdo_timeout_ms);
 
-    if (config.auto_configure_mailbox &&
-        !ethercat_master_.autoConfigureMailbox(config.slave_index, Tether::Platform::LogLevel::Info)) {
-        return false;
+    if (slaveRole(config.slave_index) != SlaveRole::DynaDrive) {
+        if (config.auto_configure_mailbox &&
+            !ethercat_master_.autoConfigureMailbox(config.slave_index, Tether::Platform::LogLevel::Info)) {
+            return false;
+        }
     }
 
     if (!drive.assignFixedPDOs(config.rxpdo_index, config.txpdo_index,
@@ -96,8 +97,10 @@ bool DS402Master::configureDrive(const DriveConfiguration& config)
         return false;
     }
 
-    if (config.operating_mode != 0 && !drive.setOperatingMode(config.operating_mode)) {
-        return false;
+    if (slaveRole(config.slave_index) != SlaveRole::DynaDrive) {
+        if (config.operating_mode != 0 && !drive.setOperatingMode(config.operating_mode)) {
+            return false;
+        }
     }
 
     return true;
@@ -140,6 +143,11 @@ void DS402Master::setSlaveAsNonDS402(uint16_t slave_index)
     setSlaveRole(slave_index, SlaveRole::NonDS402);
 }
 
+void DS402Master::setSlaveAsDynaDrive(uint16_t slave_index)
+{
+    setSlaveRole(slave_index, SlaveRole::DynaDrive);
+}
+
 DS402Master::SlaveRole DS402Master::slaveRole(uint16_t slave_index) const
 {
     if (slave_index >= slave_roles_.size()) {
@@ -154,10 +162,16 @@ bool DS402Master::isDS402Slave(uint16_t slave_index) const
     return slaveRole(slave_index) == SlaveRole::DS402;
 }
 
+bool DS402Master::isManagedDrive(uint16_t slave_index) const
+{
+    const auto role = slaveRole(slave_index);
+    return role == SlaveRole::DS402 || role == SlaveRole::DynaDrive;
+}
+
 bool DS402Master::addMotionController(uint16_t slave_index,
                                       std::unique_ptr<IDriveMotionController> controller)
 {
-    if (!controller || !isDS402Slave(slave_index)) {
+    if (!controller || !isManagedDrive(slave_index)) {
         return false;
     }
 
@@ -280,9 +294,57 @@ const CiA402Drive* DS402Master::driveAt(size_t index) const
     return drives_[index].get();
 }
 
+bool DS402Master::enableDrive(uint16_t slave_index, uint32_t timeout_ms)
+{
+    auto* drive = driveBySlaveIndex(slave_index);
+    if (!drive) return false;
+    if (slaveRole(slave_index) == SlaveRole::DynaDrive) {
+        return drive->enableDynaDrive(timeout_ms);
+    }
+    return drive->enable(timeout_ms);
+}
+
+bool DS402Master::disableDrive(uint16_t slave_index)
+{
+    auto* drive = driveBySlaveIndex(slave_index);
+    if (!drive) return false;
+    if (slaveRole(slave_index) == SlaveRole::DynaDrive) {
+        return drive->disableDynaDrive();
+    }
+    return drive->disable();
+}
+
+bool DS402Master::enableAllDrives(uint32_t timeout_ms)
+{
+    for (auto& drive : drives_) {
+        if (!drive) continue;
+        if (slaveRole(drive->slaveIndex()) == SlaveRole::DynaDrive) {
+            if (!drive->enableDynaDrive(timeout_ms)) return false;
+        } else {
+            if (!drive->enable(timeout_ms)) return false;
+        }
+    }
+
+    return true;
+}
+
+bool DS402Master::disableAllDrives()
+{
+    for (auto& drive : drives_) {
+        if (!drive) continue;
+        if (slaveRole(drive->slaveIndex()) == SlaveRole::DynaDrive) {
+            if (!drive->disableDynaDrive()) return false;
+        } else {
+            if (!drive->disable()) return false;
+        }
+    }
+
+    return true;
+}
+
 CiA402Drive* DS402Master::driveBySlaveIndex(uint16_t slave_index)
 {
-    if (!isDS402Slave(slave_index)) {
+    if (!isManagedDrive(slave_index)) {
         return nullptr;
     }
 
@@ -297,7 +359,7 @@ CiA402Drive* DS402Master::driveBySlaveIndex(uint16_t slave_index)
 
 const CiA402Drive* DS402Master::driveBySlaveIndex(uint16_t slave_index) const
 {
-    if (!isDS402Slave(slave_index)) {
+    if (!isManagedDrive(slave_index)) {
         return nullptr;
     }
 
@@ -310,48 +372,14 @@ const CiA402Drive* DS402Master::driveBySlaveIndex(uint16_t slave_index) const
     return nullptr;
 }
 
-bool DS402Master::enableDrive(uint16_t slave_index, uint32_t timeout_ms)
-{
-    auto* drive = driveBySlaveIndex(slave_index);
-    return drive ? drive->enable(timeout_ms) : false;
-}
-
-bool DS402Master::disableDrive(uint16_t slave_index)
-{
-    auto* drive = driveBySlaveIndex(slave_index);
-    return drive ? drive->disable() : false;
-}
-
-bool DS402Master::enableAllDrives(uint32_t timeout_ms)
-{
-    for (auto& drive : drives_) {
-        if (drive && !drive->enable(timeout_ms)) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-bool DS402Master::disableAllDrives()
-{
-    for (auto& drive : drives_) {
-        if (drive && !drive->disable()) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
 CiA402Drive& DS402Master::ensureDrive(uint16_t slave_index)
 {
-    if (!isDS402Slave(slave_index)) {
-        setSlaveAsDS402(slave_index);
-    }
-
     if (auto* existing_drive = driveBySlaveIndex(slave_index)) {
         return *existing_drive;
+    }
+
+    if (slaveRole(slave_index) == SlaveRole::NonDS402) {
+        setSlaveAsDS402(slave_index);
     }
 
     drives_.push_back(std::make_unique<CiA402Drive>(ethercat_master_, slave_index));

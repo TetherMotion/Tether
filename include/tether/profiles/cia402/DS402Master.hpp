@@ -17,6 +17,7 @@ public:
     enum class SlaveRole : uint8_t {
         NonDS402,
         DS402,
+        DynaDrive,
     };
 
     enum class CyclicTarget : uint8_t {
@@ -155,8 +156,10 @@ public:
     void setSlaveRole(uint16_t slave_index, SlaveRole role);
     void setSlaveAsDS402(uint16_t slave_index);
     void setSlaveAsNonDS402(uint16_t slave_index);
+    void setSlaveAsDynaDrive(uint16_t slave_index);
     SlaveRole slaveRole(uint16_t slave_index) const;
     bool isDS402Slave(uint16_t slave_index) const;
+    bool isManagedDrive(uint16_t slave_index) const;
 
     bool addMotionController(uint16_t slave_index, std::unique_ptr<IDriveMotionController> controller);
     template<typename RxPDO>

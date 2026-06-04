@@ -13,3 +13,16 @@ examples/*_native
 examples/g64_*
 examples/gcode_*
 examples/simple_*
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+
+# Build output directories
+bin/
+lib/
+
+# Generated example files
+examples/dynadrive_sine_motion*.cpp
