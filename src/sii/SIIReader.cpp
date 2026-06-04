@@ -1026,8 +1026,8 @@ void debugSIIMailboxDerivation(EtherCATMaster& master, uint16_t slave_index, con
         if (std_rx_offset == std_tx_offset) {
             TETHER_LOGW(tag, "  ⚠ WARNING: RX and TX mailboxes have same address");
         }
-        if (std_tx_offset >= std_rx_offset) {
-            TETHER_LOGW(tag, "  ⚠ WARNING: Non-standard address ordering (SM0 >= SM1)");
+        if (std_rx_offset >= std_tx_offset) {
+            TETHER_LOGW(tag, "  ⚠ WARNING: Non-standard address ordering (SM1 >= SM0)");
         }
     }
     
