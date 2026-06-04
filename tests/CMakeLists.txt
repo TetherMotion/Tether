@@ -155,7 +155,7 @@ if(TETHER_BUILD_MODULE_TESTS)
     if(DC_TEST_SOURCES)
         create_module_test(dc
             "${DC_TEST_SOURCES}"
-            "tether_common;tether_ethercat_common"
+            "tether_common;tether_ethercat_common;tether_ethercat_master"
             ""
         )
     endif()
@@ -179,7 +179,7 @@ if(TETHER_BUILD_MODULE_TESTS)
     if(GCODE_TEST_SOURCES)
         create_module_test(gcode
             "${GCODE_TEST_SOURCES}"
-            "tether_common;tether_gcode"
+            "tether_common;tether_gcode;tether_export"
             ""
         )
     endif()
@@ -187,7 +187,7 @@ if(TETHER_BUILD_MODULE_TESTS)
     if(HAL_TEST_SOURCES)
         create_module_test(hal
             "${HAL_TEST_SOURCES}"
-            "tether_common;tether_hal"
+            "tether_common;tether_hal;tether_ethercat_common;tether_ethercat_master"
             ""
         )
     endif()
@@ -219,7 +219,7 @@ if(TETHER_BUILD_MODULE_TESTS)
     if(MOTION_REPLANNER_TEST_SOURCES)
         create_module_test(motion_replanner
             "${MOTION_REPLANNER_TEST_SOURCES}"
-            "tether_common;tether_motion_control;tether_motion_replanner;tether_ethercat_common"
+            "tether_common;tether_motion_control;tether_motion_planner;tether_ethercat_common"
             ""
         )
     endif()
@@ -227,7 +227,7 @@ if(TETHER_BUILD_MODULE_TESTS)
     if(PROFILES_TEST_SOURCES)
         create_module_test(profiles
             "${PROFILES_TEST_SOURCES}"
-            "tether_common;tether_ethercat_common;tether_ethercat_slave"
+            "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
             ""
         )
     endif()
@@ -251,7 +251,7 @@ if(TETHER_BUILD_MODULE_TESTS)
     if(SII_TEST_SOURCES)
         create_module_test(sii
             "${SII_TEST_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/sii/mocks_private/raw_transport_test_stubs.cpp"
-            "tether_common;tether_ethercat_common"
+            "tether_common;tether_ethercat_common;tether_ethercat_master"
             ""
         )
     endif()
@@ -267,7 +267,7 @@ if(TETHER_BUILD_MODULE_TESTS)
     if(MAILBOX_TEST_SOURCES)
         create_module_test(mailbox
             "${MAILBOX_TEST_SOURCES}"
-            "tether_common;tether_ethercat_common"
+            "tether_common;tether_ethercat_common;tether_ethercat_master;tether_ethercat_slave"
             ""
         )
     endif()
@@ -275,7 +275,7 @@ if(TETHER_BUILD_MODULE_TESTS)
     if(SLAVE_EMULATION_TEST_SOURCES)
         create_module_test(slave_emulation
             "${SLAVE_EMULATION_TEST_SOURCES}"
-            "tether_common;tether_ethercat_common"
+            "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
             ""
         )
     endif()
@@ -291,7 +291,7 @@ if(TETHER_BUILD_MODULE_TESTS)
     if(REPLANNER_TEST_SOURCES)
         create_module_test(replanner
             "${REPLANNER_TEST_SOURCES}"
-            "tether_common;tether_motion_replanner"
+            "tether_common;tether_motion_planner"
             ""
         )
     endif()

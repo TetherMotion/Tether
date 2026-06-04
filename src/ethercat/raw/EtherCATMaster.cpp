@@ -1708,10 +1708,16 @@ void EtherCATMaster::masterTask()
             }
         }
 
-        if (!setPreopAndConfirm(i))
+        if (!setPreopAndConfirm(i)) {
             TETHER_LOGE(TAG, "Slave %u: Failed to set PRE_OP", i);
-        else
+        } else {
             TETHER_LOGI(TAG, "Slave %u: PRE_OP confirmed", i);
+
+            // Configure process-data SyncManagers (SM2/SM3) from SII / HW registers
+            if (!configureProcessDataSyncManagersFromSii(SlaveAddress(i))) {
+                TETHER_LOGW(TAG, "Slave %u: Failed to configure process-data SMs (SM2/SM3) from SII", i);
+            }
+        }
     }
 
     // Also emit a concise discovered-slaves summary for diagnostics
