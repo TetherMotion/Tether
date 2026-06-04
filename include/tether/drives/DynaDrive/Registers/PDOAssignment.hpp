@@ -7,6 +7,7 @@ namespace EtherCAT {
 namespace Drives {
 namespace Registers {
 namespace DynaDrive {
+namespace PDOAssignment {
 
 static constexpr uint16_t SM2PDOAssignmentObjectIndex = 0x1C12; // RxPDO assignment
 static constexpr uint16_t SM3PDOAssignmentObjectIndex = 0x1C13; // TxPDO assignment
@@ -91,6 +92,7 @@ inline const RegisterList kRegisterList = {
     &RxPDOModuleId,
 };
 
+} // namespace PDOAssignment
 } // namespace DynaDrive
 } // namespace Registers
 } // namespace Drives

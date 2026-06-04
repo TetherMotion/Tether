@@ -7,10 +7,11 @@ namespace EtherCAT {
 namespace Drives {
 namespace Registers {
 namespace DynaDrive {
+namespace Controlword {
 
-static constexpr uint16_t ControlwordObjectIndex = 0x6040;
+static constexpr uint16_t ObjectIndex = 0x6040;
 
-enum class DynaDriveControlwordOptions : uint16_t {
+enum class Options : uint16_t {
     WarmReset                = 0x01,
     ClearErrorsToMotorOp     = 0x02,
     StandbyToConfigure       = 0x03,
@@ -25,14 +26,14 @@ enum class DynaDriveControlwordOptions : uint16_t {
     ClearErrorsToStandby     = 0x0C,
 };
 
-constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry Controlword = {
-    .index = ControlwordObjectIndex,
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry Entry = {
+    .index = ObjectIndex,
     .subindex = 0x00,
     .name = "DynaDrive Controlword",
     .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned16,
     .default_value = 0,
     .unit = Unit_None,
-    .options_enum = std::type_identity<DynaDriveControlwordOptions>{},
+    .options_enum = std::type_identity<Options>{},
     .min_value = 0,
     .max_value = 0x0C,
     .modification_mode = ModificationMode::DuringOperation,
@@ -40,9 +41,10 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry Controlword = {
 };
 
 inline const RegisterList kRegisterList = {
-    &Controlword,
+    &Entry,
 };
 
+} // namespace Controlword
 } // namespace DynaDrive
 } // namespace Registers
 } // namespace Drives

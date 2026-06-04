@@ -673,7 +673,7 @@ bool CiA402Drive::readDynaDriveStatusword(uint32_t& statusword) {
     return m_master->sdoManager().readU32(m_slave_index, static_cast<uint16_t>(CiA402::Register::Statusword), 0, statusword, m_sdo_timeout_ms);
 }
 
-bool CiA402Drive::sendDynaDriveControlword(EtherCAT::Drives::Registers::DynaDrive::DynaDriveControlwordOptions controlword) {
+bool CiA402Drive::sendDynaDriveControlword(EtherCAT::Drives::Registers::DynaDrive::Controlword::Options controlword) {
     uint16_t cw = static_cast<uint16_t>(controlword);
     TETHER_LOGI(TAG, "Slave %u: DynaDrive sending controlword ID 0x%02X", m_slave_index, cw);
     return m_master->sdoManager().writeU16(m_slave_index, static_cast<uint16_t>(CiA402::Register::Controlword), 0, cw, m_sdo_timeout_ms);
@@ -718,7 +718,7 @@ bool CiA402Drive::enableDynaDrive(uint32_t timeout_ms) {
     // If in Error, clear to Standby
     if (state == DynaDriveState::Error) {
         TETHER_LOGI(TAG, "Slave %u: Clearing Error -> Standby", m_slave_index);
-        if (!sendDynaDriveControlword(EtherCAT::Drives::Registers::DynaDrive::DynaDriveControlwordOptions::ClearErrorsToStandby)) return false;
+        if (!sendDynaDriveControlword(EtherCAT::Drives::Registers::DynaDrive::Controlword::Options::ClearErrorsToStandby)) return false;
         Tether::Platform::Clock::instance().delayMilliseconds(500);
         if (!wait_for_state(DynaDriveState::Standby)) return false;
         state = DynaDriveState::Standby;
@@ -727,7 +727,7 @@ bool CiA402Drive::enableDynaDrive(uint32_t timeout_ms) {
     // Standby -> MotorPreOp (auto -> MotorOp)
     if (state == DynaDriveState::Standby) {
         TETHER_LOGI(TAG, "Slave %u: Standby -> MotorPreOp", m_slave_index);
-        if (!sendDynaDriveControlword(EtherCAT::Drives::Registers::DynaDrive::DynaDriveControlwordOptions::StandbyToMotorPreOp)) return false;
+        if (!sendDynaDriveControlword(EtherCAT::Drives::Registers::DynaDrive::Controlword::Options::StandbyToMotorPreOp)) return false;
         Tether::Platform::Clock::instance().delayMilliseconds(500);
         if (!wait_for_state(DynaDriveState::MotorOp)) return false;
         state = DynaDriveState::MotorOp;
@@ -736,7 +736,7 @@ bool CiA402Drive::enableDynaDrive(uint32_t timeout_ms) {
     // MotorOp -> ControlOp
     if (state == DynaDriveState::MotorOp) {
         TETHER_LOGI(TAG, "Slave %u: MotorOp -> ControlOp", m_slave_index);
-        if (!sendDynaDriveControlword(EtherCAT::Drives::Registers::DynaDrive::DynaDriveControlwordOptions::MotorOpToControlOp)) return false;
+        if (!sendDynaDriveControlword(EtherCAT::Drives::Registers::DynaDrive::Controlword::Options::MotorOpToControlOp)) return false;
         Tether::Platform::Clock::instance().delayMilliseconds(500);
         if (!wait_for_state(DynaDriveState::ControlOp)) return false;
         state = DynaDriveState::ControlOp;
@@ -758,7 +758,7 @@ bool CiA402Drive::disableDynaDrive() {
     if (readDynaDriveStatusword(statusword)) {
         DynaDriveState state = decodeDynaDriveState(statusword);
         if (state == DynaDriveState::ControlOp) {
-            return sendDynaDriveControlword(EtherCAT::Drives::Registers::DynaDrive::DynaDriveControlwordOptions::ControlOpToStandby);
+            return sendDynaDriveControlword(EtherCAT::Drives::Registers::DynaDrive::Controlword::Options::ControlOpToStandby);
         }
     }
     return true;  // Already not in ControlOp

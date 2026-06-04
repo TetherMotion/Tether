@@ -24,17 +24,17 @@ namespace EtherCAT {
 namespace Drives {
 
 // Re-export canonical identity constants
-constexpr uint32_t kDynaDriveVendorId    = Registers::DynaDrive::VendorID.default_value;
-constexpr uint32_t kDynaDriveProductCode = Registers::DynaDrive::ProductCode.default_value;
+constexpr uint32_t kDynaDriveVendorId    = Registers::DynaDrive::Identity::VendorID.default_value;
+constexpr uint32_t kDynaDriveProductCode = Registers::DynaDrive::Identity::ProductCode.default_value;
 
-// Re-export runtime statusword helper (already in Statusword.hpp, kept for convenience)
-using DynaDriveStatusword = Registers::DynaDrive::DynaDriveStatusword;
+// Re-export runtime statusword helper
+using DynaDriveStatusword = Registers::DynaDrive::Status::StatuswordDecoder;
 
 // ============================================================================
 // State name helper
 // ============================================================================
 
-std::string dynaDriveStateName(Registers::DynaDrive::DynaDriveStateOptions state);
+std::string dynaDriveStateName(Registers::DynaDrive::Status::StateOptions state);
 
 } // namespace Drives
 } // namespace EtherCAT

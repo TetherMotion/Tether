@@ -7,10 +7,11 @@ namespace EtherCAT {
 namespace Drives {
 namespace Registers {
 namespace DynaDrive {
+namespace Status {
 
-static constexpr uint16_t StatuswordObjectIndex = 0x6041;
+static constexpr uint16_t ObjectIndex = 0x6041;
 
-enum class DynaDriveStateOptions : uint8_t {
+enum class StateOptions : uint8_t {
     NA            = 0,
     ColdStart     = 1,
     WarmStart     = 2,
@@ -23,10 +24,11 @@ enum class DynaDriveStateOptions : uint8_t {
     Fatal         = 9,
     MotorPreOp    = 10,
     DeviceMissing = 11,
+    Unknown       = 255,
 };
 
-constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry Statusword = {
-    .index = StatuswordObjectIndex,
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry Entry = {
+    .index = ObjectIndex,
     .subindex = 0x00,
     .name = "DynaDrive Statusword",
     .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned32,
@@ -40,29 +42,29 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry Statusword = {
 };
 
 inline const RegisterList kRegisterList = {
-    &Statusword,
+    &Entry,
 };
 
 // ============================================================================
 // Runtime statusword decoder (not an ObjectDictionaryEntry — binary helper)
 // ============================================================================
 
-struct DynaDriveStatusword {
+struct StatuswordDecoder {
     uint32_t raw = 0;
 
-    explicit DynaDriveStatusword(uint32_t data) : raw(data) {}
+    explicit StatuswordDecoder(uint32_t data) : raw(data) {}
 
-    DynaDriveStateOptions state() const {
-        return static_cast<DynaDriveStateOptions>(raw & 0x0F);
+    StateOptions state() const {
+        return static_cast<StateOptions>(raw & 0x0F);
     }
 
     uint8_t modeId() const { return static_cast<uint8_t>((raw >> 4) & 0x0F); }
 
-    bool isError()  const { return state() == DynaDriveStateOptions::Error; }
-    bool isFatal()  const { return state() == DynaDriveStateOptions::Fatal; }
-    bool isControlOp() const { return state() == DynaDriveStateOptions::ControlOp; }
-    bool isMotorOp() const { return state() == DynaDriveStateOptions::MotorOp; }
-    bool isStandby() const { return state() == DynaDriveStateOptions::Standby; }
+    bool isError()  const { return state() == StateOptions::Error; }
+    bool isFatal()  const { return state() == StateOptions::Fatal; }
+    bool isControlOp() const { return state() == StateOptions::ControlOp; }
+    bool isMotorOp() const { return state() == StateOptions::MotorOp; }
+    bool isStandby() const { return state() == StateOptions::Standby; }
 
     bool hasWarningOvertemperatureBridge() const { return (raw >> 8)  & 1; }
     bool hasWarningOvertemperatureStator() const { return (raw >> 9)  & 1; }
@@ -70,6 +72,7 @@ struct DynaDriveStatusword {
     bool hasErrorPdoTimeout()              const { return (raw >> 15) & 1; }
 };
 
+} // namespace Status
 } // namespace DynaDrive
 } // namespace Registers
 } // namespace Drives

@@ -7,10 +7,11 @@ namespace EtherCAT {
 namespace Drives {
 namespace Registers {
 namespace DynaDrive {
+namespace ModesOfOperation {
 
-static constexpr uint16_t ModesOfOperationObjectIndex = 0x6060;
+static constexpr uint16_t ObjectIndex = 0x6060;
 
-enum class DynaDriveModeOptions : uint16_t {
+enum class Options : uint16_t {
     Freeze                  = 1,
     Disable                 = 2,
     Current                 = 3,
@@ -27,14 +28,14 @@ enum class DynaDriveModeOptions : uint16_t {
     JointPositionTorque     = 16,
 };
 
-constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry ModesOfOperation = {
-    .index = ModesOfOperationObjectIndex,
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry Entry = {
+    .index = ObjectIndex,
     .subindex = 0x00,
     .name = "Modes of Operation",
     .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned16,
-    .default_value = static_cast<uint32_t>(DynaDriveModeOptions::Freeze),
+    .default_value = static_cast<uint32_t>(Options::Freeze),
     .unit = Unit_None,
-    .options_enum = std::type_identity<DynaDriveModeOptions>{},
+    .options_enum = std::type_identity<Options>{},
     .min_value = 1,
     .max_value = 16,
     .modification_mode = ModificationMode::DuringOperation,
@@ -42,9 +43,10 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry ModesOfOperation =
 };
 
 inline const RegisterList kRegisterList = {
-    &ModesOfOperation,
+    &Entry,
 };
 
+} // namespace ModesOfOperation
 } // namespace DynaDrive
 } // namespace Registers
 } // namespace Drives

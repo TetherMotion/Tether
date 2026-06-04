@@ -227,7 +227,7 @@ if(TETHER_BUILD_MODULE_TESTS)
     if(PROFILES_TEST_SOURCES)
         create_module_test(profiles
             "${PROFILES_TEST_SOURCES}"
-            "tether_common;tether_ethercat_common"
+            "tether_common;tether_ethercat_common;tether_ethercat_slave"
             ""
         )
     endif()

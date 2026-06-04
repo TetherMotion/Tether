@@ -8,8 +8,8 @@
 namespace EtherCAT {
 namespace Drives {
 
-std::string dynaDriveStateName(Registers::DynaDrive::DynaDriveStateOptions state) {
-    using SO = Registers::DynaDrive::DynaDriveStateOptions;
+std::string dynaDriveStateName(Registers::DynaDrive::Status::StateOptions state) {
+    using SO = Registers::DynaDrive::Status::StateOptions;
     switch (state) {
         case SO::NA:            return "NA";
         case SO::ColdStart:     return "ColdStart";

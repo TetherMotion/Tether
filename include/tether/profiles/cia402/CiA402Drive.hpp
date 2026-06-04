@@ -221,13 +221,13 @@ public:
     // DynaDrive Custom FSM (rsl_drive_sdk / ANYdrive)
     // ========================================================================
 
-    using DynaDriveState = EtherCAT::Drives::Registers::DynaDrive::DynaDriveStateOptions;
+    using DynaDriveState = EtherCAT::Drives::Registers::DynaDrive::Status::StateOptions;
 
     static DynaDriveState decodeDynaDriveState(uint32_t statusword);
     static const char* getDynaDriveStateName(DynaDriveState state);
 
     bool readDynaDriveStatusword(uint32_t& statusword);
-    bool sendDynaDriveControlword(EtherCAT::Drives::Registers::DynaDrive::DynaDriveControlwordOptions controlword);
+    bool sendDynaDriveControlword(EtherCAT::Drives::Registers::DynaDrive::Controlword::Options controlword);
     bool enableDynaDrive(uint32_t timeout_ms = 10000);
     bool disableDynaDrive();
     bool isDynaDriveControlOp();

@@ -7,11 +7,12 @@ namespace EtherCAT {
 namespace Drives {
 namespace Registers {
 namespace DynaDrive {
+namespace Identity {
 
-static constexpr uint16_t IdentityObjectIndex = 0x1018;
+static constexpr uint16_t ObjectIndex = 0x1018;
 
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry VendorID = {
-    .index = IdentityObjectIndex,
+    .index = ObjectIndex,
     .subindex = 0x01,
     .name = "Vendor ID",
     .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned32,
@@ -25,7 +26,7 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry VendorID = {
 };
 
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry ProductCode = {
-    .index = IdentityObjectIndex,
+    .index = ObjectIndex,
     .subindex = 0x02,
     .name = "Product Code",
     .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned32,
@@ -43,6 +44,7 @@ inline const RegisterList kRegisterList = {
     &ProductCode,
 };
 
+} // namespace Identity
 } // namespace DynaDrive
 } // namespace Registers
 } // namespace Drives
