@@ -25,4 +25,3 @@ bin/
 lib/
 
 # Generated example files
-examples/dynadrive_sine_motion*.cpp
