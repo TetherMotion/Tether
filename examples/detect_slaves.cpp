@@ -20,6 +20,7 @@
 #include <thread>
 
 #include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/EtherCATSlave.hpp"
 #include "tether/ethercat/EtherCATTypes.hpp"
 #include "tether/ethercat/SyncManager.hpp"
 #include "tether/platform/EspCompat.hpp"
@@ -116,6 +117,12 @@ int main(int argc, char** argv) {
         for (const auto& flag : known_debug_flags) {
             TETHER_LOGW(TAG, "  - %s", flag.c_str());
         }
+    }
+
+    // Enable statemachine debug if requested
+    if (debug_flags.count("ethercat-statemachine")) {
+        EtherCAT::enableStateMachineDebug(true);
+        TETHER_LOGI(TAG, "EtherCAT state machine debug logging enabled");
     }
     
     TETHER_LOGI(TAG, "detect_slaves (host) — interface: %s", iface.c_str());

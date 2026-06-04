@@ -63,11 +63,11 @@ void logPreOperationalMailboxDiagnostics(
                                                 &write_length,
                                                 &read_address,
                                                 &read_length)) {
-            TETHER_LOGI(tag, "[PREINIT] SDO mailbox (post-auto-config): Send(MbxOut/SM0, S->M)=0x%04X/%u   Receive(MbxIn/SM1, M->S)=0x%04X/%u",
-                        read_address,
-                        static_cast<unsigned>(read_length),
+            TETHER_LOGI(tag, "[PREINIT] SDO mailbox (post-auto-config): Receive(MbxIn/SM0, M->S)=0x%04X/%u   Send(MbxOut/SM1, S->M)=0x%04X/%u",
                         write_address,
-                        static_cast<unsigned>(write_length));
+                        static_cast<unsigned>(write_length),
+                        read_address,
+                        static_cast<unsigned>(read_length));
             if (write_address == 0 || read_address == 0) {
                 TETHER_LOGW(tag, "[PREINIT] SDO mailbox contains zero addresses (possible fallback or incomplete config)");
             }

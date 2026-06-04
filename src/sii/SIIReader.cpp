@@ -962,21 +962,21 @@ void debugSIIMailboxDerivation(EtherCATMaster& master, uint16_t slave_index, con
     
     TETHER_LOGI(tag, "\n📋 STEP 3: Field Assignments");
     TETHER_LOGI(tag, "  Bootstrap Mailbox:");
-    TETHER_LOGI(tag, "    bootstrap_rx_offset  = 0x%04X (word 0x0014) → RX mailbox address (MbxIn, Master→Slave, SM1)",
+    TETHER_LOGI(tag, "    bootstrap_rx_offset  = 0x%04X (word 0x0014) → RX mailbox address (MbxIn, Master→Slave, SM0)",
              (unsigned)bootstrap_rx_offset);
     TETHER_LOGI(tag, "    bootstrap_rx_size    = 0x%04X (word 0x0015) → RX mailbox size in bytes",
              (unsigned)bootstrap_rx_size);
-    TETHER_LOGI(tag, "    bootstrap_tx_offset  = 0x%04X (word 0x0016) → TX mailbox address (MbxOut, Slave→Master, SM0)",
+    TETHER_LOGI(tag, "    bootstrap_tx_offset  = 0x%04X (word 0x0016) → TX mailbox address (MbxOut, Slave→Master, SM1)",
              (unsigned)bootstrap_tx_offset);
     TETHER_LOGI(tag, "    bootstrap_tx_size    = 0x%04X (word 0x0017) → TX mailbox size in bytes",
              (unsigned)bootstrap_tx_size);
     
     TETHER_LOGI(tag, "  Standard Mailbox:");
-    TETHER_LOGI(tag, "    std_rx_offset        = 0x%04X (word 0x0018) → RX mailbox address (MbxIn, Master→Slave, SM1)",
+    TETHER_LOGI(tag, "    std_rx_offset        = 0x%04X (word 0x0018) → RX mailbox address (MbxIn, Master→Slave, SM0)",
              (unsigned)std_rx_offset);
     TETHER_LOGI(tag, "    std_rx_size          = 0x%04X (word 0x0019) → RX mailbox size in bytes",
              (unsigned)std_rx_size);
-    TETHER_LOGI(tag, "    std_tx_offset        = 0x%04X (word 0x001A) → TX mailbox address (MbxOut, Slave→Master, SM0)",
+    TETHER_LOGI(tag, "    std_tx_offset        = 0x%04X (word 0x001A) → TX mailbox address (MbxOut, Slave→Master, SM1)",
              (unsigned)std_tx_offset);
     TETHER_LOGI(tag, "    std_tx_size          = 0x%04X (word 0x001B) → TX mailbox size in bytes",
              (unsigned)std_tx_size);
@@ -995,20 +995,20 @@ void debugSIIMailboxDerivation(EtherCATMaster& master, uint16_t slave_index, con
     
     TETHER_LOGI(tag, "\n📋 STEP 5: Sync Manager Mapping (EtherCAT Convention)");
     TETHER_LOGI(tag, "  Per EtherCAT spec ETG.2010:");
-    TETHER_LOGI(tag, "    SM0 = Send mailbox (MbxOut) = Slave→Master direction");
-    TETHER_LOGI(tag, "    SM1 = Receive mailbox (MbxIn) = Master→Slave direction");
+    TETHER_LOGI(tag, "    SM0 = Receive mailbox (MbxIn) = Master→Slave direction");
+    TETHER_LOGI(tag, "    SM1 = Send mailbox (MbxOut) = Slave→Master direction");
     TETHER_LOGI(tag, "  SII terminology mapping:");
-    TETHER_LOGI(tag, "    std_tx  (SII word 0x001A/0x001B) → SM0 (Send/MbxOut/Slave→Master)");
-    TETHER_LOGI(tag, "    std_rx  (SII word 0x0018/0x0019) → SM1 (Receive/MbxIn/Master→Slave)");
+    TETHER_LOGI(tag, "    std_rx  (SII word 0x0018/0x0019) → SM0 (Receive/MbxIn/Master→Slave)");
+    TETHER_LOGI(tag, "    std_tx  (SII word 0x001A/0x001B) → SM1 (Send/MbxOut/Slave→Master)");
     
     TETHER_LOGI(tag, "\n📋 STEP 6: Final Mailbox Configuration");
-    TETHER_LOGI(tag, "  SM0 (Send/MbxOut/Slave→Master):");
-    TETHER_LOGI(tag, "    Address = 0x%04X (from std_tx_offset at word 0x001A)", (unsigned)std_tx_offset);
-    TETHER_LOGI(tag, "    Size    = %u bytes (from std_tx_size at word 0x001B)", (unsigned)std_tx_size);
-    
-    TETHER_LOGI(tag, "  SM1 (Receive/MbxIn/Master→Slave):");
+    TETHER_LOGI(tag, "  SM0 (Receive/MbxIn/Master→Slave):");
     TETHER_LOGI(tag, "    Address = 0x%04X (from std_rx_offset at word 0x0018)", (unsigned)std_rx_offset);
     TETHER_LOGI(tag, "    Size    = %u bytes (from std_rx_size at word 0x0019)", (unsigned)std_rx_size);
+    
+    TETHER_LOGI(tag, "  SM1 (Send/MbxOut/Slave→Master):");
+    TETHER_LOGI(tag, "    Address = 0x%04X (from std_tx_offset at word 0x001A)", (unsigned)std_tx_offset);
+    TETHER_LOGI(tag, "    Size    = %u bytes (from std_tx_size at word 0x001B)", (unsigned)std_tx_size);
     
     TETHER_LOGI(tag, "  Supported Protocols: 0x%04X (%s)", (unsigned)protocols, getMailboxProtocolName(protocols));
     

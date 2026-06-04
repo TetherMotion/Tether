@@ -246,7 +246,7 @@ TEST_F(SlaveCoreTest, FMMUConfiguration) {
 }
 
 TEST_F(SlaveCoreTest, SyncManagerConfiguration) {
-    // Configure SM0 (Mailbox Out)
+    // Configure SM0 (Mailbox In)
     uint8_t smData[8] = {
         0x00, 0x10,  // Physical start address: 0x1000
         0x80, 0x00,  // Length: 128 bytes

@@ -57,9 +57,9 @@ struct SlaveConfig {
     ESCConfig escConfig;
     
     // Mailbox configuration
-    uint16_t mailboxOutOffset = 0x1000;   ///< SM0 (MbxOut/S→M): Slave→Master mailbox offset
+    uint16_t mailboxOutOffset = 0x1000;   ///< SM0 (MbxOut/M→S): Master→Slave mailbox offset
     uint16_t mailboxOutSize = 128;        ///< SM0: Mailbox size
-    uint16_t mailboxInOffset = 0x1080;    ///< SM1 (MbxIn/M→S): Master→Slave mailbox offset
+    uint16_t mailboxInOffset = 0x1080;    ///< SM1 (MbxIn/S→M): Slave→Master mailbox offset
     uint16_t mailboxInSize = 128;         ///< SM1: Mailbox size
     uint16_t mailboxProtocol = 0x000C;    ///< Supported protocols (CoE + FoE)
     

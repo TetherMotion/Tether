@@ -29,9 +29,9 @@ public:
      * 
      * Applies the following rules:
      * 1. Check for memory overlap between ANY enabled Sync Managers (Critical Error).
-     * 2. SM0 (if enabled): Must comprise valid Mailbox Write config (Slave->Master).
+     * 2. SM0 (if enabled): Must comprise valid Mailbox Write config (Master->Slave).
      *    - Control byte must be 0x26 (MAILBOX | DIR_WRITE | IRQ_PDI | REPEAT_REQ).
-     * 3. SM1 (if enabled): Must comprise valid Mailbox Read config (Master->Slave).
+     * 3. SM1 (if enabled): Must comprise valid Mailbox Read config (Slave->Master).
      *    - Control byte must be 0x22 (MAILBOX | DIR_READ | IRQ_PDI | REPEAT_REQ).
      * 4. SM2 (if enabled): Must be valid Inputs (Slave->Master).
      *    - Control byte must be 0x64 (BUFFERED | DIR_WRITE | IRQ_PDI | WATCHDOG).

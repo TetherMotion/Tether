@@ -153,8 +153,8 @@ void SDOManager::configureSlaveMailbox(uint16_t slave_index,
     slave_mbx_[slave_index].mbx_counter = 1;
     slave_mbx_[slave_index].configured  = true;
 
-    TETHER_LOGI(TAG, "Slave %u mailbox: Send(SM0/MbxOut)=0x%04x/%u, Receive(SM1/MbxIn)=0x%04x/%u",
-             slave_index, mbx_read_addr, mbx_read_len, mbx_write_addr, mbx_write_len);
+    TETHER_LOGI(TAG, "Slave %u mailbox: Receive(SM0/MbxIn)=0x%04x/%u, Send(SM1/MbxOut)=0x%04x/%u",
+             slave_index, mbx_write_addr, mbx_write_len, mbx_read_addr, mbx_read_len);
 }
 
 bool SDOManager::getSlaveMailbox(uint16_t slave_index,
@@ -167,15 +167,15 @@ bool SDOManager::getSlaveMailbox(uint16_t slave_index,
     // SDO subsystem always reflects the node's configured SyncManagers.
     const PDO::SlaveConfig* slave_configs = pdo_manager_ ? pdo_manager_->slaveConfigs() : nullptr;
     if (slave_configs) {
-        // Standard EtherCAT convention: SM0 = Send/MbxOut (S→M), SM1 = Receive/MbxIn (M→S)
-        const auto& sm0 = slave_configs[slave_index].sm[0]; // SM0 = MailboxRead (S→M)
-        const auto& sm1 = slave_configs[slave_index].sm[1]; // SM1 = MailboxWrite (M→S)
-        if (sm0.type == PDO::SyncManagerType::MailboxRead ||
-            sm1.type == PDO::SyncManagerType::MailboxWrite) {
-            if (mbx_write_addr) *mbx_write_addr = sm1.phys_start_addr;
-            if (mbx_write_len)  *mbx_write_len  = sm1.length;
-            if (mbx_read_addr)  *mbx_read_addr  = sm0.phys_start_addr;
-            if (mbx_read_len)   *mbx_read_len   = sm0.length;
+        // Standard EtherCAT convention: SM0 = Receive/MbxIn (M→S), SM1 = Send/MbxOut (S→M)
+        const auto& sm0 = slave_configs[slave_index].sm[0]; // SM0 = MailboxWrite (M→S)
+        const auto& sm1 = slave_configs[slave_index].sm[1]; // SM1 = MailboxRead (S→M)
+        if (sm0.type == PDO::SyncManagerType::MailboxWrite ||
+            sm1.type == PDO::SyncManagerType::MailboxRead) {
+            if (mbx_write_addr) *mbx_write_addr = sm0.phys_start_addr;
+            if (mbx_write_len)  *mbx_write_len  = sm0.length;
+            if (mbx_read_addr)  *mbx_read_addr  = sm1.phys_start_addr;
+            if (mbx_read_len)   *mbx_read_len   = sm1.length;
             return true;
         }
     }
@@ -441,14 +441,14 @@ bool SDOManager::executeRequest(const SDORequest& req, SDOResponse& resp)
 
     const PDO::SlaveConfig* slave_configs = pdo_manager_ ? pdo_manager_->slaveConfigs() : nullptr;
     if (slave_configs) {
-        const auto& sm0 = slave_configs[slave].sm[0]; // SM0 = Mailbox Read (SLAVE->MASTER)
-        const auto& sm1 = slave_configs[slave].sm[1]; // SM1 = Mailbox Write (MASTER->SLAVE)
-        if (sm0.type == PDO::SyncManagerType::MailboxRead ||
-            sm1.type == PDO::SyncManagerType::MailboxWrite) {
-            mbx_wr_addr = sm1.phys_start_addr;
-            mbx_wr_len  = sm1.length;
-            mbx_rd_addr = sm0.phys_start_addr;
-            mbx_rd_len  = sm0.length;
+        const auto& sm0 = slave_configs[slave].sm[0]; // SM0 = Mailbox Write (MASTER->SLAVE)
+        const auto& sm1 = slave_configs[slave].sm[1]; // SM1 = Mailbox Read (SLAVE->MASTER)
+        if (sm0.type == PDO::SyncManagerType::MailboxWrite ||
+            sm1.type == PDO::SyncManagerType::MailboxRead) {
+            mbx_wr_addr = sm0.phys_start_addr;
+            mbx_wr_len  = sm0.length;
+            mbx_rd_addr = sm1.phys_start_addr;
+            mbx_rd_len  = sm1.length;
             mbx_available = true;
         }
     }

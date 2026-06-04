@@ -950,13 +950,13 @@ void SlaveCore::initializeSII() {
 }
 
 void SlaveCore::initializeSyncManagers() {
-    // SM0: Mailbox Out (Slave → Master)
+    // SM0: Mailbox In (Master → Slave)
     syncManagers_[0].physicalAddr = config_.mailboxOutOffset;
     syncManagers_[0].length = config_.mailboxOutSize;
     syncManagers_[0].control = 0x26;  // Mailbox, write, interrupt
     syncManagers_[0].type = SyncManagerType::MailboxOut;
     
-    // SM1: Mailbox In (Master → Slave)
+    // SM1: Mailbox Out (Slave → Master)
     syncManagers_[1].physicalAddr = config_.mailboxInOffset;
     syncManagers_[1].length = config_.mailboxInSize;
     syncManagers_[1].control = 0x22;  // Mailbox, read

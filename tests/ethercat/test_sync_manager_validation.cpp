@@ -9,16 +9,16 @@ protected:
     std::vector<SyncManagerConfig> getValidConfigs() {
         std::vector<SyncManagerConfig> configs(4);
         
-        // SM0: start=0x1000 len=128 ctrl=0x22 (MbxOut: ECAT reads, slave→master)
+        // SM0: start=0x1000 len=128 ctrl=0x26 (MbxIn: ECAT writes, master→slave)
         configs[0].phys_start_addr = 0x1000;
         configs[0].length = 128;
-        configs[0].control = 0x22;
+        configs[0].control = 0x26;
         configs[0].enable = true;
 
-        // SM1: start=0x1080 len=128 ctrl=0x26 (MbxIn: ECAT writes, master→slave)
+        // SM1: start=0x1080 len=128 ctrl=0x22 (MbxOut: ECAT reads, slave→master)
         configs[1].phys_start_addr = 0x1080;
         configs[1].length = 128;
-        configs[1].control = 0x26;
+        configs[1].control = 0x22;
         configs[1].enable = true;
         
         // SM2: start=0x1100 len=8 ctrl=0x60 (Buffered, ECAT reads = TxPDO/inputs)

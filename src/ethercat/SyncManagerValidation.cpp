@@ -42,23 +42,23 @@ SyncManagerValidationResult SyncManagerValidation::validate(const std::vector<Sy
 
     // 2. Validate specific SM types if present
     
-    // SM0: MbxOut / Send (SLAVE→MASTER, ECAT reads) — must be 0x22
+    // SM0: MbxIn / Receive (MASTER→SLAVE, ECAT writes) — must be 0x26
     if (configs.size() > 0) {
         const auto& sm = configs[0];
         if (sm.enable) {
-            if (sm.control != 0x22) {
-                 ss << "SM0 invalid control: expected 0x22 (MbxOut/SLAVE→MASTER), got 0x" << std::hex << (int)sm.control;
+            if (sm.control != 0x26) {
+                 ss << "SM0 invalid control: expected 0x26 (MbxIn/MASTER→SLAVE), got 0x" << std::hex << (int)sm.control;
                  return {false, ss.str()};
             }
         }
     }
 
-    // SM1: MbxIn / Receive (MASTER→SLAVE, ECAT writes) — must be 0x26
+    // SM1: MbxOut / Send (SLAVE→MASTER, ECAT reads) — must be 0x22
     if (configs.size() > 1) {
         const auto& sm = configs[1];
         if (sm.enable) {
-            if (sm.control != 0x26) {
-                 ss << "SM1 invalid control: expected 0x26 (MbxIn/MASTER→SLAVE), got 0x" << std::hex << (int)sm.control;
+            if (sm.control != 0x22) {
+                 ss << "SM1 invalid control: expected 0x22 (MbxOut/SLAVE→MASTER), got 0x" << std::hex << (int)sm.control;
                  return {false, ss.str()};
             }
         }

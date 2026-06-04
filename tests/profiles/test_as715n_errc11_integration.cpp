@@ -7,10 +7,9 @@
  * stack correctly parses the ErC1.1 (Synchronization loss / 0x0C11) fault.
  *
  * All register values are taken directly from the hardware capture log.
- * Note: this specific AS715N device maps mailbox SMs non-standardly:
+ * Note: this specific AS715N device maps mailbox SMs per the standard ETG convention:
  *   MbxIn  (Receive, M→S) at SM0: addr=0x1000, len=256, ctrl=0x26
  *   MbxOut (Send,    S→M) at SM1: addr=0x1400, len=256, ctrl=0x22
- * (Standard ETG convention is SM0=MbxOut/S→M, SM1=MbxIn/M→S)
  *
  *   SDO 0x6041:00 StatusWord  = 0x1638  (fault bit set)
  *   SDO 0x203F:00 U32         = 0x00000C11  (external=0x0C11, internal=0x0000)

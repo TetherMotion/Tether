@@ -967,9 +967,9 @@ std::unique_ptr<SlaveEmulator> createGenericIOSlave(
     uint16_t output_size = (digital_outputs + 7) / 8 + analog_outputs * 2;
     
     // Configure sync managers
-    // SM0: Mailbox Out (slave -> master) at 0x1000
+    // SM0: Mailbox In (master -> slave) at 0x1000
     config.sync_managers.push_back({0x1000, 128, 0x26, 0x01});
-    // SM1: Mailbox In (master -> slave) at 0x1080
+    // SM1: Mailbox Out (slave -> master) at 0x1080
     config.sync_managers.push_back({0x1080, 128, 0x22, 0x01});
     // SM2: Process Data Out (RxPDO) at 0x1100
     config.sync_managers.push_back({0x1100, output_size, 0x64, 0x01});

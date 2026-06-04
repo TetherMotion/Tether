@@ -267,9 +267,9 @@ TEST_F(SDOManagerMailboxTest, ReadsMailboxFromPDOConfigWhenPresent) {
     PDOManager pdo_mgr(pdo_transport);
     pdo_mgr.init();
 
-    // Standard EtherCAT convention: SM0=MbxOut(S→M)=mailbox_read, SM1=MbxIn(M→S)=mailbox_write
-    pdo_mgr.slaveConfigs()[3].sm[0] = SyncManagerConfig::mailbox_read(0x1080, 64);
-    pdo_mgr.slaveConfigs()[3].sm[1] = SyncManagerConfig::mailbox_write(0x1000, 128);
+    // Standard EtherCAT convention: SM0=MbxIn(M→S)=mailbox_write, SM1=MbxOut(S→M)=mailbox_read
+    pdo_mgr.slaveConfigs()[3].sm[0] = SyncManagerConfig::mailbox_write(0x1000, 128);
+    pdo_mgr.slaveConfigs()[3].sm[1] = SyncManagerConfig::mailbox_read(0x1080, 64);
 
     SDOManager mgr(transport_);
     mgr.setPDOManager(&pdo_mgr);
@@ -325,8 +325,8 @@ TEST_F(SDOManagerQueueTest, ReadSyncUsesPDOConfigForTransport) {
     PDOManager pdo_mgr(pdo_transport);
     pdo_mgr.init();
 
-    pdo_mgr.slaveConfigs()[2].sm[0] = SyncManagerConfig::mailbox_read(0x1080, 32);
-    pdo_mgr.slaveConfigs()[2].sm[1] = SyncManagerConfig::mailbox_write(0x1000, 16);
+    pdo_mgr.slaveConfigs()[2].sm[0] = SyncManagerConfig::mailbox_write(0x1000, 16);
+    pdo_mgr.slaveConfigs()[2].sm[1] = SyncManagerConfig::mailbox_read(0x1080, 32);
 
     ON_CALL(transport_, getMicroseconds()).WillByDefault(Invoke(realMicros));
 

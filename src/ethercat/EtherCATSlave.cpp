@@ -7,6 +7,7 @@
 #include "tether/ethercat/EtherCATMaster.hpp"
 #include "tether/ethercat/EtherCATSDO.hpp"
 #include "tether/ethercat/EtherCATPDO.hpp"
+#include "tether/ethercat/EtherCATTypes.hpp"
 #include "tether/ethercat/SyncManager.hpp"
 #include "tether/sii/SIIReader.hpp"
 #include "tether/platform/Platform.hpp"
@@ -18,8 +19,8 @@ namespace EtherCAT {
 
 static const char* TAG = "EtherCATSlave";
 
-// Global debug flag for ethercat-statemachine
-static bool g_debug_statemachine = false;
+// Global debug flag for ethercat-statemachine (shared with EtherCATMaster)
+bool g_debug_statemachine = false;
 
 void enableStateMachineDebug(bool enable) {
     g_debug_statemachine = enable;
@@ -254,6 +255,21 @@ SlaveError EtherCATSlave::transitionToSafeOp() {
 }
 
 SlaveError EtherCATSlave::transitionToOp() {
+    if (g_debug_statemachine) {
+        SlaveState current_state;
+        readState(current_state);
+        TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
+        TETHER_LOGI(TAG, "║  State Machine Transition: Slave %u                          ║", index_);
+        TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
+        TETHER_LOGI(TAG, "║  Transition: %s => OP", slaveStateToString(current_state));
+        TETHER_LOGI(TAG, "║  Reason:    Full operational mode for process data exchange");
+        TETHER_LOGI(TAG, "║  Requirements:");
+        TETHER_LOGI(TAG, "║    - PDO sync-managers (SM2/SM3) should be configured: %s", 
+                    pdo_configured_ ? "✓ FULFILLED" : "⚠ NOT FULFILLED (warning only)");
+        TETHER_LOGI(TAG, "║  Status:     Proceeding with transition (PDO config is optional for OP)");
+        TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
+    }
+    
     if (!pdo_configured_) {
         TETHER_LOGW( TAG,
             "Slave %u: Transitioning to OP without PDO sync-managers configured. "
@@ -264,15 +280,42 @@ SlaveError EtherCATSlave::transitionToOp() {
             "Slave %u: Failed to transition to OP (transport error)", index_);
         return SlaveError::TransportError;
     }
+    
+    if (g_debug_statemachine) {
+        TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
+        TETHER_LOGI(TAG, "║  Transition Result: Slave %u => OP SUCCESS                    ║", index_);
+        TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
+    }
+    
     return SlaveError::Ok;
 }
 
 SlaveError EtherCATSlave::transitionToBoot() {
+    if (g_debug_statemachine) {
+        SlaveState current_state;
+        readState(current_state);
+        TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
+        TETHER_LOGI(TAG, "║  State Machine Transition: Slave %u                          ║", index_);
+        TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
+        TETHER_LOGI(TAG, "║  Transition: %s => BOOT", slaveStateToString(current_state));
+        TETHER_LOGI(TAG, "║  Reason:    Firmware update or bootstrap mode");
+        TETHER_LOGI(TAG, "║  Requirements: None (BOOT is a special state)");
+        TETHER_LOGI(TAG, "║  Status:     Fulfilled - proceeding with transition");
+        TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
+    }
+    
     if (!master_.requestSlaveApplicationLayerState(index_, static_cast<uint8_t>(SlaveState::BOOT))) {
         TETHER_LOGE( TAG,
             "Slave %u: Failed to transition to BOOT (transport error)", index_);
         return SlaveError::TransportError;
     }
+    
+    if (g_debug_statemachine) {
+        TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
+        TETHER_LOGI(TAG, "║  Transition Result: Slave %u => BOOT SUCCESS                  ║", index_);
+        TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
+    }
+    
     return SlaveError::Ok;
 }
 

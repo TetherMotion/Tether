@@ -137,14 +137,14 @@ static bool sii_get_byte(EtherCATMaster& master, uint16_t adp, uint16_t sii_byte
  * - Invalid/inconsistent mailbox data
  * 
  * Per standard EtherCAT convention:
- * - SM0 = Send mailbox (MbxOut) = Slave→Master = std_tx in SII
- * - SM1 = Receive mailbox (MbxIn) = Master→Slave = std_rx in SII
+ * - SM0 = Receive mailbox (MbxIn) = Master→Slave = std_rx in SII
+ * - SM1 = Send mailbox (MbxOut) = Slave→Master = std_tx in SII
  * 
  * @param master EtherCATMaster instance for network I/O
  * @param adp Auto-increment address (slave position)
- * @param out_wr_addr Receive mailbox address (MbxIn, Master→Slave, SM1, std_rx)
+ * @param out_wr_addr Receive mailbox address (MbxIn, Master→Slave, SM0, std_rx)
  * @param out_wr_len Receive mailbox size in bytes
- * @param out_rd_addr Send mailbox address (MbxOut, Slave→Master, SM0, std_tx)
+ * @param out_rd_addr Send mailbox address (MbxOut, Slave→Master, SM1, std_tx)
  * @param out_rd_len Send mailbox size in bytes
  * @param out_mbx_proto Supported mailbox protocol flags
  * @return true if mailbox configuration was read (or defaults applied), false on critical error
@@ -159,8 +159,8 @@ bool configure_mailbox_from_sii(
     uint16_t *out_mbx_proto)
 {
     // Default conservative mailbox (standard EtherCAT convention):
-    // SM0: Send    (MbxOut, Slave→Master)
-    // SM1: Receive (MbxIn, Master→Slave)
+    // SM0: Receive (MbxIn, Master→Slave)
+    // SM1: Send    (MbxOut, Slave→Master)
     constexpr uint16_t kDefaultReceiveAddr = 0x1000;  // Receive/MbxIn (M→S)
     constexpr uint16_t kDefaultReceiveLen = 256;
     constexpr uint16_t kDefaultSendAddr = 0x1400;     // Send/MbxOut (S→M)
@@ -199,20 +199,20 @@ bool configure_mailbox_from_sii(
     
     // Use SII data or defaults
     // Variable names use EtherCAT spec terminology (slave perspective):
-    // - mbx_receive = Receive mailbox (MbxIn) = Master→Slave = SM1 = std_rx
-    // - mbx_send = Send mailbox (MbxOut) = Slave→Master = SM0 = std_tx
+    // - mbx_receive = Receive mailbox (MbxIn) = Master→Slave = SM0 = std_rx
+    // - mbx_send = Send mailbox (MbxOut) = Slave→Master = SM1 = std_tx
     uint16_t mbx_receive_addr, mbx_receive_len, mbx_send_addr, mbx_send_len, proto;
     
     if (valid_mailbox) {
         // Use SII mailbox configuration
-        mbx_receive_addr = mailbox.std_rx_offset;  // Receive (MbxIn, M→S, SM1)
+        mbx_receive_addr = mailbox.std_rx_offset;  // Receive (MbxIn, M→S, SM0)
         mbx_receive_len = mailbox.std_rx_size;
-        mbx_send_addr = mailbox.std_tx_offset;  // Send (MbxOut, S→M, SM0)
+        mbx_send_addr = mailbox.std_tx_offset;  // Send (MbxOut, S→M, SM1)
         mbx_send_len = mailbox.std_tx_size;
         proto = mailbox.protocols;
         
-        TETHER_LOGI(TAG, "Mailbox from SII: Send(SM0/S→M)=0x%04X/%u Receive(SM1/M→S)=0x%04X/%u proto=0x%04X",
-                 mbx_send_addr, (unsigned)mbx_send_len, mbx_receive_addr, (unsigned)mbx_receive_len, proto);
+        TETHER_LOGI(TAG, "Mailbox from SII: Receive(SM0/M→S)=0x%04X/%u Send(SM1/S→M)=0x%04X/%u proto=0x%04X",
+                 mbx_receive_addr, (unsigned)mbx_receive_len, mbx_send_addr, (unsigned)mbx_send_len, proto);
     } else {
         // Use defaults
         mbx_receive_addr = kDefaultReceiveAddr;
@@ -222,26 +222,26 @@ bool configure_mailbox_from_sii(
         proto = kDefaultProto;
         
         if (!sii_ok) {
-            TETHER_LOGW(TAG, "Failed to read SII, using defaults: Send(SM0)=0x%04X/%u Receive(SM1)=0x%04X/%u proto=0x%04X",
-                     mbx_send_addr, (unsigned)mbx_send_len, mbx_receive_addr, (unsigned)mbx_receive_len, proto);
+            TETHER_LOGW(TAG, "Failed to read SII, using defaults: Receive(SM0)=0x%04X/%u Send(SM1)=0x%04X/%u proto=0x%04X",
+                     mbx_receive_addr, (unsigned)mbx_receive_len, mbx_send_addr, (unsigned)mbx_send_len, proto);
         } else {
-            TETHER_LOGW(TAG, "No mailbox in SII, using defaults: Send(SM0)=0x%04X/%u Receive(SM1)=0x%04X/%u proto=0x%04X",
-                     mbx_send_addr, (unsigned)mbx_send_len, mbx_receive_addr, (unsigned)mbx_receive_len, proto);
+            TETHER_LOGW(TAG, "No mailbox in SII, using defaults: Receive(SM0)=0x%04X/%u Send(SM1)=0x%04X/%u proto=0x%04X",
+                     mbx_receive_addr, (unsigned)mbx_receive_len, mbx_send_addr, (unsigned)mbx_send_len, proto);
         }
     }
 
-    // Validate address ordering: SM0 (Send) should typically be at lower address than SM1 (Receive)
-    if (mbx_send_addr >= mbx_receive_addr) {
-        TETHER_LOGW(TAG, "Mailbox addresses non-standard: Send(SM0)=0x%04X >= Receive(SM1)=0x%04X; typical is SM0 < SM1",
-                    mbx_send_addr, mbx_receive_addr);
+    // Validate address ordering: SM0 (Receive) should typically be at lower address than SM1 (Send)
+    if (mbx_receive_addr >= mbx_send_addr) {
+        TETHER_LOGW(TAG, "Mailbox addresses non-standard: Receive(SM0)=0x%04X >= Send(SM1)=0x%04X; typical is SM0 < SM1",
+                    mbx_receive_addr, mbx_send_addr);
     }
 
     // Write output parameters
     // Output param names use master perspective (wr/rd);
     // internally we use proper EtherCAT "Receive/Send" terminology (slave perspective)
-    if (out_wr_addr) *out_wr_addr = mbx_receive_addr;  // Master writes = Slave receives = Receive/MbxIn/SM1
+    if (out_wr_addr) *out_wr_addr = mbx_receive_addr;  // Master writes = Slave receives = Receive/MbxIn/SM0
     if (out_wr_len)  *out_wr_len = mbx_receive_len;
-    if (out_rd_addr) *out_rd_addr = mbx_send_addr;     // Master reads = Slave sends = Send/MbxOut/SM0
+    if (out_rd_addr) *out_rd_addr = mbx_send_addr;     // Master reads = Slave sends = Send/MbxOut/SM1
     if (out_rd_len)  *out_rd_len = mbx_send_len;
     if (out_mbx_proto) *out_mbx_proto = proto;
 
@@ -295,8 +295,8 @@ bool configure_mailbox_from_sii(
     const SmRegs sm1 = read_sm(EC_REG_SM1, 1);
 
     if (sm0.ok && sm1.ok) {
-        TETHER_LOGD(TAG, "[MBOXTRACE] SII-derived mailbox: Send(SM0/S→M)=0x%04X/%u Receive(SM1/M→S)=0x%04X/%u proto=0x%04X valid_sii=%s\n[MBOXTRACE] SM0(Send/MbxOut): start=0x%04X len=%u ctrl=0x%02X dir=%s act=0x%02X stat=0x%02X pdi=0x%02X\n[MBOXTRACE] SM1(Receive/MbxIn): start=0x%04X len=%u ctrl=0x%02X dir=%s act=0x%02X stat=0x%02X pdi=0x%02X",
-                    mbx_send_addr, (unsigned)mbx_send_len, mbx_receive_addr, (unsigned)mbx_receive_len, proto, valid_mailbox ? "yes" : "no",
+        TETHER_LOGD(TAG, "[MBOXTRACE] SII-derived mailbox: Receive(SM0/M→S)=0x%04X/%u Send(SM1/S→M)=0x%04X/%u proto=0x%04X valid_sii=%s\n[MBOXTRACE] SM0(Receive/MbxIn): start=0x%04X len=%u ctrl=0x%02X dir=%s act=0x%02X stat=0x%02X pdi=0x%02X\n[MBOXTRACE] SM1(Send/MbxOut): start=0x%04X len=%u ctrl=0x%02X dir=%s act=0x%02X stat=0x%02X pdi=0x%02X",
+                    mbx_receive_addr, (unsigned)mbx_receive_len, mbx_send_addr, (unsigned)mbx_send_len, proto, valid_mailbox ? "yes" : "no",
                     sm0.start, (unsigned)sm0.len, sm0.control, fmt_dir(sm0.control), sm0.activate, sm0.status, sm0.pdi_ctrl,
                     sm1.start, (unsigned)sm1.len, sm1.control, fmt_dir(sm1.control), sm1.activate, sm1.status, sm1.pdi_ctrl);
 
@@ -308,8 +308,8 @@ bool configure_mailbox_from_sii(
         if (sm0_mbx && sm1_mbx && sm0.start != 0 && sm1.start != 0 && sm0.len != 0 && sm1.len != 0) {
             // Determine what the hardware SM registers indicate based on direction bits.
             // Per EtherCAT ESC specification:
-            // - SM_CTRL_DIR_WRITE (bit2=1): ECAT writes, PDI reads → M→S → Receive mailbox (MbxIn, SM1)
-            // - SM_CTRL_DIR_READ  (bit2=0): ECAT reads, PDI writes → S→M → Send mailbox (MbxOut, SM0)
+            // - SM_CTRL_DIR_WRITE (bit2=1): ECAT writes, PDI reads → M→S → Receive mailbox (MbxIn, SM0)
+            // - SM_CTRL_DIR_READ  (bit2=0): ECAT reads, PDI writes → S→M → Send mailbox (MbxOut, SM1)
             const uint16_t hw_receive_addr = (((sm0.control & EtherCAT::PDO::SM_CTRL_DIR_WRITE) != 0) ? sm0.start : sm1.start);
             const uint16_t hw_receive_len  = (((sm0.control & EtherCAT::PDO::SM_CTRL_DIR_WRITE) != 0) ? sm0.len   : sm1.len);
             const uint16_t hw_send_addr = (((sm0.control & EtherCAT::PDO::SM_CTRL_DIR_WRITE) == 0) ? sm0.start : sm1.start);
@@ -320,9 +320,9 @@ bool configure_mailbox_from_sii(
                 hw_send_addr == mbx_send_addr && hw_send_len == mbx_send_len) {
                 TETHER_LOGD(TAG, "[MBOXTRACE] Hardware SM registers match SII mailbox config ✓");
             } else {
-                TETHER_LOGW(TAG, "[MBOXTRACE] Hardware SM differs from SII (hw: Send=0x%04X/%u Receive=0x%04X/%u vs sii: Send=0x%04X/%u Receive=0x%04X/%u)",
-                           hw_send_addr, (unsigned)hw_send_len, hw_receive_addr, (unsigned)hw_receive_len,
-                           mbx_send_addr, (unsigned)mbx_send_len, mbx_receive_addr, (unsigned)mbx_receive_len);
+                TETHER_LOGW(TAG, "[MBOXTRACE] Hardware SM differs from SII (hw: Receive=0x%04X/%u Send=0x%04X/%u vs sii: Receive=0x%04X/%u Send=0x%04X/%u)",
+                           hw_receive_addr, (unsigned)hw_receive_len, hw_send_addr, (unsigned)hw_send_len,
+                           mbx_receive_addr, (unsigned)mbx_receive_len, mbx_send_addr, (unsigned)mbx_send_len);
             }
         } else {
             TETHER_LOGD(TAG, "[MBOXTRACE] SM0/SM1 not both active mailbox SMs (sm0_mbx=%s sm1_mbx=%s); trusting SII",
@@ -360,16 +360,16 @@ bool configure_mailbox_from_sii(
             };
 
             if (sm_index == 0) {
-                // SM0 should be MAILBOX + Send direction (S→M, ECAT reads)
-                if (!is_mailbox_mode || is_receive_mbx) {
-                    auto desc = decode_ctrl(ctrl);
-                    TETHER_LOGW(TAG, "SM0 control=0x%02X (%s): expected MAILBOX + Send(S→M) for SM0=MbxOut. May be misconfigured.", ctrl, desc.c_str());
-                }
-            } else if (sm_index == 1) {
-                // SM1 should be MAILBOX + Receive direction (M→S, ECAT writes)
+                // SM0 should be MAILBOX + Receive direction (M→S, ECAT writes)
                 if (!is_mailbox_mode || !is_receive_mbx) {
                     auto desc = decode_ctrl(ctrl);
-                    TETHER_LOGW(TAG, "SM1 control=0x%02X (%s): expected MAILBOX + Receive(M→S) for SM1=MbxIn. May be misconfigured.", ctrl, desc.c_str());
+                    TETHER_LOGW(TAG, "SM0 control=0x%02X (%s): expected MAILBOX + Receive(M→S) for SM0=MbxIn. May be misconfigured.", ctrl, desc.c_str());
+                }
+            } else if (sm_index == 1) {
+                // SM1 should be MAILBOX + Send direction (S→M, ECAT reads)
+                if (!is_mailbox_mode || is_receive_mbx) {
+                    auto desc = decode_ctrl(ctrl);
+                    TETHER_LOGW(TAG, "SM1 control=0x%02X (%s): expected MAILBOX + Send(S→M) for SM1=MbxOut. May be misconfigured.", ctrl, desc.c_str());
                 }
             }
         } else {

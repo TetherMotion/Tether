@@ -347,8 +347,8 @@ enum : uint16_t {
  * @brief Default Sync Manager configuration values
  */
 enum : uint32_t {
-    EC_DEFAULTMBXSM0 = 0x00010026,  ///< Default SM0 (mailbox out) config
-    EC_DEFAULTMBXSM1 = 0x00010022,  ///< Default SM1 (mailbox in) config
+    EC_DEFAULTMBXSM0 = 0x00010026,  ///< Default SM0 (mailbox in / M→S) config
+    EC_DEFAULTMBXSM1 = 0x00010022,  ///< Default SM1 (mailbox out / S→M) config
 };
 
 /**
@@ -557,15 +557,15 @@ uint16_t adp_for_slave_index(uint16_t slave_index);
  * @brief Configure mailbox Sync Managers from slave EEPROM (SII)
  *
  * Reads mailbox addresses and sizes from the slave's SII and configures
- * SM0 (Send/MbxOut) and SM1 (Receive/MbxIn).
+ * SM0 (Receive/MbxIn) and SM1 (Send/MbxOut).
  *
  * Per standard EtherCAT convention:
- * - SM0 = Send mailbox (MbxOut) = Slave→Master = std_tx in SII
- * - SM1 = Receive mailbox (MbxIn) = Master→Slave = std_rx in SII
+ * - SM0 = Receive mailbox (MbxIn) = Master→Slave = std_rx in SII
+ * - SM1 = Send mailbox (MbxOut) = Slave→Master = std_tx in SII
  *
- * @param[out] out_wr_addr Receive mailbox address (MbxIn, Master→Slave, SM1)
+ * @param[out] out_wr_addr Receive mailbox address (MbxIn, Master→Slave, SM0)
  * @param[out] out_wr_len Receive mailbox size
- * @param[out] out_rd_addr Send mailbox address (MbxOut, Slave→Master, SM0)
+ * @param[out] out_rd_addr Send mailbox address (MbxOut, Slave→Master, SM1)
  * @param[out] out_rd_len Send mailbox size
  * @param[out] out_mbx_proto Supported protocols bitmap
  * @return true on success

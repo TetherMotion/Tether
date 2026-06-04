@@ -36,6 +36,9 @@ namespace EtherCAT {
 
 static const char* TAG = "ethercat";
 
+// Global debug flag for ethercat-statemachine (shared with EtherCATSlave)
+extern bool g_debug_statemachine;
+
 // Global registry of EtherCATMaster instances (host-only helper). This
 // allows host-side helpers (examples) to find the master associated with
 // a NetworkInterface pointer.
@@ -170,7 +173,7 @@ private:
 
 // ============================================================================
 // Helper: determine whether SM0 is configured as write in SII (DEPRECATED/UNUSED).
-// EtherCAT standard mandates: SM0=MbxOut(slave→master/read), SM1=MbxIn(master→slave/write).
+// EtherCAT standard mandates: SM0=MbxIn(master→slave/write), SM1=MbxOut(slave→master/read).
 // Some device SII EEPROMs incorrectly specify reversed directions, but the master
 // must ignore those errors and always configure according to the standard.
 // This function is retained for diagnostic purposes only.
@@ -557,7 +560,30 @@ uint16_t EtherCATMaster::getDiscoveredSlaveCount() const
 
 bool EtherCATMaster::requestSlaveApplicationLayerState(SlaveAddress slave_address, uint8_t state_code)
 {
-    return writeRegister(slave_address, RegisterAddress(Raw::EC_REG_AL_CONTROL), static_cast<uint16_t>(state_code));
+    if (g_debug_statemachine) {
+        uint8_t current_state_code = 0;
+        readSlaveApplicationLayerState(slave_address, current_state_code);
+        const char* current_state_name = getECStateName(current_state_code);
+        const char* target_state_name = getECStateName(state_code);
+        
+        TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
+        TETHER_LOGI(TAG, "║  AL State Request: Slave %u                                  ║", slave_address.slavePosition());
+        TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
+        TETHER_LOGI(TAG, "║  Current State: %s (0x%02X)", current_state_name, current_state_code);
+        TETHER_LOGI(TAG, "║  Target State:  %s (0x%02X)", target_state_name, state_code);
+        TETHER_LOGI(TAG, "║  Action:        Writing AL_CONTROL register");
+        TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
+    }
+    
+    bool result = writeRegister(slave_address, RegisterAddress(Raw::EC_REG_AL_CONTROL), static_cast<uint16_t>(state_code));
+    
+    if (g_debug_statemachine) {
+        TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
+        TETHER_LOGI(TAG, "║  AL State Request Result: %s                                 ║", result ? "SUCCESS" : "FAILED");
+        TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
+    }
+    
+    return result;
 }
 
 bool EtherCATMaster::readSlaveApplicationLayerState(SlaveAddress slave_address, uint8_t& state_code)
@@ -1157,12 +1183,12 @@ bool EtherCATMaster::autoConfigureMailbox(SlaveAddress slave_address, Tether::Pl
                          verify_rd == rd_addr && verify_rd_len == rd_len);
             
             if (match) {
-                TETHER_LOGD(local_tag, "      ✓ SDO subsystem mailbox verified: Send(SM0)=0x%04X/%u Receive(SM1)=0x%04X/%u",
-                           verify_rd, (unsigned)verify_rd_len, verify_wr, (unsigned)verify_wr_len);
+                TETHER_LOGD(local_tag, "      ✓ SDO subsystem mailbox verified: Receive(SM0)=0x%04X/%u Send(SM1)=0x%04X/%u",
+                           verify_wr, (unsigned)verify_wr_len, verify_rd, (unsigned)verify_rd_len);
             } else {
-                TETHER_LOGW(local_tag, "      ⚠ MISMATCH! SDO subsystem has Send(SM0)=0x%04X/%u Receive(SM1)=0x%04X/%u\n      Expected: Send(SM0)=0x%04X/%u Receive(SM1)=0x%04X/%u",
-                           verify_rd, (unsigned)verify_rd_len, verify_wr, (unsigned)verify_wr_len,
-                           rd_addr, (unsigned)rd_len, wr_addr, (unsigned)wr_len);
+                TETHER_LOGW(local_tag, "      ⚠ MISMATCH! SDO subsystem has Receive(SM0)=0x%04X/%u Send(SM1)=0x%04X/%u\n      Expected: Receive(SM0)=0x%04X/%u Send(SM1)=0x%04X/%u",
+                           verify_wr, (unsigned)verify_wr_len, verify_rd, (unsigned)verify_rd_len,
+                           wr_addr, (unsigned)wr_len, rd_addr, (unsigned)rd_len);
             }
         } else {
             TETHER_LOGE(local_tag, "      ✗ CRITICAL: SDO subsystem has NO mailbox configuration!\n      This indicates configureSlaveMailbox() failed.");
@@ -1175,8 +1201,8 @@ bool EtherCATMaster::autoConfigureMailbox(SlaveAddress slave_address, Tether::Pl
         TETHER_LOGD(local_tag, "======================================================================\n  ✓ MAILBOX AUTO-CONFIGURATION COMPLETE FOR SLAVE %u\n======================================================================",
                     (unsigned)slave_index);
     } else {
-        TETHER_LOGI(local_tag, "✓ Mailbox auto-configured for slave %u: Send(SM0)=0x%04X/%u Receive(SM1)=0x%04X/%u",
-                    (unsigned)slave_index, rd_addr, (unsigned)rd_len, wr_addr, (unsigned)wr_len);
+        TETHER_LOGI(local_tag, "✓ Mailbox auto-configured for slave %u: Receive(SM0)=0x%04X/%u Send(SM1)=0x%04X/%u",
+                    (unsigned)slave_index, wr_addr, (unsigned)wr_len, rd_addr, (unsigned)rd_len);
     }
     
     return true;
@@ -1464,6 +1490,19 @@ bool EtherCATMaster::setPreopAndConfirm(uint16_t slave_index)
 {
     using namespace Raw;
 
+    if (g_debug_statemachine) {
+        TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
+        TETHER_LOGI(TAG, "║  State Machine Transition: Slave %u (INIT => PRE_OP)          ║", slave_index);
+        TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
+        TETHER_LOGI(TAG, "║  Transition: INIT => PRE_OP");
+        TETHER_LOGI(TAG, "║  Reason:    Automatism - enabling mailbox operations");
+        TETHER_LOGI(TAG, "║  Requirements:");
+        TETHER_LOGI(TAG, "║    - Slave must respond to AL_STATUS register reads");
+        TETHER_LOGI(TAG, "║    - Slave must accept AL_CONTROL register writes");
+        TETHER_LOGI(TAG, "║  Status:     Starting transition process with retry logic");
+        TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
+    }
+
     // We'll attempt to set PRE_OP multiple times, with an extended wait per attempt.
     // This helps recover from transient conditions where the slave's mailbox or
     // internal state is not yet ready to accept AL state changes.
@@ -1472,14 +1511,33 @@ bool EtherCATMaster::setPreopAndConfirm(uint16_t slave_index)
     const int inner_sleep_ms = 20;       // Delay between checks
 
     for (int attempt = 1; attempt <= max_attempts; ++attempt) {
+        if (g_debug_statemachine) {
+            TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
+            TETHER_LOGI(TAG, "║  Attempt %d/%d for Slave %u                                    ║", attempt, max_attempts, slave_index);
+            TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
+        }
+        
         // Read current AL status and decide whether to request PRE_OP
         uint16_t al_le = 0;
         (void)readRegister(SlaveAddress(slave_index), EC_REG_AL_STATUS, al_le, 200);
         const uint16_t al0 = le16_to_host(al_le);
         const bool has_error = (al0 & 0x0010u) != 0;
 
+        if (g_debug_statemachine) {
+            const char* state_name = al_status_get_state_name(al0);
+            TETHER_LOGI(TAG, "  Current AL_STATUS: 0x%04X (State=%s, Error=%s)", 
+                       al0, state_name, has_error ? "true" : "false");
+            TETHER_LOGI(TAG, "  Requesting PRE_OP with error bit: %s", has_error ? "SET" : "CLEAR");
+        }
+
         const uint16_t req = static_cast<uint16_t>(0x0002u | (has_error ? 0x0010u : 0));
         (void)writeRegister(SlaveAddress(slave_index), EC_REG_AL_CONTROL, req);
+
+        if (g_debug_statemachine) {
+            TETHER_LOGI(TAG, "  Wrote AL_CONTROL: 0x%04X", req);
+            TETHER_LOGI(TAG, "  Waiting for PRE_OP to become active (max %d checks, %dms each)...", 
+                       inner_tries, inner_sleep_ms);
+        }
 
         // Wait for PRE_OP to become active
         for (int i = 0; i < inner_tries; i++) {
@@ -1488,6 +1546,12 @@ bool EtherCATMaster::setPreopAndConfirm(uint16_t slave_index)
                 if ((le16_to_host(s_le) & 0x000Fu) == 0x0002u) {
                     if (attempt > 1) {
                         TETHER_LOGI(TAG, "setPreop: succeeded on attempt %d", attempt);
+                    }
+                    if (g_debug_statemachine) {
+                        TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
+                        TETHER_LOGI(TAG, "║  Transition Result: Slave %u => PRE_OP SUCCESS                ║", slave_index);
+                        TETHER_LOGI(TAG, "║  Confirmed after %d checks on attempt %d/%d                   ║", i+1, attempt, max_attempts);
+                        TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
                     }
                     return true;
                 }
@@ -1581,11 +1645,11 @@ bool EtherCATMaster::forceMailboxDefaults(SlaveAddress slave_address)
 
     // Conservative hardcoded fallback values with smaller sizes for better compatibility
     // Use 128-byte mailboxes which are more commonly supported by simple devices
-    // Standard EtherCAT convention: SM0 (Send/MbxOut, S→M),
-    //                               SM1 (Receive/MbxIn, M→S)
-    constexpr uint16_t kHardcodedWrAddr = 0x1000;  // Receive/MbxIn (M→S, SM1)
+    // Standard EtherCAT convention: SM0 (Receive/MbxIn, M→S),
+    //                               SM1 (Send/MbxOut, S→M)
+    constexpr uint16_t kHardcodedWrAddr = 0x1000;  // Receive/MbxIn (M→S, SM0)
     constexpr uint16_t kHardcodedWrLen = 128;
-    constexpr uint16_t kHardcodedRdAddr = 0x1400;  // Send/MbxOut (S→M, SM0)
+    constexpr uint16_t kHardcodedRdAddr = 0x1400;  // Send/MbxOut (S→M, SM1)
     constexpr uint16_t kHardcodedRdLen = 128;
 
     if (slave_index >= PDO::kMaxPDOSlaves) return false;
@@ -1604,10 +1668,10 @@ bool EtherCATMaster::forceMailboxDefaults(SlaveAddress slave_address)
 
     auto* slave_configs = pdo_->slaveConfigs();
     // Standard EtherCAT mailbox SM convention:
-    // SM0 = Send/MbxOut    (SLAVE→MASTER, control=0x22)
-    // SM1 = Receive/MbxIn (MASTER→SLAVE, control=0x26)
-    slave_configs[slave_index].sm[0] = PDO::SyncManagerConfig::mailbox_read(rd_addr, rd_len);   // SM0 = Send/MbxOut (S→M)
-    slave_configs[slave_index].sm[1] = PDO::SyncManagerConfig::mailbox_write(wr_addr, wr_len);  // SM1 = Receive/MbxIn (M→S)
+    // SM0 = Receive/MbxIn (MASTER→SLAVE, control=0x26)
+    // SM1 = Send/MbxOut    (SLAVE→MASTER, control=0x22)
+    slave_configs[slave_index].sm[0] = PDO::SyncManagerConfig::mailbox_write(wr_addr, wr_len);  // SM0 = Receive/MbxIn (M→S)
+    slave_configs[slave_index].sm[1] = PDO::SyncManagerConfig::mailbox_read(rd_addr, rd_len);   // SM1 = Send/MbxOut (S→M)
 
     std::vector<PDO::SyncManagerConfig> sm_vec;
     for (int i=0; i<4; ++i) sm_vec.push_back(slave_configs[slave_index].sm[i]);
@@ -1663,9 +1727,9 @@ void EtherCATMaster::masterTask()
                 auto* slave_configs = pdo_->slaveConfigs();
                 if (slave_configs) {
                     // Standard EtherCAT SM convention:
-                    // SM0 = Send/MbxOut (S→M), SM1 = Receive/MbxIn (M→S)
-                    slave_configs[i].sm[0] = PDO::SyncManagerConfig::mailbox_read(ov.rd_addr, ov.rd_len);
-                    slave_configs[i].sm[1] = PDO::SyncManagerConfig::mailbox_write(ov.wr_addr, ov.wr_len);
+                    // SM0 = Receive/MbxIn (M→S), SM1 = Send/MbxOut (S→M)
+                    slave_configs[i].sm[0] = PDO::SyncManagerConfig::mailbox_write(ov.wr_addr, ov.wr_len);
+                    slave_configs[i].sm[1] = PDO::SyncManagerConfig::mailbox_read(ov.rd_addr, ov.rd_len);
                     const uint8_t* src_mac = src_mac_;
 
                     std::vector<PDO::SyncManagerConfig> sm_vec;
@@ -1691,11 +1755,11 @@ void EtherCATMaster::masterTask()
                 TETHER_LOGI(TAG, "Slave %u: Mailbox from SII wr=0x%04X/%u rd=0x%04X/%u", i, wa, (unsigned)wl, ra, (unsigned)rl);
 
                 // Standard EtherCAT SM convention:
-                // SM0 = Send/MbxOut (S→M), SM1 = Receive/MbxIn (M→S)
+                // SM0 = Receive/MbxIn (M→S), SM1 = Send/MbxOut (S→M)
                 auto* slave_configs = pdo_->slaveConfigs();
                 if (slave_configs) {
-                    slave_configs[i].sm[0] = PDO::SyncManagerConfig::mailbox_read(ra, rl);
-                    slave_configs[i].sm[1] = PDO::SyncManagerConfig::mailbox_write(wa, wl);
+                    slave_configs[i].sm[0] = PDO::SyncManagerConfig::mailbox_write(wa, wl);
+                    slave_configs[i].sm[1] = PDO::SyncManagerConfig::mailbox_read(ra, rl);
                     pdo_->configureSlavesSMs(i);
                 }
                 // NOTE: SDO mailbox configuration is provided by the PDO SyncManager

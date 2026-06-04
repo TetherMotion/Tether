@@ -213,10 +213,10 @@ std::string SyncManagerAccessor::formatConfig(const RawHWConfig& cfg) const {
     // Detect conservative default mailbox configurations
     bool fallback = false;
     if (index_ == 0) {
-        // Standard ETG: SM0=MbxOut(S→M) ctrl=0x22. Some vendors use non-standard ctrl=0x26.
+        // Standard ETG: SM0=MbxIn(M→S) ctrl=0x26.
         fallback = (cfg.start_addr == 0x1000 && cfg.length == 256 && cfg.control == 0x26);
     } else if (index_ == 1) {
-        // Standard ETG: SM1=MbxIn(M→S) ctrl=0x26. Some vendors use non-standard ctrl=0x22.
+        // Standard ETG: SM1=MbxOut(S→M) ctrl=0x22.
         fallback = (cfg.start_addr == 0x1400 && cfg.length == 256 && cfg.control == 0x22);
     }
 
@@ -324,8 +324,8 @@ void debugMailboxConfiguration(EtherCATMaster& master, uint16_t slave_index, con
         return oss.str();
     };
 
-    // Read SM0 (Mailbox Send / Slave→Master)
-    TETHER_LOGI(tag, "\n📋 SM0 (Mailbox Send / Slave→Master)");
+    // Read SM0 (Mailbox Receive / Master→Slave)
+    TETHER_LOGI(tag, "\n📋 SM0 (Mailbox Receive / Master→Slave)");
     auto sm0 = slave.sm(0);
     auto hw0 = sm0.readHardwareConfig();
     if (hw0.read_ok) {
@@ -340,8 +340,8 @@ void debugMailboxConfiguration(EtherCATMaster& master, uint16_t slave_index, con
         TETHER_LOGE(tag, "  ❌ Failed to read SM0 hardware registers");
     }
 
-    // Read SM1 (Mailbox Receive / Master→Slave)
-    TETHER_LOGI(tag, "\n📋 SM1 (Mailbox Receive / Master→Slave)");
+    // Read SM1 (Mailbox Send / Slave→Master)
+    TETHER_LOGI(tag, "\n📋 SM1 (Mailbox Send / Slave→Master)");
     auto sm1 = slave.sm(1);
     auto hw1 = sm1.readHardwareConfig();
     if (hw1.read_ok) {

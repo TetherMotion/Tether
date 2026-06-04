@@ -186,9 +186,9 @@ protected:
  */
 TEST_F(SIIMailboxParserTest, ValidMailboxConfiguration) {
     // Setup: Configure valid mailbox in mock EEPROM
-    // Standard EtherCAT convention: SM0 (Send/MbxOut), SM1 (Receive/MbxIn)
-    // SII RX (slave receives, master writes, SM1) at LOWER address
-    // SII TX (slave transmits, master reads, SM0) at HIGHER address
+    // Standard EtherCAT convention: SM0 (Receive/MbxIn), SM1 (Send/MbxOut)
+    // SII RX (slave receives, master writes, SM0) at LOWER address
+    // SII TX (slave transmits, master reads, SM1) at HIGHER address
     mock_eeprom_.setValidMailbox(
         0x1000, 128,   // RX: addr=0x1000, size=128 (Receive/MbxIn/M→S, lower addr)
         0x1400, 64,    // TX: addr=0x1400, size=64  (Send/MbxOut/S→M, higher addr)
