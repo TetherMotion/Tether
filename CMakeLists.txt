@@ -87,7 +87,7 @@ option(TETHER_BUILD_SIMULATION "Build simulation systems" ON)
 option(TETHER_BUILD_DESTABILIZER "Build destabilizer adversarial testing" ON)
 option(TETHER_BUILD_IO_PROTOCOL "Build IO protocol (SLIP-based parameter streaming)" ON)
 option(TETHER_BUILD_TESTS "Build tests" ON)
-option(TETHER_BUILD_EXAMPLES "Build examples" OFF)
+option(TETHER_BUILD_EXAMPLES "Build examples" ON)
 option(TETHER_BUILD_BENCHMARKS "Build benchmarks" OFF)
 
 # Optional small tools (non-library utilities)
