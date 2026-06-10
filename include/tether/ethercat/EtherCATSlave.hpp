@@ -74,6 +74,16 @@ class DCManager;
  */
 void enableStateMachineDebug(bool enable);
 
+/**
+ * @brief Enable or disable detailed TX EtherCAT packet debug logging
+ */
+void enableTxPacketDebug(bool enable);
+
+/**
+ * @brief Enable or disable detailed RX EtherCAT packet debug logging
+ */
+void enableRxPacketDebug(bool enable);
+
 // ============================================================================
 // SlaveError — detailed error enum
 // ============================================================================

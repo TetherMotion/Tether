@@ -70,7 +70,7 @@ int main(int argc, char** argv) {
         .help("Network interface name (e.g. eth0, enp3s0)");
     program.add_argument("--debug")
         .default_value(std::string(""))
-        .help("Comma-separated debug flags. Known flags: sii-derivation, mailbox-configuration, ethercat-statemachine");
+        .help("Comma-separated debug flags. Known flags: sii-derivation, mailbox-configuration, ethercat-statemachine, tx-ethercat-packets, rx-ethercat-packets");
 
     try { program.parse_args(argc, argv); }
     catch (const std::runtime_error& err) {
@@ -85,7 +85,9 @@ int main(int argc, char** argv) {
     const std::set<std::string> known_debug_flags = {
         "sii-derivation",
         "mailbox-configuration",
-        "ethercat-statemachine"
+        "ethercat-statemachine",
+        "tx-ethercat-packets",
+        "rx-ethercat-packets"
     };
 
     // Parse debug flags
@@ -124,7 +126,19 @@ int main(int argc, char** argv) {
         EtherCAT::enableStateMachineDebug(true);
         TETHER_LOGI(TAG, "EtherCAT state machine debug logging enabled");
     }
-    
+
+    // Enable TX packet debug if requested
+    if (debug_flags.count("tx-ethercat-packets")) {
+        EtherCAT::enableTxPacketDebug(true);
+        TETHER_LOGI(TAG, "TX EtherCAT packet debug logging enabled");
+    }
+
+    // Enable RX packet debug if requested
+    if (debug_flags.count("rx-ethercat-packets")) {
+        EtherCAT::enableRxPacketDebug(true);
+        TETHER_LOGI(TAG, "RX EtherCAT packet debug logging enabled");
+    }
+
     TETHER_LOGI(TAG, "detect_slaves (host) — interface: %s", iface.c_str());
     if (!debug_flags.empty()) {
         TETHER_LOGI(TAG, "Debug flags: %s", debug_str.c_str());

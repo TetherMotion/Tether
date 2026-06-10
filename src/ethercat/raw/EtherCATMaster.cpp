@@ -39,6 +39,10 @@ static const char* TAG = "ethercat";
 // Global debug flag for ethercat-statemachine (shared with EtherCATSlave)
 extern bool g_debug_statemachine;
 
+// Global debug flags for tx/rx packet logging (shared with EtherCATSlave)
+extern bool g_debug_tx_packets;
+extern bool g_debug_rx_packets;
+
 // Global registry of EtherCATMaster instances (host-only helper). This
 // allows host-side helpers (examples) to find the master associated with
 // a NetworkInterface pointer.
@@ -934,11 +938,101 @@ EtherCATMaster* EtherCATMaster::findByNetworkInterface(const NetworkInterface* i
 }
 
 // ============================================================================
+// Packet debug printer
+// ============================================================================
+
+static void printEtherCATFrame(const uint8_t* frame, size_t length, bool is_tx, bool print_ethernet)
+{
+    using namespace Raw;
+    const char* dir = is_tx ? "TX" : "RX";
+
+    if (print_ethernet && length >= sizeof(EtherCAT::EthernetHeader)) {
+        const auto* eth = reinterpret_cast<const EtherCAT::EthernetHeader*>(frame);
+        TETHER_LOGI("ec_pkt", "[%s] Ethernet: dst=%02X:%02X:%02X:%02X:%02X:%02X src=%02X:%02X:%02X:%02X:%02X:%02X etherType=0x%04X",
+                    dir,
+                    eth->dst[0], eth->dst[1], eth->dst[2], eth->dst[3], eth->dst[4], eth->dst[5],
+                    eth->src[0], eth->src[1], eth->src[2], eth->src[3], eth->src[4], eth->src[5],
+                    bswap16(eth->etherType_be));
+    }
+
+    if (length < sizeof(EtherCAT::EthernetHeader) + sizeof(EtherCAT::FrameHeader)) {
+        TETHER_LOGI("ec_pkt", "[%s] Frame too short for EtherCAT header (%u bytes)",
+                    dir, static_cast<unsigned>(length));
+        return;
+    }
+
+    const auto* ec_hdr = reinterpret_cast<const EtherCAT::FrameHeader*>(
+        frame + sizeof(EtherCAT::EthernetHeader));
+    const uint16_t ec_raw = le16_to_host(ec_hdr->raw_le);
+    const uint16_t ec_len = ec_raw & 0x07FFu;
+    const uint16_t ec_type = (ec_raw >> 12) & 0x0Fu;
+
+    TETHER_LOGI("ec_pkt", "[%s] EtherCAT Frame: length=%u type=%u", dir, ec_len, ec_type);
+
+    size_t offset = sizeof(EtherCAT::EthernetHeader) + sizeof(EtherCAT::FrameHeader);
+    size_t remaining = ec_len;
+    uint8_t dg_idx = 0;
+
+    while (remaining >= sizeof(EtherCAT::DatagramHeader) &&
+           offset + sizeof(EtherCAT::DatagramHeader) <= length) {
+        const auto* dg = reinterpret_cast<const EtherCAT::DatagramHeader*>(frame + offset);
+        const uint16_t dg_len_flags = le16_to_host(dg->lenFlags_le);
+        const uint16_t datalen = dg_len_flags & 0x07FFu;
+        const bool more = (dg_len_flags & 0x8000u) != 0;
+        const bool circulating = (dg_len_flags & 0x4000u) != 0;
+        const uint16_t adp = le16_to_host(dg->adp_le);
+        const uint16_t ado = le16_to_host(dg->ado_le);
+
+        const size_t data_offset = offset + sizeof(EtherCAT::DatagramHeader);
+        const size_t wkc_offset = data_offset + datalen;
+        uint16_t wkc = 0;
+        if (length >= wkc_offset + sizeof(uint16_t)) {
+            wkc = le16_to_host(*reinterpret_cast<const uint16_t*>(frame + wkc_offset));
+        }
+
+        TETHER_LOGI("ec_pkt", "[%s]   Datagram[%u]: cmd=%s idx=0x%02X adp=0x%04X ado=0x%04X len=%u wkc=%u more=%s circulating=%s",
+                    dir, dg_idx,
+                    commandToString(dg->cmd),
+                    dg->idx,
+                    adp, ado,
+                    datalen, wkc,
+                    more ? "yes" : "no",
+                    circulating ? "yes" : "no");
+
+        if (datalen > 0 && length >= data_offset + datalen) {
+            constexpr size_t kMaxHexDump = 64;
+            const size_t dump_len = (datalen < kMaxHexDump) ? datalen : kMaxHexDump;
+            char hexbuf[256];
+            size_t pos = 0;
+            for (size_t i = 0; i < dump_len && pos + 3 < sizeof(hexbuf); i++) {
+                pos += std::snprintf(hexbuf + pos, sizeof(hexbuf) - pos, "%02X ", frame[data_offset + i]);
+            }
+            if (datalen > kMaxHexDump) {
+                pos += std::snprintf(hexbuf + pos, sizeof(hexbuf) - pos, "...");
+            }
+            TETHER_LOGI("ec_pkt", "[%s]     Data (%u/%u bytes): %s",
+                        dir, static_cast<unsigned>(dump_len), static_cast<unsigned>(datalen), hexbuf);
+        }
+
+        const size_t dg_total = sizeof(EtherCAT::DatagramHeader) + datalen + sizeof(uint16_t);
+        if (remaining < dg_total) break;
+        remaining -= dg_total;
+        offset += dg_total;
+        dg_idx++;
+
+        if (!more) break;
+    }
+}
+
+// ============================================================================
 // Transport primitives
 // ============================================================================
 
 bool EtherCATMaster::sendRawFrame(const void* buf, size_t len)
 {
+    if (g_debug_tx_packets) {
+        printEtherCATFrame(reinterpret_cast<const uint8_t*>(buf), len, true, false);
+    }
     if (iface_.send)
         return iface_.send(reinterpret_cast<const uint8_t*>(buf), len);
     TETHER_LOGE(TAG, "No NetworkInterface registered!");
@@ -996,6 +1090,9 @@ bool EtherCATMaster::sendSingleDatagram(Command cmd, uint8_t idx,
     *reinterpret_cast<uint16_t*>(payload + datalen) = host_to_le16(0);
 
     if (iface_.send) {
+        if (g_debug_tx_packets) {
+            printEtherCATFrame(txbuf, frame_len, true, false);
+        }
         auto& clock = Tether::Platform::Clock::instance();
         int last_errno = 0;
         for (int retry = 0; retry <= kMaxTxRetries; retry++) {
@@ -1340,6 +1437,10 @@ void EtherCATMaster::flushRxQueue()
 
 void EtherCATMaster::parseEtherCATFrame(const uint8_t* frame, size_t length)
 {
+    if (g_debug_rx_packets) {
+        printEtherCATFrame(frame, length, false, false);
+    }
+
     using namespace Raw;  // for le16_to_host, Command, RxDatagram, etc.
 
 #if TETHER_ENABLE_ETHERCAT_STATS

@@ -26,6 +26,18 @@ void enableStateMachineDebug(bool enable) {
     g_debug_statemachine = enable;
 }
 
+// Global debug flags for tx/rx packet logging (shared with EtherCATMaster)
+bool g_debug_tx_packets = false;
+bool g_debug_rx_packets = false;
+
+void enableTxPacketDebug(bool enable) {
+    g_debug_tx_packets = enable;
+}
+
+void enableRxPacketDebug(bool enable) {
+    g_debug_rx_packets = enable;
+}
+
 // ============================================================================
 // EtherCATSlave
 // ============================================================================
