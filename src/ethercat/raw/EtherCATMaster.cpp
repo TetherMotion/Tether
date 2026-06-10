@@ -1437,10 +1437,6 @@ void EtherCATMaster::flushRxQueue()
 
 void EtherCATMaster::parseEtherCATFrame(const uint8_t* frame, size_t length)
 {
-    if (g_debug_rx_packets) {
-        printEtherCATFrame(frame, length, false, false);
-    }
-
     using namespace Raw;  // for le16_to_host, Command, RxDatagram, etc.
 
 #if TETHER_ENABLE_ETHERCAT_STATS
@@ -1454,6 +1450,10 @@ void EtherCATMaster::parseEtherCATFrame(const uint8_t* frame, size_t length)
 
     const auto* eth = reinterpret_cast<const EtherCAT::EthernetHeader*>(frame);
     if (bswap16(eth->etherType_be) != EtherCAT::kEtherTypeEtherCAT) return;
+
+    if (g_debug_rx_packets) {
+        printEtherCATFrame(frame, length, false, false);
+    }
 
     const auto* ec_hdr = reinterpret_cast<const EtherCAT::FrameHeader*>(
         frame + sizeof(EtherCAT::EthernetHeader));
