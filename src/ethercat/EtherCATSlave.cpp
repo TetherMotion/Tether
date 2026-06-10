@@ -38,9 +38,9 @@ void enableRxPacketDebug(bool enable) {
     g_debug_rx_packets = enable;
 }
 
-// Global debug flags for PDO logging
-bool g_debug_rx_pdo = false;
-bool g_debug_tx_pdo = false;
+// Global debug flags for PDO logging (defined in PDOManager.cpp)
+extern bool g_debug_rx_pdo;
+extern bool g_debug_tx_pdo;
 
 void enableRxPDODebug(bool enable) {
     g_debug_rx_pdo = enable;

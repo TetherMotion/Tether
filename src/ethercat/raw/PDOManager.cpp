@@ -13,13 +13,13 @@
 #include <cstring>
 #include <cstdio>
 
+// Global PDO debug flags (defined here to avoid linking issues)
+bool g_debug_rx_pdo = false;
+bool g_debug_tx_pdo = false;
+
 namespace EtherCAT {
 
 static const char* TAG = "ec_pdo_mgr";
-
-// Global PDO debug flags (defined in EtherCATSlave.cpp)
-extern bool g_debug_rx_pdo;
-extern bool g_debug_tx_pdo;
 
 // ============================================================================
 // SM Register Definitions (internal to this TU)
