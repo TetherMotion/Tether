@@ -94,6 +94,19 @@ public:
     };
 
     /**
+     * @brief Sentinel VLAN ID for catch-all / undefined routing.
+     *
+     * Normal VLAN IDs are 12-bit (0–4095).  4096 is outside that range
+     * and is used as a special sentinel.  A master whose rx_vlan_id is
+     * set to this value will receive **all** tagged frames whose VID
+     * is not explicitly consumed by any other registered master.
+     *
+     * Untagged (non-802.1Q) frames are still routed to masters whose
+     * rx_vlan_id is std::nullopt, regardless of this sentinel.
+     */
+    static constexpr uint16_t kUndefinedVlanId = 4096;
+
+    /**
      * @brief Default constructor.  No backend is set.
      */
     VLANRouter();

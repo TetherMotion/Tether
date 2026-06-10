@@ -290,6 +290,38 @@ TEST_F(VLANRouterTest, RxTaggedFrameDroppedWhenNoMatch) {
     EXPECT_TRUE(captured().empty());
 }
 
+TEST_F(VLANRouterTest, RxUndefinedVlanIdCatchesUnmatchedTaggedFrames) {
+    auto specific = std::make_shared<EtherCATMaster>();
+    auto catch_all = std::make_shared<EtherCATMaster>();
+    router_->addMaster(specific, 100, std::nullopt);
+    router_->addMaster(catch_all, VLANRouter::kUndefinedVlanId, std::nullopt);
+
+    // VID 999 has no exact match -> goes to catch_all
+    auto tagged = buildTaggedFrame(999, 0x88A4, {0x42});
+    router_->processRxFrame(tagged.data(), tagged.size());
+
+    auto caps = captured();
+    ASSERT_EQ(caps.size(), 1u);
+    EXPECT_EQ(caps[0].master, catch_all.get());
+    // Frame should be decapsulated
+    EXPECT_EQ(caps[0].data.size(), tagged.size() - 4);
+}
+
+TEST_F(VLANRouterTest, RxUndefinedVlanIdDoesNotStealExactMatches) {
+    auto specific = std::make_shared<EtherCATMaster>();
+    auto catch_all = std::make_shared<EtherCATMaster>();
+    router_->addMaster(specific, 100, std::nullopt);
+    router_->addMaster(catch_all, VLANRouter::kUndefinedVlanId, std::nullopt);
+
+    // VID 100 has an exact match -> only specific receives it
+    auto tagged = buildTaggedFrame(100, 0x88A4, {0x42});
+    router_->processRxFrame(tagged.data(), tagged.size());
+
+    auto caps = captured();
+    ASSERT_EQ(caps.size(), 1u);
+    EXPECT_EQ(caps[0].master, specific.get());
+}
+
 TEST_F(VLANRouterTest, RxUntaggedFrameRoutedToNulloptMaster) {
     auto master = std::make_shared<EtherCATMaster>();
     router_->addMaster(master, std::nullopt, std::nullopt);

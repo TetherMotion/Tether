@@ -207,9 +207,19 @@ void VLANRouter::processRxFrame(const uint8_t* data, size_t len)
             const uint16_t tci = be16_from_raw(data + 14);
             const uint16_t vid = tci & 0x0FFFu;
 
+            // First pass: exact VID match
             for (const auto& entry : entries_) {
                 if (entry.rx_vlan_id.has_value() && entry.rx_vlan_id.value() == vid) {
                     targets.push_back(entry);
+                }
+            }
+            // Second pass: if no exact match, route to undefined catch-all masters
+            if (targets.empty()) {
+                for (const auto& entry : entries_) {
+                    if (entry.rx_vlan_id.has_value() &&
+                        entry.rx_vlan_id.value() == kUndefinedVlanId) {
+                        targets.push_back(entry);
+                    }
                 }
             }
         } else {
