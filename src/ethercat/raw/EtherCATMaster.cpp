@@ -941,6 +941,62 @@ EtherCATMaster* EtherCATMaster::findByNetworkInterface(const NetworkInterface* i
 // Packet debug printer
 // ============================================================================
 
+static const char* etherTypeToString(uint16_t ether_type)
+{
+    switch (ether_type) {
+        case 0x0800: return "IPv4";
+        case 0x0806: return "ARP";
+        case 0x0842: return "WoL";
+        case 0x22F3: return "IETF TRILL";
+        case 0x22EA: return "Stream Reservation";
+        case 0x6003: return "DECnet Phase IV";
+        case 0x8035: return "RARP";
+        case 0x809B: return "AppleTalk";
+        case 0x80F3: return "AARP";
+        case 0x8100: return "VLAN (802.1Q)";
+        case 0x8204: return "QNX Qnet";
+        case 0x86DD: return "IPv6";
+        case 0x8808: return "Ethernet Flow Control";
+        case 0x8809: return "Ethernet Slow Protocols (LACP)";
+        case 0x8819: return "CobraNet";
+        case 0x8847: return "MPLS unicast";
+        case 0x8848: return "MPLS multicast";
+        case 0x8863: return "PPPoE Discovery";
+        case 0x8864: return "PPPoE Session";
+        case 0x887B: return "HomePlug 1.0 MME";
+        case 0x888E: return "EAPoL (802.1X)";
+        case 0x8892: return "PROFINET";
+        case 0x889A: return "HyperSCSI";
+        case 0x88A2: return "ATAoE";
+        case 0x88A4: return "EtherCAT";
+        case 0x88A8: return "Provider Bridging (802.1ad)";
+        case 0x88AB: return "EtherCAT Automation Protocol";
+        case 0x88B8: return "GOOSE (IEC 61850)";
+        case 0x88B9: return "GSE Management";
+        case 0x88BA: return "SV (IEC 61850)";
+        case 0x88BF: return "MikroTik RoMON";
+        case 0x88CC: return "LLDP";
+        case 0x88CD: return "SERCOS III";
+        case 0x88E1: return "HomePlug AV MME";
+        case 0x88E3: return "MRP (IEC 62439-2)";
+        case 0x88E5: return "MACsec (802.1AE)";
+        case 0x88E7: return "PBB (802.1ah)";
+        case 0x88F7: return "PTP (IEEE 1588)";
+        case 0x88F8: return "NC-SI";
+        case 0x88FB: return "PRP (IEC 62439-3)";
+        case 0x8902: return "IEEE 802.1ag CFM";
+        case 0x8906: return "FCoE";
+        case 0x8914: return "FCoE Initialization";
+        case 0x8915: return "RoCE";
+        case 0x891D: return "TTE";
+        case 0x892F: return "HSR (IEC 62439-3)";
+        case 0x8932: return "802.1Qbj MVRP";
+        case 0x9000: return "Loopback";
+        case 0x9100: return "Q-in-Q";
+        default: return nullptr;
+    }
+}
+
 static void printEtherCATFrame(const uint8_t* frame, size_t length, bool is_tx, bool print_ethernet)
 {
     using namespace Raw;
@@ -1452,8 +1508,14 @@ void EtherCATMaster::parseEtherCATFrame(const uint8_t* frame, size_t length)
     const uint16_t ether_type = bswap16(eth->etherType_be);
     if (ether_type != EtherCAT::kEtherTypeEtherCAT) {
         if (g_debug_rx_packets) {
-            TETHER_LOGI("ec_pkt", "[RX] Non-EtherCAT frame: etherType=0x%04X (len=%u)",
-                        ether_type, static_cast<unsigned>(length));
+            const char* name = etherTypeToString(ether_type);
+            if (name) {
+                TETHER_LOGI("ec_pkt", "[RX] Non-EtherCAT frame: %s (0x%04X, len=%u)",
+                            name, ether_type, static_cast<unsigned>(length));
+            } else {
+                TETHER_LOGI("ec_pkt", "[RX] Non-EtherCAT frame: unknown (0x%04X, len=%u)",
+                            ether_type, static_cast<unsigned>(length));
+            }
         }
         return;
     }
