@@ -1449,7 +1449,14 @@ void EtherCATMaster::parseEtherCATFrame(const uint8_t* frame, size_t length)
         return;
 
     const auto* eth = reinterpret_cast<const EtherCAT::EthernetHeader*>(frame);
-    if (bswap16(eth->etherType_be) != EtherCAT::kEtherTypeEtherCAT) return;
+    const uint16_t ether_type = bswap16(eth->etherType_be);
+    if (ether_type != EtherCAT::kEtherTypeEtherCAT) {
+        if (g_debug_rx_packets) {
+            TETHER_LOGI("ec_pkt", "[RX] Non-EtherCAT frame: etherType=0x%04X (len=%u)",
+                        ether_type, static_cast<unsigned>(length));
+        }
+        return;
+    }
 
     if (g_debug_rx_packets) {
         printEtherCATFrame(frame, length, false, false);
