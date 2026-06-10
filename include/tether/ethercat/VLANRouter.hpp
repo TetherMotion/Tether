@@ -85,24 +85,40 @@ class EtherCATMaster;
 class VLANRouter {
 public:
     /**
-     * @brief Public snapshot of a registered master entry.
+     * @brief Inclusive VLAN range used for RX matching.
+     *
+     * A single VLAN is represented as {vid, vid}.
      */
-    struct Entry {
-        std::shared_ptr<EtherCATMaster> master;  ///< The registered master
-        std::optional<uint16_t> rx_vlan_id;      ///< Expected RX VLAN ID (nullopt = untagged)
-        std::optional<uint16_t> tx_vlan_id;      ///< TX VLAN ID to insert (nullopt = pass-through)
+    struct VlanRange {
+        uint16_t start;  ///< First VLAN ID in the range (inclusive)
+        uint16_t end;    ///< Last VLAN ID in the range (inclusive)
+
+        VlanRange(uint16_t s, uint16_t e) : start(s), end(e) {}
+
+        bool contains(uint16_t vid) const {
+            return vid >= start && vid <= end;
+        }
     };
 
     /**
-     * @brief Sentinel VLAN ID for catch-all / undefined routing.
+     * @brief Public snapshot of a registered master entry.
+     */
+    struct Entry {
+        std::shared_ptr<EtherCATMaster> master;       ///< The registered master
+        std::optional<VlanRange> rx_vlan_range;       ///< Expected RX VLAN range (nullopt = untagged)
+        std::optional<uint16_t> tx_vlan_id;           ///< TX VLAN ID to insert (nullopt = pass-through)
+    };
+
+    /**
+     * @brief Sentinel VLAN ID for the dedicated undefined target.
      *
      * Normal VLAN IDs are 12-bit (0–4095).  4096 is outside that range
-     * and is used as a special sentinel.  A master whose rx_vlan_id is
-     * set to this value will receive **all** tagged frames whose VID
-     * is not explicitly consumed by any other registered master.
+     * and is reserved for the router's internal catch-all mechanism.
+     * It is **not** accepted by addMaster() as an RX value; callers
+     * must use setUndefinedTarget() instead.
      *
      * Untagged (non-802.1Q) frames are still routed to masters whose
-     * rx_vlan_id is std::nullopt, regardless of this sentinel.
+     * rx_vlan_range is std::nullopt, regardless of this sentinel.
      */
     static constexpr uint16_t kUndefinedVlanId = 4096;
 
@@ -133,19 +149,31 @@ public:
     void setBackend(NetworkInterface* backend);
 
     /**
-     * @brief Register an EtherCAT master with optional RX/TX VLAN IDs.
+     * @brief Register an EtherCAT master with an optional RX VLAN range.
      *
-     * @param master   Shared pointer to the master (must not be null).
-     * @param rx_vlan  VLAN ID this master expects on incoming frames.
-     *                 std::nullopt means the master receives only
-     *                 untagged (non-802.1Q) frames.
-     * @param tx_vlan  VLAN ID inserted into every frame this master sends.
-     *                 std::nullopt means frames are forwarded unchanged.
+     * @param master    Shared pointer to the master (must not be null).
+     * @param rx_range  VLAN range this master expects on incoming frames.
+     * @param tx_vlan   VLAN ID inserted into every frame this master sends.
+     *                  std::nullopt means frames are forwarded unchanged.
      *
-     * It is legal for multiple masters to share the same VLAN ID.
+     * It is legal for multiple masters to have overlapping ranges.
+     */
+    void addMaster(std::shared_ptr<EtherCATMaster> master,
+                   VlanRange rx_range,
+                   std::optional<uint16_t> tx_vlan);
+
+    /**
+     * @brief Convenience overload: register a master with a single RX VLAN.
      */
     void addMaster(std::shared_ptr<EtherCATMaster> master,
                    std::optional<uint16_t> rx_vlan,
+                   std::optional<uint16_t> tx_vlan);
+
+    /**
+     * @brief Register an EtherCAT master with no RX VLAN (untagged only).
+     */
+    void addMaster(std::shared_ptr<EtherCATMaster> master,
+                   std::nullopt_t,
                    std::optional<uint16_t> tx_vlan);
 
     /**
@@ -186,11 +214,15 @@ public:
      * 1. Inspects the EtherType after the Ethernet header.
      * 2. If the EtherType is 0x8100 (802.1Q), extracts the 12-bit VID
      *    from the TCI, strips the 4-byte tag, and routes the
-     *    decapsulated frame to every master whose rx_vlan_id equals
-     *    the extracted VID.
-     * 3. If the EtherType is not 0x8100, routes the raw frame to every
-     *    master whose rx_vlan_id is std::nullopt.
-     * 4. If no master matches, the frame is silently dropped.
+     *    decapsulated frame to every master whose rx_vlan_range
+     *    contains the extracted VID.
+     * 3. If no range matches and a dedicated undefined target has been
+     *    set, the frame is delivered to that target.
+     * 4. If the EtherType is not 0x8100, routes the raw frame to every
+     *    master whose rx_vlan_range is std::nullopt.
+     * 5. If no master matches and no undefined target exists, the frame
+     *    is dropped after logging a warning with the VID and inner
+     *    EtherType.
      *
      * @param data Pointer to the raw Ethernet frame.
      * @param len  Length of the frame in bytes.
@@ -198,7 +230,7 @@ public:
     void processRxFrame(const uint8_t* data, size_t len);
 
     /**
-     * @brief Return all masters whose rx_vlan_id equals @p vlan_id.
+     * @brief Return all masters whose rx_vlan_range contains @p vlan_id.
      *
      * A snapshot is returned under the internal mutex.
      *
@@ -231,6 +263,41 @@ public:
     static const char* etherTypeName(uint16_t ether_type);
 
     /**
+     * @brief Set the dedicated catch-all (undefined VLAN) target.
+     *
+     * The undefined target receives all tagged frames whose VID is not
+     * matched by any other master's rx_vlan_range.
+     *
+     * @param master   Shared pointer to the master.
+     * @param tx_vlan  Optional TX VLAN ID for this target.
+     * @param replace  If true, overwrite an existing undefined target.
+     *                 If false, return false when one already exists.
+     * @return true on success, false if a target already exists and
+     *         replace is false.
+     */
+    bool setUndefinedTarget(std::shared_ptr<EtherCATMaster> master,
+                            std::optional<uint16_t> tx_vlan = std::nullopt,
+                            bool replace = false);
+
+    /**
+     * @brief Remove the dedicated undefined target.
+     */
+    void clearUndefinedTarget();
+
+    /**
+     * @brief Return the current undefined target master, or nullptr.
+     */
+    std::shared_ptr<EtherCATMaster> undefinedTarget() const;
+
+    /**
+     * @brief Return the NetworkInterface for the undefined target.
+     *
+     * @return Pointer to the interface, or nullptr if no undefined
+     *         target is registered.
+     */
+    NetworkInterface* undefinedNetworkInterface() const;
+
+    /**
      * @brief Override the frame delivery callback (test hook).
      *
      * By default the router calls master->handleRxFrame().  Unit tests
@@ -247,21 +314,38 @@ private:
      */
     struct InternalEntry {
         std::shared_ptr<EtherCATMaster> master;
-        std::optional<uint16_t> rx_vlan_id;
+        std::optional<VlanRange> rx_vlan_range;
         std::optional<uint16_t> tx_vlan_id;
         NetworkInterface iface;  ///< Per-master view (send encapsulates)
     };
 
+    /**
+     * @brief Dedicated catch-all target (separate from the entries vector).
+     */
+    struct UndefinedTarget {
+        std::shared_ptr<EtherCATMaster> master;
+        std::optional<uint16_t> tx_vlan_id;
+        NetworkInterface iface;
+    };
+
     mutable std::mutex mutex_;
     std::vector<InternalEntry> entries_;
+    std::optional<UndefinedTarget> undefined_target_;
     NetworkInterface* backend_ = nullptr;
 
     /**
-     * @brief Rebuild the per-master NetworkInterface send lambdas.
+     * @brief Rebuild all NetworkInterface send lambdas.
      *
      * Must be called with mutex_ held.
      */
     void rebuildInterfacesLocked();
+
+    /**
+     * @brief Configure a NetworkInterface's send/receive lambdas.
+     *
+     * Must be called with mutex_ held.
+     */
+    void rebuildInterfaceSend(NetworkInterface* iface, bool has_tx_vlan, uint16_t tx_vid);
 
     /**
      * @brief Deliver a frame to a specific master.

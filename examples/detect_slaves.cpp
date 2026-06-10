@@ -23,6 +23,7 @@
 #include "tether/ethercat/EtherCATSlave.hpp"
 #include "tether/ethercat/EtherCATTypes.hpp"
 #include "tether/ethercat/SyncManager.hpp"
+#include "tether/ethercat/VLANRouter.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include "tether/sii/SIIReader.hpp"
 #include "tether/sii/SIIParser.hpp"
@@ -71,6 +72,12 @@ int main(int argc, char** argv) {
     program.add_argument("--debug")
         .default_value(std::string(""))
         .help("Comma-separated debug flags. Known flags: sii-derivation, mailbox-configuration, ethercat-statemachine, tx-ethercat-packets, rx-ethercat-packets");
+    program.add_argument("--rx-vlan")
+        .default_value(std::string(""))
+        .help("RX VLAN filter: single VID (e.g. 100), range (e.g. 100-200), or 'any' for catch-all undefined target");
+    program.add_argument("--tx-vlan")
+        .default_value(std::string(""))
+        .help("TX VLAN encapsulation: single VID (e.g. 100)");
 
     try { program.parse_args(argc, argv); }
     catch (const std::runtime_error& err) {
@@ -80,6 +87,8 @@ int main(int argc, char** argv) {
 
     std::string iface = program.get<std::string>("--interface");
     std::string debug_str = program.get<std::string>("--debug");
+    std::string rx_vlan_str = program.get<std::string>("--rx-vlan");
+    std::string tx_vlan_str = program.get<std::string>("--tx-vlan");
 
     // Known debug flags
     const std::set<std::string> known_debug_flags = {
@@ -139,9 +148,76 @@ int main(int argc, char** argv) {
         TETHER_LOGI(TAG, "RX EtherCAT packet debug logging enabled");
     }
 
+    // ---- Parse VLAN arguments ----
+    bool vlan_mode = !rx_vlan_str.empty() || !tx_vlan_str.empty();
+    std::optional<uint16_t> tx_vlan;
+    bool rx_any = false;
+    std::optional<EtherCAT::VLANRouter::VlanRange> rx_range;
+
+    if (vlan_mode) {
+        if (!tx_vlan_str.empty()) {
+            try {
+                int v = std::stoi(tx_vlan_str);
+                if (v < 1 || v > 4095) {
+                    std::cerr << "--tx-vlan must be in range 1–4095\n";
+                    return 1;
+                }
+                tx_vlan = static_cast<uint16_t>(v);
+            } catch (...) {
+                std::cerr << "Invalid --tx-vlan value: " << tx_vlan_str << "\n";
+                return 1;
+            }
+        }
+
+        if (!rx_vlan_str.empty()) {
+            if (rx_vlan_str == "any") {
+                rx_any = true;
+            } else {
+                // Parse single VID or range "start-end"
+                size_t dash = rx_vlan_str.find('-');
+                try {
+                    if (dash == std::string::npos) {
+                        int v = std::stoi(rx_vlan_str);
+                        if (v < 1 || v > 4095) {
+                            std::cerr << "--rx-vlan must be in range 1–4095\n";
+                            return 1;
+                        }
+                        rx_range = EtherCAT::VLANRouter::VlanRange{
+                            static_cast<uint16_t>(v), static_cast<uint16_t>(v)};
+                    } else {
+                        int start = std::stoi(rx_vlan_str.substr(0, dash));
+                        int end   = std::stoi(rx_vlan_str.substr(dash + 1));
+                        if (start < 1 || end > 4095 || start > end) {
+                            std::cerr << "--rx-vlan range must be 1–4095 with start <= end\n";
+                            return 1;
+                        }
+                        rx_range = EtherCAT::VLANRouter::VlanRange{
+                            static_cast<uint16_t>(start), static_cast<uint16_t>(end)};
+                    }
+                } catch (...) {
+                    std::cerr << "Invalid --rx-vlan value: " << rx_vlan_str << "\n";
+                    return 1;
+                }
+            }
+        }
+    }
+
     TETHER_LOGI(TAG, "detect_slaves (host) — interface: %s", iface.c_str());
     if (!debug_flags.empty()) {
         TETHER_LOGI(TAG, "Debug flags: %s", debug_str.c_str());
+    }
+    if (vlan_mode) {
+        if (rx_any) {
+            TETHER_LOGI(TAG, "VLAN mode: RX=any (undefined target), TX=%s",
+                        tx_vlan ? std::to_string(*tx_vlan).c_str() : "none");
+        } else if (rx_range) {
+            TETHER_LOGI(TAG, "VLAN mode: RX=%u-%u, TX=%s",
+                        rx_range->start, rx_range->end,
+                        tx_vlan ? std::to_string(*tx_vlan).c_str() : "none");
+        } else {
+            TETHER_LOGI(TAG, "VLAN mode: RX=untagged, TX=%s",
+                        tx_vlan ? std::to_string(*tx_vlan).c_str() : "none");
+        }
     }
 
     // ---- Open raw socket ----
@@ -193,11 +269,38 @@ int main(int argc, char** argv) {
     // ---- Create master ----
     EtherCAT::EtherCATMaster master;
 
-    // Route RX frames directly to the master — no fragile findByNetworkInterface
-    eth->setRxCallback([&master](const uint8_t* frame, size_t len,
-                                  const EtherCAT::HAL::RxFrameInfo&, void*) {
-        master.handleRxFrame(frame, len);
-    }, nullptr);
+    // ---- Optional VLAN router ----
+    std::unique_ptr<EtherCAT::VLANRouter> router;
+    if (vlan_mode) {
+        router = std::make_unique<EtherCAT::VLANRouter>();
+        router->setBackend(ni_ptr.get());
+        if (rx_any) {
+            router->setUndefinedTarget(
+                std::shared_ptr<EtherCAT::EtherCATMaster>(&master, [](auto*){}),
+                tx_vlan, true);
+        } else if (rx_range) {
+            router->addMaster(
+                std::shared_ptr<EtherCAT::EtherCATMaster>(&master, [](auto*){}),
+                *rx_range, tx_vlan);
+        } else {
+            router->addMaster(
+                std::shared_ptr<EtherCAT::EtherCATMaster>(&master, [](auto*){}),
+                std::nullopt, tx_vlan);
+        }
+    }
+
+    // Route RX frames
+    if (router) {
+        eth->setRxCallback([&router](const uint8_t* frame, size_t len,
+                                      const EtherCAT::HAL::RxFrameInfo&, void*) {
+            router->processRxFrame(frame, len);
+        }, nullptr);
+    } else {
+        eth->setRxCallback([&master](const uint8_t* frame, size_t len,
+                                      const EtherCAT::HAL::RxFrameInfo&, void*) {
+            master.handleRxFrame(frame, len);
+        }, nullptr);
+    }
 
     // ---- Poll thread ----
     std::atomic<bool> poll_running{true};
@@ -209,7 +312,18 @@ int main(int argc, char** argv) {
     });
 
     // ---- Start master + discover ----
-    master.start(*EtherCAT::Raw::network_interface(), src_mac);
+    if (router) {
+        EtherCAT::NetworkInterface* master_iface = rx_any
+            ? router->undefinedNetworkInterface()
+            : router->networkInterfaceFor(&master);
+        if (!master_iface) {
+            TETHER_LOGE(TAG, "Failed to obtain per-master NetworkInterface from VLAN router");
+            return 5;
+        }
+        master.start(*master_iface, src_mac);
+    } else {
+        master.start(*EtherCAT::Raw::network_interface(), src_mac);
+    }
 
     // Give time for discovery
     std::this_thread::sleep_for(std::chrono::milliseconds(500));

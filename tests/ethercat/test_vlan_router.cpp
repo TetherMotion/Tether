@@ -290,28 +290,27 @@ TEST_F(VLANRouterTest, RxTaggedFrameDroppedWhenNoMatch) {
     EXPECT_TRUE(captured().empty());
 }
 
-TEST_F(VLANRouterTest, RxUndefinedVlanIdCatchesUnmatchedTaggedFrames) {
+TEST_F(VLANRouterTest, UndefinedTargetReceivesUnmatchedTaggedFrames) {
     auto specific = std::make_shared<EtherCATMaster>();
     auto catch_all = std::make_shared<EtherCATMaster>();
     router_->addMaster(specific, 100, std::nullopt);
-    router_->addMaster(catch_all, VLANRouter::kUndefinedVlanId, std::nullopt);
+    ASSERT_TRUE(router_->setUndefinedTarget(catch_all, std::nullopt, false));
 
-    // VID 999 has no exact match -> goes to catch_all
+    // VID 999 has no exact match -> goes to undefined target
     auto tagged = buildTaggedFrame(999, 0x88A4, {0x42});
     router_->processRxFrame(tagged.data(), tagged.size());
 
     auto caps = captured();
     ASSERT_EQ(caps.size(), 1u);
     EXPECT_EQ(caps[0].master, catch_all.get());
-    // Frame should be decapsulated
     EXPECT_EQ(caps[0].data.size(), tagged.size() - 4);
 }
 
-TEST_F(VLANRouterTest, RxUndefinedVlanIdDoesNotStealExactMatches) {
+TEST_F(VLANRouterTest, UndefinedTargetDoesNotStealExactMatches) {
     auto specific = std::make_shared<EtherCATMaster>();
     auto catch_all = std::make_shared<EtherCATMaster>();
     router_->addMaster(specific, 100, std::nullopt);
-    router_->addMaster(catch_all, VLANRouter::kUndefinedVlanId, std::nullopt);
+    ASSERT_TRUE(router_->setUndefinedTarget(catch_all, std::nullopt, false));
 
     // VID 100 has an exact match -> only specific receives it
     auto tagged = buildTaggedFrame(100, 0x88A4, {0x42});
@@ -320,6 +319,46 @@ TEST_F(VLANRouterTest, RxUndefinedVlanIdDoesNotStealExactMatches) {
     auto caps = captured();
     ASSERT_EQ(caps.size(), 1u);
     EXPECT_EQ(caps[0].master, specific.get());
+}
+
+TEST_F(VLANRouterTest, UndefinedTargetRejectsSecondWithoutReplace) {
+    auto m1 = std::make_shared<EtherCATMaster>();
+    auto m2 = std::make_shared<EtherCATMaster>();
+    EXPECT_TRUE(router_->setUndefinedTarget(m1, std::nullopt, false));
+    EXPECT_FALSE(router_->setUndefinedTarget(m2, std::nullopt, false));
+}
+
+TEST_F(VLANRouterTest, UndefinedTargetReplaceTrueOverwrites) {
+    auto m1 = std::make_shared<EtherCATMaster>();
+    auto m2 = std::make_shared<EtherCATMaster>();
+    EXPECT_TRUE(router_->setUndefinedTarget(m1, std::nullopt, false));
+    EXPECT_TRUE(router_->setUndefinedTarget(m2, std::nullopt, true));
+    EXPECT_EQ(router_->undefinedTarget().get(), m2.get());
+}
+
+TEST_F(VLANRouterTest, UndefinedTargetClearRemovesIt) {
+    auto m = std::make_shared<EtherCATMaster>();
+    router_->setUndefinedTarget(m, std::nullopt, false);
+    router_->clearUndefinedTarget();
+    EXPECT_EQ(router_->undefinedTarget(), nullptr);
+    EXPECT_EQ(router_->undefinedNetworkInterface(), nullptr);
+}
+
+TEST_F(VLANRouterTest, UndefinedTargetTxEncapsulates) {
+    auto m = std::make_shared<EtherCATMaster>();
+    router_->setUndefinedTarget(m, 77, false);
+
+    NetworkInterface* iface = router_->undefinedNetworkInterface();
+    ASSERT_NE(iface, nullptr);
+    ASSERT_TRUE(iface->send);
+
+    auto raw = buildFrame(0x88A4, {0x11});
+    ASSERT_TRUE(iface->send(raw.data(), raw.size()));
+
+    ASSERT_EQ(backend_->tx_frames.size(), 1u);
+    uint16_t tci = static_cast<uint16_t>((backend_->tx_frames[0][14] << 8) |
+                                          backend_->tx_frames[0][15]);
+    EXPECT_EQ(tci & 0x0FFFu, 77u);
 }
 
 TEST_F(VLANRouterTest, RxUntaggedFrameRoutedToNulloptMaster) {
@@ -450,14 +489,22 @@ TEST_F(VLANRouterTest, EntriesSnapshotIsCorrect) {
     ASSERT_EQ(entries.size(), 2u);
 
     EXPECT_EQ(entries[0].master.get(), m1.get());
-    EXPECT_TRUE(entries[0].rx_vlan_id.has_value());
-    EXPECT_EQ(entries[0].rx_vlan_id.value(), 100u);
+    EXPECT_TRUE(entries[0].rx_vlan_range.has_value());
+    EXPECT_EQ(entries[0].rx_vlan_range->start, 100u);
+    EXPECT_EQ(entries[0].rx_vlan_range->end, 100u);
     EXPECT_TRUE(entries[0].tx_vlan_id.has_value());
     EXPECT_EQ(entries[0].tx_vlan_id.value(), 200u);
 
     EXPECT_EQ(entries[1].master.get(), m2.get());
-    EXPECT_FALSE(entries[1].rx_vlan_id.has_value());
+    EXPECT_FALSE(entries[1].rx_vlan_range.has_value());
     EXPECT_FALSE(entries[1].tx_vlan_id.has_value());
+}
+
+TEST_F(VLANRouterTest, EntriesExcludesUndefinedTarget) {
+    auto m = std::make_shared<EtherCATMaster>();
+    router_->setUndefinedTarget(m, std::nullopt, false);
+    EXPECT_EQ(router_->masterCount(), 0u);
+    EXPECT_TRUE(router_->entries().empty());
 }
 
 TEST_F(VLANRouterTest, MasterCountTracksAddsAndRemoves) {
@@ -487,7 +534,8 @@ TEST_F(VLANRouterTest, AddingSameMasterUpdatesVlans) {
     EXPECT_EQ(router_->masterCount(), 1u);
     auto entries = router_->entries();
     ASSERT_EQ(entries.size(), 1u);
-    EXPECT_EQ(entries[0].rx_vlan_id.value(), 200u);
+    EXPECT_EQ(entries[0].rx_vlan_range->start, 200u);
+    EXPECT_EQ(entries[0].rx_vlan_range->end, 200u);
     EXPECT_EQ(entries[0].tx_vlan_id.value(), 200u);
 }
 
@@ -628,4 +676,91 @@ TEST_F(VLANRouterTest, RoundTripThroughVlanPreservesPayload) {
     // Decapsulated frame should equal the original
     ASSERT_EQ(caps[0].data.size(), raw.size());
     EXPECT_EQ(std::memcmp(caps[0].data.data(), raw.data(), raw.size()), 0);
+}
+
+// ============================================================================
+// VLAN Range tests
+// ============================================================================
+
+TEST_F(VLANRouterTest, RangeSingleVidEqualsOldBehavior) {
+    auto master = std::make_shared<EtherCATMaster>();
+    router_->addMaster(master, VLANRouter::VlanRange{100, 100}, std::nullopt);
+
+    auto tagged = buildTaggedFrame(100, 0x88A4, {0x42});
+    router_->processRxFrame(tagged.data(), tagged.size());
+
+    auto caps = captured();
+    ASSERT_EQ(caps.size(), 1u);
+    EXPECT_EQ(caps[0].master, master.get());
+}
+
+TEST_F(VLANRouterTest, RangeMultipleVidsMatch) {
+    auto master = std::make_shared<EtherCATMaster>();
+    router_->addMaster(master, VLANRouter::VlanRange{100, 200}, std::nullopt);
+
+    auto tagged = buildTaggedFrame(150, 0x88A4, {0x42});
+    router_->processRxFrame(tagged.data(), tagged.size());
+
+    auto caps = captured();
+    ASSERT_EQ(caps.size(), 1u);
+    EXPECT_EQ(caps[0].master, master.get());
+}
+
+TEST_F(VLANRouterTest, RangeOverlapTwoMastersBothReceive) {
+    auto m1 = std::make_shared<EtherCATMaster>();
+    auto m2 = std::make_shared<EtherCATMaster>();
+    router_->addMaster(m1, VLANRouter::VlanRange{100, 150}, std::nullopt);
+    router_->addMaster(m2, VLANRouter::VlanRange{140, 200}, std::nullopt);
+
+    auto tagged = buildTaggedFrame(145, 0x88A4, {0x55});
+    router_->processRxFrame(tagged.data(), tagged.size());
+
+    auto caps = captured();
+    ASSERT_EQ(caps.size(), 2u);
+}
+
+TEST_F(VLANRouterTest, RangeEdgeCases) {
+    auto master = std::make_shared<EtherCATMaster>();
+    router_->addMaster(master, VLANRouter::VlanRange{100, 200}, std::nullopt);
+
+    clearCaptured();
+    router_->processRxFrame(buildTaggedFrame(100, 0x88A4, {0x01}).data(), 18);
+    EXPECT_EQ(captured().size(), 1u);
+
+    clearCaptured();
+    router_->processRxFrame(buildTaggedFrame(200, 0x88A4, {0x01}).data(), 18);
+    EXPECT_EQ(captured().size(), 1u);
+
+    clearCaptured();
+    router_->processRxFrame(buildTaggedFrame(99, 0x88A4, {0x01}).data(), 18);
+    EXPECT_TRUE(captured().empty());
+
+    clearCaptured();
+    router_->processRxFrame(buildTaggedFrame(201, 0x88A4, {0x01}).data(), 18);
+    EXPECT_TRUE(captured().empty());
+}
+
+TEST_F(VLANRouterTest, MastersForVlanIdWithRanges) {
+    auto m1 = std::make_shared<EtherCATMaster>();
+    router_->addMaster(m1, VLANRouter::VlanRange{100, 200}, std::nullopt);
+
+    EXPECT_EQ(router_->mastersForVlanId(150).size(), 1u);
+    EXPECT_TRUE(router_->mastersForVlanId(99).empty());
+    EXPECT_TRUE(router_->mastersForVlanId(201).empty());
+}
+
+// ============================================================================
+// API rejection tests
+// ============================================================================
+
+TEST_F(VLANRouterTest, AddMasterRejectsUndefinedVlanId) {
+    auto m = std::make_shared<EtherCATMaster>();
+    router_->addMaster(m, VLANRouter::kUndefinedVlanId, std::nullopt);
+    EXPECT_EQ(router_->masterCount(), 0u);
+}
+
+TEST_F(VLANRouterTest, AddMasterRejectsInvertedRange) {
+    auto m = std::make_shared<EtherCATMaster>();
+    router_->addMaster(m, VLANRouter::VlanRange{200, 100}, std::nullopt);
+    EXPECT_EQ(router_->masterCount(), 0u);
 }
