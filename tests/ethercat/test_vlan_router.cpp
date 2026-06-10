@@ -684,7 +684,7 @@ TEST_F(VLANRouterTest, RoundTripThroughVlanPreservesPayload) {
 
 TEST_F(VLANRouterTest, RangeSingleVidEqualsOldBehavior) {
     auto master = std::make_shared<EtherCATMaster>();
-    router_->addMaster(master, VLANRouter::VlanRange{100, 100}, std::nullopt);
+    router_->addMaster(master, VLANRouter::VLANRange{100, 100}, std::nullopt);
 
     auto tagged = buildTaggedFrame(100, 0x88A4, {0x42});
     router_->processRxFrame(tagged.data(), tagged.size());
@@ -696,7 +696,7 @@ TEST_F(VLANRouterTest, RangeSingleVidEqualsOldBehavior) {
 
 TEST_F(VLANRouterTest, RangeMultipleVidsMatch) {
     auto master = std::make_shared<EtherCATMaster>();
-    router_->addMaster(master, VLANRouter::VlanRange{100, 200}, std::nullopt);
+    router_->addMaster(master, VLANRouter::VLANRange{100, 200}, std::nullopt);
 
     auto tagged = buildTaggedFrame(150, 0x88A4, {0x42});
     router_->processRxFrame(tagged.data(), tagged.size());
@@ -709,8 +709,8 @@ TEST_F(VLANRouterTest, RangeMultipleVidsMatch) {
 TEST_F(VLANRouterTest, RangeOverlapTwoMastersBothReceive) {
     auto m1 = std::make_shared<EtherCATMaster>();
     auto m2 = std::make_shared<EtherCATMaster>();
-    router_->addMaster(m1, VLANRouter::VlanRange{100, 150}, std::nullopt);
-    router_->addMaster(m2, VLANRouter::VlanRange{140, 200}, std::nullopt);
+    router_->addMaster(m1, VLANRouter::VLANRange{100, 150}, std::nullopt);
+    router_->addMaster(m2, VLANRouter::VLANRange{140, 200}, std::nullopt);
 
     auto tagged = buildTaggedFrame(145, 0x88A4, {0x55});
     router_->processRxFrame(tagged.data(), tagged.size());
@@ -721,7 +721,7 @@ TEST_F(VLANRouterTest, RangeOverlapTwoMastersBothReceive) {
 
 TEST_F(VLANRouterTest, RangeEdgeCases) {
     auto master = std::make_shared<EtherCATMaster>();
-    router_->addMaster(master, VLANRouter::VlanRange{100, 200}, std::nullopt);
+    router_->addMaster(master, VLANRouter::VLANRange{100, 200}, std::nullopt);
 
     clearCaptured();
     router_->processRxFrame(buildTaggedFrame(100, 0x88A4, {0x01}).data(), 18);
@@ -742,7 +742,7 @@ TEST_F(VLANRouterTest, RangeEdgeCases) {
 
 TEST_F(VLANRouterTest, MastersForVlanIdWithRanges) {
     auto m1 = std::make_shared<EtherCATMaster>();
-    router_->addMaster(m1, VLANRouter::VlanRange{100, 200}, std::nullopt);
+    router_->addMaster(m1, VLANRouter::VLANRange{100, 200}, std::nullopt);
 
     EXPECT_EQ(router_->mastersForVlanId(150).size(), 1u);
     EXPECT_TRUE(router_->mastersForVlanId(99).empty());
@@ -761,6 +761,6 @@ TEST_F(VLANRouterTest, AddMasterRejectsUndefinedVlanId) {
 
 TEST_F(VLANRouterTest, AddMasterRejectsInvertedRange) {
     auto m = std::make_shared<EtherCATMaster>();
-    router_->addMaster(m, VLANRouter::VlanRange{200, 100}, std::nullopt);
+    router_->addMaster(m, VLANRouter::VLANRange{200, 100}, std::nullopt);
     EXPECT_EQ(router_->masterCount(), 0u);
 }

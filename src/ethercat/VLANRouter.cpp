@@ -71,7 +71,7 @@ void VLANRouter::setBackend(NetworkInterface* backend)
 // ============================================================================
 
 void VLANRouter::addMaster(std::shared_ptr<EtherCATMaster> master,
-                           VlanRange rx_range,
+                           VLANRange rx_range,
                            std::optional<uint16_t> tx_vlan)
 {
     if (!master) return;
@@ -117,7 +117,7 @@ void VLANRouter::addMaster(std::shared_ptr<EtherCATMaster> master,
                            std::optional<uint16_t> tx_vlan)
 {
     if (rx_vlan.has_value()) {
-        addMaster(std::move(master), VlanRange{rx_vlan.value(), rx_vlan.value()}, tx_vlan);
+        addMaster(std::move(master), VLANRange{rx_vlan.value(), rx_vlan.value()}, tx_vlan);
     } else {
         addMaster(std::move(master), std::nullopt, tx_vlan);
     }

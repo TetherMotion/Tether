@@ -152,7 +152,7 @@ int main(int argc, char** argv) {
     bool vlan_mode = !rx_vlan_str.empty() || !tx_vlan_str.empty();
     std::optional<uint16_t> tx_vlan;
     bool rx_any = false;
-    std::optional<EtherCAT::VLANRouter::VlanRange> rx_range;
+    std::optional<EtherCAT::VLANRouter::VLANRange> rx_range;
 
     if (vlan_mode) {
         if (!tx_vlan_str.empty()) {
@@ -182,7 +182,7 @@ int main(int argc, char** argv) {
                             std::cerr << "--rx-vlan must be in range 1–4095\n";
                             return 1;
                         }
-                        rx_range = EtherCAT::VLANRouter::VlanRange{
+                        rx_range = EtherCAT::VLANRouter::VLANRange{
                             static_cast<uint16_t>(v), static_cast<uint16_t>(v)};
                     } else {
                         int start = std::stoi(rx_vlan_str.substr(0, dash));
@@ -191,7 +191,7 @@ int main(int argc, char** argv) {
                             std::cerr << "--rx-vlan range must be 1–4095 with start <= end\n";
                             return 1;
                         }
-                        rx_range = EtherCAT::VLANRouter::VlanRange{
+                        rx_range = EtherCAT::VLANRouter::VLANRange{
                             static_cast<uint16_t>(start), static_cast<uint16_t>(end)};
                     }
                 } catch (...) {

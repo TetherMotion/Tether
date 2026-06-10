@@ -89,11 +89,11 @@ public:
      *
      * A single VLAN is represented as {vid, vid}.
      */
-    struct VlanRange {
+    struct VLANRange {
         uint16_t start;  ///< First VLAN ID in the range (inclusive)
         uint16_t end;    ///< Last VLAN ID in the range (inclusive)
 
-        VlanRange(uint16_t s, uint16_t e) : start(s), end(e) {}
+        VLANRange(uint16_t s, uint16_t e) : start(s), end(e) {}
 
         bool contains(uint16_t vid) const {
             return vid >= start && vid <= end;
@@ -105,7 +105,7 @@ public:
      */
     struct Entry {
         std::shared_ptr<EtherCATMaster> master;       ///< The registered master
-        std::optional<VlanRange> rx_vlan_range;       ///< Expected RX VLAN range (nullopt = untagged)
+        std::optional<VLANRange> rx_vlan_range;       ///< Expected RX VLAN range (nullopt = untagged)
         std::optional<uint16_t> tx_vlan_id;           ///< TX VLAN ID to insert (nullopt = pass-through)
     };
 
@@ -159,7 +159,7 @@ public:
      * It is legal for multiple masters to have overlapping ranges.
      */
     void addMaster(std::shared_ptr<EtherCATMaster> master,
-                   VlanRange rx_range,
+                   VLANRange rx_range,
                    std::optional<uint16_t> tx_vlan);
 
     /**
@@ -314,7 +314,7 @@ private:
      */
     struct InternalEntry {
         std::shared_ptr<EtherCATMaster> master;
-        std::optional<VlanRange> rx_vlan_range;
+        std::optional<VLANRange> rx_vlan_range;
         std::optional<uint16_t> tx_vlan_id;
         NetworkInterface iface;  ///< Per-master view (send encapsulates)
     };
