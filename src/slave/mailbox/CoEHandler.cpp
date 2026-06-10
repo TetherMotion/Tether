@@ -5,6 +5,7 @@
 
 #include "tether/slave/mailbox/IMailboxHandler.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <map>
 #include <vector>

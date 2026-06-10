@@ -7,6 +7,7 @@
 #include "slave/core/SlaveCore.hpp"
 #include "slave/logging/SlaveLogger.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <functional>
 #include <vector>
