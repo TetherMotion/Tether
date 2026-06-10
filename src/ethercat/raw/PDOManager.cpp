@@ -17,6 +17,10 @@ namespace EtherCAT {
 
 static const char* TAG = "ec_pdo_mgr";
 
+// Global PDO debug flags (defined in EtherCATSlave.cpp)
+extern bool g_debug_rx_pdo;
+extern bool g_debug_tx_pdo;
+
 // ============================================================================
 // SM Register Definitions (internal to this TU)
 // ============================================================================
@@ -83,6 +87,15 @@ int PDOMapping::add_rxpdo(uint16_t slave_index, void* buffer, uint16_t size,
         e.configured_address = m_slave_configured_addrs[slave_index];
     TETHER_LOGI(TAG, "Added RxPDO: slave=%u size=%u pdo=0x%04x mode=%d",
                 slave_index, size, pdo_index, static_cast<int>(mode));
+    if (g_debug_rx_pdo) {
+        TETHER_LOGI(TAG, "  [RxPDO-DEBUG] Entry %zu: slave=%u buf=%p size=%u addr_mode=%s (%d)",
+                    m_entry_count, slave_index, buffer, size,
+                    mode == PDOAddressMode::Broadcast ? "broadcast" :
+                    mode == PDOAddressMode::ConfiguredAddress ? "configured" :
+                    mode == PDOAddressMode::Position ? "position" :
+                    mode == PDOAddressMode::Logical ? "logical" : "unknown",
+                    static_cast<int>(mode));
+    }
     return static_cast<int>(m_entry_count++);
 }
 
@@ -111,6 +124,15 @@ int PDOMapping::add_txpdo(uint16_t slave_index, void* buffer, uint16_t size,
         e.configured_address = m_slave_configured_addrs[slave_index];
     TETHER_LOGI(TAG, "Added TxPDO: slave=%u size=%u pdo=0x%04x mode=%d",
                 slave_index, size, pdo_index, static_cast<int>(mode));
+    if (g_debug_tx_pdo) {
+        TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Entry %zu: slave=%u buf=%p size=%u addr_mode=%s (%d)",
+                    m_entry_count, slave_index, buffer, size,
+                    mode == PDOAddressMode::Broadcast ? "broadcast" :
+                    mode == PDOAddressMode::ConfiguredAddress ? "configured" :
+                    mode == PDOAddressMode::Position ? "position" :
+                    mode == PDOAddressMode::Logical ? "logical" : "unknown",
+                    static_cast<int>(mode));
+    }
     return static_cast<int>(m_entry_count++);
 }
 
@@ -360,6 +382,28 @@ bool PDOManager::writeSMConfig(uint16_t adp, uint8_t sm_index,
 
     TETHER_LOGI(TAG, "SM%u: configured addr=0x%04x len=%u ctrl=0x%02x act=0x%02x",
                 sm_index, config.phys_start_addr, config.length, config.control, activate);
+
+    if ((g_debug_rx_pdo && config.type == PDO::SyncManagerType::ProcessOutput) ||
+        (g_debug_tx_pdo && config.type == PDO::SyncManagerType::ProcessInput)) {
+        const char* sm_type_str = "unknown";
+        switch (config.type) {
+            case PDO::SyncManagerType::Unused:        sm_type_str = "unused"; break;
+            case PDO::SyncManagerType::MailboxWrite:  sm_type_str = "mailbox-write"; break;
+            case PDO::SyncManagerType::MailboxRead:   sm_type_str = "mailbox-read"; break;
+            case PDO::SyncManagerType::ProcessOutput: sm_type_str = "process-output (RxPDO)"; break;
+            case PDO::SyncManagerType::ProcessInput:  sm_type_str = "process-input (TxPDO)"; break;
+        }
+        const char* mode_str = (config.control & 0x02) ? "mailbox" :
+                               (config.control & 0x01) ? "buffered" : "unknown";
+        const char* dir_str  = (config.control & 0x04) ? "write (master→slave)" : "read (slave→master)";
+        TETHER_LOGI(TAG, "  [PDO-DEBUG] SM%u detail: type=%s mode=%s dir=%s enable=%s",
+                    sm_index, sm_type_str, mode_str, dir_str,
+                    config.enable ? "yes" : "no");
+        if (config.control & 0x10) TETHER_LOGI(TAG, "    IRQ eCAT enabled");
+        if (config.control & 0x20) TETHER_LOGI(TAG, "    IRQ PDI enabled");
+        if (config.control & 0x40) TETHER_LOGI(TAG, "    Watchdog enabled");
+    }
+
     return true;
 }
 
@@ -381,6 +425,29 @@ bool PDOManager::configureSlavesSMs(uint16_t slave_index) {
     const uint16_t adp = transport_.adpForSlaveIndex(slave_index);
 
     TETHER_LOGI(TAG, "Configuring SMs for slave %u (adp=0x%04x)", slave_index, adp);
+
+    if (g_debug_rx_pdo || g_debug_tx_pdo) {
+        TETHER_LOGI(TAG, "  [PDO-DEBUG] Slave %u config: vendor=0x%08x product=0x%08x",
+                    slave_index, cfg.vendor_id, cfg.product_code);
+        for (int sm = 0; sm < 4; sm++) {
+            const char* sm_type_str = "unused";
+            switch (cfg.sm[sm].type) {
+                case PDO::SyncManagerType::MailboxWrite:  sm_type_str = "mailbox-write"; break;
+                case PDO::SyncManagerType::MailboxRead:   sm_type_str = "mailbox-read"; break;
+                case PDO::SyncManagerType::ProcessOutput: sm_type_str = "process-output (RxPDO)"; break;
+                case PDO::SyncManagerType::ProcessInput:  sm_type_str = "process-input (TxPDO)"; break;
+                default: break;
+            }
+            if (cfg.sm[sm].type != PDO::SyncManagerType::Unused) {
+                TETHER_LOGI(TAG, "  [PDO-DEBUG]   SM%d: addr=0x%04x len=%u ctrl=0x%02x type=%s enable=%s",
+                            sm, cfg.sm[sm].phys_start_addr, cfg.sm[sm].length,
+                            cfg.sm[sm].control, sm_type_str,
+                            cfg.sm[sm].enable ? "yes" : "no");
+            } else {
+                TETHER_LOGI(TAG, "  [PDO-DEBUG]   SM%d: unused", sm);
+            }
+        }
+    }
 
     for (int sm = 0; sm < 4; sm++) {
         if (cfg.sm[sm].type != PDO::SyncManagerType::Unused) {
@@ -422,18 +489,37 @@ bool PDOManager::finalizeMapping(uint16_t slave_index) {
 
     uint16_t total_rxpdo_size = 0;
     uint16_t total_txpdo_size = 0;
+    size_t rxpdo_count = 0;
+    size_t txpdo_count = 0;
 
     for (size_t i = 0; i < mapping_.entry_count(); i++) {
         PDO::PDOEntry* entry = mapping_.get_entry_mut(i);
         if (!entry || entry->slave_index != slave_index) continue;
 
         if (entry->direction == PDO::PDODirection::RxPDO) {
-            entry->physical_offset = sm2_addr;
+            entry->physical_offset = sm2_addr + total_rxpdo_size;
             total_rxpdo_size += entry->data_size;
+            rxpdo_count++;
+            if (g_debug_rx_pdo) {
+                TETHER_LOGI(TAG, "  [RxPDO-DEBUG] Entry %zu: slave=%u offset=0x%04x size=%u buf=%p pdo=0x%04x",
+                            i, slave_index, entry->physical_offset, entry->data_size,
+                            entry->app_buffer, entry->pdo_index);
+            }
         } else {
-            entry->physical_offset = sm3_addr;
+            entry->physical_offset = sm3_addr + total_txpdo_size;
             total_txpdo_size += entry->data_size;
+            txpdo_count++;
+            if (g_debug_tx_pdo) {
+                TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Entry %zu: slave=%u offset=0x%04x size=%u buf=%p pdo=0x%04x",
+                            i, slave_index, entry->physical_offset, entry->data_size,
+                            entry->app_buffer, entry->pdo_index);
+            }
         }
+    }
+
+    if (g_debug_rx_pdo || g_debug_tx_pdo) {
+        TETHER_LOGI(TAG, "  [PDO-DEBUG] Summary for slave %u: RxPDO entries=%zu total=%u bytes, TxPDO entries=%zu total=%u bytes",
+                    slave_index, rxpdo_count, total_rxpdo_size, txpdo_count, total_txpdo_size);
     }
 
     if (total_rxpdo_size > 0 && cfg.sm[2].type != PDO::SyncManagerType::Unused) {
@@ -557,6 +643,24 @@ bool PDOManager::sendRxPDO(size_t entry_index) {
     if (!entry || !entry->enabled || entry->direction != PDO::PDODirection::RxPDO)
         return false;
 
+    if (g_debug_rx_pdo) {
+        TETHER_LOGI(TAG, "[RxPDO-DEBUG] Sending entry %zu: slave=%u offset=0x%04x size=%u mode=%s",
+                    entry_index, entry->slave_index, entry->physical_offset, entry->data_size,
+                    entry->address_mode == PDO::PDOAddressMode::Position ? "position" :
+                    entry->address_mode == PDO::PDOAddressMode::ConfiguredAddress ? "configured" :
+                    entry->address_mode == PDO::PDOAddressMode::Broadcast ? "broadcast" :
+                    entry->address_mode == PDO::PDOAddressMode::Logical ? "logical" : "unknown");
+        if (entry->data_size <= 32) {
+            char hex[128] = {0};
+            size_t pos = 0;
+            const uint8_t* buf = static_cast<const uint8_t*>(entry->app_buffer);
+            for (uint16_t b = 0; b < entry->data_size && pos + 3 < sizeof(hex); b++) {
+                pos += static_cast<size_t>(std::snprintf(hex + pos, sizeof(hex) - pos, "%02X ", buf[b]));
+            }
+            TETHER_LOGI(TAG, "  [RxPDO-DEBUG] Data: %s", hex);
+        }
+    }
+
     bool success = false;
     switch (entry->address_mode) {
         case PDO::PDOAddressMode::Position:
@@ -571,6 +675,13 @@ bool PDOManager::sendRxPDO(size_t entry_index) {
         case PDO::PDOAddressMode::Logical:
             TETHER_LOGW(TAG, "Logical addressing not yet implemented");
             break;
+    }
+
+    if (g_debug_rx_pdo) {
+        TETHER_LOGI(TAG, "  [RxPDO-DEBUG] Result: %s (success_count=%u error_count=%u)",
+                    success ? "OK" : "FAIL",
+                    static_cast<unsigned>(entry->success_count + (success ? 1 : 0)),
+                    static_cast<unsigned>(entry->error_count + (success ? 0 : 1)));
     }
 
     if (success) {
@@ -588,6 +699,15 @@ bool PDOManager::receiveTxPDO(size_t entry_index) {
     if (!entry || !entry->enabled || entry->direction != PDO::PDODirection::TxPDO)
         return false;
 
+    if (g_debug_tx_pdo) {
+        TETHER_LOGI(TAG, "[TxPDO-DEBUG] Receiving entry %zu: slave=%u offset=0x%04x size=%u mode=%s",
+                    entry_index, entry->slave_index, entry->physical_offset, entry->data_size,
+                    entry->address_mode == PDO::PDOAddressMode::Position ? "position" :
+                    entry->address_mode == PDO::PDOAddressMode::ConfiguredAddress ? "configured" :
+                    entry->address_mode == PDO::PDOAddressMode::Broadcast ? "broadcast" :
+                    entry->address_mode == PDO::PDOAddressMode::Logical ? "logical" : "unknown");
+    }
+
     bool success = false;
     switch (entry->address_mode) {
         case PDO::PDOAddressMode::Position:
@@ -604,6 +724,22 @@ bool PDOManager::receiveTxPDO(size_t entry_index) {
             break;
     }
 
+    if (g_debug_tx_pdo) {
+        TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Result: %s (success_count=%u error_count=%u)",
+                    success ? "OK" : "FAIL",
+                    static_cast<unsigned>(entry->success_count + (success ? 1 : 0)),
+                    static_cast<unsigned>(entry->error_count + (success ? 0 : 1)));
+        if (success && entry->data_size <= 32) {
+            char hex[128] = {0};
+            size_t pos = 0;
+            const uint8_t* buf = static_cast<const uint8_t*>(entry->app_buffer);
+            for (uint16_t b = 0; b < entry->data_size && pos + 3 < sizeof(hex); b++) {
+                pos += static_cast<size_t>(std::snprintf(hex + pos, sizeof(hex) - pos, "%02X ", buf[b]));
+            }
+            TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Data: %s", hex);
+        }
+    }
+
     if (success) {
         entry->success_count++;
         stats_.txpdo_frames_recv++;
@@ -618,7 +754,14 @@ bool PDOManager::exchangeAll() {
     bool all_ok = true;
     stats_.total_cycles++;
 
+    if (g_debug_rx_pdo || g_debug_tx_pdo) {
+        TETHER_LOGI(TAG, "[PDO-DEBUG] === Cycle %llu ===", static_cast<unsigned long long>(stats_.total_cycles));
+    }
+
     // Phase 1: Send all RxPDO
+    if (g_debug_rx_pdo) {
+        TETHER_LOGI(TAG, "  [RxPDO-DEBUG] --- Send phase ---");
+    }
     for (size_t i = 0; i < mapping_.entry_count(); i++) {
         const PDO::PDOEntry* e = mapping_.get_entry(i);
         if (e && e->enabled && e->direction == PDO::PDODirection::RxPDO) {
@@ -626,12 +769,20 @@ bool PDOManager::exchangeAll() {
         }
     }
     // Phase 2: Receive all TxPDO
+    if (g_debug_tx_pdo) {
+        TETHER_LOGI(TAG, "  [TxPDO-DEBUG] --- Receive phase ---");
+    }
     for (size_t i = 0; i < mapping_.entry_count(); i++) {
         const PDO::PDOEntry* e = mapping_.get_entry(i);
         if (e && e->enabled && e->direction == PDO::PDODirection::TxPDO) {
             if (!receiveTxPDO(i)) all_ok = false;
         }
     }
+
+    if (g_debug_rx_pdo || g_debug_tx_pdo) {
+        TETHER_LOGI(TAG, "  [PDO-DEBUG] Cycle result: %s", all_ok ? "OK" : "ERRORS");
+    }
+
     return all_ok;
 }
 
@@ -675,18 +826,23 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
             }
         }
         // Periodic hex dump: log RxPDO bytes every 1000 cycles
-        if ((physical_stats_.fpwr_success % 1000) == 0) {
+        if ((physical_stats_.fpwr_success % 1000) == 0 || g_debug_rx_pdo) {
             char hex[128];
             size_t pos = 0;
-            size_t dump_len = sm2.length < 20 ? sm2.length : 20;
+            size_t dump_len = sm2.length < 32 ? sm2.length : 32;
             for (size_t b = 0; b < dump_len && pos + 3 < sizeof(hex); b++) {
                 pos += static_cast<size_t>(std::snprintf(hex + pos, sizeof(hex) - pos, "%02X ", out_buf[b]));
             }
-            // Decode CW and TargetPos from the buffer for clarity
-            uint16_t cw_val = static_cast<uint16_t>(out_buf[0] | (out_buf[1] << 8));
-            int32_t tp_val = static_cast<int32_t>(out_buf[2] | (out_buf[3] << 8) | (out_buf[4] << 16) | (out_buf[5] << 24));
-            TETHER_LOGI(TAG, "[RxPDO-WIRE] Cycle %u: CW=0x%04X TP=%ld | %s",
-                     static_cast<unsigned>(physical_stats_.fpwr_success), cw_val, (long)tp_val, hex);
+            if (g_debug_rx_pdo) {
+                TETHER_LOGI(TAG, "[RxPDO-DEBUG] Physical write SM2: addr=0x%04x len=%u data=%s",
+                            sm2.phys_start_addr, sm2.length, hex);
+            } else {
+                // Decode CW and TargetPos from the buffer for clarity
+                uint16_t cw_val = static_cast<uint16_t>(out_buf[0] | (out_buf[1] << 8));
+                int32_t tp_val = static_cast<int32_t>(out_buf[2] | (out_buf[3] << 8) | (out_buf[4] << 16) | (out_buf[5] << 24));
+                TETHER_LOGI(TAG, "[RxPDO-WIRE] Cycle %u: CW=0x%04X TP=%ld | %s",
+                         static_cast<unsigned>(physical_stats_.fpwr_success), cw_val, (long)tp_val, hex);
+            }
         }
         if (transport_.writeRegister(transport_.adpForSlaveIndex(0),
                          sm2.phys_start_addr, out_buf, sm2.length, 50)) {
@@ -702,17 +858,35 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
         if (transport_.readRegister(transport_.adpForSlaveIndex(0),
                         sm3.phys_start_addr, in_buf, sm3.length, 50)) {
             physical_stats_.fprd_success++;
+            if (g_debug_tx_pdo) {
+                char hex[128];
+                size_t pos = 0;
+                size_t dump_len = sm3.length < 32 ? sm3.length : 32;
+                for (size_t b = 0; b < dump_len && pos + 3 < sizeof(hex); b++) {
+                    pos += static_cast<size_t>(std::snprintf(hex + pos, sizeof(hex) - pos, "%02X ", in_buf[b]));
+                }
+                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3: addr=0x%04x len=%u data=%s",
+                            sm3.phys_start_addr, sm3.length, hex);
+            }
             for (size_t i = 0; i < mapping_.entry_count(); i++) {
                 PDO::PDOEntry* e = mapping_.get_entry_mut(i);
                 if (e && e->enabled && e->direction == PDO::PDODirection::TxPDO
                     && e->app_buffer && e->data_size <= sm3.length) {
                     std::memcpy(e->app_buffer, in_buf, e->data_size);
                     e->success_count++;
+                    if (g_debug_tx_pdo) {
+                        TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Copied %u bytes to entry %zu buf=%p",
+                                    e->data_size, i, e->app_buffer);
+                    }
                 }
             }
         } else {
             physical_stats_.fprd_wkc_errors++;
             fprd_ok = false;
+            if (g_debug_tx_pdo) {
+                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3 FAILED: addr=0x%04x len=%u",
+                            sm3.phys_start_addr, sm3.length);
+            }
         }
     }
     stats_.total_cycles++;

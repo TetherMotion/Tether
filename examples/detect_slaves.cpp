@@ -71,7 +71,7 @@ int main(int argc, char** argv) {
         .help("Network interface name (e.g. eth0, enp3s0)");
     program.add_argument("--debug")
         .default_value(std::string(""))
-        .help("Comma-separated debug flags. Known flags: sii-derivation, mailbox-configuration, ethercat-statemachine, tx-ethercat-packets, rx-ethercat-packets");
+        .help("Comma-separated debug flags. Known flags: sii-derivation, mailbox-configuration, ethercat-statemachine, tx-ethercat-packets, rx-ethercat-packets, rx-pdo, tx-pdo");
     program.add_argument("--rx-vlan")
         .default_value(std::string(""))
         .help("RX VLAN filter: single VID (e.g. 100), range (e.g. 100-200), or 'any' for catch-all undefined target");
@@ -96,7 +96,9 @@ int main(int argc, char** argv) {
         "mailbox-configuration",
         "ethercat-statemachine",
         "tx-ethercat-packets",
-        "rx-ethercat-packets"
+        "rx-ethercat-packets",
+        "rx-pdo",
+        "tx-pdo"
     };
 
     // Parse debug flags
@@ -146,6 +148,18 @@ int main(int argc, char** argv) {
     if (debug_flags.count("rx-ethercat-packets")) {
         EtherCAT::enableRxPacketDebug(true);
         TETHER_LOGI(TAG, "RX EtherCAT packet debug logging enabled");
+    }
+
+    // Enable RxPDO debug if requested
+    if (debug_flags.count("rx-pdo")) {
+        EtherCAT::enableRxPDODebug(true);
+        TETHER_LOGI(TAG, "RxPDO debug logging enabled");
+    }
+
+    // Enable TxPDO debug if requested
+    if (debug_flags.count("tx-pdo")) {
+        EtherCAT::enableTxPDODebug(true);
+        TETHER_LOGI(TAG, "TxPDO debug logging enabled");
     }
 
     // ---- Parse VLAN arguments ----

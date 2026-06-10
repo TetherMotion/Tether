@@ -43,6 +43,10 @@ extern bool g_debug_statemachine;
 extern bool g_debug_tx_packets;
 extern bool g_debug_rx_packets;
 
+// Global debug flags for PDO logging (shared with PDOManager)
+extern bool g_debug_rx_pdo;
+extern bool g_debug_tx_pdo;
+
 // Global registry of EtherCATMaster instances (host-only helper). This
 // allows host-side helpers (examples) to find the master associated with
 // a NetworkInterface pointer.

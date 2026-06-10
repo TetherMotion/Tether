@@ -38,6 +38,18 @@ void enableRxPacketDebug(bool enable) {
     g_debug_rx_packets = enable;
 }
 
+// Global debug flags for PDO logging
+bool g_debug_rx_pdo = false;
+bool g_debug_tx_pdo = false;
+
+void enableRxPDODebug(bool enable) {
+    g_debug_rx_pdo = enable;
+}
+
+void enableTxPDODebug(bool enable) {
+    g_debug_tx_pdo = enable;
+}
+
 // ============================================================================
 // EtherCATSlave
 // ============================================================================

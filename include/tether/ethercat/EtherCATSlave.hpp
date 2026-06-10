@@ -84,6 +84,16 @@ void enableTxPacketDebug(bool enable);
  */
 void enableRxPacketDebug(bool enable);
 
+/**
+ * @brief Enable or disable detailed RxPDO (master→slave) debug logging
+ */
+void enableRxPDODebug(bool enable);
+
+/**
+ * @brief Enable or disable detailed TxPDO (slave→master) debug logging
+ */
+void enableTxPDODebug(bool enable);
+
 // ============================================================================
 // SlaveError — detailed error enum
 // ============================================================================
