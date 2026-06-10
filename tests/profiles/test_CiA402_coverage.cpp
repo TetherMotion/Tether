@@ -3,6 +3,7 @@
  * @brief Comprehensive CiA402 Slave coverage tests (state machine, simulation, OD, PDO)
  */
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <cstring>
 #include <cmath>
 #include <memory>

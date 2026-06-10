@@ -5,6 +5,7 @@
  */
 #include <gtest/gtest.h>
 #include <tether/motion_replanner/SystemIdentifier.hpp>
+#include <algorithm>
 #include <cmath>
 
 using namespace MotionReplanner;
