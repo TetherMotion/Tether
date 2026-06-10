@@ -21,6 +21,10 @@
 #include "tether/sensors/Axia80/Axia80Registers.hpp"
 #include "tether/platform/Platform.hpp"
 
+// Global PDO debug flags (defined in PDOManager.cpp)
+extern bool g_debug_rx_pdo;
+extern bool g_debug_tx_pdo;
+
 namespace EtherCAT {
 namespace Sensors {
 
@@ -83,6 +87,28 @@ public:
      * @return true on success
      */
     bool init(Tether::Platform::LogLevel log_level = Tether::Platform::LogLevel::Info);
+
+    /**
+     * @brief Print detailed PDO layout information for debugging.
+     *
+     * Logs the structure of TxPDO and RxPDO with field names, offsets,
+     * and sizes. Called automatically when PDO debug flags are enabled.
+     */
+    static void printPDOLayout();
+
+    /**
+     * @brief Print TxPDO data contents for debugging.
+     *
+     * Logs the current values of all TxPDO fields.
+     */
+    void printTxPDOData() const;
+
+    /**
+     * @brief Print RxPDO data contents for debugging.
+     *
+     * Logs the current values of all RxPDO fields.
+     */
+    void printRxPDOData() const;
 
     // -- PDO access --------------------------------------------------------
 
@@ -275,6 +301,11 @@ inline bool Axia80Sensor::init(Tether::Platform::LogLevel log_level)
 {
     auto& sl = slave();
 
+    // Print PDO layout if debug flags are enabled
+    if (g_debug_rx_pdo || g_debug_tx_pdo) {
+        printPDOLayout();
+    }
+
     // 1. Mailbox
     if (sl.configureMailbox(log_level) != SlaveError::Ok) {
         TETHER_LOGE("Axia80", "Slave %u: mailbox config failed", slave_index_);
@@ -461,6 +492,64 @@ inline bool Axia80Sensor::readDeviceName(char* out, size_t capacity)
 {
     size_t sz = capacity;
     return slave().sdoRead(Axia80::OD_DEVICE_NAME, 0, out, sz) == SlaveError::Ok;
+}
+
+inline void Axia80Sensor::printPDOLayout()
+{
+    TETHER_LOGI("Axia80", "=== Axia80 PDO Layout ===");
+    TETHER_LOGI("Axia80", "");
+    TETHER_LOGI("Axia80", "TxPDO (0x1A00) — Slave → Master, %u bytes:", Axia80_pdo::TxPDO_1A00.size);
+    TETHER_LOGI("Axia80", "  Offset  Size  Field          Description");
+    TETHER_LOGI("Axia80", "  ------  ----  -------------  ----------------------------------------");
+    TETHER_LOGI("Axia80", "  0x00    4     fx             Force X (counts, int32_t)");
+    TETHER_LOGI("Axia80", "  0x04    4     fy             Force Y (counts, int32_t)");
+    TETHER_LOGI("Axia80", "  0x08    4     fz             Force Z (counts, int32_t)");
+    TETHER_LOGI("Axia80", "  0x0C    4     tx             Torque X (counts, int32_t)");
+    TETHER_LOGI("Axia80", "  0x10    4     ty             Torque Y (counts, int32_t)");
+    TETHER_LOGI("Axia80", "  0x14    4     tz             Torque Z (counts, int32_t)");
+    TETHER_LOGI("Axia80", "  0x18    4     status         Status code (0x6010, uint32_t)");
+    TETHER_LOGI("Axia80", "  0x1C    4     counter        Sample counter (0x6020, uint32_t)");
+    TETHER_LOGI("Axia80", "");
+    TETHER_LOGI("Axia80", "RxPDO (0x1601) — Master → Slave, %u bytes:", Axia80_pdo::RxPDO_1601.size);
+    TETHER_LOGI("Axia80", "  Offset  Size  Field          Description");
+    TETHER_LOGI("Axia80", "  ------  ----  -------------  ----------------------------------------");
+    TETHER_LOGI("Axia80", "  0x00    4     control1       Control register 1 (0x7010.1, uint32_t)");
+    TETHER_LOGI("Axia80", "  0x04    4     control2       Control register 2 (0x7010.2, uint32_t)");
+    TETHER_LOGI("Axia80", "");
+    TETHER_LOGI("Axia80", "control1 bit fields:");
+    TETHER_LOGI("Axia80", "  Bit 0:   BIAS (set to tare)");
+    TETHER_LOGI("Axia80", "  Bit 1:   CLEAR_BIAS");
+    TETHER_LOGI("Axia80", "  Bits 2-4: FILTER (0=none, 1..7=filter levels)");
+    TETHER_LOGI("Axia80", "  Bits 5-6: CALIBRATION_SLOT (0..3)");
+    TETHER_LOGI("Axia80", "  Bits 7-10: SAMPLE_RATE (0=780Hz, 1=1563Hz, 2=3125Hz, 3=6250Hz, 4=12500Hz)");
+    TETHER_LOGI("Axia80", "========================");
+}
+
+inline void Axia80Sensor::printTxPDOData() const
+{
+    const auto* tx = txPDO();
+    if (!tx) return;
+    TETHER_LOGI("Axia80", "[TxPDO-DEBUG] Axia80 TxPDO (0x1A00) contents:");
+    TETHER_LOGI("Axia80", "  fx=%ld  fy=%ld  fz=%ld  tx=%ld  ty=%ld  tz=%ld",
+                static_cast<long>(tx->fx), static_cast<long>(tx->fy),
+                static_cast<long>(tx->fz), static_cast<long>(tx->tx),
+                static_cast<long>(tx->ty), static_cast<long>(tx->tz));
+    TETHER_LOGI("Axia80", "  status=0x%08X  counter=%u", tx->status, tx->counter);
+}
+
+inline void Axia80Sensor::printRxPDOData() const
+{
+    const auto* rx = rxPDO();
+    if (!rx) return;
+    TETHER_LOGI("Axia80", "[RxPDO-DEBUG] Axia80 RxPDO (0x1601) contents:");
+    TETHER_LOGI("Axia80", "  control1=0x%08X  control2=0x%08X", rx->control1, rx->control2);
+    TETHER_LOGI("Axia80", "  control1 breakdown:");
+    TETHER_LOGI("Axia80", "    BIAS=%s  CLEAR_BIAS=%s  FILTER=%u  SLOT=%u  RATE=%u",
+                (rx->control1 & Axia80::CTRL_BIAS_BIT) ? "1" : "0",
+                (rx->control1 & Axia80::CTRL_CLEAR_BIAS_BIT) ? "1" : "0",
+                (rx->control1 & Axia80::CTRL_FILTER_MASK) >> Axia80::CTRL_FILTER_SHIFT,
+                (rx->control1 & Axia80::CTRL_CALIBRATION_MASK) >> Axia80::CTRL_CALIBRATION_SHIFT,
+                (rx->control1 & Axia80::CTRL_SAMPLE_RATE_MASK) >> Axia80::CTRL_SAMPLE_RATE_SHIFT);
 }
 
 } // namespace Sensors

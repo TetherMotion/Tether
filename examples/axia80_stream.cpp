@@ -450,6 +450,14 @@ int main(int argc, char** argv) {
             continue;
         }
 
+        // Print PDO data if debug flags are enabled
+        if (debug_flags.count("rx-pdo")) {
+            sensor.printRxPDOData();
+        }
+        if (debug_flags.count("tx-pdo")) {
+            sensor.printTxPDOData();
+        }
+
         auto* tx = sensor.txPDO();
         if (!tx) continue;
 

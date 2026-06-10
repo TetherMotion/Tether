@@ -15,6 +15,10 @@
 #include <cstdio>
 #include <cstring>
 
+// Global PDO debug flags (defined in PDOManager.cpp, global namespace)
+extern bool g_debug_rx_pdo;
+extern bool g_debug_tx_pdo;
+
 namespace EtherCAT {
 
 static const char* TAG = "EtherCATSlave";
@@ -37,10 +41,6 @@ void enableTxPacketDebug(bool enable) {
 void enableRxPacketDebug(bool enable) {
     g_debug_rx_packets = enable;
 }
-
-// Global debug flags for PDO logging (defined in PDOManager.cpp)
-extern bool g_debug_rx_pdo;
-extern bool g_debug_tx_pdo;
 
 void enableRxPDODebug(bool enable) {
     g_debug_rx_pdo = enable;
