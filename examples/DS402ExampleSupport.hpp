@@ -127,6 +127,10 @@ inline bool configureAndEnableSingleDrive(EtherCAT::DS402Master& master,
                                           const SingleDriveExampleConfig& config,
                                           const char* tag)
 {
+    if (!master.ethercatMaster().discoverSlaves()) {
+        TETHER_LOGW(tag, "No slaves discovered");
+    }
+
     const uint16_t minimum_drive_count = static_cast<uint16_t>(config.drive.slave_index + 1);
     if (!master.waitForDriveCount(minimum_drive_count, config.discovery_timeout_ms)) {
         TETHER_LOGE(tag, "Timed out waiting for %u drive(s)", minimum_drive_count);

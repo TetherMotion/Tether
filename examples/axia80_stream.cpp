@@ -9,21 +9,28 @@
  *   ./axia80_stream              # uses eth0, streams engineering units
  *   ./axia80_stream -i enp3s0  # specify interface
  *   ./axia80_stream --raw      # stream raw sensor counts
+ *   ./axia80_stream --dc off   # disable DC/Sync0
  */
 
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <csignal>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <mutex>
+#include <queue>
 #include <thread>
 
 #include "tether/ethercat/EtherCATMaster.hpp"
 #include "tether/ethercat/EtherCATTypes.hpp"
+#include "tether/ethercat/DC/Utils.hpp"
 #include "tether/ethercat/VLANRouter.hpp"
+#include "tether/ethercat/ESIParser.hpp"
+#include "tether/ethercat/SyncManager.hpp"
 #include "tether/hal/IEthernet.hpp"
 #include "tether/platform/Platform.hpp"
 #include "tether/sensors/Axia80.hpp"
@@ -38,11 +45,14 @@ namespace Raw {
     void set_network_interface(const ::EtherCAT::NetworkInterface* iface);
     const ::EtherCAT::NetworkInterface* network_interface();
     void set_src_mac(const uint8_t src_mac[6]);
+#ifdef UNIT_TEST_HOST
+    extern std::atomic<bool>* g_sdo_cancel_flag;
+#endif
 }
 }
 
 static const char* TAG = "axia80_stream";
-static std::atomic<bool> g_running{true};
+std::atomic<bool> g_running{true};
 
 void signalHandler(int) {
     g_running.store(false);
@@ -56,6 +66,312 @@ extern "C" void axia80_stream_main(const EtherCAT::NetworkInterface* iface,
 }
 
 #else // UNIT_TEST_HOST — host/Linux build
+
+// ============================================================================
+// ESI Verification Helpers
+// ============================================================================
+
+namespace ESI = EtherCAT::ESI;
+namespace Axia80 = EtherCAT::Sensors::Axia80;
+namespace Axia80_pdo = EtherCAT::Sensors::Axia80_pdo;
+
+static void logMismatch(const char* field, uint32_t expected, uint32_t actual) {
+    TETHER_LOGW(TAG, "ESI mismatch: %s expected=0x%08X actual=0x%08X", field, expected, actual);
+}
+
+static void logMismatch(const char* field, uint16_t expected, uint16_t actual) {
+    TETHER_LOGW(TAG, "ESI mismatch: %s expected=0x%04X actual=0x%04X", field, expected, actual);
+}
+
+static void logMismatch(const char* field, uint8_t expected, uint8_t actual) {
+    TETHER_LOGW(TAG, "ESI mismatch: %s expected=0x%02X actual=0x%02X", field, expected, actual);
+}
+
+static void logMismatch(const char* field, int expected, int actual) {
+    TETHER_LOGW(TAG, "ESI mismatch: %s expected=%d actual=%d", field, expected, actual);
+}
+
+static void logMismatchStr(const char* field, const char* expected, const char* actual) {
+    TETHER_LOGW(TAG, "ESI mismatch: %s expected='%s' actual='%s'", field, expected, actual);
+}
+
+// ---- Phase 1: Verify intended (hardcoded) settings against ESI ----
+
+static void verifyIntendedAgainstESI(const ESI::DeviceInfo& esi) {
+    TETHER_LOGI(TAG, "=== ESI Intended-Settings Verification ===");
+
+    // Identity
+    if (esi.vendorId != 0 && esi.vendorId != Axia80::kVendorId) {
+        logMismatch("VendorId", esi.vendorId, Axia80::kVendorId);
+    }
+    if (esi.productCode != 0 && esi.productCode != Axia80::kProductCode) {
+        logMismatch("ProductCode", esi.productCode, Axia80::kProductCode);
+    }
+
+    // Mailbox timeouts
+    if (esi.mailbox_request_timeout_ms.has_value()) {
+        TETHER_LOGI(TAG, "ESI Mailbox RequestTimeout=%u ms", *esi.mailbox_request_timeout_ms);
+    }
+    if (esi.mailbox_response_timeout_ms.has_value()) {
+        TETHER_LOGI(TAG, "ESI Mailbox ResponseTimeout=%u ms", *esi.mailbox_response_timeout_ms);
+    }
+
+    // Sync Managers
+    for (size_t i = 0; i < esi.syncManagers.size() && i < 4; ++i) {
+        const auto& sm = esi.syncManagers[i];
+        TETHER_LOGI(TAG, "ESI SM%zu: addr=0x%04X len=%u ctrl=0x%02X enable=%u name=%s",
+                    i, sm.startAddress, sm.defaultSize, sm.control, sm.enable, sm.name.c_str());
+    }
+
+    // FMMUs
+    if (!esi.fmmus.empty()) {
+        std::string fmmu_names;
+        for (const auto& f : esi.fmmus) {
+            if (!fmmu_names.empty()) fmmu_names += ", ";
+            fmmu_names += f;
+        }
+        TETHER_LOGI(TAG, "ESI FMMUs (%zu): %s", esi.fmmus.size(), fmmu_names.c_str());
+    }
+
+    // Mailbox protocols
+    if (esi.mailbox.protocols.has_value()) {
+        TETHER_LOGI(TAG, "ESI Mailbox Protocols=0x%04X", *esi.mailbox.protocols);
+    }
+
+    // RxPDO intended check
+    bool found_rxpdo = false;
+    for (const auto& pdo : esi.rxPdos) {
+        if (pdo.index == Axia80_pdo::RxPDO_1601.index) {
+            found_rxpdo = true;
+            if (!pdo.fixed) {
+                TETHER_LOGW(TAG, "ESI RxPDO 0x%04X fixed=false (code expects true)", pdo.index);
+            }
+            if (pdo.sm != 2) {
+                logMismatch("RxPDO SM", 2, pdo.sm);
+            }
+            size_t expected_entries = 2; // control1, control2
+            if (pdo.entries.size() != expected_entries) {
+                logMismatch("RxPDO entry count", static_cast<int>(expected_entries), static_cast<int>(pdo.entries.size()));
+            }
+            break;
+        }
+    }
+    if (!found_rxpdo) {
+        TETHER_LOGW(TAG, "ESI does not contain RxPDO 0x%04X", Axia80_pdo::RxPDO_1601.index);
+    }
+
+    // TxPDO intended check
+    bool found_txpdo = false;
+    for (const auto& pdo : esi.txPdos) {
+        if (pdo.index == Axia80_pdo::TxPDO_1A00.index) {
+            found_txpdo = true;
+            if (!pdo.fixed) {
+                TETHER_LOGW(TAG, "ESI TxPDO 0x%04X fixed=false (code expects true)", pdo.index);
+            }
+            if (pdo.sm != 3) {
+                logMismatch("TxPDO SM", 3, pdo.sm);
+            }
+            size_t expected_entries = 8; // fx, fy, fz, tx, ty, tz, status, counter
+            if (pdo.entries.size() != expected_entries) {
+                logMismatch("TxPDO entry count", static_cast<int>(expected_entries), static_cast<int>(pdo.entries.size()));
+            }
+            break;
+        }
+    }
+    if (!found_txpdo) {
+        TETHER_LOGW(TAG, "ESI does not contain TxPDO 0x%04X", Axia80_pdo::TxPDO_1A00.index);
+    }
+
+    // Verify RxPDO entry details against hardcoded struct layout
+    for (const auto& pdo : esi.rxPdos) {
+        if (pdo.index != Axia80_pdo::RxPDO_1601.index) continue;
+        const struct EntryCheck { uint16_t index; uint8_t sub; uint16_t bits; const char* name; } expected[] = {
+            { Axia80::OD_CONTROL_CODES, 1, 32, "Control 1" },
+            { Axia80::OD_CONTROL_CODES, 2, 32, "Control 2" },
+        };
+        for (size_t i = 0; i < pdo.entries.size() && i < 2; ++i) {
+            const auto& e = pdo.entries[i];
+            if (e.index != expected[i].index) logMismatch("RxPDO entry index", expected[i].index, e.index);
+            if (e.subindex != expected[i].sub) logMismatch("RxPDO entry subindex", expected[i].sub, e.subindex);
+            if (e.bitLen != expected[i].bits) logMismatch("RxPDO entry bits", expected[i].bits, e.bitLen);
+        }
+    }
+
+    // Verify TxPDO entry details against hardcoded struct layout
+    for (const auto& pdo : esi.txPdos) {
+        if (pdo.index != Axia80_pdo::TxPDO_1A00.index) continue;
+        const struct EntryCheck { uint16_t index; uint8_t sub; uint16_t bits; const char* name; } expected[] = {
+            { Axia80::OD_READING_DATA, 1, 32, "Fx" },
+            { Axia80::OD_READING_DATA, 2, 32, "Fy" },
+            { Axia80::OD_READING_DATA, 3, 32, "Fz" },
+            { Axia80::OD_READING_DATA, 4, 32, "Tx" },
+            { Axia80::OD_READING_DATA, 5, 32, "Ty" },
+            { Axia80::OD_READING_DATA, 6, 32, "Tz" },
+            { Axia80::OD_STATUS_CODE, 0, 32, "Status Code" },
+            { Axia80::OD_SAMPLE_COUNTER, 0, 32, "Sample Counter" },
+        };
+        for (size_t i = 0; i < pdo.entries.size() && i < 8; ++i) {
+            const auto& e = pdo.entries[i];
+            if (e.index != expected[i].index) logMismatch("TxPDO entry index", expected[i].index, e.index);
+            if (e.subindex != expected[i].sub) logMismatch("TxPDO entry subindex", expected[i].sub, e.subindex);
+            if (e.bitLen != expected[i].bits) logMismatch("TxPDO entry bits", expected[i].bits, e.bitLen);
+        }
+    }
+
+    TETHER_LOGI(TAG, "=== End Intended-Settings Verification ===");
+}
+
+// ---- Phase 2: Read back actual slave registers and compare against ESI ----
+
+static void verifyReadbackAgainstESI(const ESI::DeviceInfo& esi,
+                                        EtherCAT::EtherCATMaster& master,
+                                        EtherCAT::Sensors::Axia80Sensor& sensor,
+                                        uint16_t slave_index)
+{
+    TETHER_LOGI(TAG, "=== ESI Readback Verification ===");
+
+    auto& sl = sensor.slave();
+
+    // 1. Identity (SII)
+    EtherCAT::SII::SIIIdentity id;
+    if (EtherCAT::SII::readSIIIdentity(master, slave_index, id)) {
+        if (esi.vendorId != 0 && id.vendor_id != esi.vendorId) {
+            logMismatch("Readback VendorId", esi.vendorId, id.vendor_id);
+        }
+        if (esi.productCode != 0 && id.product_code != esi.productCode) {
+            logMismatch("Readback ProductCode", esi.productCode, id.product_code);
+        }
+        if (esi.revision != 0 && id.revision_number != esi.revision) {
+            logMismatch("Readback Revision", esi.revision, id.revision_number);
+        }
+    } else {
+        TETHER_LOGW(TAG, "Readback: failed to read SII identity");
+    }
+
+    // 2. Sync Manager hardware registers (SM0..SM3)
+    for (uint8_t smIdx = 0; smIdx < 4 && smIdx < esi.syncManagers.size(); ++smIdx) {
+        auto hw = sl.sm(smIdx).readHardwareConfig();
+        if (!hw.read_ok) {
+            TETHER_LOGW(TAG, "Readback SM%u: failed to read hardware config", smIdx);
+            continue;
+        }
+        const auto& expected = esi.syncManagers[smIdx];
+        if (hw.start_addr != expected.startAddress) {
+            logMismatch("SM start_addr", expected.startAddress, hw.start_addr);
+        }
+        if (hw.length != expected.defaultSize) {
+            logMismatch("SM length", expected.defaultSize, hw.length);
+        }
+        if (hw.control != expected.control) {
+            logMismatch("SM control", expected.control, hw.control);
+        }
+        bool expected_enable = (expected.enable != 0);
+        if (hw.isEnabled() != expected_enable) {
+            TETHER_LOGW(TAG, "SM%u enable mismatch: expected=%s actual=%s",
+                        smIdx, expected_enable ? "yes" : "no", hw.isEnabled() ? "yes" : "no");
+        }
+    }
+
+    // 3. PDO Assignments via SDO (0x1C12 = SM2, 0x1C13 = SM3)
+    for (int smAssign = 2; smAssign <= 3; ++smAssign) {
+        uint16_t assignIndex = EtherCAT::SyncManager::pdoAssignIndex(smAssign);
+        uint8_t count = 0;
+        if (sl.sdoReadU8(assignIndex, 0, count) == EtherCAT::SlaveError::Ok) {
+            uint16_t expectedCount = 1;
+            if (count != expectedCount) {
+                logMismatch("PDO assign count", expectedCount, static_cast<uint16_t>(count));
+            }
+            uint16_t assignedPdo = 0;
+            if (sl.sdoReadU16(assignIndex, 1, assignedPdo) == EtherCAT::SlaveError::Ok) {
+                uint16_t expectedPdo = (smAssign == 2) ? Axia80_pdo::RxPDO_1601.index : Axia80_pdo::TxPDO_1A00.index;
+                if (assignedPdo != expectedPdo) {
+                    logMismatch("Assigned PDO index", expectedPdo, assignedPdo);
+                }
+            }
+        } else {
+            TETHER_LOGW(TAG, "Readback: failed to read PDO assignment 0x%04X", assignIndex);
+        }
+    }
+
+    // 4. PDO Mapping entries via SDO
+    // RxPDO mapping (0x1601)
+    {
+        uint8_t mapCount = 0;
+        if (sl.sdoReadU8(Axia80_pdo::RxPDO_1601.index, 0, mapCount) == EtherCAT::SlaveError::Ok) {
+            const auto& expectedPdo = [&]() -> const ESI::PDO* {
+                for (const auto& p : esi.rxPdos) {
+                    if (p.index == Axia80_pdo::RxPDO_1601.index) return &p;
+                }
+                return nullptr;
+            }();
+            if (expectedPdo && mapCount != expectedPdo->entries.size()) {
+                logMismatch("RxPDO map count", static_cast<uint16_t>(expectedPdo->entries.size()), static_cast<uint16_t>(mapCount));
+            }
+            for (uint8_t i = 1; i <= mapCount; ++i) {
+                uint32_t entry = 0;
+                if (sl.sdoReadU32(Axia80_pdo::RxPDO_1601.index, i, entry) == EtherCAT::SlaveError::Ok) {
+                    uint16_t idx = EtherCAT::SyncManager::mappingIndex(entry);
+                    uint8_t  sub = EtherCAT::SyncManager::mappingSubindex(entry);
+                    uint8_t  bits = EtherCAT::SyncManager::mappingBits(entry);
+                    if (expectedPdo && (i - 1) < expectedPdo->entries.size()) {
+                        const auto& e = expectedPdo->entries[i - 1];
+                        if (idx != e.index) logMismatch("RxPDO map index", e.index, idx);
+                        if (sub != e.subindex) logMismatch("RxPDO map subindex", e.subindex, sub);
+                        if (bits != e.bitLen) logMismatch("RxPDO map bits", e.bitLen, static_cast<uint16_t>(bits));
+                    }
+                }
+            }
+        } else {
+            TETHER_LOGW(TAG, "Readback: failed to read RxPDO mapping 0x%04X", Axia80_pdo::RxPDO_1601.index);
+        }
+    }
+
+    // TxPDO mapping (0x1A00)
+    {
+        uint8_t mapCount = 0;
+        if (sl.sdoReadU8(Axia80_pdo::TxPDO_1A00.index, 0, mapCount) == EtherCAT::SlaveError::Ok) {
+            const auto& expectedPdo = [&]() -> const ESI::PDO* {
+                for (const auto& p : esi.txPdos) {
+                    if (p.index == Axia80_pdo::TxPDO_1A00.index) return &p;
+                }
+                return nullptr;
+            }();
+            if (expectedPdo && mapCount != expectedPdo->entries.size()) {
+                logMismatch("TxPDO map count", static_cast<uint16_t>(expectedPdo->entries.size()), static_cast<uint16_t>(mapCount));
+            }
+            for (uint8_t i = 1; i <= mapCount; ++i) {
+                uint32_t entry = 0;
+                if (sl.sdoReadU32(Axia80_pdo::TxPDO_1A00.index, i, entry) == EtherCAT::SlaveError::Ok) {
+                    uint16_t idx = EtherCAT::SyncManager::mappingIndex(entry);
+                    uint8_t  sub = EtherCAT::SyncManager::mappingSubindex(entry);
+                    uint8_t  bits = EtherCAT::SyncManager::mappingBits(entry);
+                    if (expectedPdo && (i - 1) < expectedPdo->entries.size()) {
+                        const auto& e = expectedPdo->entries[i - 1];
+                        if (idx != e.index) logMismatch("TxPDO map index", e.index, idx);
+                        if (sub != e.subindex) logMismatch("TxPDO map subindex", e.subindex, sub);
+                        if (bits != e.bitLen) logMismatch("TxPDO map bits", e.bitLen, static_cast<uint16_t>(bits));
+                    }
+                }
+            }
+        } else {
+            TETHER_LOGW(TAG, "Readback: failed to read TxPDO mapping 0x%04X", Axia80_pdo::TxPDO_1A00.index);
+        }
+    }
+
+    TETHER_LOGI(TAG, "=== End Readback Verification ===");
+}
+
+// ---- Realtime data queue ---------------------------------------------------
+
+struct SensorFrame {
+    double fx, fy, fz, tx_val, ty, tz;
+    uint32_t status;
+    uint32_t counter;
+};
+
+static std::queue<SensorFrame> data_queue;
+static std::mutex queue_mtx;
+static std::condition_variable queue_cv;
 
 int main(int argc, char** argv) {
     // ---- Argument parsing ----
@@ -84,6 +400,12 @@ int main(int argc, char** argv) {
     program.add_argument("--tx-vlan")
         .default_value(std::string(""))
         .help("TX VLAN encapsulation: single VID (e.g. 100)");
+    program.add_argument("--dc")
+        .default_value(std::string("on"))
+        .help("DC/Sync0 distributed clocks: 'on' or 'off' (default: on)");
+    program.add_argument("--esi-xml")
+        .default_value(std::string(""))
+        .help("Path to ESI XML file for register verification");
 
     try { program.parse_args(argc, argv); }
     catch (const std::runtime_error& err) {
@@ -98,6 +420,9 @@ int main(int argc, char** argv) {
     std::string debug_str = program.get<std::string>("--debug");
     std::string rx_vlan_str = program.get<std::string>("--rx-vlan");
     std::string tx_vlan_str = program.get<std::string>("--tx-vlan");
+    std::string dc_str = program.get<std::string>("--dc");
+    bool dc_enabled = (dc_str == "on" || dc_str == "true" || dc_str == "1");
+    std::string esi_xml_path = program.get<std::string>("--esi-xml");
 
     // Known debug flags
     const std::set<std::string> known_debug_flags = {
@@ -107,7 +432,8 @@ int main(int argc, char** argv) {
         "tx-ethercat-packets",
         "rx-ethercat-packets",
         "rx-pdo",
-        "tx-pdo"
+        "tx-pdo",
+        "dc"
     };
 
     // Parse debug flags
@@ -244,9 +570,31 @@ int main(int argc, char** argv) {
         }
     }
 
+    // ---- Parse and verify against ESI XML (intended settings) ----
+    std::optional<ESI::DeviceInfo> esi_device;
+    if (!esi_xml_path.empty()) {
+        std::vector<ESI::DeviceInfo> devices;
+        std::string err;
+        if (ESI::parseESIFile(esi_xml_path, devices, err)) {
+            if (!devices.empty()) {
+                esi_device = devices[0];
+                TETHER_LOGI(TAG, "Parsed ESI XML: %s", esi_xml_path.c_str());
+                verifyIntendedAgainstESI(*esi_device);
+            } else {
+                TETHER_LOGW(TAG, "ESI XML parsed but no devices found: %s", esi_xml_path.c_str());
+            }
+        } else {
+            TETHER_LOGW(TAG, "Failed to parse ESI XML '%s': %s", esi_xml_path.c_str(), err.c_str());
+        }
+    }
+
     // ---- Install signal handler ----
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
+
+#ifdef UNIT_TEST_HOST
+    EtherCAT::Raw::g_sdo_cancel_flag = &g_running;
+#endif
 
     // ---- Open raw socket ----
     auto eth = EtherCAT::HAL::createDefaultEthernet();
@@ -331,12 +679,11 @@ int main(int argc, char** argv) {
     }
 
     // ---- Poll thread ----
-    std::atomic<bool> poll_running{true};
     std::thread poll_thread([&]() {
         if (!Tether::Platform::setCurrentThreadRealtime(-1)) {
             TETHER_LOGW(TAG, "poll_thread: could not set realtime scheduling");
         }
-        while (poll_running.load()) { eth->poll(1); }
+        while (g_running.load()) { eth->poll(1); }
     });
 
     // ---- Start master ----
@@ -353,25 +700,24 @@ int main(int argc, char** argv) {
         master.start(*EtherCAT::Raw::network_interface(), src_mac);
     }
 
-    // ---- Wait for discovery ----
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    uint16_t slaves = master.getDiscoveredSlaveCount();
-    if (slaves == 0) {
+    // ---- Discover slaves ----
+    if (!master.discoverSlaves()) {
         TETHER_LOGE(TAG, "No slaves found — check wiring and power");
         master.stop();
-        poll_running.store(false);
+        g_running.store(false);
         poll_thread.join();
         eth->shutdown();
         return 4;
     }
 
+    uint16_t slaves = master.getDiscoveredSlaveCount();
     TETHER_LOGI(TAG, "Discovered %u slave(s)", slaves);
     master.logDiscoveredSlavesSummary(TAG);
 
     if (static_cast<uint16_t>(slave_idx) >= slaves) {
         TETHER_LOGE(TAG, "Slave index %d out of range (max %u)", slave_idx, slaves - 1);
         master.stop();
-        poll_running.store(false);
+        g_running.store(false);
         poll_thread.join();
         eth->shutdown();
         return 5;
@@ -387,10 +733,15 @@ int main(int argc, char** argv) {
     if (!sensor.init(Tether::Platform::LogLevel::Info)) {
         TETHER_LOGE(TAG, "Failed to initialise Axia80 sensor");
         master.stop();
-        poll_running.store(false);
+        g_running.store(false);
         poll_thread.join();
         eth->shutdown();
         return 7;
+    }
+
+    // ---- Readback verification against ESI XML ----
+    if (esi_device.has_value()) {
+        verifyReadbackAgainstESI(*esi_device, master, sensor, static_cast<uint16_t>(slave_idx));
     }
 
     // ---- Read calibration data via SDO ----
@@ -428,7 +779,59 @@ int main(int argc, char** argv) {
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    // ---- Stream data ----
+    // ---- Set up RT motion loop callback ----
+    master.setMotionControlCallback(
+        [&master, &sensor, &cal, have_cal, raw_mode](double /*dt_seconds*/) -> bool {
+            if (!master.pdo().exchangeAll()) {
+                return true; // keep loop running even on transient errors
+            }
+
+            auto* tx = sensor.txPDO();
+            if (!tx) return true;
+
+            double fx = 0, fy = 0, fz = 0, tx_val = 0, ty = 0, tz = 0;
+
+            if (raw_mode || !have_cal || cal.counts_per_force == 0 || cal.counts_per_torque == 0) {
+                fx = static_cast<double>(tx->fx);
+                fy = static_cast<double>(tx->fy);
+                fz = static_cast<double>(tx->fz);
+                tx_val = static_cast<double>(tx->tx);
+                ty = static_cast<double>(tx->ty);
+                tz = static_cast<double>(tx->tz);
+            } else {
+                int32_t raw[6] = { tx->fx, tx->fy, tx->fz, tx->tx, tx->ty, tx->tz };
+                double out[6] = {};
+                EtherCAT::Sensors::Axia80Sensor::convertWrench(
+                    raw, out, cal.counts_per_force, cal.counts_per_torque);
+                fx = out[0]; fy = out[1]; fz = out[2];
+                tx_val = out[3]; ty = out[4]; tz = out[5];
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(queue_mtx);
+                data_queue.push({fx, fy, fz, tx_val, ty, tz, tx->status, tx->counter});
+            }
+            queue_cv.notify_one();
+            return true;
+        });
+
+    EtherCAT::EtherCATMaster::RealtimeMotionLoopConfig loop_config;
+    loop_config.cycle_period_us = 1000;          // 1 kHz
+    loop_config.sync_interval_cycles = 10;
+    loop_config.enable_dc_synchronization = false; // Axia80 does not use DC
+
+    if (!master.startRealtimeMotionControlLoop(loop_config)) {
+        TETHER_LOGE(TAG, "Failed to start realtime motion loop");
+        master.stop();
+        g_running.store(false);
+        poll_thread.join();
+        eth->shutdown();
+        return 8;
+    }
+
+    // ---- Consumer thread: print from queue ----
+    std::atomic<uint64_t> cycle_count{0};
+
     TETHER_LOGI(TAG, "Streaming %s data... Press Ctrl-C to stop",
                 raw_mode ? "raw" : "engineering-unit");
 
@@ -436,73 +839,60 @@ int main(int argc, char** argv) {
     std::cout << "      Fx        Fy        Fz        Tx        Ty        Tz    Status   Counter\n";
     std::cout << "-------------------------------------------------------------------------------\n";
 
-    auto start_time = std::chrono::steady_clock::now();
-    auto end_time = start_time + std::chrono::seconds(static_cast<int>(duration_sec));
-    uint64_t cycle_count = 0;
+    std::thread consumer_thread([&]() {
+        auto start_time = std::chrono::steady_clock::now();
+        auto end_time = start_time + std::chrono::seconds(static_cast<int>(duration_sec));
 
+        while (g_running.load()) {
+            if (duration_sec > 0 && std::chrono::steady_clock::now() >= end_time) {
+                g_running.store(false);
+                break;
+            }
+
+            std::unique_lock<std::mutex> lock(queue_mtx);
+            if (!queue_cv.wait_for(lock, std::chrono::milliseconds(100),
+                                   []() { return !data_queue.empty() || !g_running.load(); })) {
+                continue;
+            }
+            if (data_queue.empty()) continue;
+
+            auto frame = data_queue.front();
+            data_queue.pop();
+            lock.unlock();
+
+            std::cout << std::setw(10) << frame.fx
+                      << std::setw(10) << frame.fy
+                      << std::setw(10) << frame.fz
+                      << std::setw(10) << frame.tx_val
+                      << std::setw(10) << frame.ty
+                      << std::setw(10) << frame.tz
+                      << "  0x" << std::hex << std::setw(8) << std::setfill('0') << frame.status
+                      << std::dec << std::setfill(' ')
+                      << std::setw(10) << frame.counter
+                      << "\n";
+
+            if (EtherCAT::Sensors::Axia80Sensor::hasError(frame.status)) {
+                std::cout << "  [ERROR] status=0x" << std::hex << frame.status << std::dec << "\n";
+            }
+
+            cycle_count++;
+        }
+    });
+
+    // Wait for Ctrl-C or timeout
     while (g_running.load()) {
-        if (duration_sec > 0 && std::chrono::steady_clock::now() >= end_time) {
-            break;
-        }
-
-        if (!master.pdo().exchangeAll()) {
-            TETHER_LOGW(TAG, "PDO exchange failed");
-            continue;
-        }
-
-        // Print PDO data if debug flags are enabled
-        if (debug_flags.count("rx-pdo")) {
-            sensor.printRxPDOData();
-        }
-        if (debug_flags.count("tx-pdo")) {
-            sensor.printTxPDOData();
-        }
-
-        auto* tx = sensor.txPDO();
-        if (!tx) continue;
-
-        double fx = 0, fy = 0, fz = 0, tx_val = 0, ty = 0, tz = 0;
-
-        if (raw_mode || !have_cal || cal.counts_per_force == 0 || cal.counts_per_torque == 0) {
-            fx = static_cast<double>(tx->fx);
-            fy = static_cast<double>(tx->fy);
-            fz = static_cast<double>(tx->fz);
-            tx_val = static_cast<double>(tx->tx);
-            ty = static_cast<double>(tx->ty);
-            tz = static_cast<double>(tx->tz);
-        } else {
-            int32_t raw[6] = { tx->fx, tx->fy, tx->fz, tx->tx, tx->ty, tx->tz };
-            double out[6] = {};
-            EtherCAT::Sensors::Axia80Sensor::convertWrench(
-                raw, out, cal.counts_per_force, cal.counts_per_torque);
-            fx = out[0]; fy = out[1]; fz = out[2];
-            tx_val = out[3]; ty = out[4]; tz = out[5];
-        }
-
-        std::cout << std::setw(10) << fx
-                  << std::setw(10) << fy
-                  << std::setw(10) << fz
-                  << std::setw(10) << tx_val
-                  << std::setw(10) << ty
-                  << std::setw(10) << tz
-                  << "  0x" << std::hex << std::setw(8) << std::setfill('0') << tx->status
-                  << std::dec << std::setfill(' ')
-                  << std::setw(10) << tx->counter
-                  << "\n";
-
-        if (EtherCAT::Sensors::Axia80Sensor::hasError(tx->status)) {
-            std::cout << "  [ERROR] status=0x" << std::hex << tx->status << std::dec << "\n";
-        }
-
-        ++cycle_count;
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
-    TETHER_LOGI(TAG, "Streamed %lu cycles", cycle_count);
+    queue_cv.notify_all();
+    consumer_thread.join();
+
+    TETHER_LOGI(TAG, "Streamed %lu cycles", cycle_count.load());
 
     // ---- Cleanup ----
+    master.stopMotionControlLoop();
     master.stop();
-    poll_running.store(false);
+    g_running.store(false);
     poll_thread.join();
     eth->shutdown();
 

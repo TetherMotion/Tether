@@ -223,7 +223,9 @@ extern "C" void as715n_check_error_code_main(const EtherCAT::NetworkInterface* i
     if (!iface || !src_mac) { TETHER_LOGE(TAG, "No network interface registered"); return; }
     master.start(*iface, src_mac);
 
-    vTaskDelay(pdMS_TO_TICKS(500));
+    if (!master.discoverSlaves()) {
+        TETHER_LOGW(TAG, "No slaves discovered");
+    }
 
     // Do not attempt reset by default in embedded entry
     int rc = inspectAndMaybeReset(master, false, false);
@@ -324,8 +326,9 @@ int main(int argc, char** argv) {
 
     master.start(*EtherCAT::Raw::network_interface(), src_mac);
 
-    // Allow discovery
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    if (!master.discoverSlaves()) {
+        TETHER_LOGW(TAG, "No slaves discovered");
+    }
 
     uint16_t slaves = master.getDiscoveredSlaveCount();
     TETHER_LOGI(TAG, "Discovered %u slave(s)", slaves);

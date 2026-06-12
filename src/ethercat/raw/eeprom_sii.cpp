@@ -171,7 +171,21 @@ bool configure_mailbox_from_sii(
 
     // Try to read SII mailbox configuration
     EtherCAT::SII::SIIMailboxConfig mailbox;
-    bool sii_ok = EtherCAT::SII::readSIIMailbox(master, slave_index, mailbox);
+    EtherCAT::SII::SIIReader sii_reader(master);
+    EtherCAT::SII::SIIParser sii_parser(sii_reader);
+    EtherCAT::SII::SIIData sii_data;
+    bool sii_ok = sii_parser.parseIdentity(slave_index, sii_data);
+    if (sii_ok) {
+        mailbox = sii_data.mailbox;
+    }
+    if (!sii_ok) {
+        const char* err = sii_parser.lastError();
+        if (err && err[0]) {
+            TETHER_LOGW(TAG, "Slave %u: SII mailbox read failed: %s — using defaults", slave_index, err);
+        } else {
+            TETHER_LOGW(TAG, "Slave %u: SII mailbox read failed — using defaults", slave_index);
+        }
+    }
     
     // Determine if we have valid mailbox data
     bool valid_mailbox = sii_ok && mailbox.hasMailbox();

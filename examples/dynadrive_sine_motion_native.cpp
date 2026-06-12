@@ -114,6 +114,10 @@ int runSineMotion(EtherCAT::DS402Master& master, double duration_seconds)
 
 bool configureDrive(EtherCAT::DS402Master& master)
 {
+    if (!master.ethercatMaster().discoverSlaves()) {
+        TETHER_LOGW(TAG, "No slaves discovered");
+    }
+
     const uint16_t minimum_drive_count = static_cast<uint16_t>(kSlaveIndex + 1);
     if (!master.waitForDriveCount(minimum_drive_count, 2000)) {
         TETHER_LOGE(TAG, "Timed out waiting for %u drive(s)", minimum_drive_count);

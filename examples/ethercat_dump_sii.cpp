@@ -57,7 +57,10 @@ extern "C" void ethercat_dump_sii_main(const EtherCAT::NetworkInterface* iface,
     if (!iface || !src_mac) { TETHER_LOGE(TAG, "No network interface registered"); return; }
     master.start(*iface, src_mac);
 
-    vTaskDelay(pdMS_TO_TICKS(500));
+    if (!master.discoverSlaves()) {
+        TETHER_LOGW(TAG, "No slaves discovered");
+        return;
+    }
 
     (void)dumpSiiForSlave(master, 0);
 }
@@ -148,7 +151,9 @@ int main(int argc, char** argv) {
 
     master.start(*EtherCAT::Raw::network_interface(), src_mac);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    if (!master.discoverSlaves()) {
+        TETHER_LOGW(TAG, "No slaves discovered");
+    }
 
     uint16_t slaves = master.getDiscoveredSlaveCount();
     TETHER_LOGI(TAG, "Discovered %u slave(s)", slaves);

@@ -31,7 +31,6 @@
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <thread>
 #include <type_traits>
 #include <vector>
 #include <unordered_set>
@@ -219,6 +218,13 @@ public:
     // ---- Discovery ---------------------------------------------------------
 
     uint16_t getDiscoveredSlaveCount() const;
+
+    /**
+     * @brief Discover slaves on the bus and initialise internal state.
+     *
+     * This is normally called by the application after start().
+     */
+    bool discoverSlaves();
 
     // ---- Slave access -------------------------------------------------------
 
@@ -537,8 +543,6 @@ public:
 
 private:
     // ---- Internal helpers --------------------------------------------------
-    void masterTask();
-    bool discoverSlaves();
     bool setPreopAndConfirm(uint16_t slave_index);
     void ensureRxQueues();
     void flushRxQueue();
@@ -567,8 +571,7 @@ private:
     // Index allocator
     std::atomic<uint8_t> next_idx_{0};
 
-    // Master task
-    std::thread  master_thread_;
+    // Master state
     std::atomic<bool>     running_{false};
     std::atomic<uint16_t> discovered_slave_count_{0};
     MotionControlCallback motion_control_callback_;
