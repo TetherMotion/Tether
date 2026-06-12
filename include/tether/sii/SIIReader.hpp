@@ -73,6 +73,20 @@ public:
     bool readDWord(uint16_t slave_index, uint16_t word_address, uint32_t& out);
     
     /**
+     * @brief Prefetch a contiguous block of EEPROM words into the master cache.
+     *
+     * Reads `count` words starting at `word_address` in one pass, storing each
+     * word in the master-level per-slave cache. Subsequent reads of these
+     * words will be cache hits with zero bus traffic.
+     *
+     * @param slave_index  Slave index
+     * @param word_address Starting EEPROM word address
+     * @param count        Number of words to prefetch
+     * @return Number of words successfully prefetched
+     */
+    size_t prefetchWords(uint16_t slave_index, uint16_t word_address, uint16_t count);
+
+    /**
      * @brief Read multiple words from EEPROM
      * @param slave_index Slave index
      * @param word_address Starting word address

@@ -164,6 +164,21 @@ bool SIIReader::readDWord(uint16_t slave_index, uint16_t word_address, uint32_t&
     return readRaw32(slave_index, word_address, &out);
 }
 
+size_t SIIReader::prefetchWords(uint16_t slave_index, uint16_t word_address, uint16_t count) {
+    size_t prefetched = 0;
+    uint32_t dummy = 0;
+    // readRaw32() populates the master-level cache on success.
+    for (uint16_t i = 0; i < count; i += 2) {
+        uint16_t addr = static_cast<uint16_t>(word_address + i);
+        if (readRaw32(slave_index, addr, &dummy)) {
+            prefetched += 2;
+        } else {
+            break;  // Stop on first failure (past end of EEPROM, etc.)
+        }
+    }
+    return prefetched;
+}
+
 size_t SIIReader::readWords(uint16_t slave_index, uint16_t word_address,
                             uint16_t* buffer, size_t word_count) {
     size_t words_read = 0;

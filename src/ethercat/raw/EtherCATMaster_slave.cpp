@@ -74,6 +74,12 @@ void EtherCATMaster::initSlaves(uint16_t count)
         s->siiCache().init(siiReader(), i);
         slaves_.push_back(std::move(s));
     }
+    // Bulk-prefetch the first 256 words of SII EEPROM for each slave.
+    // This turns all subsequent SII reads (mailbox config, identity,
+    // categories) into cache hits, eliminating repeated EEPSTAT polling.
+    for (uint16_t i = 0; i < count; ++i) {
+        (void)sii_reader_->prefetchWords(i, 0, 256);
+    }
 }
 
 EtherCATSlave& EtherCATMaster::slave(uint16_t slave_index)
