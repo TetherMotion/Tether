@@ -355,6 +355,56 @@ bool FMMUManager::verify() {
     return match;
 }
 
+bool FMMUManager::verifyFromSlave() {
+    // Always read from slave — never rely on cached config_.fmmu_count
+    FMMUConfig hw_configs[kMaxFMMUs];
+    size_t hw_count = readFromSlave(hw_configs, kMaxFMMUs);
+
+    if (hw_count == 0) {
+        TETHER_LOGE(TAG, "verifyFromSlave: failed to read any FMMU registers from slave");
+        return false;
+    }
+
+    // Count how many FMMUs are actually enabled on the slave hardware
+    size_t enabled_count = 0;
+    for (size_t i = 0; i < hw_count; i++) {
+        if (hw_configs[i].isEnabled()) {
+            enabled_count++;
+        }
+    }
+
+    // If slave has no enabled FMMUs, that's acceptable
+    if (enabled_count == 0) {
+        return true;
+    }
+
+    // Slave has enabled FMMUs — they must match our expected configuration
+    if (hw_count < config_.fmmu_count) {
+        TETHER_LOGE(TAG, "verifyFromSlave: could only read %zu/%zu FMMUs",
+                 hw_count, config_.fmmu_count);
+        return false;
+    }
+
+    bool match = true;
+    for (size_t i = 0; i < config_.fmmu_count; i++) {
+        const FMMUConfig& expected = config_.fmmus[i];
+        const FMMUConfig& actual   = hw_configs[i];
+
+        bool ok = (expected.logical_start_addr == actual.logical_start_addr) &&
+                  (expected.length == actual.length) &&
+                  (expected.physical_start_addr == actual.physical_start_addr) &&
+                  (expected.type == actual.type) &&
+                  ((expected.activate & FMMUActivate::Enable) == (actual.activate & FMMUActivate::Enable));
+
+        if (!ok) {
+            TETHER_LOGE(TAG, "verifyFromSlave: FMMU%zu mismatch", i);
+            match = false;
+        }
+    }
+
+    return match;
+}
+
 bool FMMUManager::disableAll() {
     uint8_t zero = 0;
 

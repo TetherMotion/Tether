@@ -437,6 +437,12 @@ public:
     /// Verify FMMU registers match expected values.
     bool verify();
 
+    /// Read FMMU registers from slave hardware and verify they match expected config.
+    /// Returns true if the slave has no enabled FMMUs, or if all enabled FMMUs
+    /// match the expected configuration.  Always reads from the slave — never
+    /// relies on a cached "configured" flag.
+    bool verifyFromSlave();
+
     /// Disable all FMMUs on this slave.
     bool disableAll();
 

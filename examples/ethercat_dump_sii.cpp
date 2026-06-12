@@ -93,7 +93,7 @@ int main(int argc, char** argv) {
         .help("TX VLAN encapsulation: single VID (e.g. 100)");
     program.add_argument("--debug")
         .default_value(std::string(""))
-        .help("Comma-separated debug flags. Known flags: ethercat-statemachine, tx-ethercat-packets, rx-ethercat-packets, rx-pdo, tx-pdo, dc, fmmu");
+        .help("Comma-separated debug flags. Known flags: al-state, tx-ethercat-packets, rx-ethercat-packets, rx-pdo, tx-pdo, dc, fmmu");
 
     try { program.parse_args(argc, argv); }
     catch (const std::runtime_error& err) {
@@ -112,7 +112,7 @@ int main(int argc, char** argv) {
     const std::set<std::string> known_debug_flags = {
         "sii-derivation",
         "mailbox-configuration",
-        "ethercat-statemachine",
+        "al-state",
         "tx-ethercat-packets",
         "rx-ethercat-packets",
         "rx-pdo",
@@ -150,7 +150,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (debug_flags.count("ethercat-statemachine")) {
+    if (debug_flags.count("al-state")) {
         EtherCAT::enableStateMachineDebug(true);
         TETHER_LOGI(TAG, "EtherCAT state machine debug logging enabled");
     }

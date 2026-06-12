@@ -395,7 +395,7 @@ int main(int argc, char** argv) {
         .help("Stream duration in seconds (0 = infinite until Ctrl-C)");
     program.add_argument("--debug")
         .default_value(std::string(""))
-        .help("Comma-separated debug flags. Known flags: sii-derivation, mailbox-configuration, ethercat-statemachine, tx-ethercat-packets, rx-ethercat-packets, rx-pdo, tx-pdo");
+        .help("Comma-separated debug flags. Known flags: sii-derivation, mailbox-configuration, al-state, tx-ethercat-packets, rx-ethercat-packets, rx-pdo, tx-pdo");
     program.add_argument("--rx-vlan")
         .default_value(std::string(""))
         .help("RX VLAN filter: single VID (e.g. 100), range (e.g. 100-200), or 'any' for catch-all undefined target");
@@ -430,7 +430,7 @@ int main(int argc, char** argv) {
     const std::set<std::string> known_debug_flags = {
         "sii-derivation",
         "mailbox-configuration",
-        "ethercat-statemachine",
+        "al-state",
         "tx-ethercat-packets",
         "rx-ethercat-packets",
         "rx-pdo",
@@ -471,7 +471,7 @@ int main(int argc, char** argv) {
     }
 
     // Enable statemachine debug if requested
-    if (debug_flags.count("ethercat-statemachine")) {
+    if (debug_flags.count("al-state")) {
         EtherCAT::enableStateMachineDebug(true);
         TETHER_LOGI(TAG, "EtherCAT state machine debug logging enabled");
     }
@@ -733,6 +733,10 @@ int main(int argc, char** argv) {
         return 5;
     }
 
+    // ---- Declare calibration data early (needed by motion callback) ----
+    EtherCAT::Sensors::Axia80::CalibrationData cal;
+    std::atomic<bool> have_cal{false};
+
     // ---- Initialise Axia80 sensor ----
     EtherCAT::Sensors::Axia80Sensor sensor(master, static_cast<uint16_t>(slave_idx));
 
@@ -740,7 +744,8 @@ int main(int argc, char** argv) {
         TETHER_LOGW(TAG, "Slave %d does not appear to be an Axia80 (wrong VID/PID)", slave_idx);
     }
 
-    if (!sensor.init(Tether::Platform::LogLevel::Info)) {
+    // Initialise up to SAFE-OP (do not transition to OP yet)
+    if (!sensor.init(Tether::Platform::LogLevel::Info, false)) {
         TETHER_LOGE(TAG, "Failed to initialise Axia80 sensor");
         master.stop();
         g_running.store(false);
@@ -749,75 +754,9 @@ int main(int argc, char** argv) {
         return 7;
     }
 
-    // Verify slave actually reached OP state
-    EtherCAT::SlaveState actual_state;
-    if (sensor.slave().readState(actual_state) != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "Failed to read slave state after init");
-        master.stop();
-        g_running.store(false);
-        poll_thread.join();
-        eth->shutdown();
-        return 7;
-    }
-    if (actual_state != EtherCAT::SlaveState::OP) {
-        TETHER_LOGE(TAG, "Slave %d is not in OP (actual: %s)", slave_idx,
-                    magic_enum::enum_name(actual_state).data());
-        master.stop();
-        g_running.store(false);
-        poll_thread.join();
-        eth->shutdown();
-        return 7;
-    }
-
-    // ---- FMMU debug output ----
-    if (fmmu_debug) {
-        sensor.slave().fmmuManager().logConfig(TAG);
-        sensor.slave().fmmuManager().logHardware(TAG);
-    }
-
-    // ---- Readback verification against ESI XML ----
-    if (esi_device.has_value()) {
-        verifyReadbackAgainstESI(*esi_device, master, sensor, static_cast<uint16_t>(slave_idx));
-    }
-
-    // ---- Read calibration data via SDO ----
-    EtherCAT::Sensors::Axia80::CalibrationData cal;
-    bool have_cal = sensor.readCalibrationData(cal);
-    if (have_cal) {
-        TETHER_LOGI(TAG, "Calibration loaded: serial=%s, cpf=%u, cpt=%u",
-                    cal.ft_serial, cal.counts_per_force, cal.counts_per_torque);
-    } else {
-        TETHER_LOGW(TAG, "Could not read calibration data — using raw counts");
-        raw_mode = true;
-    }
-
-    // ---- Read product info ----
-    EtherCAT::Sensors::Axia80::ProductDescription desc;
-    if (sensor.readProductDescription(desc)) {
-        TETHER_LOGI(TAG, "Device: %s (SN: %u)", desc.product_name, desc.product_serial_number);
-    }
-
-    // ---- Configure sensor ----
-    sensor.setConfiguration(
-        EtherCAT::Sensors::Axia80::FilterType::FILTER_3,
-        EtherCAT::Sensors::Axia80::CalibrationSlot::SLOT_0,
-        EtherCAT::Sensors::Axia80::SampleRate::RATE_1953_HZ);
-    // Send one cycle to apply config
-    master.pdo().exchangeAll();
-
-    // ---- Set bias (tare) ----
-    TETHER_LOGI(TAG, "Setting bias (tare)...");
-    sensor.setBias();
-    master.pdo().exchangeAll();
-    // Clear bias bit so it doesn't stay set
-    if (auto* pdo = sensor.rxPDO()) {
-        pdo->control1 &= ~EtherCAT::Sensors::Axia80::CTRL_BIAS_BIT;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
     // ---- Set up RT motion loop callback ----
     master.setMotionControlCallback(
-        [&master, &sensor, &cal, have_cal, raw_mode](double /*dt_seconds*/) -> bool {
+        [&master, &sensor, &cal, &have_cal, raw_mode](double /*dt_seconds*/) -> bool {
             if (!master.pdo().exchangeAll()) {
                 return true; // keep loop running even on transient errors
             }
@@ -826,8 +765,9 @@ int main(int argc, char** argv) {
             if (!tx) return true;
 
             double fx = 0, fy = 0, fz = 0, tx_val = 0, ty = 0, tz = 0;
+            bool cal_ok = have_cal.load(std::memory_order_acquire);
 
-            if (raw_mode || !have_cal || cal.counts_per_force == 0 || cal.counts_per_torque == 0) {
+            if (raw_mode || !cal_ok || cal.counts_per_force == 0 || cal.counts_per_torque == 0) {
                 fx = static_cast<double>(tx->fx);
                 fy = static_cast<double>(tx->fy);
                 fz = static_cast<double>(tx->fz);
@@ -856,6 +796,8 @@ int main(int argc, char** argv) {
     loop_config.sync_interval_cycles = 10;
     loop_config.enable_dc_synchronization = false; // Axia80 does not use DC
 
+    // Start motion loop while still in SAFE-OP so PDO exchange is active
+    // during the OP transition
     if (!master.startRealtimeMotionControlLoop(loop_config)) {
         TETHER_LOGE(TAG, "Failed to start realtime motion loop");
         master.stop();
@@ -864,6 +806,84 @@ int main(int argc, char** argv) {
         eth->shutdown();
         return 8;
     }
+
+    // ---- Transition to OP while PDO exchange is already running ----
+    if (sensor.slave().transitionToOp() != EtherCAT::SlaveError::Ok) {
+        TETHER_LOGE(TAG, "Slave %d: OP transition failed", slave_idx);
+        master.stopMotionControlLoop();
+        master.stop();
+        g_running.store(false);
+        poll_thread.join();
+        eth->shutdown();
+        return 7;
+    }
+
+    // Verify slave actually reached OP state
+    EtherCAT::SlaveState actual_state;
+    if (sensor.slave().readState(actual_state) != EtherCAT::SlaveError::Ok) {
+        TETHER_LOGE(TAG, "Failed to read slave state after OP transition");
+        master.stopMotionControlLoop();
+        master.stop();
+        g_running.store(false);
+        poll_thread.join();
+        eth->shutdown();
+        return 7;
+    }
+    if (actual_state != EtherCAT::SlaveState::OP) {
+        TETHER_LOGE(TAG, "Slave %d is not in OP (actual: %s)", slave_idx,
+                    magic_enum::enum_name(actual_state).data());
+        master.stopMotionControlLoop();
+        master.stop();
+        g_running.store(false);
+        poll_thread.join();
+        eth->shutdown();
+        return 7;
+    }
+
+    // ---- FMMU debug output ----
+    if (fmmu_debug) {
+        sensor.slave().fmmuManager().logConfig(TAG);
+        sensor.slave().fmmuManager().logHardware(TAG);
+    }
+
+    // ---- Readback verification against ESI XML ----
+    if (esi_device.has_value()) {
+        verifyReadbackAgainstESI(*esi_device, master, sensor, static_cast<uint16_t>(slave_idx));
+    }
+
+    // ---- Read calibration data via SDO ----
+    if (sensor.readCalibrationData(cal)) {
+        have_cal.store(true, std::memory_order_release);
+        TETHER_LOGI(TAG, "Calibration loaded: serial=%s, cpf=%u, cpt=%u",
+                    cal.ft_serial, cal.counts_per_force, cal.counts_per_torque);
+    } else {
+        TETHER_LOGW(TAG, "Could not read calibration data — using raw counts");
+        raw_mode = true;
+    }
+
+    // ---- Read product info ----
+    EtherCAT::Sensors::Axia80::ProductDescription desc;
+    if (sensor.readProductDescription(desc)) {
+        TETHER_LOGI(TAG, "Device: %s (SN: %u)", desc.product_name, desc.product_serial_number);
+    }
+
+    // ---- Configure sensor ----
+    sensor.setConfiguration(
+        EtherCAT::Sensors::Axia80::FilterType::FILTER_3,
+        EtherCAT::Sensors::Axia80::CalibrationSlot::SLOT_0,
+        EtherCAT::Sensors::Axia80::SampleRate::RATE_1953_HZ);
+    // Motion loop will transmit RxPDO values automatically
+
+    // ---- Set bias (tare) ----
+    TETHER_LOGI(TAG, "Setting bias (tare)...");
+    sensor.setBias();
+    // Allow the motion loop to send the bias bit for several cycles
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Clear bias bit so it doesn't stay set
+    if (auto* pdo = sensor.rxPDO()) {
+        pdo->control1 &= ~EtherCAT::Sensors::Axia80::CTRL_BIAS_BIT;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     // ---- Consumer thread: print from queue ----
     std::atomic<uint64_t> cycle_count{0};

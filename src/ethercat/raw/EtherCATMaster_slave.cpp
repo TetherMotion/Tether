@@ -33,7 +33,7 @@ namespace EtherCAT {
 
 static const char* TAG = "ethercat";
 
-// Global debug flag for ethercat-statemachine (shared with EtherCATSlave)
+// Global debug flag for al-state (shared with EtherCATSlave)
 extern bool g_debug_statemachine;
 
 // Global debug flags for tx/rx packet logging (shared with EtherCATSlave)

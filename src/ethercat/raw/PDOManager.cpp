@@ -312,6 +312,27 @@ PDO::PDOStats  PDOManager::getStats() const  { return stats_; }
 void           PDOManager::resetStats()      { std::memset(&stats_, 0, sizeof(stats_)); }
 PDO::PDOStats& PDOManager::statsRef()        { return stats_; }
 
+// ----- Per-slave PDO counter accessors -----
+
+bool PDOManager::hasSlavePDOEntries(uint16_t slave_index) const {
+    for (size_t i = 0; i < mapping_.entry_count(); i++) {
+        const PDO::PDOEntry* e = mapping_.get_entry(i);
+        if (e && e->enabled && e->slave_index == slave_index)
+            return true;
+    }
+    return false;
+}
+
+uint32_t PDOManager::getSlavePDORequestCount(uint16_t slave_index) const {
+    if (slave_index >= PDO::kMaxPDOSlaves) return 0;
+    return slave_configs_[slave_index].pdo_request_count;
+}
+
+uint32_t PDOManager::getSlavePDOReplyCount(uint16_t slave_index) const {
+    if (slave_index >= PDO::kMaxPDOSlaves) return 0;
+    return slave_configs_[slave_index].pdo_reply_count;
+}
+
 // ----- Mode settings -----
 
 void PDOManager::setSeparateMode(bool v) {
@@ -688,6 +709,9 @@ bool PDOManager::sendRxPDO(size_t entry_index) {
     if (success) {
         const_cast<PDO::PDOEntry*>(entry)->success_count++;
         stats_.rxpdo_frames_sent++;
+        if (entry->slave_index < PDO::kMaxPDOSlaves) {
+            slave_configs_[entry->slave_index].pdo_request_count++;
+        }
     } else {
         const_cast<PDO::PDOEntry*>(entry)->error_count++;
         stats_.rxpdo_errors++;
@@ -744,6 +768,9 @@ bool PDOManager::receiveTxPDO(size_t entry_index) {
     if (success) {
         entry->success_count++;
         stats_.txpdo_frames_recv++;
+        if (entry->slave_index < PDO::kMaxPDOSlaves) {
+            slave_configs_[entry->slave_index].pdo_reply_count++;
+        }
     } else {
         entry->error_count++;
         stats_.txpdo_errors++;
@@ -753,7 +780,19 @@ bool PDOManager::receiveTxPDO(size_t entry_index) {
 
 bool PDOManager::exchangeAll() {
     if (logical_addr_mgr_ && logical_addr_mgr_->isInitialized()) {
-        return logical_addr_mgr_->exchangeAllLRW(mapping_);
+        bool ok = logical_addr_mgr_->exchangeAllLRW(mapping_);
+        if (ok) {
+            for (size_t i = 0; i < mapping_.entry_count(); i++) {
+                const PDO::PDOEntry* e = mapping_.get_entry(i);
+                if (!e || !e->enabled || e->slave_index >= PDO::kMaxPDOSlaves) continue;
+                if (e->direction == PDO::PDODirection::RxPDO) {
+                    slave_configs_[e->slave_index].pdo_request_count++;
+                } else {
+                    slave_configs_[e->slave_index].pdo_reply_count++;
+                }
+            }
+        }
+        return ok;
     }
 
     bool all_ok = true;

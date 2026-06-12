@@ -23,7 +23,7 @@ namespace EtherCAT {
 
 static const char* TAG = "EtherCATSlave";
 
-// Global debug flag for ethercat-statemachine (shared with EtherCATMaster)
+// Global debug flag for al-state (shared with EtherCATMaster)
 bool g_debug_statemachine = false;
 
 void enableStateMachineDebug(bool enable) {
@@ -307,6 +307,28 @@ SlaveError EtherCATSlave::transitionToSafeOp() {
 }
 
 SlaveError EtherCATSlave::transitionToOp() {
+    // --- Evaluate requirements before printing the debug banner ---
+    bool pdo_req_ok = false;
+    bool pdo_reply_ok = false;
+    bool has_pdo_entries = false;
+    {
+        auto& pdo_mgr = master_.pdo();
+        has_pdo_entries = pdo_mgr.hasSlavePDOEntries(index_);
+        if (has_pdo_entries) {
+            for (int wait_ms = 0; wait_ms < 100; wait_ms++) {
+                const uint32_t req   = pdo_mgr.getSlavePDORequestCount(index_);
+                const uint32_t reply = pdo_mgr.getSlavePDOReplyCount(index_);
+                pdo_req_ok   = (req > 0);
+                pdo_reply_ok = (reply > 0);
+                if (pdo_req_ok && pdo_reply_ok) {
+                    break;
+                }
+                Tether::Platform::Clock::instance().delayMilliseconds(1);
+            }
+        }
+    }
+    bool fmmu_ok = fmmu_mgr_.verifyFromSlave();
+
     if (g_debug_statemachine) {
         SlaveState current_state;
         readState(current_state);
@@ -316,17 +338,50 @@ SlaveError EtherCATSlave::transitionToOp() {
         TETHER_LOGI(TAG, "║  Transition: %s => OP", slaveStateToString(current_state));
         TETHER_LOGI(TAG, "║  Reason:    Full operational mode for process data exchange");
         TETHER_LOGI(TAG, "║  Requirements:");
-        TETHER_LOGI(TAG, "║    - PDO sync-managers (SM2/SM3) should be configured: %s", 
+        TETHER_LOGI(TAG, "║    - PDO sync-managers (SM2/SM3) should be configured: %s",
                     pdo_configured_ ? "✓ FULFILLED" : "⚠ NOT FULFILLED (warning only)");
-        TETHER_LOGI(TAG, "║  Status:     Proceeding with transition (PDO config is optional for OP)");
+        if (has_pdo_entries) {
+            TETHER_LOGI(TAG, "║    - PDO request counter  > 0: %s",
+                        pdo_req_ok ? "✓ FULFILLED" : "✗ NOT FULFILLED");
+            TETHER_LOGI(TAG, "║    - PDO reply counter    > 0: %s",
+                        pdo_reply_ok ? "✓ FULFILLED" : "✗ NOT FULFILLED");
+        } else {
+            TETHER_LOGI(TAG, "║    - PDO exchange check:     N/A (no PDO entries for this slave)");
+        }
+        TETHER_LOGI(TAG, "║    - FMMU configuration matches slave hardware: %s",
+                    fmmu_ok ? "✓ FULFILLED" : "✗ NOT FULFILLED");
+        TETHER_LOGI(TAG, "║  Status:     %s", (pdo_req_ok && pdo_reply_ok && fmmu_ok)
+                    ? "Proceeding with transition"
+                    : "HALTED — requirements not met");
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
     }
-    
+
     if (!pdo_configured_) {
         TETHER_LOGW( TAG,
             "Slave %u: Transitioning to OP without PDO sync-managers configured. "
             "This may cause issues with process data exchange.", index_);
     }
+
+    if (has_pdo_entries && (!pdo_req_ok || !pdo_reply_ok)) {
+        auto& pdo_mgr = master_.pdo();
+        const uint32_t req   = pdo_mgr.getSlavePDORequestCount(index_);
+        const uint32_t reply = pdo_mgr.getSlavePDOReplyCount(index_);
+        TETHER_LOGE(TAG,
+            "Slave %u: OP transition rejected — no PDO exchange after 100 ms "
+            "(req=%u reply=%u). Start the motion loop or call exchangeAll() "
+            "before requesting OP.",
+            index_, req, reply);
+        return SlaveError::TransportError;
+    }
+
+    if (!fmmu_ok) {
+        TETHER_LOGE(TAG,
+            "Slave %u: OP transition rejected — FMMU configuration mismatch "
+            "(read from slave hardware does not match expected values)",
+            index_);
+        return SlaveError::TransportError;
+    }
+
     // Request OP with Error Acknowledge bit (0x08 | 0x10 = 0x18)
     // Some slaves require the ACK bit to clear internal error latches.
     if (!master_.requestSlaveApplicationLayerState(index_, static_cast<uint8_t>(SlaveState::OP) | 0x10)) {

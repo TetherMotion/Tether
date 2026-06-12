@@ -199,6 +199,9 @@ struct SlaveConfig {
 
     bool     configured;
     bool     operational;
+
+    uint32_t pdo_request_count = 0;   // successful RxPDO sends (master -> slave)
+    uint32_t pdo_reply_count   = 0;   // successful TxPDO receives (slave -> master)
 };
 
 // ============================================================================
@@ -328,6 +331,11 @@ public:
     PDO::PDOStats  getStats() const;
     void           resetStats();
     PDO::PDOStats& statsRef();
+
+    // ----- Per-slave PDO counter accessors -----
+    bool     hasSlavePDOEntries(uint16_t slave_index) const;
+    uint32_t getSlavePDORequestCount(uint16_t slave_index) const;
+    uint32_t getSlavePDOReplyCount(uint16_t slave_index) const;
 
     // ----- SM Configuration -----
     bool     configureSlavesSMs(uint16_t slave_index);

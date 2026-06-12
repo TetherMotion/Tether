@@ -96,7 +96,8 @@ public:
      * @param log_level  Verbosity for diagnostic output
      * @return true on success
      */
-    bool init(Tether::Platform::LogLevel log_level = Tether::Platform::LogLevel::Info);
+    bool init(Tether::Platform::LogLevel log_level = Tether::Platform::LogLevel::Info,
+              bool transition_to_op = true);
 
     /**
      * @brief Print detailed PDO layout information for debugging.
@@ -316,7 +317,8 @@ inline bool Axia80Sensor::isAxia80Device()
     return match;
 }
 
-inline bool Axia80Sensor::init(Tether::Platform::LogLevel log_level)
+inline bool Axia80Sensor::init(Tether::Platform::LogLevel log_level,
+                                bool transition_to_op)
 {
     auto& sl = slave();
 
@@ -366,12 +368,15 @@ inline bool Axia80Sensor::init(Tether::Platform::LogLevel log_level)
         TETHER_LOGE("Axia80", "Slave %u: SAFE_OP failed", slave_index_);
         return false;
     }
-    if (sl.transitionToOp() != SlaveError::Ok) {
-        TETHER_LOGE("Axia80", "Slave %u: OP failed", slave_index_);
-        return false;
+    if (transition_to_op) {
+        if (sl.transitionToOp() != SlaveError::Ok) {
+            TETHER_LOGE("Axia80", "Slave %u: OP failed", slave_index_);
+            return false;
+        }
     }
 
-    TETHER_LOGI("Axia80", "Slave %u initialised successfully", slave_index_);
+    TETHER_LOGI("Axia80", "Slave %u initialised successfully%s", slave_index_,
+                transition_to_op ? "" : " (SAFE-OP only)");
     return true;
 }
 

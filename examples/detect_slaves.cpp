@@ -74,7 +74,7 @@ int main(int argc, char** argv) {
         .help("Network interface name (e.g. eth0, enp3s0)");
     program.add_argument("--debug")
         .default_value(std::string(""))
-        .help("Comma-separated debug flags. Known flags: sii-derivation, mailbox-configuration, ethercat-statemachine, tx-ethercat-packets, rx-ethercat-packets, rx-pdo, tx-pdo");
+        .help("Comma-separated debug flags. Known flags: sii-derivation, mailbox-configuration, al-state, tx-ethercat-packets, rx-ethercat-packets, rx-pdo, tx-pdo");
     program.add_argument("--rx-vlan")
         .default_value(std::string(""))
         .help("RX VLAN filter: single VID (e.g. 100), range (e.g. 100-200), or 'any' for catch-all undefined target");
@@ -97,7 +97,7 @@ int main(int argc, char** argv) {
     const std::set<std::string> known_debug_flags = {
         "sii-derivation",
         "mailbox-configuration",
-        "ethercat-statemachine",
+        "al-state",
         "tx-ethercat-packets",
         "rx-ethercat-packets",
         "rx-pdo",
@@ -136,7 +136,7 @@ int main(int argc, char** argv) {
     }
 
     // Enable statemachine debug if requested
-    if (debug_flags.count("ethercat-statemachine")) {
+    if (debug_flags.count("al-state")) {
         EtherCAT::enableStateMachineDebug(true);
         TETHER_LOGI(TAG, "EtherCAT state machine debug logging enabled");
     }
