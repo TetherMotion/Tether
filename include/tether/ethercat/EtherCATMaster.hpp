@@ -189,6 +189,15 @@ public:
     /** @return true while the master task is running. */
     bool isRunning() const;
 
+    /** Request immediate cancellation of all blocking operations. */
+    void requestCancel();
+
+    /** @return true if cancellation has been requested. */
+    bool isCancelRequested() const;
+
+    /** Clear the cancellation flag (useful for re-starting). */
+    void clearCancel();
+
     using MotionControlCallback = std::function<bool(double dt_seconds)>;
 
     struct RealtimeMotionLoopConfig {
@@ -602,6 +611,7 @@ private:
 
     // Master state
     std::atomic<bool>     running_{false};
+    std::atomic<bool>     cancel_requested_{false};
     std::atomic<uint16_t> discovered_slave_count_{0};
     MotionControlCallback motion_control_callback_;
     std::unique_ptr<IMotionControlLoop> motion_control_loop_;

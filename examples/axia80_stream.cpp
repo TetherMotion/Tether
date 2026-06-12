@@ -47,9 +47,6 @@ namespace Raw {
     void set_network_interface(const ::EtherCAT::NetworkInterface* iface);
     const ::EtherCAT::NetworkInterface* network_interface();
     void set_src_mac(const uint8_t src_mac[6]);
-#ifdef UNIT_TEST_HOST
-    extern std::atomic<bool>* g_sdo_cancel_flag;
-#endif
 }
 }
 
@@ -408,6 +405,9 @@ int main(int argc, char** argv) {
     program.add_argument("--esi-xml")
         .default_value(std::string(""))
         .help("Path to ESI XML file for register verification");
+    program.add_argument("--columns")
+        .default_value(std::string(""))
+        .help("Comma-separated TxPDO columns to display (e.g. fx,fy,fz or fx,fy,fz,tx,ty,tz,status,counter)");
 
     try { program.parse_args(argc, argv); }
     catch (const std::runtime_error& err) {
@@ -425,6 +425,7 @@ int main(int argc, char** argv) {
     std::string dc_str = program.get<std::string>("--dc");
     bool dc_enabled = (dc_str == "on" || dc_str == "true" || dc_str == "1");
     std::string esi_xml_path = program.get<std::string>("--esi-xml");
+    std::string columns_str = program.get<std::string>("--columns");
 
     // Known debug flags
     const std::set<std::string> known_debug_flags = {
@@ -468,6 +469,30 @@ int main(int argc, char** argv) {
         for (const auto& flag : known_debug_flags) {
             TETHER_LOGW(TAG, "  - %s", flag.c_str());
         }
+    }
+
+    // Parse column selection
+    std::vector<std::string> selected_columns;
+    const std::set<std::string> valid_columns = {"fx", "fy", "fz", "tx", "ty", "tz", "status", "counter"};
+    if (!columns_str.empty()) {
+        std::stringstream ss(columns_str);
+        std::string col;
+        while (std::getline(ss, col, ',')) {
+            // Trim whitespace
+            col.erase(0, col.find_first_not_of(" \t"));
+            col.erase(col.find_last_not_of(" \t") + 1);
+            if (!col.empty()) {
+                if (valid_columns.find(col) == valid_columns.end()) {
+                    std::cerr << "Invalid column: " << col << "\n";
+                    std::cerr << "Valid columns: fx, fy, fz, tx, ty, tz, status, counter\n";
+                    return 1;
+                }
+                selected_columns.push_back(col);
+            }
+        }
+    } else {
+        // Default: all columns
+        selected_columns = {"fx", "fy", "fz", "tx", "ty", "tz", "status", "counter"};
     }
 
     // Enable statemachine debug if requested
@@ -601,10 +626,6 @@ int main(int argc, char** argv) {
     // ---- Install signal handler ----
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
-
-#ifdef UNIT_TEST_HOST
-    EtherCAT::Raw::g_sdo_cancel_flag = &g_running;
-#endif
 
     // ---- Open raw socket ----
     auto eth = EtherCAT::HAL::createDefaultEthernet();
@@ -892,8 +913,14 @@ int main(int argc, char** argv) {
                 raw_mode ? "raw" : "engineering-unit");
 
     std::cout << std::fixed << std::setprecision(4);
-    std::cout << "      Fx        Fy        Fz        Tx        Ty        Tz    Status   Counter\n";
-    std::cout << "-------------------------------------------------------------------------------\n";
+    // Print header based on selected columns
+    for (const auto& col : selected_columns) {
+        std::string header = col;
+        header[0] = std::toupper(header[0]);
+        std::cout << std::setw(10) << header;
+    }
+    std::cout << "\n";
+    std::cout << std::string(selected_columns.size() * 10, '-') << "\n";
 
     std::thread consumer_thread([&]() {
         auto start_time = std::chrono::steady_clock::now();
@@ -916,16 +943,28 @@ int main(int argc, char** argv) {
             data_queue.pop();
             lock.unlock();
 
-            std::cout << std::setw(10) << frame.fx
-                      << std::setw(10) << frame.fy
-                      << std::setw(10) << frame.fz
-                      << std::setw(10) << frame.tx_val
-                      << std::setw(10) << frame.ty
-                      << std::setw(10) << frame.tz
-                      << "  0x" << std::hex << std::setw(8) << std::setfill('0') << frame.status
-                      << std::dec << std::setfill(' ')
-                      << std::setw(10) << frame.counter
-                      << "\n";
+            // Print only selected columns
+            for (const auto& col : selected_columns) {
+                if (col == "fx") {
+                    std::cout << std::setw(10) << frame.fx;
+                } else if (col == "fy") {
+                    std::cout << std::setw(10) << frame.fy;
+                } else if (col == "fz") {
+                    std::cout << std::setw(10) << frame.fz;
+                } else if (col == "tx") {
+                    std::cout << std::setw(10) << frame.tx_val;
+                } else if (col == "ty") {
+                    std::cout << std::setw(10) << frame.ty;
+                } else if (col == "tz") {
+                    std::cout << std::setw(10) << frame.tz;
+                } else if (col == "status") {
+                    std::cout << "  0x" << std::hex << std::setw(8) << std::setfill('0') << frame.status
+                              << std::dec << std::setfill(' ');
+                } else if (col == "counter") {
+                    std::cout << std::setw(10) << frame.counter;
+                }
+            }
+            std::cout << "\n";
 
             if (EtherCAT::Sensors::Axia80Sensor::hasError(frame.status)) {
                 std::cout << "  [ERROR] status=0x" << std::hex << frame.status << std::dec << "\n";

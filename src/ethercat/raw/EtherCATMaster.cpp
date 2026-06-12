@@ -411,6 +411,8 @@ void EtherCATMaster::start(const NetworkInterface& iface, const uint8_t src_mac[
 
 void EtherCATMaster::stop()
 {
+    requestCancel();
+    packet_router_.cancel();
     stopMotionControlLoop();
     running_.store(false, std::memory_order_release);
 
@@ -418,6 +420,22 @@ void EtherCATMaster::stop()
     if (sdo_manager_) {
         sdo_manager_->deinit();
     }
+}
+
+void EtherCATMaster::requestCancel()
+{
+    cancel_requested_.store(true, std::memory_order_release);
+}
+
+bool EtherCATMaster::isCancelRequested() const
+{
+    return cancel_requested_.load(std::memory_order_acquire);
+}
+
+void EtherCATMaster::clearCancel()
+{
+    cancel_requested_.store(false, std::memory_order_release);
+    packet_router_.clearCancel();
 }
 
 bool EtherCATMaster::isRunning() const
@@ -443,7 +461,14 @@ bool EtherCATMaster::startRealtimeMotionControlLoop(const RealtimeMotionLoopConf
     }
 
     stopMotionControlLoop();
-    motion_control_loop_ = std::make_unique<RealtimeMotionControlLoop>(motion_control_callback_, config, dc_.get());
+    clearCancel();
+    auto wrapped_callback = [this](double dt) -> bool {
+        if (cancel_requested_.load(std::memory_order_acquire)) {
+            return false;
+        }
+        return motion_control_callback_ ? motion_control_callback_(dt) : true;
+    };
+    motion_control_loop_ = std::make_unique<RealtimeMotionControlLoop>(wrapped_callback, config, dc_.get());
     return motion_control_loop_->start();
 }
 
@@ -460,7 +485,14 @@ bool EtherCATMaster::startPollingMotionControlLoop(const PollingMotionLoopConfig
     }
 
     stopMotionControlLoop();
-    motion_control_loop_ = std::make_unique<PollingMotionControlLoop>(motion_control_callback_, config, dc_.get());
+    clearCancel();
+    auto wrapped_callback = [this](double dt) -> bool {
+        if (cancel_requested_.load(std::memory_order_acquire)) {
+            return false;
+        }
+        return motion_control_callback_ ? motion_control_callback_(dt) : true;
+    };
+    motion_control_loop_ = std::make_unique<PollingMotionControlLoop>(wrapped_callback, config, dc_.get());
     return motion_control_loop_->start();
 }
 

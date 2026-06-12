@@ -159,9 +159,15 @@ bool EtherCATMaster::readRegister(SlaveAddress slave_address, RegisterAddress re
 bool EtherCATMaster::waitForResponseIdx(uint8_t idx, unsigned int timeout_ms,
                                          RxDatagram& out)
 {
+    if (cancel_requested_.load(std::memory_order_acquire)) {
+        return false;
+    }
     PacketFilter filter = PacketFilter::byIndex(idx);
     WaitResult result = packet_router_.waitForPacket(
         filter, out.data, sizeof(out.data), timeout_ms);
+    if (cancel_requested_.load(std::memory_order_acquire)) {
+        return false;
+    }
     if (result.success) {
         out.idx = result.idx; out.cmd = result.cmd; out.adp = result.adp;
         out.ado = result.ado;
@@ -176,6 +182,9 @@ bool EtherCATMaster::waitForResponseAdo(uint16_t ado, Command cmd,
                                          unsigned int timeout_ms,
                                          RxDatagram& out)
 {
+    if (cancel_requested_.load(std::memory_order_acquire)) {
+        return false;
+    }
     PacketFilter filter{};
     filter.command   = cmd;
     filter.ado       = ado;
@@ -183,6 +192,9 @@ bool EtherCATMaster::waitForResponseAdo(uint16_t ado, Command cmd,
 
     WaitResult result = packet_router_.waitForPacket(
         filter, out.data, sizeof(out.data), timeout_ms);
+    if (cancel_requested_.load(std::memory_order_acquire)) {
+        return false;
+    }
     if (result.success) {
         out.idx = result.idx; out.cmd = result.cmd; out.adp = result.adp;
         out.ado = result.ado;
@@ -203,6 +215,9 @@ size_t EtherCATMaster::preRegisterResponseWaiter(uint8_t idx,
 
 WaitResult EtherCATMaster::waitForPreRegistered(size_t slot, uint32_t timeout_ms)
 {
+    if (cancel_requested_.load(std::memory_order_acquire)) {
+        return WaitResult::Timeout();
+    }
     return packet_router_.waitForPreRegistered(slot, timeout_ms);
 }
 
@@ -462,6 +477,11 @@ bool EtherCATMaster::sendSingleDatagram(Command cmd, uint8_t idx,
         auto& clock = Tether::Platform::Clock::instance();
         int last_errno = 0;
         for (int retry = 0; retry <= kMaxTxRetries; retry++) {
+            if (cancel_requested_.load(std::memory_order_acquire)) {
+                TETHER_LOGW(TAG, "sendSingleDatagram cancelled (cmd=%s idx=%u)",
+                            commandToString(cmd), static_cast<unsigned>(idx));
+                return false;
+            }
             errno = 0;
             if (iface_.send(txbuf, frame_len)) return true;
             last_errno = errno;

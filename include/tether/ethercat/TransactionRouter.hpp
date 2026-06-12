@@ -213,6 +213,20 @@ public:
      */
     void shutdown();
 
+    /**
+     * @brief Request cancellation of all current and future waits.
+     *
+     * Sets an atomic flag that causes waitForPacket, waitForPreRegistered,
+     * and sendAndWait to return Timeout() immediately.  Also wakes all
+     * threads currently blocked on condition variables.
+     */
+    void cancel();
+
+    /**
+     * @brief Clear the cancellation flag.
+     */
+    void clearCancel();
+
     // ----- RX path (called from receive thread) -----------------------------
 
     /**
@@ -316,6 +330,7 @@ private:
     std::array<Slot, kNumSlots> slots_;
     std::atomic<bool>           initialized_{false};
     std::atomic<bool>           shutdown_{false};
+    std::atomic<bool>           cancelled_{false};
     Stats                       stats_;
 };
 

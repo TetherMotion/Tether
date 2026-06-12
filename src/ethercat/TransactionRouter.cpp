@@ -63,6 +63,22 @@ void TransactionRouter::shutdown()
     initialized_.store(false, std::memory_order_release);
 }
 
+void TransactionRouter::cancel()
+{
+    cancelled_.store(true, std::memory_order_release);
+
+    // Wake all threads blocked on condition variables
+    for (auto& s : slots_) {
+        std::lock_guard<std::mutex> lock(s.mtx);
+        s.cv.notify_all();
+    }
+}
+
+void TransactionRouter::clearCancel()
+{
+    cancelled_.store(false, std::memory_order_release);
+}
+
 // ============================================================================
 // RX path
 // ============================================================================
@@ -110,6 +126,8 @@ WaitResult TransactionRouter::sendAndWait(uint8_t idx,
         return WaitResult::Timeout();
     if (shutdown_.load(std::memory_order_acquire))
         return WaitResult::Timeout();
+    if (cancelled_.load(std::memory_order_acquire))
+        return WaitResult::Timeout();
 
     stats_.registrations++;
 
@@ -141,9 +159,10 @@ WaitResult TransactionRouter::sendAndWait(uint8_t idx,
         bool got_it = slot.cv.wait_for(
             lock,
             std::chrono::milliseconds(timeout_ms),
-            [&] { return slot.completed; });
+            [&] { return slot.completed || cancelled_.load(std::memory_order_acquire); });
 
-        if (got_it && !shutdown_.load(std::memory_order_acquire)) {
+        if (got_it && !shutdown_.load(std::memory_order_acquire) &&
+            !cancelled_.load(std::memory_order_acquire)) {
             auto& r = slot.response;
             result = WaitResult::Success(
                 r.wkc,
@@ -172,6 +191,9 @@ WaitResult TransactionRouter::waitForPacket(const PacketFilter& filter,
                                             uint8_t* buffer, size_t buffer_size,
                                             uint32_t timeout_ms)
 {
+    if (cancelled_.load(std::memory_order_acquire))
+        return WaitResult::Timeout();
+
     // The old API registered a waiter and waited in one call.
     // We can only use this when the filter matches by idx (which is the
     // common case).  If match_idx is false, fall back to a timed poll.
@@ -200,9 +222,10 @@ WaitResult TransactionRouter::waitForPacket(const PacketFilter& filter,
             bool got_it = slot.cv.wait_for(
                 lock,
                 std::chrono::milliseconds(timeout_ms),
-                [&] { return slot.completed; });
+                [&] { return slot.completed || cancelled_.load(std::memory_order_acquire); });
 
-            if (got_it && !shutdown_.load(std::memory_order_acquire)) {
+            if (got_it && !shutdown_.load(std::memory_order_acquire) &&
+                !cancelled_.load(std::memory_order_acquire)) {
                 auto& r = slot.response;
                 result = WaitResult::Success(
                     r.wkc, r.datalen, r.cmd, r.adp, r.ado, r.idx);
@@ -250,6 +273,8 @@ size_t TransactionRouter::preRegisterWaiter(const PacketFilter& filter,
 WaitResult TransactionRouter::waitForPreRegistered(size_t slot_idx, uint32_t timeout_ms)
 {
     if (slot_idx >= kNumSlots) return WaitResult::Timeout();
+    if (cancelled_.load(std::memory_order_acquire))
+        return WaitResult::Timeout();
 
     auto& slot = slots_[slot_idx];
 
@@ -259,9 +284,10 @@ WaitResult TransactionRouter::waitForPreRegistered(size_t slot_idx, uint32_t tim
         bool got_it = slot.cv.wait_for(
             lock,
             std::chrono::milliseconds(timeout_ms),
-            [&] { return slot.completed; });
+            [&] { return slot.completed || cancelled_.load(std::memory_order_acquire); });
 
-        if (got_it && !shutdown_.load(std::memory_order_acquire)) {
+        if (got_it && !shutdown_.load(std::memory_order_acquire) &&
+            !cancelled_.load(std::memory_order_acquire)) {
             auto& r = slot.response;
             result = WaitResult::Success(
                 r.wkc, r.datalen, r.cmd, r.adp, r.ado, r.idx);

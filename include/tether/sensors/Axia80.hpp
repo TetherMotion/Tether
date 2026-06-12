@@ -26,14 +26,6 @@
 extern bool g_debug_rx_pdo;
 extern bool g_debug_tx_pdo;
 
-#ifdef UNIT_TEST_HOST
-namespace EtherCAT {
-namespace Raw {
-// Optional application-level cancellation flag for SDO operations.
-extern std::atomic<bool>* g_sdo_cancel_flag;
-} // namespace Raw
-} // namespace EtherCAT
-#endif
 
 namespace EtherCAT {
 namespace Sensors {
@@ -429,12 +421,10 @@ inline bool Axia80Sensor::readCalibrationData(Axia80::CalibrationData& cal)
 
     // Read matrix entries (sub 5..46) as 16-byte strings, parse to double
     for (uint8_t i = 0; i < 42; ++i) {
-#ifdef UNIT_TEST_HOST
-        if (EtherCAT::Raw::g_sdo_cancel_flag && !EtherCAT::Raw::g_sdo_cancel_flag->load()) {
-            TETHER_LOGW("axia80", "Calibration read interrupted by signal");
+        if (master_.isCancelRequested()) {
+            TETHER_LOGW("axia80", "Calibration read interrupted by cancel");
             return false;
         }
-#endif
         char buf[17] = {};
         sz = sizeof(buf) - 1;
         if (sl.sdoRead(Axia80::OD_CALIBRATION_MATRIX, Axia80::CAL_SUBIDX_MATRIX_FX_G0 + i,

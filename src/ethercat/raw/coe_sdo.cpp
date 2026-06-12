@@ -10,12 +10,6 @@
 namespace EtherCAT {
 namespace Raw {
 
-#ifdef UNIT_TEST_HOST
-// Optional application-level cancellation flag for SDO operations.
-// Point this to an atomic bool (e.g. from a SIGINT handler) to allow
-// immediate abort of blocking mailbox polls.
-std::atomic<bool>* g_sdo_cancel_flag = nullptr;
-#endif
 
 
 
@@ -255,12 +249,10 @@ bool coe_sdo_upload(
         uint8_t sdo_cmd = 0;
         uint16_t r_len = 0;
         for (int attempt = 0; attempt < 50; attempt++) {
-#ifdef UNIT_TEST_HOST
-            if (g_sdo_cancel_flag && !g_sdo_cancel_flag->load()) {
-                TETHER_LOGW(TAG, "SDO upload cancelled by signal");
+            if (master.isCancelRequested()) {
+                TETHER_LOGW(TAG, "SDO upload cancelled");
                 return false;
             }
-#endif
             if (!master.readRegister(EtherCATMaster::slaveAddressFromADP(adp), mbx_read_addr, mbxbuf, static_cast<uint16_t>(mbx_read_len), 200)) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
@@ -445,12 +437,10 @@ bool coe_sdo_upload(
             // Read segment response.
             bool got = false;
             for (int attempt2 = 0; attempt2 < 50; attempt2++) {
-#ifdef UNIT_TEST_HOST
-                if (g_sdo_cancel_flag && !g_sdo_cancel_flag->load()) {
-                    TETHER_LOGW(TAG, "SDO upload segment cancelled by signal");
+                if (master.isCancelRequested()) {
+                    TETHER_LOGW(TAG, "SDO upload segment cancelled");
                     return false;
                 }
-#endif
                 if (!master.readRegister(EtherCATMaster::slaveAddressFromADP(adp), mbx_read_addr, mbxbuf, static_cast<uint16_t>(mbx_read_len), 200)) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     continue;
@@ -625,12 +615,10 @@ bool coe_sdo_download(
 
     // Poll mailbox read area for response
     for (int attempt = 0; attempt < 50; attempt++) {
-#ifdef UNIT_TEST_HOST
-        if (g_sdo_cancel_flag && !g_sdo_cancel_flag->load()) {
-            TETHER_LOGW(TAG, "SDO download cancelled by signal");
+        if (master.isCancelRequested()) {
+            TETHER_LOGW(TAG, "SDO download cancelled");
             return false;
         }
-#endif
         if (!master.readRegister(EtherCATMaster::slaveAddressFromADP(adp), mbx_read_addr, mbxbuf, static_cast<uint16_t>(mbx_read_len), 500)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
