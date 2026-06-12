@@ -418,6 +418,7 @@ add_executable(tether_ethercat_common_tests
     ethercat/test_sdo_async.cpp
     ethercat/test_foe.cpp
     ethercat/test_pdo_manager.cpp
+    ethercat/test_logical_address_manager.cpp
     ethercat/test_dc.cpp
     ethercat/test_realtime_loop.cpp
     ethercat/test_jitter_monitor.cpp
@@ -431,6 +432,7 @@ add_executable(tether_ethercat_common_tests
     ../src/ethercat/EtherCATWriteVerify.cpp
     ../src/ethercat/raw/sdo_async.cpp
     ../src/ethercat/raw/PDOManager.cpp
+    ../src/ethercat/raw/LogicalAddressManager.cpp
     ../src/ethercat/EtherCATDCClass.cpp
     ../src/ethercat/EtherCATRealtimeLoop.cpp
     ../src/ethercat/RealtimeJitterMonitor.cpp
