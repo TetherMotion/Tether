@@ -257,9 +257,10 @@ bool EtherCATMaster::configureProcessDataSyncManagersFromSii(SlaveAddress slave_
     pdo_->finalizeMapping(slave_index);
 
     // Build/rebuild the logical address map from all configured slaves.
-    // This must happen after finalizeMapping so PDO sizes are known.
+    // Use discovered slave count since this is called per-slave during discovery
+    // before pdo_->slaveCount() has been set.
     logical_addr_mgr_->buildAddressMap(pdo_->slaveConfigs(),
-                                        static_cast<uint16_t>(pdo_->slaveCount()));
+                                        getDiscoveredSlaveCount());
 
     // Configure FMMUs using manager-provided logical addresses.
     if (sii_valid && logical_addr_mgr_->hasSlavePDOs(slave_index)) {
