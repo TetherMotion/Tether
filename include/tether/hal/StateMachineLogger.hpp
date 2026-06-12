@@ -13,6 +13,7 @@
 #include <functional>
 #include <vector>
 #include <string>
+#include <magic_enum/magic_enum.hpp>
 
 namespace EtherCAT {
 namespace HAL {
@@ -42,21 +43,13 @@ enum class ALState : uint8_t {
 /**
  * @brief Convert AL state to string
  */
-inline const char* alStateToString(ALState state) {
-    switch (state) {
-        case ALState::Unknown:       return "Unknown";
-        case ALState::Init:          return "Init";
-        case ALState::PreOp:         return "Pre-Op";
-        case ALState::Bootstrap:     return "Bootstrap";
-        case ALState::SafeOp:        return "Safe-Op";
-        case ALState::Op:            return "Op";
-        case ALState::InitError:     return "Init+Error";
-        case ALState::PreOpError:    return "Pre-Op+Error";
-        case ALState::BootstrapError: return "Bootstrap+Error";
-        case ALState::SafeOpError:   return "Safe-Op+Error";
-        case ALState::OpError:       return "Op+Error";
-        default: return "Invalid";
+inline std::string alStateToString(ALState state) {
+    auto base = static_cast<ALState>(static_cast<uint8_t>(state) & 0x0F);
+    auto name = magic_enum::enum_name(base);
+    if (static_cast<uint8_t>(state) & 0x10) {
+        return std::string(name) + "+Error";
     }
+    return std::string(name);
 }
 
 /**

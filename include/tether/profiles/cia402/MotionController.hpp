@@ -28,6 +28,7 @@
 #include <functional>
 #include <string>
 #include <atomic>
+#include <magic_enum/magic_enum.hpp>
 #include <mutex>
 
 namespace CiA402 {
@@ -709,23 +710,8 @@ std::unique_ptr<MotionProfile> createProfile(ProfileType type,
                                              const MotionLimits& limits);
 
 /**
- * @brief Convert state to string
- */
-const char* stateToString(State state);
-
-/**
- * @brief Convert mode to string
- */
-const char* modeToString(OperatingMode mode);
-
-/**
  * @brief Convert error code to string
  */
 const char* errorToString(uint16_t errorCode);
-
-/**
- * @brief Convert homing method to string
- */
-const char* homingMethodToString(HomingMethod method);
 
 } // namespace CiA402

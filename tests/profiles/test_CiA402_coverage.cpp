@@ -7,6 +7,7 @@
 #include <cstring>
 #include <cmath>
 #include <memory>
+#include <magic_enum/magic_enum.hpp>
 #include "slave/profiles/CiA402Slave.hpp"
 #include "slave/mailbox/IMailboxHandler.hpp"
 
@@ -282,14 +283,14 @@ TEST_F(CiA402DriveStateTest, StatusWordFault) {
 }
 
 TEST_F(CiA402DriveStateTest, StateToString) {
-    EXPECT_STREQ(cia402StateToString(CiA402State::NotReadyToSwitchOn), "NOT_READY_TO_SWITCH_ON");
-    EXPECT_STREQ(cia402StateToString(CiA402State::SwitchOnDisabled), "SWITCH_ON_DISABLED");
-    EXPECT_STREQ(cia402StateToString(CiA402State::ReadyToSwitchOn), "READY_TO_SWITCH_ON");
-    EXPECT_STREQ(cia402StateToString(CiA402State::SwitchedOn), "SWITCHED_ON");
-    EXPECT_STREQ(cia402StateToString(CiA402State::OperationEnabled), "OPERATION_ENABLED");
-    EXPECT_STREQ(cia402StateToString(CiA402State::QuickStopActive), "QUICK_STOP_ACTIVE");
-    EXPECT_STREQ(cia402StateToString(CiA402State::FaultReactionActive), "FAULT_REACTION_ACTIVE");
-    EXPECT_STREQ(cia402StateToString(CiA402State::Fault), "FAULT");
+    EXPECT_STREQ(magic_enum::enum_name(CiA402State::NotReadyToSwitchOn).data(), "NotReadyToSwitchOn");
+    EXPECT_STREQ(magic_enum::enum_name(CiA402State::SwitchOnDisabled).data(), "SwitchOnDisabled");
+    EXPECT_STREQ(magic_enum::enum_name(CiA402State::ReadyToSwitchOn).data(), "ReadyToSwitchOn");
+    EXPECT_STREQ(magic_enum::enum_name(CiA402State::SwitchedOn).data(), "SwitchedOn");
+    EXPECT_STREQ(magic_enum::enum_name(CiA402State::OperationEnabled).data(), "OperationEnabled");
+    EXPECT_STREQ(magic_enum::enum_name(CiA402State::QuickStopActive).data(), "QuickStopActive");
+    EXPECT_STREQ(magic_enum::enum_name(CiA402State::FaultReactionActive).data(), "FaultReactionActive");
+    EXPECT_STREQ(magic_enum::enum_name(CiA402State::Fault).data(), "Fault");
 }
 
 // --- Drive state callback ---

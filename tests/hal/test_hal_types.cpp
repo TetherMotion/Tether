@@ -4,6 +4,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <magic_enum/magic_enum.hpp>
 #include "tether/hal/HALTypes.hpp"
 
 using namespace EtherCAT::HAL;
@@ -89,9 +90,9 @@ TEST(ErrorTest, ErrorValues) {
 }
 
 TEST(ErrorTest, ErrorToString) {
-    EXPECT_STREQ(errorToString(Error::OK), "OK");
-    EXPECT_STREQ(errorToString(Error::Timeout), "Timeout");
-    EXPECT_STREQ(errorToString(Error::InvalidArgument), "Invalid argument");
+    EXPECT_STREQ(magic_enum::enum_name(Error::OK).data(), "OK");
+    EXPECT_STREQ(magic_enum::enum_name(Error::Timeout).data(), "Timeout");
+    EXPECT_STREQ(magic_enum::enum_name(Error::InvalidArgument).data(), "InvalidArgument");
 }
 
 // ============================================================================

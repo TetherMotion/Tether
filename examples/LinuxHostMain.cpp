@@ -26,6 +26,7 @@
 #include <csignal>
 #include <atomic>
 #include <memory>
+#include <magic_enum/magic_enum.hpp>
 #include <sched.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -333,7 +334,7 @@ int main(int argc, char* argv[]) {
     // Initialize HAL
     Error err = initHAL(halConfig);
     if (err != Error::OK) {
-        std::fprintf(stderr, "Error: Failed to initialize HAL: %s\n", errorToString(err));
+        std::fprintf(stderr, "Error: Failed to initialize HAL: %s\n", magic_enum::enum_name(err).data());
         return 1;
     }
     

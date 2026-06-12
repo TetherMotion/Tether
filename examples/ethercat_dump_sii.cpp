@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <cstring>
+#include <magic_enum/magic_enum.hpp>
 
 #include "tether/ethercat/EtherCATDiagnostics.hpp"
 #include "tether/ethercat/EtherCATMaster.hpp"
@@ -104,7 +105,7 @@ int main(int argc, char** argv) {
             } else if (err == EtherCAT::HAL::Error::PermissionDenied) {
                 TETHER_LOGE(TAG, "Permission denied while opening interface '%s' — raw sockets require root or CAP_NET_RAW", iface.c_str());
             } else {
-                TETHER_LOGE(TAG, "Failed to init Ethernet interface '%s' (%s)", iface.c_str(), EtherCAT::HAL::errorToString(err));
+                TETHER_LOGE(TAG, "Failed to init Ethernet interface '%s' (%s)", iface.c_str(), magic_enum::enum_name(err).data());
             }
             return 2;
         }

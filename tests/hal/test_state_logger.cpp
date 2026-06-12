@@ -4,6 +4,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <magic_enum/magic_enum.hpp>
 #include "tether/hal/StateMachineLogger.hpp"
 #include "mocks/MockHAL.hpp"
 
@@ -15,19 +16,19 @@ using namespace EtherCAT::HAL::mock;
 // ============================================================================
 
 TEST(ALStateTest, StateToString) {
-    EXPECT_STREQ(alStateToString(ALState::Init), "Init");
-    EXPECT_STREQ(alStateToString(ALState::PreOp), "Pre-Op");
-    EXPECT_STREQ(alStateToString(ALState::SafeOp), "Safe-Op");
-    EXPECT_STREQ(alStateToString(ALState::Op), "Op");
-    EXPECT_STREQ(alStateToString(ALState::Bootstrap), "Bootstrap");
-    EXPECT_STREQ(alStateToString(ALState::Unknown), "Unknown");
+    EXPECT_EQ(alStateToString(ALState::Init), "Init");
+    EXPECT_EQ(alStateToString(ALState::PreOp), "PreOp");
+    EXPECT_EQ(alStateToString(ALState::SafeOp), "SafeOp");
+    EXPECT_EQ(alStateToString(ALState::Op), "Op");
+    EXPECT_EQ(alStateToString(ALState::Bootstrap), "Bootstrap");
+    EXPECT_EQ(alStateToString(ALState::Unknown), "Unknown");
 }
 
 TEST(ALStateTest, ErrorStates) {
-    EXPECT_STREQ(alStateToString(ALState::InitError), "Init+Error");
-    EXPECT_STREQ(alStateToString(ALState::PreOpError), "Pre-Op+Error");
-    EXPECT_STREQ(alStateToString(ALState::SafeOpError), "Safe-Op+Error");
-    EXPECT_STREQ(alStateToString(ALState::OpError), "Op+Error");
+    EXPECT_EQ(alStateToString(ALState::InitError), "Init+Error");
+    EXPECT_EQ(alStateToString(ALState::PreOpError), "PreOp+Error");
+    EXPECT_EQ(alStateToString(ALState::SafeOpError), "SafeOp+Error");
+    EXPECT_EQ(alStateToString(ALState::OpError), "Op+Error");
 }
 
 TEST(ALStateTest, HasError) {

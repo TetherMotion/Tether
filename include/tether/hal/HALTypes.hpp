@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstring>
 #include <array>
+#include <magic_enum/magic_enum.hpp>
 
 namespace EtherCAT {
 namespace HAL {
@@ -174,34 +175,6 @@ enum class Error {
     InternalError,
     Cancelled,
 };
-
-/**
- * @brief Convert error to string
- */
-inline const char* errorToString(Error err) {
-    switch (err) {
-        case Error::OK: return "OK";
-        case Error::InvalidArgument: return "Invalid argument";
-        case Error::NotInitialized: return "Not initialized";
-        case Error::AlreadyInitialized: return "Already initialized";
-        case Error::Timeout: return "Timeout";
-        case Error::WouldBlock: return "Would block";
-        case Error::NoMemory: return "Out of memory";
-        case Error::BufferTooSmall: return "Buffer too small";
-        case Error::BufferFull: return "Buffer full";
-        case Error::Empty: return "Empty";
-        case Error::NotSupported: return "Not supported";
-        case Error::PermissionDenied: return "Permission denied";
-        case Error::InterfaceNotFound: return "Interface not found";
-        case Error::LinkDown: return "Link down";
-        case Error::TransmitFailed: return "Transmit failed";
-        case Error::ReceiveFailed: return "Receive failed";
-        case Error::ConfigurationFailed: return "Configuration failed";
-        case Error::InternalError: return "Internal error";
-        case Error::Cancelled: return "Operation cancelled";
-        default: return "Unknown error";
-    }
-}
 
 // ============================================================================
 // Result Type

@@ -488,36 +488,6 @@ std::unique_ptr<MotionProfile> createProfile(ProfileType type,
     return profile;
 }
 
-const char* stateToString(State state) {
-    switch (state) {
-        case State::NotReadyToSwitchOn:   return "Not Ready To Switch On";
-        case State::SwitchOnDisabled:     return "Switch On Disabled";
-        case State::ReadyToSwitchOn:      return "Ready To Switch On";
-        case State::SwitchedOn:           return "Switched On";
-        case State::OperationEnabled:     return "Operation Enabled";
-        case State::QuickStopActive:      return "Quick Stop Active";
-        case State::FaultReactionActive:  return "Fault Reaction Active";
-        case State::Fault:                return "Fault";
-        default:                          return "Unknown";
-    }
-}
-
-const char* modeToString(OperatingMode mode) {
-    switch (mode) {
-        case OperatingMode::NoMode:                return "No Mode";
-        case OperatingMode::ProfilePosition:       return "Profile Position";
-        case OperatingMode::Velocity:              return "Velocity";
-        case OperatingMode::ProfileVelocity:       return "Profile Velocity";
-        case OperatingMode::ProfileTorque:         return "Profile Torque";
-        case OperatingMode::Homing:                return "Homing";
-        case OperatingMode::InterpolatedPosition:  return "Interpolated Position";
-        case OperatingMode::CyclicSyncPosition:    return "Cyclic Sync Position";
-        case OperatingMode::CyclicSyncVelocity:    return "Cyclic Sync Velocity";
-        case OperatingMode::CyclicSyncTorque:      return "Cyclic Sync Torque";
-        default:                                    return "Unknown";
-    }
-}
-
 const char* errorToString(uint16_t errorCode) {
     switch (static_cast<ErrorCode>(errorCode)) {
         case ErrorCode::None:                  return "No Error";
@@ -535,24 +505,6 @@ const char* errorToString(uint16_t errorCode) {
         case ErrorCode::CommunicationError:    return "Communication Error";
         case ErrorCode::HomingError:           return "Homing Error";
         default:                               return "Unknown Error";
-    }
-}
-
-const char* homingMethodToString(HomingMethod method) {
-    switch (method) {
-        case HomingMethod::NoHoming:                      return "No Homing";
-        case HomingMethod::CurrentPosition:               return "Current Position As Home";
-        case HomingMethod::NegDirIndexPulse:              return "Index Negative";
-        case HomingMethod::PosDirIndexPulse:              return "Index Positive";
-        case HomingMethod::HomeSwitchNeg:                 return "Home Switch Negative";
-        case HomingMethod::HomeSwitchPos:                 return "Home Switch Positive";
-        case HomingMethod::HomeSwitchNegIndex:            return "Home Switch Neg + Index";
-        case HomingMethod::HomeSwitchPosIndex:            return "Home Switch Pos + Index";
-        case HomingMethod::NegLimitOnly:                  return "Neg Limit Switch";
-        case HomingMethod::PosLimitOnly:                  return "Pos Limit Switch";
-        case HomingMethod::NegLimitIndex:                 return "Neg Limit + Index";
-        case HomingMethod::PosLimitIndex:                 return "Pos Limit + Index";
-        default:                                           return "Unknown Method";
     }
 }
 

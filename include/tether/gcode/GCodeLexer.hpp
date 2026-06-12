@@ -84,6 +84,7 @@
 #include <string>
 #include <string_view>
 #include <optional>
+#include <magic_enum/magic_enum.hpp>
 
 namespace GCode {
 
@@ -489,11 +490,6 @@ std::string stripComments(const char* line);
 // ============================================================================
 // Token Utilities
 // ============================================================================
-
-/**
- * @brief Convert token type to string
- */
-const char* tokenTypeToString(LexerTokenType type);
 
 /**
  * @brief Convert word letter to character

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <magic_enum/magic_enum.hpp>
 
 #include "tether/ethercat/SyncManager.hpp"
 #include "tether/profiles/cia402/1Cxx-SyncManagerParameters.hpp"
@@ -157,11 +158,13 @@ inline bool readSupportedSyncTypes(SDO::SDOManager& sdo,
 }
 
 // ---------------------------------------------------------------------------
-// Stringification helpers (delegates to CiA301::Parameters1Cxx implementation)
+// Stringification helpers
 // ---------------------------------------------------------------------------
 
-inline const char* syncModeToString(uint16_t raw) {
-    return CiA301::Parameters1Cxx::syncModeToString(raw);
+inline std::string syncModeToString(uint16_t raw) {
+    auto mode = static_cast<CiA301::Parameters1Cxx::SyncMode>(raw);
+    auto name = magic_enum::enum_name(mode);
+    return std::string(name);
 }
 
 inline std::string supportedSyncTypesToString(uint16_t mask) {

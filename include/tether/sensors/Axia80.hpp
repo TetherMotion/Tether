@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cmath>
 #include <cstring>
 
@@ -24,6 +25,15 @@
 // Global PDO debug flags (defined in PDOManager.cpp)
 extern bool g_debug_rx_pdo;
 extern bool g_debug_tx_pdo;
+
+#ifdef UNIT_TEST_HOST
+namespace EtherCAT {
+namespace Raw {
+// Optional application-level cancellation flag for SDO operations.
+extern std::atomic<bool>* g_sdo_cancel_flag;
+} // namespace Raw
+} // namespace EtherCAT
+#endif
 
 namespace EtherCAT {
 namespace Sensors {
@@ -293,8 +303,17 @@ private:
 inline bool Axia80Sensor::isAxia80Device()
 {
     EtherCAT::SII::SIIIdentity id;
-    if (!EtherCAT::SII::readSIIIdentity(master_, slave_index_, id)) return false;
-    return (id.vendor_id == Axia80::kVendorId) && (id.product_code == Axia80::kProductCode);
+    if (!EtherCAT::SII::readSIIIdentity(master_, slave_index_, id)) {
+        TETHER_LOGW("Axia80", "Slave %u: SII identity read failed — cannot verify device type", slave_index_);
+        return false;
+    }
+    bool match = (id.vendor_id == Axia80::kVendorId) && (id.product_code == Axia80::kProductCode);
+    if (!match) {
+        TETHER_LOGW("Axia80", "Slave %u: VID/PID mismatch — expected 0x%08X/0x%08X, got 0x%08X/0x%08X",
+                    slave_index_, Axia80::kVendorId, Axia80::kProductCode,
+                    id.vendor_id, id.product_code);
+    }
+    return match;
 }
 
 inline bool Axia80Sensor::init(Tether::Platform::LogLevel log_level)
@@ -405,6 +424,12 @@ inline bool Axia80Sensor::readCalibrationData(Axia80::CalibrationData& cal)
 
     // Read matrix entries (sub 5..46) as 16-byte strings, parse to double
     for (uint8_t i = 0; i < 42; ++i) {
+#ifdef UNIT_TEST_HOST
+        if (EtherCAT::Raw::g_sdo_cancel_flag && !EtherCAT::Raw::g_sdo_cancel_flag->load()) {
+            TETHER_LOGW("axia80", "Calibration read interrupted by signal");
+            return false;
+        }
+#endif
         char buf[17] = {};
         sz = sizeof(buf) - 1;
         if (sl.sdoRead(Axia80::OD_CALIBRATION_MATRIX, Axia80::CAL_SUBIDX_MATRIX_FX_G0 + i,

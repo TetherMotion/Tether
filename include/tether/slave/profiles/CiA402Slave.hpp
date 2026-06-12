@@ -71,6 +71,7 @@
 #include <array>
 #include <atomic>
 #include <functional>
+#include <magic_enum/magic_enum.hpp>
 
 namespace EtherCAT {
 namespace slave {
@@ -115,23 +116,6 @@ enum class CiA402State : uint8_t {
     FaultReactionActive= 6,
     Fault              = 7,
 };
-
-/**
- * @brief Convert CiA 402 state to string
- */
-inline const char* cia402StateToString(CiA402State state) {
-    switch (state) {
-        case CiA402State::NotReadyToSwitchOn:  return "NOT_READY_TO_SWITCH_ON";
-        case CiA402State::SwitchOnDisabled:    return "SWITCH_ON_DISABLED";
-        case CiA402State::ReadyToSwitchOn:     return "READY_TO_SWITCH_ON";
-        case CiA402State::SwitchedOn:          return "SWITCHED_ON";
-        case CiA402State::OperationEnabled:    return "OPERATION_ENABLED";
-        case CiA402State::QuickStopActive:     return "QUICK_STOP_ACTIVE";
-        case CiA402State::FaultReactionActive: return "FAULT_REACTION_ACTIVE";
-        case CiA402State::Fault:               return "FAULT";
-        default: return "UNKNOWN";
-    }
-}
 
 // ============================================================================
 // CiA 402 Slave Configuration

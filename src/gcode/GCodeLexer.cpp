@@ -912,24 +912,6 @@ std::string stripComments(const char* line) {
 // Token utilities
 // ============================================================================
 
-const char* tokenTypeToString(LexerTokenType type) {
-    switch (type) {
-        case LexerTokenType::WORD: return "WORD";
-        case LexerTokenType::OCODE_NUMBER: return "OCODE_NUMBER";
-        case LexerTokenType::OCODE_NAME: return "OCODE_NAME";
-        case LexerTokenType::OCODE_KEYWORD: return "OCODE_KEYWORD";
-        case LexerTokenType::PARAMETER: return "PARAMETER";
-        case LexerTokenType::EXPRESSION: return "EXPRESSION";
-        case LexerTokenType::COMMENT: return "COMMENT";
-        case LexerTokenType::BLOCK_DELETE: return "BLOCK_DELETE";
-        case LexerTokenType::PERCENT: return "PERCENT";
-        case LexerTokenType::EOL: return "EOL";
-        case LexerTokenType::END: return "END";
-        case LexerTokenType::ERROR: return "ERROR";
-        default: return "UNKNOWN";
-    }
-}
-
 char wordLetterToChar(WordLetter letter) {
     if (letter == WordLetter::INVALID) return '?';
     const uint8_t v = static_cast<uint8_t>(letter);
@@ -978,7 +960,7 @@ int axisFromWordLetter(WordLetter letter) {
 
 std::string formatToken(const LexerToken& token) {
     std::ostringstream oss;
-    oss << tokenTypeToString(token.type) << "@" << token.line << ":" << token.column;
+    oss << magic_enum::enum_name(token.type) << "@" << token.line << ":" << token.column;
     if (token.type == LexerTokenType::WORD) {
         oss << " " << wordLetterToChar(token.letter) << token.value;
     } else if (token.type == LexerTokenType::COMMENT) {

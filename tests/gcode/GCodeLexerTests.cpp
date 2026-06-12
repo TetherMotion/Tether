@@ -11,6 +11,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <magic_enum/magic_enum.hpp>
 #include <tether/gcode/GCodeLexer.hpp>
 #include <tether/gcode/GCodeTypes.hpp>
 #include <vector>
@@ -705,17 +706,17 @@ TEST_F(LexerTest, ClearError) {
 // ============================================================================
 
 TEST_F(LexerTest, TokenTypeToString) {
-    EXPECT_STREQ(tokenTypeToString(LexerTokenType::WORD), "WORD");
-    EXPECT_STREQ(tokenTypeToString(LexerTokenType::COMMENT), "COMMENT");
-    EXPECT_STREQ(tokenTypeToString(LexerTokenType::EXPRESSION), "EXPRESSION");
-    EXPECT_STREQ(tokenTypeToString(LexerTokenType::OCODE_NUMBER), "OCODE_NUMBER");
-    EXPECT_STREQ(tokenTypeToString(LexerTokenType::OCODE_NAME), "OCODE_NAME");
-    EXPECT_STREQ(tokenTypeToString(LexerTokenType::PARAMETER), "PARAMETER");
-    EXPECT_STREQ(tokenTypeToString(LexerTokenType::BLOCK_DELETE), "BLOCK_DELETE");
-    EXPECT_STREQ(tokenTypeToString(LexerTokenType::PERCENT), "PERCENT");
-    EXPECT_STREQ(tokenTypeToString(LexerTokenType::EOL), "EOL");
-    EXPECT_STREQ(tokenTypeToString(LexerTokenType::END), "END");
-    EXPECT_STREQ(tokenTypeToString(LexerTokenType::ERROR), "ERROR");
+    EXPECT_STREQ(magic_enum::enum_name(LexerTokenType::WORD).data(), "WORD");
+    EXPECT_STREQ(magic_enum::enum_name(LexerTokenType::COMMENT).data(), "COMMENT");
+    EXPECT_STREQ(magic_enum::enum_name(LexerTokenType::EXPRESSION).data(), "EXPRESSION");
+    EXPECT_STREQ(magic_enum::enum_name(LexerTokenType::OCODE_NUMBER).data(), "OCODE_NUMBER");
+    EXPECT_STREQ(magic_enum::enum_name(LexerTokenType::OCODE_NAME).data(), "OCODE_NAME");
+    EXPECT_STREQ(magic_enum::enum_name(LexerTokenType::PARAMETER).data(), "PARAMETER");
+    EXPECT_STREQ(magic_enum::enum_name(LexerTokenType::BLOCK_DELETE).data(), "BLOCK_DELETE");
+    EXPECT_STREQ(magic_enum::enum_name(LexerTokenType::PERCENT).data(), "PERCENT");
+    EXPECT_STREQ(magic_enum::enum_name(LexerTokenType::EOL).data(), "EOL");
+    EXPECT_STREQ(magic_enum::enum_name(LexerTokenType::END).data(), "END");
+    EXPECT_STREQ(magic_enum::enum_name(LexerTokenType::ERROR).data(), "ERROR");
 }
 
 TEST_F(LexerTest, WordLetterToChar) {

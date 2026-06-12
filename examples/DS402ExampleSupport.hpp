@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <magic_enum/magic_enum.hpp>
 
 #include "tether/platform/Platform.hpp"
 #include "tether/profiles/cia402/DS402Master.hpp"
@@ -58,7 +59,7 @@ inline bool startHostMasterSession(const std::string& interface_name,
     const auto init_result = session.ethernet->init(config);
     if (init_result != EtherCAT::HAL::Error::OK) {
         TETHER_LOGE(tag, "Failed to init '%s' (%s)", interface_name.c_str(),
-                    EtherCAT::HAL::errorToString(init_result));
+                    magic_enum::enum_name(init_result).data());
         session.ethernet.reset();
         return false;
     }

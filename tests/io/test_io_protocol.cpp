@@ -3,6 +3,7 @@
  * @brief Unit tests for Protocol.hpp — BufWriter, BufReader, varint, ValueType utilities.
  */
 #include <gtest/gtest.h>
+#include <magic_enum/magic_enum.hpp>
 #include "tether/io/Protocol.hpp"
 
 using namespace tether::io;
@@ -38,12 +39,11 @@ TEST(IOProtocol, IsVariableLength) {
 }
 
 TEST(IOProtocol, ValueTypeName) {
-    EXPECT_STREQ(valueTypeName(ValueType::U8), "u8");
-    EXPECT_STREQ(valueTypeName(ValueType::F64), "f64");
-    EXPECT_STREQ(valueTypeName(ValueType::Bool), "bool");
-    EXPECT_STREQ(valueTypeName(ValueType::String), "string");
-    EXPECT_STREQ(valueTypeName(ValueType::Enum), "enum");
-    EXPECT_STREQ(valueTypeName(static_cast<ValueType>(255)), "unknown");
+    EXPECT_STREQ(magic_enum::enum_name(ValueType::U8).data(), "U8");
+    EXPECT_STREQ(magic_enum::enum_name(ValueType::F64).data(), "F64");
+    EXPECT_STREQ(magic_enum::enum_name(ValueType::Bool).data(), "Bool");
+    EXPECT_STREQ(magic_enum::enum_name(ValueType::String).data(), "String");
+    EXPECT_STREQ(magic_enum::enum_name(ValueType::Enum).data(), "Enum");
 }
 
 // ===========================================================================

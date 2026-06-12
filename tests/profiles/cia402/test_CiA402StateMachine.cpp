@@ -3,6 +3,7 @@
  * @brief Comprehensive tests for CiA402::StateMachine, ControlWord/StatusWord helpers
  */
 #include <gtest/gtest.h>
+#include <magic_enum/magic_enum.hpp>
 #include "tether/profiles/cia402/CiA402StateMachine.hpp"
 #include "tether/profiles/cia402/CiA402Config.hpp"
 
@@ -327,17 +328,17 @@ TEST_F(CiA402SMTest, FaultAndReset) {
 // ============================================================================
 
 TEST(CiA402ConfigTest, StateToString) {
-    auto s = state_to_string(State::OperationEnabled);
-    EXPECT_NE(s, nullptr);
-    auto s2 = state_to_string(State::Fault);
-    EXPECT_NE(s2, nullptr);
+    auto s = magic_enum::enum_name(State::OperationEnabled);
+    EXPECT_FALSE(s.empty());
+    auto s2 = magic_enum::enum_name(State::Fault);
+    EXPECT_FALSE(s2.empty());
 }
 
 TEST(CiA402ConfigTest, ModeToString) {
-    auto m = mode_to_string(OperatingMode::CyclicSyncPosition);
-    EXPECT_NE(m, nullptr);
-    auto m2 = mode_to_string(OperatingMode::Homing);
-    EXPECT_NE(m2, nullptr);
+    auto m = magic_enum::enum_name(OperatingMode::CyclicSyncPosition);
+    EXPECT_FALSE(m.empty());
+    auto m2 = magic_enum::enum_name(OperatingMode::Homing);
+    EXPECT_FALSE(m2.empty());
 }
 
 TEST(CiA402ConfigTest, ControlWordBits) {

@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <vector>
+#include <magic_enum/magic_enum.hpp>
 
 using namespace EtherCAT;
 using namespace EtherCAT::slave;
@@ -409,25 +410,25 @@ TEST(MacAddressCovTest, EtherCATMulticast) {
 // ============================================================================
 
 TEST(HALErrorCovTest, ErrorToString) {
-    EXPECT_STREQ(HAL::errorToString(HAL::Error::OK), "OK");
-    EXPECT_STREQ(HAL::errorToString(HAL::Error::Timeout), "Timeout");
-    EXPECT_STREQ(HAL::errorToString(HAL::Error::NotInitialized), "Not initialized");
-    EXPECT_STREQ(HAL::errorToString(HAL::Error::AlreadyInitialized), "Already initialized");
-    EXPECT_STREQ(HAL::errorToString(HAL::Error::WouldBlock), "Would block");
-    EXPECT_STREQ(HAL::errorToString(HAL::Error::BufferTooSmall), "Buffer too small");
-    EXPECT_STREQ(HAL::errorToString(HAL::Error::LinkDown), "Link down");
-    EXPECT_STREQ(HAL::errorToString(HAL::Error::TransmitFailed), "Transmit failed");
-    EXPECT_STREQ(HAL::errorToString(HAL::Error::ReceiveFailed), "Receive failed");
-    EXPECT_STREQ(HAL::errorToString(HAL::Error::ConfigurationFailed), "Configuration failed");
-    EXPECT_STREQ(HAL::errorToString(HAL::Error::InternalError), "Internal error");
-    EXPECT_STREQ(HAL::errorToString(HAL::Error::NotSupported), "Not supported");
-    EXPECT_STREQ(HAL::errorToString(HAL::Error::InvalidArgument), "Invalid argument");
-    EXPECT_STREQ(HAL::errorToString(HAL::Error::NoMemory), "Out of memory");
-    EXPECT_STREQ(HAL::errorToString(HAL::Error::BufferFull), "Buffer full");
-    EXPECT_STREQ(HAL::errorToString(HAL::Error::Empty), "Empty");
-    EXPECT_STREQ(HAL::errorToString(HAL::Error::PermissionDenied), "Permission denied");
-    EXPECT_STREQ(HAL::errorToString(HAL::Error::InterfaceNotFound), "Interface not found");
-    EXPECT_STREQ(HAL::errorToString(HAL::Error::Cancelled), "Operation cancelled");
+    EXPECT_STREQ(magic_enum::enum_name(HAL::Error::OK).data(), "OK");
+    EXPECT_STREQ(magic_enum::enum_name(HAL::Error::Timeout).data(), "Timeout");
+    EXPECT_STREQ(magic_enum::enum_name(HAL::Error::NotInitialized).data(), "NotInitialized");
+    EXPECT_STREQ(magic_enum::enum_name(HAL::Error::AlreadyInitialized).data(), "AlreadyInitialized");
+    EXPECT_STREQ(magic_enum::enum_name(HAL::Error::WouldBlock).data(), "WouldBlock");
+    EXPECT_STREQ(magic_enum::enum_name(HAL::Error::BufferTooSmall).data(), "BufferTooSmall");
+    EXPECT_STREQ(magic_enum::enum_name(HAL::Error::LinkDown).data(), "LinkDown");
+    EXPECT_STREQ(magic_enum::enum_name(HAL::Error::TransmitFailed).data(), "TransmitFailed");
+    EXPECT_STREQ(magic_enum::enum_name(HAL::Error::ReceiveFailed).data(), "ReceiveFailed");
+    EXPECT_STREQ(magic_enum::enum_name(HAL::Error::ConfigurationFailed).data(), "ConfigurationFailed");
+    EXPECT_STREQ(magic_enum::enum_name(HAL::Error::InternalError).data(), "InternalError");
+    EXPECT_STREQ(magic_enum::enum_name(HAL::Error::NotSupported).data(), "NotSupported");
+    EXPECT_STREQ(magic_enum::enum_name(HAL::Error::InvalidArgument).data(), "InvalidArgument");
+    EXPECT_STREQ(magic_enum::enum_name(HAL::Error::NoMemory).data(), "NoMemory");
+    EXPECT_STREQ(magic_enum::enum_name(HAL::Error::BufferFull).data(), "BufferFull");
+    EXPECT_STREQ(magic_enum::enum_name(HAL::Error::Empty).data(), "Empty");
+    EXPECT_STREQ(magic_enum::enum_name(HAL::Error::PermissionDenied).data(), "PermissionDenied");
+    EXPECT_STREQ(magic_enum::enum_name(HAL::Error::InterfaceNotFound).data(), "InterfaceNotFound");
+    EXPECT_STREQ(magic_enum::enum_name(HAL::Error::Cancelled).data(), "Cancelled");
 }
 
 // ============================================================================

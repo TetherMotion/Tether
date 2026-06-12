@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <magic_enum/magic_enum.hpp>
 #include "tether/ethercat/ObjectDictionary.hpp"
 #include "tether/ethercat/SyncManager.hpp"
 
@@ -69,30 +70,6 @@ enum class SyncMode : uint16_t {
     DcSync0  = 2, ///< DC SYNC0 — PDO update locked to the SYNC0 signal.
     DcSync1  = 3, ///< DC SYNC1 — PDO update locked to the SYNC1 signal.
 };
-
-/**
- * @brief Return a human-readable name for a @p SyncMode value.
- *
- * Unknown values show as "(unknown:<n>)".
- */
-inline const char* toString(SyncMode mode) {
-    switch (mode) {
-        case SyncMode::FreeRun:  return "FreeRun";
-        case SyncMode::SMSync:   return "SM-Synchronous";
-        case SyncMode::DcSync0:  return "DC-SYNC0";
-        case SyncMode::DcSync1:  return "DC-SYNC1";
-        default:                 return "(unknown)";
-    }
-}
-
-/**
- * @brief Convert a raw uint16_t sync-mode value to its string representation.
- *
- * Convenience overload so callers can pass the raw SDO-read value directly.
- */
-inline const char* syncModeToString(uint16_t raw) {
-    return toString(static_cast<SyncMode>(raw));
-}
 
 // ============================================================================
 // SupportedSyncTypes — bitmask of supported modes (sub-index 0x04)

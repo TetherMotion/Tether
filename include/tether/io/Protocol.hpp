@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
+#include <magic_enum/magic_enum.hpp>
 
 namespace tether { namespace io {
 
@@ -137,28 +138,6 @@ inline constexpr uint8_t valueTypeSize(ValueType t) {
         case ValueType::U64:  case ValueType::I64:  case ValueType::F64: return 8;
         case ValueType::String: case ValueType::Binary: case ValueType::Struct: return 0;
         default: return 0;
-    }
-}
-
-/// Returns a human-readable name for a ValueType.
-inline const char* valueTypeName(ValueType t) {
-    switch (t) {
-        case ValueType::U8:     return "u8";
-        case ValueType::U16:    return "u16";
-        case ValueType::U32:    return "u32";
-        case ValueType::U64:    return "u64";
-        case ValueType::I8:     return "i8";
-        case ValueType::I16:    return "i16";
-        case ValueType::I32:    return "i32";
-        case ValueType::I64:    return "i64";
-        case ValueType::F32:    return "f32";
-        case ValueType::F64:    return "f64";
-        case ValueType::Bool:   return "bool";
-        case ValueType::String: return "string";
-        case ValueType::Binary: return "binary";
-        case ValueType::Struct: return "struct";
-        case ValueType::Enum:   return "enum";
-        default: return "unknown";
     }
 }
 

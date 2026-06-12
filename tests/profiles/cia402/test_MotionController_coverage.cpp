@@ -4,6 +4,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <magic_enum/magic_enum.hpp>
 #include <tether/profiles/cia402/MotionController.hpp>
 #include <tether/profiles/cia402/MotionProfile.hpp>
 #include "mocks/MockDriveBackend.hpp"
@@ -17,27 +18,27 @@ using namespace CiA402;
 class CiA402UtilFunctionTest : public ::testing::Test {};
 
 TEST_F(CiA402UtilFunctionTest, StateToString) {
-    EXPECT_NE(nullptr, stateToString(State::NotReadyToSwitchOn));
-    EXPECT_NE(nullptr, stateToString(State::SwitchOnDisabled));
-    EXPECT_NE(nullptr, stateToString(State::ReadyToSwitchOn));
-    EXPECT_NE(nullptr, stateToString(State::SwitchedOn));
-    EXPECT_NE(nullptr, stateToString(State::OperationEnabled));
-    EXPECT_NE(nullptr, stateToString(State::QuickStopActive));
-    EXPECT_NE(nullptr, stateToString(State::FaultReactionActive));
-    EXPECT_NE(nullptr, stateToString(State::Fault));
+    EXPECT_FALSE(magic_enum::enum_name(State::NotReadyToSwitchOn).empty());
+    EXPECT_FALSE(magic_enum::enum_name(State::SwitchOnDisabled).empty());
+    EXPECT_FALSE(magic_enum::enum_name(State::ReadyToSwitchOn).empty());
+    EXPECT_FALSE(magic_enum::enum_name(State::SwitchedOn).empty());
+    EXPECT_FALSE(magic_enum::enum_name(State::OperationEnabled).empty());
+    EXPECT_FALSE(magic_enum::enum_name(State::QuickStopActive).empty());
+    EXPECT_FALSE(magic_enum::enum_name(State::FaultReactionActive).empty());
+    EXPECT_FALSE(magic_enum::enum_name(State::Fault).empty());
 }
 
 TEST_F(CiA402UtilFunctionTest, ModeToString) {
-    EXPECT_NE(nullptr, modeToString(OperatingMode::NoMode));
-    EXPECT_NE(nullptr, modeToString(OperatingMode::ProfilePosition));
-    EXPECT_NE(nullptr, modeToString(OperatingMode::Velocity));
-    EXPECT_NE(nullptr, modeToString(OperatingMode::ProfileVelocity));
-    EXPECT_NE(nullptr, modeToString(OperatingMode::ProfileTorque));
-    EXPECT_NE(nullptr, modeToString(OperatingMode::Homing));
-    EXPECT_NE(nullptr, modeToString(OperatingMode::InterpolatedPosition));
-    EXPECT_NE(nullptr, modeToString(OperatingMode::CyclicSyncPosition));
-    EXPECT_NE(nullptr, modeToString(OperatingMode::CyclicSyncVelocity));
-    EXPECT_NE(nullptr, modeToString(OperatingMode::CyclicSyncTorque));
+    EXPECT_FALSE(magic_enum::enum_name(OperatingMode::NoMode).empty());
+    EXPECT_FALSE(magic_enum::enum_name(OperatingMode::ProfilePosition).empty());
+    EXPECT_FALSE(magic_enum::enum_name(OperatingMode::Velocity).empty());
+    EXPECT_FALSE(magic_enum::enum_name(OperatingMode::ProfileVelocity).empty());
+    EXPECT_FALSE(magic_enum::enum_name(OperatingMode::ProfileTorque).empty());
+    EXPECT_FALSE(magic_enum::enum_name(OperatingMode::Homing).empty());
+    EXPECT_FALSE(magic_enum::enum_name(OperatingMode::InterpolatedPosition).empty());
+    EXPECT_FALSE(magic_enum::enum_name(OperatingMode::CyclicSyncPosition).empty());
+    EXPECT_FALSE(magic_enum::enum_name(OperatingMode::CyclicSyncVelocity).empty());
+    EXPECT_FALSE(magic_enum::enum_name(OperatingMode::CyclicSyncTorque).empty());
 }
 
 TEST_F(CiA402UtilFunctionTest, ErrorToString) {
@@ -56,11 +57,10 @@ TEST_F(CiA402UtilFunctionTest, ErrorToString) {
 }
 
 TEST_F(CiA402UtilFunctionTest, HomingMethodToString) {
-    EXPECT_NE(nullptr, homingMethodToString(HomingMethod::NoHoming));
-    EXPECT_NE(nullptr, homingMethodToString(HomingMethod::NegLimitIndex));
-    EXPECT_NE(nullptr, homingMethodToString(HomingMethod::CurrentPosition));
-    EXPECT_NE(nullptr, homingMethodToString(HomingMethod::NegDirIndexPulse));
-    EXPECT_NE(nullptr, homingMethodToString(static_cast<HomingMethod>(99)));
+    EXPECT_FALSE(magic_enum::enum_name(HomingMethod::NoHoming).empty());
+    EXPECT_FALSE(magic_enum::enum_name(HomingMethod::NegLimitIndex).empty());
+    EXPECT_FALSE(magic_enum::enum_name(HomingMethod::CurrentPosition).empty());
+    EXPECT_FALSE(magic_enum::enum_name(HomingMethod::NegDirIndexPulse).empty());
 }
 
 // ============================================================================
@@ -546,24 +546,24 @@ TEST_F(MotionControllerCovTest, SetGetCycleTimeUs) {
 // ============================================================================
 
 TEST(CiA402ConfigTest, StateToStringInline) {
-    EXPECT_NE(nullptr, state_to_string(State::NotReadyToSwitchOn));
-    EXPECT_NE(nullptr, state_to_string(State::SwitchOnDisabled));
-    EXPECT_NE(nullptr, state_to_string(State::ReadyToSwitchOn));
-    EXPECT_NE(nullptr, state_to_string(State::SwitchedOn));
-    EXPECT_NE(nullptr, state_to_string(State::OperationEnabled));
-    EXPECT_NE(nullptr, state_to_string(State::QuickStopActive));
-    EXPECT_NE(nullptr, state_to_string(State::FaultReactionActive));
-    EXPECT_NE(nullptr, state_to_string(State::Fault));
+    EXPECT_FALSE(magic_enum::enum_name(State::NotReadyToSwitchOn).empty());
+    EXPECT_FALSE(magic_enum::enum_name(State::SwitchOnDisabled).empty());
+    EXPECT_FALSE(magic_enum::enum_name(State::ReadyToSwitchOn).empty());
+    EXPECT_FALSE(magic_enum::enum_name(State::SwitchedOn).empty());
+    EXPECT_FALSE(magic_enum::enum_name(State::OperationEnabled).empty());
+    EXPECT_FALSE(magic_enum::enum_name(State::QuickStopActive).empty());
+    EXPECT_FALSE(magic_enum::enum_name(State::FaultReactionActive).empty());
+    EXPECT_FALSE(magic_enum::enum_name(State::Fault).empty());
 }
 
 TEST(CiA402ConfigTest, ModeToStringInline) {
-    EXPECT_NE(nullptr, mode_to_string(OperatingMode::NoMode));
-    EXPECT_NE(nullptr, mode_to_string(OperatingMode::ProfilePosition));
-    EXPECT_NE(nullptr, mode_to_string(OperatingMode::CyclicSyncPosition));
-    EXPECT_NE(nullptr, mode_to_string(OperatingMode::CyclicSyncVelocity));
-    EXPECT_NE(nullptr, mode_to_string(OperatingMode::CyclicSyncTorque));
-    EXPECT_NE(nullptr, mode_to_string(OperatingMode::Homing));
-    EXPECT_NE(nullptr, mode_to_string(OperatingMode::InterpolatedPosition));
+    EXPECT_FALSE(magic_enum::enum_name(OperatingMode::NoMode).empty());
+    EXPECT_FALSE(magic_enum::enum_name(OperatingMode::ProfilePosition).empty());
+    EXPECT_FALSE(magic_enum::enum_name(OperatingMode::CyclicSyncPosition).empty());
+    EXPECT_FALSE(magic_enum::enum_name(OperatingMode::CyclicSyncVelocity).empty());
+    EXPECT_FALSE(magic_enum::enum_name(OperatingMode::CyclicSyncTorque).empty());
+    EXPECT_FALSE(magic_enum::enum_name(OperatingMode::Homing).empty());
+    EXPECT_FALSE(magic_enum::enum_name(OperatingMode::InterpolatedPosition).empty());
 }
 
 // PDO preset tests are in test_CiA402DrivePDO.cpp — skipped here to avoid namespace conflicts

@@ -58,6 +58,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <magic_enum/magic_enum.hpp>
 #include <cfloat>
 
 // ============================================================================
@@ -635,23 +636,6 @@ enum class State : uint8_t {
 };
 
 /**
- * @brief Get string name for state
- */
-inline const char* state_to_string(State state) {
-    switch (state) {
-        case State::NotReadyToSwitchOn:  return "NotReadyToSwitchOn";
-        case State::SwitchOnDisabled:    return "SwitchOnDisabled";
-        case State::ReadyToSwitchOn:     return "ReadyToSwitchOn";
-        case State::SwitchedOn:          return "SwitchedOn";
-        case State::OperationEnabled:    return "OperationEnabled";
-        case State::QuickStopActive:     return "QuickStopActive";
-        case State::FaultReactionActive: return "FaultReactionActive";
-        case State::Fault:               return "Fault";
-        default:                         return "Unknown";
-    }
-}
-
-/**
  * @brief CiA 402 operating modes
  */
 enum class OperatingMode : int8_t {
@@ -667,25 +651,6 @@ enum class OperatingMode : int8_t {
     CyclicSyncVelocity  = 9,    ///< Cyclic synchronous velocity mode (CSV)
     CyclicSyncTorque    = 10,   ///< Cyclic synchronous torque mode (CST)
 };
-
-/**
- * @brief Get string name for operating mode
- */
-inline const char* mode_to_string(OperatingMode mode) {
-    switch (mode) {
-        case OperatingMode::NoMode:              return "NoMode";
-        case OperatingMode::ProfilePosition:     return "ProfilePosition";
-        case OperatingMode::Velocity:            return "Velocity";
-        case OperatingMode::ProfileVelocity:     return "ProfileVelocity";
-        case OperatingMode::ProfileTorque:       return "ProfileTorque";
-        case OperatingMode::Homing:              return "Homing";
-        case OperatingMode::InterpolatedPosition:return "InterpolatedPosition";
-        case OperatingMode::CyclicSyncPosition:  return "CyclicSyncPosition";
-        case OperatingMode::CyclicSyncVelocity:  return "CyclicSyncVelocity";
-        case OperatingMode::CyclicSyncTorque:    return "CyclicSyncTorque";
-        default:                                 return "Unknown";
-    }
-}
 
 /**
  * @brief Homing methods as per CiA 402

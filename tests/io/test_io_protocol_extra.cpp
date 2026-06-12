@@ -3,6 +3,7 @@
  * @brief Additional coverage tests for Protocol.hpp edge cases.
  */
 #include <gtest/gtest.h>
+#include <magic_enum/magic_enum.hpp>
 #include "tether/io/Protocol.hpp"
 #include "tether/io/ParameterExposer.hpp"
 
@@ -172,15 +173,15 @@ TEST(IOProtocolExtra, ValueTypeSizeUnknown) {
 }
 
 TEST(IOProtocolExtra, ValueTypeNameAllTypes) {
-    EXPECT_STREQ(valueTypeName(ValueType::U16), "u16");
-    EXPECT_STREQ(valueTypeName(ValueType::U64), "u64");
-    EXPECT_STREQ(valueTypeName(ValueType::I8), "i8");
-    EXPECT_STREQ(valueTypeName(ValueType::I16), "i16");
-    EXPECT_STREQ(valueTypeName(ValueType::I32), "i32");
-    EXPECT_STREQ(valueTypeName(ValueType::I64), "i64");
-    EXPECT_STREQ(valueTypeName(ValueType::F32), "f32");
-    EXPECT_STREQ(valueTypeName(ValueType::Binary), "binary");
-    EXPECT_STREQ(valueTypeName(ValueType::Struct), "struct");
+    EXPECT_STREQ(magic_enum::enum_name(ValueType::U16).data(), "U16");
+    EXPECT_STREQ(magic_enum::enum_name(ValueType::U64).data(), "U64");
+    EXPECT_STREQ(magic_enum::enum_name(ValueType::I8).data(), "I8");
+    EXPECT_STREQ(magic_enum::enum_name(ValueType::I16).data(), "I16");
+    EXPECT_STREQ(magic_enum::enum_name(ValueType::I32).data(), "I32");
+    EXPECT_STREQ(magic_enum::enum_name(ValueType::I64).data(), "I64");
+    EXPECT_STREQ(magic_enum::enum_name(ValueType::F32).data(), "F32");
+    EXPECT_STREQ(magic_enum::enum_name(ValueType::Binary).data(), "Binary");
+    EXPECT_STREQ(magic_enum::enum_name(ValueType::Struct).data(), "Struct");
 }
 
 TEST(IOProtocolExtra, IsVariableLengthCoverage) {

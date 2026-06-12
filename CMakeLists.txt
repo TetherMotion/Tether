@@ -42,6 +42,26 @@ elseif(NOT EXISTS "${SUBMODULE_PATH}/include/SLIPStream/Buffer.hpp")
     )
 endif()
 
+set(MAGIC_ENUM_PATH "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/magic_enum")
+if(NOT EXISTS "${MAGIC_ENUM_PATH}")
+    message(FATAL_ERROR
+        "Git submodule 'magic_enum' is not initialized.\n"
+        "Please run the following command in the repository root:\n"
+        "  git submodule update --init\n"
+        "Then re-run CMake."
+    )
+elseif(NOT EXISTS "${MAGIC_ENUM_PATH}/include/magic_enum/magic_enum.hpp")
+    message(FATAL_ERROR
+        "Git submodule 'magic_enum' appears to be initialized but is empty or incomplete.\n"
+        "Please run the following command in the repository root:\n"
+        "  git submodule update --init\n"
+        "Then re-run CMake."
+    )
+endif()
+
+# Add magic_enum include directory
+include_directories("${MAGIC_ENUM_PATH}/include")
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)

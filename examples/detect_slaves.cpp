@@ -18,6 +18,7 @@
 #include <set>
 #include <sstream>
 #include <thread>
+#include <magic_enum/magic_enum.hpp>
 
 #include "tether/ethercat/EtherCATMaster.hpp"
 #include "tether/ethercat/EtherCATSlave.hpp"
@@ -254,7 +255,7 @@ int main(int argc, char** argv) {
                 TETHER_LOGE(TAG, "Permission denied — run as root or with CAP_NET_RAW");
             else
                 TETHER_LOGE(TAG, "Failed to init '%s' (%s)", iface.c_str(),
-                           EtherCAT::HAL::errorToString(err));
+                           magic_enum::enum_name(err).data());
             return 2;
         }
 
