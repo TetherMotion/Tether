@@ -77,9 +77,9 @@ TEST_F(LogicalAddressManagerTest, BuildAddressMapSingleSlave) {
     EXPECT_EQ(mgr.totalTxPDOBytes(), 12u);
     EXPECT_EQ(mgr.totalLogicalSize(), 20u);
 
-    EXPECT_EQ(mgr.getRxPDOLogicalAddr(0), 0u);
+    EXPECT_EQ(mgr.getRxPDOLogicalAddr(0), 0x10000u);
     EXPECT_EQ(mgr.getRxPDOLength(0), 8u);
-    EXPECT_EQ(mgr.getTxPDOLogicalAddr(0), 8u);
+    EXPECT_EQ(mgr.getTxPDOLogicalAddr(0), 0x10008u);
     EXPECT_EQ(mgr.getTxPDOLength(0), 12u);
     EXPECT_TRUE(mgr.hasSlavePDOs(0));
 }
@@ -108,15 +108,15 @@ TEST_F(LogicalAddressManagerTest, BuildAddressMapMultiSlave) {
     EXPECT_EQ(mgr.totalLogicalSize(), 30u);
 
     // Slave 0 addresses
-    EXPECT_EQ(mgr.getRxPDOLogicalAddr(0), 0u);
+    EXPECT_EQ(mgr.getRxPDOLogicalAddr(0), 0x10000u);
     EXPECT_EQ(mgr.getRxPDOLength(0), 8u);
-    EXPECT_EQ(mgr.getTxPDOLogicalAddr(0), 12u);  // after all RxPDOs
+    EXPECT_EQ(mgr.getTxPDOLogicalAddr(0), 0x1000Cu);  // 0x10000 + 12
     EXPECT_EQ(mgr.getTxPDOLength(0), 12u);
 
     // Slave 1 addresses
-    EXPECT_EQ(mgr.getRxPDOLogicalAddr(1), 8u);
+    EXPECT_EQ(mgr.getRxPDOLogicalAddr(1), 0x10008u);
     EXPECT_EQ(mgr.getRxPDOLength(1), 4u);
-    EXPECT_EQ(mgr.getTxPDOLogicalAddr(1), 24u);  // 12 + 12
+    EXPECT_EQ(mgr.getTxPDOLogicalAddr(1), 0x10018u);  // 0x1000C + 12
     EXPECT_EQ(mgr.getTxPDOLength(1), 6u);
 }
 
@@ -193,7 +193,7 @@ TEST_F(LRWExchangeTest, ExchangeAllLRWSuccess) {
     uint16_t captured_len = 0;
 
     EXPECT_CALL(transport, allocIdx()).WillOnce(Return(42));
-    EXPECT_CALL(transport, sendSingleDatagram(Command::LRW, 42, 0, 0, _, _, true))
+    EXPECT_CALL(transport, sendSingleDatagram(Command::LRW, 42, 0, 1, _, _, true))
         .WillOnce(Invoke([&](Command, uint8_t, uint16_t, uint16_t,
                               const void* data, uint16_t datalen, bool) -> bool {
             std::memcpy(captured_payload, data, datalen);
@@ -296,7 +296,7 @@ TEST_F(LRWExchangeTest, ExchangeLRWForSlaves) {
     multi_mapping.add_txpdo(1, &tx1, 8, 0x1A00, PDOAddressMode::Logical);
 
     EXPECT_CALL(transport, allocIdx()).WillOnce(Return(42));
-    EXPECT_CALL(transport, sendSingleDatagram(Command::LRW, 42, 0, 0, _, 12, true))
+    EXPECT_CALL(transport, sendSingleDatagram(Command::LRW, 42, 0, 1, _, 12, true))
         .WillOnce(Return(true));
     EXPECT_CALL(transport, waitForResponseIdx(_, _, _))
         .WillOnce(Invoke([](uint8_t, unsigned int, RxDatagram& out) -> bool {

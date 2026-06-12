@@ -33,6 +33,7 @@
 #include <mutex>
 #include <type_traits>
 #include <vector>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "logging/DeduplicatingLogger.hpp"
@@ -261,6 +262,32 @@ public:
      * @brief Access the SII reader (lazily created).
      */
     SII::SIIReader& siiReader();
+
+    // ---- SII EEPROM cache --------------------------------------------------
+
+    /**
+     * @brief Check the per-slave SII word cache.
+     *
+     * All SIIReader instances transparently hit this cache so ephemeral
+     * readers (created by readSII(), readSIIIdentity(), etc.) do not
+     * re-read already-fetched EEPROM words.
+     *
+     * @param slave_index  Slave index
+     * @param word_addr    EEPROM word address
+     * @param[out] out     Cached value (only valid on true return)
+     * @return true if the word is cached
+     */
+    bool getSIICachedWord(uint16_t slave_index, uint16_t word_addr, uint16_t& out) const;
+
+    /**
+     * @brief Store a word in the per-slave SII word cache.
+     */
+    void setSIICachedWord(uint16_t slave_index, uint16_t word_addr, uint16_t value);
+
+    /**
+     * @brief Clear the SII word cache for a given slave (or all slaves).
+     */
+    void clearSIICache(uint16_t slave_index);
 
     // ---- AL state management -----------------------------------------------
 
@@ -636,6 +663,9 @@ private:
 
     // SII reader (lazily created)
     std::unique_ptr<SII::SIIReader> sii_reader_;
+
+    // Per-slave EEPROM word cache (indexed by slave_index -> word_addr -> value)
+    std::vector<std::unordered_map<uint16_t, uint16_t>> sii_word_caches_;
 };
 
 // ============================================================================

@@ -75,6 +75,15 @@ bool SIIReader::waitNotBusy(uint16_t slave_index, uint16_t* out_status) {
 bool SIIReader::readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t* out) {
     if (out) *out = 0;
 
+    // Check the master-level per-slave cache before touching the bus.
+    uint16_t lo = 0, hi = 0;
+    const uint16_t wa = static_cast<uint16_t>(word_address & 0xFFFEu);
+    if (m_master.getSIICachedWord(slave_index, wa, lo) &&
+        m_master.getSIICachedWord(slave_index, static_cast<uint16_t>(wa + 1), hi)) {
+        if (out) *out = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 16);
+        return true;
+    }
+
     uint16_t estat = 0;
     if (!waitNotBusy(slave_index, &estat)) {
         return false;
@@ -124,6 +133,9 @@ bool SIIReader::readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t*
         if (out) {
             *out = Raw::le32_to_host(edat_le);
         }
+        // Populate the master-level cache so future readers hit it.
+        m_master.setSIICachedWord(slave_index, wa, static_cast<uint16_t>(edat_le & 0xFFFF));
+        m_master.setSIICachedWord(slave_index, static_cast<uint16_t>(wa + 1), static_cast<uint16_t>((edat_le >> 16) & 0xFFFF));
         return true;
 
     } while (nack_count > 0 && nack_count < 3);

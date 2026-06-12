@@ -50,6 +50,13 @@ void enableTxPDODebug(bool enable) {
     g_debug_tx_pdo = enable;
 }
 
+// Global debug flag for FMMU logging (defined in FMMUConfiguration.cpp)
+extern bool g_debug_fmmu;
+
+void enableFmmuDebug(bool enable) {
+    g_debug_fmmu = enable;
+}
+
 // ============================================================================
 // EtherCATSlave
 // ============================================================================

@@ -66,6 +66,8 @@ void EtherCATMaster::initSlaves(uint16_t count)
 {
     slaves_.clear();
     slaves_.reserve(count);
+    sii_word_caches_.clear();
+    sii_word_caches_.resize(count);
     for (uint16_t i = 0; i < count; ++i) {
         auto s = std::make_unique<EtherCATSlave>(*this, i);
         // Initialize SII cache for each slave
@@ -95,6 +97,29 @@ SII::SIIReader& EtherCATMaster::siiReader()
     }
     return *sii_reader_;
 }
+
+bool EtherCATMaster::getSIICachedWord(uint16_t slave_index, uint16_t word_addr, uint16_t& out) const
+{
+    if (slave_index >= sii_word_caches_.size()) return false;
+    const auto& cache = sii_word_caches_[slave_index];
+    auto it = cache.find(word_addr);
+    if (it == cache.end()) return false;
+    out = it->second;
+    return true;
+}
+
+void EtherCATMaster::setSIICachedWord(uint16_t slave_index, uint16_t word_addr, uint16_t value)
+{
+    if (slave_index >= sii_word_caches_.size()) return;
+    sii_word_caches_[slave_index][word_addr] = value;
+}
+
+void EtherCATMaster::clearSIICache(uint16_t slave_index)
+{
+    if (slave_index >= sii_word_caches_.size()) return;
+    sii_word_caches_[slave_index].clear();
+}
+
 bool EtherCATMaster::resolvePhysicalSlaveIndex(SlaveAddress slave_address, uint16_t& slave_index_out)
 {
     if (!slave_address.isPhysical()) {
@@ -256,8 +281,11 @@ bool EtherCATMaster::configureProcessDataSyncManagersFromSii(SlaveAddress slave_
 
     pdo_->finalizeMapping(slave_index);
 
-    // Write SM2/SM3 registers to slave BEFORE FMMU configuration.
-    // The ESC must see valid Sync Manager state before FMMUs reference them.
+    // Phase 1: Write SM2/SM3 registers with activation DISABLED.
+    // The ESC must see valid Sync Manager state before FMMUs reference them,
+    // but we must NOT enable the SMs yet — doing so starts the SM watchdog
+    // on strict ESCs (e.g. HMS Anybus). If the watchdog trips before FMMUs
+    // are configured, subsequent register accesses may be rejected.
     for (uint8_t sm = 2; sm < 4; sm++) {
         const auto& cfg = slave_configs[slave_index].sm[sm];
         if (cfg.type != PDO::SyncManagerType::Unused && cfg.phys_start_addr != 0) {
@@ -274,11 +302,8 @@ bool EtherCATMaster::configureProcessDataSyncManagersFromSii(SlaveAddress slave_
 
             writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 4), &cfg.control, 1, 200);
 
-            uint8_t activate = cfg.enable ? 0x01 : 0x00;
-            writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 6), &activate, 1, 200);
-
-            TETHER_LOGI(TAG, "Wrote SM%u to slave %u: Addr=0x%04X Len=%u Ctrl=0x%02X Act=0x%02X",
-                     sm, slave_index, cfg.phys_start_addr, cfg.length, cfg.control, activate);
+            TETHER_LOGI(TAG, "Wrote SM%u to slave %u: Addr=0x%04X Len=%u Ctrl=0x%02X Act=0x00 (disabled)",
+                     sm, slave_index, cfg.phys_start_addr, cfg.length, cfg.control);
         }
     }
 
@@ -288,7 +313,7 @@ bool EtherCATMaster::configureProcessDataSyncManagersFromSii(SlaveAddress slave_
     logical_addr_mgr_->buildAddressMap(pdo_->slaveConfigs(),
                                         getDiscoveredSlaveCount());
 
-    // Configure FMMUs using manager-provided logical addresses.
+    // Phase 2: Configure FMMUs while SMs are still disabled.
     if (sii_valid && logical_addr_mgr_->hasSlavePDOs(slave_index)) {
         uint32_t rx_log = logical_addr_mgr_->getRxPDOLogicalAddr(slave_index);
         uint16_t rx_len = logical_addr_mgr_->getRxPDOLength(slave_index);
@@ -313,6 +338,19 @@ bool EtherCATMaster::configureProcessDataSyncManagersFromSii(SlaveAddress slave_
         }
     } else {
         TETHER_LOGW(TAG, "Slave %u: SII unavailable — FMMU not configured", slave_index);
+    }
+
+    // Phase 3: Enable SM2/SM3 NOW that FMMUs are configured.
+    // This starts the SM watchdog — must happen as late as possible.
+    for (uint8_t sm = 2; sm < 4; sm++) {
+        const auto& cfg = slave_configs[slave_index].sm[sm];
+        if (cfg.type != PDO::SyncManagerType::Unused && cfg.phys_start_addr != 0 && cfg.enable) {
+            uint16_t base = static_cast<uint16_t>(0x0800 + sm * 8);
+            uint8_t activate = 0x01;
+            writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 6), &activate, 1, 200);
+            TETHER_LOGI(TAG, "Enabled SM%u on slave %u: Act=0x%01X",
+                     sm, slave_index, activate);
+        }
     }
 
     slave_configs[slave_index].configured = true;

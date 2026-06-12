@@ -503,6 +503,7 @@ int main(int argc, char** argv) {
     // Enable FMMU debug if requested
     bool fmmu_debug = debug_flags.count("fmmu");
     if (fmmu_debug) {
+        EtherCAT::enableFmmuDebug(true);
         TETHER_LOGI(TAG, "FMMU debug logging enabled");
     }
 

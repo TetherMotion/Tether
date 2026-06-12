@@ -45,6 +45,19 @@ static bool ec_eeprom_read_u32_ap(EtherCATMaster& master, uint16_t adp, uint16_t
 {
     if (out_u32) *out_u32 = 0;
 
+    // Convert ADP to slave_index for cache lookup.
+    // adp 0x0000 -> slave 0; adp 0xFFFF -> slave 1, etc.
+    const uint16_t slave_index = (adp == 0) ? 0 : static_cast<uint16_t>(0 - adp);
+    const uint16_t wa = static_cast<uint16_t>(eeprom_word_addr & 0xFFFEu);
+
+    // Check master-level cache before touching the bus.
+    uint16_t lo = 0, hi = 0;
+    if (master.getSIICachedWord(slave_index, wa, lo) &&
+        master.getSIICachedWord(slave_index, static_cast<uint16_t>(wa + 1), hi)) {
+        if (out_u32) *out_u32 = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 16);
+        return true;
+    }
+
     uint16_t estat = 0;
     if (!ec_eeprom_wait_not_busy_ap(master, adp, &estat, 500)) return false;
 
@@ -76,6 +89,9 @@ static bool ec_eeprom_read_u32_ap(EtherCATMaster& master, uint16_t adp, uint16_t
         if (!master.readRegister(EtherCATMaster::slaveAddressFromADP(adp), EC_REG_EEPDAT, edat_le, 200)) return false;
 
         if (out_u32) *out_u32 = le32_to_host(edat_le);
+        // Populate the master-level cache so future readers hit it.
+        master.setSIICachedWord(slave_index, wa, static_cast<uint16_t>(edat_le & 0xFFFF));
+        master.setSIICachedWord(slave_index, static_cast<uint16_t>(wa + 1), static_cast<uint16_t>((edat_le >> 16) & 0xFFFF));
         return true;
     } while (nackcnt > 0 && nackcnt < 3);
 

@@ -16,12 +16,26 @@
 #include "tether/ethercat/EtherCATMaster.hpp"
 #endif
 
+#include <cstdio>
 #include <cstring>
 
 namespace EtherCAT {
+
+// Global FMMU debug flag
+bool g_debug_fmmu = false;
+
 namespace fmmu {
 
 static const char* TAG = "fmmu";
+
+// Helper: dump a byte buffer as space-separated hex
+static void hexDump(const uint8_t* data, size_t len, char* out, size_t out_len) {
+    size_t pos = 0;
+    for (size_t i = 0; i < len && pos + 3 < out_len; i++) {
+        pos += static_cast<size_t>(std::snprintf(out + pos, out_len - pos, "%02X ", data[i]));
+    }
+    if (pos > 0) out[pos - 1] = '\0';
+}
 
 // ============================================================================
 // Utility Functions
@@ -269,15 +283,33 @@ bool FMMUManager::writeToSlave(uint16_t slave_index) {
                  fmmu.type,
                  fmmu.activate);
 
+        if (g_debug_fmmu) {
+            char hex_buf[128];
+            hexDump(reinterpret_cast<const uint8_t*>(&regs), sizeof(regs), hex_buf, sizeof(hex_buf));
+            TETHER_LOGI(TAG, "  [FMMU-DEBUG] apwr adp=0x%04X ado=0x%04X len=%zu bytes: %s",
+                     adp, reg_addr, sizeof(regs), hex_buf);
+        }
+
         if (!transport_.apwr(adp, reg_addr, &regs, sizeof(regs), 100)) {
-            TETHER_LOGE(TAG, "  FMMU%zu: Write failed!", i);
-            // Diagnostic probe: read back the activate byte to distinguish
-            // transport timeout from WKC=0 (slave present but no ack).
-            uint8_t probe = 0xFF;
-            if (transport_.aprd(adp, static_cast<uint16_t>(reg_addr + 0x0C), &probe, 1, 100)) {
-                TETHER_LOGE(TAG, "  FMMU%zu:  Slave responded to read probe (activate=0x%02X) — write had WKC=0 or was rejected", i, probe);
+            TETHER_LOGE(TAG, "  FMMU%zu: 16-byte write failed!", i);
+
+            // Fallback probe 1: try a 1-byte write to the activate register.
+            // Some ESCs reject 16-byte APWR but accept smaller writes.
+            uint8_t act_byte = regs.activate;
+            if (transport_.apwr(adp, static_cast<uint16_t>(reg_addr + 0x0C), &act_byte, 1, 100)) {
+                TETHER_LOGE(TAG, "  FMMU%zu:  1-byte activate write SUCCEEDED — 16-byte APWR rejected by ESC", i);
             } else {
-                TETHER_LOGE(TAG, "  FMMU%zu:  Slave did NOT respond to read probe — transport timeout or slave unreachable", i);
+                // Fallback probe 2: APRD the activate byte to check reachability.
+                uint8_t probe = 0xFF;
+                if (transport_.aprd(adp, static_cast<uint16_t>(reg_addr + 0x0C), &probe, 1, 100)) {
+                    if (probe == 0xFF) {
+                        TETHER_LOGE(TAG, "  FMMU%zu:  APRD returned frame but WKC=0 (probe still 0xFF) — slave ignores 0x%04X", i, reg_addr);
+                    } else {
+                        TETHER_LOGE(TAG, "  FMMU%zu:  APRD succeeded (activate=0x%02X) — 16-byte APWR had WKC=0 or was rejected", i, probe);
+                    }
+                } else {
+                    TETHER_LOGE(TAG, "  FMMU%zu:  Both 1-byte APWR and APRD failed — transport timeout or slave unreachable", i);
+                }
             }
             all_ok = false;
         }

@@ -94,6 +94,11 @@ void enableRxPDODebug(bool enable);
  */
 void enableTxPDODebug(bool enable);
 
+/**
+ * @brief Enable or disable detailed FMMU debug logging (exact register writes)
+ */
+void enableFmmuDebug(bool enable);
+
 // ============================================================================
 // SlaveError — detailed error enum
 // ============================================================================
