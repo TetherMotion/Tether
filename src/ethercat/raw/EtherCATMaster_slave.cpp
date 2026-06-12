@@ -256,6 +256,32 @@ bool EtherCATMaster::configureProcessDataSyncManagersFromSii(SlaveAddress slave_
 
     pdo_->finalizeMapping(slave_index);
 
+    // Write SM2/SM3 registers to slave BEFORE FMMU configuration.
+    // The ESC must see valid Sync Manager state before FMMUs reference them.
+    for (uint8_t sm = 2; sm < 4; sm++) {
+        const auto& cfg = slave_configs[slave_index].sm[sm];
+        if (cfg.type != PDO::SyncManagerType::Unused && cfg.phys_start_addr != 0) {
+            uint16_t base = static_cast<uint16_t>(0x0800 + sm * 8);
+
+            uint8_t disable = 0x00;
+            writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 6), &disable, 1, 200);
+
+            uint16_t addr_le = Raw::host_to_le16(cfg.phys_start_addr);
+            writeRegister(SlaveAddress(slave_index), base, &addr_le, 2, 200);
+
+            uint16_t len_le = Raw::host_to_le16(cfg.length);
+            writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 2), &len_le, 2, 200);
+
+            writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 4), &cfg.control, 1, 200);
+
+            uint8_t activate = cfg.enable ? 0x01 : 0x00;
+            writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 6), &activate, 1, 200);
+
+            TETHER_LOGI(TAG, "Wrote SM%u to slave %u: Addr=0x%04X Len=%u Ctrl=0x%02X Act=0x%02X",
+                     sm, slave_index, cfg.phys_start_addr, cfg.length, cfg.control, activate);
+        }
+    }
+
     // Build/rebuild the logical address map from all configured slaves.
     // Use discovered slave count since this is called per-slave during discovery
     // before pdo_->slaveCount() has been set.
@@ -281,30 +307,6 @@ bool EtherCATMaster::configureProcessDataSyncManagersFromSii(SlaveAddress slave_
         EtherCAT::fmmu::fmmu_write_to_slave(getSrcMac(), slave_index);
     } else {
         TETHER_LOGW(TAG, "Slave %u: SII unavailable — FMMU not configured", slave_index);
-    }
-
-    for (uint8_t sm = 2; sm < 4; sm++) {
-        const auto& cfg = slave_configs[slave_index].sm[sm];
-        if (cfg.type != PDO::SyncManagerType::Unused && cfg.phys_start_addr != 0) {
-            uint16_t base = static_cast<uint16_t>(0x0800 + sm * 8);
-
-            uint8_t disable = 0x00;
-            writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 6), &disable, 1, 200);
-
-            uint16_t addr_le = Raw::host_to_le16(cfg.phys_start_addr);
-            writeRegister(SlaveAddress(slave_index), base, &addr_le, 2, 200);
-
-            uint16_t len_le = Raw::host_to_le16(cfg.length);
-            writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 2), &len_le, 2, 200);
-
-            writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 4), &cfg.control, 1, 200);
-
-            uint8_t activate = cfg.enable ? 0x01 : 0x00;
-            writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 6), &activate, 1, 200);
-
-            TETHER_LOGI(TAG, "Wrote SM%u to slave %u: Addr=0x%04X Len=%u Ctrl=0x%02X Act=0x%02X",
-                     sm, slave_index, cfg.phys_start_addr, cfg.length, cfg.control, activate);
-        }
     }
 
     slave_configs[slave_index].configured = true;

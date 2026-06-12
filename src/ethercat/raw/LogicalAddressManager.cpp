@@ -69,7 +69,6 @@ bool LogicalAddressManager::buildAddressMap(const PDO::SlaveConfig* configs,
     // Pass 1: compute total RxPDO size
     for (uint16_t i = 0; i < slave_count; i++) {
         const auto& cfg = configs[i];
-        if (!cfg.configured) continue;
         if (cfg.sm[2].type == PDO::SyncManagerType::ProcessOutput && cfg.rxpdo_size > 0) {
             total_rxpdo_bytes_ += cfg.rxpdo_size;
         }
@@ -84,8 +83,6 @@ bool LogicalAddressManager::buildAddressMap(const PDO::SlaveConfig* configs,
 
     for (uint16_t i = 0; i < slave_count; i++) {
         const auto& cfg = configs[i];
-        if (!cfg.configured) continue;
-
         bool has_rxpdo = (cfg.sm[2].type == PDO::SyncManagerType::ProcessOutput && cfg.rxpdo_size > 0);
         bool has_txpdo = (cfg.sm[3].type == PDO::SyncManagerType::ProcessInput && cfg.txpdo_size > 0);
 
