@@ -27,3 +27,7 @@ bin/
 lib/
 
 # Generated example files
+
+# IDE files
+.devin
+.vscode
