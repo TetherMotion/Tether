@@ -35,6 +35,7 @@
 #include "tether/hal/IEthernet.hpp"
 #include "tether/platform/Platform.hpp"
 #include "tether/sensors/Axia80.hpp"
+#include "tether/fmmu/FMMUConfiguration.hpp"
 
 #ifdef UNIT_TEST_HOST
 #include <argparse/argparse.hpp>
@@ -434,7 +435,8 @@ int main(int argc, char** argv) {
         "rx-ethercat-packets",
         "rx-pdo",
         "tx-pdo",
-        "dc"
+        "dc",
+        "fmmu"
     };
 
     // Parse debug flags
@@ -496,6 +498,12 @@ int main(int argc, char** argv) {
     if (debug_flags.count("tx-pdo")) {
         EtherCAT::enableTxPDODebug(true);
         TETHER_LOGI(TAG, "TxPDO debug logging enabled");
+    }
+
+    // Enable FMMU debug if requested
+    bool fmmu_debug = debug_flags.count("fmmu");
+    if (fmmu_debug) {
+        TETHER_LOGI(TAG, "FMMU debug logging enabled");
     }
 
     // ---- Parse VLAN arguments ----
@@ -738,6 +746,12 @@ int main(int argc, char** argv) {
         poll_thread.join();
         eth->shutdown();
         return 7;
+    }
+
+    // ---- FMMU debug output ----
+    if (fmmu_debug) {
+        EtherCAT::fmmu::fmmu_log_config(slave_idx, TAG);
+        EtherCAT::fmmu::fmmu_log_hardware(src_mac, slave_idx, TAG);
     }
 
     // ---- Readback verification against ESI XML ----
