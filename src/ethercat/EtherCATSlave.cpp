@@ -224,9 +224,9 @@ SlaveError EtherCATSlave::transitionToPreOp() {
             "assumeMailboxAlreadyConfigured() first.", index_);
         return SlaveError::MailboxNotConfigured;
     }
-    if (!master_.requestSlaveApplicationLayerState(index_, static_cast<uint8_t>(SlaveState::PRE_OP))) {
+    if (!master_.transitionSlaveToPreOperational(index_)) {
         TETHER_LOGE( TAG,
-            "Slave %u: Failed to transition to PRE_OP (transport error)", index_);
+            "Slave %u: Failed to transition to PRE_OP", index_);
         return SlaveError::TransportError;
     }
     
@@ -268,14 +268,27 @@ SlaveError EtherCATSlave::transitionToSafeOp() {
             "Slave %u: Failed to transition to SAFE_OP (transport error)", index_);
         return SlaveError::TransportError;
     }
-    
-    if (g_debug_statemachine) {
-        TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  Transition Result: Slave %u => SAFE_OP SUCCESS               ║", index_);
-        TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
+
+    // Confirm SAFE_OP (up to 2 s).  Some slaves need time to validate SM2/SM3.
+    for (int attempt = 0; attempt < 20; attempt++) {
+        Tether::Platform::Clock::instance().delayMilliseconds(100);
+        uint8_t state = 0;
+        if (master_.readSlaveApplicationLayerState(index_, state)) {
+            if (state == static_cast<uint8_t>(SlaveState::SAFE_OP)) {
+                if (g_debug_statemachine) {
+                    TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
+                    TETHER_LOGI(TAG, "║  Transition Result: Slave %u => SAFE_OP SUCCESS               ║", index_);
+                    TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
+                }
+                return SlaveError::Ok;
+            }
+        }
     }
-    
-    return SlaveError::Ok;
+
+    uint16_t al_code = 0;
+    readALStatusCode(al_code);
+    TETHER_LOGE(TAG, "Slave %u: SAFE_OP not confirmed after 2s (AL_CODE=0x%04X)", index_, al_code);
+    return SlaveError::TransportError;
 }
 
 SlaveError EtherCATSlave::transitionToOp() {
@@ -299,19 +312,43 @@ SlaveError EtherCATSlave::transitionToOp() {
             "Slave %u: Transitioning to OP without PDO sync-managers configured. "
             "This may cause issues with process data exchange.", index_);
     }
-    if (!master_.requestSlaveApplicationLayerState(index_, static_cast<uint8_t>(SlaveState::OP))) {
+    // Request OP with Error Acknowledge bit (0x08 | 0x10 = 0x18)
+    // Some slaves require the ACK bit to clear internal error latches.
+    if (!master_.requestSlaveApplicationLayerState(index_, static_cast<uint8_t>(SlaveState::OP) | 0x10)) {
         TETHER_LOGE( TAG,
             "Slave %u: Failed to transition to OP (transport error)", index_);
         return SlaveError::TransportError;
     }
-    
-    if (g_debug_statemachine) {
-        TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  Transition Result: Slave %u => OP SUCCESS                    ║", index_);
-        TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
+
+    // Confirm OP (up to 5 s).  The slave may need continuous process data.
+    for (int attempt = 0; attempt < 50; attempt++) {
+        Tether::Platform::Clock::instance().delayMilliseconds(100);
+        uint8_t state = 0;
+        if (master_.readSlaveApplicationLayerState(index_, state)) {
+            if (state == static_cast<uint8_t>(SlaveState::OP)) {
+                if (g_debug_statemachine) {
+                    TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
+                    TETHER_LOGI(TAG, "║  Transition Result: Slave %u => OP SUCCESS                    ║", index_);
+                    TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
+                }
+                return SlaveError::Ok;
+            }
+            // If state dropped to INIT or PRE_OP, something went wrong
+            if (state == static_cast<uint8_t>(SlaveState::INIT) ||
+                state == static_cast<uint8_t>(SlaveState::PRE_OP)) {
+                uint16_t al_code = 0;
+                readALStatusCode(al_code);
+                TETHER_LOGE(TAG, "Slave %u: Unexpected state 0x%02X during OP transition (AL_CODE=0x%04X)",
+                         index_, state, al_code);
+                return SlaveError::TransportError;
+            }
+        }
     }
-    
-    return SlaveError::Ok;
+
+    uint16_t al_code = 0;
+    readALStatusCode(al_code);
+    TETHER_LOGE(TAG, "Slave %u: OP not confirmed after 5s (AL_CODE=0x%04X)", index_, al_code);
+    return SlaveError::TransportError;
 }
 
 SlaveError EtherCATSlave::transitionToBoot() {

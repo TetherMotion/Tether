@@ -131,7 +131,35 @@ bool EtherCATMaster::autoConfigureMailbox(SlaveAddress slave_address, Tether::Pl
         TETHER_LOGD(local_tag, "      ✓ SDO subsystem mailbox configured");
     }
     
-    // Step 4: Verify configuration was applied
+    // Step 4: Write mailbox SM registers to slave ESC
+    if (slave_index < PDO::kMaxPDOSlaves) {
+        auto* slave_configs = pdo_->slaveConfigs();
+        slave_configs[slave_index].sm[0] = PDO::SyncManagerConfig::mailbox_write(wr_addr, wr_len);
+        slave_configs[slave_index].sm[1] = PDO::SyncManagerConfig::mailbox_read(rd_addr, rd_len);
+
+        if (pdo_->configureSlavesSMs(slave_index)) {
+            uint8_t sm0_ctrl = 0, sm1_ctrl = 0;
+            bool sm0_ok = readRegister(SlaveAddress(slave_index), static_cast<uint16_t>(Raw::EC_REG_SM0 + 0x04), sm0_ctrl, 200);
+            bool sm1_ok = readRegister(SlaveAddress(slave_index), static_cast<uint16_t>(Raw::EC_REG_SM1 + 0x04), sm1_ctrl, 200);
+
+            if (sm0_ok && sm1_ok) {
+                if (sm0_ctrl == 0x26 && sm1_ctrl == 0x22) {
+                    if (log_level >= Tether::Platform::LogLevel::Debug) {
+                        TETHER_LOGD(local_tag, "[4/4] SM registers verified: SM0=0x%02X SM1=0x%02X", sm0_ctrl, sm1_ctrl);
+                    }
+                } else {
+                    TETHER_LOGW(local_tag, "SM0=0x%02X SM1=0x%02X: expected 0x26/0x22 after writing mailbox SM config", sm0_ctrl, sm1_ctrl);
+                }
+            } else {
+                TETHER_LOGW(local_tag, "Failed to read back SM0/SM1 control registers after configuration");
+            }
+        } else {
+            TETHER_LOGE(local_tag, "Failed to write mailbox SM registers to slave %u", (unsigned)slave_index);
+            return false;
+        }
+    }
+
+    // Step 5: Verify configuration was applied
     if (log_level >= Tether::Platform::LogLevel::Debug) {
         TETHER_LOGD(local_tag, "[Verification] Checking SDO subsystem mailbox configuration...");
         

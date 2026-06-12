@@ -344,58 +344,6 @@ bool configure_mailbox_from_sii(
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Validate SM control registers for SM0/SM1 to catch swapped/broken configs
-    // Always attempt to read the SM control byte for SM0 and SM1 from the
-    // slave's ESC registers and warn if the registers do not indicate
-    // mailbox mode and the expected direction.
-    // -------------------------------------------------------------------------
-    auto check_sm_control = [&](uint16_t sm_base, unsigned sm_index){
-        uint8_t ctrl = 0;
-        uint16_t ctrl_addr = static_cast<uint16_t>(sm_base + 0x04u); // control offset
-        if (master.readRegister(EtherCAT::SlaveAddress(slave_index), ctrl_addr, ctrl, 200)) {
-                using namespace EtherCAT::PDO;
-            bool is_mailbox_mode = ((ctrl & SM_CTRL_MODE_MASK) == SM_CTRL_MODE_MAILBOX);
-            bool is_receive_mbx = ((ctrl & SM_CTRL_DIR_WRITE) != 0);  // bit2=1: ECAT writes = M→S = Receive/MbxIn
-
-            // Decode control byte for human-friendly message
-            auto decode_ctrl = [&](uint8_t c){
-                const char* modeStr = ((c & SM_CTRL_MODE_MASK) == SM_CTRL_MODE_MAILBOX) ? "MAILBOX" : (((c & SM_CTRL_MODE_MASK) == SM_CTRL_MODE_BUFFERED) ? "BUFFERED" : "UNKNOWN");
-                const char* dirStr = ((c & SM_CTRL_DIR_WRITE) != 0) ? "Receive(M→S)" : "Send(S→M)";
-                std::string flags;
-                if (c & SM_CTRL_IRQ_ECAT) flags += "IRQ_ECAT ";
-                if (c & SM_CTRL_IRQ_PDI)  flags += "IRQ_PDI ";
-                if (c & SM_CTRL_WATCHDOG) flags += "WATCHDOG ";
-                if ((c & SM_CTRL_REPEAT_REQ) && ((c & SM_CTRL_MODE_MASK) == SM_CTRL_MODE_MAILBOX)) flags += "REPEAT_REQ ";
-                if (flags.empty()) flags = "-";
-                char tmp[128];
-                snprintf(tmp, sizeof(tmp), "mode=%s dir=%s flags=%s", modeStr, dirStr, flags.c_str());
-                return std::string(tmp);
-            };
-
-            if (sm_index == 0) {
-                // SM0 should be MAILBOX + Receive direction (M→S, ECAT writes)
-                if (!is_mailbox_mode || !is_receive_mbx) {
-                    auto desc = decode_ctrl(ctrl);
-                    TETHER_LOGW(TAG, "SM0 control=0x%02X (%s): expected MAILBOX + Receive(M→S) for SM0=MbxIn. May be misconfigured.", ctrl, desc.c_str());
-                }
-            } else if (sm_index == 1) {
-                // SM1 should be MAILBOX + Send direction (S→M, ECAT reads)
-                if (!is_mailbox_mode || is_receive_mbx) {
-                    auto desc = decode_ctrl(ctrl);
-                    TETHER_LOGW(TAG, "SM1 control=0x%02X (%s): expected MAILBOX + Send(S→M) for SM1=MbxOut. May be misconfigured.", ctrl, desc.c_str());
-                }
-            }
-        } else {
-            TETHER_LOGD(TAG, "SM%u control read failed (slave=%u, addr=0x%04X)", sm_index, (unsigned)slave_index, (unsigned)ctrl_addr);
-        }
-    };
-
-    // Check SM0/SM1
-    check_sm_control(EC_REG_SM0, 0);
-    check_sm_control(EC_REG_SM1, 1);
-
-
     return true;
 }
 

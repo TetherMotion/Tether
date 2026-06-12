@@ -748,6 +748,26 @@ int main(int argc, char** argv) {
         return 7;
     }
 
+    // Verify slave actually reached OP state
+    EtherCAT::SlaveState actual_state;
+    if (sensor.slave().readState(actual_state) != EtherCAT::SlaveError::Ok) {
+        TETHER_LOGE(TAG, "Failed to read slave state after init");
+        master.stop();
+        g_running.store(false);
+        poll_thread.join();
+        eth->shutdown();
+        return 7;
+    }
+    if (actual_state != EtherCAT::SlaveState::OP) {
+        TETHER_LOGE(TAG, "Slave %d is not in OP (actual: %s)", slave_idx,
+                    magic_enum::enum_name(actual_state).data());
+        master.stop();
+        g_running.store(false);
+        poll_thread.join();
+        eth->shutdown();
+        return 7;
+    }
+
     // ---- FMMU debug output ----
     if (fmmu_debug) {
         EtherCAT::fmmu::fmmu_log_config(slave_idx, TAG);

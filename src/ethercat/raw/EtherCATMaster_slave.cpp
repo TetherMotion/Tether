@@ -300,11 +300,17 @@ bool EtherCATMaster::configureProcessDataSyncManagersFromSii(SlaveAddress slave_
             slave_configs[slave_index].sm[2].phys_start_addr, rx_len,
             slave_configs[slave_index].sm[3].phys_start_addr, tx_len,
             rx_log);
-        EtherCAT::fmmu::fmmu_write_to_slave(getSrcMac(), slave_index);
+        if (!EtherCAT::fmmu::fmmu_write_to_slave(getSrcMac(), slave_index)) {
+            TETHER_LOGE(TAG, "Slave %u: FMMU write (manual) failed", slave_index);
+            return false;
+        }
     } else if (sii_valid) {
         EtherCAT::fmmu::fmmu_configure_from_sii(
             slave_index, &sii, &slave_configs[slave_index], 0);
-        EtherCAT::fmmu::fmmu_write_to_slave(getSrcMac(), slave_index);
+        if (!EtherCAT::fmmu::fmmu_write_to_slave(getSrcMac(), slave_index)) {
+            TETHER_LOGE(TAG, "Slave %u: FMMU write (from SII) failed", slave_index);
+            return false;
+        }
     } else {
         TETHER_LOGW(TAG, "Slave %u: SII unavailable — FMMU not configured", slave_index);
     }

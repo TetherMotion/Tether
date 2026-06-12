@@ -271,6 +271,14 @@ bool FMMUManager::writeToSlave(uint16_t slave_index) {
 
         if (!transport_.apwr(adp, reg_addr, &regs, sizeof(regs), 100)) {
             TETHER_LOGE(TAG, "  FMMU%zu: Write failed!", i);
+            // Diagnostic probe: read back the activate byte to distinguish
+            // transport timeout from WKC=0 (slave present but no ack).
+            uint8_t probe = 0xFF;
+            if (transport_.aprd(adp, static_cast<uint16_t>(reg_addr + 0x0C), &probe, 1, 100)) {
+                TETHER_LOGE(TAG, "  FMMU%zu:  Slave responded to read probe (activate=0x%02X) — write had WKC=0 or was rejected", i, probe);
+            } else {
+                TETHER_LOGE(TAG, "  FMMU%zu:  Slave did NOT respond to read probe — transport timeout or slave unreachable", i);
+            }
             all_ok = false;
         }
     }

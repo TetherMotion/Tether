@@ -189,6 +189,15 @@ bool EtherCATMaster::setPreopAndConfirm(uint16_t slave_index)
                         TETHER_LOGI(TAG, "║  Confirmed after %d checks on attempt %d/%d                   ║", i+1, attempt, max_attempts);
                         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
                     }
+
+                    // Post-PRE_OP SM validation safety net
+                    uint8_t sm0_ctrl = 0, sm1_ctrl = 0;
+                    (void)readRegister(SlaveAddress(slave_index), static_cast<uint16_t>(EC_REG_SM0 + 0x04), sm0_ctrl, 200);
+                    (void)readRegister(SlaveAddress(slave_index), static_cast<uint16_t>(EC_REG_SM1 + 0x04), sm1_ctrl, 200);
+                    if (sm0_ctrl != 0x26 || sm1_ctrl != 0x22) {
+                        TETHER_LOGW(TAG, "setPreop: SM0=0x%02X SM1=0x%02X (expected 0x26/0x22) — slave may have rejected mailbox config", sm0_ctrl, sm1_ctrl);
+                    }
+
                     return true;
                 }
             }
