@@ -514,4 +514,97 @@ void EtherCATMaster::resetIdx()
     next_idx_.store(0, std::memory_order_relaxed);
 }
 
+// ============================================================================
+// Internal: frame parsing
+// ============================================================================
+
+void EtherCATMaster::parseEtherCATFrame(const uint8_t* frame, size_t length)
+{
+    using namespace Raw;  // for le16_to_host, Command, RxDatagram, etc.
+
+#if TETHER_ENABLE_ETHERCAT_STATS
+    rx_frame_count_++;
+#endif
+
+    // Use fully-qualified EtherCAT::EthernetHeader to avoid ambiguity
+    // with Raw::EthernetHeader
+    if (length < sizeof(EtherCAT::EthernetHeader) + sizeof(EtherCAT::FrameHeader))
+        return;
+
+    const auto* eth = reinterpret_cast<const EtherCAT::EthernetHeader*>(frame);
+    const uint16_t ether_type = bswap16(eth->etherType_be);
+    if (ether_type != EtherCAT::kEtherTypeEtherCAT) {
+        if (g_debug_rx_packets) {
+            const char* name = etherTypeToString(ether_type);
+            if (name) {
+                TETHER_LOGI("ec_pkt", "[RX] Non-EtherCAT frame: %s (0x%04X, len=%u)",
+                            name, ether_type, static_cast<unsigned>(length));
+            } else {
+                TETHER_LOGI("ec_pkt", "[RX] Non-EtherCAT frame: unknown (0x%04X, len=%u)",
+                            ether_type, static_cast<unsigned>(length));
+            }
+        }
+        return;
+    }
+
+    if (g_debug_rx_packets) {
+        printEtherCATFrame(frame, length, false, false);
+    }
+
+    const auto* ec_hdr = reinterpret_cast<const EtherCAT::FrameHeader*>(
+        frame + sizeof(EtherCAT::EthernetHeader));
+    const uint16_t ec_len = le16_to_host(ec_hdr->raw_le) & 0x07FFu;
+
+    if (length < sizeof(EtherCAT::EthernetHeader) + sizeof(EtherCAT::FrameHeader) + ec_len)
+        return;
+
+    const size_t payload_offset = sizeof(EtherCAT::EthernetHeader) + sizeof(EtherCAT::FrameHeader);
+    const auto* dg = reinterpret_cast<const EtherCAT::DatagramHeader*>(frame + payload_offset);
+
+    const uint16_t ado     = le16_to_host(dg->ado_le);
+    const uint16_t adp     = le16_to_host(dg->adp_le);
+    const uint16_t datalen = le16_to_host(dg->lenFlags_le) & 0x07FFu;
+
+    const size_t data_offset = payload_offset + sizeof(EtherCAT::DatagramHeader);
+    const size_t wkc_offset  = data_offset + datalen;
+    if (length < wkc_offset + sizeof(uint16_t)) return;
+
+    const uint16_t wkc =
+        le16_to_host(*reinterpret_cast<const uint16_t*>(frame + wkc_offset));
+
+    RxDatagram msg{};
+    msg.idx = dg->idx; msg.cmd = dg->cmd; msg.adp = adp; msg.ado = ado;
+    msg.datalen = datalen; msg.wkc = wkc;
+    if (datalen > 0)
+        std::memcpy(msg.data, frame + data_offset,
+                    std::min<size_t>(datalen, sizeof(msg.data)));
+
+    if (dg->idx == kFireAndForgetIdx) {
+        if (dg->cmd == Command::APRD && txpdo_rx_queue_)
+            txpdo_rx_queue_->send(msg, 0);
+    } else {
+        size_t routed = packet_router_.routePacket(msg);
+        if (routed == 0) {
+            static uint32_t unrouted_count = 0;
+            if (unrouted_count < 10) {
+                TETHER_LOGW("ec_rx", "Unrouted pkt idx=0x%02X cmd=0x%02X ado=0x%04X adp=0x%04X wkc=%u",
+                         dg->idx, (unsigned)dg->cmd, ado, adp, wkc);
+            }
+            unrouted_count++;
+            if (rx_queue_ && rx_queue_->send(msg, 0)) {
+#if TETHER_ENABLE_ETHERCAT_STATS
+                rx_queue_sent_++;
+#endif
+            } else {
+                static uint32_t drop_count = 0;
+                if (drop_count < 10 || (drop_count % 500 == 0)) {
+                    TETHER_LOGW("ec_rx", "RX queue full! Dropped idx=0x%02X cmd=0x%02X ado=0x%04X adp=0x%04X wkc=%u (total dropped: %u)",
+                             dg->idx, (unsigned)dg->cmd, ado, adp, wkc, drop_count);
+                }
+                drop_count++;
+            }
+        }
+    }
+}
+
 } // namespace EtherCAT
