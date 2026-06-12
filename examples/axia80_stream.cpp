@@ -51,10 +51,12 @@ namespace Raw {
 }
 
 static const char* TAG = "axia80_stream";
-std::atomic<bool> g_running{true};
+static EtherCAT::EtherCATMaster* g_master = nullptr;
 
 void signalHandler(int) {
-    g_running.store(false);
+    if (g_master) {
+        g_master->requestCancel();
+    }
 }
 
 #ifndef UNIT_TEST_HOST
@@ -675,6 +677,7 @@ int main(int argc, char** argv) {
 
     // ---- Create master ----
     EtherCAT::EtherCATMaster master;
+    g_master = &master;
 
     // ---- Optional VLAN router ----
     std::unique_ptr<EtherCAT::VLANRouter> router;
@@ -714,7 +717,7 @@ int main(int argc, char** argv) {
         if (!Tether::Platform::setCurrentThreadRealtime(-1)) {
             TETHER_LOGW(TAG, "poll_thread: could not set realtime scheduling");
         }
-        while (g_running.load()) { eth->poll(1); }
+        while (!master.isCancelRequested()) { eth->poll(1); }
     });
 
     // ---- Start master ----
@@ -735,7 +738,7 @@ int main(int argc, char** argv) {
     if (!master.discoverSlaves()) {
         TETHER_LOGE(TAG, "No slaves found — check wiring and power");
         master.stop();
-        g_running.store(false);
+        master.requestCancel();
         poll_thread.join();
         eth->shutdown();
         return 4;
@@ -748,7 +751,7 @@ int main(int argc, char** argv) {
     if (static_cast<uint16_t>(slave_idx) >= slaves) {
         TETHER_LOGE(TAG, "Slave index %d out of range (max %u)", slave_idx, slaves - 1);
         master.stop();
-        g_running.store(false);
+        master.requestCancel();
         poll_thread.join();
         eth->shutdown();
         return 5;
@@ -769,10 +772,23 @@ int main(int argc, char** argv) {
     if (!sensor.init(Tether::Platform::LogLevel::Info, false)) {
         TETHER_LOGE(TAG, "Failed to initialise Axia80 sensor");
         master.stop();
-        g_running.store(false);
+        master.requestCancel();
         poll_thread.join();
         eth->shutdown();
         return 7;
+    }
+
+    // ---- Read calibration data via SDO (before RT loop so first frames are converted) ----
+    if (sensor.readCalibrationData(cal)) {
+        have_cal.store(true, std::memory_order_release);
+        TETHER_LOGI(TAG, "Calibration loaded: serial=%s, force=%s, torque=%s, cpf=%u, cpt=%u",
+                    cal.ft_serial,
+                    Axia80::forceUnitsToString(cal.force_units),
+                    Axia80::torqueUnitsToString(cal.torque_units),
+                    cal.counts_per_force, cal.counts_per_torque);
+    } else {
+        TETHER_LOGW(TAG, "Could not read calibration data — using raw counts");
+        raw_mode = true;
     }
 
     // ---- Set up RT motion loop callback ----
@@ -822,7 +838,7 @@ int main(int argc, char** argv) {
     if (!master.startRealtimeMotionControlLoop(loop_config)) {
         TETHER_LOGE(TAG, "Failed to start realtime motion loop");
         master.stop();
-        g_running.store(false);
+        master.requestCancel();
         poll_thread.join();
         eth->shutdown();
         return 8;
@@ -833,7 +849,7 @@ int main(int argc, char** argv) {
         TETHER_LOGE(TAG, "Slave %d: OP transition failed", slave_idx);
         master.stopMotionControlLoop();
         master.stop();
-        g_running.store(false);
+        master.requestCancel();
         poll_thread.join();
         eth->shutdown();
         return 7;
@@ -845,7 +861,7 @@ int main(int argc, char** argv) {
         TETHER_LOGE(TAG, "Failed to read slave state after OP transition");
         master.stopMotionControlLoop();
         master.stop();
-        g_running.store(false);
+        master.requestCancel();
         poll_thread.join();
         eth->shutdown();
         return 7;
@@ -855,7 +871,7 @@ int main(int argc, char** argv) {
                     magic_enum::enum_name(actual_state).data());
         master.stopMotionControlLoop();
         master.stop();
-        g_running.store(false);
+        master.requestCancel();
         poll_thread.join();
         eth->shutdown();
         return 7;
@@ -870,16 +886,6 @@ int main(int argc, char** argv) {
     // ---- Readback verification against ESI XML ----
     if (esi_device.has_value()) {
         verifyReadbackAgainstESI(*esi_device, master, sensor, static_cast<uint16_t>(slave_idx));
-    }
-
-    // ---- Read calibration data via SDO ----
-    if (sensor.readCalibrationData(cal)) {
-        have_cal.store(true, std::memory_order_release);
-        TETHER_LOGI(TAG, "Calibration loaded: serial=%s, cpf=%u, cpt=%u",
-                    cal.ft_serial, cal.counts_per_force, cal.counts_per_torque);
-    } else {
-        TETHER_LOGW(TAG, "Could not read calibration data — using raw counts");
-        raw_mode = true;
     }
 
     // ---- Read product info ----
@@ -909,32 +915,47 @@ int main(int argc, char** argv) {
     // ---- Consumer thread: print from queue ----
     std::atomic<uint64_t> cycle_count{0};
 
-    TETHER_LOGI(TAG, "Streaming %s data... Press Ctrl-C to stop",
-                raw_mode ? "raw" : "engineering-unit");
+    std::string unit_label;
+    if (raw_mode) {
+        unit_label = "raw (counts)";
+    } else {
+        unit_label = std::string(Axia80::forceUnitsToString(cal.force_units))
+                     + " / " + Axia80::torqueUnitsToString(cal.torque_units);
+    }
+    TETHER_LOGI(TAG, "Streaming %s data... Press Ctrl-C to stop", unit_label.c_str());
 
     std::cout << std::fixed << std::setprecision(4);
+    const char* force_unit = raw_mode ? "counts" : Axia80::forceUnitsToString(cal.force_units);
+    const char* torque_unit = raw_mode ? "counts" : Axia80::torqueUnitsToString(cal.torque_units);
     // Print header based on selected columns
     for (const auto& col : selected_columns) {
-        std::string header = col;
-        header[0] = std::toupper(header[0]);
-        std::cout << std::setw(10) << header;
+        std::string header;
+        if (col == "fx" || col == "fy" || col == "fz") {
+            header = std::string(1, std::toupper(col[0])) + col.substr(1) + "(" + force_unit + ")";
+        } else if (col == "tx" || col == "ty" || col == "tz") {
+            header = std::string(1, std::toupper(col[0])) + col.substr(1) + "(" + torque_unit + ")";
+        } else {
+            header = col;
+            header[0] = std::toupper(header[0]);
+        }
+        std::cout << std::setw(18) << header;
     }
     std::cout << "\n";
-    std::cout << std::string(selected_columns.size() * 10, '-') << "\n";
+    std::cout << std::string(selected_columns.size() * 18, '-') << "\n";
 
     std::thread consumer_thread([&]() {
         auto start_time = std::chrono::steady_clock::now();
         auto end_time = start_time + std::chrono::seconds(static_cast<int>(duration_sec));
 
-        while (g_running.load()) {
+        while (!master.isCancelRequested()) {
             if (duration_sec > 0 && std::chrono::steady_clock::now() >= end_time) {
-                g_running.store(false);
+                master.requestCancel();
                 break;
             }
 
             std::unique_lock<std::mutex> lock(queue_mtx);
             if (!queue_cv.wait_for(lock, std::chrono::milliseconds(100),
-                                   []() { return !data_queue.empty() || !g_running.load(); })) {
+                                   [&master]() { return !data_queue.empty() || master.isCancelRequested(); })) {
                 continue;
             }
             if (data_queue.empty()) continue;
@@ -945,23 +966,30 @@ int main(int argc, char** argv) {
 
             // Print only selected columns
             for (const auto& col : selected_columns) {
+                char cell[32];
                 if (col == "fx") {
-                    std::cout << std::setw(10) << frame.fx;
+                    snprintf(cell, sizeof(cell), "%.4f%s", frame.fx, force_unit);
+                    std::cout << std::setw(18) << cell;
                 } else if (col == "fy") {
-                    std::cout << std::setw(10) << frame.fy;
+                    snprintf(cell, sizeof(cell), "%.4f%s", frame.fy, force_unit);
+                    std::cout << std::setw(18) << cell;
                 } else if (col == "fz") {
-                    std::cout << std::setw(10) << frame.fz;
+                    snprintf(cell, sizeof(cell), "%.4f%s", frame.fz, force_unit);
+                    std::cout << std::setw(18) << cell;
                 } else if (col == "tx") {
-                    std::cout << std::setw(10) << frame.tx_val;
+                    snprintf(cell, sizeof(cell), "%.4f%s", frame.tx_val, torque_unit);
+                    std::cout << std::setw(18) << cell;
                 } else if (col == "ty") {
-                    std::cout << std::setw(10) << frame.ty;
+                    snprintf(cell, sizeof(cell), "%.4f%s", frame.ty, torque_unit);
+                    std::cout << std::setw(18) << cell;
                 } else if (col == "tz") {
-                    std::cout << std::setw(10) << frame.tz;
+                    snprintf(cell, sizeof(cell), "%.4f%s", frame.tz, torque_unit);
+                    std::cout << std::setw(18) << cell;
                 } else if (col == "status") {
-                    std::cout << "  0x" << std::hex << std::setw(8) << std::setfill('0') << frame.status
-                              << std::dec << std::setfill(' ');
+                    snprintf(cell, sizeof(cell), "0x%08X", frame.status);
+                    std::cout << std::setw(18) << cell;
                 } else if (col == "counter") {
-                    std::cout << std::setw(10) << frame.counter;
+                    std::cout << std::setw(18) << frame.counter;
                 }
             }
             std::cout << "\n";
@@ -975,7 +1003,7 @@ int main(int argc, char** argv) {
     });
 
     // Wait for Ctrl-C or timeout
-    while (g_running.load()) {
+    while (!master.isCancelRequested()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
@@ -987,9 +1015,10 @@ int main(int argc, char** argv) {
     // ---- Cleanup ----
     master.stopMotionControlLoop();
     master.stop();
-    g_running.store(false);
+    master.requestCancel();
     poll_thread.join();
     eth->shutdown();
+    g_master = nullptr;
 
     return 0;
 }
