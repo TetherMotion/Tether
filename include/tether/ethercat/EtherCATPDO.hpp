@@ -37,6 +37,7 @@ namespace EtherCAT {
 // Forward declarations
 class IPDOTransport;
 class PDOManager;
+class LogicalAddressManager;
 
 namespace PDO {
 
@@ -391,6 +392,9 @@ public:
 
     IPDOTransport& transport();
 
+    void setLogicalAddressManager(LogicalAddressManager* mgr) { logical_addr_mgr_ = mgr; }
+    LogicalAddressManager* logicalAddressManager() const { return logical_addr_mgr_; }
+
 private:
     IPDOTransport& transport_;
 
@@ -404,6 +408,8 @@ private:
     // Mode flags
     bool use_separate_commands_ = false;
     bool use_physical_mode_     = false;
+
+    LogicalAddressManager* logical_addr_mgr_ = nullptr;
 
     // Per-mode stats
     LRWStats      lrw_stats_;

@@ -8,6 +8,7 @@
  */
 
 #include "EtherCATPDO.hpp"
+#include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/platform/EspCompat.hpp"
 
 #include <cstring>
@@ -751,6 +752,10 @@ bool PDOManager::receiveTxPDO(size_t entry_index) {
 }
 
 bool PDOManager::exchangeAll() {
+    if (logical_addr_mgr_ && logical_addr_mgr_->isInitialized()) {
+        return logical_addr_mgr_->exchangeAllLRW(mapping_);
+    }
+
     bool all_ok = true;
     stats_.total_cycles++;
 
@@ -791,10 +796,10 @@ bool PDOManager::exchangeAll() {
 // ============================================================================
 
 bool PDOManager::exchangeLRW(uint16_t slave_count) {
+    if (logical_addr_mgr_ && logical_addr_mgr_->isInitialized()) {
+        return logical_addr_mgr_->exchangeAllLRW(mapping_);
+    }
     if (slave_count == 0) return true;
-    // LRW requires FMMU configuration which is external — this is a
-    // placeholder that increments stats so the manager remains testable.
-    // Production code using FMMU should call the master-level LRW exchange.
     lrw_stats_.lrw_send_errors++;
     TETHER_LOGW(TAG, "LRW exchange requires FMMU; use master-level API");
     return false;

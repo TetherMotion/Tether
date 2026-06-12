@@ -9,6 +9,7 @@
 #include "tether/ethercat/EtherCATSlave.hpp"
 #include "tether/ethercat/EtherCATDC.hpp"
 #include "tether/ethercat/EtherCATPDO.hpp"
+#include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/ethercat/EtherCATSDO.hpp"
 #include "tether/ethercat/EtherCATFoE.hpp"
 #include "tether/ethercat/EtherCATVoE.hpp"
@@ -352,6 +353,8 @@ EtherCATMaster::EtherCATMaster(const Config& config)
     // implementations that operate on file-scoped DC/SDO/PDO state.
     pdo_transport_ = std::make_unique<MasterPDOTransport>(*this);
     pdo_    = std::make_unique<PDOManager>(*pdo_transport_);
+    logical_addr_mgr_ = std::make_unique<LogicalAddressManager>(*pdo_transport_);
+    pdo_->setLogicalAddressManager(logical_addr_mgr_.get());
     sdo_manager_->setPDOManager(pdo_.get());
     dc_     = std::make_unique<DCManager>(*this);
     foe_    = std::make_unique<FoEManager>(*this);
@@ -561,6 +564,7 @@ bool EtherCATMaster::wasFaultDiagnosed(uint16_t slave_index) const
 // ============================================================================
 
 PDOManager&    EtherCATMaster::pdo()    { return *pdo_; }
+LogicalAddressManager& EtherCATMaster::logicalAddressManager() { return *logical_addr_mgr_; }
 ::EtherCAT::SDO::SDOManager& EtherCATMaster::sdoManager() { return *sdo_manager_; }
 DCManager&     EtherCATMaster::dc()     { return *dc_; }
 FoEManager&    EtherCATMaster::foe()    { return *foe_; }

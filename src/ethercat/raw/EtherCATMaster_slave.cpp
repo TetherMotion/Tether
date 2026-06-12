@@ -7,6 +7,7 @@
 #include "tether/ethercat/EtherCATSlave.hpp"
 #include "tether/ethercat/EtherCATDC.hpp"
 #include "tether/ethercat/EtherCATPDO.hpp"
+#include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/ethercat/EtherCATSDO.hpp"
 #include "tether/ethercat/EtherCATFoE.hpp"
 #include "tether/ethercat/EtherCATVoE.hpp"
@@ -254,6 +255,32 @@ bool EtherCATMaster::configureProcessDataSyncManagersFromSii(SlaveAddress slave_
     }
 
     pdo_->finalizeMapping(slave_index);
+
+    // Build/rebuild the logical address map from all configured slaves.
+    // This must happen after finalizeMapping so PDO sizes are known.
+    logical_addr_mgr_->buildAddressMap(pdo_->slaveConfigs(),
+                                        static_cast<uint16_t>(pdo_->slaveCount()));
+
+    // Configure FMMUs using manager-provided logical addresses.
+    if (sii_valid && logical_addr_mgr_->hasSlavePDOs(slave_index)) {
+        uint32_t rx_log = logical_addr_mgr_->getRxPDOLogicalAddr(slave_index);
+        uint16_t rx_len = logical_addr_mgr_->getRxPDOLength(slave_index);
+        uint32_t tx_log = logical_addr_mgr_->getTxPDOLogicalAddr(slave_index);
+        uint16_t tx_len = logical_addr_mgr_->getTxPDOLength(slave_index);
+
+        EtherCAT::fmmu::fmmu_configure_manual(
+            slave_index,
+            slave_configs[slave_index].sm[2].phys_start_addr, rx_len,
+            slave_configs[slave_index].sm[3].phys_start_addr, tx_len,
+            rx_log);
+        EtherCAT::fmmu::fmmu_write_to_slave(getSrcMac(), slave_index);
+    } else if (sii_valid) {
+        EtherCAT::fmmu::fmmu_configure_from_sii(
+            slave_index, &sii, &slave_configs[slave_index], 0);
+        EtherCAT::fmmu::fmmu_write_to_slave(getSrcMac(), slave_index);
+    } else {
+        TETHER_LOGW(TAG, "Slave %u: SII unavailable — FMMU not configured", slave_index);
+    }
 
     for (uint8_t sm = 2; sm < 4; sm++) {
         const auto& cfg = slave_configs[slave_index].sm[sm];

@@ -106,6 +106,7 @@ private:
 // Forward declarations for sub-managers
 class IPDOTransport;
 class PDOManager;
+class LogicalAddressManager;
 class DCManager;
 class FoEManager;
 class VoEManager;
@@ -464,6 +465,7 @@ public:
     // ---- Sub-managers ------------------------------------------------------
 
     PDOManager&     pdo();
+    LogicalAddressManager& logicalAddressManager();
     ::EtherCAT::SDO::SDOManager& sdoManager();
     DCManager&      dc();
     FoEManager&     foe();
@@ -620,6 +622,7 @@ private:
     // Sub-managers (legacy wrappers)
     std::unique_ptr<IPDOTransport> pdo_transport_;
     std::unique_ptr<PDOManager>    pdo_;
+    std::unique_ptr<LogicalAddressManager> logical_addr_mgr_;
     std::unique_ptr<DCManager>     dc_;
     std::unique_ptr<FoEManager>    foe_;
     std::unique_ptr<VoEManager>    voe_;
