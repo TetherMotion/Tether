@@ -439,6 +439,7 @@ add_executable(tether_ethercat_common_tests
     ../src/ethercat/ConditionalPacketRouter.cpp
     ../src/ethercat/TransactionRouter.cpp
     ../src/ethercat/EtherCATRetry.cpp
+    ../src/fmmu/FMMUConfiguration.cpp
 )
 
 target_include_directories(tether_ethercat_common_tests PRIVATE

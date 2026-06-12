@@ -70,6 +70,14 @@ uint16_t EtherCATSlave::adp() const {
     return EtherCATMaster::adpForSlaveIndex(index_);
 }
 
+bool EtherCATSlave::apwr(uint16_t ado, const void* data, uint16_t len, unsigned int timeout_ms) {
+    return master_.writeRegister(SlaveAddress(index_), ado, data, len, timeout_ms);
+}
+
+bool EtherCATSlave::aprd(uint16_t ado, void* out, uint16_t len, unsigned int timeout_ms) {
+    return master_.readRegister(SlaveAddress(index_), ado, out, len, timeout_ms);
+}
+
 // -- Mailbox configuration ---------------------------------------------------
 
 SlaveError EtherCATSlave::configureMailbox(Tether::Platform::LogLevel log_level) {

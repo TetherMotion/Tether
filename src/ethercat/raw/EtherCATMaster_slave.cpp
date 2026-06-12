@@ -320,25 +320,24 @@ bool EtherCATMaster::configureProcessDataSyncManagersFromSii(SlaveAddress slave_
                                         getDiscoveredSlaveCount());
 
     // Phase 2: Configure FMMUs while SMs are still disabled.
+    auto& fmmu_mgr = slave(slave_index).fmmuManager();
     if (sii_valid && logical_addr_mgr_->hasSlavePDOs(slave_index)) {
         uint32_t rx_log = logical_addr_mgr_->getRxPDOLogicalAddr(slave_index);
         uint16_t rx_len = logical_addr_mgr_->getRxPDOLength(slave_index);
         uint32_t tx_log = logical_addr_mgr_->getTxPDOLogicalAddr(slave_index);
         uint16_t tx_len = logical_addr_mgr_->getTxPDOLength(slave_index);
 
-        EtherCAT::fmmu::fmmu_configure_manual(
-            slave_index,
+        fmmu_mgr.configureManual(
             slave_configs[slave_index].sm[2].phys_start_addr, rx_len,
             slave_configs[slave_index].sm[3].phys_start_addr, tx_len,
             rx_log);
-        if (!EtherCAT::fmmu::fmmu_write_to_slave(getSrcMac(), slave_index)) {
+        if (!fmmu_mgr.writeToSlave()) {
             TETHER_LOGE(TAG, "Slave %u: FMMU write (manual) failed", slave_index);
             return false;
         }
     } else if (sii_valid) {
-        EtherCAT::fmmu::fmmu_configure_from_sii(
-            slave_index, &sii, &slave_configs[slave_index], 0);
-        if (!EtherCAT::fmmu::fmmu_write_to_slave(getSrcMac(), slave_index)) {
+        fmmu_mgr.configureFromSii(&sii, &slave_configs[slave_index], 0);
+        if (!fmmu_mgr.writeToSlave()) {
             TETHER_LOGE(TAG, "Slave %u: FMMU write (from SII) failed", slave_index);
             return false;
         }

@@ -42,6 +42,7 @@
 #include "tether/ethercat/EtherCATTypes.hpp"
 #include "tether/ethercat/CachedSIIReader.hpp"
 #include "tether/ethercat/SyncManager.hpp"
+#include "tether/fmmu/FMMUConfiguration.hpp"
 #include "tether/platform/Platform.hpp"
 
 namespace EtherCAT {
@@ -182,7 +183,7 @@ inline const char* slaveErrorToString(SlaveError e) {
  *   s.transitionToOp();
  * @endcode
  */
-class EtherCATSlave {
+class EtherCATSlave : public fmmu::IFMMUTransport {
 public:
     /**
      * @brief Construct a slave bound to a master at a given position.
@@ -200,6 +201,17 @@ public:
 
     /** @brief Auto-increment ADP for this slave. */
     uint16_t adp() const;
+
+    // -- FMMU manager ---------------------------------------------------------
+
+    /** @brief Access this slave's FMMU manager. */
+    fmmu::FMMUManager& fmmuManager() { return fmmu_mgr_; }
+    const fmmu::FMMUManager& fmmuManager() const { return fmmu_mgr_; }
+
+    // -- IFMMUTransport (ADP is implicit — this slave's own ADP) -----------
+
+    bool apwr(uint16_t ado, const void* data, uint16_t len, unsigned int timeout_ms) override;
+    bool aprd(uint16_t ado, void* out, uint16_t len, unsigned int timeout_ms) override;
 
     // -- SII cache ----------------------------------------------------------
 
@@ -447,6 +459,7 @@ protected:
     bool pdo_configured_ = false;
 
     SII::CachedSIIReader sii_cache_;
+    fmmu::FMMUManager fmmu_mgr_{*this};
 };
 
 // ============================================================================

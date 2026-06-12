@@ -10,18 +10,12 @@
 #include "sii/SIIParser.hpp"
 #include "EtherCATPDO.hpp"
 
-// raw/internal.hpp is only needed by the backward-compat RawFMMUTransport
-// (guarded by TETHER_COMPILE_MASTER below).
-#ifdef TETHER_COMPILE_MASTER
-#include "tether/ethercat/EtherCATMaster.hpp"
-#endif
-
 #include <cstdio>
 #include <cstring>
 
 namespace EtherCAT {
 
-// Global FMMU debug flag
+// Global FMMU debug flag (still used for verbose register-dump logging)
 bool g_debug_fmmu = false;
 
 namespace fmmu {
@@ -61,52 +55,18 @@ FMMUManager::FMMUManager(IFMMUTransport& transport)
 }
 
 // ============================================================================
-// FMMUManager — Initialization
-// ============================================================================
-
-void FMMUManager::init() {
-    TETHER_LOGI(TAG, "Initializing FMMU module");
-
-    for (size_t i = 0; i < kMaxFMMUSlaves; i++) {
-        configs_[i].clear();
-        configs_[i].slave_index = static_cast<uint16_t>(i);
-    }
-
-    global_logical_addr_ = 0;
-    initialized_ = true;
-}
-
-SlaveFMMUConfig* FMMUManager::getConfig(uint16_t slave_index) {
-    if (slave_index >= kMaxFMMUSlaves) return nullptr;
-    return &configs_[slave_index];
-}
-
-// ============================================================================
 // FMMUManager — Configuration from SII
 // ============================================================================
 
-bool FMMUManager::configureFromSii(uint16_t slave_index,
-                                    const SII::SIIData* sii,
+bool FMMUManager::configureFromSii(const SII::SIIData* sii,
                                     const PDO::SlaveConfig* sm_config,
                                     uint32_t base_logical_addr) {
-    if (slave_index >= kMaxFMMUSlaves) {
-        TETHER_LOGE(TAG, "Slave index %u exceeds maximum (%zu)", slave_index, kMaxFMMUSlaves);
-        return false;
-    }
-
-    if (!initialized_) {
-        init();
-    }
-
-    SlaveFMMUConfig* cfg = &configs_[slave_index];
-    cfg->clear();
-    cfg->slave_index = slave_index;
-    cfg->next_logical_addr = base_logical_addr;
+    config_.clear();
+    config_.next_logical_addr = base_logical_addr;
 
     size_t sii_fmmu_count = sii ? sii->fmmu_count : 0;
 
-    TETHER_LOGI(TAG, "Slave %u: Configuring FMMUs from SII (%zu FMMU hints)",
-             slave_index, sii_fmmu_count);
+    TETHER_LOGI(TAG, "Configuring FMMUs from SII (%zu FMMU hints)", sii_fmmu_count);
 
     uint16_t sm2_addr = 0x1800;
     uint16_t sm2_len = 0;
@@ -143,21 +103,21 @@ bool FMMUManager::configureFromSii(uint16_t slave_index,
             switch (fmmu_type) {
                 case SII::FMMU_TYPE_OUTPUT:
                     if (!has_output && sm2_len > 0) {
-                        cfg->addOutput(sm2_addr, sm2_len, 2);
+                        config_.addOutput(sm2_addr, sm2_len, 2);
                         has_output = true;
                         TETHER_LOGI(TAG, "  FMMU%zu: Output -> SM2 (log=0x%08lX phy=0x%04X len=%u)",
-                                 cfg->fmmu_count - 1,
-                                 (unsigned long)(cfg->next_logical_addr - sm2_len),
+                                 config_.fmmu_count - 1,
+                                 (unsigned long)(config_.next_logical_addr - sm2_len),
                                  sm2_addr, sm2_len);
                     }
                     break;
                 case SII::FMMU_TYPE_INPUT:
                     if (!has_input && sm3_len > 0) {
-                        cfg->addInput(sm3_addr, sm3_len, 3);
+                        config_.addInput(sm3_addr, sm3_len, 3);
                         has_input = true;
                         TETHER_LOGI(TAG, "  FMMU%zu: Input -> SM3 (log=0x%08lX phy=0x%04X len=%u)",
-                                 cfg->fmmu_count - 1,
-                                 (unsigned long)(cfg->next_logical_addr - sm3_len),
+                                 config_.fmmu_count - 1,
+                                 (unsigned long)(config_.next_logical_addr - sm3_len),
                                  sm3_addr, sm3_len);
                     }
                     break;
@@ -172,66 +132,55 @@ bool FMMUManager::configureFromSii(uint16_t slave_index,
     }
 
     if (!has_output && sm2_len > 0) {
-        cfg->addOutput(sm2_addr, sm2_len, 2);
+        config_.addOutput(sm2_addr, sm2_len, 2);
         TETHER_LOGI(TAG, "  FMMU%zu: Output -> SM2 (DEFAULT, log=0x%08lX phy=0x%04X len=%u)",
-                 cfg->fmmu_count - 1,
-                 (unsigned long)(cfg->next_logical_addr - sm2_len),
+                 config_.fmmu_count - 1,
+                 (unsigned long)(config_.next_logical_addr - sm2_len),
                  sm2_addr, sm2_len);
     }
 
     if (!has_input && sm3_len > 0) {
-        cfg->addInput(sm3_addr, sm3_len, 3);
+        config_.addInput(sm3_addr, sm3_len, 3);
         TETHER_LOGI(TAG, "  FMMU%zu: Input -> SM3 (DEFAULT, log=0x%08lX phy=0x%04X len=%u)",
-                 cfg->fmmu_count - 1,
-                 (unsigned long)(cfg->next_logical_addr - sm3_len),
+                 config_.fmmu_count - 1,
+                 (unsigned long)(config_.next_logical_addr - sm3_len),
                  sm3_addr, sm3_len);
     }
 
-    global_logical_addr_ = cfg->next_logical_addr;
+    TETHER_LOGI(TAG, "%zu FMMUs configured, next_log=0x%08lX",
+             config_.fmmu_count, (unsigned long)config_.next_logical_addr);
 
-    TETHER_LOGI(TAG, "Slave %u: %zu FMMUs configured, next_log=0x%08lX",
-             slave_index, cfg->fmmu_count, (unsigned long)cfg->next_logical_addr);
-
-    return cfg->fmmu_count > 0;
+    return config_.fmmu_count > 0;
 }
 
 // ============================================================================
 // FMMUManager — Manual Configuration
 // ============================================================================
 
-bool FMMUManager::configureManual(uint16_t slave_index,
-                                   uint16_t output_phys, uint16_t output_len,
+bool FMMUManager::configureManual(uint16_t output_phys, uint16_t output_len,
                                    uint16_t input_phys, uint16_t input_len,
                                    uint32_t base_logical_addr) {
-    if (slave_index >= kMaxFMMUSlaves) return false;
+    config_.clear();
+    config_.next_logical_addr = base_logical_addr;
 
-    if (!initialized_) init();
-
-    SlaveFMMUConfig* cfg = &configs_[slave_index];
-    cfg->clear();
-    cfg->slave_index = slave_index;
-    cfg->next_logical_addr = base_logical_addr;
-
-    TETHER_LOGI(TAG, "Manual FMMU config for slave %u: out_phy=0x%04X out_len=%u, in_phy=0x%04X in_len=%u, base=0x%08lX",
-             slave_index, output_phys, output_len, input_phys, input_len, (unsigned long)base_logical_addr);
+    TETHER_LOGI(TAG, "Manual FMMU config: out_phy=0x%04X out_len=%u, in_phy=0x%04X in_len=%u, base=0x%08lX",
+             output_phys, output_len, input_phys, input_len, (unsigned long)base_logical_addr);
 
     if (output_len > 0) {
-        cfg->addOutput(output_phys, output_len, 2);
+        config_.addOutput(output_phys, output_len, 2);
         TETHER_LOGI(TAG, "  FMMU0 Output: log=0x%08lX phy=0x%04X len=%u",
-                 (unsigned long)cfg->fmmus[0].logical_start_addr,
-                 cfg->fmmus[0].physical_start_addr,
-                 cfg->fmmus[0].length);
+                 (unsigned long)config_.fmmus[0].logical_start_addr,
+                 config_.fmmus[0].physical_start_addr,
+                 config_.fmmus[0].length);
     }
 
     if (input_len > 0) {
-        cfg->addInput(input_phys, input_len, 3);
+        config_.addInput(input_phys, input_len, 3);
         TETHER_LOGI(TAG, "  FMMU1 Input: log=0x%08lX phy=0x%04X len=%u",
-                 (unsigned long)cfg->fmmus[cfg->fmmu_count - 1].logical_start_addr,
-                 cfg->fmmus[cfg->fmmu_count - 1].physical_start_addr,
-                 cfg->fmmus[cfg->fmmu_count - 1].length);
+                 (unsigned long)config_.fmmus[config_.fmmu_count - 1].logical_start_addr,
+                 config_.fmmus[config_.fmmu_count - 1].physical_start_addr,
+                 config_.fmmus[config_.fmmu_count - 1].length);
     }
-
-    global_logical_addr_ = cfg->next_logical_addr;
 
     return true;
 }
@@ -240,26 +189,18 @@ bool FMMUManager::configureManual(uint16_t slave_index,
 // FMMUManager — Hardware Register Access
 // ============================================================================
 
-bool FMMUManager::writeToSlave(uint16_t slave_index) {
-    if (slave_index >= kMaxFMMUSlaves) {
-        TETHER_LOGE(TAG, "Invalid slave index %u", slave_index);
-        return false;
-    }
-
-    SlaveFMMUConfig* cfg = &configs_[slave_index];
-    if (cfg->fmmu_count == 0) {
-        TETHER_LOGW(TAG, "Slave %u: No FMMUs to configure", slave_index);
+bool FMMUManager::writeToSlave() {
+    if (config_.fmmu_count == 0) {
+        TETHER_LOGW(TAG, "No FMMUs to configure");
         return true;
     }
 
-    uint16_t adp = transport_.adpForSlaveIndex(slave_index);
-
-    TETHER_LOGI(TAG, "Writing %zu FMMUs to slave %u...", cfg->fmmu_count, slave_index);
+    TETHER_LOGI(TAG, "Writing %zu FMMUs to slave...", config_.fmmu_count);
 
     bool all_ok = true;
 
-    for (size_t i = 0; i < cfg->fmmu_count; i++) {
-        const FMMUConfig& fmmu = cfg->fmmus[i];
+    for (size_t i = 0; i < config_.fmmu_count; i++) {
+        const FMMUConfig& fmmu = config_.fmmus[i];
 
         FMMURegBlock regs;
         std::memset(&regs, 0, sizeof(regs));
@@ -286,22 +227,21 @@ bool FMMUManager::writeToSlave(uint16_t slave_index) {
         if (g_debug_fmmu) {
             char hex_buf[128];
             hexDump(reinterpret_cast<const uint8_t*>(&regs), sizeof(regs), hex_buf, sizeof(hex_buf));
-            TETHER_LOGI(TAG, "  [FMMU-DEBUG] apwr adp=0x%04X ado=0x%04X len=%zu bytes: %s",
-                     adp, reg_addr, sizeof(regs), hex_buf);
+            TETHER_LOGI(TAG, "  [FMMU-DEBUG] apwr ado=0x%04X len=%zu bytes: %s",
+                     reg_addr, sizeof(regs), hex_buf);
         }
 
-        if (!transport_.apwr(adp, reg_addr, &regs, sizeof(regs), 100)) {
+        if (!transport_.apwr(reg_addr, &regs, sizeof(regs), 100)) {
             TETHER_LOGE(TAG, "  FMMU%zu: 16-byte write failed!", i);
 
             // Fallback probe 1: try a 1-byte write to the activate register.
-            // Some ESCs reject 16-byte APWR but accept smaller writes.
             uint8_t act_byte = regs.activate;
-            if (transport_.apwr(adp, static_cast<uint16_t>(reg_addr + 0x0C), &act_byte, 1, 100)) {
+            if (transport_.apwr(static_cast<uint16_t>(reg_addr + 0x0C), &act_byte, 1, 100)) {
                 TETHER_LOGE(TAG, "  FMMU%zu:  1-byte activate write SUCCEEDED — 16-byte APWR rejected by ESC", i);
             } else {
                 // Fallback probe 2: APRD the activate byte to check reachability.
                 uint8_t probe = 0xFF;
-                if (transport_.aprd(adp, static_cast<uint16_t>(reg_addr + 0x0C), &probe, 1, 100)) {
+                if (transport_.aprd(static_cast<uint16_t>(reg_addr + 0x0C), &probe, 1, 100)) {
                     if (probe == 0xFF) {
                         TETHER_LOGE(TAG, "  FMMU%zu:  APRD returned frame but WKC=0 (probe still 0xFF) — slave ignores 0x%04X", i, reg_addr);
                     } else {
@@ -318,34 +258,30 @@ bool FMMUManager::writeToSlave(uint16_t slave_index) {
     FMMURegBlock zero_regs;
     std::memset(&zero_regs, 0, sizeof(zero_regs));
 
-    for (size_t i = cfg->fmmu_count; i < kMaxFMMUs; i++) {
+    for (size_t i = config_.fmmu_count; i < kMaxFMMUs; i++) {
         uint16_t reg_addr = kFMMURegBase + (static_cast<uint16_t>(i) * kFMMURegSize);
-        if (!transport_.apwr(adp, reg_addr + 0x0C, &zero_regs.activate, 1, 50)) {
-            TETHER_LOGD(TAG, "  FMMU%zu: Could not clear (may not exist)", i);
-        }
+        (void)transport_.apwr(static_cast<uint16_t>(reg_addr + 0x0C), &zero_regs.activate, 1, 50);
     }
 
-    cfg->configured = all_ok;
+    config_.configured = all_ok;
 
     if (all_ok) {
-        TETHER_LOGI(TAG, "Slave %u: All %zu FMMUs written successfully", slave_index, cfg->fmmu_count);
+        TETHER_LOGI(TAG, "All %zu FMMUs written successfully", config_.fmmu_count);
     }
 
     return all_ok;
 }
 
-size_t FMMUManager::readFromSlave(uint16_t slave_index,
-                                   FMMUConfig* out_configs, size_t max_fmmus) {
+size_t FMMUManager::readFromSlave(FMMUConfig* out_configs, size_t max_fmmus) {
     if (out_configs == nullptr || max_fmmus == 0) return 0;
 
-    uint16_t adp = transport_.adpForSlaveIndex(slave_index);
     size_t count = 0;
 
     for (size_t i = 0; i < max_fmmus && i < kMaxFMMUs; i++) {
         uint16_t reg_addr = kFMMURegBase + (static_cast<uint16_t>(i) * kFMMURegSize);
 
         FMMURegBlock regs;
-        if (!transport_.aprd(adp, reg_addr, &regs, sizeof(regs), 100)) {
+        if (!transport_.aprd(reg_addr, &regs, sizeof(regs), 100)) {
             break;
         }
 
@@ -373,22 +309,19 @@ size_t FMMUManager::readFromSlave(uint16_t slave_index,
     return count;
 }
 
-bool FMMUManager::verify(uint16_t slave_index) {
-    if (slave_index >= kMaxFMMUSlaves) return false;
-
-    SlaveFMMUConfig* cfg = &configs_[slave_index];
-    if (cfg->fmmu_count == 0) return true;
+bool FMMUManager::verify() {
+    if (config_.fmmu_count == 0) return true;
 
     FMMUConfig hw_configs[kMaxFMMUs];
-    size_t hw_count = readFromSlave(slave_index, hw_configs, kMaxFMMUs);
+    size_t hw_count = readFromSlave(hw_configs, kMaxFMMUs);
 
-    if (hw_count < cfg->fmmu_count) {
-        TETHER_LOGE(TAG, "Slave %u: Could only read %zu/%zu FMMUs",
-                 slave_index, hw_count, cfg->fmmu_count);
+    if (hw_count < config_.fmmu_count) {
+        TETHER_LOGE(TAG, "Could only read %zu/%zu FMMUs",
+                 hw_count, config_.fmmu_count);
         return false;
     }
 
-    TETHER_LOGI(TAG, "=== FMMU HARDWARE READBACK (Slave %u) ===", slave_index);
+    TETHER_LOGI(TAG, "=== FMMU HARDWARE READBACK ===");
     for (size_t i = 0; i < hw_count; i++) {
         const FMMUConfig& actual = hw_configs[i];
         TETHER_LOGI(TAG, "  FMMU%zu HW: log=0x%08lX phy=0x%04X len=%u type=0x%02X act=0x%02X",
@@ -401,8 +334,8 @@ bool FMMUManager::verify(uint16_t slave_index) {
     }
 
     bool match = true;
-    for (size_t i = 0; i < cfg->fmmu_count; i++) {
-        const FMMUConfig& expected = cfg->fmmus[i];
+    for (size_t i = 0; i < config_.fmmu_count; i++) {
+        const FMMUConfig& expected = config_.fmmus[i];
         const FMMUConfig& actual = hw_configs[i];
 
         bool ok = (expected.logical_start_addr == actual.logical_start_addr) &&
@@ -412,7 +345,7 @@ bool FMMUManager::verify(uint16_t slave_index) {
                   ((expected.activate & FMMUActivate::Enable) == (actual.activate & FMMUActivate::Enable));
 
         if (!ok) {
-            TETHER_LOGE(TAG, "Slave %u FMMU%zu mismatch:", slave_index, i);
+            TETHER_LOGE(TAG, "FMMU%zu mismatch:", i);
             match = false;
         } else {
             TETHER_LOGI(TAG, "  FMMU%zu: VERIFIED OK", i);
@@ -422,18 +355,15 @@ bool FMMUManager::verify(uint16_t slave_index) {
     return match;
 }
 
-bool FMMUManager::disableAll(uint16_t slave_index) {
-    uint16_t adp = transport_.adpForSlaveIndex(slave_index);
+bool FMMUManager::disableAll() {
     uint8_t zero = 0;
 
     for (size_t i = 0; i < kMaxFMMUs; i++) {
         uint16_t reg_addr = kFMMURegBase + (static_cast<uint16_t>(i) * kFMMURegSize) + 0x0C;
-        (void)transport_.apwr(adp, reg_addr, &zero, 1, 50);
+        (void)transport_.apwr(reg_addr, &zero, 1, 50);
     }
 
-    if (slave_index < kMaxFMMUSlaves) {
-        configs_[slave_index].configured = false;
-    }
+    config_.configured = false;
 
     return true;
 }
@@ -442,15 +372,13 @@ bool FMMUManager::disableAll(uint16_t slave_index) {
 // FMMUManager — Address Query Functions
 // ============================================================================
 
-uint32_t FMMUManager::getOutputLogicalAddr(uint16_t slave_index) const {
-    if (slave_index >= kMaxFMMUSlaves) return 0;
-    const FMMUConfig* fmmu = configs_[slave_index].getOutputFMMU();
+uint32_t FMMUManager::getOutputLogicalAddr() const {
+    const FMMUConfig* fmmu = config_.getOutputFMMU();
     return fmmu ? fmmu->logical_start_addr : 0;
 }
 
-uint32_t FMMUManager::getInputLogicalAddr(uint16_t slave_index) const {
-    if (slave_index >= kMaxFMMUSlaves) return 0;
-    const FMMUConfig* fmmu = configs_[slave_index].getInputFMMU();
+uint32_t FMMUManager::getInputLogicalAddr() const {
+    const FMMUConfig* fmmu = config_.getInputFMMU();
     return fmmu ? fmmu->logical_start_addr : 0;
 }
 
@@ -458,17 +386,12 @@ uint32_t FMMUManager::getInputLogicalAddr(uint16_t slave_index) const {
 // FMMUManager — Diagnostics
 // ============================================================================
 
-void FMMUManager::logConfig(uint16_t slave_index, const char* tag) const {
-    if (slave_index >= kMaxFMMUSlaves) {
-        TETHER_LOGE(tag, "Invalid slave index %u", slave_index);
-        return;
-    }
-    const SlaveFMMUConfig* cfg = &configs_[slave_index];
-    TETHER_LOGI(tag, "FMMU Config - Slave %u: %zu FMMUs, configured=%s, next_log=0x%08lX",
-             slave_index, cfg->fmmu_count, cfg->configured ? "yes" : "no",
-             (unsigned long)cfg->next_logical_addr);
-    for (size_t i = 0; i < cfg->fmmu_count; i++) {
-        const FMMUConfig& f = cfg->fmmus[i];
+void FMMUManager::logConfig(const char* tag) const {
+    TETHER_LOGI(tag, "FMMU Config: %zu FMMUs, configured=%s, next_log=0x%08lX",
+             config_.fmmu_count, config_.configured ? "yes" : "no",
+             (unsigned long)config_.next_logical_addr);
+    for (size_t i = 0; i < config_.fmmu_count; i++) {
+        const FMMUConfig& f = config_.fmmus[i];
         TETHER_LOGI(tag, "  FMMU%zu [%s]: log=0x%08lX phy=0x%04X len=%u type=0x%02X act=0x%02X SM%u",
                  i, getFMMUTypeName(f.sii_type),
                  (unsigned long)f.logical_start_addr,
@@ -477,10 +400,10 @@ void FMMUManager::logConfig(uint16_t slave_index, const char* tag) const {
     }
 }
 
-void FMMUManager::logHardware(uint16_t slave_index, const char* tag) {
+void FMMUManager::logHardware(const char* tag) {
     FMMUConfig hw_configs[kMaxFMMUs];
-    size_t count = readFromSlave(slave_index, hw_configs, kMaxFMMUs);
-    TETHER_LOGI(tag, "FMMU Hardware State - Slave %u (%zu FMMUs read)", slave_index, count);
+    size_t count = readFromSlave(hw_configs, kMaxFMMUs);
+    TETHER_LOGI(tag, "FMMU Hardware State (%zu FMMUs read)", count);
     for (size_t i = 0; i < count; i++) {
         const FMMUConfig& f = hw_configs[i];
         if (f.activate == 0 && f.length == 0) continue;
@@ -489,129 +412,6 @@ void FMMUManager::logHardware(uint16_t slave_index, const char* tag) {
                  f.length, f.type, f.activate,
                  (f.activate & FMMUActivate::Enable) ? "ENABLED" : "disabled");
     }
-}
-
-// ============================================================================
-// Backward-compatible free functions
-//
-// These delegate to a module-local FMMUManager.  The transport implementation
-// depends on whether the full EtherCAT master is linked.
-// ============================================================================
-
-#ifdef TETHER_COMPILE_MASTER
-
-/// Concrete transport delegating to the active EtherCATMaster.
-class RawFMMUTransport : public IFMMUTransport {
-public:
-    void setMaster(EtherCAT::EtherCATMaster* m) { master_ = m; }
-    
-    bool apwr(uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int timeout_ms) override {
-        if (!master_) return false;
-        return master_->writeRegister(EtherCATMaster::slaveAddressFromADP(adp), ado, data, len, timeout_ms);
-    }
-    bool aprd(uint16_t adp, uint16_t ado, void* out, uint16_t len, unsigned int timeout_ms) override {
-        if (!master_) return false;
-        return master_->readRegister(EtherCATMaster::slaveAddressFromADP(adp), ado, out, len, timeout_ms);
-    }
-    uint16_t adpForSlaveIndex(uint16_t slave_index) override {
-        return EtherCAT::EtherCATMaster::adpForSlaveIndex(slave_index);
-    }
-private:
-    EtherCAT::EtherCATMaster* master_ = nullptr;
-};
-
-static RawFMMUTransport s_raw_transport;
-
-#else // !TETHER_COMPILE_MASTER
-
-/// Null transport for common-only builds (no real I/O available).
-class NullFMMUTransport : public IFMMUTransport {
-public:
-    bool apwr(uint16_t, uint16_t, const void*, uint16_t, unsigned int) override { return false; }
-    bool aprd(uint16_t, uint16_t, void*, uint16_t, unsigned int) override { return false; }
-    uint16_t adpForSlaveIndex(uint16_t slave_index) override {
-        return static_cast<uint16_t>(0u - slave_index);
-    }
-};
-
-static NullFMMUTransport s_raw_transport;
-
-#endif // TETHER_COMPILE_MASTER
-
-static FMMUManager s_default_manager(s_raw_transport);
-
-// ---- backward-compat free-function wrappers ----
-
-SlaveFMMUConfig* fmmu_get_slave_configs() {
-    return s_default_manager.getSlaveConfigs();
-}
-
-SlaveFMMUConfig* fmmu_get_config(uint16_t slave_index) {
-    return s_default_manager.getConfig(slave_index);
-}
-
-void fmmu_init() {
-    s_default_manager.init();
-}
-
-bool fmmu_configure_from_sii(uint16_t slave_index,
-                              const SII::SIIData* sii,
-                              const PDO::SlaveConfig* sm_config,
-                              uint32_t base_logical_addr) {
-    return s_default_manager.configureFromSii(slave_index, sii, sm_config, base_logical_addr);
-}
-
-bool fmmu_configure_manual(uint16_t slave_index,
-                           uint16_t output_phys, uint16_t output_len,
-                           uint16_t input_phys, uint16_t input_len,
-                           uint32_t base_logical_addr) {
-    return s_default_manager.configureManual(slave_index, output_phys, output_len,
-                                              input_phys, input_len, base_logical_addr);
-}
-
-bool fmmu_write_to_slave(const uint8_t /*src_mac*/[6], uint16_t slave_index) {
-    return s_default_manager.writeToSlave(slave_index);
-}
-
-size_t fmmu_read_from_slave(const uint8_t /*src_mac*/[6], uint16_t slave_index,
-                            FMMUConfig* out_configs, size_t max_fmmus) {
-    return s_default_manager.readFromSlave(slave_index, out_configs, max_fmmus);
-}
-
-bool fmmu_verify(const uint8_t /*src_mac*/[6], uint16_t slave_index) {
-    return s_default_manager.verify(slave_index);
-}
-
-bool fmmu_disable_all(const uint8_t /*src_mac*/[6], uint16_t slave_index) {
-    return s_default_manager.disableAll(slave_index);
-}
-
-void fmmu_log_config(uint16_t slave_index, const char* tag) {
-    s_default_manager.logConfig(slave_index, tag);
-}
-
-void fmmu_log_hardware(const uint8_t /*src_mac*/[6], uint16_t slave_index, const char* tag) {
-    s_default_manager.logHardware(slave_index, tag);
-}
-
-uint32_t fmmu_get_output_logical_addr(uint16_t slave_index) {
-    return s_default_manager.getOutputLogicalAddr(slave_index);
-}
-
-uint32_t fmmu_get_input_logical_addr(uint16_t slave_index) {
-    return s_default_manager.getInputLogicalAddr(slave_index);
-}
-
-uint32_t fmmu_get_total_logical_size() {
-    return s_default_manager.getTotalLogicalSize();
-}
-
-void fmmu_set_master(EtherCAT::EtherCATMaster* master) {
-#ifdef TETHER_COMPILE_MASTER
-    s_raw_transport.setMaster(master);
-#else
-    (void)master;
-#endif
 }
 
 } // namespace fmmu

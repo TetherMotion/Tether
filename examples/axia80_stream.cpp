@@ -771,8 +771,8 @@ int main(int argc, char** argv) {
 
     // ---- FMMU debug output ----
     if (fmmu_debug) {
-        EtherCAT::fmmu::fmmu_log_config(slave_idx, TAG);
-        EtherCAT::fmmu::fmmu_log_hardware(src_mac, slave_idx, TAG);
+        sensor.slave().fmmuManager().logConfig(TAG);
+        sensor.slave().fmmuManager().logHardware(TAG);
     }
 
     // ---- Readback verification against ESI XML ----

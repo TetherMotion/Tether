@@ -384,250 +384,81 @@ class IFMMUTransport {
 public:
     virtual ~IFMMUTransport() = default;
 
-    /// Write data to a slave register via auto-increment addressing.
-    virtual bool apwr(uint16_t adp, uint16_t ado,
-                      const void* data, uint16_t len,
-                      unsigned int timeout_ms) = 0;
+    /// Write data to a slave register (ADP is implicit — slave knows its own).
+    virtual bool apwr(uint16_t ado, const void* data,
+                      uint16_t len, unsigned int timeout_ms) = 0;
 
-    /// Read data from a slave register via auto-increment addressing.
-    virtual bool aprd(uint16_t adp, uint16_t ado,
-                      void* out, uint16_t len,
-                      unsigned int timeout_ms) = 0;
-
-    /// Convert a slave index to the auto-increment ADP value.
-    virtual uint16_t adpForSlaveIndex(uint16_t slave_index) = 0;
+    /// Read data from a slave register (ADP is implicit).
+    virtual bool aprd(uint16_t ado, void* out,
+                      uint16_t len, unsigned int timeout_ms) = 0;
 };
-
-/// Maximum slaves supported for FMMU configuration
-constexpr size_t kMaxFMMUSlaves = 8;
 
 // ============================================================================
 // FMMUManager — instance-based FMMU configuration (no globals)
 // ============================================================================
 
 /**
- * @brief Manages FMMU configuration for up to kMaxFMMUSlaves slaves.
+ * @brief Per-slave FMMU configuration manager.
  *
- * All state is instance-owned.  Multiple FMMUManagers can coexist with
- * independent state (e.g. for unit testing).
+ * Each EtherCATSlave owns one FMMUManager instance.  All state is local to
+ * that slave; there is no global array.
  *
  * @code
  * MockFMMUTransport transport;
  * FMMUManager mgr(transport);
- * mgr.init();
- * mgr.configureManual(0, 0x1800, 23, 0x1C00, 25, 0);
- * mgr.writeToSlave(0);
+ * mgr.configureManual(0x1800, 23, 0x1C00, 25, 0);
+ * mgr.writeToSlave();
  * @endcode
  */
 class FMMUManager {
 public:
     explicit FMMUManager(IFMMUTransport& transport);
 
-    /// Initialise / reset all FMMU state.
-    void init();
-
-    /// @return true after init() has been called.
-    bool isInitialized() const { return initialized_; }
-
-    /// Direct access to the slave config array.
-    SlaveFMMUConfig* getSlaveConfigs() { return configs_; }
-
-    /// Get FMMU config for a specific slave, or nullptr if out of range.
-    SlaveFMMUConfig* getConfig(uint16_t slave_index);
+    /// Direct access to this slave's config.
+    SlaveFMMUConfig& config() { return config_; }
+    const SlaveFMMUConfig& config() const { return config_; }
 
     /// Configure FMMUs from SII data.
-    bool configureFromSii(uint16_t slave_index,
-                          const SII::SIIData* sii,
+    bool configureFromSii(const SII::SIIData* sii,
                           const PDO::SlaveConfig* sm_config,
                           uint32_t base_logical_addr = 0);
 
-    /// Manually configure FMMUs for a slave.
-    bool configureManual(uint16_t slave_index,
-                         uint16_t output_phys, uint16_t output_len,
+    /// Manually configure FMMUs.
+    bool configureManual(uint16_t output_phys, uint16_t output_len,
                          uint16_t input_phys, uint16_t input_len,
                          uint32_t base_logical_addr = 0);
 
     /// Write FMMU registers to slave hardware.
-    bool writeToSlave(uint16_t slave_index);
+    bool writeToSlave();
 
     /// Read FMMU registers from slave hardware.
-    size_t readFromSlave(uint16_t slave_index,
-                         FMMUConfig* out_configs, size_t max_fmmus);
+    size_t readFromSlave(FMMUConfig* out_configs, size_t max_fmmus);
 
     /// Verify FMMU registers match expected values.
-    bool verify(uint16_t slave_index);
+    bool verify();
 
-    /// Disable all FMMUs on a slave.
-    bool disableAll(uint16_t slave_index);
+    /// Disable all FMMUs on this slave.
+    bool disableAll();
 
-    /// Get output logical address for a slave.
-    uint32_t getOutputLogicalAddr(uint16_t slave_index) const;
+    /// Get output logical address.
+    uint32_t getOutputLogicalAddr() const;
 
-    /// Get input logical address for a slave.
-    uint32_t getInputLogicalAddr(uint16_t slave_index) const;
+    /// Get input logical address.
+    uint32_t getInputLogicalAddr() const;
 
-    /// Get total logical address space used across all slaves.
-    uint32_t getTotalLogicalSize() const { return global_logical_addr_; }
+    /// Get total logical address space used by this slave.
+    uint32_t getTotalLogicalSize() const { return config_.next_logical_addr; }
 
-    /// Log FMMU configuration for a slave.
-    void logConfig(uint16_t slave_index, const char* tag) const;
+    /// Log FMMU configuration.
+    void logConfig(const char* tag) const;
 
-    /// Log FMMU hardware state read from a slave.
-    void logHardware(uint16_t slave_index, const char* tag);
+    /// Log FMMU hardware state read from slave.
+    void logHardware(const char* tag);
 
 private:
     IFMMUTransport& transport_;
-    SlaveFMMUConfig configs_[kMaxFMMUSlaves];
-    uint32_t global_logical_addr_ = 0;
-    bool initialized_ = false;
+    SlaveFMMUConfig config_;
 };
-
-// ============================================================================
-// Global FMMU Configuration Storage (backward-compat free functions)
-// ============================================================================
-
-/**
- * @brief Get pointer to global FMMU configurations array
- */
-SlaveFMMUConfig* fmmu_get_slave_configs();
-
-/**
- * @brief Get FMMU configuration for a specific slave
- */
-SlaveFMMUConfig* fmmu_get_config(uint16_t slave_index);
-
-// ============================================================================
-// FMMU Configuration Functions
-// ============================================================================
-
-/**
- * @brief Initialize FMMU module
- * 
- * Clears all FMMU configurations and resets logical address allocator.
- */
-void fmmu_init();
-
-/**
- * @brief Configure FMMUs for a slave based on SII data and SM config
- * 
- * This function reads the FMMU type hints from the slave's SII EEPROM
- * (CAT_FMMU category) and combines them with the Sync Manager configuration
- * to create a complete FMMU mapping.
- * 
- * The mapping follows standard conventions:
- * - SII FMMU type 1 (Output) → FMMU for SM2 (RxPDO)
- * - SII FMMU type 2 (Input) → FMMU for SM3 (TxPDO)
- * 
- * @param slave_index Slave index
- * @param sii SII data containing FMMU hints (can be nullptr for defaults)
- * @param sm_config Sync Manager configuration with physical addresses and sizes
- * @param base_logical_addr Starting logical address for this slave
- * @return true if configuration was successful
- */
-bool fmmu_configure_from_sii(uint16_t slave_index, 
-                              const SII::SIIData* sii,
-                              const PDO::SlaveConfig* sm_config,
-                              uint32_t base_logical_addr = 0);
-
-/**
- * @brief Manually configure FMMUs for a slave
- * 
- * Use this when SII data is not available or you need custom configuration.
- * 
- * @param slave_index Slave index
- * @param output_phys Physical address for outputs (SM2, typically 0x1800)
- * @param output_len Output data length in bytes
- * @param input_phys Physical address for inputs (SM3, typically 0x1C00)
- * @param input_len Input data length in bytes
- * @param base_logical_addr Starting logical address
- */
-bool fmmu_configure_manual(uint16_t slave_index,
-                           uint16_t output_phys, uint16_t output_len,
-                           uint16_t input_phys, uint16_t input_len,
-                           uint32_t base_logical_addr = 0);
-
-/**
- * @brief Write FMMU configuration to slave hardware registers
- * 
- * This function writes the FMMUConfig structures to the actual FMMU
- * registers (0x0600-0x067F) on the slave.
- * 
- * @param src_mac Source MAC address
- * @param slave_index Slave index
- * @return true if all FMMU registers were written successfully
- */
-bool fmmu_write_to_slave(const uint8_t src_mac[6], uint16_t slave_index);
-
-/**
- * @brief Read FMMU configuration from slave hardware registers
- * 
- * Reads the current FMMU register values from the slave for verification.
- * 
- * @param src_mac Source MAC address
- * @param slave_index Slave index
- * @param out_configs Output array for FMMU configurations
- * @param max_fmmus Maximum FMMUs to read
- * @return Number of FMMUs read, or 0 on failure
- */
-size_t fmmu_read_from_slave(const uint8_t src_mac[6], uint16_t slave_index,
-                            FMMUConfig* out_configs, size_t max_fmmus);
-
-/**
- * @brief Verify FMMU configuration matches expected values
- * 
- * Reads back FMMU registers and compares with configured values.
- * 
- * @param src_mac Source MAC address  
- * @param slave_index Slave index
- * @return true if all configured FMMUs match hardware
- */
-bool fmmu_verify(const uint8_t src_mac[6], uint16_t slave_index);
-
-/**
- * @brief Disable all FMMUs on a slave
- * 
- * Writes 0 to all FMMU activate registers.
- */
-bool fmmu_disable_all(const uint8_t src_mac[6], uint16_t slave_index);
-
-// ============================================================================
-// Diagnostic Functions
-// ============================================================================
-
-/**
- * @brief Log FMMU configuration details
- * 
- * Outputs detailed FMMU configuration to ESP_LOG.
- */
-void fmmu_log_config(uint16_t slave_index, const char* tag);
-
-/**
- * @brief Log FMMU hardware state read from slave
- */
-void fmmu_log_hardware(const uint8_t src_mac[6], uint16_t slave_index, const char* tag);
-
-/**
- * @brief Get logical address for a slave's outputs
- */
-uint32_t fmmu_get_output_logical_addr(uint16_t slave_index);
-
-/**
- * @brief Get logical address for a slave's inputs
- */
-uint32_t fmmu_get_input_logical_addr(uint16_t slave_index);
-
-/**
- * @brief Get total logical address space used
- */
-uint32_t fmmu_get_total_logical_size();
-
-/**
- * @brief Set the EtherCATMaster pointer for the FMMU transport.
- *
- * Must be called before any fmmu_write_to_slave / fmmu_read_from_slave /
- * fmmu_verify / fmmu_disable_all calls when using the master-backed transport.
- */
-void fmmu_set_master(EtherCAT::EtherCATMaster* master);
 
 } // namespace fmmu
 } // namespace EtherCAT

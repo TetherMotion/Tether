@@ -5,10 +5,7 @@ set(TETHER_ETHERCAT_COMMON_SOURCES
     # SII parser
     ${TETHER_ROOT}/src/sii/SIIReader.cpp
     ${TETHER_ROOT}/src/ethercat/ESIParser.cpp
-    
-    # FMMU configuration
-    ${TETHER_ROOT}/src/fmmu/FMMUConfiguration.cpp
-    
+
     # Stubs for host builds (only include when we are NOT building the full master)
 )
 

@@ -397,8 +397,6 @@ void EtherCATMaster::start(const NetworkInterface& iface, const uint8_t src_mac[
     std::memcpy(src_mac_, src_mac, 6);
     ensureRxQueues();
 
-    fmmu::fmmu_set_master(this);
-
     // Initialize the instance-based SDO subsystem
     if (!sdo_manager_->init()) {
         TETHER_LOGW(TAG, "SDO subsystem failed to initialize");
@@ -415,7 +413,6 @@ void EtherCATMaster::stop()
 {
     stopMotionControlLoop();
     running_.store(false, std::memory_order_release);
-    fmmu::fmmu_set_master(nullptr);
 
     // Shutdown instance-based SDO subsystem
     if (sdo_manager_) {
