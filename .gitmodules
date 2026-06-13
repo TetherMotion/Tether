@@ -4,3 +4,6 @@
 [submodule "dependencies/magic_enum"]
 	path = dependencies/magic_enum
 	url = https://github.com/Neargye/magic_enum.git
+[submodule "dependencies/argparse"]
+	path = dependencies/argparse
+	url = https://github.com/p-ranav/argparse.git

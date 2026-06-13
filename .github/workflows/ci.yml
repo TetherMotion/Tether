@@ -28,6 +28,7 @@ jobs:
           g++ \
           gcc \
           libc6-dev \
+          libboost-dev \
           make
     
     - name: Configure and build

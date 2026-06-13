@@ -82,32 +82,43 @@ add_tether_example(detect_slaves
 add_tether_example(axia80_stream
     LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common)
 
-add_executable(tether_ui_backend
-    tether_ui_backend.cpp
-    WebSocketTransport.cpp)
-target_link_libraries(tether_ui_backend PRIVATE
-    tether_io_protocol
-    tether_gcode
-    tether_ethercat_slave
-    tether_common)
-target_include_directories(tether_ui_backend PRIVATE
-    ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/include/tether
-    ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(tether_ui_backend PRIVATE cxx_std_20)
+# --- WebSocket UI backends ---
+# These examples use Boost.Beast/Boost.Asio (header-only). They are only built
+# when Boost is available so the rest of the examples build without it.
+find_package(Boost QUIET)
+if(Boost_FOUND)
+    add_executable(tether_ui_backend
+        tether_ui_backend.cpp
+        WebSocketTransport.cpp)
+    target_link_libraries(tether_ui_backend PRIVATE
+        tether_io_protocol
+        tether_gcode
+        tether_ethercat_slave
+        tether_common
+        Boost::headers)
+    target_include_directories(tether_ui_backend PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/include/tether
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_features(tether_ui_backend PRIVATE cxx_std_20)
 
-add_executable(controlme_ui_backend
-    controlme_ui_backend.cpp
-    WebSocketTransport.cpp)
-target_link_libraries(controlme_ui_backend PRIVATE
-    tether_io_protocol
-    tether_simulation
-    tether_controls
-    tether_common)
-target_include_directories(controlme_ui_backend PRIVATE
-    ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/include/tether
-    ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(controlme_ui_backend PRIVATE cxx_std_20)
+    add_executable(controlme_ui_backend
+        controlme_ui_backend.cpp
+        WebSocketTransport.cpp)
+    target_link_libraries(controlme_ui_backend PRIVATE
+        tether_io_protocol
+        tether_simulation
+        tether_controls
+        tether_common
+        Boost::headers)
+    target_include_directories(controlme_ui_backend PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/include/tether
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_features(controlme_ui_backend PRIVATE cxx_std_20)
+else()
+    message(STATUS "Boost not found; skipping WebSocket UI backend examples "
+                   "(tether_ui_backend, controlme_ui_backend)")
+endif()
 
 message(STATUS "Examples configured")
