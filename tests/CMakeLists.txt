@@ -15,8 +15,13 @@ enable_testing()
 # Include GoogleTest for gtest_discover_tests
 include(GoogleTest)
 
-# Option to build per-module test executables (disabled by default for CI)
-option(TETHER_BUILD_MODULE_TESTS "Build per-module test executables" OFF)
+# Tests are split into one executable per library/module (see create_module_test
+# below). The core per-module executables (those that made up the former
+# monolithic "tether_tests" binary) are always built. This option additionally
+# enables optional module tests that are not part of the default suite because
+# they rely on machine-specific fixtures (currently the ESI parser tests). It is
+# kept so callers such as the ASAN/TSAN CI jobs can build those targets.
+option(TETHER_BUILD_MODULE_TESTS "Build optional/extra per-module test executables" OFF)
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/mocks)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/motion)
@@ -32,31 +37,6 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/replanner)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/motion_planner)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/io)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/identification)
-
-file(GLOB_RECURSE ALL_TEST_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/gcode/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/profiles/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/fsoe/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/hal/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/sii/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/mailbox/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/slave_emulation/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/control/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/gcode/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/export/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/replanner/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/mocks/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/dc/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/platform/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/slave/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/slave/**/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/simulation/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/destabilizer/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/io/*.cpp"
-)
 
 # Helper function to create module test executable
 function(create_module_test MODULE_NAME SOURCES LIBS DEFINITIONS)
@@ -104,7 +84,6 @@ endfunction()
 file(GLOB_RECURSE CONTROL_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/control/*.cpp")
 file(GLOB_RECURSE DC_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/dc/*.cpp")
 file(GLOB_RECURSE DESTABILIZER_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/destabilizer/*.cpp")
-file(GLOB_RECURSE ETHERCAT_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/ethercat/*.cpp")
 file(GLOB_RECURSE GCODE_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/gcode/*.cpp")
 file(GLOB_RECURSE HAL_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/hal/*.cpp")
 file(GLOB_RECURSE IO_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/io/*.cpp")
@@ -120,12 +99,13 @@ file(GLOB_RECURSE MAILBOX_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/mailbox/*.cp
 file(GLOB_RECURSE SLAVE_EMULATION_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/slave_emulation/*.cpp")
 file(GLOB_RECURSE EXPORT_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/export/*.cpp")
 file(GLOB_RECURSE REPLANNER_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/replanner/*.cpp")
+file(GLOB_RECURSE PLATFORM_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/platform/*.cpp")
+file(GLOB_RECURSE MOCKS_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/mocks/*.cpp")
 
-# Add common mock sources (only for modules that need them)
-set(ETHERCAT_MOCK_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/sii/mocks_private/raw_transport_test_stubs.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/mocks/test_submanagers.cpp"
-)
+# FSoE unit tests, excluding the integration test that has its own executable
+# (tether_fsoe_integration_tests) below.
+file(GLOB_RECURSE FSOE_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/fsoe/*.cpp")
+list(FILTER FSOE_TEST_SOURCES EXCLUDE REGEX ".*test_synapticon_safe_motion\\.cpp$")
 
 # Filter IO tests if IO protocol is disabled
 if(NOT TETHER_BUILD_IO_PROTOCOL)
@@ -142,189 +122,11 @@ if(NOT TETHER_BUILD_IO_PROTOCOL)
     list(FILTER IO_TEST_SOURCES EXCLUDE REGEX ".*test_io_datalogging_extra\\.cpp$")
 endif()
 
-# Create module test executables (only if sources exist and option is enabled)
-if(TETHER_BUILD_MODULE_TESTS)
-    if(CONTROL_TEST_SOURCES)
-        create_module_test(control
-            "${CONTROL_TEST_SOURCES}"
-            "tether_common;tether_hal;tether_gcode;tether_motion_control;tether_motion_planner;tether_controls;tether_export;tether_ethercat_common;tether_ethercat_master;tether_ethercat_slave;tether_simulation;tether_destabilizer"
-            ""
-        )
-    endif()
-
-    if(DC_TEST_SOURCES)
-        create_module_test(dc
-            "${DC_TEST_SOURCES}"
-            "tether_common;tether_ethercat_common;tether_ethercat_master"
-            ""
-        )
-    endif()
-
-    if(DESTABILIZER_TEST_SOURCES)
-        create_module_test(destabilizer
-            "${DESTABILIZER_TEST_SOURCES}"
-            "tether_common;tether_destabilizer"
-            ""
-        )
-    endif()
-
-    if(ETHERCAT_TEST_SOURCES)
-        create_module_test(ethercat
-            "${ETHERCAT_TEST_SOURCES};${ETHERCAT_MOCK_SOURCES}"
-            "tether_common;tether_ethercat_common;tether_ethercat_master;tether_ethercat_slave"
-            ""
-        )
-    endif()
-
-    if(GCODE_TEST_SOURCES)
-        create_module_test(gcode
-            "${GCODE_TEST_SOURCES}"
-            "tether_common;tether_gcode;tether_export"
-            ""
-        )
-    endif()
-
-    if(HAL_TEST_SOURCES)
-        create_module_test(hal
-            "${HAL_TEST_SOURCES}"
-            "tether_common;tether_hal;tether_ethercat_common;tether_ethercat_master"
-            ""
-        )
-    endif()
-
-    if(TETHER_BUILD_IO_PROTOCOL AND IO_TEST_SOURCES)
-        create_module_test(io
-            "${IO_TEST_SOURCES}"
-            "tether_common;tether_io_protocol"
-            ""
-        )
-    endif()
-
-    if(MOTION_TEST_SOURCES)
-        create_module_test(motion
-            "${MOTION_TEST_SOURCES}"
-            "tether_common;tether_motion_control;tether_ethercat_common"
-            ""
-        )
-    endif()
-
-    if(MOTION_PLANNER_TEST_SOURCES)
-        create_module_test(motion_planner
-            "${MOTION_PLANNER_TEST_SOURCES}"
-            "tether_common;tether_motion_control;tether_motion_planner;tether_ethercat_common"
-            ""
-        )
-    endif()
-
-    if(MOTION_REPLANNER_TEST_SOURCES)
-        create_module_test(motion_replanner
-            "${MOTION_REPLANNER_TEST_SOURCES}"
-            "tether_common;tether_motion_control;tether_motion_planner;tether_ethercat_common"
-            ""
-        )
-    endif()
-
-    if(PROFILES_TEST_SOURCES)
-        create_module_test(profiles
-            "${PROFILES_TEST_SOURCES}"
-            "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
-            ""
-        )
-    endif()
-
-    if(SIMULATION_TEST_SOURCES)
-        create_module_test(simulation
-            "${SIMULATION_TEST_SOURCES}"
-            "tether_common;tether_simulation"
-            ""
-        )
-    endif()
-
-    if(SLAVE_TEST_SOURCES)
-        create_module_test(slave
-            "${SLAVE_TEST_SOURCES}"
-            "tether_common;tether_ethercat_common;tether_ethercat_slave"
-            ""
-        )
-    endif()
-
-    if(SII_TEST_SOURCES)
-        create_module_test(sii
-            "${SII_TEST_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/sii/mocks_private/raw_transport_test_stubs.cpp"
-            "tether_common;tether_ethercat_common;tether_ethercat_master"
-            ""
-        )
-    endif()
-
-    if(ESI_TEST_SOURCES)
-        create_module_test(esi
-            "${ESI_TEST_SOURCES}"
-            "tether_common;tether_ethercat_common"
-            ""
-        )
-    endif()
-
-    if(MAILBOX_TEST_SOURCES)
-        create_module_test(mailbox
-            "${MAILBOX_TEST_SOURCES}"
-            "tether_common;tether_ethercat_common;tether_ethercat_master;tether_ethercat_slave"
-            ""
-        )
-    endif()
-
-    if(SLAVE_EMULATION_TEST_SOURCES)
-        create_module_test(slave_emulation
-            "${SLAVE_EMULATION_TEST_SOURCES}"
-            "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
-            ""
-        )
-    endif()
-
-    if(EXPORT_TEST_SOURCES)
-        create_module_test(export
-            "${EXPORT_TEST_SOURCES}"
-            "tether_common;tether_export"
-            ""
-        )
-    endif()
-
-    if(REPLANNER_TEST_SOURCES)
-        create_module_test(replanner
-            "${REPLANNER_TEST_SOURCES}"
-            "tether_common;tether_motion_planner"
-            ""
-        )
-    endif()
-endif()
-
-# Keep the original tether_tests for backward compatibility (all tests combined)
-list(FILTER ALL_TEST_SOURCES EXCLUDE REGEX ".*main\\.cpp$")
-list(FILTER ALL_TEST_SOURCES EXCLUDE REGEX ".*mocks_private/.*")
-if(NOT ALL_TEST_SOURCES)
-    message(WARNING "No test sources found, creating placeholder test")
-    file(WRITE ${CMAKE_CURRENT_SOURCE_DIR}/placeholder_test.cpp
-        "#include <gtest/gtest.h>\nTEST(Placeholder, Works) { EXPECT_TRUE(true); }\n")
-    set(ALL_TEST_SOURCES placeholder_test.cpp)
-endif()
-
-add_executable(tether_tests
-    main.cpp
-    ${ALL_TEST_SOURCES}
-)
-
-target_include_directories(tether_tests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/mocks
-    ${CMAKE_CURRENT_SOURCE_DIR}/mocks/esp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/export
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_replanner
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_planner
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src
-)
-
-target_link_libraries(tether_tests PRIVATE
+# Create one test executable per library/module (only if sources exist).
+# This replaces the former single monolithic "tether_tests" binary: each module
+# now compiles and links independently, so a change in one area only rebuilds and
+# relinks that module's test executable.
+set(TETHER_FULL_TEST_LIBS
     tether_common
     tether_hal
     tether_gcode
@@ -337,25 +139,179 @@ target_link_libraries(tether_tests PRIVATE
     tether_ethercat_slave
     tether_simulation
     tether_destabilizer
-    GTest::gtest
-    GTest::gtest_main
-    GTest::gmock
-    GTest::gmock_main
 )
 
-if(TETHER_BUILD_IO_PROTOCOL)
-    target_link_libraries(tether_tests PRIVATE tether_io_protocol)
+if(CONTROL_TEST_SOURCES)
+    create_module_test(control
+        "${CONTROL_TEST_SOURCES}"
+        "tether_common;tether_hal;tether_gcode;tether_motion_control;tether_motion_planner;tether_controls;tether_export;tether_ethercat_common;tether_ethercat_master;tether_ethercat_slave;tether_simulation;tether_destabilizer"
+        ""
+    )
 endif()
 
-target_compile_definitions(tether_tests PRIVATE
-    UNIT_TEST_HOST=1
-    GCODE_STANDALONE_CAPI=1
-    TETHER_ENABLE_ETHERCAT=1
-    TETHER_COMPILE_MASTER=1
-    TEST_PROJECT_ROOT=\"${CMAKE_SOURCE_DIR}\"
-)
+if(DC_TEST_SOURCES)
+    create_module_test(dc
+        "${DC_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common;tether_ethercat_master"
+        ""
+    )
+endif()
 
-gtest_discover_tests(tether_tests)
+if(DESTABILIZER_TEST_SOURCES)
+    create_module_test(destabilizer
+        "${DESTABILIZER_TEST_SOURCES}"
+        "tether_common;tether_destabilizer"
+        ""
+    )
+endif()
+
+if(GCODE_TEST_SOURCES)
+    create_module_test(gcode
+        "${GCODE_TEST_SOURCES}"
+        "tether_common;tether_gcode;tether_export"
+        ""
+    )
+endif()
+
+if(HAL_TEST_SOURCES)
+    create_module_test(hal
+        "${HAL_TEST_SOURCES}"
+        "tether_common;tether_hal;tether_ethercat_common;tether_ethercat_master"
+        ""
+    )
+endif()
+
+if(TETHER_BUILD_IO_PROTOCOL AND IO_TEST_SOURCES)
+    create_module_test(io
+        "${IO_TEST_SOURCES}"
+        "tether_common;tether_io_protocol"
+        ""
+    )
+endif()
+
+if(MOTION_TEST_SOURCES)
+    create_module_test(motion
+        "${MOTION_TEST_SOURCES}"
+        "tether_common;tether_motion_control;tether_ethercat_common"
+        ""
+    )
+endif()
+
+if(MOTION_PLANNER_TEST_SOURCES)
+    create_module_test(motion_planner
+        "${MOTION_PLANNER_TEST_SOURCES}"
+        "tether_common;tether_motion_control;tether_motion_planner;tether_ethercat_common"
+        ""
+    )
+endif()
+
+if(MOTION_REPLANNER_TEST_SOURCES)
+    create_module_test(motion_replanner
+        "${MOTION_REPLANNER_TEST_SOURCES}"
+        "tether_common;tether_motion_control;tether_motion_planner;tether_ethercat_common"
+        ""
+    )
+endif()
+
+if(PROFILES_TEST_SOURCES)
+    create_module_test(profiles
+        "${PROFILES_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
+        ""
+    )
+endif()
+
+if(SIMULATION_TEST_SOURCES)
+    create_module_test(simulation
+        "${SIMULATION_TEST_SOURCES}"
+        "tether_common;tether_simulation"
+        ""
+    )
+endif()
+
+if(SLAVE_TEST_SOURCES)
+    create_module_test(slave
+        "${SLAVE_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common;tether_ethercat_slave"
+        ""
+    )
+endif()
+
+if(SII_TEST_SOURCES)
+    create_module_test(sii
+        "${SII_TEST_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/sii/mocks_private/raw_transport_test_stubs.cpp"
+        "tether_common;tether_ethercat_common;tether_ethercat_master"
+        ""
+    )
+endif()
+
+# The ESI parser tests load XML fixtures from hardcoded absolute paths that only
+# exist on the original author's machine, so they are not part of the default
+# suite (they were never in the old monolithic binary). They are only built when
+# TETHER_BUILD_MODULE_TESTS is enabled (e.g. by the ASAN/TSAN CI jobs).
+if(TETHER_BUILD_MODULE_TESTS AND ESI_TEST_SOURCES)
+    create_module_test(esi
+        "${ESI_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common"
+        ""
+    )
+endif()
+
+if(MAILBOX_TEST_SOURCES)
+    create_module_test(mailbox
+        "${MAILBOX_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common;tether_ethercat_master;tether_ethercat_slave"
+        ""
+    )
+endif()
+
+if(SLAVE_EMULATION_TEST_SOURCES)
+    create_module_test(slave_emulation
+        "${SLAVE_EMULATION_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
+        ""
+    )
+endif()
+
+if(EXPORT_TEST_SOURCES)
+    create_module_test(export
+        "${EXPORT_TEST_SOURCES}"
+        "tether_common;tether_export"
+        ""
+    )
+endif()
+
+if(REPLANNER_TEST_SOURCES)
+    create_module_test(replanner
+        "${REPLANNER_TEST_SOURCES}"
+        "tether_common;tether_motion_planner"
+        ""
+    )
+endif()
+
+if(FSOE_TEST_SOURCES)
+    create_module_test(fsoe
+        "${FSOE_TEST_SOURCES}"
+        "tether_common;tether_hal;tether_controls;tether_motion_control;tether_ethercat_common;tether_ethercat_master"
+        ""
+    )
+endif()
+
+if(PLATFORM_TEST_SOURCES)
+    create_module_test(platform
+        "${PLATFORM_TEST_SOURCES}"
+        "tether_common;tether_hal"
+        ""
+    )
+endif()
+
+if(MOCKS_TEST_SOURCES)
+    create_module_test(mocks
+        "${MOCKS_TEST_SOURCES}"
+        "${TETHER_FULL_TEST_LIBS}"
+        ""
+    )
+endif()
 
 add_executable(tether_fsoe_integration_tests
     fsoe/test_synapticon_safe_motion.cpp
@@ -509,13 +465,6 @@ target_compile_definitions(tether_simulation_identification_tests PRIVATE
 )
 
 gtest_discover_tests(tether_simulation_identification_tests)
-
-add_dependencies(tether_tests
-    tether_header_tests
-    tether_ethercat_common_tests
-    tether_model_identification_tests
-    tether_simulation_identification_tests
-)
 
 if(TETHER_ENABLE_COVERAGE)
     find_program(GCOVR_EXECUTABLE NAMES gcovr)

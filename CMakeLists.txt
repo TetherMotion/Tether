@@ -62,6 +62,26 @@ endif()
 # Add magic_enum include directory
 include_directories("${MAGIC_ENUM_PATH}/include")
 
+set(ARGPARSE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/argparse")
+if(NOT EXISTS "${ARGPARSE_PATH}")
+    message(FATAL_ERROR
+        "Git submodule 'argparse' is not initialized.\n"
+        "Please run the following command in the repository root:\n"
+        "  git submodule update --init\n"
+        "Then re-run CMake."
+    )
+elseif(NOT EXISTS "${ARGPARSE_PATH}/include/argparse/argparse.hpp")
+    message(FATAL_ERROR
+        "Git submodule 'argparse' appears to be initialized but is empty or incomplete.\n"
+        "Please run the following command in the repository root:\n"
+        "  git submodule update --init\n"
+        "Then re-run CMake."
+    )
+endif()
+
+# Add argparse include directory (used by examples and tools)
+include_directories("${ARGPARSE_PATH}/include")
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
