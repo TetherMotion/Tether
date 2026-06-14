@@ -28,6 +28,7 @@ jobs:
           g++ \
           gcc \
           libc6-dev \
+          libboost-dev \
           make
     
     - name: Configure and build
@@ -65,6 +66,12 @@ jobs:
         name: debug-build
         path: build/
     
+    - name: Restore executable permissions
+      run: |
+        # upload-artifact/download-artifact does not preserve the executable
+        # bit, so the test binaries need to be made executable again.
+        chmod -R +x build/bin
+    
     - name: Run tests
       run: |
         ctest --test-dir build --output-on-failure
@@ -92,6 +99,12 @@ jobs:
       with:
         name: debug-build
         path: build/
+    
+    - name: Restore executable permissions
+      run: |
+        # upload-artifact/download-artifact does not preserve the executable
+        # bit, so the test binaries need to be made executable again.
+        chmod -R +x build/bin
     
     - name: Run integration tests
       run: |
