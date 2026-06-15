@@ -37,9 +37,7 @@
 #include "tether/sensors/Axia80.hpp"
 #include "tether/fmmu/FMMUConfiguration.hpp"
 
-#ifdef UNIT_TEST_HOST
 #include <argparse/argparse.hpp>
-#endif
 
 // Forward-declare host transport helpers
 namespace EtherCAT {
@@ -59,14 +57,6 @@ void signalHandler(int) {
     }
 }
 
-#ifndef UNIT_TEST_HOST
-// ----- ESP-IDF / embedded entry point -----
-extern "C" void axia80_stream_main(const EtherCAT::NetworkInterface* iface,
-                                     const uint8_t src_mac[6]) {
-    TETHER_LOGI(TAG, "axia80_stream (embedded) — not yet implemented");
-}
-
-#else // UNIT_TEST_HOST — host/Linux build
 
 // ============================================================================
 // ESI Verification Helpers
@@ -1022,5 +1012,3 @@ int main(int argc, char** argv) {
 
     return 0;
 }
-
-#endif // UNIT_TEST_HOST

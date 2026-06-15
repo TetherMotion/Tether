@@ -29,7 +29,6 @@ namespace Raw {
 }
 }
 
-#ifdef UNIT_TEST_HOST
 #include <argparse/argparse.hpp>
 #include "tether/hal/IEthernet.hpp"
 #include "tether/ethercat/EtherCATSlave.hpp"
@@ -41,7 +40,6 @@ namespace Raw {
 #include <sstream>
 #include <optional>
 #include <memory>
-#endif
 
 static const char* TAG = "ethercat_dump_sii";
 
@@ -54,27 +52,6 @@ static int dumpSiiForSlave(EtherCAT::EtherCATMaster& master, uint16_t slave_idx)
 
     return EtherCAT::Diagnostics::logParsedSlaveSII(master, slave_idx, TAG) ? 0 : 3;
 }
-
-#ifndef UNIT_TEST_HOST
-extern "C" void ethercat_dump_sii_main(const EtherCAT::NetworkInterface* iface,
-                                         const uint8_t src_mac[6]) {
-    TETHER_LOGI(TAG, "ethercat_dump_sii (embedded)");
-
-    EtherCAT::EtherCATMaster::Config cfg;
-    EtherCAT::EtherCATMaster master(cfg);
-
-    if (!iface || !src_mac) { TETHER_LOGE(TAG, "No network interface registered"); return; }
-    master.start(*iface, src_mac);
-
-    if (!master.discoverSlaves()) {
-        TETHER_LOGW(TAG, "No slaves discovered");
-        return;
-    }
-
-    (void)dumpSiiForSlave(master, 0);
-}
-
-#else // UNIT_TEST_HOST
 
 int main(int argc, char** argv) {
     argparse::ArgumentParser program("ethercat_dump_sii");
@@ -373,5 +350,3 @@ int main(int argc, char** argv) {
 
     return rc;
 }
-
-#endif // UNIT_TEST_HOST

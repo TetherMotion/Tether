@@ -9,9 +9,7 @@
 #include "tether/drives/DynaDrive/DynaDrivePDO.hpp"
 #include "tether/platform/EspCompat.hpp"
 
-#ifdef UNIT_TEST_HOST
 #include <argparse/argparse.hpp>
-#endif
 
 namespace {
 
@@ -151,22 +149,6 @@ bool configureDrive(EtherCAT::DS402Master& master)
 
 } // namespace
 
-#ifndef UNIT_TEST_HOST
-extern "C" void dynadrive_sine_motion_native_main(const EtherCAT::NetworkInterface* iface,
-                                                   const uint8_t src_mac[6])
-{
-    EtherCAT::DS402Master master;
-    if (!iface || !src_mac) {
-        return;
-    }
-    master.start(*iface, src_mac);
-    if (configureDrive(master)) {
-        (void)runSineMotion(master, 30.0);
-        (void)master.disableDrive(kSlaveIndex);
-    }
-    master.stop();
-}
-#else
 int main(int argc, char** argv)
 {
     argparse::ArgumentParser program("dynadrive_sine_motion_native");
@@ -197,4 +179,3 @@ int main(int argc, char** argv)
     Tether::Examples::stopHostMasterSession(master, session);
     return rc;
 }
-#endif

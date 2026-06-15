@@ -24,14 +24,12 @@
 #include "tether/ethercat/EtherCATSDO.hpp"
 #include "tether/platform/EspCompat.hpp"
 
-#ifdef UNIT_TEST_HOST
 #include <argparse/argparse.hpp>
 #include "tether/hal/IEthernet.hpp"
 #include <thread>
 #include <atomic>
 #include <dirent.h>
 #include <iostream>
-#endif
 
 static const char* TAG = "AS715N_CheckError";
 
@@ -213,28 +211,6 @@ static int inspectAndMaybeReset(EtherCAT::EtherCATMaster& master, bool do_reset,
     return 0;
 }
 
-#ifndef UNIT_TEST_HOST
-extern "C" void as715n_check_error_code_main(const EtherCAT::NetworkInterface* iface,
-                                               const uint8_t src_mac[6]) {
-    TETHER_LOGI(TAG, "AS715N error-code inspector (embedded)");
-
-    EtherCAT::EtherCATMaster::Config cfg;
-    EtherCAT::EtherCATMaster master(cfg);
-
-    if (!iface || !src_mac) { TETHER_LOGE(TAG, "No network interface registered"); return; }
-    master.start(*iface, src_mac);
-
-    if (!master.discoverSlaves()) {
-        TETHER_LOGW(TAG, "No slaves discovered");
-    }
-
-    // Do not attempt reset by default in embedded entry
-    int rc = inspectAndMaybeReset(master, false, false);
-    (void)rc;
-}
-
-#else // UNIT_TEST_HOST
-
 int main(int argc, char** argv) {
     argparse::ArgumentParser program("as715n_check_error_code");
 
@@ -349,5 +325,3 @@ int main(int argc, char** argv) {
 
     return rc;
 }
-
-#endif // UNIT_TEST_HOST

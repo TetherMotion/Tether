@@ -10,9 +10,7 @@
 #include "tether/platform/Platform.hpp"
 #include "tether/profiles/cia402/DS402Master.hpp"
 
-#ifdef UNIT_TEST_HOST
 #include "tether/hal/IEthernet.hpp"
-#endif
 
 namespace EtherCAT {
 namespace Raw {
@@ -31,7 +29,6 @@ struct SingleDriveExampleConfig {
     uint32_t enable_timeout_ms{5000};
 };
 
-#ifdef UNIT_TEST_HOST
 struct HostMasterSession {
     std::unique_ptr<EtherCAT::HAL::IEthernet> ethernet;
     std::unique_ptr<EtherCAT::NetworkInterface> network_interface;
@@ -122,7 +119,6 @@ inline void stopHostMasterSession(EtherCAT::DS402Master& master, HostMasterSessi
         session.ethernet->shutdown();
     }
 }
-#endif
 
 inline bool configureAndEnableSingleDrive(EtherCAT::DS402Master& master,
                                           const SingleDriveExampleConfig& config,

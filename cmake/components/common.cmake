@@ -40,7 +40,6 @@ target_include_directories(tether_common
 )
 
 target_compile_definitions(tether_common PUBLIC
-    UNIT_TEST_HOST=1
 )
 
 set_target_properties(tether_common PROPERTIES

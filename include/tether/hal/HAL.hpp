@@ -249,14 +249,10 @@ inline bool isSTM32() {
 }
 
 /**
- * @brief Check if in test mode
+ * @brief Check if in test mode (always false after UNIT_TEST_HOST removal)
  */
 inline bool isTestMode() {
-#ifdef HAL_PLATFORM_TEST
-    return true;
-#else
     return false;
-#endif
 }
 
 } // namespace HAL
