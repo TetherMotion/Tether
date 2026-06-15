@@ -77,6 +77,11 @@ add_tether_example(dynadrive_sine_motion_native
 add_tether_example(detect_slaves
     LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common)
 
+# --- EtherCAT AL reset example ---
+# Resets selected slaves to a target ESM state via AL Control
+add_tether_example(reset_slaves_al
+    LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common)
+
 # ---ATI Axia80 F/T Sensor streaming example ---
 # Streams 6-DOF force/torque data with engineering-unit conversion
 add_tether_example(axia80_stream
