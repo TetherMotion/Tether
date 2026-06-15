@@ -195,7 +195,7 @@ std::unique_ptr<IEthernetHAL> createDefaultHAL();
 /**
  * @brief Create ESP32 HAL (ESP-IDF only)
  */
-#ifndef UNIT_TEST_HOST
+#ifdef ESP_PLATFORM
 std::unique_ptr<IEthernetHAL> createESP32HAL();
 #endif
 

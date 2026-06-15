@@ -6,14 +6,10 @@
 #include "tether/platform/IPlatformTimer.hpp"
 #include "tether/platform/EspCompat.hpp"
 
-#ifndef UNIT_TEST_HOST
 #include "driver/gptimer.h"
-#endif
 
 namespace EtherCAT {
 namespace Platform {
-
-#ifndef UNIT_TEST_HOST
 
 static const char* TAG = "esp32_timer";
 
@@ -208,17 +204,9 @@ private:
     uint32_t avg_jitter_us_ = 0;
 };
 
-#endif // !UNIT_TEST_HOST
-
 std::unique_ptr<IPlatformTimer> createPlatformTimer()
 {
-#ifndef UNIT_TEST_HOST
     return std::make_unique<ESP32Timer>();
-#else
-    // Host implementation provided in HostTimer.cpp
-    extern std::unique_ptr<IPlatformTimer> createHostTimer();
-    return createHostTimer();
-#endif
 }
 
 } // namespace Platform

@@ -13,7 +13,7 @@
  * wkc = 1 and responds to APRD / APWR.
  *
  * Build (standalone):
- *   g++ -std=c++17 -DUNIT_TEST_HOST -I ../include -I ../include/tether \
+ *   g++ -std=c++17 -I ../include -I ../include/tether \
  *       -I ../include/tether/ethercat dual_instance_linux.cpp -lpthread -o dual_instance
  */
 

@@ -17,11 +17,6 @@
 
 #include <cstring>
 
-#ifdef UNIT_TEST_HOST
-#include <thread>
-#include <chrono>
-#endif
-
 static const char* TAG = "CiA402Drive";
 
 namespace EtherCAT {
