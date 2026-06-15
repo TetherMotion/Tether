@@ -32,6 +32,7 @@
 #include "tether/ethercat/EtherCATSlave.hpp"
 #include "tether/ethercat/EtherCATTypes.hpp"
 #include "tether/ethercat/EtherCATFaultDetection.hpp"
+#include "tether/ethercat/EtherCATALResetController.hpp"
 #include "tether/ethercat/SyncManager.hpp"
 #include "tether/ethercat/VLANRouter.hpp"
 #include "tether/platform/EspCompat.hpp"
@@ -40,14 +41,6 @@
 #include <argparse/argparse.hpp>
 #include "tether/hal/IEthernet.hpp"
 #endif
-
-// Local register addresses (internal.hpp is not exposed to examples)
-static constexpr uint16_t kRegALControl    = 0x0120;
-static constexpr uint16_t kRegALStatus     = 0x0130;
-static constexpr uint16_t kRegALStatusCode = 0x0134;
-
-// Host is little-endian (x86_64 / ESP32); le16_to_host is identity
-static inline uint16_t local_le16_to_host(uint16_t v) { return v; }
 
 // Forward-declare host transport helpers
 namespace EtherCAT {
@@ -113,36 +106,15 @@ extern "C" void reset_slaves_al_main(const EtherCAT::NetworkInterface* iface,
     constexpr uint32_t kDefaultSleepMs    = 50;
     constexpr uint8_t  kTargetState       = 0x01; // INIT
 
+    EtherCAT::EtherCATALResetController ctrl(master);
+
     for (uint16_t si = 0; si < slaves; ++si) {
         TETHER_LOGI(TAG, "Resetting slave %u to INIT ...", si);
-        bool ok = false;
-        for (uint16_t iter = 0; iter < kDefaultIterations; ++iter) {
-            uint16_t al_le = 0;
-            if (master.readRegister(EtherCAT::SlaveAddress(si),
-                                    kRegALStatus, al_le, 200)) {
-                const uint16_t al = local_le16_to_host(al_le);
-                const uint8_t state = al & 0x0Fu;
-                const bool has_err = (al & 0x10u) != 0;
-                if (state == kTargetState && !has_err) {
-                    ok = true;
-                    break;
-                }
-            }
-
-            const uint16_t req_clear = kTargetState;
-            const uint16_t req_ack   = static_cast<uint16_t>(kTargetState | 0x10u);
-            master.writeRegister(EtherCAT::SlaveAddress(si),
-                                 kRegALControl, req_clear);
-            master.writeRegister(EtherCAT::SlaveAddress(si),
-                                 kRegALControl, req_ack);
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(kDefaultSleepMs));
-        }
-
-        if (ok) {
-            TETHER_LOGI(TAG, "Slave %u => INIT OK", si);
+        auto result = ctrl.resetSlave(si, kTargetState, kDefaultIterations, kDefaultSleepMs);
+        if (result.success) {
+            TETHER_LOGI(TAG, "Slave %u => INIT OK (%s)", si, result.message.c_str());
         } else {
-            TETHER_LOGE(TAG, "Slave %u => INIT FAILED after %u iterations", si, kDefaultIterations);
+            TETHER_LOGE(TAG, "Slave %u => INIT FAILED (%s)", si, result.message.c_str());
         }
     }
 }
@@ -532,6 +504,22 @@ int main(int argc, char** argv) {
     }
 
     // ---- AL Reset loop ----
+    EtherCAT::EtherCATALResetController ctrl(master);
+    ctrl.setProgressCallback(
+        [](uint16_t si, int iter, int max_iter, uint16_t al, uint16_t code, bool reached) {
+            if (!reached) {
+                const char* state_name = EtherCAT::al_status_get_state_name(al);
+                const bool has_err = EtherCAT::al_status_has_error(al);
+                TETHER_LOGI(TAG, "  Slave %u iter %d/%d: AL_STATUS=0x%04X (state=%s, error=%s)",
+                            si, iter, max_iter, al,
+                            state_name, has_err ? "true" : "false");
+                if (code != 0) {
+                    TETHER_LOGI(TAG, "    AL_STATUS_CODE=0x%04X (%s)",
+                                code, EtherCAT::getALStatusCodeName(code));
+                }
+            }
+        });
+
     uint16_t success_count = 0;
     uint16_t fail_count    = 0;
 
@@ -539,66 +527,15 @@ int main(int argc, char** argv) {
         TETHER_LOGI(TAG, "Resetting slave %u to state 0x%02X (max %d iterations, %d ms sleep) ...",
                     si, target_state, max_iterations, sleep_ms);
 
-        bool reached = false;
-        for (int iter = 0; iter < max_iterations; ++iter) {
-            uint16_t al_le = 0;
-            bool read_ok = master.readRegister(EtherCAT::SlaveAddress(si),
-                                               kRegALStatus,
-                                               al_le, 200);
-            uint16_t al_status_code = 0;
-            bool code_ok = master.readRegister(EtherCAT::SlaveAddress(si),
-                                               kRegALStatusCode,
-                                               al_status_code, 200);
+        auto result = ctrl.resetSlave(si, target_state, max_iterations, sleep_ms);
 
-            if (read_ok) {
-                const uint16_t al = local_le16_to_host(al_le);
-                const uint8_t state = al & 0x0Fu;
-                const bool has_err = (al & 0x10u) != 0;
-                const char* state_name = EtherCAT::al_status_get_state_name(al);
-
-                if (iter == 0 || state != target_state || has_err) {
-                    TETHER_LOGI(TAG, "  Slave %u iter %d/%d: AL_STATUS=0x%04X (state=%s, error=%s)%s",
-                                si, iter + 1, max_iterations, al,
-                                state_name, has_err ? "true" : "false",
-                                code_ok ? "" : " (status code read failed)");
-                    if (code_ok) {
-                        const uint16_t code = local_le16_to_host(al_status_code);
-                        if (code != 0) {
-                            TETHER_LOGI(TAG, "    AL_STATUS_CODE=0x%04X (%s)",
-                                        code, EtherCAT::getALStatusCodeName(code));
-                        }
-                    }
-                }
-
-                if (state == target_state && !has_err) {
-                    reached = true;
-                    break;
-                }
-            } else {
-                TETHER_LOGW(TAG, "  Slave %u iter %d/%d: AL_STATUS read failed",
-                            si, iter + 1, max_iterations);
-            }
-
-            // Step 1: request target state with error ack = 0
-            const uint16_t req_clear = target_state;
-            master.writeRegister(EtherCAT::SlaveAddress(si),
-                                 kRegALControl, req_clear);
-
-            // Step 2: request target state with error ack = 1
-            const uint16_t req_ack = static_cast<uint16_t>(target_state | 0x10u);
-            master.writeRegister(EtherCAT::SlaveAddress(si),
-                                 kRegALControl, req_ack);
-
-            if (sleep_ms > 0) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
-            }
-        }
-
-        if (reached) {
-            TETHER_LOGI(TAG, "  Slave %u => target state 0x%02X OK", si, target_state);
+        if (result.success) {
+            TETHER_LOGI(TAG, "  Slave %u => target state 0x%02X OK (%s)",
+                        si, target_state, result.message.c_str());
             ++success_count;
         } else {
-            TETHER_LOGE(TAG, "  Slave %u => target state 0x%02X FAILED after %d iterations", si, target_state, max_iterations);
+            TETHER_LOGE(TAG, "  Slave %u => target state 0x%02X FAILED (%s)",
+                        si, target_state, result.message.c_str());
             ++fail_count;
         }
     }
