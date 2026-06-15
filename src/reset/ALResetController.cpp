@@ -1,9 +1,9 @@
 /**
- * @file EtherCATALResetController.cpp
- * @brief Implementation of EtherCATALResetController
+ * @file ALResetController.cpp
+ * @brief Implementation of ALResetController
  */
 
-#include "tether/ethercat/EtherCATALResetController.hpp"
+#include "tether/ethercat/ALResetController.hpp"
 #include "tether/ethercat/EtherCATMaster.hpp"
 #include "tether/ethercat/EtherCATFaultDetection.hpp"
 #include "raw/internal.hpp"
@@ -18,18 +18,18 @@ namespace EtherCAT {
 // Construction
 // ============================================================================
 
-EtherCATALResetController::EtherCATALResetController(EtherCATMaster& master)
+ALResetController::ALResetController(EtherCATMaster& master)
     : master_(master), progress_cb_(nullptr) {}
 
 // ============================================================================
 // Callback management
 // ============================================================================
 
-void EtherCATALResetController::setProgressCallback(ALResetProgressCallback cb) {
+void ALResetController::setProgressCallback(ALResetProgressCallback cb) {
     progress_cb_ = std::move(cb);
 }
 
-void EtherCATALResetController::clearProgressCallback() {
+void ALResetController::clearProgressCallback() {
     progress_cb_ = nullptr;
 }
 
@@ -37,7 +37,7 @@ void EtherCATALResetController::clearProgressCallback() {
 // Core reset logic
 // ============================================================================
 
-ALResetResult EtherCATALResetController::resetSlave(uint16_t slave_index,
+ALResetResult ALResetController::resetSlave(uint16_t slave_index,
                                                        uint8_t target_state,
                                                        int max_iterations,
                                                        int sleep_ms) {

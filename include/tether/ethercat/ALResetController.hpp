@@ -1,7 +1,7 @@
 #pragma once
 
 /**
- * @file EtherCATALResetController.hpp
+ * @file ALResetController.hpp
  * @brief Application-Layer (AL) reset controller for EtherCAT slaves
  *
  * Encapsulates the two-step AL reset loop: write target state with error-ack
@@ -58,7 +58,7 @@ using ALResetProgressCallback = std::function<void(
     bool state_reached)>;
 
 // ============================================================================
-// EtherCATALResetController
+// ALResetController
 // ============================================================================
 
 /**
@@ -72,18 +72,18 @@ using ALResetProgressCallback = std::function<void(
  *   2. AL_CONTROL = target_state | 0x10       (error ack = 1)
  *
  * @code
- *   EtherCAT::EtherCATALResetController ctrl(master);
+ *   EtherCAT::ALResetController ctrl(master);
  *   ctrl.setProgressCallback([](...){ ... });
  *   auto result = ctrl.resetSlave(0, 0x01, 50, 50); // slave 0 -> INIT
  * @endcode
  */
-class EtherCATALResetController {
+class ALResetController {
 public:
     /**
      * @brief Construct controller bound to an EtherCATMaster instance
      * @param master Reference to the active EtherCATMaster
      */
-    explicit EtherCATALResetController(EtherCATMaster& master);
+    explicit ALResetController(EtherCATMaster& master);
 
     /**
      * @brief Reset a single slave to the target ESM state
