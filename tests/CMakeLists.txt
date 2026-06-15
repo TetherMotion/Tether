@@ -69,7 +69,6 @@ function(create_module_test MODULE_NAME SOURCES LIBS DEFINITIONS)
     )
     
     target_compile_definitions(tether_${MODULE_NAME}_tests PRIVATE
-        UNIT_TEST_HOST=1
         GCODE_STANDALONE_CAPI=1
         TETHER_ENABLE_ETHERCAT=1
         TETHER_COMPILE_MASTER=1
@@ -336,7 +335,6 @@ target_link_libraries(tether_fsoe_integration_tests
 )
 
 target_compile_definitions(tether_fsoe_integration_tests PRIVATE
-    UNIT_TEST_HOST=1
     TETHER_ENABLE_ETHERCAT=1
     TETHER_COMPILE_MASTER=1
 )
@@ -360,7 +358,6 @@ target_link_libraries(tether_header_tests
 )
 
 target_compile_definitions(tether_header_tests PRIVATE
-    UNIT_TEST_HOST=1
 )
 
 gtest_discover_tests(tether_header_tests)
@@ -412,7 +409,6 @@ target_link_libraries(tether_ethercat_common_tests
 )
 
 target_compile_definitions(tether_ethercat_common_tests PRIVATE
-    UNIT_TEST_HOST=1
 )
 
 gtest_discover_tests(tether_ethercat_common_tests)
@@ -436,7 +432,6 @@ target_link_libraries(tether_model_identification_tests
 )
 
 target_compile_definitions(tether_model_identification_tests PRIVATE
-    UNIT_TEST_HOST=1
 )
 
 gtest_discover_tests(tether_model_identification_tests)
@@ -461,7 +456,6 @@ target_link_libraries(tether_simulation_identification_tests
 )
 
 target_compile_definitions(tether_simulation_identification_tests PRIVATE
-    UNIT_TEST_HOST=1
 )
 
 gtest_discover_tests(tether_simulation_identification_tests)
