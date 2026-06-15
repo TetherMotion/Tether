@@ -32,7 +32,7 @@
 #include "tether/ethercat/EtherCATSlave.hpp"
 #include "tether/ethercat/EtherCATTypes.hpp"
 #include "tether/ethercat/EtherCATFaultDetection.hpp"
-#include "tether/ethercat/EtherCATALResetController.hpp"
+#include "tether/ethercat/ALResetController.hpp"
 #include "tether/ethercat/SyncManager.hpp"
 #include "tether/ethercat/VLANRouter.hpp"
 #include "tether/platform/EspCompat.hpp"
@@ -463,7 +463,7 @@ int main(int argc, char** argv) {
     }
 
     // ---- AL Reset loop ----
-    EtherCAT::EtherCATALResetController ctrl(master);
+    EtherCAT::ALResetController ctrl(master);
     ctrl.setProgressCallback(
         [](uint16_t si, int iter, int max_iter, uint16_t al, uint16_t code, bool reached) {
             if (!reached) {
