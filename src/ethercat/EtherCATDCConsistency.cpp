@@ -26,12 +26,12 @@ static const char* TAG = "DCConsistency";
 // ============================================================================
 
 uint64_t dc_get_master_time_with_epoch() {
-#ifndef UNIT_TEST_HOST
+#ifdef ESP_PLATFORM
     // Get ESP32 uptime in microseconds, convert to nanoseconds
     uint64_t uptime_ns = static_cast<uint64_t>(esp_timer_get_time()) * 1000ULL;
     return kMasterEpochNs + uptime_ns;
 #else
-    // Host test: use system time
+    // Linux host: use system time
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     uint64_t uptime_ns = static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL +
@@ -75,7 +75,7 @@ size_t dc_format_time(uint64_t time_ns, char* buffer, size_t buffer_size) {
 // DC State Reading
 // ============================================================================
 
-#ifndef UNIT_TEST_HOST
+#ifdef ESP_PLATFORM
 bool dc_read_slave_state(uint16_t slave_index, SlaveDCState& state) {
     std::memset(&state, 0, sizeof(state));
 
@@ -178,7 +178,7 @@ bool dc_read_slave_state(uint16_t slave_index, SlaveDCState& state) {
     return state.dc_supported;
 }
 #else
-// Host test stub
+// Linux host stub — no direct EtherCAT hardware access available
 bool dc_read_slave_state(uint16_t slave_index, SlaveDCState& state) {
     std::memset(&state, 0, sizeof(state));
     state.dc_supported = true;

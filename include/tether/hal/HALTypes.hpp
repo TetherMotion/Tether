@@ -28,10 +28,6 @@ namespace HAL {
     #define HAL_PLATFORM_STM32 1
 #endif
 
-#if defined(UNIT_TEST_HOST)
-    #define HAL_PLATFORM_TEST 1
-#endif
-
 // ============================================================================
 // Ethernet Constants
 // ============================================================================

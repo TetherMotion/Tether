@@ -37,10 +37,8 @@
 #include "tether/ethercat/VLANRouter.hpp"
 #include "tether/platform/EspCompat.hpp"
 
-#ifdef UNIT_TEST_HOST
 #include <argparse/argparse.hpp>
 #include "tether/hal/IEthernet.hpp"
-#endif
 
 // Forward-declare host transport helpers
 namespace EtherCAT {
@@ -81,45 +79,6 @@ static std::vector<uint16_t> parseSlaveIndices(const std::vector<std::string>& a
     }
     return indices;
 }
-
-#ifndef UNIT_TEST_HOST
-// ----- ESP-IDF / embedded entry point -----
-extern "C" void reset_slaves_al_main(const EtherCAT::NetworkInterface* iface,
-                                     const uint8_t src_mac[6]) {
-    TETHER_LOGI(TAG, "reset_slaves_al (embedded)");
-
-    EtherCAT::EtherCATMaster master;
-    if (!iface || !src_mac) { TETHER_LOGE(TAG, "No NetworkInterface registered"); return; }
-    master.start(*iface, src_mac);
-
-    if (!master.discoverSlaves()) {
-        TETHER_LOGW(TAG, "No slaves discovered");
-        return;
-    }
-
-    uint16_t slaves = master.getDiscoveredSlaveCount();
-    TETHER_LOGI(TAG, "Discovered %u slave(s)", slaves);
-    master.logDiscoveredSlavesSummary(TAG);
-
-    // Embedded: reset all slaves to INIT (default 50 iterations, 50 ms sleep)
-    constexpr uint16_t kDefaultIterations = 50;
-    constexpr uint32_t kDefaultSleepMs    = 50;
-    constexpr uint8_t  kTargetState       = 0x01; // INIT
-
-    EtherCAT::EtherCATALResetController ctrl(master);
-
-    for (uint16_t si = 0; si < slaves; ++si) {
-        TETHER_LOGI(TAG, "Resetting slave %u to INIT ...", si);
-        auto result = ctrl.resetSlave(si, kTargetState, kDefaultIterations, kDefaultSleepMs);
-        if (result.success) {
-            TETHER_LOGI(TAG, "Slave %u => INIT OK (%s)", si, result.message.c_str());
-        } else {
-            TETHER_LOGE(TAG, "Slave %u => INIT FAILED (%s)", si, result.message.c_str());
-        }
-    }
-}
-
-#else // UNIT_TEST_HOST — host/Linux build
 
 // ============================================================================
 // Host-side helpers
@@ -557,5 +516,3 @@ int main(int argc, char** argv) {
         return 5; // some failed
     }
 }
-
-#endif // UNIT_TEST_HOST

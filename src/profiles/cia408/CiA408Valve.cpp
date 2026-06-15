@@ -8,16 +8,10 @@
 #include <cstring>
 #include <cmath>
 
-#ifndef UNIT_TEST_HOST
 #define LOG_TAG "CiA408"
 #define LOGI(fmt, ...) TETHER_LOGI(LOG_TAG, fmt, ##__VA_ARGS__)
 #define LOGW(fmt, ...) TETHER_LOGW(LOG_TAG, fmt, ##__VA_ARGS__)
 #define LOGE(fmt, ...) TETHER_LOGE(LOG_TAG, fmt, ##__VA_ARGS__)
-#else
-#define LOGI(fmt, ...)
-#define LOGW(fmt, ...)
-#define LOGE(fmt, ...)
-#endif
 
 // External SDO functions (defined in EtherCAT master)
 extern "C" {

@@ -169,10 +169,7 @@ std::unique_ptr<IEthernetHAL> createMockHAL() {
 // ============================================================================
 
 std::unique_ptr<IEthernetHAL> createDefaultHAL() {
-#ifdef UNIT_TEST_HOST
-    // In unit tests, use mock HAL
-    return createMockHAL();
-#elif defined(__linux__)
+#if defined(__linux__)
     // On Linux host, use raw socket HAL
     return createLinuxRawSocketHAL();
 #else

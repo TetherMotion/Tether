@@ -10,9 +10,7 @@
 #include "tether/platform/EspCompat.hpp"
 #include "tether/profiles/cia301/CiA402Defs.hpp"
 
-#ifdef UNIT_TEST_HOST
 #include <argparse/argparse.hpp>
-#endif
 
 namespace {
 
@@ -128,22 +126,6 @@ bool configureDrive(EtherCAT::DS402Master& master)
 
 } // namespace
 
-#ifndef UNIT_TEST_HOST
-extern "C" void pblr81fgf_step_motion_native_main(const EtherCAT::NetworkInterface* iface,
-                                                    const uint8_t src_mac[6])
-{
-    EtherCAT::DS402Master master;
-    if (!iface || !src_mac) {
-        return;
-    }
-    master.start(*iface, src_mac);
-    if (configureDrive(master)) {
-        (void)runStepMotion(master, 0.5);
-        Tether::Examples::shutdownSingleDrive(master, kSlaveIndex);
-    }
-    master.stop();
-}
-#else
 int main(int argc, char** argv)
 {
     argparse::ArgumentParser program("pblr81fgf_step_motion_native");
@@ -174,4 +156,3 @@ int main(int argc, char** argv)
     Tether::Examples::stopHostMasterSession(master, session);
     return rc;
 }
-#endif

@@ -29,10 +29,8 @@
 #include "tether/sii/SIIReader.hpp"
 #include "tether/sii/SIIParser.hpp"
 
-#ifdef UNIT_TEST_HOST
 #include <argparse/argparse.hpp>
 #include "tether/hal/IEthernet.hpp"
-#endif
 
 // Forward-declare host transport helpers
 namespace EtherCAT {
@@ -44,27 +42,6 @@ namespace Raw {
 }
 
 static const char* TAG = "detect_slaves";
-
-#ifndef UNIT_TEST_HOST
-// ----- ESP-IDF / embedded entry point -----
-extern "C" void detect_slaves_main(const EtherCAT::NetworkInterface* iface,
-                                     const uint8_t src_mac[6]) {
-    TETHER_LOGI(TAG, "detect_slaves (embedded)");
-
-    EtherCAT::EtherCATMaster master;
-    if (!iface || !src_mac) { TETHER_LOGE(TAG, "No NetworkInterface registered"); return; }
-    master.start(*iface, src_mac);
-
-    if (!master.discoverSlaves()) {
-        TETHER_LOGW(TAG, "No slaves discovered");
-    }
-
-    uint16_t slaves = master.getDiscoveredSlaveCount();
-    TETHER_LOGI(TAG, "Discovered %u slave(s)", slaves);
-    master.logDiscoveredSlavesSummary(TAG);
-}
-
-#else // UNIT_TEST_HOST — host/Linux build
 
 int main(int argc, char** argv) {
     // ---- Argument parsing ----
@@ -378,5 +355,3 @@ int main(int argc, char** argv) {
 
     return (slaves > 0) ? 0 : 4;
 }
-
-#endif // UNIT_TEST_HOST
