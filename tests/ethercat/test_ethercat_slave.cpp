@@ -1,6 +1,6 @@
 /**
  * @file test_ethercat_slave.cpp
- * @brief Comprehensive tests for EtherCATSlave, NonExistingSlave, CachedSIIReader
+ * @brief Comprehensive tests for Slave, NonExistingSlave, CachedSIIReader
  *
  * Tests the per-slave state-machine guards, configuration bookkeeping,
  * the NonExistingSlave sentinel pattern, and CachedSIIReader caching.
@@ -23,7 +23,7 @@ using namespace EtherCAT;
 using namespace ::testing;
 
 // ============================================================================
-// Test fixture — uses real EtherCATMaster with test callbacks
+// Test fixture — uses real Master with test callbacks
 // ============================================================================
 
 class EtherCATSlaveTest : public ::testing::Test {
@@ -40,7 +40,7 @@ protected:
         master_.initSlaves(1);
     }
 
-    EtherCATMaster master_;
+    Master master_;
 };
 
 // ============================================================================
@@ -88,7 +88,7 @@ TEST(SlaveErrorTest, UnknownErrorReturnsDefault) {
 }
 
 // ============================================================================
-// EtherCATSlave identification
+// Slave identification
 // ============================================================================
 
 TEST_F(EtherCATSlaveTest, IndexReturnsCorrectValue) {
@@ -98,7 +98,7 @@ TEST_F(EtherCATSlaveTest, IndexReturnsCorrectValue) {
 
 TEST_F(EtherCATSlaveTest, AdpReturnsNegatedIndex) {
     auto& s = master_.slave(0);
-    EXPECT_EQ(s.adp(), EtherCATMaster::adpForSlaveIndex(0));
+    EXPECT_EQ(s.adp(), Master::adpForSlaveIndex(0));
 }
 
 TEST_F(EtherCATSlaveTest, MasterAccessorReturnsOwnMaster) {
@@ -485,7 +485,7 @@ protected:
         master_.initSlaves(0);
     }
 
-    EtherCATMaster master_;
+    Master master_;
 };
 
 TEST_F(NonExistingSlaveTest, SlaveOutOfRangeReturnsNonExisting) {
@@ -653,7 +653,7 @@ TEST_F(NonExistingSlaveTest, DifferentIndicesWork) {
 
 class MasterSlaveManagementTest : public ::testing::Test {
 protected:
-    EtherCATMaster master_;
+    Master master_;
 };
 
 TEST_F(MasterSlaveManagementTest, InitSlavesCreatesCorrectCount) {
@@ -701,8 +701,8 @@ namespace {
 /// Minimal mock SIIReader for testing CachedSIIReader
 class MockSIIReader : public SII::SIIReader {
 public:
-    // SIIReader requires EtherCATMaster& — we use a dummy
-    MockSIIReader(EtherCATMaster& m) : SIIReader(m) {}
+    // SIIReader requires Master& — we use a dummy
+    MockSIIReader(Master& m) : SIIReader(m) {}
 
     // We'll override via test callbacks
     int read_count_ = 0;
@@ -716,7 +716,7 @@ protected:
         reader_ = std::make_unique<SII::SIIReader>(master_);
     }
 
-    EtherCATMaster master_;
+    Master master_;
     std::unique_ptr<SII::SIIReader> reader_;
 };
 
@@ -941,7 +941,7 @@ TEST_F(EtherCATSlaveTest, ReadSIIWithCacheInitialized) {
 TEST_F(EtherCATSlaveTest, ReadSIIWithoutCacheInitialized) {
     // Create a slave with uninitialized SII cache — exercises the fallback
     // path where readSII logs a warning and does a direct SII::readSII().
-    EtherCATSlave fresh(master_, 0); // cache not initialized
+    Slave fresh(master_, 0); // cache not initialized
     EXPECT_FALSE(fresh.siiCache().isInitialized());
     SII::SIIData data;
     auto err = fresh.readSII(data);
@@ -956,7 +956,7 @@ TEST_F(EtherCATSlaveTest, LogSIISummaryFails) {
     master_.setAprdTestCallback([](uint16_t, uint16_t, void*, uint16_t, unsigned int) {
         return false;
     });
-    EtherCATSlave fresh(master_, 0); // no cache init
+    Slave fresh(master_, 0); // no cache init
     fresh.logSIISummary("TestTag"); // exercises the warning branch
 }
 

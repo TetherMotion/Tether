@@ -11,7 +11,7 @@
 
 TEST(EtherCATMasterSubManagers, CreatedOnConstruction)
 {
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
 
     auto& pdo = master.pdo();
     auto& sdo = master.sdoManager();

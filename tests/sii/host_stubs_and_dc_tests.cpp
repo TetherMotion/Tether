@@ -51,7 +51,7 @@ TEST(PDOStubs_Basic, MappingNull) {
 
 TEST(DC_BasicQueries, DefaultContext) {
     // Without initialization, getState() should return Disabled (enum default)
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     auto state = master.dc().getState();
     // State is an enum; ensure it's a valid enum value
     EXPECT_EQ(state, DC::DCState::Disabled);

@@ -9,7 +9,7 @@
  * - readHardwareConfig() with simulated APRD responses
  * - validate() logic for correct and incorrect SM configurations
  * - validateCommType() using SDO mock
- * - EtherCATSlave::sm() accessor
+ * - Slave::sm() accessor
  * - NonExistingSlave::sm() sentinel behaviour
  * - formatConfig() string generation
  * - dump() and dumpMailboxStatus() smoke tests (no crash)
@@ -67,7 +67,7 @@ protected:
         master_.initSlaves(1);
     }
 
-    EtherCATMaster master_;
+    Master master_;
 };
 
 // ============================================================================
@@ -569,7 +569,7 @@ TEST_F(SyncManagerAccessorTest, DumpPDOAssignmentsNoThrow) {
 }
 
 // ============================================================================
-// EtherCATSlave::sm() accessor API
+// Slave::sm() accessor API
 // ============================================================================
 
 TEST_F(SyncManagerAccessorTest, SmAccessorViaSlaveRef) {
@@ -599,7 +599,7 @@ protected:
         });
         master_.initSlaves(0);  // zero slaves — slave(0) returns NonExistingSlave
     }
-    EtherCATMaster master_;
+    Master master_;
 };
 
 TEST_F(NonExistingSlaveTest, SmReturnsAccessorWithCorrectIndex) {

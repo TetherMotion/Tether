@@ -35,7 +35,7 @@ public:
         else if (sm_index == 1) sm1_ctrl_ = ctrl;
     }
 
-    void installMocks(EtherCAT::EtherCATMaster& master) {
+    void installMocks(EtherCAT::Master& master) {
         master_ = &master;
         // APWR: capture last_cmd_addr for EEPCTL write
         master.setApwrTestCallback([this](uint16_t adp, uint16_t ado,
@@ -108,7 +108,7 @@ private:
     bool simulate_failure_{false};
     uint8_t sm0_ctrl_{0x00};
     uint8_t sm1_ctrl_{0x00};
-    EtherCAT::EtherCATMaster* master_{nullptr};
+    EtherCAT::Master* master_{nullptr};
 };
 
 TEST(SIIMailbox, SMControlValidationLogsWarning) {
@@ -125,7 +125,7 @@ TEST(SIIMailbox, SMControlValidationLogsWarning) {
     mock.setSMControl(0, 0x00);
     mock.setSMControl(1, 0x00);
 
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     mock.installMocks(master);
 
     uint16_t wr_addr = 0, wr_len = 0, rd_addr = 0, rd_len = 0, proto = 0;
@@ -168,7 +168,7 @@ TEST(SIIMailbox, SMControlValidationNoWarning) {
     mock_ok.setSMControl(0, sm0_ok);
     mock_ok.setSMControl(1, sm1_ok);
 
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     mock_ok.installMocks(master);
 
     uint16_t wr_addr = 0, wr_len = 0, rd_addr = 0, rd_len = 0, proto = 0;

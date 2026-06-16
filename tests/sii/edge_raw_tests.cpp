@@ -15,7 +15,7 @@ TEST(EdgeRaw, BusyThenSuccess_ReadDWordSucceedsAfterRetries) {
     auto busy_calls = std::make_shared<int>(0);
     auto last_cmd_addr = std::make_shared<uint16_t>(0xFFFF);
 
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
 
     master.setApwrTestCallback([=](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms; (void)len;
@@ -60,7 +60,7 @@ TEST(EdgeRaw, BusyThenSuccess_ReadDWordSucceedsAfterRetries) {
 TEST(EdgeRaw, BusyThenNack_ReadDWordFailsWhenNackObserved) {
     auto busy_calls = std::make_shared<int>(0);
 
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
 
     master.setApwrTestCallback([=](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms; (void)len; return true;
@@ -87,7 +87,7 @@ TEST(EdgeRaw, BusyThenNack_ReadDWordFailsWhenNackObserved) {
 }
 
 TEST(EdgeRaw, PartialEepdat_ReadDWordFailsOnShortData) {
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
 
     master.setApwrTestCallback([=](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms; (void)len; return true;
@@ -115,7 +115,7 @@ TEST(EdgeRaw, PartialEepdat_ReadDWordFailsOnShortData) {
 }
 
 TEST(EdgeRaw, AprdTransportFailure_ReadDWordFailsWhenAprdReturnsFalse) {
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
 
     master.setApwrTestCallback([=](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms; (void)len; return true;
@@ -139,7 +139,7 @@ TEST(EdgeRaw, AprdTransportFailure_ReadDWordFailsWhenAprdReturnsFalse) {
 TEST(EdgeRaw, MisalignedReadBytes_CrossesDWordBoundaryCorrectly) {
     auto last_cmd_addr = std::make_shared<uint16_t>(0xFFFF);
 
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
 
     master.setApwrTestCallback([=](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms; (void)len;
@@ -179,7 +179,7 @@ TEST(EdgeRaw, MisalignedReadBytes_CrossesDWordBoundaryCorrectly) {
 TEST(EdgeRaw, ReadWordsMultiple_ReadsMultipleWordsCorrectly) {
     auto last_cmd_addr = std::make_shared<uint16_t>(0xFFFF);
 
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
 
     master.setApwrTestCallback([=](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms; (void)len;

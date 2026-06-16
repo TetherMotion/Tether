@@ -13,7 +13,7 @@ TEST(DCUtilsTest, SyncActivationMaskToString) {
 
 TEST(DCUtilsTest, PrintDCDiagnosticsNoDc) {
     // master constructed without DC configured
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     // should simply log warnings and not crash
     DC::Utils::printDCDiagnostics(master, 0, "TESTDC");
     SUCCEED();

@@ -225,7 +225,7 @@ TEST(IOProtocolExtra, MakeIdHelper) {
 }
 
 TEST(IOProtocolExtra, ModuleIdConstants) {
-    EXPECT_EQ(ModuleId::EtherCATMaster, 0x0001u);
+    EXPECT_EQ(ModuleId::Master, 0x0001u);
     EXPECT_EQ(ModuleId::CiA402Drive, 0x0002u);
     EXPECT_EQ(ModuleId::PIDController, 0x0003u);
     EXPECT_EQ(ModuleId::MotionPlanner, 0x0004u);

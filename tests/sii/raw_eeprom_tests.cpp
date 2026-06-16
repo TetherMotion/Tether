@@ -17,7 +17,7 @@ TEST(RawEeprom, ReadRaw32_SendsReadCommandAndReturnsData) {
     uint16_t captured_addr = 0;
     bool apwr_called = false;
 
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
 
     master.setApwrTestCallback([&](uint16_t adp, uint16_t ado,
                     const void* data, uint16_t len, unsigned int ms)->bool {
@@ -71,7 +71,7 @@ TEST(RawEeprom, ReadRaw32_SendsReadCommandAndReturnsData) {
 
 TEST(RawEeprom, ReadRaw32_FailsAfterRepeatedNack) {
     // Arrange: APRD always returns NACK in EEPSTAT
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
 
     master.setApwrTestCallback([&](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms){
         (void)adp; (void)ado; (void)data; (void)len; (void)ms; return true;

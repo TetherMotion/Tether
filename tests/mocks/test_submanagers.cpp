@@ -11,7 +11,7 @@
 
 TEST(EtherCATMasterSubManagers, CreatedOnConstructionTransportAPI)
 {
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
 
     auto& pdo = master.pdo();
     auto& sdo = master.sdoManager();
@@ -21,7 +21,7 @@ TEST(EtherCATMasterSubManagers, CreatedOnConstructionTransportAPI)
     auto& eoe = master.eoe();
     auto& faults = master.faults();
 
-    // Each manager should reference back to the same EtherCATMaster instance
+    // Each manager should reference back to the same Master instance
     // PDOManager uses transport injection — no master() accessor; verify transport is valid
     (void)pdo.transport();
     (void)sdo; // SDOManager doesn't store master ref directly

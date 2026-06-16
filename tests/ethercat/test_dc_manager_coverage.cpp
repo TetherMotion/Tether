@@ -17,25 +17,25 @@ using namespace EtherCAT;
 // ============================================================================
 
 TEST(DCManagerCoverage, StartWithoutInit) {
-    EtherCATMaster master;
+    Master master;
     DCManager dc(master);
     EXPECT_FALSE(dc.start());
 }
 
 TEST(DCManagerCoverage, StopWithoutInit) {
-    EtherCATMaster master;
+    Master master;
     DCManager dc(master);
     dc.stop(); // no crash
 }
 
 TEST(DCManagerCoverage, GetStateWithoutInit) {
-    EtherCATMaster master;
+    Master master;
     DCManager dc(master);
     EXPECT_EQ(dc.getState(), DC::DCState::Disabled);
 }
 
 TEST(DCManagerCoverage, GetStatsWithoutInit) {
-    EtherCATMaster master;
+    Master master;
     DCManager dc(master);
     auto stats = dc.getStats();
     EXPECT_EQ(stats.cycle_count, 0u);
@@ -43,25 +43,25 @@ TEST(DCManagerCoverage, GetStatsWithoutInit) {
 }
 
 TEST(DCManagerCoverage, ForceSyncWithoutInit) {
-    EtherCATMaster master;
+    Master master;
     DCManager dc(master);
     dc.forceSync(); // no crash
 }
 
 TEST(DCManagerCoverage, SetPDOEnabledWithoutInit) {
-    EtherCATMaster master;
+    Master master;
     DCManager dc(master);
     dc.setPDOEnabled(true); // no crash
 }
 
 TEST(DCManagerCoverage, ReconfigureSyncWithoutInit) {
-    EtherCATMaster master;
+    Master master;
     DCManager dc(master);
     EXPECT_FALSE(dc.reconfigureSync(0));
 }
 
 TEST(DCManagerCoverage, GetReturnsSentinelWhenNotInit) {
-    EtherCATMaster master;
+    Master master;
     DCManager dc(master);
     /* DCManager::get() must never return nullptr — a sentinel instance is
        returned that logs a critical error on any use. */
@@ -75,7 +75,7 @@ TEST(DCManagerCoverage, GetReturnsSentinelWhenNotInit) {
 // ============================================================================
 
 TEST(DCManagerCoverage, InitAndGetState) {
-    EtherCATMaster master;
+    Master master;
     DCManager dc(master);
     DC::DCConfig cfg = DC::DCConfig::defaults();
     ASSERT_TRUE(dc.init(cfg, 1));
@@ -88,7 +88,7 @@ TEST(DCManagerCoverage, InitAndGetState) {
 }
 
 TEST(DCManagerCoverage, InitAndGetStats) {
-    EtherCATMaster master;
+    Master master;
     DCManager dc(master);
     DC::DCConfig cfg = DC::DCConfig::defaults();
     ASSERT_TRUE(dc.init(cfg, 1));
@@ -99,7 +99,7 @@ TEST(DCManagerCoverage, InitAndGetStats) {
 }
 
 TEST(DCManagerCoverage, InitStartStop) {
-    EtherCATMaster master;
+    Master master;
     DCManager dc(master);
     DC::DCConfig cfg = DC::DCConfig::defaults();
     ASSERT_TRUE(dc.init(cfg, 1));
@@ -108,7 +108,7 @@ TEST(DCManagerCoverage, InitStartStop) {
 }
 
 TEST(DCManagerCoverage, InitForceSync) {
-    EtherCATMaster master;
+    Master master;
     DCManager dc(master);
     DC::DCConfig cfg = DC::DCConfig::defaults();
     ASSERT_TRUE(dc.init(cfg, 1));
@@ -116,7 +116,7 @@ TEST(DCManagerCoverage, InitForceSync) {
 }
 
 TEST(DCManagerCoverage, InitSetPDOEnabled) {
-    EtherCATMaster master;
+    Master master;
     DCManager dc(master);
     DC::DCConfig cfg = DC::DCConfig::defaults();
     ASSERT_TRUE(dc.init(cfg, 1));
@@ -125,7 +125,7 @@ TEST(DCManagerCoverage, InitSetPDOEnabled) {
 }
 
 TEST(DCManagerCoverage, InitReconfigureSync) {
-    EtherCATMaster master;
+    Master master;
     DCManager dc(master);
     DC::DCConfig cfg = DC::DCConfig::defaults();
     ASSERT_TRUE(dc.init(cfg, 1));
@@ -138,7 +138,7 @@ TEST(DCManagerCoverage, InitReconfigureSync) {
 // ============================================================================
 
 TEST(DCManagerCoverage, DestructorAfterInit) {
-    EtherCATMaster master;
+    Master master;
     auto dc = std::make_unique<DCManager>(master);
     DC::DCConfig cfg = DC::DCConfig::defaults();
     ASSERT_TRUE(dc->init(cfg, 1));

@@ -1,6 +1,6 @@
 /**
  * @file test_master_frame_coverage.cpp
- * @brief Coverage tests for EtherCATMaster frame construction, parsing, and
+ * @brief Coverage tests for Master frame construction, parsing, and
  *        transport methods: sendSingleDatagram, handleRxFrame (parseEtherCATFrame),
  *        sendRawFrame, ecAprd with queued responses, requestSlaveState,
  *        getSlaveState, forceMailboxDefaults, autoConfigureMailbox,
@@ -80,7 +80,7 @@ static std::vector<uint8_t> buildEtherCATFrame(
 // ============================================================================
 
 TEST(MasterFrameCoverage, SendRawFrameNoInterface) {
-    EtherCATMaster master;
+    Master master;
     uint8_t buf[64] = {};
     EXPECT_FALSE(master.sendRawFrame(buf, sizeof(buf)));
 }
@@ -95,7 +95,7 @@ TEST(MasterFrameCoverage, SendRawFrameNoInterface) {
 // ============================================================================
 
 TEST(MasterFrameCoverage, SendSingleDatagramNoInterface) {
-    EtherCATMaster master;
+    Master master;
     // No interface registered → should fail (logs "No NetworkInterface available")
     uint8_t data[2] = {0x01, 0x02};
     EXPECT_FALSE(master.sendSingleDatagram(
@@ -103,7 +103,7 @@ TEST(MasterFrameCoverage, SendSingleDatagramNoInterface) {
 }
 
 TEST(MasterFrameCoverage, SendSingleDatagramOversized) {
-    EtherCATMaster master;
+    Master master;
     // datalen that would exceed kMaxEthFrameNoFcs (1514)
     // required_len = sizeof(header=26) + datalen + 2(wkc) > 1514
     // datalen > 1514 - 28 = 1486
@@ -113,7 +113,7 @@ TEST(MasterFrameCoverage, SendSingleDatagramOversized) {
 }
 
 TEST(MasterFrameCoverage, SendSingleDatagramNullData) {
-    EtherCATMaster master;
+    Master master;
     // data=nullptr, no interface → hits the no-interface code path
     EXPECT_FALSE(master.sendSingleDatagram(
         Command::APRD, 0x01, 0x0000, 0x0130, nullptr, 4, true));
@@ -124,14 +124,14 @@ TEST(MasterFrameCoverage, SendSingleDatagramNullData) {
 // ============================================================================
 
 TEST(MasterFrameCoverage, HandleRxFrameTooShort) {
-    EtherCATMaster master;
+    Master master;
     // Frame shorter than EthernetHeader + FrameHeader (14 + 2 = 16)
     uint8_t buf[10] = {};
     master.handleRxFrame(buf, sizeof(buf)); // should not crash
 }
 
 TEST(MasterFrameCoverage, HandleRxFrameWrongEtherType) {
-    EtherCATMaster master;
+    Master master;
     // Valid length but wrong EtherType
     uint8_t buf[64] = {};
     // Set EtherType to 0x0800 (IPv4) instead of 0x88A4
@@ -141,7 +141,7 @@ TEST(MasterFrameCoverage, HandleRxFrameWrongEtherType) {
 }
 
 TEST(MasterFrameCoverage, HandleRxFramePayloadTooShort) {
-    EtherCATMaster master;
+    Master master;
     // Correct EtherType but ec_len says more data than available
     uint8_t buf[20] = {};
     buf[12] = 0x88; buf[13] = 0xA4;
@@ -151,7 +151,7 @@ TEST(MasterFrameCoverage, HandleRxFramePayloadTooShort) {
 }
 
 TEST(MasterFrameCoverage, HandleRxFrameWkcMissing) {
-    EtherCATMaster master;
+    Master master;
     // Valid EtherType, valid ec_len, but frame too short for datagram + data + WKC
     auto frame = buildEtherCATFrame(Command::APRD, 0x01, 0, 0x0130, nullptr, 2, 1);
     // Truncate before WKC
@@ -160,7 +160,7 @@ TEST(MasterFrameCoverage, HandleRxFrameWkcMissing) {
 }
 
 TEST(MasterFrameCoverage, HandleRxFrameValidAPRD) {
-    EtherCATMaster master;
+    Master master;
     uint8_t payload[2] = {0x02, 0x00}; // PRE_OP state
     auto frame = buildEtherCATFrame(Command::APRD, 0x55, 0x0000, 0x0130, payload, 2, 1);
 
@@ -169,7 +169,7 @@ TEST(MasterFrameCoverage, HandleRxFrameValidAPRD) {
 }
 
 TEST(MasterFrameCoverage, HandleRxFrameFireAndForgetAPRD) {
-    EtherCATMaster master;
+    Master master;
     uint8_t payload[2] = {0x08, 0x00}; // OP state
     // Use fire-and-forget index (0xFE)
     auto frame = buildEtherCATFrame(Command::APRD, 0xFE, 0x0000, 0x0130, payload, 2, 1);
@@ -177,7 +177,7 @@ TEST(MasterFrameCoverage, HandleRxFrameFireAndForgetAPRD) {
 }
 
 TEST(MasterFrameCoverage, HandleRxFrameFireAndForgetNonAPRD) {
-    EtherCATMaster master;
+    Master master;
     uint8_t payload[2] = {0x08, 0x00};
     // Fire-and-forget with non-APRD command should NOT enqueue
     auto frame = buildEtherCATFrame(Command::APWR, 0xFE, 0x0000, 0x0130, payload, 2, 1);
@@ -189,7 +189,7 @@ TEST(MasterFrameCoverage, HandleRxFrameFireAndForgetNonAPRD) {
 // ============================================================================
 
 TEST(MasterFrameCoverage, EcAprdWithQueuedResponse) {
-    EtherCATMaster master;
+    Master master;
     // Push a response for ADP=0x0000, ADO=0x0130
     uint8_t resp_data[2] = {0x02, 0x00};
     master.pushAprdResponse(true, 0x0000, 0x0130, resp_data, 2);
@@ -201,7 +201,7 @@ TEST(MasterFrameCoverage, EcAprdWithQueuedResponse) {
 }
 
 TEST(MasterFrameCoverage, EcAprdWithQueuedResponseFail) {
-    EtherCATMaster master;
+    Master master;
     // Push a failing response
     master.pushAprdResponse(false, 0x0000, 0x0130, nullptr, 0);
 
@@ -210,7 +210,7 @@ TEST(MasterFrameCoverage, EcAprdWithQueuedResponseFail) {
 }
 
 TEST(MasterFrameCoverage, EcAprdWithQueuedResponseMismatch) {
-    EtherCATMaster master;
+    Master master;
     // Push response for a different ADO than what we read
     uint8_t resp_data[2] = {0xFF, 0xFF};
     master.pushAprdResponse(true, 0x0000, 0x9999, resp_data, 2);
@@ -227,7 +227,7 @@ TEST(MasterFrameCoverage, EcAprdWithQueuedResponseMismatch) {
 }
 
 TEST(MasterFrameCoverage, EcAprdWithTestCallback) {
-    EtherCATMaster master;
+    Master master;
     master.setAprdTestCallback([](uint16_t adp, uint16_t ado,
                                   void* out, uint16_t len,
                                   unsigned int timeout_ms) -> bool {
@@ -249,7 +249,7 @@ TEST(MasterFrameCoverage, EcAprdWithTestCallback) {
 // ============================================================================
 
 TEST(MasterFrameCoverage, EcApwrEepromShortcut) {
-    EtherCATMaster master;
+    Master master;
     // When there are queued aprd_responses, writeRegister to EEPCTL should shortcircuit
     uint8_t dummy[2] = {0x01, 0x00};
     master.pushAprdResponse(true, 0, 0, dummy, 2);
@@ -266,7 +266,7 @@ TEST(MasterFrameCoverage, EcApwrEepromShortcut) {
 // ============================================================================
 
 TEST(MasterFrameCoverage, RequestSlaveState) {
-    EtherCATMaster master;
+    Master master;
     bool write_called = false;
     uint16_t written_value = 0;
     master.setApwrTestCallback([&](uint16_t adp, uint16_t ado,
@@ -286,7 +286,7 @@ TEST(MasterFrameCoverage, RequestSlaveState) {
 }
 
 TEST(MasterFrameCoverage, GetSlaveState) {
-    EtherCATMaster master;
+    Master master;
     master.setAprdTestCallback([](uint16_t adp, uint16_t ado,
                                   void* out, uint16_t len,
                                   unsigned int timeout_ms) -> bool {
@@ -304,7 +304,7 @@ TEST(MasterFrameCoverage, GetSlaveState) {
 }
 
 TEST(MasterFrameCoverage, GetSlaveStateFails) {
-    EtherCATMaster master;
+    Master master;
     master.setAprdTestCallback([](uint16_t, uint16_t, void*, uint16_t,
                                   unsigned int) -> bool { return false; });
     uint8_t state = 0xFF;
@@ -316,12 +316,12 @@ TEST(MasterFrameCoverage, GetSlaveStateFails) {
 // ============================================================================
 
 TEST(MasterFrameCoverage, IsRunningBeforeStart) {
-    EtherCATMaster master;
+    Master master;
     EXPECT_FALSE(master.isRunning());
 }
 
 TEST(MasterFrameCoverage, GetSrcMac) {
-    EtherCATMaster master;
+    Master master;
     const uint8_t* mac = master.getSrcMac();
     EXPECT_NE(mac, nullptr);
     // Should be all zeros before start
@@ -331,13 +331,13 @@ TEST(MasterFrameCoverage, GetSrcMac) {
 }
 
 TEST(MasterFrameCoverage, NetworkInterface) {
-    EtherCATMaster master;
+    Master master;
     const NetworkInterface* ni = master.networkInterface();
     EXPECT_NE(ni, nullptr);
 }
 
 TEST(MasterFrameCoverage, GetDiscoveredSlaveCountInitiallyZero) {
-    EtherCATMaster master;
+    Master master;
     EXPECT_EQ(master.getDiscoveredSlaveCount(), 0);
 }
 
@@ -346,7 +346,7 @@ TEST(MasterFrameCoverage, GetDiscoveredSlaveCountInitiallyZero) {
 // ============================================================================
 
 TEST(MasterFrameCoverage, SiiReadString) {
-    EtherCATMaster master;
+    Master master;
     char buf[64] = {};
     // Stub always returns false
     EXPECT_FALSE(master.siiReadString(0x0000, 1, buf, sizeof(buf)));
@@ -357,13 +357,13 @@ TEST(MasterFrameCoverage, SiiReadString) {
 // ============================================================================
 
 TEST(MasterFrameCoverage, ForceMailboxDefaultsOutOfRange) {
-    EtherCATMaster master;
+    Master master;
     // kMaxPDOSlaves is typically 16 or 32; use a value way above
     EXPECT_FALSE(master.forceMailboxDefaults(9999));
 }
 
 TEST(MasterFrameCoverage, ForceMailboxDefaultsValid) {
-    EtherCATMaster master;
+    Master master;
     master.setApwrTestCallback([](uint16_t, uint16_t, const void*, uint16_t,
                                   unsigned int) -> bool { return true; });
 
@@ -378,7 +378,7 @@ TEST(MasterFrameCoverage, ForceMailboxDefaultsValid) {
 // ============================================================================
 
 TEST(MasterFrameCoverage, AutoConfigureMailboxInfoLevel) {
-    EtherCATMaster master;
+    Master master;
     // Uses APRD/APWR callbacks for SII, SDO config
     master.setAprdTestCallback([](uint16_t, uint16_t ado, void* out, uint16_t len,
                                   unsigned int) -> bool {
@@ -394,7 +394,7 @@ TEST(MasterFrameCoverage, AutoConfigureMailboxInfoLevel) {
 }
 
 TEST(MasterFrameCoverage, AutoConfigureMailboxDebugLevel) {
-    EtherCATMaster master;
+    Master master;
     master.setAprdTestCallback([](uint16_t, uint16_t ado, void* out, uint16_t len,
                                   unsigned int) -> bool {
         if (out && len > 0) std::memset(out, 0, len);
@@ -413,12 +413,12 @@ TEST(MasterFrameCoverage, AutoConfigureMailboxDebugLevel) {
 // ============================================================================
 
 TEST(MasterFrameCoverage, ConfigurePDOSMsOutOfRange) {
-    EtherCATMaster master;
+    Master master;
     EXPECT_FALSE(master.configureProcessDataSyncManagersFromSii(9999));
 }
 
 TEST(MasterFrameCoverage, ConfigurePDOSMsWithCallbacks) {
-    EtherCATMaster master;
+    Master master;
     // Provide APRD/APWR callbacks that return zeros (SII read will fail)
     master.setAprdTestCallback([](uint16_t, uint16_t, void* out, uint16_t len,
                                   unsigned int) -> bool {
@@ -438,7 +438,7 @@ TEST(MasterFrameCoverage, ConfigurePDOSMsWithCallbacks) {
 // ============================================================================
 
 TEST(MasterFrameCoverage, ConfigureMailboxFromSiiDefaults) {
-    EtherCATMaster master;
+    Master master;
     // APRD returns empty/zero data → SII read fails → defaults applied
     master.setAprdTestCallback([](uint16_t, uint16_t, void* out, uint16_t len,
                                   unsigned int) -> bool {
@@ -462,7 +462,7 @@ TEST(MasterFrameCoverage, ConfigureMailboxFromSiiDefaults) {
 }
 
 TEST(MasterFrameCoverage, ConfigureMailboxFromSiiNullOutputs) {
-    EtherCATMaster master;
+    Master master;
     master.setAprdTestCallback([](uint16_t, uint16_t, void* out, uint16_t len,
                                   unsigned int) -> bool {
         if (out && len > 0) std::memset(out, 0, len);
@@ -482,7 +482,7 @@ TEST(MasterFrameCoverage, ConfigureMailboxFromSiiNullOutputs) {
 // ============================================================================
 
 TEST(MasterFrameCoverage, MailboxFallbackConfig) {
-    EtherCATMaster master;
+    Master master;
     EXPECT_FALSE(master.isMailboxFallbackEnabled());
     master.setEnableMailboxFallback(true);
     EXPECT_TRUE(master.isMailboxFallbackEnabled());
@@ -491,7 +491,7 @@ TEST(MasterFrameCoverage, MailboxFallbackConfig) {
 }
 
 TEST(MasterFrameCoverage, MailboxFallbackCallback) {
-    EtherCATMaster master;
+    Master master;
     uint16_t cb_slave = 0xFFFF;
     master.setMailboxFallbackCallback([&](uint16_t slave) { cb_slave = slave; });
     master.setApwrTestCallback([](uint16_t, uint16_t, const void*, uint16_t,
@@ -508,7 +508,7 @@ TEST(MasterFrameCoverage, MailboxFallbackCallback) {
 
 #if TETHER_ENABLE_ETHERCAT_STATS
 TEST(MasterFrameCoverage, GetStatsAfterFrames) {
-    EtherCATMaster master;
+    Master master;
     // Process a few frames to increment counters
     uint8_t payload[2] = {0x01, 0x00};
     auto frame = buildEtherCATFrame(Command::APRD, 0x01, 0, 0x0130, payload, 2, 1);
@@ -525,7 +525,7 @@ TEST(MasterFrameCoverage, GetStatsAfterFrames) {
 // ============================================================================
 
 TEST(MasterFrameCoverage, MultipleQueuedResponsesDrained) {
-    EtherCATMaster master;
+    Master master;
 
     // Queue 3 responses
     uint8_t d1[2] = {0x01, 0x00};
@@ -551,7 +551,7 @@ TEST(MasterFrameCoverage, MultipleQueuedResponsesDrained) {
 // ============================================================================
 
 TEST(MasterFrameCoverage, EcAprdEepromStatusShortcircuit) {
-    EtherCATMaster master;
+    Master master;
     // When apwr_cb_ is set and ado == 0x0502 (EEPSTAT), ecAprd shortcircuits
     master.setApwrTestCallback([](uint16_t, uint16_t, const void*, uint16_t,
                                   unsigned int) -> bool { return true; });
@@ -569,7 +569,7 @@ TEST(MasterFrameCoverage, EcAprdEepromStatusShortcircuit) {
 // ============================================================================
 
 TEST(MasterFrameCoverage, LogDiscoveredSlavesSummaryZero) {
-    EtherCATMaster master;
+    Master master;
     // No slaves discovered — should just log "0 slave(s)"
     master.logDiscoveredSlavesSummary("test");
 }
@@ -579,12 +579,12 @@ TEST(MasterFrameCoverage, LogDiscoveredSlavesSummaryZero) {
 // ============================================================================
 
 TEST(MasterFrameCoverage, ConfigConstructor) {
-    EtherCATMaster::Config cfg;
+    Master::Config cfg;
     cfg.rx_queue_depth = 128;
     cfg.txpdo_queue_depth = 16;
     cfg.enable_mailbox_fallback = true;
 
-    EtherCATMaster master(cfg);
+    Master master(cfg);
     EXPECT_TRUE(master.isMailboxFallbackEnabled());
     EXPECT_NE(master.rxQueue(), nullptr);
     EXPECT_NE(master.txpdoRxQueue(), nullptr);
@@ -595,7 +595,7 @@ TEST(MasterFrameCoverage, ConfigConstructor) {
 // ============================================================================
 
 TEST(MasterFrameCoverage, CoeSdoUploadSmallMailbox) {
-    EtherCATMaster master;
+    Master master;
     master.setAprdTestCallback([](uint16_t, uint16_t, void* out, uint16_t len,
                                   unsigned int) -> bool {
         if (out && len > 0) std::memset(out, 0, len);
@@ -617,7 +617,7 @@ TEST(MasterFrameCoverage, CoeSdoUploadSmallMailbox) {
 }
 
 TEST(MasterFrameCoverage, CoeSdoDownloadSmallMailbox) {
-    EtherCATMaster master;
+    Master master;
     master.setAprdTestCallback([](uint16_t, uint16_t, void* out, uint16_t len,
                                   unsigned int) -> bool {
         if (out && len > 0) std::memset(out, 0, len);

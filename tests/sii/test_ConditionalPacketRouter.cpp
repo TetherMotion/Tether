@@ -158,11 +158,11 @@ TEST_F(RouterTest, Stats_TrackRegistrations) {
 }
 
 // ============================================================================
-// EtherCATMaster: allocIdx / resetIdx
+// Master: allocIdx / resetIdx
 // ============================================================================
 
 TEST(EtherCATMasterBasic, AllocIdx_Increments) {
-    EtherCATMaster m;
+    Master m;
     m.resetIdx();
     uint8_t first = m.allocIdx();
     uint8_t second = m.allocIdx();
@@ -170,7 +170,7 @@ TEST(EtherCATMasterBasic, AllocIdx_Increments) {
 }
 
 TEST(EtherCATMasterBasic, ResetIdx_ResetsSequence) {
-    EtherCATMaster m;
+    Master m;
     m.allocIdx();
     m.allocIdx();
     m.resetIdx();
@@ -182,17 +182,17 @@ TEST(EtherCATMasterBasic, ResetIdx_ResetsSequence) {
 
 TEST(EtherCATMasterBasic, AdpForSlaveIndex) {
     // Auto-increment addressing: adp = 0 - slave_index
-    EXPECT_EQ(EtherCATMaster::adpForSlaveIndex(0), 0u);
-    EXPECT_EQ(EtherCATMaster::adpForSlaveIndex(1), static_cast<uint16_t>(0u - 1u));
-    EXPECT_EQ(EtherCATMaster::adpForSlaveIndex(10), static_cast<uint16_t>(0u - 10u));
+    EXPECT_EQ(Master::adpForSlaveIndex(0), 0u);
+    EXPECT_EQ(Master::adpForSlaveIndex(1), static_cast<uint16_t>(0u - 1u));
+    EXPECT_EQ(Master::adpForSlaveIndex(10), static_cast<uint16_t>(0u - 10u));
 }
 
 // ============================================================================
-// EtherCATMaster: test hook round-trip
+// Master: test hook round-trip
 // ============================================================================
 
 TEST(EtherCATMasterBasic, AprdCallback_ShortCircuits) {
-    EtherCATMaster m;
+    Master m;
     m.packetRouter().init();
 
     bool called = false;
@@ -212,7 +212,7 @@ TEST(EtherCATMasterBasic, AprdCallback_ShortCircuits) {
 }
 
 TEST(EtherCATMasterBasic, ApwrCallback_ShortCircuits) {
-    EtherCATMaster m;
+    Master m;
     m.packetRouter().init();
 
     bool called = false;
@@ -232,7 +232,7 @@ TEST(EtherCATMasterBasic, ApwrCallback_ShortCircuits) {
 }
 
 TEST(EtherCATMasterBasic, PushAndConsumeAprdResponse) {
-    EtherCATMaster m;
+    Master m;
     m.packetRouter().init();
 
     uint32_t data = 0xDEADBEEF;
@@ -256,7 +256,7 @@ namespace EtherCAT { namespace Raw {
 }}
 
 TEST(MasterFunctions, AllocIdxAndReset) {
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     master.packetRouter().init();
 
     master.resetIdx();
@@ -274,7 +274,7 @@ TEST(MasterFunctions, AdpForSlaveIndex) {
 }
 
 TEST(MasterFunctions, SrcMacDefaultsToZero) {
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
 
     const uint8_t* got = master.getSrcMac();
     ASSERT_NE(got, nullptr);

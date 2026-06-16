@@ -3,7 +3,7 @@
  * @brief Basic unit tests for DC initialization via DCManager (instance-based)
  *
  * Focuses on parameter validation and basic API contracts
- * using DCManager owned by EtherCATMaster.
+ * using DCManager owned by Master.
  */
 
 #include <gtest/gtest.h>
@@ -32,7 +32,7 @@ protected:
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
-    EtherCATMaster master_;
+    Master master_;
 };
 
 // ============================================================================

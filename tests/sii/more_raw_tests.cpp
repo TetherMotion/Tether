@@ -11,14 +11,14 @@ static constexpr uint16_t EC_ECMD_READ = 0x0100;
 static constexpr uint16_t EC_ESTAT_BUSY  = 0x8000;
 
 TEST(MoreRaw, ReadBytes_ZeroCount_ReturnsZero) {
-    EtherCAT::EtherCATMaster master; SIIReader reader(master);
+    EtherCAT::Master master; SIIReader reader(master);
     uint8_t buf[4] = {0};
     size_t n = reader.readBytes(0, 0, buf, 0);
     EXPECT_EQ(n, 0u);
 }
 
 TEST(MoreRaw, ReadString_InvalidArgs_ReturnFalse) {
-    EtherCAT::EtherCATMaster master; SIIReader reader(master);
+    EtherCAT::Master master; SIIReader reader(master);
     char buf[8];
     EXPECT_FALSE(reader.readString(0, 0, buf, sizeof(buf))); // string_index == 0 invalid
     EXPECT_FALSE(reader.readString(0, 1, nullptr, 4)); // null buffer
@@ -27,7 +27,7 @@ TEST(MoreRaw, ReadString_InvalidArgs_ReturnFalse) {
 
 TEST(MoreRaw, WaitNotBusy_Timeout_ReadDWordFails) {
     // APRD always returns BUSY on EEPSTAT
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
 
     master.setAprdTestCallback([&](uint16_t adp, uint16_t ado, void* out, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms;
@@ -50,7 +50,7 @@ TEST(MoreRaw, WaitNotBusy_Timeout_ReadDWordFails) {
 }
 
 TEST(MoreRaw, ApwrTriggersAprdResponse_ReadDWordSucceeds) {
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     master.clearAprdResponses();
 
     // APWR hook: when SIIReader writes read command to EEPCTL, push an APRD response with the data

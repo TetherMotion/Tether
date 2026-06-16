@@ -2,7 +2,7 @@
  * @file test_as715n_errc11_integration.cpp
  * @brief Integration test: AS715N emulated slave reporting ErC1.1 fault
  *
- * Wires a full EtherCATMaster to a software slave emulator via
+ * Wires a full Master to a software slave emulator via
  * LinuxPairedNetworkInterface and verifies that the AS715N fault-detection
  * stack correctly parses the ErC1.1 (Synchronization loss / 0x0C11) fault.
  *
@@ -515,8 +515,8 @@ protected:
         pair_.reset();
     }
 
-    EtherCATMaster& startMaster() {
-        master_ = std::make_unique<EtherCATMaster>();
+    Master& startMaster() {
+        master_ = std::make_unique<Master>();
         pair_->setRxCallbackA([this](const uint8_t* data, size_t len) {
             if (master_) master_->handleRxFrame(data, len);
         });
@@ -525,7 +525,7 @@ protected:
     }
 
     /// Spin until at least one slave appears or the timeout elapses.
-    bool waitForDiscovery(EtherCATMaster& master, int max_ms = 3000) {
+    bool waitForDiscovery(Master& master, int max_ms = 3000) {
         for (int ms = 0; ms < max_ms; ms += 25) {
             if (master.getDiscoveredSlaveCount() > 0) return true;
             std::this_thread::sleep_for(std::chrono::milliseconds(25));
@@ -534,7 +534,7 @@ protected:
     }
 
     std::unique_ptr<LinuxPairedNetworkInterface> pair_;
-    std::unique_ptr<EtherCATMaster>              master_;
+    std::unique_ptr<Master>              master_;
     static constexpr uint8_t kDummyMac[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
 };
 

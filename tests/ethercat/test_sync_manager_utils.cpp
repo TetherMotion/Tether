@@ -40,7 +40,7 @@ TEST(SyncManagerUtilsTest, SupportedSyncTypesToString) {
 // and doesn't crash when used with a default-constructed master (which has no
 // slaves). It should simply log warnings and return.
 TEST(SyncManagerUtilsTest, PrintSyncDiagnosticsNoSlave) {
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     // no slaves discovered; this call should not crash
     EtherCAT::SyncManager::Utils::printSyncDiagnostics(master, 0, "TEST");
     SUCCEED();
@@ -48,7 +48,7 @@ TEST(SyncManagerUtilsTest, PrintSyncDiagnosticsNoSlave) {
 
 // entry-based helpers should compile and behave reasonably with an empty master
 TEST(SyncManagerUtilsTest, EntryBasedReadsNoSlave) {
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     auto& sdo = master.sdoManager();
 
     // pick a known sync manager object dictionary entry
