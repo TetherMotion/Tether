@@ -1,8 +1,8 @@
 /**
  * @file dual_instance_linux.cpp
- * @brief Demonstrates two independent EtherCATMaster instances on Linux
+ * @brief Demonstrates two independent Master instances on Linux
  *
- * This example creates two separate EtherCATMaster objects, each with its own
+ * This example creates two separate Master objects, each with its own
  * NetworkInterface, queues, and CiA 402 drive.  The two masters run
  * independently on separate threads, proving that the class-based API
  * supports true multi-instance usage.
@@ -58,7 +58,7 @@ public:
     }
 
     /// Set the master that will receive responses
-    void setMaster(EtherCAT::EtherCATMaster* m) { master_ = m; }
+    void setMaster(EtherCAT::Master* m) { master_ = m; }
 
     /// Number of frames sent through this adapter
     uint32_t txCount() const { return tx_count_.load(); }
@@ -101,7 +101,7 @@ private:
     }
 
     const char* name_;
-    EtherCAT::EtherCATMaster* master_{nullptr};
+    EtherCAT::Master* master_{nullptr};
     std::atomic<uint32_t> tx_count_{0};
 };
 
@@ -112,7 +112,7 @@ private:
 struct InstanceContext {
     const char* name;
     LoopbackAdapter* adapter;
-    EtherCAT::EtherCATMaster* master;
+    EtherCAT::Master* master;
     std::atomic<bool> done{false};
 };
 
@@ -148,12 +148,12 @@ int main() {
     printf("=== Dual EtherCAT Master Instance Demo (Linux) ===\n\n");
 
     // Create two completely independent masters
-    EtherCAT::EtherCATMaster::Config cfg;
+    EtherCAT::Master::Config cfg;
     cfg.rx_queue_depth   = 8;
     cfg.txpdo_queue_depth = 4;
 
-    EtherCAT::EtherCATMaster master_a(cfg);
-    EtherCAT::EtherCATMaster master_b(cfg);
+    EtherCAT::Master master_a(cfg);
+    EtherCAT::Master master_b(cfg);
 
     LoopbackAdapter adapter_a("MasterA");
     LoopbackAdapter adapter_b("MasterB");

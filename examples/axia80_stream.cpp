@@ -49,7 +49,7 @@ namespace Raw {
 }
 
 static const char* TAG = "axia80_stream";
-static EtherCAT::EtherCATMaster* g_master = nullptr;
+static EtherCAT::Master* g_master = nullptr;
 
 void signalHandler(int) {
     if (g_master) {
@@ -215,7 +215,7 @@ static void verifyIntendedAgainstESI(const ESI::DeviceInfo& esi) {
 // ---- Phase 2: Read back actual slave registers and compare against ESI ----
 
 static void verifyReadbackAgainstESI(const ESI::DeviceInfo& esi,
-                                        EtherCAT::EtherCATMaster& master,
+                                        EtherCAT::Master& master,
                                         EtherCAT::Sensors::Axia80Sensor& sensor,
                                         uint16_t slave_index)
 {
@@ -666,7 +666,7 @@ int main(int argc, char** argv) {
     EtherCAT::Raw::set_src_mac(src_mac);
 
     // ---- Create master ----
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     g_master = &master;
 
     // ---- Optional VLAN router ----
@@ -676,15 +676,15 @@ int main(int argc, char** argv) {
         router->setBackend(ni_ptr.get());
         if (rx_any) {
             router->setUndefinedTarget(
-                std::shared_ptr<EtherCAT::EtherCATMaster>(&master, [](auto*){}),
+                std::shared_ptr<EtherCAT::Master>(&master, [](auto*){}),
                 tx_vlan, true);
         } else if (rx_range) {
             router->addMaster(
-                std::shared_ptr<EtherCAT::EtherCATMaster>(&master, [](auto*){}),
+                std::shared_ptr<EtherCAT::Master>(&master, [](auto*){}),
                 *rx_range, tx_vlan);
         } else {
             router->addMaster(
-                std::shared_ptr<EtherCAT::EtherCATMaster>(&master, [](auto*){}),
+                std::shared_ptr<EtherCAT::Master>(&master, [](auto*){}),
                 std::nullopt, tx_vlan);
         }
     }
@@ -818,7 +818,7 @@ int main(int argc, char** argv) {
             return true;
         });
 
-    EtherCAT::EtherCATMaster::RealtimeMotionLoopConfig loop_config;
+    EtherCAT::Master::RealtimeMotionLoopConfig loop_config;
     loop_config.cycle_period_us = 1000;          // 1 kHz
     loop_config.sync_interval_cycles = 10;
     loop_config.enable_dc_synchronization = false; // Axia80 does not use DC

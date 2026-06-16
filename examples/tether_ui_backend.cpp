@@ -349,7 +349,7 @@ public:
         using ValueType = tether::io::ValueType;
 
         registry.addSignal(makeFixedSignal(
-            makeId(ModuleId::EtherCATMaster, 0x0001),
+            makeId(ModuleId::Master, 0x0001),
             "discovered_slave_count",
             "Number of simulated EtherCAT slaves",
             "ethercat.master",
@@ -361,7 +361,7 @@ public:
         ));
 
         registry.addSignal(makeFixedSignal(
-            makeId(ModuleId::EtherCATMaster, 0x0002),
+            makeId(ModuleId::Master, 0x0002),
             "is_running",
             "Whether the simulated EtherCAT bus is active",
             "ethercat.master",
@@ -373,7 +373,7 @@ public:
         ));
 
         registry.addSignal(makeFixedSignal(
-            makeId(ModuleId::EtherCATMaster, 0x1001),
+            makeId(ModuleId::Master, 0x1001),
             "slave0.ec_state",
             "Current EtherCAT AL state of the simulated servo slave",
             "ethercat.slave0",

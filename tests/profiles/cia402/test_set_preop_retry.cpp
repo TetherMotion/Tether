@@ -13,10 +13,10 @@ TEST(EtherCATMasterPreopRetry, LogsDetailedALStatusOnError) {
     // Simulate AL_STATUS with error bit set and AL_STATUS_CODE = InvalidMailboxConfig
     int read_count = 0;
 
-    EtherCAT::EtherCATMaster::Config cfg;
+    EtherCAT::Master::Config cfg;
     cfg.rx_queue_depth = 4;
     cfg.txpdo_queue_depth = 4;
-    EtherCAT::EtherCATMaster master(cfg);
+    EtherCAT::Master master(cfg);
 
     master.setApwrTestCallback([&](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned ms){
         return true;

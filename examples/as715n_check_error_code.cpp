@@ -72,7 +72,7 @@ static void printAS715NErrorDetails(EtherCAT::SDO::SDOManager& sdo, uint16_t sla
     }
 }
 
-static int inspectAndMaybeReset(EtherCAT::EtherCATMaster& master, bool do_reset, bool do_sw_reset) {
+static int inspectAndMaybeReset(EtherCAT::Master& master, bool do_reset, bool do_sw_reset) {
     auto& sdo = master.sdoManager();
     uint16_t slave_count = master.getDiscoveredSlaveCount();
     if (slave_count == 0) {
@@ -283,9 +283,9 @@ int main(int argc, char** argv) {
     EtherCAT::Raw::set_network_interface(ni_ptr.get());
     EtherCAT::Raw::set_src_mac(src_mac);
 
-    EtherCAT::EtherCATMaster::Config mcfg;
+    EtherCAT::Master::Config mcfg;
     mcfg.enable_mailbox_fallback = true;  // Enable fallback to default mailbox on configuration errors
-    EtherCAT::EtherCATMaster master(mcfg);
+    EtherCAT::Master master(mcfg);
 
     // Route RX frames directly to master — avoids the fragile findByNetworkInterface lookup
     eth->setRxCallback([&master](const uint8_t* frame, size_t len, const EtherCAT::HAL::RxFrameInfo& info, void*){

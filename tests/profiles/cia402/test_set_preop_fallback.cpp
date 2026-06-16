@@ -15,11 +15,11 @@ TEST(EtherCATMasterPreopFallback, ForcesMailboxDefaultsWhenEnabled) {
 
 
 
-    EtherCAT::EtherCATMaster::Config cfg;
+    EtherCAT::Master::Config cfg;
     cfg.rx_queue_depth = 4;
     cfg.txpdo_queue_depth = 4;
     cfg.enable_mailbox_fallback = true; // opt-in
-    EtherCAT::EtherCATMaster master(cfg);
+    EtherCAT::Master master(cfg);
 
     // Ensure packet router is initialized
     master.packetRouter().init();

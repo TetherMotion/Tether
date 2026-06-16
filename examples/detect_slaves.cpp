@@ -261,7 +261,7 @@ int main(int argc, char** argv) {
     EtherCAT::Raw::set_src_mac(src_mac);
 
     // ---- Create master ----
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
 
     // ---- Optional VLAN router ----
     std::unique_ptr<EtherCAT::VLANRouter> router;
@@ -270,15 +270,15 @@ int main(int argc, char** argv) {
         router->setBackend(ni_ptr.get());
         if (rx_any) {
             router->setUndefinedTarget(
-                std::shared_ptr<EtherCAT::EtherCATMaster>(&master, [](auto*){}),
+                std::shared_ptr<EtherCAT::Master>(&master, [](auto*){}),
                 tx_vlan, true);
         } else if (rx_range) {
             router->addMaster(
-                std::shared_ptr<EtherCAT::EtherCATMaster>(&master, [](auto*){}),
+                std::shared_ptr<EtherCAT::Master>(&master, [](auto*){}),
                 *rx_range, tx_vlan);
         } else {
             router->addMaster(
-                std::shared_ptr<EtherCAT::EtherCATMaster>(&master, [](auto*){}),
+                std::shared_ptr<EtherCAT::Master>(&master, [](auto*){}),
                 std::nullopt, tx_vlan);
         }
     }

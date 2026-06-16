@@ -6,10 +6,10 @@
 using namespace EtherCAT;
 
 TEST(CiA402AssignFixedPDOs, AssignStoresSizes) {
-    EtherCAT::EtherCATMaster::Config cfg;
+    EtherCAT::Master::Config cfg;
     cfg.rx_queue_depth = 4;
     cfg.txpdo_queue_depth = 4;
-    EtherCAT::EtherCATMaster master(cfg);
+    EtherCAT::Master master(cfg);
 
     CiA402Drive drive(master, 0);
 
@@ -25,10 +25,10 @@ TEST(CiA402AssignFixedPDOs, AssignStoresSizes) {
 }
 
 TEST(CiA402AssignFixedPDOs, TypedAccessWorks) {
-    EtherCAT::EtherCATMaster::Config cfg;
+    EtherCAT::Master::Config cfg;
     cfg.rx_queue_depth = 4;
     cfg.txpdo_queue_depth = 4;
-    EtherCAT::EtherCATMaster master(cfg);
+    EtherCAT::Master master(cfg);
 
     CiA402Drive drive(master, 0);
 

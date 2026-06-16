@@ -10,10 +10,10 @@ TEST(EtherCATMasterPreopRetry, FaultDiagnosedAlwaysError) {
     // First AL_STATUS read indicates an error condition, later returns PRE_OP
     int call_count = 0;
 
-    EtherCAT::EtherCATMaster::Config cfg;
+    EtherCAT::Master::Config cfg;
     cfg.rx_queue_depth = 4;
     cfg.txpdo_queue_depth = 4;
-    EtherCAT::EtherCATMaster master(cfg);
+    EtherCAT::Master master(cfg);
 
     master.setApwrTestCallback([&](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned ms){
         (void)adp; (void)ado; (void)data; (void)len; (void)ms; return true;
@@ -37,7 +37,7 @@ TEST(EtherCATMasterPreopRetry, FaultDiagnosedAlwaysError) {
     });
 
     // Sanity-check the apwr short-circuit
-    EXPECT_TRUE(master.writeRegister(EtherCAT::EtherCATMaster::adpForSlaveIndex(0), Raw::EC_REG_AL_CONTROL, static_cast<uint16_t>(0x0002)));
+    EXPECT_TRUE(master.writeRegister(EtherCAT::Master::adpForSlaveIndex(0), Raw::EC_REG_AL_CONTROL, static_cast<uint16_t>(0x0002)));
 
     EXPECT_FALSE(master.transitionSlaveToPreOperational(0));
     EXPECT_TRUE(master.wasFaultDiagnosed(0));
