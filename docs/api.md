@@ -28,7 +28,7 @@ Below is an example of how to document C++ classes using Breathe directives in M
 
 ### EtherCAT Master
 
-```{doxygenclass} EtherCATMaster
+```{doxygenclass} Master
 :members:
 ```
 
@@ -80,13 +80,13 @@ Below is an example of how to document C++ classes using Breathe directives in M
 
 #### Master Implementation
 
-```{doxygenclass} EtherCATMaster
+```{doxygenclass} Master
 :members:
 ```
 
 #### Slave Emulation
 
-```{doxygenclass} EtherCATSlave
+```{doxygenclass} Slave
 :members:
 ```
 
@@ -101,7 +101,7 @@ using namespace tether;
 
 int main() {
     // Initialize the EtherCAT master
-    ethercat::EtherCATMaster master("eth0");
+    ethercat::Master master("eth0");
     
     // Configure the master
     master.configure();

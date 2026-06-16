@@ -71,7 +71,7 @@ int runSineMotion(EtherCAT::DS402Master& master,
         }
     }
 
-    EtherCAT::EtherCATMaster::RealtimeMotionLoopConfig loop_config;
+    EtherCAT::Master::RealtimeMotionLoopConfig loop_config;
     loop_config.cycle_period_us = 1000;
     loop_config.sync_interval_cycles = 10;
     loop_config.enable_dc_synchronization = true;

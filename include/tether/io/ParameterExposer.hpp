@@ -51,7 +51,7 @@ inline constexpr uint64_t makeId(uint64_t moduleBase, uint32_t localId) {
 // Well-known module ID bases (upper 32 bits of the entry ID)
 // ---------------------------------------------------------------------------
 namespace ModuleId {
-    inline constexpr uint64_t EtherCATMaster   = 0x0001;
+    inline constexpr uint64_t Master   = 0x0001;
     inline constexpr uint64_t CiA402Drive      = 0x0002;
     inline constexpr uint64_t PIDController    = 0x0003;
     inline constexpr uint64_t MotionPlanner    = 0x0004;

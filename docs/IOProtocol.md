@@ -131,7 +131,7 @@ public:
 | Exposer | Module | Params | Signals |
 |---|---|---|---|
 | `PIDExposer` | PIDController | kp, ki, kd, derivative_filter, enabled, output_min, output_max | error, proportional, integral_term, derivative_term, output, saturated, cycle_count |
-| `EtherCATExposer` | EtherCATMaster | enable_mailbox_fallback | discovered_slave_count, is_running, per-slave ec_state/has_fault |
+| `EtherCATExposer` | Master | enable_mailbox_fallback | discovered_slave_count, is_running, per-slave ec_state/has_fault |
 | `CiA402Exposer` | CiA402Drive | controlword | statusword, drive_state, ec_state, is_enabled, is_faulted, target_reached, operating_mode |
 | `GCodeExposer` | GCode Interpreter | dry_run, block_delete, optional_stop, mode | state, current_line, total_lines, position.x/y/z, machine_position.x/y/z, stats.* |
 | `MotionPlannerExposer` | MotionPlanner | feed_override | total_duration, total_length, num_segments, is_paused, is_reverse |
@@ -191,7 +191,7 @@ Well-known module IDs are defined in `ModuleId` namespace:
 
 | ID | Module |
 |---|---|
-| 0x0001 | EtherCATMaster |
+| 0x0001 | Master |
 | 0x0002 | CiA402Drive |
 | 0x0003 | PIDController |
 | 0x0004 | MotionPlanner |

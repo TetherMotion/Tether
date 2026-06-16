@@ -43,7 +43,7 @@ namespace Raw {
 
 static const char* TAG = "ethercat_dump_sii";
 
-static int dumpSiiForSlave(EtherCAT::EtherCATMaster& master, uint16_t slave_idx) {
+static int dumpSiiForSlave(EtherCAT::Master& master, uint16_t slave_idx) {
     uint16_t slaves = master.getDiscoveredSlaveCount();
     if (slave_idx >= slaves) {
         TETHER_LOGE(TAG, "Requested slave index %u >= discovered slaves (%u)", slave_idx, slaves);
@@ -267,9 +267,9 @@ int main(int argc, char** argv) {
     EtherCAT::Raw::set_network_interface(ni_ptr.get());
     EtherCAT::Raw::set_src_mac(src_mac);
 
-    EtherCAT::EtherCATMaster::Config mcfg;
+    EtherCAT::Master::Config mcfg;
     mcfg.enable_mailbox_fallback = true;
-    EtherCAT::EtherCATMaster master(mcfg);
+    EtherCAT::Master master(mcfg);
 
     // ---- Optional VLAN router ----
     std::unique_ptr<EtherCAT::VLANRouter> router;
@@ -278,15 +278,15 @@ int main(int argc, char** argv) {
         router->setBackend(ni_ptr.get());
         if (rx_any) {
             router->setUndefinedTarget(
-                std::shared_ptr<EtherCAT::EtherCATMaster>(&master, [](auto*){}),
+                std::shared_ptr<EtherCAT::Master>(&master, [](auto*){}),
                 tx_vlan, true);
         } else if (rx_range) {
             router->addMaster(
-                std::shared_ptr<EtherCAT::EtherCATMaster>(&master, [](auto*){}),
+                std::shared_ptr<EtherCAT::Master>(&master, [](auto*){}),
                 *rx_range, tx_vlan);
         } else {
             router->addMaster(
-                std::shared_ptr<EtherCAT::EtherCATMaster>(&master, [](auto*){}),
+                std::shared_ptr<EtherCAT::Master>(&master, [](auto*){}),
                 std::nullopt, tx_vlan);
         }
     }

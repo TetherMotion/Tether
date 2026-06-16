@@ -10,10 +10,10 @@
 using namespace CiA402;
 
 // ============================================================================
-// Mock EtherCATMasterInterface
+// Mock MasterInterface
 // ============================================================================
 
-class MockEtherCATMaster : public EtherCATMasterInterface {
+class MockEtherCATMaster : public MasterInterface {
 public:
     MOCK_METHOD(bool, readProcessData, (uint32_t slaveId, uint8_t* data, size_t size), (override));
     MOCK_METHOD(bool, writeProcessData, (uint32_t slaveId, const uint8_t* data, size_t size), (override));

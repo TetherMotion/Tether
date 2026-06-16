@@ -9,7 +9,7 @@ using namespace EtherCAT::Drives;
 
 TEST(AS715NPDOUtils, DumpUsingDescriptorsWithAssignment)
 {
-    EtherCATMaster master;
+    Master master;
     CiA402Drive drive(master, 0);
 
     // assign known PDO indices/sizes so the helper can select descriptors

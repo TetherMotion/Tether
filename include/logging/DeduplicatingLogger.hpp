@@ -28,7 +28,7 @@ public:
     bool log(Tether::Platform::LogLevel level, const char* tag, const char* msg);
 
     // Compatibility helper for legacy integer levels used by some code paths.
-    // Mapping matches the old EtherCATMaster logDedup: 0=Info, 1=Warn, 2=Error, default=Debug.
+    // Mapping matches the old Master logDedup: 0=Info, 1=Warn, 2=Error, default=Debug.
     bool logLegacy(int level, const char* tag, const char* msg);
 
     // Emit a one-line "suppressed N" message (if any) and reset counters.

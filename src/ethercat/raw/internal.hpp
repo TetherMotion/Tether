@@ -59,8 +59,8 @@
 #include "tether/platform/Platform.hpp"
 #include "tether/ethercat/EtherCATTypes.hpp"
 
-// Forward-declare EtherCATMaster for function parameters
-namespace EtherCAT { class EtherCATMaster; }
+// Forward-declare Master for function parameters
+namespace EtherCAT { class Master; }
 
 namespace EtherCAT {
 namespace Raw {
@@ -571,7 +571,7 @@ uint16_t adp_for_slave_index(uint16_t slave_index);
  * @return true on success
  */
 bool configure_mailbox_from_sii(
-    EtherCATMaster& master,
+    Master& master,
     uint16_t slave_index,
     uint16_t *out_wr_addr,
     uint16_t *out_wr_len,
@@ -582,7 +582,7 @@ bool configure_mailbox_from_sii(
 /**
  * @brief Read a string from slave SII (EEPROM)
  */
-bool sii_read_string(EtherCATMaster& master, uint16_t slave_index, uint16_t string_number, char *out, size_t out_cap);
+bool sii_read_string(Master& master, uint16_t slave_index, uint16_t string_number, char *out, size_t out_cap);
 
 // ============================================================================
 // CoE SDO Communication
@@ -602,7 +602,7 @@ bool sii_read_string(EtherCATMaster& master, uint16_t slave_index, uint16_t stri
  * @return true on success
  */
 bool coe_sdo_upload(
-    EtherCATMaster& master,
+    Master& master,
     uint16_t adp,
     uint8_t *inout_mbx_cnt,
     uint16_t mbx_write_addr,
@@ -634,7 +634,7 @@ bool coe_sdo_upload(
  * @return true on success
  */
 bool coe_sdo_download(
-    EtherCATMaster& master,
+    Master& master,
     uint16_t adp,
     uint8_t *inout_mbx_cnt,
     uint16_t mbx_write_addr,
