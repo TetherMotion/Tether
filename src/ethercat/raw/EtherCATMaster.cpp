@@ -1,6 +1,6 @@
 /**
  * @file EtherCATMaster.cpp
- * @brief EtherCATMaster class implementation
+ * @brief Master class implementation
  *
  * Core lifecycle, motion-control loops, frame parsing and sub-manager accessors.
  */
@@ -35,10 +35,10 @@ namespace EtherCAT {
 
 static const char* TAG = "ethercat";
 
-// Global debug flag for al-state (shared with EtherCATSlave)
+// Global debug flag for al-state (shared with Slave)
 extern bool g_debug_statemachine;
 
-// Global debug flags for tx/rx packet logging (shared with EtherCATSlave)
+// Global debug flags for tx/rx packet logging (shared with Slave)
 extern bool g_debug_tx_packets;
 extern bool g_debug_rx_packets;
 
@@ -46,11 +46,11 @@ extern bool g_debug_rx_packets;
 extern bool g_debug_rx_pdo;
 extern bool g_debug_tx_pdo;
 
-// Global registry of EtherCATMaster instances (host-only helper). This
+// Global registry of Master instances (host-only helper). This
 // allows host-side helpers (examples) to find the master associated with
 // a NetworkInterface pointer.
 static std::mutex g_master_list_mutex;
-static std::vector<EtherCATMaster*> g_master_list;
+static std::vector<Master*> g_master_list;
 
 // TX retry constants
 static constexpr int       kMaxTxRetries   = 3;
@@ -66,8 +66,8 @@ public:
 
 class RealtimeMotionControlLoop final : public IMotionControlLoop {
 public:
-    RealtimeMotionControlLoop(EtherCATMaster::MotionControlCallback callback,
-                              EtherCATMaster::RealtimeMotionLoopConfig config,
+    RealtimeMotionControlLoop(Master::MotionControlCallback callback,
+                              Master::RealtimeMotionLoopConfig config,
                               EtherCAT::DCManager* dc_manager)
         : callback_(std::move(callback))
         , dt_seconds_(static_cast<double>(config.cycle_period_us) / 1000000.0)
@@ -82,7 +82,7 @@ public:
             []() {
                 return static_cast<uint64_t>(Tether::Platform::Clock::instance().getMicroseconds()) * 1000ULL;
             },
-            EtherCATRealtimeLoop::Config::defaults(config.cycle_period_us, config.sync_interval_cycles))
+            RealtimeLoop::Config::defaults(config.cycle_period_us, config.sync_interval_cycles))
     {
     }
 
@@ -100,15 +100,15 @@ public:
     }
 
 private:
-    EtherCATMaster::MotionControlCallback callback_;
+    Master::MotionControlCallback callback_;
     double dt_seconds_;
-    EtherCATRealtimeLoop loop_;
+    RealtimeLoop loop_;
 };
 
 class PollingMotionControlLoop final : public IMotionControlLoop {
 public:
-    PollingMotionControlLoop(EtherCATMaster::MotionControlCallback callback,
-                             EtherCATMaster::PollingMotionLoopConfig config,
+    PollingMotionControlLoop(Master::MotionControlCallback callback,
+                             Master::PollingMotionLoopConfig config,
                              EtherCAT::DCManager* dc_manager)
         : callback_(std::move(callback))
         , config_(config)
@@ -171,8 +171,8 @@ public:
     }
 
 private:
-    EtherCATMaster::MotionControlCallback callback_;
-    EtherCATMaster::PollingMotionLoopConfig config_;
+    Master::MotionControlCallback callback_;
+    Master::PollingMotionLoopConfig config_;
     EtherCAT::DCManager* dc_manager_{nullptr};
     std::atomic<bool> running_{false};
     std::thread thread_;
@@ -183,7 +183,7 @@ private:
 // Utility: getECStateName
 // ============================================================================
 
-const char* EtherCATMaster::getECStateName(uint8_t state)
+const char* Master::getECStateName(uint8_t state)
 {
     switch (state & 0x0Fu) {
         case 0x01: return "INIT";
@@ -198,23 +198,23 @@ const char* EtherCATMaster::getECStateName(uint8_t state)
 // adpForSlaveIndex is defined inline in EtherCATMaster.hpp
 
 // ============================================================================
-// MasterPDOTransport — adapts EtherCATMaster to IPDOTransport
+// MasterPDOTransport — adapts Master to IPDOTransport
 // ============================================================================
 
 class MasterPDOTransport : public IPDOTransport {
 public:
-    explicit MasterPDOTransport(EtherCATMaster& master) : master_(master) {}
+    explicit MasterPDOTransport(Master& master) : master_(master) {}
 
     bool writeRegister(uint16_t adp, uint16_t ado,
                        const void* data, uint16_t len,
                        unsigned int timeout_ms) override {
-        return master_.writeRegister(EtherCATMaster::slaveAddressFromADP(adp), ado, data, len, timeout_ms);
+        return master_.writeRegister(Master::slaveAddressFromADP(adp), ado, data, len, timeout_ms);
     }
 
     bool readRegister(uint16_t adp, uint16_t ado,
                       void* data, uint16_t len,
                       unsigned int timeout_ms) override {
-        return master_.readRegister(EtherCATMaster::slaveAddressFromADP(adp), ado, data, len, timeout_ms);
+        return master_.readRegister(Master::slaveAddressFromADP(adp), ado, data, len, timeout_ms);
     }
 
     bool sendSingleDatagram(Command cmd, uint8_t idx,
@@ -234,20 +234,20 @@ public:
     }
 
     uint16_t adpForSlaveIndex(uint16_t slave_index) override {
-        return EtherCATMaster::adpForSlaveIndex(slave_index);
+        return Master::adpForSlaveIndex(slave_index);
     }
 
 private:
-    EtherCATMaster& master_;
+    Master& master_;
 };
 
 // ============================================================================
-// MasterFaultTransport — adapts EtherCATMaster to IFaultTransport
+// MasterFaultTransport — adapts Master to IFaultTransport
 // ============================================================================
 
 class MasterFaultTransport : public IFaultTransport {
 public:
-    explicit MasterFaultTransport(EtherCATMaster& master) : master_(master) {}
+    explicit MasterFaultTransport(Master& master) : master_(master) {}
 
     bool readRegister(uint16_t slave_index, uint16_t reg_addr,
                       void* data, uint16_t size) override {
@@ -271,16 +271,16 @@ public:
     }
 
 private:
-    EtherCATMaster& master_;
+    Master& master_;
 };
 
 // ============================================================================
-// MasterSDOTransport — adapts EtherCATMaster to ISDOTransport
+// MasterSDOTransport — adapts Master to ISDOTransport
 // ============================================================================
 
-class EtherCATMaster::MasterSDOTransport : public ::EtherCAT::SDO::ISDOTransport {
+class Master::MasterSDOTransport : public ::EtherCAT::SDO::ISDOTransport {
 public:
-    explicit MasterSDOTransport(EtherCATMaster& master, ::EtherCAT::SDO::SDOManager* mgr = nullptr)
+    explicit MasterSDOTransport(Master& master, ::EtherCAT::SDO::SDOManager* mgr = nullptr)
         : master_(master), mgr_(mgr) {}
 
     void setManager(::EtherCAT::SDO::SDOManager* mgr) { mgr_ = mgr; }
@@ -291,7 +291,7 @@ public:
                    uint16_t index, uint8_t sub,
                    uint8_t* out, size_t out_cap, size_t* out_len) override
     {
-        uint16_t adp = EtherCATMaster::adpForSlaveIndex(slave_index);
+        uint16_t adp = Master::adpForSlaveIndex(slave_index);
         bool diag = (mgr_ && mgr_->isDiagEnabled());
         return master_.coeSdoUpload(adp, mbx_counter,
                                     mbx_wr_addr, mbx_wr_len,
@@ -305,7 +305,7 @@ public:
                      uint16_t index, uint8_t sub,
                      const uint8_t* data, size_t data_len) override
     {
-        uint16_t adp = EtherCATMaster::adpForSlaveIndex(slave_index);
+        uint16_t adp = Master::adpForSlaveIndex(slave_index);
         bool diag = (mgr_ && mgr_->isDiagEnabled());
         return master_.coeSdoDownload(adp, mbx_counter,
                                       mbx_wr_addr, mbx_wr_len,
@@ -318,7 +318,7 @@ public:
     }
 
 private:
-    EtherCATMaster& master_;
+    Master& master_;
     ::EtherCAT::SDO::SDOManager* mgr_;
 };
 
@@ -327,12 +327,12 @@ private:
 // Constructor / Destructor
 // ============================================================================
 
-EtherCATMaster::EtherCATMaster()
-    : EtherCATMaster(Config{})
+Master::Master()
+    : Master(Config{})
 {
 }
 
-EtherCATMaster::EtherCATMaster(const Config& config)
+Master::Master(const Config& config)
     : config_(config)
 {
     ensureRxQueues();
@@ -370,7 +370,7 @@ EtherCATMaster::EtherCATMaster(const Config& config)
     }
 }
 
-EtherCATMaster::~EtherCATMaster()
+Master::~Master()
 {
     // Unregister this instance from the global list first
     {
@@ -390,7 +390,7 @@ EtherCATMaster::~EtherCATMaster()
 // Lifecycle
 // ============================================================================
 
-void EtherCATMaster::start(const NetworkInterface& iface, const uint8_t src_mac[6])
+void Master::start(const NetworkInterface& iface, const uint8_t src_mac[6])
 {
     iface_ = iface;
     iface_ptr_ = &iface;  // Store original pointer for identity comparison
@@ -409,7 +409,7 @@ void EtherCATMaster::start(const NetworkInterface& iface, const uint8_t src_mac[
     TETHER_LOGI(TAG, "Master started");
 }
 
-void EtherCATMaster::stop()
+void Master::stop()
 {
     requestCancel();
     packet_router_.cancel();
@@ -422,38 +422,38 @@ void EtherCATMaster::stop()
     }
 }
 
-void EtherCATMaster::requestCancel()
+void Master::requestCancel()
 {
     cancel_requested_.store(true, std::memory_order_release);
 }
 
-bool EtherCATMaster::isCancelRequested() const
+bool Master::isCancelRequested() const
 {
     return cancel_requested_.load(std::memory_order_acquire);
 }
 
-void EtherCATMaster::clearCancel()
+void Master::clearCancel()
 {
     cancel_requested_.store(false, std::memory_order_release);
     packet_router_.clearCancel();
 }
 
-bool EtherCATMaster::isRunning() const
+bool Master::isRunning() const
 {
     return running_.load(std::memory_order_acquire);
 }
 
-void EtherCATMaster::setMotionControlCallback(MotionControlCallback callback)
+void Master::setMotionControlCallback(MotionControlCallback callback)
 {
     motion_control_callback_ = std::move(callback);
 }
 
-bool EtherCATMaster::startRealtimeMotionControlLoop()
+bool Master::startRealtimeMotionControlLoop()
 {
     return startRealtimeMotionControlLoop(RealtimeMotionLoopConfig{});
 }
 
-bool EtherCATMaster::startRealtimeMotionControlLoop(const RealtimeMotionLoopConfig& config)
+bool Master::startRealtimeMotionControlLoop(const RealtimeMotionLoopConfig& config)
 {
     if (!motion_control_callback_) {
         TETHER_LOGE(TAG, "No motion control callback configured");
@@ -472,12 +472,12 @@ bool EtherCATMaster::startRealtimeMotionControlLoop(const RealtimeMotionLoopConf
     return motion_control_loop_->start();
 }
 
-bool EtherCATMaster::startPollingMotionControlLoop()
+bool Master::startPollingMotionControlLoop()
 {
     return startPollingMotionControlLoop(PollingMotionLoopConfig{});
 }
 
-bool EtherCATMaster::startPollingMotionControlLoop(const PollingMotionLoopConfig& config)
+bool Master::startPollingMotionControlLoop(const PollingMotionLoopConfig& config)
 {
     if (!motion_control_callback_) {
         TETHER_LOGE(TAG, "No motion control callback configured");
@@ -496,7 +496,7 @@ bool EtherCATMaster::startPollingMotionControlLoop(const PollingMotionLoopConfig
     return motion_control_loop_->start();
 }
 
-void EtherCATMaster::stopMotionControlLoop()
+void Master::stopMotionControlLoop()
 {
     if (motion_control_loop_) {
         motion_control_loop_->stop();
@@ -504,7 +504,7 @@ void EtherCATMaster::stopMotionControlLoop()
     }
 }
 
-bool EtherCATMaster::isMotionControlLoopRunning() const
+bool Master::isMotionControlLoopRunning() const
 {
     return motion_control_loop_ && motion_control_loop_->isRunning();
 }
@@ -516,11 +516,11 @@ bool EtherCATMaster::isMotionControlLoopRunning() const
 // Source MAC
 // ============================================================================
 
-const uint8_t* EtherCATMaster::getSrcMac() const { return src_mac_; }
+const uint8_t* Master::getSrcMac() const { return src_mac_; }
 
-const NetworkInterface* EtherCATMaster::networkInterface() const { return &iface_; }
+const NetworkInterface* Master::networkInterface() const { return &iface_; }
 
-EtherCATMaster* EtherCATMaster::findByNetworkInterface(const NetworkInterface* iface)
+Master* Master::findByNetworkInterface(const NetworkInterface* iface)
 {
     std::lock_guard<std::mutex> lg(g_master_list_mutex);
     for (auto m : g_master_list) {
@@ -536,7 +536,7 @@ EtherCATMaster* EtherCATMaster::findByNetworkInterface(const NetworkInterface* i
 // CoE / SDO low-level — delegate to existing Raw:: functions
 // ============================================================================
 
-bool EtherCATMaster::coeSdoUpload(uint16_t adp, uint8_t* inout_mbx_cnt,
+bool Master::coeSdoUpload(uint16_t adp, uint8_t* inout_mbx_cnt,
                                    uint16_t mbx_wr_addr, uint16_t mbx_wr_len,
                                    uint16_t mbx_rd_addr, uint16_t mbx_rd_len,
                                    uint16_t index, uint8_t sub,
@@ -549,7 +549,7 @@ bool EtherCATMaster::coeSdoUpload(uint16_t adp, uint8_t* inout_mbx_cnt,
                                index, sub, out, out_cap, out_len, diag_enabled);
 }
 
-bool EtherCATMaster::coeSdoDownload(uint16_t adp, uint8_t* inout_mbx_cnt,
+bool Master::coeSdoDownload(uint16_t adp, uint8_t* inout_mbx_cnt,
                                      uint16_t mbx_wr_addr, uint16_t mbx_wr_len,
                                      uint16_t mbx_rd_addr, uint16_t mbx_rd_len,
                                      uint16_t index, uint8_t sub,
@@ -566,10 +566,10 @@ bool EtherCATMaster::coeSdoDownload(uint16_t adp, uint8_t* inout_mbx_cnt,
 // Test hooks
 // ============================================================================
 
-void EtherCATMaster::setAprdTestCallback(AprdTestCb cb) { aprd_cb_ = std::move(cb); }
-void EtherCATMaster::setApwrTestCallback(ApwrTestCb cb) { apwr_cb_ = std::move(cb); }
+void Master::setAprdTestCallback(AprdTestCb cb) { aprd_cb_ = std::move(cb); }
+void Master::setApwrTestCallback(ApwrTestCb cb) { apwr_cb_ = std::move(cb); }
 
-void EtherCATMaster::pushAprdResponse(bool success, uint16_t adp, uint16_t ado,
+void Master::pushAprdResponse(bool success, uint16_t adp, uint16_t ado,
                                        const void* data, uint16_t len)
 {
     AprdResponse r;
@@ -580,9 +580,9 @@ void EtherCATMaster::pushAprdResponse(bool success, uint16_t adp, uint16_t ado,
     aprd_responses_.push_back(std::move(r));
 }
 
-void EtherCATMaster::clearAprdResponses() { aprd_responses_.clear(); }
+void Master::clearAprdResponses() { aprd_responses_.clear(); }
 
-bool EtherCATMaster::wasFaultDiagnosed(uint16_t slave_index) const
+bool Master::wasFaultDiagnosed(uint16_t slave_index) const
 {
     std::lock_guard<std::mutex> _lg(m_diag_mutex_);
     return m_diagnosed_slaves_.find(slave_index) != m_diagnosed_slaves_.end();
@@ -592,23 +592,23 @@ bool EtherCATMaster::wasFaultDiagnosed(uint16_t slave_index) const
 // Sub-manager accessors
 // ============================================================================
 
-PDOManager&    EtherCATMaster::pdo()    { return *pdo_; }
-LogicalAddressManager& EtherCATMaster::logicalAddressManager() { return *logical_addr_mgr_; }
-::EtherCAT::SDO::SDOManager& EtherCATMaster::sdoManager() { return *sdo_manager_; }
-DCManager&     EtherCATMaster::dc()     { return *dc_; }
-FoEManager&    EtherCATMaster::foe()    { return *foe_; }
-VoEManager&    EtherCATMaster::voe()    { return *voe_; }
-EoEManager&    EtherCATMaster::eoe()    { return *eoe_; }
-FaultDetector& EtherCATMaster::faults() { return *faults_; }
+PDOManager&    Master::pdo()    { return *pdo_; }
+LogicalAddressManager& Master::logicalAddressManager() { return *logical_addr_mgr_; }
+::EtherCAT::SDO::SDOManager& Master::sdoManager() { return *sdo_manager_; }
+DCManager&     Master::dc()     { return *dc_; }
+FoEManager&    Master::foe()    { return *foe_; }
+VoEManager&    Master::voe()    { return *voe_; }
+EoEManager&    Master::eoe()    { return *eoe_; }
+FaultDetector& Master::faults() { return *faults_; }
 
-ConditionalPacketRouter& EtherCATMaster::packetRouter() { return packet_router_; }
+ConditionalPacketRouter& Master::packetRouter() { return packet_router_; }
 
-Tether::Platform::MessageQueue<RxDatagram>* EtherCATMaster::rxQueue()
+Tether::Platform::MessageQueue<RxDatagram>* Master::rxQueue()
 {
     return rx_queue_.get();
 }
 
-Tether::Platform::MessageQueue<RxDatagram>* EtherCATMaster::txpdoRxQueue()
+Tether::Platform::MessageQueue<RxDatagram>* Master::txpdoRxQueue()
 {
     return txpdo_rx_queue_.get();
 }
@@ -618,7 +618,7 @@ Tether::Platform::MessageQueue<RxDatagram>* EtherCATMaster::txpdoRxQueue()
 // ============================================================================
 
 #if TETHER_ENABLE_ETHERCAT_STATS
-EtherCATMaster::Stats EtherCATMaster::getStats() const
+Master::Stats Master::getStats() const
 {
     Stats s;
     s.tx_retry_count = tx_retry_count_.load(std::memory_order_relaxed);
@@ -635,7 +635,7 @@ EtherCATMaster::Stats EtherCATMaster::getStats() const
 // Internal: queue management
 // ============================================================================
 
-void EtherCATMaster::ensureRxQueues()
+void Master::ensureRxQueues()
 {
     if (!rx_queue_)
         rx_queue_ = std::make_unique<Tether::Platform::MessageQueue<RxDatagram>>(
@@ -645,7 +645,7 @@ void EtherCATMaster::ensureRxQueues()
             config_.txpdo_queue_depth);
 }
 
-void EtherCATMaster::flushRxQueue()
+void Master::flushRxQueue()
 {
     if (!rx_queue_) return;
     RxDatagram tmp;

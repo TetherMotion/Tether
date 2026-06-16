@@ -1,6 +1,6 @@
 /**
  * @file EtherCATMaster_sdo.cpp
- * @brief EtherCATMaster — CoE/SDO transport and test hooks
+ * @brief Master — CoE/SDO transport and test hooks
  */
 
 #include "tether/ethercat/EtherCATMaster.hpp"
@@ -32,10 +32,10 @@ namespace EtherCAT {
 
 static const char* TAG = "ethercat";
 
-// Global debug flag for al-state (shared with EtherCATSlave)
+// Global debug flag for al-state (shared with Slave)
 extern bool g_debug_statemachine;
 
-// Global debug flags for tx/rx packet logging (shared with EtherCATSlave)
+// Global debug flags for tx/rx packet logging (shared with Slave)
 extern bool g_debug_tx_packets;
 extern bool g_debug_rx_packets;
 

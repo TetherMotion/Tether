@@ -1,6 +1,6 @@
 /**
  * @file EtherCATMaster_discovery.cpp
- * @brief EtherCATMaster — Slave discovery, PRE_OP transition and master task
+ * @brief Master — Slave discovery, PRE_OP transition and master task
  */
 
 #include "tether/ethercat/EtherCATMaster.hpp"
@@ -32,10 +32,10 @@ namespace EtherCAT {
 
 static const char* TAG = "ethercat";
 
-// Global debug flag for al-state (shared with EtherCATSlave)
+// Global debug flag for al-state (shared with Slave)
 extern bool g_debug_statemachine;
 
-// Global debug flags for tx/rx packet logging (shared with EtherCATSlave)
+// Global debug flags for tx/rx packet logging (shared with Slave)
 extern bool g_debug_tx_packets;
 extern bool g_debug_rx_packets;
 
@@ -70,7 +70,7 @@ static Raw::EtherCATScanFrame buildScanFrame(const uint8_t src_mac[6])
 // Internal: discover slaves
 // ============================================================================
 
-bool EtherCATMaster::discoverSlaves()
+bool Master::discoverSlaves()
 {
     for (int attempt = 0; attempt < 200; attempt++) {
         if (!running_.load(std::memory_order_acquire)) return false;
@@ -122,7 +122,7 @@ bool EtherCATMaster::discoverSlaves()
 // Internal: set PRE_OP and confirm
 // ============================================================================
 
-bool EtherCATMaster::setPreopAndConfirm(uint16_t slave_index)
+bool Master::setPreopAndConfirm(uint16_t slave_index)
 {
     using namespace Raw;
 
@@ -281,7 +281,7 @@ bool EtherCATMaster::setPreopAndConfirm(uint16_t slave_index)
     return false;
 }
 
-bool EtherCATMaster::forceMailboxDefaults(SlaveAddress slave_address)
+bool Master::forceMailboxDefaults(SlaveAddress slave_address)
 {
     uint16_t slave_index = 0;
     if (!resolvePhysicalSlaveIndex(slave_address, slave_index)) {

@@ -1,6 +1,6 @@
 /**
  * @file EtherCATMaster_slave.cpp
- * @brief EtherCATMaster — Slave management, AL state, watchdog and mailbox fallback
+ * @brief Master — Slave management, AL state, watchdog and mailbox fallback
  */
 
 #include "tether/ethercat/EtherCATMaster.hpp"
@@ -33,10 +33,10 @@ namespace EtherCAT {
 
 static const char* TAG = "ethercat";
 
-// Global debug flag for al-state (shared with EtherCATSlave)
+// Global debug flag for al-state (shared with Slave)
 extern bool g_debug_statemachine;
 
-// Global debug flags for tx/rx packet logging (shared with EtherCATSlave)
+// Global debug flags for tx/rx packet logging (shared with Slave)
 extern bool g_debug_tx_packets;
 extern bool g_debug_rx_packets;
 
@@ -51,7 +51,7 @@ extern bool g_debug_tx_pdo;
 // must ignore those errors and always configure according to the standard.
 // This function is retained for diagnostic purposes only.
 // ============================================================================
-static bool siiMailboxSM0IsWrite(EtherCATMaster& master, uint16_t slave_index)
+static bool siiMailboxSM0IsWrite(Master& master, uint16_t slave_index)
 {
     EtherCAT::SII::SIIData sii;
     if (!EtherCAT::SII::readSII(master, slave_index, sii) || sii.sm_count < 2)
@@ -62,14 +62,14 @@ static bool siiMailboxSM0IsWrite(EtherCATMaster& master, uint16_t slave_index)
 // Slave Management
 // ============================================================================
 
-void EtherCATMaster::initSlaves(uint16_t count)
+void Master::initSlaves(uint16_t count)
 {
     slaves_.clear();
     slaves_.reserve(count);
     sii_word_caches_.clear();
     sii_word_caches_.resize(count);
     for (uint16_t i = 0; i < count; ++i) {
-        auto s = std::make_unique<EtherCATSlave>(*this, i);
+        auto s = std::make_unique<Slave>(*this, i);
         // Initialize SII cache for each slave
         s->siiCache().init(siiReader(), i);
         slaves_.push_back(std::move(s));
@@ -82,7 +82,7 @@ void EtherCATMaster::initSlaves(uint16_t count)
     }
 }
 
-EtherCATSlave& EtherCATMaster::slave(uint16_t slave_index)
+Slave& Master::slave(uint16_t slave_index)
 {
     if (slave_index < slaves_.size()) {
         return *slaves_[slave_index];
@@ -96,7 +96,7 @@ EtherCATSlave& EtherCATMaster::slave(uint16_t slave_index)
     return *non_existing_slave_;
 }
 
-SII::SIIReader& EtherCATMaster::siiReader()
+SII::SIIReader& Master::siiReader()
 {
     if (!sii_reader_) {
         sii_reader_ = std::make_unique<SII::SIIReader>(*this);
@@ -104,7 +104,7 @@ SII::SIIReader& EtherCATMaster::siiReader()
     return *sii_reader_;
 }
 
-bool EtherCATMaster::getSIICachedWord(uint16_t slave_index, uint16_t word_addr, uint16_t& out) const
+bool Master::getSIICachedWord(uint16_t slave_index, uint16_t word_addr, uint16_t& out) const
 {
     if (slave_index >= sii_word_caches_.size()) return false;
     const auto& cache = sii_word_caches_[slave_index];
@@ -114,19 +114,19 @@ bool EtherCATMaster::getSIICachedWord(uint16_t slave_index, uint16_t word_addr, 
     return true;
 }
 
-void EtherCATMaster::setSIICachedWord(uint16_t slave_index, uint16_t word_addr, uint16_t value)
+void Master::setSIICachedWord(uint16_t slave_index, uint16_t word_addr, uint16_t value)
 {
     if (slave_index >= sii_word_caches_.size()) return;
     sii_word_caches_[slave_index][word_addr] = value;
 }
 
-void EtherCATMaster::clearSIICache(uint16_t slave_index)
+void Master::clearSIICache(uint16_t slave_index)
 {
     if (slave_index >= sii_word_caches_.size()) return;
     sii_word_caches_[slave_index].clear();
 }
 
-bool EtherCATMaster::resolvePhysicalSlaveIndex(SlaveAddress slave_address, uint16_t& slave_index_out)
+bool Master::resolvePhysicalSlaveIndex(SlaveAddress slave_address, uint16_t& slave_index_out)
 {
     if (!slave_address.isPhysical()) {
         TETHER_LOGE(TAG, "Operation requires a physical slave address");
@@ -141,7 +141,7 @@ bool EtherCATMaster::resolvePhysicalSlaveIndex(SlaveAddress slave_address, uint1
 // Frame handling
 // ============================================================================
 
-void EtherCATMaster::handleRxFrame(const uint8_t* frame, size_t length)
+void Master::handleRxFrame(const uint8_t* frame, size_t length)
 {
     parseEtherCATFrame(frame, length);
 }
@@ -150,7 +150,7 @@ void EtherCATMaster::handleRxFrame(const uint8_t* frame, size_t length)
 // Discovery
 // ============================================================================
 
-uint16_t EtherCATMaster::getDiscoveredSlaveCount() const
+uint16_t Master::getDiscoveredSlaveCount() const
 {
     return discovered_slave_count_.load(std::memory_order_acquire);
 }
@@ -159,7 +159,7 @@ uint16_t EtherCATMaster::getDiscoveredSlaveCount() const
 // AL state management
 // ============================================================================
 
-bool EtherCATMaster::requestSlaveApplicationLayerState(SlaveAddress slave_address, uint8_t state_code)
+bool Master::requestSlaveApplicationLayerState(SlaveAddress slave_address, uint8_t state_code)
 {
     if (g_debug_statemachine) {
         uint8_t current_state_code = 0;
@@ -187,7 +187,7 @@ bool EtherCATMaster::requestSlaveApplicationLayerState(SlaveAddress slave_addres
     return result;
 }
 
-bool EtherCATMaster::readSlaveApplicationLayerState(SlaveAddress slave_address, uint8_t& state_code)
+bool Master::readSlaveApplicationLayerState(SlaveAddress slave_address, uint8_t& state_code)
 {
     uint16_t application_layer_status = 0;
     if (!readRegister(slave_address, RegisterAddress(Raw::EC_REG_AL_STATUS), application_layer_status, 200)) {
@@ -198,12 +198,12 @@ bool EtherCATMaster::readSlaveApplicationLayerState(SlaveAddress slave_address, 
     return true;
 }
 
-bool EtherCATMaster::transitionSlaveToPreOperational(SlaveAddress slave_address)
+bool Master::transitionSlaveToPreOperational(SlaveAddress slave_address)
 {
     return setPreopAndConfirm(slave_address.slavePosition());
 }
 
-bool EtherCATMaster::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
+bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
 {
     uint16_t slave_index = 0;
     if (!resolvePhysicalSlaveIndex(slave_address, slave_index)) {
@@ -365,7 +365,7 @@ bool EtherCATMaster::configureProcessDataSyncManagersFromSii(SlaveAddress slave_
 // Watchdog configuration
 // ============================================================================
 
-bool EtherCATMaster::configureWatchdogs(SlaveAddress slave_address,
+bool Master::configureWatchdogs(SlaveAddress slave_address,
                                          uint16_t pdi_timeout_100us,
                                          uint16_t pdata_timeout_100us)
 {
@@ -375,12 +375,12 @@ bool EtherCATMaster::configureWatchdogs(SlaveAddress slave_address,
     return true;
 }
 
-bool EtherCATMaster::disableWatchdogs(SlaveAddress slave_address)
+bool Master::disableWatchdogs(SlaveAddress slave_address)
 {
     return configureWatchdogs(slave_address, 0, 0);
 }
 
-bool EtherCATMaster::readWatchdogStatus(SlaveAddress slave_address,
+bool Master::readWatchdogStatus(SlaveAddress slave_address,
                                          uint8_t& wd_status,
                                          uint8_t& pdi_cnt,
                                          uint8_t& pdata_cnt)

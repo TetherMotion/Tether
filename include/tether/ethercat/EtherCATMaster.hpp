@@ -5,13 +5,13 @@
  * @brief EtherCAT Master — class-based API for multi-instance support
  *
  * @details
- * EtherCATMaster encapsulates all state required to run an independent
+ * Master encapsulates all state required to run an independent
  * EtherCAT master instance.  Multiple masters can coexist in the same
  * process, each driving a separate Ethernet interface.
  *
  * ## Quick start
  * @code
- *   EtherCAT::EtherCATMaster master;
+ *   EtherCAT::Master master;
  *   master.start(networkIface, srcMac);
  *
  *   // Wait for slaves
@@ -114,7 +114,7 @@ class VoEManager;
 class EoEManager;
 class FaultDetector;
 class IFaultTransport;
-class EtherCATSlave;
+class Slave;
 class NonExistingSlave;
 
 namespace SII {
@@ -130,7 +130,7 @@ namespace SDO {
 class IMotionControlLoop;
 
 // ============================================================================
-// EtherCATMaster
+// Master
 // ============================================================================
 
 /**
@@ -140,7 +140,7 @@ class IMotionControlLoop;
  * slave discovery, and sub-manager objects (PDO, SDO, DC, …).
  * The class is **non-copyable** but can be moved.
  */
-class EtherCATMaster {
+class Master {
 public:
     /// Configuration knobs passed at construction time.
     struct Config {
@@ -169,14 +169,14 @@ public:
     void setMailboxOverride(SlaveAddress slave_address, uint16_t wr_addr, uint16_t wr_len,
                              uint16_t rd_addr, uint16_t rd_len, uint16_t proto);
 
-    EtherCATMaster();
-    explicit EtherCATMaster(const Config& config);
-    ~EtherCATMaster();
+    Master();
+    explicit Master(const Config& config);
+    ~Master();
 
-    EtherCATMaster(const EtherCATMaster&)            = delete;
-    EtherCATMaster& operator=(const EtherCATMaster&) = delete;
-    EtherCATMaster(EtherCATMaster&&)                 = delete;
-    EtherCATMaster& operator=(EtherCATMaster&&)      = delete;
+    Master(const Master&)            = delete;
+    Master& operator=(const Master&) = delete;
+    Master(Master&&)                 = delete;
+    Master& operator=(Master&&)      = delete;
 
     // ---- Lifecycle ---------------------------------------------------------
 
@@ -242,7 +242,7 @@ public:
     /**
      * @brief Access a slave by index.
      *
-     * Returns a reference to the EtherCATSlave at the given bus position.
+     * Returns a reference to the Slave at the given bus position.
      * If `slave_index >= getDiscoveredSlaveCount()`, returns a reference to
      * a NonExistingSlave sentinel that logs CRITICAL errors on every call.
      *
@@ -255,7 +255,7 @@ public:
      *   master.slave(0).transitionTo(SlaveState::SAFE_OP);
      * @endcode
      */
-    EtherCATSlave& slave(uint16_t slave_index);
+    Slave& slave(uint16_t slave_index);
 
     /**
      * @brief Initialise the slave vector after discovery.
@@ -549,13 +549,13 @@ public:
     const NetworkInterface* networkInterface() const;
 
     /**
-     * @brief Find a running EtherCATMaster by its NetworkInterface pointer.
+     * @brief Find a running Master by its NetworkInterface pointer.
      *
      * This helper is used by host-side transport helpers (examples) to locate
      * the master instance that was started with a given NetworkInterface.
      * Returns nullptr if no matching instance is registered.
      */
-    static EtherCATMaster* findByNetworkInterface(const NetworkInterface* iface);
+    static Master* findByNetworkInterface(const NetworkInterface* iface);
 
     /**
      * @brief Test helper: check if a one-time fault diagnosis was issued for a slave
@@ -668,7 +668,7 @@ private:
     std::unique_ptr<FaultDetector> faults_;
 
     // Per-slave state machines
-    std::vector<std::unique_ptr<EtherCATSlave>> slaves_;
+    std::vector<std::unique_ptr<Slave>> slaves_;
     std::unique_ptr<NonExistingSlave> non_existing_slave_;
 
     // SII reader (lazily created)

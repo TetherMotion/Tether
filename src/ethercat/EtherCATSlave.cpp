@@ -1,6 +1,6 @@
 /**
  * @file EtherCATSlave.cpp
- * @brief EtherCATSlave and NonExistingSlave implementation
+ * @brief Slave and NonExistingSlave implementation
  */
 
 #include "tether/ethercat/EtherCATSlave.hpp"
@@ -21,16 +21,16 @@ extern bool g_debug_tx_pdo;
 
 namespace EtherCAT {
 
-static const char* TAG = "EtherCATSlave";
+static const char* TAG = "Slave";
 
-// Global debug flag for al-state (shared with EtherCATMaster)
+// Global debug flag for al-state (shared with Master)
 bool g_debug_statemachine = false;
 
 void enableStateMachineDebug(bool enable) {
     g_debug_statemachine = enable;
 }
 
-// Global debug flags for tx/rx packet logging (shared with EtherCATMaster)
+// Global debug flags for tx/rx packet logging (shared with Master)
 bool g_debug_tx_packets = false;
 bool g_debug_rx_packets = false;
 
@@ -58,29 +58,29 @@ void enableFmmuDebug(bool enable) {
 }
 
 // ============================================================================
-// EtherCATSlave
+// Slave
 // ============================================================================
 
-EtherCATSlave::EtherCATSlave(EtherCATMaster& master, uint16_t index)
+Slave::Slave(Master& master, uint16_t index)
     : master_(master), index_(index)
 {
 }
 
-uint16_t EtherCATSlave::adp() const {
-    return EtherCATMaster::adpForSlaveIndex(index_);
+uint16_t Slave::adp() const {
+    return Master::adpForSlaveIndex(index_);
 }
 
-bool EtherCATSlave::apwr(uint16_t ado, const void* data, uint16_t len, unsigned int timeout_ms) {
+bool Slave::apwr(uint16_t ado, const void* data, uint16_t len, unsigned int timeout_ms) {
     return master_.writeRegister(SlaveAddress(index_), ado, data, len, timeout_ms);
 }
 
-bool EtherCATSlave::aprd(uint16_t ado, void* out, uint16_t len, unsigned int timeout_ms) {
+bool Slave::aprd(uint16_t ado, void* out, uint16_t len, unsigned int timeout_ms) {
     return master_.readRegister(SlaveAddress(index_), ado, out, len, timeout_ms);
 }
 
 // -- Mailbox configuration ---------------------------------------------------
 
-SlaveError EtherCATSlave::configureMailbox(Tether::Platform::LogLevel log_level) {
+SlaveError Slave::configureMailbox(Tether::Platform::LogLevel log_level) {
     if (!master_.autoConfigureMailbox(index_, log_level)) {
         TETHER_LOGE( TAG,
             "Slave %u: Failed to auto-configure mailbox from SII", index_);
@@ -92,7 +92,7 @@ SlaveError EtherCATSlave::configureMailbox(Tether::Platform::LogLevel log_level)
     return SlaveError::Ok;
 }
 
-SlaveError EtherCATSlave::configureMailbox(
+SlaveError Slave::configureMailbox(
     uint16_t wr_addr, uint16_t wr_len,
     uint16_t rd_addr, uint16_t rd_len,
     uint16_t protocols)
@@ -107,7 +107,7 @@ SlaveError EtherCATSlave::configureMailbox(
     return SlaveError::Ok;
 }
 
-void EtherCATSlave::assumeMailboxAlreadyConfigured() {
+void Slave::assumeMailboxAlreadyConfigured() {
     mailbox_configured_ = true;
     TETHER_LOGI( TAG,
         "Slave %u: Assuming mailbox already configured", index_);
@@ -115,7 +115,7 @@ void EtherCATSlave::assumeMailboxAlreadyConfigured() {
 
 // -- PDO SM configuration ----------------------------------------------------
 
-SlaveError EtherCATSlave::configurePDOSyncManagers() {
+SlaveError Slave::configurePDOSyncManagers() {
     if (!master_.configureProcessDataSyncManagersFromSii(index_)) {
         TETHER_LOGE( TAG,
             "Slave %u: Failed to configure PDO sync-managers from SII", index_);
@@ -127,7 +127,7 @@ SlaveError EtherCATSlave::configurePDOSyncManagers() {
     return SlaveError::Ok;
 }
 
-SlaveError EtherCATSlave::configurePDOSyncManagers(
+SlaveError Slave::configurePDOSyncManagers(
     uint16_t sm2_addr, uint16_t sm2_len, uint8_t sm2_ctrl,
     uint16_t sm3_addr, uint16_t sm3_len, uint8_t sm3_ctrl)
 {
@@ -160,7 +160,7 @@ SlaveError EtherCATSlave::configurePDOSyncManagers(
     return SlaveError::Ok;
 }
 
-void EtherCATSlave::assumePDOAlreadyConfigured() {
+void Slave::assumePDOAlreadyConfigured() {
     pdo_configured_ = true;
     TETHER_LOGI( TAG,
         "Slave %u: Assuming PDO sync-managers already configured", index_);
@@ -168,7 +168,7 @@ void EtherCATSlave::assumePDOAlreadyConfigured() {
 
 // -- State transitions -------------------------------------------------------
 
-SlaveError EtherCATSlave::transitionTo(SlaveState target) {
+SlaveError Slave::transitionTo(SlaveState target) {
     switch (target) {
         case SlaveState::INIT:    return transitionToInit();
         case SlaveState::PRE_OP:  return transitionToPreOp();
@@ -182,7 +182,7 @@ SlaveError EtherCATSlave::transitionTo(SlaveState target) {
     }
 }
 
-SlaveError EtherCATSlave::transitionToInit() {
+SlaveError Slave::transitionToInit() {
     if (g_debug_statemachine) {
         SlaveState current_state;
         readState(current_state);
@@ -215,7 +215,7 @@ SlaveError EtherCATSlave::transitionToInit() {
     return SlaveError::Ok;
 }
 
-SlaveError EtherCATSlave::transitionToPreOp() {
+SlaveError Slave::transitionToPreOp() {
     if (g_debug_statemachine) {
         SlaveState current_state;
         readState(current_state);
@@ -254,7 +254,7 @@ SlaveError EtherCATSlave::transitionToPreOp() {
     return SlaveError::Ok;
 }
 
-SlaveError EtherCATSlave::transitionToSafeOp() {
+SlaveError Slave::transitionToSafeOp() {
     if (g_debug_statemachine) {
         SlaveState current_state;
         readState(current_state);
@@ -306,7 +306,7 @@ SlaveError EtherCATSlave::transitionToSafeOp() {
     return SlaveError::TransportError;
 }
 
-SlaveError EtherCATSlave::transitionToOp() {
+SlaveError Slave::transitionToOp() {
     // --- Evaluate requirements before printing the debug banner ---
     bool pdo_req_ok = false;
     bool pdo_reply_ok = false;
@@ -421,7 +421,7 @@ SlaveError EtherCATSlave::transitionToOp() {
     return SlaveError::TransportError;
 }
 
-SlaveError EtherCATSlave::transitionToBoot() {
+SlaveError Slave::transitionToBoot() {
     if (g_debug_statemachine) {
         SlaveState current_state;
         readState(current_state);
@@ -452,7 +452,7 @@ SlaveError EtherCATSlave::transitionToBoot() {
 
 // -- State query -------------------------------------------------------------
 
-SlaveError EtherCATSlave::readState(SlaveState& state) {
+SlaveError Slave::readState(SlaveState& state) {
     uint8_t raw = 0;
     if (!master_.readSlaveApplicationLayerState(index_, raw)) {
         return SlaveError::TransportError;
@@ -461,7 +461,7 @@ SlaveError EtherCATSlave::readState(SlaveState& state) {
     return SlaveError::Ok;
 }
 
-SlaveError EtherCATSlave::readALStatusCode(uint16_t& code) {
+SlaveError Slave::readALStatusCode(uint16_t& code) {
     uint16_t status = 0;
     if (!master_.readRegister(SlaveAddress(index_), reg::AL_STATUS_CODE, status)) {
         return SlaveError::TransportError;
@@ -470,13 +470,13 @@ SlaveError EtherCATSlave::readALStatusCode(uint16_t& code) {
     return SlaveError::Ok;
 }
 
-std::optional<SlaveState> EtherCATSlave::ALState() {
+std::optional<SlaveState> Slave::ALState() {
     SlaveState st{};
     if (readState(st) != SlaveError::Ok) return std::nullopt;
     return st;
 }
 
-std::optional<uint16_t> EtherCATSlave::ALCode() {
+std::optional<uint16_t> Slave::ALCode() {
     uint16_t code = 0;
     if (readALStatusCode(code) != SlaveError::Ok) return std::nullopt;
     return code;
@@ -484,7 +484,7 @@ std::optional<uint16_t> EtherCATSlave::ALCode() {
 
 // -- Watchdog ----------------------------------------------------------------
 
-SlaveError EtherCATSlave::configureWatchdogs(uint16_t pdi_timeout_100us,
+SlaveError Slave::configureWatchdogs(uint16_t pdi_timeout_100us,
                                               uint16_t pdata_timeout_100us) {
     if (!master_.configureWatchdogs(index_, pdi_timeout_100us, pdata_timeout_100us)) {
         return SlaveError::TransportError;
@@ -492,14 +492,14 @@ SlaveError EtherCATSlave::configureWatchdogs(uint16_t pdi_timeout_100us,
     return SlaveError::Ok;
 }
 
-SlaveError EtherCATSlave::disableWatchdogs() {
+SlaveError Slave::disableWatchdogs() {
     if (!master_.disableWatchdogs(index_)) {
         return SlaveError::TransportError;
     }
     return SlaveError::Ok;
 }
 
-SlaveError EtherCATSlave::readWatchdogStatus(uint8_t& wd_status,
+SlaveError Slave::readWatchdogStatus(uint8_t& wd_status,
                                               uint8_t& pdi_cnt,
                                               uint8_t& pdata_cnt) {
     if (!master_.readWatchdogStatus(index_, wd_status, pdi_cnt, pdata_cnt)) {
@@ -510,7 +510,7 @@ SlaveError EtherCATSlave::readWatchdogStatus(uint8_t& wd_status,
 
 // -- SDO convenience ---------------------------------------------------------
 
-SlaveError EtherCATSlave::sdoRead(uint16_t index, uint8_t subindex,
+SlaveError Slave::sdoRead(uint16_t index, uint8_t subindex,
                                    void* data, size_t& size) {
     auto& sdo = master_.sdoManager();
     size_t actual = 0;
@@ -522,7 +522,7 @@ SlaveError EtherCATSlave::sdoRead(uint16_t index, uint8_t subindex,
     return SlaveError::Ok;
 }
 
-SlaveError EtherCATSlave::sdoWrite(uint16_t index, uint8_t subindex,
+SlaveError Slave::sdoWrite(uint16_t index, uint8_t subindex,
                                     const void* data, size_t size) {
     auto& sdo = master_.sdoManager();
     if (!sdo.writeSync(index_, index, subindex,
@@ -532,37 +532,37 @@ SlaveError EtherCATSlave::sdoWrite(uint16_t index, uint8_t subindex,
     return SlaveError::Ok;
 }
 
-SlaveError EtherCATSlave::sdoReadU8(uint16_t index, uint8_t sub, uint8_t& out) {
+SlaveError Slave::sdoReadU8(uint16_t index, uint8_t sub, uint8_t& out) {
     auto& sdo = master_.sdoManager();
     if (!sdo.readU8(index_, index, sub, out)) return SlaveError::SDOError;
     return SlaveError::Ok;
 }
 
-SlaveError EtherCATSlave::sdoReadU16(uint16_t index, uint8_t sub, uint16_t& out) {
+SlaveError Slave::sdoReadU16(uint16_t index, uint8_t sub, uint16_t& out) {
     auto& sdo = master_.sdoManager();
     if (!sdo.readU16(index_, index, sub, out)) return SlaveError::SDOError;
     return SlaveError::Ok;
 }
 
-SlaveError EtherCATSlave::sdoReadU32(uint16_t index, uint8_t sub, uint32_t& out) {
+SlaveError Slave::sdoReadU32(uint16_t index, uint8_t sub, uint32_t& out) {
     auto& sdo = master_.sdoManager();
     if (!sdo.readU32(index_, index, sub, out)) return SlaveError::SDOError;
     return SlaveError::Ok;
 }
 
-SlaveError EtherCATSlave::sdoWriteU8(uint16_t index, uint8_t sub, uint8_t val) {
+SlaveError Slave::sdoWriteU8(uint16_t index, uint8_t sub, uint8_t val) {
     auto& sdo = master_.sdoManager();
     if (!sdo.writeU8(index_, index, sub, val)) return SlaveError::SDOError;
     return SlaveError::Ok;
 }
 
-SlaveError EtherCATSlave::sdoWriteU16(uint16_t index, uint8_t sub, uint16_t val) {
+SlaveError Slave::sdoWriteU16(uint16_t index, uint8_t sub, uint16_t val) {
     auto& sdo = master_.sdoManager();
     if (!sdo.writeU16(index_, index, sub, val)) return SlaveError::SDOError;
     return SlaveError::Ok;
 }
 
-SlaveError EtherCATSlave::sdoWriteU32(uint16_t index, uint8_t sub, uint32_t val) {
+SlaveError Slave::sdoWriteU32(uint16_t index, uint8_t sub, uint32_t val) {
     auto& sdo = master_.sdoManager();
     if (!sdo.writeU32(index_, index, sub, val)) return SlaveError::SDOError;
     return SlaveError::Ok;
@@ -570,7 +570,7 @@ SlaveError EtherCATSlave::sdoWriteU32(uint16_t index, uint8_t sub, uint32_t val)
 
 // -- SII convenience ---------------------------------------------------------
 
-SlaveError EtherCATSlave::readSII(SII::SIIData& data) {
+SlaveError Slave::readSII(SII::SIIData& data) {
     if (!sii_cache_.isInitialized()) {
         // Lazy-init the SII cache through the master's SII reader
         // The SIIReader is created on-demand
@@ -587,7 +587,7 @@ SlaveError EtherCATSlave::readSII(SII::SIIData& data) {
     return SlaveError::Ok;
 }
 
-void EtherCATSlave::logSIISummary(const char* tag) {
+void Slave::logSIISummary(const char* tag) {
     SII::SIIData data;
     if (readSII(data) == SlaveError::Ok) {
         SII::logSIISummary(data, index_, tag);
@@ -601,8 +601,8 @@ void EtherCATSlave::logSIISummary(const char* tag) {
 // NonExistingSlave
 // ============================================================================
 
-NonExistingSlave::NonExistingSlave(EtherCATMaster& master, uint16_t index)
-    : EtherCATSlave(master, index)
+NonExistingSlave::NonExistingSlave(Master& master, uint16_t index)
+    : Slave(master, index)
 {
 }
 
@@ -705,10 +705,10 @@ SyncManagerAccessor NonExistingSlave::sm(uint8_t smIndex) {
 }
 
 // ============================================================================
-// EtherCATSlave::sm()
+// Slave::sm()
 // ============================================================================
 
-SyncManagerAccessor EtherCATSlave::sm(uint8_t smIndex) {
+SyncManagerAccessor Slave::sm(uint8_t smIndex) {
     return SyncManagerAccessor(*this, smIndex);
 }
 
