@@ -436,7 +436,8 @@ const slave::SlaveCore* LoopbackHAL::getSlave(size_t index) const {
     return nullptr;
 }
 
-void LoopbackHAL::setPcapLogger(std::shared_ptr<IPcapLogger> logger) {
+void LoopbackHAL::setPcapLogger(
+        std::shared_ptr<Tether::PacketLoggers::PacketLogger> logger) {
     pcapLogger_ = logger;
 }
 
@@ -514,8 +515,11 @@ void LoopbackHAL::logFrame(const uint8_t* frame, size_t length, bool isRx) {
     if (!loggingEnabled_ || !pcapLogger_) {
         return;
     }
-    
-    pcapLogger_->logFrame(frame, length);
+
+    pcapLogger_->logFrame(frame, length,
+                          isRx ? Tether::PacketLoggers::FrameDirection::Rx
+                               : Tether::PacketLoggers::FrameDirection::Tx,
+                          getSystemClock().nowMicros());
 }
 
 // ============================================================================

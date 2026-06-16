@@ -19,6 +19,7 @@
 #ifdef __linux__
 
 #include "hal/HAL.hpp"
+#include "packetloggers/pcap/PCAPLogger.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -322,9 +323,12 @@ int main(int argc, char* argv[]) {
     halConfig.ethernet.interfaceName = opts.interface;
     halConfig.ethernet.promiscuous = true;
     halConfig.ethernet.ethertypeFilter = ETHERCAT_ETHERTYPE;
-    halConfig.enablePcapLogging = opts.enablePcap;
+    halConfig.enablePacketLogging = opts.enablePcap;
     if (opts.enablePcap) {
         halConfig.pcapConfig.filename = opts.pcapFile;
+        halConfig.createPacketLogger = [](const Tether::PacketLoggers::PCAP::PCAPLoggerConfig&) {
+            return Tether::PacketLoggers::PCAP::createPCAPLogger();
+        };
     }
     halConfig.enableVlan = opts.enableVlan;
     halConfig.vlanId = opts.vlanId;

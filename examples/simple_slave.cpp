@@ -9,7 +9,7 @@
 #include "slave/SlaveCore.hpp"
 #include "slave/hal/LoopbackHAL.hpp"
 #include "slave/profiles/CiA401Slave.hpp"
-#include "pcap/PcapLogger.hpp"
+#include "packetloggers/pcap/PCAPWriter.hpp"
 
 #include <iostream>
 #include <thread>
@@ -31,24 +31,19 @@ int main(int argc, char* argv[]) {
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
     
-    // Optional: Create PcapNG logger
-    std::unique_ptr<EtherCAT::PcapNg::IPcapLogger> logger;
+    // Optional: Create PCAP logger
+    std::unique_ptr<Tether::PacketLoggers::PCAP::IPCAPWriter> writer;
     if (argc > 1 && std::string(argv[1]) == "--pcap") {
         std::string pcapFile = "slave_trace.pcapng";
         if (argc > 2) {
             pcapFile = argv[2];
         }
-        
-        EtherCAT::PcapNg::PcapNgConfig config;
-        config.filePath = pcapFile;
-        config.interfaceName = "EtherCAT Slave";
-        config.interfaceDescription = "Virtual EtherCAT slave interface";
-        config.enableBuffering = true;
-        
-        logger = std::make_unique<EtherCAT::PcapNg::PcapNgLogger>(config);
+
+        writer = Tether::PacketLoggers::PCAP::createPCAPWriter();
+        writer->open(pcapFile);
         std::cout << "Logging to: " << pcapFile << "\n";
     } else {
-        logger = std::make_unique<EtherCAT::PcapNg::NullPcapLogger>();
+        writer = Tether::PacketLoggers::PCAP::createNullPCAPWriter();
     }
     
     // Create CiA 401 (Digital I/O) slave
@@ -78,12 +73,8 @@ int main(int argc, char* argv[]) {
     slave->configureFMMU(1, 0x1002, 2, 0x1000, 0x0, true, false);
     
     // Create DirectLoopback HAL for testing
-    auto hal = std::make_unique<EtherCAT::Slave::DirectLoopbackHAL>(
-        [&slave](const uint8_t* data, size_t len) {
-            return slave->processFrame(data, len);
-        },
-        logger.get()
-    );
+    auto hal = std::make_unique<EtherCAT::Slave::DirectLoopbackHAL>();
+    hal->connect(slave.get());
     
     std::cout << "Slave created with address 0x1001\n";
     std::cout << "  Vendor ID:     0x" << std::hex << slave->getVendorId() << "\n";

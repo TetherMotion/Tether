@@ -13,8 +13,9 @@
 #include "tether/hal/IThreading.hpp"
 #include "tether/hal/IClock.hpp"
 #include "tether/hal/ILogger.hpp"
-#include "tether/hal/IPcapLogger.hpp"
 #include "tether/hal/StateMachineLogger.hpp"
+#include "tether/packetloggers/PacketLogger.hpp"
+#include "tether/packetloggers/pcap/PCAPLoggerConfig.hpp"
 
 #include <gmock/gmock.h>
 #include <queue>
@@ -396,41 +397,44 @@ private:
 };
 
 // ============================================================================
-// Mock PcapLogger
+// Mock PacketLogger
 // ============================================================================
 
-class MockPcapLogger : public IPcapLogger {
+class MockPacketLogger : public Tether::PacketLoggers::PacketLogger {
 public:
-    MOCK_METHOD(Error, init, (const PcapLoggerConfig& config), (override));
+    MOCK_METHOD(Tether::PacketLoggers::Error, init,
+                (const Tether::PacketLoggers::PCAP::PCAPLoggerConfig& config), (override));
     MOCK_METHOD(void, close, (), (override));
     MOCK_METHOD(bool, isOpen, (), (const, override));
-    MOCK_METHOD(Error, logFrame, (const uint8_t* frame, size_t length, FrameDirection dir, Timestamp ts), (override));
-    MOCK_METHOD(Error, logFrameWithInfo, (const uint8_t* frame, size_t length, FrameDirection dir, const RxFrameInfo& info), (override));
+    MOCK_METHOD(Tether::PacketLoggers::Error, logFrame,
+                (const uint8_t* frame, size_t length,
+                 Tether::PacketLoggers::FrameDirection dir, uint64_t ts), (override));
     MOCK_METHOD(void, flush, (), (override));
     MOCK_METHOD(uint64_t, getFrameCount, (), (const, override));
     MOCK_METHOD(size_t, getFileSize, (), (const, override));
-    MOCK_METHOD(Stats, getStats, (), (const, override));
+    MOCK_METHOD(Tether::PacketLoggers::Stats, getStats, (), (const, override));
 };
 
 // ============================================================================
-// Fake PcapLogger - Records frames in memory
+// Fake PacketLogger - Records frames in memory
 // ============================================================================
 
-class FakePcapLogger : public IPcapLogger {
+class FakePacketLogger : public Tether::PacketLoggers::PacketLogger {
 public:
     struct LoggedFrame {
         std::vector<uint8_t> data;
-        FrameDirection direction;
-        Timestamp timestamp;
+        Tether::PacketLoggers::FrameDirection direction;
+        uint64_t timestamp;
     };
 
-    FakePcapLogger() : m_open(false) {}
+    FakePacketLogger() : m_open(false) {}
 
-    Error init(const PcapLoggerConfig& config) override {
+    Tether::PacketLoggers::Error init(
+            const Tether::PacketLoggers::PCAP::PCAPLoggerConfig& config) override {
         m_config = config;
         m_open = true;
         m_frames.clear();
-        return Error::OK;
+        return Tether::PacketLoggers::Error::OK;
     }
 
     void close() override {
@@ -441,19 +445,15 @@ public:
         return m_open;
     }
 
-    Error logFrame(const uint8_t* frame, size_t length, 
-                   FrameDirection dir, Timestamp ts) override {
-        if (!m_open) return Error::NotInitialized;
+    Tether::PacketLoggers::Error logFrame(const uint8_t* frame, size_t length,
+                                           Tether::PacketLoggers::FrameDirection dir,
+                                           uint64_t ts) override {
+        if (!m_open) return Tether::PacketLoggers::Error::NotInitialized;
         m_frames.push_back({
             std::vector<uint8_t>(frame, frame + length),
             dir, ts
         });
-        return Error::OK;
-    }
-
-    Error logFrameWithInfo(const uint8_t* frame, size_t length,
-                           FrameDirection dir, const RxFrameInfo& info) override {
-        return logFrame(frame, length, dir, info.timestamp);
+        return Tether::PacketLoggers::Error::OK;
     }
 
     void flush() override {}
@@ -466,10 +466,10 @@ public:
         return 0;  // Not a real file
     }
 
-    Stats getStats() const override {
-        Stats s;
+    Tether::PacketLoggers::Stats getStats() const override {
+        Tether::PacketLoggers::Stats s;
         for (const auto& f : m_frames) {
-            if (f.direction == FrameDirection::Tx) s.txFrames++;
+            if (f.direction == Tether::PacketLoggers::FrameDirection::Tx) s.txFrames++;
             else s.rxFrames++;
             s.totalBytes += f.data.size();
         }
@@ -482,7 +482,7 @@ public:
 
 private:
     bool m_open;
-    PcapLoggerConfig m_config;
+    Tether::PacketLoggers::PCAP::PCAPLoggerConfig m_config;
     std::vector<LoggedFrame> m_frames;
 };
 

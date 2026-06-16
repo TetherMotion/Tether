@@ -84,11 +84,12 @@ bool MasterFIFOHAL::sendFrame(const uint8_t* data, size_t length) {
         return false;
     }
     
-    // Log to PcapNG
+    // Log to packet logger
     if (pcapLogger_) {
-        pcapLogger_->logFrame(data, length);
+        pcapLogger_->logFrame(data, length, Tether::PacketLoggers::FrameDirection::Tx,
+                              getSystemClock().nowMicros());
     }
-    
+
     bool result = writeFrame(data, length);
     
     if (result) {
@@ -128,9 +129,11 @@ bool MasterFIFOHAL::receiveFrame(uint8_t* buffer, size_t bufferSize,
         stats_.framesReceived++;
         stats_.bytesReceived += receivedLength;
         
-        // Log to PcapNG
+        // Log to packet logger
         if (pcapLogger_) {
-            pcapLogger_->logFrame(buffer, receivedLength);
+            pcapLogger_->logFrame(buffer, receivedLength,
+                                  Tether::PacketLoggers::FrameDirection::Rx,
+                                  getSystemClock().nowMicros());
         }
     } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
         stats_.timeouts++;
@@ -201,7 +204,8 @@ bool MasterFIFOHAL::isLinkUp() {
     return initialized_ && txFd_ >= 0 && rxFd_ >= 0;
 }
 
-void MasterFIFOHAL::setPcapLogger(std::shared_ptr<IPcapLogger> logger) {
+void MasterFIFOHAL::setPcapLogger(
+        std::shared_ptr<Tether::PacketLoggers::PacketLogger> logger) {
     pcapLogger_ = logger;
 }
 
@@ -310,11 +314,12 @@ bool SlaveFIFOHAL::sendResponse(const uint8_t* data, size_t length) {
         return false;
     }
     
-    // Log to PcapNG
+    // Log to packet logger
     if (pcapLogger_) {
-        pcapLogger_->logFrame(data, length);
+        pcapLogger_->logFrame(data, length, Tether::PacketLoggers::FrameDirection::Tx,
+                              getSystemClock().nowMicros());
     }
-    
+
     if (config_.useLengthHeader) {
         uint32_t len = static_cast<uint32_t>(length);
         if (write(txFd_, &len, sizeof(len)) != sizeof(len)) {
@@ -389,11 +394,13 @@ bool SlaveFIFOHAL::waitForFrame(uint8_t* buffer, size_t bufferSize,
     stats_.framesReceived++;
     stats_.bytesReceived += receivedLength;
     
-    // Log to PcapNG
+    // Log to packet logger
     if (pcapLogger_) {
-        pcapLogger_->logFrame(buffer, receivedLength);
+        pcapLogger_->logFrame(buffer, receivedLength,
+                              Tether::PacketLoggers::FrameDirection::Rx,
+                              getSystemClock().nowMicros());
     }
-    
+
     return true;
 }
 
@@ -452,7 +459,8 @@ void SlaveFIFOHAL::processingLoop() {
     }
 }
 
-void SlaveFIFOHAL::setPcapLogger(std::shared_ptr<IPcapLogger> logger) {
+void SlaveFIFOHAL::setPcapLogger(
+        std::shared_ptr<Tether::PacketLoggers::PacketLogger> logger) {
     pcapLogger_ = logger;
 }
 

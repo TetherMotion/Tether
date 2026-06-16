@@ -10,8 +10,6 @@
 #include "tether/hal/HAL.hpp"
 #include "tether/hal/IEthernet.hpp"
 #include "mocks/MockHAL.hpp"
-#include "tether/pcap/PcapLogger.hpp"
-#include "tether/hal/IPcapLogger.hpp"
 
 using namespace EtherCAT;
 using namespace EtherCAT::HAL;
@@ -217,8 +215,9 @@ protected:
     void SetUp() override {
         auto fake = std::make_unique<FakeEthernet>();
         fakePtr = fake.get();
-        PcapLoggerConfig logConfig{};
-        logging = createLoggingEthernet(std::move(fake), logConfig);
+        auto logger = std::make_shared<FakePacketLogger>();
+        logger->init({});
+        logging = createLoggingEthernet(std::move(fake), logger);
     }
     FakeEthernet* fakePtr = nullptr;
     std::unique_ptr<IEthernet> logging;

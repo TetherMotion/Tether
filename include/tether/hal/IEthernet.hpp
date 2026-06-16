@@ -9,6 +9,7 @@
 #pragma once
 
 #include "hal/HALTypes.hpp"
+#include "packetloggers/PacketLogger.hpp"
 #include <functional>
 #include <memory>
 #include <vector>
@@ -422,6 +423,61 @@ private:
 };
 
 // ============================================================================
+// Logging Ethernet Wrapper
+// ============================================================================
+
+/**
+ * @brief Ethernet wrapper that logs all frames through a PacketLogger
+ */
+class LoggingEthernetWrapper : public IEthernet {
+public:
+    LoggingEthernetWrapper(std::unique_ptr<IEthernet> inner,
+                           std::shared_ptr<Tether::PacketLoggers::PacketLogger> logger);
+    ~LoggingEthernetWrapper() override;
+
+    // IEthernet implementation
+    Error init(const EthernetConfig& config) override;
+    void shutdown() override;
+    bool isInitialized() const override;
+    Error getMacAddress(MacAddress& mac) const override;
+    Error setMacAddress(const MacAddress& mac) override;
+    Error transmit(const uint8_t* frame, size_t length) override;
+    Error transmitVlan(const uint8_t* frame, size_t length,
+                       uint16_t vlanId, uint8_t priority) override;
+    Error transmitGather(const BufferDesc* iov, size_t count) override;
+    void setRxCallback(RxCallback callback, void* userData) override;
+    int poll(Milliseconds timeoutMs) override;
+    void setEthertypeFilter(uint16_t ethertype) override;
+    Error setPromiscuous(bool enable) override;
+    Error addMulticastAddress(const MacAddress& mac) override;
+    Error removeMulticastAddress(const MacAddress& mac) override;
+    Error setAllMulticast(bool enable) override;
+    LinkStatus getLinkStatus() const override;
+    void setLinkCallback(LinkCallback callback, void* userData) override;
+    Error waitForLinkUp(Milliseconds timeoutMs) override;
+    EthernetStats getStats() const override;
+    void resetStats() override;
+    void* nativeHandle() override;
+    const char* getInterfaceName() const override;
+
+    // Logging control
+    void enableTxLogging(bool enable);
+    void enableRxLogging(bool enable);
+    Tether::PacketLoggers::PacketLogger& getLogger() { return *m_logger; }
+
+private:
+    std::unique_ptr<IEthernet> m_inner;
+    std::shared_ptr<Tether::PacketLoggers::PacketLogger> m_logger;
+    RxCallback m_userCallback;
+    void* m_userData;
+    bool m_logTx;
+    bool m_logRx;
+
+    void handleRx(const uint8_t* frame, size_t length,
+                  const RxFrameInfo& info, void* userData);
+};
+
+// ============================================================================
 // Factory Functions
 // ============================================================================
 
@@ -466,6 +522,15 @@ std::unique_ptr<IEthernet> createVlanEthernet(std::unique_ptr<IEthernet> inner,
  * @brief Create traffic splitter
  */
 std::unique_ptr<TrafficSplitter> createTrafficSplitter(std::unique_ptr<IEthernet> inner);
+
+/**
+ * @brief Create logging Ethernet wrapper
+ * @param inner Inner Ethernet implementation
+ * @param logger Packet logger (must be already initialized)
+ */
+std::unique_ptr<IEthernet> createLoggingEthernet(
+    std::unique_ptr<IEthernet> inner,
+    std::shared_ptr<Tether::PacketLoggers::PacketLogger> logger);
 
 } // namespace HAL
 } // namespace EtherCAT
