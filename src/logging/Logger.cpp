@@ -106,7 +106,7 @@ void Logger::logv(LogLevel level, const char* tag, const char* format, va_list a
 
     for (const auto& line : lines) {
         // Optional ISO8601-like UTC timestamp with millisecond precision
-        char timebuf[32] = "";
+        char timebuf[64] = "";
         if (timestampEnabled_) {
             using namespace std::chrono;
             auto now = system_clock::now();
