@@ -222,6 +222,10 @@ int main(int argc, char** argv) {
     program.add_argument("--tx-vlan")
         .default_value(std::string(""))
         .help("TX VLAN encapsulation: single VID");
+    program.add_argument("--stream")
+        .default_value(false)
+        .implicit_value(true)
+        .help("Stream DI values to stdout instead of ncurses UI");
 
     try { program.parse_args(argc, argv); }
     catch (const std::runtime_error& err) {
@@ -235,6 +239,7 @@ int main(int argc, char** argv) {
     std::string debug_str = program.get<std::string>("--debug");
     std::string rx_vlan_str = program.get<std::string>("--rx-vlan");
     std::string tx_vlan_str = program.get<std::string>("--tx-vlan");
+    bool stream_mode = program.get<bool>("--stream");
 
     const std::set<std::string> known_debug_flags = {
         "sii-derivation",
@@ -466,18 +471,10 @@ int main(int argc, char** argv) {
 
     // ---- Verify identity (optional but helpful) ----
     auto& sl = master.slave(static_cast<uint16_t>(slave_idx));
-    EtherCAT::SII::SIIIdentity id;
-    if (EtherCAT::SII::readSIIIdentity(master, static_cast<uint16_t>(slave_idx), id)) {
-        bool vid_ok = (id.vendor_id == EtherCAT::Drives::NexcobotESC211::kVendorId);
-        bool pid_ok = (id.product_code == EtherCAT::Drives::NexcobotESC211::kProductCode);
-        if (!vid_ok || !pid_ok) {
-            TETHER_LOGW(TAG, "Slave %d VID/PID mismatch (expected 0x%08X/0x%08X, got 0x%08X/0x%08X)",
-                        slave_idx,
-                        EtherCAT::Drives::NexcobotESC211::kVendorId,
-                        EtherCAT::Drives::NexcobotESC211::kProductCode,
-                        id.vendor_id, id.product_code);
-        }
-    }
+    EtherCAT::Identity::SlaveIdentity expected_id;
+    expected_id.vendor_id = EtherCAT::Drives::NexcobotESC211::kVendorId;
+    expected_id.product_code = EtherCAT::Drives::NexcobotESC211::kProductCode;
+    master.verifySlaveIdentity(static_cast<uint16_t>(slave_idx), expected_id, false, TAG);
 
     // ---- Configure mailbox + transition to PRE-OP ----
     // Override with ESI values to avoid "Mailbox size too large" from SII:
@@ -485,8 +482,8 @@ int main(int argc, char** argv) {
     //   SM1 (MBoxIn  / S->M): addr=0x1200 len=0x200 ctrl=0x22  proto=CoE (0x0004)
     TETHER_LOGI(TAG, "Configuring mailbox for slave %d...", slave_idx);
     auto mb_err = sl.configureMailbox(
-        {.address = 0x1000, .length = 0x0200},
-        {.address = 0x1200, .length = 0x0200},
+        {.address = 0x1000, .length = 0x0100},
+        {.address = 0x1200, .length = 0x0100},
         0x0004);
     if (mb_err != EtherCAT::SlaveError::Ok) {
         TETHER_LOGE(TAG, "Mailbox config failed: %s", EtherCAT::slaveErrorToString(mb_err));
@@ -513,20 +510,22 @@ int main(int argc, char** argv) {
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
 
-    // ---- Init ncurses ----
-    setlocale(LC_ALL, "");
-    initscr();
-    cbreak();
-    noecho();
-    nodelay(stdscr, TRUE);
-    curs_set(0);
-    initColors();
+    // ---- Init ncurses (unless streaming) ----
+    if (!stream_mode) {
+        setlocale(LC_ALL, "");
+        initscr();
+        cbreak();
+        noecho();
+        nodelay(stdscr, TRUE);
+        curs_set(0);
+        initColors();
+    }
 
     // ---- Start SDO reader thread ----
     DIState di_state;
     std::thread reader_thread(sdoReaderThread, std::ref(sl), std::ref(di_state));
 
-    // ---- Display loop ----
+    // ---- Display / stream loop ----
     auto start_time = std::chrono::steady_clock::now();
     auto end_time = start_time + std::chrono::seconds(static_cast<int>(duration_sec));
 
@@ -535,7 +534,21 @@ int main(int argc, char** argv) {
             g_cancel.store(true);
             break;
         }
-        drawScreen(di_state);
+        if (stream_mode) {
+            std::lock_guard<std::mutex> lock(di_state.mtx);
+            if (di_state.stale) {
+                std::cout << "[STALE]\n";
+            } else {
+                std::cout << "count=" << di_state.read_count << " IA=";
+                for (bool v : di_state.ia) std::cout << (v ? '1' : '0');
+                std::cout << " IB=";
+                for (bool v : di_state.ib) std::cout << (v ? '1' : '0');
+                std::cout << "\n";
+            }
+            std::cout.flush();
+        } else {
+            drawScreen(di_state);
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
@@ -543,7 +556,9 @@ int main(int argc, char** argv) {
     g_cancel.store(true);
     reader_thread.join();
 
-    endwin();
+    if (!stream_mode) {
+        endwin();
+    }
 
     master.stop();
     poll_running = false;
