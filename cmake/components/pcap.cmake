@@ -4,6 +4,7 @@
 set(TETHER_PCAP_SOURCES
     ${TETHER_ROOT}/src/packetloggers/pcap/PCAPWriter.cpp
     ${TETHER_ROOT}/src/packetloggers/pcap/PCAPLogger.cpp
+    ${TETHER_ROOT}/src/packetloggers/pcap/PCAPNGReader.cpp
 )
 
 set(TETHER_PCAP_HEADERS
@@ -11,6 +12,7 @@ set(TETHER_PCAP_HEADERS
     ${TETHER_ROOT}/include/tether/packetloggers/pcap/PCAPLoggerConfig.hpp
     ${TETHER_ROOT}/include/tether/packetloggers/pcap/PCAPWriter.hpp
     ${TETHER_ROOT}/include/tether/packetloggers/pcap/PCAPLogger.hpp
+    ${TETHER_ROOT}/include/tether/packetloggers/pcap/PCAPNGReader.hpp
 )
 
 # Create the pcap library

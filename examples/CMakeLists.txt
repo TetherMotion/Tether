@@ -98,6 +98,10 @@ else()
     message(STATUS "ncurses not found; skipping esc211_di_monitor")
 endif()
 
+# --- pcapng interpreter example ---
+add_tether_example(interpret_pcapng
+    LIBRARIES tether_pcap tether_ethercat_common tether_common)
+
 # --- WebSocket UI backends ---
 # These examples use Boost.Beast/Boost.Asio (header-only). They are only built
 # when Boost is available so the rest of the examples build without it.

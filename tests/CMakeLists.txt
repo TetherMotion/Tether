@@ -24,6 +24,7 @@ include(GoogleTest)
 option(TETHER_BUILD_MODULE_TESTS "Build optional/extra per-module test executables" OFF)
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/mocks)
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/pcap)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/motion)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/gcode)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402)
@@ -85,6 +86,7 @@ file(GLOB_RECURSE DC_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/dc/*.cpp")
 file(GLOB_RECURSE DESTABILIZER_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/destabilizer/*.cpp")
 file(GLOB_RECURSE GCODE_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/gcode/*.cpp")
 file(GLOB_RECURSE HAL_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/hal/*.cpp")
+file(GLOB_RECURSE PCAP_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/pcap/*.cpp")
 file(GLOB_RECURSE IO_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/io/*.cpp")
 file(GLOB_RECURSE MOTION_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/motion/*.cpp")
 file(GLOB_RECURSE MOTION_PLANNER_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/*.cpp")
@@ -175,6 +177,14 @@ if(HAL_TEST_SOURCES)
     create_module_test(hal
         "${HAL_TEST_SOURCES}"
         "tether_common;tether_pcap;tether_hal;tether_ethercat_common;tether_ethercat_master"
+        ""
+    )
+endif()
+
+if(PCAP_TEST_SOURCES)
+    create_module_test(pcap
+        "${PCAP_TEST_SOURCES}"
+        "tether_common;tether_pcap;tether_ethercat_common"
         ""
     )
 endif()
