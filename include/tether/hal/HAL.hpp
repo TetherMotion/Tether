@@ -14,8 +14,9 @@
 #include "hal/IThreading.hpp"
 #include "hal/IClock.hpp"
 #include "hal/ILogger.hpp"
-#include "hal/IPcapLogger.hpp"
 #include "hal/StateMachineLogger.hpp"
+#include "packetloggers/PacketLogger.hpp"
+#include "packetloggers/pcap/PCAPLoggerConfig.hpp"
 
 namespace EtherCAT {
 namespace HAL {
@@ -33,8 +34,17 @@ struct HALConfig {
     
     // Logging
     LogLevel logLevel = LogLevel::Info;
-    bool enablePcapLogging = false;
-    PcapLoggerConfig pcapConfig;
+    bool enablePacketLogging = false;
+    Tether::PacketLoggers::PCAP::PCAPLoggerConfig pcapConfig;
+
+    /**
+     * @brief Factory that creates a PacketLogger implementation.
+     *
+     * The application injects the concrete implementation here (e.g. the
+     * PCAP adapter from tether_pcap). If nullptr, packet logging is disabled.
+     */
+    std::function<std::shared_ptr<Tether::PacketLoggers::PacketLogger>(
+        const Tether::PacketLoggers::PCAP::PCAPLoggerConfig&)> createPacketLogger;
     
     // Threading
     bool useRealtimeScheduling = false;
@@ -111,9 +121,9 @@ public:
     IStateMachineLogger& stateLogger() { return *m_stateLogger; }
     
     /**
-     * @brief Get PcapNG logger (may be null)
+     * @brief Get packet logger (may be null)
      */
-    IPcapLogger* pcapLogger() { return m_pcapLogger.get(); }
+    Tether::PacketLoggers::PacketLogger* packetLogger() { return m_packetLogger.get(); }
     
     /**
      * @brief Get traffic splitter (may be null)
@@ -163,7 +173,7 @@ private:
     
     std::unique_ptr<IEthernet> m_ethernet;
     std::unique_ptr<IStateMachineLogger> m_stateLogger;
-    std::unique_ptr<IPcapLogger> m_pcapLogger;
+    std::shared_ptr<Tether::PacketLoggers::PacketLogger> m_packetLogger;
     TrafficSplitter* m_trafficSplitter = nullptr;  // Points into m_ethernet chain
 };
 
@@ -246,13 +256,6 @@ inline bool isSTM32() {
 #else
     return false;
 #endif
-}
-
-/**
- * @brief Check if in test mode (always false after UNIT_TEST_HOST removal)
- */
-inline bool isTestMode() {
-    return false;
 }
 
 } // namespace HAL
