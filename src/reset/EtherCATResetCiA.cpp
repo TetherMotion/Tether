@@ -5,7 +5,7 @@
  * Split from EtherCATReset.cpp for maintainability.
  */
 
-#include "EtherCATReset.hpp"
+#include "Reset.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include "profiles/cia301/CiA301Defs.hpp"
 #include "profiles/cia301/CiA402Defs.hpp"

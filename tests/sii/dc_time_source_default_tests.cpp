@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "tether/ethercat/EtherCATDC.hpp"
+#include "tether/ethercat/DC.hpp"
 
 TEST(DC_TimeSource_Defaults, CallsDefaultImplementation) {
     // Call the default implementations (weak symbols from dc_time_source.cpp)

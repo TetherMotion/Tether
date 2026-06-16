@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include "ethercat/raw/internal.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/Master.hpp"
 
 using namespace EtherCAT::Raw;
 

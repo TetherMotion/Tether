@@ -3,13 +3,13 @@
  * @brief SDOManager implementation (instance-based, no globals) + backward-compat free functions
  */
 
-#include "tether/ethercat/EtherCATSDO.hpp"
-#include "tether/ethercat/EtherCATTypes.hpp"
-#include "tether/ethercat/EtherCATPDO.hpp"
+#include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/Types.hpp"
+#include "tether/ethercat/PDOManager.hpp"
 #include "tether/platform/Platform.hpp"
 
 #ifdef TETHER_COMPILE_MASTER
-#include "EtherCATRaw.hpp"
+#include "Raw.hpp"
 #include "raw/internal.hpp"
 #endif
 

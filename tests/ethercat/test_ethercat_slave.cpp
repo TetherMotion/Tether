@@ -9,10 +9,10 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
-#include "tether/ethercat/EtherCATSlave.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
-#include "tether/ethercat/EtherCATPDO.hpp"
+#include "tether/ethercat/Slave.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/CachedSIIReader.hpp"
 #include "tether/sii/SIIReader.hpp"
 

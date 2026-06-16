@@ -3,8 +3,8 @@
  * @brief Ethernet over EtherCAT (EoE) protocol implementation
  */
 
-#include "EtherCATEoE.hpp"
-#include "EtherCATConfig.hpp"
+#include "EoE.hpp"
+#include "TetherConfig.hpp"
 
 #if ECAT_FEATURE_EOE_ENABLED
 

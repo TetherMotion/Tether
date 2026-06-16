@@ -1,13 +1,13 @@
 /**
  * @file test_dc_consistency_coverage.cpp
- * @brief Coverage tests for EtherCATDCConsistency.cpp
+ * @brief Coverage tests for DCConsistency.cpp
  *
  * Exercises every function in the file: pure utilities, consistency checks
  * (host stub provides a valid SlaveDCState), logging functions, and the
  * dc_full_diagnostic orchestrator.
  */
 #include <gtest/gtest.h>
-#include "tether/ethercat/EtherCATDCConsistency.hpp"
+#include "tether/ethercat/DCConsistency.hpp"
 #include <cstring>
 
 using namespace EtherCAT::DC;

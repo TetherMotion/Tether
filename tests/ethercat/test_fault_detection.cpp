@@ -6,7 +6,7 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
-#include "tether/ethercat/EtherCATFaultDetection.hpp"
+#include "tether/ethercat/FaultDetection.hpp"
 
 #include <cstring>
 #include <vector>

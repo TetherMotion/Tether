@@ -4,7 +4,7 @@
  */
 
 #include "tether/ethercat/LogicalAddressManager.hpp"
-#include "tether/ethercat/EtherCATTypes.hpp"
+#include "tether/ethercat/Types.hpp"
 
 #include <cstring>
 

@@ -1,9 +1,9 @@
 #include "raw/internal.hpp"
 #include "tether/platform/EspCompat.hpp"
-#include "tether/ethercat/EtherCATPlatform.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
-#include "tether/ethercat/EtherCATFaultDetection.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/Platform.hpp"
+#include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/FaultDetection.hpp"
+#include "tether/ethercat/Master.hpp"
 #include <thread>
 #include <chrono>
 

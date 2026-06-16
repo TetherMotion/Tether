@@ -16,8 +16,8 @@
 #include <thread>
 #include <vector>
 
-#include "tether/ethercat/EtherCATMaster.hpp"
-#include "tether/ethercat/EtherCATTypes.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/LinuxDevNullNetworkInterface.hpp"
 #include "tether/ethercat/LinuxPairedNetworkInterface.hpp"
 #include "tether/ethercat/TransactionRouter.hpp"

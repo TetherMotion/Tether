@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include "tether/ethercat/EtherCATRetry.hpp"
+#include "tether/ethercat/Retry.hpp"
 
 TEST(EtherCATRetry, RetryPolicyTimeoutComputation) {
     auto pol = EtherCAT::Raw::RetryPolicy::standard();

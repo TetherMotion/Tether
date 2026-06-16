@@ -22,8 +22,8 @@
 #include <thread>
 #include <vector>
 
-#include "tether/ethercat/EtherCATMaster.hpp"
-#include "tether/ethercat/EtherCATTypes.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/VLANRouter.hpp"
 
 using namespace EtherCAT;

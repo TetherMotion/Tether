@@ -1,12 +1,12 @@
 /**
  * @file test_fault_detector_coverage.cpp
- * @brief Coverage tests for FaultDetector methods in EtherCATFaultDetection.cpp
+ * @brief Coverage tests for FaultDetector methods in FaultDetection.cpp
  *
  * Uses a mock IFaultTransport to exercise poll(), pollAll(), getState(),
  * anyActive(), clear(), setCallback(), diagnose(), and diagnoseNoSync().
  */
 #include <gtest/gtest.h>
-#include "tether/ethercat/EtherCATFaultDetection.hpp"
+#include "tether/ethercat/FaultDetection.hpp"
 #include <cstring>
 #include <functional>
 

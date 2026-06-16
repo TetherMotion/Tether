@@ -17,11 +17,11 @@
 #include <cstring>
 #include <magic_enum/magic_enum.hpp>
 
-#include "tether/ethercat/EtherCATDiagnostics.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/Diagnostics.hpp"
+#include "tether/ethercat/Master.hpp"
 #include "tether/drives/AS715N.hpp"
 #include "tether/drives/AS715N/Registers/F31-ControlInProgress.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
+#include "tether/ethercat/SDOManager.hpp"
 #include "tether/platform/EspCompat.hpp"
 
 #include <argparse/argparse.hpp>

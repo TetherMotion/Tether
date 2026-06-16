@@ -6,7 +6,7 @@
 #include <memory>
 #include "tether/profiles/cia404/CiA404Device.hpp"
 #include "tether/profiles/cia404/CiA404Defs.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
+#include "tether/ethercat/SDOManager.hpp"
 
 using namespace CiA404;
 

@@ -8,7 +8,7 @@
 #include "fmmu/FMMUConfiguration.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include "sii/SIIParser.hpp"
-#include "EtherCATPDO.hpp"
+#include "PDOManager.hpp"
 
 #include <cstdio>
 #include <cstring>

@@ -4,7 +4,7 @@
  *        ManufacturerFault::parse/format, and al_status_get_state_name.
  */
 #include <gtest/gtest.h>
-#include "tether/ethercat/EtherCATFaultDetection.hpp"
+#include "tether/ethercat/FaultDetection.hpp"
 #include <cstring>
 
 using namespace EtherCAT;

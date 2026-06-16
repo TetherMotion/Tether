@@ -7,11 +7,11 @@
 #include <pybind11/stl.h>
 #include <pybind11/functional.h>
 
-#include "tether/ethercat/EtherCATRaw.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
-#include "tether/ethercat/EtherCATPDO.hpp"
-#include "tether/ethercat/EtherCATDC.hpp"
-#include "tether/ethercat/EtherCATTypes.hpp"
+#include "tether/ethercat/Raw.hpp"
+#include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/PDOManager.hpp"
+#include "tether/ethercat/DC.hpp"
+#include "tether/ethercat/Types.hpp"
 
 namespace py = pybind11;
 using namespace EtherCAT;

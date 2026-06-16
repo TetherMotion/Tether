@@ -7,7 +7,7 @@
 #include <memory>
 #include <vector>
 #include "tether/ethercat/SlaveEmulator.hpp"
-#include "tether/ethercat/EtherCATDCClass.hpp"
+#include "tether/ethercat/DCClass.hpp"
 
 using namespace EtherCAT;
 using namespace EtherCAT::Emulator;

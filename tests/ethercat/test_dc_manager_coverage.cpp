@@ -7,8 +7,8 @@
  * path, and the init-then-use path.
  */
 #include <gtest/gtest.h>
-#include "tether/ethercat/EtherCATMaster.hpp"
-#include "tether/ethercat/EtherCATDC.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/DC.hpp"
 
 using namespace EtherCAT;
 

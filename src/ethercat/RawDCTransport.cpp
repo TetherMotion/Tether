@@ -4,7 +4,7 @@
  */
 
 #include "tether/ethercat/RawDCTransport.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/Master.hpp"
 #include "tether/platform/EspCompat.hpp"
 
 // Declaration for the weak time-source symbol (defined in dc_time_source.cpp)

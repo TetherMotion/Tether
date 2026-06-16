@@ -127,7 +127,6 @@ endif()
 # relinks that module's test executable.
 set(TETHER_FULL_TEST_LIBS
     tether_common
-    tether_hal
     tether_gcode
     tether_motion_control
     tether_motion_planner
@@ -175,7 +174,7 @@ endif()
 if(HAL_TEST_SOURCES)
     create_module_test(hal
         "${HAL_TEST_SOURCES}"
-        "tether_common;tether_hal;tether_ethercat_common;tether_ethercat_master"
+        "tether_common;tether_pcap;tether_hal;tether_ethercat_common;tether_ethercat_master"
         ""
     )
 endif()
@@ -267,7 +266,7 @@ endif()
 if(SLAVE_EMULATION_TEST_SOURCES)
     create_module_test(slave_emulation
         "${SLAVE_EMULATION_TEST_SOURCES}"
-        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
+        "tether_common;tether_pcap;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
         ""
     )
 endif()
@@ -381,17 +380,17 @@ add_executable(tether_ethercat_common_tests
     sii/mocks_private/eeprom_test_stubs.cpp
     ../src/ethercat/SlaveEmulator.cpp
     ../src/ethercat/raw/FoE.cpp
-    ../src/ethercat/EtherCATFaultDetection.cpp
-    ../src/ethercat/EtherCATWriteVerify.cpp
+    ../src/ethercat/FaultDetection.cpp
+    ../src/ethercat/WriteVerify.cpp
     ../src/ethercat/raw/sdo_async.cpp
     ../src/ethercat/raw/PDOManager.cpp
     ../src/ethercat/raw/LogicalAddressManager.cpp
-    ../src/ethercat/EtherCATDCClass.cpp
-    ../src/ethercat/EtherCATRealtimeLoop.cpp
+    ../src/ethercat/DCClass.cpp
+    ../src/ethercat/RealtimeLoop.cpp
     ../src/ethercat/RealtimeJitterMonitor.cpp
     ../src/ethercat/ConditionalPacketRouter.cpp
     ../src/ethercat/TransactionRouter.cpp
-    ../src/ethercat/EtherCATRetry.cpp
+    ../src/ethercat/Retry.cpp
     ../src/fmmu/FMMUConfiguration.cpp
 )
 

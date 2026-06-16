@@ -7,8 +7,8 @@
 
 #include <memory>
 #include <functional>
-#include "tether/ethercat/EtherCATDC.hpp"        // For DC:: types
-#include "tether/ethercat/EtherCATDCClass.hpp"   // For EtherCATDC class
+#include "tether/ethercat/DC.hpp"        // For DC:: types
+#include "tether/ethercat/DCClass.hpp"   // For EtherCATDC class
 #include "tether/ethercat/RawDCTransport.hpp"    // For RawDCTransport
 
 namespace EtherCAT {

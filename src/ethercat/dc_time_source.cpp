@@ -20,7 +20,7 @@
  * @endcode
  */
 
-#include "tether/ethercat/EtherCATDC.hpp"
+#include "tether/ethercat/DC.hpp"
 #include "tether/platform/EspCompat.hpp"
 
 #ifndef ESP_PLATFORM

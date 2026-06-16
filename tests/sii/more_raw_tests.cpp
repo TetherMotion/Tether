@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include "sii/SIIReader.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/Master.hpp"
 
 using namespace EtherCAT::SII;
 

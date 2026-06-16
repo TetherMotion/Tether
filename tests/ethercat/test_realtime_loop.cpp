@@ -9,7 +9,7 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
-#include "tether/ethercat/EtherCATRealtimeLoop.hpp"
+#include "tether/ethercat/RealtimeLoop.hpp"
 #include "tether/hal/IThreading.hpp"
 
 #include <atomic>

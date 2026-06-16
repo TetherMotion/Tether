@@ -4,8 +4,8 @@
  */
 
 #include "tether/ethercat/ALResetController.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
-#include "tether/ethercat/EtherCATFaultDetection.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/FaultDetection.hpp"
 #include "raw/internal.hpp"
 #include "tether/platform/EspCompat.hpp"
 

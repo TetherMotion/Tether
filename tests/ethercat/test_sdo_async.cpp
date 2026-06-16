@@ -6,8 +6,8 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
-#include "tether/ethercat/EtherCATSDO.hpp"
-#include "tether/ethercat/EtherCATPDO.hpp"
+#include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/PDOManager.hpp"
 
 #include <cstring>
 #include <vector>

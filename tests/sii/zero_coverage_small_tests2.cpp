@@ -2,17 +2,17 @@
 #include <gmock/gmock.h>
 
 // Headers & APIs under test
-#include "tether/ethercat/EtherCATReset.hpp"
-#include "tether/ethercat/EtherCATPDO.hpp"
-#include "tether/ethercat/EtherCATDCConsistency.hpp"
+#include "tether/ethercat/Reset.hpp"
+#include "tether/ethercat/PDOManager.hpp"
+#include "tether/ethercat/DCConsistency.hpp"
 #include "tether/ethercat/ConditionalPacketRouter.hpp"
-#include "tether/ethercat/EtherCATDC.hpp"
-#include "tether/ethercat/EtherCATRetry.hpp"
-#include "tether/ethercat/EtherCATTypes.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
+#include "tether/ethercat/DC.hpp"
+#include "tether/ethercat/Retry.hpp"
+#include "tether/ethercat/Types.hpp"
+#include "tether/ethercat/SDOManager.hpp"
 
 // Raw module APIs
-#include "tether/ethercat/EtherCATRaw.hpp"
+#include "tether/ethercat/Raw.hpp"
 
 using namespace EtherCAT;
 

@@ -10,7 +10,7 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
-#include "tether/ethercat/EtherCATDCClass.hpp"
+#include "tether/ethercat/DCClass.hpp"
 #include "tether/ethercat/IDCTransport.hpp"
 
 #include <cstring>

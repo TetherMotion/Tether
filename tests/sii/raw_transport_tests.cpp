@@ -8,7 +8,7 @@
  */
 #include <gtest/gtest.h>
 #include <cstring>
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/Master.hpp"
 
 class MasterTransportTest : public ::testing::Test {
 protected:
@@ -27,10 +27,10 @@ protected:
 TEST_F(MasterTransportTest, AprdPushAndConsume) {
     master_->clearAprdResponses();
     const uint8_t payload[4] = {1, 2, 3, 4};
-    master_->pushAprdResponse(true, 0x1234, 0x5678, payload, sizeof(payload));
+    master_->pushAprdResponse(true, 0x0000, 0x5678, payload, sizeof(payload));
 
     uint8_t out[4] = {0};
-    bool ok = master_->readRegister(0x1234, 0x5678, out, sizeof(out), 1);
+    bool ok = master_->readRegister(0x0000, 0x5678, out, sizeof(out), 1);
     EXPECT_TRUE(ok);
     EXPECT_EQ(0, memcmp(out, payload, sizeof(payload)));
 }

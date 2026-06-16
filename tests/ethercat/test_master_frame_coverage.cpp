@@ -8,8 +8,8 @@
  *        getDiscoveredSlaveCount, siiReadString, and various edge-case paths.
  */
 #include <gtest/gtest.h>
-#include "tether/ethercat/EtherCATMaster.hpp"
-#include "tether/ethercat/EtherCATDC.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/DC.hpp"
 #include <cstring>
 #include <vector>
 #include <functional>

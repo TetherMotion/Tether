@@ -17,7 +17,7 @@
 #include "slave/profiles/CiA401Slave.hpp"
 #include "slave/hal/ISlaveHAL.hpp"
 #include "slave/mailbox/CoEHandler.hpp"
-#include "shared/PcapLogger.hpp"
+#include "pcap/PcapLogger.hpp"
 
 #include <gtest/gtest.h>
 #include <memory>

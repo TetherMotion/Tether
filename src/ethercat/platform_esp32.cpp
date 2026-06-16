@@ -6,8 +6,8 @@
  * for ESP32 platform.
  */
 
-#include "EtherCATPlatform.hpp"
-#include "EtherCATConfig.hpp"
+#include "Platform.hpp"
+#include "TetherConfig.hpp"
 
 #if defined(ESP_PLATFORM)
 

@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
-#include "tether/ethercat/EtherCATRetry.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
-#include "tether/ethercat/EtherCATTypes.hpp"
+#include "tether/ethercat/Retry.hpp"
+#include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/Types.hpp"
 
 using namespace EtherCAT;
 

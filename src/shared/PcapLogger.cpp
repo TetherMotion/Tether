@@ -3,7 +3,7 @@
  * @brief Shared PcapNG logging implementation for EtherCAT Master and Slave
  */
 
-#include "shared/PcapLogger.hpp"
+#include "pcap/PcapLogger.hpp"
 
 #include <chrono>
 #include <cstring>

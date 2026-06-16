@@ -33,8 +33,8 @@
 
 #include "tether/drives/AS715N.hpp"
 #include "tether/drives/AS715NErrors.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
-#include "tether/ethercat/EtherCATTypes.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/LinuxPairedNetworkInterface.hpp"
 #include "tether/platform/EspCompat.hpp"
 
@@ -521,6 +521,7 @@ protected:
             if (master_) master_->handleRxFrame(data, len);
         });
         master_->start(pair_->ifaceA(), kDummyMac);
+        master_->discoverSlaves();
         return *master_;
     }
 

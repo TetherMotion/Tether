@@ -1,5 +1,5 @@
-#include "tether/ethercat/EtherCATRaw.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
+#include "tether/ethercat/Raw.hpp"
+#include "tether/ethercat/SDOManager.hpp"
 #include <chrono>
 #include <thread>
 

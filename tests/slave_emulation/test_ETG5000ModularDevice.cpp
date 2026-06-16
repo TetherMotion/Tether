@@ -2,7 +2,7 @@
 
 #include "tether/etg5000/ETG5000ModularDevice.hpp"
 #include "tether/etg5000/ETG5000Defs.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
+#include "tether/ethercat/SDOManager.hpp"
 
 using namespace ETG5000;
 

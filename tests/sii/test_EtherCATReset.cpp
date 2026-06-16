@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "tether/ethercat/EtherCATReset.hpp"
+#include "tether/ethercat/Reset.hpp"
 
 using namespace EtherCAT;
 

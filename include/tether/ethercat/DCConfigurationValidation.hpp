@@ -1,6 +1,6 @@
 #pragma once
 
-#include "tether/ethercat/EtherCATDC.hpp"
+#include "tether/ethercat/DC.hpp"
 #include <string>
 
 namespace EtherCAT {

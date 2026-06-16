@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "tether/ethercat/EtherCATFaultDetection.hpp"
+#include "tether/ethercat/FaultDetection.hpp"
 
 using namespace EtherCAT;
 

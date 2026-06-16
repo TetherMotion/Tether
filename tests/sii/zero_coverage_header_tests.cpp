@@ -2,7 +2,7 @@
 
 // Header-only APIs / factories that should compile and be usable without linking
 #include "tether/ethercat/ConditionalPacketRouter.hpp"
-#include "tether/ethercat/EtherCATReset.hpp"
+#include "tether/ethercat/Reset.hpp"
 
 using namespace EtherCAT;
 

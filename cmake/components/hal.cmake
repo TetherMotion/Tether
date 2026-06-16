@@ -6,7 +6,6 @@ set(TETHER_HAL_SOURCES
     ${TETHER_ROOT}/src/hal/EthernetHAL_Common.cpp
     ${TETHER_ROOT}/src/hal/PcapNGLogger.cpp
     ${TETHER_ROOT}/src/hal/StateMachineLogger.cpp
-    ${TETHER_ROOT}/src/shared/PcapLogger.cpp
     # Note: FIFOHAL.cpp and LoopbackHAL.cpp excluded - outdated interface implementation
 )
 

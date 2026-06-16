@@ -22,7 +22,7 @@
 // #include "ethercat.h"
 
 // Our library includes
-// #include "EtherCATMaster.hpp"
+// #include "Master.hpp"
 // #include "CiA402Drive.hpp"
 
 // =============================================================================

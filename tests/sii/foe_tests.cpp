@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include "tether/ethercat/EtherCATFoE.hpp"
+#include "tether/ethercat/FoE.hpp"
 
 using namespace EtherCAT::FoE;
 

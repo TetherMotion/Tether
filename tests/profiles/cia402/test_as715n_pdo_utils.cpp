@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "tether/drives/AS715N/AS715NPDO.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/Master.hpp"
 #include "tether/profiles/cia402/CiA402Drive.hpp"
 
 using namespace EtherCAT;

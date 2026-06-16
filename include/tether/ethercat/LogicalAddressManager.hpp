@@ -23,7 +23,7 @@
 #include <cstdint>
 
 #include "tether/platform/EspCompat.hpp"
-#include "tether/ethercat/EtherCATPDO.hpp"
+#include "tether/ethercat/PDOManager.hpp"
 
 namespace EtherCAT {
 

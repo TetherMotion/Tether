@@ -7,7 +7,7 @@
  * no file-scoped or namespace-scoped globals.
  */
 
-#include "EtherCATPDO.hpp"
+#include "PDOManager.hpp"
 #include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/platform/EspCompat.hpp"
 

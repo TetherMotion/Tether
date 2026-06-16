@@ -4,7 +4,7 @@
  */
 
 #include "sii/SIIReader.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/Master.hpp"
 #include "tether/platform/Platform.hpp"
 #include "ethercat/raw/internal.hpp"
 

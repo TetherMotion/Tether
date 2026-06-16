@@ -4,7 +4,7 @@
  *        Tests that don't require SDOManager (ResetResult, ResetPolicy, name functions)
  */
 
-#include "tether/ethercat/EtherCATReset.hpp"
+#include "tether/ethercat/Reset.hpp"
 #include <gtest/gtest.h>
 #include <cstring>
 

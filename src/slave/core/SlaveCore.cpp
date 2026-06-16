@@ -4,7 +4,7 @@
  */
 
 #include "tether/slave/core/SlaveCore.hpp"
-#include "tether/ethercat/EtherCATTypes.hpp"
+#include "tether/ethercat/Types.hpp"
 #include <algorithm>
 #include <cstring>
 #include <chrono>

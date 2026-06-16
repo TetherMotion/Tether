@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "tether/ethercat/EtherCATRetry.hpp"
+#include "tether/ethercat/Retry.hpp"
 
 #include <atomic>
 #include <chrono>

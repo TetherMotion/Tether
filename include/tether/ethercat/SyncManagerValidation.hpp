@@ -1,6 +1,6 @@
 #pragma once
 
-#include "tether/ethercat/EtherCATPDO.hpp"
+#include "tether/ethercat/PDOManager.hpp"
 #include <vector>
 #include <string>
 #include <array>

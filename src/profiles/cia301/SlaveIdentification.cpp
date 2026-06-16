@@ -5,7 +5,7 @@
 
 #include "profiles/cia301/SlaveIdentification.hpp"
 #include "tether/platform/EspCompat.hpp"
-#include "EtherCATSDO.hpp"
+#include "SDOManager.hpp"
 
 using ::EtherCAT::SDO::SDOManager;
 

@@ -8,7 +8,7 @@
  * - Fault reset is performed via 0x2031:01 (F31.00) after switching S-ON off.
  */
 #include "tether/drives/AS715N.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
+#include "tether/ethercat/SDOManager.hpp"
 #include "tether/platform/Platform.hpp"
 #include <cstdio>
 #include <cstring>

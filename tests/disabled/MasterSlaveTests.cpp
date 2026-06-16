@@ -7,8 +7,8 @@
 #include "slave/hal/LoopbackHAL.hpp"
 #include "slave/mailbox/CoEHandler.hpp"
 #include "slave/profiles/CiA402Slave.hpp"
-#include "shared/PcapLogger.hpp"
-#include "tether/ethercat/EtherCATDCClass.hpp"
+#include "pcap/PcapLogger.hpp"
+#include "tether/ethercat/DCClass.hpp"
 
 #include <gtest/gtest.h>
 #include <thread>

@@ -1,7 +1,7 @@
 #include "tether/ethercat/DCManager.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
-#include "tether/ethercat/EtherCATPDO.hpp"
-#include "tether/ethercat/EtherCATRaw.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/PDOManager.hpp"
+#include "tether/ethercat/Raw.hpp"
 #include "tether/platform/EspCompat.hpp"
 
 #include <cstring>

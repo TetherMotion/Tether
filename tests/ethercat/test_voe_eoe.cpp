@@ -3,8 +3,8 @@
  * @brief Unit tests for VoE and EoE stub implementations.
  */
 #include <gtest/gtest.h>
-#include "tether/ethercat/EtherCATVoE.hpp"
-#include "tether/ethercat/EtherCATEoE.hpp"
+#include "tether/ethercat/VoE.hpp"
+#include "tether/ethercat/EoE.hpp"
 
 using namespace EtherCAT;
 

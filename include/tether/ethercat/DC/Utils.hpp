@@ -3,8 +3,8 @@
 #include <cstdint>
 #include <string>
 
-#include "tether/ethercat/EtherCATMaster.hpp"
-#include "tether/ethercat/EtherCATDC.hpp"  // for DCRegisters & DC class
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/DC.hpp"  // for DCRegisters & DC class
 #include "logging/Logger.hpp"     // for TETHER_LOGI/W
 
 namespace EtherCAT {

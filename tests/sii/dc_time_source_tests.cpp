@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "tether/ethercat/EtherCATDC.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/DC.hpp"
+#include "tether/ethercat/Master.hpp"
 
 // NOTE: Removed overriding test to allow default implementation coverage when
 // running coverage-enabled test binary. If you need an override test, place it

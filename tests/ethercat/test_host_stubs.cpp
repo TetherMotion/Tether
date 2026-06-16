@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "tether/ethercat/EtherCATPlatform.hpp"
+#include "tether/ethercat/Platform.hpp"
 
 #include <cstdint>
 #include <limits>

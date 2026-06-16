@@ -4,7 +4,7 @@
  */
 
 #include "slave/hal/ISlaveHAL.hpp"
-#include "shared/PcapLogger.hpp"
+#include "pcap/PcapLogger.hpp"
 
 #include <gtest/gtest.h>
 #include <thread>

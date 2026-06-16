@@ -6,7 +6,7 @@
  * ensureRxQueues, flushRxQueue, getStats, and sub-manager accessors.
  */
 #include <gtest/gtest.h>
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/Master.hpp"
 #include <cstring>
 
 using namespace EtherCAT;

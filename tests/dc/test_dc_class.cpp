@@ -19,7 +19,7 @@
 #include <cstring>
 #include <atomic>
 
-#include "tether/ethercat/EtherCATDCClass.hpp"
+#include "tether/ethercat/DCClass.hpp"
 #include "tether/ethercat/IDCTransport.hpp"
 
 using namespace EtherCAT;
