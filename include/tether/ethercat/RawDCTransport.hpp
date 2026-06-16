@@ -14,22 +14,22 @@
 
 namespace EtherCAT {
 
-class EtherCATMaster;
+class Master;
 
 /**
- * @brief IDCTransport backed by EtherCATMaster transport primitives
+ * @brief IDCTransport backed by Master transport primitives
  *
  * Translates slave_index to auto-increment address via
- * EtherCATMaster::adpForSlaveIndex().
+ * Master::adpForSlaveIndex().
  */
 class RawDCTransport final : public IDCTransport {
 public:
     /**
      * @brief Construct a RawDCTransport
      *
-     * @param master  EtherCATMaster instance (must outlive this)
+     * @param master  Master instance (must outlive this)
      */
-    explicit RawDCTransport(EtherCATMaster& master);
+    explicit RawDCTransport(Master& master);
 
     ~RawDCTransport() override = default;
 
@@ -50,7 +50,7 @@ public:
     void delayMs(uint32_t ms) override;
 
 private:
-    EtherCATMaster& master_;
+    Master& master_;
 };
 
 } // namespace EtherCAT

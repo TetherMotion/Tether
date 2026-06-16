@@ -604,11 +604,11 @@ enum class EoEIPFlags : uint32_t {
 // EoEManager — instance-based wrapper
 // ============================================================================
 
-class EtherCATMaster; // forward
+class Master; // forward
 
 class EoEManager {
 public:
-    explicit EoEManager(EtherCATMaster& master) : master_(master) {}
+    explicit EoEManager(Master& master) : master_(master) {}
     ~EoEManager() { EoE::eoe_deinit(); }
 
     bool init()    { return EoE::eoe_init(); }
@@ -617,9 +617,9 @@ public:
     bool isEnabled() const { return EoE::eoe_is_enabled(); }
     void setEnabled(bool en) { EoE::eoe_set_enabled(en); }
 
-    EtherCATMaster& master() { return master_; }
+    Master& master() { return master_; }
 private:
-    EtherCATMaster& master_;
+    Master& master_;
 };
 
 } // namespace EtherCAT

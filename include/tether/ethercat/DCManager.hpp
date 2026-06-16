@@ -14,10 +14,10 @@
 namespace EtherCAT {
 
 // Forward declaration
-class EtherCATMaster;
+class Master;
 
 /**
- * @brief Instance-based Distributed Clock manager for EtherCATMaster.
+ * @brief Instance-based Distributed Clock manager for Master.
  * 
  * DCManager wraps an optional EtherCATDC instance owned by the master.
  * After calling init(), all DC operations are forwarded to the underlying
@@ -25,7 +25,7 @@ class EtherCATMaster;
  */
 class DCManager {
 public:
-    explicit DCManager(EtherCATMaster& master);
+    explicit DCManager(Master& master);
     ~DCManager();
 
     // init needs eth_handle + src_mac → out-of-line
@@ -60,10 +60,10 @@ public:
     EtherCATDC* get() { return dc_instance_ ? dc_instance_.get() : sentinel_.get(); }
     const EtherCATDC* get() const { return dc_instance_ ? dc_instance_.get() : sentinel_.get(); }
 
-    EtherCATMaster& master() { return master_; }
+    Master& master() { return master_; }
 
 private:
-    EtherCATMaster& master_;
+    Master& master_;
     std::unique_ptr<RawDCTransport> transport_;
     std::unique_ptr<EtherCATDC> dc_instance_;
     std::unique_ptr<EtherCATDC> sentinel_;

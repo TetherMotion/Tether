@@ -1,5 +1,5 @@
 /**
- * @file EtherCATSlaveEmulator.hpp
+ * @file SlaveEmulator.hpp
  * @brief Full EtherCAT Slave Emulator for Host-Mode Testing
  * 
  * Implements TODO #6: A complete EtherCAT slave emulator that can run in host mode

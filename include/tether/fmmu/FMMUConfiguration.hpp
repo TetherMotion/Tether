@@ -71,7 +71,7 @@
 
 // Forward declarations
 namespace EtherCAT {
-class EtherCATMaster;
+class Master;
 namespace SII {
 struct SIIData;
 struct SIIFMMU;
@@ -400,7 +400,7 @@ public:
 /**
  * @brief Per-slave FMMU configuration manager.
  *
- * Each EtherCATSlave owns one FMMUManager instance.  All state is local to
+ * Each Slave owns one FMMUManager instance.  All state is local to
  * that slave; there is no global array.
  *
  * @code

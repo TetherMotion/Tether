@@ -133,15 +133,15 @@ public:
     };
 
     DS402Master();
-    explicit DS402Master(const EtherCATMaster::Config& config);
+    explicit DS402Master(const Master::Config& config);
 
     void start(const NetworkInterface& iface, const uint8_t src_mac[6]);
 
     void stop();
     bool isRunning() const;
 
-    EtherCATMaster& ethercatMaster() { return ethercat_master_; }
-    const EtherCATMaster& ethercatMaster() const { return ethercat_master_; }
+    Master& ethercatMaster() { return ethercat_master_; }
+    const Master& ethercatMaster() const { return ethercat_master_; }
 
     uint16_t discoveredDriveCount() const;
     bool waitForDriveCount(uint16_t minimum_drive_count, uint32_t timeout_ms);
@@ -180,10 +180,10 @@ public:
 
     bool startRealtimeMotionControlLoop();
     bool startRealtimeMotionControlLoop(
-        const EtherCATMaster::RealtimeMotionLoopConfig& config);
+        const Master::RealtimeMotionLoopConfig& config);
     bool startPollingMotionControlLoop();
     bool startPollingMotionControlLoop(
-        const EtherCATMaster::PollingMotionLoopConfig& config);
+        const Master::PollingMotionLoopConfig& config);
     void stopMotionControlLoop();
 
     size_t driveCount() const { return drives_.size(); }
@@ -201,7 +201,7 @@ private:
     void ensureSlaveRoleCapacity(uint16_t slave_index);
     CiA402Drive& ensureDrive(uint16_t slave_index);
 
-    EtherCATMaster ethercat_master_;
+    Master ethercat_master_;
     std::vector<std::unique_ptr<CiA402Drive>> drives_;
     std::vector<SlaveRole> slave_roles_;
     std::vector<std::pair<uint16_t, std::unique_ptr<IDriveMotionController>>> motion_controllers_;

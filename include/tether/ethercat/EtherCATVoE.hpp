@@ -377,11 +377,11 @@ static_assert(sizeof(VoEHeader) == 6, "VoEHeader size check");
 // VoEManager — instance-based wrapper
 // ============================================================================
 
-class EtherCATMaster; // forward
+class Master; // forward
 
 class VoEManager {
 public:
-    explicit VoEManager(EtherCATMaster& master) : master_(master) {}
+    explicit VoEManager(Master& master) : master_(master) {}
     ~VoEManager() { VoE::voe_deinit(); }
 
     bool init()   { return VoE::voe_init(); }
@@ -395,9 +395,9 @@ public:
     bool registerHandler(uint32_t vid, VoE::VoEHandler h) { return VoE::voe_register_handler(vid, h); }
     void unregisterHandler(uint32_t vid) { VoE::voe_unregister_handler(vid); }
 
-    EtherCATMaster& master() { return master_; }
+    Master& master() { return master_; }
 private:
-    EtherCATMaster& master_;
+    Master& master_;
 };
 
 } // namespace EtherCAT

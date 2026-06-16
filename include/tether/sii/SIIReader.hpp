@@ -33,7 +33,7 @@
 
 namespace EtherCAT {
 
-class EtherCATMaster;  // forward declaration
+class Master;  // forward declaration
 
 namespace SII {
 
@@ -50,9 +50,9 @@ class SIIReader {
 public:
     /**
      * @brief Constructor
-     * @param master EtherCATMaster instance for network I/O
+     * @param master Master instance for network I/O
      */
-    explicit SIIReader(EtherCATMaster& master);
+    explicit SIIReader(Master& master);
     
     /**
      * @brief Read a single word (16-bit) from EEPROM
@@ -125,7 +125,7 @@ public:
     void setTimeout(uint32_t timeout_ms) { m_timeout_ms = timeout_ms; }
     
 private:
-    EtherCATMaster& m_master;
+    Master& m_master;
     uint32_t m_timeout_ms{500};
     
     // Internal helpers
@@ -204,22 +204,22 @@ private:
  * This is the main entry point for SII reading. It creates temporary
  * reader/parser objects and returns the parsed data.
  * 
- * @param master EtherCATMaster instance for network I/O
+ * @param master Master instance for network I/O
  * @param slave_index Slave index
  * @param out_data Output parsed SII data
  * @return true on success
  */
-bool readSII(EtherCATMaster& master, uint16_t slave_index, SIIData& out_data);
+bool readSII(Master& master, uint16_t slave_index, SIIData& out_data);
 
 /**
  * @brief Read SII identity only (quick read)
  */
-bool readSIIIdentity(EtherCATMaster& master, uint16_t slave_index, SIIIdentity& out_identity);
+bool readSIIIdentity(Master& master, uint16_t slave_index, SIIIdentity& out_identity);
 
 /**
  * @brief Read SII mailbox configuration
  */
-bool readSIIMailbox(EtherCATMaster& master, uint16_t slave_index, SIIMailboxConfig& out_mailbox);
+bool readSIIMailbox(Master& master, uint16_t slave_index, SIIMailboxConfig& out_mailbox);
 
 // ============================================================================
 // Logging/Printing Functions
@@ -268,11 +268,11 @@ void logSIISummary(const SIIData& data, uint16_t slave_index, const char* tag);
  * - Final SM0/SM1 configuration mapping
  * - Protocol flag decoding
  * 
- * @param master EtherCATMaster instance for network I/O
+ * @param master Master instance for network I/O
  * @param slave_index Slave index
  * @param tag ESP_LOG tag
  */
-void debugSIIMailboxDerivation(EtherCATMaster& master, uint16_t slave_index, const char* tag);
+void debugSIIMailboxDerivation(Master& master, uint16_t slave_index, const char* tag);
 
 } // namespace SII
 } // namespace EtherCAT

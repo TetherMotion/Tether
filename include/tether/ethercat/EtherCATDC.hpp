@@ -23,7 +23,7 @@ namespace EtherCAT {
 
 // Forward declarations
 struct NetworkInterface;
-class EtherCATMaster;
+class Master;
 
 namespace DC {
 

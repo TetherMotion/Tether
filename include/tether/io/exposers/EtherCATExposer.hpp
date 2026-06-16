@@ -1,6 +1,6 @@
 /**
  * @file EtherCATExposer.hpp
- * @brief Exposes EtherCATMaster parameters and signals to the IO protocol.
+ * @brief Exposes Master parameters and signals to the IO protocol.
  * @copyright Copyright (C) 2025-2026 Tether Authors
  */
 #pragma once
@@ -26,10 +26,10 @@ namespace tether { namespace io { namespace exposers {
 class EtherCATExposer : public IParameterExposer {
 public:
     /**
-     * @param master   Reference to the EtherCATMaster instance.
+     * @param master   Reference to the Master instance.
      * @param numSlaves  Number of slaves to expose (0 = just master-level entries).
      */
-    explicit EtherCATExposer(tether::ethercat::EtherCATMaster& master,
+    explicit EtherCATExposer(tether::ethercat::Master& master,
                              uint16_t numSlaves = 0)
         : master_(master), numSlaves_(numSlaves) {}
 
@@ -114,7 +114,7 @@ public:
     }
 
 private:
-    tether::ethercat::EtherCATMaster& master_;
+    tether::ethercat::Master& master_;
     uint16_t numSlaves_;
 };
 

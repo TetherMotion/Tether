@@ -85,9 +85,9 @@ struct EtherCATSlaveConfig {
  * 
  * Implement this for your specific EtherCAT master library.
  */
-class EtherCATMasterInterface {
+class MasterInterface {
 public:
-    virtual ~EtherCATMasterInterface() = default;
+    virtual ~MasterInterface() = default;
     
     /**
      * @brief Read process data from slave
@@ -135,7 +135,7 @@ public:
 /**
  * @brief Shared pointer for master interface
  */
-using EtherCATMasterPtr = std::shared_ptr<EtherCATMasterInterface>;
+using EtherCATMasterPtr = std::shared_ptr<MasterInterface>;
 
 /**
  * @brief EtherCAT drive backend

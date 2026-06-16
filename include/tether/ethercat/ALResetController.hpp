@@ -15,7 +15,7 @@
 
 namespace EtherCAT {
 
-class EtherCATMaster;
+class Master;
 
 // ============================================================================
 // AL Reset Result
@@ -80,10 +80,10 @@ using ALResetProgressCallback = std::function<void(
 class ALResetController {
 public:
     /**
-     * @brief Construct controller bound to an EtherCATMaster instance
-     * @param master Reference to the active EtherCATMaster
+     * @brief Construct controller bound to an Master instance
+     * @param master Reference to the active Master
      */
-    explicit ALResetController(EtherCATMaster& master);
+    explicit ALResetController(Master& master);
 
     /**
      * @brief Reset a single slave to the target ESM state
@@ -115,7 +115,7 @@ public:
     void clearProgressCallback();
 
 private:
-    EtherCATMaster& master_;
+    Master& master_;
     ALResetProgressCallback progress_cb_;
 };
 

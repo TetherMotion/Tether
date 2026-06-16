@@ -11,7 +11,7 @@
  *
  * @code
  *   LinuxDevNullNetworkInterface devnull;
- *   EtherCAT::EtherCATMaster master;
+ *   EtherCAT::Master master;
  *   uint8_t mac[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
  *   master.start(devnull.iface(), mac);
  * @endcode
