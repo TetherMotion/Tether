@@ -412,6 +412,33 @@ struct __attribute__((packed)) SyncManagerRegs {
 };
 static_assert(sizeof(SyncManagerRegs) == 8, "SyncManagerRegs must be 8 bytes");
 
+// ============================================================================
+// Sync Manager status bit masks (ETG.1000.4, Figure 36 — TSYNCMAN.status)
+// ============================================================================
+
+enum : uint8_t {
+    EC_SM_STATUS_WRITE_EVENT      = 0x01, ///< Bit 0: Write event (master wrote to SM)
+    EC_SM_STATUS_READ_EVENT       = 0x02, ///< Bit 1: Read event (master read from SM)
+    EC_SM_STATUS_MBXFULL          = 0x08, ///< Bit 3: Mailbox/buffer full (slave finished)
+    EC_SM_STATUS_READ_BUFFER_FULL = 0x40, ///< Bit 6: Read buffer full
+    EC_SM_STATUS_WRITE_BUFFER_FULL= 0x80, ///< Bit 7: Write buffer full
+};
+
+/**
+ * @brief Compute the ESC register address of a Sync Manager's Status byte.
+ *
+ * Each Sync Manager occupies 8 bytes of register space, starting at 0x0800:
+ *   Base  = 0x0800 + (sm_index * 8)
+ *   Status= Base + 5
+ *
+ * @param sm_index Sync Manager index (0..15)
+ * @return ESC register address for the SM status byte
+ */
+static inline uint16_t sm_status_address(uint8_t sm_index)
+{
+    return static_cast<uint16_t>(EC_REG_SM0 + (sm_index * 8u) + 5u);
+}
+
 /**
  * @brief Mailbox header structure
  * 
@@ -437,7 +464,7 @@ static inline uint8_t mbx_type_with_cnt(uint8_t type_low_nibble, uint8_t cnt)
 {
     // EtherCAT mailbox header encodes the counter in the high nibble of the TYPE byte.
     // SOEM macro: MBX_HDR_SET_CNT(cnt) == (cnt << 4) and ORs it into mbxtype.
-    return static_cast<uint8_t>(((cnt & 0x0Fu) << 4) | (type_low_nibble & 0x0Fu));
+    return static_cast<uint8_t>(((cnt & 0x07u) << 4) | (type_low_nibble & 0x0Fu));
 }
 
 /**
