@@ -13,7 +13,9 @@
 #define TETHER_VERSION "@Tether_VERSION@"
 
 // Feature flags
+#ifndef TETHER_ENABLE_ETHERCAT
 #cmakedefine01 TETHER_ENABLE_ETHERCAT
+#endif
 #cmakedefine01 TETHER_ENABLE_CIA402
 #cmakedefine01 TETHER_ENABLE_CIA301
 #cmakedefine01 TETHER_ENABLE_CIA401
