@@ -49,4 +49,4 @@ set_target_properties(tether_common PROPERTIES
 )
 
 # Export for other components
-set(TETHER_COMMON_LIBRARY tether_common PARENT_SCOPE)
+set(TETHER_COMMON_LIBRARY tether_common)

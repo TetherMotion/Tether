@@ -47,4 +47,4 @@ set_target_properties(tether_export PROPERTIES
 )
 
 # Export for other components
-set(TETHER_EXPORT_LIBRARY tether_export PARENT_SCOPE)
+set(TETHER_EXPORT_LIBRARY tether_export)

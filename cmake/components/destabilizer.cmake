@@ -44,4 +44,4 @@ set_target_properties(tether_destabilizer PROPERTIES
     CXX_STANDARD_REQUIRED ON
 )
 
-set(TETHER_DESTABILIZER_LIBRARY tether_destabilizer PARENT_SCOPE)
+set(TETHER_DESTABILIZER_LIBRARY tether_destabilizer)

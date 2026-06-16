@@ -61,4 +61,4 @@ set_target_properties(tether_hal PROPERTIES
 )
 
 # Export for other components
-set(TETHER_HAL_LIBRARY tether_hal PARENT_SCOPE)
+set(TETHER_HAL_LIBRARY tether_hal)

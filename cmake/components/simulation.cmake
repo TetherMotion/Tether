@@ -126,4 +126,4 @@ set_target_properties(tether_simulation PROPERTIES
     CXX_STANDARD_REQUIRED ON
 )
 
-set(TETHER_SIMULATION_LIBRARY tether_simulation PARENT_SCOPE)
+set(TETHER_SIMULATION_LIBRARY tether_simulation)

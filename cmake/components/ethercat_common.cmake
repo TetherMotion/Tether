@@ -65,4 +65,4 @@ set_target_properties(tether_ethercat_common PROPERTIES
 )
 
 # Export for other components
-set(TETHER_ETHERCAT_COMMON_LIBRARY tether_ethercat_common PARENT_SCOPE)
+set(TETHER_ETHERCAT_COMMON_LIBRARY tether_ethercat_common)
