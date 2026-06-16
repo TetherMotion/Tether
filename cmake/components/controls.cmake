@@ -86,4 +86,4 @@ set_target_properties(tether_controls PROPERTIES
 )
 
 # Export for other components
-set(TETHER_CONTROLS_LIBRARY tether_controls PARENT_SCOPE)
+set(TETHER_CONTROLS_LIBRARY tether_controls)

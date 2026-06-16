@@ -37,4 +37,4 @@ set_target_properties(tether_gcode PROPERTIES
 )
 
 # Export for other components
-set(TETHER_GCODE_LIBRARY tether_gcode PARENT_SCOPE)
+set(TETHER_GCODE_LIBRARY tether_gcode)

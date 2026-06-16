@@ -67,4 +67,4 @@ set_target_properties(tether_motion_planner PROPERTIES
 )
 
 # Export for other components
-set(TETHER_MOTION_PLANNER_LIBRARY tether_motion_planner PARENT_SCOPE)
+set(TETHER_MOTION_PLANNER_LIBRARY tether_motion_planner)

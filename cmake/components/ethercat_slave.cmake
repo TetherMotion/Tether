@@ -54,8 +54,8 @@ add_library(tether::ethercat_slave ALIAS tether_ethercat_slave)
         CXX_STANDARD_REQUIRED ON
     )
     
-    set(TETHER_ETHERCAT_SLAVE_LIBRARY tether_ethercat_slave PARENT_SCOPE)
+    set(TETHER_ETHERCAT_SLAVE_LIBRARY tether_ethercat_slave)
 else()
     message(STATUS "No EtherCAT slave sources found, skipping tether_ethercat_slave")
-    set(TETHER_ETHERCAT_SLAVE_LIBRARY "" PARENT_SCOPE)
+    set(TETHER_ETHERCAT_SLAVE_LIBRARY "")
 endif()

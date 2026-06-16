@@ -119,4 +119,4 @@ set_target_properties(tether_ethercat_master PROPERTIES
 )
 
 # Export for other components
-set(TETHER_ETHERCAT_MASTER_LIBRARY tether_ethercat_master PARENT_SCOPE)
+set(TETHER_ETHERCAT_MASTER_LIBRARY tether_ethercat_master)

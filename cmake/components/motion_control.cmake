@@ -72,4 +72,4 @@ set_target_properties(tether_motion_control PROPERTIES
 )
 
 # Export for other components
-set(TETHER_MOTION_CONTROL_LIBRARY tether_motion_control PARENT_SCOPE)
+set(TETHER_MOTION_CONTROL_LIBRARY tether_motion_control)

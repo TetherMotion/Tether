@@ -80,5 +80,5 @@ set_target_properties(tether_io_protocol PROPERTIES
 )
 
 # Export for other components
-set(TETHER_IO_PROTOCOL_LIBRARY tether_io_protocol PARENT_SCOPE)
-set(TETHER_SLIPSPEED_LIBRARY slipspeed PARENT_SCOPE)
+set(TETHER_IO_PROTOCOL_LIBRARY tether_io_protocol)
+set(TETHER_SLIPSPEED_LIBRARY slipspeed)
