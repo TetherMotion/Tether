@@ -93,17 +93,23 @@ SlaveError Slave::configureMailbox(Tether::Platform::LogLevel log_level) {
 }
 
 SlaveError Slave::configureMailbox(
-    uint16_t wr_addr, uint16_t wr_len,
-    uint16_t rd_addr, uint16_t rd_len,
+    const MailboxSyncManagerConfig& mbox_out,
+    const MailboxSyncManagerConfig& mbox_in,
     uint16_t protocols)
 {
-    master_.setMailboxOverride(index_, wr_addr, wr_len, rd_addr, rd_len, protocols);
+    master_.setMailboxOverride(index_,
+                               mbox_out.address, mbox_out.length,
+                               mbox_in.address, mbox_in.length,
+                               protocols);
     // Configure SDO manager with these mailbox params
-    master_.sdoManager().configureSlaveMailbox(index_, wr_addr, wr_len, rd_addr, rd_len);
+    master_.sdoManager().configureSlaveMailbox(index_,
+                                               mbox_out.address, mbox_out.length,
+                                               mbox_in.address, mbox_in.length);
     mailbox_configured_ = true;
     TETHER_LOGI( TAG,
         "Slave %u: Mailbox configured (wr=0x%04X/%u, rd=0x%04X/%u, proto=0x%04X)",
-        index_, wr_addr, wr_len, rd_addr, rd_len, protocols);
+        index_, mbox_out.address, mbox_out.length,
+        mbox_in.address, mbox_in.length, protocols);
     return SlaveError::Ok;
 }
 
@@ -618,7 +624,8 @@ void NonExistingSlave::logCritical(const char* method) const {
 SlaveError NonExistingSlave::configureMailbox(Tether::Platform::LogLevel) {
     logCritical("configureMailbox"); return SlaveError::SlaveNotFound;
 }
-SlaveError NonExistingSlave::configureMailbox(uint16_t, uint16_t, uint16_t, uint16_t, uint16_t) {
+SlaveError NonExistingSlave::configureMailbox(const MailboxSyncManagerConfig&,
+                                               const MailboxSyncManagerConfig&, uint16_t) {
     logCritical("configureMailbox"); return SlaveError::SlaveNotFound;
 }
 void NonExistingSlave::assumeMailboxAlreadyConfigured() {

@@ -41,6 +41,7 @@
 
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/CachedSIIReader.hpp"
+#include "tether/ethercat/Mailbox.hpp"
 #include "tether/ethercat/SyncManager.hpp"
 #include "tether/fmmu/FMMUConfiguration.hpp"
 #include "tether/platform/Platform.hpp"
@@ -244,8 +245,8 @@ public:
      * @return SlaveError::Ok on success
      */
     virtual SlaveError configureMailbox(
-        uint16_t wr_addr, uint16_t wr_len,
-        uint16_t rd_addr, uint16_t rd_len,
+        const MailboxSyncManagerConfig& mbox_out,
+        const MailboxSyncManagerConfig& mbox_in,
         uint16_t protocols);
 
     /**
@@ -482,7 +483,8 @@ public:
     NonExistingSlave(Master& master, uint16_t index);
 
     SlaveError configureMailbox(Tether::Platform::LogLevel) override;
-    SlaveError configureMailbox(uint16_t, uint16_t, uint16_t, uint16_t, uint16_t) override;
+    SlaveError configureMailbox(const MailboxSyncManagerConfig&,
+                                 const MailboxSyncManagerConfig&, uint16_t) override;
     void assumeMailboxAlreadyConfigured() override;
 
     SlaveError configurePDOSyncManagers() override;

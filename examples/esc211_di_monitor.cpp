@@ -480,8 +480,14 @@ int main(int argc, char** argv) {
     }
 
     // ---- Configure mailbox + transition to PRE-OP ----
+    // Override with ESI values to avoid "Mailbox size too large" from SII:
+    //   SM0 (MBoxOut / M->S): addr=0x1000 len=0x200 ctrl=0x26
+    //   SM1 (MBoxIn  / S->M): addr=0x1200 len=0x200 ctrl=0x22  proto=CoE (0x0004)
     TETHER_LOGI(TAG, "Configuring mailbox for slave %d...", slave_idx);
-    auto mb_err = sl.configureMailbox(Tether::Platform::LogLevel::Info);
+    auto mb_err = sl.configureMailbox(
+        {.address = 0x1000, .length = 0x0200},
+        {.address = 0x1200, .length = 0x0200},
+        0x0004);
     if (mb_err != EtherCAT::SlaveError::Ok) {
         TETHER_LOGE(TAG, "Mailbox config failed: %s", EtherCAT::slaveErrorToString(mb_err));
         master.stop();
