@@ -3,7 +3,7 @@
  * @brief Per-slave state machine for EtherCAT slave lifecycle management
  *
  * @details
- * EtherCATSlave enforces correct EtherCAT state transitions on a per-slave
+ * Slave enforces correct EtherCAT state transitions on a per-slave
  * basis.  The master owns a vector of slaves (one per discovered device) and
  * exposes them through `master.slave(index)`.
  *
@@ -26,7 +26,7 @@
  * ## NonExistingSlave
  *
  * When the caller requests a slave index that does not exist,
- * `EtherCATMaster::slave()` returns a reference to a global
+ * `Master::slave()` returns a reference to a global
  * `NonExistingSlave` instance whose methods all log a CRITICAL error and
  * return `SlaveError::SlaveNotFound`.
  */
@@ -48,7 +48,7 @@
 namespace EtherCAT {
 
 // Forward declarations
-class EtherCATMaster;
+class Master;
 
 namespace SDO {
     class SDOManager;
@@ -105,7 +105,7 @@ void enableFmmuDebug(bool enable);
 // ============================================================================
 
 /**
- * @brief Detailed error codes returned by EtherCATSlave methods.
+ * @brief Detailed error codes returned by Slave methods.
  */
 enum class SlaveError : uint8_t {
     Ok = 0,                         ///< Operation completed successfully
@@ -162,13 +162,13 @@ inline const char* slaveErrorToString(SlaveError e) {
 }
 
 // ============================================================================
-// EtherCATSlave — per-slave state machine
+// Slave — per-slave state machine
 // ============================================================================
 
 /**
  * @brief Per-slave state machine that enforces safe EtherCAT ESM transitions.
  *
- * Instances are owned by EtherCATMaster.  The slave holds a back-reference
+ * Instances are owned by Master.  The slave holds a back-reference
  * to the master so it can use transport, SDO, PDO, and SII facilities.
  *
  * The class is **not** thread-safe by itself; the master serialises calls.
@@ -183,16 +183,16 @@ inline const char* slaveErrorToString(SlaveError e) {
  *   s.transitionToOp();
  * @endcode
  */
-class EtherCATSlave : public fmmu::IFMMUTransport {
+class Slave : public fmmu::IFMMUTransport {
 public:
     /**
      * @brief Construct a slave bound to a master at a given position.
-     * @param master  Owning EtherCATMaster instance
+     * @param master  Owning Master instance
      * @param index   Slave position on the bus (0-based)
      */
-    EtherCATSlave(EtherCATMaster& master, uint16_t index);
+    Slave(Master& master, uint16_t index);
 
-    virtual ~EtherCATSlave() = default;
+    virtual ~Slave() = default;
 
     // -- Identification -----------------------------------------------------
 
@@ -448,11 +448,11 @@ public:
     // -- Link to master ------------------------------------------------------
 
     /** @brief Access the owning master. */
-    EtherCATMaster& master() { return master_; }
-    const EtherCATMaster& master() const { return master_; }
+    Master& master() { return master_; }
+    const Master& master() const { return master_; }
 
 protected:
-    EtherCATMaster& master_;
+    Master& master_;
     uint16_t index_;
 
     bool mailbox_configured_ = false;
@@ -472,14 +472,14 @@ protected:
  * Every method logs a CRITICAL error and returns `SlaveError::SlaveNotFound`.
  * The log message includes guidance on how to fix the problem.
  */
-class NonExistingSlave final : public EtherCATSlave {
+class NonExistingSlave final : public Slave {
 public:
     /**
      * @brief Construct a NonExistingSlave.
      * @param master   Reference back to the master
      * @param index    The invalid index that was requested
      */
-    NonExistingSlave(EtherCATMaster& master, uint16_t index);
+    NonExistingSlave(Master& master, uint16_t index);
 
     SlaveError configureMailbox(Tether::Platform::LogLevel) override;
     SlaveError configureMailbox(uint16_t, uint16_t, uint16_t, uint16_t, uint16_t) override;

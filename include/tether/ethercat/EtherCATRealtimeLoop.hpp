@@ -25,7 +25,7 @@
  *   auto sync_fn = [&dc]()  { return dc.sendSyncFrame(); };
  *   auto time_fn = [&dc]()  { return dc.getMasterTimeNs(); };
  *
- *   EtherCATRealtimeLoop loop(pdo_fn, sync_fn, time_fn, config);
+ *   RealtimeLoop loop(pdo_fn, sync_fn, time_fn, config);
  *   loop.setPDOEnabled(true);
  *   loop.start();
  *   // ...
@@ -46,7 +46,7 @@
 
 namespace EtherCAT {
 
-class EtherCATRealtimeLoop {
+class RealtimeLoop {
 public:
     /// Callback signatures
     using ExchangeFunc = std::function<bool()>;
@@ -102,18 +102,18 @@ public:
      * @param time_source   Returns current monotonic time in nanoseconds
      * @param config        Timing and jitter configuration
      */
-    EtherCATRealtimeLoop(ExchangeFunc pdo_exchange,
+    RealtimeLoop(ExchangeFunc pdo_exchange,
                           SyncFunc     dc_sync,
                           TimeFunc     time_source,
                           const Config& config = Config::defaults());
 
-    ~EtherCATRealtimeLoop();
+    ~RealtimeLoop();
 
     // Non-copyable, non-movable
-    EtherCATRealtimeLoop(const EtherCATRealtimeLoop&) = delete;
-    EtherCATRealtimeLoop& operator=(const EtherCATRealtimeLoop&) = delete;
-    EtherCATRealtimeLoop(EtherCATRealtimeLoop&&) = delete;
-    EtherCATRealtimeLoop& operator=(EtherCATRealtimeLoop&&) = delete;
+    RealtimeLoop(const RealtimeLoop&) = delete;
+    RealtimeLoop& operator=(const RealtimeLoop&) = delete;
+    RealtimeLoop(RealtimeLoop&&) = delete;
+    RealtimeLoop& operator=(RealtimeLoop&&) = delete;
 
     /**
      * @brief Start both realtime threads (PDO + DC)

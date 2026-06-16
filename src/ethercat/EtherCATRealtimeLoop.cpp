@@ -20,7 +20,7 @@ static const char* TAG = "ethercat_rt_loop";
 // Constructor / Destructor
 // ============================================================================
 
-EtherCATRealtimeLoop::EtherCATRealtimeLoop(ExchangeFunc pdo_exchange,
+RealtimeLoop::RealtimeLoop(ExchangeFunc pdo_exchange,
                                             SyncFunc     dc_sync,
                                             TimeFunc     time_source,
                                             const Config& config)
@@ -31,7 +31,7 @@ EtherCATRealtimeLoop::EtherCATRealtimeLoop(ExchangeFunc pdo_exchange,
 {
 }
 
-EtherCATRealtimeLoop::~EtherCATRealtimeLoop() {
+RealtimeLoop::~RealtimeLoop() {
     stop();
 }
 
@@ -39,7 +39,7 @@ EtherCATRealtimeLoop::~EtherCATRealtimeLoop() {
 // Public API
 // ============================================================================
 
-bool EtherCATRealtimeLoop::start() {
+bool RealtimeLoop::start() {
     if (running_.load(std::memory_order_acquire)) {
         TETHER_LOGW(TAG, "Realtime loop already running");
         return false;
@@ -78,7 +78,7 @@ bool EtherCATRealtimeLoop::start() {
     return true;
 }
 
-void EtherCATRealtimeLoop::stop() {
+void RealtimeLoop::stop() {
     running_.store(false, std::memory_order_release);
 
     stopPDOThread();
@@ -87,7 +87,7 @@ void EtherCATRealtimeLoop::stop() {
     TETHER_LOGI(TAG, "Realtime loop stopped");
 }
 
-EtherCATRealtimeLoop::Stats EtherCATRealtimeLoop::getStats() const {
+RealtimeLoop::Stats RealtimeLoop::getStats() const {
     Stats s{};
 
     // PDO stats
@@ -113,7 +113,7 @@ EtherCATRealtimeLoop::Stats EtherCATRealtimeLoop::getStats() const {
     return s;
 }
 
-EtherCATRealtimeLoop::ThreadDiagnostics EtherCATRealtimeLoop::getDiagnostics() const {
+RealtimeLoop::ThreadDiagnostics RealtimeLoop::getDiagnostics() const {
     ThreadDiagnostics d{};
     if (pdo_jitter_monitor_) d.pdo_jitter = pdo_jitter_monitor_->getStats();
     if (dc_jitter_monitor_)  d.dc_jitter  = dc_jitter_monitor_->getStats();
@@ -124,7 +124,7 @@ EtherCATRealtimeLoop::ThreadDiagnostics EtherCATRealtimeLoop::getDiagnostics() c
 // PDO thread
 // ============================================================================
 
-bool EtherCATRealtimeLoop::startPDOThread() {
+bool RealtimeLoop::startPDOThread() {
     // Create jitter monitor
     pdo_jitter_monitor_ = std::make_unique<RealtimeJitterMonitor>(config_.pdo_jitter, "pdo");
 
@@ -192,7 +192,7 @@ bool EtherCATRealtimeLoop::startPDOThread() {
     return true;
 }
 
-void EtherCATRealtimeLoop::stopPDOThread() {
+void RealtimeLoop::stopPDOThread() {
     if (pdo_timer_) {
         pdo_timer_->stop();
         pdo_timer_.reset();
@@ -209,16 +209,16 @@ void EtherCATRealtimeLoop::stopPDOThread() {
     pdo_event_.reset();
 }
 
-bool EtherCATRealtimeLoop::pdoTimerCallback(void* user_data) {
-    auto* loop = static_cast<EtherCATRealtimeLoop*>(user_data);
+bool RealtimeLoop::pdoTimerCallback(void* user_data) {
+    auto* loop = static_cast<RealtimeLoop*>(user_data);
     if (loop && loop->pdo_event_) {
         loop->pdo_event_->signal();
     }
     return false;
 }
 
-void EtherCATRealtimeLoop::pdoTaskEntry(void* param) {
-    auto* loop = static_cast<EtherCATRealtimeLoop*>(param);
+void RealtimeLoop::pdoTaskEntry(void* param) {
+    auto* loop = static_cast<RealtimeLoop*>(param);
     if (!loop) return;
 
     TETHER_LOGI(TAG, "PDO realtime task started");
@@ -265,7 +265,7 @@ void EtherCATRealtimeLoop::pdoTaskEntry(void* param) {
 // DC thread
 // ============================================================================
 
-bool EtherCATRealtimeLoop::startDCThread() {
+bool RealtimeLoop::startDCThread() {
     const uint32_t dc_period_us = config_.cycle_period_us * config_.sync_interval_cycles;
 
     // Create jitter monitor
@@ -335,7 +335,7 @@ bool EtherCATRealtimeLoop::startDCThread() {
     return true;
 }
 
-void EtherCATRealtimeLoop::stopDCThread() {
+void RealtimeLoop::stopDCThread() {
     if (dc_timer_) {
         dc_timer_->stop();
         dc_timer_.reset();
@@ -352,16 +352,16 @@ void EtherCATRealtimeLoop::stopDCThread() {
     dc_event_.reset();
 }
 
-bool EtherCATRealtimeLoop::dcTimerCallback(void* user_data) {
-    auto* loop = static_cast<EtherCATRealtimeLoop*>(user_data);
+bool RealtimeLoop::dcTimerCallback(void* user_data) {
+    auto* loop = static_cast<RealtimeLoop*>(user_data);
     if (loop && loop->dc_event_) {
         loop->dc_event_->signal();
     }
     return false;
 }
 
-void EtherCATRealtimeLoop::dcTaskEntry(void* param) {
-    auto* loop = static_cast<EtherCATRealtimeLoop*>(param);
+void RealtimeLoop::dcTaskEntry(void* param) {
+    auto* loop = static_cast<RealtimeLoop*>(param);
     if (!loop) return;
 
     TETHER_LOGI(TAG, "DC realtime task started");

@@ -1,6 +1,6 @@
 /**
  * @file EtherCATMaster_transport.cpp
- * @brief EtherCATMaster — Low-level datagram transport, register I/O and packet debug
+ * @brief Master — Low-level datagram transport, register I/O and packet debug
  */
 
 #include "tether/ethercat/EtherCATMaster.hpp"
@@ -36,10 +36,10 @@ static constexpr uint32_t  kTxRetryDelayUs = 50;
 
 static const char* TAG = "ethercat";
 
-// Global debug flag for al-state (shared with EtherCATSlave)
+// Global debug flag for al-state (shared with Slave)
 extern bool g_debug_statemachine;
 
-// Global debug flags for tx/rx packet logging (shared with EtherCATSlave)
+// Global debug flags for tx/rx packet logging (shared with Slave)
 extern bool g_debug_tx_packets;
 extern bool g_debug_rx_packets;
 
@@ -47,7 +47,7 @@ extern bool g_debug_rx_packets;
 extern bool g_debug_rx_pdo;
 extern bool g_debug_tx_pdo;
 
-bool EtherCATMaster::sendDatagram(Command cmd, uint8_t idx,
+bool Master::sendDatagram(Command cmd, uint8_t idx,
                                   SlaveAddress slave_address, RegisterAddress register_address,
                                   const void* data, uint16_t datalen,
                                   bool roundtrip)
@@ -65,7 +65,7 @@ bool EtherCATMaster::sendDatagram(Command cmd, uint8_t idx,
     return sendSingleDatagram(routed_command, idx, slave_address.raw(), register_address.raw(), data, datalen, roundtrip);
 }
 
-bool EtherCATMaster::writeRegister(SlaveAddress slave_address, RegisterAddress register_address,
+bool Master::writeRegister(SlaveAddress slave_address, RegisterAddress register_address,
                                    const void* data, uint16_t len,
                                    unsigned int timeout_ms)
 {
@@ -89,14 +89,14 @@ bool EtherCATMaster::writeRegister(SlaveAddress slave_address, RegisterAddress r
     return result.success && result.wkc > 0;
 }
 
-bool EtherCATMaster::writeRegister(SlaveAddress slave_address, RegisterAddress register_address,
+bool Master::writeRegister(SlaveAddress slave_address, RegisterAddress register_address,
                                    uint16_t value)
 {
     const uint16_t little_endian_value = Raw::host_to_le16(value);
     return writeRegister(slave_address, register_address, &little_endian_value, sizeof(little_endian_value), 200);
 }
 
-bool EtherCATMaster::readRegister(SlaveAddress slave_address, RegisterAddress register_address,
+bool Master::readRegister(SlaveAddress slave_address, RegisterAddress register_address,
                                   void* out, uint16_t len,
                                   unsigned int timeout_ms)
 {
@@ -156,7 +156,7 @@ bool EtherCATMaster::readRegister(SlaveAddress slave_address, RegisterAddress re
 // Wait helpers
 // ============================================================================
 
-bool EtherCATMaster::waitForResponseIdx(uint8_t idx, unsigned int timeout_ms,
+bool Master::waitForResponseIdx(uint8_t idx, unsigned int timeout_ms,
                                          RxDatagram& out)
 {
     if (cancel_requested_.load(std::memory_order_acquire)) {
@@ -178,7 +178,7 @@ bool EtherCATMaster::waitForResponseIdx(uint8_t idx, unsigned int timeout_ms,
     return false;
 }
 
-bool EtherCATMaster::waitForResponseAdo(uint16_t ado, Command cmd,
+bool Master::waitForResponseAdo(uint16_t ado, Command cmd,
                                          unsigned int timeout_ms,
                                          RxDatagram& out)
 {
@@ -205,7 +205,7 @@ bool EtherCATMaster::waitForResponseAdo(uint16_t ado, Command cmd,
     return false;
 }
 
-size_t EtherCATMaster::preRegisterResponseWaiter(uint8_t idx,
+size_t Master::preRegisterResponseWaiter(uint8_t idx,
                                                   uint8_t* buffer,
                                                   size_t buffer_size)
 {
@@ -213,7 +213,7 @@ size_t EtherCATMaster::preRegisterResponseWaiter(uint8_t idx,
     return packet_router_.preRegisterWaiter(filter, buffer, buffer_size);
 }
 
-WaitResult EtherCATMaster::waitForPreRegistered(size_t slot, uint32_t timeout_ms)
+WaitResult Master::waitForPreRegistered(size_t slot, uint32_t timeout_ms)
 {
     if (cancel_requested_.load(std::memory_order_acquire)) {
         return WaitResult::Timeout();
@@ -225,7 +225,7 @@ WaitResult EtherCATMaster::waitForPreRegistered(size_t slot, uint32_t timeout_ms
 // Index allocation
 // ============================================================================
 
-uint8_t EtherCATMaster::allocIdx()
+uint8_t Master::allocIdx()
 {
     uint8_t idx;
     do { idx = next_idx_.fetch_add(1, std::memory_order_relaxed); }
@@ -243,7 +243,7 @@ struct MailboxOverride {
     uint16_t proto{0};
 };
 
-void EtherCATMaster::setMailboxOverride(SlaveAddress slave_address, uint16_t wr_addr, uint16_t wr_len,
+void Master::setMailboxOverride(SlaveAddress slave_address, uint16_t wr_addr, uint16_t wr_len,
                                        uint16_t rd_addr, uint16_t rd_len, uint16_t proto)
 {
     uint16_t slave_index = 0;
@@ -409,7 +409,7 @@ static void printEtherCATFrame(const uint8_t* frame, size_t length, bool is_tx, 
 // Transport primitives
 // ============================================================================
 
-bool EtherCATMaster::sendRawFrame(const void* buf, size_t len)
+bool Master::sendRawFrame(const void* buf, size_t len)
 {
     if (g_debug_tx_packets) {
         printEtherCATFrame(reinterpret_cast<const uint8_t*>(buf), len, true, false);
@@ -420,7 +420,7 @@ bool EtherCATMaster::sendRawFrame(const void* buf, size_t len)
     return false;
 }
 
-bool EtherCATMaster::sendSingleDatagram(Command cmd, uint8_t idx,
+bool Master::sendSingleDatagram(Command cmd, uint8_t idx,
                                          uint16_t adp, uint16_t ado,
                                          const void* data, uint16_t datalen,
                                          bool roundtrip)
@@ -529,7 +529,7 @@ bool EtherCATMaster::sendSingleDatagram(Command cmd, uint8_t idx,
 }
 
 
-void EtherCATMaster::resetIdx()
+void Master::resetIdx()
 {
     next_idx_.store(0, std::memory_order_relaxed);
 }
@@ -538,7 +538,7 @@ void EtherCATMaster::resetIdx()
 // Internal: frame parsing
 // ============================================================================
 
-void EtherCATMaster::parseEtherCATFrame(const uint8_t* frame, size_t length)
+void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
 {
     using namespace Raw;  // for le16_to_host, Command, RxDatagram, etc.
 

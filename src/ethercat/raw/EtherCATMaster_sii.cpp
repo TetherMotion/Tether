@@ -1,6 +1,6 @@
 /**
  * @file EtherCATMaster_sii.cpp
- * @brief EtherCATMaster — SII/EEPROM access, mailbox auto-configuration and discovery summary
+ * @brief Master — SII/EEPROM access, mailbox auto-configuration and discovery summary
  */
 
 #include "tether/ethercat/EtherCATMaster.hpp"
@@ -32,10 +32,10 @@ namespace EtherCAT {
 
 static const char* TAG = "ethercat";
 
-// Global debug flag for al-state (shared with EtherCATSlave)
+// Global debug flag for al-state (shared with Slave)
 extern bool g_debug_statemachine;
 
-// Global debug flags for tx/rx packet logging (shared with EtherCATSlave)
+// Global debug flags for tx/rx packet logging (shared with Slave)
 extern bool g_debug_tx_packets;
 extern bool g_debug_rx_packets;
 
@@ -47,13 +47,13 @@ extern bool g_debug_tx_pdo;
 // SII / EEPROM — delegate to existing Raw:: functions for now
 // ============================================================================
 
-bool EtherCATMaster::siiReadString(uint16_t slave_index, uint16_t string_number,
+bool Master::siiReadString(uint16_t slave_index, uint16_t string_number,
                                     char* out, size_t out_cap)
 {
     return Raw::sii_read_string(*this, slave_index, string_number, out, out_cap);
 }
 
-bool EtherCATMaster::configureMailboxFromSii(uint16_t slave_index,
+bool Master::configureMailboxFromSii(uint16_t slave_index,
                                               uint16_t* wr_addr, uint16_t* wr_len,
                                               uint16_t* rd_addr, uint16_t* rd_len,
                                               uint16_t* mbx_proto)
@@ -63,7 +63,7 @@ bool EtherCATMaster::configureMailboxFromSii(uint16_t slave_index,
                                            mbx_proto);
 }
 
-bool EtherCATMaster::autoConfigureMailbox(SlaveAddress slave_address, Tether::Platform::LogLevel log_level)
+bool Master::autoConfigureMailbox(SlaveAddress slave_address, Tether::Platform::LogLevel log_level)
 {
     const char* local_tag = "autoMbox";
     uint16_t slave_index = 0;
@@ -197,7 +197,7 @@ bool EtherCATMaster::autoConfigureMailbox(SlaveAddress slave_address, Tether::Pl
     
     return true;
 }
-void EtherCATMaster::logDiscoveredSlavesSummary(const char* tag)
+void Master::logDiscoveredSlavesSummary(const char* tag)
 {
     const uint16_t n = getDiscoveredSlaveCount();
     TETHER_LOGI(tag, "Discovered %u slave(s)", n);
