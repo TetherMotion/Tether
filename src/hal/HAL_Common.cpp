@@ -6,7 +6,6 @@
  * - IEthernet.hpp (VlanEthernetWrapper, TrafficSplitter, LoggingEthernetWrapper)
  * - HAL.hpp (HALInstance)
  *
- * PcapNGLoggerImpl is in PcapNGLogger.cpp
  * StateMachineLoggerImpl is in StateMachineLogger.cpp
  */
 
@@ -15,9 +14,9 @@
 #include "hal/IThreading.hpp"
 #include "hal/IClock.hpp"
 #include "hal/ILogger.hpp"
-#include "hal/IPcapLogger.hpp"
 #include "hal/StateMachineLogger.hpp"
 #include "hal/HALTypes.hpp"
+#include "packetloggers/PacketLogger.hpp"
 
 #include <cstring>
 #include <cstdio>
@@ -431,18 +430,12 @@ const char* TrafficSplitter::getInterfaceName() const {
 }
 
 // ============================================================================
-// PcapNG Logger - see PcapNGLogger.cpp
-// ============================================================================
-
-// Forward declaration - implementation in PcapNGLogger.cpp
-class PcapNGLoggerImpl;
-
-// ============================================================================
 // Logging Ethernet Wrapper Implementation
 // ============================================================================
 
-LoggingEthernetWrapper::LoggingEthernetWrapper(std::unique_ptr<IEthernet> inner,
-                                               std::unique_ptr<IPcapLogger> logger)
+LoggingEthernetWrapper::LoggingEthernetWrapper(
+        std::unique_ptr<IEthernet> inner,
+        std::shared_ptr<Tether::PacketLoggers::PacketLogger> logger)
     : m_inner(std::move(inner))
     , m_logger(std::move(logger))
     , m_userCallback(nullptr)
@@ -478,26 +471,28 @@ Error LoggingEthernetWrapper::transmit(const uint8_t* frame, size_t length) {
     
     // Log before transmit
     if (m_logTx && m_logger) {
-        m_logger->logFrame(frame, length, FrameDirection::Tx, getSystemClock().nowMicros());
+        m_logger->logFrame(frame, length, Tether::PacketLoggers::FrameDirection::Tx,
+                           getSystemClock().nowMicros());
     }
-    
+
     return m_inner->transmit(frame, length);
 }
 
 Error LoggingEthernetWrapper::transmitVlan(const uint8_t* frame, size_t length,
                                            uint16_t vlanId, uint8_t priority) {
     if (!m_inner) return Error::NotInitialized;
-    
+
     if (m_logTx && m_logger) {
-        m_logger->logFrame(frame, length, FrameDirection::Tx, getSystemClock().nowMicros());
+        m_logger->logFrame(frame, length, Tether::PacketLoggers::FrameDirection::Tx,
+                           getSystemClock().nowMicros());
     }
-    
+
     return m_inner->transmitVlan(frame, length, vlanId, priority);
 }
 
 Error LoggingEthernetWrapper::transmitGather(const BufferDesc* iov, size_t count) {
     if (!m_inner) return Error::NotInitialized;
-    
+
     if (m_logTx && m_logger) {
         // Build complete frame for logging
         uint8_t tempFrame[1518];
@@ -507,20 +502,22 @@ Error LoggingEthernetWrapper::transmitGather(const BufferDesc* iov, size_t count
             std::memcpy(tempFrame + totalLen, iov[i].data, copyLen);
             totalLen += copyLen;
         }
-        m_logger->logFrame(tempFrame, totalLen, FrameDirection::Tx, getSystemClock().nowMicros());
+        m_logger->logFrame(tempFrame, totalLen, Tether::PacketLoggers::FrameDirection::Tx,
+                           getSystemClock().nowMicros());
     }
-    
+
     return m_inner->transmitGather(iov, count);
 }
 
 void LoggingEthernetWrapper::handleRx(const uint8_t* frame, size_t length,
                                       const RxFrameInfo& info, void* userData) {
     (void)userData;
-    
+
     if (m_logRx && m_logger) {
-        m_logger->logFrameWithInfo(frame, length, FrameDirection::Rx, info);
+        m_logger->logFrame(frame, length, Tether::PacketLoggers::FrameDirection::Rx,
+                           info.timestamp);
     }
-    
+
     if (m_userCallback) {
         m_userCallback(frame, length, info, m_userData);
     }
@@ -622,16 +619,11 @@ std::unique_ptr<TrafficSplitter> createTrafficSplitter(std::unique_ptr<IEthernet
     return std::make_unique<TrafficSplitter>(std::move(inner));
 }
 
-// createPcapLogger() is in PcapNGLogger.cpp
 // createStateMachineLogger() is in StateMachineLogger.cpp
 
 std::unique_ptr<IEthernet> createLoggingEthernet(
     std::unique_ptr<IEthernet> inner,
-    const PcapLoggerConfig& config) {
-    auto logger = createPcapLogger();
-    if (logger->init(config) != Error::OK) {
-        return inner;  // Return without logging on failure
-    }
+    std::shared_ptr<Tether::PacketLoggers::PacketLogger> logger) {
     return std::make_unique<LoggingEthernetWrapper>(std::move(inner), std::move(logger));
 }
 
@@ -677,15 +669,17 @@ Error HALInstance::init(const HALConfig& config) {
         return err;
     }
     
-    // Create PcapNG logger if enabled
-    if (config.enablePcapLogging) {
-        auto logger = createPcapLogger();
-        err = logger->init(config.pcapConfig);
-        if (err == Error::OK) {
-            m_pcapLogger = std::move(logger);
-            // Wrap Ethernet with logging
-            m_ethernet = std::make_unique<LoggingEthernetWrapper>(
-                std::move(m_ethernet), createPcapLogger());
+    // Create packet logger if enabled and a factory was injected
+    if (config.enablePacketLogging && config.createPacketLogger) {
+        auto logger = config.createPacketLogger(config.pcapConfig);
+        if (logger) {
+            auto packetErr = logger->init(config.pcapConfig);
+            if (packetErr == Tether::PacketLoggers::Error::OK) {
+                m_packetLogger = logger;
+                // Wrap Ethernet with logging using the same logger instance
+                m_ethernet = std::make_unique<LoggingEthernetWrapper>(
+                    std::move(m_ethernet), m_packetLogger);
+            }
         }
         // Non-fatal if logging fails - continue without it
     }
@@ -716,10 +710,10 @@ void HALInstance::shutdown() {
     
     m_trafficSplitter = nullptr;
     
-    if (m_pcapLogger) {
-        m_pcapLogger->flush();
-        m_pcapLogger->close();
-        m_pcapLogger.reset();
+    if (m_packetLogger) {
+        m_packetLogger->flush();
+        m_packetLogger->close();
+        m_packetLogger.reset();
     }
     
     m_stateLogger.reset();

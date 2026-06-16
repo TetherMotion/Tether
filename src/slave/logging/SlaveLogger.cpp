@@ -253,7 +253,8 @@ void SlaveLogger::critical(SlaveLogCategory cat, const char* fmt, ...) {
 }
 
 void SlaveLogger::logFrameToPcap(const uint8_t* frame, size_t length,
-                                  HAL::FrameDirection direction, uint64_t timestamp) {
+                                  Tether::PacketLoggers::FrameDirection direction,
+                                  uint64_t timestamp) {
     if (pcapLogger_) {
         pcapLogger_->logFrame(frame, length, direction, timestamp ? timestamp : getTimestamp());
     }

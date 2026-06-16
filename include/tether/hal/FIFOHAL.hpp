@@ -35,7 +35,7 @@
 
 #include "hal/IEthernet.hpp"
 #include "slave/hal/ISlaveHAL.hpp"
-#include "hal/IPcapLogger.hpp"
+#include "packetloggers/PacketLogger.hpp"
 
 #include <memory>
 #include <string>
@@ -134,9 +134,9 @@ public:
     const FIFOStats& getStats() const { return stats_; }
     void resetStats() { stats_.reset(); }
     
-    // PcapNG logging
-    void setPcapLogger(std::shared_ptr<IPcapLogger> logger);
-    
+    // Packet logging
+    void setPcapLogger(std::shared_ptr<Tether::PacketLoggers::PacketLogger> logger);
+
     // FIFO management
     bool createFifos();
     bool removeFifos();
@@ -150,8 +150,8 @@ private:
     int rxFd_ = -1;
     
     uint8_t macAddress_[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
-    
-    std::shared_ptr<IPcapLogger> pcapLogger_;
+
+    std::shared_ptr<Tether::PacketLoggers::PacketLogger> pcapLogger_;
     bool initialized_ = false;
     
     bool writeFrame(const uint8_t* data, size_t length);
@@ -200,18 +200,18 @@ public:
     const FIFOStats& getStats() const { return stats_; }
     void resetStats() { stats_.reset(); }
     
-    // PcapNG logging
-    void setPcapLogger(std::shared_ptr<IPcapLogger> logger);
-    
+    // Packet logging
+    void setPcapLogger(std::shared_ptr<Tether::PacketLoggers::PacketLogger> logger);
+
 private:
     FIFOHALConfig config_;
     FIFOStats stats_;
-    
+
     // FIFOs (reversed from master's perspective)
     int rxFd_ = -1;   // Read from master's TX
     int txFd_ = -1;   // Write to master's RX
-    
-    std::shared_ptr<IPcapLogger> pcapLogger_;
+
+    std::shared_ptr<Tether::PacketLoggers::PacketLogger> pcapLogger_;
     
     // Processing thread
     std::thread processingThread_;

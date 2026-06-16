@@ -17,7 +17,7 @@
 #include "slave/profiles/CiA401Slave.hpp"
 #include "slave/hal/ISlaveHAL.hpp"
 #include "slave/mailbox/CoEHandler.hpp"
-#include "pcap/PcapLogger.hpp"
+#include "packetloggers/pcap/PCAPWriter.hpp"
 
 #include <gtest/gtest.h>
 #include <memory>
@@ -28,6 +28,8 @@
 namespace EtherCAT {
 namespace Slave {
 namespace Test {
+
+using namespace Tether::PacketLoggers::PCAP;
 
 // ============================================================================
 // Test Fixtures
@@ -77,7 +79,7 @@ protected:
         slave_ = std::make_unique<SlaveCore>(slaveConfig);
         
         // Create logger
-        logger_ = createMemoryPcapLogger(1024 * 1024);
+        logger_ = createMemoryPCAPWriter(1024 * 1024);
         
         // Configure SyncManagers for mailbox
         SyncManagerConfig sm0;
@@ -152,7 +154,7 @@ protected:
     }
     
     std::unique_ptr<SlaveCore> slave_;
-    std::shared_ptr<IPcapLogger> logger_;
+    std::shared_ptr<IPCAPWriter> logger_;
 };
 
 // ============================================================================
@@ -656,10 +658,10 @@ TEST_F(FIFOCommunicationTest, FIFOCreation) {
 class PcapLoggerTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        logger_ = createPcapLogger();
+        logger_ = createPCAPWriter();
     }
     
-    std::unique_ptr<IPcapLogger> logger_;
+    std::unique_ptr<IPCAPWriter> logger_;
 };
 
 TEST_F(PcapLoggerTest, OpenClose) {
@@ -699,8 +701,8 @@ TEST_F(PcapLoggerTest, LogPacket) {
     unlink("/tmp/test_ethercat_log.pcapng");
 }
 
-TEST_F(PcapLoggerTest, NullLogger) {
-    auto nullLogger = createNullPcapLogger();
+TEST_F(PCAPWriterTest, NullWriter) {
+    auto nullLogger = createNullPCAPWriter();
     
     EXPECT_TRUE(nullLogger->open("anything"));
     EXPECT_TRUE(nullLogger->isOpen());

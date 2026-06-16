@@ -123,12 +123,13 @@ public:
         stats_ = Stats{};
     }
 
-    hal::Error enablePcapLogging(const hal::PcapLoggerConfig& /*config*/) override {
+    hal::Error enablePcapLogging(
+            const Tether::PacketLoggers::PCAP::PCAPLoggerConfig& /*config*/) override {
         return hal::Error::OK;
     }
     void disablePcapLogging() override {}
     bool isPcapLoggingEnabled() const override { return false; }
-    hal::IPcapLogger* getPcapLogger() override { return nullptr; }
+    Tether::PacketLoggers::PacketLogger* getPcapLogger() override { return nullptr; }
 
     // ILoopbackTarget
     HAL::Error onFrameReceived(const uint8_t* frame, size_t length) override {
@@ -309,12 +310,13 @@ public:
         stats_ = Stats{};
     }
 
-    hal::Error enablePcapLogging(const hal::PcapLoggerConfig& /*config*/) override {
+    hal::Error enablePcapLogging(
+            const Tether::PacketLoggers::PCAP::PCAPLoggerConfig& /*config*/) override {
         return hal::Error::OK;
     }
     void disablePcapLogging() override {}
     bool isPcapLoggingEnabled() const override { return false; }
-    hal::IPcapLogger* getPcapLogger() override { return nullptr; }
+    Tether::PacketLoggers::PacketLogger* getPcapLogger() override { return nullptr; }
 
 private:
     mutable std::mutex mutex_;

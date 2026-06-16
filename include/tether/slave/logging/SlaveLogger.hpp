@@ -15,7 +15,8 @@
 
 #pragma once
 
-#include "hal/IPcapLogger.hpp"
+#include "packetloggers/PacketLogger.hpp"
+#include "packetloggers/pcap/PCAPLoggerConfig.hpp"
 #include "slave/core/SlaveTypes.hpp"
 
 #include <atomic>
@@ -159,9 +160,9 @@ struct SlaveLogConfig {
     size_t maxFileSize = 10 * 1024 * 1024;  // 10MB
     int maxRotatedFiles = 5;
     
-    // PcapNG output (frame logging)
+    // PCAP output (frame logging)
     bool pcapEnabled = false;
-    HAL::PcapLoggerConfig pcapConfig;
+    Tether::PacketLoggers::PCAP::PCAPLoggerConfig pcapConfig;
     
     // Realtime queue
     size_t queueSize = 1024;  ///< Number of entries in RT queue
@@ -357,13 +358,13 @@ public:
      * @param timestamp Timestamp (0 = current time)
      */
     void logFrameToPcap(const uint8_t* frame, size_t length,
-                        HAL::FrameDirection direction,
+                        Tether::PacketLoggers::FrameDirection direction,
                         uint64_t timestamp = 0);
-    
+
     /**
-     * @brief Get PcapNG logger
+     * @brief Get packet logger
      */
-    HAL::IPcapLogger* getPcapLogger() { return pcapLogger_.get(); }
+    Tether::PacketLoggers::PacketLogger* getPcapLogger() { return pcapLogger_.get(); }
     
     // ========================================================================
     // Statistics
@@ -417,8 +418,8 @@ private:
     FILE* logFile_ = nullptr;
     size_t currentFileSize_ = 0;
     
-    // PcapNG logger (shared with master)
-    std::unique_ptr<HAL::IPcapLogger> pcapLogger_;
+    // Packet logger (shared with master)
+    std::unique_ptr<Tether::PacketLoggers::PacketLogger> pcapLogger_;
     
     // Statistics
     std::atomic<uint64_t> logCount_{0};

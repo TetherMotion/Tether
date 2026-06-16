@@ -4,7 +4,7 @@
  */
 
 #include "slave/hal/ISlaveHAL.hpp"
-#include "pcap/PcapLogger.hpp"
+#include "packetloggers/pcap/PCAPWriter.hpp"
 
 #include <gtest/gtest.h>
 #include <thread>
@@ -27,6 +27,8 @@ std::unique_ptr<ISlaveHAL> createSlaveFIFOHAL();
 #endif
 
 namespace Test {
+
+using namespace Tether::PacketLoggers::PCAP;
 
 // ============================================================================
 // Direct Loopback HAL Tests
@@ -287,7 +289,7 @@ TEST_F(MasterSlaveFIFOTest, BidirectionalCommunication) {
 class HALPcapLoggingTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        logger_ = createPcapLogger();
+        logger_ = Tether::PacketLoggers::PCAP::createPCAPWriter();
         hal_ = createDirectLoopbackHAL();
     }
     
@@ -301,7 +303,7 @@ protected:
         unlink("/tmp/hal_test.pcapng");
     }
     
-    std::unique_ptr<IPcapLogger> logger_;
+    std::unique_ptr<Tether::PacketLoggers::PCAP::IPCAPWriter> logger_;
     std::unique_ptr<ISlaveHAL> hal_;
 };
 
@@ -423,8 +425,8 @@ TEST_F(HALErrorHandlingTest, ZeroLengthSend) {
 // Memory Logger Tests
 // ============================================================================
 
-TEST(MemoryPcapLoggerTest, LogToMemory) {
-    auto logger = createMemoryPcapLogger(1024 * 1024);
+TEST(MemoryPCAPWriterTest, LogToMemory) {
+    auto logger = createMemoryPCAPWriter(1024 * 1024);
     EXPECT_TRUE(logger->open("memory"));
     
     // Add interface
@@ -444,8 +446,8 @@ TEST(MemoryPcapLoggerTest, LogToMemory) {
     EXPECT_EQ(logger->getPacketCount(), 1000);
 }
 
-TEST(NullPcapLoggerTest, DiscardPackets) {
-    auto logger = createNullPcapLogger();
+TEST(NullPCAPWriterTest, DiscardPackets) {
+    auto logger = createNullPCAPWriter();
     EXPECT_TRUE(logger->open("null"));
     EXPECT_TRUE(logger->isOpen());
     

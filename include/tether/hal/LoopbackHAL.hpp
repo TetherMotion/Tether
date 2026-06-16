@@ -30,7 +30,7 @@
 #pragma once
 
 #include "hal/IEthernet.hpp"
-#include "hal/IPcapLogger.hpp"
+#include "packetloggers/PacketLogger.hpp"
 #include "slave/core/SlaveCore.hpp"
 
 #include <memory>
@@ -182,8 +182,8 @@ public:
     slave::SlaveCore* getSlave(size_t index);
     const slave::SlaveCore* getSlave(size_t index) const;
     
-    // PcapNG logging
-    void setPcapLogger(std::shared_ptr<IPcapLogger> logger);
+    // Packet logging
+    void setPcapLogger(std::shared_ptr<Tether::PacketLoggers::PacketLogger> logger);
     void enableLogging(bool enable);
     
     // Statistics
@@ -211,7 +211,7 @@ private:
     std::vector<std::shared_ptr<ILoopbackTarget>> targets_;
     
     // Logging
-    std::shared_ptr<IPcapLogger> pcapLogger_;
+    std::shared_ptr<Tether::PacketLoggers::PacketLogger> pcapLogger_;
     bool loggingEnabled_ = false;
     
     // Threading (for Threaded mode)

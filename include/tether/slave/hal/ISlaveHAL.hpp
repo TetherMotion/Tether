@@ -17,7 +17,9 @@
 #pragma once
 
 #include "hal/HALTypes.hpp"
-#include "hal/IPcapLogger.hpp"
+#include "hal/IEthernet.hpp"
+#include "packetloggers/PacketLogger.hpp"
+#include "packetloggers/pcap/PCAPLoggerConfig.hpp"
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -44,9 +46,9 @@ struct SlaveHALConfig {
     std::string fifoRxPath;   ///< Path for receiving frames
     std::string fifoTxPath;   ///< Path for sending frames
     
-    // PcapNG logging
+    // Packet logging
     bool enablePcapLogging = false;
-    HAL::PcapLoggerConfig pcapConfig;
+    Tether::PacketLoggers::PCAP::PCAPLoggerConfig pcapConfig;
     
     // Timeout for blocking operations
     uint32_t timeoutMs = 1000;
@@ -219,28 +221,29 @@ public:
     virtual void resetStats() = 0;
     
     // ========================================================================
-    // PcapNG Logging
+    // Packet Logging
     // ========================================================================
-    
+
     /**
-     * @brief Enable PcapNG logging
+     * @brief Enable packet logging
      */
-    virtual HAL::Error enablePcapLogging(const HAL::PcapLoggerConfig& config) = 0;
-    
+    virtual HAL::Error enablePcapLogging(
+        const Tether::PacketLoggers::PCAP::PCAPLoggerConfig& config) = 0;
+
     /**
-     * @brief Disable PcapNG logging
+     * @brief Disable packet logging
      */
     virtual void disablePcapLogging() = 0;
-    
+
     /**
-     * @brief Check if PcapNG logging is enabled
+     * @brief Check if packet logging is enabled
      */
     virtual bool isPcapLoggingEnabled() const = 0;
-    
+
     /**
-     * @brief Get PcapNG logger (may be null)
+     * @brief Get packet logger (may be null)
      */
-    virtual HAL::IPcapLogger* getPcapLogger() = 0;
+    virtual Tether::PacketLoggers::PacketLogger* getPcapLogger() = 0;
 };
 
 // ============================================================================

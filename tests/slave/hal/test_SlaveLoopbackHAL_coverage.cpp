@@ -147,8 +147,8 @@ TEST_F(DirectSlaveHALTest, WaitForLinkUp_NotInitialized) {
 TEST_F(DirectSlaveHALTest, PcapLogging) {
     SlaveHALConfig config;
     hal_->init(config);
-    
-    HAL::PcapLoggerConfig pcapConfig;
+
+    Tether::PacketLoggers::PCAP::PCAPLoggerConfig pcapConfig;
     EXPECT_EQ(hal_->enablePcapLogging(pcapConfig), HAL::Error::OK);
     EXPECT_FALSE(hal_->isPcapLoggingEnabled());
     EXPECT_EQ(hal_->getPcapLogger(), nullptr);
@@ -294,7 +294,7 @@ TEST_F(FIFOSlaveHALTest, WaitForLinkDown) {
 }
 
 TEST_F(FIFOSlaveHALTest, PcapLogging) {
-    HAL::PcapLoggerConfig pcapConfig;
+    Tether::PacketLoggers::PCAP::PCAPLoggerConfig pcapConfig;
     EXPECT_EQ(hal_->enablePcapLogging(pcapConfig), HAL::Error::OK);
     EXPECT_FALSE(hal_->isPcapLoggingEnabled());
     EXPECT_EQ(hal_->getPcapLogger(), nullptr);

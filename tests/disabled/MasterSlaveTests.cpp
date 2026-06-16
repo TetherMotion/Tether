@@ -7,7 +7,7 @@
 #include "slave/hal/LoopbackHAL.hpp"
 #include "slave/mailbox/CoEHandler.hpp"
 #include "slave/profiles/CiA402Slave.hpp"
-#include "pcap/PcapLogger.hpp"
+#include "packetloggers/pcap/PCAPWriter.hpp"
 #include "tether/ethercat/DCClass.hpp"
 
 #include <gtest/gtest.h>
@@ -18,6 +18,8 @@
 
 namespace EtherCAT {
 namespace Test {
+
+using namespace Tether::PacketLoggers::PCAP;
 
 // ============================================================================
 // EtherCAT Frame Building Utilities
@@ -774,7 +776,7 @@ class PcapLoggingIntegrationTest : public MasterSlaveTest {
 protected:
     void SetUp() override {
         // Create memory logger
-        logger_ = std::make_unique<PcapNg::MemoryPcapLogger>();
+        logger_ = std::make_unique<MemoryPCAPWriter>();
         
         // Create slave with logging
         slave_ = std::make_unique<Slave::SlaveCore>(1);
@@ -790,7 +792,7 @@ protected:
         builder_ = std::make_unique<FrameBuilder>();
     }
     
-    std::unique_ptr<PcapNg::MemoryPcapLogger> logger_;
+    std::unique_ptr<MemoryPCAPWriter> logger_;
 };
 
 TEST_F(PcapLoggingIntegrationTest, LogFrameExchange) {

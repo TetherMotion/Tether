@@ -8,14 +8,14 @@
 #include <memory>
 #include <vector>
 #include <string>
-#include "pcap/PcapLogger.hpp"
+#include "packetloggers/pcap/PCAPWriter.hpp"
 
-using namespace EtherCAT;
+using namespace Tether::PacketLoggers::PCAP;
 
 // ============================================================================
-// Fixture: PcapNgLogger Tests
+// Fixture: PCAPWriter Tests
 // ============================================================================
-class PcapLoggerTest : public ::testing::Test {
+class PCAPWriterTest : public ::testing::Test {
 protected:
     void SetUp() override {
         // Generate unique temp file for each test
@@ -29,22 +29,22 @@ protected:
 
 // --- Construction and lifecycle ---
 
-TEST_F(PcapLoggerTest, DefaultConstruction) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, DefaultConstruction) {
+    PCAPWriter logger;
     EXPECT_FALSE(logger.isOpen());
     EXPECT_TRUE(logger.isEnabled());
 }
 
-TEST_F(PcapLoggerTest, OpenClose) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, OpenClose) {
+    PCAPWriter logger;
     EXPECT_TRUE(logger.open(tmpFile));
     EXPECT_TRUE(logger.isOpen());
     logger.close();
     EXPECT_FALSE(logger.isOpen());
 }
 
-TEST_F(PcapLoggerTest, OpenNonExistentPath) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, OpenNonExistentPath) {
+    PCAPWriter logger;
     bool result = logger.open("/nonexistent/dir/file.pcapng");
     // May fail or succeed depending on filesystem
     if (!result) {
@@ -52,8 +52,8 @@ TEST_F(PcapLoggerTest, OpenNonExistentPath) {
     }
 }
 
-TEST_F(PcapLoggerTest, DoubleOpen) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, DoubleOpen) {
+    PCAPWriter logger;
     EXPECT_TRUE(logger.open(tmpFile));
     // Opening again should close and reopen or just succeed
     logger.open(tmpFile);
@@ -61,16 +61,16 @@ TEST_F(PcapLoggerTest, DoubleOpen) {
     logger.close();
 }
 
-TEST_F(PcapLoggerTest, CloseWithoutOpen) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, CloseWithoutOpen) {
+    PCAPWriter logger;
     logger.close(); // should not crash
     EXPECT_FALSE(logger.isOpen());
 }
 
 // --- Section header ---
 
-TEST_F(PcapLoggerTest, SetSectionHeader) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, SetSectionHeader) {
+    PCAPWriter logger;
     SectionHeaderInfo info;
     info.hardware = "TestHW";
     info.os = "Linux";
@@ -82,8 +82,8 @@ TEST_F(PcapLoggerTest, SetSectionHeader) {
 
 // --- Interface ---
 
-TEST_F(PcapLoggerTest, AddInterface) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, AddInterface) {
+    PCAPWriter logger;
     EXPECT_TRUE(logger.open(tmpFile));
     InterfaceInfo iface;
     iface.name = "eth0";
@@ -94,8 +94,8 @@ TEST_F(PcapLoggerTest, AddInterface) {
     logger.close();
 }
 
-TEST_F(PcapLoggerTest, AddMultipleInterfaces) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, AddMultipleInterfaces) {
+    PCAPWriter logger;
     EXPECT_TRUE(logger.open(tmpFile));
     InterfaceInfo iface1, iface2;
     iface1.name = "if0";
@@ -109,8 +109,8 @@ TEST_F(PcapLoggerTest, AddMultipleInterfaces) {
 
 // --- Packet logging ---
 
-TEST_F(PcapLoggerTest, LogPacketBasic) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, LogPacketBasic) {
+    PCAPWriter logger;
     EXPECT_TRUE(logger.open(tmpFile));
     InterfaceInfo iface;
     iface.name = "eth0";
@@ -125,8 +125,8 @@ TEST_F(PcapLoggerTest, LogPacketBasic) {
     logger.close();
 }
 
-TEST_F(PcapLoggerTest, LogPacketWithDirection) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, LogPacketWithDirection) {
+    PCAPWriter logger;
     EXPECT_TRUE(logger.open(tmpFile));
     InterfaceInfo iface;
     logger.addInterface(iface);
@@ -137,8 +137,8 @@ TEST_F(PcapLoggerTest, LogPacketWithDirection) {
     logger.close();
 }
 
-TEST_F(PcapLoggerTest, LogManyPackets) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, LogManyPackets) {
+    PCAPWriter logger;
     EXPECT_TRUE(logger.open(tmpFile));
     InterfaceInfo iface;
     logger.addInterface(iface);
@@ -152,8 +152,8 @@ TEST_F(PcapLoggerTest, LogManyPackets) {
     logger.close();
 }
 
-TEST_F(PcapLoggerTest, LogPacketWhenDisabled) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, LogPacketWhenDisabled) {
+    PCAPWriter logger;
     EXPECT_TRUE(logger.open(tmpFile));
     InterfaceInfo iface;
     logger.addInterface(iface);
@@ -166,8 +166,8 @@ TEST_F(PcapLoggerTest, LogPacketWhenDisabled) {
     logger.close();
 }
 
-TEST_F(PcapLoggerTest, LogPacketWithoutOpen) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, LogPacketWithoutOpen) {
+    PCAPWriter logger;
     std::vector<uint8_t> packet(64, 0xEE);
     bool result = logger.logPacket(packet.data(), packet.size(), PacketDirection::Outbound, 0);
     EXPECT_FALSE(result);
@@ -175,8 +175,8 @@ TEST_F(PcapLoggerTest, LogPacketWithoutOpen) {
 
 // --- Flush ---
 
-TEST_F(PcapLoggerTest, FlushOpenFile) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, FlushOpenFile) {
+    PCAPWriter logger;
     EXPECT_TRUE(logger.open(tmpFile));
     InterfaceInfo iface;
     logger.addInterface(iface);
@@ -186,15 +186,15 @@ TEST_F(PcapLoggerTest, FlushOpenFile) {
     logger.close();
 }
 
-TEST_F(PcapLoggerTest, FlushWithoutOpen) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, FlushWithoutOpen) {
+    PCAPWriter logger;
     logger.flush(); // should not crash
 }
 
 // --- Counters ---
 
-TEST_F(PcapLoggerTest, InitialCountersZero) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, InitialCountersZero) {
+    PCAPWriter logger;
     EXPECT_EQ(logger.getPacketCount(), 0u);
     EXPECT_EQ(logger.getByteCount(), 0u);
     EXPECT_EQ(logger.getDropCount(), 0u);
@@ -202,81 +202,81 @@ TEST_F(PcapLoggerTest, InitialCountersZero) {
 
 // --- Buffer ---
 
-TEST_F(PcapLoggerTest, SetBufferSize) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, SetBufferSize) {
+    PCAPWriter logger;
     logger.setBufferSize(4096);
 }
 
-TEST_F(PcapLoggerTest, GetBufferUsage) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, GetBufferUsage) {
+    PCAPWriter logger;
     EXPECT_EQ(logger.getBufferUsage(), 0u);
 }
 
 // --- Compression ---
 
-TEST_F(PcapLoggerTest, CompressionSetting) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, CompressionSetting) {
+    PCAPWriter logger;
     logger.setCompressionEnabled(true);
     logger.setCompressionEnabled(false);
 }
 
 // --- File rotation ---
 
-TEST_F(PcapLoggerTest, MaxFileSize) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, MaxFileSize) {
+    PCAPWriter logger;
     logger.setMaxFileSize(1024 * 1024); // 1MB
 }
 
-TEST_F(PcapLoggerTest, RotationEnabled) {
-    PcapNgLogger logger;
+TEST_F(PCAPWriterTest, RotationEnabled) {
+    PCAPWriter logger;
     logger.setRotationEnabled(true, 5);
     logger.setRotationEnabled(false, 0);
 }
 
 // --- Factory functions ---
 
-TEST_F(PcapLoggerTest, CreatePcapLoggerDefault) {
-    auto logger = createPcapLogger();
-    ASSERT_NE(logger, nullptr);
-    EXPECT_FALSE(logger->isOpen());
+TEST_F(PCAPWriterTest, CreatePCAPWriterDefault) {
+    auto writer = createPCAPWriter();
+    ASSERT_NE(writer, nullptr);
+    EXPECT_FALSE(writer->isOpen());
 }
 
-TEST_F(PcapLoggerTest, CreatePcapLoggerWithFile) {
+TEST_F(PCAPWriterTest, CreatePCAPWriterWithFile) {
     SectionHeaderInfo info;
     info.application = "Test";
-    auto logger = createPcapLogger(tmpFile, info);
-    ASSERT_NE(logger, nullptr);
-    EXPECT_TRUE(logger->isOpen());
-    logger->close();
+    auto writer = createPCAPWriter(tmpFile, info);
+    ASSERT_NE(writer, nullptr);
+    EXPECT_TRUE(writer->isOpen());
+    writer->close();
 }
 
-TEST_F(PcapLoggerTest, CreateNullPcapLogger) {
-    auto logger = createNullPcapLogger();
-    ASSERT_NE(logger, nullptr);
-    // Null logger should accept but discard packets
+TEST_F(PCAPWriterTest, CreateNullPCAPWriter) {
+    auto writer = createNullPCAPWriter();
+    ASSERT_NE(writer, nullptr);
+    // Null writer should accept but discard packets
     std::vector<uint8_t> packet(64, 0);
-    logger->logPacket(packet.data(), packet.size(), PacketDirection::Outbound, 0);
+    writer->logPacket(packet.data(), packet.size(), PacketDirection::Outbound, 0);
 }
 
-TEST_F(PcapLoggerTest, CreateMemoryPcapLogger) {
-    auto logger = createMemoryPcapLogger(4096);
-    ASSERT_NE(logger, nullptr);
+TEST_F(PCAPWriterTest, CreateMemoryPCAPWriter) {
+    auto writer = createMemoryPCAPWriter(4096);
+    ASSERT_NE(writer, nullptr);
 }
 
 // --- Utility functions ---
 
-TEST_F(PcapLoggerTest, GetTimestamp) {
-    uint64_t ts = getPcapTimestampNs();
+TEST_F(PCAPWriterTest, GetTimestamp) {
+    uint64_t ts = getPCAPTimestampNs();
     EXPECT_GT(ts, 0u);
 }
 
-TEST_F(PcapLoggerTest, ExtractEtherCATMetadataEmpty) {
+TEST_F(PCAPWriterTest, ExtractEtherCATMetadataEmpty) {
     uint8_t data[14] = {};
     auto meta = extractEtherCATMetadata(data, 14);
     (void)meta; // Just check it doesn't crash
 }
 
-TEST_F(PcapLoggerTest, ExtractEtherCATMetadataValid) {
+TEST_F(PCAPWriterTest, ExtractEtherCATMetadataValid) {
     // Build a minimal Ethernet frame with EtherCAT EtherType
     uint8_t frame[64] = {};
     frame[12] = 0x88;
