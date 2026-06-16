@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <gtest/gtest.h>
 #include "ethercat/raw/internal.hpp"
 #include "tether/ethercat/Master.hpp"
@@ -56,4 +57,46 @@ TEST(CoeSDO, Download_SmallMailboxSize_ReturnsFalse) {
     EtherCAT::Master master;
     // mailbox write len too small to hold header+SdoInitDownloadReq
     EXPECT_FALSE(coe_sdo_download(master, 0x0000, &mbx_cnt, 2, 2, 4, 4, 0x2000, 0x0, data, 4));
+}
+
+// ============================================================================
+// SyncManager register address and bit mask tests (ETG.1000.4 conformance)
+// ============================================================================
+
+TEST(SyncManagerRegs, StatusAddressCalculation) {
+    // ETG.1000.4 Table 59: each SM channel occupies 8 bytes starting at 0x0800.
+    // The Status register is at offset 5 within each 8-byte block.
+    // Test all 16 entries of the SM vtable.
+    for (uint8_t sm = 0; sm <= 15; ++sm) {
+        const uint16_t base = static_cast<uint16_t>(0x0800 + (sm * 8u));
+        const uint16_t expected_status = static_cast<uint16_t>(base + 5u);
+        EXPECT_EQ(sm_status_address(sm), expected_status)
+            << "SM" << static_cast<int>(sm) << " status address mismatch";
+    }
+}
+
+TEST(SyncManagerRegs, StatusBitMasksMatchSpec) {
+    // ETG.1000.4 Figure 36: TSYNCMAN.status bit layout
+    // Bit 0: WriteEvent
+    // Bit 1: ReadEvent
+    // Bit 3: mailboxState (buffer full)
+    EXPECT_EQ(EC_SM_STATUS_WRITE_EVENT, 0x01u);
+    EXPECT_EQ(EC_SM_STATUS_READ_EVENT,  0x02u);
+    EXPECT_EQ(EC_SM_STATUS_MBXFULL,     0x08u);
+
+    // Verify bit positions
+    EXPECT_EQ(EC_SM_STATUS_WRITE_EVENT & 0xFE, 0x00u); // only bit 0 set
+    EXPECT_EQ(EC_SM_STATUS_READ_EVENT  & 0xFD, 0x00u); // only bit 1 set
+    EXPECT_EQ(EC_SM_STATUS_MBXFULL     & 0xF7, 0x00u); // only bit 3 set
+}
+
+TEST(SyncManagerRegs, StructOffsets) {
+    using namespace EtherCAT::Raw;
+    EXPECT_EQ(offsetof(SyncManagerRegs, physStart_le), 0u);
+    EXPECT_EQ(offsetof(SyncManagerRegs, length_le),     2u);
+    EXPECT_EQ(offsetof(SyncManagerRegs, control),       4u);
+    EXPECT_EQ(offsetof(SyncManagerRegs, status),        5u); // <-- critical for SM polling
+    EXPECT_EQ(offsetof(SyncManagerRegs, activate),       6u);
+    EXPECT_EQ(offsetof(SyncManagerRegs, pdiControl),     7u);
+    EXPECT_EQ(sizeof(SyncManagerRegs),                  8u);
 }

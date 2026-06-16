@@ -130,6 +130,37 @@ static bool mbx_apwr_with_wkc_probe(
     return false;
 }
 
+/**
+ * @brief Poll SyncManager 1 status register until the mailbox is full.
+ *
+ * After the master writes an SDO request into the slave's RX mailbox (SM0),
+ * the slave's PDI must parse the request, fetch data, and write the response
+ * into the TX mailbox (SM1).  We know SM1 is ready when bit 3 of the
+ * SM1 Status register (ESC address 0x080D) is set.
+ *
+ * @param master       Master instance
+ * @param adp          Auto-increment address of the target slave
+ * @param timeout_ms   Maximum time to wait for the mailbox to become full
+ * @return true if the mailbox became full within the timeout
+ */
+static bool mbx_poll_sm1_full(Master& master, uint16_t adp, unsigned int timeout_ms)
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (master.isCancelRequested()) {
+            return false;
+        }
+        uint8_t sm1_status = 0;
+        if (master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(1), sm1_status, 100)) {
+            if ((sm1_status & EC_SM_STATUS_MBXFULL) != 0) {
+                return true; // Mailbox full — slave has written a response
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return false;
+}
+
 bool coe_sdo_upload(
     Master& master,
     uint16_t adp,
@@ -187,7 +218,7 @@ bool coe_sdo_upload(
     std::memcpy(mbxbuf + sizeof(mbx), &coe, sizeof(coe));
     std::memcpy(mbxbuf + sizeof(mbx) + sizeof(coe), &sdo, sizeof(sdo));
 
-    mbx_cnt = static_cast<uint8_t>((mbx_cnt + 1u) & 0x0Fu);
+    mbx_cnt = static_cast<uint8_t>((mbx_cnt >= 7) ? 1 : (mbx_cnt + 1));
     if (inout_mbx_cnt != nullptr) {
         *inout_mbx_cnt = mbx_cnt;
     }
@@ -245,6 +276,14 @@ bool coe_sdo_upload(
             }
         }
 
+        // Wait for the slave to finish processing and populate SM1 (mailbox full).
+        if (!mbx_poll_sm1_full(master, adp, 1000)) {
+            TETHER_LOGE(TAG, "SDO upload: SM1 mailbox never became full (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%u)",
+                        adp, mbx_write_addr, mbx_read_addr, index, sub);
+            mbx_diag_dump_slave_state(master, adp, mbx_write_addr, mbx_read_addr);
+            return false;
+        }
+
         // Poll mailbox read area for response.
         bool logged_any_mbx = false;
         bool logged_mbx_mismatch = false;
@@ -259,10 +298,6 @@ bool coe_sdo_upload(
                 return false;
             }
             if (!master.readRegister(Master::slaveAddressFromADP(adp), mbx_read_addr, mbxbuf, static_cast<uint16_t>(mbx_read_len), 200)) {
-                if (master.lastWkc() == 0) {
-                    TETHER_LOGE(TAG, "mailbox transaction failed: Working counter is 0 (adp=0x%04X addr=0x%04X)", adp, mbx_read_addr);
-                    return false;
-                }
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
@@ -420,7 +455,7 @@ bool coe_sdo_upload(
             std::memcpy(mbxbuf + sizeof(seg_mbx), &seg_coe, sizeof(seg_coe));
             mbxbuf[sizeof(seg_mbx) + sizeof(seg_coe) + 0] = seg_req_cmd;
 
-            mbx_cnt = static_cast<uint8_t>((mbx_cnt + 1u) & 0x0Fu);
+            mbx_cnt = static_cast<uint8_t>((mbx_cnt >= 7) ? 1 : (mbx_cnt + 1));
             if (inout_mbx_cnt != nullptr) {
                 *inout_mbx_cnt = mbx_cnt;
             }
@@ -443,6 +478,14 @@ bool coe_sdo_upload(
                 }
             }
 
+            // Wait for the slave to populate the response mailbox.
+            if (!mbx_poll_sm1_full(master, adp, 1000)) {
+                TETHER_LOGE(TAG, "SDO upload segment: SM1 mailbox never became full (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%u)",
+                            adp, mbx_write_addr, mbx_read_addr, index, sub);
+                mbx_diag_dump_slave_state(master, adp, mbx_write_addr, mbx_read_addr);
+                return false;
+            }
+
             // Read segment response.
             bool got = false;
             for (int attempt2 = 0; attempt2 < 50; attempt2++) {
@@ -451,10 +494,6 @@ bool coe_sdo_upload(
                     return false;
                 }
                 if (!master.readRegister(Master::slaveAddressFromADP(adp), mbx_read_addr, mbxbuf, static_cast<uint16_t>(mbx_read_len), 200)) {
-                    if (master.lastWkc() == 0) {
-                        TETHER_LOGE(TAG, "mailbox transaction failed: Working counter is 0 (adp=0x%04X addr=0x%04X)", adp, mbx_read_addr);
-                        return false;
-                    }
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     continue;
                 }
@@ -592,7 +631,7 @@ bool coe_sdo_download(
     std::memcpy(mbxbuf + sizeof(mbx), &coe, sizeof(coe));
     std::memcpy(mbxbuf + sizeof(mbx) + sizeof(coe), &sdo, sizeof(sdo));
 
-    mbx_cnt = static_cast<uint8_t>((mbx_cnt + 1u) & 0x0Fu);
+    mbx_cnt = static_cast<uint8_t>((mbx_cnt >= 7) ? 1 : (mbx_cnt + 1));
     if (inout_mbx_cnt != nullptr) {
         *inout_mbx_cnt = mbx_cnt;
     }
@@ -626,6 +665,14 @@ bool coe_sdo_download(
         }
     }
 
+    // Wait for the slave to populate the response mailbox.
+    if (!mbx_poll_sm1_full(master, adp, 1000)) {
+        TETHER_LOGE(TAG, "SDO download: SM1 mailbox never became full (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%02x)",
+                    adp, mbx_write_addr, mbx_read_addr, index, sub);
+        mbx_diag_dump_slave_state(master, adp, mbx_write_addr, mbx_read_addr);
+        return false;
+    }
+
     // Poll mailbox read area for response
     for (int attempt = 0; attempt < 50; attempt++) {
         if (master.isCancelRequested()) {
@@ -633,10 +680,6 @@ bool coe_sdo_download(
             return false;
         }
         if (!master.readRegister(Master::slaveAddressFromADP(adp), mbx_read_addr, mbxbuf, static_cast<uint16_t>(mbx_read_len), 500)) {
-            if (master.lastWkc() == 0) {
-                TETHER_LOGE(TAG, "mailbox transaction failed: Working counter is 0 (adp=0x%04X addr=0x%04X)", adp, mbx_read_addr);
-                return false;
-            }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
