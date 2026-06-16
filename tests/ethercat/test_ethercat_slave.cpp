@@ -128,7 +128,7 @@ TEST_F(EtherCATSlaveTest, AssumeMailboxSetsFlag) {
 
 TEST_F(EtherCATSlaveTest, ConfigureMailboxManualSetsFlag) {
     auto& s = master_.slave(0);
-    auto err = s.configureMailbox(0x1000, 128, 0x1400, 128, 0x000C);
+    auto err = s.configureMailbox({.address = 0x1000, .length = 128}, {.address = 0x1400, .length = 128}, 0x000C);
     EXPECT_EQ(err, SlaveError::Ok);
     EXPECT_TRUE(s.isMailboxConfigured());
 }
@@ -452,7 +452,7 @@ TEST_F(EtherCATSlaveTest, FullLifecycleHappyPath) {
     EXPECT_FALSE(s.isPDOConfigured());
 
     // Configure mailbox (manual params)
-    EXPECT_EQ(s.configureMailbox(0x1000, 128, 0x1400, 128, 0x000C), SlaveError::Ok);
+    EXPECT_EQ(s.configureMailbox({.address = 0x1000, .length = 128}, {.address = 0x1400, .length = 128}, 0x000C), SlaveError::Ok);
     EXPECT_TRUE(s.isMailboxConfigured());
 
     // Transition to PRE_OP
@@ -496,7 +496,7 @@ TEST_F(NonExistingSlaveTest, SlaveOutOfRangeReturnsNonExisting) {
 
 TEST_F(NonExistingSlaveTest, ConfigureMailboxManual) {
     auto& s = master_.slave(0);
-    EXPECT_EQ(s.configureMailbox(0x1000, 128, 0x1400, 128, 0x000C), SlaveError::SlaveNotFound);
+    EXPECT_EQ(s.configureMailbox({.address = 0x1000, .length = 128}, {.address = 0x1400, .length = 128}, 0x000C), SlaveError::SlaveNotFound);
 }
 
 TEST_F(NonExistingSlaveTest, AssumeMailboxDoesNotCrash) {
@@ -869,7 +869,7 @@ TEST_F(EtherCATSlaveTest, SdoReadFails) {
     // Without proper mailbox setup, SDO reads should fail
     auto& s = master_.slave(0);
     s.assumeMailboxAlreadyConfigured(); // needed so sdoManager has config
-    s.configureMailbox(0x1000, 128, 0x1400, 128, 0x000C);
+    s.configureMailbox({.address = 0x1000, .length = 128}, {.address = 0x1400, .length = 128}, 0x000C);
     uint8_t buf[4] = {};
     size_t sz = sizeof(buf);
     // SDO readSync will fail because there's no real transport
@@ -879,7 +879,7 @@ TEST_F(EtherCATSlaveTest, SdoReadFails) {
 
 TEST_F(EtherCATSlaveTest, SdoWriteFails) {
     auto& s = master_.slave(0);
-    s.configureMailbox(0x1000, 128, 0x1400, 128, 0x000C);
+    s.configureMailbox({.address = 0x1000, .length = 128}, {.address = 0x1400, .length = 128}, 0x000C);
     uint8_t val = 1;
     auto err = s.sdoWrite(0x6060, 0x00, &val, 1);
     EXPECT_EQ(err, SlaveError::SDOError);
@@ -887,40 +887,40 @@ TEST_F(EtherCATSlaveTest, SdoWriteFails) {
 
 TEST_F(EtherCATSlaveTest, SdoReadU8Fails) {
     auto& s = master_.slave(0);
-    s.configureMailbox(0x1000, 128, 0x1400, 128, 0x000C);
+    s.configureMailbox({.address = 0x1000, .length = 128}, {.address = 0x1400, .length = 128}, 0x000C);
     uint8_t v = 0;
     EXPECT_EQ(s.sdoReadU8(0x1018, 0x01, v), SlaveError::SDOError);
 }
 
 TEST_F(EtherCATSlaveTest, SdoReadU16Fails) {
     auto& s = master_.slave(0);
-    s.configureMailbox(0x1000, 128, 0x1400, 128, 0x000C);
+    s.configureMailbox({.address = 0x1000, .length = 128}, {.address = 0x1400, .length = 128}, 0x000C);
     uint16_t v = 0;
     EXPECT_EQ(s.sdoReadU16(0x1018, 0x01, v), SlaveError::SDOError);
 }
 
 TEST_F(EtherCATSlaveTest, SdoReadU32Fails) {
     auto& s = master_.slave(0);
-    s.configureMailbox(0x1000, 128, 0x1400, 128, 0x000C);
+    s.configureMailbox({.address = 0x1000, .length = 128}, {.address = 0x1400, .length = 128}, 0x000C);
     uint32_t v = 0;
     EXPECT_EQ(s.sdoReadU32(0x1018, 0x01, v), SlaveError::SDOError);
 }
 
 TEST_F(EtherCATSlaveTest, SdoWriteU8Fails) {
     auto& s = master_.slave(0);
-    s.configureMailbox(0x1000, 128, 0x1400, 128, 0x000C);
+    s.configureMailbox({.address = 0x1000, .length = 128}, {.address = 0x1400, .length = 128}, 0x000C);
     EXPECT_EQ(s.sdoWriteU8(0x6060, 0x00, 1), SlaveError::SDOError);
 }
 
 TEST_F(EtherCATSlaveTest, SdoWriteU16Fails) {
     auto& s = master_.slave(0);
-    s.configureMailbox(0x1000, 128, 0x1400, 128, 0x000C);
+    s.configureMailbox({.address = 0x1000, .length = 128}, {.address = 0x1400, .length = 128}, 0x000C);
     EXPECT_EQ(s.sdoWriteU16(0x6060, 0x00, 100), SlaveError::SDOError);
 }
 
 TEST_F(EtherCATSlaveTest, SdoWriteU32Fails) {
     auto& s = master_.slave(0);
-    s.configureMailbox(0x1000, 128, 0x1400, 128, 0x000C);
+    s.configureMailbox({.address = 0x1000, .length = 128}, {.address = 0x1400, .length = 128}, 0x000C);
     EXPECT_EQ(s.sdoWriteU32(0x6040, 0x00, 0x0006), SlaveError::SDOError);
 }
 
