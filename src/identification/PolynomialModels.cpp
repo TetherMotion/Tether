@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <iostream>
 #include <numeric>
 
 #include <tether/identification/DenseLinearAlgebra.hpp>
@@ -22,11 +21,7 @@ double predictARXLike(const DiscretePolynomialModel& model,
                       size_t index,
                       bool use_measured_output) {
     double prediction = 0.0;
-    bool f_has_coeffs = false;
-    for (size_t i = 1; i < model.F.size(); ++i) {
-        if (std::abs(model.F[i]) > 1e-12) { f_has_coeffs = true; break; }
-    }
-    const std::vector<double>& denominator = f_has_coeffs ? model.F : model.A;
+    const std::vector<double>& denominator = model.F.size() > 1 ? model.F : model.A;
     const Vector& reference_output = use_measured_output ? output : residuals;
     const Vector& simulated_output = output;
 
@@ -93,7 +88,7 @@ DiscretePolynomialModel makeInvalidPolynomial(const PolynomialModelOrders& order
     model.A.assign(orders.na + 1, 0.0);
     model.C.assign(orders.nc + 1, 0.0);
     model.D.assign(orders.nd + 1, 0.0);
-    model.F.assign(orders.nf + 1, 0.0);
+    model.F.assign(1, 0.0);
     if (!model.A.empty()) {
         model.A[0] = 1.0;
     }
@@ -226,9 +221,6 @@ DiscretePolynomialModel ARXIdentifier::identify(const Vector& input,
     }
 
     const Vector theta = solveLeastSquares(phi, y, orders.regularization);
-    bool all_zero = true;
-    for (double v : theta) if (std::abs(v) > 1e-12) { all_zero = false; break; }
-    if (all_zero) std::cerr << "ARX theta ALL ZERO for na=" << orders.na << " nb=" << orders.nb << " samples=" << y.size() << "\n";
     for (size_t i = 0; i < orders.na; ++i) {
         model.A[i + 1] = theta[i];
     }
@@ -341,7 +333,6 @@ DiscretePolynomialModel OEIdentifier::identify(const Vector& input,
                                                const Vector& output,
                                                const PolynomialModelOrders& orders) {
     DiscretePolynomialModel initial = ARXIdentifier::identify(input, output, orders);
-    std::cerr << "OE initial fit=" << initial.fit << "\n";
     DiscretePolynomialModel model = makeInvalidPolynomial(orders);
     model.B = initial.B;
     const size_t nf = std::max<size_t>(orders.nf, orders.na);
@@ -351,7 +342,6 @@ DiscretePolynomialModel OEIdentifier::identify(const Vector& input,
         model.F[i] = initial.A[i];
     }
     optimizeOutputErrorModel(model, input, output, std::max<size_t>(orders.iterations, 6));
-    std::cerr << "OE final fit=" << model.fit << "\n";
     return model;
 }
 
