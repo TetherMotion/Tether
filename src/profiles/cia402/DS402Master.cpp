@@ -8,7 +8,7 @@ namespace EtherCAT {
 
 DS402Master::DS402Master() = default;
 
-DS402Master::DS402Master(const EtherCATMaster::Config& config)
+DS402Master::DS402Master(const Master::Config& config)
     : ethercat_master_(config)
 {
 }
@@ -249,10 +249,10 @@ bool DS402Master::updateMotionControllers(double dt_seconds)
 
 bool DS402Master::startRealtimeMotionControlLoop()
 {
-    return startRealtimeMotionControlLoop(EtherCATMaster::RealtimeMotionLoopConfig{});
+    return startRealtimeMotionControlLoop(Master::RealtimeMotionLoopConfig{});
 }
 
-bool DS402Master::startRealtimeMotionControlLoop(const EtherCATMaster::RealtimeMotionLoopConfig& config)
+bool DS402Master::startRealtimeMotionControlLoop(const Master::RealtimeMotionLoopConfig& config)
 {
     ethercat_master_.setMotionControlCallback(
         [this](double dt_seconds) { return updateMotionControllers(dt_seconds); });
@@ -261,10 +261,10 @@ bool DS402Master::startRealtimeMotionControlLoop(const EtherCATMaster::RealtimeM
 
 bool DS402Master::startPollingMotionControlLoop()
 {
-    return startPollingMotionControlLoop(EtherCATMaster::PollingMotionLoopConfig{});
+    return startPollingMotionControlLoop(Master::PollingMotionLoopConfig{});
 }
 
-bool DS402Master::startPollingMotionControlLoop(const EtherCATMaster::PollingMotionLoopConfig& config)
+bool DS402Master::startPollingMotionControlLoop(const Master::PollingMotionLoopConfig& config)
 {
     ethercat_master_.setMotionControlCallback(
         [this](double dt_seconds) { return updateMotionControllers(dt_seconds); });

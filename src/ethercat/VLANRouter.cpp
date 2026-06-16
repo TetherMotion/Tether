@@ -47,7 +47,7 @@ static inline void be16_to_raw(uint16_t v, uint8_t* p)
 // ============================================================================
 
 VLANRouter::VLANRouter()
-    : deliver_([](EtherCATMaster* m, const uint8_t* d, size_t l) {
+    : deliver_([](Master* m, const uint8_t* d, size_t l) {
           m->handleRxFrame(d, l);
       })
 {
@@ -70,7 +70,7 @@ void VLANRouter::setBackend(NetworkInterface* backend)
 // Master registry
 // ============================================================================
 
-void VLANRouter::addMaster(std::shared_ptr<EtherCATMaster> master,
+void VLANRouter::addMaster(std::shared_ptr<Master> master,
                            VLANRange rx_range,
                            std::optional<uint16_t> tx_vlan)
 {
@@ -112,7 +112,7 @@ void VLANRouter::addMaster(std::shared_ptr<EtherCATMaster> master,
     rebuildInterfacesLocked();
 }
 
-void VLANRouter::addMaster(std::shared_ptr<EtherCATMaster> master,
+void VLANRouter::addMaster(std::shared_ptr<Master> master,
                            std::optional<uint16_t> rx_vlan,
                            std::optional<uint16_t> tx_vlan)
 {
@@ -123,7 +123,7 @@ void VLANRouter::addMaster(std::shared_ptr<EtherCATMaster> master,
     }
 }
 
-void VLANRouter::addMaster(std::shared_ptr<EtherCATMaster> master,
+void VLANRouter::addMaster(std::shared_ptr<Master> master,
                              std::nullopt_t,
                              std::optional<uint16_t> tx_vlan)
 {
@@ -150,7 +150,7 @@ void VLANRouter::addMaster(std::shared_ptr<EtherCATMaster> master,
     rebuildInterfacesLocked();
 }
 
-void VLANRouter::removeMaster(const EtherCATMaster* master)
+void VLANRouter::removeMaster(const Master* master)
 {
     if (!master) return;
 
@@ -238,7 +238,7 @@ void VLANRouter::rebuildInterfacesLocked()
 // Per-master interface lookup
 // ============================================================================
 
-NetworkInterface* VLANRouter::networkInterfaceFor(const EtherCATMaster* master)
+NetworkInterface* VLANRouter::networkInterfaceFor(const Master* master)
 {
     if (!master) return nullptr;
 
@@ -271,7 +271,7 @@ void VLANRouter::processRxFrame(const uint8_t* data, size_t len)
     const uint16_t ether_type = be16_from_raw(data + 12);
 
     std::vector<InternalEntry> targets;
-    std::shared_ptr<EtherCATMaster> undefined_master;
+    std::shared_ptr<Master> undefined_master;
     bool has_undefined = false;
 
     {
@@ -356,9 +356,9 @@ void VLANRouter::processRxFrame(const uint8_t* data, size_t len)
 // Queries
 // ============================================================================
 
-std::vector<std::shared_ptr<EtherCATMaster>> VLANRouter::mastersForVlanId(uint16_t vlan_id) const
+std::vector<std::shared_ptr<Master>> VLANRouter::mastersForVlanId(uint16_t vlan_id) const
 {
-    std::vector<std::shared_ptr<EtherCATMaster>> result;
+    std::vector<std::shared_ptr<Master>> result;
     std::lock_guard<std::mutex> lock(mutex_);
     for (const auto& entry : entries_) {
         if (entry.rx_vlan_range.has_value() && entry.rx_vlan_range->contains(vlan_id)) {
@@ -389,7 +389,7 @@ size_t VLANRouter::masterCount() const
 // EtherType name helper
 // ============================================================================
 
-bool VLANRouter::setUndefinedTarget(std::shared_ptr<EtherCATMaster> master,
+bool VLANRouter::setUndefinedTarget(std::shared_ptr<Master> master,
                                      std::optional<uint16_t> tx_vlan,
                                      bool replace)
 {
@@ -414,7 +414,7 @@ void VLANRouter::clearUndefinedTarget()
     undefined_target_.reset();
 }
 
-std::shared_ptr<EtherCATMaster> VLANRouter::undefinedTarget() const
+std::shared_ptr<Master> VLANRouter::undefinedTarget() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
     if (undefined_target_.has_value()) {
@@ -423,7 +423,7 @@ std::shared_ptr<EtherCATMaster> VLANRouter::undefinedTarget() const
     return nullptr;
 }
 
-void VLANRouter::setDeliverFunction(std::function<void(EtherCATMaster*, const uint8_t*, size_t)> fn)
+void VLANRouter::setDeliverFunction(std::function<void(Master*, const uint8_t*, size_t)> fn)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     deliver_ = std::move(fn);

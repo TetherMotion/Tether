@@ -36,7 +36,7 @@ void parse_ethercat_frame(const uint8_t* frame, size_t length)
 
     // Prefer the master associated with the registered NetworkInterface
     if (s_registered_iface) {
-        EtherCATMaster* m = EtherCATMaster::findByNetworkInterface(s_registered_iface);
+        Master* m = Master::findByNetworkInterface(s_registered_iface);
         if (m) {
             m->handleRxFrame(frame, length);
             return;

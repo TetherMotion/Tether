@@ -18,7 +18,7 @@ namespace EtherCAT {
 // Construction
 // ============================================================================
 
-ALResetController::ALResetController(EtherCATMaster& master)
+ALResetController::ALResetController(Master& master)
     : master_(master), progress_cb_(nullptr) {}
 
 // ============================================================================

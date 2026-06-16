@@ -1,7 +1,7 @@
 #include "tether/ethercat/Mailbox/Utils.hpp"
 
 #include "logging/Logger.hpp"              // for TETHER_LOGI/W
-#include "tether/ethercat/EtherCATMaster.hpp" // for EtherCATMaster
+#include "tether/ethercat/EtherCATMaster.hpp" // for Master
 #include "tether/ethercat/EtherCATSlave.hpp"  // full slave type for status dumps
 #include "tether/profiles/cia402/CiA402Drive.hpp" // for CiA402Drive
 #include "tether/ethercat/EtherCATFaultDetection.hpp" // AL status helpers
@@ -42,7 +42,7 @@ void logStatuswordDiagnostics(uint16_t statusword,
     }
 }
 
-void dumpHeaderAndStatus(EtherCATMaster& master,
+void dumpHeaderAndStatus(Master& master,
                          uint16_t slave_idx,
                          const char* tag)
 {
