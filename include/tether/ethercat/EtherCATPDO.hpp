@@ -65,6 +65,7 @@ enum SyncManagerControl : uint8_t {
     SM_CTRL_MODE_MASK     = 0x03,
     SM_CTRL_MODE_BUFFERED = 0x00,
     SM_CTRL_MODE_MAILBOX  = 0x02,
+    SM_CTRL_MODE_3PDO     = 0x03,
     SM_CTRL_DIR_READ      = 0x00,
     SM_CTRL_DIR_WRITE     = 0x04,
     SM_CTRL_IRQ_ECAT      = 0x10,
