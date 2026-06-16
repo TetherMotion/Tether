@@ -107,6 +107,11 @@ static bool mbx_apwr_with_wkc_probe(
         return true;
     }
 
+    if (master.lastWkc() == 0) {
+        TETHER_LOGE(TAG, "mailbox transaction failed: Working counter is 0 (adp=0x%04X addr=0x%04X)", adp, primary_addr);
+        return false;
+    }
+
     // Probe alternate address if primary was not acknowledged after retries.
     TETHER_LOGW(TAG, "SDO mailbox APWR not acknowledged for adp=0x%04X addr=0x%04X (len=%u) after retries. Probing alt addr=0x%04X...",
                 adp, primary_addr, (unsigned)payload_len, alt_addr);
@@ -254,6 +259,10 @@ bool coe_sdo_upload(
                 return false;
             }
             if (!master.readRegister(Master::slaveAddressFromADP(adp), mbx_read_addr, mbxbuf, static_cast<uint16_t>(mbx_read_len), 200)) {
+                if (master.lastWkc() == 0) {
+                    TETHER_LOGE(TAG, "mailbox transaction failed: Working counter is 0 (adp=0x%04X addr=0x%04X)", adp, mbx_read_addr);
+                    return false;
+                }
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
@@ -442,6 +451,10 @@ bool coe_sdo_upload(
                     return false;
                 }
                 if (!master.readRegister(Master::slaveAddressFromADP(adp), mbx_read_addr, mbxbuf, static_cast<uint16_t>(mbx_read_len), 200)) {
+                    if (master.lastWkc() == 0) {
+                        TETHER_LOGE(TAG, "mailbox transaction failed: Working counter is 0 (adp=0x%04X addr=0x%04X)", adp, mbx_read_addr);
+                        return false;
+                    }
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     continue;
                 }
@@ -620,6 +633,10 @@ bool coe_sdo_download(
             return false;
         }
         if (!master.readRegister(Master::slaveAddressFromADP(adp), mbx_read_addr, mbxbuf, static_cast<uint16_t>(mbx_read_len), 500)) {
+            if (master.lastWkc() == 0) {
+                TETHER_LOGE(TAG, "mailbox transaction failed: Working counter is 0 (adp=0x%04X addr=0x%04X)", adp, mbx_read_addr);
+                return false;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }

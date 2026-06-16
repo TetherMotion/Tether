@@ -14,6 +14,7 @@
 #include "tether/ethercat/FaultDetection.hpp"
 #include "tether/ethercat/RealtimeLoop.hpp"
 #include "tether/ethercat/SyncManagerValidation.hpp"
+#include "tether/packet_interpreters/CoE.hpp"
 #include "tether/sii/SIIParser.hpp"
 #include "tether/fmmu/FMMUConfiguration.hpp"
 #include "raw/internal.hpp"
@@ -86,6 +87,7 @@ bool Master::writeRegister(SlaveAddress slave_address, RegisterAddress register_
     }
 
     WaitResult result = waitForPreRegistered(slot, timeout_ms);
+    last_wkc_.store(result.wkc, std::memory_order_relaxed);
     return result.success && result.wkc > 0;
 }
 
@@ -145,6 +147,7 @@ bool Master::readRegister(SlaveAddress slave_address, RegisterAddress register_a
     }
 
     WaitResult result = waitForPreRegistered(slot, timeout_ms);
+    last_wkc_.store(result.wkc, std::memory_order_relaxed);
     if (!result.success) return false;
 
     resp.datalen = static_cast<uint16_t>(result.data_length);
@@ -381,18 +384,51 @@ static void printEtherCATFrame(const uint8_t* frame, size_t length, bool is_tx, 
                     circulating ? "yes" : "no");
 
         if (datalen > 0 && length >= data_offset + datalen) {
-            constexpr size_t kMaxHexDump = 64;
-            const size_t dump_len = (datalen < kMaxHexDump) ? datalen : kMaxHexDump;
-            char hexbuf[256];
-            size_t pos = 0;
-            for (size_t i = 0; i < dump_len && pos + 3 < sizeof(hexbuf); i++) {
-                pos += std::snprintf(hexbuf + pos, sizeof(hexbuf) - pos, "%02X ", frame[data_offset + i]);
+            bool all_zero = true;
+            for (size_t i = 0; i < datalen; ++i) {
+                if (frame[data_offset + i] != 0) {
+                    all_zero = false;
+                    break;
+                }
             }
-            if (datalen > kMaxHexDump) {
-                pos += std::snprintf(hexbuf + pos, sizeof(hexbuf) - pos, "...");
+            if (all_zero) {
+                TETHER_LOGI("ec_pkt", "[%s]     Data (%u bytes): All zeroes",
+                            dir, static_cast<unsigned>(datalen));
+            } else {
+                constexpr size_t kMaxHexDump = 64;
+                const size_t dump_len = (datalen < kMaxHexDump) ? datalen : kMaxHexDump;
+                char hexbuf[256];
+                size_t pos = 0;
+                for (size_t i = 0; i < dump_len && pos + 3 < sizeof(hexbuf); i++) {
+                    pos += std::snprintf(hexbuf + pos, sizeof(hexbuf) - pos, "%02X ", frame[data_offset + i]);
+                }
+                if (datalen > kMaxHexDump) {
+                    pos += std::snprintf(hexbuf + pos, sizeof(hexbuf) - pos, "...");
+                }
+                TETHER_LOGI("ec_pkt", "[%s]     Data (%u/%u bytes): %s",
+                            dir, static_cast<unsigned>(dump_len), static_cast<unsigned>(datalen), hexbuf);
             }
-            TETHER_LOGI("ec_pkt", "[%s]     Data (%u/%u bytes): %s",
-                        dir, static_cast<unsigned>(dump_len), static_cast<unsigned>(datalen), hexbuf);
+
+            // If payload looks like a CoE mailbox packet, interpret it
+            if (datalen >= 8) {
+                const uint8_t* mbx_data = frame + data_offset;
+                const uint16_t mbx_len = mbx_data[0] | (static_cast<uint16_t>(mbx_data[1]) << 8);
+                const uint8_t mbx_type = mbx_data[5] & 0x0F;
+                if (mbx_type == 0x03 && mbx_len >= 2 && mbx_len + 6 <= datalen) {
+                    EtherCAT::PacketInterpreters::CoEPacketInterpreter interp(mbx_data, datalen);
+                    std::string coe_str = interp.toString();
+                    size_t line_start = 0;
+                    while (line_start < coe_str.size()) {
+                        size_t line_end = coe_str.find('\n', line_start);
+                        if (line_end == std::string::npos) line_end = coe_str.size();
+                        if (line_end > line_start) {
+                            TETHER_LOGI("ec_pkt", "[%s]     CoE: %s",
+                                        dir, coe_str.substr(line_start, line_end - line_start).c_str());
+                        }
+                        line_start = line_end + 1;
+                    }
+                }
+            }
         }
 
         const size_t dg_total = sizeof(EtherCAT::DatagramHeader) + datalen + sizeof(uint16_t);
