@@ -46,7 +46,7 @@ public:
     void setHandler(LogHandler handler) { handler_ = handler; }
 
     // Enable or disable printing ISO8601-like timestamps on console output
-    // (default: disabled). This affects the default printf-based output only
+    // (default: enabled). This affects the default printf-based output only
     // and does not modify messages delivered to a custom handler.
     void setTimestampEnabled(bool enabled) { timestampEnabled_ = enabled; }
     bool isTimestampEnabled() const { return timestampEnabled_; }
@@ -55,7 +55,7 @@ private:
     Logger() = default;
     LogLevel level_ = LogLevel::Info;
     LogHandler handler_;
-    bool timestampEnabled_ = false;
+    bool timestampEnabled_ = true;
 };
 
 // Convenience macros matching ESP-IDF style

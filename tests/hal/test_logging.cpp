@@ -127,7 +127,6 @@ TEST(LoggerTest, TimestampPrintedWhenEnabled_DefaultOutput) {
     auto& logger = Logger::instance();
     logger.setLevel(LogLevel::Info);
     logger.setHandler(nullptr); // use default printf output
-    logger.setTimestampEnabled(true);
 
     testing::internal::CaptureStdout();
     logger.log(LogLevel::Info, "TS", "timestamp test");
@@ -149,14 +148,11 @@ TEST(LoggerTest, TimestampPrintedWhenEnabled_DefaultOutput) {
     EXPECT_EQ(out[23], 'Z');  // UTC marker
 
     EXPECT_NE(out.find("[I] TS: timestamp test"), std::string::npos) << "output: " << out;
-
-    logger.setTimestampEnabled(false);
 }
 
 TEST(LoggerTest, TimestampNotAddedToHandler) {
     auto& logger = Logger::instance();
     logger.setLevel(LogLevel::Info);
-    logger.setTimestampEnabled(true);
 
     std::string received;
     logger.setHandler([&received](LogLevel, const char*, const char* msg) { received = msg; });
@@ -166,5 +162,4 @@ TEST(LoggerTest, TimestampNotAddedToHandler) {
     EXPECT_EQ(received, "handler test");
 
     logger.setHandler(nullptr);
-    logger.setTimestampEnabled(false);
 }
