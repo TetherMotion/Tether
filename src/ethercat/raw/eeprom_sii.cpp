@@ -21,7 +21,7 @@ static void delay_us(unsigned int us) {
     }
 }
 
-static bool ec_eeprom_wait_not_busy_ap(EtherCATMaster& master, uint16_t adp, uint16_t *out_estat,
+static bool ec_eeprom_wait_not_busy_ap(Master& master, uint16_t adp, uint16_t *out_estat,
                                       unsigned int timeout_ms)
 {
     auto start = std::chrono::steady_clock::now();
@@ -31,7 +31,7 @@ static bool ec_eeprom_wait_not_busy_ap(EtherCATMaster& master, uint16_t adp, uin
         if (std::chrono::steady_clock::now() >= deadline) return false;
 
         uint16_t estat_le = 0;
-        if (master.readRegister(EtherCATMaster::slaveAddressFromADP(adp), EC_REG_EEPSTAT, estat_le, 100)) {
+        if (master.readRegister(Master::slaveAddressFromADP(adp), EC_REG_EEPSTAT, estat_le, 100)) {
             const uint16_t estat = le16_to_host(estat_le);
             if (out_estat) *out_estat = estat;
             if ((estat & EC_ESTAT_BUSY) == 0) return true;
@@ -40,7 +40,7 @@ static bool ec_eeprom_wait_not_busy_ap(EtherCATMaster& master, uint16_t adp, uin
     }
 }
 
-static bool ec_eeprom_read_u32_ap(EtherCATMaster& master, uint16_t adp, uint16_t eeprom_word_addr,
+static bool ec_eeprom_read_u32_ap(Master& master, uint16_t adp, uint16_t eeprom_word_addr,
                                  uint32_t *out_u32)
 {
     if (out_u32) *out_u32 = 0;
@@ -63,7 +63,7 @@ static bool ec_eeprom_read_u32_ap(EtherCATMaster& master, uint16_t adp, uint16_t
 
     if ((estat & EC_ESTAT_EMASK) != 0) {
         const uint16_t nop_le = host_to_le16(EC_ECMD_NOP);
-        (void)master.writeRegister(EtherCATMaster::slaveAddressFromADP(adp), EC_REG_EEPCTL, nop_le, 200);
+        (void)master.writeRegister(Master::slaveAddressFromADP(adp), EC_REG_EEPCTL, nop_le, 200);
     }
 
     int nackcnt = 0;
@@ -73,7 +73,7 @@ static bool ec_eeprom_read_u32_ap(EtherCATMaster& master, uint16_t adp, uint16_t
         cmd.addr_le = host_to_le16(eeprom_word_addr);
         cmd.d2_le = host_to_le16(0);
 
-        if (!master.writeRegister(EtherCATMaster::slaveAddressFromADP(adp), EC_REG_EEPCTL, cmd, 200)) return false;
+        if (!master.writeRegister(Master::slaveAddressFromADP(adp), EC_REG_EEPCTL, cmd, 200)) return false;
 
         delay_us(200);
         estat = 0;
@@ -86,7 +86,7 @@ static bool ec_eeprom_read_u32_ap(EtherCATMaster& master, uint16_t adp, uint16_t
         }
 
         uint32_t edat_le = 0;
-        if (!master.readRegister(EtherCATMaster::slaveAddressFromADP(adp), EC_REG_EEPDAT, edat_le, 200)) return false;
+        if (!master.readRegister(Master::slaveAddressFromADP(adp), EC_REG_EEPDAT, edat_le, 200)) return false;
 
         if (out_u32) *out_u32 = le32_to_host(edat_le);
         // Populate the master-level cache so future readers hit it.
@@ -98,13 +98,13 @@ static bool ec_eeprom_read_u32_ap(EtherCATMaster& master, uint16_t adp, uint16_t
     return false;
 }
 
-static bool sii_read_u32_pair(EtherCATMaster& master, uint16_t adp, uint16_t word_addr_even, uint32_t *out)
+static bool sii_read_u32_pair(Master& master, uint16_t adp, uint16_t word_addr_even, uint32_t *out)
 {
     const uint16_t wa = static_cast<uint16_t>(word_addr_even & 0xFFFEu);
     return ec_eeprom_read_u32_ap(master, adp, wa, out);
 }
 
-static bool sii_get_byte(EtherCATMaster& master, uint16_t adp, uint16_t sii_byte_addr, uint8_t *out)
+static bool sii_get_byte(Master& master, uint16_t adp, uint16_t sii_byte_addr, uint8_t *out)
 {
     if (out == nullptr) return false;
     const uint16_t word_addr = static_cast<uint16_t>(sii_byte_addr >> 1);
@@ -156,7 +156,7 @@ static bool sii_get_byte(EtherCATMaster& master, uint16_t adp, uint16_t sii_byte
  * - SM0 = Receive mailbox (MbxIn) = Master→Slave = std_rx in SII
  * - SM1 = Send mailbox (MbxOut) = Slave→Master = std_tx in SII
  * 
- * @param master EtherCATMaster instance for network I/O
+ * @param master Master instance for network I/O
  * @param adp Auto-increment address (slave position)
  * @param out_wr_addr Receive mailbox address (MbxIn, Master→Slave, SM0, std_rx)
  * @param out_wr_len Receive mailbox size in bytes
@@ -166,7 +166,7 @@ static bool sii_get_byte(EtherCATMaster& master, uint16_t adp, uint16_t sii_byte
  * @return true if mailbox configuration was read (or defaults applied), false on critical error
  */
 bool configure_mailbox_from_sii(
-    EtherCATMaster& master,
+    Master& master,
     uint16_t slave_index,
     uint16_t *out_wr_addr,
     uint16_t *out_wr_len,
@@ -363,7 +363,7 @@ bool configure_mailbox_from_sii(
     return true;
 }
 
-bool sii_read_string(EtherCATMaster& master, uint16_t slave_index, uint16_t string_number, char *out, size_t out_cap) {
+bool sii_read_string(Master& master, uint16_t slave_index, uint16_t string_number, char *out, size_t out_cap) {
     (void)master;
     (void)slave_index;
     (void)string_number;
@@ -374,7 +374,7 @@ bool sii_read_string(EtherCATMaster& master, uint16_t slave_index, uint16_t stri
 } // namespace Raw
 
 namespace raw {
-bool sii_read_string(EtherCATMaster& master, uint16_t slave_index, uint16_t string_number, char *out, size_t out_cap) {
+bool sii_read_string(Master& master, uint16_t slave_index, uint16_t string_number, char *out, size_t out_cap) {
     // Forward to the capitalized Raw implementation
     return Raw::sii_read_string(master, slave_index, string_number, out, out_cap);
 }

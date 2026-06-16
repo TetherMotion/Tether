@@ -3,7 +3,7 @@
  * @brief Minimal bridge — all global state has been removed.
  *
  * The former BridgeContext singleton is gone.  All transport primitives
- * are now member functions on EtherCATMaster; call them directly.
+ * are now member functions on Master; call them directly.
  *
  * Only utility / adapter wrappers remain here for firmware-only code
  * that has not yet been migrated (EtherCATDCConsistency.cpp).
@@ -23,7 +23,7 @@ namespace Raw {
 // ============================================================================
 
 uint16_t adp_for_slave_index(uint16_t slave_index) {
-    return EtherCATMaster::adpForSlaveIndex(slave_index);
+    return Master::adpForSlaveIndex(slave_index);
 }
 
 // ============================================================================

@@ -3,7 +3,7 @@
  * @brief Implementation of class-based EtherCAT Distributed Clock synchronization
  *
  * All network I/O goes through IDCTransport — no direct Raw:: or global
- * dependency.  The realtime loop is delegated to EtherCATRealtimeLoop.
+ * dependency.  The realtime loop is delegated to RealtimeLoop.
  */
 
 #include "tether/ethercat/EtherCATDCClass.hpp"
@@ -146,15 +146,15 @@ bool EtherCATDC::start(std::function<bool()> pdo_exchange_fn) {
     // Build the realtime loop with DC sync and (optional) PDO exchange callbacks.
     // Use the factory method so jitter thresholds are auto-derived from the
     // actual cycle/sync periods rather than hardcoded defaults.
-    EtherCATRealtimeLoop::Config loop_cfg =
-        EtherCATRealtimeLoop::Config::defaults(config_.cycle_period_us,
+    RealtimeLoop::Config loop_cfg =
+        RealtimeLoop::Config::defaults(config_.cycle_period_us,
                                                 config_.sync_interval_cycles);
 
     auto sync_fn = [this]() { return sendSyncFrame(); };
     auto time_fn = [this]() { return getMasterTimeNs(); };
 
-    realtime_loop_ = std::make_unique<EtherCATRealtimeLoop>(
-        pdo_exchange_fn_ ? pdo_exchange_fn_ : EtherCATRealtimeLoop::ExchangeFunc(ExchangeNoop_impl),
+    realtime_loop_ = std::make_unique<RealtimeLoop>(
+        pdo_exchange_fn_ ? pdo_exchange_fn_ : RealtimeLoop::ExchangeFunc(ExchangeNoop_impl),
         sync_fn, time_fn, loop_cfg);
 
     if (!realtime_loop_->start()) {

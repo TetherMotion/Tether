@@ -39,7 +39,7 @@ static const char* commTypeName(uint8_t type) {
 // SyncManagerAccessor
 // ============================================================================
 
-SyncManagerAccessor::SyncManagerAccessor(EtherCATSlave& slave, uint8_t smIndex)
+SyncManagerAccessor::SyncManagerAccessor(Slave& slave, uint8_t smIndex)
     : slave_(slave), index_(smIndex)
 {
 }
@@ -299,7 +299,7 @@ void SyncManagerAccessor::dumpPDOAssignments(const char* tag) const {
 // Debug function: mailbox hardware configuration
 // ============================================================================
 
-void debugMailboxConfiguration(EtherCATMaster& master, uint16_t slave_index, const char* tag) {
+void debugMailboxConfiguration(Master& master, uint16_t slave_index, const char* tag) {
     TETHER_LOGI(tag, "\n╔══════════════════════════════════════════════════════════════╗\n║  Mailbox Hardware Configuration Debug (Slave %u)            ║\n╚══════════════════════════════════════════════════════════════╝\n", (unsigned)slave_index);
 
     auto& slave = master.slave(slave_index);

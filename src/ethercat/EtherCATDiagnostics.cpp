@@ -12,7 +12,7 @@ constexpr uint16_t kAlStatusCodeRegister = 0x0134;
 constexpr uint16_t kSm0BaseRegister = 0x0800;
 constexpr uint16_t kSm1BaseRegister = 0x0808;
 
-void logSyncManagerRegister(EtherCAT::EtherCATMaster& master,
+void logSyncManagerRegister(EtherCAT::Master& master,
                             uint16_t slave_index,
                             uint16_t base_register,
                             const char* sync_manager_name,
@@ -39,7 +39,7 @@ void logSyncManagerRegister(EtherCAT::EtherCATMaster& master,
 namespace EtherCAT::Diagnostics {
 
 void logPreOperationalMailboxDiagnostics(
-    EtherCATMaster& master,
+    Master& master,
     uint16_t slave_index,
     const char* tag,
     const PreOperationalMailboxDiagnosticsOptions& options)
@@ -97,7 +97,7 @@ void logPreOperationalMailboxDiagnostics(
 }
 
 bool logParsedSlaveSII(
-    EtherCATMaster& master,
+    Master& master,
     uint16_t slave_index,
     const char* tag)
 {
@@ -115,7 +115,7 @@ bool logParsedSlaveSII(
 }
 
 void logSlaveApplicationLayerDiagnostics(
-    EtherCATMaster& master,
+    Master& master,
     uint16_t slave_index,
     const char* tag)
 {
@@ -124,7 +124,7 @@ void logSlaveApplicationLayerDiagnostics(
         TETHER_LOGW(tag, "Slave %u current EC state: 0x%02X (%s)",
                     slave_index,
                     state,
-                    EtherCAT::EtherCATMaster::getECStateName(state));
+                    EtherCAT::Master::getECStateName(state));
     } else {
         TETHER_LOGW(tag, "Slave %u: failed to read EC state (possible WKC=0 / transport issue)", slave_index);
     }

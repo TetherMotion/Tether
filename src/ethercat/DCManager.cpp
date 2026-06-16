@@ -8,7 +8,7 @@
 
 namespace EtherCAT {
 
-DCManager::DCManager(EtherCATMaster& master)
+DCManager::DCManager(Master& master)
     : master_(master), sentinel_(std::make_unique<NoDistributedClockConfigured>())
 {
 }

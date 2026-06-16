@@ -1,9 +1,9 @@
 /**
- * @file EtherCATSlaveEmulator.cpp
+ * @file SlaveEmulator.cpp
  * @brief Implementation of EtherCAT Slave Emulator
  */
 
-#include "EtherCATSlaveEmulator.hpp"
+#include "SlaveEmulator.hpp"
 #include "tether/ethercat/EtherCATDCClass.hpp"
 #include "tether/platform/EspCompat.hpp"
 

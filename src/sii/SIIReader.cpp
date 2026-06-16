@@ -39,7 +39,7 @@ static constexpr uint16_t EC_ESTAT_NACK  = 0x2000;
 // SIIReader Implementation
 // ============================================================================
 
-SIIReader::SIIReader(EtherCATMaster& master)
+SIIReader::SIIReader(Master& master)
     : m_master(master)
 {
 }
@@ -59,7 +59,7 @@ bool SIIReader::waitNotBusy(uint16_t slave_index, uint16_t* out_status) {
         }
 
         uint16_t estat_le = 0;
-        if (m_master.readRegister(EtherCATMaster::slaveAddressFromADP(adpForSlave(slave_index)), EC_REG_EEPSTAT, estat_le, 100)) {
+        if (m_master.readRegister(Master::slaveAddressFromADP(adpForSlave(slave_index)), EC_REG_EEPSTAT, estat_le, 100)) {
             uint16_t estat = Raw::le16_to_host(estat_le);
             if (out_status) {
                 *out_status = estat;
@@ -92,7 +92,7 @@ bool SIIReader::readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t*
     // Clear errors if present
     if ((estat & EC_ESTAT_EMASK) != 0) {
         uint16_t nop_le = Raw::host_to_le16(EC_ECMD_NOP);
-        m_master.writeRegister(EtherCATMaster::slaveAddressFromADP(adpForSlave(slave_index)), EC_REG_EEPCTL, nop_le, 200);
+        m_master.writeRegister(Master::slaveAddressFromADP(adpForSlave(slave_index)), EC_REG_EEPCTL, nop_le, 200);
     }
 
     int nack_count = 0;
@@ -108,7 +108,7 @@ bool SIIReader::readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t*
         cmd.addr_le = Raw::host_to_le16(word_address);
         cmd.d2_le = 0;
 
-        if (!m_master.writeRegister(EtherCATMaster::slaveAddressFromADP(adpForSlave(slave_index)), EC_REG_EEPCTL, cmd, 200)) {
+        if (!m_master.writeRegister(Master::slaveAddressFromADP(adpForSlave(slave_index)), EC_REG_EEPCTL, cmd, 200)) {
             return false;
         }
 
@@ -126,7 +126,7 @@ bool SIIReader::readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t*
         }
 
         uint32_t edat_le = 0;
-        if (!m_master.readRegister(EtherCATMaster::slaveAddressFromADP(adpForSlave(slave_index)), EC_REG_EEPDAT, edat_le, 200)) {
+        if (!m_master.readRegister(Master::slaveAddressFromADP(adpForSlave(slave_index)), EC_REG_EEPDAT, edat_le, 200)) {
             return false;
         }
 
@@ -730,13 +730,13 @@ bool SIIParser::parse(uint16_t slave_index, SIIData& out_data) {
 // Convenience Functions
 // ============================================================================
 
-bool readSII(EtherCATMaster& master, uint16_t slave_index, SIIData& out_data) {
+bool readSII(Master& master, uint16_t slave_index, SIIData& out_data) {
     SIIReader reader(master);
     SIIParser parser(reader);
     return parser.parse(slave_index, out_data);
 }
 
-bool readSIIIdentity(EtherCATMaster& master, uint16_t slave_index, SIIIdentity& out_identity) {
+bool readSIIIdentity(Master& master, uint16_t slave_index, SIIIdentity& out_identity) {
     SIIReader reader(master);
     SIIParser parser(reader);
     SIIData data;
@@ -748,7 +748,7 @@ bool readSIIIdentity(EtherCATMaster& master, uint16_t slave_index, SIIIdentity& 
     return false;
 }
 
-bool readSIIMailbox(EtherCATMaster& master, uint16_t slave_index, SIIMailboxConfig& out_mailbox) {
+bool readSIIMailbox(Master& master, uint16_t slave_index, SIIMailboxConfig& out_mailbox) {
     SIIReader reader(master);
     SIIParser parser(reader);
     SIIData data;
@@ -948,7 +948,7 @@ void logSIIData(const SIIData& data, const char* tag) {
     }
 }
 
-void debugSIIMailboxDerivation(EtherCATMaster& master, uint16_t slave_index, const char* tag) {
+void debugSIIMailboxDerivation(Master& master, uint16_t slave_index, const char* tag) {
     TETHER_LOGI(tag, "\n╔══════════════════════════════════════════════════════════════╗\n║  SII Mailbox Derivation Debug (Slave %u)                      ║\n╚══════════════════════════════════════════════════════════════╝\n", (unsigned)slave_index);
     
     SIIReader reader(master);

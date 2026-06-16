@@ -25,7 +25,7 @@ namespace EtherCAT {
 // CiA402Drive Constructor
 // ============================================================================
 
-CiA402Drive::CiA402Drive(EtherCATMaster& master, uint16_t slave_index)
+CiA402Drive::CiA402Drive(Master& master, uint16_t slave_index)
     : m_slave_index(slave_index)
     , m_master(&master)
 {
@@ -45,7 +45,7 @@ DriveManager::~DriveManager() {
     m_drive_count = 0;
 }
 
-size_t DriveManager::initializeDrives(EtherCATMaster& master, size_t slave_count) {
+size_t DriveManager::initializeDrives(Master& master, size_t slave_count) {
     m_drive_count = 0;
     
     for (size_t i = 0; i < slave_count && m_drive_count < kMaxManagedDrives; i++) {

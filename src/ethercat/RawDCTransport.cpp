@@ -12,7 +12,7 @@ extern "C" uint64_t ecdc_get_master_time_ns();
 
 namespace EtherCAT {
 
-RawDCTransport::RawDCTransport(EtherCATMaster& master)
+RawDCTransport::RawDCTransport(Master& master)
     : master_(master)
 {}
 
@@ -33,12 +33,12 @@ bool RawDCTransport::writeRegister(uint16_t slave_index, uint16_t reg_addr,
 bool RawDCTransport::sendSyncDatagram(uint16_t slave_index, uint16_t reg_addr,
                                        const void* data, uint16_t size)
 {
-    const uint16_t adp = EtherCATMaster::adpForSlaveIndex(slave_index);
+    const uint16_t adp = Master::adpForSlaveIndex(slave_index);
     // Use kFireAndForgetIdx so the response is handled as fire-and-forget
     // and doesn't flood the packet router with "unrouted" warnings.
     return master_.sendSingleDatagram(
         Command::ARMW,
-        EtherCATMaster::kFireAndForgetIdx,
+        Master::kFireAndForgetIdx,
         adp,
         reg_addr,
         data,
