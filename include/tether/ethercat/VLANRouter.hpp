@@ -7,7 +7,7 @@
  * ## Purpose
  *
  * The VLANRouter sits between a raw Ethernet backend and one or more
- * `EtherCATMaster` instances.  It transparently inserts and strips 802.1Q
+ * `Master` instances.  It transparently inserts and strips 802.1Q
  * VLAN tags so that each master can operate on its own logical EtherCAT
  * segment without needing dedicated hardware.
  *
@@ -30,11 +30,11 @@
  *   EtherCAT::VLANRouter router;
  *   router.setBackend(raw_ethernet_iface);
  *
- *   auto master_a = std::make_shared<EtherCAT::EtherCATMaster>();
+ *   auto master_a = std::make_shared<EtherCAT::Master>();
  *   router.addMaster(master_a, 100, 100);   // VLAN 100 for both RX and TX
  *   master_a->start(*router.networkInterfaceFor(master_a.get()), src_mac);
  *
- *   auto master_b = std::make_shared<EtherCAT::EtherCATMaster>();
+ *   auto master_b = std::make_shared<EtherCAT::Master>();
  *   router.addMaster(master_b, std::nullopt, std::nullopt); // No VLAN
  *   master_b->start(*router.networkInterfaceFor(master_b.get()), src_mac);
  *
@@ -72,7 +72,7 @@
 namespace EtherCAT {
 
 // Forward declarations
-class EtherCATMaster;
+class Master;
 
 /**
  * @brief 802.1Q VLAN router for multiplexing EtherCAT masters.
@@ -104,7 +104,7 @@ public:
      * @brief Public snapshot of a registered master entry.
      */
     struct Entry {
-        std::shared_ptr<EtherCATMaster> master;       ///< The registered master
+        std::shared_ptr<Master> master;       ///< The registered master
         std::optional<VLANRange> rx_vlan_range;       ///< Expected RX VLAN range (nullopt = untagged)
         std::optional<uint16_t> tx_vlan_id;           ///< TX VLAN ID to insert (nullopt = pass-through)
     };
@@ -158,21 +158,21 @@ public:
      *
      * It is legal for multiple masters to have overlapping ranges.
      */
-    void addMaster(std::shared_ptr<EtherCATMaster> master,
+    void addMaster(std::shared_ptr<Master> master,
                    VLANRange rx_range,
                    std::optional<uint16_t> tx_vlan);
 
     /**
      * @brief Convenience overload: register a master with a single RX VLAN.
      */
-    void addMaster(std::shared_ptr<EtherCATMaster> master,
+    void addMaster(std::shared_ptr<Master> master,
                    std::optional<uint16_t> rx_vlan,
                    std::optional<uint16_t> tx_vlan);
 
     /**
      * @brief Register an EtherCAT master with no RX VLAN (untagged only).
      */
-    void addMaster(std::shared_ptr<EtherCATMaster> master,
+    void addMaster(std::shared_ptr<Master> master,
                    std::nullopt_t,
                    std::optional<uint16_t> tx_vlan);
 
@@ -183,7 +183,7 @@ public:
      *
      * @param master Raw pointer to the master to remove.
      */
-    void removeMaster(const EtherCATMaster* master);
+    void removeMaster(const Master* master);
 
     /**
      * @brief Clear all registered masters.
@@ -201,7 +201,7 @@ public:
      * @return Pointer to the master's NetworkInterface, or nullptr if
      *         the master is not registered.
      */
-    NetworkInterface* networkInterfaceFor(const EtherCATMaster* master);
+    NetworkInterface* networkInterfaceFor(const Master* master);
 
     /**
      * @brief Process a received Ethernet frame and route it to matching masters.
@@ -237,7 +237,7 @@ public:
      * @param vlan_id The VLAN ID to look up.
      * @return Vector of shared_ptr to matching masters (may be empty).
      */
-    std::vector<std::shared_ptr<EtherCATMaster>> mastersForVlanId(uint16_t vlan_id) const;
+    std::vector<std::shared_ptr<Master>> mastersForVlanId(uint16_t vlan_id) const;
 
     /**
      * @brief Return a snapshot of all registered entries.
@@ -275,7 +275,7 @@ public:
      * @return true on success, false if a target already exists and
      *         replace is false.
      */
-    bool setUndefinedTarget(std::shared_ptr<EtherCATMaster> master,
+    bool setUndefinedTarget(std::shared_ptr<Master> master,
                             std::optional<uint16_t> tx_vlan = std::nullopt,
                             bool replace = false);
 
@@ -287,7 +287,7 @@ public:
     /**
      * @brief Return the current undefined target master, or nullptr.
      */
-    std::shared_ptr<EtherCATMaster> undefinedTarget() const;
+    std::shared_ptr<Master> undefinedTarget() const;
 
     /**
      * @brief Return the NetworkInterface for the undefined target.
@@ -306,14 +306,14 @@ public:
      *
      * @param fn Callback with signature (master, data, len).
      */
-    void setDeliverFunction(std::function<void(EtherCATMaster*, const uint8_t*, size_t)> fn);
+    void setDeliverFunction(std::function<void(Master*, const uint8_t*, size_t)> fn);
 
 private:
     /**
      * @brief Internal entry stored in the vector for memory locality.
      */
     struct InternalEntry {
-        std::shared_ptr<EtherCATMaster> master;
+        std::shared_ptr<Master> master;
         std::optional<VLANRange> rx_vlan_range;
         std::optional<uint16_t> tx_vlan_id;
         NetworkInterface iface;  ///< Per-master view (send encapsulates)
@@ -323,7 +323,7 @@ private:
      * @brief Dedicated catch-all target (separate from the entries vector).
      */
     struct UndefinedTarget {
-        std::shared_ptr<EtherCATMaster> master;
+        std::shared_ptr<Master> master;
         std::optional<uint16_t> tx_vlan_id;
         NetworkInterface iface;
     };
@@ -353,7 +353,7 @@ private:
      * Default behaviour invokes master->handleRxFrame().  Overridable
      * for unit testing.
      */
-    std::function<void(EtherCATMaster*, const uint8_t*, size_t)> deliver_;
+    std::function<void(Master*, const uint8_t*, size_t)> deliver_;
 };
 
 } // namespace EtherCAT

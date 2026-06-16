@@ -48,8 +48,8 @@
 // ============================================================================
 
 namespace EtherCAT {
-    class EtherCATSlave;
-    class EtherCATMaster;
+    class Slave;
+    class Master;
     enum class SlaveError : uint8_t;
 }
 
@@ -245,7 +245,7 @@ namespace EtherCAT {
 /**
  * @brief Lightweight accessor for one EtherCAT Sync Manager on a slave.
  *
- * Returned by `EtherCATSlave::sm(smIndex)`.  Holds a reference to the slave
+ * Returned by `Slave::sm(smIndex)`.  Holds a reference to the slave
  * so it can perform SDO reads and raw APRD register reads.
  *
  * ## Typical usage
@@ -332,7 +332,7 @@ public:
      * @param slave    The slave whose SM is being accessed
      * @param smIndex  Zero-based SM index (0 = SM0, 1 = SM1, …)
      */
-    SyncManagerAccessor(EtherCATSlave& slave, uint8_t smIndex);
+    SyncManagerAccessor(Slave& slave, uint8_t smIndex);
 
     // -----------------------------------------------------------------------
     // Identity
@@ -461,7 +461,7 @@ public:
     void dumpPDOAssignments(const char* tag = "SM") const;
 
 private:
-    EtherCATSlave& slave_; ///< Owning slave
+    Slave& slave_; ///< Owning slave
     uint8_t        index_; ///< SM index (0-based)
 };
 
@@ -476,6 +476,6 @@ private:
  * @param slave_index   Slave index (0-based)
  * @param tag           Logger tag
  */
-void debugMailboxConfiguration(EtherCATMaster& master, uint16_t slave_index, const char* tag);
+void debugMailboxConfiguration(Master& master, uint16_t slave_index, const char* tag);
 
 } // namespace EtherCAT

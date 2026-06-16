@@ -508,10 +508,10 @@ inline void foe_reset_stats(FoEManager& mgr) { mgr.resetStats(); }
 } // namespace FoE
 
 // ============================================================================
-// Legacy EtherCAT::FoEManager wrapper (for EtherCATMaster compatibility)
+// Legacy EtherCAT::FoEManager wrapper (for Master compatibility)
 // ============================================================================
 
-class EtherCATMaster; // forward
+class Master; // forward
 
 /**
  * @brief Null transport used by the legacy FoEManager wrapper.
@@ -532,16 +532,16 @@ public:
 };
 
 /**
- * @brief Legacy FoEManager wrapper for EtherCATMaster.
+ * @brief Legacy FoEManager wrapper for Master.
  *
- * Constructed with an EtherCATMaster& reference for backward
+ * Constructed with an Master& reference for backward
  * compatibility.  Internally owns a NullFoETransport and a
  * FoE::FoEManager.  When a real transport is needed, the master
  * should switch to using FoE::FoEManager directly.
  */
 class FoEManager {
 public:
-    explicit FoEManager(EtherCATMaster& master)
+    explicit FoEManager(Master& master)
         : master_(master), null_transport_(), mgr_(null_transport_) {}
     ~FoEManager() = default;
 
@@ -570,11 +570,11 @@ public:
     FoE::FoEStats getStats() const { return mgr_.getStats(); }
     void resetStats() { mgr_.resetStats(); }
 
-    EtherCATMaster& master() { return master_; }
+    Master& master() { return master_; }
     FoE::FoEManager& inner() { return mgr_; }
 
 private:
-    EtherCATMaster& master_;
+    Master& master_;
     NullFoETransport null_transport_;
     FoE::FoEManager mgr_;
 };

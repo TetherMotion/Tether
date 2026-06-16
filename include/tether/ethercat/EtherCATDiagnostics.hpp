@@ -13,18 +13,18 @@ struct PreOperationalMailboxDiagnosticsOptions {
 };
 
 void logPreOperationalMailboxDiagnostics(
-    EtherCATMaster& master,
+    Master& master,
     uint16_t slave_index,
     const char* tag = "EtherCAT",
     const PreOperationalMailboxDiagnosticsOptions& options = {});
 
 bool logParsedSlaveSII(
-    EtherCATMaster& master,
+    Master& master,
     uint16_t slave_index,
     const char* tag = "EtherCAT");
 
 void logSlaveApplicationLayerDiagnostics(
-    EtherCATMaster& master,
+    Master& master,
     uint16_t slave_index,
     const char* tag = "EtherCAT");
 

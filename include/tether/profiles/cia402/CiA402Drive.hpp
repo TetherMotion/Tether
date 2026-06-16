@@ -52,7 +52,7 @@
 #include "tether/drives/DynaDrive/Registers/Controlword.hpp"
 
 // Forward declaration
-namespace EtherCAT { class EtherCATMaster; }
+namespace EtherCAT { class Master; }
 
 namespace EtherCAT {
 
@@ -115,10 +115,10 @@ const char* formatStatuswordDiagnostics(uint16_t sw, char* buffer, size_t buffer
  */
 class CiA402Drive {
 public:
-    CiA402Drive(EtherCATMaster& master, uint16_t slave_index);
+    CiA402Drive(Master& master, uint16_t slave_index);
     ~CiA402Drive() = default;
 
-    EtherCATMaster* master() const { return m_master; }
+    Master* master() const { return m_master; }
 
     // Non-copyable
     CiA402Drive(const CiA402Drive&) = delete;
@@ -260,7 +260,7 @@ private:
     bool waitForDriveState(DriveState target, uint32_t timeout_ms);
 
     uint16_t       m_slave_index;
-    EtherCATMaster* m_master{nullptr};
+    Master* m_master{nullptr};
     uint32_t       m_sdo_timeout_ms{1000};
 
     // PDO configuration
@@ -295,7 +295,7 @@ public:
     DriveManager() = default;
     ~DriveManager();
 
-    size_t initializeDrives(EtherCATMaster& master, size_t slave_count);
+    size_t initializeDrives(Master& master, size_t slave_count);
     CiA402Drive* getDrive(size_t index);
     CiA402Drive* getDriveBySlaveIndex(uint16_t slave_index);
     size_t getDriveCount() const { return m_drive_count; }

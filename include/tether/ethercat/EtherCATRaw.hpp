@@ -106,6 +106,6 @@
 namespace EtherCAT {
 
 // All EtherCAT master functionality is now in the class-based API.
-// Use EtherCATMaster instances directly — no free-function API is provided.
+// Use Master instances directly — no free-function API is provided.
 
 } // namespace EtherCAT

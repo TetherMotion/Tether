@@ -2,7 +2,7 @@
  * @file Axia80.hpp
  * @brief High-level Tether helper for the ATI Axia80 Force/Torque Sensor
  *
- * Wraps EtherCATMaster/EtherCATSlave to provide:
+ * Wraps Master/Slave to provide:
  *   - Calibration reading via SDO
  *   - Control command builders (bias, filter, calibration slot, sample rate)
  *   - Status checking and unit conversion
@@ -33,11 +33,11 @@ namespace Sensors {
 /**
  * @brief High-level wrapper for ATI Axia80 F/T sensor operations.
  *
- * This class does **not** own the EtherCATMaster; it operates on a
+ * This class does **not** own the Master; it operates on a
  * reference passed at construction.  Typical usage:
  *
  * @code
- *   EtherCAT::EtherCATMaster master;
+ *   EtherCAT::Master master;
  *   // ... start master, discover slaves ...
  *   EtherCAT::Sensors::Axia80Sensor sensor(master, slave_index);
  *   sensor.init();                     // mailbox + PDO mapping + OP
@@ -51,18 +51,18 @@ namespace Sensors {
 class Axia80Sensor {
 public:
     /**
-     * @param master      Running EtherCATMaster instance
+     * @param master      Running Master instance
      * @param slave_index Bus position of the Axia80 sensor
      */
-    Axia80Sensor(EtherCATMaster& master, uint16_t slave_index)
+    Axia80Sensor(Master& master, uint16_t slave_index)
         : master_(master), slave_index_(slave_index) {}
 
     // -- Identification ----------------------------------------------------
 
     uint16_t slaveIndex() const { return slave_index_; }
 
-    EtherCATSlave& slave() { return master_.slave(slave_index_); }
-    const EtherCATMaster& master() const { return master_; }
+    Slave& slave() { return master_.slave(slave_index_); }
+    const Master& master() const { return master_; }
 
     // -- Vendor verification ---------------------------------------------
 
@@ -281,7 +281,7 @@ public:
     bool readDeviceName(char* out, size_t capacity);
 
 private:
-    EtherCATMaster& master_;
+    Master& master_;
     uint16_t slave_index_;
 
     // PDO buffers (owned by PDOManager mapping, not by this class)

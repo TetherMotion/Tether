@@ -22,7 +22,7 @@
 namespace EtherCAT {
 
 // Forward declarations
-class EtherCATRealtimeLoop;
+class RealtimeLoop;
 
 // Maximum number of slaves for DC synchronization
 constexpr size_t kMaxDCSlaves = 16;
@@ -357,7 +357,7 @@ public:
      * @brief Send DC synchronization frame
      * 
      * Sends a sync datagram to the reference slave with current master time.
-     * Public so it can be used as a callback by EtherCATRealtimeLoop.
+     * Public so it can be used as a callback by RealtimeLoop.
      * 
      * @return true on success
      */
@@ -390,7 +390,7 @@ private:
     IDCTransport& transport_;
 
     // Realtime loop (created on start(), destroyed on stop())
-    std::unique_ptr<EtherCATRealtimeLoop> realtime_loop_;
+    std::unique_ptr<RealtimeLoop> realtime_loop_;
     std::function<bool()> pdo_exchange_fn_;  // Stored for restart
 
     // ========================================================================

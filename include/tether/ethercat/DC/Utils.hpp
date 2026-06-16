@@ -15,7 +15,7 @@ namespace Utils {
 // Low-level reads
 // ---------------------------------------------------------------------------
 
-inline bool readSyncActivationStatus(EtherCAT::EtherCATMaster& master,
+inline bool readSyncActivationStatus(EtherCAT::Master& master,
                                     uint16_t slave_idx,
                                     uint8_t& out_status,
                                     uint32_t timeout_ms = 200)
@@ -25,7 +25,7 @@ inline bool readSyncActivationStatus(EtherCAT::EtherCATMaster& master,
     return dc->readRegister(slave_idx, DCRegisters::DCSyncAct, &out_status, 1, timeout_ms);
 }
 
-inline bool readSyncActivationMask(EtherCAT::EtherCATMaster& master,
+inline bool readSyncActivationMask(EtherCAT::Master& master,
                                   uint16_t slave_idx,
                                   uint16_t& out_mask,
                                   uint32_t timeout_ms = 200)
@@ -39,7 +39,7 @@ inline bool readSyncActivationMask(EtherCAT::EtherCATMaster& master,
     return true;
 }
 
-inline bool readSync0CycleTime(EtherCAT::EtherCATMaster& master,
+inline bool readSync0CycleTime(EtherCAT::Master& master,
                                uint16_t slave_idx,
                                uint32_t& out_ns,
                                uint32_t timeout_ms = 200)
@@ -53,7 +53,7 @@ inline bool readSync0CycleTime(EtherCAT::EtherCATMaster& master,
     return true;
 }
 
-inline bool readSystemTimeDiff(EtherCAT::EtherCATMaster& master,
+inline bool readSystemTimeDiff(EtherCAT::Master& master,
                                uint16_t slave_idx,
                                int32_t& out_diff,
                                uint32_t timeout_ms = 200)
@@ -67,7 +67,7 @@ inline bool readSystemTimeDiff(EtherCAT::EtherCATMaster& master,
     return true;
 }
 
-inline bool readSyncImpulseCounter(EtherCAT::EtherCATMaster& master,
+inline bool readSyncImpulseCounter(EtherCAT::Master& master,
                                    uint16_t slave_idx,
                                    uint16_t& out_count,
                                    uint32_t timeout_ms = 200)
@@ -98,7 +98,7 @@ inline std::string syncActivationMaskToString(uint16_t mask) {
 // Print helpers
 // ---------------------------------------------------------------------------
 
-inline void printSyncActivationStatus(EtherCAT::EtherCATMaster& master,
+inline void printSyncActivationStatus(EtherCAT::Master& master,
                                       uint16_t slave_idx,
                                       const char* tag = "DC")
 {
@@ -112,7 +112,7 @@ inline void printSyncActivationStatus(EtherCAT::EtherCATMaster& master,
     }
 }
 
-inline void printSyncActivationMask(EtherCAT::EtherCATMaster& master,
+inline void printSyncActivationMask(EtherCAT::Master& master,
                                     uint16_t slave_idx,
                                     const char* tag = "DC")
 {
@@ -125,7 +125,7 @@ inline void printSyncActivationMask(EtherCAT::EtherCATMaster& master,
     }
 }
 
-inline void printSync0CycleTime(EtherCAT::EtherCATMaster& master,
+inline void printSync0CycleTime(EtherCAT::Master& master,
                                 uint16_t slave_idx,
                                 const char* tag = "DC")
 {
@@ -137,7 +137,7 @@ inline void printSync0CycleTime(EtherCAT::EtherCATMaster& master,
     }
 }
 
-inline void printSystemTimeDiff(EtherCAT::EtherCATMaster& master,
+inline void printSystemTimeDiff(EtherCAT::Master& master,
                                 uint16_t slave_idx,
                                 const char* tag = "DC")
 {
@@ -149,7 +149,7 @@ inline void printSystemTimeDiff(EtherCAT::EtherCATMaster& master,
     }
 }
 
-inline void printSyncImpulseCounter(EtherCAT::EtherCATMaster& master,
+inline void printSyncImpulseCounter(EtherCAT::Master& master,
                                     uint16_t slave_idx,
                                     const char* tag = "DC")
 {
@@ -165,7 +165,7 @@ inline void printSyncImpulseCounter(EtherCAT::EtherCATMaster& master,
  * @brief Top-level helper that echoes the full DC diagnostic block shown in
  *        examples.
  */
-inline void printDCDiagnostics(EtherCAT::EtherCATMaster& master,
+inline void printDCDiagnostics(EtherCAT::Master& master,
                                uint16_t slave_idx,
                                const char* tag = "DC")
 {

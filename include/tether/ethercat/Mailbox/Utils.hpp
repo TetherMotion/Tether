@@ -3,7 +3,7 @@
 #include <cstdint>
 
 namespace EtherCAT {
-class EtherCATMaster;
+class Master;
 class CiA402Drive;
 
 namespace Mailbox {
@@ -42,11 +42,11 @@ void logStatuswordDiagnostics(uint16_t statusword,
  * the write (master→slave) and read (slave→master) buffers.  A warning is
  * printed if the APRD fails or if the mailbox configuration is unavailable.
  *
- * @param master    Reference to EtherCATMaster instance.
+ * @param master    Reference to Master instance.
  * @param slave_idx 0-based slave index.
  * @param tag       Optional log tag (defaults to "Mailbox").
  */
-void dumpHeaderAndStatus(EtherCATMaster& master,
+void dumpHeaderAndStatus(Master& master,
                          uint16_t slave_idx,
                          const char* tag = "Mailbox");
 

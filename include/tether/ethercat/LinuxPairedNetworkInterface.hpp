@@ -25,7 +25,7 @@
  *   EtherCAT::LinuxPairedNetworkInterface pair;
  *
  *   // Give side-A to the master
- *   EtherCAT::EtherCATMaster master;
+ *   EtherCAT::Master master;
  *   master.start(pair.ifaceA(), mac);
  *
  *   // Side-B receives master frames & can reply

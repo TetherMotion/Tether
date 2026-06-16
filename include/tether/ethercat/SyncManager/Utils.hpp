@@ -182,12 +182,12 @@ inline std::string supportedSyncTypesToString(uint16_t mask) {
  * Reads ESC address 0x0800 + sm*8 and logs address/length/control/status.
  * If the APRD fails, a warning is printed.
  */
-inline void printSMEscRegisters(EtherCAT::EtherCATMaster& master,
+inline void printSMEscRegisters(EtherCAT::Master& master,
                                 uint16_t slave_idx,
                                 uint8_t sm,
                                 const char* tag = "SyncMgr")
 {
-    uint16_t adp = EtherCAT::EtherCATMaster::adpForSlaveIndex(slave_idx);
+    uint16_t adp = EtherCAT::Master::adpForSlaveIndex(slave_idx);
     uint8_t regs[8] = {0};
     uint16_t base = static_cast<uint16_t>(0x0800 + sm * 8);
     if (master.readRegister(adp, base, regs, sizeof(regs), 200)) {
@@ -203,7 +203,7 @@ inline void printSMEscRegisters(EtherCAT::EtherCATMaster& master,
 /**
  * @brief Convenience wrapper to dump all eight Sync Manager ESC blocks.
  */
-inline void printAllSMEscRegisters(EtherCAT::EtherCATMaster& master,
+inline void printAllSMEscRegisters(EtherCAT::Master& master,
                                    uint16_t slave_idx,
                                    const char* tag = "SyncMgr")
 {
@@ -252,7 +252,7 @@ inline void printSupportedSyncTypes(SDO::SDOManager& sdo,
  *
  * This replicates the diagnostic block previously located in the example.
  */
-inline void printSyncDiagnostics(EtherCAT::EtherCATMaster& master,
+inline void printSyncDiagnostics(EtherCAT::Master& master,
                                  uint16_t slave_idx,
                                  const char* tag = "SyncMgr")
 {
