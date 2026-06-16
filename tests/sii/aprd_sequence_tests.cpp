@@ -7,7 +7,7 @@ using namespace EtherCAT::SII;
 static constexpr uint16_t EC_REG_EEPDAT   = 0x0508;
 
 TEST(AprdSequence, InterleavedResponses_MultipleSlaves) {
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     master.clearAprdResponses();
 
     uint32_t v0 = 0x11111111u;
@@ -26,7 +26,7 @@ TEST(AprdSequence, InterleavedResponses_MultipleSlaves) {
 }
 
 TEST(AprdSequence, PartialThenFull_ReadDWordObservesPartialThenFull) {
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     master.clearAprdResponses();
 
     // First response: partial (only low 2 bytes)
@@ -52,7 +52,7 @@ TEST(AprdSequence, PartialThenFull_ReadDWordObservesPartialThenFull) {
 }
 
 TEST(AprdSequence, AprdTransportFailure_ReadDWordFails) {
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     master.clearAprdResponses();
 
     // Simulate transport failure when reading EEPDAT

@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "tether/ethercat/EtherCATFaultDetection.hpp"
-#include "tether/ethercat/EtherCATSlaveEmulator.hpp"
+#include "tether/ethercat/SlaveEmulator.hpp"
 
 using namespace EtherCAT;
 using namespace EtherCAT::Emulator;

@@ -28,7 +28,7 @@ TEST(CoeSDO, Upload_SmallMailboxWrite_ReturnsFalse) {
     uint8_t mbx_cnt = 0;
     uint8_t outbuf[8] = {0};
     size_t out_len = 0;
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
 
     bool ok = coe_sdo_upload(master, 0x0000, &mbx_cnt, /*mbx_write_addr=*/0x1000, /*mbx_write_len=*/4,
                              /*mbx_read_addr=*/0x1080, /*mbx_read_len=*/8, /*index=*/0x2000, /*sub=*/0, outbuf, sizeof(outbuf), &out_len);
@@ -38,7 +38,7 @@ TEST(CoeSDO, Upload_SmallMailboxWrite_ReturnsFalse) {
 TEST(CoeSDO, Download_InvalidParams_ReturnsFalse) {
     uint8_t mbx_cnt = 0;
     uint8_t data[5] = {1,2,3,4,5};
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
 
     // Null data
     EXPECT_FALSE(coe_sdo_download(master, 0x0000, &mbx_cnt, 0x1000, 128, 0x1080, 128, 0x2000, 0x0, nullptr, 4));
@@ -53,7 +53,7 @@ TEST(CoeSDO, Download_InvalidParams_ReturnsFalse) {
 TEST(CoeSDO, Download_SmallMailboxSize_ReturnsFalse) {
     uint8_t mbx_cnt = 0;
     uint8_t data[4] = {1,2,3,4};
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     // mailbox write len too small to hold header+SdoInitDownloadReq
     EXPECT_FALSE(coe_sdo_download(master, 0x0000, &mbx_cnt, 2, 2, 4, 4, 0x2000, 0x0, data, 4));
 }

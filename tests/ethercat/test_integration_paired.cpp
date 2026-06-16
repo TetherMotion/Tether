@@ -217,8 +217,8 @@ protected:
     }
 
     /// Create & start a master on side-A with an inline RX callback.
-    EtherCATMaster& startMaster() {
-        master_ = std::make_unique<EtherCATMaster>();
+    Master& startMaster() {
+        master_ = std::make_unique<Master>();
         pair_->setRxCallbackA([this](const uint8_t* data, size_t len) {
             if (master_) master_->handleRxFrame(data, len);
         });
@@ -227,7 +227,7 @@ protected:
     }
 
     std::unique_ptr<LinuxPairedNetworkInterface> pair_;
-    std::unique_ptr<EtherCATMaster> master_;
+    std::unique_ptr<Master> master_;
     uint8_t dummy_mac_[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
 };
 

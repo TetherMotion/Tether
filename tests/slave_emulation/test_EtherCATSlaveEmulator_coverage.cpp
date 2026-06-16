@@ -1,12 +1,12 @@
 /**
  * @file test_EtherCATSlaveEmulator_coverage.cpp
- * @brief Comprehensive EtherCATSlaveEmulator / NetworkEmulator / CiA402 DriveState coverage tests
+ * @brief Comprehensive SlaveEmulator / NetworkEmulator / CiA402 DriveState coverage tests
  */
 #include <gtest/gtest.h>
 #include <cstring>
 #include <memory>
 #include <vector>
-#include "tether/ethercat/EtherCATSlaveEmulator.hpp"
+#include "tether/ethercat/SlaveEmulator.hpp"
 #include "tether/ethercat/EtherCATDCClass.hpp"
 
 using namespace EtherCAT;

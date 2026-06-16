@@ -9,7 +9,7 @@ using namespace EtherCAT::Mailbox;
 
 TEST(MailboxUtils, DumpHeaderAndStatusNoMailboxConfig)
 {
-    EtherCATMaster master;
+    Master master;
     // master has no mailbox configured, should simply log a warning and not
     // crash.
     Mailbox::Utils::dumpHeaderAndStatus(master, 0, "TESTMBX");
@@ -18,7 +18,7 @@ TEST(MailboxUtils, DumpHeaderAndStatusNoMailboxConfig)
 
 TEST(MailboxUtils, DumpSlaveSyncAndMailboxInfoHappyPath)
 {
-    EtherCATMaster master;
+    Master master;
     CiA402Drive drive(master, 0);
     // even though master has no slaves configured, the function should
     // gracefully log and return.

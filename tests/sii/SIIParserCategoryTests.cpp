@@ -19,7 +19,7 @@ static inline uint32_t pack32_helper(uint8_t a, uint8_t b, uint8_t c, uint8_t d)
 }
 
 // Install APRD/APWR handlers that serve bytes from the provided word->dword map.
-static inline void install_byte_level_handlers(const std::unordered_map<uint16_t, uint32_t> &mem, EtherCAT::EtherCATMaster& master) {
+static inline void install_byte_level_handlers(const std::unordered_map<uint16_t, uint32_t> &mem, EtherCAT::Master& master) {
     // Build byte map: key = byte address (word_addr*2 + byte_offset)
     auto byte_map = std::make_shared<std::unordered_map<uint32_t,uint8_t>>();
     for (const auto &kv : mem) {
@@ -112,7 +112,7 @@ TEST(SIIParserTests, ParseStringsCategory) {
     mem[0x0045] = (0u << 16) | static_cast<uint32_t>(CAT_END);
 
     // Install byte-level APRD/APWR handlers for this simulated EEPROM
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     install_byte_level_handlers(mem, master);
 
     SIIReader reader(master);
@@ -169,7 +169,7 @@ TEST(SIIParserTests, ConfigChecksumValid) {
     // identity area (minimal values so parser continues)
     mem[8] = 0x11112222; mem[10] = 0x33334444; mem[12] = 0x55556666; mem[14] = 0x77778888;
 
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     install_byte_level_handlers(mem, master);
 
     SIIReader reader(master);
@@ -197,7 +197,7 @@ TEST(SIIParserTests, ConfigChecksumInvalid) {
     // identity area
     mem[8] = 0x11112222; mem[10] = 0x33334444; mem[12] = 0x55556666; mem[14] = 0x77778888;
 
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     install_byte_level_handlers(mem, master);
 
     SIIReader reader(master);
@@ -248,7 +248,7 @@ TEST(SIIParserTests, ParseGeneralCategory) {
     mem[0x0049] = (0u << 16) | static_cast<uint32_t>(CAT_END);
 
     // Install byte-level APRD/APWR handlers for this simulated EEPROM
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     install_byte_level_handlers(mem, master);
 
     SIIReader reader(master);
@@ -286,7 +286,7 @@ TEST(SIIParserTests, ParseFMMUCategory) {
     mem[0x0044] = (0u << 16) | static_cast<uint32_t>(CAT_END);
 
     // Install reliable byte-level APRD/APWR handlers for this test
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     install_byte_level_handlers(mem, master);
 
     // Inspect raw bytes for FMMU category
@@ -333,7 +333,7 @@ TEST(SIIParserTests, ParseSyncManagerCategory) {
     mem[0x004A] = (0u << 16) | static_cast<uint32_t>(CAT_END);
 
     // Install byte-level APRD/APWR handlers for this simulated EEPROM
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     install_byte_level_handlers(mem, master);
 
     // Quick local read to inspect raw bytes before parsing
@@ -384,7 +384,7 @@ TEST(SIIParserTests, ParseTxPDOCategory) {
     mem[0x004A] = (0u << 16) | static_cast<uint32_t>(CAT_END);
 
     // Install byte-level APRD/APWR handlers for this simulated EEPROM
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     install_byte_level_handlers(mem, master);
 
     SIIReader reader(master);
@@ -426,7 +426,7 @@ TEST(SIIParserTests, ParseDCCategory) {
     mem[0x004E] = (0u << 16) | static_cast<uint32_t>(CAT_END);
 
     // Install byte-level APRD/APWR handlers for this simulated EEPROM
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     install_byte_level_handlers(mem, master);
 
     SIIReader reader(master); SIIParser parser(reader); SIIData data;

@@ -9,10 +9,10 @@ TEST(EtherCATMasterPreopRetry, SucceedsAfterRetries) {
     // Simulated behavior: AL_STATUS reads return non-PRE_OP for first 2 attempts
     int call_count = 0;
 
-    EtherCAT::EtherCATMaster::Config cfg;
+    EtherCAT::Master::Config cfg;
     cfg.rx_queue_depth = 4;
     cfg.txpdo_queue_depth = 4;
-    EtherCAT::EtherCATMaster master(cfg);
+    EtherCAT::Master master(cfg);
 
     master.setApwrTestCallback([&](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned ms){
         // Accept writes
@@ -42,10 +42,10 @@ TEST(EtherCATMasterPreopRetry, SucceedsAfterRetries) {
 }
 
 TEST(EtherCATMasterPreopRetry, FailsWhenNeverPreop) {
-    EtherCAT::EtherCATMaster::Config cfg;
+    EtherCAT::Master::Config cfg;
     cfg.rx_queue_depth = 4;
     cfg.txpdo_queue_depth = 4;
-    EtherCAT::EtherCATMaster master(cfg);
+    EtherCAT::Master master(cfg);
 
     // Always return INIT status
     master.setApwrTestCallback([&](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned ms){

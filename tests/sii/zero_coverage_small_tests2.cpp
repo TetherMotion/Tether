@@ -127,15 +127,15 @@ TEST(PDO_Stubs, CallGetMapping) {
 }
 
 TEST(Raw_EEPROM_SII, ReadStringFailsSafely) {
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     char out[8] = {0};
     // With no device, expect false
     EXPECT_FALSE(master.siiReadString(0xFFFF, 1, out, sizeof(out)));
 }
 
 TEST(SDO_Async, InitDeinit) {
-    // Use a local EtherCATMaster which owns an SDOManager
-    EtherCAT::EtherCATMaster master;
+    // Use a local Master which owns an SDOManager
+    EtherCAT::Master master;
     auto& sdo_mgr = master.sdoManager();
     bool started = sdo_mgr.init();
     // It may return false in host environment; ensure deinit is safe

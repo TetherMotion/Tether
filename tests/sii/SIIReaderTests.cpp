@@ -12,7 +12,7 @@ TEST(SIIReaderTests, ReadRaw32AndReadWordEvenOdd) {
     // State to capture the last requested EEPROM word address from APWR commands
     uint16_t last_cmd_addr = 0xFFFF;
 
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
 
     master.setApwrTestCallback([&](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms){
         // If writing to EEPCTL (0x0502), extract the address from the command struct
@@ -71,7 +71,7 @@ TEST(SIIReaderTests, ReadRaw32AndReadWordEvenOdd) {
 TEST(SIIParserTests, ParseIdentity) {
     uint16_t last_cmd_addr = 0xFFFF;
 
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
 
     master.setApwrTestCallback([&](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms){
         if (ado == 0x0502 && data && len >= 4) {
@@ -143,7 +143,7 @@ TEST(SIIParserTests, ParseIdentity) {
 TEST(SIIReaderTests, ReadWordsAndBytes) {
     uint16_t last_cmd_addr = 0xFFFF;
 
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
 
     master.setApwrTestCallback([&](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms){
         if (ado == 0x0502 && data && len >= 4) {

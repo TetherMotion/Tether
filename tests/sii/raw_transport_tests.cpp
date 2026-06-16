@@ -1,9 +1,9 @@
 /**
  * @file raw_transport_tests.cpp
- * @brief Tests for EtherCATMaster transport hooks (pushAprdResponse,
+ * @brief Tests for Master transport hooks (pushAprdResponse,
  *        readRegister, writeRegister, setAprdTestCallback, setApwrTestCallback).
  *
- * All transport operations go through the EtherCATMaster instance directly;
+ * All transport operations go through the Master instance directly;
  * no global bridge or free-function wrappers are used.
  */
 #include <gtest/gtest.h>
@@ -13,15 +13,15 @@
 class MasterTransportTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        EtherCAT::EtherCATMaster::Config cfg;
+        EtherCAT::Master::Config cfg;
         cfg.rx_queue_depth  = 4;
         cfg.txpdo_queue_depth = 4;
-        master_ = std::make_unique<EtherCAT::EtherCATMaster>(cfg);
+        master_ = std::make_unique<EtherCAT::Master>(cfg);
     }
     void TearDown() override {
         master_.reset();
     }
-    std::unique_ptr<EtherCAT::EtherCATMaster> master_;
+    std::unique_ptr<EtherCAT::Master> master_;
 };
 
 TEST_F(MasterTransportTest, AprdPushAndConsume) {

@@ -8,7 +8,7 @@
 
 TEST(DC_TimeSource_RemovalNotice, Present) {
     // Ensure DC stats API is available and returns a valid default
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     auto stats = master.dc().getStats();
     EXPECT_EQ(stats.cycle_count, 0u);
 }

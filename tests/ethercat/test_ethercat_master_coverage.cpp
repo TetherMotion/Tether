@@ -1,6 +1,6 @@
 /**
  * @file test_ethercat_master_coverage.cpp
- * @brief Coverage tests for EtherCATMaster.cpp
+ * @brief Coverage tests for Master.cpp
  *
  * Targets: getECStateName, parseEtherCATFrame, watchdog methods,
  * ensureRxQueues, flushRxQueue, getStats, and sub-manager accessors.
@@ -15,24 +15,24 @@ using namespace EtherCAT;
 // getECStateName — pure static function
 // ============================================================================
 
-TEST(EtherCATMasterCoverage, GetECStateName) {
-    EXPECT_STREQ(EtherCATMaster::getECStateName(0x01), "INIT");
-    EXPECT_STREQ(EtherCATMaster::getECStateName(0x02), "PRE_OP");
-    EXPECT_STREQ(EtherCATMaster::getECStateName(0x03), "BOOT");
-    EXPECT_STREQ(EtherCATMaster::getECStateName(0x04), "SAFE_OP");
-    EXPECT_STREQ(EtherCATMaster::getECStateName(0x08), "OP");
-    EXPECT_STREQ(EtherCATMaster::getECStateName(0x00), "UNKNOWN");
+TEST(MasterCoverage, GetECStateName) {
+    EXPECT_STREQ(Master::getECStateName(0x01), "INIT");
+    EXPECT_STREQ(Master::getECStateName(0x02), "PRE_OP");
+    EXPECT_STREQ(Master::getECStateName(0x03), "BOOT");
+    EXPECT_STREQ(Master::getECStateName(0x04), "SAFE_OP");
+    EXPECT_STREQ(Master::getECStateName(0x08), "OP");
+    EXPECT_STREQ(Master::getECStateName(0x00), "UNKNOWN");
     // With error bit (0x10) — only lower nibble matters
-    EXPECT_STREQ(EtherCATMaster::getECStateName(0x11), "INIT");
-    EXPECT_STREQ(EtherCATMaster::getECStateName(0x18), "OP");
+    EXPECT_STREQ(Master::getECStateName(0x11), "INIT");
+    EXPECT_STREQ(Master::getECStateName(0x18), "OP");
 }
 
 // ============================================================================
 // Queue management — rxQueue and txpdoRxQueue are public accessors
 // ============================================================================
 
-TEST(EtherCATMasterCoverage, RxQueuesAvailable) {
-    EtherCATMaster master;
+TEST(MasterCoverage, RxQueuesAvailable) {
+    Master master;
     // Queues are created in the constructor
     EXPECT_NE(master.rxQueue(), nullptr);
     EXPECT_NE(master.txpdoRxQueue(), nullptr);
@@ -43,8 +43,8 @@ TEST(EtherCATMasterCoverage, RxQueuesAvailable) {
 // ============================================================================
 
 #if TETHER_ENABLE_ETHERCAT_STATS
-TEST(EtherCATMasterCoverage, GetStats) {
-    EtherCATMaster master;
+TEST(MasterCoverage, GetStats) {
+    Master master;
     auto stats = master.getStats();
     EXPECT_EQ(stats.tx_retry_count, 0u);
     EXPECT_EQ(stats.tx_fail_count, 0u);
@@ -56,8 +56,8 @@ TEST(EtherCATMasterCoverage, GetStats) {
 // Sub-manager accessors
 // ============================================================================
 
-TEST(EtherCATMasterCoverage, SubManagerAccessors) {
-    EtherCATMaster master;
+TEST(MasterCoverage, SubManagerAccessors) {
+    Master master;
     // These should all return valid references
     auto& pdo = master.pdo();
     (void)pdo;
@@ -81,8 +81,8 @@ TEST(EtherCATMasterCoverage, SubManagerAccessors) {
 // Watchdog methods (via APWR/APRD test callbacks)
 // ============================================================================
 
-TEST(EtherCATMasterCoverage, ConfigureWatchdogsSuccess) {
-    EtherCATMaster master;
+TEST(MasterCoverage, ConfigureWatchdogsSuccess) {
+    Master master;
     // Set APWR callback to succeed
     master.setApwrTestCallback([](uint16_t adp, uint16_t ado,
                                    const void* data, uint16_t len,
@@ -92,8 +92,8 @@ TEST(EtherCATMasterCoverage, ConfigureWatchdogsSuccess) {
     EXPECT_TRUE(master.configureWatchdogs(0, 1000, 2000));
 }
 
-TEST(EtherCATMasterCoverage, ConfigureWatchdogsFail) {
-    EtherCATMaster master;
+TEST(MasterCoverage, ConfigureWatchdogsFail) {
+    Master master;
     master.setApwrTestCallback([](uint16_t adp, uint16_t ado,
                                    const void* data, uint16_t len,
                                    unsigned int timeout_ms) -> bool {
@@ -102,8 +102,8 @@ TEST(EtherCATMasterCoverage, ConfigureWatchdogsFail) {
     EXPECT_FALSE(master.configureWatchdogs(0, 1000, 2000));
 }
 
-TEST(EtherCATMasterCoverage, DisableWatchdogs) {
-    EtherCATMaster master;
+TEST(MasterCoverage, DisableWatchdogs) {
+    Master master;
     master.setApwrTestCallback([](uint16_t adp, uint16_t ado,
                                    const void* data, uint16_t len,
                                    unsigned int timeout_ms) -> bool {
@@ -112,8 +112,8 @@ TEST(EtherCATMasterCoverage, DisableWatchdogs) {
     EXPECT_TRUE(master.disableWatchdogs(0));
 }
 
-TEST(EtherCATMasterCoverage, ReadWatchdogStatus) {
-    EtherCATMaster master;
+TEST(MasterCoverage, ReadWatchdogStatus) {
+    Master master;
     uint8_t wd_status = 0xFF, pdi_cnt = 0xFF, pdata_cnt = 0xFF;
 
     // Provide APRD test callback that fills data
@@ -130,8 +130,8 @@ TEST(EtherCATMasterCoverage, ReadWatchdogStatus) {
     EXPECT_EQ(wd_status, 0x42u);
 }
 
-TEST(EtherCATMasterCoverage, ReadWatchdogStatusFails) {
-    EtherCATMaster master;
+TEST(MasterCoverage, ReadWatchdogStatusFails) {
+    Master master;
     uint8_t wd_status = 0, pdi_cnt = 0, pdata_cnt = 0;
     // No callback set, ecAprd fails
     EXPECT_FALSE(master.readWatchdogStatus(0, wd_status, pdi_cnt, pdata_cnt));
@@ -141,8 +141,8 @@ TEST(EtherCATMasterCoverage, ReadWatchdogStatusFails) {
 // wasFaultDiagnosed
 // ============================================================================
 
-TEST(EtherCATMasterCoverage, WasFaultDiagnosed) {
-    EtherCATMaster master;
+TEST(MasterCoverage, WasFaultDiagnosed) {
+    Master master;
     EXPECT_FALSE(master.wasFaultDiagnosed(0));
 }
 
@@ -150,8 +150,8 @@ TEST(EtherCATMasterCoverage, WasFaultDiagnosed) {
 // setMailboxOverride
 // ============================================================================
 
-TEST(EtherCATMasterCoverage, SetMailboxOverride) {
-    EtherCATMaster master;
+TEST(MasterCoverage, SetMailboxOverride) {
+    Master master;
     // Just verify it doesn't crash; override with some values
     master.setMailboxOverride(0, 0x1000, 128, 0x1400, 128, 0x0004);
 }
@@ -160,8 +160,8 @@ TEST(EtherCATMasterCoverage, SetMailboxOverride) {
 // allocIdx / resetIdx — already partially tested, but cover edge cases
 // ============================================================================
 
-TEST(EtherCATMasterCoverage, AllocAndResetIdx) {
-    EtherCATMaster master;
+TEST(MasterCoverage, AllocAndResetIdx) {
+    Master master;
     uint8_t idx1 = master.allocIdx();
     uint8_t idx2 = master.allocIdx();
     EXPECT_NE(idx1, idx2);

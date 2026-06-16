@@ -1,6 +1,6 @@
 /**
  * @file test_realtime_loop.cpp
- * @brief Comprehensive tests for EtherCATRealtimeLoop (extracted realtime loop)
+ * @brief Comprehensive tests for RealtimeLoop (extracted realtime loop)
  *
  * Tests the realtime loop independently from the DC module using callback
  * functions and short timeouts (10-50ms).
@@ -37,17 +37,17 @@ static uint64_t hostTimeNs() {
 // ============================================================================
 
 TEST(RealtimeLoopConstruction, NotRunningAfterConstruction) {
-    EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs);
+    RealtimeLoop loop(nullptr, nullptr, hostTimeNs);
     EXPECT_FALSE(loop.isRunning());
 }
 
 TEST(RealtimeLoopConstruction, PDODisabledByDefault) {
-    EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs);
+    RealtimeLoop loop(nullptr, nullptr, hostTimeNs);
     EXPECT_FALSE(loop.isPDOEnabled());
 }
 
 TEST(RealtimeLoopConstruction, StatsZeroAfterConstruction) {
-    EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs);
+    RealtimeLoop loop(nullptr, nullptr, hostTimeNs);
     auto stats = loop.getStats();
     EXPECT_EQ(stats.cycle_count, 0u);
     EXPECT_EQ(stats.sync_count, 0u);
@@ -62,7 +62,7 @@ TEST(RealtimeLoopConstruction, StatsZeroAfterConstruction) {
 
 class RealtimeLoopStartStopTest : public ::testing::Test {
 protected:
-    EtherCATRealtimeLoop::Config cfg_;
+    RealtimeLoop::Config cfg_;
 
     void SetUp() override {
         cfg_.cycle_period_us = 1000;
@@ -71,35 +71,35 @@ protected:
 };
 
 TEST_F(RealtimeLoopStartStopTest, StartReturnsTrue) {
-    EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg_);
+    RealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg_);
     ASSERT_TRUE(loop.start());
     EXPECT_TRUE(loop.isRunning());
     loop.stop();
 }
 
 TEST_F(RealtimeLoopStartStopTest, StopSetsNotRunning) {
-    EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg_);
+    RealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg_);
     ASSERT_TRUE(loop.start());
     loop.stop();
     EXPECT_FALSE(loop.isRunning());
 }
 
 TEST_F(RealtimeLoopStartStopTest, DoubleStartFails) {
-    EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg_);
+    RealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg_);
     ASSERT_TRUE(loop.start());
     EXPECT_FALSE(loop.start()); // second start should fail
     loop.stop();
 }
 
 TEST_F(RealtimeLoopStartStopTest, StopWithoutStart) {
-    EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg_);
+    RealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg_);
     // Should not crash
     loop.stop();
     EXPECT_FALSE(loop.isRunning());
 }
 
 TEST_F(RealtimeLoopStartStopTest, RestartAfterStop) {
-    EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg_);
+    RealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg_);
     ASSERT_TRUE(loop.start());
     loop.stop();
     ASSERT_TRUE(loop.start());
@@ -109,12 +109,12 @@ TEST_F(RealtimeLoopStartStopTest, RestartAfterStop) {
 
 TEST_F(RealtimeLoopStartStopTest, DestructorStops) {
     {
-        EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg_);
+        RealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg_);
         ASSERT_TRUE(loop.start());
         // Destructor should call stop() and clean up
     }
     // After destruction the realtime loop resources should be free — new loop should start
-    EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg_);
+    RealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg_);
     ASSERT_TRUE(loop.start());
     loop.stop();
 }
@@ -126,7 +126,7 @@ TEST_F(RealtimeLoopStartStopTest, DestructorStops) {
 class RealtimeLoopPDOTest : public ::testing::Test {
 protected:
     std::atomic<int> pdo_calls_{0};
-    EtherCATRealtimeLoop::Config cfg_;
+    RealtimeLoop::Config cfg_;
 
     void SetUp() override {
         cfg_.cycle_period_us = 1000;       // 1ms
@@ -137,7 +137,7 @@ protected:
 TEST_F(RealtimeLoopPDOTest, PDOCalledWhenEnabled) {
     auto pdo_fn = [this]() { pdo_calls_++; return true; };
 
-    EtherCATRealtimeLoop loop(pdo_fn, nullptr, hostTimeNs, cfg_);
+    RealtimeLoop loop(pdo_fn, nullptr, hostTimeNs, cfg_);
     loop.setPDOEnabled(true);
     ASSERT_TRUE(loop.start());
 
@@ -150,7 +150,7 @@ TEST_F(RealtimeLoopPDOTest, PDOCalledWhenEnabled) {
 TEST_F(RealtimeLoopPDOTest, PDONotCalledWhenDisabled) {
     auto pdo_fn = [this]() { pdo_calls_++; return true; };
 
-    EtherCATRealtimeLoop loop(pdo_fn, nullptr, hostTimeNs, cfg_);
+    RealtimeLoop loop(pdo_fn, nullptr, hostTimeNs, cfg_);
     // PDO disabled by default
     ASSERT_TRUE(loop.start());
 
@@ -163,7 +163,7 @@ TEST_F(RealtimeLoopPDOTest, PDONotCalledWhenDisabled) {
 TEST_F(RealtimeLoopPDOTest, PDOEnableDisableAffectsExchange) {
     auto pdo_fn = [this]() { pdo_calls_++; return true; };
 
-    EtherCATRealtimeLoop loop(pdo_fn, nullptr, hostTimeNs, cfg_);
+    RealtimeLoop loop(pdo_fn, nullptr, hostTimeNs, cfg_);
     ASSERT_TRUE(loop.start());
 
     // Disabled initially — no calls yet
@@ -193,7 +193,7 @@ TEST_F(RealtimeLoopPDOTest, PDOEnableDisableAffectsExchange) {
 TEST_F(RealtimeLoopPDOTest, PDOErrorCountIncremented) {
     auto pdo_fn = []() { return false; }; // always fails
 
-    EtherCATRealtimeLoop loop(pdo_fn, nullptr, hostTimeNs, cfg_);
+    RealtimeLoop loop(pdo_fn, nullptr, hostTimeNs, cfg_);
     loop.setPDOEnabled(true);
     ASSERT_TRUE(loop.start());
 
@@ -211,7 +211,7 @@ TEST_F(RealtimeLoopPDOTest, PDOErrorCountIncremented) {
 class RealtimeLoopSyncTest : public ::testing::Test {
 protected:
     std::atomic<int> sync_calls_{0};
-    EtherCATRealtimeLoop::Config cfg_;
+    RealtimeLoop::Config cfg_;
 
     void SetUp() override {
         cfg_.cycle_period_us = 1000;       // 1ms
@@ -222,7 +222,7 @@ protected:
 TEST_F(RealtimeLoopSyncTest, SyncCalledAtInterval) {
     auto sync_fn = [this]() { sync_calls_++; return true; };
 
-    EtherCATRealtimeLoop loop(nullptr, sync_fn, hostTimeNs, cfg_);
+    RealtimeLoop loop(nullptr, sync_fn, hostTimeNs, cfg_);
     ASSERT_TRUE(loop.start());
 
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -236,7 +236,7 @@ TEST_F(RealtimeLoopSyncTest, SyncCalledAtInterval) {
 TEST_F(RealtimeLoopSyncTest, SyncCountInStats) {
     auto sync_fn = [this]() { sync_calls_++; return true; };
 
-    EtherCATRealtimeLoop loop(nullptr, sync_fn, hostTimeNs, cfg_);
+    RealtimeLoop loop(nullptr, sync_fn, hostTimeNs, cfg_);
     ASSERT_TRUE(loop.start());
 
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -250,7 +250,7 @@ TEST_F(RealtimeLoopSyncTest, SyncCountInStats) {
 TEST_F(RealtimeLoopSyncTest, SyncNotCountedWhenCallbackReturnsFalse) {
     auto sync_fn = []() { return false; }; // always fails
 
-    EtherCATRealtimeLoop loop(nullptr, sync_fn, hostTimeNs, cfg_);
+    RealtimeLoop loop(nullptr, sync_fn, hostTimeNs, cfg_);
     ASSERT_TRUE(loop.start());
 
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
@@ -266,11 +266,11 @@ TEST_F(RealtimeLoopSyncTest, SyncNotCountedWhenCallbackReturnsFalse) {
 // ============================================================================
 
 TEST(RealtimeLoopJitterTest, StatsAccumulate) {
-    EtherCATRealtimeLoop::Config cfg;
+    RealtimeLoop::Config cfg;
     cfg.cycle_period_us = 1000;
     cfg.sync_interval_cycles = 100;
 
-    EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg);
+    RealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg);
     ASSERT_TRUE(loop.start());
 
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -289,27 +289,27 @@ TEST(RealtimeLoopJitterTest, StatsAccumulate) {
 
 TEST(RealtimeLoopShutdownTest, NoLeaksOnDestructionWhileRunning) {
     for (int i = 0; i < 5; i++) {
-        EtherCATRealtimeLoop::Config cfg;
+        RealtimeLoop::Config cfg;
         cfg.cycle_period_us = 1000;
         cfg.sync_interval_cycles = 5;
 
-        EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg);
+        RealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg);
         loop.start();
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         // Destructor cleans up
     }
     // Verify resources were released by starting a new loop
-    EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs);
+    RealtimeLoop loop(nullptr, nullptr, hostTimeNs);
     ASSERT_TRUE(loop.start());
     loop.stop();
 }
 
 TEST(RealtimeLoopShutdownTest, ResourcesReleasedAfterStop) {
-    EtherCATRealtimeLoop::Config cfg;
+    RealtimeLoop::Config cfg;
     cfg.cycle_period_us = 1000;
     cfg.sync_interval_cycles = 5;
 
-    EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg);
+    RealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg);
     ASSERT_TRUE(loop.start());
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     loop.stop();
@@ -330,11 +330,11 @@ TEST(RealtimeLoopTwoThread, BothCallbacksRunConcurrently) {
     auto pdo_fn = [&pdo_calls]() { pdo_calls++; return true; };
     auto dc_fn  = [&dc_calls]()  { dc_calls++;  return true; };
 
-    EtherCATRealtimeLoop::Config cfg;
+    RealtimeLoop::Config cfg;
     cfg.cycle_period_us = 1000;       // PDO at 1 kHz
     cfg.sync_interval_cycles = 5;     // DC at 200 Hz (every 5 ms)
 
-    EtherCATRealtimeLoop loop(pdo_fn, dc_fn, hostTimeNs, cfg);
+    RealtimeLoop loop(pdo_fn, dc_fn, hostTimeNs, cfg);
     loop.setPDOEnabled(true);
     ASSERT_TRUE(loop.start());
 
@@ -355,12 +355,12 @@ TEST(RealtimeLoopTwoThread, DCRunsIndependentlyOfPDOEnabled) {
 
     auto dc_fn = [&dc_calls]() { dc_calls++; return true; };
 
-    EtherCATRealtimeLoop::Config cfg;
+    RealtimeLoop::Config cfg;
     cfg.cycle_period_us = 1000;
     cfg.sync_interval_cycles = 5;
 
     // PDO disabled, DC should still run
-    EtherCATRealtimeLoop loop(nullptr, dc_fn, hostTimeNs, cfg);
+    RealtimeLoop loop(nullptr, dc_fn, hostTimeNs, cfg);
     ASSERT_TRUE(loop.start());
 
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -373,11 +373,11 @@ TEST(RealtimeLoopTwoThread, PDOAndDCHaveIndependentCounts) {
     auto pdo_fn = []() { return true; };
     auto dc_fn  = []() { return true; };
 
-    EtherCATRealtimeLoop::Config cfg;
+    RealtimeLoop::Config cfg;
     cfg.cycle_period_us = 1000;
     cfg.sync_interval_cycles = 10;
 
-    EtherCATRealtimeLoop loop(pdo_fn, dc_fn, hostTimeNs, cfg);
+    RealtimeLoop loop(pdo_fn, dc_fn, hostTimeNs, cfg);
     loop.setPDOEnabled(true);
     ASSERT_TRUE(loop.start());
 
@@ -400,11 +400,11 @@ TEST(RealtimeLoopDiagnostics, DiagnosticsReturnBothThreadStats) {
     auto pdo_fn = []() { return true; };
     auto dc_fn  = []() { return true; };
 
-    EtherCATRealtimeLoop::Config cfg;
+    RealtimeLoop::Config cfg;
     cfg.cycle_period_us = 1000;
     cfg.sync_interval_cycles = 5;
 
-    EtherCATRealtimeLoop loop(pdo_fn, dc_fn, hostTimeNs, cfg);
+    RealtimeLoop loop(pdo_fn, dc_fn, hostTimeNs, cfg);
     loop.setPDOEnabled(true);
     ASSERT_TRUE(loop.start());
 
@@ -421,7 +421,7 @@ TEST(RealtimeLoopDiagnostics, DiagnosticsReturnBothThreadStats) {
 }
 
 TEST(RealtimeLoopDiagnostics, DiagnosticsZeroBeforeStart) {
-    EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs);
+    RealtimeLoop loop(nullptr, nullptr, hostTimeNs);
 
     auto diag = loop.getDiagnostics();
     EXPECT_EQ(diag.pdo_jitter.cycle_count, 0u);
@@ -431,11 +431,11 @@ TEST(RealtimeLoopDiagnostics, DiagnosticsZeroBeforeStart) {
 TEST(RealtimeLoopDiagnostics, PDOJitterMatchesLegacyStats) {
     auto pdo_fn = []() { return true; };
 
-    EtherCATRealtimeLoop::Config cfg;
+    RealtimeLoop::Config cfg;
     cfg.cycle_period_us = 1000;
     cfg.sync_interval_cycles = 100;
 
-    EtherCATRealtimeLoop loop(pdo_fn, nullptr, hostTimeNs, cfg);
+    RealtimeLoop loop(pdo_fn, nullptr, hostTimeNs, cfg);
     loop.setPDOEnabled(true);
     ASSERT_TRUE(loop.start());
 
@@ -455,7 +455,7 @@ TEST(RealtimeLoopDiagnostics, PDOJitterMatchesLegacyStats) {
 // ============================================================================
 
 TEST(RealtimeLoopConfig, DefaultsAutoDerivesJitterThresholds) {
-    auto cfg = EtherCATRealtimeLoop::Config::defaults(2000, 20);
+    auto cfg = RealtimeLoop::Config::defaults(2000, 20);
 
     EXPECT_EQ(cfg.cycle_period_us, 2000u);
     EXPECT_EQ(cfg.sync_interval_cycles, 20u);
@@ -472,7 +472,7 @@ TEST(RealtimeLoopConfig, DefaultsAutoDerivesJitterThresholds) {
 }
 
 TEST(RealtimeLoopConfig, DefaultsNoArgBackwardCompatible) {
-    auto cfg = EtherCATRealtimeLoop::Config::defaults();
+    auto cfg = RealtimeLoop::Config::defaults();
 
     EXPECT_EQ(cfg.cycle_period_us, 1000u);
     EXPECT_EQ(cfg.sync_interval_cycles, 10u);
@@ -663,8 +663,8 @@ TEST(RealtimeLoopErrorPaths, PDOEventCreationFailsReturnsNotRunning) {
     cf->fail_event_at = 1; // Fail first createEvent() → PDO event
     FactoryGuard g(cf);
 
-    EtherCATRealtimeLoop::Config cfg = EtherCATRealtimeLoop::Config::defaults();
-    EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg);
+    RealtimeLoop::Config cfg = RealtimeLoop::Config::defaults();
+    RealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg);
     EXPECT_FALSE(loop.start());
     EXPECT_FALSE(loop.isRunning());
 }
@@ -674,8 +674,8 @@ TEST(RealtimeLoopErrorPaths, PDOThreadCreationFailsReturnsNotRunning) {
     cf->fail_thread_at = 1; // Fail first createThread() → PDO thread
     FactoryGuard g(cf);
 
-    EtherCATRealtimeLoop::Config cfg = EtherCATRealtimeLoop::Config::defaults();
-    EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg);
+    RealtimeLoop::Config cfg = RealtimeLoop::Config::defaults();
+    RealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg);
     EXPECT_FALSE(loop.start());
     EXPECT_FALSE(loop.isRunning());
 }
@@ -685,8 +685,8 @@ TEST(RealtimeLoopErrorPaths, PDOThreadStartFailsReturnsNotRunning) {
     cf->fail_thread_start_at = 1; // start() fails for first thread → PDO
     FactoryGuard g(cf);
 
-    EtherCATRealtimeLoop::Config cfg = EtherCATRealtimeLoop::Config::defaults();
-    EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg);
+    RealtimeLoop::Config cfg = RealtimeLoop::Config::defaults();
+    RealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg);
     EXPECT_FALSE(loop.start());
     EXPECT_FALSE(loop.isRunning());
 }
@@ -698,8 +698,8 @@ TEST(RealtimeLoopErrorPaths, DCEventCreationFailsStopsAndReturnsNotRunning) {
     cf->fail_event_at = 2; // 1st event (PDO) ok, 2nd event (DC) fails
     FactoryGuard g(cf);
 
-    EtherCATRealtimeLoop::Config cfg = EtherCATRealtimeLoop::Config::defaults();
-    EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg);
+    RealtimeLoop::Config cfg = RealtimeLoop::Config::defaults();
+    RealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg);
     EXPECT_FALSE(loop.start());
     EXPECT_FALSE(loop.isRunning());
 }
@@ -709,8 +709,8 @@ TEST(RealtimeLoopErrorPaths, DCThreadCreationFailsStopsAndReturnsNotRunning) {
     cf->fail_thread_at = 2; // 1st thread (PDO) ok, 2nd thread (DC) fails
     FactoryGuard g(cf);
 
-    EtherCATRealtimeLoop::Config cfg = EtherCATRealtimeLoop::Config::defaults();
-    EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg);
+    RealtimeLoop::Config cfg = RealtimeLoop::Config::defaults();
+    RealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg);
     EXPECT_FALSE(loop.start());
     EXPECT_FALSE(loop.isRunning());
 }
@@ -720,8 +720,8 @@ TEST(RealtimeLoopErrorPaths, DCThreadStartFailsStopsAndReturnsNotRunning) {
     cf->fail_thread_start_at = 2; // start() fails for 2nd thread → DC
     FactoryGuard g(cf);
 
-    EtherCATRealtimeLoop::Config cfg = EtherCATRealtimeLoop::Config::defaults();
-    EtherCATRealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg);
+    RealtimeLoop::Config cfg = RealtimeLoop::Config::defaults();
+    RealtimeLoop loop(nullptr, nullptr, hostTimeNs, cfg);
     EXPECT_FALSE(loop.start());
     EXPECT_FALSE(loop.isRunning());
 }

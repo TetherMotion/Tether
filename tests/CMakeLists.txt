@@ -379,7 +379,7 @@ add_executable(tether_ethercat_common_tests
     ethercat/test_retry_global.cpp
     mocks/ethercat_platform_stubs.cpp
     sii/mocks_private/eeprom_test_stubs.cpp
-    ../src/ethercat/EtherCATSlaveEmulator.cpp
+    ../src/ethercat/SlaveEmulator.cpp
     ../src/ethercat/raw/FoE.cpp
     ../src/ethercat/EtherCATFaultDetection.cpp
     ../src/ethercat/EtherCATWriteVerify.cpp

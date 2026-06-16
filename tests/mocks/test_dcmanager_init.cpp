@@ -5,7 +5,7 @@
 
 TEST(DCManagerInitTest, InitFailsWithZeroSlaves)
 {
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     EtherCAT::DCManager dc(master);
 
     EtherCAT::DC::DCConfig cfg = EtherCAT::DC::DCConfig::defaults();
@@ -14,7 +14,7 @@ TEST(DCManagerInitTest, InitFailsWithZeroSlaves)
 
 TEST(DCManagerInitTest, InitSucceedsWithoutNetworkInterface)
 {
-    EtherCAT::EtherCATMaster master;
+    EtherCAT::Master master;
     EtherCAT::DCManager dc(master);
 
     EtherCAT::DC::DCConfig cfg = EtherCAT::DC::DCConfig::defaults();

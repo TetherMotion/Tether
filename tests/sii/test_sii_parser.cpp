@@ -97,7 +97,7 @@ public:
     /**
      * @brief Install mock callbacks
      */
-    void installMocks(EtherCAT::EtherCATMaster& master) {
+    void installMocks(EtherCAT::Master& master) {
         master_ = &master;
         master.setApwrTestCallback([this](uint16_t adp, uint16_t ado,
                           const void* data, uint16_t len, unsigned int ms) {
@@ -155,7 +155,7 @@ private:
     std::map<uint16_t, uint16_t> data_;  ///< Simulated EEPROM data (word address → value)
     uint16_t last_cmd_addr_{0xFFFF};     ///< Last requested read address
     bool simulate_failure_{false};        ///< Simulate read/write failures
-    EtherCAT::EtherCATMaster* master_{nullptr};
+    EtherCAT::Master* master_{nullptr};
 };
 
 // ============================================================================
@@ -174,7 +174,7 @@ protected:
     }
     
     MockSIIEEPROM mock_eeprom_;
-    EtherCAT::EtherCATMaster master_;
+    EtherCAT::Master master_;
 };
 
 // ============================================================================
