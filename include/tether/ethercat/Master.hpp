@@ -31,6 +31,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <type_traits>
 #include <vector>
 #include <unordered_map>
@@ -38,6 +39,7 @@
 
 #include "logging/DeduplicatingLogger.hpp"
 
+#include "tether/ethercat/SlaveIdentity.hpp"
 #include "tether/ethercat/TetherConfig.hpp"
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/TransactionRouter.hpp"
@@ -396,6 +398,14 @@ public:
                             unsigned int timeout_ms,
                             RxDatagram& out);
 
+    /**
+     * @brief Return the Working Counter of the last register read/write.
+     *
+     * Useful for callers that need to distinguish WKC==0 (slave did not
+     * respond) from other transport failures.
+     */
+    uint16_t lastWkc() const { return last_wkc_; }
+
     // ---- Index allocation --------------------------------------------------
 
     static constexpr uint8_t kFireAndForgetIdx = 0xFE;
@@ -463,6 +473,23 @@ public:
      * @endcode
      */
     bool autoConfigureMailbox(SlaveAddress slave_address, Tether::Platform::LogLevel log_level = Tether::Platform::LogLevel::Info);
+
+    /**
+     * @brief Verify a slave's SII identity against expected values.
+     *
+     * Reads the slave's identity from SII EEPROM and compares each
+     * present field in @p expected.  Nullopt fields are ignored.
+     *
+     * @param slave_index    Slave index (0-based)
+     * @param expected       Expected identity values
+     * @param exit_on_error  If true, stop the master and call std::exit(1) on mismatch
+     * @param tag            ESP-style log tag
+     * @return true if all checked fields match, false otherwise
+     */
+    bool verifySlaveIdentity(uint16_t slave_index,
+                             const Identity::SlaveIdentity& expected,
+                             bool exit_on_error = false,
+                             const char* tag = "EtherCAT");
 
     // ---- CoE / SDO low-level -----------------------------------------------
 
@@ -615,6 +642,9 @@ private:
     std::atomic<uint16_t> discovered_slave_count_{0};
     MotionControlCallback motion_control_callback_;
     std::unique_ptr<IMotionControlLoop> motion_control_loop_;
+
+    // Last working counter from a real bus transaction
+    std::atomic<uint16_t> last_wkc_{0};
 
     // Test hooks
     AprdTestCb aprd_cb_;

@@ -268,6 +268,8 @@ int main(int argc, char** argv) {
     if (!unknown_flags.empty()) {
         TETHER_LOGW(TAG, "Unknown debug flags:");
         for (const auto& f : unknown_flags) TETHER_LOGW(TAG, "  - %s", f.c_str());
+        TETHER_LOGI(TAG, "Available debug flags:");
+        for (const auto& f : known_debug_flags) TETHER_LOGI(TAG, "  - %s", f.c_str());
     }
     if (debug_flags.count("al-state")) {
         EtherCAT::enableStateMachineDebug(true);

@@ -23,6 +23,7 @@
 #include <chrono>
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <cerrno>
 #include "sii/SIIReader.hpp"
@@ -227,6 +228,55 @@ void Master::logDiscoveredSlavesSummary(const char* tag)
             }
         }
     }
+}
+
+bool Master::verifySlaveIdentity(uint16_t slave_index,
+                                   const Identity::SlaveIdentity& expected,
+                                   bool exit_on_error,
+                                   const char* tag)
+{
+    EtherCAT::SII::SIIIdentity id;
+    if (!EtherCAT::SII::readSIIIdentity(*this, slave_index, id)) {
+        TETHER_LOGE(tag, "Slave %u: Failed to read SII identity", slave_index);
+        if (exit_on_error) {
+            stop();
+            std::exit(1);
+        }
+        return false;
+    }
+
+    bool ok = true;
+
+    if (expected.vendor_id.has_value() && id.vendor_id != expected.vendor_id.value()) {
+        TETHER_LOGE(tag, "Slave %u Vendor ID mismatch: expected 0x%08X, got 0x%08X",
+                    slave_index, expected.vendor_id.value(), id.vendor_id);
+        ok = false;
+    }
+
+    if (expected.product_code.has_value() && id.product_code != expected.product_code.value()) {
+        TETHER_LOGE(tag, "Slave %u Product Code mismatch: expected 0x%08X, got 0x%08X",
+                    slave_index, expected.product_code.value(), id.product_code);
+        ok = false;
+    }
+
+    if (expected.revision_number.has_value() && id.revision_number != expected.revision_number.value()) {
+        TETHER_LOGE(tag, "Slave %u Revision Number mismatch: expected 0x%08X, got 0x%08X",
+                    slave_index, expected.revision_number.value(), id.revision_number);
+        ok = false;
+    }
+
+    if (expected.serial_number.has_value() && id.serial_number != expected.serial_number.value()) {
+        TETHER_LOGE(tag, "Slave %u Serial Number mismatch: expected 0x%08X, got 0x%08X",
+                    slave_index, expected.serial_number.value(), id.serial_number);
+        ok = false;
+    }
+
+    if (!ok && exit_on_error) {
+        stop();
+        std::exit(1);
+    }
+
+    return ok;
 }
 
 } // namespace EtherCAT

@@ -224,20 +224,11 @@ static void verifyReadbackAgainstESI(const ESI::DeviceInfo& esi,
     auto& sl = sensor.slave();
 
     // 1. Identity (SII)
-    EtherCAT::SII::SIIIdentity id;
-    if (EtherCAT::SII::readSIIIdentity(master, slave_index, id)) {
-        if (esi.vendorId != 0 && id.vendor_id != esi.vendorId) {
-            logMismatch("Readback VendorId", esi.vendorId, id.vendor_id);
-        }
-        if (esi.productCode != 0 && id.product_code != esi.productCode) {
-            logMismatch("Readback ProductCode", esi.productCode, id.product_code);
-        }
-        if (esi.revision != 0 && id.revision_number != esi.revision) {
-            logMismatch("Readback Revision", esi.revision, id.revision_number);
-        }
-    } else {
-        TETHER_LOGW(TAG, "Readback: failed to read SII identity");
-    }
+    EtherCAT::Identity::SlaveIdentity expected_id;
+    if (esi.vendorId != 0)   expected_id.vendor_id = esi.vendorId;
+    if (esi.productCode != 0) expected_id.product_code = esi.productCode;
+    if (esi.revision != 0)   expected_id.revision_number = esi.revision;
+    master.verifySlaveIdentity(slave_index, expected_id, false, TAG);
 
     // 2. Sync Manager hardware registers (SM0..SM3)
     for (uint8_t smIdx = 0; smIdx < 4 && smIdx < esi.syncManagers.size(); ++smIdx) {
