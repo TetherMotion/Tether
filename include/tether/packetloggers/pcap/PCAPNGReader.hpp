@@ -1,0 +1,248 @@
+/**
+ * @file PCAPNGReader.hpp
+ * @brief Full-featured PCAPNG reader with EtherCAT frame interpretation
+ *
+ * Reads PCAPNG capture files, parses Section Header, Interface Description,
+ * Enhanced Packet, Simple Packet, Interface Statistics, Name Resolution, and
+ * Decryption Secrets blocks, and interprets captured Ethernet frames.  VLAN
+ * tags (802.1Q) are stripped automatically, and EtherCAT frames (EtherType
+ * 0x88A4) are decoded into individual datagrams.
+ */
+
+#pragma once
+
+#include "packetloggers/pcap/PCAPWriter.hpp"
+#include "ethercat/Types.hpp"
+
+#include <array>
+#include <cstdint>
+#include <cstddef>
+#include <functional>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace Tether {
+namespace PacketLoggers {
+namespace PCAP {
+
+// ============================================================================
+// Section Header Information (read from file)
+// ============================================================================
+
+struct PCAPNGSectionInfo {
+    bool byteOrderSwapped = false;   ///< True if file byte order differs from host
+    int64_t sectionLength = -1;      ///< -1 if unknown
+    std::string hardware;
+    std::string os;
+    std::string application;
+    std::string comment;
+};
+
+// ============================================================================
+// Interface Description Information (read from file)
+// ============================================================================
+
+struct PCAPNGInterfaceInfo {
+    uint32_t id = 0;                 ///< Interface index (0-based)
+    uint16_t linkType = 1;           ///< LINKTYPE_ETHERNET = 1
+    uint32_t snapLen = 65535;        ///< Max captured bytes
+    uint64_t speed = 0;              ///< Bits/sec, 0 if unknown
+    uint8_t tsResol = 9;             ///< 10^-tsResol seconds (default nanoseconds)
+    int64_t tsOffset = 0;            ///< Timestamp offset in units of tsResol
+    uint8_t fcsLen = 0;              ///< FCS length in bytes
+    std::string name;
+    std::string description;
+    std::string filter;
+    std::string os;
+    std::array<uint8_t, 6> macAddress{};
+    std::string comment;
+};
+
+// ============================================================================
+// Parsed EtherCAT Datagram
+// ============================================================================
+
+struct EtherCATDatagramInfo {
+    EtherCAT::Command cmd = EtherCAT::Command::NOP;
+    uint8_t idx = 0;
+    uint16_t adp = 0;
+    uint16_t ado = 0;
+    uint16_t dataLength = 0;
+    uint16_t wkc = 0;
+    bool more = false;
+    bool circulating = false;
+    std::vector<uint8_t> data;       ///< Copy of datagram payload
+
+    /// @return 32-bit logical address for LRD/LWR/LRW datagrams
+    uint32_t logicalAddress() const {
+        return (static_cast<uint32_t>(ado) << 16) | adp;
+    }
+};
+
+// ============================================================================
+// Interpreted Ethernet Frame
+// ============================================================================
+
+struct InterpretedFrame {
+    // Packet-block metadata
+    uint64_t timestampNs = 0;
+    uint32_t interfaceId = 0;
+    uint32_t capturedLength = 0;
+    uint32_t originalLength = 0;
+    PacketDirection direction = PacketDirection::Unknown;
+    uint32_t packetFlags = 0;
+    uint64_t dropCount = 0;
+    std::string comment;
+
+    // Custom EtherCAT options stored by the writer
+    uint16_t slaveAddress = 0;
+    bool isProcessData = false;
+    uint8_t workingCounter = 0;
+
+    /// Full captured Ethernet frame (including header, VLAN tag, and payload).
+    std::vector<uint8_t> frameData;
+
+    // Ethernet header
+    std::array<uint8_t, 6> dstMac{};
+    std::array<uint8_t, 6> srcMac{};
+
+    // VLAN decapsulation
+    std::optional<uint16_t> vlanId;
+    uint8_t vlanPcp = 0;
+    bool vlanDei = false;
+
+    // Inner protocol
+    uint16_t innerEtherType = 0;
+    bool isEtherCAT = false;
+
+    // EtherCAT frame header (valid when isEtherCAT == true)
+    uint16_t ecatFrameLength = 0;
+    uint8_t ecatFrameType = 0;
+
+    // Decoded datagrams
+    std::vector<EtherCATDatagramInfo> datagrams;
+
+    /// @return true if this frame carried at least one EtherCAT datagram
+    bool hasEtherCAT() const { return isEtherCAT && !datagrams.empty(); }
+};
+
+// ============================================================================
+// PCAPNG Reader
+// ============================================================================
+
+class PCAPNGReader {
+public:
+    PCAPNGReader();
+    ~PCAPNGReader();
+
+    /// Open a pcapng file from disk.
+    bool open(const std::string& path);
+
+    /// Open a pcapng capture from an in-memory buffer (useful for tests).
+    bool open(const std::vector<uint8_t>& data);
+
+    /// Release any open resources.
+    void close();
+
+    /// True when a file or memory buffer is loaded.
+    bool isOpen() const;
+
+    /// Parsed Section Header Block information.
+    const PCAPNGSectionInfo& sectionInfo() const { return section_; }
+
+    /// Parsed Interface Description Blocks.
+    const std::vector<PCAPNGInterfaceInfo>& interfaces() const { return interfaces_; }
+
+    /// Callback invoked once for every interpreted frame.
+    using PacketCallback = std::function<void(const InterpretedFrame&)>;
+
+    /// Read and interpret all packets, invoking @p cb for each one.
+    /// @return true if the file was parsed successfully to the end.
+    bool readAll(PacketCallback cb);
+
+    /// Convenience overload that collects all interpreted frames.
+    std::vector<InterpretedFrame> readAll();
+
+private:
+    struct BlockHeader {
+        uint32_t type = 0;
+        uint32_t totalLength = 0;
+    };
+
+    bool parseBuffer(PacketCallback cb);
+    bool readBlockHeader(size_t offset, BlockHeader& header) const;
+    bool parseSectionHeaderBlock(size_t offset, const BlockHeader& header);
+    bool parseInterfaceDescriptionBlock(size_t offset, const BlockHeader& header);
+    bool parseEnhancedPacketBlock(size_t offset, const BlockHeader& header,
+                                  PacketCallback cb);
+    bool parseSimplePacketBlock(size_t offset, const BlockHeader& header,
+                                PacketCallback cb);
+    bool parseInterfaceStatisticsBlock(size_t offset, const BlockHeader& header);
+    bool parseNameResolutionBlock(size_t offset, const BlockHeader& header);
+    bool parseDecryptionSecretsBlock(size_t offset, const BlockHeader& header);
+    bool skipBlock(size_t offset, const BlockHeader& header);
+
+    bool parseOptions(size_t offset, size_t length,
+                      std::function<bool(uint16_t code, const uint8_t* data, uint16_t len)> handler);
+
+    bool interpretEthernetFrame(const uint8_t* data, size_t length,
+                                InterpretedFrame& frame) const;
+
+    // Byte-order helpers
+    uint16_t read16(const uint8_t* p) const;
+    uint32_t read32(const uint8_t* p) const;
+    uint64_t read64(const uint8_t* p) const;
+    uint16_t maybeSwap16(uint16_t v) const;
+    uint32_t maybeSwap32(uint32_t v) const;
+    uint64_t maybeSwap64(uint64_t v) const;
+
+    static uint32_t padTo32(uint32_t length);
+
+private:
+    std::vector<uint8_t> buffer_;
+    bool ownsBuffer_ = false;
+    bool isOpen_ = false;
+    size_t fileSize_ = 0;
+
+    PCAPNGSectionInfo section_;
+    std::vector<PCAPNGInterfaceInfo> interfaces_;
+
+    // Parsing state
+    size_t currentOffset_ = 0;
+    bool haveSectionHeader_ = false;
+};
+
+// ============================================================================
+// Human-Readable Formatting
+// ============================================================================
+
+/**
+ * @brief Format an interpreted frame as human-readable text.
+ * @param frame         Frame to format.
+ * @param verbose       If true, include full payload hex dumps.
+ * @param maxDataBytes  Maximum payload bytes to dump per datagram (0 = no limit).
+ */
+std::string formatInterpretedFrame(const InterpretedFrame& frame,
+                                   bool verbose = false,
+                                   size_t maxDataBytes = 64);
+
+/**
+ * @brief Format an interpreted frame as compact JSON.
+ */
+std::string frameToJson(const InterpretedFrame& frame);
+
+/**
+ * @brief Convert a MAC address to a colon-separated hex string.
+ */
+std::string macToString(const std::array<uint8_t, 6>& mac);
+
+/**
+ * @brief Convert a byte span to a hex string with optional separator.
+ */
+std::string bytesToHex(const uint8_t* data, size_t length,
+                       const std::string& separator = " ");
+
+} // namespace PCAP
+} // namespace PacketLoggers
+} // namespace Tether
