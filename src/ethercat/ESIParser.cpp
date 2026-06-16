@@ -3,7 +3,7 @@
 #include <sstream>
 #include <iomanip>
 #include <iostream>
-#include "tether/ethercat/EtherCATPDO.hpp" // for SM flag constants
+#include "tether/ethercat/PDOManager.hpp" // for SM flag constants
 #include "tether/sii/SIIParser.hpp" // for mailbox protocol constants
 
 using namespace tinyxml2;

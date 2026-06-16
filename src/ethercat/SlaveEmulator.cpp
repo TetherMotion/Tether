@@ -4,7 +4,7 @@
  */
 
 #include "SlaveEmulator.hpp"
-#include "tether/ethercat/EtherCATDCClass.hpp"
+#include "tether/ethercat/DCClass.hpp"
 #include "tether/platform/EspCompat.hpp"
 
 #define LOG_TAG "EC_EMU"

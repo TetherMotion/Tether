@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/Master.hpp"
 #include "ethercat/raw/internal.hpp"       // EC_REG_AL_STATUS, etc.
-#include "tether/ethercat/EtherCATFaultDetection.hpp"
+#include "tether/ethercat/FaultDetection.hpp"
 
 using namespace EtherCAT;
 

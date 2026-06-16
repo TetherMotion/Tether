@@ -6,8 +6,8 @@
 #include <vector>
 
 #include "tether/control/SineMotionController.hpp"
-#include "tether/ethercat/EtherCATDC.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/DC.hpp"
+#include "tether/ethercat/Master.hpp"
 #include "tether/profiles/cia402/CiA402Drive.hpp"
 
 namespace EtherCAT {

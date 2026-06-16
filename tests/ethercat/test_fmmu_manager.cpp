@@ -10,7 +10,7 @@
 #include <gmock/gmock.h>
 
 #include "tether/fmmu/FMMUConfiguration.hpp"
-#include "tether/ethercat/EtherCATPDO.hpp"
+#include "tether/ethercat/PDOManager.hpp"
 
 #include <cstring>
 #include <vector>

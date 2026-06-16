@@ -10,7 +10,7 @@
 #include "tether/hal/HAL.hpp"
 #include "tether/hal/IEthernet.hpp"
 #include "mocks/MockHAL.hpp"
-#include "tether/shared/PcapLogger.hpp"
+#include "tether/pcap/PcapLogger.hpp"
 #include "tether/hal/IPcapLogger.hpp"
 
 using namespace EtherCAT;

@@ -15,9 +15,9 @@
 #include <cmath>
 #include <cstring>
 
-#include "tether/ethercat/EtherCATMaster.hpp"
-#include "tether/ethercat/EtherCATSlave.hpp"
-#include "tether/ethercat/EtherCATPDO.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/Slave.hpp"
+#include "tether/ethercat/PDOManager.hpp"
 #include "tether/sensors/Axia80/Axia80PDO.hpp"
 #include "tether/sensors/Axia80/Axia80Registers.hpp"
 #include "tether/platform/Platform.hpp"

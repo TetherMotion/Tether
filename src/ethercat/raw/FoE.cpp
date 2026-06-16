@@ -3,8 +3,8 @@
  * @brief File over EtherCAT (FoE) protocol implementation — instance-based, no globals
  */
 
-#include "tether/ethercat/EtherCATFoE.hpp"
-#include "tether/ethercat/EtherCATConfig.hpp"
+#include "tether/ethercat/FoE.hpp"
+#include "tether/ethercat/TetherConfig.hpp"
 
 #if ECAT_FEATURE_FOE_ENABLED
 

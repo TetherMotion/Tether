@@ -5,7 +5,7 @@
 
 #include "profiles/cia405/CiA405PLC.hpp"
 #include "tether/platform/EspCompat.hpp"
-#include "EtherCATSDO.hpp"
+#include "SDOManager.hpp"
 
 static const char* TAG = "CiA405";
 #define LOG_I(fmt, ...) TETHER_LOGI(TAG, fmt, ##__VA_ARGS__)

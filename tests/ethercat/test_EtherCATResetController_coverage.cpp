@@ -4,8 +4,8 @@
  *        EtherCATResetCore.cpp, EtherCATResetESM.cpp, EtherCATResetCiA.cpp
  */
 
-#include "tether/ethercat/EtherCATReset.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
+#include "tether/ethercat/Reset.hpp"
+#include "tether/ethercat/SDOManager.hpp"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <chrono>

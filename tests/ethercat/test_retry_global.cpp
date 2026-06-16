@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include "tether/ethercat/EtherCATRetry.hpp"
+#include "tether/ethercat/Retry.hpp"
 #include "tether/ethercat/ConditionalPacketRouter.hpp"
 
 using EtherCAT::ConditionalPacketRouter;

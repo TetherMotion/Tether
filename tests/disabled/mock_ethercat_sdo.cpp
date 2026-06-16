@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 #include "MockSDOHelper.hpp"
-#include "EtherCATPDO.hpp"
+#include "PDOManager.hpp"
 
 // Global mock state
 static std::map<uint16_t, std::string> g_mock_strings;

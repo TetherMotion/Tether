@@ -2,7 +2,7 @@
 #include <gmock/gmock.h>
 
 #include "tether/ethercat/utils/PDO.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
+#include "tether/ethercat/SDOManager.hpp"
 
 using namespace EtherCAT;
 using namespace EtherCAT::Utils;

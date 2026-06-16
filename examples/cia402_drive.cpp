@@ -10,7 +10,7 @@
 #include "slave/hal/LoopbackHAL.hpp"
 #include "slave/profiles/CiA402Slave.hpp"
 #include "slave/mailbox/CoEHandler.hpp"
-#include "shared/PcapLogger.hpp"
+#include "pcap/PcapLogger.hpp"
 
 #include <iostream>
 #include <thread>

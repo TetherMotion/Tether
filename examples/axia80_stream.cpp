@@ -26,8 +26,8 @@
 #include <thread>
 #include <magic_enum/magic_enum.hpp>
 
-#include "tether/ethercat/EtherCATMaster.hpp"
-#include "tether/ethercat/EtherCATTypes.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/DC/Utils.hpp"
 #include "tether/ethercat/VLANRouter.hpp"
 #include "tether/ethercat/ESIParser.hpp"

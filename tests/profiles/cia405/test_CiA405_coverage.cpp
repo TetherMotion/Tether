@@ -7,7 +7,7 @@
 #include <vector>
 #include "tether/profiles/cia405/CiA405PLC.hpp"
 #include "tether/profiles/cia405/CiA405Defs.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
+#include "tether/ethercat/SDOManager.hpp"
 
 using namespace CiA405;
 

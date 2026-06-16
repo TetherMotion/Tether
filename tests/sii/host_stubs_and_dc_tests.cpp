@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
-#include "tether/ethercat/EtherCATRaw.hpp"
-#include "tether/ethercat/EtherCATPDO.hpp"
-#include "tether/ethercat/EtherCATDC.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/Raw.hpp"
+#include "tether/ethercat/PDOManager.hpp"
+#include "tether/ethercat/DC.hpp"
+#include "tether/ethercat/Master.hpp"
 
 using namespace EtherCAT;
 

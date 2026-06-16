@@ -6,9 +6,9 @@
 
 #include "tether/ethercat/SyncManager.hpp"
 #include "tether/profiles/cia402/1Cxx-SyncManagerParameters.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"  // for logging context
+#include "tether/ethercat/Master.hpp"  // for logging context
 #include "tether/ethercat/SDO.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"  // for full SDOManager definition
+#include "tether/ethercat/SDOManager.hpp"  // for full SDOManager definition
 #include "logging/Logger.hpp"  // for TETHER_LOGI/W
 
 namespace EtherCAT {

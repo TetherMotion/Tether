@@ -5,7 +5,7 @@
 #include <gtest/gtest.h>
 #include <cstring>
 #include "tether/ethercat/ConditionalPacketRouter.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/Master.hpp"
 
 using namespace EtherCAT;
 
@@ -236,10 +236,10 @@ TEST(EtherCATMasterBasic, PushAndConsumeAprdResponse) {
     m.packetRouter().init();
 
     uint32_t data = 0xDEADBEEF;
-    m.pushAprdResponse(true, 0xFFFF, 0x0508, &data, sizeof(data));
+    m.pushAprdResponse(true, 0x0000, 0x0508, &data, sizeof(data));
 
     uint32_t out = 0;
-    bool ok = m.readRegister(0xFFFF, 0x0508, out, 10);
+    bool ok = m.readRegister(0x0000, 0x0508, out, 10);
     EXPECT_TRUE(ok);
     EXPECT_EQ(out, 0xDEADBEEF);
 

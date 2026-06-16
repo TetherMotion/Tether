@@ -59,7 +59,7 @@
 
 // EtherCAT
 #ifdef TETHER_ENABLE_ETHERCAT
-#include "tether/ethercat/EtherCATTypes.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
-#include "tether/ethercat/EtherCATPDO.hpp"
+#include "tether/ethercat/Types.hpp"
+#include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/PDOManager.hpp"
 #endif

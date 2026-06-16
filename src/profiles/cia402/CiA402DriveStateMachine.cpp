@@ -7,10 +7,10 @@
  */
 
 #include "profiles/cia402/CiA402Drive.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
-#include "tether/ethercat/EtherCATDC.hpp"
-#include "tether/ethercat/EtherCATPDO.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/DC.hpp"
+#include "tether/ethercat/PDOManager.hpp"
 #include "tether/platform/Platform.hpp"
 
 #include <cinttypes>

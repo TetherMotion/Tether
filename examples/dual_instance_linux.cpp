@@ -27,8 +27,8 @@
 #include <queue>
 
 // EtherCAT class-based API
-#include "tether/ethercat/EtherCATMaster.hpp"
-#include "tether/ethercat/EtherCATTypes.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/Types.hpp"
 #include "tether/platform/EspCompat.hpp"
 
 static const char* TAG = "DualInstance";

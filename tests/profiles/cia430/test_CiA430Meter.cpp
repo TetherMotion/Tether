@@ -4,7 +4,7 @@
  */
 #include <gtest/gtest.h>
 #include "tether/profiles/cia430/CiA430Meter.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
+#include "tether/ethercat/SDOManager.hpp"
 
 using namespace CiA430;
 

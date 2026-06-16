@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "tether/ethercat/EtherCATWriteVerify.hpp"
-#include "tether/ethercat/EtherCATWriteVerify.hpp" // ensure types are available
+#include "tether/ethercat/WriteVerify.hpp"
+#include "tether/ethercat/WriteVerify.hpp" // ensure types are available
 
 using namespace EtherCAT::Verify;
 

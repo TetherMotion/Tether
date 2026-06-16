@@ -12,24 +12,24 @@ namespace {
 
 // ===== AllSystems Factory Tests =====
 
-TEST(AllSystemsFactory, SystemCountIs65) {
-    EXPECT_EQ(Simulation::systemCount(), 65);
+TEST(AllSystemsFactory, SystemCountIs70) {
+    EXPECT_EQ(Simulation::systemCount(), 70);
 }
 
-TEST(AllSystemsFactory, ListSystemsReturns65) {
+TEST(AllSystemsFactory, ListSystemsReturns70) {
     auto systems = Simulation::listSystems();
-    EXPECT_EQ(systems.size(), 65u);
+    EXPECT_EQ(systems.size(), 70u);
 }
 
 TEST(AllSystemsFactory, ListSystemsHasUniqueIds) {
     auto systems = Simulation::listSystems();
     std::set<int> ids;
     for (auto& [id, name] : systems) ids.insert(id);
-    EXPECT_EQ(ids.size(), 65u);
+    EXPECT_EQ(ids.size(), 70u);
 }
 
 TEST(AllSystemsFactory, CreateSystemValidIds) {
-    for (int id = 1; id <= 65; ++id) {
+    for (int id = 1; id <= 70; ++id) {
         auto sys = Simulation::createSystem(id);
         ASSERT_NE(sys, nullptr) << "createSystem(" << id << ") returned null";
         EXPECT_EQ(sys->systemId(), id);
@@ -39,12 +39,12 @@ TEST(AllSystemsFactory, CreateSystemValidIds) {
 TEST(AllSystemsFactory, CreateSystemInvalidIds) {
     EXPECT_EQ(Simulation::createSystem(0), nullptr);
     EXPECT_EQ(Simulation::createSystem(-1), nullptr);
-    EXPECT_EQ(Simulation::createSystem(66), nullptr);
+    EXPECT_EQ(Simulation::createSystem(71), nullptr);
     EXPECT_EQ(Simulation::createSystem(999), nullptr);
 }
 
 TEST(AllSystemsFactory, AllSystemsHaveNames) {
-    for (int id = 1; id <= 65; ++id) {
+    for (int id = 1; id <= 70; ++id) {
         auto sys = Simulation::createSystem(id);
         ASSERT_NE(sys, nullptr);
         EXPECT_NE(std::string(sys->name()), "");
@@ -252,7 +252,7 @@ TEST_P(SystemInterfaceTest, CategoryIsValid) {
     ASSERT_NE(sys, nullptr);
     auto cat = sys->category();
     EXPECT_GE(static_cast<int>(cat), 0);
-    EXPECT_LE(static_cast<int>(cat), 9);
+    EXPECT_LE(static_cast<int>(cat), 10);
 }
 
 TEST_P(SystemInterfaceTest, EquationStringsAreValid) {
@@ -279,7 +279,7 @@ TEST_P(SystemInterfaceTest, GeometriesAreValid) {
 
 INSTANTIATE_TEST_SUITE_P(
     AllSystems, SystemInterfaceTest,
-    ::testing::Range(1, 66),
+    ::testing::Range(1, 71),
     [](const ::testing::TestParamInfo<int>& info) {
         auto sys = Simulation::createSystem(info.param);
         std::string name = sys ? sys->name() : "Unknown";
@@ -563,7 +563,7 @@ TEST_P(SimulationStabilityTest, ShortSimulationDoesNotDiverge) {
 
 INSTANTIATE_TEST_SUITE_P(
     AllSystems, SimulationStabilityTest,
-    ::testing::Range(1, 66),
+    ::testing::Range(1, 71),
     [](const ::testing::TestParamInfo<int>& info) {
         auto sys = Simulation::createSystem(info.param);
         std::string name = sys ? sys->name() : "Unknown";

@@ -3,7 +3,7 @@
 #include <thread>
 #include <chrono>
 
-#include "tether/ethercat/EtherCATSDO.hpp"
+#include "tether/ethercat/SDOManager.hpp"
 
 using namespace EtherCAT;
 using namespace std::chrono_literals;

@@ -19,7 +19,7 @@
 #include "profiles/cia406/CiA406Encoder.hpp"
 #include "profiles/cia406/CiA406Defs.hpp"
 #include "tether/platform/EspCompat.hpp"
-#include "EtherCATSDO.hpp"
+#include "SDOManager.hpp"
 
 #include <cstring>
 #include <algorithm>

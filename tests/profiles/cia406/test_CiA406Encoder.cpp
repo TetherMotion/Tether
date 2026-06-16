@@ -4,7 +4,7 @@
  */
 #include <gtest/gtest.h>
 #include "tether/profiles/cia406/CiA406Encoder.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
+#include "tether/ethercat/SDOManager.hpp"
 
 using namespace CiA406;
 

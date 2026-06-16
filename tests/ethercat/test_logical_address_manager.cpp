@@ -8,7 +8,7 @@
 #include <cstring>
 
 #include "tether/ethercat/LogicalAddressManager.hpp"
-#include "tether/ethercat/EtherCATPDO.hpp"
+#include "tether/ethercat/PDOManager.hpp"
 
 using namespace EtherCAT;
 using namespace EtherCAT::PDO;

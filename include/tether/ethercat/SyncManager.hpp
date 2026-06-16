@@ -5,8 +5,8 @@
 #include <string>
 #include <vector>
 
-#include "tether/ethercat/EtherCATPDO.hpp"
-#include "tether/ethercat/EtherCATTypes.hpp"
+#include "tether/ethercat/PDOManager.hpp"
+#include "tether/ethercat/Types.hpp"
 
 /**
  * @file SyncManager.hpp

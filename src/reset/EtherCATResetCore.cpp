@@ -5,9 +5,9 @@
  * Split from EtherCATReset.cpp for maintainability.
  */
 
-#include "EtherCATReset.hpp"
+#include "Reset.hpp"
 #include "tether/platform/EspCompat.hpp"
-#include "EtherCATSDO.hpp"
+#include "SDOManager.hpp"
 #include "profiles/cia301/CiA301Defs.hpp"
 #include "profiles/cia301/CiA402Defs.hpp"
 
@@ -59,7 +59,7 @@ const char* getResetLevelDescription(ResetLevel level) {
 // ============================================================================
 // AL Status Code Names
 // ============================================
-// Implementation moved to EtherCATFaultDetection.cpp to avoid duplicate symbols
+// Implementation moved to FaultDetection.cpp to avoid duplicate symbols
 // (use the public declarations in the headers).
 
 // ============================================================================

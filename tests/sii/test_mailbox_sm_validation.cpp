@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include "tether/platform/Platform.hpp"
 #include "ethercat/raw/internal.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/Master.hpp"
 
 using namespace EtherCAT::Raw;
 using namespace Tether::Platform;
@@ -51,11 +51,26 @@ public:
             return !simulate_failure_;
         });
 
-        // APRD: handle EEPSTAT/EEPDAT and SM control reads
+        // APRD: handle EEPSTAT/EEPDAT and SM register reads
         master.setAprdTestCallback([this](uint16_t adp, uint16_t ado,
                            void* out, uint16_t len, unsigned int ms) {
             (void)adp; (void)ms;
-            // SM control reads
+            // Full SM register block reads (8 bytes from base)
+            if (ado == EC_REG_SM0 && len >= 8) {
+                uint8_t buf[8] = {0};
+                buf[4] = sm0_ctrl_;
+                buf[6] = 0x01; // activate
+                std::memcpy(out, buf, 8);
+                return true;
+            }
+            if (ado == EC_REG_SM1 && len >= 8) {
+                uint8_t buf[8] = {0};
+                buf[4] = sm1_ctrl_;
+                buf[6] = 0x01; // activate
+                std::memcpy(out, buf, 8);
+                return true;
+            }
+            // SM control byte reads (legacy path)
             if (ado == (EC_REG_SM0 + 0x04)) {
                 if (out && len >= 1) {
                     uint8_t val = sm0_ctrl_;

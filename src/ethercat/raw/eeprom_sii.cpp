@@ -1,8 +1,8 @@
 #include "raw/internal.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/Master.hpp"
 #include "tether/platform/Platform.hpp"
 #include "tether/sii/SIIReader.hpp"
-#include "tether/ethercat/EtherCATPDO.hpp"
+#include "tether/ethercat/PDOManager.hpp"
 #include <thread>
 #include <chrono>
 #include <cstring>
@@ -332,6 +332,25 @@ bool configure_mailbox_from_sii(
 
         const bool sm0_mbx = is_mailbox(sm0.control) && (sm0.activate & 0x01);
         const bool sm1_mbx = is_mailbox(sm1.control) && (sm1.activate & 0x01);
+
+        // Validate SM controls match expected mailbox configuration
+        auto ctrl_mode_name = [&](uint8_t ctrl) -> const char* {
+            using namespace EtherCAT::PDO;
+            switch (ctrl & SM_CTRL_MODE_MASK) {
+                case SM_CTRL_MODE_BUFFERED: return "Buffered";
+                case SM_CTRL_MODE_MAILBOX:  return "Mailbox";
+                case SM_CTRL_MODE_3PDO:     return "Buffered3PDO";
+                default:                    return "Reserved";
+            }
+        };
+        if (sm0.ok && !sm0_mbx) {
+            TETHER_LOGW(TAG, "SM0 control byte 0x%02X does not indicate an active mailbox (mode=%s, dir=%s)",
+                        sm0.control, ctrl_mode_name(sm0.control), fmt_dir(sm0.control));
+        }
+        if (sm1.ok && !sm1_mbx) {
+            TETHER_LOGW(TAG, "SM1 control byte 0x%02X does not indicate an active mailbox (mode=%s, dir=%s)",
+                        sm1.control, ctrl_mode_name(sm1.control), fmt_dir(sm1.control));
+        }
 
         // Cross-check SM registers intelligently, accounting for swap correction applied above.
         // Only attempt cross-check when both SM0/SM1 look like enabled mailbox SMs.

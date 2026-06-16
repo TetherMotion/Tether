@@ -4,7 +4,7 @@
  * 
  * @internal
  * This is an internal header used by the EtherCAT raw module implementation.
- * Application code should use the public headers (EtherCATRaw.hpp, EtherCATPDO.hpp, etc.)
+ * Application code should use the public headers (Raw.hpp, PDOManager.hpp, etc.)
  * 
  * @details
  * This header contains:
@@ -57,7 +57,7 @@
 #include <memory> 
 
 #include "tether/platform/Platform.hpp"
-#include "tether/ethercat/EtherCATTypes.hpp"
+#include "tether/ethercat/Types.hpp"
 
 // Forward-declare Master for function parameters
 namespace EtherCAT { class Master; }
@@ -181,7 +181,7 @@ enum class EtherType : uint16_t {
     EtherCAT = 0x88A4,  ///< EtherCAT frame identification
 };
 
-// EtherCATCommand is defined in EtherCATTypes.hpp and aliased above
+// EtherCATCommand is defined in Types.hpp and aliased above
 
 // ============================================================================
 // Wire-Format Structures (Packed)
@@ -513,7 +513,7 @@ struct __attribute__((packed)) SdoAbort {
     uint8_t cmd;              ///< Command byte (0x80)
     uint16_t index_le;        ///< Object that caused abort
     uint8_t sub;              ///< Subindex
-    uint32_t abortCode_le;    ///< Abort code (see EtherCATSDO.hpp)
+    uint32_t abortCode_le;    ///< Abort code (see SDOManager.hpp)
 };
 static_assert(sizeof(SdoAbort) == 8, "SdoAbort must be 8 bytes");
 
@@ -521,7 +521,7 @@ static_assert(sizeof(SdoAbort) == 8, "SdoAbort must be 8 bytes");
 // Response/Receive Structures
 // ============================================================================
 
-// RxDatagram is now defined in EtherCATTypes.hpp
+// RxDatagram is now defined in Types.hpp
 
 /**
  * @brief Minimal scan frame structure

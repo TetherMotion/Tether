@@ -29,7 +29,7 @@
 #include <array>
 #include <mutex>
 
-#include "EtherCATTypes.hpp"
+#include "Types.hpp"
 
 namespace EtherCAT {
 namespace Emulator {
@@ -45,7 +45,7 @@ class NetworkEmulator;
 // EtherCAT State Machine
 // ============================================================================
 
-// Use SlaveState from EtherCATTypes.hpp
+// Use SlaveState from Types.hpp
 using EtherCAT::SlaveState;
 using EtherCAT::slaveStateToString;
 

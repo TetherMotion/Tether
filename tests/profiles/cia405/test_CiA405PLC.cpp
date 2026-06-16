@@ -4,7 +4,7 @@
  */
 #include <gtest/gtest.h>
 #include "tether/profiles/cia405/CiA405PLC.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
+#include "tether/ethercat/SDOManager.hpp"
 #include <cstring>
 
 using namespace CiA405;

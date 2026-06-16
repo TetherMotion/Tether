@@ -23,7 +23,7 @@
 
 #include "tether/slave/core/SlaveTypes.hpp"
 #include "tether/slave/logging/SlaveLogger.hpp"
-#include "tether/ethercat/EtherCATTypes.hpp"
+#include "tether/ethercat/Types.hpp"
 
 #include <array>
 #include <atomic>

@@ -20,9 +20,9 @@
 #include <gmock/gmock.h>
 
 #include "tether/ethercat/SyncManager.hpp"
-#include "tether/ethercat/EtherCATSlave.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
-#include "tether/ethercat/EtherCATPDO.hpp"
+#include "tether/ethercat/Slave.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/PDOManager.hpp"
 #include "profiles/cia301/CiA301Defs.hpp"  // for backward-compat alias check
 
 #include <cstring>

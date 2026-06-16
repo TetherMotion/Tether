@@ -9,7 +9,7 @@
 #include "slave/SlaveCore.hpp"
 #include "slave/hal/LoopbackHAL.hpp"
 #include "slave/profiles/CiA401Slave.hpp"
-#include "shared/PcapLogger.hpp"
+#include "pcap/PcapLogger.hpp"
 
 #include <iostream>
 #include <thread>

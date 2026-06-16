@@ -140,7 +140,7 @@ TEST(EtherCATControlWordTest, Values) {
 // ============================================================================
 
 TEST(PDOConstantsTest, MaxBufferSize) {
-    EXPECT_EQ(CiA402Drive::kMaxPDOBufferSize, 64u);
+    EXPECT_EQ(CiA402Drive::kMaxPDOBufferSize, 256u);
 }
 
 TEST(PDOConstantsTest, MaxManagedDrives) {

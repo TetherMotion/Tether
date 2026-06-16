@@ -5,10 +5,10 @@
  * Split from EtherCATReset.cpp for maintainability.
  */
 
-#include "EtherCATReset.hpp"
+#include "Reset.hpp"
 #include "tether/platform/EspCompat.hpp"
-#include "EtherCATSDO.hpp"
-#include "tether/ethercat/EtherCATDCClass.hpp"
+#include "SDOManager.hpp"
+#include "tether/ethercat/DCClass.hpp"
 
 namespace EtherCAT {
 

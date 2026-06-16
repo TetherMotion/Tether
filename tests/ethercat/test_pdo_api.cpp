@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
-#include "tether/ethercat/EtherCATPDO.hpp"
+#include "tether/ethercat/PDOManager.hpp"
 
 using namespace EtherCAT;
 using namespace EtherCAT::PDO;

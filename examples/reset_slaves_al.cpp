@@ -28,10 +28,10 @@
 #include <vector>
 #include <magic_enum/magic_enum.hpp>
 
-#include "tether/ethercat/EtherCATMaster.hpp"
-#include "tether/ethercat/EtherCATSlave.hpp"
-#include "tether/ethercat/EtherCATTypes.hpp"
-#include "tether/ethercat/EtherCATFaultDetection.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/Slave.hpp"
+#include "tether/ethercat/Types.hpp"
+#include "tether/ethercat/FaultDetection.hpp"
 #include "tether/ethercat/ALResetController.hpp"
 #include "tether/ethercat/SyncManager.hpp"
 #include "tether/ethercat/VLANRouter.hpp"

@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "tether/ethercat/EtherCATMaster.hpp"
-#include "tether/ethercat/EtherCATDC.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/DC.hpp"
 
 TEST(DCManagerInitTest, InitFailsWithZeroSlaves)
 {

@@ -6,10 +6,10 @@
  * are now member functions on Master; call them directly.
  *
  * Only utility / adapter wrappers remain here for firmware-only code
- * that has not yet been migrated (EtherCATDCConsistency.cpp).
+ * that has not yet been migrated (DCConsistency.cpp).
  */
 
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/Master.hpp"
 #include "raw/internal.hpp"
 #include "tether/platform/Platform.hpp"
 

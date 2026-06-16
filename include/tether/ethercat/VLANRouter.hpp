@@ -58,7 +58,7 @@
  * are also mutex-protected and return snapshots where required.
  */
 
-#include "tether/ethercat/EtherCATTypes.hpp"
+#include "tether/ethercat/Types.hpp"
 
 #include <cstddef>
 #include <cstdint>

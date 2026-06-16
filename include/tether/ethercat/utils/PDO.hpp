@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
-#include "tether/ethercat/EtherCATSDO.hpp"  // for SDOManager type and timeout constant
+#include "tether/ethercat/SDOManager.hpp"  // for SDOManager type and timeout constant
 
 namespace EtherCAT {
 namespace Utils {

@@ -1,10 +1,10 @@
 #include "tether/ethercat/Mailbox/Utils.hpp"
 
 #include "logging/Logger.hpp"              // for TETHER_LOGI/W
-#include "tether/ethercat/EtherCATMaster.hpp" // for Master
-#include "tether/ethercat/EtherCATSlave.hpp"  // full slave type for status dumps
+#include "tether/ethercat/Master.hpp" // for Master
+#include "tether/ethercat/Slave.hpp"  // full slave type for status dumps
 #include "tether/profiles/cia402/CiA402Drive.hpp" // for CiA402Drive
-#include "tether/ethercat/EtherCATFaultDetection.hpp" // AL status helpers
+#include "tether/ethercat/FaultDetection.hpp" // AL status helpers
 #include "tether/ethercat/SyncManager/Utils.hpp" // for SM dumps
 
 namespace EtherCAT {

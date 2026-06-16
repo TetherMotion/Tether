@@ -3,8 +3,8 @@
  * @brief Vendor over EtherCAT (VoE) protocol implementation
  */
 
-#include "EtherCATVoE.hpp"
-#include "EtherCATConfig.hpp"
+#include "VoE.hpp"
+#include "TetherConfig.hpp"
 
 #if ECAT_FEATURE_VOE_ENABLED
 

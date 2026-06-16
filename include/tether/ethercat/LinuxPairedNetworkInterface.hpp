@@ -47,7 +47,7 @@
 #include <mutex>
 #include <vector>
 
-#include "tether/ethercat/EtherCATTypes.hpp"
+#include "tether/ethercat/Types.hpp"
 
 namespace EtherCAT {
 

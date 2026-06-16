@@ -115,6 +115,7 @@ endif()
 # =============================================================================
 option(TETHER_BUILD_COMMON "Build common utilities" ON)
 option(TETHER_BUILD_HAL "Build hardware abstraction layer" ON)
+option(TETHER_BUILD_PCAP "Build pcap logging utilities" ON)
 option(TETHER_BUILD_CONTROLS "Build control algorithms" ON)
 option(TETHER_BUILD_GCODE "Build G-code interpreter" ON)
 option(TETHER_BUILD_EXPORT "Build export utilities" ON)
@@ -182,6 +183,11 @@ configure_file(
 # Common (always built - foundation for everything)
 if(TETHER_BUILD_COMMON)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/common.cmake)
+endif()
+
+# PcapNG logging
+if(TETHER_BUILD_PCAP)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/pcap.cmake)
 endif()
 
 # HAL
@@ -444,6 +450,7 @@ message(STATUS "  Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "")
 message(STATUS "  Components:")
 message(STATUS "    tether_common:         ${TETHER_BUILD_COMMON}")
+message(STATUS "    tether_pcap:           ${TETHER_BUILD_PCAP}")
 message(STATUS "    tether_hal:            ${TETHER_BUILD_HAL}")
 message(STATUS "    tether_controls:       ${TETHER_BUILD_CONTROLS}")
 message(STATUS "    tether_gcode:          ${TETHER_BUILD_GCODE}")

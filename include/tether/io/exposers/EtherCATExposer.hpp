@@ -6,7 +6,7 @@
 #pragma once
 
 #include "tether/io/ParameterExposer.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/Master.hpp"
 
 namespace tether { namespace io { namespace exposers {
 

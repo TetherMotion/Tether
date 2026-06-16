@@ -15,8 +15,8 @@
 #include <cstring>
 #include <magic_enum/magic_enum.hpp>
 
-#include "tether/ethercat/EtherCATDiagnostics.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/Diagnostics.hpp"
+#include "tether/ethercat/Master.hpp"
 #include "tether/platform/EspCompat.hpp"
 
 // Forward-declare a small subset of Raw transport helpers used by the host example
@@ -31,7 +31,7 @@ namespace Raw {
 
 #include <argparse/argparse.hpp>
 #include "tether/hal/IEthernet.hpp"
-#include "tether/ethercat/EtherCATSlave.hpp"
+#include "tether/ethercat/Slave.hpp"
 #include "tether/ethercat/VLANRouter.hpp"
 #include <thread>
 #include <atomic>

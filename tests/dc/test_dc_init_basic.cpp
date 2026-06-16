@@ -7,9 +7,9 @@
  */
 
 #include <gtest/gtest.h>
-#include "tether/ethercat/EtherCATDC.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
-#include "tether/ethercat/EtherCATTypes.hpp"
+#include "tether/ethercat/DC.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/Types.hpp"
 
 #include <thread>
 #include <chrono>

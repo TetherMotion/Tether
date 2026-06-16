@@ -14,7 +14,7 @@
 #include "sii/SIIReader.hpp"
 #include "sii/SIIParser.hpp"
 #include "ethercat/raw/internal.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
+#include "tether/ethercat/Master.hpp"
 
 #include <cstdint>
 #include <cstring>

@@ -8,7 +8,7 @@
 #include <memory>
 #include <vector>
 #include <string>
-#include "shared/PcapLogger.hpp"
+#include "pcap/PcapLogger.hpp"
 
 using namespace EtherCAT;
 

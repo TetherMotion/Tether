@@ -6,9 +6,9 @@
  */
 
 #include "tether/ethercat/SyncManager.hpp"
-#include "tether/ethercat/EtherCATSlave.hpp"
-#include "tether/ethercat/EtherCATMaster.hpp"
-#include "tether/ethercat/EtherCATPDO.hpp"
+#include "tether/ethercat/Slave.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/PDOManager.hpp"
 #include "tether/platform/Platform.hpp"
 
 #include <cstdio>

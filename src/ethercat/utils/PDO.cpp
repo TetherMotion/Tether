@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <vector>
 #include <algorithm>
-#include "tether/ethercat/EtherCATSDO.hpp"
+#include "tether/ethercat/SDOManager.hpp"
 #include "logging/Logger.hpp"  // for TETHER_LOGI/W
 
 namespace EtherCAT {

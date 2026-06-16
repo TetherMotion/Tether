@@ -1,6 +1,6 @@
 #include "tether/drives/AS715N.hpp"
 #include "tether/drives/AS715NRegisters.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
+#include "tether/ethercat/SDOManager.hpp"
 #include "tether/platform/Platform.hpp"
 
 static const char* TAG = "AS715N";

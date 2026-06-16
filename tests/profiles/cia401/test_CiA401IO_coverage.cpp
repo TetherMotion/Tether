@@ -9,7 +9,7 @@
 #include <cstring>
 #include "tether/profiles/cia401/CiA401IO.hpp"
 #include "tether/profiles/cia401/CiA401Defs.hpp"
-#include "tether/ethercat/EtherCATSDO.hpp"
+#include "tether/ethercat/SDOManager.hpp"
 
 using namespace CiA401;
 

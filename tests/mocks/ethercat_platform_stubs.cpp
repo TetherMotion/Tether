@@ -1,5 +1,5 @@
-#include "tether/ethercat/EtherCATRaw.hpp"
-#include "tether/ethercat/EtherCATPlatform.hpp"
+#include "tether/ethercat/Raw.hpp"
+#include "tether/ethercat/Platform.hpp"
 #include <chrono>
 #include <thread>
 
