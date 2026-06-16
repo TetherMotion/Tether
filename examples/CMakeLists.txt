@@ -87,6 +87,17 @@ add_tether_example(reset_slaves_al
 add_tether_example(axia80_stream
     LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common)
 
+# --- Nexcobot ESC211 Safety DI monitor ---
+# Reads Safety DI A/B via CoE/SDO and renders a live ncurses panel
+find_package(Curses)
+if(CURSES_FOUND)
+    add_tether_example(esc211_di_monitor
+        LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common ${CURSES_LIBRARIES})
+    target_include_directories(esc211_di_monitor PRIVATE ${CURSES_INCLUDE_DIRS})
+else()
+    message(STATUS "ncurses not found; skipping esc211_di_monitor")
+endif()
+
 # --- WebSocket UI backends ---
 # These examples use Boost.Beast/Boost.Asio (header-only). They are only built
 # when Boost is available so the rest of the examples build without it.
