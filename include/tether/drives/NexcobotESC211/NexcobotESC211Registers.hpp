@@ -10,6 +10,12 @@
 #include "tether/drives/NexcobotESC211/Registers/SafetyStatus.hpp"
 #include "tether/drives/NexcobotESC211/Registers/RSAPMonitoring.hpp"
 #include "tether/drives/NexcobotESC211/Registers/SafetyIO.hpp"
+#include "tether/drives/NexcobotESC211/Registers/ModularDevice.hpp"
+#include "tether/drives/NexcobotESC211/Registers/UserSystem.hpp"
+#include "tether/drives/NexcobotESC211/Registers/BulkData.hpp"
+#include "tether/drives/NexcobotESC211/Registers/FSOERx.hpp"
+#include "tether/drives/NexcobotESC211/Registers/FSOERxChannels.hpp"
+#include "tether/drives/NexcobotESC211/Registers/FSOETx.hpp"
 
 namespace EtherCAT {
 namespace Drives {
@@ -26,6 +32,12 @@ inline const RegisterListOfLists kAllRegisterLists = {
     &Registers::NexcobotESC211::SafetyStatus::kRegisterList,
     &Registers::NexcobotESC211::RSAPMonitoring::kRegisterList,
     &Registers::NexcobotESC211::SafetyIO::kRegisterList,
+    &Registers::NexcobotESC211::ModularDevice::kRegisterList,
+    &Registers::NexcobotESC211::UserSystem::kRegisterList,
+    &Registers::NexcobotESC211::BulkData::kRegisterList,
+    &Registers::NexcobotESC211::FSOERx::kRegisterList,
+    &Registers::NexcobotESC211::FSOERxChannels::kRegisterList,
+    &Registers::NexcobotESC211::FSOETx::kRegisterList,
 };
 
 } // namespace NexcobotESC211Registers
@@ -95,6 +107,56 @@ struct NexcobotESC211 {
     static constexpr uint16_t kSafetyInputAIndex  = 0x4200;
     static constexpr uint16_t kSafetyInputBIndex  = 0x4201;
     static constexpr uint16_t kSafetyOutputIndex    = 0x4202;
+
+    // Modular device profile (0xF000-0xF010)
+    static constexpr uint16_t kModularDeviceProfileIndex = 0xF000;
+    static constexpr uint16_t kModuleProfileListIndex    = 0xF010;
+
+    // User / system (0xF100-0xF112)
+    static constexpr uint16_t kUserControlIndex           = 0xF100;
+    static constexpr uint16_t kSystemCurrentStateIndex    = 0xF101;
+    static constexpr uint16_t kSystemErrorCodeIndex      = 0xF102;
+    static constexpr uint16_t kSystemErrorMessageIndex    = 0xF103;
+    static constexpr uint16_t kLastErrorCodeIndex        = 0xF104;
+    static constexpr uint16_t kUserPasswordInputIndex    = 0xF105;
+    static constexpr uint16_t kUserPasswordOutputIndex   = 0xF106;
+    static constexpr uint16_t kESCDebugMsgIndex          = 0xF110;
+    static constexpr uint16_t kSystemCurrentStateMPUBIndex = 0xF111;
+    static constexpr uint16_t kSystemErrorCodeMPUBIndex  = 0xF112;
+
+    // Bulk data (0xF200-0xF222)
+    static constexpr uint16_t kTempFNIDataIndex     = 0xF200;
+    static constexpr uint16_t kActiveFNIDataIndex   = 0xF201;
+    static constexpr uint16_t kActiveFNIDataCRCIndex = 0xF202;
+    static constexpr uint16_t kRSPDataInputIndex    = 0xF210;
+    static constexpr uint16_t kRSPDataOutputIndex   = 0xF211;
+    static constexpr uint16_t kRSPDataCRCIndex      = 0xF212;
+    static constexpr uint16_t kSDDDataInputIndex    = 0xF220;
+    static constexpr uint16_t kSDDDataOutputIndex   = 0xF221;
+    static constexpr uint16_t kSDDDataCRCIndex      = 0xF222;
+
+    // FSOE Rx (0x6000-0x6052)
+    static constexpr uint16_t kFSOESafetyPDURxIndex = 0x6000;
+    static constexpr uint16_t kInputCounterIndex    = 0x6010;
+    static constexpr uint16_t kSAFEDIIndex          = 0x6020;
+    static constexpr uint16_t kPowerStatusIndex    = 0x6030;
+    static constexpr uint16_t kDOMonitorIndex       = 0x6040;
+    static constexpr uint16_t kDOValueActualIndex   = 0x6050;
+    static constexpr uint16_t kDIValueIndex         = 0x6051;
+    static constexpr uint16_t kDOCommandIndex       = 0x6052;
+
+    // FSOE Rx channels (0x6100-0x6171)
+    static constexpr uint16_t kFSOEFrameFSoE0Index  = 0x6100;
+    static constexpr uint16_t kFSOESafeDataFSoE0Index = 0x6101;
+
+    // FSOE Tx (0x7000-0x7020)
+    static constexpr uint16_t kFSOESafetyPDUTxIndex = 0x7000;
+    static constexpr uint16_t kOutputCounterIndex   = 0x7010;
+    static constexpr uint16_t kSAFE_DOIndex         = 0x7020;
+
+    // FSOE Tx channels (0x7100-0x7171)
+    static constexpr uint16_t kFSOEFrameTxFSoE0Index  = 0x7100;
+    static constexpr uint16_t kFSOESafeDataTxFSoE0Index = 0x7101;
 
     // Access to all register lists
     static inline const auto& kAllRegisterLists = NexcobotESC211Registers::kAllRegisterLists;
