@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
-#include "tether/ethercat/SDOManager.hpp"  // for SDOManager type and timeout constant
+#include "tether/ethercat/CoEManager.hpp"  // for CoEManager
 
 namespace EtherCAT {
 namespace Utils {
@@ -44,11 +44,10 @@ struct PDOMappingEntry {
 /// @param out_entries Vector to fill with mapping entries
 /// @param timeout_ms Timeout passed to individual SDO reads
 /// @return `true` if the entry count could be read; `false` otherwise
-bool readPDOMapping(EtherCAT::SDO::SDOManager& sdo,
-                    uint16_t slave,
+bool readPDOMapping(CoE::CoEManager& coe,
                     uint16_t pdo_index,
                     std::vector<PDOMappingEntry>& out_entries,
-                    uint32_t timeout_ms = EtherCAT::SDO::kDefaultSDOTimeoutMs);
+                    uint32_t timeout_ms = SDO::kDefaultSDOTimeoutMs);
 
 /// Format a list of mapping entries into a human-readable string suitable for
 /// logging.  The output mirrors the style previously used in examples where
@@ -72,12 +71,11 @@ std::string pdoMappingToString(bool is_tx,
 /// @param pdo_index  PDO mapping index (e.g. 0x1705 or 0x1B04).
 /// @param tag        Logging tag; defaults to "PDO".
 /// @param timeout_ms SDO timeout in milliseconds.
-void printPDOMapping(EtherCAT::SDO::SDOManager& sdo,
-                     uint16_t slave,
+void printPDOMapping(CoE::CoEManager& coe,
                      bool is_tx,
                      uint16_t pdo_index,
                      const char* tag = "PDO",
-                     uint32_t timeout_ms = EtherCAT::SDO::kDefaultSDOTimeoutMs);
+                     uint32_t timeout_ms = SDO::kDefaultSDOTimeoutMs);
 
 /// Format a PDO buffer into a human-readable multi-line string.
 ///

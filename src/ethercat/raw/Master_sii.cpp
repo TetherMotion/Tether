@@ -8,6 +8,7 @@
 #include "tether/ethercat/DC.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 #include "tether/ethercat/FoE.hpp"
 #include "tether/ethercat/VoE.hpp"
 #include "tether/ethercat/EoE.hpp"
@@ -126,7 +127,7 @@ bool Master::autoConfigureMailbox(SlaveAddress slave_address, Tether::Platform::
         TETHER_LOGD(local_tag, "[3/3] Configuring SDO subsystem mailbox...");
     }
     
-    sdo_manager_->configureSlaveMailbox(slave_index, wr_addr, wr_len, rd_addr, rd_len);
+    sdo_managers_[slave_index]->configureMailbox(wr_addr, wr_len, rd_addr, rd_len);
     
     if (log_level >= Tether::Platform::LogLevel::Debug) {
         TETHER_LOGD(local_tag, "      ✓ SDO subsystem mailbox configured");
@@ -165,8 +166,8 @@ bool Master::autoConfigureMailbox(SlaveAddress slave_address, Tether::Platform::
         TETHER_LOGD(local_tag, "[Verification] Checking SDO subsystem mailbox configuration...");
         
         uint16_t verify_wr = 0, verify_wr_len = 0, verify_rd = 0, verify_rd_len = 0;
-        bool verify_ok = sdo_manager_->getSlaveMailbox(slave_index, 
-                                                        &verify_wr, &verify_wr_len, 
+        bool verify_ok = sdo_managers_[slave_index]->getMailbox(
+                                                        &verify_wr, &verify_wr_len,
                                                         &verify_rd, &verify_rd_len);
         
         if (verify_ok) {

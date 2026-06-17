@@ -392,7 +392,7 @@ add_executable(tether_ethercat_common_tests
     ../src/ethercat/raw/FoE.cpp
     ../src/ethercat/FaultDetection.cpp
     ../src/ethercat/WriteVerify.cpp
-    ../src/ethercat/raw/sdo_async.cpp
+    ../src/ethercat/CoEManager.cpp
     ../src/ethercat/raw/PDOManager.cpp
     ../src/ethercat/raw/LogicalAddressManager.cpp
     ../src/ethercat/DCClass.cpp

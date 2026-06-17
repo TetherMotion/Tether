@@ -641,7 +641,9 @@ bool coe_sdo_upload(
     uint8_t *out,
     size_t out_cap,
     size_t *out_len,
-    bool diag_enabled = false);
+    bool diag_enabled = false,
+    unsigned int poll_interval_ms = 5,
+    unsigned int transaction_timeout_ms = 1000);
 
 /**
  * @brief CANopen SDO download (write) operation
@@ -672,7 +674,9 @@ bool coe_sdo_download(
     uint8_t sub,
     const uint8_t *data,
     size_t data_len,
-    bool diag_enabled = false);
+    bool diag_enabled = false,
+    unsigned int poll_interval_ms = 5,
+    unsigned int transaction_timeout_ms = 1000);
 
 } // namespace Raw
 } // namespace EtherCAT

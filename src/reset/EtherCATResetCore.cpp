@@ -7,7 +7,7 @@
 
 #include "Reset.hpp"
 #include "tether/platform/EspCompat.hpp"
-#include "SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 #include "profiles/cia301/CiA301Defs.hpp"
 #include "profiles/cia301/CiA402Defs.hpp"
 
@@ -288,11 +288,11 @@ std::string SlaveResetController::getErrorDescription() {
 // ============================================================================
 
 bool SlaveResetController::sdoWrite(uint16_t index, uint8_t sub, const void* data, size_t len) {
-    return m_sdo.writeSync(slave_addr_, index, sub, data, len, EtherCAT::SDO::kDefaultSDOTimeoutMs);
+    return m_coe.writeSync(index, sub, data, len, {.timeout_ms = EtherCAT::SDO::kDefaultSDOTimeoutMs});
 }
 
 bool SlaveResetController::sdoRead(uint16_t index, uint8_t sub, void* data, size_t len, size_t* out_len) {
-    return m_sdo.readSync(slave_addr_, index, sub, data, len, EtherCAT::SDO::kDefaultSDOTimeoutMs, out_len);
+    return m_coe.readSync(index, sub, data, len, EtherCAT::SDO::kDefaultSDOTimeoutMs, out_len);
 }
 
 } // namespace EtherCAT

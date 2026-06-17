@@ -123,10 +123,12 @@ namespace SII {
     class SIIReader;
 }
 
-// Forward declarations for SDO namespace
+// Forward declarations for CoE/SDO namespace
 namespace SDO {
     class ISDOTransport;
-    class SDOManager;
+}
+namespace CoE {
+    class CoEManager;
 }
 
 class IMotionControlLoop;
@@ -498,14 +500,18 @@ public:
                       uint16_t mbx_rd_addr, uint16_t mbx_rd_len,
                       uint16_t index, uint8_t sub,
                       uint8_t* out, size_t out_cap, size_t* out_len,
-                      bool diag_enabled = false);
+                      bool diag_enabled = false,
+                      unsigned int poll_interval_ms = 5,
+                      unsigned int transaction_timeout_ms = 1000);
 
     bool coeSdoDownload(uint16_t adp, uint8_t* inout_mbx_cnt,
                         uint16_t mbx_wr_addr, uint16_t mbx_wr_len,
                         uint16_t mbx_rd_addr, uint16_t mbx_rd_len,
                         uint16_t index, uint8_t sub,
                         const uint8_t* data, size_t data_len,
-                        bool diag_enabled = false);
+                        bool diag_enabled = false,
+                        unsigned int poll_interval_ms = 5,
+                        unsigned int transaction_timeout_ms = 1000);
 
     // ---- Utilities (stateless) ---------------------------------------------
 
@@ -529,7 +535,7 @@ public:
 
     PDOManager&     pdo();
     LogicalAddressManager& logicalAddressManager();
-    ::EtherCAT::SDO::SDOManager& sdoManager();
+    ::EtherCAT::CoE::CoEManager& sdoManager(uint16_t slave_index);
     DCManager&      dc();
     FoEManager&     foe();
     VoEManager&     voe();
@@ -684,7 +690,7 @@ private:
     // Instance-based SDO manager (new approach)
     class MasterSDOTransport;
     std::unique_ptr<::EtherCAT::SDO::ISDOTransport> sdo_transport_;
-    std::unique_ptr<::EtherCAT::SDO::SDOManager>    sdo_manager_;
+    std::vector<std::unique_ptr<::EtherCAT::CoE::CoEManager>> sdo_managers_;
 
     // Sub-managers (legacy wrappers)
     std::unique_ptr<IPDOTransport> pdo_transport_;

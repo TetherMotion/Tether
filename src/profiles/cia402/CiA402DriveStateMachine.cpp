@@ -452,53 +452,51 @@ bool CiA402Drive::transitionToOp(bool apply_pdo_mapping) {
     
     // DIAGNOSTIC: Read PDO assignment and mode SDOs before OP request
     if (m_master) {
-        m_master->sdoManager().setDiagEnabled(true);
-        uint8_t sm2_count = 0xFF;
-        if (m_master->sdoManager().readU8(m_slave_index, 0x1C12, 0, sm2_count, m_sdo_timeout_ms))
-            TETHER_LOGI(TAG, "Slave %u: 0x1C12:0 (SM2 PDO count) = %u", m_slave_index, sm2_count);
+        m_master->sdoManager(m_slave_index).setDiagEnabled(true);
+        auto sm2_count_res = m_master->sdoManager(m_slave_index).readU8( 0x1C12, 0, {.timeout_ms = m_sdo_timeout_ms});
+        if (sm2_count_res.has_value())
+            TETHER_LOGI(TAG, "Slave %u: 0x1C12:0 (SM2 PDO count) = %u", m_slave_index, sm2_count_res.value());
         else
             TETHER_LOGW(TAG, "Slave %u: Failed to read 0x1C12:0", m_slave_index);
         
-        uint16_t sm2_pdo = 0;
-        if (m_master->sdoManager().readU16(m_slave_index, 0x1C12, 1, sm2_pdo, m_sdo_timeout_ms))
-            TETHER_LOGI(TAG, "Slave %u: 0x1C12:1 (SM2 RxPDO) = 0x%04X", m_slave_index, sm2_pdo);
+        auto sm2_pdo_res = m_master->sdoManager(m_slave_index).readU16( 0x1C12, 1, {.timeout_ms = m_sdo_timeout_ms});
+        if (sm2_pdo_res.has_value())
+            TETHER_LOGI(TAG, "Slave %u: 0x1C12:1 (SM2 RxPDO) = 0x%04X", m_slave_index, sm2_pdo_res.value());
         else
             TETHER_LOGW(TAG, "Slave %u: Failed to read 0x1C12:1", m_slave_index);
         
-        uint8_t sm3_count = 0xFF;
-        if (m_master->sdoManager().readU8(m_slave_index, 0x1C13, 0, sm3_count, m_sdo_timeout_ms))
-            TETHER_LOGI(TAG, "Slave %u: 0x1C13:0 (SM3 PDO count) = %u", m_slave_index, sm3_count);
+        auto sm3_count_res = m_master->sdoManager(m_slave_index).readU8( 0x1C13, 0, {.timeout_ms = m_sdo_timeout_ms});
+        if (sm3_count_res.has_value())
+            TETHER_LOGI(TAG, "Slave %u: 0x1C13:0 (SM3 PDO count) = %u", m_slave_index, sm3_count_res.value());
         else
             TETHER_LOGW(TAG, "Slave %u: Failed to read 0x1C13:0", m_slave_index);
         
-        uint16_t sm3_pdo = 0;
-        if (m_master->sdoManager().readU16(m_slave_index, 0x1C13, 1, sm3_pdo, m_sdo_timeout_ms))
-            TETHER_LOGI(TAG, "Slave %u: 0x1C13:1 (SM3 TxPDO) = 0x%04X", m_slave_index, sm3_pdo);
+        auto sm3_pdo_res = m_master->sdoManager(m_slave_index).readU16( 0x1C13, 1, {.timeout_ms = m_sdo_timeout_ms});
+        if (sm3_pdo_res.has_value())
+            TETHER_LOGI(TAG, "Slave %u: 0x1C13:1 (SM3 TxPDO) = 0x%04X", m_slave_index, sm3_pdo_res.value());
         else
             TETHER_LOGW(TAG, "Slave %u: Failed to read 0x1C13:1", m_slave_index);
         
-        uint8_t mode_op = 0;
-        if (m_master->sdoManager().readU8(m_slave_index, 0x6060, 0, mode_op, m_sdo_timeout_ms))
-            TETHER_LOGI(TAG, "Slave %u: 0x6060 (Modes of Operation) = %d", m_slave_index, (int8_t)mode_op);
+        auto mode_op_res = m_master->sdoManager(m_slave_index).readU8( 0x6060, 0, {.timeout_ms = m_sdo_timeout_ms});
+        if (mode_op_res.has_value())
+            TETHER_LOGI(TAG, "Slave %u: 0x6060 (Modes of Operation) = %d", m_slave_index, (int8_t)mode_op_res.value());
         
-        uint8_t mode_disp = 0;
-        if (m_master->sdoManager().readU8(m_slave_index, 0x6061, 0, mode_disp, m_sdo_timeout_ms))
-            TETHER_LOGI(TAG, "Slave %u: 0x6061 (Mode Display) = %d", m_slave_index, (int8_t)mode_disp);
+        auto mode_disp_res = m_master->sdoManager(m_slave_index).readU8( 0x6061, 0, {.timeout_ms = m_sdo_timeout_ms});
+        if (mode_disp_res.has_value())
+            TETHER_LOGI(TAG, "Slave %u: 0x6061 (Mode Display) = %d", m_slave_index, (int8_t)mode_disp_res.value());
         
-        uint32_t supported_modes = 0;
-        if (m_master->sdoManager().readU32(m_slave_index, 0x6502, 0, supported_modes, m_sdo_timeout_ms))
-            TETHER_LOGI(TAG, "Slave %u: 0x6502 (Supported Modes) = 0x%08X", m_slave_index, supported_modes);
+        auto supported_modes_res = m_master->sdoManager(m_slave_index).readU32( 0x6502, 0, {.timeout_ms = m_sdo_timeout_ms});
+        if (supported_modes_res.has_value())
+            TETHER_LOGI(TAG, "Slave %u: 0x6502 (Supported Modes) = 0x%08X", m_slave_index, supported_modes_res.value());
         
-        // Read RxPDO 0x1600 entry count
-        uint8_t rxpdo_count = 0;
-        if (m_master->sdoManager().readU8(m_slave_index, 0x1600, 0, rxpdo_count, m_sdo_timeout_ms))
-            TETHER_LOGI(TAG, "Slave %u: 0x1600:0 (RxPDO entry count) = %u", m_slave_index, rxpdo_count);
+        auto rxpdo_count_res = m_master->sdoManager(m_slave_index).readU8( 0x1600, 0, {.timeout_ms = m_sdo_timeout_ms});
+        if (rxpdo_count_res.has_value())
+            TETHER_LOGI(TAG, "Slave %u: 0x1600:0 (RxPDO entry count) = %u", m_slave_index, rxpdo_count_res.value());
         
-        // Read TxPDO 0x1A00 entry count
-        uint8_t txpdo_count = 0;
-        if (m_master->sdoManager().readU8(m_slave_index, 0x1A00, 0, txpdo_count, m_sdo_timeout_ms))
-            TETHER_LOGI(TAG, "Slave %u: 0x1A00:0 (TxPDO entry count) = %u", m_slave_index, txpdo_count);
-        m_master->sdoManager().setDiagEnabled(false);
+        auto txpdo_count_res = m_master->sdoManager(m_slave_index).readU8( 0x1A00, 0, {.timeout_ms = m_sdo_timeout_ms});
+        if (txpdo_count_res.has_value())
+            TETHER_LOGI(TAG, "Slave %u: 0x1A00:0 (TxPDO entry count) = %u", m_slave_index, txpdo_count_res.value());
+        m_master->sdoManager(m_slave_index).setDiagEnabled(false);
     }
     
     // Clear any pending error by writing Error Acknowledge + OP (0x18)
@@ -670,13 +668,21 @@ CiA402Drive::DynaDriveState CiA402Drive::decodeDynaDriveState(uint32_t statuswor
 }
 
 bool CiA402Drive::readDynaDriveStatusword(uint32_t& statusword) {
-    return m_master->sdoManager().readU32(m_slave_index, static_cast<uint16_t>(CiA402::Register::Statusword), 0, statusword, m_sdo_timeout_ms);
+    auto result = m_master->sdoManager(m_slave_index).readU32(
+        static_cast<uint16_t>(CiA402::Register::Statusword), 0,
+        {.timeout_ms = m_sdo_timeout_ms});
+    if (!result.has_value()) return false;
+    statusword = result.value();
+    return true;
 }
 
 bool CiA402Drive::sendDynaDriveControlword(EtherCAT::Drives::Registers::DynaDrive::Controlword::Options controlword) {
     uint16_t cw = static_cast<uint16_t>(controlword);
     TETHER_LOGI(TAG, "Slave %u: DynaDrive sending controlword ID 0x%02X", m_slave_index, cw);
-    return m_master->sdoManager().writeU16(m_slave_index, static_cast<uint16_t>(CiA402::Register::Controlword), 0, cw, m_sdo_timeout_ms);
+    auto result = m_master->sdoManager(m_slave_index).writeU16(
+        static_cast<uint16_t>(CiA402::Register::Controlword), 0, cw,
+        {.timeout_ms = m_sdo_timeout_ms});
+    return result.has_value();
 }
 
 bool CiA402Drive::enableDynaDrive(uint32_t timeout_ms) {
@@ -795,7 +801,10 @@ bool CiA402Drive::waitForDriveState(DriveState target, uint32_t timeout_ms) {
 }
 
 bool CiA402Drive::writeControlword(uint16_t controlword) {
-    return m_master->sdoManager().writeU16(m_slave_index, static_cast<uint16_t>(CiA402::Register::Controlword), 0, controlword, m_sdo_timeout_ms);
+    auto result = m_master->sdoManager(m_slave_index).writeU16(
+        static_cast<uint16_t>(CiA402::Register::Controlword), 0, controlword,
+        {.timeout_ms = m_sdo_timeout_ms});
+    return result.has_value();
 }
 
 // Public wrapper to allow immediate SDO write from other modules
@@ -804,7 +813,12 @@ bool CiA402Drive::sendControlwordSDO(uint16_t controlword) {
 }
 
 bool CiA402Drive::readStatusword(uint16_t& statusword) {
-    return m_master->sdoManager().readU16(m_slave_index, static_cast<uint16_t>(CiA402::Register::Statusword), 0, statusword, m_sdo_timeout_ms);
+    auto result = m_master->sdoManager(m_slave_index).readU16(
+        static_cast<uint16_t>(CiA402::Register::Statusword), 0,
+        {.timeout_ms = m_sdo_timeout_ms});
+    if (!result.has_value()) return false;
+    statusword = result.value();
+    return true;
 }
 
 // ============================================================================
@@ -813,14 +827,21 @@ bool CiA402Drive::readStatusword(uint16_t& statusword) {
 
 bool CiA402Drive::setOperatingMode(int8_t mode) {
     uint8_t umode = static_cast<uint8_t>(mode);
-    if (m_master->sdoManager().writeU8(m_slave_index, static_cast<uint16_t>(CiA402::Register::ModesOfOperation), 0, umode, m_sdo_timeout_ms)) {
+    auto write_res = m_master->sdoManager(m_slave_index).writeU8(
+        static_cast<uint16_t>(CiA402::Register::ModesOfOperation), 0, umode,
+        {.timeout_ms = m_sdo_timeout_ms});
+    if (write_res.has_value()) {
         TETHER_LOGI(TAG, "Slave %u: Operating mode set to %d via SDO", m_slave_index, mode);
-        
+
         // Read back mode display to verify
         uint8_t mode_display = 0;
         Tether::Platform::Clock::instance().delayMilliseconds(50); // Give drive time to process
-        if (m_master->sdoManager().readU8(m_slave_index, static_cast<uint16_t>(CiA402::Register::ModesOfOperationDisplay), 0, mode_display, m_sdo_timeout_ms)) {
-            TETHER_LOGI(TAG, "Slave %u: Mode Display readback via SDO = %d (expected %d)", 
+        auto read_res = m_master->sdoManager(m_slave_index).readU8(
+            static_cast<uint16_t>(CiA402::Register::ModesOfOperationDisplay), 0,
+            {.timeout_ms = m_sdo_timeout_ms});
+        if (read_res.has_value()) {
+            mode_display = read_res.value();
+            TETHER_LOGI(TAG, "Slave %u: Mode Display readback via SDO = %d (expected %d)",
                      m_slave_index, (int8_t)mode_display, mode);
         } else {
             TETHER_LOGW(TAG, "Slave %u: Failed to read Mode Display via SDO", m_slave_index);
@@ -831,21 +852,28 @@ bool CiA402Drive::setOperatingMode(int8_t mode) {
     // Diagnostic: SDO write failed. Try to read error registers (0x1001, 0x1003) to get more info
     TETHER_LOGE(TAG, "Slave %u: Failed to set operating mode via SDO (index 0x6060)", m_slave_index);
 
-    uint8_t error_reg = 0;
-    if (m_master->sdoManager().readU8(m_slave_index, static_cast<uint16_t>(0x1001), 0, error_reg, m_sdo_timeout_ms)) {
-        TETHER_LOGW(TAG, "Slave %u: Error register (0x1001) = 0x%02X", m_slave_index, error_reg);
+    auto err_reg_res = m_master->sdoManager(m_slave_index).readU8(
+        static_cast<uint16_t>(0x1001), 0,
+        {.timeout_ms = m_sdo_timeout_ms});
+    if (err_reg_res.has_value()) {
+        TETHER_LOGW(TAG, "Slave %u: Error register (0x1001) = 0x%02X", m_slave_index, err_reg_res.value());
     } else {
         TETHER_LOGW(TAG, "Slave %u: Unable to read Error Register (0x1001)", m_slave_index);
     }
 
     // Manufacturer error log (0x1003) - subindex 0 = number of errors
-    uint8_t mfr_err_count = 0;
-    if (m_master->sdoManager().readU8(m_slave_index, static_cast<uint16_t>(0x1003), 0, mfr_err_count, m_sdo_timeout_ms)) {
+    auto mfr_count_res = m_master->sdoManager(m_slave_index).readU8(
+        static_cast<uint16_t>(0x1003), 0,
+        {.timeout_ms = m_sdo_timeout_ms});
+    if (mfr_count_res.has_value()) {
+        uint8_t mfr_err_count = mfr_count_res.value();
         TETHER_LOGW(TAG, "Slave %u: Manufacturer Error count (0x1003) = %u", m_slave_index, (unsigned)mfr_err_count);
         for (uint8_t i = 1; i <= mfr_err_count && i < 16; ++i) {
-            uint32_t err = 0;
-            if (m_master->sdoManager().readU32(m_slave_index, static_cast<uint16_t>(0x1003), i, err, m_sdo_timeout_ms)) {
-                TETHER_LOGW(TAG, "Slave %u: Manufacturer Error[%u] = 0x%08" PRIX32, m_slave_index, (unsigned)i, err);
+            auto err_res = m_master->sdoManager(m_slave_index).readU32(
+                static_cast<uint16_t>(0x1003), i,
+                {.timeout_ms = m_sdo_timeout_ms});
+            if (err_res.has_value()) {
+                TETHER_LOGW(TAG, "Slave %u: Manufacturer Error[%u] = 0x%08" PRIX32, m_slave_index, (unsigned)i, err_res.value());
             }
         }
     } else {
@@ -866,13 +894,13 @@ bool CiA402Drive::setOperatingMode(int8_t mode) {
         dreq.data[0] = umode;
 
 #ifdef TETHER_DIAG_SDO_IO
-        m_master->sdoManager().setDiagEnabled(true);
+        m_master->sdoManager(m_slave_index).setDiagEnabled(true);
 #endif
-        uint32_t req_id = m_master->sdoManager().queueRequest(dreq);
+        uint32_t req_id = m_master->sdoManager(m_slave_index).queueRequest(dreq);
         if (req_id == 0) {
             TETHER_LOGW(TAG, "Slave %u: Diagnostic SDO queue failed", m_slave_index);
 #ifdef TETHER_DIAG_SDO_IO
-            m_master->sdoManager().setDiagEnabled(false);
+            m_master->sdoManager(m_slave_index).setDiagEnabled(false);
 #endif
         } else {
             SDO::SDOResponse resp = {};
@@ -882,7 +910,7 @@ bool CiA402Drive::setOperatingMode(int8_t mode) {
             while (waited < max_wait) {
                 Tether::Platform::Clock::instance().delayMilliseconds(poll_ms);
                 waited += poll_ms;
-                if (m_master->sdoManager().getResponse(req_id, resp)) {
+                if (m_master->sdoManager(m_slave_index).getResponse(req_id, resp)) {
                     TETHER_LOGI(TAG, "Slave %u: Diagnostic SDO response status=%u abort=0x%08" PRIX32 " size=%u",
                              m_slave_index, (unsigned)resp.status, (uint32_t)resp.abort_code, (unsigned)resp.data_size);
                     if (resp.data_size > 0) {
@@ -902,7 +930,7 @@ bool CiA402Drive::setOperatingMode(int8_t mode) {
                         TETHER_LOGI(TAG, "Slave %u: Diagnostic SDO data: %s", m_slave_index, hex);
                     }
 #ifdef TETHER_DIAG_SDO_IO
-                    m_master->sdoManager().setDiagEnabled(false);
+                    m_master->sdoManager(m_slave_index).setDiagEnabled(false);
 #endif
                     break;
                 }
@@ -910,7 +938,7 @@ bool CiA402Drive::setOperatingMode(int8_t mode) {
             if (waited >= max_wait) {
                 TETHER_LOGW(TAG, "Slave %u: Diagnostic SDO response timed out", m_slave_index);
 #ifdef TETHER_DIAG_SDO_IO
-                m_master->sdoManager().setDiagEnabled(false);
+                m_master->sdoManager(m_slave_index).setDiagEnabled(false);
 #endif
             }
         }
@@ -920,9 +948,11 @@ bool CiA402Drive::setOperatingMode(int8_t mode) {
 }
 
 int8_t CiA402Drive::getOperatingMode() {
-    uint8_t mode;
-    if (m_master->sdoManager().readU8(m_slave_index, static_cast<uint16_t>(CiA402::Register::ModesOfOperationDisplay), 0, mode, m_sdo_timeout_ms)) {
-        return static_cast<int8_t>(mode);
+    auto result = m_master->sdoManager(m_slave_index).readU8(
+        static_cast<uint16_t>(CiA402::Register::ModesOfOperationDisplay), 0,
+        {.timeout_ms = m_sdo_timeout_ms});
+    if (result.has_value()) {
+        return static_cast<int8_t>(result.value());
     }
     return 0;  // Unknown
 }
@@ -933,7 +963,10 @@ int8_t CiA402Drive::getOperatingMode() {
 
 bool CiA402Drive::setHomingMethod(int8_t method) {
     uint8_t umethod = static_cast<uint8_t>(method);
-    return m_master->sdoManager().writeU8(m_slave_index, static_cast<uint16_t>(CiA402::Register::HomingMethod), 0, umethod, m_sdo_timeout_ms);
+    auto result = m_master->sdoManager(m_slave_index).writeU8(
+        static_cast<uint16_t>(CiA402::Register::HomingMethod), 0, umethod,
+        {.timeout_ms = m_sdo_timeout_ms});
+    return result.has_value();
 }
 
 bool CiA402Drive::homeToCurrentPosition(int32_t home_offset) {
@@ -942,7 +975,9 @@ bool CiA402Drive::homeToCurrentPosition(int32_t home_offset) {
     
     // Set home offset
     if (home_offset != 0) {
-        m_master->sdoManager().writeI32(m_slave_index, static_cast<uint16_t>(CiA402::Register::HomeOffset), 0, home_offset, m_sdo_timeout_ms);
+        m_master->sdoManager(m_slave_index).writeI32(
+            static_cast<uint16_t>(CiA402::Register::HomeOffset), 0, home_offset,
+            {.timeout_ms = m_sdo_timeout_ms});
     }
     
     // Set homing method 35 (current position = home)
