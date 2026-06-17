@@ -7,12 +7,13 @@
 
 #include "tether/profiles/cia406/CiA406Encoder.hpp"
 #include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <chrono>
 
 using namespace CiA406;
-using namespace EtherCAT::SDO;
+using namespace EtherCAT::CoE;
 using ::testing::_;
 using ::testing::Invoke;
 using ::testing::NiceMock;
@@ -29,20 +30,23 @@ uint64_t realMicros() {
         std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-class MockSDOTransportRaw : public ISDOTransport {
+class MockSDOTransportRaw : public EtherCAT::SDO::ISDOTransport {
 public:
     MOCK_METHOD(bool, sdoUpload,
                 (uint16_t, uint8_t*, uint16_t, uint16_t, uint16_t, uint16_t,
-                 uint16_t, uint8_t, uint8_t*, size_t, size_t*), (override));
+                 uint16_t, uint8_t, uint8_t*, size_t, size_t*, bool,
+                 unsigned int, unsigned int), (override));
     MOCK_METHOD(bool, sdoDownload,
                 (uint16_t, uint8_t*, uint16_t, uint16_t, uint16_t, uint16_t,
-                 uint16_t, uint8_t, const uint8_t*, size_t), (override));
+                 uint16_t, uint8_t, const uint8_t*, size_t, bool,
+                 unsigned int, unsigned int), (override));
     MOCK_METHOD(uint64_t, getMicroseconds, (), (override));
 };
 
 auto UploadVal(const void* data, size_t len) {
     return [data, len](uint16_t, uint8_t*, uint16_t, uint16_t, uint16_t, uint16_t,
-                       uint16_t, uint8_t, uint8_t* out, size_t, size_t* ol) -> bool {
+                       uint16_t, uint8_t, uint8_t* out, size_t, size_t* ol,
+                       bool, unsigned int, unsigned int) -> bool {
         memcpy(out, data, len);
         if (ol) *ol = len;
         return true;
@@ -285,31 +289,31 @@ protected:
     void SetUp() override {
         ON_CALL(transport_, getMicroseconds()).WillByDefault(Invoke(realMicros));
         // Default: writes succeed, reads return zero
-        ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, _, _, _, _))
+        ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, _, _, _, _, _, _, _))
             .WillByDefault(Return(true));
         uint32_t zero = 0;
-        ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _))
+        ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
             .WillByDefault(UploadVal(&zero, sizeof(zero)));
 
-        sdo_ = std::make_unique<SDOManager>(transport_);
-        sdo_->configureSlaveMailbox(0, 0x1000, 128, 0x1400, 128);
-        sdo_->init();
+        coe_ = std::make_unique<CoEManager>(0, transport_);
+        coe_->configureMailbox(0x1000, 128, 0x1400, 128);
+        coe_->init();
     }
     void TearDown() override {
-        if (sdo_) sdo_->deinit();
+        if (coe_) coe_->deinit();
     }
 
     NiceMock<MockSDOTransportRaw> transport_;
-    std::unique_ptr<SDOManager> sdo_;
+    std::unique_ptr<CoEManager> coe_;
 };
 
 TEST_F(Enc406MockCovTest, Initialize_Profile406) {
     // Make device type read return profile 406 (0x196 in low 16 bits)
     uint32_t deviceType = 0x00020196; // Profile 406
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x1000, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x1000, 0, _, _, _, _, _, _))
         .WillByDefault(UploadVal(&deviceType, sizeof(deviceType)));
 
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     bool ok = enc.initialize();
     // Should succeed now that device type is 406
     (void)ok;
@@ -319,10 +323,10 @@ TEST_F(Enc406MockCovTest, Initialize_Profile406) {
 TEST_F(Enc406MockCovTest, Initialize_WrongProfile) {
     // Device type for a different profile (e.g., 402)
     uint32_t deviceType = 0x00020192; // Profile 402
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x1000, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x1000, 0, _, _, _, _, _, _))
         .WillByDefault(UploadVal(&deviceType, sizeof(deviceType)));
 
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     bool ok = enc.initialize();
     // May warn but still initialize
     (void)ok;
@@ -330,22 +334,16 @@ TEST_F(Enc406MockCovTest, Initialize_WrongProfile) {
 
 TEST_F(Enc406MockCovTest, CreateEncoder_Factory) {
     uint32_t deviceType = 0x00020196;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x1000, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x1000, 0, _, _, _, _, _, _))
         .WillByDefault(UploadVal(&deviceType, sizeof(deviceType)));
 
-    auto enc = createEncoder(*sdo_, 0);
+    auto enc = createEncoder(*coe_);
     // May be null if init fails due to other SDO reads
     (void)enc;
 }
 
-TEST_F(Enc406MockCovTest, ScanForEncoders) {
-    // Default transport returns 0 for device type → no profile 406
-    auto found = scanForEncoders(*sdo_);
-    EXPECT_TRUE(found.empty());
-}
-
 TEST_F(Enc406MockCovTest, ApplyPDOMapping_AllPresets) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     // Exercise all preset mappings
     enc.applyPDOMapping(PDOMappingPreset::Basic);
     enc.applyPDOMapping(PDOMappingPreset::WithVelocity);
@@ -357,7 +355,7 @@ TEST_F(Enc406MockCovTest, ApplyPDOMapping_AllPresets) {
 }
 
 TEST_F(Enc406MockCovTest, ApplyCustomPDOMapping) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     PDOMappingEntry entries[2];
     entries[0] = {0x6004, 0, 32};
     entries[1] = {0x6010, 0, 16};
@@ -366,7 +364,7 @@ TEST_F(Enc406MockCovTest, ApplyCustomPDOMapping) {
 }
 
 TEST_F(Enc406MockCovTest, SetScaling) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     enc.setScaling(360.0, 4096.0, 0.0);
     auto sc = enc.getScaling();
     EXPECT_TRUE(sc.enabled);
@@ -375,14 +373,14 @@ TEST_F(Enc406MockCovTest, SetScaling) {
 }
 
 TEST_F(Enc406MockCovTest, SetScalingFromRange) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     enc.setScalingFromRange(8192, 720.0);
     auto sc = enc.getScaling();
     EXPECT_TRUE(sc.enabled);
 }
 
 TEST_F(Enc406MockCovTest, DisableScaling) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     enc.setScaling(360.0, 4096.0);
     enc.disableScaling();
     auto sc = enc.getScaling();
@@ -390,7 +388,7 @@ TEST_F(Enc406MockCovTest, DisableScaling) {
 }
 
 TEST_F(Enc406MockCovTest, SetOffset) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     enc.setOffset(100.0);
     auto sc = enc.getScaling();
     EXPECT_DOUBLE_EQ(sc.offset, 100.0);
@@ -399,26 +397,26 @@ TEST_F(Enc406MockCovTest, SetOffset) {
 TEST_F(Enc406MockCovTest, PresetPosition) {
     // Readback returns the preset value
     int32_t presetVal = 12345;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x6004, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x6004, 0, _, _, _, _, _, _))
         .WillByDefault(UploadVal(&presetVal, sizeof(presetVal)));
 
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     bool ok = enc.presetPosition(12345);
     (void)ok;
 }
 
 TEST_F(Enc406MockCovTest, SetZero) {
     int32_t zero = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x6004, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x6004, 0, _, _, _, _, _, _))
         .WillByDefault(UploadVal(&zero, sizeof(zero)));
 
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     bool ok = enc.setZero();
     (void)ok;
 }
 
 TEST_F(Enc406MockCovTest, StartReference) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     ReferenceConfig cfg{};
     cfg.mode = ReferenceMode::OnZeroPulse;
     cfg.reference_position = 0;
@@ -429,7 +427,7 @@ TEST_F(Enc406MockCovTest, StartReference) {
 }
 
 TEST_F(Enc406MockCovTest, StartReference_CurrentPosition) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     ReferenceConfig cfg{};
     cfg.mode = ReferenceMode::CurrentPosition;
     bool ok = enc.startReference(cfg);
@@ -437,66 +435,66 @@ TEST_F(Enc406MockCovTest, StartReference_CurrentPosition) {
 }
 
 TEST_F(Enc406MockCovTest, AbortReference) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     enc.abortReference(); // void return
 }
 
 TEST_F(Enc406MockCovTest, SetWorkingArea1) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     bool ok = enc.setWorkingArea(0, 1000, 1);
     (void)ok;
 }
 
 TEST_F(Enc406MockCovTest, SetWorkingArea2) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     bool ok = enc.setWorkingArea(0, 2000, 2);
     (void)ok;
 }
 
 TEST_F(Enc406MockCovTest, SetWorkingArea_Invalid) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     EXPECT_FALSE(enc.setWorkingArea(0, 1000, 3));
 }
 
 TEST_F(Enc406MockCovTest, IsWithinWorkingArea) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     // Without update() the state is NotConfigured
     bool result = enc.isWithinWorkingArea();
     (void)result;
 }
 
 TEST_F(Enc406MockCovTest, ClearAlarms) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     bool ok = enc.clearAlarms();
     (void)ok;
 }
 
 TEST_F(Enc406MockCovTest, ReadDiagnostics) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     auto diag = enc.readDiagnostics();
     (void)diag;
 }
 
 TEST_F(Enc406MockCovTest, ConfigureSSI) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     bool ok = enc.configureSSI(1000, 25, true, true);
     (void)ok;
 }
 
 TEST_F(Enc406MockCovTest, ConfigureBiSS) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     bool ok = enc.configureBiSS(10000000, 26);
     (void)ok;
 }
 
 TEST_F(Enc406MockCovTest, ConfigureEnDat) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     bool ok = enc.configureEnDat(8000000);
     (void)ok;
 }
 
 TEST_F(Enc406MockCovTest, ReadWriteObject) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     uint32_t val = 0;
     size_t out_size = 0;
     bool ok = enc.readObject(0x6000, 0, reinterpret_cast<uint8_t*>(&val), sizeof(val), &out_size);
@@ -507,26 +505,14 @@ TEST_F(Enc406MockCovTest, ReadWriteObject) {
 }
 
 TEST_F(Enc406MockCovTest, EventCallback) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     int callCount = 0;
     enc.setEventCallback([&](EncoderEvent, uint16_t, uint32_t) { callCount++; });
     enc.clearEventCallback();
 }
 
-TEST_F(Enc406MockCovTest, SlaveInfo) {
-    Encoder enc(*sdo_, 0);
-    EXPECT_EQ(enc.getSlaveAddress(), 0u);
-    EXPECT_FALSE(enc.isUsingConfiguredAddress());
-}
-
-TEST_F(Enc406MockCovTest, SlaveInfo_ConfiguredAddr) {
-    Encoder enc(*sdo_, 0x1001, true);
-    EXPECT_EQ(enc.getSlaveAddress(), 0x1001u);
-    EXPECT_TRUE(enc.isUsingConfiguredAddress());
-}
-
 TEST_F(Enc406MockCovTest, PositionReading_BeforeInit) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     // Before init — returns default values
     EXPECT_EQ(enc.getRawPosition(), 0);
     EXPECT_EQ(enc.getMultiTurnValue(), 0);
@@ -536,7 +522,7 @@ TEST_F(Enc406MockCovTest, PositionReading_BeforeInit) {
 }
 
 TEST_F(Enc406MockCovTest, Update_BeforeInit) {
-    Encoder enc(*sdo_, 0);
+    Encoder enc(*coe_);
     // update() should early-return without initialization
     enc.update();
     EXPECT_EQ(enc.getRawPosition(), 0);

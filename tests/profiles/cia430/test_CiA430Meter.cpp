@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include "tether/profiles/cia430/CiA430Meter.hpp"
 #include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 
 using namespace CiA430;
 
@@ -13,10 +14,12 @@ class NullSDOTransport : public EtherCAT::SDO::ISDOTransport {
 public:
     bool sdoUpload(uint16_t, uint8_t*, uint16_t, uint16_t,
                    uint16_t, uint16_t, uint16_t, uint8_t,
-                   uint8_t*, size_t, size_t*) override { return false; }
+                   uint8_t*, size_t, size_t*, bool, unsigned int,
+                   unsigned int) override { return false; }
     bool sdoDownload(uint16_t, uint8_t*, uint16_t, uint16_t,
                      uint16_t, uint16_t, uint16_t, uint8_t,
-                     const uint8_t*, size_t) override { return false; }
+                     const uint8_t*, size_t, bool, unsigned int,
+                     unsigned int) override { return false; }
     uint64_t getMicroseconds() override { return 0; }
 };
 } // namespace
@@ -168,21 +171,21 @@ class CiA430Test : public ::testing::Test {
 protected:
     void SetUp() override {
         transport_ = std::make_unique<NullSDOTransport>();
-        sdo_ = std::make_unique<EtherCAT::SDO::SDOManager>(*transport_);
-        sdo_->init();
-        meter_ = std::make_unique<EnergyMeter>(*sdo_, 1);
+        coe_ = std::make_unique<EtherCAT::CoE::CoEManager>(1, *transport_);
+        coe_->init();
+        meter_ = std::make_unique<EnergyMeter>(*coe_);
     }
     void TearDown() override {
         meter_.reset();
-        sdo_->deinit();
+        coe_->deinit();
     }
     std::unique_ptr<NullSDOTransport> transport_;
-    std::unique_ptr<EtherCAT::SDO::SDOManager> sdo_;
+    std::unique_ptr<EtherCAT::CoE::CoEManager> coe_;
     std::unique_ptr<EnergyMeter> meter_;
 };
 
 TEST_F(CiA430Test, Construction) {
-    EnergyMeter m2(*sdo_, 0x100, true);
+    EnergyMeter m2(*coe_);
     EXPECT_FALSE(m2.isInitialized());
 }
 
