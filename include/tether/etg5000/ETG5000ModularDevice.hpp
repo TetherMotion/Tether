@@ -23,7 +23,7 @@
 #include <vector>
 #include <memory>
 
-namespace EtherCAT { namespace SDO { class SDOManager; } }
+namespace EtherCAT { namespace CoE { class CoEManager; } }
 
 namespace ETG5000 {
 
@@ -120,7 +120,7 @@ namespace ModuleEvent {
 
 class ModularDevice {
 public:
-    explicit ModularDevice(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_addr, bool use_configured_addr = false);
+    explicit ModularDevice(EtherCAT::CoE::CoEManager& coe);
     ~ModularDevice();
     
     // ========================================================================
@@ -340,9 +340,7 @@ private:
     bool readSDO(uint16_t index, uint8_t subindex, void* data, size_t len) const;
     bool writeSDO(uint16_t index, uint8_t subindex, const void* data, size_t len) const;
     
-    EtherCAT::SDO::SDOManager& m_sdo;
-    uint16_t slave_addr_;
-    bool use_configured_addr_;
+    EtherCAT::CoE::CoEManager& m_coe;
     bool initialized_;
     
     DeviceState state_;

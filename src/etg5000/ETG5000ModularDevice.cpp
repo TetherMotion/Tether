@@ -4,7 +4,7 @@
  */
 
 #include "etg5000/ETG5000ModularDevice.hpp"
-#include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 
 #include <cstring>
 #include <algorithm>
@@ -15,10 +15,8 @@ namespace ETG5000 {
 // Constructor / Destructor
 // ============================================================================
 
-ModularDevice::ModularDevice(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_addr, bool use_configured_addr)
-    : m_sdo(sdo)
-    , slave_addr_(slave_addr)
-    , use_configured_addr_(use_configured_addr)
+ModularDevice::ModularDevice(EtherCAT::CoE::CoEManager& coe)
+    : m_coe(coe)
     , initialized_(false)
     , state_{}
     , prev_statusword_(0)
@@ -627,12 +625,14 @@ void ModularDevice::setErrorCallback(ErrorCallback callback)
 
 bool ModularDevice::readSDO(uint16_t index, uint8_t subindex, void* data, size_t len) const
 {
-    return m_sdo.readSync(slave_addr_, index, subindex, data, len, EtherCAT::SDO::kDefaultSDOTimeoutMs);
+    size_t actual_size;
+    return m_coe.readSync(index, subindex, data, len, EtherCAT::SDO::kDefaultSDOTimeoutMs, &actual_size);
 }
 
 bool ModularDevice::writeSDO(uint16_t index, uint8_t subindex, const void* data, size_t len) const
 {
-    return m_sdo.writeSync(slave_addr_, index, subindex, data, len, EtherCAT::SDO::kDefaultSDOTimeoutMs);
+    auto result = m_coe.writeSync(index, subindex, data, len, {.timeout_ms = EtherCAT::SDO::kDefaultSDOTimeoutMs});
+    return result.has_value();
 }
 
 } // namespace ETG5000
