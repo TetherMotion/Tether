@@ -375,7 +375,7 @@ int main(int argc, char** argv) {
         .help("Stream duration in seconds (0 = infinite until Ctrl-C)");
     program.add_argument("--debug")
         .default_value(std::string(""))
-        .help("Comma-separated debug flags. Known flags: sii-derivation, mailbox-configuration, al-state, tx-ethercat-packets, rx-ethercat-packets, rx-pdo, tx-pdo");
+        .help("Comma-separated debug flags. Known flags: sii-derivation, mailbox-configuration, al-state, tx-ethercat-packets, rx-ethercat-packets, rx-pdo, tx-pdo, dc, fmmu, sii-eeprom");
     program.add_argument("--rx-vlan")
         .default_value(std::string(""))
         .help("RX VLAN filter: single VID (e.g. 100), range (e.g. 100-200), or 'any' for catch-all undefined target");
@@ -420,7 +420,8 @@ int main(int argc, char** argv) {
         "rx-pdo",
         "tx-pdo",
         "dc",
-        "fmmu"
+        "fmmu",
+        "sii-eeprom"
     };
 
     // Parse debug flags
@@ -513,6 +514,12 @@ int main(int argc, char** argv) {
     if (fmmu_debug) {
         EtherCAT::enableFmmuDebug(true);
         TETHER_LOGI(TAG, "FMMU debug logging enabled");
+    }
+
+    // Enable SII/EEPROM debug if requested
+    if (debug_flags.count("sii-eeprom")) {
+        EtherCAT::enableSIIEEPROMDebug(true);
+        TETHER_LOGI(TAG, "SII/EEPROM debug logging enabled");
     }
 
     // ---- Parse VLAN arguments ----

@@ -70,7 +70,7 @@ int main(int argc, char** argv) {
         .help("TX VLAN encapsulation: single VID (e.g. 100)");
     program.add_argument("--debug")
         .default_value(std::string(""))
-        .help("Comma-separated debug flags. Known flags: al-state, tx-ethercat-packets, rx-ethercat-packets, rx-pdo, tx-pdo, dc, fmmu");
+        .help("Comma-separated debug flags. Known flags: al-state, tx-ethercat-packets, rx-ethercat-packets, rx-pdo, tx-pdo, dc, fmmu, sii-eeprom");
 
     try { program.parse_args(argc, argv); }
     catch (const std::runtime_error& err) {
@@ -95,7 +95,8 @@ int main(int argc, char** argv) {
         "rx-pdo",
         "tx-pdo",
         "dc",
-        "fmmu"
+        "fmmu",
+        "sii-eeprom"
     };
 
     // Parse debug flags
@@ -150,6 +151,12 @@ int main(int argc, char** argv) {
     if (debug_flags.count("fmmu")) {
         EtherCAT::enableFmmuDebug(true);
         TETHER_LOGI(TAG, "FMMU debug logging enabled");
+    }
+
+    // Enable SII/EEPROM debug if requested
+    if (debug_flags.count("sii-eeprom")) {
+        EtherCAT::enableSIIEEPROMDebug(true);
+        TETHER_LOGI(TAG, "SII/EEPROM debug logging enabled");
     }
 
     // ---- Parse VLAN arguments ----

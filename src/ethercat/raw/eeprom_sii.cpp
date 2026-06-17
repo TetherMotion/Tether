@@ -9,6 +9,10 @@
 #include <utility>
 
 namespace EtherCAT {
+extern bool g_debug_sii_eeprom;
+}
+
+namespace EtherCAT {
 namespace Raw {
 
 static const char *TAG = "ethercat_sii";
@@ -22,20 +26,28 @@ static void delay_us(unsigned int us) {
 }
 
 static bool ec_eeprom_wait_not_busy_ap(Master& master, uint16_t adp, uint16_t *out_estat,
-                                      unsigned int timeout_ms)
+                                      unsigned int timeout_ms, uint32_t* out_poll_iters = nullptr)
 {
+    uint32_t iters = 0;
     auto start = std::chrono::steady_clock::now();
     auto deadline = start + std::chrono::milliseconds(timeout_ms);
 
     while (true) {
-        if (std::chrono::steady_clock::now() >= deadline) return false;
+        if (std::chrono::steady_clock::now() >= deadline) {
+            if (out_poll_iters) *out_poll_iters = iters;
+            return false;
+        }
 
         uint16_t estat_le = 0;
         if (master.readRegister(Master::slaveAddressFromADP(adp), EC_REG_EEPSTAT, estat_le, 100)) {
             const uint16_t estat = le16_to_host(estat_le);
             if (out_estat) *out_estat = estat;
-            if ((estat & EC_ESTAT_BUSY) == 0) return true;
+            if ((estat & EC_ESTAT_BUSY) == 0) {
+                if (out_poll_iters) *out_poll_iters = iters;
+                return true;
+            }
         }
+        iters++;
         delay_us(200);
     }
 }
@@ -55,11 +67,21 @@ static bool ec_eeprom_read_u32_ap(Master& master, uint16_t adp, uint16_t eeprom_
     if (master.getSIICachedWord(slave_index, wa, lo) &&
         master.getSIICachedWord(slave_index, static_cast<uint16_t>(wa + 1), hi)) {
         if (out_u32) *out_u32 = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 16);
+        if (EtherCAT::g_debug_sii_eeprom) {
+            TETHER_LOGD(TAG, "SII EEPROM [slave %u]: read_u32_ap addr=0x%04X cache hit", slave_index, eeprom_word_addr);
+        }
         return true;
     }
 
     uint16_t estat = 0;
-    if (!ec_eeprom_wait_not_busy_ap(master, adp, &estat, 500)) return false;
+    uint32_t pre_iters = 0;
+    if (!ec_eeprom_wait_not_busy_ap(master, adp, &estat, 500, &pre_iters)) {
+        if (EtherCAT::g_debug_sii_eeprom) {
+            TETHER_LOGW(TAG, "SII EEPROM [slave %u]: read_u32_ap addr=0x%04X pre-wait timed out (%u iters)",
+                        slave_index, eeprom_word_addr, pre_iters);
+        }
+        return false;
+    }
 
     if ((estat & EC_ESTAT_EMASK) != 0) {
         const uint16_t nop_le = host_to_le16(EC_ECMD_NOP);
@@ -73,28 +95,57 @@ static bool ec_eeprom_read_u32_ap(Master& master, uint16_t adp, uint16_t eeprom_
         cmd.addr_le = host_to_le16(eeprom_word_addr);
         cmd.d2_le = host_to_le16(0);
 
-        if (!master.writeRegister(Master::slaveAddressFromADP(adp), EC_REG_EEPCTL, cmd, 200)) return false;
+        if (!master.writeRegister(Master::slaveAddressFromADP(adp), EC_REG_EEPCTL, cmd, 200)) {
+            if (EtherCAT::g_debug_sii_eeprom) {
+                TETHER_LOGW(TAG, "SII EEPROM [slave %u]: read_u32_ap addr=0x%04X writeRegister(EEPCTL) failed (nack=%d)",
+                            slave_index, eeprom_word_addr, nackcnt);
+            }
+            return false;
+        }
 
         delay_us(200);
         estat = 0;
-        if (!ec_eeprom_wait_not_busy_ap(master, adp, &estat, 500)) return false;
+        uint32_t post_iters = 0;
+        if (!ec_eeprom_wait_not_busy_ap(master, adp, &estat, 500, &post_iters)) {
+            if (EtherCAT::g_debug_sii_eeprom) {
+                TETHER_LOGW(TAG, "SII EEPROM [slave %u]: read_u32_ap addr=0x%04X post-wait timed out (%u iters, nack=%d)",
+                            slave_index, eeprom_word_addr, post_iters, nackcnt);
+            }
+            return false;
+        }
 
         if ((estat & EC_ESTAT_NACK) != 0) {
             nackcnt++;
+            if (EtherCAT::g_debug_sii_eeprom) {
+                TETHER_LOGD(TAG, "SII EEPROM [slave %u]: read_u32_ap addr=0x%04X NACK retry %d/3", slave_index, eeprom_word_addr, nackcnt);
+            }
             delay_us(1000);
             continue;
         }
 
         uint32_t edat_le = 0;
-        if (!master.readRegister(Master::slaveAddressFromADP(adp), EC_REG_EEPDAT, edat_le, 200)) return false;
+        if (!master.readRegister(Master::slaveAddressFromADP(adp), EC_REG_EEPDAT, edat_le, 200)) {
+            if (EtherCAT::g_debug_sii_eeprom) {
+                TETHER_LOGW(TAG, "SII EEPROM [slave %u]: read_u32_ap addr=0x%04X readRegister(EEPDAT) failed (nack=%d)",
+                            slave_index, eeprom_word_addr, nackcnt);
+            }
+            return false;
+        }
 
         if (out_u32) *out_u32 = le32_to_host(edat_le);
         // Populate the master-level cache so future readers hit it.
         master.setSIICachedWord(slave_index, wa, static_cast<uint16_t>(edat_le & 0xFFFF));
         master.setSIICachedWord(slave_index, static_cast<uint16_t>(wa + 1), static_cast<uint16_t>((edat_le >> 16) & 0xFFFF));
+        if (EtherCAT::g_debug_sii_eeprom) {
+            TETHER_LOGD(TAG, "SII EEPROM [slave %u]: read_u32_ap addr=0x%04X success pre=%u post=%u nack=%d",
+                        slave_index, eeprom_word_addr, pre_iters, post_iters, nackcnt);
+        }
         return true;
     } while (nackcnt > 0 && nackcnt < 3);
 
+    if (EtherCAT::g_debug_sii_eeprom) {
+        TETHER_LOGW(TAG, "SII EEPROM [slave %u]: read_u32_ap addr=0x%04X failed after %d NACK retries", slave_index, eeprom_word_addr, nackcnt);
+    }
     return false;
 }
 
