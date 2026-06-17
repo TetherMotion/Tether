@@ -24,7 +24,7 @@
 
 #include "profiles/cia404/CiA404Defs.hpp"
 
-namespace EtherCAT { namespace SDO { class SDOManager; } }
+namespace EtherCAT { namespace CoE { class CoEManager; } }
 
 namespace CiA404 {
 
@@ -254,10 +254,9 @@ public:
     
     /**
      * @brief Construct measuring device controller
-     * @param slave_addr Position address or configured address
-     * @param use_configured_addr If true, slave_addr is configured address
+     * @param coe CoEManager instance for SDO access (per-slave)
      */
-    explicit MeasuringDevice(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_addr, bool use_configured_addr = false);
+    explicit MeasuringDevice(EtherCAT::CoE::CoEManager& coe);
     
     /**
      * @brief Destructor
@@ -274,16 +273,6 @@ public:
      * @brief Check if initialized
      */
     bool isInitialized() const { return initialized_; }
-    
-    /**
-     * @brief Get slave address
-     */
-    uint16_t getSlaveAddress() const { return slave_addr_; }
-    
-    /**
-     * @brief Check if using configured address
-     */
-    bool isUsingConfiguredAddress() const { return use_configured_addr_; }
     
     /**
      * @brief Get device capabilities
@@ -772,9 +761,7 @@ private:
     // Member Variables
     // ========================================================================
     
-    EtherCAT::SDO::SDOManager& m_sdo;
-    uint16_t slave_addr_;
-    bool use_configured_addr_;
+    EtherCAT::CoE::CoEManager& m_coe;
     bool initialized_;
     
     DeviceCapabilities capabilities_;

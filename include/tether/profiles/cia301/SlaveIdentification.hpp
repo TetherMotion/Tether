@@ -52,7 +52,7 @@
 #include "profiles/cia301/CiA301Defs.hpp"
 
 namespace EtherCAT {
-namespace SDO { class SDOManager; }  // forward declaration
+class Master;  // forward declaration
 
 // ============================================================================
 // Configuration
@@ -424,8 +424,8 @@ private:
  * ## Usage
  * 
  * ```cpp
- * EtherCAT::SDO::SDOManager& sdo = master.sdoManager();
- * SlaveIdentifier identifier(sdo);
+ * EtherCAT::Master& master = ...;
+ * SlaveIdentifier identifier(master);
  * identifier.setSDOTimeout(2000);  // 2 second timeout
  * 
  * // Identify single slave
@@ -442,10 +442,10 @@ private:
 class SlaveIdentifier {
 public:
     /**
-     * @brief Construct with an SDOManager reference
-     * @param sdo  SDOManager instance (must outlive this object)
+     * @brief Construct with a Master reference
+     * @param master  Master instance (must outlive this object)
      */
-    explicit SlaveIdentifier(SDO::SDOManager& sdo);
+    explicit SlaveIdentifier(Master& master);
     
     /**
      * @brief Set SDO timeout in milliseconds
@@ -529,7 +529,7 @@ public:
     bool readSupportedDriveModes(uint16_t slave_index, uint32_t& modes);
 
 private:
-    SDO::SDOManager& m_sdo;
+    Master& m_master;
     uint32_t m_sdo_timeout_ms{1000};
 };
 
