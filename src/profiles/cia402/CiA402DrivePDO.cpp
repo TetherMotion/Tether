@@ -7,8 +7,8 @@
 
 #include "profiles/cia402/CiA402Drive.hpp"
 #include "tether/ethercat/Master.hpp"
-#include "SDOManager.hpp"
-#include "PDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
+#include "tether/ethercat/PDOManager.hpp"
 #include "tether/platform/EspCompat.hpp"
 
 #include <cstring>

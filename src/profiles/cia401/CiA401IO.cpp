@@ -3,9 +3,9 @@
  * @brief CiA 401 I/O Module Controller Implementation
  */
 
-#include "profiles/cia401/CiA401IO.hpp"
+#include "tether/profiles/cia401/CiA401IO.hpp"
 #include "tether/platform/EspCompat.hpp"
-#include "SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 
 static const char* TAG = "CiA401";
 #define LOG_I(fmt, ...) TETHER_LOGI(TAG, fmt, ##__VA_ARGS__)
@@ -21,10 +21,8 @@ namespace CiA401 {
 // Construction and Initialization
 // ============================================================================
 
-IOModule::IOModule(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_addr, bool use_configured_addr)
-    : m_sdo(sdo)
-    , slave_addr_(slave_addr)
-    , use_configured_addr_(use_configured_addr)
+IOModule::IOModule(EtherCAT::CoE::CoEManager& coe)
+    : m_coe(coe)
     , initialized_(false)
     , capabilities_()
     , current_mapping_(PDOMappingPreset::Minimal)
@@ -37,7 +35,7 @@ IOModule::~IOModule() {
 }
 
 bool IOModule::initialize() {
-    LOG_I("Initializing CiA 401 I/O module at address %u", slave_addr_);
+    LOG_I("Initializing CiA 401 I/O module at slave %u", m_coe.slaveIndex());
     
     // Verify device type
     uint32_t device_type = 0;
@@ -98,7 +96,7 @@ size_t do_blocks = std::max({ (size_t)capabilities_.digital_output_8bit_blocks,
     initialized_ = true;
     
     if (event_callback_) {
-        event_callback_(IOEvent::Initialized, slave_addr_, 0, 0);
+        event_callback_(IOEvent::Initialized, m_coe.slaveIndex(), 0, 0);
     }
     
     return true;
@@ -421,12 +419,12 @@ void IOModule::checkDigitalInputChanges() {
             for (int bit = 0; bit < 8; bit++) {
                 if (changed & (1 << bit)) {
                     bool state = digital_input_state_[block] & (1 << bit);
-                    digital_callback_(slave_addr_, block * 8 + bit, state);
+                    digital_callback_(m_coe.slaveIndex(), block * 8 + bit, state);
                 }
             }
             
             if (event_callback_) {
-                event_callback_(IOEvent::DigitalInputChanged, slave_addr_, 
+                event_callback_(IOEvent::DigitalInputChanged, m_coe.slaveIndex(), 
                                block, digital_input_state_[block]);
             }
         }
@@ -446,27 +444,27 @@ void IOModule::checkAnalogThresholds() {
             // Check upper limit
             if ((cfg.trigger & InterruptTrigger::UpperLimit) && 
                 val >= cfg.upper_limit && prev < cfg.upper_limit) {
-                analog_callback_(slave_addr_, ch + 1, val, 1);
+                analog_callback_(m_coe.slaveIndex(), ch + 1, val, 1);
                 if (event_callback_) {
-                    event_callback_(IOEvent::AnalogUpperLimit, slave_addr_, ch + 1, val);
+                    event_callback_(IOEvent::AnalogUpperLimit, m_coe.slaveIndex(), ch + 1, val);
                 }
             }
             
             // Check lower limit
             if ((cfg.trigger & InterruptTrigger::LowerLimit) &&
                 val <= cfg.lower_limit && prev > cfg.lower_limit) {
-                analog_callback_(slave_addr_, ch + 1, val, 2);
+                analog_callback_(m_coe.slaveIndex(), ch + 1, val, 2);
                 if (event_callback_) {
-                    event_callback_(IOEvent::AnalogLowerLimit, slave_addr_, ch + 1, val);
+                    event_callback_(IOEvent::AnalogLowerLimit, m_coe.slaveIndex(), ch + 1, val);
                 }
             }
             
             // Check delta
             if ((cfg.trigger & InterruptTrigger::Delta) &&
                 std::abs(val - prev) >= cfg.delta) {
-                analog_callback_(slave_addr_, ch + 1, val, 3);
+                analog_callback_(m_coe.slaveIndex(), ch + 1, val, 3);
                 if (event_callback_) {
-                    event_callback_(IOEvent::AnalogDeltaTriggered, slave_addr_, ch + 1, val);
+                    event_callback_(IOEvent::AnalogDeltaTriggered, m_coe.slaveIndex(), ch + 1, val);
                 }
             }
         }
@@ -827,7 +825,7 @@ void IOModule::setAnalogThresholdCallback(AnalogThresholdCallback callback) {
 std::string IOModule::getDiagnostics() const {
     std::string diag;
     diag += "CiA 401 I/O Module\n";
-    diag += "  Slave: " + std::to_string(slave_addr_) + "\n";
+    diag += "  Slave: " + std::to_string(m_coe.slaveIndex()) + "\n";
     diag += "  Type: " + std::string(getModuleTypeName(capabilities_.module_type)) + "\n";
     diag += "  Digital In: " + std::to_string(capabilities_.getTotalDigitalInputs()) + "\n";
     diag += "  Digital Out: " + std::to_string(capabilities_.getTotalDigitalOutputs()) + "\n";
@@ -859,11 +857,13 @@ bool IOModule::resetFault() {
 // ============================================================================
 
 bool IOModule::readSDO(uint16_t index, uint8_t subindex, void* data, size_t len) {
-    return m_sdo.readSync(slave_addr_, index, subindex, data, len, EtherCAT::SDO::kDefaultSDOTimeoutMs);
+    size_t actual_size;
+    return m_coe.readSync(index, subindex, data, len, EtherCAT::SDO::kDefaultSDOTimeoutMs, &actual_size);
 }
 
 bool IOModule::writeSDO(uint16_t index, uint8_t subindex, const void* data, size_t len) {
-    return m_sdo.writeSync(slave_addr_, index, subindex, data, len, EtherCAT::SDO::kDefaultSDOTimeoutMs);
+    auto result = m_coe.writeSync(index, subindex, data, len, {.timeout_ms = EtherCAT::SDO::kDefaultSDOTimeoutMs});
+    return result.has_value();
 }
 
 } // namespace CiA401
