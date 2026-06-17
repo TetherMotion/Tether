@@ -81,7 +81,7 @@
 #include <memory>
 #include <vector>
 
-namespace EtherCAT { namespace SDO { class SDOManager; } }
+namespace EtherCAT { namespace CoE { class CoEManager; } }
 
 namespace CiA406 {
 
@@ -398,18 +398,9 @@ class Encoder {
 public:
     /**
      * @brief Construct encoder controller
-     * @param sdo SDOManager instance for SDO access
-     * @param slave_position EtherCAT slave position (0-based)
+     * @param coe CoEManager instance for SDO access
      */
-    Encoder(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_position);
-    
-    /**
-     * @brief Construct with configured address
-     * @param sdo SDOManager instance for SDO access
-     * @param slave_address Configured station address
-     * @param use_configured_addr Flag to use FPWR addressing
-     */
-    Encoder(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_address, bool use_configured_addr);
+    explicit Encoder(EtherCAT::CoE::CoEManager& coe);
     
     ~Encoder() = default;
     
@@ -753,21 +744,9 @@ public:
     // Slave Information
     // ========================================================================
     
-    /**
-     * @brief Get slave position/address
-     */
-    uint16_t getSlaveAddress() const { return slave_addr_; }
-    
-    /**
-     * @brief Check if using configured addressing
-     */
-    bool isUsingConfiguredAddress() const { return use_configured_addr_; }
-    
 private:
     // Slave identification
-    EtherCAT::SDO::SDOManager& m_sdo;
-    uint16_t slave_addr_;
-    bool use_configured_addr_;
+    EtherCAT::CoE::CoEManager& m_coe;
     bool initialized_{false};
     
     // Capabilities
@@ -831,13 +810,13 @@ private:
  * @param slave_position Slave position
  * @return Initialized encoder or nullptr if detection failed
  */
-std::unique_ptr<Encoder> createEncoder(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_position);
+std::unique_ptr<Encoder> createEncoder(EtherCAT::CoE::CoEManager& coe);
 
 /**
  * @brief Scan for all encoders on the network
  * @param sdo SDOManager instance for SDO access
  * @return Vector of slave positions with CiA 406 devices
  */
-std::vector<uint16_t> scanForEncoders(EtherCAT::SDO::SDOManager& sdo);
+// scanForEncoders removed - no longer applicable with per-slave CoEManager
 
 } // namespace CiA406

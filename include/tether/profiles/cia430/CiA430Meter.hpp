@@ -22,7 +22,7 @@
 #include <functional>
 #include <array>
 
-namespace EtherCAT { namespace SDO { class SDOManager; } }
+namespace EtherCAT { namespace CoE { class CoEManager; } }
 
 namespace CiA430 {
 
@@ -223,7 +223,7 @@ enum class PDOMappingPreset {
 
 class EnergyMeter {
 public:
-    explicit EnergyMeter(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_addr, bool use_configured_addr = false);
+    explicit EnergyMeter(EtherCAT::CoE::CoEManager& coe);
     ~EnergyMeter();
     
     // ========================================================================
@@ -385,9 +385,7 @@ private:
     bool readSDO(uint16_t index, uint8_t subindex, void* data, size_t len);
     bool writeSDO(uint16_t index, uint8_t subindex, const void* data, size_t len);
     
-    EtherCAT::SDO::SDOManager& m_sdo;
-    uint16_t slave_addr_;
-    bool use_configured_addr_;
+    EtherCAT::CoE::CoEManager& m_coe;
     bool initialized_;
     
     MeterSpec spec_;

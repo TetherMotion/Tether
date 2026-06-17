@@ -26,7 +26,7 @@
 #include <memory>
 #include <map>
 
-namespace EtherCAT { namespace SDO { class SDOManager; } }
+namespace EtherCAT { namespace CoE { class CoEManager; } }
 
 namespace CiA405 {
 
@@ -211,10 +211,9 @@ public:
     
     /**
      * @brief Construct PLC device controller
-     * @param slave_addr Slave station address (0-65535)
-     * @param use_configured_addr Use configured address vs auto-increment
+     * @param coe CoEManager instance for SDO access (per-slave)
      */
-    explicit PLCDevice(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_addr, bool use_configured_addr = false);
+    explicit PLCDevice(EtherCAT::CoE::CoEManager& coe);
     
     ~PLCDevice();
     
@@ -636,9 +635,7 @@ private:
     // Private Data
     // ========================================================================
     
-    EtherCAT::SDO::SDOManager& m_sdo;
-    uint16_t slave_addr_;
-    bool use_configured_addr_;
+    EtherCAT::CoE::CoEManager& m_coe;
     bool initialized_;
     
     PLCCapabilities capabilities_;
