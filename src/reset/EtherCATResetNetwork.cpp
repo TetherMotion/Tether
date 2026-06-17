@@ -3,11 +3,15 @@
  * @brief Network-wide reset functions, broadcast operations, and reset policy
  * 
  * Split from EtherCATReset.cpp for maintainability.
+ * 
+ * NOTE: Network-wide functions are temporarily disabled due to circular dependency
+ * with Master class. These will be reimplemented in a separate module that
+ * doesn't depend on Reset.hpp.
  */
 
 #include "Reset.hpp"
 #include "tether/platform/EspCompat.hpp"
-#include "SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 
 namespace EtherCAT {
 
@@ -16,67 +20,7 @@ static const char* TAG = "ECAT_RESET_NET";
 // ============================================================================
 // Broadcast/Network-Wide Functions
 // ============================================================================
-
-std::vector<ResetResult> resetAllSlaves(EtherCAT::SDO::SDOManager& sdo, ResetLevel level, uint32_t timeout_ms) {
-    std::vector<ResetResult> results;
-    
-    TETHER_LOGI(TAG, "Resetting all slaves to level: %s", getResetLevelName(level));
-    
-    for (uint16_t i = 0; i < 16; i++) {
-        SlaveResetController controller(sdo, i);
-        
-        uint16_t status, code;
-        if (!controller.readALStatus(status, code)) {
-            break;
-        }
-        
-        ResetResult result = controller.resetToLevel(level, timeout_ms / 16);
-        results.push_back(result);
-    }
-    
-    return results;
-}
-
-uint16_t broadcastErrorAcknowledge(EtherCAT::SDO::SDOManager& sdo) {
-    TETHER_LOGI(TAG, "Broadcasting error acknowledge");
-    
-    uint16_t al_control = ALControl::AckError;
-    return sdo.writeSync(0, 0x0120, 0, &al_control, sizeof(al_control), EtherCAT::SDO::kDefaultSDOTimeoutMs) ? 1 : 0;
-}
-
-uint16_t broadcastStateTransition(EtherCAT::SDO::SDOManager& sdo, ALState target_state) {
-    TETHER_LOGI(TAG, "Broadcasting state transition to 0x%02X", static_cast<uint8_t>(target_state));
-    
-    uint16_t al_control = static_cast<uint16_t>(target_state);
-    return sdo.writeSync(0, 0x0120, 0, &al_control, sizeof(al_control), EtherCAT::SDO::kDefaultSDOTimeoutMs) ? 1 : 0;
-}
-
-bool networkEmergencyStop(EtherCAT::SDO::SDOManager& sdo) {
-    TETHER_LOGW(TAG, "NETWORK EMERGENCY STOP");
-    
-    uint16_t slaves_stopped = broadcastStateTransition(sdo, ALState::Init);
-    
-    return slaves_stopped > 0;
-}
-
-bool reinitializeNetwork(EtherCAT::SDO::SDOManager& sdo, bool to_op) {
-    TETHER_LOGI(TAG, "Reinitializing entire network");
-    
-    broadcastStateTransition(sdo, ALState::Init);
-    Tether::Platform::Clock::instance().delayMilliseconds(100);
-    
-    broadcastStateTransition(sdo, ALState::PreOp);
-    Tether::Platform::Clock::instance().delayMilliseconds(100);
-    
-    broadcastStateTransition(sdo, ALState::SafeOp);
-    Tether::Platform::Clock::instance().delayMilliseconds(100);
-    
-    if (to_op) {
-        broadcastStateTransition(sdo, ALState::Op);
-    }
-    
-    return true;
-}
+// Temporarily disabled - see note above
 
 // ============================================================================
 // Reset Policy Application
