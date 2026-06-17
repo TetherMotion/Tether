@@ -46,6 +46,25 @@ static bool mbx_clear_read_area(Master& master, uint16_t adp, uint16_t mbx_read_
     return master.writeRegister(Master::slaveAddressFromADP(adp), mbx_read_addr, zero_le, 200);
 }
 
+// Check SM1 status for stale mailbox data from a previous unfinished request.
+// If present, read and discard it to clear the mailbox state, then zero the read area.
+static bool mbx_drain_stale_if_present(Master& master, uint16_t adp, uint16_t mbx_read_addr, uint16_t mbx_read_len)
+{
+    uint8_t sm1_status = 0;
+    if (master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(1), sm1_status, 100)) {
+        if ((sm1_status & EC_SM_STATUS_MBXFULL) != 0) {
+            TETHER_LOGW(TAG, "Stale mailbox data detected (SM1 full, adp=0x%04X). Draining before new SDO request. Consider increasing the SDO timeout.", adp);
+            uint8_t drain_buf[256] = {0};
+            uint16_t drain_len = mbx_read_len;
+            if (drain_len > sizeof(drain_buf)) {
+                drain_len = static_cast<uint16_t>(sizeof(drain_buf));
+            }
+            (void)master.readRegister(Master::slaveAddressFromADP(adp), mbx_read_addr, drain_buf, drain_len, 200);
+        }
+    }
+    return mbx_clear_read_area(master, adp, mbx_read_addr);
+}
+
 static void mbx_diag_dump_slave_state(Master& master, uint16_t adp, uint16_t mbx_wr_addr, uint16_t mbx_rd_addr)
 {
     // Keep this lightweight and only call on errors.
@@ -254,7 +273,7 @@ bool coe_sdo_upload(
         }
 #endif
 
-        (void)mbx_clear_read_area(master, adp, mbx_read_addr);
+        (void)mbx_drain_stale_if_present(master, adp, mbx_read_addr, mbx_read_len);
 
         // IMPORTANT: actually write the upload request into the slave RX mailbox.
         // This used to be missing, causing all SDO reads to fail silently.
@@ -652,6 +671,8 @@ bool coe_sdo_download(
             diag_hexdump(mbxbuf, msg_len, 64);
         }
 #endif
+        (void)mbx_drain_stale_if_present(master, adp, mbx_read_addr, mbx_read_len);
+
         // Write full SM buffer to trigger ESC mailbox event (must reach last byte)
         bool used_alt = false;
         if (!mbx_apwr_with_wkc_probe(master, adp,
