@@ -49,6 +49,47 @@ jobs:
         name: debug-build
         path: build/
 
+  compile-static:
+    name: Compile Static Build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake \
+          g++ \
+          gcc \
+          libc6-dev \
+          libboost-dev \
+          make
+
+    - name: Configure and build (static only)
+      run: |
+        cmake -S . -B build-static \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DTETHER_BUILD_SHARED_LIBS=OFF \
+          -DTETHER_BUILD_STATIC_LIBS=ON \
+          -DTETHER_BUILD_TESTS=ON \
+          -DTETHER_BUILD_SIMULATION=ON \
+          -DTETHER_BUILD_ETHERCAT_MASTER=ON \
+          -DTETHER_BUILD_DESTABILIZER=ON \
+          -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
+          -DTETHER_BUILD_EXTRACT_ESI=OFF
+        cmake --build build-static --parallel $(nproc)
+
+    - name: Upload static build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: static-build
+        path: build-static/
+
   unit-tests:
     name: Run Unit Tests
     runs-on: ubuntu-latest

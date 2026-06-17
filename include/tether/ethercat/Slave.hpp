@@ -102,6 +102,26 @@ void enableFmmuDebug(bool enable);
  */
 void enableSIIEEPROMDebug(bool enable);
 
+/**
+ * @brief Enable or disable detailed CoE read debug logging
+ */
+void enableCoEReadsDebug(bool enable);
+
+/**
+ * @brief Enable or disable detailed CoE write debug logging
+ */
+void enableCoEWritesDebug(bool enable);
+
+/**
+ * @brief Enable or disable detailed CoE RX packet debug logging
+ */
+void enableCoERxPacketsDebug(bool enable);
+
+/**
+ * @brief Enable or disable detailed CoE TX packet debug logging
+ */
+void enableCoETxPacketsDebug(bool enable);
+
 // ============================================================================
 // SlaveError — detailed error enum
 // ============================================================================

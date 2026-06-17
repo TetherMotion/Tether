@@ -4,6 +4,7 @@
  */
 
 #include "tether/ethercat/CoEManager.hpp"
+#include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/platform/Platform.hpp"
 
@@ -223,6 +224,11 @@ size_t CoEManager::pendingCount() const {
 std::future<CoEResult<void>> CoEManager::write(uint16_t index, uint8_t subindex,
                                                 const void* data, size_t size,
                                                 CoETransactionOptions options) {
+    if (EtherCAT::debug::coeWrites()) {
+        TETHER_LOGI(TAG, "Slave %u: CoE write START index=0x%04X:%u size=%zu",
+                    slave_index_, index, subindex, size);
+    }
+
     CoEWriteTransaction txn;
     txn.index = index;
     txn.subindex = subindex;
@@ -238,6 +244,10 @@ std::future<CoEResult<void>> CoEManager::write(uint16_t index, uint8_t subindex,
     {
         std::lock_guard<std::mutex> lock(state_.write_mutex);
         if (state_.write_queue.size() >= kMaxQueueDepth) {
+            if (EtherCAT::debug::coeWrites()) {
+                TETHER_LOGI(TAG, "Slave %u: CoE write QUEUE FULL index=0x%04X:%u",
+                            slave_index_, index, subindex);
+            }
             CoEWriteTransaction fail_txn;
             fail_txn.promise.set_value(std::unexpected(CoEError::QueueFull));
             return fail_txn.promise.get_future();
@@ -247,6 +257,10 @@ std::future<CoEResult<void>> CoEManager::write(uint16_t index, uint8_t subindex,
     state_.write_cv.notify_one();
     ensureWorkerRunning();
 
+    if (EtherCAT::debug::coeWrites()) {
+        TETHER_LOGI(TAG, "Slave %u: CoE write ENQUEUED index=0x%04X:%u",
+                    slave_index_, index, subindex);
+    }
     return future;
 }
 
@@ -257,12 +271,20 @@ std::future<CoEResult<void>> CoEManager::write(uint16_t index, uint8_t subindex,
 CoEResult<void> CoEManager::writeSync(uint16_t index, uint8_t subindex,
                                        const void* data, size_t size,
                                        CoETransactionOptions options) {
+    if (EtherCAT::debug::coeWrites()) {
+        TETHER_LOGI(TAG, "Slave %u: CoE writeSync index=0x%04X:%u size=%zu",
+                    slave_index_, index, subindex, size);
+    }
     return write(index, subindex, data, size, options).get();
 }
 
 bool CoEManager::readSync(uint16_t index, uint8_t subindex,
                            void* data, size_t max_size, uint32_t timeout_ms,
                            size_t* actual_size) {
+    if (EtherCAT::debug::coeReads()) {
+        TETHER_LOGI(TAG, "Slave %u: CoE readSync index=0x%04X:%u max_size=%zu",
+                    slave_index_, index, subindex, max_size);
+    }
     CoETransactionOptions opts;
     opts.timeout_ms = timeout_ms;
 

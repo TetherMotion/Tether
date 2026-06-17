@@ -31,32 +31,49 @@ elseif(TETHER_PLATFORM_STM32)
     )
 endif()
 
-# Create the HAL library
-add_library(tether_hal STATIC ${TETHER_HAL_SOURCES})
-add_library(tether::hal ALIAS tether_hal)
+# Create variant targets
+set(_variants "")
+if(TETHER_BUILD_SHARED_LIBS)
+    add_library(tether_hal_shared SHARED ${TETHER_HAL_SOURCES})
+    list(APPEND _variants tether_hal_shared)
+endif()
+if(TETHER_BUILD_STATIC_LIBS)
+    add_library(tether_hal_static STATIC ${TETHER_HAL_SOURCES})
+    list(APPEND _variants tether_hal_static)
+endif()
 
-target_include_directories(tether_hal
-    PUBLIC
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/hal>
-        $<INSTALL_INTERFACE:include>
-        $<INSTALL_INTERFACE:include/tether>
-        $<INSTALL_INTERFACE:include/tether/hal>
-    PRIVATE
-        ${TETHER_ROOT}/src
-)
+foreach(_tgt IN LISTS _variants)
+    target_include_directories(${_tgt}
+        PUBLIC
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/hal>
+            $<INSTALL_INTERFACE:include>
+            $<INSTALL_INTERFACE:include/tether>
+            $<INSTALL_INTERFACE:include/tether/hal>
+        PRIVATE
+            ${TETHER_ROOT}/src
+    )
 
-target_link_libraries(tether_hal
-    PUBLIC tether_common
-    ${TETHER_HAL_PLATFORM_LIBS}
-)
+    target_link_libraries(${_tgt}
+        PUBLIC tether_common
+        ${TETHER_HAL_PLATFORM_LIBS}
+    )
 
-set_target_properties(tether_hal PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-    CXX_STANDARD 20
-    CXX_STANDARD_REQUIRED ON
-)
+    set_target_properties(${_tgt} PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+    )
+endforeach()
 
-# Export for other components
+if(TETHER_BUILD_SHARED_LIBS)
+    add_library(tether_hal ALIAS tether_hal_shared)
+    add_library(tether::hal ALIAS tether_hal_shared)
+elseif(TETHER_BUILD_STATIC_LIBS)
+    add_library(tether_hal ALIAS tether_hal_static)
+    add_library(tether::hal ALIAS tether_hal_static)
+endif()
+
 set(TETHER_HAL_LIBRARY tether_hal)
+set(TETHER_HAL_TARGETS ${_variants})

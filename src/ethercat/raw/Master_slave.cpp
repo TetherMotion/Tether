@@ -15,6 +15,7 @@
 #include "tether/ethercat/FaultDetection.hpp"
 #include "tether/ethercat/RealtimeLoop.hpp"
 #include "tether/ethercat/SyncManagerValidation.hpp"
+#include "tether/ethercat/DebugFlags.hpp"
 #include "tether/sii/SIIParser.hpp"
 #include "tether/fmmu/FMMUConfiguration.hpp"
 #include "raw/internal.hpp"
@@ -32,17 +33,6 @@
 namespace EtherCAT {
 
 static const char* TAG = "ethercat";
-
-// Global debug flag for al-state (shared with Slave)
-extern bool g_debug_statemachine;
-
-// Global debug flags for tx/rx packet logging (shared with Slave)
-extern bool g_debug_tx_packets;
-extern bool g_debug_rx_packets;
-
-// Global debug flags for PDO logging (shared with PDOManager)
-extern bool g_debug_rx_pdo;
-extern bool g_debug_tx_pdo;
 
 // ============================================================================
 // Helper: determine whether SM0 is configured as write in SII (DEPRECATED/UNUSED).
@@ -161,7 +151,7 @@ uint16_t Master::getDiscoveredSlaveCount() const
 
 bool Master::requestSlaveApplicationLayerState(SlaveAddress slave_address, uint8_t state_code)
 {
-    if (g_debug_statemachine) {
+    if (debug::stateMachine()) {
         uint8_t current_state_code = 0;
         readSlaveApplicationLayerState(slave_address, current_state_code);
         const char* current_state_name = getECStateName(current_state_code);
@@ -178,7 +168,7 @@ bool Master::requestSlaveApplicationLayerState(SlaveAddress slave_address, uint8
     
     bool result = writeRegister(slave_address, RegisterAddress(Raw::EC_REG_AL_CONTROL), static_cast<uint16_t>(state_code));
     
-    if (g_debug_statemachine) {
+    if (debug::stateMachine()) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
         TETHER_LOGI(TAG, "║  AL State Request Result: %s                                 ║", result ? "SUCCESS" : "FAILED");
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");

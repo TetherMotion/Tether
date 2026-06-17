@@ -18,14 +18,10 @@
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
 #include "tether/ethercat/PDOManager.hpp"
+#include "tether/ethercat/DebugFlags.hpp"
 #include "tether/sensors/Axia80/Axia80PDO.hpp"
 #include "tether/sensors/Axia80/Axia80Registers.hpp"
 #include "tether/platform/Platform.hpp"
-
-// Global PDO debug flags (defined in PDOManager.cpp)
-extern bool g_debug_rx_pdo;
-extern bool g_debug_tx_pdo;
-
 
 namespace EtherCAT {
 namespace Sensors {
@@ -315,7 +311,7 @@ inline bool Axia80Sensor::init(Tether::Platform::LogLevel log_level,
     auto& sl = slave();
 
     // Print PDO layout if debug flags are enabled
-    if (g_debug_rx_pdo || g_debug_tx_pdo) {
+    if (debug::rxPDO() || debug::txPDO()) {
         printPDOLayout();
     }
 

@@ -126,6 +126,16 @@ pybind11_add_module(_fsoe MODULE
 )
 target_compile_definitions(_fsoe PRIVATE VERSION_INFO="${PROJECT_VERSION}")
 
+# Set RPATH so Python modules find shared libraries at runtime without LD_LIBRARY_PATH
+if(UNIX AND NOT APPLE)
+    set_target_properties(
+        _gcode _export _motion_planner _motion_control _controls
+        _ethercat_common _ethercat_master _ethercat_slave
+        _cia402 _cia401 _fsoe
+        PROPERTIES INSTALL_RPATH "$ORIGIN/../lib"
+    )
+endif()
+
 # =============================================================================
 # Installation
 # =============================================================================

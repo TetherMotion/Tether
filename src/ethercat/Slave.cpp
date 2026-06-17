@@ -10,59 +10,59 @@
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/SyncManager.hpp"
+#include "tether/ethercat/DebugFlags.hpp"
 #include "tether/sii/SIIReader.hpp"
 #include "tether/platform/Platform.hpp"
 
 #include <cstdio>
 #include <cstring>
 
-// Global PDO debug flags (defined in PDOManager.cpp, global namespace)
-extern bool g_debug_rx_pdo;
-extern bool g_debug_tx_pdo;
-
 namespace EtherCAT {
 
 static const char* TAG = "Slave";
 
-// Global debug flag for al-state (shared with Master)
-bool g_debug_statemachine = false;
-
 void enableStateMachineDebug(bool enable) {
-    g_debug_statemachine = enable;
+    debug::stateMachine() = enable;
 }
 
-// Global debug flags for tx/rx packet logging (shared with Master)
-bool g_debug_tx_packets = false;
-bool g_debug_rx_packets = false;
-
 void enableTxPacketDebug(bool enable) {
-    g_debug_tx_packets = enable;
+    debug::txPackets() = enable;
 }
 
 void enableRxPacketDebug(bool enable) {
-    g_debug_rx_packets = enable;
+    debug::rxPackets() = enable;
 }
 
 void enableRxPDODebug(bool enable) {
-    g_debug_rx_pdo = enable;
+    debug::rxPDO() = enable;
 }
 
 void enableTxPDODebug(bool enable) {
-    g_debug_tx_pdo = enable;
+    debug::txPDO() = enable;
 }
-
-// Global debug flag for FMMU logging (defined in FMMUConfiguration.cpp)
-extern bool g_debug_fmmu;
 
 void enableFmmuDebug(bool enable) {
-    g_debug_fmmu = enable;
+    debug::fmmu() = enable;
 }
 
-// Global debug flag for SII/EEPROM access logging
-bool g_debug_sii_eeprom = false;
-
 void enableSIIEEPROMDebug(bool enable) {
-    g_debug_sii_eeprom = enable;
+    debug::siiEeprom() = enable;
+}
+
+void enableCoEReadsDebug(bool enable) {
+    debug::coeReads() = enable;
+}
+
+void enableCoEWritesDebug(bool enable) {
+    debug::coeWrites() = enable;
+}
+
+void enableCoERxPacketsDebug(bool enable) {
+    debug::coeRxPackets() = enable;
+}
+
+void enableCoETxPacketsDebug(bool enable) {
+    debug::coeTxPackets() = enable;
 }
 
 // ============================================================================
@@ -197,7 +197,7 @@ SlaveError Slave::transitionTo(SlaveState target) {
 }
 
 SlaveError Slave::transitionToInit() {
-    if (g_debug_statemachine) {
+    if (debug::stateMachine()) {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
@@ -219,7 +219,7 @@ SlaveError Slave::transitionToInit() {
     mailbox_configured_ = false;
     pdo_configured_ = false;
     
-    if (g_debug_statemachine) {
+    if (debug::stateMachine()) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
         TETHER_LOGI(TAG, "║  Transition Result: Slave %u => INIT SUCCESS                  ║", index_);
         TETHER_LOGI(TAG, "║  Configuration flags reset: mailbox=false, pdo=false          ║");
@@ -230,7 +230,7 @@ SlaveError Slave::transitionToInit() {
 }
 
 SlaveError Slave::transitionToPreOp() {
-    if (g_debug_statemachine) {
+    if (debug::stateMachine()) {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
@@ -259,7 +259,7 @@ SlaveError Slave::transitionToPreOp() {
         return SlaveError::TransportError;
     }
     
-    if (g_debug_statemachine) {
+    if (debug::stateMachine()) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
         TETHER_LOGI(TAG, "║  Transition Result: Slave %u => PRE_OP SUCCESS                ║", index_);
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
@@ -269,7 +269,7 @@ SlaveError Slave::transitionToPreOp() {
 }
 
 SlaveError Slave::transitionToSafeOp() {
-    if (g_debug_statemachine) {
+    if (debug::stateMachine()) {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
@@ -304,7 +304,7 @@ SlaveError Slave::transitionToSafeOp() {
         uint8_t state = 0;
         if (master_.readSlaveApplicationLayerState(index_, state)) {
             if (state == static_cast<uint8_t>(SlaveState::SAFE_OP)) {
-                if (g_debug_statemachine) {
+                if (debug::stateMachine()) {
                     TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
                     TETHER_LOGI(TAG, "║  Transition Result: Slave %u => SAFE_OP SUCCESS               ║", index_);
                     TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
@@ -343,7 +343,7 @@ SlaveError Slave::transitionToOp() {
     }
     bool fmmu_ok = fmmu_mgr_.verifyFromSlave();
 
-    if (g_debug_statemachine) {
+    if (debug::stateMachine()) {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
@@ -410,7 +410,7 @@ SlaveError Slave::transitionToOp() {
         uint8_t state = 0;
         if (master_.readSlaveApplicationLayerState(index_, state)) {
             if (state == static_cast<uint8_t>(SlaveState::OP)) {
-                if (g_debug_statemachine) {
+                if (debug::stateMachine()) {
                     TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
                     TETHER_LOGI(TAG, "║  Transition Result: Slave %u => OP SUCCESS                    ║", index_);
                     TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
@@ -436,7 +436,7 @@ SlaveError Slave::transitionToOp() {
 }
 
 SlaveError Slave::transitionToBoot() {
-    if (g_debug_statemachine) {
+    if (debug::stateMachine()) {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
@@ -455,7 +455,7 @@ SlaveError Slave::transitionToBoot() {
         return SlaveError::TransportError;
     }
     
-    if (g_debug_statemachine) {
+    if (debug::stateMachine()) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
         TETHER_LOGI(TAG, "║  Transition Result: Slave %u => BOOT SUCCESS                  ║", index_);
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");

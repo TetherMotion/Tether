@@ -34,17 +34,6 @@ namespace EtherCAT {
 
 static const char* TAG = "ethercat";
 
-// Global debug flag for al-state (shared with Slave)
-extern bool g_debug_statemachine;
-
-// Global debug flags for tx/rx packet logging (shared with Slave)
-extern bool g_debug_tx_packets;
-extern bool g_debug_rx_packets;
-
-// Global debug flags for PDO logging (shared with PDOManager)
-extern bool g_debug_rx_pdo;
-extern bool g_debug_tx_pdo;
-
 // ============================================================================
 // SII / EEPROM — delegate to existing Raw:: functions for now
 // ============================================================================

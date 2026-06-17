@@ -11,7 +11,9 @@
 #pragma once
 
 #include "tether/ethercat/CoETypes.hpp"
+#include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/SDOManager.hpp" // ISDOTransport, SDORequest, SDOResponse
+#include "logging/Logger.hpp"
 
 #include <cstdint>
 #include <deque>
@@ -218,6 +220,10 @@ public:
 template<typename T>
 std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
                                             CoETransactionOptions options) {
+    if (EtherCAT::debug::coeReads()) {
+        TETHER_LOGI("coe_mgr", "Slave %u: CoE read START index=0x%04X:%u", slave_index_, index, subindex);
+    }
+
     CoEReadTransaction<T> txn;
     txn.index = index;
     txn.subindex = subindex;
@@ -231,6 +237,9 @@ std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
     {
         std::lock_guard<std::mutex> lock(state_.read_mutex);
         if (state_.read_queue.size() >= kMaxQueueDepth) {
+            if (EtherCAT::debug::coeReads()) {
+                TETHER_LOGI("coe_mgr", "Slave %u: CoE read QUEUE FULL index=0x%04X:%u", slave_index_, index, subindex);
+            }
             CoEReadTransaction<T> fail_txn;
             fail_txn.promise.set_value(std::unexpected(CoEError::QueueFull));
             return fail_txn.promise.get_future();
@@ -240,6 +249,9 @@ std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
     state_.read_cv.notify_one();
     ensureWorkerRunning();
 
+    if (EtherCAT::debug::coeReads()) {
+        TETHER_LOGI("coe_mgr", "Slave %u: CoE read ENQUEUED index=0x%04X:%u", slave_index_, index, subindex);
+    }
     return future;
 }
 

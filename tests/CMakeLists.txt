@@ -91,7 +91,6 @@ file(GLOB_RECURSE IO_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/io/*.cpp")
 file(GLOB_RECURSE MOTION_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/motion/*.cpp")
 file(GLOB_RECURSE MOTION_PLANNER_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/*.cpp")
 file(GLOB_RECURSE MOTION_REPLANNER_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/*.cpp")
-file(GLOB_RECURSE PROFILES_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/*.cpp")
 file(GLOB_RECURSE SIMULATION_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/simulation/*.cpp")
 file(GLOB_RECURSE SLAVE_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/slave/*.cpp")
 file(GLOB_RECURSE SII_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/sii/*.cpp")
@@ -102,6 +101,30 @@ file(GLOB_RECURSE EXPORT_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/export/*.cpp"
 file(GLOB_RECURSE REPLANNER_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/replanner/*.cpp")
 file(GLOB_RECURSE PLATFORM_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/platform/*.cpp")
 file(GLOB_RECURSE MOCKS_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/mocks/*.cpp")
+
+# Per-profile test sources (split from monolithic PROFILES_TEST_SOURCES)
+file(GLOB CIA301_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia301/*.cpp")
+file(GLOB CIA401_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia401/*.cpp")
+file(GLOB CIA402_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/*.cpp")
+list(APPEND CIA402_TEST_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/profiles/test_CiA402_coverage.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/profiles/test_drives_as715n.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/profiles/test_as715n_errc11_integration.cpp"
+)
+file(GLOB CIA404_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia404/*.cpp")
+file(GLOB CIA405_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia405/*.cpp")
+list(APPEND CIA405_TEST_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/profiles/test_slave_profiles_extra.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/profiles/test_slave_profile_no_global_state.cpp"
+)
+file(GLOB CIA406_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia406/*.cpp")
+file(GLOB CIA408_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia408/*.cpp")
+file(GLOB CIA410_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia410/*.cpp")
+file(GLOB CIA417_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia417/*.cpp")
+list(APPEND CIA417_TEST_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/profiles/test_CiA430_CiA417.cpp"
+)
+file(GLOB CIA430_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia430/*.cpp")
 
 # FSoE unit tests, excluding the integration test that has its own executable
 # (tether_fsoe_integration_tests) below.
@@ -221,9 +244,81 @@ if(MOTION_REPLANNER_TEST_SOURCES)
     )
 endif()
 
-if(PROFILES_TEST_SOURCES)
-    create_module_test(profiles
-        "${PROFILES_TEST_SOURCES}"
+if(CIA301_TEST_SOURCES)
+    create_module_test(profiles_cia301
+        "${CIA301_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common;tether_ethercat_master"
+        ""
+    )
+endif()
+
+if(CIA401_TEST_SOURCES)
+    create_module_test(profiles_cia401
+        "${CIA401_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
+        ""
+    )
+endif()
+
+if(CIA402_TEST_SOURCES)
+    create_module_test(profiles_cia402
+        "${CIA402_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
+        ""
+    )
+endif()
+
+if(CIA404_TEST_SOURCES)
+    create_module_test(profiles_cia404
+        "${CIA404_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common;tether_ethercat_master"
+        ""
+    )
+endif()
+
+if(CIA405_TEST_SOURCES)
+    create_module_test(profiles_cia405
+        "${CIA405_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
+        ""
+    )
+endif()
+
+if(CIA406_TEST_SOURCES)
+    create_module_test(profiles_cia406
+        "${CIA406_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
+        ""
+    )
+endif()
+
+if(CIA408_TEST_SOURCES)
+    create_module_test(profiles_cia408
+        "${CIA408_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
+        ""
+    )
+endif()
+
+if(CIA410_TEST_SOURCES)
+    create_module_test(profiles_cia410
+        "${CIA410_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
+        ""
+    )
+endif()
+
+if(CIA417_TEST_SOURCES)
+    create_module_test(profiles_cia417
+        "${CIA417_TEST_SOURCES}"
+        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
+        ""
+    )
+endif()
+
+if(CIA430_TEST_SOURCES)
+    create_module_test(profiles_cia430
+        "${CIA430_TEST_SOURCES}"
         "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
         ""
     )

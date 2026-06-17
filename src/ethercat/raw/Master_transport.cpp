@@ -14,6 +14,7 @@
 #include "tether/ethercat/FaultDetection.hpp"
 #include "tether/ethercat/RealtimeLoop.hpp"
 #include "tether/ethercat/SyncManagerValidation.hpp"
+#include "tether/ethercat/DebugFlags.hpp"
 #include "tether/packet_interpreters/CoE.hpp"
 #include "tether/sii/SIIParser.hpp"
 #include "tether/fmmu/FMMUConfiguration.hpp"
@@ -36,17 +37,6 @@ static constexpr int       kMaxTxRetries   = 3;
 static constexpr uint32_t  kTxRetryDelayUs = 50;
 
 static const char* TAG = "ethercat";
-
-// Global debug flag for al-state (shared with Slave)
-extern bool g_debug_statemachine;
-
-// Global debug flags for tx/rx packet logging (shared with Slave)
-extern bool g_debug_tx_packets;
-extern bool g_debug_rx_packets;
-
-// Global debug flags for PDO logging (shared with PDOManager)
-extern bool g_debug_rx_pdo;
-extern bool g_debug_tx_pdo;
 
 bool Master::sendDatagram(Command cmd, uint8_t idx,
                                   SlaveAddress slave_address, RegisterAddress register_address,
@@ -447,7 +437,7 @@ static void printEtherCATFrame(const uint8_t* frame, size_t length, bool is_tx, 
 
 bool Master::sendRawFrame(const void* buf, size_t len)
 {
-    if (g_debug_tx_packets) {
+    if (debug::txPackets()) {
         printEtherCATFrame(reinterpret_cast<const uint8_t*>(buf), len, true, false);
     }
     if (iface_.send)
@@ -507,7 +497,7 @@ bool Master::sendSingleDatagram(Command cmd, uint8_t idx,
     *reinterpret_cast<uint16_t*>(payload + datalen) = host_to_le16(0);
 
     if (iface_.send) {
-        if (g_debug_tx_packets) {
+        if (debug::txPackets()) {
             printEtherCATFrame(txbuf, frame_len, true, false);
         }
         auto& clock = Tether::Platform::Clock::instance();
@@ -590,7 +580,7 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
     const auto* eth = reinterpret_cast<const EtherCAT::EthernetHeader*>(frame);
     const uint16_t ether_type = bswap16(eth->etherType_be);
     if (ether_type != EtherCAT::kEtherTypeEtherCAT) {
-        if (g_debug_rx_packets) {
+        if (debug::rxPackets()) {
             const char* name = etherTypeToString(ether_type);
             if (name) {
                 TETHER_LOGI("ec_pkt", "[RX] Non-EtherCAT frame: %s (0x%04X, len=%u)",
@@ -603,7 +593,7 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
         return;
     }
 
-    if (g_debug_rx_packets) {
+    if (debug::rxPackets()) {
         printEtherCATFrame(frame, length, false, false);
     }
 
