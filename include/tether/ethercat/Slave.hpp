@@ -51,10 +51,6 @@ namespace EtherCAT {
 // Forward declarations
 class Master;
 
-namespace SDO {
-    class SDOManager;
-}
-
 class PDOManager;
 class DCManager;
 
@@ -100,6 +96,11 @@ void enableTxPDODebug(bool enable);
  * @brief Enable or disable detailed FMMU debug logging (exact register writes)
  */
 void enableFmmuDebug(bool enable);
+
+/**
+ * @brief Enable or disable detailed SII/EEPROM access debug logging
+ */
+void enableSIIEEPROMDebug(bool enable);
 
 // ============================================================================
 // SlaveError — detailed error enum

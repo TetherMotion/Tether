@@ -57,6 +57,13 @@ void enableFmmuDebug(bool enable) {
     g_debug_fmmu = enable;
 }
 
+// Global debug flag for SII/EEPROM access logging
+bool g_debug_sii_eeprom = false;
+
+void enableSIIEEPROMDebug(bool enable) {
+    g_debug_sii_eeprom = enable;
+}
+
 // ============================================================================
 // Slave
 // ============================================================================
@@ -102,9 +109,9 @@ SlaveError Slave::configureMailbox(
                                mbox_in.address, mbox_in.length,
                                protocols);
     // Configure SDO manager with these mailbox params
-    master_.sdoManager().configureSlaveMailbox(index_,
-                                               mbox_out.address, mbox_out.length,
-                                               mbox_in.address, mbox_in.length);
+    master_.sdoManager(index_).configureMailbox(
+        mbox_out.address, mbox_out.length,
+        mbox_in.address, mbox_in.length);
     mailbox_configured_ = true;
     TETHER_LOGI( TAG,
         "Slave %u: Mailbox configured (wr=0x%04X/%u, rd=0x%04X/%u, proto=0x%04X)",
@@ -518,9 +525,9 @@ SlaveError Slave::readWatchdogStatus(uint8_t& wd_status,
 
 SlaveError Slave::sdoRead(uint16_t index, uint8_t subindex,
                                    void* data, size_t& size) {
-    auto& sdo = master_.sdoManager();
+    auto& sdo = master_.sdoManager(index_);
     size_t actual = 0;
-    if (!sdo.readSync(index_, index, subindex,
+    if (!sdo.readSync(index, subindex,
                       data, size, SDO::kDefaultSDOTimeoutMs, &actual)) {
         return SlaveError::SDOError;
     }
@@ -530,8 +537,8 @@ SlaveError Slave::sdoRead(uint16_t index, uint8_t subindex,
 
 SlaveError Slave::sdoWrite(uint16_t index, uint8_t subindex,
                                     const void* data, size_t size) {
-    auto& sdo = master_.sdoManager();
-    if (!sdo.writeSync(index_, index, subindex,
+    auto& sdo = master_.sdoManager(index_);
+    if (!sdo.writeSync(index, subindex,
                        data, size, SDO::kDefaultSDOTimeoutMs)) {
         return SlaveError::SDOError;
     }
@@ -539,38 +546,47 @@ SlaveError Slave::sdoWrite(uint16_t index, uint8_t subindex,
 }
 
 SlaveError Slave::sdoReadU8(uint16_t index, uint8_t sub, uint8_t& out) {
-    auto& sdo = master_.sdoManager();
-    if (!sdo.readU8(index_, index, sub, out)) return SlaveError::SDOError;
+    auto& sdo = master_.sdoManager(index_);
+    auto result = sdo.readU8(index, sub);
+    if (!result.has_value()) return SlaveError::SDOError;
+    out = result.value();
     return SlaveError::Ok;
 }
 
 SlaveError Slave::sdoReadU16(uint16_t index, uint8_t sub, uint16_t& out) {
-    auto& sdo = master_.sdoManager();
-    if (!sdo.readU16(index_, index, sub, out)) return SlaveError::SDOError;
+    auto& sdo = master_.sdoManager(index_);
+    auto result = sdo.readU16(index, sub);
+    if (!result.has_value()) return SlaveError::SDOError;
+    out = result.value();
     return SlaveError::Ok;
 }
 
 SlaveError Slave::sdoReadU32(uint16_t index, uint8_t sub, uint32_t& out) {
-    auto& sdo = master_.sdoManager();
-    if (!sdo.readU32(index_, index, sub, out)) return SlaveError::SDOError;
+    auto& sdo = master_.sdoManager(index_);
+    auto result = sdo.readU32(index, sub);
+    if (!result.has_value()) return SlaveError::SDOError;
+    out = result.value();
     return SlaveError::Ok;
 }
 
 SlaveError Slave::sdoWriteU8(uint16_t index, uint8_t sub, uint8_t val) {
-    auto& sdo = master_.sdoManager();
-    if (!sdo.writeU8(index_, index, sub, val)) return SlaveError::SDOError;
+    auto& sdo = master_.sdoManager(index_);
+    auto result = sdo.writeU8(index, sub, val);
+    if (!result.has_value()) return SlaveError::SDOError;
     return SlaveError::Ok;
 }
 
 SlaveError Slave::sdoWriteU16(uint16_t index, uint8_t sub, uint16_t val) {
-    auto& sdo = master_.sdoManager();
-    if (!sdo.writeU16(index_, index, sub, val)) return SlaveError::SDOError;
+    auto& sdo = master_.sdoManager(index_);
+    auto result = sdo.writeU16(index, sub, val);
+    if (!result.has_value()) return SlaveError::SDOError;
     return SlaveError::Ok;
 }
 
 SlaveError Slave::sdoWriteU32(uint16_t index, uint8_t sub, uint32_t val) {
-    auto& sdo = master_.sdoManager();
-    if (!sdo.writeU32(index_, index, sub, val)) return SlaveError::SDOError;
+    auto& sdo = master_.sdoManager(index_);
+    auto result = sdo.writeU32(index, sub, val);
+    if (!result.has_value()) return SlaveError::SDOError;
     return SlaveError::Ok;
 }
 
