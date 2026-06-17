@@ -7,6 +7,7 @@
 #include "tether/profiles/cia404/CiA404Device.hpp"
 #include "tether/profiles/cia404/CiA404Defs.hpp"
 #include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 
 using namespace CiA404;
 
@@ -15,10 +16,12 @@ class NullSDOTransport : public EtherCAT::SDO::ISDOTransport {
 public:
     bool sdoUpload(uint16_t, uint8_t*, uint16_t, uint16_t,
                    uint16_t, uint16_t, uint16_t, uint8_t,
-                   uint8_t*, size_t, size_t*) override { return false; }
+                   uint8_t*, size_t, size_t*, bool, unsigned int,
+                   unsigned int) override { return false; }
     bool sdoDownload(uint16_t, uint8_t*, uint16_t, uint16_t,
                      uint16_t, uint16_t, uint16_t, uint8_t,
-                     const uint8_t*, size_t) override { return false; }
+                     const uint8_t*, size_t, bool, unsigned int,
+                     unsigned int) override { return false; }
     uint64_t getMicroseconds() override { return 0; }
 };
 } // namespace
@@ -27,16 +30,16 @@ class CiA404CovTest : public ::testing::Test {
 protected:
     void SetUp() override {
         transport = std::make_unique<NullSDOTransport>();
-        sdo = std::make_unique<EtherCAT::SDO::SDOManager>(*transport);
-        sdo->init();
-        dev = std::make_unique<MeasuringDevice>(*sdo, 1);
+        coe = std::make_unique<EtherCAT::CoE::CoEManager>(1, *transport);
+        coe->init();
+        dev = std::make_unique<MeasuringDevice>(*coe);
     }
     void TearDown() override {
         dev.reset();
-        sdo->deinit();
+        coe->deinit();
     }
     std::unique_ptr<NullSDOTransport> transport;
-    std::unique_ptr<EtherCAT::SDO::SDOManager> sdo;
+    std::unique_ptr<EtherCAT::CoE::CoEManager> coe;
     std::unique_ptr<MeasuringDevice> dev;
 };
 
@@ -285,10 +288,6 @@ TEST_F(CiA404CovTest, GetDiagnostics) {
 
 TEST_F(CiA404CovTest, IsInitialized) {
     EXPECT_FALSE(dev->isInitialized());
-}
-
-TEST_F(CiA404CovTest, GetSlaveAddress) {
-    EXPECT_EQ(dev->getSlaveAddress(), 1u);
 }
 
 TEST_F(CiA404CovTest, GetCapabilities) {

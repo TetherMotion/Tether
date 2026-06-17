@@ -587,7 +587,7 @@ TEST_F(AS715NErC11IntegrationTest, CheckFaultDetectsErC11) {
     uint16_t mfr_error    = 0xFFFFu;
     uint16_t cia402_error = 0xFFFFu;
     const bool has_fault = AS715NFaultHandler::checkFault(
-        master.sdoManager(), 0, &mfr_error, &cia402_error);
+        master.sdoManager(0), 0, &mfr_error, &cia402_error);
 
     // ---- Correctness assertions ----
     EXPECT_TRUE(has_fault)
@@ -620,7 +620,7 @@ TEST_F(AS715NErC11IntegrationTest, ErrorParsedCorrectly) {
     uint16_t mfr_error    = 0;
     uint16_t cia402_error = 0;
     AS715NFaultHandler::checkFault(
-        master.sdoManager(), 0, &mfr_error, &cia402_error);
+        master.sdoManager(0), 0, &mfr_error, &cia402_error);
 
     // Parse exactly as the production firmware path does
     const AS715NError err = AS715NError::parse(mfr_error);

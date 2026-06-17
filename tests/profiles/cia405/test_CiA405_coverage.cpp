@@ -8,6 +8,7 @@
 #include "tether/profiles/cia405/CiA405PLC.hpp"
 #include "tether/profiles/cia405/CiA405Defs.hpp"
 #include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 
 using namespace CiA405;
 
@@ -16,10 +17,12 @@ class NullSDOTransport : public EtherCAT::SDO::ISDOTransport {
 public:
     bool sdoUpload(uint16_t, uint8_t*, uint16_t, uint16_t,
                    uint16_t, uint16_t, uint16_t, uint8_t,
-                   uint8_t*, size_t, size_t*) override { return false; }
+                   uint8_t*, size_t, size_t*, bool, unsigned int,
+                   unsigned int) override { return false; }
     bool sdoDownload(uint16_t, uint8_t*, uint16_t, uint16_t,
                      uint16_t, uint16_t, uint16_t, uint8_t,
-                     const uint8_t*, size_t) override { return false; }
+                     const uint8_t*, size_t, bool, unsigned int,
+                     unsigned int) override { return false; }
     uint64_t getMicroseconds() override { return 0; }
 };
 } // namespace
@@ -28,16 +31,16 @@ class CiA405CovTest : public ::testing::Test {
 protected:
     void SetUp() override {
         transport = std::make_unique<NullSDOTransport>();
-        sdo = std::make_unique<EtherCAT::SDO::SDOManager>(*transport);
-        sdo->init();
-        plc = std::make_unique<PLCDevice>(*sdo, 1);
+        coe = std::make_unique<EtherCAT::CoE::CoEManager>(1, *transport);
+        coe->init();
+        plc = std::make_unique<PLCDevice>(*coe);
     }
     void TearDown() override {
         plc.reset();
-        sdo->deinit();
+        coe->deinit();
     }
     std::unique_ptr<NullSDOTransport> transport;
-    std::unique_ptr<EtherCAT::SDO::SDOManager> sdo;
+    std::unique_ptr<EtherCAT::CoE::CoEManager> coe;
     std::unique_ptr<PLCDevice> plc;
 };
 
