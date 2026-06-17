@@ -10,6 +10,7 @@
 #include "tether/ethercat/Retry.hpp"
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 
 // Raw module APIs
 #include "tether/ethercat/Raw.hpp"
@@ -136,7 +137,7 @@ TEST(Raw_EEPROM_SII, ReadStringFailsSafely) {
 TEST(SDO_Async, InitDeinit) {
     // Use a local Master which owns an SDOManager
     EtherCAT::Master master;
-    auto& sdo_mgr = master.sdoManager();
+    auto& sdo_mgr = master.sdoManager(0);
     bool started = sdo_mgr.init();
     // It may return false in host environment; ensure deinit is safe
     sdo_mgr.deinit();

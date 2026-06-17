@@ -4,6 +4,7 @@
  */
 
 #include "hal/EthernetHAL.hpp"
+#include "hal/IEthernet.hpp"
 #include <cstring>
 
 namespace EtherCAT {
@@ -98,7 +99,7 @@ public:
         return true;
     }
 
-    void setRxCallback(RxCallback callback, void* user_data) override {
+    void setRxCallback(EthernetHALRxCallback callback, void* user_data) override {
         m_rx_callback = callback;
         m_user_data = user_data;
     }
@@ -152,7 +153,7 @@ private:
     bool m_loopback = false;
     uint8_t m_mac[6] = {0};
     uint16_t m_ethertype_filter = 0;
-    RxCallback m_rx_callback = nullptr;
+    EthernetHALRxCallback m_rx_callback = nullptr;
     void* m_user_data = nullptr;
     Stats m_stats = {};
 
@@ -165,6 +166,104 @@ std::unique_ptr<IEthernetHAL> createMockHAL() {
 }
 
 // ============================================================================
+// IEthernet to IEthernetHAL Adapter
+// ============================================================================
+
+class EthernetHALAdapter : public IEthernetHAL {
+public:
+    explicit EthernetHALAdapter(std::unique_ptr<IEthernet> eth)
+        : m_eth(std::move(eth)) {}
+
+    bool init(const char* interface_name) override {
+        EthernetConfig config;
+        config.interfaceName = interface_name;
+        return m_eth->init(config) == Error::OK;
+    }
+
+    void shutdown() override { m_eth->shutdown(); }
+
+    bool isInitialized() const override { return m_eth->isInitialized(); }
+
+    bool getMacAddress(uint8_t mac[6]) const override {
+        MacAddress addr;
+        if (m_eth->getMacAddress(addr) != Error::OK) return false;
+        std::memcpy(mac, addr.bytes, 6);
+        return true;
+    }
+
+    bool setMacAddress(const uint8_t mac[6]) override {
+        return m_eth->setMacAddress(MacAddress(mac)) == Error::OK;
+    }
+
+    bool transmit(const uint8_t* frame, size_t length) override {
+        return m_eth->transmit(frame, length) == Error::OK;
+    }
+
+    void setRxCallback(EthernetHALRxCallback callback, void* user_data) override {
+        m_user_callback = callback;
+        m_user_data = user_data;
+        if (callback) {
+            m_eth->setRxCallback(
+                [](const uint8_t* frame, size_t length, const RxFrameInfo&, void* userData) {
+                    auto* self = static_cast<EthernetHALAdapter*>(userData);
+                    if (self->m_user_callback) {
+                        self->m_user_callback(frame, length, self->m_user_data);
+                    }
+                },
+                this);
+        } else {
+            m_eth->setRxCallback(nullptr, nullptr);
+        }
+    }
+
+    void setEtherTypeFilter(uint16_t ethertype) override {
+        m_eth->setEthertypeFilter(ethertype);
+    }
+
+    bool setPromiscuous(bool enable) override {
+        return m_eth->setPromiscuous(enable) == Error::OK;
+    }
+
+    int poll(uint32_t timeout_ms) override {
+        return m_eth->poll(static_cast<Milliseconds>(timeout_ms));
+    }
+
+    Stats getStats() const override {
+        auto es = m_eth->getStats();
+        Stats s;
+        s.tx_frames = es.txFrames;
+        s.tx_bytes = es.txBytes;
+        s.tx_errors = es.txErrors;
+        s.rx_frames = es.rxFrames;
+        s.rx_bytes = es.rxBytes;
+        s.rx_errors = es.rxErrors;
+        s.rx_filtered = es.rxFiltered;
+        return s;
+    }
+
+    void resetStats() override { m_eth->resetStats(); }
+
+private:
+    std::unique_ptr<IEthernet> m_eth;
+    EthernetHALRxCallback m_user_callback = nullptr;
+    void* m_user_data = nullptr;
+};
+
+
+// ============================================================================
+
+#if defined(__linux__)
+std::unique_ptr<IEthernetHAL> createLinuxRawSocketHAL() {
+    return std::make_unique<EthernetHALAdapter>(createLinuxRawSocketEthernet());
+}
+#endif
+
+#ifdef ESP_PLATFORM
+std::unique_ptr<IEthernetHAL> createESP32HAL() {
+    return std::make_unique<EthernetHALAdapter>(createESP32Ethernet());
+}
+#endif
+
 // Default HAL Creation
 // ============================================================================
 
