@@ -506,67 +506,35 @@ int main(int argc, char** argv) {
         return 7;
     }
 
-    TETHER_LOGI(TAG, "Slave %d in PRE-OP — starting SDO reads", slave_idx);
+    TETHER_LOGI(TAG, "Slave %d in PRE-OP", slave_idx);
 
-    // ---- Install signal handler ----
-    std::signal(SIGINT, signalHandler);
-    std::signal(SIGTERM, signalHandler);
+    // ---- Read Identity Object 0x1018 ----
+    uint32_t vendor_id = 0;
+    uint32_t product_code = 0;
+    uint32_t revision = 0;
+    uint32_t serial = 0;
 
-    // ---- Init ncurses (unless streaming) ----
-    if (!stream_mode) {
-        setlocale(LC_ALL, "");
-        initscr();
-        cbreak();
-        noecho();
-        nodelay(stdscr, TRUE);
-        curs_set(0);
-        initColors();
+    bool identity_ok = true;
+    if (sl.sdoReadU32(0x1018, 1, vendor_id) != EtherCAT::SlaveError::Ok) { identity_ok = false; }
+    if (sl.sdoReadU32(0x1018, 2, product_code) != EtherCAT::SlaveError::Ok) { identity_ok = false; }
+    if (sl.sdoReadU32(0x1018, 3, revision) != EtherCAT::SlaveError::Ok) { identity_ok = false; }
+    if (sl.sdoReadU32(0x1018, 4, serial) != EtherCAT::SlaveError::Ok) { identity_ok = false; }
+
+    if (!identity_ok) {
+        TETHER_LOGE(TAG, "Failed to read Identity Object 0x1018");
+    } else {
+        std::cout << "=== Identity Object (0x1018) ===" << "\n";
+        std::cout << "Vendor ID:    0x" << std::hex << vendor_id << std::dec << "\n";
+        std::cout << "Product Code: 0x" << std::hex << product_code << std::dec << "\n";
+        std::cout << "Revision:     0x" << std::hex << revision << std::dec << "\n";
+        std::cout << "Serial:       0x" << std::hex << serial << std::dec << "\n";
+        std::cout.flush();
     }
 
-    // ---- Start SDO reader thread ----
-    DIState di_state;
-    std::thread reader_thread(sdoReaderThread, std::ref(sl), std::ref(di_state));
-
-    // ---- Display / stream loop ----
-    auto start_time = std::chrono::steady_clock::now();
-    auto end_time = start_time + std::chrono::seconds(static_cast<int>(duration_sec));
-
-    while (!g_cancel.load(std::memory_order_relaxed)) {
-        if (duration_sec > 0.0 && std::chrono::steady_clock::now() >= end_time) {
-            g_cancel.store(true);
-            break;
-        }
-        if (stream_mode) {
-            std::lock_guard<std::mutex> lock(di_state.mtx);
-            if (di_state.stale) {
-                std::cout << "[STALE]\n";
-            } else {
-                std::cout << "count=" << di_state.read_count << " IA=";
-                for (bool v : di_state.ia) std::cout << (v ? '1' : '0');
-                std::cout << " IB=";
-                for (bool v : di_state.ib) std::cout << (v ? '1' : '0');
-                std::cout << "\n";
-            }
-            std::cout.flush();
-        } else {
-            drawScreen(di_state);
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    }
-
-    // ---- Cleanup ----
-    g_cancel.store(true);
-    reader_thread.join();
-
-    if (!stream_mode) {
-        endwin();
-    }
-
+    // ---- Exit cleanly ----
     master.stop();
     poll_running = false;
     poll_thread.join();
     eth->shutdown();
-
-    TETHER_LOGI(TAG, "Exiting.");
-    return 0;
+    return identity_ok ? 0 : 8;
 }
