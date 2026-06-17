@@ -499,11 +499,41 @@ void CoEReadTransactionImpl<T>::execute(CoEManager& mgr) {
     txn_.promise.set_value(value);
 }
 
+// Specialization for std::vector<uint8_t> — used by the raw-buffer readSync overload
+template<>
+void CoEReadTransactionImpl<std::vector<uint8_t>>::execute(CoEManager& mgr) {
+    uint16_t wr_addr = 0, wr_len = 0, rd_addr = 0, rd_len = 0;
+    if (!mgr.resolveMailbox(wr_addr, wr_len, rd_addr, rd_len)) {
+        txn_.promise.set_value(std::unexpected(CoEError::NotConfigured));
+        return;
+    }
+
+    std::vector<uint8_t> buf(1500);
+    size_t out_len = 0;
+
+    bool ok = mgr.transport().sdoUpload(
+        mgr.slaveIndex(), mgr.mbxCounterPtr(),
+        wr_addr, wr_len, rd_addr, rd_len,
+        txn_.index, txn_.subindex,
+        buf.data(), buf.size(), &out_len,
+        mgr.isDiagEnabled(),
+        txn_.options.poll_interval_ms, txn_.options.timeout_ms);
+
+    if (!ok) {
+        txn_.promise.set_value(std::unexpected(CoEError::TransportError));
+        return;
+    }
+
+    std::vector<uint8_t> result(buf.data(), buf.data() + out_len);
+    txn_.promise.set_value(std::move(result));
+}
+
 // Explicit template instantiations
 template class CoEReadTransactionImpl<uint8_t>;
 template class CoEReadTransactionImpl<uint16_t>;
 template class CoEReadTransactionImpl<uint32_t>;
 template class CoEReadTransactionImpl<int32_t>;
+template class CoEReadTransactionImpl<std::vector<uint8_t>>;
 
 } // namespace CoE
 } // namespace EtherCAT
