@@ -8,7 +8,7 @@
  * - Fault reset is performed via 0x2031:01 (F31.00) after switching S-ON off.
  */
 #include "tether/drives/AS715N.hpp"
-#include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 #include "tether/platform/Platform.hpp"
 #include <cstdio>
 #include <cstring>
@@ -28,10 +28,10 @@ namespace Drives {
 // Fault Detection
 // ============================================================================
 
-bool AS715NFaultHandler::checkFault(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_idx, uint16_t* mfr_error, uint16_t* cia402_error) {
-    // Read StatusWord via SDO to check fault bit
+bool AS715NFaultHandler::checkFault(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx, uint16_t* mfr_error, uint16_t* cia402_error) {
     uint16_t statusword = 0;
-    if (!sdo.readU16(slave_idx, 0x6041, 0x00, statusword, 3000)) {
+    auto sw_result = sdo.readU16(slave_idx, 0x6041, 0x00, {.timeout_ms = 3000});
+    if (!sw_result.has_value()) {
         TETHER_LOGW(TAG, "Failed to read StatusWord (0x6041) from slave %u (SDO upload failed)", slave_idx);
 
         // Best-effort: still try to read fault codes.
@@ -52,6 +52,7 @@ bool AS715NFaultHandler::checkFault(EtherCAT::SDO::SDOManager& sdo, uint16_t sla
         // Conservative: if we can't read status, treat as fault/unknown.
         return true;
     }
+    statusword = sw_result.value();
 
     // CiA 402 StatusWord bit 3 = Fault
     bool has_fault = (statusword & (1u << 3)) != 0;
@@ -95,28 +96,30 @@ bool AS715NFaultHandler::checkFault(EtherCAT::SDO::SDOManager& sdo, uint16_t sla
 // Fault Reset
 // ============================================================================
 
-bool AS715NFaultHandler::resetFault(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_idx) {
+bool AS715NFaultHandler::resetFault(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx) {
     TETHER_LOGI(TAG, "Slave %u: Attempting fault reset via 0x2031:01 (F31.00)...", slave_idx);
 
     // 0 -> 1 -> 0 sequence
-    if (!sdo.writeU16(slave_idx, AS715NDevice::kControlInProgressIndex, AS715NDevice::kFaultResetSubIndex, 0, 3000)) {
+    if (!sdo.writeU16(slave_idx, AS715NDevice::kControlInProgressIndex, AS715NDevice::kFaultResetSubIndex, 0, {.timeout_ms = 3000}).has_value()) {
         TETHER_LOGE(TAG, "Slave %u: Failed to write 0x2031:01=0", slave_idx);
         return false;
     }
     Tether::Platform::Clock::instance().delayMilliseconds(50);
 
-    if (!sdo.writeU16(slave_idx, AS715NDevice::kControlInProgressIndex, AS715NDevice::kFaultResetSubIndex, 1, 3000)) {
+    if (!sdo.writeU16(slave_idx, AS715NDevice::kControlInProgressIndex, AS715NDevice::kFaultResetSubIndex, 1, {.timeout_ms = 3000}).has_value()) {
         TETHER_LOGE(TAG, "Slave %u: Failed to write 0x2031:01=1", slave_idx);
         return false;
     }
     Tether::Platform::Clock::instance().delayMilliseconds(200);
 
-    (void)sdo.writeU16(slave_idx, AS715NDevice::kControlInProgressIndex, AS715NDevice::kFaultResetSubIndex, 0, 3000);
+    (void)sdo.writeU16(slave_idx, AS715NDevice::kControlInProgressIndex, AS715NDevice::kFaultResetSubIndex, 0, {.timeout_ms = 3000});
     Tether::Platform::Clock::instance().delayMilliseconds(50);
 
     // Verify via StatusWord when possible; otherwise fall back to 0x203F external code cleared.
     uint16_t statusword = 0;
-    if (sdo.readU16(slave_idx, 0x6041, 0x00, statusword, 3000)) {
+    auto sw_result = sdo.readU16(slave_idx, 0x6041, 0x00, {.timeout_ms = 3000});
+    if (sw_result.has_value()) {
+        statusword = sw_result.value();
         const bool fault_cleared = (statusword & (1u << 3)) == 0;
         if (fault_cleared) {
             TETHER_LOGI(TAG, "Slave %u: Fault CLEARED (StatusWord=0x%04X)", slave_idx, statusword);
@@ -140,7 +143,7 @@ bool AS715NFaultHandler::resetFault(EtherCAT::SDO::SDOManager& sdo, uint16_t sla
 // DC Sync Error Recovery
 // ============================================================================
 
-bool AS715NFaultHandler::handleNoSyncError(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_idx, uint8_t max_attempts) {
+bool AS715NFaultHandler::handleNoSyncError(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx, uint8_t max_attempts) {
     // First check if the current error is indeed a DC sync error
     uint16_t mfr = readManufacturerFault(sdo, slave_idx);
 

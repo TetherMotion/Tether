@@ -114,7 +114,7 @@ target_compile_definitions(tether_ethercat_master PUBLIC TETHER_COMPILE_MASTER=1
 
 set_target_properties(tether_ethercat_master PROPERTIES
     POSITION_INDEPENDENT_CODE ON
-    CXX_STANDARD 20
+    CXX_STANDARD 23
     CXX_STANDARD_REQUIRED ON
 )
 

@@ -6,6 +6,7 @@
 #include "tether/ethercat/Slave.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/SyncManager.hpp"
@@ -539,7 +540,7 @@ SlaveError Slave::sdoWrite(uint16_t index, uint8_t subindex,
                                     const void* data, size_t size) {
     auto& sdo = master_.sdoManager(index_);
     if (!sdo.writeSync(index, subindex,
-                       data, size, SDO::kDefaultSDOTimeoutMs)) {
+                       data, size, {.timeout_ms = SDO::kDefaultSDOTimeoutMs})) {
         return SlaveError::SDOError;
     }
     return SlaveError::Ok;

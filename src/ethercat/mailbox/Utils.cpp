@@ -52,7 +52,7 @@ void dumpHeaderAndStatus(Master& master,
 
     // Peek at mailbox header content (mailbox-buffer-specific, not SM-register-specific)
     uint16_t mbx_wr_addr = 0, mbx_wr_len = 0, mbx_rd_addr = 0, mbx_rd_len = 0;
-    bool mbx_cfg = master.sdoManager().getSlaveMailbox(slave_idx,
+    bool mbx_cfg = master.sdoManager(slave_idx).getMailbox(
                                                       &mbx_wr_addr, &mbx_wr_len,
                                                       &mbx_rd_addr, &mbx_rd_len);
     if (mbx_cfg) {

@@ -8,7 +8,7 @@
 #include "tether/profiles/cia402/1Cxx-SyncManagerParameters.hpp"
 #include "tether/ethercat/Master.hpp"  // for logging context
 #include "tether/ethercat/SDO.hpp"
-#include "tether/ethercat/SDOManager.hpp"  // for full SDOManager definition
+#include "tether/ethercat/CoEManager.hpp"  // for CoEManager
 #include "logging/Logger.hpp"  // for TETHER_LOGI/W
 
 namespace EtherCAT {
@@ -35,14 +35,13 @@ namespace Utils {
  * This simply forwards to `SDOManager::readSync` using the index/subindex
  * stored in @p entry.  The caller must supply a buffer of appropriate size.
  */
-inline bool readSyncEntry(SDO::SDOManager& sdo,
-                          uint16_t slave_idx,
+inline bool readSyncEntry(CoE::CoEManager& coe,
                           const ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry& entry,
                           void* buffer,
                           size_t len,
                           uint32_t timeout_ms = 2000)
 {
-    return sdo.readSync(slave_idx, entry.index, entry.subindex, buffer, len, timeout_ms);
+    return coe.readSync(entry.index, entry.subindex, buffer, len, timeout_ms);
 }
 
 /**
@@ -51,14 +50,13 @@ inline bool readSyncEntry(SDO::SDOManager& sdo,
  * Automatically infers the buffer size from the template parameter.
  */
 template<typename T>
-inline bool readSync(SDO::SDOManager& sdo,
-                     uint16_t slave_idx,
+inline bool readSync(CoE::CoEManager& coe,
                      const ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry& entry,
                      T& out,
                      uint32_t timeout_ms = 2000)
 {
     static_assert(std::is_trivially_copyable_v<T>, "T must be trivially copyable");
-    return readSyncEntry(sdo, slave_idx, entry, &out, sizeof(out), timeout_ms);
+    return readSyncEntry(coe, entry, &out, sizeof(out), timeout_ms);
 }
 
 /**
@@ -67,14 +65,13 @@ inline bool readSync(SDO::SDOManager& sdo,
  * For simple integer types the value is logged numerically; for others the
  * raw bytes are printed in hex.
  */
-inline void printSyncEntry(SDO::SDOManager& sdo,
-                           uint16_t slave_idx,
+inline void printSyncEntry(CoE::CoEManager& coe,
                            const ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry& entry,
                            const char* tag = "SyncMgr",
                            uint32_t timeout_ms = 2000)
 {
     char buf[8] = {0};
-    if (!readSyncEntry(sdo, slave_idx, entry, buf, sizeof(buf), timeout_ms)) {
+    if (!readSyncEntry(coe, entry, buf, sizeof(buf), timeout_ms)) {
         TETHER_LOGW(tag, "0x%04X:%02X (%s) read FAILED", entry.index, entry.subindex, entry.name);
         return;
     }
@@ -117,8 +114,7 @@ inline void printSyncEntry(SDO::SDOManager& sdo,
  * @param timeout_ms SDO timeout, defaults to 2000 ms.
  * @return true if the read succeeded, false otherwise.
  */
-inline bool readSyncMode(SDO::SDOManager& sdo,
-                         uint16_t slave_idx,
+inline bool readSyncMode(CoE::CoEManager& coe,
                          uint8_t sm_index,
                          uint16_t& out_mode,
                          uint32_t timeout_ms = 2000)
@@ -126,35 +122,33 @@ inline bool readSyncMode(SDO::SDOManager& sdo,
     // delegate to generic entry-based reader
     using namespace CiA301::Parameters1Cxx;
     auto entry = (sm_index == 2) ? SM2SyncMode : SM3SyncMode;
-    return readSync(sdo, slave_idx, entry, out_mode, timeout_ms);
+    return readSync(coe, entry, out_mode, timeout_ms);
 }
 
 /**
  * @brief Read the cycle time (nanoseconds) for the given SyncManager.
  */
-inline bool readCycleTime(SDO::SDOManager& sdo,
-                          uint16_t slave_idx,
+inline bool readCycleTime(CoE::CoEManager& coe,
                           uint8_t sm_index,
                           uint32_t& out_time,
                           uint32_t timeout_ms = 2000)
 {
     using namespace CiA301::Parameters1Cxx;
     auto entry = (sm_index == 2) ? SM2CycleTime : SM3CycleTime;
-    return readSync(sdo, slave_idx, entry, out_time, timeout_ms);
+    return readSync(coe, entry, out_time, timeout_ms);
 }
 
 /**
  * @brief Read the supported sync-types bitmask for the given SyncManager.
  */
-inline bool readSupportedSyncTypes(SDO::SDOManager& sdo,
-                                   uint16_t slave_idx,
+inline bool readSupportedSyncTypes(CoE::CoEManager& coe,
                                    uint8_t sm_index,
                                    uint16_t& out_mask,
                                    uint32_t timeout_ms = 2000)
 {
     using namespace CiA301::Parameters1Cxx;
     auto entry = (sm_index == 2) ? SM2SupportedSyncTypes : SM3SupportedSyncTypes;
-    return readSync(sdo, slave_idx, entry, out_mask, timeout_ms);
+    return readSync(coe, entry, out_mask, timeout_ms);
 }
 
 // ---------------------------------------------------------------------------
@@ -216,34 +210,31 @@ inline void printAllSMEscRegisters(EtherCAT::Master& master,
 // Printing helpers
 // ---------------------------------------------------------------------------
 
-inline void printSyncMode(SDO::SDOManager& sdo,
-                          uint16_t slave_idx,
+inline void printSyncMode(CoE::CoEManager& coe,
                           uint8_t sm_index,
                           const char* tag = "SyncMgr")
 {
     using namespace CiA301::Parameters1Cxx;
     auto entry = (sm_index == 2) ? SM2SyncMode : SM3SyncMode;
-    printSyncEntry(sdo, slave_idx, entry, tag);
+    printSyncEntry(coe, entry, tag);
 }
 
-inline void printCycleTime(SDO::SDOManager& sdo,
-                           uint16_t slave_idx,
+inline void printCycleTime(CoE::CoEManager& coe,
                            uint8_t sm_index,
                            const char* tag = "SyncMgr")
 {
     using namespace CiA301::Parameters1Cxx;
     auto entry = (sm_index == 2) ? SM2CycleTime : SM3CycleTime;
-    printSyncEntry(sdo, slave_idx, entry, tag);
+    printSyncEntry(coe, entry, tag);
 }
 
-inline void printSupportedSyncTypes(SDO::SDOManager& sdo,
-                                    uint16_t slave_idx,
+inline void printSupportedSyncTypes(CoE::CoEManager& coe,
                                     uint8_t sm_index,
                                     const char* tag = "SyncMgr")
 {
     using namespace CiA301::Parameters1Cxx;
     auto entry = (sm_index == 2) ? SM2SupportedSyncTypes : SM3SupportedSyncTypes;
-    printSyncEntry(sdo, slave_idx, entry, tag);
+    printSyncEntry(coe, entry, tag);
 }
 
 /**
@@ -257,16 +248,16 @@ inline void printSyncDiagnostics(EtherCAT::Master& master,
                                  const char* tag = "SyncMgr")
 {
     using namespace CiA301::Parameters1Cxx;
-    auto& sdo = master.sdoManager();
+    auto& coe = master.sdoManager(slave_idx);
 
     TETHER_LOGI(tag, "  ----- SM Sync Mode (0x%04X / 0x%04X) -----",
              kIdxSM2Sync, kIdxSM3Sync);
 
-    printSyncMode(sdo, slave_idx, 2, tag);
-    printSyncMode(sdo, slave_idx, 3, tag);
+    printSyncMode(coe, 2, tag);
+    printSyncMode(coe, 3, tag);
 
-    printCycleTime(sdo, slave_idx, 2, tag);
-    printSupportedSyncTypes(sdo, slave_idx, 2, tag);
+    printCycleTime(coe, 2, tag);
+    printSupportedSyncTypes(coe, 2, tag);
 
     TETHER_LOGI(tag, "  -------------------------------------------");
 }

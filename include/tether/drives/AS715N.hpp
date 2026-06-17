@@ -16,7 +16,7 @@
 #include "tether/drives/AS715NErrors.hpp"
 #include "tether/drives/AS715N/AS715NPDO.hpp"
 
-namespace EtherCAT { namespace SDO { class SDOManager; } }
+namespace EtherCAT { namespace CoE { class CoEManager; } }
 
 namespace EtherCAT {
 namespace Drives {
@@ -28,20 +28,20 @@ namespace Drives {
 
 class AS715NFaultHandler {
 public:
-    static bool checkFault(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_idx, uint16_t* mfr_error, uint16_t* cia402_error);
+    static bool checkFault(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx, uint16_t* mfr_error, uint16_t* cia402_error);
 
     // Fault reset via 0x2031:01 (F31.00). Returns true if fault appears cleared.
-    static bool resetFault(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_idx);
+    static bool resetFault(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx);
 
-    static bool handleNoSyncError(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_idx, uint8_t max_attempts = 3);
+    static bool handleNoSyncError(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx, uint8_t max_attempts = 3);
 
     // Returns external manufacturer fault code (0x203F low-16).
-    static uint16_t readManufacturerFault(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_idx);
+    static uint16_t readManufacturerFault(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx);
 
     // Returns both internal and external parts of 0x203F.
-    static AS715NManufacturerFault203F readManufacturerFaultExtended(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_idx);
+    static AS715NManufacturerFault203F readManufacturerFaultExtended(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx);
 
-    static uint16_t readCiA402Error(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_idx);
+    static uint16_t readCiA402Error(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx);
 };
 
 }  // namespace Drives

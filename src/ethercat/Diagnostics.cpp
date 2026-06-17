@@ -3,6 +3,7 @@
 #include "logging/Logger.hpp"
 #include "tether/ethercat/FaultDetection.hpp"
 #include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 #include "tether/sii/SIIReader.hpp"
 
 namespace {
@@ -58,7 +59,7 @@ void logPreOperationalMailboxDiagnostics(
         uint16_t write_length = 0;
         uint16_t read_address = 0;
         uint16_t read_length = 0;
-        if (master.sdoManager().getSlaveMailbox(slave_index,
+        if (master.sdoManager(slave_index).getMailbox(
                                                 &write_address,
                                                 &write_length,
                                                 &read_address,

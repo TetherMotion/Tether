@@ -10,7 +10,7 @@
 #include "tether/ethercat/DC.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/LogicalAddressManager.hpp"
-#include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 #include "tether/ethercat/FoE.hpp"
 #include "tether/ethercat/VoE.hpp"
 #include "tether/ethercat/EoE.hpp"
@@ -280,37 +280,41 @@ private:
 
 class Master::MasterSDOTransport : public ::EtherCAT::SDO::ISDOTransport {
 public:
-    explicit MasterSDOTransport(Master& master, ::EtherCAT::SDO::SDOManager* mgr = nullptr)
-        : master_(master), mgr_(mgr) {}
-
-    void setManager(::EtherCAT::SDO::SDOManager* mgr) { mgr_ = mgr; }
+    explicit MasterSDOTransport(Master& master)
+        : master_(master) {}
 
     bool sdoUpload(uint16_t slave_index, uint8_t* mbx_counter,
                    uint16_t mbx_wr_addr, uint16_t mbx_wr_len,
                    uint16_t mbx_rd_addr, uint16_t mbx_rd_len,
                    uint16_t index, uint8_t sub,
-                   uint8_t* out, size_t out_cap, size_t* out_len) override
+                   uint8_t* out, size_t out_cap, size_t* out_len,
+                   bool diag_enabled = false,
+                   unsigned int poll_interval_ms = 5,
+                   unsigned int transaction_timeout_ms = 1000) override
     {
         uint16_t adp = Master::adpForSlaveIndex(slave_index);
-        bool diag = (mgr_ && mgr_->isDiagEnabled());
         return master_.coeSdoUpload(adp, mbx_counter,
                                     mbx_wr_addr, mbx_wr_len,
                                     mbx_rd_addr, mbx_rd_len,
-                                    index, sub, out, out_cap, out_len, diag);
+                                    index, sub, out, out_cap, out_len, diag_enabled,
+                                    poll_interval_ms, transaction_timeout_ms);
     }
 
     bool sdoDownload(uint16_t slave_index, uint8_t* mbx_counter,
                      uint16_t mbx_wr_addr, uint16_t mbx_wr_len,
                      uint16_t mbx_rd_addr, uint16_t mbx_rd_len,
                      uint16_t index, uint8_t sub,
-                     const uint8_t* data, size_t data_len) override
+                     const uint8_t* data, size_t data_len,
+                     bool diag_enabled = false,
+                     unsigned int poll_interval_ms = 5,
+                     unsigned int transaction_timeout_ms = 1000) override
     {
         uint16_t adp = Master::adpForSlaveIndex(slave_index);
-        bool diag = (mgr_ && mgr_->isDiagEnabled());
         return master_.coeSdoDownload(adp, mbx_counter,
                                       mbx_wr_addr, mbx_wr_len,
                                       mbx_rd_addr, mbx_rd_len,
-                                      index, sub, data, data_len, diag);
+                                      index, sub, data, data_len, diag_enabled,
+                                      poll_interval_ms, transaction_timeout_ms);
     }
 
     uint64_t getMicroseconds() override {
@@ -319,7 +323,6 @@ public:
 
 private:
     Master& master_;
-    ::EtherCAT::SDO::SDOManager* mgr_;
 };
 
 
@@ -342,11 +345,8 @@ Master::Master(const Config& config)
         TETHER_LOGE(TAG, "Failed to initialize master packet router");
     }
 
-    // Create instance-based SDO manager
-    auto* transport_ptr = new MasterSDOTransport(*this);
-    sdo_transport_.reset(transport_ptr);
-    sdo_manager_ = std::make_unique<::EtherCAT::SDO::SDOManager>(*sdo_transport_);
-    transport_ptr->setManager(sdo_manager_.get());
+    // Create instance-based SDO transport (shared across all per-slave CoEManagers)
+    sdo_transport_ = std::make_unique<MasterSDOTransport>(*this);
 
     // Create thin wrapper sub-managers so callers may use e.g. master.dc() immediately.
     // Sub-managers are lightweight wrappers that forward to global/free-function
@@ -355,7 +355,6 @@ Master::Master(const Config& config)
     pdo_    = std::make_unique<PDOManager>(*pdo_transport_);
     logical_addr_mgr_ = std::make_unique<LogicalAddressManager>(*pdo_transport_);
     pdo_->setLogicalAddressManager(logical_addr_mgr_.get());
-    sdo_manager_->setPDOManager(pdo_.get());
     dc_     = std::make_unique<DCManager>(*this);
     foe_    = std::make_unique<FoEManager>(*this);
     voe_    = std::make_unique<VoEManager>(*this);
@@ -397,11 +396,14 @@ void Master::start(const NetworkInterface& iface, const uint8_t src_mac[6])
     std::memcpy(src_mac_, src_mac, 6);
     ensureRxQueues();
 
-    // Initialize the instance-based SDO subsystem
-    if (!sdo_manager_->init()) {
-        TETHER_LOGW(TAG, "SDO subsystem failed to initialize");
-    } else {
-        TETHER_LOGI(TAG, "SDO subsystem initialized");
+    // Initialize per-slave CoEManagers
+    for (size_t i = 0; i < sdo_managers_.size(); ++i) {
+        if (!sdo_managers_[i]->init()) {
+            TETHER_LOGW(TAG, "SDO subsystem failed to initialize for slave %zu", i);
+        }
+    }
+    if (!sdo_managers_.empty()) {
+        TETHER_LOGI(TAG, "SDO subsystem initialized for %zu slave(s)", sdo_managers_.size());
     }
 
     running_.store(true, std::memory_order_release);
@@ -416,9 +418,9 @@ void Master::stop()
     stopMotionControlLoop();
     running_.store(false, std::memory_order_release);
 
-    // Shutdown instance-based SDO subsystem
-    if (sdo_manager_) {
-        sdo_manager_->deinit();
+    // Shutdown per-slave CoEManagers
+    for (auto& mgr : sdo_managers_) {
+        if (mgr) mgr->deinit();
     }
 }
 
@@ -541,12 +543,15 @@ bool Master::coeSdoUpload(uint16_t adp, uint8_t* inout_mbx_cnt,
                                    uint16_t mbx_rd_addr, uint16_t mbx_rd_len,
                                    uint16_t index, uint8_t sub,
                                    uint8_t* out, size_t out_cap, size_t* out_len,
-                                   bool diag_enabled)
+                                   bool diag_enabled,
+                                   unsigned int poll_interval_ms,
+                                   unsigned int transaction_timeout_ms)
 {
     return Raw::coe_sdo_upload(*this, adp, inout_mbx_cnt,
                                mbx_wr_addr, mbx_wr_len,
                                mbx_rd_addr, mbx_rd_len,
-                               index, sub, out, out_cap, out_len, diag_enabled);
+                               index, sub, out, out_cap, out_len, diag_enabled,
+                               poll_interval_ms, transaction_timeout_ms);
 }
 
 bool Master::coeSdoDownload(uint16_t adp, uint8_t* inout_mbx_cnt,
@@ -554,12 +559,15 @@ bool Master::coeSdoDownload(uint16_t adp, uint8_t* inout_mbx_cnt,
                                      uint16_t mbx_rd_addr, uint16_t mbx_rd_len,
                                      uint16_t index, uint8_t sub,
                                      const uint8_t* data, size_t data_len,
-                                     bool diag_enabled)
+                                     bool diag_enabled,
+                                     unsigned int poll_interval_ms,
+                                     unsigned int transaction_timeout_ms)
 {
     return Raw::coe_sdo_download(*this, adp, inout_mbx_cnt,
                                  mbx_wr_addr, mbx_wr_len,
                                  mbx_rd_addr, mbx_rd_len,
-                                 index, sub, data, data_len, diag_enabled);
+                                 index, sub, data, data_len, diag_enabled,
+                                 poll_interval_ms, transaction_timeout_ms);
 }
 
 // ============================================================================
@@ -594,7 +602,22 @@ bool Master::wasFaultDiagnosed(uint16_t slave_index) const
 
 PDOManager&    Master::pdo()    { return *pdo_; }
 LogicalAddressManager& Master::logicalAddressManager() { return *logical_addr_mgr_; }
-::EtherCAT::SDO::SDOManager& Master::sdoManager() { return *sdo_manager_; }
+::EtherCAT::CoE::CoEManager& Master::sdoManager(uint16_t slave_index) {
+    if (slave_index >= sdo_managers_.size()) {
+        // Lazily expand the vector if needed
+        size_t old_size = sdo_managers_.size();
+        sdo_managers_.resize(slave_index + 1);
+        for (size_t i = old_size; i <= slave_index; ++i) {
+            sdo_managers_[i] = std::make_unique<::EtherCAT::CoE::CoEManager>(
+                static_cast<uint16_t>(i), *sdo_transport_);
+            sdo_managers_[i]->setPDOManager(pdo_.get());
+            if (running_.load()) {
+                sdo_managers_[i]->init();
+            }
+        }
+    }
+    return *sdo_managers_[slave_index];
+}
 DCManager&     Master::dc()     { return *dc_; }
 FoEManager&    Master::foe()    { return *foe_; }
 VoEManager&    Master::voe()    { return *voe_; }

@@ -56,15 +56,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <functional>
-#include <atomic>
-#include <deque>
-#include <map>
-#include <memory>
-#include <mutex>
-#include <thread>
-#include <condition_variable>
 
-#include "tether/platform/EspCompat.hpp"
 #include "tether/ethercat/Types.hpp"
 #ifdef ESP_PLATFORM
 #include "esp_eth_driver.h"
@@ -283,7 +275,10 @@ public:
                            uint16_t mbx_wr_addr, uint16_t mbx_wr_len,
                            uint16_t mbx_rd_addr, uint16_t mbx_rd_len,
                            uint16_t index, uint8_t sub,
-                           uint8_t* out, size_t out_cap, size_t* out_len) = 0;
+                           uint8_t* out, size_t out_cap, size_t* out_len,
+                           bool diag_enabled = false,
+                           unsigned int poll_interval_ms = 5,
+                           unsigned int transaction_timeout_ms = 1000) = 0;
 
     /**
      * @brief Perform a CoE SDO download (write to slave)
@@ -304,219 +299,15 @@ public:
                              uint16_t mbx_wr_addr, uint16_t mbx_wr_len,
                              uint16_t mbx_rd_addr, uint16_t mbx_rd_len,
                              uint16_t index, uint8_t sub,
-                             const uint8_t* data, size_t data_len) = 0;
+                             const uint8_t* data, size_t data_len,
+                             bool diag_enabled = false,
+                             unsigned int poll_interval_ms = 5,
+                             unsigned int transaction_timeout_ms = 1000) = 0;
 
     /**
      * @brief Get current monotonic time in microseconds
      */
     virtual uint64_t getMicroseconds() = 0;
-};
-
-// ============================================================================
-// SDOManager — owns all state (no globals)
-// ============================================================================
-
-/**
- * @brief Instance-based SDO manager.
- *
- * Each SDOManager owns its own request queue, worker thread, slave
- * mailbox configurations, and response map.  Multiple independent
- * instances can co-exist.  Network I/O is performed through the
- * injected ISDOTransport.
- */
-class SDOManager {
-public:
-    static constexpr size_t kMaxSlaves = 16;
-    static constexpr size_t kQueueDepth = 16;
-    /// Maximum age (microseconds) before a queued request times out
-    static constexpr uint64_t kQueueTimeoutUs = 5000000ULL;
-
-    /**
-     * @brief Construct an SDOManager with the given transport.
-     *
-     * The transport reference must outlive the SDOManager.
-     */
-    explicit SDOManager(ISDOTransport& transport);
-
-    /**
-     * @brief Destructor — calls deinit() if still initialized.
-     */
-    ~SDOManager();
-
-    // Non-copyable
-    SDOManager(const SDOManager&) = delete;
-    SDOManager& operator=(const SDOManager&) = delete;
-
-    // ----- Lifecycle -----
-
-    /**
-     * @brief Initialize the manager and start the worker thread.
-     * @return true on success
-     */
-    bool init();
-
-    /**
-     * @brief Stop the worker thread and clear all state.
-     */
-    void deinit();
-
-    /**
-     * @brief Check if the manager is initialized (worker running).
-     */
-    bool isInitialized() const;
-
-    // ----- Slave Mailbox Configuration -----
-
-    /**
-     * @brief Configure slave mailbox information for SDO
-     *
-     * @param slave_index  Slave index (0-based)
-     * @param mbx_write_addr Mailbox write address (Master→Slave)
-     * @param mbx_write_len  Mailbox write length
-     * @param mbx_read_addr  Mailbox read address (Slave→Master)
-     * @param mbx_read_len   Mailbox read length
-     */
-    void configureSlaveMailbox(uint16_t slave_index,
-                               uint16_t mbx_write_addr, uint16_t mbx_write_len,
-                               uint16_t mbx_read_addr, uint16_t mbx_read_len);
-
-    /**
-     * @brief Query configured mailbox info for a slave
-     * @return true if the slave has been configured
-     */
-    bool getSlaveMailbox(uint16_t slave_index,
-                         uint16_t* mbx_write_addr, uint16_t* mbx_write_len,
-                         uint16_t* mbx_read_addr, uint16_t* mbx_read_len) const;
-
-    // ----- Async API -----
-
-    /**
-     * @brief Queue an asynchronous SDO request
-     * @return Request ID on success, 0 on failure (queue full)
-     */
-    uint32_t queueRequest(SDORequest& request);
-
-    /**
-     * @brief Check if an SDO request has completed
-     */
-    bool isComplete(uint32_t request_id);
-
-    /**
-     * @brief Get the response for a completed request (removes it)
-     */
-    bool getResponse(uint32_t request_id, SDOResponse& response);
-
-    /**
-     * @brief Get the number of pending SDO requests
-     */
-    size_t pendingCount();
-
-    // ----- Sync API -----
-
-    /**
-     * @brief Read an SDO value synchronously (blocking)
-     */
-    bool readSync(uint16_t slave_index, uint16_t index, uint8_t sub,
-                  void* data, size_t max_size, uint32_t timeout_ms,
-                  size_t* actual_size = nullptr);
-
-    /**
-     * @brief Write an SDO value synchronously (blocking)
-     */
-    bool writeSync(uint16_t slave_index, uint16_t index, uint8_t sub,
-                   const void* data, size_t size, uint32_t timeout_ms);
-
-    // ----- Type-Safe Sync Helpers -----
-
-    bool readU8(uint16_t slave, uint16_t idx, uint8_t sub,
-                uint8_t& value, uint32_t timeout_ms = kDefaultSDOTimeoutMs) {
-        return readSync(slave, idx, sub, &value, sizeof(value), timeout_ms);
-    }
-    bool readU16(uint16_t slave, uint16_t idx, uint8_t sub,
-                 uint16_t& value, uint32_t timeout_ms = kDefaultSDOTimeoutMs) {
-        return readSync(slave, idx, sub, &value, sizeof(value), timeout_ms);
-    }
-    bool readU32(uint16_t slave, uint16_t idx, uint8_t sub,
-                 uint32_t& value, uint32_t timeout_ms = kDefaultSDOTimeoutMs) {
-        return readSync(slave, idx, sub, &value, sizeof(value), timeout_ms);
-    }
-    bool readI32(uint16_t slave, uint16_t idx, uint8_t sub,
-                 int32_t& value, uint32_t timeout_ms = kDefaultSDOTimeoutMs) {
-        return readSync(slave, idx, sub, &value, sizeof(value), timeout_ms);
-    }
-    bool writeU8(uint16_t slave, uint16_t idx, uint8_t sub,
-                 uint8_t value, uint32_t timeout_ms = kDefaultSDOTimeoutMs) {
-        return writeSync(slave, idx, sub, &value, sizeof(value), timeout_ms);
-    }
-    bool writeU16(uint16_t slave, uint16_t idx, uint8_t sub,
-                  uint16_t value, uint32_t timeout_ms = kDefaultSDOTimeoutMs) {
-        return writeSync(slave, idx, sub, &value, sizeof(value), timeout_ms);
-    }
-    bool writeU32(uint16_t slave, uint16_t idx, uint8_t sub,
-                  uint32_t value, uint32_t timeout_ms = kDefaultSDOTimeoutMs) {
-        return writeSync(slave, idx, sub, &value, sizeof(value), timeout_ms);
-    }
-    bool writeI32(uint16_t slave, uint16_t idx, uint8_t sub,
-                  int32_t value, uint32_t timeout_ms = kDefaultSDOTimeoutMs) {
-        return writeSync(slave, idx, sub, &value, sizeof(value), timeout_ms);
-    }
-
-    // ----- Diagnostics -----
-
-    // ----- PDO integration -----
-
-    /** Inject PDOManager so SDO can read slave SM configs from it. */
-    void setPDOManager(PDOManager* mgr) { pdo_manager_ = mgr; }
-    PDOManager* pdoManager() const { return pdo_manager_; }
-
-    void setDiagEnabled(bool enabled);
-    bool isDiagEnabled() const;
-
-private:
-    struct SlaveMailboxConfig {
-        uint16_t write_addr = 0;
-        uint16_t write_len  = 0;
-        uint16_t read_addr  = 0;
-        uint16_t read_len   = 0;
-        uint8_t  mbx_counter = 1;
-        bool     configured  = false;
-    };
-
-    struct SyncContext {
-        std::mutex mutex;
-        std::condition_variable cv;
-        bool complete = false;
-        SDOResponse response{};
-    };
-
-    struct QueuedRequest {
-        SDORequest request{};
-        std::shared_ptr<SyncContext> sync_ctx{};
-        uint64_t enqueue_time_us = 0;
-    };
-
-    void workerFunction();
-    bool executeRequest(const SDORequest& req, SDOResponse& resp);
-
-    ISDOTransport& transport_;
-
-    std::deque<QueuedRequest> queue_;
-    mutable std::mutex queue_mutex_;
-    std::condition_variable queue_cv_;
-
-    std::thread worker_thread_;
-    volatile bool shutdown_requested_ = false;
-    std::atomic<uint32_t> next_request_id_{1};
-
-    SlaveMailboxConfig slave_mbx_[kMaxSlaves]{};
-
-    mutable std::mutex responses_mutex_;
-    std::map<uint32_t, SDOResponse> completed_responses_;
-
-    std::atomic<bool> diag_enabled_{false};
-    bool initialized_ = false;
-
-    PDOManager* pdo_manager_ = nullptr;
 };
 
 // ============================================================================

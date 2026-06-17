@@ -39,26 +39,26 @@ bool CiA402Drive::assignFixedPDOs(uint16_t rxpdo_index, uint16_t txpdo_index,
     bool sdo_ok = true;
 
     // SM2 (RxPDO) assignment — best effort
-    if (!m_master->sdoManager().writeU8(m_slave_index, CiA301::SyncManager2PDOAssign, 0, zero, m_sdo_timeout_ms)) {
+    if (!m_master->sdoManager(m_slave_index).writeU8( CiA301::SyncManager2PDOAssign, 0, zero, {.timeout_ms = m_sdo_timeout_ms}).has_value()) {
         TETHER_LOGW(TAG, "Slave %u: Failed to clear SM2 PDO count (may be fixed)", m_slave_index);
     }
-    if (!m_master->sdoManager().writeU16(m_slave_index, CiA301::SyncManager2PDOAssign, 1, rxpdo_index, m_sdo_timeout_ms)) {
+    if (!m_master->sdoManager(m_slave_index).writeU16( CiA301::SyncManager2PDOAssign, 1, rxpdo_index, {.timeout_ms = m_sdo_timeout_ms}).has_value()) {
         TETHER_LOGW(TAG, "Slave %u: Failed to assign RxPDO 0x%04X to SM2", m_slave_index, rxpdo_index);
         sdo_ok = false;
     }
-    if (!m_master->sdoManager().writeU8(m_slave_index, CiA301::SyncManager2PDOAssign, 0, one, m_sdo_timeout_ms)) {
+    if (!m_master->sdoManager(m_slave_index).writeU8( CiA301::SyncManager2PDOAssign, 0, one, {.timeout_ms = m_sdo_timeout_ms}).has_value()) {
         TETHER_LOGW(TAG, "Slave %u: Failed to set SM2 PDO count", m_slave_index);
     }
 
     // SM3 (TxPDO) assignment — best effort
-    if (!m_master->sdoManager().writeU8(m_slave_index, CiA301::SyncManager3PDOAssign, 0, zero, m_sdo_timeout_ms)) {
+    if (!m_master->sdoManager(m_slave_index).writeU8( CiA301::SyncManager3PDOAssign, 0, zero, {.timeout_ms = m_sdo_timeout_ms}).has_value()) {
         TETHER_LOGW(TAG, "Slave %u: Failed to clear SM3 PDO count (may be fixed)", m_slave_index);
     }
-    if (!m_master->sdoManager().writeU16(m_slave_index, CiA301::SyncManager3PDOAssign, 1, txpdo_index, m_sdo_timeout_ms)) {
+    if (!m_master->sdoManager(m_slave_index).writeU16( CiA301::SyncManager3PDOAssign, 1, txpdo_index, {.timeout_ms = m_sdo_timeout_ms}).has_value()) {
         TETHER_LOGW(TAG, "Slave %u: Failed to assign TxPDO 0x%04X to SM3", m_slave_index, txpdo_index);
         sdo_ok = false;
     }
-    if (!m_master->sdoManager().writeU8(m_slave_index, CiA301::SyncManager3PDOAssign, 0, one, m_sdo_timeout_ms)) {
+    if (!m_master->sdoManager(m_slave_index).writeU8( CiA301::SyncManager3PDOAssign, 0, one, {.timeout_ms = m_sdo_timeout_ms}).has_value()) {
         TETHER_LOGW(TAG, "Slave %u: Failed to set SM3 PDO count", m_slave_index);
     }
 

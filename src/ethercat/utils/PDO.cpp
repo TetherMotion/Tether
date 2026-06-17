@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <vector>
 #include <algorithm>
-#include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 #include "logging/Logger.hpp"  // for TETHER_LOGI/W
 
 namespace EtherCAT {
@@ -140,8 +140,7 @@ std::string pdoToString(bool is_tx,
 // New mapping helpers
 // ---------------------------------------------------------------------------
 
-bool readPDOMapping(EtherCAT::SDO::SDOManager& sdo,
-                    uint16_t slave,
+bool readPDOMapping(CoE::CoEManager& coe,
                     uint16_t pdo_index,
                     std::vector<PDOMappingEntry>& out_entries,
                     uint32_t timeout_ms)
@@ -149,10 +148,11 @@ bool readPDOMapping(EtherCAT::SDO::SDOManager& sdo,
     out_entries.clear();
 
     // read count (subindex 0)
-    uint8_t count = 0;
-    if (!sdo.readU8(slave, pdo_index, 0, count, timeout_ms)) {
+    auto count_res = coe.readU8(pdo_index, 0, {.timeout_ms = timeout_ms});
+    if (!count_res.has_value()) {
         return false;
     }
+    uint8_t count = count_res.value();
 
     uint16_t running_offset = 0;
     for (uint8_t si = 1; si <= count; ++si) {
@@ -160,11 +160,12 @@ bool readPDOMapping(EtherCAT::SDO::SDOManager& sdo,
             // subindex is a single byte; stop if it rolls over
             break;
         }
-        uint32_t entry = 0;
-        if (!sdo.readU32(slave, pdo_index, si, entry, timeout_ms)) {
+        auto entry_res = coe.readU32(pdo_index, si, {.timeout_ms = timeout_ms});
+        if (!entry_res.has_value()) {
             // stop on first failure but keep what we've gathered so far
             break;
         }
+        uint32_t entry = entry_res.value();
         uint16_t obj_idx = static_cast<uint16_t>((entry >> 16) & 0xFFFF);
         uint8_t sub_idx = static_cast<uint8_t>((entry >> 8) & 0xFF);
         uint8_t bits    = static_cast<uint8_t>(entry & 0xFF);
@@ -210,15 +211,14 @@ std::string pdoMappingToString(bool is_tx,
 // Convenience logging wrapper
 // ---------------------------------------------------------------------------
 
-void printPDOMapping(EtherCAT::SDO::SDOManager& sdo,
-                     uint16_t slave,
+void printPDOMapping(CoE::CoEManager& coe,
                      bool is_tx,
                      uint16_t pdo_index,
                      const char* tag,
                      uint32_t timeout_ms)
 {
     std::vector<PDOMappingEntry> entries;
-    if (readPDOMapping(sdo, slave, pdo_index, entries, timeout_ms)) {
+    if (readPDOMapping(coe, pdo_index, entries, timeout_ms)) {
         TETHER_LOGI(tag, "%s", pdoMappingToString(is_tx, pdo_index, entries).c_str());
     } else {
         TETHER_LOGW(tag, "PDO 0x%04X mapping read FAILED", pdo_index);

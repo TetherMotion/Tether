@@ -143,7 +143,9 @@ static bool mbx_apwr_with_wkc_probe(
  * @param timeout_ms   Maximum time to wait for the mailbox to become full
  * @return true if the mailbox became full within the timeout
  */
-static bool mbx_poll_sm1_full(Master& master, uint16_t adp, unsigned int timeout_ms)
+static bool mbx_poll_sm1_full(Master& master, uint16_t adp,
+                                unsigned int timeout_ms,
+                                unsigned int poll_interval_ms = 5)
 {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
     while (std::chrono::steady_clock::now() < deadline) {
@@ -153,10 +155,10 @@ static bool mbx_poll_sm1_full(Master& master, uint16_t adp, unsigned int timeout
         uint8_t sm1_status = 0;
         if (master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(1), sm1_status, 100)) {
             if ((sm1_status & EC_SM_STATUS_MBXFULL) != 0) {
-                return true; // Mailbox full — slave has written a response
+                return true;
             }
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
     }
     return false;
 }
@@ -174,7 +176,9 @@ bool coe_sdo_upload(
     uint8_t *out,
     size_t out_cap,
     size_t *out_len,
-    bool diag_enabled)
+    bool diag_enabled,
+    unsigned int poll_interval_ms,
+    unsigned int transaction_timeout_ms)
 {
     if (out_len) {
         *out_len = 0;
@@ -277,9 +281,9 @@ bool coe_sdo_upload(
         }
 
         // Wait for the slave to finish processing and populate SM1 (mailbox full).
-        if (!mbx_poll_sm1_full(master, adp, 1000)) {
-            TETHER_LOGE(TAG, "SDO upload: SM1 mailbox never became full (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%u)",
-                        adp, mbx_write_addr, mbx_read_addr, index, sub);
+        if (!mbx_poll_sm1_full(master, adp, transaction_timeout_ms, poll_interval_ms)) {
+            TETHER_LOGE(TAG, "SDO upload: SM1 mailbox never became full (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%u timeout=%ums)",
+                        adp, mbx_write_addr, mbx_read_addr, index, sub, transaction_timeout_ms);
             mbx_diag_dump_slave_state(master, adp, mbx_write_addr, mbx_read_addr);
             return false;
         }
@@ -479,9 +483,9 @@ bool coe_sdo_upload(
             }
 
             // Wait for the slave to populate the response mailbox.
-            if (!mbx_poll_sm1_full(master, adp, 1000)) {
-                TETHER_LOGE(TAG, "SDO upload segment: SM1 mailbox never became full (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%u)",
-                            adp, mbx_write_addr, mbx_read_addr, index, sub);
+            if (!mbx_poll_sm1_full(master, adp, transaction_timeout_ms, poll_interval_ms)) {
+                TETHER_LOGE(TAG, "SDO upload segment: SM1 mailbox never became full (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%u timeout=%ums)",
+                            adp, mbx_write_addr, mbx_read_addr, index, sub, transaction_timeout_ms);
                 mbx_diag_dump_slave_state(master, adp, mbx_write_addr, mbx_read_addr);
                 return false;
             }
@@ -574,7 +578,9 @@ bool coe_sdo_download(
     uint8_t sub,
     const uint8_t *data,
     size_t data_len,
-    bool diag_enabled)
+    bool diag_enabled,
+    unsigned int poll_interval_ms,
+    unsigned int transaction_timeout_ms)
 {
     if (data == nullptr || data_len == 0 || data_len > 4) {
         TETHER_LOGE(TAG, "Invalid SDO download parameters (len=%u)", static_cast<unsigned>(data_len));
@@ -666,9 +672,9 @@ bool coe_sdo_download(
     }
 
     // Wait for the slave to populate the response mailbox.
-    if (!mbx_poll_sm1_full(master, adp, 1000)) {
-        TETHER_LOGE(TAG, "SDO download: SM1 mailbox never became full (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%02x)",
-                    adp, mbx_write_addr, mbx_read_addr, index, sub);
+    if (!mbx_poll_sm1_full(master, adp, transaction_timeout_ms, poll_interval_ms)) {
+        TETHER_LOGE(TAG, "SDO download: SM1 mailbox never became full (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%02x timeout=%ums)",
+                    adp, mbx_write_addr, mbx_read_addr, index, sub, transaction_timeout_ms);
         mbx_diag_dump_slave_state(master, adp, mbx_write_addr, mbx_read_addr);
         return false;
     }
