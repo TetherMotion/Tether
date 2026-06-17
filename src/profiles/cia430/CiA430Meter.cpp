@@ -4,7 +4,7 @@
  */
 
 #include "profiles/cia430/CiA430Meter.hpp"
-#include "SDOManager.hpp"
+#include "tether/ethercat/SDOManager.hpp"
 
 #include <cstring>
 
