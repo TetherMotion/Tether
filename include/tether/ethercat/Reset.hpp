@@ -82,6 +82,9 @@
 
 namespace EtherCAT {
 
+// Forward declarations
+class Master;
+
 // Forward declaration for SDO injection
 namespace CoE { class CoEManager; }
 
@@ -352,18 +355,10 @@ class SlaveResetController {
 public:
     /**
      * @brief Construct reset controller for specific slave
-     * @param sdo SDOManager instance for SDO access
-     * @param slave_position Auto-increment position (0 = first slave)
+     * @param coe CoEManager instance for SDO access (per-slave)
+     * @param slave_index Slave index (must match CoEManager's slave index)
      */
-    SlaveResetController(CoE::CoEManager& coe, uint16_t slave_position);
-    
-    /**
-     * @brief Construct reset controller for configured address
-     * @param sdo SDOManager instance for SDO access
-     * @param slave_address Configured station address
-     * @param use_configured_addr Flag to use FPWR instead of APWR
-     */
-    SlaveResetController(CoE::CoEManager& coe, uint16_t slave_address, bool use_configured_addr);
+    SlaveResetController(CoE::CoEManager& coe, uint16_t slave_index);
     
     ~SlaveResetController() = default;
     
@@ -678,8 +673,7 @@ public:
     
 private:
     CoE::CoEManager& m_coe; ///< SDO manager for SDO access
-    uint16_t slave_addr_;           ///< Slave address
-    bool use_configured_addr_;      ///< Use FPWR vs APWR
+    const uint16_t slave_index_;   ///< Slave index
     ResetResult last_result_;       ///< Last reset result
     ResetProgressCallback progress_callback_;
     uint32_t reset_attempt_count_{0};
@@ -696,45 +690,17 @@ private:
 // ============================================================================
 // Broadcast/Network-Wide Reset Functions
 // ============================================================================
+// TODO: Network-wide functions need to be redesigned for per-slave CoEManager architecture
+// These functions require access to Master class which creates circular dependency
+// Temporarily disabled - will be implemented in a separate module
 
-/**
- * @brief Reset all slaves on the network
- * @param sdo SDOManager instance for SDO access
- * @param level Reset level to apply
- * @param timeout_ms Timeout for entire operation
- * @return Vector of results for each slave
- */
-std::vector<ResetResult> resetAllSlaves(CoE::CoEManager& coe, ResetLevel level, uint32_t timeout_ms = 10000);
-
-/**
- * @brief Broadcast error acknowledge to all slaves
- * @param sdo SDOManager instance for SDO access
- * @return Number of slaves that acknowledged
- */
-uint16_t broadcastErrorAcknowledge(CoE::CoEManager& coe);
-
-/**
- * @brief Broadcast state transition to all slaves
- * @param sdo SDOManager instance for SDO access
- * @param target_state Target AL state
- * @return Number of slaves that transitioned
- */
-uint16_t broadcastStateTransition(CoE::CoEManager& coe, ALState target_state);
-
-/**
- * @brief Network-wide emergency stop
- * @param sdo SDOManager instance for SDO access
- * @return true if all slaves stopped
- */
-bool networkEmergencyStop(CoE::CoEManager& coe);
-
-/**
- * @brief Re-initialize entire network from scratch
- * @param sdo SDOManager instance for SDO access
- * @param to_op Bring all slaves to OP state
- * @return true if network re-initialization succeeded
- */
-bool reinitializeNetwork(CoE::CoEManager& coe, bool to_op = true);
+/*
+std::vector<ResetResult> resetAllSlaves(EtherCAT::Master& master, ResetLevel level, uint32_t timeout_ms = 10000);
+uint16_t broadcastErrorAcknowledge(EtherCAT::Master& master);
+uint16_t broadcastStateTransition(EtherCAT::Master& master, ALState target_state);
+bool networkEmergencyStop(EtherCAT::Master& master);
+bool reinitializeNetwork(EtherCAT::Master& master, bool to_op = true);
+*/
 
 // ============================================================================
 // Reset Policies

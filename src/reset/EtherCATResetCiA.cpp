@@ -5,7 +5,7 @@
  * Split from EtherCATReset.cpp for maintainability.
  */
 
-#include "Reset.hpp"
+#include "tether/ethercat/Reset.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include "profiles/cia301/CiA301Defs.hpp"
 #include "profiles/cia301/CiA402Defs.hpp"
@@ -19,12 +19,12 @@ static const char* TAG = "ECAT_RESET_CIA";
 // ============================================================================
 
 bool SlaveResetController::nmtResetNode() {
-    TETHER_LOGI(TAG, "Sending NMT Reset Node to slave %u", slave_addr_);
+    TETHER_LOGI(TAG, "Sending NMT Reset Node to slave %u", slave_index_);
     return restoreDefaultParameters(CiA301Reset::AllParameters);
 }
 
 bool SlaveResetController::nmtResetCommunication() {
-    TETHER_LOGI(TAG, "Sending NMT Reset Communication to slave %u", slave_addr_);
+    TETHER_LOGI(TAG, "Sending NMT Reset Communication to slave %u", slave_index_);
     return restoreDefaultParameters(CiA301Reset::CommunicationParams);
 }
 
@@ -47,7 +47,7 @@ ResetResult SlaveResetController::faultReset(CiA402State target_state) {
     result.requested_level = ResetLevel::SoftReset;
     int64_t start_time = esp_timer_get_time();
     
-    TETHER_LOGI(TAG, "Performing CiA 402 fault reset on slave %u", slave_addr_);
+    TETHER_LOGI(TAG, "Performing CiA 402 fault reset on slave %u", slave_index_);
     reportProgress("Reading statusword", 10);
     
     uint16_t statusword;
@@ -145,7 +145,7 @@ ResetResult SlaveResetController::disableDrive() {
     result.requested_level = ResetLevel::SoftReset;
     int64_t start_time = esp_timer_get_time();
     
-    TETHER_LOGI(TAG, "Disabling drive on slave %u", slave_addr_);
+    TETHER_LOGI(TAG, "Disabling drive on slave %u", slave_index_);
     
     uint16_t controlword = 0x0000;
     if (!writeControlword(controlword)) {
@@ -167,7 +167,7 @@ ResetResult SlaveResetController::enableDrive() {
     result.requested_level = ResetLevel::SoftReset;
     int64_t start_time = esp_timer_get_time();
     
-    TETHER_LOGI(TAG, "Enabling drive on slave %u", slave_addr_);
+    TETHER_LOGI(TAG, "Enabling drive on slave %u", slave_index_);
     
     // Step 1: Shutdown (ready to switch on)
     uint16_t controlword = CiA402Reset::QuickStopInactive | CiA402Reset::EnableVoltage;

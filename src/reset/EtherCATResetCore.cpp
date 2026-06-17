@@ -5,7 +5,7 @@
  * Split from EtherCATReset.cpp for maintainability.
  */
 
-#include "Reset.hpp"
+#include "tether/ethercat/Reset.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include "tether/ethercat/CoEManager.hpp"
 #include "profiles/cia301/CiA301Defs.hpp"
@@ -66,18 +66,9 @@ const char* getResetLevelDescription(ResetLevel level) {
 // SlaveResetController - Construction and Basic Methods
 // ============================================================================
 
-SlaveResetController::SlaveResetController(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_position)
-    : m_sdo(sdo)
-    , slave_addr_(slave_position)
-    , use_configured_addr_(false)
-    , last_result_{false, ResetLevel::SoftReset, ResetLevel::SoftReset, 0, 0, 0, ""}
-{
-}
-
-SlaveResetController::SlaveResetController(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_address, bool use_configured_addr)
-    : m_sdo(sdo)
-    , slave_addr_(slave_address)
-    , use_configured_addr_(use_configured_addr)
+SlaveResetController::SlaveResetController(CoE::CoEManager& coe, uint16_t slave_index)
+    : m_coe(coe)
+    , slave_index_(slave_index)
     , last_result_{false, ResetLevel::SoftReset, ResetLevel::SoftReset, 0, 0, 0, ""}
 {
 }
@@ -88,7 +79,7 @@ void SlaveResetController::setProgressCallback(ResetProgressCallback callback) {
 
 void SlaveResetController::reportProgress(const char* stage, uint8_t progress) {
     if (progress_callback_) {
-        progress_callback_(stage, progress, slave_addr_);
+        progress_callback_(stage, progress, slave_index_);
     }
 }
 
@@ -102,7 +93,7 @@ ResetResult SlaveResetController::resetToLevel(ResetLevel level, uint32_t timeou
     
     last_result_ = {false, level, ResetLevel::SoftReset, 0, 0, 0, ""};
     
-    TETHER_LOGI(TAG, "Resetting slave %u to level %s", slave_addr_, getResetLevelName(level));
+    TETHER_LOGI(TAG, "Resetting slave %u to level %s", slave_index_, getResetLevelName(level));
     reportProgress("Starting reset", 0);
     
     bool success = false;
@@ -225,7 +216,7 @@ ResetResult SlaveResetController::progressiveReset(ResetLevel max_level, uint32_
 }
 
 ResetResult SlaveResetController::emergencyStopAndReset() {
-    TETHER_LOGW(TAG, "Emergency stop and reset for slave %u", slave_addr_);
+    TETHER_LOGW(TAG, "Emergency stop and reset for slave %u", slave_index_);
     
     ResetResult result;
     result.requested_level = ResetLevel::ApplicationReset;
@@ -288,7 +279,8 @@ std::string SlaveResetController::getErrorDescription() {
 // ============================================================================
 
 bool SlaveResetController::sdoWrite(uint16_t index, uint8_t sub, const void* data, size_t len) {
-    return m_coe.writeSync(index, sub, data, len, {.timeout_ms = EtherCAT::SDO::kDefaultSDOTimeoutMs});
+    auto result = m_coe.writeSync(index, sub, data, len, {.timeout_ms = EtherCAT::SDO::kDefaultSDOTimeoutMs});
+    return result.has_value();
 }
 
 bool SlaveResetController::sdoRead(uint16_t index, uint8_t sub, void* data, size_t len, size_t* out_len) {

@@ -5,9 +5,9 @@
  * Split from EtherCATReset.cpp for maintainability.
  */
 
-#include "Reset.hpp"
+#include "tether/ethercat/Reset.hpp"
 #include "tether/platform/EspCompat.hpp"
-#include "SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 #include "tether/ethercat/DCClass.hpp"
 
 namespace EtherCAT {
@@ -52,11 +52,12 @@ bool SlaveResetController::acknowledgeError() {
 }
 
 bool SlaveResetController::readALStatus(uint16_t& status, uint16_t& status_code) {
-    if (!m_sdo.readSync(slave_addr_, 0x0130, 0, &status, sizeof(status), EtherCAT::SDO::kDefaultSDOTimeoutMs)) {
+    size_t actual_size;
+    if (!sdoRead(0x0130, 0, &status, sizeof(status), &actual_size)) {
         return false;
     }
     
-    if (!m_sdo.readSync(slave_addr_, 0x0134, 0, &status_code, sizeof(status_code), EtherCAT::SDO::kDefaultSDOTimeoutMs)) {
+    if (!sdoRead(0x0134, 0, &status_code, sizeof(status_code), &actual_size)) {
         status_code = 0;
     }
     
@@ -64,7 +65,7 @@ bool SlaveResetController::readALStatus(uint16_t& status, uint16_t& status_code)
 }
 
 bool SlaveResetController::writeALControl(uint16_t value) {
-    return m_sdo.writeSync(slave_addr_, 0x0120, 0, &value, sizeof(value), EtherCAT::SDO::kDefaultSDOTimeoutMs);
+    return sdoWrite(0x0120, 0, &value, sizeof(value));
 }
 
 bool SlaveResetController::forceToInit(uint32_t timeout_ms) {
@@ -133,7 +134,7 @@ ResetResult SlaveResetController::fullReinitialize(bool to_op) {
     result.requested_level = ResetLevel::StateMachineReset;
     int64_t start_time = esp_timer_get_time();
     
-    TETHER_LOGI(TAG, "Full re-initialization of slave %u", slave_addr_);
+    TETHER_LOGI(TAG, "Full re-initialization of slave %u", slave_index_);
     
     reportProgress("Forcing to INIT", 10);
     if (!forceToInit(1000)) {
@@ -191,19 +192,19 @@ ResetResult SlaveResetController::fullReinitialize(bool to_op) {
 // ============================================================================
 
 bool SlaveResetController::resetSyncManagerWatchdog() {
-    TETHER_LOGI(TAG, "Resetting Sync Manager watchdog on slave %u", slave_addr_);
+    TETHER_LOGI(TAG, "Resetting Sync Manager watchdog on slave %u", slave_index_);
     
     uint8_t disable = 0x00;
-    if (!m_sdo.writeSync(slave_addr_, 0x0806, 0, &disable, 1, EtherCAT::SDO::kDefaultSDOTimeoutMs) ||
-        !m_sdo.writeSync(slave_addr_, 0x080E, 0, &disable, 1, EtherCAT::SDO::kDefaultSDOTimeoutMs)) {
+    if (!sdoWrite(0x0806, 0, &disable, 1) ||
+        !sdoWrite(0x080E, 0, &disable, 1)) {
         return false;
     }
     
     Tether::Platform::Clock::instance().delayMilliseconds(10);
     
     uint8_t enable = 0x01;
-    if (!m_sdo.writeSync(slave_addr_, 0x0806, 0, &enable, 1, EtherCAT::SDO::kDefaultSDOTimeoutMs) ||
-        !m_sdo.writeSync(slave_addr_, 0x080E, 0, &enable, 1, EtherCAT::SDO::kDefaultSDOTimeoutMs)) {
+    if (!sdoWrite(0x0806, 0, &enable, 1) ||
+        !sdoWrite(0x080E, 0, &enable, 1)) {
         return false;
     }
     
@@ -212,11 +213,11 @@ bool SlaveResetController::resetSyncManagerWatchdog() {
 
 bool SlaveResetController::clearPDIWatchdog() {
     uint16_t wd_div = 0x09C2;
-    return m_sdo.writeSync(slave_addr_, 0x0400, 0, &wd_div, sizeof(wd_div), EtherCAT::SDO::kDefaultSDOTimeoutMs);
+    return sdoWrite(0x0400, 0, &wd_div, sizeof(wd_div));
 }
 
 bool SlaveResetController::reconfigureSyncManagers() {
-    TETHER_LOGI(TAG, "Reconfiguring Sync Managers on slave %u", slave_addr_);
+    TETHER_LOGI(TAG, "Reconfiguring Sync Managers on slave %u", slave_index_);
     return true;
 }
 
@@ -225,15 +226,15 @@ bool SlaveResetController::reconfigureSyncManagers() {
 // ============================================================================
 
 bool SlaveResetController::resetDistributedClock() {
-    TETHER_LOGI(TAG, "Resetting Distributed Clock on slave %u", slave_addr_);
+    TETHER_LOGI(TAG, "Resetting Distributed Clock on slave %u", slave_index_);
     
     uint8_t dc_disable = 0x00;
-    if (!m_sdo.writeSync(slave_addr_, toUInt16(DCRegisters::DCSyncAct), 0, &dc_disable, 1, EtherCAT::SDO::kDefaultSDOTimeoutMs)) {
+    if (!sdoWrite(toUInt16(DCRegisters::DCSyncAct), 0, &dc_disable, 1)) {
         return false;
     }
     
     uint64_t zero_offset = 0;
-    if (!m_sdo.writeSync(slave_addr_, toUInt16(DCRegisters::DCSysOffset), 0, &zero_offset, sizeof(zero_offset), EtherCAT::SDO::kDefaultSDOTimeoutMs)) {
+    if (!sdoWrite(toUInt16(DCRegisters::DCSysOffset), 0, &zero_offset, sizeof(zero_offset))) {
         return false;
     }
     
@@ -242,7 +243,7 @@ bool SlaveResetController::resetDistributedClock() {
 
 bool SlaveResetController::clearDCSyncErrors() {
     uint16_t zero = 0;
-    return m_sdo.writeSync(slave_addr_, toUInt16(DCRegisters::DCSysDiff), 0, &zero, sizeof(zero), EtherCAT::SDO::kDefaultSDOTimeoutMs);
+    return sdoWrite(toUInt16(DCRegisters::DCSysDiff), 0, &zero, sizeof(zero));
 }
 
 // ============================================================================
