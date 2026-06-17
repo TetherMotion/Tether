@@ -36,6 +36,7 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include "HALTypes.hpp"
 
 namespace EtherCAT {
 namespace HAL {
@@ -43,21 +44,6 @@ namespace HAL {
 // ============================================================================
 // Configuration
 // ============================================================================
-
-/**
- * @brief Maximum Ethernet frame size (without FCS)
- */
-constexpr size_t kMaxFrameSize = 1514;
-
-/**
- * @brief Minimum Ethernet frame size (without FCS)
- */
-constexpr size_t kMinFrameSize = 60;
-
-/**
- * @brief EtherCAT EtherType
- */
-constexpr uint16_t kEtherTypeEtherCAT = 0x88A4;
 
 // ============================================================================
 // Callback Types
@@ -70,7 +56,7 @@ constexpr uint16_t kEtherTypeEtherCAT = 0x88A4;
  * @param length Frame length in bytes
  * @param user_data User-provided context pointer
  */
-using RxCallback = std::function<void(const uint8_t* frame, size_t length, void* user_data)>;
+using EthernetHALRxCallback = std::function<void(const uint8_t* frame, size_t length, void* user_data)>;
 
 // ============================================================================
 // HAL Interface
@@ -132,7 +118,7 @@ public:
      * @param callback Function to call when a frame is received
      * @param user_data User context passed to callback
      */
-    virtual void setRxCallback(RxCallback callback, void* user_data) = 0;
+    virtual void setRxCallback(EthernetHALRxCallback callback, void* user_data) = 0;
 
     /**
      * @brief Set EtherType filter
