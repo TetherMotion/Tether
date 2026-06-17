@@ -10,23 +10,42 @@ if(NOT EXISTS ${LIBSLIPSPEED_DIR}/include)
     return()
 endif()
 
-# Build libSLIPspeed as a static library
-add_library(slipspeed STATIC
-    ${LIBSLIPSPEED_DIR}/src/Buffer.cpp
-    ${LIBSLIPSPEED_DIR}/src/Decoder.cpp
-    ${LIBSLIPSPEED_DIR}/src/Encoder.cpp
-)
+# Build libSLIPspeed variants
+set(_slip_variants "")
+if(TETHER_BUILD_SHARED_LIBS)
+    add_library(slipspeed_shared SHARED
+        ${LIBSLIPSPEED_DIR}/src/Buffer.cpp
+        ${LIBSLIPSPEED_DIR}/src/Decoder.cpp
+        ${LIBSLIPSPEED_DIR}/src/Encoder.cpp
+    )
+    list(APPEND _slip_variants slipspeed_shared)
+endif()
+if(TETHER_BUILD_STATIC_LIBS)
+    add_library(slipspeed_static STATIC
+        ${LIBSLIPSPEED_DIR}/src/Buffer.cpp
+        ${LIBSLIPSPEED_DIR}/src/Decoder.cpp
+        ${LIBSLIPSPEED_DIR}/src/Encoder.cpp
+    )
+    list(APPEND _slip_variants slipspeed_static)
+endif()
 
-target_include_directories(slipspeed PUBLIC
-    $<BUILD_INTERFACE:${LIBSLIPSPEED_DIR}/include>
-    $<INSTALL_INTERFACE:include>
-)
+foreach(_tgt IN LISTS _slip_variants)
+    target_include_directories(${_tgt} PUBLIC
+        $<BUILD_INTERFACE:${LIBSLIPSPEED_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+    )
+    set_target_properties(${_tgt} PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+    )
+endforeach()
 
-set_target_properties(slipspeed PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-    CXX_STANDARD 20
-    CXX_STANDARD_REQUIRED ON
-)
+if(TETHER_BUILD_SHARED_LIBS)
+    add_library(slipspeed ALIAS slipspeed_shared)
+elseif(TETHER_BUILD_STATIC_LIBS)
+    add_library(slipspeed ALIAS slipspeed_static)
+endif()
 
 # ---------------------------------------------------------------------------
 # Core IO protocol sources
@@ -51,34 +70,52 @@ if(NOT ESP_PLATFORM)
     )
 endif()
 
-# Create the IO protocol library
-add_library(tether_io_protocol STATIC ${TETHER_IO_PROTOCOL_SOURCES})
-add_library(tether::io_protocol ALIAS tether_io_protocol)
+# Create the IO protocol library variants
+set(_variants "")
+if(TETHER_BUILD_SHARED_LIBS)
+    add_library(tether_io_protocol_shared SHARED ${TETHER_IO_PROTOCOL_SOURCES})
+    list(APPEND _variants tether_io_protocol_shared)
+endif()
+if(TETHER_BUILD_STATIC_LIBS)
+    add_library(tether_io_protocol_static STATIC ${TETHER_IO_PROTOCOL_SOURCES})
+    list(APPEND _variants tether_io_protocol_static)
+endif()
 
-target_include_directories(tether_io_protocol
-    PUBLIC
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
-        $<INSTALL_INTERFACE:include>
-        $<INSTALL_INTERFACE:include/tether>
-    PRIVATE
-        ${TETHER_ROOT}/src
-)
+foreach(_tgt IN LISTS _variants)
+    target_include_directories(${_tgt}
+        PUBLIC
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
+            $<INSTALL_INTERFACE:include>
+            $<INSTALL_INTERFACE:include/tether>
+        PRIVATE
+            ${TETHER_ROOT}/src
+    )
 
-target_link_libraries(tether_io_protocol
-    PUBLIC tether_common slipspeed
-)
+    target_link_libraries(${_tgt} PUBLIC tether_common slipspeed)
+endforeach()
 
 # Pthreads for Server/Session threading
 find_package(Threads REQUIRED)
-target_link_libraries(tether_io_protocol PUBLIC Threads::Threads)
+foreach(_tgt IN LISTS _variants)
+    target_link_libraries(${_tgt} PUBLIC Threads::Threads)
+    set_target_properties(${_tgt} PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+    )
+endforeach()
 
-set_target_properties(tether_io_protocol PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-    CXX_STANDARD 20
-    CXX_STANDARD_REQUIRED ON
-)
+if(TETHER_BUILD_SHARED_LIBS)
+    add_library(tether_io_protocol ALIAS tether_io_protocol_shared)
+    add_library(tether::io_protocol ALIAS tether_io_protocol_shared)
+elseif(TETHER_BUILD_STATIC_LIBS)
+    add_library(tether_io_protocol ALIAS tether_io_protocol_static)
+    add_library(tether::io_protocol ALIAS tether_io_protocol_static)
+endif()
 
 # Export for other components
 set(TETHER_IO_PROTOCOL_LIBRARY tether_io_protocol)
+set(TETHER_IO_PROTOCOL_TARGETS ${_variants})
 set(TETHER_SLIPSPEED_LIBRARY slipspeed)
+set(TETHER_SLIPSPEED_TARGETS ${_slip_variants})

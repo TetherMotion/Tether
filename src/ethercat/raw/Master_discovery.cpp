@@ -14,6 +14,7 @@
 #include "tether/ethercat/FaultDetection.hpp"
 #include "tether/ethercat/RealtimeLoop.hpp"
 #include "tether/ethercat/SyncManagerValidation.hpp"
+#include "tether/ethercat/DebugFlags.hpp"
 #include "tether/sii/SIIParser.hpp"
 #include "tether/fmmu/FMMUConfiguration.hpp"
 #include "raw/internal.hpp"
@@ -31,17 +32,6 @@
 namespace EtherCAT {
 
 static const char* TAG = "ethercat";
-
-// Global debug flag for al-state (shared with Slave)
-extern bool g_debug_statemachine;
-
-// Global debug flags for tx/rx packet logging (shared with Slave)
-extern bool g_debug_tx_packets;
-extern bool g_debug_rx_packets;
-
-// Global debug flags for PDO logging (shared with PDOManager)
-extern bool g_debug_rx_pdo;
-extern bool g_debug_tx_pdo;
 
 // ============================================================================
 // Internal helpers: scan frame builder
@@ -126,7 +116,7 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
 {
     using namespace Raw;
 
-    if (g_debug_statemachine) {
+    if (debug::stateMachine()) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
         TETHER_LOGI(TAG, "║  State Machine Transition: Slave %u (INIT => PRE_OP)          ║", slave_index);
         TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
@@ -147,7 +137,7 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
     const int inner_sleep_ms = 20;       // Delay between checks
 
     for (int attempt = 1; attempt <= max_attempts; ++attempt) {
-        if (g_debug_statemachine) {
+        if (debug::stateMachine()) {
             TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
             TETHER_LOGI(TAG, "║  Attempt %d/%d for Slave %u                                    ║", attempt, max_attempts, slave_index);
             TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
@@ -159,7 +149,7 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
         const uint16_t al0 = le16_to_host(al_le);
         const bool has_error = (al0 & 0x0010u) != 0;
 
-        if (g_debug_statemachine) {
+        if (debug::stateMachine()) {
             const char* state_name = al_status_get_state_name(al0);
             TETHER_LOGI(TAG, "  Current AL_STATUS: 0x%04X (State=%s, Error=%s)", 
                        al0, state_name, has_error ? "true" : "false");
@@ -169,7 +159,7 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
         const uint16_t req = static_cast<uint16_t>(0x0002u | (has_error ? 0x0010u : 0));
         (void)writeRegister(SlaveAddress(slave_index), EC_REG_AL_CONTROL, req);
 
-        if (g_debug_statemachine) {
+        if (debug::stateMachine()) {
             TETHER_LOGI(TAG, "  Wrote AL_CONTROL: 0x%04X", req);
             TETHER_LOGI(TAG, "  Waiting for PRE_OP to become active (max %d checks, %dms each)...", 
                        inner_tries, inner_sleep_ms);
@@ -183,7 +173,7 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
                     if (attempt > 1) {
                         TETHER_LOGI(TAG, "setPreop: succeeded on attempt %d", attempt);
                     }
-                    if (g_debug_statemachine) {
+                    if (debug::stateMachine()) {
                         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
                         TETHER_LOGI(TAG, "║  Transition Result: Slave %u => PRE_OP SUCCESS                ║", slave_index);
                         TETHER_LOGI(TAG, "║  Confirmed after %d checks on attempt %d/%d                   ║", i+1, attempt, max_attempts);

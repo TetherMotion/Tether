@@ -23,30 +23,49 @@ set(TETHER_COMMON_HEADERS
     ${TETHER_ROOT}/include/tether/platform/IPlatformTimer.hpp
 )
 
-# Create the common library
-add_library(tether_common STATIC ${TETHER_COMMON_SOURCES})
-add_library(tether::common ALIAS tether_common)
+# Create variant targets
+set(_variants "")
+if(TETHER_BUILD_SHARED_LIBS)
+    add_library(tether_common_shared SHARED ${TETHER_COMMON_SOURCES})
+    list(APPEND _variants tether_common_shared)
+endif()
+if(TETHER_BUILD_STATIC_LIBS)
+    add_library(tether_common_static STATIC ${TETHER_COMMON_SOURCES})
+    list(APPEND _variants tether_common_static)
+endif()
 
-target_include_directories(tether_common
-    PUBLIC
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
-        $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
-        $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include/tether>
-        $<INSTALL_INTERFACE:include>
-        $<INSTALL_INTERFACE:include/tether>
-    PRIVATE
-        ${TETHER_ROOT}/src
-)
+# Apply properties to every variant
+foreach(_tgt IN LISTS _variants)
+    target_include_directories(${_tgt}
+        PUBLIC
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
+            $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
+            $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include/tether>
+            $<INSTALL_INTERFACE:include>
+            $<INSTALL_INTERFACE:include/tether>
+        PRIVATE
+            ${TETHER_ROOT}/src
+    )
 
-target_compile_definitions(tether_common PUBLIC
-)
+    target_compile_definitions(${_tgt} PUBLIC)
 
-set_target_properties(tether_common PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-    CXX_STANDARD 20
-    CXX_STANDARD_REQUIRED ON
-)
+    set_target_properties(${_tgt} PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+    )
+endforeach()
+
+# Create convenience aliases (shared preferred)
+if(TETHER_BUILD_SHARED_LIBS)
+    add_library(tether_common ALIAS tether_common_shared)
+    add_library(tether::common ALIAS tether_common_shared)
+elseif(TETHER_BUILD_STATIC_LIBS)
+    add_library(tether_common ALIAS tether_common_static)
+    add_library(tether::common ALIAS tether_common_static)
+endif()
 
 # Export for other components
 set(TETHER_COMMON_LIBRARY tether_common)
+set(TETHER_COMMON_TARGETS ${_variants})

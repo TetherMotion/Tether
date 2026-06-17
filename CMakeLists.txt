@@ -136,7 +136,16 @@ option(TETHER_BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(TETHER_BUILD_EXTRACT_ESI "Build extract_esi_xml utility" ON)
 
 option(TETHER_BUILD_PYTHON_BINDINGS "Build Python bindings" ON)
-option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
+option(TETHER_BUILD_SHARED_LIBS "Build Tether component libraries as shared" ON)
+option(TETHER_BUILD_STATIC_LIBS "Build Tether component libraries as static" OFF)
+
+if(NOT TETHER_BUILD_SHARED_LIBS AND NOT TETHER_BUILD_STATIC_LIBS)
+    message(FATAL_ERROR "At least one of TETHER_BUILD_SHARED_LIBS or TETHER_BUILD_STATIC_LIBS must be ON")
+endif()
+
+if(WIN32)
+    set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif()
 
 # Platform detection
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -271,8 +280,38 @@ endif()
 # =============================================================================
 # Create Combined "tether" Library (for backward compatibility)
 # =============================================================================
-set(TETHER_ALL_COMPONENTS "")
+# TETHER_ALL_TARGETS collects the real (non-alias) library targets for installation.
+set(TETHER_ALL_TARGETS "")
 
+# Helper to collect real targets from component variables
+macro(tether_collect_targets var_prefix)
+    if(DEFINED ${var_prefix}_TARGETS)
+        foreach(_tgt ${${var_prefix}_TARGETS})
+            if(TARGET ${_tgt})
+                list(APPEND TETHER_ALL_TARGETS ${_tgt})
+            endif()
+        endforeach()
+    endif()
+endmacro()
+
+tether_collect_targets(TETHER_COMMON)
+tether_collect_targets(TETHER_PCAP)
+tether_collect_targets(TETHER_HAL)
+tether_collect_targets(TETHER_CONTROLS)
+tether_collect_targets(TETHER_GCODE)
+tether_collect_targets(TETHER_EXPORT)
+tether_collect_targets(TETHER_MOTION_PLANNER)
+tether_collect_targets(TETHER_MOTION_CONTROL)
+tether_collect_targets(TETHER_ETHERCAT_COMMON)
+tether_collect_targets(TETHER_ETHERCAT_MASTER)
+tether_collect_targets(TETHER_ETHERCAT_SLAVE)
+tether_collect_targets(TETHER_SIMULATION)
+tether_collect_targets(TETHER_DESTABILIZER)
+tether_collect_targets(TETHER_IO_PROTOCOL)
+tether_collect_targets(TETHER_SLIPSPEED)
+
+# Aliases for consumer linking (shared preferred, then static)
+set(TETHER_ALL_COMPONENTS "")
 if(TARGET tether_common)
     list(APPEND TETHER_ALL_COMPONENTS tether_common)
 endif()
@@ -386,8 +425,8 @@ endif()
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-# Install all component libraries
-foreach(component ${TETHER_ALL_COMPONENTS})
+# Install all component libraries (real targets only, aliases cannot be installed)
+foreach(component ${TETHER_ALL_TARGETS})
     install(TARGETS ${component}
         EXPORT TetherTargets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -468,5 +507,7 @@ message(STATUS "    Tests:           ${TETHER_BUILD_TESTS}")
 message(STATUS "    Examples:        ${TETHER_BUILD_EXAMPLES}")
 message(STATUS "    Benchmarks:      ${TETHER_BUILD_BENCHMARKS}")
 message(STATUS "    Python bindings: ${TETHER_BUILD_PYTHON_BINDINGS}")
+message(STATUS "  Shared libs:      ${TETHER_BUILD_SHARED_LIBS}")
+message(STATUS "  Static libs:      ${TETHER_BUILD_STATIC_LIBS}")
 message(STATUS "  Binaries:         ${TETHER_BIN_DIR}")
 message(STATUS "")

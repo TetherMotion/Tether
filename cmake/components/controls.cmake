@@ -57,33 +57,48 @@ if(NOT TETHER_CONTROLS_SOURCES_FILTERED)
     file(GLOB_RECURSE TETHER_CONTROLS_SOURCES_FILTERED "${TETHER_ROOT}/src/control/*.cpp")
 endif()
 
-# Create the controls library
-add_library(tether_controls STATIC ${TETHER_CONTROLS_SOURCES_FILTERED})
-add_library(tether::controls ALIAS tether_controls)
+# Create variant targets
+set(_variants "")
+if(TETHER_BUILD_SHARED_LIBS)
+    add_library(tether_controls_shared SHARED ${TETHER_CONTROLS_SOURCES_FILTERED})
+    list(APPEND _variants tether_controls_shared)
+endif()
+if(TETHER_BUILD_STATIC_LIBS)
+    add_library(tether_controls_static STATIC ${TETHER_CONTROLS_SOURCES_FILTERED})
+    list(APPEND _variants tether_controls_static)
+endif()
 
-target_include_directories(tether_controls
-    PUBLIC
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/control>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/control/autotuning>
-        $<INSTALL_INTERFACE:include>
-        $<INSTALL_INTERFACE:include/tether>
-        $<INSTALL_INTERFACE:include/tether/control>
-        $<INSTALL_INTERFACE:include/tether/control/autotuning>
-    PRIVATE
-        ${TETHER_ROOT}/src
-)
+foreach(_tgt IN LISTS _variants)
+    target_include_directories(${_tgt}
+        PUBLIC
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/control>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/control/autotuning>
+            $<INSTALL_INTERFACE:include>
+            $<INSTALL_INTERFACE:include/tether>
+            $<INSTALL_INTERFACE:include/tether/control>
+            $<INSTALL_INTERFACE:include/tether/control/autotuning>
+        PRIVATE
+            ${TETHER_ROOT}/src
+    )
 
-target_link_libraries(tether_controls
-    PUBLIC tether_common
-)
+    target_link_libraries(${_tgt} PUBLIC tether_common)
 
-set_target_properties(tether_controls PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-    CXX_STANDARD 20
-    CXX_STANDARD_REQUIRED ON
-)
+    set_target_properties(${_tgt} PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+    )
+endforeach()
 
-# Export for other components
+if(TETHER_BUILD_SHARED_LIBS)
+    add_library(tether_controls ALIAS tether_controls_shared)
+    add_library(tether::controls ALIAS tether_controls_shared)
+elseif(TETHER_BUILD_STATIC_LIBS)
+    add_library(tether_controls ALIAS tether_controls_static)
+    add_library(tether::controls ALIAS tether_controls_static)
+endif()
+
 set(TETHER_CONTROLS_LIBRARY tether_controls)
+set(TETHER_CONTROLS_TARGETS ${_variants})

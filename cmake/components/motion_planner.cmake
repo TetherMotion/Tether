@@ -39,32 +39,47 @@ if(NOT TETHER_MOTION_PLANNER_SOURCES_FILTERED)
     list(FILTER TETHER_MOTION_PLANNER_SOURCES_FILTERED EXCLUDE REGEX "main\\.cpp$")
 endif()
 
-# Create the motion planner library
-add_library(tether_motion_planner STATIC ${TETHER_MOTION_PLANNER_SOURCES_FILTERED})
-add_library(tether::motion_planner ALIAS tether_motion_planner)
+# Create variant targets
+set(_variants "")
+if(TETHER_BUILD_SHARED_LIBS)
+    add_library(tether_motion_planner_shared SHARED ${TETHER_MOTION_PLANNER_SOURCES_FILTERED})
+    list(APPEND _variants tether_motion_planner_shared)
+endif()
+if(TETHER_BUILD_STATIC_LIBS)
+    add_library(tether_motion_planner_static STATIC ${TETHER_MOTION_PLANNER_SOURCES_FILTERED})
+    list(APPEND _variants tether_motion_planner_static)
+endif()
 
-target_include_directories(tether_motion_planner
-    PUBLIC
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/motion_replanner>
-        $<INSTALL_INTERFACE:include>
-        $<INSTALL_INTERFACE:include/tether>
-        $<INSTALL_INTERFACE:include/tether/motion_replanner>
-    PRIVATE
-        ${TETHER_ROOT}/src
-        ${TETHER_ROOT}/src/replanner
-)
+foreach(_tgt IN LISTS _variants)
+    target_include_directories(${_tgt}
+        PUBLIC
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/motion_replanner>
+            $<INSTALL_INTERFACE:include>
+            $<INSTALL_INTERFACE:include/tether>
+            $<INSTALL_INTERFACE:include/tether/motion_replanner>
+        PRIVATE
+            ${TETHER_ROOT}/src
+            ${TETHER_ROOT}/src/replanner
+    )
 
-target_link_libraries(tether_motion_planner
-    PUBLIC tether_common tether_gcode tether_export
-)
+    target_link_libraries(${_tgt} PUBLIC tether_common tether_gcode tether_export)
 
-set_target_properties(tether_motion_planner PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-    CXX_STANDARD 20
-    CXX_STANDARD_REQUIRED ON
-)
+    set_target_properties(${_tgt} PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+    )
+endforeach()
 
-# Export for other components
+if(TETHER_BUILD_SHARED_LIBS)
+    add_library(tether_motion_planner ALIAS tether_motion_planner_shared)
+    add_library(tether::motion_planner ALIAS tether_motion_planner_shared)
+elseif(TETHER_BUILD_STATIC_LIBS)
+    add_library(tether_motion_planner ALIAS tether_motion_planner_static)
+    add_library(tether::motion_planner ALIAS tether_motion_planner_static)
+endif()
+
 set(TETHER_MOTION_PLANNER_LIBRARY tether_motion_planner)
+set(TETHER_MOTION_PLANNER_TARGETS ${_variants})

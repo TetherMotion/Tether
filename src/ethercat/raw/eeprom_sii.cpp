@@ -1,11 +1,9 @@
 #include "raw/internal.hpp"
 #include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/DebugFlags.hpp"
 #include "tether/platform/Platform.hpp"
 #include "tether/sii/SIIReader.hpp"
 #include "tether/ethercat/PDOManager.hpp"
-namespace EtherCAT {
-extern bool g_debug_sii_eeprom;
-}
 
 namespace EtherCAT {
 namespace Raw {

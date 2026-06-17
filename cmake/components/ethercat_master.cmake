@@ -76,47 +76,64 @@ set(TETHER_ETHERCAT_MASTER_SOURCES
 # Remove duplicates
 list(REMOVE_DUPLICATES TETHER_ETHERCAT_MASTER_SOURCES)
 
-# Create the ethercat master library
-add_library(tether_ethercat_master STATIC ${TETHER_ETHERCAT_MASTER_SOURCES})
-add_library(tether::ethercat_master ALIAS tether_ethercat_master)
+# Create variant targets
+set(_variants "")
+if(TETHER_BUILD_SHARED_LIBS)
+    add_library(tether_ethercat_master_shared SHARED ${TETHER_ETHERCAT_MASTER_SOURCES})
+    list(APPEND _variants tether_ethercat_master_shared)
+endif()
+if(TETHER_BUILD_STATIC_LIBS)
+    add_library(tether_ethercat_master_static STATIC ${TETHER_ETHERCAT_MASTER_SOURCES})
+    list(APPEND _variants tether_ethercat_master_static)
+endif()
 
-target_include_directories(tether_ethercat_master
-    PUBLIC
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/ethercat>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia301>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia401>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia402>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia404>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia405>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia406>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia408>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia410>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia417>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia430>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/etg5000>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/fsoe>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/reset>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/drives>
-        $<INSTALL_INTERFACE:include>
-        $<INSTALL_INTERFACE:include/tether>
-    PRIVATE
-        ${TETHER_ROOT}/src
-        ${TETHER_ROOT}/src/ethercat
-)
+foreach(_tgt IN LISTS _variants)
+    target_include_directories(${_tgt}
+        PUBLIC
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/ethercat>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia301>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia401>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia402>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia404>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia405>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia406>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia408>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia410>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia417>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia430>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/etg5000>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/fsoe>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/reset>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/drives>
+            $<INSTALL_INTERFACE:include>
+            $<INSTALL_INTERFACE:include/tether>
+        PRIVATE
+            ${TETHER_ROOT}/src
+            ${TETHER_ROOT}/src/ethercat
+    )
 
-target_link_libraries(tether_ethercat_master
-    PUBLIC tether_common tether_hal tether_ethercat_common tether_controls tether_motion_control
-)
+    target_link_libraries(${_tgt}
+        PUBLIC tether_common tether_hal tether_ethercat_common tether_controls tether_motion_control
+    )
 
-target_compile_definitions(tether_ethercat_master PUBLIC TETHER_COMPILE_MASTER=1)
+    target_compile_definitions(${_tgt} PUBLIC TETHER_COMPILE_MASTER=1)
 
-set_target_properties(tether_ethercat_master PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-    CXX_STANDARD 23
-    CXX_STANDARD_REQUIRED ON
-)
+    set_target_properties(${_tgt} PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 23
+        CXX_STANDARD_REQUIRED ON
+    )
+endforeach()
 
-# Export for other components
+if(TETHER_BUILD_SHARED_LIBS)
+    add_library(tether_ethercat_master ALIAS tether_ethercat_master_shared)
+    add_library(tether::ethercat_master ALIAS tether_ethercat_master_shared)
+elseif(TETHER_BUILD_STATIC_LIBS)
+    add_library(tether_ethercat_master ALIAS tether_ethercat_master_static)
+    add_library(tether::ethercat_master ALIAS tether_ethercat_master_static)
+endif()
+
 set(TETHER_ETHERCAT_MASTER_LIBRARY tether_ethercat_master)
+set(TETHER_ETHERCAT_MASTER_TARGETS ${_variants})

@@ -20,31 +20,46 @@ if(NOT TETHER_EXPORT_SOURCES_FILTERED)
     file(GLOB_RECURSE TETHER_EXPORT_SOURCES_FILTERED "${TETHER_ROOT}/src/export/*.cpp")
 endif()
 
-# Create the export library
-add_library(tether_export STATIC ${TETHER_EXPORT_SOURCES_FILTERED})
-add_library(tether::export ALIAS tether_export)
+# Create variant targets
+set(_variants "")
+if(TETHER_BUILD_SHARED_LIBS)
+    add_library(tether_export_shared SHARED ${TETHER_EXPORT_SOURCES_FILTERED})
+    list(APPEND _variants tether_export_shared)
+endif()
+if(TETHER_BUILD_STATIC_LIBS)
+    add_library(tether_export_static STATIC ${TETHER_EXPORT_SOURCES_FILTERED})
+    list(APPEND _variants tether_export_static)
+endif()
 
-target_include_directories(tether_export
-    PUBLIC
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
-        $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/export>
-        $<INSTALL_INTERFACE:include>
-        $<INSTALL_INTERFACE:include/tether>
-        $<INSTALL_INTERFACE:include/tether/export>
-    PRIVATE
-        ${TETHER_ROOT}/src
-)
+foreach(_tgt IN LISTS _variants)
+    target_include_directories(${_tgt}
+        PUBLIC
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/export>
+            $<INSTALL_INTERFACE:include>
+            $<INSTALL_INTERFACE:include/tether>
+            $<INSTALL_INTERFACE:include/tether/export>
+        PRIVATE
+            ${TETHER_ROOT}/src
+    )
 
-target_link_libraries(tether_export
-    PUBLIC tether_common tether_gcode
-)
+    target_link_libraries(${_tgt} PUBLIC tether_common tether_gcode)
 
-set_target_properties(tether_export PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-    CXX_STANDARD 20
-    CXX_STANDARD_REQUIRED ON
-)
+    set_target_properties(${_tgt} PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+    )
+endforeach()
 
-# Export for other components
+if(TETHER_BUILD_SHARED_LIBS)
+    add_library(tether_export ALIAS tether_export_shared)
+    add_library(tether::export ALIAS tether_export_shared)
+elseif(TETHER_BUILD_STATIC_LIBS)
+    add_library(tether_export ALIAS tether_export_static)
+    add_library(tether::export ALIAS tether_export_static)
+endif()
+
 set(TETHER_EXPORT_LIBRARY tether_export)
+set(TETHER_EXPORT_TARGETS ${_variants})

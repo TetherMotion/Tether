@@ -247,7 +247,11 @@ int main(int argc, char** argv) {
         "al-state",
         "tx-ethercat-packets",
         "rx-ethercat-packets",
-        "sii-eeprom"
+        "sii-eeprom",
+        "coe-reads",
+        "coe-writes",
+        "coe-rx-packets",
+        "coe-tx-packets"
     };
 
     std::set<std::string> debug_flags;
@@ -289,6 +293,30 @@ int main(int argc, char** argv) {
     if (debug_flags.count("sii-eeprom")) {
         EtherCAT::enableSIIEEPROMDebug(true);
         TETHER_LOGI(TAG, "SII/EEPROM debug logging enabled");
+    }
+
+    // Enable CoE read debug if requested
+    if (debug_flags.count("coe-reads")) {
+        EtherCAT::enableCoEReadsDebug(true);
+        TETHER_LOGI(TAG, "CoE read debug enabled");
+    }
+
+    // Enable CoE write debug if requested
+    if (debug_flags.count("coe-writes")) {
+        EtherCAT::enableCoEWritesDebug(true);
+        TETHER_LOGI(TAG, "CoE write debug enabled");
+    }
+
+    // Enable CoE RX packet debug if requested
+    if (debug_flags.count("coe-rx-packets")) {
+        EtherCAT::enableCoERxPacketsDebug(true);
+        TETHER_LOGI(TAG, "CoE RX packet debug enabled");
+    }
+
+    // Enable CoE TX packet debug if requested
+    if (debug_flags.count("coe-tx-packets")) {
+        EtherCAT::enableCoETxPacketsDebug(true);
+        TETHER_LOGI(TAG, "CoE TX packet debug enabled");
     }
 
     // ---- Parse VLAN arguments ----

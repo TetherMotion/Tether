@@ -1,6 +1,7 @@
 #include "raw/internal.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include "tether/ethercat/Platform.hpp"
+#include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/SDOManager.hpp"
 #include "tether/ethercat/FaultDetection.hpp"
 #include "tether/ethercat/Master.hpp"
@@ -106,6 +107,41 @@ static void mbx_diag_dump_slave_state(Master& master, uint16_t adp, uint16_t mbx
                sm0_start, (unsigned)sm0_len, sm0_ctrl, sm0_stat, sm0_act,
                sm1_start, (unsigned)sm1_len, sm1_ctrl, sm1_stat, sm1_act,
                sm0_stat_act[0], sm0_stat_act[1], sm1_stat_act[0], sm1_stat_act[1]);
+}
+
+static void logCoeMbxPacket(const char* dir, uint16_t adp, uint16_t index, uint8_t sub,
+                            const uint8_t* data, size_t len)
+{
+    const bool enabled = (dir[0] == 'T')
+                         ? EtherCAT::debug::coeTxPackets()
+                         : EtherCAT::debug::coeRxPackets();
+    if (!enabled) return;
+
+    TETHER_LOGI(TAG, "[CoE-%s] adp=0x%04X index=0x%04X:%u len=%zu",
+                dir, adp, index, sub, len);
+
+    if (len == 0) return;
+
+    bool all_zero = true;
+    for (size_t i = 0; i < len; ++i) {
+        if (data[i] != 0) { all_zero = false; break; }
+    }
+    if (all_zero) {
+        TETHER_LOGI(TAG, "[CoE-%s] Data (%zu bytes): All zeroes", dir, len);
+        return;
+    }
+
+    constexpr size_t kMaxHexDump = 64;
+    const size_t dump_len = (len < kMaxHexDump) ? len : kMaxHexDump;
+    char hexbuf[256];
+    size_t pos = 0;
+    for (size_t i = 0; i < dump_len && pos + 3 < sizeof(hexbuf); ++i) {
+        pos += snprintf(hexbuf + pos, sizeof(hexbuf) - pos, "%02X ", data[i]);
+    }
+    if (len > kMaxHexDump) {
+        pos += snprintf(hexbuf + pos, sizeof(hexbuf) - pos, "...");
+    }
+    TETHER_LOGI(TAG, "[CoE-%s] Data (%zu/%zu bytes): %s", dir, dump_len, len, hexbuf);
 }
 
 static bool mbx_apwr_with_wkc_probe(
@@ -240,6 +276,8 @@ bool coe_sdo_upload(
     std::memcpy(mbxbuf, &mbx, sizeof(mbx));
     std::memcpy(mbxbuf + sizeof(mbx), &coe, sizeof(coe));
     std::memcpy(mbxbuf + sizeof(mbx) + sizeof(coe), &sdo, sizeof(sdo));
+
+    logCoeMbxPacket("TX", adp, index, sub, mbxbuf, msg_len);
 
     mbx_cnt = static_cast<uint8_t>((mbx_cnt >= 7) ? 1 : (mbx_cnt + 1));
     if (inout_mbx_cnt != nullptr) {
@@ -449,6 +487,7 @@ bool coe_sdo_upload(
                     *out_len = copy_n;
                 }
             }
+            logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbx_read_len);
             (void)mbx_clear_read_area(master, adp, mbx_read_addr);
             return true;
         }
@@ -565,6 +604,7 @@ bool coe_sdo_upload(
                     if (total_size != 0 && produced > total_size && out_len) {
                         *out_len = total_size;
                     }
+                    logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbx_read_len);
                     return true;
                 }
                 toggle = !toggle;
@@ -655,6 +695,8 @@ bool coe_sdo_download(
     std::memcpy(mbxbuf, &mbx, sizeof(mbx));
     std::memcpy(mbxbuf + sizeof(mbx), &coe, sizeof(coe));
     std::memcpy(mbxbuf + sizeof(mbx) + sizeof(coe), &sdo, sizeof(sdo));
+
+    logCoeMbxPacket("TX", adp, index, sub, mbxbuf, msg_len);
 
     mbx_cnt = static_cast<uint8_t>((mbx_cnt >= 7) ? 1 : (mbx_cnt + 1));
     if (inout_mbx_cnt != nullptr) {
@@ -755,6 +797,7 @@ bool coe_sdo_download(
                 const uint16_t res_index = le16_to_host(res.index_le);
                 
                 if (res_index == index && res.sub == sub) {
+                    logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbx_read_len);
                     (void)mbx_clear_read_area(master, adp, mbx_read_addr);
                     return true;
                 }

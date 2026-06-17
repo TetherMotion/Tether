@@ -180,7 +180,11 @@ int main(int argc, char** argv) {
         "rx-ethercat-packets",
         "rx-pdo",
         "tx-pdo",
-        "sii-eeprom"
+        "sii-eeprom",
+        "coe-reads",
+        "coe-writes",
+        "coe-rx-packets",
+        "coe-tx-packets"
     };
 
     // Parse debug flags
@@ -237,6 +241,30 @@ int main(int argc, char** argv) {
     if (debug_flags.count("sii-eeprom")) {
         EtherCAT::enableSIIEEPROMDebug(true);
         TETHER_LOGI(TAG, "SII/EEPROM debug logging enabled");
+    }
+
+    // Enable CoE read debug if requested
+    if (debug_flags.count("coe-reads")) {
+        EtherCAT::enableCoEReadsDebug(true);
+        TETHER_LOGI(TAG, "CoE read debug logging enabled");
+    }
+
+    // Enable CoE write debug if requested
+    if (debug_flags.count("coe-writes")) {
+        EtherCAT::enableCoEWritesDebug(true);
+        TETHER_LOGI(TAG, "CoE write debug logging enabled");
+    }
+
+    // Enable CoE RX packet debug if requested
+    if (debug_flags.count("coe-rx-packets")) {
+        EtherCAT::enableCoERxPacketsDebug(true);
+        TETHER_LOGI(TAG, "CoE RX packet debug logging enabled");
+    }
+
+    // Enable CoE TX packet debug if requested
+    if (debug_flags.count("coe-tx-packets")) {
+        EtherCAT::enableCoETxPacketsDebug(true);
+        TETHER_LOGI(TAG, "CoE TX packet debug logging enabled");
     }
 
     // ---- Parse VLAN arguments ----

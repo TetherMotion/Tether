@@ -7,6 +7,7 @@
 
 #include "fmmu/FMMUConfiguration.hpp"
 #include "tether/platform/EspCompat.hpp"
+#include "tether/ethercat/DebugFlags.hpp"
 #include "sii/SIIParser.hpp"
 #include "PDOManager.hpp"
 
@@ -14,9 +15,6 @@
 #include <cstring>
 
 namespace EtherCAT {
-
-// Global FMMU debug flag (still used for verbose register-dump logging)
-bool g_debug_fmmu = false;
 
 namespace fmmu {
 
@@ -224,7 +222,7 @@ bool FMMUManager::writeToSlave() {
                  fmmu.type,
                  fmmu.activate);
 
-        if (g_debug_fmmu) {
+        if (debug::fmmu()) {
             char hex_buf[128];
             hexDump(reinterpret_cast<const uint8_t*>(&regs), sizeof(regs), hex_buf, sizeof(hex_buf));
             TETHER_LOGI(TAG, "  [FMMU-DEBUG] apwr ado=0x%04X len=%zu bytes: %s",
