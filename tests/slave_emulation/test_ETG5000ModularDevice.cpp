@@ -3,6 +3,7 @@
 #include "tether/etg5000/ETG5000ModularDevice.hpp"
 #include "tether/etg5000/ETG5000Defs.hpp"
 #include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 
 using namespace ETG5000;
 
@@ -13,10 +14,12 @@ class NullSDOTransport : public EtherCAT::SDO::ISDOTransport {
 public:
     bool sdoUpload(uint16_t, uint8_t*, uint16_t, uint16_t,
                    uint16_t, uint16_t, uint16_t, uint8_t,
-                   uint8_t*, size_t, size_t*) override { return false; }
+                   uint8_t*, size_t, size_t*, bool, unsigned int,
+                   unsigned int) override { return false; }
     bool sdoDownload(uint16_t, uint8_t*, uint16_t, uint16_t,
                      uint16_t, uint16_t, uint16_t, uint8_t,
-                     const uint8_t*, size_t) override { return false; }
+                     const uint8_t*, size_t, bool, unsigned int,
+                     unsigned int) override { return false; }
     uint64_t getMicroseconds() override { return 0; }
 };
 
@@ -73,8 +76,9 @@ TEST(ETG5000ModularDevice, DeviceState_Flags)
 TEST(ETG5000ModularDevice, PrepareRxPDO_and_DefaultOffsets)
 {
     NullSDOTransport transport;
-    EtherCAT::SDO::SDOManager sdo(transport);
-    ModularDevice dev(sdo, 0);
+    EtherCAT::CoE::CoEManager sdo(0, transport);
+    sdo.init();
+    ModularDevice dev(sdo);
 
     // By default controlword_ == 0 -> prepareRxPDO should write zeros
     uint8_t buf[16] = {};
@@ -95,8 +99,9 @@ TEST(ETG5000ModularDevice, PrepareRxPDO_and_DefaultOffsets)
 TEST(ETG5000ModularDevice, DiagnosticsString_Default)
 {
     NullSDOTransport transport;
-    EtherCAT::SDO::SDOManager sdo(transport);
-    ModularDevice dev(sdo, 1);
+    EtherCAT::CoE::CoEManager sdo(1, transport);
+    sdo.init();
+    ModularDevice dev(sdo);
     // Default-constructed state should produce a diagnostics string containing expected headers
     std::string diag = dev.getDiagnostics();
     EXPECT_NE(diag.find("Modular Device Diagnostics"), std::string::npos);

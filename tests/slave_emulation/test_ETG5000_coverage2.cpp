@@ -19,6 +19,7 @@
 #include "tether/etg5000/ETG5000ModularDevice.hpp"
 #include "tether/etg5000/ETG5000Defs.hpp"
 #include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 
 using namespace ETG5000;
 
@@ -52,7 +53,8 @@ public:
                    uint16_t wr_addr, uint16_t wr_len,
                    uint16_t rd_addr, uint16_t rd_len,
                    uint16_t index, uint8_t subindex,
-                   uint8_t* buf, size_t buf_sz, size_t* out_len) override {
+                   uint8_t* buf, size_t buf_sz, size_t* out_len,
+                   bool, unsigned int, unsigned int) override {
         if (!upload_returns) return false;
         auto key = std::make_pair(index, subindex);
         auto it = read_data_.find(key);
@@ -71,7 +73,8 @@ public:
                      uint16_t wr_addr, uint16_t wr_len,
                      uint16_t rd_addr, uint16_t rd_len,
                      uint16_t index, uint8_t subindex,
-                     const uint8_t* data, size_t len) override {
+                     const uint8_t* data, size_t len,
+                     bool, unsigned int, unsigned int) override {
         if (!download_returns) return false;
         last_write_index = index;
         last_write_subindex = subindex;
@@ -117,10 +120,10 @@ protected:
     }
 
     std::unique_ptr<ModularDevice> createDevice() {
-        sdo = std::make_unique<EtherCAT::SDO::SDOManager>(*transport);
+        sdo = std::make_unique<EtherCAT::CoE::CoEManager>(1, *transport);
         sdo->init();
-        sdo->configureSlaveMailbox(1, 0x1000, 128, 0x1200, 128);
-        return std::make_unique<ModularDevice>(*sdo, 1);
+        sdo->configureMailbox(0x1000, 128, 0x1200, 128);
+        return std::make_unique<ModularDevice>(*sdo);
     }
 
     void TearDown() override {
@@ -129,7 +132,7 @@ protected:
     }
 
     std::unique_ptr<MockSDOTransport> transport;
-    std::unique_ptr<EtherCAT::SDO::SDOManager> sdo;
+    std::unique_ptr<EtherCAT::CoE::CoEManager> sdo;
     std::unique_ptr<ModularDevice> dev;
 };
 
@@ -677,10 +680,10 @@ TEST_F(ETG5000Cov2Test, DiagAccessors_WithModules) {
 
 TEST_F(ETG5000Cov2Test, Constructor_UseConfiguredAddr) {
     setupModules(*transport, 1);
-    sdo = std::make_unique<EtherCAT::SDO::SDOManager>(*transport);
+    sdo = std::make_unique<EtherCAT::CoE::CoEManager>(1, *transport);
     sdo->init();
-    sdo->configureSlaveMailbox(1, 0x1000, 128, 0x1200, 128);
-    auto d = std::make_unique<ModularDevice>(*sdo, 1, true);
+    sdo->configureMailbox(0x1000, 128, 0x1200, 128);
+    auto d = std::make_unique<ModularDevice>(*sdo);
     EXPECT_FALSE(d->isInitialized());
     d.reset();
     sdo->deinit();
