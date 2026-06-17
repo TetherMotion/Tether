@@ -6,7 +6,6 @@ set(TETHER_ETHERCAT_COMMON_SOURCES
     ${TETHER_ROOT}/src/ethercat/DebugFlags.cpp
 
     # SII parser
-    ${TETHER_ROOT}/src/sii/SIIReader.cpp
     ${TETHER_ROOT}/src/ethercat/ESIParser.cpp
 
     # Stubs for host builds (only include when we are NOT building the full master)

@@ -57,6 +57,7 @@ set(TETHER_ETHERCAT_MASTER_SOURCES
     ${ETHERCAT_CORE_SOURCES}
     ${ETHERCAT_RAW_SOURCES}
     ${TETHER_ROOT}/src/fmmu/FMMUConfiguration.cpp
+    ${TETHER_ROOT}/src/sii/SIIReader.cpp
     ${RESET_SOURCES}
     ${FSOE_SOURCES}
     ${ETG5000_SOURCES}
