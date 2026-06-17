@@ -5,9 +5,8 @@
 
 #include "profiles/cia301/SlaveIdentification.hpp"
 #include "tether/platform/EspCompat.hpp"
-#include "SDOManager.hpp"
-
-using ::EtherCAT::SDO::SDOManager;
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 
 static const char* TAG = "SlaveID";
 
@@ -149,8 +148,8 @@ void SlaveIdentity::clear() {
 // SlaveIdentifier Implementation
 // ============================================================================
 
-SlaveIdentifier::SlaveIdentifier(SDO::SDOManager& sdo)
-    : m_sdo(sdo) {}
+SlaveIdentifier::SlaveIdentifier(Master& master)
+    : m_master(master) {}
 
 bool SlaveIdentifier::identify(uint16_t slave_index, SlaveIdentity& identity) {
     identity.clear();
@@ -236,32 +235,58 @@ size_t SlaveIdentifier::identifyAll(SlaveIdentity* identities, size_t max_count,
 bool SlaveIdentifier::readIdentityRecord(uint16_t slave_index, IdentityRecord& record) {
     record = IdentityRecord{};
     
-    // Read Vendor ID (0x1018:01)
-    if (!m_sdo.readU32(slave_index, CiA301::Identity, CiA301::IdentitySub::VendorID,
-                       record.vendor_id, m_sdo_timeout_ms)) {
+    try {
+        auto& coe = m_master.sdoManager(slave_index);
+        
+        // Read Vendor ID (0x1018:01)
+        auto vendor_result = coe.readU32(CiA301::Identity, CiA301::IdentitySub::VendorID,
+                                          {.timeout_ms = m_sdo_timeout_ms});
+        if (!vendor_result.has_value()) {
+            return false;
+        }
+        record.vendor_id = vendor_result.value();
+        
+        // Read Product Code (0x1018:02)
+        auto product_result = coe.readU32(CiA301::Identity, CiA301::IdentitySub::ProductCode,
+                                            {.timeout_ms = m_sdo_timeout_ms});
+        if (product_result.has_value()) {
+            record.product_code = product_result.value();
+        }
+        
+        // Read Revision Number (0x1018:03)
+        auto revision_result = coe.readU32(CiA301::Identity, CiA301::IdentitySub::RevisionNumber,
+                                             {.timeout_ms = m_sdo_timeout_ms});
+        if (revision_result.has_value()) {
+            record.revision_number = revision_result.value();
+        }
+        
+        // Read Serial Number (0x1018:04)
+        auto serial_result = coe.readU32(CiA301::Identity, CiA301::IdentitySub::SerialNumber,
+                                          {.timeout_ms = m_sdo_timeout_ms});
+        if (serial_result.has_value()) {
+            record.serial_number = serial_result.value();
+        }
+        
+        return true;
+    } catch (...) {
         return false;
     }
-    
-    // Read Product Code (0x1018:02)
-    m_sdo.readU32(slave_index, CiA301::Identity, CiA301::IdentitySub::ProductCode,
-                  record.product_code, m_sdo_timeout_ms);
-    
-    // Read Revision Number (0x1018:03)
-    m_sdo.readU32(slave_index, CiA301::Identity, CiA301::IdentitySub::RevisionNumber,
-                  record.revision_number, m_sdo_timeout_ms);
-    
-    // Read Serial Number (0x1018:04)
-    m_sdo.readU32(slave_index, CiA301::Identity, CiA301::IdentitySub::SerialNumber,
-                  record.serial_number, m_sdo_timeout_ms);
-    
-    return true;
 }
 
 bool SlaveIdentifier::readDeviceType(uint16_t slave_index, DeviceTypeInfo& type) {
     type = DeviceTypeInfo{};
     
-    return m_sdo.readU32(slave_index, CiA301::DeviceType, 0,
-                         type.raw_value, m_sdo_timeout_ms);
+    try {
+        auto& coe = m_master.sdoManager(slave_index);
+        auto result = coe.readU32(CiA301::DeviceType, 0, {.timeout_ms = m_sdo_timeout_ms});
+        if (result.has_value()) {
+            type.raw_value = result.value();
+            return true;
+        }
+        return false;
+    } catch (...) {
+        return false;
+    }
 }
 
 bool SlaveIdentifier::readString(uint16_t slave_index, uint16_t index,
@@ -273,51 +298,75 @@ bool SlaveIdentifier::readString(uint16_t slave_index, uint16_t index,
     
     buffer[0] = '\0';
     
-    size_t read_len = 0;
-    // Try subindex 0 first (common for visible strings)
-    bool ok = m_sdo.readSync(slave_index, index, 0, buffer, buffer_size - 1,
-                             m_sdo_timeout_ms, &read_len);
+    try {
+        auto& coe = m_master.sdoManager(slave_index);
+        size_t read_len = 0;
+        // Try subindex 0 first (common for visible strings)
+        bool ok = coe.readSync(index, 0, buffer, buffer_size - 1,
+                               m_sdo_timeout_ms, &read_len);
 
-    // Some devices present the string at subindex 1 - try that as a fallback
-    if ((!ok || read_len == 0) && m_sdo.readSync(slave_index, index, 1, buffer, buffer_size - 1,
+        // Some devices present the string at subindex 1 - try that as a fallback
+        if ((!ok || read_len == 0) && coe.readSync(index, 1, buffer, buffer_size - 1,
                                                   m_sdo_timeout_ms, &read_len)) {
-        ok = true;
-    }
+            ok = true;
+        }
 
-    if (!ok) {
+        if (!ok) {
+            return false;
+        }
+
+        // Ensure null termination (read_len may be larger than buffer-1)
+        if (read_len >= buffer_size) {
+            read_len = buffer_size - 1;
+        }
+        buffer[read_len] = '\0';
+
+        // Trim trailing whitespace and non-printable chars (some devices pad strings)
+        size_t str_len = read_len;
+        while (str_len > 0 && (buffer[str_len - 1] == '\0' || buffer[str_len - 1] == ' ' ||
+                               buffer[str_len - 1] == '\r' || buffer[str_len - 1] == '\n' ||
+                               static_cast<unsigned char>(buffer[str_len - 1]) < 32)) {
+            str_len--;
+        }
+
+        buffer[str_len] = '\0';
+
+        if (actual_len) {
+            *actual_len = str_len;
+        }
+
+        return true;
+    } catch (...) {
         return false;
     }
-
-    // Ensure null termination (read_len may be larger than buffer-1)
-    if (read_len >= buffer_size) {
-        read_len = buffer_size - 1;
-    }
-    buffer[read_len] = '\0';
-
-    // Trim trailing whitespace and non-printable chars (some devices pad strings)
-    size_t str_len = read_len;
-    while (str_len > 0 && (buffer[str_len - 1] == '\0' || buffer[str_len - 1] == ' ' ||
-                           buffer[str_len - 1] == '\r' || buffer[str_len - 1] == '\n' ||
-                           static_cast<unsigned char>(buffer[str_len - 1]) < 32)) {
-        str_len--;
-    }
-
-    buffer[str_len] = '\0';
-
-    if (actual_len) {
-        *actual_len = str_len;
-    }
-
-    return true;
 }
 
 bool SlaveIdentifier::readErrorRegister(uint16_t slave_index, uint8_t& error_register) {
-    return m_sdo.readU8(slave_index, CiA301::ErrorRegister, 0,
-                        error_register, m_sdo_timeout_ms);
+    try {
+        auto& coe = m_master.sdoManager(slave_index);
+        auto result = coe.readU8(CiA301::ErrorRegister, 0, {.timeout_ms = m_sdo_timeout_ms});
+        if (result.has_value()) {
+            error_register = result.value();
+            return true;
+        }
+        return false;
+    } catch (...) {
+        return false;
+    }
 }
 
 bool SlaveIdentifier::readSupportedDriveModes(uint16_t slave_index, uint32_t& modes) {
-    return m_sdo.readU32(slave_index, 0x6502, 0, modes, m_sdo_timeout_ms);
+    try {
+        auto& coe = m_master.sdoManager(slave_index);
+        auto result = coe.readU32(0x6502, 0, {.timeout_ms = m_sdo_timeout_ms});
+        if (result.has_value()) {
+            modes = result.value();
+            return true;
+        }
+        return false;
+    } catch (...) {
+        return false;
+    }
 }
 
 // ============================================================================

@@ -3,9 +3,9 @@
  * @brief CiA 405 IEC 61131-3 Programmable Device Implementation
  */
 
-#include "profiles/cia405/CiA405PLC.hpp"
+#include "tether/profiles/cia405/CiA405PLC.hpp"
 #include "tether/platform/EspCompat.hpp"
-#include "SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 
 static const char* TAG = "CiA405";
 #define LOG_I(fmt, ...) TETHER_LOGI(TAG, fmt, ##__VA_ARGS__)
@@ -21,10 +21,8 @@ namespace CiA405 {
 // Construction and Initialization
 // ============================================================================
 
-PLCDevice::PLCDevice(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_addr, bool use_configured_addr)
-    : m_sdo(sdo)
-    , slave_addr_(slave_addr)
-    , use_configured_addr_(use_configured_addr)
+PLCDevice::PLCDevice(EtherCAT::CoE::CoEManager& coe)
+    : m_coe(coe)
     , initialized_(false)
     , capabilities_()
     , current_mapping_(PDOMappingPreset::Minimal)
@@ -45,7 +43,7 @@ PLCDevice::~PLCDevice() {
 }
 
 bool PLCDevice::initialize() {
-    LOG_I("Initializing CiA 405 PLC device at address %u", slave_addr_);
+    LOG_I("Initializing CiA 405 PLC device at slave %u", m_coe.slaveIndex());
     
     // Verify device type
     uint32_t device_type = 0;
@@ -831,7 +829,7 @@ void PLCDevice::setVariableCallback(VariableCallback callback) {
 std::string PLCDevice::getDiagnostics() const {
     std::string diag;
     diag += "CiA 405 PLC Device\n";
-    diag += "  Slave: " + std::to_string(slave_addr_) + "\n";
+    diag += "  Slave: " + std::to_string(m_coe.slaveIndex()) + "\n";
     diag += "  Program State: " + std::string(getProgramStateName(program_info_.state)) + "\n";
     diag += "  Tasks: " + std::to_string(tasks_.size()) + "\n";
     
@@ -855,11 +853,13 @@ std::string PLCDevice::getDiagnostics() const {
 // ============================================================================
 
 bool PLCDevice::readSDO(uint16_t index, uint8_t subindex, void* data, size_t len) {
-    return m_sdo.readSync(slave_addr_, index, subindex, data, len, EtherCAT::SDO::kDefaultSDOTimeoutMs);
+    size_t actual_size;
+    return m_coe.readSync(index, subindex, data, len, EtherCAT::SDO::kDefaultSDOTimeoutMs, &actual_size);
 }
 
 bool PLCDevice::writeSDO(uint16_t index, uint8_t subindex, const void* data, size_t len) {
-    return m_sdo.writeSync(slave_addr_, index, subindex, data, len, EtherCAT::SDO::kDefaultSDOTimeoutMs);
+    auto result = m_coe.writeSync(index, subindex, data, len, {.timeout_ms = EtherCAT::SDO::kDefaultSDOTimeoutMs});
+    return result.has_value();
 }
 
 } // namespace CiA405

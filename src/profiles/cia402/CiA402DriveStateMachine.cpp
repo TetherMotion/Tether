@@ -6,9 +6,9 @@
  * EtherCAT state transitions, and drive enable/disable logic.
  */
 
-#include "profiles/cia402/CiA402Drive.hpp"
+#include "tether/profiles/cia402/CiA402Drive.hpp"
 #include "tether/ethercat/Master.hpp"
-#include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 #include "tether/ethercat/DC.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/platform/Platform.hpp"

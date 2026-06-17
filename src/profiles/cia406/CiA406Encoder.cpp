@@ -19,7 +19,7 @@
 #include "profiles/cia406/CiA406Encoder.hpp"
 #include "profiles/cia406/CiA406Defs.hpp"
 #include "tether/platform/EspCompat.hpp"
-#include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 
 #include <cstring>
 #include <algorithm>
@@ -141,22 +141,13 @@ std::string AlarmFlags::getDescription() const {
 // Encoder Class Implementation
 // ============================================================================
 
-Encoder::Encoder(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_position)
-    : m_sdo(sdo)
-    , slave_addr_(slave_position)
-    , use_configured_addr_(false)
-{
-}
-
-Encoder::Encoder(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_address, bool use_configured_addr)
-    : m_sdo(sdo)
-    , slave_addr_(slave_address)
-    , use_configured_addr_(use_configured_addr)
+Encoder::Encoder(EtherCAT::CoE::CoEManager& coe)
+    : m_coe(coe)
 {
 }
 
 bool Encoder::initialize() {
-    TETHER_LOGI(TAG, "Initializing CiA 406 encoder at slave %u", slave_addr_);
+    TETHER_LOGI(TAG, "Initializing CiA 406 encoder");
     
     // Verify device type
     uint32_t device_type = 0;
@@ -291,7 +282,7 @@ bool Encoder::readCapabilities() {
 }
 
 bool Encoder::applyPDOMapping(PDOMappingPreset preset) {
-    TETHER_LOGI(TAG, "Applying PDO mapping preset for slave %u", slave_addr_);
+    TETHER_LOGI(TAG, "Applying PDO mapping preset for slave %u", m_coe.slaveIndex());
     
     current_mapping_ = preset;
     
@@ -550,7 +541,7 @@ void Encoder::processAlarms(uint16_t alarm_word) {
 
 void Encoder::fireEvent(EncoderEvent event, uint32_t data) {
     if (event_callback_) {
-        event_callback_(event, slave_addr_, data);
+        event_callback_(event, m_coe.slaveIndex(), data);
     }
 }
 
@@ -597,7 +588,7 @@ void Encoder::setOffset(int32_t offset) {
 // ============================================================================
 
 bool Encoder::presetPosition(int32_t position) {
-    TETHER_LOGI(TAG, "Presetting encoder %u position to %d", slave_addr_, position);
+    TETHER_LOGI(TAG, "Presetting encoder %u position to %d", m_coe.slaveIndex(), position);
     
     // Write preset value
     if (!writeObject(PresetValue, 0, &position, sizeof(position))) {
@@ -620,7 +611,7 @@ bool Encoder::presetPosition(int32_t position) {
 }
 
 bool Encoder::startReference(const ReferenceConfig& config) {
-    TETHER_LOGI(TAG, "Starting reference procedure for encoder %u", slave_addr_);
+    TETHER_LOGI(TAG, "Starting reference procedure for encoder %u", m_coe.slaveIndex());
     
     // Write reference position
     writeObject(ReferencePosition, 0, &config.reference_position, 
@@ -744,43 +735,26 @@ void Encoder::clearEventCallback() {
 // ============================================================================
 
 bool Encoder::readObject(uint16_t index, uint8_t subindex, void* data, size_t size, size_t* out_size) {
-    return m_sdo.readSync(slave_addr_, index, subindex, data, size, EtherCAT::SDO::kDefaultSDOTimeoutMs, out_size);
+    return m_coe.readSync(index, subindex, data, size, EtherCAT::SDO::kDefaultSDOTimeoutMs, out_size);
 }
 
 bool Encoder::writeObject(uint16_t index, uint8_t subindex, const void* data, size_t size) {
-    return m_sdo.writeSync(slave_addr_, index, subindex, data, size, EtherCAT::SDO::kDefaultSDOTimeoutMs);
+    auto result = m_coe.writeSync(index, subindex, data, size, {.timeout_ms = EtherCAT::SDO::kDefaultSDOTimeoutMs});
+    return result.has_value();
 }
 
 // ============================================================================
 // Factory Functions
 // ============================================================================
 
-std::unique_ptr<Encoder> createEncoder(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_position) {
-    auto encoder = std::make_unique<Encoder>(sdo, slave_position);
+std::unique_ptr<Encoder> createEncoder(EtherCAT::CoE::CoEManager& coe) {
+    auto encoder = std::make_unique<Encoder>(coe);
     if (encoder->initialize()) {
         return encoder;
     }
     return nullptr;
 }
 
-std::vector<uint16_t> scanForEncoders(EtherCAT::SDO::SDOManager& sdo) {
-    std::vector<uint16_t> encoders;
-    
-    // Scan first 16 slaves
-    for (uint16_t i = 0; i < 16; i++) {
-        uint32_t device_type = 0;
-        size_t len;
-        
-        Encoder temp(sdo, i);
-        if (temp.readObject(0x1000, 0, &device_type, sizeof(device_type), &len)) {
-            uint16_t profile = device_type & 0xFFFF;
-            if (profile == 406) {
-                encoders.push_back(i);
-            }
-        }
-    }
-    
-    return encoders;
-}
+// scanForEncoders removed - no longer applicable with per-slave CoEManager
 
 } // namespace CiA406

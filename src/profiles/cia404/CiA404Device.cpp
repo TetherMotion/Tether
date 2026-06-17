@@ -3,9 +3,9 @@
  * @brief CiA 404 Measuring Device and Closed Loop Controller Implementation
  */
 
-#include "profiles/cia404/CiA404Device.hpp"
+#include "tether/profiles/cia404/CiA404Device.hpp"
 #include "tether/platform/EspCompat.hpp"
-#include "SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 
 static const char* TAG = "CiA404";
 #define LOG_I(fmt, ...) TETHER_LOGI(TAG, fmt, ##__VA_ARGS__)
@@ -21,10 +21,8 @@ namespace CiA404 {
 // Construction and Initialization
 // ============================================================================
 
-MeasuringDevice::MeasuringDevice(EtherCAT::SDO::SDOManager& sdo, uint16_t slave_addr, bool use_configured_addr)
-    : m_sdo(sdo)
-    , slave_addr_(slave_addr)
-    , use_configured_addr_(use_configured_addr)
+MeasuringDevice::MeasuringDevice(EtherCAT::CoE::CoEManager& coe)
+    : m_coe(coe)
     , initialized_(false)
     , capabilities_()
     , current_mapping_(PDOMappingPreset::Minimal)
@@ -37,7 +35,7 @@ MeasuringDevice::~MeasuringDevice() {
 }
 
 bool MeasuringDevice::initialize() {
-    LOG_I("Initializing CiA 404 measuring device at address %u", slave_addr_);
+    LOG_I("Initializing CiA 404 measuring device at slave %u", m_coe.slaveIndex());
     
     // Verify device type
     uint32_t device_type = 0;
@@ -240,7 +238,7 @@ void MeasuringDevice::update() {
             
             // Fire value callback
             if (value_callback_) {
-                value_callback_(slave_addr_, ch + 1, 
+                value_callback_(m_coe.slaveIndex(), ch + 1, 
                                input_states_[ch].raw_value,
                                input_states_[ch].scaled_value);
             }
@@ -339,7 +337,7 @@ void MeasuringDevice::checkAlarms() {
             }
             
             if (alarm_callback_) {
-                alarm_callback_(slave_addr_, ch + 1, alarm, val);
+                alarm_callback_(m_coe.slaveIndex(), ch + 1, alarm, val);
             }
         }
         
@@ -351,7 +349,7 @@ void MeasuringDevice::checkAlarms() {
 
 void MeasuringDevice::fireEvent(DeviceEvent event, uint8_t channel, int32_t value) {
     if (event_callback_) {
-        event_callback_(event, slave_addr_, channel, value);
+        event_callback_(event, m_coe.slaveIndex(), channel, value);
     }
 }
 
@@ -754,7 +752,7 @@ uint32_t MeasuringDevice::getOperatingHours() {
 std::string MeasuringDevice::getDiagnostics() const {
     std::string diag;
     diag += "CiA 404 Measuring Device\n";
-    diag += "  Slave: " + std::to_string(slave_addr_) + "\n";
+    diag += "  Slave: " + std::to_string(m_coe.slaveIndex()) + "\n";
     diag += "  Process Inputs: " + std::to_string(capabilities_.num_process_inputs) + "\n";
     diag += "  Process Outputs: " + std::to_string(capabilities_.num_process_outputs) + "\n";
     diag += "  Controller: " + std::string(capabilities_.has_controller ? "Yes" : "No") + "\n";
@@ -789,11 +787,13 @@ void MeasuringDevice::setValueCallback(ValueCallback callback) {
 // ============================================================================
 
 bool MeasuringDevice::readSDO(uint16_t index, uint8_t subindex, void* data, size_t len) {
-    return m_sdo.readSync(slave_addr_, index, subindex, data, len, EtherCAT::SDO::kDefaultSDOTimeoutMs);
+    size_t actual_size;
+    return m_coe.readSync(index, subindex, data, len, EtherCAT::SDO::kDefaultSDOTimeoutMs, &actual_size);
 }
 
 bool MeasuringDevice::writeSDO(uint16_t index, uint8_t subindex, const void* data, size_t len) {
-    return m_sdo.writeSync(slave_addr_, index, subindex, data, len, EtherCAT::SDO::kDefaultSDOTimeoutMs);
+    auto result = m_coe.writeSync(index, subindex, data, len, {.timeout_ms = EtherCAT::SDO::kDefaultSDOTimeoutMs});
+    return result.has_value();
 }
 
 } // namespace CiA404
