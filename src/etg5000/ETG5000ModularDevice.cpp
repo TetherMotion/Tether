@@ -4,7 +4,7 @@
  */
 
 #include "etg5000/ETG5000ModularDevice.hpp"
-#include "SDOManager.hpp"
+#include "tether/ethercat/SDOManager.hpp"
 
 #include <cstring>
 #include <algorithm>
