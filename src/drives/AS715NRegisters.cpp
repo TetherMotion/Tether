@@ -14,7 +14,7 @@ uint16_t AS715NFaultHandler::readManufacturerFault(EtherCAT::CoE::CoEManager& sd
 }
 
 AS715NManufacturerFault203F AS715NFaultHandler::readManufacturerFaultExtended(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx) {
-    auto result = sdo.readU32(slave_idx, AS715NDevice::kManufacturerFaultIndex, 0x00, {.timeout_ms = 3000});
+    auto result = sdo.readU32(AS715NDevice::kManufacturerFaultIndex, 0x00, {.timeout_ms = 3000});
     if (!result.has_value()) {
         TETHER_LOGW(TAG, "Failed to read manufacturer fault (0x%04X) from slave %u",
                     AS715NDevice::kManufacturerFaultIndex, slave_idx);
@@ -24,7 +24,7 @@ AS715NManufacturerFault203F AS715NFaultHandler::readManufacturerFaultExtended(Et
 }
 
 uint16_t AS715NFaultHandler::readCiA402Error(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx) {
-    auto result = sdo.readU16(slave_idx, AS715NDevice::kCiA402ErrorIndex, 0x00, {.timeout_ms = 3000});
+    auto result = sdo.readU16(AS715NDevice::kCiA402ErrorIndex, 0x00, {.timeout_ms = 3000});
     if (!result.has_value()) {
         TETHER_LOGW(TAG, "Failed to read CiA 402 error code (0x%04X) from slave %u",
                     AS715NDevice::kCiA402ErrorIndex, slave_idx);
