@@ -57,6 +57,8 @@ enum class ALStatusCode : uint16_t {
     NoError                     = 0x0000,
     UnspecifiedError            = 0x0001,
     NoMemory                    = 0x0002,
+    InvalidDeviceSetup          = 0x0003,
+    ReservedCompatibility       = 0x0005,
     InvalidRequestedStateChange = 0x0011,
     UnknownRequestedState       = 0x0012,
     BootstrapNotSupported       = 0x0013,

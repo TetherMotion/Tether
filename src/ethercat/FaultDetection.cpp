@@ -22,6 +22,8 @@ const char* getALStatusCodeName(ALStatusCode code) {
         case ALStatusCode::NoError: return "No error";
         case ALStatusCode::UnspecifiedError: return "Unspecified error";
         case ALStatusCode::NoMemory: return "No memory";
+        case ALStatusCode::InvalidDeviceSetup: return "Invalid device setup";
+        case ALStatusCode::ReservedCompatibility: return "Reserved due to compatibility reasons";
         case ALStatusCode::InvalidRequestedStateChange: return "Invalid requested state change";
         case ALStatusCode::UnknownRequestedState: return "Unknown requested state";
         case ALStatusCode::BootstrapNotSupported: return "Bootstrap not supported";
