@@ -1,15 +1,12 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
-#include <iostream>
 #include <string>
 
 #include "DS402ExampleSupport.hpp"
 #include "tether/drives/PBLR81FGF/PBLR81FGFPDO.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include "tether/profiles/cia301/CiA402Defs.hpp"
-
-#include <argparse/argparse.hpp>
 
 namespace {
 
@@ -65,20 +62,14 @@ bool configureDrive(EtherCAT::DS402Master& master)
 
 int main(int argc, char** argv)
 {
-    argparse::ArgumentParser program("pblr81fgf_sine_motion_native");
-    program.add_argument("-i", "--interface").default_value(std::string("eth0"));
-    program.add_argument("-d", "--duration").scan<'g', double>().default_value(10.0);
-
-    try {
-        program.parse_args(argc, argv);
-    } catch (const std::runtime_error& err) {
-        std::cerr << err.what() << '\n' << program;
+    Tether::Examples::MotionNativeArgs args;
+    if (!Tether::Examples::parseMotionNativeArgs(argc, argv, "pblr81fgf_sine_motion_native", args)) {
         return 1;
     }
 
     EtherCAT::DS402Master master;
     Tether::Examples::HostMasterSession session;
-    if (!Tether::Examples::startHostMasterSession(program.get<std::string>("--interface"), master, session, TAG)) {
+    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG)) {
         return 2;
     }
 
@@ -86,7 +77,7 @@ int main(int argc, char** argv)
     if (!configureDrive(master)) {
         rc = 3;
     } else {
-        rc = runSineMotion(master, program.get<double>("--duration"));
+        rc = runSineMotion(master, args.duration);
         Tether::Examples::shutdownSingleDrive(master, kSlaveIndex);
     }
 
