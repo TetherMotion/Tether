@@ -2,9 +2,12 @@
 
 #include <atomic>
 #include <cstring>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <thread>
+
+#include <argparse/argparse.hpp>
 #include <magic_enum/magic_enum.hpp>
 
 #include "tether/platform/Platform.hpp"
@@ -163,6 +166,37 @@ inline void shutdownSingleDrive(EtherCAT::DS402Master& master, uint16_t slave_in
 {
     (void)master.disableDrive(slave_index);
     master.stopDistributedClocks();
+}
+
+// ============================================================================
+// Motion-native example argument parsing
+// ============================================================================
+
+struct MotionNativeArgs {
+    std::string interface = "eth0";
+    double duration = 10.0;
+};
+
+/// Parse the standard motion-native arguments (`-i`/`--interface`,
+/// `-d`/`--duration`).  Prints usage to stderr and returns `false` on failure.
+inline bool parseMotionNativeArgs(int argc, char** argv,
+                                  const char* program_name,
+                                  MotionNativeArgs& out)
+{
+    argparse::ArgumentParser program(program_name);
+    program.add_argument("-i", "--interface").default_value(std::string("eth0"));
+    program.add_argument("-d", "--duration").scan<'g', double>().default_value(10.0);
+
+    try {
+        program.parse_args(argc, argv);
+    } catch (const std::runtime_error& err) {
+        std::cerr << err.what() << '\n' << program;
+        return false;
+    }
+
+    out.interface = program.get<std::string>("--interface");
+    out.duration  = program.get<double>("--duration");
+    return true;
 }
 
 } // namespace Tether::Examples
