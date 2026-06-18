@@ -429,7 +429,7 @@ public:
                          uint32_t base_logical_addr = 0);
 
     /// Write FMMU registers to slave hardware.
-    bool writeToSlave();
+    bool writeToSlave(bool fmmu_debug = false);
 
     /// Read FMMU registers from slave hardware.
     size_t readFromSlave(FMMUConfig* out_configs, size_t max_fmmus);

@@ -39,6 +39,7 @@
 
 #include "logging/DeduplicatingLogger.hpp"
 
+#include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/SlaveIdentity.hpp"
 #include "tether/ethercat/TetherConfig.hpp"
 #include "tether/ethercat/Types.hpp"
@@ -493,6 +494,25 @@ public:
                              bool exit_on_error = false,
                              const char* tag = "EtherCAT");
 
+    // ---- Debug flags -------------------------------------------------------
+
+    /** @brief Access the master's debug flags (read/write). */
+    EtherCATMasterDebugFlags& debugFlags() { return debug_flags_; }
+    const EtherCATMasterDebugFlags& debugFlags() const { return debug_flags_; }
+
+    /**
+     * @brief Recompute and push per-slave debug flags to all slaves and CoE managers.
+     *
+     * Call this after modifying the master debug flags, or after slave
+     * discovery changes the slave count.
+     */
+    void updateDebugFlags();
+
+    /** @brief Convenience: is a named debug flag enabled for a slave? */
+    bool isDebugEnabled(const std::string& name, uint16_t slave_index) const {
+        return debug_flags_.isEnabled(name, slave_index);
+    }
+
     // ---- CoE / SDO low-level -----------------------------------------------
 
     bool coeSdoUpload(uint16_t adp, uint8_t* inout_mbx_cnt,
@@ -706,6 +726,9 @@ private:
     // Per-slave state machines
     std::vector<std::unique_ptr<Slave>> slaves_;
     std::unique_ptr<NonExistingSlave> non_existing_slave_;
+
+    // Debug flags (master-level with per-slave filtering)
+    EtherCATMasterDebugFlags debug_flags_;
 
     // SII reader (lazily created)
     std::unique_ptr<SII::SIIReader> sii_reader_;

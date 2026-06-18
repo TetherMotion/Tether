@@ -412,7 +412,6 @@ int main(int argc, char** argv) {
 
     if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
     auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
-    Tether::Examples::applyDebugFlags(debug_flags, TAG);
 
     // Parse column selection
     std::vector<std::string> selected_columns;
@@ -582,6 +581,7 @@ int main(int argc, char** argv) {
     // ---- Create master ----
     EtherCAT::Master master;
     g_master = &master;
+    Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
 
     // ---- Optional VLAN router ----
     std::unique_ptr<EtherCAT::VLANRouter> router;

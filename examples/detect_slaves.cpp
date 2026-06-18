@@ -46,7 +46,6 @@ int main(int argc, char** argv) {
 
     if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
     auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
-    Tether::Examples::applyDebugFlags(debug_flags, TAG);
 
     Tether::Examples::VlanConfig vlan;
     if (!Tether::Examples::parseVlanArgs(
@@ -68,6 +67,7 @@ int main(int argc, char** argv) {
     }
 
     EtherCAT::Master master;
+    Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
     if (!Tether::Examples::setupVlanAndRxCallback(session, master, vlan, TAG)) {
         Tether::Examples::shutdownHostEthernet(session);
         return 5;

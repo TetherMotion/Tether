@@ -437,7 +437,7 @@ static void printEtherCATFrame(const uint8_t* frame, size_t length, bool is_tx, 
 
 bool Master::sendRawFrame(const void* buf, size_t len)
 {
-    if (debug::txPackets()) {
+    if (debug_flags_.txPackets) {
         printEtherCATFrame(reinterpret_cast<const uint8_t*>(buf), len, true, false);
     }
     if (iface_.send)
@@ -497,7 +497,7 @@ bool Master::sendSingleDatagram(Command cmd, uint8_t idx,
     *reinterpret_cast<uint16_t*>(payload + datalen) = host_to_le16(0);
 
     if (iface_.send) {
-        if (debug::txPackets()) {
+        if (debug_flags_.txPackets) {
             printEtherCATFrame(txbuf, frame_len, true, false);
         }
         auto& clock = Tether::Platform::Clock::instance();
@@ -580,7 +580,7 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
     const auto* eth = reinterpret_cast<const EtherCAT::EthernetHeader*>(frame);
     const uint16_t ether_type = bswap16(eth->etherType_be);
     if (ether_type != EtherCAT::kEtherTypeEtherCAT) {
-        if (debug::rxPackets()) {
+        if (debug_flags_.rxPackets) {
             const char* name = etherTypeToString(ether_type);
             if (name) {
                 TETHER_LOGI("ec_pkt", "[RX] Non-EtherCAT frame: %s (0x%04X, len=%u)",
@@ -593,7 +593,7 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
         return;
     }
 
-    if (debug::rxPackets()) {
+    if (debug_flags_.rxPackets) {
         printEtherCATFrame(frame, length, false, false);
     }
 

@@ -311,7 +311,7 @@ inline bool Axia80Sensor::init(Tether::Platform::LogLevel log_level,
     auto& sl = slave();
 
     // Print PDO layout if debug flags are enabled
-    if (debug::rxPDO() || debug::txPDO()) {
+    if (master_.debugFlags().rxPDO && master_.debugFlags().rxPDOFilt.allows(slave_index_)) {
         printPDOLayout();
     }
 

@@ -39,9 +39,19 @@ void addDurationArg(argparse::ArgumentParser& program, double defaultValue = 0.0
 /// Parse a comma-separated debug-flags string into a set of trimmed tokens.
 std::set<std::string> parseDebugFlags(const std::string& debugStr);
 
-/// Enable the appropriate EtherCAT debug logging for each flag in @p flags.
-/// Warns about unknown flags by comparing against the debug-module registry.
-void applyDebugFlags(const std::set<std::string>& flags, const char* tag);
+/**
+ * @brief Apply debug flags parsed from CLI to a Master instance.
+ *
+ * Uses the new per-master/per-slave syntax, e.g.:
+ *   --debug rx-pdo,stateMachine:(slaves:0,2,5),coe-reads:(slaves:1-3)
+ *
+ * @param flags   Set of flag strings from parseDebugFlags()
+ * @param master  Target master to configure debug flags on
+ * @param tag     ESP-style log tag for diagnostics
+ */
+void applyDebugFlags(const std::set<std::string>& flags,
+                     EtherCAT::Master& master,
+                     const char* tag);
 
 // ============================================================================
 // VLAN helpers

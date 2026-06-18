@@ -9,6 +9,7 @@
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 #include "tether/ethercat/FoE.hpp"
 #include "tether/ethercat/VoE.hpp"
 #include "tether/ethercat/EoE.hpp"
@@ -69,6 +70,26 @@ void Master::initSlaves(uint16_t count)
     // categories) into cache hits, eliminating repeated EEPSTAT polling.
     for (uint16_t i = 0; i < count; ++i) {
         (void)sii_reader_->prefetchWords(i, 0, 256);
+    }
+    // Resize filters to current slave count and push per-slave flags.
+    debug_flags_.resizeFilters(count);
+    updateDebugFlags();
+}
+
+void Master::updateDebugFlags()
+{
+    const uint16_t count = static_cast<uint16_t>(slaves_.size());
+    for (uint16_t i = 0; i < count; ++i) {
+        EtherCATSlaveDebugFlags flags = debug_flags_.computeForSlave(i);
+        if (slaves_[i]) {
+            slaves_[i]->updateDebugFlags(flags);
+        }
+        if (i < sdo_managers_.size() && sdo_managers_[i]) {
+            sdo_managers_[i]->updateDebugFlags(flags);
+        }
+    }
+    if (pdo_) {
+        pdo_->setDebugFlags(&debug_flags_);
     }
 }
 
@@ -151,7 +172,10 @@ uint16_t Master::getDiscoveredSlaveCount() const
 
 bool Master::requestSlaveApplicationLayerState(SlaveAddress slave_address, uint8_t state_code)
 {
-    if (debug::stateMachine()) {
+    uint16_t slave_index = 0;
+    if (slave_address.isPhysical()) slave_index = slave_address.slavePosition();
+
+    if (debug_flags_.stateMachine && debug_flags_.stateMachineFilt.allows(slave_index)) {
         uint8_t current_state_code = 0;
         readSlaveApplicationLayerState(slave_address, current_state_code);
         const char* current_state_name = getECStateName(current_state_code);
@@ -168,7 +192,7 @@ bool Master::requestSlaveApplicationLayerState(SlaveAddress slave_address, uint8
     
     bool result = writeRegister(slave_address, RegisterAddress(Raw::EC_REG_AL_CONTROL), static_cast<uint16_t>(state_code));
     
-    if (debug::stateMachine()) {
+    if (debug_flags_.stateMachine && debug_flags_.stateMachineFilt.allows(slave_index)) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
         TETHER_LOGI(TAG, "║  AL State Request Result: %s                                 ║", result ? "SUCCESS" : "FAILED");
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
@@ -321,13 +345,13 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
             slave_configs[slave_index].sm[2].phys_start_addr, rx_len,
             slave_configs[slave_index].sm[3].phys_start_addr, tx_len,
             rx_log);
-        if (!fmmu_mgr.writeToSlave()) {
+        if (!fmmu_mgr.writeToSlave(debug_flags_.fmmu && debug_flags_.fmmuFilt.allows(slave_index))) {
             TETHER_LOGE(TAG, "Slave %u: FMMU write (manual) failed", slave_index);
             return false;
         }
     } else if (sii_valid) {
         fmmu_mgr.configureFromSii(&sii, &slave_configs[slave_index], 0);
-        if (!fmmu_mgr.writeToSlave()) {
+        if (!fmmu_mgr.writeToSlave(debug_flags_.fmmu && debug_flags_.fmmuFilt.allows(slave_index))) {
             TETHER_LOGE(TAG, "Slave %u: FMMU write (from SII) failed", slave_index);
             return false;
         }

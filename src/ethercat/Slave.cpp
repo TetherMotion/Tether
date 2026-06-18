@@ -154,7 +154,7 @@ SlaveError Slave::transitionTo(SlaveState target) {
 }
 
 SlaveError Slave::transitionToInit() {
-    if (debug::stateMachine()) {
+    if (slave_debug_flags_.stateMachine) {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
@@ -176,7 +176,7 @@ SlaveError Slave::transitionToInit() {
     mailbox_configured_ = false;
     pdo_configured_ = false;
     
-    if (debug::stateMachine()) {
+    if (slave_debug_flags_.stateMachine) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
         TETHER_LOGI(TAG, "║  Transition Result: Slave %u => INIT SUCCESS                  ║", index_);
         TETHER_LOGI(TAG, "║  Configuration flags reset: mailbox=false, pdo=false          ║");
@@ -187,7 +187,7 @@ SlaveError Slave::transitionToInit() {
 }
 
 SlaveError Slave::transitionToPreOp() {
-    if (debug::stateMachine()) {
+    if (slave_debug_flags_.stateMachine) {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
@@ -216,7 +216,7 @@ SlaveError Slave::transitionToPreOp() {
         return SlaveError::TransportError;
     }
     
-    if (debug::stateMachine()) {
+    if (slave_debug_flags_.stateMachine) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
         TETHER_LOGI(TAG, "║  Transition Result: Slave %u => PRE_OP SUCCESS                ║", index_);
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
@@ -226,7 +226,7 @@ SlaveError Slave::transitionToPreOp() {
 }
 
 SlaveError Slave::transitionToSafeOp() {
-    if (debug::stateMachine()) {
+    if (slave_debug_flags_.stateMachine) {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
@@ -261,7 +261,7 @@ SlaveError Slave::transitionToSafeOp() {
         uint8_t state = 0;
         if (master_.readSlaveApplicationLayerState(index_, state)) {
             if (state == static_cast<uint8_t>(SlaveState::SAFE_OP)) {
-                if (debug::stateMachine()) {
+                if (slave_debug_flags_.stateMachine) {
                     TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
                     TETHER_LOGI(TAG, "║  Transition Result: Slave %u => SAFE_OP SUCCESS               ║", index_);
                     TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
@@ -300,7 +300,7 @@ SlaveError Slave::transitionToOp() {
     }
     bool fmmu_ok = fmmu_mgr_.verifyFromSlave();
 
-    if (debug::stateMachine()) {
+    if (slave_debug_flags_.stateMachine) {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
@@ -367,7 +367,7 @@ SlaveError Slave::transitionToOp() {
         uint8_t state = 0;
         if (master_.readSlaveApplicationLayerState(index_, state)) {
             if (state == static_cast<uint8_t>(SlaveState::OP)) {
-                if (debug::stateMachine()) {
+                if (slave_debug_flags_.stateMachine) {
                     TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
                     TETHER_LOGI(TAG, "║  Transition Result: Slave %u => OP SUCCESS                    ║", index_);
                     TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
@@ -393,7 +393,7 @@ SlaveError Slave::transitionToOp() {
 }
 
 SlaveError Slave::transitionToBoot() {
-    if (debug::stateMachine()) {
+    if (slave_debug_flags_.stateMachine) {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
@@ -412,7 +412,7 @@ SlaveError Slave::transitionToBoot() {
         return SlaveError::TransportError;
     }
     
-    if (debug::stateMachine()) {
+    if (slave_debug_flags_.stateMachine) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
         TETHER_LOGI(TAG, "║  Transition Result: Slave %u => BOOT SUCCESS                  ║", index_);
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
