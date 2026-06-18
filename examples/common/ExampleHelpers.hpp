@@ -66,4 +66,38 @@ bool parseVlanArgs(const std::string& rxVlanStr,
 /// Log the VLAN configuration via TETHER_LOGI.
 void logVlanConfig(const VlanConfig& config, const char* tag);
 
+// ============================================================================
+// Mailbox helpers
+// ============================================================================
+
+struct MailboxSizeConfig {
+    uint16_t inSize = 256;
+    uint16_t outSize = 256;
+};
+
+struct MailboxAddressConfig {
+    uint16_t inAddress = 0x1000;
+    uint16_t outAddress = 0x1200;
+};
+
+/// Add `-M` / `--mailbox-size` to an ArgumentParser.
+void addMailboxSizeArg(argparse::ArgumentParser& program);
+
+/// Add `--mailbox-address` to an ArgumentParser.
+void addMailboxAddressArg(argparse::ArgumentParser& program);
+
+/// Parse `--mailbox-size` value.  Single number sets both; `in:X,out:Y` sets independently.
+/// Returns false and prints to stderr on invalid input.
+bool parseMailboxSize(const std::string& str, MailboxSizeConfig& out);
+
+/// Parse `--mailbox-address` value.  Expected format: `in:<hex>,out:<hex>`.
+/// Validates that in-address != out-address.
+/// Returns false and prints to stderr on invalid input.
+bool parseMailboxAddress(const std::string& str, MailboxAddressConfig& out);
+
+/// Log the mailbox configuration via TETHER_LOGI.
+void logMailboxConfig(const MailboxSizeConfig& size,
+                      const MailboxAddressConfig& addr,
+                      const char* tag);
+
 } // namespace Tether::Examples
