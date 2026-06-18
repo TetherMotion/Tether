@@ -20,6 +20,9 @@ void addInterfaceArg(argparse::ArgumentParser& program,
 /// Add `--debug` to an ArgumentParser.
 void addDebugArg(argparse::ArgumentParser& program);
 
+/// Print detailed debug-flag help to stdout and return true if @p debugStr is "help".
+bool printDebugHelpIfRequested(const std::string& debugStr);
+
 /// Add `--rx-vlan` and `--tx-vlan` to an ArgumentParser.
 void addVlanArgs(argparse::ArgumentParser& program);
 
@@ -37,13 +40,8 @@ void addDurationArg(argparse::ArgumentParser& program, double defaultValue = 0.0
 std::set<std::string> parseDebugFlags(const std::string& debugStr);
 
 /// Enable the appropriate EtherCAT debug logging for each flag in @p flags.
-/// If @p knownFlags is non-null, warn about unknown flags.
-void applyDebugFlags(const std::set<std::string>& flags,
-                     const std::set<std::string>* knownFlags,
-                     const char* tag);
-
-/// Full set of known debug flags used by most examples.
-const std::set<std::string>& allKnownDebugFlags();
+/// Warns about unknown flags by comparing against the debug-module registry.
+void applyDebugFlags(const std::set<std::string>& flags, const char* tag);
 
 // ============================================================================
 // VLAN helpers

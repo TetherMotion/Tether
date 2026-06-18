@@ -183,6 +183,34 @@ static void drawScreen(const DIState& state) {
 }
 
 // ---------------------------------------------------------------------------
+// Identity helper
+// ---------------------------------------------------------------------------
+
+static void readIdentityObject(EtherCAT::Slave& sl) {
+    uint32_t vendor_id = 0;
+    uint32_t product_code = 0;
+    uint32_t revision = 0;
+    uint32_t serial = 0;
+
+    bool identity_ok = true;
+    if (sl.sdoReadU32(0x1018, 1, vendor_id) != EtherCAT::SlaveError::Ok) { identity_ok = false; }
+    if (sl.sdoReadU32(0x1018, 2, product_code) != EtherCAT::SlaveError::Ok) { identity_ok = false; }
+    if (sl.sdoReadU32(0x1018, 3, revision) != EtherCAT::SlaveError::Ok) { identity_ok = false; }
+    if (sl.sdoReadU32(0x1018, 4, serial) != EtherCAT::SlaveError::Ok) { identity_ok = false; }
+
+    if (!identity_ok) {
+        TETHER_LOGE(TAG, "Failed to read Identity Object 0x1018");
+    } else {
+        std::cout << "=== Identity Object (0x1018) ===" << "\n";
+        std::cout << "Vendor ID:    0x" << std::hex << vendor_id << std::dec << "\n";
+        std::cout << "Product Code: 0x" << std::hex << product_code << std::dec << "\n";
+        std::cout << "Revision:     0x" << std::hex << revision << std::dec << "\n";
+        std::cout << "Serial:       0x" << std::hex << serial << std::dec << "\n";
+        std::cout.flush();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -212,8 +240,9 @@ int main(int argc, char** argv) {
     std::string debug_str = program.get<std::string>("--debug");
     bool stream_mode = program.get<bool>("--stream");
 
+    if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
     auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
-    Tether::Examples::applyDebugFlags(debug_flags, &Tether::Examples::allKnownDebugFlags(), TAG);
+    Tether::Examples::applyDebugFlags(debug_flags, TAG);
 
     Tether::Examples::VlanConfig vlan;
     if (!Tether::Examples::parseVlanArgs(
@@ -321,29 +350,27 @@ int main(int argc, char** argv) {
 
     TETHER_LOGI(TAG, "Slave %d in PRE-OP", slave_idx);
 
-    uint32_t vendor_id = 0;
-    uint32_t product_code = 0;
-    uint32_t revision = 0;
-    uint32_t serial = 0;
+    // readIdentityObject(sl);
 
-    bool identity_ok = true;
-    if (sl.sdoReadU32(0x1018, 1, vendor_id) != EtherCAT::SlaveError::Ok) { identity_ok = false; }
-    if (sl.sdoReadU32(0x1018, 2, product_code) != EtherCAT::SlaveError::Ok) { identity_ok = false; }
-    if (sl.sdoReadU32(0x1018, 3, revision) != EtherCAT::SlaveError::Ok) { identity_ok = false; }
-    if (sl.sdoReadU32(0x1018, 4, serial) != EtherCAT::SlaveError::Ok) { identity_ok = false; }
-
-    if (!identity_ok) {
-        TETHER_LOGE(TAG, "Failed to read Identity Object 0x1018");
-    } else {
-        std::cout << "=== Identity Object (0x1018) ===" << "\n";
-        std::cout << "Vendor ID:    0x" << std::hex << vendor_id << std::dec << "\n";
-        std::cout << "Product Code: 0x" << std::hex << product_code << std::dec << "\n";
-        std::cout << "Revision:     0x" << std::hex << revision << std::dec << "\n";
-        std::cout << "Serial:       0x" << std::hex << serial << std::dec << "\n";
-        std::cout.flush();
+    auto pdo_err = sl.configurePDOSyncManagers();
+    if (pdo_err != EtherCAT::SlaveError::Ok) {
+        TETHER_LOGE(TAG, "PDO sync-manager config failed: %s", EtherCAT::slaveErrorToString(pdo_err));
+        master.stop();
+        Tether::Examples::shutdownHostEthernet(session);
+        return 7;
     }
+
+    auto safe_err = sl.transitionToSafeOp();
+    if (safe_err != EtherCAT::SlaveError::Ok) {
+        TETHER_LOGE(TAG, "SAFE-OP transition failed: %s", EtherCAT::slaveErrorToString(safe_err));
+        master.stop();
+        Tether::Examples::shutdownHostEthernet(session);
+        return 7;
+    }
+
+    TETHER_LOGI(TAG, "Slave %d in SAFE-OP", slave_idx);
 
     master.stop();
     Tether::Examples::shutdownHostEthernet(session);
-    return identity_ok ? 0 : 8;
+    return 0;
 }

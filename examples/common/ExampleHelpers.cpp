@@ -3,6 +3,7 @@
 #include <iostream>
 #include <sstream>
 
+#include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/Slave.hpp"
 #include "tether/platform/Platform.hpp"
 
@@ -22,7 +23,18 @@ void addInterfaceArg(argparse::ArgumentParser& program,
 void addDebugArg(argparse::ArgumentParser& program) {
     program.add_argument("--debug")
         .default_value(std::string(""))
-        .help("Comma-separated debug flags");
+        .help("Comma-separated debug flags. Use '--debug help' for a list.");
+}
+
+bool printDebugHelpIfRequested(const std::string& debugStr) {
+    if (debugStr != "help") return false;
+
+    const auto& registry = EtherCAT::debug::allDebugFlags();
+    std::cout << "Available debug flags:\n";
+    for (const auto& info : registry) {
+        std::cout << "  " << info.name << "\n      " << info.description << "\n";
+    }
+    return true;
 }
 
 void addVlanArgs(argparse::ArgumentParser& program) {
@@ -68,91 +80,38 @@ std::set<std::string> parseDebugFlags(const std::string& debugStr) {
     return flags;
 }
 
-const std::set<std::string>& allKnownDebugFlags() {
-    static const std::set<std::string> kFlags = {
-        "sii-derivation",
-        "mailbox-configuration",
-        "al-state",
-        "tx-ethercat-packets",
-        "rx-ethercat-packets",
-        "rx-pdo",
-        "tx-pdo",
-        "dc",
-        "fmmu",
-        "sii-eeprom",
-        "coe-reads",
-        "coe-writes",
-        "coe-rx-packets",
-        "coe-tx-packets"
-    };
-    return kFlags;
-}
+void applyDebugFlags(const std::set<std::string>& flags, const char* tag) {
+    const auto& registry = EtherCAT::debug::allDebugFlags();
 
-void applyDebugFlags(const std::set<std::string>& flags,
-                     const std::set<std::string>* knownFlags,
-                     const char* tag) {
-    if (knownFlags) {
-        std::set<std::string> unknown;
-        for (const auto& f : flags) {
-            if (knownFlags->find(f) == knownFlags->end()) {
-                unknown.insert(f);
-            }
+    // Build known-names set for unknown-flag detection.
+    std::set<std::string> knownNames;
+    for (const auto& info : registry) {
+        knownNames.insert(info.name);
+    }
+
+    std::set<std::string> unknown;
+    for (const auto& f : flags) {
+        if (knownNames.find(f) == knownNames.end()) {
+            unknown.insert(f);
         }
-        if (!unknown.empty()) {
-            TETHER_LOGW(tag, "Unknown debug flags:");
-            for (const auto& f : unknown) {
-                TETHER_LOGW(tag, "  - %s", f.c_str());
-            }
-            TETHER_LOGI(tag, "Known debug flags:");
-            for (const auto& f : *knownFlags) {
-                TETHER_LOGI(tag, "  - %s", f.c_str());
-            }
+    }
+    if (!unknown.empty()) {
+        TETHER_LOGW(tag, "Unknown debug flags:");
+        for (const auto& f : unknown) {
+            TETHER_LOGW(tag, "  - %s", f.c_str());
+        }
+        TETHER_LOGI(tag, "Known debug flags:");
+        for (const auto& f : knownNames) {
+            TETHER_LOGI(tag, "  - %s", f.c_str());
         }
     }
 
-    if (flags.count("al-state")) {
-        EtherCAT::enableStateMachineDebug(true);
-        TETHER_LOGI(tag, "EtherCAT state machine debug logging enabled");
-    }
-    if (flags.count("tx-ethercat-packets")) {
-        EtherCAT::enableTxPacketDebug(true);
-        TETHER_LOGI(tag, "TX EtherCAT packet debug logging enabled");
-    }
-    if (flags.count("rx-ethercat-packets")) {
-        EtherCAT::enableRxPacketDebug(true);
-        TETHER_LOGI(tag, "RX EtherCAT packet debug logging enabled");
-    }
-    if (flags.count("rx-pdo")) {
-        EtherCAT::enableRxPDODebug(true);
-        TETHER_LOGI(tag, "RxPDO debug logging enabled");
-    }
-    if (flags.count("tx-pdo")) {
-        EtherCAT::enableTxPDODebug(true);
-        TETHER_LOGI(tag, "TxPDO debug logging enabled");
-    }
-    if (flags.count("fmmu")) {
-        EtherCAT::enableFmmuDebug(true);
-        TETHER_LOGI(tag, "FMMU debug logging enabled");
-    }
-    if (flags.count("sii-eeprom")) {
-        EtherCAT::enableSIIEEPROMDebug(true);
-        TETHER_LOGI(tag, "SII/EEPROM debug logging enabled");
-    }
-    if (flags.count("coe-reads")) {
-        EtherCAT::enableCoEReadsDebug(true);
-        TETHER_LOGI(tag, "CoE read debug logging enabled");
-    }
-    if (flags.count("coe-writes")) {
-        EtherCAT::enableCoEWritesDebug(true);
-        TETHER_LOGI(tag, "CoE write debug logging enabled");
-    }
-    if (flags.count("coe-rx-packets")) {
-        EtherCAT::enableCoERxPacketsDebug(true);
-        TETHER_LOGI(tag, "CoE RX packet debug logging enabled");
-    }
-    if (flags.count("coe-tx-packets")) {
-        EtherCAT::enableCoETxPacketsDebug(true);
-        TETHER_LOGI(tag, "CoE TX packet debug logging enabled");
+    // Apply setters for flags that have one.
+    for (const auto& info : registry) {
+        if (flags.count(info.name) && info.setter) {
+            info.setter(true);
+            TETHER_LOGI(tag, "%s debug logging enabled", info.name.c_str());
+        }
     }
 }
 

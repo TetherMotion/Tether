@@ -146,8 +146,9 @@ int main(int argc, char** argv) {
         selected_slaves = parseSlaveIndices(program.get<std::vector<std::string>>("--slave"));
     }
 
+    if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
     auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
-    Tether::Examples::applyDebugFlags(debug_flags, &Tether::Examples::allKnownDebugFlags(), TAG);
+    Tether::Examples::applyDebugFlags(debug_flags, TAG);
 
     Tether::Examples::VlanConfig vlan;
     if (!Tether::Examples::parseVlanArgs(
