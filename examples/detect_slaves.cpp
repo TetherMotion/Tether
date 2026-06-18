@@ -32,6 +32,8 @@ int main(int argc, char** argv) {
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addDebugArg(program);
     Tether::Examples::addVlanArgs(program);
+    Tether::Examples::addMailboxSizeArg(program);
+    Tether::Examples::addMailboxAddressArg(program);
 
     try { program.parse_args(argc, argv); }
     catch (const std::runtime_error& err) {

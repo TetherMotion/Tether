@@ -11,11 +11,8 @@
  * NOT enable the drive or perform motion.
  */
 
-#include <cstdio>
-#include <cstdlib>
 #include <cstdint>
 #include <cstring>
-#include <magic_enum/magic_enum.hpp>
 
 #include "tether/ethercat/Diagnostics.hpp"
 #include "tether/ethercat/Master.hpp"
@@ -24,26 +21,11 @@
 #include "tether/ethercat/CoEManager.hpp"
 #include "tether/platform/EspCompat.hpp"
 
-#include <argparse/argparse.hpp>
-#include "tether/hal/IEthernet.hpp"
-#include <thread>
-#include <atomic>
-#include <dirent.h>
-#include <iostream>
+#include "common/EtherCATHostSetup.hpp"
 
 static const char* TAG = "AS715N_CheckError";
 
 using namespace EtherCAT::Drives;
-
-// Forward-declare a small subset of Raw transport helpers used by the host example
-namespace EtherCAT {
-namespace Raw {
-    void set_network_interface(const ::EtherCAT::NetworkInterface* iface);
-    const ::EtherCAT::NetworkInterface* network_interface();
-    void set_src_mac(const uint8_t src_mac[6]);
-    const uint8_t* get_src_mac();
-}
-}
 
 static void printAS715NErrorDetails(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx, uint16_t mfr_error, uint16_t cia402_error) {
     if (mfr_error == 0 && cia402_error == 0) {
@@ -215,14 +197,13 @@ static int inspectAndMaybeReset(EtherCAT::Master& master, bool do_reset, bool do
 
 int main(int argc, char** argv) {
     argparse::ArgumentParser program("as715n_check_error_code");
-
-    program.add_argument("-i", "--interface").default_value(std::string("eth0"))
-        .help("Network interface name for host builds (e.g. eth0)");
+    Tether::Examples::addInterfaceArg(program);
+    Tether::Examples::addMailboxSizeArg(program);
+    Tether::Examples::addMailboxAddressArg(program);
 
     program.add_argument("-r","--reset").default_value(false).implicit_value(true)
         .help("Attempt to reset the reported error (if recoverable)");
-
-    program.add_argument("-s","--software-reset").default_value(false).implicit_value(true)
+    program.add_argument("--software-reset").default_value(false).implicit_value(true)
         .help("Perform a software reset via F31.02 (write 1 to 0x2031:02); does not require a fault to be present");
 
     try { program.parse_args(argc, argv); }
@@ -238,72 +219,23 @@ int main(int argc, char** argv) {
 
     TETHER_LOGI(TAG, "AS715N error-code inspector (host)\nNetwork interface: %s", iface.c_str());
 
-    auto eth = EtherCAT::HAL::createDefaultEthernet();
-    if (!eth) { TETHER_LOGE(TAG, "No Ethernet HAL available"); return 1; }
-
-    EtherCAT::HAL::EthernetConfig cfg;
-    cfg.interfaceName = iface.c_str();
-    cfg.promiscuous = true;
-    cfg.ethertypeFilter = static_cast<uint16_t>(EtherCAT::kEtherTypeEtherCAT);
-
-    {
-        auto err = eth->init(cfg);
-        if (err != EtherCAT::HAL::Error::OK) {
-            if (err == EtherCAT::HAL::Error::InterfaceNotFound) {
-                TETHER_LOGE(TAG, "Network interface '%s' not found — verify interface name (run: `ip link`)", iface.c_str());
-            } else if (err == EtherCAT::HAL::Error::PermissionDenied) {
-                TETHER_LOGE(TAG, "Permission denied while opening interface '%s' — raw sockets require root or CAP_NET_RAW (try: sudo or `sudo setcap cap_net_raw+ep %s`)", iface.c_str(), argv[0]);
-            } else {
-                TETHER_LOGE(TAG, "Failed to init Ethernet interface '%s' (%s)", iface.c_str(), magic_enum::enum_name(err).data());
-            }
-            return 2;
-        }
-
-        // Fail fast when the physical link is down — avoids repeated send failures
-        {
-            EtherCAT::HAL::LinkStatus ls = eth->getLinkStatus();
-            if (!ls.up) {
-                TETHER_LOGE(TAG, "Network interface '%s' link is DOWN — check cable/driver", iface.c_str());
-                return 6; // distinct, non-retry exit code for link-down
-            }
-        }
+    Tether::Examples::HostEtherNetSession session;
+    if (!Tether::Examples::initHostEthernet(session, iface, TAG)) {
+        return 2;
     }
-
-    EtherCAT::HAL::MacAddress mac;
-    if (eth->getMacAddress(mac) != EtherCAT::HAL::Error::OK) {
-        TETHER_LOGE(TAG, "Failed to read MAC address");
-        return 3;
-    }
-
-    uint8_t src_mac[6]; std::memcpy(src_mac, mac.bytes, 6);
-
-    auto ni_ptr = std::make_unique<EtherCAT::NetworkInterface>();
-    ni_ptr->send = [eth = eth.get()](const uint8_t* data, size_t len) -> bool {
-        return eth->transmit(data, len) == EtherCAT::HAL::Error::OK;
-    };
-
-    EtherCAT::Raw::set_network_interface(ni_ptr.get());
-    EtherCAT::Raw::set_src_mac(src_mac);
 
     EtherCAT::Master::Config mcfg;
-    mcfg.enable_mailbox_fallback = true;  // Enable fallback to default mailbox on configuration errors
+    mcfg.enable_mailbox_fallback = true;
     EtherCAT::Master master(mcfg);
 
-    // Route RX frames directly to master — avoids the fragile findByNetworkInterface lookup
-    eth->setRxCallback([&master](const uint8_t* frame, size_t len, const EtherCAT::HAL::RxFrameInfo& info, void*){
+    session.eth->setRxCallback([&master](const uint8_t* frame, size_t len,
+                                           const EtherCAT::HAL::RxFrameInfo& info, void*){
         (void)info; master.handleRxFrame(frame, len);
     }, nullptr);
 
-    std::atomic<bool> poll_running{true};
-    std::thread poll_thread([&](){
-        // Best-effort: set polling thread to realtime on Linux
-        if (!Tether::Platform::setCurrentThreadRealtime(-1)) {
-            TETHER_LOGW(TAG, "poll_thread: could not set realtime scheduling (continuing)");
-        }
-        while (poll_running.load()) eth->poll(1);
-    });
+    Tether::Examples::startHostPollThread(session, TAG);
 
-    master.start(*EtherCAT::Raw::network_interface(), src_mac);
+    master.start(*EtherCAT::Raw::network_interface(), session.srcMac);
 
     if (!master.discoverSlaves()) {
         TETHER_LOGW(TAG, "No slaves discovered");
@@ -312,18 +244,13 @@ int main(int argc, char** argv) {
     uint16_t slaves = master.getDiscoveredSlaveCount();
     TETHER_LOGI(TAG, "Discovered %u slave(s)", slaves);
     if (slaves == 0) {
-        poll_running.store(false);
-        poll_thread.join();
-        eth->shutdown();
+        Tether::Examples::shutdownHostEthernet(session);
         return 5;
     }
 
     int rc = inspectAndMaybeReset(master, do_reset, do_sw_reset);
 
-    // Cleanup
-    poll_running.store(false);
-    poll_thread.join();
-    eth->shutdown();
+    Tether::Examples::shutdownHostEthernet(session);
 
     return rc;
 }

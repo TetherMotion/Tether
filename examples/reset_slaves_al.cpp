@@ -16,17 +16,12 @@
  *   ./reset_slaves_al -n 20 --sleep 10 # 20 iterations, 10 ms sleep
  */
 
-#include <atomic>
-#include <chrono>
 #include <cstring>
 #include <iostream>
 #include <memory>
-#include <set>
 #include <sstream>
 #include <string>
-#include <thread>
 #include <vector>
-#include <magic_enum/magic_enum.hpp>
 
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
@@ -34,20 +29,10 @@
 #include "tether/ethercat/FaultDetection.hpp"
 #include "tether/ethercat/ALResetController.hpp"
 #include "tether/ethercat/SyncManager.hpp"
-#include "tether/ethercat/VLANRouter.hpp"
 #include "tether/platform/EspCompat.hpp"
 
-#include <argparse/argparse.hpp>
-#include "tether/hal/IEthernet.hpp"
-
-// Forward-declare host transport helpers
-namespace EtherCAT {
-namespace Raw {
-    void set_network_interface(const ::EtherCAT::NetworkInterface* iface);
-    const ::EtherCAT::NetworkInterface* network_interface();
-    void set_src_mac(const uint8_t src_mac[6]);
-}
-}
+#include "common/ExampleHelpers.hpp"
+#include "common/EtherCATHostSetup.hpp"
 
 static const char* TAG = "reset_slaves_al";
 
@@ -85,20 +70,12 @@ static std::vector<uint16_t> parseSlaveIndices(const std::vector<std::string>& a
 // ============================================================================
 
 int main(int argc, char** argv) {
-    // ---- Argument parsing ----
     argparse::ArgumentParser program("reset_slaves_al");
-    program.add_argument("-i", "--interface")
-        .default_value(std::string("eth0"))
-        .help("Network interface name (e.g. eth0, enp3s0)");
-    program.add_argument("--debug")
-        .default_value(std::string(""))
-        .help("Comma-separated debug flags. Known flags: sii-derivation, mailbox-configuration, al-state, tx-ethercat-packets, rx-ethercat-packets, rx-pdo, tx-pdo, sii-eeprom");
-    program.add_argument("--rx-vlan")
-        .default_value(std::string(""))
-        .help("RX VLAN filter: single VID, range, or 'any'");
-    program.add_argument("--tx-vlan")
-        .default_value(std::string(""))
-        .help("TX VLAN encapsulation: single VID");
+    Tether::Examples::addInterfaceArg(program);
+    Tether::Examples::addDebugArg(program);
+    Tether::Examples::addVlanArgs(program);
+    Tether::Examples::addMailboxSizeArg(program);
+    Tether::Examples::addMailboxAddressArg(program);
     program.add_argument("-s", "--slave")
         .append()
         .help("Slave index to reset. Repeatable. Accepts comma list (e.g. -s 1,2,3). Default: all discovered slaves.");
@@ -120,8 +97,6 @@ int main(int argc, char** argv) {
 
     std::string iface       = program.get<std::string>("--interface");
     std::string debug_str   = program.get<std::string>("--debug");
-    std::string rx_vlan_str = program.get<std::string>("--rx-vlan");
-    std::string tx_vlan_str = program.get<std::string>("--tx-vlan");
 
     int max_iterations = 50;
     try {
@@ -171,153 +146,15 @@ int main(int argc, char** argv) {
         selected_slaves = parseSlaveIndices(program.get<std::vector<std::string>>("--slave"));
     }
 
-    // Known debug flags
-    const std::set<std::string> known_debug_flags = {
-        "sii-derivation",
-        "mailbox-configuration",
-        "al-state",
-        "tx-ethercat-packets",
-        "rx-ethercat-packets",
-        "rx-pdo",
-        "tx-pdo",
-        "sii-eeprom",
-        "coe-reads",
-        "coe-writes",
-        "coe-rx-packets",
-        "coe-tx-packets"
-    };
+    auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
+    Tether::Examples::applyDebugFlags(debug_flags, &Tether::Examples::allKnownDebugFlags(), TAG);
 
-    // Parse debug flags
-    std::set<std::string> debug_flags;
-    std::set<std::string> unknown_flags;
-    if (!debug_str.empty()) {
-        std::stringstream ss(debug_str);
-        std::string flag;
-        while (std::getline(ss, flag, ',')) {
-            flag.erase(0, flag.find_first_not_of(" \t"));
-            flag.erase(flag.find_last_not_of(" \t") + 1);
-            if (!flag.empty()) {
-                debug_flags.insert(flag);
-                if (known_debug_flags.find(flag) == known_debug_flags.end()) {
-                    unknown_flags.insert(flag);
-                }
-            }
-        }
-    }
-
-    if (!unknown_flags.empty()) {
-        TETHER_LOGW(TAG, "Unknown debug flags:");
-        for (const auto& flag : unknown_flags) {
-            TETHER_LOGW(TAG, "  - %s", flag.c_str());
-        }
-        TETHER_LOGW(TAG, "Known debug flags:");
-        for (const auto& flag : known_debug_flags) {
-            TETHER_LOGW(TAG, "  - %s", flag.c_str());
-        }
-    }
-
-    if (debug_flags.count("al-state")) {
-        EtherCAT::enableStateMachineDebug(true);
-        TETHER_LOGI(TAG, "EtherCAT state machine debug logging enabled");
-    }
-    if (debug_flags.count("tx-ethercat-packets")) {
-        EtherCAT::enableTxPacketDebug(true);
-        TETHER_LOGI(TAG, "TX EtherCAT packet debug logging enabled");
-    }
-    if (debug_flags.count("rx-ethercat-packets")) {
-        EtherCAT::enableRxPacketDebug(true);
-        TETHER_LOGI(TAG, "RX EtherCAT packet debug logging enabled");
-    }
-    if (debug_flags.count("rx-pdo")) {
-        EtherCAT::enableRxPDODebug(true);
-        TETHER_LOGI(TAG, "RxPDO debug logging enabled");
-    }
-    if (debug_flags.count("tx-pdo")) {
-        EtherCAT::enableTxPDODebug(true);
-        TETHER_LOGI(TAG, "TxPDO debug logging enabled");
-    }
-
-    // Enable SII/EEPROM debug if requested
-    if (debug_flags.count("sii-eeprom")) {
-        EtherCAT::enableSIIEEPROMDebug(true);
-        TETHER_LOGI(TAG, "SII/EEPROM debug logging enabled");
-    }
-
-    // Enable CoE read debug if requested
-    if (debug_flags.count("coe-reads")) {
-        EtherCAT::enableCoEReadsDebug(true);
-        TETHER_LOGI(TAG, "CoE read debug logging enabled");
-    }
-
-    // Enable CoE write debug if requested
-    if (debug_flags.count("coe-writes")) {
-        EtherCAT::enableCoEWritesDebug(true);
-        TETHER_LOGI(TAG, "CoE write debug logging enabled");
-    }
-
-    // Enable CoE RX packet debug if requested
-    if (debug_flags.count("coe-rx-packets")) {
-        EtherCAT::enableCoERxPacketsDebug(true);
-        TETHER_LOGI(TAG, "CoE RX packet debug logging enabled");
-    }
-
-    // Enable CoE TX packet debug if requested
-    if (debug_flags.count("coe-tx-packets")) {
-        EtherCAT::enableCoETxPacketsDebug(true);
-        TETHER_LOGI(TAG, "CoE TX packet debug logging enabled");
-    }
-
-    // ---- Parse VLAN arguments ----
-    bool vlan_mode = !rx_vlan_str.empty() || !tx_vlan_str.empty();
-    std::optional<uint16_t> tx_vlan;
-    bool rx_any = false;
-    std::optional<EtherCAT::VLANRouter::VLANRange> rx_range;
-
-    if (vlan_mode) {
-        if (!tx_vlan_str.empty()) {
-            try {
-                int v = std::stoi(tx_vlan_str);
-                if (v < 1 || v > 4095) {
-                    std::cerr << "--tx-vlan must be in range 1-4095\n";
-                    return 1;
-                }
-                tx_vlan = static_cast<uint16_t>(v);
-            } catch (...) {
-                std::cerr << "Invalid --tx-vlan value: " << tx_vlan_str << "\n";
-                return 1;
-            }
-        }
-
-        if (!rx_vlan_str.empty()) {
-            if (rx_vlan_str == "any") {
-                rx_any = true;
-            } else {
-                size_t dash = rx_vlan_str.find('-');
-                try {
-                    if (dash == std::string::npos) {
-                        int v = std::stoi(rx_vlan_str);
-                        if (v < 1 || v > 4095) {
-                            std::cerr << "--rx-vlan must be in range 1-4095\n";
-                            return 1;
-                        }
-                        rx_range = EtherCAT::VLANRouter::VLANRange{
-                            static_cast<uint16_t>(v), static_cast<uint16_t>(v)};
-                    } else {
-                        int start = std::stoi(rx_vlan_str.substr(0, dash));
-                        int end   = std::stoi(rx_vlan_str.substr(dash + 1));
-                        if (start < 1 || end > 4095 || start > end) {
-                            std::cerr << "--rx-vlan range must be 1-4095 with start <= end\n";
-                            return 1;
-                        }
-                        rx_range = EtherCAT::VLANRouter::VLANRange{
-                            static_cast<uint16_t>(start), static_cast<uint16_t>(end)};
-                    }
-                } catch (...) {
-                    std::cerr << "Invalid --rx-vlan value: " << rx_vlan_str << "\n";
-                    return 1;
-                }
-            }
-        }
+    Tether::Examples::VlanConfig vlan;
+    if (!Tether::Examples::parseVlanArgs(
+            program.get<std::string>("--rx-vlan"),
+            program.get<std::string>("--tx-vlan"),
+            vlan, TAG)) {
+        return 1;
     }
 
     TETHER_LOGI(TAG, "reset_slaves_al (host) — interface: %s", iface.c_str());
@@ -333,131 +170,31 @@ int main(int argc, char** argv) {
     } else {
         TETHER_LOGI(TAG, "Selected slaves: all");
     }
-    if (vlan_mode) {
-        if (rx_any) {
-            TETHER_LOGI(TAG, "VLAN mode: RX=any (undefined target), TX=%s",
-                        tx_vlan ? std::to_string(*tx_vlan).c_str() : "none");
-        } else if (rx_range) {
-            TETHER_LOGI(TAG, "VLAN mode: RX=%u-%u, TX=%s",
-                        rx_range->start, rx_range->end,
-                        tx_vlan ? std::to_string(*tx_vlan).c_str() : "none");
-        } else {
-            TETHER_LOGI(TAG, "VLAN mode: RX=untagged, TX=%s",
-                        tx_vlan ? std::to_string(*tx_vlan).c_str() : "none");
-        }
+    Tether::Examples::logVlanConfig(vlan, TAG);
+
+    Tether::Examples::HostEtherNetSession session;
+    if (!Tether::Examples::initHostEthernet(session, iface, TAG)) {
+        return 2;
     }
 
-    // ---- Open raw socket ----
-    auto eth = EtherCAT::HAL::createDefaultEthernet();
-    if (!eth) { TETHER_LOGE(TAG, "No Ethernet HAL available"); return 1; }
-
-    EtherCAT::HAL::EthernetConfig cfg;
-    cfg.interfaceName = iface.c_str();
-    cfg.promiscuous   = true;
-    cfg.ethertypeFilter = static_cast<uint16_t>(EtherCAT::kEtherTypeEtherCAT);
-
-    {
-        auto err = eth->init(cfg);
-        if (err != EtherCAT::HAL::Error::OK) {
-            if (err == EtherCAT::HAL::Error::InterfaceNotFound)
-                TETHER_LOGE(TAG, "Interface '%s' not found — check `ip link`", iface.c_str());
-            else if (err == EtherCAT::HAL::Error::PermissionDenied)
-                TETHER_LOGE(TAG, "Permission denied — run as root or with CAP_NET_RAW");
-            else
-                TETHER_LOGE(TAG, "Failed to init '%s' (%s)", iface.c_str(),
-                           magic_enum::enum_name(err).data());
-            return 2;
-        }
-
-        auto ls = eth->getLinkStatus();
-        if (!ls.up) {
-            TETHER_LOGE(TAG, "Link DOWN on '%s' — check cable", iface.c_str());
-            return 6;
-        }
-    }
-
-    // ---- MAC address ----
-    EtherCAT::HAL::MacAddress mac;
-    if (eth->getMacAddress(mac) != EtherCAT::HAL::Error::OK) {
-        TETHER_LOGE(TAG, "Failed to read MAC address");
-        return 3;
-    }
-    uint8_t src_mac[6];
-    std::memcpy(src_mac, mac.bytes, 6);
-
-    // ---- NetworkInterface wrapper ----
-    auto ni_ptr = std::make_unique<EtherCAT::NetworkInterface>();
-    ni_ptr->send = [eth_raw = eth.get()](const uint8_t* data, size_t len) -> bool {
-        return eth_raw->transmit(data, len) == EtherCAT::HAL::Error::OK;
-    };
-    EtherCAT::Raw::set_network_interface(ni_ptr.get());
-    EtherCAT::Raw::set_src_mac(src_mac);
-
-    // ---- Create master ----
     EtherCAT::Master master;
 
-    // ---- Optional VLAN router ----
-    std::unique_ptr<EtherCAT::VLANRouter> router;
-    if (vlan_mode) {
-        router = std::make_unique<EtherCAT::VLANRouter>();
-        router->setBackend(ni_ptr.get());
-        if (rx_any) {
-            router->setUndefinedTarget(
-                std::shared_ptr<EtherCAT::Master>(&master, [](auto*){}),
-                tx_vlan, true);
-        } else if (rx_range) {
-            router->addMaster(
-                std::shared_ptr<EtherCAT::Master>(&master, [](auto*){}),
-                *rx_range, tx_vlan);
-        } else {
-            router->addMaster(
-                std::shared_ptr<EtherCAT::Master>(&master, [](auto*){}),
-                std::nullopt, tx_vlan);
-        }
+    if (!Tether::Examples::setupVlanAndRxCallback(session, master, vlan, TAG)) {
+        Tether::Examples::shutdownHostEthernet(session);
+        return 5;
     }
 
-    // Route RX frames
-    if (router) {
-        eth->setRxCallback([&router](const uint8_t* frame, size_t len,
-                                      const EtherCAT::HAL::RxFrameInfo&, void*) {
-            router->processRxFrame(frame, len);
-        }, nullptr);
-    } else {
-        eth->setRxCallback([&master](const uint8_t* frame, size_t len,
-                                      const EtherCAT::HAL::RxFrameInfo&, void*) {
-            master.handleRxFrame(frame, len);
-        }, nullptr);
-    }
+    Tether::Examples::startHostPollThread(session, TAG);
 
-    // ---- Poll thread ----
-    std::atomic<bool> poll_running{true};
-    std::thread poll_thread([&]() {
-        if (!Tether::Platform::setCurrentThreadRealtime(-1)) {
-            TETHER_LOGW(TAG, "poll_thread: could not set realtime scheduling (continuing)");
-        }
-        while (poll_running.load()) eth->poll(1);
-    });
-
-    // ---- Start master + discover ----
-    if (router) {
-        EtherCAT::NetworkInterface* master_iface = rx_any
-            ? router->undefinedNetworkInterface()
-            : router->networkInterfaceFor(&master);
-        if (!master_iface) {
-            TETHER_LOGE(TAG, "Failed to obtain per-master NetworkInterface from VLAN router");
-            return 5;
-        }
-        master.start(*master_iface, src_mac);
-    } else {
-        master.start(*EtherCAT::Raw::network_interface(), src_mac);
+    if (!Tether::Examples::startHostMaster(session, master, vlan, TAG)) {
+        Tether::Examples::shutdownHostEthernet(session);
+        return 5;
     }
 
     if (!master.discoverSlaves()) {
         TETHER_LOGW(TAG, "No slaves discovered");
         master.stop();
-        poll_running.store(false);
-        poll_thread.join();
-        eth->shutdown();
+        Tether::Examples::shutdownHostEthernet(session);
         return 4;
     }
 
@@ -468,13 +205,10 @@ int main(int argc, char** argv) {
     if (slaves == 0) {
         TETHER_LOGW(TAG, "No slaves found — check wiring, power, and interface name");
         master.stop();
-        poll_running.store(false);
-        poll_thread.join();
-        eth->shutdown();
+        Tether::Examples::shutdownHostEthernet(session);
         return 4;
     }
 
-    // Resolve target slave list
     std::vector<uint16_t> targets;
     if (selected_slaves.empty()) {
         for (uint16_t i = 0; i < slaves; ++i) targets.push_back(i);
@@ -491,13 +225,10 @@ int main(int argc, char** argv) {
     if (targets.empty()) {
         TETHER_LOGW(TAG, "No valid slaves selected for reset");
         master.stop();
-        poll_running.store(false);
-        poll_thread.join();
-        eth->shutdown();
+        Tether::Examples::shutdownHostEthernet(session);
         return 4;
     }
 
-    // ---- AL Reset loop ----
     EtherCAT::ALResetController ctrl(master);
     ctrl.setProgressCallback(
         [](uint16_t si, int iter, int max_iter, uint16_t al, uint16_t code, bool reached) {
@@ -534,20 +265,16 @@ int main(int argc, char** argv) {
         }
     }
 
-    // ---- Summary ----
     TETHER_LOGI(TAG, "=== Reset Summary: %u succeeded, %u failed ===", success_count, fail_count);
 
-    // ---- Cleanup ----
     master.stop();
-    poll_running.store(false);
-    poll_thread.join();
-    eth->shutdown();
+    Tether::Examples::shutdownHostEthernet(session);
 
     if (fail_count == 0) {
-        return 0; // all ok
+        return 0;
     } else if (success_count == 0) {
-        return 7; // all failed
+        return 7;
     } else {
-        return 5; // some failed
+        return 5;
     }
 }
