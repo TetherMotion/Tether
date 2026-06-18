@@ -141,6 +141,14 @@ public:
     void setDiagEnabled(bool enabled) { diag_enabled_.store(enabled); }
     bool isDiagEnabled() const { return diag_enabled_.load(); }
 
+    // ----- Debug flags -----
+
+    /** @brief Update the per-slave debug flags distributed by the master. */
+    void updateDebugFlags(const EtherCATSlaveDebugFlags& flags) { debug_flags_ = flags; }
+
+    /** @brief Access the current per-slave debug flags. */
+    const EtherCATSlaveDebugFlags& debugFlags() const { return debug_flags_; }
+
     // ----- Internal: called by ICoEReadTransaction::execute -----
 
     SDO::ISDOTransport& transport() { return transport_; }
@@ -199,6 +207,8 @@ private:
     PDOManager* pdo_manager_ = nullptr;
     std::atomic<bool> diag_enabled_{false};
     std::atomic<bool> initialized_{false};
+
+    EtherCATSlaveDebugFlags debug_flags_;
 };
 
 // ============================================================================
@@ -220,7 +230,7 @@ public:
 template<typename T>
 std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
                                             CoETransactionOptions options) {
-    if (EtherCAT::debug::coeReads()) {
+    if (debug_flags_.coeReads) {
         TETHER_LOGI("coe_mgr", "Slave %u: CoE read START index=0x%04X:%u", slave_index_, index, subindex);
     }
 
@@ -237,7 +247,7 @@ std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
     {
         std::lock_guard<std::mutex> lock(state_.read_mutex);
         if (state_.read_queue.size() >= kMaxQueueDepth) {
-            if (EtherCAT::debug::coeReads()) {
+            if (debug_flags_.coeReads) {
                 TETHER_LOGI("coe_mgr", "Slave %u: CoE read QUEUE FULL index=0x%04X:%u", slave_index_, index, subindex);
             }
             CoEReadTransaction<T> fail_txn;
@@ -249,7 +259,7 @@ std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
     state_.read_cv.notify_one();
     ensureWorkerRunning();
 
-    if (EtherCAT::debug::coeReads()) {
+    if (debug_flags_.coeReads) {
         TETHER_LOGI("coe_mgr", "Slave %u: CoE read ENQUEUED index=0x%04X:%u", slave_index_, index, subindex);
     }
     return future;

@@ -187,7 +187,7 @@ bool FMMUManager::configureManual(uint16_t output_phys, uint16_t output_len,
 // FMMUManager — Hardware Register Access
 // ============================================================================
 
-bool FMMUManager::writeToSlave() {
+bool FMMUManager::writeToSlave(bool fmmu_debug) {
     if (config_.fmmu_count == 0) {
         TETHER_LOGW(TAG, "No FMMUs to configure");
         return true;
@@ -222,7 +222,7 @@ bool FMMUManager::writeToSlave() {
                  fmmu.type,
                  fmmu.activate);
 
-        if (debug::fmmu()) {
+        if (fmmu_debug) {
             char hex_buf[128];
             hexDump(reinterpret_cast<const uint8_t*>(&regs), sizeof(regs), hex_buf, sizeof(hex_buf));
             TETHER_LOGI(TAG, "  [FMMU-DEBUG] apwr ado=0x%04X len=%zu bytes: %s",

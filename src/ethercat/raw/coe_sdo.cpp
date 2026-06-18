@@ -109,12 +109,13 @@ static void mbx_diag_dump_slave_state(Master& master, uint16_t adp, uint16_t mbx
                sm0_stat_act[0], sm0_stat_act[1], sm1_stat_act[0], sm1_stat_act[1]);
 }
 
+static uint16_t slaveIndexFromADP(uint16_t adp) {
+    return Master::slaveAddressFromADP(adp).slavePosition();
+}
+
 static void logCoeMbxPacket(const char* dir, uint16_t adp, uint16_t index, uint8_t sub,
-                            const uint8_t* data, size_t len)
+                            const uint8_t* data, size_t len, bool enabled)
 {
-    const bool enabled = (dir[0] == 'T')
-                         ? EtherCAT::debug::coeTxPackets()
-                         : EtherCAT::debug::coeRxPackets();
     if (!enabled) return;
 
     TETHER_LOGI(TAG, "[CoE-%s] adp=0x%04X index=0x%04X:%u len=%zu",
@@ -277,7 +278,8 @@ bool coe_sdo_upload(
     std::memcpy(mbxbuf + sizeof(mbx), &coe, sizeof(coe));
     std::memcpy(mbxbuf + sizeof(mbx) + sizeof(coe), &sdo, sizeof(sdo));
 
-    logCoeMbxPacket("TX", adp, index, sub, mbxbuf, msg_len);
+    logCoeMbxPacket("TX", adp, index, sub, mbxbuf, msg_len,
+                    master.debugFlags().coeTxPackets && master.debugFlags().coeTxPacketsFilt.allows(slaveIndexFromADP(adp)));
 
     mbx_cnt = static_cast<uint8_t>((mbx_cnt >= 7) ? 1 : (mbx_cnt + 1));
     if (inout_mbx_cnt != nullptr) {
@@ -487,7 +489,8 @@ bool coe_sdo_upload(
                     *out_len = copy_n;
                 }
             }
-            logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbx_read_len);
+            logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbx_read_len,
+                            master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
             (void)mbx_clear_read_area(master, adp, mbx_read_addr);
             return true;
         }
@@ -604,7 +607,8 @@ bool coe_sdo_upload(
                     if (total_size != 0 && produced > total_size && out_len) {
                         *out_len = total_size;
                     }
-                    logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbx_read_len);
+                    logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbx_read_len,
+                            master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
                     return true;
                 }
                 toggle = !toggle;
@@ -696,7 +700,8 @@ bool coe_sdo_download(
     std::memcpy(mbxbuf + sizeof(mbx), &coe, sizeof(coe));
     std::memcpy(mbxbuf + sizeof(mbx) + sizeof(coe), &sdo, sizeof(sdo));
 
-    logCoeMbxPacket("TX", adp, index, sub, mbxbuf, msg_len);
+    logCoeMbxPacket("TX", adp, index, sub, mbxbuf, msg_len,
+                    master.debugFlags().coeTxPackets && master.debugFlags().coeTxPacketsFilt.allows(slaveIndexFromADP(adp)));
 
     mbx_cnt = static_cast<uint8_t>((mbx_cnt >= 7) ? 1 : (mbx_cnt + 1));
     if (inout_mbx_cnt != nullptr) {
@@ -813,7 +818,8 @@ bool coe_sdo_download(
                 const uint16_t res_index = le16_to_host(res.index_le);
                 
                 if (res_index == index && res.sub == sub) {
-                    logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbx_read_len);
+                    logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbx_read_len,
+                            master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
                     (void)mbx_clear_read_area(master, adp, mbx_read_addr);
                     return true;
                 }

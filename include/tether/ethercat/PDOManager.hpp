@@ -26,6 +26,7 @@
 #include <functional>
 
 #include "tether/platform/EspCompat.hpp"
+#include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/Types.hpp"
 
 #ifdef ESP_PLATFORM
@@ -318,6 +319,9 @@ public:
     void deinit();
     bool isInitialized() const;
 
+    // ----- Debug flags -----
+    void setDebugFlags(const EtherCATMasterDebugFlags* flags) { debug_flags_ = flags; }
+
     // ----- Configuration Access -----
     PDO::PDOMapping&       mapping();
     const PDO::PDOMapping& mapping() const;
@@ -414,6 +418,8 @@ private:
     bool             initialized_ = false;
     size_t           slave_count_ = 0;
 
+    const EtherCATMasterDebugFlags* debug_flags_ = nullptr;
+
     // Mode flags
     bool use_separate_commands_ = false;
     bool use_physical_mode_     = false;
@@ -427,6 +433,17 @@ private:
     TransferStats transfer_stats_;
 
     // ----- Private helpers -----
+    bool rxPDODebug(uint16_t slave_index = 0xFFFF) const {
+        if (!debug_flags_) return false;
+        if (slave_index == 0xFFFF) return debug_flags_->rxPDO;
+        return debug_flags_->rxPDO && debug_flags_->rxPDOFilt.allows(slave_index);
+    }
+    bool txPDODebug(uint16_t slave_index = 0xFFFF) const {
+        if (!debug_flags_) return false;
+        if (slave_index == 0xFFFF) return debug_flags_->txPDO;
+        return debug_flags_->txPDO && debug_flags_->txPDOFilt.allows(slave_index);
+    }
+
     bool writeSMConfig(uint16_t adp, uint8_t sm_index,
                        const PDO::SyncManagerConfig& config);
     bool readSMStatus(uint16_t adp, uint8_t sm_index, uint8_t& status);

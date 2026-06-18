@@ -40,6 +40,7 @@
 #include <optional>
 
 #include "tether/ethercat/Types.hpp"
+#include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/CachedSIIReader.hpp"
 #include "tether/ethercat/Mailbox.hpp"
 #include "tether/ethercat/SyncManager.hpp"
@@ -53,74 +54,6 @@ class Master;
 
 class PDOManager;
 class DCManager;
-
-// ============================================================================
-// Global debug control
-// ============================================================================
-
-/**
- * @brief Enable or disable detailed EtherCAT state machine debug logging
- *
- * When enabled, state transition methods will log detailed information about:
- * - Why a state change is being attempted
- * - Current state before transition
- * - Requirements being checked (mailbox configured, PDO configured, etc.)
- * - Whether requirements are fulfilled
- * - Result of the transition attempt
- *
- * @param enable true to enable debug logging, false to disable
- */
-void enableStateMachineDebug(bool enable);
-
-/**
- * @brief Enable or disable detailed TX EtherCAT packet debug logging
- */
-void enableTxPacketDebug(bool enable);
-
-/**
- * @brief Enable or disable detailed RX EtherCAT packet debug logging
- */
-void enableRxPacketDebug(bool enable);
-
-/**
- * @brief Enable or disable detailed RxPDO (master→slave) debug logging
- */
-void enableRxPDODebug(bool enable);
-
-/**
- * @brief Enable or disable detailed TxPDO (slave→master) debug logging
- */
-void enableTxPDODebug(bool enable);
-
-/**
- * @brief Enable or disable detailed FMMU debug logging (exact register writes)
- */
-void enableFmmuDebug(bool enable);
-
-/**
- * @brief Enable or disable detailed SII/EEPROM access debug logging
- */
-void enableSIIEEPROMDebug(bool enable);
-
-/**
- * @brief Enable or disable detailed CoE read debug logging
- */
-void enableCoEReadsDebug(bool enable);
-
-/**
- * @brief Enable or disable detailed CoE write debug logging
- */
-void enableCoEWritesDebug(bool enable);
-
-/**
- * @brief Enable or disable detailed CoE RX packet debug logging
- */
-void enableCoERxPacketsDebug(bool enable);
-
-/**
- * @brief Enable or disable detailed CoE TX packet debug logging
- */
-void enableCoETxPacketsDebug(bool enable);
 
 // ============================================================================
 // SlaveError — detailed error enum
@@ -223,6 +156,14 @@ public:
 
     /** @brief Auto-increment ADP for this slave. */
     uint16_t adp() const;
+
+    // -- Debug flags --------------------------------------------------------
+
+    /** @brief Update the per-slave debug flags distributed by the master. */
+    void updateDebugFlags(const EtherCATSlaveDebugFlags& flags) { slave_debug_flags_ = flags; }
+
+    /** @brief Access the current per-slave debug flags. */
+    const EtherCATSlaveDebugFlags& debugFlags() const { return slave_debug_flags_; }
 
     // -- FMMU manager ---------------------------------------------------------
 
@@ -479,6 +420,8 @@ protected:
 
     bool mailbox_configured_ = false;
     bool pdo_configured_ = false;
+
+    EtherCATSlaveDebugFlags slave_debug_flags_;
 
     SII::CachedSIIReader sii_cache_;
     fmmu::FMMUManager fmmu_mgr_{*this};

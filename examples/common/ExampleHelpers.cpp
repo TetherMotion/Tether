@@ -4,6 +4,7 @@
 #include <sstream>
 
 #include "tether/ethercat/DebugFlags.hpp"
+#include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
 #include "tether/platform/Platform.hpp"
 
@@ -34,6 +35,9 @@ bool printDebugHelpIfRequested(const std::string& debugStr) {
     for (const auto& info : registry) {
         std::cout << "  " << info.name << "\n      " << info.description << "\n";
     }
+    std::cout << "\nFilter syntax:\n";
+    std::cout << "  --debug flagname:(slaves:0,2,5),otherflag:(slaves:1-3)\n";
+    std::cout << "  (default: pass-all for every flag)\n";
     return true;
 }
 
@@ -80,7 +84,9 @@ std::set<std::string> parseDebugFlags(const std::string& debugStr) {
     return flags;
 }
 
-void applyDebugFlags(const std::set<std::string>& flags, const char* tag) {
+void applyDebugFlags(const std::set<std::string>& flags,
+                     EtherCAT::Master& master,
+                     const char* tag) {
     const auto& registry = EtherCAT::debug::allDebugFlags();
 
     // Build known-names set for unknown-flag detection.
@@ -89,9 +95,25 @@ void applyDebugFlags(const std::set<std::string>& flags, const char* tag) {
         knownNames.insert(info.name);
     }
 
+    // Reconstruct the comma-separated spec string (preserves filter syntax).
+    std::string spec;
+    for (const auto& f : flags) {
+        if (!spec.empty()) spec += ",";
+        spec += f;
+    }
+
+    master.debugFlags().applyFromString(spec,
+                                         static_cast<uint16_t>(master.getDiscoveredSlaveCount()),
+                                         tag);
+
+    // Warn about unknown flags.
     std::set<std::string> unknown;
     for (const auto& f : flags) {
-        if (knownNames.find(f) == knownNames.end()) {
+        // Strip any filter syntax for name matching.
+        std::string name = f;
+        size_t colon = name.find(':');
+        if (colon != std::string::npos) name = name.substr(0, colon);
+        if (knownNames.find(name) == knownNames.end()) {
             unknown.insert(f);
         }
     }
@@ -103,14 +125,6 @@ void applyDebugFlags(const std::set<std::string>& flags, const char* tag) {
         TETHER_LOGI(tag, "Known debug flags:");
         for (const auto& f : knownNames) {
             TETHER_LOGI(tag, "  - %s", f.c_str());
-        }
-    }
-
-    // Apply setters for flags that have one.
-    for (const auto& info : registry) {
-        if (flags.count(info.name) && info.setter) {
-            info.setter(true);
-            TETHER_LOGI(tag, "%s debug logging enabled", info.name.c_str());
         }
     }
 }
