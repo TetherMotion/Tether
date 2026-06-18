@@ -11,6 +11,7 @@
 #include "tether/ethercat/CoEManager.hpp"
 #include "tether/ethercat/DC.hpp"
 #include "tether/ethercat/PDOManager.hpp"
+#include "tether/ethercat/FaultDetection.hpp"
 #include "tether/platform/Platform.hpp"
 
 #include <cinttypes>
@@ -200,8 +201,8 @@ bool CiA402Drive::gotoSafeOp() {
     uint8_t asc[2] = {0};
     m_master->readRegister(SlaveAddress(m_slave_index), 0x0134, asc, 2, 200);
     uint16_t al_code = asc[0] | (asc[1] << 8);
-    TETHER_LOGE(TAG, "Slave %u: SAFE_OP not confirmed after 2s, state=0x%02X AL_CODE=0x%04X",
-             m_slave_index, final_state, al_code);
+    TETHER_LOGE(TAG, "Slave %u: SAFE_OP not confirmed after 2s, state=0x%02X (AL status code: %s (0x%04X))",
+             m_slave_index, final_state, getALStatusCodeName(al_code), al_code);
     return false;
 }
 
@@ -233,8 +234,8 @@ bool CiA402Drive::gotoOp() {
                 uint8_t asc[2] = {0};
                 m_master->readRegister(SlaveAddress(m_slave_index), 0x0134, asc, 2, 200);
                 uint16_t al_code = asc[0] | (asc[1] << 8);
-                TETHER_LOGE(TAG, "Slave %u: Unexpected state 0x%02X during OP transition (AL_CODE=0x%04X)",
-                         m_slave_index, state, al_code);
+                TETHER_LOGE(TAG, "Slave %u: Unexpected state 0x%02X during OP transition (AL status code: %s (0x%04X))",
+                         m_slave_index, state, getALStatusCodeName(al_code), al_code);
                 return false;
             }
             // Re-request OP every second - some slaves need repeated requests
@@ -263,8 +264,8 @@ bool CiA402Drive::gotoOp() {
                 m_master->readRegister(SlaveAddress(m_slave_index), 0x0820, sm2_event, 200);
                 // PDO exchange stats
                 auto pstats = m_master->pdo().getPhysicalStats();
-                TETHER_LOGI(TAG, "Slave %u: Still waiting for OP, AL_STATUS=0x%04X AL_CODE=0x%04X DC_SYNC_ACT=0x%02X DC_SysTime_lo=0x%08lX (%d ms)\n  PDO: fpwr_ok=%u fpwr_err=%u fprd_ok=%u fprd_err=%u  SYNC_LATCH=0x%02X SM2_EVT=0x%02X",
-                         m_slave_index, al_raw, al_code, dc_sync_act, (unsigned long)sys_time_lo, (attempt+1)*100,
+                TETHER_LOGI(TAG, "Slave %u: Still waiting for OP, AL_STATUS=0x%04X AL status code: %s (0x%04X) DC_SYNC_ACT=0x%02X DC_SysTime_lo=0x%08lX (%d ms)\n  PDO: fpwr_ok=%u fpwr_err=%u fprd_ok=%u fprd_err=%u  SYNC_LATCH=0x%02X SM2_EVT=0x%02X",
+                         m_slave_index, al_raw, getALStatusCodeName(al_code), al_code, dc_sync_act, (unsigned long)sys_time_lo, (attempt+1)*100,
                          pstats.fpwr_success, pstats.fpwr_wkc_errors, pstats.fprd_success, pstats.fprd_wkc_errors, sync_latch, sm2_event);
             }
         }
@@ -284,10 +285,10 @@ bool CiA402Drive::gotoOp() {
     // Read PDO exchange stats to diagnose if PDO was ever active
     auto pstats = m_master->pdo().getPhysicalStats();
     
-    TETHER_LOGW(TAG, "Slave %u: OP not confirmed after 5s, current state=0x%02X AL_CODE=0x%04X\n"
+    TETHER_LOGW(TAG, "Slave %u: OP not confirmed after 5s, current state=0x%02X (AL status code: %s (0x%04X))\n"
              "  AL_STATUS=0x%04X%s\n"
              "  PDO stats: fpwr_ok=%u fpwr_err=%u fprd_ok=%u fprd_err=%u",
-             m_slave_index, final_state, al_code,
+             m_slave_index, final_state, getALStatusCodeName(al_code), al_code,
              al_status, (al_status & 0x10) ? " (ERROR)" : "",
              pstats.fpwr_success, pstats.fpwr_wkc_errors,
              pstats.fprd_success, pstats.fprd_wkc_errors);

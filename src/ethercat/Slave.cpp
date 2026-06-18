@@ -12,6 +12,7 @@
 #include "tether/ethercat/SyncManager.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
 #include "tether/sii/SIIReader.hpp"
+#include "tether/ethercat/FaultDetection.hpp"
 #include "tether/platform/Platform.hpp"
 
 #include <cstdio>
@@ -20,50 +21,6 @@
 namespace EtherCAT {
 
 static const char* TAG = "Slave";
-
-void enableStateMachineDebug(bool enable) {
-    debug::stateMachine() = enable;
-}
-
-void enableTxPacketDebug(bool enable) {
-    debug::txPackets() = enable;
-}
-
-void enableRxPacketDebug(bool enable) {
-    debug::rxPackets() = enable;
-}
-
-void enableRxPDODebug(bool enable) {
-    debug::rxPDO() = enable;
-}
-
-void enableTxPDODebug(bool enable) {
-    debug::txPDO() = enable;
-}
-
-void enableFmmuDebug(bool enable) {
-    debug::fmmu() = enable;
-}
-
-void enableSIIEEPROMDebug(bool enable) {
-    debug::siiEeprom() = enable;
-}
-
-void enableCoEReadsDebug(bool enable) {
-    debug::coeReads() = enable;
-}
-
-void enableCoEWritesDebug(bool enable) {
-    debug::coeWrites() = enable;
-}
-
-void enableCoERxPacketsDebug(bool enable) {
-    debug::coeRxPackets() = enable;
-}
-
-void enableCoETxPacketsDebug(bool enable) {
-    debug::coeTxPackets() = enable;
-}
 
 // ============================================================================
 // Slave
@@ -316,7 +273,7 @@ SlaveError Slave::transitionToSafeOp() {
 
     uint16_t al_code = 0;
     readALStatusCode(al_code);
-    TETHER_LOGE(TAG, "Slave %u: SAFE_OP not confirmed after 2s (AL_CODE=0x%04X)", index_, al_code);
+    TETHER_LOGE(TAG, "Slave %u: SAFE_OP not confirmed after 2s (AL status code: %s (0x%04X))", index_, getALStatusCodeName(al_code), al_code);
     return SlaveError::TransportError;
 }
 
@@ -422,8 +379,8 @@ SlaveError Slave::transitionToOp() {
                 state == static_cast<uint8_t>(SlaveState::PRE_OP)) {
                 uint16_t al_code = 0;
                 readALStatusCode(al_code);
-                TETHER_LOGE(TAG, "Slave %u: Unexpected state 0x%02X during OP transition (AL_CODE=0x%04X)",
-                         index_, state, al_code);
+                TETHER_LOGE(TAG, "Slave %u: Unexpected state 0x%02X during OP transition (AL status code: %s (0x%04X))",
+                         index_, state, getALStatusCodeName(al_code), al_code);
                 return SlaveError::TransportError;
             }
         }
@@ -431,7 +388,7 @@ SlaveError Slave::transitionToOp() {
 
     uint16_t al_code = 0;
     readALStatusCode(al_code);
-    TETHER_LOGE(TAG, "Slave %u: OP not confirmed after 5s (AL_CODE=0x%04X)", index_, al_code);
+    TETHER_LOGE(TAG, "Slave %u: OP not confirmed after 5s (AL status code: %s (0x%04X))", index_, getALStatusCodeName(al_code), al_code);
     return SlaveError::TransportError;
 }
 
