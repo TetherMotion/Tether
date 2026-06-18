@@ -7,6 +7,19 @@
 #include "tether/ethercat/Slave.hpp"
 
 namespace EtherCAT {
+
+void enableStateMachineDebug(bool enable) { debug::stateMachine() = enable; }
+void enableTxPacketDebug(bool enable)     { debug::txPackets() = enable; }
+void enableRxPacketDebug(bool enable)     { debug::rxPackets() = enable; }
+void enableRxPDODebug(bool enable)        { debug::rxPDO() = enable; }
+void enableTxPDODebug(bool enable)        { debug::txPDO() = enable; }
+void enableFmmuDebug(bool enable)         { debug::fmmu() = enable; }
+void enableSIIEEPROMDebug(bool enable)    { debug::siiEeprom() = enable; }
+void enableCoEReadsDebug(bool enable)     { debug::coeReads() = enable; }
+void enableCoEWritesDebug(bool enable)    { debug::coeWrites() = enable; }
+void enableCoERxPacketsDebug(bool enable) { debug::coeRxPackets() = enable; }
+void enableCoETxPacketsDebug(bool enable) { debug::coeTxPackets() = enable; }
+
 namespace debug {
 
 bool& rxPDO()       { static bool value = false; return value; }

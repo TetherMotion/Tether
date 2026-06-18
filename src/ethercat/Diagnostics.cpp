@@ -146,12 +146,12 @@ void logSlaveApplicationLayerDiagnostics(
     }
 
     if (have_al_code) {
-        TETHER_LOGW(tag, "Slave %u AL_STATUS_CODE: 0x%04X (%s)",
+        TETHER_LOGW(tag, "Slave %u AL status code: %s (0x%04X)",
                     slave_index,
-                    al_code,
-                    getALStatusCodeName(al_code));
+                    getALStatusCodeName(al_code),
+                    al_code);
     } else {
-        TETHER_LOGW(tag, "Slave %u AL_STATUS_CODE read FAILED (APRD)", slave_index);
+        TETHER_LOGW(tag, "Slave %u AL status code read FAILED (APRD)", slave_index);
     }
 }
 

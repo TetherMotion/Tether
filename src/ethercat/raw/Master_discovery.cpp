@@ -215,7 +215,7 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
             }
 
             if (have_code) {
-                TETHER_LOGW(TAG, "setPreop: AL_STATUS_CODE=0x%04X (%s)", al_code, EtherCAT::getALStatusCodeName(static_cast<EtherCAT::ALStatusCode>(al_code)));
+                TETHER_LOGW(TAG, "setPreop: AL status code: %s (0x%04X)", EtherCAT::getALStatusCodeName(static_cast<EtherCAT::ALStatusCode>(al_code)), al_code);
 
                 // Fallback: If the slave reports Invalid Mailbox Configuration on the
                 // first attempt to enter PRE_OP, optionally try forcing conservative mailbox
@@ -225,7 +225,7 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
                      al_code == static_cast<uint16_t>(ALStatusCode::InvalidMailboxConfigPreOp)) &&
                     attempt == 1) {
                     if (config_.enable_mailbox_fallback) {
-                        TETHER_LOGW(TAG, "setPreop: AL_STATUS_CODE indicates invalid mailbox for slave %u — applying mailbox defaults (enable_mailbox_fallback=true)", slave_index);
+                        TETHER_LOGW(TAG, "setPreop: AL status code indicates invalid mailbox for slave %u — applying mailbox defaults (enable_mailbox_fallback=true)", slave_index);
                         if (forceMailboxDefaults(slave_index)) {
                             TETHER_LOGI(TAG, "setPreop: mailbox defaults applied for slave %u; retrying PRE_OP", slave_index);
                         } else {
@@ -234,7 +234,7 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
                         // Wait for slave to process new SM config
                         std::this_thread::sleep_for(std::chrono::milliseconds(200));
                     } else {
-                        TETHER_LOGW(TAG, "setPreop: AL_STATUS_CODE indicates invalid mailbox for slave %u — set enable_mailbox_fallback=true to auto-fix", slave_index);
+                        TETHER_LOGW(TAG, "setPreop: AL status code indicates invalid mailbox for slave %u — set enable_mailbox_fallback=true to auto-fix", slave_index);
                     }
                 }
             }

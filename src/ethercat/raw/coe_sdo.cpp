@@ -97,12 +97,12 @@ static void mbx_diag_dump_slave_state(Master& master, uint16_t adp, uint16_t mbx
     const uint8_t  sm1_stat  = sm1[5];
     const uint8_t  sm1_act   = sm1[6];
 
-    TETHER_LOGE(TAG, "[SDO_DIAG] AL_STATUS=0x%04X state=%s%s | AL_STATUS_CODE=0x%04X (%s)\n[SDO_DIAG] MBX cfg: wr=0x%04X rd=0x%04X | SM0(start=0x%04X len=%u ctrl=0x%02X stat=0x%02X act=0x%02X) SM1(start=0x%04X len=%u ctrl=0x%02X stat=0x%02X act=0x%02X)\n[SDO_DIAG] SM0 status/act: 0x%02X/0x%02X | SM1 status/act: 0x%02X/0x%02X",
+    TETHER_LOGE(TAG, "[SDO_DIAG] AL_STATUS=0x%04X state=%s%s | AL status code: %s (0x%04X)\n[SDO_DIAG] MBX cfg: wr=0x%04X rd=0x%04X | SM0(start=0x%04X len=%u ctrl=0x%02X stat=0x%02X act=0x%02X) SM1(start=0x%04X len=%u ctrl=0x%02X stat=0x%02X act=0x%02X)\n[SDO_DIAG] SM0 status/act: 0x%02X/0x%02X | SM1 status/act: 0x%02X/0x%02X",
                al_s,
                EtherCAT::al_status_get_state_name(al_s),
                EtherCAT::al_status_has_error(al_s) ? " ERROR" : "",
-               al_c,
                EtherCAT::getALStatusCodeName(static_cast<EtherCAT::ALStatusCode>(al_c)),
+               al_c,
                mbx_wr_addr, mbx_rd_addr,
                sm0_start, (unsigned)sm0_len, sm0_ctrl, sm0_stat, sm0_act,
                sm1_start, (unsigned)sm1_len, sm1_ctrl, sm1_stat, sm1_act,
