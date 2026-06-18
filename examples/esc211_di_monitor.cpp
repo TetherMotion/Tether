@@ -20,14 +20,10 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
-#include <set>
-#include <sstream>
 #include <string>
 #include <thread>
-#include <magic_enum/magic_enum.hpp>
 
 #include <clocale>
-#include <optional>
 
 #include "tether/drives/NexcobotESC211/NexcobotESC211Registers.hpp"
 
@@ -40,22 +36,11 @@
 #include "tether/ethercat/Slave.hpp"
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/SyncManager.hpp"
-#include "tether/ethercat/VLANRouter.hpp"
-#include "tether/hal/IEthernet.hpp"
-#include "tether/platform/Platform.hpp"
 #include "tether/sii/SIIReader.hpp"
 #include "tether/sii/SIIParser.hpp"
 
-#include <argparse/argparse.hpp>
-
-// Forward-declare host transport helpers
-namespace EtherCAT {
-namespace Raw {
-    void set_network_interface(const ::EtherCAT::NetworkInterface* iface);
-    const ::EtherCAT::NetworkInterface* network_interface();
-    void set_src_mac(const uint8_t src_mac[6]);
-}
-}
+#include "common/ExampleHelpers.hpp"
+#include "common/EtherCATHostSetup.hpp"
 
 static const char* TAG = "esc211_di_monitor";
 static std::atomic<bool> g_cancel{false};
@@ -202,28 +187,14 @@ static void drawScreen(const DIState& state) {
 // ---------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
-    // ---- Argument parsing ----
     argparse::ArgumentParser program("esc211_di_monitor");
-    program.add_argument("-i", "--interface")
-        .default_value(std::string("eth0"))
-        .help("Network interface name (e.g. eth0, enp3s0)");
-    program.add_argument("-s", "--slave")
-        .scan<'i', int>()
-        .default_value(0)
-        .help("Slave index on the bus (0-based)");
-    program.add_argument("-t", "--time")
-        .scan<'g', double>()
-        .default_value(0.0)
-        .help("Monitor duration in seconds (0 = infinite until Ctrl-C)");
-    program.add_argument("--debug")
-        .default_value(std::string(""))
-        .help("Comma-separated debug flags. Known flags: sii-derivation, mailbox-configuration, al-state, tx-ethercat-packets, rx-ethercat-packets, sii-eeprom");
-    program.add_argument("--rx-vlan")
-        .default_value(std::string(""))
-        .help("RX VLAN filter: single VID, range, or 'any'");
-    program.add_argument("--tx-vlan")
-        .default_value(std::string(""))
-        .help("TX VLAN encapsulation: single VID");
+    Tether::Examples::addInterfaceArg(program);
+    Tether::Examples::addSlaveArg(program);
+    Tether::Examples::addDurationArg(program);
+    Tether::Examples::addDebugArg(program);
+    Tether::Examples::addVlanArgs(program);
+    Tether::Examples::addMailboxSizeArg(program);
+    Tether::Examples::addMailboxAddressArg(program);
     program.add_argument("--stream")
         .default_value(false)
         .implicit_value(true)
@@ -239,247 +210,50 @@ int main(int argc, char** argv) {
     int slave_idx = program.get<int>("--slave");
     double duration_sec = program.get<double>("--time");
     std::string debug_str = program.get<std::string>("--debug");
-    std::string rx_vlan_str = program.get<std::string>("--rx-vlan");
-    std::string tx_vlan_str = program.get<std::string>("--tx-vlan");
     bool stream_mode = program.get<bool>("--stream");
 
-    const std::set<std::string> known_debug_flags = {
-        "sii-derivation",
-        "mailbox-configuration",
-        "al-state",
-        "tx-ethercat-packets",
-        "rx-ethercat-packets",
-        "sii-eeprom",
-        "coe-reads",
-        "coe-writes",
-        "coe-rx-packets",
-        "coe-tx-packets"
-    };
+    auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
+    Tether::Examples::applyDebugFlags(debug_flags, &Tether::Examples::allKnownDebugFlags(), TAG);
 
-    std::set<std::string> debug_flags;
-    std::set<std::string> unknown_flags;
-    if (!debug_str.empty()) {
-        std::stringstream ss(debug_str);
-        std::string flag;
-        while (std::getline(ss, flag, ',')) {
-            flag.erase(0, flag.find_first_not_of(" \t"));
-            flag.erase(flag.find_last_not_of(" \t") + 1);
-            if (!flag.empty()) {
-                debug_flags.insert(flag);
-                if (known_debug_flags.find(flag) == known_debug_flags.end()) {
-                    unknown_flags.insert(flag);
-                }
-            }
-        }
-    }
-    if (!unknown_flags.empty()) {
-        TETHER_LOGW(TAG, "Unknown debug flags:");
-        for (const auto& f : unknown_flags) TETHER_LOGW(TAG, "  - %s", f.c_str());
-        TETHER_LOGI(TAG, "Available debug flags:");
-        for (const auto& f : known_debug_flags) TETHER_LOGI(TAG, "  - %s", f.c_str());
-    }
-    if (debug_flags.count("al-state")) {
-        EtherCAT::enableStateMachineDebug(true);
-        TETHER_LOGI(TAG, "EtherCAT state machine debug enabled");
-    }
-    if (debug_flags.count("tx-ethercat-packets")) {
-        EtherCAT::enableTxPacketDebug(true);
-        TETHER_LOGI(TAG, "TX packet debug enabled");
-    }
-    if (debug_flags.count("rx-ethercat-packets")) {
-        EtherCAT::enableRxPacketDebug(true);
-        TETHER_LOGI(TAG, "RX packet debug enabled");
+    Tether::Examples::VlanConfig vlan;
+    if (!Tether::Examples::parseVlanArgs(
+            program.get<std::string>("--rx-vlan"),
+            program.get<std::string>("--tx-vlan"),
+            vlan, TAG)) {
+        return 1;
     }
 
-    // Enable SII/EEPROM debug if requested
-    if (debug_flags.count("sii-eeprom")) {
-        EtherCAT::enableSIIEEPROMDebug(true);
-        TETHER_LOGI(TAG, "SII/EEPROM debug logging enabled");
+    Tether::Examples::MailboxSizeConfig mbSize;
+    if (!Tether::Examples::parseMailboxSize(program.get<std::string>("--mailbox-size"), mbSize)) {
+        return 1;
     }
-
-    // Enable CoE read debug if requested
-    if (debug_flags.count("coe-reads")) {
-        EtherCAT::enableCoEReadsDebug(true);
-        TETHER_LOGI(TAG, "CoE read debug enabled");
-    }
-
-    // Enable CoE write debug if requested
-    if (debug_flags.count("coe-writes")) {
-        EtherCAT::enableCoEWritesDebug(true);
-        TETHER_LOGI(TAG, "CoE write debug enabled");
-    }
-
-    // Enable CoE RX packet debug if requested
-    if (debug_flags.count("coe-rx-packets")) {
-        EtherCAT::enableCoERxPacketsDebug(true);
-        TETHER_LOGI(TAG, "CoE RX packet debug enabled");
-    }
-
-    // Enable CoE TX packet debug if requested
-    if (debug_flags.count("coe-tx-packets")) {
-        EtherCAT::enableCoETxPacketsDebug(true);
-        TETHER_LOGI(TAG, "CoE TX packet debug enabled");
-    }
-
-    // ---- Parse VLAN arguments ----
-    bool vlan_mode = !rx_vlan_str.empty() || !tx_vlan_str.empty();
-    std::optional<uint16_t> tx_vlan;
-    bool rx_any = false;
-    std::optional<EtherCAT::VLANRouter::VLANRange> rx_range;
-
-    if (vlan_mode) {
-        if (!tx_vlan_str.empty()) {
-            try {
-                int v = std::stoi(tx_vlan_str);
-                if (v < 1 || v > 4095) {
-                    std::cerr << "--tx-vlan must be in range 1-4095\n";
-                    return 1;
-                }
-                tx_vlan = static_cast<uint16_t>(v);
-            } catch (...) {
-                std::cerr << "Invalid --tx-vlan value: " << tx_vlan_str << "\n";
-                return 1;
-            }
-        }
-        if (!rx_vlan_str.empty()) {
-            if (rx_vlan_str == "any") {
-                rx_any = true;
-            } else {
-                size_t dash = rx_vlan_str.find('-');
-                try {
-                    if (dash == std::string::npos) {
-                        int v = std::stoi(rx_vlan_str);
-                        if (v < 1 || v > 4095) {
-                            std::cerr << "--rx-vlan must be in range 1-4095\n";
-                            return 1;
-                        }
-                        rx_range = EtherCAT::VLANRouter::VLANRange{
-                            static_cast<uint16_t>(v), static_cast<uint16_t>(v)};
-                    } else {
-                        int start = std::stoi(rx_vlan_str.substr(0, dash));
-                        int end   = std::stoi(rx_vlan_str.substr(dash + 1));
-                        if (start < 1 || end > 4095 || start > end) {
-                            std::cerr << "--rx-vlan range must be 1-4095 with start <= end\n";
-                            return 1;
-                        }
-                        rx_range = EtherCAT::VLANRouter::VLANRange{
-                            static_cast<uint16_t>(start), static_cast<uint16_t>(end)};
-                    }
-                } catch (...) {
-                    std::cerr << "Invalid --rx-vlan value: " << rx_vlan_str << "\n";
-                    return 1;
-                }
-            }
-        }
+    Tether::Examples::MailboxAddressConfig mbAddr;
+    if (!Tether::Examples::parseMailboxAddress(program.get<std::string>("--mailbox-address"), mbAddr)) {
+        return 1;
     }
 
     TETHER_LOGI(TAG, "esc211_di_monitor — interface: %s, slave: %d",
                 iface.c_str(), slave_idx);
+    Tether::Examples::logMailboxConfig(mbSize, mbAddr, TAG);
 
-    // ---- Open raw socket ----
-    auto eth = EtherCAT::HAL::createDefaultEthernet();
-    if (!eth) { TETHER_LOGE(TAG, "No Ethernet HAL available"); return 1; }
-
-    EtherCAT::HAL::EthernetConfig cfg;
-    cfg.interfaceName = iface.c_str();
-    cfg.promiscuous   = true;
-    cfg.ethertypeFilter = static_cast<uint16_t>(EtherCAT::kEtherTypeEtherCAT);
-
-    {
-        auto err = eth->init(cfg);
-        if (err != EtherCAT::HAL::Error::OK) {
-            if (err == EtherCAT::HAL::Error::InterfaceNotFound)
-                TETHER_LOGE(TAG, "Interface '%s' not found", iface.c_str());
-            else if (err == EtherCAT::HAL::Error::PermissionDenied)
-                TETHER_LOGE(TAG, "Permission denied — run as root or with CAP_NET_RAW");
-            else
-                TETHER_LOGE(TAG, "Failed to init '%s' (%s)", iface.c_str(),
-                            magic_enum::enum_name(err).data());
-            return 2;
-        }
-        auto ls = eth->getLinkStatus();
-        if (!ls.up) {
-            TETHER_LOGE(TAG, "Link DOWN on '%s'", iface.c_str());
-            return 6;
-        }
+    Tether::Examples::HostEtherNetSession session;
+    if (!Tether::Examples::initHostEthernet(session, iface, TAG)) {
+        return 2;
     }
 
-    // ---- MAC + NetworkInterface ----
-    EtherCAT::HAL::MacAddress mac;
-    if (eth->getMacAddress(mac) != EtherCAT::HAL::Error::OK) {
-        TETHER_LOGE(TAG, "Failed to read MAC address");
-        return 3;
-    }
-    uint8_t src_mac[6];
-    std::memcpy(src_mac, mac.bytes, 6);
-
-    auto ni_ptr = std::make_unique<EtherCAT::NetworkInterface>();
-    ni_ptr->send = [eth_raw = eth.get()](const uint8_t* data, size_t len) -> bool {
-        return eth_raw->transmit(data, len) == EtherCAT::HAL::Error::OK;
-    };
-    EtherCAT::Raw::set_network_interface(ni_ptr.get());
-    EtherCAT::Raw::set_src_mac(src_mac);
-
-    // ---- Create master ----
     EtherCAT::Master master;
     g_master = &master;
 
-    // ---- Optional VLAN router ----
-    std::unique_ptr<EtherCAT::VLANRouter> router;
-    if (vlan_mode) {
-        router = std::make_unique<EtherCAT::VLANRouter>();
-        router->setBackend(ni_ptr.get());
-        if (rx_any) {
-            router->setUndefinedTarget(
-                std::shared_ptr<EtherCAT::Master>(&master, [](auto*){}),
-                tx_vlan, true);
-        } else if (rx_range) {
-            router->addMaster(
-                std::shared_ptr<EtherCAT::Master>(&master, [](auto*){}),
-                *rx_range, tx_vlan);
-        } else {
-            router->addMaster(
-                std::shared_ptr<EtherCAT::Master>(&master, [](auto*){}),
-                std::nullopt, tx_vlan);
-        }
+    if (!Tether::Examples::setupVlanAndRxCallback(session, master, vlan, TAG)) {
+        Tether::Examples::shutdownHostEthernet(session);
+        return 5;
     }
 
-    if (router) {
-        eth->setRxCallback([&router](const uint8_t* frame, size_t len,
-                                      const EtherCAT::HAL::RxFrameInfo&, void*) {
-            router->processRxFrame(frame, len);
-        }, nullptr);
-    } else {
-        eth->setRxCallback([&master](const uint8_t* frame, size_t len,
-                                      const EtherCAT::HAL::RxFrameInfo&, void*) {
-            master.handleRxFrame(frame, len);
-        }, nullptr);
-    }
+    Tether::Examples::startHostPollThread(session, TAG);
 
-    // ---- Poll thread ----
-    std::atomic<bool> poll_running{true};
-    std::thread poll_thread([&]() {
-        if (!Tether::Platform::setCurrentThreadRealtime(-1)) {
-            TETHER_LOGW(TAG, "poll_thread: could not set realtime scheduling (continuing)");
-        }
-        while (poll_running.load()) eth->poll(1);
-    });
-
-    // ---- Start master + discover ----
-    if (router) {
-        EtherCAT::NetworkInterface* master_iface = rx_any
-            ? router->undefinedNetworkInterface()
-            : router->networkInterfaceFor(&master);
-        if (!master_iface) {
-            TETHER_LOGE(TAG, "Failed to obtain per-master NetworkInterface from VLAN router");
-            poll_running = false;
-            poll_thread.join();
-            eth->shutdown();
-            return 5;
-        }
-        master.start(*master_iface, src_mac);
-    } else {
-        master.start(*EtherCAT::Raw::network_interface(), src_mac);
+    if (!Tether::Examples::startHostMaster(session, master, vlan, TAG)) {
+        Tether::Examples::shutdownHostEthernet(session);
+        return 5;
     }
 
     if (!master.discoverSlaves()) {
@@ -507,18 +281,14 @@ int main(int argc, char** argv) {
     if (slaves == 0) {
         TETHER_LOGE(TAG, "No slaves found — check wiring, power, and interface name");
         master.stop();
-        poll_running = false;
-        poll_thread.join();
-        eth->shutdown();
+        Tether::Examples::shutdownHostEthernet(session);
         return 4;
     }
 
     if (slave_idx < 0 || static_cast<uint16_t>(slave_idx) >= slaves) {
         TETHER_LOGE(TAG, "Slave index %d out of range (0..%u)", slave_idx, slaves - 1);
         master.stop();
-        poll_running = false;
-        poll_thread.join();
-        eth->shutdown();
+        Tether::Examples::shutdownHostEthernet(session);
         return 4;
     }
 
@@ -529,21 +299,15 @@ int main(int argc, char** argv) {
     expected_id.product_code = EtherCAT::Drives::NexcobotESC211::kProductCode;
     master.verifySlaveIdentity(static_cast<uint16_t>(slave_idx), expected_id, false, TAG);
 
-    // ---- Configure mailbox + transition to PRE-OP ----
-    // Override with ESI values to avoid "Mailbox size too large" from SII:
-    //   SM0 (MBoxOut / M->S): addr=0x1000 len=0x200 ctrl=0x26
-    //   SM1 (MBoxIn  / S->M): addr=0x1200 len=0x200 ctrl=0x22  proto=CoE (0x0004)
     TETHER_LOGI(TAG, "Configuring mailbox for slave %d...", slave_idx);
     auto mb_err = sl.configureMailbox(
-        {.address = 0x1000, .length = 0x0100},
-        {.address = 0x1200, .length = 0x0100},
+        {.address = mbAddr.outAddress, .length = mbSize.outSize},
+        {.address = mbAddr.inAddress, .length = mbSize.inSize},
         0x0004);
     if (mb_err != EtherCAT::SlaveError::Ok) {
         TETHER_LOGE(TAG, "Mailbox config failed: %s", EtherCAT::slaveErrorToString(mb_err));
         master.stop();
-        poll_running = false;
-        poll_thread.join();
-        eth->shutdown();
+        Tether::Examples::shutdownHostEthernet(session);
         return 7;
     }
 
@@ -551,15 +315,12 @@ int main(int argc, char** argv) {
     if (pre_err != EtherCAT::SlaveError::Ok) {
         TETHER_LOGE(TAG, "PRE-OP transition failed: %s", EtherCAT::slaveErrorToString(pre_err));
         master.stop();
-        poll_running = false;
-        poll_thread.join();
-        eth->shutdown();
+        Tether::Examples::shutdownHostEthernet(session);
         return 7;
     }
 
     TETHER_LOGI(TAG, "Slave %d in PRE-OP", slave_idx);
 
-    // ---- Read Identity Object 0x1018 ----
     uint32_t vendor_id = 0;
     uint32_t product_code = 0;
     uint32_t revision = 0;
@@ -582,10 +343,7 @@ int main(int argc, char** argv) {
         std::cout.flush();
     }
 
-    // ---- Exit cleanly ----
     master.stop();
-    poll_running = false;
-    poll_thread.join();
-    eth->shutdown();
+    Tether::Examples::shutdownHostEthernet(session);
     return identity_ok ? 0 : 8;
 }
