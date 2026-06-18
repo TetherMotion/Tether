@@ -51,8 +51,9 @@ int main(int argc, char** argv) {
     int slave_idx = program.get<int>("--slave");
     std::string debug_str = program.get<std::string>("--debug");
 
+    if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
     auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
-    Tether::Examples::applyDebugFlags(debug_flags, &Tether::Examples::allKnownDebugFlags(), TAG);
+    Tether::Examples::applyDebugFlags(debug_flags, TAG);
 
     Tether::Examples::VlanConfig vlan;
     if (!Tether::Examples::parseVlanArgs(
