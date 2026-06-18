@@ -39,10 +39,12 @@
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
 #include "tether/ethercat/Types.hpp"
+#include "tether/ethercat/SyncManager.hpp"
 #include "tether/ethercat/VLANRouter.hpp"
 #include "tether/hal/IEthernet.hpp"
 #include "tether/platform/Platform.hpp"
 #include "tether/sii/SIIReader.hpp"
+#include "tether/sii/SIIParser.hpp"
 
 #include <argparse/argparse.hpp>
 
@@ -487,6 +489,20 @@ int main(int argc, char** argv) {
     uint16_t slaves = master.getDiscoveredSlaveCount();
     TETHER_LOGI(TAG, "Discovered %u slave(s)", slaves);
     master.logDiscoveredSlavesSummary(TAG);
+
+    if (debug_flags.count("sii-derivation") && slaves > 0) {
+        TETHER_LOGI(TAG, "\n=== SII Mailbox Derivation Debug ===");
+        for (uint16_t i = 0; i < slaves; i++) {
+            EtherCAT::SII::debugSIIMailboxDerivation(master, i, TAG);
+        }
+    }
+
+    if (debug_flags.count("mailbox-configuration") && slaves > 0) {
+        TETHER_LOGI(TAG, "\n=== Mailbox Hardware Configuration Debug ===");
+        for (uint16_t i = 0; i < slaves; i++) {
+            EtherCAT::debugMailboxConfiguration(master, i, TAG);
+        }
+    }
 
     if (slaves == 0) {
         TETHER_LOGE(TAG, "No slaves found — check wiring, power, and interface name");

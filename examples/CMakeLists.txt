@@ -82,6 +82,11 @@ add_tether_example(detect_slaves
 add_tether_example(reset_slaves_al
     LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common)
 
+# --- EtherCAT slave identity reader example ---
+# Configures mailbox from SII, transitions to PRE-OP, and reads identity object 0x1018
+add_tether_example(slave_read_identity
+    LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common)
+
 # ---ATI Axia80 F/T Sensor streaming example ---
 # Streams 6-DOF force/torque data with engineering-unit conversion
 add_tether_example(axia80_stream
