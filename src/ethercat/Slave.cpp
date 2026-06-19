@@ -657,7 +657,7 @@ SlaveError Slave::registerPDOsFromSII(SIIPDOConfig& out_config) {
 
 SlaveError Slave::assignPDOs(const SIIPDOConfig& config) {
     if (!config.has_rxpdo && !config.has_txpdo) {
-        TETHER_LOGW(TAG, "Slave %u: assignPDOs called with empty config, skipping", index_);
+        TETHER_LOGE(TAG, "Slave %u: assignPDOs called with empty config (zero PDOs available), skipping", index_);
         return SlaveError::Ok;
     }
 
