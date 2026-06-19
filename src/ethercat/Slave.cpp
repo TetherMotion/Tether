@@ -701,6 +701,44 @@ SlaveError Slave::assignPDOs(const SIIPDOConfig& config) {
     return SlaveError::Ok;
 }
 
+SlaveError Slave::registerFixedPDOs(const SIIPDOConfig& config) {
+    if (!config.has_rxpdo && !config.has_txpdo) {
+        TETHER_LOGW(TAG, "Slave %u: registerFixedPDOs called with empty config, skipping", index_);
+        return SlaveError::Ok;
+    }
+
+    // Remove any existing entries for this slave to avoid duplicates
+    PDO::PDOMapping& mapping = master_.pdo().mapping();
+    mapping.remove_entries_for_slave(index_);
+
+    if (config.has_rxpdo) {
+        pdo_rx_buffer_.assign(config.rxpdo_size, 0);
+        int idx = mapping.add_rxpdo(index_, pdo_rx_buffer_.data(), config.rxpdo_size,
+                                    config.rxpdo_index, PDO::PDOAddressMode::Position);
+        if (idx < 0) {
+            TETHER_LOGE(TAG, "Slave %u: Failed to register fixed RxPDO 0x%04X mapping entry", index_, config.rxpdo_index);
+            return SlaveError::PDOMappingFailed;
+        }
+        TETHER_LOGI(TAG, "Slave %u: Registered fixed RxPDO 0x%04X (%u bytes)", index_,
+                    config.rxpdo_index, config.rxpdo_size);
+    }
+
+    if (config.has_txpdo) {
+        pdo_tx_buffer_.assign(config.txpdo_size, 0);
+        int idx = mapping.add_txpdo(index_, pdo_tx_buffer_.data(), config.txpdo_size,
+                                    config.txpdo_index, PDO::PDOAddressMode::Position);
+        if (idx < 0) {
+            TETHER_LOGE(TAG, "Slave %u: Failed to register fixed TxPDO 0x%04X mapping entry", index_, config.txpdo_index);
+            return SlaveError::PDOMappingFailed;
+        }
+        TETHER_LOGI(TAG, "Slave %u: Registered fixed TxPDO 0x%04X (%u bytes)", index_,
+                    config.txpdo_index, config.txpdo_size);
+    }
+
+    master_.pdo().finalizeMapping(index_);
+    return SlaveError::Ok;
+}
+
 // ============================================================================
 // NonExistingSlave
 // ============================================================================
@@ -744,6 +782,9 @@ SlaveError NonExistingSlave::registerPDOsFromSII(SIIPDOConfig&) {
 }
 SlaveError NonExistingSlave::assignPDOs(const SIIPDOConfig&) {
     logCritical("assignPDOs"); return SlaveError::SlaveNotFound;
+}
+SlaveError NonExistingSlave::registerFixedPDOs(const SIIPDOConfig&) {
+    logCritical("registerFixedPDOs"); return SlaveError::SlaveNotFound;
 }
 SlaveError NonExistingSlave::transitionTo(SlaveState) {
     logCritical("transitionTo"); return SlaveError::SlaveNotFound;
