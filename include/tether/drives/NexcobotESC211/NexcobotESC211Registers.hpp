@@ -63,8 +63,10 @@ struct NexcobotESC211 {
     static constexpr uint16_t kRxPDOMapFSoE7Index       = 0x1617;
 
     // TxPDO mapping indices
+    static constexpr uint16_t kTxPDOMapFSOEIndex        = 0x1A00;
     static constexpr uint16_t kTxPDOMapIndex            = 0x1A01;
     static constexpr uint16_t kTxPDORSAPInfoIndex       = 0x1A02;
+    static constexpr uint16_t kTxPDORSAPDebugIndex      = 0x1A03;
     static constexpr uint16_t kTxPDOMapFSoE0Index       = 0x1A10;
     static constexpr uint16_t kTxPDOMapFSoE7Index       = 0x1A17;
 

@@ -76,10 +76,28 @@ static constexpr uint8_t kRxPDOMapMaxEntriesFSoE = 18;
 // TxPDO Mapping Objects
 // ---------------------------------------------------------------------------
 
+static constexpr uint16_t TxPDOMapFSOEIndex        = 0x1A00;
 static constexpr uint16_t TxPDOMapIndex            = 0x1A01;
 static constexpr uint16_t TxPDORSAPInfoIndex       = 0x1A02;
+static constexpr uint16_t TxPDORSAPDebugIndex     = 0x1A03;
 static constexpr uint16_t TxPDOMapFSoE0Index       = 0x1A10;
 static constexpr uint16_t TxPDOMapFSoE7Index       = 0x1A17;
+
+// 0x1A00: TxPDO-Map-FSoE (16 mapping entries)
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry TxPDOMapFSOECount = {
+    .index = TxPDOMapFSOEIndex,
+    .subindex = 0x00,
+    .name = "TxPDO-Map-FSoE number of entries",
+    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
+    .default_value = 16,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 16,
+    .modification_mode = ModificationMode::DuringOperation,
+    .effective_time = EffectiveTime::Immediately,
+    .comment = "Number of mapped objects in TxPDO-Map-FSoE (0x1A00)",
+};
 
 // 0x1A01: TxPDO-Map (8 mapping entries)
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry TxPDOMapCount = {
@@ -113,6 +131,22 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry TxPDORSAPInfoCount
     .comment = "Number of mapped objects in TxPDO-RSAP-Info (0x1A02)",
 };
 
+// 0x1A03: TxPDO-RSAP-Debug (11 mapping entries)
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry TxPDORSAPDebugCount = {
+    .index = TxPDORSAPDebugIndex,
+    .subindex = 0x00,
+    .name = "TxPDO-RSAP-Debug number of entries",
+    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
+    .default_value = 11,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 11,
+    .modification_mode = ModificationMode::DuringOperation,
+    .effective_time = EffectiveTime::Immediately,
+    .comment = "Number of mapped objects in TxPDO-RSAP-Debug (0x1A03)",
+};
+
 // 0x1A10-0x1A17: TxPDO-Map-FSoE0..FSoE7 (18 mapping entries each)
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry TxPDOMapFSoECount = {
     .index = TxPDOMapFSoE0Index,
@@ -130,8 +164,10 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry TxPDOMapFSoECount 
 };
 
 // Subindex helpers for TxPDO mapping entries
-static constexpr uint8_t kTxPDOMapMaxEntries       = 8;
+static constexpr uint8_t kTxPDOMapMaxEntriesFSOE     = 16;
+static constexpr uint8_t kTxPDOMapMaxEntries         = 8;
 static constexpr uint8_t kTxPDORSAPInfoMaxEntries    = 32;
+static constexpr uint8_t kTxPDORSAPDebugMaxEntries   = 11;
 static constexpr uint8_t kTxPDOMapMaxEntriesFSoE     = 18;
 
 // All PDO mapping object indices in arrays for iteration
@@ -147,8 +183,10 @@ inline const RegisterList kRegisterList = {
     &RxPDOMapFSOECount,
     &RxPDOMapCount,
     &RxPDOMapFSoECount,
+    &TxPDOMapFSOECount,
     &TxPDOMapCount,
     &TxPDORSAPInfoCount,
+    &TxPDORSAPDebugCount,
     &TxPDOMapFSoECount,
 };
 
