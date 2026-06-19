@@ -171,6 +171,23 @@ void PDOMapping::clear() {
     std::memset(m_entries, 0, sizeof(m_entries));
 }
 
+void PDOMapping::remove_entries_for_slave(uint16_t slave_index) {
+    size_t write = 0;
+    for (size_t read = 0; read < m_entry_count; ++read) {
+        if (m_entries[read].slave_index != slave_index) {
+            if (write != read) {
+                m_entries[write] = m_entries[read];
+            }
+            ++write;
+        }
+    }
+    // zero out the vacated tail so stale pointers don't dangle
+    for (size_t i = write; i < m_entry_count; ++i) {
+        std::memset(&m_entries[i], 0, sizeof(PDOEntry));
+    }
+    m_entry_count = write;
+}
+
 size_t PDOMapping::total_rxpdo_bytes() const {
     size_t total = 0;
     for (size_t i = 0; i < m_entry_count; i++)

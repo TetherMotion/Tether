@@ -249,6 +249,45 @@ public:
     /** @brief True if PDO sync-managers have been configured. */
     bool isPDOConfigured() const { return pdo_configured_; }
 
+    // -- PDO auto-configuration from SII -------------------------------------
+
+    /**
+     * @brief Description of a PDO configuration discovered from SII.
+     */
+    struct SIIPDOConfig {
+        uint16_t rxpdo_index = 0;   ///< RxPDO object index (e.g. 0x1600)
+        uint16_t txpdo_index = 0;   ///< TxPDO object index (e.g. 0x1A00)
+        uint16_t rxpdo_size = 0;    ///< Total RxPDO size in bytes
+        uint16_t txpdo_size = 0;    ///< Total TxPDO size in bytes
+        bool has_rxpdo = false;     ///< True if an RxPDO was found in SII
+        bool has_txpdo = false;     ///< True if a TxPDO was found in SII
+    };
+
+    /**
+     * @brief Read PDO descriptions from the slave's SII and register mapping entries.
+     *
+     * This populates the master-side PDOMapping with dynamically allocated buffers.
+     * It does NOT write any SDO assignments to the slave — call assignPDOs()
+     * afterwards for that.
+     *
+     * Must be called in PRE_OP.
+     *
+     * @param[out] out_config  Populated with the discovered PDO indices/sizes
+     * @return SlaveError::Ok on success
+     */
+    virtual SlaveError registerPDOsFromSII(SIIPDOConfig& out_config);
+
+    /**
+     * @brief Write PDO assignment objects (0x1C12 / 0x1C13) to the slave.
+     *
+     * Uses the indices discovered by registerPDOsFromSII().
+     * Must be called in PRE_OP after registerPDOsFromSII().
+     *
+     * @param config  PDO configuration returned by registerPDOsFromSII()
+     * @return SlaveError::Ok on success
+     */
+    virtual SlaveError assignPDOs(const SIIPDOConfig& config);
+
     // -- State transitions ---------------------------------------------------
 
     /**
@@ -425,6 +464,10 @@ protected:
 
     SII::CachedSIIReader sii_cache_;
     fmmu::FMMUManager fmmu_mgr_{*this};
+
+    // -- Buffers for auto-configured PDO entries from SII ---------------------
+    std::vector<uint8_t> pdo_rx_buffer_;
+    std::vector<uint8_t> pdo_tx_buffer_;
 };
 
 // ============================================================================
@@ -455,6 +498,9 @@ public:
     SlaveError configurePDOSyncManagers(uint16_t, uint16_t, uint8_t,
                                          uint16_t, uint16_t, uint8_t) override;
     void assumePDOAlreadyConfigured() override;
+
+    SlaveError registerPDOsFromSII(SIIPDOConfig&) override;
+    SlaveError assignPDOs(const SIIPDOConfig&) override;
 
     SlaveError transitionTo(SlaveState) override;
     SlaveError transitionToInit() override;
