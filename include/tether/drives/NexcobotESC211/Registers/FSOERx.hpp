@@ -22,8 +22,8 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSOESafetyPDURxCou
     .index = FSOESafetyPDURxIndex, .subindex = 0x00,
     .name = "FSOE Master SafetyPDU Rx count",
     .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
-    .default_value = 8, .unit = Unit_None, .options_enum = nullptr,
-    .min_value = 0, .max_value = 8,
+    .default_value = 16, .unit = Unit_None, .options_enum = nullptr,
+    .min_value = 0, .max_value = 16,
     .modification_mode = ModificationMode::ReadOnly,
     .effective_time = EffectiveTime::Immediately,
     .comment = "Number of entries for FSOE RxPDU",
@@ -43,6 +43,8 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSOESafetyPDURxCou
 
 NEXCOBOT_RXPDU_REG(1); NEXCOBOT_RXPDU_REG(2); NEXCOBOT_RXPDU_REG(3); NEXCOBOT_RXPDU_REG(4);
 NEXCOBOT_RXPDU_REG(5); NEXCOBOT_RXPDU_REG(6); NEXCOBOT_RXPDU_REG(7); NEXCOBOT_RXPDU_REG(8);
+NEXCOBOT_RXPDU_REG(9); NEXCOBOT_RXPDU_REG(10); NEXCOBOT_RXPDU_REG(11); NEXCOBOT_RXPDU_REG(12);
+NEXCOBOT_RXPDU_REG(13); NEXCOBOT_RXPDU_REG(14); NEXCOBOT_RXPDU_REG(15); NEXCOBOT_RXPDU_REG(16);
 #undef NEXCOBOT_RXPDU_REG
 
 #define NEXCOBOT_UDINT_REG(NAME, IDX, DESC) \
@@ -69,6 +71,8 @@ inline const RegisterList kRegisterList = {
     &FSOESafetyPDURxCount,
     &FSOERxPDU_1, &FSOERxPDU_2, &FSOERxPDU_3, &FSOERxPDU_4,
     &FSOERxPDU_5, &FSOERxPDU_6, &FSOERxPDU_7, &FSOERxPDU_8,
+    &FSOERxPDU_9, &FSOERxPDU_10, &FSOERxPDU_11, &FSOERxPDU_12,
+    &FSOERxPDU_13, &FSOERxPDU_14, &FSOERxPDU_15, &FSOERxPDU_16,
     &InputCounter, &SAFE_DI, &PowerStatus, &DOMonitor,
     &DOValueActual, &DIValue, &DOCommand,
 };
