@@ -70,6 +70,21 @@ SlaveError Slave::configureMailbox(
     master_.sdoManager(index_).configureMailbox(
         mbox_out.address, mbox_out.length,
         mbox_in.address, mbox_in.length);
+
+    // Write mailbox SM registers to slave ESC (same as autoConfigureMailbox)
+    auto& pdo = master_.pdo();
+    auto* slave_configs = pdo.slaveConfigs();
+    if (index_ < PDO::kMaxPDOSlaves) {
+        slave_configs[index_].sm[0] = PDO::SyncManagerConfig::mailbox_write(
+            mbox_out.address, mbox_out.length);
+        slave_configs[index_].sm[1] = PDO::SyncManagerConfig::mailbox_read(
+            mbox_in.address, mbox_in.length);
+        if (!pdo.configureSlavesSMs(index_)) {
+            TETHER_LOGE(TAG, "Slave %u: Failed to write mailbox SM registers", index_);
+            return SlaveError::MailboxConfigFailed;
+        }
+    }
+
     mailbox_configured_ = true;
     TETHER_LOGI( TAG,
         "Slave %u: Mailbox configured (wr=0x%04X/%u, rd=0x%04X/%u, proto=0x%04X)",
