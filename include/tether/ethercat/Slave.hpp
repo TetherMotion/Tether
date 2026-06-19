@@ -288,6 +288,17 @@ public:
      */
     virtual SlaveError assignPDOs(const SIIPDOConfig& config);
 
+    /**
+     * @brief Register master-side PDO mapping entries with explicit indices/sizes.
+     *
+     * Like registerPDOsFromSII() but uses caller-provided indices/sizes instead
+     * of reading from the slave's SII EEPROM.
+     *
+     * @param config  PDO configuration (indices, sizes, has-rx/tx flags)
+     * @return SlaveError::Ok on success
+     */
+    virtual SlaveError registerFixedPDOs(const SIIPDOConfig& config);
+
     // -- State transitions ---------------------------------------------------
 
     /**
@@ -501,6 +512,7 @@ public:
 
     SlaveError registerPDOsFromSII(SIIPDOConfig&) override;
     SlaveError assignPDOs(const SIIPDOConfig&) override;
+    SlaveError registerFixedPDOs(const SIIPDOConfig&) override;
 
     SlaveError transitionTo(SlaveState) override;
     SlaveError transitionToInit() override;

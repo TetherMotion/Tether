@@ -26,6 +26,7 @@
 #include <clocale>
 
 #include "tether/drives/NexcobotESC211/NexcobotESC211Registers.hpp"
+#include "tether/drives/NexcobotESC211/NexcobotESC211PDO.hpp"
 
 // ncurses defines OK/ERR as macros; undefine them before Tether headers
 // that use Error::OK are parsed.
@@ -352,10 +353,18 @@ int main(int argc, char** argv) {
 
     // readIdentityObject(sl);
 
+    // Use predefined ESC211 PDOs (FSOE: 0x1600 / 0x1A00) instead of SII
     EtherCAT::Slave::SIIPDOConfig pdo_cfg;
-    auto reg_err = sl.registerPDOsFromSII(pdo_cfg);
+    pdo_cfg.rxpdo_index = EtherCAT::Drives::NexcobotESC211_pdo::RxPDO_1600.index;
+    pdo_cfg.rxpdo_size  = static_cast<uint16_t>(EtherCAT::Drives::NexcobotESC211_pdo::RxPDO_1600.size);
+    pdo_cfg.has_rxpdo   = true;
+    pdo_cfg.txpdo_index = EtherCAT::Drives::NexcobotESC211_pdo::TxPDO_1A00.index;
+    pdo_cfg.txpdo_size  = static_cast<uint16_t>(EtherCAT::Drives::NexcobotESC211_pdo::TxPDO_1A00.size);
+    pdo_cfg.has_txpdo   = true;
+
+    auto reg_err = sl.registerFixedPDOs(pdo_cfg);
     if (reg_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "PDO auto-config from SII failed: %s", EtherCAT::slaveErrorToString(reg_err));
+        TETHER_LOGE(TAG, "Fixed PDO registration failed: %s", EtherCAT::slaveErrorToString(reg_err));
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 7;
