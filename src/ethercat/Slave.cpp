@@ -578,6 +578,130 @@ void Slave::logSIISummary(const char* tag) {
 }
 
 // ============================================================================
+// PDO auto-configuration from SII
+// ============================================================================
+
+SlaveError Slave::registerPDOsFromSII(SIIPDOConfig& out_config) {
+    SII::SIIData sii;
+    if (readSII(sii) != SlaveError::Ok) {
+        TETHER_LOGE(TAG, "Slave %u: Failed to read SII for PDO auto-config", index_);
+        return SlaveError::SIIReadError;
+    }
+
+    // Find best-matching PDOs
+    const SII::SIIPDO* rxpdo = nullptr;
+    const SII::SIIPDO* txpdo = nullptr;
+
+    for (const auto& pdo : sii.rx_pdos) {
+        if (pdo.sync_manager == 2 || pdo.isDefault()) {
+            rxpdo = &pdo;
+            break;
+        }
+    }
+    for (const auto& pdo : sii.tx_pdos) {
+        if (pdo.sync_manager == 3 || pdo.isDefault()) {
+            txpdo = &pdo;
+            break;
+        }
+    }
+
+    if (!rxpdo && !txpdo) {
+        TETHER_LOGE(TAG, "Slave %u: No PDO data found in SII", index_);
+        return SlaveError::PDOConfigFailed;
+    }
+
+    // Remove any existing entries for this slave to avoid duplicates
+    PDO::PDOMapping& mapping = master_.pdo().mapping();
+    mapping.remove_entries_for_slave(index_);
+
+    // Allocate buffers and register entries
+    out_config = SIIPDOConfig{};  // clear
+
+    if (rxpdo) {
+        uint16_t size = static_cast<uint16_t>(rxpdo->totalBytes());
+        pdo_rx_buffer_.assign(size, 0);
+        int idx = mapping.add_rxpdo(index_, pdo_rx_buffer_.data(), size,
+                                    rxpdo->pdo_index, PDO::PDOAddressMode::Position);
+        if (idx < 0) {
+            TETHER_LOGE(TAG, "Slave %u: Failed to register RxPDO mapping entry", index_);
+            return SlaveError::PDOMappingFailed;
+        }
+        out_config.rxpdo_index = rxpdo->pdo_index;
+        out_config.rxpdo_size  = size;
+        out_config.has_rxpdo   = true;
+        TETHER_LOGI(TAG, "Slave %u: Registered RxPDO 0x%04X (%u bytes) from SII", index_,
+                    rxpdo->pdo_index, size);
+    }
+
+    if (txpdo) {
+        uint16_t size = static_cast<uint16_t>(txpdo->totalBytes());
+        pdo_tx_buffer_.assign(size, 0);
+        int idx = mapping.add_txpdo(index_, pdo_tx_buffer_.data(), size,
+                                    txpdo->pdo_index, PDO::PDOAddressMode::Position);
+        if (idx < 0) {
+            TETHER_LOGE(TAG, "Slave %u: Failed to register TxPDO mapping entry", index_);
+            return SlaveError::PDOMappingFailed;
+        }
+        out_config.txpdo_index = txpdo->pdo_index;
+        out_config.txpdo_size  = size;
+        out_config.has_txpdo   = true;
+        TETHER_LOGI(TAG, "Slave %u: Registered TxPDO 0x%04X (%u bytes) from SII", index_,
+                    txpdo->pdo_index, size);
+    }
+
+    // Finalize so SlaveConfig rxpdo_size / txpdo_size are updated
+    master_.pdo().finalizeMapping(index_);
+
+    return SlaveError::Ok;
+}
+
+SlaveError Slave::assignPDOs(const SIIPDOConfig& config) {
+    if (!config.has_rxpdo && !config.has_txpdo) {
+        TETHER_LOGW(TAG, "Slave %u: assignPDOs called with empty config, skipping", index_);
+        return SlaveError::Ok;
+    }
+
+    auto& sdo = master_.sdoManager(index_);
+    uint8_t zero = 0;
+    uint8_t one  = 1;
+    bool sdo_ok = true;
+
+    if (config.has_rxpdo) {
+        if (!sdo.writeU8(CiA301::SyncManager2PDOAssign, 0, zero).has_value()) {
+            TETHER_LOGW(TAG, "Slave %u: Failed to clear SM2 PDO count (may be fixed)", index_);
+        }
+        if (!sdo.writeU16(CiA301::SyncManager2PDOAssign, 1, config.rxpdo_index).has_value()) {
+            TETHER_LOGW(TAG, "Slave %u: Failed to assign RxPDO 0x%04X to SM2", index_, config.rxpdo_index);
+            sdo_ok = false;
+        }
+        if (!sdo.writeU8(CiA301::SyncManager2PDOAssign, 0, one).has_value()) {
+            TETHER_LOGW(TAG, "Slave %u: Failed to set SM2 PDO count", index_);
+        }
+        TETHER_LOGI(TAG, "Slave %u: Assigned RxPDO 0x%04X to SM2 (0x1C12)", index_, config.rxpdo_index);
+    }
+
+    if (config.has_txpdo) {
+        if (!sdo.writeU8(CiA301::SyncManager3PDOAssign, 0, zero).has_value()) {
+            TETHER_LOGW(TAG, "Slave %u: Failed to clear SM3 PDO count (may be fixed)", index_);
+        }
+        if (!sdo.writeU16(CiA301::SyncManager3PDOAssign, 1, config.txpdo_index).has_value()) {
+            TETHER_LOGW(TAG, "Slave %u: Failed to assign TxPDO 0x%04X to SM3", index_, config.txpdo_index);
+            sdo_ok = false;
+        }
+        if (!sdo.writeU8(CiA301::SyncManager3PDOAssign, 0, one).has_value()) {
+            TETHER_LOGW(TAG, "Slave %u: Failed to set SM3 PDO count", index_);
+        }
+        TETHER_LOGI(TAG, "Slave %u: Assigned TxPDO 0x%04X to SM3 (0x1C13)", index_, config.txpdo_index);
+    }
+
+    if (!sdo_ok) {
+        TETHER_LOGW(TAG, "Slave %u: PDO assignment had SDO failures; continuing anyway", index_);
+    }
+
+    return SlaveError::Ok;
+}
+
+// ============================================================================
 // NonExistingSlave
 // ============================================================================
 
@@ -614,6 +738,12 @@ SlaveError NonExistingSlave::configurePDOSyncManagers(uint16_t, uint16_t, uint8_
 }
 void NonExistingSlave::assumePDOAlreadyConfigured() {
     logCritical("assumePDOAlreadyConfigured");
+}
+SlaveError NonExistingSlave::registerPDOsFromSII(SIIPDOConfig&) {
+    logCritical("registerPDOsFromSII"); return SlaveError::SlaveNotFound;
+}
+SlaveError NonExistingSlave::assignPDOs(const SIIPDOConfig&) {
+    logCritical("assignPDOs"); return SlaveError::SlaveNotFound;
 }
 SlaveError NonExistingSlave::transitionTo(SlaveState) {
     logCritical("transitionTo"); return SlaveError::SlaveNotFound;

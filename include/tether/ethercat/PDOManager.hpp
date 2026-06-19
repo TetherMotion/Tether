@@ -47,7 +47,7 @@ namespace PDO {
 // ============================================================================
 
 constexpr size_t kMaxPDOEntries = 32;
-constexpr size_t kMaxPDOSize    = 256;
+constexpr size_t kMaxPDOSize    = 1024;
 constexpr size_t kMaxPDOSlaves  = 16;
 
 // ============================================================================
@@ -166,6 +166,7 @@ public:
     const PDOEntry* get_entry(size_t index) const;
     PDOEntry*       get_entry_mut(size_t index);
     void            clear();
+    void            remove_entries_for_slave(uint16_t slave_index);
 
     size_t total_rxpdo_bytes() const;
     size_t total_txpdo_bytes() const;

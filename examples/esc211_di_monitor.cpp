@@ -352,6 +352,23 @@ int main(int argc, char** argv) {
 
     // readIdentityObject(sl);
 
+    EtherCAT::Slave::SIIPDOConfig pdo_cfg;
+    auto reg_err = sl.registerPDOsFromSII(pdo_cfg);
+    if (reg_err != EtherCAT::SlaveError::Ok) {
+        TETHER_LOGE(TAG, "PDO auto-config from SII failed: %s", EtherCAT::slaveErrorToString(reg_err));
+        master.stop();
+        Tether::Examples::shutdownHostEthernet(session);
+        return 7;
+    }
+
+    auto assign_err = sl.assignPDOs(pdo_cfg);
+    if (assign_err != EtherCAT::SlaveError::Ok) {
+        TETHER_LOGE(TAG, "PDO assignment failed: %s", EtherCAT::slaveErrorToString(assign_err));
+        master.stop();
+        Tether::Examples::shutdownHostEthernet(session);
+        return 7;
+    }
+
     auto pdo_err = sl.configurePDOSyncManagers();
     if (pdo_err != EtherCAT::SlaveError::Ok) {
         TETHER_LOGE(TAG, "PDO sync-manager config failed: %s", EtherCAT::slaveErrorToString(pdo_err));
