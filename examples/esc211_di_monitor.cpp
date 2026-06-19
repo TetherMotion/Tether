@@ -370,14 +370,6 @@ int main(int argc, char** argv) {
         return 7;
     }
 
-    auto assign_err = sl.assignPDOs(pdo_cfg);
-    if (assign_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "PDO assignment failed: %s", EtherCAT::slaveErrorToString(assign_err));
-        master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
-        return 7;
-    }
-
     auto pdo_err = sl.configurePDOSyncManagers();
     if (pdo_err != EtherCAT::SlaveError::Ok) {
         TETHER_LOGE(TAG, "PDO sync-manager config failed: %s", EtherCAT::slaveErrorToString(pdo_err));
@@ -395,6 +387,14 @@ int main(int argc, char** argv) {
     }
 
     TETHER_LOGI(TAG, "Slave %d in SAFE-OP", slave_idx);
+
+    auto assign_err = sl.assignPDOs(pdo_cfg);
+    if (assign_err != EtherCAT::SlaveError::Ok) {
+        TETHER_LOGE(TAG, "PDO assignment failed: %s", EtherCAT::slaveErrorToString(assign_err));
+        master.stop();
+        Tether::Examples::shutdownHostEthernet(session);
+        return 7;
+    }
 
     master.stop();
     Tether::Examples::shutdownHostEthernet(session);
