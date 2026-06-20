@@ -341,16 +341,39 @@ struct Transaction {
 // Mailbox configuration event
 // ============================================================================
 
-struct MailboxConfigEvent {
-    uint64_t timestampNs;
-    uint16_t adp;       // slave position
-    uint16_t addr;      // register address (ado)
-    bool isWrite;
-    EtherCAT::Command cmd;
-    std::vector<uint8_t> data;
-    uint16_t wkc;
-    std::string description;
+// SM register layout: 8 bytes per Sync Manager
+//   offset 0-1: StartAddr (uint16_t LE)
+//   offset 2-3: Length     (uint16_t LE)
+//   offset 4:   Control    (uint8_t)
+//   offset 5:   Status     (uint8_t)
+//   offset 6:   Activate   (uint8_t)
+//   offset 7:   PDI Control (uint8_t)
+
+struct SmRegInfo {
+    uint8_t smIndex;
+    uint8_t byteOffset;  // 0-7 within the 8-byte SM block
+    const char* name;
+    bool isTwoByte;
 };
+
+std::optional<SmRegInfo> smRegInfo(uint16_t addr) {
+    if (addr < 0x0800 || addr > 0x081F) return std::nullopt;
+    uint16_t rel = addr - 0x0800;
+    uint8_t sm = rel / 8;
+    uint8_t off = rel % 8;
+    if (sm > 3) return std::nullopt;
+    switch (off) {
+        case 0: return SmRegInfo{sm, 0, "StartAddr", true};
+        case 1: return SmRegInfo{sm, 1, "StartAddr+1", false};  // high byte — rarely accessed alone
+        case 2: return SmRegInfo{sm, 2, "Length", true};
+        case 3: return SmRegInfo{sm, 3, "Length+1", false};
+        case 4: return SmRegInfo{sm, 4, "Control", false};
+        case 5: return SmRegInfo{sm, 5, "Status", false};
+        case 6: return SmRegInfo{sm, 6, "Activate", false};
+        case 7: return SmRegInfo{sm, 7, "PDIControl", false};
+        default: return std::nullopt;
+    }
+}
 
 bool isSmRegister(uint16_t ado) {
     return ado >= 0x0800 && ado <= 0x081F;
@@ -365,14 +388,9 @@ bool isMailboxArea(uint16_t ado) {
 }
 
 std::string smRegisterName(uint16_t addr) {
-    if (addr < 0x0800 || addr > 0x081F) return hex16(addr);
-    uint8_t sm = (addr - 0x0800) / 8;
-    uint8_t off = (addr - 0x0800) % 8;
-    const char* fields[] = {"StartAddr", "Length", "Control", "Status", "Activate", "PDIControl"};
-    if (sm < 4 && off < 6) {
-        return "SM" + std::to_string(sm) + "." + fields[off] + " " + hex16(addr);
-    }
-    return "SM? " + hex16(addr);
+    auto info = smRegInfo(addr);
+    if (!info) return hex16(addr);
+    return "SM" + std::to_string(info->smIndex) + "." + info->name + " " + hex16(addr);
 }
 
 std::string alRegisterName(uint16_t addr) {
@@ -382,6 +400,127 @@ std::string alRegisterName(uint16_t addr) {
         case 0x0134: return "AL_STATUS_CODE " + hex16(addr);
         default: return "AL? " + hex16(addr);
     }
+}
+
+// --- Register value interpretation ---
+
+std::string interpretSmControl(uint8_t ctrl) {
+    std::string s;
+    uint8_t mode = ctrl & 0x03;
+    switch (mode) {
+        case 0x00: s += "Buffered"; break;
+        case 0x02: s += "Mailbox"; break;
+        case 0x03: s += "3PDO"; break;
+        default: s += "Mode?"; break;
+    }
+    if (ctrl & 0x04) s += ", Write";
+    else             s += ", Read";
+    if (ctrl & 0x10) s += ", IRQ_ECAT";
+    if (ctrl & 0x20) s += ", IRQ_PDI";
+    if (ctrl & 0x40) s += ", Watchdog";
+    return s;
+}
+
+std::string interpretSmStatus(uint8_t status) {
+    std::string s;
+    if (status & 0x01) s += "IntWrite ";
+    if (status & 0x02) s += "IntRead ";
+    if (status & 0x08) s += "MailboxFull ";
+    uint8_t bufState = (status >> 4) & 0x03;
+    s += "buf=" + std::to_string(bufState);
+    return s;
+}
+
+std::string interpretSmActivate(uint8_t act) {
+    if (act & 0x01) return "enabled";
+    return "disabled";
+}
+
+std::string interpretSlaveState(uint8_t state) {
+    switch (state & 0x0F) {
+        case 0x01: return "INIT";
+        case 0x02: return "PRE-OP";
+        case 0x03: return "BOOT";
+        case 0x04: return "SAFE-OP";
+        case 0x08: return "OP";
+        default: return "UNKNOWN(0x" + hexBytes(&state, 1) + ")";
+    }
+}
+
+std::string interpretRegisterValue(uint16_t addr, const uint8_t* data, size_t len) {
+    if (len == 0) return "(empty)";
+
+    // SM registers
+    auto smi = smRegInfo(addr);
+    if (smi) {
+        std::string raw;
+        if (smi->isTwoByte && len >= 2) {
+            uint16_t val;
+            std::memcpy(&val, data, 2);
+            raw = hex16(val);
+        } else {
+            raw = hexBytes(data, len);
+        }
+
+        std::string desc;
+        if (smi->byteOffset == 0 && len >= 2) {
+            uint16_t val;
+            std::memcpy(&val, data, 2);
+            desc = "addr=" + hex16(val);
+        } else if (smi->byteOffset == 2 && len >= 2) {
+            uint16_t val;
+            std::memcpy(&val, data, 2);
+            desc = std::to_string(val) + " bytes";
+        } else if (smi->byteOffset == 4) {
+            desc = interpretSmControl(data[0]);
+        } else if (smi->byteOffset == 5) {
+            desc = interpretSmStatus(data[0]);
+        } else if (smi->byteOffset == 6) {
+            desc = interpretSmActivate(data[0]);
+        } else {
+            desc = raw;
+        }
+        return raw + " (" + desc + ")";
+    }
+
+    // AL registers
+    switch (addr) {
+        case 0x0120: {  // AL_CONTROL
+            if (len >= 1) {
+                uint8_t state = data[0] & 0x0F;
+                uint16_t raw16 = 0;
+                if (len >= 2) std::memcpy(&raw16, data, 2);
+                return hex16(raw16) + " (" + interpretSlaveState(state) + ")";
+            }
+            break;
+        }
+        case 0x0130: {  // AL_STATUS
+            if (len >= 1) {
+                uint8_t state = data[0] & 0x0F;
+                bool error = (data[0] & 0x10) != 0;
+                uint16_t raw16 = 0;
+                if (len >= 2) std::memcpy(&raw16, data, 2);
+                std::string desc = interpretSlaveState(state);
+                if (error) desc += ", ERROR";
+                return hex16(raw16) + " (" + desc + ")";
+            }
+            break;
+        }
+        case 0x0134: {  // AL_STATUS_CODE
+            if (len >= 2) {
+                uint16_t code;
+                std::memcpy(&code, data, 2);
+                return hex16(code) + " (" + EtherCAT::alcode::alStatusCodeToString(code) + ")";
+            }
+            break;
+        }
+    }
+
+    // Generic fallback
+    if (len == 1) return hexBytes(data, len);
+    if (len == 2) { uint16_t v; std::memcpy(&v, data, 2); return hex16(v); }
+    if (len == 4) { uint32_t v; std::memcpy(&v, data, 4); return hex32(v); }
+    return hexBytes(data, len, 64);
 }
 
 // ============================================================================
@@ -573,90 +712,121 @@ void displayEthercatTransactions(const std::vector<PCP::InterpretedFrame>& frame
 }
 
 // ============================================================================
-// Selection: Mailbox Configuration
+// Selection: Mailbox Configuration (transaction-correlated)
 // ============================================================================
+
+struct MbxConfigTxn {
+    uint8_t idx;
+    uint16_t adp;
+    uint16_t addr;
+    bool isWrite;
+    EtherCAT::Command cmd;
+    std::vector<uint8_t> reqData;
+    std::vector<uint8_t> respData;
+    uint16_t wkc;
+    bool hasResponse;
+    std::string description;
+};
 
 void displayMailboxConfiguration(const std::vector<PCP::InterpretedFrame>& frames, const Filters& f) {
     std::cout << Utf8Formatter::titledBox("Mailbox Configuration");
 
-    std::vector<MailboxConfigEvent> events;
-    uint64_t frameIdx = 0;
+    // Correlate request/response by idx — first occurrence is request,
+    // second occurrence is response. This works regardless of frame
+    // direction metadata, which may be Unknown in some captures.
+    std::map<uint8_t, MbxConfigTxn> pending;
+    std::vector<MbxConfigTxn> completed;
 
     for (const auto& frame : frames) {
-        ++frameIdx;
         if (!frame.isEtherCAT) continue;
 
         for (const auto& dg : frame.datagrams) {
             if (!datagramPassesFilters(dg, f)) continue;
 
-            if (isAutoPositionCommand(dg.cmd) || dg.cmd == EtherCAT::Command::FPRD ||
-                dg.cmd == EtherCAT::Command::FPWR) {
-                if (isSmRegister(dg.ado) || isAlRegister(dg.ado)) {
-                    MailboxConfigEvent ev;
-                    ev.timestampNs = frame.timestampNs;
-                    ev.adp = dg.adp;
-                    ev.addr = dg.ado;
-                    ev.isWrite = EtherCAT::isWriteCommand(dg.cmd);
-                    ev.cmd = dg.cmd;
-                    ev.data = dg.data;
-                    ev.wkc = dg.wkc;
+            if (!isAutoPositionCommand(dg.cmd) && dg.cmd != EtherCAT::Command::FPRD &&
+                dg.cmd != EtherCAT::Command::FPWR)
+                continue;
+            if (!isSmRegister(dg.ado) && !isAlRegister(dg.ado))
+                continue;
 
-                    if (isSmRegister(dg.ado)) {
-                        ev.description = smRegisterName(dg.ado);
-                    } else {
-                        ev.description = alRegisterName(dg.ado);
-                    }
-
-                    if (f.errorsOnly && dg.wkc != 0) continue;
-                    events.push_back(ev);
+            auto it = pending.find(dg.idx);
+            if (it == pending.end()) {
+                // First occurrence → request
+                MbxConfigTxn& txn = pending[dg.idx];
+                txn.idx = dg.idx;
+                txn.adp = dg.adp;
+                txn.addr = dg.ado;
+                txn.isWrite = EtherCAT::isWriteCommand(dg.cmd);
+                txn.cmd = dg.cmd;
+                txn.reqData = dg.data;
+                txn.wkc = 0;
+                txn.hasResponse = false;
+                if (isSmRegister(dg.ado))
+                    txn.description = smRegisterName(dg.ado);
+                else
+                    txn.description = alRegisterName(dg.ado);
+            } else {
+                // Second occurrence → response
+                MbxConfigTxn& txn = it->second;
+                txn.hasResponse = true;
+                txn.respData = dg.data;
+                txn.wkc = dg.wkc;
+                if (f.errorsOnly && dg.wkc != 0) {
+                    pending.erase(it);
+                    continue;
                 }
+                completed.push_back(txn);
+                pending.erase(it);
             }
         }
     }
 
+    // Display completed transactions
     uint64_t shown = 0;
-    for (const auto& ev : events) {
+    for (const auto& txn : completed) {
         if (f.maxPackets > 0 && shown >= f.maxPackets) break;
 
-        std::cout << Utf8Formatter::bullet << " slave=" << ev.adp
-                  << "  " << (ev.isWrite ? "WR" : "RD")
-                  << "  " << ev.description;
+        std::cout << Utf8Formatter::bullet << " slave=" << txn.adp
+                  << "  " << (txn.isWrite ? "WR" : "RD")
+                  << "  " << txn.description;
 
-        if (ev.isWrite && !ev.data.empty()) {
-            if (ev.data.size() == 2) {
-                uint16_t val;
-                std::memcpy(&val, ev.data.data(), 2);
-                std::cout << "  value=" << hex16(val);
-            } else if (ev.data.size() == 4) {
-                uint32_t val;
-                std::memcpy(&val, ev.data.data(), 4);
-                std::cout << "  value=" << hex32(val);
-            } else if (!ev.data.empty()) {
-                std::cout << "  data=" << hexBytes(ev.data.data(), ev.data.size(), f.maxData);
-            }
-        } else if (!ev.isWrite && !ev.data.empty()) {
-            if (ev.data.size() == 2) {
-                uint16_t val;
-                std::memcpy(&val, ev.data.data(), 2);
-                std::cout << "  " << Utf8Formatter::arrow << " " << hex16(val);
-            } else if (ev.data.size() == 4) {
-                uint32_t val;
-                std::memcpy(&val, ev.data.data(), 4);
-                std::cout << "  " << Utf8Formatter::arrow << " " << hex32(val);
-            } else {
-                std::cout << "  " << Utf8Formatter::arrow << " " << hexBytes(ev.data.data(), ev.data.size(), f.maxData);
-            }
+        // Show value with interpretation
+        const std::vector<uint8_t>& valData = txn.isWrite ? txn.reqData : txn.respData;
+        if (!valData.empty()) {
+            std::cout << "  " << Utf8Formatter::arrow << " "
+                      << interpretRegisterValue(txn.addr, valData.data(), valData.size());
         }
 
-        std::cout << "  wkc=" << ev.wkc;
-        if (ev.wkc == 0) std::cout << "  " << Utf8Formatter::cross;
-        else std::cout << "  " << Utf8Formatter::check;
+        // WKC and status
+        if (txn.hasResponse) {
+            std::cout << "  wkc=" << txn.wkc;
+            if (txn.wkc == 0) std::cout << "  " << Utf8Formatter::cross;
+            else std::cout << "  " << Utf8Formatter::check;
+        } else {
+            std::cout << "  (no response)  " << Utf8Formatter::cross;
+        }
 
         std::cout << "\n";
         ++shown;
     }
 
-    std::cout << "\n" << Utf8Formatter::diamond << " Config events: " << shown << "\n";
+    // Show pending (no response)
+    for (const auto& [idx, txn] : pending) {
+        if (f.maxPackets > 0 && shown >= f.maxPackets) break;
+        if (f.errorsOnly) {
+            std::cout << Utf8Formatter::bullet << " slave=" << txn.adp
+                      << "  " << (txn.isWrite ? "WR" : "RD")
+                      << "  " << txn.description;
+            if (!txn.reqData.empty())
+                std::cout << "  " << Utf8Formatter::arrow << " "
+                          << interpretRegisterValue(txn.addr, txn.reqData.data(), txn.reqData.size());
+            std::cout << "  (no response)  " << Utf8Formatter::cross << "\n";
+            ++shown;
+        }
+    }
+
+    std::cout << "\n" << Utf8Formatter::diamond << " Config transactions: " << shown
+              << " | Pending: " << pending.size() << "\n";
 }
 
 // ============================================================================
