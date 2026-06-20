@@ -8,7 +8,7 @@
  *   ./interpret_pcapng capture.pcapng --select raw --verbose --max-data 256
  *   ./interpret_pcapng capture.pcapng --select statistics
  *   ./interpret_pcapng capture.pcapng --select pdo --pdo-addr 0x00000000 --slave 0
- *   ./interpret_pcapng capture.pcapng --select mailbox-configuration
+ *   ./interpret_pcapng capture.pcapng --select mailbox
  *   ./interpret_pcapng capture.pcapng --select coe-transactions --coe-index 0x1018 --coe-sub 1
  *   ./interpret_pcapng capture.pcapng --select ethercat-transactions --errors-only
  */
@@ -90,7 +90,7 @@ public:
 enum class Selection {
     Raw,
     EthercatTransactions,
-    MailboxConfiguration,
+    Mailbox,
     CoeTransactions,
     Pdo,
     Statistics,
@@ -105,7 +105,7 @@ std::optional<Selection> parseSelection(const std::string& name) {
     }();
     if (lower == "raw") return Selection::Raw;
     if (lower == "ethercat-transactions") return Selection::EthercatTransactions;
-    if (lower == "mailbox-configuration") return Selection::MailboxConfiguration;
+    if (lower == "mailbox") return Selection::Mailbox;
     if (lower == "coe-transactions") return Selection::CoeTransactions;
     if (lower == "pdo") return Selection::Pdo;
     if (lower == "statistics") return Selection::Statistics;
@@ -205,7 +205,36 @@ bool isLogicalCommand(EtherCAT::Command cmd) {
            cmd == EtherCAT::Command::LRW;
 }
 
+bool isPhysicalCommand(EtherCAT::Command cmd) {
+    return cmd == EtherCAT::Command::APRD || cmd == EtherCAT::Command::APWR ||
+           cmd == EtherCAT::Command::APRW ||
+           cmd == EtherCAT::Command::FPRD || cmd == EtherCAT::Command::FPWR ||
+           cmd == EtherCAT::Command::FPRW;
+}
+
+const char* accessType(EtherCAT::Command cmd) {
+    if (isLogicalCommand(cmd)) return "LWR";
+    if (isPhysicalCommand(cmd)) return "PWR";
+    if (cmd == EtherCAT::Command::BRD || cmd == EtherCAT::Command::BWR) return "BWR";
+    return "OTH";
+}
+
 // Use EtherCAT::isReadCommand and EtherCAT::isWriteCommand directly
+
+std::string formatMs(uint64_t ns) {
+    double ms = static_cast<double>(ns) / 1e6;
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(3) << ms;
+    return oss.str();
+}
+
+uint64_t g_baseTs = 0;
+
+void setBaseTimestamp(uint64_t ts) { g_baseTs = ts; }
+
+std::string tsRelMs(uint64_t ns) {
+    return formatMs(ns - g_baseTs);
+}
 
 // ============================================================================
 // Minimal CoE/mailbox wire structures for parsing
@@ -665,7 +694,8 @@ void displayEthercatTransactions(const std::vector<PCP::InterpretedFrame>& frame
     for (const auto& txn : completed) {
         if (f.maxPackets > 0 && shown >= f.maxPackets) break;
 
-        std::cout << Utf8Formatter::bullet << " idx=" << static_cast<int>(txn.idx)
+        std::cout << Utf8Formatter::bullet << " " << tsRelMs(txn.reqTs) << "ms"
+                  << "  idx=" << static_cast<int>(txn.idx)
                   << "  " << EtherCAT::commandToString(txn.cmd);
 
         if (isAutoPositionCommand(txn.cmd)) {
@@ -701,7 +731,8 @@ void displayEthercatTransactions(const std::vector<PCP::InterpretedFrame>& frame
     for (const auto& [idx, txn] : pending) {
         if (f.maxPackets > 0 && shown >= f.maxPackets) break;
         if (f.errorsOnly && !txn.isError()) continue;
-        std::cout << Utf8Formatter::bullet << " idx=" << static_cast<int>(idx)
+        std::cout << Utf8Formatter::bullet << " " << tsRelMs(txn.reqTs) << "ms"
+                  << "  idx=" << static_cast<int>(idx)
                   << "  " << EtherCAT::commandToString(txn.cmd)
                   << "  (pending, no response)\n";
         ++shown;
@@ -725,11 +756,13 @@ struct MbxConfigTxn {
     std::vector<uint8_t> respData;
     uint16_t wkc;
     bool hasResponse;
+    uint64_t reqTs;
+    uint64_t respTs;
     std::string description;
 };
 
-void displayMailboxConfiguration(const std::vector<PCP::InterpretedFrame>& frames, const Filters& f) {
-    std::cout << Utf8Formatter::titledBox("Mailbox Configuration");
+void displayMailbox(const std::vector<PCP::InterpretedFrame>& frames, const Filters& f) {
+    std::cout << Utf8Formatter::titledBox("Mailbox");
 
     // Correlate request/response by idx — first occurrence is request,
     // second occurrence is response. This works regardless of frame
@@ -746,7 +779,7 @@ void displayMailboxConfiguration(const std::vector<PCP::InterpretedFrame>& frame
             if (!isAutoPositionCommand(dg.cmd) && dg.cmd != EtherCAT::Command::FPRD &&
                 dg.cmd != EtherCAT::Command::FPWR)
                 continue;
-            if (!isSmRegister(dg.ado) && !isAlRegister(dg.ado))
+            if (!isSmRegister(dg.ado) && !isAlRegister(dg.ado) && !isMailboxArea(dg.ado))
                 continue;
 
             auto it = pending.find(dg.idx);
@@ -761,16 +794,21 @@ void displayMailboxConfiguration(const std::vector<PCP::InterpretedFrame>& frame
                 txn.reqData = dg.data;
                 txn.wkc = 0;
                 txn.hasResponse = false;
+                txn.reqTs = frame.timestampNs;
+                txn.respTs = 0;
                 if (isSmRegister(dg.ado))
                     txn.description = smRegisterName(dg.ado);
-                else
+                else if (isAlRegister(dg.ado))
                     txn.description = alRegisterName(dg.ado);
+                else
+                    txn.description = "MbxData " + hex16(dg.ado);
             } else {
                 // Second occurrence → response
                 MbxConfigTxn& txn = it->second;
                 txn.hasResponse = true;
                 txn.respData = dg.data;
                 txn.wkc = dg.wkc;
+                txn.respTs = frame.timestampNs;
                 if (f.errorsOnly && dg.wkc != 0) {
                     pending.erase(it);
                     continue;
@@ -786,8 +824,10 @@ void displayMailboxConfiguration(const std::vector<PCP::InterpretedFrame>& frame
     for (const auto& txn : completed) {
         if (f.maxPackets > 0 && shown >= f.maxPackets) break;
 
-        std::cout << Utf8Formatter::bullet << " slave=" << txn.adp
+        std::cout << Utf8Formatter::bullet << " " << tsRelMs(txn.reqTs) << "ms"
+                  << "  slave=" << txn.adp
                   << "  " << (txn.isWrite ? "WR" : "RD")
+                  << "  [" << accessType(txn.cmd) << "]"
                   << "  " << txn.description;
 
         // Show value with interpretation
@@ -814,8 +854,10 @@ void displayMailboxConfiguration(const std::vector<PCP::InterpretedFrame>& frame
     for (const auto& [idx, txn] : pending) {
         if (f.maxPackets > 0 && shown >= f.maxPackets) break;
         if (f.errorsOnly) {
-            std::cout << Utf8Formatter::bullet << " slave=" << txn.adp
+            std::cout << Utf8Formatter::bullet << " " << tsRelMs(txn.reqTs) << "ms"
+                      << "  slave=" << txn.adp
                       << "  " << (txn.isWrite ? "WR" : "RD")
+                      << "  [" << accessType(txn.cmd) << "]"
                       << "  " << txn.description;
             if (!txn.reqData.empty())
                 std::cout << "  " << Utf8Formatter::arrow << " "
@@ -870,7 +912,8 @@ void displayCoeTransactions(const std::vector<PCP::InterpretedFrame>& frames, co
                 if (it != pending.end()) {
                     auto& req = it->second;
 
-                    std::cout << Utf8Formatter::bullet << " slave=" << dg.adp;
+                    std::cout << Utf8Formatter::bullet << " " << tsRelMs(req.timestampNs) << "ms"
+                              << "  slave=" << dg.adp;
 
                     if (req.isUpload) {
                         std::cout << "  SDO Upload  index=" << hex16(req.odIndex)
@@ -901,7 +944,8 @@ void displayCoeTransactions(const std::vector<PCP::InterpretedFrame>& frames, co
                     pending.erase(it);
                 } else {
                     // Standalone response
-                    std::cout << Utf8Formatter::bullet << " slave=" << dg.adp
+                    std::cout << Utf8Formatter::bullet << " " << tsRelMs(coe.timestampNs) << "ms"
+                              << "  slave=" << dg.adp
                               << "  SDO Response  index=" << hex16(coe.odIndex)
                               << ":" << static_cast<int>(coe.odSub);
                     if (coe.isAbort) {
@@ -922,13 +966,15 @@ void displayCoeTransactions(const std::vector<PCP::InterpretedFrame>& frames, co
     for (const auto& [key, req] : pending) {
         if (f.maxPackets > 0 && shown >= f.maxPackets) break;
         if (f.errorsOnly) {
-            std::cout << Utf8Formatter::bullet << " slave=" << req.slaveAdp
+            std::cout << Utf8Formatter::bullet << " " << tsRelMs(req.timestampNs) << "ms"
+                      << "  slave=" << req.slaveAdp
                       << "  SDO  index=" << hex16(req.odIndex)
                       << ":" << static_cast<int>(req.odSub)
                       << "  (timeout, no response)  " << Utf8Formatter::cross << "\n";
             ++shown;
         } else {
-            std::cout << Utf8Formatter::bullet << " slave=" << req.slaveAdp
+            std::cout << Utf8Formatter::bullet << " " << tsRelMs(req.timestampNs) << "ms"
+                      << "  slave=" << req.slaveAdp
                       << "  SDO  index=" << hex16(req.odIndex)
                       << ":" << static_cast<int>(req.odSub)
                       << "  (pending)\n";
@@ -966,8 +1012,8 @@ void displayPdo(const std::vector<PCP::InterpretedFrame>& frames, const Filters&
         if (!hasPdo) continue;
         if (f.maxPackets > 0 && shown >= f.maxPackets) break;
 
-        std::cout << Utf8Formatter::bullet << " Frame " << frameIdx
-                  << "  ts=" << frame.timestampNs << "ns";
+        std::cout << Utf8Formatter::bullet << " " << tsRelMs(frame.timestampNs) << "ms"
+                  << "  Frame " << frameIdx;
         if (frame.direction == PCP::PacketDirection::Outbound) std::cout << "  [TX]";
         else if (frame.direction == PCP::PacketDirection::Inbound) std::cout << "  [RX]";
         std::cout << "\n";
@@ -1133,7 +1179,7 @@ int main(int argc, char** argv) {
     // Selections
     program.add_argument("--select")
         .default_value(std::string{"raw"})
-        .help("Selection(s): raw, ethercat-transactions, mailbox-configuration, "
+        .help("Selection(s): raw, ethercat-transactions, mailbox, "
               "coe-transactions, pdo, statistics (comma-separated or repeat)");
 
     // Display filters
@@ -1238,7 +1284,7 @@ int main(int argc, char** argv) {
                 selections.insert(*sel);
             } else {
                 std::cerr << "Unknown selection: " << token << "\n";
-                std::cerr << "Available: raw, ethercat-transactions, mailbox-configuration, "
+                std::cerr << "Available: raw, ethercat-transactions, mailbox, "
                           << "coe-transactions, pdo, statistics\n";
                 return 1;
             }
@@ -1319,6 +1365,9 @@ int main(int argc, char** argv) {
         return 3;
     }
 
+    // Set base timestamp for relative time output
+    setBaseTimestamp(allFrames.front().timestampNs);
+
     // JSON mode: output raw JSON for each frame
     if (json) {
         for (const auto& frame : allFrames) {
@@ -1337,8 +1386,8 @@ int main(int argc, char** argv) {
             case Selection::EthercatTransactions:
                 displayEthercatTransactions(allFrames, filters);
                 break;
-            case Selection::MailboxConfiguration:
-                displayMailboxConfiguration(allFrames, filters);
+            case Selection::Mailbox:
+                displayMailbox(allFrames, filters);
                 break;
             case Selection::CoeTransactions:
                 displayCoeTransactions(allFrames, filters);
