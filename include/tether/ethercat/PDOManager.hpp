@@ -24,10 +24,17 @@
 #include <cstring>
 #include <atomic>
 #include <functional>
+#include <bit>
+#include <memory>
+#include <vector>
 
 #include "tether/platform/EspCompat.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/Types.hpp"
+#include "tether/ethercat/SMRegisters.hpp"
+#include "tether/ethercat/PDOModes.hpp"
+
+#include <atomic_queue/atomic_queue.h>
 
 #ifdef ESP_PLATFORM
 #include "esp_eth_driver.h"
@@ -69,37 +76,41 @@ enum SyncManagerControl : uint8_t {
     SM_CTRL_MODE_3PDO     = 0x03,
     SM_CTRL_DIR_READ      = 0x00,
     SM_CTRL_DIR_WRITE     = 0x04,
-    SM_CTRL_IRQ_ECAT      = 0x10,
-    SM_CTRL_IRQ_PDI       = 0x20,
-    SM_CTRL_WATCHDOG      = 0x40,
-    SM_CTRL_REPEAT_REQ    = 0x02,
+    SM_CTRL_IRQ_ECAT      = 0x08,
+    SM_CTRL_IRQ_PDI       = 0x10,
+    SM_CTRL_WATCHDOG      = 0x20,
+    SM_CTRL_REPEAT_REQ    = 0x40,
 };
 
 struct SyncManagerConfig {
-    uint16_t        phys_start_addr;
-    uint16_t        length;
-    uint8_t         control;
-    bool            enable;
-    SyncManagerType type;
+    uint16_t                      phys_start_addr;
+    uint16_t                      length;
+    EtherCAT::SyncManager::SMControlReg control;
+    bool                          enable;
+    SyncManagerType               type;
 
     static SyncManagerConfig mailbox_write(uint16_t addr, uint16_t len) {
         return { addr, len,
-                 static_cast<uint8_t>(SM_CTRL_MODE_MAILBOX | SM_CTRL_DIR_WRITE | SM_CTRL_IRQ_PDI),
+                 std::bit_cast<EtherCAT::SyncManager::SMControlReg>(
+                     static_cast<uint8_t>(SM_CTRL_MODE_MAILBOX | SM_CTRL_DIR_WRITE | SM_CTRL_WATCHDOG)),
                  true, SyncManagerType::MailboxWrite };
     }
     static SyncManagerConfig mailbox_read(uint16_t addr, uint16_t len) {
         return { addr, len,
-                 static_cast<uint8_t>(SM_CTRL_MODE_MAILBOX | SM_CTRL_DIR_READ | SM_CTRL_IRQ_PDI),
+                 std::bit_cast<EtherCAT::SyncManager::SMControlReg>(
+                     static_cast<uint8_t>(SM_CTRL_MODE_MAILBOX | SM_CTRL_DIR_READ | SM_CTRL_WATCHDOG)),
                  true, SyncManagerType::MailboxRead };
     }
     static SyncManagerConfig process_output(uint16_t addr, uint16_t len) {
         return { addr, len,
-                 static_cast<uint8_t>(SM_CTRL_MODE_BUFFERED | SM_CTRL_DIR_WRITE | SM_CTRL_IRQ_PDI | SM_CTRL_WATCHDOG),
+                 std::bit_cast<EtherCAT::SyncManager::SMControlReg>(
+                     static_cast<uint8_t>(SM_CTRL_MODE_BUFFERED | SM_CTRL_DIR_WRITE | SM_CTRL_REPEAT_REQ)),
                  true, SyncManagerType::ProcessOutput };
     }
     static SyncManagerConfig process_input(uint16_t addr, uint16_t len) {
         return { addr, len,
-                 static_cast<uint8_t>(SM_CTRL_MODE_BUFFERED | SM_CTRL_DIR_READ | SM_CTRL_IRQ_PDI),
+                 std::bit_cast<EtherCAT::SyncManager::SMControlReg>(
+                     static_cast<uint8_t>(SM_CTRL_MODE_BUFFERED | SM_CTRL_DIR_READ | SM_CTRL_REPEAT_REQ)),
                  true, SyncManagerType::ProcessInput };
     }
 };
@@ -289,6 +300,8 @@ public:
                                     const void* data, uint16_t datalen,
                                     bool roundtrip) = 0;
 
+    virtual size_t sendMultiDatagram(const MultiDatagramSpec* specs, size_t count) = 0;
+
     virtual bool waitForResponseIdx(uint8_t idx, unsigned int timeout_ms,
                                     RxDatagram& out) = 0;
 
@@ -354,6 +367,36 @@ public:
     bool sendRxPDO(size_t entry_index);
     bool receiveTxPDO(size_t entry_index);
     bool exchangeAll();
+
+    // ----- Split send/receive (Mode 1: direct, user-driven) -----
+    // sendAll() sends all RxPDO datagrams and returns immediately.
+    // receiveAll() waits for all TxPDO responses and copies data into buffers.
+    // exchangeAll() = sendAll() + receiveAll() (backward compat).
+    // For LRW mode, sendAll() does the full atomic exchange; receiveAll() is a no-op.
+    bool sendAll();
+    bool receiveAll();
+
+    // ----- Callback mode (Mode 3) -----
+    // Per-entry callbacks fire during sendAll()/receiveAll() on the calling thread.
+    // User must ensure callbacks are RT-safe if called from a realtime context.
+    void configureCallbackMode(const CallbackModeConfig& config = {});
+    void setTxSentCallback(size_t entry_index, PDOTxSentCallback callback);
+    void setRxReceivedCallback(size_t entry_index, PDORxReceivedCallback callback);
+    PDOMode getMode() const { return mode_; }
+
+    // ----- Queue mode (Mode 2) -----
+    // Audio-driver model: user pushes TX data and pulls RX data via lock-free queues.
+    // An internal RT loop calls queueCycle() each cycle.
+    void configureQueueMode(const QueueModeConfig& config = {});
+    bool enqueueTx(size_t entry_index, std::shared_ptr<PDOFrame> frame);
+    bool tryDequeueRx(size_t entry_index, std::shared_ptr<PDOFrame>& frame);
+    bool tryPollEvent(std::shared_ptr<PDOEvent>& event);
+    void setUnderrunCallback(UnderrunCallback callback);
+
+    // Called by the RT loop each cycle (Mode 2).
+    // Pops from TX queues, applies underrun policy, calls sendAll()+receiveAll(),
+    // pushes received data to RX queues and events to the event queue.
+    bool queueCycle();
 
     // ----- PDO Exchange modes -----
     bool exchangeLRW(uint16_t slave_count);
@@ -456,6 +499,40 @@ private:
     bool recvTxPDOConfigured(PDO::PDOEntry& entry);
     bool sendRxPDOBroadcast(const PDO::PDOEntry& entry, uint16_t expected_wkc);
     bool recvTxPDOBroadcast(PDO::PDOEntry& entry, uint16_t expected_wkc);
+
+    // Split send/receive internal state (used by sendAll/receiveAll)
+    struct SplitState {
+        bool send_phase_ok = true;
+        bool lrw_mode = false;  // true if last sendAll() used LRW (receiveAll is no-op)
+        std::vector<uint8_t> rx_confirmed_idxs;
+        std::vector<size_t>  rx_confirmed_entry_idxs;
+    };
+    SplitState split_state_;
+
+    // Mode state
+    PDOMode mode_ = PDOMode::Direct;
+
+    // Callback mode storage (Mode 3)
+    CallbackModeConfig callback_config_;
+    struct CallbackEntry {
+        PDOTxSentCallback tx_sent;
+        PDORxReceivedCallback rx_received;
+    };
+    std::vector<CallbackEntry> callbacks_;  // Indexed by PDO entry index
+
+    // Queue mode storage (Mode 2)
+    // Uses AtomicQueueB2 (runtime-size, state-based) for shared_ptr elements.
+    // Queues are heap-allocated via unique_ptr because AtomicQueueB2 is non-copyable
+    // and requires a size parameter at construction.
+    using FrameQueue = atomic_queue::AtomicQueueB2<std::shared_ptr<PDOFrame>>;
+    using EventQueue = atomic_queue::AtomicQueueB2<std::shared_ptr<PDOEvent>>;
+
+    QueueModeConfig queue_config_;
+    std::vector<std::unique_ptr<FrameQueue>> tx_queues_;   // Per-entry TX queues (user → RT)
+    std::vector<std::unique_ptr<FrameQueue>> rx_queues_;   // Per-entry RX queues (RT → user)
+    std::unique_ptr<EventQueue> event_queue_;              // Global event queue
+    std::vector<std::shared_ptr<PDOFrame>> last_tx_frames_; // For RepeatLastFrame underrun policy
+    UnderrunCallback underrun_callback_;
 };
 
 } // namespace EtherCAT

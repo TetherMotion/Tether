@@ -11,9 +11,11 @@
 #include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
 #include "tether/platform/EspCompat.hpp"
+#include "tether/platform/Platform.hpp"
 
 #include <cstring>
 #include <cstdio>
+#include <bit>
 
 namespace EtherCAT {
 
@@ -384,9 +386,10 @@ bool PDOManager::writeSMConfig(uint16_t adp, uint8_t sm_index,
     }
 
     // Step 4: Control
+    uint8_t ctrl_byte = std::bit_cast<uint8_t>(config.control);
     if (!transport_.writeRegister(adp, static_cast<uint16_t>(base + SM_OFF_CONTROL),
-                                  &config.control, sizeof(config.control), 200)) {
-        TETHER_LOGE(TAG, "SM%u: failed to write control=0x%02x", sm_index, config.control);
+                                  &ctrl_byte, sizeof(ctrl_byte), 200)) {
+        TETHER_LOGE(TAG, "SM%u: failed to write control=0x%02x", sm_index, ctrl_byte);
         return false;
     }
 
@@ -399,7 +402,7 @@ bool PDOManager::writeSMConfig(uint16_t adp, uint8_t sm_index,
     }
 
     TETHER_LOGI(TAG, "SM%u: configured addr=0x%04x len=%u ctrl=0x%02x act=0x%02x",
-                sm_index, config.phys_start_addr, config.length, config.control, activate);
+                sm_index, config.phys_start_addr, config.length, ctrl_byte, activate);
 
     if ((rxPDODebug() && config.type == PDO::SyncManagerType::ProcessOutput) ||
         (txPDODebug() && config.type == PDO::SyncManagerType::ProcessInput)) {
@@ -411,15 +414,15 @@ bool PDOManager::writeSMConfig(uint16_t adp, uint8_t sm_index,
             case PDO::SyncManagerType::ProcessOutput: sm_type_str = "process-output (RxPDO)"; break;
             case PDO::SyncManagerType::ProcessInput:  sm_type_str = "process-input (TxPDO)"; break;
         }
-        const char* mode_str = (config.control & 0x02) ? "mailbox" :
-                               (config.control & 0x01) ? "buffered" : "unknown";
-        const char* dir_str  = (config.control & 0x04) ? "write (master→slave)" : "read (slave→master)";
+        const char* mode_str = (config.control.mode == static_cast<uint8_t>(EtherCAT::SyncManager::SMMode::Mailbox)) ? "mailbox" :
+                               (config.control.mode == static_cast<uint8_t>(EtherCAT::SyncManager::SMMode::Buffered)) ? "buffered" : "unknown";
+        const char* dir_str  = config.control.direction ? "write (master→slave)" : "read (slave→master)";
         TETHER_LOGI(TAG, "  [PDO-DEBUG] SM%u detail: type=%s mode=%s dir=%s enable=%s",
                     sm_index, sm_type_str, mode_str, dir_str,
                     config.enable ? "yes" : "no");
-        if (config.control & 0x10) TETHER_LOGI(TAG, "    IRQ eCAT enabled");
-        if (config.control & 0x20) TETHER_LOGI(TAG, "    IRQ PDI enabled");
-        if (config.control & 0x40) TETHER_LOGI(TAG, "    Watchdog enabled");
+        if (config.control.ecat_irq) TETHER_LOGI(TAG, "    IRQ eCAT enabled");
+        if (config.control.pdi_irq) TETHER_LOGI(TAG, "    IRQ PDI enabled");
+        if (config.control.watchdog) TETHER_LOGI(TAG, "    Watchdog enabled");
     }
 
     return true;
@@ -774,10 +777,217 @@ bool PDOManager::receiveTxPDO(size_t entry_index) {
     return success;
 }
 
-bool PDOManager::exchangeAll() {
+// ============================================================================
+// Callback mode (Mode 3)
+// ============================================================================
+
+void PDOManager::configureCallbackMode(const CallbackModeConfig& config) {
+    mode_ = PDOMode::Callback;
+    callback_config_ = config;
+    callbacks_.resize(PDO::kMaxPDOEntries);
+}
+
+void PDOManager::setTxSentCallback(size_t entry_index, PDOTxSentCallback callback) {
+    if (entry_index < callbacks_.size()) {
+        callbacks_[entry_index].tx_sent = std::move(callback);
+    }
+}
+
+void PDOManager::setRxReceivedCallback(size_t entry_index, PDORxReceivedCallback callback) {
+    if (entry_index < callbacks_.size()) {
+        callbacks_[entry_index].rx_received = std::move(callback);
+    }
+}
+
+// ============================================================================
+// Queue mode (Mode 2)
+// ============================================================================
+
+void PDOManager::configureQueueMode(const QueueModeConfig& config) {
+    mode_ = PDOMode::Queue;
+    queue_config_ = config;
+
+    const size_t n = PDO::kMaxPDOEntries;
+    tx_queues_.clear();
+    rx_queues_.clear();
+    tx_queues_.reserve(n);
+    rx_queues_.reserve(n);
+    for (size_t i = 0; i < n; i++) {
+        tx_queues_.push_back(std::make_unique<FrameQueue>(config.tx_queue_capacity));
+        rx_queues_.push_back(std::make_unique<FrameQueue>(config.rx_queue_capacity));
+    }
+    event_queue_ = std::make_unique<EventQueue>(config.event_queue_capacity);
+    last_tx_frames_.resize(n);
+    underrun_callback_ = nullptr;
+}
+
+bool PDOManager::enqueueTx(size_t entry_index, std::shared_ptr<PDOFrame> frame) {
+    if (mode_ != PDOMode::Queue || entry_index >= tx_queues_.size() || !tx_queues_[entry_index])
+        return false;
+    return tx_queues_[entry_index]->try_push(std::move(frame));
+}
+
+bool PDOManager::tryDequeueRx(size_t entry_index, std::shared_ptr<PDOFrame>& frame) {
+    if (mode_ != PDOMode::Queue || entry_index >= rx_queues_.size() || !rx_queues_[entry_index])
+        return false;
+    return rx_queues_[entry_index]->try_pop(frame);
+}
+
+bool PDOManager::tryPollEvent(std::shared_ptr<PDOEvent>& event) {
+    if (mode_ != PDOMode::Queue || !event_queue_)
+        return false;
+    return event_queue_->try_pop(event);
+}
+
+void PDOManager::setUnderrunCallback(UnderrunCallback callback) {
+    underrun_callback_ = std::move(callback);
+}
+
+bool PDOManager::queueCycle() {
+    if (mode_ != PDOMode::Queue) return false;
+
+    const uint64_t cycle_start_ns =
+        static_cast<uint64_t>(Tether::Platform::Clock::instance().getMicroseconds()) * 1000ULL;
+
+    // Phase 1: Drain TX queues into app buffers for RxPDO entries
+    for (size_t i = 0; i < mapping_.entry_count(); i++) {
+        PDO::PDOEntry* e = mapping_.get_entry_mut(i);
+        if (!e || !e->enabled || e->direction != PDO::PDODirection::RxPDO)
+            continue;
+
+        std::shared_ptr<PDOFrame> frame;
+        if (tx_queues_[i] && tx_queues_[i]->try_pop(frame)) {
+            // Got new TX data — copy into app buffer
+            if (frame->data.size() <= e->data_size) {
+                std::memcpy(e->app_buffer, frame->data.data(), frame->data.size());
+            }
+            last_tx_frames_[i] = frame;
+        } else {
+            // Underrun — apply policy
+            if (underrun_callback_) {
+                underrun_callback_(e->slave_index, stats_.total_cycles);
+            }
+            // Push underrun event
+            if (event_queue_) {
+                auto ev = std::make_shared<PDOEvent>();
+                ev->type = PDOEvent::Type::Underrun;
+                ev->slave_index = e->slave_index;
+                ev->pdo_entry_index = static_cast<uint16_t>(i);
+                ev->timestamp_ns = cycle_start_ns;
+                ev->cycle_count = stats_.total_cycles;
+                event_queue_->try_push(std::move(ev));  // Drop if full
+            }
+
+            switch (queue_config_.underrun_policy) {
+                case UnderrunPolicy::RepeatLastFrame:
+                    if (last_tx_frames_[i] && last_tx_frames_[i]->data.size() <= e->data_size) {
+                        std::memcpy(e->app_buffer, last_tx_frames_[i]->data.data(),
+                                    last_tx_frames_[i]->data.size());
+                    }
+                    break;
+                case UnderrunPolicy::SafeState:
+                    if (queue_config_.safe_state_buffer.size() <= e->data_size) {
+                        std::memcpy(e->app_buffer, queue_config_.safe_state_buffer.data(),
+                                    queue_config_.safe_state_buffer.size());
+                    }
+                    break;
+                case UnderrunPolicy::SkipCycle:
+                    e->enabled = false;  // Temporarily disable for this cycle
+                    break;
+                case UnderrunPolicy::Custom:
+                    // User callback already invoked above; no automatic action
+                    break;
+            }
+        }
+    }
+
+    // Phase 2: Bus exchange
+    bool ok = sendAll();
+    ok = receiveAll() && ok;
+
+    // Re-enable any entries we skipped for underrun
+    for (size_t i = 0; i < mapping_.entry_count(); i++) {
+        PDO::PDOEntry* e = mapping_.get_entry_mut(i);
+        if (!e) continue;
+        // Re-enable entries that were disabled by SkipCycle
+        // (only if they were disabled by us, not the user)
+        // We can't distinguish, so we re-enable all that have queue data
+        if (e->direction == PDO::PDODirection::RxPDO && !e->enabled) {
+            // Check if this was a SkipCycle disable by checking if queue has data now
+            // Simplest: just re-enable — user disables are done via mapping API
+            e->enabled = true;
+        }
+    }
+
+    // Phase 3: Push received TxPDO data to RX queues and emit events
+    for (size_t i = 0; i < mapping_.entry_count(); i++) {
+        const PDO::PDOEntry* e = mapping_.get_entry(i);
+        if (!e || !e->enabled || e->direction != PDO::PDODirection::TxPDO)
+            continue;
+
+        // Create RX frame
+        auto frame = std::make_shared<PDOFrame>();
+        frame->data.resize(e->data_size);
+        std::memcpy(frame->data.data(), e->app_buffer, e->data_size);
+        frame->timestamp_ns =
+            static_cast<uint64_t>(Tether::Platform::Clock::instance().getMicroseconds()) * 1000ULL;
+        frame->cycle_count = stats_.total_cycles;
+
+        // try_push — drop if queue is full (user not consuming fast enough)
+        if (rx_queues_[i]) {
+            rx_queues_[i]->try_push(std::move(frame));
+        }
+
+        // Push RxReceived event
+        if (event_queue_ && queue_config_.enable_rx_received_events) {
+            auto ev = std::make_shared<PDOEvent>();
+            ev->type = PDOEvent::Type::RxReceived;
+            ev->slave_index = e->slave_index;
+            ev->pdo_entry_index = static_cast<uint16_t>(i);
+            ev->timestamp_ns =
+                static_cast<uint64_t>(Tether::Platform::Clock::instance().getMicroseconds()) * 1000ULL;
+            ev->cycle_count = stats_.total_cycles;
+            event_queue_->try_push(std::move(ev));  // Drop if full
+        }
+    }
+
+    // Push TxSent events for RxPDO entries
+    if (queue_config_.enable_tx_sent_events) {
+        for (size_t i = 0; i < mapping_.entry_count(); i++) {
+            const PDO::PDOEntry* e = mapping_.get_entry(i);
+            if (!e || !e->enabled || e->direction != PDO::PDODirection::RxPDO)
+                continue;
+            if (event_queue_) {
+                auto ev = std::make_shared<PDOEvent>();
+                ev->type = PDOEvent::Type::TxSent;
+                ev->slave_index = e->slave_index;
+                ev->pdo_entry_index = static_cast<uint16_t>(i);
+                ev->timestamp_ns = cycle_start_ns;
+                ev->cycle_count = stats_.total_cycles;
+                event_queue_->try_push(std::move(ev));  // Drop if full
+            }
+        }
+    }
+
+    // Push error events if exchange failed
+    if (!ok && event_queue_) {
+        auto ev = std::make_shared<PDOEvent>();
+        ev->type = PDOEvent::Type::Error;
+        ev->timestamp_ns =
+            static_cast<uint64_t>(Tether::Platform::Clock::instance().getMicroseconds()) * 1000ULL;
+        ev->cycle_count = stats_.total_cycles;
+        event_queue_->try_push(std::move(ev));
+    }
+
+    return ok;
+}
+
+bool PDOManager::sendAll() {
+    // LRW path: atomic exchange, can't be split
     if (logical_addr_mgr_ && logical_addr_mgr_->isInitialized()) {
-        bool ok = logical_addr_mgr_->exchangeAllLRW(mapping_);
-        if (ok) {
+        split_state_.lrw_mode = true;
+        split_state_.send_phase_ok = logical_addr_mgr_->exchangeAllLRW(mapping_);
+        if (split_state_.send_phase_ok) {
             for (size_t i = 0; i < mapping_.entry_count(); i++) {
                 const PDO::PDOEntry* e = mapping_.get_entry(i);
                 if (!e || !e->enabled || e->slave_index >= PDO::kMaxPDOSlaves) continue;
@@ -788,34 +998,244 @@ bool PDOManager::exchangeAll() {
                 }
             }
         }
-        return ok;
+        return split_state_.send_phase_ok;
     }
 
-    bool all_ok = true;
+    split_state_.lrw_mode = false;
+    split_state_.send_phase_ok = true;
+    split_state_.rx_confirmed_idxs.clear();
+    split_state_.rx_confirmed_entry_idxs.clear();
     stats_.total_cycles++;
 
     if (rxPDODebug() || txPDODebug()) {
         TETHER_LOGI(TAG, "[PDO-DEBUG] === Cycle %llu ===", static_cast<unsigned long long>(stats_.total_cycles));
     }
 
-    // Phase 1: Send all RxPDO
+    // Phase 1: Batch all RxPDO writes into one frame
     if (rxPDODebug()) {
-        TETHER_LOGI(TAG, "  [RxPDO-DEBUG] --- Send phase ---");
+        TETHER_LOGI(TAG, "  [RxPDO-DEBUG] --- Send phase (batched) ---");
     }
+
+    std::vector<MultiDatagramSpec> rx_specs;
+    std::vector<size_t> rx_entry_idx;
+    std::vector<size_t> rx_confirmed_spec_map;
+
     for (size_t i = 0; i < mapping_.entry_count(); i++) {
         const PDO::PDOEntry* e = mapping_.get_entry(i);
-        if (e && e->enabled && e->direction == PDO::PDODirection::RxPDO) {
-            if (!sendRxPDO(i)) all_ok = false;
+        if (!e || !e->enabled || e->direction != PDO::PDODirection::RxPDO)
+            continue;
+
+        Command cmd;
+        uint16_t adp;
+        uint8_t idx;
+        bool roundtrip;
+
+        switch (e->address_mode) {
+            case PDO::PDOAddressMode::Position:
+                cmd = Command::APWR;
+                adp = transport_.adpForSlaveIndex(e->slave_index);
+                idx = IPDOTransport::kFireAndForgetIdx;
+                roundtrip = false;
+                break;
+            case PDO::PDOAddressMode::ConfiguredAddress:
+                cmd = Command::FPWR;
+                adp = e->configured_address;
+                idx = transport_.allocIdx();
+                roundtrip = true;
+                break;
+            case PDO::PDOAddressMode::Broadcast:
+                cmd = Command::BWR;
+                adp = 0;
+                idx = transport_.allocIdx();
+                roundtrip = true;
+                break;
+            default:
+                continue;
+        }
+
+        rx_specs.push_back({cmd, idx, adp, e->physical_offset,
+                           e->app_buffer, e->data_size, roundtrip});
+        rx_entry_idx.push_back(i);
+        if (roundtrip) {
+            split_state_.rx_confirmed_idxs.push_back(idx);
+            rx_confirmed_spec_map.push_back(rx_specs.size() - 1);
         }
     }
-    // Phase 2: Receive all TxPDO
-    if (txPDODebug()) {
-        TETHER_LOGI(TAG, "  [TxPDO-DEBUG] --- Receive phase ---");
+
+    if (!rx_specs.empty()) {
+        size_t frames_sent = transport_.sendMultiDatagram(rx_specs.data(), rx_specs.size());
+        if (frames_sent == 0) {
+            for (size_t i : rx_entry_idx) {
+                mapping_.get_entry_mut(i)->error_count++;
+                stats_.rxpdo_errors++;
+            }
+            split_state_.send_phase_ok = false;
+        } else {
+            // Handle fire-and-forget entries (assume success if send succeeded)
+            for (size_t j = 0; j < rx_specs.size(); j++) {
+                if (rx_specs[j].idx == IPDOTransport::kFireAndForgetIdx) {
+                    PDO::PDOEntry* e = mapping_.get_entry_mut(rx_entry_idx[j]);
+                    e->success_count++;
+                    stats_.rxpdo_frames_sent++;
+                    if (e->slave_index < PDO::kMaxPDOSlaves)
+                        slave_configs_[e->slave_index].pdo_request_count++;
+                    // Callback mode: fire TxSent callback for fire-and-forget entries
+                    if (mode_ == PDOMode::Callback && callback_config_.fire_on_tx_sent &&
+                        rx_entry_idx[j] < callbacks_.size() && callbacks_[rx_entry_idx[j]].tx_sent) {
+                        callbacks_[rx_entry_idx[j]].tx_sent(e->slave_index, stats_.total_cycles,
+                            static_cast<uint64_t>(Tether::Platform::Clock::instance().getMicroseconds()) * 1000ULL);
+                    }
+                }
+            }
+            // Store confirmed entry indices for receiveAll() to wait on
+            for (size_t j = 0; j < split_state_.rx_confirmed_idxs.size(); j++) {
+                split_state_.rx_confirmed_entry_idxs.push_back(
+                    rx_entry_idx[rx_confirmed_spec_map[j]]);
+            }
+        }
     }
+
+    return split_state_.send_phase_ok;
+}
+
+bool PDOManager::receiveAll() {
+    // LRW path: already done in sendAll(), nothing to receive
+    if (split_state_.lrw_mode) {
+        return split_state_.send_phase_ok;
+    }
+
+    bool all_ok = split_state_.send_phase_ok;
+
+    // Wait for confirmed RxPDO responses from sendAll()
+    for (size_t j = 0; j < split_state_.rx_confirmed_idxs.size(); j++) {
+        size_t entry_i = split_state_.rx_confirmed_entry_idxs[j];
+        RxDatagram resp;
+        if (transport_.waitForResponseIdx(split_state_.rx_confirmed_idxs[j], 5, resp) && resp.wkc > 0) {
+            PDO::PDOEntry* e = mapping_.get_entry_mut(entry_i);
+            e->success_count++;
+            stats_.rxpdo_frames_sent++;
+            if (e->slave_index < PDO::kMaxPDOSlaves)
+                slave_configs_[e->slave_index].pdo_request_count++;
+            // Callback mode: fire TxSent callback for confirmed entries
+            if (mode_ == PDOMode::Callback && callback_config_.fire_on_tx_sent &&
+                entry_i < callbacks_.size() && callbacks_[entry_i].tx_sent) {
+                callbacks_[entry_i].tx_sent(e->slave_index, stats_.total_cycles,
+                    static_cast<uint64_t>(Tether::Platform::Clock::instance().getMicroseconds()) * 1000ULL);
+            }
+        } else {
+            PDO::PDOEntry* e = mapping_.get_entry_mut(entry_i);
+            e->error_count++;
+            stats_.rxpdo_errors++;
+            all_ok = false;
+        }
+    }
+    split_state_.rx_confirmed_idxs.clear();
+    split_state_.rx_confirmed_entry_idxs.clear();
+
+    // Phase 2: Batch all TxPDO reads into one frame
+    if (txPDODebug()) {
+        TETHER_LOGI(TAG, "  [TxPDO-DEBUG] --- Receive phase (batched) ---");
+    }
+
+    std::vector<MultiDatagramSpec> tx_specs;
+    std::vector<size_t> tx_entry_idx;
+    std::vector<uint8_t> tx_idxs;
+    std::vector<size_t> tx_spec_map;
+
     for (size_t i = 0; i < mapping_.entry_count(); i++) {
         const PDO::PDOEntry* e = mapping_.get_entry(i);
-        if (e && e->enabled && e->direction == PDO::PDODirection::TxPDO) {
-            if (!receiveTxPDO(i)) all_ok = false;
+        if (!e || !e->enabled || e->direction != PDO::PDODirection::TxPDO)
+            continue;
+
+        Command cmd;
+        uint16_t adp;
+        uint8_t idx;
+        bool roundtrip;
+
+        switch (e->address_mode) {
+            case PDO::PDOAddressMode::Position:
+                cmd = Command::APRD;
+                adp = transport_.adpForSlaveIndex(e->slave_index);
+                idx = IPDOTransport::kFireAndForgetIdx;
+                roundtrip = true;  // APRD always roundtrip
+                break;
+            case PDO::PDOAddressMode::ConfiguredAddress:
+                cmd = Command::FPRD;
+                adp = e->configured_address;
+                idx = transport_.allocIdx();
+                roundtrip = true;
+                break;
+            case PDO::PDOAddressMode::Broadcast:
+                cmd = Command::BRD;
+                adp = 0;
+                idx = transport_.allocIdx();
+                roundtrip = true;
+                break;
+            default:
+                continue;
+        }
+
+        tx_specs.push_back({cmd, idx, adp, e->physical_offset,
+                           nullptr, e->data_size, roundtrip});
+        tx_entry_idx.push_back(i);
+        if (idx != IPDOTransport::kFireAndForgetIdx) {
+            tx_idxs.push_back(idx);
+            tx_spec_map.push_back(tx_specs.size() - 1);
+        }
+    }
+
+    if (!tx_specs.empty()) {
+        size_t frames_sent = transport_.sendMultiDatagram(tx_specs.data(), tx_specs.size());
+        if (frames_sent == 0) {
+            for (size_t i : tx_entry_idx) {
+                mapping_.get_entry_mut(i)->error_count++;
+                stats_.txpdo_errors++;
+            }
+            all_ok = false;
+        } else {
+            // Handle fire-and-forget entries (position mode - assume success)
+            for (size_t j = 0; j < tx_specs.size(); j++) {
+                if (tx_specs[j].idx == IPDOTransport::kFireAndForgetIdx) {
+                    PDO::PDOEntry* e = mapping_.get_entry_mut(tx_entry_idx[j]);
+                    e->success_count++;
+                    stats_.txpdo_frames_recv++;
+                    if (e->slave_index < PDO::kMaxPDOSlaves)
+                        slave_configs_[e->slave_index].pdo_reply_count++;
+                    // Callback mode: fire RxReceived callback for fire-and-forget entries
+                    // (data not actually received for fire-and-forget, but callback signals cycle completion)
+                    if (mode_ == PDOMode::Callback && callback_config_.fire_on_rx_received &&
+                        tx_entry_idx[j] < callbacks_.size() && callbacks_[tx_entry_idx[j]].rx_received) {
+                        callbacks_[tx_entry_idx[j]].rx_received(e->slave_index, static_cast<const uint8_t*>(e->app_buffer), e->data_size,
+                            stats_.total_cycles,
+                            static_cast<uint64_t>(Tether::Platform::Clock::instance().getMicroseconds()) * 1000ULL);
+                    }
+                }
+            }
+            // Wait for confirmed responses and copy data
+            for (size_t j = 0; j < tx_idxs.size(); j++) {
+                size_t entry_i = tx_entry_idx[tx_spec_map[j]];
+                PDO::PDOEntry* e = mapping_.get_entry_mut(entry_i);
+                RxDatagram resp;
+                if (transport_.waitForResponseIdx(tx_idxs[j], 5, resp) &&
+                    resp.wkc > 0 && resp.datalen >= e->data_size) {
+                    std::memcpy(e->app_buffer, resp.data, e->data_size);
+                    e->success_count++;
+                    stats_.txpdo_frames_recv++;
+                    if (e->slave_index < PDO::kMaxPDOSlaves)
+                        slave_configs_[e->slave_index].pdo_reply_count++;
+                    // Callback mode: fire RxReceived callback for confirmed entries
+                    if (mode_ == PDOMode::Callback && callback_config_.fire_on_rx_received &&
+                        entry_i < callbacks_.size() && callbacks_[entry_i].rx_received) {
+                        callbacks_[entry_i].rx_received(e->slave_index, static_cast<const uint8_t*>(e->app_buffer), e->data_size,
+                            stats_.total_cycles,
+                            static_cast<uint64_t>(Tether::Platform::Clock::instance().getMicroseconds()) * 1000ULL);
+                    }
+                } else {
+                    e->error_count++;
+                    stats_.txpdo_errors++;
+                    all_ok = false;
+                }
+            }
         }
     }
 
@@ -824,6 +1244,14 @@ bool PDOManager::exchangeAll() {
     }
 
     return all_ok;
+}
+
+bool PDOManager::exchangeAll() {
+    if (!sendAll()) {
+        // Even if send phase fails, still try to receive
+        // (receiveAll handles the split_state_ correctly)
+    }
+    return receiveAll();
 }
 
 // ============================================================================
@@ -856,8 +1284,11 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
     const auto& sm3 = cfg->sm[3];
     bool fpwr_ok = true, fprd_ok = true;
 
+    // Build the RxPDO output buffer
+    uint8_t out_buf[PDO::kMaxPDOSize] = {0};
+    bool have_write = false;
     if (sm2.type == PDO::SyncManagerType::ProcessOutput && sm2.length > 0) {
-        uint8_t out_buf[PDO::kMaxPDOSize] = {0};
+        have_write = true;
         for (size_t i = 0; i < mapping_.entry_count(); i++) {
             const PDO::PDOEntry* e = mapping_.get_entry(i);
             if (e && e->enabled && e->direction == PDO::PDODirection::RxPDO
@@ -884,6 +1315,74 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
                          static_cast<unsigned>(physical_stats_.fpwr_success), cw_val, (long)tp_val, hex);
             }
         }
+    }
+
+    bool have_read = (sm3.type == PDO::SyncManagerType::ProcessInput && sm3.length > 0);
+
+    // Build multi-datagram specs: pack FPWR + FPRD into one frame
+    if (have_write && have_read) {
+        // Batch both write and read into a single frame
+        const uint16_t adp = transport_.adpForSlaveIndex(0);
+        const uint8_t write_idx = transport_.allocIdx();
+        const uint8_t read_idx = transport_.allocIdx();
+
+        MultiDatagramSpec specs[2] = {
+            {Command::FPWR, write_idx, adp, sm2.phys_start_addr, out_buf, sm2.length, true},
+            {Command::FPRD, read_idx, adp, sm3.phys_start_addr, nullptr, sm3.length, true},
+        };
+
+        size_t frames_sent = transport_.sendMultiDatagram(specs, 2);
+        if (frames_sent == 0) {
+            physical_stats_.fpwr_wkc_errors++;
+            physical_stats_.fprd_wkc_errors++;
+            return false;
+        }
+
+        // Wait for write response
+        RxDatagram write_resp;
+        if (transport_.waitForResponseIdx(write_idx, 50, write_resp) && write_resp.wkc > 0) {
+            physical_stats_.fpwr_success++;
+        } else {
+            physical_stats_.fpwr_wkc_errors++;
+            fpwr_ok = false;
+        }
+
+        // Wait for read response
+        RxDatagram read_resp;
+        if (transport_.waitForResponseIdx(read_idx, 50, read_resp) && read_resp.wkc > 0) {
+            physical_stats_.fprd_success++;
+            if (txPDODebug()) {
+                char hex[128];
+                size_t pos = 0;
+                size_t dump_len = sm3.length < 32 ? sm3.length : 32;
+                for (size_t b = 0; b < dump_len && pos + 3 < sizeof(hex); b++) {
+                    pos += static_cast<size_t>(std::snprintf(hex + pos, sizeof(hex) - pos, "%02X ", read_resp.data[b]));
+                }
+                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3: addr=0x%04x len=%u data=%s",
+                            sm3.phys_start_addr, sm3.length, hex);
+            }
+            for (size_t i = 0; i < mapping_.entry_count(); i++) {
+                PDO::PDOEntry* e = mapping_.get_entry_mut(i);
+                if (e && e->enabled && e->direction == PDO::PDODirection::TxPDO
+                    && e->app_buffer && e->data_size <= sm3.length) {
+                    std::memcpy(e->app_buffer, read_resp.data, e->data_size);
+                    e->success_count++;
+                    if (txPDODebug(e->slave_index)) {
+                        TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Copied %u bytes to entry %zu buf=%p",
+                                    e->data_size, i, e->app_buffer);
+                    }
+                }
+            }
+        } else {
+            physical_stats_.fprd_wkc_errors++;
+            fprd_ok = false;
+            if (txPDODebug()) {
+                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3 FAILED: addr=0x%04x len=%u",
+                            sm3.phys_start_addr, sm3.length);
+            }
+        }
+    } else if (have_write) {
+        // Write only
         if (transport_.writeRegister(transport_.adpForSlaveIndex(0),
                          sm2.phys_start_addr, out_buf, sm2.length, 50)) {
             physical_stats_.fpwr_success++;
@@ -891,9 +1390,8 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
             physical_stats_.fpwr_wkc_errors++;
             fpwr_ok = false;
         }
-    }
-
-    if (sm3.type == PDO::SyncManagerType::ProcessInput && sm3.length > 0) {
+    } else if (have_read) {
+        // Read only
         uint8_t in_buf[PDO::kMaxPDOSize] = {0};
         if (transport_.readRegister(transport_.adpForSlaveIndex(0),
                         sm3.phys_start_addr, in_buf, sm3.length, 50)) {

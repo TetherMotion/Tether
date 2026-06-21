@@ -167,6 +167,50 @@ private:
     std::thread thread_;
 };
 
+// ============================================================================
+// Queue-mode RT loop: calls PDOManager::queueCycle() each cycle
+// Reuses RealtimeLoop infrastructure (same timer, jitter monitor, DC sync)
+// ============================================================================
+
+class QueueMotionControlLoop final : public IMotionControlLoop {
+public:
+    QueueMotionControlLoop(PDOManager* pdo_manager,
+                           Master::RealtimeMotionLoopConfig config,
+                           EtherCAT::DCManager* dc_manager)
+        : pdo_manager_(pdo_manager)
+        , loop_(
+            [this]() { return pdo_manager_ ? pdo_manager_->queueCycle() : false; },
+            [this, config, dc_manager]() {
+                if (!config.enable_dc_synchronization || dc_manager == nullptr) {
+                    return true;
+                }
+                return dc_manager->get()->sendSyncFrame();
+            },
+            []() {
+                return static_cast<uint64_t>(Tether::Platform::Clock::instance().getMicroseconds()) * 1000ULL;
+            },
+            RealtimeLoop::Config::defaults(config.cycle_period_us, config.sync_interval_cycles))
+    {
+    }
+
+    bool start() override {
+        loop_.setPDOEnabled(true);
+        return loop_.start();
+    }
+
+    void stop() override {
+        loop_.stop();
+    }
+
+    bool isRunning() const override {
+        return loop_.isRunning();
+    }
+
+private:
+    PDOManager* pdo_manager_;
+    RealtimeLoop loop_;
+};
+
 
 // ============================================================================
 // Utility: getECStateName
@@ -211,6 +255,10 @@ public:
                             const void* data, uint16_t datalen,
                             bool roundtrip) override {
         return master_.sendSingleDatagram(cmd, idx, adp, ado, data, datalen, roundtrip);
+    }
+
+    size_t sendMultiDatagram(const MultiDatagramSpec* specs, size_t count) override {
+        return master_.sendMultiDatagram(specs, count);
     }
 
     bool waitForResponseIdx(uint8_t idx, unsigned int timeout_ms,
@@ -496,6 +544,38 @@ void Master::stopMotionControlLoop()
 }
 
 bool Master::isMotionControlLoopRunning() const
+{
+    return motion_control_loop_ && motion_control_loop_->isRunning();
+}
+
+// ============================================================================
+// Queue-mode RT loop
+// ============================================================================
+
+bool Master::startQueueModeLoop()
+{
+    return startQueueModeLoop(RealtimeMotionLoopConfig{});
+}
+
+bool Master::startQueueModeLoop(const RealtimeMotionLoopConfig& config)
+{
+    if (pdo_->getMode() != PDOMode::Queue) {
+        TETHER_LOGE(TAG, "PDOManager is not in Queue mode; call configureQueueMode() first");
+        return false;
+    }
+
+    stopMotionControlLoop();  // Ensure no other loop is running
+    clearCancel();
+    motion_control_loop_ = std::make_unique<QueueMotionControlLoop>(pdo_.get(), config, dc_.get());
+    return motion_control_loop_->start();
+}
+
+void Master::stopQueueModeLoop()
+{
+    stopMotionControlLoop();
+}
+
+bool Master::isQueueModeLoopRunning() const
 {
     return motion_control_loop_ && motion_control_loop_->isRunning();
 }

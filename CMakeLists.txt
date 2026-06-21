@@ -82,6 +82,25 @@ endif()
 # Add argparse include directory (used by examples and tools)
 include_directories("${ARGPARSE_PATH}/include")
 
+# atomic_queue (lock-free MPMC queue for PDO mode queues)
+set(ATOMIC_QUEUE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/atomic_queue")
+if(NOT EXISTS "${ATOMIC_QUEUE_PATH}")
+    message(FATAL_ERROR
+        "Git submodule 'atomic_queue' is not initialized.\n"
+        "Please run the following command in the repository root:\n"
+        "  git submodule update --init\n"
+        "Then re-run CMake."
+    )
+elseif(NOT EXISTS "${ATOMIC_QUEUE_PATH}/include/atomic_queue/atomic_queue.h")
+    message(FATAL_ERROR
+        "Git submodule 'atomic_queue' appears to be initialized but is empty or incomplete.\n"
+        "Please run the following command in the repository root:\n"
+        "  git submodule update --init\n"
+        "Then re-run CMake."
+    )
+endif()
+include_directories("${ATOMIC_QUEUE_PATH}/include")
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
