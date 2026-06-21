@@ -226,6 +226,14 @@ public:
     void stopMotionControlLoop();
     bool isMotionControlLoopRunning() const;
 
+    // ---- Queue-mode RT loop (Mode 2) ---------------------------------------
+    // Starts an internal RT loop that calls pdo.queueCycle() each cycle.
+    // Requires PDOManager to be configured in Queue mode.
+    bool startQueueModeLoop();
+    bool startQueueModeLoop(const RealtimeMotionLoopConfig& config);
+    void stopQueueModeLoop();
+    bool isQueueModeLoopRunning() const;
+
     // ---- Frame handling ----------------------------------------------------
 
     /** Route a received Ethernet frame to the internal parser. */
@@ -340,6 +348,13 @@ public:
                             const void* data, uint16_t datalen,
                             bool roundtrip);
 
+    /// Pack multiple datagrams into one or more Ethernet frames and send immediately.
+    /// Auto-splits across frames if total exceeds 1514 bytes.
+    /// @param specs Array of datagram specifications
+    /// @param count Number of specs
+    /// @return Number of frames sent, or 0 on failure
+    size_t sendMultiDatagram(const MultiDatagramSpec* specs, size_t count);
+
     bool writeRegister(SlaveAddress slave_address, RegisterAddress register_address,
                        const void* data, uint16_t len,
                        unsigned int timeout_ms = 200);
@@ -400,6 +415,90 @@ public:
     bool waitForResponseAdo(uint16_t ado, Command cmd,
                             unsigned int timeout_ms,
                             RxDatagram& out);
+
+    // ---- Batch (multi-datagram) APIs ---------------------------------------
+
+    /**
+     * @brief Async handle for a batch read or write transaction.
+     *
+     * Returned by readRegistersBatch() / writeRegistersBatch().
+     * Call getResult() to retrieve individual results or waitAll() for all.
+     * Unclaimed slots are cleaned up on destruction.
+     */
+    class BatchTransaction {
+    public:
+        BatchTransaction() = default;
+        BatchTransaction(TransactionRouter* router,
+                         std::vector<uint8_t> idxs,
+                         std::vector<size_t> slots,
+                         std::vector<RxDatagram> responses);
+
+        BatchTransaction(BatchTransaction&&) = default;
+        BatchTransaction& operator=(BatchTransaction&&) = default;
+        BatchTransaction(const BatchTransaction&) = delete;
+        BatchTransaction& operator=(const BatchTransaction&) = delete;
+
+        ~BatchTransaction();
+
+        /// Get result for datagram at index i (blocks up to timeout_ms)
+        BatchReadResult getResult(size_t i, uint32_t timeout_ms);
+
+        /// Wait for all results (blocks up to timeout_ms per datagram)
+        bool waitAll(uint32_t timeout_ms, std::vector<BatchReadResult>& out);
+
+        /// Cancel any pending waits
+        void cancel();
+
+        /// Number of datagrams in this transaction
+        size_t count() const { return idxs_.size(); }
+
+    private:
+        TransactionRouter* router_{nullptr};
+        std::vector<uint8_t> idxs_;
+        std::vector<size_t> slots_;
+        std::vector<RxDatagram> responses_;
+        bool cancelled_{false};
+    };
+
+    /**
+     * @brief Read multiple physical addresses in one frame (async).
+     *
+     * Packs N APRD/FPRD datagrams into one Ethernet frame (auto-splits if
+     * exceeding 1514 bytes) and sends immediately.  Returns a BatchTransaction
+     * for async result retrieval.
+     *
+     * @param slave_addresses  Array of slave addresses (physical or logical)
+     * @param register_addresses Array of register addresses
+     * @param lengths          Array of expected read lengths
+     * @param count            Number of reads
+     * @return Batch transaction handle
+     */
+    BatchTransaction readRegistersBatch(
+        const SlaveAddress* slave_addresses,
+        const uint16_t* register_addresses,
+        const uint16_t* lengths,
+        size_t count);
+
+    /**
+     * @brief Write multiple physical addresses in one frame (async).
+     *
+     * Packs N APWR/FPWR datagrams into one Ethernet frame (auto-splits if
+     * exceeding 1514 bytes) and sends immediately.  Returns a BatchTransaction
+     * for async result retrieval.
+     *
+     * @param slave_addresses  Array of slave addresses
+     * @param register_addresses Array of register addresses
+     * @param data              Array of data pointers
+     * @param lengths           Array of write lengths
+     * @param count             Number of writes
+     * @return Batch transaction handle
+     */
+    BatchTransaction writeRegistersBatch(
+        const SlaveAddress* slave_addresses,
+        const uint16_t* register_addresses,
+        const void* const* data,
+        const uint16_t* lengths,
+        size_t count);
 
     /**
      * @brief Return the Working Counter of the last register read/write.

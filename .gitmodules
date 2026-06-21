@@ -7,3 +7,6 @@
 [submodule "dependencies/argparse"]
 	path = dependencies/argparse
 	url = https://github.com/p-ranav/argparse.git
+[submodule "dependencies/atomic_queue"]
+	path = dependencies/atomic_queue
+	url = https://github.com/max0x7ba/atomic_queue.git
