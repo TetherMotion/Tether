@@ -63,6 +63,8 @@ bool EtherCATMasterDebugFlags::isEnabled(const std::string& name, uint16_t slave
     if (name == "coe-writes")        return coeWrites && coeWritesFilt.allows(slave_index);
     if (name == "coe-rx-packets")    return coeRxPackets && coeRxPacketsFilt.allows(slave_index);
     if (name == "coe-tx-packets")    return coeTxPackets && coeTxPacketsFilt.allows(slave_index);
+    if (name == "verify-preop")      return verifyPreOp && verifyPreOpFilt.allows(slave_index);
+    if (name == "verify-safeop")     return verifySafeOp && verifySafeOpFilt.allows(slave_index);
     return false;
 }
 
@@ -78,6 +80,8 @@ void EtherCATMasterDebugFlags::setFlag(const std::string& name, bool enabled) {
     else if (name == "coe-writes")   coeWrites = enabled;
     else if (name == "coe-rx-packets") coeRxPackets = enabled;
     else if (name == "coe-tx-packets") coeTxPackets = enabled;
+    else if (name == "verify-preop")   verifyPreOp = enabled;
+    else if (name == "verify-safeop")  verifySafeOp = enabled;
 }
 
 void EtherCATMasterDebugFlags::setFilter(const std::string& name, const SlaveFilter& filter) {
@@ -92,6 +96,8 @@ void EtherCATMasterDebugFlags::setFilter(const std::string& name, const SlaveFil
     else if (name == "coe-writes")   coeWritesFilt = filter;
     else if (name == "coe-rx-packets") coeRxPacketsFilt = filter;
     else if (name == "coe-tx-packets") coeTxPacketsFilt = filter;
+    else if (name == "verify-preop")   verifyPreOpFilt = filter;
+    else if (name == "verify-safeop")  verifySafeOpFilt = filter;
 }
 
 void EtherCATMasterDebugFlags::applyFromString(const std::string& spec,
@@ -161,6 +167,8 @@ void EtherCATMasterDebugFlags::resizeFilters(uint16_t slave_count) {
     coeWritesFilt.resize(slave_count);
     coeRxPacketsFilt.resize(slave_count);
     coeTxPacketsFilt.resize(slave_count);
+    verifyPreOpFilt.resize(slave_count);
+    verifySafeOpFilt.resize(slave_count);
 }
 
 namespace debug {
@@ -195,6 +203,10 @@ const std::vector<DebugFlagInfo>& allDebugFlags() {
          "Log CoE received packets"},
         {"coe-tx-packets",
          "Log CoE transmitted packets"},
+        {"verify-preop",
+         "Dump detailed SM register verification before PRE_OP transition"},
+        {"verify-safeop",
+         "Dump detailed SM register verification before SAFE_OP transition"},
     };
     return kFlags;
 }

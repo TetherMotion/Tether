@@ -29,11 +29,23 @@ using namespace ::testing;
 class EtherCATSlaveTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        // Default: all APRD/APWR succeed
-        master_.setApwrTestCallback([](uint16_t, uint16_t, const void*, uint16_t, unsigned int) {
+        // Track AL state so APRD can return the correct AL_STATUS value.
+        // This makes state-machine transitions fast and deterministic.
+        uint16_t al_state = 0x01; // INIT
+
+        master_.setApwrTestCallback([&al_state](uint16_t, uint16_t ado, const void* data, uint16_t len, unsigned int) {
+            if (ado == 0x0120 && data && len >= 2) {
+                uint16_t val = *static_cast<const uint16_t*>(data);
+                al_state = val & 0x0F;
+            }
             return true;
         });
-        master_.setAprdTestCallback([](uint16_t, uint16_t, void*, uint16_t, unsigned int) {
+        master_.setAprdTestCallback([&al_state](uint16_t, uint16_t ado, void* out, uint16_t len, unsigned int) {
+            if (out && len >= 2 && (ado == 0x0130 || ado == 0x0134)) {
+                uint8_t* p = static_cast<uint8_t*>(out);
+                p[0] = static_cast<uint8_t>(al_state & 0xFF);
+                p[1] = 0;
+            }
             return true;
         });
         // Discover one slave so initSlaves(1) creates the slave object
@@ -963,4 +975,191 @@ TEST_F(EtherCATSlaveTest, LogSIISummaryFails) {
 TEST_F(EtherCATSlaveTest, LogSIISummaryDefaultTag) {
     auto& s = master_.slave(0);
     s.logSIISummary(); // uses default tag "EtherCAT"
+}
+
+// ============================================================================
+// SM register verification before state transitions
+// ============================================================================
+
+namespace {
+
+/**
+ * @brief Fill an 8-byte SM register block in little-endian format.
+ */
+void fillSMReg(uint8_t* buf, uint16_t addr, uint16_t len, uint8_t ctrl, uint8_t activate) {
+    buf[0] = static_cast<uint8_t>(addr & 0xFF);
+    buf[1] = static_cast<uint8_t>((addr >> 8) & 0xFF);
+    buf[2] = static_cast<uint8_t>(len & 0xFF);
+    buf[3] = static_cast<uint8_t>((len >> 8) & 0xFF);
+    buf[4] = ctrl;
+    buf[5] = 0;      // status
+    buf[6] = activate;
+    buf[7] = 0;      // pdi_ctrl
+}
+
+/**
+ * @brief Set up a smart APRD callback that returns matching SM configs and AL states.
+ */
+void setupFastAprd(Master& master,
+                     uint16_t sm0_addr, uint16_t sm0_len, uint8_t sm0_ctrl,
+                     uint16_t sm1_addr, uint16_t sm1_len, uint8_t sm1_ctrl,
+                     uint16_t sm2_addr, uint16_t sm2_len, uint8_t sm2_ctrl,
+                     uint16_t sm3_addr, uint16_t sm3_len, uint8_t sm3_ctrl,
+                     uint16_t al_status_value)
+{
+    master.setAprdTestCallback([
+        sm0_addr, sm0_len, sm0_ctrl,
+        sm1_addr, sm1_len, sm1_ctrl,
+        sm2_addr, sm2_len, sm2_ctrl,
+        sm3_addr, sm3_len, sm3_ctrl,
+        al_status_value
+    ](uint16_t /*adp*/, uint16_t ado, void* out, uint16_t len, unsigned int /*timeout_ms*/) -> bool {
+        if (!out || len == 0) return true;
+        std::memset(out, 0, len);
+
+        // AL_STATUS / AL_STATUS_CODE
+        if (ado == 0x0130 || ado == 0x0134) {
+            if (len >= 2) {
+                uint8_t* p = static_cast<uint8_t*>(out);
+                p[0] = static_cast<uint8_t>(al_status_value & 0xFF);
+                p[1] = static_cast<uint8_t>((al_status_value >> 8) & 0xFF);
+            }
+            return true;
+        }
+
+        // SM0 register block (0x0800-0x0807)
+        if (ado >= 0x0800 && ado < 0x0808) {
+            uint8_t buf[8];
+            fillSMReg(buf, sm0_addr, sm0_len, sm0_ctrl, 0x01);
+            uint16_t offset = ado - 0x0800;
+            uint16_t copy = (offset + len > 8) ? static_cast<uint16_t>(8 - offset) : len;
+            std::memcpy(out, buf + offset, copy);
+            return true;
+        }
+        // SM1 register block (0x0808-0x080F)
+        if (ado >= 0x0808 && ado < 0x0810) {
+            uint8_t buf[8];
+            fillSMReg(buf, sm1_addr, sm1_len, sm1_ctrl, 0x01);
+            uint16_t offset = ado - 0x0808;
+            uint16_t copy = (offset + len > 8) ? static_cast<uint16_t>(8 - offset) : len;
+            std::memcpy(out, buf + offset, copy);
+            return true;
+        }
+        // SM2 register block (0x0810-0x0817)
+        if (ado >= 0x0810 && ado < 0x0818) {
+            uint8_t buf[8];
+            fillSMReg(buf, sm2_addr, sm2_len, sm2_ctrl, 0x01);
+            uint16_t offset = ado - 0x0810;
+            uint16_t copy = (offset + len > 8) ? static_cast<uint16_t>(8 - offset) : len;
+            std::memcpy(out, buf + offset, copy);
+            return true;
+        }
+        // SM3 register block (0x0818-0x081F)
+        if (ado >= 0x0818 && ado < 0x0820) {
+            uint8_t buf[8];
+            fillSMReg(buf, sm3_addr, sm3_len, sm3_ctrl, 0x01);
+            uint16_t offset = ado - 0x0818;
+            uint16_t copy = (offset + len > 8) ? static_cast<uint16_t>(8 - offset) : len;
+            std::memcpy(out, buf + offset, copy);
+            return true;
+        }
+        return true;
+    });
+}
+
+} // anonymous namespace
+
+TEST_F(EtherCATSlaveTest, PreOpVerificationSkippedWhenAssumed) {
+    // When mailbox is only assumed (not really configured), expected SM0/1
+    // have enable=false, so verification is silently skipped.
+    auto& s = master_.slave(0);
+    s.assumeMailboxAlreadyConfigured();
+    setupFastAprd(master_, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x0002);
+    EXPECT_EQ(s.transitionToPreOp(), SlaveError::Ok);
+}
+
+TEST_F(EtherCATSlaveTest, PreOpVerificationPassesWithMatchingSM) {
+    // Actually configure mailbox, then make APRD read back the exact same values.
+    auto& s = master_.slave(0);
+    s.configureMailbox({.address = 0x1000, .length = 128},
+                       {.address = 0x1400, .length = 128}, 0x000C);
+    setupFastAprd(master_,
+                  0x1400, 128, 0x26,  // SM0: mailbox write (matches mbox_in)
+                  0x1000, 128, 0x22,  // SM1: mailbox read (matches mbox_out)
+                  0, 0, 0,
+                  0, 0, 0,
+                  0x0002);            // AL_STATUS = PRE_OP
+    EXPECT_EQ(s.transitionToPreOp(), SlaveError::Ok);
+}
+
+TEST_F(EtherCATSlaveTest, PreOpVerificationMismatchDoesNotBlock) {
+    // Configure mailbox with one set of values, but APRD returns different values.
+    // Verification logs an error but the transition still proceeds.
+    auto& s = master_.slave(0);
+    s.configureMailbox({.address = 0x1000, .length = 128},
+                       {.address = 0x1400, .length = 128}, 0x000C);
+    setupFastAprd(master_,
+                  0xDEAD, 255, 0xFF,  // SM0: completely wrong
+                  0xBEEF, 255, 0xFF,  // SM1: completely wrong
+                  0, 0, 0,
+                  0, 0, 0,
+                  0x0002);            // AL_STATUS = PRE_OP
+    EXPECT_EQ(s.transitionToPreOp(), SlaveError::Ok);
+}
+
+TEST_F(EtherCATSlaveTest, SafeOpVerificationSkippedWhenAssumed) {
+    auto& s = master_.slave(0);
+    s.assumeMailboxAlreadyConfigured();
+    s.assumePDOAlreadyConfigured();
+    setupFastAprd(master_, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x0004);
+    EXPECT_EQ(s.transitionToSafeOp(), SlaveError::Ok);
+}
+
+TEST_F(EtherCATSlaveTest, SafeOpVerificationPassesWithAllSMsMatching) {
+    auto& s = master_.slave(0);
+    s.configureMailbox({.address = 0x1000, .length = 128},
+                       {.address = 0x1400, .length = 128}, 0x000C);
+    s.configurePDOSyncManagers(0x1800, 32, 0x64, 0x1C00, 32, 0x20);
+    setupFastAprd(master_,
+                  0x1400, 128, 0x26,  // SM0
+                  0x1000, 128, 0x22,  // SM1
+                  0x1800,  32, 0x64,  // SM2
+                  0x1C00,  32, 0x20,  // SM3
+                  0x0004);            // AL_STATUS = SAFE_OP
+    EXPECT_EQ(s.transitionToSafeOp(), SlaveError::Ok);
+}
+
+TEST_F(EtherCATSlaveTest, SafeOpVerificationMismatchDoesNotBlock) {
+    auto& s = master_.slave(0);
+    s.configureMailbox({.address = 0x1000, .length = 128},
+                       {.address = 0x1400, .length = 128}, 0x000C);
+    s.configurePDOSyncManagers(0x1800, 32, 0x64, 0x1C00, 32, 0x20);
+    setupFastAprd(master_,
+                  0x1400, 128, 0x26,
+                  0x1000, 128, 0x22,
+                  0xDEAD, 255, 0xFF,  // SM2 mismatch
+                  0xBEEF, 255, 0xFF,  // SM3 mismatch
+                  0x0004);            // AL_STATUS = SAFE_OP
+    EXPECT_EQ(s.transitionToSafeOp(), SlaveError::Ok);
+}
+
+TEST_F(EtherCATSlaveTest, DebugFlagsEnableVerifyDump) {
+    // When the verify-preop / verify-safeop debug flags are set,
+    // the verification code should emit detailed dumps.
+    auto& s = master_.slave(0);
+    s.configureMailbox({.address = 0x1000, .length = 128},
+                       {.address = 0x1400, .length = 128}, 0x000C);
+    setupFastAprd(master_,
+                  0x1400, 128, 0x26,
+                  0x1000, 128, 0x22,
+                  0, 0, 0,
+                  0, 0, 0,
+                  0x0002);
+
+    master_.debugFlags().verifyPreOp = true;
+    master_.updateDebugFlags();
+    s.updateDebugFlags(master_.debugFlags().computeForSlave(0));
+
+    // Should succeed even with debug dumps active
+    EXPECT_EQ(s.transitionToPreOp(), SlaveError::Ok);
 }

@@ -14,6 +14,7 @@ public:
     MOCK_METHOD(bool, writeRegister, (uint16_t, uint16_t, const void*, uint16_t, unsigned int), (override));
     MOCK_METHOD(bool, readRegister, (uint16_t, uint16_t, void*, uint16_t, unsigned int), (override));
     MOCK_METHOD(bool, sendSingleDatagram, (Command, uint8_t, uint16_t, uint16_t, const void*, uint16_t, bool), (override));
+    MOCK_METHOD(size_t, sendMultiDatagram, (const MultiDatagramSpec*, size_t), (override));
     MOCK_METHOD(bool, waitForResponseIdx, (uint8_t, unsigned int, RxDatagram&), (override));
     MOCK_METHOD(uint8_t, allocIdx, (), (override));
     MOCK_METHOD(uint16_t, adpForSlaveIndex, (uint16_t), (override));

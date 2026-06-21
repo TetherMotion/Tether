@@ -2,6 +2,7 @@
 #include <sstream>
 #include <algorithm>
 #include <iomanip>
+#include <bit>
 
 namespace EtherCAT {
 
@@ -46,8 +47,8 @@ SyncManagerValidationResult SyncManagerValidation::validate(const std::vector<Sy
     if (configs.size() > 0) {
         const auto& sm = configs[0];
         if (sm.enable) {
-            if (sm.control != 0x26) {
-                 ss << "SM0 invalid control: expected 0x26 (MbxIn/MASTER→SLAVE), got 0x" << std::hex << (int)sm.control;
+            if (std::bit_cast<uint8_t>(sm.control) != 0x26) {
+                 ss << "SM0 invalid control: expected 0x26 (MbxIn/MASTER→SLAVE), got 0x" << std::hex << (int)std::bit_cast<uint8_t>(sm.control);
                  return {false, ss.str()};
             }
         }
@@ -57,8 +58,8 @@ SyncManagerValidationResult SyncManagerValidation::validate(const std::vector<Sy
     if (configs.size() > 1) {
         const auto& sm = configs[1];
         if (sm.enable) {
-            if (sm.control != 0x22) {
-                 ss << "SM1 invalid control: expected 0x22 (MbxOut/SLAVE→MASTER), got 0x" << std::hex << (int)sm.control;
+            if (std::bit_cast<uint8_t>(sm.control) != 0x22) {
+                 ss << "SM1 invalid control: expected 0x22 (MbxOut/SLAVE→MASTER), got 0x" << std::hex << (int)std::bit_cast<uint8_t>(sm.control);
                  return {false, ss.str()};
             }
         }
@@ -84,8 +85,8 @@ SyncManagerValidationResult SyncManagerValidation::validate(const std::vector<Sy
     if (configs.size() > 2) {
         const auto& sm = configs[2];
         if (sm.enable) {
-            if ((sm.control & 0x03) != 0x00) {  // Must be BUFFERED mode (bits[1:0]=00)
-                 ss << "SM2 invalid mode: expected BUFFERED (0x00), got mode bits 0x" << std::hex << (int)(sm.control & 0x03);
+            if (sm.control.mode != static_cast<uint8_t>(EtherCAT::SyncManager::SMMode::Buffered)) {
+                 ss << "SM2 invalid mode: expected BUFFERED (0x00), got mode bits 0x" << std::hex << (int)sm.control.mode;
                  return {false, ss.str()};
             }
         }
@@ -95,8 +96,8 @@ SyncManagerValidationResult SyncManagerValidation::validate(const std::vector<Sy
     if (configs.size() > 3) {
         const auto& sm = configs[3];
         if (sm.enable) {
-            if ((sm.control & 0x03) != 0x00) {  // Must be BUFFERED mode (bits[1:0]=00)
-                 ss << "SM3 invalid mode: expected BUFFERED (0x00), got mode bits 0x" << std::hex << (int)(sm.control & 0x03);
+            if (sm.control.mode != static_cast<uint8_t>(EtherCAT::SyncManager::SMMode::Buffered)) {
+                 ss << "SM3 invalid mode: expected BUFFERED (0x00), got mode bits 0x" << std::hex << (int)sm.control.mode;
                  return {false, ss.str()};
             }
         }

@@ -17,6 +17,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <bit>
 
 namespace EtherCAT {
 
@@ -63,22 +64,22 @@ SlaveError Slave::configureMailbox(
     uint16_t protocols)
 {
     master_.setMailboxOverride(index_,
-                               mbox_out.address, mbox_out.length,
                                mbox_in.address, mbox_in.length,
+                               mbox_out.address, mbox_out.length,
                                protocols);
     // Configure SDO manager with these mailbox params
     master_.sdoManager(index_).configureMailbox(
-        mbox_out.address, mbox_out.length,
-        mbox_in.address, mbox_in.length);
+        mbox_in.address, mbox_in.length,
+        mbox_out.address, mbox_out.length);
 
     // Write mailbox SM registers to slave ESC (same as autoConfigureMailbox)
     auto& pdo = master_.pdo();
     auto* slave_configs = pdo.slaveConfigs();
     if (index_ < PDO::kMaxPDOSlaves) {
         slave_configs[index_].sm[0] = PDO::SyncManagerConfig::mailbox_write(
-            mbox_out.address, mbox_out.length);
-        slave_configs[index_].sm[1] = PDO::SyncManagerConfig::mailbox_read(
             mbox_in.address, mbox_in.length);
+        slave_configs[index_].sm[1] = PDO::SyncManagerConfig::mailbox_read(
+            mbox_out.address, mbox_out.length);
         if (!pdo.configureSlavesSMs(index_)) {
             TETHER_LOGE(TAG, "Slave %u: Failed to write mailbox SM registers", index_);
             return SlaveError::MailboxConfigFailed;
@@ -88,8 +89,8 @@ SlaveError Slave::configureMailbox(
     mailbox_configured_ = true;
     TETHER_LOGI( TAG,
         "Slave %u: Mailbox configured (wr=0x%04X/%u, rd=0x%04X/%u, proto=0x%04X)",
-        index_, mbox_out.address, mbox_out.length,
-        mbox_in.address, mbox_in.length, protocols);
+        index_, mbox_in.address, mbox_in.length,
+        mbox_out.address, mbox_out.length, protocols);
     return SlaveError::Ok;
 }
 
@@ -126,13 +127,13 @@ SlaveError Slave::configurePDOSyncManagers(
     }
     cfgs[index_].sm[2].phys_start_addr = sm2_addr;
     cfgs[index_].sm[2].length = sm2_len;
-    cfgs[index_].sm[2].control = sm2_ctrl;
+    cfgs[index_].sm[2].control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(sm2_ctrl);
     cfgs[index_].sm[2].enable = 1;
     cfgs[index_].sm[2].type = PDO::SyncManagerType::ProcessOutput;
 
     cfgs[index_].sm[3].phys_start_addr = sm3_addr;
     cfgs[index_].sm[3].length = sm3_len;
-    cfgs[index_].sm[3].control = sm3_ctrl;
+    cfgs[index_].sm[3].control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(sm3_ctrl);
     cfgs[index_].sm[3].enable = 1;
     cfgs[index_].sm[3].type = PDO::SyncManagerType::ProcessInput;
 
@@ -153,6 +154,76 @@ void Slave::assumePDOAlreadyConfigured() {
 }
 
 // -- State transitions -------------------------------------------------------
+
+namespace {
+
+/**
+ * @brief Verify that the slave's SM hardware registers match the expected configs.
+ *
+ * Logs mismatches as errors but never blocks the caller.
+ * Detailed per-SM dumps are emitted when the corresponding debug flag is set.
+ *
+ * @param slave        The slave to verify
+ * @param sm_start     First SM index to check (inclusive)
+ * @param sm_end       Last SM index to check (inclusive)
+ * @param debug_flag   If true, dump detailed SM register state
+ * @param tag          Logger tag for diagnostic output
+ */
+void verifySyncManagers(EtherCAT::Slave& slave,
+                        uint8_t sm_start,
+                        uint8_t sm_end,
+                        bool debug_flag,
+                        const char* tag)
+{
+    using EtherCAT::PDO::kMaxPDOSlaves;
+    const uint16_t idx = slave.index();
+    auto& pdo = slave.master().pdo();
+    auto* cfgs = pdo.slaveConfigs();
+    if (idx >= kMaxPDOSlaves) {
+        TETHER_LOGE(tag, "Slave %u: Cannot verify SMs — index out of range", idx);
+        return;
+    }
+    const auto& expected = cfgs[idx].sm;
+
+    if (debug_flag) {
+        TETHER_LOGI(tag,
+            "╔══════════════════════════════════════════════════════════════╗");
+        TETHER_LOGI(tag,
+            "║  SM Verification: Slave %u  SM%u–SM%u                           ║",
+            idx, static_cast<unsigned>(sm_start), static_cast<unsigned>(sm_end));
+        TETHER_LOGI(tag,
+            "╚══════════════════════════════════════════════════════════════╝");
+    }
+
+    bool any_mismatch = false;
+    for (uint8_t i = sm_start; i <= sm_end; ++i) {
+        if (!expected[i].enable) {
+            if (debug_flag) {
+                TETHER_LOGI(tag, "SM%u: expected disabled — skipped", static_cast<unsigned>(i));
+            }
+            continue;
+        }
+        auto result = slave.sm(i).validate(expected[i]);
+        if (!result.valid) {
+            TETHER_LOGE(tag, "Slave %u: SM%u verification FAILED — %s",
+                        idx, static_cast<unsigned>(i), result.message.c_str());
+            any_mismatch = true;
+        } else if (debug_flag) {
+            TETHER_LOGI(tag, "Slave %u: SM%u verification PASSED", idx, static_cast<unsigned>(i));
+        }
+        if (debug_flag) {
+            slave.sm(i).dump(tag);
+        }
+    }
+
+    if (debug_flag) {
+        TETHER_LOGI(tag,
+            "Slave %u: SM verification summary — %s",
+            idx, any_mismatch ? "MISMATCHES DETECTED (see errors above)" : "ALL OK");
+    }
+}
+
+} // anonymous namespace
 
 SlaveError Slave::transitionTo(SlaveState target) {
     switch (target) {
@@ -225,6 +296,7 @@ SlaveError Slave::transitionToPreOp() {
             "assumeMailboxAlreadyConfigured() first.", index_);
         return SlaveError::MailboxNotConfigured;
     }
+    verifySyncManagers(*this, 0, 1, slave_debug_flags_.verifyPreOp, TAG);
     if (!master_.transitionSlaveToPreOperational(index_)) {
         TETHER_LOGE( TAG,
             "Slave %u: Failed to transition to PRE_OP", index_);
@@ -264,6 +336,7 @@ SlaveError Slave::transitionToSafeOp() {
             "assumePDOAlreadyConfigured() first.", index_);
         return SlaveError::PDONotConfigured;
     }
+    verifySyncManagers(*this, 0, 3, slave_debug_flags_.verifySafeOp, TAG);
     if (!master_.requestSlaveApplicationLayerState(index_, static_cast<uint8_t>(SlaveState::SAFE_OP))) {
         TETHER_LOGE( TAG,
             "Slave %u: Failed to transition to SAFE_OP (transport error)", index_);

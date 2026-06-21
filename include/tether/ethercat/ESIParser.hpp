@@ -5,14 +5,16 @@
 #include <cstdint>
 #include <optional>
 
+#include "tether/ethercat/SMRegisters.hpp"
+
 namespace EtherCAT {
 namespace ESI {
 
 struct SyncManagerEntry {
     uint16_t startAddress{0};
     uint16_t defaultSize{0};
-    uint8_t control{0};
-    uint8_t enable{0};
+    EtherCAT::SyncManager::SMControlReg control{};
+    EtherCAT::SyncManager::SMActivateReg enable{};
     std::string name; // e.g., "MBoxOut" or "MBoxIn" or "ProcessIn"
 };
 

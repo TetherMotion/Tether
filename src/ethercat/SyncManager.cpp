@@ -15,6 +15,7 @@
 #include <cstring>
 #include <sstream>
 #include <iomanip>
+#include <bit>
 
 namespace EtherCAT {
 
@@ -62,10 +63,10 @@ SyncManagerAccessor::readHardwareConfig(unsigned int timeout_ms) const {
 
     cfg.start_addr = static_cast<uint16_t>(buf[0] | (static_cast<uint16_t>(buf[1]) << 8));
     cfg.length     = static_cast<uint16_t>(buf[2] | (static_cast<uint16_t>(buf[3]) << 8));
-    cfg.control    = buf[4];
-    cfg.status     = buf[5];
-    cfg.activate   = buf[6];
-    cfg.pdi_ctrl   = buf[7];
+    cfg.control    = std::bit_cast<SyncManager::SMControlReg>(buf[4]);
+    cfg.status     = std::bit_cast<SyncManager::SMStatusReg>(buf[5]);
+    cfg.activate   = std::bit_cast<SyncManager::SMActivateReg>(buf[6]);
+    cfg.pdi_ctrl   = std::bit_cast<SyncManager::SMPDICtrlReg>(buf[7]);
     return cfg;
 }
 
@@ -134,8 +135,8 @@ SyncManagerAccessor::validate(const PDO::SyncManagerConfig& expected) const {
 
     if (hw.control != expected.control) {
         oss << "SM" << static_cast<int>(index_)
-            << ": control mismatch: hw=0x" << std::hex << static_cast<int>(hw.control)
-            << " expected=0x" << static_cast<int>(expected.control);
+            << ": control mismatch: hw=0x" << std::hex << static_cast<int>(std::bit_cast<uint8_t>(hw.control))
+            << " expected=0x" << static_cast<int>(std::bit_cast<uint8_t>(expected.control));
         result.valid   = false;
         result.message = oss.str();
         return result;
@@ -143,7 +144,7 @@ SyncManagerAccessor::validate(const PDO::SyncManagerConfig& expected) const {
 
     if (!hw.isEnabled()) {
         oss << "SM" << static_cast<int>(index_) << ": expected ENABLED but activate=0x"
-            << std::hex << static_cast<int>(hw.activate) << " (bit 0 not set)";
+            << std::hex << static_cast<int>(std::bit_cast<uint8_t>(hw.activate)) << " (bit 0 not set)";
         result.valid   = false;
         result.message = oss.str();
         return result;
@@ -195,29 +196,30 @@ std::string SyncManagerAccessor::formatConfig(const RawHWConfig& cfg) const {
     }
 
     const char* modeStr = "UNKNOWN";
-    const uint8_t modeBits = static_cast<uint8_t>(cfg.control & SM_CTRL_MODE_MASK);
-    if (modeBits == SM_CTRL_MODE_BUFFERED) modeStr = "BUFFERED";
-    else if (modeBits == SM_CTRL_MODE_MAILBOX)  modeStr = "MAILBOX";
+    const uint8_t modeBits = cfg.control.mode;
+    if (modeBits == static_cast<uint8_t>(SyncManager::SMMode::Buffered)) modeStr = "BUFFERED";
+    else if (modeBits == static_cast<uint8_t>(SyncManager::SMMode::Mailbox))  modeStr = "MAILBOX";
 
-    const char* dirStr = (cfg.control & SM_CTRL_DIR_WRITE) ? "MASTER->SLAVE" : "SLAVE->MASTER";
+    const char* dirStr = cfg.control.direction ? "MASTER->SLAVE" : "SLAVE->MASTER";
 
     std::string flags;
-    if (cfg.control & SM_CTRL_IRQ_ECAT)                                    flags += "IRQ_ECAT ";
-    if (cfg.control & SM_CTRL_IRQ_PDI)                                     flags += "IRQ_PDI ";
-    if (cfg.control & SM_CTRL_WATCHDOG)                                    flags += "WATCHDOG ";
-    if ((cfg.control & SM_CTRL_REPEAT_REQ) && (modeBits == SM_CTRL_MODE_MAILBOX))
-                                                                            flags += "REPEAT_REQ ";
+    if (cfg.control.ecat_irq)   flags += "IRQ_ECAT ";
+    if (cfg.control.pdi_irq)    flags += "IRQ_PDI ";
+    if (cfg.control.watchdog)   flags += "WATCHDOG ";
+    if (cfg.control.repeat_req && (modeBits == static_cast<uint8_t>(SyncManager::SMMode::Mailbox)))
+                                flags += "REPEAT_REQ ";
 
     const bool enabled = cfg.isEnabled();
 
     // Detect conservative default mailbox configurations
     bool fallback = false;
+    const uint8_t ctrl_raw = std::bit_cast<uint8_t>(cfg.control);
     if (index_ == 0) {
         // Standard ETG: SM0=MbxIn(M→S) ctrl=0x26.
-        fallback = (cfg.start_addr == 0x1000 && cfg.length == 256 && cfg.control == 0x26);
+        fallback = (cfg.start_addr == 0x1000 && cfg.length == 256 && ctrl_raw == 0x26);
     } else if (index_ == 1) {
         // Standard ETG: SM1=MbxOut(S→M) ctrl=0x22.
-        fallback = (cfg.start_addr == 0x1400 && cfg.length == 256 && cfg.control == 0x22);
+        fallback = (cfg.start_addr == 0x1400 && cfg.length == 256 && ctrl_raw == 0x22);
     }
 
     char tmp[320];
@@ -228,9 +230,9 @@ std::string SyncManagerAccessor::formatConfig(const RawHWConfig& cfg) const {
              cfg.start_addr, cfg.length,
              modeStr, dirStr,
              flags.empty() ? "-" : flags.c_str(),
-             cfg.control, cfg.status, cfg.activate,
+             ctrl_raw, std::bit_cast<uint8_t>(cfg.status), std::bit_cast<uint8_t>(cfg.activate),
              enabled ? "ENABLED" : "disabled",
-             cfg.pdi_ctrl,
+             std::bit_cast<uint8_t>(cfg.pdi_ctrl),
              fallback ? " [fallback/mailbox default]" : "");
     return std::string(tmp);
 }
@@ -305,21 +307,21 @@ void debugMailboxConfiguration(Master& master, uint16_t slave_index, const char*
     auto& slave = master.slave(slave_index);
 
     // Helper to decode control register bits
-    auto decode_control = [](uint8_t ctrl) -> std::string {
+    auto decode_control = [](const SyncManager::SMControlReg& ctrl) -> std::string {
         std::ostringstream oss;
-        const uint8_t mode = ctrl & 0x03;
-        if (mode == 0x00) oss << "BUFFERED";
-        else if (mode == 0x02) oss << "MAILBOX";
+        const uint8_t mode = ctrl.mode;
+        if (mode == static_cast<uint8_t>(SyncManager::SMMode::Buffered)) oss << "BUFFERED";
+        else if (mode == static_cast<uint8_t>(SyncManager::SMMode::Mailbox)) oss << "MAILBOX";
         else oss << "UNKNOWN(0x" << std::hex << (int)mode << ")";
 
         oss << " ";
-        if (ctrl & 0x04) oss << "DIR_WRITE ";
+        if (ctrl.direction) oss << "DIR_WRITE ";
         else oss << "DIR_READ ";
 
-        if (ctrl & 0x08) oss << "IRQ_ECAT ";
-        if (ctrl & 0x10) oss << "IRQ_PDI ";
-        if (ctrl & 0x20) oss << "WATCHDOG ";
-        if (ctrl & 0x40) oss << "REPEAT_REQ ";
+        if (ctrl.ecat_irq)   oss << "IRQ_ECAT ";
+        if (ctrl.pdi_irq)    oss << "IRQ_PDI ";
+        if (ctrl.watchdog)   oss << "WATCHDOG ";
+        if (ctrl.repeat_req) oss << "REPEAT_REQ ";
 
         return oss.str();
     };
@@ -332,10 +334,10 @@ void debugMailboxConfiguration(Master& master, uint16_t slave_index, const char*
         TETHER_LOGI(tag, "  Physical Register Base: 0x%04X", (unsigned)sm0.physRegisterBase());
         TETHER_LOGI(tag, "  Start Address:          0x%04X", (unsigned)hw0.start_addr);
         TETHER_LOGI(tag, "  Length:                 %u bytes", (unsigned)hw0.length);
-        TETHER_LOGI(tag, "  Control Register (0x%02X): %s", (unsigned)hw0.control, decode_control(hw0.control).c_str());
-        TETHER_LOGI(tag, "  Status Register:        0x%02X", (unsigned)hw0.status);
-        TETHER_LOGI(tag, "  Activate Register:      0x%02X (%s)", (unsigned)hw0.activate, hw0.isEnabled() ? "ENABLED" : "disabled");
-        TETHER_LOGI(tag, "  PDI Control:            0x%02X", (unsigned)hw0.pdi_ctrl);
+        TETHER_LOGI(tag, "  Control Register (0x%02X): %s", (unsigned)std::bit_cast<uint8_t>(hw0.control), decode_control(hw0.control).c_str());
+        TETHER_LOGI(tag, "  Status Register:        0x%02X", (unsigned)std::bit_cast<uint8_t>(hw0.status));
+        TETHER_LOGI(tag, "  Activate Register:      0x%02X (%s)", (unsigned)std::bit_cast<uint8_t>(hw0.activate), hw0.isEnabled() ? "ENABLED" : "disabled");
+        TETHER_LOGI(tag, "  PDI Control:            0x%02X", (unsigned)std::bit_cast<uint8_t>(hw0.pdi_ctrl));
     } else {
         TETHER_LOGE(tag, "  ❌ Failed to read SM0 hardware registers");
     }
@@ -348,10 +350,10 @@ void debugMailboxConfiguration(Master& master, uint16_t slave_index, const char*
         TETHER_LOGI(tag, "  Physical Register Base: 0x%04X", (unsigned)sm1.physRegisterBase());
         TETHER_LOGI(tag, "  Start Address:          0x%04X", (unsigned)hw1.start_addr);
         TETHER_LOGI(tag, "  Length:                 %u bytes", (unsigned)hw1.length);
-        TETHER_LOGI(tag, "  Control Register (0x%02X): %s", (unsigned)hw1.control, decode_control(hw1.control).c_str());
-        TETHER_LOGI(tag, "  Status Register:        0x%02X", (unsigned)hw1.status);
-        TETHER_LOGI(tag, "  Activate Register:      0x%02X (%s)", (unsigned)hw1.activate, hw1.isEnabled() ? "ENABLED" : "disabled");
-        TETHER_LOGI(tag, "  PDI Control:            0x%02X", (unsigned)hw1.pdi_ctrl);
+        TETHER_LOGI(tag, "  Control Register (0x%02X): %s", (unsigned)std::bit_cast<uint8_t>(hw1.control), decode_control(hw1.control).c_str());
+        TETHER_LOGI(tag, "  Status Register:        0x%02X", (unsigned)std::bit_cast<uint8_t>(hw1.status));
+        TETHER_LOGI(tag, "  Activate Register:      0x%02X (%s)", (unsigned)std::bit_cast<uint8_t>(hw1.activate), hw1.isEnabled() ? "ENABLED" : "disabled");
+        TETHER_LOGI(tag, "  PDI Control:            0x%02X", (unsigned)std::bit_cast<uint8_t>(hw1.pdi_ctrl));
     } else {
         TETHER_LOGE(tag, "  ❌ Failed to read SM1 hardware registers");
     }

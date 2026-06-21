@@ -56,6 +56,9 @@
 #include <cstring>
 #include <array>
 #include <vector>
+#include <bit>
+
+#include "tether/ethercat/SMRegisters.hpp"
 
 namespace EtherCAT {
 namespace SII {
@@ -250,15 +253,15 @@ struct SIIGeneralInfo {
 struct SIISyncManager {
     uint16_t phys_start_address{0};  ///< Physical start address in ESC memory
     uint16_t length{0};              ///< Length in bytes
-    uint8_t control_register{0};     ///< Control register value
-    uint8_t status_register{0};      ///< Status register value (usually 0)
-    uint8_t enable{0};               ///< Enable flags
+    EtherCAT::SyncManager::SMControlReg  control_register{};  ///< Control register
+    EtherCAT::SyncManager::SMStatusReg   status_register{};   ///< Status register (usually 0)
+    EtherCAT::SyncManager::SMActivateReg enable{};            ///< Enable flags
     uint8_t sm_type{0};              ///< Sync Manager type (SyncManagerType enum)
     
-    bool isEnabled() const { return (enable & 0x01) != 0; }
-    bool isFixedContent() const { return (enable & 0x02) != 0; }
-    bool isVirtualSM() const { return (enable & 0x04) != 0; }
-    bool opOnly() const { return (enable & 0x08) != 0; }
+    bool isEnabled() const { return enable.enable; }
+    bool isFixedContent() const { return (std::bit_cast<uint8_t>(enable) & 0x02) != 0; }
+    bool isVirtualSM() const { return (std::bit_cast<uint8_t>(enable) & 0x04) != 0; }
+    bool opOnly() const { return (std::bit_cast<uint8_t>(enable) & 0x08) != 0; }
     
     SyncManagerType getType() const { return static_cast<SyncManagerType>(sm_type); }
     

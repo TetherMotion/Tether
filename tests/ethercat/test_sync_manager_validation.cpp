@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "tether/ethercat/SyncManagerValidation.hpp"
+#include <bit>
 
 using namespace EtherCAT;
 using namespace EtherCAT::PDO;
@@ -12,25 +13,25 @@ protected:
         // SM0: start=0x1000 len=128 ctrl=0x26 (MbxIn: ECAT writes, master→slave)
         configs[0].phys_start_addr = 0x1000;
         configs[0].length = 128;
-        configs[0].control = 0x26;
+        configs[0].control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x26));
         configs[0].enable = true;
 
         // SM1: start=0x1080 len=128 ctrl=0x22 (MbxOut: ECAT reads, slave→master)
         configs[1].phys_start_addr = 0x1080;
         configs[1].length = 128;
-        configs[1].control = 0x22;
+        configs[1].control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x22));
         configs[1].enable = true;
         
-        // SM2: start=0x1100 len=8 ctrl=0x60 (Buffered, ECAT reads = TxPDO/inputs)
+        // SM2: start=0x1100 len=8 ctrl=0x44 (Buffered, ECAT writes = RxPDO/outputs)
         configs[2].phys_start_addr = 0x1100;
         configs[2].length = 8;
-        configs[2].control = 0x60;
+        configs[2].control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x44));
         configs[2].enable = true;
         
-        // SM3: start=0x1400 len=32 ctrl=0x24 (Buffered, ECAT writes = RxPDO/outputs)
+        // SM3: start=0x1400 len=32 ctrl=0x40 (Buffered, ECAT reads = TxPDO/inputs)
         configs[3].phys_start_addr = 0x1400;
         configs[3].length = 32;
-        configs[3].control = 0x24;
+        configs[3].control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x40));
         configs[3].enable = true;
         
         return configs;
@@ -81,25 +82,25 @@ TEST_F(SyncManagerValidationTest, ValidatesControlBytes) {
     auto configs = getValidConfigs();
     
     // Invalid SM0
-    configs[0].control = 0x00;
+    configs[0].control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x00));
     auto result0 = SyncManagerValidation::validate(configs);
     EXPECT_FALSE(result0.valid);
     EXPECT_NE(result0.error_message.find("SM0 invalid control"), std::string::npos);
     
     configs = getValidConfigs(); // Reset
-    configs[1].control = 0xFF; // Invalid SM1
+    configs[1].control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0xFF)); // Invalid SM1
     auto result1 = SyncManagerValidation::validate(configs);
     EXPECT_FALSE(result1.valid);
     EXPECT_NE(result1.error_message.find("SM1 invalid control"), std::string::npos);
 
     configs = getValidConfigs();
-    configs[2].control = 0x22; // Wrong: MAILBOX mode instead of BUFFERED for SM2
+    configs[2].control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x22)); // Wrong: MAILBOX mode instead of BUFFERED for SM2
     auto result2 = SyncManagerValidation::validate(configs);
     EXPECT_FALSE(result2.valid);
     EXPECT_NE(result2.error_message.find("SM2 invalid mode"), std::string::npos);
 
     configs = getValidConfigs();
-    configs[3].control = 0x26; // Wrong: MAILBOX mode instead of BUFFERED for SM3
+    configs[3].control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x26)); // Wrong: MAILBOX mode instead of BUFFERED for SM3
     auto result3 = SyncManagerValidation::validate(configs);
     EXPECT_FALSE(result3.valid);
     EXPECT_NE(result3.error_message.find("SM3 invalid mode"), std::string::npos);
@@ -127,7 +128,7 @@ TEST_F(SyncManagerValidationTest, AcceptsDifferentLengths) {
 TEST_F(SyncManagerValidationTest, DisablesAreIgnored) {
     auto configs = getValidConfigs();
     // Make SM1 invalid but disabled
-    configs[1].control = 0xFF;
+    configs[1].control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0xFF));
     configs[1].enable = false;
     
     auto result = SyncManagerValidation::validate(configs);
@@ -136,7 +137,7 @@ TEST_F(SyncManagerValidationTest, DisablesAreIgnored) {
     EXPECT_TRUE(result.valid);
 
     // Make SM1 overlap SM0 but disabled
-    configs[1].control = 0x22; // restore valid control
+    configs[1].control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x22)); // restore valid control
     configs[1].phys_start_addr = 0x1000; // Overlap SM0
     configs[1].enable = false;
     

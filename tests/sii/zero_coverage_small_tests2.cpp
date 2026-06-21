@@ -24,6 +24,7 @@ public:
     bool writeRegister(uint16_t, uint16_t, const void*, uint16_t, unsigned int) override { return false; }
     bool readRegister(uint16_t, uint16_t, void*, uint16_t, unsigned int) override { return false; }
     bool sendSingleDatagram(Command, uint8_t, uint16_t, uint16_t, const void*, uint16_t, bool) override { return false; }
+    size_t sendMultiDatagram(const MultiDatagramSpec*, size_t) override { return 0; }
     bool waitForResponseIdx(uint8_t, unsigned int, RxDatagram&) override { return false; }
     uint8_t allocIdx() override { return 0; }
     uint16_t adpForSlaveIndex(uint16_t idx) override { return static_cast<uint16_t>(0u - idx); }

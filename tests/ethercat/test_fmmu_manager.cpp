@@ -80,7 +80,7 @@ TEST_F(FMMUManagerTest, ConfigureManualOutputOnly) {
     EXPECT_EQ(cfg.fmmus[0].length, 23u);
     EXPECT_EQ(cfg.fmmus[0].logical_start_addr, 0u);
     // Output FMMU → type should include Write flag
-    EXPECT_NE(cfg.fmmus[0].type & FMMURegType::Write, 0);
+    EXPECT_TRUE(cfg.fmmus[0].type.write_enable);
 }
 
 TEST_F(FMMUManagerTest, ConfigureManualInputOnly) {
@@ -91,7 +91,7 @@ TEST_F(FMMUManagerTest, ConfigureManualInputOnly) {
     EXPECT_EQ(cfg.fmmu_count, 1u);
     EXPECT_EQ(cfg.fmmus[0].physical_start_addr, 0x1C00);
     EXPECT_EQ(cfg.fmmus[0].length, 25u);
-    EXPECT_NE(cfg.fmmus[0].type & FMMURegType::Read, 0);
+    EXPECT_TRUE(cfg.fmmus[0].type.read_enable);
 }
 
 TEST_F(FMMUManagerTest, ConfigureManualBoth) {

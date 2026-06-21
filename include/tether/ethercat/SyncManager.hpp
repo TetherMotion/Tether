@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "tether/ethercat/SMRegisters.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/Types.hpp"
 
@@ -285,33 +286,28 @@ public:
      * - Byte  7:   PDI control register
      */
     struct RawHWConfig {
-        uint16_t start_addr = 0; ///< Physical start address in the slave memory
-        uint16_t length     = 0; ///< Region length in bytes
-        uint8_t  control    = 0; ///< Control register (mode, direction, IRQ, watchdog flags)
-        uint8_t  status     = 0; ///< Status register (read-only from master perspective)
-        uint8_t  activate   = 0; ///< Activate register (bit 0 = SM enabled)
-        uint8_t  pdi_ctrl   = 0; ///< PDI control register
-        bool     read_ok    = false; ///< true if the APRD read succeeded
+        uint16_t start_addr = 0;
+        uint16_t length     = 0;
+        SyncManager::SMControlReg  control{};
+        SyncManager::SMStatusReg   status{};
+        SyncManager::SMActivateReg activate{};
+        SyncManager::SMPDICtrlReg  pdi_ctrl{};
+        bool     read_ok    = false;
 
-        /// Return true if the SM is enabled (activate bit 0 set) and the read succeeded.
-        bool isEnabled()       const { return read_ok && ((activate & 0x01U) != 0); }
-        /// Return true if the SM is in mailbox mode (mode bits = 0x02).
+        bool isEnabled()       const { return read_ok && activate.enable; }
         bool isMailboxMode()   const {
             return read_ok &&
-                   ((control & PDO::SM_CTRL_MODE_MASK) == PDO::SM_CTRL_MODE_MAILBOX);
+                   (control.mode == static_cast<uint8_t>(SyncManager::SMMode::Mailbox));
         }
-        /// Return true if the SM is in buffered (process data) mode (mode bits = 0x00).
         bool isBufferedMode()  const {
             return read_ok &&
-                   ((control & PDO::SM_CTRL_MODE_MASK) == PDO::SM_CTRL_MODE_BUFFERED);
+                   (control.mode == static_cast<uint8_t>(SyncManager::SMMode::Buffered));
         }
-        /// Return true if data flows from master to slave (DIR_WRITE set in control).
         bool isMasterToSlave() const {
-            return read_ok && ((control & PDO::SM_CTRL_DIR_WRITE) != 0);
+            return read_ok && control.direction;
         }
-        /// Return true if data flows from slave to master.
         bool isSlaveToMaster() const {
-            return read_ok && ((control & PDO::SM_CTRL_DIR_WRITE) == 0);
+            return read_ok && !control.direction;
         }
     };
 

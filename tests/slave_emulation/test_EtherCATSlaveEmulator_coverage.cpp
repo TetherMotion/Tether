@@ -6,6 +6,7 @@
 #include <cstring>
 #include <memory>
 #include <vector>
+#include <bit>
 #include "tether/ethercat/SlaveEmulator.hpp"
 #include "tether/ethercat/DCClass.hpp"
 
@@ -159,7 +160,7 @@ TEST_F(SlaveEmulatorCovTest, ReadSMRegisters) {
 }
 
 TEST_F(SlaveEmulatorCovTest, WriteSMRegisters) {
-    uint8_t data[8] = {0x00, 0x10, 0x80, 0x00, 0x26, 0x00, 0x01, 0x00};
+    uint8_t data[8] = {0x00, 0x10, 0x80, 0x00, 0x16, 0x00, 0x01, 0x00};
     emu->processAPWR(0x0800, data, 8);
 }
 
@@ -376,7 +377,7 @@ TEST_F(SlaveEmulatorCovTest, ALStatusFromRegister) {
 // --- SyncManager struct ---
 
 TEST(EmulatorStructsTest, SyncManagerDefaults) {
-    SyncManager sm;
+    Emulator::SyncManager sm;
     EXPECT_FALSE(sm.isEnabled());
     EXPECT_TRUE(sm.isMailbox());
     EXPECT_FALSE(sm.isOutput());
@@ -384,9 +385,9 @@ TEST(EmulatorStructsTest, SyncManagerDefaults) {
 }
 
 TEST(EmulatorStructsTest, SyncManagerEnabled) {
-    SyncManager sm;
-    sm.enable = 0x01;
-    sm.control = 0x06; // PDO (bit 2) + output direction (bit 1)
+    Emulator::SyncManager sm;
+    sm.enable = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x01));
+    sm.control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x06)); // PDO (bit 2) + output direction (bit 1)
     EXPECT_TRUE(sm.isEnabled());
     EXPECT_FALSE(sm.isMailbox());
     EXPECT_TRUE(sm.isOutput());
@@ -394,8 +395,8 @@ TEST(EmulatorStructsTest, SyncManagerEnabled) {
 }
 
 TEST(EmulatorStructsTest, SyncManagerInput) {
-    SyncManager sm;
-    sm.control = 0x04; // PDO (bit 2), no bit 1 = input
+    Emulator::SyncManager sm;
+    sm.control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x04)); // PDO (bit 2), no bit 1 = input
     EXPECT_TRUE(sm.isInput());
 }
 

@@ -28,6 +28,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cerrno>
+#include <bit>
 #include "sii/SIIReader.hpp"
 #include <inttypes.h>
 
@@ -47,7 +48,7 @@ static bool siiMailboxSM0IsWrite(Master& master, uint16_t slave_index)
     EtherCAT::SII::SIIData sii;
     if (!EtherCAT::SII::readSII(master, slave_index, sii) || sii.sm_count < 2)
         return false;
-    return (sii.sync_managers[0].control_register & EtherCAT::PDO::SM_CTRL_DIR_WRITE) != 0;
+    return sii.sync_managers[0].control_register.direction;
 }
 // ============================================================================
 // Slave Management
@@ -255,7 +256,7 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
         dst.type = static_cast<PDO::SyncManagerType>(src.sm_type);
 
         TETHER_LOGI(TAG, "SM%zu from SII: Addr=0x%04X Len=%u Ctrl=0x%02X Type=%s Enable=%s",
-                 i, dst.phys_start_addr, dst.length, dst.control,
+                 i, dst.phys_start_addr, dst.length, std::bit_cast<uint8_t>(dst.control),
                  src.getTypeName(), dst.enable ? "yes" : "no");
         configured_any = true;
     }
@@ -276,7 +277,7 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
                     auto& dst = slave_configs[slave_index].sm[sm];
                     dst.phys_start_addr = addr;
                     dst.length = len;
-                    dst.control = ctrl;
+                    dst.control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(ctrl);
                     dst.enable = (act & 0x01) != 0;
                     dst.type = (sm == 2) ? PDO::SyncManagerType::ProcessOutput
                                          : PDO::SyncManagerType::ProcessInput;
@@ -291,12 +292,12 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
     if (slave_configs[slave_index].sm[2].phys_start_addr == 0) {
         auto& sm2 = slave_configs[slave_index].sm[2];
         sm2 = PDO::SyncManagerConfig::process_output(0x1800, 0);
-        TETHER_LOGW(TAG, "SM2 (RxPDO) using DEFAULT: Addr=0x%04X Ctrl=0x%02X", sm2.phys_start_addr, sm2.control);
+        TETHER_LOGW(TAG, "SM2 (RxPDO) using DEFAULT: Addr=0x%04X Ctrl=0x%02X", sm2.phys_start_addr, std::bit_cast<uint8_t>(sm2.control));
     }
     if (slave_configs[slave_index].sm[3].phys_start_addr == 0) {
         auto& sm3 = slave_configs[slave_index].sm[3];
         sm3 = PDO::SyncManagerConfig::process_input(0x1C00, 0);
-        TETHER_LOGW(TAG, "SM3 (TxPDO) using DEFAULT: Addr=0x%04X Ctrl=0x%02X", sm3.phys_start_addr, sm3.control);
+        TETHER_LOGW(TAG, "SM3 (TxPDO) using DEFAULT: Addr=0x%04X Ctrl=0x%02X", sm3.phys_start_addr, std::bit_cast<uint8_t>(sm3.control));
     }
 
     pdo_->finalizeMapping(slave_index);
@@ -320,10 +321,11 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
             uint16_t len_le = Raw::host_to_le16(cfg.length);
             writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 2), &len_le, 2, 200);
 
-            writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 4), &cfg.control, 1, 200);
+            uint8_t ctrl_byte = std::bit_cast<uint8_t>(cfg.control);
+            writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 4), &ctrl_byte, 1, 200);
 
             TETHER_LOGI(TAG, "Wrote SM%u to slave %u: Addr=0x%04X Len=%u Ctrl=0x%02X Act=0x00 (disabled)",
-                     sm, slave_index, cfg.phys_start_addr, cfg.length, cfg.control);
+                     sm, slave_index, cfg.phys_start_addr, cfg.length, ctrl_byte);
         }
     }
 

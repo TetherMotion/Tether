@@ -185,6 +185,133 @@ TEST(MasterFrameCoverage, HandleRxFrameFireAndForgetNonAPRD) {
 }
 
 // ============================================================================
+// Multi-datagram frame helper: build a frame with N datagrams
+// ============================================================================
+static std::vector<uint8_t> buildMultiDatagramFrame(
+    const std::vector<std::tuple<Command, uint8_t, uint16_t, uint16_t,
+                                  const uint8_t*, uint16_t, uint16_t>>& datagrams)
+{
+    // Calculate total payload size
+    size_t total_payload = 0;
+    for (const auto& dg : datagrams) {
+        total_payload += 10 + std::get<5>(dg) + 2; // header + data + WKC
+    }
+
+    const size_t frame_size = 14 + 2 + total_payload;
+    std::vector<uint8_t> frame(std::max(frame_size, (size_t)60), 0);
+
+    // Ethernet header
+    frame[0] = 0x01; frame[1] = 0x01; frame[2] = 0x05;
+    frame[3] = 0x00; frame[4] = 0x00; frame[5] = 0x00;
+    frame[6] = 0xAA; frame[7] = 0xBB; frame[8] = 0xCC;
+    frame[9] = 0xDD; frame[10] = 0xEE; frame[11] = 0xFF;
+    frame[12] = 0x88; frame[13] = 0xA4;
+
+    // EtherCAT frame header
+    uint16_t ec_raw = static_cast<uint16_t>((total_payload & 0x07FFu) | (1u << 12));
+    frame[14] = ec_raw & 0xFF;
+    frame[15] = (ec_raw >> 8) & 0xFF;
+
+    // Pack datagrams
+    size_t offset = 16;
+    for (size_t i = 0; i < datagrams.size(); i++) {
+        const auto& [cmd, idx, adp, ado, payload, payload_len, wkc] = datagrams[i];
+        bool is_last = (i == datagrams.size() - 1);
+
+        frame[offset] = static_cast<uint8_t>(cmd);
+        frame[offset + 1] = idx;
+        frame[offset + 2] = adp & 0xFF;
+        frame[offset + 3] = (adp >> 8) & 0xFF;
+        frame[offset + 4] = ado & 0xFF;
+        frame[offset + 5] = (ado >> 8) & 0xFF;
+
+        uint16_t len_flags = payload_len & 0x07FFu;
+        if (!is_last) len_flags |= 0x8000u; // more flag
+        frame[offset + 6] = len_flags & 0xFF;
+        frame[offset + 7] = (len_flags >> 8) & 0xFF;
+        frame[offset + 8] = 0; // irq
+        frame[offset + 9] = 0;
+
+        if (payload && payload_len > 0) {
+            std::memcpy(&frame[offset + 10], payload, payload_len);
+        }
+
+        size_t wkc_off = offset + 10 + payload_len;
+        frame[wkc_off] = wkc & 0xFF;
+        frame[wkc_off + 1] = (wkc >> 8) & 0xFF;
+
+        offset += 10 + payload_len + 2;
+    }
+
+    return frame;
+}
+
+// ============================================================================
+// Multi-datagram RX parsing tests
+// ============================================================================
+
+TEST(MasterFrameCoverage, HandleRxFrameMultiDatagram) {
+    Master master;
+    // Build a frame with 3 datagrams, different idx values
+    uint8_t p1[2] = {0x02, 0x00};
+    uint8_t p2[2] = {0x08, 0x00};
+    uint8_t p3[4] = {0x01, 0x02, 0x03, 0x04};
+
+    auto frame = buildMultiDatagramFrame({
+        {Command::APRD, 0x10, 0x0000, 0x0130, p1, 2, 1},
+        {Command::APRD, 0x20, 0x0001, 0x0130, p2, 2, 1},
+        {Command::APRD, 0x30, 0x0002, 0x0130, p3, 4, 1},
+    });
+
+    // Should not crash and should process all 3 datagrams
+    // (they'll be unrouted since no waiters, but should not crash)
+    master.handleRxFrame(frame.data(), frame.size());
+
+    auto stats = master.getStats();
+    EXPECT_GE(stats.rx_frame_count, 1u);
+}
+
+TEST(MasterFrameCoverage, HandleRxFrameMultiDatagramFireAndForget) {
+    Master master;
+    // Mix of fire-and-forget and normal idx
+    uint8_t p1[2] = {0x02, 0x00};
+    uint8_t p2[2] = {0x08, 0x00};
+    uint8_t p3[2] = {0x01, 0x00};
+
+    auto frame = buildMultiDatagramFrame({
+        {Command::APRD, 0xFE, 0x0000, 0x0130, p1, 2, 1},  // fire-and-forget
+        {Command::APRD, 0xFE, 0x0001, 0x0130, p2, 2, 1},  // fire-and-forget
+        {Command::APWR, 0xFE, 0x0002, 0x0130, p3, 2, 1},  // fire-and-forget non-APRD
+    });
+
+    // Should process all 3 without crash
+    master.handleRxFrame(frame.data(), frame.size());
+}
+
+TEST(MasterFrameCoverage, HandleRxFrameMultiDatagramTruncated) {
+    Master master;
+    uint8_t p1[2] = {0x02, 0x00};
+    uint8_t p2[2] = {0x08, 0x00};
+
+    auto frame = buildMultiDatagramFrame({
+        {Command::APRD, 0x10, 0x0000, 0x0130, p1, 2, 1},
+        {Command::APRD, 0x20, 0x0001, 0x0130, p2, 2, 1},
+    });
+
+    // Truncate in the middle of the second datagram
+    size_t trunc_len = 16 + 14 + 5; // first datagram (10+2+2) + partial second
+    master.handleRxFrame(frame.data(), trunc_len); // should bail gracefully
+}
+
+TEST(MasterFrameCoverage, HandleRxFrameSingleDatagramNoMoreFlag) {
+    Master master;
+    // Single datagram with more flag = 0 should work as before
+    uint8_t payload[2] = {0x02, 0x00};
+    auto frame = buildEtherCATFrame(Command::APRD, 0x55, 0x0000, 0x0130, payload, 2, 1);
+    master.handleRxFrame(frame.data(), frame.size()); // should not crash
+}
+
+// ============================================================================
 // readRegister — queued responses
 // ============================================================================
 

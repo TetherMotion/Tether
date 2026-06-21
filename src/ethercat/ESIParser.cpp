@@ -3,6 +3,7 @@
 #include <sstream>
 #include <iomanip>
 #include <iostream>
+#include <bit>
 #include "tether/ethercat/PDOManager.hpp" // for SM flag constants
 #include "tether/sii/SIIParser.hpp" // for mailbox protocol constants
 
@@ -99,8 +100,8 @@ bool parseESIFile(const std::string& path, std::vector<DeviceInfo>& devices, std
             const char* en = node->Attribute("Enable");
             if (sa) sment.startAddress = static_cast<uint16_t>(parseHexAttribute(sa));
             if (dsz) sment.defaultSize = static_cast<uint16_t>(std::stoi(dsz));
-            if (cb) sment.control = static_cast<uint8_t>(parseHexAttribute(cb));
-            if (en) sment.enable = static_cast<uint8_t>(std::stoi(en));
+            if (cb) sment.control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(parseHexAttribute(cb)));
+            if (en) sment.enable = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(std::stoi(en)));
             if (node->GetText()) sment.name = node->GetText();
             info.syncManagers.push_back(sment);
         }
@@ -201,10 +202,10 @@ static std::string formatHex(uint32_t v, int width=4) {
     return ss.str();
 }
 
-static std::string formatSMControl(uint8_t ctrl) {
+static std::string formatSMControl(const EtherCAT::SyncManager::SMControlReg& ctrl) {
     using namespace EtherCAT::PDO;
     std::string out;
-    uint8_t modeBits = static_cast<uint8_t>(ctrl & SM_CTRL_MODE_MASK);
+    uint8_t modeBits = ctrl.mode;
     if (modeBits == SM_CTRL_MODE_BUFFERED) out += "BUFFERED";
     else if (modeBits == SM_CTRL_MODE_MAILBOX) out += "MAILBOX";
     else {
@@ -213,12 +214,12 @@ static std::string formatSMControl(uint8_t ctrl) {
 
     out += " (";
     bool first = true;
-    if (ctrl & SM_CTRL_DIR_WRITE) { if (!first) out += " | "; out += "MASTER->SLAVE"; first=false; }
+    if (ctrl.direction) { if (!first) out += " | "; out += "MASTER->SLAVE"; first=false; }
     else { if (!first) out += " | "; out += "SLAVE->MASTER"; first=false; }
-    if (ctrl & SM_CTRL_IRQ_ECAT) { if (!first) out += " | "; out += "IRQ_ECAT"; first=false; }
-    if (ctrl & SM_CTRL_IRQ_PDI)  { if (!first) out += " | "; out += "IRQ_PDI"; first=false; }
-    if (ctrl & SM_CTRL_WATCHDOG) { if (!first) out += " | "; out += "WATCHDOG"; first=false; }
-    if (ctrl & SM_CTRL_REPEAT_REQ) { if (!first) out += " | "; out += "REPEAT_REQ"; }
+    if (ctrl.ecat_irq) { if (!first) out += " | "; out += "IRQ_ECAT"; first=false; }
+    if (ctrl.pdi_irq)  { if (!first) out += " | "; out += "IRQ_PDI"; first=false; }
+    if (ctrl.watchdog) { if (!first) out += " | "; out += "WATCHDOG"; first=false; }
+    if (ctrl.repeat_req) { if (!first) out += " | "; out += "REPEAT_REQ"; }
     out += ")";
     return out;
 }
@@ -250,8 +251,8 @@ std::string formatDeviceHumanReadable(const DeviceInfo& dev, bool onlyMailboxes)
             for (size_t i=0;i<dev.syncManagers.size();++i) {
                 const auto& s = dev.syncManagers[i];
                 ss << "    SM" << i << ": start=" << formatHex(s.startAddress,4) << " len=" << s.defaultSize
-                   << " ctrl=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << (unsigned)s.control << std::dec
-                   << " " << formatSMControl(s.control) << " enable=" << (unsigned)s.enable << " name=" << s.name << "\n";
+                   << " ctrl=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << (unsigned)std::bit_cast<uint8_t>(s.control) << std::dec
+                   << " " << formatSMControl(s.control) << " enable=" << (unsigned)std::bit_cast<uint8_t>(s.enable) << " name=" << s.name << "\n";
             }
         }
 
@@ -330,8 +331,8 @@ std::string formatDeviceJSON(const DeviceInfo& dev) {
         ss << "{";
         ss << "\"start\":\"" << formatHex(s.startAddress,4) << "\",";
         ss << "\"length\":" << s.defaultSize << ",";
-        ss << "\"control\":\"0x" << std::hex << std::uppercase << (unsigned)s.control << std::dec << "\",";
-        ss << "\"enable\":" << ((s.enable & 0x01)?"true":"false") << ",";
+        ss << "\"control\":\"0x" << std::hex << std::uppercase << (unsigned)std::bit_cast<uint8_t>(s.control) << std::dec << "\",";
+        ss << "\"enable\":" << (s.enable.enable ?"true":"false") << ",";
         ss << "\"name\":\"" << s.name << "\"";
         ss << "}";
         if (i+1<dev.syncManagers.size()) ss << ",";

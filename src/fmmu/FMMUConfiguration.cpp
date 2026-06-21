@@ -13,6 +13,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <bit>
 
 namespace EtherCAT {
 
@@ -209,8 +210,8 @@ bool FMMUManager::writeToSlave(bool fmmu_debug) {
         regs.logical_end_bit = fmmu.logical_end_bit;
         regs.physical_start_le = fmmu.physical_start_addr;
         regs.physical_start_bit = fmmu.physical_start_bit;
-        regs.type = fmmu.type;
-        regs.activate = fmmu.activate;
+        regs.type = std::bit_cast<uint8_t>(fmmu.type);
+        regs.activate = std::bit_cast<uint8_t>(fmmu.activate);
 
         uint16_t reg_addr = kFMMURegBase + (static_cast<uint16_t>(i) * kFMMURegSize);
 
@@ -219,8 +220,8 @@ bool FMMUManager::writeToSlave(bool fmmu_debug) {
                  (unsigned long)fmmu.logical_start_addr,
                  fmmu.physical_start_addr,
                  fmmu.length,
-                 fmmu.type,
-                 fmmu.activate);
+                 std::bit_cast<uint8_t>(fmmu.type),
+                 std::bit_cast<uint8_t>(fmmu.activate));
 
         if (fmmu_debug) {
             char hex_buf[128];
@@ -290,13 +291,13 @@ size_t FMMUManager::readFromSlave(FMMUConfig* out_configs, size_t max_fmmus) {
         cfg.logical_end_bit = regs.logical_end_bit;
         cfg.physical_start_addr = regs.physical_start_le;
         cfg.physical_start_bit = regs.physical_start_bit;
-        cfg.type = regs.type;
-        cfg.activate = regs.activate;
+        cfg.type = std::bit_cast<EtherCAT::FMMU::FMMUTypeReg>(regs.type);
+        cfg.activate = std::bit_cast<EtherCAT::FMMU::FMMUActivateReg>(regs.activate);
 
-        if (regs.activate & FMMUActivate::Enable) {
-            if (regs.type & FMMURegType::Write) {
+        if (cfg.activate.enable) {
+            if (cfg.type.write_enable) {
                 cfg.sii_type = FMMUType::Output;
-            } else if (regs.type & FMMURegType::Read) {
+            } else if (cfg.type.read_enable) {
                 cfg.sii_type = FMMUType::Input;
             }
         }
@@ -339,8 +340,8 @@ bool FMMUManager::verify() {
         bool ok = (expected.logical_start_addr == actual.logical_start_addr) &&
                   (expected.length == actual.length) &&
                   (expected.physical_start_addr == actual.physical_start_addr) &&
-                  (expected.type == actual.type) &&
-                  ((expected.activate & FMMUActivate::Enable) == (actual.activate & FMMUActivate::Enable));
+                  (std::bit_cast<uint8_t>(expected.type) == std::bit_cast<uint8_t>(actual.type)) &&
+                  (expected.activate.enable == actual.activate.enable);
 
         if (!ok) {
             TETHER_LOGE(TAG, "FMMU%zu mismatch:", i);
@@ -391,8 +392,8 @@ bool FMMUManager::verifyFromSlave() {
         bool ok = (expected.logical_start_addr == actual.logical_start_addr) &&
                   (expected.length == actual.length) &&
                   (expected.physical_start_addr == actual.physical_start_addr) &&
-                  (expected.type == actual.type) &&
-                  ((expected.activate & FMMUActivate::Enable) == (actual.activate & FMMUActivate::Enable));
+                  (std::bit_cast<uint8_t>(expected.type) == std::bit_cast<uint8_t>(actual.type)) &&
+                  (expected.activate.enable == actual.activate.enable);
 
         if (!ok) {
             TETHER_LOGE(TAG, "verifyFromSlave: FMMU%zu mismatch", i);
@@ -444,7 +445,7 @@ void FMMUManager::logConfig(const char* tag) const {
                  i, getFMMUTypeName(f.sii_type),
                  (unsigned long)f.logical_start_addr,
                  f.physical_start_addr, f.length,
-                 f.type, f.activate, f.associated_sm);
+                 std::bit_cast<uint8_t>(f.type), std::bit_cast<uint8_t>(f.activate), f.associated_sm);
     }
 }
 
@@ -454,11 +455,11 @@ void FMMUManager::logHardware(const char* tag) {
     TETHER_LOGI(tag, "FMMU Hardware State (%zu FMMUs read)", count);
     for (size_t i = 0; i < count; i++) {
         const FMMUConfig& f = hw_configs[i];
-        if (f.activate == 0 && f.length == 0) continue;
+        if (f.activate.enable == 0 && f.length == 0) continue;
         TETHER_LOGI(tag, "  FMMU%zu: log=0x%08lX phy=0x%04X len=%u type=0x%02X act=0x%02X [%s]",
                  i, (unsigned long)f.logical_start_addr, f.physical_start_addr,
-                 f.length, f.type, f.activate,
-                 (f.activate & FMMUActivate::Enable) ? "ENABLED" : "disabled");
+                 f.length, std::bit_cast<uint8_t>(f.type), std::bit_cast<uint8_t>(f.activate),
+                 f.activate.enable ? "ENABLED" : "disabled");
     }
 }
 

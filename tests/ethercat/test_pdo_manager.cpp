@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <cstring>
+#include <bit>
 
 #include "tether/ethercat/PDOManager.hpp"
 
@@ -32,6 +33,9 @@ public:
     MOCK_METHOD(bool, sendSingleDatagram,
                 (Command cmd, uint8_t idx, uint16_t adp, uint16_t ado,
                  const void* data, uint16_t datalen, bool roundtrip),
+                (override));
+    MOCK_METHOD(size_t, sendMultiDatagram,
+                (const MultiDatagramSpec* specs, size_t count),
                 (override));
     MOCK_METHOD(bool, waitForResponseIdx,
                 (uint8_t idx, unsigned int timeout_ms, RxDatagram& out),
@@ -799,9 +803,9 @@ TEST(SyncManagerConfig, ProcessOutputFactory) {
     EXPECT_EQ(cfg.length, 16u);
     EXPECT_TRUE(cfg.enable);
     EXPECT_EQ(cfg.type, SyncManagerType::ProcessOutput);
-    // Output SM should have write direction and watchdog
-    EXPECT_NE(cfg.control & SM_CTRL_DIR_WRITE, 0);
-    EXPECT_NE(cfg.control & SM_CTRL_WATCHDOG, 0);
+    // Output SM should have write direction and repeat request (SOEM EC_DEFAULTDOSM0)
+    EXPECT_NE(std::bit_cast<uint8_t>(cfg.control) & SM_CTRL_DIR_WRITE, 0);
+    EXPECT_NE(std::bit_cast<uint8_t>(cfg.control) & SM_CTRL_REPEAT_REQ, 0);
 }
 
 TEST(SyncManagerConfig, ProcessInputFactory) {
@@ -811,7 +815,7 @@ TEST(SyncManagerConfig, ProcessInputFactory) {
     EXPECT_TRUE(cfg.enable);
     EXPECT_EQ(cfg.type, SyncManagerType::ProcessInput);
     // Input SM should have read direction
-    EXPECT_EQ(cfg.control & SM_CTRL_DIR_WRITE, 0);
+    EXPECT_EQ(std::bit_cast<uint8_t>(cfg.control) & SM_CTRL_DIR_WRITE, 0);
 }
 
 // ============================================================================

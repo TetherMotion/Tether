@@ -212,11 +212,11 @@ bool isPhysicalCommand(EtherCAT::Command cmd) {
            cmd == EtherCAT::Command::FPRW;
 }
 
-const char* accessType(EtherCAT::Command cmd) {
-    if (isLogicalCommand(cmd)) return "LWR";
-    if (isPhysicalCommand(cmd)) return "PWR";
-    if (cmd == EtherCAT::Command::BRD || cmd == EtherCAT::Command::BWR) return "BWR";
-    return "OTH";
+const char* accessPrefix(EtherCAT::Command cmd) {
+    if (isLogicalCommand(cmd)) return "L";
+    if (isPhysicalCommand(cmd)) return "P";
+    if (cmd == EtherCAT::Command::BRD || cmd == EtherCAT::Command::BWR) return "B";
+    return "";
 }
 
 // Use EtherCAT::isReadCommand and EtherCAT::isWriteCommand directly
@@ -826,8 +826,7 @@ void displayMailbox(const std::vector<PCP::InterpretedFrame>& frames, const Filt
 
         std::cout << Utf8Formatter::bullet << " " << tsRelMs(txn.reqTs) << "ms"
                   << "  slave=" << txn.adp
-                  << "  " << (txn.isWrite ? "WR" : "RD")
-                  << "  [" << accessType(txn.cmd) << "]"
+                  << "  " << accessPrefix(txn.cmd) << (txn.isWrite ? "WR" : "RD")
                   << "  " << txn.description;
 
         // Show value with interpretation
@@ -856,8 +855,7 @@ void displayMailbox(const std::vector<PCP::InterpretedFrame>& frames, const Filt
         if (f.errorsOnly) {
             std::cout << Utf8Formatter::bullet << " " << tsRelMs(txn.reqTs) << "ms"
                       << "  slave=" << txn.adp
-                      << "  " << (txn.isWrite ? "WR" : "RD")
-                      << "  [" << accessType(txn.cmd) << "]"
+                      << "  " << accessPrefix(txn.cmd) << (txn.isWrite ? "WR" : "RD")
                       << "  " << txn.description;
             if (!txn.reqData.empty())
                 std::cout << "  " << Utf8Formatter::arrow << " "

@@ -27,6 +27,7 @@
 
 #include <cstring>
 #include <string>
+#include <bit>
 
 using namespace EtherCAT;
 using namespace ::testing;
@@ -221,10 +222,10 @@ TEST_F(SyncManagerAccessorTest, ReadHardwareConfigSuccess) {
     EXPECT_TRUE(cfg.read_ok);
     EXPECT_EQ(cfg.start_addr, 0x1000u);
     EXPECT_EQ(cfg.length,     128u);
-    EXPECT_EQ(cfg.control,    0x26u);
-    EXPECT_EQ(cfg.status,     0x00u);
-    EXPECT_EQ(cfg.activate,   0x01u);
-    EXPECT_EQ(cfg.pdi_ctrl,   0x00u);
+    EXPECT_EQ(cfg.control,    std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x26u)));
+    EXPECT_EQ(cfg.status,     std::bit_cast<EtherCAT::SyncManager::SMStatusReg>(static_cast<uint8_t>(0x00u)));
+    EXPECT_EQ(cfg.activate,   std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x01u)));
+    EXPECT_EQ(cfg.pdi_ctrl,   std::bit_cast<EtherCAT::SyncManager::SMPDICtrlReg>(static_cast<uint8_t>(0x00u)));
 }
 
 TEST_F(SyncManagerAccessorTest, ReadHardwareConfigFailure) {
@@ -243,21 +244,21 @@ TEST_F(SyncManagerAccessorTest, ReadHardwareConfigFailure) {
 TEST_F(SyncManagerAccessorTest, RawHWConfigIsEnabledFlag) {
     SyncManagerAccessor::RawHWConfig cfg{};
     cfg.read_ok  = true;
-    cfg.activate = 0x01;
+    cfg.activate = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x01));
     EXPECT_TRUE(cfg.isEnabled());
 
-    cfg.activate = 0x00;
+    cfg.activate = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x00));
     EXPECT_FALSE(cfg.isEnabled());
 
     cfg.read_ok  = false;
-    cfg.activate = 0x01;
+    cfg.activate = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x01));
     EXPECT_FALSE(cfg.isEnabled());   // read_ok must be true
 }
 
 TEST_F(SyncManagerAccessorTest, RawHWConfigMailboxMode) {
     SyncManagerAccessor::RawHWConfig cfg{};
     cfg.read_ok = true;
-    cfg.control = PDO::SM_CTRL_MODE_MAILBOX;
+    cfg.control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(PDO::SM_CTRL_MODE_MAILBOX));
     EXPECT_TRUE(cfg.isMailboxMode());
     EXPECT_FALSE(cfg.isBufferedMode());
 }
@@ -265,7 +266,7 @@ TEST_F(SyncManagerAccessorTest, RawHWConfigMailboxMode) {
 TEST_F(SyncManagerAccessorTest, RawHWConfigBufferedMode) {
     SyncManagerAccessor::RawHWConfig cfg{};
     cfg.read_ok = true;
-    cfg.control = PDO::SM_CTRL_MODE_BUFFERED;
+    cfg.control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(PDO::SM_CTRL_MODE_BUFFERED));
     EXPECT_FALSE(cfg.isMailboxMode());
     EXPECT_TRUE(cfg.isBufferedMode());
 }
@@ -274,11 +275,11 @@ TEST_F(SyncManagerAccessorTest, RawHWConfigDirection) {
     SyncManagerAccessor::RawHWConfig cfg{};
     cfg.read_ok = true;
 
-    cfg.control = PDO::SM_CTRL_DIR_WRITE;
+    cfg.control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(PDO::SM_CTRL_DIR_WRITE));
     EXPECT_TRUE(cfg.isMasterToSlave());
     EXPECT_FALSE(cfg.isSlaveToMaster());
 
-    cfg.control = 0x00;  // DIR_READ
+    cfg.control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x00));  // DIR_READ
     EXPECT_FALSE(cfg.isMasterToSlave());
     EXPECT_TRUE(cfg.isSlaveToMaster());
 }
@@ -299,7 +300,7 @@ TEST_F(SyncManagerAccessorTest, ValidateCorrectConfig) {
     PDO::SyncManagerConfig expected;
     expected.phys_start_addr = 0x1000;
     expected.length          = 128;
-    expected.control         = 0x26;
+    expected.control         = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x26));
     expected.enable          = true;
 
     auto result = master_.slave(0).sm(0).validate(expected);
@@ -318,7 +319,7 @@ TEST_F(SyncManagerAccessorTest, ValidateStartAddrMismatch) {
     PDO::SyncManagerConfig expected;
     expected.phys_start_addr = 0x2000;  // wrong
     expected.length          = 128;
-    expected.control         = 0x26;
+    expected.control         = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x26));
     expected.enable          = true;
 
     auto result = master_.slave(0).sm(0).validate(expected);
@@ -338,7 +339,7 @@ TEST_F(SyncManagerAccessorTest, ValidateLengthMismatch) {
     PDO::SyncManagerConfig expected;
     expected.phys_start_addr = 0x1000;
     expected.length          = 256;   // wrong length
-    expected.control         = 0x26;
+    expected.control         = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x26));
     expected.enable          = true;
 
     auto result = master_.slave(0).sm(0).validate(expected);
@@ -358,7 +359,7 @@ TEST_F(SyncManagerAccessorTest, ValidateControlMismatch) {
     PDO::SyncManagerConfig expected;
     expected.phys_start_addr = 0x1000;
     expected.length          = 128;
-    expected.control         = 0x22;  // wrong ctrl
+    expected.control         = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x22));  // wrong ctrl
     expected.enable          = true;
 
     auto result = master_.slave(0).sm(0).validate(expected);
@@ -379,7 +380,7 @@ TEST_F(SyncManagerAccessorTest, ValidateNotEnabled) {
     PDO::SyncManagerConfig expected;
     expected.phys_start_addr = 0x1000;
     expected.length          = 128;
-    expected.control         = 0x26;
+    expected.control         = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x26));
     expected.enable          = true;
 
     auto result = master_.slave(0).sm(0).validate(expected);
@@ -409,7 +410,7 @@ TEST_F(SyncManagerAccessorTest, ValidateReadFailure) {
     PDO::SyncManagerConfig expected;
     expected.phys_start_addr = 0x1000;
     expected.length          = 128;
-    expected.control         = 0x26;
+    expected.control         = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x26));
     expected.enable          = true;
 
     auto result = master_.slave(0).sm(0).validate(expected);
@@ -439,10 +440,10 @@ TEST_F(SyncManagerAccessorTest, FormatConfigMailboxSM0FallbackDetected) {
     cfg.read_ok   = true;
     cfg.start_addr = 0x1000;
     cfg.length     = 256;
-    cfg.control    = 0x26;  // mailbox-write ctrl
-    cfg.status     = 0x00;
-    cfg.activate   = 0x01;
-    cfg.pdi_ctrl   = 0x00;
+    cfg.control    = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x26));  // mailbox-write ctrl
+    cfg.status     = std::bit_cast<EtherCAT::SyncManager::SMStatusReg>(static_cast<uint8_t>(0x00));
+    cfg.activate   = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x01));
+    cfg.pdi_ctrl   = std::bit_cast<EtherCAT::SyncManager::SMPDICtrlReg>(static_cast<uint8_t>(0x00));
 
     auto acc = master_.slave(0).sm(0);
     std::string fmt = acc.formatConfig(cfg);
@@ -460,11 +461,11 @@ TEST_F(SyncManagerAccessorTest, FormatConfigBufferedProcessSM2) {
     cfg.start_addr = 0x1100;
     cfg.length     = 8;
     // Buffered + DIR_WRITE + IRQ_PDI + WATCHDOG = 0x24 | 0x20 | 0x40 = 0x64
-    cfg.control    = static_cast<uint8_t>(PDO::SM_CTRL_MODE_BUFFERED |
+    cfg.control    = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(PDO::SM_CTRL_MODE_BUFFERED |
                                           PDO::SM_CTRL_DIR_WRITE |
                                           PDO::SM_CTRL_IRQ_PDI |
-                                          PDO::SM_CTRL_WATCHDOG);
-    cfg.activate   = 0x01;
+                                          PDO::SM_CTRL_WATCHDOG));
+    cfg.activate   = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x01));
 
     auto acc = master_.slave(0).sm(2);
     std::string fmt = acc.formatConfig(cfg);
@@ -493,8 +494,8 @@ TEST_F(SyncManagerAccessorTest, FormatConfigSM1FallbackDetected) {
     cfg.read_ok    = true;
     cfg.start_addr = 0x1400;
     cfg.length     = 256;
-    cfg.control    = 0x22;
-    cfg.activate   = 0x01;
+    cfg.control    = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x22));
+    cfg.activate   = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x01));
 
     auto acc  = master_.slave(0).sm(1);
     std::string fmt = acc.formatConfig(cfg);
@@ -508,8 +509,8 @@ TEST_F(SyncManagerAccessorTest, FormatConfigDisabled) {
     cfg.read_ok    = true;
     cfg.start_addr = 0x1000;
     cfg.length     = 128;
-    cfg.control    = 0x26;
-    cfg.activate   = 0x00;  // not enabled
+    cfg.control    = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x26));
+    cfg.activate   = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x00));  // not enabled
 
     auto acc  = master_.slave(0).sm(0);
     std::string fmt = acc.formatConfig(cfg);
@@ -676,7 +677,7 @@ TEST_F(SyncManagerAccessorTest, ValidateCorrectConfigOnAllSMs) {
         PDO::SyncManagerConfig expected;
         expected.phys_start_addr = addr;
         expected.length          = len;
-        expected.control         = ctrl;
+        expected.control         = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(ctrl);
         expected.enable          = true;
 
         auto result = master_.slave(0).sm(smIdx).validate(expected);

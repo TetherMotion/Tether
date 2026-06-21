@@ -5,6 +5,8 @@
 #include "tether/sii/SIIReader.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 
+#include <bit>
+
 namespace EtherCAT {
 namespace Raw {
 
@@ -155,10 +157,10 @@ bool configure_mailbox_from_sii(
         bool ok{false};
         uint16_t start{0};
         uint16_t len{0};
-        uint8_t control{0};
-        uint8_t status{0};
-        uint8_t activate{0};
-        uint8_t pdi_ctrl{0};
+        EtherCAT::SyncManager::SMControlReg  control{};
+        EtherCAT::SyncManager::SMStatusReg   status{};
+        EtherCAT::SyncManager::SMActivateReg activate{};
+        EtherCAT::SyncManager::SMPDICtrlReg  pdi_ctrl{};
     };
 
     auto read_sm = [&](uint16_t sm_base, unsigned sm_index) -> SmRegs {
@@ -172,20 +174,18 @@ bool configure_mailbox_from_sii(
         r.ok = true;
         r.start = static_cast<uint16_t>(buf[0] | (static_cast<uint16_t>(buf[1]) << 8));
         r.len = static_cast<uint16_t>(buf[2] | (static_cast<uint16_t>(buf[3]) << 8));
-        r.control = buf[4];
-        r.status = buf[5];
-        r.activate = buf[6];
-        r.pdi_ctrl = buf[7];
+        r.control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(buf[4]);
+        r.status = std::bit_cast<EtherCAT::SyncManager::SMStatusReg>(buf[5]);
+        r.activate = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(buf[6]);
+        r.pdi_ctrl = std::bit_cast<EtherCAT::SyncManager::SMPDICtrlReg>(buf[7]);
         return r;
     };
 
-    auto fmt_dir = [&](uint8_t ctrl) -> const char* {
-        using namespace EtherCAT::PDO;
-        return ((ctrl & SM_CTRL_DIR_WRITE) != 0) ? "MASTER->SLAVE" : "SLAVE->MASTER";
+    auto fmt_dir = [&](const EtherCAT::SyncManager::SMControlReg& ctrl) -> const char* {
+        return ctrl.direction ? "MASTER->SLAVE" : "SLAVE->MASTER";
     };
-    auto is_mailbox = [&](uint8_t ctrl) -> bool {
-        using namespace EtherCAT::PDO;
-        return ((ctrl & SM_CTRL_MODE_MASK) == SM_CTRL_MODE_MAILBOX);
+    auto is_mailbox = [&](const EtherCAT::SyncManager::SMControlReg& ctrl) -> bool {
+        return ctrl.mode == static_cast<uint8_t>(EtherCAT::SyncManager::SMMode::Mailbox);
     };
 
     const SmRegs sm0 = read_sm(EC_REG_SM0, 0);
@@ -194,29 +194,27 @@ bool configure_mailbox_from_sii(
     if (sm0.ok && sm1.ok) {
         TETHER_LOGD(TAG, "[MBOXTRACE] SII-derived mailbox: Receive(SM0/M→S)=0x%04X/%u Send(SM1/S→M)=0x%04X/%u proto=0x%04X valid_sii=%s\n[MBOXTRACE] SM0(Receive/MbxIn): start=0x%04X len=%u ctrl=0x%02X dir=%s act=0x%02X stat=0x%02X pdi=0x%02X\n[MBOXTRACE] SM1(Send/MbxOut): start=0x%04X len=%u ctrl=0x%02X dir=%s act=0x%02X stat=0x%02X pdi=0x%02X",
                     mbx_receive_addr, (unsigned)mbx_receive_len, mbx_send_addr, (unsigned)mbx_send_len, proto, valid_mailbox ? "yes" : "no",
-                    sm0.start, (unsigned)sm0.len, sm0.control, fmt_dir(sm0.control), sm0.activate, sm0.status, sm0.pdi_ctrl,
-                    sm1.start, (unsigned)sm1.len, sm1.control, fmt_dir(sm1.control), sm1.activate, sm1.status, sm1.pdi_ctrl);
+                    sm0.start, (unsigned)sm0.len, std::bit_cast<uint8_t>(sm0.control), fmt_dir(sm0.control), std::bit_cast<uint8_t>(sm0.activate), std::bit_cast<uint8_t>(sm0.status), std::bit_cast<uint8_t>(sm0.pdi_ctrl),
+                    sm1.start, (unsigned)sm1.len, std::bit_cast<uint8_t>(sm1.control), fmt_dir(sm1.control), std::bit_cast<uint8_t>(sm1.activate), std::bit_cast<uint8_t>(sm1.status), std::bit_cast<uint8_t>(sm1.pdi_ctrl));
 
-        const bool sm0_mbx = is_mailbox(sm0.control) && (sm0.activate & 0x01);
-        const bool sm1_mbx = is_mailbox(sm1.control) && (sm1.activate & 0x01);
+        const bool sm0_mbx = is_mailbox(sm0.control) && sm0.activate.enable;
+        const bool sm1_mbx = is_mailbox(sm1.control) && sm1.activate.enable;
 
-        // Validate SM controls match expected mailbox configuration
-        auto ctrl_mode_name = [&](uint8_t ctrl) -> const char* {
-            using namespace EtherCAT::PDO;
-            switch (ctrl & SM_CTRL_MODE_MASK) {
-                case SM_CTRL_MODE_BUFFERED: return "Buffered";
-                case SM_CTRL_MODE_MAILBOX:  return "Mailbox";
-                case SM_CTRL_MODE_3PDO:     return "Buffered3PDO";
+        auto ctrl_mode_name = [&](const EtherCAT::SyncManager::SMControlReg& ctrl) -> const char* {
+            switch (ctrl.mode) {
+                case static_cast<uint8_t>(EtherCAT::SyncManager::SMMode::Buffered): return "Buffered";
+                case static_cast<uint8_t>(EtherCAT::SyncManager::SMMode::Mailbox):  return "Mailbox";
+                case static_cast<uint8_t>(EtherCAT::SyncManager::SMMode::ThreePDO): return "Buffered3PDO";
                 default:                    return "Reserved";
             }
         };
         if (sm0.ok && !sm0_mbx) {
             TETHER_LOGW(TAG, "SM0 control byte 0x%02X does not indicate an active mailbox (mode=%s, dir=%s)",
-                        sm0.control, ctrl_mode_name(sm0.control), fmt_dir(sm0.control));
+                        std::bit_cast<uint8_t>(sm0.control), ctrl_mode_name(sm0.control), fmt_dir(sm0.control));
         }
         if (sm1.ok && !sm1_mbx) {
             TETHER_LOGW(TAG, "SM1 control byte 0x%02X does not indicate an active mailbox (mode=%s, dir=%s)",
-                        sm1.control, ctrl_mode_name(sm1.control), fmt_dir(sm1.control));
+                        std::bit_cast<uint8_t>(sm1.control), ctrl_mode_name(sm1.control), fmt_dir(sm1.control));
         }
 
         // Cross-check SM registers intelligently, accounting for swap correction applied above.
@@ -226,10 +224,10 @@ bool configure_mailbox_from_sii(
             // Per EtherCAT ESC specification:
             // - SM_CTRL_DIR_WRITE (bit2=1): ECAT writes, PDI reads → M→S → Receive mailbox (MbxIn, SM0)
             // - SM_CTRL_DIR_READ  (bit2=0): ECAT reads, PDI writes → S→M → Send mailbox (MbxOut, SM1)
-            const uint16_t hw_receive_addr = (((sm0.control & EtherCAT::PDO::SM_CTRL_DIR_WRITE) != 0) ? sm0.start : sm1.start);
-            const uint16_t hw_receive_len  = (((sm0.control & EtherCAT::PDO::SM_CTRL_DIR_WRITE) != 0) ? sm0.len   : sm1.len);
-            const uint16_t hw_send_addr = (((sm0.control & EtherCAT::PDO::SM_CTRL_DIR_WRITE) == 0) ? sm0.start : sm1.start);
-            const uint16_t hw_send_len  = (((sm0.control & EtherCAT::PDO::SM_CTRL_DIR_WRITE) == 0) ? sm0.len   : sm1.len);
+            const uint16_t hw_receive_addr = (sm0.control.direction ? sm0.start : sm1.start);
+            const uint16_t hw_receive_len  = (sm0.control.direction ? sm0.len   : sm1.len);
+            const uint16_t hw_send_addr = (!sm0.control.direction ? sm0.start : sm1.start);
+            const uint16_t hw_send_len  = (!sm0.control.direction ? sm0.len   : sm1.len);
 
             // Compare hardware SM registers to SII values but DO NOT modify output addresses.
             if (hw_receive_addr == mbx_receive_addr && hw_receive_len == mbx_receive_len &&
