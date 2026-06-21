@@ -398,7 +398,13 @@ void CoEManager::workerLoop() {
                 auto txn = std::move(state_.read_queue.front());
                 state_.read_queue.pop_front();
                 lock.unlock();
+
+                if (request_in_flight_.exchange(true)) {
+                    TETHER_LOGW(TAG, "Slave %u: CoE read started while previous request in flight — stale response possible",
+                                slave_index_);
+                }
                 txn->execute(*this);
+                request_in_flight_.store(false);
                 did_work = true;
             }
         }
@@ -416,6 +422,10 @@ void CoEManager::workerLoop() {
                 if (!resolveMailbox(wr_addr, wr_len, rd_addr, rd_len)) {
                     txn.promise.set_value(std::unexpected(CoEError::NotConfigured));
                 } else {
+                    if (request_in_flight_.exchange(true)) {
+                        TETHER_LOGW(TAG, "Slave %u: CoE write started while previous request in flight — stale response possible",
+                                    slave_index_);
+                    }
                     bool ok = transport_.sdoDownload(
                         slave_index_, mbxCounterPtr(),
                         wr_addr, wr_len, rd_addr, rd_len,
@@ -423,6 +433,7 @@ void CoEManager::workerLoop() {
                         txn.data.data(), txn.data.size(),
                         diag_enabled_.load(),
                         txn.options.poll_interval_ms, txn.options.timeout_ms);
+                    request_in_flight_.store(false);
 
                     if (ok) {
                         txn.promise.set_value({});

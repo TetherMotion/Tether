@@ -38,18 +38,12 @@ static void diag_hexdump(const uint8_t *data, size_t len, size_t max_print = 64)
 }
 #endif
 
-// Clear the slave's output (read) mailbox SM to reset stale response state.
-// Without this, a prior unread response leaves SM1 "full" from the PDI's
-// perspective, preventing the slave from writing new responses.
-static bool mbx_clear_read_area(Master& master, uint16_t adp, uint16_t mbx_read_addr)
-{
-    const uint16_t zero_le = host_to_le16(0);
-    return master.writeRegister(Master::slaveAddressFromADP(adp), mbx_read_addr, zero_le, 200);
-}
-
 // Check SM1 status for stale mailbox data from a previous unfinished request.
-// If present, read and discard it to clear the mailbox state, then zero the read area.
-static bool mbx_drain_stale_if_present(Master& master, uint16_t adp, uint16_t mbx_read_addr, uint16_t mbx_read_len)
+// If present, read and discard it to clear the mailbox state.
+// Note: we must NOT write to SM1 (the slave's transmit mailbox) — the ESC
+// rejects PWR to a read-direction sync manager with wkc=0.  Reading the
+// stale data is sufficient to clear the mailbox full flag.
+static void mbx_drain_stale_if_present(Master& master, uint16_t adp, uint16_t mbx_read_addr, uint16_t mbx_read_len)
 {
     uint8_t sm1_status = 0;
     if (master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(1), sm1_status, 100)) {
@@ -63,7 +57,6 @@ static bool mbx_drain_stale_if_present(Master& master, uint16_t adp, uint16_t mb
             (void)master.readRegister(Master::slaveAddressFromADP(adp), mbx_read_addr, drain_buf, drain_len, 200);
         }
     }
-    return mbx_clear_read_area(master, adp, mbx_read_addr);
 }
 
 static void mbx_diag_dump_slave_state(Master& master, uint16_t adp, uint16_t mbx_wr_addr, uint16_t mbx_rd_addr)
@@ -145,6 +138,28 @@ static void logCoeMbxPacket(const char* dir, uint16_t adp, uint16_t index, uint8
     TETHER_LOGI(TAG, "[CoE-%s] Data (%zu/%zu bytes): %s", dir, dump_len, len, hexbuf);
 }
 
+static bool mbx_wait_sm0_not_full(Master& master, uint16_t adp,
+                                   unsigned int timeout_ms,
+                                   unsigned int poll_interval_ms = 5)
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (master.isCancelRequested()) {
+            return false;
+        }
+        uint8_t sm0_status = 0;
+        if (master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(0), sm0_status, 100)) {
+            if ((sm0_status & EC_SM_STATUS_MBXFULL) == 0) {
+                return true;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+    }
+    TETHER_LOGE(TAG, "SM0 mailbox stayed full (adp=0x%04X) after %ums timeout — slave PDI not draining mailbox",
+                adp, timeout_ms);
+    return false;
+}
+
 static bool mbx_apwr_with_wkc_probe(
     Master& master,
     uint16_t adp,
@@ -156,6 +171,14 @@ static bool mbx_apwr_with_wkc_probe(
     bool* out_used_alt)
 {
     if (out_used_alt) *out_used_alt = false;
+
+    // Wait for SM0 (master→slave mailbox) to be not full before writing.
+    // If the slave's PDI hasn't read the previous message yet, the ESC will
+    // reject the write (wkc=0) and silently drop the data.
+    if (!mbx_wait_sm0_not_full(master, adp, timeout_ms)) {
+        TETHER_LOGE(TAG, "mailbox write aborted: SM0 still full (adp=0x%04X addr=0x%04X)", adp, primary_addr);
+        return false;
+    }
 
     // Use the master's descriptive write API, which still pre-registers a waiter,
     // the response arrives before we start waiting.
@@ -253,6 +276,8 @@ bool coe_sdo_upload(
         mbx_cnt = *inout_mbx_cnt;
     }
 
+    const uint8_t expected_mbx_cnt = mbx_cnt;
+
     MbxHeader mbx{};
     mbx.length_le = host_to_le16(static_cast<uint16_t>(sizeof(CoeHeader) + sizeof(SdoInitUploadReq)));
     mbx.address_le = host_to_le16(0);
@@ -260,7 +285,7 @@ bool coe_sdo_upload(
     mbx.mbxtype = mbx_type_with_cnt(EC_MBXT_COE, mbx_cnt);
 
     CoeHeader coe{};
-    coe.raw_le = host_to_le16(coe_make_raw(coe_number, EC_COES_SDOREQ));
+    coe.raw_le = host_to_le16(coe_make_raw(0, EC_COES_SDOREQ));
 
     SdoInitUploadReq sdo{};
     sdo.cmd = EC_SDO_UP_REQ;
@@ -410,11 +435,11 @@ bool coe_sdo_upload(
             const uint16_t r_coe_raw = le16_to_host(r_coe.raw_le);
             const uint16_t r_number = r_coe_raw & 0x01FFu;
             const uint8_t r_service = (r_coe_raw >> 12) & 0x0Fu;
-            if (r_number != coe_number || r_service != EC_COES_SDORES) {
+            if (r_service != EC_COES_SDORES) {
                 if (!logged_mbx_mismatch) {
                     logged_mbx_mismatch = true;
                     char tmp[96];
-                    snprintf(tmp, sizeof(tmp), "CoE mismatch: want num=%u svc=%u got num=%u svc=%u raw=0x%04x", coe_number, EC_COES_SDORES,
+                    snprintf(tmp, sizeof(tmp), "CoE mismatch: want svc=%u got num=%u svc=%u raw=0x%04x", EC_COES_SDORES,
                              r_number, r_service, r_coe_raw);
                     TETHER_LOGI(TAG, "%s", tmp);
 #ifdef TETHER_DIAG_SDO_IO
@@ -423,6 +448,17 @@ bool coe_sdo_upload(
                         diag_hexdump(mbxbuf, r_len, 256);
                     }
 #endif
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                continue;
+            }
+            // Validate mailbox counter — a stale response from a previous
+            // (possibly timed-out) request will have a different counter.
+            if (r_cnt != expected_mbx_cnt) {
+                if (!logged_mbx_mismatch) {
+                    logged_mbx_mismatch = true;
+                    TETHER_LOGW(TAG, "Stale mailbox response: cnt=%u expected=%u (adp=0x%04X index=0x%04X:%u) — skipping",
+                                r_cnt, expected_mbx_cnt, adp, index, sub);
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
@@ -447,6 +483,22 @@ bool coe_sdo_upload(
                 }
 #endif
                 return false;
+            }
+            // Validate SDO index/subindex — a stale response for a different
+            // object must not be accepted as the response to this request.
+            if (r_len >= sizeof(CoeHeader) + sizeof(SdoInitUploadRes)) {
+                const auto *res = reinterpret_cast<const SdoInitUploadRes *>(r_sdo_bytes);
+                const uint16_t r_index = le16_to_host(res->index_le);
+                const uint8_t r_sub = res->sub;
+                if (r_index != index || r_sub != sub) {
+                    if (!logged_mbx_mismatch) {
+                        logged_mbx_mismatch = true;
+                        TETHER_LOGW(TAG, "Stale SDO response: idx=0x%04X:%u expected=0x%04X:%u (adp=0x%04X) — skipping",
+                                    r_index, r_sub, index, sub, adp);
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    continue;
+                }
             }
             // Matching non-abort response found — stop polling.
             // CRITICAL: We must break here so that subsequent APRD calls
@@ -491,7 +543,6 @@ bool coe_sdo_upload(
             }
             logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbx_read_len,
                             master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
-            (void)mbx_clear_read_area(master, adp, mbx_read_addr);
             return true;
         }
 
@@ -511,7 +562,7 @@ bool coe_sdo_upload(
             seg_mbx.mbxtype = mbx_type_with_cnt(EC_MBXT_COE, mbx_cnt);
 
             CoeHeader seg_coe{};
-            seg_coe.raw_le = host_to_le16(coe_make_raw(coe_number, EC_COES_SDOREQ));
+            seg_coe.raw_le = host_to_le16(coe_make_raw(0, EC_COES_SDOREQ));
 
             const uint8_t seg_req_cmd = static_cast<uint8_t>(EC_SDO_SEG_UP_REQ | (toggle ? 0x10u : 0x00u));
 
@@ -573,9 +624,8 @@ bool coe_sdo_upload(
                 }
                 const auto *r2_coe = reinterpret_cast<const CoeHeader *>(mbxbuf + sizeof(MbxHeader));
                 const uint16_t r2_coe_raw = le16_to_host(r2_coe->raw_le);
-                const uint16_t r2_number = r2_coe_raw & 0x01FFu;
                 const uint8_t r2_service = (r2_coe_raw >> 12) & 0x0Fu;
-                if (r2_number != coe_number || r2_service != EC_COES_SDORES) {
+                if (r2_service != EC_COES_SDORES) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     continue;
                 }
@@ -599,7 +649,6 @@ bool coe_sdo_upload(
                     std::memcpy(out + produced, seg_res + 1, copy_n);
                 }
                 produced += seg_data_bytes;
-                (void)mbx_clear_read_area(master, adp, mbx_read_addr);
                 if (last) {
                     if (out_len) {
                         *out_len = produced;
@@ -622,7 +671,6 @@ bool coe_sdo_upload(
                 return false;
             }
         }
-        (void)mbx_clear_read_area(master, adp, mbx_read_addr);
         return false;
     }
 
@@ -656,12 +704,12 @@ bool coe_sdo_download(
         return false;
     }
 
-    uint16_t coe_number = static_cast<uint16_t>(master.allocIdx());
-
     uint8_t mbx_cnt = 0;
     if (inout_mbx_cnt != nullptr) {
         mbx_cnt = *inout_mbx_cnt;
     }
+
+    const uint8_t expected_mbx_cnt = mbx_cnt;
 
     // Build mailbox header
     MbxHeader mbx{};
@@ -672,7 +720,7 @@ bool coe_sdo_download(
 
     // Build CoE header
     CoeHeader coe{};
-    coe.raw_le = host_to_le16(coe_make_raw(coe_number, EC_COES_SDOREQ));
+    coe.raw_le = host_to_le16(coe_make_raw(0, EC_COES_SDOREQ));
 
     // Build SDO download request
     // Expedited transfer: cmd = 0x20 | (expedited << 1) | (size_specified << 0)
@@ -777,6 +825,13 @@ bool coe_sdo_download(
         MbxHeader resp_mbx{};
         std::memcpy(&resp_mbx, mbxbuf, sizeof(resp_mbx));
         const uint16_t resp_len = le16_to_host(resp_mbx.length_le);
+        const uint8_t resp_cnt = static_cast<uint8_t>((resp_mbx.mbxtype >> 4) & 0x0Fu);
+
+        // Validate mailbox counter — reject stale responses from previous requests.
+        if (resp_cnt != expected_mbx_cnt) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
 
         if (resp_len < sizeof(CoeHeader)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -806,7 +861,6 @@ bool coe_sdo_download(
                 diag_hexdump(mbxbuf + sdo_offset, mbx_read_len - sdo_offset, 256);
             }
 #endif
-            (void)mbx_clear_read_area(master, adp, mbx_read_addr);
             return false;
         }
 
@@ -820,7 +874,6 @@ bool coe_sdo_download(
                 if (res_index == index && res.sub == sub) {
                     logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbx_read_len,
                             master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
-                    (void)mbx_clear_read_area(master, adp, mbx_read_addr);
                     return true;
                 }
             }

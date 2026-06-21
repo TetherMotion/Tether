@@ -4,10 +4,12 @@
  */
 
 #include "tether/slave/core/SlaveCore.hpp"
+#include "tether/slave/mailbox/IMailboxHandler.hpp"
 #include "tether/ethercat/Types.hpp"
 #include <algorithm>
 #include <cstring>
 #include <chrono>
+#include <bit>
 
 namespace EtherCAT {
 namespace slave {
@@ -46,8 +48,9 @@ SlaveCore::SlaveCore(const SlaveConfig& config)
     registers_[ESCReg::SyncManagerCount] = config_.escConfig.smCount;
     registers_[ESCReg::RAMSize] = config_.escConfig.ramSizeKB;
     registers_[ESCReg::PortDescriptor] = config_.escConfig.portDescriptor;
-    registers_[ESCReg::Features] = config_.escConfig.features & 0xFF;
-    registers_[ESCReg::Features + 1] = (config_.escConfig.features >> 8) & 0xFF;
+    uint16_t featuresRaw = std::bit_cast<uint16_t>(config_.escConfig.features);
+    registers_[ESCReg::Features] = featuresRaw & 0xFF;
+    registers_[ESCReg::Features + 1] = (featuresRaw >> 8) & 0xFF;
     
     // Initialize process data RAM
     processDataRAM_.resize(config_.escConfig.processDataRamSize(), 0);
@@ -723,7 +726,8 @@ bool SlaveCore::writeRegister(uint16_t addr, const uint8_t* data, uint16_t len) 
     
     // Handle SII access
     if (addr == ESCReg::SIIControl && len >= 2) {
-        siiState_.control = data[0] | (data[1] << 8);
+        siiState_.control = std::bit_cast<EtherCAT::SII::SIIControlReg>(
+            static_cast<uint16_t>(data[0] | (data[1] << 8)));
         processSIICommand();
     }
     if (addr == ESCReg::SIIAddress && len >= 4) {
@@ -764,11 +768,56 @@ bool SlaveCore::writeRegister(uint16_t addr, const uint8_t* data, uint16_t len) 
 bool SlaveCore::readProcessData(uint16_t addr, uint8_t* data, uint16_t len) {
     if (addr + len > processDataRAM_.size()) return false;
     std::memcpy(data, &processDataRAM_[addr], len);
+
+    // If this read falls within a mailbox read-direction SM (SM1, slave→master),
+    // clear the MailboxStatus bit — the master has consumed the response.
+    const uint16_t physAddr = addr + ESCReg::ProcessDataRAM;
+    for (size_t i = 0; i < syncManagers_.size(); ++i) {
+        auto& sm = syncManagers_[i];
+        if (!sm.isEnabled() || !sm.isMailbox()) continue;
+        if (sm.isDirectionRead()) {
+            if (physAddr >= sm.physicalAddr &&
+                physAddr + len <= sm.physicalAddr + sm.length) {
+                sm.status = std::bit_cast<EtherCAT::SyncManager::SMStatusReg>(static_cast<uint8_t>(std::bit_cast<uint8_t>(sm.status) & ~SMStatus::MailboxStatus));
+                // Sync status byte back to register image
+                registers_[ESCReg::SM0 + i * ESCReg::SMSize + 5] = std::bit_cast<uint8_t>(sm.status);
+                break;
+            }
+        }
+    }
+
     return true;
 }
 
 bool SlaveCore::writeProcessData(uint16_t addr, const uint8_t* data, uint16_t len) {
     if (addr + len > processDataRAM_.size()) return false;
+
+    // ESC mailbox protection: check if this write targets a mailbox SM.
+    const uint16_t physAddr = addr + ESCReg::ProcessDataRAM;
+    for (size_t i = 0; i < syncManagers_.size(); ++i) {
+        auto& sm = syncManagers_[i];
+        if (!sm.isEnabled() || !sm.isMailbox()) continue;
+        if (physAddr >= sm.physicalAddr &&
+            physAddr + len <= sm.physicalAddr + sm.length) {
+            // Reject writes to a read-direction SM (slave→master).
+            // The ESC hardware rejects PWR to a read-direction sync manager with wkc=0.
+            if (sm.isDirectionRead()) {
+                return false;
+            }
+            // Reject writes to a full mailbox — the ESC protects unread data.
+            if (std::bit_cast<uint8_t>(sm.status) & SMStatus::MailboxStatus) {
+                return false;
+            }
+            // Write-direction mailbox SM: write data and set MailboxStatus.
+            std::memcpy(&processDataRAM_[addr], data, len);
+            sm.status = std::bit_cast<EtherCAT::SyncManager::SMStatusReg>(static_cast<uint8_t>(std::bit_cast<uint8_t>(sm.status) | SMStatus::MailboxStatus));
+            // Sync status byte back to register image
+            registers_[ESCReg::SM0 + i * ESCReg::SMSize + 5] = std::bit_cast<uint8_t>(sm.status);
+            return true;
+        }
+    }
+
+    // Non-mailbox write: proceed normally
     std::memcpy(&processDataRAM_[addr], data, len);
     return true;
 }
@@ -802,7 +851,7 @@ bool SlaveCore::processLogicalWrite(uint32_t logicalAddr, const uint8_t* data, u
 }
 
 void SlaveCore::processSIICommand() {
-    if (siiState_.control & SIIControl::ReadOperation) {
+    if (siiState_.control.read_op) {
         // Read operation
         uint16_t word = readSIIWord(static_cast<uint16_t>(siiState_.address));
         siiState_.data[0] = word & 0xFF;
@@ -813,20 +862,24 @@ void SlaveCore::processSIICommand() {
         registers_[ESCReg::SIIData + 1] = siiState_.data[1];
         
         // Clear read bit and busy
-        siiState_.control &= ~(SIIControl::ReadOperation | SIIControl::Busy);
-        registers_[ESCReg::SIIControl] = siiState_.control & 0xFF;
-        registers_[ESCReg::SIIControl + 1] = (siiState_.control >> 8) & 0xFF;
+        siiState_.control.read_op = 0;
+        siiState_.control.busy = 0;
+        uint16_t ctrlRaw = std::bit_cast<uint16_t>(siiState_.control);
+        registers_[ESCReg::SIIControl] = ctrlRaw & 0xFF;
+        registers_[ESCReg::SIIControl + 1] = (ctrlRaw >> 8) & 0xFF;
     }
     
-    if (siiState_.control & SIIControl::WriteOperation) {
+    if (siiState_.control.write_op) {
         // Write operation
         uint16_t word = siiState_.data[0] | (siiState_.data[1] << 8);
         writeSIIWord(static_cast<uint16_t>(siiState_.address), word);
         
         // Clear write bit and busy
-        siiState_.control &= ~(SIIControl::WriteOperation | SIIControl::Busy);
-        registers_[ESCReg::SIIControl] = siiState_.control & 0xFF;
-        registers_[ESCReg::SIIControl + 1] = (siiState_.control >> 8) & 0xFF;
+        siiState_.control.write_op = 0;
+        siiState_.control.busy = 0;
+        uint16_t ctrlRaw = std::bit_cast<uint16_t>(siiState_.control);
+        registers_[ESCReg::SIIControl] = ctrlRaw & 0xFF;
+        registers_[ESCReg::SIIControl + 1] = (ctrlRaw >> 8) & 0xFF;
     }
 }
 
@@ -840,7 +893,7 @@ void SlaveCore::updateWatchdog(uint64_t deltaNs) {
     if (alStatus_.state == SlaveState::OP) {
         watchdog_.smCounter++;
         if (watchdog_.smCounter >= watchdog_.smTimeout) {
-            watchdog_.status |= 0x02;  // SM watchdog triggered
+            watchdog_.status.sm_triggered = 1;  // SM watchdog triggered
             if (watchdogCallback_) {
                 watchdogCallback_(false, true);
             }
@@ -871,7 +924,15 @@ void SlaveCore::processMailboxOut() {
     if (syncManagers_[0].isEnabled()) {
         auto& sm = syncManagers_[0];
         // Check mailbox status bit
-        if (sm.status & SMStatus::MailboxStatus) {
+        if (std::bit_cast<uint8_t>(sm.status) & SMStatus::MailboxStatus) {
+            // ESC guard: if SM1 (slave→master) still has an unconsumed response
+            // (MailboxStatus set), do not process the new request — the master
+            // must first read the pending response. Real ESC hardware enforces
+            // this by blocking writes to a full read-direction sync manager.
+            if (syncManagers_[1].isEnabled() &&
+                (std::bit_cast<uint8_t>(syncManagers_[1].status) & SMStatus::MailboxStatus)) {
+                return;
+            }
             // Copy data from process RAM to mailbox buffer
             if (sm.physicalAddr >= ESCReg::ProcessDataRAM) {
                 size_t ramOffset = sm.physicalAddr - ESCReg::ProcessDataRAM;
@@ -879,7 +940,22 @@ void SlaveCore::processMailboxOut() {
                     std::memcpy(mailboxOut_.data(), &processDataRAM_[ramOffset], 
                                std::min(static_cast<size_t>(sm.length), mailboxOut_.size()));
                     mailboxOutFull_.store(true);
-                    sm.status &= ~SMStatus::MailboxStatus;  // Clear mailbox full
+                    sm.status = std::bit_cast<EtherCAT::SyncManager::SMStatusReg>(static_cast<uint8_t>(std::bit_cast<uint8_t>(sm.status) & ~SMStatus::MailboxStatus));  // Clear mailbox full
+                    // Sync status byte back to register image
+                    registers_[ESCReg::SM0 + 5] = std::bit_cast<uint8_t>(sm.status);
+
+                    // Dispatch to mailbox handlers and generate response
+                    for (auto& handler : mailboxHandlers_) {
+                        uint8_t responseBuf[256] = {0};
+                        size_t responseLen = sizeof(responseBuf);
+                        if (handler->processRequest(mailboxOut_.data(), sm.length,
+                                                     responseBuf, responseLen)) {
+                            std::memcpy(mailboxIn_.data(), responseBuf,
+                                       std::min(responseLen, mailboxIn_.size()));
+                            mailboxInFull_.store(true);
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -897,7 +973,9 @@ void SlaveCore::processMailboxIn() {
                 std::memcpy(&processDataRAM_[ramOffset], mailboxIn_.data(),
                            std::min(static_cast<size_t>(sm.length), mailboxIn_.size()));
                 mailboxInFull_.store(false);
-                sm.status |= SMStatus::MailboxStatus;  // Set mailbox full
+                sm.status = std::bit_cast<EtherCAT::SyncManager::SMStatusReg>(static_cast<uint8_t>(std::bit_cast<uint8_t>(sm.status) | SMStatus::MailboxStatus));  // Set mailbox full
+                // Sync status byte back to register image
+                registers_[ESCReg::SM0 + 1 * ESCReg::SMSize + 5] = std::bit_cast<uint8_t>(sm.status);
             }
         }
     }
@@ -953,20 +1031,20 @@ void SlaveCore::initializeSyncManagers() {
     // SM0: Mailbox In (Master → Slave)
     syncManagers_[0].physicalAddr = config_.mailboxOutOffset;
     syncManagers_[0].length = config_.mailboxOutSize;
-    syncManagers_[0].control = 0x26;  // Mailbox, write, interrupt
+    syncManagers_[0].control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x26));  // Mailbox, write, watchdog
     syncManagers_[0].type = SyncManagerType::MailboxOut;
     
     // SM1: Mailbox Out (Slave → Master)
     syncManagers_[1].physicalAddr = config_.mailboxInOffset;
     syncManagers_[1].length = config_.mailboxInSize;
-    syncManagers_[1].control = 0x22;  // Mailbox, read
+    syncManagers_[1].control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x22));  // Mailbox, read, watchdog
     syncManagers_[1].type = SyncManagerType::MailboxIn;
     
     // SM2: RxPDO (Master → Slave outputs)
     if (config_.rxPdoSize > 0) {
         syncManagers_[2].physicalAddr = config_.rxPdoOffset;
         syncManagers_[2].length = config_.rxPdoSize;
-        syncManagers_[2].control = 0x64;  // Buffered, write
+        syncManagers_[2].control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x44));  // Buffered, write, repeat request
         syncManagers_[2].type = SyncManagerType::ProcessOut;
     }
     
@@ -974,7 +1052,7 @@ void SlaveCore::initializeSyncManagers() {
     if (config_.txPdoSize > 0) {
         syncManagers_[3].physicalAddr = config_.txPdoOffset;
         syncManagers_[3].length = config_.txPdoSize;
-        syncManagers_[3].control = 0x20;  // Buffered, read
+        syncManagers_[3].control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x40));  // Buffered, read, repeat request
         syncManagers_[3].type = SyncManagerType::ProcessIn;
     }
     

@@ -31,6 +31,7 @@ public:
     bool writeRegister(uint16_t, uint16_t, const void*, uint16_t, unsigned int) override { return false; }
     bool readRegister(uint16_t, uint16_t, void*, uint16_t, unsigned int) override { return false; }
     bool sendSingleDatagram(Command, uint8_t, uint16_t, uint16_t, const void*, uint16_t, bool) override { return false; }
+    size_t sendMultiDatagram(const MultiDatagramSpec*, size_t) override { return 0; }
     bool waitForResponseIdx(uint8_t, unsigned int, RxDatagram&) override { return false; }
     uint8_t allocIdx() override { return 0; }
     uint16_t adpForSlaveIndex(uint16_t idx) override { return static_cast<uint16_t>(0u - idx); }
@@ -967,6 +968,121 @@ TEST_F(SDOManagerResponseFieldsTest, DownloadResponseFields) {
     EXPECT_EQ(resp.index, 0x6040);
     EXPECT_EQ(resp.operation, SDOOperation::Download);
     EXPECT_TRUE(resp.success());
+
+    mgr.deinit();
+}
+
+// ============================================================================
+// request_in_flight_ tracking tests
+// ============================================================================
+
+class SDOManagerInFlightTest : public ::testing::Test {
+protected:
+    MockSDOTransport transport_;
+
+    void SetUp() override {
+        ON_CALL(transport_, getMicroseconds()).WillByDefault(Invoke(realMicros));
+    }
+};
+
+TEST_F(SDOManagerInFlightTest, FlagFalseWhenIdle) {
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    EXPECT_FALSE(mgr.isRequestInFlight());
+
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerInFlightTest, FlagClearedAfterSyncRead) {
+    const uint32_t device_type = 0xAABBCCDDu;
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(Invoke(UploadOk(&device_type, sizeof(device_type))));
+
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    uint32_t out = 0;
+    size_t out_len = 0;
+    EXPECT_TRUE(mgr.readSync(0x2000, 0, &out, sizeof(out), 500, &out_len));
+
+    EXPECT_FALSE(mgr.isRequestInFlight());
+
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerInFlightTest, FlagClearedAfterSyncWrite) {
+    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(Invoke(DownloadOk()));
+
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    uint16_t val = 0x0006;
+    auto result = mgr.writeSync(0x6040, 0, &val, sizeof(val));
+    EXPECT_TRUE(result.has_value());
+
+    EXPECT_FALSE(mgr.isRequestInFlight());
+
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerInFlightTest, FlagClearedAfterFailedRead) {
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(Invoke(UploadFail()));
+
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    uint32_t out = 0;
+    size_t out_len = 0;
+    EXPECT_FALSE(mgr.readSync(0x2000, 0, &out, sizeof(out), 500, &out_len));
+
+    EXPECT_FALSE(mgr.isRequestInFlight());
+
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerInFlightTest, ClearRequestInFlightManually) {
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    mgr.clearRequestInFlight();
+    EXPECT_FALSE(mgr.isRequestInFlight());
+
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerInFlightTest, FlagSetDuringTransportCall) {
+    std::atomic<bool> call_started{false};
+
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(Invoke([&](uint16_t, uint8_t*, uint16_t, uint16_t, uint16_t, uint16_t,
+                                   uint16_t, uint8_t, uint8_t* out, size_t out_cap, size_t* out_len,
+                                   bool, unsigned int, unsigned int) -> bool {
+            call_started.store(true);
+            size_t cp = std::min(sizeof(uint32_t), out_cap);
+            uint32_t val = 0x12345678;
+            std::memcpy(out, &val, cp);
+            if (out_len) *out_len = cp;
+            return true;
+        }));
+
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    uint32_t out = 0;
+    size_t out_len = 0;
+    EXPECT_TRUE(mgr.readSync(0x2000, 0, &out, sizeof(out), 500, &out_len));
+
+    EXPECT_FALSE(mgr.isRequestInFlight());
+    EXPECT_TRUE(call_started.load());
 
     mgr.deinit();
 }
