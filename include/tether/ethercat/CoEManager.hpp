@@ -157,6 +157,9 @@ public:
     bool resolveMailbox(uint16_t& wr_addr, uint16_t& wr_len,
                         uint16_t& rd_addr, uint16_t& rd_len);
 
+    bool isRequestInFlight() const { return request_in_flight_.load(); }
+    void clearRequestInFlight() { request_in_flight_.store(false); }
+
 private:
     struct MailboxConfig {
         uint16_t write_addr = 0;
@@ -207,6 +210,7 @@ private:
     PDOManager* pdo_manager_ = nullptr;
     std::atomic<bool> diag_enabled_{false};
     std::atomic<bool> initialized_{false};
+    std::atomic<bool> request_in_flight_{false};
 
     EtherCATSlaveDebugFlags debug_flags_;
 };

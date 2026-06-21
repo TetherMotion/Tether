@@ -7,6 +7,7 @@
 #include <cstring>
 #include <vector>
 #include <memory>
+#include <bit>
 #include "slave/core/SlaveCore.hpp"
 #include "slave/core/SlaveTypes.hpp"
 #include "slave/logging/SlaveLogger.hpp"
@@ -376,8 +377,8 @@ TEST_F(SlaveCoreTest, SetGetFMMU) {
     fmmu.logicalEndBit = 7;
     fmmu.physicalStartAddr = 0x1100;
     fmmu.physicalStartBit = 0;
-    fmmu.type = 1; // read
-    fmmu.activate = 1; // enabled
+    fmmu.type.read_enable = 1; // read
+    fmmu.activate.enable = 1; // enabled
     core->setFMMU(0, fmmu);
     auto got = core->getFMMU(0);
     EXPECT_EQ(got.logicalStartAddr, 0x1000u);
@@ -395,9 +396,9 @@ TEST_F(SlaveCoreTest, SetGetSyncManager) {
     SyncManagerConfig sm{};
     sm.physicalAddr = 0x1000;
     sm.length = 128;
-    sm.control = 0x26; // mailbox out
-    sm.status = 0;
-    sm.activate = 1; // enabled
+    sm.control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x16)); // mailbox out
+    sm.status = std::bit_cast<EtherCAT::SyncManager::SMStatusReg>(static_cast<uint8_t>(0));
+    sm.activate = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(1)); // enabled
     sm.type = SyncManagerType::MailboxOut;
     core->setSyncManager(0, sm);
     auto got = core->getSyncManager(0);
@@ -546,4 +547,143 @@ TEST_F(SlaveCoreTest, SetNullHAL) {
 
 TEST_F(SlaveCoreTest, AddNullMailboxHandler) {
     core->addMailboxHandler(nullptr);
+}
+
+// --- Mailbox stale response guard ---
+
+// Mock mailbox handler that always generates a response
+class MockMailboxHandler : public IMailboxHandler {
+public:
+    MailboxProtocol getProtocol() const override { return MailboxProtocol::CoE; }
+    const char* getProtocolName() const override { return "MockCoE"; }
+    void reset() override {}
+
+    bool processRequest(const uint8_t* /*request*/, size_t /*requestLen*/,
+                        uint8_t* response, size_t& responseLen) override {
+        // Generate a simple 8-byte response
+        if (responseLen < 8) return false;
+        std::memset(response, 0xAB, 8);
+        responseLen = 8;
+        call_count++;
+        return true;
+    }
+
+    int call_count = 0;
+};
+
+TEST_F(SlaveCoreTest, MailboxOut_GuardWhenSM1ResponseUnconsumed) {
+    // Enable SM0 (mailbox write, master→slave) and SM1 (mailbox read, slave→master)
+    auto sm0 = core->getSyncManager(0);
+    sm0.setEnabled(true);
+    core->setSyncManager(0, sm0);
+
+    auto sm1 = core->getSyncManager(1);
+    sm1.setEnabled(true);
+    core->setSyncManager(1, sm1);
+
+    // Add a mock handler
+    auto handler = std::make_shared<MockMailboxHandler>();
+    core->addMailboxHandler(handler);
+
+    // Simulate master writing a request to SM0's mailbox area via FPWR
+    // SM0 physicalAddr = config_.mailboxOutOffset (default 0x1000)
+    std::vector<uint8_t> reqData(sm0.length, 0x42);
+    auto frame = buildFrame(EcCmd::FPWR, 0x0000, sm0.physicalAddr, reqData);
+    auto resp = core->processFrame(frame.data(), frame.size());
+
+    // Simulate one cycle — processMailboxOut + processMailboxIn
+    core->simulate(1000000);
+    EXPECT_EQ(handler->call_count, 1);
+
+    // Verify SM1 has MailboxStatus set (response pending, unconsumed by master)
+    auto sm1After = core->getSyncManager(1);
+    EXPECT_TRUE(std::bit_cast<uint8_t>(sm1After.status) & SMStatus::MailboxStatus);
+
+    // Now simulate master writing a SECOND request without reading the first response
+    auto frame2 = buildFrame(EcCmd::FPWR, 0x0000, sm0.physicalAddr, reqData);
+    auto resp2 = core->processFrame(frame2.data(), frame2.size());
+
+    // Simulate again — processMailboxOut should NOT process because SM1 still
+    // has unconsumed response
+    core->simulate(1000000);
+    EXPECT_EQ(handler->call_count, 1) << "Handler should not be called when SM1 response is unconsumed";
+
+    // Verify SM1 still has the original response (MailboxStatus still set)
+    auto sm1Final = core->getSyncManager(1);
+    EXPECT_TRUE(std::bit_cast<uint8_t>(sm1Final.status) & SMStatus::MailboxStatus)
+        << "SM1 MailboxStatus should remain set with unconsumed response";
+}
+
+TEST_F(SlaveCoreTest, MailboxOut_ProcessesWhenSM1Disabled) {
+    // When SM1 is not enabled, the guard should not block processing.
+    // Enable only SM0.
+    auto sm0 = core->getSyncManager(0);
+    sm0.setEnabled(true);
+    core->setSyncManager(0, sm0);
+
+    // SM1 is NOT enabled
+    auto sm1 = core->getSyncManager(1);
+    sm1.setEnabled(false);
+    core->setSyncManager(1, sm1);
+
+    auto handler = std::make_shared<MockMailboxHandler>();
+    core->addMailboxHandler(handler);
+
+    // Write request to SM0
+    std::vector<uint8_t> reqData(sm0.length, 0x42);
+    auto frame = buildFrame(EcCmd::FPWR, 0x0000, sm0.physicalAddr, reqData);
+    core->processFrame(frame.data(), frame.size());
+
+    core->simulate(1000000);
+    EXPECT_EQ(handler->call_count, 1)
+        << "Handler should be called when SM1 is disabled (no guard)";
+
+    // Second request should also be processed
+    auto frame2 = buildFrame(EcCmd::FPWR, 0x0000, sm0.physicalAddr, reqData);
+    core->processFrame(frame2.data(), frame2.size());
+
+    core->simulate(1000000);
+    EXPECT_EQ(handler->call_count, 2)
+        << "Handler should be called again when SM1 is disabled";
+}
+
+TEST_F(SlaveCoreTest, MailboxOut_RecoveryAfterMasterConsumesResponse) {
+    // Enable SM0 and SM1
+    auto sm0 = core->getSyncManager(0);
+    sm0.setEnabled(true);
+    core->setSyncManager(0, sm0);
+
+    auto sm1 = core->getSyncManager(1);
+    sm1.setEnabled(true);
+    core->setSyncManager(1, sm1);
+
+    auto handler = std::make_shared<MockMailboxHandler>();
+    core->addMailboxHandler(handler);
+
+    // First request — generates response, SM1 MailboxStatus set
+    std::vector<uint8_t> reqData(sm0.length, 0x42);
+    auto frame = buildFrame(EcCmd::FPWR, 0x0000, sm0.physicalAddr, reqData);
+    core->processFrame(frame.data(), frame.size());
+    core->simulate(1000000);
+    EXPECT_EQ(handler->call_count, 1);
+
+    auto sm1After = core->getSyncManager(1);
+    EXPECT_TRUE(std::bit_cast<uint8_t>(sm1After.status) & SMStatus::MailboxStatus);
+
+    // Simulate master reading the response (FPRD from SM1 area clears MailboxStatus)
+    auto readFrame = buildFrame(EcCmd::FPRD, 0x0000, sm1.physicalAddr,
+                                std::vector<uint8_t>(sm1.length, 0));
+    core->processFrame(readFrame.data(), readFrame.size());
+
+    // SM1 MailboxStatus should be cleared after master read
+    auto sm1AfterRead = core->getSyncManager(1);
+    EXPECT_FALSE(std::bit_cast<uint8_t>(sm1AfterRead.status) & SMStatus::MailboxStatus)
+        << "SM1 MailboxStatus should be cleared after master reads the response";
+
+    // Now a second request should be processed (guard no longer blocks)
+    auto frame2 = buildFrame(EcCmd::FPWR, 0x0000, sm0.physicalAddr, reqData);
+    core->processFrame(frame2.data(), frame2.size());
+    core->simulate(1000000);
+    EXPECT_EQ(handler->call_count, 2)
+        << "Handler should be called after master consumed the previous response";
 }
