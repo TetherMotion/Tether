@@ -33,6 +33,9 @@ public:
                 (Command cmd, uint8_t idx, uint16_t adp, uint16_t ado,
                  const void* data, uint16_t datalen, bool roundtrip),
                 (override));
+    MOCK_METHOD(size_t, sendMultiDatagram,
+                (const MultiDatagramSpec* specs, size_t count),
+                (override));
     MOCK_METHOD(bool, waitForResponseIdx,
                 (uint8_t idx, unsigned int timeout_ms, RxDatagram& out),
                 (override));

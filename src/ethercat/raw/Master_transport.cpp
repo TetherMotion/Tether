@@ -554,6 +554,327 @@ bool Master::sendSingleDatagram(Command cmd, uint8_t idx,
     return false;
 }
 
+// ============================================================================
+// sendMultiDatagram — pack multiple datagrams into one or more frames
+// ============================================================================
+
+size_t Master::sendMultiDatagram(const MultiDatagramSpec* specs, size_t count)
+{
+    using namespace Raw;
+
+    if (count == 0 || !specs) return 0;
+
+    constexpr uint8_t dst_mac[6] = {0x01, 0x01, 0x05, 0x00, 0x00, 0x00};
+    constexpr size_t kMinEthFrameNoFcs = 60;
+    constexpr size_t kMaxEthFrameNoFcs = 1514;
+    constexpr size_t kHeaderSize = sizeof(EtherCAT::EthernetHeader) + sizeof(EtherCAT::FrameHeader);
+
+    size_t frames_sent = 0;
+    size_t i = 0;
+
+    while (i < count) {
+        uint8_t txbuf[kMaxEthFrameNoFcs] = {0};
+
+        // Ethernet header
+        auto* eth = reinterpret_cast<EtherCAT::EthernetHeader*>(txbuf);
+        std::memcpy(eth->dst, dst_mac, 6);
+        std::memcpy(eth->src, src_mac_, 6);
+        eth->etherType_be = host_to_be16(EtherCAT::kEtherTypeEtherCAT);
+
+        // Start packing datagrams after Ethernet + EtherCAT frame header
+        size_t payload_offset = kHeaderSize;
+        size_t payload_bytes = 0;
+        size_t dg_count_in_frame = 0;
+
+        while (i + dg_count_in_frame < count) {
+            const auto& spec = specs[i + dg_count_in_frame];
+            const size_t dg_size = kDatagramOverhead + spec.datalen;
+
+            if (payload_bytes + dg_size > kMaxEtherCATPayloadPerFrame)
+                break;
+
+            size_t dg_offset = payload_offset + payload_bytes;
+            auto* dg = reinterpret_cast<EtherCAT::DatagramHeader*>(txbuf + dg_offset);
+
+            dg->cmd    = spec.cmd;
+            dg->idx    = spec.idx;
+            dg->adp_le = host_to_le16(spec.adp);
+            dg->ado_le = host_to_le16(spec.ado);
+
+            // Set more flag if this isn't the last datagram in this frame
+            // (will be finalized below)
+            uint16_t flags = spec.roundtrip ? (1u << 14) : 0u;
+            dg->lenFlags_le =
+                host_to_le16(static_cast<uint16_t>((spec.datalen & 0x07FFu) | flags));
+            dg->irq_le = host_to_le16(0);
+
+            // Copy payload
+            uint8_t* dg_payload = txbuf + dg_offset + sizeof(EtherCAT::DatagramHeader);
+            if (spec.datalen > 0) {
+                if (spec.data) std::memcpy(dg_payload, spec.data, spec.datalen);
+                else            std::memset(dg_payload, 0, spec.datalen);
+            }
+            // WKC = 0 (filled by slave)
+            *reinterpret_cast<uint16_t*>(dg_payload + spec.datalen) = host_to_le16(0);
+
+            payload_bytes += dg_size;
+            dg_count_in_frame++;
+        }
+
+        if (dg_count_in_frame == 0) {
+            // Single datagram too big for one frame
+            TETHER_LOGE(TAG, "sendMultiDatagram: datagram %zu too big (datalen=%u)",
+                        i, specs[i].datalen);
+            return frames_sent > 0 ? frames_sent : 0;
+        }
+
+        // Set the more flag on all datagrams except the last in this frame
+        for (size_t d = 0; d < dg_count_in_frame; d++) {
+            size_t dg_offset = payload_offset;
+            for (size_t prev = 0; prev < d; prev++) {
+                dg_offset += kDatagramOverhead + specs[i + prev].datalen;
+            }
+            auto* dg = reinterpret_cast<EtherCAT::DatagramHeader*>(txbuf + dg_offset);
+            uint16_t cur = le16_to_host(dg->lenFlags_le);
+            if (d < dg_count_in_frame - 1) {
+                cur |= 0x8000u;  // Set more flag
+            } else {
+                cur &= ~0x8000u; // Clear more flag on last
+            }
+            dg->lenFlags_le = host_to_le16(cur);
+        }
+
+        // Fill EtherCAT frame header
+        auto* ec_hdr = reinterpret_cast<EtherCAT::FrameHeader*>(txbuf + sizeof(EtherCAT::EthernetHeader));
+        constexpr uint16_t type = 0x1;
+        ec_hdr->raw_le = host_to_le16(
+            static_cast<uint16_t>((payload_bytes & 0x07FFu) | ((type & 0x0Fu) << 12)));
+
+        // Frame length (minimum 60 bytes)
+        size_t frame_len = kHeaderSize + payload_bytes;
+        if (frame_len < kMinEthFrameNoFcs) frame_len = kMinEthFrameNoFcs;
+
+        // Send with retry
+        if (iface_.send) {
+            if (debug_flags_.txPackets) {
+                printEtherCATFrame(txbuf, frame_len, true, false);
+            }
+            auto& clock = Tether::Platform::Clock::instance();
+            bool sent = false;
+            for (int retry = 0; retry <= kMaxTxRetries; retry++) {
+                if (cancel_requested_.load(std::memory_order_acquire)) {
+                    TETHER_LOGW(TAG, "sendMultiDatagram cancelled");
+                    return frames_sent;
+                }
+                if (iface_.send(txbuf, frame_len)) { sent = true; break; }
+#if TETHER_ENABLE_ETHERCAT_STATS
+                tx_retry_count_.fetch_add(1, std::memory_order_relaxed);
+#endif
+                const int64_t t0 = clock.getMicroseconds();
+                while ((clock.getMicroseconds() - t0) <
+                       static_cast<int64_t>(kTxRetryDelayUs)) {}
+            }
+            if (!sent) {
+                send_fail_log_.logLegacy(1, TAG,
+                    "sendMultiDatagram: send failed after retries");
+#if TETHER_ENABLE_ETHERCAT_STATS
+                tx_fail_count_.fetch_add(1, std::memory_order_relaxed);
+#endif
+                return frames_sent;
+            }
+            frames_sent++;
+        } else {
+            TETHER_LOGE(TAG, "No NetworkInterface available for sendMultiDatagram");
+            return frames_sent;
+        }
+
+        i += dg_count_in_frame;
+    }
+
+    return frames_sent;
+}
+
+// ============================================================================
+// BatchTransaction implementation
+// ============================================================================
+
+Master::BatchTransaction::BatchTransaction(TransactionRouter* router,
+                                             std::vector<uint8_t> idxs,
+                                             std::vector<size_t> slots,
+                                             std::vector<RxDatagram> responses)
+    : router_(router)
+    , idxs_(std::move(idxs))
+    , slots_(std::move(slots))
+    , responses_(std::move(responses))
+{
+}
+
+Master::BatchTransaction::~BatchTransaction()
+{
+    // Clean up any unclaimed slots
+    if (router_) {
+        for (size_t i = 0; i < slots_.size(); i++) {
+            if (slots_[i] < TransactionRouter::kNumSlots) {
+                router_->cancelPreRegistered(slots_[i]);
+            }
+        }
+    }
+}
+
+BatchReadResult Master::BatchTransaction::getResult(size_t i, uint32_t timeout_ms)
+{
+    BatchReadResult result;
+    if (i >= idxs_.size() || !router_) return result;
+
+    if (slots_[i] >= TransactionRouter::kNumSlots) return result;
+
+    // If already completed (response was routed before we called), return it
+    if (responses_[i].wkc != 0 || responses_[i].datalen > 0) {
+        result.success = true;
+        result.wkc = responses_[i].wkc;
+        result.datalen = responses_[i].datalen;
+        result.data = responses_[i].data;
+        return result;
+    }
+
+    // Wait for the response
+    WaitResult wr = router_->waitForPreRegistered(slots_[i], timeout_ms);
+    if (wr.success) {
+        result.success = true;
+        result.wkc = wr.wkc;
+        result.datalen = wr.data_length;
+        result.data = responses_[i].data;
+    }
+
+    return result;
+}
+
+bool Master::BatchTransaction::waitAll(uint32_t timeout_ms,
+                                        std::vector<BatchReadResult>& out)
+{
+    out.resize(idxs_.size());
+    bool all_ok = true;
+    for (size_t i = 0; i < idxs_.size(); i++) {
+        out[i] = getResult(i, timeout_ms);
+        if (!out[i].success) all_ok = false;
+    }
+    return all_ok;
+}
+
+void Master::BatchTransaction::cancel()
+{
+    cancelled_ = true;
+    if (router_) {
+        for (size_t i = 0; i < slots_.size(); i++) {
+            if (slots_[i] < TransactionRouter::kNumSlots) {
+                router_->cancelPreRegistered(slots_[i]);
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Batch read/write APIs
+// ============================================================================
+
+Master::BatchTransaction Master::readRegistersBatch(
+    const SlaveAddress* slave_addresses,
+    const uint16_t* register_addresses,
+    const uint16_t* lengths,
+    size_t count)
+{
+    if (count == 0 || !slave_addresses || !register_addresses || !lengths)
+        return BatchTransaction();
+
+    std::vector<MultiDatagramSpec> specs(count);
+    std::vector<uint8_t> idxs(count);
+    std::vector<size_t> slots(count);
+    std::vector<RxDatagram> responses(count);
+
+    for (size_t i = 0; i < count; i++) {
+        idxs[i] = allocIdx();
+        slots[i] = idxs[i]; // slot index == idx in TransactionRouter
+
+        Command cmd = slave_addresses[i].isPhysical() ? Command::APRD : Command::FPRD;
+        specs[i] = MultiDatagramSpec{
+            cmd,
+            idxs[i],
+            slave_addresses[i].raw(),
+            register_addresses[i],
+            nullptr,        // no data for reads
+            lengths[i],
+            true            // roundtrip
+        };
+
+        // Pre-register the waiter slot
+        PacketFilter filter = PacketFilter::byIndex(idxs[i]);
+        slots[i] = packet_router_.preRegisterWaiter(
+            filter, responses[i].data, sizeof(responses[i].data));
+    }
+
+    // Send all datagrams in one frame (auto-splits if needed)
+    size_t sent = sendMultiDatagram(specs.data(), count);
+    if (sent == 0) {
+        // Send failed — cancel all pre-registered slots
+        for (size_t i = 0; i < count; i++) {
+            if (slots[i] < TransactionRouter::kNumSlots)
+                packet_router_.cancelPreRegistered(slots[i]);
+        }
+        return BatchTransaction();
+    }
+
+    return BatchTransaction(&packet_router_, std::move(idxs), std::move(slots),
+                            std::move(responses));
+}
+
+Master::BatchTransaction Master::writeRegistersBatch(
+    const SlaveAddress* slave_addresses,
+    const uint16_t* register_addresses,
+    const void* const* data,
+    const uint16_t* lengths,
+    size_t count)
+{
+    if (count == 0 || !slave_addresses || !register_addresses || !data || !lengths)
+        return BatchTransaction();
+
+    std::vector<MultiDatagramSpec> specs(count);
+    std::vector<uint8_t> idxs(count);
+    std::vector<size_t> slots(count);
+    std::vector<RxDatagram> responses(count);
+
+    for (size_t i = 0; i < count; i++) {
+        idxs[i] = allocIdx();
+        slots[i] = idxs[i];
+
+        Command cmd = slave_addresses[i].isPhysical() ? Command::APWR : Command::FPWR;
+        specs[i] = MultiDatagramSpec{
+            cmd,
+            idxs[i],
+            slave_addresses[i].raw(),
+            register_addresses[i],
+            data[i],
+            lengths[i],
+            true            // roundtrip
+        };
+
+        PacketFilter filter = PacketFilter::byIndex(idxs[i]);
+        slots[i] = packet_router_.preRegisterWaiter(
+            filter, responses[i].data, sizeof(responses[i].data));
+    }
+
+    size_t sent = sendMultiDatagram(specs.data(), count);
+    if (sent == 0) {
+        for (size_t i = 0; i < count; i++) {
+            if (slots[i] < TransactionRouter::kNumSlots)
+                packet_router_.cancelPreRegistered(slots[i]);
+        }
+        return BatchTransaction();
+    }
+
+    return BatchTransaction(&packet_router_, std::move(idxs), std::move(slots),
+                            std::move(responses));
+}
+
 
 void Master::resetIdx()
 {
@@ -605,51 +926,68 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
         return;
 
     const size_t payload_offset = sizeof(EtherCAT::EthernetHeader) + sizeof(EtherCAT::FrameHeader);
-    const auto* dg = reinterpret_cast<const EtherCAT::DatagramHeader*>(frame + payload_offset);
+    size_t offset = payload_offset;
+    size_t remaining = ec_len;
+    uint8_t dg_idx = 0;
 
-    const uint16_t ado     = le16_to_host(dg->ado_le);
-    const uint16_t adp     = le16_to_host(dg->adp_le);
-    const uint16_t datalen = le16_to_host(dg->lenFlags_le) & 0x07FFu;
+    while (remaining >= sizeof(EtherCAT::DatagramHeader) &&
+           offset + sizeof(EtherCAT::DatagramHeader) <= length) {
+        const auto* dg = reinterpret_cast<const EtherCAT::DatagramHeader*>(frame + offset);
 
-    const size_t data_offset = payload_offset + sizeof(EtherCAT::DatagramHeader);
-    const size_t wkc_offset  = data_offset + datalen;
-    if (length < wkc_offset + sizeof(uint16_t)) return;
+        const uint16_t ado     = le16_to_host(dg->ado_le);
+        const uint16_t adp     = le16_to_host(dg->adp_le);
+        const uint16_t len_flags = le16_to_host(dg->lenFlags_le);
+        const uint16_t datalen = len_flags & 0x07FFu;
+        const bool more_flag   = (len_flags & 0x8000u) != 0;
 
-    const uint16_t wkc =
-        le16_to_host(*reinterpret_cast<const uint16_t*>(frame + wkc_offset));
+        const size_t data_offset = offset + sizeof(EtherCAT::DatagramHeader);
+        const size_t wkc_offset  = data_offset + datalen;
+        if (length < wkc_offset + sizeof(uint16_t)) break;
 
-    RxDatagram msg{};
-    msg.idx = dg->idx; msg.cmd = dg->cmd; msg.adp = adp; msg.ado = ado;
-    msg.datalen = datalen; msg.wkc = wkc;
-    if (datalen > 0)
-        std::memcpy(msg.data, frame + data_offset,
-                    std::min<size_t>(datalen, sizeof(msg.data)));
+        const uint16_t wkc =
+            le16_to_host(*reinterpret_cast<const uint16_t*>(frame + wkc_offset));
 
-    if (dg->idx == kFireAndForgetIdx) {
-        if (dg->cmd == Command::APRD && txpdo_rx_queue_)
-            txpdo_rx_queue_->send(msg, 0);
-    } else {
-        size_t routed = packet_router_.routePacket(msg);
-        if (routed == 0) {
-            static uint32_t unrouted_count = 0;
-            if (unrouted_count < 10) {
-                TETHER_LOGW("ec_rx", "Unrouted pkt idx=0x%02X cmd=0x%02X ado=0x%04X adp=0x%04X wkc=%u",
-                         dg->idx, (unsigned)dg->cmd, ado, adp, wkc);
-            }
-            unrouted_count++;
-            if (rx_queue_ && rx_queue_->send(msg, 0)) {
-#if TETHER_ENABLE_ETHERCAT_STATS
-                rx_queue_sent_++;
-#endif
-            } else {
-                static uint32_t drop_count = 0;
-                if (drop_count < 10 || (drop_count % 500 == 0)) {
-                    TETHER_LOGW("ec_rx", "RX queue full! Dropped idx=0x%02X cmd=0x%02X ado=0x%04X adp=0x%04X wkc=%u (total dropped: %u)",
-                             dg->idx, (unsigned)dg->cmd, ado, adp, wkc, drop_count);
+        RxDatagram msg{};
+        msg.idx = dg->idx; msg.cmd = dg->cmd; msg.adp = adp; msg.ado = ado;
+        msg.datalen = datalen; msg.wkc = wkc;
+        if (datalen > 0)
+            std::memcpy(msg.data, frame + data_offset,
+                        std::min<size_t>(datalen, sizeof(msg.data)));
+
+        if (dg->idx == kFireAndForgetIdx) {
+            if (dg->cmd == Command::APRD && txpdo_rx_queue_)
+                txpdo_rx_queue_->send(msg, 0);
+        } else {
+            size_t routed = packet_router_.routePacket(msg);
+            if (routed == 0) {
+                static uint32_t unrouted_count = 0;
+                if (unrouted_count < 10) {
+                    TETHER_LOGW("ec_rx", "Unrouted pkt dg=%u idx=0x%02X cmd=0x%02X ado=0x%04X adp=0x%04X wkc=%u",
+                             dg_idx, dg->idx, (unsigned)dg->cmd, ado, adp, wkc);
                 }
-                drop_count++;
+                unrouted_count++;
+                if (rx_queue_ && rx_queue_->send(msg, 0)) {
+#if TETHER_ENABLE_ETHERCAT_STATS
+                    rx_queue_sent_++;
+#endif
+                } else {
+                    static uint32_t drop_count = 0;
+                    if (drop_count < 10 || (drop_count % 500 == 0)) {
+                        TETHER_LOGW("ec_rx", "RX queue full! Dropped dg=%u idx=0x%02X cmd=0x%02X ado=0x%04X adp=0x%04X wkc=%u (total dropped: %u)",
+                                 dg_idx, dg->idx, (unsigned)dg->cmd, ado, adp, wkc, drop_count);
+                    }
+                    drop_count++;
+                }
             }
         }
+
+        const size_t dg_total = sizeof(EtherCAT::DatagramHeader) + datalen + sizeof(uint16_t);
+        if (remaining < dg_total) break;
+        remaining -= dg_total;
+        offset += dg_total;
+        dg_idx++;
+
+        if (!more_flag) break;
     }
 }
 

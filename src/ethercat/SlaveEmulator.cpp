@@ -7,6 +7,8 @@
 #include "tether/ethercat/DCClass.hpp"
 #include "tether/platform/EspCompat.hpp"
 
+#include <bit>
+
 #define LOG_TAG "EC_EMU"
 #define LOGI(fmt, ...) TETHER_LOGI(LOG_TAG, fmt, ##__VA_ARGS__)
 #define LOGW(fmt, ...) TETHER_LOGW(LOG_TAG, fmt, ##__VA_ARGS__)
@@ -383,13 +385,13 @@ bool SlaveEmulator::readRegister(uint16_t addr, uint8_t* data, uint16_t len) {
                     }
                     return true;
                 case 4:  // Control
-                    data[0] = sm.control;
+                    data[0] = std::bit_cast<uint8_t>(sm.control);
                     return true;
                 case 5:  // Status
-                    data[0] = sm.status;
+                    data[0] = std::bit_cast<uint8_t>(sm.status);
                     return true;
                 case 6:  // Enable
-                    data[0] = sm.enable;
+                    data[0] = std::bit_cast<uint8_t>(sm.enable);
                     return true;
             }
         }
@@ -490,10 +492,10 @@ bool SlaveEmulator::writeRegister(uint16_t addr, const uint8_t* data, uint16_t l
                     }
                     return true;
                 case 4:
-                    sm.control = data[0];
+                    sm.control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(data[0]);
                     return true;
                 case 6:
-                    sm.enable = data[0];
+                    sm.enable = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(data[0]);
                     return true;
             }
         }
@@ -666,7 +668,7 @@ void SlaveEmulator::dumpSyncManagers() const {
         if (sync_managers_[i].isEnabled()) {
             LOGI("  SM%d: addr=0x%04X len=%u ctrl=0x%02X",
                  i, sync_managers_[i].start_addr, sync_managers_[i].length,
-                 sync_managers_[i].control);
+                 std::bit_cast<uint8_t>(sync_managers_[i].control));
         }
     }
 }
@@ -994,10 +996,10 @@ std::unique_ptr<SlaveEmulator> createCiA402Drive(
     config.cycle_time_0 = 1000000;  // 1ms
     
     // SM configuration for CiA 402
-    config.sync_managers.push_back({0x1000, 128, 0x26, 0x01});  // Mailbox Out
-    config.sync_managers.push_back({0x1080, 128, 0x22, 0x01});  // Mailbox In
-    config.sync_managers.push_back({0x1100, 12, 0x64, 0x01});   // RxPDO (control, target pos, etc.)
-    config.sync_managers.push_back({0x1180, 12, 0x20, 0x01});   // TxPDO (status, actual pos, etc.)
+    config.sync_managers.push_back({0x1000, 128, std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x26)), std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x01))});  // Mailbox Out
+    config.sync_managers.push_back({0x1080, 128, std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x22)), std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x01))});  // Mailbox In
+    config.sync_managers.push_back({0x1100, 12, std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x44)), std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x01))});   // RxPDO (control, target pos, etc.)
+    config.sync_managers.push_back({0x1180, 12, std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x40)), std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x01))});   // TxPDO (status, actual pos, etc.)
     
     slave->setSIIConfig(config);
     slave->enableCiA402(true);
@@ -1016,13 +1018,13 @@ std::unique_ptr<SlaveEmulator> createSimpleSlave(
     config.product_code = product_code;
     config.device_name = "Simple Slave";
     
-    config.sync_managers.push_back({0x1000, 128, 0x26, 0x01});
-    config.sync_managers.push_back({0x1080, 128, 0x22, 0x01});
+    config.sync_managers.push_back({0x1000, 128, std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x26)), std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x01))});
+    config.sync_managers.push_back({0x1080, 128, std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x22)), std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x01))});
     if (output_bytes > 0) {
-        config.sync_managers.push_back({0x1100, output_bytes, 0x64, 0x01});
+        config.sync_managers.push_back({0x1100, output_bytes, std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x64)), std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x01))});
     }
     if (input_bytes > 0) {
-        config.sync_managers.push_back({0x1180, input_bytes, 0x20, 0x01});
+        config.sync_managers.push_back({0x1180, input_bytes, std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x20)), std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x01))});
     }
     
     slave->setSIIConfig(config);

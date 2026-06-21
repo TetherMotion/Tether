@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "tether/ethercat/ESIParser.hpp"
+#include <bit>
 
 TEST(ESIParser, ParsesStepperOnlineXML) {
     std::vector<EtherCAT::ESI::DeviceInfo> devices;
@@ -22,7 +23,7 @@ TEST(ESIParser, ParsesStepperOnlineXML) {
     // Expect at least one SM and the first mailbox start address to be 0x1000
     ASSERT_FALSE(d.syncManagers.empty());
     EXPECT_EQ(d.syncManagers[0].startAddress, 0x1000);
-    EXPECT_EQ(d.syncManagers[0].control, 0x26);
+    EXPECT_EQ(d.syncManagers[0].control, std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x16)));
 
     // PDO parsing: expect RxPDOs and TxPDOs to be present and non-empty
     ASSERT_FALSE(d.rxPdos.empty());

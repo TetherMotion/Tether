@@ -166,7 +166,34 @@ struct RxDatagram {
     uint16_t ado;             ///< Address offset
     uint16_t datalen;         ///< Data length
     uint16_t wkc;             ///< Working Counter (incremented by each slave that processes)
-    uint8_t data[256];        ///< Payload data
+    uint8_t data[1486];       ///< Payload data (max EtherCAT payload in one frame)
+};
+
+/**
+ * @brief Specification for a single datagram within a multi-datagram frame
+ *
+ * Used by Master::sendMultiDatagram() to pack multiple datagrams into one
+ * or more Ethernet frames.  Each spec describes one datagram's command,
+ * address, data, and roundtrip behavior.
+ */
+struct MultiDatagramSpec {
+    Command     cmd;        ///< Datagram command (APRD, APWR, FPRD, FPWR, etc.)
+    uint8_t     idx;        ///< Datagram index for response matching
+    uint16_t    adp;        ///< Address position (slave-dependent)
+    uint16_t    ado;        ///< Address offset (register address or logical low word)
+    const void* data;      ///< Payload data (nullptr for read-only datagrams)
+    uint16_t    datalen;    ///< Payload length in bytes
+    bool        roundtrip;  ///< If true, sets the circulating flag (C bit)
+};
+
+/**
+ * @brief Result of a single read operation within a batch transaction
+ */
+struct BatchReadResult {
+    bool success{false};       ///< Whether the response was received
+    uint16_t wkc{0};           ///< Working counter from the response
+    uint16_t datalen{0};       ///< Actual data length received
+    const uint8_t* data{nullptr};  ///< Pointer to data (valid until BatchTransaction is destroyed)
 };
 
 // ============================================================================

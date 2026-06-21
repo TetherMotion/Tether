@@ -16,6 +16,7 @@
 
 #include <cinttypes>
 #include <cstring>
+#include <bit>
 
 static const char* TAG = "CiA402StateMachine";
 
@@ -389,14 +390,15 @@ bool CiA402Drive::transitionToOp(bool apply_pdo_mapping) {
                 m_master->writeRegister(SlaveAddress(m_slave_index), static_cast<uint16_t>(base + 2), len_buf, 2, 200);
 
                 // Write control
-                m_master->writeRegister(SlaveAddress(m_slave_index), static_cast<uint16_t>(base + 4), &cfg.control, 1, 200);
+                uint8_t ctrl_byte = std::bit_cast<uint8_t>(cfg.control);
+                m_master->writeRegister(SlaveAddress(m_slave_index), static_cast<uint16_t>(base + 4), &ctrl_byte, 1, 200);
 
                 // Enable SM
                 uint8_t activate = cfg.enable ? 0x01 : 0x00;
                 m_master->writeRegister(SlaveAddress(m_slave_index), static_cast<uint16_t>(base + 6), &activate, 1, 200);
-                
+
                 TETHER_LOGI(TAG, "Slave %u: Re-wrote SM%u: Addr=0x%04X Len=%u Ctrl=0x%02X",
-                         m_slave_index, sm, cfg.phys_start_addr, cfg.length, cfg.control);
+                         m_slave_index, sm, cfg.phys_start_addr, cfg.length, ctrl_byte);
             }
         }
     }

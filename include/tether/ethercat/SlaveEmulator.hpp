@@ -30,6 +30,7 @@
 #include <mutex>
 
 #include "Types.hpp"
+#include "tether/ethercat/SMRegisters.hpp"
 
 namespace EtherCAT {
 namespace Emulator {
@@ -101,8 +102,8 @@ struct SIIConfig {
     struct SMConfig {
         uint16_t start_addr = 0;
         uint16_t length = 0;
-        uint8_t control = 0;
-        uint8_t enable = 0;
+        EtherCAT::SyncManager::SMControlReg  control{};
+        EtherCAT::SyncManager::SMActivateReg enable{};
     };
     std::vector<SMConfig> sync_managers;
     
@@ -133,17 +134,17 @@ struct SIIConfig {
 struct SyncManager {
     uint16_t start_addr = 0;
     uint16_t length = 0;
-    uint8_t control = 0;
-    uint8_t enable = 0;
-    uint8_t status = 0;
+    EtherCAT::SyncManager::SMControlReg  control{};
+    EtherCAT::SyncManager::SMActivateReg enable{};
+    EtherCAT::SyncManager::SMStatusReg   status{};
     
     // Buffer for SM data
     std::vector<uint8_t> buffer;
     
-    bool isEnabled() const { return (enable & 0x01) != 0; }
-    bool isMailbox() const { return (control & 0x04) == 0; }
-    bool isOutput() const { return (control & 0x04) != 0 && (control & 0x02) != 0; }  // RxPDO
-    bool isInput() const { return (control & 0x04) != 0 && (control & 0x02) == 0; }   // TxPDO
+    bool isEnabled() const { return enable.enable; }
+    bool isMailbox() const { return !control.direction; }
+    bool isOutput() const { return control.direction && control.mode == 0x02; }  // RxPDO
+    bool isInput() const { return control.direction && control.mode != 0x02; }   // TxPDO
 };
 
 // ============================================================================

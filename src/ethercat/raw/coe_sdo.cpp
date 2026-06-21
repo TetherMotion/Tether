@@ -7,6 +7,7 @@
 #include "tether/ethercat/Master.hpp"
 #include <thread>
 #include <chrono>
+#include <cinttypes>
 
 namespace EtherCAT {
 namespace Raw {

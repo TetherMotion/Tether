@@ -9,6 +9,8 @@
 #include "tether/platform/Platform.hpp"
 #include "ethercat/raw/internal.hpp"
 
+#include <bit>
+
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -580,9 +582,9 @@ bool SIIParser::parseSyncManager(uint16_t slave_index, uint16_t byte_offset,
         
         data.sync_managers[i].phys_start_address = static_cast<uint16_t>(sm_data[0] | (sm_data[1] << 8));
         data.sync_managers[i].length = static_cast<uint16_t>(sm_data[2] | (sm_data[3] << 8));
-        data.sync_managers[i].control_register = sm_data[4];
-        data.sync_managers[i].status_register = sm_data[5];
-        data.sync_managers[i].enable = sm_data[6];
+        data.sync_managers[i].control_register = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(sm_data[4]);
+        data.sync_managers[i].status_register = std::bit_cast<EtherCAT::SyncManager::SMStatusReg>(sm_data[5]);
+        data.sync_managers[i].enable = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(sm_data[6]);
         data.sync_managers[i].sm_type = sm_data[7];
         
         data.sm_count = i + 1;
