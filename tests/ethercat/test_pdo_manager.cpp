@@ -556,10 +556,11 @@ TEST_F(PDOManagerTest, ExchangeAllSendsAndReceives) {
     mgr.mapping().add_rxpdo(0, &tx_buf, sizeof(tx_buf), 0x1600, PDOAddressMode::Position);
     mgr.mapping().add_txpdo(0, &rx_buf, sizeof(rx_buf), 0x1A00, PDOAddressMode::Position);
 
-    EXPECT_CALL(transport, sendSingleDatagram(Command::APWR, _, _, _, _, _, _))
-        .WillOnce(Return(true));
-    EXPECT_CALL(transport, sendSingleDatagram(Command::APRD, _, _, _, _, _, _))
-        .WillOnce(Return(true));
+    // Position mode uses fire-and-forget, batched into frames via sendMultiDatagram
+    // Called twice: once for RxPDO batch, once for TxPDO batch
+    EXPECT_CALL(transport, sendMultiDatagram(_, _))
+        .Times(2)
+        .WillRepeatedly(Return(1));
 
     // exchangeAll should succeed and increment total_cycles
     bool ok = mgr.exchangeAll();
@@ -604,15 +605,18 @@ TEST_F(PDOManagerTest, ExchangePhysicalSendsAndReceives) {
     mgr.mapping().add_rxpdo(0, &out_buf, sizeof(out_buf));
     mgr.mapping().add_txpdo(0, &in_buf, sizeof(in_buf));
 
-    // writeRegister for RxPDO (FPWR-style)
-    EXPECT_CALL(transport, writeRegister(_, 0x1100, _, 4, _))
-        .WillOnce(Return(true));
+    // exchangePhysical now batches FPWR+FPRD into one frame via sendMultiDatagram
+    EXPECT_CALL(transport, sendMultiDatagram(_, _))
+        .WillOnce(Return(1));  // 1 frame with 2 datagrams
 
-    // readRegister for TxPDO (FPRD-style)
+    // Wait for write and read responses (called twice)
     uint32_t hw_data = 0x55AA55AA;
-    EXPECT_CALL(transport, readRegister(_, 0x1180, _, 4, _))
-        .WillOnce([&hw_data](uint16_t, uint16_t, void* data, uint16_t, unsigned) {
-            std::memcpy(data, &hw_data, sizeof(hw_data));
+    EXPECT_CALL(transport, waitForResponseIdx(_, _, _))
+        .Times(2)
+        .WillRepeatedly([&hw_data](uint8_t, unsigned int, RxDatagram& out) -> bool {
+            out.wkc = 1;
+            out.datalen = 4;
+            std::memcpy(out.data, &hw_data, sizeof(hw_data));
             return true;
         });
 
