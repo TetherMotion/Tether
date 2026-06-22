@@ -46,6 +46,7 @@
 #include "tether/ethercat/SyncManager.hpp"
 #include "tether/fmmu/FMMUConfiguration.hpp"
 #include "tether/platform/Platform.hpp"
+#include "tether/ethercat/CustomPDOMapping.hpp"
 
 namespace EtherCAT {
 
@@ -299,6 +300,75 @@ public:
      */
     virtual SlaveError registerFixedPDOs(const SIIPDOConfig& config);
 
+    // -- Custom PDO mapping --------------------------------------------------
+
+    /**
+     * @brief Define a custom RxPDO mapping from register entries.
+     *
+     * Writes the PDO mapping object (SDO) on the slave and stores the
+     * field layout for later buffer registration and data extraction.
+     *
+     * @param pdo_index   PDO mapping object index (e.g. 0x1601)
+     * @param entries     Initializer list of CustomPDOMappingEntry (register pointers)
+     * @return SlaveError::Ok on success
+     */
+    virtual SlaveError configureCustomRxPDO(
+        uint16_t pdo_index,
+        std::initializer_list<CustomPDOMappingEntry> entries);
+
+    /**
+     * @brief Define a custom TxPDO mapping from register entries.
+     *
+     * @param pdo_index   PDO mapping object index (e.g. 0x1A01)
+     * @param entries     Initializer list of CustomPDOMappingEntry (register pointers)
+     * @return SlaveError::Ok on success
+     */
+    virtual SlaveError configureCustomTxPDO(
+        uint16_t pdo_index,
+        std::initializer_list<CustomPDOMappingEntry> entries);
+
+    /**
+     * @brief Register PDO buffers and assign PDOs to sync managers.
+     *
+     * Must be called after configureCustomRxPDO / configureCustomTxPDO,
+     * and before configurePDOSyncManagers().
+     *
+     * @return SlaveError::Ok on success
+     */
+    virtual SlaveError applyCustomPDOs();
+
+    /**
+     * @brief Get a pointer to the raw PDO buffer for a custom PDO.
+     *
+     * @param pdo_index  PDO mapping object index
+     * @return Pointer to the buffer, or nullptr if not found
+     */
+    const uint8_t* customPDOData(uint16_t pdo_index) const;
+
+    /**
+     * @brief Get a typed pointer to a field within a custom PDO.
+     *
+     * @param pdo_index    PDO mapping object index
+     * @param field_index  Zero-based field index within the PDO
+     * @return Typed pointer, or nullptr if not found / out of range
+     */
+    template <typename T>
+    const T* customPDOField(uint16_t pdo_index, size_t field_index) const {
+        const uint8_t* ptr = customPDOFieldRaw(pdo_index, field_index);
+        return ptr ? reinterpret_cast<const T*>(ptr) : nullptr;
+    }
+
+    /**
+     * @brief Get a pointer to a field within a custom PDO by register entry.
+     *
+     * @param pdo_index  PDO mapping object index
+     * @param entry      Pointer to the ObjectDictionaryEntry used in mapping
+     * @return Pointer to the field data, or nullptr if not found
+     */
+    const uint8_t* customPDOField(
+        uint16_t pdo_index,
+        const ObjectDictionary::ObjectDictionaryEntry* entry) const;
+
     // -- State transitions ---------------------------------------------------
 
     /**
@@ -479,6 +549,30 @@ protected:
     // -- Buffers for auto-configured PDO entries from SII ---------------------
     std::vector<uint8_t> pdo_rx_buffer_;
     std::vector<uint8_t> pdo_tx_buffer_;
+
+    // -- Custom PDO mapping state ----------------------------------------------
+    struct CustomPDOInfo {
+        uint16_t pdo_index = 0;
+        PDO::PDODirection direction = PDO::PDODirection::TxPDO;
+        uint16_t total_size = 0;
+        std::vector<CustomPDOFieldLayout> fields;
+        std::vector<uint8_t> buffer;
+        int mapping_entry_index = -1;
+    };
+    std::vector<CustomPDOInfo> custom_pdo_infos_;
+
+    const uint8_t* customPDOFieldRaw(uint16_t pdo_index, size_t field_index) const;
+
+    SlaveError configureCustomTxPDO(
+        uint16_t pdo_index,
+        std::initializer_list<CustomPDOMappingEntry> entries,
+        PDO::PDODirection direction);
+
+    void storeCustomPDOInfo(
+        uint16_t pdo_index,
+        PDO::PDODirection direction,
+        uint16_t total_size,
+        std::vector<CustomPDOFieldLayout>&& fields);
 };
 
 // ============================================================================
@@ -513,6 +607,10 @@ public:
     SlaveError registerPDOsFromSII(SIIPDOConfig&) override;
     SlaveError assignPDOs(const SIIPDOConfig&) override;
     SlaveError registerFixedPDOs(const SIIPDOConfig&) override;
+
+    SlaveError configureCustomRxPDO(uint16_t, std::initializer_list<CustomPDOMappingEntry>) override;
+    SlaveError configureCustomTxPDO(uint16_t, std::initializer_list<CustomPDOMappingEntry>) override;
+    SlaveError applyCustomPDOs() override;
 
     SlaveError transitionTo(SlaveState) override;
     SlaveError transitionToInit() override;

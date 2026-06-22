@@ -828,6 +828,233 @@ SlaveError Slave::registerFixedPDOs(const SIIPDOConfig& config) {
 }
 
 // ============================================================================
+// Custom PDO mapping
+// ============================================================================
+
+SlaveError Slave::configureCustomRxPDO(
+    uint16_t pdo_index,
+    std::initializer_list<CustomPDOMappingEntry> entries)
+{
+    return configureCustomTxPDO(pdo_index, entries, PDO::PDODirection::RxPDO);
+}
+
+SlaveError Slave::configureCustomTxPDO(
+    uint16_t pdo_index,
+    std::initializer_list<CustomPDOMappingEntry> entries)
+{
+    return configureCustomTxPDO(pdo_index, entries, PDO::PDODirection::TxPDO);
+}
+
+SlaveError Slave::configureCustomTxPDO(
+    uint16_t pdo_index,
+    std::initializer_list<CustomPDOMappingEntry> entries,
+    PDO::PDODirection direction)
+{
+    if (entries.size() == 0) {
+        TETHER_LOGE(TAG, "configureCustomPDO: empty entry list for PDO 0x%04X", pdo_index);
+        return SlaveError::PDOMappingFailed;
+    }
+    if (entries.size() > 255) {
+        TETHER_LOGE(TAG, "configureCustomPDO: too many entries (%zu) for PDO 0x%04X",
+                    entries.size(), pdo_index);
+        return SlaveError::PDOMappingFailed;
+    }
+
+    // Build field layout and compute total size
+    std::vector<CustomPDOFieldLayout> fields;
+    fields.reserve(entries.size());
+    uint16_t offset = 0;
+    bool any_unresolved = false;
+
+    for (const auto& e : entries) {
+        uint8_t sz = e.resolvedSize();
+        if (sz == 0) {
+            TETHER_LOGE(TAG, "configureCustomPDO: cannot infer size for entry 0x%04X:0x%02X (%s) — specify explicit byte size",
+                        e.entry->index, e.entry->subindex, e.entry->name ? e.entry->name : "?");
+            any_unresolved = true;
+        }
+        fields.push_back({e.entry, offset, sz});
+        offset += sz;
+    }
+    if (any_unresolved) {
+        return SlaveError::PDOMappingFailed;
+    }
+
+    uint16_t total_size = offset;
+    const char* dir_str = (direction == PDO::PDODirection::RxPDO) ? "RxPDO" : "TxPDO";
+    TETHER_LOGI(TAG, "Slave %u: Configuring custom %s 0x%04X: %zu entries, %u bytes",
+                index_, dir_str, pdo_index, entries.size(), total_size);
+
+    // Write SDO mapping to slave
+    auto err = sdoWriteU8(pdo_index, 0x00, 0);  // clear count
+    if (err != SlaveError::Ok) {
+        TETHER_LOGE(TAG, "Failed to clear PDO mapping count for 0x%04X", pdo_index);
+        return err;
+    }
+
+    uint8_t sub = 1;
+    for (const auto& e : entries) {
+        uint8_t sz = e.resolvedSize();
+        uint32_t val = encodePDOMappingValue(e.entry, sz);
+        err = sdoWriteU32(pdo_index, sub, val);
+        if (err != SlaveError::Ok) {
+            TETHER_LOGE(TAG, "Failed to write PDO mapping entry %u for 0x%04X", sub, pdo_index);
+            return err;
+        }
+        TETHER_LOGI(TAG, "  %s 0x%04X sub %u: 0x%08X (idx=0x%04X sub=0x%02X %u bytes)",
+                    dir_str, pdo_index, sub, val, e.entry->index, e.entry->subindex, sz);
+        ++sub;
+    }
+
+    err = sdoWriteU8(pdo_index, 0x00, static_cast<uint8_t>(entries.size()));
+    if (err != SlaveError::Ok) {
+        TETHER_LOGE(TAG, "Failed to set PDO mapping count for 0x%04X", pdo_index);
+        return err;
+    }
+
+    storeCustomPDOInfo(pdo_index, direction, total_size, std::move(fields));
+
+    return SlaveError::Ok;
+}
+
+void Slave::storeCustomPDOInfo(
+    uint16_t pdo_index,
+    PDO::PDODirection direction,
+    uint16_t total_size,
+    std::vector<CustomPDOFieldLayout>&& fields)
+{
+    // Remove any existing entry with the same pdo_index
+    for (auto it = custom_pdo_infos_.begin(); it != custom_pdo_infos_.end(); ++it) {
+        if (it->pdo_index == pdo_index) {
+            custom_pdo_infos_.erase(it);
+            break;
+        }
+    }
+    CustomPDOInfo info;
+    info.pdo_index = pdo_index;
+    info.direction = direction;
+    info.total_size = total_size;
+    info.fields = std::move(fields);
+    info.mapping_entry_index = -1;
+    custom_pdo_infos_.push_back(std::move(info));
+}
+
+SlaveError Slave::applyCustomPDOs() {
+    if (custom_pdo_infos_.empty()) {
+        TETHER_LOGW(TAG, "Slave %u: applyCustomPDOs called with no custom PDOs configured", index_);
+        return SlaveError::Ok;
+    }
+
+    // Remove existing PDO mapping entries for this slave
+    PDO::PDOMapping& mapping = master_.pdo().mapping();
+    mapping.remove_entries_for_slave(index_);
+
+    // Register each custom PDO
+    std::vector<uint16_t> rx_indices, tx_indices;
+    for (auto& info : custom_pdo_infos_) {
+        info.buffer.assign(info.total_size, 0);
+        int idx;
+        if (info.direction == PDO::PDODirection::RxPDO) {
+            idx = mapping.add_rxpdo(index_, info.buffer.data(), info.total_size,
+                                    info.pdo_index, PDO::PDOAddressMode::Position);
+            rx_indices.push_back(info.pdo_index);
+        } else {
+            idx = mapping.add_txpdo(index_, info.buffer.data(), info.total_size,
+                                    info.pdo_index, PDO::PDOAddressMode::Position);
+            tx_indices.push_back(info.pdo_index);
+        }
+        if (idx < 0) {
+            TETHER_LOGE(TAG, "Slave %u: Failed to register custom PDO 0x%04X", index_, info.pdo_index);
+            return SlaveError::PDOMappingFailed;
+        }
+        info.mapping_entry_index = idx;
+        TETHER_LOGI(TAG, "Slave %u: Registered custom PDO 0x%04X (%u bytes, entry %d)",
+                    index_, info.pdo_index, info.total_size, idx);
+    }
+
+    // Write PDO assignment SDOs (0x1C12 for Rx, 0x1C13 for Tx)
+    auto& sdo = master_.sdoManager(index_);
+    bool sdo_ok = true;
+
+    if (!rx_indices.empty()) {
+        if (!sdo.writeU8(CiA301::SyncManager2PDOAssign, 0, 0).has_value()) {
+            TETHER_LOGW(TAG, "Slave %u: Failed to clear SM2 PDO count", index_);
+        }
+        for (size_t i = 0; i < rx_indices.size(); i++) {
+            if (!sdo.writeU16(CiA301::SyncManager2PDOAssign, static_cast<uint8_t>(i + 1),
+                              rx_indices[i]).has_value()) {
+                TETHER_LOGE(TAG, "Slave %u: Failed to assign RxPDO 0x%04X to SM2", index_, rx_indices[i]);
+                sdo_ok = false;
+            }
+        }
+        if (!sdo.writeU8(CiA301::SyncManager2PDOAssign, 0, static_cast<uint8_t>(rx_indices.size())).has_value()) {
+            TETHER_LOGW(TAG, "Slave %u: Failed to set SM2 PDO count", index_);
+        }
+        TETHER_LOGI(TAG, "Slave %u: Assigned %zu RxPDO(s) to SM2 (0x1C12)", index_, rx_indices.size());
+    }
+
+    if (!tx_indices.empty()) {
+        if (!sdo.writeU8(CiA301::SyncManager3PDOAssign, 0, 0).has_value()) {
+            TETHER_LOGW(TAG, "Slave %u: Failed to clear SM3 PDO count", index_);
+        }
+        for (size_t i = 0; i < tx_indices.size(); i++) {
+            if (!sdo.writeU16(CiA301::SyncManager3PDOAssign, static_cast<uint8_t>(i + 1),
+                              tx_indices[i]).has_value()) {
+                TETHER_LOGE(TAG, "Slave %u: Failed to assign TxPDO 0x%04X to SM3", index_, tx_indices[i]);
+                sdo_ok = false;
+            }
+        }
+        if (!sdo.writeU8(CiA301::SyncManager3PDOAssign, 0, static_cast<uint8_t>(tx_indices.size())).has_value()) {
+            TETHER_LOGW(TAG, "Slave %u: Failed to set SM3 PDO count", index_);
+        }
+        TETHER_LOGI(TAG, "Slave %u: Assigned %zu TxPDO(s) to SM3 (0x1C13)", index_, tx_indices.size());
+    }
+
+    if (!sdo_ok) {
+        TETHER_LOGW(TAG, "Slave %u: Custom PDO assignment had SDO failures; continuing anyway", index_);
+    }
+
+    // Finalize mapping to update SM lengths
+    master_.pdo().finalizeMapping(index_);
+
+    return SlaveError::Ok;
+}
+
+const uint8_t* Slave::customPDOData(uint16_t pdo_index) const {
+    for (const auto& info : custom_pdo_infos_) {
+        if (info.pdo_index == pdo_index) {
+            return info.buffer.data();
+        }
+    }
+    return nullptr;
+}
+
+const uint8_t* Slave::customPDOFieldRaw(uint16_t pdo_index, size_t field_index) const {
+    for (const auto& info : custom_pdo_infos_) {
+        if (info.pdo_index == pdo_index) {
+            if (field_index >= info.fields.size()) return nullptr;
+            return info.buffer.data() + info.fields[field_index].offset;
+        }
+    }
+    return nullptr;
+}
+
+const uint8_t* Slave::customPDOField(
+    uint16_t pdo_index,
+    const ObjectDictionary::ObjectDictionaryEntry* entry) const {
+    for (const auto& info : custom_pdo_infos_) {
+        if (info.pdo_index == pdo_index) {
+            for (const auto& f : info.fields) {
+                if (f.entry == entry) {
+                    return info.buffer.data() + f.offset;
+                }
+            }
+        }
+    }
+    return nullptr;
+}
+
+// ============================================================================
 // NonExistingSlave
 // ============================================================================
 
@@ -873,6 +1100,15 @@ SlaveError NonExistingSlave::assignPDOs(const SIIPDOConfig&) {
 }
 SlaveError NonExistingSlave::registerFixedPDOs(const SIIPDOConfig&) {
     logCritical("registerFixedPDOs"); return SlaveError::SlaveNotFound;
+}
+SlaveError NonExistingSlave::configureCustomRxPDO(uint16_t, std::initializer_list<CustomPDOMappingEntry>) {
+    logCritical("configureCustomRxPDO"); return SlaveError::SlaveNotFound;
+}
+SlaveError NonExistingSlave::configureCustomTxPDO(uint16_t, std::initializer_list<CustomPDOMappingEntry>) {
+    logCritical("configureCustomTxPDO"); return SlaveError::SlaveNotFound;
+}
+SlaveError NonExistingSlave::applyCustomPDOs() {
+    logCritical("applyCustomPDOs"); return SlaveError::SlaveNotFound;
 }
 SlaveError NonExistingSlave::transitionTo(SlaveState) {
     logCritical("transitionTo"); return SlaveError::SlaveNotFound;
