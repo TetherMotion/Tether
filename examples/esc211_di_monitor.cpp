@@ -353,13 +353,36 @@ int main(int argc, char** argv) {
 
     // readIdentityObject(sl);
 
-    // Use predefined ESC211 PDOs (FSOE: 0x1600 / 0x1A00) instead of SII
+    // Explicitly write RxPDO 0x1601 mapping (OutputCounter + SAFE_DO = 8 B)
+    {
+        TETHER_LOGI(TAG, "Writing RxPDO 0x1601 mapping (2 entries, 8 B)...");
+        sl.sdoWriteU8(0x1601, 0x00, 0);              // clear count
+        sl.sdoWriteU32(0x1601, 0x01, 0x70100020);    // OutputCounter
+        sl.sdoWriteU32(0x1601, 0x02, 0x70200020);    // SAFE_DO
+        sl.sdoWriteU8(0x1601, 0x00, 2);              // set count = 2
+    }
+
+    // Remap TxPDO 0x1A01 from 7 entries (28 B) to 6 entries (24 B) to match SM3 DefaultSize.
+    // Drop DO_Command (0x6052) — not needed for DI monitoring.
+    {
+        TETHER_LOGI(TAG, "Remapping TxPDO 0x1A01 to 6 entries (24 B)...");
+        sl.sdoWriteU8(0x1A01, 0x00, 0);              // clear count
+        sl.sdoWriteU32(0x1A01, 0x01, 0x60100020);    // InputCounter
+        sl.sdoWriteU32(0x1A01, 0x02, 0x60200020);    // SAFE_DI
+        sl.sdoWriteU32(0x1A01, 0x03, 0x60300020);    // Power_Status
+        sl.sdoWriteU32(0x1A01, 0x04, 0x60400020);    // DO_Monitor
+        sl.sdoWriteU32(0x1A01, 0x05, 0x60500020);    // DO_Valu
+        sl.sdoWriteU32(0x1A01, 0x06, 0x60510020);    // DI_Valu
+        sl.sdoWriteU8(0x1A01, 0x00, 6);              // set count = 6
+    }
+
+    // Use non-FSoE PDOs: RxPDO 0x1601 (8 B) / TxPDO 0x1A01 (24 B after remap)
     EtherCAT::Slave::SIIPDOConfig pdo_cfg;
-    pdo_cfg.rxpdo_index = EtherCAT::Drives::NexcobotESC211_pdo::RxPDO_1600.index;
-    pdo_cfg.rxpdo_size  = static_cast<uint16_t>(EtherCAT::Drives::NexcobotESC211_pdo::RxPDO_1600.size);
+    pdo_cfg.rxpdo_index = EtherCAT::Drives::NexcobotESC211_pdo::RxPDO_1601.index;
+    pdo_cfg.rxpdo_size  = static_cast<uint16_t>(EtherCAT::Drives::NexcobotESC211_pdo::RxPDO_1601.size);
     pdo_cfg.has_rxpdo   = true;
-    pdo_cfg.txpdo_index = EtherCAT::Drives::NexcobotESC211_pdo::TxPDO_1A00.index;
-    pdo_cfg.txpdo_size  = static_cast<uint16_t>(EtherCAT::Drives::NexcobotESC211_pdo::TxPDO_1A00.size);
+    pdo_cfg.txpdo_index = EtherCAT::Drives::NexcobotESC211_pdo::TxPDO_1A01.index;
+    pdo_cfg.txpdo_size  = 24;
     pdo_cfg.has_txpdo   = true;
 
     auto reg_err = sl.registerFixedPDOs(pdo_cfg);
