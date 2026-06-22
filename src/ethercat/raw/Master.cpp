@@ -15,6 +15,7 @@
 #include "tether/ethercat/VoE.hpp"
 #include "tether/ethercat/EoE.hpp"
 #include "tether/ethercat/FaultDetection.hpp"
+#include "tether/ethercat/SlaveStatusPoller.hpp"
 #include "tether/ethercat/RealtimeLoop.hpp"
 #include "tether/ethercat/SyncManagerValidation.hpp"
 #include "tether/sii/SIIParser.hpp"
@@ -398,6 +399,7 @@ Master::Master(const Config& config)
     eoe_    = std::make_unique<EoEManager>(*this);
     fault_transport_ = std::make_unique<MasterFaultTransport>(*this);
     faults_ = std::make_unique<FaultDetector>(*fault_transport_);
+    status_poller_ = std::make_unique<SlaveStatusPoller>(*fault_transport_);
 
     // Register this instance in the global list so host helpers may locate it
     {
@@ -453,6 +455,9 @@ void Master::stop()
     requestCancel();
     packet_router_.cancel();
     stopMotionControlLoop();
+    if (status_poller_) {
+        status_poller_->shutdown();
+    }
     running_.store(false, std::memory_order_release);
 
     // Shutdown per-slave CoEManagers
@@ -692,6 +697,8 @@ FoEManager&    Master::foe()    { return *foe_; }
 VoEManager&    Master::voe()    { return *voe_; }
 EoEManager&    Master::eoe()    { return *eoe_; }
 FaultDetector& Master::faults() { return *faults_; }
+
+SlaveStatusPoller& Master::statusPoller() { return *status_poller_; }
 
 ConditionalPacketRouter& Master::packetRouter() { return packet_router_; }
 
