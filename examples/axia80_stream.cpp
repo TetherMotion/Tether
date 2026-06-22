@@ -13,6 +13,7 @@
  */
 
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -82,6 +83,13 @@ static void logMismatch(const char* field, uint8_t expected, uint8_t actual) {
 
 static void logMismatch(const char* field, int expected, int actual) {
     TETHER_LOGW(TAG, "ESI mismatch: %s expected=%d actual=%d", field, expected, actual);
+}
+
+static void logMismatch(const char* field,
+                        const EtherCAT::SyncManager::SMControlReg& expected,
+                        const EtherCAT::SyncManager::SMControlReg& actual) {
+    TETHER_LOGW(TAG, "ESI mismatch: %s expected=0x%02X actual=0x%02X", field,
+                std::bit_cast<uint8_t>(expected), std::bit_cast<uint8_t>(actual));
 }
 
 static void logMismatchStr(const char* field, const char* expected, const char* actual) {
@@ -249,7 +257,7 @@ static void verifyReadbackAgainstESI(const ESI::DeviceInfo& esi,
         if (hw.control != expected.control) {
             logMismatch("SM control", expected.control, hw.control);
         }
-        bool expected_enable = (expected.enable != 0);
+        bool expected_enable = (std::bit_cast<uint8_t>(expected.enable) & 0x01) != 0;
         if (hw.isEnabled() != expected_enable) {
             TETHER_LOGW(TAG, "SM%u enable mismatch: expected=%s actual=%s",
                         smIdx, expected_enable ? "yes" : "no", hw.isEnabled() ? "yes" : "no");
