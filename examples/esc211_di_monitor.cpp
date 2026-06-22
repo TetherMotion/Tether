@@ -37,11 +37,23 @@
 #include "tether/ethercat/Slave.hpp"
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/SyncManager.hpp"
+#include "tether/ethercat/PDOManager.hpp"
 #include "tether/sii/SIIReader.hpp"
 #include "tether/sii/SIIParser.hpp"
 
 #include "common/ExampleHelpers.hpp"
 #include "common/EtherCATHostSetup.hpp"
+
+// Packed TxPDO 0x1A01 (6 entries, 24 bytes — DO_Command dropped)
+struct TxPDO_1A01_Remapped {
+    uint32_t input_counter;
+    uint32_t safe_di;
+    uint32_t power_status;
+    uint32_t do_monitor;
+    uint32_t do_valu;
+    uint32_t di_valu;
+} __attribute__((packed));
+static_assert(sizeof(TxPDO_1A01_Remapped) == 24, "TxPDO_1A01_Remapped size mismatch");
 
 static const char* TAG = "esc211_di_monitor";
 static std::atomic<bool> g_cancel{false};
@@ -419,6 +431,56 @@ int main(int argc, char** argv) {
     }
 
     TETHER_LOGI(TAG, "Slave %d in SAFE-OP", slave_idx);
+
+    // ---- Stream TxPDO data ----
+    if (stream_mode) {
+        TETHER_LOGI(TAG, "Streaming TxPDO 0x1A01 (DI monitor)...");
+
+        using namespace std::chrono;
+        const auto period = milliseconds(20);  // 50 Hz
+        auto next_time = steady_clock::now();
+        uint64_t cycle = 0;
+
+        while (!g_cancel.load(std::memory_order_relaxed)) {
+            if (!master.pdo().exchangeAll()) {
+                TETHER_LOGW(TAG, "PDO exchange failed (cycle %llu)",
+                            static_cast<unsigned long long>(cycle));
+                next_time += period;
+                std::this_thread::sleep_until(next_time);
+                continue;
+            }
+
+            // Find the TxPDO entry for our slave
+            const auto& mapping = master.pdo().mapping();
+            const TxPDO_1A01_Remapped* tx = nullptr;
+            for (size_t i = 0; i < mapping.entry_count(); ++i) {
+                const auto* entry = mapping.get_entry(i);
+                if (entry && entry->slave_index == static_cast<uint16_t>(slave_idx) &&
+                    entry->direction == EtherCAT::PDO::PDODirection::TxPDO) {
+                    tx = reinterpret_cast<const TxPDO_1A01_Remapped*>(entry->app_buffer);
+                    break;
+                }
+            }
+
+            if (tx) {
+                std::cout << "cycle=" << std::dec << cycle
+                          << " ic=0x" << std::hex << tx->input_counter
+                          << " safe_di=0x" << tx->safe_di
+                          << " pwr=0x" << tx->power_status
+                          << " do_mon=0x" << tx->do_monitor
+                          << " do_val=0x" << tx->do_valu
+                          << " di_val=0x" << tx->di_valu
+                          << std::dec << "\n";
+                std::cout.flush();
+            }
+
+            ++cycle;
+            next_time += period;
+            std::this_thread::sleep_until(next_time);
+        }
+    } else {
+        TETHER_LOGI(TAG, "Slave %d in SAFE-OP (no --stream, exiting)", slave_idx);
+    }
 
     master.stop();
     Tether::Examples::shutdownHostEthernet(session);
