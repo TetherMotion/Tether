@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <bit>
 
 #if __has_include(<argparse/argparse.hpp>)
 #include <argparse/argparse.hpp>
@@ -64,7 +65,7 @@ int main(int argc, char** argv) {
         for (size_t i=0;i<dev.syncManagers.size();++i) {
             const auto& s = dev.syncManagers[i];
             std::cout << "  SM" << i << ": start=0x" << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << s.startAddress << std::dec
-                      << " len=" << s.defaultSize << " ctrl=0x" << std::hex << (unsigned)s.control << std::dec << " (humanized)" << "\n";
+                      << " len=" << s.defaultSize << " ctrl=0x" << std::hex << static_cast<unsigned>(std::bit_cast<uint8_t>(s.control)) << std::dec << " (humanized)" << "\n";
         }
     } else {
         std::cout << EtherCAT::ESI::formatDeviceHumanReadable(dev, false);
