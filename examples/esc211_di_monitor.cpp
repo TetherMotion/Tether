@@ -67,69 +67,28 @@ void signalHandler(int) {
 }
 
 // ---------------------------------------------------------------------------
-// Shared DI state between SDO reader and ncurses display
+// Shared DI state between PDO exchange loop and ncurses display
 // ---------------------------------------------------------------------------
 
 struct DIState {
     mutable std::mutex mtx;
-    std::array<bool, 10> ia{};   // IA1..IA10
-    std::array<bool, 10> ib{};   // IB1..IB10
+    std::array<bool, 10> ia{};   // IA1..IA10  (di_val bits 0–9)
+    std::array<bool, 10> ib{};   // IB1..IB10  (di_val bits 16–25)
     bool stale = true;
     uint64_t read_count = 0;
+    uint32_t last_safe_di = 0;
 };
 
-// ---------------------------------------------------------------------------
-// SDO reader thread (50 Hz)
-// ---------------------------------------------------------------------------
-
-static void sdoReaderThread(EtherCAT::Slave& slave, DIState& state) {
-    using namespace std::chrono;
-    const auto period = milliseconds(20);
-    auto next_time = steady_clock::now();
-
-    while (!g_cancel.load(std::memory_order_relaxed)) {
-        std::array<bool, 10> ia{};
-        std::array<bool, 10> ib{};
-        bool ok = true;
-
-        for (int i = 0; i < 10 && ok; ++i) {
-            uint8_t val = 0;
-            auto err = slave.sdoReadU8(
-                EtherCAT::Drives::NexcobotESC211::kSafetyInputAIndex,
-                static_cast<uint8_t>(i + 1), val);
-            if (err != EtherCAT::SlaveError::Ok) {
-                ok = false;
-            } else {
-                ia[i] = (val != 0);
-            }
-        }
-        for (int i = 0; i < 10 && ok; ++i) {
-            uint8_t val = 0;
-            auto err = slave.sdoReadU8(
-                EtherCAT::Drives::NexcobotESC211::kSafetyInputBIndex,
-                static_cast<uint8_t>(i + 1), val);
-            if (err != EtherCAT::SlaveError::Ok) {
-                ok = false;
-            } else {
-                ib[i] = (val != 0);
-            }
-        }
-
-        {
-            std::lock_guard<std::mutex> lock(state.mtx);
-            if (ok) {
-                state.ia = ia;
-                state.ib = ib;
-                state.stale = false;
-                ++state.read_count;
-            } else {
-                state.stale = true;
-            }
-        }
-
-        next_time += period;
-        std::this_thread::sleep_until(next_time);
+// Extract IA/IB from the 32-bit SAFE_DI field
+static void parseSafeDI(uint32_t di_val, DIState& state) {
+    std::lock_guard<std::mutex> lock(state.mtx);
+    for (int i = 0; i < 10; ++i) {
+        state.ia[i] = (di_val >> i) & 1u;           // IA1..IA10 = bits 0..9
+        state.ib[i] = (di_val >> (i + 16)) & 1u;    // IB1..IB10 = bits 16..25
     }
+    state.last_safe_di = di_val;
+    state.stale = false;
+    ++state.read_count;
 }
 
 // ---------------------------------------------------------------------------
@@ -150,7 +109,7 @@ static void drawScreen(const DIState& state) {
     std::lock_guard<std::mutex> lock(state.mtx);
 
     clear();
-    mvprintw(0, 0, "Nexcobot ESC211 — Safety Digital Inputs (50 Hz)");
+    mvprintw(0, 0, "Nexcobot ESC211 - Safety Digital Inputs (50 Hz)");
     mvprintw(1, 0, "Press Ctrl-C to quit");
 
     if (state.stale) {
@@ -170,28 +129,29 @@ static void drawScreen(const DIState& state) {
 
         // Left: IA1..IA10
         bool a = state.ia[row];
-        mvprintw(y, 2, "IA%2d  ", row + 1);
+        mvprintw(y, 2, "IA%2d", row + 1);
         if (a) {
             attron(COLOR_PAIR(1));
-            mvprintw(y, 10, "\u25CF");   // filled circle
+            mvprintw(y, 8, "  ON");
             attroff(COLOR_PAIR(1));
         } else {
-            mvprintw(y, 10, "\u25CB");   // empty circle
+            mvprintw(y, 8, " off");
         }
 
         // Right: IB1..IB10
         bool b = state.ib[row];
-        mvprintw(y, 22, "IB%2d  ", row + 1);
+        mvprintw(y, 22, "IB%2d", row + 1);
         if (b) {
             attron(COLOR_PAIR(1));
-            mvprintw(y, 30, "\u25CF");
+            mvprintw(y, 28, "  ON");
             attroff(COLOR_PAIR(1));
         } else {
-            mvprintw(y, 30, "\u25CB");
+            mvprintw(y, 28, " off");
         }
     }
 
-    mvprintw(16, 0, "Read count: %llu", static_cast<unsigned long long>(state.read_count));
+    mvprintw(16, 0, "Read count: %llu  di_val=0x%08X",
+             static_cast<unsigned long long>(state.read_count), state.last_safe_di);
     refresh();
 }
 
@@ -432,36 +392,30 @@ int main(int argc, char** argv) {
 
     TETHER_LOGI(TAG, "Slave %d in SAFE-OP", slave_idx);
 
-    // ---- Stream TxPDO data ----
+    // ---- PDO exchange + display loop ----
+    using namespace std::chrono;
+    const auto period = milliseconds(20);  // 50 Hz
+    auto next_time = steady_clock::now();
+    uint64_t cycle = 0;
+
+    // Helper: exchange PDOs and return TxPDO pointer
+    auto getTxPDO = [&]() -> const TxPDO_1A01_Remapped* {
+        if (!master.pdo().exchangeAll()) return nullptr;
+        const auto& mapping = master.pdo().mapping();
+        for (size_t i = 0; i < mapping.entry_count(); ++i) {
+            const auto* entry = mapping.get_entry(i);
+            if (entry && entry->slave_index == static_cast<uint16_t>(slave_idx) &&
+                entry->direction == EtherCAT::PDO::PDODirection::TxPDO) {
+                return reinterpret_cast<const TxPDO_1A01_Remapped*>(entry->app_buffer);
+            }
+        }
+        return nullptr;
+    };
+
     if (stream_mode) {
         TETHER_LOGI(TAG, "Streaming TxPDO 0x1A01 (DI monitor)...");
-
-        using namespace std::chrono;
-        const auto period = milliseconds(20);  // 50 Hz
-        auto next_time = steady_clock::now();
-        uint64_t cycle = 0;
-
         while (!g_cancel.load(std::memory_order_relaxed)) {
-            if (!master.pdo().exchangeAll()) {
-                TETHER_LOGW(TAG, "PDO exchange failed (cycle %llu)",
-                            static_cast<unsigned long long>(cycle));
-                next_time += period;
-                std::this_thread::sleep_until(next_time);
-                continue;
-            }
-
-            // Find the TxPDO entry for our slave
-            const auto& mapping = master.pdo().mapping();
-            const TxPDO_1A01_Remapped* tx = nullptr;
-            for (size_t i = 0; i < mapping.entry_count(); ++i) {
-                const auto* entry = mapping.get_entry(i);
-                if (entry && entry->slave_index == static_cast<uint16_t>(slave_idx) &&
-                    entry->direction == EtherCAT::PDO::PDODirection::TxPDO) {
-                    tx = reinterpret_cast<const TxPDO_1A01_Remapped*>(entry->app_buffer);
-                    break;
-                }
-            }
-
+            const auto* tx = getTxPDO();
             if (tx) {
                 std::cout << "cycle=" << std::dec << cycle
                           << " ic=0x" << std::hex << tx->input_counter
@@ -472,14 +426,48 @@ int main(int argc, char** argv) {
                           << " di_val=0x" << tx->di_valu
                           << std::dec << "\n";
                 std::cout.flush();
+            } else {
+                TETHER_LOGW(TAG, "PDO exchange failed (cycle %llu)",
+                            static_cast<unsigned long long>(cycle));
             }
-
             ++cycle;
             next_time += period;
             std::this_thread::sleep_until(next_time);
         }
     } else {
-        TETHER_LOGI(TAG, "Slave %d in SAFE-OP (no --stream, exiting)", slave_idx);
+        // ncurses UI mode
+        DIState di_state;
+        setlocale(LC_ALL, "");   // enable Unicode for ncurses
+        initscr();
+        noecho();
+        cbreak();
+        curs_set(0);
+        nodelay(stdscr, TRUE);
+        keypad(stdscr, TRUE);
+        initColors();
+
+        TETHER_LOGI(TAG, "Starting ncurses DI monitor (PDO-based)...");
+
+        while (!g_cancel.load(std::memory_order_relaxed)) {
+            const auto* tx = getTxPDO();
+            if (tx) {
+                parseSafeDI(tx->di_valu, di_state);
+            } else {
+                std::lock_guard<std::mutex> lock(di_state.mtx);
+                di_state.stale = true;
+            }
+
+            drawScreen(di_state);
+
+            int ch = getch();
+            if (ch == 'q' || ch == 27) break;  // q or Esc
+
+            ++cycle;
+            next_time += period;
+            std::this_thread::sleep_until(next_time);
+        }
+
+        endwin();
     }
 
     master.stop();
