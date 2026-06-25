@@ -130,8 +130,24 @@ if(TETHER_ENABLE_COVERAGE)
 endif()
 
 # =============================================================================
-# Feature Options
+# TETHER_COMPONENTS — FindBoost-style component selection
 # =============================================================================
+# When a parent project sets TETHER_COMPONENTS (e.g. "ethercat_master"),
+# Tether disables all optional components and enables only the requested
+# ones plus their transitive dependencies.
+#
+# Component dependency graph:
+#   ethercat_master  → ethercat_common, motion_control, controls, hal, common
+#   ethercat_common  → hal, common
+#   motion_control   → controls, common
+#   controls         → common
+#   hal              → common
+#   common           → (none)
+#
+# When TETHER_COMPONENTS is not defined, all TETHER_BUILD_* defaults apply
+# (standalone build behavior is unchanged).
+
+# Feature Options (defaults — overridden by TETHER_COMPONENTS if set)
 option(TETHER_BUILD_COMMON "Build common utilities" ON)
 option(TETHER_BUILD_HAL "Build hardware abstraction layer" ON)
 option(TETHER_BUILD_PCAP "Build pcap logging utilities" ON)
@@ -157,6 +173,75 @@ option(TETHER_BUILD_EXTRACT_ESI "Build extract_esi_xml utility" ON)
 option(TETHER_BUILD_PYTHON_BINDINGS "Build Python bindings" ON)
 option(TETHER_BUILD_SHARED_LIBS "Build Tether component libraries as shared" ON)
 option(TETHER_BUILD_STATIC_LIBS "Build Tether component libraries as static" OFF)
+
+# --- Apply TETHER_COMPONENTS selection ---
+if(DEFINED TETHER_COMPONENTS)
+    # Transitive dependency map: component → list of dependencies
+    set(_tether_component_deps_common          "")
+    set(_tether_component_deps_hal             "common")
+    set(_tether_component_deps_controls        "common")
+    set(_tether_component_deps_motion_control  "controls;common")
+    set(_tether_component_deps_ethercat_common "hal;common")
+    set(_tether_component_deps_ethercat_master "ethercat_common;motion_control;controls;hal;common")
+    set(_tether_component_deps_ethercat_slave  "ethercat_common;hal;common")
+    set(_tether_component_deps_pcap            "common")
+    set(_tether_component_deps_gcode           "common")
+    set(_tether_component_deps_export          "common")
+    set(_tether_component_deps_motion_planner  "common")
+    set(_tether_component_deps_simulation      "common")
+    set(_tether_component_deps_io_protocol     "common")
+    set(_tether_component_deps_destabilizer    "simulation;common")
+
+    # All valid component names
+    set(_tether_all_components
+        common hal pcap controls gcode export motion_planner motion_control
+        ethercat_common ethercat_master ethercat_slave simulation
+        destabilizer io_protocol)
+
+    # Resolve transitive closure of requested components
+    set(_tether_enabled ${TETHER_COMPONENTS})
+    set(_tether_queue ${TETHER_COMPONENTS})
+    while(_tether_queue)
+        list(POP_FRONT _tether_queue _comp)
+        # Validate component name
+        if(NOT _comp IN_LIST _tether_all_components)
+            message(FATAL_ERROR "TETHER_COMPONENTS: unknown component '${_comp}'. "
+                "Valid components: ${_tether_all_components}")
+        endif()
+        # Add dependencies not already in the enabled set
+        foreach(_dep ${_tether_component_deps_${_comp}})
+            if(NOT _dep IN_LIST _tether_enabled)
+                list(APPEND _tether_enabled ${_dep})
+                list(APPEND _tether_queue ${_dep})
+            endif()
+        endforeach()
+    endwhile()
+
+    # Disable everything first
+    set(_tether_build_vars
+        COMMON HAL PCAP CONTROLS GCODE EXPORT MOTION_PLANNER MOTION_CONTROL
+        ETHERCAT_COMMON ETHERCAT_MASTER ETHERCAT_SLAVE SIMULATION
+        DESTABILIZER IO_PROTOCOL)
+    foreach(_var ${_tether_build_vars})
+        set(TETHER_BUILD_${_var} OFF CACHE BOOL "" FORCE)
+    endforeach()
+
+    # Enable only the resolved components
+    foreach(_comp ${_tether_enabled})
+        string(TOUPPER ${_comp} _comp_upper)
+        set(TETHER_BUILD_${_comp_upper} ON CACHE BOOL "" FORCE)
+    endforeach()
+
+    # Disable non-library targets when used as a subproject
+    set(TETHER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(TETHER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(TETHER_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+    set(TETHER_BUILD_EXTRACT_ESI OFF CACHE BOOL "" FORCE)
+    set(TETHER_BUILD_PYTHON_BINDINGS OFF CACHE BOOL "" FORCE)
+
+    message(STATUS "Tether: TETHER_COMPONENTS=${TETHER_COMPONENTS}")
+    message(STATUS "Tether: resolved components (with deps): ${_tether_enabled}")
+endif()
 
 if(NOT TETHER_BUILD_SHARED_LIBS AND NOT TETHER_BUILD_STATIC_LIBS)
     message(FATAL_ERROR "At least one of TETHER_BUILD_SHARED_LIBS or TETHER_BUILD_STATIC_LIBS must be ON")

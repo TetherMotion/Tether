@@ -474,4 +474,17 @@ private:
  */
 void debugMailboxConfiguration(Master& master, uint16_t slave_index, const char* tag);
 
+/**
+ * @brief Debug function to dump non-mailbox (PDO) sync manager hardware register configuration.
+ *
+ * Reads and displays the actual hardware register configuration of SM2 and SM3
+ * (process data sync managers), showing start addresses, lengths, control register
+ * bits, activation status, and communication types.
+ *
+ * @param master        EtherCAT master instance
+ * @param slave_index   Slave index (0-based)
+ * @param tag           Logger tag
+ */
+void debugPDOSyncManagerConfiguration(Master& master, uint16_t slave_index, const char* tag);
+
 } // namespace EtherCAT
