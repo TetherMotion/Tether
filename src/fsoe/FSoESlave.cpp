@@ -540,8 +540,10 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
         connId = static_cast<uint16_t>(data[1] | (data[2] << 8));
     }
     
-    // Validate connection ID (in DATA state)
-    if (state_ == ConnectionState::Data) {
+    // Validate connection ID (after connection is established)
+    if (state_ == ConnectionState::Parameter ||
+        state_ == ConnectionState::Data ||
+        state_ == ConnectionState::FailSafe) {
         if (!validateConnectionId(connId)) {
             return false;
         }

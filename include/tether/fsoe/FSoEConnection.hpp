@@ -39,6 +39,7 @@ class FSoESlave;
  */
 struct ConnectionConfig {
     uint16_t slave_addr = 0;            // EtherCAT slave address
+    uint16_t slave_safety_addr = 0;     // FSoE slave safety address
     uint16_t connection_id = 0;         // FSoE connection ID
     uint16_t master_addr = 0;           // FSoE master safety address
     uint16_t watchdog_timeout_ms = 100; // Watchdog timeout
@@ -292,7 +293,7 @@ public:
 
 private:
     // State machine handlers
-    void handleResetState();
+    void handleResetState(const uint8_t* data, size_t len);
     void handleSessionState(const uint8_t* data, size_t len);
     void handleConnectionState(const uint8_t* data, size_t len);
     void handleParameterState(const uint8_t* data, size_t len);
@@ -301,6 +302,7 @@ private:
     // Frame building
     size_t buildSessionResetFrame(uint8_t* data, size_t max_len);
     size_t buildConnectionFrame(uint8_t* data, size_t max_len);
+    size_t buildParameterFrame(uint8_t* data, size_t max_len);
     size_t buildDataFrame(uint8_t* data, size_t max_len);
     size_t buildFailSafeFrame(uint8_t* data, size_t max_len);
     

@@ -24,6 +24,7 @@ protected:
     void SetUp() override {
         ConnectionConfig cfg{};
         cfg.slave_addr = 0x0100;
+        cfg.slave_safety_addr = 0x0100;
         cfg.connection_id = 0x1234;
         cfg.master_addr = 0x0100;
         cfg.watchdog_timeout_ms = 100;
@@ -188,6 +189,7 @@ TEST_F(FSoESequenceNonStrictTest, NonStrictDoesNotIncrementSequenceErrors) {
 TEST(FSoEThreadSafetyTest, ConcurrentProcessAndPrepare) {
     ConnectionConfig cfg{};
     cfg.slave_addr = 0x0001;
+    cfg.slave_safety_addr = 0x0100;
     cfg.connection_id = 0x1234;
     cfg.input_size = 4;
     cfg.output_size = 4;
@@ -272,12 +274,14 @@ TEST(FSoEThreadSafetyTest, ConcurrentMasterAccess) {
 
     ConnectionConfig cfg1{};
     cfg1.slave_addr = 0x0001;
+    cfg1.slave_safety_addr = 0x0100;
     cfg1.connection_id = 0x1111;
     cfg1.input_size = 2;
     cfg1.output_size = 2;
 
     ConnectionConfig cfg2{};
     cfg2.slave_addr = 0x0002;
+    cfg2.slave_safety_addr = 0x0200;
     cfg2.connection_id = 0x2222;
     cfg2.input_size = 2;
     cfg2.output_size = 2;

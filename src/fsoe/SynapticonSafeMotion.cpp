@@ -228,6 +228,7 @@ std::optional<Status> Codec::decodeSlaveToMain(
 MainInstance::MainInstance(const MainConfig& config)
     : config_(config)
     , connection_config_({config.slave_address,
+                          config.safety_address,
                           config.connection_id,
                           config.master_address,
                           config.watchdog_time_ms,
