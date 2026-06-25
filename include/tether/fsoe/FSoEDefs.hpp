@@ -38,6 +38,7 @@ namespace Command {
     constexpr uint8_t Connection     = 0x95;  // Connection command
     constexpr uint8_t ParameterReq   = 0xC3;  // Parameter request
     constexpr uint8_t ParameterResp  = 0x3C;  // Parameter response
+    constexpr uint8_t FailSafeFlag   = 0x80;  // OR'd with ProcessData for fail-safe response
 }
 
 // ============================================================================

@@ -588,9 +588,11 @@ bool FSoESlave::validateSequence(uint8_t seqNum) {
             stats_.sequenceErrors++;
             return false;
         }
+        // Non-strict: accept frame but don't resync — preserves replay protection
+        return true;
     }
     
-    expectedSequence_ = (seqNum + 1) & 0xFF;
+    expectedSequence_ = (seqNum + 1) & 0x0F;
     return true;
 }
 

@@ -33,12 +33,19 @@ FSoEConnection::FSoEConnection(const ConnectionConfig& config)
 
 FSoEConnection::~FSoEConnection() = default;
 
+bool FSoEConnection::isInitialized() const
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return initialized_;
+}
+
 // ============================================================================
 // Initialization
 // ============================================================================
 
 bool FSoEConnection::initialize()
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (config_.input_size > 16 || config_.output_size > 16) {
         return false;  // Buffer size exceeded
     }
@@ -67,6 +74,7 @@ bool FSoEConnection::initialize()
 
 bool FSoEConnection::startConnection()
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!initialized_) return false;
     
     status_.state = ConnectionState::Reset;
@@ -75,6 +83,7 @@ bool FSoEConnection::startConnection()
 
 bool FSoEConnection::resetConnection()
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!initialized_) return false;
     
     transitionTo(ConnectionState::Reset);
@@ -90,6 +99,7 @@ bool FSoEConnection::resetConnection()
 
 bool FSoEConnection::requestSessionReset()
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!initialized_) return false;
     
     // Generate new session ID
@@ -104,6 +114,7 @@ bool FSoEConnection::requestSessionReset()
 
 void FSoEConnection::triggerFailSafe(uint16_t error_code)
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     const bool was_fail_safe = status_.fail_safe_active;
     status_.fail_safe_active = true;
     status_.data_valid = false;
@@ -126,6 +137,7 @@ void FSoEConnection::triggerFailSafe(uint16_t error_code)
 
 bool FSoEConnection::clearError()
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (status_.state != ConnectionState::Error &&
         status_.state != ConnectionState::FailSafe) {
         return false;
@@ -143,6 +155,7 @@ bool FSoEConnection::clearError()
 
 bool FSoEConnection::processRxFrame(const uint8_t* data, size_t len)
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!initialized_ || !data || len < sizeof(FSoEHeader) + 2) {
         return false;
     }
@@ -159,7 +172,8 @@ bool FSoEConnection::processRxFrame(const uint8_t* data, size_t len)
     // Validate connection ID
     const auto* header = reinterpret_cast<const FSoEHeader*>(data);
     uint16_t conn_id = 0;
-    if (header->command == Command::ProcessData) {
+    uint8_t cmd = header->command & ~Command::FailSafeFlag;
+    if (cmd == Command::ProcessData) {
         conn_id = static_cast<uint16_t>(header->conn_id_low |
                                         ((header->conn_id_high & 0x0F) << 8));
     } else {
@@ -207,6 +221,7 @@ bool FSoEConnection::processRxFrame(const uint8_t* data, size_t len)
 
 size_t FSoEConnection::prepareTxFrame(uint8_t* data, size_t max_len)
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!initialized_ || !data) return 0;
     
     size_t len = 0;
@@ -253,6 +268,7 @@ size_t FSoEConnection::prepareTxFrame(uint8_t* data, size_t max_len)
 
 void FSoEConnection::update(uint64_t current_time_ms)
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     current_time_ms_ = current_time_ms;
     stats_.uptime_ms = current_time_ms;
     
@@ -313,6 +329,22 @@ void FSoEConnection::handleParameterState(const uint8_t* data, size_t len)
 void FSoEConnection::handleDataState(const uint8_t* data, size_t len)
 {
     const auto* header = reinterpret_cast<const FSoEHeader*>(data);
+    
+    // Check for fail-safe response from slave
+    if (header->command == (Command::ProcessData | Command::FailSafeFlag)) {
+        // Extract slave error code from fail-safe response
+        // Format: header(3) + input_data + error_code(2) + CRC(2)
+        size_t payload_len = len - sizeof(FSoEHeader) - 2;
+        if (payload_len >= config_.input_size + 2) {
+            size_t error_offset = sizeof(FSoEHeader) + config_.input_size;
+            uint16_t slave_error = static_cast<uint16_t>(
+                data[error_offset] | (data[error_offset + 1] << 8));
+            handleError(slave_error);
+        } else {
+            handleError(ErrorCode::ApplicationError);
+        }
+        return;
+    }
     
     if (header->command != Command::ProcessData) {
         return;
@@ -519,6 +551,7 @@ void FSoEConnection::checkWatchdog(uint64_t current_time_ms)
 
 bool FSoEConnection::setSafeOutputs(const uint8_t* data, size_t len)
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!data || len != config_.output_size) return false;
     if (status_.isFailSafe()) return false;  // Don't allow writes in fail-safe
     
@@ -528,11 +561,13 @@ bool FSoEConnection::setSafeOutputs(const uint8_t* data, size_t len)
 
 bool FSoEConnection::writeOutputProcessData(std::span<const uint8_t> data)
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return setSafeOutputs(data.data(), data.size());
 }
 
 size_t FSoEConnection::getSafeInputs(uint8_t* data, size_t len) const
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!data || len < config_.input_size) return 0;
     if (!status_.data_valid) return 0;
     
@@ -542,11 +577,13 @@ size_t FSoEConnection::getSafeInputs(uint8_t* data, size_t len) const
 
 size_t FSoEConnection::readInputProcessData(std::span<uint8_t> data) const
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return getSafeInputs(data.data(), data.size());
 }
 
 std::vector<uint8_t> FSoEConnection::inputProcessData() const
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::vector<uint8_t> data(config_.input_size, 0);
     const size_t copied = getSafeInputs(data.data(), data.size());
     data.resize(copied);
@@ -555,12 +592,14 @@ std::vector<uint8_t> FSoEConnection::inputProcessData() const
 
 std::vector<uint8_t> FSoEConnection::outputProcessData() const
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return std::vector<uint8_t>(safe_outputs_.begin(),
                                 safe_outputs_.begin() + config_.output_size);
 }
 
 bool FSoEConnection::exchangeWith(FSoESlave& slave, uint64_t current_time_ms)
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     update(current_time_ms);
     slave.update(current_time_ms);
 
@@ -586,6 +625,7 @@ bool FSoEConnection::exchangeWith(FSoESlave& slave, uint64_t current_time_ms)
 
 bool FSoEConnection::getSafeInputBit(uint8_t bit_index) const
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!status_.data_valid) return false;
     
     uint8_t byte_idx = bit_index / 8;
@@ -598,6 +638,7 @@ bool FSoEConnection::getSafeInputBit(uint8_t bit_index) const
 
 bool FSoEConnection::setSafeOutputBit(uint8_t bit_index, bool value)
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (status_.isFailSafe()) return false;
     
     uint8_t byte_idx = bit_index / 8;
@@ -616,6 +657,7 @@ bool FSoEConnection::setSafeOutputBit(uint8_t bit_index, bool value)
 
 uint8_t FSoEConnection::getSafeInputByte(uint8_t byte_index) const
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!status_.data_valid || byte_index >= config_.input_size) {
         return 0;
     }
@@ -624,6 +666,7 @@ uint8_t FSoEConnection::getSafeInputByte(uint8_t byte_index) const
 
 bool FSoEConnection::setSafeOutputByte(uint8_t byte_index, uint8_t value)
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (status_.isFailSafe() || byte_index >= config_.output_size) {
         return false;
     }
@@ -637,11 +680,13 @@ bool FSoEConnection::setSafeOutputByte(uint8_t byte_index, uint8_t value)
 
 void FSoEConnection::resetStats()
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     stats_ = {};
 }
 
 std::string FSoEConnection::getDiagnostics() const
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::string diag;
     
     diag += "FSoE Connection Diagnostics:\n";
@@ -678,21 +723,25 @@ std::string FSoEConnection::getDiagnostics() const
 
 void FSoEConnection::setStateChangeCallback(StateChangeCallback callback)
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     state_change_callback_ = std::move(callback);
 }
 
 void FSoEConnection::setErrorCallback(ErrorCallback callback)
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     error_callback_ = std::move(callback);
 }
 
 void FSoEConnection::setFailSafeCallback(FailSafeCallback callback)
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     fail_safe_callback_ = std::move(callback);
 }
 
 void FSoEConnection::setDataCallback(DataCallback callback)
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     data_callback_ = std::move(callback);
 }
 
@@ -700,11 +749,42 @@ void FSoEConnection::setDataCallback(DataCallback callback)
 // FSoEMaster Implementation
 // ============================================================================
 
+uint8_t FSoEConnection::getState() const
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return status_.state;
+}
+
+uint16_t FSoEConnection::getErrorCode() const
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return status_.error_code;
+}
+
+bool FSoEConnection::isOperational() const
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return status_.isOperational();
+}
+
+bool FSoEConnection::isFailSafe() const
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return status_.isFailSafe();
+}
+
+bool FSoEConnection::areSafeInputsValid() const
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return status_.data_valid && status_.isOperational();
+}
+
 FSoEMaster::FSoEMaster() = default;
 FSoEMaster::~FSoEMaster() = default;
 
 bool FSoEMaster::addConnection(const ConnectionConfig& config)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     // Check for duplicate connection ID
     for (const auto& conn : connections_) {
         if (conn->getConfig().connection_id == config.connection_id) {
@@ -723,6 +803,7 @@ bool FSoEMaster::addConnection(const ConnectionConfig& config)
 
 bool FSoEMaster::removeConnection(uint16_t connection_id)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     auto it = std::remove_if(connections_.begin(), connections_.end(),
         [connection_id](const std::unique_ptr<FSoEConnection>& conn) {
             return conn->getConfig().connection_id == connection_id;
@@ -738,6 +819,7 @@ bool FSoEMaster::removeConnection(uint16_t connection_id)
 
 FSoEConnection* FSoEMaster::getConnection(uint16_t connection_id)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     for (auto& conn : connections_) {
         if (conn->getConfig().connection_id == connection_id) {
             return conn.get();
@@ -748,6 +830,7 @@ FSoEConnection* FSoEMaster::getConnection(uint16_t connection_id)
 
 FSoEConnection* FSoEMaster::getConnectionBySlaveAddr(uint16_t slave_addr)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     for (auto& conn : connections_) {
         if (conn->getConfig().slave_addr == slave_addr) {
             return conn.get();
@@ -758,6 +841,7 @@ FSoEConnection* FSoEMaster::getConnectionBySlaveAddr(uint16_t slave_addr)
 
 bool FSoEMaster::startAll()
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     bool all_started = true;
     for (auto& conn : connections_) {
         if (!conn->startConnection()) {
@@ -769,6 +853,7 @@ bool FSoEMaster::startAll()
 
 void FSoEMaster::resetAll()
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     for (auto& conn : connections_) {
         conn->resetConnection();
     }
@@ -776,12 +861,13 @@ void FSoEMaster::resetAll()
 
 void FSoEMaster::update(uint64_t current_time_ms)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     for (auto& conn : connections_) {
         conn->update(current_time_ms);
     }
 }
 
-bool FSoEMaster::allOperational() const
+bool FSoEMaster::allOperationalUnsafe() const
 {
     for (const auto& conn : connections_) {
         if (!conn->isOperational()) {
@@ -791,7 +877,13 @@ bool FSoEMaster::allOperational() const
     return !connections_.empty();
 }
 
-bool FSoEMaster::anyFailSafe() const
+bool FSoEMaster::allOperational() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return allOperationalUnsafe();
+}
+
+bool FSoEMaster::anyFailSafeUnsafe() const
 {
     for (const auto& conn : connections_) {
         if (conn->isFailSafe()) {
@@ -801,14 +893,27 @@ bool FSoEMaster::anyFailSafe() const
     return false;
 }
 
+bool FSoEMaster::anyFailSafe() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return anyFailSafeUnsafe();
+}
+
+size_t FSoEMaster::getConnectionCount() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return connections_.size();
+}
+
 std::string FSoEMaster::getDiagnostics() const
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     std::string diag;
     
     diag += "FSoE Master Diagnostics:\n";
     diag += "  Connections: " + std::to_string(connections_.size()) + "\n";
-    diag += "  All Operational: " + std::string(allOperational() ? "Yes" : "No") + "\n";
-    diag += "  Any Fail-Safe: " + std::string(anyFailSafe() ? "Yes" : "No") + "\n";
+    diag += "  All Operational: " + std::string(allOperationalUnsafe() ? "Yes" : "No") + "\n";
+    diag += "  Any Fail-Safe: " + std::string(anyFailSafeUnsafe() ? "Yes" : "No") + "\n";
     
     for (size_t i = 0; i < connections_.size(); ++i) {
         diag += "\n--- Connection " + std::to_string(i) + " ---\n";

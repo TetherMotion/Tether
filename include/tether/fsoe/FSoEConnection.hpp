@@ -24,6 +24,7 @@
 #include <span>
 #include <vector>
 #include <memory>
+#include <mutex>
 
 namespace FSoE {
 
@@ -96,7 +97,7 @@ public:
     /**
      * @brief Check if connection is initialized
      */
-    bool isInitialized() const { return initialized_; }
+    bool isInitialized() const;
     
     /**
      * @brief Get connection configuration
@@ -205,7 +206,7 @@ public:
     /**
      * @brief Check if safe inputs are valid
      */
-    bool areSafeInputsValid() const { return status_.data_valid && status_.isOperational(); }
+    bool areSafeInputsValid() const;
     
     /**
      * @brief Get fail-safe output values
@@ -248,22 +249,22 @@ public:
     /**
      * @brief Get current connection state
      */
-    uint8_t getState() const { return status_.state; }
+    uint8_t getState() const;
     
     /**
      * @brief Get last error code
      */
-    uint16_t getErrorCode() const { return status_.error_code; }
+    uint16_t getErrorCode() const;
     
     /**
      * @brief Check if connection is operational
      */
-    bool isOperational() const { return status_.isOperational(); }
+    bool isOperational() const;
     
     /**
      * @brief Check if in fail-safe state
      */
-    bool isFailSafe() const { return status_.isFailSafe(); }
+    bool isFailSafe() const;
     
     /**
      * @brief Get connection statistics
@@ -332,6 +333,8 @@ private:
     ErrorCallback error_callback_;
     FailSafeCallback fail_safe_callback_;
     DataCallback data_callback_;
+
+    mutable std::recursive_mutex mutex_;
 };
 
 // ============================================================================
@@ -391,7 +394,7 @@ public:
     /**
      * @brief Get number of connections
      */
-    size_t getConnectionCount() const { return connections_.size(); }
+    size_t getConnectionCount() const;
     
     /**
      * @brief Get master diagnostics
@@ -399,7 +402,10 @@ public:
     std::string getDiagnostics() const;
 
 private:
+    bool allOperationalUnsafe() const;
+    bool anyFailSafeUnsafe() const;
     std::vector<std::unique_ptr<FSoEConnection>> connections_;
+    mutable std::mutex mutex_;
 };
 
 } // namespace FSoE
