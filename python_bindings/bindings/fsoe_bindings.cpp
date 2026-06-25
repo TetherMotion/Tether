@@ -6,7 +6,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "tether/fsoe/FSoEConnection.hpp"
+#include "tether/fsoe/FSoEMasterConnection.hpp"
 #include "tether/fsoe/FSoESlave.hpp"
 
 namespace py = pybind11;

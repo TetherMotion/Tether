@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include "fsoe/FSoECRC.hpp"
 
 namespace FSoE {
 
@@ -38,6 +39,19 @@ namespace Command {
     constexpr uint8_t Connection     = 0x95;  // Connection command
     constexpr uint8_t ParameterReq   = 0xC3;  // Parameter request
     constexpr uint8_t ParameterResp  = 0x3C;  // Parameter response
+}
+
+// ============================================================================
+// FSoE Parameter IDs
+// ============================================================================
+
+namespace ParameterID {
+    constexpr uint16_t WatchdogTimeout   = 0x0001;
+    constexpr uint16_t ConnectionTimeout = 0x0002;
+    constexpr uint16_t SafetyLevel       = 0x0003;
+    constexpr uint16_t SafeInputSize     = 0x0004;
+    constexpr uint16_t SafeOutputSize    = 0x0005;
+    constexpr uint16_t FailSafeValues    = 0x0006;
 }
 
 // ============================================================================
@@ -174,8 +188,7 @@ struct FSoEConnectionFrame {
     FSoEHeader header;
     uint16_t   conn_id;
     uint16_t   slave_addr;
-    uint8_t    sl_param_crc;
-    uint8_t    reserved;
+    uint16_t   sl_param_crc;
     uint16_t   crc;
 };
 
@@ -261,41 +274,31 @@ namespace ConfigParam {
 // ============================================================================
 
 /**
- * @brief Calculate FSoE CRC-16
+ * @brief Calculate FSoE CRC-16 (delegates to shared table-based implementation)
  * @param data Pointer to data
  * @param len Length of data
  * @param init_crc Initial CRC value (0xFFFF for first call)
  * @return CRC-16 value
  */
-inline uint16_t calculateCRC16(const uint8_t* data, size_t len, uint16_t init_crc = 0xFFFF)
+inline uint16_t calculateCRC16(const uint8_t* data, size_t len, uint16_t init_crc = CRC::kInitValue)
 {
-    // FSoE uses the ETG.5100 polynomial 0x755B.
-    uint16_t crc = init_crc;
-
-    if (data == nullptr || len == 0) {
-        return crc;
-    }
-
-    for (size_t i = 0; i < len; ++i) {
-        crc ^= data[i];
-        for (int j = 0; j < 8; ++j) {
-            const bool lsb_set = (crc & 0x0001u) != 0;
-            crc >>= 1;
-            if (lsb_set) {
-                crc ^= 0x755B;
-            }
-        }
-    }
-
-    return crc;
+    return CRC::calculate(data, len, init_crc);
 }
 
 /**
- * @brief Verify FSoE CRC-16
+ * @brief Verify FSoE CRC-16 (delegates to shared implementation)
+ */
+inline bool verifyCRC16(const uint8_t* data, size_t len)
+{
+    return CRC::verify(data, len);
+}
+
+/**
+ * @brief Verify FSoE CRC-16 against an explicit expected value
  */
 inline bool verifyCRC16(const uint8_t* data, size_t len, uint16_t expected_crc)
 {
-    return calculateCRC16(data, len) == expected_crc;
+    return CRC::calculate(data, len) == expected_crc;
 }
 
 // ============================================================================
@@ -335,15 +338,18 @@ namespace SafePDO {
 // ============================================================================
 
 struct ConnectionStats {
-    uint32_t frames_sent;
-    uint32_t frames_received;
-    uint32_t crc_errors;
-    uint32_t sequence_errors;
-    uint32_t timeout_events;
-    uint32_t reset_events;
-    uint32_t watchdog_events;
-    uint64_t uptime_ms;
-    uint64_t last_comm_time_ms;
+    uint32_t frames_sent = 0;
+    uint32_t frames_received = 0;
+    uint32_t crc_errors = 0;
+    uint32_t sequence_errors = 0;
+    uint32_t timeout_events = 0;
+    uint32_t reset_events = 0;
+    uint32_t watchdog_events = 0;
+    uint32_t invalid_frames = 0;
+    uint32_t recovery_attempts = 0;
+    uint32_t successful_recoveries = 0;
+    uint64_t uptime_ms = 0;
+    uint64_t last_comm_time_ms = 0;
 };
 
 } // namespace FSoE

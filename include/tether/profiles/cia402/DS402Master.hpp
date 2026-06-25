@@ -8,6 +8,7 @@
 #include "tether/control/SineMotionController.hpp"
 #include "tether/ethercat/DC.hpp"
 #include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/CyclicTaskScheduler.hpp"
 #include "tether/profiles/cia402/CiA402Drive.hpp"
 
 namespace EtherCAT {
@@ -34,11 +35,7 @@ public:
         virtual bool update(CiA402Drive& drive, double dt_seconds) = 0;
     };
 
-    class ICyclicTask {
-    public:
-        virtual ~ICyclicTask() = default;
-        virtual bool update(DS402Master& master, double dt_seconds) = 0;
-    };
+    using ICyclicTask = EtherCAT::ICyclicTask;
 
     template<typename RxPDO>
     class SineDriveMotionController final : public IDriveMotionController {
@@ -175,7 +172,9 @@ public:
     bool removeMotionController(uint16_t slave_index);
     void clearMotionControllers();
     bool addCyclicTask(std::unique_ptr<ICyclicTask> task);
+    bool addCyclicTask(std::unique_ptr<ICyclicTask> task, TaskPhase phase, uint8_t priority = 128);
     void clearCyclicTasks();
+    CyclicTaskScheduler& cyclicTaskScheduler() { return cyclic_task_scheduler_; }
     bool updateMotionControllers(double dt_seconds);
 
     bool startRealtimeMotionControlLoop();
@@ -205,7 +204,8 @@ private:
     std::vector<std::unique_ptr<CiA402Drive>> drives_;
     std::vector<SlaveRole> slave_roles_;
     std::vector<std::pair<uint16_t, std::unique_ptr<IDriveMotionController>>> motion_controllers_;
-    std::vector<std::unique_ptr<ICyclicTask>> cyclic_tasks_;
+    CyclicTaskScheduler cyclic_task_scheduler_;
+    std::vector<std::unique_ptr<ICyclicTask>> owned_tasks_;  // Keep ownership for backward compat
 };
 
 } // namespace EtherCAT

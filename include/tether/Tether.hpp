@@ -44,7 +44,8 @@
 // FSoE (Functional Safety over EtherCAT)
 #ifdef TETHER_ENABLE_FSOE
 #include "tether/fsoe/FSoESlave.hpp"
-#include "tether/fsoe/FSoEConnection.hpp"
+#include "tether/fsoe/FSoEMasterConnection.hpp"
+#include "tether/fsoe/FSoEMaster.hpp"
 #include "tether/fsoe/TypedProcessData.hpp"
 #include "tether/drives/Synapticon/SafeMotionFSoE.hpp"
 #endif

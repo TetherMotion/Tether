@@ -120,15 +120,15 @@ public:
     bool hasStatus() const { return has_status_; }
     bool motionAllowed() const;
 
-    ::FSoE::FSoEConnection& rawConnection() { return connection_; }
-    const ::FSoE::FSoEConnection& rawConnection() const { return connection_; }
+    ::FSoE::FSoEMasterConnection& rawConnection() { return connection_; }
+    const ::FSoE::FSoEMasterConnection& rawConnection() const { return connection_; }
 
 private:
     void clearPulseBits();
 
     MainConfig config_;
-    ::FSoE::ConnectionConfig connection_config_{};
-    ::FSoE::FSoEConnection connection_;
+    ::FSoE::MasterConnectionConfig connection_config_{};
+    ::FSoE::FSoEMasterConnection connection_;
     ::FSoE::TypedMainProcessDataView<Command, Status, Codec> typed_view_;
     Command command_ = Command::safeStop();
     Status status_{};
