@@ -280,6 +280,13 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (debug_flags.count("pdo-sm") && slaves > 0) {
+        TETHER_LOGI(TAG, "\n=== PDO Sync Manager Configuration Debug ===");
+        for (uint16_t i = 0; i < slaves; i++) {
+            EtherCAT::debugPDOSyncManagerConfiguration(master, i, TAG);
+        }
+    }
+
     if (slaves == 0) {
         TETHER_LOGE(TAG, "No slaves found — check wiring, power, and interface name");
         master.stop();
