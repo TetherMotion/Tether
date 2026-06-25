@@ -563,7 +563,7 @@ namespace CRC {
     /**
      * @brief Verify FSoE CRC
      */
-    bool verifyFSoECRC(const uint8_t* data, size_t len);
+    bool verifyFSoECRC(const uint8_t* data, size_t len, uint16_t expected_crc);
 }
 
 } // namespace FSoE

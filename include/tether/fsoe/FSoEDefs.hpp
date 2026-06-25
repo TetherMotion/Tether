@@ -257,48 +257,6 @@ namespace ConfigParam {
 }
 
 // ============================================================================
-// CRC-16 Functions
-// ============================================================================
-
-/**
- * @brief Calculate FSoE CRC-16
- * @param data Pointer to data
- * @param len Length of data
- * @param init_crc Initial CRC value (0xFFFF for first call)
- * @return CRC-16 value
- */
-inline uint16_t calculateCRC16(const uint8_t* data, size_t len, uint16_t init_crc = 0xFFFF)
-{
-    // FSoE uses the ETG.5100 polynomial 0x755B.
-    uint16_t crc = init_crc;
-
-    if (data == nullptr || len == 0) {
-        return crc;
-    }
-
-    for (size_t i = 0; i < len; ++i) {
-        crc ^= data[i];
-        for (int j = 0; j < 8; ++j) {
-            const bool lsb_set = (crc & 0x0001u) != 0;
-            crc >>= 1;
-            if (lsb_set) {
-                crc ^= 0x755B;
-            }
-        }
-    }
-
-    return crc;
-}
-
-/**
- * @brief Verify FSoE CRC-16
- */
-inline bool verifyCRC16(const uint8_t* data, size_t len, uint16_t expected_crc)
-{
-    return calculateCRC16(data, len) == expected_crc;
-}
-
-// ============================================================================
 // Safety Process Data Objects
 // ============================================================================
 

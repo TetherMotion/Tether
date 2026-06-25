@@ -22,7 +22,7 @@ FSoEConnection::FSoEConnection(const ConnectionConfig& config)
     , current_time_ms_(0)
     , safe_inputs_{}
     , safe_outputs_{}
-    , rx_sequence_(0)
+    , rx_sequence_(0x0F)
     , tx_sequence_(0)
     , state_change_callback_(nullptr)
     , error_callback_(nullptr)
@@ -80,7 +80,7 @@ bool FSoEConnection::resetConnection()
     transitionTo(ConnectionState::Reset);
     status_.error_code = ErrorCode::NoError;
     status_.data_valid = false;
-    rx_sequence_ = 0;
+    rx_sequence_ = 0x0F;
     tx_sequence_ = 0;
     
     stats_.reset_events++;
@@ -358,7 +358,7 @@ size_t FSoEConnection::buildSessionResetFrame(uint8_t* data, size_t max_len)
     frame->session_id = status_.session_id;
     
     // Calculate CRC
-    frame->crc = calculateCRC16(data, sizeof(FSoESessionReset) - 2);
+    frame->crc = CRC::calculateFSoECRC(data, sizeof(FSoESessionReset) - 2);
     
     return sizeof(FSoESessionReset);
 }
@@ -378,7 +378,7 @@ size_t FSoEConnection::buildConnectionFrame(uint8_t* data, size_t max_len)
     frame->reserved = 0;
     
     // Calculate CRC
-    frame->crc = calculateCRC16(data, sizeof(struct FSoEConnectionFrame) - 2);
+    frame->crc = CRC::calculateFSoECRC(data, sizeof(struct FSoEConnectionFrame) - 2);
     
     return sizeof(struct FSoEConnectionFrame);
 }
@@ -400,7 +400,7 @@ size_t FSoEConnection::buildDataFrame(uint8_t* data, size_t max_len)
               data + sizeof(FSoEHeader));
     
     // Calculate CRC
-    uint16_t crc = calculateCRC16(data, frame_size - 2);
+    uint16_t crc = CRC::calculateFSoECRC(data, frame_size - 2);
     data[frame_size - 2] = crc & 0xFF;
     data[frame_size - 1] = (crc >> 8) & 0xFF;
     
@@ -422,7 +422,7 @@ size_t FSoEConnection::buildFailSafeFrame(uint8_t* data, size_t max_len)
               frame->fail_safe_data);
     
     // Calculate CRC
-    frame->crc = calculateCRC16(data, sizeof(FSoEFailSafe) - 2);
+    frame->crc = CRC::calculateFSoECRC(data, sizeof(FSoEFailSafe) - 2);
     
     return sizeof(FSoEFailSafe);
 }
@@ -445,16 +445,15 @@ bool FSoEConnection::validateCRC(const uint8_t* data, size_t len)
     if (len < 2) return false;
     
     uint16_t received_crc = data[len - 2] | (data[len - 1] << 8);
-    uint16_t calculated_crc = calculateCRC16(data, len - 2);
     
-    return received_crc == calculated_crc;
+    return CRC::verifyFSoECRC(data, len - 2, received_crc);
 }
 
 bool FSoEConnection::validateSequence(uint8_t seq)
 {
-    // Check sequence number is expected (allows for some tolerance)
+    // Check sequence number matches expected next value
     uint8_t expected = (rx_sequence_ + 1) & 0x0F;
-    return seq == expected || seq == rx_sequence_;
+    return seq == expected;
 }
 
 bool FSoEConnection::validateConnectionID(uint16_t conn_id)

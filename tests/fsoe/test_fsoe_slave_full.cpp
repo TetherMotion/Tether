@@ -56,27 +56,27 @@ TEST(FSoEDefsTest, PLLevels) {
     EXPECT_EQ(PL::PLa, 1);
 }
 
-TEST(FSoEDefsTest, CalculateCRC16) {
+TEST(FSoEDefsTest, CalculateFSoECRC) {
     uint8_t data[] = {0x01, 0x02, 0x03, 0x04};
-    uint16_t crc = calculateCRC16(data, sizeof(data));
+    uint16_t crc = CRC::calculateFSoECRC(data, sizeof(data));
     EXPECT_NE(crc, 0); // CRC should be non-zero for non-zero data
     
     // Verify deterministic
-    uint16_t crc2 = calculateCRC16(data, sizeof(data));
+    uint16_t crc2 = CRC::calculateFSoECRC(data, sizeof(data));
     EXPECT_EQ(crc, crc2);
 }
 
-TEST(FSoEDefsTest, CalculateCRC16_EmptyData) {
-    uint16_t crc = calculateCRC16(nullptr, 0);
+TEST(FSoEDefsTest, CalculateFSoECRC_EmptyData) {
+    uint16_t crc = CRC::calculateFSoECRC(nullptr, 0);
     // Empty data with init 0xFFFF should return init
     EXPECT_EQ(crc, 0xFFFF);
 }
 
-TEST(FSoEDefsTest, VerifyCRC16) {
+TEST(FSoEDefsTest, VerifyFSoECRC) {
     uint8_t data[] = {0x01, 0x02, 0x03, 0x04};
-    uint16_t crc = calculateCRC16(data, sizeof(data));
-    EXPECT_TRUE(verifyCRC16(data, sizeof(data), crc));
-    EXPECT_FALSE(verifyCRC16(data, sizeof(data), crc + 1));
+    uint16_t crc = CRC::calculateFSoECRC(data, sizeof(data));
+    EXPECT_TRUE(CRC::verifyFSoECRC(data, sizeof(data), crc));
+    EXPECT_FALSE(CRC::verifyFSoECRC(data, sizeof(data), crc + 1));
 }
 
 TEST(FSoEDefsTest, ConnectionStatsDefaults) {
