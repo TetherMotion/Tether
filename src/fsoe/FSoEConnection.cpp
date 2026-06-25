@@ -172,8 +172,8 @@ bool FSoEConnection::processRxFrame(const uint8_t* data, size_t len)
     // Validate connection ID
     const auto* header = reinterpret_cast<const FSoEHeader*>(data);
     uint16_t conn_id = 0;
-    uint8_t cmd = header->command & ~Command::FailSafeFlag;
-    if (cmd == Command::ProcessData) {
+    uint8_t cmd = header->command;
+    if (cmd == Command::ProcessData || cmd == Command::FailSafeData) {
         conn_id = static_cast<uint16_t>(header->conn_id_low |
                                         ((header->conn_id_high & 0x0F) << 8));
     } else {
@@ -301,7 +301,7 @@ void FSoEConnection::handleConnectionState(const uint8_t* data, size_t len)
     const auto* header = reinterpret_cast<const FSoEHeader*>(data);
     
     if (header->command == Command::Connection ||
-        header->command == Command::ParameterResp) {
+        header->command == Command::Parameter) {
         // Some simulated slaves acknowledge the connection by immediately
         // advancing to the parameter phase and returning a parameter response.
         if (config_.input_size > 0 || config_.output_size > 0) {
@@ -318,7 +318,7 @@ void FSoEConnection::handleParameterState(const uint8_t* data, size_t len)
     FSoEHeader header;
     std::memcpy(&header, data, sizeof(header));
     
-    if (header.command == Command::ParameterResp) {
+    if (header.command == Command::Parameter) {
         transitionTo(ConnectionState::Data);
     } else if (header.command == Command::ProcessData) {
         transitionTo(ConnectionState::Data);
@@ -331,7 +331,7 @@ void FSoEConnection::handleDataState(const uint8_t* data, size_t len)
     const auto* header = reinterpret_cast<const FSoEHeader*>(data);
     
     // Check for fail-safe response from slave
-    if (header->command == (Command::ProcessData | Command::FailSafeFlag)) {
+    if (header->command == Command::FailSafeData) {
         // Extract slave error code from fail-safe response
         // Format: header(3) + input_data + error_code(2) + CRC(2)
         size_t payload_len = len - sizeof(FSoEHeader) - 2;
@@ -445,7 +445,7 @@ size_t FSoEConnection::buildFailSafeFrame(uint8_t* data, size_t max_len)
     
     auto* frame = reinterpret_cast<FSoEFailSafe*>(data);
     
-    frame->header.command = Command::Reset;  // Fail-safe uses reset command
+    frame->header.command = Command::FailSafeData;  // Fail-safe data command
     frame->header.conn_id_low = config_.connection_id & 0xFF;
     frame->header.conn_id_high = (config_.connection_id >> 8) & 0xFF;
     
