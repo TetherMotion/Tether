@@ -60,19 +60,11 @@ uint16_t calculateFSoECRC(const uint8_t* data, size_t len) {
         crc = (crc >> 8) ^ crcTable[index];
     }
     
-    return crc ^ 0xFFFF;  // Final XOR
+    return crc;
 }
 
-bool verifyFSoECRC(const uint8_t* data, size_t len) {
-    if (len < 2) return false;
-    
-    // Calculate CRC over data (excluding the CRC field)
-    uint16_t calculated = calculateFSoECRC(data, len - 2);
-    
-    // Get stored CRC (little-endian)
-    uint16_t stored = data[len - 2] | (data[len - 1] << 8);
-    
-    return calculated == stored;
+bool verifyFSoECRC(const uint8_t* data, size_t len, uint16_t expected_crc) {
+    return calculateFSoECRC(data, len) == expected_crc;
 }
 
 } // namespace CRC
@@ -573,7 +565,7 @@ bool FSoESlave::validateCRC(const uint8_t* data, size_t len) {
 
     const uint16_t stored_crc = static_cast<uint16_t>(data[len - 2]) |
                                 (static_cast<uint16_t>(data[len - 1]) << 8);
-    if (!verifyCRC16(data, len - 2, stored_crc)) {
+    if (!CRC::verifyFSoECRC(data, len - 2, stored_crc)) {
         if (config_.strictCrcCheck) {
             handleError(ErrorCode::CRCError, config_.treatCrcErrorAsCritical);
             stats_.crcErrors++;
@@ -618,7 +610,7 @@ bool FSoESlave::validateConnectionId(uint16_t connId) {
 }
 
 uint16_t FSoESlave::calculateCRC(const uint8_t* data, size_t len) {
-    return calculateCRC16(data, len);
+    return CRC::calculateFSoECRC(data, len);
 }
 
 // ============================================================================
