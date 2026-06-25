@@ -107,7 +107,7 @@ TEST(SlaveStatusPollerCallbackTest, RegisterReturnsNonZeroHandle) {
     MockTransport transport;
     SlaveStatusPoller poller(transport);
     poller.init(2);
-    auto handle = poller.registerCallback({}, [](const SlaveStatusEvent&) {});
+    auto handle = poller.registerCallback(StatusFilter{}, [](const SlaveStatusEvent&) {});
     EXPECT_NE(handle, 0u);
 }
 
@@ -115,7 +115,7 @@ TEST(SlaveStatusPollerCallbackTest, RegisterNullCallbackReturnsZero) {
     MockTransport transport;
     SlaveStatusPoller poller(transport);
     poller.init(2);
-    auto handle = poller.registerCallback({}, nullptr);
+    auto handle = poller.registerCallback(StatusFilter{}, nullptr);
     EXPECT_EQ(handle, 0u);
 }
 
@@ -123,7 +123,7 @@ TEST(SlaveStatusPollerCallbackTest, UnregisterExistingHandle) {
     MockTransport transport;
     SlaveStatusPoller poller(transport);
     poller.init(2);
-    auto handle = poller.registerCallback({}, [](const SlaveStatusEvent&) {});
+    auto handle = poller.registerCallback(StatusFilter{}, [](const SlaveStatusEvent&) {});
     EXPECT_TRUE(poller.unregisterCallback(handle));
 }
 
@@ -139,7 +139,7 @@ TEST(SlaveStatusPollerCallbackTest, UnregisterAlreadyUnregistered) {
     MockTransport transport;
     SlaveStatusPoller poller(transport);
     poller.init(2);
-    auto handle = poller.registerCallback({}, [](const SlaveStatusEvent&) {});
+    auto handle = poller.registerCallback(StatusFilter{}, [](const SlaveStatusEvent&) {});
     EXPECT_TRUE(poller.unregisterCallback(handle));
     EXPECT_FALSE(poller.unregisterCallback(handle));
 }
@@ -148,8 +148,8 @@ TEST(SlaveStatusPollerCallbackTest, ClearCallbacks) {
     MockTransport transport;
     SlaveStatusPoller poller(transport);
     poller.init(2);
-    poller.registerCallback({}, [](const SlaveStatusEvent&) {});
-    poller.registerCallback({}, [](const SlaveStatusEvent&) {});
+    poller.registerCallback(StatusFilter{}, [](const SlaveStatusEvent&) {});
+    poller.registerCallback(StatusFilter{}, [](const SlaveStatusEvent&) {});
     poller.clearCallbacks();
     // Verify no callbacks fire by doing a manual poll — no crash expected
     // (indirect verification via unregister returning false)
@@ -246,7 +246,7 @@ TEST_F(SlaveStatusPollerPollTest, DetectsStateChange) {
     std::atomic<SlaveState> observed_new_state{SlaveState::INIT};
 
     poller_.registerCallback(
-        {kAnySlave, kAnyState, kAnyState, static_cast<uint8_t>(StatusTransitionFlags::AnyTransition)},
+        StatusFilter(StatusTransitionFlags::AnyTransition),
         [&](const SlaveStatusEvent& ev) {
             call_count++;
             observed_new_state.store(ev.new_state);
@@ -272,7 +272,7 @@ TEST_F(SlaveStatusPollerPollTest, NoCallbackOnSameState) {
     std::atomic<int> call_count{0};
 
     poller_.registerCallback(
-        {kAnySlave, kAnyState, kAnyState, static_cast<uint8_t>(StatusTransitionFlags::AnyTransition)},
+        StatusFilter(StatusTransitionFlags::AnyTransition),
         [&](const SlaveStatusEvent&) { call_count++; });
 
     // Keep state constant at OP
@@ -291,13 +291,13 @@ TEST_F(SlaveStatusPollerPollTest, ErrorFlagTransition) {
     std::atomic<bool> saw_error_cleared{false};
 
     poller_.registerCallback(
-        {kAnySlave, kAnyState, kAnyState, static_cast<uint8_t>(StatusTransitionFlags::ErrorSet)},
+        StatusFilter(StatusTransitionFlags::ErrorSet),
         [&](const SlaveStatusEvent& ev) {
             if (ev.new_error_flag && !ev.old_error_flag) saw_error_set.store(true);
         });
 
     poller_.registerCallback(
-        {kAnySlave, kAnyState, kAnyState, static_cast<uint8_t>(StatusTransitionFlags::ErrorCleared)},
+        StatusFilter(StatusTransitionFlags::ErrorCleared),
         [&](const SlaveStatusEvent& ev) {
             if (!ev.new_error_flag && ev.old_error_flag) saw_error_cleared.store(true);
         });
@@ -332,11 +332,11 @@ TEST_F(SlaveStatusPollerPollTest, FilterToLowerStateOnly) {
     std::atomic<int> higher_count{0};
 
     poller_.registerCallback(
-        {kAnySlave, kAnyState, kAnyState, static_cast<uint8_t>(StatusTransitionFlags::ToLowerState)},
+        StatusFilter(StatusTransitionFlags::ToLowerState),
         [&](const SlaveStatusEvent&) { lower_count++; });
 
     poller_.registerCallback(
-        {kAnySlave, kAnyState, kAnyState, static_cast<uint8_t>(StatusTransitionFlags::ToHigherState)},
+        StatusFilter(StatusTransitionFlags::ToHigherState),
         [&](const SlaveStatusEvent&) { higher_count++; });
 
     // Start at INIT, go to OP (higher), then drop to SAFE_OP (lower)
@@ -359,12 +359,9 @@ TEST_F(SlaveStatusPollerPollTest, FilterToLowerStateOnly) {
 TEST_F(SlaveStatusPollerPollTest, FilterSpecificFromToState) {
     std::atomic<int> match_count{0};
 
-    StatusFilter filter;
-    filter.from_state = SlaveState::SAFE_OP;
-    filter.to_state = SlaveState::OP;
-    filter.transition_flags = static_cast<uint8_t>(StatusTransitionFlags::AnyTransition);
-
-    poller_.registerCallback(filter, [&](const SlaveStatusEvent&) { match_count++; });
+    poller_.registerCallback(
+        StatusFilter(SlaveState::SAFE_OP, SlaveState::OP, StatusTransitionFlags::AnyTransition),
+        [&](const SlaveStatusEvent&) { match_count++; });
 
     // Start at INIT, go to SAFE_OP, then to OP
     slave0_al_status.store(alStatusVal(SlaveState::INIT));
@@ -390,12 +387,10 @@ TEST_F(SlaveStatusPollerPollTest, FilterSpecificSlaveOnly) {
 
     std::atomic<int> slave1_count{0};
 
-    StatusFilter filter;
-    filter.slave_index = 1;
-    filter.transition_flags = static_cast<uint8_t>(StatusTransitionFlags::AnyTransition);
-
-    poller_.registerCallback(filter, [&](const SlaveStatusEvent& ev) {
-        if (ev.slave_index == 1) slave1_count++;
+    poller_.registerCallback(
+        StatusFilter(1, StatusTransitionFlags::AnyTransition),
+        [&](const SlaveStatusEvent& ev) {
+            if (ev.slave_index == 1) slave1_count++;
     });
 
     std::atomic<uint16_t> slave1_status{alStatusVal(SlaveState::INIT)};
@@ -431,11 +426,11 @@ TEST_F(SlaveStatusPollerPollTest, MultipleCallbacksFireIndependently) {
     std::atomic<int> cb2_count{0};
 
     poller_.registerCallback(
-        {kAnySlave, kAnyState, kAnyState, static_cast<uint8_t>(StatusTransitionFlags::ToHigherState)},
+        StatusFilter(StatusTransitionFlags::ToHigherState),
         [&](const SlaveStatusEvent&) { cb1_count++; });
 
     poller_.registerCallback(
-        {kAnySlave, kAnyState, kAnyState, static_cast<uint8_t>(StatusTransitionFlags::ToLowerState)},
+        StatusFilter(StatusTransitionFlags::ToLowerState),
         [&](const SlaveStatusEvent&) { cb2_count++; });
 
     slave0_al_status.store(alStatusVal(SlaveState::INIT));
@@ -460,7 +455,7 @@ TEST_F(SlaveStatusPollerPollTest, UnregisterStopsCallbacks) {
     std::atomic<int> call_count{0};
 
     auto handle = poller_.registerCallback(
-        {kAnySlave, kAnyState, kAnyState, static_cast<uint8_t>(StatusTransitionFlags::AnyTransition)},
+        StatusFilter(StatusTransitionFlags::AnyTransition),
         [&](const SlaveStatusEvent&) { call_count++; });
 
     slave0_al_status.store(alStatusVal(SlaveState::INIT));
@@ -514,7 +509,7 @@ TEST_F(SlaveStatusPollerPollTest, EventContainsAlStatusCodeOnError) {
     std::atomic<bool> got_event{false};
 
     poller_.registerCallback(
-        {kAnySlave, kAnyState, kAnyState, static_cast<uint8_t>(StatusTransitionFlags::ErrorSet)},
+        StatusFilter(StatusTransitionFlags::ErrorSet),
         [&](const SlaveStatusEvent& ev) {
             observed_code.store(ev.al_status_code);
             got_event.store(true);
