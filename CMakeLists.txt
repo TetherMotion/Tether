@@ -25,7 +25,7 @@ project(Tether VERSION 2.0.0 LANGUAGES C CXX)
 # =============================================================================
 # Git Submodule Check
 # =============================================================================
-set(SUBMODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/components/libSLIPspeed")
+set(SUBMODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/libSLIPspeed")
 if(NOT EXISTS "${SUBMODULE_PATH}")
     message(FATAL_ERROR
         "Git submodule 'libSLIPspeed' is not initialized.\n"
