@@ -12,6 +12,17 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 
+# Route all test executables into bin/tests to avoid cluttering the shared bin/
+# directory used by examples and tools.
+if(NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${TETHER_BIN_DIR}/tests")
+else()
+    foreach(cfg ${CMAKE_CONFIGURATION_TYPES})
+        string(TOUPPER ${cfg} CFG)
+        set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${CFG} "${TETHER_BIN_DIR}/tests")
+    endforeach()
+endif()
+
 # Include GoogleTest for gtest_discover_tests
 include(GoogleTest)
 
