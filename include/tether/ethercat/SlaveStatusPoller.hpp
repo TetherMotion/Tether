@@ -90,6 +90,21 @@ struct StatusFilter {
     SlaveState from_state = kAnyState;       ///< kAnyState = don't filter on old state
     SlaveState to_state = kAnyState;         ///< kAnyState = don't filter on new state
     uint8_t transition_flags = static_cast<uint8_t>(StatusTransitionFlags::AnyTransition);
+
+    /// Construct from transition flags only (any slave, any state)
+    StatusFilter(StatusTransitionFlags flags)
+        : transition_flags(static_cast<uint8_t>(flags)) {}
+
+    /// Construct from slave index + transition flags
+    StatusFilter(uint16_t slave, StatusTransitionFlags flags)
+        : slave_index(slave), transition_flags(static_cast<uint8_t>(flags)) {}
+
+    /// Construct from from/to states + transition flags
+    StatusFilter(SlaveState from, SlaveState to, StatusTransitionFlags flags)
+        : from_state(from), to_state(to), transition_flags(static_cast<uint8_t>(flags)) {}
+
+    /// Default construct (AnyTransition, any slave, any state)
+    StatusFilter() = default;
 };
 
 /**

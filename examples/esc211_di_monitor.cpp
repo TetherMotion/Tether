@@ -40,6 +40,7 @@
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/SyncManager.hpp"
 #include "tether/ethercat/PDOManager.hpp"
+#include "tether/ethercat/SlaveStatusPoller.hpp"
 #include "tether/sii/SIIReader.hpp"
 #include "tether/sii/SIIParser.hpp"
 
@@ -315,6 +316,44 @@ int main(int argc, char** argv) {
     }
 
     TETHER_LOGI(TAG, "Slave %d in PRE-OP", slave_idx);
+
+    // ---- AL status monitoring via SlaveStatusPoller ----
+    auto& poller = master.statusPoller();
+    poller.setPollIntervalMs(200);
+
+    // Log any transition to a lower AL state (e.g. OP -> SAFE_OP, SAFE_OP -> PRE_OP)
+    poller.registerCallback(
+        EtherCAT::StatusFilter(EtherCAT::StatusTransitionFlags::ToLowerState),
+        [](const EtherCAT::SlaveStatusEvent& ev) {
+            TETHER_LOGW(TAG, "Slave %u AL state dropped: %s -> %s (raw 0x%04X -> 0x%04X)",
+                        ev.slave_index,
+                        EtherCAT::slaveStateToString(ev.old_state),
+                        EtherCAT::slaveStateToString(ev.new_state),
+                        ev.old_al_status, ev.new_al_status);
+        });
+
+    // Log error flag set with AL_STATUS_CODE
+    poller.registerCallback(
+        EtherCAT::StatusFilter(EtherCAT::StatusTransitionFlags::ErrorSet),
+        [](const EtherCAT::SlaveStatusEvent& ev) {
+            TETHER_LOGE(TAG, "Slave %u AL error flag SET (AL_STATUS=0x%04X, "
+                             "AL_STATUS_CODE=0x%04X, state=%s)",
+                        ev.slave_index, ev.new_al_status,
+                        ev.al_status_code,
+                        EtherCAT::slaveStateToString(ev.new_state));
+        });
+
+    // Log error flag cleared
+    poller.registerCallback(
+        EtherCAT::StatusFilter(EtherCAT::StatusTransitionFlags::ErrorCleared),
+        [](const EtherCAT::SlaveStatusEvent& ev) {
+            TETHER_LOGI(TAG, "Slave %u AL error flag CLEARED (state=%s)",
+                        ev.slave_index,
+                        EtherCAT::slaveStateToString(ev.new_state));
+        });
+
+    poller.start();
+    TETHER_LOGI(TAG, "AL status poller started (interval=%u ms)", poller.pollIntervalMs());
 
     // readIdentityObject(sl);
 
