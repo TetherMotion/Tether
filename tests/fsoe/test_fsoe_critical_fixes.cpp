@@ -96,9 +96,9 @@ TEST_F(FSoEFailSafeResponseTest, MasterFailSafeResponseExtractsErrorCode) {
     EXPECT_EQ(conn->getErrorCode(), ErrorCode::CRCError);
 }
 
-TEST_F(FSoEFailSafeResponseTest, FailSafeFlagConstant) {
-    EXPECT_EQ(Command::FailSafeFlag, 0x80);
-    EXPECT_EQ(Command::ProcessData | Command::FailSafeFlag, 0x80);
+TEST_F(FSoEFailSafeResponseTest, FailSafeDataConstant) {
+    EXPECT_EQ(Command::FailSafeData, 0x08);
+    EXPECT_NE(Command::FailSafeData, Command::ProcessData);
 }
 
 // ============================================================================

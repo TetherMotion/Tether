@@ -39,9 +39,12 @@ TEST(FSoEDefsTest, MessageTypeConstants) {
 }
 
 TEST(FSoEDefsTest, CommandConstants) {
-    EXPECT_EQ(Command::ProcessData, 0x00);
-    EXPECT_EQ(Command::Reset, 0x36);
-    EXPECT_EQ(Command::Session, 0x6A);
+    EXPECT_EQ(Command::ProcessData, 0x36);
+    EXPECT_EQ(Command::Reset, 0x2A);
+    EXPECT_EQ(Command::Session, 0x4E);
+    EXPECT_EQ(Command::Connection, 0x64);
+    EXPECT_EQ(Command::Parameter, 0x52);
+    EXPECT_EQ(Command::FailSafeData, 0x08);
 }
 
 TEST(FSoEDefsTest, SILLevels) {

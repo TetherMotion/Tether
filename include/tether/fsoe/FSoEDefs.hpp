@@ -32,13 +32,12 @@ namespace MessageType {
 // ============================================================================
 
 namespace Command {
-    constexpr uint8_t ProcessData    = 0x00;  // Normal process data
-    constexpr uint8_t Reset          = 0x36;  // Reset command
-    constexpr uint8_t Session        = 0x6A;  // Session command
-    constexpr uint8_t Connection     = 0x95;  // Connection command
-    constexpr uint8_t ParameterReq   = 0xC3;  // Parameter request
-    constexpr uint8_t ParameterResp  = 0x3C;  // Parameter response
-    constexpr uint8_t FailSafeFlag   = 0x80;  // OR'd with ProcessData for fail-safe response
+    constexpr uint8_t ProcessData    = 0x36;  // Process data (ETG.5100 §8.1.2)
+    constexpr uint8_t Reset          = 0x2A;  // Reset command
+    constexpr uint8_t Session        = 0x4E;  // Session command
+    constexpr uint8_t Connection     = 0x64;  // Connection command
+    constexpr uint8_t Parameter      = 0x52;  // Parameter command
+    constexpr uint8_t FailSafeData   = 0x08;  // Fail-safe data
 }
 
 // ============================================================================

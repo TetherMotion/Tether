@@ -294,7 +294,7 @@ bool FSoESlave::processRxFrame(const uint8_t* data, size_t len) {
             break;
             
         case ConnectionState::Parameter:
-            if (command == Command::ParameterReq) {
+            if (command == Command::Parameter) {
                 processParameter(data, len);
             } else if (command == Command::ProcessData) {
                 // Skip parameter phase
@@ -534,7 +534,7 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
     
     // Get connection ID from header
     uint16_t connId = 0;
-    if (data[0] == Command::ProcessData) {
+    if (data[0] == Command::ProcessData || data[0] == Command::FailSafeData) {
         connId = static_cast<uint16_t>(data[1] | ((data[2] & 0x0F) << 8));
     } else {
         connId = static_cast<uint16_t>(data[1] | (data[2] << 8));
@@ -746,7 +746,7 @@ size_t FSoESlave::buildConnectionResponse(uint8_t* data, size_t maxLen) {
 size_t FSoESlave::buildParameterResponse(uint8_t* data, size_t maxLen) {
     if (maxLen < 7) return 0;
     
-    data[0] = Command::ParameterResp;
+    data[0] = Command::Parameter;
     data[1] = currentConnectionId_ & 0xFF;
     data[2] = (currentConnectionId_ >> 8) & 0xFF;
     data[3] = 0;  // Parameter ACK
@@ -789,7 +789,7 @@ size_t FSoESlave::buildFailSafeResponse(uint8_t* data, size_t maxLen) {
     
     if (maxLen < frameLen) return 0;
     
-    data[0] = Command::ProcessData | 0x80;  // Fail-safe flag
+    data[0] = Command::FailSafeData;  // Fail-safe data command
     data[1] = currentConnectionId_ & 0xFF;
     data[2] = ((currentConnectionId_ >> 8) & 0x0F) | ((txSequence_ & 0x0F) << 4);
     
