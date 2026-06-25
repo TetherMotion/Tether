@@ -220,13 +220,28 @@ bool DS402Master::addCyclicTask(std::unique_ptr<ICyclicTask> task)
         return false;
     }
 
-    cyclic_tasks_.push_back(std::move(task));
+    ICyclicTask* raw = task.get();
+    owned_tasks_.push_back(std::move(task));
+    cyclic_task_scheduler_.addTask(raw, TaskPhase::MotionControl, 128);
+    return true;
+}
+
+bool DS402Master::addCyclicTask(std::unique_ptr<ICyclicTask> task, TaskPhase phase, uint8_t priority)
+{
+    if (!task) {
+        return false;
+    }
+
+    ICyclicTask* raw = task.get();
+    owned_tasks_.push_back(std::move(task));
+    cyclic_task_scheduler_.addTask(raw, phase, priority);
     return true;
 }
 
 void DS402Master::clearCyclicTasks()
 {
-    cyclic_tasks_.clear();
+    cyclic_task_scheduler_.clear();
+    owned_tasks_.clear();
 }
 
 bool DS402Master::updateMotionControllers(double dt_seconds)
@@ -238,13 +253,7 @@ bool DS402Master::updateMotionControllers(double dt_seconds)
         }
     }
 
-    for (auto& task : cyclic_tasks_) {
-        if (task && !task->update(*this, dt_seconds)) {
-            return false;
-        }
-    }
-
-    return true;
+    return cyclic_task_scheduler_.executeAll(*this, dt_seconds);
 }
 
 bool DS402Master::startRealtimeMotionControlLoop()

@@ -1,23 +1,23 @@
 /**
- * @file test_FSoEConnection_coverage.cpp
- * @brief Comprehensive FSoEConnection + FSoESlave coverage tests
+ * @file test_FSoEMasterConnection_coverage.cpp
+ * @brief Comprehensive FSoEMasterConnection + FSoESlave coverage tests
  */
 #include <gtest/gtest.h>
 #include <cstring>
 #include <memory>
 #include <vector>
-#include "fsoe/FSoEConnection.hpp"
+#include "fsoe/FSoEMasterConnection.hpp"
 #include "fsoe/FSoESlave.hpp"
 
 using namespace FSoE;
 
 // ============================================================================
-// Fixture: FSoEConnection
+// Fixture: FSoEMasterConnection
 // ============================================================================
-class FSoEConnectionCoverageTest : public ::testing::Test {
+class FSoEMasterConnectionCoverageTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        ConnectionConfig cfg{};
+        MasterConnectionConfig cfg{};
         cfg.slave_addr = 0x0001;
         cfg.connection_id = 0x1234;
         cfg.master_addr = 0x0100;
@@ -27,21 +27,21 @@ protected:
         cfg.input_size = 4;
         cfg.output_size = 4;
         cfg.fail_safe_values = {0xDE, 0xAD, 0xBE, 0xEF, 0, 0, 0, 0};
-        conn = std::make_unique<FSoEConnection>(cfg);
+        conn = std::make_unique<FSoEMasterConnection>(cfg);
         conn->initialize();
     }
-    std::unique_ptr<FSoEConnection> conn;
+    std::unique_ptr<FSoEMasterConnection> conn;
 };
 
 // --- Basic state ---
 
-TEST_F(FSoEConnectionCoverageTest, InitialState) {
+TEST_F(FSoEMasterConnectionCoverageTest, InitialState) {
     EXPECT_TRUE(conn->isInitialized());
     EXPECT_FALSE(conn->isOperational());
     EXPECT_FALSE(conn->isFailSafe());
 }
 
-TEST_F(FSoEConnectionCoverageTest, GetConfig) {
+TEST_F(FSoEMasterConnectionCoverageTest, GetConfig) {
     auto& cfg = conn->getConfig();
     EXPECT_EQ(cfg.slave_addr, 0x0001);
     EXPECT_EQ(cfg.connection_id, 0x1234);
@@ -49,38 +49,38 @@ TEST_F(FSoEConnectionCoverageTest, GetConfig) {
     EXPECT_EQ(cfg.output_size, 4u);
 }
 
-TEST_F(FSoEConnectionCoverageTest, GetStatus) {
+TEST_F(FSoEMasterConnectionCoverageTest, GetStatus) {
     auto& status = conn->getStatus();
     EXPECT_EQ(status.error_code, ErrorCode::NoError);
     EXPECT_FALSE(status.data_valid);
 }
 
-TEST_F(FSoEConnectionCoverageTest, GetState) {
+TEST_F(FSoEMasterConnectionCoverageTest, GetState) {
     uint8_t state = conn->getState();
     // Should be in Reset or Session after init
     EXPECT_LE(state, ConnectionState::Data);
 }
 
-TEST_F(FSoEConnectionCoverageTest, GetErrorCode) {
+TEST_F(FSoEMasterConnectionCoverageTest, GetErrorCode) {
     EXPECT_EQ(conn->getErrorCode(), ErrorCode::NoError);
 }
 
 // --- Connection flow ---
 
-TEST_F(FSoEConnectionCoverageTest, StartConnection) {
+TEST_F(FSoEMasterConnectionCoverageTest, StartConnection) {
     bool result = conn->startConnection();
     // May succeed or fail depending on initial state
     (void)result;
     EXPECT_GE(conn->getState(), ConnectionState::Reset);
 }
 
-TEST_F(FSoEConnectionCoverageTest, ResetConnection) {
+TEST_F(FSoEMasterConnectionCoverageTest, ResetConnection) {
     conn->startConnection();
     bool result = conn->resetConnection();
     EXPECT_TRUE(result);
 }
 
-TEST_F(FSoEConnectionCoverageTest, RequestSessionReset) {
+TEST_F(FSoEMasterConnectionCoverageTest, RequestSessionReset) {
     bool result = conn->requestSessionReset();
     EXPECT_TRUE(result);
     auto& status = conn->getStatus();
@@ -89,61 +89,61 @@ TEST_F(FSoEConnectionCoverageTest, RequestSessionReset) {
 
 // --- Safe I/O ---
 
-TEST_F(FSoEConnectionCoverageTest, SetSafeOutputsCorrectLength) {
+TEST_F(FSoEMasterConnectionCoverageTest, SetSafeOutputsCorrectLength) {
     uint8_t data[4] = {1, 2, 3, 4};
     EXPECT_TRUE(conn->setSafeOutputs(data, 4));
 }
 
-TEST_F(FSoEConnectionCoverageTest, SetSafeOutputsWrongLength) {
+TEST_F(FSoEMasterConnectionCoverageTest, SetSafeOutputsWrongLength) {
     uint8_t data[2] = {1, 2};
     EXPECT_FALSE(conn->setSafeOutputs(data, 2));
 }
 
-TEST_F(FSoEConnectionCoverageTest, GetSafeInputs) {
+TEST_F(FSoEMasterConnectionCoverageTest, GetSafeInputs) {
     uint8_t data[4] = {};
     size_t len = conn->getSafeInputs(data, 4);
     EXPECT_LE(len, 4u);
 }
 
-TEST_F(FSoEConnectionCoverageTest, AreSafeInputsValid) {
+TEST_F(FSoEMasterConnectionCoverageTest, AreSafeInputsValid) {
     EXPECT_FALSE(conn->areSafeInputsValid()); // No data received yet
 }
 
-TEST_F(FSoEConnectionCoverageTest, SetSafeOutputBit) {
+TEST_F(FSoEMasterConnectionCoverageTest, SetSafeOutputBit) {
     conn->setSafeOutputBit(0, true);
     conn->setSafeOutputBit(7, false);
 }
 
-TEST_F(FSoEConnectionCoverageTest, GetSafeInputBit) {
+TEST_F(FSoEMasterConnectionCoverageTest, GetSafeInputBit) {
     bool val = conn->getSafeInputBit(0);
     (void)val;
 }
 
-TEST_F(FSoEConnectionCoverageTest, SetSafeOutputByte) {
+TEST_F(FSoEMasterConnectionCoverageTest, SetSafeOutputByte) {
     conn->setSafeOutputByte(0, 0xAA);
     conn->setSafeOutputByte(3, 0x55);
 }
 
-TEST_F(FSoEConnectionCoverageTest, GetSafeInputByte) {
+TEST_F(FSoEMasterConnectionCoverageTest, GetSafeInputByte) {
     uint8_t val = conn->getSafeInputByte(0);
     (void)val;
 }
 
 // --- Fail-safe ---
 
-TEST_F(FSoEConnectionCoverageTest, TriggerFailSafe) {
+TEST_F(FSoEMasterConnectionCoverageTest, TriggerFailSafe) {
     conn->triggerFailSafe(ErrorCode::WatchdogError);
     EXPECT_TRUE(conn->isFailSafe());
     EXPECT_NE(conn->getErrorCode(), ErrorCode::NoError);
 }
 
-TEST_F(FSoEConnectionCoverageTest, GetFailSafeValues) {
-    auto& vals = conn->getFailSafeValues();
+TEST_F(FSoEMasterConnectionCoverageTest, GetFailSafeValues) {
+    auto& vals = conn->getConfig().fail_safe_values;
     EXPECT_EQ(vals[0], 0xDE);
     EXPECT_EQ(vals[1], 0xAD);
 }
 
-TEST_F(FSoEConnectionCoverageTest, ClearErrorAfterFailSafe) {
+TEST_F(FSoEMasterConnectionCoverageTest, ClearErrorAfterFailSafe) {
     conn->triggerFailSafe(ErrorCode::CRCError);
     EXPECT_TRUE(conn->isFailSafe());
     bool result = conn->clearError();
@@ -151,7 +151,7 @@ TEST_F(FSoEConnectionCoverageTest, ClearErrorAfterFailSafe) {
     EXPECT_FALSE(conn->isFailSafe());
 }
 
-TEST_F(FSoEConnectionCoverageTest, SetOutputsInFailSafe) {
+TEST_F(FSoEMasterConnectionCoverageTest, SetOutputsInFailSafe) {
     conn->triggerFailSafe(ErrorCode::ApplicationError);
     uint8_t data[4] = {0, 0, 0, 0};
     EXPECT_FALSE(conn->setSafeOutputs(data, 4));
@@ -159,25 +159,25 @@ TEST_F(FSoEConnectionCoverageTest, SetOutputsInFailSafe) {
 
 // --- Frame processing ---
 
-TEST_F(FSoEConnectionCoverageTest, ProcessRxFrameEmpty) {
+TEST_F(FSoEMasterConnectionCoverageTest, ProcessRxFrameEmpty) {
     bool result = conn->processRxFrame(nullptr, 0);
     EXPECT_FALSE(result);
 }
 
-TEST_F(FSoEConnectionCoverageTest, ProcessRxFrameTooShort) {
+TEST_F(FSoEMasterConnectionCoverageTest, ProcessRxFrameTooShort) {
     uint8_t data[2] = {0, 0};
     bool result = conn->processRxFrame(data, 2);
     EXPECT_FALSE(result);
 }
 
-TEST_F(FSoEConnectionCoverageTest, PrepareTxFrame) {
+TEST_F(FSoEMasterConnectionCoverageTest, PrepareTxFrame) {
     uint8_t buffer[64] = {};
     size_t len = conn->prepareTxFrame(buffer, sizeof(buffer));
     // May return 0 if not in appropriate state
     (void)len;
 }
 
-TEST_F(FSoEConnectionCoverageTest, PrepareTxFrameTooSmall) {
+TEST_F(FSoEMasterConnectionCoverageTest, PrepareTxFrameTooSmall) {
     uint8_t buffer[2] = {};
     size_t len = conn->prepareTxFrame(buffer, sizeof(buffer));
     EXPECT_EQ(len, 0u);
@@ -185,13 +185,13 @@ TEST_F(FSoEConnectionCoverageTest, PrepareTxFrameTooSmall) {
 
 // --- Update/Watchdog ---
 
-TEST_F(FSoEConnectionCoverageTest, UpdateDoesNotCrash) {
+TEST_F(FSoEMasterConnectionCoverageTest, UpdateDoesNotCrash) {
     for (int i = 0; i < 100; ++i) {
         conn->update(i * 10);
     }
 }
 
-TEST_F(FSoEConnectionCoverageTest, WatchdogTimeout) {
+TEST_F(FSoEMasterConnectionCoverageTest, WatchdogTimeout) {
     conn->startConnection();
     // Simulate time passing beyond watchdog timeout
     conn->update(0);
@@ -200,14 +200,14 @@ TEST_F(FSoEConnectionCoverageTest, WatchdogTimeout) {
 
 // --- Stats ---
 
-TEST_F(FSoEConnectionCoverageTest, InitialStats) {
+TEST_F(FSoEMasterConnectionCoverageTest, InitialStats) {
     auto& stats = conn->getStats();
     EXPECT_EQ(stats.frames_sent, 0u);
     EXPECT_EQ(stats.frames_received, 0u);
     EXPECT_EQ(stats.crc_errors, 0u);
 }
 
-TEST_F(FSoEConnectionCoverageTest, ResetStats) {
+TEST_F(FSoEMasterConnectionCoverageTest, ResetStats) {
     conn->resetStats();
     auto& stats = conn->getStats();
     EXPECT_EQ(stats.frames_sent, 0u);
@@ -215,14 +215,14 @@ TEST_F(FSoEConnectionCoverageTest, ResetStats) {
 
 // --- Callbacks ---
 
-TEST_F(FSoEConnectionCoverageTest, StateChangeCallback) {
+TEST_F(FSoEMasterConnectionCoverageTest, StateChangeCallback) {
     bool called = false;
     conn->setStateChangeCallback([&](uint8_t, uint8_t) { called = true; });
     conn->triggerFailSafe(ErrorCode::TimeoutError);
     // Should trigger state change callback
 }
 
-TEST_F(FSoEConnectionCoverageTest, ErrorCallback) {
+TEST_F(FSoEMasterConnectionCoverageTest, ErrorCallback) {
     bool called = false;
     conn->setErrorCallback([&](uint16_t code) {
         called = true;
@@ -231,20 +231,20 @@ TEST_F(FSoEConnectionCoverageTest, ErrorCallback) {
     conn->triggerFailSafe(ErrorCode::SequenceError);
 }
 
-TEST_F(FSoEConnectionCoverageTest, FailSafeCallback) {
+TEST_F(FSoEMasterConnectionCoverageTest, FailSafeCallback) {
     bool called = false;
     conn->setFailSafeCallback([&]() { called = true; });
     conn->triggerFailSafe(ErrorCode::CRCError);
 }
 
-TEST_F(FSoEConnectionCoverageTest, DataCallback) {
+TEST_F(FSoEMasterConnectionCoverageTest, DataCallback) {
     bool called = false;
     conn->setDataCallback([&](const uint8_t*, size_t) { called = true; });
 }
 
 // --- Diagnostics ---
 
-TEST_F(FSoEConnectionCoverageTest, GetDiagnostics) {
+TEST_F(FSoEMasterConnectionCoverageTest, GetDiagnostics) {
     auto diag = conn->getDiagnostics();
     EXPECT_FALSE(diag.empty());
     EXPECT_NE(diag.find("Connection ID"), std::string::npos);

@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <optional>
 
-#include "tether/fsoe/FSoEConnection.hpp"
+#include "tether/fsoe/FSoEMasterConnection.hpp"
 #include "tether/fsoe/FSoESlave.hpp"
 
 namespace FSoE {
@@ -12,7 +12,7 @@ namespace FSoE {
 template<typename MainToSlavePayload, typename SlaveToMainPayload, typename Codec>
 class TypedMainProcessDataView {
 public:
-    explicit TypedMainProcessDataView(FSoEConnection& connection)
+    explicit TypedMainProcessDataView(FSoEMasterConnection& connection)
         : connection_(connection)
     {
     }
@@ -39,11 +39,11 @@ public:
         return connection_.exchangeWith(slave, current_time_ms);
     }
 
-    FSoEConnection& rawConnection() { return connection_; }
-    const FSoEConnection& rawConnection() const { return connection_; }
+    FSoEMasterConnection& rawConnection() { return connection_; }
+    const FSoEMasterConnection& rawConnection() const { return connection_; }
 
 private:
-    FSoEConnection& connection_;
+    FSoEMasterConnection& connection_;
 };
 
 template<typename MainToSlavePayload, typename SlaveToMainPayload, typename Codec>

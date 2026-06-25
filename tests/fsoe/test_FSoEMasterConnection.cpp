@@ -1,17 +1,17 @@
 #include <gtest/gtest.h>
-#include "tether/fsoe/FSoEConnection.hpp"
+#include "tether/fsoe/FSoEMasterConnection.hpp"
 
 using namespace FSoE;
 
-TEST(FSoEConnection, Smoke) {
-    ConnectionConfig cfg;
+TEST(FSoEMasterConnection, Smoke) {
+    MasterConnectionConfig cfg;
     cfg.connection_id = 0x1234;
     cfg.slave_addr = 0x100;
     cfg.input_size = 2;
     cfg.output_size = 2;
     cfg.fail_safe_values = {0xAA, 0x55, 0,0,0,0,0,0};
 
-    FSoEConnection conn(cfg);
+    FSoEMasterConnection conn(cfg);
     EXPECT_FALSE(conn.isInitialized());
     EXPECT_TRUE(conn.initialize());
     EXPECT_TRUE(conn.isInitialized());

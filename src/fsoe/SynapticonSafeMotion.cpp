@@ -227,19 +227,19 @@ std::optional<Status> Codec::decodeSlaveToMain(
 
 MainInstance::MainInstance(const MainConfig& config)
     : config_(config)
-    , connection_config_({config.slave_address,
-                          config.connection_id,
-                          config.master_address,
-                          config.watchdog_time_ms,
-                          1000,
-                          ::FSoE::SIL::SIL2,
-                          static_cast<uint8_t>(Codec::kSlaveToMainSize),
-                          static_cast<uint8_t>(Codec::kMainToSlaveSize),
-                          {0, 0, 0, 0, 0, 0, 0, 0}})
+    , connection_config_{}
     , connection_(connection_config_)
     , typed_view_(connection_)
     , feature_enabled_(config.feature_enabled)
 {
+    connection_config_.slave_addr = config.slave_address;
+    connection_config_.connection_id = config.connection_id;
+    connection_config_.master_addr = config.master_address;
+    connection_config_.watchdog_timeout_ms = config.watchdog_time_ms;
+    connection_config_.conn_timeout_ms = 1000;
+    connection_config_.safety_level = ::FSoE::SIL::SIL2;
+    connection_config_.input_size = static_cast<uint8_t>(Codec::kSlaveToMainSize);
+    connection_config_.output_size = static_cast<uint8_t>(Codec::kMainToSlaveSize);
 }
 
 bool MainInstance::initialize()

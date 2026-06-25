@@ -19,6 +19,83 @@ namespace Raw {
 
 static const char *TAG = "ethercat";
 
+// ============================================================================
+// SDO abort code decoding
+// ============================================================================
+
+static const char* sdo_abort_code_str(uint32_t code) {
+    switch (code) {
+        case 0x05030000: return "Toggle bit not alternated";
+        case 0x05040000: return "SDO protocol timeout";
+        case 0x05040001: return "Invalid command";
+        case 0x05040002: return "Invalid block size";
+        case 0x05040003: return "Invalid sequence number";
+        case 0x05040004: return "CRC error";
+        case 0x05040005: return "Out of memory";
+        case 0x06010000: return "Unsupported access";
+        case 0x06010001: return "Write to read-only object";
+        case 0x06010002: return "Read from write-only object";
+        case 0x06020000: return "Object does not exist";
+        case 0x06040041: return "Object cannot be mapped to PDO";
+        case 0x06040042: return "PDO length exceeded";
+        case 0x06040043: return "Parameter incompatibility";
+        case 0x06040047: return "General internal incompatibility";
+        case 0x06060000: return "Hardware error";
+        case 0x06070010: return "Data type mismatch, length mismatch";
+        case 0x06070012: return "Data type mismatch, length too high";
+        case 0x06070013: return "Data type mismatch, length too low";
+        case 0x06090011: return "Subindex does not exist";
+        case 0x06090030: return "Invalid value for parameter";
+        case 0x06090031: return "Value too high";
+        case 0x06090032: return "Value too low";
+        case 0x06090036: return "Maximum less than minimum";
+        case 0x060A0023: return "Resource not available";
+        case 0x08000000: return "General error";
+        case 0x08000020: return "Data transfer aborted";
+        case 0x08000021: return "Local control error";
+        case 0x08000022: return "Wrong device state";
+        case 0x08000023: return "Object dictionary not present";
+        case 0x08000024: return "No data available";
+        default:        return "Unknown abort code";
+    }
+}
+
+static bool is_pdo_mapping_index(uint16_t idx) {
+    return (idx >= 0x1600 && idx <= 0x167F) ||
+           (idx >= 0x1A00 && idx <= 0x1A7F);
+}
+
+// When a SubindexNotFound abort occurs on a PDO mapping object, attempt to
+// read subindex 0 (entry count) to tell the user the max supported entries.
+static void log_pdo_mapping_subindex_diagnostic(
+    Master& master, uint16_t adp, uint8_t* inout_mbx_cnt,
+    uint16_t mbx_write_addr, uint16_t mbx_write_len,
+    uint16_t mbx_read_addr, uint16_t mbx_read_len,
+    uint16_t index, uint8_t sub,
+    bool diag_enabled, unsigned int poll_interval_ms,
+    unsigned int transaction_timeout_ms)
+{
+    if (sub == 0) return;
+
+    uint8_t count_buf[4] = {0};
+    size_t count_len = 0;
+    bool ok = coe_sdo_upload(master, adp, inout_mbx_cnt,
+                             mbx_write_addr, mbx_write_len,
+                             mbx_read_addr, mbx_read_len,
+                             index, 0x00,
+                             count_buf, sizeof(count_buf), &count_len,
+                             diag_enabled, poll_interval_ms, transaction_timeout_ms);
+    if (ok && count_len >= 1) {
+        TETHER_LOGE(TAG, "  -> PDO mapping object 0x%04X supports max %u entries (subindices 1-%u), but subindex %u was accessed",
+                    index, static_cast<unsigned>(count_buf[0]),
+                    static_cast<unsigned>(count_buf[0]),
+                    static_cast<unsigned>(sub));
+    } else {
+        TETHER_LOGE(TAG, "  -> PDO mapping object 0x%04X: subindex %u does not exist (failed to read max entry count from subindex 0)",
+                    index, static_cast<unsigned>(sub));
+    }
+}
+
 // Compile-time option to enable low-level SDO mailbox diagnostics.
 // Define TETHER_DIAG_SDO_IO at build time to enable verbose dumps of mailbox
 // writes/reads and related SM/AL status useful for debugging SDO failures.
@@ -474,8 +551,10 @@ bool coe_sdo_upload(
             if (sdo_cmd == EC_SDO_ABORT) {
                 if (r_len >= sizeof(CoeHeader) + sizeof(SdoAbort)) {
                     const auto *ab = reinterpret_cast<const SdoAbort *>(r_sdo_bytes);
-                    TETHER_LOGE(TAG, "SDO abort 0x%04x:%u code=0x%08" PRIx32, le16_to_host(ab->index_le), ab->sub,
-                             le32_to_host(ab->abortCode_le));
+                    const uint32_t abort_code = le32_to_host(ab->abortCode_le);
+                    TETHER_LOGE(TAG, "SDO abort 0x%04x:%u code=0x%08" PRIx32 " (%s)",
+                             le16_to_host(ab->index_le), ab->sub,
+                             abort_code, sdo_abort_code_str(abort_code));
                 }
 #ifdef TETHER_DIAG_SDO_IO
                 if (diag_enabled) {
@@ -851,8 +930,16 @@ bool coe_sdo_download(
                 SdoAbort abort{};
                 std::memcpy(&abort, mbxbuf + sdo_offset, sizeof(abort));
                 const uint32_t abort_code = le32_to_host(abort.abortCode_le);
-                TETHER_LOGE(TAG, "SDO download abort: index=0x%04x:%02x code=0x%08" PRIx32,
-                         index, sub, abort_code);
+                TETHER_LOGE(TAG, "SDO download abort: index=0x%04x:%02x code=0x%08" PRIx32 " (%s)",
+                         index, sub, abort_code, sdo_abort_code_str(abort_code));
+                if (abort_code == 0x06090011 && is_pdo_mapping_index(index)) {
+                    log_pdo_mapping_subindex_diagnostic(
+                        master, adp, inout_mbx_cnt,
+                        mbx_write_addr, mbx_write_len,
+                        mbx_read_addr, mbx_read_len,
+                        index, sub,
+                        diag_enabled, poll_interval_ms, transaction_timeout_ms);
+                }
             } else {
                 TETHER_LOGE(TAG, "SDO download abort (malformed response)");
             }
