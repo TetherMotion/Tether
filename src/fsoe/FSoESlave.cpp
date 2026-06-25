@@ -11,49 +11,49 @@
 namespace FSoE {
 
 // ============================================================================
-// CRC-16 Implementation (FSoE polynomial 0x755B)
+// CRC-16 Implementation (FSoE Safety polynomial 0x139B7 per ETG.5100 §8.1.3.2)
 // ============================================================================
 
 namespace CRC {
 
-// Pre-computed CRC-16 table for FSoE polynomial 0x755B
+// Pre-computed CRC-16 table for FSoE Safety polynomial 0x139B7 (16-bit: 0x39B7)
 static const uint16_t crcTable[256] = {
-    0x0000, 0x755B, 0xEAB6, 0x9FED, 0xC16D, 0xB436, 0x2BDB, 0x5E80,
-    0x9EDB, 0xEB80, 0x746D, 0x0136, 0x5FB6, 0x2AED, 0xB500, 0xC05B,
-    0x29B7, 0x5CEC, 0xC301, 0xB65A, 0xE8DA, 0x9D81, 0x026C, 0x7737,
-    0xB76C, 0xC237, 0x5DDA, 0x2881, 0x7601, 0x035A, 0x9CB7, 0xE9EC,
-    0x536E, 0x2635, 0xB9D8, 0xCC83, 0x9203, 0xE758, 0x78B5, 0x0DEE,
-    0xCDB5, 0xB8EE, 0x2703, 0x5258, 0x0CD8, 0x7983, 0xE66E, 0x9335,
-    0x7AD9, 0x0F82, 0x906F, 0xE534, 0xBBB4, 0xCEEF, 0x5102, 0x2459,
-    0xE402, 0x9159, 0x0EB4, 0x7BEF, 0x256F, 0x5034, 0xCFD9, 0xBA82,
-    0xA6DC, 0xD387, 0x4C6A, 0x3931, 0x67B1, 0x12EA, 0x8D07, 0xF85C,
-    0x3807, 0x4D5C, 0xD2B1, 0xA7EA, 0xF96A, 0x8C31, 0x13DC, 0x6687,
-    0x8F6B, 0xFA30, 0x65DD, 0x1086, 0x4E06, 0x3B5D, 0xA4B0, 0xD1EB,
-    0x11B0, 0x64EB, 0xFB06, 0x8E5D, 0xD0DD, 0xA586, 0x3A6B, 0x4F30,
-    0xF5B2, 0x80E9, 0x1F04, 0x6A5F, 0x34DF, 0x4184, 0xDE69, 0xAB32,
-    0x6B69, 0x1E32, 0x81DF, 0xF484, 0xAA04, 0xDF5F, 0x40B2, 0x35E9,
-    0xDC05, 0xA95E, 0x36B3, 0x43E8, 0x1D68, 0x6833, 0xF7DE, 0x8285,
-    0x42DE, 0x3785, 0xA868, 0xDD33, 0x83B3, 0xF6E8, 0x6905, 0x1C5E,
-    0x51B9, 0x24E2, 0xBB0F, 0xCE54, 0x90D4, 0xE58F, 0x7A62, 0x0F39,
-    0xCF62, 0xBA39, 0x25D4, 0x508F, 0x0E0F, 0x7B54, 0xE4B9, 0x91E2,
-    0x780E, 0x0D55, 0x92B8, 0xE7E3, 0xB963, 0xCC38, 0x53D5, 0x268E,
-    0xE6D5, 0x938E, 0x0C63, 0x7938, 0x27B8, 0x52E3, 0xCD0E, 0xB855,
-    0x02D7, 0x778C, 0xE861, 0x9D3A, 0xC3BA, 0xB6E1, 0x290C, 0x5C57,
-    0x9C0C, 0xE957, 0x76BA, 0x03E1, 0x5D61, 0x283A, 0xB7D7, 0xC28C,
-    0x2B60, 0x5E3B, 0xC1D6, 0xB48D, 0xEA0D, 0x9F56, 0x00BB, 0x75E0,
-    0xB5BB, 0xC0E0, 0x5F0D, 0x2A56, 0x74D6, 0x018D, 0x9E60, 0xEB3B,
-    0xF765, 0x823E, 0x1DD3, 0x6888, 0x3608, 0x4353, 0xDCBE, 0xA9E5,
-    0x69BE, 0x1CE5, 0x8308, 0xF653, 0xA8D3, 0xDD88, 0x4265, 0x373E,
-    0xDED2, 0xAB89, 0x3464, 0x413F, 0x1FBF, 0x6AE4, 0xF509, 0x8052,
-    0x4009, 0x3552, 0xAABF, 0xDFE4, 0x8164, 0xF43F, 0x6BD2, 0x1E89,
-    0xA40B, 0xD150, 0x4EBD, 0x3BE6, 0x6566, 0x103D, 0x8FD0, 0xFA8B,
-    0x3AD0, 0x4F8B, 0xD066, 0xA53D, 0xFBBD, 0x8EE6, 0x110B, 0x6450,
-    0x8DBC, 0xF8E7, 0x670A, 0x1251, 0x4CD1, 0x398A, 0xA667, 0xD33C,
-    0x1367, 0x663C, 0xF9D1, 0x8C8A, 0xD20A, 0xA751, 0x38BC, 0x4DE7
+    0x0000, 0x22CF, 0x36F1, 0x143E, 0x1E8D, 0x3C42, 0x287C, 0x0AB3,
+    0x3D1A, 0x1FD5, 0x0BEB, 0x2924, 0x2397, 0x0158, 0x1566, 0x37A9,
+    0x095B, 0x2B94, 0x3FAA, 0x1D65, 0x17D6, 0x3519, 0x2127, 0x03E8,
+    0x3441, 0x168E, 0x02B0, 0x207F, 0x2ACC, 0x0803, 0x1C3D, 0x3EF2,
+    0x12B6, 0x3079, 0x2447, 0x0688, 0x0C3B, 0x2EF4, 0x3ACA, 0x1805,
+    0x2FAC, 0x0D63, 0x195D, 0x3B92, 0x3121, 0x13EE, 0x07D0, 0x251F,
+    0x1BED, 0x3922, 0x2D1C, 0x0FD3, 0x0560, 0x27AF, 0x3391, 0x115E,
+    0x26F7, 0x0438, 0x1006, 0x32C9, 0x387A, 0x1AB5, 0x0E8B, 0x2C44,
+    0x256C, 0x07A3, 0x139D, 0x3152, 0x3BE1, 0x192E, 0x0D10, 0x2FDF,
+    0x1876, 0x3AB9, 0x2E87, 0x0C48, 0x06FB, 0x2434, 0x300A, 0x12C5,
+    0x2C37, 0x0EF8, 0x1AC6, 0x3809, 0x32BA, 0x1075, 0x044B, 0x2684,
+    0x112D, 0x33E2, 0x27DC, 0x0513, 0x0FA0, 0x2D6F, 0x3951, 0x1B9E,
+    0x37DA, 0x1515, 0x012B, 0x23E4, 0x2957, 0x0B98, 0x1FA6, 0x3D69,
+    0x0AC0, 0x280F, 0x3C31, 0x1EFE, 0x144D, 0x3682, 0x22BC, 0x0073,
+    0x3E81, 0x1C4E, 0x0870, 0x2ABF, 0x200C, 0x02C3, 0x16FD, 0x3432,
+    0x039B, 0x2154, 0x356A, 0x17A5, 0x1D16, 0x3FD9, 0x2BE7, 0x0928,
+    0x39B7, 0x1B78, 0x0F46, 0x2D89, 0x273A, 0x05F5, 0x11CB, 0x3304,
+    0x04AD, 0x2662, 0x325C, 0x1093, 0x1A20, 0x38EF, 0x2CD1, 0x0E1E,
+    0x30EC, 0x1223, 0x061D, 0x24D2, 0x2E61, 0x0CAE, 0x1890, 0x3A5F,
+    0x0DF6, 0x2F39, 0x3B07, 0x19C8, 0x137B, 0x31B4, 0x258A, 0x0745,
+    0x2B01, 0x09CE, 0x1DF0, 0x3F3F, 0x358C, 0x1743, 0x037D, 0x21B2,
+    0x161B, 0x34D4, 0x20EA, 0x0225, 0x0896, 0x2A59, 0x3E67, 0x1CA8,
+    0x225A, 0x0095, 0x14AB, 0x3664, 0x3CD7, 0x1E18, 0x0A26, 0x28E9,
+    0x1F40, 0x3D8F, 0x29B1, 0x0B7E, 0x01CD, 0x2302, 0x373C, 0x15F3,
+    0x1CDB, 0x3E14, 0x2A2A, 0x08E5, 0x0256, 0x2099, 0x34A7, 0x1668,
+    0x21C1, 0x030E, 0x1730, 0x35FF, 0x3F4C, 0x1D83, 0x09BD, 0x2B72,
+    0x1580, 0x374F, 0x2371, 0x01BE, 0x0B0D, 0x29C2, 0x3DFC, 0x1F33,
+    0x289A, 0x0A55, 0x1E6B, 0x3CA4, 0x3617, 0x14D8, 0x00E6, 0x2229,
+    0x0E6D, 0x2CA2, 0x389C, 0x1A53, 0x10E0, 0x322F, 0x2611, 0x04DE,
+    0x3377, 0x11B8, 0x0586, 0x2749, 0x2DFA, 0x0F35, 0x1B0B, 0x39C4,
+    0x0736, 0x25F9, 0x31C7, 0x1308, 0x19BB, 0x3B74, 0x2F4A, 0x0D85,
+    0x3A2C, 0x18E3, 0x0CDD, 0x2E12, 0x24A1, 0x066E, 0x1250, 0x309F
 };
 
 uint16_t calculateFSoECRC(const uint8_t* data, size_t len) {
-    uint16_t crc = 0xFFFF;  // Initial value
+    uint16_t crc = 0x0000;  // Initial value per ETG.5100
     
     for (size_t i = 0; i < len; i++) {
         uint8_t index = (crc ^ data[i]) & 0xFF;
@@ -65,6 +65,68 @@ uint16_t calculateFSoECRC(const uint8_t* data, size_t len) {
 
 bool verifyFSoECRC(const uint8_t* data, size_t len, uint16_t expected_crc) {
     return calculateFSoECRC(data, len) == expected_crc;
+}
+
+size_t buildFSoEFrame(uint8_t* out, uint8_t cmd,
+                       const uint8_t* data, size_t data_len,
+                       uint16_t conn_id) {
+    size_t chunks = (data_len + 1) / 2;
+    size_t frame_size = fsoeFrameSize(data_len);
+
+    out[0] = cmd;
+
+    size_t offset = 1;
+    for (size_t i = 0; i < chunks; i++) {
+        uint8_t chunk[2] = {0, 0};
+        size_t chunk_start = i * 2;
+        chunk[0] = (chunk_start < data_len) ? data[chunk_start] : 0;
+        chunk[1] = (chunk_start + 1 < data_len) ? data[chunk_start + 1] : 0;
+
+        out[offset] = chunk[0];
+        out[offset + 1] = chunk[1];
+        uint16_t crc = calculateFSoECRC(chunk, 2);
+        out[offset + 2] = crc & 0xFF;
+        out[offset + 3] = (crc >> 8) & 0xFF;
+        offset += 4;
+    }
+
+    out[offset] = conn_id & 0xFF;
+    out[offset + 1] = (conn_id >> 8) & 0xFF;
+
+    return frame_size;
+}
+
+bool parseFSoEFrame(const uint8_t* frame, size_t frame_len,
+                     uint8_t& out_cmd,
+                     uint8_t* out_data, size_t& out_data_len,
+                     uint16_t& out_conn_id) {
+    if (frame_len < MIN_FSOE_FRAME_SIZE) return false;
+
+    out_cmd = frame[0];
+
+    size_t remaining = frame_len - 1 - 2;  // subtract CMD and ConnID
+    size_t chunks = remaining / 4;
+    out_data_len = chunks * 2;
+
+    size_t offset = 1;
+    for (size_t i = 0; i < chunks; i++) {
+        uint8_t chunk[2] = {frame[offset], frame[offset + 1]};
+        uint16_t stored_crc = static_cast<uint16_t>(frame[offset + 2]) |
+                              (static_cast<uint16_t>(frame[offset + 3]) << 8);
+        uint16_t calc_crc = calculateFSoECRC(chunk, 2);
+        if (stored_crc != calc_crc) {
+            return false;
+        }
+        if (out_data) {
+            out_data[i * 2] = chunk[0];
+            out_data[i * 2 + 1] = chunk[1];
+        }
+        offset += 4;
+    }
+
+    out_conn_id = static_cast<uint16_t>(frame[offset]) |
+                  (static_cast<uint16_t>(frame[offset + 1]) << 8);
+    return true;
 }
 
 } // namespace CRC
@@ -89,6 +151,17 @@ bool FSoESlave::initialize() {
     
     // Validate configuration
     if (config_.safeInputSize > 16 || config_.safeOutputSize > 16) {
+        return false;
+    }
+
+    // Validate watchdog timeout range (ETG.5100 / Object 0x6791: 50-60000 ms)
+    if (config_.watchdogTimeoutMs < Limits::WatchdogTimeoutMin ||
+        config_.watchdogTimeoutMs > Limits::WatchdogTimeoutMax) {
+        return false;
+    }
+
+    // Validate safety address range (1-65535, 0 is invalid)
+    if (config_.safetyAddress < Limits::SafetyAddressMin) {
         return false;
     }
     
@@ -141,7 +214,6 @@ const char* FSoESlave::getStateName() const {
         case ConnectionState::Connection: return "CONNECTION";
         case ConnectionState::Parameter:  return "PARAMETER";
         case ConnectionState::Data:       return "DATA";
-        case ConnectionState::FailSafe:   return "FAIL_SAFE";
         case ConnectionState::Error:      return "ERROR";
         default:                          return "UNKNOWN";
     }
@@ -168,24 +240,24 @@ void FSoESlave::reset() {
 
 void FSoESlave::triggerFailSafe(uint16_t errorCode) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    
-    if (state_ == ConnectionState::FailSafe) {
+
+    if (failSafeActive_) {
         return;  // Already in fail-safe
     }
-    
+
     lastError_ = errorCode;
     failSafeActive_ = true;
     dataValid_ = false;
-    
-    transitionTo(ConnectionState::FailSafe);
+
+    // Stay in Data state but mark as fail-safe (ETG.5100 uses cmd 0x08 within Data)
     applyFailSafeOutputs();
-    
+
     stats_.failSafeActivations++;
-    
+
     char msg[64];
     snprintf(msg, sizeof(msg), "Fail-safe triggered: 0x%04X", errorCode);
     logDiagnostic(errorCode, msg);
-    
+
     if (failSafeCallback_) {
         failSafeCallback_();
     }
@@ -194,7 +266,7 @@ void FSoESlave::triggerFailSafe(uint16_t errorCode) {
 bool FSoESlave::attemptRecovery() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
-    if (state_ != ConnectionState::FailSafe) {
+    if (!failSafeActive_) {
         return false;
     }
     
@@ -304,20 +376,10 @@ bool FSoESlave::processRxFrame(const uint8_t* data, size_t len) {
             break;
             
         case ConnectionState::Data:
-            if (command == Command::ProcessData) {
+            if (command == Command::ProcessData || command == Command::FailSafeData) {
                 processData(data, len);
             } else if (command == Command::Reset) {
                 processSessionReset(data, len);
-            }
-            break;
-            
-        case ConnectionState::FailSafe:
-            if (command == Command::Reset) {
-                // Master requesting reset after fail-safe
-                if (config_.autoRecoveryEnabled && !errorInjection_.preventRecovery) {
-                    processSessionReset(data, len);
-                    stats_.successfulRecoveries++;
-                }
             }
             break;
             
@@ -365,11 +427,11 @@ size_t FSoESlave::prepareTxFrame(uint8_t* data, size_t maxLen) {
             break;
             
         case ConnectionState::Data:
-            frameSize = buildDataResponse(data, maxLen);
-            break;
-            
-        case ConnectionState::FailSafe:
-            frameSize = buildFailSafeResponse(data, maxLen);
+            if (failSafeActive_) {
+                frameSize = buildFailSafeResponse(data, maxLen);
+            } else {
+                frameSize = buildDataResponse(data, maxLen);
+            }
             break;
             
         default:
@@ -520,81 +582,55 @@ void FSoESlave::applyFailSafeOutputs() {
 // ============================================================================
 
 bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
-    // Minimum frame size: header(3) + CRC(2) = 5
-    if (len < 5) {
+    if (len < MIN_FSOE_FRAME_SIZE) {
         handleError(ErrorCode::DataLengthError, false);
         stats_.dataLengthErrors++;
         return false;
     }
-    
-    // Validate CRC
-    if (!validateCRC(data, len)) {
-        return false;
-    }
-    
-    // Get connection ID from header
-    uint16_t connId = 0;
-    if (data[0] == Command::ProcessData || data[0] == Command::FailSafeData) {
-        connId = static_cast<uint16_t>(data[1] | ((data[2] & 0x0F) << 8));
-    } else {
-        connId = static_cast<uint16_t>(data[1] | (data[2] << 8));
-    }
-    
-    // Validate connection ID (after connection is established)
-    if (state_ == ConnectionState::Parameter ||
-        state_ == ConnectionState::Data ||
-        state_ == ConnectionState::FailSafe) {
-        if (!validateConnectionId(connId)) {
-            return false;
-        }
-    }
-    
-    return true;
-}
 
-bool FSoESlave::validateCRC(const uint8_t* data, size_t len) {
-    // Check for CRC error injection
-    if (errorInjection_.enabled && errorInjection_.injectCRCError) {
-        // Pretend CRC failed
+    // Parse frame with interleaved CRC verification
+    uint8_t cmd = 0;
+    size_t data_len = 0;
+    uint16_t conn_id = 0;
+
+    if (!CRC::parseFSoEFrame(data, len, cmd, nullptr, data_len, conn_id)) {
         handleError(ErrorCode::CRCError, config_.treatCrcErrorAsCritical);
         stats_.crcErrors++;
         return false;
     }
-    
-    if (len < 2) {
-        return false;
-    }
 
-    const uint16_t stored_crc = static_cast<uint16_t>(data[len - 2]) |
-                                (static_cast<uint16_t>(data[len - 1]) << 8);
-    if (!CRC::verifyFSoECRC(data, len - 2, stored_crc)) {
-        if (config_.strictCrcCheck) {
-            handleError(ErrorCode::CRCError, config_.treatCrcErrorAsCritical);
-            stats_.crcErrors++;
+    // Validate connection ID (after connection is established)
+    if (state_ == ConnectionState::Connection ||
+        state_ == ConnectionState::Parameter ||
+        state_ == ConnectionState::Data) {
+        if (!validateConnectionId(conn_id)) {
             return false;
         }
     }
-    
+
     return true;
 }
 
+bool FSoESlave::validateCRC(const uint8_t* data, size_t len) {
+    // CRC validation is now done inside parseFSoEFrame in validateFrame.
+    // This method is kept for compatibility but delegates to parseFSoEFrame.
+    if (errorInjection_.enabled && errorInjection_.injectCRCError) {
+        handleError(ErrorCode::CRCError, config_.treatCrcErrorAsCritical);
+        stats_.crcErrors++;
+        return false;
+    }
+
+    uint8_t cmd = 0;
+    size_t data_len = 0;
+    uint16_t conn_id = 0;
+    return CRC::parseFSoEFrame(data, len, cmd, nullptr, data_len, conn_id);
+}
+
 bool FSoESlave::validateSequence(uint8_t seqNum) {
-    // Check for sequence error injection
-    if (errorInjection_.enabled && errorInjection_.injectSequenceError) {
-        seqNum += errorInjection_.sequenceOffset;
-    }
-    
-    if (seqNum != expectedSequence_) {
-        if (config_.strictSequenceCheck) {
-            handleError(ErrorCode::SequenceError, config_.treatSequenceErrorAsCritical);
-            stats_.sequenceErrors++;
-            return false;
-        }
-        // Non-strict: accept frame but don't resync — preserves replay protection
-        return true;
-    }
-    
-    expectedSequence_ = (seqNum + 1) & 0x0F;
+    // ETG.5100 does not define a sequence number field.
+    // Frame integrity is ensured via CRC + watchdog.
+    // This method is kept for API compatibility but is a no-op.
+    (void)seqNum;
     return true;
 }
 
@@ -604,7 +640,7 @@ bool FSoESlave::validateConnectionId(uint16_t connId) {
         connId = errorInjection_.fakeConnId;
     }
     
-    if ((connId & 0x0FFFu) != (currentConnectionId_ & 0x0FFFu)) {
+    if (connId != currentConnectionId_) {
         handleError(ErrorCode::ConnectionIDError, config_.treatConnIdErrorAsCritical);
         stats_.connectionIdErrors++;
         return false;
@@ -622,83 +658,157 @@ uint16_t FSoESlave::calculateCRC(const uint8_t* data, size_t len) {
 // ============================================================================
 
 void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
-    (void)len;
-    
-    // Extract session ID
-    if (len >= 7) {
-        sessionId_ = data[3] | (data[4] << 8);
-    } else {
-        sessionId_ = 0;
+    // Parse frame to extract session ID from safe data
+    uint8_t cmd = 0;
+    uint8_t frame_data[MAX_SAFE_DATA_SIZE] = {0};
+    size_t data_len = 0;
+    uint16_t conn_id = 0;
+
+    if (CRC::parseFSoEFrame(data, len, cmd, frame_data, data_len, conn_id)) {
+        // Session ID is in the first 2 bytes of safe data
+        if (data_len >= 2) {
+            sessionId_ = static_cast<uint16_t>(frame_data[0]) |
+                         (static_cast<uint16_t>(frame_data[1]) << 8);
+        }
     }
-    
-    // Reset sequence counters
+
+    // Reset sequence counters (no longer used but kept for API compat)
     expectedSequence_ = 0;
     txSequence_ = 0;
-    
+
     // Clear error state
     lastError_ = ErrorCode::NoError;
     failSafeActive_ = false;
-    
+
     transitionTo(ConnectionState::Session);
-    
+
     stats_.sessionResets++;
     logDiagnostic(ErrorCode::NoError, "Session reset received");
 }
 
 void FSoESlave::processConnection(const uint8_t* data, size_t len) {
-    (void)len;
-    
-    // Extract connection ID
-    currentConnectionId_ = data[3] | (data[4] << 8);
-    
-    // Validate safety address if present
-    if (len >= 9) {
-        uint16_t safetyAddr = data[5] | (data[6] << 8);
+    // Parse frame to extract connection data
+    uint8_t cmd = 0;
+    uint8_t frame_data[MAX_SAFE_DATA_SIZE] = {0};
+    size_t data_len = 0;
+    uint16_t conn_id = 0;
+
+    if (!CRC::parseFSoEFrame(data, len, cmd, frame_data, data_len, conn_id)) {
+        handleError(ErrorCode::CRCError, true);
+        return;
+    }
+
+    // Connection ID from end of frame
+    currentConnectionId_ = conn_id;
+
+    // Validate safety address if present in safe data (first 2 bytes)
+    if (data_len >= 2) {
+        uint16_t safetyAddr = static_cast<uint16_t>(frame_data[0]) |
+                              (static_cast<uint16_t>(frame_data[1]) << 8);
         if (safetyAddr != 0 && safetyAddr != config_.safetyAddress) {
             handleError(ErrorCode::ConnectionIDError, true);
             return;
         }
     }
-    
+
     transitionTo(ConnectionState::Parameter);
-    
+
     char msg[64];
     snprintf(msg, sizeof(msg), "Connection established: ID=0x%04X", currentConnectionId_);
     logDiagnostic(ErrorCode::NoError, msg);
 }
 
 void FSoESlave::processParameter(const uint8_t* data, size_t len) {
-    (void)data;
-    (void)len;
-    
-    // Parameter exchange - for now just acknowledge
-    // Real implementation would validate safety parameters
-    
+    // Parse frame to extract parameter data
+    uint8_t cmd = 0;
+    uint8_t frame_data[MAX_SAFE_DATA_SIZE] = {0};
+    size_t data_len = 0;
+    uint16_t conn_id = 0;
+
+    if (!CRC::parseFSoEFrame(data, len, cmd, frame_data, data_len, conn_id)) {
+        handleError(ErrorCode::CRCError, true);
+        return;
+    }
+
+    // Validate safety-critical parameters from safe data
+    // Expected layout: [watchdog_lo] [watchdog_hi] [safety_level] [input_size] [output_size] [reserved]
+    if (data_len >= 5) {
+        uint16_t watchdog = static_cast<uint16_t>(frame_data[0]) |
+                            (static_cast<uint16_t>(frame_data[1]) << 8);
+        uint8_t safety_level = frame_data[2];
+        uint8_t input_size = frame_data[3];
+        uint8_t output_size = frame_data[4];
+
+        // Validate watchdog range
+        if (watchdog < Limits::WatchdogTimeoutMin || watchdog > Limits::WatchdogTimeoutMax) {
+            handleError(ErrorCode::ParameterError, true);
+            return;
+        }
+
+        // Validate safety level
+        if (safety_level < config_.safetyLevel) {
+            handleError(ErrorCode::ParameterError, true);
+            return;
+        }
+
+        // Validate data sizes match configuration
+        if (input_size != config_.safeInputSize || output_size != config_.safeOutputSize) {
+            handleError(ErrorCode::ParameterError, true);
+            return;
+        }
+
+        // Update watchdog timeout from parameter
+        config_.watchdogTimeoutMs = watchdog;
+    }
+
     transitionTo(ConnectionState::Data);
-    
+
     logDiagnostic(ErrorCode::NoError, "Parameters accepted");
 }
 
 void FSoESlave::processData(const uint8_t* data, size_t len) {
-    // Extract sequence number from data
-    if (len > 3) {
-        uint8_t seqNum = (data[2] >> 4) & 0x0F;  // High nibble of conn_id_high
-        if (!validateSequence(seqNum)) {
-            return;
-        }
+    // Parse frame to extract safe output data
+    uint8_t cmd = 0;
+    uint8_t frame_data[MAX_SAFE_DATA_SIZE] = {0};
+    size_t data_len = 0;
+    uint16_t conn_id = 0;
+
+    if (!CRC::parseFSoEFrame(data, len, cmd, frame_data, data_len, conn_id)) {
+        handleError(ErrorCode::CRCError, true);
+        return;
     }
-    
+
+    // Handle fail-safe command within Data state
+    if (cmd == Command::FailSafeData) {
+        // Master is sending fail-safe data
+        // Extract safe output data (first safeOutputSize bytes)
+        if (data_len >= config_.safeOutputSize) {
+            std::copy(frame_data, frame_data + config_.safeOutputSize,
+                      safeOutputs_.begin());
+        }
+        dataValid_ = false;
+        failSafeActive_ = true;
+        applyFailSafeOutputs();
+
+        if (failSafeCallback_) {
+            failSafeCallback_();
+        }
+        return;
+    }
+
+    // Normal ProcessData command
+    if (cmd != Command::ProcessData) {
+        return;
+    }
+
     // Extract safe output data
-    size_t dataOffset = 3;  // After header
-    size_t dataLen = len - dataOffset - 2;  // Minus header and CRC
-    
-    if (dataLen >= config_.safeOutputSize) {
-        std::copy(data + dataOffset, 
-                  data + dataOffset + config_.safeOutputSize,
+    // Note: fail-safe is only cleared by Reset command, not by ProcessData
+    if (data_len >= config_.safeOutputSize) {
+        std::copy(frame_data, frame_data + config_.safeOutputSize,
                   safeOutputs_.begin());
-        
+
         dataValid_ = true;
-        
+
         if (dataValidCallback_) {
             dataValidCallback_(safeOutputs_.data(), config_.safeOutputSize);
         }
@@ -710,108 +820,59 @@ void FSoESlave::processData(const uint8_t* data, size_t len) {
 // ============================================================================
 
 size_t FSoESlave::buildSessionResponse(uint8_t* data, size_t maxLen) {
-    if (maxLen < 7) return 0;
-    
-    data[0] = Command::Session;
-    data[1] = config_.connectionId & 0xFF;
-    data[2] = (config_.connectionId >> 8) & 0xFF;
-    data[3] = sessionId_ & 0xFF;
-    data[4] = (sessionId_ >> 8) & 0xFF;
-    
-    // Calculate and append CRC
-    uint16_t crc = calculateCRC(data, 5);
-    data[5] = crc & 0xFF;
-    data[6] = (crc >> 8) & 0xFF;
-    
-    return 7;
+    // Session response: CMD + session_id (2B) + ConnID (2B)
+    uint8_t payload[2];
+    payload[0] = sessionId_ & 0xFF;
+    payload[1] = (sessionId_ >> 8) & 0xFF;
+    size_t needed = fsoeFrameSize(2);
+    if (maxLen < needed) return 0;
+    return CRC::buildFSoEFrame(data, Command::Session, payload, 2, config_.connectionId);
 }
 
 size_t FSoESlave::buildConnectionResponse(uint8_t* data, size_t maxLen) {
-    if (maxLen < 9) return 0;
-    
-    data[0] = Command::Connection;
-    data[1] = currentConnectionId_ & 0xFF;
-    data[2] = (currentConnectionId_ >> 8) & 0xFF;
-    data[3] = config_.safetyAddress & 0xFF;
-    data[4] = (config_.safetyAddress >> 8) & 0xFF;
-    data[5] = config_.safetyLevel;
-    data[6] = 0;  // Reserved
-    
-    // Calculate and append CRC
-    uint16_t crc = calculateCRC(data, 7);
-    data[7] = crc & 0xFF;
-    data[8] = (crc >> 8) & 0xFF;
-    
-    return 9;
+    // Connection response: CMD + safety_addr (2B) + safety_level (1B) + reserved (1B) + ConnID (2B)
+    uint8_t payload[4];
+    payload[0] = config_.safetyAddress & 0xFF;
+    payload[1] = (config_.safetyAddress >> 8) & 0xFF;
+    payload[2] = config_.safetyLevel;
+    payload[3] = 0;  // Reserved
+    size_t needed = fsoeFrameSize(4);
+    if (maxLen < needed) return 0;
+    return CRC::buildFSoEFrame(data, Command::Connection, payload, 4, currentConnectionId_);
 }
 
 size_t FSoESlave::buildParameterResponse(uint8_t* data, size_t maxLen) {
-    if (maxLen < 7) return 0;
-    
-    data[0] = Command::Parameter;
-    data[1] = currentConnectionId_ & 0xFF;
-    data[2] = (currentConnectionId_ >> 8) & 0xFF;
-    data[3] = 0;  // Parameter ACK
-    data[4] = 0;
-    
-    // Calculate and append CRC
-    uint16_t crc = calculateCRC(data, 5);
-    data[5] = crc & 0xFF;
-    data[6] = (crc >> 8) & 0xFF;
-    
-    return 7;
+    // Parameter response: CMD + param_ack (2B) + ConnID (2B)
+    uint8_t payload[2] = {0, 0};  // Parameter ACK
+    size_t needed = fsoeFrameSize(2);
+    if (maxLen < needed) return 0;
+    return CRC::buildFSoEFrame(data, Command::Parameter, payload, 2, currentConnectionId_);
 }
 
 size_t FSoESlave::buildDataResponse(uint8_t* data, size_t maxLen) {
-    size_t frameLen = 3 + config_.safeInputSize + 2;  // Header + data + CRC
-    
-    if (maxLen < frameLen) return 0;
-    
-    data[0] = Command::ProcessData;
-    data[1] = currentConnectionId_ & 0xFF;
-    data[2] = ((currentConnectionId_ >> 8) & 0x0F) | ((txSequence_ & 0x0F) << 4);
-    
-    // Copy safe input data
-    std::copy(safeInputs_.begin(),
-              safeInputs_.begin() + config_.safeInputSize,
-              data + 3);
-    
-    // Calculate and append CRC
-    uint16_t crc = calculateCRC(data, 3 + config_.safeInputSize);
-    data[3 + config_.safeInputSize] = crc & 0xFF;
-    data[4 + config_.safeInputSize] = (crc >> 8) & 0xFF;
-    
-    txSequence_ = (txSequence_ + 1) & 0x0F;
-    
-    return frameLen;
+    size_t needed = fsoeFrameSize(config_.safeInputSize);
+    if (maxLen < needed) return 0;
+    return CRC::buildFSoEFrame(data, Command::ProcessData,
+                               safeInputs_.data(), config_.safeInputSize,
+                               currentConnectionId_);
 }
 
 size_t FSoESlave::buildFailSafeResponse(uint8_t* data, size_t maxLen) {
-    size_t frameLen = 3 + config_.safeInputSize + 2 + 2;  // Header + data + error + CRC
-    
-    if (maxLen < frameLen) return 0;
-    
-    data[0] = Command::FailSafeData;  // Fail-safe data command
-    data[1] = currentConnectionId_ & 0xFF;
-    data[2] = ((currentConnectionId_ >> 8) & 0x0F) | ((txSequence_ & 0x0F) << 4);
-    
-    // Copy fail-safe input values
+    // Fail-safe response: CMD + fail_safe_inputs (safeInputSize) + error_code (2B) + ConnID (2B)
+    // Use a temporary buffer to combine fail-safe inputs and error code
+    uint8_t payload[MAX_SAFE_DATA_SIZE] = {0};
+    size_t payload_len = config_.safeInputSize + 2;  // inputs + error code
+
     std::copy(config_.failSafeInputs.begin(),
               config_.failSafeInputs.begin() + config_.safeInputSize,
-              data + 3);
-    
-    // Add error code
-    data[3 + config_.safeInputSize] = lastError_ & 0xFF;
-    data[4 + config_.safeInputSize] = (lastError_ >> 8) & 0xFF;
-    
-    // Calculate and append CRC
-    uint16_t crc = calculateCRC(data, 5 + config_.safeInputSize);
-    data[5 + config_.safeInputSize] = crc & 0xFF;
-    data[6 + config_.safeInputSize] = (crc >> 8) & 0xFF;
-    
-    txSequence_ = (txSequence_ + 1) & 0x0F;
-    
-    return frameLen;
+              payload);
+    payload[config_.safeInputSize] = lastError_ & 0xFF;
+    payload[config_.safeInputSize + 1] = (lastError_ >> 8) & 0xFF;
+
+    size_t needed = fsoeFrameSize(payload_len);
+    if (maxLen < needed) return 0;
+    return CRC::buildFSoEFrame(data, Command::FailSafeData,
+                               payload, payload_len, currentConnectionId_);
 }
 
 // ============================================================================
@@ -819,17 +880,18 @@ size_t FSoESlave::buildFailSafeResponse(uint8_t* data, size_t maxLen) {
 // ============================================================================
 
 void FSoESlave::handleWatchdog(uint64_t currentTimeMs) {
-    if (state_ != ConnectionState::Data) {
+    // Watchdog active in all communication states (not Reset/Error)
+    if (state_ == ConnectionState::Reset || state_ == ConnectionState::Error) {
         return;
     }
-    
+
     uint64_t elapsed = currentTimeMs - lastValidFrameMs_;
-    
+
     // Track longest gap
     if (elapsed > stats_.longestGapMs) {
         stats_.longestGapMs = elapsed;
     }
-    
+
     // Check watchdog timeout
     if (elapsed > config_.watchdogTimeoutMs) {
         handleError(ErrorCode::WatchdogError, config_.treatTimeoutAsCritical);
@@ -854,9 +916,10 @@ void FSoESlave::handleTimeout(uint64_t currentTimeMs) {
             }
             break;
             
-        case ConnectionState::FailSafe:
-            // Check recovery delay
-            if (config_.autoRecoveryEnabled && elapsed > config_.recoveryDelayMs) {
+        case ConnectionState::Data:
+            // Check recovery delay for fail-safe sub-mode
+            if (failSafeActive_ && config_.autoRecoveryEnabled &&
+                elapsed > config_.recoveryDelayMs) {
                 attemptRecovery();
             }
             break;
