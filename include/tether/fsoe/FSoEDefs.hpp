@@ -17,17 +17,6 @@
 namespace FSoE {
 
 // ============================================================================
-// FSoE Message Types
-// ============================================================================
-
-namespace MessageType {
-    constexpr uint8_t Data           = 0x00;  // Normal safety data
-    constexpr uint8_t SessionReset   = 0x01;  // Session reset request
-    constexpr uint8_t Parameter      = 0x02;  // Parameter transfer
-    constexpr uint8_t FailSafe       = 0x03;  // Fail-safe command
-}
-
-// ============================================================================
 // FSoE Command Codes
 // ============================================================================
 

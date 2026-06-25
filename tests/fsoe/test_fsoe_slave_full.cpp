@@ -31,13 +31,6 @@ TEST(FSoEDefsTest, ErrorCodeConstants) {
     EXPECT_EQ(ErrorCode::NoError, 0x0000);
 }
 
-TEST(FSoEDefsTest, MessageTypeConstants) {
-    EXPECT_EQ(MessageType::Data, 0);
-    EXPECT_EQ(MessageType::SessionReset, 1);
-    EXPECT_EQ(MessageType::Parameter, 2);
-    EXPECT_EQ(MessageType::FailSafe, 3);
-}
-
 TEST(FSoEDefsTest, CommandConstants) {
     EXPECT_EQ(Command::ProcessData, 0x36);
     EXPECT_EQ(Command::Reset, 0x2A);

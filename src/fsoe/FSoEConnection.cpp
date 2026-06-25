@@ -188,10 +188,28 @@ bool FSoEConnection::processRxFrame(const uint8_t* data, size_t len)
     // Update watchdog
     status_.last_valid_frame_ms = current_time_ms_;
     
+    // Check for fail-safe response from slave in any active state
+    if (header->command == Command::FailSafeData &&
+        status_.state != ConnectionState::FailSafe &&
+        status_.state != ConnectionState::Error) {
+        // Extract slave error code from fail-safe response
+        size_t payload_len = len - sizeof(FSoEHeader) - 2;
+        if (payload_len >= 2) {
+            size_t error_offset = sizeof(FSoEHeader) +
+                (payload_len >= config_.input_size + 2 ? config_.input_size : 0);
+            uint16_t slave_error = static_cast<uint16_t>(
+                data[error_offset] | (data[error_offset + 1] << 8));
+            handleError(slave_error);
+        } else {
+            handleError(ErrorCode::ApplicationError);
+        }
+        return true;
+    }
+    
     // Process based on current state
     switch (status_.state) {
         case ConnectionState::Reset:
-            handleResetState();
+            handleResetState(data, len);
             break;
             
         case ConnectionState::Session:
@@ -237,8 +255,7 @@ size_t FSoEConnection::prepareTxFrame(uint8_t* data, size_t max_len)
             break;
             
         case ConnectionState::Parameter:
-            // Parameter frames similar to data frames
-            len = buildDataFrame(data, max_len);
+            len = buildParameterFrame(data, max_len);
             break;
             
         case ConnectionState::Data:
@@ -259,7 +276,7 @@ size_t FSoEConnection::prepareTxFrame(uint8_t* data, size_t max_len)
         if (status_.state == ConnectionState::Parameter ||
             status_.state == ConnectionState::Data ||
             status_.state == ConnectionState::FailSafe) {
-            tx_sequence_++;
+            tx_sequence_ = (tx_sequence_ + 1) & 0x0F;
         }
     }
     
@@ -280,10 +297,17 @@ void FSoEConnection::update(uint64_t current_time_ms)
 // State Handlers
 // ============================================================================
 
-void FSoEConnection::handleResetState()
+void FSoEConnection::handleResetState(const uint8_t* data, size_t len)
 {
-    // Start session establishment
-    requestSessionReset();
+    const auto* header = reinterpret_cast<const FSoEHeader*>(data);
+    
+    if (header->command == Command::Session) {
+        // Slave already responded with Session — advance to Connection
+        transitionTo(ConnectionState::Connection);
+    } else {
+        // No valid session response — initiate session establishment
+        requestSessionReset();
+    }
 }
 
 void FSoEConnection::handleSessionState(const uint8_t* data, size_t len)
@@ -300,8 +324,29 @@ void FSoEConnection::handleConnectionState(const uint8_t* data, size_t len)
 {
     const auto* header = reinterpret_cast<const FSoEHeader*>(data);
     
-    if (header->command == Command::Connection ||
-        header->command == Command::Parameter) {
+    if (header->command == Command::Connection) {
+        // Validate slave's safety address from connection response
+        if (len >= 9) {
+            uint16_t slave_safety_addr = data[5] | (data[6] << 8);
+            if (slave_safety_addr != 0 && slave_safety_addr != config_.slave_safety_addr) {
+                handleError(ErrorCode::ConnectionIDError);
+                return;
+            }
+            // Validate SIL level if present (byte 7)
+            if (len >= 10) {
+                uint8_t slave_sil = data[7];
+                if (slave_sil < config_.safety_level) {
+                    handleError(ErrorCode::ApplicationError);
+                    return;
+                }
+            }
+        }
+        if (config_.input_size > 0 || config_.output_size > 0) {
+            transitionTo(ConnectionState::Parameter);
+        } else {
+            transitionTo(ConnectionState::Data);
+        }
+    } else if (header->command == Command::Parameter) {
         // Some simulated slaves acknowledge the connection by immediately
         // advancing to the parameter phase and returning a parameter response.
         if (config_.input_size > 0 || config_.output_size > 0) {
@@ -330,22 +375,6 @@ void FSoEConnection::handleDataState(const uint8_t* data, size_t len)
 {
     const auto* header = reinterpret_cast<const FSoEHeader*>(data);
     
-    // Check for fail-safe response from slave
-    if (header->command == Command::FailSafeData) {
-        // Extract slave error code from fail-safe response
-        // Format: header(3) + input_data + error_code(2) + CRC(2)
-        size_t payload_len = len - sizeof(FSoEHeader) - 2;
-        if (payload_len >= config_.input_size + 2) {
-            size_t error_offset = sizeof(FSoEHeader) + config_.input_size;
-            uint16_t slave_error = static_cast<uint16_t>(
-                data[error_offset] | (data[error_offset + 1] << 8));
-            handleError(slave_error);
-        } else {
-            handleError(ErrorCode::ApplicationError);
-        }
-        return;
-    }
-    
     if (header->command != Command::ProcessData) {
         return;
     }
@@ -357,8 +386,6 @@ void FSoEConnection::handleDataState(const uint8_t* data, size_t len)
         handleError(ErrorCode::SequenceError);
         return;
     }
-    
-    rx_sequence_ = seq;
     
     // Extract safety data
     const uint8_t* safe_data = data + sizeof(FSoEHeader);
@@ -405,14 +432,41 @@ size_t FSoEConnection::buildConnectionFrame(uint8_t* data, size_t max_len)
     frame->header.conn_id_low = config_.connection_id & 0xFF;
     frame->header.conn_id_high = (config_.connection_id >> 8) & 0xFF;
     frame->conn_id = config_.connection_id;
-    frame->slave_addr = config_.slave_addr;
-    frame->sl_param_crc = 0;  // Would contain parameter CRC
+    frame->slave_addr = config_.slave_safety_addr;
+    // Calculate parameter CRC from safety-critical configuration
+    uint8_t param_buf[6];
+    param_buf[0] = config_.watchdog_timeout_ms & 0xFF;
+    param_buf[1] = (config_.watchdog_timeout_ms >> 8) & 0xFF;
+    param_buf[2] = config_.safety_level;
+    param_buf[3] = config_.input_size;
+    param_buf[4] = config_.output_size;
+    param_buf[5] = 0;  // Reserved
+    uint16_t param_crc = CRC::calculateFSoECRC(param_buf, sizeof(param_buf));
+    frame->sl_param_crc = static_cast<uint8_t>(param_crc & 0xFF);
     frame->reserved = 0;
     
     // Calculate CRC
     frame->crc = CRC::calculateFSoECRC(data, sizeof(struct FSoEConnectionFrame) - 2);
     
     return sizeof(struct FSoEConnectionFrame);
+}
+
+size_t FSoEConnection::buildParameterFrame(uint8_t* data, size_t max_len)
+{
+    if (max_len < sizeof(FSoEParameter)) return 0;
+    
+    auto* frame = reinterpret_cast<FSoEParameter*>(data);
+    
+    frame->header.command = Command::Parameter;
+    frame->header.conn_id_low = config_.connection_id & 0xFF;
+    frame->header.conn_id_high = (config_.connection_id >> 8) & 0xFF;
+    frame->param_id = 0;  // No parameter request
+    frame->param_value = 0;
+    
+    // Calculate CRC
+    frame->crc = CRC::calculateFSoECRC(data, sizeof(FSoEParameter) - 2);
+    
+    return sizeof(FSoEParameter);
 }
 
 size_t FSoEConnection::buildDataFrame(uint8_t* data, size_t max_len)
@@ -485,7 +539,11 @@ bool FSoEConnection::validateSequence(uint8_t seq)
 {
     // Check sequence number matches expected next value
     uint8_t expected = (rx_sequence_ + 1) & 0x0F;
-    return seq == expected;
+    if (seq != expected) {
+        return false;
+    }
+    rx_sequence_ = seq;
+    return true;
 }
 
 bool FSoEConnection::validateConnectionID(uint16_t conn_id)
