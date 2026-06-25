@@ -148,8 +148,8 @@ struct FSoESlaveConfig {
     // Behavior configuration
     bool autoRecoveryEnabled = true;   ///< Automatically recover from fail-safe
     uint32_t recoveryDelayMs = 1000;   ///< Delay before attempting recovery
-    bool strictCrcCheck = true;        ///< Reject all CRC errors
-    bool strictSequenceCheck = true;   ///< Reject sequence errors
+    bool strictCrcCheck = true;        ///< Reject all CRC errors (always enforced)
+    bool strictSequenceCheck = true;   ///< Reject sequence errors (deprecated, no-op)
     
     // Error handling
     bool treatCrcErrorAsCritical = true;
@@ -305,7 +305,7 @@ public:
     /**
      * @brief Check if in fail-safe state
      */
-    bool isFailSafe() const { return state_ == ConnectionState::FailSafe || failSafeActive_; }
+    bool isFailSafe() const { return failSafeActive_; }
     
     /**
      * @brief Check if error occurred
@@ -556,7 +556,7 @@ private:
 
 namespace CRC {
     /**
-     * @brief Calculate FSoE CRC-16 (polynomial 0x755B)
+     * @brief Calculate FSoE CRC-16 (Safety polynomial 0x139B7, initial value 0x0000)
      */
     uint16_t calculateFSoECRC(const uint8_t* data, size_t len);
     
@@ -564,6 +564,38 @@ namespace CRC {
      * @brief Verify FSoE CRC
      */
     bool verifyFSoECRC(const uint8_t* data, size_t len, uint16_t expected_crc);
+
+    /**
+     * @brief Build an FSoE frame with interleaved CRC-16 per 2-byte data chunk.
+     *
+     * Layout: [CMD] [Data0(2B)] [CRC0(2B)] [Data1(2B)] [CRC1(2B)] ... [ConnID(2B)]
+     *
+     * @param out       Output buffer (must be >= fsoeFrameSize(data_len))
+     * @param cmd       FSoE command byte
+     * @param data      Safe data payload (may be nullptr if data_len==0)
+     * @param data_len  Number of safe data bytes
+     * @param conn_id   Connection ID (placed at end of frame)
+     * @return Total frame size, or 0 on error
+     */
+    size_t buildFSoEFrame(uint8_t* out, uint8_t cmd,
+                           const uint8_t* data, size_t data_len,
+                           uint16_t conn_id);
+
+    /**
+     * @brief Parse an FSoE frame with interleaved CRC-16 and verify all CRCs.
+     *
+     * @param frame       Pointer to frame data
+     * @param frame_len   Frame length
+     * @param out_cmd      Output: command byte
+     * @param out_data     Output buffer for safe data (may be nullptr to skip)
+     * @param out_data_len Output: number of safe data bytes parsed
+     * @param out_conn_id  Output: connection ID from end of frame
+     * @return true if all CRCs valid and frame structure is correct
+     */
+    bool parseFSoEFrame(const uint8_t* frame, size_t frame_len,
+                         uint8_t& out_cmd,
+                         uint8_t* out_data, size_t& out_data_len,
+                         uint16_t& out_conn_id);
 }
 
 } // namespace FSoE

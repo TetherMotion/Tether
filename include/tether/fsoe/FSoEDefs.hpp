@@ -38,9 +38,8 @@ namespace ConnectionState {
     constexpr uint8_t Session        = 0x01;  // Session establishment
     constexpr uint8_t Connection     = 0x02;  // Connection setup
     constexpr uint8_t Parameter      = 0x03;  // Parameter exchange
-    constexpr uint8_t Data           = 0x04;  // Data exchange
-    constexpr uint8_t FailSafe       = 0x05;  // Fail-safe state
-    constexpr uint8_t Error          = 0x06;  // Error state
+    constexpr uint8_t Data           = 0x04;  // Data exchange (includes fail-safe sub-mode via cmd 0x08)
+    constexpr uint8_t Error          = 0x05;  // Internal error state
 }
 
 // ============================================================================
@@ -87,110 +86,52 @@ namespace PL {
 }
 
 // ============================================================================
-// FSoE Frame Structure
+// FSoE Frame Structure (ETG.5100 §8.1)
 // ============================================================================
+//
+// ETG.5100 frame layout:
+//   [CMD (1B)] [Data0 (2B)] [CRC0 (2B)] [Data1 (2B)] [CRC1 (2B)] ... [ConnID (2B)]
+//
+// - Command byte first
+// - Safe data in 2-byte chunks, each followed by its own CRC-16
+// - If safe data length is odd, the last chunk is 1 byte + 1 padding byte, then CRC
+// - Connection ID (2 bytes) at the very end of the frame
+// - CRC-16 Safety polynomial 0x139B7 (16-bit: 0x39B7), initial value 0x0000
+// - Minimum frame: CMD(1) + ConnID(2) = 3 bytes (no safe data)
+//
 
 #pragma pack(push, 1)
 
-/**
- * @brief FSoE frame header
- */
-struct FSoEHeader {
-    uint8_t  command;         // FSoE command code
-    uint8_t  conn_id_low;     // Connection ID low byte
-    uint8_t  conn_id_high;    // Connection ID high byte
-    // Followed by safety data and CRC
-};
-
-/**
- * @brief FSoE safety data frame (1 byte)
- */
-struct FSoEData1 {
-    FSoEHeader header;
-    uint8_t    data;          // 1 byte safety data
-    uint16_t   crc;           // CRC-16
-};
-
-/**
- * @brief FSoE safety data frame (2 bytes)
- */
-struct FSoEData2 {
-    FSoEHeader header;
-    uint8_t    data[2];       // 2 bytes safety data
-    uint16_t   crc;
-};
-
-/**
- * @brief FSoE safety data frame (4 bytes)
- */
-struct FSoEData4 {
-    FSoEHeader header;
-    uint8_t    data[4];       // 4 bytes safety data
-    uint16_t   crc;
-};
-
-/**
- * @brief FSoE safety data frame (8 bytes)
- */
-struct FSoEData8 {
-    FSoEHeader header;
-    uint8_t    data[8];       // 8 bytes safety data
-    uint16_t   crc;
-};
-
-/**
- * @brief FSoE safety data frame (16 bytes)
- */
-struct FSoEData16 {
-    FSoEHeader header;
-    uint8_t    data[16];      // 16 bytes safety data
-    uint16_t   crc;
-};
-
-/**
- * @brief FSoE session reset frame
- */
-struct FSoESessionReset {
-    FSoEHeader header;
-    uint16_t   session_id;
-    uint16_t   crc;
-};
-
-/**
- * @brief FSoE connection frame
- */
-struct FSoEConnectionFrame {
-    FSoEHeader header;
-    uint16_t   conn_id;
-    uint16_t   slave_addr;
-    uint8_t    sl_param_crc;
-    uint8_t    reserved;
-    uint16_t   crc;
-};
-
-// Backwards compatibility: old name
-// using FSoEConnection = FSoEConnectionFrame;
-
-/**
- * @brief FSoE parameter frame
- */
-struct FSoEParameter {
-    FSoEHeader header;
-    uint16_t   param_id;
-    uint32_t   param_value;
-    uint16_t   crc;
-};
-
-/**
- * @brief FSoE fail-safe values frame
- */
-struct FSoEFailSafe {
-    FSoEHeader header;
-    uint8_t    fail_safe_data[8];  // Fail-safe output values
-    uint16_t   crc;
+/// FSoE frame command byte (first byte of every frame)
+struct FSoEFrameHeader {
+    uint8_t command;  // FSoE command code
 };
 
 #pragma pack(pop)
+
+/// Maximum number of 2-byte safe data chunks in a frame
+constexpr size_t MAX_SAFE_DATA_CHUNKS = 8;
+
+/// Maximum safe data payload size (bytes)
+constexpr size_t MAX_SAFE_DATA_SIZE = MAX_SAFE_DATA_CHUNKS * 2;
+
+/// Minimum FSoE frame size: CMD(1) + ConnID(2) = 3 bytes
+constexpr size_t MIN_FSOE_FRAME_SIZE = 3;
+
+/// Compute the total frame size for a given safe data payload length.
+/// Frame = CMD(1) + ceil(dataLen/2) * (2+2) + ConnID(2)
+inline constexpr size_t fsoeFrameSize(size_t data_len) {
+    size_t chunks = (data_len + 1) / 2;  // round up
+    return 1 + chunks * 4 + 2;           // CMD + chunks*(data+CRC) + ConnID
+}
+
+/// Compute the safe data payload length from a total frame size.
+inline constexpr size_t fsoeDataLen(size_t frame_size) {
+    if (frame_size < MIN_FSOE_FRAME_SIZE) return 0;
+    size_t remaining = frame_size - 1 - 2;  // subtract CMD and ConnID
+    size_t chunks = remaining / 4;           // each chunk is 4 bytes (2 data + 2 CRC)
+    return chunks * 2;                       // each chunk carries 2 data bytes
+}
 
 // ============================================================================
 // Safety I/O Types
@@ -246,6 +187,17 @@ namespace ConfigParam {
 }
 
 // ============================================================================
+// Validation Limits (ETG.5100 / Object 0x6791)
+// ============================================================================
+
+namespace Limits {
+    constexpr uint16_t WatchdogTimeoutMin   = 10;      // ms (vendor-specific, e.g. Synapticon uses 15ms)
+    constexpr uint16_t WatchdogTimeoutMax   = 60000;   // ms
+    constexpr uint16_t SafetyAddressMin     = 1;       // 0 is invalid
+    constexpr uint16_t SafetyAddressMax     = 65535;
+}
+
+// ============================================================================
 // Safety Process Data Objects
 // ============================================================================
 
@@ -291,6 +243,18 @@ struct ConnectionStats {
     uint32_t watchdog_events;
     uint64_t uptime_ms;
     uint64_t last_comm_time_ms;
+
+    void reset() {
+        frames_sent = 0;
+        frames_received = 0;
+        crc_errors = 0;
+        sequence_errors = 0;
+        timeout_events = 0;
+        reset_events = 0;
+        watchdog_events = 0;
+        uptime_ms = 0;
+        last_comm_time_ms = 0;
+    }
 };
 
 } // namespace FSoE

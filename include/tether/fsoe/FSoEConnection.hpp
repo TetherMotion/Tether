@@ -64,7 +64,7 @@ struct ConnectionStatus {
     uint64_t last_valid_frame_ms = 0;
     
     bool isOperational() const { return state == ConnectionState::Data; }
-    bool isFailSafe() const { return state == ConnectionState::FailSafe || fail_safe_active; }
+    bool isFailSafe() const { return fail_safe_active; }
     bool hasError() const { return state == ConnectionState::Error || error_code != ErrorCode::NoError; }
 };
 
@@ -292,12 +292,12 @@ public:
     void setDataCallback(DataCallback callback);
 
 private:
-    // State machine handlers
-    void handleResetState(const uint8_t* data, size_t len);
-    void handleSessionState(const uint8_t* data, size_t len);
-    void handleConnectionState(const uint8_t* data, size_t len);
-    void handleParameterState(const uint8_t* data, size_t len);
-    void handleDataState(const uint8_t* data, size_t len);
+    // State machine handlers (receive parsed safe data, not raw frame)
+    void handleResetState(const uint8_t* data, size_t data_len, uint8_t cmd);
+    void handleSessionState(const uint8_t* data, size_t data_len, uint8_t cmd);
+    void handleConnectionState(const uint8_t* data, size_t data_len, uint8_t cmd);
+    void handleParameterState(const uint8_t* data, size_t data_len, uint8_t cmd);
+    void handleDataState(const uint8_t* data, size_t data_len, uint8_t cmd);
     
     // Frame building
     size_t buildSessionResetFrame(uint8_t* data, size_t max_len);

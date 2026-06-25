@@ -103,7 +103,7 @@ TEST_F(FSoEFailSafeResponseTest, FailSafeDataConstant) {
 }
 
 // ============================================================================
-// Fix #4: Slave non-strict sequence validation doesn't resync
+// Fix #4: Sequence numbers removed per ETG.5100 — frames use interleaved CRC
 // ============================================================================
 
 class FSoESequenceNonStrictTest : public ::testing::Test {
@@ -120,9 +120,6 @@ protected:
         cfg.safeInputSize = 2;
         cfg.safeOutputSize = 2;
         cfg.autoRecoveryEnabled = false;
-        cfg.strictCrcCheck = true;
-        cfg.strictSequenceCheck = false;  // Non-strict mode
-        cfg.treatSequenceErrorAsCritical = false;
         slave = std::make_unique<FSoESlave>(cfg);
         slave->initialize();
     }
@@ -130,55 +127,33 @@ protected:
     std::unique_ptr<FSoESlave> slave;
 };
 
-TEST_F(FSoESequenceNonStrictTest, NonStrictAcceptsWrongSequenceWithoutResync) {
-    // Build a valid data frame with wrong sequence number
-    // Slave expects sequence 0 initially
+TEST_F(FSoESequenceNonStrictTest, FrameAcceptedWithoutSequenceField) {
+    // ETG.5100 does not define a sequence number field.
+    // Frame integrity is ensured via interleaved CRC + watchdog.
+    // Build a valid ProcessData frame with new format:
+    //   [CMD] [Data0(2B)] [CRC0(2B)] [ConnID(2B)]
+    uint8_t data[2] = {0xAA, 0x55};
     uint8_t frame[64];
-    frame[0] = Command::ProcessData;
-    frame[1] = 0x78;  // conn_id low
-    frame[2] = 0x56 | ((5 & 0x0F) << 4);  // conn_id high with seq=5 (wrong, expected 0)
-    frame[3] = 0xAA;  // data byte 1
-    frame[4] = 0x55;  // data byte 2
-    uint16_t crc = CRC::calculateFSoECRC(frame, 5);
-    frame[5] = crc & 0xFF;
-    frame[6] = (crc >> 8) & 0xFF;
+    size_t frame_len = CRC::buildFSoEFrame(frame, Command::ProcessData,
+                                            data, 2, 0x5678);
+    EXPECT_GT(frame_len, 0);
 
-    // Slave should accept the frame (non-strict) but NOT resync
-    EXPECT_TRUE(slave->processRxFrame(frame, 7));
-
-    // Now send a frame with the CORRECT expected sequence (0)
-    frame[2] = 0x56 | ((0 & 0x0F) << 4);  // seq=0 (still expected)
-    crc = CRC::calculateFSoECRC(frame, 5);
-    frame[5] = crc & 0xFF;
-    frame[6] = (crc >> 8) & 0xFF;
-
-    // Should still be accepted because expected sequence wasn't changed
-    EXPECT_TRUE(slave->processRxFrame(frame, 7));
-
-    // After accepting seq=0, expected should advance to 1
-    frame[2] = 0x56 | ((1 & 0x0F) << 4);  // seq=1
-    crc = CRC::calculateFSoECRC(frame, 5);
-    frame[5] = crc & 0xFF;
-    frame[6] = (crc >> 8) & 0xFF;
-    EXPECT_TRUE(slave->processRxFrame(frame, 7));
+    // Slave should accept the frame (no sequence check needed)
+    EXPECT_TRUE(slave->processRxFrame(frame, frame_len));
 }
 
-TEST_F(FSoESequenceNonStrictTest, NonStrictDoesNotIncrementSequenceErrors) {
+TEST_F(FSoESequenceNonStrictTest, NoSequenceErrorsCounter) {
+    // Since ETG.5100 has no sequence field, sequence errors should never increment
+    uint8_t data[2] = {0xAA, 0x55};
     uint8_t frame[64];
-    frame[0] = Command::ProcessData;
-    frame[1] = 0x78;
-    frame[2] = 0x56 | ((9 & 0x0F) << 4);  // Wrong sequence
-    frame[3] = 0xAA;
-    frame[4] = 0x55;
-    uint16_t crc = CRC::calculateFSoECRC(frame, 5);
-    frame[5] = crc & 0xFF;
-    frame[6] = (crc >> 8) & 0xFF;
+    size_t frame_len = CRC::buildFSoEFrame(frame, Command::ProcessData,
+                                            data, 2, 0x5678);
 
     auto stats_before = slave->getStats().sequenceErrors;
-    EXPECT_TRUE(slave->processRxFrame(frame, 7));
+    slave->processRxFrame(frame, frame_len);
     auto stats_after = slave->getStats().sequenceErrors;
 
-    // Non-strict mode should not increment sequence error counter
+    // No sequence errors should be recorded
     EXPECT_EQ(stats_after, stats_before);
 }
 
