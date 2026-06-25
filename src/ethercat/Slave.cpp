@@ -111,6 +111,11 @@ SlaveError Slave::configurePDOSyncManagers() {
     pdo_configured_ = true;
     TETHER_LOGI( TAG,
         "Slave %u: PDO sync-managers configured from SII", index_);
+
+    if (slave_debug_flags_.pdoSm) {
+        EtherCAT::debugPDOSyncManagerConfiguration(master_, index_, TAG);
+    }
+
     return SlaveError::Ok;
 }
 

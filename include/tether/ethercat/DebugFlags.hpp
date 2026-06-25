@@ -82,6 +82,7 @@ struct EtherCATSlaveDebugFlags {
     bool coeTxPackets = false;
     bool verifyPreOp = false;
     bool verifySafeOp = false;
+    bool pdoSm = false;
 };
 
 /**
@@ -106,6 +107,7 @@ public:
     bool coeTxPackets = false;
     bool verifyPreOp = false;
     bool verifySafeOp = false;
+    bool pdoSm = false;
 
     SlaveFilter rxPDOFilt;
     SlaveFilter txPDOFilt;
@@ -120,6 +122,7 @@ public:
     SlaveFilter coeTxPacketsFilt;
     SlaveFilter verifyPreOpFilt;
     SlaveFilter verifySafeOpFilt;
+    SlaveFilter pdoSmFilt;
 
     /**
      * @brief Compute the pre-computed flags for a single slave.
@@ -139,6 +142,7 @@ public:
         s.coeTxPackets = coeTxPackets && coeTxPacketsFilt.allows(slave_index);
         s.verifyPreOp   = verifyPreOp && verifyPreOpFilt.allows(slave_index);
         s.verifySafeOp  = verifySafeOp && verifySafeOpFilt.allows(slave_index);
+        s.pdoSm         = pdoSm && pdoSmFilt.allows(slave_index);
         return s;
     }
 

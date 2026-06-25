@@ -65,6 +65,7 @@ bool EtherCATMasterDebugFlags::isEnabled(const std::string& name, uint16_t slave
     if (name == "coe-tx-packets")    return coeTxPackets && coeTxPacketsFilt.allows(slave_index);
     if (name == "verify-preop")      return verifyPreOp && verifyPreOpFilt.allows(slave_index);
     if (name == "verify-safeop")     return verifySafeOp && verifySafeOpFilt.allows(slave_index);
+    if (name == "pdo-sm")            return pdoSm && pdoSmFilt.allows(slave_index);
     return false;
 }
 
@@ -82,6 +83,7 @@ void EtherCATMasterDebugFlags::setFlag(const std::string& name, bool enabled) {
     else if (name == "coe-tx-packets") coeTxPackets = enabled;
     else if (name == "verify-preop")   verifyPreOp = enabled;
     else if (name == "verify-safeop")  verifySafeOp = enabled;
+    else if (name == "pdo-sm")         pdoSm = enabled;
 }
 
 void EtherCATMasterDebugFlags::setFilter(const std::string& name, const SlaveFilter& filter) {
@@ -98,6 +100,7 @@ void EtherCATMasterDebugFlags::setFilter(const std::string& name, const SlaveFil
     else if (name == "coe-tx-packets") coeTxPacketsFilt = filter;
     else if (name == "verify-preop")   verifyPreOpFilt = filter;
     else if (name == "verify-safeop")  verifySafeOpFilt = filter;
+    else if (name == "pdo-sm")         pdoSmFilt = filter;
 }
 
 void EtherCATMasterDebugFlags::applyFromString(const std::string& spec,
@@ -169,6 +172,7 @@ void EtherCATMasterDebugFlags::resizeFilters(uint16_t slave_count) {
     coeTxPacketsFilt.resize(slave_count);
     verifyPreOpFilt.resize(slave_count);
     verifySafeOpFilt.resize(slave_count);
+    pdoSmFilt.resize(slave_count);
 }
 
 namespace debug {
@@ -207,6 +211,8 @@ const std::vector<DebugFlagInfo>& allDebugFlags() {
          "Dump detailed SM register verification before PRE_OP transition"},
         {"verify-safeop",
          "Dump detailed SM register verification before SAFE_OP transition"},
+        {"pdo-sm",
+         "Print detailed configuration of non-mailbox sync managers (SM2/SM3)"},
     };
     return kFlags;
 }
