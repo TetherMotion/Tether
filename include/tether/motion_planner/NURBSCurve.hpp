@@ -789,8 +789,9 @@ public:
      * @brief Create a G2-continuous NURBS blend curve between two directions
      *
      * Creates a degree-5 NURBS (equivalent to quintic Bézier) that smoothly
-     * transitions from entryPoint/entryDir to exitPoint/exitDir with zero
-     * curvature at both ends (appropriate for blending between lines).
+     * transitions from entryPoint/entryDir to exitPoint/exitDir with curvature
+     * matching at both ends (C2 continuous). Supports zero curvature (line
+     * transitions) and non-zero curvature (arc transitions).
      */
     static NURBSCurve makeG2BlendCurve(const Point& entryPoint,
                                         const Point& exitPoint,
@@ -798,47 +799,45 @@ public:
                                         const Point& exitDir,
                                         T entryCurvature = T(0),
                                         T exitCurvature = T(0)) {
-        // Quintic blend - 6 control points
-        // Construct so that:
-        //   C(0) = entryPoint, C'(0) ∥ entryDir
-        //   C(1) = exitPoint,  C'(1) ∥ exitDir
-        //   C''(0) and C''(1) controlled for G2
+        // Quintic Bézier blend - 6 control points P0..P5
+        // C2 continuity at boundaries:
+        //   C(0) = P0, C'(0) = 5*(P1-P0), C''(0) = 20*(P2-2*P1+P0)
+        //   C(1) = P5, C'(1) = 5*(P5-P4), C''(1) = 20*(P5-2*P4+P3)
+        //
+        // Curvature at t=0: κ(0) = (4/5) * |normal component of (P2-2P1+P0)| / tangentScale²
+        // For desired κ: normal offset = (5/4) * κ * tangentScale²
 
         T chordLength = entryPoint.distanceTo(exitPoint);
         if (chordLength < static_cast<T>(MathConstants::EPSILON)) {
             return makeLine(entryPoint, exitPoint);
         }
 
-        // Scale tangent vectors proportional to chord but small enough
-        // to keep control polygon inside the blend region
-        T tangentScale = chordLength * T(0.25);
+        T tangentScale = chordLength / T(5);
 
         Point P0 = entryPoint;
         Point P5 = exitPoint;
+
+        // C1: P1 along entry tangent, P4 along exit tangent
         Point P1 = P0 + entryDir * tangentScale;
         Point P4 = P5 - exitDir * tangentScale;
 
-        // Intermediate points: linear interpolation with small curvature correction
-        if (std::abs(entryCurvature) < static_cast<T>(MathConstants::EPSILON)) {
-            P1 = P0 + entryDir * tangentScale;
-        } else {
-            Point norm = perpendicular(entryDir);
-            T offset = entryCurvature * tangentScale * tangentScale / T(2);
-            P1 = P0 + entryDir * tangentScale + norm * offset;
-        }
-
-        if (std::abs(exitCurvature) < static_cast<T>(MathConstants::EPSILON)) {
-            P4 = P5 - exitDir * tangentScale;
-        } else {
-            Point norm = perpendicular(exitDir);
-            T offset = exitCurvature * tangentScale * tangentScale / T(2);
-            P4 = P5 - exitDir * tangentScale + norm * offset;
-        }
-
-        // P2, P3: for G2 zero-curvature at boundaries, these should
-        // continue along the tangent direction but converge toward midpoint
+        // C2: P2 and P3 control curvature at boundaries
+        // For zero curvature: P2 = 2*P1 - P0 (collinear), P3 = 2*P4 - P5 (collinear)
+        // For curvature κ: add normal offset = (5/4) * κ * tangentScale²
         Point P2 = P0 + entryDir * (tangentScale * T(2));
         Point P3 = P5 - exitDir * (tangentScale * T(2));
+
+        if (std::abs(entryCurvature) > static_cast<T>(MathConstants::EPSILON)) {
+            Point norm = perpendicular(entryDir);
+            T offset = (T(5) / T(4)) * entryCurvature * tangentScale * tangentScale;
+            P2 = P2 + norm * offset;
+        }
+
+        if (std::abs(exitCurvature) > static_cast<T>(MathConstants::EPSILON)) {
+            Point norm = perpendicular(exitDir);
+            T offset = (T(5) / T(4)) * exitCurvature * tangentScale * tangentScale;
+            P3 = P3 + norm * offset;
+        }
 
         // Clamped knot vector for degree 5 with 6 control points (= Bézier)
         KnotVector knots = {T(0),T(0),T(0),T(0),T(0),T(0),

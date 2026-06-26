@@ -30,6 +30,7 @@
 
 #include "MathTypes.hpp"
 #include "BezierCurve.hpp"
+#include "BlendCore.hpp"
 #include "MotionSegment.hpp"
 #include <optional>
 #include <utility>
@@ -303,39 +304,31 @@ public:
             return Curve({P0, P0, P0, P0, P0, P5});
         }
 
-        // Tangent scale for quintic: 1/5 of chord
-        T tangentScale = chordLength / T(5);
+        // Delegate to shared core
+        namespace bc = tether::blend;
+        bc::BlendVec entry{P0[0], P0[1], Dim >= 3 ? P0[2] : T(0)};
+        bc::BlendVec exit{P5[0], P5[1], Dim >= 3 ? P5[2] : T(0)};
+        bc::BlendVec entryDir{analysis.incomingDir[0], analysis.incomingDir[1],
+                              Dim >= 3 ? analysis.incomingDir[2] : T(0)};
+        bc::BlendVec exitDir{analysis.outgoingDir[0], analysis.outgoingDir[1],
+                             Dim >= 3 ? analysis.outgoingDir[2] : T(0)};
 
-        // C1: P1 along incoming tangent, P4 against outgoing tangent
-        Point P1 = P0 + analysis.incomingDir * tangentScale;
-        Point P4 = P5 - analysis.outgoingDir * tangentScale;
+        auto cp = bc::quinticC2ControlPoints(
+            entry, exit, entryDir, exitDir,
+            static_cast<double>(analysis.incomingCurvature),
+            static_cast<double>(analysis.outgoingCurvature));
 
-        // C2: curvature control scale
-        T curvatureScale = tangentScale * T(2) / T(3);
+        // Convert back to Point
+        auto toPoint = [](const bc::BlendVec& v) -> Point {
+            Point p{};
+            p[0] = static_cast<T>(v.x);
+            p[1] = static_cast<T>(v.y);
+            if constexpr (Dim >= 3) p[2] = static_cast<T>(v.z);
+            return p;
+        };
 
-        Point P2, P3;
-
-        // Entry curvature
-        if (std::abs(analysis.incomingCurvature) < T(1e-10)) {
-            // Zero curvature (line) — collinear P0-P1-P2
-            P2 = P0 + analysis.incomingDir * (tangentScale * T(2));
-        } else {
-            // Nonzero curvature (arc) — offset P2 for curvature matching
-            Point normal = perpendicular(analysis.incomingDir);
-            T offset = computeCurvatureOffset(analysis.incomingCurvature, curvatureScale);
-            P2 = P1 + analysis.incomingDir * curvatureScale + normal * offset;
-        }
-
-        // Exit curvature
-        if (std::abs(analysis.outgoingCurvature) < T(1e-10)) {
-            P3 = P5 - analysis.outgoingDir * (tangentScale * T(2));
-        } else {
-            Point normal = perpendicular(analysis.outgoingDir);
-            T offset = computeCurvatureOffset(analysis.outgoingCurvature, curvatureScale);
-            P3 = P4 - analysis.outgoingDir * curvatureScale + normal * offset;
-        }
-
-        Curve curve({P0, P1, P2, P3, P4, P5});
+        Curve curve({toPoint(cp[0]), toPoint(cp[1]), toPoint(cp[2]),
+                     toPoint(cp[3]), toPoint(cp[4]), toPoint(cp[5])});
         curve.setSourceRef(std::move(sourceRef));
         return curve;
     }
@@ -497,10 +490,6 @@ public:
     }
 
 private:
-    static T computeCurvatureOffset(T curvature, T scale) {
-        return curvature * scale * scale / T(2);
-    }
-
     static Point perpendicular(const Point& v) {
         if constexpr (Dim == 2) {
             return Point{-v[1], v[0]};
@@ -674,7 +663,8 @@ public:
             return;
         }
 
-        applyBlendFraction(analysis, bestLambda, idealRadius, idealDistance, sinHalf, config);
+        applyBlendFraction(analysis, bestLambda, idealRadius, idealDistance, sinHalf, config,
+                           maxEntry, maxExit);
         analysis.diagnostics.solverIterations = totalIterations;
         analysis.diagnostics.bestScore = static_cast<double>(bestScore);
         analysis.diagnostics.isValid = true;
@@ -739,7 +729,10 @@ private:
 
         // Curvature quality check — build candidate and test
         Analysis candidate = analysis;
-        applyBlendFraction(candidate, lambda, idealRadius, idealDistance, sinHalf, config);
+        T maxEntryEval = static_cast<T>(seg1.segmentLength * config.maxBlendFraction);
+        T maxExitEval  = static_cast<T>(seg2.segmentLength * config.maxBlendFraction);
+        applyBlendFraction(candidate, lambda, idealRadius, idealDistance, sinHalf, config,
+                          maxEntryEval, maxExitEval);
 
         T curvatureScore = T(1);
         if (candidate.canBlend && radius > T(1e-12)) {
@@ -774,18 +767,26 @@ private:
      */
     static void applyBlendFraction(Analysis& analysis, T lambda,
                                    T idealRadius, T idealDistance,
-                                   T sinHalf, const BlendConfig& config) {
+                                   T sinHalf, const BlendConfig& config,
+                                   T maxEntryDist = T(0),
+                                   T maxExitDist = T(0)) {
         (void)config;
         T distance = lambda * idealDistance;
         T radius = lambda * idealRadius;
 
+        // Clamp entry/exit independently to respect each segment's half-length
+        T entryDist = distance;
+        T exitDist = distance;
+        if (maxEntryDist > T(0)) entryDist = std::min(distance, maxEntryDist);
+        if (maxExitDist > T(0)) exitDist = std::min(distance, maxExitDist);
+
         analysis.blendRadius = radius;
         analysis.blendFraction = lambda;
-        analysis.entryDistance = distance;
-        analysis.exitDistance = distance;
+        analysis.entryDistance = entryDist;
+        analysis.exitDistance = exitDist;
 
-        analysis.blendEntry = analysis.cornerPoint - analysis.incomingDir * distance;
-        analysis.blendExit = analysis.cornerPoint + analysis.outgoingDir * distance;
+        analysis.blendEntry = analysis.cornerPoint - analysis.incomingDir * entryDist;
+        analysis.blendExit = analysis.cornerPoint + analysis.outgoingDir * exitDist;
 
         // Compute center using bisector
         if (sinHalf > T(1e-12)) {
@@ -885,7 +886,7 @@ public:
         // Compute tangent directions at junction
         if (seg1.isArc()) {
             result.incomingDir = computeArcExitTangent(seg1);
-            result.incomingCurvature = T(1) / static_cast<T>(seg1.arcRadius);
+            result.incomingCurvature = static_cast<T>(seg1.arcDirection()) / static_cast<T>(seg1.arcRadius);
         } else {
             Point p0 = extractPoint<Dim>(seg1.startPosition);
             result.incomingDir = (result.cornerPoint - p0).normalized();
@@ -894,7 +895,7 @@ public:
 
         if (seg2.isArc()) {
             result.outgoingDir = computeArcEntryTangent(seg2);
-            result.outgoingCurvature = T(1) / static_cast<T>(seg2.arcRadius);
+            result.outgoingCurvature = static_cast<T>(seg2.arcDirection()) / static_cast<T>(seg2.arcRadius);
         } else {
             Point p2 = extractPoint<Dim>(seg2.endPosition);
             result.outgoingDir = (p2 - result.cornerPoint).normalized();
