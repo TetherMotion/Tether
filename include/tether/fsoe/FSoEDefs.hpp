@@ -18,27 +18,16 @@
 namespace FSoE {
 
 // ============================================================================
-// FSoE Message Types
-// ============================================================================
-
-namespace MessageType {
-    constexpr uint8_t Data           = 0x00;  // Normal safety data
-    constexpr uint8_t SessionReset   = 0x01;  // Session reset request
-    constexpr uint8_t Parameter      = 0x02;  // Parameter transfer
-    constexpr uint8_t FailSafe       = 0x03;  // Fail-safe command
-}
-
-// ============================================================================
 // FSoE Command Codes
 // ============================================================================
 
 namespace Command {
-    constexpr uint8_t ProcessData    = 0x00;  // Normal process data
-    constexpr uint8_t Reset          = 0x36;  // Reset command
-    constexpr uint8_t Session        = 0x6A;  // Session command
-    constexpr uint8_t Connection     = 0x95;  // Connection command
-    constexpr uint8_t ParameterReq   = 0xC3;  // Parameter request
-    constexpr uint8_t ParameterResp  = 0x3C;  // Parameter response
+    constexpr uint8_t ProcessData    = 0x36;  // Process data (ETG.5100 §8.1.2)
+    constexpr uint8_t Reset          = 0x2A;  // Reset command
+    constexpr uint8_t Session        = 0x4E;  // Session command
+    constexpr uint8_t Connection     = 0x64;  // Connection command
+    constexpr uint8_t Parameter      = 0x52;  // Parameter command
+    constexpr uint8_t FailSafeData   = 0x08;  // Fail-safe data
 }
 
 // ============================================================================

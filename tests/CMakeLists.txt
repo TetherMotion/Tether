@@ -666,6 +666,7 @@ create_ethercat_test(pdo
         ethercat/test_pdo_api.cpp
         ethercat/test_pdo_to_string.cpp
         ethercat/test_sync_manager_validation.cpp
+        ethercat/test_custom_pdo_mapping.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/raw/PDOManager.cpp
         ../src/ethercat/raw/LogicalAddressManager.cpp
@@ -691,10 +692,12 @@ create_ethercat_test(protocol
         ethercat/test_ethercat_retry.cpp
         ethercat/test_ethercat_retry_smoke.cpp
         ethercat/test_host_stubs.cpp
+        ethercat/test_slave_status_poller.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/SlaveEmulator.cpp
         ../src/ethercat/raw/FoE.cpp
         ../src/ethercat/FaultDetection.cpp
+        ../src/ethercat/SlaveStatusPoller.cpp
         ../src/ethercat/WriteVerify.cpp
         ../src/ethercat/CoEManager.cpp
         ../src/ethercat/raw/PDOManager.cpp

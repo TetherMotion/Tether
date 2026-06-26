@@ -50,7 +50,7 @@ inline uint16_t calculate(const uint8_t* data, size_t len, uint16_t init_crc = k
         uint8_t index = (crc ^ data[i]) & 0xFF;
         crc = (crc >> 8) ^ crcTable[index];
     }
-    return crc ^ kInitValue;
+    return crc;
 }
 
 inline bool verify(const uint8_t* data, size_t len) {

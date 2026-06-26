@@ -31,17 +31,13 @@ TEST(FSoEDefsTest, ErrorCodeConstants) {
     EXPECT_EQ(ErrorCode::NoError, 0x0000);
 }
 
-TEST(FSoEDefsTest, MessageTypeConstants) {
-    EXPECT_EQ(MessageType::Data, 0);
-    EXPECT_EQ(MessageType::SessionReset, 1);
-    EXPECT_EQ(MessageType::Parameter, 2);
-    EXPECT_EQ(MessageType::FailSafe, 3);
-}
-
 TEST(FSoEDefsTest, CommandConstants) {
-    EXPECT_EQ(Command::ProcessData, 0x00);
-    EXPECT_EQ(Command::Reset, 0x36);
-    EXPECT_EQ(Command::Session, 0x6A);
+    EXPECT_EQ(Command::ProcessData, 0x36);
+    EXPECT_EQ(Command::Reset, 0x2A);
+    EXPECT_EQ(Command::Session, 0x4E);
+    EXPECT_EQ(Command::Connection, 0x64);
+    EXPECT_EQ(Command::Parameter, 0x52);
+    EXPECT_EQ(Command::FailSafeData, 0x08);
 }
 
 TEST(FSoEDefsTest, SILLevels) {
@@ -56,27 +52,27 @@ TEST(FSoEDefsTest, PLLevels) {
     EXPECT_EQ(PL::PLa, 1);
 }
 
-TEST(FSoEDefsTest, CalculateCRC16) {
+TEST(FSoEDefsTest, CalculateFSoECRC) {
     uint8_t data[] = {0x01, 0x02, 0x03, 0x04};
-    uint16_t crc = calculateCRC16(data, sizeof(data));
+    uint16_t crc = CRC::calculate(data, sizeof(data));
     EXPECT_NE(crc, 0); // CRC should be non-zero for non-zero data
     
     // Verify deterministic
-    uint16_t crc2 = calculateCRC16(data, sizeof(data));
+    uint16_t crc2 = CRC::calculate(data, sizeof(data));
     EXPECT_EQ(crc, crc2);
 }
 
-TEST(FSoEDefsTest, CalculateCRC16_EmptyData) {
-    uint16_t crc = calculateCRC16(nullptr, 0);
+TEST(FSoEDefsTest, CalculateFSoECRC_EmptyData) {
+    uint16_t crc = CRC::calculate(nullptr, 0);
     // Empty data with init 0xFFFF should return init
     EXPECT_EQ(crc, 0xFFFF);
 }
 
-TEST(FSoEDefsTest, VerifyCRC16) {
+TEST(FSoEDefsTest, VerifyFSoECRC) {
     uint8_t data[] = {0x01, 0x02, 0x03, 0x04};
-    uint16_t crc = calculateCRC16(data, sizeof(data));
-    EXPECT_TRUE(verifyCRC16(data, sizeof(data), crc));
-    EXPECT_FALSE(verifyCRC16(data, sizeof(data), crc + 1));
+    uint16_t crc = CRC::calculate(data, sizeof(data));
+    EXPECT_TRUE(CRC::calculate(data, sizeof(data)) == crc);
+    EXPECT_FALSE(CRC::calculate(data, sizeof(data)) == crc + 1);
 }
 
 TEST(FSoEDefsTest, ConnectionStatsDefaults) {

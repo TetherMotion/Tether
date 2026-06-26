@@ -19,6 +19,7 @@ protected:
     void SetUp() override {
         MasterConnectionConfig cfg{};
         cfg.slave_addr = 0x0001;
+        cfg.slave_safety_addr = 0x0100;
         cfg.connection_id = 0x1234;
         cfg.master_addr = 0x0100;
         cfg.watchdog_timeout_ms = 100;
