@@ -8,6 +8,7 @@
 #include "tether/ethercat/DC.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/SDOManager.hpp"
+#include "tether/ethercat/SlaveStatusPoller.hpp"
 #include "tether/ethercat/FoE.hpp"
 #include "tether/ethercat/VoE.hpp"
 #include "tether/ethercat/EoE.hpp"
@@ -100,6 +101,9 @@ bool Master::discoverSlaves()
             initSlaves(resp.wkc);
             if (faults_) {
                 faults_->init(resp.wkc);
+            }
+            if (status_poller_) {
+                status_poller_->init(resp.wkc);
             }
             return true;
         }

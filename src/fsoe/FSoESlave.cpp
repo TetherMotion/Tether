@@ -236,7 +236,7 @@ bool FSoESlave::processRxFrame(const uint8_t* data, size_t len) {
             break;
             
         case ConnectionState::Parameter:
-            if (command == Command::ParameterReq) {
+            if (command == Command::Parameter) {
                 processParameter(data, len);
             } else if (command == Command::ProcessData) {
                 // Skip parameter phase
@@ -476,14 +476,16 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
     
     // Get connection ID from header
     uint16_t connId = 0;
-    if (data[0] == Command::ProcessData) {
+    if (data[0] == Command::ProcessData || data[0] == Command::FailSafeData) {
         connId = static_cast<uint16_t>(data[1] | ((data[2] & 0x0F) << 8));
     } else {
         connId = static_cast<uint16_t>(data[1] | (data[2] << 8));
     }
     
-    // Validate connection ID (in DATA state)
-    if (state_ == ConnectionState::Data) {
+    // Validate connection ID (after connection is established)
+    if (state_ == ConnectionState::Parameter ||
+        state_ == ConnectionState::Data ||
+        state_ == ConnectionState::FailSafe) {
         if (!validateConnectionId(connId)) {
             return false;
         }
@@ -507,7 +509,7 @@ bool FSoESlave::validateCRC(const uint8_t* data, size_t len) {
 
     const uint16_t stored_crc = static_cast<uint16_t>(data[len - 2]) |
                                 (static_cast<uint16_t>(data[len - 1]) << 8);
-    if (!verifyCRC16(data, len - 2, stored_crc)) {
+    if (!CRC::verify(data, len)) {
         if (config_.strictCrcCheck) {
             handleError(ErrorCode::CRCError, config_.treatCrcErrorAsCritical);
             stats_.crcErrors++;
@@ -530,9 +532,11 @@ bool FSoESlave::validateSequence(uint8_t seqNum) {
             stats_.sequenceErrors++;
             return false;
         }
+        // Non-strict: accept frame but don't resync — preserves replay protection
+        return true;
     }
     
-    expectedSequence_ = (seqNum + 1) & 0xFF;
+    expectedSequence_ = (seqNum + 1) & 0x0F;
     return true;
 }
 
@@ -552,7 +556,7 @@ bool FSoESlave::validateConnectionId(uint16_t connId) {
 }
 
 uint16_t FSoESlave::calculateCRC(const uint8_t* data, size_t len) {
-    return calculateCRC16(data, len);
+    return CRC::calculate(data, len);
 }
 
 // ============================================================================
@@ -686,7 +690,7 @@ size_t FSoESlave::buildConnectionResponse(uint8_t* data, size_t maxLen) {
 size_t FSoESlave::buildParameterResponse(uint8_t* data, size_t maxLen) {
     if (maxLen < 7) return 0;
     
-    data[0] = Command::ParameterResp;
+    data[0] = Command::Parameter;
     data[1] = currentConnectionId_ & 0xFF;
     data[2] = (currentConnectionId_ >> 8) & 0xFF;
     data[3] = 0;  // Parameter ACK
@@ -729,7 +733,7 @@ size_t FSoESlave::buildFailSafeResponse(uint8_t* data, size_t maxLen) {
     
     if (maxLen < frameLen) return 0;
     
-    data[0] = Command::ProcessData | 0x80;  // Fail-safe flag
+    data[0] = Command::FailSafeData;  // Fail-safe data command
     data[1] = currentConnectionId_ & 0xFF;
     data[2] = ((currentConnectionId_ >> 8) & 0x0F) | ((txSequence_ & 0x0F) << 4);
     

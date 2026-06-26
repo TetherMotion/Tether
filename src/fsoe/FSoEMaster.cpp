@@ -210,11 +210,23 @@ std::string FSoEMaster::getDiagnostics() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
 
+    // Inline allOperational/anyFailSafe checks to avoid recursive mutex deadlock
+    bool all_op = !connections_.empty();
+    bool any_fs = false;
+    for (const auto& entry : connections_) {
+        if (!entry.connection || !entry.connection->isOperational()) {
+            all_op = false;
+        }
+        if (entry.connection && entry.connection->isFailSafe()) {
+            any_fs = true;
+        }
+    }
+
     std::string diag;
     diag += "FSoE Master Diagnostics:\n";
     diag += "  Connections: " + std::to_string(connections_.size()) + "\n";
-    diag += "  All Operational: " + std::string(allOperational() ? "Yes" : "No") + "\n";
-    diag += "  Any Fail-Safe: " + std::string(anyFailSafe() ? "Yes" : "No") + "\n";
+    diag += "  All Operational: " + std::string(all_op ? "Yes" : "No") + "\n";
+    diag += "  Any Fail-Safe: " + std::string(any_fs ? "Yes" : "No") + "\n";
     diag += "  Mode: " + std::string(inline_mode_ ? "Inline" : "Dedicated/Manual") + "\n";
 
     for (size_t i = 0; i < connections_.size(); ++i) {

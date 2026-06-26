@@ -39,6 +39,7 @@ class FSoESlave;
 
 struct MasterConnectionConfig {
     uint16_t slave_addr = 0;
+    uint16_t slave_safety_addr = 0;     // FSoE slave safety address
     uint16_t connection_id = 0;
     uint16_t master_addr = 0;
     uint16_t watchdog_timeout_ms = 100;

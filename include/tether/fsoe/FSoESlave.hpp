@@ -554,16 +554,4 @@ private:
 // CRC-16 Utilities (FSoE specific polynomial)
 // ============================================================================
 
-namespace CRC {
-    /**
-     * @brief Calculate FSoE CRC-16 (polynomial 0x755B)
-     */
-    uint16_t calculateFSoECRC(const uint8_t* data, size_t len);
-    
-    /**
-     * @brief Verify FSoE CRC
-     */
-    bool verifyFSoECRC(const uint8_t* data, size_t len);
-}
-
 } // namespace FSoE

@@ -59,6 +59,7 @@ struct Status {
 
 struct MainConfig {
     uint16_t slave_address = 0x0001;
+    uint16_t safety_address = 0x0001;
     uint16_t connection_id = 0x1234;
     uint16_t master_address = 0x0001;
     uint16_t watchdog_time_ms = Timing::kMinimumWatchdogTimeMs;

@@ -27,6 +27,8 @@
 
 #include "tether/drives/NexcobotESC211/NexcobotESC211Registers.hpp"
 #include "tether/drives/NexcobotESC211/NexcobotESC211PDO.hpp"
+#include "tether/drives/NexcobotESC211/Registers/FSOERx.hpp"
+#include "tether/drives/NexcobotESC211/Registers/FSOETx.hpp"
 
 // ncurses defines OK/ERR as macros; undefine them before Tether headers
 // that use Error::OK are parsed.
@@ -38,22 +40,14 @@
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/SyncManager.hpp"
 #include "tether/ethercat/PDOManager.hpp"
+#include "tether/ethercat/SlaveStatusPoller.hpp"
 #include "tether/sii/SIIReader.hpp"
 #include "tether/sii/SIIParser.hpp"
 
 #include "common/ExampleHelpers.hpp"
 #include "common/EtherCATHostSetup.hpp"
 
-// Packed TxPDO 0x1A01 (6 entries, 24 bytes — DO_Command dropped)
-struct TxPDO_1A01_Remapped {
-    uint32_t input_counter;
-    uint32_t safe_di;
-    uint32_t power_status;
-    uint32_t do_monitor;
-    uint32_t do_valu;
-    uint32_t di_valu;
-} __attribute__((packed));
-static_assert(sizeof(TxPDO_1A01_Remapped) == 24, "TxPDO_1A01_Remapped size mismatch");
+namespace Reg = EtherCAT::Drives::Registers::NexcobotESC211;
 
 static const char* TAG = "esc211_di_monitor";
 static std::atomic<bool> g_cancel{false};
@@ -330,52 +324,78 @@ int main(int argc, char** argv) {
 
     TETHER_LOGI(TAG, "Slave %d in PRE-OP", slave_idx);
 
+    // ---- AL status monitoring via SlaveStatusPoller ----
+    auto& poller = master.statusPoller();
+    poller.setPollIntervalMs(200);
+
+    // Log any transition to a lower AL state (e.g. OP -> SAFE_OP, SAFE_OP -> PRE_OP)
+    poller.registerCallback(
+        EtherCAT::StatusFilter(EtherCAT::StatusTransitionFlags::ToLowerState),
+        [](const EtherCAT::SlaveStatusEvent& ev) {
+            TETHER_LOGW(TAG, "Slave %u AL state dropped: %s -> %s (raw 0x%04X -> 0x%04X)",
+                        ev.slave_index,
+                        EtherCAT::slaveStateToString(ev.old_state),
+                        EtherCAT::slaveStateToString(ev.new_state),
+                        ev.old_al_status, ev.new_al_status);
+        });
+
+    // Log error flag set with AL_STATUS_CODE
+    poller.registerCallback(
+        EtherCAT::StatusFilter(EtherCAT::StatusTransitionFlags::ErrorSet),
+        [](const EtherCAT::SlaveStatusEvent& ev) {
+            TETHER_LOGE(TAG, "Slave %u AL error flag SET (AL_STATUS=0x%04X, "
+                             "AL_STATUS_CODE=0x%04X, state=%s)",
+                        ev.slave_index, ev.new_al_status,
+                        ev.al_status_code,
+                        EtherCAT::slaveStateToString(ev.new_state));
+        });
+
+    // Log error flag cleared
+    poller.registerCallback(
+        EtherCAT::StatusFilter(EtherCAT::StatusTransitionFlags::ErrorCleared),
+        [](const EtherCAT::SlaveStatusEvent& ev) {
+            TETHER_LOGI(TAG, "Slave %u AL error flag CLEARED (state=%s)",
+                        ev.slave_index,
+                        EtherCAT::slaveStateToString(ev.new_state));
+        });
+
+    poller.start();
+    TETHER_LOGI(TAG, "AL status poller started (interval=%u ms)", poller.pollIntervalMs());
+
     // readIdentityObject(sl);
 
-    // Explicitly write RxPDO 0x1601 mapping (OutputCounter + SAFE_DO = 8 B)
-    {
-        TETHER_LOGI(TAG, "Writing RxPDO 0x1601 mapping (2 entries, 8 B)...");
-        sl.sdoWriteU8(0x1601, 0x00, 0);              // clear count
-        sl.sdoWriteU32(0x1601, 0x01, 0x70100020);    // OutputCounter
-        sl.sdoWriteU32(0x1601, 0x02, 0x70200020);    // SAFE_DO
-        sl.sdoWriteU8(0x1601, 0x00, 2);              // set count = 2
-    }
-
-    // Remap TxPDO 0x1A01 from 7 entries (28 B) to 6 entries (24 B) to match SM3 DefaultSize.
-    // Drop DO_Command (0x6052) — not needed for DI monitoring.
-    {
-        TETHER_LOGI(TAG, "Remapping TxPDO 0x1A01 to 6 entries (24 B)...");
-        sl.sdoWriteU8(0x1A01, 0x00, 0);              // clear count
-        sl.sdoWriteU32(0x1A01, 0x01, 0x60100020);    // InputCounter
-        sl.sdoWriteU32(0x1A01, 0x02, 0x60200020);    // SAFE_DI
-        sl.sdoWriteU32(0x1A01, 0x03, 0x60300020);    // Power_Status
-        sl.sdoWriteU32(0x1A01, 0x04, 0x60400020);    // DO_Monitor
-        sl.sdoWriteU32(0x1A01, 0x05, 0x60500020);    // DO_Valu
-        sl.sdoWriteU32(0x1A01, 0x06, 0x60510020);    // DI_Valu
-        sl.sdoWriteU8(0x1A01, 0x00, 6);              // set count = 6
-    }
-
-    // Use non-FSoE PDOs: RxPDO 0x1601 (8 B) / TxPDO 0x1A01 (24 B after remap)
-    EtherCAT::Slave::SIIPDOConfig pdo_cfg;
-    pdo_cfg.rxpdo_index = EtherCAT::Drives::NexcobotESC211_pdo::RxPDO_1601.index;
-    pdo_cfg.rxpdo_size  = static_cast<uint16_t>(EtherCAT::Drives::NexcobotESC211_pdo::RxPDO_1601.size);
-    pdo_cfg.has_rxpdo   = true;
-    pdo_cfg.txpdo_index = EtherCAT::Drives::NexcobotESC211_pdo::TxPDO_1A01.index;
-    pdo_cfg.txpdo_size  = 24;
-    pdo_cfg.has_txpdo   = true;
-
-    auto reg_err = sl.registerFixedPDOs(pdo_cfg);
-    if (reg_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "Fixed PDO registration failed: %s", EtherCAT::slaveErrorToString(reg_err));
+    // Configure custom RxPDO 0x1601 (OutputCounter + SAFE_DO = 8 B)
+    auto rx_err = sl.configureCustomRxPDO(0x1601, {
+        {&Reg::FSOETx::OutputCounter},   // 0x7010, 4 bytes (Unsigned32)
+        {&Reg::FSOETx::SAFE_DO},         // 0x7020, 4 bytes (Unsigned32)
+    });
+    if (rx_err != EtherCAT::SlaveError::Ok) {
+        TETHER_LOGE(TAG, "Custom RxPDO config failed: %s", EtherCAT::slaveErrorToString(rx_err));
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 7;
     }
 
-    // MUST assign PDOs via SDO before configuring SM lengths / SAFE-OP
-    auto assign_err = sl.assignPDOs(pdo_cfg);
-    if (assign_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "PDO assignment failed: %s", EtherCAT::slaveErrorToString(assign_err));
+    // Configure custom TxPDO 0x1A01 (6 entries, 24 B — DO_Command dropped)
+    auto tx_err = sl.configureCustomTxPDO(0x1A01, {
+        {&Reg::FSOERx::InputCounter},    // 0x6010, 4 bytes
+        {&Reg::FSOERx::SAFE_DI},         // 0x6020, 4 bytes
+        {&Reg::FSOERx::PowerStatus},     // 0x6030, 4 bytes
+        {&Reg::FSOERx::DOMonitor},       // 0x6040, 4 bytes
+        {&Reg::FSOERx::DOValueActual},   // 0x6050, 4 bytes
+        {&Reg::FSOERx::DIValue},         // 0x6051, 4 bytes
+    });
+    if (tx_err != EtherCAT::SlaveError::Ok) {
+        TETHER_LOGE(TAG, "Custom TxPDO config failed: %s", EtherCAT::slaveErrorToString(tx_err));
+        master.stop();
+        Tether::Examples::shutdownHostEthernet(session);
+        return 7;
+    }
+
+    // Register PDO buffers and assign PDOs to sync managers
+    auto apply_err = sl.applyCustomPDOs();
+    if (apply_err != EtherCAT::SlaveError::Ok) {
+        TETHER_LOGE(TAG, "Apply custom PDOs failed: %s", EtherCAT::slaveErrorToString(apply_err));
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 7;
@@ -405,18 +425,10 @@ int main(int argc, char** argv) {
     auto next_time = steady_clock::now();
     uint64_t cycle = 0;
 
-    // Helper: exchange PDOs and return TxPDO pointer
-    auto getTxPDO = [&]() -> const TxPDO_1A01_Remapped* {
+    // Helper: exchange PDOs and return raw TxPDO buffer
+    auto getTxPDO = [&]() -> const uint8_t* {
         if (!master.pdo().exchangeAll()) return nullptr;
-        const auto& mapping = master.pdo().mapping();
-        for (size_t i = 0; i < mapping.entry_count(); ++i) {
-            const auto* entry = mapping.get_entry(i);
-            if (entry && entry->slave_index == static_cast<uint16_t>(slave_idx) &&
-                entry->direction == EtherCAT::PDO::PDODirection::TxPDO) {
-                return reinterpret_cast<const TxPDO_1A01_Remapped*>(entry->app_buffer);
-            }
-        }
-        return nullptr;
+        return sl.customPDOData(0x1A01);
     };
 
     if (stream_mode) {
@@ -424,13 +436,19 @@ int main(int argc, char** argv) {
         while (!g_cancel.load(std::memory_order_relaxed)) {
             const auto* tx = getTxPDO();
             if (tx) {
+                auto ic      = *sl.customPDOField<uint32_t>(0x1A01, 0);
+                auto safe_di = *sl.customPDOField<uint32_t>(0x1A01, 1);
+                auto pwr     = *sl.customPDOField<uint32_t>(0x1A01, 2);
+                auto do_mon  = *sl.customPDOField<uint32_t>(0x1A01, 3);
+                auto do_val  = *sl.customPDOField<uint32_t>(0x1A01, 4);
+                auto di_val  = *sl.customPDOField<uint32_t>(0x1A01, 5);
                 std::cout << "cycle=" << std::dec << cycle
-                          << " ic=0x" << std::hex << tx->input_counter
-                          << " safe_di=0x" << tx->safe_di
-                          << " pwr=0x" << tx->power_status
-                          << " do_mon=0x" << tx->do_monitor
-                          << " do_val=0x" << tx->do_valu
-                          << " di_val=0x" << tx->di_valu
+                          << " ic=0x" << std::hex << ic
+                          << " safe_di=0x" << safe_di
+                          << " pwr=0x" << pwr
+                          << " do_mon=0x" << do_mon
+                          << " do_val=0x" << do_val
+                          << " di_val=0x" << di_val
                           << std::dec << "\n";
                 std::cout.flush();
             } else {
@@ -458,7 +476,8 @@ int main(int argc, char** argv) {
         while (!g_cancel.load(std::memory_order_relaxed)) {
             const auto* tx = getTxPDO();
             if (tx) {
-                parseSafeDI(tx->di_valu, di_state);
+                auto di_val = sl.customPDOField<uint32_t>(0x1A01, 5);
+                parseSafeDI(di_val ? *di_val : 0, di_state);
             } else {
                 std::lock_guard<std::mutex> lock(di_state.mtx);
                 di_state.stale = true;
