@@ -32,6 +32,7 @@
 #pragma once
 
 #include "InterpolationStrategy.hpp"
+#include "BlendCoreGCodeAdapter.hpp"
 #include <cmath>
 #include <algorithm>
 #include <string>
@@ -98,7 +99,8 @@ struct G64CornerConfig {
     // Blend curve parameters
     double blendRadiusFactor = 1.0;         ///< Multiplier for blend radius
     bool useBezierBlend = true;             ///< Use Bézier curves for smooth blends
-    int bezierOrder = 3;                    ///< Bézier curve order (2=quadratic, 3=cubic)
+    int bezierOrder = 5;                    ///< Bézier curve order (2=quadratic, 3=cubic, 5=quintic C2)
+    double maxBlendFraction = 0.5;          ///< Max fraction of segment length consumed by blend
 
     // Velocity handling at corners
     bool reduceVelocityAtCorners = true;    ///< Slow down at sharp corners
@@ -491,25 +493,37 @@ public:
      * @brief Adjust blend geometry for corner mode constraints
      */
     static void adjustForConstraints(CornerAnalysis& analysis, const G64CornerConfig& config) {
-        // Adjust based on corner mode - may need to reduce radius
+        const double tolerance = InterpolationConstants::EPSILON;
+        namespace bc = tether::blend;
+
         switch (config.cornerMode) {
-            case G64CornerMode::InsideStrict:
-                // For inside strict, blend must stay completely inside
-                if (analysis.maxOutsideDeviation > 0) {
-                    // Reduce radius until deviation is zero
-                    analysis.blendRadius *= 0.9;  // Iterative approach
-                    computeBlendGeometry(analysis, config);
-                }
+            case G64CornerMode::InsideStrict: {
+                double prevRadius = analysis.blendRadius;
+                bc::iterateConstraintReduction(analysis.blendRadius,
+                    [&](double r) -> bool {
+                        if (r != prevRadius) {
+                            computeBlendGeometry(analysis, config);
+                            prevRadius = r;
+                        }
+                        return analysis.maxOutsideDeviation <= tolerance;
+                    }, 20, 0.5);
+                computeBlendGeometry(analysis, config);
                 break;
-            case G64CornerMode::OutsideStrict:
-                // For outside strict, blend must stay completely outside
-                if (analysis.maxInsideDeviation > 0) {
-                    analysis.blendRadius *= 0.9;
-                    computeBlendGeometry(analysis, config);
-                }
+            }
+            case G64CornerMode::OutsideStrict: {
+                double prevRadius = analysis.blendRadius;
+                bc::iterateConstraintReduction(analysis.blendRadius,
+                    [&](double r) -> bool {
+                        if (r != prevRadius) {
+                            computeBlendGeometry(analysis, config);
+                            prevRadius = r;
+                        }
+                        return analysis.maxInsideDeviation <= tolerance;
+                    }, 20, 0.5);
+                computeBlendGeometry(analysis, config);
                 break;
+            }
             default:
-                // Other modes handled by computeBlendGeometry
                 break;
         }
     }
@@ -796,12 +810,11 @@ private:
                 pt.isBlendPoint = true;
                 points.push_back(pt);
             }
-        } else {
-            // Cubic Bézier with computed control points for G2 continuity
+        } else if (config.bezierOrder == 3) {
+            // Cubic Bézier (C1 only) — fallback for compatibility
             Position P0 = analysis.blendEntry;
             Position P3 = analysis.blendExit;
 
-            // Control points maintain tangent direction at entry/exit
             double tangentLen = analysis.blendRadius * 0.5;
             Position P1, P2;
             for (size_t j = 0; j < 3; ++j) {
@@ -818,6 +831,29 @@ private:
                     pt.position[j] = mt*mt*mt*P0[j] + 3*mt*mt*t*P1[j] +
                                      3*mt*t*t*P2[j] + t*t*t*P3[j];
                 }
+                pt.parameter = t;
+                pt.isBlendPoint = true;
+                points.push_back(pt);
+            }
+        } else {
+            // Quintic Bézier (C2 continuous) — default for higher continuity
+            // Delegate control point computation to shared core
+            namespace bc = tether::blend;
+            bc::BlendVec entry{analysis.blendEntry[0], analysis.blendEntry[1], analysis.blendEntry[2]};
+            bc::BlendVec exit{analysis.blendExit[0], analysis.blendExit[1], analysis.blendExit[2]};
+            bc::BlendVec entryDir{analysis.incomingDir[0], analysis.incomingDir[1], analysis.incomingDir[2]};
+            bc::BlendVec exitDir{analysis.outgoingDir[0], analysis.outgoingDir[1], analysis.outgoingDir[2]};
+
+            auto cp = bc::quinticC2ControlPoints(entry, exit, entryDir, exitDir);
+
+            for (size_t i = 0; i <= numPoints; ++i) {
+                double t = static_cast<double>(i) / numPoints;
+                bc::BlendVec pos = bc::evalQuintic(cp, t);
+
+                TrajectoryPoint pt;
+                pt.position[0] = pos.x;
+                pt.position[1] = pos.y;
+                pt.position[2] = pos.z;
                 pt.parameter = t;
                 pt.isBlendPoint = true;
                 points.push_back(pt);
@@ -901,6 +937,21 @@ public:
 
             // Adjust for corner mode constraints
             CornerAnalyzer::adjustForConstraints(analysis, config_);
+
+            // Half-length constraint: clamp blend distances to maxBlendFraction
+            // of each segment's available length (shared core)
+            double halfAngle = analysis.angle / 2.0 * InterpolationConstants::PI / 180.0;
+            double maxEntryDist = seg1.segmentLength * config_.maxBlendFraction;
+            double maxExitDist  = seg2.segmentLength * config_.maxBlendFraction;
+            double clampedRadius = tether::blend::clampBlendRadius(
+                analysis.blendRadius, halfAngle, maxEntryDist, maxExitDist);
+            
+            if (clampedRadius != analysis.blendRadius) {
+                analysis.blendRadius = clampedRadius;
+                CornerAnalyzer::computeBlendGeometry(analysis, config_);
+                CornerAnalyzer::adjustForConstraints(analysis, config_);
+            }
+
             corners_.push_back(analysis);
 
             if (analysis.blendRadius <= InterpolationConstants::EPSILON) {
@@ -920,32 +971,22 @@ public:
             }
             result.push_back(truncated1);
 
-            // Add blend segment
+            // Add blend segment (Bézier curve, not arc — for C2 continuity)
             PlanningSegment blendSeg;
             blendSeg.start = analysis.blendEntry;
             blendSeg.end = analysis.blendExit;
             blendSeg.center = analysis.blendCenter;
             blendSeg.arcRadius = analysis.blendRadius;
-            blendSeg.motionType = analysis.isCW ? SegmentMotionType::ArcCW
-                                                 : SegmentMotionType::ArcCCW;
+            blendSeg.motionType = SegmentMotionType::Linear;
             blendSeg.feedRate = seg1.feedRate * config_.cornerVelocityFactor;
             blendSeg.blockIndex = seg1.blockIndex;
             blendSeg.plane = InterpolationPlane::XY;
 
-            // Compute arc sweep - the blend arc sweeps through the same angle as the corner
-            // because the arc is tangent to both incoming and outgoing directions.
-            // The arc goes from perpendicular-to-incoming to perpendicular-to-outgoing.
-            // For CCW (left turn): positive sweep equal to corner angle
-            // For CW (right turn): negative sweep equal to corner angle
-            blendSeg.arcSweep = analysis.angle * InterpolationConstants::PI / 180.0;
-            if (analysis.isCW) {
-                blendSeg.arcSweep = -blendSeg.arcSweep;
-            }
-
-            // Compute arc length and segment time
-            blendSeg.segmentLength = analysis.blendRadius * std::abs(blendSeg.arcSweep);
+            // Blend segment length: approximate as chord length
+            // (actual Bézier arc length is slightly longer but chord is a
+            // reasonable approximation for velocity planning)
+            blendSeg.segmentLength = analysis.blendEntry.linearDistance(analysis.blendExit);
             if (blendSeg.feedRate > InterpolationConstants::EPSILON) {
-                // feedRate is in mm/min, convert to mm/s for time calculation
                 double feedRatePerSec = blendSeg.feedRate / 60.0;
                 blendSeg.segmentTime = blendSeg.segmentLength / feedRatePerSec;
             } else {

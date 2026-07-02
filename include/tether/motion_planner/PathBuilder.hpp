@@ -440,16 +440,14 @@ public:
                 });
                 
                 if (config_.continuityLevel >= 2) {
-                    // Build G2 blend as NURBS (quintic)
-                    auto blendCurve = NCurve::makeG2BlendCurve(
-                        blend.analysis.blendEntry,
-                        blend.analysis.blendExit,
-                        blend.analysis.incomingDir,
-                        blend.analysis.outgoingDir,
-                        blend.analysis.incomingCurvature,
-                        blend.analysis.outgoingCurvature);
-                    blendCurve.setSourceRef(std::move(blendRef));
-                    blend.nurbsBlendCurves.push_back(std::move(blendCurve));
+                    // Build G2 blend using BlendCurveBuilder (handles outside
+                    // blends, proper C2 curvature matching, etc.)
+                    auto bezBlends = BlendBuilder::buildG2BlendCurve(
+                        blend.analysis, blendRef);
+                    for (auto& bezBlend : bezBlends) {
+                        NCurve nurbsBlend(bezBlend);
+                        blend.nurbsBlendCurves.push_back(std::move(nurbsBlend));
+                    }
                 } else if (config_.useBezier) {
                     auto bezBlend = BlendBuilder::buildG1BlendCurve(
                         blend.analysis, std::move(blendRef));
@@ -649,7 +647,7 @@ private:
             if (trimStart) {
                 T curveLength = curve.arcLength();
                 if (curveLength > T(0)) {
-                    T trimLength = blendBefore->analysis.entryDistance;
+                    T trimLength = blendBefore->analysis.exitDistance;
                     startParam = std::min(trimLength / curveLength, T(0.5));
                 }
             }
@@ -657,7 +655,7 @@ private:
             if (trimEnd) {
                 T curveLength = curve.arcLength();
                 if (curveLength > T(0)) {
-                    T trimLength = blendAfter->analysis.exitDistance;
+                    T trimLength = blendAfter->analysis.entryDistance;
                     endParam = std::max(T(1) - trimLength / curveLength, T(0.5));
                 }
             }

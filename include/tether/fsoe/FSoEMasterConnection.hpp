@@ -143,11 +143,11 @@ public:
 
 private:
     // State machine handlers
-    void handleSessionState(const uint8_t* data, size_t len);
-    void handleConnectionState(const uint8_t* data, size_t len);
-    void handleParameterState(const uint8_t* data, size_t len);
-    void handleDataState(const uint8_t* data, size_t len);
-    void handleFailSafeState(const uint8_t* data, size_t len);
+    void handleSessionState(uint8_t cmd, const uint8_t* data, size_t data_len);
+    void handleConnectionState(uint8_t cmd, const uint8_t* data, size_t data_len);
+    void handleParameterState(uint8_t cmd, const uint8_t* data, size_t data_len);
+    void handleDataState(uint8_t cmd, const uint8_t* data, size_t data_len);
+    void handleFailSafeState(uint8_t cmd, const uint8_t* data, size_t data_len);
 
     // Frame building
     size_t buildSessionResetFrame(uint8_t* data, size_t max_len);
@@ -160,7 +160,6 @@ private:
     bool validateCRC(const uint8_t* data, size_t len) const;
     bool validateSequence(uint8_t seq);
     bool validateConnectionID(uint16_t conn_id) const;
-    uint16_t extractConnectionID(const uint8_t* data, size_t len) const;
 
     // State transitions
     void transitionTo(uint8_t new_state);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <type_traits>
 #include "tether/drives/NexcobotESC211/Registers/Common.hpp"
 
 namespace EtherCAT {
@@ -21,6 +22,37 @@ static constexpr uint16_t SystemCurrentStateMPUBIndex   = 0xF111;
 static constexpr uint16_t SystemErrorCodeMPUBIndex      = 0xF112;
 
 // ---------------------------------------------------------------------------
+// Control command values for 0xF100:01 (Control Command)
+// ---------------------------------------------------------------------------
+
+enum class ControlCommandCode : uint32_t {
+    ResetResponseToStandby      = 0,    // Reset command response to STANDBY
+    LoadFNIFromFlash            = 1,    // Load FNI from Flash to system (0xF201)
+    LoadRSPAndSDDFromFlash      = 2,    // Load RSP and SDD from Flash to system
+    UpdateFNIFromObject         = 3,    // Update FNI from object (0xF200) to system (0xF201)
+    DownloadRSPAndSDDByObject   = 4,    // Download RSP and SDD by object (0xF210, 0xF220) to system
+    SaveFNIToFlash              = 5,    // Save FNI to Flash
+    SaveRSPAndSDDToFlash        = 6,    // Save RSP and SDD to Flash
+    ClearApplicationErrorState  = 7,    // Clear application error state (APPERR -> READY)
+    ClearLastErrorCode          = 8,    // Clear last error code object (0x104)
+    StopSafetyAppAndFSoE        = 9,    // Stop safety application and FSoE connection
+    StartFSoEAndSafetyApp       = 10,   // Start FSoE communication and safety application
+    StartFSoEConnectionOnly   = 11,   // Start FSoE connection only (for testing)
+    FlashMemoryReset            = 9001, // Flash memory reset
+};
+
+// ---------------------------------------------------------------------------
+// Command response values for 0xF100:02 (Command Response)
+// ---------------------------------------------------------------------------
+
+enum class CommandResponseCode : uint32_t {
+    Standby  = 0, // Response reset / standby
+    Ongoing  = 1, // Command execution in progress
+    Done     = 2, // Command completed successfully
+    Failed   = 3, // Command failed
+};
+
+// ---------------------------------------------------------------------------
 // 0xF100: User Control
 // ---------------------------------------------------------------------------
 
@@ -29,11 +61,11 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry UserControlCount =
     .subindex = 0x00,
     .name = "User Control count",
     .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
-    .default_value = 2,
+    .default_value = 3,
     .unit = Unit_None,
     .options_enum = nullptr,
     .min_value = 0,
-    .max_value = 2,
+    .max_value = 3,
     .modification_mode = ModificationMode::ReadOnly,
     .effective_time = EffectiveTime::Immediately,
     .comment = "Number of entries for User Control",
@@ -46,7 +78,7 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry ControlCommand = {
     .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned32,
     .default_value = 0,
     .unit = Unit_None,
-    .options_enum = nullptr,
+    .options_enum = std::type_identity<ControlCommandCode>{},
     .min_value = 0,
     .max_value = 0xFFFFFFFF,
     .modification_mode = ModificationMode::DuringOperation,
@@ -61,12 +93,27 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry CommandResponse = 
     .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned32,
     .default_value = 0,
     .unit = Unit_None,
-    .options_enum = nullptr,
+    .options_enum = std::type_identity<CommandResponseCode>{},
     .min_value = 0,
     .max_value = 0xFFFFFFFF,
     .modification_mode = ModificationMode::ReadOnly,
     .effective_time = EffectiveTime::Immediately,
     .comment = "User command response",
+};
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry ResponseErrorCode = {
+    .index = UserControlIndex,
+    .subindex = 0x03,
+    .name = "Response Error Code",
+    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned32,
+    .default_value = 0,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 0xFFFFFFFF,
+    .modification_mode = ModificationMode::ReadOnly,
+    .effective_time = EffectiveTime::Immediately,
+    .comment = "Response error code",
 };
 
 // ---------------------------------------------------------------------------
@@ -346,6 +393,7 @@ inline const RegisterList kRegisterList = {
     &UserControlCount,
     &ControlCommand,
     &CommandResponse,
+    &ResponseErrorCode,
     &SystemCurrentState,
     &SystemErrorCode,
     &SystemErrorMessage,

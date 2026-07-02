@@ -195,6 +195,7 @@ set(MOTION_PLANNER_BLEND_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/RegressionTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/VelocityProfilerTest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/DebugSCurveTest.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/BlendVisualRegressionTests.cpp"
 )
 set(MOTION_PLANNER_INTEGRATION_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/MotionPlannerIntegrationTest.cpp"
