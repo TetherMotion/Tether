@@ -141,6 +141,9 @@ public:
     void setDiagEnabled(bool enabled) { diag_enabled_.store(enabled); }
     bool isDiagEnabled() const { return diag_enabled_.load(); }
 
+    void setBehaviourOptions(const BehaviourOptions& opts) { behaviour_options_ = opts; }
+    const BehaviourOptions& behaviourOptions() const { return behaviour_options_; }
+
     // ----- Debug flags -----
 
     /** @brief Update the per-slave debug flags distributed by the master. */
@@ -159,6 +162,14 @@ public:
 
     bool isRequestInFlight() const { return request_in_flight_.load(); }
     void clearRequestInFlight() { request_in_flight_.store(false); }
+
+    bool sdoUploadWithRetry(uint16_t index, uint8_t subindex,
+                            uint8_t* out, size_t out_cap, size_t* out_len,
+                            const CoETransactionOptions& options);
+
+    bool sdoDownloadWithRetry(uint16_t index, uint8_t subindex,
+                              const uint8_t* data, size_t data_len,
+                              const CoETransactionOptions& options);
 
 private:
     struct MailboxConfig {
@@ -197,6 +208,7 @@ private:
     void storeResponse(uint32_t request_id, const SDO::SDOResponse& resp);
     bool popResponse(uint32_t request_id, SDO::SDOResponse& resp);
     uint32_t nextRequestId();
+    void logALStatusAfterRequest();
 
     uint16_t slave_index_;
     SDO::ISDOTransport& transport_;
@@ -211,6 +223,8 @@ private:
     std::atomic<bool> diag_enabled_{false};
     std::atomic<bool> initialized_{false};
     std::atomic<bool> request_in_flight_{false};
+
+    BehaviourOptions behaviour_options_;
 
     EtherCATSlaveDebugFlags debug_flags_;
 };

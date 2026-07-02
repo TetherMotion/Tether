@@ -359,6 +359,12 @@ public:
         return static_cast<uint64_t>(Tether::Platform::Clock::instance().getMicroseconds());
     }
 
+    bool readSlaveRegister(uint16_t slave_index, uint16_t reg_addr,
+                           void* out, uint16_t len,
+                           unsigned int timeout_ms) override {
+        return master_.readRegister(SlaveAddress(slave_index), reg_addr, out, len, timeout_ms);
+    }
+
 private:
     Master& master_;
 };

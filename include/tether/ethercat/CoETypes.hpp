@@ -89,6 +89,11 @@ struct CoETransactionOptions {
     uint32_t poll_interval_ms = 5;
     uint32_t timeout_ms = 1000;
     uint8_t priority = 0;
+    uint8_t max_retries = 3;
+};
+
+struct BehaviourOptions {
+    bool request_al_status_after_coe_requests = false;
 };
 
 // ============================================================================

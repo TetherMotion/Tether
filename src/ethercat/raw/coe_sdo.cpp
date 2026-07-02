@@ -132,6 +132,45 @@ static void mbx_drain_stale_if_present(Master& master, uint16_t adp, uint16_t mb
     }
 }
 
+static void sm_control_str(uint8_t ctrl_byte, char* buf, size_t buflen)
+{
+    const auto ctrl = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(ctrl_byte);
+    size_t pos = 0;
+
+    const char* mode = "UNKNOWN";
+    if (ctrl.mode == static_cast<uint8_t>(EtherCAT::SyncManager::SMMode::Buffered)) mode = "BUFFERED";
+    else if (ctrl.mode == static_cast<uint8_t>(EtherCAT::SyncManager::SMMode::Mailbox))  mode = "MAILBOX";
+    else if (ctrl.mode == static_cast<uint8_t>(EtherCAT::SyncManager::SMMode::ThreePDO)) mode = "THREE_PDO";
+
+    pos += snprintf(buf + pos, buflen - pos, "%s %s", mode, ctrl.direction ? "M->S" : "S->M");
+    if (ctrl.ecat_irq)   pos += snprintf(buf + pos, buflen - pos, " IRQ_ECAT");
+    if (ctrl.pdi_irq)    pos += snprintf(buf + pos, buflen - pos, " IRQ_PDI");
+    if (ctrl.watchdog)   pos += snprintf(buf + pos, buflen - pos, " WATCHDOG");
+    if (ctrl.repeat_req) pos += snprintf(buf + pos, buflen - pos, " REPEAT_REQ");
+}
+
+static void sm_status_str(uint8_t stat_byte, char* buf, size_t buflen)
+{
+    const auto stat = std::bit_cast<EtherCAT::SyncManager::SMStatusReg>(stat_byte);
+    if (stat_byte == 0) {
+        snprintf(buf, buflen, "-");
+        return;
+    }
+    size_t pos = 0;
+    if (stat.write_event)    pos += snprintf(buf + pos, buflen - pos, "WRITE_EVENT ");
+    if (stat.read_event)     pos += snprintf(buf + pos, buflen - pos, "READ_EVENT ");
+    if (stat.mailbox_full)   pos += snprintf(buf + pos, buflen - pos, "MBOX_FULL ");
+    if (stat.read_buf_full)  pos += snprintf(buf + pos, buflen - pos, "READ_BUF_FULL ");
+    if (stat.write_buf_full) pos += snprintf(buf + pos, buflen - pos, "WRITE_BUF_FULL ");
+    if (pos > 0 && buf[pos - 1] == ' ') buf[pos - 1] = '\0';
+}
+
+static void sm_activate_str(uint8_t act_byte, char* buf, size_t buflen)
+{
+    const auto act = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(act_byte);
+    snprintf(buf, buflen, "%s", act.enable ? "ENABLED" : "disabled");
+}
+
 static void mbx_diag_dump_slave_state(Master& master, uint16_t adp, uint16_t mbx_wr_addr, uint16_t mbx_rd_addr)
 {
     // Keep this lightweight and only call on errors.
@@ -163,16 +202,29 @@ static void mbx_diag_dump_slave_state(Master& master, uint16_t adp, uint16_t mbx
     const uint8_t  sm1_stat  = sm1[5];
     const uint8_t  sm1_act   = sm1[6];
 
-    TETHER_LOGE(TAG, "[SDO_DIAG] AL_STATUS=0x%04X state=%s%s | AL status code: %s (0x%04X)\n[SDO_DIAG] MBX cfg: wr=0x%04X rd=0x%04X | SM0(start=0x%04X len=%u ctrl=0x%02X stat=0x%02X act=0x%02X) SM1(start=0x%04X len=%u ctrl=0x%02X stat=0x%02X act=0x%02X)\n[SDO_DIAG] SM0 status/act: 0x%02X/0x%02X | SM1 status/act: 0x%02X/0x%02X",
+    char sm0_ctrl_desc[64];  sm_control_str(sm0_ctrl, sm0_ctrl_desc, sizeof(sm0_ctrl_desc));
+    char sm1_ctrl_desc[64];  sm_control_str(sm1_ctrl, sm1_ctrl_desc, sizeof(sm1_ctrl_desc));
+    char sm0_stat_desc[64];  sm_status_str(sm0_stat, sm0_stat_desc, sizeof(sm0_stat_desc));
+    char sm1_stat_desc[64];  sm_status_str(sm1_stat, sm1_stat_desc, sizeof(sm1_stat_desc));
+    char sm0_act_desc[16];   sm_activate_str(sm0_act, sm0_act_desc, sizeof(sm0_act_desc));
+    char sm1_act_desc[16];   sm_activate_str(sm1_act, sm1_act_desc, sizeof(sm1_act_desc));
+
+    char sm0_sa_stat_desc[64]; sm_status_str(sm0_stat_act[0], sm0_sa_stat_desc, sizeof(sm0_sa_stat_desc));
+    char sm1_sa_stat_desc[64]; sm_status_str(sm1_stat_act[0], sm1_sa_stat_desc, sizeof(sm1_sa_stat_desc));
+    char sm0_sa_act_desc[16];  sm_activate_str(sm0_stat_act[1], sm0_sa_act_desc, sizeof(sm0_sa_act_desc));
+    char sm1_sa_act_desc[16];  sm_activate_str(sm1_stat_act[1], sm1_sa_act_desc, sizeof(sm1_sa_act_desc));
+
+    TETHER_LOGE(TAG, "[SDO_DIAG] AL_STATUS=0x%04X state=%s%s | AL status code: %s (0x%04X)\n[SDO_DIAG] MBX cfg: wr=0x%04X rd=0x%04X | SM0(start=0x%04X len=%u ctrl=0x%02X [%s] stat=0x%02X act=0x%02X) SM1(start=0x%04X len=%u ctrl=0x%02X [%s] stat=0x%02X act=0x%02X)\n[SDO_DIAG] SM0 status=0x%02X [%s] act=0x%02X [%s] | SM1 status=0x%02X [%s] act=0x%02X [%s]",
                al_s,
                EtherCAT::al_status_get_state_name(al_s),
                EtherCAT::al_status_has_error(al_s) ? " ERROR" : "",
                EtherCAT::getALStatusCodeName(static_cast<EtherCAT::ALStatusCode>(al_c)),
                al_c,
                mbx_wr_addr, mbx_rd_addr,
-               sm0_start, (unsigned)sm0_len, sm0_ctrl, sm0_stat, sm0_act,
-               sm1_start, (unsigned)sm1_len, sm1_ctrl, sm1_stat, sm1_act,
-               sm0_stat_act[0], sm0_stat_act[1], sm1_stat_act[0], sm1_stat_act[1]);
+               sm0_start, (unsigned)sm0_len, sm0_ctrl, sm0_ctrl_desc, sm0_stat, sm0_act,
+               sm1_start, (unsigned)sm1_len, sm1_ctrl, sm1_ctrl_desc, sm1_stat, sm1_act,
+               sm0_stat_act[0], sm0_sa_stat_desc, sm0_stat_act[1], sm0_sa_act_desc,
+               sm1_stat_act[0], sm1_sa_stat_desc, sm1_stat_act[1], sm1_sa_act_desc);
 }
 
 static uint16_t slaveIndexFromADP(uint16_t adp) {

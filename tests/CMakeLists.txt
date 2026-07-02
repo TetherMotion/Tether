@@ -672,6 +672,7 @@ create_ethercat_test(pdo
         ../src/ethercat/raw/PDOManager.cpp
         ../src/ethercat/raw/LogicalAddressManager.cpp
         ../src/ethercat/CoEManager.cpp
+        ../src/ethercat/FaultDetection.cpp
         ../src/ethercat/utils/PDO.cpp
         ../src/ethercat/SyncManagerValidation.cpp
         ../src/fmmu/FMMUConfiguration.cpp
