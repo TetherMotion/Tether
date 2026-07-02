@@ -349,8 +349,8 @@ SlaveError Slave::transitionToSafeOp() {
     }
 
     // Confirm SAFE_OP (up to 2 s).  Some slaves need time to validate SM2/SM3.
-    for (int attempt = 0; attempt < 20; attempt++) {
-        Tether::Platform::Clock::instance().delayMilliseconds(100);
+    for (int attempt = 0; attempt < 200; attempt++) {
+        Tether::Platform::Clock::instance().delayMilliseconds(10);
         uint8_t state = 0;
         if (master_.readSlaveApplicationLayerState(index_, state)) {
             if (state == static_cast<uint8_t>(SlaveState::SAFE_OP)) {
@@ -455,8 +455,8 @@ SlaveError Slave::transitionToOp() {
     }
 
     // Confirm OP (up to 5 s).  The slave may need continuous process data.
-    for (int attempt = 0; attempt < 50; attempt++) {
-        Tether::Platform::Clock::instance().delayMilliseconds(100);
+    for (int attempt = 0; attempt < 500; attempt++) {
+        Tether::Platform::Clock::instance().delayMilliseconds(10);
         uint8_t state = 0;
         if (master_.readSlaveApplicationLayerState(index_, state)) {
             if (state == static_cast<uint8_t>(SlaveState::OP)) {
