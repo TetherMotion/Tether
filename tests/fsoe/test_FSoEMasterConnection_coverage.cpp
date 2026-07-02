@@ -296,6 +296,11 @@ TEST_F(FSoESlaveCoverageTest, Reconfigure) {
     FSoESlaveConfig newCfg{};
     newCfg.slaveAddress = 0x0002;
     newCfg.connectionId = 0x9999;
+    newCfg.safetyAddress = 0x0200;
+    newCfg.safetyLevel = SIL::SIL3;
+    newCfg.watchdogTimeoutMs = 100;
+    newCfg.connectionTimeoutMs = 2000;
+    newCfg.sessionTimeoutMs = 10000;
     newCfg.safeInputSize = 4;
     newCfg.safeOutputSize = 4;
     EXPECT_TRUE(slave->reconfigure(newCfg));

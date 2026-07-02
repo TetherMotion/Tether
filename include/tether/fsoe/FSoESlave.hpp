@@ -148,8 +148,8 @@ struct FSoESlaveConfig {
     // Behavior configuration
     bool autoRecoveryEnabled = true;   ///< Automatically recover from fail-safe
     uint32_t recoveryDelayMs = 1000;   ///< Delay before attempting recovery
-    bool strictCrcCheck = true;        ///< Reject all CRC errors
-    bool strictSequenceCheck = true;   ///< Reject sequence errors
+    bool strictCrcCheck = true;        ///< Reject all CRC errors (always enforced)
+    bool strictSequenceCheck = true;   ///< Reject sequence errors (deprecated, no-op)
     
     // Error handling
     bool treatCrcErrorAsCritical = true;
@@ -305,7 +305,7 @@ public:
     /**
      * @brief Check if in fail-safe state
      */
-    bool isFailSafe() const { return state_ == ConnectionState::FailSafe || failSafeActive_; }
+    bool isFailSafe() const { return failSafeActive_; }
     
     /**
      * @brief Check if error occurred

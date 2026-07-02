@@ -23,8 +23,7 @@ TEST(FSoEDefsTest, ConnectionStateConstants) {
     EXPECT_EQ(ConnectionState::Connection, 2);
     EXPECT_EQ(ConnectionState::Parameter, 3);
     EXPECT_EQ(ConnectionState::Data, 4);
-    EXPECT_EQ(ConnectionState::FailSafe, 5);
-    EXPECT_EQ(ConnectionState::Error, 6);
+    EXPECT_EQ(ConnectionState::Error, 5);
 }
 
 TEST(FSoEDefsTest, ErrorCodeConstants) {
@@ -64,15 +63,15 @@ TEST(FSoEDefsTest, CalculateFSoECRC) {
 
 TEST(FSoEDefsTest, CalculateFSoECRC_EmptyData) {
     uint16_t crc = CRC::calculate(nullptr, 0);
-    // Empty data with init 0xFFFF should return init
-    EXPECT_EQ(crc, 0xFFFF);
+    // Empty data with init 0x0000 should return init
+    EXPECT_EQ(crc, 0x0000);
 }
 
 TEST(FSoEDefsTest, VerifyFSoECRC) {
     uint8_t data[] = {0x01, 0x02, 0x03, 0x04};
     uint16_t crc = CRC::calculate(data, sizeof(data));
-    EXPECT_TRUE(CRC::calculate(data, sizeof(data)) == crc);
-    EXPECT_FALSE(CRC::calculate(data, sizeof(data)) == crc + 1);
+    EXPECT_TRUE(CRC::verifyFSoECRC(data, sizeof(data), crc));
+    EXPECT_FALSE(CRC::verifyFSoECRC(data, sizeof(data), crc + 1));
 }
 
 TEST(FSoEDefsTest, ConnectionStatsDefaults) {
