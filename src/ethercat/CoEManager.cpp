@@ -6,6 +6,7 @@
 #include "tether/ethercat/CoEManager.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/PDOManager.hpp"
+#include "tether/ethercat/FaultDetection.hpp"
 #include "tether/platform/Platform.hpp"
 
 #ifdef TETHER_COMPILE_MASTER
@@ -153,8 +154,105 @@ bool CoEManager::resolveMailbox(uint16_t& wr_addr, uint16_t& wr_len,
     return getMailbox(&wr_addr, &wr_len, &rd_addr, &rd_len);
 }
 
+// ============================================================================
+// Retry Wrappers
+// ============================================================================
+
+bool CoEManager::sdoUploadWithRetry(uint16_t index, uint8_t subindex,
+                                    uint8_t* out, size_t out_cap, size_t* out_len,
+                                    const CoETransactionOptions& options) {
+    uint16_t wr_addr = 0, wr_len = 0, rd_addr = 0, rd_len = 0;
+    if (!resolveMailbox(wr_addr, wr_len, rd_addr, rd_len)) {
+        TETHER_LOGE(TAG, "Slave %u: sdoUploadWithRetry: mailbox not configured", slave_index_);
+        return false;
+    }
+
+    const uint8_t max_attempts = options.max_retries + 1;
+    for (uint8_t attempt = 0; attempt < max_attempts; ++attempt) {
+        bool ok = transport_.sdoUpload(
+            slave_index_, mbxCounterPtr(),
+            wr_addr, wr_len, rd_addr, rd_len,
+            index, subindex,
+            out, out_cap, out_len,
+            diag_enabled_.load(),
+            options.poll_interval_ms, options.timeout_ms);
+
+        if (behaviour_options_.request_al_status_after_coe_requests) {
+            logALStatusAfterRequest();
+        }
+
+        if (ok) return true;
+
+        if (attempt + 1 < max_attempts) {
+            TETHER_LOGW(TAG, "Slave %u: SDO upload 0x%04X:%u failed on attempt %u/%u, retrying",
+                        slave_index_, index, subindex, attempt + 1, max_attempts);
+        }
+    }
+
+    TETHER_LOGE(TAG, "Slave %u: SDO upload 0x%04X:%u failed after %u attempts",
+                slave_index_, index, subindex, max_attempts);
+    return false;
+}
+
+bool CoEManager::sdoDownloadWithRetry(uint16_t index, uint8_t subindex,
+                                      const uint8_t* data, size_t data_len,
+                                      const CoETransactionOptions& options) {
+    uint16_t wr_addr = 0, wr_len = 0, rd_addr = 0, rd_len = 0;
+    if (!resolveMailbox(wr_addr, wr_len, rd_addr, rd_len)) {
+        TETHER_LOGE(TAG, "Slave %u: sdoDownloadWithRetry: mailbox not configured", slave_index_);
+        return false;
+    }
+
+    const uint8_t max_attempts = options.max_retries + 1;
+    for (uint8_t attempt = 0; attempt < max_attempts; ++attempt) {
+        bool ok = transport_.sdoDownload(
+            slave_index_, mbxCounterPtr(),
+            wr_addr, wr_len, rd_addr, rd_len,
+            index, subindex,
+            data, data_len,
+            diag_enabled_.load(),
+            options.poll_interval_ms, options.timeout_ms);
+
+        if (behaviour_options_.request_al_status_after_coe_requests) {
+            logALStatusAfterRequest();
+        }
+
+        if (ok) return true;
+
+        if (attempt + 1 < max_attempts) {
+            TETHER_LOGW(TAG, "Slave %u: SDO download 0x%04X:%u failed on attempt %u/%u, retrying",
+                        slave_index_, index, subindex, attempt + 1, max_attempts);
+        }
+    }
+
+    TETHER_LOGE(TAG, "Slave %u: SDO download 0x%04X:%u failed after %u attempts",
+                slave_index_, index, subindex, max_attempts);
+    return false;
+}
+
 uint8_t* CoEManager::mbxCounterPtr() {
     return &mbx_.mbx_counter;
+}
+
+void CoEManager::logALStatusAfterRequest() {
+    uint16_t al_status = 0;
+    uint16_t al_code = 0;
+
+    if (!transport_.readSlaveRegister(slave_index_, 0x0130, &al_status, sizeof(al_status), 200)) {
+        TETHER_LOGW(TAG, "Slave %u: post-SDO AL_STATUS read FAILED", slave_index_);
+        return;
+    }
+    if (!transport_.readSlaveRegister(slave_index_, 0x0134, &al_code, sizeof(al_code), 200)) {
+        al_code = 0;
+    }
+
+    TETHER_LOGI(TAG, "Slave %u: post-SDO AL_STATUS=0x%04X (%s)%s | AL status code: %s (0x%04X)",
+                slave_index_,
+                al_status,
+                al_status_get_state_name(al_status),
+                al_status_has_error(al_status) ? " ERROR" : "",
+                getALStatusCodeName(al_code),
+                al_code);
 }
 
 // ============================================================================
@@ -418,28 +516,20 @@ void CoEManager::workerLoop() {
                 lock.unlock();
 
                 auto& txn = entry.txn;
-                uint16_t wr_addr = 0, wr_len = 0, rd_addr = 0, rd_len = 0;
-                if (!resolveMailbox(wr_addr, wr_len, rd_addr, rd_len)) {
-                    txn.promise.set_value(std::unexpected(CoEError::NotConfigured));
-                } else {
-                    if (request_in_flight_.exchange(true)) {
-                        TETHER_LOGW(TAG, "Slave %u: CoE write started while previous request in flight — stale response possible",
-                                    slave_index_);
-                    }
-                    bool ok = transport_.sdoDownload(
-                        slave_index_, mbxCounterPtr(),
-                        wr_addr, wr_len, rd_addr, rd_len,
-                        txn.index, txn.subindex,
-                        txn.data.data(), txn.data.size(),
-                        diag_enabled_.load(),
-                        txn.options.poll_interval_ms, txn.options.timeout_ms);
-                    request_in_flight_.store(false);
+                if (request_in_flight_.exchange(true)) {
+                    TETHER_LOGW(TAG, "Slave %u: CoE write started while previous request in flight — stale response possible",
+                                slave_index_);
+                }
+                bool ok = sdoDownloadWithRetry(
+                    txn.index, txn.subindex,
+                    txn.data.data(), txn.data.size(),
+                    txn.options);
+                request_in_flight_.store(false);
 
-                    if (ok) {
-                        txn.promise.set_value({});
-                    } else {
-                        txn.promise.set_value(std::unexpected(CoEError::TransportError));
-                    }
+                if (ok) {
+                    txn.promise.set_value({});
+                } else {
+                    txn.promise.set_value(std::unexpected(CoEError::TransportError));
                 }
                 did_work = true;
             }
@@ -500,22 +590,13 @@ uint32_t CoEManager::nextRequestId() {
 
 template<typename T>
 void CoEReadTransactionImpl<T>::execute(CoEManager& mgr) {
-    uint16_t wr_addr = 0, wr_len = 0, rd_addr = 0, rd_len = 0;
-    if (!mgr.resolveMailbox(wr_addr, wr_len, rd_addr, rd_len)) {
-        txn_.promise.set_value(std::unexpected(CoEError::NotConfigured));
-        return;
-    }
-
     std::vector<uint8_t> buf(1500);
     size_t out_len = 0;
 
-    bool ok = mgr.transport().sdoUpload(
-        mgr.slaveIndex(), mgr.mbxCounterPtr(),
-        wr_addr, wr_len, rd_addr, rd_len,
+    bool ok = mgr.sdoUploadWithRetry(
         txn_.index, txn_.subindex,
         buf.data(), buf.size(), &out_len,
-        mgr.isDiagEnabled(),
-        txn_.options.poll_interval_ms, txn_.options.timeout_ms);
+        txn_.options);
 
     if (!ok) {
         txn_.promise.set_value(std::unexpected(CoEError::TransportError));
@@ -535,22 +616,13 @@ void CoEReadTransactionImpl<T>::execute(CoEManager& mgr) {
 // Specialization for std::vector<uint8_t> — used by the raw-buffer readSync overload
 template<>
 void CoEReadTransactionImpl<std::vector<uint8_t>>::execute(CoEManager& mgr) {
-    uint16_t wr_addr = 0, wr_len = 0, rd_addr = 0, rd_len = 0;
-    if (!mgr.resolveMailbox(wr_addr, wr_len, rd_addr, rd_len)) {
-        txn_.promise.set_value(std::unexpected(CoEError::NotConfigured));
-        return;
-    }
-
     std::vector<uint8_t> buf(1500);
     size_t out_len = 0;
 
-    bool ok = mgr.transport().sdoUpload(
-        mgr.slaveIndex(), mgr.mbxCounterPtr(),
-        wr_addr, wr_len, rd_addr, rd_len,
+    bool ok = mgr.sdoUploadWithRetry(
         txn_.index, txn_.subindex,
         buf.data(), buf.size(), &out_len,
-        mgr.isDiagEnabled(),
-        txn_.options.poll_interval_ms, txn_.options.timeout_ms);
+        txn_.options);
 
     if (!ok) {
         txn_.promise.set_value(std::unexpected(CoEError::TransportError));

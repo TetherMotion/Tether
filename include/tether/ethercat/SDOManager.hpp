@@ -308,6 +308,26 @@ public:
      * @brief Get current monotonic time in microseconds
      */
     virtual uint64_t getMicroseconds() = 0;
+
+    /**
+     * @brief Read an ESC register from a slave (e.g. AL_STATUS 0x0130)
+     *
+     * Default implementation returns false. Concrete transports override
+     * to provide actual register access.
+     *
+     * @param slave_index  Zero-based slave index
+     * @param reg_addr     ESC register address (e.g. 0x0130)
+     * @param out          Output buffer
+     * @param len          Number of bytes to read
+     * @param timeout_ms   Read timeout in milliseconds
+     * @return true on success
+     */
+    virtual bool readSlaveRegister(uint16_t slave_index, uint16_t reg_addr,
+                                   void* out, uint16_t len,
+                                   unsigned int timeout_ms = 200) {
+        (void)slave_index; (void)reg_addr; (void)out; (void)len; (void)timeout_ms;
+        return false;
+    }
 };
 
 // ============================================================================
