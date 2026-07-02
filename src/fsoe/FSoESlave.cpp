@@ -462,7 +462,7 @@ void FSoESlave::applyFailSafeOutputs() {
 // ============================================================================
 
 bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
-    if (len < MIN_FSOE_FRAME_SIZE) {
+    if (len < CRC::MIN_FSOE_FRAME_SIZE) {
         handleError(ErrorCode::DataLengthError, false);
         stats_.dataLengthErrors++;
         return false;
@@ -704,7 +704,7 @@ size_t FSoESlave::buildSessionResponse(uint8_t* data, size_t maxLen) {
     uint8_t payload[2];
     payload[0] = sessionId_ & 0xFF;
     payload[1] = (sessionId_ >> 8) & 0xFF;
-    size_t needed = fsoeFrameSize(2);
+    size_t needed = CRC::fsoeFrameSize(2);
     if (maxLen < needed) return 0;
     return CRC::buildFSoEFrame(data, Command::Session, payload, 2, config_.connectionId);
 }
@@ -716,7 +716,7 @@ size_t FSoESlave::buildConnectionResponse(uint8_t* data, size_t maxLen) {
     payload[1] = (config_.safetyAddress >> 8) & 0xFF;
     payload[2] = config_.safetyLevel;
     payload[3] = 0;  // Reserved
-    size_t needed = fsoeFrameSize(4);
+    size_t needed = CRC::fsoeFrameSize(4);
     if (maxLen < needed) return 0;
     return CRC::buildFSoEFrame(data, Command::Connection, payload, 4, currentConnectionId_);
 }
@@ -724,13 +724,13 @@ size_t FSoESlave::buildConnectionResponse(uint8_t* data, size_t maxLen) {
 size_t FSoESlave::buildParameterResponse(uint8_t* data, size_t maxLen) {
     // Parameter response: CMD + param_ack (2B) + ConnID (2B)
     uint8_t payload[2] = {0, 0};  // Parameter ACK
-    size_t needed = fsoeFrameSize(2);
+    size_t needed = CRC::fsoeFrameSize(2);
     if (maxLen < needed) return 0;
     return CRC::buildFSoEFrame(data, Command::Parameter, payload, 2, currentConnectionId_);
 }
 
 size_t FSoESlave::buildDataResponse(uint8_t* data, size_t maxLen) {
-    size_t needed = fsoeFrameSize(config_.safeInputSize);
+    size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
     return CRC::buildFSoEFrame(data, Command::ProcessData,
                                safeInputs_.data(), config_.safeInputSize,
@@ -749,7 +749,7 @@ size_t FSoESlave::buildFailSafeResponse(uint8_t* data, size_t maxLen) {
     payload[config_.safeInputSize] = lastError_ & 0xFF;
     payload[config_.safeInputSize + 1] = (lastError_ >> 8) & 0xFF;
 
-    size_t needed = fsoeFrameSize(payload_len);
+    size_t needed = CRC::fsoeFrameSize(payload_len);
     if (maxLen < needed) return 0;
     return CRC::buildFSoEFrame(data, Command::FailSafeData,
                                payload, payload_len, currentConnectionId_);
