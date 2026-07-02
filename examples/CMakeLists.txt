@@ -160,4 +160,9 @@ else()
                    "(tether_ui_backend, controlme_ui_backend)")
 endif()
 
+# --- Generic EtherCAT Slave Emulator Example ---
+# Emulates a generic EtherCAT slave on a real network interface using SlaveCore
+add_tether_example(slave_emulator
+    LIBRARIES tether_ethercat_slave tether_ethercat_common tether_hal tether_common tether_examples_common)
+
 message(STATUS "Examples configured")
