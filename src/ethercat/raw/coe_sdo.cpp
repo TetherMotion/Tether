@@ -563,9 +563,23 @@ bool coe_sdo_upload(
             if (r_service != EC_COES_SDORES) {
                 if (!logged_mbx_mismatch) {
                     logged_mbx_mismatch = true;
-                    char tmp[96];
-                    snprintf(tmp, sizeof(tmp), "CoE mismatch: want svc=%u got num=%u svc=%u raw=0x%04x", EC_COES_SDORES,
-                             r_number, r_service, r_coe_raw);
+                    const char* svc_name = "Unknown";
+                    switch (r_service) {
+                        case 0x00: svc_name = "Emergency (0x0)"; break;
+                        case 0x01: svc_name = "EMail (0x1)"; break;
+                        case 0x02: svc_name = "SDO Request (0x2)"; break;
+                        case 0x03: svc_name = "SDO Response (0x3)"; break;
+                        case 0x04: svc_name = "TxPDO (0x4)"; break;
+                        case 0x05: svc_name = "RxPDO (0x5)"; break;
+                        case 0x06: svc_name = "TxPDO RR (0x6)"; break;
+                        case 0x07: svc_name = "RxPDO RR (0x7)"; break;
+                        default:   break;
+                    }
+                    char tmp[160];
+                    snprintf(tmp, sizeof(tmp),
+                             "Expected SDO Response (CoE service 0x3) but received %s "
+                             "[ CoE header=0x%04X service=0x%X number=%u ]",
+                             svc_name, r_coe_raw, r_service, r_number);
                     TETHER_LOGI(TAG, "%s", tmp);
 #ifdef TETHER_DIAG_SDO_IO
                     if (diag_enabled) {

@@ -246,13 +246,15 @@ void CoEManager::logALStatusAfterRequest() {
         al_code = 0;
     }
 
-    TETHER_LOGI(TAG, "Slave %u: post-SDO AL_STATUS=0x%04X (%s)%s | AL status code: %s (0x%04X)",
-                slave_index_,
-                al_status,
-                al_status_get_state_name(al_status),
-                al_status_has_error(al_status) ? " ERROR" : "",
-                getALStatusCodeName(al_code),
-                al_code);
+    if (al_status_has_error(al_status) || al_code != 0) {
+        TETHER_LOGE(TAG, "Slave %u: post-SDO AL_STATUS=0x%04X (%s)%s | AL status code: %s (0x%04X)",
+                    slave_index_,
+                    al_status,
+                    al_status_get_state_name(al_status),
+                    al_status_has_error(al_status) ? " ERROR" : "",
+                    getALStatusCodeName(al_code),
+                    al_code);
+    }
 }
 
 // ============================================================================
