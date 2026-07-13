@@ -165,4 +165,10 @@ endif()
 add_tether_example(slave_emulator
     LIBRARIES tether_ethercat_slave tether_ethercat_common tether_hal tether_common tether_examples_common)
 
+# --- Kinco RP20 I/O module initialization demo ---
+# Auto-discovers RP20 I/O modules across all slaves/slots, initializes via CoE,
+# and runs a cyclic I/O loop
+add_tether_example(kinco_rp20_io
+    LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common tether_examples_common)
+
 message(STATUS "Examples configured")
