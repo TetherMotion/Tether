@@ -116,19 +116,35 @@ static void diag_hexdump(const uint8_t *data, size_t len, size_t max_print = 64)
 // Note: we must NOT write to SM1 (the slave's transmit mailbox) — the ESC
 // rejects PWR to a read-direction sync manager with wkc=0.  Reading the
 // stale data is sufficient to clear the mailbox full flag.
-static void mbx_drain_stale_if_present(Master& master, uint16_t adp, uint16_t mbx_read_addr, uint16_t mbx_read_len)
+//
+// This function loops to drain ALL pending stale responses, not just one.
+// The slave may have multiple queued responses from previously timed-out
+// requests.  Each read from SM1 clears the mailbox full flag, allowing the
+// slave to write the next queued response.  We keep draining until SM1 is
+// no longer full or we hit the max drain limit.
+static void mbx_drain_all_stale(Master& master, uint16_t adp,
+                                uint16_t mbx_read_addr, uint16_t mbx_read_len,
+                                unsigned int max_drain = 16)
 {
-    uint8_t sm1_status = 0;
-    if (master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(1), sm1_status, 100)) {
-        if ((sm1_status & EC_SM_STATUS_MBXFULL) != 0) {
-            TETHER_LOGW(TAG, "Stale mailbox data detected (SM1 full, adp=0x%04X). Draining before new SDO request. Consider increasing the SDO timeout.", adp);
-            uint8_t drain_buf[256] = {0};
-            uint16_t drain_len = mbx_read_len;
-            if (drain_len > sizeof(drain_buf)) {
-                drain_len = static_cast<uint16_t>(sizeof(drain_buf));
-            }
-            (void)master.readRegister(Master::slaveAddressFromADP(adp), mbx_read_addr, drain_buf, drain_len, 200);
+    for (unsigned int i = 0; i < max_drain; ++i) {
+        uint8_t sm1_status = 0;
+        if (!master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(1), sm1_status, 100)) {
+            break;
         }
+        if ((sm1_status & EC_SM_STATUS_MBXFULL) == 0) {
+            break;
+        }
+        if (i == 0) {
+            TETHER_LOGW(TAG, "Stale mailbox data detected (SM1 full, adp=0x%04X). Draining before new SDO request.",
+                        adp);
+        }
+        uint8_t drain_buf[256] = {0};
+        uint16_t drain_len = mbx_read_len;
+        if (drain_len > sizeof(drain_buf)) {
+            drain_len = static_cast<uint16_t>(sizeof(drain_buf));
+        }
+        (void)master.readRegister(Master::slaveAddressFromADP(adp), mbx_read_addr, drain_buf, drain_len, 200);
+        TETHER_LOGW(TAG, "Drained stale mailbox data #%u (adp=0x%04X)", i + 1, adp);
     }
 }
 
@@ -463,7 +479,7 @@ bool coe_sdo_upload(
         }
 #endif
 
-        (void)mbx_drain_stale_if_present(master, adp, mbx_read_addr, mbx_read_len);
+        (void)mbx_drain_all_stale(master, adp, mbx_read_addr, mbx_read_len);
 
         // IMPORTANT: actually write the upload request into the slave RX mailbox.
         // This used to be missing, causing all SDO reads to fail silently.
@@ -501,10 +517,40 @@ bool coe_sdo_upload(
         bool logged_any_mbx = false;
         bool logged_mbx_mismatch = false;
         bool got_init_response = false;
+        // When a stale response is detected, we re-send the same request (same
+        // mailbox counter) and re-wait for SM1 to become full.  This clears the
+        // stale data and gives the slave a fresh chance to respond correctly.
+        // Limit retries to avoid infinite loops on a permanently desynced slave.
+        static constexpr int MAX_STALE_RETRIES = 8;
+        int stale_retry_count = 0;
         // Variables captured from initial upload response (kept after loop for segmented transfers)
         const uint8_t* r_sdo_bytes = nullptr;
         uint8_t sdo_cmd = 0;
         uint16_t r_len = 0;
+
+        // Helper: re-send the same SDO upload request and re-wait for SM1 full.
+        // Returns true if the re-send and SM1 wait both succeeded, false on failure.
+        // The mbxbuf already contains the correct request with the original counter.
+        auto resend_and_wait = [&]() -> bool {
+            if (!mbx_apwr_with_wkc_probe(master, adp,
+                                         mbx_write_addr,
+                                         mbx_read_addr,
+                                         mbxbuf,
+                                         static_cast<uint16_t>(mbx_write_len),
+                                         500,
+                                         nullptr)) {
+                TETHER_LOGE(TAG, "SDO upload: re-send failed after stale response (adp=0x%04X index=0x%04X:%u)",
+                            adp, index, sub);
+                return false;
+            }
+            if (!mbx_poll_sm1_full(master, adp, transaction_timeout_ms, poll_interval_ms)) {
+                TETHER_LOGE(TAG, "SDO upload: SM1 never full after re-send (adp=0x%04X index=0x%04X:%u timeout=%ums)",
+                            adp, index, sub, transaction_timeout_ms);
+                mbx_diag_dump_slave_state(master, adp, mbx_write_addr, mbx_read_addr);
+                return false;
+            }
+            return true;
+        };
         for (int attempt = 0; attempt < 50; attempt++) {
             if (master.isCancelRequested()) {
                 TETHER_LOGW(TAG, "SDO upload cancelled");
@@ -594,12 +640,15 @@ bool coe_sdo_upload(
             // Validate mailbox counter — a stale response from a previous
             // (possibly timed-out) request will have a different counter.
             if (r_cnt != expected_mbx_cnt) {
-                if (!logged_mbx_mismatch) {
-                    logged_mbx_mismatch = true;
-                    TETHER_LOGW(TAG, "Stale mailbox response: cnt=%u expected=%u (adp=0x%04X index=0x%04X:%u) — skipping",
-                                r_cnt, expected_mbx_cnt, adp, index, sub);
+                TETHER_LOGW(TAG, "Stale mailbox response: cnt=%u expected=%u (adp=0x%04X index=0x%04X:%u) — clearing and re-sending",
+                            r_cnt, expected_mbx_cnt, adp, index, sub);
+                if (++stale_retry_count <= MAX_STALE_RETRIES) {
+                    if (!resend_and_wait()) {
+                        return false;
+                    }
+                } else {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 }
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
             r_sdo_bytes = mbxbuf + sizeof(MbxHeader) + sizeof(CoeHeader);
@@ -632,12 +681,15 @@ bool coe_sdo_upload(
                 const uint16_t r_index = le16_to_host(res->index_le);
                 const uint8_t r_sub = res->sub;
                 if (r_index != index || r_sub != sub) {
-                    if (!logged_mbx_mismatch) {
-                        logged_mbx_mismatch = true;
-                        TETHER_LOGW(TAG, "Stale SDO response: idx=0x%04X:%u expected=0x%04X:%u (adp=0x%04X) — skipping",
-                                    r_index, r_sub, index, sub, adp);
+                    TETHER_LOGW(TAG, "Stale SDO response: idx=0x%04X:%u expected=0x%04X:%u (adp=0x%04X) — clearing and re-sending",
+                                r_index, r_sub, index, sub, adp);
+                    if (++stale_retry_count <= MAX_STALE_RETRIES) {
+                        if (!resend_and_wait()) {
+                            return false;
+                        }
+                    } else {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     }
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     continue;
                 }
             }
@@ -923,7 +975,7 @@ bool coe_sdo_download(
             diag_hexdump(mbxbuf, msg_len, 64);
         }
 #endif
-        (void)mbx_drain_stale_if_present(master, adp, mbx_read_addr, mbx_read_len);
+        (void)mbx_drain_all_stale(master, adp, mbx_read_addr, mbx_read_len);
 
         // Write full SM buffer to trigger ESC mailbox event (must reach last byte)
         bool used_alt = false;
@@ -952,6 +1004,32 @@ bool coe_sdo_download(
         return false;
     }
 
+    // When a stale response is detected, re-send the same request and re-wait.
+    static constexpr int MAX_STALE_RETRIES = 8;
+    int stale_retry_count = 0;
+
+    // Helper: re-send the same SDO download request and re-wait for SM1 full.
+    auto resend_and_wait = [&]() -> bool {
+        if (!mbx_apwr_with_wkc_probe(master, adp,
+                                     mbx_write_addr,
+                                     mbx_read_addr,
+                                     mbxbuf,
+                                     static_cast<uint16_t>(mbx_write_len),
+                                     500,
+                                     nullptr)) {
+            TETHER_LOGE(TAG, "SDO download: re-send failed after stale response (adp=0x%04X index=0x%04X:%u)",
+                        adp, index, sub);
+            return false;
+        }
+        if (!mbx_poll_sm1_full(master, adp, transaction_timeout_ms, poll_interval_ms)) {
+            TETHER_LOGE(TAG, "SDO download: SM1 never full after re-send (adp=0x%04X index=0x%04X:%u timeout=%ums)",
+                        adp, index, sub, transaction_timeout_ms);
+            mbx_diag_dump_slave_state(master, adp, mbx_write_addr, mbx_read_addr);
+            return false;
+        }
+        return true;
+    };
+
     // Poll mailbox read area for response
     for (int attempt = 0; attempt < 50; attempt++) {
         if (master.isCancelRequested()) {
@@ -970,7 +1048,15 @@ bool coe_sdo_download(
 
         // Validate mailbox counter — reject stale responses from previous requests.
         if (resp_cnt != expected_mbx_cnt) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            TETHER_LOGW(TAG, "Stale mailbox response (download): cnt=%u expected=%u (adp=0x%04X index=0x%04X:%u) — clearing and re-sending",
+                        resp_cnt, expected_mbx_cnt, adp, index, sub);
+            if (++stale_retry_count <= MAX_STALE_RETRIES) {
+                if (!resend_and_wait()) {
+                    return false;
+                }
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
             continue;
         }
 
@@ -1019,12 +1105,23 @@ bool coe_sdo_download(
                 SdoInitDownloadRes res{};
                 std::memcpy(&res, mbxbuf + sdo_offset, sizeof(res));
                 const uint16_t res_index = le16_to_host(res.index_le);
-                
+
                 if (res_index == index && res.sub == sub) {
                     logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbx_read_len,
                             master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
                     return true;
                 }
+                // Counter matches but index/sub doesn't — stale response.
+                TETHER_LOGW(TAG, "Stale SDO download response: idx=0x%04X:%u expected=0x%04X:%u (adp=0x%04X) — clearing and re-sending",
+                            res_index, res.sub, index, sub, adp);
+                if (++stale_retry_count <= MAX_STALE_RETRIES) {
+                    if (!resend_and_wait()) {
+                        return false;
+                    }
+                } else {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                }
+                continue;
             }
         }
 

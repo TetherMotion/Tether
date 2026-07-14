@@ -172,7 +172,7 @@ public:
             }
 
             // SM1 status read — only report full after the write has occurred
-            // (so mbx_drain_stale_if_present before the write sees SM1 empty)
+            // (so mbx_drain_all_stale before the write sees SM1 empty)
             if (ado == SM1_STATUS_ADDR && len >= 1) {
                 uint8_t val = write_happened ? EC_SM_STATUS_MBXFULL : 0x00;
                 std::memcpy(out, &val, 1);
@@ -549,6 +549,76 @@ TEST(CoeSDO, Upload_StaleThenAbort_ReturnsFalse) {
 
     EXPECT_FALSE(ok) << "SDO abort should cause upload to return false";
     EXPECT_GE(mock.mailbox_data_reads, 2);
+
+    mock.remove();
+}
+
+// ============================================================================
+// Multi-stale response tests: verify re-send and recovery
+// ============================================================================
+
+// Test that multiple stale responses are cleared via re-send and the correct
+// response is eventually accepted.  This simulates the real-world lockup
+// scenario where the slave has several queued stale responses.
+TEST(CoeSDO, Upload_MultipleStaleResponses_ClearsAndResendsUntilSuccess) {
+    EtherCAT::Master master;
+    StaleResponseMockExt mock;
+    mock.num_stale_responses = 5;   // 5 stale responses before the correct one
+    mock.stale_cnt = 7;
+    mock.stale_index = 0x1000;
+    mock.stale_sub = 0;
+    mock.final_cnt = 1;
+    mock.final_index = 0x1000;
+    mock.final_sub = 0;
+    mock.final_data = 0xCAFEBABE;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 1;
+    uint8_t outbuf[256] = {0};
+    size_t out_len = 0;
+
+    bool ok = coe_sdo_upload(master, 0x0000, &mbx_cnt,
+                             StaleResponseMockExt::MBX_WRITE_ADDR, StaleResponseMockExt::MBX_LEN,
+                             StaleResponseMockExt::MBX_READ_ADDR, StaleResponseMockExt::MBX_LEN,
+                             0x1000, 0, outbuf, sizeof(outbuf), &out_len,
+                             false, 5, 200);
+
+    EXPECT_TRUE(ok) << "Should succeed after clearing multiple stale responses via re-send";
+    EXPECT_GE(mock.mailbox_data_reads, 6) << "Should have read 5 stale + 1 correct response";
+    if (ok && out_len >= 4) {
+        uint32_t val = 0;
+        std::memcpy(&val, outbuf, 4);
+        EXPECT_EQ(val, 0xCAFEBABE);
+    }
+
+    mock.remove();
+}
+
+// Test that multiple stale download responses are cleared via re-send.
+TEST(CoeSDO, Download_MultipleStaleResponses_ClearsAndResendsUntilSuccess) {
+    EtherCAT::Master master;
+    StaleResponseMockExt mock;
+    mock.num_stale_responses = 3;
+    mock.stale_cnt = 7;
+    mock.stale_index = 0x1000;
+    mock.stale_sub = 0;
+    mock.final_cnt = 1;
+    mock.final_index = 0x1000;
+    mock.final_sub = 0;
+    mock.final_is_download = true;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 1;
+    uint8_t data[4] = {0x01, 0x02, 0x03, 0x04};
+
+    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+                               StaleResponseMockExt::MBX_WRITE_ADDR, StaleResponseMockExt::MBX_LEN,
+                               StaleResponseMockExt::MBX_READ_ADDR, StaleResponseMockExt::MBX_LEN,
+                               0x1000, 0, data, 4,
+                               false, 5, 200);
+
+    EXPECT_TRUE(ok) << "Should succeed after clearing multiple stale responses via re-send";
+    EXPECT_GE(mock.mailbox_data_reads, 4) << "Should have read 3 stale + 1 correct response";
 
     mock.remove();
 }
