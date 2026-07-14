@@ -10,6 +10,7 @@
  *   ./kinco_rp20_io              # uses eth0
  *   ./kinco_rp20_io -i enp3s0  # specify interface
  *   ./kinco_rp20_io -t 10       # run for 10 seconds
+ *   ./kinco_rp20_io --interactive  # ncurses UI for toggling outputs
  */
 
 #include <atomic>
@@ -21,6 +22,12 @@
 #include <iostream>
 #include <string>
 #include <vector>
+
+#ifdef HAVE_NCURSES
+#include <ncurses.h>
+#undef OK
+#undef ERR
+#endif
 
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
@@ -309,6 +316,253 @@ static void updateSMLengths(EtherCAT::Master& master,
 }
 
 // ============================================================================
+// Interactive ncurses UI
+// ============================================================================
+
+#ifdef HAVE_NCURSES
+
+struct OutputBit {
+    size_t module_idx;
+    size_t field_idx;
+    uint8_t bit;
+    const char* label;
+};
+
+static void initColors() {
+    if (has_colors()) {
+        start_color();
+        use_default_colors();
+        init_pair(1, COLOR_GREEN, -1);   // active ON
+        init_pair(2, COLOR_WHITE, -1);   // inactive
+        init_pair(3, COLOR_RED, -1);     // error/stale
+        init_pair(4, COLOR_CYAN, -1);    // header
+        init_pair(5, COLOR_YELLOW, -1);  // cursor
+    }
+}
+
+static void runInteractiveUI(EtherCAT::Master& master,
+                             std::vector<DiscoveredModule>& modules,
+                             std::atomic<uint64_t>& cycle_count,
+                             std::atomic<bool>& pdo_ok) {
+    // Build list of toggleable output bits across all modules
+    std::vector<OutputBit> output_bits;
+    for (size_t mi = 0; mi < modules.size(); ++mi) {
+        auto& mod = modules[mi];
+        const auto* desc = mod.descriptor;
+        if (!desc->has_rxpdo || !desc->rxpdo || mod.rx_buffer.empty()) continue;
+
+        switch (desc->type) {
+            case RP20Mod::ModuleType::DO_16_PNP:
+            case RP20Mod::ModuleType::DO_16_NPN:
+            case RP20Mod::ModuleType::Multi_DIO_8:
+            case RP20Mod::ModuleType::DR_8: {
+                for (size_t fi = 0; fi < desc->rxpdo->field_count; ++fi) {
+                    const auto* f = RP20Mod::getFieldByChannel(*desc->rxpdo, fi);
+                    if (!f) continue;
+                    uint8_t nbits = f->size * 8;
+                    for (uint8_t b = 0; b < nbits; ++b) {
+                        char buf[64];
+                        std::snprintf(buf, sizeof(buf), "%s DO.%zu.%u",
+                                      desc->name, fi, b);
+                        output_bits.push_back({mi, fi, b, ""});
+                        output_bits.back().label = strdup(buf);
+                    }
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    if (output_bits.empty()) {
+        TETHER_LOGW(TAG, "No toggleable digital outputs found for interactive mode");
+        return;
+    }
+
+    // State: which output bits are ON
+    std::vector<bool> bit_states(output_bits.size(), false);
+
+    // Initialize ncurses
+    setlocale(LC_ALL, "");
+    initscr();
+    noecho();
+    cbreak();
+    curs_set(0);
+    nodelay(stdscr, TRUE);
+    keypad(stdscr, TRUE);
+    initColors();
+
+    int cursor = 0;
+    int scroll_offset = 0;
+    const int max_rows = LINES - 8;
+
+    auto applyOutputs = [&]() {
+        for (size_t i = 0; i < output_bits.size(); ++i) {
+            auto& ob = output_bits[i];
+            auto& mod = modules[ob.module_idx];
+            const auto* f = RP20Mod::getFieldByChannel(*mod.descriptor->rxpdo, ob.field_idx);
+            if (!f) continue;
+            std::span<uint8_t> rx(mod.rx_buffer.data(), mod.rx_buffer.size());
+            RP20Mod::writeBit(rx, *f, ob.bit, bit_states[i]);
+        }
+    };
+
+    applyOutputs();
+
+    while (g_running.load()) {
+        if (!pdo_ok.load()) {
+            // Keep trying — the RT loop keeps exchanging
+        }
+
+        uint64_t cyc = cycle_count.load();
+
+        clear();
+
+        // Header
+        attron(COLOR_PAIR(4) | A_BOLD);
+        mvprintw(0, 0, "Kinco RP20 Interactive I/O  —  Cycle %llu  (%zu outputs)",
+                 static_cast<unsigned long long>(cyc), output_bits.size());
+        attroff(COLOR_PAIR(4) | A_BOLD);
+        mvprintw(1, 0, "UP/DOWN: select  SPACE: toggle  a: all on  n: all off  q: quit");
+
+        // Adjust scroll
+        if (cursor < scroll_offset) scroll_offset = cursor;
+        if (cursor >= scroll_offset + max_rows) scroll_offset = cursor - max_rows + 1;
+
+        // Output section
+        attron(A_BOLD);
+        mvprintw(3, 0, "Outputs:");
+        attroff(A_BOLD);
+
+        int y = 4;
+        int visible = 0;
+        for (size_t i = 0; i < output_bits.size(); ++i) {
+            if (static_cast<int>(i) < scroll_offset) continue;
+            if (visible >= max_rows) break;
+            visible++;
+
+            auto& ob = output_bits[i];
+            auto& mod = modules[ob.module_idx];
+
+            bool is_cursor = static_cast<int>(i) == cursor;
+            bool is_on = bit_states[i];
+
+            if (is_cursor) attron(COLOR_PAIR(5) | A_BOLD);
+            else if (is_on) attron(COLOR_PAIR(1));
+
+            mvprintw(y, 2, "[%s] %s  (s%u/slot%u)",
+                     is_on ? "ON " : "off",
+                     ob.label,
+                     mod.slave_index, mod.slot);
+
+            if (is_cursor) attroff(COLOR_PAIR(5) | A_BOLD);
+            else if (is_on) attroff(COLOR_PAIR(1));
+            y++;
+        }
+
+        // Input section
+        y++;
+        attron(A_BOLD);
+        mvprintw(y, 0, "Inputs:");
+        attroff(A_BOLD);
+        y++;
+
+        for (auto& mod : modules) {
+            const auto* desc = mod.descriptor;
+            if (!desc->has_txpdo || !desc->txpdo || mod.tx_buffer.empty()) continue;
+
+            std::span<const uint8_t> tx(mod.tx_buffer.data(), mod.tx_buffer.size());
+
+            switch (desc->type) {
+                case RP20Mod::ModuleType::DI_16:
+                case RP20Mod::ModuleType::Multi_DIO_8: {
+                    for (size_t fi = 0; fi < desc->txpdo->field_count; ++fi) {
+                        const auto* f = RP20Mod::getFieldByChannel(*desc->txpdo, fi);
+                        if (!f) continue;
+                        uint8_t val = RP20Mod::readU8(tx, *f);
+                        uint8_t nbits = f->size * 8;
+                        mvprintw(y, 2, "%s DI.%zu: ", desc->name, fi);
+                        int x = 2 + static_cast<int>(strlen(desc->name)) + 8;
+                        for (uint8_t b = 0; b < nbits; ++b) {
+                            bool on = (val >> b) & 1u;
+                            if (on) attron(COLOR_PAIR(1));
+                            mvprintw(y, x + b * 4, "%2d", b);
+                            if (on) {
+                                attron(A_BOLD);
+                                mvprintw(y, x + b * 4 + 2, "1");
+                                attroff(A_BOLD);
+                                attroff(COLOR_PAIR(1));
+                            } else {
+                                mvprintw(y, x + b * 4 + 2, "0");
+                            }
+                        }
+                        y++;
+                    }
+                    break;
+                }
+                case RP20Mod::ModuleType::AI_4:
+                case RP20Mod::ModuleType::RD_4:
+                case RP20Mod::ModuleType::TC_4:
+                case RP20Mod::ModuleType::Mixed_AIO: {
+                    for (size_t fi = 0; fi < desc->txpdo->field_count; ++fi) {
+                        const auto* f = RP20Mod::getFieldByChannel(*desc->txpdo, fi);
+                        if (!f) continue;
+                        int16_t val = RP20Mod::readI16(tx, *f);
+                        mvprintw(y, 2, "%s AI.%zu: %d", desc->name, fi, val);
+                        y++;
+                    }
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+
+        // Footer
+        if (!pdo_ok.load()) {
+            attron(COLOR_PAIR(3));
+            mvprintw(LINES - 1, 0, "[PDO EXCHANGE ERROR]");
+            attroff(COLOR_PAIR(3));
+        }
+
+        refresh();
+
+        // Handle input
+        int ch = getch();
+        if (ch == 'q' || ch == 27) {
+            g_running.store(false);
+            if (g_master) g_master->requestCancel();
+            break;
+        } else if (ch == KEY_UP || ch == 'k') {
+            if (cursor > 0) cursor--;
+        } else if (ch == KEY_DOWN || ch == 'j') {
+            if (cursor < static_cast<int>(output_bits.size()) - 1) cursor++;
+        } else if (ch == ' ' || ch == '\n') {
+            bit_states[cursor] = !bit_states[cursor];
+            applyOutputs();
+        } else if (ch == 'a') {
+            std::fill(bit_states.begin(), bit_states.end(), true);
+            applyOutputs();
+        } else if (ch == 'n') {
+            std::fill(bit_states.begin(), bit_states.end(), false);
+            applyOutputs();
+        }
+
+        Tether::Platform::Clock::instance().delayMilliseconds(20);
+    }
+
+    // Cleanup
+    for (auto& ob : output_bits) {
+        if (ob.label) free(const_cast<char*>(ob.label));
+    }
+
+    endwin();
+}
+
+#endif // HAVE_NCURSES
+
+// ============================================================================
 // Print module I/O data
 // ============================================================================
 
@@ -420,6 +674,10 @@ int main(int argc, char** argv) {
         .scan<'i', int>()
         .default_value(100)
         .help("Delay in ms between PRE-OP and slot scan (default: 100)");
+    program.add_argument("--interactive")
+        .default_value(false)
+        .implicit_value(true)
+        .help("Use ncurses interactive UI for toggling outputs");
 
     try { program.parse_args(argc, argv); }
     catch (const std::runtime_error& err) {
@@ -431,6 +689,14 @@ int main(int argc, char** argv) {
     std::string debug_str = program.get<std::string>("--debug");
     double duration_sec = program.get<double>("--time");
     int slot_scan_delay = program.get<int>("--slot-scan-delay");
+    bool interactive = program.get<bool>("--interactive");
+
+#ifndef HAVE_NCURSES
+    if (interactive) {
+        std::cerr << "Interactive mode requires ncurses (not compiled in).\n";
+        return 1;
+    }
+#endif
 
     if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
     auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
@@ -647,32 +913,39 @@ int main(int argc, char** argv) {
 
     TETHER_LOGI(TAG, "All slaves in OP — starting cyclic I/O");
 
-    // ---- Main display loop ----
-    auto start_time = std::chrono::steady_clock::now();
-    uint64_t last_print_cycle = 0;
+#ifdef HAVE_NCURSES
+    if (interactive) {
+        runInteractiveUI(master, modules, cycle_count, pdo_ok);
+    } else
+#endif
+    {
+        // ---- Main display loop (non-interactive) ----
+        auto start_time = std::chrono::steady_clock::now();
+        uint64_t last_print_cycle = 0;
 
-    while (g_running.load()) {
-        if (duration_sec > 0.0) {
-            auto elapsed = std::chrono::duration<double>(
-                std::chrono::steady_clock::now() - start_time).count();
-            if (elapsed >= duration_sec) break;
-        }
-
-        uint64_t cyc = cycle_count.load();
-        if (cyc != last_print_cycle && cyc % 100 == 0) {
-            last_print_cycle = cyc;
-            std::cout << "\n=== Cycle " << cyc << " ===\n";
-            for (auto& mod : modules) {
-                printModuleIO(mod, cyc);
+        while (g_running.load()) {
+            if (duration_sec > 0.0) {
+                auto elapsed = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - start_time).count();
+                if (elapsed >= duration_sec) break;
             }
-            std::cout.flush();
-        }
 
-        if (!pdo_ok.load()) {
-            TETHER_LOGW(TAG, "PDO exchange error detected");
-        }
+            uint64_t cyc = cycle_count.load();
+            if (cyc != last_print_cycle && cyc % 100 == 0) {
+                last_print_cycle = cyc;
+                std::cout << "\n=== Cycle " << cyc << " ===\n";
+                for (auto& mod : modules) {
+                    printModuleIO(mod, cyc);
+                }
+                std::cout.flush();
+            }
 
-        Tether::Platform::Clock::instance().delayMilliseconds(10);
+            if (!pdo_ok.load()) {
+                TETHER_LOGW(TAG, "PDO exchange error detected");
+            }
+
+            Tether::Platform::Clock::instance().delayMilliseconds(10);
+        }
     }
 
     // ---- Shutdown ----
