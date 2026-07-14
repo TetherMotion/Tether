@@ -180,4 +180,10 @@ else()
     message(STATUS "ncurses not found; kinco_rp20_io built without --interactive mode")
 endif()
 
+# --- Kinco RP20 module discovery demo ---
+# Auto-discovers RP20 I/O modules across all slaves/slots and prints the list.
+# No PDO/cyclic I/O — just discovery and listing.
+add_tether_example(kinco_rp20_list_modules
+    LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common tether_examples_common)
+
 message(STATUS "Examples configured")
