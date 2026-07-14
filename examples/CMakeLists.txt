@@ -167,8 +167,17 @@ add_tether_example(slave_emulator
 
 # --- Kinco RP20 I/O module initialization demo ---
 # Auto-discovers RP20 I/O modules across all slaves/slots, initializes via CoE,
-# and runs a cyclic I/O loop
-add_tether_example(kinco_rp20_io
-    LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common tether_examples_common)
+# and runs a cyclic I/O loop. Supports --interactive ncurses UI.
+find_package(Curses)
+if(CURSES_FOUND)
+    add_tether_example(kinco_rp20_io
+        LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common tether_examples_common ${CURSES_LIBRARIES})
+    target_include_directories(kinco_rp20_io PRIVATE ${CURSES_INCLUDE_DIRS})
+    target_compile_definitions(kinco_rp20_io PRIVATE HAVE_NCURSES)
+else()
+    add_tether_example(kinco_rp20_io
+        LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common tether_examples_common)
+    message(STATUS "ncurses not found; kinco_rp20_io built without --interactive mode")
+endif()
 
 message(STATUS "Examples configured")
