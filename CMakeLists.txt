@@ -174,6 +174,10 @@ option(TETHER_BUILD_PYTHON_BINDINGS "Build Python bindings" ON)
 option(TETHER_BUILD_SHARED_LIBS "Build Tether component libraries as shared" ON)
 option(TETHER_BUILD_STATIC_LIBS "Build Tether component libraries as static" OFF)
 
+# EtherCAT-over-UDP encapsulation (default: OFF for zero overhead).
+# When enabled, the master can wrap EtherCAT frames in Ethernet/IPv4/UDP.
+option(TETHER_ENABLE_UDP_ENCAPSULATION "Enable EtherCAT-over-UDP encapsulation support" OFF)
+
 # --- Apply TETHER_COMPONENTS selection ---
 if(DEFINED TETHER_COMPONENTS)
     # Transitive dependency map: component → list of dependencies
@@ -354,6 +358,13 @@ endif()
 # SDO diagnostic tracing
 if(TETHER_DIAG_SDO_IO)
     add_compile_definitions(TETHER_DIAG_SDO_IO=1)
+endif()
+
+# EtherCAT-over-UDP encapsulation
+if(TETHER_ENABLE_UDP_ENCAPSULATION)
+    add_compile_definitions(TETHER_ENABLE_UDP_ENCAPSULATION=1)
+else()
+    add_compile_definitions(TETHER_ENABLE_UDP_ENCAPSULATION=0)
 endif()
 
 # EtherCAT Master

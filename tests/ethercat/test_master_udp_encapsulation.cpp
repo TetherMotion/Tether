@@ -10,6 +10,9 @@
  *  - RX: UDP-encapsulated frames are correctly parsed (datagrams extracted)
  *  - RX: non-EtherCAT UDP frames are ignored
  *  - Size limits: oversized datagrams are rejected in UDP mode
+ *
+ * When TETHER_ENABLE_UDP_ENCAPSULATION is 0 (default), only a single test
+ * verifying the feature is compiled out is included.
  */
 
 #include <gtest/gtest.h>
@@ -25,6 +28,19 @@
 #include <chrono>
 
 using namespace EtherCAT;
+
+#if !TETHER_ENABLE_UDP_ENCAPSULATION
+
+// ============================================================================
+// When UDP encapsulation is compiled out, verify it's always disabled.
+// ============================================================================
+
+TEST(MasterUdpEncapsulation, CompiledOutAlwaysReturnsFalse) {
+    Master master;
+    EXPECT_FALSE(master.isUdpEncapsulationEnabled());
+}
+
+#else // TETHER_ENABLE_UDP_ENCAPSULATION
 
 // ============================================================================
 // Helpers
@@ -536,3 +552,5 @@ TEST(MasterUdpEncapsulation, RxUdpFrameWithNonUdpProtocol) {
     waiter.join();
     EXPECT_FALSE(got_response.load()); // should be ignored
 }
+
+#endif // TETHER_ENABLE_UDP_ENCAPSULATION
