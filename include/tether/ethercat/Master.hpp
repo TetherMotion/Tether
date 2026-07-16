@@ -153,11 +153,27 @@ public:
         uint32_t rx_queue_depth     = 64;
         uint32_t txpdo_queue_depth  = 8;
         bool enable_mailbox_fallback = false; ///< Opt-in: force default mailbox on InvalidMailboxConfig
+
+        /// EtherCAT-over-UDP encapsulation settings (opt-in, default: disabled).
+        /// When enabled, frames are encapsulated as Ethernet/IPv4/UDP(port 34980)
+        /// instead of using EtherType 0x88A4 directly.  This allows communicating
+        /// with devices that use UDP encapsulation (e.g. some ESC-based slaves,
+        /// tunneling over IP networks).
+        struct UdpEncapsulation {
+            bool     enabled          = false;          ///< Master switch (default: off)
+            uint32_t source_ip        = 0;              ///< Source IPv4 (host byte order), 0 = 0.0.0.0
+            uint32_t destination_ip   = 0xFFFFFFFF;     ///< Destination IPv4 (host byte order), default broadcast
+            uint16_t source_port      = 0x88A4;         ///< UDP source port (default 34980)
+            uint16_t destination_port = 0x88A4;         ///< UDP destination port (default 34980)
+        } udp_encapsulation;
     };
 
     /** Enable or disable the mailbox fallback at runtime. */
     void setEnableMailboxFallback(bool enabled) { config_.enable_mailbox_fallback = enabled; }
     bool isMailboxFallbackEnabled() const { return config_.enable_mailbox_fallback; }
+
+    /** @return true if EtherCAT-over-UDP encapsulation is enabled. */
+    bool isUdpEncapsulationEnabled() const { return config_.udp_encapsulation.enabled; }
 
     /** Set a callback invoked when the master attempts the mailbox fallback for a slave. */
     void setMailboxFallbackCallback(std::function<void(uint16_t)> cb) { mailbox_fallback_cb_ = std::move(cb); }
@@ -740,6 +756,23 @@ private:
     void flushRxQueue();
     void parseEtherCATFrame(const uint8_t* frame, size_t length);
 
+    // ---- EtherCAT-over-UDP encapsulation ----------------------------------
+    /// Compute the IPv4 header checksum (ones-complement sum over 20-byte header).
+    static uint16_t computeIpChecksum(const uint8_t* ip_header);
+    /// Transform a direct Ethernet/EtherCAT frame into Ethernet/IPv4/UDP/EtherCAT.
+    /// @param in_frame  Pointer to the original frame (Ethernet + EtherCAT, EtherType 0x88A4).
+    /// @param in_len    Length of the original frame.
+    /// @param out_buf   Output buffer (must be at least in_len + kUdpEncapOverhead bytes).
+    /// @param out_cap   Capacity of out_buf.
+    /// @param[out] out_len  Actual length of the encapsulated frame.
+    /// @return true on success, false if the frame is too short or output buffer too small.
+    bool encapsulateFrame(const uint8_t* in_frame, size_t in_len,
+                          uint8_t* out_buf, size_t out_cap, size_t* out_len) const;
+    /// Send a frame via iface_.send(), applying UDP encapsulation if enabled.
+    bool sendWithEncapsulation(const uint8_t* frame, size_t len);
+    /// @return max EtherCAT payload bytes per frame, accounting for UDP overhead.
+    size_t maxEtherCATPayloadPerFrame() const;
+
     size_t    preRegisterResponseWaiter(uint8_t idx, uint8_t* buffer,
                                         size_t buffer_size);
     WaitResult waitForPreRegistered(size_t slot, uint32_t timeout_ms);
@@ -762,6 +795,9 @@ private:
 
     // Index allocator
     std::atomic<uint8_t> next_idx_{0};
+
+    // IP identification counter for UDP encapsulation
+    mutable std::atomic<uint16_t> ip_id_counter_{0};
 
     // Master state
     std::atomic<bool>     running_{false};

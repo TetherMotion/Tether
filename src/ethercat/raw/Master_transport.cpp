@@ -335,15 +335,39 @@ static void printEtherCATFrame(const uint8_t* frame, size_t length, bool is_tx, 
         return;
     }
 
-    const auto* ec_hdr = reinterpret_cast<const EtherCAT::FrameHeader*>(
-        frame + sizeof(EtherCAT::EthernetHeader));
+    // Determine the EtherCAT frame offset — handle both direct EtherCAT and
+    // EtherCAT-over-UDP encapsulation.
+    size_t ecat_offset = sizeof(EtherCAT::EthernetHeader);
+    {
+        const auto* eth = reinterpret_cast<const EtherCAT::EthernetHeader*>(frame);
+        const uint16_t ether_type = bswap16(eth->etherType_be);
+        if (ether_type == kEtherTypeIPv4) {
+            const size_t ip_off = sizeof(EtherCAT::EthernetHeader);
+            if (ip_off + sizeof(IPv4Header) > length) return;
+            const auto* ip = reinterpret_cast<const IPv4Header*>(frame + ip_off);
+            const uint8_t ihl = (ip->version_ihl & 0x0F) * 4;
+            if (ip_off + ihl + sizeof(UDPHeader) > length) return;
+            const auto* udp = reinterpret_cast<const UDPHeader*>(frame + ip_off + ihl);
+            TETHER_LOGI("ec_pkt", "[%s] EtherCAT-over-UDP: src_port=%u dst_port=%u",
+                        dir, bswap16(udp->src_port_be), bswap16(udp->dst_port_be));
+            ecat_offset = ip_off + ihl + sizeof(UDPHeader);
+        }
+    }
+
+    if (length < ecat_offset + sizeof(EtherCAT::FrameHeader)) {
+        TETHER_LOGI("ec_pkt", "[%s] Frame too short for EtherCAT header after encap (%u bytes)",
+                    dir, static_cast<unsigned>(length));
+        return;
+    }
+
+    const auto* ec_hdr = reinterpret_cast<const EtherCAT::FrameHeader*>(frame + ecat_offset);
     const uint16_t ec_raw = le16_to_host(ec_hdr->raw_le);
     const uint16_t ec_len = ec_raw & 0x07FFu;
     const uint16_t ec_type = (ec_raw >> 12) & 0x0Fu;
 
     TETHER_LOGI("ec_pkt", "[%s] EtherCAT Frame: length=%u type=%u", dir, ec_len, ec_type);
 
-    size_t offset = sizeof(EtherCAT::EthernetHeader) + sizeof(EtherCAT::FrameHeader);
+    size_t offset = ecat_offset + sizeof(EtherCAT::FrameHeader);
     size_t remaining = ec_len;
     uint8_t dg_idx = 0;
 
@@ -432,6 +456,110 @@ static void printEtherCATFrame(const uint8_t* frame, size_t length, bool is_tx, 
 }
 
 // ============================================================================
+// EtherCAT-over-UDP encapsulation helpers
+// ============================================================================
+
+uint16_t Master::computeIpChecksum(const uint8_t* ip_header)
+{
+    // Standard IPv4 header checksum: ones-complement sum of all 16-bit words.
+    uint32_t sum = 0;
+    for (int i = 0; i < 20; i += 2) {
+        sum += static_cast<uint32_t>(ip_header[i]) << 8;
+        sum += static_cast<uint32_t>(ip_header[i + 1]);
+    }
+    while (sum >> 16) {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+    return static_cast<uint16_t>(~sum & 0xFFFF);
+}
+
+bool Master::encapsulateFrame(const uint8_t* in_frame, size_t in_len,
+                              uint8_t* out_buf, size_t out_cap, size_t* out_len) const
+{
+    using namespace Raw;
+
+    // Input frame must have at least an Ethernet header (14 bytes).
+    if (in_len < sizeof(EtherCAT::EthernetHeader)) return false;
+
+    // The EtherCAT payload is everything after the 14-byte Ethernet header.
+    const size_t ecat_payload_len = in_len - sizeof(EtherCAT::EthernetHeader);
+    const size_t encap_len = sizeof(EtherCAT::EthernetHeader) +
+                             sizeof(IPv4Header) + sizeof(UDPHeader) + ecat_payload_len;
+
+    // Minimum Ethernet frame size (without FCS).
+    constexpr size_t kMinEthFrame = 60;
+    const size_t padded_len = (encap_len < kMinEthFrame) ? kMinEthFrame : encap_len;
+
+    if (padded_len > out_cap) return false;
+
+    std::memset(out_buf, 0, padded_len);
+
+    // --- Ethernet header (reuse dst/src MAC from input, change EtherType to IPv4) ---
+    const auto* in_eth = reinterpret_cast<const EtherCAT::EthernetHeader*>(in_frame);
+    auto* out_eth = reinterpret_cast<EtherCAT::EthernetHeader*>(out_buf);
+    std::memcpy(out_eth->dst, in_eth->dst, 6);
+    std::memcpy(out_eth->src, in_eth->src, 6);
+    out_eth->etherType_be = host_to_be16(kEtherTypeIPv4);
+
+    // --- IPv4 header ---
+    auto* ip = reinterpret_cast<IPv4Header*>(out_buf + sizeof(EtherCAT::EthernetHeader));
+    ip->version_ihl = 0x45;
+    ip->tos = 0;
+    const uint16_t ip_total_len = static_cast<uint16_t>(sizeof(IPv4Header) + sizeof(UDPHeader) + ecat_payload_len);
+    ip->total_length_be = host_to_be16(ip_total_len);
+    ip->identification_be = host_to_be16(ip_id_counter_.fetch_add(1, std::memory_order_relaxed));
+    ip->flags_fragment_be = host_to_be16(0x4000); // Don't Fragment, no offset
+    ip->ttl = 64;
+    ip->protocol = 0x11; // UDP
+    ip->checksum_be = 0; // Will be computed below
+    ip->src_ip_be = host_to_be32(config_.udp_encapsulation.source_ip);
+    ip->dst_ip_be = host_to_be32(config_.udp_encapsulation.destination_ip);
+    // Compute checksum over the 20-byte header.
+    ip->checksum_be = host_to_be16(computeIpChecksum(reinterpret_cast<const uint8_t*>(ip)));
+
+    // --- UDP header ---
+    auto* udp = reinterpret_cast<UDPHeader*>(out_buf + sizeof(EtherCAT::EthernetHeader) + sizeof(IPv4Header));
+    udp->src_port_be = host_to_be16(config_.udp_encapsulation.source_port);
+    udp->dst_port_be = host_to_be16(config_.udp_encapsulation.destination_port);
+    const uint16_t udp_len = static_cast<uint16_t>(sizeof(UDPHeader) + ecat_payload_len);
+    udp->length_be = host_to_be16(udp_len);
+    udp->checksum_be = 0; // Not computed (optional for IPv4 UDP)
+
+    // --- EtherCAT payload (everything from the original frame after the Ethernet header) ---
+    uint8_t* ecat_dst = out_buf + sizeof(EtherCAT::EthernetHeader) + sizeof(IPv4Header) + sizeof(UDPHeader);
+    std::memcpy(ecat_dst, in_frame + sizeof(EtherCAT::EthernetHeader), ecat_payload_len);
+
+    *out_len = padded_len;
+    return true;
+}
+
+bool Master::sendWithEncapsulation(const uint8_t* frame, size_t len)
+{
+    if (!config_.udp_encapsulation.enabled) {
+        return iface_.send ? iface_.send(frame, len) : false;
+    }
+
+    // Build the encapsulated frame in a stack buffer.
+    // Max frame: 1514 (max Ethernet) + 28 (IP+UDP overhead) = 1542, round up to 1600.
+    constexpr size_t kEncapBufSize = 1600;
+    uint8_t encap_buf[kEncapBufSize] = {0};
+    size_t encap_len = 0;
+    if (!encapsulateFrame(frame, len, encap_buf, kEncapBufSize, &encap_len)) {
+        TETHER_LOGE(TAG, "encapsulateFrame failed (in_len=%u)", static_cast<unsigned>(len));
+        return false;
+    }
+    return iface_.send ? iface_.send(encap_buf, encap_len) : false;
+}
+
+size_t Master::maxEtherCATPayloadPerFrame() const
+{
+    if (config_.udp_encapsulation.enabled) {
+        return Raw::kMaxEtherCATPayloadPerFrame - Raw::kUdpEncapOverhead;
+    }
+    return Raw::kMaxEtherCATPayloadPerFrame;
+}
+
+// ============================================================================
 // Transport primitives
 // ============================================================================
 
@@ -440,10 +568,7 @@ bool Master::sendRawFrame(const void* buf, size_t len)
     if (debug_flags_.txPackets) {
         printEtherCATFrame(reinterpret_cast<const uint8_t*>(buf), len, true, false);
     }
-    if (iface_.send)
-        return iface_.send(reinterpret_cast<const uint8_t*>(buf), len);
-    TETHER_LOGE(TAG, "No NetworkInterface registered!");
-    return false;
+    return sendWithEncapsulation(reinterpret_cast<const uint8_t*>(buf), len);
 }
 
 bool Master::sendSingleDatagram(Command cmd, uint8_t idx,
@@ -459,9 +584,12 @@ bool Master::sendSingleDatagram(Command cmd, uint8_t idx,
 
     const size_t required_len =
         sizeof(EtherCATSingleDgramFrameHeader) + datalen + sizeof(uint16_t);
-    if (required_len > kMaxEthFrameNoFcs) {
-        TETHER_LOGE(TAG, "Datagram too big (datalen=%u required=%u)",
-                    datalen, static_cast<unsigned>(required_len));
+    // Account for UDP encapsulation overhead in the max frame size check.
+    const size_t encap_overhead = config_.udp_encapsulation.enabled ? kUdpEncapOverhead : 0;
+    if (required_len + encap_overhead > kMaxEthFrameNoFcs) {
+        TETHER_LOGE(TAG, "Datagram too big (datalen=%u required=%u encap=%u)",
+                    datalen, static_cast<unsigned>(required_len),
+                    static_cast<unsigned>(encap_overhead));
         return false;
     }
 
@@ -509,7 +637,7 @@ bool Master::sendSingleDatagram(Command cmd, uint8_t idx,
                 return false;
             }
             errno = 0;
-            if (iface_.send(txbuf, frame_len)) return true;
+            if (sendWithEncapsulation(txbuf, frame_len)) return true;
             last_errno = errno;
 #if TETHER_ENABLE_ETHERCAT_STATS
             tx_retry_count_.fetch_add(1, std::memory_order_relaxed);
@@ -568,6 +696,7 @@ size_t Master::sendMultiDatagram(const MultiDatagramSpec* specs, size_t count)
     constexpr size_t kMinEthFrameNoFcs = 60;
     constexpr size_t kMaxEthFrameNoFcs = 1514;
     constexpr size_t kHeaderSize = sizeof(EtherCAT::EthernetHeader) + sizeof(EtherCAT::FrameHeader);
+    const size_t max_payload = maxEtherCATPayloadPerFrame();
 
     size_t frames_sent = 0;
     size_t i = 0;
@@ -590,7 +719,7 @@ size_t Master::sendMultiDatagram(const MultiDatagramSpec* specs, size_t count)
             const auto& spec = specs[i + dg_count_in_frame];
             const size_t dg_size = kDatagramOverhead + spec.datalen;
 
-            if (payload_bytes + dg_size > kMaxEtherCATPayloadPerFrame)
+            if (payload_bytes + dg_size > max_payload)
                 break;
 
             size_t dg_offset = payload_offset + payload_bytes;
@@ -666,7 +795,7 @@ size_t Master::sendMultiDatagram(const MultiDatagramSpec* specs, size_t count)
                     TETHER_LOGW(TAG, "sendMultiDatagram cancelled");
                     return frames_sent;
                 }
-                if (iface_.send(txbuf, frame_len)) { sent = true; break; }
+                if (sendWithEncapsulation(txbuf, frame_len)) { sent = true; break; }
 #if TETHER_ENABLE_ETHERCAT_STATS
                 tx_retry_count_.fetch_add(1, std::memory_order_relaxed);
 #endif
@@ -900,7 +1029,34 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
 
     const auto* eth = reinterpret_cast<const EtherCAT::EthernetHeader*>(frame);
     const uint16_t ether_type = bswap16(eth->etherType_be);
-    if (ether_type != EtherCAT::kEtherTypeEtherCAT) {
+
+    // The EtherCAT frame header and datagrams start right after the Ethernet
+    // header for direct EtherCAT (EtherType 0x88A4).  For EtherCAT-over-UDP,
+    // we need to skip the IPv4 + UDP headers first.
+    size_t ecat_offset = sizeof(EtherCAT::EthernetHeader);
+
+    if (ether_type == EtherCAT::kEtherTypeEtherCAT) {
+        // Direct EtherCAT — nothing extra to skip.
+    } else if (ether_type == kEtherTypeIPv4) {
+        // EtherCAT-over-UDP encapsulation: parse IPv4 + UDP headers.
+        const size_t ip_offset = sizeof(EtherCAT::EthernetHeader);
+        if (ip_offset + sizeof(IPv4Header) > length) return;
+
+        const auto* ip = reinterpret_cast<const IPv4Header*>(frame + ip_offset);
+        const uint8_t ihl = (ip->version_ihl & 0x0F) * 4;
+        if (ihl < sizeof(IPv4Header) || ip_offset + ihl > length) return;
+        if (ip->protocol != 0x11) return; // not UDP
+
+        const size_t udp_offset = ip_offset + ihl;
+        if (udp_offset + sizeof(UDPHeader) > length) return;
+
+        const auto* udp = reinterpret_cast<const UDPHeader*>(frame + udp_offset);
+        const uint16_t dst_port = bswap16(udp->dst_port_be);
+        if (dst_port != kEtherCATOverUdpPort) return; // not EtherCAT-over-UDP
+
+        ecat_offset = udp_offset + sizeof(UDPHeader);
+        if (ecat_offset + sizeof(EtherCAT::FrameHeader) > length) return;
+    } else {
         if (debug_flags_.rxPackets) {
             const char* name = etherTypeToString(ether_type);
             if (name) {
@@ -918,14 +1074,13 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
         printEtherCATFrame(frame, length, false, false);
     }
 
-    const auto* ec_hdr = reinterpret_cast<const EtherCAT::FrameHeader*>(
-        frame + sizeof(EtherCAT::EthernetHeader));
+    const auto* ec_hdr = reinterpret_cast<const EtherCAT::FrameHeader*>(frame + ecat_offset);
     const uint16_t ec_len = le16_to_host(ec_hdr->raw_le) & 0x07FFu;
 
-    if (length < sizeof(EtherCAT::EthernetHeader) + sizeof(EtherCAT::FrameHeader) + ec_len)
+    if (length < ecat_offset + sizeof(EtherCAT::FrameHeader) + ec_len)
         return;
 
-    const size_t payload_offset = sizeof(EtherCAT::EthernetHeader) + sizeof(EtherCAT::FrameHeader);
+    const size_t payload_offset = ecat_offset + sizeof(EtherCAT::FrameHeader);
     size_t offset = payload_offset;
     size_t remaining = ec_len;
     uint8_t dg_idx = 0;

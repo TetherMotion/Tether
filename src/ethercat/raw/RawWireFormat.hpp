@@ -29,9 +29,11 @@ using RxDatagram = EtherCAT::RxDatagram;
 // ============================================================================
 
 static inline uint16_t bswap16(uint16_t v) { return __builtin_bswap16(v); }
+static inline uint32_t bswap32(uint32_t v) { return __builtin_bswap32(v); }
 
 static inline uint16_t be16(uint16_t host) { return bswap16(host); }
 static inline uint16_t host_to_be16(uint16_t host) { return be16(host); }
+static inline uint32_t host_to_be32(uint32_t host) { return bswap32(host); }
 static inline uint16_t le16_to_host(uint16_t le) { return le; }
 static inline uint16_t host_to_le16(uint16_t host) { return host; }
 static inline uint32_t le32_to_host(uint32_t le) { return le; }
@@ -43,7 +45,40 @@ static inline uint32_t host_to_le32(uint32_t host) { return host; }
 
 enum class EtherType : uint16_t {
     EtherCAT = 0x88A4,
+    IPv4     = 0x0800,
 };
+
+constexpr uint16_t kEtherTypeIPv4 = 0x0800;
+
+// ============================================================================
+// EtherCAT-over-UDP encapsulation (ETG.1000.3)
+// EtherCAT frames tunneled via IPv4/UDP, destination port 0x88A4 (34980).
+// ============================================================================
+
+constexpr uint16_t kEtherCATOverUdpPort = 0x88A4; // 34980
+constexpr size_t   kUdpEncapOverhead    = 28;     // IPv4 header (20) + UDP header (8)
+
+struct __attribute__((packed)) IPv4Header {
+    uint8_t  version_ihl;       // 0x45 (version 4, IHL 5 = 20 bytes)
+    uint8_t  tos;               // 0
+    uint16_t total_length_be;   // IP header + UDP header + EtherCAT payload
+    uint16_t identification_be; // Per-packet incrementing ID
+    uint16_t flags_fragment_be; // 0x4000 = Don't Fragment, no offset
+    uint8_t  ttl;               // 64
+    uint8_t  protocol;          // 17 = UDP
+    uint16_t checksum_be;       // Header checksum (computed)
+    uint32_t src_ip_be;         // Source IP (network byte order)
+    uint32_t dst_ip_be;         // Destination IP (network byte order)
+};
+static_assert(sizeof(IPv4Header) == 20, "IPv4Header must be 20 bytes");
+
+struct __attribute__((packed)) UDPHeader {
+    uint16_t src_port_be;  // Source port (network byte order)
+    uint16_t dst_port_be;  // Destination port (network byte order)
+    uint16_t length_be;    // UDP header + payload (network byte order)
+    uint16_t checksum_be;  // 0 = not computed (optional for IPv4 UDP)
+};
+static_assert(sizeof(UDPHeader) == 8, "UDPHeader must be 8 bytes");
 
 // ============================================================================
 // Wire-Format Structures (Packed)
