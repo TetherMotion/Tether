@@ -17,6 +17,7 @@
 #include "tether/platform/Platform.hpp"
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/SMRegisters.hpp"
+#include "tether/ethercat/TetherConfig.hpp"
 
 namespace EtherCAT {
 namespace Raw {
@@ -45,9 +46,12 @@ static inline uint32_t host_to_le32(uint32_t host) { return host; }
 
 enum class EtherType : uint16_t {
     EtherCAT = 0x88A4,
+#if TETHER_ENABLE_UDP_ENCAPSULATION
     IPv4     = 0x0800,
+#endif
 };
 
+#if TETHER_ENABLE_UDP_ENCAPSULATION
 constexpr uint16_t kEtherTypeIPv4 = 0x0800;
 
 // ============================================================================
@@ -79,6 +83,7 @@ struct __attribute__((packed)) UDPHeader {
     uint16_t checksum_be;  // 0 = not computed (optional for IPv4 UDP)
 };
 static_assert(sizeof(UDPHeader) == 8, "UDPHeader must be 8 bytes");
+#endif // TETHER_ENABLE_UDP_ENCAPSULATION
 
 // ============================================================================
 // Wire-Format Structures (Packed)
