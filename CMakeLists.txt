@@ -342,6 +342,12 @@ if(TETHER_BUILD_ETHERCAT_COMMON)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/ethercat_common.cmake)
 endif()
 
+# ESI XML parser (separate from ethercat_common to keep tinyxml2 out of the
+# runtime shared library; only needed by tools/tests/examples that parse ESI files)
+if(TETHER_BUILD_EXTRACT_ESI)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/esi.cmake)
+endif()
+
 # If we are building the EtherCAT master, enable the feature macro so
 # host-only stubs and conditional tests are excluded automatically.
 if(TETHER_BUILD_ETHERCAT_MASTER)

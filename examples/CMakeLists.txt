@@ -104,7 +104,7 @@ add_tether_example(slave_read_identity
 # ---ATI Axia80 F/T Sensor streaming example ---
 # Streams 6-DOF force/torque data with engineering-unit conversion
 add_tether_example(axia80_stream
-    LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common tether_examples_common)
+    LIBRARIES tether_ethercat_master tether_ethercat_common tether_esi tether_hal tether_common tether_examples_common)
 
 # --- Nexcobot ESC211 Safety DI monitor ---
 # Reads Safety DI A/B via CoE/SDO and renders a live ncurses panel
