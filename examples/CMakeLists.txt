@@ -102,9 +102,16 @@ add_tether_example(slave_read_identity
     LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common tether_examples_common)
 
 # ---ATI Axia80 F/T Sensor streaming example ---
-# Streams 6-DOF force/torque data with engineering-unit conversion
-add_tether_example(axia80_stream
-    LIBRARIES tether_ethercat_master tether_ethercat_common tether_esi tether_hal tether_common tether_examples_common)
+# Streams 6-DOF force/torque data with engineering-unit conversion.
+# Links tether_esi for optional --esi-xml register verification, so it is
+# only built when the ESI parser library is available
+# (i.e. TETHER_BUILD_EXTRACT_ESI or another consumer enables esi.cmake).
+if(TARGET tether_esi)
+    add_tether_example(axia80_stream
+        LIBRARIES tether_ethercat_master tether_ethercat_common tether_esi tether_hal tether_common tether_examples_common)
+else()
+    message(STATUS "tether_esi not built; skipping axia80_stream (enable TETHER_BUILD_EXTRACT_ESI to build it)")
+endif()
 
 # --- Nexcobot ESC211 Safety DI monitor ---
 # Reads Safety DI A/B via CoE/SDO and renders a live ncurses panel
