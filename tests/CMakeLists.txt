@@ -731,6 +731,7 @@ create_ethercat_test(coverage
     SOURCES
         ethercat/test_vlan_router.cpp
         ethercat/test_master_frame_coverage.cpp
+        ethercat/test_master_udp_encapsulation.cpp
         ethercat/test_integration_paired.cpp
         ethercat/test_sync_manager.cpp
         ethercat/test_set_preop_fault_diagnose.cpp
