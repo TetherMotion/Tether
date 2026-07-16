@@ -23,10 +23,20 @@ inline uint16_t read16_be(const uint8_t* p) {
     return static_cast<uint16_t>((static_cast<uint16_t>(p[0]) << 8) | p[1]);
 }
 
+inline uint32_t read32_be(const uint8_t* p) {
+    return (static_cast<uint32_t>(p[0]) << 24) |
+           (static_cast<uint32_t>(p[1]) << 16) |
+           (static_cast<uint32_t>(p[2]) << 8) |
+           static_cast<uint32_t>(p[3]);
+}
+
 constexpr uint32_t kPcapngByteOrderMagic = 0x1A2B3C4D;
 constexpr uint32_t kPcapngByteOrderMagicSwapped = 0x4D3C2B1A;
 
 constexpr uint16_t kEtherTypeVlan = 0x8100;
+constexpr uint16_t kEtherTypeIPv4 = 0x0800;
+constexpr uint8_t  kIpProtocolUDP = 0x11;
+constexpr uint16_t kEtherCATOverUdpPort = 0x88A4; // 34980
 
 // PCAPNG block types already declared in PCAPWriter.hpp, but keep local
 // constexprs for clarity in switch statements.
@@ -679,26 +689,83 @@ bool PCAPNGReader::interpretEthernetFrame(const uint8_t* data, size_t length,
 
     frame.innerEtherType = etherType;
 
-    if (etherType != EtherCAT::kEtherTypeEtherCAT) {
-        return true; // parsed but not EtherCAT
+    // Direct EtherCAT via EtherType 0x88A4.
+    if (etherType == EtherCAT::kEtherTypeEtherCAT) {
+        frame.isEtherCAT = true;
+        parseEtherCATDatagrams(data, length, payloadOffset, frame);
+        return true;
     }
+
+    // EtherCAT-over-UDP encapsulation: EtherType 0x0800 (IPv4) -> UDP ->
+    // dst port 34980 (0x88A4) -> EtherCAT frame as UDP payload.
+    if (etherType == kEtherTypeIPv4) {
+        parseEtherCATOverUDP(data, length, payloadOffset, frame);
+    }
+
+    return true; // parsed but not necessarily EtherCAT
+}
+
+void PCAPNGReader::parseEtherCATOverUDP(const uint8_t* data, size_t length,
+                                        size_t ipOffset,
+                                        InterpretedFrame& frame) const {
+    // Minimum IPv4 header is 20 bytes.
+    if (ipOffset + 20 > length) return;
+
+    const uint8_t* ip = data + ipOffset;
+    uint8_t versionIhl = ip[0];
+    if ((versionIhl >> 4) != 4) return; // not IPv4
+
+    uint8_t ihl = (versionIhl & 0x0F) * 4;
+    if (ihl < 20 || ipOffset + ihl > length) return;
+
+    uint8_t protocol = ip[9];
+    if (protocol != kIpProtocolUDP) return; // not UDP
+
+    // IPv4 src/dst addresses (offset 12 and 16, network byte order).
+    frame.srcIp = read32_be(ip + 12);
+    frame.dstIp = read32_be(ip + 16);
+
+    size_t udpOffset = ipOffset + ihl;
+    if (udpOffset + 8 > length) return;
+
+    const uint8_t* udp = data + udpOffset;
+    frame.srcPort = read16_be(udp + 0);
+    frame.dstPort = read16_be(udp + 2);
+    uint16_t udpLen = read16_be(udp + 4);
+    if (udpLen < 8) return;
+
+    // EtherCAT-over-UDP uses destination port 34980 (0x88A4).
+    if (frame.dstPort != kEtherCATOverUdpPort) return;
+
+    size_t ecatOffset = udpOffset + 8;
+    size_t ecatAvail = length - ecatOffset;
+    // Clamp to UDP length minus header.
+    size_t udpPayloadLen = udpLen - 8;
+    if (udpPayloadLen > ecatAvail) udpPayloadLen = ecatAvail;
+    if (udpPayloadLen < sizeof(EtherCAT::FrameHeader)) return;
 
     frame.isEtherCAT = true;
+    frame.isEtherCATOverUDP = true;
+    parseEtherCATDatagrams(data, ecatOffset + udpPayloadLen, ecatOffset, frame);
+}
 
-    if (payloadOffset + sizeof(EtherCAT::FrameHeader) > length) {
-        return false;
+void PCAPNGReader::parseEtherCATDatagrams(const uint8_t* data, size_t dataEnd,
+                                          size_t ecatOffset,
+                                          InterpretedFrame& frame) const {
+    if (ecatOffset + sizeof(EtherCAT::FrameHeader) > dataEnd) {
+        return;
     }
 
-    const uint8_t* ecatHdrBytes = data + payloadOffset;
+    const uint8_t* ecatHdrBytes = data + ecatOffset;
     frame.ecatFrameLength = static_cast<uint16_t>(ecatHdrBytes[0]) |
                             static_cast<uint16_t>((ecatHdrBytes[1] & 0x07) << 8);
     frame.ecatFrameType = static_cast<uint8_t>((ecatHdrBytes[1] >> 4) & 0x0F);
 
-    size_t datagramOffset = payloadOffset + sizeof(EtherCAT::FrameHeader);
+    size_t datagramOffset = ecatOffset + sizeof(EtherCAT::FrameHeader);
     size_t remaining = frame.ecatFrameLength;
 
     while (remaining >= sizeof(EtherCAT::DatagramHeader) + sizeof(uint16_t)) {
-        if (datagramOffset + sizeof(EtherCAT::DatagramHeader) > length) {
+        if (datagramOffset + sizeof(EtherCAT::DatagramHeader) > dataEnd) {
             break;
         }
 
@@ -715,7 +782,7 @@ bool PCAPNGReader::interpretEthernetFrame(const uint8_t* data, size_t length,
         // irq at dg+8 (not surfaced)
 
         size_t dgTotalSize = sizeof(EtherCAT::DatagramHeader) + info.dataLength + sizeof(uint16_t);
-        if (datagramOffset + dgTotalSize > length || dgTotalSize > remaining) {
+        if (datagramOffset + dgTotalSize > dataEnd || dgTotalSize > remaining) {
             break;
         }
 
@@ -728,8 +795,6 @@ bool PCAPNGReader::interpretEthernetFrame(const uint8_t* data, size_t length,
         datagramOffset += dgTotalSize;
         remaining -= dgTotalSize;
     }
-
-    return true;
 }
 
 // ============================================================================
@@ -743,6 +808,15 @@ std::string macToString(const std::array<uint8_t, 6>& mac) {
         if (i > 0) oss << ':';
         oss << std::setw(2) << static_cast<int>(mac[i]);
     }
+    return oss.str();
+}
+
+std::string ipToString(uint32_t ip) {
+    std::ostringstream oss;
+    oss << ((ip >> 24) & 0xFF) << "."
+        << ((ip >> 16) & 0xFF) << "."
+        << ((ip >> 8) & 0xFF) << "."
+        << (ip & 0xFF);
     return oss.str();
 }
 
@@ -789,6 +863,13 @@ std::string formatInterpretedFrame(const InterpretedFrame& frame, bool verbose, 
     }
     oss << "  EtherType: 0x" << std::hex << std::setfill('0') << std::setw(4) << frame.innerEtherType
         << std::dec << "\n";
+
+    if (frame.isEtherCATOverUDP) {
+        oss << "  EtherCAT-over-UDP  "
+            << ipToString(frame.srcIp) << ":" << frame.srcPort
+            << " -> " << ipToString(frame.dstIp) << ":" << frame.dstPort
+            << "\n";
+    }
 
     if (frame.isEtherCAT) {
         oss << "  EtherCAT frame  length=" << frame.ecatFrameLength
@@ -863,6 +944,13 @@ std::string frameToJson(const InterpretedFrame& frame) {
     }
     oss << "  \"innerEtherType\": " << frame.innerEtherType << ",\n";
     oss << "  \"isEtherCAT\": " << (frame.isEtherCAT ? "true" : "false") << ",\n";
+    oss << "  \"isEtherCATOverUDP\": " << (frame.isEtherCATOverUDP ? "true" : "false") << ",\n";
+    if (frame.isEtherCATOverUDP) {
+        oss << "  \"srcIp\": \"" << ipToString(frame.srcIp) << "\",\n";
+        oss << "  \"dstIp\": \"" << ipToString(frame.dstIp) << "\",\n";
+        oss << "  \"srcPort\": " << frame.srcPort << ",\n";
+        oss << "  \"dstPort\": " << frame.dstPort << ",\n";
+    }
     if (frame.isEtherCAT) {
         oss << "  \"ecatFrameLength\": " << frame.ecatFrameLength << ",\n";
         oss << "  \"ecatFrameType\": " << static_cast<int>(frame.ecatFrameType) << ",\n";
