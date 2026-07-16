@@ -504,7 +504,7 @@ endif()
 if(TETHER_BUILD_MODULE_TESTS AND ESI_TEST_SOURCES)
     create_module_test(esi
         "${ESI_TEST_SOURCES}"
-        "tether_common;tether_ethercat_common"
+        "tether_common;tether_esi"
         ""
     )
 endif()

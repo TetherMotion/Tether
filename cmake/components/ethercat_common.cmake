@@ -5,9 +5,6 @@ set(TETHER_ETHERCAT_COMMON_SOURCES
     # Debug flags (must be in common so all EtherCAT libraries can link to it)
     ${TETHER_ROOT}/src/ethercat/DebugFlags.cpp
 
-    # SII parser
-    ${TETHER_ROOT}/src/ethercat/ESIParser.cpp
-
     # Stubs for host builds (only include when we are NOT building the full master)
 )
 
@@ -34,23 +31,7 @@ if(TETHER_BUILD_STATIC_LIBS)
     list(APPEND _variants tether_ethercat_common_static)
 endif()
 
-# If tinyxml2 is available or needed by ESI parsing, link it
-find_package(TinyXML2 QUIET)
-if(NOT TinyXML2_FOUND)
-    include(FetchContent)
-    FetchContent_Declare(tinyxml2 GIT_REPOSITORY https://github.com/leethomason/tinyxml2.git GIT_TAG 9.0.0)
-    FetchContent_MakeAvailable(tinyxml2)
-endif()
-
 foreach(_tgt IN LISTS _variants)
-    if(TARGET tinyxml2)
-        target_link_libraries(${_tgt} PUBLIC tinyxml2)
-    elseif(TARGET tinyxml2::tinyxml2)
-        target_link_libraries(${_tgt} PUBLIC tinyxml2::tinyxml2)
-    elseif(TARGET TinyXML2::TinyXML2)
-        target_link_libraries(${_tgt} PUBLIC TinyXML2::TinyXML2)
-    endif()
-
     target_include_directories(${_tgt}
         PUBLIC
             $<BUILD_INTERFACE:${TETHER_ROOT}/include>

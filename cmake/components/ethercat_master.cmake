@@ -18,6 +18,10 @@ file(GLOB ETHERCAT_RAW_SOURCES CONFIGURE_DEPENDS
 list(FILTER ETHERCAT_RAW_SOURCES EXCLUDE REGEX "platform_esp32\\.cpp$")
 list(FILTER ETHERCAT_RAW_SOURCES EXCLUDE REGEX "host_stubs\\.cpp$")
 list(FILTER ETHERCAT_RAW_SOURCES EXCLUDE REGEX "pdo_stubs\\.cpp$")
+# ESIParser.cpp lives in tether_esi (requires tinyxml2) — keep it out of the
+# runtime master library.
+list(FILTER ETHERCAT_CORE_SOURCES EXCLUDE REGEX "ESIParser\\.cpp$")
+list(FILTER ETHERCAT_RAW_SOURCES EXCLUDE REGEX "ESIParser\\.cpp$")
 
 # Reset handling
 file(GLOB RESET_SOURCES "${TETHER_ROOT}/src/reset/*.cpp")
