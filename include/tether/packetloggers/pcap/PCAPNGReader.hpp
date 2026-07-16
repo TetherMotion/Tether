@@ -116,6 +116,14 @@ struct InterpretedFrame {
     uint16_t innerEtherType = 0;
     bool isEtherCAT = false;
 
+    // EtherCAT-over-UDP encapsulation (set when EtherCAT is tunneled via UDP
+    // port 34980/0x88A4 instead of using EtherType 0x88A4 directly).
+    bool isEtherCATOverUDP = false;
+    uint32_t srcIp = 0;   ///< IPv4 source address (host byte order)
+    uint32_t dstIp = 0;   ///< IPv4 destination address (host byte order)
+    uint16_t srcPort = 0; ///< UDP source port (host byte order)
+    uint16_t dstPort = 0; ///< UDP destination port (host byte order)
+
     // EtherCAT frame header (valid when isEtherCAT == true)
     uint16_t ecatFrameLength = 0;
     uint8_t ecatFrameType = 0;
@@ -188,6 +196,18 @@ private:
 
     bool interpretEthernetFrame(const uint8_t* data, size_t length,
                                 InterpretedFrame& frame) const;
+
+    /// Parse EtherCAT datagrams starting at @p ecatOffset within @p data.
+    /// @p dataEnd is the exclusive end boundary (data + dataEnd is one-past-the-last valid byte).
+    void parseEtherCATDatagrams(const uint8_t* data, size_t dataEnd,
+                                size_t ecatOffset,
+                                InterpretedFrame& frame) const;
+
+    /// Detect and parse EtherCAT-over-UDP encapsulation (UDP dst port 34980).
+    /// @p ipOffset points to the start of the IPv4 header within @p data.
+    void parseEtherCATOverUDP(const uint8_t* data, size_t length,
+                              size_t ipOffset,
+                              InterpretedFrame& frame) const;
 
     // Byte-order helpers
     uint16_t read16(const uint8_t* p) const;

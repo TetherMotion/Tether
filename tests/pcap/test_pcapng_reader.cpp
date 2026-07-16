@@ -162,6 +162,61 @@ std::vector<uint8_t> makeEtherCATFrame(const std::array<uint8_t, 6>& dst,
     return frame;
 }
 
+// Build the EtherCAT frame payload only (no Ethernet header) — used as the
+// UDP payload for EtherCAT-over-UDP encapsulation tests.
+std::vector<uint8_t> makeEtherCATPayloadOnly() {
+    std::vector<uint8_t> ecat;
+    uint16_t dataLen = 2;
+    std::vector<uint8_t> payload = {0x04, 0x00}; // SAFE-OP
+    uint16_t wkc = 0x0001;
+    uint16_t ecatLen = static_cast<uint16_t>(sizeof(DatagramHeader) + dataLen + sizeof(uint16_t));
+    appendU8(ecat, static_cast<uint8_t>(ecatLen));
+    appendU8(ecat, static_cast<uint8_t>(0x10 | ((ecatLen >> 8) & 0x07))); // type=1
+    appendU8(ecat, static_cast<uint8_t>(Command::APRD));
+    appendU8(ecat, 0xAB);
+    appendU16(ecat, 0x0000);
+    appendU16(ecat, 0x0130);
+    appendU16(ecat, dataLen);
+    appendU16(ecat, 0); // irq
+    appendBytes(ecat, payload.data(), payload.size());
+    appendU16(ecat, wkc);
+    return ecat;
+}
+
+// Build an Ethernet/IPv4/UDP frame carrying an EtherCAT-over-UDP payload.
+std::vector<uint8_t> makeEtherCATOverUdpFrame(const std::array<uint8_t, 6>& dst,
+                                              const std::array<uint8_t, 6>& src,
+                                              const std::vector<uint8_t>& ecatPayload,
+                                              uint16_t dstPort = 0x88A4) {
+    std::vector<uint8_t> frame;
+    appendBytes(frame, dst.data(), 6);
+    appendBytes(frame, src.data(), 6);
+    appendU16BE(frame, 0x0800); // EtherType = IPv4
+
+    // IPv4 header (20 bytes, no options).
+    std::vector<uint8_t> ip(20, 0);
+    ip[0] = 0x45;  // version=4, IHL=5
+    ip[9] = 0x11;  // protocol = UDP
+    // src IP = 192.168.1.1, dst IP = 192.168.1.255 (big-endian / network order)
+    ip[12] = 192; ip[13] = 168; ip[14] = 1; ip[15] = 1;
+    ip[16] = 192; ip[17] = 168; ip[18] = 1; ip[19] = 255;
+    uint16_t udpLen = static_cast<uint16_t>(8 + ecatPayload.size());
+    uint16_t ipTotalLen = static_cast<uint16_t>(20 + udpLen);
+    ip[2] = static_cast<uint8_t>(ipTotalLen >> 8);
+    ip[3] = static_cast<uint8_t>(ipTotalLen & 0xFF);
+    appendBytes(frame, ip.data(), ip.size());
+
+    // UDP header (8 bytes, big-endian fields).
+    appendU16BE(frame, 0x1234);        // src port
+    appendU16BE(frame, dstPort);       // dst port (0x88A4 = EtherCAT-over-UDP)
+    appendU16BE(frame, udpLen);        // UDP length
+    appendU16BE(frame, 0);             // checksum (0 = not computed)
+
+    // EtherCAT payload.
+    appendBytes(frame, ecatPayload.data(), ecatPayload.size());
+    return frame;
+}
+
 std::vector<uint8_t> makeBigEndianSectionHeaderBlock() {
     // Helper to append big-endian values.
     auto appendU16BE = [](std::vector<uint8_t>& out, uint16_t v) {
@@ -306,6 +361,76 @@ TEST(PCAPNGReader, ReadEtherCATFrameWithVlan) {
     EXPECT_TRUE(frames[0].isEtherCAT);
     ASSERT_EQ(frames[0].datagrams.size(), 1u);
     EXPECT_EQ(frames[0].datagrams[0].cmd, Command::APRD);
+}
+
+TEST(PCAPNGReader, ReadEtherCATOverUdpFrame) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    std::array<uint8_t, 6> dst = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::array<uint8_t, 6> src = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    auto ecatPayload = makeEtherCATPayloadOnly();
+    auto frame = makeEtherCATOverUdpFrame(dst, src, ecatPayload);
+
+    auto epb = makeEnhancedPacketBlock(0, 5000, frame.data(), frame.size());
+    appendBytes(data, epb.data(), epb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    auto frames = reader.readAll();
+    ASSERT_EQ(frames.size(), 1u);
+
+    // The frame should be recognised as EtherCAT carried over UDP.
+    EXPECT_TRUE(frames[0].isEtherCAT);
+    EXPECT_TRUE(frames[0].isEtherCATOverUDP);
+    EXPECT_EQ(frames[0].innerEtherType, 0x0800u); // IPv4
+    EXPECT_EQ(frames[0].dstPort, 0x88A4u);
+    EXPECT_EQ(frames[0].srcPort, 0x1234u);
+    // 192.168.1.1 = 0xC0A80101, 192.168.1.255 = 0xC0A801FF
+    EXPECT_EQ(frames[0].srcIp, 0xC0A80101u);
+    EXPECT_EQ(frames[0].dstIp, 0xC0A801FFu);
+
+    // The embedded EtherCAT datagram must be decoded.
+    ASSERT_EQ(frames[0].datagrams.size(), 1u);
+    const auto& dg = frames[0].datagrams[0];
+    EXPECT_EQ(dg.cmd, Command::APRD);
+    EXPECT_EQ(dg.idx, 0xAB);
+    EXPECT_EQ(dg.adp, 0x0000);
+    EXPECT_EQ(dg.ado, 0x0130);
+    EXPECT_EQ(dg.dataLength, 2u);
+    EXPECT_EQ(dg.wkc, 1u);
+    ASSERT_EQ(dg.data.size(), 2u);
+    EXPECT_EQ(dg.data[0], 0x04);
+    EXPECT_EQ(dg.data[1], 0x00);
+}
+
+TEST(PCAPNGReader, NonEtherCatUdpFrameNotMarked) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    std::array<uint8_t, 6> dst = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::array<uint8_t, 6> src = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    auto ecatPayload = makeEtherCATPayloadOnly();
+    // Use a non-EtherCAT UDP destination port (e.g. 12345).
+    auto frame = makeEtherCATOverUdpFrame(dst, src, ecatPayload, 12345);
+
+    auto epb = makeEnhancedPacketBlock(0, 6000, frame.data(), frame.size());
+    appendBytes(data, epb.data(), epb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    auto frames = reader.readAll();
+    ASSERT_EQ(frames.size(), 1u);
+
+    // Not EtherCAT because the UDP port does not match.
+    EXPECT_FALSE(frames[0].isEtherCAT);
+    EXPECT_FALSE(frames[0].isEtherCATOverUDP);
 }
 
 TEST(PCAPNGReader, DirectionAndCustomOptions) {

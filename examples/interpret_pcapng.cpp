@@ -1330,6 +1330,13 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    // Collect all frames first — this also populates section/interfaces metadata.
+    auto allFrames = reader.readAll();
+    if (allFrames.empty()) {
+        std::cerr << "No frames found in pcapng file\n";
+        return 3;
+    }
+
     // Print PCAPNG summary (unless JSON)
     const auto& section = reader.sectionInfo();
     if (!json) {
@@ -1353,14 +1360,20 @@ int main(int argc, char** argv) {
             if (!iface.description.empty()) std::cout << " desc=\"" << iface.description << "\"";
             std::cout << "\n";
         }
-        std::cout << "\n";
-    }
 
-    // Collect all frames
-    auto allFrames = reader.readAll();
-    if (allFrames.empty()) {
-        std::cerr << "No frames found in pcapng file\n";
-        return 3;
+        // Count EtherCAT frames (including UDP-encapsulated) for a quick overview.
+        uint64_t ecatCount = 0;
+        uint64_t ecatUdpCount = 0;
+        for (const auto& fr : allFrames) {
+            if (fr.isEtherCAT) {
+                ++ecatCount;
+                if (fr.isEtherCATOverUDP) ++ecatUdpCount;
+            }
+        }
+        std::cout << Utf8Formatter::bullet << " Frames: " << allFrames.size()
+                  << "  EtherCAT: " << ecatCount
+                  << "  (over-UDP: " << ecatUdpCount << ")"
+                  << "\n\n";
     }
 
     // Set base timestamp for relative time output
