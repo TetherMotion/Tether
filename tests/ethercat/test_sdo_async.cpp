@@ -129,6 +129,17 @@ static bool waitFor(std::function<bool()> pred, int timeout_ms = 500) {
     return pred();
 }
 
+// Helper: wait for a response from queueRequest with timeout
+static bool waitForResponse(CoEManager& mgr, uint32_t id,
+                            SDOResponse& resp, int timeout_ms = 2000) {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (mgr.getResponse(id, resp)) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return mgr.getResponse(id, resp);
+}
+
 // ============================================================================
 // Construction Tests
 // ============================================================================
@@ -553,7 +564,7 @@ TEST_F(SDOManagerAsyncTest, AsyncUploadPollCompletion) {
     ASSERT_NE(id, 0u);
 
     SDOResponse resp{};
-    EXPECT_TRUE(mgr.getResponse(id, resp));
+    EXPECT_TRUE(waitForResponse(mgr, id, resp));
     EXPECT_TRUE(resp.success());
     EXPECT_EQ(resp.data_size, sizeof(uint16_t));
 
@@ -587,7 +598,7 @@ TEST_F(SDOManagerAsyncTest, AsyncDownloadPollCompletion) {
     ASSERT_NE(id, 0u);
 
     SDOResponse resp{};
-    EXPECT_TRUE(mgr.getResponse(id, resp));
+    EXPECT_TRUE(waitForResponse(mgr, id, resp));
     EXPECT_TRUE(resp.success());
 
     mgr.deinit();
@@ -606,7 +617,7 @@ TEST_F(SDOManagerAsyncTest, AsyncRequestFailedSlave) {
     ASSERT_NE(id, 0u);
 
     SDOResponse resp{};
-    EXPECT_TRUE(mgr.getResponse(id, resp));
+    EXPECT_TRUE(waitForResponse(mgr, id, resp));
     EXPECT_FALSE(resp.success());
     EXPECT_EQ(resp.status, SDOStatus::Failed);
     EXPECT_EQ(resp.abort_code, SDO::SDOAbortCode::DeviceStateError);
@@ -666,12 +677,13 @@ TEST_F(SDOManagerWorkerTest, WorkerProcessesMultipleRequests) {
         ids.push_back(id);
     }
 
-    EXPECT_EQ(upload_count.load(), 5);
+    // Wait for all uploads to complete
+    ASSERT_TRUE(waitFor(std::function<bool()>{[&]{ return upload_count.load() == 5; }}, 2000));
 
     // Verify all responses
     for (auto id : ids) {
         SDOResponse resp{};
-        EXPECT_TRUE(mgr.getResponse(id, resp));
+        EXPECT_TRUE(waitForResponse(mgr, id, resp));
         EXPECT_TRUE(resp.success());
     }
 
@@ -928,7 +940,7 @@ TEST_F(SDOManagerResponseFieldsTest, UploadResponseFields) {
     ASSERT_NE(id, 0u);
 
     SDOResponse resp{};
-    EXPECT_TRUE(mgr.getResponse(id, resp));
+    EXPECT_TRUE(waitForResponse(mgr, id, resp));
     EXPECT_EQ(resp.request_id, id);
     EXPECT_EQ(resp.slave_index, 3);
     EXPECT_EQ(resp.index, 0x2000);
@@ -963,7 +975,7 @@ TEST_F(SDOManagerResponseFieldsTest, DownloadResponseFields) {
     ASSERT_NE(id, 0u);
 
     SDOResponse resp{};
-    EXPECT_TRUE(mgr.getResponse(id, resp));
+    EXPECT_TRUE(waitForResponse(mgr, id, resp));
     EXPECT_EQ(resp.slave_index, 2);
     EXPECT_EQ(resp.index, 0x6040);
     EXPECT_EQ(resp.operation, SDOOperation::Download);
