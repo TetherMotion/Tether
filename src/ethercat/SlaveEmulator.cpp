@@ -970,13 +970,21 @@ std::unique_ptr<SlaveEmulator> createGenericIOSlave(
     
     // Configure sync managers
     // SM0: Mailbox In (master -> slave) at 0x1000
-    config.sync_managers.push_back({0x1000, 128, 0x26, 0x01});
+    config.sync_managers.push_back({0x1000, 128,
+        std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x26)),
+        std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x01))});
     // SM1: Mailbox Out (slave -> master) at 0x1080
-    config.sync_managers.push_back({0x1080, 128, 0x22, 0x01});
+    config.sync_managers.push_back({0x1080, 128,
+        std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x22)),
+        std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x01))});
     // SM2: Process Data Out (RxPDO) at 0x1100
-    config.sync_managers.push_back({0x1100, output_size, 0x64, 0x01});
+    config.sync_managers.push_back({0x1100, output_size,
+        std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x64)),
+        std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x01))});
     // SM3: Process Data In (TxPDO) at 0x1180
-    config.sync_managers.push_back({0x1180, input_size, 0x20, 0x01});
+    config.sync_managers.push_back({0x1180, input_size,
+        std::bit_cast<EtherCAT::SyncManager::SMControlReg>(static_cast<uint8_t>(0x20)),
+        std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(static_cast<uint8_t>(0x01))});
     
     slave->setSIIConfig(config);
     return slave;
