@@ -108,9 +108,12 @@ bool Master::drainSlaveMailbox(uint16_t slave_index, unsigned int max_drain)
             return false;
         }
 
-        // SM1 (slave→master) may signal unread data via either the mailbox-state
-        // flag (bit 3) or the write-buffer-full flag (bit 7).
-        if ((sm1_status & (Raw::EC_SM_STATUS_MBXFULL | Raw::EC_SM_STATUS_WRITE_BUFFER_FULL)) == 0) {
+        // SM1 (slave→master mailbox) signals unread data via the mailbox-full
+        // flag (bit 3, 0x08) per ETG.1000.4. Bit 7 (WRITE_BUFFER_FULL) is only
+        // meaningful for 3-buffer PDO SMs and must not be treated as "mailbox
+        // full" — doing so causes premature reads (WKC=0) on slaves that
+        // transiently set bit 7 before writing the response.
+        if ((sm1_status & Raw::EC_SM_STATUS_MBXFULL) == 0) {
             if (drained_any) {
                 TETHER_LOGI(local_tag, "Slave %u: SM1 drained successfully", slave_index);
             }
@@ -130,7 +133,7 @@ bool Master::drainSlaveMailbox(uint16_t slave_index, unsigned int max_drain)
                 // before continuing so we don't loop on stale status.
                 uint8_t sm1_status = 0;
                 if (readRegister(SlaveAddress(slave_index), Raw::sm_status_address(1), sm1_status, 100) &&
-                    (sm1_status & (Raw::EC_SM_STATUS_MBXFULL | Raw::EC_SM_STATUS_WRITE_BUFFER_FULL)) == 0) {
+                    (sm1_status & Raw::EC_SM_STATUS_MBXFULL) == 0) {
                     TETHER_LOGI(local_tag, "Slave %u: SM1 empty after reset", slave_index);
                     return true;
                 }
@@ -175,7 +178,7 @@ bool Master::resetSlaveMailboxSM1(uint16_t slave_index)
         return false;
     }
 
-    if ((sm1_status & (Raw::EC_SM_STATUS_MBXFULL | Raw::EC_SM_STATUS_WRITE_BUFFER_FULL)) != 0) {
+    if ((sm1_status & Raw::EC_SM_STATUS_MBXFULL) != 0) {
         TETHER_LOGE(local_tag, "Slave %u: SM1 still full after activate reset (status=0x%02X)",
                     slave_index, sm1_status);
         return false;

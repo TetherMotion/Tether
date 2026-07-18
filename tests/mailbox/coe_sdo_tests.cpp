@@ -797,13 +797,19 @@ TEST(CoeSDO, Download_Segmented_AbortInSegment_Fails) {
     mock.remove();
 }
 
-// Verify that segmented download succeeds when the ESC signals a full SM1 via
-// the WRITE_BUFFER_FULL flag (bit 7) instead of the traditional MBXFULL flag.
-TEST(CoeSDO, Download_Normal_SM1WriteBufferFull_Succeeds) {
+// Verify that the master does NOT treat WRITE_BUFFER_FULL (bit 7, 0x80) alone
+// as "SM1 mailbox full" for a mailbox-mode SM. Per ETG.1000.4 only bit 3
+// (MBXFULL, 0x08) indicates a full mailbox. Slaves such as the Nexcobot
+// ESC211 transiently set bit 7 before writing the response; reading the
+// mailbox in that state is rejected by the ESC (WKC=0). The master must keep
+// polling until bit 3 is set, otherwise time out — never issue a data read
+// on bit 7 alone.
+TEST(CoeSDO, Download_Normal_SM1WriteBufferFull_Alone_DoesNotTriggerRead) {
     EtherCAT::Master master;
     SegmentedDownloadMock mock;
     mock.index = 0x1000;
     mock.sub = 0;
+    // SM1 signals ONLY bit 7 (no bit 3) — must NOT be interpreted as full.
     mock.sm1_full_flag = EC_SM_STATUS_WRITE_BUFFER_FULL;
     mock.install(master);
 
@@ -816,11 +822,87 @@ TEST(CoeSDO, Download_Normal_SM1WriteBufferFull_Succeeds) {
                                0x1000, 0, data, sizeof(data),
                                false, 5, 200);
 
-    // 5 bytes with MBX_LEN=128 → normal download path
-    EXPECT_TRUE(ok) << "Normal download should succeed with WRITE_BUFFER_FULL flag";
-    EXPECT_EQ(mock.mailbox_data_reads, 1) << "Expected single response for normal download";
+    // pollSm1Full must time out because bit 3 never becomes set.
+    EXPECT_FALSE(ok) << "Download must fail when SM1 never sets MBXFULL (bit 3)";
+    // The master must NOT have issued any mailbox data read on bit 7 alone.
+    EXPECT_EQ(mock.mailbox_data_reads, 0) << "Master must not read mailbox on WRITE_BUFFER_FULL alone";
 
     mock.remove();
+}
+
+// Regression test for the ESC211 SM1 status race: the slave transiently
+// returns 0x80 (bit 7, no bit 3) on the first SM1 status poll after the
+// SDO download request, then returns 0x09 (bit 3 + bit 0) once the response
+// has actually been written. The master must NOT read the mailbox on 0x80,
+// and MUST read successfully once 0x09 (bit 3 set) appears. This mirrors the
+// log walkthrough: premature read on 0x80 → WKC=0; correct read on 0x09 → OK.
+TEST(CoeSDO, Download_Normal_SM1_Transient0x80_Then0x09_Succeeds) {
+    EtherCAT::Master master;
+
+    constexpr uint16_t SM0_STATUS_ADDR = 0x0805;
+    constexpr uint16_t SM1_STATUS_ADDR = 0x0805 + 8;
+    constexpr uint16_t MBX_WRITE_ADDR  = 0x1000;
+    constexpr uint16_t MBX_READ_ADDR   = 0x1080;
+    constexpr uint16_t MBX_LEN         = 128;
+
+    int sm1_status_reads = 0;
+    int mailbox_data_reads = 0;
+    bool write_happened = false;
+
+    master.setAprdTestCallback([&](uint16_t adp, uint16_t ado,
+                                   void* out, uint16_t len, unsigned int ms) {
+        (void)adp; (void)ms;
+
+        if (ado == SM0_STATUS_ADDR && len >= 1) {
+            uint8_t val = 0x00;
+            std::memcpy(out, &val, 1);
+            return true;
+        }
+
+        if (ado == SM1_STATUS_ADDR && len >= 1) {
+            sm1_status_reads++;
+            // Before the PDI writes the response: transient 0x80 (bit 7 only).
+            // After: 0x09 = bit 3 (MBXFULL) + bit 0 (WRITE_EVENT).
+            uint8_t val = write_happened
+                ? ((sm1_status_reads == 1) ? 0x80u : 0x09u)
+                : 0x00u;
+            std::memcpy(out, &val, 1);
+            return true;
+        }
+
+        if (ado == MBX_READ_ADDR && len >= 16) {
+            mailbox_data_reads++;
+            buildSdoDownloadResponse(static_cast<uint8_t*>(out), 0, 0x1000, 0);
+            return true;
+        }
+
+        std::memset(out, 0, len);
+        return true;
+    });
+
+    master.setApwrTestCallback([&](uint16_t adp, uint16_t ado,
+                                   const void* data, uint16_t len, unsigned int ms) {
+        (void)adp; (void)ado; (void)data; (void)len; (void)ms;
+        write_happened = true;
+        return true;
+    });
+
+    uint8_t mbx_cnt = 0;
+    uint8_t data[5] = {0x01, 0x02, 0x03, 0x04, 0x05};
+
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
+                               MBX_WRITE_ADDR, MBX_LEN, MBX_READ_ADDR, MBX_LEN,
+                               0x1000, 0, data, sizeof(data),
+                               false, 5, 200);
+
+    EXPECT_TRUE(ok) << "Download should succeed once SM1 sets MBXFULL (bit 3)";
+    // Exactly one data read — the master must not have read on the transient 0x80.
+    EXPECT_EQ(mailbox_data_reads, 1) << "Master must skip the 0x80 transient and read only on 0x09";
+    // The master must have polled SM1 status at least twice (0x80 then 0x09).
+    EXPECT_GE(sm1_status_reads, 2) << "Master must re-poll SM1 after seeing 0x80";
+
+    master.setAprdTestCallback(nullptr);
+    master.setApwrTestCallback(nullptr);
 }
 
 // ============================================================================

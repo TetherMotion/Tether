@@ -60,7 +60,7 @@ MbxPollOutcome SDOTransactionBase::pollSm1AndRead(Master& master, uint16_t adp,
         std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
         return MbxPollOutcome::Sm1Empty;
     }
-    if ((sm1_status & (EC_SM_STATUS_MBXFULL | EC_SM_STATUS_WRITE_BUFFER_FULL)) == 0) {
+    if ((sm1_status & EC_SM_STATUS_MBXFULL) == 0) {
         std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
         return MbxPollOutcome::Sm1Empty;
     }

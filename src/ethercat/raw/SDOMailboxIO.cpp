@@ -29,7 +29,7 @@ void SDOMailboxIO::drainStale(Master& master, uint16_t adp,
         if (!master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(1), sm1_status, 100)) {
             break;
         }
-        if ((sm1_status & (EC_SM_STATUS_MBXFULL | EC_SM_STATUS_WRITE_BUFFER_FULL)) == 0) {
+        if ((sm1_status & EC_SM_STATUS_MBXFULL) == 0) {
             if (i > 0) {
                 TETHER_LOGI(TAG, "SM1 drained successfully (adp=0x%04X)", adp);
             }
@@ -46,7 +46,7 @@ void SDOMailboxIO::drainStale(Master& master, uint16_t adp,
             if (master.resetSlaveMailboxSM1(slave_index)) {
                 uint8_t sm1_status = 0;
                 if (master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(1), sm1_status, 100) &&
-                    (sm1_status & (EC_SM_STATUS_MBXFULL | EC_SM_STATUS_WRITE_BUFFER_FULL)) == 0) {
+                    (sm1_status & EC_SM_STATUS_MBXFULL) == 0) {
                     TETHER_LOGI(TAG, "SM1 empty after reset (adp=0x%04X)", adp);
                     break;
                 }
@@ -68,7 +68,7 @@ bool SDOMailboxIO::waitSm0NotFull(Master& master, uint16_t adp,
         }
         uint8_t sm0_status = 0;
         if (master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(0), sm0_status, 100)) {
-            if ((sm0_status & (EC_SM_STATUS_MBXFULL | EC_SM_STATUS_WRITE_BUFFER_FULL)) == 0) {
+            if ((sm0_status & EC_SM_STATUS_MBXFULL) == 0) {
                 return true;
             }
         }
@@ -128,7 +128,7 @@ bool SDOMailboxIO::pollSm1Full(Master& master, uint16_t adp,
         }
         uint8_t sm1_status = 0;
         if (master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(1), sm1_status, 100)) {
-            if ((sm1_status & (EC_SM_STATUS_MBXFULL | EC_SM_STATUS_WRITE_BUFFER_FULL)) != 0) {
+            if ((sm1_status & EC_SM_STATUS_MBXFULL) != 0) {
                 return true;
             }
         }
