@@ -472,6 +472,8 @@ struct SIIData {
     
     // Size information
     uint16_t version{0};
+    uint16_t eeprom_size_kbits{0};   ///< EEPROM size in Kbits (from SII_SIZE_INFO word 0x002E)
+    uint16_t eeprom_size_words{0};   ///< EEPROM size in 16-bit words (calculated from kbits)
     
     // Parsing state
     bool valid{false};
@@ -500,6 +502,8 @@ struct SIIData {
         rx_pdos.clear();
         dc_configs.clear();
         version = 0;
+        eeprom_size_kbits = 0;
+        eeprom_size_words = 0;
         valid = false;
         parse_complete = false;
         checksum_ok = false;
