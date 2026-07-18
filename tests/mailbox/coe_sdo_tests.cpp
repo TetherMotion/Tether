@@ -22,6 +22,8 @@ TEST(CoeStructs, SdoStructSizes) {
     EXPECT_EQ(sizeof(SdoInitUploadReq), 8u);
     EXPECT_EQ(sizeof(SdoInitUploadRes), 8u);
     EXPECT_EQ(sizeof(SdoInitDownloadReq), 8u);
+    EXPECT_EQ(sizeof(SdoDownloadSegReq), 8u);
+    EXPECT_EQ(sizeof(SdoDownloadSegRes), 8u);
     EXPECT_EQ(sizeof(SdoAbort), 8u);
 }
 
@@ -47,9 +49,6 @@ TEST(CoeSDO, Download_InvalidParams_ReturnsFalse) {
 
     // Zero length
     EXPECT_FALSE(coe_sdo_download(master, 0x0000, &mbx_cnt, 0x1000, 128, 0x1080, 128, 0x2000, 0x0, data, 0));
-
-    // Length > 4
-    EXPECT_FALSE(coe_sdo_download(master, 0x0000, &mbx_cnt, 0x1000, 128, 0x1080, 128, 0x2000, 0x0, data, 5));
 }
 
 TEST(CoeSDO, Download_SmallMailboxSize_ReturnsFalse) {
@@ -317,6 +316,24 @@ static void buildSdoAbortResponse(uint8_t* buf, uint8_t mbx_cnt,
     abort.sub = sub;
     abort.abortCode_le = host_to_le32(abort_code);
     std::memcpy(buf + sizeof(mbx) + sizeof(coe), &abort, sizeof(abort));
+}
+
+static void buildSdoDownloadSegmentResponse(uint8_t* buf, uint8_t mbx_cnt,
+                                            bool toggle) {
+    MbxHeader mbx{};
+    mbx.length_le = host_to_le16(static_cast<uint16_t>(sizeof(CoeHeader) + sizeof(SdoDownloadSegRes)));
+    mbx.address_le = host_to_le16(0);
+    mbx.priority = 0;
+    mbx.mbxtype = mbx_type_with_cnt(EC_MBXT_COE, mbx_cnt);
+    std::memcpy(buf, &mbx, sizeof(mbx));
+
+    CoeHeader coe{};
+    coe.raw_le = host_to_le16(coe_make_raw(0, EC_COES_SDORES));
+    std::memcpy(buf + sizeof(mbx), &coe, sizeof(coe));
+
+    SdoDownloadSegRes sdo{};
+    sdo.cmd = static_cast<uint8_t>(0x20u | (toggle ? 0x10u : 0x00u));
+    std::memcpy(buf + sizeof(mbx) + sizeof(coe), &sdo, sizeof(sdo));
 }
 
 // Extended mock supporting upload, download, abort, and timeout scenarios.
@@ -619,6 +636,444 @@ TEST(CoeSDO, Download_MultipleStaleResponses_ClearsAndResendsUntilSuccess) {
 
     EXPECT_TRUE(ok) << "Should succeed after clearing multiple stale responses via re-send";
     EXPECT_GE(mock.mailbox_data_reads, 4) << "Should have read 3 stale + 1 correct response";
+
+    mock.remove();
+}
+
+// ============================================================================
+// Segmented download tests
+// ============================================================================
+
+// Mock that serves an init download response followed by segment download
+// responses.  Responses are returned in the order the master reads them.
+class SegmentedDownloadMock {
+public:
+    static constexpr uint16_t SM0_STATUS_ADDR = 0x0805;
+    static constexpr uint16_t SM1_STATUS_ADDR = 0x0805 + 8;
+    static constexpr uint16_t MBX_WRITE_ADDR = 0x1000;
+    static constexpr uint16_t MBX_READ_ADDR = 0x1080;
+    static constexpr uint16_t MBX_LEN = 128;
+
+    uint16_t index = 0x1000;
+    uint8_t sub = 0;
+    int abort_on_segment = -1;
+    uint32_t abort_code = 0x06070010;
+    uint8_t sm1_full_flag = EC_SM_STATUS_MBXFULL;
+
+    int mailbox_data_reads = 0;
+    bool write_happened = false;
+    EtherCAT::Master* master_ = nullptr;
+
+    void install(EtherCAT::Master& master) {
+        master_ = &master;
+
+        master.setAprdTestCallback([this](uint16_t adp, uint16_t ado,
+                                          void* out, uint16_t len, unsigned int ms) {
+            (void)adp; (void)ms;
+
+            if (ado == SM0_STATUS_ADDR && len >= 1) {
+                uint8_t val = 0x00;
+                std::memcpy(out, &val, 1);
+                return true;
+            }
+
+            if (ado == SM1_STATUS_ADDR && len >= 1) {
+                uint8_t val = write_happened ? sm1_full_flag : 0x00;
+                std::memcpy(out, &val, 1);
+                return true;
+            }
+
+            if (ado == MBX_READ_ADDR && len >= 16) {
+                int idx = mailbox_data_reads++;
+                if (idx == 0) {
+                    // Init download response (counter matches init request: 0)
+                    buildSdoDownloadResponse(static_cast<uint8_t*>(out), 0, index, sub);
+                } else {
+                    // Segment download response. Segment N uses counter N and
+                    // alternates toggle starting with false for segment 1.
+                    int seg_idx = idx - 1;
+                    bool toggle = (seg_idx % 2) != 0;
+                    if (seg_idx == abort_on_segment) {
+                        buildSdoAbortResponse(static_cast<uint8_t*>(out),
+                                              static_cast<uint8_t>(idx),
+                                              index, sub, abort_code);
+                    } else {
+                        buildSdoDownloadSegmentResponse(static_cast<uint8_t*>(out),
+                                                        static_cast<uint8_t>(idx), toggle);
+                    }
+                }
+                return true;
+            }
+
+            std::memset(out, 0, len);
+            return true;
+        });
+
+        master.setApwrTestCallback([this](uint16_t adp, uint16_t ado,
+                                          const void* data, uint16_t len, unsigned int ms) {
+            (void)adp; (void)ado; (void)data; (void)len; (void)ms;
+            write_happened = true;
+            return true;
+        });
+    }
+
+    void remove() {
+        if (master_) {
+            master_->setAprdTestCallback(nullptr);
+            master_->setApwrTestCallback(nullptr);
+        }
+    }
+};
+
+TEST(CoeSDO, Download_Segmented_5Bytes_Succeeds) {
+    EtherCAT::Master master;
+    SegmentedDownloadMock mock;
+    mock.index = 0x1000;
+    mock.sub = 0;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 0;
+    uint8_t data[5] = {0x01, 0x02, 0x03, 0x04, 0x05};
+
+    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+                               SegmentedDownloadMock::MBX_WRITE_ADDR, SegmentedDownloadMock::MBX_LEN,
+                               SegmentedDownloadMock::MBX_READ_ADDR, SegmentedDownloadMock::MBX_LEN,
+                               0x1000, 0, data, sizeof(data),
+                               false, 5, 200);
+
+    EXPECT_TRUE(ok) << "5-byte segmented download should succeed";
+    EXPECT_EQ(mock.mailbox_data_reads, 2) << "Expected init response + 1 segment response";
+
+    mock.remove();
+}
+
+TEST(CoeSDO, Download_Segmented_9Bytes_Succeeds) {
+    EtherCAT::Master master;
+    SegmentedDownloadMock mock;
+    mock.index = 0x1000;
+    mock.sub = 0;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 0;
+    uint8_t data[9] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09};
+
+    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+                               SegmentedDownloadMock::MBX_WRITE_ADDR, SegmentedDownloadMock::MBX_LEN,
+                               SegmentedDownloadMock::MBX_READ_ADDR, SegmentedDownloadMock::MBX_LEN,
+                               0x1000, 0, data, sizeof(data),
+                               false, 5, 200);
+
+    EXPECT_TRUE(ok) << "9-byte segmented download should succeed";
+    EXPECT_EQ(mock.mailbox_data_reads, 3) << "Expected init response + 2 segment responses";
+
+    mock.remove();
+}
+
+TEST(CoeSDO, Download_Segmented_AbortInSegment_Fails) {
+    EtherCAT::Master master;
+    SegmentedDownloadMock mock;
+    mock.index = 0x1000;
+    mock.sub = 0;
+    mock.abort_on_segment = 0;
+    mock.abort_code = 0x06070010;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 0;
+    uint8_t data[5] = {0x01, 0x02, 0x03, 0x04, 0x05};
+
+    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+                               SegmentedDownloadMock::MBX_WRITE_ADDR, SegmentedDownloadMock::MBX_LEN,
+                               SegmentedDownloadMock::MBX_READ_ADDR, SegmentedDownloadMock::MBX_LEN,
+                               0x1000, 0, data, sizeof(data),
+                               false, 5, 200);
+
+    EXPECT_FALSE(ok) << "Segment abort should cause download to fail";
+    EXPECT_GE(mock.mailbox_data_reads, 2) << "Expected init response + abort response";
+
+    mock.remove();
+}
+
+// Verify that segmented download succeeds when the ESC signals a full SM1 via
+// the WRITE_BUFFER_FULL flag (bit 7) instead of the traditional MBXFULL flag.
+TEST(CoeSDO, Download_Segmented_SM1WriteBufferFull_Succeeds) {
+    EtherCAT::Master master;
+    SegmentedDownloadMock mock;
+    mock.index = 0x1000;
+    mock.sub = 0;
+    mock.sm1_full_flag = EC_SM_STATUS_WRITE_BUFFER_FULL;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 0;
+    uint8_t data[5] = {0x01, 0x02, 0x03, 0x04, 0x05};
+
+    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+                               SegmentedDownloadMock::MBX_WRITE_ADDR, SegmentedDownloadMock::MBX_LEN,
+                               SegmentedDownloadMock::MBX_READ_ADDR, SegmentedDownloadMock::MBX_LEN,
+                               0x1000, 0, data, sizeof(data),
+                               false, 5, 200);
+
+    EXPECT_TRUE(ok) << "Segmented download should succeed with WRITE_BUFFER_FULL flag";
+    EXPECT_EQ(mock.mailbox_data_reads, 2) << "Expected init response + 1 segment response";
+
+    mock.remove();
+}
+
+// ============================================================================
+// Mailbox error response (type 0) tests — RZ/T2M infinite loop regression
+// ============================================================================
+
+// Helper: build a mailbox error response (type 0x00, not CoE)
+static void buildMailboxErrorResponse(uint8_t* buf, uint8_t mbx_cnt,
+                                       uint16_t err_code, uint16_t err_detail) {
+    MbxHeader mbx{};
+    mbx.length_le = host_to_le16(4); // 4 bytes of error payload
+    mbx.address_le = host_to_le16(0);
+    mbx.priority = 0;
+    mbx.mbxtype = mbx_type_with_cnt(EC_MBXT_ERR, mbx_cnt); // type 0x00
+    std::memcpy(buf, &mbx, sizeof(mbx));
+
+    // Error code + detail (4 bytes)
+    uint16_t err_le = host_to_le16(err_code);
+    uint16_t detail_le = host_to_le16(err_detail);
+    std::memcpy(buf + sizeof(mbx), &err_le, 2);
+    std::memcpy(buf + sizeof(mbx) + 2, &detail_le, 2);
+}
+
+// Mock that returns a mailbox error response (type 0) instead of a CoE SDO response.
+class MailboxErrorMock {
+public:
+    static constexpr uint16_t SM0_STATUS_ADDR = 0x0805;
+    static constexpr uint16_t SM1_STATUS_ADDR = 0x0805 + 8;
+    static constexpr uint16_t MBX_WRITE_ADDR = 0x1000;
+    static constexpr uint16_t MBX_READ_ADDR = 0x1080;
+    static constexpr uint16_t MBX_LEN = 128;
+
+    uint8_t mbx_cnt = 1;
+    uint16_t err_code = 0x0001;
+    uint16_t err_detail = 0x0000;
+
+    int mailbox_data_reads = 0;
+    int sm1_status_reads = 0;
+    bool write_happened = false;
+    EtherCAT::Master* master_ = nullptr;
+
+    void install(EtherCAT::Master& master) {
+        master_ = &master;
+
+        master.setAprdTestCallback([this](uint16_t adp, uint16_t ado,
+                                          void* out, uint16_t len, unsigned int ms) {
+            (void)adp; (void)ms;
+
+            if (ado == SM0_STATUS_ADDR && len >= 1) {
+                uint8_t val = 0x00;
+                std::memcpy(out, &val, 1);
+                return true;
+            }
+
+            if (ado == SM1_STATUS_ADDR && len >= 1) {
+                sm1_status_reads++;
+                uint8_t val = write_happened ? EC_SM_STATUS_MBXFULL : 0x00;
+                std::memcpy(out, &val, 1);
+                return true;
+            }
+
+            if (ado == MBX_READ_ADDR && len >= 16) {
+                mailbox_data_reads++;
+                buildMailboxErrorResponse(static_cast<uint8_t*>(out), mbx_cnt,
+                                          err_code, err_detail);
+                return true;
+            }
+
+            std::memset(out, 0, len);
+            return true;
+        });
+
+        master.setApwrTestCallback([this](uint16_t adp, uint16_t ado,
+                                          const void* data, uint16_t len, unsigned int ms) {
+            (void)adp; (void)ado; (void)data; (void)len; (void)ms;
+            write_happened = true;
+            return true;
+        });
+    }
+
+    void remove() {
+        if (master_) {
+            master_->setAprdTestCallback(nullptr);
+            master_->setApwrTestCallback(nullptr);
+        }
+    }
+};
+
+// Test: Download receives mailbox error response (type 0) — should return false
+// immediately, not loop 50 times on the empty buffer.
+TEST(CoeSDO, Download_MailboxErrorResponse_ReturnsFalseQuickly) {
+    EtherCAT::Master master;
+    MailboxErrorMock mock;
+    mock.mbx_cnt = 1;
+    mock.err_code = 0x0001;
+    mock.err_detail = 0x0000;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 1;
+    uint8_t data[4] = {0x01, 0x02, 0x03, 0x04};
+
+    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+                               MailboxErrorMock::MBX_WRITE_ADDR, MailboxErrorMock::MBX_LEN,
+                               MailboxErrorMock::MBX_READ_ADDR, MailboxErrorMock::MBX_LEN,
+                               0x1000, 0, data, 4,
+                               false, 5, 200);
+
+    EXPECT_FALSE(ok) << "Mailbox error response should cause download to fail";
+    EXPECT_EQ(mock.mailbox_data_reads, 1) << "Should read mailbox data exactly once (error response), not loop";
+
+    mock.remove();
+}
+
+// Test: Upload receives mailbox error response (type 0) — should return false
+// immediately, not loop on the empty buffer.
+TEST(CoeSDO, Upload_MailboxErrorResponse_ReturnsFalseQuickly) {
+    EtherCAT::Master master;
+    MailboxErrorMock mock;
+    mock.mbx_cnt = 1;
+    mock.err_code = 0x0002;
+    mock.err_detail = 0x0001;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 1;
+    uint8_t outbuf[256] = {0};
+    size_t out_len = 0;
+
+    bool ok = coe_sdo_upload(master, 0x0000, &mbx_cnt,
+                             MailboxErrorMock::MBX_WRITE_ADDR, MailboxErrorMock::MBX_LEN,
+                             MailboxErrorMock::MBX_READ_ADDR, MailboxErrorMock::MBX_LEN,
+                             0x1000, 0, outbuf, sizeof(outbuf), &out_len,
+                             false, 5, 200);
+
+    EXPECT_FALSE(ok) << "Mailbox error response should cause upload to fail";
+    EXPECT_EQ(mock.mailbox_data_reads, 1) << "Should read mailbox data exactly once (error response), not loop";
+
+    mock.remove();
+}
+
+// Test: Segmented download init receives mailbox error response — should return
+// false immediately.
+TEST(CoeSDO, Download_Segmented_MailboxErrorInInit_ReturnsFalseQuickly) {
+    EtherCAT::Master master;
+    MailboxErrorMock mock;
+    mock.mbx_cnt = 0; // Segmented download starts with counter 0
+    mock.err_code = 0x0001;
+    mock.err_detail = 0x0000;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 0;
+    uint8_t data[5] = {0x01, 0x02, 0x03, 0x04, 0x05};
+
+    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+                               MailboxErrorMock::MBX_WRITE_ADDR, MailboxErrorMock::MBX_LEN,
+                               MailboxErrorMock::MBX_READ_ADDR, MailboxErrorMock::MBX_LEN,
+                               0x1000, 0, data, sizeof(data),
+                               false, 5, 200);
+
+    EXPECT_FALSE(ok) << "Mailbox error in segmented download init should fail";
+    EXPECT_EQ(mock.mailbox_data_reads, 1) << "Should read mailbox data exactly once (error response), not loop";
+
+    mock.remove();
+}
+
+// ============================================================================
+// Non-CoE response tests
+// ============================================================================
+
+// Helper: build a non-CoE mailbox response (e.g. EoE type 0x02)
+static void buildNonCoeResponse(uint8_t* buf, uint8_t mbx_cnt, uint8_t mbx_type) {
+    MbxHeader mbx{};
+    mbx.length_le = host_to_le16(8);
+    mbx.address_le = host_to_le16(0);
+    mbx.priority = 0;
+    mbx.mbxtype = mbx_type_with_cnt(mbx_type, mbx_cnt);
+    std::memcpy(buf, &mbx, sizeof(mbx));
+    // Fill remaining with non-zero data to distinguish from empty buffer
+    for (size_t i = sizeof(mbx); i < 32; ++i) {
+        buf[i] = 0xFF;
+    }
+}
+
+// Test: Download receives non-CoE response (EoE type 0x02) — should abort, not loop
+TEST(CoeSDO, Download_NonCoeResponse_AbortsCleanly) {
+    EtherCAT::Master master;
+    MailboxErrorMock mock;
+    // Override the data read to return a non-CoE response
+    mock.install(master);
+    master.setAprdTestCallback([&mock](uint16_t adp, uint16_t ado,
+                                       void* out, uint16_t len, unsigned int ms) {
+        (void)adp; (void)ms;
+
+        if (ado == MailboxErrorMock::SM0_STATUS_ADDR && len >= 1) {
+            uint8_t val = 0x00;
+            std::memcpy(out, &val, 1);
+            return true;
+        }
+
+        if (ado == MailboxErrorMock::SM1_STATUS_ADDR && len >= 1) {
+            mock.sm1_status_reads++;
+            uint8_t val = mock.write_happened ? EC_SM_STATUS_MBXFULL : 0x00;
+            std::memcpy(out, &val, 1);
+            return true;
+        }
+
+        if (ado == MailboxErrorMock::MBX_READ_ADDR && len >= 16) {
+            mock.mailbox_data_reads++;
+            // Return EoE (type 0x02) response instead of CoE
+            buildNonCoeResponse(static_cast<uint8_t*>(out), 1, 0x02);
+            return true;
+        }
+
+        std::memset(out, 0, len);
+        return true;
+    });
+
+    uint8_t mbx_cnt = 1;
+    uint8_t data[4] = {0x01, 0x02, 0x03, 0x04};
+
+    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+                               MailboxErrorMock::MBX_WRITE_ADDR, MailboxErrorMock::MBX_LEN,
+                               MailboxErrorMock::MBX_READ_ADDR, MailboxErrorMock::MBX_LEN,
+                               0x1000, 0, data, 4,
+                               false, 5, 200);
+
+    EXPECT_FALSE(ok) << "Non-CoE response should cause download to fail (timeout after break)";
+    EXPECT_EQ(mock.mailbox_data_reads, 1) << "Should read mailbox data exactly once, not loop on empty buffer";
+
+    mock.remove();
+}
+
+// ============================================================================
+// Status-gated read tests — verify master re-checks SM1 status before data reads
+// ============================================================================
+
+// Test: Download status-gated read — master should check SM1 status before
+// each data read, not blindly read the data buffer.
+TEST(CoeSDO, Download_StatusGatedRead_ChecksSM1BeforeData) {
+    EtherCAT::Master master;
+    StaleResponseMockExt mock;
+    mock.final_cnt = 1;
+    mock.final_index = 0x1000;
+    mock.final_sub = 0;
+    mock.final_is_download = true;
+    mock.num_stale_responses = 0;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 1;
+    uint8_t data[4] = {0x01, 0x02, 0x03, 0x04};
+
+    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+                               StaleResponseMockExt::MBX_WRITE_ADDR, StaleResponseMockExt::MBX_LEN,
+                               StaleResponseMockExt::MBX_READ_ADDR, StaleResponseMockExt::MBX_LEN,
+                               0x1000, 0, data, 4,
+                               false, 5, 200);
+
+    EXPECT_TRUE(ok) << "Download should succeed with status-gated reads";
+    EXPECT_EQ(mock.mailbox_data_reads, 1) << "Should read mailbox data exactly once for a clean response";
 
     mock.remove();
 }
