@@ -375,11 +375,29 @@ static void printEtherCATFrame(const uint8_t* frame, size_t length, bool is_tx, 
     const uint16_t ec_len = ec_raw & 0x07FFu;
     const uint16_t ec_type = (ec_raw >> 12) & 0x0Fu;
 
-    TETHER_LOGI("ec_pkt", "[%s] EtherCAT Frame: length=%u type=%u", dir, ec_len, ec_type);
+    struct DgInfo {
+        const char* cmd;
+        uint8_t idx;
+        uint16_t adp;
+        uint16_t ado;
+        uint16_t datalen;
+        uint16_t wkc;
+        bool more;
+        bool circulating;
+        bool has_data;
+        bool all_zero;
+        size_t dump_len;
+        std::string hex;
+        std::string data;
+        std::vector<std::string> coe_lines;
+    };
+    std::vector<DgInfo> dgs;
+    dgs.reserve(8);
 
     size_t offset = ecat_offset + sizeof(EtherCAT::FrameHeader);
     size_t remaining = ec_len;
     uint8_t dg_idx = 0;
+    bool can_collapse = true;
 
     while (remaining >= sizeof(EtherCAT::DatagramHeader) &&
            offset + sizeof(EtherCAT::DatagramHeader) <= length) {
@@ -398,70 +416,160 @@ static void printEtherCATFrame(const uint8_t* frame, size_t length, bool is_tx, 
             wkc = le16_to_host(*reinterpret_cast<const uint16_t*>(frame + wkc_offset));
         }
 
-        TETHER_LOGI("ec_pkt", "[%s]   Datagram[%u]: cmd=%s idx=0x%02X adp=0x%04X ado=0x%04X len=%u wkc=%u more=%s circulating=%s",
-                    dir, dg_idx,
-                    commandToString(dg->cmd),
-                    dg->idx,
-                    adp, ado,
-                    datalen, wkc,
-                    more ? "yes" : "no",
-                    circulating ? "yes" : "no");
+        DgInfo info;
+        info.cmd = commandToString(dg->cmd);
+        info.idx = dg->idx;
+        info.adp = adp;
+        info.ado = ado;
+        info.datalen = datalen;
+        info.wkc = wkc;
+        info.more = more;
+        info.circulating = circulating;
+        info.has_data = (datalen > 0 && length >= data_offset + datalen);
+        info.all_zero = false;
+        info.dump_len = 0;
 
-        if (datalen > 0 && length >= data_offset + datalen) {
-            bool all_zero = true;
+        if (info.has_data) {
+            info.all_zero = true;
             for (size_t i = 0; i < datalen; ++i) {
                 if (frame[data_offset + i] != 0) {
-                    all_zero = false;
+                    info.all_zero = false;
                     break;
                 }
             }
-            if (all_zero) {
-                TETHER_LOGI("ec_pkt", "[%s]     Data (%u bytes): All zeroes",
-                            dir, static_cast<unsigned>(datalen));
-            } else {
+            if (!info.all_zero) {
                 constexpr size_t kMaxHexDump = 64;
                 const size_t dump_len = (datalen < kMaxHexDump) ? datalen : kMaxHexDump;
-                char hexbuf[256];
-                size_t pos = 0;
-                for (size_t i = 0; i < dump_len && pos + 3 < sizeof(hexbuf); i++) {
-                    pos += std::snprintf(hexbuf + pos, sizeof(hexbuf) - pos, "%02X ", frame[data_offset + i]);
+                info.dump_len = dump_len;
+                info.hex.reserve(dump_len * 3 + 4);
+                info.data.reserve(dump_len * 3);
+                for (size_t i = 0; i < dump_len; ++i) {
+                    char byte_str[4];
+                    char byte_no_space[3];
+                    std::snprintf(byte_str, sizeof(byte_str), "%02X ", frame[data_offset + i]);
+                    std::snprintf(byte_no_space, sizeof(byte_no_space), "%02X", frame[data_offset + i]);
+                    info.hex += byte_str;
+                    if (i > 0) info.data += ' ';
+                    info.data += byte_no_space;
                 }
                 if (datalen > kMaxHexDump) {
-                    pos += std::snprintf(hexbuf + pos, sizeof(hexbuf) - pos, "...");
+                    info.hex += "...";
                 }
-                TETHER_LOGI("ec_pkt", "[%s]     Data (%u/%u bytes): %s",
-                            dir, static_cast<unsigned>(dump_len), static_cast<unsigned>(datalen), hexbuf);
-            }
-
-            // If payload looks like a CoE mailbox packet, interpret it
-            if (datalen >= 8) {
-                const uint8_t* mbx_data = frame + data_offset;
-                const uint16_t mbx_len = mbx_data[0] | (static_cast<uint16_t>(mbx_data[1]) << 8);
-                const uint8_t mbx_type = mbx_data[5] & 0x0F;
-                if (mbx_type == 0x03 && mbx_len >= 2 && mbx_len + 6 <= datalen) {
-                    EtherCAT::PacketInterpreters::CoEPacketInterpreter interp(mbx_data, datalen);
-                    std::string coe_str = interp.toString();
-                    size_t line_start = 0;
-                    while (line_start < coe_str.size()) {
-                        size_t line_end = coe_str.find('\n', line_start);
-                        if (line_end == std::string::npos) line_end = coe_str.size();
-                        if (line_end > line_start) {
-                            TETHER_LOGI("ec_pkt", "[%s]     CoE: %s",
-                                        dir, coe_str.substr(line_start, line_end - line_start).c_str());
+                // If payload looks like a CoE mailbox packet, interpret it
+                if (datalen >= 8) {
+                    const uint8_t* mbx_data = frame + data_offset;
+                    const uint16_t mbx_len = mbx_data[0] | (static_cast<uint16_t>(mbx_data[1]) << 8);
+                    const uint8_t mbx_type = mbx_data[5] & 0x0F;
+                    if (mbx_type == 0x03 && mbx_len >= 2 && mbx_len + 6 <= datalen) {
+                        EtherCAT::PacketInterpreters::CoEPacketInterpreter interp(mbx_data, datalen);
+                        std::string coe_str = interp.toString();
+                        size_t line_start = 0;
+                        while (line_start < coe_str.size()) {
+                            size_t line_end = coe_str.find('\n', line_start);
+                            if (line_end == std::string::npos) line_end = coe_str.size();
+                            if (line_end > line_start) {
+                                info.coe_lines.emplace_back(coe_str.substr(line_start, line_end - line_start));
+                            }
+                            line_start = line_end + 1;
                         }
-                        line_start = line_end + 1;
                     }
                 }
             }
         }
 
+        if (!info.has_data || (!info.all_zero && info.datalen > 16)) {
+            can_collapse = false;
+        }
+
+        dgs.push_back(info);
+
         const size_t dg_total = sizeof(EtherCAT::DatagramHeader) + datalen + sizeof(uint16_t);
-        if (remaining < dg_total) break;
+        if (remaining < dg_total) {
+            can_collapse = false;
+            break;
+        }
         remaining -= dg_total;
         offset += dg_total;
         dg_idx++;
 
         if (!more) break;
+    }
+
+    if (can_collapse && !dgs.empty()) {
+        std::string line;
+        line.reserve(256);
+        line += "[";
+        line += dir;
+        line += "] Frame: length=";
+        line += std::to_string(static_cast<unsigned>(ec_len));
+        line += " type=";
+        line += std::to_string(static_cast<unsigned>(ec_type));
+        const bool single = (dgs.size() == 1);
+        for (size_t i = 0; i < dgs.size(); ++i) {
+            const auto& dg = dgs[i];
+            if (!single) {
+                char prefix[32];
+                std::snprintf(prefix, sizeof(prefix), " | DG%u: ", static_cast<unsigned>(i));
+                line += prefix;
+            } else {
+                line += " ";
+            }
+            line += dg.cmd;
+            char fields[128];
+            std::snprintf(fields, sizeof(fields), " idx=0x%02X adp=0x%04X ado=0x%04X len=%u wkc=%u more=%s circ=%s",
+                          static_cast<unsigned>(dg.idx), dg.adp, dg.ado,
+                          static_cast<unsigned>(dg.datalen), dg.wkc,
+                          dg.more ? "yes" : "no", dg.circulating ? "yes" : "no");
+            line += fields;
+            if (dg.has_data) {
+                if (dg.all_zero) {
+                    char dbuf[32];
+                    std::snprintf(dbuf, sizeof(dbuf), " Data=%u zero", static_cast<unsigned>(dg.datalen));
+                    line += dbuf;
+                } else {
+                    line += " Data=";
+                    line += dg.data;
+                }
+            }
+        }
+        TETHER_LOGI("ec_pkt", "%s", line.c_str());
+    } else {
+        TETHER_LOGI("ec_pkt", "[%s] EtherCAT Frame: length=%u type=%u", dir, ec_len, ec_type);
+        for (size_t i = 0; i < dgs.size(); ++i) {
+            const auto& dg = dgs[i];
+            std::string dgram_line;
+            dgram_line += "[";
+            dgram_line += dir;
+            dgram_line += "]   Datagram[";
+            dgram_line += std::to_string(static_cast<unsigned>(i));
+            dgram_line += "]: ";
+            dgram_line += dg.cmd;
+            char fields[128];
+            std::snprintf(fields, sizeof(fields), " idx=0x%02X adp=0x%04X ado=0x%04X len=%u wkc=%u more=%s circulating=%s",
+                          static_cast<unsigned>(dg.idx), dg.adp, dg.ado,
+                          static_cast<unsigned>(dg.datalen), dg.wkc,
+                          dg.more ? "yes" : "no", dg.circulating ? "yes" : "no");
+            dgram_line += fields;
+            bool inline_data = (dg.has_data && (dg.all_zero || dg.datalen <= 16));
+            if (inline_data) {
+                if (dg.all_zero) {
+                    char dbuf[32];
+                    std::snprintf(dbuf, sizeof(dbuf), " Data=%u zero", static_cast<unsigned>(dg.datalen));
+                    dgram_line += dbuf;
+                } else {
+                    dgram_line += " Data=";
+                    dgram_line += dg.data;
+                }
+            }
+            TETHER_LOGI("ec_pkt", "%s", dgram_line.c_str());
+            if (dg.has_data && !inline_data) {
+                TETHER_LOGI("ec_pkt", "[%s]     Data (%u/%u bytes): %s",
+                            dir, static_cast<unsigned>(dg.dump_len), static_cast<unsigned>(dg.datalen), dg.hex.c_str());
+                for (const auto& coe_line : dg.coe_lines) {
+                    TETHER_LOGI("ec_pkt", "[%s]     CoE: %s", dir, coe_line.c_str());
+                }
+            }
+        }
     }
 }
 
