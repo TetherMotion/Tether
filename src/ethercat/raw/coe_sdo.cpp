@@ -8,6 +8,7 @@
 #include <thread>
 #include <chrono>
 #include <cinttypes>
+#include <vector>
 
 namespace EtherCAT {
 namespace Raw {
@@ -126,25 +127,50 @@ static void mbx_drain_all_stale(Master& master, uint16_t adp,
                                 uint16_t mbx_read_addr, uint16_t mbx_read_len,
                                 unsigned int max_drain = 16)
 {
+    if (mbx_read_len == 0) {
+        return;
+    }
+
+    // Some ESCs only clear WRITE_BUF_FULL when the master reads the entire
+    // configured mailbox length in one datagram. Allocate a buffer that matches
+    // the SM length instead of capping at 256 bytes.
+    std::vector<uint8_t> drain_buf(mbx_read_len, 0);
+
     for (unsigned int i = 0; i < max_drain; ++i) {
         uint8_t sm1_status = 0;
         if (!master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(1), sm1_status, 100)) {
             break;
         }
-        if ((sm1_status & EC_SM_STATUS_MBXFULL) == 0) {
+        // SM1 (slave→master) may signal unread data via either the mailbox-state
+        // flag (bit 3) or the write-buffer-full flag (bit 7). Check both so we
+        // drain correctly regardless of which flag the ESC asserts.
+        if ((sm1_status & (EC_SM_STATUS_MBXFULL | EC_SM_STATUS_WRITE_BUFFER_FULL)) == 0) {
+            if (i > 0) {
+                TETHER_LOGI(TAG, "SM1 drained successfully (adp=0x%04X)", adp);
+            }
             break;
         }
         if (i == 0) {
             TETHER_LOGW(TAG, "Stale mailbox data detected (SM1 full, adp=0x%04X). Draining before new SDO request.",
                         adp);
         }
-        uint8_t drain_buf[256] = {0};
-        uint16_t drain_len = mbx_read_len;
-        if (drain_len > sizeof(drain_buf)) {
-            drain_len = static_cast<uint16_t>(sizeof(drain_buf));
+        if (!master.readRegister(Master::slaveAddressFromADP(adp), mbx_read_addr,
+                                 drain_buf.data(), static_cast<uint16_t>(drain_buf.size()), 200)) {
+            TETHER_LOGW(TAG, "SM1 drain read failed (adp=0x%04X), attempting SM1 activate reset", adp);
+            const uint16_t slave_index = Master::slaveAddressFromADP(adp).slavePosition();
+            if (master.resetSlaveMailboxSM1(slave_index)) {
+                // After a successful reset the buffer should be empty; re-check.
+                uint8_t sm1_status = 0;
+                if (master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(1), sm1_status, 100) &&
+                    (sm1_status & (EC_SM_STATUS_MBXFULL | EC_SM_STATUS_WRITE_BUFFER_FULL)) == 0) {
+                    TETHER_LOGI(TAG, "SM1 empty after reset (adp=0x%04X)", adp);
+                    break;
+                }
+            }
+            break;
         }
-        (void)master.readRegister(Master::slaveAddressFromADP(adp), mbx_read_addr, drain_buf, drain_len, 200);
-        TETHER_LOGW(TAG, "Drained stale mailbox data #%u (adp=0x%04X)", i + 1, adp);
+        TETHER_LOGW(TAG, "Drained stale mailbox data #%u (adp=0x%04X, len=%u)",
+                    i + 1, adp, static_cast<unsigned>(drain_buf.size()));
     }
 }
 
@@ -290,7 +316,9 @@ static bool mbx_wait_sm0_not_full(Master& master, uint16_t adp,
         }
         uint8_t sm0_status = 0;
         if (master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(0), sm0_status, 100)) {
-            if ((sm0_status & EC_SM_STATUS_MBXFULL) == 0) {
+            // SM0 (master→slave) may signal a full outbound mailbox via either
+            // the mailbox-state flag (bit 3) or the write-buffer-full flag (bit 7).
+            if ((sm0_status & (EC_SM_STATUS_MBXFULL | EC_SM_STATUS_WRITE_BUFFER_FULL)) == 0) {
                 return true;
             }
         }
@@ -355,8 +383,9 @@ static bool mbx_apwr_with_wkc_probe(
  *
  * After the master writes an SDO request into the slave's RX mailbox (SM0),
  * the slave's PDI must parse the request, fetch data, and write the response
- * into the TX mailbox (SM1).  We know SM1 is ready when bit 3 of the
- * SM1 Status register (ESC address 0x080D) is set.
+ * into the TX mailbox (SM1).  We know SM1 is ready when either the mailbox
+ * state flag (bit 3) or the write-buffer-full flag (bit 7) of the SM1 Status
+ * register (ESC address 0x080D) is set.
  *
  * @param master       Master instance
  * @param adp          Auto-increment address of the target slave
@@ -367,6 +396,12 @@ static bool mbx_poll_sm1_full(Master& master, uint16_t adp,
                                 unsigned int timeout_ms,
                                 unsigned int poll_interval_ms = 5)
 {
+    // Enforce minimum inter-poll delay for RZ/T2M ESC compatibility.
+    // The RZ/T2M's Cortex-R52 core needs time to react to mailbox writes;
+    // zero-delay polling can cause bus-register contention.
+    if (poll_interval_ms == 0) {
+        poll_interval_ms = 1;
+    }
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
     while (std::chrono::steady_clock::now() < deadline) {
         if (master.isCancelRequested()) {
@@ -374,7 +409,9 @@ static bool mbx_poll_sm1_full(Master& master, uint16_t adp,
         }
         uint8_t sm1_status = 0;
         if (master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(1), sm1_status, 100)) {
-            if ((sm1_status & EC_SM_STATUS_MBXFULL) != 0) {
+            // SM1 (slave→master) may signal a waiting response via either the
+            // mailbox-state flag (bit 3) or the write-buffer-full flag (bit 7).
+            if ((sm1_status & (EC_SM_STATUS_MBXFULL | EC_SM_STATUS_WRITE_BUFFER_FULL)) != 0) {
                 return true;
             }
         }
@@ -556,8 +593,27 @@ bool coe_sdo_upload(
                 TETHER_LOGW(TAG, "SDO upload cancelled");
                 return false;
             }
+
+            // Re-check SM1 status before reading data — never read blind.
+            // On the RZ/T2M, reading the mailbox data buffer while WKC=0
+            // can desynchronize the internal buffer toggle tracking.
+            uint8_t sm1_status = 0;
+            if (!master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(1), sm1_status, 100)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+                continue;
+            }
+            if ((sm1_status & (EC_SM_STATUS_MBXFULL | EC_SM_STATUS_WRITE_BUFFER_FULL)) == 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+                continue;
+            }
+
+            // SM1 is full — read the FULL configured mailbox length.
+            // The RZ/T2M ESC only clears the Buffer Full flag when the entire
+            // configured SM1 length has been read by the master.
             if (!master.readRegister(Master::slaveAddressFromADP(adp), mbx_read_addr, mbxbuf, static_cast<uint16_t>(mbx_read_len), 200)) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                // WKC=0 on data read despite SM1 full — back off and re-poll status
+                TETHER_LOGW(TAG, "SDO upload: mailbox data read WKC=0 despite SM1 full — backing off (adp=0x%04X)", adp);
+                std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
                 continue;
             }
 
@@ -576,16 +632,22 @@ bool coe_sdo_upload(
                 }
 #endif
             }
+            // Handle mailbox error response (type 0x00) — abort immediately
+            if (r_type == EC_MBXT_ERR) {
+                if (r_len >= 4) {
+                    const uint16_t err = le16_to_host(*reinterpret_cast<const uint16_t *>(mbxbuf + sizeof(MbxHeader) + 0));
+                    const uint16_t detail = le16_to_host(*reinterpret_cast<const uint16_t *>(mbxbuf + sizeof(MbxHeader) + 2));
+                    TETHER_LOGE(TAG, "Mailbox error response: cnt=%u err=0x%04X detail=0x%04X (adp=0x%04X index=0x%04X:%u)",
+                                r_cnt, err, detail, adp, index, sub);
+                } else {
+                    TETHER_LOGE(TAG, "Mailbox error response (truncated): cnt=%u len=%u (adp=0x%04X index=0x%04X:%u)",
+                                r_cnt, r_len, adp, index, sub);
+                }
+                return false;
+            }
             if (r_len == 0 || r_type != EC_MBXT_COE) {
                 if (!logged_mbx_mismatch) {
                     logged_mbx_mismatch = true;
-                    if (r_type == 0x00 && r_len >= 4) {
-                        const uint16_t err = le16_to_host(*reinterpret_cast<const uint16_t *>(mbxbuf + sizeof(MbxHeader) + 0));
-                        const uint16_t detail = le16_to_host(*reinterpret_cast<const uint16_t *>(mbxbuf + sizeof(MbxHeader) + 2));
-                        char tmp_err[64];
-                        snprintf(tmp_err, sizeof(tmp_err), "MBX error: cnt=%u err=0x%04x detail=0x%04x", r_cnt, err, detail);
-                        TETHER_LOGW(TAG, "%s", tmp_err);
-                    }
                     {
                         char tmp[96];
                         snprintf(tmp, sizeof(tmp), "MBX mismatch: len=%u type=0x%02x cnt=%u prio=0x%02x rawType=0x%02x", r_len, r_type,
@@ -593,11 +655,11 @@ bool coe_sdo_upload(
                         TETHER_LOGI(TAG, "%s", tmp);
                     }
                 }
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                continue;
+                // Non-CoE response consumed — don't loop on the now-empty buffer
+                break;
             }
             if (sizeof(MbxHeader) + r_len > mbx_read_len) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
                 continue;
             }
             // Use memcpy instead of reinterpret_cast for safety
@@ -634,8 +696,8 @@ bool coe_sdo_upload(
                     }
 #endif
                 }
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                continue;
+                // Unexpected CoE service — don't loop on the now-empty buffer
+                break;
             }
             // Validate mailbox counter — a stale response from a previous
             // (possibly timed-out) request will have a different counter.
@@ -747,7 +809,7 @@ bool coe_sdo_upload(
 
         bool toggle = false;
         size_t produced = 0;
-        for (int seg = 0; seg < 200; seg++) {
+        for (int seg = 0; seg < ECAT_SDO_UPLOAD_MAX_SEGMENTS; seg++) {
             MbxHeader seg_mbx{};
             seg_mbx.length_le = host_to_le16(static_cast<uint16_t>(sizeof(CoeHeader) + 8));
             seg_mbx.address_le = host_to_le16(0);
@@ -870,6 +932,477 @@ bool coe_sdo_upload(
     return false;
 }
 
+// Segmented SDO download for payloads larger than 4 bytes.
+// Implements ETG.1000.5 segmented download: init request (0x21) followed by
+// segment requests (ccs=0) carrying up to 7 bytes each, with toggle-bit
+// alternation and last-segment indication.
+static bool coe_sdo_download_segmented(
+    Master& master,
+    uint16_t adp,
+    uint8_t *inout_mbx_cnt,
+    uint16_t mbx_write_addr,
+    uint16_t mbx_write_len,
+    uint16_t mbx_read_addr,
+    uint16_t mbx_read_len,
+    uint16_t index,
+    uint8_t sub,
+    const uint8_t *data,
+    size_t data_len,
+    bool diag_enabled,
+    unsigned int poll_interval_ms,
+    unsigned int transaction_timeout_ms)
+{
+    uint8_t mbxbuf[256] = {0};
+    if (mbx_write_len > sizeof(mbxbuf) || mbx_read_len > sizeof(mbxbuf)) {
+        TETHER_LOGE(TAG, "Mailbox size too large (wr=%u rd=%u)", mbx_write_len, mbx_read_len);
+        return false;
+    }
+
+    uint8_t mbx_cnt = 0;
+    if (inout_mbx_cnt != nullptr) {
+        mbx_cnt = *inout_mbx_cnt;
+    }
+
+    static constexpr int MAX_STALE_RETRIES = 8;
+
+    // Helper: re-send the current mbxbuf contents and wait for SM1 full.
+    auto resend_and_wait = [&](const char* phase) -> bool {
+        if (!mbx_apwr_with_wkc_probe(master, adp,
+                                     mbx_write_addr,
+                                     mbx_read_addr,
+                                     mbxbuf,
+                                     static_cast<uint16_t>(mbx_write_len),
+                                     500,
+                                     nullptr)) {
+            TETHER_LOGE(TAG, "SDO segmented download (%s): re-send failed after stale response (adp=0x%04X index=0x%04X:%u)",
+                        phase, adp, index, sub);
+            return false;
+        }
+        if (!mbx_poll_sm1_full(master, adp, transaction_timeout_ms, poll_interval_ms)) {
+            TETHER_LOGE(TAG, "SDO segmented download (%s): SM1 never full after re-send (adp=0x%04X index=0x%04X:%u timeout=%ums)",
+                        phase, adp, index, sub, transaction_timeout_ms);
+            mbx_diag_dump_slave_state(master, adp, mbx_write_addr, mbx_read_addr);
+            return false;
+        }
+        return true;
+    };
+
+    // --- Init download request ------------------------------------------------
+    {
+        const uint8_t expected_mbx_cnt = mbx_cnt;
+
+        MbxHeader mbx{};
+        mbx.length_le = host_to_le16(static_cast<uint16_t>(sizeof(CoeHeader) + sizeof(SdoInitDownloadReq)));
+        mbx.address_le = host_to_le16(0);
+        mbx.priority = 0;
+        mbx.mbxtype = mbx_type_with_cnt(EC_MBXT_COE, mbx_cnt);
+
+        CoeHeader coe{};
+        coe.raw_le = host_to_le16(coe_make_raw(0, EC_COES_SDOREQ));
+
+        // Non-expedited download with size indicated: 0x20 | 0x01 = 0x21
+        SdoInitDownloadReq sdo{};
+        sdo.cmd = static_cast<uint8_t>(EC_SDO_DOWN_REQ | 0x01u);
+        sdo.index_le = host_to_le16(index);
+        sdo.sub = sub;
+        sdo.data_le = host_to_le32(static_cast<uint32_t>(data_len));
+
+        std::memcpy(mbxbuf, &mbx, sizeof(mbx));
+        std::memcpy(mbxbuf + sizeof(mbx), &coe, sizeof(coe));
+        std::memcpy(mbxbuf + sizeof(mbx) + sizeof(coe), &sdo, sizeof(sdo));
+
+        const size_t init_msg_len = sizeof(mbx) + sizeof(coe) + sizeof(sdo);
+        if (init_msg_len > mbx_write_len) {
+            TETHER_LOGE(TAG, "Mailbox write len too small for segmented init (%u < %u)",
+                        mbx_write_len, static_cast<unsigned>(init_msg_len));
+            return false;
+        }
+
+        logCoeMbxPacket("TX", adp, index, sub, mbxbuf, init_msg_len,
+                        master.debugFlags().coeTxPackets && master.debugFlags().coeTxPacketsFilt.allows(slaveIndexFromADP(adp)));
+
+        mbx_cnt = static_cast<uint8_t>((mbx_cnt >= 7) ? 1 : (mbx_cnt + 1));
+        if (inout_mbx_cnt != nullptr) {
+            *inout_mbx_cnt = mbx_cnt;
+        }
+
+        (void)mbx_drain_all_stale(master, adp, mbx_read_addr, mbx_read_len);
+
+        bool used_alt = false;
+        if (!mbx_apwr_with_wkc_probe(master, adp,
+                                     mbx_write_addr,
+                                     mbx_read_addr,
+                                     mbxbuf,
+                                     static_cast<uint16_t>(mbx_write_len),
+                                     500,
+                                     &used_alt)) {
+            TETHER_LOGE(TAG, "SDO segmented download init: Mailbox write failed (adp=0x%04X wr=0x%04X rd=0x%04X)",
+                        adp, mbx_write_addr, mbx_read_addr);
+            return false;
+        }
+        if (used_alt) {
+            std::swap(mbx_write_addr, mbx_read_addr);
+            std::swap(mbx_write_len, mbx_read_len);
+        }
+
+        if (!mbx_poll_sm1_full(master, adp, transaction_timeout_ms, poll_interval_ms)) {
+            TETHER_LOGE(TAG, "SDO segmented download init: SM1 never became full (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%02x timeout=%ums)",
+                        adp, mbx_write_addr, mbx_read_addr, index, sub, transaction_timeout_ms);
+            mbx_diag_dump_slave_state(master, adp, mbx_write_addr, mbx_read_addr);
+            return false;
+        }
+
+        bool got_init = false;
+        int stale_retry_count = 0;
+        for (int attempt = 0; attempt < 50; attempt++) {
+            if (master.isCancelRequested()) {
+                TETHER_LOGW(TAG, "SDO segmented download cancelled");
+                return false;
+            }
+
+            // Re-check SM1 status before reading data — never read blind.
+            uint8_t sm1_status = 0;
+            if (!master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(1), sm1_status, 100)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+                continue;
+            }
+            if ((sm1_status & (EC_SM_STATUS_MBXFULL | EC_SM_STATUS_WRITE_BUFFER_FULL)) == 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+                continue;
+            }
+
+            // SM1 is full — read the FULL configured mailbox length.
+            if (!master.readRegister(Master::slaveAddressFromADP(adp), mbx_read_addr, mbxbuf, static_cast<uint16_t>(mbx_read_len), 500)) {
+                TETHER_LOGW(TAG, "SDO segmented download init: mailbox data read WKC=0 despite SM1 full — backing off (adp=0x%04X)", adp);
+                std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+                continue;
+            }
+
+            MbxHeader resp_mbx{};
+            std::memcpy(&resp_mbx, mbxbuf, sizeof(resp_mbx));
+            const uint16_t resp_len = le16_to_host(resp_mbx.length_le);
+            const uint8_t resp_cnt = static_cast<uint8_t>((resp_mbx.mbxtype >> 4) & 0x0Fu);
+            const uint8_t resp_type = static_cast<uint8_t>(resp_mbx.mbxtype & 0x0Fu);
+
+            // Handle mailbox error response (type 0x00) — abort immediately
+            if (resp_type == EC_MBXT_ERR) {
+                if (resp_len >= 4) {
+                    const uint16_t err = le16_to_host(*reinterpret_cast<const uint16_t*>(mbxbuf + sizeof(MbxHeader)));
+                    const uint16_t detail = le16_to_host(*reinterpret_cast<const uint16_t*>(mbxbuf + sizeof(MbxHeader) + 2));
+                    TETHER_LOGE(TAG, "Mailbox error response (seg download init): cnt=%u err=0x%04X detail=0x%04X (adp=0x%04X index=0x%04X:%u)",
+                                resp_cnt, err, detail, adp, index, sub);
+                } else {
+                    TETHER_LOGE(TAG, "Mailbox error response (seg download init, truncated): cnt=%u len=%u (adp=0x%04X index=0x%04X:%u)",
+                                resp_cnt, resp_len, adp, index, sub);
+                }
+                return false;
+            }
+
+            // Reject non-CoE responses — don't loop on the now-empty buffer
+            if (resp_type != EC_MBXT_COE) {
+                TETHER_LOGW(TAG, "Non-CoE mailbox response (seg download init): type=%u cnt=%u (adp=0x%04X index=0x%04X:%u) — aborting",
+                            resp_type, resp_cnt, adp, index, sub);
+                break;
+            }
+
+            if (resp_cnt != expected_mbx_cnt) {
+                TETHER_LOGW(TAG, "Stale mailbox response (segmented download init): cnt=%u expected=%u (adp=0x%04X index=0x%04X:%u) — clearing and re-sending",
+                            resp_cnt, expected_mbx_cnt, adp, index, sub);
+                if (++stale_retry_count <= MAX_STALE_RETRIES) {
+                    if (!resend_and_wait("init")) {
+                        return false;
+                    }
+                } else {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+                }
+                continue;
+            }
+
+            if (resp_len < sizeof(CoeHeader) + sizeof(SdoInitDownloadRes)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+                continue;
+            }
+
+            // Validate CoE service — must be SDO Response
+            CoeHeader resp_coe{};
+            std::memcpy(&resp_coe, mbxbuf + sizeof(MbxHeader), sizeof(resp_coe));
+            const uint8_t resp_service = (le16_to_host(resp_coe.raw_le) >> 12) & 0x0Fu;
+            if (resp_service != EC_COES_SDORES) {
+                TETHER_LOGW(TAG, "Unexpected CoE service (seg download init): 0x%X (expected 0x3) (adp=0x%04X index=0x%04X:%u) — aborting",
+                            resp_service, adp, index, sub);
+                break;
+            }
+
+            const size_t sdo_offset = sizeof(MbxHeader) + sizeof(CoeHeader);
+            const uint8_t sdo_cmd = mbxbuf[sdo_offset];
+
+            if ((sdo_cmd & 0xE0u) == EC_SDO_ABORT) {
+                if (mbx_read_len >= sdo_offset + sizeof(SdoAbort)) {
+                    SdoAbort abort{};
+                    std::memcpy(&abort, mbxbuf + sdo_offset, sizeof(abort));
+                    const uint32_t abort_code = le32_to_host(abort.abortCode_le);
+                    TETHER_LOGE(TAG, "SDO segmented download abort: index=0x%04x:%02x code=0x%08" PRIx32 " (%s)",
+                             index, sub, abort_code, sdo_abort_code_str(abort_code));
+                    if (abort_code == 0x06090011 && is_pdo_mapping_index(index)) {
+                        log_pdo_mapping_subindex_diagnostic(
+                            master, adp, inout_mbx_cnt,
+                            mbx_write_addr, mbx_write_len,
+                            mbx_read_addr, mbx_read_len,
+                            index, sub,
+                            diag_enabled, poll_interval_ms, transaction_timeout_ms);
+                    }
+                } else {
+                    TETHER_LOGE(TAG, "SDO segmented download abort (malformed response)");
+                }
+#ifdef TETHER_DIAG_SDO_IO
+                if (diag_enabled) {
+                    TETHER_LOGI(TAG, "SDO segmented download abort raw response (mbx_read_len=%u)", (unsigned)mbx_read_len);
+                    diag_hexdump(mbxbuf + sdo_offset, mbx_read_len - sdo_offset, 256);
+                }
+#endif
+                return false;
+            }
+
+            if ((sdo_cmd & 0xE0u) == 0x60u) {
+                SdoInitDownloadRes res{};
+                std::memcpy(&res, mbxbuf + sdo_offset, sizeof(res));
+                const uint16_t res_index = le16_to_host(res.index_le);
+
+                if (res_index == index && res.sub == sub) {
+                    got_init = true;
+                    break;
+                }
+
+                TETHER_LOGW(TAG, "Stale SDO segmented download init response: idx=0x%04X:%u expected=0x%04X:%u (adp=0x%04X) — clearing and re-sending",
+                            res_index, res.sub, index, sub, adp);
+                if (++stale_retry_count <= MAX_STALE_RETRIES) {
+                    if (!resend_and_wait("init")) {
+                        return false;
+                    }
+                } else {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+                }
+                continue;
+            }
+
+            // Unknown SDO command — don't loop on the now-empty buffer
+            TETHER_LOGW(TAG, "Unexpected SDO command (seg download init): cmd=0x%02X (adp=0x%04X index=0x%04X:%u) — aborting",
+                        sdo_cmd, adp, index, sub);
+            break;
+        }
+
+        if (!got_init) {
+            TETHER_LOGE(TAG, "SDO segmented download init timeout: index=0x%04x:%02x (adp=0x%04X wr=0x%04X rd=0x%04X)",
+                        index, sub, adp, mbx_write_addr, mbx_read_addr);
+            mbx_diag_dump_slave_state(master, adp, mbx_write_addr, mbx_read_addr);
+            return false;
+        }
+    }
+
+    // --- Segment loop ---------------------------------------------------------
+    bool toggle = false;
+    const uint8_t *seg_ptr = data;
+    size_t remaining = data_len;
+
+    for (int seg = 0; seg < ECAT_SDO_DOWNLOAD_MAX_SEGMENTS && remaining > 0; seg++) {
+        const size_t seg_bytes = (remaining < 7) ? remaining : 7;
+        const uint8_t n = static_cast<uint8_t>(7 - seg_bytes);
+        const bool last = (remaining == seg_bytes);
+        const uint8_t seg_cmd = static_cast<uint8_t>((toggle ? 0x10u : 0x00u) | (n << 1) | (last ? 0x01u : 0x00u));
+
+        const uint8_t expected_mbx_cnt = mbx_cnt;
+
+        MbxHeader seg_mbx{};
+        seg_mbx.length_le = host_to_le16(static_cast<uint16_t>(sizeof(CoeHeader) + sizeof(SdoDownloadSegReq)));
+        seg_mbx.address_le = host_to_le16(0);
+        seg_mbx.priority = 0;
+        seg_mbx.mbxtype = mbx_type_with_cnt(EC_MBXT_COE, mbx_cnt);
+
+        CoeHeader seg_coe{};
+        seg_coe.raw_le = host_to_le16(coe_make_raw(0, EC_COES_SDOREQ));
+
+        SdoDownloadSegReq seg_req{};
+        seg_req.cmd = seg_cmd;
+        std::memcpy(seg_req.data, seg_ptr, seg_bytes);
+        // Unused bytes are implicitly zero because the struct was value-initialized.
+
+        std::memset(mbxbuf, 0, sizeof(mbxbuf));
+        std::memcpy(mbxbuf, &seg_mbx, sizeof(seg_mbx));
+        std::memcpy(mbxbuf + sizeof(seg_mbx), &seg_coe, sizeof(seg_coe));
+        std::memcpy(mbxbuf + sizeof(seg_mbx) + sizeof(seg_coe), &seg_req, sizeof(seg_req));
+
+        mbx_cnt = static_cast<uint8_t>((mbx_cnt >= 7) ? 1 : (mbx_cnt + 1));
+        if (inout_mbx_cnt != nullptr) {
+            *inout_mbx_cnt = mbx_cnt;
+        }
+
+        bool used_alt = false;
+        if (!mbx_apwr_with_wkc_probe(master, adp,
+                                     mbx_write_addr,
+                                     mbx_read_addr,
+                                     mbxbuf,
+                                     static_cast<uint16_t>(mbx_write_len),
+                                     500,
+                                     &used_alt)) {
+            TETHER_LOGE(TAG, "SDO segmented download segment %d: Mailbox write failed (adp=0x%04X wr=0x%04X rd=0x%04X)",
+                        seg, adp, mbx_write_addr, mbx_read_addr);
+            return false;
+        }
+        if (used_alt) {
+            std::swap(mbx_write_addr, mbx_read_addr);
+            std::swap(mbx_write_len, mbx_read_len);
+        }
+
+        if (!mbx_poll_sm1_full(master, adp, transaction_timeout_ms, poll_interval_ms)) {
+            TETHER_LOGE(TAG, "SDO segmented download segment %d: SM1 never became full (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%02x timeout=%ums)",
+                        seg, adp, mbx_write_addr, mbx_read_addr, index, sub, transaction_timeout_ms);
+            mbx_diag_dump_slave_state(master, adp, mbx_write_addr, mbx_read_addr);
+            return false;
+        }
+
+        bool got_seg = false;
+        int stale_retry_count = 0;
+        for (int attempt2 = 0; attempt2 < 50; attempt2++) {
+            if (master.isCancelRequested()) {
+                TETHER_LOGW(TAG, "SDO segmented download cancelled");
+                return false;
+            }
+
+            // Re-check SM1 status before reading data — never read blind.
+            uint8_t sm1_status = 0;
+            if (!master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(1), sm1_status, 100)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+                continue;
+            }
+            if ((sm1_status & (EC_SM_STATUS_MBXFULL | EC_SM_STATUS_WRITE_BUFFER_FULL)) == 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+                continue;
+            }
+
+            // SM1 is full — read the FULL configured mailbox length.
+            if (!master.readRegister(Master::slaveAddressFromADP(adp), mbx_read_addr, mbxbuf, static_cast<uint16_t>(mbx_read_len), 500)) {
+                TETHER_LOGW(TAG, "SDO segmented download segment %d: mailbox data read WKC=0 despite SM1 full — backing off (adp=0x%04X)", seg, adp);
+                std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+                continue;
+            }
+
+            MbxHeader r2_mbx{};
+            std::memcpy(&r2_mbx, mbxbuf, sizeof(r2_mbx));
+            const uint16_t r2_len = le16_to_host(r2_mbx.length_le);
+            const uint8_t r2_type = static_cast<uint8_t>(r2_mbx.mbxtype & 0x0Fu);
+            const uint8_t r2_cnt = static_cast<uint8_t>((r2_mbx.mbxtype >> 4) & 0x0Fu);
+
+            // Handle mailbox error response (type 0x00) — abort immediately
+            if (r2_type == EC_MBXT_ERR) {
+                if (r2_len >= 4) {
+                    const uint16_t err = le16_to_host(*reinterpret_cast<const uint16_t*>(mbxbuf + sizeof(MbxHeader)));
+                    const uint16_t detail = le16_to_host(*reinterpret_cast<const uint16_t*>(mbxbuf + sizeof(MbxHeader) + 2));
+                    TETHER_LOGE(TAG, "Mailbox error response (seg download seg %d): cnt=%u err=0x%04X detail=0x%04X (adp=0x%04X index=0x%04X:%u)",
+                                seg, r2_cnt, err, detail, adp, index, sub);
+                } else {
+                    TETHER_LOGE(TAG, "Mailbox error response (seg download seg %d, truncated): cnt=%u len=%u (adp=0x%04X index=0x%04X:%u)",
+                                seg, r2_cnt, r2_len, adp, index, sub);
+                }
+                return false;
+            }
+
+            if (r2_type != EC_MBXT_COE) {
+                TETHER_LOGW(TAG, "Non-CoE mailbox response (seg download seg %d): type=%u cnt=%u (adp=0x%04X index=0x%04X:%u) — aborting",
+                            seg, r2_type, r2_cnt, adp, index, sub);
+                break;
+            }
+
+            if (r2_len < sizeof(CoeHeader) + sizeof(SdoDownloadSegRes)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+                continue;
+            }
+
+            const auto *r2_coe = reinterpret_cast<const CoeHeader *>(mbxbuf + sizeof(MbxHeader));
+            const uint16_t r2_coe_raw = le16_to_host(r2_coe->raw_le);
+            const uint8_t r2_service = (r2_coe_raw >> 12) & 0x0Fu;
+            if (r2_service != EC_COES_SDORES) {
+                TETHER_LOGW(TAG, "Unexpected CoE service (seg download seg %d): 0x%X (expected 0x3) (adp=0x%04X index=0x%04X:%u) — aborting",
+                            seg, r2_service, adp, index, sub);
+                break;
+            }
+
+            const uint8_t *seg_res = mbxbuf + sizeof(MbxHeader) + sizeof(CoeHeader);
+            const uint8_t seg_res_cmd = seg_res[0];
+
+            // Check for abort
+            if ((seg_res_cmd & 0xE0u) == EC_SDO_ABORT) {
+                if (mbx_read_len >= sizeof(MbxHeader) + sizeof(CoeHeader) + sizeof(SdoAbort)) {
+                    SdoAbort abort{};
+                    std::memcpy(&abort, seg_res, sizeof(abort));
+                    const uint32_t abort_code = le32_to_host(abort.abortCode_le);
+                    TETHER_LOGE(TAG, "SDO segmented download segment %d abort: index=0x%04x:%02x code=0x%08" PRIx32 " (%s)",
+                                seg, index, sub, abort_code, sdo_abort_code_str(abort_code));
+                } else {
+                    TETHER_LOGE(TAG, "SDO segmented download segment %d abort (malformed response)", seg);
+                }
+                return false;
+            }
+
+            const uint8_t seg_ccs = (seg_res_cmd >> 5) & 0x07u;
+            if (seg_ccs != 1) {
+                TETHER_LOGW(TAG, "Unexpected SDO command (seg download seg %d): cmd=0x%02X ccs=%u (adp=0x%04X index=0x%04X:%u) — aborting",
+                            seg, seg_res_cmd, seg_ccs, adp, index, sub);
+                break;
+            }
+
+            const bool seg_toggle = (seg_res_cmd & 0x10u) != 0;
+            if (seg_toggle != toggle) {
+                TETHER_LOGW(TAG, "SDO segmented download segment %d toggle mismatch: got=%u expected=%u (adp=0x%04X index=0x%04X:%u) — re-sending",
+                            seg, seg_toggle, toggle, adp, index, sub);
+                if (++stale_retry_count <= MAX_STALE_RETRIES) {
+                    if (!resend_and_wait("segment")) {
+                        return false;
+                    }
+                } else {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+                }
+                continue;
+            }
+
+            if (r2_cnt != expected_mbx_cnt) {
+                TETHER_LOGW(TAG, "Stale mailbox response (segmented download segment %d): cnt=%u expected=%u (adp=0x%04X index=0x%04X:%u) — re-sending",
+                            seg, r2_cnt, expected_mbx_cnt, adp, index, sub);
+                if (++stale_retry_count <= MAX_STALE_RETRIES) {
+                    if (!resend_and_wait("segment")) {
+                        return false;
+                    }
+                } else {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+                }
+                continue;
+            }
+
+            if (last) {
+                logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbx_read_len,
+                                master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
+                return true;
+            }
+
+            toggle = !toggle;
+            seg_ptr += seg_bytes;
+            remaining -= seg_bytes;
+            got_seg = true;
+            break;
+        }
+
+        if (!got_seg) {
+            TETHER_LOGE(TAG, "SDO segmented download segment %d timeout (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%u)",
+                        seg, adp, mbx_write_addr, mbx_read_addr, index, sub);
+            mbx_diag_dump_slave_state(master, adp, mbx_write_addr, mbx_read_addr);
+            return false;
+        }
+    }
+
+    TETHER_LOGE(TAG, "SDO segmented download exceeded max segments (%d) for index=0x%04X:%u (len=%zu)",
+                ECAT_SDO_DOWNLOAD_MAX_SEGMENTS, index, sub, data_len);
+    return false;
+}
+
 bool coe_sdo_download(
     Master& master,
     uint16_t adp,
@@ -886,9 +1419,18 @@ bool coe_sdo_download(
     unsigned int poll_interval_ms,
     unsigned int transaction_timeout_ms)
 {
-    if (data == nullptr || data_len == 0 || data_len > 4) {
+    if (data == nullptr || data_len == 0) {
         TETHER_LOGE(TAG, "Invalid SDO download parameters (len=%u)", static_cast<unsigned>(data_len));
         return false;
+    }
+
+    if (data_len > 4) {
+        return coe_sdo_download_segmented(master, adp, inout_mbx_cnt,
+                                          mbx_write_addr, mbx_write_len,
+                                          mbx_read_addr, mbx_read_len,
+                                          index, sub,
+                                          data, data_len,
+                                          diag_enabled, poll_interval_ms, transaction_timeout_ms);
     }
 
     uint8_t mbxbuf[256] = {0};
@@ -1036,8 +1578,27 @@ bool coe_sdo_download(
             TETHER_LOGW(TAG, "SDO download cancelled");
             return false;
         }
+
+        // Re-check SM1 status before reading data — never read blind.
+        // On the RZ/T2M, reading the mailbox data buffer while WKC=0
+        // can desynchronize the internal buffer toggle tracking.
+        uint8_t sm1_status = 0;
+        if (!master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(1), sm1_status, 100)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+            continue;
+        }
+        if ((sm1_status & (EC_SM_STATUS_MBXFULL | EC_SM_STATUS_WRITE_BUFFER_FULL)) == 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+            continue;
+        }
+
+        // SM1 is full — read the FULL configured mailbox length.
+        // The RZ/T2M ESC only clears the Buffer Full flag when the entire
+        // configured SM1 length has been read by the master.
         if (!master.readRegister(Master::slaveAddressFromADP(adp), mbx_read_addr, mbxbuf, static_cast<uint16_t>(mbx_read_len), 500)) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            // WKC=0 on data read despite SM1 full — back off and re-poll status
+            TETHER_LOGW(TAG, "SDO download: mailbox data read WKC=0 despite SM1 full — backing off (adp=0x%04X)", adp);
+            std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
             continue;
         }
 
@@ -1045,6 +1606,28 @@ bool coe_sdo_download(
         std::memcpy(&resp_mbx, mbxbuf, sizeof(resp_mbx));
         const uint16_t resp_len = le16_to_host(resp_mbx.length_le);
         const uint8_t resp_cnt = static_cast<uint8_t>((resp_mbx.mbxtype >> 4) & 0x0Fu);
+        const uint8_t resp_type = static_cast<uint8_t>(resp_mbx.mbxtype & 0x0Fu);
+
+        // Handle mailbox error response (type 0x00) — abort immediately
+        if (resp_type == EC_MBXT_ERR) {
+            if (resp_len >= 4) {
+                const uint16_t err = le16_to_host(*reinterpret_cast<const uint16_t*>(mbxbuf + sizeof(MbxHeader)));
+                const uint16_t detail = le16_to_host(*reinterpret_cast<const uint16_t*>(mbxbuf + sizeof(MbxHeader) + 2));
+                TETHER_LOGE(TAG, "Mailbox error response (download): cnt=%u err=0x%04X detail=0x%04X (adp=0x%04X index=0x%04X:%u)",
+                            resp_cnt, err, detail, adp, index, sub);
+            } else {
+                TETHER_LOGE(TAG, "Mailbox error response (download, truncated): cnt=%u len=%u (adp=0x%04X index=0x%04X:%u)",
+                            resp_cnt, resp_len, adp, index, sub);
+            }
+            return false;
+        }
+
+        // Reject non-CoE responses — don't loop on the now-empty buffer
+        if (resp_type != EC_MBXT_COE) {
+            TETHER_LOGW(TAG, "Non-CoE mailbox response (download): type=%u cnt=%u (adp=0x%04X index=0x%04X:%u) — aborting",
+                        resp_type, resp_cnt, adp, index, sub);
+            break;
+        }
 
         // Validate mailbox counter — reject stale responses from previous requests.
         if (resp_cnt != expected_mbx_cnt) {
@@ -1055,18 +1638,26 @@ bool coe_sdo_download(
                     return false;
                 }
             } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
             }
             continue;
         }
 
         if (resp_len < sizeof(CoeHeader)) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
             continue;
         }
 
         CoeHeader resp_coe{};
         std::memcpy(&resp_coe, mbxbuf + sizeof(MbxHeader), sizeof(resp_coe));
+        const uint8_t resp_service = (le16_to_host(resp_coe.raw_le) >> 12) & 0x0Fu;
+
+        // Validate CoE service — must be SDO Response
+        if (resp_service != EC_COES_SDORES) {
+            TETHER_LOGW(TAG, "Unexpected CoE service (download): 0x%X (expected 0x3) (adp=0x%04X index=0x%04X:%u) — aborting",
+                        resp_service, adp, index, sub);
+            break;
+        }
 
         const size_t sdo_offset = sizeof(MbxHeader) + sizeof(CoeHeader);
         const uint8_t sdo_cmd = mbxbuf[sdo_offset];
@@ -1119,13 +1710,16 @@ bool coe_sdo_download(
                         return false;
                     }
                 } else {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
                 }
                 continue;
             }
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        // Unknown SDO command — don't loop on the now-empty buffer
+        TETHER_LOGW(TAG, "Unexpected SDO command (download): cmd=0x%02X (adp=0x%04X index=0x%04X:%u) — aborting",
+                    sdo_cmd, adp, index, sub);
+        break;
     }
 
     TETHER_LOGE(TAG, "SDO download timeout: index=0x%04x:%02x (adp=0x%04X wr=0x%04X rd=0x%04X)",
