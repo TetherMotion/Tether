@@ -18,6 +18,7 @@
 #include "tether/ethercat/SlaveStatusPoller.hpp"
 #include "tether/ethercat/RealtimeLoop.hpp"
 #include "tether/ethercat/SyncManagerValidation.hpp"
+#include "tether/ethercat/CoeSDOChannel.hpp"
 #include "tether/sii/SIIParser.hpp"
 #include "tether/fmmu/FMMUConfiguration.hpp"
 #include "raw/internal.hpp"
@@ -397,6 +398,9 @@ Master::Master(const Config& config)
     // Create instance-based SDO transport (shared across all per-slave CoEManagers)
     sdo_transport_ = std::make_unique<MasterSDOTransport>(*this);
 
+    // Create CoE SDO mailbox channel
+    coe_sdo_channel_ = std::make_unique<Raw::CoeSDOChannel>();
+
     // Create thin wrapper sub-managers so callers may use e.g. master.dc() immediately.
     // Sub-managers are lightweight wrappers that forward to global/free-function
     // implementations that operate on file-scoped DC/SDO/PDO state.
@@ -633,7 +637,7 @@ bool Master::coeSdoUpload(uint16_t adp, uint8_t* inout_mbx_cnt,
                                    unsigned int poll_interval_ms,
                                    unsigned int transaction_timeout_ms)
 {
-    return Raw::coe_sdo_upload(*this, adp, inout_mbx_cnt,
+    return coe_sdo_channel_->upload(*this, adp, inout_mbx_cnt,
                                mbx_wr_addr, mbx_wr_len,
                                mbx_rd_addr, mbx_rd_len,
                                index, sub, out, out_cap, out_len, diag_enabled,
@@ -649,7 +653,7 @@ bool Master::coeSdoDownload(uint16_t adp, uint8_t* inout_mbx_cnt,
                                      unsigned int poll_interval_ms,
                                      unsigned int transaction_timeout_ms)
 {
-    return Raw::coe_sdo_download(*this, adp, inout_mbx_cnt,
+    return coe_sdo_channel_->download(*this, adp, inout_mbx_cnt,
                                  mbx_wr_addr, mbx_wr_len,
                                  mbx_rd_addr, mbx_rd_len,
                                  index, sub, data, data_len, diag_enabled,

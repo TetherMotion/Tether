@@ -133,6 +133,9 @@ namespace SDO {
 namespace CoE {
     class CoEManager;
 }
+namespace Raw {
+    class CoeSDOChannel;
+}
 
 class IMotionControlLoop;
 
@@ -903,6 +906,9 @@ private:
     class MasterSDOTransport;
     std::unique_ptr<::EtherCAT::SDO::ISDOTransport> sdo_transport_;
     std::vector<std::unique_ptr<::EtherCAT::CoE::CoEManager>> sdo_managers_;
+
+    // CoE SDO mailbox channel (refactored from free functions)
+    std::unique_ptr<::EtherCAT::Raw::CoeSDOChannel> coe_sdo_channel_;
 
     // Sub-managers (legacy wrappers)
     std::unique_ptr<IPDOTransport> pdo_transport_;

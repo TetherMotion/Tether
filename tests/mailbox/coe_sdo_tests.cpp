@@ -34,7 +34,7 @@ TEST(CoeSDO, Upload_SmallMailboxWrite_ReturnsFalse) {
     size_t out_len = 0;
     EtherCAT::Master master;
 
-    bool ok = coe_sdo_upload(master, 0x0000, &mbx_cnt, /*mbx_write_addr=*/0x1000, /*mbx_write_len=*/4,
+    bool ok = master.coeSdoUpload(0x0000, &mbx_cnt, /*mbx_write_addr=*/0x1000, /*mbx_write_len=*/4,
                              /*mbx_read_addr=*/0x1080, /*mbx_read_len=*/8, /*index=*/0x2000, /*sub=*/0, outbuf, sizeof(outbuf), &out_len);
     EXPECT_FALSE(ok);
 }
@@ -45,10 +45,10 @@ TEST(CoeSDO, Download_InvalidParams_ReturnsFalse) {
     EtherCAT::Master master;
 
     // Null data
-    EXPECT_FALSE(coe_sdo_download(master, 0x0000, &mbx_cnt, 0x1000, 128, 0x1080, 128, 0x2000, 0x0, nullptr, 4));
+    EXPECT_FALSE(master.coeSdoDownload(0x0000, &mbx_cnt, 0x1000, 128, 0x1080, 128, 0x2000, 0x0, nullptr, 4));
 
     // Zero length
-    EXPECT_FALSE(coe_sdo_download(master, 0x0000, &mbx_cnt, 0x1000, 128, 0x1080, 128, 0x2000, 0x0, data, 0));
+    EXPECT_FALSE(master.coeSdoDownload(0x0000, &mbx_cnt, 0x1000, 128, 0x1080, 128, 0x2000, 0x0, data, 0));
 }
 
 TEST(CoeSDO, Download_SmallMailboxSize_ReturnsFalse) {
@@ -56,7 +56,7 @@ TEST(CoeSDO, Download_SmallMailboxSize_ReturnsFalse) {
     uint8_t data[4] = {1,2,3,4};
     EtherCAT::Master master;
     // mailbox write len too small to hold header+SdoInitDownloadReq
-    EXPECT_FALSE(coe_sdo_download(master, 0x0000, &mbx_cnt, 2, 2, 4, 4, 0x2000, 0x0, data, 4));
+    EXPECT_FALSE(master.coeSdoDownload(0x0000, &mbx_cnt, 2, 2, 4, 4, 0x2000, 0x0, data, 4));
 }
 
 // ============================================================================
@@ -231,7 +231,7 @@ TEST(CoeSDO, Upload_RejectsStaleResponse_WrongCounter) {
     uint8_t outbuf[256] = {0};
     size_t out_len = 0;
 
-    bool ok = coe_sdo_upload(master, 0x0000, &mbx_cnt,
+    bool ok = master.coeSdoUpload(0x0000, &mbx_cnt,
                              StaleResponseMock::MBX_WRITE_ADDR, StaleResponseMock::MBX_LEN,
                              StaleResponseMock::MBX_READ_ADDR, StaleResponseMock::MBX_LEN,
                              0x1000, 0, outbuf, sizeof(outbuf), &out_len,
@@ -260,7 +260,7 @@ TEST(CoeSDO, Upload_RejectsStaleResponse_WrongIndex) {
     uint8_t outbuf[256] = {0};
     size_t out_len = 0;
 
-    bool ok = coe_sdo_upload(master, 0x0000, &mbx_cnt,
+    bool ok = master.coeSdoUpload(0x0000, &mbx_cnt,
                              StaleResponseMock::MBX_WRITE_ADDR, StaleResponseMock::MBX_LEN,
                              StaleResponseMock::MBX_READ_ADDR, StaleResponseMock::MBX_LEN,
                              0x1000, 0, outbuf, sizeof(outbuf), &out_len,
@@ -443,7 +443,7 @@ TEST(CoeSDO, Download_RejectsStaleResponse_WrongCounter) {
     uint8_t mbx_cnt = 1;
     uint8_t data[4] = {0x01, 0x02, 0x03, 0x04};
 
-    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
                                StaleResponseMockExt::MBX_WRITE_ADDR, StaleResponseMockExt::MBX_LEN,
                                StaleResponseMockExt::MBX_READ_ADDR, StaleResponseMockExt::MBX_LEN,
                                0x1000, 0, data, 4,
@@ -471,7 +471,7 @@ TEST(CoeSDO, Download_RejectsStaleResponse_WrongIndex) {
     uint8_t mbx_cnt = 1;
     uint8_t data[4] = {0x01, 0x02, 0x03, 0x04};
 
-    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
                                StaleResponseMockExt::MBX_WRITE_ADDR, StaleResponseMockExt::MBX_LEN,
                                StaleResponseMockExt::MBX_READ_ADDR, StaleResponseMockExt::MBX_LEN,
                                0x1000, 0, data, 4,
@@ -504,7 +504,7 @@ TEST(CoeSDO, Upload_RejectsStaleResponse_WrongSubindex) {
     uint8_t outbuf[256] = {0};
     size_t out_len = 0;
 
-    bool ok = coe_sdo_upload(master, 0x0000, &mbx_cnt,
+    bool ok = master.coeSdoUpload(0x0000, &mbx_cnt,
                              StaleResponseMockExt::MBX_WRITE_ADDR, StaleResponseMockExt::MBX_LEN,
                              StaleResponseMockExt::MBX_READ_ADDR, StaleResponseMockExt::MBX_LEN,
                              0x1000, 0, outbuf, sizeof(outbuf), &out_len,
@@ -529,7 +529,7 @@ TEST(CoeSDO, Upload_AllStaleResponses_TimeoutReturnsFalse) {
     uint8_t outbuf[256] = {0};
     size_t out_len = 0;
 
-    bool ok = coe_sdo_upload(master, 0x0000, &mbx_cnt,
+    bool ok = master.coeSdoUpload(0x0000, &mbx_cnt,
                              StaleResponseMockExt::MBX_WRITE_ADDR, StaleResponseMockExt::MBX_LEN,
                              StaleResponseMockExt::MBX_READ_ADDR, StaleResponseMockExt::MBX_LEN,
                              0x1000, 0, outbuf, sizeof(outbuf), &out_len,
@@ -558,7 +558,7 @@ TEST(CoeSDO, Upload_StaleThenAbort_ReturnsFalse) {
     uint8_t outbuf[256] = {0};
     size_t out_len = 0;
 
-    bool ok = coe_sdo_upload(master, 0x0000, &mbx_cnt,
+    bool ok = master.coeSdoUpload(0x0000, &mbx_cnt,
                              StaleResponseMockExt::MBX_WRITE_ADDR, StaleResponseMockExt::MBX_LEN,
                              StaleResponseMockExt::MBX_READ_ADDR, StaleResponseMockExt::MBX_LEN,
                              0x1000, 0, outbuf, sizeof(outbuf), &out_len,
@@ -594,7 +594,7 @@ TEST(CoeSDO, Upload_MultipleStaleResponses_ClearsAndResendsUntilSuccess) {
     uint8_t outbuf[256] = {0};
     size_t out_len = 0;
 
-    bool ok = coe_sdo_upload(master, 0x0000, &mbx_cnt,
+    bool ok = master.coeSdoUpload(0x0000, &mbx_cnt,
                              StaleResponseMockExt::MBX_WRITE_ADDR, StaleResponseMockExt::MBX_LEN,
                              StaleResponseMockExt::MBX_READ_ADDR, StaleResponseMockExt::MBX_LEN,
                              0x1000, 0, outbuf, sizeof(outbuf), &out_len,
@@ -628,7 +628,7 @@ TEST(CoeSDO, Download_MultipleStaleResponses_ClearsAndResendsUntilSuccess) {
     uint8_t mbx_cnt = 1;
     uint8_t data[4] = {0x01, 0x02, 0x03, 0x04};
 
-    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
                                StaleResponseMockExt::MBX_WRITE_ADDR, StaleResponseMockExt::MBX_LEN,
                                StaleResponseMockExt::MBX_READ_ADDR, StaleResponseMockExt::MBX_LEN,
                                0x1000, 0, data, 4,
@@ -725,7 +725,7 @@ public:
     }
 };
 
-TEST(CoeSDO, Download_Segmented_5Bytes_Succeeds) {
+TEST(CoeSDO, Download_Normal_5Bytes_Succeeds) {
     EtherCAT::Master master;
     SegmentedDownloadMock mock;
     mock.index = 0x1000;
@@ -735,19 +735,20 @@ TEST(CoeSDO, Download_Segmented_5Bytes_Succeeds) {
     uint8_t mbx_cnt = 0;
     uint8_t data[5] = {0x01, 0x02, 0x03, 0x04, 0x05};
 
-    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
                                SegmentedDownloadMock::MBX_WRITE_ADDR, SegmentedDownloadMock::MBX_LEN,
                                SegmentedDownloadMock::MBX_READ_ADDR, SegmentedDownloadMock::MBX_LEN,
                                0x1000, 0, data, sizeof(data),
                                false, 5, 200);
 
-    EXPECT_TRUE(ok) << "5-byte segmented download should succeed";
-    EXPECT_EQ(mock.mailbox_data_reads, 2) << "Expected init response + 1 segment response";
+    // With MBX_LEN=128, max_inline=112. 5 bytes <= 112 → normal download (single response)
+    EXPECT_TRUE(ok) << "5-byte normal download should succeed";
+    EXPECT_EQ(mock.mailbox_data_reads, 1) << "Expected single response for normal download";
 
     mock.remove();
 }
 
-TEST(CoeSDO, Download_Segmented_9Bytes_Succeeds) {
+TEST(CoeSDO, Download_Normal_9Bytes_Succeeds) {
     EtherCAT::Master master;
     SegmentedDownloadMock mock;
     mock.index = 0x1000;
@@ -757,14 +758,15 @@ TEST(CoeSDO, Download_Segmented_9Bytes_Succeeds) {
     uint8_t mbx_cnt = 0;
     uint8_t data[9] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09};
 
-    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
                                SegmentedDownloadMock::MBX_WRITE_ADDR, SegmentedDownloadMock::MBX_LEN,
                                SegmentedDownloadMock::MBX_READ_ADDR, SegmentedDownloadMock::MBX_LEN,
                                0x1000, 0, data, sizeof(data),
                                false, 5, 200);
 
-    EXPECT_TRUE(ok) << "9-byte segmented download should succeed";
-    EXPECT_EQ(mock.mailbox_data_reads, 3) << "Expected init response + 2 segment responses";
+    // With MBX_LEN=128, max_inline=112. 9 bytes <= 112 → normal download (single response)
+    EXPECT_TRUE(ok) << "9-byte normal download should succeed";
+    EXPECT_EQ(mock.mailbox_data_reads, 1) << "Expected single response for normal download";
 
     mock.remove();
 }
@@ -779,9 +781,11 @@ TEST(CoeSDO, Download_Segmented_AbortInSegment_Fails) {
     mock.install(master);
 
     uint8_t mbx_cnt = 0;
-    uint8_t data[5] = {0x01, 0x02, 0x03, 0x04, 0x05};
+    // Use 120 bytes to exceed max_inline (112) and trigger segmented path
+    uint8_t data[120] = {};
+    for (int i = 0; i < 120; ++i) data[i] = static_cast<uint8_t>(i);
 
-    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
                                SegmentedDownloadMock::MBX_WRITE_ADDR, SegmentedDownloadMock::MBX_LEN,
                                SegmentedDownloadMock::MBX_READ_ADDR, SegmentedDownloadMock::MBX_LEN,
                                0x1000, 0, data, sizeof(data),
@@ -795,7 +799,7 @@ TEST(CoeSDO, Download_Segmented_AbortInSegment_Fails) {
 
 // Verify that segmented download succeeds when the ESC signals a full SM1 via
 // the WRITE_BUFFER_FULL flag (bit 7) instead of the traditional MBXFULL flag.
-TEST(CoeSDO, Download_Segmented_SM1WriteBufferFull_Succeeds) {
+TEST(CoeSDO, Download_Normal_SM1WriteBufferFull_Succeeds) {
     EtherCAT::Master master;
     SegmentedDownloadMock mock;
     mock.index = 0x1000;
@@ -806,14 +810,15 @@ TEST(CoeSDO, Download_Segmented_SM1WriteBufferFull_Succeeds) {
     uint8_t mbx_cnt = 0;
     uint8_t data[5] = {0x01, 0x02, 0x03, 0x04, 0x05};
 
-    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
                                SegmentedDownloadMock::MBX_WRITE_ADDR, SegmentedDownloadMock::MBX_LEN,
                                SegmentedDownloadMock::MBX_READ_ADDR, SegmentedDownloadMock::MBX_LEN,
                                0x1000, 0, data, sizeof(data),
                                false, 5, 200);
 
-    EXPECT_TRUE(ok) << "Segmented download should succeed with WRITE_BUFFER_FULL flag";
-    EXPECT_EQ(mock.mailbox_data_reads, 2) << "Expected init response + 1 segment response";
+    // 5 bytes with MBX_LEN=128 → normal download path
+    EXPECT_TRUE(ok) << "Normal download should succeed with WRITE_BUFFER_FULL flag";
+    EXPECT_EQ(mock.mailbox_data_reads, 1) << "Expected single response for normal download";
 
     mock.remove();
 }
@@ -917,7 +922,7 @@ TEST(CoeSDO, Download_MailboxErrorResponse_ReturnsFalseQuickly) {
     uint8_t mbx_cnt = 1;
     uint8_t data[4] = {0x01, 0x02, 0x03, 0x04};
 
-    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
                                MailboxErrorMock::MBX_WRITE_ADDR, MailboxErrorMock::MBX_LEN,
                                MailboxErrorMock::MBX_READ_ADDR, MailboxErrorMock::MBX_LEN,
                                0x1000, 0, data, 4,
@@ -943,7 +948,7 @@ TEST(CoeSDO, Upload_MailboxErrorResponse_ReturnsFalseQuickly) {
     uint8_t outbuf[256] = {0};
     size_t out_len = 0;
 
-    bool ok = coe_sdo_upload(master, 0x0000, &mbx_cnt,
+    bool ok = master.coeSdoUpload(0x0000, &mbx_cnt,
                              MailboxErrorMock::MBX_WRITE_ADDR, MailboxErrorMock::MBX_LEN,
                              MailboxErrorMock::MBX_READ_ADDR, MailboxErrorMock::MBX_LEN,
                              0x1000, 0, outbuf, sizeof(outbuf), &out_len,
@@ -957,10 +962,10 @@ TEST(CoeSDO, Upload_MailboxErrorResponse_ReturnsFalseQuickly) {
 
 // Test: Segmented download init receives mailbox error response — should return
 // false immediately.
-TEST(CoeSDO, Download_Segmented_MailboxErrorInInit_ReturnsFalseQuickly) {
+TEST(CoeSDO, Download_Normal_MailboxErrorInInit_ReturnsFalseQuickly) {
     EtherCAT::Master master;
     MailboxErrorMock mock;
-    mock.mbx_cnt = 0; // Segmented download starts with counter 0
+    mock.mbx_cnt = 0; // Normal download starts with counter 0
     mock.err_code = 0x0001;
     mock.err_detail = 0x0000;
     mock.install(master);
@@ -968,13 +973,14 @@ TEST(CoeSDO, Download_Segmented_MailboxErrorInInit_ReturnsFalseQuickly) {
     uint8_t mbx_cnt = 0;
     uint8_t data[5] = {0x01, 0x02, 0x03, 0x04, 0x05};
 
-    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
                                MailboxErrorMock::MBX_WRITE_ADDR, MailboxErrorMock::MBX_LEN,
                                MailboxErrorMock::MBX_READ_ADDR, MailboxErrorMock::MBX_LEN,
                                0x1000, 0, data, sizeof(data),
                                false, 5, 200);
 
-    EXPECT_FALSE(ok) << "Mailbox error in segmented download init should fail";
+    // 5 bytes with MBX_LEN=128 → normal download path, but mailbox error response
+    EXPECT_FALSE(ok) << "Mailbox error in normal download should fail";
     EXPECT_EQ(mock.mailbox_data_reads, 1) << "Should read mailbox data exactly once (error response), not loop";
 
     mock.remove();
@@ -1035,7 +1041,7 @@ TEST(CoeSDO, Download_NonCoeResponse_AbortsCleanly) {
     uint8_t mbx_cnt = 1;
     uint8_t data[4] = {0x01, 0x02, 0x03, 0x04};
 
-    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
                                MailboxErrorMock::MBX_WRITE_ADDR, MailboxErrorMock::MBX_LEN,
                                MailboxErrorMock::MBX_READ_ADDR, MailboxErrorMock::MBX_LEN,
                                0x1000, 0, data, 4,
@@ -1066,7 +1072,7 @@ TEST(CoeSDO, Download_StatusGatedRead_ChecksSM1BeforeData) {
     uint8_t mbx_cnt = 1;
     uint8_t data[4] = {0x01, 0x02, 0x03, 0x04};
 
-    bool ok = coe_sdo_download(master, 0x0000, &mbx_cnt,
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
                                StaleResponseMockExt::MBX_WRITE_ADDR, StaleResponseMockExt::MBX_LEN,
                                StaleResponseMockExt::MBX_READ_ADDR, StaleResponseMockExt::MBX_LEN,
                                0x1000, 0, data, 4,
@@ -1074,6 +1080,354 @@ TEST(CoeSDO, Download_StatusGatedRead_ChecksSM1BeforeData) {
 
     EXPECT_TRUE(ok) << "Download should succeed with status-gated reads";
     EXPECT_EQ(mock.mailbox_data_reads, 1) << "Should read mailbox data exactly once for a clean response";
+
+    mock.remove();
+}
+
+// ============================================================================
+// Normal download (non-expedited, non-segmented) tests
+// Tests the new coe_sdo_download_normal path for 5..max_inline byte payloads
+// ============================================================================
+
+// Mock that captures the written mailbox data for verification
+class NormalDownloadCaptureMock {
+public:
+    static constexpr uint16_t SM0_STATUS_ADDR = 0x0805;
+    static constexpr uint16_t SM1_STATUS_ADDR = 0x0805 + 8;
+    static constexpr uint16_t MBX_WRITE_ADDR = 0x1000;
+    static constexpr uint16_t MBX_READ_ADDR = 0x1080;
+    static constexpr uint16_t MBX_LEN = 128;
+
+    uint16_t index = 0x1000;
+    uint8_t sub = 0;
+
+    int mailbox_data_reads = 0;
+    bool write_happened = false;
+    uint8_t captured_mbxbuf[256] = {};
+    uint16_t captured_len = 0;
+    EtherCAT::Master* master_ = nullptr;
+
+    void install(EtherCAT::Master& master) {
+        master_ = &master;
+
+        master.setAprdTestCallback([this](uint16_t adp, uint16_t ado,
+                                          void* out, uint16_t len, unsigned int ms) {
+            (void)adp; (void)ms;
+
+            if (ado == SM0_STATUS_ADDR && len >= 1) {
+                uint8_t val = 0x00;
+                std::memcpy(out, &val, 1);
+                return true;
+            }
+
+            if (ado == SM1_STATUS_ADDR && len >= 1) {
+                uint8_t val = write_happened ? EC_SM_STATUS_MBXFULL : 0x00;
+                std::memcpy(out, &val, 1);
+                return true;
+            }
+
+            if (ado == MBX_READ_ADDR && len >= 16) {
+                mailbox_data_reads++;
+                buildSdoDownloadResponse(static_cast<uint8_t*>(out), 0, index, sub);
+                return true;
+            }
+
+            std::memset(out, 0, len);
+            return true;
+        });
+
+        master.setApwrTestCallback([this](uint16_t adp, uint16_t ado,
+                                          const void* data, uint16_t len, unsigned int ms) {
+            (void)adp; (void)ado; (void)ms;
+            write_happened = true;
+            if (data && len <= sizeof(captured_mbxbuf)) {
+                std::memcpy(captured_mbxbuf, data, len);
+                captured_len = len;
+            }
+            return true;
+        });
+    }
+
+    void remove() {
+        if (master_) {
+            master_->setAprdTestCallback(nullptr);
+            master_->setApwrTestCallback(nullptr);
+        }
+    }
+};
+
+TEST(CoeSDO, Download_Normal_32Bytes_VerifyPacketStructure) {
+    EtherCAT::Master master;
+    NormalDownloadCaptureMock mock;
+    mock.index = 0x1A00;
+    mock.sub = 0x18;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 0;
+    uint8_t data[32] = {};
+    for (int i = 0; i < 32; ++i) data[i] = static_cast<uint8_t>(0x40 + i);
+
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
+                               NormalDownloadCaptureMock::MBX_WRITE_ADDR, NormalDownloadCaptureMock::MBX_LEN,
+                               NormalDownloadCaptureMock::MBX_READ_ADDR, NormalDownloadCaptureMock::MBX_LEN,
+                               0x1A00, 0x18, data, sizeof(data),
+                               false, 5, 200);
+
+    EXPECT_TRUE(ok) << "32-byte normal download should succeed";
+    EXPECT_EQ(mock.mailbox_data_reads, 1) << "Expected single response";
+
+    // Verify mailbox header length field: CoE(2) + SDO(8) + data(32) = 42
+    uint16_t mbx_len = static_cast<uint16_t>(mock.captured_mbxbuf[0]) |
+                       (static_cast<uint16_t>(mock.captured_mbxbuf[1]) << 8);
+    EXPECT_EQ(mbx_len, 42u) << "Mailbox length should be 42 (10 + 32)";
+
+    // Verify SDO cmd byte at offset 8: 0x21 (download request, e=0, s=1)
+    EXPECT_EQ(mock.captured_mbxbuf[8], 0x21u) << "SDO cmd should be 0x21 (non-expedited, size indicated)";
+
+    // Verify index and subindex
+    EXPECT_EQ(mock.captured_mbxbuf[9], 0x00u);
+    EXPECT_EQ(mock.captured_mbxbuf[10], 0x1Au);
+    EXPECT_EQ(mock.captured_mbxbuf[11], 0x18u);
+
+    // Verify data_le (total size) at offset 12-15
+    uint32_t data_le = static_cast<uint32_t>(mock.captured_mbxbuf[12]) |
+                       (static_cast<uint32_t>(mock.captured_mbxbuf[13]) << 8) |
+                       (static_cast<uint32_t>(mock.captured_mbxbuf[14]) << 16) |
+                       (static_cast<uint32_t>(mock.captured_mbxbuf[15]) << 24);
+    EXPECT_EQ(data_le, 32u) << "data_le should be 32 (total size)";
+
+    // Verify inline data starts at offset 16
+    for (int i = 0; i < 32; ++i) {
+        EXPECT_EQ(mock.captured_mbxbuf[16 + i], static_cast<uint8_t>(0x40 + i))
+            << "Inline data byte " << i << " mismatch";
+    }
+
+    mock.remove();
+}
+
+TEST(CoeSDO, Download_Normal_Boundary_MaxInline_Succeeds) {
+    EtherCAT::Master master;
+    NormalDownloadCaptureMock mock;
+    mock.index = 0x1000;
+    mock.sub = 0;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 0;
+    // max_inline = 128 - 16 = 112. Test exactly at boundary.
+    uint8_t data[112] = {};
+    for (int i = 0; i < 112; ++i) data[i] = static_cast<uint8_t>(i);
+
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
+                               NormalDownloadCaptureMock::MBX_WRITE_ADDR, NormalDownloadCaptureMock::MBX_LEN,
+                               NormalDownloadCaptureMock::MBX_READ_ADDR, NormalDownloadCaptureMock::MBX_LEN,
+                               0x1000, 0, data, sizeof(data),
+                               false, 5, 200);
+
+    EXPECT_TRUE(ok) << "112-byte (max_inline) normal download should succeed";
+    EXPECT_EQ(mock.mailbox_data_reads, 1) << "Expected single response";
+
+    // Verify mailbox length = 10 + 112 = 122
+    uint16_t mbx_len = static_cast<uint16_t>(mock.captured_mbxbuf[0]) |
+                       (static_cast<uint16_t>(mock.captured_mbxbuf[1]) << 8);
+    EXPECT_EQ(mbx_len, 122u) << "Mailbox length should be 122 (10 + 112)";
+
+    mock.remove();
+}
+
+TEST(CoeSDO, Download_Normal_ExceedsMaxInline_FallsToSegmented) {
+    EtherCAT::Master master;
+    SegmentedDownloadMock mock;
+    mock.index = 0x1000;
+    mock.sub = 0;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 0;
+    // 113 bytes > max_inline (112) -> segmented path
+    uint8_t data[113] = {};
+    for (int i = 0; i < 113; ++i) data[i] = static_cast<uint8_t>(i);
+
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
+                               SegmentedDownloadMock::MBX_WRITE_ADDR, SegmentedDownloadMock::MBX_LEN,
+                               SegmentedDownloadMock::MBX_READ_ADDR, SegmentedDownloadMock::MBX_LEN,
+                               0x1000, 0, data, sizeof(data),
+                               false, 5, 200);
+
+    // Segmented: inline=112, remaining=1, 1 segment -> init response + 1 segment response = 2 reads
+    EXPECT_TRUE(ok) << "113-byte segmented download should succeed";
+    EXPECT_EQ(mock.mailbox_data_reads, 2) << "Expected init response + 1 segment response";
+
+    mock.remove();
+}
+
+// ============================================================================
+// Segmented download with inline first chunk tests
+// ============================================================================
+
+TEST(CoeSDO, Download_Segmented_120Bytes_WithInline_FirstChunk) {
+    EtherCAT::Master master;
+    SegmentedDownloadMock mock;
+    mock.index = 0x1000;
+    mock.sub = 0;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 0;
+    // 120 bytes, max_inline=112. Init carries 112 inline, remaining=8 -> 2 segments (7+1)
+    uint8_t data[120] = {};
+    for (int i = 0; i < 120; ++i) data[i] = static_cast<uint8_t>(i);
+
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
+                               SegmentedDownloadMock::MBX_WRITE_ADDR, SegmentedDownloadMock::MBX_LEN,
+                               SegmentedDownloadMock::MBX_READ_ADDR, SegmentedDownloadMock::MBX_LEN,
+                               0x1000, 0, data, sizeof(data),
+                               false, 5, 200);
+
+    EXPECT_TRUE(ok) << "120-byte segmented download with inline first chunk should succeed";
+    // Init response + 2 segment responses (7 bytes + 1 byte)
+    EXPECT_EQ(mock.mailbox_data_reads, 3) << "Expected init + 2 segment responses";
+
+    mock.remove();
+}
+
+// ============================================================================
+// Complete Access tests -- verify subindex bit 7 is set
+// ============================================================================
+
+// Mock that captures the subindex from the SDO download request
+class CompleteAccessCaptureMock {
+public:
+    static constexpr uint16_t SM0_STATUS_ADDR = 0x0805;
+    static constexpr uint16_t SM1_STATUS_ADDR = 0x0805 + 8;
+    static constexpr uint16_t MBX_WRITE_ADDR = 0x1000;
+    static constexpr uint16_t MBX_READ_ADDR = 0x1080;
+    static constexpr uint16_t MBX_LEN = 128;
+
+    uint8_t captured_sub = 0;
+    uint8_t response_sub = 0;
+    bool write_happened = false;
+    EtherCAT::Master* master_ = nullptr;
+
+    void install(EtherCAT::Master& master) {
+        master_ = &master;
+
+        master.setAprdTestCallback([this](uint16_t adp, uint16_t ado,
+                                          void* out, uint16_t len, unsigned int ms) {
+            (void)adp; (void)ms;
+
+            if (ado == SM0_STATUS_ADDR && len >= 1) {
+                uint8_t val = 0x00;
+                std::memcpy(out, &val, 1);
+                return true;
+            }
+
+            if (ado == SM1_STATUS_ADDR && len >= 1) {
+                uint8_t val = write_happened ? EC_SM_STATUS_MBXFULL : 0x00;
+                std::memcpy(out, &val, 1);
+                return true;
+            }
+
+            if (ado == MBX_READ_ADDR && len >= 16) {
+                buildSdoDownloadResponse(static_cast<uint8_t*>(out), 0, 0x1000, response_sub);
+                return true;
+            }
+
+            std::memset(out, 0, len);
+            return true;
+        });
+
+        master.setApwrTestCallback([this](uint16_t adp, uint16_t ado,
+                                          const void* data, uint16_t len, unsigned int ms) {
+            (void)adp; (void)ado; (void)ms;
+            write_happened = true;
+            // SDO subindex is at offset 11 (MbxHeader(6) + CoeHeader(2) + SDO cmd(1) + index(2))
+            if (data && len >= 12) {
+                const uint8_t* b = static_cast<const uint8_t*>(data);
+                captured_sub = b[11];
+                response_sub = captured_sub;
+            }
+            return true;
+        });
+    }
+
+    void remove() {
+        if (master_) {
+            master_->setAprdTestCallback(nullptr);
+            master_->setApwrTestCallback(nullptr);
+        }
+    }
+};
+
+TEST(CoeSDO, Download_CompleteAccess_SetsBit7) {
+    EtherCAT::Master master;
+    CompleteAccessCaptureMock mock;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 0;
+    uint8_t data[4] = {0x01, 0x02, 0x03, 0x04};
+
+    // Manually set bit 7 on subindex to simulate Complete Access
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
+                               CompleteAccessCaptureMock::MBX_WRITE_ADDR, CompleteAccessCaptureMock::MBX_LEN,
+                               CompleteAccessCaptureMock::MBX_READ_ADDR, CompleteAccessCaptureMock::MBX_LEN,
+                               0x1000, 0x03 | 0x80, data, sizeof(data),
+                               false, 5, 200);
+
+    EXPECT_TRUE(ok) << "Complete Access download should succeed";
+    EXPECT_EQ(mock.captured_sub, 0x83u) << "Subindex should have bit 7 set (0x03 | 0x80 = 0x83)";
+
+    mock.remove();
+}
+
+TEST(CoeSDO, Download_NoCompleteAccess_KeepsBit7Clear) {
+    EtherCAT::Master master;
+    CompleteAccessCaptureMock mock;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 0;
+    uint8_t data[4] = {0x01, 0x02, 0x03, 0x04};
+
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
+                               CompleteAccessCaptureMock::MBX_WRITE_ADDR, CompleteAccessCaptureMock::MBX_LEN,
+                               CompleteAccessCaptureMock::MBX_READ_ADDR, CompleteAccessCaptureMock::MBX_LEN,
+                               0x1000, 0x03, data, sizeof(data),
+                               false, 5, 200);
+
+    EXPECT_TRUE(ok) << "Normal download should succeed";
+    EXPECT_EQ(mock.captured_sub, 0x03u) << "Subindex should not have bit 7 set";
+
+    mock.remove();
+}
+
+// ============================================================================
+// Expedited download still works (regression test)
+// ============================================================================
+
+TEST(CoeSDO, Download_Expedited_4Bytes_StillWorks) {
+    EtherCAT::Master master;
+    NormalDownloadCaptureMock mock;
+    mock.index = 0x1000;
+    mock.sub = 0;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 0;
+    uint8_t data[4] = {0xDE, 0xAD, 0xBE, 0xEF};
+
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
+                               NormalDownloadCaptureMock::MBX_WRITE_ADDR, NormalDownloadCaptureMock::MBX_LEN,
+                               NormalDownloadCaptureMock::MBX_READ_ADDR, NormalDownloadCaptureMock::MBX_LEN,
+                               0x1000, 0, data, sizeof(data),
+                               false, 5, 200);
+
+    EXPECT_TRUE(ok) << "4-byte expedited download should still work";
+    EXPECT_EQ(mock.mailbox_data_reads, 1) << "Expected single response";
+
+    // Verify SDO cmd: 0x23 (expedited, size indicated, n=0)
+    EXPECT_EQ(mock.captured_mbxbuf[8], 0x23u) << "Expedited cmd should be 0x23";
+
+    // Verify data is in the SDO header's data_le field (offset 12-15)
+    EXPECT_EQ(mock.captured_mbxbuf[12], 0xDEu);
+    EXPECT_EQ(mock.captured_mbxbuf[13], 0xADu);
+    EXPECT_EQ(mock.captured_mbxbuf[14], 0xBEu);
+    EXPECT_EQ(mock.captured_mbxbuf[15], 0xEFu);
 
     mock.remove();
 }
