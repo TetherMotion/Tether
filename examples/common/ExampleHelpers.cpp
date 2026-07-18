@@ -4,6 +4,7 @@
 #include <sstream>
 
 #include "tether/ethercat/DebugFlags.hpp"
+#include "tether/ethercat/DebugGate.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
 #include "tether/platform/Platform.hpp"
@@ -39,6 +40,63 @@ bool printDebugHelpIfRequested(const std::string& debugStr) {
     std::cout << "  --debug flagname:(slaves:0,2,5),otherflag:(slaves:1-3)\n";
     std::cout << "  (default: pass-all for every flag)\n";
     return true;
+}
+
+void addDebugConditionArgs(argparse::ArgumentParser& program) {
+    program.add_argument("--debug-start")
+        .default_value(std::string(""))
+        .help("Start debug output when condition fires. Use '--debug-start help' for syntax.");
+    program.add_argument("--debug-stop")
+        .default_value(std::string(""))
+        .help("Stop debug output when condition fires. Use '--debug-start help' for syntax.");
+}
+
+bool printDebugConditionHelpIfRequested(const std::string& startStr) {
+    if (startStr != "help") return false;
+#if TETHER_DEBUG_GATE_ENABLED
+    EtherCAT::DebugGate::printHelp();
+#else
+    std::cout << "Debug gate compiled out (TETHER_DEBUG_GATE_ENABLED=0).\n"
+              << "Conditional debugging is not available in this build.\n";
+#endif
+    return true;
+}
+
+bool applyDebugGateConditions(const std::string& startCond,
+                              const std::string& stopCond,
+                              EtherCAT::Master& master,
+                              const char* tag) {
+    if (startCond.empty() && stopCond.empty()) return true;
+
+#if !TETHER_DEBUG_GATE_ENABLED
+    if (!startCond.empty() || !stopCond.empty()) {
+        TETHER_LOGW(tag, "Debug gate compiled out (TETHER_DEBUG_GATE_ENABLED=0); "
+                         "ignoring --debug-start/--debug-stop conditions.");
+    }
+    return true;
+#else
+    if (!startCond.empty()) {
+        auto cond = EtherCAT::DebugGate::parseCondition(startCond);
+        if (!cond) {
+            TETHER_LOGE(tag, "Failed to parse --debug-start condition: '%s'", startCond.c_str());
+            return false;
+        }
+        TETHER_LOGI(tag, "Debug gate: global start condition = '%s'", startCond.c_str());
+        master.debugGate().addGlobalStart(std::move(cond));
+    }
+
+    if (!stopCond.empty()) {
+        auto cond = EtherCAT::DebugGate::parseCondition(stopCond);
+        if (!cond) {
+            TETHER_LOGE(tag, "Failed to parse --debug-stop condition: '%s'", stopCond.c_str());
+            return false;
+        }
+        TETHER_LOGI(tag, "Debug gate: global stop condition = '%s'", stopCond.c_str());
+        master.debugGate().addGlobalStop(std::move(cond));
+    }
+
+    return true;
+#endif
 }
 
 void addVlanArgs(argparse::ArgumentParser& program) {

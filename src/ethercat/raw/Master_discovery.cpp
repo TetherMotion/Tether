@@ -105,6 +105,10 @@ bool Master::discoverSlaves()
             if (status_poller_) {
                 status_poller_->init(resp.wkc);
             }
+            // Debug gate checkpoint: discovery complete
+            if (debug_gate_) {
+                debug_gate_->notifyCheckpoint("discovery-complete");
+            }
             return true;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -190,6 +194,11 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
                     (void)readRegister(SlaveAddress(slave_index), static_cast<uint16_t>(EC_REG_SM1 + 0x04), sm1_ctrl, 200);
                     if (sm0_ctrl != 0x26 || sm1_ctrl != 0x22) {
                         TETHER_LOGW(TAG, "setPreop: SM0=0x%02X SM1=0x%02X (expected 0x26/0x22) — slave may have rejected mailbox config", sm0_ctrl, sm1_ctrl);
+                    }
+
+                    // Debug gate checkpoint: PRE_OP confirmed
+                    if (debug_gate_) {
+                        debug_gate_->notifyCheckpoint("state:pre-op", slave_index);
                     }
 
                     return true;

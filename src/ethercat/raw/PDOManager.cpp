@@ -1095,6 +1095,12 @@ bool PDOManager::sendAll() {
         }
     }
 
+    // Debug gate checkpoint: first successful RxPDO send
+    if (debug_gate_ && !first_rxpdo_emitted_ && split_state_.send_phase_ok) {
+        first_rxpdo_emitted_ = true;
+        debug_gate_->notifyCheckpoint("first-rxpdo");
+    }
+
     return split_state_.send_phase_ok;
 }
 
@@ -1241,6 +1247,12 @@ bool PDOManager::receiveAll() {
 
     if (rxPDODebug() || txPDODebug()) {
         TETHER_LOGI(TAG, "  [PDO-DEBUG] Cycle result: %s", all_ok ? "OK" : "ERRORS");
+    }
+
+    // Debug gate checkpoint: first successful TxPDO receive
+    if (debug_gate_ && !first_txpdo_emitted_ && all_ok) {
+        first_txpdo_emitted_ = true;
+        debug_gate_->notifyCheckpoint("first-txpdo");
     }
 
     return all_ok;

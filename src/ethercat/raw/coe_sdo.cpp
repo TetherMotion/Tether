@@ -798,6 +798,11 @@ bool coe_sdo_upload(
             }
             logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbx_read_len,
                             master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
+            // Debug gate intercept: notify CoE read conditions
+            if (master.debugGate().hasAnyConditions()) {
+                master.debugGate().onCoERead(slaveIndexFromADP(adp), index, sub,
+                                             out, out_len ? *out_len : 0);
+            }
             return true;
         }
 
@@ -913,6 +918,11 @@ bool coe_sdo_upload(
                     }
                     logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbx_read_len,
                             master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
+                    // Debug gate intercept: notify CoE read conditions
+                    if (master.debugGate().hasAnyConditions()) {
+                        master.debugGate().onCoERead(slaveIndexFromADP(adp), index, sub,
+                                                     out, out_len ? *out_len : 0);
+                    }
                     return true;
                 }
                 toggle = !toggle;

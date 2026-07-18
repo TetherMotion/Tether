@@ -20,8 +20,14 @@ void addInterfaceArg(argparse::ArgumentParser& program,
 /// Add `--debug` to an ArgumentParser.
 void addDebugArg(argparse::ArgumentParser& program);
 
+/// Add `--debug-start` and `--debug-stop` to an ArgumentParser.
+void addDebugConditionArgs(argparse::ArgumentParser& program);
+
 /// Print detailed debug-flag help to stdout and return true if @p debugStr is "help".
 bool printDebugHelpIfRequested(const std::string& debugStr);
+
+/// Print debug condition help and return true if @p startStr is "help".
+bool printDebugConditionHelpIfRequested(const std::string& startStr);
 
 /// Add `--rx-vlan` and `--tx-vlan` to an ArgumentParser.
 void addVlanArgs(argparse::ArgumentParser& program);
@@ -52,6 +58,23 @@ std::set<std::string> parseDebugFlags(const std::string& debugStr);
 void applyDebugFlags(const std::set<std::string>& flags,
                      EtherCAT::Master& master,
                      const char* tag);
+
+/**
+ * @brief Apply debug start/stop conditions from CLI to a Master's debug gate.
+ *
+ * Parses the --debug-start and --debug-stop condition strings and adds them
+ * to the master's DebugGate as global start/stop conditions.
+ *
+ * @param startCond  Start condition string (e.g. "state:pre-op"), or empty
+ * @param stopCond   Stop condition string (e.g. "state:op"), or empty
+ * @param master     Target master
+ * @param tag        Log tag for diagnostics
+ * @return true if all conditions parsed successfully (or were empty)
+ */
+bool applyDebugGateConditions(const std::string& startCond,
+                              const std::string& stopCond,
+                              EtherCAT::Master& master,
+                              const char* tag);
 
 // ============================================================================
 // VLAN helpers

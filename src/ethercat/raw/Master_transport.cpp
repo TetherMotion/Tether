@@ -143,6 +143,14 @@ bool Master::readRegister(SlaveAddress slave_address, RegisterAddress register_a
     resp.datalen = static_cast<uint16_t>(result.data_length);
     if (resp.datalen < len) return false;
     if (out && len > 0) std::memcpy(out, resp.data, len);
+
+    // Debug gate intercept: notify conditions of this register read
+    if (debug_gate_ && debug_gate_->hasAnyConditions()) {
+        debug_gate_->onRegisterRead(slave_address.slavePosition(),
+                                    register_address.raw(),
+                                    reinterpret_cast<const uint8_t*>(out), len);
+    }
+
     return result.wkc > 0;
 }
 // ============================================================================

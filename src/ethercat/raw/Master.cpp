@@ -389,6 +389,11 @@ Master::Master(const Config& config)
         TETHER_LOGE(TAG, "Failed to initialize master packet router");
     }
 
+    // Initialize debug gate and wire it to debug flags
+    debug_gate_ = std::make_unique<DebugGate>();
+    debug_flags_.setGate(debug_gate_.get());
+    debug_gate_->setGateChangedCallback([this]() { this->updateDebugFlags(); });
+
     // Create instance-based SDO transport (shared across all per-slave CoEManagers)
     sdo_transport_ = std::make_unique<MasterSDOTransport>(*this);
 
@@ -399,6 +404,7 @@ Master::Master(const Config& config)
     pdo_    = std::make_unique<PDOManager>(*pdo_transport_);
     logical_addr_mgr_ = std::make_unique<LogicalAddressManager>(*pdo_transport_);
     pdo_->setLogicalAddressManager(logical_addr_mgr_.get());
+    pdo_->setDebugGate(debug_gate_.get());
     dc_     = std::make_unique<DCManager>(*this);
     foe_    = std::make_unique<FoEManager>(*this);
     voe_    = std::make_unique<VoEManager>(*this);

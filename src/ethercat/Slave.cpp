@@ -55,6 +55,8 @@ SlaveError Slave::configureMailbox(Tether::Platform::LogLevel log_level) {
     mailbox_configured_ = true;
     TETHER_LOGI( TAG,
         "Slave %u: Mailbox configured from SII", index_);
+    // Debug gate checkpoint: mailbox configured
+    master_.debugGate().notifyCheckpoint("mailbox-configured", index_);
     return SlaveError::Ok;
 }
 
@@ -84,6 +86,11 @@ SlaveError Slave::configureMailbox(
             TETHER_LOGE(TAG, "Slave %u: Failed to write mailbox SM registers", index_);
             return SlaveError::MailboxConfigFailed;
         }
+
+        // SM1 may contain stale/junk data left over from slave firmware boot.
+        // Drain it now so the slave has a free outbound mailbox before the
+        // first SDO exchange.
+        (void)master_.drainSlaveMailbox(index_);
     }
 
     mailbox_configured_ = true;
@@ -91,6 +98,8 @@ SlaveError Slave::configureMailbox(
         "Slave %u: Mailbox configured (wr=0x%04X/%u, rd=0x%04X/%u, proto=0x%04X)",
         index_, mbox_in.address, mbox_in.length,
         mbox_out.address, mbox_out.length, protocols);
+    // Debug gate checkpoint: mailbox configured
+    master_.debugGate().notifyCheckpoint("mailbox-configured", index_);
     return SlaveError::Ok;
 }
 
@@ -98,6 +107,8 @@ void Slave::assumeMailboxAlreadyConfigured() {
     mailbox_configured_ = true;
     TETHER_LOGI( TAG,
         "Slave %u: Assuming mailbox already configured", index_);
+    // Debug gate checkpoint: mailbox configured
+    master_.debugGate().notifyCheckpoint("mailbox-configured", index_);
 }
 
 // -- PDO SM configuration ----------------------------------------------------
@@ -359,6 +370,8 @@ SlaveError Slave::transitionToSafeOp() {
                     TETHER_LOGI(TAG, "║  Transition Result: Slave %u => SAFE_OP SUCCESS               ║", index_);
                     TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
                 }
+                // Debug gate checkpoint: SAFE_OP confirmed
+                master_.debugGate().notifyCheckpoint("state:safe-op", index_);
                 return SlaveError::Ok;
             }
         }
@@ -465,6 +478,8 @@ SlaveError Slave::transitionToOp() {
                     TETHER_LOGI(TAG, "║  Transition Result: Slave %u => OP SUCCESS                    ║", index_);
                     TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
                 }
+                // Debug gate checkpoint: OP confirmed
+                master_.debugGate().notifyCheckpoint("state:op", index_);
                 return SlaveError::Ok;
             }
             // If state dropped to INIT or PRE_OP, something went wrong
