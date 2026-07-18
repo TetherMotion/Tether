@@ -35,7 +35,7 @@ namespace CoE {
 static constexpr size_t kMaxQueueDepth = 32;
 static constexpr uint32_t kDefaultTimeoutMs = 1000;
 static constexpr uint32_t kDefaultPollIntervalMs = 5;
-static constexpr std::chrono::milliseconds kWorkerIdleTimeout{500};
+// kWorkerIdleTimeout removed — persistent worker, no idle timeout
 
 // ============================================================================
 // Type-erased read transaction base for queue storage
@@ -46,6 +46,17 @@ public:
     virtual ~ICoEReadTransaction() = default;
     virtual const CoETransactionBase& base() const = 0;
     virtual void execute(class CoEManager& mgr) = 0;
+    virtual void fail(CoEError err) = 0;
+};
+
+// ============================================================================
+// Type-erased pending future for legacy queueRequest API
+// ============================================================================
+
+struct IPendingFuture {
+    virtual ~IPendingFuture() = default;
+    virtual bool isReady() const = 0;
+    virtual SDO::SDOResponse consume() = 0;
 };
 
 // ============================================================================
@@ -92,6 +103,8 @@ public:
 
     uint32_t queueRequest(SDO::SDORequest& request);
     bool getResponse(uint32_t request_id, SDO::SDOResponse& response);
+    bool waitForResponse(uint32_t request_id, SDO::SDOResponse& response,
+                         uint32_t timeout_ms = kDefaultTimeoutMs);
     size_t pendingCount() const;
 
     // ----- Sync Convenience -----
@@ -192,19 +205,15 @@ private:
     struct SlaveState {
         std::deque<std::unique_ptr<ICoEReadTransaction>> read_queue;
         std::deque<WriteQueueEntry> write_queue;
-        mutable std::mutex read_mutex;
-        mutable std::mutex write_mutex;
-        std::condition_variable read_cv;
-        std::condition_variable write_cv;
+        mutable std::mutex queue_mutex;
+        std::condition_variable work_cv;
         std::unique_ptr<std::thread> worker_thread;
         std::atomic<bool> shutdown_requested{false};
         std::atomic<bool> worker_running{false};
         mutable std::mutex worker_mutex;
-        std::condition_variable worker_cv;
     };
 
     void workerLoop();
-    void ensureWorkerRunning();
     void storeResponse(uint32_t request_id, const SDO::SDOResponse& resp);
     bool popResponse(uint32_t request_id, SDO::SDOResponse& resp);
     uint32_t nextRequestId();
@@ -217,6 +226,10 @@ private:
 
     mutable std::mutex responses_mutex_;
     std::map<uint32_t, SDO::SDOResponse> completed_responses_;
+
+    mutable std::mutex pending_futures_mutex_;
+    std::map<uint32_t, std::unique_ptr<IPendingFuture>> pending_futures_;
+
     std::atomic<uint32_t> next_request_id_{1};
 
     PDOManager* pdo_manager_ = nullptr;
@@ -241,6 +254,9 @@ public:
 
     const CoETransactionBase& base() const override { return txn_; }
     void execute(CoEManager& mgr) override;
+    void fail(CoEError err) override {
+        txn_.promise.set_value(std::unexpected(err));
+    }
 
     CoEReadTransaction<T> txn_;
 };
@@ -262,8 +278,19 @@ std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
 
     auto impl = std::make_unique<CoEReadTransactionImpl<T>>(std::move(txn));
 
+    if (!initialized_.load() || state_.shutdown_requested.load()) {
+        CoEReadTransaction<T> fail_txn;
+        fail_txn.promise.set_value(std::unexpected(CoEError::NotConfigured));
+        return fail_txn.promise.get_future();
+    }
+
     {
-        std::lock_guard<std::mutex> lock(state_.read_mutex);
+        std::lock_guard<std::mutex> lock(state_.queue_mutex);
+        if (state_.shutdown_requested.load()) {
+            CoEReadTransaction<T> fail_txn;
+            fail_txn.promise.set_value(std::unexpected(CoEError::ShuttingDown));
+            return fail_txn.promise.get_future();
+        }
         if (state_.read_queue.size() >= kMaxQueueDepth) {
             if (debug_flags_.coeReads) {
                 TETHER_LOGI("coe_mgr", "Slave %u: CoE read QUEUE FULL index=0x%04X:%u", slave_index_, index, subindex);
@@ -274,8 +301,7 @@ std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
         }
         state_.read_queue.push_back(std::move(impl));
     }
-    state_.read_cv.notify_one();
-    ensureWorkerRunning();
+    state_.work_cv.notify_one();
 
     if (debug_flags_.coeReads) {
         TETHER_LOGI("coe_mgr", "Slave %u: CoE read ENQUEUED index=0x%04X:%u", slave_index_, index, subindex);
