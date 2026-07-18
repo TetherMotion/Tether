@@ -415,3 +415,37 @@ jobs:
       with:
         name: tsan-test-results
         path: tsan_*.log
+
+  analyze-test-timing:
+    name: Analyze Test Timing
+    runs-on: ubuntu-latest
+    needs: compile
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Download build artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: debug-build
+        path: build/
+
+    - name: Restore executable permissions
+      run: |
+        chmod -R +x build/bin
+
+    - name: Run tests with timing output and analyze
+      run: python3 .github/scripts/analyze_test_timing.py
+      env:
+        BUILD_DIR: build
+        TOP_N: 50
+
+    - name: Upload timing analysis results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-timing-analysis
+        path: build/timing_results/
