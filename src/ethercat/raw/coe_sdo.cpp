@@ -466,8 +466,8 @@ bool coe_sdo_upload(
         static uint32_t s_mbx_write_count = 0;
         s_mbx_write_count++;
         if ((s_mbx_write_count % 1000) == 1) {
-            TETHER_LOGI(TAG, "SDO upload (read) request to adp=0x%04X: index=0x%04X:%u read_size=%zu [mailbox #%lu -> 0x%04X, len=%u, SM0=0x%02X, AL=0x%04X]",
-                     adp, index, sub, out_cap, (unsigned long)s_mbx_write_count, mbx_write_addr, mbx_write_len, sm0_status, al_status);
+            TETHER_LOGI(TAG, "SDO upload (read) request to adp=0x%04X: index=0x%04X:%u [mailbox #%lu -> 0x%04X, len=%u, SM0=0x%02X, AL=0x%04X]",
+                     adp, index, sub, (unsigned long)s_mbx_write_count, mbx_write_addr, mbx_write_len, sm0_status, al_status);
         }
 
 #ifdef TETHER_DIAG_SDO_IO
