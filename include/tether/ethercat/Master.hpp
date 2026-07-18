@@ -40,6 +40,7 @@
 #include "logging/DeduplicatingLogger.hpp"
 
 #include "tether/ethercat/DebugFlags.hpp"
+#include "tether/ethercat/DebugGate.hpp"
 #include "tether/ethercat/SlaveIdentity.hpp"
 #include "tether/ethercat/TetherConfig.hpp"
 #include "tether/ethercat/Types.hpp"
@@ -604,6 +605,37 @@ public:
     bool autoConfigureMailbox(SlaveAddress slave_address, Tether::Platform::LogLevel log_level = Tether::Platform::LogLevel::Info);
 
     /**
+     * @brief Drain any stale data from the slave-to-master mailbox (SM1).
+     *
+     * Reads the SM1 status register and, if it indicates unread data, reads the
+     * configured SM1 address to clear the ESC buffer toggle.  Repeats until SM1
+     * is no longer full or the drain limit is reached.
+     *
+     * This should be called once after mailbox auto-configuration (or manual
+     * configuration) and before the first SDO exchange.  It is also safe to call
+     * as a diagnostic recovery step.
+     *
+     * @param slave_index    Slave index (0-based)
+     * @param max_drain      Maximum back-to-back reads to perform (default 16)
+     * @return true if the drain completed (SM1 empty or successfully drained);
+     *         false if mailbox is not configured or SM1 status could not be read
+     */
+    bool drainSlaveMailbox(uint16_t slave_index, unsigned int max_drain = 16);
+
+    /**
+     * @brief Hardware-reset the slave-to-master mailbox (SM1) by cycling its
+     *        activate register.
+     *
+     * This is a last-resort recovery for an ESC that reports SM1 full but
+     * rejects master read datagrams (WKC == 0). Disabling and re-enabling SM1
+     * flushes the internal buffer state and clears stuck full flags.
+     *
+     * @param slave_index    Slave index (0-based)
+     * @return true if SM1 status reads back clear after the reset
+     */
+    bool resetSlaveMailboxSM1(uint16_t slave_index);
+
+    /**
      * @brief Verify a slave's SII identity against expected values.
      *
      * Reads the slave's identity from SII EEPROM and compares each
@@ -638,6 +670,10 @@ public:
     bool isDebugEnabled(const std::string& name, uint16_t slave_index) const {
         return debug_flags_.isEnabled(name, slave_index);
     }
+
+    /** @brief Access the master's debug gate (for conditional debugging). */
+    DebugGate& debugGate() { return *debug_gate_; }
+    const DebugGate& debugGate() const { return *debug_gate_; }
 
     // ---- CoE / SDO low-level -----------------------------------------------
 
@@ -886,6 +922,9 @@ private:
 
     // Debug flags (master-level with per-slave filtering)
     EtherCATMasterDebugFlags debug_flags_;
+
+    // Debug gate (conditional debug activation)
+    std::unique_ptr<DebugGate> debug_gate_;
 
     // SII reader (lazily created)
     std::unique_ptr<SII::SIIReader> sii_reader_;

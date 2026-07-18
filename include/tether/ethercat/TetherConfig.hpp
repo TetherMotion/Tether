@@ -348,6 +348,30 @@
 #define ECAT_SDO_RETRY_COUNT            3
 #endif
 
+/**
+ * @brief Maximum number of segments for a segmented SDO upload
+ * 
+ * Limits how many segment requests are issued for a single SDO upload.
+ * Acts as a safety bound against a slave that never marks the last segment.
+ * 
+ * Default: 200
+ */
+#ifndef ECAT_SDO_UPLOAD_MAX_SEGMENTS
+#define ECAT_SDO_UPLOAD_MAX_SEGMENTS    200
+#endif
+
+/**
+ * @brief Maximum number of segments for a segmented SDO download
+ * 
+ * Limits how many segment requests are issued for a single SDO download.
+ * Acts as a safety bound against a slave that never marks the last segment.
+ * 
+ * Default: 200
+ */
+#ifndef ECAT_SDO_DOWNLOAD_MAX_SEGMENTS
+#define ECAT_SDO_DOWNLOAD_MAX_SEGMENTS  200
+#endif
+
 // ============================================================================
 // FOE CONFIGURATION
 // ============================================================================
@@ -642,8 +666,22 @@
 #endif
 
 /**
+ * @brief Enable conditional debug gating framework
+ *
+ * When enabled (default), the DebugGate system is compiled in, allowing
+ * debug output to be conditionally activated/deactivated based on
+ * start/stop conditions (state transitions, checkpoints, register/CoE reads).
+ * When disabled, all DebugGate code compiles to no-ops with zero overhead.
+ *
+ * Can be overridden via CMake: -DTETHER_DEBUG_GATE_ENABLED=OFF
+ */
+#ifndef TETHER_DEBUG_GATE_ENABLED
+#define TETHER_DEBUG_GATE_ENABLED       1
+#endif
+
+/**
  * @brief Log tag for EtherCAT modules
- * 
+ *
  * Used with TETHER_LOG* macros for platform-independent logging.
  */
 #ifndef ECAT_LOG_TAG

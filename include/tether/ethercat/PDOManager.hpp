@@ -336,6 +336,9 @@ public:
     // ----- Debug flags -----
     void setDebugFlags(const EtherCATMasterDebugFlags* flags) { debug_flags_ = flags; }
 
+    // ----- Debug gate (for conditional debugging checkpoints) -----
+    void setDebugGate(DebugGate* gate) { debug_gate_ = gate; }
+
     // ----- Configuration Access -----
     PDO::PDOMapping&       mapping();
     const PDO::PDOMapping& mapping() const;
@@ -463,6 +466,9 @@ private:
     size_t           slave_count_ = 0;
 
     const EtherCATMasterDebugFlags* debug_flags_ = nullptr;
+    DebugGate* debug_gate_ = nullptr;
+    bool first_rxpdo_emitted_ = false;
+    bool first_txpdo_emitted_ = false;
 
     // Mode flags
     bool use_separate_commands_ = false;
