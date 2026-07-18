@@ -129,6 +129,11 @@ bool Master::autoConfigureMailbox(SlaveAddress slave_address, Tether::Platform::
         slave_configs[slave_index].sm[1] = PDO::SyncManagerConfig::mailbox_read(rd_addr, rd_len);
 
         if (pdo_->configureSlavesSMs(slave_index)) {
+            // SM1 may contain stale/junk data left over from slave firmware boot.
+            // Drain it now so the slave has a free outbound mailbox before the
+            // first SDO exchange.
+            (void)drainSlaveMailbox(slave_index);
+
             uint8_t sm0_ctrl = 0, sm1_ctrl = 0;
             bool sm0_ok = readRegister(SlaveAddress(slave_index), static_cast<uint16_t>(Raw::EC_REG_SM0 + 0x04), sm0_ctrl, 200);
             bool sm1_ok = readRegister(SlaveAddress(slave_index), static_cast<uint16_t>(Raw::EC_REG_SM1 + 0x04), sm1_ctrl, 200);
