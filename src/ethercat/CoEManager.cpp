@@ -55,11 +55,134 @@ const char* coeErrorStr(CoEError error) {
         case CoEError::TransportError:  return "Transport error";
         case CoEError::QueueFull:       return "Queue full";
         case CoEError::NotConfigured:   return "Mailbox not configured";
+        case CoEError::ShuttingDown:    return "Shutting down";
         case CoEError::SlaveNotFound:   return "Slave not found";
         case CoEError::InternalError:   return "Internal error";
         default:                        return "Unknown error";
     }
 }
+
+// ============================================================================
+// CoEError → SDOAbortCode mapping
+// ============================================================================
+
+static SDO::SDOAbortCode coeErrorToAbortCode(CoEError err) {
+    switch (err) {
+        case CoEError::Ok:             return SDO::SDOAbortCode::Success;
+        case CoEError::Timeout:        return SDO::SDOAbortCode::Timeout;
+        case CoEError::NotConfigured:  return SDO::SDOAbortCode::DeviceStateError;
+        case CoEError::TransportError: return SDO::SDOAbortCode::GeneralError;
+        case CoEError::QueueFull:      return SDO::SDOAbortCode::OutOfMemory;
+        case CoEError::Aborted:        return SDO::SDOAbortCode::TransferAborted;
+        case CoEError::ShuttingDown:   return SDO::SDOAbortCode::DeviceStateError;
+        case CoEError::SlaveNotFound:  return SDO::SDOAbortCode::ObjectNotFound;
+        case CoEError::InternalError:  return SDO::SDOAbortCode::InternalError;
+    }
+    return SDO::SDOAbortCode::GeneralError;
+}
+
+// ============================================================================
+// Pending future implementations for legacy queueRequest API
+// ============================================================================
+
+namespace {
+
+class PendingReadFuture : public IPendingFuture {
+public:
+    PendingReadFuture(std::future<CoEResult<std::vector<uint8_t>>>&& fut,
+                      uint32_t request_id, uint16_t slave_index,
+                      uint16_t index, uint8_t subindex)
+        : fut_(std::move(fut))
+        , request_id_(request_id)
+        , slave_index_(slave_index)
+        , index_(index)
+        , subindex_(subindex) {}
+
+    bool isReady() const override {
+        return fut_.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+    }
+
+    SDO::SDOResponse consume() override {
+        SDO::SDOResponse resp{};
+        resp.request_id = request_id_;
+        resp.slave_index = slave_index_;
+        resp.index = index_;
+        resp.subindex = subindex_;
+        resp.operation = SDO::SDOOperation::Upload;
+
+        auto result = fut_.get();
+        if (result.has_value()) {
+            resp.status = SDO::SDOStatus::Complete;
+            resp.abort_code = SDO::SDOAbortCode::Success;
+            auto& vec = result.value();
+            resp.data_size = std::min(vec.size(), sizeof(resp.data));
+            std::memcpy(resp.data, vec.data(), resp.data_size);
+        } else {
+            resp.status = SDO::SDOStatus::Failed;
+            resp.abort_code = coeErrorToAbortCode(result.error());
+        }
+        return resp;
+    }
+
+private:
+    std::future<CoEResult<std::vector<uint8_t>>> fut_;
+    uint32_t request_id_;
+    uint16_t slave_index_;
+    uint16_t index_;
+    uint8_t subindex_;
+};
+
+class PendingWriteFuture : public IPendingFuture {
+public:
+    PendingWriteFuture(std::future<CoEResult<void>>&& fut,
+                       uint32_t request_id, uint16_t slave_index,
+                       uint16_t index, uint8_t subindex,
+                       const uint8_t* echo_data, size_t echo_size)
+        : fut_(std::move(fut))
+        , request_id_(request_id)
+        , slave_index_(slave_index)
+        , index_(index)
+        , subindex_(subindex) {
+        echo_size_ = std::min(echo_size, sizeof(echo_data_));
+        std::memcpy(echo_data_, echo_data, echo_size_);
+    }
+
+    bool isReady() const override {
+        return fut_.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+    }
+
+    SDO::SDOResponse consume() override {
+        SDO::SDOResponse resp{};
+        resp.request_id = request_id_;
+        resp.slave_index = slave_index_;
+        resp.index = index_;
+        resp.subindex = subindex_;
+        resp.operation = SDO::SDOOperation::Download;
+        resp.data_size = echo_size_;
+        std::memcpy(resp.data, echo_data_, echo_size_);
+
+        auto result = fut_.get();
+        if (result.has_value()) {
+            resp.status = SDO::SDOStatus::Complete;
+            resp.abort_code = SDO::SDOAbortCode::Success;
+        } else {
+            resp.status = SDO::SDOStatus::Failed;
+            resp.abort_code = coeErrorToAbortCode(result.error());
+        }
+        return resp;
+    }
+
+private:
+    std::future<CoEResult<void>> fut_;
+    uint32_t request_id_;
+    uint16_t slave_index_;
+    uint16_t index_;
+    uint8_t subindex_;
+    uint8_t echo_data_[SDO::kMaxSDODataSize];
+    size_t echo_size_ = 0;
+};
+
+} // anonymous namespace
 
 // ============================================================================
 // Construction / Destruction
@@ -80,6 +203,28 @@ CoEManager::~CoEManager() {
 // ============================================================================
 
 bool CoEManager::init() {
+    std::lock_guard<std::mutex> wlock(state_.worker_mutex);
+
+    if (state_.worker_running.load()) {
+        initialized_.store(true);
+        return true;
+    }
+
+    if (state_.worker_thread && state_.worker_thread->joinable()) {
+        state_.worker_thread->join();
+    }
+    state_.worker_thread.reset();
+
+    state_.shutdown_requested.store(false);
+
+    try {
+        state_.worker_thread = std::make_unique<std::thread>(&CoEManager::workerLoop, this);
+        state_.worker_running.store(true);
+    } catch (...) {
+        TETHER_LOGE(TAG, "Slave %u: Failed to create CoE worker thread", slave_index_);
+        return false;
+    }
+
     initialized_.store(true);
     TETHER_LOGI(TAG, "CoEManager initialized for slave %u", slave_index_);
     return true;
@@ -89,13 +234,42 @@ void CoEManager::deinit() {
     initialized_.store(false);
 
     state_.shutdown_requested.store(true);
-    state_.read_cv.notify_all();
-    state_.write_cv.notify_all();
-    state_.worker_cv.notify_all();
+    state_.work_cv.notify_all();
 
-    if (state_.worker_thread && state_.worker_thread->joinable()) {
-        state_.worker_thread->join();
+    {
+        std::lock_guard<std::mutex> wlock(state_.worker_mutex);
+        if (state_.worker_thread && state_.worker_thread->joinable()) {
+            state_.worker_thread->join();
+        }
+        state_.worker_thread.reset();
+        state_.worker_running.store(false);
     }
+
+    // Worker is joined — safe to clear all state without concurrent access
+    {
+        std::lock_guard<std::mutex> qlock(state_.queue_mutex);
+        for (auto& txn : state_.read_queue) {
+            txn->fail(CoEError::ShuttingDown);
+        }
+        state_.read_queue.clear();
+        for (auto& entry : state_.write_queue) {
+            entry.txn.promise.set_value(std::unexpected(CoEError::ShuttingDown));
+        }
+        state_.write_queue.clear();
+    }
+
+    {
+        std::lock_guard<std::mutex> flock(pending_futures_mutex_);
+        pending_futures_.clear();
+    }
+
+    {
+        std::lock_guard<std::mutex> rlock(responses_mutex_);
+        completed_responses_.clear();
+    }
+
+    next_request_id_.store(1);
+    state_.shutdown_requested.store(false);
 
     TETHER_LOGI(TAG, "CoEManager deinitialized for slave %u", slave_index_);
 }
@@ -203,12 +377,21 @@ bool CoEManager::sdoDownloadWithRetry(uint16_t index, uint8_t subindex,
         return false;
     }
 
+    const uint8_t effective_sub = options.complete_access
+        ? static_cast<uint8_t>(subindex | 0x80u)
+        : subindex;
+
+    if (options.complete_access) {
+        TETHER_LOGI(TAG, "Slave %u: SDO download 0x%04X:%u (Complete Access) %zu bytes",
+                    slave_index_, index, subindex, data_len);
+    }
+
     const uint8_t max_attempts = options.max_retries + 1;
     for (uint8_t attempt = 0; attempt < max_attempts; ++attempt) {
         bool ok = transport_.sdoDownload(
             slave_index_, mbxCounterPtr(),
             wr_addr, wr_len, rd_addr, rd_len,
-            index, subindex,
+            index, effective_sub,
             data, data_len,
             diag_enabled_.load(),
             options.poll_interval_ms, options.timeout_ms);
@@ -269,52 +452,121 @@ uint32_t CoEManager::queueRequest(SDO::SDORequest& request) {
     uint32_t id = nextRequestId();
     request.request_id = id;
 
+    const uint32_t timeout_ms = (request.timeout_ms > 0) ? request.timeout_ms : kDefaultTimeoutMs;
+    CoETransactionOptions opts;
+    opts.timeout_ms = timeout_ms;
+
     if (request.operation == SDO::SDOOperation::Upload) {
-        auto future = readSync<std::vector<uint8_t>>(request.index, request.subindex,
-            CoETransactionOptions{.timeout_ms = request.timeout_ms});
+        auto future = read<std::vector<uint8_t>>(request.index, request.subindex, opts);
 
-        SDO::SDOResponse resp{};
-        resp.request_id = id;
-        resp.slave_index = slave_index_;
-        resp.index = request.index;
-        resp.subindex = request.subindex;
-        resp.operation = request.operation;
+        // Check if future is immediately ready (queue full or not initialized)
+        if (future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            auto result = future.get();
+            if (!result.has_value() && result.error() == CoEError::QueueFull) {
+                return 0;
+            }
 
-        if (future.has_value()) {
-            resp.status = SDO::SDOStatus::Complete;
-            auto& vec = future.value();
-            resp.data_size = std::min(vec.size(), sizeof(resp.data));
-            std::memcpy(resp.data, vec.data(), resp.data_size);
-        } else {
-            resp.status = SDO::SDOStatus::Failed;
+            // Completed immediately (e.g., NotConfigured error) — store response
+            SDO::SDOResponse resp{};
+            resp.request_id = id;
+            resp.slave_index = slave_index_;
+            resp.index = request.index;
+            resp.subindex = request.subindex;
+            resp.operation = request.operation;
+
+            if (result.has_value()) {
+                resp.status = SDO::SDOStatus::Complete;
+                resp.abort_code = SDO::SDOAbortCode::Success;
+                auto& vec = result.value();
+                resp.data_size = std::min(vec.size(), sizeof(resp.data));
+                std::memcpy(resp.data, vec.data(), resp.data_size);
+            } else {
+                resp.status = SDO::SDOStatus::Failed;
+                resp.abort_code = coeErrorToAbortCode(result.error());
+            }
+            storeResponse(id, resp);
+            return id;
         }
-        storeResponse(id, resp);
-    } else {
-        auto future = writeSync(request.index, request.subindex,
-            request.data, request.data_size,
-            CoETransactionOptions{.timeout_ms = request.timeout_ms});
 
-        SDO::SDOResponse resp{};
-        resp.request_id = id;
-        resp.slave_index = slave_index_;
-        resp.index = request.index;
-        resp.subindex = request.subindex;
-        resp.operation = request.operation;
-        resp.status = future.has_value() ? SDO::SDOStatus::Complete : SDO::SDOStatus::Failed;
-        resp.data_size = std::min(request.data_size, sizeof(resp.data));
-        std::memcpy(resp.data, request.data, resp.data_size);
-        storeResponse(id, resp);
+        // Not ready — store future for later retrieval via getResponse
+        std::lock_guard<std::mutex> lock(pending_futures_mutex_);
+        pending_futures_[id] = std::make_unique<PendingReadFuture>(
+            std::move(future), id, slave_index_, request.index, request.subindex);
+    } else {
+        auto future = write(request.index, request.subindex,
+            request.data, request.data_size, opts);
+
+        // Check if future is immediately ready (queue full or not initialized)
+        if (future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            auto result = future.get();
+            if (!result.has_value() && result.error() == CoEError::QueueFull) {
+                return 0;
+            }
+
+            // Completed immediately — store response
+            SDO::SDOResponse resp{};
+            resp.request_id = id;
+            resp.slave_index = slave_index_;
+            resp.index = request.index;
+            resp.subindex = request.subindex;
+            resp.operation = request.operation;
+            resp.data_size = std::min(request.data_size, sizeof(resp.data));
+            std::memcpy(resp.data, request.data, resp.data_size);
+
+            if (result.has_value()) {
+                resp.status = SDO::SDOStatus::Complete;
+                resp.abort_code = SDO::SDOAbortCode::Success;
+            } else {
+                resp.status = SDO::SDOStatus::Failed;
+                resp.abort_code = coeErrorToAbortCode(result.error());
+            }
+            storeResponse(id, resp);
+            return id;
+        }
+
+        // Not ready — store future for later retrieval via getResponse
+        std::lock_guard<std::mutex> lock(pending_futures_mutex_);
+        pending_futures_[id] = std::make_unique<PendingWriteFuture>(
+            std::move(future), id, slave_index_, request.index, request.subindex,
+            request.data, request.data_size);
     }
 
     return id;
 }
 
 bool CoEManager::getResponse(uint32_t request_id, SDO::SDOResponse& response) {
+    // Check pending futures first
+    {
+        std::lock_guard<std::mutex> lock(pending_futures_mutex_);
+        auto it = pending_futures_.find(request_id);
+        if (it != pending_futures_.end()) {
+            if (!it->second->isReady()) {
+                return false;
+            }
+            response = it->second->consume();
+            pending_futures_.erase(it);
+            return true;
+        }
+    }
+    // Fall back to completed_responses_ (for immediately-completed requests)
     return popResponse(request_id, response);
 }
 
+bool CoEManager::waitForResponse(uint32_t request_id, SDO::SDOResponse& response,
+                                  uint32_t timeout_ms) {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (getResponse(request_id, response)) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return getResponse(request_id, response);
+}
+
 size_t CoEManager::pendingCount() const {
-    return totalPendingCount();
+    std::lock_guard<std::mutex> lock(pending_futures_mutex_);
+    return pending_futures_.size();
 }
 
 // ============================================================================
@@ -341,8 +593,19 @@ std::future<CoEResult<void>> CoEManager::write(uint16_t index, uint8_t subindex,
 
     WriteQueueEntry entry{std::move(txn)};
 
+    if (!initialized_.load() || state_.shutdown_requested.load()) {
+        CoEWriteTransaction fail_txn;
+        fail_txn.promise.set_value(std::unexpected(CoEError::NotConfigured));
+        return fail_txn.promise.get_future();
+    }
+
     {
-        std::lock_guard<std::mutex> lock(state_.write_mutex);
+        std::lock_guard<std::mutex> lock(state_.queue_mutex);
+        if (state_.shutdown_requested.load()) {
+            CoEWriteTransaction fail_txn;
+            fail_txn.promise.set_value(std::unexpected(CoEError::ShuttingDown));
+            return fail_txn.promise.get_future();
+        }
         if (state_.write_queue.size() >= kMaxQueueDepth) {
             if (debug_flags_.coeWrites) {
                 TETHER_LOGI(TAG, "Slave %u: CoE write QUEUE FULL index=0x%04X:%u",
@@ -354,8 +617,7 @@ std::future<CoEResult<void>> CoEManager::write(uint16_t index, uint8_t subindex,
         }
         state_.write_queue.push_back(std::move(entry));
     }
-    state_.write_cv.notify_one();
-    ensureWorkerRunning();
+    state_.work_cv.notify_one();
 
     if (debug_flags_.coeWrites) {
         TETHER_LOGI(TAG, "Slave %u: CoE write ENQUEUED index=0x%04X:%u",
@@ -447,12 +709,12 @@ CoEResult<void> CoEManager::writeI32(uint16_t idx, uint8_t sub,
 // ============================================================================
 
 size_t CoEManager::pendingReadCount() const {
-    std::lock_guard<std::mutex> lock(state_.read_mutex);
+    std::lock_guard<std::mutex> lock(state_.queue_mutex);
     return state_.read_queue.size();
 }
 
 size_t CoEManager::pendingWriteCount() const {
-    std::lock_guard<std::mutex> lock(state_.write_mutex);
+    std::lock_guard<std::mutex> lock(state_.queue_mutex);
     return state_.write_queue.size();
 }
 
@@ -464,36 +726,23 @@ size_t CoEManager::totalPendingCount() const {
 // Worker Thread Management
 // ============================================================================
 
-void CoEManager::ensureWorkerRunning() {
-    if (state_.worker_running.load()) return;
-
-    std::lock_guard<std::mutex> lock(state_.worker_mutex);
-    if (state_.worker_running.load()) return;
-
-    if (state_.worker_thread && state_.worker_thread->joinable()) {
-        state_.worker_thread->join();
-    }
-
-    state_.shutdown_requested.store(false);
-    state_.worker_running.store(true);
-
-    try {
-        state_.worker_thread = std::make_unique<std::thread>(&CoEManager::workerLoop, this);
-    } catch (...) {
-        TETHER_LOGE(TAG, "Slave %u: Failed to create CoE worker thread", slave_index_);
-        state_.worker_running.store(false);
-    }
-}
-
 void CoEManager::workerLoop() {
     TETHER_LOGI(TAG, "Slave %u: CoE worker thread started", slave_index_);
 
     while (!state_.shutdown_requested.load()) {
-        bool did_work = false;
-
-        // Process one read if available
         {
-            std::unique_lock<std::mutex> lock(state_.read_mutex);
+            std::unique_lock<std::mutex> lock(state_.queue_mutex);
+            state_.work_cv.wait(lock, [this] {
+                return !state_.read_queue.empty()
+                       || !state_.write_queue.empty()
+                       || state_.shutdown_requested.load();
+            });
+        }
+
+        if (state_.shutdown_requested.load()) break;
+
+        {
+            std::unique_lock<std::mutex> lock(state_.queue_mutex);
             if (!state_.read_queue.empty()) {
                 auto txn = std::move(state_.read_queue.front());
                 state_.read_queue.pop_front();
@@ -503,15 +752,20 @@ void CoEManager::workerLoop() {
                     TETHER_LOGW(TAG, "Slave %u: CoE read started while previous request in flight — stale response possible",
                                 slave_index_);
                 }
-                txn->execute(*this);
+                try {
+                    txn->execute(*this);
+                } catch (const std::exception& e) {
+                    TETHER_LOGE(TAG, "Slave %u: CoE read threw: %s", slave_index_, e.what());
+                } catch (...) {
+                    TETHER_LOGE(TAG, "Slave %u: CoE read threw unknown exception", slave_index_);
+                }
                 request_in_flight_.store(false);
-                did_work = true;
+                continue;
             }
         }
 
-        // Process one write if available
         {
-            std::unique_lock<std::mutex> lock(state_.write_mutex);
+            std::unique_lock<std::mutex> lock(state_.queue_mutex);
             if (!state_.write_queue.empty()) {
                 auto entry = std::move(state_.write_queue.front());
                 state_.write_queue.pop_front();
@@ -522,10 +776,17 @@ void CoEManager::workerLoop() {
                     TETHER_LOGW(TAG, "Slave %u: CoE write started while previous request in flight — stale response possible",
                                 slave_index_);
                 }
-                bool ok = sdoDownloadWithRetry(
-                    txn.index, txn.subindex,
-                    txn.data.data(), txn.data.size(),
-                    txn.options);
+                bool ok = false;
+                try {
+                    ok = sdoDownloadWithRetry(
+                        txn.index, txn.subindex,
+                        txn.data.data(), txn.data.size(),
+                        txn.options);
+                } catch (const std::exception& e) {
+                    TETHER_LOGE(TAG, "Slave %u: CoE write threw: %s", slave_index_, e.what());
+                } catch (...) {
+                    TETHER_LOGE(TAG, "Slave %u: CoE write threw unknown exception", slave_index_);
+                }
                 request_in_flight_.store(false);
 
                 if (ok) {
@@ -533,29 +794,7 @@ void CoEManager::workerLoop() {
                 } else {
                     txn.promise.set_value(std::unexpected(CoEError::TransportError));
                 }
-                did_work = true;
-            }
-        }
-
-        if (!did_work) {
-            bool has_work = false;
-            {
-                std::unique_lock<std::mutex> lock(state_.read_mutex);
-                state_.read_cv.wait_for(lock, kWorkerIdleTimeout, [this] {
-                    return !state_.read_queue.empty() || state_.shutdown_requested.load();
-                });
-                has_work = !state_.read_queue.empty();
-            }
-            if (!has_work) {
-                std::unique_lock<std::mutex> lock(state_.write_mutex);
-                state_.write_cv.wait_for(lock, kWorkerIdleTimeout, [this] {
-                    return !state_.write_queue.empty() || state_.shutdown_requested.load();
-                });
-                has_work = !state_.write_queue.empty();
-            }
-
-            if (!has_work && !state_.shutdown_requested.load()) {
-                break;
+                continue;
             }
         }
     }
