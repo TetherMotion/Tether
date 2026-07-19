@@ -217,8 +217,10 @@ jobs:
     
     - name: Generate coverage report with gcovr
       run: |
-        gcovr --root . --build-directory build-coverage --xml --output coverage.xml
-        gcovr --root . --build-directory build-coverage --html --output coverage.html
+        # gcovr 6.x (Ubuntu 24.04) removed --build-directory; the build
+        # directory is now a positional argument.
+        gcovr --root . --xml --output coverage.xml build-coverage
+        gcovr --root . --html --output coverage.html build-coverage
     
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
@@ -296,12 +298,17 @@ jobs:
         # names (no executable-name prefix), so a -R filter by target name
         # would match nothing. Run the whole discovered test set in parallel
         # instead and let ctest schedule them.
+        # Capture the exit code without tripping `set -e` so the log is
+        # always printed below, even when tests fail.
         ctest --test-dir build-asan \
           --output-on-failure \
-          --parallel $(nproc) > asan_all.log 2>&1
+          --parallel $(nproc) > asan_all.log 2>&1 || ctest_exit=$?
+        ctest_exit=${ctest_exit:-0}
         
         echo "=== ASAN Test Results ==="
         cat asan_all.log
+        
+        exit $ctest_exit
     
     - name: Show ccache stats
       if: always()
@@ -373,12 +380,17 @@ jobs:
         # names (no executable-name prefix), so a -R filter by target name
         # would match nothing. Run the whole discovered test set in parallel
         # instead and let ctest schedule them.
+        # Capture the exit code without tripping `set -e` so the log is
+        # always printed below, even when tests fail.
         ctest --test-dir build-tsan \
           --output-on-failure \
-          --parallel $(nproc) > tsan_all.log 2>&1
+          --parallel $(nproc) > tsan_all.log 2>&1 || tsan_exit=$?
+        tsan_exit=${tsan_exit:-0}
         
         echo "=== TSAN Test Results ==="
         cat tsan_all.log
+        
+        exit $tsan_exit
     
     - name: Show ccache stats
       if: always()
