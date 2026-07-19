@@ -350,6 +350,21 @@ bool CoEManager::sdoUploadWithRetry(uint16_t index, uint8_t subindex,
         return false;
     }
 
+    // Translate options.complete_access into Tether's internal Complete-Access
+    // signal (bit 7 set in the subindex). The raw SDO upload layer reads this
+    // marker and converts it into the spec-compliant ETG.1000.6 CA bit (0x10)
+    // in the SDO command byte, sending the clean subindex on the wire. Without
+    // this translation the CA flag is silently dropped and the slave receives
+    // a normal (non-CA) upload request, which mirrors the download path below.
+    const uint8_t effective_sub = options.complete_access
+        ? static_cast<uint8_t>(subindex | 0x80u)
+        : subindex;
+
+    if (options.complete_access) {
+        TETHER_LOGI(TAG, "Slave %u: SDO upload 0x%04X:%u (Complete Access) cap=%zu",
+                    slave_index_, index, subindex, out_cap);
+    }
+
     last_sdo_abort_code_.store(0, std::memory_order_relaxed);
     last_sdo_was_download_.store(false, std::memory_order_relaxed);
     last_sdo_attempted_length_.store(out_cap, std::memory_order_relaxed);
@@ -359,7 +374,7 @@ bool CoEManager::sdoUploadWithRetry(uint16_t index, uint8_t subindex,
         bool ok = transport_.sdoUpload(
             slave_index_, mbxCounterPtr(),
             wr_addr, wr_len, rd_addr, rd_len,
-            index, subindex,
+            index, effective_sub,
             out, out_cap, out_len,
             diag_enabled_.load(),
             options.poll_interval_ms, options.timeout_ms);
