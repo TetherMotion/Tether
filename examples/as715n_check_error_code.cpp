@@ -235,7 +235,7 @@ int main(int argc, char** argv) {
 
     Tether::Examples::startHostPollThread(session, TAG);
 
-    master.start(*EtherCAT::Raw::network_interface(), session.srcMac);
+    master.start(*session.ni, session.srcMac);
 
     if (!master.discoverSlaves()) {
         TETHER_LOGW(TAG, "No slaves discovered");

@@ -32,32 +32,17 @@ static inline uint32_t le32_to_host(uint32_t val) { return val; }
 // Constructor / Destructor
 // ============================================================================
 
-// --- No-op DC transport used for the sentinel NoDistributedClockConfigured ---
-// Implements IDCTransport with safe no-op behaviour so the sentinel can
-// be constructed without a real transport.
-class NoopDCTransport final : public IDCTransport {
-public:
-    bool readRegister(uint16_t, uint16_t, void* /*data*/, uint16_t /*size*/, unsigned int /*timeout_ms*/ = 200) override {
-        return false;
-    }
-    bool writeRegister(uint16_t, uint16_t, const void* /*data*/, uint16_t /*size*/, unsigned int /*timeout_ms*/ = 200) override {
-        return false;
-    }
-    bool sendSyncDatagram(uint16_t, uint16_t, const void* /*data*/, uint16_t /*size*/) override {
-        return false;
-    }
-    uint64_t getMasterTimeNs() override { return 0; }
-    void delayMs(uint32_t) override { /* noop */ }
-};
-
-static NoopDCTransport g_noop_dc_transport;
+// NoopDCTransport is defined in the public header (EtherCATDC.hpp) and held
+// as a private base of NoDistributedClockConfigured (base-from-member idiom),
+// so no process-global sentinel instance is required here.
 
 // ============================================================================
 // NoDistributedClockConfigured (sentinel)
 // ============================================================================
 
 NoDistributedClockConfigured::NoDistributedClockConfigured()
-    : EtherCATDC(g_noop_dc_transport, 1, nullptr)
+    : NoopDCTransport()
+    , EtherCATDC(static_cast<NoopDCTransport&>(*this), 1, nullptr)
 {
     // Keep the base class in Disabled state; do not initialize.
 }

@@ -1247,23 +1247,21 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
         } else {
             size_t routed = packet_router_.routePacket(msg);
             if (routed == 0) {
-                static uint32_t unrouted_count = 0;
-                if (unrouted_count < 10) {
+                if (unrouted_log_count_ < 10) {
                     TETHER_LOGW("ec_rx", "Unrouted pkt dg=%u idx=0x%02X cmd=0x%02X ado=0x%04X adp=0x%04X wkc=%u",
                              dg_idx, dg->idx, (unsigned)dg->cmd, ado, adp, wkc);
                 }
-                unrouted_count++;
+                unrouted_log_count_++;
                 if (rx_queue_ && rx_queue_->send(msg, 0)) {
 #if TETHER_ENABLE_ETHERCAT_STATS
                     rx_queue_sent_++;
 #endif
                 } else {
-                    static uint32_t drop_count = 0;
-                    if (drop_count < 10 || (drop_count % 500 == 0)) {
+                    if (rx_drop_log_count_ < 10 || (rx_drop_log_count_ % 500 == 0)) {
                         TETHER_LOGW("ec_rx", "RX queue full! Dropped dg=%u idx=0x%02X cmd=0x%02X ado=0x%04X adp=0x%04X wkc=%u (total dropped: %u)",
-                                 dg_idx, dg->idx, (unsigned)dg->cmd, ado, adp, wkc, drop_count);
+                                 dg_idx, dg->idx, (unsigned)dg->cmd, ado, adp, wkc, rx_drop_log_count_);
                     }
-                    drop_count++;
+                    rx_drop_log_count_++;
                 }
             }
         }

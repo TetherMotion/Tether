@@ -4,9 +4,6 @@
 namespace EtherCAT {
 namespace Raw {
 
-// Forward declaration of the global thunk pointer defined in SDODownload.cpp
-extern SDOUpload* g_sdo_upload_for_thunk;
-
 CoeSDOChannel::CoeSDOChannel()
     : errorDecoder_()
     , diagnostics_()
@@ -44,10 +41,6 @@ bool CoeSDOChannel::download(Master& master, uint16_t adp, uint8_t* inoutMbxCnt,
                              bool diagEnabled,
                              unsigned int pollIntervalMs,
                              unsigned int transactionTimeoutMs) {
-    // Set the global thunk pointer so SDODownload can call SDOUpload for
-    // PDO mapping diagnostics. This is safe because SDO operations are
-    // single-threaded on the EtherCAT master.
-    g_sdo_upload_for_thunk = &upload_;
     last_abort_code_.store(0, std::memory_order_relaxed);
     uint32_t abort_code = 0;
     bool ok = download_.execute(master, adp, inoutMbxCnt,
@@ -55,7 +48,7 @@ bool CoeSDOChannel::download(Master& master, uint16_t adp, uint8_t* inoutMbxCnt,
                                 mbxReadAddr, mbxReadLen,
                                 index, sub, data, dataLen,
                                 diagEnabled, pollIntervalMs, transactionTimeoutMs,
-                                &abort_code);
+                                &abort_code, &upload_);
     if (!ok && abort_code != 0) {
         last_abort_code_.store(abort_code, std::memory_order_relaxed);
     }

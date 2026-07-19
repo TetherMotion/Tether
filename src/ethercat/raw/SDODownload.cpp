@@ -23,36 +23,19 @@ static uint16_t slaveIndexFromADP(uint16_t adp) {
     return Master::slaveAddressFromADP(adp).slavePosition();
 }
 
-// Forward declaration for PDO mapping diagnostic callback
-static bool sdo_upload_thunk(Master& master, uint16_t adp, uint8_t* inout_mbx_cnt,
-                             uint16_t mbx_write_addr, uint16_t mbx_write_len,
-                             uint16_t mbx_read_addr, uint16_t mbx_read_len,
-                             uint16_t index, uint8_t sub,
-                             uint8_t* out, size_t out_cap, size_t* out_len,
-                             bool diag_enabled, unsigned int poll_interval_ms,
-                             unsigned int transaction_timeout_ms);
-
-// We need a global or thread-local pointer to the SDOUpload instance for the thunk.
-// Since CoeSDOChannel owns the SDOUpload and all calls go through it, we use a
-// global pointer set by CoeSDOChannel before calling download.
-// This is safe because the EtherCAT master is single-threaded for SDO operations.
-SDOUpload* g_sdo_upload_for_thunk = nullptr;
-
-static bool sdo_upload_thunk(Master& master, uint16_t adp, uint8_t* inout_mbx_cnt,
-                             uint16_t mbx_write_addr, uint16_t mbx_write_len,
-                             uint16_t mbx_read_addr, uint16_t mbx_read_len,
-                             uint16_t index, uint8_t sub,
-                             uint8_t* out, size_t out_cap, size_t* out_len,
-                             bool diag_enabled, unsigned int poll_interval_ms,
-                             unsigned int transaction_timeout_ms) {
-    if (g_sdo_upload_for_thunk) {
-        return g_sdo_upload_for_thunk->execute(master, adp, inout_mbx_cnt,
-                                               mbx_write_addr, mbx_write_len,
-                                               mbx_read_addr, mbx_read_len,
-                                               index, sub, out, out_cap, out_len,
-                                               diag_enabled, poll_interval_ms, transaction_timeout_ms);
-    }
-    return false;
+// Build a diagnostic upload functor bound to a specific SDOUpload instance.
+// Returns a no-op functor (returns false) when @p upload is null, so callers
+// can unconditionally pass the result to SDODiagnostics without null checks.
+static SDODiagnostics::UploadFn makeUploadDiagFn(SDOUpload* upload) {
+    return [upload](Master& m, uint16_t a, uint8_t* c,
+                    uint16_t wwa, uint16_t wwl, uint16_t rwa, uint16_t rwl,
+                    uint16_t idx, uint8_t s,
+                    uint8_t* out, size_t out_cap, size_t* out_len,
+                    bool de, unsigned int pim, unsigned int ttm) -> bool {
+        if (!upload) return false;
+        return upload->execute(m, a, c, wwa, wwl, rwa, rwl, idx, s,
+                               out, out_cap, out_len, de, pim, ttm);
+    };
 }
 
 bool SDODownload::execute(Master& master, uint16_t adp,
@@ -64,7 +47,8 @@ bool SDODownload::execute(Master& master, uint16_t adp,
                           bool diagEnabled,
                           unsigned int pollIntervalMs,
                           unsigned int transactionTimeoutMs,
-                          uint32_t* outAbortCode) {
+                          uint32_t* outAbortCode,
+                          SDOUpload* uploadForDiag) {
     if (outAbortCode) *outAbortCode = 0;
     if (data == nullptr || dataLen == 0) {
         TETHER_LOGE(TAG, "Invalid SDO download parameters (len=%u)", static_cast<unsigned>(dataLen));
@@ -90,7 +74,7 @@ bool SDODownload::execute(Master& master, uint16_t adp,
                                 mbxReadAddr, mbxReadLen,
                                 index, sub, data, dataLen,
                                 diagEnabled, pollIntervalMs, transactionTimeoutMs,
-                                outAbortCode);
+                                outAbortCode, uploadForDiag);
     }
 
     return executeExpedited(master, adp, inoutMbxCnt,
@@ -98,7 +82,7 @@ bool SDODownload::execute(Master& master, uint16_t adp,
                             mbxReadAddr, mbxReadLen,
                             index, sub, data, dataLen,
                             diagEnabled, pollIntervalMs, transactionTimeoutMs,
-                            outAbortCode);
+                            outAbortCode, uploadForDiag);
 }
 
 bool SDODownload::executeExpedited(Master& master, uint16_t adp,
@@ -110,7 +94,8 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
                                    bool diagEnabled,
                                    unsigned int pollIntervalMs,
                                    unsigned int transactionTimeoutMs,
-                                   uint32_t* outAbortCode) {
+                                   uint32_t* outAbortCode,
+                                   SDOUpload* uploadForDiag) {
     uint8_t mbxbuf[256] = {0};
     if (mbxWriteLen > sizeof(mbxbuf) || mbxReadLen > sizeof(mbxbuf)) {
         TETHER_LOGE(TAG, "Mailbox size too large (wr=%u rd=%u)", mbxWriteLen, mbxReadLen);
@@ -166,11 +151,10 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
         uint16_t al_status = 0;
         (void)master.readRegister(Master::slaveAddressFromADP(adp), 0x0130, al_status, 100);
 
-        static uint32_t s_mbx_write_count = 0;
-        s_mbx_write_count++;
-        if ((s_mbx_write_count % 1000) == 1) {
+        mbx_write_count_++;
+        if ((mbx_write_count_ % 1000) == 1) {
             TETHER_LOGI(TAG, "SDO download (write) request to adp=0x%04X: index=0x%04X:%u [mailbox #%lu -> 0x%04X, len=%u, SM0=0x%02X, AL=0x%04X]",
-                     adp, index, sub, (unsigned long)s_mbx_write_count, mbxWriteAddr, mbxWriteLen, sm0_status, al_status);
+                     adp, index, sub, (unsigned long)mbx_write_count_, mbxWriteAddr, mbxWriteLen, sm0_status, al_status);
         }
 
 #ifdef TETHER_DIAG_SDO_IO
@@ -273,7 +257,7 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
                         mbxReadAddr, mbxReadLen,
                         index, sub,
                         diagEnabled, pollIntervalMs, transactionTimeoutMs,
-                        sdo_upload_thunk);
+                        makeUploadDiagFn(uploadForDiag));
                 }
             } else {
                 TETHER_LOGE(TAG, "SDO download abort (malformed response)");
@@ -535,7 +519,8 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                                    bool diagEnabled,
                                    unsigned int pollIntervalMs,
                                    unsigned int transactionTimeoutMs,
-                                   uint32_t* outAbortCode) {
+                                   uint32_t* outAbortCode,
+                                   SDOUpload* uploadForDiag) {
     uint8_t mbxbuf[256] = {0};
     if (mbxWriteLen > sizeof(mbxbuf) || mbxReadLen > sizeof(mbxbuf)) {
         TETHER_LOGE(TAG, "Mailbox size too large (wr=%u rd=%u)", mbxWriteLen, mbxReadLen);
@@ -684,7 +669,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                             mbxReadAddr, mbxReadLen,
                             index, sub,
                             diagEnabled, pollIntervalMs, transactionTimeoutMs,
-                            sdo_upload_thunk);
+                            makeUploadDiagFn(uploadForDiag));
                     }
                 } else {
                     TETHER_LOGE(TAG, "SDO segmented download abort (malformed response)");

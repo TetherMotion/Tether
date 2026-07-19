@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <functional>
 
 namespace EtherCAT { class Master; }
 
@@ -25,11 +26,11 @@ public:
 
     virtual bool isPdoMappingIndex(uint16_t idx) const;
 
-    using UploadFn = bool(*)(Master&, uint16_t, uint8_t*,
-                             uint16_t, uint16_t, uint16_t, uint16_t,
-                             uint16_t, uint8_t,
-                             uint8_t*, size_t, size_t*,
-                             bool, unsigned int, unsigned int);
+    using UploadFn = std::function<bool(Master&, uint16_t, uint8_t*,
+                                        uint16_t, uint16_t, uint16_t, uint16_t,
+                                        uint16_t, uint8_t,
+                                        uint8_t*, size_t, size_t*,
+                                        bool, unsigned int, unsigned int)>;
 
     virtual void logPdoMappingSubindexDiagnostic(Master& master, uint16_t adp,
                                                  uint8_t* inoutMbxCnt,
