@@ -43,6 +43,7 @@
 #include <functional>
 #include <array>
 #include <algorithm>
+#include "tether/ethercat/TetherConfig.hpp"
 
 namespace EtherCAT {
 
@@ -295,7 +296,7 @@ public:
  */
 class FaultDetector {
 public:
-    static constexpr size_t kMaxSlaves = 16;
+    static constexpr size_t kMaxSlaves = ECAT_FAULT_DETECTION_MAX_SLAVES;
 
     /**
      * @brief Construct a FaultDetector with the given transport.

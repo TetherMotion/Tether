@@ -140,7 +140,7 @@ using CallbackHandle = uint32_t;
  */
 class SlaveStatusPoller {
 public:
-    static constexpr size_t kMaxSlaves = 16;
+    static constexpr size_t kMaxSlaves = ECAT_STATUS_POLLER_MAX_SLAVES;
 
     explicit SlaveStatusPoller(IFaultTransport& transport);
     ~SlaveStatusPoller();

@@ -668,8 +668,11 @@ std::future<CoEResult<void>> CoEManager::write(uint16_t index, uint8_t subindex,
         }
         if (state_.write_queue.size() >= kMaxQueueDepth) {
             if (debug_flags_.coeWrites) {
-                TETHER_LOGI(TAG, "Slave %u: CoE write QUEUE FULL index=0x%04X:%u",
-                            slave_index_, index, subindex);
+                TETHER_LOGI(TAG,
+                    "Slave %u: CoE write QUEUE FULL (index=0x%04X:%u, "
+                    "Tether max=%zu pending). This is a Tether limit, not a slave limit. "
+                    "Increase ECAT_COE_QUEUE_DEPTH in TetherConfig.hpp.",
+                    slave_index_, index, subindex, kMaxQueueDepth);
             }
             CoEWriteTransaction fail_txn;
             fail_txn.promise.set_value(std::unexpected(CoEError::QueueFull));

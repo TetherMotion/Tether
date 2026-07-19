@@ -311,9 +311,9 @@ bool Master::forceMailboxDefaults(SlaveAddress slave_address)
     // Standard EtherCAT convention: SM0 (Receive/MbxIn, M→S),
     //                               SM1 (Send/MbxOut, S→M)
     constexpr uint16_t kHardcodedWrAddr = 0x1000;  // Receive/MbxIn (M→S, SM0)
-    constexpr uint16_t kHardcodedWrLen = 128;
+    constexpr uint16_t kHardcodedWrLen = ECAT_DISCOVERY_MBX_WRITE_LEN;
     constexpr uint16_t kHardcodedRdAddr = 0x1400;  // Send/MbxOut (S→M, SM1)
-    constexpr uint16_t kHardcodedRdLen = 128;
+    constexpr uint16_t kHardcodedRdLen = ECAT_DISCOVERY_MBX_READ_LEN;
 
     if (slave_index >= PDO::kMaxPDOSlaves) return false;
 

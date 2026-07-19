@@ -50,6 +50,7 @@
 #include "profiles/cia301/CiA402Defs.hpp"
 #include "tether/drives/DynaDrive/Registers/Statusword.hpp"
 #include "tether/drives/DynaDrive/Registers/Controlword.hpp"
+#include "tether/ethercat/TetherConfig.hpp"
 
 // Forward declaration
 namespace EtherCAT { class Master; }
@@ -154,7 +155,7 @@ public:
     // Typed PDO Buffer Access
     // ========================================================================
 
-    static constexpr size_t kMaxPDOBufferSize = 256;
+    static constexpr size_t kMaxPDOBufferSize = ECAT_CIA402_MAX_PDO_BUFFER_SIZE;
 
     /**
      * @brief Get typed pointer to the RxPDO buffer (master -> slave)
@@ -288,7 +289,7 @@ private:
 // Drive Manager
 // ============================================================================
 
-constexpr size_t kMaxManagedDrives = 8;
+constexpr size_t kMaxManagedDrives = ECAT_CIA402_MAX_MANAGED_DRIVES;
 
 class DriveManager {
 public:

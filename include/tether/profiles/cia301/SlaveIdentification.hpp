@@ -50,6 +50,7 @@
 #include <cstddef>
 #include <cstring>
 #include "profiles/cia301/CiA301Defs.hpp"
+#include "tether/ethercat/TetherConfig.hpp"
 
 namespace EtherCAT {
 class Master;  // forward declaration
@@ -68,12 +69,12 @@ class Master;  // forward declaration
  * - Manufacturer name (~64 chars)
  * - Additional strings (~128 chars)
  */
-constexpr size_t kMaxIdentityStringBuffer = 512;
+constexpr size_t kMaxIdentityStringBuffer = ECAT_CIA301_MAX_IDENTITY_STRING_BUFFER;
 
 /**
  * @brief Maximum number of supported slaves for batch identification
  */
-constexpr size_t kMaxIdentifiedSlaves = 16;
+constexpr size_t kMaxIdentifiedSlaves = ECAT_CIA301_MAX_IDENTIFIED_SLAVES;
 
 // ============================================================================
 // Identity Record (CiA 301 0x1018)

@@ -433,6 +433,111 @@
 #endif
 
 /**
+ * @brief Maximum number of stale mailbox response retries
+ *
+ * When a slave returns a stale mailbox response (wrong counter, wrong
+ * index, or wrong subindex), Tether clears the mailbox and re-sends the
+ * request. This limits the number of such retries before giving up.
+ * This is a Tether-internal limit.
+ *
+ * Default: 8
+ */
+#ifndef ECAT_SDO_MAX_STALE_RETRIES
+#define ECAT_SDO_MAX_STALE_RETRIES      8
+#endif
+
+/**
+ * @brief Maximum number of mailbox poll attempts per SDO phase
+ *
+ * Each SDO phase (init upload, segment request, etc.) polls the SM1
+ * status register this many times before timing out. Combined with
+ * the poll interval, this determines the per-phase timeout.
+ * This is a Tether-internal limit.
+ *
+ * Default: 50
+ */
+#ifndef ECAT_SDO_MAX_POLL_ATTEMPTS
+#define ECAT_SDO_MAX_POLL_ATTEMPTS      50
+#endif
+
+/**
+ * @brief CoE manager queue depth (per slave)
+ *
+ * Maximum number of pending CoE read/write requests per slave in the
+ * CoEManager's async queue. This is a Tether-internal limit — if the
+ * queue is full, new requests are rejected with CoEError::QueueFull.
+ * Note: this is separate from ECAT_SDO_QUEUE_DEPTH which controls the
+ * SDOManager queue.
+ *
+ * Default: 32
+ */
+#ifndef ECAT_COE_QUEUE_DEPTH
+#define ECAT_COE_QUEUE_DEPTH            32
+#endif
+
+/**
+ * @brief CoE default timeout (milliseconds)
+ *
+ * Default timeout for CoE read/write operations when not explicitly
+ * specified by the caller.
+ *
+ * Default: 1000
+ */
+#ifndef ECAT_COE_DEFAULT_TIMEOUT_MS
+#define ECAT_COE_DEFAULT_TIMEOUT_MS     1000
+#endif
+
+/**
+ * @brief CoE default poll interval (milliseconds)
+ *
+ * Default interval for polling the slave mailbox status register
+ * during CoE operations.
+ *
+ * Default: 5
+ */
+#ifndef ECAT_COE_DEFAULT_POLL_INTERVAL_MS
+#define ECAT_COE_DEFAULT_POLL_INTERVAL_MS 5
+#endif
+
+/**
+ * @brief SDO manager maximum data size (bytes)
+ *
+ * Maximum data size for a single SDO transfer in the SDOManager.
+ * Larger transfers use segmented transfer automatically.
+ * Note: this is the SDOManager-level limit, separate from
+ * ECAT_SDO_MAX_DATA_SIZE which is the raw SDO layer limit.
+ *
+ * Default: 256
+ */
+#ifndef ECAT_SDO_MANAGER_MAX_DATA_SIZE
+#define ECAT_SDO_MANAGER_MAX_DATA_SIZE  256
+#endif
+
+/**
+ * @brief SDO manager queue depth
+ *
+ * Maximum number of pending SDO requests in the SDOManager queue.
+ * Note: this is the SDOManager-level limit, separate from
+ * ECAT_SDO_QUEUE_DEPTH which is the general SDO queue limit.
+ *
+ * Default: 16
+ */
+#ifndef ECAT_SDO_MANAGER_QUEUE_DEPTH
+#define ECAT_SDO_MANAGER_QUEUE_DEPTH    16
+#endif
+
+/**
+ * @brief SDO manager default timeout (milliseconds)
+ *
+ * Default timeout for SDO operations in the SDOManager.
+ *
+ * Default: 1000
+ */
+#ifndef ECAT_SDO_MANAGER_DEFAULT_TIMEOUT_MS
+#define ECAT_SDO_MANAGER_DEFAULT_TIMEOUT_MS 1000
+#endif
+
+/**
  * @brief Write-verify maximum data length (bytes)
  *
  * Maximum data length for a single write-verify operation in the
@@ -730,6 +835,182 @@
  */
 #ifndef ECAT_STATE_CHANGE_TIMEOUT_MS
 #define ECAT_STATE_CHANGE_TIMEOUT_MS    5000
+#endif
+
+/**
+ * @brief Maximum TX retries for EtherCAT frame transmission
+ *
+ * Number of times Tether will retransmit an EtherCAT frame if the
+ * raw socket send fails. This is a Tether-internal limit.
+ *
+ * Default: 3
+ */
+#ifndef ECAT_TX_MAX_RETRIES
+#define ECAT_TX_MAX_RETRIES             3
+#endif
+
+/**
+ * @brief TX retry delay (microseconds)
+ *
+ * Delay between TX retry attempts. This is a Tether-internal parameter.
+ *
+ * Default: 50
+ */
+#ifndef ECAT_TX_RETRY_DELAY_US
+#define ECAT_TX_RETRY_DELAY_US          50
+#endif
+
+// ============================================================================
+// SLAVE COUNT LIMITS (Tether-internal)
+// ============================================================================
+
+/**
+ * @brief Maximum slaves for fault detection
+ *
+ * Limits the FaultDetector's internal slave state array. This is a
+ * Tether-internal limit — if the actual slave count exceeds this value,
+ * Tether will silently clamp to this limit. Increase if you have more
+ * slaves and need fault detection for all of them.
+ *
+ * Default: 16
+ */
+#ifndef ECAT_FAULT_DETECTION_MAX_SLAVES
+#define ECAT_FAULT_DETECTION_MAX_SLAVES 16
+#endif
+
+/**
+ * @brief Maximum slaves for status polling
+ *
+ * Limits the SlaveStatusPoller's internal slave array. This is a
+ * Tether-internal limit.
+ *
+ * Default: 16
+ */
+#ifndef ECAT_STATUS_POLLER_MAX_SLAVES
+#define ECAT_STATUS_POLLER_MAX_SLAVES   16
+#endif
+
+/**
+ * @brief Maximum slaves for Distributed Clocks
+ *
+ * Limits the DC subsystem's per-slave time info array. This is a
+ * Tether-internal limit.
+ *
+ * Default: 16
+ */
+#ifndef ECAT_DC_MAX_SLAVES
+#define ECAT_DC_MAX_SLAVES              16
+#endif
+
+// ============================================================================
+// SII PARSER LIMITS (Tether-internal)
+// ============================================================================
+
+/**
+ * @brief Maximum number of strings in SII string category
+ *
+ * Limits how many indexed strings the SII parser can store.
+ * This is a Tether-internal limit — if a slave's SII has more strings,
+ * the excess strings are silently dropped.
+ *
+ * Default: 32
+ */
+#ifndef ECAT_SII_MAX_STRINGS
+#define ECAT_SII_MAX_STRINGS            32
+#endif
+
+/**
+ * @brief Maximum SII string buffer size (bytes)
+ *
+ * Total storage for all SII string data. This is a Tether-internal
+ * limit — if the total string data exceeds this, excess is silently
+ * dropped.
+ *
+ * Default: 2048
+ */
+#ifndef ECAT_SII_MAX_STRING_BUFFER
+#define ECAT_SII_MAX_STRING_BUFFER      2048
+#endif
+
+// ============================================================================
+// DISCOVERY LIMITS (Tether-internal)
+// ============================================================================
+
+/**
+ * @brief Discovery mailbox write length (bytes)
+ *
+ * Mailbox write size used during slave discovery when SII-based
+ * configuration is not available. This is a Tether-internal default
+ * — some slaves may require larger or smaller mailboxes.
+ *
+ * Default: 128
+ */
+#ifndef ECAT_DISCOVERY_MBX_WRITE_LEN
+#define ECAT_DISCOVERY_MBX_WRITE_LEN    128
+#endif
+
+/**
+ * @brief Discovery mailbox read length (bytes)
+ *
+ * Mailbox read size used during slave discovery.
+ *
+ * Default: 128
+ */
+#ifndef ECAT_DISCOVERY_MBX_READ_LEN
+#define ECAT_DISCOVERY_MBX_READ_LEN     128
+#endif
+
+// ============================================================================
+// CIA PROFILE LIMITS (Tether-internal)
+// ============================================================================
+
+/**
+ * @brief Maximum managed CiA402 drives
+ *
+ * Limits the CiA402 DriveManager's internal drive array. This is a
+ * Tether-internal limit.
+ *
+ * Default: 8
+ */
+#ifndef ECAT_CIA402_MAX_MANAGED_DRIVES
+#define ECAT_CIA402_MAX_MANAGED_DRIVES  8
+#endif
+
+/**
+ * @brief CiA402 maximum PDO buffer size (bytes)
+ *
+ * Maximum PDO buffer size per CiA402 drive. This is a Tether-internal
+ * limit — if a drive's PDO mapping exceeds this, it will be rejected.
+ *
+ * Default: 256
+ */
+#ifndef ECAT_CIA402_MAX_PDO_BUFFER_SIZE
+#define ECAT_CIA402_MAX_PDO_BUFFER_SIZE 256
+#endif
+
+/**
+ * @brief Maximum identified slaves (CiA 301)
+ *
+ * Limits the batch slave identification array. This is a
+ * Tether-internal limit.
+ *
+ * Default: 16
+ */
+#ifndef ECAT_CIA301_MAX_IDENTIFIED_SLAVES
+#define ECAT_CIA301_MAX_IDENTIFIED_SLAVES 16
+#endif
+
+/**
+ * @brief CiA 301 identity string buffer size (bytes)
+ *
+ * Total storage for slave identity strings (name, hardware version,
+ * software version, manufacturer). This is a Tether-internal limit —
+ * if the total string data exceeds this, excess is silently dropped.
+ *
+ * Default: 512
+ */
+#ifndef ECAT_CIA301_MAX_IDENTITY_STRING_BUFFER
+#define ECAT_CIA301_MAX_IDENTITY_STRING_BUFFER 512
 #endif
 
 // ============================================================================
