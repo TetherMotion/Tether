@@ -930,8 +930,33 @@ void CoEReadTransactionImpl<T>::execute(CoEManager& mgr) {
     }
 
     if (out_len < sizeof(T)) {
+        // The slave returned fewer bytes than the typed read expects. This is
+        // not a transport/timeout — the SDO upload itself succeeded, but the
+        // response payload does not match the requested C++ type (e.g. reading
+        // a 1-byte Unsigned8 object with sdoReadU32). Surface the actual
+        // received length and the expected length so the caller can correct
+        // the read type instead of chasing a misleading "transport" error.
+        TETHER_LOGE(TAG,
+                    "Slave %u: SDO upload 0x%04X:%u succeeded but response size "
+                    "does not match requested type: got %zu byte(s), expected %zu. "
+                    "Use a smaller typed read (e.g. sdoReadU8 for a 1-byte object) "
+                    "or read as a raw byte vector.",
+                    mgr.slaveIndex(), txn_.index, txn_.subindex,
+                    out_len, sizeof(T));
         txn_.promise.set_value(std::unexpected(CoEError::InternalError));
         return;
+    }
+
+    if (out_len > sizeof(T)) {
+        // The slave returned MORE bytes than the typed read expects. The
+        // leading sizeof(T) bytes are still copied below, but warn so a
+        // truncated response does not pass silently.
+        TETHER_LOGW(TAG,
+                    "Slave %u: SDO upload 0x%04X:%u returned %zu bytes, only "
+                    "the first %zu are used for the requested typed read (trailing "
+                    "%zu byte(s) discarded).",
+                    mgr.slaveIndex(), txn_.index, txn_.subindex,
+                    out_len, sizeof(T), out_len - sizeof(T));
     }
 
     T value;

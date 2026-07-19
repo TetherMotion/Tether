@@ -96,9 +96,9 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
                                    unsigned int transactionTimeoutMs,
                                    uint32_t* outAbortCode,
                                    SDOUpload* uploadForDiag) {
-    uint8_t mbxbuf[256] = {0};
+    uint8_t mbxbuf[kRawSDOMbxBufferSize] = {0};
     if (mbxWriteLen > sizeof(mbxbuf) || mbxReadLen > sizeof(mbxbuf)) {
-        TETHER_LOGE(TAG, "Mailbox size too large (wr=%u rd=%u)", mbxWriteLen, mbxReadLen);
+        TETHER_LOGE(TAG, "Mailbox size too large (wr=%u rd=%u, max=%zu)", mbxWriteLen, mbxReadLen, sizeof(mbxbuf));
         return false;
     }
 
@@ -332,9 +332,9 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
                                 unsigned int pollIntervalMs,
                                 unsigned int transactionTimeoutMs,
                                 uint32_t* outAbortCode) {
-    uint8_t mbxbuf[256] = {0};
+    uint8_t mbxbuf[kRawSDOMbxBufferSize] = {0};
     if (mbxWriteLen > sizeof(mbxbuf) || mbxReadLen > sizeof(mbxbuf)) {
-        TETHER_LOGE(TAG, "Mailbox size too large (wr=%u rd=%u)", mbxWriteLen, mbxReadLen);
+        TETHER_LOGE(TAG, "Mailbox size too large (wr=%u rd=%u, max=%zu)", mbxWriteLen, mbxReadLen, sizeof(mbxbuf));
         return false;
     }
 
@@ -533,9 +533,9 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                                    unsigned int transactionTimeoutMs,
                                    uint32_t* outAbortCode,
                                    SDOUpload* uploadForDiag) {
-    uint8_t mbxbuf[256] = {0};
+    uint8_t mbxbuf[kRawSDOMbxBufferSize] = {0};
     if (mbxWriteLen > sizeof(mbxbuf) || mbxReadLen > sizeof(mbxbuf)) {
-        TETHER_LOGE(TAG, "Mailbox size too large (wr=%u rd=%u)", mbxWriteLen, mbxReadLen);
+        TETHER_LOGE(TAG, "Mailbox size too large (wr=%u rd=%u, max=%zu)", mbxWriteLen, mbxReadLen, sizeof(mbxbuf));
         return false;
     }
 
