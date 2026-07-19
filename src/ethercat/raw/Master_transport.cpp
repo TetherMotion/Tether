@@ -711,9 +711,11 @@ bool Master::sendSingleDatagram(Command cmd, uint8_t idx,
     constexpr size_t encap_overhead = 0;
 #endif
     if (required_len + encap_overhead > kMaxEthFrameNoFcs) {
-        TETHER_LOGE(TAG, "Datagram too big (datalen=%u required=%u encap=%u)",
-                    datalen, static_cast<unsigned>(required_len),
-                    static_cast<unsigned>(encap_overhead));
+        TETHER_LOGE(TAG,
+            "Datagram exceeds max Ethernet frame size (datalen=%u required=%u encap=%u, "
+            "max_frame=%zu). This is a physical Ethernet frame size limit, not a Tether buffer.",
+            datalen, static_cast<unsigned>(required_len),
+            static_cast<unsigned>(encap_overhead), kMaxEthFrameNoFcs);
         return false;
     }
 
@@ -880,8 +882,10 @@ size_t Master::sendMultiDatagram(const MultiDatagramSpec* specs, size_t count)
 
         if (dg_count_in_frame == 0) {
             // Single datagram too big for one frame
-            TETHER_LOGE(TAG, "sendMultiDatagram: datagram %zu too big (datalen=%u)",
-                        i, specs[i].datalen);
+            TETHER_LOGE(TAG,
+                "sendMultiDatagram: datagram %zu exceeds max Ethernet frame size (datalen=%u, "
+                "max_payload=%zu). This is a physical Ethernet frame size limit, not a Tether buffer.",
+                i, specs[i].datalen, max_payload);
             return frames_sent > 0 ? frames_sent : 0;
         }
 

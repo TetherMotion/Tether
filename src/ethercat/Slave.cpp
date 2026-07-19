@@ -138,7 +138,10 @@ SlaveError Slave::configurePDOSyncManagers(
     auto* cfgs = pdo.slaveConfigs();
     if (index_ >= PDO::kMaxPDOSlaves) {
         TETHER_LOGE( TAG,
-            "Slave %u: Index exceeds max PDO slaves (%zu)", index_, PDO::kMaxPDOSlaves);
+            "Slave %u: Index exceeds Tether internal max PDO slaves (%zu). "
+            "This is a Tether limit, not a slave limit. "
+            "Increase ECAT_PDO_MAX_SLAVES in TetherConfig.hpp.",
+            index_, PDO::kMaxPDOSlaves);
         return SlaveError::PDOConfigFailed;
     }
     cfgs[index_].sm[2].phys_start_addr = sm2_addr;

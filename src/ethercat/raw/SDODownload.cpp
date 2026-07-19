@@ -98,7 +98,12 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
                                    SDOUpload* uploadForDiag) {
     uint8_t mbxbuf[kRawSDOMbxBufferSize] = {0};
     if (mbxWriteLen > sizeof(mbxbuf) || mbxReadLen > sizeof(mbxbuf)) {
-        TETHER_LOGE(TAG, "Mailbox size too large (wr=%u rd=%u, max=%zu)", mbxWriteLen, mbxReadLen, sizeof(mbxbuf));
+        TETHER_LOGE(TAG,
+            "Tether internal SDO mailbox buffer too small for slave mailbox size "
+            "(wr=%u rd=%u, Tether max=%zu bytes). This is a Tether limit, not a slave limit. "
+            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= %u.",
+            mbxWriteLen, mbxReadLen, sizeof(mbxbuf),
+            (mbxWriteLen > mbxReadLen) ? mbxWriteLen : mbxReadLen);
         return false;
     }
 
@@ -334,14 +339,21 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
                                 uint32_t* outAbortCode) {
     uint8_t mbxbuf[kRawSDOMbxBufferSize] = {0};
     if (mbxWriteLen > sizeof(mbxbuf) || mbxReadLen > sizeof(mbxbuf)) {
-        TETHER_LOGE(TAG, "Mailbox size too large (wr=%u rd=%u, max=%zu)", mbxWriteLen, mbxReadLen, sizeof(mbxbuf));
+        TETHER_LOGE(TAG,
+            "Tether internal SDO mailbox buffer too small for slave mailbox size "
+            "(wr=%u rd=%u, Tether max=%zu bytes). This is a Tether limit, not a slave limit. "
+            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= %u.",
+            mbxWriteLen, mbxReadLen, sizeof(mbxbuf),
+            (mbxWriteLen > mbxReadLen) ? mbxWriteLen : mbxReadLen);
         return false;
     }
 
     const size_t sdo_header_size = sizeof(MbxHeader) + sizeof(CoeHeader) + sizeof(SdoInitDownloadReq);
     const size_t msg_len = sdo_header_size + dataLen;
     if (msg_len > mbxWriteLen) {
-        TETHER_LOGE(TAG, "Normal download: data_len=%zu exceeds mailbox capacity (msg=%zu > wr=%u)",
+        TETHER_LOGE(TAG, "Normal download: data_len=%zu exceeds slave mailbox write capacity "
+                    "(msg=%zu > slave mailbox wr=%u). The slave mailbox is too small for this data; "
+                    "use segmented download or increase the slave's mailbox size.",
                     dataLen, msg_len, mbxWriteLen);
         return false;
     }
@@ -535,7 +547,12 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                                    SDOUpload* uploadForDiag) {
     uint8_t mbxbuf[kRawSDOMbxBufferSize] = {0};
     if (mbxWriteLen > sizeof(mbxbuf) || mbxReadLen > sizeof(mbxbuf)) {
-        TETHER_LOGE(TAG, "Mailbox size too large (wr=%u rd=%u, max=%zu)", mbxWriteLen, mbxReadLen, sizeof(mbxbuf));
+        TETHER_LOGE(TAG,
+            "Tether internal SDO mailbox buffer too small for slave mailbox size "
+            "(wr=%u rd=%u, Tether max=%zu bytes). This is a Tether limit, not a slave limit. "
+            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= %u.",
+            mbxWriteLen, mbxReadLen, sizeof(mbxbuf),
+            (mbxWriteLen > mbxReadLen) ? mbxWriteLen : mbxReadLen);
         return false;
     }
 

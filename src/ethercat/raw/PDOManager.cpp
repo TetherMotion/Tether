@@ -65,11 +65,20 @@ namespace PDO {
 int PDOMapping::add_rxpdo(uint16_t slave_index, void* buffer, uint16_t size,
                           uint16_t pdo_index, PDOAddressMode mode) {
     if (m_entry_count >= kMaxPDOEntries) {
-        TETHER_LOGE(TAG, "PDO entry limit reached");
+        TETHER_LOGE(TAG,
+            "Tether internal PDO entry limit reached (%zu entries). This is a Tether limit, "
+            "not a slave limit. Increase ECAT_PDO_MAX_ENTRIES in TetherConfig.hpp.",
+            kMaxPDOEntries);
         return -1;
     }
     if (!buffer || size == 0 || size > kMaxPDOSize) {
-        TETHER_LOGE(TAG, "Invalid PDO buffer or size");
+        TETHER_LOGE(TAG,
+            "Invalid PDO buffer or size (size=%u). %s",
+            size,
+            (size > kMaxPDOSize)
+                ? "This is a Tether limit, not a slave limit. "
+                  "Increase ECAT_PDO_MAX_BUFFER_SIZE in TetherConfig.hpp."
+                : "Buffer is null or size is zero.");
         return -1;
     }
     PDOEntry& e   = m_entries[m_entry_count];
@@ -93,11 +102,20 @@ int PDOMapping::add_rxpdo(uint16_t slave_index, void* buffer, uint16_t size,
 int PDOMapping::add_txpdo(uint16_t slave_index, void* buffer, uint16_t size,
                           uint16_t pdo_index, PDOAddressMode mode) {
     if (m_entry_count >= kMaxPDOEntries) {
-        TETHER_LOGE(TAG, "PDO entry limit reached");
+        TETHER_LOGE(TAG,
+            "Tether internal PDO entry limit reached (%zu entries). This is a Tether limit, "
+            "not a slave limit. Increase ECAT_PDO_MAX_ENTRIES in TetherConfig.hpp.",
+            kMaxPDOEntries);
         return -1;
     }
     if (!buffer || size == 0 || size > kMaxPDOSize) {
-        TETHER_LOGE(TAG, "Invalid PDO buffer or size");
+        TETHER_LOGE(TAG,
+            "Invalid PDO buffer or size (size=%u). %s",
+            size,
+            (size > kMaxPDOSize)
+                ? "This is a Tether limit, not a slave limit. "
+                  "Increase ECAT_PDO_MAX_BUFFER_SIZE in TetherConfig.hpp."
+                : "Buffer is null or size is zero.");
         return -1;
     }
     PDOEntry& e   = m_entries[m_entry_count];
