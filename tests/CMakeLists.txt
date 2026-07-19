@@ -731,13 +731,12 @@ create_ethercat_test(timing
     DEFS TETHER_COMPILE_MASTER=1
 )
 
-# Master/coverage tests (vlan router, master frame, integration, sync manager)
+# Master/coverage tests (vlan router, master frame, sync manager)
 create_ethercat_test(coverage
     SOURCES
         ethercat/test_vlan_router.cpp
         ethercat/test_master_frame_coverage.cpp
         ethercat/test_master_udp_encapsulation.cpp
-        ethercat/test_integration_paired.cpp
         ethercat/test_sync_manager.cpp
         ethercat/test_set_preop_fault_diagnose.cpp
         ethercat/test_set_preop_retry.cpp
@@ -752,6 +751,37 @@ create_ethercat_test(coverage
     LIBS tether_ethercat_master
     DEFS TETHER_COMPILE_MASTER=1
 )
+
+# EtherCAT integration tests (master ↔ slave communication via paired
+# loopback interfaces).  Separated from unit tests because they exercise
+# full end-to-end communication paths and may require more time/resources.
+add_executable(tether_ethercat_integration_tests
+    ethercat/test_integration_paired.cpp
+    ${ETHERCAT_COMMON_STUBS}
+    ../src/ethercat/SlaveEmulator.cpp
+    ../src/ethercat/ConditionalPacketRouter.cpp
+    ../src/ethercat/TransactionRouter.cpp
+)
+
+target_include_directories(tether_ethercat_integration_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+)
+
+target_link_libraries(tether_ethercat_integration_tests
+    tether_ethercat_common
+    tether_ethercat_master
+    GTest::gtest_main
+    GTest::gmock
+)
+
+target_compile_definitions(tether_ethercat_integration_tests PRIVATE
+    TETHER_COMPILE_MASTER=1
+)
+
+gtest_discover_tests(tether_ethercat_integration_tests PROPERTIES TIMEOUT 30)
 
 # EtherCAT master + slave state-machine tests (needs full Master/Slave linkage)
 add_executable(tether_ethercat_master_tests

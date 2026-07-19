@@ -213,21 +213,30 @@ protected:
 
     void TearDown() override {
         if (master_) master_->stop();
+        if (discovery_thread_.joinable()) {
+            discovery_thread_.join();
+        }
         pair_.reset();
     }
 
     /// Create & start a master on side-A with an inline RX callback.
+    /// Launches discoverSlaves() in a background thread (since masterTask
+    /// was removed, discovery is no longer automatic).
     Master& startMaster() {
         master_ = std::make_unique<Master>();
         pair_->setRxCallbackA([this](const uint8_t* data, size_t len) {
             if (master_) master_->handleRxFrame(data, len);
         });
         master_->start(pair_->ifaceA(), dummy_mac_);
+        discovery_thread_ = std::thread([this]() {
+            if (master_) master_->discoverSlaves();
+        });
         return *master_;
     }
 
     std::unique_ptr<LinuxPairedNetworkInterface> pair_;
     std::unique_ptr<Master> master_;
+    std::thread discovery_thread_;
     uint8_t dummy_mac_[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
 };
 

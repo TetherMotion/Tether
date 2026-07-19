@@ -1019,6 +1019,7 @@ bool PDOManager::sendAll() {
     std::vector<MultiDatagramSpec> rx_specs;
     std::vector<size_t> rx_entry_idx;
     std::vector<size_t> rx_confirmed_spec_map;
+    size_t rx_skipped = 0;
 
     for (size_t i = 0; i < mapping_.entry_count(); i++) {
         const PDO::PDOEntry* e = mapping_.get_entry(i);
@@ -1050,6 +1051,7 @@ bool PDOManager::sendAll() {
                 roundtrip = true;
                 break;
             default:
+                rx_skipped++;
                 continue;
         }
 
@@ -1092,6 +1094,19 @@ bool PDOManager::sendAll() {
                 split_state_.rx_confirmed_entry_idxs.push_back(
                     rx_entry_idx[rx_confirmed_spec_map[j]]);
             }
+        }
+    }
+
+    // If all enabled RxPDO entries were skipped (e.g. Logical addressing
+    // is not implemented), mark the send phase as failed.
+    if (rx_specs.empty() && rx_skipped > 0) {
+        split_state_.send_phase_ok = false;
+        for (size_t i = 0; i < mapping_.entry_count(); i++) {
+            PDO::PDOEntry* e = mapping_.get_entry_mut(i);
+            if (!e || !e->enabled || e->direction != PDO::PDODirection::RxPDO)
+                continue;
+            e->error_count++;
+            stats_.rxpdo_errors++;
         }
     }
 
@@ -1147,6 +1162,7 @@ bool PDOManager::receiveAll() {
     std::vector<size_t> tx_entry_idx;
     std::vector<uint8_t> tx_idxs;
     std::vector<size_t> tx_spec_map;
+    size_t tx_skipped = 0;
 
     for (size_t i = 0; i < mapping_.entry_count(); i++) {
         const PDO::PDOEntry* e = mapping_.get_entry(i);
@@ -1178,6 +1194,7 @@ bool PDOManager::receiveAll() {
                 roundtrip = true;
                 break;
             default:
+                tx_skipped++;
                 continue;
         }
 
@@ -1242,6 +1259,19 @@ bool PDOManager::receiveAll() {
                     all_ok = false;
                 }
             }
+        }
+    }
+
+    // If all enabled TxPDO entries were skipped (e.g. Logical addressing
+    // is not implemented), mark the receive phase as failed.
+    if (tx_specs.empty() && tx_skipped > 0) {
+        all_ok = false;
+        for (size_t i = 0; i < mapping_.entry_count(); i++) {
+            PDO::PDOEntry* e = mapping_.get_entry_mut(i);
+            if (!e || !e->enabled || e->direction != PDO::PDODirection::TxPDO)
+                continue;
+            e->error_count++;
+            stats_.txpdo_errors++;
         }
     }
 
