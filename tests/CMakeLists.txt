@@ -646,6 +646,7 @@ set(ETHERCAT_COMMON_SRC
     ../src/ethercat/FaultDetection.cpp
     ../src/ethercat/WriteVerify.cpp
     ../src/ethercat/CoEManager.cpp
+    ../src/ethercat/raw/SDOErrorDecoder.cpp
     ../src/ethercat/raw/PDOManager.cpp
     ../src/ethercat/raw/LogicalAddressManager.cpp
     ../src/ethercat/DCClass.cpp
@@ -672,6 +673,7 @@ create_ethercat_test(pdo
         ../src/ethercat/raw/PDOManager.cpp
         ../src/ethercat/raw/LogicalAddressManager.cpp
         ../src/ethercat/CoEManager.cpp
+        ../src/ethercat/raw/SDOErrorDecoder.cpp
         ../src/ethercat/FaultDetection.cpp
         ../src/ethercat/DebugGate.cpp
         ../src/ethercat/utils/PDO.cpp
@@ -703,6 +705,7 @@ create_ethercat_test(protocol
         ../src/ethercat/SlaveStatusPoller.cpp
         ../src/ethercat/WriteVerify.cpp
         ../src/ethercat/CoEManager.cpp
+        ../src/ethercat/raw/SDOErrorDecoder.cpp
         ../src/ethercat/raw/PDOManager.cpp
         ../src/ethercat/raw/LogicalAddressManager.cpp
         ../src/ethercat/DebugGate.cpp
