@@ -85,7 +85,7 @@ TEST(SlaveErrorTest, AllErrorsHaveStrings) {
     EXPECT_STREQ(slaveErrorToString(SlaveError::MailboxConfigFailed),
         "Failed to write mailbox SM registers");
     EXPECT_STREQ(slaveErrorToString(SlaveError::SDOError),
-        "SDO operation failed");
+        "SDO operation failed (transport/timeout)");
     EXPECT_STREQ(slaveErrorToString(SlaveError::SIIReadError),
         "SII EEPROM read failed");
     EXPECT_STREQ(slaveErrorToString(SlaveError::PDOConfigFailed),

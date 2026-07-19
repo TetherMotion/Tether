@@ -700,8 +700,10 @@ bool CoEManager::readSync(uint16_t index, uint8_t subindex,
 
     auto& vec = result.value();
     size_t copy_len = std::min(vec.size(), max_size);
-    std::memcpy(data, vec.data(), copy_len);
-    if (actual_size) *actual_size = copy_len;
+    if (data && copy_len > 0) {
+        std::memcpy(data, vec.data(), copy_len);
+    }
+    if (actual_size) *actual_size = vec.size();
     return true;
 }
 
@@ -823,6 +825,11 @@ void CoEManager::workerLoop() {
                 }
                 bool ok = false;
                 try {
+                    if (!getMailbox(nullptr, nullptr, nullptr, nullptr)) {
+                        txn.promise.set_value(std::unexpected(CoEError::NotConfigured));
+                        request_in_flight_.store(false);
+                        continue;
+                    }
                     ok = sdoDownloadWithRetry(
                         txn.index, txn.subindex,
                         txn.data.data(), txn.data.size(),
@@ -882,6 +889,14 @@ uint32_t CoEManager::nextRequestId() {
 
 template<typename T>
 void CoEReadTransactionImpl<T>::execute(CoEManager& mgr) {
+    // Check mailbox configuration before attempting I/O so that the
+    // proper CoEError::NotConfigured is surfaced (maps to DeviceStateError
+    // abort code) rather than a generic TransportError.
+    if (!mgr.getMailbox(nullptr, nullptr, nullptr, nullptr)) {
+        txn_.promise.set_value(std::unexpected(CoEError::NotConfigured));
+        return;
+    }
+
     std::vector<uint8_t> buf(1500);
     size_t out_len = 0;
 
@@ -912,6 +927,11 @@ void CoEReadTransactionImpl<T>::execute(CoEManager& mgr) {
 // Specialization for std::vector<uint8_t> — used by the raw-buffer readSync overload
 template<>
 void CoEReadTransactionImpl<std::vector<uint8_t>>::execute(CoEManager& mgr) {
+    if (!mgr.getMailbox(nullptr, nullptr, nullptr, nullptr)) {
+        txn_.promise.set_value(std::unexpected(CoEError::NotConfigured));
+        return;
+    }
+
     std::vector<uint8_t> buf(1500);
     size_t out_len = 0;
 

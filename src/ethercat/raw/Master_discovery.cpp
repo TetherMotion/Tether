@@ -188,6 +188,21 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
                         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
                     }
 
+                    // If the initial AL_STATUS had an error bit, issue a
+                    // one-time fault diagnostic dump even though the
+                    // transition succeeded — the error bit indicates a
+                    // prior fault that users should be aware of.
+                    if (has_error) {
+                        std::lock_guard<std::mutex> _lg(m_diag_mutex_);
+                        if (m_diagnosed_slaves_.find(slave_index) == m_diagnosed_slaves_.end()) {
+                            TETHER_LOGI(TAG, "setPreop: issuing one-time fault_diagnose() for slave %u (error bit was set in initial AL_STATUS)", slave_index);
+                            if (faults_) {
+                                faults_->diagnose(slave_index);
+                            }
+                            m_diagnosed_slaves_.insert(slave_index);
+                        }
+                    }
+
                     // Post-PRE_OP SM validation safety net
                     uint8_t sm0_ctrl = 0, sm1_ctrl = 0;
                     (void)readRegister(SlaveAddress(slave_index), static_cast<uint16_t>(EC_REG_SM0 + 0x04), sm0_ctrl, 200);

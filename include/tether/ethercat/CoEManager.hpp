@@ -344,7 +344,12 @@ std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
 template<typename T>
 CoEResult<T> CoEManager::readSync(uint16_t index, uint8_t subindex,
                                    CoETransactionOptions options) {
-    return read<T>(index, subindex, options).get();
+    auto future = read<T>(index, subindex, options);
+    const uint32_t timeout_ms = (options.timeout_ms > 0) ? options.timeout_ms : kDefaultTimeoutMs;
+    if (future.wait_for(std::chrono::milliseconds(timeout_ms)) != std::future_status::ready) {
+        return std::unexpected(CoEError::Timeout);
+    }
+    return future.get();
 }
 
 } // namespace CoE
