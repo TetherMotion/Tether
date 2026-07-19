@@ -200,11 +200,12 @@ jobs:
     
     - name: Generate coverage report with lcov
       run: |
-        # lcov 2.0 is strict about gcov warnings/negative counts emitted for
-        # system headers (libstdc++). --ignore-errors lets the capture proceed
-        # and --rc geninfo_unexecuted_blocks=1 silences the noisy warnings.
+        # lcov 2.0 is strict about gcov warnings/negative counts/mismatched
+        # line ranges emitted for system headers (libstdc++) and optimized
+        # test bodies. --ignore-errors lets the capture proceed and
+        # --rc geninfo_unexecuted_blocks=1 silences the noisy warnings.
         lcov --directory build-coverage --capture --output-file coverage.info \
-          --ignore-errors gcov,negative,gcov_warnings \
+          --ignore-errors gcov,negative,gcov_warnings,mismatch \
           --rc geninfo_unexecuted_blocks=1
         lcov --remove coverage.info '/usr/*' --output-file coverage.info \
           --ignore-errors unused
