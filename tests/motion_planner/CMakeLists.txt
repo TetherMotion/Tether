@@ -47,6 +47,7 @@ foreach(test_source ${MOTION_PLANNER_TEST_SOURCES})
     
     # Add to CTest
     add_test(NAME ${test_name} COMMAND ${test_name})
+    set_tests_properties(${test_name} PROPERTIES TIMEOUT 30)
     
     # Add to test list for combined target
     list(APPEND MOTION_PLANNER_TESTS ${test_name})

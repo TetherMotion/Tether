@@ -234,8 +234,16 @@ bool CoEManager::init() {
 void CoEManager::deinit() {
     initialized_.store(false);
 
-    state_.shutdown_requested.store(true);
-    state_.work_cv.notify_all();
+    // Hold queue_mutex while setting shutdown_requested and notifying the
+    // worker.  This closes the lost-wakeup window: without the lock, the
+    // worker could be between the predicate check in work_cv.wait() and the
+    // actual blocking futex call when notify_all() fires, causing the
+    // notification to be lost and join() to hang forever.
+    {
+        std::lock_guard<std::mutex> qlock(state_.queue_mutex);
+        state_.shutdown_requested.store(true);
+        state_.work_cv.notify_all();
+    }
 
     {
         std::lock_guard<std::mutex> wlock(state_.worker_mutex);
