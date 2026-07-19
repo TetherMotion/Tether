@@ -140,9 +140,9 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
     // We'll attempt to set PRE_OP multiple times, with an extended wait per attempt.
     // This helps recover from transient conditions where the slave's mailbox or
     // internal state is not yet ready to accept AL state changes.
-    const int max_attempts = 3;          // Number of attempts
-    const int inner_tries = 200;         // Wait checks per attempt (inner loop)
-    const int inner_sleep_ms = 20;       // Delay between checks
+    const int max_attempts    = config_.preop_max_attempts;   // Number of attempts
+    const int inner_tries     = config_.preop_inner_tries;    // Wait checks per attempt (inner loop)
+    const int inner_sleep_ms  = config_.preop_inner_sleep_ms; // Delay between checks
 
     for (int attempt = 1; attempt <= max_attempts; ++attempt) {
         if (debug_flags_.stateMachine && debug_flags_.stateMachineFilt.allows(slave_index)) {
@@ -276,11 +276,11 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
         }
 
         // Backoff before retrying
-        const int backoff_ms = 200 * attempt;
+        const int backoff_ms = config_.preop_backoff_ms * attempt;
         std::this_thread::sleep_for(std::chrono::milliseconds(backoff_ms));
     }
 
-    TETHER_LOGE(TAG, "setPreopAndConfirm: all %d attempts failed", 3);
+    TETHER_LOGE(TAG, "setPreopAndConfirm: all %d attempts failed", max_attempts);
     return false;
 }
 
