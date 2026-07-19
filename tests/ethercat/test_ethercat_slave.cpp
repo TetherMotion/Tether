@@ -31,19 +31,22 @@ protected:
     void SetUp() override {
         // Track AL state so APRD can return the correct AL_STATUS value.
         // This makes state-machine transitions fast and deterministic.
-        uint16_t al_state = 0x01; // INIT
+        // NOTE: al_state_ is a member so the lambdas below capture a reference
+        // that outlives SetUp(); a local variable would dangle after SetUp()
+        // returns and corrupt the stack when the callbacks fire later.
+        al_state_ = 0x01; // INIT
 
-        master_.setApwrTestCallback([&al_state](uint16_t, uint16_t ado, const void* data, uint16_t len, unsigned int) {
+        master_.setApwrTestCallback([this](uint16_t, uint16_t ado, const void* data, uint16_t len, unsigned int) {
             if (ado == 0x0120 && data && len >= 2) {
                 uint16_t val = *static_cast<const uint16_t*>(data);
-                al_state = val & 0x0F;
+                al_state_ = val & 0x0F;
             }
             return true;
         });
-        master_.setAprdTestCallback([&al_state](uint16_t, uint16_t ado, void* out, uint16_t len, unsigned int) {
+        master_.setAprdTestCallback([this](uint16_t, uint16_t ado, void* out, uint16_t len, unsigned int) {
             if (out && len >= 2 && (ado == 0x0130 || ado == 0x0134)) {
                 uint8_t* p = static_cast<uint8_t*>(out);
-                p[0] = static_cast<uint8_t>(al_state & 0xFF);
+                p[0] = static_cast<uint8_t>(al_state_ & 0xFF);
                 p[1] = 0;
             }
             return true;
@@ -53,6 +56,7 @@ protected:
     }
 
     Master master_;
+    uint16_t al_state_ = 0x01; // INIT
 };
 
 // ============================================================================
