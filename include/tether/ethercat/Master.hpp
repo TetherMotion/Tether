@@ -158,6 +158,15 @@ public:
         uint32_t txpdo_queue_depth  = 8;
         bool enable_mailbox_fallback = false; ///< Opt-in: force default mailbox on InvalidMailboxConfig
 
+        /// Tuning knobs for `setPreopAndConfirm` (INIT -> PRE_OP transition).
+        /// Defaults preserve the original production timing. Tests that simulate
+        /// slaves which never reach PRE_OP can shrink these to avoid spending
+        /// ~13s of wall time per attempt in `std::this_thread::sleep_for`.
+        uint16_t preop_max_attempts   = 3;   ///< Outer retry attempts for the PRE_OP transition
+        uint16_t preop_inner_tries    = 200; ///< AL_STATUS polls per attempt
+        uint16_t preop_inner_sleep_ms = 20;  ///< Delay between AL_STATUS polls
+        uint16_t preop_backoff_ms     = 200; ///< Base backoff before retry (scaled by attempt index)
+
 #if TETHER_ENABLE_UDP_ENCAPSULATION
         /// EtherCAT-over-UDP encapsulation settings (opt-in, default: disabled).
         /// When enabled, frames are encapsulated as Ethernet/IPv4/UDP(port 34980)
