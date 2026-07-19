@@ -102,6 +102,12 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
         return false;
     }
 
+    // Translate internal CA signal (bit 7 in subindex) to the ETG.1000.6
+    // Complete-Access bit (0x10) in the SDO command byte.  See SDOUpload.cpp
+    // for the full rationale.
+    const bool complete_access = (sub & 0x80u) != 0;
+    sub = static_cast<uint8_t>(sub & 0x7Fu);
+
     uint8_t mbx_cnt = 0;
     if (inoutMbxCnt != nullptr) {
         mbx_cnt = *inoutMbxCnt;
@@ -119,7 +125,7 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
 
     const uint8_t n = static_cast<uint8_t>((4u - dataLen) & 0x03u);
     SdoInitDownloadReq sdo{};
-    sdo.cmd = static_cast<uint8_t>(EC_SDO_DOWN_REQ | 0x02u | 0x01u | (n << 2));
+    sdo.cmd = static_cast<uint8_t>(EC_SDO_DOWN_REQ | 0x02u | 0x01u | (n << 2) | (complete_access ? 0x10u : 0x00u));
     sdo.index_le = host_to_le16(index);
     sdo.sub = sub;
 
@@ -340,6 +346,12 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
         return false;
     }
 
+    // Translate internal CA signal (bit 7 in subindex) to the ETG.1000.6
+    // Complete-Access bit (0x10) in the SDO command byte.  See SDOUpload.cpp
+    // for the full rationale.
+    const bool complete_access = (sub & 0x80u) != 0;
+    sub = static_cast<uint8_t>(sub & 0x7Fu);
+
     uint8_t mbx_cnt = 0;
     if (inoutMbxCnt != nullptr) {
         mbx_cnt = *inoutMbxCnt;
@@ -356,7 +368,7 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
     coe.raw_le = host_to_le16(coe_make_raw(0, EC_COES_SDOREQ));
 
     SdoInitDownloadReq sdo{};
-    sdo.cmd = static_cast<uint8_t>(EC_SDO_DOWN_REQ | 0x01u);
+    sdo.cmd = static_cast<uint8_t>(EC_SDO_DOWN_REQ | 0x01u | (complete_access ? 0x10u : 0x00u));
     sdo.index_le = host_to_le16(index);
     sdo.sub = sub;
     sdo.data_le = host_to_le32(static_cast<uint32_t>(dataLen));
@@ -527,6 +539,12 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
         return false;
     }
 
+    // Translate internal CA signal (bit 7 in subindex) to the ETG.1000.6
+    // Complete-Access bit (0x10) in the SDO command byte.  See SDOUpload.cpp
+    // for the full rationale.
+    const bool complete_access = (sub & 0x80u) != 0;
+    sub = static_cast<uint8_t>(sub & 0x7Fu);
+
     uint8_t mbx_cnt = 0;
     if (inoutMbxCnt != nullptr) {
         mbx_cnt = *inoutMbxCnt;
@@ -550,7 +568,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
         coe.raw_le = host_to_le16(coe_make_raw(0, EC_COES_SDOREQ));
 
         SdoInitDownloadReq sdo{};
-        sdo.cmd = static_cast<uint8_t>(EC_SDO_DOWN_REQ | 0x01u);
+        sdo.cmd = static_cast<uint8_t>(EC_SDO_DOWN_REQ | 0x01u | (complete_access ? 0x10u : 0x00u));
         sdo.index_le = host_to_le16(index);
         sdo.sub = sub;
         sdo.data_le = host_to_le32(static_cast<uint32_t>(dataLen));

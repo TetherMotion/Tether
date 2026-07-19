@@ -1399,10 +1399,12 @@ TEST(CoeSDO, Download_Segmented_120Bytes_WithInline_FirstChunk) {
 }
 
 // ============================================================================
-// Complete Access tests -- verify subindex bit 7 is set
+// Complete Access tests -- verify the ETG.1000.6 Complete-Access bit (0x10)
+// is set in the SDO command byte and the subindex is sent clean (without
+// the internal 0x80 marker) on the wire.
 // ============================================================================
 
-// Mock that captures the subindex from the SDO download request
+// Mock that captures the SDO command byte and subindex from the SDO download
 class CompleteAccessCaptureMock {
 public:
     static constexpr uint16_t SM0_STATUS_ADDR = 0x0805;
@@ -1411,6 +1413,7 @@ public:
     static constexpr uint16_t MBX_READ_ADDR = 0x1080;
     static constexpr uint16_t MBX_LEN = 128;
 
+    uint8_t captured_cmd = 0;
     uint8_t captured_sub = 0;
     uint8_t response_sub = 0;
     bool write_happened = false;
@@ -1448,9 +1451,11 @@ public:
                                           const void* data, uint16_t len, unsigned int ms) {
             (void)adp; (void)ado; (void)ms;
             write_happened = true;
-            // SDO subindex is at offset 11 (MbxHeader(6) + CoeHeader(2) + SDO cmd(1) + index(2))
+            // SDO command byte is at offset 8 (MbxHeader(6) + CoeHeader(2)).
+            // SDO subindex is at offset 11 (MbxHeader(6) + CoeHeader(2) + cmd(1) + index(2)).
             if (data && len >= 12) {
                 const uint8_t* b = static_cast<const uint8_t*>(data);
+                captured_cmd = b[8];
                 captured_sub = b[11];
                 response_sub = captured_sub;
             }
@@ -1466,7 +1471,7 @@ public:
     }
 };
 
-TEST(CoeSDO, Download_CompleteAccess_SetsBit7) {
+TEST(CoeSDO, Download_CompleteAccess_SetsCaBitInCommandByte) {
     EtherCAT::Master master;
     CompleteAccessCaptureMock mock;
     mock.install(master);
@@ -1474,7 +1479,10 @@ TEST(CoeSDO, Download_CompleteAccess_SetsBit7) {
     uint8_t mbx_cnt = 0;
     uint8_t data[4] = {0x01, 0x02, 0x03, 0x04};
 
-    // Manually set bit 7 on subindex to simulate Complete Access
+    // Bit 7 of the subindex is Tether's internal Complete-Access signal
+    // (set by CoEManager when options.complete_access is true).  The raw SDO
+    // layer must translate this into the ETG.1000.6 CA bit (0x10) in the
+    // command byte and send the clean subindex on the wire.
     bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
                                CompleteAccessCaptureMock::MBX_WRITE_ADDR, CompleteAccessCaptureMock::MBX_LEN,
                                CompleteAccessCaptureMock::MBX_READ_ADDR, CompleteAccessCaptureMock::MBX_LEN,
@@ -1482,12 +1490,15 @@ TEST(CoeSDO, Download_CompleteAccess_SetsBit7) {
                                false, 5, 200);
 
     EXPECT_TRUE(ok) << "Complete Access download should succeed";
-    EXPECT_EQ(mock.captured_sub, 0x83u) << "Subindex should have bit 7 set (0x03 | 0x80 = 0x83)";
+    EXPECT_EQ(mock.captured_sub, 0x03u)
+        << "Wire subindex must be clean (0x03), not 0x83";
+    EXPECT_NE(mock.captured_cmd & 0x10u, 0u)
+        << "SDO command byte must have the Complete-Access bit (0x10) set";
 
     mock.remove();
 }
 
-TEST(CoeSDO, Download_NoCompleteAccess_KeepsBit7Clear) {
+TEST(CoeSDO, Download_NoCompleteAccess_KeepsCaBitClear) {
     EtherCAT::Master master;
     CompleteAccessCaptureMock mock;
     mock.install(master);
@@ -1502,7 +1513,9 @@ TEST(CoeSDO, Download_NoCompleteAccess_KeepsBit7Clear) {
                                false, 5, 200);
 
     EXPECT_TRUE(ok) << "Normal download should succeed";
-    EXPECT_EQ(mock.captured_sub, 0x03u) << "Subindex should not have bit 7 set";
+    EXPECT_EQ(mock.captured_sub, 0x03u) << "Subindex should be clean";
+    EXPECT_EQ(mock.captured_cmd & 0x10u, 0u)
+        << "SDO command byte must NOT have the Complete-Access bit set";
 
     mock.remove();
 }

@@ -36,6 +36,17 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
         *outLen = 0;
     }
 
+    // Translate the internal Complete-Access signal (bit 7 set in the
+    // subindex, as set by CoEManager when options.complete_access is true)
+    // into the spec-compliant ETG.1000.6 Complete-Access bit (bit 4 / 0x10
+    // in the SDO command byte).  On the wire the subindex must carry the
+    // real entry number without the 0x80 marker, and the slave's response
+    // will echo the clean subindex — so we translate `sub` in-place here
+    // and all downstream code (request, response matching, logging,
+    // diagnostics) consistently uses the clean value.
+    const bool complete_access = (sub & 0x80u) != 0;
+    sub = static_cast<uint8_t>(sub & 0x7Fu);
+
     uint8_t mbxbuf[256] = {0};
     if (mbxWriteLen > sizeof(mbxbuf) || mbxReadLen > sizeof(mbxbuf)) {
         TETHER_LOGE(TAG, "Mailbox size too large (wr=%u rd=%u)", mbxWriteLen, mbxReadLen);
@@ -61,7 +72,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
     coe.raw_le = host_to_le16(coe_make_raw(0, EC_COES_SDOREQ));
 
     SdoInitUploadReq sdo{};
-    sdo.cmd = EC_SDO_UP_REQ;
+    sdo.cmd = static_cast<uint8_t>(EC_SDO_UP_REQ | (complete_access ? 0x10u : 0x00u));
     sdo.index_le = host_to_le16(index);
     sdo.sub = sub;
     std::memset(sdo.reserved, 0, sizeof(sdo.reserved));
