@@ -47,9 +47,9 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
     const bool complete_access = (sub & 0x80u) != 0;
     sub = static_cast<uint8_t>(sub & 0x7Fu);
 
-    uint8_t mbxbuf[256] = {0};
+    uint8_t mbxbuf[kRawSDOMbxBufferSize] = {0};
     if (mbxWriteLen > sizeof(mbxbuf) || mbxReadLen > sizeof(mbxbuf)) {
-        TETHER_LOGE(TAG, "Mailbox size too large (wr=%u rd=%u)", mbxWriteLen, mbxReadLen);
+        TETHER_LOGE(TAG, "Mailbox size too large (wr=%u rd=%u, max=%zu)", mbxWriteLen, mbxReadLen, sizeof(mbxbuf));
         return false;
     }
 
