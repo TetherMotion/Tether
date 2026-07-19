@@ -68,6 +68,7 @@ uint16_t DriveState::getStatusWord() const {
 
 void DriveState::processControlWord(uint16_t cw) {
     // State machine transitions based on control word
+    bool reset = false;
     switch (state) {
         case State::NOT_READY_TO_SWITCH_ON:
             // Automatic transition to SWITCH_ON_DISABLED
@@ -144,8 +145,7 @@ void DriveState::processControlWord(uint16_t cw) {
             
         case State::FAULT:
             // Fault reset: bit 7 rising edge
-            static bool prev_reset = false;
-            bool reset = (cw & 0x0080) != 0;
+            reset = (cw & 0x0080) != 0;
             if (reset && !prev_reset) {
                 state = State::SWITCH_ON_DISABLED;
                 error_code = 0;

@@ -261,7 +261,10 @@ struct DriveState {
     
     // Homing
     bool homing_complete = false;
-    
+
+    // Fault-reset edge detection (per-instance, latched between cycles)
+    bool prev_reset = false;
+
     // Fault code
     uint16_t error_code = 0;         // 0x603F
     

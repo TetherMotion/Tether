@@ -785,15 +785,6 @@ public:
     const NetworkInterface* networkInterface() const;
 
     /**
-     * @brief Find a running Master by its NetworkInterface pointer.
-     *
-     * This helper is used by host-side transport helpers (examples) to locate
-     * the master instance that was started with a given NetworkInterface.
-     * Returns nullptr if no matching instance is registered.
-     */
-    static Master* findByNetworkInterface(const NetworkInterface* iface);
-
-    /**
      * @brief Test helper: check if a one-time fault diagnosis was issued for a slave
      * 
      * Used by unit tests to verify that `fault_diagnose()` was called when
@@ -856,7 +847,6 @@ private:
 
     // Network
     NetworkInterface iface_{};
-    const NetworkInterface* iface_ptr_{nullptr}; ///< Original pointer for identity comparison
     uint8_t src_mac_[6] = {};
 
     // Queues
@@ -914,6 +904,11 @@ private:
         "NetworkInterface::send failed after retries",
         Tether::Logging::DedupLogConfig{2, 10'000, true, Tether::Platform::LogLevel::Info}
     };
+
+    // RX-path unrouted/dropped-packet log throttling counters (per-instance;
+    // formerly function-local statics shared across all Master instances).
+    uint32_t unrouted_log_count_ = 0;
+    uint32_t rx_drop_log_count_  = 0;
 
     // Diagnostics: one-time per-slave fault diagnostic tracker
     mutable std::mutex m_diag_mutex_;

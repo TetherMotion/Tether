@@ -67,6 +67,11 @@ protected:
     SDOErrorDecoder& errorDecoder_;
     SDOMailboxIO& mailboxIO_;
     SDODiagnostics& diagnostics_;
+
+    // Per-instance mailbox write counter used to throttle periodic SDO
+    // request logging. Formerly a function-local static shared across all
+    // transactions (process-global state); now instance-scoped.
+    uint32_t mbx_write_count_ = 0;
 };
 
 } // namespace Raw

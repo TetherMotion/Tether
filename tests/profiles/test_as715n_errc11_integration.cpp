@@ -198,6 +198,14 @@ private:
             return;
         }
 
+        // SM0 control byte (0x0804) — read back by autoConfigureMailbox and
+        // setPreopAndConfirm to verify the mailbox config was accepted.
+        // Must match byte[4] of the 8-byte SM0 config above.
+        if (ado == 0x0804 && len >= 1) {
+            buf[0] = 0x26;
+            return;
+        }
+
         // SM0 status byte (0x0805) — idle / not busy
         if (ado == 0x0805 && len >= 1) {
             buf[0] = 0x00;
@@ -215,9 +223,20 @@ private:
             return;
         }
 
-        // SM1 status byte (0x080D) — idle
+        // SM1 control byte (0x080C) — read back by autoConfigureMailbox and
+        // setPreopAndConfirm to verify the mailbox config was accepted.
+        // Must match byte[4] of the 8-byte SM1 config above.
+        if (ado == 0x080C && len >= 1) {
+            buf[0] = 0x22;
+            return;
+        }
+
+        // SM1 status byte (0x080D) — MBXFULL (bit 3, 0x08) when an SDO
+        // response is pending in the slave→master mailbox.  The master polls
+        // this bit (pollSm1Full) before reading SM1; without it every SDO
+        // upload times out waiting for a response that is already staged.
         if (ado == 0x080D && len >= 1) {
-            buf[0] = 0x00;
+            buf[0] = sdo_response_ready_ ? EC_SM_STATUS_MBXFULL : 0x00;
             return;
         }
 
@@ -452,22 +471,31 @@ private:
     /**
      * @brief Return the SII word at a given word address.
      *
-     * Words 20–24 carry the standard mailbox configuration that the master
-     * reads during discovery and autoConfigureMailbox().  All other words
-     * return 0 (causing a CRC mismatch at word 7, which the SII reader
-     * tolerates and treats as non-fatal).
+     * Words 20–28 carry the mailbox configuration that the master reads
+     * during discovery and autoConfigureMailbox().  Per the SII spec
+     * (ETG.1000.6) and SIIParser::parseIdentity():
+     *   - Words 20–23: Bootstrap mailbox (rx_offset, rx_size, tx_offset, tx_size)
+     *   - Words 24–27: Standard mailbox  (rx_offset, rx_size, tx_offset, tx_size)
+     *   - Word 28:     Supported mailbox protocols
      *
-     * | Word | Value  | Meaning                         |
-     * |------|--------|---------------------------------|
-     * |  8   | 0x0000 | Vendor ID low  (0x00400000)     |
-     * |  9   | 0x0040 | Vendor ID high                  |
-     * | 10   | 0x0715 | Product Code low (0x00000715)   |
-     * | 11   | 0x0000 | Product Code high               |
-     * | 20   | 0x1000 | Std RX mailbox offset (MbxIn/M→S) |
-     * | 21   | 0x0100 | Std RX mailbox size = 256          |
-     * | 22   | 0x1400 | Std TX mailbox offset (MbxOut/S→M) |
-     * | 23   | 0x0100 | Std TX mailbox size = 256          |
-     * | 24   | 0x000C | Protocols: CoE (bit2) + FoE (bit3)|
+     * All other words return 0 (causing a CRC mismatch at word 7, which the
+     * SII reader tolerates and treats as non-fatal).
+     *
+     * | Word | Value  | Meaning                              |
+     * |------|--------|--------------------------------------|
+     * |  8   | 0x0000 | Vendor ID low  (0x00400000)          |
+     * |  9   | 0x0040 | Vendor ID high                       |
+     * | 10   | 0x0715 | Product Code low (0x00000715)        |
+     * | 11   | 0x0000 | Product Code high                    |
+     * | 20   | 0x1000 | Bootstrap RX mbx offset (MbxIn/M→S)  |
+     * | 21   | 0x0100 | Bootstrap RX mbx size = 256          |
+     * | 22   | 0x1400 | Bootstrap TX mbx offset (MbxOut/S→M) |
+     * | 23   | 0x0100 | Bootstrap TX mbx size = 256          |
+     * | 24   | 0x1000 | Standard RX mbx offset (MbxIn/M→S)   |
+     * | 25   | 0x0100 | Standard RX mbx size = 256           |
+     * | 26   | 0x1400 | Standard TX mbx offset (MbxOut/S→M)  |
+     * | 27   | 0x0100 | Standard TX mbx size = 256           |
+     * | 28   | 0x000C | Protocols: CoE (bit2) + FoE (bit3)   |
      */
     static uint16_t siiWord(uint16_t word_addr) {
         switch (word_addr) {
@@ -475,11 +503,15 @@ private:
             case  9: return 0x0040;  // Vendor ID high
             case 10: return 0x0715;  // Product Code low (→ 0x00000715)
             case 11: return 0x0000;  // Product Code high
-            case 20: return 0x1000;  // Std mailbox receive offset (MbxIn)
-            case 21: return 0x0100;  // Std mailbox receive size = 256
-            case 22: return 0x1400;  // Std mailbox transmit offset (MbxOut)
-            case 23: return 0x0100;  // Std mailbox transmit size = 256
-            case 24: return 0x000C;  // Mailbox protocols: CoE + FoE
+            case 20: return 0x1000;  // Bootstrap mailbox receive offset (MbxIn)
+            case 21: return 0x0100;  // Bootstrap mailbox receive size = 256
+            case 22: return 0x1400;  // Bootstrap mailbox transmit offset (MbxOut)
+            case 23: return 0x0100;  // Bootstrap mailbox transmit size = 256
+            case 24: return 0x1000;  // Standard mailbox receive offset (MbxIn)
+            case 25: return 0x0100;  // Standard mailbox receive size = 256
+            case 26: return 0x1400;  // Standard mailbox transmit offset (MbxOut)
+            case 27: return 0x0100;  // Standard mailbox transmit size = 256
+            case 28: return 0x000C;  // Mailbox protocols: CoE + FoE
             default: return 0x0000;
         }
     }

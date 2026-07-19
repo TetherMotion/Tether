@@ -3,7 +3,6 @@
  * @brief EtherCAT raw transport function declarations
  *
  * Extracted from internal.hpp. Contains:
- * - Log deduplication functions
  * - adp_for_slave_index helper
  * - configure_mailbox_from_sii, sii_read_string
  */
@@ -17,13 +16,6 @@ namespace EtherCAT { class Master; }
 
 namespace EtherCAT {
 namespace Raw {
-
-// ============================================================================
-// Log Deduplication
-// ============================================================================
-
-void log_dedup_key(int level, const char *key, const char *msg);
-void log_dedup(int level, const char *msg);
 
 // ============================================================================
 // Higher-Level Helpers

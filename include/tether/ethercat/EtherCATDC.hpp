@@ -78,7 +78,31 @@ private:
     bool updateSyncStartTime();
 };
 
-class NoDistributedClockConfigured final : public EtherCATDC {
+/**
+ * @brief State-less no-op IDCTransport used as the transport for the
+ *        NoDistributedClockConfigured sentinel.
+ *
+ * Every method returns a safe no-op result (false / 0). The sentinel
+ * overrides every public EtherCATDC method and never delegates to the base,
+ * so this transport is never actually exercised — it exists only to satisfy
+ * the EtherCATDC base-class constructor's reference parameter without
+ * introducing process-global state.
+ *
+ * It is held as a private base class of NoDistributedClockConfigured
+ * (the "base-from-member" idiom) so that the EtherCATDC subobject can be
+ * constructed with a reference to an already-constructed NoopDCTransport
+ * subobject, avoiding both a global instance and a dangling reference.
+ */
+class NoopDCTransport : public IDCTransport {
+public:
+    bool readRegister(uint16_t, uint16_t, void*, uint16_t, unsigned int = 200) override { return false; }
+    bool writeRegister(uint16_t, uint16_t, const void*, uint16_t, unsigned int = 200) override { return false; }
+    bool sendSyncDatagram(uint16_t, uint16_t, const void*, uint16_t) override { return false; }
+    uint64_t getMasterTimeNs() override { return 0; }
+    void delayMs(uint32_t) override {}
+};
+
+class NoDistributedClockConfigured final : private NoopDCTransport, public EtherCATDC {
 public:
     NoDistributedClockConfigured();
 

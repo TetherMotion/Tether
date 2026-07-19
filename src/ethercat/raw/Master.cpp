@@ -37,12 +37,6 @@ namespace EtherCAT {
 
 static const char* TAG = "ethercat";
 
-// Global registry of Master instances (host-only helper). This
-// allows host-side helpers (examples) to find the master associated with
-// a NetworkInterface pointer.
-static std::mutex g_master_list_mutex;
-static std::vector<Master*> g_master_list;
-
 // TX retry constants
 static constexpr int       kMaxTxRetries   = 3;
 static constexpr uint32_t  kTxRetryDelayUs = 50;
@@ -420,23 +414,10 @@ Master::Master(const Config& config)
     fault_transport_ = std::make_unique<MasterFaultTransport>(*this);
     faults_ = std::make_unique<FaultDetector>(*fault_transport_);
     status_poller_ = std::make_unique<SlaveStatusPoller>(*fault_transport_);
-
-    // Register this instance in the global list so host helpers may locate it
-    {
-        std::lock_guard<std::mutex> lg(g_master_list_mutex);
-        g_master_list.push_back(this);
-    }
 }
 
 Master::~Master()
 {
-    // Unregister this instance from the global list first
-    {
-        std::lock_guard<std::mutex> lg(g_master_list_mutex);
-        auto it = std::find(g_master_list.begin(), g_master_list.end(), this);
-        if (it != g_master_list.end()) g_master_list.erase(it);
-    }
-
     stop();
 
     // Clean up per-master packet router
@@ -451,7 +432,6 @@ Master::~Master()
 void Master::start(const NetworkInterface& iface, const uint8_t src_mac[6])
 {
     iface_ = iface;
-    iface_ptr_ = &iface;  // Store original pointer for identity comparison
     std::memcpy(src_mac_, src_mac, 6);
     ensureRxQueues();
 
@@ -615,15 +595,6 @@ bool Master::isQueueModeLoopRunning() const
 const uint8_t* Master::getSrcMac() const { return src_mac_; }
 
 const NetworkInterface* Master::networkInterface() const { return &iface_; }
-
-Master* Master::findByNetworkInterface(const NetworkInterface* iface)
-{
-    std::lock_guard<std::mutex> lg(g_master_list_mutex);
-    for (auto m : g_master_list) {
-        if (m && m->iface_ptr_ == iface) return m;
-    }
-    return nullptr;
-}
 
 
 
