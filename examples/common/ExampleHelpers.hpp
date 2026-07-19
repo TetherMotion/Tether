@@ -146,7 +146,9 @@ void logMailboxConfig(const MailboxSizeConfig& size,
  * SlaveError::SDOAborted. It reads Slave::lastSdoAbortCode(), decodes the
  * standard 32-bit CoE abort code into its human-readable meaning, and prints
  * the result to both the TETHER log and stderr so the user sees it on the
- * console regardless of log routing.
+ * console regardless of log routing. It also reports the operation direction
+ * (read vs. write) and the attempted payload length from
+ * Slave::lastSdoAttemptedLength().
  *
  * For the length-mismatch family of abort codes (0x06070010 / 0x06070012 /
  * 0x06070013) it additionally prints a hint pointing the user at the object

@@ -351,6 +351,8 @@ bool CoEManager::sdoUploadWithRetry(uint16_t index, uint8_t subindex,
     }
 
     last_sdo_abort_code_.store(0, std::memory_order_relaxed);
+    last_sdo_was_download_.store(false, std::memory_order_relaxed);
+    last_sdo_attempted_length_.store(out_cap, std::memory_order_relaxed);
 
     const uint8_t max_attempts = options.max_retries + 1;
     for (uint8_t attempt = 0; attempt < max_attempts; ++attempt) {
@@ -376,9 +378,9 @@ bool CoEManager::sdoUploadWithRetry(uint16_t index, uint8_t subindex,
         if (abort_code != 0) {
             last_sdo_abort_code_.store(abort_code, std::memory_order_relaxed);
             Raw::SDOErrorDecoder decoder;
-            TETHER_LOGE(TAG, "Slave %u: SDO upload 0x%04X:%u aborted by slave — code 0x%08X (%s). Not retrying.",
+            TETHER_LOGE(TAG, "Slave %u: SDO upload 0x%04X:%u aborted by slave — code 0x%08X (%s). Attempted read buffer capacity: %zu bytes. Not retrying.",
                         slave_index_, index, subindex, abort_code,
-                        decoder.sdoAbortCodeStr(abort_code));
+                        decoder.sdoAbortCodeStr(abort_code), out_cap);
             return false;
         }
 
@@ -412,6 +414,8 @@ bool CoEManager::sdoDownloadWithRetry(uint16_t index, uint8_t subindex,
     }
 
     last_sdo_abort_code_.store(0, std::memory_order_relaxed);
+    last_sdo_was_download_.store(true, std::memory_order_relaxed);
+    last_sdo_attempted_length_.store(data_len, std::memory_order_relaxed);
 
     const uint8_t max_attempts = options.max_retries + 1;
     for (uint8_t attempt = 0; attempt < max_attempts; ++attempt) {
@@ -437,9 +441,9 @@ bool CoEManager::sdoDownloadWithRetry(uint16_t index, uint8_t subindex,
         if (abort_code != 0) {
             last_sdo_abort_code_.store(abort_code, std::memory_order_relaxed);
             Raw::SDOErrorDecoder decoder;
-            TETHER_LOGE(TAG, "Slave %u: SDO download 0x%04X:%u aborted by slave — code 0x%08X (%s). Not retrying.",
+            TETHER_LOGE(TAG, "Slave %u: SDO download 0x%04X:%u aborted by slave — code 0x%08X (%s). Attempted payload length: %zu bytes. Not retrying.",
                         slave_index_, index, subindex, abort_code,
-                        decoder.sdoAbortCodeStr(abort_code));
+                        decoder.sdoAbortCodeStr(abort_code), data_len);
             return false;
         }
 

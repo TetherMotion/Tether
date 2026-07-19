@@ -397,15 +397,26 @@ uint32_t reportSdoAbort(const EtherCAT::Slave& slave, const char* tag) {
     EtherCAT::Raw::SDOErrorDecoder decoder;
     const char* meaning = decoder.sdoAbortCodeStr(abort_code);
 
-    TETHER_LOGE(tag, "Slave rejected the SDO request: CoE abort code 0x%08X (%s).",
-                abort_code, meaning);
+    const bool was_download = slave.lastSdoWasDownload();
+    const size_t attempted_len = slave.lastSdoAttemptedLength();
+    const char* op_str = was_download ? "download (write)" : "upload (read)";
+    const char* len_str = was_download
+                              ? "payload length sent to slave"
+                              : "read buffer capacity offered";
+
+    TETHER_LOGE(tag, "Slave rejected the SDO request: CoE abort code 0x%08X (%s). "
+                     "Operation: %s, attempted %s: %zu bytes.",
+                abort_code, meaning, op_str, len_str, attempted_len);
 
     // Always echo to stderr so the user sees it on the console even when log
     // output is redirected or silenced.
     std::fprintf(stderr,
                  "ERROR: Slave rejected the SDO request.\n"
-                 "  CoE SDO abort code: 0x%08X (%s)\n",
-                 abort_code, meaning);
+                 "  CoE SDO abort code: 0x%08X (%s)\n"
+                 "  Operation:          %s\n"
+                 "  Attempted %s: %zu bytes\n",
+                 abort_code, meaning,
+                 op_str, len_str, attempted_len);
 
     // The length-mismatch family — the signature of the original
     // "slave rejects the write because the payload is the wrong size"
@@ -417,12 +428,12 @@ uint32_t reportSdoAbort(const EtherCAT::Slave& slave, const char* tag) {
                                 : (abort_code == 0x06070013) ? "too low"
                                                              : "mismatch";
         std::fprintf(stderr,
-                     "  Cause: the payload size you sent does not match the size\n"
+                     "  Cause: the payload size you sent (%zu bytes) does not match the size\n"
                      "         the slave expects for this object (length %s).\n"
                      "  Fix:   check the object dictionary / ESI (XML) file for the\n"
                      "         target index:subindex to find the correct data type\n"
                      "         and byte length, then send exactly that many bytes.\n",
-                     which);
+                     attempted_len, which);
     }
 
     std::fflush(stderr);
