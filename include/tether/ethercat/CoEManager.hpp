@@ -157,6 +157,15 @@ public:
     void setBehaviourOptions(const BehaviourOptions& opts) { behaviour_options_ = opts; }
     const BehaviourOptions& behaviourOptions() const { return behaviour_options_; }
 
+    /// @brief Return the CoE SDO abort code reported by the slave on the most
+    /// recent sdoUploadWithRetry/sdoDownloadWithRetry call. 0 means no abort
+    /// (success or a non-abort failure such as a transport/timeout error).
+    /// Read this immediately after a sync read/write returns false to
+    /// distinguish a definitive slave rejection (e.g. 0x06070010 length
+    /// mismatch) from a transport issue. When this is non-zero the retry
+    /// wrapper does NOT retry the operation.
+    uint32_t lastSdoAbortCode() const { return last_sdo_abort_code_.load(std::memory_order_relaxed); }
+
     // ----- Debug flags -----
 
     /** @brief Update the per-slave debug flags distributed by the master. */
@@ -238,6 +247,8 @@ private:
     std::atomic<bool> request_in_flight_{false};
 
     BehaviourOptions behaviour_options_;
+
+    std::atomic<uint32_t> last_sdo_abort_code_{0};
 
     EtherCATSlaveDebugFlags debug_flags_;
 };

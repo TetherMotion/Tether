@@ -366,6 +366,10 @@ public:
         return master_.readRegister(SlaveAddress(slave_index), reg_addr, out, len, timeout_ms);
     }
 
+    uint32_t lastAbortCode() const override {
+        return master_.lastCoeSdoAbortCode();
+    }
+
 private:
     Master& master_;
 };
@@ -658,6 +662,10 @@ bool Master::coeSdoDownload(uint16_t adp, uint8_t* inout_mbx_cnt,
                                  mbx_rd_addr, mbx_rd_len,
                                  index, sub, data, data_len, diag_enabled,
                                  poll_interval_ms, transaction_timeout_ms);
+}
+
+uint32_t Master::lastCoeSdoAbortCode() const {
+    return coe_sdo_channel_ ? coe_sdo_channel_->lastAbortCode() : 0u;
 }
 
 // ============================================================================

@@ -595,7 +595,8 @@ SlaveError Slave::sdoRead(uint16_t index, uint8_t subindex,
     size_t actual = 0;
     if (!sdo.readSync(index, subindex,
                       data, size, SDO::kDefaultSDOTimeoutMs, &actual)) {
-        return SlaveError::SDOError;
+        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
+                                              : SlaveError::SDOError;
     }
     size = actual;
     return SlaveError::Ok;
@@ -606,7 +607,8 @@ SlaveError Slave::sdoWrite(uint16_t index, uint8_t subindex,
     auto& sdo = master_.sdoManager(index_);
     if (!sdo.writeSync(index, subindex,
                        data, size, {.timeout_ms = SDO::kDefaultSDOTimeoutMs})) {
-        return SlaveError::SDOError;
+        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
+                                              : SlaveError::SDOError;
     }
     return SlaveError::Ok;
 }
@@ -614,7 +616,10 @@ SlaveError Slave::sdoWrite(uint16_t index, uint8_t subindex,
 SlaveError Slave::sdoReadU8(uint16_t index, uint8_t sub, uint8_t& out) {
     auto& sdo = master_.sdoManager(index_);
     auto result = sdo.readU8(index, sub);
-    if (!result.has_value()) return SlaveError::SDOError;
+    if (!result.has_value()) {
+        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
+                                              : SlaveError::SDOError;
+    }
     out = result.value();
     return SlaveError::Ok;
 }
@@ -622,7 +627,10 @@ SlaveError Slave::sdoReadU8(uint16_t index, uint8_t sub, uint8_t& out) {
 SlaveError Slave::sdoReadU16(uint16_t index, uint8_t sub, uint16_t& out) {
     auto& sdo = master_.sdoManager(index_);
     auto result = sdo.readU16(index, sub);
-    if (!result.has_value()) return SlaveError::SDOError;
+    if (!result.has_value()) {
+        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
+                                              : SlaveError::SDOError;
+    }
     out = result.value();
     return SlaveError::Ok;
 }
@@ -630,7 +638,10 @@ SlaveError Slave::sdoReadU16(uint16_t index, uint8_t sub, uint16_t& out) {
 SlaveError Slave::sdoReadU32(uint16_t index, uint8_t sub, uint32_t& out) {
     auto& sdo = master_.sdoManager(index_);
     auto result = sdo.readU32(index, sub);
-    if (!result.has_value()) return SlaveError::SDOError;
+    if (!result.has_value()) {
+        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
+                                              : SlaveError::SDOError;
+    }
     out = result.value();
     return SlaveError::Ok;
 }
@@ -638,22 +649,35 @@ SlaveError Slave::sdoReadU32(uint16_t index, uint8_t sub, uint32_t& out) {
 SlaveError Slave::sdoWriteU8(uint16_t index, uint8_t sub, uint8_t val) {
     auto& sdo = master_.sdoManager(index_);
     auto result = sdo.writeU8(index, sub, val);
-    if (!result.has_value()) return SlaveError::SDOError;
+    if (!result.has_value()) {
+        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
+                                              : SlaveError::SDOError;
+    }
     return SlaveError::Ok;
 }
 
 SlaveError Slave::sdoWriteU16(uint16_t index, uint8_t sub, uint16_t val) {
     auto& sdo = master_.sdoManager(index_);
     auto result = sdo.writeU16(index, sub, val);
-    if (!result.has_value()) return SlaveError::SDOError;
+    if (!result.has_value()) {
+        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
+                                              : SlaveError::SDOError;
+    }
     return SlaveError::Ok;
 }
 
 SlaveError Slave::sdoWriteU32(uint16_t index, uint8_t sub, uint32_t val) {
     auto& sdo = master_.sdoManager(index_);
     auto result = sdo.writeU32(index, sub, val);
-    if (!result.has_value()) return SlaveError::SDOError;
+    if (!result.has_value()) {
+        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
+                                              : SlaveError::SDOError;
+    }
     return SlaveError::Ok;
+}
+
+uint32_t Slave::lastSdoAbortCode() const {
+    return master_.sdoManager(index_).lastSdoAbortCode();
 }
 
 // -- SII convenience ---------------------------------------------------------
