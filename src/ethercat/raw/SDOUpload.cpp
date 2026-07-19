@@ -49,7 +49,12 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
 
     uint8_t mbxbuf[kRawSDOMbxBufferSize] = {0};
     if (mbxWriteLen > sizeof(mbxbuf) || mbxReadLen > sizeof(mbxbuf)) {
-        TETHER_LOGE(TAG, "Mailbox size too large (wr=%u rd=%u, max=%zu)", mbxWriteLen, mbxReadLen, sizeof(mbxbuf));
+        TETHER_LOGE(TAG,
+            "Tether internal SDO mailbox buffer too small for slave mailbox size "
+            "(wr=%u rd=%u, Tether max=%zu bytes). This is a Tether limit, not a slave limit. "
+            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= %u.",
+            mbxWriteLen, mbxReadLen, sizeof(mbxbuf),
+            (mbxWriteLen > mbxReadLen) ? mbxWriteLen : mbxReadLen);
         return false;
     }
 
@@ -343,9 +348,90 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
         }
 
         uint32_t total_size = 0;
+        bool has_total_size = false;
         if (size_indicated && r_len >= sizeof(CoeHeader) + sizeof(SdoInitUploadRes)) {
             const auto *res = reinterpret_cast<const SdoInitUploadRes *>(r_sdo_bytes);
             total_size = le32_to_host(res->data_or_size_le);
+            has_total_size = true;
+        }
+
+        // Handle inline data in the init upload response. When the mailbox is
+        // large enough (e.g. 512 bytes), the slave may send the full response
+        // data inline in the init upload response rather than using segmented
+        // transfer. The inline data follows the 8-byte SdoInitUploadRes header
+        // and occupies (r_len - sizeof(CoeHeader) - sizeof(SdoInitUploadRes))
+        // bytes. If the full response fits inline, copy it and return without
+        // entering the segment loop. This is critical for slaves like the
+        // ESC211 that, with a 512-byte mailbox, send 256-byte OctetString
+        // responses inline and do not respond to subsequent segment requests.
+        //
+        // Completeness logic:
+        //   - has_total_size && total_size > 0 && inline_data_len >= total_size:
+        //       complete — copy total_size bytes (ignore trailing padding)
+        //   - !has_total_size && inline_data_len > 0:
+        //       assume complete — copy inline_data_len bytes (size unknown)
+        //   - has_total_size && total_size == 0:
+        //       empty response — return 0 bytes (ignore any inline bytes)
+        //   - has_total_size && total_size > 0 && inline_data_len < total_size:
+        //       partial inline — fall through to segment loop (avoid silent
+        //       truncation; the slave should re-send via segments)
+        const size_t sdo_header_len = sizeof(CoeHeader) + sizeof(SdoInitUploadRes);
+        const size_t inline_data_len = (r_len > sdo_header_len) ? (r_len - sdo_header_len) : 0;
+
+        // Empty response with size indicated as 0 — return immediately.
+        if (has_total_size && total_size == 0) {
+            if (outLen) *outLen = 0;
+            diagnostics_.logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbxReadLen,
+                                         master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
+            if (master.debugGate().hasAnyConditions()) {
+                master.debugGate().onCoERead(slaveIndexFromADP(adp), index, sub,
+                                             out, 0);
+            }
+            return true;
+        }
+
+        const bool inline_complete = (inline_data_len > 0) &&
+            ((has_total_size && inline_data_len >= total_size) || !has_total_size);
+        if (inline_complete) {
+            const uint8_t* inline_data = r_sdo_bytes + sizeof(SdoInitUploadRes);
+            size_t copy_len = inline_data_len;
+            if (has_total_size && total_size < copy_len) {
+                copy_len = total_size;
+            }
+#ifdef TETHER_DIAG_SDO_IO
+            if (diagEnabled) {
+                TETHER_LOGI(TAG,
+                    "SDO upload inline: idx=0x%04x:%u cmd=0x%02x total_size=%u "
+                    "inline=%zu r_len=%u — complete, skipping segments",
+                    index, sub, sdo_cmd, total_size, inline_data_len, r_len);
+            }
+#endif
+            if (out && outCap > 0) {
+                const size_t copy_n = (copy_len < outCap) ? copy_len : outCap;
+                std::memcpy(out, inline_data, copy_n);
+                if (outLen) {
+                    *outLen = copy_n;
+                }
+            } else if (outLen) {
+                *outLen = copy_len;
+            }
+            diagnostics_.logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbxReadLen,
+                                         master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
+            if (master.debugGate().hasAnyConditions()) {
+                master.debugGate().onCoERead(slaveIndexFromADP(adp), index, sub,
+                                             out, outLen ? *outLen : 0);
+            }
+            return true;
+        }
+        if (inline_data_len > 0 && has_total_size && inline_data_len < total_size) {
+            // Partial inline data — the slave sent some bytes inline but
+            // indicated a larger total size. This is a protocol deviation;
+            // fall through to the segment loop and let the slave re-send the
+            // full data via segments. Log a warning so this is visible.
+            TETHER_LOGW(TAG,
+                "SDO upload partial inline: idx=0x%04x:%u total_size=%u "
+                "inline=%zu — falling through to segmented transfer",
+                index, sub, total_size, inline_data_len);
         }
 
         bool toggle = false;

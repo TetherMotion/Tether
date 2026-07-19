@@ -252,11 +252,14 @@
 
 /**
  * @brief Maximum number of slaves for PDO mapping
- * 
+ *
  * Limits memory allocation for slave configuration arrays.
- * 
+ * This is a Tether-internal limit — if the actual slave count exceeds
+ * this value, Tether will reject the configuration with an error that
+ * explicitly names Tether's internal limit as the constraint.
+ *
  * @note Recommendation: Set to actual expected slave count + small margin
- * 
+ *
  * Memory impact: ~64 bytes per slot
  * Range: 1-247 (EtherCAT limit)
  * Default: 16
@@ -266,12 +269,29 @@
 #endif
 
 /**
+ * @brief Maximum total PDO entries across all slaves
+ *
+ * Limits the total number of PDO mapping entries in the PDOMapping.
+ * This is a Tether-internal limit — if the total entries exceed this
+ * value, Tether will reject the mapping with an error that explicitly
+ * names Tether's internal limit as the constraint.
+ *
+ * @note Recommendation: 16-32 for typical applications, higher for complex setups
+ *
+ * Memory impact: ~32 bytes per entry
+ * Default: 32
+ */
+#ifndef ECAT_PDO_MAX_ENTRIES
+#define ECAT_PDO_MAX_ENTRIES            32
+#endif
+
+/**
  * @brief Maximum PDO entries per slave
- * 
+ *
  * Limits the number of PDO objects that can be mapped per slave.
- * 
+ *
  * @note Recommendation: Most slaves have 2-8 PDOs. Set higher for complex slaves.
- * 
+ *
  * Memory impact: ~32 bytes per entry per slave
  * Default: 16
  */
@@ -280,10 +300,27 @@
 #endif
 
 /**
+ * @brief Maximum PDO data buffer size (bytes)
+ *
+ * Size of the internal PDO data exchange buffer. Must accommodate the
+ * largest single PDO data transfer. This is a Tether-internal limit —
+ * if a PDO exceeds this size, Tether will reject it with an error that
+ * explicitly names Tether's internal buffer as the limiting factor.
+ *
+ * @note Recommendation: 1024 covers most applications. Increase for very large PDOs.
+ *
+ * Memory impact: 2x this value (double buffering)
+ * Default: 1024
+ */
+#ifndef ECAT_PDO_MAX_BUFFER_SIZE
+#define ECAT_PDO_MAX_BUFFER_SIZE        1024
+#endif
+
+/**
  * @brief Maximum total PDO data size per slave (bytes)
- * 
+ *
  * Buffer size for PDO data exchange. Must accommodate largest PDO mapping.
- * 
+ *
  * @note Recommendation: Sum of all PDO sizes for your largest slave + padding
  * 
  * Memory impact: 2x this value per slave (double buffering)
@@ -296,6 +333,29 @@
 // ============================================================================
 // SDO CONFIGURATION
 // ============================================================================
+
+/**
+ * @brief Raw SDO mailbox buffer size (bytes)
+ *
+ * Size of the stack-allocated buffer used by the raw SDO upload/download
+ * layer for mailbox communication. This is a Tether-internal limit — it
+ * must be >= the largest configured mailbox (SM0/SM1) length on any slave.
+ *
+ * The ESC211 FNI objects are 256-byte OctetString sections; a 256-byte
+ * SDO download needs 272 bytes on the wire (6 mbx + 2 CoE + 8 SDO +
+ * 256 data), so a 256-byte mailbox forces segmented transfers that the
+ * ESC211 rejects. The manufacturer ENI uses 512-byte mailboxes.
+ *
+ * @note If a slave's mailbox is larger than this buffer, Tether will
+ *       reject the transfer with an error that explicitly names Tether's
+ *       internal buffer as the limiting factor (not the slave).
+ *
+ * Memory impact: 2x this value per SDO function (upload + download)
+ * Default: 512
+ */
+#ifndef ECAT_RAW_SDO_MBX_BUFFER_SIZE
+#define ECAT_RAW_SDO_MBX_BUFFER_SIZE   512
+#endif
 
 /**
  * @brief SDO request queue depth
@@ -370,6 +430,41 @@
  */
 #ifndef ECAT_SDO_DOWNLOAD_MAX_SEGMENTS
 #define ECAT_SDO_DOWNLOAD_MAX_SEGMENTS  200
+#endif
+
+/**
+ * @brief Write-verify maximum data length (bytes)
+ *
+ * Maximum data length for a single write-verify operation in the
+ * WriteVerifier class. This is a Tether-internal stack buffer limit.
+ * If a write exceeds this size, Tether will reject it with an error
+ * that explicitly names Tether's internal buffer as the limiting factor.
+ *
+ * @note Increase if you need to verify writes larger than the default.
+ *
+ * Memory impact: 1x this value per WriteVerifier instance (stack)
+ * Default: 256
+ */
+#ifndef ECAT_WRITE_VERIFY_MAX_DATA_LEN
+#define ECAT_WRITE_VERIFY_MAX_DATA_LEN  256
+#endif
+
+/**
+ * @brief Retry verify buffer size (bytes)
+ *
+ * Size of the stack-allocated read-back buffer in the retry layer's
+ * APWR/FPWR verify path. This is a Tether-internal limit. If a write
+ * exceeds this size, Tether will reject the verify with an error that
+ * explicitly names Tether's internal buffer as the limiting factor.
+ *
+ * @note Most register writes are small (< 64 bytes). Increase only if
+ *       you need to verify larger register writes.
+ *
+ * Memory impact: 1x this value per retry-verify call (stack)
+ * Default: 64
+ */
+#ifndef ECAT_RETRY_VERIFY_BUFFER_SIZE
+#define ECAT_RETRY_VERIFY_BUFFER_SIZE   64
 #endif
 
 // ============================================================================
