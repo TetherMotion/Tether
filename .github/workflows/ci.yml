@@ -200,10 +200,18 @@ jobs:
     
     - name: Generate coverage report with lcov
       run: |
-        lcov --directory build-coverage --capture --output-file coverage.info
-        lcov --remove coverage.info '/usr/*' --output-file coverage.info
-        lcov --remove coverage.info '*/_deps/*' --output-file coverage.info
-        lcov --remove coverage.info '*/tests/*' --output-file coverage.info
+        # lcov 2.0 is strict about gcov warnings/negative counts emitted for
+        # system headers (libstdc++). --ignore-errors lets the capture proceed
+        # and --rc geninfo_unexecuted_blocks=1 silences the noisy warnings.
+        lcov --directory build-coverage --capture --output-file coverage.info \
+          --ignore-errors gcov,negative,gcov_warnings \
+          --rc geninfo_unexecuted_blocks=1
+        lcov --remove coverage.info '/usr/*' --output-file coverage.info \
+          --ignore-errors unused
+        lcov --remove coverage.info '*/_deps/*' --output-file coverage.info \
+          --ignore-errors unused
+        lcov --remove coverage.info '*/tests/*' --output-file coverage.info \
+          --ignore-errors unused
         lcov --list coverage.info
     
     - name: Generate coverage report with gcovr
@@ -273,43 +281,26 @@ jobs:
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           
-        modules=("control" "destabilizer" "simulation" "motion" "motion_planner" "slave" "esi" "export")
-        for module in "${modules[@]}"; do
-          cmake --build build-asan --target tether_${module}_tests --parallel $(nproc)
-        done
+        # Build every test target that the project defines. The per-module
+        # target names are split (e.g. tether_control_core_tests,
+        # tether_simulation_systems_tests, ...) so building "all" is the
+        # robust way to pick up every module test executable.
+        cmake --build build-asan --parallel $(nproc)
     
-    - name: Run all module tests with ASAN in parallel
+    - name: Run all module tests with ASAN
       run: |
         export ASAN_OPTIONS=detect_leaks=1:halt_on_error=0
         
-        modules=("control" "destabilizer" "simulation" "motion" "motion_planner" "slave" "esi" "export")
-        pids=()
-        
-        for module in "${modules[@]}"; do
-          echo "Running $module with ASAN..."
-          ctest --test-dir build-asan \
-            --output-on-failure \
-            -R "^tether_${module}_tests" > "asan_${module}.log" 2>&1 &
-          pids+=($!)
-        done
-        
-        failed=()
-        for i in "${!pids[@]}"; do
-          if ! wait "${pids[$i]}"; then
-            failed+=("${modules[$i]}")
-          fi
-        done
+        # gtest_discover_tests registers tests under their TestSuite.TestCase
+        # names (no executable-name prefix), so a -R filter by target name
+        # would match nothing. Run the whole discovered test set in parallel
+        # instead and let ctest schedule them.
+        ctest --test-dir build-asan \
+          --output-on-failure \
+          --parallel $(nproc) > asan_all.log 2>&1
         
         echo "=== ASAN Test Results ==="
-        for module in "${modules[@]}"; do
-          echo "--- $module (ASAN) ---"
-          cat "asan_${module}.log"
-        done
-        
-        if [ ${#failed[@]} -gt 0 ]; then
-          echo "Failed modules with ASAN: ${failed[*]}"
-          exit 1
-        fi
+        cat asan_all.log
     
     - name: Show ccache stats
       if: always()
@@ -320,7 +311,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: asan-test-results
-        path: asan_*.log
+        path: asan_all.log
 
   tsan-tests:
     name: Run Module Tests with TSAN
@@ -367,43 +358,26 @@ jobs:
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           
-        modules=("control" "destabilizer" "simulation" "motion" "motion_planner" "slave" "esi" "export")
-        for module in "${modules[@]}"; do
-          cmake --build build-tsan --target tether_${module}_tests --parallel $(nproc)
-        done
+        # Build every test target that the project defines. The per-module
+        # target names are split (e.g. tether_control_core_tests,
+        # tether_simulation_systems_tests, ...) so building "all" is the
+        # robust way to pick up every module test executable.
+        cmake --build build-tsan --parallel $(nproc)
     
-    - name: Run all module tests with TSAN in parallel
+    - name: Run all module tests with TSAN
       run: |
         export TSAN_OPTIONS=halt_on_error=0
         
-        modules=("control" "destabilizer" "simulation" "motion" "motion_planner" "slave" "esi" "export")
-        pids=()
-        
-        for module in "${modules[@]}"; do
-          echo "Running $module with TSAN..."
-          ctest --test-dir build-tsan \
-            --output-on-failure \
-            -R "^tether_${module}_tests" > "tsan_${module}.log" 2>&1 &
-          pids+=($!)
-        done
-        
-        failed=()
-        for i in "${!pids[@]}"; do
-          if ! wait "${pids[$i]}"; then
-            failed+=("${modules[$i]}")
-          fi
-        done
+        # gtest_discover_tests registers tests under their TestSuite.TestCase
+        # names (no executable-name prefix), so a -R filter by target name
+        # would match nothing. Run the whole discovered test set in parallel
+        # instead and let ctest schedule them.
+        ctest --test-dir build-tsan \
+          --output-on-failure \
+          --parallel $(nproc) > tsan_all.log 2>&1
         
         echo "=== TSAN Test Results ==="
-        for module in "${modules[@]}"; do
-          echo "--- $module (TSAN) ---"
-          cat "tsan_${module}.log"
-        done
-        
-        if [ ${#failed[@]} -gt 0 ]; then
-          echo "Failed modules with TSAN: ${failed[*]}"
-          exit 1
-        fi
+        cat tsan_all.log
     
     - name: Show ccache stats
       if: always()
@@ -414,7 +388,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: tsan-test-results
-        path: tsan_*.log
+        path: tsan_all.log
 
   analyze-test-timing:
     name: Analyze Test Timing
