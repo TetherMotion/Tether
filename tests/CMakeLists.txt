@@ -501,7 +501,9 @@ endif()
 # exist on the original author's machine, so they are not part of the default
 # suite (they were never in the old monolithic binary). They are only built when
 # TETHER_BUILD_MODULE_TESTS is enabled (e.g. by the ASAN/TSAN CI jobs).
-if(TETHER_BUILD_MODULE_TESTS AND ESI_TEST_SOURCES)
+# They also require the tether_esi library, which is only created when
+# TETHER_BUILD_EXTRACT_ESI is ON, so guard on the target being present.
+if(TETHER_BUILD_MODULE_TESTS AND ESI_TEST_SOURCES AND TARGET tether_esi)
     create_module_test(esi
         "${ESI_TEST_SOURCES}"
         "tether_common;tether_esi"
