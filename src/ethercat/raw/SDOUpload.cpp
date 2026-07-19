@@ -187,6 +187,37 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                 std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
                 continue;
             }
+            if (r_len < sizeof(CoeHeader) + 1) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
+                continue;
+            }
+
+            r_sdo_bytes = mbxbuf + sizeof(MbxHeader) + sizeof(CoeHeader);
+            sdo_cmd = r_sdo_bytes[0];
+
+            // Check for SDO abort before the CoE service field — some slaves
+            // (e.g. ESC211) emit abort responses with a buggy CoE service field
+            // (0x2/SDO-REQ instead of 0x3/SDO-RES). Surface the abort code
+            // regardless of the CoE service so callers see the real rejection
+            // instead of a misleading timeout.
+            if (sdo_cmd == EC_SDO_ABORT) {
+                if (r_len >= sizeof(CoeHeader) + sizeof(SdoAbort)) {
+                    const auto *ab = reinterpret_cast<const SdoAbort *>(r_sdo_bytes);
+                    const uint32_t abort_code = le32_to_host(ab->abortCode_le);
+                    TETHER_LOGE(TAG, "SDO abort 0x%04x:%u code=0x%08" PRIx32 " (%s)",
+                             le16_to_host(ab->index_le), ab->sub,
+                             abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
+                    if (outAbortCode) *outAbortCode = abort_code;
+                }
+#ifdef TETHER_DIAG_SDO_IO
+                if (diagEnabled) {
+                    TETHER_LOGI(TAG, "SDO abort raw response (len=%u)", r_len);
+                    diagnostics_.diagHexdump(mbxbuf, r_len, 256);
+                }
+#endif
+                return false;
+            }
+
             CoeHeader r_coe;
             std::memcpy(&r_coe, mbxbuf + sizeof(MbxHeader), sizeof(r_coe));
             const uint16_t r_coe_raw = le16_to_host(r_coe.raw_le);
@@ -231,28 +262,9 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                 }
                 continue;
             }
-            r_sdo_bytes = mbxbuf + sizeof(MbxHeader) + sizeof(CoeHeader);
             r_len = le16_to_host(reinterpret_cast<const MbxHeader*>(mbxbuf)->length_le);
             got_init_response = true;
             if (r_len < (sizeof(CoeHeader) + sizeof(SdoInitUploadRes))) {
-                return false;
-            }
-            sdo_cmd = r_sdo_bytes[0];
-            if (sdo_cmd == EC_SDO_ABORT) {
-                if (r_len >= sizeof(CoeHeader) + sizeof(SdoAbort)) {
-                    const auto *ab = reinterpret_cast<const SdoAbort *>(r_sdo_bytes);
-                    const uint32_t abort_code = le32_to_host(ab->abortCode_le);
-                    TETHER_LOGE(TAG, "SDO abort 0x%04x:%u code=0x%08" PRIx32 " (%s)",
-                             le16_to_host(ab->index_le), ab->sub,
-                             abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
-                    if (outAbortCode) *outAbortCode = abort_code;
-                }
-#ifdef TETHER_DIAG_SDO_IO
-                if (diagEnabled) {
-                    TETHER_LOGI(TAG, "SDO abort raw response (len=%u)", r_len);
-                    diagnostics_.diagHexdump(mbxbuf, r_len, 256);
-                }
-#endif
                 return false;
             }
             if (r_len >= sizeof(CoeHeader) + sizeof(SdoInitUploadRes)) {
@@ -392,15 +404,14 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     continue;
                 }
-                const auto *r2_coe = reinterpret_cast<const CoeHeader *>(mbxbuf + sizeof(MbxHeader));
-                const uint16_t r2_coe_raw = le16_to_host(r2_coe->raw_le);
-                const uint8_t r2_service = (r2_coe_raw >> 12) & 0x0Fu;
-                if (r2_service != EC_COES_SDORES) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-                    continue;
-                }
                 const uint8_t *seg_res = mbxbuf + sizeof(MbxHeader) + sizeof(CoeHeader);
                 const uint8_t seg_cmd = seg_res[0];
+
+                // Check for SDO abort before the CoE service field — some slaves
+                // (e.g. ESC211) emit abort responses with a buggy CoE service
+                // field (0x2/SDO-REQ instead of 0x3/SDO-RES). Surface the abort
+                // code regardless of the CoE service so callers see the real
+                // rejection instead of a misleading timeout.
                 if ((seg_cmd & 0xE0u) == EC_SDO_ABORT) {
                     if (mbxReadLen >= sizeof(MbxHeader) + sizeof(CoeHeader) + sizeof(SdoAbort)) {
                         SdoAbort abort{};
@@ -413,6 +424,14 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                         TETHER_LOGE(TAG, "SDO upload segment abort (malformed response)");
                     }
                     return false;
+                }
+
+                const auto *r2_coe = reinterpret_cast<const CoeHeader *>(mbxbuf + sizeof(MbxHeader));
+                const uint16_t r2_coe_raw = le16_to_host(r2_coe->raw_le);
+                const uint8_t r2_service = (r2_coe_raw >> 12) & 0x0Fu;
+                if (r2_service != EC_COES_SDORES) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                    continue;
                 }
                 const uint8_t seg_ccs = (seg_cmd >> 5) & 0x07u;
                 if (seg_ccs != 0) {

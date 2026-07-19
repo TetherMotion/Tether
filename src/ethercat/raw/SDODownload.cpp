@@ -245,23 +245,19 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
             }
             continue;
         }
-        if (hdr.len < sizeof(CoeHeader)) {
+        if (hdr.len < sizeof(CoeHeader) + 1) {
             std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
             continue;
-        }
-
-        CoeHeader resp_coe{};
-        std::memcpy(&resp_coe, mbxbuf + sizeof(MbxHeader), sizeof(resp_coe));
-        const uint8_t resp_service = (le16_to_host(resp_coe.raw_le) >> 12) & 0x0Fu;
-        if (resp_service != EC_COES_SDORES) {
-            TETHER_LOGW(TAG, "Unexpected CoE service (download): 0x%X (expected 0x3) (adp=0x%04X index=0x%04X:%u) — aborting",
-                        resp_service, adp, index, sub);
-            break;
         }
 
         const size_t sdo_offset = sizeof(MbxHeader) + sizeof(CoeHeader);
         const uint8_t sdo_cmd = mbxbuf[sdo_offset];
 
+        // Check for SDO abort before the CoE service field — some slaves
+        // (e.g. ESC211) emit abort responses with a buggy CoE service field
+        // (0x2/SDO-REQ instead of 0x3/SDO-RES). Surface the abort code
+        // regardless of the CoE service so callers see the real rejection
+        // instead of a misleading timeout.
         if ((sdo_cmd & 0xE0u) == EC_SDO_ABORT) {
             if (mbxReadLen >= sdo_offset + sizeof(SdoAbort)) {
                 SdoAbort abort{};
@@ -289,6 +285,15 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
             }
 #endif
             return false;
+        }
+
+        CoeHeader resp_coe{};
+        std::memcpy(&resp_coe, mbxbuf + sizeof(MbxHeader), sizeof(resp_coe));
+        const uint8_t resp_service = (le16_to_host(resp_coe.raw_le) >> 12) & 0x0Fu;
+        if (resp_service != EC_COES_SDORES) {
+            TETHER_LOGW(TAG, "Unexpected CoE service (download): 0x%X (expected 0x3) (adp=0x%04X index=0x%04X:%u) — aborting",
+                        resp_service, adp, index, sub);
+            break;
         }
 
         if ((sdo_cmd & 0xE0u) == 0x60u) {
@@ -449,23 +454,19 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
             }
             continue;
         }
-        if (hdr.len < sizeof(CoeHeader)) {
+        if (hdr.len < sizeof(CoeHeader) + 1) {
             std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
             continue;
-        }
-
-        CoeHeader resp_coe{};
-        std::memcpy(&resp_coe, mbxbuf + sizeof(MbxHeader), sizeof(resp_coe));
-        const uint8_t resp_service = (le16_to_host(resp_coe.raw_le) >> 12) & 0x0Fu;
-        if (resp_service != EC_COES_SDORES) {
-            TETHER_LOGW(TAG, "Unexpected CoE service (normal download): 0x%X (expected 0x3) (adp=0x%04X index=0x%04X:%u) — aborting",
-                        resp_service, adp, index, sub);
-            break;
         }
 
         const size_t sdo_offset = sizeof(MbxHeader) + sizeof(CoeHeader);
         const uint8_t sdo_cmd = mbxbuf[sdo_offset];
 
+        // Check for SDO abort before the CoE service field — some slaves
+        // (e.g. ESC211) emit abort responses with a buggy CoE service field
+        // (0x2/SDO-REQ instead of 0x3/SDO-RES). Surface the abort code
+        // regardless of the CoE service so callers see the real rejection
+        // instead of a misleading timeout.
         if ((sdo_cmd & 0xE0u) == EC_SDO_ABORT) {
             if (mbxReadLen >= sdo_offset + sizeof(SdoAbort)) {
                 SdoAbort abort{};
@@ -478,6 +479,15 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
                 TETHER_LOGE(TAG, "SDO normal download abort (malformed response)");
             }
             return false;
+        }
+
+        CoeHeader resp_coe{};
+        std::memcpy(&resp_coe, mbxbuf + sizeof(MbxHeader), sizeof(resp_coe));
+        const uint8_t resp_service = (le16_to_host(resp_coe.raw_le) >> 12) & 0x0Fu;
+        if (resp_service != EC_COES_SDORES) {
+            TETHER_LOGW(TAG, "Unexpected CoE service (normal download): 0x%X (expected 0x3) (adp=0x%04X index=0x%04X:%u) — aborting",
+                        resp_service, adp, index, sub);
+            break;
         }
 
         if ((sdo_cmd & 0xE0u) == 0x60u) {
@@ -646,23 +656,19 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                 }
                 continue;
             }
-            if (hdr.len < sizeof(CoeHeader) + sizeof(SdoInitDownloadRes)) {
+            if (hdr.len < sizeof(CoeHeader) + 1) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
                 continue;
-            }
-
-            CoeHeader resp_coe{};
-            std::memcpy(&resp_coe, mbxbuf + sizeof(MbxHeader), sizeof(resp_coe));
-            const uint8_t resp_service = (le16_to_host(resp_coe.raw_le) >> 12) & 0x0Fu;
-            if (resp_service != EC_COES_SDORES) {
-                TETHER_LOGW(TAG, "Unexpected CoE service (seg download init): 0x%X (expected 0x3) (adp=0x%04X index=0x%04X:%u) — aborting",
-                            resp_service, adp, index, sub);
-                break;
             }
 
             const size_t sdo_offset = sizeof(MbxHeader) + sizeof(CoeHeader);
             const uint8_t sdo_cmd = mbxbuf[sdo_offset];
 
+            // Check for SDO abort before the CoE service field — some slaves
+            // (e.g. ESC211) emit abort responses with a buggy CoE service field
+            // (0x2/SDO-REQ instead of 0x3/SDO-RES). Surface the abort code
+            // regardless of the CoE service so callers see the real rejection
+            // instead of a misleading timeout.
             if ((sdo_cmd & 0xE0u) == EC_SDO_ABORT) {
                 if (mbxReadLen >= sdo_offset + sizeof(SdoAbort)) {
                     SdoAbort abort{};
@@ -690,6 +696,20 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                 }
 #endif
                 return false;
+            }
+
+            if (hdr.len < sizeof(CoeHeader) + sizeof(SdoInitDownloadRes)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
+                continue;
+            }
+
+            CoeHeader resp_coe{};
+            std::memcpy(&resp_coe, mbxbuf + sizeof(MbxHeader), sizeof(resp_coe));
+            const uint8_t resp_service = (le16_to_host(resp_coe.raw_le) >> 12) & 0x0Fu;
+            if (resp_service != EC_COES_SDORES) {
+                TETHER_LOGW(TAG, "Unexpected CoE service (seg download init): 0x%X (expected 0x3) (adp=0x%04X index=0x%04X:%u) — aborting",
+                            resp_service, adp, index, sub);
+                break;
             }
 
             if ((sdo_cmd & 0xE0u) == 0x60u) {
@@ -818,23 +838,19 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                             seg, hdr.type, hdr.cnt, adp, index, sub);
                 break;
             }
-            if (hdr.len < sizeof(CoeHeader) + sizeof(SdoDownloadSegRes)) {
+            if (hdr.len < sizeof(CoeHeader) + 1) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
                 continue;
-            }
-
-            const auto* r2_coe = reinterpret_cast<const CoeHeader*>(mbxbuf + sizeof(MbxHeader));
-            const uint16_t r2_coe_raw = le16_to_host(r2_coe->raw_le);
-            const uint8_t r2_service = (r2_coe_raw >> 12) & 0x0Fu;
-            if (r2_service != EC_COES_SDORES) {
-                TETHER_LOGW(TAG, "Unexpected CoE service (seg download seg %d): 0x%X (expected 0x3) (adp=0x%04X index=0x%04X:%u) — aborting",
-                            seg, r2_service, adp, index, sub);
-                break;
             }
 
             const uint8_t* seg_res = mbxbuf + sizeof(MbxHeader) + sizeof(CoeHeader);
             const uint8_t seg_res_cmd = seg_res[0];
 
+            // Check for SDO abort before the CoE service field — some slaves
+            // (e.g. ESC211) emit abort responses with a buggy CoE service field
+            // (0x2/SDO-REQ instead of 0x3/SDO-RES). Surface the abort code
+            // regardless of the CoE service so callers see the real rejection
+            // instead of a misleading timeout.
             if ((seg_res_cmd & 0xE0u) == EC_SDO_ABORT) {
                 if (mbxReadLen >= sizeof(MbxHeader) + sizeof(CoeHeader) + sizeof(SdoAbort)) {
                     SdoAbort abort{};
@@ -847,6 +863,20 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                     TETHER_LOGE(TAG, "SDO segmented download segment %d abort (malformed response)", seg);
                 }
                 return false;
+            }
+
+            if (hdr.len < sizeof(CoeHeader) + sizeof(SdoDownloadSegRes)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
+                continue;
+            }
+
+            const auto* r2_coe = reinterpret_cast<const CoeHeader*>(mbxbuf + sizeof(MbxHeader));
+            const uint16_t r2_coe_raw = le16_to_host(r2_coe->raw_le);
+            const uint8_t r2_service = (r2_coe_raw >> 12) & 0x0Fu;
+            if (r2_service != EC_COES_SDORES) {
+                TETHER_LOGW(TAG, "Unexpected CoE service (seg download seg %d): 0x%X (expected 0x3) (adp=0x%04X index=0x%04X:%u) — aborting",
+                            seg, r2_service, adp, index, sub);
+                break;
             }
 
             const uint8_t seg_ccs = (seg_res_cmd >> 5) & 0x07u;
