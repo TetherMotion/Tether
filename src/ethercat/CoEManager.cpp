@@ -7,6 +7,7 @@
 #include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/FaultDetection.hpp"
+#include "tether/ethercat/SDOErrorDecoder.hpp"
 #include "tether/platform/Platform.hpp"
 
 #ifdef TETHER_COMPILE_MASTER
@@ -341,6 +342,8 @@ bool CoEManager::sdoUploadWithRetry(uint16_t index, uint8_t subindex,
         return false;
     }
 
+    last_sdo_abort_code_.store(0, std::memory_order_relaxed);
+
     const uint8_t max_attempts = options.max_retries + 1;
     for (uint8_t attempt = 0; attempt < max_attempts; ++attempt) {
         bool ok = transport_.sdoUpload(
@@ -356,6 +359,20 @@ bool CoEManager::sdoUploadWithRetry(uint16_t index, uint8_t subindex,
         }
 
         if (ok) return true;
+
+        // Definitive slave SDO abort: the slave explicitly rejected the
+        // request (e.g. wrong payload size, read-only object, subindex does
+        // not exist). Retrying the identical request cannot succeed, so do
+        // NOT retry — record the abort code and escalate immediately.
+        const uint32_t abort_code = transport_.lastAbortCode();
+        if (abort_code != 0) {
+            last_sdo_abort_code_.store(abort_code, std::memory_order_relaxed);
+            Raw::SDOErrorDecoder decoder;
+            TETHER_LOGE(TAG, "Slave %u: SDO upload 0x%04X:%u aborted by slave — code 0x%08X (%s). Not retrying.",
+                        slave_index_, index, subindex, abort_code,
+                        decoder.sdoAbortCodeStr(abort_code));
+            return false;
+        }
 
         if (attempt + 1 < max_attempts) {
             TETHER_LOGW(TAG, "Slave %u: SDO upload 0x%04X:%u failed on attempt %u/%u, retrying",
@@ -386,6 +403,8 @@ bool CoEManager::sdoDownloadWithRetry(uint16_t index, uint8_t subindex,
                     slave_index_, index, subindex, data_len);
     }
 
+    last_sdo_abort_code_.store(0, std::memory_order_relaxed);
+
     const uint8_t max_attempts = options.max_retries + 1;
     for (uint8_t attempt = 0; attempt < max_attempts; ++attempt) {
         bool ok = transport_.sdoDownload(
@@ -401,6 +420,20 @@ bool CoEManager::sdoDownloadWithRetry(uint16_t index, uint8_t subindex,
         }
 
         if (ok) return true;
+
+        // Definitive slave SDO abort: the slave explicitly rejected the
+        // request (e.g. wrong payload size, read-only object, subindex does
+        // not exist). Retrying the identical request cannot succeed, so do
+        // NOT retry — record the abort code and escalate immediately.
+        const uint32_t abort_code = transport_.lastAbortCode();
+        if (abort_code != 0) {
+            last_sdo_abort_code_.store(abort_code, std::memory_order_relaxed);
+            Raw::SDOErrorDecoder decoder;
+            TETHER_LOGE(TAG, "Slave %u: SDO download 0x%04X:%u aborted by slave — code 0x%08X (%s). Not retrying.",
+                        slave_index_, index, subindex, abort_code,
+                        decoder.sdoAbortCodeStr(abort_code));
+            return false;
+        }
 
         if (attempt + 1 < max_attempts) {
             TETHER_LOGW(TAG, "Slave %u: SDO download 0x%04X:%u failed on attempt %u/%u, retrying",
@@ -791,6 +824,12 @@ void CoEManager::workerLoop() {
 
                 if (ok) {
                     txn.promise.set_value({});
+                } else if (last_sdo_abort_code_.load(std::memory_order_relaxed) != 0) {
+                    // Slave explicitly aborted the SDO (definitive rejection,
+                    // e.g. 0x06070010 length mismatch). Surface as Aborted so
+                    // callers can distinguish it from a transport/timeout
+                    // failure and read lastSdoAbortCode() for the code.
+                    txn.promise.set_value(std::unexpected(CoEError::Aborted));
                 } else {
                     txn.promise.set_value(std::unexpected(CoEError::TransportError));
                 }
@@ -840,7 +879,11 @@ void CoEReadTransactionImpl<T>::execute(CoEManager& mgr) {
         txn_.options);
 
     if (!ok) {
-        txn_.promise.set_value(std::unexpected(CoEError::TransportError));
+        if (mgr.lastSdoAbortCode() != 0) {
+            txn_.promise.set_value(std::unexpected(CoEError::Aborted));
+        } else {
+            txn_.promise.set_value(std::unexpected(CoEError::TransportError));
+        }
         return;
     }
 
@@ -866,7 +909,11 @@ void CoEReadTransactionImpl<std::vector<uint8_t>>::execute(CoEManager& mgr) {
         txn_.options);
 
     if (!ok) {
-        txn_.promise.set_value(std::unexpected(CoEError::TransportError));
+        if (mgr.lastSdoAbortCode() != 0) {
+            txn_.promise.set_value(std::unexpected(CoEError::Aborted));
+        } else {
+            txn_.promise.set_value(std::unexpected(CoEError::TransportError));
+        }
         return;
     }
 

@@ -63,7 +63,9 @@ bool SDODownload::execute(Master& master, uint16_t adp,
                           const uint8_t* data, size_t dataLen,
                           bool diagEnabled,
                           unsigned int pollIntervalMs,
-                          unsigned int transactionTimeoutMs) {
+                          unsigned int transactionTimeoutMs,
+                          uint32_t* outAbortCode) {
+    if (outAbortCode) *outAbortCode = 0;
     if (data == nullptr || dataLen == 0) {
         TETHER_LOGE(TAG, "Invalid SDO download parameters (len=%u)", static_cast<unsigned>(dataLen));
         return false;
@@ -78,7 +80,8 @@ bool SDODownload::execute(Master& master, uint16_t adp,
                              mbxWriteAddr, mbxWriteLen,
                              mbxReadAddr, mbxReadLen,
                              index, sub, data, dataLen,
-                             diagEnabled, pollIntervalMs, transactionTimeoutMs);
+                             diagEnabled, pollIntervalMs, transactionTimeoutMs,
+                             outAbortCode);
     }
 
     if (dataLen > max_inline) {
@@ -86,14 +89,16 @@ bool SDODownload::execute(Master& master, uint16_t adp,
                                 mbxWriteAddr, mbxWriteLen,
                                 mbxReadAddr, mbxReadLen,
                                 index, sub, data, dataLen,
-                                diagEnabled, pollIntervalMs, transactionTimeoutMs);
+                                diagEnabled, pollIntervalMs, transactionTimeoutMs,
+                                outAbortCode);
     }
 
     return executeExpedited(master, adp, inoutMbxCnt,
                             mbxWriteAddr, mbxWriteLen,
                             mbxReadAddr, mbxReadLen,
                             index, sub, data, dataLen,
-                            diagEnabled, pollIntervalMs, transactionTimeoutMs);
+                            diagEnabled, pollIntervalMs, transactionTimeoutMs,
+                            outAbortCode);
 }
 
 bool SDODownload::executeExpedited(Master& master, uint16_t adp,
@@ -104,7 +109,8 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
                                    const uint8_t* data, size_t dataLen,
                                    bool diagEnabled,
                                    unsigned int pollIntervalMs,
-                                   unsigned int transactionTimeoutMs) {
+                                   unsigned int transactionTimeoutMs,
+                                   uint32_t* outAbortCode) {
     uint8_t mbxbuf[256] = {0};
     if (mbxWriteLen > sizeof(mbxbuf) || mbxReadLen > sizeof(mbxbuf)) {
         TETHER_LOGE(TAG, "Mailbox size too large (wr=%u rd=%u)", mbxWriteLen, mbxReadLen);
@@ -263,6 +269,7 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
                 const uint32_t abort_code = le32_to_host(abort.abortCode_le);
                 TETHER_LOGE(TAG, "SDO download abort: index=0x%04x:%02x code=0x%08" PRIx32 " (%s)",
                          index, sub, abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
+                if (outAbortCode) *outAbortCode = abort_code;
                 if (abort_code == 0x06090011 && diagnostics_.isPdoMappingIndex(index)) {
                     diagnostics_.logPdoMappingSubindexDiagnostic(
                         master, adp, inoutMbxCnt,
@@ -328,7 +335,8 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
                                 const uint8_t* data, size_t dataLen,
                                 bool diagEnabled,
                                 unsigned int pollIntervalMs,
-                                unsigned int transactionTimeoutMs) {
+                                unsigned int transactionTimeoutMs,
+                                uint32_t* outAbortCode) {
     uint8_t mbxbuf[256] = {0};
     if (mbxWriteLen > sizeof(mbxbuf) || mbxReadLen > sizeof(mbxbuf)) {
         TETHER_LOGE(TAG, "Mailbox size too large (wr=%u rd=%u)", mbxWriteLen, mbxReadLen);
@@ -465,6 +473,7 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
                 const uint32_t abort_code = le32_to_host(abort.abortCode_le);
                 TETHER_LOGE(TAG, "SDO normal download abort: index=0x%04x:%02x code=0x%08" PRIx32 " (%s)",
                          index, sub, abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
+                if (outAbortCode) *outAbortCode = abort_code;
             } else {
                 TETHER_LOGE(TAG, "SDO normal download abort (malformed response)");
             }
@@ -515,7 +524,8 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                                    const uint8_t* data, size_t dataLen,
                                    bool diagEnabled,
                                    unsigned int pollIntervalMs,
-                                   unsigned int transactionTimeoutMs) {
+                                   unsigned int transactionTimeoutMs,
+                                   uint32_t* outAbortCode) {
     uint8_t mbxbuf[256] = {0};
     if (mbxWriteLen > sizeof(mbxbuf) || mbxReadLen > sizeof(mbxbuf)) {
         TETHER_LOGE(TAG, "Mailbox size too large (wr=%u rd=%u)", mbxWriteLen, mbxReadLen);
@@ -660,6 +670,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                     const uint32_t abort_code = le32_to_host(abort.abortCode_le);
                     TETHER_LOGE(TAG, "SDO segmented download abort: index=0x%04x:%02x code=0x%08" PRIx32 " (%s)",
                              index, sub, abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
+                    if (outAbortCode) *outAbortCode = abort_code;
                     if (abort_code == 0x06090011 && diagnostics_.isPdoMappingIndex(index)) {
                         diagnostics_.logPdoMappingSubindexDiagnostic(
                             master, adp, inoutMbxCnt,
@@ -831,6 +842,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                     const uint32_t abort_code = le32_to_host(abort.abortCode_le);
                     TETHER_LOGE(TAG, "SDO segmented download segment %d abort: index=0x%04x:%02x code=0x%08" PRIx32 " (%s)",
                                 seg, index, sub, abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
+                    if (outAbortCode) *outAbortCode = abort_code;
                 } else {
                     TETHER_LOGE(TAG, "SDO segmented download segment %d abort (malformed response)", seg);
                 }

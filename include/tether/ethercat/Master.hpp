@@ -698,6 +698,14 @@ public:
                         unsigned int poll_interval_ms = 5,
                         unsigned int transaction_timeout_ms = 1000);
 
+    /// @brief Return the CoE SDO abort code reported by the slave on the most
+    /// recent coeSdoUpload/coeSdoDownload call. 0 means no abort (success or
+    /// a non-abort failure such as a transport/timeout error). Read this
+    /// immediately after a call returns false to distinguish a definitive
+    /// slave rejection (e.g. 0x06070010 length mismatch) from a transport
+    /// issue.
+    uint32_t lastCoeSdoAbortCode() const;
+
     // ---- Utilities (stateless) ---------------------------------------------
 
     static constexpr PhysicalAddress physicalAddressForSlaveIndex(uint16_t slave_index) {

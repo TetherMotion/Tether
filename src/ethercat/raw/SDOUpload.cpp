@@ -29,7 +29,9 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                         uint8_t* out, size_t outCap, size_t* outLen,
                         bool diagEnabled,
                         unsigned int pollIntervalMs,
-                        unsigned int transactionTimeoutMs) {
+                        unsigned int transactionTimeoutMs,
+                        uint32_t* outAbortCode) {
+    if (outAbortCode) *outAbortCode = 0;
     if (outLen) {
         *outLen = 0;
     }
@@ -243,6 +245,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                     TETHER_LOGE(TAG, "SDO abort 0x%04x:%u code=0x%08" PRIx32 " (%s)",
                              le16_to_host(ab->index_le), ab->sub,
                              abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
+                    if (outAbortCode) *outAbortCode = abort_code;
                 }
 #ifdef TETHER_DIAG_SDO_IO
                 if (diagEnabled) {
@@ -398,6 +401,19 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                 }
                 const uint8_t *seg_res = mbxbuf + sizeof(MbxHeader) + sizeof(CoeHeader);
                 const uint8_t seg_cmd = seg_res[0];
+                if ((seg_cmd & 0xE0u) == EC_SDO_ABORT) {
+                    if (mbxReadLen >= sizeof(MbxHeader) + sizeof(CoeHeader) + sizeof(SdoAbort)) {
+                        SdoAbort abort{};
+                        std::memcpy(&abort, seg_res, sizeof(abort));
+                        const uint32_t abort_code = le32_to_host(abort.abortCode_le);
+                        TETHER_LOGE(TAG, "SDO upload segment abort: index=0x%04x:%02x code=0x%08" PRIx32 " (%s)",
+                                 index, sub, abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
+                        if (outAbortCode) *outAbortCode = abort_code;
+                    } else {
+                        TETHER_LOGE(TAG, "SDO upload segment abort (malformed response)");
+                    }
+                    return false;
+                }
                 const uint8_t seg_ccs = (seg_cmd >> 5) & 0x07u;
                 if (seg_ccs != 0) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));

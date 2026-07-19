@@ -22,11 +22,18 @@ bool CoeSDOChannel::upload(Master& master, uint16_t adp, uint8_t* inoutMbxCnt,
                            bool diagEnabled,
                            unsigned int pollIntervalMs,
                            unsigned int transactionTimeoutMs) {
-    return upload_.execute(master, adp, inoutMbxCnt,
-                           mbxWriteAddr, mbxWriteLen,
-                           mbxReadAddr, mbxReadLen,
-                           index, sub, out, outCap, outLen,
-                           diagEnabled, pollIntervalMs, transactionTimeoutMs);
+    last_abort_code_.store(0, std::memory_order_relaxed);
+    uint32_t abort_code = 0;
+    bool ok = upload_.execute(master, adp, inoutMbxCnt,
+                              mbxWriteAddr, mbxWriteLen,
+                              mbxReadAddr, mbxReadLen,
+                              index, sub, out, outCap, outLen,
+                              diagEnabled, pollIntervalMs, transactionTimeoutMs,
+                              &abort_code);
+    if (!ok && abort_code != 0) {
+        last_abort_code_.store(abort_code, std::memory_order_relaxed);
+    }
+    return ok;
 }
 
 bool CoeSDOChannel::download(Master& master, uint16_t adp, uint8_t* inoutMbxCnt,
@@ -41,11 +48,18 @@ bool CoeSDOChannel::download(Master& master, uint16_t adp, uint8_t* inoutMbxCnt,
     // PDO mapping diagnostics. This is safe because SDO operations are
     // single-threaded on the EtherCAT master.
     g_sdo_upload_for_thunk = &upload_;
-    return download_.execute(master, adp, inoutMbxCnt,
-                             mbxWriteAddr, mbxWriteLen,
-                             mbxReadAddr, mbxReadLen,
-                             index, sub, data, dataLen,
-                             diagEnabled, pollIntervalMs, transactionTimeoutMs);
+    last_abort_code_.store(0, std::memory_order_relaxed);
+    uint32_t abort_code = 0;
+    bool ok = download_.execute(master, adp, inoutMbxCnt,
+                                mbxWriteAddr, mbxWriteLen,
+                                mbxReadAddr, mbxReadLen,
+                                index, sub, data, dataLen,
+                                diagEnabled, pollIntervalMs, transactionTimeoutMs,
+                                &abort_code);
+    if (!ok && abort_code != 0) {
+        last_abort_code_.store(abort_code, std::memory_order_relaxed);
+    }
+    return ok;
 }
 
 } // namespace Raw

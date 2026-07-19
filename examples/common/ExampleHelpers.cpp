@@ -1,11 +1,13 @@
 #include "ExampleHelpers.hpp"
 
+#include <cstdio>
 #include <iostream>
 #include <sstream>
 
 #include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/DebugGate.hpp"
 #include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/SDOErrorDecoder.hpp"
 #include "tether/ethercat/Slave.hpp"
 #include "tether/platform/Platform.hpp"
 
@@ -382,6 +384,49 @@ void logMailboxConfig(const MailboxSizeConfig& size,
     TETHER_LOGI(tag, "Mailbox config: MbxOut addr=0x%04X len=%u, MbxIn addr=0x%04X len=%u",
                 addr.outAddress, size.outSize,
                 addr.inAddress, size.inSize);
+}
+
+// ============================================================================
+// SDO abort reporting
+// ============================================================================
+
+uint32_t reportSdoAbort(const EtherCAT::Slave& slave, const char* tag) {
+    const uint32_t abort_code = slave.lastSdoAbortCode();
+    if (abort_code == 0) return 0;
+
+    EtherCAT::Raw::SDOErrorDecoder decoder;
+    const char* meaning = decoder.sdoAbortCodeStr(abort_code);
+
+    TETHER_LOGE(tag, "Slave rejected the SDO request: CoE abort code 0x%08X (%s).",
+                abort_code, meaning);
+
+    // Always echo to stderr so the user sees it on the console even when log
+    // output is redirected or silenced.
+    std::fprintf(stderr,
+                 "ERROR: Slave rejected the SDO request.\n"
+                 "  CoE SDO abort code: 0x%08X (%s)\n",
+                 abort_code, meaning);
+
+    // The length-mismatch family — the signature of the original
+    // "slave rejects the write because the payload is the wrong size"
+    // failure. Point the user at the object dictionary / ESI file.
+    if (abort_code == 0x06070010 || abort_code == 0x06070012 ||
+        abort_code == 0x06070013) {
+        const char* which = (abort_code == 0x06070012)
+                                ? "too high"
+                                : (abort_code == 0x06070013) ? "too low"
+                                                             : "mismatch";
+        std::fprintf(stderr,
+                     "  Cause: the payload size you sent does not match the size\n"
+                     "         the slave expects for this object (length %s).\n"
+                     "  Fix:   check the object dictionary / ESI (XML) file for the\n"
+                     "         target index:subindex to find the correct data type\n"
+                     "         and byte length, then send exactly that many bytes.\n",
+                     which);
+    }
+
+    std::fflush(stderr);
+    return abort_code;
 }
 
 } // namespace Tether::Examples

@@ -80,7 +80,10 @@ enum class SlaveError : uint8_t {
 
     // -- Mailbox / SDO errors --
     MailboxConfigFailed,            ///< Failed to write SM0/SM1 configuration registers
-    SDOError,                       ///< SDO read/write failed
+    SDOError,                       ///< SDO read/write failed (transport/timeout)
+    SDOAborted,                     ///< Slave explicitly aborted the SDO (definitive
+                                    ///< rejection — read lastSdoAbortCode() for the
+                                    ///< CoE abort code, e.g. 0x06070010 length mismatch)
     SIIReadError,                   ///< SII EEPROM read failure
 
     // -- PDO errors --
@@ -107,7 +110,8 @@ inline const char* slaveErrorToString(SlaveError e) {
         case SlaveError::ALStatusError:           return "Slave reported AL Status error";
         case SlaveError::WorkingCounterMismatch:  return "Working counter mismatch";
         case SlaveError::MailboxConfigFailed:     return "Failed to write mailbox SM registers";
-        case SlaveError::SDOError:                return "SDO operation failed";
+        case SlaveError::SDOError:                return "SDO operation failed (transport/timeout)";
+        case SlaveError::SDOAborted:              return "Slave aborted the SDO — read Slave::lastSdoAbortCode() for the CoE abort code";
         case SlaveError::SIIReadError:            return "SII EEPROM read failed";
         case SlaveError::PDOConfigFailed:         return "PDO sync-manager configuration failed";
         case SlaveError::PDOMappingFailed:        return "PDO mapping finalization failed";
@@ -492,6 +496,15 @@ public:
     virtual SlaveError sdoWriteU16(uint16_t index, uint8_t sub, uint16_t val);
     /** @brief Write a uint32_t via SDO. */
     virtual SlaveError sdoWriteU32(uint16_t index, uint8_t sub, uint32_t val);
+
+    /**
+     * @brief Return the CoE SDO abort code reported by the slave on the most
+     * recent sdoRead/sdoWrite call. 0 means no abort (success or a non-abort
+     * failure such as a transport/timeout error). Read this immediately after
+     * a call returns SlaveError::SDOAborted to get the exact abort code
+     * (e.g. 0x06070010 = "Data type mismatch, length mismatch").
+     */
+    uint32_t lastSdoAbortCode() const;
 
     // -- SII convenience -----------------------------------------------------
 

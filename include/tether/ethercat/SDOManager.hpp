@@ -328,6 +328,24 @@ public:
         (void)slave_index; (void)reg_addr; (void)out; (void)len; (void)timeout_ms;
         return false;
     }
+
+    /**
+     * @brief Return the CoE SDO abort code reported by the slave on the most
+     * recent sdoUpload/sdoDownload call.
+     *
+     * @return 0 if the last call succeeded or failed for a non-abort reason
+     *         (transport/timeout); otherwise the standard 32-bit CoE SDO
+     *         abort code (e.g. 0x06070010 for "data type / length mismatch").
+     *
+     * The default implementation returns 0, so mock transports used in unit
+     * tests do not need to override this unless they specifically want to
+     * simulate slave aborts. Real transports override to read the value
+     * captured by the underlying CoE SDO channel.
+     *
+     * @note SDO operations on a slave are serialized by CoEManager, so this
+     *       is safe to read immediately after a call returns false.
+     */
+    virtual uint32_t lastAbortCode() const { return 0; }
 };
 
 // ============================================================================
