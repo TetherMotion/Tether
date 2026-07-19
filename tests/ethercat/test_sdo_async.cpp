@@ -340,6 +340,76 @@ TEST_F(SDOManagerQueueTest, ReadSyncUsesPDOConfigForTransport) {
     pdo_mgr.deinit();
 }
 
+// Regression test: CoEManager::sdoUploadWithRetry must translate
+// options.complete_access into Tether's internal Complete-Access marker
+// (bit 7 / 0x80 of the subindex) before calling the raw transport. The raw
+// SDO upload layer relies on this marker to set the ETG.1000.6 CA bit (0x10)
+// in the SDO command byte. Without the translation the CA flag is silently
+// dropped and the slave receives a normal (non-CA) upload request, which
+// caused 0xF110:1 segment timeouts on the ESC211.
+TEST_F(SDOManagerQueueTest, SdoUploadWithRetryCompleteAccessSetsSubindexMarker) {
+    ON_CALL(transport_, getMicroseconds()).WillByDefault(Invoke(realMicros));
+    ON_CALL(transport_, lastAbortCode()).WillByDefault(Return(0));
+
+    CoEManager mgr(0, transport_);
+    ASSERT_TRUE(mgr.init());
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    const uint32_t value = 0xDEADBEEFu;
+
+    // Complete Access: expect the transport to receive subindex | 0x80.
+    CoETransactionOptions ca_opts;
+    ca_opts.complete_access = true;
+    ca_opts.max_retries = 0;
+
+    EXPECT_CALL(transport_,
+                sdoUpload(0, _, 0x1000, 128, 0x1400, 128, 0xF110,
+                          static_cast<uint8_t>(0x01u | 0x80u),
+                          _, _, _, _, _, _))
+        .WillOnce(Invoke(UploadOk(&value, sizeof(value))));
+
+    uint32_t out = 0;
+    size_t out_len = 0;
+    EXPECT_TRUE(mgr.sdoUploadWithRetry(0xF110, 0x01,
+                                       reinterpret_cast<uint8_t*>(&out),
+                                       sizeof(out), &out_len, ca_opts));
+    EXPECT_EQ(out_len, sizeof(value));
+    EXPECT_EQ(out, value);
+
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerQueueTest, SdoUploadWithRetryNoCompleteAccessKeepsCleanSubindex) {
+    ON_CALL(transport_, getMicroseconds()).WillByDefault(Invoke(realMicros));
+    ON_CALL(transport_, lastAbortCode()).WillByDefault(Return(0));
+
+    CoEManager mgr(0, transport_);
+    ASSERT_TRUE(mgr.init());
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    const uint32_t value = 0xCAFEBABEu;
+
+    CoETransactionOptions opts;
+    opts.complete_access = false;
+    opts.max_retries = 0;
+
+    EXPECT_CALL(transport_,
+                sdoUpload(0, _, 0x1000, 128, 0x1400, 128, 0xF110,
+                          static_cast<uint8_t>(0x01u),
+                          _, _, _, _, _, _))
+        .WillOnce(Invoke(UploadOk(&value, sizeof(value))));
+
+    uint32_t out = 0;
+    size_t out_len = 0;
+    EXPECT_TRUE(mgr.sdoUploadWithRetry(0xF110, 0x01,
+                                       reinterpret_cast<uint8_t*>(&out),
+                                       sizeof(out), &out_len, opts));
+    EXPECT_EQ(out_len, sizeof(value));
+    EXPECT_EQ(out, value);
+
+    mgr.deinit();
+}
+
 TEST_F(SDOManagerQueueTest, QueueFullReturnsZero) {
     // Use blocking transport to keep worker busy
     std::mutex block_mutex;
