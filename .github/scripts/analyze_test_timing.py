@@ -14,6 +14,34 @@ TIMING_DIR = BUILD_DIR / "timing_results"
 TOP_N = int(os.environ.get("TOP_N", "50"))
 
 
+def parse_time(value) -> float:
+    """Parse a GoogleTest time value into seconds as a float.
+
+    GoogleTest emits times as strings that may be bare numbers ("0.123")
+    or carry a unit suffix ("0s", "123ms"). Fall back to 0.0 for anything
+    that cannot be parsed so a single bad entry does not abort the run.
+    """
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return 0.0
+    # Strip a trailing unit suffix if present and convert to seconds.
+    unit_scales = {"ms": 1e-3, "us": 1e-6, "ns": 1e-9, "s": 1.0}
+    scale = 1.0
+    for unit, factor in unit_scales.items():
+        if text.endswith(unit):
+            text = text[: -len(unit)].strip()
+            scale = factor
+            break
+    try:
+        return float(text) * scale
+    except ValueError:
+        return 0.0
+
+
 def main() -> int:
     TIMING_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -53,11 +81,11 @@ def main() -> int:
 
         for suite in data.get("testsuites", []):
             suite_name = suite.get("name", "Unknown")
-            suite_time = float(suite.get("time", "0"))
+            suite_time = parse_time(suite.get("time", "0"))
             per_suite[suite_name]["time"] += suite_time
             per_suite[suite_name]["tests"] += suite.get("tests", 0)
             for case in suite.get("testsuite", []):
-                case_time = float(case.get("time", "0"))
+                case_time = parse_time(case.get("time", "0"))
                 per_test.append({
                     "module": exe.name,
                     "suite": suite_name,
