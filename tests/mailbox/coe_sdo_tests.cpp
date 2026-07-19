@@ -318,6 +318,34 @@ static void buildSdoAbortResponse(uint8_t* buf, uint8_t mbx_cnt,
     std::memcpy(buf + sizeof(mbx) + sizeof(coe), &abort, sizeof(abort));
 }
 
+// Variant of buildSdoAbortResponse that emits the abort with an explicit CoE
+// service field. Some slaves (e.g. Nexcobot ESC211) send SDO abort responses
+// with CoE service=0x2 (SDO-REQ) instead of 0x3 (SDO-RES) — a slave firmware
+// bug. The master must still surface the abort code regardless of the CoE
+// service field.
+static void buildSdoAbortResponseWithCoeService(uint8_t* buf, uint8_t mbx_cnt,
+                                                 uint16_t index, uint8_t sub,
+                                                 uint32_t abort_code,
+                                                 uint8_t coe_service) {
+    MbxHeader mbx{};
+    mbx.length_le = host_to_le16(static_cast<uint16_t>(sizeof(CoeHeader) + sizeof(SdoAbort)));
+    mbx.address_le = host_to_le16(0);
+    mbx.priority = 0;
+    mbx.mbxtype = mbx_type_with_cnt(EC_MBXT_COE, mbx_cnt);
+    std::memcpy(buf, &mbx, sizeof(mbx));
+
+    CoeHeader coe{};
+    coe.raw_le = host_to_le16(coe_make_raw(0, coe_service));
+    std::memcpy(buf + sizeof(mbx), &coe, sizeof(coe));
+
+    SdoAbort abort{};
+    abort.cmd = EC_SDO_ABORT;
+    abort.index_le = host_to_le16(index);
+    abort.sub = sub;
+    abort.abortCode_le = host_to_le32(abort_code);
+    std::memcpy(buf + sizeof(mbx) + sizeof(coe), &abort, sizeof(abort));
+}
+
 static void buildSdoDownloadSegmentResponse(uint8_t* buf, uint8_t mbx_cnt,
                                             bool toggle) {
     MbxHeader mbx{};
@@ -1510,6 +1538,201 @@ TEST(CoeSDO, Download_Expedited_4Bytes_StillWorks) {
     EXPECT_EQ(mock.captured_mbxbuf[13], 0xADu);
     EXPECT_EQ(mock.captured_mbxbuf[14], 0xBEu);
     EXPECT_EQ(mock.captured_mbxbuf[15], 0xEFu);
+
+    mock.remove();
+}
+
+// ============================================================================
+// Buggy CoE service field in abort responses
+//
+// Some slaves (e.g. Nexcobot ESC211) emit SDO abort responses with CoE
+// service=0x2 (SDO-REQ) instead of 0x3 (SDO-RES) — a slave firmware bug.
+// The master must still surface the abort code so callers see the real
+// rejection (e.g. 0x06070010 length mismatch) instead of a misleading
+// "timeout" error. These tests reproduce the ESC211 scenario from the
+// field trace: a Normal Download Initiate Request with 32 bytes of inline
+// payload, and the slave responding with an ABORT whose CoE header echoes
+// the request's service field (0x2).
+// ============================================================================
+
+class BuggyCoeServiceAbortMock {
+public:
+    static constexpr uint16_t SM0_STATUS_ADDR = 0x0805;
+    static constexpr uint16_t SM1_STATUS_ADDR = 0x0805 + 8;
+    static constexpr uint16_t MBX_WRITE_ADDR = 0x1000;
+    static constexpr uint16_t MBX_READ_ADDR = 0x1080;
+    static constexpr uint16_t MBX_LEN = 128;
+
+    uint16_t index = 0xF200;
+    uint8_t sub = 0x01;
+    uint32_t abort_code = 0x06070010; // Data type mismatch, length mismatch
+    uint8_t coe_service = EC_COES_SDOREQ; // Buggy: echoes request's 0x2
+
+    int mailbox_data_reads = 0;
+    bool write_happened = false;
+    EtherCAT::Master* master_ = nullptr;
+
+    void install(EtherCAT::Master& master) {
+        master_ = &master;
+
+        master.setAprdTestCallback([this](uint16_t adp, uint16_t ado,
+                                          void* out, uint16_t len, unsigned int ms) {
+            (void)adp; (void)ms;
+
+            if (ado == SM0_STATUS_ADDR && len >= 1) {
+                uint8_t val = 0x00;
+                std::memcpy(out, &val, 1);
+                return true;
+            }
+
+            if (ado == SM1_STATUS_ADDR && len >= 1) {
+                uint8_t val = write_happened ? EC_SM_STATUS_MBXFULL : 0x00;
+                std::memcpy(out, &val, 1);
+                return true;
+            }
+
+            if (ado == MBX_READ_ADDR && len >= 16) {
+                mailbox_data_reads++;
+                // Respond with an abort whose CoE service field is buggy
+                // (0x2/SDO-REQ instead of 0x3/SDO-RES), matching the ESC211
+                // firmware behaviour. The mbx counter (0) matches the
+                // request counter — the master starts at 0, sends the
+                // request with cnt=0, and expects the response with cnt=0.
+                buildSdoAbortResponseWithCoeService(
+                    static_cast<uint8_t*>(out), /*mbx_cnt=*/0,
+                    index, sub, abort_code, coe_service);
+                return true;
+            }
+
+            std::memset(out, 0, len);
+            return true;
+        });
+
+        master.setApwrTestCallback([this](uint16_t adp, uint16_t ado,
+                                          const void* data, uint16_t len, unsigned int ms) {
+            (void)adp; (void)ado; (void)data; (void)len; (void)ms;
+            write_happened = true;
+            return true;
+        });
+    }
+
+    void remove() {
+        if (master_) {
+            master_->setAprdTestCallback(nullptr);
+            master_->setApwrTestCallback(nullptr);
+        }
+    }
+};
+
+// Reproduces the ESC211 field trace: 32-byte Normal Download to 0xF200:0x01,
+// slave responds with ABORT 0x06070010 and a buggy CoE service field (0x2).
+// The master must surface the abort code, not report a timeout.
+TEST(CoeSDO, Download_Normal_AbortWithBuggyCoeService_SurfacesAbortCode) {
+    EtherCAT::Master master;
+    BuggyCoeServiceAbortMock mock;
+    mock.index = 0xF200;
+    mock.sub = 0x01;
+    mock.abort_code = 0x06070010;
+    mock.coe_service = EC_COES_SDOREQ; // Buggy: 0x2 instead of 0x3
+    mock.install(master);
+
+    uint8_t mbx_cnt = 0;
+    uint8_t data[32] = {};
+    for (int i = 0; i < 32; ++i) data[i] = static_cast<uint8_t>(i + 1);
+
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
+                               BuggyCoeServiceAbortMock::MBX_WRITE_ADDR, BuggyCoeServiceAbortMock::MBX_LEN,
+                               BuggyCoeServiceAbortMock::MBX_READ_ADDR, BuggyCoeServiceAbortMock::MBX_LEN,
+                               0xF200, 0x01, data, sizeof(data),
+                               false, 5, 200);
+
+    EXPECT_FALSE(ok) << "Abort should cause download to fail";
+    EXPECT_EQ(master.lastCoeSdoAbortCode(), 0x06070010u)
+        << "Master must surface the abort code despite buggy CoE service field";
+    EXPECT_EQ(mock.mailbox_data_reads, 1)
+        << "Abort should be detected on first response read — no retry storm";
+
+    mock.remove();
+}
+
+// Same scenario for the expedited download path (≤4 bytes).
+TEST(CoeSDO, Download_Expedited_AbortWithBuggyCoeService_SurfacesAbortCode) {
+    EtherCAT::Master master;
+    BuggyCoeServiceAbortMock mock;
+    mock.index = 0xF200;
+    mock.sub = 0x01;
+    mock.abort_code = 0x06070012; // Data type mismatch, read only
+    mock.coe_service = EC_COES_SDOREQ;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 0;
+    uint8_t data[4] = {0x01, 0x02, 0x03, 0x04};
+
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
+                               BuggyCoeServiceAbortMock::MBX_WRITE_ADDR, BuggyCoeServiceAbortMock::MBX_LEN,
+                               BuggyCoeServiceAbortMock::MBX_READ_ADDR, BuggyCoeServiceAbortMock::MBX_LEN,
+                               0xF200, 0x01, data, sizeof(data),
+                               false, 5, 200);
+
+    EXPECT_FALSE(ok) << "Abort should cause download to fail";
+    EXPECT_EQ(master.lastCoeSdoAbortCode(), 0x06070012u)
+        << "Master must surface the abort code despite buggy CoE service field";
+
+    mock.remove();
+}
+
+// Same scenario for the upload path.
+TEST(CoeSDO, Upload_AbortWithBuggyCoeService_SurfacesAbortCode) {
+    EtherCAT::Master master;
+    BuggyCoeServiceAbortMock mock;
+    mock.index = 0xF200;
+    mock.sub = 0x01;
+    mock.abort_code = 0x06070010;
+    mock.coe_service = EC_COES_SDOREQ;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 0;
+    uint8_t out[256] = {};
+    size_t out_len = sizeof(out);
+
+    bool ok = master.coeSdoUpload(0x0000, &mbx_cnt,
+                            BuggyCoeServiceAbortMock::MBX_WRITE_ADDR, BuggyCoeServiceAbortMock::MBX_LEN,
+                            BuggyCoeServiceAbortMock::MBX_READ_ADDR, BuggyCoeServiceAbortMock::MBX_LEN,
+                            0xF200, 0x01, out, sizeof(out), &out_len,
+                            false, 5, 200);
+
+    EXPECT_FALSE(ok) << "Abort should cause upload to fail";
+    EXPECT_EQ(master.lastCoeSdoAbortCode(), 0x06070010u)
+        << "Master must surface the abort code despite buggy CoE service field";
+
+    mock.remove();
+}
+
+// Regression: a spec-compliant abort (CoE service=0x3) must still be surfaced.
+// This guards against accidentally making the CoE service check non-fatal for
+// non-abort responses.
+TEST(CoeSDO, Download_Normal_AbortWithCorrectCoeService_StillSurfacesAbortCode) {
+    EtherCAT::Master master;
+    BuggyCoeServiceAbortMock mock;
+    mock.index = 0xF200;
+    mock.sub = 0x01;
+    mock.abort_code = 0x06070010;
+    mock.coe_service = EC_COES_SDORES; // Spec-compliant: 0x3
+    mock.install(master);
+
+    uint8_t mbx_cnt = 0;
+    uint8_t data[32] = {};
+    for (int i = 0; i < 32; ++i) data[i] = static_cast<uint8_t>(i + 1);
+
+    bool ok = master.coeSdoDownload(0x0000, &mbx_cnt,
+                               BuggyCoeServiceAbortMock::MBX_WRITE_ADDR, BuggyCoeServiceAbortMock::MBX_LEN,
+                               BuggyCoeServiceAbortMock::MBX_READ_ADDR, BuggyCoeServiceAbortMock::MBX_LEN,
+                               0xF200, 0x01, data, sizeof(data),
+                               false, 5, 200);
+
+    EXPECT_FALSE(ok) << "Abort should cause download to fail";
+    EXPECT_EQ(master.lastCoeSdoAbortCode(), 0x06070010u)
+        << "Spec-compliant abort must still be surfaced";
 
     mock.remove();
 }
