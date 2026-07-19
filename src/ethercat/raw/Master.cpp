@@ -38,8 +38,8 @@ namespace EtherCAT {
 static const char* TAG = "ethercat";
 
 // TX retry constants
-static constexpr int       kMaxTxRetries   = 3;
-static constexpr uint32_t  kTxRetryDelayUs = 50;
+static constexpr int       kMaxTxRetries   = ECAT_TX_MAX_RETRIES;
+static constexpr uint32_t  kTxRetryDelayUs = ECAT_TX_RETRY_DELAY_US;
 
 class IMotionControlLoop {
 public:

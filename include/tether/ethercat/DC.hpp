@@ -18,6 +18,7 @@
 
 #include "tether/platform/EspCompat.hpp"
 #include "tether/platform/IPlatformTimer.hpp"
+#include "tether/ethercat/TetherConfig.hpp"
 
 namespace EtherCAT {
 
@@ -106,7 +107,7 @@ inline const char* dc_state_name(DCState state) {
 }
 
 // Maximum number of slaves for DC synchronization
-constexpr size_t kMaxDCSlaves = 16;
+constexpr size_t kMaxDCSlaves = ECAT_DC_MAX_SLAVES;
 
 // ============================================================================
 // Forward declaration of the class-based DC implementation

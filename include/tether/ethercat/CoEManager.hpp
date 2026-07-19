@@ -11,6 +11,7 @@
 #pragma once
 
 #include "tether/ethercat/CoETypes.hpp"
+#include "tether/ethercat/TetherConfig.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/SDOManager.hpp" // ISDOTransport, SDORequest, SDOResponse
 #include "logging/Logger.hpp"
@@ -32,9 +33,9 @@ class PDOManager;
 
 namespace CoE {
 
-static constexpr size_t kMaxQueueDepth = 32;
-static constexpr uint32_t kDefaultTimeoutMs = 1000;
-static constexpr uint32_t kDefaultPollIntervalMs = 5;
+static constexpr size_t kMaxQueueDepth = ECAT_COE_QUEUE_DEPTH;
+static constexpr uint32_t kDefaultTimeoutMs = ECAT_COE_DEFAULT_TIMEOUT_MS;
+static constexpr uint32_t kDefaultPollIntervalMs = ECAT_COE_DEFAULT_POLL_INTERVAL_MS;
 // kWorkerIdleTimeout removed — persistent worker, no idle timeout
 
 // ============================================================================

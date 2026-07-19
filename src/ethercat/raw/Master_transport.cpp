@@ -15,6 +15,7 @@
 #include "tether/ethercat/RealtimeLoop.hpp"
 #include "tether/ethercat/SyncManagerValidation.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
+#include "tether/ethercat/TetherConfig.hpp"
 #include "tether/packet_interpreters/CoE.hpp"
 #include "tether/sii/SIIParser.hpp"
 #include "tether/fmmu/FMMUConfiguration.hpp"
@@ -33,8 +34,8 @@
 namespace EtherCAT {
 
 // TX retry constants
-static constexpr int       kMaxTxRetries   = 3;
-static constexpr uint32_t  kTxRetryDelayUs = 50;
+static constexpr int       kMaxTxRetries   = ECAT_TX_MAX_RETRIES;
+static constexpr uint32_t  kTxRetryDelayUs = ECAT_TX_RETRY_DELAY_US;
 
 static const char* TAG = "ethercat";
 
@@ -776,26 +777,30 @@ bool Master::sendSingleDatagram(Command cmd, uint8_t idx,
         char msg[256];
         if (last_errno != 0) {
             std::snprintf(msg, sizeof(msg),
-                          "NetworkInterface::send failed after retries (cmd=%s idx=%u adp=0x%04X ado=0x%04X datalen=%u frame_len=%u retries=%d errno=%d:%s)",
+                          "NetworkInterface::send failed after %d retries (cmd=%s idx=%u adp=0x%04X ado=0x%04X datalen=%u frame_len=%u errno=%d:%s). "
+                          "Tether TX retry limit is %d (ECAT_TX_MAX_RETRIES in TetherConfig.hpp).",
+                          kMaxTxRetries + 1,
                           commandToString(cmd),
                           static_cast<unsigned>(idx),
                           static_cast<unsigned>(adp),
                           static_cast<unsigned>(ado),
                           static_cast<unsigned>(datalen),
                           static_cast<unsigned>(frame_len),
-                          kMaxTxRetries + 1,
                           last_errno,
-                          std::strerror(last_errno));
+                          std::strerror(last_errno),
+                          kMaxTxRetries);
         } else {
             std::snprintf(msg, sizeof(msg),
-                          "NetworkInterface::send failed after retries (cmd=%s idx=%u adp=0x%04X ado=0x%04X datalen=%u frame_len=%u retries=%d errno=0)",
+                          "NetworkInterface::send failed after %d retries (cmd=%s idx=%u adp=0x%04X ado=0x%04X datalen=%u frame_len=%u errno=0). "
+                          "Tether TX retry limit is %d (ECAT_TX_MAX_RETRIES in TetherConfig.hpp).",
+                          kMaxTxRetries + 1,
                           commandToString(cmd),
                           static_cast<unsigned>(idx),
                           static_cast<unsigned>(adp),
                           static_cast<unsigned>(ado),
                           static_cast<unsigned>(datalen),
                           static_cast<unsigned>(frame_len),
-                          kMaxTxRetries + 1);
+                          kMaxTxRetries);
         }
         send_fail_log_.logLegacy(1, TAG, msg);
 #if TETHER_ENABLE_ETHERCAT_STATS

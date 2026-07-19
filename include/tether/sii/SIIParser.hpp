@@ -59,6 +59,7 @@
 #include <bit>
 
 #include "tether/ethercat/SMRegisters.hpp"
+#include "tether/ethercat/TetherConfig.hpp"
 
 namespace EtherCAT {
 namespace SII {
@@ -367,8 +368,8 @@ struct SIIDCConfig {
  */
 class SIIStrings {
 public:
-    static constexpr size_t MAX_STRINGS = 32;
-    static constexpr size_t MAX_STRING_BUFFER = 2048;
+    static constexpr size_t MAX_STRINGS = ECAT_SII_MAX_STRINGS;
+    static constexpr size_t MAX_STRING_BUFFER = ECAT_SII_MAX_STRING_BUFFER;
     
     SIIStrings() {
         clear();

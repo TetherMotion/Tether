@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include "tether/ethercat/TetherConfig.hpp"
 
 namespace EtherCAT { class Master; }
 
@@ -60,8 +61,8 @@ public:
                            uint16_t index_, uint8_t sub_,
                            const char* phaseLabel);
 
-    static constexpr int MAX_STALE_RETRIES = 8;
-    static constexpr int MAX_POLL_ATTEMPTS = 50;
+    static constexpr int MAX_STALE_RETRIES = ECAT_SDO_MAX_STALE_RETRIES;
+    static constexpr int MAX_POLL_ATTEMPTS = ECAT_SDO_MAX_POLL_ATTEMPTS;
 
 protected:
     SDOErrorDecoder& errorDecoder_;
