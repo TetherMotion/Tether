@@ -166,6 +166,25 @@ public:
     /// wrapper does NOT retry the operation.
     uint32_t lastSdoAbortCode() const { return last_sdo_abort_code_.load(std::memory_order_relaxed); }
 
+    /// @brief Direction of the most recent SDO operation that recorded an
+    /// abort code via lastSdoAbortCode(). Returns false for "upload" (read)
+    /// and true for "download" (write). Undefined when lastSdoAbortCode()==0.
+    bool lastSdoWasDownload() const { return last_sdo_was_download_.load(std::memory_order_relaxed); }
+
+    /// @brief Return the payload length that was attempted on the most recent
+    /// SDO operation that recorded an abort code via lastSdoAbortCode().
+    ///
+    /// For a download (write) this is the number of bytes that were sent to
+    /// the slave; for an upload (read) it is the capacity of the receive
+    /// buffer that was offered. Returns 0 when lastSdoAbortCode()==0.
+    ///
+    /// This is most useful for the length-mismatch abort family
+    /// (0x06070010 / 0x06070012 / 0x06070013) where the slave rejects the
+    /// request because the payload size does not match what the object
+    /// dictionary expects — the attempted length lets the user compare
+    /// against the ESI-specified size.
+    size_t lastSdoAttemptedLength() const { return last_sdo_attempted_length_.load(std::memory_order_relaxed); }
+
     // ----- Debug flags -----
 
     /** @brief Update the per-slave debug flags distributed by the master. */
@@ -249,6 +268,8 @@ private:
     BehaviourOptions behaviour_options_;
 
     std::atomic<uint32_t> last_sdo_abort_code_{0};
+    std::atomic<bool>     last_sdo_was_download_{false};
+    std::atomic<size_t>   last_sdo_attempted_length_{0};
 
     EtherCATSlaveDebugFlags debug_flags_;
 };

@@ -680,6 +680,14 @@ uint32_t Slave::lastSdoAbortCode() const {
     return master_.sdoManager(index_).lastSdoAbortCode();
 }
 
+bool Slave::lastSdoWasDownload() const {
+    return master_.sdoManager(index_).lastSdoWasDownload();
+}
+
+size_t Slave::lastSdoAttemptedLength() const {
+    return master_.sdoManager(index_).lastSdoAttemptedLength();
+}
+
 // -- SII convenience ---------------------------------------------------------
 
 SlaveError Slave::readSII(SII::SIIData& data) {

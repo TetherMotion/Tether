@@ -506,6 +506,29 @@ public:
      */
     uint32_t lastSdoAbortCode() const;
 
+    /**
+     * @brief Direction of the most recent SDO call that recorded an abort
+     *        code via lastSdoAbortCode(). Returns false for "upload" (read)
+     *        and true for "download" (write). Undefined when
+     *        lastSdoAbortCode()==0.
+     */
+    bool lastSdoWasDownload() const;
+
+    /**
+     * @brief Return the payload length that was attempted on the most recent
+     *        sdoRead/sdoWrite call that recorded an abort code via
+     *        lastSdoAbortCode().
+     *
+     * For a download (write) this is the number of bytes that were sent to
+     * the slave; for an upload (read) it is the capacity of the receive
+     * buffer that was offered. Returns 0 when lastSdoAbortCode()==0.
+     *
+     * Most useful for the length-mismatch abort family (0x06070010 /
+     * 0x06070012 / 0x06070013) where the slave rejects the request because
+     * the payload size does not match what the object dictionary expects.
+     */
+    size_t lastSdoAttemptedLength() const;
+
     // -- SII convenience -----------------------------------------------------
 
     /**
