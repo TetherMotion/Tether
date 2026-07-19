@@ -13,6 +13,13 @@ TEST(EtherCATMasterPreopRetry, FaultDiagnosedAlwaysError) {
     EtherCAT::Master::Config cfg;
     cfg.rx_queue_depth = 4;
     cfg.txpdo_queue_depth = 4;
+    // Speed up the test: the simulated slave never reaches PRE_OP, so the
+    // default 3 x 200 x 20ms retry schedule would burn ~13s of wall time.
+    // One attempt is enough to trigger the one-time fault_diagnose() call.
+    cfg.preop_max_attempts   = 1;
+    cfg.preop_inner_tries    = 2;
+    cfg.preop_inner_sleep_ms = 1;
+    cfg.preop_backoff_ms     = 1;
     EtherCAT::Master master(cfg);
 
     master.setApwrTestCallback([&](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned ms){
