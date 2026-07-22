@@ -10,10 +10,22 @@
 
 namespace GCodeExport {
 
+/// Reject filenames containing path traversal or absolute path components.
+/// This prevents an attacker who controls the filename from writing to
+/// arbitrary locations (e.g. "../../etc/passwd" or "/etc/cron.d/evil").
+static bool isSafeFilename(const std::string& filename) {
+    if (filename.empty()) return false;
+    if (filename[0] == '/' || filename[0] == '\\') return false;
+    if (filename.find("..") != std::string::npos) return false;
+    if (filename.find('\0') != std::string::npos) return false;
+    return true;
+}
+
 CSVExporter::CSVExporter(const CSVConfig& config)
     : config_(config) {}
 
 bool CSVExporter::exportToFile(const std::vector<TrajectorySample>& samples, const std::string& filename) {
+    if (!isSafeFilename(filename)) return false;
     std::ofstream file(filename);
     if (!file.is_open()) return false;
     

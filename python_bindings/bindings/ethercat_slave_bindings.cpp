@@ -84,6 +84,6 @@ PYBIND11_MODULE(_ethercat_slave, m) {
              py::arg("callback"),
              "Set callback for state changes")
         .def("get_object_dictionary", &SlaveCore::getObjectDictionary,
-             py::return_value_policy::reference,
+             py::return_value_policy::reference_internal,
              "Get object dictionary");
 }

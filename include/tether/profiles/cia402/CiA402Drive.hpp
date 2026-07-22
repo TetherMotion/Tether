@@ -46,6 +46,8 @@
 #include <cstddef>
 #include <cstring>
 #include <functional>
+#include <array>
+#include <memory>
 #include "profiles/cia301/CiA301Defs.hpp"
 #include "profiles/cia301/CiA402Defs.hpp"
 #include "tether/drives/DynaDrive/Registers/Statusword.hpp"
@@ -294,7 +296,8 @@ constexpr size_t kMaxManagedDrives = ECAT_CIA402_MAX_MANAGED_DRIVES;
 class DriveManager {
 public:
     DriveManager() = default;
-    ~DriveManager();
+    // Destructor is no longer needed — unique_ptr handles cleanup.
+    // Kept as defaulted here for ABI clarity; the .cpp no longer defines it.
 
     size_t initializeDrives(Master& master, size_t slave_count);
     CiA402Drive* getDrive(size_t index);
@@ -305,7 +308,7 @@ public:
     bool disableAll();
 
 private:
-    CiA402Drive* m_drives[kMaxManagedDrives] = {nullptr};
+    std::array<std::unique_ptr<CiA402Drive>, kMaxManagedDrives> m_drives{};
     size_t m_drive_count{0};
 };
 

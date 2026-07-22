@@ -21,6 +21,7 @@
 #include <functional>
 #include <optional>
 #include <map>
+#include <mutex>
 #include <cmath>
 
 namespace MotionReplanner {
@@ -269,9 +270,15 @@ public:
     const std::vector<TrackingError>& getAllErrors() const { return trackingErrors_; }
     
     /**
-     * @brief Get all actual samples (if logging enabled)
+     * @brief Get all actual samples (thread-safe copy)
+     *
+     * Returns a copy rather than a const reference so the caller cannot
+     * observe the deque while another thread is mutating it.
      */
-    const std::deque<PositionSample>& getActualSamples() const { return actualSamples_; }
+    std::deque<PositionSample> getActualSamples() const {
+        std::lock_guard<std::mutex> lk(samples_mutex_);
+        return actualSamples_;
+    }
     
     /**
      * @brief Configuration access
@@ -297,8 +304,13 @@ private:
     // Desired trajectory
     std::vector<GCodeExport::TrajectorySample> desiredTrajectory_;
     
-    // Actual samples (ring buffer for memory efficiency)
+    // Actual samples (ring buffer for memory efficiency).
+    // Guarded by samples_mutex_ because addActualSample() may be called from
+    // a feedback/RT thread while processAccumulatedSamples() / detectSystemDelay()
+    // / getActualSamples() run on another thread. Without synchronization the
+    // deque's internal map can be invalidated mid-iteration (use-after-free).
     std::deque<PositionSample> actualSamples_;
+    mutable std::mutex samples_mutex_;
     size_t nextDesiredIndex_ = 0;
     
     // Computed errors
@@ -365,6 +377,7 @@ private:
     double m2_ = 0.0;  // For Welford's online variance
     double sumSquares_ = 0.0;
     double logSum_ = 0.0;
+    size_t  positiveCount_ = 0;  // Count of samples > 0 (for geometric mean)
     
     std::vector<double> samples_; // For percentiles
 };

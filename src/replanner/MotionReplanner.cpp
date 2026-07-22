@@ -38,6 +38,7 @@ void RollingStatistics::addSample(double value) {
     // Log sum for geometric mean (only for positive values)
     if (value > 0) {
         logSum_ += std::log(value);
+        positiveCount_++;
     }
     
     // Keep samples for percentile calculation
@@ -54,6 +55,7 @@ void RollingStatistics::clear() {
     m2_ = 0.0;
     sumSquares_ = 0.0;
     logSum_ = 0.0;
+    positiveCount_ = 0;
     samples_.clear();
 }
 
@@ -63,8 +65,10 @@ double RollingStatistics::variance() const {
 }
 
 double RollingStatistics::geometricMean() const {
-    if (count_ == 0) return 0.0;
-    return std::exp(logSum_ / count_);
+    // Geometric mean is only defined for positive values. If no positive
+    // samples were added, return 0.0 instead of the incorrect exp(0)=1.0.
+    if (positiveCount_ == 0) return 0.0;
+    return std::exp(logSum_ / static_cast<double>(positiveCount_));
 }
 
 double RollingStatistics::rms() const {
@@ -102,6 +106,7 @@ void MotionReplanner::setDesiredTrajectory(
 }
 
 void MotionReplanner::reset() {
+    std::lock_guard<std::mutex> lk(samples_mutex_);
     actualSamples_.clear();
     trackingErrors_.clear();
     segmentPerformance_.clear();
@@ -110,6 +115,7 @@ void MotionReplanner::reset() {
 }
 
 void MotionReplanner::addActualSample(const PositionSample& sample) {
+    std::lock_guard<std::mutex> lk(samples_mutex_);
     // Add to buffer
     actualSamples_.push_back(sample);
     
@@ -121,52 +127,62 @@ void MotionReplanner::addActualSample(const PositionSample& sample) {
 }
 
 size_t MotionReplanner::processAccumulatedSamples() {
-    if (desiredTrajectory_.empty() || actualSamples_.empty()) {
-        return 0;
+    // Snapshot the samples under the lock, then release it before running
+    // the per-sample loop. This avoids holding samples_mutex_ while user
+    // callbacks (errorCallback_, suggestionCallback_) run, which could
+    // otherwise deadlock if a callback calls back into this replanner
+    // (e.g. addActualSample).
+    std::deque<PositionSample> samples_snapshot;
+    {
+        std::lock_guard<std::mutex> lk(samples_mutex_);
+        if (desiredTrajectory_.empty() || actualSamples_.empty()) {
+            return 0;
+        }
+        samples_snapshot = actualSamples_;
     }
-    
+
     size_t processedCount = 0;
-    
-    for (const auto& actual : actualSamples_) {
+
+    for (const auto& actual : samples_snapshot) {
         // Apply delay compensation
         double adjustedTime = actual.timestamp - detectedDelay_;
         if (adjustedTime < 0) continue;
-        
+
         // Find nearest desired sample
         size_t desiredIdx = findNearestDesiredIndex(adjustedTime);
         if (desiredIdx >= desiredTrajectory_.size()) continue;
-        
+
         const auto& desired = desiredTrajectory_[desiredIdx];
-        
+
         // Compute tracking error
         TrackingError error = computeError(actual, desired);
         error.segmentIndex = desired.segmentIndex;
         error.blockIndex = desired.blockIndex;
-        
+
         // Check if this is a critical point
         error.isCriticalPoint = isCriticalPoint(desiredIdx);
         if (error.isCriticalPoint) {
             error.criticalPointType = classifyCriticalPoint(desiredIdx);
         }
-        
+
         // Store error
         if (config_.logAllSamples || error.isCriticalPoint) {
             trackingErrors_.push_back(error);
         }
-        
+
         // Update segment performance
         updateSegmentPerformance(error);
-        
+
         // Notify callback
         if (errorCallback_) {
             errorCallback_(error);
         }
-        
+
         // Check for alerts
         if (!config_.monitoringOnly && config_.enableLimitSuggestions) {
             if (error.combinedPositionError > config_.positionErrorThreshold ||
                 error.contourError > config_.contourErrorThreshold) {
-                
+
                 auto perf = segmentPerformance_[error.segmentIndex];
                 auto suggestion = generateSuggestion(perf);
                 if (suggestion.limitAdjustmentNeeded && suggestionCallback_) {
@@ -174,15 +190,16 @@ size_t MotionReplanner::processAccumulatedSamples() {
                 }
             }
         }
-        
+
         processedCount++;
     }
-    
+
     // Clear processed samples (keep some for delay detection)
     if (!config_.autoDetectDelay) {
+        std::lock_guard<std::mutex> lk(samples_mutex_);
         actualSamples_.clear();
     }
-    
+
     return processedCount;
 }
 
@@ -607,7 +624,14 @@ MotionReplanner::Limits MotionReplanner::getSuggestedLimits(
 }
 
 double MotionReplanner::detectSystemDelay() {
-    if (actualSamples_.size() < 100 || desiredTrajectory_.empty()) {
+    // Snapshot under the lock so the cross-correlation loop sees a stable
+    // view of the samples even if addActualSample() runs concurrently.
+    std::deque<PositionSample> samples_snapshot;
+    {
+        std::lock_guard<std::mutex> lk(samples_mutex_);
+        samples_snapshot = actualSamples_;
+    }
+    if (samples_snapshot.size() < 100 || desiredTrajectory_.empty()) {
         return config_.systemDelay;
     }
     
@@ -624,7 +648,7 @@ double MotionReplanner::detectSystemDelay() {
         double correlation = 0.0;
         size_t count = 0;
         
-        for (const auto& actual : actualSamples_) {
+        for (const auto& actual : samples_snapshot) {
             double adjustedTime = actual.timestamp - testDelay;
             if (adjustedTime < 0) continue;
             

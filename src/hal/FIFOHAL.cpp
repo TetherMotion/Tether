@@ -163,9 +163,12 @@ bool MasterFIFOHAL::readFrame(uint8_t* buffer, size_t bufferSize,
         if (n != sizeof(len)) {
             return false;
         }
-        
-        if (len > bufferSize) {
-            // Frame too large - skip it
+
+        // Reject frames larger than a sane Ethernet MTU. Without this, a
+        // malicious/buggy peer can send len=0xFFFFFFFF and force us to
+        // discard ~4 GB of data, blocking the HAL read path (DoS).
+        if (len > kMaxFrameSize || len > bufferSize) {
+            // Frame too large or exceeds caller buffer - skip it
             uint8_t discard[256];
             while (len > 0) {
                 size_t toRead = std::min(len, (uint32_t)sizeof(discard));
@@ -362,8 +365,9 @@ bool SlaveFIFOHAL::waitForFrame(uint8_t* buffer, size_t bufferSize,
             stats_.readErrors++;
             return false;
         }
-        
-        if (len > bufferSize) {
+
+        // Reject frames larger than a sane Ethernet MTU (DoS protection).
+        if (len > kMaxFrameSize || len > bufferSize) {
             // Skip oversized frame
             uint8_t discard[256];
             while (len > 0) {
