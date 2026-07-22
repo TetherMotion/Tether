@@ -16,6 +16,7 @@
 #include "tether/platform/EspCompat.hpp"
 
 #include <cstring>
+#include <memory>
 
 static const char* TAG = "CiA402Drive";
 
@@ -36,24 +37,18 @@ CiA402Drive::CiA402Drive(Master& master, uint16_t slave_index)
 // ============================================================================
 // DriveManager Implementation
 // ============================================================================
-
-DriveManager::~DriveManager() {
-    for (size_t i = 0; i < m_drive_count; i++) {
-        delete m_drives[i];
-        m_drives[i] = nullptr;
-    }
-    m_drive_count = 0;
-}
+// Note: no explicit destructor needed — std::unique_ptr in m_drives handles
+// cleanup automatically and is exception-safe.
 
 size_t DriveManager::initializeDrives(Master& master, size_t slave_count) {
     m_drive_count = 0;
-    
+
     for (size_t i = 0; i < slave_count && m_drive_count < kMaxManagedDrives; i++) {
         // Check if slave is a CiA 402 drive by reading device type
         // For simplicity, assume all slaves are drives for now
         // In real implementation, use SlaveIdentifier first
-        
-        m_drives[m_drive_count] = new CiA402Drive(master, static_cast<uint16_t>(i));
+
+        m_drives[m_drive_count] = std::make_unique<CiA402Drive>(master, static_cast<uint16_t>(i));
         m_drive_count++;
     }
     
@@ -63,7 +58,7 @@ size_t DriveManager::initializeDrives(Master& master, size_t slave_count) {
 
 CiA402Drive* DriveManager::getDrive(size_t index) {
     if (index < m_drive_count) {
-        return m_drives[index];
+        return m_drives[index].get();
     }
     return nullptr;
 }
@@ -71,7 +66,7 @@ CiA402Drive* DriveManager::getDrive(size_t index) {
 CiA402Drive* DriveManager::getDriveBySlaveIndex(uint16_t slave_index) {
     for (size_t i = 0; i < m_drive_count; i++) {
         if (m_drives[i] && m_drives[i]->slaveIndex() == slave_index) {
-            return m_drives[i];
+            return m_drives[i].get();
         }
     }
     return nullptr;

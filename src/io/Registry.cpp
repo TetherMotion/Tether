@@ -9,21 +9,25 @@
 namespace tether { namespace io {
 
 bool Registry::addParam(ParamEntry entry) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (idMap_.count(entry.id)) return false;
-    idMap_[entry.id] = EntryKind::Parameter;
-    params_.push_back(std::move(entry));
-    ++revision_;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (idMap_.count(entry.id)) return false;
+        idMap_[entry.id] = EntryKind::Parameter;
+        params_.push_back(std::move(entry));
+        ++revision_;
+    }
     notifyChange();
     return true;
 }
 
 bool Registry::addSignal(SignalEntry entry) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (idMap_.count(entry.id)) return false;
-    idMap_[entry.id] = EntryKind::Signal;
-    signals_.push_back(std::move(entry));
-    ++revision_;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (idMap_.count(entry.id)) return false;
+        idMap_[entry.id] = EntryKind::Signal;
+        signals_.push_back(std::move(entry));
+        ++revision_;
+    }
     notifyChange();
     return true;
 }
@@ -116,8 +120,18 @@ void Registry::removeChangeListener(size_t handle) {
 }
 
 void Registry::notifyChange() {
-    // Called with mutex held
-    for (auto& [handle, listener] : listeners_) {
+    // Copy listeners under the lock, then invoke them outside the lock.
+    // This prevents deadlock if a listener calls back into Registry (e.g.
+    // addParam) and also ensures removeChangeListener() completing means
+    // no in-flight callback can still be running on a destroyed listener.
+    std::vector<CatalogChangeListener> listeners_copy;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (const auto& [handle, listener] : listeners_) {
+            listeners_copy.push_back(listener);
+        }
+    }
+    for (const auto& listener : listeners_copy) {
         listener();
     }
 }

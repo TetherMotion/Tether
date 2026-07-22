@@ -474,6 +474,10 @@ private:
     // Internal Methods
     // ========================================================================
     
+    /// Transition to a new connection state.
+    /// @note Invariant: caller must hold mutex_. All state-correlated fields
+    ///       (stateEntryTimeMs_, lastError_, failSafeActive_, dataValid_)
+    ///       are updated atomically with state_ under that lock.
     void transitionTo(uint8_t newState);
     bool validateFrame(const uint8_t* data, size_t len);
     bool validateCRC(const uint8_t* data, size_t len);

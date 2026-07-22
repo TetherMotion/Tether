@@ -94,7 +94,7 @@ PYBIND11_MODULE(_fsoe, m) {
         .def("get_error_code", &FSoEMasterConnection::getErrorCode,
              "Get last error code")
         .def("get_stats", &FSoEMasterConnection::getStats,
-             py::return_value_policy::reference,
+             py::return_value_policy::reference_internal,
              "Get connection statistics")
         .def("reset_stats", &FSoEMasterConnection::resetStats,
              "Reset statistics")

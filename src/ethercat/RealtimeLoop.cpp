@@ -49,16 +49,11 @@ bool RealtimeLoop::start() {
     // starts, sees running_==false, and exits immediately.
     running_.store(true, std::memory_order_release);
 
-    // Reset counters
-    {
-        std::lock_guard<std::mutex> lk(pdo_stats_mutex_);
-        pdo_cycle_count_ = 0;
-        pdo_error_count_ = 0;
-    }
-    {
-        std::lock_guard<std::mutex> lk(dc_stats_mutex_);
-        dc_sync_count_ = 0;
-    }
+    // Reset counters (relaxed — only the RT threads write, and start() runs
+    // before they do).
+    pdo_cycle_count_.store(0, std::memory_order_relaxed);
+    pdo_error_count_.store(0, std::memory_order_relaxed);
+    dc_sync_count_.store(0, std::memory_order_relaxed);
 
     // Start both threads.  If one fails, tear down the other.
     if (!startPDOThread()) {
@@ -90,18 +85,10 @@ void RealtimeLoop::stop() {
 RealtimeLoop::Stats RealtimeLoop::getStats() const {
     Stats s{};
 
-    // PDO stats
-    {
-        std::lock_guard<std::mutex> lk(pdo_stats_mutex_);
-        s.cycle_count     = pdo_cycle_count_;
-        s.pdo_error_count = pdo_error_count_;
-    }
-
-    // DC stats
-    {
-        std::lock_guard<std::mutex> lk(dc_stats_mutex_);
-        s.sync_count = dc_sync_count_;
-    }
+    // Atomic snapshots (relaxed — independent monotonic counters).
+    s.cycle_count     = pdo_cycle_count_.load(std::memory_order_relaxed);
+    s.pdo_error_count = pdo_error_count_.load(std::memory_order_relaxed);
+    s.sync_count      = dc_sync_count_.load(std::memory_order_relaxed);
 
     // Jitter (from PDO monitor — primary realtime thread)
     if (pdo_jitter_monitor_) {
@@ -246,16 +233,12 @@ void RealtimeLoop::pdoTaskEntry(void* param) {
         // ── PDO exchange (every cycle if enabled) ──
         if (loop->pdo_enabled_.load(std::memory_order_acquire) && loop->pdo_exchange_) {
             if (!loop->pdo_exchange_()) {
-                std::lock_guard<std::mutex> lk(loop->pdo_stats_mutex_);
-                loop->pdo_error_count_++;
+                loop->pdo_error_count_.fetch_add(1, std::memory_order_relaxed);
             }
         }
 
         // ── Update cycle count ──
-        {
-            std::lock_guard<std::mutex> lk(loop->pdo_stats_mutex_);
-            loop->pdo_cycle_count_++;
-        }
+        loop->pdo_cycle_count_.fetch_add(1, std::memory_order_relaxed);
     }
 
     TETHER_LOGI(TAG, "PDO realtime task exiting");
@@ -388,8 +371,7 @@ void RealtimeLoop::dcTaskEntry(void* param) {
 
         // ── DC sync ──
         if (loop->dc_sync_ && loop->dc_sync_()) {
-            std::lock_guard<std::mutex> lk(loop->dc_stats_mutex_);
-            loop->dc_sync_count_++;
+            loop->dc_sync_count_.fetch_add(1, std::memory_order_relaxed);
         }
     }
 

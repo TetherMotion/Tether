@@ -621,24 +621,24 @@ public:
     
     Error peek(void* item) const override {
         if (!item) return Error::InvalidArgument;
-        
-        pthread_mutex_lock(const_cast<pthread_mutex_t*>(&m_mutex));
-        
+
+        pthread_mutex_lock(&m_mutex);
+
         if (m_count == 0) {
-            pthread_mutex_unlock(const_cast<pthread_mutex_t*>(&m_mutex));
+            pthread_mutex_unlock(&m_mutex);
             return Error::Empty;
         }
-        
+
         memcpy(item, m_buffer.get() + (m_head * m_itemSize), m_itemSize);
-        
-        pthread_mutex_unlock(const_cast<pthread_mutex_t*>(&m_mutex));
+
+        pthread_mutex_unlock(&m_mutex);
         return Error::OK;
     }
-    
+
     size_t getCount() const override {
-        pthread_mutex_lock(const_cast<pthread_mutex_t*>(&m_mutex));
+        pthread_mutex_lock(&m_mutex);
         size_t count = m_count;
-        pthread_mutex_unlock(const_cast<pthread_mutex_t*>(&m_mutex));
+        pthread_mutex_unlock(&m_mutex);
         return count;
     }
     
@@ -678,7 +678,7 @@ private:
     size_t m_head;
     size_t m_tail;
     size_t m_count;
-    pthread_mutex_t m_mutex;
+    mutable pthread_mutex_t m_mutex;
     pthread_cond_t m_notEmpty;
     pthread_cond_t m_notFull;
 };

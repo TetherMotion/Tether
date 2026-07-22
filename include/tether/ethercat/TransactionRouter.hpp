@@ -320,8 +320,8 @@ private:
     struct Slot {
         std::mutex              mtx;
         std::condition_variable cv;
-        bool                    pending{false};
-        bool                    completed{false};
+        std::atomic<bool>       pending{false};
+        std::atomic<bool>       completed{false};
         uint8_t*                buffer{nullptr};
         size_t                  buffer_size{0};
         RxDatagram              response{};

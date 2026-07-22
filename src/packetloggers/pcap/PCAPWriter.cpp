@@ -82,6 +82,12 @@ void PCAPWriter::close() {
             file_.write(reinterpret_cast<const char*>(writeBuffer_.data()), writeBuffer_.size());
             writeBuffer_.clear();
         }
+        // Flush the C++ stream buffer to the kernel. Note: this does not
+        // fsync the kernel page cache to disk — std::ofstream provides no
+        // portable way to obtain the underlying file descriptor for fsync.
+        // If crash-level durability is required, the caller should use an
+        // OS-level fsync on the file path after close().
+        file_.flush();
         file_.close();
     }
 }
@@ -103,6 +109,9 @@ bool PCAPWriter::flush() {
         writeBuffer_.clear();
     }
 
+    // Flush the C++ stream buffer to the kernel. Note: this does not
+    // fsync the kernel page cache to disk — std::ofstream provides no
+    // portable way to obtain the underlying file descriptor for fsync.
     file_.flush();
     return true;
 }

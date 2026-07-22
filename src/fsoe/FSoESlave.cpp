@@ -176,19 +176,23 @@ bool FSoESlave::attemptRecovery() {
 }
 
 void FSoESlave::transitionTo(uint8_t newState) {
+    // Invariant: caller must hold mutex_ (recursive). All state-correlated
+    // fields (stateEntryTimeMs_, lastError_, failSafeActive_, dataValid_)
+    // are written here under that lock so that readers observing state_ via
+    // the atomic also see a consistent snapshot of the related fields.
     uint8_t oldState = state_.load();
-    
+
     if (oldState == newState) {
         return;
     }
-    
+
     state_ = newState;
     stateEntryTimeMs_ = lastUpdateTimeMs_;
-    
+
     if (stateCallback_) {
         stateCallback_(oldState, newState);
     }
-    
+
     char msg[64];
     snprintf(msg, sizeof(msg), "State: %d -> %d", oldState, newState);
     logDiagnostic(ErrorCode::NoError, msg);

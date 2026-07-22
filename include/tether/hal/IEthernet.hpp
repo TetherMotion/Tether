@@ -83,7 +83,12 @@ struct RxFrameInfo {
 /**
  * @brief Callback for received frames
  * 
- * @param frame Pointer to frame data (including Ethernet header)
+ * @param frame Pointer to frame data (including Ethernet header).
+ *               **Lifetime contract:** the buffer pointed to by `frame` is
+ *               only valid for the duration of the callback. The HAL frees
+ *               or reuses it immediately after the callback returns. If the
+ *               receiver needs the data beyond the callback, it must copy
+ *               it into its own storage before returning.
  * @param length Frame length in bytes
  * @param info Frame metadata
  * @param userData User-provided context
@@ -184,7 +189,9 @@ public:
     
     /**
      * @brief Set callback for received frames
-     * @param callback Function to call on frame reception
+     * @param callback Function to call on frame reception. The `frame` buffer
+     *                  passed to the callback is only valid for the duration
+     *                  of the callback invocation — see RxCallback docs.
      * @param userData User context passed to callback
      */
     virtual void setRxCallback(RxCallback callback, void* userData = nullptr) = 0;

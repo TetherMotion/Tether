@@ -38,7 +38,6 @@
 #include <functional>
 #include <atomic>
 #include <memory>
-#include <mutex>
 
 #include "tether/platform/IPlatformTimer.hpp"
 #include "tether/hal/IThreading.hpp"
@@ -181,13 +180,16 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> pdo_enabled_{false};
 
-    // Legacy stats (combined view for backward compatibility)
-    mutable std::mutex pdo_stats_mutex_;
-    uint64_t pdo_cycle_count_{0};
-    uint64_t pdo_error_count_{0};
-
-    mutable std::mutex dc_stats_mutex_;
-    uint64_t dc_sync_count_{0};
+    // Legacy stats (combined view for backward compatibility).
+    // Atomic counters are used so the realtime PDO/DC threads can update them
+    // without taking a mutex (which would risk priority inversion against the
+    // application thread reading getStats()). Relaxed ordering is sufficient
+    // because each counter is independently monotonic; getStats() may observe
+    // a slightly inconsistent snapshot across counters, which is acceptable
+    // for diagnostics.
+    std::atomic<uint64_t> pdo_cycle_count_{0};
+    std::atomic<uint64_t> pdo_error_count_{0};
+    std::atomic<uint64_t> dc_sync_count_{0};
 };
 
 } // namespace EtherCAT

@@ -30,8 +30,8 @@ bool TransactionRouter::init()
 
     for (auto& s : slots_) {
         std::lock_guard<std::mutex> lock(s.mtx);
-        s.pending   = false;
-        s.completed = false;
+        s.pending.store(false, std::memory_order_relaxed);
+        s.completed.store(false, std::memory_order_relaxed);
         s.buffer    = nullptr;
         s.buffer_size = 0;
         s.response  = {};
@@ -54,8 +54,8 @@ void TransactionRouter::shutdown()
     // Wake up every pending waiter so it can exit
     for (auto& s : slots_) {
         std::lock_guard<std::mutex> lock(s.mtx);
-        if (s.pending) {
-            s.completed = true;  // let it see "completed" but result has success=false
+        if (s.pending.load(std::memory_order_relaxed)) {
+            s.completed.store(true, std::memory_order_relaxed);  // let it see "completed" but result has success=false
             s.cv.notify_all();
         }
     }
@@ -93,7 +93,7 @@ size_t TransactionRouter::routePacket(const RxDatagram& dgram)
 
     std::lock_guard<std::mutex> lock(slot.mtx);
 
-    if (!slot.pending) {
+    if (!slot.pending.load(std::memory_order_relaxed)) {
         stats_.packets_dropped++;
         return 0;
     }
@@ -106,7 +106,7 @@ size_t TransactionRouter::routePacket(const RxDatagram& dgram)
 
     // Fill response
     slot.response = dgram;
-    slot.completed = true;
+    slot.completed.store(true, std::memory_order_relaxed);
     stats_.packets_matched++;
     slot.cv.notify_one();
 
@@ -136,8 +136,8 @@ WaitResult TransactionRouter::sendAndWait(uint8_t idx,
     // 1. Mark slot as pending (under lock)
     {
         std::lock_guard<std::mutex> lock(slot.mtx);
-        slot.pending    = true;
-        slot.completed  = false;
+        slot.pending.store(true, std::memory_order_relaxed);
+        slot.completed.store(false, std::memory_order_relaxed);
         slot.buffer     = buffer;
         slot.buffer_size = buffer_size;
         slot.response   = {};
@@ -147,7 +147,7 @@ WaitResult TransactionRouter::sendAndWait(uint8_t idx,
     //    instantaneous response will be caught by routePacket().
     if (!send_fn()) {
         std::lock_guard<std::mutex> lock(slot.mtx);
-        slot.pending = false;
+        slot.pending.store(false, std::memory_order_relaxed);
         stats_.registration_failures++;
         return WaitResult::Timeout();
     }
@@ -159,7 +159,7 @@ WaitResult TransactionRouter::sendAndWait(uint8_t idx,
         bool got_it = slot.cv.wait_for(
             lock,
             std::chrono::milliseconds(timeout_ms),
-            [&] { return slot.completed || cancelled_.load(std::memory_order_acquire); });
+            [&] { return slot.completed.load(std::memory_order_relaxed) || cancelled_.load(std::memory_order_acquire); });
 
         if (got_it && !shutdown_.load(std::memory_order_acquire) &&
             !cancelled_.load(std::memory_order_acquire)) {
@@ -175,7 +175,7 @@ WaitResult TransactionRouter::sendAndWait(uint8_t idx,
             stats_.timeouts++;
         }
 
-        slot.pending    = false;
+        slot.pending.store(false, std::memory_order_relaxed);
         slot.buffer     = nullptr;
         slot.buffer_size = 0;
     }
@@ -206,9 +206,9 @@ WaitResult TransactionRouter::waitForPacket(const PacketFilter& filter,
         {
             std::lock_guard<std::mutex> lock(slot.mtx);
             // If not already pending, set it up
-            if (!slot.pending) {
-                slot.pending    = true;
-                slot.completed  = false;
+            if (!slot.pending.load(std::memory_order_relaxed)) {
+                slot.pending.store(true, std::memory_order_relaxed);
+                slot.completed.store(false, std::memory_order_relaxed);
                 slot.buffer     = buffer;
                 slot.buffer_size = buffer_size;
                 slot.response   = {};
@@ -222,7 +222,7 @@ WaitResult TransactionRouter::waitForPacket(const PacketFilter& filter,
             bool got_it = slot.cv.wait_for(
                 lock,
                 std::chrono::milliseconds(timeout_ms),
-                [&] { return slot.completed || cancelled_.load(std::memory_order_acquire); });
+                [&] { return slot.completed.load(std::memory_order_relaxed) || cancelled_.load(std::memory_order_acquire); });
 
             if (got_it && !shutdown_.load(std::memory_order_acquire) &&
                 !cancelled_.load(std::memory_order_acquire)) {
@@ -233,7 +233,7 @@ WaitResult TransactionRouter::waitForPacket(const PacketFilter& filter,
                 stats_.timeouts++;
             }
 
-            slot.pending    = false;
+            slot.pending.store(false, std::memory_order_relaxed);
             slot.buffer     = nullptr;
             slot.buffer_size = 0;
         }
@@ -257,10 +257,10 @@ size_t TransactionRouter::preRegisterWaiter(const PacketFilter& filter,
     std::lock_guard<std::mutex> lock(slot.mtx);
 
     // Reject if slot is already in use (pending and not yet completed)
-    if (slot.pending && !slot.completed) return kNumSlots;
+    if (slot.pending.load(std::memory_order_relaxed) && !slot.completed.load(std::memory_order_relaxed)) return kNumSlots;
 
-    slot.pending    = true;
-    slot.completed  = false;
+    slot.pending.store(true, std::memory_order_relaxed);
+    slot.completed.store(false, std::memory_order_relaxed);
     slot.buffer     = buffer;
     slot.buffer_size = buffer_size;
     slot.response   = {};
@@ -284,7 +284,7 @@ WaitResult TransactionRouter::waitForPreRegistered(size_t slot_idx, uint32_t tim
         bool got_it = slot.cv.wait_for(
             lock,
             std::chrono::milliseconds(timeout_ms),
-            [&] { return slot.completed || cancelled_.load(std::memory_order_acquire); });
+            [&] { return slot.completed.load(std::memory_order_relaxed) || cancelled_.load(std::memory_order_acquire); });
 
         if (got_it && !shutdown_.load(std::memory_order_acquire) &&
             !cancelled_.load(std::memory_order_acquire)) {
@@ -295,7 +295,7 @@ WaitResult TransactionRouter::waitForPreRegistered(size_t slot_idx, uint32_t tim
             stats_.timeouts++;
         }
 
-        slot.pending    = false;
+        slot.pending.store(false, std::memory_order_relaxed);
         slot.buffer     = nullptr;
         slot.buffer_size = 0;
     }
@@ -309,8 +309,8 @@ void TransactionRouter::cancelPreRegistered(size_t slot_idx)
 
     auto& slot = slots_[slot_idx];
     std::lock_guard<std::mutex> lock(slot.mtx);
-    slot.pending    = false;
-    slot.completed  = false;
+    slot.pending.store(false, std::memory_order_relaxed);
+    slot.completed.store(false, std::memory_order_relaxed);
     slot.buffer     = nullptr;
     slot.buffer_size = 0;
 }
@@ -322,10 +322,8 @@ void TransactionRouter::cancelPreRegistered(size_t slot_idx)
 bool TransactionRouter::hasWaiters() const
 {
     for (const auto& s : slots_) {
-        // Note: we don't lock here (diagnostic only).
-        // `pending` is modified under the slot mutex but reading a bool
-        // is inherently safe for diagnostic purposes.
-        if (s.pending) return true;
+        // Atomic relaxed load — safe for lock-free diagnostic reads.
+        if (s.pending.load(std::memory_order_relaxed)) return true;
     }
     return false;
 }
@@ -334,7 +332,7 @@ size_t TransactionRouter::waiterCount() const
 {
     size_t count = 0;
     for (const auto& s : slots_) {
-        if (s.pending) count++;
+        if (s.pending.load(std::memory_order_relaxed)) count++;
     }
     return count;
 }

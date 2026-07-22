@@ -15,6 +15,10 @@ namespace Motion {
 
 void TrapezoidalProfileGenerator::start() {
     calculateProfile();
+    if (m_state == GeneratorState::Error) {
+        // calculateProfile() detected invalid configuration; do not start.
+        return;
+    }
     m_elapsed_time = 0;
     m_phase = Phase::Accel;
     m_current_position = m_start_position;
@@ -36,6 +40,20 @@ void TrapezoidalProfileGenerator::calculateProfile() {
     float v_max = static_cast<float>(m_max_velocity);
     float a = static_cast<float>(m_acceleration);
     float d = static_cast<float>(m_deceleration > 0 ? m_deceleration : m_acceleration);
+    
+    // Guard against division by zero when acceleration/velocity are unset or
+    // misconfigured. Without this, v_max / a produces Inf/NaN that propagates
+    // into m_total_time and downstream motion. Mark the generator as Error so
+    // callers can detect the misconfiguration instead of producing garbage.
+    if (v_max <= 0.0f || a <= 0.0f || d <= 0.0f) {
+        m_state = GeneratorState::Error;
+        m_accel_time = 0;
+        m_cruise_time = 0;
+        m_decel_time = 0;
+        m_total_time = 0;
+        m_peak_velocity = 0;
+        return;
+    }
     
     // Time to accelerate to max velocity
     float t_accel = v_max / a;
@@ -125,6 +143,10 @@ void TrapezoidalProfileGenerator::update(float dt_ms) {
 
 void SCurveProfileGenerator::start() {
     calculateProfile();
+    if (m_state == GeneratorState::Error) {
+        // calculateProfile() detected invalid configuration; do not start.
+        return;
+    }
     m_elapsed_time = 0;
     m_current_phase = 0;
     m_position = static_cast<float>(m_start_position);
@@ -149,6 +171,16 @@ void SCurveProfileGenerator::calculateProfile() {
     float v_max = m_max_velocity;
     float a_max = m_max_acceleration;
     float j_max = m_max_jerk;
+    
+    // Guard against division by zero when jerk/acceleration/velocity are unset
+    // or misconfigured. Without this, a_max / j_max and later divisions
+    // produce Inf/NaN that propagates into m_total_time and downstream motion.
+    if (v_max <= 0.0f || a_max <= 0.0f || j_max <= 0.0f) {
+        m_state = GeneratorState::Error;
+        for (int i = 0; i < 8; i++) m_t[i] = 0;
+        m_total_time = 0;
+        return;
+    }
     
     // Time for jerk phase
     float t_j = a_max / j_max;
