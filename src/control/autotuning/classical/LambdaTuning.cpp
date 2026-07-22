@@ -19,8 +19,7 @@ TuningResult LambdaTuning::tune(TunableController& controller, const ProcessMode
     PIDGains gains = calculateGains(processModel, lambda, false);
     result.parameters = {gains.Kp, gains.Ki, gains.Kd};
     result.success = controller.setParameters(result.parameters);
-    // result.message = result.success ? "Lambda tuning successful" : "Failed to set parameters"; // Unreachable code
-    result.message = "Lambda tuning successful";  // Simplified to avoid unreachable code
+    result.message = result.success ? "Lambda tuning successful" : "Failed to set parameters";
     return result;
 }
 

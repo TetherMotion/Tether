@@ -38,6 +38,10 @@ double AstromHagglundRelay::update(double measured, double reference, double con
             double avgPeak = std::accumulate(m_peakValues.begin(), m_peakValues.end(), 0.0) / m_peakValues.size();
             double avgValley = std::accumulate(m_valleyValues.begin(), m_valleyValues.end(), 0.0) / m_valleyValues.size();
             double amplitude = (avgPeak - avgValley) / 2.0;
+            if (std::abs(amplitude) < 1e-10) {
+                m_state = State::Failed;
+                return m_relayOutput;
+            }
             double totalPeriod = 0;
             for (size_t i = 1; i < m_peakTimes.size(); ++i) totalPeriod += m_peakTimes[i] - m_peakTimes[i - 1];
             m_Tu = totalPeriod / (m_peakTimes.size() - 1);

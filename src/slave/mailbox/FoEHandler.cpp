@@ -378,7 +378,11 @@ private:
     }
     
     bool sendDataPacket(uint8_t* response, size_t& responseLength) {
-        size_t maxDataSize = 512 - 6;  // Adjust based on mailbox size
+        // responseLength on input holds the response buffer capacity.
+        // Use it instead of the hardcoded 512 to prevent buffer overflow.
+        size_t bufCap = responseLength;
+        if (bufCap < 6) return false;
+        size_t maxDataSize = bufCap - 6;
         size_t remaining = transfer_.data.size() - transfer_.offset;
         size_t dataLen = std::min(remaining, maxDataSize);
         

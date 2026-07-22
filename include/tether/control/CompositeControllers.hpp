@@ -35,14 +35,21 @@
  * CascadeController cascade;
  * cascade.setOuterController(&positionPID);  // Slow position loop
  * cascade.setInnerController(&velocityPID);  // Fast velocity loop
- * 
+ *
  * ControllerInput input;
  * input.reference = targetPosition;
  * input.measured = currentPosition;
  * input.auxMeasured[0] = currentVelocity;  // Inner measurement
- * 
+ *
  * auto output = cascade.compute(input);
  * ```
+ *
+ * @warning Composite controllers store non-owning raw pointers to child
+ *          controllers. The caller is responsible for ensuring that child
+ *          controllers outlive the composite. Do NOT reconfigure (call
+ *          setOuterController/setInnerController/etc.) while compute() is
+ *          running from another thread — composite controllers are not
+ *          thread-safe for concurrent reconfiguration + computation.
  * 
  * ## Feedforward Control
  * 

@@ -248,13 +248,15 @@ private:
     bool handleReadRequest(uint8_t driveNo, uint16_t idn, uint8_t elements,
                           const uint8_t* data, size_t length,
                           uint8_t* response, size_t& responseLength) {
+        // responseLength on input holds the response buffer capacity.
+        size_t bufCap = responseLength;
         auto it = idnMap_.find(idn);
         if (it == idnMap_.end()) {
             return sendError(idn, SOE_ERR_NO_IDN, response, responseLength);
         }
-        
+
         SoEIDN& entry = it->second;
-        
+
         // Build response
         size_t offset = 0;
         response[offset++] = SOE_OP_READ_RESPONSE;
@@ -263,7 +265,7 @@ private:
         response[offset++] = idn & 0xFF;
         response[offset++] = (idn >> 8) & 0xFF;
         response[offset++] = 0;  // Reserved
-        
+
         // Add requested elements
         if (elements & SOE_ELEM_DATA) {
             // Data length header (2 bytes)
@@ -273,72 +275,93 @@ private:
             } else {
                 value = entry.data;
             }
-            
+
             uint16_t dataLen = value.size();
+            if (offset + 2 + dataLen > bufCap) {
+                return sendError(idn, SOE_ERR_COMMAND, response, responseLength);
+            }
             response[offset++] = dataLen & 0xFF;
             response[offset++] = (dataLen >> 8) & 0xFF;
-            
+
             memcpy(response + offset, value.data(), value.size());
             offset += value.size();
         }
-        
+
         if (elements & SOE_ELEM_NAME) {
             if (entry.name.empty()) {
                 return sendError(idn, SOE_ERR_NO_NAME, response, responseLength);
             }
-            
+
             uint16_t nameLen = entry.name.length();
+            if (offset + 2 + nameLen > bufCap) {
+                return sendError(idn, SOE_ERR_COMMAND, response, responseLength);
+            }
             response[offset++] = nameLen & 0xFF;
             response[offset++] = (nameLen >> 8) & 0xFF;
             memcpy(response + offset, entry.name.c_str(), nameLen);
             offset += nameLen;
         }
-        
+
         if (elements & SOE_ELEM_ATTRIBUTE) {
+            if (offset + 4 > bufCap) {
+                return sendError(idn, SOE_ERR_COMMAND, response, responseLength);
+            }
             response[offset++] = entry.attribute & 0xFF;
             response[offset++] = (entry.attribute >> 8) & 0xFF;
             response[offset++] = (entry.attribute >> 16) & 0xFF;
             response[offset++] = (entry.attribute >> 24) & 0xFF;
         }
-        
+
         if (elements & SOE_ELEM_UNIT) {
             if (entry.unit.empty()) {
+                if (offset + 2 > bufCap) {
+                    return sendError(idn, SOE_ERR_COMMAND, response, responseLength);
+                }
                 // No unit - send empty
                 response[offset++] = 0;
                 response[offset++] = 0;
             } else {
                 uint16_t unitLen = entry.unit.length();
+                if (offset + 2 + unitLen > bufCap) {
+                    return sendError(idn, SOE_ERR_COMMAND, response, responseLength);
+                }
                 response[offset++] = unitLen & 0xFF;
                 response[offset++] = (unitLen >> 8) & 0xFF;
                 memcpy(response + offset, entry.unit.c_str(), unitLen);
                 offset += unitLen;
             }
         }
-        
+
         if (elements & SOE_ELEM_MIN) {
             if (entry.minValue.empty()) {
                 return sendError(idn, SOE_ERR_NO_MIN, response, responseLength);
             }
-            
+
             uint16_t minLen = entry.minValue.size();
+            if (offset + 2 + minLen > bufCap) {
+                return sendError(idn, SOE_ERR_COMMAND, response, responseLength);
+            }
             response[offset++] = minLen & 0xFF;
             response[offset++] = (minLen >> 8) & 0xFF;
             memcpy(response + offset, entry.minValue.data(), minLen);
             offset += minLen;
         }
-        
+
         if (elements & SOE_ELEM_MAX) {
             if (entry.maxValue.empty()) {
                 return sendError(idn, SOE_ERR_NO_MAX, response, responseLength);
             }
-            
+
             uint16_t maxLen = entry.maxValue.size();
+            if (offset + 2 + maxLen > bufCap) {
+                return sendError(idn, SOE_ERR_COMMAND, response, responseLength);
+            }
             response[offset++] = maxLen & 0xFF;
             response[offset++] = (maxLen >> 8) & 0xFF;
             memcpy(response + offset, entry.maxValue.data(), maxLen);
             offset += maxLen;
         }
-        
+
         responseLength = offset;
         return true;
     }

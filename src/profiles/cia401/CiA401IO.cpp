@@ -315,21 +315,21 @@ void IOModule::processTxPDO(const uint8_t* data, size_t len) {
         case PDOMappingPreset::DigitalOnly:
         case PDOMappingPreset::Digital16:
         case PDOMappingPreset::Digital32:
-            processDigitalInputs(data, 0);
+            processDigitalInputs(data, 0, len);
             break;
             
         case PDOMappingPreset::AnalogOnly:
         case PDOMappingPreset::AnalogHighRes:
-            processAnalogInputs(data, 0);
+            processAnalogInputs(data, 0, len);
             break;
             
         case PDOMappingPreset::Combined:
         case PDOMappingPreset::Full:
         case PDOMappingPreset::Minimal:
-            processDigitalInputs(data, 0);
+            processDigitalInputs(data, 0, len);
             offset = digital_input_state_.size();
             if (offset < len) {
-                processAnalogInputs(data, offset);
+                processAnalogInputs(data, offset, len);
             }
             break;
             
@@ -396,15 +396,15 @@ void IOModule::update() {
     prev_analog_input_state_ = analog_input_state_;
 }
 
-void IOModule::processDigitalInputs(const uint8_t* data, size_t offset) {
-    size_t copy_len = std::min(digital_input_state_.size(), 
-                               static_cast<size_t>(16) - offset);
+void IOModule::processDigitalInputs(const uint8_t* data, size_t offset, size_t len) {
+    if (offset >= len) return;
+    size_t copy_len = std::min(digital_input_state_.size(), len - offset);
     memcpy(digital_input_state_.data(), data + offset, copy_len);
 }
 
-void IOModule::processAnalogInputs(const uint8_t* data, size_t offset) {
+void IOModule::processAnalogInputs(const uint8_t* data, size_t offset, size_t len) {
     size_t ai_count = analog_input_state_.size();
-    for (size_t i = 0; i < ai_count && (offset + i * 2 + 1) < 32; i++) {
+    for (size_t i = 0; i < ai_count && (offset + i * 2 + 1) < len; i++) {
         analog_input_state_[i] = static_cast<int16_t>(
             data[offset + i * 2] | (data[offset + i * 2 + 1] << 8));
     }

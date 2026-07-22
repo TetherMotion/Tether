@@ -226,6 +226,7 @@ struct Quaternion {
     
     Quaternion normalized() const {
         float m = magnitude();
+        if (m < 1e-9f) return Quaternion(1, 0, 0, 0);  // Identity if zero
         return Quaternion(w/m, x/m, y/m, z/m);
     }
     

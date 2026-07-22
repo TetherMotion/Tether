@@ -100,7 +100,9 @@
  * - Local parameters stack per call level
  * 
  * ### Thread Safety
- * - Global parameters are protected by mutex
+ * - VariableSystem is NOT thread-safe. All access must be from a single
+ *   thread (typically the G-code execution thread). If multi-threaded
+ *   access is needed, the caller must provide external synchronization.
  * - Local parameters are per-execution context
  * 
  * @see GCodeParser
