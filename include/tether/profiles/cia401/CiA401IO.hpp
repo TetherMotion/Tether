@@ -775,8 +775,8 @@ private:
     bool setupPDOMapping_Combined();
     bool setupPDOMapping_Full();
     
-    void processDigitalInputs(const uint8_t* data, size_t offset);
-    void processAnalogInputs(const uint8_t* data, size_t offset);
+    void processDigitalInputs(const uint8_t* data, size_t offset, size_t len);
+    void processAnalogInputs(const uint8_t* data, size_t offset, size_t len);
     void checkDigitalInputChanges();
     void checkAnalogThresholds();
     

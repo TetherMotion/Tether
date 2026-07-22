@@ -664,19 +664,20 @@ private:
     
     bool processGetObjDesc(const uint8_t* data, size_t length,
                             uint8_t* response, size_t& responseLength) {
+        size_t bufCap = responseLength;
         uint16_t index = data[2] | (data[3] << 8);
-        
+
         if (!objectDictionary_->hasObject(index, 0)) {
             return false;
         }
-        
+
         ODEntryInfo info;
         if (!objectDictionary_->getObjectInfo(index, 0, info)) {
             return false;
         }
-        
+
         uint8_t maxSub = objectDictionary_->getSubindexCount(index);
-        
+
         response[0] = SDO_INFO_GET_OBJ_DESC_RES;
         response[1] = 0;
         response[2] = index & 0xFF;
@@ -684,30 +685,31 @@ private:
         response[4] = static_cast<uint8_t>(info.dataType);
         response[5] = maxSub;
         response[6] = 0x07;  // Object code (VAR)
-        
-        // Copy name
-        size_t nameLen = std::min(info.name.size(), size_t(240));
+
+        // Copy name — clamp to both buffer capacity and 240
+        size_t nameLen = std::min({info.name.size(), size_t(240), bufCap > 7 ? bufCap - 7 : size_t(0)});
         std::memcpy(response + 7, info.name.c_str(), nameLen);
-        
+
         responseLength = 7 + nameLen;
         return true;
     }
     
     bool processGetEntryDesc(const uint8_t* data, size_t length,
                               uint8_t* response, size_t& responseLength) {
+        size_t bufCap = responseLength;
         uint16_t index = data[2] | (data[3] << 8);
         uint8_t subindex = data[4];
         uint8_t valueInfo = data[5];
-        
+
         if (!objectDictionary_->hasObject(index, subindex)) {
             return false;
         }
-        
+
         ODEntryInfo info;
         if (!objectDictionary_->getObjectInfo(index, subindex, info)) {
             return false;
         }
-        
+
         response[0] = SDO_INFO_GET_ENTRY_DESC_RES;
         response[1] = 0;
         response[2] = index & 0xFF;
@@ -718,11 +720,11 @@ private:
         response[7] = info.bitLength & 0xFF;
         response[8] = (info.bitLength >> 8) & 0xFF;
         response[9] = info.accessType;
-        
-        // Name
-        size_t nameLen = std::min(info.name.size(), size_t(236));
+
+        // Name — clamp to both buffer capacity and 236
+        size_t nameLen = std::min({info.name.size(), size_t(236), bufCap > 10 ? bufCap - 10 : size_t(0)});
         std::memcpy(response + 10, info.name.c_str(), nameLen);
-        
+
         responseLength = 10 + nameLen;
         return true;
     }

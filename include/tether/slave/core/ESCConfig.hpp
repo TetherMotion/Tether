@@ -31,7 +31,7 @@ struct ESCConfig {
     EtherCAT::ESC::ESCFeatureReg features = std::bit_cast<EtherCAT::ESC::ESCFeatureReg>(
         static_cast<uint16_t>(ESCFeature::FMMU | ESCFeature::SyncManager | ESCFeature::DC));
 
-    uint16_t processDataRamSize() const { return ramSizeKB * 1024; }
+    uint32_t processDataRamSize() const { return static_cast<uint32_t>(ramSizeKB) * 1024; }
 };
 
 }} // namespace EtherCAT::slave

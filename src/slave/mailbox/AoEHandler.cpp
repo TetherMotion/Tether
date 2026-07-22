@@ -339,6 +339,8 @@ private:
     
     bool handleRead(const AmsHeader& request, const uint8_t* data, size_t length,
                    uint8_t* response, size_t& responseLength) {
+        // responseLength on input holds the response buffer capacity.
+        size_t bufCap = responseLength;
         if (length < sizeof(AdsReadRequest)) {
             return sendError(ADS_ERR_INTERNAL, request, response, responseLength);
         }
@@ -376,7 +378,12 @@ private:
         // Build response
         AmsHeader respHeader = buildResponseHeader(request, ADS_CMD_READ);
         respHeader.cbData = sizeof(uint32_t) + sizeof(uint32_t) + readData.size();
-        
+
+        size_t totalNeeded = sizeof(respHeader) + sizeof(uint32_t) + sizeof(uint32_t) + readData.size();
+        if (totalNeeded > bufCap) {
+            return sendError(ADS_ERR_INTERNAL, request, response, responseLength);
+        }
+
         memcpy(response, &respHeader, sizeof(respHeader));
         
         size_t offset = sizeof(respHeader);

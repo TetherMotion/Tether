@@ -17,8 +17,7 @@ TuningResult AMIGOMethod::tune(TunableController& controller, const ProcessModel
     PIDGains gains = calculateGains(processModel, PIDForm::Parallel);
     result.parameters = {gains.Kp, gains.Ki, gains.Kd};
     result.success = controller.setParameters(result.parameters);
-    // result.message = result.success ? "AMIGO tuning successful" : "Failed to set parameters"; // Unreachable code
-    result.message = "AMIGO tuning successful";  // Simplified to avoid unreachable code
+    result.message = result.success ? "AMIGO tuning successful" : "Failed to set parameters";
     return result;
 }
 

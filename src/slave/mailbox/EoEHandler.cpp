@@ -419,48 +419,63 @@ private:
     
     bool handleGetIPParam(uint8_t* response, size_t& responseLength) {
         stats_.ipParamRequests++;
-        
+
+        // responseLength on input holds the response buffer capacity.
+        size_t bufCap = responseLength;
+        if (bufCap < 28) return false;  // Need at least header + fixed fields
+
         // Build response header
         response[0] = (EOE_TYPE_GET_IP_PARAM_RESP << 4);
         response[1] = 0;
         response[2] = EOE_RESULT_SUCCESS & 0xFF;
         response[3] = (EOE_RESULT_SUCCESS >> 8) & 0xFF;
-        
+
         // Calculate flags
         uint16_t flags = 0;
         size_t offset = 6;
-        
+
         // MAC address
         flags |= 0x01;
         memcpy(response + offset, ipParams_.macAddress.data(), 6);
         offset += 6;
-        
+
         // IP address
         flags |= 0x02;
         memcpy(response + offset, ipParams_.ipAddress.data(), 4);
         offset += 4;
-        
+
         // Subnet mask
         flags |= 0x04;
         memcpy(response + offset, ipParams_.subnetMask.data(), 4);
         offset += 4;
-        
+
         // Gateway
         flags |= 0x08;
         memcpy(response + offset, ipParams_.gateway.data(), 4);
         offset += 4;
-        
+
         // DNS server
         flags |= 0x10;
         memcpy(response + offset, ipParams_.dnsServer.data(), 4);
         offset += 4;
-        
+
         // DNS name
         if (!ipParams_.dnsName.empty()) {
             flags |= 0x20;
-            memcpy(response + offset, ipParams_.dnsName.c_str(), 
-                   ipParams_.dnsName.length() + 1);
-            offset += ipParams_.dnsName.length() + 1;
+            size_t nameLen = ipParams_.dnsName.length() + 1;
+            if (offset + nameLen > bufCap) {
+                // Truncate DNS name to fit buffer
+                nameLen = bufCap - offset;
+                if (nameLen > 0) {
+                    memcpy(response + offset, ipParams_.dnsName.c_str(), nameLen);
+                    // Ensure null termination if space allows
+                    response[offset + nameLen - 1] = 0;
+                }
+                offset += nameLen;
+            } else {
+                memcpy(response + offset, ipParams_.dnsName.c_str(), nameLen);
+                offset += nameLen;
+            }
         }
         
         // Write flags

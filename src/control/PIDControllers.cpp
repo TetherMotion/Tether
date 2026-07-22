@@ -211,6 +211,12 @@ void PIDController::autoTune(double processGain, double timeConstant,
     double K = processGain;
     double tau = timeConstant;
     double theta = deadTime;
+
+    // Guard against division by zero — NaN/Inf in gains would propagate
+    // through the control loop and could damage machinery.
+    if (std::abs(K) < 1e-10 || std::abs(theta) < 1e-10) {
+        return;
+    }
     
     switch (method) {
         case TuningMethod::ZieglerNichols:

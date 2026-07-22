@@ -968,6 +968,12 @@ void SlaveCore::processMailboxOut() {
                         size_t responseLen = sizeof(responseBuf);
                         if (handler->processRequest(mailboxOut_.data(), sm.length,
                                                      responseBuf, responseLen)) {
+                            // Clamp responseLen to buffer capacity as a safety
+                            // net — handlers should respect the input value of
+                            // responseLen but this prevents overflow if they don't.
+                            if (responseLen > sizeof(responseBuf)) {
+                                responseLen = sizeof(responseBuf);
+                            }
                             std::memcpy(mailboxIn_.data(), responseBuf,
                                        std::min(responseLen, mailboxIn_.size()));
                             mailboxInFull_.store(true);
