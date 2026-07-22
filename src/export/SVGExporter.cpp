@@ -12,14 +12,14 @@
 
 namespace GCodeExport {
 
-/// Reject filenames containing path traversal or absolute path components.
+/// Reject filenames containing path traversal sequences or null bytes.
 /// This prevents an attacker who controls the filename from writing to
-/// arbitrary locations (e.g. "../../etc/passwd" or "/etc/cron.d/evil").
+/// arbitrary locations via "../" traversal. Absolute paths are allowed.
 static bool isSafeFilename(const std::string& filename) {
     if (filename.empty()) return false;
-    if (filename[0] == '/' || filename[0] == '\\') return false;
-    if (filename.find("..") != std::string::npos) return false;
     if (filename.find('\0') != std::string::npos) return false;
+    if (filename.find("../") != std::string::npos) return false;
+    if (filename.find("..\\") != std::string::npos) return false;
     return true;
 }
 

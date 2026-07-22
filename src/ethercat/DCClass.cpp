@@ -458,13 +458,16 @@ bool EtherCATDC::configureSyncSignals(uint16_t slave_index) {
 
 bool EtherCATDC::sendSyncFrame() {
     const uint64_t master_ns = getMasterTimeNs();
+    bool all_ok = true;
     for (uint16_t i = 0; i < slave_count_; i++) {
         if (slaves_[i].dc_supported && slaves_[i].dc_active) {
-            return transport_.sendSyncDatagram(i, toUInt16(DCRegisters::DCSysTime),
-                                                &master_ns, sizeof(master_ns));
+            if (!transport_.sendSyncDatagram(i, toUInt16(DCRegisters::DCSysTime),
+                                              &master_ns, sizeof(master_ns))) {
+                all_ok = false;
+            }
         }
     }
-    return true;
+    return all_ok;
 }
 
 void EtherCATDC::readSyncConfig(uint16_t slave_index) {

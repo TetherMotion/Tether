@@ -74,7 +74,7 @@ ControllerOutput FeedforwardController::computeImpl(const ControllerInput& input
     } else if (m_useSimpleFF) {
         ff = m_ffGain * input.reference;
         ff += m_velFFGain * input.referenceDerivative;
-        ff += m_accelFFGain * input.referenceDerivative;  // Could use 2nd derivative if available
+        ff += m_accelFFGain * input.referenceAccel;
     }
     
     // Calculate feedback
