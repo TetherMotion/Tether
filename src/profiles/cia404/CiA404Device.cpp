@@ -406,8 +406,10 @@ bool MeasuringDevice::setInputScaling(uint8_t channel, int32_t raw_min, int32_t 
     
     auto& cfg = input_configs_[channel - 1];
     
-    // Calculate Q16 scale factor
-    int64_t scale = ((int64_t)(eng_max - eng_min) << 16) / (raw_max - raw_min);
+    // Calculate Q16 scale factor (cast before subtraction to prevent int32 overflow)
+    int64_t eng_span = static_cast<int64_t>(eng_max) - static_cast<int64_t>(eng_min);
+    int64_t raw_span = static_cast<int64_t>(raw_max) - static_cast<int64_t>(raw_min);
+    int64_t scale = (eng_span << 16) / raw_span;
     cfg.scaling_factor = static_cast<int32_t>(scale);
     cfg.offset = eng_min - ((raw_min * scale) >> 16);
     

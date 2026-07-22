@@ -219,8 +219,42 @@ void SCurveProfileGenerator::calculateProfile() {
     if (cruise_distance > 0) {
         m_t[3] = cruise_distance / v_max;
     } else {
+        // Cruise distance is negative: the acceleration/deceleration phases
+        // alone would overshoot the target. Recalculate t_a so that the
+        // acceleration + deceleration phases exactly cover abs_distance.
+        // Solve: 2 * (2*d_j + a_max * t_a * (t_j + 0.5*t_a)) = abs_distance
+        // => a_max * t_a^2 + 2*a_max*t_j * t_a + (4*d_j - abs_distance) = 0
+        // => t_a = -t_j + sqrt(t_j^2 + (abs_distance - 4*d_j) / a_max)
         m_t[3] = 0;
-        // Would need to reduce max velocity - simplified for now
+        if (abs_distance > 4.0f * d_j) {
+            float discriminant = t_j * t_j + (abs_distance - 4.0f * d_j) / a_max;
+            if (discriminant > 0.0f) {
+                t_a = -t_j + std::sqrt(discriminant);
+                // Recalculate phase times and distances with reduced t_a
+                m_t[1] = t_a;
+                m_t[5] = t_a;
+                accel_distance = 2.0f * d_j + a_max * t_a * (t_j + 0.5f * t_a);
+                decel_distance = accel_distance;
+            }
+        } else {
+            // Distance too short to even complete jerk phases.
+            // Scale t_j down proportionally so jerk phases cover the distance.
+            // 4*d_j_scaled = abs_distance => t_j_scaled = t_j * cbrt(abs_distance / (4*d_j))
+            if (d_j > 0.0f) {
+                float scale = std::cbrt(abs_distance / (4.0f * d_j));
+                t_j *= scale;
+                t_a = 0;
+                m_t[0] = t_j;
+                m_t[2] = t_j;
+                m_t[4] = t_j;
+                m_t[6] = t_j;
+                m_t[1] = 0;
+                m_t[5] = 0;
+                d_j = j_max * t_j * t_j * t_j / 6.0f;
+                accel_distance = 2.0f * d_j;
+                decel_distance = accel_distance;
+            }
+        }
     }
     
     m_total_time = 0;

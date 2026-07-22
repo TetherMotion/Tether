@@ -303,6 +303,7 @@ struct ControllerInput {
     
     // Optional extended inputs
     double referenceDerivative{0.0};    ///< Derivative of reference (for 2DOF)
+    double referenceAccel{0.0};         ///< Second derivative of reference (for acceleration feedforward)
     double feedforward{0.0};            ///< Feedforward term
     double disturbance{0.0};            ///< Measured disturbance
     
