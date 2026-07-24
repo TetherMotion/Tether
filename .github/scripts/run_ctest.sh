@@ -45,12 +45,12 @@ echo "=== Failed Test Output ==="
 #   - "Internal ctest changing into directory: ..."
 #   - "Test project ..."
 #   - "          Start    N: TestName"
-#   - "    N/M Test    #K: TestName ... Passed/Failed ... X sec"
+#   - "N/M Test    #K: TestName ... Passed/Failed ... X sec"  (with or without leading whitespace)
 # Keep everything else (gtest [ RUN ]/[ OK ]/[ FAILED ] blocks, ASAN errors,
 # summary lines).
 grep -v -E "^(Internal ctest|Test project)" "$FULL_LOG" | \
-    grep -v -E "^[[:space:]]+Start[[:space:]]+[0-9]+:" | \
-    grep -v -E "^[[:space:]]+[0-9]+/[0-9]+[[:space:]]+Test[[:space:]]" | \
+    grep -v -E "^[[:space:]]*Start[[:space:]]+[0-9]+:" | \
+    grep -v -E "^[[:space:]]*[0-9]+/[0-9]+[[:space:]]+Test[[:space:]]" | \
     grep -v "^[[:space:]]*$"
 
 echo ""
