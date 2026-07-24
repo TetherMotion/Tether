@@ -196,8 +196,8 @@ protected:
             p.description = "Sensor temp";
             p.group = "sensors";
             p.valueType = ValueType::F32;
-            p.readFn = [this](void* d) { std::memcpy(d, &temperature_, 4); };
-            p.writeFn = [this](const void* s) { std::memcpy(&temperature_, s, 4); };
+            p.readFn = [this](void* d) { float v = temperature_.load(std::memory_order_relaxed); std::memcpy(d, &v, 4); };
+            p.writeFn = [this](const void* s) { float v; std::memcpy(&v, s, 4); temperature_.store(v, std::memory_order_relaxed); };
             registry_.addParam(std::move(p));
         }
     }
@@ -253,7 +253,7 @@ protected:
     std::string deviceName_ = "TestDevice";
     StructDescriptor structDesc_;
     float vec3_[3] = {1.0f, 2.0f, 3.0f};
-    float temperature_ = 25.0f;
+    std::atomic<float> temperature_{25.0f};
 
     uint64_t fakeTimestamp_ = 1000000;
     TimestampFn tsFn_ = [this]() -> uint64_t { return fakeTimestamp_++; };
@@ -1121,7 +1121,7 @@ TEST_F(SessionIntegrationTest, StreamOnChange) {
 
     // Wait a bit, then change the value
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
-    temperature_ = 30.0f;
+    temperature_.store(30.0f, std::memory_order_relaxed);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
