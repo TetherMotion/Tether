@@ -25,6 +25,7 @@
 #include <atomic>
 #include <chrono>
 #include <map>
+#include <optional>
 #include <vector>
 
 namespace EtherCAT {
@@ -46,7 +47,13 @@ class ICoEReadTransaction {
 public:
     virtual ~ICoEReadTransaction() = default;
     virtual const CoETransactionBase& base() const = 0;
+    // Performs the SDO upload and stashes the result on the transaction WITHOUT
+    // fulfilling the promise, so the worker can clear its in-flight flag before
+    // deliver() wakes the caller.
     virtual void execute(class CoEManager& mgr) = 0;
+    // Fulfills the promise with the result stashed by execute(). No-op if
+    // execute() did not produce a result (e.g. it threw).
+    virtual void deliver() = 0;
     virtual void fail(CoEError err) = 0;
 };
 
@@ -287,11 +294,17 @@ public:
 
     const CoETransactionBase& base() const override { return txn_; }
     void execute(CoEManager& mgr) override;
+    void deliver() override {
+        if (!result_) return;
+        txn_.promise.set_value(std::move(*result_));
+        result_.reset();
+    }
     void fail(CoEError err) override {
         txn_.promise.set_value(std::unexpected(err));
     }
 
     CoEReadTransaction<T> txn_;
+    std::optional<CoEResult<T>> result_;
 };
 
 template<typename T>
