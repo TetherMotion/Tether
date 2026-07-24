@@ -62,13 +62,14 @@ static std::vector<uint8_t> slipReceive(ITransport* tp, uint32_t timeoutMs = 500
 }
 
 /// Send a GetParam request and expect a response — proves the session is alive.
-static bool verifySessionAlive(ITransport* client, uint64_t paramId = 1) {
+static bool verifySessionAlive(ITransport* client, uint64_t paramId = 1,
+                               uint32_t timeoutMs = 2000) {
     uint8_t msg[9];
     BufWriter w(msg, sizeof(msg));
     w.putU8(static_cast<uint8_t>(MessageType::GetParamReq));
     w.putU64(paramId);
     slipSend(client, msg, w.pos);
-    auto resp = slipReceive(client, 2000);
+    auto resp = slipReceive(client, timeoutMs);
     if (resp.empty()) return false;
     return resp[0] == static_cast<uint8_t>(MessageType::GetParamResp);
 }
@@ -84,6 +85,32 @@ static bool waitForSessionAlive(ITransport* client, uint64_t timeoutMs = 3000,
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
     return false;
+}
+
+/// Wait until the server's active session count reaches the expected value.
+/// Replaces fixed 600ms sleeps with a poll that exits as soon as cleanup
+/// completes (typically <50ms).
+static void waitSessionCount(Server& server, size_t expected,
+                             uint64_t timeoutMs = 2000) {
+    auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(timeoutMs);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (server.activeSessionCount() == expected) return;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
+
+/// Wait until a client can no longer communicate (i.e. the server has
+/// rejected or disconnected it).  Replaces fixed 600ms sleeps in tests
+/// that verify a client is rejected by maxClients enforcement.
+static void waitClientDead(ITransport* client, uint64_t timeoutMs = 2000) {
+    auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(timeoutMs);
+    while (std::chrono::steady_clock::now() < deadline) {
+        // Use a short 100ms probe so we retry quickly instead of blocking 2s
+        if (!verifySessionAlive(client, 1, 100)) return;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
 }
 
 // ===========================================================================
@@ -179,7 +206,7 @@ TEST_F(ServerIntegrationTest, SingleClientSession) {
     EXPECT_EQ(r.getU64(), 1u);
 
     client->close();
-    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    waitSessionCount(server, 0);
     server.stop();
 }
 
@@ -204,7 +231,7 @@ TEST_F(ServerIntegrationTest, MultipleClients) {
 
     client1->close();
     client2->close();
-    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    waitSessionCount(server, 0);
     server.stop();
 }
 
@@ -224,14 +251,14 @@ TEST_F(ServerIntegrationTest, MaxClientsEnforced) {
 
     // Second connection should be rejected (server closes its end)
     auto client2 = ps->addPendingConnection();
-    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    waitClientDead(client2.get());
 
     // client2 should be disconnected or unable to communicate
-    EXPECT_FALSE(verifySessionAlive(client2.get()));
+    EXPECT_FALSE(verifySessionAlive(client2.get(), 1, 200));
 
     client1->close();
     client2->close();
-    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    waitSessionCount(server, 0);
     server.stop();
 }
 
@@ -252,14 +279,14 @@ TEST_F(ServerIntegrationTest, CleanupFinishedSessions) {
 
     // Disconnect client1
     client1->close();
-    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    waitSessionCount(server, 0);
 
     // Connect another client — cleanup should have reclaimed the slot
     auto client2 = ps->addPendingConnection();
     ASSERT_TRUE(waitForSessionAlive(client2.get()));
 
     client2->close();
-    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    waitSessionCount(server, 0);
     server.stop();
 }
 
@@ -316,13 +343,13 @@ TEST_F(ServerIntegrationTest, MaxClientsLoggingPath) {
     ASSERT_TRUE(waitForSessionAlive(client1.get()));
 
     auto client2 = ps->addPendingConnection();
-    std::this_thread::sleep_for(std::chrono::milliseconds(600));
-    EXPECT_FALSE(verifySessionAlive(client2.get()));
+    waitClientDead(client2.get());
+    EXPECT_FALSE(verifySessionAlive(client2.get(), 1, 200));
     EXPECT_GT(g_logCallCount, 0);
 
     client1->close();
     client2->close();
-    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    waitSessionCount(server, 0);
     server.stop();
 }
 
@@ -362,7 +389,7 @@ TEST_F(ServerIntegrationTest, ServerWithFeatures) {
     EXPECT_NE(respFeatures.find("server_name"), nullptr);
 
     client->close();
-    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    waitSessionCount(server, 0);
     server.stop();
 }
 
@@ -405,7 +432,7 @@ TEST_F(ServerIntegrationTest, ActiveSessionCountAfterStop) {
     ASSERT_TRUE(waitForSessionAlive(client.get()));
 
     client->close();
-    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    waitSessionCount(server, 0);
     server.stop();
 
     // After stop, all sessions are cleaned up
@@ -429,6 +456,6 @@ TEST_F(ServerIntegrationTest, ServerWithLoggingAndClient) {
     ASSERT_TRUE(waitForSessionAlive(client.get()));
 
     client->close();
-    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    waitSessionCount(server, 0);
     server.stop();
 }

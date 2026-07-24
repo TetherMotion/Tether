@@ -29,6 +29,12 @@ using namespace ::testing;
 class EtherCATSlaveTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        // Shrink PRE_OP retry timing to avoid ~13s of wall-clock sleep in tests
+        // that simulate slaves which never reach PRE_OP.
+        master_.setPreopRetryConfig(1, 3, 1, 1);
+        // Shrink SII read timeout so initSlaves prefetch doesn't block.
+        master_.siiReader().setTimeout(1);
+
         // Track AL state so APRD can return the correct AL_STATUS value.
         // This makes state-machine transitions fast and deterministic.
         // NOTE: al_state_ is a member so the lambdas below capture a reference
@@ -497,6 +503,10 @@ TEST_F(EtherCATSlaveTest, FullLifecycleHappyPath) {
 class NonExistingSlaveTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        // Shrink PRE_OP retry timing for fast tests.
+        master_.setPreopRetryConfig(1, 3, 1, 1);
+        // Shrink SII read timeout so initSlaves prefetch doesn't block.
+        master_.siiReader().setTimeout(1);
         // No slaves discovered
         master_.initSlaves(0);
     }
@@ -669,6 +679,14 @@ TEST_F(NonExistingSlaveTest, DifferentIndicesWork) {
 
 class MasterSlaveManagementTest : public ::testing::Test {
 protected:
+    void SetUp() override {
+        // Shrink PRE_OP retry timing for fast tests.
+        master_.setPreopRetryConfig(1, 3, 1, 1);
+        // Shrink SII read timeout so initSlaves prefetch doesn't block 500ms
+        // per slave when there's no real bus.
+        master_.siiReader().setTimeout(1);
+    }
+
     Master master_;
 };
 

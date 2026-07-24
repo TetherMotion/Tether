@@ -12,7 +12,7 @@ namespace {
 
 constexpr double kAmplitudeEpsilon = 1e-9;
 constexpr double kHalfSecondWindow = 0.5;
-constexpr double kTimeStep = 0.001;
+constexpr double kTimeStep = 0.005;
 
 double max_abs_value(const Simulation::StateVector& values) {
     double max_value = 0.0;
