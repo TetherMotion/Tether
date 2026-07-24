@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
 
     std::string line;
     double curX = 0.0, curY = 0.0, curZ = 0.0;
-    std::regex reXY("[XY]\\s*([-+]?[0-9]*\.?[0-9]+)");
+    std::regex reXY("[XY]\\s*([-+]?[0-9]*\\.?[0-9]+)");
 
     while (std::getline(ifs, line)) {
         // Quick find of X and Y values in the line
@@ -56,11 +56,11 @@ int main(int argc, char** argv) {
         double x = curX, y = curY;
         std::string l = line;
         // find X
-        std::regex reX("X\\s*([-+]?[0-9]*\.?[0-9]+)");
+        std::regex reX("X\\s*([-+]?[0-9]*\\.?[0-9]+)");
         if (std::regex_search(l, m, reX)) {
             x = std::stod(m[1].str());
         }
-        std::regex reY("Y\\s*([-+]?[0-9]*\.?[0-9]+)");
+        std::regex reY("Y\\s*([-+]?[0-9]*\\.?[0-9]+)");
         if (std::regex_search(l, m, reY)) {
             y = std::stod(m[1].str());
         }
