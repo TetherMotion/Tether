@@ -6,6 +6,7 @@
 #include "tether/io/Session.hpp"
 #include "tether/io/FeatureExchange.hpp"
 #include "SLIPStream/Buffer.hpp"
+#include <atomic>
 #include <queue>
 #include <mutex>
 #include <cstring>
@@ -35,8 +36,8 @@ public:
         return n;
     }
 
-    void close() override { connected_ = false; }
-    bool isConnected() const override { return connected_; }
+    void close() override { connected_.store(false, std::memory_order_relaxed); }
+    bool isConnected() const override { return connected_.load(std::memory_order_relaxed); }
 
     // Test helpers
     void injectRx(const uint8_t* data, size_t len) {
@@ -73,7 +74,7 @@ public:
         return decoded;
     }
 
-    bool connected_ = true;
+    std::atomic<bool> connected_{true};
 
 private:
     mutable std::mutex mutex_;
