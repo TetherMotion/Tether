@@ -819,6 +819,11 @@ void CoEManager::workerLoop() {
                 }
                 try {
                     txn->execute(*this);
+                    // Clear the in-flight flag BEFORE waking the caller so that a
+                    // readSync() returning from the promise never observes a
+                    // request still in flight.
+                    request_in_flight_.store(false);
+                    txn->deliver();
                 } catch (const std::exception& e) {
                     TETHER_LOGE(TAG, "Slave %u: CoE read threw: %s", slave_index_, e.what());
                 } catch (...) {
@@ -911,7 +916,7 @@ void CoEReadTransactionImpl<T>::execute(CoEManager& mgr) {
     // proper CoEError::NotConfigured is surfaced (maps to DeviceStateError
     // abort code) rather than a generic TransportError.
     if (!mgr.getMailbox(nullptr, nullptr, nullptr, nullptr)) {
-        txn_.promise.set_value(std::unexpected(CoEError::NotConfigured));
+        result_ = CoEResult<T>(std::unexpected(CoEError::NotConfigured));
         return;
     }
 
@@ -925,9 +930,9 @@ void CoEReadTransactionImpl<T>::execute(CoEManager& mgr) {
 
     if (!ok) {
         if (mgr.lastSdoAbortCode() != 0) {
-            txn_.promise.set_value(std::unexpected(CoEError::Aborted));
+            result_ = CoEResult<T>(std::unexpected(CoEError::Aborted));
         } else {
-            txn_.promise.set_value(std::unexpected(CoEError::TransportError));
+            result_ = CoEResult<T>(std::unexpected(CoEError::TransportError));
         }
         return;
     }
@@ -946,7 +951,7 @@ void CoEReadTransactionImpl<T>::execute(CoEManager& mgr) {
                     "or read as a raw byte vector.",
                     mgr.slaveIndex(), txn_.index, txn_.subindex,
                     out_len, sizeof(T));
-        txn_.promise.set_value(std::unexpected(CoEError::InternalError));
+        result_ = CoEResult<T>(std::unexpected(CoEError::InternalError));
         return;
     }
 
@@ -964,14 +969,14 @@ void CoEReadTransactionImpl<T>::execute(CoEManager& mgr) {
 
     T value;
     std::memcpy(&value, buf.data(), sizeof(T));
-    txn_.promise.set_value(value);
+    result_ = CoEResult<T>(value);
 }
 
 // Specialization for std::vector<uint8_t> — used by the raw-buffer readSync overload
 template<>
 void CoEReadTransactionImpl<std::vector<uint8_t>>::execute(CoEManager& mgr) {
     if (!mgr.getMailbox(nullptr, nullptr, nullptr, nullptr)) {
-        txn_.promise.set_value(std::unexpected(CoEError::NotConfigured));
+        result_ = CoEResult<std::vector<uint8_t>>(std::unexpected(CoEError::NotConfigured));
         return;
     }
 
@@ -985,15 +990,15 @@ void CoEReadTransactionImpl<std::vector<uint8_t>>::execute(CoEManager& mgr) {
 
     if (!ok) {
         if (mgr.lastSdoAbortCode() != 0) {
-            txn_.promise.set_value(std::unexpected(CoEError::Aborted));
+            result_ = CoEResult<std::vector<uint8_t>>(std::unexpected(CoEError::Aborted));
         } else {
-            txn_.promise.set_value(std::unexpected(CoEError::TransportError));
+            result_ = CoEResult<std::vector<uint8_t>>(std::unexpected(CoEError::TransportError));
         }
         return;
     }
 
     std::vector<uint8_t> result(buf.data(), buf.data() + out_len);
-    txn_.promise.set_value(std::move(result));
+    result_ = CoEResult<std::vector<uint8_t>>(std::move(result));
 }
 
 // Explicit template instantiations

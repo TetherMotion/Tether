@@ -1031,8 +1031,10 @@ private:
         Point tangent{};
         tangent[u] = static_cast<T>(-dir * std::sin(angle));
         tangent[v] = static_cast<T>(dir * std::cos(angle));
-        double segLen = seg.segmentLength > 1e-12 ? seg.segmentLength : 1.0;
-        tangent[w] = static_cast<T>((seg.endPosition[w] - seg.startPosition[w]) / segLen);
+        if (w < static_cast<int>(Dim)) {
+            double segLen = seg.segmentLength > 1e-12 ? seg.segmentLength : 1.0;
+            tangent[w] = static_cast<T>((seg.endPosition[w] - seg.startPosition[w]) / segLen);
+        }
         return tangent.normalized();
     }
 
@@ -1054,8 +1056,10 @@ private:
         Point tangent{};
         tangent[u] = static_cast<T>(-dir * std::sin(angle));
         tangent[v] = static_cast<T>(dir * std::cos(angle));
-        double segLen = seg.segmentLength > 1e-12 ? seg.segmentLength : 1.0;
-        tangent[w] = static_cast<T>((seg.endPosition[w] - seg.startPosition[w]) / segLen);
+        if (w < static_cast<int>(Dim)) {
+            double segLen = seg.segmentLength > 1e-12 ? seg.segmentLength : 1.0;
+            tangent[w] = static_cast<T>((seg.endPosition[w] - seg.startPosition[w]) / segLen);
+        }
         return tangent.normalized();
     }
 };
