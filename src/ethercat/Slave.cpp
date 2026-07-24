@@ -55,6 +55,8 @@ SlaveError Slave::configureMailbox(Tether::Platform::LogLevel log_level) {
     mailbox_configured_ = true;
     TETHER_LOGI( TAG,
         "Slave %u: Mailbox configured from SII", index_);
+    // Debug gate checkpoint: mailbox configured
+    master_.debugGate().notifyCheckpoint("mailbox-configured", index_);
     return SlaveError::Ok;
 }
 
@@ -84,6 +86,11 @@ SlaveError Slave::configureMailbox(
             TETHER_LOGE(TAG, "Slave %u: Failed to write mailbox SM registers", index_);
             return SlaveError::MailboxConfigFailed;
         }
+
+        // SM1 may contain stale/junk data left over from slave firmware boot.
+        // Drain it now so the slave has a free outbound mailbox before the
+        // first SDO exchange.
+        (void)master_.drainSlaveMailbox(index_);
     }
 
     mailbox_configured_ = true;
@@ -91,6 +98,8 @@ SlaveError Slave::configureMailbox(
         "Slave %u: Mailbox configured (wr=0x%04X/%u, rd=0x%04X/%u, proto=0x%04X)",
         index_, mbox_in.address, mbox_in.length,
         mbox_out.address, mbox_out.length, protocols);
+    // Debug gate checkpoint: mailbox configured
+    master_.debugGate().notifyCheckpoint("mailbox-configured", index_);
     return SlaveError::Ok;
 }
 
@@ -98,6 +107,8 @@ void Slave::assumeMailboxAlreadyConfigured() {
     mailbox_configured_ = true;
     TETHER_LOGI( TAG,
         "Slave %u: Assuming mailbox already configured", index_);
+    // Debug gate checkpoint: mailbox configured
+    master_.debugGate().notifyCheckpoint("mailbox-configured", index_);
 }
 
 // -- PDO SM configuration ----------------------------------------------------
@@ -127,7 +138,10 @@ SlaveError Slave::configurePDOSyncManagers(
     auto* cfgs = pdo.slaveConfigs();
     if (index_ >= PDO::kMaxPDOSlaves) {
         TETHER_LOGE( TAG,
-            "Slave %u: Index exceeds max PDO slaves (%zu)", index_, PDO::kMaxPDOSlaves);
+            "Slave %u: Index exceeds Tether internal max PDO slaves (%zu). "
+            "This is a Tether limit, not a slave limit. "
+            "Increase ECAT_PDO_MAX_SLAVES in TetherConfig.hpp.",
+            index_, PDO::kMaxPDOSlaves);
         return SlaveError::PDOConfigFailed;
     }
     cfgs[index_].sm[2].phys_start_addr = sm2_addr;
@@ -359,6 +373,8 @@ SlaveError Slave::transitionToSafeOp() {
                     TETHER_LOGI(TAG, "║  Transition Result: Slave %u => SAFE_OP SUCCESS               ║", index_);
                     TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
                 }
+                // Debug gate checkpoint: SAFE_OP confirmed
+                master_.debugGate().notifyCheckpoint("state:safe-op", index_);
                 return SlaveError::Ok;
             }
         }
@@ -465,6 +481,8 @@ SlaveError Slave::transitionToOp() {
                     TETHER_LOGI(TAG, "║  Transition Result: Slave %u => OP SUCCESS                    ║", index_);
                     TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
                 }
+                // Debug gate checkpoint: OP confirmed
+                master_.debugGate().notifyCheckpoint("state:op", index_);
                 return SlaveError::Ok;
             }
             // If state dropped to INIT or PRE_OP, something went wrong
@@ -580,7 +598,8 @@ SlaveError Slave::sdoRead(uint16_t index, uint8_t subindex,
     size_t actual = 0;
     if (!sdo.readSync(index, subindex,
                       data, size, SDO::kDefaultSDOTimeoutMs, &actual)) {
-        return SlaveError::SDOError;
+        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
+                                              : SlaveError::SDOError;
     }
     size = actual;
     return SlaveError::Ok;
@@ -591,7 +610,8 @@ SlaveError Slave::sdoWrite(uint16_t index, uint8_t subindex,
     auto& sdo = master_.sdoManager(index_);
     if (!sdo.writeSync(index, subindex,
                        data, size, {.timeout_ms = SDO::kDefaultSDOTimeoutMs})) {
-        return SlaveError::SDOError;
+        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
+                                              : SlaveError::SDOError;
     }
     return SlaveError::Ok;
 }
@@ -599,7 +619,10 @@ SlaveError Slave::sdoWrite(uint16_t index, uint8_t subindex,
 SlaveError Slave::sdoReadU8(uint16_t index, uint8_t sub, uint8_t& out) {
     auto& sdo = master_.sdoManager(index_);
     auto result = sdo.readU8(index, sub);
-    if (!result.has_value()) return SlaveError::SDOError;
+    if (!result.has_value()) {
+        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
+                                              : SlaveError::SDOError;
+    }
     out = result.value();
     return SlaveError::Ok;
 }
@@ -607,7 +630,10 @@ SlaveError Slave::sdoReadU8(uint16_t index, uint8_t sub, uint8_t& out) {
 SlaveError Slave::sdoReadU16(uint16_t index, uint8_t sub, uint16_t& out) {
     auto& sdo = master_.sdoManager(index_);
     auto result = sdo.readU16(index, sub);
-    if (!result.has_value()) return SlaveError::SDOError;
+    if (!result.has_value()) {
+        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
+                                              : SlaveError::SDOError;
+    }
     out = result.value();
     return SlaveError::Ok;
 }
@@ -615,7 +641,10 @@ SlaveError Slave::sdoReadU16(uint16_t index, uint8_t sub, uint16_t& out) {
 SlaveError Slave::sdoReadU32(uint16_t index, uint8_t sub, uint32_t& out) {
     auto& sdo = master_.sdoManager(index_);
     auto result = sdo.readU32(index, sub);
-    if (!result.has_value()) return SlaveError::SDOError;
+    if (!result.has_value()) {
+        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
+                                              : SlaveError::SDOError;
+    }
     out = result.value();
     return SlaveError::Ok;
 }
@@ -623,22 +652,43 @@ SlaveError Slave::sdoReadU32(uint16_t index, uint8_t sub, uint32_t& out) {
 SlaveError Slave::sdoWriteU8(uint16_t index, uint8_t sub, uint8_t val) {
     auto& sdo = master_.sdoManager(index_);
     auto result = sdo.writeU8(index, sub, val);
-    if (!result.has_value()) return SlaveError::SDOError;
+    if (!result.has_value()) {
+        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
+                                              : SlaveError::SDOError;
+    }
     return SlaveError::Ok;
 }
 
 SlaveError Slave::sdoWriteU16(uint16_t index, uint8_t sub, uint16_t val) {
     auto& sdo = master_.sdoManager(index_);
     auto result = sdo.writeU16(index, sub, val);
-    if (!result.has_value()) return SlaveError::SDOError;
+    if (!result.has_value()) {
+        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
+                                              : SlaveError::SDOError;
+    }
     return SlaveError::Ok;
 }
 
 SlaveError Slave::sdoWriteU32(uint16_t index, uint8_t sub, uint32_t val) {
     auto& sdo = master_.sdoManager(index_);
     auto result = sdo.writeU32(index, sub, val);
-    if (!result.has_value()) return SlaveError::SDOError;
+    if (!result.has_value()) {
+        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
+                                              : SlaveError::SDOError;
+    }
     return SlaveError::Ok;
+}
+
+uint32_t Slave::lastSdoAbortCode() const {
+    return master_.sdoManager(index_).lastSdoAbortCode();
+}
+
+bool Slave::lastSdoWasDownload() const {
+    return master_.sdoManager(index_).lastSdoWasDownload();
+}
+
+size_t Slave::lastSdoAttemptedLength() const {
+    return master_.sdoManager(index_).lastSdoAttemptedLength();
 }
 
 // -- SII convenience ---------------------------------------------------------

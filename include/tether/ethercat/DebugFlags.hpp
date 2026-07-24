@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "tether/ethercat/DebugGate.hpp"
+
 namespace EtherCAT {
 
 /**
@@ -124,10 +126,29 @@ public:
     SlaveFilter verifySafeOpFilt;
     SlaveFilter pdoSmFilt;
 
+    // Gate for conditional debugging (nullptr = always active, current behavior)
+    DebugGate* gate_ = nullptr;
+
+    void setGate(DebugGate* gate) { gate_ = gate; }
+
+    /**
+     * @brief Check if any debug flag is enabled at all (ignoring gate).
+     */
+    bool isAnyFlagEnabled() const {
+        return rxPDO || txPDO || stateMachine || txPackets || rxPackets ||
+               fmmu || siiEeprom || coeReads || coeWrites || coeRxPackets ||
+               coeTxPackets || verifyPreOp || verifySafeOp || pdoSm;
+    }
+
     /**
      * @brief Compute the pre-computed flags for a single slave.
      */
     EtherCATSlaveDebugFlags computeForSlave(uint16_t slave_index) const {
+        // If a gate is set and it's closed for this slave, return all-false
+        if (gate_ && !gate_->isActiveForSlave(slave_index)) {
+            return EtherCATSlaveDebugFlags{};
+        }
+
         EtherCATSlaveDebugFlags s;
         s.rxPDO        = rxPDO && rxPDOFilt.allows(slave_index);
         s.txPDO        = txPDO && txPDOFilt.allows(slave_index);

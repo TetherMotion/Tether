@@ -12,10 +12,11 @@
 
 #include <cstdint>
 #include <cstddef>
+#include "tether/ethercat/TetherConfig.hpp"
 
 namespace EtherCAT {
 
-constexpr size_t kMaxDCSlaves = 16;
+constexpr size_t kMaxDCSlaves = ECAT_DC_MAX_SLAVES;
 
 struct SlaveTimeInfo {
     uint64_t system_time_ns;

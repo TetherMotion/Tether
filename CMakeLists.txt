@@ -178,6 +178,10 @@ option(TETHER_BUILD_STATIC_LIBS "Build Tether component libraries as static" OFF
 # When enabled, the master can wrap EtherCAT frames in Ethernet/IPv4/UDP.
 option(TETHER_ENABLE_UDP_ENCAPSULATION "Enable EtherCAT-over-UDP encapsulation support" OFF)
 
+# Conditional debug gating framework (default: ON).
+# When disabled, all DebugGate code compiles to no-ops with zero overhead.
+option(TETHER_DEBUG_GATE_ENABLED "Enable conditional debug gating framework" ON)
+
 # --- Apply TETHER_COMPONENTS selection ---
 if(DEFINED TETHER_COMPONENTS)
     # Transitive dependency map: component → list of dependencies
@@ -371,6 +375,13 @@ if(TETHER_ENABLE_UDP_ENCAPSULATION)
     add_compile_definitions(TETHER_ENABLE_UDP_ENCAPSULATION=1)
 else()
     add_compile_definitions(TETHER_ENABLE_UDP_ENCAPSULATION=0)
+endif()
+
+# Conditional debug gating framework
+if(TETHER_DEBUG_GATE_ENABLED)
+    add_compile_definitions(TETHER_DEBUG_GATE_ENABLED=1)
+else()
+    add_compile_definitions(TETHER_DEBUG_GATE_ENABLED=0)
 endif()
 
 # EtherCAT Master

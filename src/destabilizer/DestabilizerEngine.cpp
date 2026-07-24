@@ -129,6 +129,7 @@ RolloutTrajectory DestabilizerEngine::simulateRollout(
     Simulation::SimConfig simCfg;
     simCfg.dt = config_.dt;
     simCfg.totalTime = config_.horizon;
+    simCfg.maxStepSize = 0.0;
     simEngine.setConfig(simCfg);
 
     // Set controller if provided

@@ -63,9 +63,6 @@ bool initHostEthernet(HostEtherNetSession& session,
         return eth->transmit(data, len) == EtherCAT::HAL::Error::OK;
     };
 
-    EtherCAT::Raw::set_network_interface(session.ni.get());
-    EtherCAT::Raw::set_src_mac(session.srcMac);
-
     return true;
 }
 
@@ -143,7 +140,7 @@ bool startHostMaster(HostEtherNetSession& session,
         }
         master.start(*masterIface, session.srcMac);
     } else {
-        master.start(*EtherCAT::Raw::network_interface(), session.srcMac);
+        master.start(*session.ni, session.srcMac);
     }
     return true;
 }

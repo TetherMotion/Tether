@@ -1,11 +1,14 @@
 #pragma once
 
 #include <argparse/argparse.hpp>
+#include <cstdint>
 #include <optional>
 #include <set>
 #include <string>
 
 #include "tether/ethercat/VLANRouter.hpp"
+
+namespace EtherCAT { class Slave; }
 
 namespace Tether::Examples {
 
@@ -20,8 +23,14 @@ void addInterfaceArg(argparse::ArgumentParser& program,
 /// Add `--debug` to an ArgumentParser.
 void addDebugArg(argparse::ArgumentParser& program);
 
+/// Add `--debug-start` and `--debug-stop` to an ArgumentParser.
+void addDebugConditionArgs(argparse::ArgumentParser& program);
+
 /// Print detailed debug-flag help to stdout and return true if @p debugStr is "help".
 bool printDebugHelpIfRequested(const std::string& debugStr);
+
+/// Print debug condition help and return true if @p startStr is "help".
+bool printDebugConditionHelpIfRequested(const std::string& startStr);
 
 /// Add `--rx-vlan` and `--tx-vlan` to an ArgumentParser.
 void addVlanArgs(argparse::ArgumentParser& program);
@@ -52,6 +61,23 @@ std::set<std::string> parseDebugFlags(const std::string& debugStr);
 void applyDebugFlags(const std::set<std::string>& flags,
                      EtherCAT::Master& master,
                      const char* tag);
+
+/**
+ * @brief Apply debug start/stop conditions from CLI to a Master's debug gate.
+ *
+ * Parses the --debug-start and --debug-stop condition strings and adds them
+ * to the master's DebugGate as global start/stop conditions.
+ *
+ * @param startCond  Start condition string (e.g. "state:pre-op"), or empty
+ * @param stopCond   Stop condition string (e.g. "state:op"), or empty
+ * @param master     Target master
+ * @param tag        Log tag for diagnostics
+ * @return true if all conditions parsed successfully (or were empty)
+ */
+bool applyDebugGateConditions(const std::string& startCond,
+                              const std::string& stopCond,
+                              EtherCAT::Master& master,
+                              const char* tag);
 
 // ============================================================================
 // VLAN helpers
@@ -107,5 +133,34 @@ bool parseMailboxAddress(const std::string& str, MailboxAddressConfig& out);
 void logMailboxConfig(const MailboxSizeConfig& size,
                       const MailboxAddressConfig& addr,
                       const char* tag);
+
+// ============================================================================
+// SDO abort reporting helper
+// ============================================================================
+
+/**
+ * @brief Print a clear, user-facing explanation of the last CoE SDO abort
+ *        reported by the slave on @p slave.
+ *
+ * Call this immediately after a Slave::sdoRead/sdoWrite family call returns
+ * SlaveError::SDOAborted. It reads Slave::lastSdoAbortCode(), decodes the
+ * standard 32-bit CoE abort code into its human-readable meaning, and prints
+ * the result to both the TETHER log and stderr so the user sees it on the
+ * console regardless of log routing. It also reports the operation direction
+ * (read vs. write) and the attempted payload length from
+ * Slave::lastSdoAttemptedLength().
+ *
+ * For the length-mismatch family of abort codes (0x06070010 / 0x06070012 /
+ * 0x06070013) it additionally prints a hint pointing the user at the object
+ * dictionary / ESI file to find the correct payload size — this is the
+ * signature of the original "slave rejects the write because the payload is
+ * the wrong size" failure.
+ *
+ * @param slave  The slave whose last SDO call was aborted.
+ * @param tag    ESP-style log tag for the TETHER_LOGE line.
+ * @return The abort code (0 if no abort was recorded — in that case nothing
+ *         is printed).
+ */
+uint32_t reportSdoAbort(const EtherCAT::Slave& slave, const char* tag);
 
 } // namespace Tether::Examples

@@ -12,15 +12,6 @@
 
 #include "ExampleHelpers.hpp"
 
-namespace EtherCAT {
-namespace Raw {
-    void set_network_interface(const ::EtherCAT::NetworkInterface* iface);
-    const ::EtherCAT::NetworkInterface* network_interface();
-    void set_src_mac(const uint8_t src_mac[6]);
-    const uint8_t* get_src_mac();
-}
-}
-
 namespace Tether::Examples {
 
 // ============================================================================
@@ -29,10 +20,11 @@ namespace Tether::Examples {
 // These functions encapsulate the repetitive boilerplate found in every
 // Linux host example:
 //   1. createDefaultEthernet() + init() + link-check + getMacAddress()
-//   2. NetworkInterface wrapper + Raw::set_network_interface / set_src_mac
+//   2. NetworkInterface wrapper held in the session (no process-global
+//      registration — the iface/src MAC are passed directly to Master::start)
 //   3. Optional VLAN router + RX callback registration
 //   4. Poll thread with best-effort realtime scheduling
-//   5. Master.start() (via Raw interface or VLAN router)
+//   5. Master.start() (via session NetworkInterface or VLAN router)
 //   6. Graceful shutdown (stop master, stop poll, join, shutdown eth)
 // ============================================================================
 
@@ -48,7 +40,7 @@ struct HostEtherNetSession {
 };
 
 /// Initialise the Ethernet HAL, verify link, read MAC, create NetworkInterface
-/// and register it with EtherCAT::Raw.  Returns false on any error (already
+/// and store it in the session.  Returns false on any error (already
 /// logged via TETHER_LOGE).
 bool initHostEthernet(HostEtherNetSession& session,
                       const std::string& interfaceName,
@@ -69,8 +61,8 @@ bool setupVlanAndRxCallback(HostEtherNetSession& session,
                             const char* tag);
 
 /// Start the EtherCAT master.  If VLAN is enabled the master is started via
-/// the per-master NetworkInterface from the router, otherwise via
-/// EtherCAT::Raw::network_interface().
+/// the per-master NetworkInterface from the router, otherwise via the
+/// session's own NetworkInterface.
 bool startHostMaster(HostEtherNetSession& session,
                      EtherCAT::Master& master,
                      const VlanConfig& vlan,

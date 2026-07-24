@@ -231,6 +231,12 @@ bool FaultDetector::init(uint16_t slave_count) {
         return true;  // idempotent
     }
 
+    if (slave_count > kMaxSlaves) {
+        TETHER_LOGW("fault", "Slave count %u exceeds Tether fault detection max %zu — clamping. "
+                     "This is a Tether limit, not a slave limit. "
+                     "Increase ECAT_FAULT_DETECTION_MAX_SLAVES in TetherConfig.hpp.",
+                     static_cast<unsigned>(slave_count), kMaxSlaves);
+    }
     slave_count_ = std::min(slave_count, static_cast<uint16_t>(kMaxSlaves));
 
     for (auto& state : slave_faults_) {
@@ -386,7 +392,7 @@ void FaultDetector::diagnose(uint16_t slave_index) const {
 
     const SlaveFaultState& state = slave_faults_[slave_index];
 
-    TETHER_LOGE(TAG, "=== FAULT DIAGNOSTICS - Slave %u ===\nAL_STATUS: 0x%04X (State=%s%s)\nAL status code: %s (0x%04X)",
+    TETHER_LOGE(TAG, "=== FAULT DIAGNOSTICS - Slave %u ===\nAL_STATUS: 0x%04X (State=%s%s)\nAL_STATUS_CODE: %s (0x%04X)",
              slave_index,
              state.al_status,
              al_status_get_state_name(state.al_status),

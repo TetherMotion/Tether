@@ -58,6 +58,7 @@
 #include <functional>
 
 #include "tether/ethercat/Types.hpp"
+#include "tether/ethercat/TetherConfig.hpp"
 #ifdef ESP_PLATFORM
 #include "esp_eth_driver.h"
 #endif
@@ -77,18 +78,18 @@ namespace SDO {
  * 
  * For larger transfers, segmented transfer is used automatically.
  */
-constexpr size_t kMaxSDODataSize = 256;
+constexpr size_t kMaxSDODataSize = ECAT_SDO_MANAGER_MAX_DATA_SIZE;
 
 /**
  * @brief Maximum number of pending SDO requests in the queue
  */
-constexpr size_t kMaxSDOQueueDepth = 16;
+constexpr size_t kMaxSDOQueueDepth = ECAT_SDO_MANAGER_QUEUE_DEPTH;
 
 /**
  * @brief Default timeout for SDO operations in milliseconds
  */
 // Default SDO timeout increased to 3000 ms to account for slower mailbox/CoE transactions on some hardware
-constexpr uint32_t kDefaultSDOTimeoutMs = 1000;
+constexpr uint32_t kDefaultSDOTimeoutMs = ECAT_SDO_MANAGER_DEFAULT_TIMEOUT_MS;
 
 // ============================================================================
 // SDO Error Codes
@@ -328,6 +329,24 @@ public:
         (void)slave_index; (void)reg_addr; (void)out; (void)len; (void)timeout_ms;
         return false;
     }
+
+    /**
+     * @brief Return the CoE SDO abort code reported by the slave on the most
+     * recent sdoUpload/sdoDownload call.
+     *
+     * @return 0 if the last call succeeded or failed for a non-abort reason
+     *         (transport/timeout); otherwise the standard 32-bit CoE SDO
+     *         abort code (e.g. 0x06070010 for "data type / length mismatch").
+     *
+     * The default implementation returns 0, so mock transports used in unit
+     * tests do not need to override this unless they specifically want to
+     * simulate slave aborts. Real transports override to read the value
+     * captured by the underlying CoE SDO channel.
+     *
+     * @note SDO operations on a slave are serialized by CoEManager, so this
+     *       is safe to read immediately after a call returns false.
+     */
+    virtual uint32_t lastAbortCode() const { return 0; }
 };
 
 // ============================================================================

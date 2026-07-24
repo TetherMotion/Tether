@@ -11,6 +11,7 @@
 #pragma once
 
 #include "tether/ethercat/CoETypes.hpp"
+#include "tether/ethercat/TetherConfig.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/SDOManager.hpp" // ISDOTransport, SDORequest, SDOResponse
 #include "logging/Logger.hpp"
@@ -32,10 +33,10 @@ class PDOManager;
 
 namespace CoE {
 
-static constexpr size_t kMaxQueueDepth = 32;
-static constexpr uint32_t kDefaultTimeoutMs = 1000;
-static constexpr uint32_t kDefaultPollIntervalMs = 5;
-static constexpr std::chrono::milliseconds kWorkerIdleTimeout{500};
+static constexpr size_t kMaxQueueDepth = ECAT_COE_QUEUE_DEPTH;
+static constexpr uint32_t kDefaultTimeoutMs = ECAT_COE_DEFAULT_TIMEOUT_MS;
+static constexpr uint32_t kDefaultPollIntervalMs = ECAT_COE_DEFAULT_POLL_INTERVAL_MS;
+// kWorkerIdleTimeout removed — persistent worker, no idle timeout
 
 // ============================================================================
 // Type-erased read transaction base for queue storage
@@ -46,6 +47,17 @@ public:
     virtual ~ICoEReadTransaction() = default;
     virtual const CoETransactionBase& base() const = 0;
     virtual void execute(class CoEManager& mgr) = 0;
+    virtual void fail(CoEError err) = 0;
+};
+
+// ============================================================================
+// Type-erased pending future for legacy queueRequest API
+// ============================================================================
+
+struct IPendingFuture {
+    virtual ~IPendingFuture() = default;
+    virtual bool isReady() const = 0;
+    virtual SDO::SDOResponse consume() = 0;
 };
 
 // ============================================================================
@@ -92,6 +104,8 @@ public:
 
     uint32_t queueRequest(SDO::SDORequest& request);
     bool getResponse(uint32_t request_id, SDO::SDOResponse& response);
+    bool waitForResponse(uint32_t request_id, SDO::SDOResponse& response,
+                         uint32_t timeout_ms = kDefaultTimeoutMs);
     size_t pendingCount() const;
 
     // ----- Sync Convenience -----
@@ -144,6 +158,34 @@ public:
     void setBehaviourOptions(const BehaviourOptions& opts) { behaviour_options_ = opts; }
     const BehaviourOptions& behaviourOptions() const { return behaviour_options_; }
 
+    /// @brief Return the CoE SDO abort code reported by the slave on the most
+    /// recent sdoUploadWithRetry/sdoDownloadWithRetry call. 0 means no abort
+    /// (success or a non-abort failure such as a transport/timeout error).
+    /// Read this immediately after a sync read/write returns false to
+    /// distinguish a definitive slave rejection (e.g. 0x06070010 length
+    /// mismatch) from a transport issue. When this is non-zero the retry
+    /// wrapper does NOT retry the operation.
+    uint32_t lastSdoAbortCode() const { return last_sdo_abort_code_.load(std::memory_order_relaxed); }
+
+    /// @brief Direction of the most recent SDO operation that recorded an
+    /// abort code via lastSdoAbortCode(). Returns false for "upload" (read)
+    /// and true for "download" (write). Undefined when lastSdoAbortCode()==0.
+    bool lastSdoWasDownload() const { return last_sdo_was_download_.load(std::memory_order_relaxed); }
+
+    /// @brief Return the payload length that was attempted on the most recent
+    /// SDO operation that recorded an abort code via lastSdoAbortCode().
+    ///
+    /// For a download (write) this is the number of bytes that were sent to
+    /// the slave; for an upload (read) it is the capacity of the receive
+    /// buffer that was offered. Returns 0 when lastSdoAbortCode()==0.
+    ///
+    /// This is most useful for the length-mismatch abort family
+    /// (0x06070010 / 0x06070012 / 0x06070013) where the slave rejects the
+    /// request because the payload size does not match what the object
+    /// dictionary expects — the attempted length lets the user compare
+    /// against the ESI-specified size.
+    size_t lastSdoAttemptedLength() const { return last_sdo_attempted_length_.load(std::memory_order_relaxed); }
+
     // ----- Debug flags -----
 
     /** @brief Update the per-slave debug flags distributed by the master. */
@@ -192,19 +234,15 @@ private:
     struct SlaveState {
         std::deque<std::unique_ptr<ICoEReadTransaction>> read_queue;
         std::deque<WriteQueueEntry> write_queue;
-        mutable std::mutex read_mutex;
-        mutable std::mutex write_mutex;
-        std::condition_variable read_cv;
-        std::condition_variable write_cv;
+        mutable std::mutex queue_mutex;
+        std::condition_variable work_cv;
         std::unique_ptr<std::thread> worker_thread;
         std::atomic<bool> shutdown_requested{false};
         std::atomic<bool> worker_running{false};
         mutable std::mutex worker_mutex;
-        std::condition_variable worker_cv;
     };
 
     void workerLoop();
-    void ensureWorkerRunning();
     void storeResponse(uint32_t request_id, const SDO::SDOResponse& resp);
     bool popResponse(uint32_t request_id, SDO::SDOResponse& resp);
     uint32_t nextRequestId();
@@ -217,6 +255,10 @@ private:
 
     mutable std::mutex responses_mutex_;
     std::map<uint32_t, SDO::SDOResponse> completed_responses_;
+
+    mutable std::mutex pending_futures_mutex_;
+    std::map<uint32_t, std::unique_ptr<IPendingFuture>> pending_futures_;
+
     std::atomic<uint32_t> next_request_id_{1};
 
     PDOManager* pdo_manager_ = nullptr;
@@ -225,6 +267,10 @@ private:
     std::atomic<bool> request_in_flight_{false};
 
     BehaviourOptions behaviour_options_;
+
+    std::atomic<uint32_t> last_sdo_abort_code_{0};
+    std::atomic<bool>     last_sdo_was_download_{false};
+    std::atomic<size_t>   last_sdo_attempted_length_{0};
 
     EtherCATSlaveDebugFlags debug_flags_;
 };
@@ -241,6 +287,9 @@ public:
 
     const CoETransactionBase& base() const override { return txn_; }
     void execute(CoEManager& mgr) override;
+    void fail(CoEError err) override {
+        txn_.promise.set_value(std::unexpected(err));
+    }
 
     CoEReadTransaction<T> txn_;
 };
@@ -262,8 +311,19 @@ std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
 
     auto impl = std::make_unique<CoEReadTransactionImpl<T>>(std::move(txn));
 
+    if (!initialized_.load() || state_.shutdown_requested.load()) {
+        CoEReadTransaction<T> fail_txn;
+        fail_txn.promise.set_value(std::unexpected(CoEError::NotConfigured));
+        return fail_txn.promise.get_future();
+    }
+
     {
-        std::lock_guard<std::mutex> lock(state_.read_mutex);
+        std::lock_guard<std::mutex> lock(state_.queue_mutex);
+        if (state_.shutdown_requested.load()) {
+            CoEReadTransaction<T> fail_txn;
+            fail_txn.promise.set_value(std::unexpected(CoEError::ShuttingDown));
+            return fail_txn.promise.get_future();
+        }
         if (state_.read_queue.size() >= kMaxQueueDepth) {
             if (debug_flags_.coeReads) {
                 TETHER_LOGI("coe_mgr", "Slave %u: CoE read QUEUE FULL index=0x%04X:%u", slave_index_, index, subindex);
@@ -274,8 +334,7 @@ std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
         }
         state_.read_queue.push_back(std::move(impl));
     }
-    state_.read_cv.notify_one();
-    ensureWorkerRunning();
+    state_.work_cv.notify_one();
 
     if (debug_flags_.coeReads) {
         TETHER_LOGI("coe_mgr", "Slave %u: CoE read ENQUEUED index=0x%04X:%u", slave_index_, index, subindex);
@@ -286,7 +345,12 @@ std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
 template<typename T>
 CoEResult<T> CoEManager::readSync(uint16_t index, uint8_t subindex,
                                    CoETransactionOptions options) {
-    return read<T>(index, subindex, options).get();
+    auto future = read<T>(index, subindex, options);
+    const uint32_t timeout_ms = (options.timeout_ms > 0) ? options.timeout_ms : kDefaultTimeoutMs;
+    if (future.wait_for(std::chrono::milliseconds(timeout_ms)) != std::future_status::ready) {
+        return std::unexpected(CoEError::Timeout);
+    }
+    return future.get();
 }
 
 } // namespace CoE

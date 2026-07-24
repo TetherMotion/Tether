@@ -42,15 +42,6 @@
 
 #include "common/ExampleHelpers.hpp"
 
-// Forward-declare host transport helpers
-namespace EtherCAT {
-namespace Raw {
-    void set_network_interface(const ::EtherCAT::NetworkInterface* iface);
-    const ::EtherCAT::NetworkInterface* network_interface();
-    void set_src_mac(const uint8_t src_mac[6]);
-}
-}
-
 static const char* TAG = "axia80_stream";
 static EtherCAT::Master* g_master = nullptr;
 
@@ -583,8 +574,6 @@ int main(int argc, char** argv) {
     ni_ptr->send = [eth_raw = eth.get()](const uint8_t* data, size_t len) -> bool {
         return eth_raw->transmit(data, len) == EtherCAT::HAL::Error::OK;
     };
-    EtherCAT::Raw::set_network_interface(ni_ptr.get());
-    EtherCAT::Raw::set_src_mac(src_mac);
 
     // ---- Create master ----
     EtherCAT::Master master;
@@ -643,7 +632,7 @@ int main(int argc, char** argv) {
         }
         master.start(*master_iface, src_mac);
     } else {
-        master.start(*EtherCAT::Raw::network_interface(), src_mac);
+        master.start(*ni_ptr, src_mac);
     }
 
     // ---- Discover slaves ----
