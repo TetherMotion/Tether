@@ -114,15 +114,16 @@ jobs:
         chmod -R +x build/bin
     
     - name: Run tests
-      run: |
-        ctest --test-dir build --output-on-failure
-    
+      run: .github/scripts/run_ctest.sh build
+
     - name: Upload test results
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: unit-test-results
-        path: build/Testing/
+        path: |
+          build/Testing/
+          build/ctest_full.log
 
   integration-tests:
     name: Run Integration Tests
@@ -148,15 +149,16 @@ jobs:
         chmod -R +x build/bin
     
     - name: Run integration tests
-      run: |
-        ctest --test-dir build --output-on-failure -R "integration|ethercat|simulation"
-    
+      run: .github/scripts/run_ctest.sh build "" -R "integration|ethercat|simulation"
+
     - name: Upload integration test results
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: integration-test-results
-        path: build/Testing/
+        path: |
+          build/Testing/
+          build/ctest_full.log
 
   coverage:
     name: Generate Code Coverage
@@ -195,8 +197,7 @@ jobs:
         cmake --build build-coverage --parallel $(nproc)
     
     - name: Run tests
-      run: |
-        ctest --test-dir build-coverage --output-on-failure
+      run: .github/scripts/run_ctest.sh build-coverage
     
     - name: Generate coverage report with lcov
       run: |
@@ -298,33 +299,20 @@ jobs:
     - name: Run all module tests with ASAN
       run: |
         export ASAN_OPTIONS=detect_leaks=1:halt_on_error=0
-        
-        # gtest_discover_tests registers tests under their TestSuite.TestCase
-        # names (no executable-name prefix), so a -R filter by target name
-        # would match nothing. Run the whole discovered test set in parallel
-        # instead and let ctest schedule them.
-        # Capture the exit code without tripping `set -e` so the log is
-        # always printed below, even when tests fail.
-        ctest --test-dir build-asan \
-          --output-on-failure \
-          --parallel $(nproc) > asan_all.log 2>&1 || ctest_exit=$?
-        ctest_exit=${ctest_exit:-0}
-        
-        echo "=== ASAN Test Results ==="
-        cat asan_all.log
-        
-        exit $ctest_exit
-    
+        .github/scripts/run_ctest.sh build-asan asan_all.log --parallel $(nproc)
+
     - name: Show ccache stats
       if: always()
       run: ccache -s
-    
+
     - name: Upload test results
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: asan-test-results
-        path: asan_all.log
+        path: |
+          asan_all.log
+          build-asan/ctest_full.log
 
   tsan-tests:
     name: Run Module Tests with TSAN
@@ -380,33 +368,20 @@ jobs:
     - name: Run all module tests with TSAN
       run: |
         export TSAN_OPTIONS=halt_on_error=0
-        
-        # gtest_discover_tests registers tests under their TestSuite.TestCase
-        # names (no executable-name prefix), so a -R filter by target name
-        # would match nothing. Run the whole discovered test set in parallel
-        # instead and let ctest schedule them.
-        # Capture the exit code without tripping `set -e` so the log is
-        # always printed below, even when tests fail.
-        ctest --test-dir build-tsan \
-          --output-on-failure \
-          --parallel $(nproc) > tsan_all.log 2>&1 || tsan_exit=$?
-        tsan_exit=${tsan_exit:-0}
-        
-        echo "=== TSAN Test Results ==="
-        cat tsan_all.log
-        
-        exit $tsan_exit
-    
+        .github/scripts/run_ctest.sh build-tsan tsan_all.log --parallel $(nproc)
+
     - name: Show ccache stats
       if: always()
       run: ccache -s
-    
+
     - name: Upload test results
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: tsan-test-results
-        path: tsan_all.log
+        path: |
+          tsan_all.log
+          build-tsan/ctest_full.log
 
   analyze-test-timing:
     name: Analyze Test Timing
