@@ -235,7 +235,7 @@ protected:
         });
 
         // Give session time to start
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
         return ctx;
     }
 
@@ -899,7 +899,7 @@ TEST_F(SessionIntegrationTest, StreamDataFlowTimeBased) {
     slipSend(ctx->client.get(), startMsg, 1);
 
     // Collect stream data packets
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     // Stop streaming
     uint8_t stopMsg[1] = {static_cast<uint8_t>(MessageType::StopStream)};
@@ -1011,11 +1011,11 @@ TEST_F(SessionIntegrationTest, StreamWithSkipCount) {
 
     uint8_t startMsg[1] = {static_cast<uint8_t>(MessageType::StartStream)};
     slipSend(ctx->client.get(), startMsg, 1);
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     uint8_t stopMsg[1] = {static_cast<uint8_t>(MessageType::StopStream)};
     slipSend(ctx->client.get(), stopMsg, 1);
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
     // Just verify we got through without crashes
 }
@@ -1040,7 +1040,7 @@ TEST_F(SessionIntegrationTest, StreamWithChunking) {
 
     uint8_t startMsg[1] = {static_cast<uint8_t>(MessageType::StartStream)};
     slipSend(ctx->client.get(), startMsg, 1);
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     uint8_t stopMsg[1] = {static_cast<uint8_t>(MessageType::StopStream)};
     slipSend(ctx->client.get(), stopMsg, 1);
@@ -1120,10 +1120,10 @@ TEST_F(SessionIntegrationTest, StreamOnChange) {
     slipSend(ctx->client.get(), startMsg, 1);
 
     // Wait a bit, then change the value
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
     temperature_ = 30.0f;
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     uint8_t stopMsg[1] = {static_cast<uint8_t>(MessageType::StopStream)};
     slipSend(ctx->client.get(), stopMsg, 1);
@@ -1459,7 +1459,7 @@ TEST_F(SessionIntegrationTest, StreamWithThresholdFiltering) {
     // Start streaming
     uint8_t startMsg[1] = {static_cast<uint8_t>(MessageType::StartStream)};
     slipSend(ctx->client.get(), startMsg, 1);
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     // Stop
     uint8_t stopMsg[1] = {static_cast<uint8_t>(MessageType::StopStream)};
