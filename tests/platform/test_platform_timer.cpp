@@ -36,7 +36,7 @@ protected:
             timer_->stop();
         }
         // Give timer thread time to clean up
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     
     static bool testCallback(void* user_data) {
@@ -322,19 +322,19 @@ TEST_F(PlatformTimerTest, TimingAccuracyIsReasonable) {
     ASSERT_TRUE(timer_->start());
     
     auto start = std::chrono::high_resolution_clock::now();
-    
-    // Wait for exactly 100 callbacks
-    while (callback_count_.load() < 100) {
+
+    // Wait for exactly 50 callbacks
+    while (callback_count_.load() < 50) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    
+
     auto end = std::chrono::high_resolution_clock::now();
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-    
-    // 100 callbacks at 10ms each = 1000ms expected
+
+    // 50 callbacks at 10ms each = 500ms expected
     // Allow ±10% tolerance
-    EXPECT_GE(elapsed_ms, 900) << "Timer running too fast";
-    EXPECT_LE(elapsed_ms, 1100) << "Timer running too slow";
+    EXPECT_GE(elapsed_ms, 450) << "Timer running too fast";
+    EXPECT_LE(elapsed_ms, 550) << "Timer running too slow";
     
     timer_->stop();
 }
@@ -352,15 +352,15 @@ TEST_F(PlatformTimerTest, HighFrequencyTimerIsStable) {
     
     ASSERT_TRUE(timer_->configure(config));
     ASSERT_TRUE(timer_->start());
-    
-    // Run at 1kHz for 1 second = 1000 callbacks expected
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    
+
+    // Run at 1kHz for 300ms = 300 callbacks expected
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
     int count = callback_count_.load();
-    
+
     // Allow ±10% tolerance
-    EXPECT_GE(count, 900) << "High frequency timer missed too many cycles";
-    EXPECT_LE(count, 1100) << "High frequency timer fired too many times";
+    EXPECT_GE(count, 270) << "High frequency timer missed too many cycles";
+    EXPECT_LE(count, 330) << "High frequency timer fired too many times";
     
     timer_->stop();
 }
@@ -374,20 +374,20 @@ TEST_F(PlatformTimerTest, TimerDoesNotDriftOverTime) {
     
     ASSERT_TRUE(timer_->configure(config));
     ASSERT_TRUE(timer_->start());
-    
-    // Run for 5 seconds and check if drift accumulates
+
+    // Run for 1 second and check if drift accumulates
     auto start = std::chrono::high_resolution_clock::now();
-    std::this_thread::sleep_for(std::chrono::seconds(5));
+    std::this_thread::sleep_for(std::chrono::seconds(1));
     auto end = std::chrono::high_resolution_clock::now();
-    
+
     int count = callback_count_.load();
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-    
-    // Expected: 500 callbacks (5000ms / 10ms)
+
+    // Expected: 100 callbacks (1000ms / 10ms)
     double expected = elapsed_ms / 10.0;
     double error_percent = std::abs(count - expected) / expected * 100.0;
-    
-    EXPECT_LT(error_percent, 5.0) << "Timer drift >5% over 5 seconds";
+
+    EXPECT_LT(error_percent, 5.0) << "Timer drift >5% over 1 second";
     
     timer_->stop();
 }

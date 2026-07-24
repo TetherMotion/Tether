@@ -191,6 +191,15 @@ public:
     void setEnableMailboxFallback(bool enabled) { config_.enable_mailbox_fallback = enabled; }
     bool isMailboxFallbackEnabled() const { return config_.enable_mailbox_fallback; }
 
+    /** Override the PRE_OP retry timing (useful for tests that emulate slaves). */
+    void setPreopRetryConfig(uint16_t max_attempts, uint16_t inner_tries,
+                             uint16_t inner_sleep_ms, uint16_t backoff_ms) {
+        config_.preop_max_attempts   = max_attempts;
+        config_.preop_inner_tries    = inner_tries;
+        config_.preop_inner_sleep_ms = inner_sleep_ms;
+        config_.preop_backoff_ms     = backoff_ms;
+    }
+
     /** @return true if EtherCAT-over-UDP encapsulation is enabled. */
 #if TETHER_ENABLE_UDP_ENCAPSULATION
     bool isUdpEncapsulationEnabled() const { return config_.udp_encapsulation.enabled; }
