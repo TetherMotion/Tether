@@ -4,18 +4,18 @@
 #include <cstdlib>
 #include <ctime>
 #include <chrono>
+#include <mutex>
 #include <unistd.h>
 
 // Determine whether to use ANSI color codes for console output. Colors are
 // enabled when stdout is a TTY and the NO_COLOR environment variable is not set.
 static inline int tether_platform_use_color(void) {
-    static int inited = 0;
     static int enabled = 0;
-    if (!inited) {
-        inited = 1;
+    static std::once_flag initFlag;
+    std::call_once(initFlag, [&]() {
         // Force color if TETHER_FORCE_COLOR is set, otherwise require a TTY and no NO_COLOR.
         enabled = ((isatty(fileno(stdout)) || (getenv("TETHER_FORCE_COLOR") != NULL)) && (getenv("NO_COLOR") == NULL));
-    }
+    });
     return enabled;
 }
 
