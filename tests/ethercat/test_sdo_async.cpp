@@ -68,6 +68,12 @@ public:
                 (override));
 
     MOCK_METHOD(uint64_t, getMicroseconds, (), (override));
+
+    // Optional override: tests that simulate a definitive slave SDO abort
+    // return a non-zero code here. The default ISDOTransport implementation
+    // returns 0, so existing tests that do not care about aborts are
+    // unaffected.
+    MOCK_METHOD(uint32_t, lastAbortCode, (), (const, override));
 };
 
 } // anonymous namespace
@@ -127,6 +133,17 @@ static bool waitFor(std::function<bool()> pred, int timeout_ms = 500) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     return pred();
+}
+
+// Helper: wait for a response from queueRequest with timeout
+static bool waitForResponse(CoEManager& mgr, uint32_t id,
+                            SDOResponse& resp, int timeout_ms = 2000) {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (mgr.getResponse(id, resp)) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return mgr.getResponse(id, resp);
 }
 
 // ============================================================================
@@ -321,6 +338,76 @@ TEST_F(SDOManagerQueueTest, ReadSyncUsesPDOConfigForTransport) {
 
     mgr.deinit();
     pdo_mgr.deinit();
+}
+
+// Regression test: CoEManager::sdoUploadWithRetry must translate
+// options.complete_access into Tether's internal Complete-Access marker
+// (bit 7 / 0x80 of the subindex) before calling the raw transport. The raw
+// SDO upload layer relies on this marker to set the ETG.1000.6 CA bit (0x10)
+// in the SDO command byte. Without the translation the CA flag is silently
+// dropped and the slave receives a normal (non-CA) upload request, which
+// caused 0xF110:1 segment timeouts on the ESC211.
+TEST_F(SDOManagerQueueTest, SdoUploadWithRetryCompleteAccessSetsSubindexMarker) {
+    ON_CALL(transport_, getMicroseconds()).WillByDefault(Invoke(realMicros));
+    ON_CALL(transport_, lastAbortCode()).WillByDefault(Return(0));
+
+    CoEManager mgr(0, transport_);
+    ASSERT_TRUE(mgr.init());
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    const uint32_t value = 0xDEADBEEFu;
+
+    // Complete Access: expect the transport to receive subindex | 0x80.
+    CoETransactionOptions ca_opts;
+    ca_opts.complete_access = true;
+    ca_opts.max_retries = 0;
+
+    EXPECT_CALL(transport_,
+                sdoUpload(0, _, 0x1000, 128, 0x1400, 128, 0xF110,
+                          static_cast<uint8_t>(0x01u | 0x80u),
+                          _, _, _, _, _, _))
+        .WillOnce(Invoke(UploadOk(&value, sizeof(value))));
+
+    uint32_t out = 0;
+    size_t out_len = 0;
+    EXPECT_TRUE(mgr.sdoUploadWithRetry(0xF110, 0x01,
+                                       reinterpret_cast<uint8_t*>(&out),
+                                       sizeof(out), &out_len, ca_opts));
+    EXPECT_EQ(out_len, sizeof(value));
+    EXPECT_EQ(out, value);
+
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerQueueTest, SdoUploadWithRetryNoCompleteAccessKeepsCleanSubindex) {
+    ON_CALL(transport_, getMicroseconds()).WillByDefault(Invoke(realMicros));
+    ON_CALL(transport_, lastAbortCode()).WillByDefault(Return(0));
+
+    CoEManager mgr(0, transport_);
+    ASSERT_TRUE(mgr.init());
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    const uint32_t value = 0xCAFEBABEu;
+
+    CoETransactionOptions opts;
+    opts.complete_access = false;
+    opts.max_retries = 0;
+
+    EXPECT_CALL(transport_,
+                sdoUpload(0, _, 0x1000, 128, 0x1400, 128, 0xF110,
+                          static_cast<uint8_t>(0x01u),
+                          _, _, _, _, _, _))
+        .WillOnce(Invoke(UploadOk(&value, sizeof(value))));
+
+    uint32_t out = 0;
+    size_t out_len = 0;
+    EXPECT_TRUE(mgr.sdoUploadWithRetry(0xF110, 0x01,
+                                       reinterpret_cast<uint8_t*>(&out),
+                                       sizeof(out), &out_len, opts));
+    EXPECT_EQ(out_len, sizeof(value));
+    EXPECT_EQ(out, value);
+
+    mgr.deinit();
 }
 
 TEST_F(SDOManagerQueueTest, QueueFullReturnsZero) {
@@ -523,6 +610,93 @@ TEST_F(SDOManagerSyncTest, WriteSyncEmptyData) {
 }
 
 // ============================================================================
+// SDO-abort escalation tests
+//
+// When the slave returns a definitive CoE SDO abort (e.g. 0x06070010 length
+// mismatch), the retry wrapper must NOT retry the identical payload — it
+// should call the transport exactly once, surface CoEError::Aborted, and
+// expose the abort code via CoEManager::lastSdoAbortCode().
+// ============================================================================
+
+TEST_F(SDOManagerSyncTest, WriteSyncAbort_DoesNotRetry_AndReportsAbortCode) {
+    // Transport always fails (download returns false).
+    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(DownloadFail());
+    // And reports a definitive slave SDO abort code.
+    const uint32_t kAbortCode = 0x06070010u; // Data type / length mismatch
+    ON_CALL(transport_, lastAbortCode()).WillByDefault(Return(kAbortCode));
+
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    uint16_t controlword = 0x0006;
+    // The download must be invoked exactly once — no retries on a definitive
+    // slave abort.
+    EXPECT_CALL(transport_, sdoDownload(_, _, _, _, _, _, _, _, _, _, _, _, _))
+        .Times(1);
+    auto result = mgr.writeSync(0x6040, 0, &controlword, sizeof(controlword),
+                                CoETransactionOptions{.timeout_ms = 100, .max_retries = 3});
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), CoEError::Aborted);
+    EXPECT_EQ(mgr.lastSdoAbortCode(), kAbortCode);
+
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerSyncTest, ReadSyncAbort_DoesNotRetry_AndReportsAbortCode) {
+    // Transport always fails (upload returns false).
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(UploadFail());
+    // And reports a definitive slave SDO abort code.
+    const uint32_t kAbortCode = 0x06090011u; // Subindex does not exist
+    ON_CALL(transport_, lastAbortCode()).WillByDefault(Return(kAbortCode));
+
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    // The upload must be invoked exactly once — no retries on a definitive
+    // slave abort.
+    EXPECT_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
+        .Times(1);
+    uint32_t value = 0;
+    auto result = mgr.readSync<uint32_t>(0x6040, 0,
+                                         CoETransactionOptions{.timeout_ms = 100, .max_retries = 3});
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), CoEError::Aborted);
+    EXPECT_EQ(mgr.lastSdoAbortCode(), kAbortCode);
+
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerSyncTest, WriteSyncTransportFailure_StillRetries_WhenNoAbortCode) {
+    // Transport fails but reports NO abort code (a genuine transport/timeout
+    // failure, not a slave rejection). The retry loop must still retry
+    // max_retries+1 times, and the result must be TransportError (not
+    // Aborted). This preserves the existing behaviour for non-abort failures.
+    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(DownloadFail());
+    ON_CALL(transport_, lastAbortCode()).WillByDefault(Return(0u));
+
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    uint16_t controlword = 0x0006;
+    // max_retries = 3 -> 4 attempts total.
+    EXPECT_CALL(transport_, sdoDownload(_, _, _, _, _, _, _, _, _, _, _, _, _))
+        .Times(4);
+    auto result = mgr.writeSync(0x6040, 0, &controlword, sizeof(controlword),
+                                CoETransactionOptions{.timeout_ms = 100, .max_retries = 3});
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), CoEError::TransportError);
+    EXPECT_EQ(mgr.lastSdoAbortCode(), 0u);
+
+    mgr.deinit();
+}
+
+// ============================================================================
 // Async Request + Poll Tests
 // ============================================================================
 
@@ -553,7 +727,7 @@ TEST_F(SDOManagerAsyncTest, AsyncUploadPollCompletion) {
     ASSERT_NE(id, 0u);
 
     SDOResponse resp{};
-    EXPECT_TRUE(mgr.getResponse(id, resp));
+    EXPECT_TRUE(waitForResponse(mgr, id, resp));
     EXPECT_TRUE(resp.success());
     EXPECT_EQ(resp.data_size, sizeof(uint16_t));
 
@@ -587,7 +761,7 @@ TEST_F(SDOManagerAsyncTest, AsyncDownloadPollCompletion) {
     ASSERT_NE(id, 0u);
 
     SDOResponse resp{};
-    EXPECT_TRUE(mgr.getResponse(id, resp));
+    EXPECT_TRUE(waitForResponse(mgr, id, resp));
     EXPECT_TRUE(resp.success());
 
     mgr.deinit();
@@ -606,7 +780,7 @@ TEST_F(SDOManagerAsyncTest, AsyncRequestFailedSlave) {
     ASSERT_NE(id, 0u);
 
     SDOResponse resp{};
-    EXPECT_TRUE(mgr.getResponse(id, resp));
+    EXPECT_TRUE(waitForResponse(mgr, id, resp));
     EXPECT_FALSE(resp.success());
     EXPECT_EQ(resp.status, SDOStatus::Failed);
     EXPECT_EQ(resp.abort_code, SDO::SDOAbortCode::DeviceStateError);
@@ -666,12 +840,13 @@ TEST_F(SDOManagerWorkerTest, WorkerProcessesMultipleRequests) {
         ids.push_back(id);
     }
 
-    EXPECT_EQ(upload_count.load(), 5);
+    // Wait for all uploads to complete
+    ASSERT_TRUE(waitFor(std::function<bool()>{[&]{ return upload_count.load() == 5; }}, 2000));
 
     // Verify all responses
     for (auto id : ids) {
         SDOResponse resp{};
-        EXPECT_TRUE(mgr.getResponse(id, resp));
+        EXPECT_TRUE(waitForResponse(mgr, id, resp));
         EXPECT_TRUE(resp.success());
     }
 
@@ -928,7 +1103,7 @@ TEST_F(SDOManagerResponseFieldsTest, UploadResponseFields) {
     ASSERT_NE(id, 0u);
 
     SDOResponse resp{};
-    EXPECT_TRUE(mgr.getResponse(id, resp));
+    EXPECT_TRUE(waitForResponse(mgr, id, resp));
     EXPECT_EQ(resp.request_id, id);
     EXPECT_EQ(resp.slave_index, 3);
     EXPECT_EQ(resp.index, 0x2000);
@@ -963,7 +1138,7 @@ TEST_F(SDOManagerResponseFieldsTest, DownloadResponseFields) {
     ASSERT_NE(id, 0u);
 
     SDOResponse resp{};
-    EXPECT_TRUE(mgr.getResponse(id, resp));
+    EXPECT_TRUE(waitForResponse(mgr, id, resp));
     EXPECT_EQ(resp.slave_index, 2);
     EXPECT_EQ(resp.index, 0x6040);
     EXPECT_EQ(resp.operation, SDOOperation::Download);

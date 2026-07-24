@@ -34,9 +34,12 @@ static constexpr uint16_t EC_ECMD_NOP  = 0x0000;
 static constexpr uint16_t EC_ECMD_READ = 0x0100;
 
 // EEPROM status flags
-static constexpr uint16_t EC_ESTAT_BUSY  = 0x8000;
-static constexpr uint16_t EC_ESTAT_EMASK = 0x7800;
-static constexpr uint16_t EC_ESTAT_NACK  = 0x2000;
+static constexpr uint16_t EC_ESTAT_BUSY     = 0x8000;
+static constexpr uint16_t EC_ESTAT_EMASK    = 0x7800;
+static constexpr uint16_t EC_ESTAT_CRC_ERR  = 0x0800;
+static constexpr uint16_t EC_ESTAT_LOAD_ERR = 0x1000;
+static constexpr uint16_t EC_ESTAT_NACK     = 0x2000;
+static constexpr uint16_t EC_ESTAT_WRITE_ERR = 0x4000;
 
 // ============================================================================
 // SIIReader Implementation
@@ -131,8 +134,6 @@ bool SIIReader::readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t*
             return false;
         }
 
-        Tether::Platform::Clock::instance().delayMicroseconds(200);
-
         estat = 0;
         uint32_t post_iters = 0;
         if (!waitNotBusy(slave_index, &estat, &post_iters)) {
@@ -143,13 +144,27 @@ bool SIIReader::readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t*
             return false;
         }
 
-        if ((estat & EC_ESTAT_NACK) != 0) {
-            nack_count++;
-            if (m_master.debugFlags().siiEeprom && m_master.debugFlags().siiEepromFilt.allows(slave_index)) {
-                TETHER_LOGD(TAG, "SII EEPROM [slave %u]: readRaw32 addr=0x%04X NACK retry %d/3", slave_index, word_address, nack_count);
+        if ((estat & EC_ESTAT_EMASK) != 0) {
+            if ((estat & EC_ESTAT_NACK) != 0) {
+                nack_count++;
+                if (m_master.debugFlags().siiEeprom && m_master.debugFlags().siiEepromFilt.allows(slave_index)) {
+                    TETHER_LOGD(TAG, "SII EEPROM [slave %u]: readRaw32 addr=0x%04X NACK retry %d/3", slave_index, word_address, nack_count);
+                }
+                Tether::Platform::Clock::instance().delayMicroseconds(1000);
+                continue;
             }
-            Tether::Platform::Clock::instance().delayMicroseconds(1000);
-            continue;
+            // Non-NACK error (CRC, loading, write error): log and fail
+            if (m_master.debugFlags().siiEeprom && m_master.debugFlags().siiEepromFilt.allows(slave_index)) {
+                TETHER_LOGW(TAG, "SII EEPROM [slave %u]: readRaw32 addr=0x%04X error status=0x%04X (crc=%d load=%d write=%d)",
+                            slave_index, word_address, estat,
+                            (estat & EC_ESTAT_CRC_ERR) ? 1 : 0,
+                            (estat & EC_ESTAT_LOAD_ERR) ? 1 : 0,
+                            (estat & EC_ESTAT_WRITE_ERR) ? 1 : 0);
+            }
+            // Clear error by writing NOP
+            uint16_t nop_le = Raw::host_to_le16(EC_ECMD_NOP);
+            m_master.writeRegister(Master::slaveAddressFromADP(adpForSlave(slave_index)), EC_REG_EEPCTL, nop_le, 200);
+            return false;
         }
 
         uint32_t edat_le = 0;
@@ -466,6 +481,16 @@ bool SIIParser::parseIdentity(uint16_t slave_index, SIIData& out_data) {
     out_data.mailbox.std_tx_size = mbx_data[7];
     out_data.mailbox.protocols = mbx_data[8];
     
+    // Read EEPROM size info (word 0x002E)
+    uint16_t size_info = 0;
+    if (m_reader.readWord(slave_index, SII_SIZE_INFO, size_info)) {
+        out_data.eeprom_size_kbits = size_info & 0xFF;
+        if (out_data.eeprom_size_kbits > 0) {
+            out_data.eeprom_size_words = static_cast<uint16_t>(
+                static_cast<uint32_t>(out_data.eeprom_size_kbits) * 1024 / 16);
+        }
+    }
+    
     out_data.valid = true;
     return true;
 }
@@ -696,6 +721,13 @@ bool SIIParser::parse(uint16_t slave_index, SIIData& out_data) {
     const int max_categories = 64;  // Prevent infinite loops
     
     while (category_count < max_categories) {
+        // EEPROM size boundary check
+        if (out_data.eeprom_size_words > 0 && word_addr >= out_data.eeprom_size_words) {
+            TETHER_LOGW(TAG, "Category parse exceeded EEPROM size (%u words) at word 0x%04X",
+                        out_data.eeprom_size_words, word_addr);
+            break;
+        }
+
         // Read category header (2 words)
         uint16_t cat_type = 0;
         uint16_t cat_size = 0;
@@ -710,12 +742,19 @@ bool SIIParser::parse(uint16_t slave_index, SIIData& out_data) {
             TETHER_LOGD(TAG, "End of categories at word 0x%04X", word_addr - 1);
             break;
         }
-        
+
         if (!m_reader.readWord(slave_index, word_addr, cat_size)) {
             setError("Failed to read category size at word 0x%04X", word_addr);
             break;
         }
         word_addr++;
+
+        // Uninitialized/blank EEPROM region: treat as implicit end
+        if (cat_type == 0 && cat_size == 0) {
+            TETHER_LOGW(TAG, "Zero category header at word 0x%04X, treating as end",
+                        static_cast<uint16_t>(word_addr - 2));
+            break;
+        }
         
         // Category data starts here
         uint16_t data_byte_offset = word_addr * 2;

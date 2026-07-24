@@ -1,10 +1,13 @@
 #include "ExampleHelpers.hpp"
 
+#include <cstdio>
 #include <iostream>
 #include <sstream>
 
 #include "tether/ethercat/DebugFlags.hpp"
+#include "tether/ethercat/DebugGate.hpp"
 #include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/SDOErrorDecoder.hpp"
 #include "tether/ethercat/Slave.hpp"
 #include "tether/platform/Platform.hpp"
 
@@ -39,6 +42,63 @@ bool printDebugHelpIfRequested(const std::string& debugStr) {
     std::cout << "  --debug flagname:(slaves:0,2,5),otherflag:(slaves:1-3)\n";
     std::cout << "  (default: pass-all for every flag)\n";
     return true;
+}
+
+void addDebugConditionArgs(argparse::ArgumentParser& program) {
+    program.add_argument("--debug-start")
+        .default_value(std::string(""))
+        .help("Start debug output when condition fires. Use '--debug-start help' for syntax.");
+    program.add_argument("--debug-stop")
+        .default_value(std::string(""))
+        .help("Stop debug output when condition fires. Use '--debug-start help' for syntax.");
+}
+
+bool printDebugConditionHelpIfRequested(const std::string& startStr) {
+    if (startStr != "help") return false;
+#if TETHER_DEBUG_GATE_ENABLED
+    EtherCAT::DebugGate::printHelp();
+#else
+    std::cout << "Debug gate compiled out (TETHER_DEBUG_GATE_ENABLED=0).\n"
+              << "Conditional debugging is not available in this build.\n";
+#endif
+    return true;
+}
+
+bool applyDebugGateConditions(const std::string& startCond,
+                              const std::string& stopCond,
+                              EtherCAT::Master& master,
+                              const char* tag) {
+    if (startCond.empty() && stopCond.empty()) return true;
+
+#if !TETHER_DEBUG_GATE_ENABLED
+    if (!startCond.empty() || !stopCond.empty()) {
+        TETHER_LOGW(tag, "Debug gate compiled out (TETHER_DEBUG_GATE_ENABLED=0); "
+                         "ignoring --debug-start/--debug-stop conditions.");
+    }
+    return true;
+#else
+    if (!startCond.empty()) {
+        auto cond = EtherCAT::DebugGate::parseCondition(startCond);
+        if (!cond) {
+            TETHER_LOGE(tag, "Failed to parse --debug-start condition: '%s'", startCond.c_str());
+            return false;
+        }
+        TETHER_LOGI(tag, "Debug gate: global start condition = '%s'", startCond.c_str());
+        master.debugGate().addGlobalStart(std::move(cond));
+    }
+
+    if (!stopCond.empty()) {
+        auto cond = EtherCAT::DebugGate::parseCondition(stopCond);
+        if (!cond) {
+            TETHER_LOGE(tag, "Failed to parse --debug-stop condition: '%s'", stopCond.c_str());
+            return false;
+        }
+        TETHER_LOGI(tag, "Debug gate: global stop condition = '%s'", stopCond.c_str());
+        master.debugGate().addGlobalStop(std::move(cond));
+    }
+
+    return true;
+#endif
 }
 
 void addVlanArgs(argparse::ArgumentParser& program) {
@@ -324,6 +384,60 @@ void logMailboxConfig(const MailboxSizeConfig& size,
     TETHER_LOGI(tag, "Mailbox config: MbxOut addr=0x%04X len=%u, MbxIn addr=0x%04X len=%u",
                 addr.outAddress, size.outSize,
                 addr.inAddress, size.inSize);
+}
+
+// ============================================================================
+// SDO abort reporting
+// ============================================================================
+
+uint32_t reportSdoAbort(const EtherCAT::Slave& slave, const char* tag) {
+    const uint32_t abort_code = slave.lastSdoAbortCode();
+    if (abort_code == 0) return 0;
+
+    EtherCAT::Raw::SDOErrorDecoder decoder;
+    const char* meaning = decoder.sdoAbortCodeStr(abort_code);
+
+    const bool was_download = slave.lastSdoWasDownload();
+    const size_t attempted_len = slave.lastSdoAttemptedLength();
+    const char* op_str = was_download ? "download (write)" : "upload (read)";
+    const char* len_str = was_download
+                              ? "payload length sent to slave"
+                              : "read buffer capacity offered";
+
+    TETHER_LOGE(tag, "Slave rejected the SDO request: CoE abort code 0x%08X (%s). "
+                     "Operation: %s, attempted %s: %zu bytes.",
+                abort_code, meaning, op_str, len_str, attempted_len);
+
+    // Always echo to stderr so the user sees it on the console even when log
+    // output is redirected or silenced.
+    std::fprintf(stderr,
+                 "ERROR: Slave rejected the SDO request.\n"
+                 "  CoE SDO abort code: 0x%08X (%s)\n"
+                 "  Operation:          %s\n"
+                 "  Attempted %s: %zu bytes\n",
+                 abort_code, meaning,
+                 op_str, len_str, attempted_len);
+
+    // The length-mismatch family — the signature of the original
+    // "slave rejects the write because the payload is the wrong size"
+    // failure. Point the user at the object dictionary / ESI file.
+    if (abort_code == 0x06070010 || abort_code == 0x06070012 ||
+        abort_code == 0x06070013) {
+        const char* which = (abort_code == 0x06070012)
+                                ? "too high"
+                                : (abort_code == 0x06070013) ? "too low"
+                                                             : "mismatch";
+        std::fprintf(stderr,
+                     "  Cause: the payload size you sent (%zu bytes) does not match the size\n"
+                     "         the slave expects for this object (length %s).\n"
+                     "  Fix:   check the object dictionary / ESI (XML) file for the\n"
+                     "         target index:subindex to find the correct data type\n"
+                     "         and byte length, then send exactly that many bytes.\n",
+                     attempted_len, which);
+    }
+
+    std::fflush(stderr);
+    return abort_code;
 }
 
 } // namespace Tether::Examples

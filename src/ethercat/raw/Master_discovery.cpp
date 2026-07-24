@@ -105,6 +105,10 @@ bool Master::discoverSlaves()
             if (status_poller_) {
                 status_poller_->init(resp.wkc);
             }
+            // Debug gate checkpoint: discovery complete
+            if (debug_gate_) {
+                debug_gate_->notifyCheckpoint("discovery-complete");
+            }
             return true;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -136,9 +140,9 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
     // We'll attempt to set PRE_OP multiple times, with an extended wait per attempt.
     // This helps recover from transient conditions where the slave's mailbox or
     // internal state is not yet ready to accept AL state changes.
-    const int max_attempts = 3;          // Number of attempts
-    const int inner_tries = 200;         // Wait checks per attempt (inner loop)
-    const int inner_sleep_ms = 20;       // Delay between checks
+    const int max_attempts    = config_.preop_max_attempts;   // Number of attempts
+    const int inner_tries     = config_.preop_inner_tries;    // Wait checks per attempt (inner loop)
+    const int inner_sleep_ms  = config_.preop_inner_sleep_ms; // Delay between checks
 
     for (int attempt = 1; attempt <= max_attempts; ++attempt) {
         if (debug_flags_.stateMachine && debug_flags_.stateMachineFilt.allows(slave_index)) {
@@ -184,12 +188,32 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
                         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
                     }
 
+                    // If the initial AL_STATUS had an error bit, issue a
+                    // one-time fault diagnostic dump even though the
+                    // transition succeeded — the error bit indicates a
+                    // prior fault that users should be aware of.
+                    if (has_error) {
+                        std::lock_guard<std::mutex> _lg(m_diag_mutex_);
+                        if (m_diagnosed_slaves_.find(slave_index) == m_diagnosed_slaves_.end()) {
+                            TETHER_LOGI(TAG, "setPreop: issuing one-time fault_diagnose() for slave %u (error bit was set in initial AL_STATUS)", slave_index);
+                            if (faults_) {
+                                faults_->diagnose(slave_index);
+                            }
+                            m_diagnosed_slaves_.insert(slave_index);
+                        }
+                    }
+
                     // Post-PRE_OP SM validation safety net
                     uint8_t sm0_ctrl = 0, sm1_ctrl = 0;
                     (void)readRegister(SlaveAddress(slave_index), static_cast<uint16_t>(EC_REG_SM0 + 0x04), sm0_ctrl, 200);
                     (void)readRegister(SlaveAddress(slave_index), static_cast<uint16_t>(EC_REG_SM1 + 0x04), sm1_ctrl, 200);
                     if (sm0_ctrl != 0x26 || sm1_ctrl != 0x22) {
                         TETHER_LOGW(TAG, "setPreop: SM0=0x%02X SM1=0x%02X (expected 0x26/0x22) — slave may have rejected mailbox config", sm0_ctrl, sm1_ctrl);
+                    }
+
+                    // Debug gate checkpoint: PRE_OP confirmed
+                    if (debug_gate_) {
+                        debug_gate_->notifyCheckpoint("state:pre-op", slave_index);
                     }
 
                     return true;
@@ -267,11 +291,11 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
         }
 
         // Backoff before retrying
-        const int backoff_ms = 200 * attempt;
+        const int backoff_ms = config_.preop_backoff_ms * attempt;
         std::this_thread::sleep_for(std::chrono::milliseconds(backoff_ms));
     }
 
-    TETHER_LOGE(TAG, "setPreopAndConfirm: all %d attempts failed", 3);
+    TETHER_LOGE(TAG, "setPreopAndConfirm: all %d attempts failed", max_attempts);
     return false;
 }
 
@@ -287,9 +311,9 @@ bool Master::forceMailboxDefaults(SlaveAddress slave_address)
     // Standard EtherCAT convention: SM0 (Receive/MbxIn, M→S),
     //                               SM1 (Send/MbxOut, S→M)
     constexpr uint16_t kHardcodedWrAddr = 0x1000;  // Receive/MbxIn (M→S, SM0)
-    constexpr uint16_t kHardcodedWrLen = 128;
+    constexpr uint16_t kHardcodedWrLen = ECAT_DISCOVERY_MBX_WRITE_LEN;
     constexpr uint16_t kHardcodedRdAddr = 0x1400;  // Send/MbxOut (S→M, SM1)
-    constexpr uint16_t kHardcodedRdLen = 128;
+    constexpr uint16_t kHardcodedRdLen = ECAT_DISCOVERY_MBX_READ_LEN;
 
     if (slave_index >= PDO::kMaxPDOSlaves) return false;
 

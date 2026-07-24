@@ -65,11 +65,20 @@ namespace PDO {
 int PDOMapping::add_rxpdo(uint16_t slave_index, void* buffer, uint16_t size,
                           uint16_t pdo_index, PDOAddressMode mode) {
     if (m_entry_count >= kMaxPDOEntries) {
-        TETHER_LOGE(TAG, "PDO entry limit reached");
+        TETHER_LOGE(TAG,
+            "Tether internal PDO entry limit reached (%zu entries). This is a Tether limit, "
+            "not a slave limit. Increase ECAT_PDO_MAX_ENTRIES in TetherConfig.hpp.",
+            kMaxPDOEntries);
         return -1;
     }
     if (!buffer || size == 0 || size > kMaxPDOSize) {
-        TETHER_LOGE(TAG, "Invalid PDO buffer or size");
+        TETHER_LOGE(TAG,
+            "Invalid PDO buffer or size (size=%u). %s",
+            size,
+            (size > kMaxPDOSize)
+                ? "This is a Tether limit, not a slave limit. "
+                  "Increase ECAT_PDO_MAX_BUFFER_SIZE in TetherConfig.hpp."
+                : "Buffer is null or size is zero.");
         return -1;
     }
     PDOEntry& e   = m_entries[m_entry_count];
@@ -93,11 +102,20 @@ int PDOMapping::add_rxpdo(uint16_t slave_index, void* buffer, uint16_t size,
 int PDOMapping::add_txpdo(uint16_t slave_index, void* buffer, uint16_t size,
                           uint16_t pdo_index, PDOAddressMode mode) {
     if (m_entry_count >= kMaxPDOEntries) {
-        TETHER_LOGE(TAG, "PDO entry limit reached");
+        TETHER_LOGE(TAG,
+            "Tether internal PDO entry limit reached (%zu entries). This is a Tether limit, "
+            "not a slave limit. Increase ECAT_PDO_MAX_ENTRIES in TetherConfig.hpp.",
+            kMaxPDOEntries);
         return -1;
     }
     if (!buffer || size == 0 || size > kMaxPDOSize) {
-        TETHER_LOGE(TAG, "Invalid PDO buffer or size");
+        TETHER_LOGE(TAG,
+            "Invalid PDO buffer or size (size=%u). %s",
+            size,
+            (size > kMaxPDOSize)
+                ? "This is a Tether limit, not a slave limit. "
+                  "Increase ECAT_PDO_MAX_BUFFER_SIZE in TetherConfig.hpp."
+                : "Buffer is null or size is zero.");
         return -1;
     }
     PDOEntry& e   = m_entries[m_entry_count];
@@ -1019,6 +1037,7 @@ bool PDOManager::sendAll() {
     std::vector<MultiDatagramSpec> rx_specs;
     std::vector<size_t> rx_entry_idx;
     std::vector<size_t> rx_confirmed_spec_map;
+    size_t rx_skipped = 0;
 
     for (size_t i = 0; i < mapping_.entry_count(); i++) {
         const PDO::PDOEntry* e = mapping_.get_entry(i);
@@ -1050,6 +1069,7 @@ bool PDOManager::sendAll() {
                 roundtrip = true;
                 break;
             default:
+                rx_skipped++;
                 continue;
         }
 
@@ -1093,6 +1113,25 @@ bool PDOManager::sendAll() {
                     rx_entry_idx[rx_confirmed_spec_map[j]]);
             }
         }
+    }
+
+    // If all enabled RxPDO entries were skipped (e.g. Logical addressing
+    // is not implemented), mark the send phase as failed.
+    if (rx_specs.empty() && rx_skipped > 0) {
+        split_state_.send_phase_ok = false;
+        for (size_t i = 0; i < mapping_.entry_count(); i++) {
+            PDO::PDOEntry* e = mapping_.get_entry_mut(i);
+            if (!e || !e->enabled || e->direction != PDO::PDODirection::RxPDO)
+                continue;
+            e->error_count++;
+            stats_.rxpdo_errors++;
+        }
+    }
+
+    // Debug gate checkpoint: first successful RxPDO send
+    if (debug_gate_ && !first_rxpdo_emitted_ && split_state_.send_phase_ok) {
+        first_rxpdo_emitted_ = true;
+        debug_gate_->notifyCheckpoint("first-rxpdo");
     }
 
     return split_state_.send_phase_ok;
@@ -1141,6 +1180,7 @@ bool PDOManager::receiveAll() {
     std::vector<size_t> tx_entry_idx;
     std::vector<uint8_t> tx_idxs;
     std::vector<size_t> tx_spec_map;
+    size_t tx_skipped = 0;
 
     for (size_t i = 0; i < mapping_.entry_count(); i++) {
         const PDO::PDOEntry* e = mapping_.get_entry(i);
@@ -1172,6 +1212,7 @@ bool PDOManager::receiveAll() {
                 roundtrip = true;
                 break;
             default:
+                tx_skipped++;
                 continue;
         }
 
@@ -1239,8 +1280,27 @@ bool PDOManager::receiveAll() {
         }
     }
 
+    // If all enabled TxPDO entries were skipped (e.g. Logical addressing
+    // is not implemented), mark the receive phase as failed.
+    if (tx_specs.empty() && tx_skipped > 0) {
+        all_ok = false;
+        for (size_t i = 0; i < mapping_.entry_count(); i++) {
+            PDO::PDOEntry* e = mapping_.get_entry_mut(i);
+            if (!e || !e->enabled || e->direction != PDO::PDODirection::TxPDO)
+                continue;
+            e->error_count++;
+            stats_.txpdo_errors++;
+        }
+    }
+
     if (rxPDODebug() || txPDODebug()) {
         TETHER_LOGI(TAG, "  [PDO-DEBUG] Cycle result: %s", all_ok ? "OK" : "ERRORS");
+    }
+
+    // Debug gate checkpoint: first successful TxPDO receive
+    if (debug_gate_ && !first_txpdo_emitted_ && all_ok) {
+        first_txpdo_emitted_ = true;
+        debug_gate_->notifyCheckpoint("first-txpdo");
     }
 
     return all_ok;

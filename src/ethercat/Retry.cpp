@@ -5,6 +5,7 @@
 
 #include "Retry.hpp"
 #include "tether/platform/EspCompat.hpp"
+#include "tether/ethercat/TetherConfig.hpp"
 
 #define LOG_TAG "EC_RETRY"
 #define LOGI(fmt, ...) TETHER_LOGI(LOG_TAG, fmt, ##__VA_ARGS__)
@@ -285,9 +286,12 @@ RetryResult retryAPWRVerify(RetryExecutor& executor, uint8_t idx, uint16_t slave
 
     // Now verify by reading back
     uint8_t verify_idx = (idx + 1) & 0xFF;  // Use different index
-    uint8_t read_buffer[64];
+    uint8_t read_buffer[ECAT_RETRY_VERIFY_BUFFER_SIZE];
     if (length > sizeof(read_buffer)) {
-        LOGE("Data too large for verify buffer");
+        LOGE("Data too large for Tether internal retry verify buffer: %u bytes (max=%zu). "
+             "This is a Tether limit, not a slave limit. "
+             "Increase ECAT_RETRY_VERIFY_BUFFER_SIZE in TetherConfig.hpp.",
+             length, sizeof(read_buffer));
         write_result.success = false;
         return write_result;
     }

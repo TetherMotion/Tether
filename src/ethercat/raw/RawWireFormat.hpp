@@ -212,6 +212,18 @@ struct __attribute__((packed)) SdoInitDownloadRes {
 };
 static_assert(sizeof(SdoInitDownloadRes) == 8, "SdoInitDownloadRes must be 8 bytes");
 
+struct __attribute__((packed)) SdoDownloadSegReq {
+    uint8_t cmd;
+    uint8_t data[7];
+};
+static_assert(sizeof(SdoDownloadSegReq) == 8, "SdoDownloadSegReq must be 8 bytes");
+
+struct __attribute__((packed)) SdoDownloadSegRes {
+    uint8_t cmd;
+    uint8_t reserved[7];
+};
+static_assert(sizeof(SdoDownloadSegRes) == 8, "SdoDownloadSegRes must be 8 bytes");
+
 struct __attribute__((packed)) SdoAbort {
     uint8_t cmd;
     uint16_t index_le;

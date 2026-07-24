@@ -75,6 +75,7 @@ enum class CoEError : uint8_t {
     TransportError,
     QueueFull,
     NotConfigured,
+    ShuttingDown,
     SlaveNotFound,
     InternalError,
 };
@@ -90,6 +91,7 @@ struct CoETransactionOptions {
     uint32_t timeout_ms = 1000;
     uint8_t priority = 0;
     uint8_t max_retries = 3;
+    bool complete_access = false;
 };
 
 struct BehaviourOptions {

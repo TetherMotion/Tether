@@ -88,7 +88,7 @@ function(create_module_test MODULE_NAME SOURCES LIBS DEFINITIONS)
         ${DEFINITIONS}
     )
     
-    gtest_discover_tests(tether_${MODULE_NAME}_tests)
+    gtest_discover_tests(tether_${MODULE_NAME}_tests PROPERTIES TIMEOUT 30)
 endfunction()
 
 # Collect test sources by module
@@ -501,7 +501,9 @@ endif()
 # exist on the original author's machine, so they are not part of the default
 # suite (they were never in the old monolithic binary). They are only built when
 # TETHER_BUILD_MODULE_TESTS is enabled (e.g. by the ASAN/TSAN CI jobs).
-if(TETHER_BUILD_MODULE_TESTS AND ESI_TEST_SOURCES)
+# They also require the tether_esi library, which is only created when
+# TETHER_BUILD_EXTRACT_ESI is ON, so guard on the target being present.
+if(TETHER_BUILD_MODULE_TESTS AND ESI_TEST_SOURCES AND TARGET tether_esi)
     create_module_test(esi
         "${ESI_TEST_SOURCES}"
         "tether_common;tether_esi"
@@ -588,7 +590,7 @@ target_compile_definitions(tether_fsoe_integration_tests PRIVATE
     TETHER_COMPILE_MASTER=1
 )
 
-gtest_discover_tests(tether_fsoe_integration_tests)
+gtest_discover_tests(tether_fsoe_integration_tests PROPERTIES TIMEOUT 30)
 
 add_executable(tether_header_tests
     sii/zero_coverage_header_tests.cpp
@@ -609,7 +611,7 @@ target_link_libraries(tether_header_tests
 target_compile_definitions(tether_header_tests PRIVATE
 )
 
-gtest_discover_tests(tether_header_tests)
+gtest_discover_tests(tether_header_tests PROPERTIES TIMEOUT 30)
 
 # Helper to create ethercat test executables with common settings
 function(create_ethercat_test NAME)
@@ -632,7 +634,7 @@ function(create_ethercat_test NAME)
     target_compile_definitions(tether_ethercat_${NAME}_tests PRIVATE
         ${ET_DEFS}
     )
-    gtest_discover_tests(tether_ethercat_${NAME}_tests)
+    gtest_discover_tests(tether_ethercat_${NAME}_tests PROPERTIES TIMEOUT 30)
 endfunction()
 
 # Common stubs and source files compiled into each ethercat test exe
@@ -646,6 +648,7 @@ set(ETHERCAT_COMMON_SRC
     ../src/ethercat/FaultDetection.cpp
     ../src/ethercat/WriteVerify.cpp
     ../src/ethercat/CoEManager.cpp
+    ../src/ethercat/raw/SDOErrorDecoder.cpp
     ../src/ethercat/raw/PDOManager.cpp
     ../src/ethercat/raw/LogicalAddressManager.cpp
     ../src/ethercat/DCClass.cpp
@@ -672,7 +675,9 @@ create_ethercat_test(pdo
         ../src/ethercat/raw/PDOManager.cpp
         ../src/ethercat/raw/LogicalAddressManager.cpp
         ../src/ethercat/CoEManager.cpp
+        ../src/ethercat/raw/SDOErrorDecoder.cpp
         ../src/ethercat/FaultDetection.cpp
+        ../src/ethercat/DebugGate.cpp
         ../src/ethercat/utils/PDO.cpp
         ../src/ethercat/SyncManagerValidation.cpp
         ../src/fmmu/FMMUConfiguration.cpp
@@ -702,8 +707,10 @@ create_ethercat_test(protocol
         ../src/ethercat/SlaveStatusPoller.cpp
         ../src/ethercat/WriteVerify.cpp
         ../src/ethercat/CoEManager.cpp
+        ../src/ethercat/raw/SDOErrorDecoder.cpp
         ../src/ethercat/raw/PDOManager.cpp
         ../src/ethercat/raw/LogicalAddressManager.cpp
+        ../src/ethercat/DebugGate.cpp
         ../src/ethercat/Retry.cpp
         ../src/ethercat/host_stubs.cpp
         ../src/ethercat/ConditionalPacketRouter.cpp
@@ -726,13 +733,12 @@ create_ethercat_test(timing
     DEFS TETHER_COMPILE_MASTER=1
 )
 
-# Master/coverage tests (vlan router, master frame, integration, sync manager)
+# Master/coverage tests (vlan router, master frame, sync manager)
 create_ethercat_test(coverage
     SOURCES
         ethercat/test_vlan_router.cpp
         ethercat/test_master_frame_coverage.cpp
         ethercat/test_master_udp_encapsulation.cpp
-        ethercat/test_integration_paired.cpp
         ethercat/test_sync_manager.cpp
         ethercat/test_set_preop_fault_diagnose.cpp
         ethercat/test_set_preop_retry.cpp
@@ -747,6 +753,37 @@ create_ethercat_test(coverage
     LIBS tether_ethercat_master
     DEFS TETHER_COMPILE_MASTER=1
 )
+
+# EtherCAT integration tests (master ↔ slave communication via paired
+# loopback interfaces).  Separated from unit tests because they exercise
+# full end-to-end communication paths and may require more time/resources.
+add_executable(tether_ethercat_integration_tests
+    ethercat/test_integration_paired.cpp
+    ${ETHERCAT_COMMON_STUBS}
+    ../src/ethercat/SlaveEmulator.cpp
+    ../src/ethercat/ConditionalPacketRouter.cpp
+    ../src/ethercat/TransactionRouter.cpp
+)
+
+target_include_directories(tether_ethercat_integration_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+)
+
+target_link_libraries(tether_ethercat_integration_tests
+    tether_ethercat_common
+    tether_ethercat_master
+    GTest::gtest_main
+    GTest::gmock
+)
+
+target_compile_definitions(tether_ethercat_integration_tests PRIVATE
+    TETHER_COMPILE_MASTER=1
+)
+
+gtest_discover_tests(tether_ethercat_integration_tests PROPERTIES TIMEOUT 30)
 
 # EtherCAT master + slave state-machine tests (needs full Master/Slave linkage)
 add_executable(tether_ethercat_master_tests
@@ -771,7 +808,7 @@ target_compile_definitions(tether_ethercat_master_tests PRIVATE
     TETHER_COMPILE_MASTER=1
 )
 
-gtest_discover_tests(tether_ethercat_master_tests)
+gtest_discover_tests(tether_ethercat_master_tests PROPERTIES TIMEOUT 30)
 
 add_executable(tether_model_identification_tests
     identification/test_ModelIdentification.cpp
@@ -794,7 +831,7 @@ target_link_libraries(tether_model_identification_tests
 target_compile_definitions(tether_model_identification_tests PRIVATE
 )
 
-gtest_discover_tests(tether_model_identification_tests)
+gtest_discover_tests(tether_model_identification_tests PROPERTIES TIMEOUT 30)
 
 add_executable(tether_simulation_identification_tests
     identification/test_SimulationIdentificationIntegration.cpp
@@ -818,7 +855,7 @@ target_link_libraries(tether_simulation_identification_tests
 target_compile_definitions(tether_simulation_identification_tests PRIVATE
 )
 
-gtest_discover_tests(tether_simulation_identification_tests)
+gtest_discover_tests(tether_simulation_identification_tests PROPERTIES TIMEOUT 30)
 
 if(TETHER_ENABLE_COVERAGE)
     find_program(GCOVR_EXECUTABLE NAMES gcovr)

@@ -50,7 +50,7 @@ public:
     NetworkInterface& iface() { return iface_; }
     const NetworkInterface& iface() const { return iface_; }
 
-    /// Get a pointer (useful for set_network_interface).
+    /// Get a pointer to the underlying NetworkInterface.
     NetworkInterface* ifacePtr() { return &iface_; }
 
     /// Number of frames "sent" (discarded).

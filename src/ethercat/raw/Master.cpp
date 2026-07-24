@@ -18,6 +18,7 @@
 #include "tether/ethercat/SlaveStatusPoller.hpp"
 #include "tether/ethercat/RealtimeLoop.hpp"
 #include "tether/ethercat/SyncManagerValidation.hpp"
+#include "tether/ethercat/CoeSDOChannel.hpp"
 #include "tether/sii/SIIParser.hpp"
 #include "tether/fmmu/FMMUConfiguration.hpp"
 #include "raw/internal.hpp"
@@ -36,15 +37,9 @@ namespace EtherCAT {
 
 static const char* TAG = "ethercat";
 
-// Global registry of Master instances (host-only helper). This
-// allows host-side helpers (examples) to find the master associated with
-// a NetworkInterface pointer.
-static std::mutex g_master_list_mutex;
-static std::vector<Master*> g_master_list;
-
 // TX retry constants
-static constexpr int       kMaxTxRetries   = 3;
-static constexpr uint32_t  kTxRetryDelayUs = 50;
+static constexpr int       kMaxTxRetries   = ECAT_TX_MAX_RETRIES;
+static constexpr uint32_t  kTxRetryDelayUs = ECAT_TX_RETRY_DELAY_US;
 
 class IMotionControlLoop {
 public:
@@ -365,6 +360,10 @@ public:
         return master_.readRegister(SlaveAddress(slave_index), reg_addr, out, len, timeout_ms);
     }
 
+    uint32_t lastAbortCode() const override {
+        return master_.lastCoeSdoAbortCode();
+    }
+
 private:
     Master& master_;
 };
@@ -389,8 +388,16 @@ Master::Master(const Config& config)
         TETHER_LOGE(TAG, "Failed to initialize master packet router");
     }
 
+    // Initialize debug gate and wire it to debug flags
+    debug_gate_ = std::make_unique<DebugGate>();
+    debug_flags_.setGate(debug_gate_.get());
+    debug_gate_->setGateChangedCallback([this]() { this->updateDebugFlags(); });
+
     // Create instance-based SDO transport (shared across all per-slave CoEManagers)
     sdo_transport_ = std::make_unique<MasterSDOTransport>(*this);
+
+    // Create CoE SDO mailbox channel
+    coe_sdo_channel_ = std::make_unique<Raw::CoeSDOChannel>();
 
     // Create thin wrapper sub-managers so callers may use e.g. master.dc() immediately.
     // Sub-managers are lightweight wrappers that forward to global/free-function
@@ -399,6 +406,7 @@ Master::Master(const Config& config)
     pdo_    = std::make_unique<PDOManager>(*pdo_transport_);
     logical_addr_mgr_ = std::make_unique<LogicalAddressManager>(*pdo_transport_);
     pdo_->setLogicalAddressManager(logical_addr_mgr_.get());
+    pdo_->setDebugGate(debug_gate_.get());
     dc_     = std::make_unique<DCManager>(*this);
     foe_    = std::make_unique<FoEManager>(*this);
     voe_    = std::make_unique<VoEManager>(*this);
@@ -406,23 +414,10 @@ Master::Master(const Config& config)
     fault_transport_ = std::make_unique<MasterFaultTransport>(*this);
     faults_ = std::make_unique<FaultDetector>(*fault_transport_);
     status_poller_ = std::make_unique<SlaveStatusPoller>(*fault_transport_);
-
-    // Register this instance in the global list so host helpers may locate it
-    {
-        std::lock_guard<std::mutex> lg(g_master_list_mutex);
-        g_master_list.push_back(this);
-    }
 }
 
 Master::~Master()
 {
-    // Unregister this instance from the global list first
-    {
-        std::lock_guard<std::mutex> lg(g_master_list_mutex);
-        auto it = std::find(g_master_list.begin(), g_master_list.end(), this);
-        if (it != g_master_list.end()) g_master_list.erase(it);
-    }
-
     stop();
 
     // Clean up per-master packet router
@@ -437,7 +432,6 @@ Master::~Master()
 void Master::start(const NetworkInterface& iface, const uint8_t src_mac[6])
 {
     iface_ = iface;
-    iface_ptr_ = &iface;  // Store original pointer for identity comparison
     std::memcpy(src_mac_, src_mac, 6);
     ensureRxQueues();
 
@@ -602,15 +596,6 @@ const uint8_t* Master::getSrcMac() const { return src_mac_; }
 
 const NetworkInterface* Master::networkInterface() const { return &iface_; }
 
-Master* Master::findByNetworkInterface(const NetworkInterface* iface)
-{
-    std::lock_guard<std::mutex> lg(g_master_list_mutex);
-    for (auto m : g_master_list) {
-        if (m && m->iface_ptr_ == iface) return m;
-    }
-    return nullptr;
-}
-
 
 
 
@@ -627,7 +612,7 @@ bool Master::coeSdoUpload(uint16_t adp, uint8_t* inout_mbx_cnt,
                                    unsigned int poll_interval_ms,
                                    unsigned int transaction_timeout_ms)
 {
-    return Raw::coe_sdo_upload(*this, adp, inout_mbx_cnt,
+    return coe_sdo_channel_->upload(*this, adp, inout_mbx_cnt,
                                mbx_wr_addr, mbx_wr_len,
                                mbx_rd_addr, mbx_rd_len,
                                index, sub, out, out_cap, out_len, diag_enabled,
@@ -643,11 +628,15 @@ bool Master::coeSdoDownload(uint16_t adp, uint8_t* inout_mbx_cnt,
                                      unsigned int poll_interval_ms,
                                      unsigned int transaction_timeout_ms)
 {
-    return Raw::coe_sdo_download(*this, adp, inout_mbx_cnt,
+    return coe_sdo_channel_->download(*this, adp, inout_mbx_cnt,
                                  mbx_wr_addr, mbx_wr_len,
                                  mbx_rd_addr, mbx_rd_len,
                                  index, sub, data, data_len, diag_enabled,
                                  poll_interval_ms, transaction_timeout_ms);
+}
+
+uint32_t Master::lastCoeSdoAbortCode() const {
+    return coe_sdo_channel_ ? coe_sdo_channel_->lastAbortCode() : 0u;
 }
 
 // ============================================================================

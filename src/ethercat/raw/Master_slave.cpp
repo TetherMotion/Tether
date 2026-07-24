@@ -29,6 +29,7 @@
 #include <cstring>
 #include <cerrno>
 #include <bit>
+#include <vector>
 #include "sii/SIIReader.hpp"
 #include <inttypes.h>
 
@@ -75,6 +76,116 @@ void Master::initSlaves(uint16_t count)
     // Resize filters to current slave count and push per-slave flags.
     debug_flags_.resizeFilters(count);
     updateDebugFlags();
+}
+
+bool Master::drainSlaveMailbox(uint16_t slave_index, unsigned int max_drain)
+{
+    const char* local_tag = "mbox_drain";
+
+    uint16_t mbx_wr_addr = 0, mbx_wr_len = 0;
+    uint16_t mbx_rd_addr = 0, mbx_rd_len = 0;
+    if (!sdoManager(slave_index).getMailbox(&mbx_wr_addr, &mbx_wr_len,
+                                            &mbx_rd_addr, &mbx_rd_len)) {
+        TETHER_LOGW(local_tag, "Slave %u: cannot drain mailbox, no mailbox configured", slave_index);
+        return false;
+    }
+
+    if (mbx_rd_len == 0) {
+        TETHER_LOGW(local_tag, "Slave %u: cannot drain mailbox, read length is zero", slave_index);
+        return false;
+    }
+
+    // Some ESCs only clear WRITE_BUF_FULL when the master reads the entire
+    // configured mailbox length in one datagram. Allocate a buffer that matches
+    // the SM length instead of capping at 256 bytes.
+    std::vector<uint8_t> drain_buf(mbx_rd_len, 0);
+
+    bool drained_any = false;
+    for (unsigned int i = 0; i < max_drain; ++i) {
+        uint8_t sm1_status = 0;
+        if (!readRegister(SlaveAddress(slave_index), Raw::sm_status_address(1), sm1_status, 100)) {
+            TETHER_LOGW(local_tag, "Slave %u: failed to read SM1 status while draining", slave_index);
+            return false;
+        }
+
+        // SM1 (slave→master mailbox) signals unread data via the mailbox-full
+        // flag (bit 3, 0x08) per ETG.1000.4. Bit 7 (WRITE_BUFFER_FULL) is only
+        // meaningful for 3-buffer PDO SMs and must not be treated as "mailbox
+        // full" — doing so causes premature reads (WKC=0) on slaves that
+        // transiently set bit 7 before writing the response.
+        if ((sm1_status & Raw::EC_SM_STATUS_MBXFULL) == 0) {
+            if (drained_any) {
+                TETHER_LOGI(local_tag, "Slave %u: SM1 drained successfully", slave_index);
+            }
+            return true;
+        }
+
+        if (!drained_any) {
+            TETHER_LOGW(local_tag, "Slave %u: SM1 full at startup (status=0x%02X). Draining stale mailbox data...",
+                        slave_index, sm1_status);
+        }
+
+        if (!readRegister(SlaveAddress(slave_index), mbx_rd_addr,
+                          drain_buf.data(), static_cast<uint16_t>(drain_buf.size()), 200)) {
+            TETHER_LOGW(local_tag, "Slave %u: SM1 drain read failed, attempting SM1 activate reset", slave_index);
+            if (resetSlaveMailboxSM1(slave_index)) {
+                // After a successful reset the buffer should be empty; re-check
+                // before continuing so we don't loop on stale status.
+                uint8_t sm1_status = 0;
+                if (readRegister(SlaveAddress(slave_index), Raw::sm_status_address(1), sm1_status, 100) &&
+                    (sm1_status & Raw::EC_SM_STATUS_MBXFULL) == 0) {
+                    TETHER_LOGI(local_tag, "Slave %u: SM1 empty after reset", slave_index);
+                    return true;
+                }
+            }
+            return false;
+        }
+        TETHER_LOGW(local_tag, "Slave %u: drained stale mailbox data #%u (len=%u)",
+                    slave_index, i + 1, static_cast<unsigned>(drain_buf.size()));
+        drained_any = true;
+    }
+
+    // After max_drain reads, SM1 is still reporting full. The slave may be
+    // continuously refilling the buffer or the ESC is not acknowledging the
+    // reads; do not pretend the drain succeeded.
+    TETHER_LOGE(local_tag, "Slave %u: SM1 still full after %u drain attempts", slave_index, max_drain);
+    return false;
+}
+
+bool Master::resetSlaveMailboxSM1(uint16_t slave_index)
+{
+    const char* local_tag = "mbox_reset";
+    const uint16_t sm1_activate_addr = static_cast<uint16_t>(Raw::EC_REG_SM1 + 0x06u);
+    const uint16_t sm1_status_addr = Raw::sm_status_address(1);
+
+    TETHER_LOGW(local_tag, "Slave %u: cycling SM1 activate register (0x%04X) to clear stuck WRITE_BUF_FULL",
+                slave_index, sm1_activate_addr);
+
+    uint8_t disable = 0x00;
+    uint8_t enable = 0x01;
+    if (!writeRegister(SlaveAddress(slave_index), RegisterAddress(sm1_activate_addr), &disable, sizeof(disable), 200)) {
+        TETHER_LOGE(local_tag, "Slave %u: failed to disable SM1", slave_index);
+        return false;
+    }
+    if (!writeRegister(SlaveAddress(slave_index), RegisterAddress(sm1_activate_addr), &enable, sizeof(enable), 200)) {
+        TETHER_LOGE(local_tag, "Slave %u: failed to re-enable SM1", slave_index);
+        return false;
+    }
+
+    uint8_t sm1_status = 0;
+    if (!readRegister(SlaveAddress(slave_index), RegisterAddress(sm1_status_addr), sm1_status, 100)) {
+        TETHER_LOGE(local_tag, "Slave %u: failed to read SM1 status after reset", slave_index);
+        return false;
+    }
+
+    if ((sm1_status & Raw::EC_SM_STATUS_MBXFULL) != 0) {
+        TETHER_LOGE(local_tag, "Slave %u: SM1 still full after activate reset (status=0x%02X)",
+                    slave_index, sm1_status);
+        return false;
+    }
+
+    TETHER_LOGI(local_tag, "Slave %u: SM1 reset successful", slave_index);
+    return true;
 }
 
 void Master::updateDebugFlags()

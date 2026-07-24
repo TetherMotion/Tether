@@ -122,7 +122,11 @@ WriteVerifyResult WriteVerifier::apwrVerify(uint16_t adp, uint16_t ado,
 
     if (len > kMaxDataLen) {
         if (config_.log_failures) {
-            TETHER_LOGE(TAG, "Data too large for verify: %u", len);
+            TETHER_LOGE(TAG,
+                "Data too large for Tether internal verify buffer: %u bytes (max=%u). "
+                "This is a Tether limit, not a slave limit. "
+                "Increase ECAT_WRITE_VERIFY_MAX_DATA_LEN in TetherConfig.hpp.",
+                len, kMaxDataLen);
         }
         return WriteVerifyResult::WriteFailed(0, 0);
     }
@@ -265,7 +269,11 @@ WriteVerifyResult WriteVerifier::bwrVerify(uint16_t slave_to_verify,
 
     if (len > kMaxDataLen) {
         if (config_.log_failures) {
-            TETHER_LOGE(TAG, "Data too large for BWR verify: %u", len);
+            TETHER_LOGE(TAG,
+                "Data too large for Tether internal BWR verify buffer: %u bytes (max=%u). "
+                "This is a Tether limit, not a slave limit. "
+                "Increase ECAT_WRITE_VERIFY_MAX_DATA_LEN in TetherConfig.hpp.",
+                len, kMaxDataLen);
         }
         return WriteVerifyResult::WriteFailed(0, 0);
     }

@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "tether/platform/EspCompat.hpp"
+#include "tether/ethercat/TetherConfig.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/SMRegisters.hpp"
@@ -53,9 +54,9 @@ namespace PDO {
 // Constants and Limits
 // ============================================================================
 
-constexpr size_t kMaxPDOEntries = 32;
-constexpr size_t kMaxPDOSize    = 1024;
-constexpr size_t kMaxPDOSlaves  = 16;
+constexpr size_t kMaxPDOEntries = ECAT_PDO_MAX_ENTRIES;
+constexpr size_t kMaxPDOSize    = ECAT_PDO_MAX_BUFFER_SIZE;
+constexpr size_t kMaxPDOSlaves  = ECAT_PDO_MAX_SLAVES;
 
 // ============================================================================
 // Sync Manager Configuration
@@ -336,6 +337,9 @@ public:
     // ----- Debug flags -----
     void setDebugFlags(const EtherCATMasterDebugFlags* flags) { debug_flags_ = flags; }
 
+    // ----- Debug gate (for conditional debugging checkpoints) -----
+    void setDebugGate(DebugGate* gate) { debug_gate_ = gate; }
+
     // ----- Configuration Access -----
     PDO::PDOMapping&       mapping();
     const PDO::PDOMapping& mapping() const;
@@ -463,6 +467,9 @@ private:
     size_t           slave_count_ = 0;
 
     const EtherCATMasterDebugFlags* debug_flags_ = nullptr;
+    DebugGate* debug_gate_ = nullptr;
+    bool first_rxpdo_emitted_ = false;
+    bool first_txpdo_emitted_ = false;
 
     // Mode flags
     bool use_separate_commands_ = false;

@@ -15,14 +15,6 @@
 
 #include "tether/hal/IEthernet.hpp"
 
-namespace EtherCAT {
-namespace Raw {
-    void set_network_interface(const ::EtherCAT::NetworkInterface* iface);
-    const ::EtherCAT::NetworkInterface* network_interface();
-    void set_src_mac(const uint8_t src_mac[6]);
-}
-}
-
 namespace Tether::Examples {
 
 struct SingleDriveExampleConfig {
@@ -86,9 +78,6 @@ inline bool startHostMasterSession(const std::string& interface_name,
         return eth->transmit(data, length) == EtherCAT::HAL::Error::OK;
     };
 
-    EtherCAT::Raw::set_network_interface(session.network_interface.get());
-    EtherCAT::Raw::set_src_mac(session.src_mac);
-
     session.ethernet->setRxCallback(
         [&master](const uint8_t* frame, size_t len, const EtherCAT::HAL::RxFrameInfo&, void*) {
             master.ethercatMaster().handleRxFrame(frame, len);
@@ -105,7 +94,7 @@ inline bool startHostMasterSession(const std::string& interface_name,
         }
     });
 
-    master.start(*EtherCAT::Raw::network_interface(), session.src_mac);
+    master.start(*session.network_interface, session.src_mac);
     return true;
 }
 

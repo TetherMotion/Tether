@@ -40,6 +40,7 @@
 #include "logging/DeduplicatingLogger.hpp"
 
 #include "tether/ethercat/DebugFlags.hpp"
+#include "tether/ethercat/DebugGate.hpp"
 #include "tether/ethercat/SlaveIdentity.hpp"
 #include "tether/ethercat/TetherConfig.hpp"
 #include "tether/ethercat/Types.hpp"
@@ -132,6 +133,9 @@ namespace SDO {
 namespace CoE {
     class CoEManager;
 }
+namespace Raw {
+    class CoeSDOChannel;
+}
 
 class IMotionControlLoop;
 
@@ -153,6 +157,15 @@ public:
         uint32_t rx_queue_depth     = 64;
         uint32_t txpdo_queue_depth  = 8;
         bool enable_mailbox_fallback = false; ///< Opt-in: force default mailbox on InvalidMailboxConfig
+
+        /// Tuning knobs for `setPreopAndConfirm` (INIT -> PRE_OP transition).
+        /// Defaults preserve the original production timing. Tests that simulate
+        /// slaves which never reach PRE_OP can shrink these to avoid spending
+        /// ~13s of wall time per attempt in `std::this_thread::sleep_for`.
+        uint16_t preop_max_attempts   = 3;   ///< Outer retry attempts for the PRE_OP transition
+        uint16_t preop_inner_tries    = 200; ///< AL_STATUS polls per attempt
+        uint16_t preop_inner_sleep_ms = 20;  ///< Delay between AL_STATUS polls
+        uint16_t preop_backoff_ms     = 200; ///< Base backoff before retry (scaled by attempt index)
 
 #if TETHER_ENABLE_UDP_ENCAPSULATION
         /// EtherCAT-over-UDP encapsulation settings (opt-in, default: disabled).
@@ -604,6 +617,37 @@ public:
     bool autoConfigureMailbox(SlaveAddress slave_address, Tether::Platform::LogLevel log_level = Tether::Platform::LogLevel::Info);
 
     /**
+     * @brief Drain any stale data from the slave-to-master mailbox (SM1).
+     *
+     * Reads the SM1 status register and, if it indicates unread data, reads the
+     * configured SM1 address to clear the ESC buffer toggle.  Repeats until SM1
+     * is no longer full or the drain limit is reached.
+     *
+     * This should be called once after mailbox auto-configuration (or manual
+     * configuration) and before the first SDO exchange.  It is also safe to call
+     * as a diagnostic recovery step.
+     *
+     * @param slave_index    Slave index (0-based)
+     * @param max_drain      Maximum back-to-back reads to perform (default 16)
+     * @return true if the drain completed (SM1 empty or successfully drained);
+     *         false if mailbox is not configured or SM1 status could not be read
+     */
+    bool drainSlaveMailbox(uint16_t slave_index, unsigned int max_drain = 16);
+
+    /**
+     * @brief Hardware-reset the slave-to-master mailbox (SM1) by cycling its
+     *        activate register.
+     *
+     * This is a last-resort recovery for an ESC that reports SM1 full but
+     * rejects master read datagrams (WKC == 0). Disabling and re-enabling SM1
+     * flushes the internal buffer state and clears stuck full flags.
+     *
+     * @param slave_index    Slave index (0-based)
+     * @return true if SM1 status reads back clear after the reset
+     */
+    bool resetSlaveMailboxSM1(uint16_t slave_index);
+
+    /**
      * @brief Verify a slave's SII identity against expected values.
      *
      * Reads the slave's identity from SII EEPROM and compares each
@@ -639,6 +683,10 @@ public:
         return debug_flags_.isEnabled(name, slave_index);
     }
 
+    /** @brief Access the master's debug gate (for conditional debugging). */
+    DebugGate& debugGate() { return *debug_gate_; }
+    const DebugGate& debugGate() const { return *debug_gate_; }
+
     // ---- CoE / SDO low-level -----------------------------------------------
 
     bool coeSdoUpload(uint16_t adp, uint8_t* inout_mbx_cnt,
@@ -658,6 +706,14 @@ public:
                         bool diag_enabled = false,
                         unsigned int poll_interval_ms = 5,
                         unsigned int transaction_timeout_ms = 1000);
+
+    /// @brief Return the CoE SDO abort code reported by the slave on the most
+    /// recent coeSdoUpload/coeSdoDownload call. 0 means no abort (success or
+    /// a non-abort failure such as a transport/timeout error). Read this
+    /// immediately after a call returns false to distinguish a definitive
+    /// slave rejection (e.g. 0x06070010 length mismatch) from a transport
+    /// issue.
+    uint32_t lastCoeSdoAbortCode() const;
 
     // ---- Utilities (stateless) ---------------------------------------------
 
@@ -729,15 +785,6 @@ public:
     const NetworkInterface* networkInterface() const;
 
     /**
-     * @brief Find a running Master by its NetworkInterface pointer.
-     *
-     * This helper is used by host-side transport helpers (examples) to locate
-     * the master instance that was started with a given NetworkInterface.
-     * Returns nullptr if no matching instance is registered.
-     */
-    static Master* findByNetworkInterface(const NetworkInterface* iface);
-
-    /**
      * @brief Test helper: check if a one-time fault diagnosis was issued for a slave
      * 
      * Used by unit tests to verify that `fault_diagnose()` was called when
@@ -800,7 +847,6 @@ private:
 
     // Network
     NetworkInterface iface_{};
-    const NetworkInterface* iface_ptr_{nullptr}; ///< Original pointer for identity comparison
     uint8_t src_mac_[6] = {};
 
     // Queues
@@ -859,6 +905,11 @@ private:
         Tether::Logging::DedupLogConfig{2, 10'000, true, Tether::Platform::LogLevel::Info}
     };
 
+    // RX-path unrouted/dropped-packet log throttling counters (per-instance;
+    // formerly function-local statics shared across all Master instances).
+    uint32_t unrouted_log_count_ = 0;
+    uint32_t rx_drop_log_count_  = 0;
+
     // Diagnostics: one-time per-slave fault diagnostic tracker
     mutable std::mutex m_diag_mutex_;
     std::unordered_set<uint16_t> m_diagnosed_slaves_;
@@ -867,6 +918,9 @@ private:
     class MasterSDOTransport;
     std::unique_ptr<::EtherCAT::SDO::ISDOTransport> sdo_transport_;
     std::vector<std::unique_ptr<::EtherCAT::CoE::CoEManager>> sdo_managers_;
+
+    // CoE SDO mailbox channel (refactored from free functions)
+    std::unique_ptr<::EtherCAT::Raw::CoeSDOChannel> coe_sdo_channel_;
 
     // Sub-managers (legacy wrappers)
     std::unique_ptr<IPDOTransport> pdo_transport_;
@@ -886,6 +940,9 @@ private:
 
     // Debug flags (master-level with per-slave filtering)
     EtherCATMasterDebugFlags debug_flags_;
+
+    // Debug gate (conditional debug activation)
+    std::unique_ptr<DebugGate> debug_gate_;
 
     // SII reader (lazily created)
     std::unique_ptr<SII::SIIReader> sii_reader_;

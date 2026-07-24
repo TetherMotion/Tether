@@ -610,7 +610,7 @@ const std::vector<uint8_t>& SlaveCore::getSIIData() const {
 
 uint16_t SlaveCore::readSIIWord(uint16_t wordAddr) const {
     size_t byteAddr = wordAddr * 2;
-    if (byteAddr + 1 >= siiState_.eepromData.size()) {
+    if (byteAddr + 1 > siiState_.eepromData.size()) {
         return 0xFFFF;
     }
     return siiState_.eepromData[byteAddr] | (siiState_.eepromData[byteAddr + 1] << 8);
@@ -618,7 +618,7 @@ uint16_t SlaveCore::readSIIWord(uint16_t wordAddr) const {
 
 bool SlaveCore::writeSIIWord(uint16_t wordAddr, uint16_t data) {
     size_t byteAddr = wordAddr * 2;
-    if (byteAddr + 1 >= siiState_.eepromData.size()) {
+    if (byteAddr + 1 > siiState_.eepromData.size()) {
         return false;
     }
     siiState_.eepromData[byteAddr] = data & 0xFF;
@@ -725,7 +725,13 @@ bool SlaveCore::writeRegister(uint16_t addr, const uint8_t* data, uint16_t len) 
     }
     
     // Handle SII access
-    if (addr == ESCReg::SIIControl && len >= 2) {
+    if (addr == ESCReg::SIIControl && len >= 6) {
+        // Combined write: comm(2) + addr(2) + d2(2) — master writes EepromCmd struct
+        siiState_.control = std::bit_cast<EtherCAT::SII::SIIControlReg>(
+            static_cast<uint16_t>(data[0] | (data[1] << 8)));
+        siiState_.address = data[2] | (data[3] << 8) | (data[4] << 16) | (data[5] << 24);
+        processSIICommand();
+    } else if (addr == ESCReg::SIIControl && len >= 2) {
         siiState_.control = std::bit_cast<EtherCAT::SII::SIIControlReg>(
             static_cast<uint16_t>(data[0] | (data[1] << 8)));
         processSIICommand();
@@ -852,15 +858,21 @@ bool SlaveCore::processLogicalWrite(uint32_t logicalAddr, const uint8_t* data, u
 
 void SlaveCore::processSIICommand() {
     if (siiState_.control.read_op) {
+        // Set busy while processing
+        siiState_.control.busy = 1;
+        uint16_t ctrlBusy = std::bit_cast<uint16_t>(siiState_.control);
+        registers_[ESCReg::SIIControl] = ctrlBusy & 0xFF;
+        registers_[ESCReg::SIIControl + 1] = (ctrlBusy >> 8) & 0xFF;
+
         // Read operation
         uint16_t word = readSIIWord(static_cast<uint16_t>(siiState_.address));
         siiState_.data[0] = word & 0xFF;
         siiState_.data[1] = (word >> 8) & 0xFF;
-        
+
         // Update data register
         registers_[ESCReg::SIIData] = siiState_.data[0];
         registers_[ESCReg::SIIData + 1] = siiState_.data[1];
-        
+
         // Clear read bit and busy
         siiState_.control.read_op = 0;
         siiState_.control.busy = 0;
@@ -868,12 +880,18 @@ void SlaveCore::processSIICommand() {
         registers_[ESCReg::SIIControl] = ctrlRaw & 0xFF;
         registers_[ESCReg::SIIControl + 1] = (ctrlRaw >> 8) & 0xFF;
     }
-    
+
     if (siiState_.control.write_op) {
+        // Set busy while processing
+        siiState_.control.busy = 1;
+        uint16_t ctrlBusy = std::bit_cast<uint16_t>(siiState_.control);
+        registers_[ESCReg::SIIControl] = ctrlBusy & 0xFF;
+        registers_[ESCReg::SIIControl + 1] = (ctrlBusy >> 8) & 0xFF;
+
         // Write operation
         uint16_t word = siiState_.data[0] | (siiState_.data[1] << 8);
         writeSIIWord(static_cast<uint16_t>(siiState_.address), word);
-        
+
         // Clear write bit and busy
         siiState_.control.write_op = 0;
         siiState_.control.busy = 0;

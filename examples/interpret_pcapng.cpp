@@ -667,7 +667,12 @@ void displayEthercatTransactions(const std::vector<PCP::InterpretedFrame>& frame
                     completed.push_back(txn);
                     pending.erase(it);
                 } else {
-                    // No matching request — create standalone
+                    // No matching request — create standalone. This happens
+                    // when frame direction metadata is Unknown (e.g. captures
+                    // where the EPB_FLAGS direction bits are not set), so the
+                    // isTx-based request detection above never fires. Use the
+                    // response timestamp as the transaction timestamp so the
+                    // relative-time display is correct.
                     Transaction txn;
                     txn.idx = dg.idx;
                     txn.cmd = dg.cmd;
@@ -679,6 +684,7 @@ void displayEthercatTransactions(const std::vector<PCP::InterpretedFrame>& frame
                     txn.respData = dg.data;
                     txn.respWkc = dg.wkc;
                     txn.respTs = frame.timestampNs;
+                    txn.reqTs = frame.timestampNs;
                     txn.reqWkc = 0;
                     txn.frameIndex = frameIdx;
                     if (!f.errorsOnly || txn.isError()) {
@@ -694,7 +700,7 @@ void displayEthercatTransactions(const std::vector<PCP::InterpretedFrame>& frame
     for (const auto& txn : completed) {
         if (f.maxPackets > 0 && shown >= f.maxPackets) break;
 
-        std::cout << Utf8Formatter::bullet << " " << tsRelMs(txn.reqTs) << "ms"
+        std::cout << Utf8Formatter::bullet << " " << tsRelMs(txn.hasRequest ? txn.reqTs : txn.respTs) << "ms"
                   << "  idx=" << static_cast<int>(txn.idx)
                   << "  " << EtherCAT::commandToString(txn.cmd);
 

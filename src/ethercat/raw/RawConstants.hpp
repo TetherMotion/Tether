@@ -18,12 +18,23 @@
 #include <cstdint>
 #include <cstddef>
 
+#include "tether/ethercat/TetherConfig.hpp"
 #include "tether/ethercat/SMRegisters.hpp"
 
 namespace EtherCAT {
 namespace Raw {
 
 constexpr uint8_t FIRE_AND_FORGET_IDX = 0xFE;
+
+// Maximum mailbox buffer size supported by the raw SDO layer's stack
+// buffers. Configurable via ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp.
+// Must be >= the largest configured mailbox (SM0/SM1) length.
+// The ESC211 FNI objects are 256-byte OctetString sections; a 256-byte
+// SDO download needs 272 bytes on the wire (6 mbx + 2 CoE + 8 SDO +
+// 256 data), so a 256-byte mailbox forces segmented transfers that the
+// ESC211 rejects. The manufacturer ENI uses 512-byte mailboxes, so we
+// support at least 512 here.
+constexpr uint16_t kRawSDOMbxBufferSize = ECAT_RAW_SDO_MBX_BUFFER_SIZE;
 
 // ============================================================================
 // EtherCAT Register Addresses
