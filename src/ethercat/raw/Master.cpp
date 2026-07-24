@@ -672,6 +672,7 @@ bool Master::wasFaultDiagnosed(uint16_t slave_index) const
 PDOManager&    Master::pdo()    { return *pdo_; }
 LogicalAddressManager& Master::logicalAddressManager() { return *logical_addr_mgr_; }
 ::EtherCAT::CoE::CoEManager& Master::sdoManager(uint16_t slave_index) {
+    std::lock_guard<std::mutex> lock(sdo_managers_mutex_);
     if (slave_index >= sdo_managers_.size()) {
         // Lazily expand the vector if needed
         size_t old_size = sdo_managers_.size();
@@ -717,10 +718,10 @@ Master::Stats Master::getStats() const
     Stats s;
     s.tx_retry_count = tx_retry_count_.load(std::memory_order_relaxed);
     s.tx_fail_count  = tx_fail_count_.load(std::memory_order_relaxed);
-    s.rx_frame_count = rx_frame_count_;
-    s.rx_queue_sent  = rx_queue_sent_;
-    s.rx_flushed     = total_flushed_;
-    s.flush_calls    = flush_calls_;
+    s.rx_frame_count = rx_frame_count_.load(std::memory_order_relaxed);
+    s.rx_queue_sent  = rx_queue_sent_.load(std::memory_order_relaxed);
+    s.rx_flushed     = total_flushed_.load(std::memory_order_relaxed);
+    s.flush_calls    = flush_calls_.load(std::memory_order_relaxed);
     return s;
 }
 #endif
@@ -746,8 +747,8 @@ void Master::flushRxQueue()
     size_t flushed = 0;
     while (rx_queue_->receive(tmp, 0)) flushed++;
 #if TETHER_ENABLE_ETHERCAT_STATS
-    total_flushed_ += static_cast<uint32_t>(flushed);
-    if (flushed) flush_calls_++;
+    total_flushed_.fetch_add(static_cast<uint32_t>(flushed), std::memory_order_relaxed);
+    if (flushed) flush_calls_.fetch_add(1, std::memory_order_relaxed);
 #else
     (void)flushed;
 #endif

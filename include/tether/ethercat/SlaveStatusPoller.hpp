@@ -164,8 +164,8 @@ public:
      */
     void shutdown();
 
-    bool isInitialized() const { return initialized_; }
-    uint16_t slaveCount() const { return slave_count_; }
+    bool isInitialized() const { return initialized_.load(std::memory_order_acquire); }
+    uint16_t slaveCount() const { return slave_count_.load(std::memory_order_acquire); }
 
     // ----- Configuration -----
 
@@ -208,9 +208,9 @@ private:
     bool filterMatches(const StatusFilter& filter, const SlaveStatusEvent& event) const;
 
     IFaultTransport& transport_;
-    uint16_t slave_count_ = 0;
+    std::atomic<uint16_t> slave_count_{0};
     uint32_t poll_interval_ms_ = 500;
-    bool initialized_ = false;
+    std::atomic<bool> initialized_{false};
 
     struct SlaveCache {
         SlaveState state;

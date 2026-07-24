@@ -1156,7 +1156,7 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
     using namespace Raw;  // for le16_to_host, Command, RxDatagram, etc.
 
 #if TETHER_ENABLE_ETHERCAT_STATS
-    rx_frame_count_++;
+    rx_frame_count_.fetch_add(1, std::memory_order_relaxed);
 #endif
 
     // Use fully-qualified EtherCAT::EthernetHeader to avoid ambiguity
@@ -1263,7 +1263,7 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
                 unrouted_log_count_++;
                 if (rx_queue_ && rx_queue_->send(msg, 0)) {
 #if TETHER_ENABLE_ETHERCAT_STATS
-                    rx_queue_sent_++;
+                    rx_queue_sent_.fetch_add(1, std::memory_order_relaxed);
 #endif
                 } else {
                     if (rx_drop_log_count_ < 10 || (rx_drop_log_count_ % 500 == 0)) {

@@ -310,8 +310,24 @@ public:
         uint64_t registration_failures{0};
     };
 
-    Stats getStats() const { return stats_; }
-    void  resetStats()     { stats_ = {}; }
+    Stats getStats() const {
+        Stats s;
+        s.packets_routed = stats_packets_routed_.load(std::memory_order_relaxed);
+        s.packets_matched = stats_packets_matched_.load(std::memory_order_relaxed);
+        s.packets_dropped = stats_packets_dropped_.load(std::memory_order_relaxed);
+        s.timeouts = stats_timeouts_.load(std::memory_order_relaxed);
+        s.registrations = stats_registrations_.load(std::memory_order_relaxed);
+        s.registration_failures = stats_registration_failures_.load(std::memory_order_relaxed);
+        return s;
+    }
+    void  resetStats()     {
+        stats_packets_routed_.store(0, std::memory_order_relaxed);
+        stats_packets_matched_.store(0, std::memory_order_relaxed);
+        stats_packets_dropped_.store(0, std::memory_order_relaxed);
+        stats_timeouts_.store(0, std::memory_order_relaxed);
+        stats_registrations_.store(0, std::memory_order_relaxed);
+        stats_registration_failures_.store(0, std::memory_order_relaxed);
+    }
 
     /// Maximum concurrent waiters (kept for backward compat with ConditionalPacketRouter::kMaxWaiters)
     static constexpr size_t kMaxWaiters = kNumSlots;
@@ -331,7 +347,13 @@ private:
     std::atomic<bool>           initialized_{false};
     std::atomic<bool>           shutdown_{false};
     std::atomic<bool>           cancelled_{false};
-    Stats                       stats_;
+    // Atomic counters (accessed from RX thread and client threads concurrently)
+    std::atomic<uint64_t>       stats_packets_routed_{0};
+    std::atomic<uint64_t>       stats_packets_matched_{0};
+    std::atomic<uint64_t>       stats_packets_dropped_{0};
+    std::atomic<uint64_t>       stats_timeouts_{0};
+    std::atomic<uint64_t>       stats_registrations_{0};
+    std::atomic<uint64_t>       stats_registration_failures_{0};
 };
 
 // ============================================================================

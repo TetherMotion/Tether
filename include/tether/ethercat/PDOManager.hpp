@@ -335,7 +335,7 @@ public:
     bool isInitialized() const;
 
     // ----- Debug flags -----
-    void setDebugFlags(const EtherCATMasterDebugFlags* flags) { debug_flags_ = flags; }
+    void setDebugFlags(const EtherCATMasterDebugFlags* flags) { debug_flags_.store(flags, std::memory_order_relaxed); }
 
     // ----- Debug gate (for conditional debugging checkpoints) -----
     void setDebugGate(DebugGate* gate) { debug_gate_ = gate; }
@@ -466,7 +466,7 @@ private:
     bool             initialized_ = false;
     size_t           slave_count_ = 0;
 
-    const EtherCATMasterDebugFlags* debug_flags_ = nullptr;
+    std::atomic<const EtherCATMasterDebugFlags*> debug_flags_{nullptr};
     DebugGate* debug_gate_ = nullptr;
     bool first_rxpdo_emitted_ = false;
     bool first_txpdo_emitted_ = false;
@@ -485,14 +485,16 @@ private:
 
     // ----- Private helpers -----
     bool rxPDODebug(uint16_t slave_index = 0xFFFF) const {
-        if (!debug_flags_) return false;
-        if (slave_index == 0xFFFF) return debug_flags_->rxPDO;
-        return debug_flags_->rxPDO && debug_flags_->rxPDOFilt.allows(slave_index);
+        const auto* df = debug_flags_.load(std::memory_order_relaxed);
+        if (!df) return false;
+        if (slave_index == 0xFFFF) return df->rxPDO;
+        return df->rxPDO && df->rxPDOFilt.allows(slave_index);
     }
     bool txPDODebug(uint16_t slave_index = 0xFFFF) const {
-        if (!debug_flags_) return false;
-        if (slave_index == 0xFFFF) return debug_flags_->txPDO;
-        return debug_flags_->txPDO && debug_flags_->txPDOFilt.allows(slave_index);
+        const auto* df = debug_flags_.load(std::memory_order_relaxed);
+        if (!df) return false;
+        if (slave_index == 0xFFFF) return df->txPDO;
+        return df->txPDO && df->txPDOFilt.allows(slave_index);
     }
 
     bool writeSMConfig(uint16_t adp, uint8_t sm_index,

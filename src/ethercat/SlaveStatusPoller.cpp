@@ -51,11 +51,11 @@ SlaveStatusPoller::~SlaveStatusPoller() {
 // ============================================================================
 
 bool SlaveStatusPoller::init(uint16_t slave_count) {
-    if (initialized_) {
+    if (initialized_.load(std::memory_order_acquire)) {
         return true;
     }
 
-    slave_count_ = std::min(slave_count, static_cast<uint16_t>(kMaxSlaves));
+    slave_count_.store(std::min(slave_count, static_cast<uint16_t>(kMaxSlaves)), std::memory_order_release);
 
     for (auto& c : cache_) {
         c.state = SlaveState::INIT;
@@ -63,15 +63,15 @@ bool SlaveStatusPoller::init(uint16_t slave_count) {
         c.error_flag = false;
     }
 
-    initialized_ = true;
-    TETHER_LOGI(TAG, "Status poller initialized for %u slaves", slave_count_);
+    initialized_.store(true, std::memory_order_release);
+    TETHER_LOGI(TAG, "Status poller initialized for %u slaves", slave_count_.load(std::memory_order_relaxed));
     return true;
 }
 
 void SlaveStatusPoller::shutdown() {
     stop();
-    initialized_ = false;
-    slave_count_ = 0;
+    initialized_.store(false, std::memory_order_release);
+    slave_count_.store(0, std::memory_order_release);
     clearCallbacks();
 }
 
@@ -120,7 +120,7 @@ bool SlaveStatusPoller::start() {
         TETHER_LOGW(TAG, "Status poller already running");
         return false;
     }
-    if (!initialized_ || slave_count_ == 0) {
+    if (!initialized_.load(std::memory_order_acquire) || slave_count_.load(std::memory_order_acquire) == 0) {
         TETHER_LOGW(TAG, "Cannot start: not initialized or no slaves");
         return false;
     }
@@ -129,7 +129,7 @@ bool SlaveStatusPoller::start() {
     thread_ = std::thread([this]() { pollLoop(); });
 
     TETHER_LOGI(TAG, "Status poller started (interval=%u ms, slaves=%u)",
-                poll_interval_ms_, slave_count_);
+                poll_interval_ms_, slave_count_.load(std::memory_order_relaxed));
     return true;
 }
 
@@ -145,7 +145,7 @@ void SlaveStatusPoller::stop() {
 // ============================================================================
 
 SlaveState SlaveStatusPoller::getSlaveState(uint16_t slave_index) const {
-    if (!initialized_ || slave_index >= slave_count_) {
+    if (!initialized_.load(std::memory_order_acquire) || slave_index >= slave_count_.load(std::memory_order_acquire)) {
         return SlaveState::INIT;
     }
     return cache_[slave_index].state;
@@ -162,7 +162,7 @@ void SlaveStatusPoller::pollLoop() {
     while (running_.load(std::memory_order_acquire)) {
         next_tick += period;
 
-        for (uint16_t i = 0; i < slave_count_; i++) {
+        for (uint16_t i = 0, n = slave_count_.load(std::memory_order_acquire); i < n; i++) {
             pollSlave(i);
         }
 
