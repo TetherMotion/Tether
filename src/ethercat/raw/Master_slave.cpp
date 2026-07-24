@@ -59,8 +59,11 @@ void Master::initSlaves(uint16_t count)
 {
     slaves_.clear();
     slaves_.reserve(count);
-    sii_word_caches_.clear();
-    sii_word_caches_.resize(count);
+    {
+        std::lock_guard<std::mutex> lock(sii_cache_mutex_);
+        sii_word_caches_.clear();
+        sii_word_caches_.resize(count);
+    }
     for (uint16_t i = 0; i < count; ++i) {
         auto s = std::make_unique<Slave>(*this, i);
         // Initialize SII cache for each slave
@@ -191,13 +194,19 @@ bool Master::resetSlaveMailboxSM1(uint16_t slave_index)
 void Master::updateDebugFlags()
 {
     const uint16_t count = static_cast<uint16_t>(slaves_.size());
+    std::vector<EtherCATSlaveDebugFlags> per_slave_flags(count);
     for (uint16_t i = 0; i < count; ++i) {
-        EtherCATSlaveDebugFlags flags = debug_flags_.computeForSlave(i);
+        per_slave_flags[i] = debug_flags_.computeForSlave(i);
         if (slaves_[i]) {
-            slaves_[i]->updateDebugFlags(flags);
+            slaves_[i]->updateDebugFlags(per_slave_flags[i]);
         }
-        if (i < sdo_managers_.size() && sdo_managers_[i]) {
-            sdo_managers_[i]->updateDebugFlags(flags);
+    }
+    {
+        std::lock_guard<std::mutex> lock(sdo_managers_mutex_);
+        for (uint16_t i = 0; i < count; ++i) {
+            if (i < sdo_managers_.size() && sdo_managers_[i]) {
+                sdo_managers_[i]->updateDebugFlags(per_slave_flags[i]);
+            }
         }
     }
     if (pdo_) {
@@ -229,6 +238,7 @@ SII::SIIReader& Master::siiReader()
 
 bool Master::getSIICachedWord(uint16_t slave_index, uint16_t word_addr, uint16_t& out) const
 {
+    std::lock_guard<std::mutex> lock(sii_cache_mutex_);
     if (slave_index >= sii_word_caches_.size()) return false;
     const auto& cache = sii_word_caches_[slave_index];
     auto it = cache.find(word_addr);
@@ -239,12 +249,14 @@ bool Master::getSIICachedWord(uint16_t slave_index, uint16_t word_addr, uint16_t
 
 void Master::setSIICachedWord(uint16_t slave_index, uint16_t word_addr, uint16_t value)
 {
+    std::lock_guard<std::mutex> lock(sii_cache_mutex_);
     if (slave_index >= sii_word_caches_.size()) return;
     sii_word_caches_[slave_index][word_addr] = value;
 }
 
 void Master::clearSIICache(uint16_t slave_index)
 {
+    std::lock_guard<std::mutex> lock(sii_cache_mutex_);
     if (slave_index >= sii_word_caches_.size()) return;
     sii_word_caches_[slave_index].clear();
 }

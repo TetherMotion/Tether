@@ -902,10 +902,10 @@ private:
 #if TETHER_ENABLE_ETHERCAT_STATS
     std::atomic<uint32_t> tx_retry_count_{0};
     std::atomic<uint32_t> tx_fail_count_{0};
-    uint32_t rx_frame_count_ = 0;
-    uint32_t rx_queue_sent_  = 0;
-    uint32_t total_flushed_  = 0;
-    uint32_t flush_calls_    = 0;
+    std::atomic<uint32_t> rx_frame_count_{0};
+    std::atomic<uint32_t> rx_queue_sent_{0};
+    std::atomic<uint32_t> total_flushed_{0};
+    std::atomic<uint32_t> flush_calls_{0};
 #endif
 
     // Log dedup / rate limiting
@@ -927,6 +927,7 @@ private:
     class MasterSDOTransport;
     std::unique_ptr<::EtherCAT::SDO::ISDOTransport> sdo_transport_;
     std::vector<std::unique_ptr<::EtherCAT::CoE::CoEManager>> sdo_managers_;
+    mutable std::mutex sdo_managers_mutex_;
 
     // CoE SDO mailbox channel (refactored from free functions)
     std::unique_ptr<::EtherCAT::Raw::CoeSDOChannel> coe_sdo_channel_;
@@ -957,7 +958,10 @@ private:
     std::unique_ptr<SII::SIIReader> sii_reader_;
 
     // Per-slave EEPROM word cache (indexed by slave_index -> word_addr -> value)
+    // Protected by sii_cache_mutex_ since the discovery thread writes via
+    // setSIICachedWord while client threads read via getSIICachedWord.
     std::vector<std::unordered_map<uint16_t, uint16_t>> sii_word_caches_;
+    mutable std::mutex sii_cache_mutex_;
 };
 
 // ============================================================================

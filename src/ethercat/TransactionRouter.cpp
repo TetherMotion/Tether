@@ -38,7 +38,7 @@ bool TransactionRouter::init()
     }
 
     shutdown_.store(false, std::memory_order_release);
-    stats_ = {};
+    resetStats();
     initialized_.store(true, std::memory_order_release);
 
     TETHER_LOGI(TAG, "TransactionRouter initialized (%zu slots)", kNumSlots);
@@ -87,14 +87,14 @@ size_t TransactionRouter::routePacket(const RxDatagram& dgram)
 {
     if (!initialized_.load(std::memory_order_acquire)) return 0;
 
-    stats_.packets_routed++;
+    stats_packets_routed_.fetch_add(1, std::memory_order_relaxed);
 
     auto& slot = slots_[dgram.idx];
 
     std::lock_guard<std::mutex> lock(slot.mtx);
 
     if (!slot.pending.load(std::memory_order_relaxed)) {
-        stats_.packets_dropped++;
+        stats_packets_dropped_.fetch_add(1, std::memory_order_relaxed);
         return 0;
     }
 
@@ -107,7 +107,7 @@ size_t TransactionRouter::routePacket(const RxDatagram& dgram)
     // Fill response
     slot.response = dgram;
     slot.completed.store(true, std::memory_order_relaxed);
-    stats_.packets_matched++;
+    stats_packets_matched_.fetch_add(1, std::memory_order_relaxed);
     slot.cv.notify_one();
 
     return 1;
@@ -129,7 +129,7 @@ WaitResult TransactionRouter::sendAndWait(uint8_t idx,
     if (cancelled_.load(std::memory_order_acquire))
         return WaitResult::Timeout();
 
-    stats_.registrations++;
+    stats_registrations_.fetch_add(1, std::memory_order_relaxed);
 
     auto& slot = slots_[idx];
 
@@ -148,7 +148,7 @@ WaitResult TransactionRouter::sendAndWait(uint8_t idx,
     if (!send_fn()) {
         std::lock_guard<std::mutex> lock(slot.mtx);
         slot.pending.store(false, std::memory_order_relaxed);
-        stats_.registration_failures++;
+        stats_registration_failures_.fetch_add(1, std::memory_order_relaxed);
         return WaitResult::Timeout();
     }
 
@@ -172,7 +172,7 @@ WaitResult TransactionRouter::sendAndWait(uint8_t idx,
                 r.ado,
                 r.idx);
         } else {
-            stats_.timeouts++;
+            stats_timeouts_.fetch_add(1, std::memory_order_relaxed);
         }
 
         slot.pending.store(false, std::memory_order_relaxed);
@@ -201,7 +201,7 @@ WaitResult TransactionRouter::waitForPacket(const PacketFilter& filter,
         // Slot is already pending or we set it up now
         auto& slot = slots_[filter.idx];
 
-        stats_.registrations++;
+        stats_registrations_.fetch_add(1, std::memory_order_relaxed);
 
         {
             std::lock_guard<std::mutex> lock(slot.mtx);
@@ -230,7 +230,7 @@ WaitResult TransactionRouter::waitForPacket(const PacketFilter& filter,
                 result = WaitResult::Success(
                     r.wkc, r.datalen, r.cmd, r.adp, r.ado, r.idx);
             } else {
-                stats_.timeouts++;
+                stats_timeouts_.fetch_add(1, std::memory_order_relaxed);
             }
 
             slot.pending.store(false, std::memory_order_relaxed);
@@ -265,7 +265,7 @@ size_t TransactionRouter::preRegisterWaiter(const PacketFilter& filter,
     slot.buffer_size = buffer_size;
     slot.response   = {};
 
-    stats_.registrations++;
+    stats_registrations_.fetch_add(1, std::memory_order_relaxed);
 
     return static_cast<size_t>(filter.idx);
 }
@@ -292,7 +292,7 @@ WaitResult TransactionRouter::waitForPreRegistered(size_t slot_idx, uint32_t tim
             result = WaitResult::Success(
                 r.wkc, r.datalen, r.cmd, r.adp, r.ado, r.idx);
         } else {
-            stats_.timeouts++;
+            stats_timeouts_.fetch_add(1, std::memory_order_relaxed);
         }
 
         slot.pending.store(false, std::memory_order_relaxed);
