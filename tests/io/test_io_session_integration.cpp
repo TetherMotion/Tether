@@ -208,8 +208,12 @@ protected:
         std::thread thread;
 
         ~SessionContext() {
-            if (session) session->requestStop();
+            // Close client transport first to signal Session thread to exit gracefully
+            // This causes server transport's receive() to return 0, ending the session loop
+            if (client) client->close();
+            // Join the thread - Session destructor will handle cleanup including server transport close
             if (thread.joinable()) thread.join();
+            // Both transports are now safely destroyed without race condition
         }
     };
 

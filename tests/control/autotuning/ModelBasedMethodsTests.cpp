@@ -8,9 +8,10 @@
 
 TEST(ModelBasedMethodsMoved, Present) {
     // Ensure one model-based helper is available and callable (deadbeat design)
-    double A[] = {1.0, -0.5};
-    double B[] = {0.0, 0.5};
-    double C[] = {1.0, 0.0};
+    // Note: computeGain expects 2x2 matrices (4 elements each for n=2)
+    double A[] = {1.0, -0.5, 0.0, 0.0};
+    double B[] = {0.0, 0.5, 0.0, 0.0};
+    double C[] = {1.0, 0.0, 0.0, 0.0};
     auto coeffs = Control::Autotuning::DeadbeatControl::design(A, B, C, 2, 1, 1, 0.1, 1);
     EXPECT_FALSE(coeffs.empty());
 }
