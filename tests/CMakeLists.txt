@@ -54,12 +54,12 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/identification)
 function(create_module_test MODULE_NAME SOURCES LIBS DEFINITIONS)
     list(FILTER SOURCES EXCLUDE REGEX ".*main\\.cpp$")
     list(FILTER SOURCES EXCLUDE REGEX ".*mocks_private/.*")
-    
+
     add_executable(tether_${MODULE_NAME}_tests
         main.cpp
         ${SOURCES}
     )
-    
+
     target_include_directories(tether_${MODULE_NAME}_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/mocks
@@ -71,7 +71,7 @@ function(create_module_test MODULE_NAME SOURCES LIBS DEFINITIONS)
         ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_planner
         ${CMAKE_CURRENT_SOURCE_DIR}/../src
     )
-    
+
     target_link_libraries(tether_${MODULE_NAME}_tests PRIVATE
         ${LIBS}
         GTest::gtest
@@ -79,7 +79,7 @@ function(create_module_test MODULE_NAME SOURCES LIBS DEFINITIONS)
         GTest::gmock
         GTest::gmock_main
     )
-    
+
     target_compile_definitions(tether_${MODULE_NAME}_tests PRIVATE
         GCODE_STANDALONE_CAPI=1
         TETHER_ENABLE_ETHERCAT=1
@@ -87,8 +87,49 @@ function(create_module_test MODULE_NAME SOURCES LIBS DEFINITIONS)
         TEST_PROJECT_ROOT=\"${CMAKE_SOURCE_DIR}\"
         ${DEFINITIONS}
     )
-    
+
     gtest_discover_tests(tether_${MODULE_NAME}_tests PROPERTIES TIMEOUT 30)
+endfunction()
+
+# Like create_module_test but with a custom per-test timeout (seconds).
+function(create_module_test_timeout MODULE_NAME SOURCES LIBS DEFINITIONS TEST_TIMEOUT)
+    list(FILTER SOURCES EXCLUDE REGEX ".*main\\.cpp$")
+    list(FILTER SOURCES EXCLUDE REGEX ".*mocks_private/.*")
+
+    add_executable(tether_${MODULE_NAME}_tests
+        main.cpp
+        ${SOURCES}
+    )
+
+    target_include_directories(tether_${MODULE_NAME}_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/mocks
+        ${CMAKE_CURRENT_SOURCE_DIR}/mocks/esp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/export
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_replanner
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_planner
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src
+    )
+
+    target_link_libraries(tether_${MODULE_NAME}_tests PRIVATE
+        ${LIBS}
+        GTest::gtest
+        GTest::gtest_main
+        GTest::gmock
+        GTest::gmock_main
+    )
+
+    target_compile_definitions(tether_${MODULE_NAME}_tests PRIVATE
+        GCODE_STANDALONE_CAPI=1
+        TETHER_ENABLE_ETHERCAT=1
+        TETHER_COMPILE_MASTER=1
+        TEST_PROJECT_ROOT=\"${CMAKE_SOURCE_DIR}\"
+        ${DEFINITIONS}
+    )
+
+    gtest_discover_tests(tether_${MODULE_NAME}_tests PROPERTIES TIMEOUT ${TEST_TIMEOUT})
 endfunction()
 
 # Collect test sources by module
@@ -479,7 +520,11 @@ if(CIA430_TEST_SOURCES)
 endif()
 
 create_module_test(simulation_systems "${SIMULATION_SYSTEMS_SOURCES}" "tether_common;tether_simulation" "")
-create_module_test(simulation_engine "${SIMULATION_ENGINE_SOURCES}" "tether_common;tether_simulation" "")
+# The simulation_engine module includes AllSystemsStayNonzeroThroughHalfSecondWithNonzeroInitialCondition
+# which runs 70 dynamical systems × 100 RK4 steps each. Under TSAN/ASAN the per-step
+# overhead is 5-10×, and with --parallel $(nproc) on a 4-core CI runner the
+# wall-clock time can exceed the default 30 s timeout.
+create_module_test_timeout(simulation_engine "${SIMULATION_ENGINE_SOURCES}" "tether_common;tether_simulation" "" 120)
 
 if(SLAVE_TEST_SOURCES)
     create_module_test(slave
