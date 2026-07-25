@@ -161,12 +161,12 @@ private:
                 // If we've fallen behind significantly, resync to now
                 const auto now = high_resolution_clock::now();
                 if (next_wakeup < now - period) {
-                    static uint32_t behind_count = 0;
-                    behind_count++;
-                    if (behind_count <= 3 || (behind_count % 1000) == 0) {
+                    static std::atomic<uint32_t> behind_count{0};
+                    const uint32_t count = behind_count.fetch_add(1, std::memory_order_relaxed) + 1;
+                    if (count <= 3 || (count % 1000) == 0) {
                         TETHER_LOGW(TAG, "Timer fell behind by %lld us, resyncing (count=%u)",
                                  (long long)duration_cast<microseconds>(now - next_wakeup).count(),
-                                 behind_count);
+                                 count);
                     }
                     next_wakeup = now + period;
                 }
