@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "tether/drives/Synapticon/SafeMotionFSoE.hpp"
+#include "tether/fsoe/Synapticon/SafeMotionFSoE.hpp"
 
 using namespace EtherCAT::Drives::Synapticon::SafeMotion;
 

@@ -47,7 +47,7 @@
 #include "tether/fsoe/FSoEMasterConnection.hpp"
 #include "tether/fsoe/FSoEMaster.hpp"
 #include "tether/fsoe/TypedProcessData.hpp"
-#include "tether/drives/Synapticon/SafeMotionFSoE.hpp"
+#include "tether/fsoe/Synapticon/SafeMotionFSoE.hpp"
 #endif
 
 // HAL (Hardware Abstraction Layer)

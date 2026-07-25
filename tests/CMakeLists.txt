@@ -134,7 +134,7 @@ endfunction()
 
 # Collect test sources by module
 # Control test sources split by sub-area
-set(CONTROL_TEST_LIBS "tether_common;tether_hal;tether_gcode;tether_motion_control;tether_motion_planner;tether_controls;tether_export;tether_ethercat_common;tether_ethercat_master;tether_ethercat_slave;tether_simulation;tether_destabilizer")
+set(CONTROL_TEST_LIBS "tether_common;tether_hal;tether_gcode;tether_motion_control;tether_motion_planner;tether_controls;tether_autotuning;tether_export;tether_ethercat_common;tether_ethercat_master;tether_ethercat_slave;tether_simulation;tether_destabilizer")
 set(CONTROL_CORE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/control/ControlTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/FractionalPIDTests.cpp"
@@ -243,7 +243,7 @@ set(MOTION_PLANNER_INTEGRATION_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/test_GCodeAdapter_coverage.cpp"
 )
 # Motion replanner test sources split by sub-area
-set(MOTION_REPLANNER_LIBS "tether_common;tether_motion_control;tether_motion_planner;tether_ethercat_common")
+set(MOTION_REPLANNER_LIBS "tether_common;tether_motion_control;tether_motion_planner;tether_ethercat_common;tether_identification")
 set(MOTION_REPLANNER_CORE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_MotionReplanner.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_MotionReplanner_coverage.cpp"
@@ -274,7 +274,7 @@ file(GLOB_RECURSE SII_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/sii/*.cpp")
 file(GLOB_RECURSE ESI_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/esi/*.cpp")
 file(GLOB_RECURSE MAILBOX_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/mailbox/*.cpp")
 # Slave emulation test sources split by sub-area
-set(SLAVE_EMULATION_LIBS "tether_common;tether_pcap;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master")
+set(SLAVE_EMULATION_LIBS "tether_common;tether_pcap;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master;tether_cia_profiles")
 set(SLAVE_EMULATION_CORE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/slave_emulation/test_EtherCATSlaveEmulator_coverage.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/slave_emulation/test_SlaveCore_coverage.cpp"
@@ -297,7 +297,7 @@ file(GLOB_RECURSE MOCKS_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/mocks/*.cpp")
 file(GLOB CIA301_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia301/*.cpp")
 file(GLOB CIA401_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia401/*.cpp")
 # CiA402 test sources split by sub-area
-set(CIA402_PROFILE_LIBS "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master")
+set(CIA402_PROFILE_LIBS "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master;tether_cia_profiles;tether_motion_control;tether_drives")
 set(CIA402_STATE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/test_CiA402StateMachine.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/test_CiA402StateMachine_coverage.cpp"
@@ -365,9 +365,14 @@ set(TETHER_FULL_TEST_LIBS
     tether_motion_control
     tether_motion_planner
     tether_controls
+    tether_autotuning
+    tether_identification
     tether_export
     tether_ethercat_common
     tether_ethercat_master
+    tether_cia_profiles
+    tether_drives
+    tether_fsoe
     tether_ethercat_slave
     tether_simulation
     tether_destabilizer
@@ -444,7 +449,7 @@ create_module_test(motion_replanner_identification "${MOTION_REPLANNER_IDENTIFIC
 if(CIA301_TEST_SOURCES)
     create_module_test(profiles_cia301
         "${CIA301_TEST_SOURCES}"
-        "tether_common;tether_ethercat_common;tether_ethercat_master"
+        "tether_common;tether_ethercat_common;tether_ethercat_master;tether_cia_profiles"
         ""
     )
 endif()
@@ -452,7 +457,7 @@ endif()
 if(CIA401_TEST_SOURCES)
     create_module_test(profiles_cia401
         "${CIA401_TEST_SOURCES}"
-        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
+        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master;tether_cia_profiles"
         ""
     )
 endif()
@@ -466,7 +471,7 @@ create_module_test(profiles_cia402_coverage "${CIA402_COVERAGE_SOURCES}" "${CIA4
 if(CIA404_TEST_SOURCES)
     create_module_test(profiles_cia404
         "${CIA404_TEST_SOURCES}"
-        "tether_common;tether_ethercat_common;tether_ethercat_master"
+        "tether_common;tether_ethercat_common;tether_ethercat_master;tether_cia_profiles"
         ""
     )
 endif()
@@ -474,7 +479,7 @@ endif()
 if(CIA405_TEST_SOURCES)
     create_module_test(profiles_cia405
         "${CIA405_TEST_SOURCES}"
-        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
+        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master;tether_cia_profiles"
         ""
     )
 endif()
@@ -482,7 +487,7 @@ endif()
 if(CIA406_TEST_SOURCES)
     create_module_test(profiles_cia406
         "${CIA406_TEST_SOURCES}"
-        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
+        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master;tether_cia_profiles"
         ""
     )
 endif()
@@ -490,7 +495,7 @@ endif()
 if(CIA408_TEST_SOURCES)
     create_module_test(profiles_cia408
         "${CIA408_TEST_SOURCES}"
-        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
+        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master;tether_cia_profiles"
         ""
     )
 endif()
@@ -498,7 +503,7 @@ endif()
 if(CIA410_TEST_SOURCES)
     create_module_test(profiles_cia410
         "${CIA410_TEST_SOURCES}"
-        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
+        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master;tether_cia_profiles"
         ""
     )
 endif()
@@ -506,7 +511,7 @@ endif()
 if(CIA417_TEST_SOURCES)
     create_module_test(profiles_cia417
         "${CIA417_TEST_SOURCES}"
-        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
+        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master;tether_cia_profiles"
         ""
     )
 endif()
@@ -514,7 +519,7 @@ endif()
 if(CIA430_TEST_SOURCES)
     create_module_test(profiles_cia430
         "${CIA430_TEST_SOURCES}"
-        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master"
+        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master;tether_cia_profiles"
         ""
     )
 endif()
@@ -559,7 +564,7 @@ endif()
 if(MAILBOX_TEST_SOURCES)
     create_module_test(mailbox
         "${MAILBOX_TEST_SOURCES}"
-        "tether_common;tether_ethercat_common;tether_ethercat_master;tether_ethercat_slave"
+        "tether_common;tether_ethercat_common;tether_ethercat_master;tether_ethercat_slave;tether_cia_profiles"
         ""
     )
 endif()
@@ -587,7 +592,7 @@ endif()
 if(FSOE_TEST_SOURCES)
     create_module_test(fsoe
         "${FSOE_TEST_SOURCES}"
-        "tether_common;tether_hal;tether_controls;tether_motion_control;tether_ethercat_common;tether_ethercat_master"
+        "tether_common;tether_hal;tether_controls;tether_motion_control;tether_ethercat_common;tether_ethercat_master;tether_cia_profiles;tether_fsoe"
         ""
     )
 endif()
@@ -626,6 +631,8 @@ target_link_libraries(tether_fsoe_integration_tests
     tether_motion_control
     tether_ethercat_common
     tether_ethercat_master
+    tether_cia_profiles
+    tether_fsoe
     GTest::gtest
     GTest::gtest_main
 )
@@ -795,7 +802,7 @@ create_ethercat_test(coverage
         ../src/ethercat/SlaveEmulator.cpp
         ../src/ethercat/ConditionalPacketRouter.cpp
         ../src/ethercat/TransactionRouter.cpp
-    LIBS tether_ethercat_master
+    LIBS tether_ethercat_master;tether_cia_profiles
     DEFS TETHER_COMPILE_MASTER=1
 )
 
@@ -870,6 +877,7 @@ target_link_libraries(tether_model_identification_tests
     tether_common
     tether_controls
     tether_motion_control
+    tether_identification
     GTest::gtest_main
 )
 
@@ -893,6 +901,7 @@ target_link_libraries(tether_simulation_identification_tests
     tether_common
     tether_controls
     tether_motion_control
+    tether_identification
     tether_simulation
     GTest::gtest_main
 )

@@ -7,7 +7,7 @@
 
 #include "DS402ExampleSupport.hpp"
 #include "tether/drives/AS715N/AS715NPDO.hpp"
-#include "tether/drives/Synapticon/SafeMotionFSoE.hpp"
+#include "tether/fsoe/Synapticon/SafeMotionFSoE.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include "tether/profiles/cia301/CiA402Defs.hpp"
 
