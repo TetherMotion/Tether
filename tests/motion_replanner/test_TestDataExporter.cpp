@@ -22,7 +22,9 @@ using namespace MotionReplanner;
 // Helper: create temp file path
 // ============================================================================
 static std::string tempFile(const std::string& name) {
-    return "/tmp/tether_test_export_" + name;
+    // Include PID to avoid collisions when CTest runs individual gtest
+    // cases as separate processes in parallel (--parallel).
+    return "/tmp/tether_test_export_" + std::to_string(getpid()) + "_" + name;
 }
 
 static void cleanupFile(const std::string& path) {
