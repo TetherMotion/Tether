@@ -3,9 +3,13 @@
 #include "logging/Logger.hpp"              // for TETHER_LOGI/W
 #include "tether/ethercat/Master.hpp" // for Master
 #include "tether/ethercat/Slave.hpp"  // full slave type for status dumps
-#include "tether/profiles/cia402/CiA402Drive.hpp" // for CiA402Drive
 #include "tether/ethercat/FaultDetection.hpp" // AL status helpers
 #include "tether/ethercat/SyncManager/Utils.hpp" // for SM dumps
+
+// NOTE: dumpSlaveSyncAndMailboxInfo(const CiA402Drive&, ...) is declared in
+// this header (forward-declared CiA402Drive) but implemented in
+// tether_cia_profiles (src/profiles/cia402/MailboxDiagnostics.cpp) to avoid a
+// circular link dependency between the master core and the profile library.
 
 namespace EtherCAT {
 namespace Mailbox {
@@ -83,38 +87,6 @@ void dumpHeaderAndStatus(Master& master,
     } else {
         TETHER_LOGW(tag, "SDO mailbox configuration unavailable for slave %u", slave_idx);
     }
-}
-
-void dumpSlaveSyncAndMailboxInfo(const CiA402Drive& drive,
-                                 const char* tag)
-{
-    if (!drive.master()) {
-        TETHER_LOGW(tag, "dumpSlaveSyncAndMailboxInfo: drive has no master");
-        return;
-    }
-
-    auto* master = drive.master();
-    uint16_t slave_idx = drive.slaveIndex();
-
-    // first dump mailbox header / status registers
-    dumpHeaderAndStatus(*master, slave_idx, tag);
-
-    // dump SM0/SM1 register values (same as sync-manager utils do internally)
-    for (uint8_t sm = 0; sm < 2; ++sm) {
-        master->slave(slave_idx).sm(sm).dump(tag);
-    }
-
-    // read and log AL status + code
-    uint8_t ast[2] = {0};
-    uint8_t acd[2] = {0};
-    (void)master->readRegister(SlaveAddress(slave_idx), static_cast<uint16_t>(0x0130), ast, sizeof(ast), 200);
-    (void)master->readRegister(SlaveAddress(slave_idx), static_cast<uint16_t>(0x0134), acd, sizeof(acd), 200);
-    const uint16_t al_status = static_cast<uint16_t>(ast[0] | (ast[1] << 8));
-    const uint16_t al_code   = static_cast<uint16_t>(acd[0] | (acd[1] << 8));
-    TETHER_LOGI(tag, "AL_STATUS=0x%04X (%s)%s | AL status code: %s (0x%04X)",
-             al_status, al_status_get_state_name(al_status),
-             (al_status_has_error(al_status) ? ", ERROR" : ""),
-             getALStatusCodeName(static_cast<ALStatusCode>(al_code)), al_code);
 }
 
 } // namespace Utils

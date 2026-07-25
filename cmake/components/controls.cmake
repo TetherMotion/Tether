@@ -1,5 +1,8 @@
 # Component: tether_controls
-# Control algorithms: PID, state-space, LQR, LQG, robust controllers, learning controllers
+# Core control algorithms: PID, state-space, LQR, LQG, robust controllers, learning
+# controllers, composite controllers, matrix utilities.
+#
+# Autotuning methods live in the separate tether_autotuning component (opt-in).
 
 set(TETHER_CONTROLS_SOURCES
     ${TETHER_ROOT}/src/control/ControllerBase.cpp
@@ -12,36 +15,6 @@ set(TETHER_CONTROLS_SOURCES
     ${TETHER_ROOT}/src/control/LearningControllers.cpp
     ${TETHER_ROOT}/src/control/CompositeControllers.cpp
     ${TETHER_ROOT}/src/control/MatrixUtils.cpp
-    # Autotuning sources
-    ${TETHER_ROOT}/src/control/autotuning/AdaptiveMethods.cpp
-    ${TETHER_ROOT}/src/control/autotuning/AutotuningFramework.cpp
-    ${TETHER_ROOT}/src/control/autotuning/classical/Common.cpp
-    ${TETHER_ROOT}/src/control/autotuning/classical/ZieglerNicholsStepResponse.cpp
-    ${TETHER_ROOT}/src/control/autotuning/classical/ZieglerNicholsUltimateCycle.cpp
-    ${TETHER_ROOT}/src/control/autotuning/classical/TyreusLuyben.cpp
-    ${TETHER_ROOT}/src/control/autotuning/classical/CohenCoon.cpp
-    ${TETHER_ROOT}/src/control/autotuning/classical/ChienHronesReswick.cpp
-    ${TETHER_ROOT}/src/control/autotuning/classical/AstromHagglundRelay.cpp
-    ${TETHER_ROOT}/src/control/autotuning/classical/LopezMethod.cpp
-    ${TETHER_ROOT}/src/control/autotuning/classical/LambdaTuning.cpp
-    ${TETHER_ROOT}/src/control/autotuning/classical/SIMCMethod.cpp
-    ${TETHER_ROOT}/src/control/autotuning/classical/AMIGOMethod.cpp
-    ${TETHER_ROOT}/src/control/autotuning/classical/ClassicalTuningFactory.cpp
-    ${TETHER_ROOT}/src/control/autotuning/HybridMethods.cpp
-    ${TETHER_ROOT}/src/control/autotuning/IndustrialAutotuners.cpp
-    ${TETHER_ROOT}/src/control/autotuning/LQRTuning.cpp
-    ${TETHER_ROOT}/src/control/autotuning/model_based/IMCDesign.cpp
-    ${TETHER_ROOT}/src/control/autotuning/model_based/PolePlacement.cpp
-    ${TETHER_ROOT}/src/control/autotuning/model_based/LoopShaping.cpp
-    ${TETHER_ROOT}/src/control/autotuning/model_based/DirectSynthesis.cpp
-    ${TETHER_ROOT}/src/control/autotuning/model_based/SmithPredictor.cpp
-    ${TETHER_ROOT}/src/control/autotuning/model_based/DahlinAlgorithm.cpp
-    ${TETHER_ROOT}/src/control/autotuning/model_based/DeadbeatControl.cpp
-    ${TETHER_ROOT}/src/control/autotuning/model_based/MinimumVarianceControl.cpp
-    ${TETHER_ROOT}/src/control/autotuning/MuSynthesis.cpp
-    ${TETHER_ROOT}/src/control/autotuning/OptimizationAlgorithms.cpp
-    ${TETHER_ROOT}/src/control/autotuning/QFT.cpp
-    ${TETHER_ROOT}/src/control/autotuning/SlidingModeControl.cpp
 )
 
 # Filter to only existing files

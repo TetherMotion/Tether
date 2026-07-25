@@ -1,4 +1,4 @@
-#include "tether/drives/Synapticon/SafeMotionFSoE.hpp"
+#include "tether/fsoe/Synapticon/SafeMotionFSoE.hpp"
 
 #include <cmath>
 

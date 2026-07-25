@@ -1,21 +1,13 @@
 # Component: tether_motion_control
-# Real-time motion control, profiles, motor models, and kinematics
+# Real-time motion control, profiles, motor models, and kinematics.
+#
+# System identification now lives in the separate tether_identification component
+# (opt-in, zero tether deps).
 
 set(TETHER_MOTION_CONTROL_SOURCES
     # Motion generators and profiles
     ${TETHER_ROOT}/src/motion/MotionGenerator.cpp
-    ${TETHER_ROOT}/src/identification/DenseLinearAlgebra.cpp
-    ${TETHER_ROOT}/src/identification/StepResponse.cpp
-    ${TETHER_ROOT}/src/identification/LeastSquares.cpp
-    ${TETHER_ROOT}/src/identification/FrictionIdentification.cpp
-    ${TETHER_ROOT}/src/identification/FrequencyIdentification.cpp
-    ${TETHER_ROOT}/src/identification/PolynomialModels.cpp
-    ${TETHER_ROOT}/src/identification/SubspaceIdentification.cpp
-    ${TETHER_ROOT}/src/identification/AdvancedFrictionModels.cpp
-    ${TETHER_ROOT}/src/identification/RigidBodyIdentification.cpp
-    ${TETHER_ROOT}/src/identification/AdaptiveObservers.cpp
-    ${TETHER_ROOT}/src/identification/NonlinearIdentification.cpp
-    
+
     # CiA 402 motion control (not drive protocol, but motion logic)
     ${TETHER_ROOT}/src/profiles/cia402/MotionController.cpp
     ${TETHER_ROOT}/src/profiles/cia402/AxisMotion.cpp
@@ -27,7 +19,7 @@ set(TETHER_MOTION_CONTROL_SOURCES
     ${TETHER_ROOT}/src/profiles/cia402/AdvancedMotorModelPhysics.cpp
     ${TETHER_ROOT}/src/profiles/cia402/AdvancedMotorModelFactory.cpp
     ${TETHER_ROOT}/src/profiles/cia402/MotorModelFactory.cpp
-    ${TETHER_ROOT}/src/profiles/cia402/CiA402PIDController.cpp
+    ${TETHER_ROOT}/src/profiles/cia402/PIDController.cpp
 )
 
 # Filter to only existing files

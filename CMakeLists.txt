@@ -4,13 +4,18 @@
 # This builds multiple component libraries:
 #   - tether_common: Shared utilities, types, configuration
 #   - tether_hal: Hardware abstraction layer
-#   - tether_controls: PID and control algorithms
+#   - tether_controls: Core control algorithms (PID, LQR, LQG, Kalman, robust)
+#   - tether_autotuning: Controller autotuning framework (classical + model-based)
 #   - tether_gcode: G-code parsing and trajectory generation
 #   - tether_export: CSV/SVG export utilities
 #   - tether_motion_planner: Motion planning and replanning
-#   - tether_motion_control: Real-time motion control
+#   - tether_motion_control: Real-time motion control and CiA 402 motion logic
+#   - tether_identification: System identification (step/ freq/ friction/ subspace)
 #   - tether_ethercat_common: Common EtherCAT types
-#   - tether_ethercat_master: EtherCAT master and CiA profiles
+#   - tether_ethercat_master: EtherCAT master core (protocol, mailbox, DC, FMMU, SII)
+#   - tether_cia_profiles: CiA device profiles (301/401/402/404/405/406/408/410/417/430) + ETG5000
+#   - tether_drives: Vendor-specific drive helpers (AS715N, DynaDrive, Nexcobot ESC211)
+#   - tether_fsoe: Fail-Safe over EtherCAT (ETG 5100) safety protocol
 #   - tether_ethercat_slave: EtherCAT slave emulation
 
 # Check if we're being built as an ESP-IDF component
@@ -137,10 +142,15 @@ endif()
 # ones plus their transitive dependencies.
 #
 # Component dependency graph:
-#   ethercat_master  → ethercat_common, motion_control, controls, hal, common
+#   fsoe             → cia_profiles, ethercat_master, common
+#   cia_profiles     → ethercat_master, motion_control, common
+#   drives           → ethercat_master, common
+#   ethercat_master  → ethercat_common, controls, hal, common
 #   ethercat_common  → hal, common
 #   motion_control   → controls, common
+#   identification   → common
 #   controls         → common
+#   autotuning       → common
 #   hal              → common
 #   common           → (none)
 #
@@ -151,13 +161,18 @@ endif()
 option(TETHER_BUILD_COMMON "Build common utilities" ON)
 option(TETHER_BUILD_HAL "Build hardware abstraction layer" ON)
 option(TETHER_BUILD_PCAP "Build pcap logging utilities" ON)
-option(TETHER_BUILD_CONTROLS "Build control algorithms" ON)
+option(TETHER_BUILD_CONTROLS "Build core control algorithms" ON)
+option(TETHER_BUILD_AUTOTUNING "Build controller autotuning framework" ON)
 option(TETHER_BUILD_GCODE "Build G-code interpreter" ON)
 option(TETHER_BUILD_EXPORT "Build export utilities" ON)
 option(TETHER_BUILD_MOTION_PLANNER "Build motion planner" ON)
 option(TETHER_BUILD_MOTION_CONTROL "Build motion control" ON)
+option(TETHER_BUILD_IDENTIFICATION "Build system identification" ON)
 option(TETHER_BUILD_ETHERCAT_COMMON "Build EtherCAT common" ON)
-option(TETHER_BUILD_ETHERCAT_MASTER "Build EtherCAT master" ON)
+option(TETHER_BUILD_ETHERCAT_MASTER "Build EtherCAT master core" ON)
+option(TETHER_BUILD_CIA_PROFILES "Build CiA device profiles and ETG5000" ON)
+option(TETHER_BUILD_DRIVES "Build vendor-specific drive helpers" ON)
+option(TETHER_BUILD_FSOE "Build Fail-Safe over EtherCAT (FSoE)" ON)
 option(TETHER_BUILD_ETHERCAT_SLAVE "Build EtherCAT slave emulation" ON)
 option(TETHER_BUILD_SIMULATION "Build simulation systems" ON)
 option(TETHER_BUILD_DESTABILIZER "Build destabilizer adversarial testing" ON)
@@ -188,9 +203,14 @@ if(DEFINED TETHER_COMPONENTS)
     set(_tether_component_deps_common          "")
     set(_tether_component_deps_hal             "common")
     set(_tether_component_deps_controls        "common")
+    set(_tether_component_deps_autotuning      "common")
     set(_tether_component_deps_motion_control  "controls;common")
+    set(_tether_component_deps_identification  "common")
     set(_tether_component_deps_ethercat_common "hal;common")
-    set(_tether_component_deps_ethercat_master "ethercat_common;motion_control;controls;hal;common")
+    set(_tether_component_deps_ethercat_master "ethercat_common;controls;hal;common")
+    set(_tether_component_deps_cia_profiles    "ethercat_master;motion_control;common")
+    set(_tether_component_deps_drives          "ethercat_master;common")
+    set(_tether_component_deps_fsoe            "cia_profiles;ethercat_master;common")
     set(_tether_component_deps_ethercat_slave  "ethercat_common;hal;common")
     set(_tether_component_deps_pcap            "common")
     set(_tether_component_deps_gcode           "common")
@@ -202,9 +222,10 @@ if(DEFINED TETHER_COMPONENTS)
 
     # All valid component names
     set(_tether_all_components
-        common hal pcap controls gcode export motion_planner motion_control
-        ethercat_common ethercat_master ethercat_slave simulation
-        destabilizer io_protocol)
+        common hal pcap controls autotuning gcode export motion_planner
+        motion_control identification ethercat_common ethercat_master
+        cia_profiles drives fsoe ethercat_slave simulation destabilizer
+        io_protocol)
 
     # Resolve transitive closure of requested components
     set(_tether_enabled ${TETHER_COMPONENTS})
@@ -227,8 +248,9 @@ if(DEFINED TETHER_COMPONENTS)
 
     # Disable everything first
     set(_tether_build_vars
-        COMMON HAL PCAP CONTROLS GCODE EXPORT MOTION_PLANNER MOTION_CONTROL
-        ETHERCAT_COMMON ETHERCAT_MASTER ETHERCAT_SLAVE SIMULATION
+        COMMON HAL PCAP CONTROLS AUTOTUNING GCODE EXPORT MOTION_PLANNER
+        MOTION_CONTROL IDENTIFICATION ETHERCAT_COMMON ETHERCAT_MASTER
+        CIA_PROFILES DRIVES FSOE ETHERCAT_SLAVE SIMULATION
         DESTABILIZER IO_PROTOCOL)
     foreach(_var ${_tether_build_vars})
         set(TETHER_BUILD_${_var} OFF CACHE BOOL "" FORCE)
@@ -316,9 +338,14 @@ if(TETHER_BUILD_HAL)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/hal.cmake)
 endif()
 
-# Controls
+# Controls (core controllers)
 if(TETHER_BUILD_CONTROLS)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/controls.cmake)
+endif()
+
+# Autotuning (depends on common; fully self-contained)
+if(TETHER_BUILD_AUTOTUNING)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/autotuning.cmake)
 endif()
 
 # GCode
@@ -334,6 +361,11 @@ endif()
 # Motion Planner
 if(TETHER_BUILD_MOTION_PLANNER)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/motion_planner.cmake)
+endif()
+
+# Identification (depends on common; fully self-contained)
+if(TETHER_BUILD_IDENTIFICATION)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/identification.cmake)
 endif()
 
 # Motion Control
@@ -384,9 +416,24 @@ else()
     add_compile_definitions(TETHER_DEBUG_GATE_ENABLED=0)
 endif()
 
-# EtherCAT Master
+# EtherCAT Master (core: protocol, mailbox, raw, FMMU, SII, reset)
 if(TETHER_BUILD_ETHERCAT_MASTER)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/ethercat_master.cmake)
+endif()
+
+# CiA device profiles + ETG5000 (depends on ethercat_master and motion_control)
+if(TETHER_BUILD_CIA_PROFILES AND TETHER_BUILD_ETHERCAT_MASTER AND TETHER_BUILD_MOTION_CONTROL)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/cia_profiles.cmake)
+endif()
+
+# Vendor-specific drive helpers (depends on ethercat_master)
+if(TETHER_BUILD_DRIVES AND TETHER_BUILD_ETHERCAT_MASTER)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/drives.cmake)
+endif()
+
+# FSoE — Fail-Safe over EtherCAT (depends on ethercat_master and cia_profiles)
+if(TETHER_BUILD_FSOE AND TETHER_BUILD_ETHERCAT_MASTER AND TETHER_BUILD_CIA_PROFILES AND TETHER_BUILD_MOTION_CONTROL)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/fsoe.cmake)
 endif()
 
 # EtherCAT Slave
@@ -430,12 +477,17 @@ tether_collect_targets(TETHER_COMMON)
 tether_collect_targets(TETHER_PCAP)
 tether_collect_targets(TETHER_HAL)
 tether_collect_targets(TETHER_CONTROLS)
+tether_collect_targets(TETHER_AUTOTUNING)
 tether_collect_targets(TETHER_GCODE)
 tether_collect_targets(TETHER_EXPORT)
 tether_collect_targets(TETHER_MOTION_PLANNER)
 tether_collect_targets(TETHER_MOTION_CONTROL)
+tether_collect_targets(TETHER_IDENTIFICATION)
 tether_collect_targets(TETHER_ETHERCAT_COMMON)
 tether_collect_targets(TETHER_ETHERCAT_MASTER)
+tether_collect_targets(TETHER_CIA_PROFILES)
+tether_collect_targets(TETHER_DRIVES)
+tether_collect_targets(TETHER_FSOE)
 tether_collect_targets(TETHER_ETHERCAT_SLAVE)
 tether_collect_targets(TETHER_SIMULATION)
 tether_collect_targets(TETHER_DESTABILIZER)
@@ -453,6 +505,9 @@ endif()
 if(TARGET tether_controls)
     list(APPEND TETHER_ALL_COMPONENTS tether_controls)
 endif()
+if(TARGET tether_autotuning)
+    list(APPEND TETHER_ALL_COMPONENTS tether_autotuning)
+endif()
 if(TARGET tether_gcode)
     list(APPEND TETHER_ALL_COMPONENTS tether_gcode)
 endif()
@@ -465,11 +520,23 @@ endif()
 if(TARGET tether_motion_control)
     list(APPEND TETHER_ALL_COMPONENTS tether_motion_control)
 endif()
+if(TARGET tether_identification)
+    list(APPEND TETHER_ALL_COMPONENTS tether_identification)
+endif()
 if(TARGET tether_ethercat_common)
     list(APPEND TETHER_ALL_COMPONENTS tether_ethercat_common)
 endif()
 if(TARGET tether_ethercat_master)
     list(APPEND TETHER_ALL_COMPONENTS tether_ethercat_master)
+endif()
+if(TARGET tether_cia_profiles)
+    list(APPEND TETHER_ALL_COMPONENTS tether_cia_profiles)
+endif()
+if(TARGET tether_drives)
+    list(APPEND TETHER_ALL_COMPONENTS tether_drives)
+endif()
+if(TARGET tether_fsoe)
+    list(APPEND TETHER_ALL_COMPONENTS tether_fsoe)
 endif()
 if(TARGET tether_ethercat_slave)
     list(APPEND TETHER_ALL_COMPONENTS tether_ethercat_slave)
@@ -624,12 +691,17 @@ message(STATUS "    tether_common:         ${TETHER_BUILD_COMMON}")
 message(STATUS "    tether_pcap:           ${TETHER_BUILD_PCAP}")
 message(STATUS "    tether_hal:            ${TETHER_BUILD_HAL}")
 message(STATUS "    tether_controls:       ${TETHER_BUILD_CONTROLS}")
+message(STATUS "    tether_autotuning:     ${TETHER_BUILD_AUTOTUNING}")
 message(STATUS "    tether_gcode:          ${TETHER_BUILD_GCODE}")
 message(STATUS "    tether_export:         ${TETHER_BUILD_EXPORT}")
 message(STATUS "    tether_motion_planner: ${TETHER_BUILD_MOTION_PLANNER}")
 message(STATUS "    tether_motion_control: ${TETHER_BUILD_MOTION_CONTROL}")
+message(STATUS "    tether_identification: ${TETHER_BUILD_IDENTIFICATION}")
 message(STATUS "    tether_ethercat_common: ${TETHER_BUILD_ETHERCAT_COMMON}")
 message(STATUS "    tether_ethercat_master: ${TETHER_BUILD_ETHERCAT_MASTER}")
+message(STATUS "    tether_cia_profiles:   ${TETHER_BUILD_CIA_PROFILES}")
+message(STATUS "    tether_drives:         ${TETHER_BUILD_DRIVES}")
+message(STATUS "    tether_fsoe:           ${TETHER_BUILD_FSOE}")
 message(STATUS "    tether_ethercat_slave: ${TETHER_BUILD_ETHERCAT_SLAVE}")
 message(STATUS "    tether_simulation:    ${TETHER_BUILD_SIMULATION}")
 message(STATUS "    tether_io_protocol:   ${TETHER_BUILD_IO_PROTOCOL}")
