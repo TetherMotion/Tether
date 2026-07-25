@@ -178,6 +178,7 @@ file(GLOB_RECURSE DESTABILIZER_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/destabi
 set(GCODE_LEXER_PARSER_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/gcode/GCodeLexerTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/gcode/GCodeParserTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gcode/GCodeOCodesTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/gcode/test_gcode_parser.cpp"
 )
 set(GCODE_INTERPOLATION_SOURCES

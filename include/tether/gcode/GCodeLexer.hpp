@@ -119,9 +119,14 @@ struct LexerToken {
     
     /// For WORD tokens: the letter (A-Z)
     WordLetter letter{WordLetter::INVALID};
-    
+
     /// For WORD tokens: the numeric value
     double value{0.0};
+
+    /// For WORD tokens whose value is an unevaluated expression ([...]) or
+    /// parameter reference (#N / #<name>). When true, the parser must
+    /// evaluate `expression` / `paramNumber` / `paramName` to obtain `value`.
+    bool wordNeedsEval{false};
     
     /// For OCODE_NUMBER: the O-code number
     int32_t oNumber{-1};
@@ -245,6 +250,16 @@ std::vector<HighlightSpan> highlightLine(std::string_view line,
 
 /**
  * @brief G-code lexical analyzer
+ *
+ * @note Thread safety: A Lexer instance is NOT thread-safe and is NOT
+ *       reentrant. All access (including tokenization, seeking, and error
+ *       inspection) must be performed from a single thread, or the caller
+ *       must provide external synchronization.
+ *
+ * @note Lifetime: The lexer does NOT copy the input buffer. The caller must
+ *       keep the buffer passed to setInput() alive for the entire lifetime
+ *       of the lexer (or until the next setInput() call with a different
+ *       buffer).
  */
 class Lexer {
 public:
@@ -410,13 +425,20 @@ private:
     const char* m_source{nullptr};
     size_t m_len{0};
     size_t m_pos{0};
-    
+
     // Position tracking
     uint32_t m_line{1};
     uint32_t m_column{1};
     uint32_t m_totalLines{0};
     bool m_atLineStart{true};
-    
+    // Byte offset of the start of the current line. Maintained incrementally
+    // in advance()/seek()/retreat() so that findLineStart(m_pos) is O(1) on
+    // the hot path (forward parsing).
+    size_t m_lineStartPos{0};
+    // True when the previous token was OCODE_NUMBER or OCODE_NAME, so the
+    // next token should be lexed as an O-code keyword (sub/call/if/etc.).
+    bool m_afterOCode{false};
+
     // Lookahead token for peek
     std::optional<LexerToken> m_peeked;
     

@@ -114,6 +114,7 @@
 #include "GCodeTypes.hpp"
 #include <cstring>
 #include <cmath>
+#include <deque>
 #include <unordered_map>
 #include <string>
 #include <vector>
@@ -233,6 +234,15 @@ struct LocalFrame {
 
 /**
  * @brief Complete variable system
+ *
+ * @note Thread safety: A VariableSystem instance is NOT thread-safe. All
+ *       access must be performed from a single thread, or the caller must
+ *       provide external synchronization.
+ *
+ * @note Lifetime: setState() stores a non-owning pointer to a MachineState.
+ *       The caller must keep that MachineState alive for as long as the
+ *       VariableSystem references it (i.e. until setState(nullptr) is called
+ *       or the VariableSystem is destroyed).
  */
 class VariableSystem {
 public:
@@ -412,6 +422,9 @@ enum class TokenType : uint8_t {
     MOD,
     EQ, NE, GT, GE, LT, LE,
     AND, OR, XOR, NOT,
+    ASSIGN,         // = (parameter assignment)
+    QUESTION,       // ? (ternary)
+    COLON,          // : (ternary)
     FUNC_ABS, FUNC_ACOS, FUNC_ASIN, FUNC_ATAN,
     FUNC_COS, FUNC_EXP, FUNC_FIX, FUNC_FUP,
     FUNC_LN, FUNC_ROUND, FUNC_SIN, FUNC_SQRT, FUNC_TAN,
@@ -476,6 +489,14 @@ struct Token {
  * - TAN[x]   - Tangent (x in degrees)
  * - EXISTS[#<name>] - Check if parameter exists
  */
+/**
+ * @brief Expression evaluator for G-code [...] expressions and parameters.
+ *
+ * @note Thread safety: An ExpressionEvaluator instance is NOT thread-safe.
+ *       All access must be performed from a single thread, or the caller
+ *       must provide external synchronization. The referenced VariableSystem
+ *       must not be modified by another thread during evaluation.
+ */
 class ExpressionEvaluator {
 public:
     /**
@@ -513,10 +534,17 @@ private:
     size_t m_pos{0};
     size_t m_len{0};
     Token m_current;
+    std::deque<Token> m_pushedBack;  // pushback buffer for lookahead
     std::array<char, 64> m_error{};
+    // Current recursion depth of the recursive-descent parser, used to bound
+    // deeply nested expressions and prevent stack overflow on hostile input.
+    uint32_t m_depth{0};
+    static constexpr uint32_t kMaxDepth = 256;
     
     // Tokenizer
     Token nextToken();
+    Token nextTokenRaw();
+    void pushBack(Token t);
     void skipWhitespace();
     Token parseNumber();
     Token parseParameter();

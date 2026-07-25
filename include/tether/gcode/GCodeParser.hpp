@@ -263,6 +263,18 @@ private:
 
 /**
  * @brief G-code parser
+ *
+ * @note Thread safety: A Parser instance is NOT thread-safe and is NOT
+ *       reentrant. All access must be performed from a single thread, or
+ *       the caller must provide external synchronization. The referenced
+ *       VariableSystem must not be modified by another thread during
+ *       parsing.
+ *
+ * @note Lifetime: When input is provided via `setInput(const char*)` or
+ *       `(const char*, size_t)`, the parser does NOT copy the buffer; the
+ *       caller must keep it alive. Input provided via `loadFile()` is owned
+ *       by the parser. Input provided as a temporary `std::string` to
+ *       `setInput(std::string_view)` must outlive the parser.
  */
 class Parser {
 public:
@@ -339,19 +351,13 @@ public:
     
     /**
      * @brief Fill lookahead buffer
+     *
+     * @deprecated The parser no longer maintains a persistent lookahead
+     *             buffer; use readAhead() instead. Kept as a no-op for API
+     *             compatibility.
      */
     void fillLookahead();
-    
-    /**
-     * @brief Get current lookahead buffer
-     */
-    const BlockQueue& getLookahead() const { return m_lookahead; }
-    
-    /**
-     * @brief Get current lookbehind buffer
-     */
-    const BlockQueue& getLookbehind() const { return m_lookbehind; }
-    
+
     // ========================================================================
     // Position Control
     // ========================================================================
@@ -386,6 +392,22 @@ public:
      * @brief Check if at start of input
      */
     bool atStart() const;
+
+    /**
+     * @brief Get the underlying lexer (for position tracking)
+     */
+    Lexer& getLexer() { return m_lexer; }
+    const Lexer& getLexer() const { return m_lexer; }
+
+    /**
+     * @brief Get current block number (0-based count of parsed blocks)
+     */
+    size_t getCurrentBlockNumber() const { return m_currentBlockNum; }
+
+    /**
+     * @brief Set current block number (for restoring state after scans)
+     */
+    void setCurrentBlockNumber(size_t n) { m_currentBlockNum = n; }
     
     // ========================================================================
     // O-Code Handling
@@ -459,32 +481,38 @@ private:
     VariableSystem& m_vars;
     Lexer m_lexer;
     ExpressionEvaluator m_evaluator;
-    
-    // Lookahead/behind queues
-    BlockQueue m_lookahead;
-    BlockQueue m_lookbehind;
-    
+
+    // Reusable lexer for parseLine() (avoids per-line allocation).
+    Lexer m_lineLexer;
+
+    // File contents owned by the parser when loaded via loadFile(). Kept
+    // alive so m_lexer.m_source remains valid across parse calls.
+    std::string m_fileContent;
+
     // Statistics
     uint32_t m_totalBlocks{0};
     uint32_t m_currentBlockNum{0};
-    
+
     // Error state
     Error m_error;
-    
+
     // Parsing helpers
     Error parseBlockFromTokens(const std::vector<LexerToken>& tokens, Block& block);
     Error parseWord(const LexerToken& token, Block& block);
     Error parseGCode(double value, Block& block);
     Error parseMCode(double value, Block& block);
-    Error parseOCode(const std::vector<LexerToken>& tokens, 
+    Error parseOCode(const std::vector<LexerToken>& tokens,
                      size_t& index, Block& block);
-    
+
     // Value evaluation
     Error evaluateWordValue(const LexerToken& token, double& value);
-    
+
     // Modal group checking
     Error checkModalGroups(const Block& block) const;
-    
+
+    // Build a LexerConfig from the parser config.
+    LexerConfig lexerConfigFromParser() const;
+
     // Error generation
     void setError(ErrorCode code, const char* msg, uint32_t line = 0);
 };
