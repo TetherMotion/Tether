@@ -660,8 +660,11 @@ TEST_F(ParserTest, FindMatchingOCode) {
     Block block;
     Error err = parser->findMatchingOCode(100, OCodeType::IF, block);
 
-    // Not implemented, should return error
-    EXPECT_TRUE(err);
+    // Should find the matching endif
+    EXPECT_FALSE(err) << "Expected findMatchingOCode to succeed";
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_EQ(block.oCodeNumber, 100);
+    EXPECT_EQ(block.oCodeType, OCodeType::ENDIF);
 }
 
 TEST_F(ParserTest, FindSubroutineNumber) {
@@ -670,8 +673,11 @@ TEST_F(ParserTest, FindSubroutineNumber) {
     Block block;
     Error err = parser->findSubroutine(100, block);
 
-    // Not implemented, should return error
-    EXPECT_TRUE(err);
+    // Should find the subroutine
+    EXPECT_FALSE(err) << "Expected findSubroutine to succeed";
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_EQ(block.oCodeNumber, 100);
+    EXPECT_EQ(block.oCodeType, OCodeType::SUB);
 }
 
 TEST_F(ParserTest, FindSubroutineName) {
@@ -680,8 +686,12 @@ TEST_F(ParserTest, FindSubroutineName) {
     Block block;
     Error err = parser->findSubroutine("mysub", block);
 
-    // Not implemented, should return error
-    EXPECT_TRUE(err);
+    // Should find the named subroutine
+    EXPECT_FALSE(err) << "Expected findSubroutine to succeed";
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_TRUE(block.oCodeIsNamed);
+    EXPECT_EQ(std::string(block.oCodeName.data()), "mysub");
+    EXPECT_EQ(block.oCodeType, OCodeType::SUB);
 }
 
 // ============================================================================
@@ -1091,10 +1101,160 @@ TEST_F(ParserTest, TooManyMCodes) {
 }
 
 TEST_F(ParserTest, OCodeParsing) {
+    // O-code with keyword should parse correctly
+    Block block = parseBlock("O100 sub");
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_FALSE(block.oCodeIsNamed);
+    EXPECT_EQ(block.oCodeNumber, 100);
+    EXPECT_EQ(block.oCodeType, OCodeType::SUB);
+}
+
+TEST_F(ParserTest, OCodeKeywordCall) {
+    Block block = parseBlock("O100 call [10] [20]");
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_EQ(block.oCodeType, OCodeType::CALL);
+}
+
+TEST_F(ParserTest, OCodeKeywordIf) {
+    Block block = parseBlock("O101 if [#1 GT 10]");
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_EQ(block.oCodeType, OCodeType::IF);
+    // Condition should be stored
+    EXPECT_STRNE(block.oCodeCondition.data(), "");
+}
+
+TEST_F(ParserTest, OCodeKeywordWhile) {
+    Block block = parseBlock("O102 while [#1 LT 10]");
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_EQ(block.oCodeType, OCodeType::WHILE);
+}
+
+TEST_F(ParserTest, OCodeKeywordDo) {
+    Block block = parseBlock("O103 do");
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_EQ(block.oCodeType, OCodeType::DO);
+}
+
+TEST_F(ParserTest, OCodeKeywordRepeat) {
+    Block block = parseBlock("O104 repeat [10]");
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_EQ(block.oCodeType, OCodeType::REPEAT);
+}
+
+TEST_F(ParserTest, OCodeKeywordEndsub) {
+    Block block = parseBlock("O100 endsub");
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_EQ(block.oCodeType, OCodeType::ENDSUB);
+}
+
+TEST_F(ParserTest, OCodeKeywordEndif) {
+    Block block = parseBlock("O101 endif");
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_EQ(block.oCodeType, OCodeType::ENDIF);
+}
+
+TEST_F(ParserTest, OCodeKeywordEndwhile) {
+    Block block = parseBlock("O102 endwhile");
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_EQ(block.oCodeType, OCodeType::ENDWHILE);
+}
+
+TEST_F(ParserTest, OCodeKeywordEndrepeat) {
+    Block block = parseBlock("O104 endrepeat");
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_EQ(block.oCodeType, OCodeType::ENDREPEAT);
+}
+
+TEST_F(ParserTest, OCodeKeywordElseif) {
+    Block block = parseBlock("O101 elseif [#1 GT 5]");
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_EQ(block.oCodeType, OCodeType::ELSEIF);
+}
+
+TEST_F(ParserTest, OCodeKeywordElse) {
+    Block block = parseBlock("O101 else");
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_EQ(block.oCodeType, OCodeType::ELSE);
+}
+
+TEST_F(ParserTest, OCodeKeywordReturn) {
+    Block block = parseBlock("O100 return [#1 * 2]");
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_EQ(block.oCodeType, OCodeType::RETURN);
+}
+
+TEST_F(ParserTest, OCodeKeywordBreak) {
+    Block block = parseBlock("O105 break");
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_EQ(block.oCodeType, OCodeType::BREAK);
+}
+
+TEST_F(ParserTest, OCodeKeywordContinue) {
+    Block block = parseBlock("O105 continue");
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_EQ(block.oCodeType, OCodeType::CONTINUE);
+}
+
+TEST_F(ParserTest, OCodeNamedSub) {
+    Block block = parseBlock("O<myroutine> sub");
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_TRUE(block.oCodeIsNamed);
+    EXPECT_STREQ(block.oCodeName.data(), "myroutine");
+    EXPECT_EQ(block.oCodeType, OCodeType::SUB);
+}
+
+TEST_F(ParserTest, OCodeNamedCall) {
+    Block block = parseBlock("O<myroutine> call [1] [2] [3]");
+    EXPECT_TRUE(block.hasOCode);
+    EXPECT_TRUE(block.oCodeIsNamed);
+    EXPECT_EQ(block.oCodeType, OCodeType::CALL);
+}
+
+TEST_F(ParserTest, FindMatchingOCodeWhile) {
+    parser->setInput("O100 while [#1 LT 10]\nG1 X[#1*10]\n#1 = [#1+1]\nO100 endwhile");
     Block block;
-    Error err = parser->parseLine("O100", block);
-    // O-code parsing is not implemented, should return error
-    // But the line itself might parse OK with O as a word
+    Error err = parser->findMatchingOCode(100, OCodeType::WHILE, block);
+    EXPECT_FALSE(err);
+    EXPECT_EQ(block.oCodeType, OCodeType::ENDWHILE);
+}
+
+TEST_F(ParserTest, FindMatchingOCodeRepeat) {
+    parser->setInput("O100 repeat [5]\nG1 X100\nO100 endrepeat");
+    Block block;
+    Error err = parser->findMatchingOCode(100, OCodeType::REPEAT, block);
+    EXPECT_FALSE(err);
+    EXPECT_EQ(block.oCodeType, OCodeType::ENDREPEAT);
+}
+
+TEST_F(ParserTest, FindMatchingOCodeSub) {
+    parser->setInput("O100 sub\nG1 X100\nO100 endsub");
+    Block block;
+    Error err = parser->findMatchingOCode(100, OCodeType::SUB, block);
+    EXPECT_FALSE(err);
+    EXPECT_EQ(block.oCodeType, OCodeType::ENDSUB);
+}
+
+TEST_F(ParserTest, FindMatchingOCodeNested) {
+    parser->setInput("O100 if [1]\nO101 if [1]\nG1 X100\nO101 endif\nO100 endif");
+    Block block;
+    Error err = parser->findMatchingOCode(100, OCodeType::IF, block);
+    EXPECT_FALSE(err);
+    EXPECT_EQ(block.oCodeNumber, 100);
+    EXPECT_EQ(block.oCodeType, OCodeType::ENDIF);
+}
+
+TEST_F(ParserTest, FindMatchingOCodeNotFound) {
+    parser->setInput("O100 if [1]\nG1 X100\n");
+    Block block;
+    Error err = parser->findMatchingOCode(100, OCodeType::IF, block);
+    EXPECT_TRUE(err);  // No matching endif
+}
+
+TEST_F(ParserTest, FindSubroutineNotFound) {
+    parser->setInput("O100 sub\nG1 X100\nO100 endsub");
+    Block block;
+    Error err = parser->findSubroutine(999, block);
+    EXPECT_TRUE(err);  // Subroutine 999 doesn't exist
 }
 
 TEST_F(ParserTest, GCodeSubWithDecimal) {

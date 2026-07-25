@@ -505,6 +505,7 @@ struct Block {
     int32_t oCodeNumber{-1};
     std::array<char, 64> oCodeName{};  // Named subroutine
     bool oCodeIsNamed{false};
+    std::array<char, 128> oCodeCondition{};  // Condition expression for if/while/repeat
     
     /// Comment text
     std::array<char, 128> comment{};
@@ -519,12 +520,16 @@ struct Block {
 
     /// Helper to check if a word is present
     bool hasWord(WordLetter letter) const {
-        return words[static_cast<size_t>(letter)].present;
+        const size_t idx = static_cast<size_t>(letter);
+        if (idx >= words.size()) return false;
+        return words[idx].present;
     }
 
     /// Helper to get word value
     double getWord(WordLetter letter, double defaultVal = 0.0) const {
-        const auto& w = words[static_cast<size_t>(letter)];
+        const size_t idx = static_cast<size_t>(letter);
+        if (idx >= words.size()) return defaultVal;
+        const auto& w = words[idx];
         return w.present ? w.value : defaultVal;
     }
 
@@ -598,22 +603,20 @@ struct Block {
         if ((s.front() == '[' && s.back() == ']') || (s.front() == '(' && s.back() == ')')) {
             s = s.substr(1, s.size() - 2);
         }
-        // split on commas or whitespace
-        std::stringstream ss(s);
-        std::string token;
-        while (std::getline(ss, token, ',')) {
-            // token may still contain whitespace-separated numbers
-            std::stringstream inner(token);
-            std::string t2;
-            while (inner >> t2) {
-                try {
-                    size_t idx = 0;
-                    double v = std::stod(t2, &idx);
-                    if (idx == 0) continue;
-                    out.push_back(v);
-                } catch (...) {
-                    // skip unparsable tokens
-                }
+        // split on commas or whitespace, parsing each token with from_chars
+        const char* beg = s.data();
+        const char* end = beg + s.size();
+        const char* p = beg;
+        auto isSep = [](char c) { return c == ',' || std::isspace(static_cast<unsigned char>(c)); };
+        while (p < end) {
+            while (p < end && isSep(*p)) ++p;
+            if (p >= end) break;
+            const char* tokStart = p;
+            while (p < end && !isSep(*p)) ++p;
+            double v = 0.0;
+            auto r = std::from_chars(tokStart, p, v);
+            if (r.ec == std::errc() && r.ptr > tokStart) {
+                out.push_back(v);
             }
         }
         return out;
@@ -638,7 +641,7 @@ struct Block {
     
     /// Check if a G-code (with decimal) is present (e.g., 382 for G38.2)
     bool hasGCodeDecimal(double code) const {
-        int16_t intCode = static_cast<int16_t>(code * 10);
+        int16_t intCode = static_cast<int16_t>(std::llround(code * 10.0));
         for (uint8_t i = 0; i < gCodeCount; ++i) {
             if (gCodes[i] == intCode) return true;
         }
@@ -959,6 +962,8 @@ struct Error {
     std::array<char, 64> context{};
     
     bool ok() const { return code == ErrorCode::OK; }
+    /// True if this represents end-of-input (not a real error).
+    bool isEnd() const { return code == ErrorCode::END; }
     operator bool() const { return code != ErrorCode::OK; }
 };
 

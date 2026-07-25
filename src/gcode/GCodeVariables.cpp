@@ -64,8 +64,12 @@ LocalFrame& VariableSystem::currentFrame() {
 
 const LocalFrame& VariableSystem::currentFrame() const {
     if (m_callStack.empty()) {
-        static LocalFrame empty;
-        return empty;
+        // Use a class-static rather than a function-local static so the
+        // sentinel is initialized at namespace load time (no first-call
+        // synchronization cost). It is never mutated; only read as a
+        // default when no call frame is active.
+        static const LocalFrame s_empty{};
+        return s_empty;
     }
     return m_callStack.back();
 }
@@ -255,13 +259,24 @@ void VariableSystem::setCoordSystemOffset(CoordSystem cs, const Position& offset
         return;
     }
 
-    // #5221-#5230 cover G54 offsets + rotation. We store only for G54 index 0.
-    if (idx == 0) {
-        m_systemParams[static_cast<size_t>(PARAM_G54_OFFSET - 5001) + 0] = offset.coords[0];
-        m_systemParams[static_cast<size_t>(PARAM_G54_OFFSET - 5001) + 1] = offset.coords[1];
-        m_systemParams[static_cast<size_t>(PARAM_G54_OFFSET - 5001) + 2] = offset.coords[2];
-        m_systemParams[static_cast<size_t>(PARAM_G54_OFFSET - 5001) + 9] = rotation;
+    // Each coordinate system occupies a 10-slot block starting at #5221:
+    //   G54   = #5221-#5230
+    //   G55   = #5231-#5240
+    //   G56   = #5241-#5250
+    //   G57   = #5251-#5260
+    //   G58   = #5261-#5270
+    //   G59   = #5271-#5280
+    //   G59.1 = #5281-#5290
+    //   G59.2 = #5291-#5300
+    //   G59.3 = #5301-#5310
+    // Slots 0-8 hold X,Y,Z,A,B,C,U,V,W; slot 9 holds rotation.
+    const size_t base = static_cast<size_t>(PARAM_G54_OFFSET - 5001)
+                      + static_cast<size_t>(idx) * 10;
+    if (base + 9 >= m_systemParams.size()) return;
+    for (size_t i = 0; i < offset.coords.size() && i < 9; ++i) {
+        m_systemParams[base + i] = offset.coords[i];
     }
+    m_systemParams[base + 9] = rotation;
 }
 
 Position VariableSystem::getCoordSystemOffset(CoordSystem cs) const {
@@ -269,13 +284,16 @@ Position VariableSystem::getCoordSystemOffset(CoordSystem cs) const {
     out.coords.fill(0.0);
 
     const int idx = static_cast<int>(cs) - static_cast<int>(CoordSystem::G54);
-    if (idx != 0) {
+    if (idx < 0 || idx >= static_cast<int>(MAX_COORD_SYSTEMS)) {
         return out;
     }
 
-    out.coords[0] = m_systemParams[static_cast<size_t>(PARAM_G54_OFFSET - 5001) + 0];
-    out.coords[1] = m_systemParams[static_cast<size_t>(PARAM_G54_OFFSET - 5001) + 1];
-    out.coords[2] = m_systemParams[static_cast<size_t>(PARAM_G54_OFFSET - 5001) + 2];
+    const size_t base = static_cast<size_t>(PARAM_G54_OFFSET - 5001)
+                      + static_cast<size_t>(idx) * 10;
+    if (base + 9 >= m_systemParams.size()) return out;
+    for (size_t i = 0; i < out.coords.size() && i < 9; ++i) {
+        out.coords[i] = m_systemParams[base + i];
+    }
     return out;
 }
 
@@ -313,10 +331,33 @@ void VariableSystem::updateSystemParams() {
     }
 
     // Current tool number (#5400)
-    m_systemParams[static_cast<size_t>(PARAM_TOOL_NUMBER - 5001)] = static_cast<double>(m_state->currentTool);
+    m_systemParams[static_cast<size_t>(PARAM_TOOL_NUMBER - 5001)] =
+        static_cast<double>(m_state->currentTool);
 
-    // Feed/spindle
-    // (No direct numeric system parameter mapping here; named params cover this.)
+    // Current coordinate system (#5220): 1=G54 .. 9=G59.3
+    m_systemParams[static_cast<size_t>(PARAM_COORD_SYSTEM - 5001)] =
+        static_cast<double>(static_cast<int>(m_state->coordSystem));
+
+    // Tool length offsets (#5401-#5409)
+    for (size_t i = 0; i < MAX_AXES && i < 9; ++i) {
+        const int32_t num = PARAM_TOOL_OFFSET + static_cast<int32_t>(i);
+        if (num >= 5001 && num <= 5600) {
+            m_systemParams[static_cast<size_t>(num - 5001)] =
+                m_state->toolOffset.coords[i];
+        }
+    }
+
+    // G28/G30 home positions (#5161-#5169, #5181-#5189) are not tracked in
+    // MachineState yet; left at their last set values.
+
+    // G92 offset (#5211-#5219)
+    for (size_t i = 0; i < MAX_AXES && i < 9; ++i) {
+        const int32_t num = PARAM_G92_OFFSET + static_cast<int32_t>(i);
+        if (num >= 5001 && num <= 5600) {
+            m_systemParams[static_cast<size_t>(num - 5001)] =
+                m_state->g92Offset.coords[i];
+        }
+    }
 }
 
 // ============================================================================
@@ -463,6 +504,19 @@ Token ExpressionEvaluator::parseIdentifier() {
 }
 
 Token ExpressionEvaluator::nextToken() {
+    if (!m_pushedBack.empty()) {
+        Token t = m_pushedBack.front();
+        m_pushedBack.pop_front();
+        return t;
+    }
+    return nextTokenRaw();
+}
+
+void ExpressionEvaluator::pushBack(Token t) {
+    m_pushedBack.push_front(t);
+}
+
+Token ExpressionEvaluator::nextTokenRaw() {
     skipWhitespace();
 
     Token t;
@@ -480,6 +534,9 @@ Token ExpressionEvaluator::nextToken() {
     if (c == '-') { ++m_pos; t.type = TokenType::MINUS; return t; }
     if (c == '/') { ++m_pos; t.type = TokenType::DIVIDE; return t; }
     if (c == '^') { ++m_pos; t.type = TokenType::POWER; return t; }
+    if (c == '=') { ++m_pos; t.type = TokenType::ASSIGN; return t; }
+    if (c == '?') { ++m_pos; t.type = TokenType::QUESTION; return t; }
+    if (c == ':') { ++m_pos; t.type = TokenType::COLON; return t; }
     if (c == '*') {
         if (m_pos + 1 < m_len && m_expr[m_pos + 1] == '*') {
             m_pos += 2;
@@ -521,15 +578,41 @@ Error ExpressionEvaluator::evaluate(const char* expr, double& result) {
     m_expr = expr;
     m_pos = 0;
     m_len = std::strlen(expr);
-
-    // Allow expressions with optional outer brackets.
-    skipWhitespace();
-    bool hasOuter = (m_pos < m_len && m_expr[m_pos] == '[');
-    if (hasOuter) {
-        ++m_pos;
-    }
+    m_depth = 0;
+    m_pushedBack.clear();
 
     m_current = nextToken();
+
+    // Parameter assignment: #<name> = expr  or  #N = expr
+    // The assignment target is consumed as a PARAMETER token, followed by
+    // an ASSIGN token. We evaluate the RHS and store it back to the variable
+    // system, returning the assigned value as the result.
+    if (m_current.type == TokenType::PARAMETER) {
+        Token assignTarget = m_current;
+        Token lookahead = nextToken();
+        if (lookahead.type == TokenType::ASSIGN) {
+            m_current = nextToken();
+            double rhs = 0.0;
+            err = parseExpression(rhs);
+            if (err) return err;
+            if (!std::isfinite(rhs)) {
+                set_error(err, ErrorCode::EXPRESSION_ERROR, 0,
+                          "Assignment of non-finite value (inf/nan)");
+                return err;
+            }
+            if (assignTarget.paramNum >= 0) {
+                m_vars.set(assignTarget.paramNum, rhs);
+            } else if (!assignTarget.name.empty()) {
+                m_vars.setNamed(assignTarget.name, rhs);
+            }
+            result = rhs;
+            return Error{};
+        }
+        // Not an assignment — push both tokens back and parse normally.
+        pushBack(lookahead);
+        pushBack(assignTarget);
+        m_current = nextToken();
+    }
 
     double value = 0.0;
     err = parseExpression(value);
@@ -537,13 +620,12 @@ Error ExpressionEvaluator::evaluate(const char* expr, double& result) {
         return err;
     }
 
-    if (hasOuter) {
-        // Consume until close bracket
-        if (m_current.type != TokenType::CLOSE_BRACKET) {
-            set_error(err, ErrorCode::MISSING_BRACKET, 0, "Missing closing ]");
-            return err;
-        }
-        m_current = nextToken();
+    // Reject non-finite results (inf/nan) so downstream consumers don't
+    // silently propagate them into motion commands.
+    if (!std::isfinite(value)) {
+        set_error(err, ErrorCode::EXPRESSION_ERROR, 0,
+                  "Expression evaluated to non-finite value (inf/nan)");
+        return err;
     }
 
     result = value;
@@ -559,12 +641,45 @@ std::pair<double, Error> ExpressionEvaluator::evaluate(const char* expr) {
 // --- Recursive descent ------------------------------------------------------
 
 Error ExpressionEvaluator::parseExpression(double& result) {
-    // No ternary currently; logical OR is top level.
-    return parseLogicalOr(result);
+    // Bound recursion to prevent stack overflow on deeply nested input.
+    if (++m_depth > kMaxDepth) {
+        --m_depth;
+        Error err;
+        set_error(err, ErrorCode::EXPRESSION_ERROR, 0,
+                  "Expression recursion depth exceeded");
+        return err;
+    }
+    Error err = parseTernary(result);
+    --m_depth;
+    return err;
 }
 
 Error ExpressionEvaluator::parseTernary(double& result) {
-    return parseLogicalOr(result);
+    // ternary: logicalOr ('?' expression ':' ternary)?
+    // The true branch is a full expression; the false branch is a ternary
+    // (right-associative for chained ternaries).
+    Error err = parseLogicalOr(result);
+    if (err) return err;
+
+    if (m_current.type == TokenType::QUESTION) {
+        m_current = nextToken();
+        double condVal = result;
+        double trueVal = 0.0;
+        err = parseExpression(trueVal);
+        if (err) return err;
+        if (m_current.type != TokenType::COLON) {
+            set_error(err, ErrorCode::EXPRESSION_ERROR, 0,
+                      "Missing ':' in ternary expression");
+            return err;
+        }
+        m_current = nextToken();
+        double falseVal = 0.0;
+        err = parseTernary(falseVal); // right-assoc for chained ternaries
+        if (err) return err;
+        result = (condVal != 0.0) ? trueVal : falseVal;
+    }
+
+    return Error{};
 }
 
 Error ExpressionEvaluator::parseLogicalOr(double& result) {
@@ -685,13 +800,14 @@ Error ExpressionEvaluator::parseMulDiv(double& result) {
 }
 
 Error ExpressionEvaluator::parsePower(double& result) {
+    // Right-associative: a ** b ** c == a ** (b ** c).
     Error err = parseUnary(result);
     if (err) return err;
 
-    while (m_current.type == TokenType::POWER) {
+    if (m_current.type == TokenType::POWER) {
         m_current = nextToken();
         double rhs = 0.0;
-        err = parseUnary(rhs);
+        err = parsePower(rhs); // recurse for right-assoc
         if (err) return err;
         result = std::pow(result, rhs);
     }
