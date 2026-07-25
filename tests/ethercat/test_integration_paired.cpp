@@ -212,11 +212,25 @@ protected:
     }
 
     void TearDown() override {
+        // Stop the master and join the discovery thread BEFORE destroying
+        // the responder.  discoverSlaves() calls initSlaves() which sends
+        // SII read frames; those frames are handled by the responder's RX
+        // callback.  If the responder (a local in each test) is destroyed
+        // first, the discovery thread calls handleFrame on a dead object —
+        // a use-after-free that TSAN catches as a SEGV.
         if (master_) master_->stop();
         if (discovery_thread_.joinable()) {
             discovery_thread_.join();
         }
+        responder_.reset();
         pair_.reset();
+    }
+
+    /// Create a slave responder owned by the fixture.
+    /// Must be called before startMaster().
+    SimpleSlaveResponder& makeResponder(uint16_t num_slaves = 1) {
+        responder_ = std::make_unique<SimpleSlaveResponder>(*pair_, num_slaves);
+        return *responder_;
     }
 
     /// Create & start a master on side-A with an inline RX callback.
@@ -235,6 +249,7 @@ protected:
     }
 
     std::unique_ptr<LinuxPairedNetworkInterface> pair_;
+    std::unique_ptr<SimpleSlaveResponder> responder_;
     std::unique_ptr<Master> master_;
     std::thread discovery_thread_;
     uint8_t dummy_mac_[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
@@ -245,7 +260,7 @@ protected:
 // ============================================================================
 
 TEST_F(IntegrationPairedTest, DiscoverSingleSlave) {
-    SimpleSlaveResponder responder(*pair_, 1);
+    auto& responder = makeResponder(1);
     auto& master = startMaster();
 
     // Wait for discovery
@@ -256,7 +271,7 @@ TEST_F(IntegrationPairedTest, DiscoverSingleSlave) {
 }
 
 TEST_F(IntegrationPairedTest, DiscoverMultipleSlaves) {
-    SimpleSlaveResponder responder(*pair_, 3);
+    auto& responder = makeResponder(3);
     auto& master = startMaster();
 
     for (int i = 0; i < 50 && master.getDiscoveredSlaveCount() == 0; ++i)
@@ -282,7 +297,7 @@ TEST_F(IntegrationPairedTest, DiscoverZeroSlaves) {
 // ============================================================================
 
 TEST_F(IntegrationPairedTest, AutoConfigureMailboxDoesNotCrash) {
-    SimpleSlaveResponder responder(*pair_, 1);
+    auto& responder = makeResponder(1);
     auto& master = startMaster();
 
     for (int i = 0; i < 50 && master.getDiscoveredSlaveCount() == 0; ++i)
@@ -302,7 +317,7 @@ TEST_F(IntegrationPairedTest, AutoConfigureMailboxDoesNotCrash) {
 // ============================================================================
 
 TEST_F(IntegrationPairedTest, TransitionToPreOp) {
-    SimpleSlaveResponder responder(*pair_, 1);
+    auto& responder = makeResponder(1);
     auto& master = startMaster();
 
     for (int i = 0; i < 50 && master.getDiscoveredSlaveCount() == 0; ++i)
@@ -319,7 +334,7 @@ TEST_F(IntegrationPairedTest, TransitionToPreOp) {
 }
 
 TEST_F(IntegrationPairedTest, TransitionToSafeOpAndOp) {
-    SimpleSlaveResponder responder(*pair_, 1);
+    auto& responder = makeResponder(1);
     auto& master = startMaster();
 
     for (int i = 0; i < 50 && master.getDiscoveredSlaveCount() == 0; ++i)
@@ -340,7 +355,7 @@ TEST_F(IntegrationPairedTest, TransitionToSafeOpAndOp) {
 }
 
 TEST_F(IntegrationPairedTest, ReadSlaveState) {
-    SimpleSlaveResponder responder(*pair_, 1);
+    auto& responder = makeResponder(1);
     auto& master = startMaster();
 
     for (int i = 0; i < 50 && master.getDiscoveredSlaveCount() == 0; ++i)
@@ -360,7 +375,7 @@ TEST_F(IntegrationPairedTest, ReadSlaveState) {
 // ============================================================================
 
 TEST_F(IntegrationPairedTest, DCManagerInit) {
-    SimpleSlaveResponder responder(*pair_, 1);
+    auto& responder = makeResponder(1);
     auto& master = startMaster();
 
     for (int i = 0; i < 50 && master.getDiscoveredSlaveCount() == 0; ++i)
