@@ -256,6 +256,7 @@ set(MOTION_REPLANNER_CORE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_CertifiedCornerDetection.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_CurvatureAwareLimiter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_CertifiedSuggestionSolver.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_OnlineReblender.cpp"
 )
 set(MOTION_REPLANNER_MACHINE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_MachineTester.cpp"
