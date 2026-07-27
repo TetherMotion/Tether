@@ -16,6 +16,7 @@ set(TETHER_MOTION_PLANNER_SOURCES
     ${TETHER_ROOT}/src/replanner/CertifiedContourError.cpp
     ${TETHER_ROOT}/src/replanner/CertifiedCornerDetection.cpp
     ${TETHER_ROOT}/src/replanner/CurvatureAwareLimiter.cpp
+    ${TETHER_ROOT}/src/replanner/CertifiedSuggestionSolver.cpp
     ${TETHER_ROOT}/src/replanner/GCodeProgram.cpp
     ${TETHER_ROOT}/src/replanner/GCodePatterns.cpp
     ${TETHER_ROOT}/src/replanner/GCodeExporter.cpp
