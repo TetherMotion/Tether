@@ -32,6 +32,7 @@
 #include <unordered_map>
 #include <optional>
 #include <sstream>
+#include <iostream>
 
 namespace MotionPlanner {
 

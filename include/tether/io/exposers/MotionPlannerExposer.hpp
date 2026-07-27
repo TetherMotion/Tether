@@ -30,8 +30,8 @@ namespace tether { namespace io { namespace exposers {
  */
 class MotionPlanExposer3D : public IParameterExposer {
 public:
-    using Plan    = tether::motion::MotionPlan3D;
-    using Builder = tether::motion::MotionPlanBuilder3D;
+    using Plan    = MotionPlanner::MotionPlan3D;
+    using Builder = MotionPlanner::MotionPlanBuilder3D;
 
     /**
      * @param builder  Reference to the builder (for limits/config parameters).

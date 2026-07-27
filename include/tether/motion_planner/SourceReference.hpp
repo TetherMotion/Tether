@@ -27,7 +27,7 @@
  * 3. Reverse traversal for lookbehind operations
  *
  * @see MotionSegment.hpp
- * @see BezierCurve.hpp
+ * @see NurbsCurve.hpp
  */
 
 #pragma once

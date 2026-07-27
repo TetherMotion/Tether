@@ -44,7 +44,13 @@ foreach(_tgt IN LISTS _variants)
             ${TETHER_ROOT}/src
     )
 
-    target_link_libraries(${_tgt} PUBLIC tether_common tether_gcode)
+    target_link_libraries(${_tgt}
+        PUBLIC
+            tether_common
+            tether_gcode
+        PRIVATE
+            tether_motion_geometry
+    )
 
     set_target_properties(${_tgt} PROPERTIES
         POSITION_INDEPENDENT_CODE ON

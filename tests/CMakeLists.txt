@@ -224,25 +224,28 @@ file(GLOB_RECURSE MOTION_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/motion/*.cpp"
 # Motion planner test sources split by sub-area
 set(MOTION_PLANNER_LIBS "tether_common;tether_motion_control;tether_motion_planner;tether_ethercat_common")
 set(MOTION_PLANNER_CURVES_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/NURBSCurveTest.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/BezierCurveTest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/MathTypesTest.cpp"
 )
+# NOTE: NURBSCurveTest.cpp and BezierCurveTest.cpp removed — they tested
+# the old templated NURBSCurve/BezierCurve which have been replaced by
+# tether::motion::NurbsCurve. The new geometry is covered by
+# tether_motion_geometry_tests.
 set(MOTION_PLANNER_BLEND_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/ScoringBlendTests.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/MotionPlannerArcBlendTests.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/MixedTransitionTests.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/CornerLimitTests.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/NegativeToleranceTest.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/RegressionTests.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/VelocityProfilerTest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/DebugSCurveTest.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/BlendVisualRegressionTests.cpp"
 )
+# NOTE: ScoringBlendTests, MotionPlannerArcBlendTests, MixedTransitionTests,
+# CornerLimitTests, NegativeToleranceTest, RegressionTests, VelocityProfilerTest,
+# BlendVisualRegressionTests removed — they tested the old
+# BlendConfig/PathBuilder/CornerBlending stack which has been replaced by
+# tether::motion::PathBlender/BlendSolver. The new blend stack is covered by
+# tether_motion_blend_new_tests.
 set(MOTION_PLANNER_INTEGRATION_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/MotionPlannerIntegrationTest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/test_GCodeAdapter_coverage.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/Phase5IntegrationTest.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/PHFastPathTest.cpp"
 )
+# NOTE: MotionPlannerIntegrationTest.cpp removed — it tested the old
+# PiecewiseBezierPath/PathBuilder/CornerAnalyzer stack.
 # Motion replanner test sources split by sub-area
 set(MOTION_REPLANNER_LIBS "tether_common;tether_motion_control;tether_motion_planner;tether_ethercat_common;tether_identification")
 set(MOTION_REPLANNER_CORE_SOURCES
@@ -441,7 +444,103 @@ endif()
 
 create_module_test(motion_planner_curves "${MOTION_PLANNER_CURVES_SOURCES}" "${MOTION_PLANNER_LIBS}" "")
 create_module_test(motion_planner_blend "${MOTION_PLANNER_BLEND_SOURCES}" "${MOTION_PLANNER_LIBS}" "")
-create_module_test(motion_planner_integration "${MOTION_PLANNER_INTEGRATION_SOURCES}" "${MOTION_PLANNER_LIBS}" "")
+# PH fast-path integration tests need a longer timeout (PH blend certification is expensive).
+create_module_test_timeout(motion_planner_integration "${MOTION_PLANNER_INTEGRATION_SOURCES}" "${MOTION_PLANNER_LIBS}" "" 120)
+
+# New geometry core (namespace tether::motion), Phase 1 of the motion-planner
+# rewrite. Same wiring as create_module_test, plus a TEST_PREFIX so that
+# `ctest -R motion_geometry` selects exactly this suite.
+set(MOTION_GEOMETRY_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/geometry/VectorTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/geometry/NurbsCurveTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/geometry/BernsteinTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/geometry/PointCurveDistanceTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/geometry/PiecewiseNurbsPathTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/geometry/CertifiedCurvatureSamplerTests.cpp"
+)
+add_executable(tether_motion_geometry_tests
+    main.cpp
+    ${MOTION_GEOMETRY_SOURCES}
+)
+target_include_directories(tether_motion_geometry_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/mocks
+    ${CMAKE_CURRENT_SOURCE_DIR}/mocks/esp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/export
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_replanner
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_planner
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+)
+target_link_libraries(tether_motion_geometry_tests PRIVATE
+    tether_common
+    tether_motion_planner
+    GTest::gtest
+    GTest::gtest_main
+    GTest::gmock
+    GTest::gmock_main
+)
+target_compile_definitions(tether_motion_geometry_tests PRIVATE
+    GCODE_STANDALONE_CAPI=1
+    TETHER_ENABLE_ETHERCAT=1
+    TETHER_COMPILE_MASTER=1
+    TEST_PROJECT_ROOT=\"${CMAKE_SOURCE_DIR}\"
+)
+# 120 s: the fuzz tests (1e5-sample brute force) and the 1e6-piece laziness
+# test exceed the default 30 s under Debug/ASAN.
+gtest_discover_tests(tether_motion_geometry_tests
+    TEST_PREFIX motion_geometry.
+    PROPERTIES TIMEOUT 120
+)
+
+# New blend layer (namespace tether::motion), Phase 2 of the motion-planner
+# rewrite. `ctest -R motion_blend_new` selects exactly this suite.
+set(MOTION_BLEND_NEW_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/blend/CornerAnalysisTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/blend/BoundaryConditionsTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/blend/BlendCurveBuilderTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/blend/DeviationCertifierTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/blend/PHQuinticBlendTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/blend/ContinuityPropertyTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/blend/BlendSolverTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/blend/PathBlenderTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/blend/ToleranceFuzzTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/blend/SegmentConverterTests.cpp"
+)
+add_executable(tether_motion_blend_new_tests
+    main.cpp
+    ${MOTION_BLEND_NEW_SOURCES}
+)
+target_include_directories(tether_motion_blend_new_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/mocks
+    ${CMAKE_CURRENT_SOURCE_DIR}/mocks/esp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/export
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_replanner
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_planner
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+)
+target_link_libraries(tether_motion_blend_new_tests PRIVATE
+    tether_common
+    tether_motion_planner
+    GTest::gtest
+    GTest::gtest_main
+    GTest::gmock
+    GTest::gmock_main
+)
+target_compile_definitions(tether_motion_blend_new_tests PRIVATE
+    GCODE_STANDALONE_CAPI=1
+    TETHER_ENABLE_ETHERCAT=1
+    TETHER_COMPILE_MASTER=1
+    TEST_PROJECT_ROOT=\"${CMAKE_SOURCE_DIR}\"
+)
+gtest_discover_tests(tether_motion_blend_new_tests
+    TEST_PREFIX motion_blend_new.
+    PROPERTIES TIMEOUT 300
+)
 
 create_module_test(motion_replanner_core "${MOTION_REPLANNER_CORE_SOURCES}" "${MOTION_REPLANNER_LIBS}" "")
 create_module_test(motion_replanner_machine "${MOTION_REPLANNER_MACHINE_SOURCES}" "${MOTION_REPLANNER_LIBS}" "")

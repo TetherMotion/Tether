@@ -28,7 +28,7 @@
  * ```
  *
  * @see SourceReference.hpp
- * @see PathBuilder.hpp
+ * @see PathAdapter.hpp
  */
 
 #pragma once
@@ -647,12 +647,27 @@ private:
         
         // Arc length = |sweep| * radius
         segmentLength = std::abs(arcSweep) * arcRadius;
-        
-        // Mark active axes
+
+        // Mark active axes. For an arc, BOTH plane axes (i1, i2) are always
+        // active — the arc moves in both plane axes even if the start and
+        // end happen to coincide on one of them (e.g. a semicircle from
+        // (10,0) to (20,0) with center (15,0) passes through Y=5 but has
+        // start.Y == end.Y == 0). Non-plane axes use the displacement check.
         for (size_t i = 0; i < MAX_MOTION_AXES; ++i) {
-            if (std::abs(endPosition[i] - startPosition[i]) > MathConstants::EPSILON) {
-                activeAxes[i] = true;
-                ++numActiveAxes;
+            if (i == i1 || i == i2) {
+                // Plane axis: always active for arcs (unless the arc is
+                // degenerate — zero radius or zero sweep).
+                if (arcRadius > MathConstants::EPSILON &&
+                    std::abs(arcSweep) > MathConstants::EPSILON) {
+                    activeAxes[i] = true;
+                    ++numActiveAxes;
+                }
+            } else {
+                // Non-plane axis: active only if the axis actually moves.
+                if (std::abs(endPosition[i] - startPosition[i]) > MathConstants::EPSILON) {
+                    activeAxes[i] = true;
+                    ++numActiveAxes;
+                }
             }
         }
     }

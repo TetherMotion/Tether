@@ -44,8 +44,10 @@ add_tether_example(simple_gcode_example
     LIBRARIES tether_gcode tether_export tether_common)
 
 # --- G-Code Analytical Planner Example ---
-add_tether_example(gcode_analytical_planner
-    LIBRARIES tether_gcode tether_motion_planner tether_export tether_common)
+# NOTE: disabled — uses the old PathBuilder/BezierCurve stack which has
+# been replaced by tether::motion::PathBlender/NurbsCurve. To be ported.
+# add_tether_example(gcode_analytical_planner
+#     LIBRARIES tether_gcode tether_motion_planner tether_export tether_common)
 
 # Minimal G64 visualizer example: parses X/Y moves and exports them to SVG
 add_tether_example(g64_demo_export
@@ -192,5 +194,12 @@ endif()
 # No PDO/cyclic I/O — just discovery and listing.
 add_tether_example(kinco_rp20_list_modules
     LIBRARIES tether_ethercat_master tether_drives tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# --- Phase 5.4 PH fast-path benchmark ---
+# Informational benchmark: reports planning-time ratio PH-on vs PH-off
+# on a multi-corner zigzag path. Not a hard CI gate.
+add_tether_example(ph_benchmark
+    SOURCE PHBenchmark.cpp
+    LIBRARIES tether_motion_planner tether_motion_geometry tether_common tether_gcode)
 
 message(STATUS "Examples configured")

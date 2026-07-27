@@ -3,8 +3,8 @@
  * @brief Shared algorithmic core for corner blending
  *
  * @details
- * Pure-geometry functions shared between the MotionPlanner scoring-based
- * blender (CornerBlending.hpp) and the G64 path blender (G64CornerMode.hpp).
+ * Pure-geometry functions shared between the MotionPlanner
+ * and the G64 path blender (G64CornerMode.hpp).
  *
  * This header is deliberately independent of both MotionSegment and
  * PlanningSegment. It operates on a minimal BlendVec type (x, y, z) and

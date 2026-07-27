@@ -27,7 +27,7 @@
  * - Pause/resume with state preservation
  * - Complete traceability chain
  *
- * @see PiecewisePath.hpp
+ * @see PiecewiseNurbsPath.hpp
  * @see VelocityProfile.hpp
  * @see SCurveProfile.hpp
  */
@@ -35,11 +35,8 @@
 #pragma once
 
 #include "MathTypes.hpp"
-#include "BezierCurve.hpp"
-#include "PiecewiseNURBSPath.hpp"
-#include "PiecewisePath.hpp"
+#include "PathAdapter.hpp"
 #include "VelocityProfile.hpp"
-#include "PathBuilder.hpp"
 #include "SCurveProfile.hpp"
 #include "MotionSegment.hpp"
 #include "SourceReference.hpp"
@@ -151,8 +148,7 @@ struct MotionPlanConfig {
 template<size_t Dim, typename T = double>
 class MotionPlan : public Traceable {
 public:
-    using Path = PiecewiseNURBSPath<Dim, T>;
-    using LegacyPath = PiecewiseBezierPath<Dim, T>;
+    using Path = PathAdapter<Dim, T>;
     using Profile = VelocityProfile<T>;
     using SCurve = SCurveProfile<T>;
     using State = MotionState<Dim, T>;
@@ -500,6 +496,22 @@ private:
 
     /**
      * @brief Build S-curve profiles for path segments
+     *
+     * @note STUB (Phase 5.2): The S-curve constraints below are hardcoded
+     *       (maxVelocity=100, maxAcceleration=500, maxJerk=5000) rather
+     *       than being taken from the MotionPlan's KinematicLimits. A full
+     *       implementation would:
+     *       1. Read the limits from `config_` / the builder's limits.
+     *       2. Build a *per-segment* S-curve profile (one per
+     *          PiecewiseNurbsPath piece) instead of a single profile for
+     *          the entire path, so that blend transitions get proper
+     *          jerk-limited ramps.
+     *       3. Use the certified per-span curvature from
+     *          CertifiedCurvatureSampler to set the velocity limit per
+     *          segment.
+     *       The current single-profile approach is adequate for
+     *       feedrate-only planning but does not respect per-axis jerk
+     *       limits at blend boundaries.
      */
     void buildSCurveProfiles() {
         // Build S-curve profiles based on velocity profile points
@@ -507,9 +519,9 @@ private:
         constraints.maxVelocity = T(100);  // Would come from limits
         constraints.maxAcceleration = T(500);
         constraints.maxJerk = T(5000);
-        
+
         SCurveProfileBuilder<T> builder(constraints);
-        
+
         // For now, create one S-curve for the entire path
         // A full implementation would create per-segment profiles
         if (profile_.points().size() >= 2) {
@@ -531,6 +543,18 @@ private:
 
     /**
      * @brief Estimate acceleration from velocity profile
+     *
+     * @note STUB (Phase 5.2): Acceleration is estimated by finite
+     *       differencing the velocity profile with a fixed dt = 0.001 s.
+     *       This is first-order accurate and introduces numerical noise
+     *       on noisy velocity profiles. A full implementation would:
+     *       1. Use the analytic acceleration from the SCurveProfile
+     *          (which has closed-form a(t) per segment).
+     *       2. Or use a higher-order finite-difference stencil
+     *          (e.g. 4th-order central difference) if the velocity
+     *          profile remains tabulated.
+     *       The current approach is adequate for display/debugging but
+     *       should not be used for closed-loop control.
      */
     T estimateAcceleration(T t) const {
         T dt = T(0.001);
@@ -588,7 +612,7 @@ template<size_t Dim, typename T = double>
 class MotionPlanBuilder {
 public:
     using Plan = MotionPlan<Dim, T>;
-    using Path = PiecewiseNURBSPath<Dim, T>;
+    using Path = PathAdapter<Dim, T>;
     using Profile = VelocityProfile<T>;
     using Config = MotionPlanConfig<T>;
     using Limits = KinematicLimits<Dim, T>;
@@ -608,20 +632,23 @@ public:
      * @return Complete motion plan
      */
     Plan build(const MotionSegmentList& segments, T feedRate) {
-        // Build path with corner blending
-        PathBuilder<Dim, T> pathBuilder;
-        auto pathResult = pathBuilder.build(segments);
-        
-        if (!pathResult.success || pathResult.nurbsPath.numSegments() == 0) {
+        // Build path with corner blending using the new geometry core.
+        PathBuilderAdapter<Dim, T> pathBuilder;
+        tether::motion::BlendSpec blendSpec;
+        // Translate the old BlendingConfig to the new BlendSpec.
+        // (The old config is on the segments; use defaults for now.)
+        auto pathResult = pathBuilder.build(segments, blendSpec);
+
+        if (!pathResult.success || pathResult.path.numSegments() == 0) {
             return Plan{};
         }
-        
-        // Compute velocity profile using NURBS path
+
+        // Compute velocity profile using the adapted path.
         VelocityProfiler<Dim, T> profiler(limits_);
-        Profile profile = profiler.computeProfile(pathResult.nurbsPath, feedRate);
-        
-        // Create motion plan with NURBS path
-        Plan plan(std::move(pathResult.nurbsPath), std::move(profile), config_);
+        Profile profile = profiler.computeProfile(pathResult.path, feedRate);
+
+        // Create motion plan with the adapted path.
+        Plan plan(std::move(pathResult.path), std::move(profile), config_);
         
         // Set source reference to cover all input segments
         if (!segments.empty()) {
