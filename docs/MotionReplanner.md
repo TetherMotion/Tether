@@ -379,6 +379,133 @@ std::cout << "Stribeck velocity: " << frictionResult.params.stribeckVelocity << 
 - **RMS**: Root mean square, combines mean and variation
 - **P95/P99**: 95th and 99th percentile errors
 
+## Certified Motion Replanner (Phases 1–8)
+
+The certified motion replanner integrates the motion kernel's certified
+algorithms into the replanning framework, replacing the old heuristic
+methods with guaranteed bounds and audit trails.
+
+### Architecture
+
+All new certified modules live in `namespace tether::motion::replanner`
+and are declared in `include/tether/motion_replanner/`. A unified entry
+point is provided by `CertifiedReplanner.hpp`, which also brings the new
+types into the legacy `MotionReplanner` namespace for backward
+compatibility.
+
+### Phase 1: TrajectorySampleConverter
+
+Converts `vector<GCodeExport::TrajectorySample>` →
+`tether::motion::PiecewiseNurbsPath`, bridging the export module's dense
+sampled representation to the kernel's certified geometric path type.
+
+- Linear/rapid segments → `NurbsCurve::fromLine` (degree 1, exact)
+- Arc segments (G2/G3) → `NurbsCurve::fromArc` via 3-point circumcenter
+  fit, with polyline fallback
+- Active-axis extraction keeps the RVec dimension minimal
+
+### Phase 2: CertifiedContourError
+
+Replaces tangent-projection contour error with
+`tether::motion::pointCurveDistance` (Bernstein root isolation, M8/M9).
+Returns the TRUE global minimum distance from the actual position to the
+NURBS path, plus lag error decomposition.
+
+- `computeCertifiedContourError`: searches all pieces (global, offline)
+- `computeCertifiedContourErrorLocal`: searches ±N pieces (real-time)
+
+### Phase 3: CertifiedCornerDetection
+
+Replaces 3-sample angle-threshold with `tether::motion::CornerAnalyzer`
+(M13). Extracts exact tangents from NURBS arc-length derivatives,
+classifies Straight/Corner/Cusp, builds the orthonormal (e₁, e₂) plane
+basis via Gram-Schmidt.
+
+### Phase 4: CurvatureAwareLimiter
+
+Proactive feed limiting using `v_safe = sqrt(maxCentripetalAccel / kappa)`.
+
+- Immediate: uses the `curvature` field already in `TrajectorySample`
+  (previously ignored)
+- Certified: uses `CertifiedCurvatureSampler` for a Lipschitz-certified
+  upper bound on max curvature per span
+
+### Phase 5: CertifiedSuggestionSolver
+
+Replaces the `1/sqrt(errorRatio)` heuristic with M15-pattern bisection.
+Finds the maximum feed rate whose predicted contour error stays within
+the tolerance threshold. T3-analog guarantee: the suggested feed never
+violates the tolerance, given the error model.
+
+### Phase 6: OnlineReblender
+
+True geometric replanning via `tether::motion::PathBlender::blend`.
+Re-blends problematic junctions with tighter tolerance or higher
+continuity (G²→G³). The `BlendAuditEntry` trail provides the "no silent
+fallback" guarantee — every decision is visible to the caller.
+
+### Phase 7: ProfileReplanner
+
+Replaces scalar `quinticBlend` transitions with:
+
+- `replanProfile`: TOPP-RA velocity profile via
+  `MotionPlanner::VelocityProfiler` (curvature-aware limit curve)
+- `computeSCurveTransition`: 7-phase jerk-limited S-curve via
+  `MotionPlanner::SCurveProfile`
+
+### Phase 8: Namespace Convergence
+
+New modules use `namespace tether::motion::replanner` per
+`Architecture.md` §3. The `CertifiedReplanner.hpp` header provides
+`using` declarations so legacy code using `MotionReplanner::` can access
+the new certified types. The full namespace migration (renaming all
+existing headers from `MotionReplanner` to `tether::motion::replanner`)
+is deferred to avoid a flag-day rename of examples and python bindings.
+
+### Certification Summary
+
+| Module | Certification | Guarantee |
+|--------|--------------|-----------|
+| TrajectorySampleConverter | Exact (lines/arcs) | Geometric fidelity |
+| CertifiedContourError | Certified (M8/M9) | True global min distance |
+| CertifiedCornerDetection | Exact (G.18–G.21) | True turning angle |
+| CurvatureAwareLimiter | Certified (Lipschitz) | Conservative v_lim |
+| CertifiedSuggestionSolver | Certified (T3 analog) | No threshold violation |
+| OnlineReblender | Certified (M10/M15) | Deviation ≤ tolerance |
+| ProfileReplanner | Heuristic (TOPP-RA) | Time-optimal within limits |
+
+### Usage Example
+
+```cpp
+#include "tether/motion_replanner/CertifiedReplanner.hpp"
+
+using namespace tether::motion::replanner;
+
+// 1. Build the path
+PiecewiseNurbsPath path = convertTrajectory(trajectorySamples);
+
+// 2. Compute certified contour error
+CertifiedContourError err = computeCertifiedContourError(
+    path, actualPosition, desiredArcLength);
+
+// 3. Detect corners
+CertifiedCornerDetection corners = detectCorners(path);
+
+// 4. Get curvature-aware feed limits
+CurvatureAwareFeedLimits feedLimits = computeCertifiedFeedLimits(path);
+
+// 5. Get certified feed suggestion
+CertifiedSuggestion suggestion = solveCertifiedFeedRate(
+    currentFeedRate, err.contourError);
+
+// 6. Re-blend problematic junctions
+ReblendResult reblend = reblendJunctions(path, {0, 2});
+
+// 7. Re-plan the velocity profile
+auto newPath = extractPath(reblend.blendedPath);
+ProfileReplanResult profile = replanProfile(*newPath, suggestedFeedRate);
+```
+
 ## License
 
 MIT License - see LICENSE file for details.
