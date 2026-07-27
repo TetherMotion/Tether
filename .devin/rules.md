@@ -21,7 +21,7 @@
 | `src/control/` | `tether_controls` | `tether_control_tests` |
 | `src/gcode/` | `tether_gcode` | `tether_gcode_tests` |
 | `src/export/` | `tether_export` | `tether_export_tests` |
-| `src/replanner/` | `tether_motion_planner` | `tether_motion_planner_tests`, `tether_replanner_tests` |
+| `src/replanner/` | `tether_motion_planner` | `tether_motion_planner_tests`, `tether_motion_replanner_core_tests`, `tether_motion_replanner_machine_tests`, `tether_motion_replanner_identification_tests` |
 | `src/motion/`, `src/profiles/cia402/`, `src/identification/` | `tether_motion_control` | `tether_motion_tests`, `tether_model_identification_tests`, `tether_simulation_identification_tests` |
 | `src/sii/`, `src/ethercat/ESIParser.cpp` | `tether_ethercat_common` | `tether_sii_tests`, `tether_ethercat_common_tests` |
 | `src/ethercat/*.cpp`, `src/fmmu/`, `src/reset/`, `src/fsoe/`, `src/etg5000/`, `src/profiles/cia*/` (drive), `src/drives/` | `tether_ethercat_master` | `tether_profiles_tests`, `tether_fsoe_tests`, `tether_mailbox_tests` |
@@ -36,7 +36,9 @@
 | Target | Description |
 |--------|-------------|
 | `tether_dc_tests` | DC clock/distribution tests |
-| `tether_motion_replanner_tests` | Motion replanner tests |
+| `tether_motion_replanner_core_tests` | Motion replanner core tests |
+| `tether_motion_replanner_machine_tests` | Motion replanner machine tester tests |
+| `tether_motion_replanner_identification_tests` | Motion replanner system identification tests |
 | `tether_header_tests` | Header compilation tests |
 | `tether_fsoe_integration_tests` | FSoE integration tests |
 

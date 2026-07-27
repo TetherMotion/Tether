@@ -3,7 +3,7 @@
  * @brief Implementation of online motion replanning with closed-loop feedback
  */
 
-#include "MotionReplanner.hpp"
+#include "tether/motion_replanner/MotionReplanner.hpp"
 #include <algorithm>
 #include <numeric>
 #include <cmath>

@@ -11,12 +11,12 @@
  * - Data export for visualization
  */
 
-#include "MotionReplanner.hpp"
-#include "PerformanceHeatmap.hpp"
-#include "MachineTester.hpp"
-#include "SystemIdentifier.hpp"
-#include "GCodeGenerator.hpp"
-#include "TestDataExporter.hpp"
+#include "tether/motion_replanner/MotionReplanner.hpp"
+#include "tether/motion_replanner/PerformanceHeatmap.hpp"
+#include "tether/motion_replanner/MachineTester.hpp"
+#include "tether/motion_replanner/SystemIdentifier.hpp"
+#include "tether/motion_replanner/GCodeGenerator.hpp"
+#include "tether/motion_replanner/TestDataExporter.hpp"
 
 #include <iostream>
 #include <fstream>

@@ -3,7 +3,7 @@
  * @brief Trajectory data exporter implementation
  */
 
-#include "TestDataExporter.hpp"
+#include "tether/motion_replanner/TestDataExporter.hpp"
 #include <cmath>
 
 namespace MotionReplanner {

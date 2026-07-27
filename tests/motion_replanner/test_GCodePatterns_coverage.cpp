@@ -4,8 +4,8 @@
  *        Supplements existing test_GCodeGenerator.cpp with untested patterns.
  */
 
-#include "replanner/GCodeGenerator.hpp"
-#include "replanner/MachineTester.hpp"
+#include "tether/motion_replanner/GCodeGenerator.hpp"
+#include "tether/motion_replanner/MachineTester.hpp"
 #include <gtest/gtest.h>
 #include <string>
 

@@ -5,7 +5,7 @@
  * Split from GCodeGenerator.cpp for maintainability.
  */
 
-#include "GCodeGenerator.hpp"
+#include "tether/motion_replanner/GCodeGenerator.hpp"
 #include <fstream>
 #include <algorithm>
 #include <cmath>

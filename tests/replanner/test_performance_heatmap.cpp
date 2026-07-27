@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "replanner/PerformanceHeatmap.hpp"
+#include "tether/motion_replanner/PerformanceHeatmap.hpp"
 
 #include <array>
 #include <cmath>
