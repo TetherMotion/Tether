@@ -252,6 +252,7 @@ set(MOTION_REPLANNER_CORE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_MotionReplanner.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_MotionReplanner_coverage.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_TrajectorySampleConverter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_CertifiedContourError.cpp"
 )
 set(MOTION_REPLANNER_MACHINE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_MachineTester.cpp"
