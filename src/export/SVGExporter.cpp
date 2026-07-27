@@ -390,54 +390,67 @@ bool SVGExporter::exportBezierPaths(const std::vector<GCodeExport::RenderableBez
 
     for (const auto& rpath : paths) {
         out << "  <path d=\"";
-        
+
         bool first = true;
         for (const auto& curve : rpath.path) {
-            const auto& pts = curve.controlPoints(); 
-            
+            const auto& pts = curve.controlPoints();
+
             double x0 = transformX(pts[0][0]);
             double y0 = transformY(pts[0][1]);
-            
+
             if (first) {
                 out << "M" << x0 << "," << y0;
                 first = false;
             } else {
                  out << " L " << x0 << "," << y0;
             }
-    
-            if (curve.degree() == 3) {
-                out << " C " << transformX(pts[1][0]) << "," << transformY(pts[1][1]) << " " 
-                    << transformX(pts[2][0]) << "," << transformY(pts[2][1]) << " " 
+
+            if (curve.degree() == 3 && pts.size() == 4) {
+                out << " C " << transformX(pts[1][0]) << "," << transformY(pts[1][1]) << " "
+                    << transformX(pts[2][0]) << "," << transformY(pts[2][1]) << " "
                     << transformX(pts[3][0]) << "," << transformY(pts[3][1]);
-            } else if (curve.degree() == 1) {
+            } else if (curve.degree() == 1 && pts.size() >= 2) {
                 out << " L " << transformX(pts[1][0]) << "," << transformY(pts[1][1]);
             } else {
-                 const int samples = 32; 
+                 // General case: sample the curve across its parameter domain.
+                 const int samples = 32;
+                 const double uMin = curve.knotMin();
+                 const double uMax = curve.knotMax();
                  for(int k=1; k<=samples; ++k) {
                      double t = (double)k / samples;
-                     auto pt = curve.evaluate(t);
+                     double u = uMin + t * (uMax - uMin);
+                     auto pt = curve.evaluate(u);
                      out << " L " << transformX(pt[0]) << "," << transformY(pt[1]);
                  }
             }
         }
-        
+
         out << "\" stroke=\"" << rpath.color << "\" stroke-width=\"" << rpath.width << "\" fill=\"none\"/>\n";
     }
     out << "</svg>\n";
     return true;
 }
 
-bool SVGExporter::exportNURBSPath(const MotionPlanner::PiecewiseNURBSPath<2, double>& nurbsPath,
+bool SVGExporter::exportNURBSPath(const tether::motion::PiecewiseNurbsPath& nurbsPath,
                                    const std::string& filename,
                                    const std::string& color,
                                    double width,
                                    double maxApproxError) {
-    // Decompose NURBS to cubic Bézier curves
-    auto cubics = nurbsPath.approximateWithCubicBeziers(maxApproxError);
+    (void)maxApproxError; // The new core decomposes exactly; no approximation needed.
+
+    // Decompose each piece into single-span Bézier curves (exact knot
+    // insertion). The result is a flat list of Bézier pieces.
+    std::vector<tether::motion::NurbsCurve> beziers;
+    for (std::size_t i = 0; i < nurbsPath.numPieces(); ++i) {
+        auto pieces = nurbsPath.piece(i).bezierDecompose();
+        for (auto& p : pieces) {
+            beziers.push_back(std::move(p));
+        }
+    }
 
     // Convert to RenderableBezierPath and delegate
     RenderableBezierPath rp;
-    rp.path = std::move(cubics);
+    rp.path = std::move(beziers);
     rp.color = color;
     rp.width = width;
 

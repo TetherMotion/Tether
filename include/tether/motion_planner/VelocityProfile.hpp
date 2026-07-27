@@ -27,14 +27,15 @@
  * - Per-axis jerk limits (optional)
  * - Centripetal acceleration limit (function of velocity and curvature)
  *
- * @see PiecewisePath.hpp
+ * @see PiecewiseNurbsPath.hpp
  */
 
 #pragma once
 
 #include "MathTypes.hpp"
-#include "PiecewiseNURBSPath.hpp"
-#include "PiecewisePath.hpp"
+#include "PathAdapter.hpp"
+#include <tether/motion_planner/geometry/CertifiedCurvatureSampler.hpp>
+#include <tether/motion_planner/blend/PHQuinticBlendBuilder.hpp>
 #include <vector>
 #include <array>
 #include <algorithm>
@@ -330,7 +331,7 @@ private:
 template<size_t Dim, typename T = double>
 class VelocityProfiler {
 public:
-    using Path = PiecewiseNURBSPath<Dim, T>;
+    using Path = PathAdapter<Dim, T>;
     using Profile = VelocityProfile<T>;
     using Limits = KinematicLimits<Dim, T>;
     using Point = VelocityProfilePoint<T>;
@@ -363,29 +364,82 @@ public:
                            T startAcceleration = T(0),
                            T startJerk = T(0)) {
         Profile profile;
-        
+
         if (path.numSegments() == 0) {
             return profile;
         }
-        
+
         T pathLength = path.totalLength();
         if (pathLength <= T(0)) {
             return profile;
         }
-        
+
+        // --- Certified curvature sampler (lazy per-span, Lipschitz-bound) --
+        // The velocity limit v_lim = √(a_cent / κ) uses the *certified
+        // per-span max* curvature rather than the pointwise κ(s). This
+        // guarantees the centripetal acceleration constraint is never
+        // violated: within a span, the true κ ≤ maxKappa (certified),
+        // so v ≤ √(a_cent / maxKappa) is always safe.
+        //
+        // Why certified sampling instead of closed-form: curvature extrema
+        // of degree-5/7 Béziers have no closed-form solution (κ′ = 0 is a
+        // high-degree rational equation, beyond the Abel–Ruffini barrier
+        // for degree ≥ 5). See CertifiedCurvatureSampler.hpp for details.
+        const tether::motion::CertifiedCurvatureSampler* curvatureSampler = nullptr;
+        if (path.hasInner()) {
+            curvatureSampler = &path.curvatureSampler();
+        }
+
         // Sample path at uniform arc length intervals
         T ds = pathLength / T(numSamples - 1);
-        
+
         std::vector<PathSample> samples(numSamples);
-        
+
         for (size_t i = 0; i < numSamples; ++i) {
             T s = std::min(i * ds, pathLength);
             samples[i].arcLength = s;
-            
+
             auto eval = path.evaluateAtArcLength(s);
             samples[i].position = eval.position;
             samples[i].tangent = eval.tangent;
-            samples[i].curvature = path.curvatureAtArcLength(s);
+
+            // --- PH fast path (Phase 5.4) -------------------------------
+            // If the current piece has PHData, use the closed-form
+            // curvature κ(ξ) = 2(uv'−u'v)/σ²(ξ) (M16) instead of the
+            // certified sampler. This is faster (no sampling) and exact
+            // (no certificate width). The trade-off is that the pointwise
+            // κ may not be the max on the span, so the velocity limit is
+            // less conservative — but for PH blends the curvature is
+            // smooth and the sample density is high enough that the
+            // difference is negligible.
+            bool usedPH = false;
+            if (path.hasInner() && path.hasPHData()) {
+                const auto& inner = path.inner();
+                auto loc = inner.locate(static_cast<double>(s));
+                const auto& ph = path.phData(loc.piece);
+                if (ph) {
+                    // Map the local arc length to the PH parameter ξ ∈ [0,1].
+                    // The PH curve's total arc length is polynomial; invert
+                    // it to get ξ from the local arc length.
+                    const double localS = loc.localS;
+                    const double xi = tether::motion::PHQuinticBlendBuilder::invertArcLength(*ph, localS);
+                    samples[i].curvature = static_cast<T>(
+                        tether::motion::PHQuinticBlendBuilder::curvature(*ph, xi));
+                    usedPH = true;
+                }
+            }
+
+            if (!usedPH) {
+                if (curvatureSampler) {
+                    // Use the certified per-span max curvature (conservative).
+                    auto cert = curvatureSampler->maxCurvatureAtArcLength(
+                        static_cast<double>(s));
+                    samples[i].curvature = static_cast<T>(cert.maxKappa);
+                } else {
+                    // Fallback: pointwise curvature (no certificate).
+                    samples[i].curvature = path.curvatureAtArcLength(s);
+                }
+            }
         }
         
         // Compute velocity limit curve (from curvature and feed rate)

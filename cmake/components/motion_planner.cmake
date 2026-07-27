@@ -2,6 +2,15 @@
 # Motion planning, replanning, trajectory generation, and machine testing
 
 set(TETHER_MOTION_PLANNER_SOURCES
+    ${TETHER_ROOT}/src/motion_planner/blend/CornerAnalysis.cpp
+    ${TETHER_ROOT}/src/motion_planner/blend/BoundaryConditions.cpp
+    ${TETHER_ROOT}/src/motion_planner/blend/BlendCurveBuilder.cpp
+    ${TETHER_ROOT}/src/motion_planner/blend/BlendSpec.cpp
+    ${TETHER_ROOT}/src/motion_planner/blend/DeviationCertifier.cpp
+    ${TETHER_ROOT}/src/motion_planner/blend/PHQuinticBlendBuilder.cpp
+    ${TETHER_ROOT}/src/motion_planner/blend/BlendSolver.cpp
+    ${TETHER_ROOT}/src/motion_planner/blend/PathBlender.cpp
+    ${TETHER_ROOT}/src/motion_planner/blend/SegmentConverter.cpp
     ${TETHER_ROOT}/src/replanner/MotionReplanner.cpp
     ${TETHER_ROOT}/src/replanner/GCodeProgram.cpp
     ${TETHER_ROOT}/src/replanner/GCodePatterns.cpp
@@ -64,7 +73,14 @@ foreach(_tgt IN LISTS _variants)
             ${TETHER_ROOT}/src/replanner
     )
 
-    target_link_libraries(${_tgt} PUBLIC tether_common tether_gcode tether_export)
+    target_link_libraries(${_tgt}
+        PUBLIC
+            tether_common
+            tether_gcode
+            tether_motion_geometry
+        PRIVATE
+            tether_export
+    )
 
     set_target_properties(${_tgt} PROPERTIES
         POSITION_INDEPENDENT_CODE ON

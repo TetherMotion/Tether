@@ -82,13 +82,14 @@
  *                         │
  *                         ▼
  *              ┌─────────────────────┐
- *              │   PathBuilder       │  (Step 6)
- *              │   + CornerBlending  │  (Step 5)
+ *              │  PathBuilderAdapter │  (Step 6)
+ *              │  + SegmentConverter │  (Step 5)
+ *              │  + PathBlender      │
  *              └─────────────────────┘
  *                         │
  *                         ▼
  *              ┌─────────────────────┐
- *              │ PiecewiseBezierPath │  (Step 3)
+ *              │ PiecewiseNurbsPath  │  (Step 3)
  *              │   (Arc-Length)      │
  *              └─────────────────────┘
  *                         │
@@ -144,11 +145,10 @@
  * |------|-------------|
  * | MathTypes.hpp | Vec<N,T>, Polynomial<D,T>, constants |
  * | SourceReference.hpp | G-code traceability infrastructure |
- * | BezierCurve.hpp | Bézier curves with de Casteljau |
- * | PiecewisePath.hpp | Arc-length parameterized path |
+ * | NurbsCurve.hpp | NURBS curves with rational de Casteljau |
+ * | PiecewiseNurbsPath.hpp | Arc-length parameterized piecewise path |
  * | MotionSegment.hpp | Motion segment data structures |
- * | CornerBlending.hpp | G2-continuous corner blending |
- * | PathBuilder.hpp | Segment to path conversion |
+ * | PathAdapter.hpp | Segment→path conversion (SegmentConverter+PathBlender) |
  * | VelocityProfile.hpp | TOPP-RA velocity profiling |
  * | SCurveProfile.hpp | 7-phase jerk-limited profiles |
  * | MotionPlan.hpp | Unified query interface |
@@ -171,20 +171,11 @@
 // Traceability infrastructure
 #include "SourceReference.hpp"
 
-// Bézier curve implementation
-#include "BezierCurve.hpp"
-
-// Piecewise path with arc-length parameterization
-#include "PiecewisePath.hpp"
-
 // Motion segment data structures
 #include "MotionSegment.hpp"
 
-// Corner blending (G64)
-#include "CornerBlending.hpp"
-
-// Path building from segments
-#include "PathBuilder.hpp"
+// Path adapter (bridges new geometry core to old template API)
+#include "PathAdapter.hpp"
 
 // Velocity profiling
 #include "VelocityProfile.hpp"

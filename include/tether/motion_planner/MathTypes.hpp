@@ -16,7 +16,7 @@
  * 3. **Type Safety**: Template-based with compile-time dimension checking
  * 4. **Performance**: Inline operations, cache-friendly layout
  *
- * @see BezierCurve.hpp
+ * @see NurbsCurve.hpp
  * @see MotionPlan.hpp
  */
 

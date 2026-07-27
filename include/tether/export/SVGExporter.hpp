@@ -9,8 +9,8 @@
 #include <string>
 #include <ostream>
 #include <vector>
-#include <tether/motion_planner/BezierCurve.hpp>
-#include <tether/motion_planner/PiecewiseNURBSPath.hpp>
+#include <tether/motion_planner/geometry/NurbsCurve.hpp>
+#include <tether/motion_planner/geometry/PiecewiseNurbsPath.hpp>
 
 namespace GCodeExport {
 
@@ -56,7 +56,7 @@ struct SVGConfig {
 };
 
 struct RenderableBezierPath {
-    std::vector<MotionPlanner::BezierCurve<2, double>> path; 
+    std::vector<tether::motion::NurbsCurve> path;
     std::string color;
     double width;
 };
@@ -94,7 +94,7 @@ public:
     bool exportBezierPaths(const std::vector<struct RenderableBezierPath>& paths, const std::string& filename);
 
     /**
-     * @brief Export a PiecewiseNURBSPath to SVG by Bézier decomposition
+     * @brief Export a PiecewiseNurbsPath to SVG by Bézier decomposition
      *
      * Decomposes NURBS segments into cubic Bézier curves for SVG-compatible output.
      *
@@ -105,7 +105,7 @@ public:
      * @param maxApproxError Maximum approximation error for cubic Bézier fitting
      * @return true on success
      */
-    bool exportNURBSPath(const MotionPlanner::PiecewiseNURBSPath<2, double>& nurbsPath,
+    bool exportNURBSPath(const tether::motion::PiecewiseNurbsPath& nurbsPath,
                          const std::string& filename,
                          const std::string& color = "#0066ff",
                          double width = 1.0,
