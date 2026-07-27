@@ -12,6 +12,7 @@ set(TETHER_MOTION_PLANNER_SOURCES
     ${TETHER_ROOT}/src/motion_planner/blend/PathBlender.cpp
     ${TETHER_ROOT}/src/motion_planner/blend/SegmentConverter.cpp
     ${TETHER_ROOT}/src/replanner/MotionReplanner.cpp
+    ${TETHER_ROOT}/src/replanner/TrajectorySampleConverter.cpp
     ${TETHER_ROOT}/src/replanner/GCodeProgram.cpp
     ${TETHER_ROOT}/src/replanner/GCodePatterns.cpp
     ${TETHER_ROOT}/src/replanner/GCodeExporter.cpp
