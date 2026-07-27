@@ -12,7 +12,7 @@
  * Split from MachineTester.cpp
  */
 
-#include "MachineTester.hpp"
+#include "tether/motion_replanner/MachineTester.hpp"
 #include <cmath>
 #include <algorithm>
 #include <limits>

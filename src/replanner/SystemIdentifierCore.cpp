@@ -5,7 +5,7 @@
  * Split from SystemIdentifier.cpp for maintainability.
  */
 
-#include "SystemIdentifier.hpp"
+#include "tether/motion_replanner/SystemIdentifier.hpp"
 #include <algorithm>
 #include <numeric>
 #include <cmath>

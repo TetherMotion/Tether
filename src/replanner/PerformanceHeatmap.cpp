@@ -3,7 +3,7 @@
  * @brief Implementation of performance limit heatmaps
  */
 
-#include "PerformanceHeatmap.hpp"
+#include "tether/motion_replanner/PerformanceHeatmap.hpp"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>

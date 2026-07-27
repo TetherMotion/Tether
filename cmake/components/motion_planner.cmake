@@ -29,10 +29,6 @@ set(TETHER_MOTION_PLANNER_SOURCES
     ${TETHER_ROOT}/src/replanner/TestDataExporterBatch.cpp
 )
 
-# Note: motion_replanner/*.cpp are monolithic originals that have been
-# split into replanner/*.cpp files above. Do not include them to avoid
-# duplicate symbol definitions.
-
 # Filter to only existing files
 set(TETHER_MOTION_PLANNER_SOURCES_FILTERED "")
 foreach(src ${TETHER_MOTION_PLANNER_SOURCES})
@@ -70,7 +66,6 @@ foreach(_tgt IN LISTS _variants)
             $<INSTALL_INTERFACE:include/tether/motion_replanner>
         PRIVATE
             ${TETHER_ROOT}/src
-            ${TETHER_ROOT}/src/replanner
     )
 
     target_link_libraries(${_tgt}
