@@ -92,6 +92,14 @@ struct CoETransactionOptions {
     uint8_t priority = 0;
     uint8_t max_retries = 3;
     bool complete_access = false;
+    /// @brief When true, suppress the "trailing bytes discarded" warning
+    /// emitted when a typed read (e.g. readU8) returns more bytes than the
+    /// requested C++ type. Set this when the caller knowingly reads a narrow
+    /// value from a wider SDO entry (e.g. a 1-byte module ID stored in a
+    /// 4-byte OD entry). The leading sizeof(T) bytes are still copied
+    /// regardless; this flag only silences the warning. The hard error path
+    /// for short reads (out_len < sizeof(T)) is unaffected.
+    bool allow_trailing_bytes = false;
 };
 
 struct BehaviourOptions {
