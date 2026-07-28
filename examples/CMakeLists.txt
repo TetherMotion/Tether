@@ -55,6 +55,7 @@ add_tether_example(g64_demo_export
 
 # ---AS715N Sine Motion Native Example ---
 # Demonstrates EtherCAT master with CiA 402 drive control
+if(TETHER_DRIVE_AS715N)
 add_tether_example(as715n_sine_motion_native
     LIBRARIES tether_ethercat_master tether_cia_profiles tether_drives tether_ethercat_common tether_hal tether_common tether_examples_common)
 
@@ -62,9 +63,11 @@ add_tether_example(as715n_sine_motion_native
 # Adds an optional Synapticon-style FSoE safe-motion main instance to the sine loop.
 add_tether_example(as715n_sine_motion_fsoe_native
     LIBRARIES tether_ethercat_master tether_cia_profiles tether_drives tether_fsoe tether_ethercat_common tether_hal tether_common tether_examples_common)
+endif()
 
 # ---PBLR81FGF Sine Motion Native Example ---
 # Copy of AS715N example for the PBLR81FGF drive (see TODOs in source)
+if(TETHER_DRIVE_PBLR81FGF)
 add_tether_example(pblr81fgf_sine_motion_native
     LIBRARIES tether_ethercat_master tether_cia_profiles tether_drives tether_ethercat_common tether_hal tether_common tether_examples_common)
 
@@ -72,11 +75,14 @@ add_tether_example(pblr81fgf_sine_motion_native
 # CSP position steps with jerk-limited S-curve ramps
 add_tether_example(pblr81fgf_step_motion_native
     LIBRARIES tether_ethercat_master tether_cia_profiles tether_drives tether_ethercat_common tether_hal tether_common tether_examples_common)
+endif()
 
 # ---AS715N Error-code inspector example ---
 # Reads manufacturer / CiA402 error codes and optionally resets them.
+if(TETHER_DRIVE_AS715N)
 add_tether_example(as715n_check_error_code
     LIBRARIES tether_ethercat_master tether_drives tether_ethercat_common tether_hal tether_common tether_examples_common)
+endif()
 
 # ---EtherCAT SII dump example ---
 # Dumps the parsed SII for a given slave index (host + embedded)
@@ -85,8 +91,10 @@ add_tether_example(ethercat_dump_sii
 
 # ---DynaDrive Sine Motion Native Example ---
 # DynaDrive (ANYdrive / rsl_drive_sdk) position sine wave using Type-E PDOs
+if(TETHER_DRIVE_DYNADRIVE)
 add_tether_example(dynadrive_sine_motion_native
     LIBRARIES tether_ethercat_master tether_cia_profiles tether_drives tether_ethercat_common tether_hal tether_common tether_examples_common)
+endif()
 
 # ---EtherCAT slave detection example ---
 # Scans the bus, reports discovered slaves with SII summary
@@ -117,6 +125,7 @@ endif()
 
 # --- Nexcobot ESC211 Safety DI monitor ---
 # Reads Safety DI A/B via CoE/SDO and renders a live ncurses panel
+if(TETHER_DRIVE_NEXCOBOT_ESC211)
 find_package(Curses)
 if(CURSES_FOUND)
     add_tether_example(esc211_di_monitor
@@ -124,6 +133,7 @@ if(CURSES_FOUND)
     target_include_directories(esc211_di_monitor PRIVATE ${CURSES_INCLUDE_DIRS})
 else()
     message(STATUS "ncurses not found; skipping esc211_di_monitor")
+endif()
 endif()
 
 # --- pcapng interpreter example ---
@@ -177,6 +187,7 @@ add_tether_example(slave_emulator
 # --- Kinco RP20 I/O module initialization demo ---
 # Auto-discovers RP20 I/O modules across all slaves/slots, initializes via CoE,
 # and runs a cyclic I/O loop. Supports --interactive ncurses UI.
+if(TETHER_DRIVE_RP20)
 find_package(Curses)
 if(CURSES_FOUND)
     add_tether_example(kinco_rp20_io
@@ -194,6 +205,7 @@ endif()
 # No PDO/cyclic I/O — just discovery and listing.
 add_tether_example(kinco_rp20_list_modules
     LIBRARIES tether_ethercat_master tether_drives tether_ethercat_common tether_hal tether_common tether_examples_common)
+endif()
 
 # --- Phase 5.4 PH fast-path benchmark ---
 # Informational benchmark: reports planning-time ratio PH-on vs PH-off

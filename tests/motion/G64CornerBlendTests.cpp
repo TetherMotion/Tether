@@ -14,12 +14,108 @@
 #include <cmath>
 #include <vector>
 #include <array>
+#include <string>
 
 #include "tether/gcode/motion/G64CornerMode.hpp"
 #include "tether/gcode/motion/InterpolationStrategy.hpp"
+#include "motion_planner/TestPathSVG.hpp"
 
 namespace GCode {
 namespace test {
+
+// ============================================================================
+// SVG output helper for G64 corner blend tests
+// ============================================================================
+
+static void emitCornerSVG(const std::string& testName,
+                          const PlanningSegment& seg1,
+                          const PlanningSegment& seg2,
+                          const CornerAnalysis& analysis,
+                          const G64CornerConfig& config,
+                          double tolerance) {
+    TestPathSVG::PathSVGData data;
+    data.title = testName;
+    data.originalSegments = {seg1, seg2};
+    data.gridSpacing = std::max(1.0, tolerance * 5.0);
+
+    // If blend was computed, add blend arc as a blended segment
+    if (analysis.blendRadius > 0) {
+        PlanningSegment blendSeg;
+        blendSeg.start = analysis.blendEntry;
+        blendSeg.end = analysis.blendExit;
+        blendSeg.center = analysis.blendCenter;
+        blendSeg.arcRadius = analysis.blendRadius;
+        // Determine arc direction from turn direction
+        blendSeg.motionType = analysis.isCW ?
+            SegmentMotionType::ArcCW : SegmentMotionType::ArcCCW;
+        blendSeg.plane = InterpolationPlane::XY;
+        data.blendedSegments = {blendSeg};
+    }
+
+    // Info panel
+    std::string modeStr;
+    switch (config.cornerMode) {
+        case G64CornerMode::Centered:           modeStr = "Centered"; break;
+        case G64CornerMode::InsideApproximate:  modeStr = "InsideApprox"; break;
+        case G64CornerMode::InsideStrict:       modeStr = "InsideStrict"; break;
+        case G64CornerMode::OutsideApproximate: modeStr = "OutsideApprox"; break;
+        case G64CornerMode::OutsideStrict:      modeStr = "OutsideStrict"; break;
+        case G64CornerMode::Teardrop:           modeStr = "Teardrop"; break;
+        case G64CornerMode::ExactStop:          modeStr = "ExactStop"; break;
+        default:                                modeStr = "Unknown"; break;
+    }
+
+    data.infoLines = {
+        "Test: " + testName,
+        "Mode: " + modeStr,
+        "Tolerance: " + TestPathSVG::fmt(tolerance) + " mm",
+        "Corner angle: " + TestPathSVG::fmt(analysis.angle) + " deg",
+        "Blend radius: " + TestPathSVG::fmt(analysis.blendRadius) + " mm",
+        "Inside dev: " + TestPathSVG::fmt(analysis.maxInsideDeviation) + " mm",
+        "Outside dev: " + TestPathSVG::fmt(analysis.maxOutsideDeviation) + " mm",
+    };
+
+    TestPathSVG::generateSVG(data, "g64_corner", testName + ".svg");
+}
+
+static void emitZigZagSVG(const std::string& testName,
+                          const std::vector<Position>& points,
+                          const G64CornerConfig& config,
+                          double tolerance) {
+    std::vector<PlanningSegment> segments;
+    for (size_t i = 0; i < points.size() - 1; ++i) {
+        PlanningSegment seg;
+        seg.start = points[i];
+        seg.end = points[i + 1];
+        segments.push_back(seg);
+    }
+
+    TestPathSVG::PathSVGData data;
+    data.title = testName;
+    data.originalSegments = segments;
+    data.gridSpacing = std::max(1.0, tolerance * 5.0);
+
+    std::string modeStr;
+    switch (config.cornerMode) {
+        case G64CornerMode::Centered:           modeStr = "Centered"; break;
+        case G64CornerMode::InsideApproximate:  modeStr = "InsideApprox"; break;
+        case G64CornerMode::InsideStrict:       modeStr = "InsideStrict"; break;
+        case G64CornerMode::OutsideApproximate: modeStr = "OutsideApprox"; break;
+        case G64CornerMode::OutsideStrict:      modeStr = "OutsideStrict"; break;
+        case G64CornerMode::Teardrop:           modeStr = "Teardrop"; break;
+        case G64CornerMode::ExactStop:          modeStr = "ExactStop"; break;
+        default:                                modeStr = "Unknown"; break;
+    }
+
+    data.infoLines = {
+        "Test: " + testName,
+        "Mode: " + modeStr,
+        "Tolerance: " + TestPathSVG::fmt(tolerance) + " mm",
+        "Segments: " + std::to_string(segments.size()),
+    };
+
+    TestPathSVG::generateSVG(data, "g64_corner", testName + ".svg");
+}
 
 // ============================================================================
 // Test Constants
@@ -167,6 +263,8 @@ TEST_F(G64CornerBlendTest, BlendRadiusFormula_60DegreeCorner) {
     
     EXPECT_NEAR(analysis.angle, cornerAngle, ANGLE_TOLERANCE);
     EXPECT_NEAR(analysis.blendRadius, expected.radius, BLEND_TOLERANCE);
+
+    emitCornerSVG("BlendRadiusFormula_60DegreeCorner", seg1, seg2, analysis, config_, tolerance);
 }
 
 TEST_F(G64CornerBlendTest, BlendRadiusFormula_90DegreeCorner) {
@@ -190,6 +288,8 @@ TEST_F(G64CornerBlendTest, BlendRadiusFormula_90DegreeCorner) {
     
     EXPECT_NEAR(analysis.angle, cornerAngle, ANGLE_TOLERANCE);
     EXPECT_NEAR(analysis.blendRadius, expected.radius, BLEND_TOLERANCE);
+
+    emitCornerSVG("BlendRadiusFormula_90DegreeCorner", seg1, seg2, analysis, config_, tolerance);
 }
 
 TEST_F(G64CornerBlendTest, TangentDistanceCalculation) {
@@ -218,6 +318,8 @@ TEST_F(G64CornerBlendTest, TangentDistanceCalculation) {
     );
     
     EXPECT_NEAR(entryDist, expected.tangentDist, BLEND_TOLERANCE);
+
+    emitCornerSVG("TangentDistanceCalculation", seg1, seg2, analysis, config_, tolerance);
 }
 
 TEST_F(G64CornerBlendTest, ParseG64PositivePIsInsideApproximate) {
@@ -318,6 +420,8 @@ TEST_F(G64CornerBlendTest, OverlapHandling_ReducesBlendRadius) {
         // This test documents expected behavior.
         // If this fails, the implementation needs overlap handling.
     }
+
+    emitZigZagSVG("OverlapHandling_ReducesBlendRadius", points, config_, 2.0);
 }
 
 // ============================================================================
@@ -352,6 +456,8 @@ TEST_F(G64CornerBlendTest, BlendedPath_RemainsConnected) {
         // Exit becomes the new reference for the next segment
         lastExit = analysis.blendExit;
     }
+
+    emitZigZagSVG("BlendedPath_RemainsConnected", points, config_, 0.5);
 }
 
 // ============================================================================
@@ -374,6 +480,8 @@ TEST_F(G64CornerBlendTest, InsideStrictMode_StaysInside) {
     
     // For inside strict mode, outside deviation should be minimized
     EXPECT_GE(analysis.maxInsideDeviation, 0.0);
+
+    emitCornerSVG("InsideStrictMode_StaysInside", seg1, seg2, analysis, config_, config_.pathTolerance);
 }
 
 TEST_F(G64CornerBlendTest, OutsideStrictMode_StaysOutside) {
@@ -392,6 +500,8 @@ TEST_F(G64CornerBlendTest, OutsideStrictMode_StaysOutside) {
     
     // For outside strict mode, inside deviation should be minimized
     EXPECT_GE(analysis.maxOutsideDeviation, 0.0);
+
+    emitCornerSVG("OutsideStrictMode_StaysOutside", seg1, seg2, analysis, config_, config_.pathTolerance);
 }
 
 // ============================================================================
@@ -423,6 +533,9 @@ TEST_P(G64CornerAngleTest, BlendGeometry_MatchesExpectedFormula) {
     
     EXPECT_NEAR(analysis.angle, cornerAngle, ANGLE_TOLERANCE);
     EXPECT_NEAR(analysis.blendRadius, expected.radius, BLEND_TOLERANCE * expected.radius);
+
+    std::string name = "AngleTest_" + std::to_string(static_cast<int>(cornerAngle)) + "deg";
+    emitCornerSVG(name, seg1, seg2, analysis, config, tolerance);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -573,6 +686,8 @@ TEST_F(G64CornerBlendTest, TeardropGeometry_90DegreeCorner) {
     // So the overshoot should be approximately equal to the radius
     // CCW turn (left turn) means inside deviation
     EXPECT_NEAR(analysis.maxInsideDeviation, 5.0, 0.1);
+
+    emitCornerSVG("TeardropGeometry_90DegreeCorner", seg1, seg2, analysis, config_, 5.0);
 }
 
 TEST_F(G64CornerBlendTest, TeardropGeometry_60DegreeCorner) {
@@ -602,6 +717,8 @@ TEST_F(G64CornerBlendTest, TeardropGeometry_60DegreeCorner) {
     // halfAngle = 30°, extensionDist = r / tan(30°) = r * sqrt(3)
     double expectedExtension = 3.0 * std::sqrt(3.0);
     EXPECT_NEAR(analysis.maxInsideDeviation, expectedExtension, 0.1);  // CCW = inside
+
+    emitCornerSVG("TeardropGeometry_60DegreeCorner", seg1, seg2, analysis, config_, 3.0);
 }
 
 TEST_F(G64CornerBlendTest, TeardropGeometry_120DegreeCorner) {
@@ -631,6 +748,8 @@ TEST_F(G64CornerBlendTest, TeardropGeometry_120DegreeCorner) {
     // halfAngle = 60°, extensionDist = r / tan(60°) = r / sqrt(3)
     double expectedExtension = 4.0 / std::sqrt(3.0);
     EXPECT_NEAR(analysis.maxInsideDeviation, expectedExtension, 0.1);
+
+    emitCornerSVG("TeardropGeometry_120DegreeCorner", seg1, seg2, analysis, config_, 4.0);
 }
 
 TEST_F(G64CornerBlendTest, TeardropVsStandardBlend_CompareRadius) {
@@ -671,6 +790,9 @@ TEST_F(G64CornerBlendTest, TeardropVsStandardBlend_CompareRadius) {
     
     // Verify radii are different (teardrop uses tolerance directly)
     EXPECT_NE(analysis2.blendRadius, analysis1.blendRadius);
+
+    emitCornerSVG("TeardropVsStandardBlend_Standard", seg1, seg2, analysis1, standardConfig, tolerance);
+    emitCornerSVG("TeardropVsStandardBlend_Teardrop", seg1, seg2, analysis2, teardropConfig, tolerance);
 }
 
 TEST_F(G64CornerBlendTest, ExactStop_NoBlending) {
@@ -715,6 +837,8 @@ TEST_F(G64CornerBlendTest, TeardropGeometry_TangentialToToleranceCircle) {
     // sqrt(2) * tolerance (since it continues r past corner then r perpendicular)
     double expectedCenterDist = std::sqrt(2.0) * config_.pathTolerance;
     EXPECT_NEAR(centerDist, expectedCenterDist, 0.1);
+
+    emitCornerSVG("TeardropGeometry_TangentialToToleranceCircle", seg1, seg2, analysis, config_, 5.0);
 }
 
 }  // namespace test

@@ -102,6 +102,44 @@ menu "Tether Library Configuration"
         help
             Enable Functional Safety over EtherCAT protocol support.
 
+    menu "Tether Device Drivers"
+        depends on TETHER_ENABLE_ETHERCAT
+
+        config TETHER_DRIVE_AS715N
+            bool "AS715N servo drive helper"
+            default y
+            help
+                Build vendor-specific helper for the AS715N servo drive
+                (register maps, error code tables, CoE helpers).
+
+        config TETHER_DRIVE_DYNADRIVE
+            bool "DynaDrive (ANYdrive) helper"
+            default y
+            help
+                Build vendor-specific helper for the DynaDrive / ANYdrive.
+
+        config TETHER_DRIVE_NEXCOBOT_ESC211
+            bool "Nexcobot ESC211 helper"
+            default y
+            help
+                Build vendor-specific helper for the Nexcobot ESC211
+                (error code tables).
+
+        config TETHER_DRIVE_RP20
+            bool "Kinco RP20 I/O module helper"
+            default y
+            help
+                Build header-only helper for the Kinco RP20 I/O module
+                (register maps, PDO definitions, module config).
+
+        config TETHER_DRIVE_PBLR81FGF
+            bool "PBLR81FGF drive helper"
+            default y
+            help
+                Build header-only helper for the PBLR81FGF drive
+                (PDO definitions).
+    endmenu
+
     config TETHER_ENABLE_KINEMATICS
         bool "Enable kinematics"
         default y

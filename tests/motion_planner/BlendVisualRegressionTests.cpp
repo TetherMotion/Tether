@@ -9,7 +9,10 @@
  * - Blend feasibility (canBlend)
  * - Curvature bounds
  *
- * SVG output is written to build/test_output/blend_svgs/
+ * SVG output is written to:
+ *   - <root>/blend_single_corner/  for single-corner scenarios
+ *   - <root>/blend_multi_corner/   for multi-corner path scenarios
+ * where <root> is from BLEND_SVG_DIR env var or "test_output/svgs".
  */
 
 #include <gtest/gtest.h>
@@ -25,16 +28,25 @@ namespace BlendTest {
 // Output directory — configurable via environment variable
 // ============================================================================
 
-static std::string getOutputDir() {
+static std::string getOutputRoot() {
     const char* env = std::getenv("BLEND_SVG_DIR");
     if (env && env[0]) return std::string(env);
-    return "test_output/blend_svgs";
+    return "test_output/svgs";
 }
 
-static void ensureOutputDir() {
-    std::string dir = getOutputDir();
-    if (!std::filesystem::exists(dir)) {
-        std::filesystem::create_directories(dir);
+static std::string singleCornerDir() {
+    return getOutputRoot() + "/blend_single_corner";
+}
+
+static std::string multiCornerDir() {
+    return getOutputRoot() + "/blend_multi_corner";
+}
+
+static void ensureOutputDirs() {
+    for (const auto& dir : {singleCornerDir(), multiCornerDir()}) {
+        if (!std::filesystem::exists(dir)) {
+            std::filesystem::create_directories(dir);
+        }
     }
 }
 
@@ -44,12 +56,12 @@ static void ensureOutputDir() {
 
 class BlendScenarioTest : public ::testing::TestWithParam<BlendScenario> {
 protected:
-    void SetUp() override { ensureOutputDir(); }
+    void SetUp() override { ensureOutputDirs(); }
 };
 
 TEST_P(BlendScenarioTest, ProducesValidBlend) {
     const auto& scenario = GetParam();
-    std::string svgPath = getOutputDir() + "/" + scenario.name + ".svg";
+    std::string svgPath = singleCornerDir() + "/" + scenario.name + ".svg";
 
     auto result = runBlendScenario(scenario, svgPath);
 
@@ -146,12 +158,12 @@ INSTANTIATE_TEST_SUITE_P(
 
 class MultiCornerTest : public ::testing::TestWithParam<MultiCornerScenario> {
 protected:
-    void SetUp() override { ensureOutputDir(); }
+    void SetUp() override { ensureOutputDirs(); }
 };
 
 TEST_P(MultiCornerTest, GeneratesValidBlendedPath) {
     const auto& scenario = GetParam();
-    std::string svgPath = getOutputDir() + "/" + scenario.name + ".svg";
+    std::string svgPath = multiCornerDir() + "/" + scenario.name + ".svg";
 
     auto vd = runMultiCornerScenario(scenario, svgPath);
 
@@ -200,11 +212,11 @@ INSTANTIATE_TEST_SUITE_P(
 // ============================================================================
 
 TEST(BlendSVGOutput, SingleBlendSVGIsValid) {
-    ensureOutputDir();
+    ensureOutputDirs();
     auto scenarios = standardScenarios();
     ASSERT_FALSE(scenarios.empty());
 
-    std::string path = getOutputDir() + "/svg_validation_test.svg";
+    std::string path = singleCornerDir() + "/svg_validation_test.svg";
     auto result = runBlendScenario(scenarios[0], path);
 
     ASSERT_TRUE(std::filesystem::exists(path));
@@ -222,11 +234,11 @@ TEST(BlendSVGOutput, SingleBlendSVGIsValid) {
 }
 
 TEST(BlendSVGOutput, MultiBlendSVGIsValid) {
-    ensureOutputDir();
+    ensureOutputDirs();
     auto scenarios = multiCornerScenarios();
     ASSERT_FALSE(scenarios.empty());
 
-    std::string path = getOutputDir() + "/multi_svg_validation_test.svg";
+    std::string path = multiCornerDir() + "/multi_svg_validation_test.svg";
     auto vd = runMultiCornerScenario(scenarios[0], path);
 
     ASSERT_TRUE(std::filesystem::exists(path));
@@ -246,19 +258,20 @@ TEST(BlendSVGOutput, MultiBlendSVGIsValid) {
 // ============================================================================
 
 TEST(BlendVisualSummary, GenerateAllSVGs) {
-    ensureOutputDir();
-    std::string dir = getOutputDir();
+    ensureOutputDirs();
+    std::string sDir = singleCornerDir();
+    std::string mDir = multiCornerDir();
 
     int singleCount = 0, multiCount = 0;
 
     for (const auto& s : standardScenarios()) {
-        std::string path = dir + "/" + s.name + ".svg";
+        std::string path = sDir + "/" + s.name + ".svg";
         runBlendScenario(s, path);
         if (std::filesystem::exists(path)) ++singleCount;
     }
 
     for (const auto& s : multiCornerScenarios()) {
-        std::string path = dir + "/" + s.name + ".svg";
+        std::string path = mDir + "/" + s.name + ".svg";
         runMultiCornerScenario(s, path);
         if (std::filesystem::exists(path)) ++multiCount;
     }
@@ -269,7 +282,8 @@ TEST(BlendVisualSummary, GenerateAllSVGs) {
     std::cout << "\n=== Blend Test SVG Summary ===\n"
               << "Single-blend SVGs: " << singleCount << "\n"
               << "Multi-blend SVGs:  " << multiCount << "\n"
-              << "Output directory:  " << dir << "\n"
+              << "Single-blend dir:  " << sDir << "\n"
+              << "Multi-blend dir:   " << mDir << "\n"
               << "================================\n\n";
 }
 

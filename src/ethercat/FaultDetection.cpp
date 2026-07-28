@@ -392,7 +392,12 @@ void FaultDetector::diagnose(uint16_t slave_index) const {
 
     const SlaveFaultState& state = slave_faults_[slave_index];
 
-    TETHER_LOGE(TAG, "=== FAULT DIAGNOSTICS - Slave %u ===\nAL_STATUS: 0x%04X (State=%s%s)\nAL_STATUS_CODE: %s (0x%04X)",
+    // Build a single-line diagnostics string.
+    // Log level: ERROR if there is an active fault, WARN if there is no active
+    // fault but past errors were recorded (statistics), INFO otherwise.
+    char buf[256];
+    int n = snprintf(buf, sizeof(buf),
+             "Slave %u: AL_STATUS=0x%04X (State=%s%s) AL_STATUS_CODE=%s (0x%04X)",
              slave_index,
              state.al_status,
              al_status_get_state_name(state.al_status),
@@ -400,31 +405,46 @@ void FaultDetector::diagnose(uint16_t slave_index) const {
              getALStatusCodeName(state.al_status_code),
              static_cast<uint16_t>(state.al_status_code));
 
-    if (state.error_code_603f != 0) {
-        TETHER_LOGE(TAG, "CiA 402 Error Code (0x603F): 0x%04X (%s)",
-                 state.error_code_603f,
-                 getCiA402ErrorCodeName(state.error_code_603f));
+    if (state.error_code_603f != 0 && n > 0 && static_cast<size_t>(n) < sizeof(buf)) {
+        n += snprintf(buf + n, sizeof(buf) - n,
+                      " | CiA 402 Error Code 0x603F=0x%04X (%s)",
+                      state.error_code_603f,
+                      getCiA402ErrorCodeName(state.error_code_603f));
     }
 
-    if (state.mfr_fault.raw_code != 0) {
+    if (state.mfr_fault.raw_code != 0 && n > 0 && static_cast<size_t>(n) < sizeof(buf)) {
         char fault_str[32];
         state.mfr_fault.format(fault_str, sizeof(fault_str));
-        TETHER_LOGE(TAG, "Manufacturer Fault: %s - %s",
-                 fault_str, state.mfr_fault.description);
+        n += snprintf(buf + n, sizeof(buf) - n,
+                      " | Manufacturer Fault: %s (%s)",
+                      fault_str, state.mfr_fault.description);
     }
 
-    TETHER_LOGE(TAG, "Statistics:\n  Total faults: %lu\n  Sync errors: %lu\n  Watchdog timeouts: %lu",
-               (unsigned long)state.fault_count,
-               (unsigned long)state.sync_error_count,
-               (unsigned long)state.watchdog_count);
+    // Only include statistics when at least one counter is non-zero.
+    bool has_stats = (state.fault_count != 0 ||
+                      state.sync_error_count != 0 ||
+                      state.watchdog_count != 0);
+    if (has_stats && n > 0 && static_cast<size_t>(n) < sizeof(buf)) {
+        n += snprintf(buf + n, sizeof(buf) - n,
+                      " | stats: faults=%lu sync=%lu wd=%lu",
+                      (unsigned long)state.fault_count,
+                      (unsigned long)state.sync_error_count,
+                      (unsigned long)state.watchdog_count);
+    }
+
+    if (state.has_fault) {
+        TETHER_LOGE(TAG, "%s", buf);
+    } else if (has_stats) {
+        TETHER_LOGW(TAG, "%s", buf);
+    } else {
+        TETHER_LOGI(TAG, "%s", buf);
+    }
 
     // Check for specific error types and provide guidance
     if (state.al_status_code == ALStatusCode::NoSyncError ||
         state.al_status_code == ALStatusCode::SynchronizationError) {
         diagnoseNoSync(slave_index);
     }
-
-    TETHER_LOGE(TAG, "=== END FAULT DIAGNOSTICS ===");
 }
 
 void FaultDetector::diagnoseNoSync(uint16_t slave_index) const {
