@@ -125,6 +125,42 @@ jobs:
           build/Testing/
           build/ctest_full.log
 
+  blend-svg-paths:
+    name: Generate Test SVG Paths
+    runs-on: ubuntu-latest
+    needs: compile
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+      with:
+        submodules: recursive
+
+    - name: Download build artifact
+      uses: actions/download-artifact@v8
+      with:
+        name: debug-build
+        path: build/
+
+    - name: Restore executable permissions
+      run: |
+        # upload-artifact/download-artifact does not preserve the executable
+        # bit, so the test binaries need to be made executable again.
+        chmod -R +x build/bin
+
+    - name: Run SVG-generating tests
+      run: .github/scripts/run_ctest.sh build "" -R "Blend|G64|ScoringBlend|MotionPlannerArcBlend|VisualSummary"
+      env:
+        BLEND_SVG_DIR: ${{ github.workspace }}/test_svgs
+        TEST_SVG_DIR: ${{ github.workspace }}/test_svgs
+
+    - name: Upload test SVG paths
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: test-svg-paths
+        path: test_svgs/
+
   coverage:
     name: Generate Code Coverage
     runs-on: ubuntu-latest

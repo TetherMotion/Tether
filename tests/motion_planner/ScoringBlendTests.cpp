@@ -18,10 +18,15 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include <array>
+#include <string>
+#include <vector>
+#include <filesystem>
+#include <cstdlib>
 
 #include "tether/motion_planner/CornerBlending.hpp"
 #include "tether/motion_planner/MotionSegment.hpp"
 #include "tether/motion_planner/BezierCurve.hpp"
+#include "BlendTestVisualizer.hpp"
 
 namespace MotionPlanner {
 namespace test {
@@ -739,6 +744,68 @@ TEST(ScoringBlendQuintic, QuinticEndpointsMatchEntryExit) {
     EXPECT_NEAR(P0[1], analysis.blendEntry[1], 1e-10);
     EXPECT_NEAR(P5[0], analysis.blendExit[0], 1e-10);
     EXPECT_NEAR(P5[1], analysis.blendExit[1], 1e-10);
+}
+
+// ============================================================================
+// SVG visualization summary — generates SVGs for representative scenarios
+// ============================================================================
+
+TEST(ScoringBlendVisualSummary, GenerateAllSVGs) {
+    struct Scenario {
+        std::string name;
+        MotionSegment seg1;
+        MotionSegment seg2;
+        double tolerance;
+        std::string mode;
+    };
+
+    std::vector<Scenario> scenarios = {
+        {"C2_90deg_LineLine",      makeLine(0,0, 10,0),    makeLine(10,0, 10,10),    0.5, "Line-Line"},
+        {"C2_60deg_LineLine",      makeLine(0,0, 10,0),    makeLine(10,0, 10+5,8.66),0.5, "Line-Line"},
+        {"C2_120deg_LineLine",     makeLine(0,0, 10,0),    makeLine(10,0, 15,8.66),  0.5, "Line-Line"},
+        {"C2_LineArcCW",           makeLine(0,0, 10,0),    makeArcCW(10,0, 20,0, 15,0), 0.5, "Line-ArcCW"},
+        {"C2_ArcCW_Line",          makeArcCW(0,0, 10,0, 5,0), makeLine(10,0, 20,10),  0.5, "ArcCW-Line"},
+        {"C2_OutsideBlend_90deg",  makeLine(0,0, 10,0),    makeLine(10,0, 10,10),    0.5, "Outside"},
+        {"C2_HalfLength_Short",    makeLine(0,0, 2,0),     makeLine(2,0, 2,2),       0.5, "Short"},
+        {"C2_SharpCorner_30deg",   makeLine(0,0, 10,0),    makeLine(10,0, 10+8.66,5),0.5, "Sharp"},
+        {"C2_GentleCorner_150deg", makeLine(0,0, 10,0),    makeLine(10,0, 10+8.66,-5),0.5, "Gentle"},
+    };
+
+    // Set outside tolerance for the outside blend
+    scenarios[5].seg1 = makeLine(0,0, 10,0);
+    scenarios[5].seg2 = makeLine(10,0, 10,10);
+
+    std::string outRoot;
+    const char* env = std::getenv("TEST_SVG_DIR");
+    if (env && env[0]) outRoot = env;
+    else outRoot = "test_output/svgs";
+    std::string dir = outRoot + "/blend_scoring";
+    std::filesystem::create_directories(dir);
+
+    int count = 0;
+    for (const auto& sc : scenarios) {
+        BlendConfig config;
+        config.tolerance = sc.tolerance;
+        config.maxBlendFraction = 0.5;
+        if (sc.mode == "Outside") {
+            config.cornerMode = BlendConfig::CornerLimitMode::OutsideApproximate;
+        }
+
+        auto analysis = Analyzer2D::analyze(sc.seg1, sc.seg2, config);
+
+        BlendTest::emitMotionPlannerSVG(
+            sc.name, sc.seg1, sc.seg2, analysis,
+            dir, sc.name + ".svg",
+            sc.tolerance, sc.mode);
+
+        if (std::filesystem::exists(dir + "/" + sc.name + ".svg")) ++count;
+    }
+
+    EXPECT_GT(count, 0) << "Should generate at least one SVG";
+    std::cout << "\n=== Scoring Blend SVG Summary ===\n"
+              << "SVGs generated: " << count << "\n"
+              << "Output dir: " << dir << "\n"
+              << "================================\n\n";
 }
 
 }  // namespace test

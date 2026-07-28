@@ -341,6 +341,47 @@ inline std::vector<MultiCornerScenario> multiCornerScenarios() {
 }
 
 // ============================================================================
+// Synthetic G-code generation from segment definitions
+// ============================================================================
+
+inline std::string fmtCoord(double v) {
+    std::ostringstream s;
+    s << std::fixed << std::setprecision(3) << v;
+    return s.str();
+}
+
+inline std::string segmentDefToGCode(const SegmentDef& d) {
+    std::ostringstream s;
+    switch (d.type) {
+        case SegmentType::ArcCW:  s << "G2"; break;
+        case SegmentType::ArcCCW: s << "G3"; break;
+        default:                  s << "G1"; break;
+    }
+    s << " X" << fmtCoord(d.ex) << " Y" << fmtCoord(d.ey);
+    if (d.type == SegmentType::ArcCW || d.type == SegmentType::ArcCCW) {
+        double i = d.cx - d.sx;
+        double j = d.cy - d.sy;
+        s << " I" << fmtCoord(i) << " J" << fmtCoord(j);
+    }
+    return s.str();
+}
+
+inline std::vector<std::string> scenarioToGCode(const BlendScenario& sc) {
+    return {segmentDefToGCode(sc.seg1), segmentDefToGCode(sc.seg2)};
+}
+
+inline std::vector<std::string> multiCornerToGCode(const MultiCornerScenario& sc) {
+    std::vector<std::string> lines;
+    for (size_t i = 1; i < sc.waypoints.size(); ++i) {
+        std::ostringstream s;
+        s << "G1 X" << fmtCoord(sc.waypoints[i][0])
+          << " Y" << fmtCoord(sc.waypoints[i][1]);
+        lines.push_back(s.str());
+    }
+    return lines;
+}
+
+// ============================================================================
 // Run a single blend scenario and generate visualization
 // ============================================================================
 
@@ -416,6 +457,7 @@ inline BlendTestResult runBlendScenario(const BlendScenario& scenario,
     vd.canBlend = result.canBlend;
     vd.c1Continuous = result.c1Pass;
     vd.c2Continuous = result.c2Pass;
+    vd.gcodeLines = scenarioToGCode(scenario);
 
     // Path points
     namespace bc = tether::blend;
@@ -534,6 +576,7 @@ inline MultiBlendVisualizationData runMultiCornerScenario(
     for (size_t i = 0; i < scenario.waypoints.size(); ++i) {
         vd.labels.push_back("W" + std::to_string(i));
     }
+    vd.gcodeLines = multiCornerToGCode(scenario);
 
     if (!svgOutputPath.empty()) {
         generateMultiBlendSVG(vd, svgOutputPath);
