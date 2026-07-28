@@ -11,6 +11,11 @@
  *   ./kinco_rp20_io -i enp3s0  # specify interface
  *   ./kinco_rp20_io -t 10       # run for 10 seconds
  *   ./kinco_rp20_io --interactive  # ncurses UI for toggling outputs
+ *   ./kinco_rp20_io --tc-type K    # set thermocouple type to K for all TC channels
+ *   ./kinco_rp20_io --tc-cjc internal  # set cold junction compensation to internal
+ *   ./kinco_rp20_io --tc-filter none    # disable TC filtering
+ *   ./kinco_rp20_io --ai-type 4-20mA   # set AI signal form to 4-20mA
+ *   ./kinco_rp20_io --rd-type PT100    # set RTD type to PT100
  */
 
 #include <atomic>
@@ -20,8 +25,12 @@
 #include <cstring>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
+
+#include <magic_enum/magic_enum.hpp>
 
 #ifdef HAVE_NCURSES
 #include <ncurses.h>
@@ -136,8 +145,294 @@ static std::vector<DiscoveredModule> scanSlots(EtherCAT::Master& master,
 }
 
 // ============================================================================
-// Send CoE init commands for a module
+// Module configuration (TC, AI, RD)
 // ============================================================================
+
+using RP20Reg::TCSignalForm;
+using RP20Reg::AISignalForm;
+using RP20Reg::RTDSignalForm;
+using RP20Reg::FilteringMode;
+using RP20Reg::ColdJunctionCompensation;
+
+struct ModuleConfig {
+    // TC options
+    std::optional<TCSignalForm> tc_signal_form;
+    std::optional<FilteringMode> tc_filter;
+    std::optional<ColdJunctionCompensation> tc_cjc;
+    // AI options (also used for Mixed_AIO AI channels)
+    std::optional<AISignalForm> ai_signal_form;
+    std::optional<FilteringMode> ai_filter;
+    // RD options
+    std::optional<RTDSignalForm> rd_signal_form;
+    std::optional<FilteringMode> rd_filter;
+};
+
+// --- Parsing helpers ---
+
+static std::optional<TCSignalForm> parseTcSignalForm(const std::string& s) {
+    if (s.empty() || s == "-1")
+        return std::nullopt;
+    if (auto v = magic_enum::enum_cast<TCSignalForm>(s))
+        return v;
+    static const std::unordered_map<std::string, TCSignalForm> aliases = {
+        {"J", TCSignalForm::Type_J}, {"K", TCSignalForm::Type_K},
+        {"E", TCSignalForm::Type_E}, {"S", TCSignalForm::Type_S},
+        {"T", TCSignalForm::Type_T}, {"100mV", TCSignalForm::Voltage_100mV},
+    };
+    auto it = aliases.find(s);
+    if (it != aliases.end()) return it->second;
+    try {
+        int val = std::stoi(s);
+        if (val >= 0 && val <= 5) return static_cast<TCSignalForm>(val);
+    } catch (...) {}
+    std::cerr << "Invalid --tc-type: " << s
+              << " (expected J, K, E, S, T, 100mV, or 0-5)\n";
+    return std::nullopt;
+}
+
+static std::optional<AISignalForm> parseAiSignalForm(const std::string& s) {
+    if (s.empty() || s == "-1")
+        return std::nullopt;
+    if (auto v = magic_enum::enum_cast<AISignalForm>(s))
+        return v;
+    static const std::unordered_map<std::string, AISignalForm> aliases = {
+        {"4-20mA", AISignalForm::Current_4_20mA},
+        {"20mA", AISignalForm::Current_20mA},
+        {"1-5V", AISignalForm::Voltage_1_5V},
+        {"10V", AISignalForm::Voltage_10V},
+    };
+    auto it = aliases.find(s);
+    if (it != aliases.end()) return it->second;
+    try {
+        int val = std::stoi(s);
+        if (val >= 0 && val <= 3) return static_cast<AISignalForm>(val);
+    } catch (...) {}
+    std::cerr << "Invalid --ai-type: " << s
+              << " (expected 4-20mA, 20mA, 1-5V, 10V, or 0-3)\n";
+    return std::nullopt;
+}
+
+static std::optional<RTDSignalForm> parseRdSignalForm(const std::string& s) {
+    if (s.empty() || s == "-1")
+        return std::nullopt;
+    if (auto v = magic_enum::enum_cast<RTDSignalForm>(s))
+        return v;
+    static const std::unordered_map<std::string, RTDSignalForm> aliases = {
+        {"PT100", RTDSignalForm::PT100}, {"PT1000", RTDSignalForm::PT1000},
+        {"Cu50", RTDSignalForm::Cu50}, {"Cu100", RTDSignalForm::Cu100},
+    };
+    auto it = aliases.find(s);
+    if (it != aliases.end()) return it->second;
+    try {
+        int val = std::stoi(s);
+        if (val == 0 || val == 1 || val == 4 || val == 5)
+            return static_cast<RTDSignalForm>(val);
+    } catch (...) {}
+    std::cerr << "Invalid --rd-type: " << s
+              << " (expected PT100, PT1000, Cu50, Cu100, or 0/1/4/5)\n";
+    return std::nullopt;
+}
+
+static std::optional<FilteringMode> parseFilteringMode(const std::string& s) {
+    if (s.empty() || s == "-1")
+        return std::nullopt;
+    if (auto v = magic_enum::enum_cast<FilteringMode>(s))
+        return v;
+    if (s == "none" || s == "0") return FilteringMode::None;
+    if (s == "average" || s == "1") return FilteringMode::Average;
+    std::cerr << "Invalid filter mode: " << s
+              << " (expected none, average, or 0-1)\n";
+    return std::nullopt;
+}
+
+static std::optional<ColdJunctionCompensation>
+parseColdJunctionCompensation(const std::string& s) {
+    if (s.empty() || s == "-1")
+        return std::nullopt;
+    if (auto v = magic_enum::enum_cast<ColdJunctionCompensation>(s))
+        return v;
+    if (s == "internal" || s == "0") return ColdJunctionCompensation::Internal;
+    if (s == "external" || s == "1") return ColdJunctionCompensation::External;
+    std::cerr << "Invalid --tc-cjc: " << s
+              << " (expected internal, external, or 0-1)\n";
+    return std::nullopt;
+}
+
+// --- Argument registration ---
+
+static void addModuleArguments(argparse::ArgumentParser& program) {
+    program.add_argument("--tc-type")
+        .default_value(std::string("K"))
+        .help("Thermocouple type for all TC channels: "
+              "J, K, E, S, T, 100mV (or 0-5). Default: K");
+    program.add_argument("--tc-filter")
+        .default_value(std::string("none"))
+        .help("Filtering mode for all TC channels: "
+              "none, average (or 0-1). Default: none");
+    program.add_argument("--tc-cjc")
+        .default_value(std::string("internal"))
+        .help("Cold junction compensation for all TC channels: "
+              "internal, external (or 0-1). Default: internal");
+    program.add_argument("--ai-type")
+        .default_value(std::string("4-20mA"))
+        .help("Signal form for all AI channels: "
+              "4-20mA, 20mA, 1-5V, 10V (or 0-3). Default: 4-20mA");
+    program.add_argument("--ai-filter")
+        .default_value(std::string("none"))
+        .help("Filtering mode for all AI channels: "
+              "none, average (or 0-1). Default: none");
+    program.add_argument("--rd-type")
+        .default_value(std::string("PT100"))
+        .help("RTD type for all RD channels: "
+              "PT100, PT1000, Cu50, Cu100 (or 0/1/4/5). Default: PT100");
+    program.add_argument("--rd-filter")
+        .default_value(std::string("none"))
+        .help("Filtering mode for all RD channels: "
+              "none, average (or 0-1). Default: none");
+}
+
+static ModuleConfig parseModuleConfig(const argparse::ArgumentParser& program) {
+    ModuleConfig config;
+    config.tc_signal_form = parseTcSignalForm(program.get<std::string>("--tc-type"));
+    config.tc_filter = parseFilteringMode(program.get<std::string>("--tc-filter"));
+    config.tc_cjc = parseColdJunctionCompensation(program.get<std::string>("--tc-cjc"));
+    config.ai_signal_form = parseAiSignalForm(program.get<std::string>("--ai-type"));
+    config.ai_filter = parseFilteringMode(program.get<std::string>("--ai-filter"));
+    config.rd_signal_form = parseRdSignalForm(program.get<std::string>("--rd-type"));
+    config.rd_filter = parseFilteringMode(program.get<std::string>("--rd-filter"));
+    return config;
+}
+
+// --- Config label formatting ---
+
+static std::string formatTcConfigLabel(const ModuleConfig& config) {
+    std::string label = "[";
+    label += config.tc_signal_form
+        ? std::string(magic_enum::enum_name(*config.tc_signal_form)) : "default";
+    label += ", ";
+    label += config.tc_filter
+        ? std::string(magic_enum::enum_name(*config.tc_filter)) : "default";
+    label += " filter, ";
+    label += config.tc_cjc
+        ? std::string(magic_enum::enum_name(*config.tc_cjc)) : "default";
+    label += " CJC]";
+    return label;
+}
+
+static std::string formatAiConfigLabel(const ModuleConfig& config) {
+    std::string label = "[";
+    label += config.ai_signal_form
+        ? std::string(magic_enum::enum_name(*config.ai_signal_form)) : "default";
+    label += ", ";
+    label += config.ai_filter
+        ? std::string(magic_enum::enum_name(*config.ai_filter)) : "default";
+    label += " filter]";
+    return label;
+}
+
+static std::string formatRdConfigLabel(const ModuleConfig& config) {
+    std::string label = "[";
+    label += config.rd_signal_form
+        ? std::string(magic_enum::enum_name(*config.rd_signal_form)) : "default";
+    label += ", ";
+    label += config.rd_filter
+        ? std::string(magic_enum::enum_name(*config.rd_filter)) : "default";
+    label += " filter]";
+    return label;
+}
+
+// ============================================================================
+// Apply module configuration via SDO
+// ============================================================================
+
+static bool applyModuleConfig(EtherCAT::Master& master,
+                              const DiscoveredModule& mod,
+                              const ModuleConfig& config) {
+    const auto type = mod.descriptor->type;
+    const bool is_tc = (type == RP20Mod::ModuleType::TC_4);
+    const bool is_ai = (type == RP20Mod::ModuleType::AI_4 ||
+                        type == RP20Mod::ModuleType::Mixed_AIO);
+    const bool is_rd = (type == RP20Mod::ModuleType::RD_4);
+    if (!is_tc && !is_ai && !is_rd)
+        return true;
+
+    auto& sdo = master.sdoManager(mod.slave_index);
+    uint16_t cfg_idx = RP20Mod::configIndexForSlot(mod.slot);
+    bool ok = true;
+
+    // Number of analog input channels (Mixed_AIO has 2, others have 4)
+    uint8_t ai_ch_count = (type == RP20Mod::ModuleType::Mixed_AIO) ? 2 : 4;
+
+    auto writeChannels = [&](uint8_t start_sub, uint8_t ch_count,
+                             uint8_t val, const char* what,
+                             std::string_view name_sv) {
+        for (uint8_t ch = 0; ch < ch_count; ++ch) {
+            uint8_t sub = static_cast<uint8_t>(start_sub + ch);
+            if (!sdo.writeU8(cfg_idx, sub, val).has_value()) {
+                TETHER_LOGW(TAG, "Slave %u slot %u: failed to set %s CH%u=%.*s",
+                            mod.slave_index, mod.slot, what, ch,
+                            static_cast<int>(name_sv.size()), name_sv.data());
+                ok = false;
+            } else {
+                TETHER_LOGI(TAG, "Slave %u slot %u: %s CH%u=%.*s",
+                            mod.slave_index, mod.slot, what, ch,
+                            static_cast<int>(name_sv.size()), name_sv.data());
+            }
+        }
+    };
+
+    if (is_tc) {
+        if (config.tc_signal_form) {
+            uint8_t val = static_cast<uint8_t>(*config.tc_signal_form);
+            writeChannels(0x01, 4, val, "TC type",
+                          magic_enum::enum_name(*config.tc_signal_form));
+        }
+        if (config.tc_filter) {
+            uint8_t val = static_cast<uint8_t>(*config.tc_filter);
+            writeChannels(0x05, 4, val, "TC filter",
+                          magic_enum::enum_name(*config.tc_filter));
+        }
+        if (config.tc_cjc) {
+            uint8_t val = static_cast<uint8_t>(*config.tc_cjc);
+            writeChannels(0x09, 4, val, "TC CJC",
+                          magic_enum::enum_name(*config.tc_cjc));
+        }
+    } else if (is_ai) {
+        if (config.ai_signal_form) {
+            uint8_t val = static_cast<uint8_t>(*config.ai_signal_form);
+            writeChannels(0x01, ai_ch_count, val, "AI type",
+                          magic_enum::enum_name(*config.ai_signal_form));
+        }
+        if (config.ai_filter) {
+            uint8_t val = static_cast<uint8_t>(*config.ai_filter);
+            // AI filter subindices: 0x05-0x08 for AI_4, 0x03-0x04 for Mixed_AIO
+            uint8_t filter_sub = (type == RP20Mod::ModuleType::Mixed_AIO) ? 0x03 : 0x05;
+            writeChannels(filter_sub, ai_ch_count, val, "AI filter",
+                          magic_enum::enum_name(*config.ai_filter));
+        }
+    } else if (is_rd) {
+        if (config.rd_signal_form) {
+            uint8_t val = static_cast<uint8_t>(*config.rd_signal_form);
+            writeChannels(0x01, 4, val, "RD type",
+                          magic_enum::enum_name(*config.rd_signal_form));
+        }
+        if (config.rd_filter) {
+            uint8_t val = static_cast<uint8_t>(*config.rd_filter);
+            writeChannels(0x05, 4, val, "RD filter",
+                          magic_enum::enum_name(*config.rd_filter));
+        }
+    }
+
+    return ok;
+}
+
+static void applyModuleConfigToAll(EtherCAT::Master& master,
+                                   const std::vector<DiscoveredModule>& modules,
+                                   const ModuleConfig& config) {
+    for (const auto& mod : modules) {
+        applyModuleConfig(master, mod, config);
+    }
+}
 
 static bool sendInitCommands(EtherCAT::Master& master,
                              const DiscoveredModule& mod) {
@@ -348,7 +643,8 @@ static void initColors() {
 static void runInteractiveUI(EtherCAT::Master& master,
                              std::vector<DiscoveredModule>& modules,
                              std::atomic<uint64_t>& cycle_count,
-                             std::atomic<bool>& pdo_ok) {
+                             std::atomic<bool>& pdo_ok,
+                             const ModuleConfig& mod_config) {
     // Build list of toggleable output bits across all modules
     std::vector<OutputBit> output_bits;
     for (size_t mi = 0; mi < modules.size(); ++mi) {
@@ -507,12 +803,13 @@ static void runInteractiveUI(EtherCAT::Master& master,
                     break;
                 }
                 case RP20Mod::ModuleType::TC_4: {
+                    auto tc_label = formatTcConfigLabel(mod_config);
                     for (size_t fi = 0; fi < desc->txpdo->field_count; ++fi) {
                         const auto* f = RP20Mod::getFieldByChannel(*desc->txpdo, fi);
                         if (!f) continue;
                         int16_t val = RP20Mod::readI16(tx, *f);
-                        mvprintw(y, 2, "%s TC.%zu: %6.1f C",
-                                 desc->name, fi, val / 10.0);
+                        mvprintw(y, 2, "%s %s TC.%zu: %6.1f C",
+                                 desc->name, tc_label.c_str(), fi, val / 10.0);
                         y++;
                     }
                     break;
@@ -520,11 +817,18 @@ static void runInteractiveUI(EtherCAT::Master& master,
                 case RP20Mod::ModuleType::AI_4:
                 case RP20Mod::ModuleType::RD_4:
                 case RP20Mod::ModuleType::Mixed_AIO: {
+                    const char* prefix = (desc->type == RP20Mod::ModuleType::RD_4) ? "RD" : "AI";
+                    std::string label;
+                    if (desc->type == RP20Mod::ModuleType::RD_4)
+                        label = formatRdConfigLabel(mod_config);
+                    else
+                        label = formatAiConfigLabel(mod_config);
                     for (size_t fi = 0; fi < desc->txpdo->field_count; ++fi) {
                         const auto* f = RP20Mod::getFieldByChannel(*desc->txpdo, fi);
                         if (!f) continue;
                         int16_t val = RP20Mod::readI16(tx, *f);
-                        mvprintw(y, 2, "%s AI.%zu: %d", desc->name, fi, val);
+                        mvprintw(y, 2, "%s %s %s.%zu: %d",
+                                 desc->name, label.c_str(), prefix, fi, val);
                         y++;
                     }
                     break;
@@ -581,7 +885,8 @@ static void runInteractiveUI(EtherCAT::Master& master,
 // Print module I/O data
 // ============================================================================
 
-static void printModuleIO(DiscoveredModule& mod, uint64_t cycle) {
+static void printModuleIO(DiscoveredModule& mod, uint64_t cycle,
+                          const ModuleConfig& mod_config) {
     const auto* desc = mod.descriptor;
     std::cout << "[" << desc->name << " s" << mod.slave_index
               << "/slot" << static_cast<int>(mod.slot) << "] ";
@@ -606,7 +911,8 @@ static void printModuleIO(DiscoveredModule& mod, uint64_t cycle) {
             }
             case RP20Mod::ModuleType::TC_4: {
                 // Thermocouple inputs — value / 10 = °C
-                std::cout << "TC:";
+                auto tc_label = formatTcConfigLabel(mod_config);
+                std::cout << tc_label << " TC:";
                 for (size_t i = 0; i < desc->txpdo->field_count; ++i) {
                     const auto* f = RP20Mod::getFieldByChannel(*desc->txpdo, i);
                     if (f) {
@@ -620,8 +926,13 @@ static void printModuleIO(DiscoveredModule& mod, uint64_t cycle) {
             case RP20Mod::ModuleType::AI_4:
             case RP20Mod::ModuleType::RD_4:
             case RP20Mod::ModuleType::Mixed_AIO: {
-                // Analog inputs — print as signed 16-bit decimal
-                std::cout << "AI:";
+                const char* prefix = (desc->type == RP20Mod::ModuleType::RD_4) ? "RD" : "AI";
+                std::string label;
+                if (desc->type == RP20Mod::ModuleType::RD_4)
+                    label = formatRdConfigLabel(mod_config);
+                else
+                    label = formatAiConfigLabel(mod_config);
+                std::cout << label << " " << prefix << ":";
                 for (size_t i = 0; i < desc->txpdo->field_count; ++i) {
                     const auto* f = RP20Mod::getFieldByChannel(*desc->txpdo, i);
                     if (f) {
@@ -705,6 +1016,7 @@ int main(int argc, char** argv) {
         .default_value(false)
         .implicit_value(true)
         .help("Use ncurses interactive UI for toggling outputs");
+    addModuleArguments(program);
 
     try { program.parse_args(argc, argv); }
     catch (const std::runtime_error& err) {
@@ -717,6 +1029,15 @@ int main(int argc, char** argv) {
     double duration_sec = program.get<double>("--time");
     int slot_scan_delay = program.get<int>("--slot-scan-delay");
     bool interactive = program.get<bool>("--interactive");
+
+    auto mod_config = parseModuleConfig(program);
+    if (program.is_used("--tc-type") && !mod_config.tc_signal_form) return 1;
+    if (program.is_used("--tc-filter") && !mod_config.tc_filter) return 1;
+    if (program.is_used("--tc-cjc") && !mod_config.tc_cjc) return 1;
+    if (program.is_used("--ai-type") && !mod_config.ai_signal_form) return 1;
+    if (program.is_used("--ai-filter") && !mod_config.ai_filter) return 1;
+    if (program.is_used("--rd-type") && !mod_config.rd_signal_form) return 1;
+    if (program.is_used("--rd-filter") && !mod_config.rd_filter) return 1;
 
 #ifndef HAVE_NCURSES
     if (interactive) {
@@ -843,6 +1164,7 @@ int main(int argc, char** argv) {
     for (const auto& mod : modules) {
         sendInitCommands(master, mod);
     }
+    applyModuleConfigToAll(master, modules, mod_config);
 
     // ---- Register PDO buffers on master side ----
     if (!registerPDOBuffers(master, modules)) {
@@ -942,7 +1264,7 @@ int main(int argc, char** argv) {
 
 #ifdef HAVE_NCURSES
     if (interactive) {
-        runInteractiveUI(master, modules, cycle_count, pdo_ok);
+        runInteractiveUI(master, modules, cycle_count, pdo_ok, mod_config);
     } else
 #endif
     {
@@ -962,7 +1284,7 @@ int main(int argc, char** argv) {
                 last_print_cycle = cyc;
                 std::cout << "\n=== Cycle " << cyc << " ===\n";
                 for (auto& mod : modules) {
-                    printModuleIO(mod, cyc);
+                    printModuleIO(mod, cyc, mod_config);
                 }
                 std::cout.flush();
             }

@@ -49,7 +49,7 @@ static constexpr uint16_t kConfigIndex = 0x8000;
         .index = kConfigIndex, .subindex = (CH), \
         .name = "RD CH" #CH " Signal Form", \
         .data_type = ::EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8, \
-        .default_value = 0, .unit = Unit_None, .options_enum = nullptr, \
+        .default_value = 0, .unit = Unit_None, .options_enum = std::type_identity<RTDSignalForm>{}, \
         .min_value = 0, .max_value = 5, \
         .modification_mode = ModificationMode::AtStop, \
         .effective_time = EffectiveTime::Immediately, \
