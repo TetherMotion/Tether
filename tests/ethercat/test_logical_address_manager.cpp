@@ -321,6 +321,64 @@ TEST_F(LRWExchangeTest, ExchangeLRWForSlaves) {
     }
 }
 
+TEST_F(LRWExchangeTest, MultipleTxPDOEntriesSameSlave) {
+    // Regression test: multiple TxPDO entries on the same slave must each
+    // receive their own data from distinct offsets in the LRW response.
+    // Previously, all entries for one slave used the same addr_map_ offset,
+    // causing all modules on a slave to read identical data.
+
+    // Reconfigure: slave 0 with 24-byte TxPDO (3 × 8-byte entries)
+    SlaveConfig configs[kMaxPDOSlaves] = {};
+    configs[0].configured = true;
+    configs[0].sm[2] = SyncManagerConfig::process_output(0x1800, 0);
+    configs[0].rxpdo_size = 0;
+    configs[0].sm[3] = SyncManagerConfig::process_input(0x1C00, 24);
+    configs[0].txpdo_size = 24;
+    mgr.buildAddressMap(configs, 1);
+
+    PDOMapping multi_mapping;
+    uint64_t tx0 = 0, tx1 = 0, tx2 = 0;
+    multi_mapping.add_txpdo(0, &tx0, 8, 0x1A00, PDOAddressMode::Logical);
+    multi_mapping.add_txpdo(0, &tx1, 8, 0x1A01, PDOAddressMode::Logical);
+    multi_mapping.add_txpdo(0, &tx2, 8, 0x1A02, PDOAddressMode::Logical);
+
+    EXPECT_CALL(transport, allocIdx()).WillOnce(Return(42));
+    EXPECT_CALL(transport, sendSingleDatagram(Command::LRW, 42, 0, 1, _, 24, true))
+        .WillOnce(Return(true));
+    EXPECT_CALL(transport, waitForResponseIdx(_, _, _))
+        .WillOnce(Invoke([](uint8_t, unsigned int, RxDatagram& out) -> bool {
+            out.wkc = 1;
+            out.datalen = 24;
+            // Three distinct 8-byte blocks
+            uint8_t resp[24] = {
+                0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, // entry 0
+                0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, // entry 1
+                0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28  // entry 2
+            };
+            std::memcpy(out.data, resp, 24);
+            return true;
+        }));
+
+    EXPECT_TRUE(mgr.exchangeAllLRW(multi_mapping));
+
+    // Each entry should have received its own distinct data
+    uint8_t* b0 = reinterpret_cast<uint8_t*>(&tx0);
+    uint8_t* b1 = reinterpret_cast<uint8_t*>(&tx1);
+    uint8_t* b2 = reinterpret_cast<uint8_t*>(&tx2);
+
+    EXPECT_EQ(b0[0], 0x01);
+    EXPECT_EQ(b0[7], 0x08);
+    EXPECT_EQ(b1[0], 0x11);
+    EXPECT_EQ(b1[7], 0x18);
+    EXPECT_EQ(b2[0], 0x21);
+    EXPECT_EQ(b2[7], 0x28);
+
+    // Ensure entries are not all identical (the bug)
+    EXPECT_NE(tx0, tx1);
+    EXPECT_NE(tx1, tx2);
+    EXPECT_NE(tx0, tx2);
+}
+
 TEST_F(LRWExchangeTest, EmptyMappingReturnsTrue) {
     // Build map with zero-size PDOs
     SlaveConfig configs[kMaxPDOSlaves] = {};

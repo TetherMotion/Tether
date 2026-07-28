@@ -6,6 +6,7 @@
 #include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/ethercat/Types.hpp"
 
+#include <array>
 #include <cstring>
 
 namespace EtherCAT {
@@ -187,6 +188,9 @@ bool LogicalAddressManager::exchangeAllLRW(const PDO::PDOMapping& mapping) {
     std::memset(payload, 0, total_data);
 
     // Fill RxPDO (write) portion from app buffers
+    // Track per-slave running offset so multiple PDO entries on the same
+    // slave are placed at consecutive positions within the slave's region.
+    std::array<uint32_t, PDO::kMaxPDOSlaves> rx_running{};
     for (size_t i = 0; i < mapping.entry_count(); i++) {
         const PDO::PDOEntry* e = mapping.get_entry(i);
         if (!e || !e->enabled || e->direction != PDO::PDODirection::RxPDO) continue;
@@ -194,7 +198,9 @@ bool LogicalAddressManager::exchangeAllLRW(const PDO::PDOMapping& mapping) {
         if (!addr_map_[e->slave_index].active) continue;
 
         const auto& addr = addr_map_[e->slave_index];
-        const uint32_t offset = addr.rxpdo_logical_addr - kBaseLogicalAddress;
+        const uint32_t offset = addr.rxpdo_logical_addr - kBaseLogicalAddress
+                              + rx_running[e->slave_index];
+        rx_running[e->slave_index] += e->data_size;
         if (e->app_buffer && e->data_size > 0 &&
             offset + e->data_size <= total_rxpdo_bytes_) {
             std::memcpy(payload + offset, e->app_buffer, e->data_size);
@@ -230,8 +236,11 @@ bool LogicalAddressManager::exchangeAllLRW(const PDO::PDOMapping& mapping) {
     }
 
     // Extract TxPDO (read) data from response into app buffers
+    // Track per-slave running offset so multiple PDO entries on the same
+    // slave are read from consecutive positions within the slave's region.
     if (resp.datalen >= total_data) {
         const uint8_t* rx_data = resp.data + total_rxpdo_bytes_;
+        std::array<uint32_t, PDO::kMaxPDOSlaves> tx_running{};
         for (size_t i = 0; i < mapping.entry_count(); i++) {
             const PDO::PDOEntry* e = mapping.get_entry(i);
             if (!e || !e->enabled || e->direction != PDO::PDODirection::TxPDO) continue;
@@ -239,7 +248,10 @@ bool LogicalAddressManager::exchangeAllLRW(const PDO::PDOMapping& mapping) {
             if (!addr_map_[e->slave_index].active) continue;
 
             const auto& addr = addr_map_[e->slave_index];
-            const uint32_t offset = addr.txpdo_logical_addr - kBaseLogicalAddress - total_rxpdo_bytes_;
+            const uint32_t offset = addr.txpdo_logical_addr - kBaseLogicalAddress
+                                  - total_rxpdo_bytes_
+                                  + tx_running[e->slave_index];
+            tx_running[e->slave_index] += e->data_size;
             if (e->app_buffer && e->data_size > 0 &&
                 offset + e->data_size <= total_txpdo_bytes_) {
                 std::memcpy(e->app_buffer, rx_data + offset, e->data_size);
