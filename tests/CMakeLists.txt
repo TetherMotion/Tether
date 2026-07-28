@@ -332,10 +332,14 @@ set(CIA402_COVERAGE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/test_60xxParameters.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/test_cia402_pdo_fallback.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/test_cia402_protocol.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/test_as715n_pdo_utils.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/profiles/test_drives_as715n.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/profiles/test_as715n_errc11_integration.cpp"
 )
+if(TETHER_DRIVE_AS715N)
+    list(APPEND CIA402_COVERAGE_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/test_as715n_pdo_utils.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/profiles/test_drives_as715n.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/profiles/test_as715n_errc11_integration.cpp"
+    )
+endif()
 file(GLOB CIA404_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia404/*.cpp")
 file(GLOB CIA405_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia405/*.cpp")
 list(APPEND CIA405_TEST_SOURCES
