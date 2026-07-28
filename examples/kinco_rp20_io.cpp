@@ -20,7 +20,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <cmath>
 #include <csignal>
 #include <cstring>
 #include <iomanip>
@@ -954,20 +953,14 @@ static void printModuleIO(DiscoveredModule& mod, uint64_t cycle,
             case RP20Mod::ModuleType::DO_16_NPN:
             case RP20Mod::ModuleType::Multi_DIO_8:
             case RP20Mod::ModuleType::DR_8: {
-                // Digital/relay outputs — toggle a walking bit
+                // Digital/relay outputs — display current state (no toggling)
                 std::cout << " DO:";
                 for (size_t i = 0; i < desc->rxpdo->field_count; ++i) {
                     const auto* f = RP20Mod::getFieldByChannel(*desc->rxpdo, i);
                     if (f) {
-                        uint8_t pattern = static_cast<uint8_t>(
-                            (cycle >> 4) & 0xFF);
-                        if (desc->type == RP20Mod::ModuleType::DR_8) {
-                            // For relay, toggle individual bits more slowly
-                            pattern = static_cast<uint8_t>(1u << ((cycle / 500) % 8));
-                        }
-                        RP20Mod::writeU8(rx, *f, pattern);
+                        uint8_t val = RP20Mod::readU8(rx, *f);
                         std::cout << " " << std::hex << std::setw(2)
-                                  << std::setfill('0') << static_cast<int>(pattern);
+                                  << std::setfill('0') << static_cast<int>(val);
                     }
                 }
                 std::cout << std::dec;
@@ -975,14 +968,12 @@ static void printModuleIO(DiscoveredModule& mod, uint64_t cycle,
             }
             case RP20Mod::ModuleType::AO_4:
             case RP20Mod::ModuleType::Mixed_AIO: {
-                // Analog outputs — write a sine wave
+                // Analog outputs — display current state (no sine wave)
                 std::cout << " AO:";
                 for (size_t i = 0; i < desc->rxpdo->field_count; ++i) {
                     const auto* f = RP20Mod::getFieldByChannel(*desc->rxpdo, i);
                     if (f) {
-                        double phase = cycle * 0.01 + i * 1.5708;
-                        int16_t val = static_cast<int16_t>(10000.0 * sin(phase));
-                        RP20Mod::writeI16(rx, *f, val);
+                        int16_t val = RP20Mod::readI16(rx, *f);
                         std::cout << " " << val;
                     }
                 }
