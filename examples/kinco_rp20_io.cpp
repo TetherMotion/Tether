@@ -506,9 +506,19 @@ static void runInteractiveUI(EtherCAT::Master& master,
                     }
                     break;
                 }
+                case RP20Mod::ModuleType::TC_4: {
+                    for (size_t fi = 0; fi < desc->txpdo->field_count; ++fi) {
+                        const auto* f = RP20Mod::getFieldByChannel(*desc->txpdo, fi);
+                        if (!f) continue;
+                        int16_t val = RP20Mod::readI16(tx, *f);
+                        mvprintw(y, 2, "%s TC.%zu: %6.1f C",
+                                 desc->name, fi, val / 10.0);
+                        y++;
+                    }
+                    break;
+                }
                 case RP20Mod::ModuleType::AI_4:
                 case RP20Mod::ModuleType::RD_4:
-                case RP20Mod::ModuleType::TC_4:
                 case RP20Mod::ModuleType::Mixed_AIO: {
                     for (size_t fi = 0; fi < desc->txpdo->field_count; ++fi) {
                         const auto* f = RP20Mod::getFieldByChannel(*desc->txpdo, fi);
@@ -594,9 +604,21 @@ static void printModuleIO(DiscoveredModule& mod, uint64_t cycle) {
                 std::cout << std::dec;
                 break;
             }
+            case RP20Mod::ModuleType::TC_4: {
+                // Thermocouple inputs — value / 10 = °C
+                std::cout << "TC:";
+                for (size_t i = 0; i < desc->txpdo->field_count; ++i) {
+                    const auto* f = RP20Mod::getFieldByChannel(*desc->txpdo, i);
+                    if (f) {
+                        int16_t val = RP20Mod::readI16(tx, *f);
+                        std::cout << " " << std::fixed << std::setprecision(1)
+                                  << std::setw(6) << (val / 10.0) << "C";
+                    }
+                }
+                break;
+            }
             case RP20Mod::ModuleType::AI_4:
             case RP20Mod::ModuleType::RD_4:
-            case RP20Mod::ModuleType::TC_4:
             case RP20Mod::ModuleType::Mixed_AIO: {
                 // Analog inputs — print as signed 16-bit decimal
                 std::cout << "AI:";
