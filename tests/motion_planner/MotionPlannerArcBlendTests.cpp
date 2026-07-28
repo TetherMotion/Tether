@@ -9,9 +9,14 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include <array>
+#include <string>
+#include <vector>
+#include <filesystem>
+#include <cstdlib>
 
 #include "tether/motion_planner/CornerBlending.hpp"
 #include "tether/motion_planner/MotionSegment.hpp"
+#include "BlendTestVisualizer.hpp"
 
 namespace MotionPlanner {
 namespace test {
@@ -209,6 +214,52 @@ INSTANTIATE_TEST_SUITE_P(
     MotionPlannerArcAngleTest,
     ::testing::Values(15.0, 30.0, 45.0, 60.0, 90.0, 120.0)
 );
+
+// ============================================================================
+// SVG visualization summary — generates SVGs for arc blend scenarios
+// ============================================================================
+
+TEST(MotionPlannerArcBlendVisualSummary, GenerateAllSVGs) {
+    struct Scenario {
+        std::string name;
+        MotionSegment seg1;
+        MotionSegment seg2;
+        std::string mode;
+    };
+
+    std::vector<Scenario> scenarios = {
+        {"SmoothLineToArcCW",       makeLine(0,0, 50,0),     makeArcCW(50,0, 50,-30, 50,-15),   "Line-ArcCW"},
+        {"SmoothArcCWToLine",       makeArcCW(50,0, 50,-30, 50,-15), makeLine(50,-30, 0,-30),   "ArcCW-Line"},
+        {"SmoothLineToArcCCW",      makeLine(0,0, 50,0),     makeArcCCW(50,0, 50,30, 50,15),    "Line-ArcCCW"},
+        {"SmoothArcToArc_SameCenter", makeArcCCW(20,0, 0,20, 0,0), makeArcCCW(0,20, -20,0, 0,0), "ArcCCW-ArcCCW"},
+        {"LineToArc_90Deg",         makeLine(0,0, 10,0),     makeArcCW(10,0, 20,-10, 20,0),     "Line-ArcCW"},
+        {"ArcToLine_90Deg",         makeArcCW(0,10, 10,0, 0,0), makeLine(10,0, 20,0),           "ArcCW-Line"},
+        {"LineLine_90Deg",          makeLine(0,0, 10,0),     makeLine(10,0, 10,10),             "Line-Line"},
+    };
+
+    std::string outRoot;
+    const char* env = std::getenv("TEST_SVG_DIR");
+    if (env && env[0]) outRoot = env;
+    else outRoot = "test_output/svgs";
+    std::string dir = outRoot + "/motion_planner_arc_blend";
+    std::filesystem::create_directories(dir);
+
+    int count = 0;
+    for (const auto& sc : scenarios) {
+        auto analysis = CornerAnalyzer2D::analyze(sc.seg1, sc.seg2);
+        BlendTest::emitMotionPlannerSVG(
+            sc.name, sc.seg1, sc.seg2, analysis,
+            dir, sc.name + ".svg",
+            0.0, sc.mode);
+        if (std::filesystem::exists(dir + "/" + sc.name + ".svg")) ++count;
+    }
+
+    EXPECT_GT(count, 0);
+    std::cout << "\n=== MotionPlanner Arc Blend SVG Summary ===\n"
+              << "SVGs generated: " << count << "\n"
+              << "Output dir: " << dir << "\n"
+              << "================================\n\n";
+}
 
 }  // namespace test
 }  // namespace MotionPlanner

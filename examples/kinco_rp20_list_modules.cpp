@@ -71,7 +71,12 @@ static std::vector<DiscoveredModule> scanSlots(EtherCAT::Master& master,
     for (uint16_t s = 0; s < slave_count; ++s) {
         for (uint8_t slot = 0; slot < 16; ++slot) {
             uint16_t diag_idx = RP20Mod::diagnosisIndexForSlot(slot);
-            auto id_res = master.sdoManager(s).readU8(diag_idx, 0x01);
+            // The RP20 diagnosis entry is a 4-byte OD object whose low byte
+            // holds the module ID; readU8 returns the relevant byte and the
+            // trailing 3 bytes are expected padding.
+            EtherCAT::CoE::CoETransactionOptions opts;
+            opts.allow_trailing_bytes = true;
+            auto id_res = master.sdoManager(s).readU8(diag_idx, 0x01, opts);
             if (!id_res.has_value()) {
                 continue;
             }

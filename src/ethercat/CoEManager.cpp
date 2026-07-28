@@ -958,13 +958,19 @@ void CoEReadTransactionImpl<T>::execute(CoEManager& mgr) {
     if (out_len > sizeof(T)) {
         // The slave returned MORE bytes than the typed read expects. The
         // leading sizeof(T) bytes are still copied below, but warn so a
-        // truncated response does not pass silently.
-        TETHER_LOGW(TAG,
-                    "Slave %u: SDO upload 0x%04X:%u returned %zu bytes, only "
-                    "the first %zu are used for the requested typed read (trailing "
-                    "%zu byte(s) discarded).",
-                    mgr.slaveIndex(), txn_.index, txn_.subindex,
-                    out_len, sizeof(T), out_len - sizeof(T));
+        // truncated response does not pass silently. Callers that knowingly
+        // read a narrow value from a wider SDO entry (e.g. a 1-byte module
+        // ID stored in a 4-byte OD entry) may set
+        // CoETransactionOptions::allow_trailing_bytes to suppress this
+        // warning for this transaction.
+        if (!txn_.options.allow_trailing_bytes) {
+            TETHER_LOGW(TAG,
+                        "Slave %u: SDO upload 0x%04X:%u returned %zu bytes, only "
+                        "the first %zu are used for the requested typed read (trailing "
+                        "%zu byte(s) discarded).",
+                        mgr.slaveIndex(), txn_.index, txn_.subindex,
+                        out_len, sizeof(T), out_len - sizeof(T));
+        }
     }
 
     T value;
