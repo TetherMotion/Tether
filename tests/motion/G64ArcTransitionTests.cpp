@@ -16,9 +16,11 @@
 #include <cmath>
 #include <vector>
 #include <array>
+#include <string>
 
 #include "tether/gcode/motion/G64CornerMode.hpp"
 #include "tether/gcode/motion/InterpolationStrategy.hpp"
+#include "motion_planner/TestPathSVG.hpp"
 
 namespace GCode {
 namespace test {
@@ -158,6 +160,67 @@ protected:
 };
 
 // ============================================================================
+// SVG output helper for G64 arc transition tests
+// ============================================================================
+
+static void emitArcSVG(const std::string& testName,
+                       const PlanningSegment& seg1,
+                       const PlanningSegment& seg2,
+                       const CornerAnalysis& analysis,
+                       const G64CornerConfig& config) {
+    TestPathSVG::PathSVGData data;
+    data.title = testName;
+    data.originalSegments = {seg1, seg2};
+    data.gridSpacing = 5.0;
+
+    if (analysis.blendRadius > 0) {
+        PlanningSegment blendSeg;
+        blendSeg.start = analysis.blendEntry;
+        blendSeg.end = analysis.blendExit;
+        blendSeg.center = analysis.blendCenter;
+        blendSeg.arcRadius = analysis.blendRadius;
+        blendSeg.motionType = analysis.isCW ?
+            SegmentMotionType::ArcCW : SegmentMotionType::ArcCCW;
+        blendSeg.plane = InterpolationPlane::XY;
+        data.blendedSegments = {blendSeg};
+    }
+
+    data.infoLines = {
+        "Test: " + testName,
+        "Angle: " + TestPathSVG::fmt(analysis.angle) + " deg",
+        "Tolerance: " + TestPathSVG::fmt(config.pathTolerance) + " mm",
+        "Blend radius: " + TestPathSVG::fmt(analysis.blendRadius) + " mm",
+        "Type: " + std::string(analysis.type == CornerType::Straight ? "Straight" :
+                               analysis.type == CornerType::Concave ? "Concave" :
+                               analysis.type == CornerType::Convex ? "Convex" : "Cusp"),
+    };
+
+    TestPathSVG::generateSVG(data, "g64_arc", testName + ".svg");
+}
+
+static void emitArcSVG3(const std::string& testName,
+                        const PlanningSegment& seg1,
+                        const PlanningSegment& seg2,
+                        const PlanningSegment& seg3,
+                        const CornerAnalysis& a1,
+                        const CornerAnalysis& a2,
+                        const G64CornerConfig& config) {
+    TestPathSVG::PathSVGData data;
+    data.title = testName;
+    data.originalSegments = {seg1, seg2, seg3};
+    data.gridSpacing = 5.0;
+
+    data.infoLines = {
+        "Test: " + testName,
+        "Junction1 angle: " + TestPathSVG::fmt(a1.angle) + " deg",
+        "Junction2 angle: " + TestPathSVG::fmt(a2.angle) + " deg",
+        "Tolerance: " + TestPathSVG::fmt(config.pathTolerance) + " mm",
+    };
+
+    TestPathSVG::generateSVG(data, "g64_arc", testName + ".svg");
+}
+
+// ============================================================================
 // 1. SMOOTH TRANSITION TESTS
 //    Tangent-continuous junctions should produce angle ≈ 0° and no blending.
 // ============================================================================
@@ -172,6 +235,8 @@ TEST_F(G64ArcTransitionTest, SmoothLineToArcCW_AngleIsZero) {
     EXPECT_NEAR(analysis.angle, 0.0, ANGLE_TOL_DEG)
         << "Smooth line→CW arc should have ~0° angle";
     EXPECT_EQ(analysis.type, CornerType::Straight);
+
+    emitArcSVG("SmoothLineToArcCW", line, arc, analysis, config_);
 }
 
 TEST_F(G64ArcTransitionTest, SmoothArcCWToLine_AngleIsZero) {
@@ -183,6 +248,8 @@ TEST_F(G64ArcTransitionTest, SmoothArcCWToLine_AngleIsZero) {
     EXPECT_NEAR(analysis.angle, 0.0, ANGLE_TOL_DEG)
         << "Smooth CW arc→line should have ~0° angle";
     EXPECT_EQ(analysis.type, CornerType::Straight);
+
+    emitArcSVG("SmoothArcCWToLine", arc, line, analysis, config_);
 }
 
 TEST_F(G64ArcTransitionTest, SmoothLineToArcCCW_AngleIsZero) {
@@ -195,6 +262,8 @@ TEST_F(G64ArcTransitionTest, SmoothLineToArcCCW_AngleIsZero) {
     EXPECT_NEAR(analysis.angle, 0.0, ANGLE_TOL_DEG)
         << "Smooth line→CCW arc should have ~0° angle";
     EXPECT_EQ(analysis.type, CornerType::Straight);
+
+    emitArcSVG("SmoothLineToArcCCW", line, arc, analysis, config_);
 }
 
 TEST_F(G64ArcTransitionTest, SmoothArcCCWToLine_AngleIsZero) {
@@ -205,6 +274,8 @@ TEST_F(G64ArcTransitionTest, SmoothArcCCWToLine_AngleIsZero) {
     EXPECT_NEAR(analysis.angle, 0.0, ANGLE_TOL_DEG)
         << "Smooth CCW arc→line should have ~0° angle";
     EXPECT_EQ(analysis.type, CornerType::Straight);
+
+    emitArcSVG("SmoothArcCCWToLine", arc, line, analysis, config_);
 }
 
 TEST_F(G64ArcTransitionTest, SmoothArcToArc_SameCenter_AngleIsZero) {
@@ -218,6 +289,8 @@ TEST_F(G64ArcTransitionTest, SmoothArcToArc_SameCenter_AngleIsZero) {
     EXPECT_NEAR(analysis.angle, 0.0, ANGLE_TOL_DEG)
         << "Two CCW arcs with same center should be smooth";
     EXPECT_EQ(analysis.type, CornerType::Straight);
+
+    emitArcSVG("SmoothArcToArc_SameCenter", arc1, arc2, analysis, config_);
 }
 
 TEST_F(G64ArcTransitionTest, SmoothArcToArc_DifferentRadii_Tangent) {
@@ -237,6 +310,8 @@ TEST_F(G64ArcTransitionTest, SmoothArcToArc_DifferentRadii_Tangent) {
     auto analysis = CornerAnalyzer::analyze(arc1, arc2);
     EXPECT_NEAR(analysis.angle, 0.0, ANGLE_TOL_DEG)
         << "S-curve arcs with matching tangent should be smooth";
+
+    emitArcSVG("SmoothArcToArc_DifferentRadii", arc1, arc2, analysis, config_);
 }
 
 TEST_F(G64ArcTransitionTest, SmoothFullLineArcLine_NoBlendGenerated) {
@@ -258,6 +333,8 @@ TEST_F(G64ArcTransitionTest, SmoothFullLineArcLine_NoBlendGenerated) {
     bool blend2 = CornerAnalyzer::computeBlendGeometry(a2, config_);
     EXPECT_FALSE(blend1) << "Smooth junction should not produce blend";
     EXPECT_FALSE(blend2) << "Smooth junction should not produce blend";
+
+    emitArcSVG3("SmoothFullLineArcLine_NoBogusCorner", seg1, seg2, seg3, a1, a2, config_);
 }
 
 // ============================================================================
@@ -294,6 +371,8 @@ TEST_F(G64ArcTransitionTest, NearSmoothLineToArc_SmallAngle) {
         << "Should detect non-zero angle";
     EXPECT_LT(analysis.angle, 15.0)
         << "Should not produce a large angle";
+
+    emitArcSVG("NearSmoothLineToArc_5Deg", line2, arc, analysis, config_);
 }
 
 TEST_F(G64ArcTransitionTest, NearSmooth_10DegreeMismatch) {
@@ -309,6 +388,8 @@ TEST_F(G64ArcTransitionTest, NearSmooth_10DegreeMismatch) {
     auto analysis = CornerAnalyzer::analyze(line, arc);
     EXPECT_NEAR(analysis.angle, mismatchDeg, 2.0)
         << "10° mismatch should give ~10° angle";
+
+    emitArcSVG("NearSmoothLineToArc_10Deg", line, arc, analysis, config_);
 }
 
 // ============================================================================
@@ -343,6 +424,8 @@ TEST_F(G64ArcTransitionTest, LineToArc_45DegreeCorner) {
     auto analysis = CornerAnalyzer::analyze(line, arc);
     EXPECT_NEAR(analysis.angle, 45.0, 2.0)
         << "Line(+X) → Arc(45° tangent) should give 45° angle";
+
+    emitArcSVG("LineToArc_45DegreeCorner", line, arc, analysis, config_);
 }
 
 TEST_F(G64ArcTransitionTest, LineToArc_90DegreeCorner) {
@@ -358,6 +441,8 @@ TEST_F(G64ArcTransitionTest, LineToArc_90DegreeCorner) {
     auto analysis = CornerAnalyzer::analyze(line, arc);
     EXPECT_NEAR(analysis.angle, 90.0, 2.0)
         << "Line(+X) → Arc(perpendicular tangent) should give 90° angle";
+
+    emitArcSVG("LineToArc_90DegreeCorner", line, arc, analysis, config_);
 }
 
 TEST_F(G64ArcTransitionTest, ArcToLine_90DegreeCorner) {
@@ -371,6 +456,8 @@ TEST_F(G64ArcTransitionTest, ArcToLine_90DegreeCorner) {
 
     auto analysis = CornerAnalyzer::analyze(arc, line);
     EXPECT_NEAR(analysis.angle, 90.0, 2.0);
+
+    emitArcSVG("ArcToLine_90DegreeCorner", arc, line, analysis, config_);
 }
 
 // ============================================================================
@@ -403,6 +490,8 @@ TEST_F(G64ArcTransitionTest, ArcToArc_90DegreeMismatch) {
     // Arc1 exit tangent = (-1, 0), Arc2 entry tangent = (0, 1) → 90°
     EXPECT_NEAR(analysis.angle, 90.0, 2.0)
         << "Arc→Arc with perpendicular tangents should give 90°";
+
+    emitArcSVG("ArcToArc_90DegreeMismatch", arc1, arc2, analysis, config_);
 }
 
 TEST_F(G64ArcTransitionTest, ArcToArc_SameDirection_Smooth) {
@@ -414,6 +503,8 @@ TEST_F(G64ArcTransitionTest, ArcToArc_SameDirection_Smooth) {
     auto analysis = CornerAnalyzer::analyze(arc1, arc2);
     EXPECT_NEAR(analysis.angle, 0.0, ANGLE_TOL_DEG)
         << "Two CW quarter-circles forming semicircle should be smooth";
+
+    emitArcSVG("ArcToArc_SameDirection_Smooth", arc1, arc2, analysis, config_);
 }
 
 // ============================================================================

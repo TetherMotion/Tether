@@ -276,6 +276,9 @@ struct BlendVisualizationData {
     bool canBlend = false;
     bool c1Continuous = false;
     bool c2Continuous = false;
+
+    // G-code reference lines (synthetic or real)
+    std::vector<std::string> gcodeLines;
 };
 
 inline std::string generateBlendSVG(const BlendVisualizationData& data,
@@ -390,6 +393,23 @@ inline std::string generateBlendSVG(const BlendVisualizationData& data,
     info.push_back("C2: " + std::string(data.c2Continuous ? "PASS" : "FAIL"));
     s << canvas.infoPanel(info, 10, 20);
 
+    // G-code reference panel
+    if (!data.gcodeLines.empty()) {
+        int gx = canvas.width() - 270;
+        int gy = canvas.height() - static_cast<int>(data.gcodeLines.size()) * 13 - 30;
+        int panelH = static_cast<int>(data.gcodeLines.size()) * 13 + 22;
+        s << "  <rect x=\"" << (gx - 5) << "\" y=\"" << (gy - 15)
+          << "\" width=\"260\" height=\"" << panelH
+          << "\" fill=\"white\" fill-opacity=\"0.9\" stroke=\"#ccc\" "
+          << "stroke-width=\"0.5\" rx=\"4\"/>\n";
+        s << canvas.text(gx, gy, "G-Code:", "#666", 10);
+        int yPos = gy + 13;
+        for (const auto& l : data.gcodeLines) {
+            s << canvas.text(gx, yPos, l, "#0066cc", 10);
+            yPos += 13;
+        }
+    }
+
     // Curvature profile subplot (bottom-right)
     if (!data.curvatureProfile.empty()) {
         int subplotX = canvas.width() - 250;
@@ -453,6 +473,7 @@ struct MultiBlendVisualizationData {
     std::vector<tether::blend::BlendVec> blendedPath;   // All output points
     std::vector<tether::blend::BlendVec> blendRegions;  // Start/end of each blend
     std::vector<std::string> labels;
+    std::vector<std::string> gcodeLines;  // G-code reference
 };
 
 inline std::string generateMultiBlendSVG(const MultiBlendVisualizationData& data,
@@ -506,6 +527,23 @@ inline std::string generateMultiBlendSVG(const MultiBlendVisualizationData& data
                            "Blended points: " + std::to_string(data.blendedPath.size())},
                           10, 20);
 
+    // G-code reference panel
+    if (!data.gcodeLines.empty()) {
+        int gx = canvas.width() - 270;
+        int gy = canvas.height() - static_cast<int>(data.gcodeLines.size()) * 13 - 30;
+        int panelH = static_cast<int>(data.gcodeLines.size()) * 13 + 22;
+        s << "  <rect x=\"" << (gx - 5) << "\" y=\"" << (gy - 15)
+          << "\" width=\"260\" height=\"" << panelH
+          << "\" fill=\"white\" fill-opacity=\"0.9\" stroke=\"#ccc\" "
+          << "stroke-width=\"0.5\" rx=\"4\"/>\n";
+        s << canvas.text(gx, gy, "G-Code:", "#666", 10);
+        int yPos = gy + 13;
+        for (const auto& l : data.gcodeLines) {
+            s << canvas.text(gx, yPos, l, "#0066cc", 10);
+            yPos += 13;
+        }
+    }
+
     s << canvas.footer();
 
     if (!outputPath.empty()) {
@@ -521,6 +559,70 @@ inline std::string generateMultiBlendSVG(const MultiBlendVisualizationData& data
     }
 
     return s.str();
+}
+
+// ============================================================================
+// Convenience: generate SVG from MotionPlanner segments + analysis
+// Works with MotionPlanner::MotionSegment and CornerAnalysis<2, double>
+// ============================================================================
+
+inline std::string mpSegmentToGCode(const tether::blend::BlendVec& start,
+                                    const tether::blend::BlendVec& end,
+                                    bool isArc = false,
+                                    bool isCW = false,
+                                    const tether::blend::BlendVec& center = {}) {
+    std::ostringstream s;
+    s << std::fixed << std::setprecision(3);
+    if (isArc) s << (isCW ? "G2" : "G3");
+    else       s << "G1";
+    s << " X" << end.x << " Y" << end.y;
+    if (isArc) {
+        s << " I" << (center.x - start.x) << " J" << (center.y - start.y);
+    }
+    return s.str();
+}
+
+template <typename Seg, typename Analysis>
+inline void emitMotionPlannerSVG(const std::string& testName,
+                                 const Seg& seg1,
+                                 const Seg& seg2,
+                                 const Analysis& analysis,
+                                 const std::string& subjectDir,
+                                 const std::string& filename,
+                                 double tolerance = 0.0,
+                                 const std::string& modeStr = "") {
+    BlendVisualizationData vd;
+    vd.testName = testName;
+    vd.tolerance = tolerance;
+    vd.canBlend = analysis.canBlend;
+    vd.blendRadius = analysis.blendRadius;
+    vd.entryDistance = analysis.entryDistance;
+    vd.exitDistance = analysis.exitDistance;
+    vd.cornerAngleDeg = analysis.angle * 180.0 / 3.14159265358979323846;
+
+    // Path points — MotionSegment uses startPosition/endPosition arrays
+    vd.pathStart = tether::blend::BlendVec(seg1.startPosition[0], seg1.startPosition[1], 0.0);
+    vd.cornerPoint = tether::blend::BlendVec(seg1.endPosition[0], seg1.endPosition[1], 0.0);
+    vd.pathEnd = tether::blend::BlendVec(seg2.endPosition[0], seg2.endPosition[1], 0.0);
+
+    if (analysis.canBlend) {
+        vd.blendEntry = tether::blend::BlendVec(analysis.blendEntry[0], analysis.blendEntry[1], 0.0);
+        vd.blendExit = tether::blend::BlendVec(analysis.blendExit[0], analysis.blendExit[1], 0.0);
+    }
+
+    // G-code lines
+    vd.gcodeLines.push_back(mpSegmentToGCode(vd.pathStart, vd.cornerPoint));
+    vd.gcodeLines.push_back(mpSegmentToGCode(vd.cornerPoint, vd.pathEnd));
+
+    // Info
+    vd.transitionType = modeStr.empty() ? "MotionPlanner" : modeStr;
+
+    // Ensure output directory exists
+    std::filesystem::path dir(subjectDir);
+    if (!std::filesystem::exists(dir)) {
+        std::filesystem::create_directories(dir);
+    }
+    generateBlendSVG(vd, subjectDir + "/" + filename);
 }
 
 } // namespace BlendTest
