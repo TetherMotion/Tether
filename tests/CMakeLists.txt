@@ -323,6 +323,7 @@ set(CIA402_HOMING_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/test_HomingHandler.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/test_HomingHandler_coverage.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/test_HomingMethods_coverage.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/test_TorqueHomingController.cpp"
 )
 set(CIA402_MOTION_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/test_MotionController_coverage.cpp"
