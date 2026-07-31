@@ -24,7 +24,11 @@
 #include "tether/klipper/klippy/PrinterObjects.hpp"
 #include "tether/klipper/klippy/PrinterObjectsE2.hpp"
 #include "tether/klipper/klippy/KlippyInstanceConfig.hpp"
+#include "tether/klipper/klippy/KlippyHost.hpp"
+#include "tether/klipper/device/KlipperDevice.hpp"
 #include "tether/klipper/motion/MotionTranslator.hpp"
+#include "tether/klipper/motion/MotionDispatcher.hpp"
+#include "tether/klipper/config/StandardCommands.hpp"
 #include "tether/klipper/objects/Thermal.hpp"
 #include "tether/klipper/objects/Peripherals.hpp"
 #include "tether/klipper/objects/Homing.hpp"
@@ -101,6 +105,9 @@ public:
     {
         setupObjects();
         setupCallbacks();
+        if (config_.motionBackend) {
+            setupMotionBackend();
+        }
     }
 
     // ------------------------------------------------------------------
@@ -307,6 +314,30 @@ public:
         server_.stop();
     }
 
+    /// @return The motion backend's KlippyHost, or nullptr if not configured.
+    klippy::KlippyHost* motionHost() { return motionHost_.get(); }
+
+    /// @return The motion backend's KlipperDevice, or nullptr if not configured
+    ///         or no in-process device was created.
+    device::KlipperDevice* motionDevice() { return motionDevice_.get(); }
+
+    /// @return The motion backend's MotionDispatcher, or nullptr if not configured.
+    motion::MotionDispatcher* motionDispatcher() { return motionDispatcher_.get(); }
+
+    /// @return True if the motion backend is wired and the host is ready
+    ///         (connected + dict downloaded + clock synced).
+    bool motionBackendReady() const {
+        return motionHost_ && motionHost_->isReady();
+    }
+
+    /// @brief Pump the motion backend: pump the device (if in-process) and
+    ///        the host so protocol messages flow. Call this periodically
+    ///        (e.g. from tick()) when using the motion backend.
+    void pumpMotionBackend() {
+        if (motionDevice_) motionDevice_->pump();
+        if (motionHost_) motionHost_->pump();
+    }
+
     /// @brief Execute a G-code script.
     bool executeGcode(const std::string& script) {
         return gcode_.execute(script);
@@ -323,6 +354,96 @@ public:
     // === Config processing (extracted to .ipp) ===
     #include "tether/klipper/klippy/KlippyInstanceConfigProcessing.ipp"
 
+    /// @brief Set up the motion backend: create KlippyHost (+ optional
+    /// KlipperDevice), connect, download dict, sync clock, create
+    /// MotionDispatcher, and override the G-code move callback to route
+    /// moves through the real Klipper wire protocol.
+    void setupMotionBackend() {
+        auto& mb = *config_.motionBackend;
+        motionBackendCfg_ = config_.motionBackend;
+
+        // Build the data dictionary if not pre-provided.
+        protocol::DataDictionary dict = mb.dict;
+        if (dict.messages().empty()) {
+            config::KlipperConfig cfg;
+            config::withStandardCommands(cfg, mb.clockFreqHz);
+            dict = cfg.build();
+        }
+
+        // Create the in-process device if a device transport is provided.
+        if (mb.deviceTransport) {
+            device::KlipperDeviceConfig dcfg;
+            dcfg.clockFreqHz = mb.clockFreqHz;
+            motionDevice_ = std::make_unique<device::KlipperDevice>(
+                mb.deviceTransport, dict, dcfg);
+            motionDevice_->start();
+            if (mb.registerDeviceSteppers) {
+                for (uint8_t i = 0; i < 4; ++i) {
+                    auto s = std::make_shared<objects::Stepper>(i);
+                    motionDevice_->registerStepper(s);
+                    deviceSteppers_.push_back(s);
+                }
+                motionDevice_->enableStepperMotion();
+            }
+        }
+
+        // Create the host and connect.
+        motionHost_ = std::make_unique<klippy::KlippyHost>(mb.hostTransport);
+        if (mb.autoConnect) {
+            motionHost_->connect();
+            auto devicePump = [this]() {
+                if (motionDevice_) motionDevice_->pump();
+            };
+            if (!motionHost_->downloadDictionary(devicePump)) return;
+            if (!motionHost_->syncClock(devicePump)) return;
+        }
+
+        // Create the motion dispatcher.
+        motion::MotionDispatcher::Config dcfg;
+        for (size_t i = 0; i < 4; ++i) {
+            dcfg.axisConfigs[i] = {mb.stepsPerMm[i], mb.invertDirection[i]};
+        }
+        dcfg.axisOids = mb.axisOids;
+        dcfg.clockFreqHz = mb.clockFreqHz;
+        dcfg.sampleIntervalSec = mb.sampleIntervalSec;
+        motionDispatcher_ = std::make_unique<motion::MotionDispatcher>(dcfg);
+        motionDispatcher_->setKinematicsTransform(kinematicsTransform_);
+
+        // Wire the dispatcher's send callback to the host's step sender.
+        // Pump both device and host when the serial window is full.
+        motionDispatcher_->setSendCallback(
+            [this](const std::vector<motion::AxisStepSequence>& seqs) {
+                return motionHost_->sendStepSequences(seqs, [this]() {
+                    if (motionDevice_) motionDevice_->pump();
+                    motionHost_->pump();
+                });
+            });
+
+        // Wire the clock provider to the host's clock sync.
+        motionDispatcher_->setClockProvider([this]() {
+            return motionHost_->clockSync().isSynchronised()
+                ? motionHost_->clockSync().hostToMcu(clock::HostClock::now())
+                : 0u;
+        });
+
+        // Override the G-code move callback to route through the dispatcher
+        // in addition to updating the printer object model.
+        gcode_.callbacks().move = [this](double x, double y, double z,
+                                          double e, double speed) {
+            // Route through the wire protocol (G-code space, no offset).
+            if (motionDispatcher_) {
+                motionDispatcher_->move(x, y, z, e, speed);
+            }
+            // Update the printer object model (with G-code offset for display).
+            std::array<double, 4> pos = {x + gcodeOffset_[0], y + gcodeOffset_[1],
+                                         z + gcodeOffset_[2], e + gcodeOffset_[3]};
+            toolheadObj_->setPosition(pos);
+            motionReportObj_->setPosition(pos);
+            motionReportObj_->setVelocity(speed);
+            moveQueueDepth_++;
+            noteActivity();
+        };
+    }
 
     /// @brief Update system statistics (call periodically).
     void updateSystemStats() {
@@ -367,6 +488,9 @@ public:
     /// Also checks idle timeout and executes timeout G-code if expired.
     void tick() {
         auto now = std::chrono::steady_clock::now();
+
+        // Pump the motion backend so protocol messages flow.
+        pumpMotionBackend();
 
         // Process delayed G-codes
         std::vector<std::string> toExecute;
@@ -643,6 +767,13 @@ private:
     std::shared_ptr<InputShaper> inputShaper_;
     std::shared_ptr<objects::BedMesh> bedMesh_;
     std::shared_ptr<objects::Adxl345> adxl345_;
+
+    // Motion backend (optional, wired when config_.motionBackend is set)
+    std::shared_ptr<MotionBackendConfig> motionBackendCfg_;
+    std::unique_ptr<klippy::KlippyHost> motionHost_;
+    std::unique_ptr<device::KlipperDevice> motionDevice_;
+    std::unique_ptr<motion::MotionDispatcher> motionDispatcher_;
+    std::vector<std::shared_ptr<objects::Stepper>> deviceSteppers_;
 
     // Heater/Fan/Probe backends (set by user)
     std::shared_ptr<objects::Heater> extruderHeater_;  ///< active extruder's heater

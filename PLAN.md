@@ -6,6 +6,15 @@ currently support, based on an audit of `src/gcode/GCodeParser.cpp`,
 `include/tether/gcode/`, and the dialect handlers under
 `include/tether/motion_planner/` and `include/tether/gcode/`.
 
+> **Note on scope:** This document covers the **Tether G-code parser**
+> (`src/gcode/`, `include/tether/gcode/`) — the dialect-agnostic parser that
+> handles RS274/NGC, Fanuc, Haas, GRBL, and Marlin dialects. It does **not**
+> cover the **Klipper layer** (`src/klipper/`, `include/tether/klipper/`),
+> which has its own independent G-code executor
+> (`tether/klipper/klippy/GCodeExecutor.hpp`) with 84+ extended and 95+
+> standard G/M commands. The Klipper layer's command coverage is tracked
+> separately in its test suite (`tests/klipper/`).
+
 Each item is tagged:
 - **MISSING** — not recognized by the lexer/parser at all (silently dropped
   or rejected).

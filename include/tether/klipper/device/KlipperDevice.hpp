@@ -32,6 +32,7 @@
 #include "tether/klipper/objects/Peripherals.hpp"
 #include "tether/klipper/motion/MotionBlockSink.hpp"
 #include "tether/klipper/motion/MotionReconstructor.hpp"
+#include "tether/klipper/motion/StepScheduler.hpp"
 
 #include <memory>
 #include <unordered_map>
@@ -55,6 +56,13 @@ struct KlipperDeviceConfig {
     MotionMode motionMode = MotionMode::Passthrough;
     /// Sink for motion blocks (required for ReconstructReplan mode).
     std::shared_ptr<motion::MotionBlockSink> motionSink;
+    /// If true, enable the real-time StepScheduler. When enabled, queue_step
+    /// commands are also forwarded to the StepScheduler, which fires steps
+    /// against a real monotonic timer (std::chrono::steady_clock). The
+    /// step callback updates the Stepper's position counter, so both the
+    /// simulated tick() path and the real-time scheduler path stay in sync.
+    /// Call device.tickStepScheduler() periodically to pump the scheduler.
+    bool useStepScheduler = false;
 };
 
 /**
@@ -95,6 +103,22 @@ public:
     ///        Stepper currently registered via registerPeripheral/registerStepper.
     void enableStepperMotion();
 
+    /// @brief Tick the real-time StepScheduler (if enabled). Call this
+    ///        periodically from the main loop or a timer thread.
+    /// @return Number of steps fired, or 0 if the scheduler is not enabled.
+    size_t tickStepScheduler();
+
+    /// @return The StepScheduler, or nullptr if not enabled.
+    motion::StepScheduler* stepScheduler() { return stepScheduler_.get(); }
+
+    /// @brief Wait for all scheduled steps to complete (blocks).
+    /// @param maxWaitMs Maximum wait in milliseconds (0 = no limit).
+    /// @return True if all steps completed, false on timeout.
+    bool waitStepScheduler(uint32_t maxWaitMs = 0) {
+        if (!stepScheduler_) return true;
+        return stepScheduler_->wait(maxWaitMs);
+    }
+
     /// @brief Register a command handler for a format string.
     void onCommand(const std::string& formatStr, protocol::CommandHandler handler);
 
@@ -121,6 +145,8 @@ private:
     std::unordered_map<uint8_t, std::shared_ptr<objects::Stepper>> steppers_;
     /// Per-OID base clock set by reset_step_clock (for queue_step scheduling).
     std::unordered_map<uint8_t, uint32_t> stepperBaseClocks_;
+    /// Real-time step scheduler (optional, enabled by config.useStepScheduler).
+    std::unique_ptr<motion::StepScheduler> stepScheduler_;
     uint8_t lastRecvSeq_ = 0;
     bool started_ = false;
 };

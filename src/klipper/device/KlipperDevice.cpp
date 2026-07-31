@@ -21,6 +21,10 @@ KlipperDevice::KlipperDevice(std::shared_ptr<transport::IByteStreamTransport> tr
     commandTable_ = std::make_unique<protocol::CommandTable>(dict_);
     // Build the identify server from the dictionary's wire blob.
     identifyServer_ = std::make_unique<protocol::IdentifyServer>(dict_.toWire());
+    // Create the real-time step scheduler if enabled.
+    if (config_.useStepScheduler) {
+        stepScheduler_ = std::make_unique<motion::StepScheduler>(config_.clockFreqHz);
+    }
 }
 
 KlipperDevice::~KlipperDevice() = default;
@@ -133,6 +137,17 @@ uint8_t KlipperDevice::registerStepper(std::shared_ptr<objects::Stepper> stepper
 }
 
 void KlipperDevice::enableStepperMotion() {
+    // If the StepScheduler is enabled, wire its step callback to update
+    // the Stepper's position counter (simulating real hardware step pulses).
+    if (stepScheduler_) {
+        stepScheduler_->setStepCallback([this](uint8_t oid, int8_t dir) {
+            auto it = steppers_.find(oid);
+            if (it == steppers_.end()) return;
+            it->second->step(dir);
+        });
+        stepScheduler_->start();
+    }
+
     // queue_step oid=%c interval=%u count=%hu add=%hi
     onCommand("queue_step oid=%c interval=%u count=%hu add=%hi",
         [this](const std::vector<protocol::ParamValue>& params) {
@@ -147,6 +162,10 @@ void KlipperDevice::enableStepperMotion() {
             cmd.dir      = it->second->direction();
             uint32_t start = stepperBaseClocks_.count(oid) ? stepperBaseClocks_[oid] : 0;
             it->second->enqueueStep(cmd, start);
+            // Also forward to the real-time StepScheduler (if enabled).
+            if (stepScheduler_) {
+                stepScheduler_->schedule(oid, cmd, start);
+            }
             // Advance the base clock by the total duration of this command so
             // the next queue_step continues seamlessly. With `add`, the
             // interval changes each step: duration = count*interval +
@@ -178,6 +197,11 @@ void KlipperDevice::enableStepperMotion() {
             uint8_t oid = static_cast<uint8_t>(params[0].integer);
             stepperBaseClocks_[oid] = static_cast<uint32_t>(params[1].integer);
         });
+}
+
+size_t KlipperDevice::tickStepScheduler() {
+    if (!stepScheduler_) return 0;
+    return stepScheduler_->tick();
 }
 
 void KlipperDevice::onCommand(const std::string& formatStr, protocol::CommandHandler handler) {

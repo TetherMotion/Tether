@@ -30,3 +30,4 @@ lib/
 
 # IDE files
 .vscode
+tests/test_output
