@@ -6,7 +6,7 @@
 #include <cmath>
 #include <array>
 
-namespace tether::klipper::klippy {
+namespace tether::kinematics {
 
 /// @brief Delta printer geometry parameters (M665).
 struct DeltaGeometry {
@@ -41,7 +41,7 @@ public:
 
     /// @brief Convert Cartesian (X, Y, Z) to tower angles (A, B, C).
     /// @return Tower positions in steps for each tower.
-    std::array<double, 3> cartesianToTower(double x, double y, double z) const {
+    std::array<double, 3> forwardActuatorKinematics(double x, double y, double z) const {
         // Tower positions at 120-degree intervals with angle offsets
         double angleA = (210.0 + geometry_.towerAngleA) * M_PI / 180.0;
         double angleB = (330.0 + geometry_.towerAngleB) * M_PI / 180.0;
@@ -78,7 +78,7 @@ public:
     /// Uses trilateration: subtract pairs of sphere equations to get two
     /// linear equations, express x and y in terms of z, then substitute
     /// into one sphere equation to get a quadratic in z.
-    std::array<double, 3> towerToCartesian(
+    std::array<double, 3> inverseActuatorKinematics(
         double towerA, double towerB, double towerC) const {
         // Tower base positions
         double angleA = (210.0 + geometry_.towerAngleA) * M_PI / 180.0;
@@ -190,4 +190,4 @@ private:
     DeltaEndstopAdjust endstopAdjust_;
 };
 
-} // namespace tether::klipper::klippy
+} // namespace tether::kinematics

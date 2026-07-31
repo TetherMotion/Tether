@@ -14,7 +14,7 @@
 #include "tether/klipper/klippy/PrinterObjectsE2.hpp"
 #include "tether/klipper/klippy/GCodeExecutor.hpp"
 #include "tether/klipper/motion/MotionTranslator.hpp"
-#include "tether/klipper/klippy/DeltaPrinter.hpp"
+#include "tether/kinematics/DeltaPrinter.hpp"
 #include "tether/klipper/klippy/InputShaper.hpp"
 #include "tether/klipper/config/ConfigParser.hpp"
 
@@ -224,7 +224,7 @@ class E4HybridKinematicsTest : public ::testing::Test {};
 TEST_F(E4HybridKinematicsTest, HybridCoreXYForward) {
     KinematicsTransform kt;
     kt.setKinematics(Kinematics::HybridCoreXY);
-    auto result = kt.transform(100, 50, 10);
+    auto result = kt.forwardActuatorKinematics(100, 50, 10);
     // A = X + Y = 150, B = X - Y = 50, C = Z = 10
     EXPECT_NEAR(result[0], 150, 1e-9);
     EXPECT_NEAR(result[1], 50, 1e-9);
@@ -234,7 +234,7 @@ TEST_F(E4HybridKinematicsTest, HybridCoreXYForward) {
 TEST_F(E4HybridKinematicsTest, HybridCoreXYInverse) {
     KinematicsTransform kt;
     kt.setKinematics(Kinematics::HybridCoreXY);
-    auto result = kt.inverseTransform(150, 50, 10);
+    auto result = kt.inverseActuatorKinematics(150, 50, 10);
     // X = (A + B) / 2 = 100, Y = (A - B) / 2 = 50, Z = C = 10
     EXPECT_NEAR(result[0], 100, 1e-9);
     EXPECT_NEAR(result[1], 50, 1e-9);
@@ -246,8 +246,8 @@ TEST_F(E4HybridKinematicsTest, HybridCoreXYRoundTrip) {
     kt.setKinematics(Kinematics::HybridCoreXY);
     for (double x : {0.0, 50.0, -30.0, 100.0}) {
         for (double y : {0.0, 25.0, -15.0, 80.0}) {
-            auto stepper = kt.transform(x, y, 10);
-            auto cart = kt.inverseTransform(stepper[0], stepper[1], stepper[2]);
+            auto stepper = kt.forwardActuatorKinematics(x, y, 10);
+            auto cart = kt.inverseActuatorKinematics(stepper[0], stepper[1], stepper[2]);
             EXPECT_NEAR(cart[0], x, 1e-9);
             EXPECT_NEAR(cart[1], y, 1e-9);
             EXPECT_NEAR(cart[2], 10, 1e-9);
@@ -258,7 +258,7 @@ TEST_F(E4HybridKinematicsTest, HybridCoreXYRoundTrip) {
 TEST_F(E4HybridKinematicsTest, HybridCoreXZForward) {
     KinematicsTransform kt;
     kt.setKinematics(Kinematics::HybridCoreXZ);
-    auto result = kt.transform(100, 50, 30);
+    auto result = kt.forwardActuatorKinematics(100, 50, 30);
     // A = X + Z = 130, B = X - Z = 70, C = Y = 50
     EXPECT_NEAR(result[0], 130, 1e-9);
     EXPECT_NEAR(result[1], 70, 1e-9);
@@ -268,7 +268,7 @@ TEST_F(E4HybridKinematicsTest, HybridCoreXZForward) {
 TEST_F(E4HybridKinematicsTest, HybridCoreXZInverse) {
     KinematicsTransform kt;
     kt.setKinematics(Kinematics::HybridCoreXZ);
-    auto result = kt.inverseTransform(130, 70, 50);
+    auto result = kt.inverseActuatorKinematics(130, 70, 50);
     // X = (A + B) / 2 = 100, Y = C = 50, Z = (A - B) / 2 = 30
     EXPECT_NEAR(result[0], 100, 1e-9);
     EXPECT_NEAR(result[1], 50, 1e-9);
@@ -280,8 +280,8 @@ TEST_F(E4HybridKinematicsTest, HybridCoreXZRoundTrip) {
     kt.setKinematics(Kinematics::HybridCoreXZ);
     for (double x : {0.0, 50.0, -30.0}) {
         for (double z : {0.0, 25.0, -15.0}) {
-            auto stepper = kt.transform(x, 50, z);
-            auto cart = kt.inverseTransform(stepper[0], stepper[1], stepper[2]);
+            auto stepper = kt.forwardActuatorKinematics(x, 50, z);
+            auto cart = kt.inverseActuatorKinematics(stepper[0], stepper[1], stepper[2]);
             EXPECT_NEAR(cart[0], x, 1e-9);
             EXPECT_NEAR(cart[2], z, 1e-9);
         }
@@ -297,7 +297,7 @@ class E4NicheKinematicsTest : public ::testing::Test {};
 TEST_F(E4NicheKinematicsTest, PolarForward) {
     KinematicsTransform kt;
     kt.setKinematics(Kinematics::Polar);
-    auto result = kt.transform(100, 0, 10);
+    auto result = kt.forwardActuatorKinematics(100, 0, 10);
     // radius = 100, angle = 0, z = 10
     EXPECT_NEAR(result[0], 100, 1e-9);
     EXPECT_NEAR(result[1], 0, 1e-9);
@@ -307,7 +307,7 @@ TEST_F(E4NicheKinematicsTest, PolarForward) {
 TEST_F(E4NicheKinematicsTest, PolarForward45deg) {
     KinematicsTransform kt;
     kt.setKinematics(Kinematics::Polar);
-    auto result = kt.transform(10, 10, 5);
+    auto result = kt.forwardActuatorKinematics(10, 10, 5);
     // radius = sqrt(200) ~ 14.14, angle = 45
     EXPECT_NEAR(result[0], std::sqrt(200.0), 1e-9);
     EXPECT_NEAR(result[1], 45.0, 1e-9);
@@ -317,7 +317,7 @@ TEST_F(E4NicheKinematicsTest, PolarForward45deg) {
 TEST_F(E4NicheKinematicsTest, WinchForward) {
     KinematicsTransform kt;
     kt.setKinematics(Kinematics::Winch);
-    auto result = kt.transform(0, 0, 0);
+    auto result = kt.forwardActuatorKinematics(0, 0, 0);
     // All cable lengths should be equal (distance from center to each anchor + height)
     // Anchor at (500, 0), height 300: length = sqrt(500^2 + 300^2) = sqrt(340000)
     double expectedLen = std::sqrt(500.0*500.0 + 300.0*300.0);
@@ -338,7 +338,7 @@ TEST_F(E4NicheKinematicsTest, RotaryDeltaForwardAtCenter) {
     geo.baseHeight = 0.0;
     rdp.setGeometry(geo);
     kt.setRotaryDeltaPrinter(&rdp);
-    auto result = kt.transform(0, 0, -200);
+    auto result = kt.forwardActuatorKinematics(0, 0, -200);
     // At center, all arm angles should be equal
     EXPECT_NEAR(result[0], result[1], 1e-9);
     EXPECT_NEAR(result[1], result[2], 1e-9);

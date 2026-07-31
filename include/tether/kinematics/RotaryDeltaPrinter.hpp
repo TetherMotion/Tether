@@ -51,7 +51,7 @@
 #include <cmath>
 #include <array>
 
-namespace tether::klipper::klippy {
+namespace tether::kinematics {
 
 /// @brief Rotary delta geometry parameters.
 struct RotaryDeltaGeometry {
@@ -91,7 +91,7 @@ public:
     ///
     /// The angle is measured from the horizontal plane: 0 = arm horizontal,
     /// positive = arm pointing upward.
-    std::array<double, 3> cartesianToTower(double x, double y, double z) const {
+    std::array<double, 3> forwardActuatorKinematics(double x, double y, double z) const {
         const double angles[3] = {
             geometry_.towerAngleA * M_PI / 180.0,
             geometry_.towerAngleB * M_PI / 180.0,
@@ -167,7 +167,7 @@ public:
     ///
     /// Computes the upper-arm-end positions, then trilaterates with forearm
     /// length L2 to find the effector center.
-    std::array<double, 3> towerToCartesian(
+    std::array<double, 3> inverseActuatorKinematics(
         double thetaA, double thetaB, double thetaC) const {
         const double angles[3] = {
             geometry_.towerAngleA * M_PI / 180.0,
@@ -272,4 +272,4 @@ private:
     RotaryDeltaEndstopAdjust endstopAdjust_;
 };
 
-} // namespace tether::klipper::klippy
+} // namespace tether::kinematics

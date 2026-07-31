@@ -70,7 +70,7 @@ TEST(KlipperDelta, SetEndstopAdjust) {
 TEST(KlipperDelta, CartesianToTowerAtCenter) {
     DeltaPrinter delta;
     // At center (0, 0, 0), all towers should be at sqrt(armLength^2 - deltaRadius^2)
-    auto towers = delta.cartesianToTower(0, 0, 0);
+    auto towers = delta.forwardActuatorKinematics(0, 0, 0);
     double expected = std::sqrt(250.0 * 250.0 - 125.0 * 125.0);
     EXPECT_NEAR(towers[0], expected, 0.1);
     EXPECT_NEAR(towers[1], expected, 0.1);
@@ -84,7 +84,7 @@ TEST(KlipperDelta, CartesianToTowerWithEndstopAdjust) {
     adj.adjY = 2.0;
     adj.adjZ = 3.0;
     delta.setEndstopAdjust(adj);
-    auto towers = delta.cartesianToTower(0, 0, 0);
+    auto towers = delta.forwardActuatorKinematics(0, 0, 0);
     double baseExpected = std::sqrt(250.0 * 250.0 - 125.0 * 125.0);
     EXPECT_NEAR(towers[0], baseExpected + 1.0, 0.1);
     EXPECT_NEAR(towers[1], baseExpected + 2.0, 0.1);
@@ -95,9 +95,9 @@ TEST(KlipperDelta, TowerToCartesianRoundTrip) {
     DeltaPrinter delta;
     // Forward: Cartesian -> Tower
     double x = 10.0, y = 5.0, z = 50.0;
-    auto towers = delta.cartesianToTower(x, y, z);
+    auto towers = delta.forwardActuatorKinematics(x, y, z);
     // Inverse: Tower -> Cartesian
-    auto cartesian = delta.towerToCartesian(towers[0], towers[1], towers[2]);
+    auto cartesian = delta.inverseActuatorKinematics(towers[0], towers[1], towers[2]);
     EXPECT_NEAR(cartesian[0], x, 0.5);
     EXPECT_NEAR(cartesian[1], y, 0.5);
     EXPECT_NEAR(cartesian[2], z, 0.5);

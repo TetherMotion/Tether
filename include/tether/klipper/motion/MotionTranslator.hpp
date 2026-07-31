@@ -26,8 +26,7 @@
 #include "tether/klipper/clock/McuClock.hpp"
 #include "tether/klipper/motion/MotionBlock.hpp"
 #include "tether/klipper/klippy/KlippyInstanceConfig.hpp"
-#include "tether/klipper/klippy/DeltaPrinter.hpp"
-#include "tether/klipper/klippy/RotaryDeltaPrinter.hpp"
+#include "tether/kinematics/KinematicsTransform.hpp"
 #include "tether/motion_planner/MotionPlan.hpp"
 
 #include <cstdint>
@@ -54,166 +53,11 @@ struct AxisStepSequence {
     std::vector<objects::StepCommand> steps;
 };
 
-/// @brief Kinematics transform: converts Cartesian (X,Y,Z) to stepper positions.
-///
-/// For Cartesian: stepper = cartesian (identity).
-/// For CoreXY: A = X+Y, B = X-Y.
-/// For CoreXZ: A = X+Z, B = X-Z.
-/// For Delta: uses DeltaPrinter::cartesianToTower.
-class KinematicsTransform {
-public:
-    /// @brief Set the kinematics type.
-    void setKinematics(klippy::Kinematics k) { kinematics_ = k; }
-
-    /// @brief Get the kinematics type.
-    klippy::Kinematics kinematics() const { return kinematics_; }
-
-    /// @brief Set the delta printer (for delta kinematics).
-    void setDeltaPrinter(const klippy::DeltaPrinter* dp) { deltaPrinter_ = dp; }
-
-    /// @brief Set the rotary delta printer (for rotary delta kinematics).
-    void setRotaryDeltaPrinter(const klippy::RotaryDeltaPrinter* rdp) {
-        rotaryDeltaPrinter_ = rdp;
-    }
-
-    /// @brief Set winch anchor parameters (for winch kinematics).
-    void setWinchParams(double anchorRadius, double anchorHeight) {
-        winchAnchorRadius_ = anchorRadius;
-        winchAnchorHeight_ = anchorHeight;
-    }
-
-    /// @brief Transform a Cartesian position to stepper-space positions.
-    ///
-    /// @param x, y, z Cartesian position in mm.
-    /// @return Array of 3 stepper positions (A, B, C) in mm.
-    std::array<double, 3> transform(double x, double y, double z) const {
-        switch (kinematics_) {
-            case klippy::Kinematics::CoreXY:
-                // A = X + Y, B = X - Y, C = Z
-                return {x + y, x - y, z};
-            case klippy::Kinematics::CoreXZ:
-                // A = X + Z, B = X - Z, C = Y
-                return {x + z, x - z, y};
-            case klippy::Kinematics::CoreYZ:
-                // A = Y + Z, B = Y - Z, C = X
-                return {y + z, y - z, x};
-            case klippy::Kinematics::HybridCoreXY:
-                // HybridCoreXY: X/Y use CoreXY belts, Z is independent (leadscrew)
-                // A = X + Y, B = X - Y, C = Z
-                return {x + y, x - y, z};
-            case klippy::Kinematics::HybridCoreXZ:
-                // HybridCoreXZ: X/Z use CoreXZ belts, Y is independent
-                // A = X + Z, B = X - Z, C = Y
-                return {x + z, x - z, y};
-            case klippy::Kinematics::Delta:
-                if (deltaPrinter_) {
-                    return deltaPrinter_->cartesianToTower(x, y, z);
-                }
-                return {x, y, z};
-            case klippy::Kinematics::RotaryDelta: {
-                // Rotary delta: three upper arms at 120° spacing.
-                // Stepper positions are shoulder angles (radians).
-                if (rotaryDeltaPrinter_) {
-                    return rotaryDeltaPrinter_->cartesianToTower(x, y, z);
-                }
-                // Fallback: no geometry configured, return identity.
-                return {x, y, z};
-            }
-            case klippy::Kinematics::Polar: {
-                // Polar: A = radius, B = angle (degrees), C = Z
-                double radius = std::sqrt(x*x + y*y);
-                double angle = std::atan2(y, x) * 180.0 / M_PI;
-                return {radius, angle, z};
-            }
-            case klippy::Kinematics::Winch: {
-                // Winch/cable: A/B/C are cable lengths from three anchors.
-                // Anchors at fixed positions (simplified: equilateral triangle).
-                double anchorR = winchAnchorRadius_;
-                double az1 = 0.0, az2 = 2.0*M_PI/3.0, az3 = 4.0*M_PI/3.0;
-                double a1x = anchorR * std::cos(az1), a1y = anchorR * std::sin(az1);
-                double a2x = anchorR * std::cos(az2), a2y = anchorR * std::sin(az2);
-                double a3x = anchorR * std::cos(az3), a3y = anchorR * std::sin(az3);
-                double h = winchAnchorHeight_;
-                double la = std::sqrt((x-a1x)*(x-a1x) + (y-a1y)*(y-a1y) + (z-h)*(z-h));
-                double lb = std::sqrt((x-a2x)*(x-a2x) + (y-a2y)*(y-a2y) + (z-h)*(z-h));
-                double lc = std::sqrt((x-a3x)*(x-a3x) + (y-a3y)*(y-a3y) + (z-h)*(z-h));
-                return {la, lb, lc};
-            }
-            case klippy::Kinematics::Cartesian:
-            case klippy::Kinematics::None:
-            default:
-                return {x, y, z};
-        }
-    }
-
-    /// @brief Transform stepper-space positions back to Cartesian.
-    ///
-    /// @param a, b, c Stepper positions in mm.
-    /// @return Array of 3 Cartesian positions (X, Y, Z) in mm.
-    std::array<double, 3> inverseTransform(double a, double b, double c) const {
-        switch (kinematics_) {
-            case klippy::Kinematics::CoreXY:
-                // X = (A + B) / 2, Y = (A - B) / 2, Z = C
-                return {(a + b) / 2.0, (a - b) / 2.0, c};
-            case klippy::Kinematics::CoreXZ:
-                // X = (A + B) / 2, Y = C, Z = (A - B) / 2
-                return {(a + b) / 2.0, c, (a - b) / 2.0};
-            case klippy::Kinematics::CoreYZ:
-                // X = C, Y = (A + B) / 2, Z = (A - B) / 2
-                return {c, (a + b) / 2.0, (a - b) / 2.0};
-            case klippy::Kinematics::Delta:
-                if (deltaPrinter_) {
-                    return deltaPrinter_->towerToCartesian(a, b, c);
-                }
-                return {a, b, c};
-            case klippy::Kinematics::HybridCoreXY:
-                // X = (A + B) / 2, Y = (A - B) / 2, Z = C
-                return {(a + b) / 2.0, (a - b) / 2.0, c};
-            case klippy::Kinematics::HybridCoreXZ:
-                // X = (A + B) / 2, Y = C, Z = (A - B) / 2
-                return {(a + b) / 2.0, c, (a - b) / 2.0};
-            case klippy::Kinematics::RotaryDelta: {
-                // Inverse rotary delta: from shoulder angles to Cartesian
-                if (rotaryDeltaPrinter_) {
-                    return rotaryDeltaPrinter_->towerToCartesian(a, b, c);
-                }
-                return {a, b, c};
-            }
-            case klippy::Kinematics::Polar: {
-                // Inverse polar: A = radius, B = angle (degrees), C = Z
-                double rad = a * M_PI / 180.0;
-                return {b * std::cos(rad), b * std::sin(rad), c};
-            }
-            case klippy::Kinematics::Winch: {
-                // Inverse winch: trilateration from three cable lengths
-                // Simplified: anchors at equilateral triangle, height h
-                double anchorR = winchAnchorRadius_;
-                double h = winchAnchorHeight_;
-                double a1x = anchorR, a1y = 0.0;
-                double a2x = anchorR * std::cos(2.0*M_PI/3.0);
-                double a2y = anchorR * std::sin(2.0*M_PI/3.0);
-                // Using first two anchors to estimate XY
-                double da = a*a - b*b;
-                double dx = da / (2.0 * (a1x - a2x));
-                double dy = (a*a - dx*dx - (dx - a1x)*(dx - a1x) +
-                            a2x*a2x + a2y*a2y - 2.0*dx*a2x) / (2.0 * a2y);
-                double dz = std::sqrt(std::max(0.0, a*a - (dx-a1x)*(dx-a1x) - (dy-a1y)*(dy-a1y)));
-                return {dx, dy, dz - h};
-            }
-            case klippy::Kinematics::Cartesian:
-            case klippy::Kinematics::None:
-            default:
-                return {a, b, c};
-        }
-    }
-
-private:
-    klippy::Kinematics kinematics_ = klippy::Kinematics::Cartesian;
-    const klippy::DeltaPrinter* deltaPrinter_ = nullptr;
-    const klippy::RotaryDeltaPrinter* rotaryDeltaPrinter_ = nullptr;
-    double winchAnchorRadius_ = 500.0;   ///< Winch anchor radius (mm)
-    double winchAnchorHeight_ = 300.0;   ///< Winch anchor height (mm)
-};
+// KinematicsTransform has been extracted to
+// tether/kinematics/KinematicsTransform.hpp (in the tether_kinematics module).
+// It is included above. A using-alias keeps existing code that referenced
+// `tether::klipper::motion::KinematicsTransform` compiling without changes.
+using KinematicsTransform = ::tether::kinematics::KinematicsTransform;
 
 /**
  * @brief Translate a Tether MotionPlan into Klipper queue_step sequences.
@@ -298,7 +142,7 @@ std::vector<AxisStepSequence> MotionTranslator<Dim, T>::translate(
         double cartY = (Dim > 1) ? static_cast<double>(state.position[1]) : 0.0;
         double cartZ = (Dim > 2) ? static_cast<double>(state.position[2]) : 0.0;
         // Apply kinematics transform to get stepper-space positions
-        auto stepperPos = kinematics_.transform(cartX, cartY, cartZ);
+        auto stepperPos = kinematics_.forwardActuatorKinematics(cartX, cartY, cartZ);
         // Extract velocities for kinematics transform (approximate)
         double velX = (Dim > 0) ? static_cast<double>(state.velocity[0]) : 0.0;
         double velY = (Dim > 1) ? static_cast<double>(state.velocity[1]) : 0.0;
@@ -308,13 +152,13 @@ std::vector<AxisStepSequence> MotionTranslator<Dim, T>::translate(
         // For Cartesian: identity
         std::array<double, 3> stepperVel;
         switch (kinematics_.kinematics()) {
-            case klippy::Kinematics::CoreXY:
+            case ::tether::kinematics::PrinterKinematics::CoreXY:
                 stepperVel = {velX + velY, velX - velY, velZ};
                 break;
-            case klippy::Kinematics::CoreXZ:
+            case ::tether::kinematics::PrinterKinematics::CoreXZ:
                 stepperVel = {velX + velZ, velX - velZ, velY};
                 break;
-            case klippy::Kinematics::CoreYZ:
+            case ::tether::kinematics::PrinterKinematics::CoreYZ:
                 stepperVel = {velY + velZ, velY - velZ, velX};
                 break;
             default:

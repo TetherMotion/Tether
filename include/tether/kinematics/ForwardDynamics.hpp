@@ -34,9 +34,7 @@
 #include <cstring>
 #include "ForwardKinematics.hpp"
 
-namespace Dynamics {
-
-using namespace Kinematics;
+namespace tether::kinematics {
 
 // =============================================================================
 // Physical Constants
@@ -1030,4 +1028,4 @@ private:
     float m_Kd[N];
 };
 
-} // namespace Dynamics
+} // namespace tether::kinematics

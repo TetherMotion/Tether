@@ -80,13 +80,13 @@ max_radius = 200.0
     // At (10, 0, 5): radius=10, angle=0, Z=5
     kmotion::KinematicsTransform kt;
     kt.setKinematics(klippy::Kinematics::Polar);
-    auto result = kt.transform(10.0, 0.0, 5.0);
+    auto result = kt.forwardActuatorKinematics(10.0, 0.0, 5.0);
     EXPECT_NEAR(result[0], 10.0, 1e-6);  // radius
     EXPECT_NEAR(result[1], 0.0, 1e-6);   // angle
     EXPECT_NEAR(result[2], 5.0, 1e-6);   // Z
 
     // At (3, 4, 0): radius=5, angle=atan2(4,3)=53.13°
-    result = kt.transform(3.0, 4.0, 0.0);
+    result = kt.forwardActuatorKinematics(3.0, 4.0, 0.0);
     EXPECT_NEAR(result[0], 5.0, 1e-6);
     EXPECT_NEAR(result[1], 53.1301, 0.01);
     EXPECT_NEAR(result[2], 0.0, 1e-6);
@@ -149,13 +149,13 @@ anchor_height = 250.0
     kt.setWinchParams(400.0, 250.0);
 
     double x = 50.0, y = 30.0, z = -100.0;
-    auto cableLengths = kt.transform(x, y, z);
+    auto cableLengths = kt.forwardActuatorKinematics(x, y, z);
 
     // With different anchor params, cable lengths should differ
     kmotion::KinematicsTransform kt2;
     kt2.setKinematics(klippy::Kinematics::Winch);
     kt2.setWinchParams(800.0, 500.0);
-    auto cableLengths2 = kt2.transform(x, y, z);
+    auto cableLengths2 = kt2.forwardActuatorKinematics(x, y, z);
     EXPECT_NE(cableLengths[0], cableLengths2[0]);
     EXPECT_NE(cableLengths[1], cableLengths2[1]);
     EXPECT_NE(cableLengths[2], cableLengths2[2]);

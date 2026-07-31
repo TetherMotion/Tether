@@ -5,7 +5,7 @@
  */
 
 #include <gtest/gtest.h>
-#include "tether/klipper/klippy/RotaryDeltaPrinter.hpp"
+#include "tether/kinematics/RotaryDeltaPrinter.hpp"
 #include "tether/klipper/motion/MotionTranslator.hpp"
 
 #include <cmath>
@@ -30,7 +30,7 @@ protected:
 
 // At the center (0,0), all three arms should have the same angle.
 TEST_F(RotaryDeltaTest, CenterPositionSymmetric) {
-    auto angles = printer.cartesianToTower(0.0, 0.0, -200.0);
+    auto angles = printer.forwardActuatorKinematics(0.0, 0.0, -200.0);
     // All three angles should be equal (symmetric position).
     EXPECT_NEAR(angles[0], angles[1], 1e-6);
     EXPECT_NEAR(angles[1], angles[2], 1e-6);
@@ -39,8 +39,8 @@ TEST_F(RotaryDeltaTest, CenterPositionSymmetric) {
 // Round-trip: cartesian -> angles -> cartesian should recover the original.
 TEST_F(RotaryDeltaTest, RoundTripCenter) {
     double x = 0.0, y = 0.0, z = -200.0;
-    auto angles = printer.cartesianToTower(x, y, z);
-    auto recovered = printer.towerToCartesian(angles[0], angles[1], angles[2]);
+    auto angles = printer.forwardActuatorKinematics(x, y, z);
+    auto recovered = printer.inverseActuatorKinematics(angles[0], angles[1], angles[2]);
     EXPECT_NEAR(recovered[0], x, 0.1);
     EXPECT_NEAR(recovered[1], y, 0.1);
     EXPECT_NEAR(recovered[2], z, 0.1);
@@ -48,8 +48,8 @@ TEST_F(RotaryDeltaTest, RoundTripCenter) {
 
 TEST_F(RotaryDeltaTest, RoundTripOffset) {
     double x = 30.0, y = 20.0, z = -180.0;
-    auto angles = printer.cartesianToTower(x, y, z);
-    auto recovered = printer.towerToCartesian(angles[0], angles[1], angles[2]);
+    auto angles = printer.forwardActuatorKinematics(x, y, z);
+    auto recovered = printer.inverseActuatorKinematics(angles[0], angles[1], angles[2]);
     EXPECT_NEAR(recovered[0], x, 0.5);
     EXPECT_NEAR(recovered[1], y, 0.5);
     EXPECT_NEAR(recovered[2], z, 0.5);
@@ -57,8 +57,8 @@ TEST_F(RotaryDeltaTest, RoundTripOffset) {
 
 TEST_F(RotaryDeltaTest, RoundTripFarOffset) {
     double x = 50.0, y = -40.0, z = -150.0;
-    auto angles = printer.cartesianToTower(x, y, z);
-    auto recovered = printer.towerToCartesian(angles[0], angles[1], angles[2]);
+    auto angles = printer.forwardActuatorKinematics(x, y, z);
+    auto recovered = printer.inverseActuatorKinematics(angles[0], angles[1], angles[2]);
     EXPECT_NEAR(recovered[0], x, 1.0);
     EXPECT_NEAR(recovered[1], y, 1.0);
     EXPECT_NEAR(recovered[2], z, 1.0);
@@ -66,8 +66,8 @@ TEST_F(RotaryDeltaTest, RoundTripFarOffset) {
 
 // Different Z heights should produce different angles.
 TEST_F(RotaryDeltaTest, DifferentZProducesDifferentAngles) {
-    auto a1 = printer.cartesianToTower(0.0, 0.0, -100.0);
-    auto a2 = printer.cartesianToTower(0.0, 0.0, -300.0);
+    auto a1 = printer.forwardActuatorKinematics(0.0, 0.0, -100.0);
+    auto a2 = printer.forwardActuatorKinematics(0.0, 0.0, -300.0);
     // Lower Z (more negative) should produce different angles than higher Z.
     EXPECT_NE(a1[0], a2[0]);
 }
@@ -78,8 +78,8 @@ TEST_F(RotaryDeltaTest, MotionTranslatorUsesRotaryDelta) {
     kt.setKinematics(klippy::Kinematics::RotaryDelta);
     kt.setRotaryDeltaPrinter(&printer);
 
-    auto stepperPos = kt.transform(10.0, 5.0, -200.0);
-    auto recovered = kt.inverseTransform(stepperPos[0], stepperPos[1], stepperPos[2]);
+    auto stepperPos = kt.forwardActuatorKinematics(10.0, 5.0, -200.0);
+    auto recovered = kt.inverseActuatorKinematics(stepperPos[0], stepperPos[1], stepperPos[2]);
 
     EXPECT_NEAR(recovered[0], 10.0, 0.5);
     EXPECT_NEAR(recovered[1], 5.0, 0.5);
@@ -92,7 +92,7 @@ TEST_F(RotaryDeltaTest, EndstopAdjustmentShiftsAngles) {
     adj.adjA = 0.1; // ~5.7° offset on tower A
     printer.setEndstopAdjust(adj);
 
-    auto angles = printer.cartesianToTower(0.0, 0.0, -200.0);
+    auto angles = printer.forwardActuatorKinematics(0.0, 0.0, -200.0);
     // Tower A angle should differ from B and C by the adjustment.
     EXPECT_NEAR(angles[0] - angles[1], 0.1, 1e-6);
     EXPECT_NEAR(angles[0] - angles[2], 0.1, 1e-6);
@@ -189,8 +189,8 @@ effector_radius = 24.0
     EXPECT_NEAR(rdp.geometry().effectorRadius, 24.0, 1e-9);
 
     // Round-trip through the printer should work
-    auto angles = rdp.cartesianToTower(0.0, 0.0, -200.0);
-    auto recovered = rdp.towerToCartesian(angles[0], angles[1], angles[2]);
+    auto angles = rdp.forwardActuatorKinematics(0.0, 0.0, -200.0);
+    auto recovered = rdp.inverseActuatorKinematics(angles[0], angles[1], angles[2]);
     EXPECT_NEAR(recovered[0], 0.0, 0.5);
     EXPECT_NEAR(recovered[1], 0.0, 0.5);
     EXPECT_NEAR(recovered[2], -200.0, 0.5);

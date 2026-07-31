@@ -45,9 +45,9 @@ class TestDeltaPrinter(unittest.TestCase):
     def test_kinematics_roundtrip(self):
         dp = klipper.DeltaPrinter()
         x, y, z = 50.0, -30.0, 200.0
-        tower = dp.cartesian_to_tower(x, y, z)
+        tower = dp.forward_actuator_kinematics(x, y, z)
         self.assertEqual(len(tower), 3)
-        back = dp.tower_to_cartesian(tower[0], tower[1], tower[2])
+        back = dp.inverse_actuator_kinematics(tower[0], tower[1], tower[2])
         self.assertAlmostEqual(back[0], x, places=2)
         self.assertAlmostEqual(back[1], y, places=2)
         self.assertAlmostEqual(back[2], z, places=2)

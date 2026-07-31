@@ -12,6 +12,7 @@
  */
 
 #include "tether/klipper/klippy/AdvancedObjects.hpp"
+#include "tether/klipper/klippy/KlippyInstanceConfig.hpp"
 
 #include <cstdio>
 #include <cmath>
@@ -33,18 +34,18 @@ int main() {
 
     // 2. Cartesian to tower conversion (forward kinematics)
     double x = 0.0, y = 0.0, z = 100.0;
-    auto towers = delta.cartesianToTower(x, y, z);
+    auto towers = delta.forwardActuatorKinematics(x, y, z);
     std::printf("\nForward: (%.1f, %.1f, %.1f) -> towers A=%.3f B=%.3f C=%.3f\n",
                 x, y, z, towers[0], towers[1], towers[2]);
 
     // Try an off-center position
     x = 30.0; y = 20.0; z = 150.0;
-    towers = delta.cartesianToTower(x, y, z);
+    towers = delta.forwardActuatorKinematics(x, y, z);
     std::printf("Forward: (%.1f, %.1f, %.1f) -> towers A=%.3f B=%.3f C=%.3f\n",
                 x, y, z, towers[0], towers[1], towers[2]);
 
     // 3. Tower to Cartesian (inverse kinematics) — round-trip check
-    auto cart = delta.towerToCartesian(towers[0], towers[1], towers[2]);
+    auto cart = delta.inverseActuatorKinematics(towers[0], towers[1], towers[2]);
     std::printf("Inverse: towers A=%.3f B=%.3f C=%.3f -> (%.4f, %.4f, %.4f)\n",
                 towers[0], towers[1], towers[2], cart[0], cart[1], cart[2]);
     std::printf("Round-trip error: dx=%.6f dy=%.6f dz=%.6f\n",
@@ -65,7 +66,7 @@ int main() {
                 delta.geometry().towerAngleC);
 
     // Recompute towers with new geometry
-    towers = delta.cartesianToTower(0.0, 0.0, 100.0);
+    towers = delta.forwardActuatorKinematics(0.0, 0.0, 100.0);
     std::printf("New forward (0,0,100): A=%.3f B=%.3f C=%.3f\n",
                 towers[0], towers[1], towers[2]);
 
@@ -82,7 +83,7 @@ int main() {
                 delta.endstopAdjust().adjZ);
 
     // Show effect of endstop adjustment on tower positions
-    auto towersAdj = delta.cartesianToTower(0.0, 0.0, 100.0);
+    auto towersAdj = delta.forwardActuatorKinematics(0.0, 0.0, 100.0);
     std::printf("With adjustment (0,0,100): A=%.3f B=%.3f C=%.3f\n",
                 towersAdj[0], towersAdj[1], towersAdj[2]);
 
