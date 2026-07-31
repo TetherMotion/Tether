@@ -64,3 +64,40 @@
 #include "tether/ethercat/SDOManager.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 #endif
+
+// Klipper protocol
+#ifdef TETHER_ENABLE_KLIPPER
+#include "tether/klipper/protocol/Crc16.hpp"
+#include "tether/klipper/protocol/Vlq.hpp"
+#include "tether/klipper/protocol/MessageBlock.hpp"
+#include "tether/klipper/protocol/Constants.hpp"
+#include "tether/klipper/protocol/ParameterFormat.hpp"
+#include "tether/klipper/protocol/DataDictionary.hpp"
+#include "tether/klipper/protocol/IdentifyProtocol.hpp"
+#include "tether/klipper/protocol/CommandTable.hpp"
+#include "tether/klipper/transport/IByteStreamTransport.hpp"
+#include "tether/klipper/transport/LoopbackTransport.hpp"
+#include "tether/klipper/transport/PipeTransport.hpp"
+#include "tether/klipper/transport/TcpStreamTransport.hpp"
+#ifdef TETHER_ENABLE_KLIPPER_CAN
+#include "tether/klipper/transport/CanTransport.hpp"
+#include "tether/hal/ICan.hpp"
+#endif
+#include "tether/klipper/reliability/SequenceCounter.hpp"
+#include "tether/klipper/reliability/RtoEstimator.hpp"
+#include "tether/klipper/reliability/SerialQueue.hpp"
+#include "tether/klipper/reliability/AckMessage.hpp"
+#include "tether/klipper/clock/McuClock.hpp"
+#include "tether/klipper/clock/ClockSync.hpp"
+#include "tether/klipper/objects/OidAllocator.hpp"
+#include "tether/klipper/objects/Stepper.hpp"
+#include "tether/klipper/objects/Peripherals.hpp"
+#include "tether/klipper/motion/MotionBlock.hpp"
+#include "tether/klipper/motion/MotionTranslator.hpp"
+#include "tether/klipper/motion/MotionReconstructor.hpp"
+#include "tether/klipper/motion/MotionBlockSink.hpp"
+#include "tether/klipper/klippy/KlippyHost.hpp"
+#include "tether/klipper/device/KlipperDevice.hpp"
+#include "tether/klipper/config/KlipperConfig.hpp"
+#include "tether/klipper/config/StandardCommands.hpp"
+#endif

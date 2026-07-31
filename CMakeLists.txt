@@ -106,6 +106,25 @@ elseif(NOT EXISTS "${ATOMIC_QUEUE_PATH}/include/atomic_queue/atomic_queue.h")
 endif()
 include_directories("${ATOMIC_QUEUE_PATH}/include")
 
+# glaze (header-only JSON/BEVE/etc. serialization library, used by tether_klipper)
+set(GLAZE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/glaze")
+if(NOT EXISTS "${GLAZE_PATH}")
+    message(FATAL_ERROR
+        "Git submodule 'glaze' is not initialized.\n"
+        "Please run the following command in the repository root:\n"
+        "  git submodule update --init\n"
+        "Then re-run CMake."
+    )
+elseif(NOT EXISTS "${GLAZE_PATH}/include/glaze/glaze.hpp")
+    message(FATAL_ERROR
+        "Git submodule 'glaze' appears to be initialized but is empty or incomplete.\n"
+        "Please run the following command in the repository root:\n"
+        "  git submodule update --init\n"
+        "Then re-run CMake."
+    )
+endif()
+include_directories("${GLAZE_PATH}/include")
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
@@ -182,6 +201,8 @@ option(TETHER_BUILD_ETHERCAT_SLAVE "Build EtherCAT slave emulation" ON)
 option(TETHER_BUILD_SIMULATION "Build simulation systems" ON)
 option(TETHER_BUILD_DESTABILIZER "Build destabilizer adversarial testing" ON)
 option(TETHER_BUILD_IO_PROTOCOL "Build IO protocol (SLIP-based parameter streaming)" ON)
+option(TETHER_BUILD_KLIPPER "Build Klipper protocol implementation" ON)
+option(TETHER_ENABLE_KLIPPER_CAN "Enable Klipper CAN transport (requires SocketCAN)" OFF)
 option(TETHER_BUILD_TESTS "Build tests" ON)
 option(TETHER_BUILD_EXAMPLES "Build examples" ON)
 option(TETHER_BUILD_BENCHMARKS "Build benchmarks" OFF)
@@ -224,13 +245,14 @@ if(DEFINED TETHER_COMPONENTS)
     set(_tether_component_deps_simulation      "common")
     set(_tether_component_deps_io_protocol     "common")
     set(_tether_component_deps_destabilizer    "simulation;common")
+    set(_tether_component_deps_klipper         "motion_planner;gcode;export;common")
 
     # All valid component names
     set(_tether_all_components
         common hal pcap controls autotuning gcode export motion_planner
         motion_control identification ethercat_common ethercat_master
         cia_profiles drives fsoe ethercat_slave simulation destabilizer
-        io_protocol)
+        io_protocol klipper)
 
     # Resolve transitive closure of requested components
     set(_tether_enabled ${TETHER_COMPONENTS})
@@ -400,6 +422,11 @@ if(TETHER_BUILD_ETHERCAT_MASTER)
     add_compile_definitions(TETHER_ENABLE_ETHERCAT=1)
 endif()
 
+# If we are building the Klipper component, enable the feature macro.
+if(TETHER_BUILD_KLIPPER)
+    add_compile_definitions(TETHER_ENABLE_KLIPPER=1)
+endif()
+
 # Propagate blend runtime checks option to all targets
 if(TETHER_BLEND_RUNTIME_CHECKS)
     add_compile_definitions(TETHER_BLEND_RUNTIME_CHECKS=1)
@@ -464,6 +491,11 @@ endif()
 # IO Protocol (SLIP-based parameter/signal streaming)
 if(TETHER_BUILD_IO_PROTOCOL)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/io_protocol.cmake)
+endif()
+
+# Klipper protocol implementation (clean-slate, Tether motion kernel)
+if(TETHER_BUILD_KLIPPER)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/klipper.cmake)
 endif()
 
 # =============================================================================

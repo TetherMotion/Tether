@@ -132,3 +132,58 @@ tether_common (root)
 ```
 
 When a lower-level component changes, build it first, then build its direct dependents selectively.
+
+## Klipper Protocol Component (tether_klipper)
+
+The `tether_klipper` component is a clean-slate Klipper protocol implementation
+that uses Tether's motion subsystem for all trajectory generation.
+
+### Build commands
+
+```bash
+# Build klipper library only (with dependencies)
+cmake -S . -B build -DTETHER_COMPONENTS=klipper
+cmake --build build --target tether_klipper_shared -j$(nproc)
+
+# Build with tests
+cmake -S . -B build -DTETHER_BUILD_KLIPPER=ON -DTETHER_BUILD_TESTS=ON \
+  -DTETHER_BUILD_HAL=OFF -DTETHER_BUILD_CONTROLS=OFF \
+  -DTETHER_BUILD_ETHERCAT_COMMON=OFF -DTETHER_BUILD_ETHERCAT_MASTER=OFF \
+  -DTETHER_BUILD_CIA_PROFILES=OFF -DTETHER_BUILD_DRIVES=OFF \
+  -DTETHER_BUILD_FSOE=OFF -DTETHER_BUILD_ETHERCAT_SLAVE=OFF \
+  -DTETHER_BUILD_SIMULATION=OFF -DTETHER_BUILD_DESTABILIZER=OFF \
+  -DTETHER_BUILD_IO_PROTOCOL=OFF -DTETHER_BUILD_PCAP=OFF \
+  -DTETHER_BUILD_AUTOTUNING=OFF -DTETHER_BUILD_MOTION_CONTROL=OFF \
+  -DTETHER_BUILD_IDENTIFICATION=OFF -DTETHER_BUILD_PYTHON_BINDINGS=OFF
+cmake --build build --target tether_klipper_tests -j$(nproc)
+
+# Run tests
+./build/bin/tests/tether_klipper_tests
+
+# Build examples
+cmake -S . -B build -DTETHER_BUILD_KLIPPER=ON -DTETHER_BUILD_EXAMPLES=ON
+cmake --build build --target klipper_loopback_demo klipper_motion_blocks \
+  klipper_clock_sync klipper_gpio_pwm -j$(nproc)
+```
+
+### Component dependency
+
+```
+tether_klipper
+  └─ depends on: tether_motion_planner, tether_gcode, tether_export, tether_common
+  └─ optional CAN transport: tether_hal (when TETHER_ENABLE_KLIPPER_CAN=ON)
+```
+
+### Key directories
+
+- `include/tether/klipper/protocol/` — Wire protocol (CRC, VLQ, blocks, dict)
+- `include/tether/klipper/transport/` — Transport interfaces (loopback, pipe, TCP, CAN)
+- `include/tether/klipper/reliability/` — Serial queue, RTO estimator
+- `include/tether/klipper/clock/` — MCU clock, clock sync
+- `include/tether/klipper/objects/` — Peripheral objects (stepper, GPIO, PWM, etc.)
+- `include/tether/klipper/motion/` — Motion translator, reconstructor, block sink
+- `include/tether/klipper/klippy/` — Host-side orchestrator
+- `include/tether/klipper/device/` — Device-side handler
+- `include/tether/klipper/config/` — Code-as-config builder + standard commands
+- `src/klipper/` — Implementation sources
+- `tests/klipper/` — Test sources
