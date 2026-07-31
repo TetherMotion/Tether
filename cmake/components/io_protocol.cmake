@@ -67,6 +67,7 @@ list(APPEND TETHER_IO_PROTOCOL_SOURCES
 if(NOT ESP_PLATFORM)
     list(APPEND TETHER_IO_PROTOCOL_SOURCES
         ${TETHER_ROOT}/src/io/SerialTransport.cpp
+        ${TETHER_ROOT}/src/io/SpiDriver.cpp
     )
 endif()
 

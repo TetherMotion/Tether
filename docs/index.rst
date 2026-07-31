@@ -20,6 +20,11 @@ Welcome to the Tether library documentation. Tether is a modular C++ library for
    motion/Architecture
    motion/AlgorithmComparison
    motion/ImplementationGuide
+   KlipperProtocol
+   KlipperTerminology
+   KlipperGcodeCommands
+   KlipperMoonrakerApi
+   KlipperPrinterObjects
    GLOBAL_STATE
 
 Overview

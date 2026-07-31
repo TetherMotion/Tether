@@ -126,12 +126,20 @@ pybind11_add_module(_fsoe MODULE
 )
 target_compile_definitions(_fsoe PRIVATE VERSION_INFO="${PROJECT_VERSION}")
 
+# Module: _klipper
+pybind11_add_module(_klipper MODULE
+    bindings/klipper_bindings.cpp
+)
+target_include_directories(_klipper PRIVATE ${TETHER_COMMON_INCLUDES})
+target_link_libraries(_klipper PRIVATE tether_klipper_shared)
+target_compile_definitions(_klipper PRIVATE VERSION_INFO="${PROJECT_VERSION}")
+
 # Set RPATH so Python modules find shared libraries at runtime without LD_LIBRARY_PATH
 if(UNIX AND NOT APPLE)
     set_target_properties(
         _gcode _export _motion_planner _motion_control _controls
         _ethercat_common _ethercat_master _ethercat_slave
-        _cia402 _cia401 _fsoe
+        _cia402 _cia401 _fsoe _klipper
         PROPERTIES INSTALL_RPATH "$ORIGIN/../lib"
     )
 endif()
@@ -142,7 +150,7 @@ endif()
 install(TARGETS 
     _gcode _export _motion_planner _motion_control _controls
     _ethercat_common _ethercat_master _ethercat_slave 
-    _cia402 _cia401 _fsoe
+    _cia402 _cia401 _fsoe _klipper
     LIBRARY DESTINATION tether
 )
 

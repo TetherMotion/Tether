@@ -215,3 +215,46 @@ add_tether_example(ph_benchmark
     LIBRARIES tether_motion_planner tether_motion_geometry tether_common tether_gcode)
 
 message(STATUS "Examples configured")
+
+# --- Klipper protocol examples ---
+if(TETHER_BUILD_KLIPPER)
+    add_tether_example(klipper_loopback_demo
+        SOURCE klipper_loopback_demo.cpp
+        LIBRARIES tether_klipper_shared tether_common_shared tether_motion_planner_shared tether_gcode_shared tether_export_shared)
+    add_tether_example(klipper_motion_blocks
+        SOURCE klipper_motion_blocks.cpp
+        LIBRARIES tether_klipper_shared tether_common_shared)
+    add_tether_example(klipper_clock_sync
+        SOURCE klipper_clock_sync.cpp
+        LIBRARIES tether_klipper_shared tether_common_shared)
+    add_tether_example(klipper_gpio_pwm
+        SOURCE klipper_gpio_pwm.cpp
+        LIBRARIES tether_klipper_shared tether_common_shared)
+    add_tether_example(klipper_klippy_instance
+        SOURCE klipper_klippy_instance.cpp
+        LIBRARIES tether_klipper_shared tether_common_shared)
+    add_tether_example(klipper_delta_kinematics
+        SOURCE klipper_delta_kinematics.cpp
+        LIBRARIES tether_klipper_shared tether_common_shared)
+    add_tether_example(klipper_thermal_control
+        SOURCE klipper_thermal_control.cpp
+        LIBRARIES tether_klipper_shared tether_common_shared)
+    add_tether_example(klipper_multi_mcu
+        SOURCE klipper_multi_mcu.cpp
+        LIBRARIES tether_klipper_shared tether_common_shared)
+    add_tether_example(klipper_gcode_commands
+        SOURCE klipper_gcode_commands.cpp
+        LIBRARIES tether_klipper_shared tether_common_shared)
+    add_tether_example(klipper_bed_leveling
+        SOURCE klipper_bed_leveling.cpp
+        LIBRARIES tether_klipper_shared tether_common_shared)
+    add_tether_example(klipper_moonraker_api
+        SOURCE klipper_moonraker_api.cpp
+        LIBRARIES tether_klipper_shared tether_common_shared)
+    add_tether_example(klipper_printer_objects
+        SOURCE klipper_printer_objects.cpp
+        LIBRARIES tether_klipper_shared tether_common_shared)
+    add_tether_example(klipper_config_macros
+        SOURCE klipper_config_macros.cpp
+        LIBRARIES tether_klipper_shared tether_common_shared)
+endif()

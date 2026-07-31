@@ -10,3 +10,6 @@
 [submodule "dependencies/atomic_queue"]
 	path = dependencies/atomic_queue
 	url = https://github.com/max0x7ba/atomic_queue.git
+[submodule "dependencies/glaze"]
+	path = dependencies/glaze
+	url = https://github.com/stephenberry/glaze.git

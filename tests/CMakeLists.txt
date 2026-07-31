@@ -1023,6 +1023,21 @@ target_compile_definitions(tether_simulation_identification_tests PRIVATE
 
 gtest_discover_tests(tether_simulation_identification_tests PROPERTIES TIMEOUT 30)
 
+# =============================================================================
+# Klipper protocol tests
+# =============================================================================
+if(TETHER_BUILD_KLIPPER)
+    file(GLOB KLIPPER_TEST_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/klipper/*.cpp"
+    )
+    create_module_test_timeout(klipper
+        "${KLIPPER_TEST_SOURCES}"
+        "tether_klipper_shared;tether_common_shared;tether_motion_planner_shared;tether_gcode_shared;tether_export_shared;tether_controls;tether_simulation;tether_io_protocol_shared"
+        "TETHER_ENABLE_KLIPPER=1"
+        120
+    )
+endif()
+
 if(TETHER_ENABLE_COVERAGE)
     find_program(GCOVR_EXECUTABLE NAMES gcovr)
     if(GCOVR_EXECUTABLE)

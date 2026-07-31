@@ -1,0 +1,400 @@
+#pragma once
+
+/// @file KlippyInstanceConfig.hpp
+/// @brief Configuration structures for KlippyInstance.
+
+#include "tether/klipper/klippy/DeltaPrinter.hpp"
+#include "tether/klipper/klippy/RotaryDeltaPrinter.hpp"
+#include "tether/klipper/klippy/SkewCorrection.hpp"
+#include "tether/klipper/klippy/UdsTypes.hpp"
+
+#include <map>
+#include <string>
+#include <vector>
+
+namespace tether::klipper::klippy {
+
+
+/// @brief Kinematics type for the printer.
+enum class Kinematics {
+    Cartesian,  ///< Standard Cartesian (X, Y, Z independent)
+    CoreXY,     ///< CoreXY (X=A+B, Y=A-B)
+    CoreXZ,     ///< CoreXZ (X=A+B, Z=A-B)
+    CoreYZ,     ///< CoreYZ (Y=A+B, Z=A-B)
+    HybridCoreXY, ///< Hybrid CoreXY (X is independent, Y uses CoreXY)
+    HybridCoreXZ, ///< Hybrid CoreXZ (X is independent, Z uses CoreXZ)
+    Delta,      ///< Linear Delta (3 towers)
+    RotaryDelta, ///< Rotary Delta
+    Polar,      ///< Polar (R, Theta, Z)
+    Winch,      ///< Cable/winch kinematics
+    None,       ///< No kinematics (manual)
+};
+
+/// @brief Convert kinematics string to enum.
+inline Kinematics kinematicsFromString(const std::string& s) {
+    if (s == "cartesian") return Kinematics::Cartesian;
+    if (s == "corexy") return Kinematics::CoreXY;
+    if (s == "corexz") return Kinematics::CoreXZ;
+    if (s == "coreyz") return Kinematics::CoreYZ;
+    if (s == "hybrid_corexy") return Kinematics::HybridCoreXY;
+    if (s == "hybrid_corexz") return Kinematics::HybridCoreXZ;
+    if (s == "delta") return Kinematics::Delta;
+    if (s == "rotary_delta") return Kinematics::RotaryDelta;
+    if (s == "polar") return Kinematics::Polar;
+    if (s == "winch") return Kinematics::Winch;
+    if (s == "none") return Kinematics::None;
+    return Kinematics::Cartesian;
+}
+
+/// @brief Convert kinematics enum to string.
+inline std::string kinematicsToString(Kinematics k) {
+    switch (k) {
+        case Kinematics::Cartesian:    return "cartesian";
+        case Kinematics::CoreXY:       return "corexy";
+        case Kinematics::CoreXZ:       return "corexz";
+        case Kinematics::CoreYZ:       return "coreyz";
+        case Kinematics::HybridCoreXY: return "hybrid_corexy";
+        case Kinematics::HybridCoreXZ: return "hybrid_corexz";
+        case Kinematics::Delta:        return "delta";
+        case Kinematics::RotaryDelta:  return "rotary_delta";
+        case Kinematics::Polar:        return "polar";
+        case Kinematics::Winch:        return "winch";
+        case Kinematics::None:         return "none";
+    }
+    return "cartesian";
+}
+
+
+/// @brief Persistent printer settings (M500-M503).
+struct KlippySettings {
+    // Printer kinematics and motion limits
+    Kinematics kinematics = Kinematics::Cartesian;
+    double maxVelocity = 3000.0;       ///< Max velocity (mm/s)
+    double maxAccel = 3000.0;          ///< Max acceleration (mm/s^2)
+    double maxAccelToDecel = 1500.0;   ///< Max accel-to-decel (mm/s^2)
+    double squareCornerVelocity = 5.0; ///< Square corner velocity (mm/s)
+    double maxZVelocity = 200.0;       ///< Max Z velocity (mm/s)
+    double maxZAccel = 100.0;          ///< Max Z acceleration (mm/s^2)
+    // Motion
+    std::map<std::string, double> stepsPerMm = {
+        {"x", 80.0}, {"y", 80.0}, {"z", 400.0}, {"e", 500.0}
+    };
+    std::map<std::string, double> maxFeedrate = {
+        {"x", 500.0}, {"y", 500.0}, {"z", 10.0}, {"e", 25.0}
+    };
+    std::map<std::string, int> microstepping = {
+        {"x", 16}, {"y", 16}, {"z", 16}, {"e", 16}
+    };
+    std::map<std::string, double> stepperCurrent = {
+        {"x", 800.0}, {"y", 800.0}, {"z", 600.0}, {"e", 600.0}
+    };
+    std::map<std::string, int> stepperDirection = {
+        {"x", 0}, {"y", 0}, {"z", 0}, {"e", 0}
+    };
+    double acceleration = 3000.0;
+    double travelAcceleration = 3000.0;
+    double jerk = 20.0;
+    double startAccel = 1000.0;
+
+    // Offsets
+    std::map<std::string, double> homeOffset = {
+        {"x", 0.0}, {"y", 0.0}, {"z", 0.0}
+    };
+    std::map<std::string, double> toolOffset[8]; // per-tool offsets
+    double probeOffset = 0.0;
+
+    // Backlash
+    std::map<std::string, double> backlash = {
+        {"x", 0.0}, {"y", 0.0}, {"z", 0.0}
+    };
+
+    // Filament
+    double filamentDiameter = 1.75;
+
+    // Retract
+    double retractLength = 0.0;
+    double retractSpeed = 0.0;
+    double retractZLift = 0.0;
+    double unretractLength = 0.0;
+    double unretractSpeed = 0.0;
+
+    // PID
+    double hotendKp = 0.0, hotendKi = 0.0, hotendKd = 0.0;
+    double bedKp = 0.0, bedKi = 0.0, bedKd = 0.0;
+
+    // Autotuning configuration (delegated to Tether autotuning framework)
+    std::string pidAutotuneMethod = "relay_feedback";  ///< Method name (see AutotuneMethod enum)
+    std::string pidAutotuneForm = "pid";               ///< Controller form: "pi", "pid", "pid_filtered"
+    double pidAutotuneLambda = -1.0;                   ///< Lambda for IMC/SIMC (-1 = auto)
+
+    // Bed mesh
+    bool bedMeshEnabled = false;
+    std::string bedMeshMin;
+    std::string bedMeshMax;
+    std::string bedMeshProbeCount = "3,3";
+    double bedMeshSpeed = 50.0;
+    double bedMeshFadeStart = 1.0;
+    double bedMeshFadeEnd = 10.0;
+    double bedMeshFadeTarget = 0.0;
+    std::string bedMeshAlgorithm = "lagrange";
+
+    // Extruder
+    double nozzleDiameter = 0.4;
+    double extruderPressureAdvance = 0.0;
+    double extruderSmoothTime = 0.040;
+
+    // Heater bed
+    double bedMinTemp = 0.0;
+    double bedMaxTemp = 300.0;
+
+    // Fan
+    double fanMaxPower = 1.0;
+    double fanCycleTime = 0.010;
+    double fanKickStartTime = 0.100;
+    double fanOffBelow = 0.0;
+
+    // Probe
+    double probeXOffset = 0.0;
+    double probeYOffset = 0.0;
+    double probeSpeed = 5.0;
+    int probeSampleCount = 3;
+    std::string probeSamplesResult = "average";
+
+    // MCU
+    std::string mcuSerial;
+    int mcuBaud = 250000;
+    std::string mcuRestartMethod = "command";
+    std::map<std::string, std::string> secondaryMcuSerials;
+
+    // Virtual SD card
+    std::string virtualSdcardOnErrorGcode;
+
+    // Safe Z home
+    std::string safeZHomeXYPosition = "0,0";
+    double safeZHomeZHop = 0.0;
+    double safeZHomeZHopSpeed = 0.0;
+    double safeZHomeXYHomeSpeed = 0.0;
+    bool safeZHomeMoveToPrevious = false;
+
+    // Idle timeout
+    double idleTimeout = 600.0;
+    std::string idleTimeoutGcode = "TURN_OFF_HEATERS";
+
+    // Pause/resume
+    bool pauseResumeEnabled = false;
+    bool pauseResumeRecoverFromSubtract = false;
+
+    // Display status
+    bool displayStatusEnabled = false;
+
+    // Output pins
+    struct OutputPinConfig {
+        std::string pin;
+        double value = 0.0;
+        bool pwm = false;
+        double cycleTime = 0.100;
+        double scale = 1.0;
+    };
+    std::map<std::string, OutputPinConfig> outputPins;
+
+    // Servos
+    struct ServoConfig {
+        std::string pin;
+        double minPulseWidth = 0.001;
+        double maxPulseWidth = 0.002;
+        double minAngle = 0.0;
+        double maxAngle = 180.0;
+        double initialAngle = 0.0;
+    };
+    std::map<std::string, ServoConfig> servos;
+
+    // Temperature sensors
+    struct TemperatureSensorConfig {
+        std::string sensorType = "NTC 100K";
+        std::string sensorPin;
+        double minTemp = 0.0;
+        double maxTemp = 100.0;
+    };
+    std::map<std::string, TemperatureSensorConfig> temperatureSensors;
+
+    // [thermistor <name>] definitions — reusable thermistor parameter sets
+    // referenced by [temperature_sensor] via sensor_type.
+    struct ThermistorConfig {
+        double pullupResistor = 4700.0;
+        double referenceVoltage = 3.3;
+        double adcMax = 4095.0;
+        double resistanceAt25C = 100000.0;
+        double beta = 3950.0;
+        /// Multi-point calibration table (temperature, resistance pairs).
+        /// When non-empty, used instead of beta model.
+        std::vector<std::pair<double, double>> calibrationTable;
+    };
+    std::map<std::string, ThermistorConfig> thermistors;
+
+    // [thermocouple <name>] definitions — reusable thermocouple parameter sets
+    struct ThermocoupleConfig {
+        std::string type = "K"; // K, J, T, E, N, R, S, B
+        std::string spiBus;
+        std::string csPin;
+    };
+    std::map<std::string, ThermocoupleConfig> thermocouples;
+
+    // [rtd <name>] definitions — reusable RTD parameter sets
+    struct RtdConfig {
+        double nominalResistance = 100.0;   ///< 100 for PT100, 1000 for PT1000
+        double alpha = 0.003851;            ///< Temperature coefficient (PT385)
+        double referenceResistor = 430.0;   ///< Reference resistor (ohms)
+        double adcMax = 4095.0;
+        double referenceVoltage = 3.3;
+    };
+    std::map<std::string, RtdConfig> rtds;
+
+    // Temperature fans
+    struct TemperatureFanConfig {
+        std::string pin;
+        std::string sensorType = "NTC 100K";
+        std::string sensorPin;
+        double maxPower = 1.0;
+        double targetTemp = 0.0;
+        double minTemp = 0.0;
+        double maxTemp = 100.0;
+    };
+    std::map<std::string, TemperatureFanConfig> temperatureFans;
+
+    // Heater fans
+    struct HeaterFanConfig {
+        std::string pin;
+        double maxPower = 1.0;
+        std::string heater = "extruder";
+        double heaterTemp = 50.0;
+    };
+    std::map<std::string, HeaterFanConfig> heaterFans;
+
+    // Controller fans
+    struct ControllerFanConfig {
+        std::string pin;
+        double maxPower = 1.0;
+        double idleSpeed = 0.0;
+        double idleTimeout = 30.0;
+    };
+    std::map<std::string, ControllerFanConfig> controllerFans;
+
+    // TMC drivers
+    struct TmcSectionConfig {
+        std::string driverType;  ///< tmc2209, tmc2208, tmc5160, tmc2130, tmc2660, tmc2240
+        std::string stepper;
+        std::string uartPin;
+        std::string spiBus;
+        std::string csPin;
+        double runCurrent = 0.0;
+        double holdCurrent = 0.0;
+        double stealthchopThreshold = 0.0;
+        bool interpolate = false;
+        int uartAddress = 0;
+        // Advanced TMC features
+        bool stealthchop = false;           ///< Enable StealthChop mode
+        double spreadCycleThreshold = 0.0;  ///< Speed threshold for SpreadCycle (mm/s)
+        int chopperTiming = 0;             ///< Chopper timing parameter (0=auto)
+        double coolstepThreshold = 0.0;     ///< CoolStep threshold speed (mm/s)
+        bool stallguard = false;            ///< Enable StallGuard
+        double stallguardThreshold = 0.0;   ///< StallGuard threshold
+        int microsteps = 0;                 ///< Microstep resolution (0=use stepper default)
+        bool multiHoming = false;           ///< Use multi-mcu homing
+        double homeCurrent = 0.0;           ///< Run current during homing (A, 0=use run_current)
+    };
+    std::map<std::string, TmcSectionConfig> tmcDrivers;
+
+    // ADXL345 accelerometer
+    bool adxl345Configured = false;
+    std::string adxl345SpiBus;
+    std::string adxl345CsPin;
+    int adxl345Rate = 3200;
+    std::string adxl345AxesMap = "xyz";
+
+    // TSL1401CL filament width sensor
+    struct Tsl1401clConfig {
+        bool configured = false;
+        std::string sensorPin;
+        double nominalWidth = 1.75;
+        double tolerance = 0.1;
+        double minWidth = 1.5;
+        double maxWidth = 2.0;
+        int pixelCount = 128;
+        double pixelSpacing = 0.1;
+    };
+    Tsl1401clConfig tsl1401clConfig;
+
+    // Input shaper
+    double inputShaperFreqX = 0.0;
+    double inputShaperFreqY = 0.0;
+    std::string inputShaperTypeX = "ei";
+    std::string inputShaperTypeY = "ei";
+    double inputShaperDampingX = 0.1;
+    double inputShaperDampingY = 0.1;
+
+    // Z tilt
+    bool zTiltEnabled = false;
+    std::string zTiltPositions;
+    int zTiltRetries = 0;
+    double zTiltRetryTolerance = 0.0;
+    std::vector<double> zTiltAdjustments; ///< Computed Z tilt adjustments per stepper
+
+    // Quad gantry level
+    bool qglEnabled = false;
+    std::string qglPositions;
+    int qglRetries = 0;
+
+    // Bed screws
+    bool bedScrewsEnabled = false;
+    std::string bedScrewsList;
+    double bedScrewsProbeSpeed = 0.0;
+
+    // Screws tilt adjust
+    bool screwsTiltEnabled = false;
+    std::string screwsTiltList;
+    std::string screwsTiltThread = "CW-M3";
+    double screwsTiltHorizontalZ = 0.0;
+
+    // Delta printer
+    DeltaGeometry deltaGeometry;
+    DeltaEndstopAdjust deltaEndstopAdjust;
+
+    // Rotary delta printer
+    RotaryDeltaGeometry rotaryDeltaGeometry;
+    RotaryDeltaEndstopAdjust rotaryDeltaEndstopAdjust;
+
+    // Polar printer
+    struct PolarConfig {
+        double maxRadius = 200.0;       ///< Maximum radius (mm)
+        double maxAngle = 360.0;        ///< Maximum angle (degrees, 0=continuous)
+        bool continuousRotation = false; ///< If true, angle is continuous
+    };
+    PolarConfig polarConfig;
+
+    // Winch printer
+    struct WinchConfig {
+        double anchorRadius = 500.0;    ///< Distance from center to each anchor (mm)
+        double anchorHeight = 300.0;    ///< Height of anchors above bed (mm)
+        int anchorCount = 3;            ///< Number of anchors (typically 3)
+    };
+    WinchConfig winchConfig;
+
+    // Skew correction
+    SkewParams skewParams;
+
+    // Case light
+    bool caseLightOn = false;
+    double caseLightBrightness = 1.0;
+};
+
+/// @brief Configuration for a KlippyInstance.
+struct KlippyInstanceConfig {
+    UdsServerConfig udsConfig;
+    std::string sdcardDir = "/tmp/tether_sdcard";
+    std::string settingsPath = "/tmp/tether_klippy_settings.cfg";
+    std::string configPath = "/etc/tether/printer.cfg";
+    double minExtrudeTemp = 170.0;
+    std::string firmwareVersion = "tether-klipper-1.0.0";
+};
+
+} // namespace tether::klipper::klippy
