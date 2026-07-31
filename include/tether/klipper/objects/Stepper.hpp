@@ -69,6 +69,13 @@ public:
         nextStepClock_ = 0;
     }
 
+    /// @brief Execute a single step in the given direction (real-time path).
+    /// Advances the position counter by +1 or -1. Used by the StepScheduler
+    /// to fire individual steps without going through the queue.
+    void step(int8_t dir) {
+        position_ += (dir < 0) ? -1 : 1;
+    }
+
     /**
      * @brief Enqueue a step sequence.
      * @param cmd Step command (interval, count, add).

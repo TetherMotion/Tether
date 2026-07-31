@@ -87,6 +87,7 @@ public:
     }
 
     void setPosition(const std::array<double, 4>& pos) { position_ = pos; }
+    std::array<double, 4> position() const { return position_; }
     void setStatus(const std::string& s) { status_ = s; }
     void setHomedAxes(const std::string& axes) { homedAxes_ = axes; }
     void setExtruder(const std::string& e) { extruder_ = e; }

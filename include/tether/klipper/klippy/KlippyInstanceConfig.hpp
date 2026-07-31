@@ -8,8 +8,13 @@
 #include "tether/kinematics/RotaryDeltaPrinter.hpp"
 #include "tether/klipper/klippy/SkewCorrection.hpp"
 #include "tether/klipper/klippy/UdsTypes.hpp"
+#include "tether/klipper/transport/IByteStreamTransport.hpp"
+#include "tether/klipper/protocol/DataDictionary.hpp"
 
+#include <array>
+#include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -359,6 +364,40 @@ struct KlippySettings {
     double caseLightBrightness = 1.0;
 };
 
+/// @brief Configuration for the optional motion backend.
+///
+/// When provided, KlippyInstance creates a KlippyHost (+ optional in-process
+/// KlipperDevice) and routes G-code moves through the real Klipper wire
+/// protocol (MotionPlan → MotionTranslator → queue_step) instead of just
+/// updating the printer object model.
+struct MotionBackendConfig {
+    /// Host-side transport (required). Connects to the device.
+    std::shared_ptr<transport::IByteStreamTransport> hostTransport;
+    /// Device-side transport (optional). If provided, an in-process
+    /// KlipperDevice is created and pumped automatically during
+    /// connect/sync/move. If null, the user is responsible for pumping
+    /// the device side externally.
+    std::shared_ptr<transport::IByteStreamTransport> deviceTransport;
+    /// Pre-built data dictionary. If empty (no messages), it is built
+    /// from withStandardCommands() at construction time.
+    protocol::DataDictionary dict;
+    /// MCU clock frequency in Hz.
+    uint32_t clockFreqHz = 180000000;
+    /// Per-axis steps per millimeter (X, Y, Z, E).
+    std::array<double, 4> stepsPerMm = {80.0, 80.0, 400.0, 500.0};
+    /// Per-axis direction invert (true = reverse direction).
+    std::array<bool, 4> invertDirection = {false, false, false, false};
+    /// Per-axis OIDs (must match the device's registered stepper OIDs).
+    std::array<uint8_t, 4> axisOids = {0, 1, 2, 3};
+    /// Sample interval for motion discretization (seconds).
+    double sampleIntervalSec = 0.0002;
+    /// If true, connect + download dict + sync clock on construction.
+    bool autoConnect = true;
+    /// If true and deviceTransport is set, register 4 steppers on the
+    /// device and enable default queue_step motion handlers.
+    bool registerDeviceSteppers = true;
+};
+
 /// @brief Configuration for a KlippyInstance.
 struct KlippyInstanceConfig {
     UdsServerConfig udsConfig;
@@ -367,6 +406,11 @@ struct KlippyInstanceConfig {
     std::string configPath = "/etc/tether/printer.cfg";
     double minExtrudeTemp = 170.0;
     std::string firmwareVersion = "tether-klipper-1.0.0";
+
+    /// Optional motion backend. If set, G-code moves are routed through
+    /// the real Klipper wire protocol instead of just updating the object
+    /// model. See MotionBackendConfig for details.
+    std::shared_ptr<MotionBackendConfig> motionBackend;
 };
 
 } // namespace tether::klipper::klippy
