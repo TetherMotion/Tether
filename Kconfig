@@ -143,9 +143,10 @@ menu "Tether Library Configuration"
     config TETHER_ENABLE_KINEMATICS
         bool "Enable kinematics"
         default y
-        depends on TETHER_ENABLE_MOTION
         help
-            Enable forward/inverse kinematics for robotic control.
+            Enable forward/inverse kinematics models for robotics and
+            3D-printer kinematics (DeltaPrinter, RotaryDeltaPrinter,
+            KinematicsTransform, generic robotics FK/IK).
 
     menu "EtherCAT Distributed Clock (DC)"
         depends on TETHER_ENABLE_ETHERCAT

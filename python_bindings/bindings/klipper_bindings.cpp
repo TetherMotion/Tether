@@ -463,9 +463,9 @@ PYBIND11_MODULE(_klipper, m) {
             py::return_value_policy::reference)
         .def_property_readonly("endstop_adjust", &DeltaPrinter::endstopAdjust,
             py::return_value_policy::reference)
-        .def("cartesian_to_tower", &DeltaPrinter::cartesianToTower,
+        .def("forward_actuator_kinematics", &DeltaPrinter::forwardActuatorKinematics,
             py::arg("x"), py::arg("y"), py::arg("z"))
-        .def("tower_to_cartesian", &DeltaPrinter::towerToCartesian,
+        .def("inverse_actuator_kinematics", &DeltaPrinter::inverseActuatorKinematics,
             py::arg("tower_a"), py::arg("tower_b"), py::arg("tower_c"));
 
     // ----------------------------------------------------------------

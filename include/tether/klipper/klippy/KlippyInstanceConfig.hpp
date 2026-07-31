@@ -3,8 +3,9 @@
 /// @file KlippyInstanceConfig.hpp
 /// @brief Configuration structures for KlippyInstance.
 
-#include "tether/klipper/klippy/DeltaPrinter.hpp"
-#include "tether/klipper/klippy/RotaryDeltaPrinter.hpp"
+#include "tether/kinematics/PrinterKinematics.hpp"
+#include "tether/kinematics/DeltaPrinter.hpp"
+#include "tether/kinematics/RotaryDeltaPrinter.hpp"
 #include "tether/klipper/klippy/SkewCorrection.hpp"
 #include "tether/klipper/klippy/UdsTypes.hpp"
 
@@ -14,54 +15,35 @@
 
 namespace tether::klipper::klippy {
 
+// The Kinematics enum, string conversion helpers, and geometry config structs
+// (DeltaGeometry, DeltaEndstopAdjust, RotaryDeltaGeometry,
+// RotaryDeltaEndstopAdjust, PolarConfig, WinchConfig) have been moved to the
+// tether_kinematics module (tether/kinematics/). These using-declarations keep
+// existing klippy code compiling with the old unqualified names.
+using ::tether::kinematics::PrinterKinematics;
+using ::tether::kinematics::printerKinematicsFromString;
+using ::tether::kinematics::printerKinematicsToString;
+using ::tether::kinematics::DeltaGeometry;
+using ::tether::kinematics::DeltaEndstopAdjust;
+using ::tether::kinematics::RotaryDeltaGeometry;
+using ::tether::kinematics::RotaryDeltaEndstopAdjust;
+using ::tether::kinematics::PolarConfig;
+using ::tether::kinematics::WinchConfig;
+using ::tether::kinematics::DeltaPrinter;
+using ::tether::kinematics::RotaryDeltaPrinter;
 
-/// @brief Kinematics type for the printer.
-enum class Kinematics {
-    Cartesian,  ///< Standard Cartesian (X, Y, Z independent)
-    CoreXY,     ///< CoreXY (X=A+B, Y=A-B)
-    CoreXZ,     ///< CoreXZ (X=A+B, Z=A-B)
-    CoreYZ,     ///< CoreYZ (Y=A+B, Z=A-B)
-    HybridCoreXY, ///< Hybrid CoreXY (X is independent, Y uses CoreXY)
-    HybridCoreXZ, ///< Hybrid CoreXZ (X is independent, Z uses CoreXZ)
-    Delta,      ///< Linear Delta (3 towers)
-    RotaryDelta, ///< Rotary Delta
-    Polar,      ///< Polar (R, Theta, Z)
-    Winch,      ///< Cable/winch kinematics
-    None,       ///< No kinematics (manual)
-};
+/// @brief Backward-compatible alias for the kinematics enum name.
+///   Existing klippy code uses `klippy::Kinematics::Cartesian` etc.
+using Kinematics = PrinterKinematics;
 
-/// @brief Convert kinematics string to enum.
+/// @brief Backward-compatible alias for the string-to-enum converter.
 inline Kinematics kinematicsFromString(const std::string& s) {
-    if (s == "cartesian") return Kinematics::Cartesian;
-    if (s == "corexy") return Kinematics::CoreXY;
-    if (s == "corexz") return Kinematics::CoreXZ;
-    if (s == "coreyz") return Kinematics::CoreYZ;
-    if (s == "hybrid_corexy") return Kinematics::HybridCoreXY;
-    if (s == "hybrid_corexz") return Kinematics::HybridCoreXZ;
-    if (s == "delta") return Kinematics::Delta;
-    if (s == "rotary_delta") return Kinematics::RotaryDelta;
-    if (s == "polar") return Kinematics::Polar;
-    if (s == "winch") return Kinematics::Winch;
-    if (s == "none") return Kinematics::None;
-    return Kinematics::Cartesian;
+    return printerKinematicsFromString(s);
 }
 
-/// @brief Convert kinematics enum to string.
+/// @brief Backward-compatible alias for the enum-to-string converter.
 inline std::string kinematicsToString(Kinematics k) {
-    switch (k) {
-        case Kinematics::Cartesian:    return "cartesian";
-        case Kinematics::CoreXY:       return "corexy";
-        case Kinematics::CoreXZ:       return "corexz";
-        case Kinematics::CoreYZ:       return "coreyz";
-        case Kinematics::HybridCoreXY: return "hybrid_corexy";
-        case Kinematics::HybridCoreXZ: return "hybrid_corexz";
-        case Kinematics::Delta:        return "delta";
-        case Kinematics::RotaryDelta:  return "rotary_delta";
-        case Kinematics::Polar:        return "polar";
-        case Kinematics::Winch:        return "winch";
-        case Kinematics::None:         return "none";
-    }
-    return "cartesian";
+    return printerKinematicsToString(k);
 }
 
 
@@ -363,20 +345,10 @@ struct KlippySettings {
     RotaryDeltaGeometry rotaryDeltaGeometry;
     RotaryDeltaEndstopAdjust rotaryDeltaEndstopAdjust;
 
-    // Polar printer
-    struct PolarConfig {
-        double maxRadius = 200.0;       ///< Maximum radius (mm)
-        double maxAngle = 360.0;        ///< Maximum angle (degrees, 0=continuous)
-        bool continuousRotation = false; ///< If true, angle is continuous
-    };
+    // Polar printer (PolarConfig is defined in tether::kinematics)
     PolarConfig polarConfig;
 
-    // Winch printer
-    struct WinchConfig {
-        double anchorRadius = 500.0;    ///< Distance from center to each anchor (mm)
-        double anchorHeight = 300.0;    ///< Height of anchors above bed (mm)
-        int anchorCount = 3;            ///< Number of anchors (typically 3)
-    };
+    // Winch printer (WinchConfig is defined in tether::kinematics)
     WinchConfig winchConfig;
 
     // Skew correction

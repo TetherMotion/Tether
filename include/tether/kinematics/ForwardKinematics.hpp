@@ -24,7 +24,7 @@
 #include <cstdint>
 #include <cstring>
 
-namespace Kinematics {
+namespace tether::kinematics {
 
 // =============================================================================
 // Mathematical Constants and Utilities
@@ -505,7 +505,7 @@ public:
      * @param joint_positions Array of joint positions (radians or meters)
      * @return End-effector pose
      */
-    virtual Pose6D compute(const float* joint_positions) const = 0;
+    virtual Pose6D forwardKinematics(const float* joint_positions) const = 0;
     
     /**
      * @brief Get transformation matrix
@@ -541,7 +541,7 @@ public:
     
     size_t getDOF() const override { return 2; }
     
-    Pose6D compute(const float* q) const override {
+    Pose6D forwardKinematics(const float* q) const override {
         Position3D pos = computePosition(q[0], q[1]);
         float total_angle = q[0] + q[1];
         
@@ -621,7 +621,7 @@ public:
     
     size_t getDOF() const override { return 3; }
     
-    Pose6D compute(const float* q) const override {
+    Pose6D forwardKinematics(const float* q) const override {
         return getTransform(q).toPose();
     }
     
@@ -717,7 +717,7 @@ public:
         m_dh[5] = {0, 0.080f, 0, 0};
     }
     
-    Pose6D compute(const float* q) const override {
+    Pose6D forwardKinematics(const float* q) const override {
         return getTransform(q).toPose();
     }
     
@@ -794,7 +794,7 @@ public:
         m_dh[6] = {0, 0.107f, 0.088f, HALF_PI};
     }
     
-    Pose6D compute(const float* q) const override {
+    Pose6D forwardKinematics(const float* q) const override {
         return getTransform(q).toPose();
     }
     
@@ -846,7 +846,7 @@ public:
     
     size_t getDOF() const override { return 4; }
     
-    Pose6D compute(const float* q) const override {
+    Pose6D forwardKinematics(const float* q) const override {
         // q[0]: Joint 1 rotation
         // q[1]: Joint 2 rotation
         // q[2]: Z slide (prismatic, in meters)
@@ -930,7 +930,7 @@ public:
      * 
      * @param theta Array of 3 actuator angles (radians)
      */
-    Pose6D compute(const float* theta) const override {
+    Pose6D forwardKinematics(const float* theta) const override {
         Position3D pos = computePosition(theta);
         return Pose6D(pos, Quaternion());  // Delta maintains parallel orientation
     }
@@ -1032,7 +1032,7 @@ public:
     
     size_t getDOF() const override { return 3; }
     
-    Pose6D compute(const float* q) const override {
+    Pose6D forwardKinematics(const float* q) const override {
         // q[0]: X position
         // q[1]: Y position
         // q[2]: Z position
@@ -1055,7 +1055,7 @@ public:
     
     size_t getDOF() const override { return 5; }
     
-    Pose6D compute(const float* q) const override {
+    Pose6D forwardKinematics(const float* q) const override {
         return getTransform(q).toPose();
     }
     
@@ -1348,7 +1348,7 @@ public:
      * 
      * @param leg_lengths Array of 6 leg lengths
      */
-    Pose6D compute(const float* leg_lengths) const override {
+    Pose6D forwardKinematics(const float* leg_lengths) const override {
         // Initial guess: platform directly above base
         Pose6D pose(Position3D(0, 0, 0.3f), Quaternion());
         
@@ -1359,7 +1359,7 @@ public:
         for (int iter = 0; iter < max_iterations; ++iter) {
             // Compute current leg vectors and lengths
             float current_lengths[6];
-            computeLegLengths(pose, current_lengths);
+            inverseKinematics(pose, current_lengths);
             
             // Compute error
             float error = 0;
@@ -1391,7 +1391,7 @@ public:
     }
     
     Transform4x4 getTransform(const float* leg_lengths) const override {
-        Pose6D pose = compute(leg_lengths);
+        Pose6D pose = forwardKinematics(leg_lengths);
         Transform4x4 T = Transform4x4::translation(pose.position);
         // Add rotation based on quaternion
         return T;
@@ -1400,7 +1400,7 @@ public:
     /**
      * @brief Inverse kinematics: compute leg lengths from pose
      */
-    void computeLegLengths(const Pose6D& pose, float* leg_lengths) const {
+    void inverseKinematics(const Pose6D& pose, float* leg_lengths) const {
         for (int i = 0; i < 6; ++i) {
             Position3D platform_joint = getPlatformJointWorld(pose, i);
             Position3D leg = platform_joint - m_base_joints[i];
@@ -1419,4 +1419,4 @@ private:
     }
 };
 
-} // namespace Kinematics
+} // namespace tether::kinematics

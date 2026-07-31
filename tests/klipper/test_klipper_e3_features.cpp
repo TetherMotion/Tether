@@ -9,7 +9,7 @@
 #include "tether/klipper/klippy/KlippyInstanceConfig.hpp"
 #include "tether/klipper/klippy/PrinterObjects.hpp"
 #include "tether/klipper/motion/MotionTranslator.hpp"
-#include "tether/klipper/klippy/DeltaPrinter.hpp"
+#include "tether/kinematics/DeltaPrinter.hpp"
 #include "tether/klipper/config/ConfigParser.hpp"
 
 #include <gtest/gtest.h>
@@ -495,7 +495,7 @@ class E3KinematicsTest : public ::testing::Test {};
 TEST_F(E3KinematicsTest, CartesianIdentity) {
     KinematicsTransform kt;
     kt.setKinematics(Kinematics::Cartesian);
-    auto result = kt.transform(10.0, 20.0, 30.0);
+    auto result = kt.forwardActuatorKinematics(10.0, 20.0, 30.0);
     EXPECT_NEAR(result[0], 10.0, 1e-9);
     EXPECT_NEAR(result[1], 20.0, 1e-9);
     EXPECT_NEAR(result[2], 30.0, 1e-9);
@@ -503,7 +503,7 @@ TEST_F(E3KinematicsTest, CartesianIdentity) {
 
 TEST_F(E3KinematicsTest, CartesianInverseIdentity) {
     KinematicsTransform kt;
-    auto result = kt.inverseTransform(10.0, 20.0, 30.0);
+    auto result = kt.inverseActuatorKinematics(10.0, 20.0, 30.0);
     EXPECT_NEAR(result[0], 10.0, 1e-9);
     EXPECT_NEAR(result[1], 20.0, 1e-9);
     EXPECT_NEAR(result[2], 30.0, 1e-9);
@@ -512,7 +512,7 @@ TEST_F(E3KinematicsTest, CartesianInverseIdentity) {
 TEST_F(E3KinematicsTest, CoreXYForward) {
     KinematicsTransform kt;
     kt.setKinematics(Kinematics::CoreXY);
-    auto result = kt.transform(100.0, 50.0, 10.0);
+    auto result = kt.forwardActuatorKinematics(100.0, 50.0, 10.0);
     // A = X + Y = 150, B = X - Y = 50, C = Z = 10
     EXPECT_NEAR(result[0], 150.0, 1e-9);
     EXPECT_NEAR(result[1], 50.0, 1e-9);
@@ -522,7 +522,7 @@ TEST_F(E3KinematicsTest, CoreXYForward) {
 TEST_F(E3KinematicsTest, CoreXYInverse) {
     KinematicsTransform kt;
     kt.setKinematics(Kinematics::CoreXY);
-    auto result = kt.inverseTransform(150.0, 50.0, 10.0);
+    auto result = kt.inverseActuatorKinematics(150.0, 50.0, 10.0);
     // X = (A + B) / 2 = 100, Y = (A - B) / 2 = 50, Z = C = 10
     EXPECT_NEAR(result[0], 100.0, 1e-9);
     EXPECT_NEAR(result[1], 50.0, 1e-9);
@@ -533,8 +533,8 @@ TEST_F(E3KinematicsTest, CoreXYRoundTrip) {
     KinematicsTransform kt;
     kt.setKinematics(Kinematics::CoreXY);
     double x = 73.5, y = -42.3, z = 15.7;
-    auto fwd = kt.transform(x, y, z);
-    auto inv = kt.inverseTransform(fwd[0], fwd[1], fwd[2]);
+    auto fwd = kt.forwardActuatorKinematics(x, y, z);
+    auto inv = kt.inverseActuatorKinematics(fwd[0], fwd[1], fwd[2]);
     EXPECT_NEAR(inv[0], x, 1e-9);
     EXPECT_NEAR(inv[1], y, 1e-9);
     EXPECT_NEAR(inv[2], z, 1e-9);
@@ -543,7 +543,7 @@ TEST_F(E3KinematicsTest, CoreXYRoundTrip) {
 TEST_F(E3KinematicsTest, CoreXZForward) {
     KinematicsTransform kt;
     kt.setKinematics(Kinematics::CoreXZ);
-    auto result = kt.transform(100.0, 50.0, 30.0);
+    auto result = kt.forwardActuatorKinematics(100.0, 50.0, 30.0);
     // A = X + Z = 130, B = X - Z = 70, C = Y = 50
     EXPECT_NEAR(result[0], 130.0, 1e-9);
     EXPECT_NEAR(result[1], 70.0, 1e-9);
@@ -553,7 +553,7 @@ TEST_F(E3KinematicsTest, CoreXZForward) {
 TEST_F(E3KinematicsTest, CoreXZInverse) {
     KinematicsTransform kt;
     kt.setKinematics(Kinematics::CoreXZ);
-    auto result = kt.inverseTransform(130.0, 70.0, 50.0);
+    auto result = kt.inverseActuatorKinematics(130.0, 70.0, 50.0);
     EXPECT_NEAR(result[0], 100.0, 1e-9);
     EXPECT_NEAR(result[1], 50.0, 1e-9);
     EXPECT_NEAR(result[2], 30.0, 1e-9);
@@ -562,7 +562,7 @@ TEST_F(E3KinematicsTest, CoreXZInverse) {
 TEST_F(E3KinematicsTest, CoreYZForward) {
     KinematicsTransform kt;
     kt.setKinematics(Kinematics::CoreYZ);
-    auto result = kt.transform(100.0, 50.0, 30.0);
+    auto result = kt.forwardActuatorKinematics(100.0, 50.0, 30.0);
     // A = Y + Z = 80, B = Y - Z = 20, C = X = 100
     EXPECT_NEAR(result[0], 80.0, 1e-9);
     EXPECT_NEAR(result[1], 20.0, 1e-9);
@@ -572,7 +572,7 @@ TEST_F(E3KinematicsTest, CoreYZForward) {
 TEST_F(E3KinematicsTest, CoreYZInverse) {
     KinematicsTransform kt;
     kt.setKinematics(Kinematics::CoreYZ);
-    auto result = kt.inverseTransform(80.0, 20.0, 100.0);
+    auto result = kt.inverseActuatorKinematics(80.0, 20.0, 100.0);
     EXPECT_NEAR(result[0], 100.0, 1e-9);
     EXPECT_NEAR(result[1], 50.0, 1e-9);
     EXPECT_NEAR(result[2], 30.0, 1e-9);
@@ -588,7 +588,7 @@ TEST_F(E3KinematicsTest, DeltaForwardAtCenter) {
     dp.setGeometry(geo);
     kt.setDeltaPrinter(&dp);
     // At center (0, 0, 0), all towers should be equal
-    auto result = kt.transform(0.0, 0.0, 0.0);
+    auto result = kt.forwardActuatorKinematics(0.0, 0.0, 0.0);
     EXPECT_NEAR(result[0], result[1], 1e-6);
     EXPECT_NEAR(result[1], result[2], 1e-6);
 }
@@ -603,8 +603,8 @@ TEST_F(E3KinematicsTest, DeltaRoundTrip) {
     dp.setGeometry(geo);
     kt.setDeltaPrinter(&dp);
     double x = 30.0, y = 20.0, z = 100.0;
-    auto fwd = kt.transform(x, y, z);
-    auto inv = kt.inverseTransform(fwd[0], fwd[1], fwd[2]);
+    auto fwd = kt.forwardActuatorKinematics(x, y, z);
+    auto inv = kt.inverseActuatorKinematics(fwd[0], fwd[1], fwd[2]);
     EXPECT_NEAR(inv[0], x, 1e-4);
     EXPECT_NEAR(inv[1], y, 1e-4);
     EXPECT_NEAR(inv[2], z, 1e-4);

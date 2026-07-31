@@ -1,5 +1,5 @@
 # Component: tether_motion_control
-# Real-time motion control, profiles, motor models, and kinematics.
+# Real-time motion control, profiles, motor models.
 #
 # System identification now lives in the separate tether_identification component
 # (opt-in, zero tether deps).
@@ -53,7 +53,6 @@ foreach(_tgt IN LISTS _variants)
             $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
             $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/motion>
             $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia402>
-            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/kinematics>
             $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/identification>
             $<INSTALL_INTERFACE:include>
             $<INSTALL_INTERFACE:include/tether>
@@ -61,7 +60,7 @@ foreach(_tgt IN LISTS _variants)
             ${TETHER_ROOT}/src
     )
 
-    target_link_libraries(${_tgt} PUBLIC tether_common tether_controls)
+    target_link_libraries(${_tgt} PUBLIC tether_common tether_controls tether_kinematics)
 
     set_target_properties(${_tgt} PROPERTIES
         POSITION_INDEPENDENT_CODE ON

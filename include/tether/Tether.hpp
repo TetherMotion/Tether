@@ -58,6 +58,16 @@
 #include "tether/hal/IPeriodicTimer.hpp"
 #endif
 
+// Kinematics (robotics + printer kinematics models)
+#ifdef TETHER_ENABLE_KINEMATICS
+#include "tether/kinematics/ForwardKinematics.hpp"
+#include "tether/kinematics/ForwardDynamics.hpp"
+#include "tether/kinematics/PrinterKinematics.hpp"
+#include "tether/kinematics/DeltaPrinter.hpp"
+#include "tether/kinematics/RotaryDeltaPrinter.hpp"
+#include "tether/kinematics/KinematicsTransform.hpp"
+#endif
+
 // EtherCAT
 #ifdef TETHER_ENABLE_ETHERCAT
 #include "tether/ethercat/Types.hpp"

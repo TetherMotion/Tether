@@ -11,7 +11,7 @@
 #include "tether/klipper/klippy/PressureAdvance.hpp"
 #include "tether/klipper/klippy/InputShaper.hpp"
 #include "tether/klipper/klippy/FirmwareRetraction.hpp"
-#include "tether/klipper/klippy/DeltaPrinter.hpp"
+#include "tether/kinematics/DeltaPrinter.hpp"
 #include "tether/klipper/klippy/TmcDriverConfig.hpp"
 #include "tether/klipper/klippy/FilamentLoader.hpp"
 #include "tether/klipper/klippy/MultiMcuManager.hpp"

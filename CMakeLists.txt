@@ -185,6 +185,7 @@ option(TETHER_BUILD_AUTOTUNING "Build controller autotuning framework" ON)
 option(TETHER_BUILD_GCODE "Build G-code interpreter" ON)
 option(TETHER_BUILD_EXPORT "Build export utilities" ON)
 option(TETHER_BUILD_MOTION_PLANNER "Build motion planner" ON)
+option(TETHER_BUILD_KINEMATICS "Build kinematics models (robotics + printer kinematics)" ON)
 option(TETHER_BUILD_MOTION_CONTROL "Build motion control" ON)
 option(TETHER_BUILD_IDENTIFICATION "Build system identification" ON)
 option(TETHER_BUILD_ETHERCAT_COMMON "Build EtherCAT common" ON)
@@ -230,7 +231,8 @@ if(DEFINED TETHER_COMPONENTS)
     set(_tether_component_deps_hal             "common")
     set(_tether_component_deps_controls        "common")
     set(_tether_component_deps_autotuning      "common")
-    set(_tether_component_deps_motion_control  "controls;common")
+    set(_tether_component_deps_kinematics       "common")
+    set(_tether_component_deps_motion_control  "kinematics;controls;common")
     set(_tether_component_deps_identification  "common")
     set(_tether_component_deps_ethercat_common "hal;common")
     set(_tether_component_deps_ethercat_master "ethercat_common;controls;hal;common")
@@ -245,14 +247,14 @@ if(DEFINED TETHER_COMPONENTS)
     set(_tether_component_deps_simulation      "common")
     set(_tether_component_deps_io_protocol     "common")
     set(_tether_component_deps_destabilizer    "simulation;common")
-    set(_tether_component_deps_klipper         "motion_planner;gcode;export;common")
+    set(_tether_component_deps_klipper         "kinematics;motion_planner;gcode;export;common")
 
     # All valid component names
     set(_tether_all_components
         common hal pcap controls autotuning gcode export motion_planner
-        motion_control identification ethercat_common ethercat_master
-        cia_profiles drives fsoe ethercat_slave simulation destabilizer
-        io_protocol klipper)
+        kinematics motion_control identification ethercat_common
+        ethercat_master cia_profiles drives fsoe ethercat_slave simulation
+        destabilizer io_protocol klipper)
 
     # Resolve transitive closure of requested components
     set(_tether_enabled ${TETHER_COMPONENTS})
@@ -276,8 +278,8 @@ if(DEFINED TETHER_COMPONENTS)
     # Disable everything first
     set(_tether_build_vars
         COMMON HAL PCAP CONTROLS AUTOTUNING GCODE EXPORT MOTION_PLANNER
-        MOTION_CONTROL IDENTIFICATION ETHERCAT_COMMON ETHERCAT_MASTER
-        CIA_PROFILES DRIVES FSOE ETHERCAT_SLAVE SIMULATION
+        KINEMATICS MOTION_CONTROL IDENTIFICATION ETHERCAT_COMMON
+        ETHERCAT_MASTER CIA_PROFILES DRIVES FSOE ETHERCAT_SLAVE SIMULATION
         DESTABILIZER IO_PROTOCOL)
     foreach(_var ${_tether_build_vars})
         set(TETHER_BUILD_${_var} OFF CACHE BOOL "" FORCE)
@@ -398,6 +400,11 @@ endif()
 # Identification (depends on common; fully self-contained)
 if(TETHER_BUILD_IDENTIFICATION)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/identification.cmake)
+endif()
+
+# Kinematics (header-only; depends on common)
+if(TETHER_BUILD_KINEMATICS)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/kinematics.cmake)
 endif()
 
 # Motion Control
@@ -524,6 +531,7 @@ tether_collect_targets(TETHER_GCODE)
 tether_collect_targets(TETHER_EXPORT)
 tether_collect_targets(TETHER_MOTION_GEOMETRY)
 tether_collect_targets(TETHER_MOTION_PLANNER)
+tether_collect_targets(TETHER_KINEMATICS)
 tether_collect_targets(TETHER_MOTION_CONTROL)
 tether_collect_targets(TETHER_IDENTIFICATION)
 tether_collect_targets(TETHER_ETHERCAT_COMMON)
@@ -559,6 +567,9 @@ if(TARGET tether_export)
 endif()
 if(TARGET tether_motion_planner)
     list(APPEND TETHER_ALL_COMPONENTS tether_motion_planner)
+endif()
+if(TARGET tether_kinematics)
+    list(APPEND TETHER_ALL_COMPONENTS tether_kinematics)
 endif()
 if(TARGET tether_motion_control)
     list(APPEND TETHER_ALL_COMPONENTS tether_motion_control)
@@ -738,6 +749,7 @@ message(STATUS "    tether_autotuning:     ${TETHER_BUILD_AUTOTUNING}")
 message(STATUS "    tether_gcode:          ${TETHER_BUILD_GCODE}")
 message(STATUS "    tether_export:         ${TETHER_BUILD_EXPORT}")
 message(STATUS "    tether_motion_planner: ${TETHER_BUILD_MOTION_PLANNER}")
+message(STATUS "    tether_kinematics:     ${TETHER_BUILD_KINEMATICS}")
 message(STATUS "    tether_motion_control: ${TETHER_BUILD_MOTION_CONTROL}")
 message(STATUS "    tether_identification: ${TETHER_BUILD_IDENTIFICATION}")
 message(STATUS "    tether_ethercat_common: ${TETHER_BUILD_ETHERCAT_COMMON}")
