@@ -209,3 +209,18 @@ Examples
 
 See the **klipper_printer_objects** example for a full demonstration of all
 printer objects and their status fields.
+
+Klipper-Specific Scope
+----------------------
+
+All printer objects in this module are **Klipper-specific**. They live in
+the ``tether::klipper::klippy`` namespace and are designed for 3D printer
+control via Moonraker frontends. They have no equivalent in the main Tether
+RS274/NGC CNC interpreter, which uses a different state model based on
+machine coordinates, tool tables, and work coordinate systems (G54-G59.3).
+
+The bed leveling objects (``bed_mesh``, ``bed_tilt``, ``z_tilt``,
+``quad_gantry_level``, ``screws_tilt_adjust``, ``bed_screws``) are
+particularly 3D-printer-specific. The underlying ``BedMesh`` class in
+``tether/klipper/objects/BedLevel.hpp`` provides 2D mesh interpolation
+for Z compensation — a concept that does not apply to CNC machining.

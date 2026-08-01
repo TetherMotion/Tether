@@ -5,6 +5,24 @@
 ///
 /// This file includes the parser, state, callbacks, and macro sub-components
 /// and defines the main GCodeExecutor class.
+///
+/// @par Feature limitations
+/// The Klipper G-code executor is a lightweight parser for 3D printer
+/// control. It does **not** support the following features that the main
+/// Tether RS274/NGC interpreter (tether::gcode::GCodeInterpreter) provides:
+///
+/// - O-code control flow (subroutines, if/else, while, repeat)
+/// - # parameters and expression evaluation
+/// - Tool compensation (G40-G42, G43-G49)
+/// - Full canned cycle semantics (G73-G89 with rigid tapping)
+/// - NURBS splines (G5.1, G5.2/G5.3)
+/// - Coordinate rotation (G68/G69)
+/// - Execution modes (MDI, STEP, VERIFY)
+///
+/// Conversely, it provides 3D-printer-specific features not in the main
+/// interpreter: temperature control, bed mesh leveling, input shaping,
+/// TMC driver configuration, LED control, and 50+ Klipper extended
+/// commands. See docs/KlipperGcodeCommands.md for the full reference.
 
 #include "tether/klipper/klippy/GCodeParser.hpp"
 #include "tether/klipper/klippy/PrinterMotionState.hpp"
@@ -90,10 +108,10 @@ public:
         } else if (g.code == "G4") {
             return executeDwell(g);
         } else if (g.code == "G90") {
-            state_->absoluteCoordinates = true;
+            state_->distanceMode = GCode::DistanceMode::ABSOLUTE;
             return true;
         } else if (g.code == "G91") {
-            state_->absoluteCoordinates = false;
+            state_->distanceMode = GCode::DistanceMode::INCREMENTAL;
             return true;
         } else if (g.code == "M82") {
             state_->absoluteExtrude = true;
@@ -249,11 +267,11 @@ public:
             return true;
         } else if (g.code == "G20") {
             // Set units to inches
-            state_->unitsInches = true;
+            state_->units = GCode::Units::INCH;
             return true;
         } else if (g.code == "G21") {
             // Set units to millimeters (default)
-            state_->unitsInches = false;
+            state_->units = GCode::Units::MM;
             return true;
         } else if (g.code == "G29") {
             // Bed mesh leveling — probe bed and fill mesh
@@ -303,13 +321,13 @@ public:
             // Arc move — clockwise (G2) or counter-clockwise (G3)
             return executeArcMove(g);
         } else if (g.code == "G17") {
-            state_->arcPlane = 0; // XY plane
+            state_->plane = GCode::Plane::XY;
             return true;
         } else if (g.code == "G18") {
-            state_->arcPlane = 1; // XZ plane
+            state_->plane = GCode::Plane::ZX;
             return true;
         } else if (g.code == "G19") {
-            state_->arcPlane = 2; // YZ plane
+            state_->plane = GCode::Plane::YZ;
             return true;
         } else if (g.code == "G12") {
             // Clean nozzle
@@ -1059,7 +1077,7 @@ private:
         state_->feedrate = f;
 
         // Apply absolute/relative mode
-        if (state_->absoluteCoordinates) {
+        if (state_->distanceMode == GCode::DistanceMode::ABSOLUTE) {
             if (!std::isnan(x)) state_->position[0] = x;
             if (!std::isnan(y)) state_->position[1] = y;
             if (!std::isnan(z)) state_->position[2] = z;
@@ -1186,7 +1204,7 @@ private:
         state_->feedrate = f;
 
         // Convert inches to mm if needed
-        double unitScale = state_->unitsInches ? 25.4 : 1.0;
+        double unitScale = (state_->units == GCode::Units::INCH) ? 25.4 : 1.0;
         x *= unitScale; y *= unitScale; z *= unitScale;
 
         bool clockwise = (g.code == "G2");
@@ -1295,7 +1313,7 @@ private:
             double pe = std::isnan(e) ? state_->position[3] :
                         (state_->absoluteExtrude ? e : state_->position[3] + ePerSegment);
 
-            if (state_->absoluteCoordinates) {
+            if (state_->distanceMode == GCode::DistanceMode::ABSOLUTE) {
                 state_->position[0] = px;
                 state_->position[1] = py;
                 state_->position[2] = pz;
@@ -1329,7 +1347,7 @@ private:
         double f = g.has('F') ? g.get('F') : state_->feedrate;
         state_->feedrate = f;
 
-        double unitScale = state_->unitsInches ? 25.4 : 1.0;
+        double unitScale = (state_->units == GCode::Units::INCH) ? 25.4 : 1.0;
         endX *= unitScale; endY *= unitScale; endZ *= unitScale;
 
         double startX = state_->position[0];
@@ -1369,7 +1387,7 @@ private:
                 pe = state_->position[3];
             }
 
-            if (state_->absoluteCoordinates) {
+            if (state_->distanceMode == GCode::DistanceMode::ABSOLUTE) {
                 state_->position[0] = px;
                 state_->position[1] = py;
                 state_->position[2] = pz;

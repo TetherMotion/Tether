@@ -519,7 +519,7 @@ TEST(E2ArcMoves, G2ClockwiseArc) {
     };
 
     PrinterMotionState state;
-    state.absoluteCoordinates = true;
+    state.setAbsoluteCoordinates(true);
     state.absoluteExtrude = true;
     state.feedrate = 1000;
     state.speedFactor = 1.0;
@@ -549,7 +549,7 @@ TEST(E2ArcMoves, G3CounterClockwiseArc) {
     };
 
     PrinterMotionState state;
-    state.absoluteCoordinates = true;
+    state.setAbsoluteCoordinates(true);
     state.absoluteExtrude = true;
     state.feedrate = 1000;
     state.speedFactor = 1.0;
@@ -577,7 +577,7 @@ TEST(E2ArcMoves, ArcWithRadiusMode) {
     };
 
     PrinterMotionState state;
-    state.absoluteCoordinates = true;
+    state.setAbsoluteCoordinates(true);
     state.absoluteExtrude = true;
     state.feedrate = 1000;
     state.speedFactor = 1.0;
@@ -604,7 +604,7 @@ TEST(E2ArcMoves, FullCircleArc) {
     };
 
     PrinterMotionState state;
-    state.absoluteCoordinates = true;
+    state.setAbsoluteCoordinates(true);
     state.absoluteExtrude = true;
     state.feedrate = 1000;
     state.speedFactor = 1.0;
@@ -633,7 +633,7 @@ TEST(E2ArcMoves, ArcWithExtrusion) {
     };
 
     PrinterMotionState state;
-    state.absoluteCoordinates = true;
+    state.setAbsoluteCoordinates(true);
     state.absoluteExtrude = true;
     state.feedrate = 1000;
     state.speedFactor = 1.0;

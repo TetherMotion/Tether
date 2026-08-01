@@ -7,6 +7,11 @@
  * (connect to a host:port) and server (listen on a port, accept one
  * connection) modes. This enables Klipper protocol over TCP/IP, useful for
  * networked MCU simulators and remote devices.
+ *
+ * The connection setup (connect/listen/accept) is delegated to shared
+ * helpers in `tether::platform::PosixSocket.hpp`, and the actual data
+ * transfer is delegated to `tether::io::TcpTransport`.  This avoids
+ * duplicating POSIX socket I/O code with the `tether::io` module.
  */
 
 #pragma once
@@ -16,6 +21,12 @@
 #include <cstdint>
 #include <string>
 #include <atomic>
+#include <memory>
+
+#if !defined(ESP_PLATFORM)
+#include "tether/io/TcpTransport.hpp"
+#include "tether/platform/PosixSocket.hpp"
+#endif
 
 namespace tether::klipper::transport {
 
@@ -37,6 +48,11 @@ struct TcpTransportConfig {
 
 /**
  * @brief TCP/IP byte-stream transport.
+ *
+ * Adapts `tether::io::TcpTransport` to the `IByteStreamTransport` interface.
+ * On non-POSIX platforms (ESP-IDF), the open() method always fails —
+ * embedded targets should use callback-based transports (UsbSerialTransport,
+ * UartTransport) or CanTransport instead.
  */
 class TcpStreamTransport : public IByteStreamTransport {
 public:
@@ -54,8 +70,9 @@ public:
 
 private:
     TcpTransportConfig config_;
-    int sock_ = -1;
-    int listenSock_ = -1;
+#if !defined(ESP_PLATFORM)
+    std::unique_ptr<tether::io::TcpTransport> transport_;
+#endif
     std::atomic<bool> open_{false};
 };
 

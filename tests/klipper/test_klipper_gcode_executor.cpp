@@ -122,6 +122,71 @@ TEST(KlipperGcodeParser, ParseG4Dwell) {
     EXPECT_EQ(g->get('P'), 500.0);
 }
 
+// --- Tests verifying unification with tether::gcode lexer ---
+
+/// @brief Verify the parser uses the shared GCode::Lexer for tokenization
+/// by checking subcode handling (G38.2) which the lexer supports natively.
+TEST(KlipperGcodeParser, ParseSubcodeViaLexer) {
+    auto g = parseGcodeLine("G38.2 X10 Y20");
+    ASSERT_TRUE(g.has_value());
+    EXPECT_EQ(g->code, "G38.2");
+    EXPECT_EQ(g->get('X'), 10.0);
+    EXPECT_EQ(g->get('Y'), 20.0);
+}
+
+/// @brief Verify extended commands (SET_SERVO) are parsed by the fallback path.
+TEST(KlipperGcodeParser, ParseExtendedCommand) {
+    auto g = parseGcodeLine("SET_SERVO SERVO=my_servo ANGLE=45");
+    ASSERT_TRUE(g.has_value());
+    EXPECT_EQ(g->code, "SET_SERVO");
+    EXPECT_TRUE(g->isExtendedCommand());
+    EXPECT_EQ(g->getNamed("SERVO"), "my_servo");
+    EXPECT_EQ(g->getNamedDouble("ANGLE"), 45.0);
+}
+
+/// @brief Verify extended command with quoted string parameter.
+TEST(KlipperGcodeParser, ParseExtendedCommandQuoted) {
+    auto g = parseGcodeLine("SET_GCODE_VARIABLE MACRO=START_PRINT VARIABLE=enable VALUE=1");
+    ASSERT_TRUE(g.has_value());
+    EXPECT_EQ(g->code, "SET_GCODE_VARIABLE");
+    EXPECT_EQ(g->getNamed("MACRO"), "START_PRINT");
+    EXPECT_EQ(g->getNamed("VARIABLE"), "enable");
+    EXPECT_EQ(g->getNamed("VALUE"), "1");
+}
+
+/// @brief Verify M117 captures remaining text as message.
+TEST(KlipperGcodeParser, ParseM117Text) {
+    auto g = parseGcodeLine("M117 Hello World");
+    ASSERT_TRUE(g.has_value());
+    EXPECT_EQ(g->code, "M117");
+    EXPECT_EQ(g->text, "Hello World");
+    EXPECT_TRUE(g->params.empty());
+}
+
+/// @brief Verify bare letters and letter+number mix (Klipper flavor).
+TEST(KlipperGcodeParser, ParseMixedBareAndNumbered) {
+    auto g = parseGcodeLine("G28 X Y Z0");
+    ASSERT_TRUE(g.has_value());
+    EXPECT_EQ(g->code, "G28");
+    EXPECT_TRUE(g->has('X'));
+    EXPECT_TRUE(g->has('Y'));
+    EXPECT_TRUE(g->has('Z'));
+    EXPECT_EQ(g->get('Z'), 0.0);
+}
+
+/// @brief Verify the parser handles G-code with multiple parameters
+/// including negative and decimal values (lexer tokenization).
+TEST(KlipperGcodeParser, ParseComplexLine) {
+    auto g = parseGcodeLine("G1 X-10.5 Y20 Z0.3 E1.5 F1500");
+    ASSERT_TRUE(g.has_value());
+    EXPECT_EQ(g->code, "G1");
+    EXPECT_NEAR(g->get('X'), -10.5, 0.001);
+    EXPECT_EQ(g->get('Y'), 20.0);
+    EXPECT_NEAR(g->get('Z'), 0.3, 0.001);
+    EXPECT_NEAR(g->get('E'), 1.5, 0.001);
+    EXPECT_EQ(g->get('F'), 1500.0);
+}
+
 // ============================================================================
 // G-code executor tests
 // ============================================================================
@@ -309,12 +374,43 @@ TEST_F(GcodeExecutorTest, ExecuteG4DwellSeconds) {
 
 TEST_F(GcodeExecutorTest, ExecuteG90) {
     executor->executeLine("G90");
-    EXPECT_TRUE(executor->state().absoluteCoordinates);
+    EXPECT_TRUE(executor->state().absoluteCoordinates());
+    // Verify enum-based modal state (unified with tether::gcode)
+    EXPECT_EQ(executor->state().distanceMode, GCode::DistanceMode::ABSOLUTE);
 }
 
 TEST_F(GcodeExecutorTest, ExecuteG91) {
     executor->executeLine("G91");
-    EXPECT_FALSE(executor->state().absoluteCoordinates);
+    EXPECT_FALSE(executor->state().absoluteCoordinates());
+    // Verify enum-based modal state (unified with tether::gcode)
+    EXPECT_EQ(executor->state().distanceMode, GCode::DistanceMode::INCREMENTAL);
+}
+
+// --- Tests verifying enum-based modal state (unified with tether::gcode) ---
+
+TEST_F(GcodeExecutorTest, ExecuteG20SetsUnitsEnum) {
+    executor->executeLine("G20");
+    EXPECT_EQ(executor->state().units, GCode::Units::INCH);
+}
+
+TEST_F(GcodeExecutorTest, ExecuteG21SetsUnitsEnum) {
+    executor->executeLine("G21");
+    EXPECT_EQ(executor->state().units, GCode::Units::MM);
+}
+
+TEST_F(GcodeExecutorTest, ExecuteG17SetsPlaneEnum) {
+    executor->executeLine("G17");
+    EXPECT_EQ(executor->state().plane, GCode::Plane::XY);
+}
+
+TEST_F(GcodeExecutorTest, ExecuteG18SetsPlaneEnum) {
+    executor->executeLine("G18");
+    EXPECT_EQ(executor->state().plane, GCode::Plane::ZX);
+}
+
+TEST_F(GcodeExecutorTest, ExecuteG19SetsPlaneEnum) {
+    executor->executeLine("G19");
+    EXPECT_EQ(executor->state().plane, GCode::Plane::YZ);
 }
 
 TEST_F(GcodeExecutorTest, ExecuteM82) {

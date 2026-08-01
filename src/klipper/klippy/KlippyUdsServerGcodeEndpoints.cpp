@@ -5,6 +5,7 @@
 
 #include "tether/klipper/klippy/KlippyUdsServer.hpp"
 #include "tether/klipper/klippy/AdvancedObjects.hpp"
+#include "tether/klipper/klippy/KlippyUdsHelpText.hpp"
 #include "UdsConnection_internal.hpp"
 
 #include <algorithm>
@@ -87,118 +88,7 @@ JsonValue KlippyUdsServer::handleListEndpoints(const JsonValue& params) {
 // ============================================================================
 
 JsonValue KlippyUdsServer::handleGcodeHelp(const JsonValue& params) {
-    std::map<std::string, JsonValue> result;
-    // Motion
-    result["G0"] = JsonValue("Rapid move");
-    result["G1"] = JsonValue("Linear move");
-    result["G2"] = JsonValue("Arc move clockwise");
-    result["G3"] = JsonValue("Arc move counter-clockwise");
-    result["G4"] = JsonValue("Dwell");
-    result["G17"] = JsonValue("XY plane select");
-    result["G18"] = JsonValue("XZ plane select");
-    result["G19"] = JsonValue("YZ plane select");
-    result["G20"] = JsonValue("Set units to inches");
-    result["G21"] = JsonValue("Set units to millimeters");
-    result["G28"] = JsonValue("Home axes");
-    result["G29"] = JsonValue("Bed mesh leveling");
-    result["G30"] = JsonValue("Probe");
-    result["G38"] = JsonValue("Probe toward target");
-    result["G60"] = JsonValue("Save position");
-    result["G61"] = JsonValue("Restore position");
-    result["G90"] = JsonValue("Absolute coordinates");
-    result["G91"] = JsonValue("Relative coordinates");
-    result["G92"] = JsonValue("Set position");
-    // Extrusion
-    result["G10"] = JsonValue("Firmware retract");
-    result["G11"] = JsonValue("Firmware unretract");
-    result["M82"] = JsonValue("Absolute extrusion");
-    result["M83"] = JsonValue("Relative extrusion");
-    // Temperature
-    result["M104"] = JsonValue("Set hotend temperature");
-    result["M109"] = JsonValue("Wait for hotend temperature");
-    result["M140"] = JsonValue("Set bed temperature");
-    result["M190"] = JsonValue("Wait for bed temperature");
-    result["M105"] = JsonValue("Get temperatures");
-    result["M155"] = JsonValue("Auto temperature reporting");
-    // Fan
-    result["M106"] = JsonValue("Set fan speed");
-    result["M107"] = JsonValue("Fan off");
-    // Motors
-    result["M17"] = JsonValue("Enable motors");
-    result["M18"] = JsonValue("Disable motors");
-    result["M84"] = JsonValue("Disable motors");
-    // SD card
-    result["M20"] = JsonValue("List SD files");
-    result["M23"] = JsonValue("Select SD file");
-    result["M24"] = JsonValue("Start/resume SD print");
-    result["M25"] = JsonValue("Pause SD print");
-    result["M27"] = JsonValue("Report SD status");
-    // Display
-    result["M73"] = JsonValue("Set display progress");
-    result["M117"] = JsonValue("Set display message");
-    result["M118"] = JsonValue("Output message");
-    // Status
-    result["M114"] = JsonValue("Get current position");
-    result["M119"] = JsonValue("Get endstop status");
-    // Sync
-    result["M400"] = JsonValue("Wait for moves to finish");
-    // Overrides
-    result["M220"] = JsonValue("Set speed factor");
-    result["M221"] = JsonValue("Set extrude factor");
-    // Advanced motion
-    result["M205"] = JsonValue("Advanced motion settings");
-    result["M900"] = JsonValue("Set pressure advance");
-    result["M593"] = JsonValue("Set input shaper");
-    // Settings
-    result["M500"] = JsonValue("Save settings");
-    result["M501"] = JsonValue("Load settings");
-    result["M502"] = JsonValue("Reset to factory defaults");
-    result["M503"] = JsonValue("Report current settings");
-    // Emergency
-    result["M112"] = JsonValue("Emergency stop");
-    // Nozzle
-    result["G12"] = JsonValue("Clean nozzle");
-    // Spline
-    result["G5"] = JsonValue("Bezier spline move");
-    // Firmware info
-    result["M115"] = JsonValue("Get firmware version");
-    result["M116"] = JsonValue("Wait for all temperatures");
-    // Stepper config
-    result["M92"] = JsonValue("Set steps per mm");
-    result["M350"] = JsonValue("Set microstepping");
-    result["M906"] = JsonValue("Set stepper driver current");
-    result["M569"] = JsonValue("Set stepper direction");
-    // Motion limits
-    result["M200"] = JsonValue("Set filament diameter");
-    result["M201"] = JsonValue("Set print acceleration");
-    result["M203"] = JsonValue("Set max feedrate");
-    result["M204"] = JsonValue("Set acceleration");
-    // Offsets
-    result["M206"] = JsonValue("Set home offset");
-    result["M218"] = JsonValue("Set tool offset");
-    result["M851"] = JsonValue("Set probe Z offset");
-    // Retract
-    result["M207"] = JsonValue("Set retract parameters");
-    result["M208"] = JsonValue("Set unretract parameters");
-    // PID
-    result["M301"] = JsonValue("Set hotend PID");
-    result["M303"] = JsonValue("PID autotune");
-    result["M304"] = JsonValue("Set bed PID");
-    // Probe
-    result["M401"] = JsonValue("Deploy probe");
-    result["M402"] = JsonValue("Stow probe");
-    // Bed mesh
-    result["M420"] = JsonValue("Enable/disable bed mesh");
-    result["M421"] = JsonValue("Set bed mesh point");
-    // Backlash
-    result["M425"] = JsonValue("Set backlash compensation");
-    // Misc
-    result["M42"] = JsonValue("Set pin state");
-    result["M150"] = JsonValue("Set LED color");
-    result["M280"] = JsonValue("Servo control");
-    result["M300"] = JsonValue("Beep");
-    result["M600"] = JsonValue("Filament change");
-    return JsonValue(result);
+    return getGcodeHelpJson();
 }
 
 JsonValue KlippyUdsServer::handleGcodeScript(const JsonValue& params) {

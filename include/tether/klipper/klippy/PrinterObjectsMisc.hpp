@@ -29,19 +29,15 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& n, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), n) != fields.end())
-                result[n] = std::move(v);
-        };
-        add("enabled", JsonValue(true));
+        auto s = buildStatus(fields);
+        s.add("enabled", JsonValue(true));
         if (registry_) {
             auto* m = registry_->getMacro(macroName_);
             if (m) {
-                add("description", JsonValue(m->description));
+                s.add("description", JsonValue(m->description));
             }
         }
-        return result;
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -63,13 +59,9 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
-        add("value", JsonValue(value_));
-        return result;
+        auto s = buildStatus(fields);
+        s.add("value", JsonValue(value_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override { return {"value"}; }
@@ -90,13 +82,9 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
-        add("value", JsonValue(value_));
-        return result;
+        auto s = buildStatus(fields);
+        s.add("value", JsonValue(value_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override { return {"value"}; }
@@ -117,14 +105,10 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
-        add("angle", JsonValue(angle_));
-        add("width", JsonValue(width_));
-        return result;
+        auto s = buildStatus(fields);
+        s.add("angle", JsonValue(angle_));
+        s.add("width", JsonValue(width_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override { return {"angle", "width"}; }
@@ -147,16 +131,12 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
+        auto s = buildStatus(fields);
         std::vector<JsonValue> pinArr;
         for (const auto& p : pins_) pinArr.push_back(JsonValue(p));
-        add("pins", JsonValue(pinArr));
-        add("value", JsonValue(value_));
-        return result;
+        s.add("pins", JsonValue(pinArr));
+        s.add("value", JsonValue(value_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -181,13 +161,9 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
-        add("state", JsonValue(state_));
-        return result;
+        auto s = buildStatus(fields);
+        s.add("state", JsonValue(state_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override { return {"state"}; }
@@ -206,13 +182,9 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
-        add("probe_state", JsonValue(probeState_));
-        return result;
+        auto s = buildStatus(fields);
+        s.add("probe_state", JsonValue(probeState_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override { return {"probe_state"}; }
@@ -232,17 +204,13 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
-        add("rx_error", JsonValue(static_cast<int64_t>(rxError_)));
-        add("tx_error", JsonValue(static_cast<int64_t>(txError_)));
-        add("tx_overflow", JsonValue(static_cast<int64_t>(txOverflow_)));
-        add("rx_overflow", JsonValue(static_cast<int64_t>(rxOverflow_)));
-        add("bus_state", JsonValue(busState_));
-        return result;
+        auto s = buildStatus(fields);
+        s.add("rx_error", JsonValue(static_cast<int64_t>(rxError_)));
+        s.add("tx_error", JsonValue(static_cast<int64_t>(txError_)));
+        s.add("tx_overflow", JsonValue(static_cast<int64_t>(txOverflow_)));
+        s.add("rx_overflow", JsonValue(static_cast<int64_t>(rxOverflow_)));
+        s.add("bus_state", JsonValue(busState_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -271,14 +239,10 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
-        add("value", JsonValue(value_));
-        add("cycle_time", JsonValue(cycleTime_));
-        return result;
+        auto s = buildStatus(fields);
+        s.add("value", JsonValue(value_));
+        s.add("cycle_time", JsonValue(cycleTime_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -301,16 +265,12 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
-        add("min_freq", JsonValue(minFreq_));
-        add("max_freq", JsonValue(maxFreq_));
-        add("accel_per_hz", JsonValue(accelPerHz_));
-        add("hz_per_sec", JsonValue(hzPerSec_));
-        return result;
+        auto s = buildStatus(fields);
+        s.add("min_freq", JsonValue(minFreq_));
+        s.add("max_freq", JsonValue(maxFreq_));
+        s.add("accel_per_hz", JsonValue(accelPerHz_));
+        s.add("hz_per_sec", JsonValue(hzPerSec_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -336,19 +296,15 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
-        add("connected", JsonValue(connected_));
-        add("loading", JsonValue(loading_));
-        add("splicing", JsonValue(splicing_));
-        add("unload_speed", JsonValue(unloadSpeed_));
-        add("load_speed", JsonValue(loadSpeed_));
-        add("ping_load_distance", JsonValue(pingLoadDistance_));
-        add("long_load_speed", JsonValue(longLoadSpeed_));
-        return result;
+        auto s = buildStatus(fields);
+        s.add("connected", JsonValue(connected_));
+        s.add("loading", JsonValue(loading_));
+        s.add("splicing", JsonValue(splicing_));
+        s.add("unload_speed", JsonValue(unloadSpeed_));
+        s.add("load_speed", JsonValue(loadSpeed_));
+        s.add("ping_load_distance", JsonValue(pingLoadDistance_));
+        s.add("long_load_speed", JsonValue(longLoadSpeed_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -377,16 +333,12 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
-        add("enabled", JsonValue(enabled_));
-        add("timeout", JsonValue(timeout_));
-        add("rows", JsonValue(static_cast<int64_t>(rows_)));
-        add("cols", JsonValue(static_cast<int64_t>(cols_)));
-        return result;
+        auto s = buildStatus(fields);
+        s.add("enabled", JsonValue(enabled_));
+        s.add("timeout", JsonValue(timeout_));
+        s.add("rows", JsonValue(static_cast<int64_t>(rows_)));
+        s.add("cols", JsonValue(static_cast<int64_t>(cols_)));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -410,18 +362,14 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
-        add("commands", JsonValue(static_cast<int64_t>(commands_)));
-        add("info", JsonValue(info_));
-        add("config_commands", JsonValue(static_cast<int64_t>(configCommands_)));
+        auto s = buildStatus(fields);
+        s.add("commands", JsonValue(static_cast<int64_t>(commands_)));
+        s.add("info", JsonValue(info_));
+        s.add("config_commands", JsonValue(static_cast<int64_t>(configCommands_)));
         std::vector<JsonValue> posArr;
         for (double v : moveGcodePosition_) posArr.push_back(JsonValue(v));
-        add("move_gcode_position", JsonValue(posArr));
-        return result;
+        s.add("move_gcode_position", JsonValue(posArr));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {

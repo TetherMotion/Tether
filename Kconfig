@@ -102,6 +102,23 @@ menu "Tether Library Configuration"
         help
             Enable Functional Safety over EtherCAT protocol support.
 
+    config TETHER_ENABLE_KLIPPER
+        bool "Enable Klipper protocol implementation"
+        default y
+        depends on TETHER_ENABLE_GCODE
+        help
+            Enable Klipper protocol implementation (clean-slate, Tether motion kernel).
+            Provides klippy (host) and device roles, protocol/transport/reliability
+            layers, clock sync, and Klipper object model.
+
+    config TETHER_ENABLE_KLIPPER_CAN
+        bool "Enable Klipper CAN transport (requires SocketCAN)"
+        default n
+        depends on TETHER_ENABLE_KLIPPER
+        help
+            Enable Klipper CAN transport using Linux SocketCAN.
+            Not available on ESP32.
+
     menu "Tether Device Drivers"
         depends on TETHER_ENABLE_ETHERCAT
 

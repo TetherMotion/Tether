@@ -29,23 +29,19 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& n, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), n) != fields.end())
-                result[n] = std::move(v);
-        };
+        auto s = buildStatus(fields);
         if (heater_) {
-            add("temperature", JsonValue(heater_->currentTemp()));
-            add("target", JsonValue(heater_->target()));
+            s.add("temperature", JsonValue(heater_->currentTemp()));
+            s.add("target", JsonValue(heater_->target()));
             double power = 0.0;
             auto ps = heater_->pidState();
             power = std::clamp(ps.output, 0.0, 1.0);
-            add("power", JsonValue(power));
+            s.add("power", JsonValue(power));
         }
-        add("pressure_advance", JsonValue(pressureAdvance_));
-        add("can_extrude", JsonValue(heater_ && heater_->currentTemp() > minExtrudeTemp_));
-        add("motion_queue", JsonValue(motionQueue_));
-        return result;
+        s.add("pressure_advance", JsonValue(pressureAdvance_));
+        s.add("can_extrude", JsonValue(heater_ && heater_->currentTemp() > minExtrudeTemp_));
+        s.add("motion_queue", JsonValue(motionQueue_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -79,18 +75,14 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& n, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), n) != fields.end())
-                result[n] = std::move(v);
-        };
+        auto s = buildStatus(fields);
         if (heater_) {
-            add("temperature", JsonValue(heater_->currentTemp()));
-            add("target", JsonValue(heater_->target()));
+            s.add("temperature", JsonValue(heater_->currentTemp()));
+            s.add("target", JsonValue(heater_->target()));
             auto ps = heater_->pidState();
-            add("power", JsonValue(std::clamp(ps.output, 0.0, 1.0)));
+            s.add("power", JsonValue(std::clamp(ps.output, 0.0, 1.0)));
         }
-        return result;
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -111,18 +103,14 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& n, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), n) != fields.end())
-                result[n] = std::move(v);
-        };
+        auto s = buildStatus(fields);
         if (fan_) {
-            add("speed", JsonValue(fan_->speed()));
+            s.add("speed", JsonValue(fan_->speed()));
         } else {
-            add("speed", JsonValue(0.0));
+            s.add("speed", JsonValue(0.0));
         }
-        add("rpm", JsonValue(rpm_));
-        return result;
+        s.add("rpm", JsonValue(rpm_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -147,18 +135,14 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& n, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), n) != fields.end())
-                result[n] = std::move(v);
-        };
+        auto s = buildStatus(fields);
         std::vector<JsonValue> h;
         for (const auto& n : heaters_) h.emplace_back(n);
-        std::vector<JsonValue> s;
-        for (const auto& n : sensors_) s.emplace_back(n);
-        add("available_heaters", JsonValue(h));
-        add("available_sensors", JsonValue(s));
-        return result;
+        std::vector<JsonValue> sn;
+        for (const auto& n : sensors_) sn.emplace_back(n);
+        s.add("available_heaters", JsonValue(h));
+        s.add("available_sensors", JsonValue(sn));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -178,24 +162,20 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& n, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), n) != fields.end())
-                result[n] = std::move(v);
-        };
-        add("mcu_version", JsonValue(mcuVersion_));
-        add("mcu_build_version", JsonValue(mcuBuildVersion_));
-        add("mcu_constants", JsonValue(std::map<std::string, JsonValue>{
+        auto s = buildStatus(fields);
+        s.add("mcu_version", JsonValue(mcuVersion_));
+        s.add("mcu_build_version", JsonValue(mcuBuildVersion_));
+        s.add("mcu_constants", JsonValue(std::map<std::string, JsonValue>{
             {"FREQ", JsonValue(static_cast<int64_t>(freq_))},
             {"SERIAL", JsonValue(serial_)}
         }));
-        add("last_stats", JsonValue(std::map<std::string, JsonValue>{
+        s.add("last_stats", JsonValue(std::map<std::string, JsonValue>{
             {"mcu_awake", JsonValue(mcuAwake_)},
             {"bytes_read", JsonValue(static_cast<int64_t>(bytesRead_))},
             {"bytes_write", JsonValue(static_cast<int64_t>(bytesWrite_))},
             {"retransmits", JsonValue(static_cast<int64_t>(retransmits_))},
         }));
-        return result;
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -232,18 +212,14 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& n, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), n) != fields.end())
-                result[n] = std::move(v);
-        };
+        auto s = buildStatus(fields);
         std::vector<JsonValue> stepperList;
         for (const auto& [name, enabled] : steppers_) {
             stepperList.emplace_back(name);
         }
-        add("steppers", JsonValue(stepperList));
-        add("enabled", JsonValue(enabled_));
-        return result;
+        s.add("steppers", JsonValue(stepperList));
+        s.add("enabled", JsonValue(enabled_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -264,15 +240,11 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& n, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), n) != fields.end())
-                result[n] = std::move(v);
-        };
-        add("state", JsonValue(state_));
-        add("printing_time", JsonValue(printingTime_));
-        add("timeout", JsonValue(timeout_));
-        return result;
+        auto s = buildStatus(fields);
+        s.add("state", JsonValue(state_));
+        s.add("printing_time", JsonValue(printingTime_));
+        s.add("timeout", JsonValue(timeout_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -296,15 +268,11 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& n, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), n) != fields.end())
-                result[n] = std::move(v);
-        };
-        add("sysload", JsonValue(sysload_));
-        add("cputime", JsonValue(cputime_));
-        add("memavail", JsonValue(static_cast<int64_t>(memavail_)));
-        return result;
+        auto s = buildStatus(fields);
+        s.add("sysload", JsonValue(sysload_));
+        s.add("cputime", JsonValue(cputime_));
+        s.add("memavail", JsonValue(static_cast<int64_t>(memavail_)));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -332,29 +300,25 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& n, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), n) != fields.end())
-                result[n] = std::move(v);
-        };
+        auto s = buildStatus(fields);
         if (sd_) {
-            add("filename", JsonValue(sd_->filePath()));
-            add("progress", JsonValue(sd_->progress()));
+            s.add("filename", JsonValue(sd_->filePath()));
+            s.add("progress", JsonValue(sd_->progress()));
         } else {
-            add("filename", JsonValue(filename_));
-            add("progress", JsonValue(progress_));
+            s.add("filename", JsonValue(filename_));
+            s.add("progress", JsonValue(progress_));
         }
-        add("total_duration", JsonValue(totalDuration_));
-        add("print_duration", JsonValue(printDuration_));
-        add("filament_used", JsonValue(filamentUsed_));
-        add("state", JsonValue(state_));
-        add("message", JsonValue(message_));
+        s.add("total_duration", JsonValue(totalDuration_));
+        s.add("print_duration", JsonValue(printDuration_));
+        s.add("filament_used", JsonValue(filamentUsed_));
+        s.add("state", JsonValue(state_));
+        s.add("message", JsonValue(message_));
         // info sub-object (SET_PRINT_STATS_INFO)
         std::map<std::string, JsonValue> info;
         info["total_layer"] = JsonValue(infoTotalLayer_);
         info["current_layer"] = JsonValue(infoCurrentLayer_);
-        add("info", JsonValue(info));
-        return result;
+        s.add("info", JsonValue(info));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {

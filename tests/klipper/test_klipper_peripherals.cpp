@@ -675,7 +675,7 @@ TEST(KlipperUsbSerial, WriteRead) {
     );
     transport.open();
     uint8_t data[] = {1, 2, 3};
-    EXPECT_EQ(transport.write(data, 3), 3);
+    EXPECT_EQ(transport.write(std::span<const uint8_t>(data, 3)), 3u);
     EXPECT_EQ(written.size(), 3u);
 }
 

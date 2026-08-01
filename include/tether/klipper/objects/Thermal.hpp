@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include "tether/control/PIDControllers.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -290,7 +292,11 @@ public:
     Heater(uint8_t oid, PwmWriteFunc pwmWrite, SensorReadFunc sensorRead)
         : oid_(oid)
         , pwmWrite_(std::move(pwmWrite))
-        , sensorRead_(std::move(sensorRead)) {}
+        , sensorRead_(std::move(sensorRead)) {
+        // Configure the PID controller with default heater limits.
+        pid_.setGains(0.0, 0.0, 0.0);
+        applyPidLimits();
+    }
 
     uint8_t oid() const { return oid_; }
 
@@ -304,7 +310,11 @@ public:
     double currentTemp() const { return currentTemp_; }
 
     /// @brief Set PID parameters.
-    void setPidParams(const HeaterPidParams& params) { pidParams_ = params; }
+    void setPidParams(const HeaterPidParams& params) {
+        pidParams_ = params;
+        pid_.setGains(params.Kp, params.Ki, params.Kd);
+        applyPidLimits();
+    }
 
     /// @brief Get PID parameters.
     const HeaterPidParams& pidParams() const { return pidParams_; }
@@ -348,20 +358,17 @@ public:
             return 0.0;
         }
 
-        // PID computation
-        double error = target_ - measured;
-        integral_ += error * controlInterval_;
-        integral_ = std::clamp(integral_, -pidParams_.imax, pidParams_.imax);
-        double derivative = (error - lastError_) / controlInterval_;
-        lastError_ = error;
+        // PID computation via Control::PIDController
+        Control::ControllerInput input{};
+        input.reference = target_;
+        input.measured = measured;
+        input.dt = controlInterval_;
+        auto output = pid_.compute(input);
+        lastOutput_ = output;
 
-        double output = pidParams_.Kp * error +
-                        pidParams_.Ki * integral_ +
-                        pidParams_.Kd * derivative;
-        output = std::clamp(output, pidParams_.pwmMin, pidParams_.pwmMax);
-
-        pwmWrite_(output);
-        return output;
+        double pwm = std::clamp(output.control, pidParams_.pwmMin, pidParams_.pwmMax);
+        pwmWrite_(pwm);
+        return pwm;
     }
 
     /// @brief Manually apply a power level and update the temperature reading.
@@ -382,8 +389,8 @@ public:
 
     /// @brief Reset PID state.
     void reset() {
-        integral_ = 0.0;
-        lastError_ = 0.0;
+        pid_.reset();
+        lastOutput_ = {};
         target_ = 0.0;
         pwmWrite_(0.0);
     }
@@ -403,10 +410,21 @@ public:
     };
 
     PidState pidState() const {
-        return {lastError_, integral_, 0.0, 0.0};
+        return {lastOutput_.error, lastOutput_.integral,
+                lastOutput_.derivative, lastOutput_.control};
     }
 
 private:
+    /// @brief Apply integral and output limits from pidParams_ to the PID controller.
+    void applyPidLimits() {
+        Control::SaturationLimits limits;
+        limits.outputMin = pidParams_.pwmMin;
+        limits.outputMax = pidParams_.pwmMax;
+        limits.integralMin = -pidParams_.imax;
+        limits.integralMax = pidParams_.imax;
+        pid_.setSaturationLimits(limits);
+    }
+
     uint8_t oid_;
     PwmWriteFunc pwmWrite_;
     SensorReadFunc sensorRead_;
@@ -418,8 +436,8 @@ private:
     double maxTemp_ = 300.0;
 
     HeaterPidParams pidParams_;
-    double integral_ = 0.0;
-    double lastError_ = 0.0;
+    Control::PIDController pid_;
+    Control::ControllerOutput lastOutput_;
     double controlInterval_ = 0.1; // 100ms default
 };
 

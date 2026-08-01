@@ -110,6 +110,26 @@ if(CONFIG_TETHER_ENABLE_FSOE)
     list(APPEND TETHER_SRCS ${FSOE_SRCS})
 endif()
 
+# Klipper protocol implementation
+# Note: CAN transport (CanTransport.cpp) requires Linux SocketCAN and is
+# excluded on ESP32. TCP/Pipe transports use POSIX APIs not available on
+# ESP-IDF and are also excluded — only the protocol/reliability/clock/
+# objects/motion/klippy/device layers are compiled on ESP32.
+if(CONFIG_TETHER_ENABLE_KLIPPER)
+    file(GLOB_RECURSE KLIPPER_SRCS
+        "src/klipper/protocol/*.cpp"
+        "src/klipper/reliability/*.cpp"
+        "src/klipper/objects/*.cpp"
+        "src/klipper/motion/*.cpp"
+        "src/klipper/klippy/*.cpp"
+        "src/klipper/device/*.cpp"
+    )
+    # Exclude POSIX-only transports on ESP32
+    list(FILTER KLIPPER_SRCS EXCLUDE REGEX
+        "(CanTransport|PipeTransport|TcpStreamTransport)\\.cpp$")
+    list(APPEND TETHER_SRCS ${KLIPPER_SRCS})
+endif()
+
 # HAL - ESP32 implementation
 file(GLOB HAL_COMMON_SRCS "src/hal/*.cpp")
 file(GLOB HAL_ESP32_SRCS "src/hal/esp32/*.cpp")
@@ -216,6 +236,10 @@ endif()
 
 if(CONFIG_TETHER_ENABLE_KINEMATICS)
     target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_KINEMATICS=1)
+endif()
+
+if(CONFIG_TETHER_ENABLE_KLIPPER)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_KLIPPER=1)
 endif()
 
 # Per-driver compile definitions (including header-only drivers)

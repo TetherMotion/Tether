@@ -3,58 +3,34 @@
  * @brief USB serial and UART transport implementations.
  *
  * Provides:
- *   - UsbSerialTransport: USB CDC serial transport
- *   - UartTransport: hardware UART transport
- *   - Both implement the ITransport interface from the protocol layer
+ *   - UsbSerialTransport: USB CDC serial transport (callback-based)
+ *   - UartTransport: hardware UART transport (callback-based)
+ *
+ * Both implement the IByteStreamTransport interface so they can be used
+ * anywhere the Klipper protocol stack expects a byte stream.  The
+ * callback-based design allows embedded targets (ESP-IDF, STM32) to wire
+ * these transports to their platform-specific USB CDC / UART HAL drivers
+ * without pulling in POSIX dependencies.
  */
 
 #pragma once
 
+#include "tether/klipper/transport/IByteStreamTransport.hpp"
 #include "tether/klipper/protocol/Constants.hpp"
 
 #include <atomic>
 #include <cstdint>
 #include <functional>
-#include <mutex>
 #include <string>
-#include <vector>
 
 namespace tether::klipper::transport {
 
-/// @brief Transport interface for Klipper communication.
-class ITransport {
-public:
-    virtual ~ITransport() = default;
-
-    /// @brief Open the transport.
-    /// @return True on success.
-    virtual bool open() = 0;
-
-    /// @brief Close the transport.
-    virtual void close() = 0;
-
-    /// @brief Check if the transport is open.
-    virtual bool isOpen() const = 0;
-
-    /// @brief Write data to the transport.
-    /// @return Number of bytes written, or -1 on error.
-    virtual ssize_t write(const uint8_t* data, size_t len) = 0;
-
-    /// @brief Read data from the transport.
-    /// @param timeoutMs Read timeout in milliseconds (-1 = blocking).
-    /// @return Number of bytes read, or -1 on error/timeout.
-    virtual ssize_t read(uint8_t* data, size_t len, int timeoutMs = -1) = 0;
-
-    /// @brief Get the transport name.
-    virtual std::string name() const = 0;
-};
-
-/// @brief USB CDC serial transport.
-class UsbSerialTransport : public ITransport {
+/// @brief USB CDC serial transport backed by user-supplied callbacks.
+class UsbSerialTransport : public IByteStreamTransport {
 public:
     using UsbWriteFunc = std::function<ssize_t(const uint8_t*, size_t)>;
-    using UsbReadFunc = std::function<ssize_t(uint8_t*, size_t, int)>;
-    using UsbOpenFunc = std::function<bool()>;
+    using UsbReadFunc  = std::function<ssize_t(uint8_t*, size_t, int)>;
+    using UsbOpenFunc  = std::function<bool()>;
     using UsbCloseFunc = std::function<void()>;
 
     UsbSerialTransport(std::string deviceName,
@@ -74,25 +50,34 @@ public:
         return open_;
     }
 
-    void close() override {
-        if (!open_) return;
-        if (closeFunc_) closeFunc_();
-        open_ = false;
-    }
-
     bool isOpen() const override { return open_; }
 
-    ssize_t write(const uint8_t* data, size_t len) override {
-        if (!open_ || !writeFunc_) return -1;
-        return writeFunc_(data, len);
+    void close() override {
+        if (!open_.exchange(false)) return;
+        if (closeFunc_) closeFunc_();
     }
 
-    ssize_t read(uint8_t* data, size_t len, int timeoutMs = -1) override {
-        if (!open_ || !readFunc_) return -1;
-        return readFunc_(data, len, timeoutMs);
+    size_t write(std::span<const uint8_t> data) override {
+        if (!open_ || !writeFunc_ || data.empty()) return 0;
+        ssize_t n = writeFunc_(data.data(), data.size());
+        return n < 0 ? 0 : static_cast<size_t>(n);
     }
 
-    std::string name() const override { return "usb:" + deviceName_; }
+    size_t available() const override {
+        // Callback-based transports don't expose a byte count; return 1 if
+        // open so the protocol layer falls through to read().
+        return open_ ? 1 : 0;
+    }
+
+    size_t read(uint8_t* out, size_t maxLen, bool canBlock = false) override {
+        if (!open_ || !readFunc_ || maxLen == 0) return 0;
+        int timeoutMs = canBlock ? 1000 : 1;
+        ssize_t n = readFunc_(out, maxLen, timeoutMs);
+        return n < 0 ? 0 : static_cast<size_t>(n);
+    }
+
+    /// @return Transport name (for diagnostics).
+    std::string name() const { return "usb:" + deviceName_; }
 
 private:
     std::string deviceName_;
@@ -103,12 +88,12 @@ private:
     std::atomic<bool> open_{false};
 };
 
-/// @brief Hardware UART transport.
-class UartTransport : public ITransport {
+/// @brief Hardware UART transport backed by user-supplied callbacks.
+class UartTransport : public IByteStreamTransport {
 public:
     using UartWriteFunc = std::function<ssize_t(const uint8_t*, size_t)>;
-    using UartReadFunc = std::function<ssize_t(uint8_t*, size_t)>;
-    using UartOpenFunc = std::function<bool()>;
+    using UartReadFunc  = std::function<ssize_t(uint8_t*, size_t)>;
+    using UartOpenFunc  = std::function<bool()>;
     using UartCloseFunc = std::function<void()>;
 
     UartTransport(std::string deviceName,
@@ -130,25 +115,31 @@ public:
         return open_;
     }
 
-    void close() override {
-        if (!open_) return;
-        if (closeFunc_) closeFunc_();
-        open_ = false;
-    }
-
     bool isOpen() const override { return open_; }
 
-    ssize_t write(const uint8_t* data, size_t len) override {
-        if (!open_ || !writeFunc_) return -1;
-        return writeFunc_(data, len);
+    void close() override {
+        if (!open_.exchange(false)) return;
+        if (closeFunc_) closeFunc_();
     }
 
-    ssize_t read(uint8_t* data, size_t len, int timeoutMs = -1) override {
-        if (!open_ || !readFunc_) return -1;
-        return readFunc_(data, len);
+    size_t write(std::span<const uint8_t> data) override {
+        if (!open_ || !writeFunc_ || data.empty()) return 0;
+        ssize_t n = writeFunc_(data.data(), data.size());
+        return n < 0 ? 0 : static_cast<size_t>(n);
     }
 
-    std::string name() const override {
+    size_t available() const override {
+        return open_ ? 1 : 0;
+    }
+
+    size_t read(uint8_t* out, size_t maxLen, bool canBlock = false) override {
+        if (!open_ || !readFunc_ || maxLen == 0) return 0;
+        ssize_t n = readFunc_(out, maxLen);
+        return n < 0 ? 0 : static_cast<size_t>(n);
+    }
+
+    /// @return Transport name (for diagnostics).
+    std::string name() const {
         return "uart:" + deviceName_ + "@" + std::to_string(baudRate_);
     }
 

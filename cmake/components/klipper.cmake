@@ -103,6 +103,21 @@ foreach(_tgt IN LISTS _variants)
         target_link_libraries(${_tgt} PUBLIC tether_autotuning_shared)
     endif()
 
+    # Control algorithms (PIDController used by Heater::control())
+    if(TARGET tether_controls_static)
+        target_link_libraries(${_tgt} PUBLIC tether_controls_static)
+    elseif(TARGET tether_controls_shared)
+        target_link_libraries(${_tgt} PUBLIC tether_controls_shared)
+    endif()
+
+    # G-code shared types (Units, DistanceMode, Plane enums used by
+    # PrinterMotionState for modal state tracking)
+    if(TARGET tether_gcode_static)
+        target_link_libraries(${_tgt} PUBLIC tether_gcode_static)
+    elseif(TARGET tether_gcode_shared)
+        target_link_libraries(${_tgt} PUBLIC tether_gcode_shared)
+    endif()
+
     # Identification framework (for resonance testing / frequency analysis)
     if(TARGET tether_identification_static)
         target_link_libraries(${_tgt} PUBLIC tether_identification_static)

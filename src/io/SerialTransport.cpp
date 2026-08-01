@@ -75,7 +75,7 @@ static speed_t baudToSpeed(uint32_t baud) {
         case 1500000: return B1500000;
         case 2000000: return B2000000;
         case 3000000: return B3000000;
-        default:      return B115200;
+        default:      return B0;  // sentinel: use cfsetspeed for non-standard rates
     }
 }
 
@@ -95,8 +95,14 @@ bool PosixSerialDriver::open(const char* port, uint32_t baudRate) {
     }
 
     speed_t spd = baudToSpeed(baudRate);
-    cfsetospeed(&tty, spd);
-    cfsetispeed(&tty, spd);
+    if (spd == B0) {
+        // Non-standard baud rate (e.g. 250000 for Klipper): use cfsetspeed
+        // which accepts arbitrary numeric rates on Linux.
+        cfsetspeed(&tty, static_cast<speed_t>(baudRate));
+    } else {
+        cfsetospeed(&tty, spd);
+        cfsetispeed(&tty, spd);
+    }
 
     // 8N1
     tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;

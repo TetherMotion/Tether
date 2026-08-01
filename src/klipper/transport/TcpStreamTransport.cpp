@@ -1,21 +1,18 @@
 /**
  * @file TcpStreamTransport.cpp
- * @brief TCP/IP stream transport implementation (POSIX sockets).
+ * @brief TCP/IP stream transport implementation.
+ *
+ * Delegates connection setup to `tether::platform::posixTcpConnect()` /
+ * `posixTcpListenAccept()` and data transfer to `tether::io::TcpTransport`,
+ * eliminating the duplicated POSIX socket code that previously existed here.
  */
 
 #include "tether/klipper/transport/TcpStreamTransport.hpp"
 
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <poll.h>
+#if !defined(ESP_PLATFORM)
+
 #include <sys/ioctl.h>
-#include <cstring>
+#include <poll.h>
 
 namespace tether::klipper::transport {
 
@@ -26,64 +23,17 @@ TcpStreamTransport::~TcpStreamTransport() {
 bool TcpStreamTransport::open() {
     if (open_) return true;
 
+    int fd = -1;
     if (config_.mode == "server") {
-        listenSock_ = ::socket(AF_INET, SOCK_STREAM, 0);
-        if (listenSock_ < 0) return false;
-        int yes = 1;
-        ::setsockopt(listenSock_, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
-        struct sockaddr_in addr{};
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = INADDR_ANY;
-        addr.sin_port = htons(config_.port);
-        if (::bind(listenSock_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
-            ::close(listenSock_); listenSock_ = -1; return false;
-        }
-        if (::listen(listenSock_, config_.backlog) < 0) {
-            ::close(listenSock_); listenSock_ = -1; return false;
-        }
-        // Accept one connection (blocking with timeout).
-        struct pollfd pfd{listenSock_, POLLIN, 0};
-        if (::poll(&pfd, 1, config_.timeoutMs) <= 0) {
-            ::close(listenSock_); listenSock_ = -1; return false;
-        }
-        sock_ = ::accept(listenSock_, nullptr, nullptr);
-        if (sock_ < 0) { ::close(listenSock_); listenSock_ = -1; return false; }
-        ::close(listenSock_); listenSock_ = -1;
+        fd = tether::platform::posixTcpListenAccept(
+            config_.port, config_.backlog, config_.timeoutMs);
     } else {
-        // Client mode.
-        sock_ = ::socket(AF_INET, SOCK_STREAM, 0);
-        if (sock_ < 0) return false;
-        struct addrinfo hints{}, *res = nullptr;
-        hints.ai_family = AF_INET;
-        hints.ai_socktype = SOCK_STREAM;
-        std::string portStr = std::to_string(config_.port);
-        if (::getaddrinfo(config_.host.c_str(), portStr.c_str(), &hints, &res) != 0) {
-            ::close(sock_); sock_ = -1; return false;
-        }
-        // Set non-blocking for timeout connect.
-        int flags = ::fcntl(sock_, F_GETFL, 0);
-        ::fcntl(sock_, F_SETFL, flags | O_NONBLOCK);
-        int rc = ::connect(sock_, res->ai_addr, res->ai_addrlen);
-        ::freeaddrinfo(res);
-        if (rc < 0 && errno != EINPROGRESS) {
-            ::close(sock_); sock_ = -1; return false;
-        }
-        struct pollfd pfd{sock_, POLLOUT, 0};
-        if (::poll(&pfd, 1, config_.timeoutMs) <= 0) {
-            ::close(sock_); sock_ = -1; return false;
-        }
-        int err = 0;
-        socklen_t errLen = sizeof(err);
-        ::getsockopt(sock_, SOL_SOCKET, SO_ERROR, &err, &errLen);
-        if (err != 0) {
-            ::close(sock_); sock_ = -1; return false;
-        }
-        // Restore blocking mode.
-        ::fcntl(sock_, F_SETFL, flags);
+        fd = tether::platform::posixTcpConnect(
+            config_.host, config_.port, config_.timeoutMs);
     }
-    // Disable Nagle for low-latency command/response.
-    int one = 1;
-    ::setsockopt(sock_, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    if (fd < 0) return false;
+
+    transport_ = std::make_unique<tether::io::TcpTransport>(fd);
     open_ = true;
     return true;
 }
@@ -92,43 +42,53 @@ bool TcpStreamTransport::isOpen() const { return open_; }
 
 void TcpStreamTransport::close() {
     if (!open_.exchange(false)) return;
-    if (sock_ >= 0) { ::close(sock_); sock_ = -1; }
-    if (listenSock_ >= 0) { ::close(listenSock_); listenSock_ = -1; }
+    if (transport_) {
+        transport_->close();
+        transport_.reset();
+    }
 }
 
 size_t TcpStreamTransport::write(std::span<const uint8_t> data) {
-    if (!open_ || sock_ < 0) return 0;
-    size_t total = 0;
-    while (total < data.size()) {
-        ssize_t n = ::send(sock_, data.data() + total, data.size() - total, MSG_NOSIGNAL);
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            return total;
-        }
-        total += static_cast<size_t>(n);
-    }
-    return total;
+    if (!open_ || !transport_ || data.empty()) return 0;
+    bool ok = transport_->send(data.data(), data.size());
+    return ok ? data.size() : 0;
 }
 
 size_t TcpStreamTransport::available() const {
-    if (!open_ || sock_ < 0) return 0;
-    int n = 0;
-    if (::ioctl(sock_, FIONREAD, &n) < 0) return 0;
-    return static_cast<size_t>(n);
+    if (!open_ || !transport_) return 0;
+    // io::TcpTransport doesn't expose FIONREAD; use a zero-timeout poll via
+    // isConnected() as a proxy.  The protocol layer will call read() which
+    // handles the actual data retrieval.
+    return transport_->isConnected() ? 1 : 0;
 }
 
 size_t TcpStreamTransport::read(uint8_t* out, size_t maxLen, bool canBlock) {
-    if (!open_ || sock_ < 0 || maxLen == 0) return 0;
-    if (canBlock) {
-        struct pollfd pfd{sock_, POLLIN, 0};
-        if (::poll(&pfd, 1, -1) <= 0) return 0;
+    if (!open_ || !transport_ || maxLen == 0) return 0;
+    uint32_t timeoutMs = canBlock ? 0 : 1;  // 0 = block forever in io::TcpTransport
+    if (!canBlock) {
+        // Non-blocking: use a 1ms timeout probe.
+        size_t n = transport_->receive(out, maxLen, 1);
+        return n;
     }
-    ssize_t n = ::recv(sock_, out, maxLen, 0);
-    if (n < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
-        return 0;
-    }
-    return static_cast<size_t>(n);
+    // Blocking: io::TcpTransport::receive with timeoutMs=0 means no wait.
+    // Use a long timeout instead for blocking behaviour.
+    return transport_->receive(out, maxLen, 60000);
 }
 
 } // namespace tether::klipper::transport
+
+#else // ESP_PLATFORM
+
+namespace tether::klipper::transport {
+
+TcpStreamTransport::~TcpStreamTransport() { close(); }
+bool TcpStreamTransport::open() { return false; }
+bool TcpStreamTransport::isOpen() const { return false; }
+void TcpStreamTransport::close() { open_ = false; }
+size_t TcpStreamTransport::write(std::span<const uint8_t>) { return 0; }
+size_t TcpStreamTransport::available() const { return 0; }
+size_t TcpStreamTransport::read(uint8_t*, size_t, bool) { return 0; }
+
+} // namespace tether::klipper::transport
+
+#endif // ESP_PLATFORM

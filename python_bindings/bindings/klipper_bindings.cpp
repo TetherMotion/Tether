@@ -193,7 +193,9 @@ PYBIND11_MODULE(_klipper, m) {
 
     py::class_<PrinterMotionState>(m, "PrinterMotionState")
         .def(py::init<>())
-        .def_readwrite("absolute_coordinates", &PrinterMotionState::absoluteCoordinates)
+        .def_property("absolute_coordinates",
+                       &PrinterMotionState::absoluteCoordinates,
+                       &PrinterMotionState::setAbsoluteCoordinates)
         .def_readwrite("absolute_extrude", &PrinterMotionState::absoluteExtrude)
         .def_readwrite("feedrate", &PrinterMotionState::feedrate)
         .def_readwrite("homed_axes", &PrinterMotionState::homedAxes);
