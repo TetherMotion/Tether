@@ -7,6 +7,24 @@
  *   - MeshPoint: individual mesh probe point
  *   - Bilinear interpolation for Z compensation
  *   - Mesh save/load (in-memory)
+ *
+ * @par Klipper-specific scope
+ * This module is **Klipper-specific** and lives in the
+ * `tether::klipper::objects` namespace. It is not promoted to a shared
+ * `tether/compensation/` directory because bed mesh leveling is a
+ * 3D-printer-specific concept with no equivalent in the main Tether
+ * RS274/NGC CNC interpreter.
+ *
+ * The main Tether interpreter handles machine compensation through:
+ * - Tool compensation (G40-G42, G43-G49) in `tether/gcode/motion/GCodeToolComp.hpp`
+ * - Volumetric compensation (3D error grid) in `tether/gcode/motion/GCodeAdvancedMotion.hpp`
+ * - Backlash compensation (per-axis) in `tether/gcode/motion/GCodeAdvancedMotion.hpp`
+ *
+ * The additional Klipper leveling methods (ZTilt, QuadGantryLevel,
+ * ScrewsTiltAdjust, BedScrews, BedTilt, DeltaCalibrate) are implemented
+ * as extended Klipper commands in KlippyInstanceExtendedCommands.ipp,
+ * not as part of this module. Only BedMesh (the 2D mesh with bilinear
+ * interpolation) is provided here.
  */
 
 #pragma once

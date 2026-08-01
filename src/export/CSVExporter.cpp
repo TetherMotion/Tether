@@ -268,6 +268,7 @@ std::string CSVExporter::formatDouble(double value, int precision) {
 }
 
 bool CSVExporter::exportStatistics(const TrajectoryStatistics& stats, const std::string& filename) {
+    if (!isSafeFilename(filename)) return false;
     std::ofstream file(filename);
     if (!file.is_open()) return false;
     
@@ -305,6 +306,7 @@ bool CSVExporter::exportStatistics(const TrajectoryStatistics& stats, const std:
 }
 
 bool CSVExporter::exportViolations(const std::vector<LimitViolation>& violations, const std::string& filename) {
+    if (!isSafeFilename(filename)) return false;
     std::ofstream file(filename);
     if (!file.is_open()) return false;
     

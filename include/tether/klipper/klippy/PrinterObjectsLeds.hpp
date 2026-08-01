@@ -28,13 +28,9 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& n, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), n) != fields.end())
-                result[n] = std::move(v);
-        };
+        auto s = buildStatus(fields);
         if (dev_) {
-            add("pixel_count", JsonValue(static_cast<int64_t>(dev_->numLeds())));
+            s.add("pixel_count", JsonValue(static_cast<int64_t>(dev_->numLeds())));
             // Chain data as a hex string
             std::ostringstream ss;
             for (int i = 0; i < dev_->numLeds(); ++i) {
@@ -45,9 +41,9 @@ public:
                    << std::setw(2) << static_cast<int>(color.b)
                    << std::setw(2) << static_cast<int>(color.w);
             }
-            add("color_data", JsonValue(ss.str()));
+            s.add("color_data", JsonValue(ss.str()));
         }
-        return result;
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -68,15 +64,11 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
+        auto s = buildStatus(fields);
         std::vector<JsonValue> color;
         for (double c : color_) color.emplace_back(c);
-        add("color_data", JsonValue(std::vector<JsonValue>{JsonValue(color)}));
-        return result;
+        s.add("color_data", JsonValue(std::vector<JsonValue>{JsonValue(color)}));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override { return {"color_data"}; }
@@ -97,15 +89,11 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
+        auto s = buildStatus(fields);
         std::vector<JsonValue> color;
         for (double c : color_) color.emplace_back(c);
-        add("color_data", JsonValue(std::vector<JsonValue>{JsonValue(color)}));
-        return result;
+        s.add("color_data", JsonValue(std::vector<JsonValue>{JsonValue(color)}));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override { return {"color_data"}; }

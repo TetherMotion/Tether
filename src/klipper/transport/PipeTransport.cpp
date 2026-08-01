@@ -1,19 +1,27 @@
 /**
  * @file PipeTransport.cpp
  * @brief POSIX pipe/serial transport implementation.
+ *
+ * For serial-device mode (devicePath non-empty), delegates the termios
+ * setup to `tether::io::PosixSerialDriver` to avoid duplicating the
+ * serial-port configuration code that already lives in the `tether::io`
+ * module.  The driver's fd is borrowed via `PosixSerialDriver::fd()` and
+ * the driver is released without closing (ownership transfers to
+ * PipeTransport).  For raw-fd-pair mode (used by the Linux MCU
+ * simulator), the transport manages the file descriptors directly.
  */
 
 #include "tether/klipper/transport/PipeTransport.hpp"
+
+#if !defined(ESP_PLATFORM)
+
+#include "tether/io/SerialTransport.hpp"
 
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <poll.h>
 #include <sys/ioctl.h>
-
-#ifdef __linux__
-#include <termios.h>
-#endif
 
 namespace tether::klipper::transport {
 
@@ -27,23 +35,21 @@ bool PipeTransport::open() {
     int wfd = config_.writeFd;
 
     if (!config_.devicePath.empty()) {
-#ifdef __linux__
-        int fd = ::open(config_.devicePath.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
-        if (fd < 0) return false;
-        // Configure as serial if baud rate is set.
-        if (config_.baudRate > 0) {
-            struct termios tty{};
-            if (tcgetattr(fd, &tty) != 0) { ::close(fd); return false; }
-            cfmakeraw(&tty);
-            cfsetspeed(&tty, static_cast<speed_t>(config_.baudRate));
-            tty.c_cflag |= CLOCAL | CREAD;
-            if (tcsetattr(fd, TCSANOW, &tty) != 0) { ::close(fd); return false; }
+        // Serial device mode: use io::PosixSerialDriver for termios setup,
+        // then dup its fd so we avoid duplicating serial-port code.
+        // The driver is destroyed (closing its fd) after we've dup'd.
+        auto driver = std::make_unique<tether::io::PosixSerialDriver>();
+        if (!driver->open(config_.devicePath.c_str(), config_.baudRate)) {
+            return false;
         }
+        int fd = ::dup(driver->fd());
+        driver.reset();  // closes the original fd; our dup remains valid
+        if (fd < 0) return false;
+        // Set non-blocking mode for the protocol layer's poll-based reads.
+        int flags = ::fcntl(fd, F_GETFL, 0);
+        ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
         rfd = fd;
         wfd = fd;
-#else
-        return false; // serial device mode only supported on Linux
-#endif
     }
     if (rfd < 0 || wfd < 0) return false;
     config_.readFd = rfd;
@@ -103,3 +109,19 @@ size_t PipeTransport::read(uint8_t* out, size_t maxLen, bool canBlock) {
 }
 
 } // namespace tether::klipper::transport
+
+#else // ESP_PLATFORM
+
+namespace tether::klipper::transport {
+
+PipeTransport::~PipeTransport() { close(); }
+bool PipeTransport::open() { return false; }
+bool PipeTransport::isOpen() const { return false; }
+void PipeTransport::close() { open_ = false; }
+size_t PipeTransport::write(std::span<const uint8_t>) { return 0; }
+size_t PipeTransport::available() const { return 0; }
+size_t PipeTransport::read(uint8_t*, size_t, bool) { return 0; }
+
+} // namespace tether::klipper::transport
+
+#endif // ESP_PLATFORM

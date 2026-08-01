@@ -28,11 +28,7 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& n, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), n) != fields.end())
-                result[n] = std::move(v);
-        };
+        auto s = buildStatus(fields);
         if (dev_) {
             // Read actual TMC register values
             // DRV_STATUS register (0x6F) contains stall guard and other status
@@ -58,12 +54,12 @@ public:
                 }
             } catch (...) {}
 
-            add("mcu_phase_offset", JsonValue(mcuPhaseOffset));
-            add("drv_status", JsonValue(drvStatus));
-            add("run_current", JsonValue(runCurrent));
-            add("hold_current", JsonValue(holdCurrent));
+            s.add("mcu_phase_offset", JsonValue(mcuPhaseOffset));
+            s.add("drv_status", JsonValue(drvStatus));
+            s.add("run_current", JsonValue(runCurrent));
+            s.add("hold_current", JsonValue(holdCurrent));
         }
-        return result;
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -84,17 +80,13 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
-        add("mcu_phase_offset", JsonValue(static_cast<int64_t>(mcuPhaseOffset_)));
-        add("run_current", JsonValue(runCurrent_));
-        add("hold_current", JsonValue(holdCurrent_));
-        add("drv_status", JsonValue(static_cast<int64_t>(drvStatus_)));
-        add("temperature", JsonValue(temperature_));
-        return result;
+        auto s = buildStatus(fields);
+        s.add("mcu_phase_offset", JsonValue(static_cast<int64_t>(mcuPhaseOffset_)));
+        s.add("run_current", JsonValue(runCurrent_));
+        s.add("hold_current", JsonValue(holdCurrent_));
+        s.add("drv_status", JsonValue(static_cast<int64_t>(drvStatus_)));
+        s.add("temperature", JsonValue(temperature_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {

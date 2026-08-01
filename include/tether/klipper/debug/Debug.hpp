@@ -5,9 +5,16 @@
  * Provides:
  *   - DebugFlags: bitfield of debug enable flags
  *   - DiagnosticGate: conditional logging/dump based on flags
+ *
+ * DebugManager is a thin wrapper over Tether::Platform::Logger.
+ * Debug-flag-gated messages are forwarded to the platform Logger at
+ * Debug level with a "klipper" tag, so all log routing (timestamps,
+ * custom handlers, level filtering) is centralised in one place.
  */
 
 #pragma once
+
+#include "logging/Logger.hpp"
 
 #include <cstdint>
 #include <functional>
@@ -44,9 +51,12 @@ inline bool hasFlag(DebugFlag flags, DebugFlag test) {
     return static_cast<uint32_t>(flags & test) != 0;
 }
 
-/// @brief Debug flags manager with optional log callback.
+/// @brief Debug flags manager — thin wrapper over Tether::Platform::Logger.
 class DebugManager {
 public:
+    /// @brief Legacy log callback type (kept for backward compatibility).
+    /// If set, messages are also delivered to this callback in addition to
+    /// the platform Logger.
     using LogCallback = std::function<void(std::string_view message)>;
 
     DebugManager() = default;
@@ -69,19 +79,25 @@ public:
     /// @brief Check if a flag is enabled.
     bool isEnabled(DebugFlag flag) const { return hasFlag(flags_, flag); }
 
-    /// @brief Set the log callback.
+    /// @brief Set a legacy log callback (optional, for backward compatibility).
+    /// If set, log() messages are also delivered to this callback.
     void setLogCallback(LogCallback cb) { logCb_ = std::move(cb); }
 
     /// @brief Log a message if the corresponding flag is enabled.
+    /// Forwards to Tether::Platform::Logger at Debug level with tag "klipper".
     void log(DebugFlag flag, std::string_view message) {
-        if (isEnabled(flag) && logCb_) {
-            logCb_(message);
-        }
+        if (!isEnabled(flag)) return;
+        // Forward to the platform Logger.
+        Tether::Platform::Logger::instance().log(
+            Tether::Platform::LogLevel::Debug, "klipper", "%.*s",
+            static_cast<int>(message.size()), message.data());
+        // Also deliver to legacy callback if set.
+        if (logCb_) logCb_(message);
     }
 
     /// @brief Check if logging is enabled for a flag.
     bool shouldLog(DebugFlag flag) const {
-        return isEnabled(flag) && logCb_ != nullptr;
+        return isEnabled(flag);
     }
 
 private:

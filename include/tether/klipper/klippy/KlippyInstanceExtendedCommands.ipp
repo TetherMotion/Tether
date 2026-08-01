@@ -1136,7 +1136,7 @@
             GcodeState state;
             state.position = motionState_.position;
             state.gcodeOffset = gcodeOffset_;
-            state.absoluteCoords = motionState_.absoluteCoordinates;
+            state.absoluteCoords = (motionState_.distanceMode == GCode::DistanceMode::ABSOLUTE);
             state.absoluteExtrude = motionState_.absoluteExtrude;
             state.feedrate = motionState_.feedrate;
             state.speedFactor = motionState_.speedFactor;
@@ -1153,7 +1153,9 @@
             if (it != gcodeStates_.end()) {
                 motionState_.position = it->second.position;
                 gcodeOffset_ = it->second.gcodeOffset;
-                motionState_.absoluteCoordinates = it->second.absoluteCoords;
+                motionState_.distanceMode = it->second.absoluteCoords
+                    ? GCode::DistanceMode::ABSOLUTE
+                    : GCode::DistanceMode::INCREMENTAL;
                 motionState_.absoluteExtrude = it->second.absoluteExtrude;
                 motionState_.feedrate = it->second.feedrate;
                 motionState_.speedFactor = it->second.speedFactor;

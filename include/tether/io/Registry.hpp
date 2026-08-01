@@ -31,6 +31,7 @@
 #include <map>
 #include <functional>
 #include <mutex>
+#include <condition_variable>
 
 namespace tether { namespace io {
 
@@ -252,6 +253,15 @@ private:
 
     std::map<size_t, CatalogChangeListener> listeners_;
     size_t nextListenerHandle_ = 1;
+
+    /// In-flight callback counter. `notifyChange` increments this under
+    /// `mutex_` before invoking listeners outside the lock; `removeChangeListener`
+    /// waits for it to reach zero before returning, guaranteeing that no
+    /// in-flight callback can outlive a removed (and potentially destroyed)
+    /// listener. This prevents use-after-free when a listener captures `this`
+    /// and the owner is destroyed during `removeChangeListener`.
+    mutable std::condition_variable notifyCv_;
+    uint32_t notifyInFlight_ = 0;
 };
 
 }} // namespace tether::io

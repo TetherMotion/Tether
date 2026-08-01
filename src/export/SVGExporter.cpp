@@ -320,6 +320,7 @@ double SVGExporter::transformY(double y, double scale, double offset) const {
 }
 
 bool SVGExporter::exportBezierPaths(const std::vector<GCodeExport::RenderableBezierPath>& paths, const std::string& filename) {
+    if (!isSafeFilename(filename)) return false;
     std::ofstream out(filename);
     if (!out.is_open()) return false;
     

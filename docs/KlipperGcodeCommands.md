@@ -346,3 +346,134 @@ Build and run examples:
    cmake -B build -S .
    cmake --build build --target klipper_gcode_commands
    ./build/bin/klipper_gcode_commands
+
+Feature Limitations Relative to Main Tether Parser
+---------------------------------------------------
+
+Tether ships two G-code interpreters:
+
+1. **Klipper G-code executor** (``tether::klipper::klippy::GCodeExecutor``) —
+   a lightweight parser designed for 3D printer control via Moonraker
+   frontends. It supports the standard RepRap/Klipper G/M command set plus
+   50+ Klipper extended commands (``SET_*``, ``BED_MESH_*``, etc.).
+2. **Tether RS274/NGC interpreter** (``tether::gcode::GCodeInterpreter``) — a
+   full LinuxCNC-compatible interpreter with control flow, variables,
+   expressions, tool compensation, and canned cycles.
+
+The Klipper executor is intentionally minimal and does **not** support the
+following features that the main Tether interpreter provides:
+
+O-Code Control Flow
+~~~~~~~~~~~~~~~~~~~
+
+The Klipper executor has no control flow constructs. The main Tether
+interpreter supports:
+
+- ``o<name> sub`` / ``o<name> endsub`` / ``o<name> call`` — subroutines
+- ``o<n> if`` / ``o<n> elseif`` / ``o<n> else`` / ``o<n> endif`` — conditionals
+- ``o<n> while`` / ``o<n> endwhile`` / ``o<n> do`` / ``o<n> repeat`` — loops
+- ``o<n> break`` / ``o<n> continue`` — flow control
+- ``M98`` / ``M99`` — Fanuc-style subprogram call/return
+- ``M70``–``M73`` — modal state save/restore
+
+Parameters and Expressions
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The Klipper executor does not support ``#`` parameters or expression
+evaluation. The main Tether interpreter provides:
+
+- Numbered parameters (``#1``–``#30`` local, ``#31``–``#5000`` global,
+  ``#5001``–``#5999`` system)
+- Named parameters (``#<name>``, ``#<_name>``)
+- Full expression evaluation with arithmetic, comparison, and logical
+  operators (``**``, ``MOD``, ``EQ``, ``AND``, ``OR``, etc.)
+- Mathematical functions (``ABS``, ``SIN``, ``COS``, ``SQRT``, ``ATAN``, etc.)
+- Predefined system parameters (probe results, G28 positions, G92 offsets,
+  tool table, current position)
+
+Tool Compensation
+~~~~~~~~~~~~~~~~~
+
+The Klipper executor has no tool compensation. The main Tether interpreter
+supports:
+
+- ``G43`` / ``G43.1`` / ``G43.2`` — tool length offset
+- ``G44`` — tool length offset (subtract)
+- ``G49`` — cancel tool length offset
+- ``G41`` / ``G41.1`` — cutter compensation left
+- ``G42`` / ``G42.1`` — cutter compensation right
+- ``G40`` — cancel cutter compensation
+- Tool table with 256 tools, wear offsets, and lathe orientation
+- Gouge detection and corner arc generation
+
+Canned Cycles
+~~~~~~~~~~~~~
+
+The Klipper executor accepts ``G81``–``G89`` but does not implement full
+canned cycle semantics. The main Tether interpreter provides:
+
+- ``G73`` — high-speed peck drill (chip-break)
+- ``G74`` — left-hand tapping (CCW)
+- ``G76`` — fine boring (spindle orient, shift)
+- ``G81``–``G89`` — full canned cycle set with rigid tapping
+- ``G98`` / ``G99`` — retract to initial/R plane
+- Spindle orient for boring cycles
+
+Advanced Splines
+~~~~~~~~~~~~~~~~
+
+The Klipper executor supports ``G5`` (Bezier spline). The main Tether
+interpreter additionally supports:
+
+- ``G5.1`` — quadratic B-spline
+- ``G5.2`` / ``G5.3`` — NURBS blocks
+
+Advanced Path Blending
+~~~~~~~~~~~~~~~~~~~~~~
+
+The Klipper executor supports ``G64`` with basic tolerance. The main Tether
+interpreter provides:
+
+- ``G64`` with ``P`` (tolerance) and ``Q`` (naive CAM tolerance)
+- Lookahead velocity planning
+- Trochoidal milling (``G12.1``)
+- Volumetric compensation (3D error grid with trilinear interpolation)
+- Velocity-dependent backlash compensation
+
+Coordinate Rotation
+~~~~~~~~~~~~~~~~~~~
+
+The Klipper executor does not support coordinate rotation. The main Tether
+interpreter supports ``G68`` / ``G69`` (coordinate rotation on/off).
+
+Execution Modes
+~~~~~~~~~~~~~~~
+
+The Klipper executor runs in a simple line-by-line mode. The main Tether
+interpreter supports:
+
+- **AUTO** — run program from file
+- **MDI** — manual data input (single lines)
+- **STEP** — single-step through program
+- **VERIFY** — dry run (no motion output)
+- Block delete (``/`` prefix)
+- Optional stop (``M1`` behavior)
+
+Conversely, the Klipper executor provides many 3D-printer-specific features
+that the main Tether interpreter does not:
+
+- Temperature control (``M104``, ``M109``, ``M140``, ``M190``)
+- Part cooling fan (``M106``, ``M107``)
+- Firmware retract (``G10``, ``G11``, ``M207``, ``M208``)
+- Pressure advance (``M900``, ``SET_PRESSURE_ADVANCE``)
+- Input shaping (``M593``, ``TEST_RESONANCES``, ``SHAPER_CALIBRATE``)
+- Bed mesh leveling (``BED_MESH_*``, ``M420``, ``M421``)
+- Delta calibration (``G33``, ``DELTA_CALIBRATE``, ``M665``, ``M666``)
+- TMC driver configuration (``M907``–``M914``)
+- LED control (``M150``, ``SET_LED``, ``SET_NEOPIXEL``, ``SET_DOTSTAR``)
+- Filament handling (``M600``, ``M701``–``M708``)
+- 50+ Klipper extended commands (``SET_*``, ``QUERY_*``, etc.)
+
+The two interpreters serve complementary purposes: the Klipper executor is
+optimized for 3D printer control, while the Tether RS274/NGC interpreter is
+designed for CNC machining with full RS274/NGC compliance.

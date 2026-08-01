@@ -29,19 +29,15 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& n, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), n) != fields.end())
-                result[n] = std::move(v);
-        };
+        auto s = buildStatus(fields);
         if (sensor_) {
-            add("temperature", JsonValue(sensor_->read()));
+            s.add("temperature", JsonValue(sensor_->read()));
         } else {
-            add("temperature", JsonValue(temperature_));
+            s.add("temperature", JsonValue(temperature_));
         }
-        add("measured_min_temp", JsonValue(minTemp_));
-        add("measured_max_temp", JsonValue(maxTemp_));
-        return result;
+        s.add("measured_min_temp", JsonValue(minTemp_));
+        s.add("measured_max_temp", JsonValue(maxTemp_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -73,18 +69,14 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& n, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), n) != fields.end())
-                result[n] = std::move(v);
-        };
+        auto s = buildStatus(fields);
         if (sensor_) {
-            add("filament_detected", JsonValue(sensor_->filamentPresent()));
+            s.add("filament_detected", JsonValue(sensor_->filamentPresent()));
         } else {
-            add("filament_detected", JsonValue(filamentDetected_));
+            s.add("filament_detected", JsonValue(filamentDetected_));
         }
-        add("enabled", JsonValue(enabled_));
-        return result;
+        s.add("enabled", JsonValue(enabled_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -112,15 +104,11 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& n, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), n) != fields.end())
-                result[n] = std::move(v);
-        };
+        auto s = buildStatus(fields);
         if (dev_) {
-            add("value", JsonValue(static_cast<double>(dev_->lastSample())));
+            s.add("value", JsonValue(static_cast<double>(dev_->lastSample())));
         }
-        return result;
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -143,16 +131,12 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& n, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), n) != fields.end())
-                result[n] = std::move(v);
-        };
+        auto s = buildStatus(fields);
         if (dev_) {
-            add("diameter", JsonValue(dev_->diameter()));
-            add("filament_present", JsonValue(dev_->withinTolerance()));
+            s.add("diameter", JsonValue(dev_->diameter()));
+            s.add("filament_present", JsonValue(dev_->withinTolerance()));
         }
-        return result;
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -175,16 +159,12 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& n, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), n) != fields.end())
-                result[n] = std::move(v);
-        };
+        auto s = buildStatus(fields);
         if (dev_) {
-            add("count", JsonValue(static_cast<int64_t>(dev_->count())));
-            add("rate", JsonValue(dev_->pulseRate()));
+            s.add("count", JsonValue(static_cast<int64_t>(dev_->count())));
+            s.add("rate", JsonValue(dev_->pulseRate()));
         }
-        return result;
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -205,16 +185,12 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
-        add("filament_detected", JsonValue(filamentDetected_));
-        add("enabled", JsonValue(enabled_));
-        add("distance", JsonValue(distance_));
-        add("detection_distance", JsonValue(detectionDistance_));
-        return result;
+        auto s = buildStatus(fields);
+        s.add("filament_detected", JsonValue(filamentDetected_));
+        s.add("enabled", JsonValue(enabled_));
+        s.add("distance", JsonValue(distance_));
+        s.add("detection_distance", JsonValue(detectionDistance_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -243,17 +219,13 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
-        add("load", JsonValue(load_));
-        add("tare_value", JsonValue(tareValue_));
-        add("threshold", JsonValue(threshold_));
-        add("min_load", JsonValue(minLoad_));
-        add("max_load", JsonValue(maxLoad_));
-        return result;
+        auto s = buildStatus(fields);
+        s.add("load", JsonValue(load_));
+        s.add("tare_value", JsonValue(tareValue_));
+        s.add("threshold", JsonValue(threshold_));
+        s.add("min_load", JsonValue(minLoad_));
+        s.add("max_load", JsonValue(maxLoad_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -282,15 +254,11 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
-        add("angle", JsonValue(angle_));
-        add("velocity", JsonValue(velocity_));
-        add("error", JsonValue(error_));
-        return result;
+        auto s = buildStatus(fields);
+        s.add("angle", JsonValue(angle_));
+        s.add("velocity", JsonValue(velocity_));
+        s.add("error", JsonValue(error_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {

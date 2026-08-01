@@ -86,6 +86,10 @@ public:
     size_t read(uint8_t* buf, size_t maxLen, uint32_t timeoutMs) override;
     bool isOpen() const override;
 
+    /// @brief Get the underlying file descriptor (for advanced use cases
+    /// like PipeTransport that need raw fd access). Returns -1 if not open.
+    int fd() const { return fd_; }
+
 private:
     int fd_ = -1;
 };

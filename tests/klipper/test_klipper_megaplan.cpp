@@ -323,9 +323,9 @@ TEST(KlipperGcodeNew, G20G21Units) {
     GcodeCallbacks cb;
     GCodeExecutor exec(cb);
     exec.executeLine("G20");
-    EXPECT_TRUE(exec.state().unitsInches);
+    EXPECT_TRUE(exec.state().unitsInches());
     exec.executeLine("G21");
-    EXPECT_FALSE(exec.state().unitsInches);
+    EXPECT_FALSE(exec.state().unitsInches());
 }
 
 TEST(KlipperGcodeNew, G29BedLevel) {
@@ -341,11 +341,11 @@ TEST(KlipperGcodeNew, G17G18G19ArcPlane) {
     GcodeCallbacks cb;
     GCodeExecutor exec(cb);
     exec.executeLine("G17");
-    EXPECT_EQ(exec.state().arcPlane, 0);
+    EXPECT_EQ(exec.state().arcPlane(), 0);
     exec.executeLine("G18");
-    EXPECT_EQ(exec.state().arcPlane, 1);
+    EXPECT_EQ(exec.state().arcPlane(), 1);
     exec.executeLine("G19");
-    EXPECT_EQ(exec.state().arcPlane, 2);
+    EXPECT_EQ(exec.state().arcPlane(), 2);
 }
 
 TEST(KlipperGcodeNew, M900PressureAdvance) {

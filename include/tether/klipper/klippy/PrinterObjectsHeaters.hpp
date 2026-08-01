@@ -26,15 +26,11 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
-        add("temperature", JsonValue(temperature_));
-        add("target", JsonValue(target_));
-        add("power", JsonValue(power_));
-        return result;
+        auto s = buildStatus(fields);
+        s.add("temperature", JsonValue(temperature_));
+        s.add("target", JsonValue(target_));
+        s.add("power", JsonValue(power_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -61,15 +57,11 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
-        add("temperature", JsonValue(temperature_));
-        add("measured_min_temp", JsonValue(measuredMinTemp_));
-        add("measured_max_temp", JsonValue(measuredMaxTemp_));
-        return result;
+        auto s = buildStatus(fields);
+        s.add("temperature", JsonValue(temperature_));
+        s.add("measured_min_temp", JsonValue(measuredMinTemp_));
+        s.add("measured_max_temp", JsonValue(measuredMaxTemp_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {

@@ -27,21 +27,16 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() ||
-                std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
+        auto s = buildStatus(fields);
         if (fr_) {
             const auto& p = fr_->params();
-            add("retract_length", JsonValue(p.retractLength));
-            add("retract_speed", JsonValue(p.retractSpeed));
-            add("unretract_extra_length", JsonValue(p.unretractLength));
-            add("unretract_speed", JsonValue(p.unretractSpeed));
-            add("z_hop", JsonValue(p.zHop));
+            s.add("retract_length", JsonValue(p.retractLength));
+            s.add("retract_speed", JsonValue(p.retractSpeed));
+            s.add("unretract_extra_length", JsonValue(p.unretractLength));
+            s.add("unretract_speed", JsonValue(p.unretractSpeed));
+            s.add("z_hop", JsonValue(p.zHop));
         }
-        return result;
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -60,19 +55,15 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
-        add("current_object", JsonValue(currentObject_));
+        auto s = buildStatus(fields);
+        s.add("current_object", JsonValue(currentObject_));
         std::vector<JsonValue> excluded;
         for (const auto& e : excludedObjects_) excluded.emplace_back(e);
-        add("excluded_objects", JsonValue(excluded));
+        s.add("excluded_objects", JsonValue(excluded));
         std::vector<JsonValue> objs;
         for (const auto& o : objects_) objs.push_back(JsonValue(o));
-        add("objects", JsonValue(objs));
-        return result;
+        s.add("objects", JsonValue(objs));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
@@ -96,15 +87,11 @@ public:
 
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
-        std::map<std::string, JsonValue> result;
-        auto add = [&](const std::string& k, JsonValue v) {
-            if (fields.empty() || std::find(fields.begin(), fields.end(), k) != fields.end())
-                result[k] = std::move(v);
-        };
-        add("enabled", JsonValue(enabled_));
-        add("measured", JsonValue(measured_));
-        add("adjust", JsonValue(adjust_));
-        return result;
+        auto s = buildStatus(fields);
+        s.add("enabled", JsonValue(enabled_));
+        s.add("measured", JsonValue(measured_));
+        s.add("adjust", JsonValue(adjust_));
+        return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {

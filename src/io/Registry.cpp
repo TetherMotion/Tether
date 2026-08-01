@@ -115,25 +115,38 @@ size_t Registry::addChangeListener(CatalogChangeListener listener) {
 }
 
 void Registry::removeChangeListener(size_t handle) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     listeners_.erase(handle);
+    // Wait for any in-flight notifyChange() calls to finish before returning.
+    // This guarantees that by the time removeChangeListener() returns, no
+    // callback that was copied out of `listeners_` is still running — which
+    // is essential when the listener's owner (e.g. Session) is about to be
+    // destroyed and the lambda captures `this`.
+    notifyCv_.wait(lock, [this] { return notifyInFlight_ == 0; });
 }
 
 void Registry::notifyChange() {
     // Copy listeners under the lock, then invoke them outside the lock.
     // This prevents deadlock if a listener calls back into Registry (e.g.
-    // addParam) and also ensures removeChangeListener() completing means
-    // no in-flight callback can still be running on a destroyed listener.
+    // addParam). The `notifyInFlight_` counter + condition variable ensures
+    // removeChangeListener() can quiesce in-flight callbacks before the
+    // caller proceeds to destroy the listener's owner.
     std::vector<CatalogChangeListener> listeners_copy;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         for (const auto& [handle, listener] : listeners_) {
             listeners_copy.push_back(listener);
         }
+        ++notifyInFlight_;
     }
     for (const auto& listener : listeners_copy) {
         listener();
     }
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        --notifyInFlight_;
+    }
+    notifyCv_.notify_all();
 }
 
 }} // namespace tether::io

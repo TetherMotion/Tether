@@ -31,3 +31,5 @@ lib/
 # IDE files
 .vscode
 tests/test_output
+Testing/
+build-tsan/
