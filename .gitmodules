@@ -1,5 +1,5 @@
-[submodule "libSLIPspeed"]
-	path = libSLIPspeed
+[submodule "dependencies/libSLIPspeed"]
+	path = dependencies/libSLIPspeed
 	url = https://github.com/ulikoehler/libSLIPspeed
 [submodule "dependencies/magic_enum"]
 	path = dependencies/magic_enum

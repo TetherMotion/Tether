@@ -30,23 +30,6 @@ project(Tether VERSION 2.0.0 LANGUAGES C CXX)
 # =============================================================================
 # Git Submodule Check
 # =============================================================================
-set(SUBMODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/libSLIPspeed")
-if(NOT EXISTS "${SUBMODULE_PATH}")
-    message(FATAL_ERROR
-        "Git submodule 'libSLIPspeed' is not initialized.\n"
-        "Please run the following command in the repository root:\n"
-        "  git submodule update --init\n"
-        "Then re-run CMake."
-    )
-elseif(NOT EXISTS "${SUBMODULE_PATH}/include/SLIPStream/Buffer.hpp")
-    message(FATAL_ERROR
-        "Git submodule 'libSLIPspeed' appears to be initialized but is empty or incomplete.\n"
-        "Please run the following command in the repository root:\n"
-        "  git submodule update --init\n"
-        "Then re-run CMake."
-    )
-endif()
-
 set(MAGIC_ENUM_PATH "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/magic_enum")
 if(NOT EXISTS "${MAGIC_ENUM_PATH}")
     message(FATAL_ERROR
@@ -124,6 +107,24 @@ elseif(NOT EXISTS "${GLAZE_PATH}/include/glaze/glaze.hpp")
     )
 endif()
 include_directories("${GLAZE_PATH}/include")
+
+# libSLIPspeed (SLIP encoder/decoder used by tether_io_protocol)
+set(LIBSLIPSPEED_PATH "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/libSLIPspeed")
+if(NOT EXISTS "${LIBSLIPSPEED_PATH}")
+    message(FATAL_ERROR
+        "Git submodule 'libSLIPspeed' is not initialized.\n"
+        "Please run the following command in the repository root:\n"
+        "  git submodule update --init\n"
+        "Then re-run CMake."
+    )
+elseif(NOT EXISTS "${LIBSLIPSPEED_PATH}/include/SLIPStream/Buffer.hpp")
+    message(FATAL_ERROR
+        "Git submodule 'libSLIPspeed' appears to be initialized but is empty or incomplete.\n"
+        "Please run the following command in the repository root:\n"
+        "  git submodule update --init\n"
+        "Then re-run CMake."
+    )
+endif()
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

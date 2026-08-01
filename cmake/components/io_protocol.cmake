@@ -4,7 +4,7 @@
 # ---------------------------------------------------------------------------
 # libSLIPspeed submodule
 # ---------------------------------------------------------------------------
-set(LIBSLIPSPEED_DIR ${TETHER_ROOT}/libSLIPspeed)
+set(LIBSLIPSPEED_DIR ${TETHER_ROOT}/dependencies/libSLIPspeed)
 if(NOT EXISTS ${LIBSLIPSPEED_DIR}/include)
     message(WARNING "libSLIPspeed submodule not checked out at ${LIBSLIPSPEED_DIR}; skipping tether_io_protocol")
     return()
