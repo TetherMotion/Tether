@@ -66,7 +66,7 @@ TEST_F(KlippyHostTest, SyncClock) {
     ASSERT_TRUE(host_->downloadDictionary([this](){ dev_->pump(); }));
     for (int i = 0; i < 5; ++i) {
         dev_->advanceClock(180000000);
-        EXPECT_TRUE(host_->syncClock([this](){ dev_->pump(); }));
+        ASSERT_TRUE(host_->syncClock([this](){ dev_->pump(); }));
     }
     EXPECT_TRUE(host_->clockSync().isSynchronised());
 }
@@ -74,7 +74,7 @@ TEST_F(KlippyHostTest, SyncClock) {
 TEST_F(KlippyHostTest, SendCommand) {
     host_->connect();
     ASSERT_TRUE(host_->downloadDictionary([this](){ dev_->pump(); }));
-    EXPECT_TRUE(host_->sendCommand("get_clock", {}));
+    ASSERT_TRUE(host_->sendCommand("get_clock", {}));
     for (int i = 0; i < 50; ++i) { dev_->pump(); host_->pump(); }
 }
 

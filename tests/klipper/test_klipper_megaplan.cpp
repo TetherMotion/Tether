@@ -524,8 +524,8 @@ TEST_F(KlippyInstanceTest, SdcardOperations) {
                         std::to_string(getpid()) + "/" + filename);
         f << "G28\nG1 X100\n";
     }
-    EXPECT_TRUE(sd.selectFile(filename));
-    EXPECT_TRUE(sd.startPrint());
+    ASSERT_TRUE(sd.selectFile(filename));
+    ASSERT_TRUE(sd.startPrint());
     sd.pausePrint();
     EXPECT_TRUE(sd.isPaused());
     sd.resumePrint();

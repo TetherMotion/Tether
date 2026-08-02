@@ -317,6 +317,7 @@ TEST(KlipperMultiMcu, SetBaudRate) {
 TEST(KlipperMultiMcu, EnableDisable) {
     MultiMcuManager mgr;
     mgr.setEnabled(1, true);
+    ASSERT_NE(mgr.getMcu(1), nullptr);
     EXPECT_TRUE(mgr.getMcu(1)->connected);
     mgr.setEnabled(1, false);
     EXPECT_FALSE(mgr.getMcu(1)->connected);
