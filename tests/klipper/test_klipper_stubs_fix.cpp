@@ -104,15 +104,14 @@ TEST_F(KlippyStubsFix, EndstopStatusOpenWhenNotTriggered) {
 // --- setAutoTempReport is now stored ---
 TEST_F(KlippyStubsFix, AutoTempReportIntervalStored) {
     // M155 S5 should set the auto temp report interval to 5
-    instance_->executeGcode("M155 S5");
-    // The interval is stored internally; we verify no crash
-    SUCCEED();
+    bool ok = instance_->executeGcode("M155 S5");
+    EXPECT_TRUE(ok);
 }
 
 // --- waitForMoves is now a queue flush ---
 TEST_F(KlippyStubsFix, WaitForMovesFlushesQueue) {
-    instance_->executeGcode("G1 X10\nG1 X20\nM400");
-    SUCCEED(); // No crash, queue flushed
+    bool ok = instance_->executeGcode("G1 X10\nG1 X20\nM400");
+    EXPECT_TRUE(ok);
 }
 
 // --- bedLevel is now wired to BedMesh ---
@@ -124,9 +123,8 @@ TEST_F(KlippyStubsFix, BedLevelWiredToBedMesh) {
 
 // --- cleanNozzle now executes a pattern ---
 TEST_F(KlippyStubsFix, CleanNozzleExecutesPattern) {
-    instance_->executeGcode("G12 P2 R5 S100");
-    // Should not crash and should update toolhead position
-    SUCCEED();
+    bool ok = instance_->executeGcode("G12 P2 R5 S100");
+    EXPECT_TRUE(ok);
 }
 
 // --- Settings persistence (M500/M501/M502/M503) ---
@@ -144,10 +142,8 @@ TEST_F(KlippyStubsFix, SaveAndLoadSettings) {
 }
 
 TEST_F(KlippyStubsFix, ReportSettingsOutputsM503) {
-    instance_->executeGcode("M503");
-    // The output should contain M92, M203, etc.
-    // We can't capture the output directly here, but it should not crash
-    SUCCEED();
+    bool ok = instance_->executeGcode("M503");
+    EXPECT_TRUE(ok);
 }
 
 TEST_F(KlippyStubsFix, ResetSettingsToDefaults) {
@@ -490,9 +486,8 @@ TEST(KlipperNewGcodes, G5BezierMove) {
 // KlippyInstance new G-code integration tests
 // ============================================================================
 TEST_F(KlippyStubsFix, M115FirmwareInfoViaInstance) {
-    instance_->executeGcode("M115");
-    // Should not crash; output goes to UDS
-    SUCCEED();
+    bool ok = instance_->executeGcode("M115");
+    EXPECT_TRUE(ok);
 }
 
 TEST_F(KlippyStubsFix, M92StepsPerMmViaInstance) {
@@ -526,9 +521,8 @@ TEST_F(KlippyStubsFix, M200FilamentDiameterViaInstance) {
 
 TEST_F(KlippyStubsFix, M421BedMeshPointViaInstance) {
     instance_->bedMesh().configure(0, 100, 0, 100, 3, 3);
-    instance_->executeGcode("M421 I1 J1 Z0.05");
-    // The mesh point should be set
-    SUCCEED(); // bedMesh().zAt() would verify, but mesh must be complete
+    bool ok = instance_->executeGcode("M421 I1 J1 Z0.05");
+    EXPECT_TRUE(ok);
 }
 
 TEST_F(KlippyStubsFix, M420BedMeshEnableViaInstance) {
@@ -555,9 +549,8 @@ TEST_F(KlippyStubsFix, M301HotendPidViaInstance) {
 }
 
 TEST_F(KlippyStubsFix, M503ReportSettingsViaInstance) {
-    instance_->executeGcode("M503");
-    // Should not crash
-    SUCCEED();
+    bool ok = instance_->executeGcode("M503");
+    EXPECT_TRUE(ok);
 }
 
 TEST_F(KlippyStubsFix, SettingsRoundTrip) {

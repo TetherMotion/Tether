@@ -23,9 +23,6 @@
 #pragma once
 
 #include "tether/klipper/objects/Stepper.hpp"
-#include "tether/klipper/clock/McuClock.hpp"
-#include "tether/klipper/motion/MotionBlock.hpp"
-#include "tether/klipper/klippy/KlippyInstanceConfig.hpp"
 #include "tether/kinematics/KinematicsTransform.hpp"
 #include "tether/motion_planner/MotionPlan.hpp"
 
@@ -90,6 +87,9 @@ public:
 
     /// @brief Set the source label for emitted blocks (traceability).
     void setSourceLabel(std::string label) { sourceLabel_ = std::move(label); }
+
+    /// @brief Get the source label.
+    const std::string& sourceLabel() const { return sourceLabel_; }
 
     /// @brief Set the kinematics transform.
     void setKinematicsTransform(const KinematicsTransform& kt) { kinematics_ = kt; }

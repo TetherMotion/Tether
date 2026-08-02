@@ -5,6 +5,7 @@
 
 #include "tether/klipper/klippy/KlippyHost.hpp"
 #include "tether/klipper/protocol/MessageBlock.hpp"
+#include "tether/klipper/KlipperLog.hpp"
 
 #include <chrono>
 #include <functional>
@@ -19,14 +20,20 @@ KlippyHost::KlippyHost(std::shared_ptr<transport::IByteStreamTransport> transpor
 KlippyHost::~KlippyHost() = default;
 
 bool KlippyHost::connect() {
-    if (!transport_->open()) return false;
+    if (!transport_->open()) {
+        KLIPPER_LOG_ERROR("KlippyHost::connect() - transport open failed");
+        return false;
+    }
     connected_ = true;
     commandTable_ = std::make_unique<protocol::CommandTable>(dict_);
     return true;
 }
 
 bool KlippyHost::downloadDictionary(std::function<void()> devicePump) {
-    if (!connected_) return false;
+    if (!connected_) {
+        KLIPPER_LOG_ERROR("KlippyHost::downloadDictionary() - not connected");
+        return false;
+    }
     protocol::IdentifyClient client;
     int rounds = 0;
     while (!client.complete() && rounds < 10000) {
@@ -59,9 +66,16 @@ bool KlippyHost::downloadDictionary(std::function<void()> devicePump) {
         }
         ++rounds;
     }
-    if (!client.complete()) return false;
+    if (!client.complete()) {
+        KLIPPER_LOG_ERROR("KlippyHost::downloadDictionary() - identify protocol did not complete after " +
+            std::to_string(rounds) + " rounds");
+        return false;
+    }
     auto dictOpt = client.decodeDictionary();
-    if (!dictOpt) return false;
+    if (!dictOpt) {
+        KLIPPER_LOG_ERROR("KlippyHost::downloadDictionary() - failed to decode dictionary");
+        return false;
+    }
     dict_ = std::move(*dictOpt);
     commandTable_ = std::make_unique<protocol::CommandTable>(dict_);
     dictDownloaded_ = true;
@@ -69,16 +83,28 @@ bool KlippyHost::downloadDictionary(std::function<void()> devicePump) {
 }
 
 bool KlippyHost::syncClock(std::function<void()> devicePump) {
-    if (!dictDownloaded_) return false;
+    if (!dictDownloaded_) {
+        KLIPPER_LOG_ERROR("KlippyHost::syncClock() - dictionary not downloaded");
+        return false;
+    }
     auto msgidOpt = dict_.lookupCommand("get_clock");
-    if (!msgidOpt) return false;
+    if (!msgidOpt) {
+        KLIPPER_LOG_ERROR("KlippyHost::syncClock() - 'get_clock' not in dictionary");
+        return false;
+    }
     std::vector<uint8_t> content;
     std::vector<protocol::ParamValue> params;
-    if (!protocol::encodeMessage(dict_, *msgidOpt, params, content)) return false;
+    if (!protocol::encodeMessage(dict_, *msgidOpt, params, content)) {
+        KLIPPER_LOG_ERROR("KlippyHost::syncClock() - failed to encode get_clock");
+        return false;
+    }
     getClockSendTime_ = clock::HostClock::now();
     getClockPending_ = true;
     auto seq = serialQueue_->send(content);
-    if (!seq) return false;
+    if (!seq) {
+        KLIPPER_LOG_ERROR("KlippyHost::syncClock() - failed to send get_clock");
+        return false;
+    }
     for (int i = 0; i < 1000 && getClockPending_; ++i) {
         if (devicePump) devicePump();
         pump();
@@ -94,13 +120,26 @@ uint8_t KlippyHost::allocateOid(const std::string& type) {
 
 bool KlippyHost::sendCommand(const std::string& formatStr,
                               const std::vector<protocol::ParamValue>& params) {
-    if (!dictDownloaded_) return false;
+    if (!dictDownloaded_) {
+        KLIPPER_LOG_ERROR("KlippyHost::sendCommand() - dictionary not downloaded");
+        return false;
+    }
     auto msgidOpt = dict_.lookupCommand(formatStr);
-    if (!msgidOpt) return false;
+    if (!msgidOpt) {
+        KLIPPER_LOG_ERROR("KlippyHost::sendCommand() - unknown command: " + formatStr);
+        return false;
+    }
     std::vector<uint8_t> content;
-    if (!protocol::encodeMessage(dict_, *msgidOpt, params, content)) return false;
+    if (!protocol::encodeMessage(dict_, *msgidOpt, params, content)) {
+        KLIPPER_LOG_ERROR("KlippyHost::sendCommand() - failed to encode: " + formatStr);
+        return false;
+    }
     auto seq = serialQueue_->send(content);
-    return seq.has_value();
+    if (!seq) {
+        KLIPPER_LOG_WARN("KlippyHost::sendCommand() - serial queue full for: " + formatStr);
+        return false;
+    }
+    return true;
 }
 
 size_t KlippyHost::sendStepSequence(const motion::AxisStepSequence& seq,

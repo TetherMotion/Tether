@@ -21,6 +21,8 @@
 
 #pragma once
 
+#include "tether/klipper/device/IKlipperDevice.hpp"
+#include "tether/klipper/device/KlipperDeviceConfig.hpp"
 #include "tether/klipper/transport/IByteStreamTransport.hpp"
 #include "tether/klipper/protocol/DataDictionary.hpp"
 #include "tether/klipper/protocol/CommandTable.hpp"
@@ -42,47 +44,24 @@
 
 namespace tether::klipper::device {
 
-/// @brief Motion execution mode for the device.
-enum class MotionMode {
-    Passthrough,       ///< Execute steps directly on a virtual stepper.
-    ReconstructReplan, ///< Reconstruct steps into MotionBlocks for analysis.
-};
-
-/// @brief Configuration for the Klipper device.
-struct KlipperDeviceConfig {
-    /// MCU clock frequency in Hz.
-    uint32_t clockFreqHz = 180000000;
-    /// Motion execution mode.
-    MotionMode motionMode = MotionMode::Passthrough;
-    /// Sink for motion blocks (required for ReconstructReplan mode).
-    std::shared_ptr<motion::MotionBlockSink> motionSink;
-    /// If true, enable the real-time StepScheduler. When enabled, queue_step
-    /// commands are also forwarded to the StepScheduler, which fires steps
-    /// against a real monotonic timer (std::chrono::steady_clock). The
-    /// step callback updates the Stepper's position counter, so both the
-    /// simulated tick() path and the real-time scheduler path stay in sync.
-    /// Call device.tickStepScheduler() periodically to pump the scheduler.
-    bool useStepScheduler = false;
-};
-
 /**
  * @brief Klipper device: serves the dict, processes commands, executes motion.
  */
-class KlipperDevice {
+class KlipperDevice : public IKlipperDevice {
 public:
     KlipperDevice(std::shared_ptr<transport::IByteStreamTransport> transport,
                   protocol::DataDictionary dict,
                   KlipperDeviceConfig config = {});
-    ~KlipperDevice();
+    ~KlipperDevice() override;
 
     /// @brief Open the transport and start serving.
-    bool start();
+    bool start() override;
 
     /// @brief Pump the event loop: read transport, parse blocks, dispatch, ack.
-    void pump();
+    void pump() override;
 
     /// @brief Advance the MCU clock by @p deltaTicks.
-    void advanceClock(uint32_t deltaTicks);
+    void advanceClock(uint32_t deltaTicks) override;
 
     /// @return The MCU clock.
     const clock::McuClock& clock() const { return mcuClock_; }
@@ -96,12 +75,12 @@ public:
     /// @brief Register a Stepper peripheral and auto-wire the queue_step /
     ///        set_next_step_dir / reset_step_clock handlers for its OID.
     /// @return The OID passed in, for chaining.
-    uint8_t registerStepper(std::shared_ptr<objects::Stepper> stepper);
+    uint8_t registerStepper(std::shared_ptr<objects::Stepper> stepper) override;
 
     /// @brief Register all default stepper motion command handlers
     ///        (queue_step, set_next_step_dir, reset_step_clock) for every
     ///        Stepper currently registered via registerPeripheral/registerStepper.
-    void enableStepperMotion();
+    void enableStepperMotion() override;
 
     /// @brief Register default handlers for the 5 core device commands:
     ///        allocate_oids, get_config, get_status, shutdown, finalize_config.

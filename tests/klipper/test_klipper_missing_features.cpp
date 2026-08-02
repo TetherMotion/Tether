@@ -894,24 +894,23 @@ TEST_F(MissingFeaturesInstance, M428SetsHomeOffsetFromPosition) {
 }
 
 TEST_F(MissingFeaturesInstance, M42SetsPinState) {
-    instance_->executeGcode("M42 P5 S128");
-    // No crash — pin state stored internally
-    SUCCEED();
+    bool ok = instance_->executeGcode("M42 P5 S128");
+    EXPECT_TRUE(ok);
 }
 
 TEST_F(MissingFeaturesInstance, M280SetsServoAngle) {
-    instance_->executeGcode("M280 P0 S90");
-    SUCCEED();
+    bool ok = instance_->executeGcode("M280 P0 S90");
+    EXPECT_TRUE(ok);
 }
 
 TEST_F(MissingFeaturesInstance, M150SetsLedColor) {
-    instance_->executeGcode("M150 R255 G128 B64 W32");
-    SUCCEED();
+    bool ok = instance_->executeGcode("M150 R255 G128 B64 W32");
+    EXPECT_TRUE(ok);
 }
 
 TEST_F(MissingFeaturesInstance, M300Beep) {
-    instance_->executeGcode("M300 S440 P200");
-    SUCCEED();
+    bool ok = instance_->executeGcode("M300 S440 P200");
+    EXPECT_TRUE(ok);
 }
 
 TEST_F(MissingFeaturesInstance, RegisterTemperatureSensor) {

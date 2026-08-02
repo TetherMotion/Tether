@@ -33,21 +33,23 @@ protected:
 
 TEST_F(MotionTranslatorTest, SetSourceLabel) {
     translator_->setSourceLabel("test_move");
-    SUCCEED();
+    EXPECT_EQ(translator_->sourceLabel(), "test_move");
 }
 
 TEST_F(MotionTranslatorTest, SetKinematicsTransform) {
     motion::KinematicsTransform kt;
+    kt.setKinematics(tether::kinematics::PrinterKinematics::CoreXY);
     translator_->setKinematicsTransform(kt);
-    SUCCEED();
+    const auto& retrieved = translator_->kinematicsTransform();
+    EXPECT_EQ(retrieved.kinematics(), tether::kinematics::PrinterKinematics::CoreXY);
 }
 
 TEST_F(MotionTranslatorTest, GetKinematicsTransform) {
     motion::KinematicsTransform kt;
+    kt.setKinematics(tether::kinematics::PrinterKinematics::Delta);
     translator_->setKinematicsTransform(kt);
     const auto& retrieved = translator_->kinematicsTransform();
-    (void)retrieved;
-    SUCCEED();
+    EXPECT_EQ(retrieved.kinematics(), tether::kinematics::PrinterKinematics::Delta);
 }
 
 TEST_F(MotionTranslatorTest, TranslateEmptyPlan) {

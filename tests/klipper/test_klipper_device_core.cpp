@@ -66,15 +66,16 @@ TEST_F(KlipperDeviceCoreTest, GetStatus) {
     bool ok = host_->sendCommand("get_status", {});
     EXPECT_TRUE(ok);
     for (int i = 0; i < 50; ++i) { dev_->pump(); host_->pump(); }
-    // Status response should be received; no crash.
-    SUCCEED();
+    // Device should not be in shutdown after status query.
+    EXPECT_FALSE(dev_->isShutdown());
 }
 
 TEST_F(KlipperDeviceCoreTest, GetConfig) {
     bool ok = host_->sendCommand("get_config", {});
     EXPECT_TRUE(ok);
     for (int i = 0; i < 50; ++i) { dev_->pump(); host_->pump(); }
-    SUCCEED();
+    // Device should not be in shutdown after config query.
+    EXPECT_FALSE(dev_->isShutdown());
 }
 
 TEST_F(KlipperDeviceCoreTest, ShutdownCommand) {
@@ -95,7 +96,8 @@ TEST_F(KlipperDeviceCoreTest, FinalizeConfig) {
 TEST_F(KlipperDeviceCoreTest, EnableDefaultCommandsIdempotent) {
     dev_->enableDefaultCommands();
     dev_->enableDefaultCommands();
-    SUCCEED();
+    // Calling twice should not crash or change state.
+    EXPECT_FALSE(dev_->isShutdown());
 }
 
 TEST_F(KlipperDeviceCoreTest, LastReceivedSeq) {

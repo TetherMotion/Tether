@@ -54,9 +54,9 @@ TEST_F(MotionDispatcherTest, SetSendCallback) {
     });
     dispatcher_->setClockProvider([]() { return 0u; });
     dispatcher_->move(10.0, 0.0, 0.0, 0.0, 50.0);
-    // The move may or may not invoke the send callback depending on
-    // whether the motion planner produces non-empty sequences.
-    SUCCEED();
+    // Position should be updated to target after move.
+    auto pos = dispatcher_->position();
+    EXPECT_NEAR(pos[0], 10.0, 0.01);
 }
 
 TEST_F(MotionDispatcherTest, SetClockProvider) {
@@ -64,7 +64,9 @@ TEST_F(MotionDispatcherTest, SetClockProvider) {
     dispatcher_->setClockProvider([&clockValue]() { return clockValue.load(); });
     dispatcher_->setSendCallback([](const std::vector<motion::AxisStepSequence>&) { return 0; });
     dispatcher_->move(5.0, 0.0, 0.0, 0.0, 50.0);
-    SUCCEED();
+    // Position should be updated.
+    auto pos = dispatcher_->position();
+    EXPECT_NEAR(pos[0], 5.0, 0.01);
 }
 
 TEST_F(MotionDispatcherTest, MoveUpdatesPosition) {
@@ -91,8 +93,19 @@ TEST_F(MotionDispatcherTest, MoveWithZeroSpeed) {
 
 TEST_F(MotionDispatcherTest, SetKinematicsTransform) {
     motion::KinematicsTransform kt;
+    kt.setKinematics(tether::kinematics::PrinterKinematics::CoreXY);
     dispatcher_->setKinematicsTransform(kt);
-    SUCCEED();
+    // Verify a move still works with the transform set.
+    std::atomic<size_t> callCount{0};
+    dispatcher_->setSendCallback([&callCount](const std::vector<motion::AxisStepSequence>&) {
+        callCount++;
+        return 0;
+    });
+    dispatcher_->setClockProvider([]() { return 0u; });
+    dispatcher_->move(5.0, 0.0, 0.0, 0.0, 50.0);
+    // Position should be updated regardless of transform.
+    auto pos = dispatcher_->position();
+    EXPECT_NEAR(pos[0], 5.0, 0.01);
 }
 
 TEST_F(MotionDispatcherTest, MultipleMoves) {
