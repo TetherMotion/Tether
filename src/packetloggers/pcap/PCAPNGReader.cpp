@@ -529,8 +529,16 @@ bool PCAPNGReader::parseInterfaceDescriptionBlock(size_t offset, const BlockHead
                         iface.description.assign(reinterpret_cast<const char*>(data), len);
                         break;
                     case PCAPNG::IDB_IPV4ADDR:
-                        break; // not interpreted
+                        if (len >= 8) {
+                            std::memcpy(iface.ipv4Address.data(), data, 4);
+                            std::memcpy(iface.ipv4Mask.data(), data + 4, 4);
+                        }
+                        break;
                     case PCAPNG::IDB_IPV6ADDR:
+                        if (len >= 32) {
+                            std::memcpy(iface.ipv6Address.data(), data, 16);
+                            std::memcpy(iface.ipv6Mask.data(), data + 16, 16);
+                        }
                         break;
                     case PCAPNG::IDB_MACADDR:
                         if (len >= 6) {
@@ -538,6 +546,9 @@ bool PCAPNGReader::parseInterfaceDescriptionBlock(size_t offset, const BlockHead
                         }
                         break;
                     case PCAPNG::IDB_EUIADDR:
+                        if (len >= 8) {
+                            std::memcpy(iface.euiAddress.data(), data, 8);
+                        }
                         break;
                     case PCAPNG::IDB_SPEED:
                         if (len >= 8) {
@@ -550,6 +561,9 @@ bool PCAPNGReader::parseInterfaceDescriptionBlock(size_t offset, const BlockHead
                         }
                         break;
                     case PCAPNG::IDB_TZONE:
+                        if (len >= 1) {
+                            iface.tzZone = data[0];
+                        }
                         break;
                     case PCAPNG::IDB_FILTER:
                         if (len > 0) {
