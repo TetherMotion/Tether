@@ -34,9 +34,18 @@ constexpr uint32_t kPcapngByteOrderMagic = 0x1A2B3C4D;
 constexpr uint32_t kPcapngByteOrderMagicSwapped = 0x4D3C2B1A;
 
 constexpr uint16_t kEtherTypeVlan = 0x8100;
+constexpr uint16_t kEtherTypeVlan8021ad = 0x88A8;  // Service-tag (QinQ outer)
 constexpr uint16_t kEtherTypeIPv4 = 0x0800;
+constexpr uint16_t kEtherTypeIPv6 = 0x86DD;
 constexpr uint8_t  kIpProtocolUDP = 0x11;
 constexpr uint16_t kEtherCATOverUdpPort = 0x88A4; // 34980
+
+// LINKTYPE_* constants relevant for dispatch.
+constexpr uint16_t kLinkTypeNull       = 0;   // BSD loopback
+constexpr uint16_t kLinkTypeEthernet   = 1;   // LINKTYPE_ETHERNET
+constexpr uint16_t kLinkTypeRaw        = 101; // LINKTYPE_RAW (old)
+constexpr uint16_t kLinkTypeLinuxSll   = 113; // LINKTYPE_LINUX_SLL
+constexpr uint16_t kLinkTypeRaw228     = 228; // LINKTYPE_RAW (new)
 
 // PCAPNG block types already declared in PCAPWriter.hpp, but keep local
 // constexprs for clarity in switch statements.
@@ -520,7 +529,7 @@ bool PCAPNGReader::parseEnhancedPacketBlock(size_t offset, const BlockHeader& he
         if (frame.fcsLength > 0 && frame.frameData.size() > frame.fcsLength) {
             frame.frameData.resize(frame.frameData.size() - frame.fcsLength);
         }
-        interpretEthernetFrame(frame.frameData.data(), frame.frameData.size(), frame);
+        interpretFrameByLinkType(frame.frameData.data(), frame.frameData.size(), frame);
     }
 
     // Parse options.
@@ -617,7 +626,7 @@ bool PCAPNGReader::parseSimplePacketBlock(size_t offset, const BlockHeader& head
         if (frame.fcsLength > 0 && frame.frameData.size() > frame.fcsLength) {
             frame.frameData.resize(frame.frameData.size() - frame.fcsLength);
         }
-        interpretEthernetFrame(frame.frameData.data(), frame.frameData.size(), frame);
+        interpretFrameByLinkType(frame.frameData.data(), frame.frameData.size(), frame);
     }
 
     if (cb) {
@@ -678,6 +687,32 @@ uint8_t PCAPNGReader::interfaceFcsLen(uint32_t interfaceId) const {
     return 0;
 }
 
+uint16_t PCAPNGReader::interfaceLinkType(uint32_t interfaceId) const {
+    if (interfaceId < interfaces_.size()) {
+        return interfaces_[interfaceId].linkType;
+    }
+    return kLinkTypeEthernet;
+}
+
+void PCAPNGReader::interpretPayload(uint16_t etherType, const uint8_t* data,
+                                    size_t length, size_t payloadOffset,
+                                    InterpretedFrame& frame) const {
+    frame.innerEtherType = etherType;
+
+    // Direct EtherCAT via EtherType 0x88A4.
+    if (etherType == EtherCAT::kEtherTypeEtherCAT) {
+        frame.isEtherCAT = true;
+        parseEtherCATDatagrams(data, length, payloadOffset, frame);
+        return;
+    }
+
+    // EtherCAT-over-UDP encapsulation: IPv4 or IPv6 -> UDP ->
+    // dst port 34980 (0x88A4) -> EtherCAT frame as UDP payload.
+    if (etherType == kEtherTypeIPv4 || etherType == kEtherTypeIPv6) {
+        parseEtherCATOverUDP(data, length, payloadOffset, frame);
+    }
+}
+
 bool PCAPNGReader::interpretEthernetFrame(const uint8_t* data, size_t length,
                                           InterpretedFrame& frame) const {
     if (length < sizeof(EtherCAT::EthernetHeader)) {
@@ -692,9 +727,10 @@ bool PCAPNGReader::interpretEthernetFrame(const uint8_t* data, size_t length,
     uint16_t etherType = read16_be(reinterpret_cast<const uint8_t*>(&ethHdr.etherType_be));
     size_t payloadOffset = sizeof(EtherCAT::EthernetHeader);
 
-    // Handle 802.1Q VLAN tag(s).  The outer EtherType field already held the
-    // TPID, so payloadOffset points at the TCI word.
-    while (etherType == kEtherTypeVlan && payloadOffset + 4 <= length) {
+    // Handle 802.1Q / 802.1ad VLAN tag(s).  The outer EtherType field already
+    // held the TPID, so payloadOffset points at the TCI word.
+    while ((etherType == kEtherTypeVlan || etherType == kEtherTypeVlan8021ad) &&
+           payloadOffset + 4 <= length) {
         uint16_t tci = read16_be(data + payloadOffset);
         uint16_t inner = read16_be(data + payloadOffset + 2);
         frame.vlanId = tci & 0x0FFF;
@@ -704,22 +740,76 @@ bool PCAPNGReader::interpretEthernetFrame(const uint8_t* data, size_t length,
         payloadOffset += 4;
     }
 
-    frame.innerEtherType = etherType;
-
-    // Direct EtherCAT via EtherType 0x88A4.
-    if (etherType == EtherCAT::kEtherTypeEtherCAT) {
-        frame.isEtherCAT = true;
-        parseEtherCATDatagrams(data, length, payloadOffset, frame);
-        return true;
-    }
-
-    // EtherCAT-over-UDP encapsulation: EtherType 0x0800 (IPv4) -> UDP ->
-    // dst port 34980 (0x88A4) -> EtherCAT frame as UDP payload.
-    if (etherType == kEtherTypeIPv4) {
-        parseEtherCATOverUDP(data, length, payloadOffset, frame);
-    }
-
+    interpretPayload(etherType, data, length, payloadOffset, frame);
     return true; // parsed but not necessarily EtherCAT
+}
+
+void PCAPNGReader::interpretFrameByLinkType(const uint8_t* data, size_t length,
+                                            InterpretedFrame& frame) const {
+    frame.linkType = interfaceLinkType(frame.interfaceId);
+    switch (frame.linkType) {
+        case kLinkTypeEthernet:
+            interpretEthernetFrame(data, length, frame);
+            break;
+        case kLinkTypeLinuxSll:
+            interpretLinuxSllFrame(data, length, frame);
+            break;
+        case kLinkTypeRaw:
+        case kLinkTypeRaw228:
+            interpretRawIpFrame(data, length, frame);
+            break;
+        case kLinkTypeNull:
+            interpretNullFrame(data, length, frame);
+            break;
+        default:
+            // Unknown link type: leave frameData as-is, do not interpret.
+            break;
+    }
+}
+
+void PCAPNGReader::interpretLinuxSllFrame(const uint8_t* data, size_t length,
+                                          InterpretedFrame& frame) const {
+    // SLL header (16 bytes):
+    //   0: packet type (2 bytes, BE)
+    //   2: ARPHRD type (2 bytes, BE)
+    //   4: address length (2 bytes, BE)
+    //   6: address (8 bytes)
+    //  14: protocol / EtherType (2 bytes, BE)
+    if (length < 16) return;
+
+    uint16_t etherType = read16_be(data + 14);
+    // The 8-byte address field holds the source MAC (padded/truncated).
+    std::memcpy(frame.srcMac.data(), data + 6, 6);
+    interpretPayload(etherType, data, length, 16, frame);
+}
+
+void PCAPNGReader::interpretRawIpFrame(const uint8_t* data, size_t length,
+                                       InterpretedFrame& frame) const {
+    if (length < 1) return;
+    uint8_t version = (data[0] >> 4) & 0x0F;
+    if (version == 4) {
+        frame.innerEtherType = kEtherTypeIPv4;
+        parseEtherCATOverUDP(data, length, 0, frame);
+    } else if (version == 6) {
+        frame.innerEtherType = kEtherTypeIPv6;
+        parseEtherCATOverUDP(data, length, 0, frame);
+    }
+}
+
+void PCAPNGReader::interpretNullFrame(const uint8_t* data, size_t length,
+                                      InterpretedFrame& frame) const {
+    // BSD loopback header: 4-byte address family (host byte order on the
+    // capturing machine; on a little-endian host AF_INET=2, AF_INET6=30).
+    if (length < 4) return;
+    uint32_t family = read32_le(data);
+    if (family == 2 || family == 0x02000000u) {
+        frame.innerEtherType = kEtherTypeIPv4;
+        parseEtherCATOverUDP(data, length, 4, frame);
+    } else if (family == 30 || family == 0x1E000000u ||
+               family == 24 || family == 0x18000000u) { // AF_INET6 on BSDs varies
+        frame.innerEtherType = kEtherTypeIPv6;
+        parseEtherCATOverUDP(data, length, 4, frame);
+    }
 }
 
 void PCAPNGReader::parseEtherCATOverUDP(const uint8_t* data, size_t length,

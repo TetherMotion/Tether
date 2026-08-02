@@ -102,7 +102,12 @@ struct InterpretedFrame {
     uint8_t workingCounter = 0;
 
     /// Full captured Ethernet frame (including header, VLAN tag, and payload).
+    /// For non-Ethernet link types, this is the link-layer payload after FCS
+    /// stripping (e.g. the SLL header + payload, or the raw IP packet).
     std::vector<uint8_t> frameData;
+
+    // Link-layer information
+    uint16_t linkType = 1;          ///< LINKTYPE_* of the capturing interface
 
     // Ethernet header
     std::array<uint8_t, 6> dstMac{};
@@ -198,8 +203,31 @@ private:
     bool interpretEthernetFrame(const uint8_t* data, size_t length,
                                 InterpretedFrame& frame) const;
 
+    /// Dispatch frame interpretation based on the interface link type.
+    void interpretFrameByLinkType(const uint8_t* data, size_t length,
+                                  InterpretedFrame& frame) const;
+
+    /// Interpret a Linux cooked-capture (SLL) frame (LINKTYPE_LINUX_SLL=113).
+    void interpretLinuxSllFrame(const uint8_t* data, size_t length,
+                                InterpretedFrame& frame) const;
+
+    /// Interpret a raw IP frame (LINKTYPE_RAW=101/228, no link-layer header).
+    void interpretRawIpFrame(const uint8_t* data, size_t length,
+                             InterpretedFrame& frame) const;
+
+    /// Interpret a BSD loopback frame (LINKTYPE_NULL=0): 4-byte family + IP.
+    void interpretNullFrame(const uint8_t* data, size_t length,
+                            InterpretedFrame& frame) const;
+
+    /// Common post-EtherType payload interpretation (VLAN already stripped).
+    void interpretPayload(uint16_t etherType, const uint8_t* data, size_t length,
+                          size_t payloadOffset, InterpretedFrame& frame) const;
+
     /// @return FCS length (bytes) for the given interface, or 0 if unknown.
     uint8_t interfaceFcsLen(uint32_t interfaceId) const;
+
+    /// @return LINKTYPE_* for the given interface, or LINKTYPE_ETHERNET if unknown.
+    uint16_t interfaceLinkType(uint32_t interfaceId) const;
 
     /// Parse EtherCAT datagrams starting at @p ecatOffset within @p data.
     /// @p dataEnd is the exclusive end boundary (data + dataEnd is one-past-the-last valid byte).
