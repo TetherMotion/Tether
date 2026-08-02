@@ -1023,3 +1023,65 @@ TEST(PCAPNGReader, DecryptionSecretsBlockSurfaced) {
     EXPECT_EQ(ds[0].secretsData, secrets);
     EXPECT_EQ(ds[0].comment, "tls key log");
 }
+
+// ============================================================================
+// Streaming reader API (readNext / reset)
+// ============================================================================
+
+TEST(PCAPNGReader, ReadNextYieldsFramesIncrementally) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    std::array<uint8_t, 6> dst = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::array<uint8_t, 6> src = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    auto frame1 = makeEtherCATFrame(dst, src, std::nullopt);
+    auto frame2 = makeEtherCATFrame(dst, src, std::nullopt);
+
+    auto epb1 = makeEnhancedPacketBlock(0, 100, frame1.data(), frame1.size());
+    auto epb2 = makeEnhancedPacketBlock(0, 200, frame2.data(), frame2.size());
+    appendBytes(data, epb1.data(), epb1.size());
+    appendBytes(data, epb2.data(), epb2.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+
+    InterpretedFrame f;
+    ASSERT_TRUE(reader.readNext(f));
+    EXPECT_EQ(f.timestampNs, 100u);
+    EXPECT_TRUE(f.isEtherCAT);
+
+    ASSERT_TRUE(reader.readNext(f));
+    EXPECT_EQ(f.timestampNs, 200u);
+    EXPECT_TRUE(f.isEtherCAT);
+
+    EXPECT_FALSE(reader.readNext(f)); // EOF
+}
+
+TEST(PCAPNGReader, ResetAllowsReiteration) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    std::array<uint8_t, 6> dst = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::array<uint8_t, 6> src = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    auto frame = makeEtherCATFrame(dst, src, std::nullopt);
+    auto epb = makeEnhancedPacketBlock(0, 42, frame.data(), frame.size());
+    appendBytes(data, epb.data(), epb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+
+    InterpretedFrame f;
+    ASSERT_TRUE(reader.readNext(f));
+    EXPECT_EQ(f.timestampNs, 42u);
+    EXPECT_FALSE(reader.readNext(f)); // EOF
+
+    reader.reset();
+    ASSERT_TRUE(reader.readNext(f));
+    EXPECT_EQ(f.timestampNs, 42u);
+}

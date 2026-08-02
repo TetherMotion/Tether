@@ -228,6 +228,16 @@ public:
     /// Convenience overload that collects all interpreted frames.
     std::vector<InterpretedFrame> readAll();
 
+    /// Read the next interpreted frame incrementally.  Processes metadata
+    /// blocks (SHB/IDB/ISB/NRB/DSB) as encountered and returns the next
+    /// packet block (EPB/PB/SPB) via @p out.
+    /// @return true if a frame was produced; false at EOF or on error.
+    bool readNext(InterpretedFrame& out);
+
+    /// Reset the read cursor to the beginning of the capture without
+    /// reloading the buffer.  Useful for re-iterating with readNext().
+    void reset();
+
 private:
     struct BlockHeader {
         uint32_t type = 0;
@@ -235,6 +245,9 @@ private:
     };
 
     bool parseBuffer(PacketCallback cb);
+    /// Process the block at @p offset, invoking @p cb for packet blocks.
+    /// @return true on success.  Does not advance currentOffset_.
+    bool processBlock(size_t offset, const BlockHeader& header, PacketCallback cb);
     bool readBlockHeader(size_t offset, BlockHeader& header) const;
     bool parseSectionHeaderBlock(size_t offset, const BlockHeader& header);
     bool parseInterfaceDescriptionBlock(size_t offset, const BlockHeader& header);
