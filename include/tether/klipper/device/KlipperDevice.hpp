@@ -103,6 +103,13 @@ public:
     ///        Stepper currently registered via registerPeripheral/registerStepper.
     void enableStepperMotion();
 
+    /// @brief Register default handlers for the 5 core device commands:
+    ///        allocate_oids, get_config, get_status, shutdown, finalize_config.
+    ///        Called automatically in the constructor; safe to call again
+    ///        after resetting state. Application-registered handlers via
+    ///        onCommand() override these defaults.
+    void enableDefaultCommands();
+
     /// @brief Tick the real-time StepScheduler (if enabled). Call this
     ///        periodically from the main loop or a timer thread.
     /// @return Number of steps fired, or 0 if the scheduler is not enabled.
@@ -129,6 +136,18 @@ public:
     /// @return The last received in-order sequence (for ack building).
     uint8_t lastReceivedSeq() const { return lastRecvSeq_; }
 
+    /// @return True if the device is in shutdown state.
+    bool isShutdown() const { return shutdown_; }
+
+    /// @return True if finalize_config has been received.
+    bool isConfigFinalized() const { return configFinalized_; }
+
+    /// @return The config CRC (valid after get_config or finalize_config).
+    uint32_t configCrc() const { return configCrc_; }
+
+    /// @return The number of allocated OIDs.
+    uint8_t allocatedOidCount() const { return oidAllocator_.nextOid(); }
+
 private:
     void processBlock(const protocol::MessageBlock& block);
     void sendAck(uint8_t seq);
@@ -149,6 +168,9 @@ private:
     std::unique_ptr<motion::StepScheduler> stepScheduler_;
     uint8_t lastRecvSeq_ = 0;
     bool started_ = false;
+    bool shutdown_ = false;
+    bool configFinalized_ = false;
+    uint32_t configCrc_ = 0;
 };
 
 } // namespace tether::klipper::device
