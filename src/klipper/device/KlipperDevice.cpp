@@ -5,6 +5,7 @@
 
 #include "tether/klipper/device/KlipperDevice.hpp"
 #include "tether/klipper/protocol/MessageBlock.hpp"
+#include "tether/klipper/protocol/Crc16.hpp"
 #include "tether/klipper/reliability/SequenceCounter.hpp"
 
 #include <cstring>
@@ -25,6 +26,11 @@ KlipperDevice::KlipperDevice(std::shared_ptr<transport::IByteStreamTransport> tr
     if (config_.useStepScheduler) {
         stepScheduler_ = std::make_unique<motion::StepScheduler>(config_.clockFreqHz);
     }
+    // Compute config CRC from the dictionary wire bytes.
+    auto wire = dict_.toWire();
+    configCrc_ = protocol::crc16Ccitt(wire);
+    // Register default handlers for core commands.
+    enableDefaultCommands();
 }
 
 KlipperDevice::~KlipperDevice() = default;
@@ -134,6 +140,51 @@ uint8_t KlipperDevice::registerStepper(std::shared_ptr<objects::Stepper> stepper
     peripherals_[oid] = stepper;
     steppers_[oid] = std::move(stepper);
     return oid;
+}
+
+void KlipperDevice::enableDefaultCommands() {
+    // allocate_oids oid=%c — allocate a block of OIDs.
+    onCommand("allocate_oids oid=%c",
+        [this](const std::vector<protocol::ParamValue>& params) {
+            if (params.size() < 1) return;
+            uint8_t count = static_cast<uint8_t>(params[0].integer);
+            oidAllocator_.allocateBlock(count);
+        });
+
+    // get_config — respond with oid_count and config_crc.
+    onCommand("get_config",
+        [this](const std::vector<protocol::ParamValue>&) {
+            sendResponse("config_result oid_count=%c config_crc=%u",
+                {protocol::ParamValue{static_cast<int32_t>(oidAllocator_.nextOid())},
+                 protocol::ParamValue{static_cast<int32_t>(configCrc_)}});
+        });
+
+    // get_status — respond with current clock and status byte.
+    onCommand("get_status",
+        [this](const std::vector<protocol::ParamValue>&) {
+            uint8_t status = shutdown_ ? 1 : 0;
+            sendResponse("status clock=%u status=%c",
+                {protocol::ParamValue{static_cast<int32_t>(mcuClock_.ticks32())},
+                 protocol::ParamValue{static_cast<int32_t>(status)}});
+        });
+
+    // shutdown — enter shutdown state.
+    onCommand("shutdown",
+        [this](const std::vector<protocol::ParamValue>&) {
+            shutdown_ = true;
+        });
+
+    // finalize_config crc=%u — lock config and verify CRC.
+    onCommand("finalize_config crc=%u",
+        [this](const std::vector<protocol::ParamValue>& params) {
+            if (params.size() < 1) return;
+            uint32_t crc = static_cast<uint32_t>(params[0].integer);
+            configFinalized_ = true;
+            if (crc != 0) configCrc_ = crc;
+            sendResponse("config_result oid_count=%c config_crc=%u",
+                {protocol::ParamValue{static_cast<int32_t>(oidAllocator_.nextOid())},
+                 protocol::ParamValue{static_cast<int32_t>(configCrc_)}});
+        });
 }
 
 void KlipperDevice::enableStepperMotion() {

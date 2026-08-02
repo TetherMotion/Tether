@@ -23,6 +23,7 @@
 #include "tether/klipper/klippy/AdvancedObjects.hpp"
 #include "tether/klipper/klippy/PrinterObjects.hpp"
 #include "tether/klipper/klippy/PrinterObjectsE2.hpp"
+#include "tether/klipper/klippy/PrinterObjectRegistry.hpp"
 #include "tether/klipper/klippy/KlippyInstanceConfig.hpp"
 #include "tether/klipper/klippy/KlippyHost.hpp"
 #include "tether/klipper/device/KlipperDevice.hpp"
@@ -41,6 +42,7 @@
 #include <cmath>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -86,11 +88,44 @@ private:
 /// and all printer objects. Provides a single entry point for running
 /// a complete Klipper-compatible host.
 ///
+/// @section threading Threading model
+///
+/// KlippyInstance is **not internally synchronized**. The UDS server
+/// runs its event loop on a dedicated thread (`eventThread_`) and calls
+/// back into KlippyInstance via endpoint handlers. The UDS server
+/// protects its own state with `KlippyUdsServer::mutex_` (a
+/// `std::recursive_mutex`), but KlippyInstance's state (settings,
+/// motion state, heater/fan backends, etc.) is **not** protected by
+/// that mutex.
+///
+/// **Recommended usage:**
+/// - **Single-threaded mode**: Call `start()` then `tick()` from the
+///   same thread. The UDS event loop runs on its own thread but only
+///   touches UDS-server-internal state (protected by the server's
+///   mutex). KlippyInstance state is only modified from the `tick()`
+///   thread. This is the safest mode.
+/// - **Multi-threaded mode**: If you must call KlippyInstance methods
+///   from multiple threads (e.g., the UDS event thread + a main
+///   thread), use `mutex()` to synchronize all external access:
+///   ```cpp
+///   {
+///       std::lock_guard<std::mutex> lock(instance.mutex());
+///       instance.executeGcode("G28");
+///   }
+///   ```
+///   The UDS server's event loop does **not** acquire this mutex, so
+///   endpoint handlers that modify KlippyInstance state are only safe
+///   if no other thread is concurrently modifying the same state.
+///
 /// Inherits privately from KlippyState which groups all extended command
 /// state (servo positions, bed mesh profiles, LED colors, idle timeout,
 /// delayed G-codes, etc.) into a single struct, reducing the god-object
 /// problem. The .ipp callback files reference these fields by name.
-class KlippyInstance : private KlippyState {
+///
+/// Also inherits privately from PrinterObjectRegistry which groups all
+/// printer object shared_ptrs (toolhead, extruder, heater_bed, etc.)
+/// into a separate struct, further reducing the god-object problem.
+class KlippyInstance : private KlippyState, private PrinterObjectRegistry {
 public:
     explicit KlippyInstance(KlippyInstanceConfig cfg = {})
         : config_(std::move(cfg))
@@ -119,6 +154,10 @@ public:
     // ------------------------------------------------------------------
     // Accessors
     // ------------------------------------------------------------------
+
+    /// @return Reference to the instance mutex. Use for multi-threaded
+    ///         access synchronization (see threading model above).
+    std::mutex& mutex() { return instanceMutex_; }
 
     KlippyUdsServer& server() { return server_; }
     GCodeExecutor& gcode() { return gcode_; }
@@ -764,6 +803,7 @@ private:
     // Internal state
     // ------------------------------------------------------------------
 
+    std::mutex instanceMutex_; ///< For multi-threaded access (see threading model)
     KlippyInstanceConfig config_;
     KlippyUdsServer server_;
     std::shared_ptr<VirtualSdcard> sdcard_;
@@ -796,74 +836,7 @@ private:
     std::map<std::string, std::function<double()>> adcCallbacks_;
     std::map<std::string, std::function<std::vector<uint8_t>(std::span<const uint8_t>)>> spiCallbacks_;
 
-    // Printer objects
-    std::shared_ptr<ToolheadObject> toolheadObj_;
-    std::shared_ptr<DisplayStatusObject> displayStatusObj_;
-    std::shared_ptr<PauseResumeObject> pauseResumeObj_;
-    std::shared_ptr<PrintStatsObject> printStatsObj_;
-    std::shared_ptr<MotionReportObject> motionReportObj_;
-    std::shared_ptr<ExtruderObject> extruderObj_;
-    std::shared_ptr<HeaterBedObject> heaterBedObj_;
-    std::shared_ptr<FanObject> fanObj_;
-    std::shared_ptr<ProbeObject> probeObj_;
-    std::shared_ptr<BedMeshObject> bedMeshObj_;
-    std::shared_ptr<QueryEndstopsObject> queryEndstopsObj_;
-    std::shared_ptr<Adxl345Object> adxl345Obj_;
-    std::shared_ptr<McuObject> mcuObj_;
-    std::shared_ptr<SystemStatsObject> systemStatsObj_;
-    std::shared_ptr<IdleTimeoutObject> idleTimeoutObj_;
-    std::shared_ptr<StepperEnableObject> stepperEnableObj_;
-    std::shared_ptr<GcodeMoveObject> gcodeMoveObj_;
-    std::shared_ptr<ConfigfileObject> configfileObj_;
-    std::shared_ptr<WebhooksObject> webhooksObj_;
-    std::shared_ptr<FirmwareRetractionObject> firmwareRetractionObj_;
-
-    // B4: New printer objects
-    std::shared_ptr<OutputPinObject> outputPinObj_;
-    std::shared_ptr<PwmToolObject> pwmToolObj_;
-    std::shared_ptr<TemperatureFanObject> temperatureFanObj_;
-    std::shared_ptr<ControllerFanObject> controllerFanObj_;
-    std::shared_ptr<HeaterFanObject> heaterFanObj_;
-    std::shared_ptr<FanGenericObject> fanGenericObj_;
-    std::shared_ptr<LedObject> ledObj_;
-    std::shared_ptr<DotstarObject> dotstarObj_;
-    std::shared_ptr<ServoObject> servoObj_;
-    std::shared_ptr<BltouchObject> bltouchObj_;
-    std::shared_ptr<ZTiltObject> zTiltObj_;
-    std::shared_ptr<QuadGantryLevelObject> quadGantryLevelObj_;
-    std::shared_ptr<ScrewsTiltAdjustObject> screwsTiltAdjustObj_;
-    std::shared_ptr<BedScrewsObject> bedScrewsObj_;
-    std::shared_ptr<DeltaCalibrateObject> deltaCalibrateObj_;
-    std::shared_ptr<SkewCorrectionObject> skewCorrectionObj_;
-    std::shared_ptr<InputShaperObject> inputShaperObj_;
-    std::shared_ptr<PressureAdvanceObject> pressureAdvanceObj_;
-    std::shared_ptr<ExcludeObjectObject> excludeObjectObj_;
-    std::shared_ptr<ZThermalAdjustObject> zThermalAdjustObj_;
-    std::shared_ptr<HeaterGenericObject> heaterGenericObj_;
-    std::shared_ptr<TemperatureProbeObject> temperatureProbeObj_;
-    std::shared_ptr<ForceMoveObject> forceMoveObj_;
-    std::shared_ptr<DualCarriageObject> dualCarriageObj_;
-    std::shared_ptr<ExtruderStepperObject> extruderStepperObj_;
-    std::shared_ptr<ManualStepperObject> manualStepperObj_;
-    std::shared_ptr<EndstopPhaseObject> endstopPhaseObj_;
-    std::shared_ptr<SafeZHomeObject> safeZHomeObj_;
-    std::shared_ptr<BedTiltObject> bedTiltObj_;
-    std::shared_ptr<MultiPinObject> multiPinObj_;
-    std::shared_ptr<ButtonObject> buttonObj_;
-    std::shared_ptr<SmartEffectorObject> smartEffectorObj_;
-    std::shared_ptr<TmcDriverObject> tmcDriverObj_;
-
-    // D2: New printer objects
-    std::shared_ptr<class ManualProbeObject> manualProbeObj_;
-    std::shared_ptr<class FilamentMotionSensorObject> filamentMotionSensorObj_;
-    std::shared_ptr<class LoadCellObject> loadCellObj_;
-    std::shared_ptr<class CanbusStatsObject> canbusStatsObj_;
-    std::shared_ptr<class PwmCycleTimeObject> pwmCycleTimeObj_;
-    std::shared_ptr<class ResonanceTesterObject> resonanceTesterObj_;
-    std::shared_ptr<class AngleObject> angleObj_;
-    std::shared_ptr<class Palette2Object> palette2Obj_;
-    std::shared_ptr<class MenuObject> menuObj_;
-    std::shared_ptr<class GcodeObject> gcodeObj_;
+    // Printer objects are now inherited from PrinterObjectRegistry.
 
     // Advanced feature objects
     std::shared_ptr<DeltaPrinter> deltaPrinter_;
@@ -877,11 +850,6 @@ private:
 
     // E4: Kinematics transform (wired from config)
     motion::KinematicsTransform kinematicsTransform_;
-
-    // E4: New printer objects from PrinterObjectsE2.hpp
-    std::shared_ptr<DelayedGcodeObject> delayedGcodeObj_;
-    std::shared_ptr<SaveVariablesObject> saveVariablesObj_;
-    std::shared_ptr<BoardPinsObject> boardPinsObj_;
 
     // E4: Tracking which config-derived temp sensors have been registered
     std::set<std::string> configTempSensorsRegistered_;

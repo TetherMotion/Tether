@@ -38,6 +38,20 @@ namespace tether::klipper::klippy {
 ///   - Dispatches requests to endpoint handlers
 ///   - Sends responses and push messages
 ///   - Periodically refreshes subscriptions (coalescing)
+///
+/// @section uds_threading Thread safety
+///
+/// All public methods of KlippyUdsServer are safe to call from any thread.
+/// Internal state is protected by `mutex_` (a `std::recursive_mutex`).
+/// The event loop runs on `eventThread_` and acquires `mutex_` for each
+/// iteration. Endpoint handlers are called with `mutex_` held, so they
+/// must not call back into methods that acquire `mutex_` recursively in
+/// a way that could deadlock (the recursive mutex allows re-entry, so
+/// this is generally safe).
+///
+/// **Note**: Endpoint handlers that modify external state (e.g.,
+/// KlippyInstance state) are responsible for synchronizing that external
+/// state. See KlippyInstance's threading model documentation.
 class KlippyUdsServer {
 public:
     explicit KlippyUdsServer(UdsServerConfig cfg = {});
