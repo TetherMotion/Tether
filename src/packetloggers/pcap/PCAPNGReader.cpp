@@ -294,14 +294,29 @@ bool PCAPNGReader::parseBuffer(PacketCallback cb) {
     nameRecords_.clear();
     decryptionSecrets_.clear();
     section_ = PCAPNGSectionInfo{};
+    skippedBlockCount_ = 0;
 
     while (currentOffset_ < fileSize_) {
         BlockHeader header;
         if (!readBlockHeader(currentOffset_, header)) {
+            if (recoveryMode_) {
+                size_t bad = currentOffset_;
+                currentOffset_ = findNextBlockOffset(currentOffset_ + 4);
+                ++skippedBlockCount_;
+                if (errorCallback_) errorCallback_(bad, "invalid block header");
+                continue;
+            }
             return false;
         }
 
         if (!processBlock(currentOffset_, header, cb)) {
+            if (recoveryMode_) {
+                size_t bad = currentOffset_;
+                currentOffset_ = findNextBlockOffset(currentOffset_ + header.totalLength);
+                ++skippedBlockCount_;
+                if (errorCallback_) errorCallback_(bad, "block parse error");
+                continue;
+            }
             return false;
         }
 
@@ -319,6 +334,25 @@ void PCAPNGReader::reset() {
     nameRecords_.clear();
     decryptionSecrets_.clear();
     section_ = PCAPNGSectionInfo{};
+    skippedBlockCount_ = 0;
+}
+
+void PCAPNGReader::setRecoveryMode(bool enabled, ErrorCallback cb) {
+    recoveryMode_ = enabled;
+    errorCallback_ = std::move(cb);
+}
+
+size_t PCAPNGReader::findNextBlockOffset(size_t from) const {
+    // Scan forward in 4-byte increments for a plausible block header.
+    // A plausible header has a known block type and a total length that
+    // fits within the remaining file.
+    for (size_t off = from; off + 12 <= fileSize_; off += 4) {
+        BlockHeader hdr;
+        if (readBlockHeader(off, hdr)) {
+            return off;
+        }
+    }
+    return fileSize_;
 }
 
 bool PCAPNGReader::readNext(InterpretedFrame& out) {
@@ -334,6 +368,13 @@ bool PCAPNGReader::readNext(InterpretedFrame& out) {
     while (currentOffset_ < fileSize_) {
         BlockHeader header;
         if (!readBlockHeader(currentOffset_, header)) {
+            if (recoveryMode_) {
+                size_t bad = currentOffset_;
+                currentOffset_ = findNextBlockOffset(currentOffset_ + 4);
+                ++skippedBlockCount_;
+                if (errorCallback_) errorCallback_(bad, "invalid block header");
+                continue;
+            }
             return false;
         }
 
@@ -347,6 +388,13 @@ bool PCAPNGReader::readNext(InterpretedFrame& out) {
         currentOffset_ += header.totalLength;
 
         if (!ok) {
+            if (recoveryMode_) {
+                size_t bad = currentOffset_ - header.totalLength;
+                ++skippedBlockCount_;
+                if (errorCallback_) errorCallback_(bad, "block parse error");
+                // currentOffset_ already advanced past the bad block; continue.
+                continue;
+            }
             return false;
         }
 
