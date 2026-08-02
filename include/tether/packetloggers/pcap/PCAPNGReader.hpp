@@ -69,6 +69,7 @@ struct EtherCATDatagramInfo {
     uint16_t adp = 0;
     uint16_t ado = 0;
     uint16_t dataLength = 0;
+    uint16_t irq = 0;              ///< Interrupt request register
     uint16_t wkc = 0;
     bool more = false;
     bool circulating = false;

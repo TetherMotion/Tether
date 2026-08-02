@@ -226,7 +226,8 @@ std::vector<uint8_t> makePacketBlock(uint16_t interfaceId,
 // Build a raw Ethernet + EtherCAT frame with one APRD datagram.
 std::vector<uint8_t> makeEtherCATFrame(const std::array<uint8_t, 6>& dst,
                                        const std::array<uint8_t, 6>& src,
-                                       std::optional<uint16_t> vlanId = std::nullopt) {
+                                       std::optional<uint16_t> vlanId = std::nullopt,
+                                       uint16_t irq = 0) {
     std::vector<uint8_t> frame;
     appendBytes(frame, dst.data(), 6);
     appendBytes(frame, src.data(), 6);
@@ -257,7 +258,7 @@ std::vector<uint8_t> makeEtherCATFrame(const std::array<uint8_t, 6>& dst,
     appendU16(frame, adp);
     appendU16(frame, ado);
     appendU16(frame, dataLen); // lenFlags: length, no M/C
-    appendU16(frame, 0);       // irq
+    appendU16(frame, irq);     // irq
     appendBytes(frame, payload.data(), payload.size());
     appendU16(frame, wkc);
 
@@ -844,4 +845,36 @@ TEST(PCAPNGReader, ObsoletePacketBlockDecodesEtherCAT) {
     EXPECT_TRUE(frames[0].isEtherCAT);
     ASSERT_EQ(frames[0].datagrams.size(), 1u);
     EXPECT_EQ(frames[0].datagrams[0].cmd, Command::APRD);
+}
+
+// ============================================================================
+// EtherCAT datagram IRQ field
+// ============================================================================
+
+TEST(PCAPNGReader, DatagramIrqFieldSurfaced) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    std::array<uint8_t, 6> dst = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::array<uint8_t, 6> src = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    auto frame = makeEtherCATFrame(dst, src, std::nullopt, 0x1234);
+
+    auto epb = makeEnhancedPacketBlock(0, 1000, frame.data(), frame.size());
+    appendBytes(data, epb.data(), epb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    auto frames = reader.readAll();
+    ASSERT_EQ(frames.size(), 1u);
+    ASSERT_EQ(frames[0].datagrams.size(), 1u);
+    EXPECT_EQ(frames[0].datagrams[0].irq, 0x1234u);
+
+    // Verify IRQ appears in text and JSON output.
+    std::string text = formatInterpretedFrame(frames[0], false, 0);
+    EXPECT_NE(text.find("irq=0x1234"), std::string::npos);
+    std::string json = frameToJson(frames[0]);
+    EXPECT_NE(json.find("\"irq\": 4660"), std::string::npos); // 0x1234 = 4660
 }
