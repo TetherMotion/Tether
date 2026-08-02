@@ -8,6 +8,7 @@
 #include "tether/klipper/KlipperLog.hpp"
 
 #include <chrono>
+#include <format>
 #include <functional>
 
 namespace tether::klipper::klippy {
@@ -67,8 +68,7 @@ bool KlippyHost::downloadDictionary(std::function<void()> devicePump) {
         ++rounds;
     }
     if (!client.complete()) {
-        KLIPPER_LOG_ERROR("KlippyHost::downloadDictionary() - identify protocol did not complete after " +
-            std::to_string(rounds) + " rounds");
+        KLIPPER_LOG_ERROR(std::format("KlippyHost::downloadDictionary() - identify protocol did not complete after {} rounds", rounds));
         return false;
     }
     auto dictOpt = client.decodeDictionary();

@@ -20,6 +20,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <string>
 
@@ -140,7 +141,7 @@ public:
 
     /// @return Transport name (for diagnostics).
     std::string name() const {
-        return "uart:" + deviceName_ + "@" + std::to_string(baudRate_);
+        return std::format("uart:{}@{}", deviceName_, baudRate_);
     }
 
     uint32_t baudRate() const { return baudRate_; }

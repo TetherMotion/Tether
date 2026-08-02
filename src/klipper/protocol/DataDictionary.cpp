@@ -7,6 +7,7 @@
 #include "tether/klipper/KlipperLog.hpp"
 
 #include <glaze/glaze.hpp>
+#include <format>
 
 #ifdef TETHER_KLIPPER_HAS_ZLIB
 #include <zlib.h>
@@ -38,7 +39,7 @@ uint16_t DataDictionary::addMessage(std::string_view formatStr, MessageDirection
         return 0;
     }
     if (nextMsgid_ > kMaxMsgId) {
-        KLIPPER_LOG_ERROR("DataDictionary msgid exhausted (max=" + std::to_string(kMaxMsgId) + ")");
+        KLIPPER_LOG_ERROR(std::format("DataDictionary msgid exhausted (max={})", kMaxMsgId));
         return 0;
     }
     uint16_t id = nextMsgid_++;

@@ -3,8 +3,8 @@
 /// @file MultiMcuManager.hpp
 /// @brief Multi-MCU coordination manager
 
+#include <format>
 #include <map>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -55,16 +55,12 @@ public:
     /// @brief Get status of a secondary MCU (M876).
     std::string getStatus(int id) const {
         auto it = mcus_.find(id);
-        if (it == mcus_.end()) return "MCU " + std::to_string(id) + ": not configured";
+        if (it == mcus_.end()) return std::format("MCU {}: not configured", id);
         const auto& mcu = it->second;
-        std::ostringstream ss;
-        ss << "MCU " << id << ": " << (mcu.connected ? "connected" : "disconnected")
-           << " serial=" << mcu.serialPath
-           << " baud=" << mcu.baudRate
-           << " freq=" << mcu.clockFreq
-           << " read=" << mcu.bytesRead
-           << " write=" << mcu.bytesWrite;
-        return ss.str();
+        return std::format("MCU {}: {} serial={} baud={} freq={} read={} write={}",
+                           id, mcu.connected ? "connected" : "disconnected",
+                           mcu.serialPath, mcu.baudRate, mcu.clockFreq,
+                           mcu.bytesRead, mcu.bytesWrite);
     }
 
     /// @brief Update MCU statistics.
