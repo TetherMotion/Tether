@@ -1,0 +1,91 @@
+# AGENTS.md - Project Guide for AI Agents
+
+## Project Overview
+
+Tether is a C++23 EtherCAT master and motion control framework for 3D printers
+and CNC machines. It includes a Klipper-compatible firmware emulation layer
+(`tether_klipper`) that implements the Klipper wire protocol, G-code execution,
+and Moonraker-compatible UDS API.
+
+## Build Commands
+
+```bash
+# Configure (with Klipper support)
+cmake -B build -DTETHER_ENABLE_KLIPPER=1
+
+# Build all
+cmake --build build -j$(nproc)
+
+# Build only klipper tests
+cmake --build build --target tether_klipper_tests -j$(nproc)
+
+# Run klipper tests (excluding slow thermal simulation)
+./build/bin/tests/tether_klipper_tests --gtest_filter='-ThermalIntegrationTest.*'
+
+# Run all klipper tests (including thermal, takes ~6 min)
+./build/bin/tests/tether_klipper_tests
+```
+
+## Test Commands
+
+```bash
+# Run specific test suite
+./build/bin/tests/tether_klipper_tests --gtest_filter='KlippyUdsTest.*'
+
+# Run fuzz tests
+./build/bin/tests/tether_klipper_tests --gtest_filter='*Fuzz*:*Property*'
+
+# Run with verbose output
+./build/bin/tests/tether_klipper_tests --gtest_print_time=0
+```
+
+## Architecture
+
+See `docs/KlipperArchitecture.md` for the module dependency diagram,
+threading model, and performance characteristics.
+
+### Key Layers (top to bottom)
+
+1. **KlippyInstance** — Top-level orchestrator (header-only)
+2. **KlippyHost** — MCU communication client
+3. **KlippyUdsServer** — Unix domain socket JSON-RPC server
+4. **MotionTranslator** — MotionPlan to queue_step translation
+5. **KlipperDevice** — Device-side protocol handler (implements `IKlipperDevice`)
+6. **Transport** — Byte-stream abstraction (loopback, pipe, TCP)
+
+### Interface Boundaries
+
+- `IKlipperDevice` — Abstract device interface (breaks klippy->device coupling)
+- `IByteStreamTransport` — Abstract transport interface
+- `MotionBlockSink` — Abstract motion block consumer
+
+## Code Conventions
+
+- C++23 (`-std=c++23`)
+- Use `std::format` instead of string concatenation or `std::to_string`
+- Use `std::ranges` algorithms where applicable
+- Error handling: `std::expected<T, KlipperError>` for recoverable errors
+- Logging: `KLIPPER_LOG_ERROR`, `KLIPPER_LOG_WARN`, `KLIPPER_LOG_INFO` macros
+- Tests: Google Test (gtest), use `ASSERT_*` for setup, `EXPECT_*` for checks
+- Header guards: `#pragma once`
+- Namespaces: `tether::klipper::{layer}` (e.g., `device`, `klippy`, `motion`)
+
+## Test File Organization
+
+Tests are in `tests/klipper/` and use `file(GLOB)` to collect `*.cpp` files.
+New test files are automatically picked up by CMake on re-configure.
+
+### Test Categories
+
+- `test_klipper_*.cpp` — Unit and integration tests
+- `test_klipper_error_paths.cpp` — Error-path and failure injection tests
+- `test_klipper_fuzz.cpp` — Fuzz/property-based tests (VLQ, MessageBlock, JSON)
+- `test_helpers.hpp` — Shared test utilities (temp dirs, socket paths)
+
+## Known Issues
+
+- `LinuxCanHal.VcanLoopbackTest` is skipped when `vcan0` is not available
+  (requires: `sudo modprobe vcan && sudo ip link add dev vcan0 type vcan`)
+- `ThermalIntegrationTest` tests take ~6 minutes total (real-time simulation)
+- `test_klipper_tier_features.cpp` is the largest test file (1092 lines) and
+  could be split for better parallelization
