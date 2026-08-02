@@ -515,6 +515,11 @@ bool PCAPNGReader::parseEnhancedPacketBlock(size_t offset, const BlockHeader& he
     if (frame.capturedLength > 0) {
         frame.frameData.assign(buffer_.data() + dataOffset,
                                buffer_.data() + dataOffset + frame.capturedLength);
+        // Strip trailing FCS bytes declared by the interface (if_fcslen).
+        frame.fcsLength = interfaceFcsLen(frame.interfaceId);
+        if (frame.fcsLength > 0 && frame.frameData.size() > frame.fcsLength) {
+            frame.frameData.resize(frame.frameData.size() - frame.fcsLength);
+        }
         interpretEthernetFrame(frame.frameData.data(), frame.frameData.size(), frame);
     }
 
@@ -607,6 +612,11 @@ bool PCAPNGReader::parseSimplePacketBlock(size_t offset, const BlockHeader& head
     if (frame.capturedLength > 0) {
         frame.frameData.assign(buffer_.data() + dataOffset,
                                buffer_.data() + dataOffset + frame.capturedLength);
+        // Strip trailing FCS bytes declared by the interface (if_fcslen).
+        frame.fcsLength = interfaceFcsLen(frame.interfaceId);
+        if (frame.fcsLength > 0 && frame.frameData.size() > frame.fcsLength) {
+            frame.frameData.resize(frame.frameData.size() - frame.fcsLength);
+        }
         interpretEthernetFrame(frame.frameData.data(), frame.frameData.size(), frame);
     }
 
@@ -659,6 +669,13 @@ bool PCAPNGReader::parseOptions(size_t offset, size_t length,
     }
 
     return true;
+}
+
+uint8_t PCAPNGReader::interfaceFcsLen(uint32_t interfaceId) const {
+    if (interfaceId < interfaces_.size()) {
+        return interfaces_[interfaceId].fcsLen;
+    }
+    return 0;
 }
 
 bool PCAPNGReader::interpretEthernetFrame(const uint8_t* data, size_t length,

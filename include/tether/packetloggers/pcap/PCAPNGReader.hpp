@@ -88,8 +88,9 @@ struct InterpretedFrame {
     // Packet-block metadata
     uint64_t timestampNs = 0;
     uint32_t interfaceId = 0;
-    uint32_t capturedLength = 0;
-    uint32_t originalLength = 0;
+    uint32_t capturedLength = 0;   ///< Raw on-wire captured length (incl. FCS)
+    uint32_t originalLength = 0;   ///< Raw on-wire original length (incl. FCS)
+    uint8_t  fcsLength = 0;        ///< FCS bytes stripped from frameData
     PacketDirection direction = PacketDirection::Unknown;
     uint32_t packetFlags = 0;
     uint64_t dropCount = 0;
@@ -196,6 +197,9 @@ private:
 
     bool interpretEthernetFrame(const uint8_t* data, size_t length,
                                 InterpretedFrame& frame) const;
+
+    /// @return FCS length (bytes) for the given interface, or 0 if unknown.
+    uint8_t interfaceFcsLen(uint32_t interfaceId) const;
 
     /// Parse EtherCAT datagrams starting at @p ecatOffset within @p data.
     /// @p dataEnd is the exclusive end boundary (data + dataEnd is one-past-the-last valid byte).

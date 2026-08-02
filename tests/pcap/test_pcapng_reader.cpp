@@ -99,6 +99,27 @@ std::vector<uint8_t> makeInterfaceDescriptionBlock(uint16_t linkType = 1,
     return out;
 }
 
+// IDB with an if_fcslen option declaring trailing FCS bytes.
+std::vector<uint8_t> makeInterfaceDescriptionBlockWithFcs(uint8_t fcsLen,
+                                                          uint16_t linkType = 1) {
+    std::vector<uint8_t> body;
+    appendU16(body, linkType);
+    appendU16(body, 0); // reserved
+    appendU32(body, 65535);
+
+    std::vector<uint8_t> opts;
+    appendU16(opts, PCAPNG::IDB_FCSLEN);
+    appendU16(opts, 1);
+    appendU8(opts, fcsLen);
+    appendU8(opts, 0); appendU8(opts, 0); appendU8(opts, 0); // pad to 4
+    appendEndOption(opts);
+    appendBytes(body, opts.data(), opts.size());
+
+    std::vector<uint8_t> out;
+    appendBlockHeader(out, PCAPNG::BLOCK_TYPE_IDB, body);
+    return out;
+}
+
 std::vector<uint8_t> makeEnhancedPacketBlock(uint32_t interfaceId,
                                              uint64_t timestamp,
                                              const uint8_t* packetData,
@@ -515,4 +536,67 @@ TEST(PCAPNGReader, FormatAndJson) {
     std::string json = frameToJson(frames[0]);
     EXPECT_NE(json.find("\"cmd\": \"APRD\""), std::string::npos);
     EXPECT_NE(json.find("\"vlanId\": 42"), std::string::npos);
+}
+
+// ============================================================================
+// FCS stripping (if_fcslen)
+// ============================================================================
+
+TEST(PCAPNGReader, StripsFcsFromEtherCATFrame) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlockWithFcs(4); // 4-byte FCS
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    std::array<uint8_t, 6> dst = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::array<uint8_t, 6> src = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    auto frame = makeEtherCATFrame(dst, src, std::nullopt);
+    // Append 4 bogus FCS bytes that would corrupt datagram parsing if not stripped.
+    frame.push_back(0xDE);
+    frame.push_back(0xAD);
+    frame.push_back(0xBE);
+    frame.push_back(0xEF);
+
+    auto epb = makeEnhancedPacketBlock(0, 1000, frame.data(), frame.size());
+    appendBytes(data, epb.data(), epb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    auto frames = reader.readAll();
+    ASSERT_EQ(frames.size(), 1u);
+
+    EXPECT_EQ(frames[0].fcsLength, 4u);
+    // frameData should have the 4 FCS bytes removed.
+    EXPECT_EQ(frames[0].frameData.size(), frame.size() - 4u);
+    // capturedLength stays as the raw on-wire value (incl. FCS).
+    EXPECT_EQ(frames[0].capturedLength, frame.size());
+    // The EtherCAT datagram must still decode correctly.
+    EXPECT_TRUE(frames[0].isEtherCAT);
+    ASSERT_EQ(frames[0].datagrams.size(), 1u);
+    EXPECT_EQ(frames[0].datagrams[0].cmd, Command::APRD);
+    EXPECT_EQ(frames[0].datagrams[0].wkc, 1u);
+}
+
+TEST(PCAPNGReader, NoFcsStrippingWhenFcsLenZero) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock(); // no if_fcslen option
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    std::array<uint8_t, 6> dst = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::array<uint8_t, 6> src = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    auto frame = makeEtherCATFrame(dst, src, std::nullopt);
+
+    auto epb = makeEnhancedPacketBlock(0, 1000, frame.data(), frame.size());
+    appendBytes(data, epb.data(), epb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    auto frames = reader.readAll();
+    ASSERT_EQ(frames.size(), 1u);
+
+    EXPECT_EQ(frames[0].fcsLength, 0u);
+    EXPECT_EQ(frames[0].frameData.size(), frame.size());
 }
