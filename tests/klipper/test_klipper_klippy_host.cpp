@@ -102,7 +102,8 @@ TEST_F(KlippyHostTest, CheckTimeouts) {
     host_->connect();
     ASSERT_TRUE(host_->downloadDictionary([this](){ dev_->pump(); }));
     host_->checkTimeouts();
-    SUCCEED();
+    // checkTimeouts should not crash and should not change pending count.
+    EXPECT_EQ(host_->serialQueue().pendingCount(), 0u);
 }
 
 TEST_F(KlippyHostTest, SerialQueueAccessible) {
@@ -112,6 +113,8 @@ TEST_F(KlippyHostTest, SerialQueueAccessible) {
 
 TEST_F(KlippyHostTest, PumpOnEmptyTransport) {
     host_->connect();
-    host_->pump();
-    SUCCEED();
+    EXPECT_NO_THROW(host_->pump());
+    // Pump on empty transport should not crash.
+    // isReady() is false because dictionary is not downloaded yet.
+    EXPECT_FALSE(host_->isReady());
 }

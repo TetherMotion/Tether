@@ -76,10 +76,9 @@ TEST_F(MultiMcuManagerTest, PrimaryMcuSingle) {
 TEST_F(MultiMcuManagerTest, HostToMcu) {
     auto cs = std::make_shared<ClockSync>();
     manager_->registerMcu("mcu0", 0, cs);
-    // Without sync, hostToMcu returns 0.
+    // Without sync, hostToMcu returns 0 (no samples to extrapolate from).
     uint32_t result = manager_->hostToMcu(0, HostClock::now());
-    (void)result;
-    SUCCEED();
+    EXPECT_EQ(result, 0u);
 }
 
 // --- TrsyncManager tests ---

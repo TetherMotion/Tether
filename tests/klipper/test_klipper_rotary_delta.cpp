@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 #include "tether/kinematics/RotaryDeltaPrinter.hpp"
+#include "tether/klipper/klippy/KlippyInstanceConfig.hpp"
 #include "tether/klipper/motion/MotionTranslator.hpp"
 
 #include <cmath>

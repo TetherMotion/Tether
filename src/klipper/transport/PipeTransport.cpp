@@ -12,6 +12,7 @@
  */
 
 #include "tether/klipper/transport/PipeTransport.hpp"
+#include "tether/klipper/KlipperLog.hpp"
 
 #if !defined(ESP_PLATFORM)
 
@@ -40,11 +41,15 @@ bool PipeTransport::open() {
         // The driver is destroyed (closing its fd) after we've dup'd.
         auto driver = std::make_unique<tether::io::PosixSerialDriver>();
         if (!driver->open(config_.devicePath.c_str(), config_.baudRate)) {
+            KLIPPER_LOG_ERROR("PipeTransport: failed to open serial device: " + config_.devicePath);
             return false;
         }
         int fd = ::dup(driver->fd());
         driver.reset();  // closes the original fd; our dup remains valid
-        if (fd < 0) return false;
+        if (fd < 0) {
+            KLIPPER_LOG_ERROR("PipeTransport: dup() failed for serial device");
+            return false;
+        }
         // Set non-blocking mode for the protocol layer's poll-based reads.
         int flags = ::fcntl(fd, F_GETFL, 0);
         ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);

@@ -4,6 +4,7 @@
  */
 
 #include "tether/klipper/protocol/DataDictionary.hpp"
+#include "tether/klipper/KlipperLog.hpp"
 
 #include <glaze/glaze.hpp>
 
@@ -19,12 +20,27 @@ namespace tether::klipper::protocol {
 
 uint16_t DataDictionary::addMessage(std::string_view formatStr, MessageDirection dir) {
     std::string key(formatStr);
-    if (dir == MessageDirection::Command && commandIndex_.count(key)) return 0;
-    if (dir == MessageDirection::Response && responseIndex_.count(key)) return 0;
-    if (dir == MessageDirection::Output && outputIndex_.count(key)) return 0;
+    if (dir == MessageDirection::Command && commandIndex_.count(key)) {
+        KLIPPER_LOG_WARN("Duplicate command format string ignored: " + key);
+        return 0;
+    }
+    if (dir == MessageDirection::Response && responseIndex_.count(key)) {
+        KLIPPER_LOG_WARN("Duplicate response format string ignored: " + key);
+        return 0;
+    }
+    if (dir == MessageDirection::Output && outputIndex_.count(key)) {
+        KLIPPER_LOG_WARN("Duplicate output format string ignored: " + key);
+        return 0;
+    }
     auto spec = parseFormatString(formatStr);
-    if (!spec) return 0;
-    if (nextMsgid_ > kMaxMsgId) return 0;
+    if (!spec) {
+        KLIPPER_LOG_ERROR("Failed to parse format string: " + key);
+        return 0;
+    }
+    if (nextMsgid_ > kMaxMsgId) {
+        KLIPPER_LOG_ERROR("DataDictionary msgid exhausted (max=" + std::to_string(kMaxMsgId) + ")");
+        return 0;
+    }
     uint16_t id = nextMsgid_++;
     MessageEntry e;
     e.msgid = id;
@@ -210,7 +226,10 @@ std::string DataDictionary::toJson() const {
 
 bool DataDictionary::fromJson(std::string_view json) {
     auto rd = glz::read_json<glz::generic>(json);
-    if (!rd) return false;
+    if (!rd) {
+        KLIPPER_LOG_ERROR("DataDictionary::fromJson() failed to parse JSON");
+        return false;
+    }
     glz::generic& doc = *rd;
     // Reset state.
     *this = DataDictionary{};

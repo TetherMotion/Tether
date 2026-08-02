@@ -4,18 +4,29 @@
  */
 
 #include "tether/klipper/reliability/SerialQueue.hpp"
+#include "tether/klipper/KlipperLog.hpp"
 
 #include <algorithm>
 
 namespace tether::klipper::reliability {
 
 std::optional<uint8_t> SerialQueue::send(std::span<const uint8_t> content) {
-    if (!canSend()) return std::nullopt;
+    if (!canSend()) {
+        KLIPPER_LOG_WARN("SerialQueue::send() rejected - window full");
+        return std::nullopt;
+    }
     uint8_t seq = sendSeq_.value();
     auto wire = protocol::buildBlockVec(seq, content);
-    if (wire.empty()) return std::nullopt;
+    if (wire.empty()) {
+        KLIPPER_LOG_ERROR("SerialQueue::send() failed to build message block");
+        return std::nullopt;
+    }
     size_t written = transport_.write(wire);
-    if (written != wire.size()) return std::nullopt;
+    if (written != wire.size()) {
+        KLIPPER_LOG_ERROR("SerialQueue::send() partial write: " +
+            std::to_string(written) + "/" + std::to_string(wire.size()) + " bytes");
+        return std::nullopt;
+    }
     PendingBlock pb;
     pb.sequence = seq;
     pb.wireBytes = std::move(wire);

@@ -283,6 +283,9 @@ public:
     void setCputime(double t) { cputime_ = t; }
     void setMemavail(size_t m) { memavail_ = m; }
 
+    double sysload() const { return sysload_; }
+    size_t memavail() const { return memavail_; }
+
 private:
     double sysload_ = 0.0;
     double cputime_ = 0.0;

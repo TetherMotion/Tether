@@ -26,7 +26,9 @@
 #include "tether/klipper/klippy/PrinterObjectRegistry.hpp"
 #include "tether/klipper/klippy/KlippyInstanceConfig.hpp"
 #include "tether/klipper/klippy/KlippyHost.hpp"
-#include "tether/klipper/device/KlipperDevice.hpp"
+#include "tether/klipper/device/IKlipperDevice.hpp"
+#include "tether/klipper/device/KlipperDeviceConfig.hpp"
+#include "tether/klipper/device/KlipperDevice.hpp" // Needed for std::make_unique in setupMotionBackend()
 #include "tether/klipper/motion/MotionTranslator.hpp"
 #include "tether/klipper/motion/MotionDispatcher.hpp"
 #include "tether/klipper/config/StandardCommands.hpp"
@@ -36,6 +38,7 @@
 #include "tether/klipper/objects/BedLevel.hpp"
 #include "tether/klipper/klippy/KlippyAutotuningBridge.hpp"
 #include "tether/klipper/klippy/KlippyState.hpp"
+#include "tether/klipper/klippy/SystemStatsProvider.hpp"
 #include "tether/io/SpiDriver.hpp"
 
 #include <chrono>
@@ -362,9 +365,9 @@ public:
     /// @return The motion backend's KlippyHost, or nullptr if not configured.
     klippy::KlippyHost* motionHost() { return motionHost_.get(); }
 
-    /// @return The motion backend's KlipperDevice, or nullptr if not configured
+    /// @return The motion backend's device interface, or nullptr if not configured
     ///         or no in-process device was created.
-    device::KlipperDevice* motionDevice() { return motionDevice_.get(); }
+    device::IKlipperDevice* motionDevice() { return motionDevice_.get(); }
 
     /// @return The motion backend's MotionDispatcher, or nullptr if not configured.
     motion::MotionDispatcher* motionDispatcher() { return motionDispatcher_.get(); }
@@ -490,34 +493,21 @@ public:
         };
     }
 
+    /// @brief Set a custom system stats provider (for testing).
+    /// Pass nullptr to restore the default Linux provider.
+    void setSystemStatsProvider(std::shared_ptr<ISystemStatsProvider> provider) {
+        systemStatsProvider_ = std::move(provider);
+    }
+
     /// @brief Update system statistics (call periodically).
     void updateSystemStats() {
-        if (systemStatsObj_) {
-            // Read /proc/loadavg for sysload
-            std::ifstream loadavg("/proc/loadavg");
-            if (loadavg) {
-                double load;
-                loadavg >> load;
-                systemStatsObj_->setSysload(load);
-            }
-            // Read /proc/meminfo for memavail
-            std::ifstream meminfo("/proc/meminfo");
-            if (meminfo) {
-                std::string line;
-                while (std::getline(meminfo, line)) {
-                    if (line.substr(0, 9) == "MemAvaila") {
-                        size_t pos = line.find(':');
-                        if (pos != std::string::npos) {
-                            size_t val = 0;
-                            std::istringstream iss(line.substr(pos + 1));
-                            iss >> val;
-                            systemStatsObj_->setMemavail(val);
-                        }
-                        break;
-                    }
-                }
-            }
+        if (!systemStatsObj_) return;
+        if (!systemStatsProvider_) {
+            systemStatsProvider_ = std::make_shared<LinuxSystemStatsProvider>();
         }
+        auto snap = systemStatsProvider_->readStats();
+        systemStatsObj_->setSysload(snap.sysload);
+        systemStatsObj_->setMemavail(static_cast<size_t>(snap.memAvailable * 1024.0));
     }
 
     /// @brief Update MCU statistics (call periodically with real MCU data).
@@ -806,6 +796,7 @@ private:
     std::mutex instanceMutex_; ///< For multi-threaded access (see threading model)
     KlippyInstanceConfig config_;
     KlippyUdsServer server_;
+    std::shared_ptr<ISystemStatsProvider> systemStatsProvider_; ///< Injectable system stats
     std::shared_ptr<VirtualSdcard> sdcard_;
     std::shared_ptr<GcodeMacroRegistry> macros_;
     std::shared_ptr<FirmwareRetraction> firmwareRetraction_;
@@ -817,7 +808,7 @@ private:
     // Motion backend (optional, wired when config_.motionBackend is set)
     std::shared_ptr<MotionBackendConfig> motionBackendCfg_;
     std::unique_ptr<klippy::KlippyHost> motionHost_;
-    std::unique_ptr<device::KlipperDevice> motionDevice_;
+    std::unique_ptr<device::IKlipperDevice> motionDevice_;
     std::unique_ptr<motion::MotionDispatcher> motionDispatcher_;
     std::vector<std::shared_ptr<objects::Stepper>> deviceSteppers_;
 
