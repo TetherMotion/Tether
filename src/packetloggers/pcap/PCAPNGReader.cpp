@@ -60,6 +60,21 @@ constexpr uint32_t kBlockTypeDsb = 0x0000000A;
 constexpr uint32_t kBlockTypeCb1 = 0x00000BAD;
 constexpr uint32_t kBlockTypeCb2 = 0x40000BAD;
 
+// ISB option codes.
+constexpr uint16_t kIsbStarttime     = 2;
+constexpr uint16_t kIsbEndtime       = 3;
+constexpr uint16_t kIsbIfrecv        = 4;
+constexpr uint16_t kIsbIfdrop        = 5;
+constexpr uint16_t kIsbFilteraccept  = 6;
+constexpr uint16_t kIsbFilterdrop    = 7;
+constexpr uint16_t kIsbOsdrop        = 8;
+constexpr uint16_t kIsbUsrdeliv      = 9;
+
+// NRB record type codes.
+constexpr uint16_t kNrbEndRecord = 0;
+constexpr uint16_t kNrbIpv4      = 1;
+constexpr uint16_t kNrbIpv6      = 2;
+
 // Simple byte-swap helpers that are independent of host endianness.
 inline uint16_t swap16(uint16_t v) {
     return static_cast<uint16_t>(((v & 0xFF00u) >> 8) | ((v & 0x00FFu) << 8));
@@ -186,6 +201,9 @@ void PCAPNGReader::close() {
     haveSectionHeader_ = false;
     section_ = PCAPNGSectionInfo{};
     interfaces_.clear();
+    interfaceStats_.clear();
+    nameRecords_.clear();
+    decryptionSecrets_.clear();
 }
 
 bool PCAPNGReader::isOpen() const {
@@ -246,6 +264,9 @@ bool PCAPNGReader::parseBuffer(PacketCallback cb) {
     currentOffset_ = 0;
     haveSectionHeader_ = false;
     interfaces_.clear();
+    interfaceStats_.clear();
+    nameRecords_.clear();
+    decryptionSecrets_.clear();
     section_ = PCAPNGSectionInfo{};
 
     while (currentOffset_ < fileSize_) {
@@ -732,18 +753,134 @@ bool PCAPNGReader::parseSimplePacketBlock(size_t offset, const BlockHeader& head
     return true;
 }
 
-bool PCAPNGReader::parseInterfaceStatisticsBlock(size_t, const BlockHeader&) {
-    // We do not currently surface interface statistics, but we accept the block.
+bool PCAPNGReader::parseInterfaceStatisticsBlock(size_t offset, const BlockHeader& header) {
+    // ISB body: interface ID (4), timestamp high (4), timestamp low (4) = 12 bytes.
+    if (offset + 20 > fileSize_) {
+        return false;
+    }
+
+    PCAPNGInterfaceStats stats;
+    stats.interfaceId = read32(buffer_.data() + offset + 8);
+    uint32_t tsHigh = read32(buffer_.data() + offset + 12);
+    uint32_t tsLow = read32(buffer_.data() + offset + 16);
+    stats.timestampNs = (static_cast<uint64_t>(tsHigh) << 32) | tsLow;
+
+    size_t optionsOffset = offset + 20;
+    size_t optionsEnd = offset + header.totalLength - 4;
+    if (optionsEnd > optionsOffset) {
+        if (!parseOptions(optionsOffset, optionsEnd - optionsOffset,
+            [&stats, this](uint16_t code, const uint8_t* data, uint16_t len) -> bool {
+                switch (code) {
+                    case kIsbStarttime:    if (len >= 8) stats.startTime = this->read64(data); break;
+                    case kIsbEndtime:      if (len >= 8) stats.endTime = this->read64(data); break;
+                    case kIsbIfrecv:       if (len >= 8) stats.ifRecv = this->read64(data); break;
+                    case kIsbIfdrop:       if (len >= 8) stats.ifDrop = this->read64(data); break;
+                    case kIsbFilteraccept: if (len >= 8) stats.filterAccept = this->read64(data); break;
+                    case kIsbFilterdrop:   if (len >= 8) stats.filterDrop = this->read64(data); break;
+                    case kIsbOsdrop:       if (len >= 8) stats.osDrop = this->read64(data); break;
+                    case kIsbUsrdeliv:     if (len >= 8) stats.usrDeliv = this->read64(data); break;
+                    case PCAPNG::OPT_COMMENT:
+                        stats.comment.assign(reinterpret_cast<const char*>(data), len);
+                        break;
+                    default: break;
+                }
+                return true;
+            })) {
+            return false;
+        }
+    }
+
+    interfaceStats_.push_back(std::move(stats));
     return true;
 }
 
-bool PCAPNGReader::parseNameResolutionBlock(size_t, const BlockHeader&) {
-    // We do not currently surface name-resolution records, but we accept the block.
+bool PCAPNGReader::parseNameResolutionBlock(size_t offset, const BlockHeader& header) {
+    // NRB has no fixed body; it is a sequence of records followed by options.
+    // Records use the same TLV format as options but with their own type codes.
+    // We scan records until nrb_end_record, then the rest are options.
+    size_t pos = offset + 8;
+    size_t end = offset + header.totalLength - 4;
+
+    while (pos + 4 <= end) {
+        uint16_t recType = read16(buffer_.data() + pos);
+        uint16_t recLen = read16(buffer_.data() + pos + 2);
+        size_t paddedLen = padTo32(recLen);
+
+        if (recType == kNrbEndRecord && recLen == 0) {
+            // Remaining bytes (if any) are options.
+            size_t optionsOffset = pos + 4;
+            if (optionsOffset < end) {
+                parseOptions(optionsOffset, end - optionsOffset,
+                    [this](uint16_t code, const uint8_t* data, uint16_t len) -> bool {
+                        if (code == PCAPNG::OPT_COMMENT) {
+                            PCAPNGNameResolutionRecord rec;
+                            rec.type = PCAPNGNameResolutionRecord::Type::Comment;
+                            rec.name.assign(reinterpret_cast<const char*>(data), len);
+                            nameRecords_.push_back(std::move(rec));
+                        }
+                        return true;
+                    });
+            }
+            return true;
+        }
+
+        if (pos + 4 + paddedLen > end) {
+            break; // truncated
+        }
+
+        const uint8_t* recData = buffer_.data() + pos + 4;
+        PCAPNGNameResolutionRecord rec;
+        if (recType == kNrbIpv4 && recLen >= 4) {
+            rec.type = PCAPNGNameResolutionRecord::Type::Ipv4;
+            std::memcpy(rec.ipv4.data(), recData, 4);
+            rec.name.assign(reinterpret_cast<const char*>(recData + 4), recLen - 4);
+            nameRecords_.push_back(std::move(rec));
+        } else if (recType == kNrbIpv6 && recLen >= 16) {
+            rec.type = PCAPNGNameResolutionRecord::Type::Ipv6;
+            std::memcpy(rec.ipv6.data(), recData, 16);
+            rec.name.assign(reinterpret_cast<const char*>(recData + 16), recLen - 16);
+            nameRecords_.push_back(std::move(rec));
+        }
+
+        pos += 4 + paddedLen;
+    }
+
     return true;
 }
 
-bool PCAPNGReader::parseDecryptionSecretsBlock(size_t, const BlockHeader&) {
-    // We do not currently surface decryption secrets, but we accept the block.
+bool PCAPNGReader::parseDecryptionSecretsBlock(size_t offset, const BlockHeader& header) {
+    // DSB body: secrets type (2), secrets length (2), secrets data (padded to 4).
+    if (offset + 16 > fileSize_) {
+        return false;
+    }
+
+    PCAPNGDecryptionSecrets dsb;
+    dsb.secretsType = read16(buffer_.data() + offset + 8);
+    uint16_t secretsLen = read16(buffer_.data() + offset + 10);
+    size_t paddedSecretsLen = padTo32(secretsLen);
+
+    size_t dataStart = offset + 12;
+    if (dataStart + paddedSecretsLen > offset + header.totalLength - 4) {
+        return false;
+    }
+
+    dsb.secretsData.assign(buffer_.data() + dataStart,
+                           buffer_.data() + dataStart + secretsLen);
+
+    // Options follow the padded secrets data.
+    size_t optionsOffset = dataStart + paddedSecretsLen;
+    size_t optionsEnd = offset + header.totalLength - 4;
+    if (optionsEnd > optionsOffset) {
+        parseOptions(optionsOffset, optionsEnd - optionsOffset,
+            [&dsb](uint16_t code, const uint8_t* data, uint16_t len) -> bool {
+                if (code == PCAPNG::OPT_COMMENT) {
+                    dsb.comment.assign(reinterpret_cast<const char*>(data), len);
+                }
+                return true;
+            });
+    }
+
+    decryptionSecrets_.push_back(std::move(dsb));
     return true;
 }
 
