@@ -60,6 +60,46 @@ struct PCAPNGInterfaceInfo {
 };
 
 // ============================================================================
+// Interface Statistics (from Interface Statistics Block)
+// ============================================================================
+
+struct PCAPNGInterfaceStats {
+    uint32_t interfaceId = 0;
+    uint64_t timestampNs = 0;        ///< Timestamp of the statistics record
+    uint64_t startTime = 0;          ///< isb_starttime (raw ticks)
+    uint64_t endTime = 0;            ///< isb_endtime (raw ticks)
+    uint64_t ifRecv = 0;             ///< isb_ifrecv — packets received
+    uint64_t ifDrop = 0;             ///< isb_ifdrop — dropped by interface
+    uint64_t filterAccept = 0;       ///< isb_filteraccept
+    uint64_t filterDrop = 0;         ///< isb_filterdrop
+    uint64_t osDrop = 0;             ///< isb_osdrop — dropped by OS
+    uint64_t usrDeliv = 0;           ///< isb_usrdeliv — delivered to user
+    std::string comment;
+};
+
+// ============================================================================
+// Name Resolution Record (from Name Resolution Block)
+// ============================================================================
+
+struct PCAPNGNameResolutionRecord {
+    enum class Type : uint8_t { Ipv4, Ipv6, Comment };
+    Type type = Type::Ipv4;
+    std::array<uint8_t, 4> ipv4{};   ///< Valid when type == Ipv4
+    std::array<uint8_t, 16> ipv6{};  ///< Valid when type == Ipv6
+    std::string name;                ///< Hostname (or comment text)
+};
+
+// ============================================================================
+// Decryption Secrets (from Decryption Secrets Block)
+// ============================================================================
+
+struct PCAPNGDecryptionSecrets {
+    uint16_t secretsType = 0;        ///< Secrets type code
+    std::vector<uint8_t> secretsData;
+    std::string comment;
+};
+
+// ============================================================================
 // Parsed EtherCAT Datagram
 // ============================================================================
 
@@ -169,6 +209,15 @@ public:
     /// Parsed Interface Description Blocks.
     const std::vector<PCAPNGInterfaceInfo>& interfaces() const { return interfaces_; }
 
+    /// Parsed Interface Statistics Blocks.
+    const std::vector<PCAPNGInterfaceStats>& interfaceStats() const { return interfaceStats_; }
+
+    /// Parsed Name Resolution records (from all NRBs).
+    const std::vector<PCAPNGNameResolutionRecord>& nameResolutionRecords() const { return nameRecords_; }
+
+    /// Parsed Decryption Secrets Blocks.
+    const std::vector<PCAPNGDecryptionSecrets>& decryptionSecrets() const { return decryptionSecrets_; }
+
     /// Callback invoked once for every interpreted frame.
     using PacketCallback = std::function<void(const InterpretedFrame&)>;
 
@@ -262,6 +311,9 @@ private:
 
     PCAPNGSectionInfo section_;
     std::vector<PCAPNGInterfaceInfo> interfaces_;
+    std::vector<PCAPNGInterfaceStats> interfaceStats_;
+    std::vector<PCAPNGNameResolutionRecord> nameRecords_;
+    std::vector<PCAPNGDecryptionSecrets> decryptionSecrets_;
 
     // Parsing state
     size_t currentOffset_ = 0;

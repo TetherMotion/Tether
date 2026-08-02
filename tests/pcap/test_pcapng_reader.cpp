@@ -223,6 +223,64 @@ std::vector<uint8_t> makePacketBlock(uint16_t interfaceId,
     return out;
 }
 
+// Build an Interface Statistics Block.
+std::vector<uint8_t> makeInterfaceStatsBlock(uint32_t interfaceId,
+                                             uint64_t timestamp,
+                                             const std::vector<uint8_t>& options = {}) {
+    std::vector<uint8_t> body;
+    appendU32(body, interfaceId);
+    appendU32(body, static_cast<uint32_t>(timestamp >> 32));
+    appendU32(body, static_cast<uint32_t>(timestamp & 0xFFFFFFFFull));
+    appendBytes(body, options.data(), options.size());
+    std::vector<uint8_t> out;
+    appendBlockHeader(out, PCAPNG::BLOCK_TYPE_ISB, body);
+    return out;
+}
+
+// Build a Name Resolution Block with IPv4 records.
+std::vector<uint8_t> makeNameResolutionBlock(
+    const std::vector<std::pair<std::array<uint8_t,4>, std::string>>& ipv4Records,
+    const std::string& comment = "") {
+    std::vector<uint8_t> body;
+    for (const auto& [ip, name] : ipv4Records) {
+        appendU16(body, 1); // nrb_ipv4
+        uint16_t recLen = static_cast<uint16_t>(4 + name.size());
+        appendU16(body, recLen);
+        appendBytes(body, ip.data(), 4);
+        appendBytes(body, reinterpret_cast<const uint8_t*>(name.data()), name.size());
+        while (body.size() % 4 != 0) body.push_back(0);
+    }
+    // nrb_end_record
+    appendU16(body, 0);
+    appendU16(body, 0);
+    // Optional comment
+    if (!comment.empty()) {
+        appendStringOption(body, PCAPNG::OPT_COMMENT, comment);
+    }
+    appendEndOption(body);
+    std::vector<uint8_t> out;
+    appendBlockHeader(out, PCAPNG::BLOCK_TYPE_NRB, body);
+    return out;
+}
+
+// Build a Decryption Secrets Block.
+std::vector<uint8_t> makeDecryptionSecretsBlock(uint16_t secretsType,
+                                                const std::vector<uint8_t>& secretsData,
+                                                const std::string& comment = "") {
+    std::vector<uint8_t> body;
+    appendU16(body, secretsType);
+    appendU16(body, static_cast<uint16_t>(secretsData.size()));
+    appendBytes(body, secretsData.data(), secretsData.size());
+    while (body.size() % 4 != 0) body.push_back(0);
+    if (!comment.empty()) {
+        appendStringOption(body, PCAPNG::OPT_COMMENT, comment);
+    }
+    appendEndOption(body);
+    std::vector<uint8_t> out;
+    appendBlockHeader(out, PCAPNG::BLOCK_TYPE_DSB, body);
+    return out;
+}
+
 // Build a raw Ethernet + EtherCAT frame with one APRD datagram.
 std::vector<uint8_t> makeEtherCATFrame(const std::array<uint8_t, 6>& dst,
                                        const std::array<uint8_t, 6>& src,
@@ -877,4 +935,91 @@ TEST(PCAPNGReader, DatagramIrqFieldSurfaced) {
     EXPECT_NE(text.find("irq=0x1234"), std::string::npos);
     std::string json = frameToJson(frames[0]);
     EXPECT_NE(json.find("\"irq\": 4660"), std::string::npos); // 0x1234 = 4660
+}
+
+// ============================================================================
+// ISB / NRB / DSB data surfacing
+// ============================================================================
+
+TEST(PCAPNGReader, InterfaceStatisticsBlockSurfaced) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    // ISB with options: ifrecv=100, ifdrop=5, comment.
+    std::vector<uint8_t> opts;
+    appendU16(opts, 4); // isb_ifrecv
+    appendU16(opts, 8);
+    appendU64(opts, 100);
+    appendU16(opts, 5); // isb_ifdrop
+    appendU16(opts, 8);
+    appendU64(opts, 5);
+    appendStringOption(opts, PCAPNG::OPT_COMMENT, "stats comment");
+    appendEndOption(opts);
+
+    auto isb = makeInterfaceStatsBlock(0, 12345, opts);
+    appendBytes(data, isb.data(), isb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    ASSERT_TRUE(reader.readAll([](const InterpretedFrame&) {}));
+
+    const auto& stats = reader.interfaceStats();
+    ASSERT_EQ(stats.size(), 1u);
+    EXPECT_EQ(stats[0].interfaceId, 0u);
+    EXPECT_EQ(stats[0].timestampNs, 12345u);
+    EXPECT_EQ(stats[0].ifRecv, 100u);
+    EXPECT_EQ(stats[0].ifDrop, 5u);
+    EXPECT_EQ(stats[0].comment, "stats comment");
+}
+
+TEST(PCAPNGReader, NameResolutionBlockSurfaced) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    appendBytes(data, shb.data(), shb.size());
+
+    std::vector<std::pair<std::array<uint8_t,4>, std::string>> records = {
+        {{192, 168, 1, 1}, "slave0"},
+        {{10, 0, 0, 5}, "master"},
+    };
+    auto nrb = makeNameResolutionBlock(records, "nrb comment");
+    appendBytes(data, nrb.data(), nrb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    ASSERT_TRUE(reader.readAll([](const InterpretedFrame&) {}));
+
+    const auto& nr = reader.nameResolutionRecords();
+    // 2 IPv4 records + 1 comment record.
+    ASSERT_EQ(nr.size(), 3u);
+    EXPECT_EQ(nr[0].type, PCAPNGNameResolutionRecord::Type::Ipv4);
+    EXPECT_EQ(nr[0].ipv4, (std::array<uint8_t,4>{192, 168, 1, 1}));
+    EXPECT_EQ(nr[0].name, "slave0");
+    EXPECT_EQ(nr[1].type, PCAPNGNameResolutionRecord::Type::Ipv4);
+    EXPECT_EQ(nr[1].ipv4, (std::array<uint8_t,4>{10, 0, 0, 5}));
+    EXPECT_EQ(nr[1].name, "master");
+    EXPECT_EQ(nr[2].type, PCAPNGNameResolutionRecord::Type::Comment);
+    EXPECT_EQ(nr[2].name, "nrb comment");
+}
+
+TEST(PCAPNGReader, DecryptionSecretsBlockSurfaced) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    appendBytes(data, shb.data(), shb.size());
+
+    std::vector<uint8_t> secrets = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+    auto dsb = makeDecryptionSecretsBlock(0x0001, secrets, "tls key log");
+    appendBytes(data, dsb.data(), dsb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    ASSERT_TRUE(reader.readAll([](const InterpretedFrame&) {}));
+
+    const auto& ds = reader.decryptionSecrets();
+    ASSERT_EQ(ds.size(), 1u);
+    EXPECT_EQ(ds[0].secretsType, 0x0001u);
+    EXPECT_EQ(ds[0].secretsData, secrets);
+    EXPECT_EQ(ds[0].comment, "tls key log");
 }
