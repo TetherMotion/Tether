@@ -1170,24 +1170,40 @@ void PCAPNGReader::interpretNullFrame(const uint8_t* data, size_t length,
 void PCAPNGReader::parseEtherCATOverUDP(const uint8_t* data, size_t length,
                                         size_t ipOffset,
                                         InterpretedFrame& frame) const {
-    // Minimum IPv4 header is 20 bytes.
-    if (ipOffset + 20 > length) return;
+    if (ipOffset + 1 > length) return;
 
     const uint8_t* ip = data + ipOffset;
-    uint8_t versionIhl = ip[0];
-    if ((versionIhl >> 4) != 4) return; // not IPv4
+    uint8_t version = (ip[0] >> 4) & 0x0F;
+    size_t udpOffset = 0;
 
-    uint8_t ihl = (versionIhl & 0x0F) * 4;
-    if (ihl < 20 || ipOffset + ihl > length) return;
+    if (version == 4) {
+        // Minimum IPv4 header is 20 bytes.
+        if (ipOffset + 20 > length) return;
+        uint8_t versionIhl = ip[0];
+        uint8_t ihl = (versionIhl & 0x0F) * 4;
+        if (ihl < 20 || ipOffset + ihl > length) return;
 
-    uint8_t protocol = ip[9];
-    if (protocol != kIpProtocolUDP) return; // not UDP
+        uint8_t protocol = ip[9];
+        if (protocol != kIpProtocolUDP) return; // not UDP
 
-    // IPv4 src/dst addresses (offset 12 and 16, network byte order).
-    frame.srcIp = read32_be(ip + 12);
-    frame.dstIp = read32_be(ip + 16);
+        frame.ipVersion = 4;
+        frame.srcIp = read32_be(ip + 12);
+        frame.dstIp = read32_be(ip + 16);
+        udpOffset = ipOffset + ihl;
+    } else if (version == 6) {
+        // Minimum IPv6 header is 40 bytes.
+        if (ipOffset + 40 > length) return;
+        uint8_t nextHeader = ip[6];
+        if (nextHeader != kIpProtocolUDP) return; // not UDP
 
-    size_t udpOffset = ipOffset + ihl;
+        frame.ipVersion = 6;
+        std::memcpy(frame.srcIpv6.data(), ip + 8, 16);
+        std::memcpy(frame.dstIpv6.data(), ip + 24, 16);
+        udpOffset = ipOffset + 40;
+    } else {
+        return; // not IP
+    }
+
     if (udpOffset + 8 > length) return;
 
     const uint8_t* udp = data + udpOffset;
