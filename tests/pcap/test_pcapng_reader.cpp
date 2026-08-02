@@ -199,6 +199,30 @@ std::vector<uint8_t> makeEnhancedPacketBlock(uint32_t interfaceId,
     return out;
 }
 
+// Build an obsolete Packet Block (type 0x00000002).
+std::vector<uint8_t> makePacketBlock(uint16_t interfaceId,
+                                     uint16_t drops,
+                                     uint32_t timestampSeconds,
+                                     const uint8_t* packetData,
+                                     size_t packetLen,
+                                     const std::vector<uint8_t>& options = {}) {
+    std::vector<uint8_t> body;
+    appendU16(body, interfaceId);
+    appendU16(body, drops);
+    appendU32(body, timestampSeconds);
+    appendU32(body, static_cast<uint32_t>(packetLen));
+    appendU32(body, static_cast<uint32_t>(packetLen));
+
+    appendBytes(body, packetData, packetLen);
+    while (body.size() % 4 != 0) body.push_back(0);
+
+    appendBytes(body, options.data(), options.size());
+
+    std::vector<uint8_t> out;
+    appendBlockHeader(out, 0x00000002, body);
+    return out;
+}
+
 // Build a raw Ethernet + EtherCAT frame with one APRD datagram.
 std::vector<uint8_t> makeEtherCATFrame(const std::array<uint8_t, 6>& dst,
                                        const std::array<uint8_t, 6>& src,
@@ -788,4 +812,36 @@ TEST(PCAPNGReader, MultipleSectionsResetInterfaces) {
     EXPECT_EQ(frames[0].timestampNs, 1000u);
     // Frame 2: tsResol=6 → 1000 ticks * 1000 ns/tick = 1,000,000 ns.
     EXPECT_EQ(frames[1].timestampNs, 1000000u);
+}
+
+// ============================================================================
+// Obsolete Packet Block (type 0x00000002)
+// ============================================================================
+
+TEST(PCAPNGReader, ObsoletePacketBlockDecodesEtherCAT) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    std::array<uint8_t, 6> dst = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::array<uint8_t, 6> src = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    auto frame = makeEtherCATFrame(dst, src, std::nullopt);
+
+    // PB with drops=3, timestamp=5 seconds.
+    auto pb = makePacketBlock(0, 3, 5, frame.data(), frame.size());
+    appendBytes(data, pb.data(), pb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    auto frames = reader.readAll();
+    ASSERT_EQ(frames.size(), 1u);
+
+    // Timestamp 5 seconds → 5,000,000,000 ns.
+    EXPECT_EQ(frames[0].timestampNs, 5000000000ull);
+    EXPECT_EQ(frames[0].dropCount, 3u);
+    EXPECT_TRUE(frames[0].isEtherCAT);
+    ASSERT_EQ(frames[0].datagrams.size(), 1u);
+    EXPECT_EQ(frames[0].datagrams[0].cmd, Command::APRD);
 }

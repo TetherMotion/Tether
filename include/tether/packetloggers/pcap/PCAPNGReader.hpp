@@ -190,6 +190,8 @@ private:
     bool parseInterfaceDescriptionBlock(size_t offset, const BlockHeader& header);
     bool parseEnhancedPacketBlock(size_t offset, const BlockHeader& header,
                                   PacketCallback cb);
+    bool parsePacketBlock(size_t offset, const BlockHeader& header,
+                          PacketCallback cb);
     bool parseSimplePacketBlock(size_t offset, const BlockHeader& header,
                                 PacketCallback cb);
     bool parseInterfaceStatisticsBlock(size_t offset, const BlockHeader& header);
