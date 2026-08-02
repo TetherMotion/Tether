@@ -51,6 +51,7 @@ constexpr uint16_t kLinkTypeRaw228     = 228; // LINKTYPE_RAW (new)
 // constexprs for clarity in switch statements.
 constexpr uint32_t kBlockTypeShb = 0x0A0D0D0A;
 constexpr uint32_t kBlockTypeIdb = 0x00000001;
+constexpr uint32_t kBlockTypePb  = 0x00000002; // obsolete Packet Block
 constexpr uint32_t kBlockTypeEpb = 0x00000006;
 constexpr uint32_t kBlockTypeSpb = 0x00000003;
 constexpr uint32_t kBlockTypeNrb = 0x00000004;
@@ -260,6 +261,9 @@ bool PCAPNGReader::parseBuffer(PacketCallback cb) {
                 break;
             case kBlockTypeIdb:
                 ok = parseInterfaceDescriptionBlock(currentOffset_, header);
+                break;
+            case kBlockTypePb:
+                ok = parsePacketBlock(currentOffset_, header, cb);
                 break;
             case kBlockTypeEpb:
                 ok = parseEnhancedPacketBlock(currentOffset_, header, cb);
@@ -592,6 +596,87 @@ bool PCAPNGReader::parseEnhancedPacketBlock(size_t offset, const BlockHeader& he
                         if (len >= 1) {
                             frame.workingCounter = data[0];
                         }
+                        break;
+                    case PCAPNG::OPT_COMMENT:
+                        frame.comment.assign(reinterpret_cast<const char*>(data), len);
+                        break;
+                    default:
+                        break;
+                }
+                return true;
+            })) {
+            return false;
+        }
+    }
+
+    if (cb) {
+        cb(frame);
+    }
+    return true;
+}
+
+bool PCAPNGReader::parsePacketBlock(size_t offset, const BlockHeader& header,
+                                    PacketCallback cb) {
+    // Obsolete Packet Block (type 0x00000002) layout:
+    //   0: block type (4)
+    //   4: total length (4)
+    //   8: interface ID (2)
+    //  10: drops (2)
+    //  12: timestamp seconds (4)
+    //  16: captured length (4)
+    //  20: original length (4)
+    //  24: packet data (padded to 32-bit)
+    //     options
+    //     total length (4)
+    if (offset + 24 > fileSize_) {
+        return false;
+    }
+
+    InterpretedFrame frame;
+    frame.interfaceId = read16(buffer_.data() + offset + 8);
+    frame.dropCount = read16(buffer_.data() + offset + 10);
+    uint32_t tsSeconds = read32(buffer_.data() + offset + 12);
+    frame.capturedLength = read32(buffer_.data() + offset + 16);
+    frame.originalLength = read32(buffer_.data() + offset + 20);
+
+    // PB timestamps are in seconds; convert to nanoseconds.
+    frame.timestampNs = static_cast<uint64_t>(tsSeconds) * 1000000000ull;
+
+    size_t dataOffset = offset + 24;
+    size_t paddedLength = padTo32(frame.capturedLength);
+    if (dataOffset + paddedLength > offset + header.totalLength - 4) {
+        return false;
+    }
+
+    if (frame.capturedLength > 0) {
+        frame.frameData.assign(buffer_.data() + dataOffset,
+                               buffer_.data() + dataOffset + frame.capturedLength);
+        frame.fcsLength = interfaceFcsLen(frame.interfaceId);
+        if (frame.fcsLength > 0 && frame.frameData.size() > frame.fcsLength) {
+            frame.frameData.resize(frame.frameData.size() - frame.fcsLength);
+        }
+        interpretFrameByLinkType(frame.frameData.data(), frame.frameData.size(), frame);
+    }
+
+    // Parse options (same option set as EPB).
+    size_t optionsOffset = dataOffset + paddedLength;
+    size_t optionsEnd = offset + header.totalLength - 4;
+    if (optionsEnd > optionsOffset) {
+        if (!parseOptions(optionsOffset, optionsEnd - optionsOffset,
+            [&frame, this](uint16_t code, const uint8_t* data, uint16_t len) -> bool {
+                switch (code) {
+                    case PCAPNG::EPB_FLAGS:
+                        if (len >= 4) {
+                            frame.packetFlags = this->read32(data);
+                            uint32_t dir = frame.packetFlags & 0x03;
+                            if (dir == 0x01) frame.direction = PacketDirection::Inbound;
+                            else if (dir == 0x02) frame.direction = PacketDirection::Outbound;
+                            else if (dir == 0x03) frame.direction = PacketDirection::Loopback;
+                            else frame.direction = PacketDirection::Unknown;
+                        }
+                        break;
+                    case PCAPNG::EPB_DROPCOUNT:
+                        if (len >= 8) frame.dropCount = this->read64(data);
                         break;
                     case PCAPNG::OPT_COMMENT:
                         frame.comment.assign(reinterpret_cast<const char*>(data), len);
