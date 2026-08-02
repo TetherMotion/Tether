@@ -1157,3 +1157,62 @@ TEST(PCAPNGReader, StrictModeAbortsOnBadBlock) {
     EXPECT_FALSE(reader.readAll([](const InterpretedFrame&) {}));
     EXPECT_EQ(reader.skippedBlockCount(), 0u);
 }
+
+// ============================================================================
+// EPB optional metadata (hash, packetid, queue, verdict)
+// ============================================================================
+
+TEST(PCAPNGReader, EpbOptionalMetadataFields) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    std::array<uint8_t, 6> dst = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::array<uint8_t, 6> src = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    auto frame = makeEtherCATFrame(dst, src, std::nullopt);
+
+    // Build EPB options: packetid=42, queue=3, hash(type=2, data=0xABCD),
+    // verdict(type=1, text="accepted").
+    std::vector<uint8_t> opts;
+    appendU16(opts, PCAPNG::EPB_PACKETID);
+    appendU16(opts, 8);
+    appendU64(opts, 42);
+    appendU16(opts, PCAPNG::EPB_QUEUE);
+    appendU16(opts, 4);
+    appendU32(opts, 3);
+    appendU16(opts, PCAPNG::EPB_HASH);
+    appendU16(opts, 3);                     // 1 byte type + 2 bytes hash
+    appendU8(opts, 2);                      // hash type
+    appendU8(opts, 0xAB); appendU8(opts, 0xCD);
+    appendU8(opts, 0);                      // pad
+    appendU16(opts, PCAPNG::EPB_VERDICT);
+    std::string verdictText = "accepted";
+    appendU16(opts, static_cast<uint16_t>(2 + verdictText.size()));
+    appendU16(opts, 1);                     // verdict type
+    appendBytes(opts, reinterpret_cast<const uint8_t*>(verdictText.data()), verdictText.size());
+    while (opts.size() % 4 != 0) opts.push_back(0);
+    appendEndOption(opts);
+
+    auto epb = makeEnhancedPacketBlock(0, 1000, frame.data(), frame.size(), opts);
+    appendBytes(data, epb.data(), epb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    auto frames = reader.readAll();
+    ASSERT_EQ(frames.size(), 1u);
+
+    ASSERT_TRUE(frames[0].packetId.has_value());
+    EXPECT_EQ(*frames[0].packetId, 42u);
+    ASSERT_TRUE(frames[0].queue.has_value());
+    EXPECT_EQ(*frames[0].queue, 3u);
+    ASSERT_TRUE(frames[0].hash.has_value());
+    EXPECT_EQ(frames[0].hash->type, 2u);
+    ASSERT_EQ(frames[0].hash->data.size(), 2u);
+    EXPECT_EQ(frames[0].hash->data[0], 0xAB);
+    EXPECT_EQ(frames[0].hash->data[1], 0xCD);
+    ASSERT_TRUE(frames[0].verdict.has_value());
+    EXPECT_EQ(frames[0].verdict->type, 1u);
+    EXPECT_EQ(frames[0].verdict->text, "accepted");
+}

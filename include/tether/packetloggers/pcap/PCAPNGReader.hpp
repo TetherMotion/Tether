@@ -137,6 +137,20 @@ struct InterpretedFrame {
     uint64_t dropCount = 0;
     std::string comment;
 
+    // EPB optional metadata
+    std::optional<uint64_t> packetId;  ///< epb_packetid
+    std::optional<uint32_t> queue;     ///< epb_queue
+    struct PacketHash {
+        uint8_t type = 0;              ///< Hash algorithm (e.g. 1=IPv4, 2=IPv6)
+        std::vector<uint8_t> data;
+    };
+    std::optional<PacketHash> hash;    ///< epb_hash
+    struct PacketVerdict {
+        uint16_t type = 0;             ///< Verdict type code
+        std::string text;              ///< Verdict description
+    };
+    std::optional<PacketVerdict> verdict;  ///< epb_verdict
+
     // Custom EtherCAT options stored by the writer
     uint16_t slaveAddress = 0;
     bool isProcessData = false;
