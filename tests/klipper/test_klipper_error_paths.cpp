@@ -147,7 +147,7 @@ TEST_F(PacketLossTest, ConnectWithCorruptionFails) {
     // warnings. Instead, we verify that corrupted data can be written and read
     // without crashing.
     hostT_->injectCorruption();
-    EXPECT_TRUE(host_->connect());
+    ASSERT_TRUE(host_->connect());
 
     // Write some data and verify it arrives corrupted.
     std::vector<uint8_t> data = {0x01, 0x02, 0x03};
@@ -162,7 +162,7 @@ TEST_F(PacketLossTest, ConnectWithCorruptionFails) {
 TEST_F(PacketLossTest, ConnectWithDropWriteFails) {
     // Drop first 2 bytes of write.
     hostT_->injectDropWrite(2);
-    EXPECT_TRUE(host_->connect());
+    ASSERT_TRUE(host_->connect());
 
     std::vector<uint8_t> data = {0x01, 0x02, 0x03, 0x04, 0x05};
     hostT_->write(data);
@@ -190,7 +190,7 @@ TEST_F(PacketLossTest, ClearErrorsRestoresCommunication) {
 }
 
 TEST_F(PacketLossTest, FailReadOnDeviceSide) {
-    EXPECT_TRUE(host_->connect());
+    ASSERT_TRUE(host_->connect());
     // Inject read failure on device side - device can't read host requests.
     devT_->injectFailRead(1);
     // Pump should not crash.

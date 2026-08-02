@@ -33,24 +33,22 @@ namespace tether::klipper::klippy {
 // ============================================================================
 
 JsonValue KlippyUdsServer::handleServerConfig(const JsonValue& params) {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    std::map<std::string, JsonValue> result;
-    result["result"] = JsonValue(serverConfig_);
-    return JsonValue(result);
+    return withLockResult(serverConfig_);
 }
 
 JsonValue KlippyUdsServer::handleServerFilesRoots(const JsonValue& params) {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    std::map<std::string, JsonValue> result;
-    std::map<std::string, JsonValue> roots;
-    for (const auto& [name, root] : fileRoots_) {
-        std::map<std::string, JsonValue> rootInfo;
-        rootInfo["path"] = JsonValue(root.path);
-        rootInfo["writable"] = JsonValue(root.writable);
-        roots[name] = JsonValue(rootInfo);
-    }
-    result["result"] = JsonValue(roots);
-    return JsonValue(result);
+    return withLock([&]() {
+        std::map<std::string, JsonValue> result;
+        std::map<std::string, JsonValue> roots;
+        for (const auto& [name, root] : fileRoots_) {
+            std::map<std::string, JsonValue> rootInfo;
+            rootInfo["path"] = JsonValue(root.path);
+            rootInfo["writable"] = JsonValue(root.writable);
+            roots[name] = JsonValue(rootInfo);
+        }
+        result["result"] = JsonValue(roots);
+        return result;
+    });
 }
 
 JsonValue KlippyUdsServer::handleServerFilesCreateDir(const JsonValue& params) {
@@ -188,17 +186,18 @@ JsonValue KlippyUdsServer::handleServerMoonrakerLog(const JsonValue& params) {
 }
 
 JsonValue KlippyUdsServer::handleMachineServicesList(const JsonValue& params) {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    std::map<std::string, JsonValue> result;
-    std::map<std::string, JsonValue> services;
-    for (const auto& [name, svc] : services_) {
-        std::map<std::string, JsonValue> svcInfo;
-        svcInfo["active_state"] = JsonValue(svc.activeState);
-        svcInfo["sub_state"] = JsonValue(svc.subState);
-        services[name] = JsonValue(svcInfo);
-    }
-    result["result"] = JsonValue(services);
-    return JsonValue(result);
+    return withLock([&]() {
+        std::map<std::string, JsonValue> result;
+        std::map<std::string, JsonValue> services;
+        for (const auto& [name, svc] : services_) {
+            std::map<std::string, JsonValue> svcInfo;
+            svcInfo["active_state"] = JsonValue(svc.activeState);
+            svcInfo["sub_state"] = JsonValue(svc.subState);
+            services[name] = JsonValue(svcInfo);
+        }
+        result["result"] = JsonValue(services);
+        return result;
+    });
 }
 
 JsonValue KlippyUdsServer::handleMachineServiceAction(const JsonValue& params) {

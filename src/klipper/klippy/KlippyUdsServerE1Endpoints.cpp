@@ -34,19 +34,21 @@ namespace tether::klipper::klippy {
 // ============================================================================
 
 JsonValue KlippyUdsServer::handleJobQueuePause(const JsonValue& params) {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    jobQueuePaused_ = true;
-    std::map<std::string, JsonValue> result;
-    result["result"] = JsonValue("paused");
-    return JsonValue(result);
+    return withLock([&]() {
+        jobQueuePaused_ = true;
+        std::map<std::string, JsonValue> result;
+        result["result"] = JsonValue("paused");
+        return result;
+    });
 }
 
 JsonValue KlippyUdsServer::handleJobQueueStart(const JsonValue& params) {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    jobQueuePaused_ = false;
-    std::map<std::string, JsonValue> result;
-    result["result"] = JsonValue("started");
-    return JsonValue(result);
+    return withLock([&]() {
+        jobQueuePaused_ = false;
+        std::map<std::string, JsonValue> result;
+        result["result"] = JsonValue("started");
+        return result;
+    });
 }
 
 JsonValue KlippyUdsServer::handleJobQueueJumpTo(const JsonValue& params) {

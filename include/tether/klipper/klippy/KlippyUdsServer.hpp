@@ -474,6 +474,30 @@ public:
     void setSystemPerms(const std::string& resource, const std::vector<std::string>& perms);
 
 private:
+    /// @brief Helper to execute a handler lambda with the mutex held and
+    ///        wrap its result in a JSON object map.
+    /// @details This eliminates the boilerplate pattern of:
+    ///   std::lock_guard<std::recursive_mutex> lock(mutex_);
+    ///   std::map<std::string, JsonValue> result;
+    ///   result["result"] = ...;
+    ///   return JsonValue(result);
+    /// @param func Lambda that returns a std::map<std::string, JsonValue>.
+    /// @return JsonValue wrapping the result map.
+    template<typename Func>
+    JsonValue withLock(Func&& func) {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        return JsonValue(func());
+    }
+
+    /// @brief Helper to build a simple {"result": value} response with lock.
+    template<typename T>
+    JsonValue withLockResult(T&& value) {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        std::map<std::string, JsonValue> result;
+        result["result"] = JsonValue(std::forward<T>(value));
+        return JsonValue(result);
+    }
+
     UdsServerConfig config_;
 
     int listenFd_ = -1;

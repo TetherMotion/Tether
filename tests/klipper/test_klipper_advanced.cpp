@@ -67,7 +67,7 @@ TEST_F(KlipperVirtualSdcard, SelectFile) {
         f << "G28\n";
     }
     VirtualSdcard sd(testDir_);
-    EXPECT_TRUE(sd.selectFile(filename));
+    ASSERT_TRUE(sd.selectFile(filename));
     EXPECT_EQ(sd.filePath(), filename);
     EXPECT_GT(sd.fileSize(), 0u);
     EXPECT_FALSE(sd.isActive());
@@ -86,7 +86,7 @@ TEST_F(KlipperVirtualSdcard, StartPauseResume) {
     }
     VirtualSdcard sd(testDir_);
     sd.selectFile(filename);
-    EXPECT_TRUE(sd.startPrint());
+    ASSERT_TRUE(sd.startPrint());
     EXPECT_TRUE(sd.isActive());
     EXPECT_FALSE(sd.isPaused());
     sd.pausePrint();
