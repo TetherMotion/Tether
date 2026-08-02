@@ -260,6 +260,32 @@ uint32_t PCAPNGReader::padTo32(uint32_t length) {
     return (length + 3u) & ~3u;
 }
 
+bool PCAPNGReader::processBlock(size_t offset, const BlockHeader& header,
+                                PacketCallback cb) {
+    switch (header.type) {
+        case kBlockTypeShb:
+            return parseSectionHeaderBlock(offset, header);
+        case kBlockTypeIdb:
+            return parseInterfaceDescriptionBlock(offset, header);
+        case kBlockTypePb:
+            return parsePacketBlock(offset, header, cb);
+        case kBlockTypeEpb:
+            return parseEnhancedPacketBlock(offset, header, cb);
+        case kBlockTypeSpb:
+            return parseSimplePacketBlock(offset, header, cb);
+        case kBlockTypeIsb:
+            return parseInterfaceStatisticsBlock(offset, header);
+        case kBlockTypeNrb:
+            return parseNameResolutionBlock(offset, header);
+        case kBlockTypeDsb:
+            return parseDecryptionSecretsBlock(offset, header);
+        case kBlockTypeCb1:
+        case kBlockTypeCb2:
+        default:
+            return skipBlock(offset, header);
+    }
+}
+
 bool PCAPNGReader::parseBuffer(PacketCallback cb) {
     currentOffset_ = 0;
     haveSectionHeader_ = false;
@@ -275,40 +301,7 @@ bool PCAPNGReader::parseBuffer(PacketCallback cb) {
             return false;
         }
 
-        bool ok = false;
-        switch (header.type) {
-            case kBlockTypeShb:
-                ok = parseSectionHeaderBlock(currentOffset_, header);
-                break;
-            case kBlockTypeIdb:
-                ok = parseInterfaceDescriptionBlock(currentOffset_, header);
-                break;
-            case kBlockTypePb:
-                ok = parsePacketBlock(currentOffset_, header, cb);
-                break;
-            case kBlockTypeEpb:
-                ok = parseEnhancedPacketBlock(currentOffset_, header, cb);
-                break;
-            case kBlockTypeSpb:
-                ok = parseSimplePacketBlock(currentOffset_, header, cb);
-                break;
-            case kBlockTypeIsb:
-                ok = parseInterfaceStatisticsBlock(currentOffset_, header);
-                break;
-            case kBlockTypeNrb:
-                ok = parseNameResolutionBlock(currentOffset_, header);
-                break;
-            case kBlockTypeDsb:
-                ok = parseDecryptionSecretsBlock(currentOffset_, header);
-                break;
-            case kBlockTypeCb1:
-            case kBlockTypeCb2:
-            default:
-                ok = skipBlock(currentOffset_, header);
-                break;
-        }
-
-        if (!ok) {
+        if (!processBlock(currentOffset_, header, cb)) {
             return false;
         }
 
@@ -316,6 +309,53 @@ bool PCAPNGReader::parseBuffer(PacketCallback cb) {
     }
 
     return true;
+}
+
+void PCAPNGReader::reset() {
+    currentOffset_ = 0;
+    haveSectionHeader_ = false;
+    interfaces_.clear();
+    interfaceStats_.clear();
+    nameRecords_.clear();
+    decryptionSecrets_.clear();
+    section_ = PCAPNGSectionInfo{};
+}
+
+bool PCAPNGReader::readNext(InterpretedFrame& out) {
+    if (!isOpen_) {
+        return false;
+    }
+
+    // If this is the first call, initialise state (like parseBuffer does).
+    if (currentOffset_ == 0 && !haveSectionHeader_) {
+        reset();
+    }
+
+    while (currentOffset_ < fileSize_) {
+        BlockHeader header;
+        if (!readBlockHeader(currentOffset_, header)) {
+            return false;
+        }
+
+        bool gotFrame = false;
+        bool ok = processBlock(currentOffset_, header,
+            [&out, &gotFrame](const InterpretedFrame& frame) {
+                out = frame;
+                gotFrame = true;
+            });
+
+        currentOffset_ += header.totalLength;
+
+        if (!ok) {
+            return false;
+        }
+
+        if (gotFrame) {
+            return true;
+        }
+    }
+
+    return false; // EOF
 }
 
 bool PCAPNGReader::readBlockHeader(size_t offset, BlockHeader& header) const {
