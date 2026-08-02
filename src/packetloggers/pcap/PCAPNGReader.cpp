@@ -983,7 +983,7 @@ void PCAPNGReader::parseEtherCATDatagrams(const uint8_t* data, size_t dataEnd,
         info.dataLength = lenFlags & 0x07FF;
         info.more = (lenFlags & 0x8000) != 0;
         info.circulating = (lenFlags & 0x4000) != 0;
-        // irq at dg+8 (not surfaced)
+        info.irq = read16_le(dg + 8);
 
         size_t dgTotalSize = sizeof(EtherCAT::DatagramHeader) + info.dataLength + sizeof(uint16_t);
         if (datagramOffset + dgTotalSize > dataEnd || dgTotalSize > remaining) {
@@ -1109,8 +1109,12 @@ std::string formatInterpretedFrame(const InterpretedFrame& frame, bool verbose, 
             }
 
             oss << " len=" << dg.dataLength
-                << " wkc=" << dg.wkc
-                << (dg.more ? " [M]" : "")
+                << " wkc=" << dg.wkc;
+            if (dg.irq != 0) {
+                oss << " irq=0x" << std::hex << std::setfill('0')
+                    << std::setw(4) << dg.irq << std::dec;
+            }
+            oss << (dg.more ? " [M]" : "")
                 << (dg.circulating ? " [C]" : "")
                 << "\n";
 
@@ -1170,6 +1174,7 @@ std::string frameToJson(const InterpretedFrame& frame) {
             oss << "      \"adp\": " << dg.adp << ",\n";
             oss << "      \"ado\": " << dg.ado << ",\n";
             oss << "      \"dataLength\": " << dg.dataLength << ",\n";
+            oss << "      \"irq\": " << dg.irq << ",\n";
             oss << "      \"wkc\": " << dg.wkc << ",\n";
             oss << "      \"more\": " << (dg.more ? "true" : "false") << ",\n";
             oss << "      \"circulating\": " << (dg.circulating ? "true" : "false") << ",\n";
