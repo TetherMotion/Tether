@@ -188,6 +188,9 @@ struct InterpretedFrame {
     bool isEtherCATOverUDP = false;
     uint32_t srcIp = 0;   ///< IPv4 source address (host byte order)
     uint32_t dstIp = 0;   ///< IPv4 destination address (host byte order)
+    std::array<uint8_t, 16> srcIpv6{};  ///< IPv6 source address (network byte order)
+    std::array<uint8_t, 16> dstIpv6{};  ///< IPv6 destination address (network byte order)
+    uint8_t ipVersion = 0;  ///< 4 or 6 (0 if not IP)
     uint16_t srcPort = 0; ///< UDP source port (host byte order)
     uint16_t dstPort = 0; ///< UDP destination port (host byte order)
 

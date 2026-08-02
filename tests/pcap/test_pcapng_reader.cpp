@@ -161,6 +161,33 @@ std::vector<uint8_t> makeRawIpv4UdpEtherCAT(const std::vector<uint8_t>& ecatPayl
     return pkt;
 }
 
+// Build an IPv6/UDP/EtherCAT-over-UDP packet (raw IP, no Ethernet header).
+std::vector<uint8_t> makeRawIpv6UdpEtherCAT(const std::vector<uint8_t>& ecatPayload,
+                                            uint16_t dstPort = 0x88A4) {
+    std::vector<uint8_t> ip(40, 0);
+    ip[0] = 0x60;  // version=6
+    ip[6] = 0x11;  // next header = UDP
+    // src: fe80::1
+    ip[8] = 0xfe; ip[9] = 0x80;
+    ip[23] = 0x01;
+    // dst: fe80::2
+    ip[24] = 0xfe; ip[25] = 0x80;
+    ip[39] = 0x02;
+    uint16_t udpLen = static_cast<uint16_t>(8 + ecatPayload.size());
+    uint16_t ipPayloadLen = udpLen;
+    ip[4] = static_cast<uint8_t>(ipPayloadLen >> 8);
+    ip[5] = static_cast<uint8_t>(ipPayloadLen & 0xFF);
+
+    std::vector<uint8_t> pkt;
+    appendBytes(pkt, ip.data(), ip.size());
+    appendU16BE(pkt, 0x5678);       // src port
+    appendU16BE(pkt, dstPort);      // dst port
+    appendU16BE(pkt, udpLen);       // UDP length
+    appendU16BE(pkt, 0);            // checksum
+    appendBytes(pkt, ecatPayload.data(), ecatPayload.size());
+    return pkt;
+}
+
 // Build a Linux SLL header + raw IPv4/UDP/EtherCAT-over-UDP payload.
 std::vector<uint8_t> makeLinuxSllEtherCAT(const std::vector<uint8_t>& ipPayload,
                                           uint16_t etherType = 0x0800) {
@@ -356,6 +383,50 @@ std::vector<uint8_t> makeEtherCATFrame(const std::array<uint8_t, 6>& dst,
     appendU16(frame, ado);
     appendU16(frame, dataLen); // lenFlags: length, no M/C
     appendU16(frame, irq);     // irq
+    appendBytes(frame, payload.data(), payload.size());
+    appendU16(frame, wkc);
+
+    return frame;
+}
+
+// Build a raw Ethernet + EtherCAT frame with 802.1ad QinQ double VLAN.
+// Outer tag uses TPID 0x88A8 (S-tag), inner tag uses TPID 0x8100 (C-tag).
+std::vector<uint8_t> makeEtherCATFrameQinQ(const std::array<uint8_t, 6>& dst,
+                                           const std::array<uint8_t, 6>& src,
+                                           uint16_t outerVlan,
+                                           uint16_t innerVlan) {
+    std::vector<uint8_t> frame;
+    appendBytes(frame, dst.data(), 6);
+    appendBytes(frame, src.data(), 6);
+
+    // Outer S-tag (802.1ad)
+    appendU16BE(frame, 0x88A8);
+    appendU16BE(frame, outerVlan & 0x0FFF);
+    // Inner C-tag (802.1Q)
+    appendU16BE(frame, 0x8100);
+    appendU16BE(frame, innerVlan & 0x0FFF);
+
+    appendU16BE(frame, 0x88A4); // EtherType
+
+    // One APRD datagram: read AL Status (0x0130) at position 0.
+    uint8_t cmd = static_cast<uint8_t>(Command::APRD);
+    uint8_t idx = 0xAB;
+    uint16_t adp = 0x0000;
+    uint16_t ado = 0x0130;
+    uint16_t dataLen = 2;
+    std::vector<uint8_t> payload = {0x04, 0x00};
+    uint16_t wkc = 0x0001;
+
+    uint16_t ecatLen = static_cast<uint16_t>(sizeof(DatagramHeader) + dataLen + sizeof(uint16_t));
+    appendU8(frame, static_cast<uint8_t>(ecatLen));
+    appendU8(frame, static_cast<uint8_t>(0x10 | ((ecatLen >> 8) & 0x07)));
+
+    appendU8(frame, cmd);
+    appendU8(frame, idx);
+    appendU16(frame, adp);
+    appendU16(frame, ado);
+    appendU16(frame, dataLen);
+    appendU16(frame, 0); // irq
     appendBytes(frame, payload.data(), payload.size());
     appendU16(frame, wkc);
 
@@ -1280,4 +1351,73 @@ TEST(PCAPNGReader, IdbAddressOptionsSurfaced) {
     EXPECT_EQ(ifaces[0].euiAddress,
               (std::array<uint8_t,8>{0x02,0x00,0x5e,0x10,0x20,0x30,0x40,0x50}));
     EXPECT_EQ(ifaces[0].tzZone, 5u);
+}
+
+// ============================================================================
+// IPv6 EtherCAT-over-UDP
+// ============================================================================
+
+TEST(PCAPNGReader, RawIpv6LinkTypeDecodesEtherCATOverUdp) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock(101); // LINKTYPE_RAW
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    auto ecatPayload = makeEtherCATPayloadOnly();
+    auto rawIp = makeRawIpv6UdpEtherCAT(ecatPayload);
+
+    auto epb = makeEnhancedPacketBlock(0, 8000, rawIp.data(), rawIp.size());
+    appendBytes(data, epb.data(), epb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    auto frames = reader.readAll();
+    ASSERT_EQ(frames.size(), 1u);
+
+    EXPECT_EQ(frames[0].linkType, 101u);
+    EXPECT_TRUE(frames[0].isEtherCAT);
+    EXPECT_TRUE(frames[0].isEtherCATOverUDP);
+    EXPECT_EQ(frames[0].ipVersion, 6u);
+    EXPECT_EQ(frames[0].innerEtherType, 0x86DDu);
+    EXPECT_EQ(frames[0].dstPort, 0x88A4u);
+    EXPECT_EQ(frames[0].srcPort, 0x5678u);
+    // Verify IPv6 addresses.
+    std::array<uint8_t,16> expectedSrc = {0xfe, 0x80, 0,0,0,0,0,0,0,0,0,0,0,0,0,1};
+    std::array<uint8_t,16> expectedDst = {0xfe, 0x80, 0,0,0,0,0,0,0,0,0,0,0,0,0,2};
+    EXPECT_EQ(frames[0].srcIpv6, expectedSrc);
+    EXPECT_EQ(frames[0].dstIpv6, expectedDst);
+    ASSERT_EQ(frames[0].datagrams.size(), 1u);
+    EXPECT_EQ(frames[0].datagrams[0].cmd, Command::APRD);
+}
+
+// ============================================================================
+// 802.1ad (QinQ) double VLAN
+// ============================================================================
+
+TEST(PCAPNGReader, QinQ8021adDoubleVlanDecodesEtherCAT) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    std::array<uint8_t, 6> dst = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::array<uint8_t, 6> src = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    auto frame = makeEtherCATFrameQinQ(dst, src, 200, 100);
+
+    auto epb = makeEnhancedPacketBlock(0, 3000, frame.data(), frame.size());
+    appendBytes(data, epb.data(), epb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    auto frames = reader.readAll();
+    ASSERT_EQ(frames.size(), 1u);
+
+    // The inner-most VLAN ID is surfaced (100), matching the C-tag.
+    ASSERT_TRUE(frames[0].vlanId.has_value());
+    EXPECT_EQ(*frames[0].vlanId, 100u);
+    EXPECT_TRUE(frames[0].isEtherCAT);
+    ASSERT_EQ(frames[0].datagrams.size(), 1u);
+    EXPECT_EQ(frames[0].datagrams[0].cmd, Command::APRD);
 }
