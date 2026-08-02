@@ -7,6 +7,7 @@
 #include "tether/klipper/KlipperLog.hpp"
 
 #include <algorithm>
+#include <format>
 
 namespace tether::klipper::reliability {
 
@@ -23,8 +24,7 @@ std::optional<uint8_t> SerialQueue::send(std::span<const uint8_t> content) {
     }
     size_t written = transport_.write(wire);
     if (written != wire.size()) {
-        KLIPPER_LOG_ERROR("SerialQueue::send() partial write: " +
-            std::to_string(written) + "/" + std::to_string(wire.size()) + " bytes");
+        KLIPPER_LOG_ERROR(std::format("SerialQueue::send() partial write: {}/{} bytes", written, wire.size()));
         return std::nullopt;
     }
     PendingBlock pb;

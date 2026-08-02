@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <map>
 #include <memory>
@@ -343,8 +344,7 @@ public:
         if (!std::isnan(measured)) {
             if (measured < minTemp_ || measured > maxTemp_) {
                 if (shutdownCallback_) {
-                    shutdownCallback_("Temperature out of range: " +
-                                      std::to_string(measured) + "°C");
+                    shutdownCallback_(std::format("Temperature out of range: {}°C", measured));
                 }
                 pwmWrite_(0.0);
                 return 0.0;

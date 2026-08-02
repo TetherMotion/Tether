@@ -105,8 +105,8 @@ public:
 
     /// @brief Clear the mesh.
     void clear() {
-        for (auto& col : mesh_) std::fill(col.begin(), col.end(), 0.0);
-        for (auto& col : probed_) std::fill(col.begin(), col.end(), false);
+        std::ranges::for_each(mesh_, [](auto& col) { std::ranges::fill(col, 0.0); });
+        std::ranges::for_each(probed_, [](auto& col) { std::ranges::fill(col, false); });
     }
 
     /// @brief Get mesh dimensions.

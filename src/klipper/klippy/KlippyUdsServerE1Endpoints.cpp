@@ -13,6 +13,7 @@
 #include <cstring>
 #include <ctime>
 #include <fcntl.h>
+#include <format>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -314,7 +315,7 @@ JsonValue KlippyUdsServer::handleAccessLogin(const JsonValue& params) {
         return JsonValue(result);
     }
     // Generate a simple token
-    std::string token = username + "_jwt_token_" + std::to_string(std::time(nullptr));
+    std::string token = std::format("{}_jwt_token_{}", username, std::time(nullptr));
     std::map<std::string, JsonValue> loginResult;
     loginResult["token"] = JsonValue(token);
     loginResult["username"] = JsonValue(username);
@@ -353,7 +354,7 @@ JsonValue KlippyUdsServer::handleAccessRefreshJwt(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     std::string username = params.has("username") && params.find("username")->isString()
         ? params.find("username")->asString() : "";
-    std::string token = username + "_jwt_refreshed_" + std::to_string(std::time(nullptr));
+    std::string token = std::format("{}_jwt_refreshed_{}", username, std::time(nullptr));
     std::map<std::string, JsonValue> refreshResult;
     refreshResult["token"] = JsonValue(token);
     refreshResult["username"] = JsonValue(username);
@@ -370,8 +371,7 @@ JsonValue KlippyUdsServer::handleAccessApiKey(const JsonValue& params) {
 JsonValue KlippyUdsServer::handleAccessOneshotToken(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
-    std::string token = "oneshot_" + std::to_string(oneshotTokens_.size()) +
-                        "_" + std::to_string(std::time(nullptr));
+    std::string token = std::format("oneshot_{}_{}", oneshotTokens_.size(), std::time(nullptr));
     oneshotTokens_.push_back(token);
     result["result"] = JsonValue(token);
     return JsonValue(result);

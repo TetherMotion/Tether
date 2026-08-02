@@ -38,6 +38,7 @@
 #include "tether/motion_planner/MotionPlan.hpp"
 #include "tether/motion_planner/MotionSegment.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -74,9 +75,9 @@ public:
         : config_(std::move(config))
         , translator_(config_.axisConfigs, config_.axisOids) {
         // Reasonable default limits if caller left them zeroed.
-        for (auto& v : config_.limits.axis.maxVelocity)    if (v <= 0) v = 200.0;
-        for (auto& v : config_.limits.axis.maxAcceleration) if (v <= 0) v = 2000.0;
-        for (auto& v : config_.limits.axis.maxJerk)         if (v <= 0) v = 20000.0;
+        std::ranges::replace_if(config_.limits.axis.maxVelocity,    [](auto v) { return v <= 0; }, 200.0);
+        std::ranges::replace_if(config_.limits.axis.maxAcceleration, [](auto v) { return v <= 0; }, 2000.0);
+        std::ranges::replace_if(config_.limits.axis.maxJerk,         [](auto v) { return v <= 0; }, 20000.0);
         if (config_.limits.path.maxPathVelocity <= 0)      config_.limits.path.maxPathVelocity = 200.0;
         if (config_.limits.path.maxPathAcceleration <= 0)  config_.limits.path.maxPathAcceleration = 2000.0;
     }
