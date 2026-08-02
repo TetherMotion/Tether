@@ -156,6 +156,27 @@ std::vector<uint8_t> makeInterfaceDescriptionBlockWithFcs(uint8_t fcsLen,
     return out;
 }
 
+// IDB with a custom if_tsresol option (power-of-ten resolution).
+std::vector<uint8_t> makeInterfaceDescriptionBlockWithTsResol(uint8_t tsResol,
+                                                              uint16_t linkType = 1) {
+    std::vector<uint8_t> body;
+    appendU16(body, linkType);
+    appendU16(body, 0); // reserved
+    appendU32(body, 65535);
+
+    std::vector<uint8_t> opts;
+    appendU16(opts, PCAPNG::IDB_TSRESOL);
+    appendU16(opts, 1);
+    appendU8(opts, tsResol);
+    appendU8(opts, 0); appendU8(opts, 0); appendU8(opts, 0); // pad to 4
+    appendEndOption(opts);
+    appendBytes(body, opts.data(), opts.size());
+
+    std::vector<uint8_t> out;
+    appendBlockHeader(out, PCAPNG::BLOCK_TYPE_IDB, body);
+    return out;
+}
+
 std::vector<uint8_t> makeEnhancedPacketBlock(uint32_t interfaceId,
                                              uint64_t timestamp,
                                              const uint8_t* packetData,
@@ -717,4 +738,54 @@ TEST(PCAPNGReader, UnknownLinkTypeNotInterpreted) {
     EXPECT_FALSE(frames[0].isEtherCAT);
     // frameData preserved as-is, no interpretation attempted.
     EXPECT_EQ(frames[0].frameData, junk);
+}
+
+// ============================================================================
+// Multi-section SHB handling
+// ============================================================================
+
+TEST(PCAPNGReader, MultipleSectionsResetInterfaces) {
+    std::vector<uint8_t> data;
+
+    // Section 1: IDB with tsResol=9 (nanoseconds, default).
+    auto shb1 = makeSectionHeaderBlock("HW1", "OS1", "App1");
+    auto idb1 = makeInterfaceDescriptionBlockWithTsResol(9);
+    appendBytes(data, shb1.data(), shb1.size());
+    appendBytes(data, idb1.data(), idb1.size());
+
+    std::array<uint8_t, 6> dst = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::array<uint8_t, 6> src = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    auto frame1 = makeEtherCATFrame(dst, src, std::nullopt);
+    // raw timestamp = 1000 ticks; with tsResol=9 (ns), timestampNs = 1000.
+    auto epb1 = makeEnhancedPacketBlock(0, 1000, frame1.data(), frame1.size());
+    appendBytes(data, epb1.data(), epb1.size());
+
+    // Section 2: new SHB + IDB with tsResol=6 (microseconds).
+    auto shb2 = makeSectionHeaderBlock("HW2", "OS2", "App2");
+    auto idb2 = makeInterfaceDescriptionBlockWithTsResol(6);
+    appendBytes(data, shb2.data(), shb2.size());
+    appendBytes(data, idb2.data(), idb2.size());
+
+    auto frame2 = makeEtherCATFrame(dst, src, std::nullopt);
+    // raw timestamp = 1000 ticks; with tsResol=6 (us), timestampNs = 1000 * 1000.
+    auto epb2 = makeEnhancedPacketBlock(0, 1000, frame2.data(), frame2.size());
+    appendBytes(data, epb2.data(), epb2.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    auto frames = reader.readAll();
+    ASSERT_EQ(frames.size(), 2u);
+
+    // Section 2's metadata should be the final section info.
+    EXPECT_EQ(reader.sectionInfo().hardware, "HW2");
+    EXPECT_EQ(reader.sectionInfo().os, "OS2");
+    EXPECT_EQ(reader.sectionInfo().application, "App2");
+    // Only the second section's IDB should remain.
+    ASSERT_EQ(reader.interfaces().size(), 1u);
+    EXPECT_EQ(reader.interfaces()[0].tsResol, 6u);
+
+    // Frame 1: tsResol=9 → 1000 ns.
+    EXPECT_EQ(frames[0].timestampNs, 1000u);
+    // Frame 2: tsResol=6 → 1000 ticks * 1000 ns/tick = 1,000,000 ns.
+    EXPECT_EQ(frames[1].timestampNs, 1000000u);
 }
