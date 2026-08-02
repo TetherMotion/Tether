@@ -680,7 +680,12 @@ bool PCAPNGReader::parseEnhancedPacketBlock(size_t offset, const BlockHeader& he
                         }
                         break;
                     case PCAPNG::EPB_HASH:
-                        // Not formatted currently, but could be stored.
+                        if (len >= 1) {
+                            InterpretedFrame::PacketHash h;
+                            h.type = data[0];
+                            h.data.assign(data + 1, data + len);
+                            frame.hash = std::move(h);
+                        }
                         break;
                     case PCAPNG::EPB_DROPCOUNT:
                         if (len >= 8) {
@@ -688,8 +693,22 @@ bool PCAPNGReader::parseEnhancedPacketBlock(size_t offset, const BlockHeader& he
                         }
                         break;
                     case PCAPNG::EPB_PACKETID:
+                        if (len >= 8) {
+                            frame.packetId = this->read64(data);
+                        }
+                        break;
                     case PCAPNG::EPB_QUEUE:
+                        if (len >= 4) {
+                            frame.queue = this->read32(data);
+                        }
+                        break;
                     case PCAPNG::EPB_VERDICT:
+                        if (len >= 2) {
+                            InterpretedFrame::PacketVerdict v;
+                            v.type = this->read16(data);
+                            v.text.assign(reinterpret_cast<const char*>(data + 2), len - 2);
+                            frame.verdict = std::move(v);
+                        }
                         break;
                     case PCAPNG::EPB_ETHERCAT_SLAVE:
                         if (len >= 2) {
