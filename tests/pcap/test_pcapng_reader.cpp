@@ -99,6 +99,42 @@ std::vector<uint8_t> makeInterfaceDescriptionBlock(uint16_t linkType = 1,
     return out;
 }
 
+// Build an IPv4/UDP/EtherCAT-over-UDP packet with no Ethernet header (raw IP).
+std::vector<uint8_t> makeRawIpv4UdpEtherCAT(const std::vector<uint8_t>& ecatPayload,
+                                            uint16_t dstPort = 0x88A4) {
+    std::vector<uint8_t> ip(20, 0);
+    ip[0] = 0x45;  // version=4, IHL=5
+    ip[9] = 0x11;  // protocol = UDP
+    ip[12] = 192; ip[13] = 168; ip[14] = 1; ip[15] = 1;
+    ip[16] = 192; ip[17] = 168; ip[18] = 1; ip[19] = 255;
+    uint16_t udpLen = static_cast<uint16_t>(8 + ecatPayload.size());
+    uint16_t ipTotalLen = static_cast<uint16_t>(20 + udpLen);
+    ip[2] = static_cast<uint8_t>(ipTotalLen >> 8);
+    ip[3] = static_cast<uint8_t>(ipTotalLen & 0xFF);
+
+    std::vector<uint8_t> pkt;
+    appendBytes(pkt, ip.data(), ip.size());
+    appendU16BE(pkt, 0x1234);       // src port
+    appendU16BE(pkt, dstPort);      // dst port
+    appendU16BE(pkt, udpLen);       // UDP length
+    appendU16BE(pkt, 0);            // checksum
+    appendBytes(pkt, ecatPayload.data(), ecatPayload.size());
+    return pkt;
+}
+
+// Build a Linux SLL header + raw IPv4/UDP/EtherCAT-over-UDP payload.
+std::vector<uint8_t> makeLinuxSllEtherCAT(const std::vector<uint8_t>& ipPayload,
+                                          uint16_t etherType = 0x0800) {
+    std::vector<uint8_t> sll;
+    appendU16BE(sll, 0);            // packet type: unicast
+    appendU16BE(sll, 1);            // ARPHRD: Ethernet
+    appendU16BE(sll, 6);            // address length
+    appendBytes(sll, std::array<uint8_t,8>{0x00,0x11,0x22,0x33,0x44,0x55,0,0}.data(), 8);
+    appendU16BE(sll, etherType);    // protocol
+    appendBytes(sll, ipPayload.data(), ipPayload.size());
+    return sll;
+}
+
 // IDB with an if_fcslen option declaring trailing FCS bytes.
 std::vector<uint8_t> makeInterfaceDescriptionBlockWithFcs(uint8_t fcsLen,
                                                           uint16_t linkType = 1) {
@@ -599,4 +635,86 @@ TEST(PCAPNGReader, NoFcsStrippingWhenFcsLenZero) {
 
     EXPECT_EQ(frames[0].fcsLength, 0u);
     EXPECT_EQ(frames[0].frameData.size(), frame.size());
+}
+
+// ============================================================================
+// Link-type dispatch (LINKTYPE_LINUX_SLL, LINKTYPE_RAW, LINKTYPE_NULL)
+// ============================================================================
+
+TEST(PCAPNGReader, LinuxSllLinkTypeDecodesEtherCATOverUdp) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock(113); // LINKTYPE_LINUX_SLL
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    auto ecatPayload = makeEtherCATPayloadOnly();
+    auto rawIp = makeRawIpv4UdpEtherCAT(ecatPayload);
+    auto sllFrame = makeLinuxSllEtherCAT(rawIp, 0x0800);
+
+    auto epb = makeEnhancedPacketBlock(0, 7000, sllFrame.data(), sllFrame.size());
+    appendBytes(data, epb.data(), epb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    auto frames = reader.readAll();
+    ASSERT_EQ(frames.size(), 1u);
+
+    EXPECT_EQ(frames[0].linkType, 113u);
+    EXPECT_TRUE(frames[0].isEtherCAT);
+    EXPECT_TRUE(frames[0].isEtherCATOverUDP);
+    EXPECT_EQ(frames[0].innerEtherType, 0x0800u);
+    EXPECT_EQ(frames[0].dstPort, 0x88A4u);
+    // SLL source MAC should be populated from the address field.
+    EXPECT_EQ(frames[0].srcMac, (std::array<uint8_t,6>{0x00,0x11,0x22,0x33,0x44,0x55}));
+    ASSERT_EQ(frames[0].datagrams.size(), 1u);
+    EXPECT_EQ(frames[0].datagrams[0].cmd, Command::APRD);
+}
+
+TEST(PCAPNGReader, RawIpLinkTypeDecodesEtherCATOverUdp) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock(101); // LINKTYPE_RAW
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    auto ecatPayload = makeEtherCATPayloadOnly();
+    auto rawIp = makeRawIpv4UdpEtherCAT(ecatPayload);
+
+    auto epb = makeEnhancedPacketBlock(0, 8000, rawIp.data(), rawIp.size());
+    appendBytes(data, epb.data(), epb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    auto frames = reader.readAll();
+    ASSERT_EQ(frames.size(), 1u);
+
+    EXPECT_EQ(frames[0].linkType, 101u);
+    EXPECT_TRUE(frames[0].isEtherCAT);
+    EXPECT_TRUE(frames[0].isEtherCATOverUDP);
+    EXPECT_EQ(frames[0].innerEtherType, 0x0800u);
+    ASSERT_EQ(frames[0].datagrams.size(), 1u);
+    EXPECT_EQ(frames[0].datagrams[0].cmd, Command::APRD);
+}
+
+TEST(PCAPNGReader, UnknownLinkTypeNotInterpreted) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock(999); // unknown link type
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    std::vector<uint8_t> junk = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
+    auto epb = makeEnhancedPacketBlock(0, 9000, junk.data(), junk.size());
+    appendBytes(data, epb.data(), epb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    auto frames = reader.readAll();
+    ASSERT_EQ(frames.size(), 1u);
+
+    EXPECT_EQ(frames[0].linkType, 999u);
+    EXPECT_FALSE(frames[0].isEtherCAT);
+    // frameData preserved as-is, no interpretation attempted.
+    EXPECT_EQ(frames[0].frameData, junk);
 }
