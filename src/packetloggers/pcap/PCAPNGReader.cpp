@@ -342,6 +342,18 @@ bool PCAPNGReader::parseSectionHeaderBlock(size_t offset, const BlockHeader& hea
     }
     haveSectionHeader_ = true;
 
+    // A new Section Header Block starts a fresh section: reset interface
+    // state so subsequent EPBs do not resolve timestamps against stale IDBs
+    // from the previous section.
+    if (!interfaces_.empty()) {
+        interfaces_.clear();
+    }
+    section_.sectionLength = -1;
+    section_.hardware.clear();
+    section_.os.clear();
+    section_.application.clear();
+    section_.comment.clear();
+
     // Major/minor version
     [[maybe_unused]] uint16_t majorVersion = read16(buffer_.data() + offset + 12);
     [[maybe_unused]] uint16_t minorVersion = read16(buffer_.data() + offset + 14);
