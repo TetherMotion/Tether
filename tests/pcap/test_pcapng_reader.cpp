@@ -1085,3 +1085,75 @@ TEST(PCAPNGReader, ResetAllowsReiteration) {
     ASSERT_TRUE(reader.readNext(f));
     EXPECT_EQ(f.timestampNs, 42u);
 }
+
+// ============================================================================
+// Error-recovery mode
+// ============================================================================
+
+TEST(PCAPNGReader, RecoveryModeSkipsBadBlock) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    // Insert 12 bytes of garbage (invalid block header with huge totalLength).
+    appendU32(data, 0xDEADBEEF);       // bogus block type
+    appendU32(data, 0xFFFFFFFF);       // bogus total length (too large)
+    appendU32(data, 0);                // padding
+
+    std::array<uint8_t, 6> dst = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::array<uint8_t, 6> src = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    auto frame = makeEtherCATFrame(dst, src, std::nullopt);
+    auto epb = makeEnhancedPacketBlock(0, 999, frame.data(), frame.size());
+    appendBytes(data, epb.data(), epb.size());
+
+    // Without recovery, parsing fails.
+    {
+        PCAPNGReader reader;
+        ASSERT_TRUE(reader.open(data));
+        auto frames = reader.readAll();
+        EXPECT_TRUE(frames.empty());
+    }
+
+    // With recovery, the bad block is skipped and the EPB is found.
+    {
+        PCAPNGReader reader;
+        ASSERT_TRUE(reader.open(data));
+        size_t errorCount = 0;
+        reader.setRecoveryMode(true, [&errorCount](size_t, const std::string&) {
+            ++errorCount;
+        });
+        auto frames = reader.readAll();
+        ASSERT_EQ(frames.size(), 1u);
+        EXPECT_EQ(frames[0].timestampNs, 999u);
+        EXPECT_TRUE(frames[0].isEtherCAT);
+        EXPECT_EQ(reader.skippedBlockCount(), 1u);
+        EXPECT_EQ(errorCount, 1u);
+    }
+}
+
+TEST(PCAPNGReader, StrictModeAbortsOnBadBlock) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    // Insert garbage.
+    appendU32(data, 0xDEADBEEF);
+    appendU32(data, 0xFFFFFFFF);
+    appendU32(data, 0);
+
+    std::array<uint8_t, 6> dst = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::array<uint8_t, 6> src = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    auto frame = makeEtherCATFrame(dst, src, std::nullopt);
+    auto epb = makeEnhancedPacketBlock(0, 999, frame.data(), frame.size());
+    appendBytes(data, epb.data(), epb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    // Default mode is strict — readAll returns false (no frames collected).
+    EXPECT_FALSE(reader.readAll([](const InterpretedFrame&) {}));
+    EXPECT_EQ(reader.skippedBlockCount(), 0u);
+}

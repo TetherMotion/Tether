@@ -238,6 +238,18 @@ public:
     /// reloading the buffer.  Useful for re-iterating with readNext().
     void reset();
 
+    /// Error callback invoked when a malformed block is encountered in
+    /// recovery mode.  Receives the block offset and a human-readable message.
+    using ErrorCallback = std::function<void(size_t offset, const std::string& msg)>;
+
+    /// Enable or disable recovery mode.  When enabled, malformed blocks are
+    /// skipped (the reader scans forward for the next valid block) instead of
+    /// aborting the parse.  @p cb is invoked for each skipped block.
+    void setRecoveryMode(bool enabled, ErrorCallback cb = nullptr);
+
+    /// @return number of blocks skipped due to errors in recovery mode.
+    size_t skippedBlockCount() const { return skippedBlockCount_; }
+
 private:
     struct BlockHeader {
         uint32_t type = 0;
@@ -249,6 +261,9 @@ private:
     /// @return true on success.  Does not advance currentOffset_.
     bool processBlock(size_t offset, const BlockHeader& header, PacketCallback cb);
     bool readBlockHeader(size_t offset, BlockHeader& header) const;
+    /// Scan forward from @p from for the next plausible block header.
+    /// @return offset of the next valid block, or fileSize_ if none found.
+    size_t findNextBlockOffset(size_t from) const;
     bool parseSectionHeaderBlock(size_t offset, const BlockHeader& header);
     bool parseInterfaceDescriptionBlock(size_t offset, const BlockHeader& header);
     bool parseEnhancedPacketBlock(size_t offset, const BlockHeader& header,
@@ -331,6 +346,11 @@ private:
     // Parsing state
     size_t currentOffset_ = 0;
     bool haveSectionHeader_ = false;
+
+    // Error recovery
+    bool recoveryMode_ = false;
+    size_t skippedBlockCount_ = 0;
+    ErrorCallback errorCallback_;
 };
 
 // ============================================================================
