@@ -56,6 +56,12 @@ struct PCAPNGInterfaceInfo {
     std::string filter;
     std::string os;
     std::array<uint8_t, 6> macAddress{};
+    std::array<uint8_t, 4> ipv4Address{};   ///< if_ipv4addr (network byte order)
+    std::array<uint8_t, 4> ipv4Mask{};      ///< if_ipv4addr netmask
+    std::array<uint8_t, 16> ipv6Address{};  ///< if_ipv6addr (network byte order)
+    std::array<uint8_t, 16> ipv6Mask{};     ///< if_ipv6addr prefix mask
+    std::array<uint8_t, 8> euiAddress{};    ///< if_euiaddr (EUI-64)
+    uint8_t tzZone = 0;                     ///< if_tzone (deprecated, hours from UTC)
     std::string comment;
 };
 

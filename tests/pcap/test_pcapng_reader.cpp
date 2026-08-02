@@ -99,6 +99,45 @@ std::vector<uint8_t> makeInterfaceDescriptionBlock(uint16_t linkType = 1,
     return out;
 }
 
+// IDB with if_ipv4addr, if_ipv6addr, if_euiaddr, and if_tzone options.
+std::vector<uint8_t> makeInterfaceDescriptionBlockWithAddresses() {
+    std::vector<uint8_t> body;
+    appendU16(body, 1);    // linkType = Ethernet
+    appendU16(body, 0);    // reserved
+    appendU32(body, 65535);
+
+    std::vector<uint8_t> opts;
+    // if_ipv4addr: 4 bytes IP + 4 bytes mask
+    appendU16(opts, PCAPNG::IDB_IPV4ADDR);
+    appendU16(opts, 8);
+    appendBytes(opts, std::array<uint8_t,4>{192, 168, 1, 10}.data(), 4);
+    appendBytes(opts, std::array<uint8_t,4>{255, 255, 255, 0}.data(), 4);
+    // if_ipv6addr: 16 bytes IP + 16 bytes mask
+    appendU16(opts, PCAPNG::IDB_IPV6ADDR);
+    appendU16(opts, 32);
+    std::array<uint8_t,16> ipv6 = {0xfe, 0x80, 0,0,0,0,0,0,0,0,0,0,0,0,0,1};
+    std::array<uint8_t,16> ipv6Mask{};
+    ipv6Mask[0] = 0xff; ipv6Mask[1] = 0xff; ipv6Mask[2] = 0xff; ipv6Mask[3] = 0xff;
+    ipv6Mask[4] = 0xff; ipv6Mask[5] = 0xff; ipv6Mask[6] = 0xff; ipv6Mask[7] = 0xff;
+    appendBytes(opts, ipv6.data(), 16);
+    appendBytes(opts, ipv6Mask.data(), 16);
+    // if_euiaddr: 8 bytes
+    appendU16(opts, PCAPNG::IDB_EUIADDR);
+    appendU16(opts, 8);
+    appendBytes(opts, std::array<uint8_t,8>{0x02,0x00,0x5e,0x10,0x20,0x30,0x40,0x50}.data(), 8);
+    // if_tzone: 1 byte
+    appendU16(opts, PCAPNG::IDB_TZONE);
+    appendU16(opts, 1);
+    appendU8(opts, 5);
+    appendU8(opts, 0); appendU8(opts, 0); appendU8(opts, 0); // pad
+    appendEndOption(opts);
+    appendBytes(body, opts.data(), opts.size());
+
+    std::vector<uint8_t> out;
+    appendBlockHeader(out, PCAPNG::BLOCK_TYPE_IDB, body);
+    return out;
+}
+
 // Build an IPv4/UDP/EtherCAT-over-UDP packet with no Ethernet header (raw IP).
 std::vector<uint8_t> makeRawIpv4UdpEtherCAT(const std::vector<uint8_t>& ecatPayload,
                                             uint16_t dstPort = 0x88A4) {
@@ -1215,4 +1254,30 @@ TEST(PCAPNGReader, EpbOptionalMetadataFields) {
     ASSERT_TRUE(frames[0].verdict.has_value());
     EXPECT_EQ(frames[0].verdict->type, 1u);
     EXPECT_EQ(frames[0].verdict->text, "accepted");
+}
+
+// ============================================================================
+// IDB address options (if_ipv4addr, if_ipv6addr, if_euiaddr, if_tzone)
+// ============================================================================
+
+TEST(PCAPNGReader, IdbAddressOptionsSurfaced) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlockWithAddresses();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    ASSERT_TRUE(reader.readAll([](const InterpretedFrame&) {}));
+
+    const auto& ifaces = reader.interfaces();
+    ASSERT_EQ(ifaces.size(), 1u);
+    EXPECT_EQ(ifaces[0].ipv4Address, (std::array<uint8_t,4>{192, 168, 1, 10}));
+    EXPECT_EQ(ifaces[0].ipv4Mask, (std::array<uint8_t,4>{255, 255, 255, 0}));
+    std::array<uint8_t,16> expectedIpv6 = {0xfe, 0x80, 0,0,0,0,0,0,0,0,0,0,0,0,0,1};
+    EXPECT_EQ(ifaces[0].ipv6Address, expectedIpv6);
+    EXPECT_EQ(ifaces[0].euiAddress,
+              (std::array<uint8_t,8>{0x02,0x00,0x5e,0x10,0x20,0x30,0x40,0x50}));
+    EXPECT_EQ(ifaces[0].tzZone, 5u);
 }
