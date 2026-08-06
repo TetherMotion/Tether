@@ -533,6 +533,7 @@ private:
     uint64_t stateEntryTimeMs_ = 0;
     uint64_t lastUpdateTimeMs_ = 0;
     uint64_t recoveryAttemptTimeMs_ = 0;
+    uint64_t failSafeEnteredMs_ = 0;
     
     // Data buffers
     std::array<uint8_t, 16> safeInputs_{};
