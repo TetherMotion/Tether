@@ -23,6 +23,7 @@
 #include "tether/klipper/protocol/DataDictionary.hpp"
 #include "tether/klipper/protocol/CommandTable.hpp"
 #include "tether/klipper/protocol/IdentifyProtocol.hpp"
+#include "tether/klipper/protocol/BlockReader.hpp"
 #include "tether/klipper/clock/ClockSync.hpp"
 #include "tether/klipper/objects/OidAllocator.hpp"
 #include "tether/klipper/objects/Stepper.hpp"
@@ -94,6 +95,15 @@ public:
     /// @brief Check retransmit timeouts.
     void checkTimeouts();
 
+    /// @brief Reset host-side protocol state for connection re-establishment.
+    ///
+    /// Clears the downloaded dictionary, clock sync, OID allocator, serial
+    /// queue, and block reader state. The transport is not touched (call
+    /// connect() to re-open it). This mirrors the reset() pattern of the
+    /// pcapng reader and BlockReader, allowing the host to recover from a
+    /// device reconnect without full reconstruction.
+    void reset();
+
     /// @return The data dictionary (valid after downloadDictionary()).
     const protocol::DataDictionary& dictionary() const { return dict_; }
 
@@ -106,6 +116,22 @@ public:
     /// @return True if the host is connected and the dictionary is downloaded.
     bool isReady() const { return connected_ && dictDownloaded_; }
 
+    /// @return Block parse statistics from the internal BlockReader.
+    const protocol::BlockParseStats& blockParseStats() const {
+        return blockReader_.stats();
+    }
+
+    /// @return Number of corrupt blocks skipped by the internal BlockReader.
+    size_t skippedBlockCount() const { return blockReader_.skippedBlockCount(); }
+
+    /// @brief Enable error-recovery mode on the internal BlockReader.
+    /// When enabled, corrupt blocks are skipped (with optional callback)
+    /// instead of causing pump() to silently drop remaining data.
+    void setBlockRecoveryMode(bool enabled,
+                              protocol::BlockReader::ErrorCallback cb = nullptr) {
+        blockReader_.setRecoveryMode(enabled, std::move(cb));
+    }
+
 private:
     std::shared_ptr<transport::IByteStreamTransport> transport_;
     std::unique_ptr<reliability::SerialQueue> serialQueue_;
@@ -113,6 +139,7 @@ private:
     std::unique_ptr<protocol::CommandTable> commandTable_;
     clock::ClockSync clockSync_;
     objects::OidAllocator oidAllocator_;
+    protocol::BlockReader blockReader_;
     bool connected_ = false;
     bool dictDownloaded_ = false;
 

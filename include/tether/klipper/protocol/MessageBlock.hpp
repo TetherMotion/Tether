@@ -118,6 +118,8 @@ struct ParsedBlock {
     BlockParseStatus status = BlockParseStatus::NeedMoreData;
     MessageBlock block;           ///< Valid when status == Ok
     size_t consumedBytes = 0;     ///< Bytes consumed from the input (to advance buffer)
+    size_t wireLength = 0;        ///< Total wire length of the parsed block (0 if not Ok)
+    size_t skippedBytes = 0;      ///< Garbage bytes skipped before finding this block
 };
 
 /**
@@ -136,6 +138,7 @@ inline ParsedBlock parseBlock(std::span<const uint8_t> buffer) {
     ParsedBlock result;
     size_t i = 0;
     const size_t size = buffer.size();
+    size_t startOffset = 0; // tracks how many garbage bytes were skipped
 
     while (i < size) {
         uint8_t len = buffer[i];
@@ -144,6 +147,7 @@ inline ParsedBlock parseBlock(std::span<const uint8_t> buffer) {
             if (i + len > size) {
                 // Need more data to complete this candidate block.
                 result.consumedBytes = i; // keep scanning from i once more arrives
+                result.skippedBytes = startOffset;
                 result.status = BlockParseStatus::NeedMoreData;
                 return result;
             }
@@ -161,6 +165,8 @@ inline ParsedBlock parseBlock(std::span<const uint8_t> buffer) {
             if (computed != stored) {
                 result.status = BlockParseStatus::BadCrc;
                 result.consumedBytes = i + len; // discard the corrupt block
+                result.wireLength = len;
+                result.skippedBytes = startOffset;
                 return result;
             }
             // Valid block.
@@ -169,12 +175,16 @@ inline ParsedBlock parseBlock(std::span<const uint8_t> buffer) {
             result.block.content.assign(buffer.data() + i + kHeaderSize,
                                         buffer.data() + i + crcLen);
             result.consumedBytes = i + len;
+            result.wireLength = len;
+            result.skippedBytes = startOffset;
             return result;
         }
         // Not a plausible length: skip to next sync byte to resync.
         ++i;
+        startOffset = i;
     }
     result.consumedBytes = i;
+    result.skippedBytes = startOffset;
     result.status = BlockParseStatus::NeedMoreData;
     return result;
 }

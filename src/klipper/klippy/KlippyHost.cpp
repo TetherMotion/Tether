@@ -14,7 +14,8 @@
 namespace tether::klipper::klippy {
 
 KlippyHost::KlippyHost(std::shared_ptr<transport::IByteStreamTransport> transport)
-    : transport_(std::move(transport)) {
+    : transport_(std::move(transport))
+    , blockReader_(*transport_) {
     serialQueue_ = std::make_unique<reliability::SerialQueue>(*transport_);
 }
 
@@ -48,21 +49,16 @@ bool KlippyHost::downloadDictionary(std::function<void()> devicePump) {
         // Pump both sides until we get a response or timeout.
         for (int i = 0; i < 100 && !client.complete(); ++i) {
             if (devicePump) devicePump();
-            // Read and parse blocks directly (pump() dispatches to
-            // commandTable which isn't set up yet during identify).
-            auto rd = transport_->readAll();
-            if (rd.empty()) continue;
-            size_t off = 0;
-            while (off < rd.size()) {
-                auto pb = protocol::parseBlock(
-                    std::span<const uint8_t>(rd.data() + off, rd.size() - off));
-                if (pb.status != protocol::BlockParseStatus::Ok) break;
-                if (pb.block.content.empty()) {
-                    serialQueue_->processAck(pb.block);
+            // Use the BlockReader to parse incoming blocks. During the
+            // identify handshake the command table isn't set up yet, so
+            // we dispatch acks and identify responses directly here.
+            protocol::MessageBlock block;
+            while (blockReader_.readNext(block)) {
+                if (block.content.empty()) {
+                    serialQueue_->processAck(block);
                 } else {
-                    client.consumeResponseContent(pb.block.content);
+                    client.consumeResponseContent(block.content);
                 }
-                off += pb.consumedBytes;
             }
         }
         ++rounds;
@@ -204,17 +200,16 @@ void KlippyHost::onResponse(const std::string& formatStr, protocol::ResponseHand
 }
 
 void KlippyHost::pump() {
-    auto rd = transport_->readAll();
-    if (rd.empty()) return;
-    size_t off = 0;
-    while (off < rd.size()) {
-        auto pb = protocol::parseBlock(
-            std::span<const uint8_t>(rd.data() + off, rd.size() - off));
-        if (pb.status != protocol::BlockParseStatus::Ok) break;
-        if (pb.block.content.empty()) {
-            serialQueue_->processAck(pb.block);
+    // Use the streaming BlockReader: it reads from the transport and parses
+    // complete blocks, handling partial data and (in recovery mode) corrupt
+    // blocks transparently. This replaces the manual readAll()+parseBlock()
+    // loop and surfaces parse statistics via blockParseStats().
+    protocol::MessageBlock block;
+    while (blockReader_.readNext(block)) {
+        if (block.content.empty()) {
+            serialQueue_->processAck(block);
         } else {
-            auto msgs = protocol::decodeMessages(dict_, pb.block.content);
+            auto msgs = protocol::decodeMessages(dict_, block.content);
             for (const auto& msg : msgs) {
                 if (getClockPending_) {
                     auto clockRespOpt = dict_.lookupResponse("clock clock=%u");
@@ -228,8 +223,19 @@ void KlippyHost::pump() {
                 if (commandTable_) commandTable_->dispatchResponse(msg);
             }
         }
-        off += pb.consumedBytes;
     }
+}
+
+void KlippyHost::reset() {
+    serialQueue_->reset();
+    dict_ = protocol::DataDictionary{};
+    commandTable_.reset();
+    oidAllocator_.reset();
+    blockReader_.reset();
+    clockSync_.reset();
+    connected_ = false;
+    dictDownloaded_ = false;
+    getClockPending_ = false;
 }
 
 void KlippyHost::checkTimeouts() {

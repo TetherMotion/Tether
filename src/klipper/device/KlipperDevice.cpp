@@ -18,7 +18,8 @@ KlipperDevice::KlipperDevice(std::shared_ptr<transport::IByteStreamTransport> tr
     : transport_(std::move(transport))
     , dict_(std::move(dict))
     , config_(std::move(config))
-    , mcuClock_(config_.clockFreqHz) {
+    , mcuClock_(config_.clockFreqHz)
+    , blockReader_(*transport_) {
     commandTable_ = std::make_unique<protocol::CommandTable>(dict_);
     // Build the identify server from the dictionary's wire blob.
     identifyServer_ = std::make_unique<protocol::IdentifyServer>(dict_.toWire());
@@ -43,21 +44,28 @@ bool KlipperDevice::start() {
 
 void KlipperDevice::pump() {
     if (!started_) return;
-    auto rd = transport_->readAll();
-    if (rd.empty()) return;
-    size_t offset = 0;
-    while (offset < rd.size()) {
-        auto pb = protocol::parseBlock(std::span<const uint8_t>(rd.data() + offset, rd.size() - offset));
-        if (pb.status == protocol::BlockParseStatus::Ok) {
-            processBlock(pb.block);
-            offset += pb.consumedBytes;
-        } else if (pb.status == protocol::BlockParseStatus::NeedMoreData) {
-            break;
-        } else {
-            // Bad block: skip consumed bytes.
-            offset += pb.consumedBytes;
-        }
+    // Use the streaming BlockReader: it reads from the transport and parses
+    // complete blocks, handling partial data and (in recovery mode) corrupt
+    // blocks transparently. This replaces the manual readAll()+parseBlock()
+    // loop and surfaces parse statistics via blockParseStats().
+    protocol::MessageBlock block;
+    while (blockReader_.readNext(block)) {
+        processBlock(block);
     }
+}
+
+void KlipperDevice::reset() {
+    lastRecvSeq_ = 0;
+    shutdown_ = false;
+    configFinalized_ = false;
+    oidAllocator_.reset();
+    steppers_.clear();
+    peripherals_.clear();
+    stepperBaseClocks_.clear();
+    blockReader_.reset();
+    // Re-register default command handlers (clears any application-registered
+    // handlers that may have referenced now-stale state).
+    enableDefaultCommands();
 }
 
 void KlipperDevice::processBlock(const protocol::MessageBlock& block) {
