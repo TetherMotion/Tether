@@ -131,7 +131,13 @@ void FSoESlave::triggerFailSafe(uint16_t errorCode) {
     dataValid_ = false;
     failSafeEnteredMs_ = lastUpdateTimeMs_;
 
-    // Stay in Data state but mark as fail-safe (ETG.5100 uses cmd 0x08 within Data)
+    // ETG.5100 defines fail-safe as a sub-mode of Data (signalled via cmd 0x08).
+    // Transition to Data so that handleTimeout's recovery logic is reached
+    // regardless of which state triggerFailSafe was called from.
+    if (state_ != ConnectionState::Data) {
+        transitionTo(ConnectionState::Data);
+    }
+
     applyFailSafeOutputs();
 
     stats_.failSafeActivations++;

@@ -325,8 +325,8 @@ void FSoEMasterConnection::checkPhaseTimeout(uint64_t current_time_ms)
     }
 
     if (elapsed > timeout) {
-        stats_.watchdog_events++;
-        handleError(ErrorCode::WatchdogError);
+        stats_.timeout_events++;
+        handleError(ErrorCode::TimeoutError);
     }
 }
 
@@ -443,9 +443,6 @@ void FSoEMasterConnection::handleDataState(uint8_t cmd, const uint8_t* data, siz
 
 void FSoEMasterConnection::handleFailSafeState(uint8_t cmd, const uint8_t* data, size_t data_len)
 {
-    (void)data;
-    (void)data_len;
-
     if (cmd == Command::Reset) {
         if (config_.auto_recovery_enabled) {
             stats_.successful_recoveries++;
@@ -454,6 +451,18 @@ void FSoEMasterConnection::handleFailSafeState(uint8_t cmd, const uint8_t* data,
     } else if (cmd == Command::FailSafeData) {
         // Slave is also in fail-safe — acknowledge by staying in fail-safe.
         // Recovery will be attempted by attemptAutoRecovery() in update().
+        // Extract slave error code for diagnostics (input_size bytes of
+        // fail-safe inputs followed by 2-byte error code).
+        if (data_len >= config_.input_size + 2) {
+            uint16_t slave_error = static_cast<uint16_t>(
+                data[config_.input_size] | (data[config_.input_size + 1] << 8));
+            // Update error code only if the slave reports a different error
+            // than what we already have — avoids overwriting our own error.
+            if (slave_error != ErrorCode::NoError &&
+                slave_error != status_.error_code) {
+                status_.error_code = slave_error;
+            }
+        }
     }
 }
 
