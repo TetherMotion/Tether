@@ -246,7 +246,7 @@ inline bool verifyCRC16(const uint8_t* data, size_t len, uint16_t expected_crc)
 }
 
 namespace Limits {
-    constexpr uint16_t WatchdogTimeoutMin   = 10;      // ms (vendor-specific, e.g. Synapticon uses 15ms)
+    constexpr uint16_t WatchdogTimeoutMin   = 15;      // ms (matches Synapticon vendor minimum)
     constexpr uint16_t WatchdogTimeoutMax   = 60000;   // ms
     constexpr uint16_t SafetyAddressMin     = 1;       // 0 is invalid
     constexpr uint16_t SafetyAddressMax     = 65535;
