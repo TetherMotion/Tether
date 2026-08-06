@@ -109,50 +109,16 @@ namespace PL {
 //
 // - Command byte first
 // - Safe data in 2-byte chunks, each followed by its own CRC-16
-// - If safe data length is odd, the last chunk is 1 byte + 1 padding byte, then CRC
+// - If safe data length is odd, the last chunk is 1 data byte + 2 CRC bytes (no padding)
 // - Connection ID (2 bytes) at the very end of the frame
 // - CRC-16 Safety polynomial 0x139B7 (16-bit: 0x39B7), initial value 0x0000
 // - Minimum frame: CMD(1) + ConnID(2) = 3 bytes (no safe data)
 //
 
-#pragma pack(push, 1)
-
-/**
- * @brief FSoE frame header (legacy struct for master connection)
- */
-struct FSoEHeader {
-    uint8_t  command;         // FSoE command code
-    uint8_t  conn_id_low;     // Connection ID low byte
-    uint8_t  conn_id_high;    // Connection ID high byte
-    // Followed by safety data and CRC
-};
-
 /// FSoE frame command byte (first byte of every frame, ETG.5100 interleaved format)
 struct FSoEFrameHeader {
     uint8_t command;  // FSoE command code
 };
-
-/**
- * @brief FSoE session reset frame
- */
-struct FSoESessionReset {
-    FSoEHeader header;
-    uint16_t   session_id;
-    uint16_t   crc;
-};
-
-/**
- * @brief FSoE connection frame
- */
-struct FSoEConnectionFrame {
-    FSoEHeader header;
-    uint16_t   conn_id;
-    uint16_t   slave_addr;
-    uint16_t   sl_param_crc;
-    uint16_t   crc;
-};
-
-#pragma pack(pop)
 
 /// Maximum number of 2-byte safe data chunks in a frame
 constexpr size_t MAX_SAFE_DATA_CHUNKS = 8;
