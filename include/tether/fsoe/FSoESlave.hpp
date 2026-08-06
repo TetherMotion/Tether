@@ -156,6 +156,9 @@ struct FSoESlaveConfig {
     bool treatSequenceErrorAsCritical = true;
     bool treatTimeoutAsCritical = true;
     bool treatConnIdErrorAsCritical = true;
+
+    // Parameter CRC verification (0 = skip verification)
+    uint16_t expectedParameterCRC = 0;
     
     // Diagnostics
     bool enableDiagnostics = true;
@@ -521,6 +524,7 @@ private:
     // Session/sequence management
     uint16_t sessionId_ = 0;
     uint16_t currentConnectionId_ = 0;
+    uint16_t receivedParameterCRC_ = 0;
     uint8_t expectedSequence_ = 0;
     uint8_t txSequence_ = 0;
     
