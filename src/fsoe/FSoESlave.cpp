@@ -128,6 +128,7 @@ void FSoESlave::triggerFailSafe(uint16_t errorCode) {
     lastError_ = errorCode;
     failSafeActive_ = true;
     dataValid_ = false;
+    failSafeEnteredMs_ = lastUpdateTimeMs_;
 
     // Stay in Data state but mark as fail-safe (ETG.5100 uses cmd 0x08 within Data)
     applyFailSafeOutputs();
@@ -169,6 +170,7 @@ bool FSoESlave::attemptRecovery() {
     transitionTo(ConnectionState::Reset);
     lastError_ = ErrorCode::NoError;
     failSafeActive_ = false;
+    failSafeEnteredMs_ = 0;
     
     logDiagnostic(ErrorCode::NoError, "Recovery attempt initiated");
     
@@ -784,6 +786,11 @@ void FSoESlave::handleWatchdog(uint64_t currentTimeMs) {
         return;
     }
 
+    // Don't re-fire watchdog once already in fail-safe
+    if (failSafeActive_) {
+        return;
+    }
+
     uint64_t elapsed = currentTimeMs - lastValidFrameMs_;
 
     // Track longest gap
@@ -817,9 +824,11 @@ void FSoESlave::handleTimeout(uint64_t currentTimeMs) {
             
         case ConnectionState::Data:
             // Check recovery delay for fail-safe sub-mode
-            if (failSafeActive_ && config_.autoRecoveryEnabled &&
-                elapsed > config_.recoveryDelayMs) {
-                attemptRecovery();
+            if (failSafeActive_ && config_.autoRecoveryEnabled) {
+                uint64_t failSafeElapsed = currentTimeMs - failSafeEnteredMs_;
+                if (failSafeElapsed > config_.recoveryDelayMs) {
+                    attemptRecovery();
+                }
             }
             break;
             
