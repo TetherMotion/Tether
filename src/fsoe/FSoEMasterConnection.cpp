@@ -451,6 +451,9 @@ void FSoEMasterConnection::handleFailSafeState(uint8_t cmd, const uint8_t* data,
             stats_.successful_recoveries++;
             resetConnection();
         }
+    } else if (cmd == Command::FailSafeData) {
+        // Slave is also in fail-safe — acknowledge by staying in fail-safe.
+        // Recovery will be attempted by attemptAutoRecovery() in update().
     }
 }
 
@@ -510,10 +513,10 @@ size_t FSoEMasterConnection::buildDataFrame(uint8_t* data, size_t max_len)
 
 size_t FSoEMasterConnection::buildFailSafeFrame(uint8_t* data, size_t max_len)
 {
-    // Fail-safe frame sends Reset command with fail-safe output values
+    // Fail-safe frame sends FailSafeData command with fail-safe output values
     size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Reset,
+    return CRC::buildFSoEFrame(data, Command::FailSafeData,
                                config_.fail_safe_values.data(), config_.output_size,
                                config_.connection_id);
 }
@@ -568,11 +571,12 @@ void FSoEMasterConnection::handleError(uint16_t error_code)
 {
     status_.error_code = error_code;
 
-    // Transition to Error state (persistent, not immediately overwritten)
-    transitionTo(ConnectionState::Error);
-
     if (config_.auto_fail_safe_on_error) {
+        // Go directly to fail-safe (skip Error state)
         triggerFailSafe(error_code);
+    } else {
+        // Stay in Error state (persistent until explicitly cleared)
+        transitionTo(ConnectionState::Error);
     }
 
     if (error_callback_) {
