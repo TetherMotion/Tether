@@ -124,14 +124,46 @@ protected:
         cfg.strictCrcCheck = true;
         slave = std::make_unique<FSoESlave>(cfg);
         slave->initialize();
+
+        // Set up a master connection to advance the slave to Data state
+        MasterConnectionConfig mcfg{};
+        mcfg.slave_addr = 0x0001;
+        mcfg.slave_safety_addr = 0x0100;
+        mcfg.connection_id = 0x5678;
+        mcfg.master_addr = 0x0100;
+        mcfg.watchdog_timeout_ms = 200;
+        mcfg.conn_timeout_ms = 2000;
+        mcfg.input_size = 2;
+        mcfg.output_size = 2;
+        mcfg.safety_level = SIL::SIL2;
+        mcfg.fail_safe_values = {0, 0, 0, 0, 0, 0, 0, 0};
+        conn = std::make_unique<FSoEMasterConnection>(mcfg);
+        conn->initialize();
+        conn->startConnection();
+    }
+
+    void advanceToData() {
+        uint64_t now = 0;
+        for (int i = 0; i < 20; ++i) {
+            now += 15;
+            ASSERT_TRUE(conn->exchangeWith(*slave, now));
+            if (conn->isOperational()) break;
+        }
+        ASSERT_TRUE(conn->isOperational())
+            << "Master state: " << (int)conn->getState()
+            << " Slave state: " << (int)slave->getState();
     }
 
     std::unique_ptr<FSoESlave> slave;
+    std::unique_ptr<FSoEMasterConnection> conn;
 };
 
 TEST_F(FSoESequenceNonStrictTest, FrameAcceptedWithoutSequenceField) {
     // ETG.5100 does not define a sequence number field.
     // Frame integrity is ensured via interleaved CRC + watchdog.
+    // Advance slave to Data state first via proper handshake
+    advanceToData();
+
     // Build a valid ProcessData frame with new format:
     //   [CMD] [Data0(2B)] [CRC0(2B)] [ConnID(2B)]
     uint8_t data[2] = {0xAA, 0x55};
@@ -146,6 +178,8 @@ TEST_F(FSoESequenceNonStrictTest, FrameAcceptedWithoutSequenceField) {
 
 TEST_F(FSoESequenceNonStrictTest, NoSequenceErrorsCounter) {
     // Since ETG.5100 has no sequence field, sequence errors should never increment
+    advanceToData();
+
     uint8_t data[2] = {0xAA, 0x55};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::ProcessData,
