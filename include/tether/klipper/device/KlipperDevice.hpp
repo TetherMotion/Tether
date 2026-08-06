@@ -28,6 +28,7 @@
 #include "tether/klipper/protocol/CommandTable.hpp"
 #include "tether/klipper/protocol/IdentifyProtocol.hpp"
 #include "tether/klipper/protocol/MessageBlock.hpp"
+#include "tether/klipper/protocol/BlockReader.hpp"
 #include "tether/klipper/clock/McuClock.hpp"
 #include "tether/klipper/objects/OidAllocator.hpp"
 #include "tether/klipper/objects/Stepper.hpp"
@@ -59,6 +60,16 @@ public:
 
     /// @brief Pump the event loop: read transport, parse blocks, dispatch, ack.
     void pump() override;
+
+    /// @brief Reset device-side protocol state for connection re-establishment.
+    ///
+    /// Clears the last-received sequence, shutdown/finalize flags, OID
+    /// allocator, stepper base clocks, and re-registers default command
+    /// handlers. The transport is not touched (call start() to re-open it).
+    /// This mirrors the reset() pattern of the pcapng reader and BlockReader,
+    /// allowing the device to recover from a host reconnect without full
+    /// reconstruction.
+    void reset();
 
     /// @brief Advance the MCU clock by @p deltaTicks.
     void advanceClock(uint32_t deltaTicks) override;
@@ -127,6 +138,22 @@ public:
     /// @return The number of allocated OIDs.
     uint8_t allocatedOidCount() const { return oidAllocator_.nextOid(); }
 
+    /// @return Block parse statistics from the internal BlockReader.
+    const protocol::BlockParseStats& blockParseStats() const {
+        return blockReader_.stats();
+    }
+
+    /// @return Number of corrupt blocks skipped by the internal BlockReader.
+    size_t skippedBlockCount() const { return blockReader_.skippedBlockCount(); }
+
+    /// @brief Enable error-recovery mode on the internal BlockReader.
+    /// When enabled, corrupt blocks are skipped (with optional callback)
+    /// instead of causing pump() to silently drop remaining data.
+    void setBlockRecoveryMode(bool enabled,
+                              protocol::BlockReader::ErrorCallback cb = nullptr) {
+        blockReader_.setRecoveryMode(enabled, std::move(cb));
+    }
+
 private:
     void processBlock(const protocol::MessageBlock& block);
     void sendAck(uint8_t seq);
@@ -137,6 +164,7 @@ private:
     clock::McuClock mcuClock_;
     std::unique_ptr<protocol::CommandTable> commandTable_;
     std::unique_ptr<protocol::IdentifyServer> identifyServer_;
+    protocol::BlockReader blockReader_;
     objects::OidAllocator oidAllocator_;
     std::unordered_map<uint8_t, std::shared_ptr<void>> peripherals_;
     /// Typed stepper map for default queue_step dispatch.
