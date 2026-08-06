@@ -586,6 +586,12 @@ void FSoESlave::processConnection(const uint8_t* data, size_t len) {
         return;
     }
 
+    // Validate connection ID matches configured value
+    if (conn_id != config_.connectionId) {
+        handleError(ErrorCode::ConnectionIDError, true);
+        return;
+    }
+
     // Connection ID from end of frame
     currentConnectionId_ = conn_id;
 
