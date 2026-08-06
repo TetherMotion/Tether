@@ -95,6 +95,7 @@ const char* FSoESlave::getStateName() const {
         case ConnectionState::Parameter:  return "PARAMETER";
         case ConnectionState::Data:       return "DATA";
         case ConnectionState::Error:      return "ERROR";
+        case ConnectionState::FailSafe:   return "FAILSAFE";
         default:                          return "UNKNOWN";
     }
 }
@@ -242,17 +243,21 @@ bool FSoESlave::processRxFrame(const uint8_t* data, size_t len) {
                 processSessionReset(data, len);
             } else if (command == Command::Connection) {
                 processConnection(data, len);
+            } else {
+                return false;
             }
             break;
-            
+
         case ConnectionState::Connection:
             if (command == Command::Connection) {
                 processConnection(data, len);
             } else if (command == Command::Parameter) {
                 processParameter(data, len);
+            } else {
+                return false;
             }
             break;
-            
+
         case ConnectionState::Parameter:
             if (command == Command::Parameter) {
                 processParameter(data, len);
@@ -260,14 +265,18 @@ bool FSoESlave::processRxFrame(const uint8_t* data, size_t len) {
                 // Skip parameter phase
                 transitionTo(ConnectionState::Data);
                 processData(data, len);
+            } else {
+                return false;
             }
             break;
-            
+
         case ConnectionState::Data:
             if (command == Command::ProcessData || command == Command::FailSafeData) {
                 processData(data, len);
             } else if (command == Command::Reset) {
                 processSessionReset(data, len);
+            } else {
+                return false;
             }
             break;
             
@@ -275,13 +284,15 @@ bool FSoESlave::processRxFrame(const uint8_t* data, size_t len) {
             if (command == Command::Reset) {
                 // Reset from error state
                 reset();
+            } else {
+                return false;
             }
             break;
-            
+
         default:
-            break;
+            return false;
     }
-    
+
     return true;
 }
 

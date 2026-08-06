@@ -44,7 +44,8 @@ bool FSoEMaster::removeConnection(int connection_id)
 
     auto it = std::remove_if(connections_.begin(), connections_.end(),
         [connection_id](const ConnectionEntry& e) {
-            return e.id == connection_id;
+            return e.connection &&
+                   e.connection->getConfig().connection_id == static_cast<uint16_t>(connection_id);
         });
 
     if (it == connections_.end()) return false;
@@ -56,7 +57,8 @@ FSoEMasterConnection* FSoEMaster::getConnection(int connection_id)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& entry : connections_) {
-        if (entry.id == connection_id) {
+        if (entry.connection &&
+            entry.connection->getConfig().connection_id == static_cast<uint16_t>(connection_id)) {
             return entry.connection.get();
         }
     }
