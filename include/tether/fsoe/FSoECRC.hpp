@@ -70,39 +70,55 @@ inline bool verifyFSoECRC(const uint8_t* data, size_t len, uint16_t expected_crc
 
 inline constexpr size_t MIN_FSOE_FRAME_SIZE = 3;
 
+// ETG.5100 frame layout:
+//   [CMD] [Data0(2B)][CRC0(2B)] ... [DataN(1-2B)][CRCN(2B)] [ConnID(2B)]
+// Each 2-byte data chunk gets its own CRC-16.
+// If data_len is odd, the last chunk is 1 data byte + 2 CRC bytes (no padding).
 inline constexpr size_t fsoeFrameSize(size_t data_len) {
-    size_t chunks = (data_len + 1) / 2;
-    return 1 + chunks * 4 + 2;
+    size_t full_chunks = data_len / 2;
+    size_t has_odd = data_len % 2;
+    return 1 + full_chunks * 4 + (has_odd ? 3 : 0) + 2;
 }
 
 inline constexpr size_t fsoeDataLen(size_t frame_size) {
     if (frame_size < MIN_FSOE_FRAME_SIZE) return 0;
     size_t remaining = frame_size - 1 - 2;
-    size_t chunks = remaining / 4;
-    return chunks * 2;
+    size_t full_chunks = remaining / 4;
+    size_t remainder = remaining % 4;
+    // remainder 0 = all full chunks (even data)
+    // remainder 3 = last chunk is 1 data byte + 2 CRC (odd data)
+    // remainder 1 or 2 = invalid frame
+    if (remainder != 0 && remainder != 3) return 0;
+    return full_chunks * 2 + (remainder == 3 ? 1 : 0);
 }
 
 inline size_t buildFSoEFrame(uint8_t* out, uint8_t cmd,
                               const uint8_t* data, size_t data_len,
                               uint16_t conn_id) {
-    size_t chunks = (data_len + 1) / 2;
+    size_t full_chunks = data_len / 2;
+    size_t has_odd = data_len % 2;
     size_t frame_size = fsoeFrameSize(data_len);
 
     out[0] = cmd;
 
     size_t offset = 1;
-    for (size_t i = 0; i < chunks; i++) {
-        uint8_t chunk[2] = {0, 0};
+    for (size_t i = 0; i < full_chunks; i++) {
         size_t chunk_start = i * 2;
-        chunk[0] = (chunk_start < data_len) ? data[chunk_start] : 0;
-        chunk[1] = (chunk_start + 1 < data_len) ? data[chunk_start + 1] : 0;
-
-        out[offset] = chunk[0];
-        out[offset + 1] = chunk[1];
-        uint16_t crc = calculate(chunk, 2);
+        out[offset] = data[chunk_start];
+        out[offset + 1] = data[chunk_start + 1];
+        uint16_t crc = calculate(data + chunk_start, 2);
         out[offset + 2] = crc & 0xFF;
         out[offset + 3] = (crc >> 8) & 0xFF;
         offset += 4;
+    }
+
+    // Last odd byte: 1 data byte + 2 CRC bytes (no padding)
+    if (has_odd) {
+        out[offset] = data[data_len - 1];
+        uint16_t crc = calculate(&data[data_len - 1], 1);
+        out[offset + 1] = crc & 0xFF;
+        out[offset + 2] = (crc >> 8) & 0xFF;
+        offset += 3;
     }
 
     out[offset] = conn_id & 0xFF;
@@ -120,11 +136,14 @@ inline bool parseFSoEFrame(const uint8_t* frame, size_t frame_len,
     out_cmd = frame[0];
 
     size_t remaining = frame_len - 1 - 2;
-    size_t chunks = remaining / 4;
-    out_data_len = chunks * 2;
+    size_t full_chunks = remaining / 4;
+    size_t remainder = remaining % 4;
+    if (remainder != 0 && remainder != 3) return false;
+    bool has_odd = (remainder == 3);
+    out_data_len = full_chunks * 2 + (has_odd ? 1 : 0);
 
     size_t offset = 1;
-    for (size_t i = 0; i < chunks; i++) {
+    for (size_t i = 0; i < full_chunks; i++) {
         uint8_t chunk[2] = {frame[offset], frame[offset + 1]};
         uint16_t stored_crc = static_cast<uint16_t>(frame[offset + 2]) |
                               (static_cast<uint16_t>(frame[offset + 3]) << 8);
@@ -137,6 +156,21 @@ inline bool parseFSoEFrame(const uint8_t* frame, size_t frame_len,
             out_data[i * 2 + 1] = chunk[1];
         }
         offset += 4;
+    }
+
+    // Last odd byte: 1 data byte + 2 CRC bytes
+    if (has_odd) {
+        uint8_t chunk[1] = {frame[offset]};
+        uint16_t stored_crc = static_cast<uint16_t>(frame[offset + 1]) |
+                              (static_cast<uint16_t>(frame[offset + 2]) << 8);
+        uint16_t calc_crc = calculate(chunk, 1);
+        if (stored_crc != calc_crc) {
+            return false;
+        }
+        if (out_data) {
+            out_data[full_chunks * 2] = chunk[0];
+        }
+        offset += 3;
     }
 
     out_conn_id = static_cast<uint16_t>(frame[offset]) |
