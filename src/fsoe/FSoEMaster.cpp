@@ -21,9 +21,13 @@ int FSoEMaster::addConnection(const MasterConnectionConfig& config)
 {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    // Check for duplicate connection ID
+    // Check for duplicate connection ID or slave address
     for (const auto& entry : connections_) {
-        if (entry.connection && entry.connection->getConfig().connection_id == config.connection_id) {
+        if (!entry.connection) continue;
+        if (entry.connection->getConfig().connection_id == config.connection_id) {
+            return -1;
+        }
+        if (entry.connection->getConfig().slave_addr == config.slave_addr) {
             return -1;
         }
     }

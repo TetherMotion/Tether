@@ -679,7 +679,9 @@ void FSoESlave::processParameter(const uint8_t* data, size_t len) {
         config_.watchdogTimeoutMs = watchdog;
     }
 
-    transitionTo(ConnectionState::Data);
+    // Transition to Parameter state to send Parameter response.
+    // Will transition to Data when the master sends ProcessData.
+    transitionTo(ConnectionState::Parameter);
 
     logDiagnostic(ErrorCode::NoError, "Parameters accepted");
 }
