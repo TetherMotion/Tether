@@ -9,6 +9,7 @@
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/RealtimeLoop.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 
 namespace FSoE {
@@ -166,7 +167,12 @@ bool FSoEMaster::startDedicatedThread(EtherCAT::IPDOTransport& transport,
     auto exchange_fn = [this]() -> bool {
         if (!dedicated_transport_) return false;
 
-        uint64_t now_us = 0;
+        // Use monotonic clock so watchdog/timeout checks work correctly
+        auto now = std::chrono::steady_clock::now();
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now.time_since_epoch()).count();
+        uint64_t now_ms = static_cast<uint64_t>(ms);
+
         // Use transport to send/receive FSoE frames for each connection
         for (auto& entry : connections_) {
             if (!entry.connection) continue;
@@ -175,13 +181,17 @@ bool FSoEMaster::startDedicatedThread(EtherCAT::IPDOTransport& transport,
             // (In a real implementation, this would send FPWR/FPRD datagrams
             // to the FSoE register addresses on the slave)
             // For now, we just call update to keep the state machine running
-            entry.connection->update(now_us);
+            entry.connection->update(now_ms);
         }
         return true;
     };
 
     auto sync_fn = []() -> bool { return true; };
-    auto time_fn = []() -> uint64_t { return 0; };
+    auto time_fn = []() -> uint64_t {
+        auto now = std::chrono::steady_clock::now();
+        return std::chrono::duration_cast<std::chrono::microseconds>(
+            now.time_since_epoch()).count();
+    };
 
     dedicated_loop_ = std::make_unique<EtherCAT::RealtimeLoop>(
         exchange_fn, sync_fn, time_fn,
