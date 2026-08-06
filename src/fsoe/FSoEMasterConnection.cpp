@@ -390,9 +390,6 @@ void FSoEMasterConnection::handleConnectionState(uint8_t cmd, const uint8_t* dat
         } else {
             transitionTo(ConnectionState::Data);
         }
-    } else if (cmd == Command::Parameter) {
-        transitionTo(ConnectionState::Parameter);
-        handleParameterState(cmd, data, data_len);
     } else {
         handleError(ErrorCode::CommandError);
     }
@@ -488,12 +485,13 @@ size_t FSoEMasterConnection::buildConnectionFrame(uint8_t* data, size_t max_len)
 size_t FSoEMasterConnection::buildParameterFrame(uint8_t* data, size_t max_len)
 {
     // Parameter frame: CMD + param data (6B) + ConnID
+    // Layout: [watchdog_lo] [watchdog_hi] [safety_level] [input_size] [output_size] [reserved]
     uint8_t payload[6] = {0, 0, 0, 0, 0, 0};
     payload[0] = config_.watchdog_timeout_ms & 0xFF;
     payload[1] = (config_.watchdog_timeout_ms >> 8) & 0xFF;
-    payload[2] = config_.conn_timeout_ms & 0xFF;
-    payload[3] = (config_.conn_timeout_ms >> 8) & 0xFF;
-    payload[4] = config_.safety_level;
+    payload[2] = config_.safety_level;
+    payload[3] = config_.input_size;
+    payload[4] = config_.output_size;
     payload[5] = 0;  // reserved
     size_t needed = CRC::fsoeFrameSize(6);
     if (max_len < needed) return 0;

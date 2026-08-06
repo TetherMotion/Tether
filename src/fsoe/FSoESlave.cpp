@@ -246,6 +246,8 @@ bool FSoESlave::processRxFrame(const uint8_t* data, size_t len) {
         case ConnectionState::Connection:
             if (command == Command::Connection) {
                 processConnection(data, len);
+            } else if (command == Command::Parameter) {
+                processParameter(data, len);
             }
             break;
             
@@ -595,7 +597,19 @@ void FSoESlave::processConnection(const uint8_t* data, size_t len) {
         }
     }
 
-    transitionTo(ConnectionState::Parameter);
+    // Extract parameter CRC from connection frame (bytes 2-3)
+    if (data_len >= 4) {
+        receivedParameterCRC_ = static_cast<uint16_t>(frame_data[2]) |
+                                (static_cast<uint16_t>(frame_data[3]) << 8);
+        // Verify parameter CRC if expected value is configured (non-zero)
+        if (config_.expectedParameterCRC != 0 &&
+            receivedParameterCRC_ != config_.expectedParameterCRC) {
+            handleError(ErrorCode::ParameterError, true);
+            return;
+        }
+    }
+
+    transitionTo(ConnectionState::Connection);
 
     char msg[64];
     snprintf(msg, sizeof(msg), "Connection established: ID=0x%04X", currentConnectionId_);
@@ -615,7 +629,8 @@ void FSoESlave::processParameter(const uint8_t* data, size_t len) {
     }
 
     // Validate safety-critical parameters from safe data
-    // Expected layout: [watchdog_lo] [watchdog_hi] [safety_level] [input_size] [output_size] [reserved]
+    // Layout (must match master's buildParameterFrame):
+    //   [watchdog_lo] [watchdog_hi] [safety_level] [input_size] [output_size] [reserved]
     if (data_len >= 5) {
         uint16_t watchdog = static_cast<uint16_t>(frame_data[0]) |
                             (static_cast<uint16_t>(frame_data[1]) << 8);
