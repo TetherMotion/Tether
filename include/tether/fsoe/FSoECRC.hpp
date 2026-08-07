@@ -70,6 +70,10 @@ inline bool verifyFSoECRC(const uint8_t* data, size_t len, uint16_t expected_crc
 
 inline constexpr size_t MIN_FSOE_FRAME_SIZE = 3;
 
+// Maximum payload bytes that parseFSoEFrame will write to out_data.
+// Accommodates 16 bytes of safe data + 2 bytes error code (fail-safe response).
+inline constexpr size_t MAX_PARSE_DATA_SIZE = 18;
+
 // ETG.5100 frame layout:
 //   [CMD] [Data0(2B)][CRC0(2B)] ... [DataN(1-2B)][CRCN(2B)] [ConnID(2B)]
 // Each 2-byte data chunk gets its own CRC-16.
@@ -141,6 +145,14 @@ inline bool parseFSoEFrame(const uint8_t* frame, size_t frame_len,
     if (remainder != 0 && remainder != 3) return false;
     bool has_odd = (remainder == 3);
     out_data_len = full_chunks * 2 + (has_odd ? 1 : 0);
+
+    // Safety check: reject frames with payload exceeding the maximum
+    // supported size. MAX_PARSE_DATA_SIZE accommodates the largest
+    // valid FSoE payload (16 bytes of safe data + 2 bytes error code
+    // in a fail-safe response).
+    if (out_data_len > MAX_PARSE_DATA_SIZE) {
+        return false;
+    }
 
     size_t offset = 1;
     for (size_t i = 0; i < full_chunks; i++) {

@@ -51,7 +51,7 @@ TEST_F(FSoEMasterConnectionCoverageTest, GetConfig) {
 }
 
 TEST_F(FSoEMasterConnectionCoverageTest, GetStatus) {
-    auto& status = conn->getStatus();
+    auto status = conn->getStatus();
     EXPECT_EQ(status.error_code, ErrorCode::NoError);
     EXPECT_FALSE(status.data_valid);
 }
@@ -84,7 +84,7 @@ TEST_F(FSoEMasterConnectionCoverageTest, ResetConnection) {
 TEST_F(FSoEMasterConnectionCoverageTest, RequestSessionReset) {
     bool result = conn->requestSessionReset();
     EXPECT_TRUE(result);
-    auto& status = conn->getStatus();
+    auto status = conn->getStatus();
     EXPECT_NE(status.session_id, 0u);
 }
 
@@ -202,7 +202,7 @@ TEST_F(FSoEMasterConnectionCoverageTest, WatchdogTimeout) {
 // --- Stats ---
 
 TEST_F(FSoEMasterConnectionCoverageTest, InitialStats) {
-    auto& stats = conn->getStats();
+    auto stats = conn->getStats();
     EXPECT_EQ(stats.frames_sent, 0u);
     EXPECT_EQ(stats.frames_received, 0u);
     EXPECT_EQ(stats.crc_errors, 0u);
@@ -210,7 +210,7 @@ TEST_F(FSoEMasterConnectionCoverageTest, InitialStats) {
 
 TEST_F(FSoEMasterConnectionCoverageTest, ResetStats) {
     conn->resetStats();
-    auto& stats = conn->getStats();
+    auto stats = conn->getStats();
     EXPECT_EQ(stats.frames_sent, 0u);
 }
 

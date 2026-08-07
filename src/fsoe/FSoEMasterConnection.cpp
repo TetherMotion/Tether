@@ -163,8 +163,11 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
     stats_.frames_received++;
 
     // Parse and validate frame (CRC verification happens inside parseFSoEFrame)
+    // Buffer must accommodate MAX_PARSE_DATA_SIZE bytes because the slave's
+    // buildFailSafeResponse sends safeInputSize + 2 bytes (inputs + error code),
+    // which can be up to 18 bytes when safeInputSize = 16.
     uint8_t cmd = 0;
-    uint8_t frame_data[MAX_SAFE_DATA_SIZE] = {0};
+    uint8_t frame_data[CRC::MAX_PARSE_DATA_SIZE] = {0};
     size_t data_len = 0;
     uint16_t conn_id = 0;
 
@@ -376,19 +379,22 @@ void FSoEMasterConnection::handleSessionState(uint8_t cmd, const uint8_t* data, 
 void FSoEMasterConnection::handleConnectionState(uint8_t cmd, const uint8_t* data, size_t data_len)
 {
     if (cmd == Command::Connection) {
-        // Validate slave's safety address and SIL from connection response
+        // Validate slave's safety address and SIL from connection response.
         // Parsed data format: [safetyAddr_lo][safetyAddr_hi][sil][reserved]
-        if (data_len >= 4) {
-            uint16_t slave_safety_addr = data[0] | (data[1] << 8);
-            if (slave_safety_addr != 0 && slave_safety_addr != config_.slave_safety_addr) {
-                handleError(ErrorCode::ConnectionIDError);
-                return;
-            }
-            uint8_t slave_sil = data[2];
-            if (slave_sil < config_.safety_level) {
-                handleError(ErrorCode::ApplicationError);
-                return;
-            }
+        // Require the full 4-byte payload — the slave always sends 4 bytes.
+        if (data_len < 4) {
+            handleError(ErrorCode::DataLengthError);
+            return;
+        }
+        uint16_t slave_safety_addr = data[0] | (data[1] << 8);
+        if (slave_safety_addr != 0 && slave_safety_addr != config_.slave_safety_addr) {
+            handleError(ErrorCode::ConnectionIDError);
+            return;
+        }
+        uint8_t slave_sil = data[2];
+        if (slave_sil < config_.safety_level) {
+            handleError(ErrorCode::ApplicationError);
+            return;
         }
         if (config_.input_size > 0 || config_.output_size > 0) {
             transitionTo(ConnectionState::Parameter);
@@ -776,7 +782,7 @@ bool FSoEMasterConnection::setSafeOutputByte(uint8_t byte_index, uint8_t value)
 // Status & Diagnostics
 // ============================================================================
 
-const MasterConnectionStatus& FSoEMasterConnection::getStatus() const
+MasterConnectionStatus FSoEMasterConnection::getStatus() const
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     return status_;
@@ -806,7 +812,7 @@ bool FSoEMasterConnection::isFailSafe() const
     return status_.isFailSafe();
 }
 
-const ConnectionStats& FSoEMasterConnection::getStats() const
+ConnectionStats FSoEMasterConnection::getStats() const
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     return stats_;

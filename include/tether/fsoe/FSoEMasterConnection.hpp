@@ -126,12 +126,12 @@ public:
     bool setSafeOutputByte(uint8_t byte_index, uint8_t value);
 
     // --- Status & Diagnostics ---
-    const MasterConnectionStatus& getStatus() const;
+    MasterConnectionStatus getStatus() const;
     uint8_t getState() const;
     uint16_t getErrorCode() const;
     bool isOperational() const;
     bool isFailSafe() const;
-    const ConnectionStats& getStats() const;
+    ConnectionStats getStats() const;
     void resetStats();
     std::string getDiagnostics() const;
 
