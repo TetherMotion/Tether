@@ -712,34 +712,38 @@ void FSoESlave::processParameter(const uint8_t* data, size_t len) {
     // Validate safety-critical parameters from safe data
     // Layout (must match master's buildParameterFrame):
     //   [watchdog_lo] [watchdog_hi] [safety_level] [input_size] [output_size] [reserved]
-    if (data_len >= 5) {
-        uint16_t watchdog = static_cast<uint16_t>(frame_data[0]) |
-                            (static_cast<uint16_t>(frame_data[1]) << 8);
-        uint8_t safety_level = frame_data[2];
-        uint8_t input_size = frame_data[3];
-        uint8_t output_size = frame_data[4];
-
-        // Validate watchdog range
-        if (watchdog < Limits::WatchdogTimeoutMin || watchdog > Limits::WatchdogTimeoutMax) {
-            handleError(ErrorCode::ParameterError, true);
-            return;
-        }
-
-        // Validate safety level
-        if (safety_level < config_.safetyLevel) {
-            handleError(ErrorCode::ParameterError, true);
-            return;
-        }
-
-        // Validate data sizes match configuration
-        if (input_size != config_.safeInputSize || output_size != config_.safeOutputSize) {
-            handleError(ErrorCode::ParameterError, true);
-            return;
-        }
-
-        // Update watchdog timeout from parameter
-        config_.watchdogTimeoutMs = watchdog;
+    // Require the full 6-byte parameter payload (5 data bytes + 1 reserved).
+    if (data_len < 6) {
+        handleError(ErrorCode::DataLengthError, true);
+        return;
     }
+
+    uint16_t watchdog = static_cast<uint16_t>(frame_data[0]) |
+                        (static_cast<uint16_t>(frame_data[1]) << 8);
+    uint8_t safety_level = frame_data[2];
+    uint8_t input_size = frame_data[3];
+    uint8_t output_size = frame_data[4];
+
+    // Validate watchdog range
+    if (watchdog < Limits::WatchdogTimeoutMin || watchdog > Limits::WatchdogTimeoutMax) {
+        handleError(ErrorCode::ParameterError, true);
+        return;
+    }
+
+    // Validate safety level
+    if (safety_level < config_.safetyLevel) {
+        handleError(ErrorCode::ParameterError, true);
+        return;
+    }
+
+    // Validate data sizes match configuration
+    if (input_size != config_.safeInputSize || output_size != config_.safeOutputSize) {
+        handleError(ErrorCode::ParameterError, true);
+        return;
+    }
+
+    // Update watchdog timeout from parameter
+    config_.watchdogTimeoutMs = watchdog;
 
     // Transition to Parameter state to send Parameter response.
     // Will transition to Data when the master sends ProcessData.
@@ -834,8 +838,10 @@ size_t FSoESlave::buildDataResponse(uint8_t* data, size_t maxLen) {
 
 size_t FSoESlave::buildFailSafeResponse(uint8_t* data, size_t maxLen) {
     // Fail-safe response: CMD + fail_safe_inputs (safeInputSize) + error_code (2B) + ConnID (2B)
-    // Use a temporary buffer to combine fail-safe inputs and error code
-    uint8_t payload[MAX_SAFE_DATA_SIZE] = {0};
+    // Use a temporary buffer to combine fail-safe inputs and error code.
+    // Buffer must be large enough for safeInputSize + 2 (error code) bytes.
+    // MAX_SAFE_DATA_SIZE is 16, so we need MAX_SAFE_DATA_SIZE + 2 for the worst case.
+    uint8_t payload[MAX_SAFE_DATA_SIZE + 2] = {0};
     size_t payload_len = config_.safeInputSize + 2;  // inputs + error code
 
     std::copy(config_.failSafeInputs.begin(),

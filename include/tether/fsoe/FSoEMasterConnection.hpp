@@ -49,7 +49,7 @@ struct MasterConnectionConfig {
     uint8_t  safety_level = SIL::SIL2;
     uint8_t  input_size = 0;
     uint8_t  output_size = 0;
-    std::array<uint8_t, 8> fail_safe_values = {0};
+    std::array<uint8_t, 16> fail_safe_values = {0};
 
     bool auto_recovery_enabled = true;
     bool auto_fail_safe_on_error = true;
