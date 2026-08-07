@@ -169,7 +169,17 @@ bool FSoEMaster::startDedicatedThread(EtherCAT::IPDOTransport& transport,
 
     // Create a RealtimeLoop that exchanges FSoE frames each cycle
     // The callback iterates all connections, sending/receiving FSoE PDUs
-    // via the IPDOTransport interface
+    // via the IPDOTransport interface.
+    //
+    // Thread-safety: exchange_fn runs on the RT thread and must not hold
+    // mutex_ for the duration of the exchange (stopDedicatedThread() may
+    // be waiting for the thread to finish while holding mutex_). Instead,
+    // we take a short lock to snapshot the connection pointers, then
+    // iterate the snapshot without holding the lock. The connections are
+    // owned by unique_ptr in the vector, so the raw pointers remain valid
+    // as long as removeConnection() isn't called concurrently (which would
+    // be a user error — the application should stop the thread before
+    // modifying connections).
     auto exchange_fn = [this]() -> bool {
         if (!dedicated_transport_) return false;
 
@@ -179,15 +189,21 @@ bool FSoEMaster::startDedicatedThread(EtherCAT::IPDOTransport& transport,
             now.time_since_epoch()).count();
         uint64_t now_ms = static_cast<uint64_t>(ms);
 
-        // Use transport to send/receive FSoE frames for each connection
-        for (auto& entry : connections_) {
-            if (!entry.connection) continue;
+        // Snapshot connection pointers under a short lock
+        std::vector<FSoEMasterConnection*> conns;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            conns.reserve(connections_.size());
+            for (auto& entry : connections_) {
+                if (entry.connection) {
+                    conns.push_back(entry.connection.get());
+                }
+            }
+        }
 
-            // Update connection state
-            // (In a real implementation, this would send FPWR/FPRD datagrams
-            // to the FSoE register addresses on the slave)
-            // For now, we just call update to keep the state machine running
-            entry.connection->update(now_ms);
+        // Update each connection without holding the lock
+        for (auto* conn : conns) {
+            conn->update(now_ms);
         }
         return true;
     };
@@ -208,12 +224,23 @@ bool FSoEMaster::startDedicatedThread(EtherCAT::IPDOTransport& transport,
 
 void FSoEMaster::stopDedicatedThread()
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (dedicated_loop_) {
-        dedicated_loop_->stop();
-        dedicated_loop_.reset();
+    // Stop the thread BEFORE taking the lock, so exchange_fn (which takes
+    // a short lock on mutex_) can finish without deadlocking. The thread
+    // owns a reference to this (via the lambda), so it's safe to access
+    // dedicated_loop_ without holding the lock — only start/stop/this
+    // function modify it.
+    std::unique_ptr<EtherCAT::RealtimeLoop> loop_to_stop;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        loop_to_stop = std::move(dedicated_loop_);
+        dedicated_transport_ = nullptr;
     }
-    dedicated_transport_ = nullptr;
+
+    // Stop the thread outside the lock to avoid deadlock with exchange_fn
+    if (loop_to_stop) {
+        loop_to_stop->stop();
+        // unique_ptr destructor cleans up here, after stop() has returned
+    }
 }
 
 bool FSoEMaster::isDedicatedThreadRunning() const
