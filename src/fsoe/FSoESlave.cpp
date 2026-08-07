@@ -311,6 +311,11 @@ bool FSoESlave::processRxFrame(const uint8_t* data, size_t len) {
                 processConnection(data, len);
             } else if (command == Command::Parameter) {
                 processParameter(data, len);
+            } else if (command == Command::ProcessData) {
+                // Master may skip the Parameter phase when input_size=0
+                // and output_size=0. Transition directly to Data.
+                transitionTo(ConnectionState::Data);
+                processData(data, len);
             } else if (command == Command::FailSafeData) {
                 processData(data, len);
             } else {
@@ -621,7 +626,7 @@ uint16_t FSoESlave::calculateCRC(const uint8_t* data, size_t len) {
 void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
     // Parse frame to extract session ID from safe data
     uint8_t cmd = 0;
-    uint8_t frame_data[MAX_SAFE_DATA_SIZE] = {0};
+    uint8_t frame_data[CRC::MAX_PARSE_DATA_SIZE] = {0};
     size_t data_len = 0;
     uint16_t conn_id = 0;
 
@@ -650,7 +655,7 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
 void FSoESlave::processConnection(const uint8_t* data, size_t len) {
     // Parse frame to extract connection data
     uint8_t cmd = 0;
-    uint8_t frame_data[MAX_SAFE_DATA_SIZE] = {0};
+    uint8_t frame_data[CRC::MAX_PARSE_DATA_SIZE] = {0};
     size_t data_len = 0;
     uint16_t conn_id = 0;
 
@@ -700,7 +705,7 @@ void FSoESlave::processConnection(const uint8_t* data, size_t len) {
 void FSoESlave::processParameter(const uint8_t* data, size_t len) {
     // Parse frame to extract parameter data
     uint8_t cmd = 0;
-    uint8_t frame_data[MAX_SAFE_DATA_SIZE] = {0};
+    uint8_t frame_data[CRC::MAX_PARSE_DATA_SIZE] = {0};
     size_t data_len = 0;
     uint16_t conn_id = 0;
 
@@ -755,7 +760,7 @@ void FSoESlave::processParameter(const uint8_t* data, size_t len) {
 void FSoESlave::processData(const uint8_t* data, size_t len) {
     // Parse frame to extract safe output data
     uint8_t cmd = 0;
-    uint8_t frame_data[MAX_SAFE_DATA_SIZE] = {0};
+    uint8_t frame_data[CRC::MAX_PARSE_DATA_SIZE] = {0};
     size_t data_len = 0;
     uint16_t conn_id = 0;
 
@@ -780,17 +785,30 @@ void FSoESlave::processData(const uint8_t* data, size_t len) {
         return;
     }
 
+    // Reject ProcessData while in fail-safe — fail-safe is only cleared by
+    // Reset command. Accepting master data would overwrite fail-safe outputs.
+    // Silently ignore to preserve the existing error code in the fail-safe
+    // response — the master will see the slave's FailSafeData response and
+    // enter fail-safe with the correct error code.
+    if (failSafeActive_) {
+        return;
+    }
+
+    // Validate data length — reject short ProcessData frames
+    if (data_len < config_.safeOutputSize) {
+        handleError(ErrorCode::DataLengthError, false);
+        stats_.dataLengthErrors++;
+        return;
+    }
+
     // Extract safe output data
-    // Note: fail-safe is only cleared by Reset command, not by ProcessData
-    if (data_len >= config_.safeOutputSize) {
-        std::copy(frame_data, frame_data + config_.safeOutputSize,
-                  safeOutputs_.begin());
+    std::copy(frame_data, frame_data + config_.safeOutputSize,
+              safeOutputs_.begin());
 
-        dataValid_ = true;
+    dataValid_ = true;
 
-        if (dataValidCallback_) {
-            dataValidCallback_(safeOutputs_.data(), config_.safeOutputSize);
-        }
+    if (dataValidCallback_) {
+        dataValidCallback_(safeOutputs_.data(), config_.safeOutputSize);
     }
 }
 
