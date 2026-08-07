@@ -100,21 +100,46 @@ bool FSoEMaster::startAll()
 
 void FSoEMaster::resetAll()
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (auto& entry : connections_) {
-        if (entry.connection) {
-            entry.connection->resetConnection();
+    // Snapshot connection pointers under a short lock, then call
+    // resetConnection() without holding the lock. resetConnection() calls
+    // transitionTo() which may fire state_change_callback_; if the callback
+    // calls back into FSoEMaster, the non-recursive mutex would deadlock.
+    std::vector<FSoEMasterConnection*> conns;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        conns.reserve(connections_.size());
+        for (auto& entry : connections_) {
+            if (entry.connection) {
+                conns.push_back(entry.connection.get());
+            }
         }
+    }
+
+    for (auto* conn : conns) {
+        conn->resetConnection();
     }
 }
 
 void FSoEMaster::update(uint64_t current_time_ms)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (auto& entry : connections_) {
-        if (entry.connection) {
-            entry.connection->update(current_time_ms);
+    // Snapshot connection pointers under a short lock, then call update()
+    // without holding the lock. This prevents deadlock if a connection
+    // callback (fail_safe, error, state_change) calls back into FSoEMaster
+    // (e.g., anyFailSafe(), allOperational(), getDiagnostics()).
+    // FSoEMaster uses a non-recursive std::mutex, so re-entry would deadlock.
+    std::vector<FSoEMasterConnection*> conns;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        conns.reserve(connections_.size());
+        for (auto& entry : connections_) {
+            if (entry.connection) {
+                conns.push_back(entry.connection.get());
+            }
         }
+    }
+
+    for (auto* conn : conns) {
+        conn->update(current_time_ms);
     }
 }
 
