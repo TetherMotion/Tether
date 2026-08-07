@@ -249,6 +249,8 @@ bool FSoESlave::processRxFrame(const uint8_t* data, size_t len) {
                 processSessionReset(data, len);
             } else if (command == Command::Connection) {
                 processConnection(data, len);
+            } else if (command == Command::FailSafeData) {
+                processData(data, len);
             } else {
                 return false;
             }
@@ -259,6 +261,8 @@ bool FSoESlave::processRxFrame(const uint8_t* data, size_t len) {
                 processConnection(data, len);
             } else if (command == Command::Parameter) {
                 processParameter(data, len);
+            } else if (command == Command::FailSafeData) {
+                processData(data, len);
             } else {
                 return false;
             }
@@ -270,6 +274,8 @@ bool FSoESlave::processRxFrame(const uint8_t* data, size_t len) {
             } else if (command == Command::ProcessData) {
                 // Skip parameter phase
                 transitionTo(ConnectionState::Data);
+                processData(data, len);
+            } else if (command == Command::FailSafeData) {
                 processData(data, len);
             } else {
                 return false;
@@ -285,7 +291,7 @@ bool FSoESlave::processRxFrame(const uint8_t* data, size_t len) {
                 return false;
             }
             break;
-            
+
         case ConnectionState::Error:
             if (command == Command::Reset) {
                 // Reset from error state
@@ -706,19 +712,12 @@ void FSoESlave::processData(const uint8_t* data, size_t len) {
 
     // Handle fail-safe command within Data state
     if (cmd == Command::FailSafeData) {
-        // Master is sending fail-safe data
-        // Extract safe output data (first safeOutputSize bytes)
-        if (data_len >= config_.safeOutputSize) {
-            std::copy(frame_data, frame_data + config_.safeOutputSize,
-                      safeOutputs_.begin());
-        }
-        dataValid_ = false;
-        failSafeActive_ = true;
-        applyFailSafeOutputs();
-
-        if (failSafeCallback_) {
-            failSafeCallback_();
-        }
+        // Master is sending fail-safe data — enter fail-safe via triggerFailSafe
+        // to properly set failSafeEnteredMs_, increment stats, and fire callback.
+        // triggerFailSafe skips if already in fail-safe, which is correct.
+        // Preserve existing error code; use ApplicationError if none set yet.
+        triggerFailSafe(lastError_ != ErrorCode::NoError ? lastError_
+                                                         : ErrorCode::ApplicationError);
         return;
     }
 
