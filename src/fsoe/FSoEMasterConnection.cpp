@@ -190,11 +190,13 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
     if (cmd == Command::FailSafeData &&
         status_.state != ConnectionState::FailSafe &&
         status_.state != ConnectionState::Error) {
-        if (data_len >= 2) {
-            size_t error_offset = (data_len >= config_.input_size + 2)
-                                      ? config_.input_size : 0;
+        // Slave's fail-safe response contains input_size bytes of fail-safe
+        // inputs followed by a 2-byte error code. Extract the error code
+        // only if the full payload is present; otherwise use ApplicationError.
+        if (data_len >= config_.input_size + 2) {
             uint16_t slave_error = static_cast<uint16_t>(
-                frame_data[error_offset] | (frame_data[error_offset + 1] << 8));
+                frame_data[config_.input_size] |
+                (frame_data[config_.input_size + 1] << 8));
             handleError(slave_error);
         } else {
             handleError(ErrorCode::ApplicationError);
