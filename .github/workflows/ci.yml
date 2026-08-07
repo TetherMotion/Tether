@@ -312,7 +312,14 @@ jobs:
     - name: Run all module tests with ASAN
       run: |
         export ASAN_OPTIONS=detect_leaks=1:halt_on_error=0
-        .github/scripts/run_ctest.sh build-asan asan_all.log --parallel $(nproc)
+        # Exclude known-slow tests that exceed the per-test timeout under
+        # sanitizers (see AGENTS.md): the ThermalIntegrationTest suite
+        # (~6 min each, documented slow) and the CertifiedCurvatureSampler
+        # brute-force fuzz (20x100k samples). The rest of the curvature
+        # sampler suite still runs.
+        .github/scripts/run_ctest.sh build-asan asan_all.log \
+          --parallel $(nproc) \
+          -E "ThermalIntegrationTest|CertifiedBoundDominatesBruteForce"
 
     - name: Show ccache stats
       if: always()
@@ -381,7 +388,14 @@ jobs:
     - name: Run all module tests with TSAN
       run: |
         export TSAN_OPTIONS=halt_on_error=0
-        .github/scripts/run_ctest.sh build-tsan tsan_all.log --parallel $(nproc)
+        # Exclude known-slow tests that exceed the per-test timeout under
+        # sanitizers (see AGENTS.md): the ThermalIntegrationTest suite
+        # (~6 min each, documented slow) and the CertifiedCurvatureSampler
+        # brute-force fuzz (20x100k samples). The rest of the curvature
+        # sampler suite still runs.
+        .github/scripts/run_ctest.sh build-tsan tsan_all.log \
+          --parallel $(nproc) \
+          -E "ThermalIntegrationTest|CertifiedBoundDominatesBruteForce"
 
     - name: Show ccache stats
       if: always()
