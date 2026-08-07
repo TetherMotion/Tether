@@ -88,10 +88,23 @@ size_t FSoEMaster::getConnectionCount() const
 
 bool FSoEMaster::startAll()
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    // Snapshot connection pointers under a short lock, then call
+    // startConnection() without holding the lock. This prevents AB-BA
+    // deadlock with connection callbacks that may call back into FSoEMaster.
+    std::vector<FSoEMasterConnection*> conns;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        conns.reserve(connections_.size());
+        for (auto& entry : connections_) {
+            if (entry.connection) {
+                conns.push_back(entry.connection.get());
+            }
+        }
+    }
+
     bool all_started = true;
-    for (auto& entry : connections_) {
-        if (entry.connection && !entry.connection->startConnection()) {
+    for (auto* conn : conns) {
+        if (!conn->startConnection()) {
             all_started = false;
         }
     }
@@ -145,10 +158,25 @@ void FSoEMaster::update(uint64_t current_time_ms)
 
 bool FSoEMaster::allOperational() const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (connections_.empty()) return false;
-    for (const auto& entry : connections_) {
-        if (!entry.connection || !entry.connection->isOperational()) {
+    // Snapshot connection pointers under a short lock, then call
+    // isOperational() without holding the lock. This prevents AB-BA
+    // deadlock: without this, allOperational() holds master.mutex_ while
+    // locking conn.mutex_, while a connection callback may hold conn.mutex_
+    // and try to lock master.mutex_ (e.g., via anyFailSafe()).
+    std::vector<const FSoEMasterConnection*> conns;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (connections_.empty()) return false;
+        conns.reserve(connections_.size());
+        for (const auto& entry : connections_) {
+            if (entry.connection) {
+                conns.push_back(entry.connection.get());
+            }
+        }
+    }
+
+    for (const auto* conn : conns) {
+        if (!conn->isOperational()) {
             return false;
         }
     }
@@ -157,9 +185,22 @@ bool FSoEMaster::allOperational() const
 
 bool FSoEMaster::anyFailSafe() const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (const auto& entry : connections_) {
-        if (entry.connection && entry.connection->isFailSafe()) {
+    // Snapshot connection pointers under a short lock, then call
+    // isFailSafe() without holding the lock. Same AB-BA prevention as
+    // allOperational().
+    std::vector<const FSoEMasterConnection*> conns;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        conns.reserve(connections_.size());
+        for (const auto& entry : connections_) {
+            if (entry.connection) {
+                conns.push_back(entry.connection.get());
+            }
+        }
+    }
+
+    for (const auto* conn : conns) {
+        if (conn->isFailSafe()) {
             return true;
         }
     }
@@ -276,32 +317,39 @@ bool FSoEMaster::isDedicatedThreadRunning() const
 
 std::string FSoEMaster::getDiagnostics() const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    // Snapshot connection pointers and metadata under a short lock, then
+    // call isOperational()/isFailSafe()/getDiagnostics() without holding
+    // the lock. This prevents AB-BA deadlock with connection callbacks.
+    std::vector<const FSoEMasterConnection*> conns;
+    bool inline_mode;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        inline_mode = inline_mode_;
+        conns.reserve(connections_.size());
+        for (const auto& entry : connections_) {
+            if (entry.connection) {
+                conns.push_back(entry.connection.get());
+            }
+        }
+    }
 
-    // Inline allOperational/anyFailSafe checks to avoid recursive mutex deadlock
-    bool all_op = !connections_.empty();
+    bool all_op = !conns.empty();
     bool any_fs = false;
-    for (const auto& entry : connections_) {
-        if (!entry.connection || !entry.connection->isOperational()) {
-            all_op = false;
-        }
-        if (entry.connection && entry.connection->isFailSafe()) {
-            any_fs = true;
-        }
+    for (const auto* conn : conns) {
+        if (!conn->isOperational()) all_op = false;
+        if (conn->isFailSafe()) any_fs = true;
     }
 
     std::string diag;
     diag += "FSoE Master Diagnostics:\n";
-    diag += "  Connections: " + std::to_string(connections_.size()) + "\n";
+    diag += "  Connections: " + std::to_string(conns.size()) + "\n";
     diag += "  All Operational: " + std::string(all_op ? "Yes" : "No") + "\n";
     diag += "  Any Fail-Safe: " + std::string(any_fs ? "Yes" : "No") + "\n";
-    diag += "  Mode: " + std::string(inline_mode_ ? "Inline" : "Dedicated/Manual") + "\n";
+    diag += "  Mode: " + std::string(inline_mode ? "Inline" : "Dedicated/Manual") + "\n";
 
-    for (size_t i = 0; i < connections_.size(); ++i) {
+    for (size_t i = 0; i < conns.size(); ++i) {
         diag += "\n--- Connection " + std::to_string(i) + " ---\n";
-        if (connections_[i].connection) {
-            diag += connections_[i].connection->getDiagnostics();
-        }
+        diag += conns[i]->getDiagnostics();
     }
 
     return diag;
