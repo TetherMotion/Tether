@@ -309,20 +309,20 @@ TEST_F(FSoESlaveTest, RecoveryCallback) {
 
 TEST_F(FSoESlaveTest, GetStats) {
     slave_->initialize();
-    auto& stats = slave_->getStats();
+    auto stats = slave_->getStats();
     EXPECT_EQ(stats.framesReceived, 0u);
 }
 
 TEST_F(FSoESlaveTest, ResetStats) {
     slave_->initialize();
     slave_->resetStats();
-    auto& stats = slave_->getStats();
+    auto stats = slave_->getStats();
     EXPECT_EQ(stats.framesSent, 0u);
 }
 
 TEST_F(FSoESlaveTest, GetDiagnostics) {
     slave_->initialize();
-    auto& diag = slave_->getDiagnostics();
+    auto diag = slave_->getDiagnostics();
     // Diagnostics may contain entries from initialization
     // Verify we can read them without crash
     (void)diag.size();

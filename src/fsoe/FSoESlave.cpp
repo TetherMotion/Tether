@@ -100,6 +100,56 @@ const char* FSoESlave::getStateName() const {
     }
 }
 
+bool FSoESlave::isFailSafe() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return failSafeActive_;
+}
+
+bool FSoESlave::hasError() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return state_.load() == ConnectionState::Error || lastError_ != ErrorCode::NoError;
+}
+
+uint16_t FSoESlave::getLastError() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return lastError_;
+}
+
+bool FSoESlave::areSafeOutputsValid() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return dataValid_ && state_.load() == ConnectionState::Data;
+}
+
+FSoESlaveStats FSoESlave::getStats() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return stats_;
+}
+
+void FSoESlave::resetStats() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    stats_.reset();
+}
+
+std::vector<FSoEDiagnosticEntry> FSoESlave::getDiagnostics() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return diagnostics_;
+}
+
+void FSoESlave::clearDiagnostics() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    diagnostics_.clear();
+}
+
+void FSoESlave::setErrorInjection(const FSoEErrorInjection& injection) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    errorInjection_ = injection;
+}
+
+bool FSoESlave::isErrorInjectionEnabled() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return errorInjection_.enabled;
+}
+
 void FSoESlave::reset() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
