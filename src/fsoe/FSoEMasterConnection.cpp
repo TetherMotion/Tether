@@ -603,8 +603,9 @@ void FSoEMasterConnection::handleError(uint16_t error_code)
 
 uint16_t FSoEMasterConnection::computeParameterCRC() const
 {
-    // Compute CRC over the parameter set
-    std::array<uint8_t, 19> param_data{};
+    // Compute CRC over the parameter set.
+    // Layout: 11 fixed bytes + fail_safe_values (up to 16 bytes) = up to 27 bytes.
+    std::array<uint8_t, 27> param_data{};
 
     param_data[0] = config_.watchdog_timeout_ms & 0xFF;
     param_data[1] = (config_.watchdog_timeout_ms >> 8) & 0xFF;
