@@ -202,7 +202,9 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
     // Process based on current state
     switch (status_.state) {
         case ConnectionState::Reset:
-            break;
+            // No frames expected in Reset — prepareTxFrame auto-transitions
+            // to Session, so we should never actually be here.
+            return false;
 
         case ConnectionState::Session:
             handleSessionState(cmd, frame_data, data_len);
@@ -230,6 +232,9 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
                     resetConnection();
                     stats_.successful_recoveries++;
                 }
+            } else {
+                // Ignore non-Reset commands in Error state
+                return false;
             }
             break;
     }
