@@ -106,15 +106,21 @@ void Server::acceptLoop() {
             &config_.serverFeatures, &datalogRecorder_);
 
         Session* sessionPtr = session.get();
-        session->markRunning();
 
         SessionInfo si;
         si.session = std::move(session);
-        si.thread = std::thread([sessionPtr]() { sessionPtr->run(); });
 
+        // Add the session to sessions_ and start its thread within the same
+        // lock scope.  This prevents activeSessionCount() from observing a
+        // session that has already started processing requests but hasn't
+        // been added to the list yet (a race that is especially visible
+        // under TSAN where thread scheduling timing differs).
         {
             std::lock_guard<std::mutex> lock(sessionsMutex_);
             sessions_.push_back(std::move(si));
+            SessionInfo& ref = sessions_.back();
+            ref.session->markRunning();
+            ref.thread = std::thread([sessionPtr]() { sessionPtr->run(); });
         }
     }
 }
