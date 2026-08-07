@@ -143,9 +143,16 @@ foreach(_tgt IN LISTS _variants)
     )
 endforeach()
 
-# Alias targets for convenience
+# Export for install/collection (matches other components)
+set(TETHER_KLIPPER_TARGETS ${_variants})
+
+# Alias targets for convenience (shared preferred, matches other components)
 if(TARGET tether_klipper_shared)
+    add_library(tether_klipper ALIAS tether_klipper_shared)
+    add_library(tether::klipper ALIAS tether_klipper_shared)
     add_library(Tether::Klipper ALIAS tether_klipper_shared)
 elseif(TARGET tether_klipper_static)
+    add_library(tether_klipper ALIAS tether_klipper_static)
+    add_library(tether::klipper ALIAS tether_klipper_static)
     add_library(Tether::Klipper ALIAS tether_klipper_static)
 endif()

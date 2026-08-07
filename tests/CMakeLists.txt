@@ -1033,7 +1033,7 @@ if(TETHER_BUILD_KLIPPER)
     )
     create_module_test_timeout(klipper
         "${KLIPPER_TEST_SOURCES}"
-        "tether_klipper_shared;tether_common_shared;tether_motion_planner_shared;tether_gcode_shared;tether_export_shared;tether_controls;tether_simulation;tether_io_protocol_shared"
+        "tether_klipper;tether_common;tether_motion_planner;tether_gcode;tether_export;tether_controls;tether_simulation;tether_io_protocol"
         "TETHER_ENABLE_KLIPPER=1"
         120
     )
