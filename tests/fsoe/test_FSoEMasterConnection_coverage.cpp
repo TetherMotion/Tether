@@ -374,10 +374,11 @@ TEST_F(FSoESlaveCoverageTest, UpdateCycles) {
 }
 
 TEST_F(FSoESlaveCoverageTest, StatsAccess) {
-    auto& stats = slave->getStats();
+    auto stats = slave->getStats();
     EXPECT_EQ(stats.framesReceived, 0u);
     slave->resetStats();
-    EXPECT_EQ(stats.framesReceived, 0u);
+    auto stats2 = slave->getStats();
+    EXPECT_EQ(stats2.framesReceived, 0u);
 }
 
 TEST_F(FSoESlaveCoverageTest, DiagnosticsAccess) {

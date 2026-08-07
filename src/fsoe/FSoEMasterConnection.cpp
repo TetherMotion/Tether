@@ -468,6 +468,9 @@ void FSoEMasterConnection::handleFailSafeState(uint8_t cmd, const uint8_t* data,
                 status_.error_code = slave_error;
             }
         }
+    } else {
+        // Unexpected command in FailSafe state
+        handleError(ErrorCode::CommandError);
     }
 }
 

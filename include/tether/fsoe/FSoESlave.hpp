@@ -275,50 +275,50 @@ public:
      * @brief Check if initialized
      */
     bool isInitialized() const { return initialized_; }
-    
+
     /**
      * @brief Get configuration
      */
     const FSoESlaveConfig& getConfig() const { return config_; }
-    
+
     /**
      * @brief Reconfigure (must be in RESET state)
      */
     bool reconfigure(const FSoESlaveConfig& config);
-    
+
     // ========================================================================
     // State Machine
     // ========================================================================
-    
+
     /**
      * @brief Get current FSoE state
      */
-    uint8_t getState() const { return state_; }
-    
+    uint8_t getState() const { return state_.load(); }
+
     /**
      * @brief Get state name
      */
     const char* getStateName() const;
-    
+
     /**
      * @brief Check if in operational (DATA) state
      */
-    bool isOperational() const { return state_ == ConnectionState::Data; }
-    
+    bool isOperational() const { return state_.load() == ConnectionState::Data; }
+
     /**
      * @brief Check if in fail-safe state
      */
-    bool isFailSafe() const { return failSafeActive_; }
-    
+    bool isFailSafe() const;
+
     /**
      * @brief Check if error occurred
      */
-    bool hasError() const { return state_ == ConnectionState::Error || lastError_ != ErrorCode::NoError; }
-    
+    bool hasError() const;
+
     /**
      * @brief Get last error code
      */
-    uint16_t getLastError() const { return lastError_; }
+    uint16_t getLastError() const;
     
     /**
      * @brief Reset state machine
@@ -405,7 +405,7 @@ public:
     /**
      * @brief Check if safe outputs are valid
      */
-    bool areSafeOutputsValid() const { return dataValid_ && isOperational(); }
+    bool areSafeOutputsValid() const;
     
     /**
      * @brief Apply fail-safe values to outputs
@@ -432,45 +432,46 @@ public:
     // ========================================================================
     // Statistics and Diagnostics
     // ========================================================================
-    
+
     /**
-     * @brief Get statistics
+     * @brief Get statistics (thread-safe snapshot by value)
      */
-    const FSoESlaveStats& getStats() const { return stats_; }
-    
+    FSoESlaveStats getStats() const;
+
     /**
      * @brief Reset statistics
      */
-    void resetStats() { stats_.reset(); }
-    
+    void resetStats();
+
     /**
-     * @brief Get diagnostic log
+     * @brief Get diagnostic log (thread-safe copy by value)
      */
-    const std::vector<FSoEDiagnosticEntry>& getDiagnostics() const { return diagnostics_; }
-    
+    std::vector<FSoEDiagnosticEntry> getDiagnostics() const;
+
     /**
      * @brief Clear diagnostic log
      */
-    void clearDiagnostics() { diagnostics_.clear(); }
-    
+    void clearDiagnostics();
+
     // ========================================================================
     // Error Injection (Testing)
     // ========================================================================
-    
+
     /**
-     * @brief Get error injection configuration (mutable)
+     * @brief Get error injection configuration (mutable, for test setup only)
+     * @note Not thread-safe — call before starting cyclic processing.
      */
     FSoEErrorInjection& getErrorInjection() { return errorInjection_; }
-    
+
     /**
      * @brief Set error injection configuration
      */
-    void setErrorInjection(const FSoEErrorInjection& injection) { errorInjection_ = injection; }
-    
+    void setErrorInjection(const FSoEErrorInjection& injection);
+
     /**
      * @brief Check if error injection is enabled
      */
-    bool isErrorInjectionEnabled() const { return errorInjection_.enabled; }
+    bool isErrorInjectionEnabled() const;
 
 private:
     // ========================================================================
