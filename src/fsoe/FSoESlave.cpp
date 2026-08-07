@@ -673,26 +673,29 @@ void FSoESlave::processConnection(const uint8_t* data, size_t len) {
     // Connection ID from end of frame
     currentConnectionId_ = conn_id;
 
-    // Validate safety address if present in safe data (first 2 bytes)
-    if (data_len >= 2) {
-        uint16_t safetyAddr = static_cast<uint16_t>(frame_data[0]) |
-                              (static_cast<uint16_t>(frame_data[1]) << 8);
-        if (safetyAddr != 0 && safetyAddr != config_.safetyAddress) {
-            handleError(ErrorCode::ConnectionIDError, true);
-            return;
-        }
+    // Validate safety address and extract parameter CRC from safe data.
+    // Layout (must match master's buildConnectionFrame):
+    //   [safetyAddr_lo] [safetyAddr_hi] [paramCRC_lo] [paramCRC_hi]
+    // Require the full 4-byte payload — the master always sends 4 bytes.
+    if (data_len < 4) {
+        handleError(ErrorCode::DataLengthError, true);
+        return;
     }
 
-    // Extract parameter CRC from connection frame (bytes 2-3)
-    if (data_len >= 4) {
-        receivedParameterCRC_ = static_cast<uint16_t>(frame_data[2]) |
-                                (static_cast<uint16_t>(frame_data[3]) << 8);
-        // Verify parameter CRC if expected value is configured (non-zero)
-        if (config_.expectedParameterCRC != 0 &&
-            receivedParameterCRC_ != config_.expectedParameterCRC) {
-            handleError(ErrorCode::ParameterError, true);
-            return;
-        }
+    uint16_t safetyAddr = static_cast<uint16_t>(frame_data[0]) |
+                          (static_cast<uint16_t>(frame_data[1]) << 8);
+    if (safetyAddr != 0 && safetyAddr != config_.safetyAddress) {
+        handleError(ErrorCode::ConnectionIDError, true);
+        return;
+    }
+
+    receivedParameterCRC_ = static_cast<uint16_t>(frame_data[2]) |
+                            (static_cast<uint16_t>(frame_data[3]) << 8);
+    // Verify parameter CRC if expected value is configured (non-zero)
+    if (config_.expectedParameterCRC != 0 &&
+        receivedParameterCRC_ != config_.expectedParameterCRC) {
+        handleError(ErrorCode::ParameterError, true);
+        return;
     }
 
     transitionTo(ConnectionState::Connection);
