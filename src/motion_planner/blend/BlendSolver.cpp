@@ -11,6 +11,7 @@
 #include "tether/motion_planner/blend/BoundaryConditions.hpp"
 #include "tether/motion_planner/blend/DeviationCertifier.hpp"
 #include "tether/motion_planner/blend/PHQuinticBlendBuilder.hpp"
+#include "tether/motion_planner/geometry/PointCurveDistance.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -30,6 +31,43 @@ double autoEpsilon(double tol) {
 /// Check if a piece is long enough to trim by `trim` on the junction end.
 bool canTrim(const NurbsCurve& piece, double trim, double minLength) {
     return piece.length() >= std::max(2.0 * minLength, trim);
+}
+
+/// Coarse deviation lower bound: sample the blend and the removed corner
+/// pieces at a small number of points and compute the min point-to-curve
+/// distance in both directions (blend→Ω and Ω→blend). The result is a
+/// lower bound on the true Hausdorff deviation — if it already exceeds
+/// the tolerance, the full (M10) certification would reject the blend, so
+/// the caller can skip that expensive step.
+///
+/// This is the key performance optimization for tight tolerances: the
+/// (M10) certifier's grid size scales as L/(2ε), and ε = 1e-3·|tol|. For
+/// tight tolerances, ε is tiny, making the grid enormous (up to 100000
+/// samples, each calling pointCurveDistance). Most bisection iterations
+/// test high speeds where the deviation is far above the tolerance —
+/// this pre-check skips the expensive certification for those iterations.
+double coarseDeviationLowerBound(const NurbsCurve& blend,
+                                 const NurbsCurve& removedIn,
+                                 const NurbsCurve& removedOut,
+                                 std::size_t N = 16) {
+    double maxDist = 0.0;
+    // Blend → Ω direction: for each blend sample, min dist to removedIn/Out.
+    for (std::size_t i = 0; i <= N; ++i) {
+        const double t = static_cast<double>(i) / static_cast<double>(N);
+        const RVec p = blend.evaluate(t);
+        const double dIn = pointCurveDistance(removedIn, p).distance;
+        const double dOut = pointCurveDistance(removedOut, p).distance;
+        maxDist = std::max(maxDist, std::min(dIn, dOut));
+    }
+    // Ω → blend direction: for each removed-piece sample, dist to blend.
+    for (std::size_t i = 0; i <= N; ++i) {
+        const double t = static_cast<double>(i) / static_cast<double>(N);
+        const RVec qIn = removedIn.evaluate(t);
+        maxDist = std::max(maxDist, pointCurveDistance(blend, qIn).distance);
+        const RVec qOut = removedOut.evaluate(t);
+        maxDist = std::max(maxDist, pointCurveDistance(blend, qOut).distance);
+    }
+    return maxDist;
 }
 
 } // namespace
@@ -168,6 +206,16 @@ BlendGeometry BlendSolver::solveBezier(const BlendSpec& spec) const {
             continue;
         }
 
+        // Coarse pre-check: if the deviation lower bound already exceeds
+        // the tolerance, the full (M10) certification would reject this
+        // blend. Skip the expensive certification (which can use grids of
+        // up to 100000 samples for tight tolerances) and continue the
+        // bisection with a smaller speed.
+        if (coarseDeviationLowerBound(*blend, *removedIn, *removedOut) > absTol) {
+            speedHi2 = speed;
+            continue;
+        }
+
         // Certify.
         DeviationCertificate dev;
         try {
@@ -288,6 +336,12 @@ BlendGeometry BlendSolver::solvePH(const BlendSpec& spec) const {
 
         for (const auto& cand : candidates) {
             if (cand.degenerate) continue;
+            // Coarse pre-check: skip candidates whose deviation is clearly
+            // above tolerance (see solveBezier for rationale).
+            if (coarseDeviationLowerBound(cand.curve, *removedIn, *removedOut)
+                > absTol) {
+                continue;
+            }
             DeviationCertificate dev;
             try {
                 dev = isEar
