@@ -412,6 +412,8 @@ int main(int argc, char** argv) {
     if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
     auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
 
+    Tether::Platform::ensureRealtimeKernelOrExit();
+
     // Parse column selection
     std::vector<std::string> selected_columns;
     const std::set<std::string> valid_columns = {"fx", "fy", "fz", "tx", "ty", "tz", "status", "counter"};

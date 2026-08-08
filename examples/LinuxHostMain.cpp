@@ -20,6 +20,7 @@
 
 #include "hal/HAL.hpp"
 #include "packetloggers/pcap/PCAPLogger.hpp"
+#include "tether/platform/Platform.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -311,7 +312,10 @@ int main(int argc, char* argv[]) {
     // Setup signal handlers
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
-    
+
+    // Ensure kernel supports realtime (warns if low-latency desktop, exits if below)
+    Tether::Platform::ensureRealtimeKernelOrExit();
+
     // Setup real-time
     RTConfig rtConfig;
     rtConfig.priority = opts.rtPriority;

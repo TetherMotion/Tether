@@ -1042,6 +1042,8 @@ int main(int argc, char** argv) {
     if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
     auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
 
+    Tether::Platform::ensureRealtimeKernelOrExit();
+
     Tether::Examples::VlanConfig vlan;
     if (!Tether::Examples::parseVlanArgs(
             program.get<std::string>("--rx-vlan"),

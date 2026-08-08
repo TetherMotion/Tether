@@ -139,6 +139,8 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    Tether::Platform::ensureRealtimeKernelOrExit();
+
     EtherCAT::DS402Master master;
     Tether::Examples::HostMasterSession session;
     if (!Tether::Examples::startHostMasterSession(program.get<std::string>("--interface"), master, session, TAG)) {

@@ -110,3 +110,61 @@ TEST(PlatformRealtime, SetCurrentThreadRealtime) {
     EXPECT_TRUE(ok); // non-Linux platforms are expected to be no-op and return true
 #endif
 }
+
+TEST(PlatformRealtime, DetectRealtimeKernel) {
+    auto info = Tether::Platform::detectRealtimeKernel();
+#ifdef __linux__
+    // uname must succeed on Linux
+    EXPECT_FALSE(info.kernel_release.empty());
+    EXPECT_FALSE(info.kernel_version.empty());
+    EXPECT_NE(info.build_model, Tether::Platform::PreemptModel::Unknown);
+
+    // is_realtime must be consistent: only PreemptRt => true
+    if (info.is_realtime) {
+        EXPECT_EQ(info.build_model, Tether::Platform::PreemptModel::PreemptRt);
+        EXPECT_EQ(info.realtime_class, Tether::Platform::RealtimeClass::HardRealtime);
+    } else {
+        EXPECT_NE(info.build_model, Tether::Platform::PreemptModel::PreemptRt);
+    }
+
+    // is_low_latency must be consistent with realtime_class
+    EXPECT_EQ(info.is_low_latency,
+              info.realtime_class == Tether::Platform::RealtimeClass::LowLatency ||
+              info.realtime_class == Tether::Platform::RealtimeClass::HardRealtime);
+#else
+    // Non-Linux: best-effort no-op
+    EXPECT_TRUE(info.is_realtime);
+    EXPECT_EQ(info.active_preempt_mode, "n/a");
+#endif
+}
+
+TEST(PlatformRealtime, DetectDynamicActiveMode) {
+    auto info = Tether::Platform::detectRealtimeKernel();
+#ifdef __linux__
+    if (info.build_model == Tether::Platform::PreemptModel::PreemptDynamic) {
+        // Active mode must be resolved to a known value
+        EXPECT_FALSE(info.active_preempt_mode.empty());
+        EXPECT_FALSE(info.detection_source.empty());
+        // Valid modes: full, lazy, voluntary, none, unknown
+        EXPECT_TRUE(info.active_preempt_mode == "full" ||
+                    info.active_preempt_mode == "lazy" ||
+                    info.active_preempt_mode == "voluntary" ||
+                    info.active_preempt_mode == "none" ||
+                    info.active_preempt_mode == "unknown");
+
+        // Dynamic kernels are never hard realtime
+        EXPECT_FALSE(info.is_realtime);
+        EXPECT_NE(info.realtime_class, Tether::Platform::RealtimeClass::HardRealtime);
+
+        // If active mode is "full", it's low-latency
+        if (info.active_preempt_mode == "full") {
+            EXPECT_EQ(info.realtime_class, Tether::Platform::RealtimeClass::LowLatency);
+            EXPECT_TRUE(info.is_low_latency);
+        }
+    } else {
+        // Non-dynamic: active_model == build_model, no dynamic resolution needed
+        EXPECT_EQ(info.active_model, info.build_model);
+        EXPECT_EQ(info.detection_source, "uname");
+    }
+#endif
+}
