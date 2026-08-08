@@ -46,6 +46,7 @@
 #pragma once
 
 #include "fsoe/FSoEDefs.hpp"
+#include "fsoe/FSoEStatistics.hpp"
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -163,74 +164,6 @@ struct FSoESlaveConfig {
     // Diagnostics
     bool enableDiagnostics = true;
     uint32_t maxErrorLogEntries = 100;
-};
-
-// ============================================================================
-// FSoE Diagnostic Entry
-// ============================================================================
-
-struct FSoEDiagnosticEntry {
-    uint64_t timestamp;
-    uint16_t errorCode;
-    uint8_t  state;
-    uint8_t  sequenceNumber;
-    uint16_t connectionId;
-    char message[64];
-};
-
-// ============================================================================
-// FSoE Slave Statistics
-// ============================================================================
-
-struct FSoESlaveStats {
-    // Frame counters
-    uint64_t framesReceived = 0;
-    uint64_t framesSent = 0;
-    uint64_t validFrames = 0;
-    uint64_t invalidFrames = 0;
-    
-    // Error counters
-    uint32_t crcErrors = 0;
-    uint32_t sequenceErrors = 0;
-    uint32_t connectionIdErrors = 0;
-    uint32_t watchdogTimeouts = 0;
-    uint32_t commandErrors = 0;
-    uint32_t dataLengthErrors = 0;
-    
-    // State counters
-    uint32_t sessionResets = 0;
-    uint32_t failSafeActivations = 0;
-    uint32_t recoveryAttempts = 0;
-    uint32_t successfulRecoveries = 0;
-    
-    // Timing
-    uint64_t lastValidFrameTime = 0;
-    uint64_t longestGapMs = 0;
-    uint32_t avgCycleTimeUs = 0;
-    uint32_t maxCycleTimeUs = 0;
-    uint32_t minCycleTimeUs = UINT32_MAX;
-    
-    void reset() {
-        framesReceived = 0;
-        framesSent = 0;
-        validFrames = 0;
-        invalidFrames = 0;
-        crcErrors = 0;
-        sequenceErrors = 0;
-        connectionIdErrors = 0;
-        watchdogTimeouts = 0;
-        commandErrors = 0;
-        dataLengthErrors = 0;
-        sessionResets = 0;
-        failSafeActivations = 0;
-        recoveryAttempts = 0;
-        successfulRecoveries = 0;
-        lastValidFrameTime = 0;
-        longestGapMs = 0;
-        avgCycleTimeUs = 0;
-        maxCycleTimeUs = 0;
-        minCycleTimeUs = UINT32_MAX;
-    }
 };
 
 // ============================================================================
@@ -549,9 +482,8 @@ private:
     FSoEDataValidCallback dataValidCallback_;
     FSoERecoveryCallback recoveryCallback_;
     
-    // Statistics and diagnostics
-    FSoESlaveStats stats_;
-    std::vector<FSoEDiagnosticEntry> diagnostics_;
+    // Statistics and diagnostics (managed by FSoEStatistics)
+    FSoEStatistics statistics_;
     
     // Error injection
     FSoEErrorInjection errorInjection_;
