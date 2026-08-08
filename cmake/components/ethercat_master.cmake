@@ -46,6 +46,7 @@ set(TETHER_ETHERCAT_MASTER_SOURCES
     ${ETHERCAT_RAW_SOURCES}
     ${TETHER_ROOT}/src/fmmu/FMMUConfiguration.cpp
     ${TETHER_ROOT}/src/sii/SIIReader.cpp
+    ${TETHER_ROOT}/src/sii/SIILogger.cpp
     ${RESET_SOURCES}
 )
 

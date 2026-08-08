@@ -28,6 +28,7 @@
 #pragma once
 
 #include "sii/SIIParser.hpp"
+#include "tether/sii/SIILogger.hpp"
 #include <cstdint>
 #include <cstddef>
 
@@ -220,59 +221,6 @@ bool readSIIIdentity(Master& master, uint16_t slave_index, SIIIdentity& out_iden
  * @brief Read SII mailbox configuration
  */
 bool readSIIMailbox(Master& master, uint16_t slave_index, SIIMailboxConfig& out_mailbox);
-
-// ============================================================================
-// Logging/Printing Functions
-// ============================================================================
-
-/**
- * @brief Log complete SII data
- * @param data Parsed SII data
- * @param tag ESP_LOG tag
- */
-void logSIIData(const SIIData& data, const char* tag);
-
-/**
- * @brief Log SII identity
- */
-void logSIIIdentity(const SIIIdentity& identity, const char* tag);
-
-/**
- * @brief Log SII mailbox configuration
- */
-void logSIIMailbox(const SIIMailboxConfig& mailbox, const char* tag);
-
-/**
- * @brief Log SII Sync Manager configuration
- */
-void logSIISyncManagers(const SIIData& data, const char* tag);
-
-/**
- * @brief Log SII PDO configuration
- */
-void logSIIPDOs(const SIIData& data, const char* tag);
-
-/**
- * @brief Log SII summary (one-line per slave)
- */
-void logSIISummary(const SIIData& data, uint16_t slave_index, const char* tag);
-
-/**
- * @brief Debug SII mailbox derivation with step-by-step detail
- * 
- * This function provides extremely detailed logging of how mailbox configuration
- * is derived from SII EEPROM, including:
- * - Raw EEPROM word reads with addresses and values
- * - Byte extraction from multi-byte reads
- * - Field assignments and their meanings
- * - Final SM0/SM1 configuration mapping
- * - Protocol flag decoding
- * 
- * @param master Master instance for network I/O
- * @param slave_index Slave index
- * @param tag ESP_LOG tag
- */
-void debugSIIMailboxDerivation(Master& master, uint16_t slave_index, const char* tag);
 
 } // namespace SII
 } // namespace EtherCAT

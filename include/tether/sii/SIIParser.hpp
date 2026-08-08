@@ -60,6 +60,7 @@
 
 #include "tether/ethercat/SMRegisters.hpp"
 #include "tether/ethercat/TetherConfig.hpp"
+#include "tether/sii/SIILogger.hpp"
 
 namespace EtherCAT {
 namespace SII {
@@ -598,20 +599,6 @@ struct SIICategoryHeader {
 
 class SIIReader;
 class SIIParser;
-
-// ============================================================================
-// Utility Functions
-// ============================================================================
-
-/**
- * @brief Get human-readable name for category type
- */
-const char* getCategoryTypeName(uint16_t type);
-
-/**
- * @brief Get human-readable name for mailbox protocol
- */
-const char* getMailboxProtocolName(uint16_t protocol);
 
 /**
  * @brief Format vendor ID as human-readable string
