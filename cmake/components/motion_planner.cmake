@@ -42,6 +42,7 @@ set(TETHER_MOTION_PLANNER_SOURCES
     ${TETHER_ROOT}/src/replanner/DependenceAnalyzer.cpp
     ${TETHER_ROOT}/src/replanner/BandwidthSelector.cpp
     ${TETHER_ROOT}/src/replanner/KdeStatistics.cpp
+    ${TETHER_ROOT}/src/replanner/KdeGridEvaluator.cpp
     ${TETHER_ROOT}/src/replanner/KdeDerivativeAnalyzer.cpp
 )
 
