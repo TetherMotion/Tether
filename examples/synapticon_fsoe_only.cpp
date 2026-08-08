@@ -13,15 +13,17 @@
  *   SM3 (inputs, 0x1C00, ctrl=0x20): TxPDO 0x1B00 (31 bytes)
  *     FSoE Command, safety state flags, diagnostic flags, safe position/velocity, CRCs, ConnectionID
  *
- * The FSoE safety layer (MainInstance + SafeMotionServoEmulator) runs each
- * cycle, exchanging safety commands and status.  The actual FSoE PDO buffers
- * (0x1700/0x1B00) are read/written via the drive's typed PDO accessors.
+ * The FSoE master state machine (MainInstance) runs each cycle, building the
+ * FSoE command frame into the RxPDO 0x1700 buffer and processing the drive's
+ * safety status frame from the TxPDO 0x1B00 buffer.  The drive's safety
+ * firmware handles the slave side of the FSoE protocol.
  *
  * Usage (Linux, requires root or CAP_NET_RAW):
  *   ./synapticon_fsoe_only                       # eth0, slave 0, 10 s
  *   ./synapticon_fsoe_only -i enx34298f762c4e    # specify interface
  *   ./synapticon_fsoe_only -s 1 -d 30            # slave 1, 30 s
  *   ./synapticon_fsoe_only --connection-id 0x4321 --watchdog-ms 15
+ *   ./synapticon_fsoe_only --debug fsoe-master   # verbose per-cycle FSoE logging
  */
 
 #include <array>
@@ -34,6 +36,7 @@
 
 #include "DS402ExampleSupport.hpp"
 #include "tether/drives/Synapticon.hpp"
+#include "tether/drives/Synapticon/SafetyDiagnostics.hpp"
 #include "tether/drives/Synapticon/SynapticonPDO.hpp"
 #include "tether/ethercat/Slave.hpp"
 #include "tether/fsoe/FSoEDefs.hpp"
@@ -63,7 +66,6 @@ using FSoERxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_RxPDO_1700;
 using FSoETxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_TxPDO_1B00;
 
 using FSoEMain  = EtherCAT::Drives::Synapticon::SafeMotion::MainInstance;
-using FSoEServo = EtherCAT::Drives::Synapticon::SafeMotion::SafeMotionServoEmulator;
 
 // ============================================================================
 // FSoE state / error name helpers
@@ -101,6 +103,30 @@ const char* fsoeErrorName(uint16_t code) {
         case FSoE::ErrorCode::StartupError:      return "StartupError";
         case FSoE::ErrorCode::CommChannelError:  return "CommChannelError";
         default:                                 return "Unknown";
+    }
+}
+
+const char* fsoeCommandName(uint8_t cmd) {
+    switch (cmd) {
+        case FSoE::Command::ProcessData:    return "ProcessData(0x36)";
+        case FSoE::Command::Reset:          return "Reset(0x2A)";
+        case FSoE::Command::Session:        return "Session(0x4E)";
+        case FSoE::Command::Connection:     return "Connection(0x64)";
+        case FSoE::Command::Parameter:      return "Parameter(0x52)";
+        case FSoE::Command::FailSafeData:   return "FailSafeData(0x08)";
+        default:                            return "Unknown";
+    }
+}
+
+void hexDump(const char* tag, const char* label, const uint8_t* data, size_t len) {
+    constexpr size_t kBytesPerLine = 16;
+    char hex[kBytesPerLine * 3 + 1];
+    for (size_t i = 0; i < len; i += kBytesPerLine) {
+        size_t pos = 0;
+        for (size_t j = i; j < i + kBytesPerLine && j < len; j++) {
+            pos += snprintf(hex + pos, sizeof(hex) - pos, "%02X ", data[j]);
+        }
+        TETHER_LOGI(tag, "  %s [%3zu/%3zu]: %s", label, i, len, hex);
     }
 }
 
@@ -170,24 +196,27 @@ private:
 };
 
 // ============================================================================
-// FSoE cyclic exchange task — uses FSoE PDO buffers (0x1700/0x1B00)
+// FSoE cyclic exchange task — real PDO communication via 0x1700/0x1B00
 // ============================================================================
 //
-// This task runs the FSoE protocol exchange each cycle.  The FSoE MainInstance
-// and SafeMotionServoEmulator handle the safety state machine, while the
-// actual PDO data is exchanged through the EtherCAT process data frame.
-// The drive's RxPDO buffer (0x1700, 11 bytes) carries the FSoE command frame
-// from master to slave, and the TxPDO buffer (0x1B00, 31 bytes) carries the
-// safety status frame from slave to master.
+// This task runs the FSoE protocol exchange each cycle using the actual
+// EtherCAT PDO buffers.  The FSoE MainInstance builds its master→slave frame
+// into the RxPDO 0x1700 buffer (11 bytes), and processes the slave→master
+// frame from the TxPDO 0x1B00 buffer (31 bytes).  The drive's safety
+// firmware handles the slave side of the FSoE state machine.
+//
+// On exchange failure the task logs a warning but does NOT stop the process
+// — this allows the operator to see the FSoE state machine diagnostics even
+// when the drive is in safe state or not yet responding correctly.
 
-class FSoEExchangeTask final : public EtherCAT::DS402Master::ICyclicTask {
+class FSoEPDOExchangeTask final : public EtherCAT::DS402Master::ICyclicTask {
 public:
-    FSoEExchangeTask(uint16_t slave_index,
-                     FSoEMain& main_instance,
-                     FSoEServo& servo)
+    FSoEPDOExchangeTask(uint16_t slave_index,
+                        FSoEMain& main_instance,
+                        bool debug_master)
         : slave_index_(slave_index)
         , main_instance_(main_instance)
-        , servo_(servo)
+        , debug_master_(debug_master)
     {}
 
     bool update(EtherCAT::DS402Master& master, double dt_seconds) override {
@@ -199,16 +228,73 @@ public:
 
         auto* drive = master.driveBySlaveIndex(slave_index_);
         if (drive == nullptr) {
-            return false;
+            TETHER_LOGW(TAG, "Drive %u not found — skipping FSoE exchange",
+                        slave_index_);
+            return true;  // don't stop the process
         }
 
-        // The FSoE exchange runs the safety state machine.  The servo
-        // emulator processes the command and publishes status.
-        servo_.step(0.0, dt_seconds);
-        if (!main_instance_.exchangeWith(servo_, elapsed_time_ms_)) {
-            TETHER_LOGW(TAG, "FSoE exchange failed at t=%lu ms",
-                        static_cast<unsigned long>(elapsed_time_ms_));
-            return false;
+        auto* rx = drive->rxPDO<FSoERxPDO>();
+        auto* tx = drive->txPDO<FSoETxPDO>();
+        if (rx == nullptr || tx == nullptr) {
+            TETHER_LOGW(TAG, "FSoE PDO buffers not available — skipping exchange");
+            return true;  // don't stop the process
+        }
+
+        // Exchange FSoE frames via the PDO buffers.
+        // rx (RxPDO 0x1700) is master→slave: we write the FSoE TX frame here.
+        // tx (TxPDO 0x1B00) is slave→master: we read the drive's FSoE RX frame here.
+        const bool ok = main_instance_.exchangeViaPDO(
+            reinterpret_cast<uint8_t*>(rx), sizeof(FSoERxPDO),
+            reinterpret_cast<const uint8_t*>(tx), sizeof(FSoETxPDO),
+            elapsed_time_ms_);
+
+        if (debug_master_) {
+            const auto status = main_instance_.rawConnection().getStatus();
+            TETHER_LOGI(TAG, "[fsoe-master] t=%lu ms  state=%s(0x%02X)  ok=%d",
+                        static_cast<unsigned long>(elapsed_time_ms_),
+                        fsoeStateName(status.state), status.state,
+                        ok ? 1 : 0);
+            // Dump the master→slave frame written into RxPDO 0x1700
+            hexDump(TAG, "TX→RxPDO 0x1700",
+                    reinterpret_cast<const uint8_t*>(rx), sizeof(FSoERxPDO));
+            // Dump the slave→master frame read from TxPDO 0x1B00
+            hexDump(TAG, "RX←TxPDO 0x1B00",
+                    reinterpret_cast<const uint8_t*>(tx), sizeof(FSoETxPDO));
+            // Decode FSoE command bytes
+            TETHER_LOGI(TAG, "  TX cmd=%s  RX cmd=%s",
+                        fsoeCommandName(rx->fsoe_command),
+                        fsoeCommandName(tx->fsoe_command));
+            // Decode safety flags from the PDO structs
+            TETHER_LOGI(TAG,
+                "  RX safety: STO=%d SS1=%d SS2=%d SOS=%d SBC=%d "
+                "conn_id=0x%04X  crc0=0x%04X crc1=0x%04X",
+                (rx->safety_flags & FSoERxPDO::kSTO) ? 1 : 0,
+                (rx->safety_flags & FSoERxPDO::kSS1) ? 1 : 0,
+                (rx->safety_flags & FSoERxPDO::kSS2) ? 1 : 0,
+                (rx->safety_flags & FSoERxPDO::kSOS) ? 1 : 0,
+                (rx->safety_flags & FSoERxPDO::kSBCCommand) ? 1 : 0,
+                rx->fsoe_connection_id,
+                rx->fsoe_crc_0, rx->fsoe_crc_1);
+            TETHER_LOGI(TAG,
+                "  TX safety: STO=%d SOS=%d SS1=%d SS2=%d err=%d "
+                "conn_id=0x%04X  crc0=0x%04X",
+                (tx->safety_state_flags & FSoETxPDO::kSTOState) ? 1 : 0,
+                (tx->safety_state_flags & FSoETxPDO::kSOSState) ? 1 : 0,
+                (tx->safety_state_flags & FSoETxPDO::kSS1State) ? 1 : 0,
+                (tx->safety_state_flags & FSoETxPDO::kSS2State) ? 1 : 0,
+                (tx->safety_state_flags & FSoETxPDO::kErrorState) ? 1 : 0,
+                tx->fsoe_connection_id,
+                tx->fsoe_crc_0);
+        }
+
+        if (!ok) {
+            // Log the failure but do NOT return false — keep the process
+            // running so the operator can see FSoE diagnostics and state
+            // transitions even when the drive is in safe state or not
+            // responding correctly.
+            TETHER_LOGW(TAG, "FSoE exchange failed at t=%lu ms (state=%s) — continuing",
+                        static_cast<unsigned long>(elapsed_time_ms_),
+                        fsoeStateName(main_instance_.rawConnection().getState()));
         }
 
         return true;
@@ -217,7 +303,7 @@ public:
 private:
     uint16_t slave_index_;
     FSoEMain& main_instance_;
-    FSoEServo& servo_;
+    bool debug_master_;
     uint64_t elapsed_time_ms_ = 0;
 };
 
@@ -233,6 +319,7 @@ struct Args {
     unsigned int connection_id = 0x1234;
     int watchdog_ms = 15;
     int diag_interval_ms = 500;
+    std::string debug;
 };
 
 bool parseArgs(int argc, char** argv, Args& out) {
@@ -251,6 +338,9 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .scan<'i', int>().default_value(15);
     program.add_argument("--diag-interval-ms")
         .scan<'i', int>().default_value(500);
+    program.add_argument("--debug")
+        .default_value(std::string(""))
+        .help("Comma-separated debug flags: 'fsoe-master' for per-cycle FSoE frame logging");
 
     try {
         program.parse_args(argc, argv);
@@ -266,6 +356,7 @@ bool parseArgs(int argc, char** argv, Args& out) {
     out.connection_id = program.get<unsigned int>("--connection-id");
     out.watchdog_ms = program.get<int>("--watchdog-ms");
     out.diag_interval_ms = program.get<int>("--diag-interval-ms");
+    out.debug = program.get<std::string>("--debug");
     return true;
 }
 
@@ -289,10 +380,11 @@ int main(int argc, char** argv) {
 
     TETHER_LOGI(TAG,
         "synapticon_fsoe_only — interface=%s slave=%u duration=%.1f "
-        "dc_sync=%s conn_id=0x%04X watchdog=%u ms",
+        "dc_sync=%s conn_id=0x%04X watchdog=%u ms debug='%s'",
         args.interface.c_str(), slave_idx, args.duration,
         args.enable_dc_sync ? "on" : "off",
-        args.connection_id, args.watchdog_ms);
+        args.connection_id, args.watchdog_ms,
+        args.debug.c_str());
 
     // --- Start EtherCAT master ---
     EtherCAT::DS402Master master;
@@ -340,6 +432,51 @@ int main(int argc, char** argv) {
         TETHER_LOGI(TAG, "Slave %u transitioned to PRE_OP", slave_idx);
     }
 
+    // --- Pre-activation safety check: read 0x2611 Safety Module input diagnostics ---
+    // Object 0x2611 reports the state of the safety module: 0 = safe state
+    // (safety function active, torque inhibited), 1 = not safe state (motion
+    // allowed).  We log this for diagnostics but do NOT abort if the drive
+    // is in safe state — the FSoE connection itself will bring the drive out
+    // of safe state once the safety protocol reaches the Data state.
+    {
+        auto& slave = master.ethercatMaster().slave(slave_idx);
+        const auto safety = EtherCAT::Drives::Synapticon::readSafetyModuleState(slave);
+
+        TETHER_LOGI(TAG,
+            "Safety module diagnostics (0x2611): input1=%u input2=%u -> %s",
+            static_cast<unsigned>(safety.input1),
+            static_cast<unsigned>(safety.input2),
+            safety.stateSummary());
+
+        TETHER_LOGI(TAG,
+            "FSoE active indicator (0x2620:2 \"Safe fieldbus\"): raw=%u -> %s",
+            static_cast<unsigned>(safety.safe_fieldbus),
+            safety.fsoeStateSummary());
+
+        if (!safety.ok) {
+            TETHER_LOGW(TAG,
+                "Failed to read safety module diagnostics (0x2611) via SDO — "
+                "continuing anyway (FSoE will attempt to establish connection)");
+        }
+
+        // NOTE: The check that would abort activation when the drive is in
+        // safe state is commented out.  For FSoE-only operation, the drive
+        // starts in safe state (STO active) and the FSoE master brings it
+        // out of safe state by going through the safety protocol.  Aborting
+        // here would prevent the FSoE connection from ever establishing.
+        //
+        // if (safety.isInSafeState()) {
+        //     TETHER_LOGE(TAG,
+        //         "Drive is in SAFE STATE (safety function active, motion "
+        //         "inhibited) — FSoE is %s (0x2620:2=%u) — refusing to "
+        //         "activate drive, triggering shutdown",
+        //         safety.fsoeStateSummary(),
+        //         static_cast<unsigned>(safety.safe_fieldbus));
+        //     Tether::Examples::stopHostMasterSession(master, session);
+        //     return 2;
+        // }
+    }
+
     // --- Configure FSoE-only PDO mapping and transition to OP ---
     //
     // Only FSoE safety PDOs are mapped — no CiA 402 process data PDOs.
@@ -384,9 +521,11 @@ int main(int argc, char** argv) {
         TETHER_LOGI(TAG, "Slave %u transitioned to OP with FSoE-only PDOs", slave_idx);
     }
 
-    // --- Set up FSoE safe-motion ---
+    // --- Set up FSoE safe-motion (master side only — no emulator) ---
     std::unique_ptr<FSoEMain> fsoe_main;
-    std::unique_ptr<FSoEServo> fsoe_servo;
+
+    // Parse --debug flags for fsoe-master verbose logging
+    const bool debug_fsoe_master = (args.debug.find("fsoe-master") != std::string::npos);
 
     {
         EtherCAT::Drives::Synapticon::SafeMotion::MainConfig main_config;
@@ -397,16 +536,9 @@ int main(int argc, char** argv) {
         main_config.master_address = 0x0001;
         main_config.watchdog_time_ms = static_cast<uint16_t>(args.watchdog_ms);
 
-        EtherCAT::Drives::Synapticon::SafeMotion::ServoEmulatorConfig servo_config;
-        servo_config.slave_address = slave_idx;
-        servo_config.connection_id = static_cast<uint16_t>(args.connection_id);
-        servo_config.safety_address = 0x0001;
-        servo_config.watchdog_time_ms = static_cast<uint16_t>(args.watchdog_ms);
-
         fsoe_main = std::make_unique<FSoEMain>(main_config);
-        fsoe_servo = std::make_unique<FSoEServo>(servo_config);
 
-        if (!fsoe_main->initialize() || !fsoe_servo->initialize()) {
+        if (!fsoe_main->initialize()) {
             TETHER_LOGE(TAG, "FSoE initialization failed");
             Tether::Examples::stopHostMasterSession(master, session);
             return 5;
@@ -433,16 +565,17 @@ int main(int argc, char** argv) {
             });
 
         TETHER_LOGI(TAG,
-            "FSoE initialized: conn_id=0x%04X watchdog=%u ms",
-            args.connection_id, args.watchdog_ms);
+            "FSoE initialized: conn_id=0x%04X watchdog=%u ms debug_master=%s",
+            args.connection_id, args.watchdog_ms,
+            debug_fsoe_master ? "on" : "off");
     }
 
     // --- Add FSoE cyclic tasks ---
     int rc = 0;
 
     if (!master.addCyclicTask(
-            std::make_unique<FSoEExchangeTask>(slave_idx, *fsoe_main, *fsoe_servo))) {
-        TETHER_LOGE(TAG, "Failed to add FSoE exchange task");
+            std::make_unique<FSoEPDOExchangeTask>(slave_idx, *fsoe_main, debug_fsoe_master))) {
+        TETHER_LOGE(TAG, "Failed to add FSoE PDO exchange task");
         rc = 6;
         Tether::Examples::stopHostMasterSession(master, session);
         return rc;

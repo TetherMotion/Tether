@@ -343,6 +343,48 @@ bool MainInstance::exchangeWith(SafeMotionServoEmulator& slave, uint64_t current
     return ok;
 }
 
+bool MainInstance::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max,
+                                   const uint8_t* tx_pdo_in, size_t tx_pdo_len,
+                                   uint64_t current_time_ms)
+{
+    if (!feature_enabled_) {
+        return true;
+    }
+    if (!initialized_ && !initialize()) {
+        return false;
+    }
+
+    // Encode the current command into the connection's safe_outputs.
+    if (!typed_view_.write(command_)) {
+        return false;
+    }
+
+    // Run the FSoE state machine (watchdog, phase timeouts, auto-recovery).
+    connection_.update(current_time_ms);
+
+    // Build the master→slave FSoE frame into the RxPDO buffer.
+    // The frame size varies by state (Session=5B, Connection=7B,
+    // Parameter=9B, Data=11B).  prepareTxFrame writes only the needed
+    // bytes; the rest of the PDO buffer is left untouched.
+    const size_t tx_len = connection_.prepareTxFrame(rx_pdo_out, rx_pdo_max);
+    if (tx_len == 0) {
+        return false;
+    }
+
+    // Process the slave→master FSoE frame from the TxPDO buffer.
+    // The drive writes its response into TxPDO 0x1B00 each cycle.
+    const bool ok = connection_.processRxFrame(tx_pdo_in, tx_pdo_len);
+    if (ok) {
+        if (const auto decoded = typed_view_.read()) {
+            status_ = *decoded;
+            has_status_ = true;
+        }
+        clearPulseBits();
+    }
+
+    return ok;
+}
+
 bool MainInstance::motionAllowed() const
 {
     return !feature_enabled_ || (has_status_ && status_.motionAllowed());
