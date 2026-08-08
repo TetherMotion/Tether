@@ -840,6 +840,8 @@ create_ethercat_test(pdo
         ethercat/test_pdo_to_string.cpp
         ethercat/test_sync_manager_validation.cpp
         ethercat/test_custom_pdo_mapping.cpp
+        ethercat/test_multi_pdo_mapping.cpp
+        ethercat/test_synapticon_pdo_mapping.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/raw/PDOManager.cpp
         ../src/ethercat/raw/LogicalAddressManager.cpp

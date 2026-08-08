@@ -90,6 +90,65 @@ SlaveError SyncManagerAccessor::readPDOAssignment(uint8_t subIndex, uint16_t& pd
     return slave_.sdoReadU16(odIdx, subIndex, pdoIndex);
 }
 
+SlaveError SyncManagerAccessor::readAllPDOAssignments(std::vector<uint16_t>& out_indices) const {
+    out_indices.clear();
+
+    uint8_t count = 0;
+    SlaveError err = readPDOAssignCount(count);
+    if (err != SlaveError::Ok) {
+        return err;
+    }
+
+    out_indices.reserve(count);
+    for (uint8_t sub = 1; sub <= count; ++sub) {
+        uint16_t pdo_idx = 0;
+        err = readPDOAssignment(sub, pdo_idx);
+        if (err != SlaveError::Ok) {
+            return err;
+        }
+        out_indices.push_back(pdo_idx);
+    }
+    return SlaveError::Ok;
+}
+
+SlaveError SyncManagerAccessor::writePDOAssignments(std::initializer_list<uint16_t> pdo_indices) {
+    std::vector<uint16_t> vec(pdo_indices);
+    return writePDOAssignments(vec);
+}
+
+SlaveError SyncManagerAccessor::writePDOAssignments(const std::vector<uint16_t>& pdo_indices) {
+    const uint16_t odIdx = EtherCAT::SyncManager::pdoAssignIndex(index_);
+
+    // CiA 301 write ordering: clear count first, write entries, then set count
+    uint8_t zero = 0;
+    SlaveError err = slave_.sdoWriteU8(odIdx, 0x00, zero);
+    if (err != SlaveError::Ok) {
+        return err;
+    }
+
+    for (size_t i = 0; i < pdo_indices.size(); i++) {
+        uint8_t sub = static_cast<uint8_t>(i + 1);
+        err = slave_.sdoWriteU16(odIdx, sub, pdo_indices[i]);
+        if (err != SlaveError::Ok) {
+            return err;
+        }
+    }
+
+    uint8_t count = static_cast<uint8_t>(pdo_indices.size());
+    err = slave_.sdoWriteU8(odIdx, 0x00, count);
+    if (err != SlaveError::Ok) {
+        return err;
+    }
+
+    return SlaveError::Ok;
+}
+
+SlaveError SyncManagerAccessor::clearPDOAssignments() {
+    const uint16_t odIdx = EtherCAT::SyncManager::pdoAssignIndex(index_);
+    uint8_t zero = 0;
+    return slave_.sdoWriteU8(odIdx, 0x00, zero);
+}
+
 // -----------------------------------------------------------------------
 // Validation
 // -----------------------------------------------------------------------

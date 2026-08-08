@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <initializer_list>
 
 #include "tether/ethercat/SMRegisters.hpp"
 #include "tether/ethercat/PDOManager.hpp"
@@ -387,6 +388,47 @@ public:
      * @return SlaveError::Ok on success
      */
     SlaveError readPDOAssignment(uint8_t subIndex, uint16_t& pdoIndex) const;
+
+    /**
+     * @brief Read all assigned PDO indices for this SM into a vector.
+     *
+     * Reads the PDO assignment count (0x1C10+n : 0x00), then reads each
+     * subindex (1..count) and appends the PDO index to @p out_indices.
+     *
+     * @param[out] out_indices  Vector populated with all assigned PDO indices
+     * @return SlaveError::Ok on success
+     */
+    SlaveError readAllPDOAssignments(std::vector<uint16_t>& out_indices) const;
+
+    /**
+     * @brief Write PDO assignment entries to this SM's OD (0x1C10+n).
+     *
+     * Follows CiA 301 write ordering:
+     * 1. Set count (subindex 0) to 0 (clear)
+     * 2. Write each PDO index to subindex 1..N
+     * 3. Set count (subindex 0) to N
+     *
+     * @param pdo_indices  Initializer list of PDO mapping object indices
+     * @return SlaveError::Ok on success
+     */
+    SlaveError writePDOAssignments(std::initializer_list<uint16_t> pdo_indices);
+
+    /**
+     * @brief Write PDO assignment entries to this SM's OD (0x1C10+n).
+     *
+     * Vector overload of the initializer_list version.
+     *
+     * @param pdo_indices  Vector of PDO mapping object indices
+     * @return SlaveError::Ok on success
+     */
+    SlaveError writePDOAssignments(const std::vector<uint16_t>& pdo_indices);
+
+    /**
+     * @brief Clear all PDO assignments for this SM (set count to 0).
+     *
+     * @return SlaveError::Ok on success
+     */
+    SlaveError clearPDOAssignments();
 
     // -----------------------------------------------------------------------
     // Validation
