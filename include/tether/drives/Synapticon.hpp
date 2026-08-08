@@ -22,6 +22,7 @@
 #include <cstdint>
 
 #include "tether/drives/Synapticon/SynapticonPDO.hpp"
+#include "tether/drives/Synapticon/SafetyDiagnostics.hpp"
 #include "tether/drives/Synapticon/Registers/Common.hpp"
 #include "tether/drives/Synapticon/Registers/DriveConfig2000.hpp"
 #include "tether/drives/Synapticon/Registers/Controllers2010.hpp"

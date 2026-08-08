@@ -411,6 +411,42 @@ int main(int argc, char** argv) {
             kMailboxReadAddr, kMailboxReadSize, kMailboxProtocols);
     }
 
+    // --- Pre-activation safety check: read 0x2611 Safety Module input diagnostics ---
+    // Before enabling the drive, verify the safety module is NOT in safe state.
+    // Object 0x2611 (per Synapticon documentation) reports the state of the
+    // safety module: 0 = safe state (safety function active, torque inhibited),
+    // 1 = not safe state (motion allowed).  If the drive is in safe state,
+    // attempting to activate it is an error — we shut down immediately.
+    {
+        auto& slave = master.ethercatMaster().slave(slave_idx);
+        const auto safety = EtherCAT::Drives::Synapticon::readSafetyModuleState(slave);
+
+        TETHER_LOGI(TAG,
+            "Safety module diagnostics (0x2611): input1=%u input2=%u -> %s",
+            static_cast<unsigned>(safety.input1),
+            static_cast<unsigned>(safety.input2),
+            safety.stateSummary());
+
+        if (!safety.ok) {
+            TETHER_LOGE(TAG,
+                "Failed to read safety module diagnostics (0x2611) via SDO — "
+                "cannot verify safety state, aborting activation");
+            Tether::Examples::stopHostMasterSession(master, session);
+            return 2;
+        }
+
+        if (safety.isInSafeState()) {
+            TETHER_LOGE(TAG,
+                "Drive is in SAFE STATE (safety function active, motion inhibited) — "
+                "refusing to activate drive, triggering shutdown");
+            Tether::Examples::stopHostMasterSession(master, session);
+            return 2;
+        }
+
+        TETHER_LOGI(TAG,
+            "Safety check passed: safety module reports motion allowed");
+    }
+
     // --- Configure drive: CST mode, RxPDO 0x1600 / TxPDO 0x1A00 ---
     // These are the standard SOMANET CiA 402 PDO mappings from the ESI:
     //   RxPDO 0x1600 (19 bytes): controlword, modes_of_operation, target_torque,
