@@ -71,13 +71,6 @@ add_tether_example(as715n_sine_motion_native
 # Adds an optional Synapticon-style FSoE safe-motion main instance to the sine loop.
 add_tether_example(as715n_sine_motion_fsoe_native
     LIBRARIES tether_ethercat_master tether_cia_profiles tether_drives tether_fsoe tether_ethercat_common tether_hal tether_common tether_examples_common)
-
-# ---Synapticon SOMANET CST + FSoE Example ---
-# Puts a Synapticon SOMANET (AS715N) drive into Cyclic Sync Torque mode,
-# maps RxPDO 0x1702 / TxPDO 0x1B02, sends 0 torque, and runs the FSoE
-# safe-motion protocol with rich diagnostics.
-add_tether_example(synapticon_cst_fsoe
-    LIBRARIES tether_ethercat_master tether_cia_profiles tether_drives tether_fsoe tether_ethercat_common tether_hal tether_common tether_examples_common)
 endif()
 
 # ---PBLR81FGF Sine Motion Native Example ---
