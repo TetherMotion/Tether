@@ -78,6 +78,13 @@ add_tether_example(as715n_sine_motion_fsoe_native
 # safe-motion protocol with rich diagnostics.
 add_tether_example(synapticon_cst_fsoe
     LIBRARIES tether_ethercat_master tether_cia_profiles tether_drives tether_fsoe tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# ---Synapticon SOMANET FSoE-Only Example ---
+# Maps ONLY the FSoE safety PDOs (RxPDO 0x1700 / TxPDO 0x1B00) using the
+# multi-PDO-per-sync-manager API (Slave::configureMultiPDOs).  No CiA 402
+# process data PDOs are mapped — establishes FSoE safety communication only.
+add_tether_example(synapticon_fsoe_only
+    LIBRARIES tether_ethercat_master tether_cia_profiles tether_drives tether_fsoe tether_ethercat_common tether_hal tether_common tether_examples_common)
 endif()
 
 # ---PBLR81FGF Sine Motion Native Example ---
