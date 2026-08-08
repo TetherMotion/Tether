@@ -37,6 +37,7 @@ set(TETHER_MOTION_PLANNER_SOURCES
     ${TETHER_ROOT}/src/replanner/PathEvaluator.cpp
     ${TETHER_ROOT}/src/replanner/PathQualityGrader.cpp
     ${TETHER_ROOT}/src/replanner/PathRelativeFFT.cpp
+    ${TETHER_ROOT}/src/replanner/FftProcessor.cpp
     ${TETHER_ROOT}/src/replanner/SvgExporter.cpp
     ${TETHER_ROOT}/src/replanner/SvgCanvas.cpp
     ${TETHER_ROOT}/src/replanner/DependenceAnalyzer.cpp
