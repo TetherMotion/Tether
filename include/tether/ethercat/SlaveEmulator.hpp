@@ -353,11 +353,6 @@ public:
     bool processSIIRead(uint32_t word_addr, uint16_t* data);
     bool processSIIWrite(uint32_t word_addr, uint16_t data);
 
-    // CoE mailbox
-    bool hasMailboxData() const;
-    std::vector<uint8_t> getMailboxResponse();
-    void processMailboxRequest(const uint8_t* data, size_t len);
-
     // DC
     DCState& getDCState() { return dc_state_; }
     void advanceDCTime(uint64_t delta_ns);
@@ -391,12 +386,6 @@ private:
     // Object dictionary
     void initObjectDictionary();
     ODEntry* findODEntry(uint16_t index, uint8_t subindex);
-
-    // SDO processing
-    std::vector<uint8_t> processSDORequest(const uint8_t* data, size_t len);
-
-    // PDO mapping update
-    void updatePDOMapping();
 
     // Position/address
     uint16_t position_ = 0;
@@ -543,5 +532,5 @@ std::unique_ptr<SlaveEmulator> createSimpleSlave(
     uint16_t vendor_id, uint16_t product_code,
     uint16_t input_bytes, uint16_t output_bytes);
 
-}  // namespace emulator
+}  // namespace Emulator
 }  // namespace EtherCAT

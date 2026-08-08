@@ -1,1 +1,0 @@
-/home/uli/dev/Tether/include/tether/ethercat/TetherConfig.hpp

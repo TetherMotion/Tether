@@ -1039,5 +1039,5 @@ std::unique_ptr<SlaveEmulator> createSimpleSlave(
     return slave;
 }
 
-}  // namespace emulator
+}  // namespace Emulator
 }  // namespace EtherCAT

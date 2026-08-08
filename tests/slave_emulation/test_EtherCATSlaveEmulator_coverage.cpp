@@ -216,7 +216,7 @@ TEST_F(SlaveEmulatorCovTest, SIIWriteWord) {
     (void)ok;
 }
 
-// --- Mailbox --- (hasMailboxData/getMailboxResponse/processMailboxRequest not yet implemented in source)
+// --- Mailbox --- (hasMailboxData/getMailboxResponse/processMailboxRequest removed: unimplemented)
 
 // --- CiA402 Drive ---
 
