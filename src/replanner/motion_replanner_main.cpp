@@ -17,6 +17,10 @@
 #include "tether/motion_replanner/SystemIdentifier.hpp"
 #include "tether/motion_replanner/GCodeGenerator.hpp"
 #include "tether/motion_replanner/TestDataExporter.hpp"
+#include "tether/motion_replanner/PathEvaluator.hpp"
+#include "tether/motion_replanner/PathRelativeFFT.hpp"
+#include "tether/motion_replanner/KdeDerivativeAnalyzer.hpp"
+#include "tether/motion_replanner/SvgExporter.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -63,6 +67,13 @@ struct Options {
     // Flags
     bool verbose = false;
     bool help = false;
+    bool enableFFT = true;  // For evaluate command
+    bool enableKDE = true;  // For evaluate command
+    std::string kdeDerivative = "velocity";   // velocity/acceleration/jerk/curvature/feedrate/arclength/time
+    std::string kdeDeviation = "contour";     // contour/lag/combined/binormal/tracking/velocity/acceleration
+    std::string kdeKernel = "gaussian";       // gaussian/epanechnikov/uniform/triangular/quartic/cosine
+    std::string kdeBandwidth = "silverman";   // silverman/scott/isj/fixed/lscv/likelihoodcv
+    std::string kdeColormap = "viridis";      // viridis/inferno/plasma/magma/jet/hot/cool/grayscale/bluered
 };
 
 void printUsage(const char* progName) {
@@ -73,6 +84,7 @@ Usage: )" << progName << R"( <command> [options]
 
 Commands:
   analyze     Analyze trajectory from input file
+  evaluate    Evaluate desired vs actual path (quantitative, qualitative, FFT, SVG)
   test        Generate and run machine tests
   identify    System identification (delay, friction, PID)
   heatmap     Generate performance heatmaps
@@ -104,11 +116,28 @@ Heatmap Options:
   --workspace <x,y,z,X,Y,Z>  Workspace bounds (default: 0,0,0,300,300,100)
 
 Export Options:
-  --format <fmt>          Export format: csv, json (default: csv)
+  --format <fmt>          Export format: csv, json, svg, all (default: csv)
   --dialect <name>        G-Code dialect: linuxcnc, fanuc, grbl (default: linuxcnc)
+
+Evaluate Options:
+  --no-fft                Skip FFT/spectral analysis
+  --fft                   Enable FFT/spectral analysis (default: enabled)
+  --no-kde                Skip KDE derivative-vs-deviation analysis
+  --kde                   Enable KDE analysis (default: enabled)
+  --kde-derivative <ax>   KDE derivative axis: velocity, acceleration, jerk,
+                          curvature, feedrate, arclength, time (default: velocity)
+  --kde-deviation <ax>    KDE deviation axis: contour, lag, combined, binormal,
+                          tracking, velocity, acceleration (default: contour)
+  --kde-kernel <k>        KDE kernel: gaussian, epanechnikov, uniform, triangular,
+                          quartic, cosine (default: gaussian)
+  --kde-bandwidth <m>     Bandwidth method: silverman, scott, isj, fixed, lscv,
+                          likelihoodcv (default: silverman)
+  --kde-colormap <c>      Colormap: viridis, inferno, plasma, magma, jet, hot,
+                          cool, grayscale, bluered (default: viridis)
 
 Examples:
   )" << progName << R"( analyze -i trajectory.csv -o results/ --delay 0.002
+  )" << progName << R"( evaluate -i trajectory.csv -o eval_results/ --format all
   )" << progName << R"( test --test-type circle --radius 100 -o tests/
   )" << progName << R"( gcode --test-type sinusoid --dialect grbl -o gcode/
   )" << progName << R"( heatmap -i performance_data.csv -o heatmaps/
@@ -173,6 +202,24 @@ bool parseOptions(int argc, char** argv, Options& opts) {
             if (++i < argc) opts.exportFormat = argv[i];
         } else if (arg == "--dialect") {
             if (++i < argc) opts.gcodeDialect = argv[i];
+        } else if (arg == "--no-fft") {
+            opts.enableFFT = false;
+        } else if (arg == "--fft") {
+            opts.enableFFT = true;
+        } else if (arg == "--no-kde") {
+            opts.enableKDE = false;
+        } else if (arg == "--kde") {
+            opts.enableKDE = true;
+        } else if (arg == "--kde-derivative") {
+            if (++i < argc) opts.kdeDerivative = argv[i];
+        } else if (arg == "--kde-deviation") {
+            if (++i < argc) opts.kdeDeviation = argv[i];
+        } else if (arg == "--kde-kernel") {
+            if (++i < argc) opts.kdeKernel = argv[i];
+        } else if (arg == "--kde-bandwidth") {
+            if (++i < argc) opts.kdeBandwidth = argv[i];
+        } else if (arg == "--kde-colormap") {
+            if (++i < argc) opts.kdeColormap = argv[i];
         }
     }
     
@@ -204,8 +251,16 @@ bool loadTrajectoryCSV(const std::string& filename,
         
         if (std::sscanf(line.c_str(), "%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf",
                         &t, &dx, &dy, &dz, &dvx, &dvy, &dvz, &ax, &ay, &az, &avx, &avy, &avz) >= 7) {
-            GCodeExport::TrajectorySample des = {t, {dx, dy, dz}, {dvx, dvy, dvz}, {0, 0, 0}};
-            GCodeExport::TrajectorySample act = {t, {ax, ay, az}, {avx, avy, avz}, {0, 0, 0}};
+            GCodeExport::TrajectorySample des;
+            des.time = t;
+            des.position = {dx, dy, dz, 0, 0, 0, 0, 0, 0};
+            des.velocity = {dvx, dvy, dvz, 0, 0, 0, 0, 0, 0};
+            des.acceleration = {};
+            GCodeExport::TrajectorySample act;
+            act.time = t;
+            act.position = {ax, ay, az, 0, 0, 0, 0, 0, 0};
+            act.velocity = {avx, avy, avz, 0, 0, 0, 0, 0, 0};
+            act.acceleration = {};
             desired.push_back(des);
             actual.push_back(act);
         }
@@ -238,36 +293,26 @@ int cmdAnalyze(const Options& opts) {
     ReplannerConfig config;
     config.systemDelay = opts.systemDelay;
     config.cornerAngleThreshold = opts.cornerThreshold;
-    config.monitorMode = opts.monitorMode;
-    
-    MotionReplanner replanner(config);
-    
+
+    ::MotionReplanner::MotionReplanner replanner(config);
+
     // Set desired trajectory
     replanner.setDesiredTrajectory(desired);
-    
-    // Process actual samples
-    for (const auto& sample : actual) {
-        replanner.addActualSample(sample);
-    }
-    
-    replanner.processAccumulatedSamples();
-    
+
     // Get results
-    auto stats = replanner.getStatistics();
+    auto stats = replanner.getOverallStatistics();
     
     std::cout << "\n=== Error Statistics ===" << std::endl;
-    std::cout << "Sample count: " << stats.count << std::endl;
+    std::cout << "Sample count: " << stats.sampleCount << std::endl;
     std::cout << "Min error:    " << stats.minError << " mm" << std::endl;
     std::cout << "Max error:    " << stats.maxError << " mm" << std::endl;
     std::cout << "Mean error:   " << stats.meanError << " mm" << std::endl;
-    std::cout << "Geo. mean:    " << stats.geometricMeanError << " mm" << std::endl;
-    std::cout << "Std dev:      " << stats.stdDevError << " mm" << std::endl;
+    std::cout << "Geo. mean:    " << stats.geometricMean << " mm" << std::endl;
+    std::cout << "Std dev:      " << stats.stdDev << " mm" << std::endl;
     std::cout << "RMS error:    " << stats.rmsError << " mm" << std::endl;
     std::cout << "\nPercentiles:" << std::endl;
-    std::cout << "  50%: " << stats.percentile50 << " mm" << std::endl;
-    std::cout << "  90%: " << stats.percentile90 << " mm" << std::endl;
-    std::cout << "  95%: " << stats.percentile95 << " mm" << std::endl;
-    std::cout << "  99%: " << stats.percentile99 << " mm" << std::endl;
+    std::cout << "  95%: " << stats.p95Error << " mm" << std::endl;
+    std::cout << "  99%: " << stats.p99Error << " mm" << std::endl;
     
     if (stats.cornerCount > 0) {
         std::cout << "\nCorner Analysis:" << std::endl;
@@ -289,13 +334,14 @@ int cmdAnalyze(const Options& opts) {
     std::cout << "\nResults exported to: " << opts.outputDir << std::endl;
     
     // Show suggestions if any
-    auto suggestions = replanner.getSuggestions();
+    auto suggestions = replanner.getParameterSuggestions();
     if (!suggestions.empty()) {
         std::cout << "\n=== Parameter Suggestions ===" << std::endl;
         for (const auto& sug : suggestions) {
-            std::cout << "Segment " << sug.segmentId << ": " << sug.parameterName
-                      << " " << sug.currentValue << " -> " << sug.suggestedValue
-                      << " (" << sug.reason << ")" << std::endl;
+            std::cout << "Segment " << sug.segmentIndex << ": "
+                      << "feed " << sug.currentFeedRate << " -> " << sug.suggestedFeedRate
+                      << ", accel " << sug.currentAccel << " -> " << sug.suggestedAccel
+                      << std::endl;
         }
     }
     
@@ -350,26 +396,19 @@ int cmdTest(const Options& opts) {
         sequence.multiAxisTests.push_back(config);
     }
     
-    // Generate trajectories
-    auto trajectories = tester.generateTestTrajectories(sequence);
-    
-    std::cout << "Generated " << trajectories.size() << " test trajectories" << std::endl;
+    // Run tests
+    auto results = tester.runTestSequence(sequence);
+
+    std::cout << "Generated " << results.size() << " test results" << std::endl;
     
     // Export test data
     fs::create_directories(opts.outputDir);
     
     ExportConfig exportConfig;
-    TrajectoryExporter exporter(exportConfig);
-    
-    for (size_t i = 0; i < trajectories.size(); ++i) {
-        std::string filename = opts.outputDir + "/test_" + std::to_string(i) + "_trajectory.csv";
-        
-        // Export desired trajectory (actual will be empty until test is run)
-        std::vector<GCodeExport::TrajectorySample> empty;
-        exporter.exportTrajectory(filename, trajectories[i], empty);
-        
-        std::cout << "Exported: " << filename << std::endl;
-    }
+    BatchExporter batchExporter(opts.outputDir, exportConfig);
+    batchExporter.exportTestResults(results);
+    batchExporter.generateManifest("manifest.json");
+    std::cout << "Exported test results to: " << opts.outputDir << std::endl;
     
     return 0;
 }
@@ -479,27 +518,42 @@ int cmdHeatmap(const Options& opts) {
     config.maxBounds = opts.workspaceMax;
     
     HeatmapBuilder builder(config);
-    
-    // Add samples to builder
+
+    // Process samples
     for (size_t i = 0; i < std::min(desired.size(), actual.size()); ++i) {
-        builder.addSample(desired[i], actual[i]);
+        double trackingError = 0.0, contourError = 0.0;
+        // Compute simple errors
+        double dx = actual[i].position[0] - desired[i].position[0];
+        double dy = actual[i].position[1] - desired[i].position[1];
+        double dz = actual[i].position[2] - desired[i].position[2];
+        trackingError = std::sqrt(dx*dx + dy*dy + dz*dz);
+        contourError = trackingError; // simplified
+
+        double cmdFeed = std::sqrt(desired[i].velocity[0]*desired[i].velocity[0] +
+                                   desired[i].velocity[1]*desired[i].velocity[1] +
+                                   desired[i].velocity[2]*desired[i].velocity[2]);
+        double actFeed = std::sqrt(actual[i].velocity[0]*actual[i].velocity[0] +
+                                   actual[i].velocity[1]*actual[i].velocity[1] +
+                                   actual[i].velocity[2]*actual[i].velocity[2]);
+
+        builder.processSample(desired[i].position, desired[i].velocity,
+                              trackingError, contourError, cmdFeed, actFeed);
     }
-    
-    builder.finalize();
-    
+
     // Export heatmaps
     fs::create_directories(opts.outputDir);
-    
+
     ExportConfig exportConfig;
     exportConfig.format = (opts.exportFormat == "json") ? ExportFormat::JSONPretty : ExportFormat::CSV;
-    
+
     BatchExporter exporter(opts.outputDir, exportConfig);
     exporter.exportHeatmapData(builder);
     exporter.generateManifest("manifest.json");
-    
-    // Print summary
-    auto limits = builder.getSuggestedLimits();
-    std::cout << "\n=== Suggested Limits ===" << std::endl;
+
+    // Print summary from XY heatmap
+    auto& xyHeatmap = builder.getXYHeatmap();
+    auto limits = xyHeatmap.getSuggestedLimits(150.0, 150.0);
+    std::cout << "\n=== Suggested Limits (at center) ===" << std::endl;
     std::cout << "Max velocity:     " << limits.maxVelocity << " mm/s" << std::endl;
     std::cout << "Max acceleration: " << limits.maxAcceleration << " mm/s²" << std::endl;
     std::cout << "Confidence:       " << limits.confidence * 100 << "%" << std::endl;
@@ -583,6 +637,234 @@ int cmdGcode(const Options& opts) {
     return 0;
 }
 
+int cmdEvaluate(const Options& opts) {
+    if (opts.inputFile.empty()) {
+        std::cerr << "Error: Input file required for evaluate command" << std::endl;
+        return 1;
+    }
+
+    std::cout << "Evaluating trajectory: " << opts.inputFile << std::endl;
+
+    // Load data
+    std::vector<GCodeExport::TrajectorySample> desired, actual;
+    if (!loadTrajectoryCSV(opts.inputFile, desired, actual)) {
+        return 1;
+    }
+
+    std::cout << "Loaded " << desired.size() << " samples" << std::endl;
+
+    // Create output directory
+    fs::create_directories(opts.outputDir);
+
+    //--- Quantitative evaluation ---
+    tether::motion::replanner::EvaluatorConfig evalConfig;
+    evalConfig.useCertifiedContourError = true;
+    tether::motion::replanner::PathEvaluator evaluator(evalConfig);
+
+    std::cout << "Computing quantitative metrics..." << std::endl;
+    auto quant = evaluator.evaluateQuantitative(desired, actual);
+
+    //--- Spectral evaluation ---
+    tether::motion::replanner::SpectralEvaluation spectral;
+    if (opts.enableFFT) {
+        std::cout << "Computing path-relative FFT analysis..." << std::endl;
+        tether::motion::replanner::PathRelativeFFT fftEval;
+        spectral = fftEval.evaluate(desired, actual);
+    }
+
+    //--- Qualitative evaluation ---
+    std::cout << "Computing qualitative grades..." << std::endl;
+    auto qual = evaluator.evaluateQualitative(quant,
+        opts.enableFFT ? &spectral : nullptr);
+
+    //--- Print summary to stdout ---
+    std::cout << "\n=== Path Evaluation Summary ===" << std::endl;
+    std::cout << "Samples: " << quant.sampleCount << std::endl;
+    std::cout << "Path length: " << quant.pathLength << " mm" << std::endl;
+    std::cout << "Duration: " << quant.duration << " s" << std::endl;
+
+    std::cout << "\n--- Quantitative Metrics ---" << std::endl;
+    std::cout << "Contour error (max): " << quant.norms.linf_contour << " mm" << std::endl;
+    std::cout << "Contour error (RMS): " << quant.contourStats.rmsError << " mm" << std::endl;
+    std::cout << "Lag error (max): " << quant.following.maxFollowingError << " mm" << std::endl;
+    std::cout << "Hausdorff distance: " << quant.shape.hausdorff << " mm" << std::endl;
+    std::cout << "Frechet distance: " << quant.shape.frechet << " mm" << std::endl;
+    std::cout << "Path length ratio: " << quant.shape.pathLengthRatio << std::endl;
+    std::cout << "Surface Ra: " << quant.surface.ra << " µm" << std::endl;
+    std::cout << "Surface Rq: " << quant.surface.rq << " µm" << std::endl;
+    std::cout << "Max jerk: " << quant.kinematic.jerkActualMax << " mm/s³" << std::endl;
+    std::cout << "Smoothness index: " << quant.kinematic.smoothnessIndex << std::endl;
+
+    if (opts.enableFFT) {
+        std::cout << "\n--- Spectral Analysis ---" << std::endl;
+        std::cout << "Oscillation detected: " << (spectral.oscillationDetected ? "YES" : "NO") << std::endl;
+        std::cout << "Oscillation severity: " << spectral.oscillationSeverity << std::endl;
+        std::cout << "Spatial contour dominant freq: " << spectral.spatialContour.dominantFrequency << " cyc/mm" << std::endl;
+        std::cout << "Temporal contour dominant freq: " << spectral.temporalContour.dominantFrequency << " Hz" << std::endl;
+        if (spectral.oscillationDetected) {
+            std::cout << "Description: " << spectral.oscillationDescription << std::endl;
+        }
+    }
+
+    std::cout << "\n--- Qualitative Grades ---" << std::endl;
+    std::cout << "Path fidelity:      " << tether::motion::replanner::gradeToString(qual.pathFidelity.grade)
+              << " (" << qual.pathFidelity.description << ")" << std::endl;
+    std::cout << "Surface finish:     " << tether::motion::replanner::gradeToString(qual.surfaceFinish.grade)
+              << " (" << qual.surfaceFinish.description << ")" << std::endl;
+    std::cout << "Timing fidelity:    " << tether::motion::replanner::gradeToString(qual.timingFidelity.grade)
+              << " (" << qual.timingFidelity.description << ")" << std::endl;
+    std::cout << "Smoothness:         " << tether::motion::replanner::gradeToString(qual.smoothness.grade)
+              << " (" << qual.smoothness.description << ")" << std::endl;
+    if (opts.enableFFT) {
+        std::cout << "Oscillation:        " << tether::motion::replanner::gradeToString(qual.oscillationSeverity.grade)
+                  << " (" << qual.oscillationSeverity.description << ")" << std::endl;
+    }
+    std::cout << "Overall:            " << tether::motion::replanner::gradeToString(qual.overall.grade)
+              << " (" << qual.overall.description << ")" << std::endl;
+
+    if (!qual.diagnosticMessages.empty()) {
+        std::cout << "\n--- Diagnostic Messages ---" << std::endl;
+        for (const auto& msg : qual.diagnosticMessages) {
+            std::cout << "  - " << msg << std::endl;
+        }
+    }
+
+    //--- KDE derivative-vs-deviation analysis ---
+    tether::motion::replanner::KdeEvaluation kde;
+    if (opts.enableKDE) {
+        std::cout << "\n--- KDE Derivative-vs-Deviation Analysis ---" << std::endl;
+
+        // Parse derivative axis
+        auto parseDerivative = [](const std::string& s) {
+            if (s == "velocity") return tether::motion::replanner::DerivativeAxis::Velocity;
+            if (s == "acceleration") return tether::motion::replanner::DerivativeAxis::Acceleration;
+            if (s == "jerk") return tether::motion::replanner::DerivativeAxis::Jerk;
+            if (s == "curvature") return tether::motion::replanner::DerivativeAxis::Curvature;
+            if (s == "feedrate") return tether::motion::replanner::DerivativeAxis::FeedRate;
+            if (s == "arclength") return tether::motion::replanner::DerivativeAxis::ArcLength;
+            if (s == "time") return tether::motion::replanner::DerivativeAxis::Time;
+            return tether::motion::replanner::DerivativeAxis::Velocity;
+        };
+        auto parseDeviation = [](const std::string& s) {
+            if (s == "contour") return tether::motion::replanner::DeviationAxis::ContourError;
+            if (s == "lag") return tether::motion::replanner::DeviationAxis::LagError;
+            if (s == "combined") return tether::motion::replanner::DeviationAxis::CombinedError;
+            if (s == "binormal") return tether::motion::replanner::DeviationAxis::BinormalError;
+            if (s == "tracking") return tether::motion::replanner::DeviationAxis::TrackingError;
+            if (s == "velocity") return tether::motion::replanner::DeviationAxis::VelocityError;
+            if (s == "acceleration") return tether::motion::replanner::DeviationAxis::AccelerationError;
+            return tether::motion::replanner::DeviationAxis::ContourError;
+        };
+        auto parseKernel = [](const std::string& s) {
+            if (s == "gaussian") return tether::motion::replanner::KernelType::Gaussian;
+            if (s == "epanechnikov") return tether::motion::replanner::KernelType::Epanechnikov;
+            if (s == "uniform") return tether::motion::replanner::KernelType::Uniform;
+            if (s == "triangular") return tether::motion::replanner::KernelType::Triangular;
+            if (s == "quartic") return tether::motion::replanner::KernelType::Quartic;
+            if (s == "cosine") return tether::motion::replanner::KernelType::Cosine;
+            return tether::motion::replanner::KernelType::Gaussian;
+        };
+        auto parseBandwidth = [](const std::string& s) {
+            if (s == "silverman") return tether::motion::replanner::BandwidthMethod::Silverman;
+            if (s == "scott") return tether::motion::replanner::BandwidthMethod::Scott;
+            if (s == "isj") return tether::motion::replanner::BandwidthMethod::ISJ;
+            if (s == "fixed") return tether::motion::replanner::BandwidthMethod::Fixed;
+            if (s == "lscv") return tether::motion::replanner::BandwidthMethod::LeastSquaresCV;
+            if (s == "likelihoodcv") return tether::motion::replanner::BandwidthMethod::LikelihoodCV;
+            return tether::motion::replanner::BandwidthMethod::Silverman;
+        };
+        auto parseColormap = [](const std::string& s) {
+            if (s == "viridis") return tether::motion::replanner::KdeColormap::Viridis;
+            if (s == "inferno") return tether::motion::replanner::KdeColormap::Inferno;
+            if (s == "plasma") return tether::motion::replanner::KdeColormap::Plasma;
+            if (s == "magma") return tether::motion::replanner::KdeColormap::Magma;
+            if (s == "jet") return tether::motion::replanner::KdeColormap::Jet;
+            if (s == "hot") return tether::motion::replanner::KdeColormap::Hot;
+            if (s == "cool") return tether::motion::replanner::KdeColormap::Cool;
+            if (s == "grayscale") return tether::motion::replanner::KdeColormap::Grayscale;
+            if (s == "bluered") return tether::motion::replanner::KdeColormap::BlueRed;
+            return tether::motion::replanner::KdeColormap::Viridis;
+        };
+
+        tether::motion::replanner::KdeConfig kdeConfig;
+        kdeConfig.derivativeAxis = parseDerivative(opts.kdeDerivative);
+        kdeConfig.deviationAxis = parseDeviation(opts.kdeDeviation);
+        kdeConfig.kernel = parseKernel(opts.kdeKernel);
+        kdeConfig.bandwidthMethod = parseBandwidth(opts.kdeBandwidth);
+        kdeConfig.useCertifiedContourError = true;
+
+        std::cout << "Computing KDE: " << opts.kdeDerivative << " vs " << opts.kdeDeviation
+                  << " (" << opts.kdeKernel << " kernel, " << opts.kdeBandwidth << " bandwidth)..." << std::endl;
+
+        tether::motion::replanner::KdeDerivativeAnalyzer kdeAnalyzer(kdeConfig);
+        kde = kdeAnalyzer.evaluate(desired, actual);
+
+        if (kde.hasSufficientData) {
+            std::cout << "Samples: " << kde.derivatives.size() << std::endl;
+            std::cout << "Bandwidth: h_x=" << kde.grid.bandwidthX
+                      << ", h_y=" << kde.grid.bandwidthY << std::endl;
+            std::cout << "Pearson r: " << kde.pearsonCorrelation << std::endl;
+            std::cout << "Spearman rho: " << kde.spearmanCorrelation << std::endl;
+            std::cout << "Kendall tau: " << kde.kendallTau << std::endl;
+            std::cout << "Mutual information: " << kde.mutualInformation << " bits" << std::endl;
+            std::cout << "Correlation ratio (eta^2): " << kde.correlationRatio << std::endl;
+            std::cout << "Distance correlation: " << kde.distanceCorrelation << std::endl;
+            std::cout << "Normalized MI: " << kde.normalizedMutualInfo << std::endl;
+            std::cout << "Mode: (" << kde.modeDerivative << ", " << kde.modeDeviation << ")" << std::endl;
+            std::cout << "VaR95: " << kde.var95 << " mm" << std::endl;
+            std::cout << "CVaR95: " << kde.conditionalVar95 << " mm" << std::endl;
+
+            if (!kde.thresholds.empty()) {
+                std::cout << "\nDeviation thresholds:" << std::endl;
+                for (const auto& t : kde.thresholds) {
+                    if (t.found) {
+                        std::cout << "  " << t.description << std::endl;
+                    }
+                }
+            }
+
+            std::cout << "\n" << kde.summary << std::endl;
+        } else {
+            std::cout << "Insufficient data for KDE analysis (need >= 30 samples, got "
+                      << kde.derivatives.size() << ")" << std::endl;
+        }
+    }
+
+    //--- Export all data ---
+    std::cout << "\nExporting results to: " << opts.outputDir << std::endl;
+    ExportConfig exportConfig;
+    exportConfig.format = (opts.exportFormat == "json") ? ExportFormat::JSONPretty : ExportFormat::CSV;
+
+    BatchExporter exporter(opts.outputDir, exportConfig);
+    exporter.exportEvaluationData(desired, actual, quant, spectral, qual);
+
+    // Export KDE data
+    if (opts.enableKDE && kde.hasSufficientData) {
+        SvgConfig svgConfig;
+        // Parse colormap
+        auto parseColormap = [](const std::string& s) {
+            if (s == "viridis") return tether::motion::replanner::KdeColormap::Viridis;
+            if (s == "inferno") return tether::motion::replanner::KdeColormap::Inferno;
+            if (s == "plasma") return tether::motion::replanner::KdeColormap::Plasma;
+            if (s == "magma") return tether::motion::replanner::KdeColormap::Magma;
+            if (s == "jet") return tether::motion::replanner::KdeColormap::Jet;
+            if (s == "hot") return tether::motion::replanner::KdeColormap::Hot;
+            if (s == "cool") return tether::motion::replanner::KdeColormap::Cool;
+            if (s == "grayscale") return tether::motion::replanner::KdeColormap::Grayscale;
+            if (s == "bluered") return tether::motion::replanner::KdeColormap::BlueRed;
+            return tether::motion::replanner::KdeColormap::Viridis;
+        };
+        svgConfig.kdeColormap = parseColormap(opts.kdeColormap);
+        exporter.exportKdeData(kde, svgConfig);
+    }
+
+    exporter.generateManifest("manifest.json");
+
+    std::cout << "Done. " << exporter.generatedFiles().size() << " files generated." << std::endl;
+
+    return 0;
+}
+
 int cmdReport(const Options& opts) {
     std::cout << "Generating comprehensive report" << std::endl;
     
@@ -636,6 +918,8 @@ int main(int argc, char** argv) {
     try {
         if (opts.command == "analyze") {
             return cmdAnalyze(opts);
+        } else if (opts.command == "evaluate") {
+            return cmdEvaluate(opts);
         } else if (opts.command == "test") {
             return cmdTest(opts);
         } else if (opts.command == "identify") {

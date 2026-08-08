@@ -34,6 +34,10 @@ set(TETHER_MOTION_PLANNER_SOURCES
     ${TETHER_ROOT}/src/replanner/TestDataExporterHeatmap.cpp
     ${TETHER_ROOT}/src/replanner/TestDataExporterTestResult.cpp
     ${TETHER_ROOT}/src/replanner/TestDataExporterBatch.cpp
+    ${TETHER_ROOT}/src/replanner/PathEvaluator.cpp
+    ${TETHER_ROOT}/src/replanner/PathRelativeFFT.cpp
+    ${TETHER_ROOT}/src/replanner/SvgExporter.cpp
+    ${TETHER_ROOT}/src/replanner/KdeDerivativeAnalyzer.cpp
 )
 
 # Filter to only existing files
@@ -101,3 +105,12 @@ endif()
 
 set(TETHER_MOTION_PLANNER_LIBRARY tether_motion_planner)
 set(TETHER_MOTION_PLANNER_TARGETS ${_variants})
+
+# CLI tool for motion replanner analysis
+if(TARGET tether_motion_planner)
+    add_executable(motion_replanner_cli ${TETHER_ROOT}/src/replanner/motion_replanner_main.cpp)
+    target_link_libraries(motion_replanner_cli PRIVATE tether_motion_planner)
+    target_compile_definitions(motion_replanner_cli PRIVATE
+        GCODE_STANDALONE_CAPI=1
+    )
+endif()
