@@ -43,6 +43,12 @@ public:
     MOCK_METHOD(bool, waitForResponseIdx,
                 (uint8_t idx, unsigned int timeout_ms, RxDatagram& out),
                 (override));
+    MOCK_METHOD(size_t, preRegisterResponseWaiter,
+                (uint8_t idx, uint8_t* buffer, size_t buffer_size),
+                (override));
+    MOCK_METHOD(bool, waitForPreRegistered,
+                (size_t slot, unsigned int timeout_ms, RxDatagram& out),
+                (override));
     MOCK_METHOD(uint8_t, allocIdx, (), (override));
     MOCK_METHOD(uint16_t, adpForSlaveIndex, (uint16_t slave_index), (override));
 };
@@ -161,12 +167,16 @@ TEST_F(PDOModesTest, CallbackFiresOnRxReceived) {
     EXPECT_CALL(transport, sendMultiDatagram(_, _))
         .WillRepeatedly(Return(1));
 
+    // Pre-registration: return valid slot handles
+    EXPECT_CALL(transport, preRegisterResponseWaiter(_, _, _))
+        .WillRepeatedly([](uint8_t, uint8_t*, size_t) -> size_t { return 0; });
+
     RxDatagram resp{};
     resp.wkc = 1;
     resp.datalen = sizeof(uint32_t);
     uint32_t resp_data = 0xCAFEBABE;
     std::memcpy(resp.data, &resp_data, sizeof(resp_data));
-    EXPECT_CALL(transport, waitForResponseIdx(_, _, _))
+    EXPECT_CALL(transport, waitForPreRegistered(_, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(resp), Return(true)));
 
     mgr.sendAll();
@@ -368,12 +378,16 @@ TEST_F(PDOModesTest, QueueModeTryDequeueRx) {
     EXPECT_CALL(transport, sendMultiDatagram(_, _))
         .WillRepeatedly(Return(1));
 
+    // Pre-registration: return valid slot handles
+    EXPECT_CALL(transport, preRegisterResponseWaiter(_, _, _))
+        .WillRepeatedly([](uint8_t, uint8_t*, size_t) -> size_t { return 0; });
+
     RxDatagram resp{};
     resp.wkc = 1;
     resp.datalen = sizeof(uint32_t);
     uint32_t resp_data = 0xDEAD1234;
     std::memcpy(resp.data, &resp_data, sizeof(resp_data));
-    EXPECT_CALL(transport, waitForResponseIdx(_, _, _))
+    EXPECT_CALL(transport, waitForPreRegistered(_, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(resp), Return(true)));
 
     mgr.queueCycle();

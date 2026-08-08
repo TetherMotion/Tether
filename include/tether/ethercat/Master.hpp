@@ -846,6 +846,13 @@ public:
     Stats getStats() const;
 #endif
 
+    // ---- Pre-registration API (used by MasterPDOTransport) -----------------
+    // Pre-register a response waiter slot before sending to avoid the
+    // send-then-register race when multiple datagrams share one frame.
+    size_t    preRegisterResponseWaiter(uint8_t idx, uint8_t* buffer,
+                                        size_t buffer_size);
+    WaitResult waitForPreRegistered(size_t slot, uint32_t timeout_ms);
+
 private:
     // ---- Internal helpers --------------------------------------------------
     bool setPreopAndConfirm(uint16_t slave_index);
@@ -876,10 +883,6 @@ private:
         return iface_.send ? iface_.send(frame, len) : false;
     }
 #endif
-
-    size_t    preRegisterResponseWaiter(uint8_t idx, uint8_t* buffer,
-                                        size_t buffer_size);
-    WaitResult waitForPreRegistered(size_t slot, uint32_t timeout_ms);
 
     // ---- Data members ------------------------------------------------------
 

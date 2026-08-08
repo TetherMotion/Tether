@@ -14,6 +14,7 @@
 #endif
 
 #include <cstring>
+#include <cstdlib>
 #include <cinttypes>
 
 namespace EtherCAT {
@@ -139,12 +140,12 @@ bool dc_read_slave_state(uint16_t slave_index, SlaveDCState& state) {
     }
 
     // Read Cyclic Unit Control (0x0980, 1 byte)
-    if (Raw::ec_aprd(eth, mac, adp, toUInt16(DCRegisters::DCCuc), &state.cyclic_unit_control, 1, timeout)) {
+    if (Raw::ec_aprd(eth, mac, adp, toUInt16(DCRegisters::DCCuc), &state.cyclic_unit_control, 1, timeout_ms)) {
         // Success
     }
 
     // Read Sync Activation (0x0981, 1 byte)
-    if (Raw::ec_aprd(eth, mac, adp, toUInt16(DCRegisters::DCSyncAct), &state.sync_activation, 1, timeout)) {
+    if (Raw::ec_aprd(eth, mac, adp, toUInt16(DCRegisters::DCSyncAct), &state.sync_activation, 1, timeout_ms)) {
         state.dc_active = (state.sync_activation & 0x01) != 0;
         state.sync0_active = (state.sync_activation & 0x02) != 0;
         state.sync1_active = (state.sync_activation & 0x04) != 0;
@@ -152,7 +153,7 @@ bool dc_read_slave_state(uint16_t slave_index, SlaveDCState& state) {
 
     // Read SYNC0 Start Time (0x0990, 8 bytes)
     uint8_t sync0_start[8];
-    if (Raw::ec_aprd(eth, mac, adp, toUInt16(DCRegisters::DCStart0), sync0_start, 8, timeout)) {
+    if (Raw::ec_aprd(eth, mac, adp, toUInt16(DCRegisters::DCStart0), sync0_start, 8, timeout_ms)) {
         state.sync0_start_time = 0;
         for (int i = 7; i >= 0; i--) {
             state.sync0_start_time = (state.sync0_start_time << 8) | sync0_start[i];
@@ -161,13 +162,13 @@ bool dc_read_slave_state(uint16_t slave_index, SlaveDCState& state) {
 
     // Read SYNC0 Cycle Time (0x09A0, 4 bytes)
     uint32_t cycle0_le = 0;
-    if (Raw::ec_aprd(eth, mac, adp, toUInt16(DCRegisters::DCCycle0), &cycle0_le, 4, timeout)) {
+    if (Raw::ec_aprd(eth, mac, adp, toUInt16(DCRegisters::DCCycle0), &cycle0_le, 4, timeout_ms)) {
         state.sync0_cycle_time = Raw::le32_to_host(cycle0_le);
     }
 
     // Read SYNC1 Cycle Time (0x09A4, 4 bytes)
     uint32_t cycle1_le = 0;
-    if (Raw::ec_aprd(eth, mac, adp, toUInt16(DCRegisters::DCCycle1), &cycle1_le, 4, timeout)) {
+    if (Raw::ec_aprd(eth, mac, adp, toUInt16(DCRegisters::DCCycle1), &cycle1_le, 4, timeout_ms)) {
         state.sync1_cycle_time = Raw::le32_to_host(cycle1_le);
     }
 
@@ -272,15 +273,18 @@ bool dc_run_consistency_checks(uint16_t slave_index, DCConsistencyReport& report
     if (delay_valid) report.passed_count++; else report.failed_count++;
     idx++;
 
-    // Check 7: System Time Difference Small (< 1ms)
-    bool diff_valid = state.system_time_diff < 1000000 ||
-                       static_cast<int32_t>(state.system_time_diff) > -1000000;
+    // Check 7: System Time Difference Small (< 1ms, signed)
+    // DCSysDiff (0x092C) is a signed 32-bit value; interpret as signed
+    // and check that |diff| < 1ms.
+    int32_t signed_diff = static_cast<int32_t>(state.system_time_diff);
+    int64_t abs_diff = std::abs(static_cast<int64_t>(signed_diff));
+    bool diff_valid = abs_diff < 1000000;
     report.checks[idx] = {
         diff_valid,
         "System Time Diff",
         diff_valid ? "OK" : "Large time difference detected!",
         0,
-        static_cast<int64_t>(static_cast<int32_t>(state.system_time_diff))
+        static_cast<int64_t>(signed_diff)
     };
     if (diff_valid) report.passed_count++; else report.failed_count++;
     idx++;

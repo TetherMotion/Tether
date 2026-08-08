@@ -58,6 +58,11 @@ struct DCState {
         bool triggered = false;
 
         if (isSync0Enabled() && sync0CycleTime > 0) {
+            if (lastSync0Time == 0) {
+                // First trigger: initialize to current time to avoid
+                // repeated triggers catching up from epoch 0.
+                lastSync0Time = systemTime;
+            }
             if ((systemTime - lastSync0Time) >= sync0CycleTime) {
                 lastSync0Time += sync0CycleTime;
                 if (callback) callback(0, systemTime);
@@ -66,6 +71,9 @@ struct DCState {
         }
 
         if (isSync1Enabled() && sync1CycleTime > 0) {
+            if (lastSync1Time == 0) {
+                lastSync1Time = systemTime;
+            }
             if ((systemTime - lastSync1Time) >= sync1CycleTime) {
                 lastSync1Time += sync1CycleTime;
                 if (callback) callback(1, systemTime);

@@ -306,6 +306,26 @@ public:
     virtual bool waitForResponseIdx(uint8_t idx, unsigned int timeout_ms,
                                     RxDatagram& out) = 0;
 
+    /// Pre-register a response waiter slot for @p idx BEFORE sending the frame.
+    /// This avoids the send-then-register race when multiple datagrams share
+    /// one frame.  Returns a slot handle; a value of kPreRegInvalid means
+    /// the transport does not support pre-registration.
+    virtual size_t preRegisterResponseWaiter(uint8_t idx,
+                                             uint8_t* buffer, size_t buffer_size) {
+        (void)idx; (void)buffer; (void)buffer_size;
+        return static_cast<size_t>(-1);
+    }
+
+    /// Wait for a previously pre-registered response.  Fills @p out on success.
+    virtual bool waitForPreRegistered(size_t slot, unsigned int timeout_ms,
+                                      RxDatagram& out) {
+        (void)slot; (void)timeout_ms; (void)out;
+        return false;
+    }
+
+    /// Sentinel returned by preRegisterResponseWaiter when unsupported.
+    static constexpr size_t kPreRegInvalid = static_cast<size_t>(-1);
+
     virtual uint8_t  allocIdx() = 0;
     virtual uint16_t adpForSlaveIndex(uint16_t slave_index) = 0;
 };
@@ -515,6 +535,11 @@ private:
         bool lrw_mode = false;  // true if last sendAll() used LRW (receiveAll is no-op)
         std::vector<uint8_t> rx_confirmed_idxs;
         std::vector<size_t>  rx_confirmed_entry_idxs;
+        // Pre-registered slot handles and response buffers for race-free
+        // multi-datagram exchanges.  Populated by sendAll() before the send,
+        // consumed by receiveAll().
+        std::vector<size_t>  rx_confirmed_slots;
+        std::vector<RxDatagram> rx_confirmed_responses;
     };
     SplitState split_state_;
 

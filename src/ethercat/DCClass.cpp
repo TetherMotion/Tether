@@ -410,6 +410,11 @@ bool EtherCATDC::updateSyncStartTime() {
                          * config_.sync0_cycle_time_ns;
         }
 
+        // Apply SYNC0 shift (offset from cycle boundary)
+        if (config_.sync0_shift_ns > 0) {
+            start_time += static_cast<uint64_t>(config_.sync0_shift_ns);
+        }
+
         uint8_t start_bytes[8];
         uint64_t st = start_time;
         for (int j = 0; j < 8; j++) {
@@ -435,15 +440,25 @@ bool EtherCATDC::configureSyncSignals(uint16_t slave_index) {
         return false;
     }
 
-    // Write SYNC0 cycle time
+    // Build sync activation register value from config flags
+    uint8_t sync_act = DC_SYNCACT_ENA | DC_SYNCACT_AUTO_ACT;
     if (config_.enable_sync0 && config_.sync0_cycle_time_ns > 0) {
+        sync_act |= DC_SYNCACT_SYNC0_ENA;
+        // Write SYNC0 cycle time
         uint32_t cycle0_le = host_to_le32(config_.sync0_cycle_time_ns);
         transport_.writeRegister(slave_index, toUInt16(DCRegisters::DCCycle0),
                                   &cycle0_le, sizeof(cycle0_le), 200);
     }
 
-    // Activate SYNC with Auto-Activation bit set.
-    uint8_t sync_act = DC_SYNCACT_ENA | DC_SYNCACT_SYNC0_ENA | DC_SYNCACT_AUTO_ACT;
+    if (config_.enable_sync1 && config_.sync1_cycle_time_ns > 0) {
+        sync_act |= DC_SYNCACT_SYNC1_ENA;
+        // Write SYNC1 cycle time
+        uint32_t cycle1_le = host_to_le32(config_.sync1_cycle_time_ns);
+        transport_.writeRegister(slave_index, toUInt16(DCRegisters::DCCycle1),
+                                  &cycle1_le, sizeof(cycle1_le), 200);
+    }
+
+    // Activate SYNC with the configured signals and Auto-Activation bit set.
     transport_.writeRegister(slave_index, toUInt16(DCRegisters::DCSyncAct),
                               &sync_act, sizeof(sync_act), 200);
 
@@ -452,7 +467,7 @@ bool EtherCATDC::configureSyncSignals(uint16_t slave_index) {
 
     // Set the SYNC0 start time AFTER activating the sync unit.
     updateSyncStartTime();
-    
+
     return true;
 }
 

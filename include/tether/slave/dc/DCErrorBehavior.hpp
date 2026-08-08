@@ -454,6 +454,15 @@ private:
     void reportError(uint16_t errorCode, int64_t value = 0);
     void addJitterSample(uint32_t jitterNs);
     uint32_t calculateJitter() const;
+
+    // Internal unlocked variants (caller must hold mutex_)
+    bool checkClockDriftUnlocked();
+    bool checkClockJumpUnlocked(int64_t deltaTimeNs);
+    bool checkSyncSignalsUnlocked(uint64_t currentTimeNs);
+    bool checkJitterUnlocked();
+    bool checkPacketOrderUnlocked(uint32_t sequenceNum);
+    bool hasPartialConfigurationUnlocked() const;
+    bool isConfigurationCompleteUnlocked() const;
     
     DCErrorConfig config_;
     DCState state_;
