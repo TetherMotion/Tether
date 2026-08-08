@@ -41,6 +41,7 @@
 
 #include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/DebugGate.hpp"
+#include "tether/ethercat/EtherCATTransport.hpp"
 #include "tether/ethercat/SlaveIdentity.hpp"
 #include "tether/ethercat/TetherConfig.hpp"
 #include "tether/ethercat/Types.hpp"
@@ -178,13 +179,8 @@ public:
         /// @note This struct only exists when TETHER_ENABLE_UDP_ENCAPSULATION is
         ///       enabled at compile time.  When disabled, all UDP encapsulation
         ///       code is compiled out for zero overhead.
-        struct UdpEncapsulation {
-            bool     enabled          = false;          ///< Master switch (default: off)
-            uint32_t source_ip        = 0;              ///< Source IPv4 (host byte order), 0 = 0.0.0.0
-            uint32_t destination_ip   = 0xFFFFFFFF;     ///< Destination IPv4 (host byte order), default broadcast
-            uint16_t source_port      = 0x88A4;         ///< UDP source port (default 34980)
-            uint16_t destination_port = 0x88A4;         ///< UDP destination port (default 34980)
-        } udp_encapsulation;
+        using UdpEncapsulation = EtherCAT::UdpEncapsulationConfig;
+        UdpEncapsulation udp_encapsulation;
 #endif
     };
 
@@ -878,9 +874,15 @@ private:
     /// @return max EtherCAT payload bytes per frame, accounting for UDP overhead.
     size_t maxEtherCATPayloadPerFrame() const;
 #else
-    /// Without UDP encapsulation, sendWithEncapsulation is a trivial passthrough.
+    /// Without UDP encapsulation, sendWithEncapsulation delegates to transport_.
     bool sendWithEncapsulation(const uint8_t* frame, size_t len) {
-        return iface_.send ? iface_.send(frame, len) : false;
+        if (!transport_) return iface_.send ? iface_.send(frame, len) : false;
+        return transport_->send(frame, len);
+    }
+    /// @return max EtherCAT payload bytes per frame.
+    size_t maxEtherCATPayloadPerFrame() const {
+        if (!transport_) return 1498;
+        return transport_->maxEtherCATPayloadPerFrame();
     }
 #endif
 
@@ -891,6 +893,9 @@ private:
     // Network
     NetworkInterface iface_{};
     uint8_t src_mac_[6] = {};
+
+    // Frame transport (UDP encapsulation + raw sending)
+    std::unique_ptr<EtherCATTransport> transport_;
 
     // Queues
     std::unique_ptr<Tether::Platform::MessageQueue<RxDatagram>> rx_queue_;

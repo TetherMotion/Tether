@@ -449,6 +449,14 @@ void Master::start(const NetworkInterface& iface, const uint8_t src_mac[6])
 {
     iface_ = iface;
     std::memcpy(src_mac_, src_mac, 6);
+
+    // Initialize frame transport (UDP encapsulation + raw sending)
+#if TETHER_ENABLE_UDP_ENCAPSULATION
+    transport_ = std::make_unique<EtherCATTransport>(&iface_, &config_.udp_encapsulation);
+#else
+    transport_ = std::make_unique<EtherCATTransport>(&iface_);
+#endif
+
     ensureRxQueues();
 
     // Initialize per-slave CoEManagers
