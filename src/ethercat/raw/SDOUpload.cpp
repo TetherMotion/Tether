@@ -11,6 +11,8 @@
 #include <chrono>
 #include <thread>
 #include <cinttypes>
+#include <vector>
+#include <algorithm>
 
 namespace EtherCAT {
 namespace Raw {
@@ -47,16 +49,19 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
     const bool complete_access = (sub & 0x80u) != 0;
     sub = static_cast<uint8_t>(sub & 0x7Fu);
 
-    uint8_t mbxbuf[kRawSDOMbxBufferSize] = {0};
-    if (mbxWriteLen > sizeof(mbxbuf) || mbxReadLen > sizeof(mbxbuf)) {
+    const size_t buf_size = std::max(static_cast<size_t>(mbxWriteLen),
+                                      static_cast<size_t>(mbxReadLen));
+    if (buf_size > kRawSDOMbxBufferSize) {
         TETHER_LOGE(TAG,
-            "Tether internal SDO mailbox buffer too small for slave mailbox size "
-            "(wr=%u rd=%u, Tether max=%zu bytes). This is a Tether limit, not a slave limit. "
-            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= %u.",
-            mbxWriteLen, mbxReadLen, sizeof(mbxbuf),
-            (mbxWriteLen > mbxReadLen) ? mbxWriteLen : mbxReadLen);
+            "Slave mailbox size exceeds Tether safety ceiling "
+            "(wr=%u rd=%u, needed=%zu, ceiling=%u bytes). "
+            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= %zu.",
+            mbxWriteLen, mbxReadLen, buf_size,
+            static_cast<unsigned>(kRawSDOMbxBufferSize), buf_size);
         return false;
     }
+    std::vector<uint8_t> mbxbuf_storage(buf_size, 0);
+    uint8_t* mbxbuf = mbxbuf_storage.data();
 
     uint16_t coe_number = static_cast<uint16_t>(master.allocIdx());
 
@@ -448,7 +453,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
 
             const uint8_t seg_req_cmd = static_cast<uint8_t>(EC_SDO_SEG_UP_REQ | (toggle ? 0x10u : 0x00u));
 
-            std::memset(mbxbuf, 0, sizeof(mbxbuf));
+            std::memset(mbxbuf, 0, buf_size);
             std::memcpy(mbxbuf, &seg_mbx, sizeof(seg_mbx));
             std::memcpy(mbxbuf + sizeof(seg_mbx), &seg_coe, sizeof(seg_coe));
             mbxbuf[sizeof(seg_mbx) + sizeof(seg_coe) + 0] = seg_req_cmd;
