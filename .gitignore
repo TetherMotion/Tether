@@ -33,3 +33,7 @@ lib/
 tests/test_output
 Testing/
 build-tsan/
+
+# Build files
+.ninja*
+build.ninja
