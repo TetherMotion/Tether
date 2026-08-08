@@ -198,6 +198,7 @@ option(TETHER_DRIVE_DYNADRIVE        "Build DynaDrive (ANYdrive) helper"        
 option(TETHER_DRIVE_NEXCOBOT_ESC211  "Build Nexcobot ESC211 helper"             ON)
 option(TETHER_DRIVE_RP20             "Build Kinco RP20 I/O module helper"       ON)
 option(TETHER_DRIVE_PBLR81FGF        "Build PBLR81FGF drive helper"             ON)
+option(TETHER_DRIVE_SYNAPTICON       "Build Synapticon SOMANET drive helper"    ON)
 option(TETHER_BUILD_FSOE "Build Fail-Safe over EtherCAT (FSoE)" ON)
 option(TETHER_BUILD_ETHERCAT_SLAVE "Build EtherCAT slave emulation" ON)
 option(TETHER_BUILD_SIMULATION "Build simulation systems" ON)

@@ -155,6 +155,14 @@ menu "Tether Library Configuration"
             help
                 Build header-only helper for the PBLR81FGF drive
                 (PDO definitions).
+
+        config TETHER_DRIVE_SYNAPTICON
+            bool "Synapticon SOMANET drive helper"
+            default y
+            help
+                Build header-only helper for the Synapticon SOMANET
+                CiA 402 drive (PDO definitions, manufacturer object
+                dictionary 0x2000-0x2705, safety objects 0x26xx).
     endmenu
 
     config TETHER_ENABLE_KINEMATICS
