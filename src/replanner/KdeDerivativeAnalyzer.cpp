@@ -5,6 +5,7 @@
 
 #include "tether/motion_replanner/KdeDerivativeAnalyzer.hpp"
 #include "tether/motion_replanner/DependenceAnalyzer.hpp"
+#include "tether/motion_replanner/BandwidthSelector.hpp"
 #include "tether/motion_planner/geometry/Vector.hpp" // RVec
 
 #include <algorithm>
@@ -514,143 +515,19 @@ double KdeDerivativeAnalyzer::computeBandwidth(
     BandwidthMethod method,
     double fixedValue,
     double scale) const {
-
-    auto n = data.size();
-    if (n < 2) return 1e-6;
-
-    double sigma = stdDev(data);
-    if (sigma < 1e-15) return 1e-6;
-
-    double h = 0.0;
-    switch (method) {
-        case BandwidthMethod::Silverman: {
-            h = 1.06 * sigma * std::pow(static_cast<double>(n), -0.2);
-            break;
-        }
-        case BandwidthMethod::Scott: {
-            h = sigma * std::pow(static_cast<double>(n), -0.2);
-            break;
-        }
-        case BandwidthMethod::ISJ: {
-            h = isjBandwidth(data);
-            break;
-        }
-        case BandwidthMethod::Fixed: {
-            h = fixedValue;
-            break;
-        }
-        case BandwidthMethod::LeastSquaresCV: {
-            h = lscvBandwidth(data);
-            break;
-        }
-        case BandwidthMethod::LikelihoodCV: {
-            h = likelihoodCvBandwidth(data);
-            break;
-        }
-    }
-
-    // Apply scale and ensure positivity
-    h = std::max(h * scale, 1e-12);
-    return h;
+    return BandwidthSelector::compute(data, method, fixedValue, scale);
 }
 
 double KdeDerivativeAnalyzer::isjBandwidth(const std::vector<double>& data) const {
-    // Improved Sheather-Jones (simplified plug-in)
-    auto n = data.size();
-    if (n < 2) return 1e-6;
-    double sigma = stdDev(data);
-    double iqr = [&]() {
-        auto sorted = data;
-        std::sort(sorted.begin(), sorted.end());
-        return quantileSorted(sorted, 0.75) - quantileSorted(sorted, 0.25);
-    }();
-    double sigmaHat = std::min(sigma, iqr / 1.34);
-    if (sigmaHat < 1e-15) sigmaHat = sigma;
-
-    // Silverman's rule as starting point
-    double h0 = 1.06 * sigmaHat * std::pow(static_cast<double>(n), -0.2);
-
-    // Pilot estimate of the roughness functional
-    // φ^(4) integral ≈ 3 / (8 * sqrt(π) * σ^5) for Gaussian
-    double phi4Integral = 3.0 / (8.0 * std::sqrt(M_PI) * std::pow(sigmaHat, 5.0));
-
-    // ISJ formula: h = (1 / (2 * sqrt(π) * φ^(4) * n))^(1/5)
-    double h = std::pow(1.0 / (2.0 * std::sqrt(M_PI) * phi4Integral * static_cast<double>(n)), 0.2);
-
-    // Sanity bounds
-    h = std::max(h, h0 * 0.1);
-    h = std::min(h, h0 * 10.0);
-    return h;
+    return BandwidthSelector::isj(data);
 }
 
 double KdeDerivativeAnalyzer::lscvBandwidth(const std::vector<double>& data) const {
-    // Least-squares cross-validation (simplified grid search)
-    auto n = data.size();
-    if (n < 5) return computeBandwidth(data, BandwidthMethod::Silverman, 0, 1.0);
-
-    double sigma = stdDev(data);
-    double hMin = 0.1 * sigma * std::pow(static_cast<double>(n), -0.2);
-    double hMax = 3.0 * sigma * std::pow(static_cast<double>(n), -0.2);
-
-    // Coarse grid search
-    double bestH = hMin;
-    double bestScore = std::numeric_limits<double>::max();
-    int steps = 20;
-    for (int i = 0; i <= steps; ++i) {
-        double h = hMin + (hMax - hMin) * static_cast<double>(i) / static_cast<double>(steps);
-        // LSCV score: ∫f² - 2/n Σ f_(-i)(x_i)
-        // Simplified: use leave-one-out
-        double score = 0.0;
-        for (std::size_t j = 0; j < n; ++j) {
-            double fMinusI = 0.0;
-            for (std::size_t k = 0; k < n; ++k) {
-                if (k == j) continue;
-                double u = (data[j] - data[k]) / h;
-                fMinusI += normalPdf(u);
-            }
-            fMinusI /= static_cast<double>(n - 1) * h;
-            score += fMinusI * fMinusI - 2.0 * fMinusI;
-        }
-        score /= static_cast<double>(n);
-        if (score < bestScore) {
-            bestScore = score;
-            bestH = h;
-        }
-    }
-    return bestH;
+    return BandwidthSelector::lscv(data);
 }
 
 double KdeDerivativeAnalyzer::likelihoodCvBandwidth(const std::vector<double>& data) const {
-    // Likelihood cross-validation (simplified grid search)
-    auto n = data.size();
-    if (n < 5) return computeBandwidth(data, BandwidthMethod::Silverman, 0, 1.0);
-
-    double sigma = stdDev(data);
-    double hMin = 0.1 * sigma * std::pow(static_cast<double>(n), -0.2);
-    double hMax = 3.0 * sigma * std::pow(static_cast<double>(n), -0.2);
-
-    double bestH = hMin;
-    double bestScore = -std::numeric_limits<double>::max();
-    int steps = 20;
-    for (int i = 0; i <= steps; ++i) {
-        double h = hMin + (hMax - hMin) * static_cast<double>(i) / static_cast<double>(steps);
-        double score = 0.0;
-        for (std::size_t j = 0; j < n; ++j) {
-            double fMinusI = 0.0;
-            for (std::size_t k = 0; k < n; ++k) {
-                if (k == j) continue;
-                double u = (data[j] - data[k]) / h;
-                fMinusI += normalPdf(u);
-            }
-            fMinusI /= static_cast<double>(n - 1) * h;
-            if (fMinusI > 1e-15) score += std::log(fMinusI);
-        }
-        if (score > bestScore) {
-            bestScore = score;
-            bestH = h;
-        }
-    }
-    return bestH;
+    return BandwidthSelector::likelihoodCv(data);
 }
 
 KdeGrid KdeDerivativeAnalyzer::evaluateKde(
