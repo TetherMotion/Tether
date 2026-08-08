@@ -23,7 +23,7 @@ SlaveCore::SlaveCore(const SlaveConfig& config)
     , logger_(std::make_unique<SlaveLogger>(config.logConfig))
     , alStatus_()
     , dcState_()
-    , siiState_()
+    , siiEmulator_(&registers_)
     , watchdog_()
 {
     // Initialize registers to zero
@@ -100,13 +100,16 @@ SlaveCore::SlaveCore(SlaveCore&& other) noexcept
     , fmmus_(std::move(other.fmmus_))
     , syncManagers_(std::move(other.syncManagers_))
     , dcState_(std::move(other.dcState_))
-    , siiState_(std::move(other.siiState_))
+    , siiEmulator_(&registers_)
     , watchdog_(other.watchdog_)
     , mailboxOut_(std::move(other.mailboxOut_))
     , mailboxIn_(std::move(other.mailboxIn_))
     , mailboxOutFull_(other.mailboxOutFull_.load())
     , mailboxInFull_(other.mailboxInFull_.load())
-{}
+{
+    // Copy SII state from the moved-from emulator (registers_ pointer is set above)
+    siiEmulator_.state() = std::move(other.siiEmulator_.state());
+}
 
 SlaveCore& SlaveCore::operator=(SlaveCore&& other) noexcept {
     if (this != &other) {
@@ -125,7 +128,7 @@ SlaveCore& SlaveCore::operator=(SlaveCore&& other) noexcept {
         fmmus_ = std::move(other.fmmus_);
         syncManagers_ = std::move(other.syncManagers_);
         dcState_ = std::move(other.dcState_);
-        siiState_ = std::move(other.siiState_);
+        siiEmulator_.state() = std::move(other.siiEmulator_.state());
         watchdog_ = other.watchdog_;
         mailboxOut_ = std::move(other.mailboxOut_);
         mailboxIn_ = std::move(other.mailboxIn_);
@@ -601,29 +604,19 @@ void SlaveCore::setSyncCallback(SyncCallback callback) {
 // ============================================================================
 
 void SlaveCore::setSIIData(const std::vector<uint8_t>& data) {
-    siiState_.eepromData = data;
+    siiEmulator_.setData(data);
 }
 
 const std::vector<uint8_t>& SlaveCore::getSIIData() const {
-    return siiState_.eepromData;
+    return siiEmulator_.getData();
 }
 
 uint16_t SlaveCore::readSIIWord(uint16_t wordAddr) const {
-    size_t byteAddr = wordAddr * 2;
-    if (byteAddr + 1 > siiState_.eepromData.size()) {
-        return 0xFFFF;
-    }
-    return siiState_.eepromData[byteAddr] | (siiState_.eepromData[byteAddr + 1] << 8);
+    return siiEmulator_.readWord(wordAddr);
 }
 
 bool SlaveCore::writeSIIWord(uint16_t wordAddr, uint16_t data) {
-    size_t byteAddr = wordAddr * 2;
-    if (byteAddr + 1 > siiState_.eepromData.size()) {
-        return false;
-    }
-    siiState_.eepromData[byteAddr] = data & 0xFF;
-    siiState_.eepromData[byteAddr + 1] = (data >> 8) & 0xFF;
-    return true;
+    return siiEmulator_.writeWord(wordAddr, data);
 }
 
 // ============================================================================
@@ -724,21 +717,8 @@ bool SlaveCore::writeRegister(uint16_t addr, const uint8_t* data, uint16_t len) 
         requestStateChange(control);
     }
     
-    // Handle SII access
-    if (addr == ESCReg::SIIControl && len >= 6) {
-        // Combined write: comm(2) + addr(2) + d2(2) — master writes EepromCmd struct
-        siiState_.control = std::bit_cast<EtherCAT::SII::SIIControlReg>(
-            static_cast<uint16_t>(data[0] | (data[1] << 8)));
-        siiState_.address = data[2] | (data[3] << 8) | (data[4] << 16) | (data[5] << 24);
-        processSIICommand();
-    } else if (addr == ESCReg::SIIControl && len >= 2) {
-        siiState_.control = std::bit_cast<EtherCAT::SII::SIIControlReg>(
-            static_cast<uint16_t>(data[0] | (data[1] << 8)));
-        processSIICommand();
-    }
-    if (addr == ESCReg::SIIAddress && len >= 4) {
-        siiState_.address = data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24);
-    }
+    // Handle SII access (delegated to SIIEmulator)
+    siiEmulator_.handleRegisterWrite(addr, data, len);
     
     // Handle FMMU writes
     if (addr >= ESCReg::FMMU0 && addr < ESCReg::FMMU0 + 16 * ESCReg::FMMUSize) {
@@ -857,48 +837,7 @@ bool SlaveCore::processLogicalWrite(uint32_t logicalAddr, const uint8_t* data, u
 }
 
 void SlaveCore::processSIICommand() {
-    if (siiState_.control.read_op) {
-        // Set busy while processing
-        siiState_.control.busy = 1;
-        uint16_t ctrlBusy = std::bit_cast<uint16_t>(siiState_.control);
-        registers_[ESCReg::SIIControl] = ctrlBusy & 0xFF;
-        registers_[ESCReg::SIIControl + 1] = (ctrlBusy >> 8) & 0xFF;
-
-        // Read operation
-        uint16_t word = readSIIWord(static_cast<uint16_t>(siiState_.address));
-        siiState_.data[0] = word & 0xFF;
-        siiState_.data[1] = (word >> 8) & 0xFF;
-
-        // Update data register
-        registers_[ESCReg::SIIData] = siiState_.data[0];
-        registers_[ESCReg::SIIData + 1] = siiState_.data[1];
-
-        // Clear read bit and busy
-        siiState_.control.read_op = 0;
-        siiState_.control.busy = 0;
-        uint16_t ctrlRaw = std::bit_cast<uint16_t>(siiState_.control);
-        registers_[ESCReg::SIIControl] = ctrlRaw & 0xFF;
-        registers_[ESCReg::SIIControl + 1] = (ctrlRaw >> 8) & 0xFF;
-    }
-
-    if (siiState_.control.write_op) {
-        // Set busy while processing
-        siiState_.control.busy = 1;
-        uint16_t ctrlBusy = std::bit_cast<uint16_t>(siiState_.control);
-        registers_[ESCReg::SIIControl] = ctrlBusy & 0xFF;
-        registers_[ESCReg::SIIControl + 1] = (ctrlBusy >> 8) & 0xFF;
-
-        // Write operation
-        uint16_t word = siiState_.data[0] | (siiState_.data[1] << 8);
-        writeSIIWord(static_cast<uint16_t>(siiState_.address), word);
-
-        // Clear write bit and busy
-        siiState_.control.write_op = 0;
-        siiState_.control.busy = 0;
-        uint16_t ctrlRaw = std::bit_cast<uint16_t>(siiState_.control);
-        registers_[ESCReg::SIIControl] = ctrlRaw & 0xFF;
-        registers_[ESCReg::SIIControl + 1] = (ctrlRaw >> 8) & 0xFF;
-    }
+    siiEmulator_.processCommand();
 }
 
 void SlaveCore::updateWatchdog(uint64_t deltaNs) {
@@ -1006,49 +945,7 @@ void SlaveCore::processMailboxIn() {
 }
 
 void SlaveCore::initializeSII() {
-    // Create minimal SII data based on identity
-    std::vector<uint8_t> sii;
-    sii.resize(128, 0xFF);  // Default to 0xFF (empty EEPROM)
-    
-    // SII Header (first 16 bytes)
-    // Word 0: PDI Control
-    sii[0] = 0x00; sii[1] = 0x00;
-    // Word 1: PDI Config
-    sii[2] = 0x00; sii[3] = 0x00;
-    // Word 2: Sync Impulse Length
-    sii[4] = 0x00; sii[5] = 0x00;
-    // Word 3: PDI Config 2
-    sii[6] = 0x00; sii[7] = 0x00;
-    // Word 4: Station Alias
-    sii[8] = 0x00; sii[9] = 0x00;
-    // Word 5-6: Reserved
-    // Word 7: Checksum (calculated later)
-    
-    // Words 8-11: Vendor ID (4 bytes)
-    sii[16] = config_.identity.vendorId & 0xFF;
-    sii[17] = (config_.identity.vendorId >> 8) & 0xFF;
-    sii[18] = (config_.identity.vendorId >> 16) & 0xFF;
-    sii[19] = (config_.identity.vendorId >> 24) & 0xFF;
-    
-    // Words 12-13: Product Code
-    sii[24] = config_.identity.productCode & 0xFF;
-    sii[25] = (config_.identity.productCode >> 8) & 0xFF;
-    sii[26] = (config_.identity.productCode >> 16) & 0xFF;
-    sii[27] = (config_.identity.productCode >> 24) & 0xFF;
-    
-    // Words 14-15: Revision Number
-    sii[28] = config_.identity.revisionNumber & 0xFF;
-    sii[29] = (config_.identity.revisionNumber >> 8) & 0xFF;
-    sii[30] = (config_.identity.revisionNumber >> 16) & 0xFF;
-    sii[31] = (config_.identity.revisionNumber >> 24) & 0xFF;
-    
-    // Words 16-17: Serial Number
-    sii[32] = config_.identity.serialNumber & 0xFF;
-    sii[33] = (config_.identity.serialNumber >> 8) & 0xFF;
-    sii[34] = (config_.identity.serialNumber >> 16) & 0xFF;
-    sii[35] = (config_.identity.serialNumber >> 24) & 0xFF;
-    
-    siiState_.eepromData = std::move(sii);
+    siiEmulator_.initializeFromIdentity(config_.identity);
 }
 
 void SlaveCore::initializeSyncManagers() {
