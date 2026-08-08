@@ -33,6 +33,7 @@
 #include <cstdint>
 #include <cstring>
 #include "ForwardKinematics.hpp"
+#include "LinearAlgebra.hpp"
 
 namespace tether::kinematics {
 
@@ -453,8 +454,8 @@ public:
             rhs[i] = tau[i] - C_vel[i] - g[i] - friction[i];
         }
         
-        // Solve 3x3 system (using simple Gaussian elimination)
-        solve3x3(M, rhs, ddq);
+        // Solve 3x3 system (using Gaussian elimination with partial pivoting)
+        tether::kinematics::solve3x3(M, rhs, ddq);
     }
     
     void inverseDynamics(const float q[3], const float dq[3],
@@ -506,50 +507,6 @@ private:
         g[0] = 0;  // Base rotation doesn't affect gravity
         g[1] = GRAVITY * ((m2 * lc2 + m3 * L2) * c2 + m3 * lc3 * c23);
         g[2] = GRAVITY * m3 * lc3 * c23;
-    }
-    
-    void solve3x3(float A[3][3], float b[3], float x[3]) const {
-        // Simple Gaussian elimination with partial pivoting
-        float aug[3][4];
-        for (int i = 0; i < 3; ++i) {
-            for (int j = 0; j < 3; ++j) {
-                aug[i][j] = A[i][j];
-            }
-            aug[i][3] = b[i];
-        }
-        
-        // Forward elimination
-        for (int k = 0; k < 3; ++k) {
-            // Find pivot
-            int maxRow = k;
-            for (int i = k + 1; i < 3; ++i) {
-                if (std::abs(aug[i][k]) > std::abs(aug[maxRow][k])) {
-                    maxRow = i;
-                }
-            }
-            std::swap(aug[k], aug[maxRow]);
-            
-            if (std::abs(aug[k][k]) < 1e-10f) {
-                x[0] = x[1] = x[2] = 0;
-                return;
-            }
-            
-            for (int i = k + 1; i < 3; ++i) {
-                float factor = aug[i][k] / aug[k][k];
-                for (int j = k; j < 4; ++j) {
-                    aug[i][j] -= factor * aug[k][j];
-                }
-            }
-        }
-        
-        // Back substitution
-        for (int i = 2; i >= 0; --i) {
-            x[i] = aug[i][3];
-            for (int j = i + 1; j < 3; ++j) {
-                x[i] -= aug[i][j] * x[j];
-            }
-            x[i] /= aug[i][i];
-        }
     }
 };
 
