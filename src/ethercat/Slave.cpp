@@ -199,8 +199,24 @@ void Slave::assumeMailboxAlreadyConfigured() {
     mailbox_configured_ = true;
     TETHER_LOGI( TAG,
         "Slave %u: Assuming mailbox already configured", index_);
+
+    // Best-effort drain: the slave firmware may have left stale data in SM1
+    // from boot or a previous session.  If the CoE subsystem doesn't have
+    // mailbox address info (common when the firmware truly pre-configured
+    // everything), the drain simply logs a warning and continues.
+    if (!drainMailbox()) {
+        TETHER_LOGW(TAG,
+            "Slave %u: Mailbox drain after assumeMailboxAlreadyConfigured() "
+            "did not complete — stale responses may occur on first SDO exchange",
+            index_);
+    }
+
     // Debug gate checkpoint: mailbox configured
     master_.debugGate().notifyCheckpoint("mailbox-configured", index_);
+}
+
+bool Slave::drainMailbox(unsigned int max_drain) {
+    return master_.drainSlaveMailbox(index_, max_drain);
 }
 
 // -- PDO SM configuration ----------------------------------------------------
@@ -1351,6 +1367,9 @@ SlaveError NonExistingSlave::configureMailbox(const ESIFile&,
 }
 void NonExistingSlave::assumeMailboxAlreadyConfigured() {
     logCritical("assumeMailboxAlreadyConfigured");
+}
+bool NonExistingSlave::drainMailbox(unsigned int) {
+    logCritical("drainMailbox"); return false;
 }
 SlaveError NonExistingSlave::configurePDOSyncManagers() {
     logCritical("configurePDOSyncManagers"); return SlaveError::SlaveNotFound;

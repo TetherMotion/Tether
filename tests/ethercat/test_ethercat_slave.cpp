@@ -155,6 +155,27 @@ TEST_F(EtherCATSlaveTest, ConfigureMailboxManualSetsFlag) {
     EXPECT_TRUE(s.isMailboxConfigured());
 }
 
+TEST_F(EtherCATSlaveTest, DrainMailboxFailsWithoutConfig) {
+    auto& s = master_.slave(0);
+    // No mailbox configured yet — drain should fail gracefully
+    EXPECT_FALSE(s.drainMailbox());
+}
+
+TEST_F(EtherCATSlaveTest, DrainMailboxSucceedsAfterManualConfig) {
+    auto& s = master_.slave(0);
+    ASSERT_EQ(s.configureMailbox({.address = 0x1000, .length = 128}, {.address = 0x1400, .length = 128}, 0x000C), SlaveError::Ok);
+    // In the test environment SM1 is not full, so drain should succeed
+    EXPECT_TRUE(s.drainMailbox());
+}
+
+TEST_F(EtherCATSlaveTest, AssumeMailboxStillSetsFlagWithDrain) {
+    auto& s = master_.slave(0);
+    // assumeMailboxAlreadyConfigured now attempts a best-effort drain.
+    // Even if the drain fails (no CoE mailbox config), the flag must still be set.
+    s.assumeMailboxAlreadyConfigured();
+    EXPECT_TRUE(s.isMailboxConfigured());
+}
+
 // ============================================================================
 // PDO configuration flags
 // ============================================================================
@@ -528,6 +549,11 @@ TEST_F(NonExistingSlaveTest, ConfigureMailboxManual) {
 TEST_F(NonExistingSlaveTest, AssumeMailboxDoesNotCrash) {
     auto& s = master_.slave(0);
     s.assumeMailboxAlreadyConfigured(); // logs critical, doesn't crash
+}
+
+TEST_F(NonExistingSlaveTest, DrainMailboxDoesNotCrash) {
+    auto& s = master_.slave(0);
+    EXPECT_FALSE(s.drainMailbox()); // logs critical, returns false
 }
 
 TEST_F(NonExistingSlaveTest, ConfigurePDOSyncManagers) {
