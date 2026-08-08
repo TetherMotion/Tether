@@ -439,6 +439,23 @@ struct KdeConfig {
 ///     }
 /// }
 /// ```
+
+/// @brief Dependence metrics between two sample vectors.
+/// @see KdeDerivativeAnalyzer::computeDependence
+/// @see DependenceAnalyzer::compute
+struct DependenceMetrics {
+    double pearson = 0.0;
+    double spearman = 0.0;
+    double kendall = 0.0;
+    double mutualInformation = 0.0;
+    double correlationRatio = 0.0;
+    double distanceCorrelation = 0.0;
+    double dependenceIndex = 0.0;
+    double jointEntropy = 0.0;
+    double conditionalEntropy = 0.0;
+    double normalizedMutualInfo = 0.0;
+};
+
 class KdeDerivativeAnalyzer {
 public:
     explicit KdeDerivativeAnalyzer(KdeConfig config = {});
@@ -524,18 +541,7 @@ public:
         double minMass) const;
 
     /// Compute dependence metrics between two samples.
-    struct DependenceMetrics {
-        double pearson = 0.0;
-        double spearman = 0.0;
-        double kendall = 0.0;
-        double mutualInformation = 0.0;
-        double correlationRatio = 0.0;
-        double distanceCorrelation = 0.0;
-        double dependenceIndex = 0.0;
-        double jointEntropy = 0.0;
-        double conditionalEntropy = 0.0;
-        double normalizedMutualInfo = 0.0;
-    };
+    /// @see DependenceMetrics (defined at namespace scope)
     DependenceMetrics computeDependence(
         const std::vector<double>& x,
         const std::vector<double>& y,
