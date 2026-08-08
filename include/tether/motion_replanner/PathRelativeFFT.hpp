@@ -379,26 +379,6 @@ private:
         const std::vector<double>& ys,
         double xq) const;
 
-    /// Detrend: remove DC and/or linear trend.
-    void detrend(std::vector<double>& signal,
-                 bool removeDC, bool removeLinear) const;
-
-    /// Apply a window function.
-    void applyWindow(std::vector<double>& signal,
-                     FFTConfig::Window window) const;
-
-    /// Cooley-Tukey radix-2 FFT (in-place, complex).
-    void fft(std::vector<std::complex<double>>& data) const;
-
-    /// Find the top N spectral peaks with prominence filtering.
-    std::vector<SpectralPeak> findPeaks(
-        const std::vector<double>& freqs,
-        const std::vector<double>& mags,
-        const std::vector<double>& phases,
-        const std::vector<double>& psd,
-        std::size_t maxPeaks,
-        double prominenceThreshold) const;
-
     /// Compute path-geometry frequencies and match to spectral peaks.
     PathGeometryCorrelation computeGeometryCorrelation(
         const PiecewiseNurbsPath& path,
