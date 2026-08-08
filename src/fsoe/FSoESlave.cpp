@@ -64,11 +64,14 @@ bool FSoESlave::initialize() {
     txSequence_ = 0;
     
     // Reset statistics
-    stats_.reset();
-    diagnostics_.clear();
-    
+    statistics_.resetAll();
+
+    // Configure diagnostics
+    statistics_.setDiagnosticsEnabled(config_.enableDiagnostics);
+    statistics_.setMaxEntries(config_.maxErrorLogEntries);
+
     initialized_ = true;
-    
+
     logDiagnostic(ErrorCode::NoError, "FSoE slave initialized");
     
     return true;
@@ -122,22 +125,22 @@ bool FSoESlave::areSafeOutputsValid() const {
 
 FSoESlaveStats FSoESlave::getStats() const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    return stats_;
+    return statistics_.getStats();
 }
 
 void FSoESlave::resetStats() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    stats_.reset();
+    statistics_.resetStats();
 }
 
 std::vector<FSoEDiagnosticEntry> FSoESlave::getDiagnostics() const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    return diagnostics_;
+    return statistics_.getDiagnostics();
 }
 
 void FSoESlave::clearDiagnostics() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    diagnostics_.clear();
+    statistics_.clearDiagnostics();
 }
 
 void FSoESlave::setErrorInjection(const FSoEErrorInjection& injection) {
@@ -165,7 +168,7 @@ void FSoESlave::reset() {
     // Apply fail-safe values
     applyFailSafeOutputs();
     
-    stats_.sessionResets++;
+    statistics_.onSessionReset();
     logDiagnostic(ErrorCode::NoError, "FSoE slave reset");
 }
 
@@ -190,7 +193,7 @@ void FSoESlave::triggerFailSafe(uint16_t errorCode) {
 
     applyFailSafeOutputs();
 
-    stats_.failSafeActivations++;
+    statistics_.onFailSafeActivation();
 
     char msg[64];
     snprintf(msg, sizeof(msg), "Fail-safe triggered: 0x%04X", errorCode);
@@ -221,7 +224,7 @@ bool FSoESlave::attemptRecovery() {
         return false;
     }
     
-    stats_.recoveryAttempts++;
+    statistics_.onRecoveryAttempt();
     
     // Attempt to restart session
     transitionTo(ConnectionState::Reset);
@@ -264,29 +267,28 @@ bool FSoESlave::processRxFrame(const uint8_t* data, size_t len) {
         return false;
     }
     
-    stats_.framesReceived++;
-    
+    statistics_.onFrameReceived();
+
     // Check for frame drop injection
     if (errorInjection_.enabled && shouldDropFrame()) {
-        stats_.invalidFrames++;
+        statistics_.onInvalidFrame();
         return false;
     }
-    
+
     // Check for forced fail-safe
     if (errorInjection_.enabled && errorInjection_.forceFailSafe) {
         triggerFailSafe(ErrorCode::ApplicationError);
         return false;
     }
-    
+
     // Validate frame
     if (!validateFrame(data, len)) {
-        stats_.invalidFrames++;
+        statistics_.onInvalidFrame();
         return false;
     }
-    
-    stats_.validFrames++;
+
+    statistics_.onValidFrame();
     lastValidFrameMs_ = lastUpdateTimeMs_;
-    stats_.lastValidFrameTime = lastValidFrameMs_;
     
     // Get command from header
     uint8_t command = data[0];
@@ -408,7 +410,7 @@ size_t FSoESlave::prepareTxFrame(uint8_t* data, size_t maxLen) {
     if (frameSize > 2 && errorInjection_.enabled && shouldInjectCRCError()) {
         // Corrupt the CRC
         data[frameSize - 1] ^= 0xFF;
-        stats_.crcErrors++;  // Track injected errors
+        statistics_.onCrcError();  // Track injected errors
     }
     
     // Apply data corruption
@@ -417,7 +419,7 @@ size_t FSoESlave::prepareTxFrame(uint8_t* data, size_t maxLen) {
     }
     
     if (frameSize > 0) {
-        stats_.framesSent++;
+        statistics_.onFrameSent();
     }
     
     return frameSize;
@@ -433,10 +435,7 @@ void FSoESlave::update(uint64_t currentTimeMs) {
     // Calculate cycle time
     if (lastUpdateTimeMs_ > 0) {
         uint32_t cycleUs = (currentTimeMs - lastUpdateTimeMs_) * 1000;
-        if (cycleUs < stats_.minCycleTimeUs) stats_.minCycleTimeUs = cycleUs;
-        if (cycleUs > stats_.maxCycleTimeUs) stats_.maxCycleTimeUs = cycleUs;
-        // Simple moving average
-        stats_.avgCycleTimeUs = (stats_.avgCycleTimeUs * 7 + cycleUs) / 8;
+        statistics_.updateCycleTime(cycleUs);
     }
     
     lastUpdateTimeMs_ = currentTimeMs;
@@ -550,7 +549,7 @@ void FSoESlave::applyFailSafeOutputs() {
 bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
     if (len < CRC::MIN_FSOE_FRAME_SIZE) {
         handleError(ErrorCode::DataLengthError, false);
-        stats_.dataLengthErrors++;
+        statistics_.onDataLengthError();
         return false;
     }
 
@@ -561,7 +560,7 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
 
     if (!CRC::parseFSoEFrame(data, len, cmd, nullptr, data_len, conn_id)) {
         handleError(ErrorCode::CRCError, config_.treatCrcErrorAsCritical);
-        stats_.crcErrors++;
+        statistics_.onCrcError();
         return false;
     }
 
@@ -582,7 +581,7 @@ bool FSoESlave::validateCRC(const uint8_t* data, size_t len) {
     // This method is kept for compatibility but delegates to parseFSoEFrame.
     if (errorInjection_.enabled && errorInjection_.injectCRCError) {
         handleError(ErrorCode::CRCError, config_.treatCrcErrorAsCritical);
-        stats_.crcErrors++;
+        statistics_.onCrcError();
         return false;
     }
 
@@ -608,7 +607,7 @@ bool FSoESlave::validateConnectionId(uint16_t connId) {
     
     if (connId != currentConnectionId_) {
         handleError(ErrorCode::ConnectionIDError, config_.treatConnIdErrorAsCritical);
-        stats_.connectionIdErrors++;
+        statistics_.onConnectionIdError();
         return false;
     }
     
@@ -648,7 +647,7 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
 
     transitionTo(ConnectionState::Session);
 
-    stats_.sessionResets++;
+    statistics_.onSessionReset();
     logDiagnostic(ErrorCode::NoError, "Session reset received");
 }
 
@@ -800,7 +799,7 @@ void FSoESlave::processData(const uint8_t* data, size_t len) {
     // Validate data length — reject short ProcessData frames
     if (data_len < config_.safeOutputSize) {
         handleError(ErrorCode::DataLengthError, false);
-        stats_.dataLengthErrors++;
+        statistics_.onDataLengthError();
         return;
     }
 
@@ -895,14 +894,12 @@ void FSoESlave::handleWatchdog(uint64_t currentTimeMs) {
     uint64_t elapsed = currentTimeMs - lastValidFrameMs_;
 
     // Track longest gap
-    if (elapsed > stats_.longestGapMs) {
-        stats_.longestGapMs = elapsed;
-    }
+    statistics_.updateGap(elapsed);
 
     // Check watchdog timeout
     if (elapsed > config_.watchdogTimeoutMs) {
         handleError(ErrorCode::WatchdogError, config_.treatTimeoutAsCritical);
-        stats_.watchdogTimeouts++;
+        statistics_.onWatchdogTimeout();
     }
 }
 
@@ -955,24 +952,12 @@ void FSoESlave::handleError(uint16_t errorCode, bool isCritical) {
 }
 
 void FSoESlave::logDiagnostic(uint16_t errorCode, const char* message) {
-    if (!config_.enableDiagnostics) {
-        return;
-    }
-    
-    FSoEDiagnosticEntry entry;
-    entry.timestamp = lastUpdateTimeMs_;
-    entry.errorCode = errorCode;
-    entry.state = state_.load();
-    entry.sequenceNumber = expectedSequence_;
-    entry.connectionId = currentConnectionId_;
-    strncpy(entry.message, message, sizeof(entry.message) - 1);
-    entry.message[sizeof(entry.message) - 1] = '\0';
-    
-    if (diagnostics_.size() >= config_.maxErrorLogEntries) {
-        diagnostics_.erase(diagnostics_.begin());
-    }
-    
-    diagnostics_.push_back(entry);
+    // Update context for diagnostic entries
+    statistics_.setCurrentTimestamp(lastUpdateTimeMs_);
+    statistics_.setCurrentState(state_.load());
+    statistics_.setCurrentSequence(expectedSequence_);
+    statistics_.setCurrentConnectionId(currentConnectionId_);
+    statistics_.logDiagnostic(errorCode, message);
 }
 
 // ============================================================================
