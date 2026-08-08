@@ -23,6 +23,7 @@
 
 #include "tether/slave/core/SlaveTypes.hpp"
 #include "tether/slave/core/SIIEmulator.hpp"
+#include "tether/slave/core/StateManager.hpp"
 #include "tether/slave/core/WatchdogManager.hpp"
 #include "tether/slave/logging/SlaveLogger.hpp"
 #include "tether/ethercat/Types.hpp"
@@ -196,7 +197,7 @@ public:
     /**
      * @brief Get current slave state
      */
-    SlaveState getState() const { return alStatus_.state; }
+    SlaveState getState() const { return stateMgr_.status().state; }
     
     /**
      * @brief Get AL status
@@ -531,10 +532,8 @@ private:
     // Running state
     std::atomic<bool> running_{false};
     
-    // AL state
-    ALStatus alStatus_;
-    ALStatusCode alStatusCode_ = ALStatusCode::NoError;
-    std::mutex stateMutex_;
+    // AL state (managed by StateManager)
+    StateManager stateMgr_;
     
     // Addressing
     uint16_t configuredAddress_ = 0;
@@ -570,7 +569,6 @@ private:
     std::atomic<bool> mailboxInFull_{false};
     
     // Callbacks
-    StateChangeCallback stateChangeCallback_;
     SyncCallback syncCallback_;
     PDOExchangeCallback pdoExchangeCallback_;
     

@@ -21,7 +21,7 @@ namespace slave {
 SlaveCore::SlaveCore(const SlaveConfig& config)
     : config_(config)
     , logger_(std::make_unique<SlaveLogger>(config.logConfig))
-    , alStatus_()
+    , stateMgr_(&registers_)
     , dcState_()
     , siiEmulator_(&registers_)
     , watchdog_()
@@ -67,13 +67,10 @@ SlaveCore::SlaveCore(const SlaveConfig& config)
     initializeSyncManagers();
     
     // Set initial AL status
-    alStatus_.state = SlaveState::INIT;
-    alStatus_.error = false;
-    
-    // Write initial AL status to registers
-    uint16_t alStatusReg = alStatus_.toRegister();
-    registers_[ESCReg::ALStatus] = alStatusReg & 0xFF;
-    registers_[ESCReg::ALStatus + 1] = (alStatusReg >> 8) & 0xFF;
+    stateMgr_.setInitialState(SlaveState::INIT);
+
+    // Wire state manager to reset watchdog on entering INIT
+    stateMgr_.setOnInitCallback([this]() { watchdogMgr_.reset(); });
     
     // Initialize watchdog
     watchdog_.divider = config_.watchdogDivider;
@@ -92,8 +89,7 @@ SlaveCore::SlaveCore(SlaveCore&& other) noexcept
     , objectDictionary_(std::move(other.objectDictionary_))
     , mailboxHandlers_(std::move(other.mailboxHandlers_))
     , running_(other.running_.load())
-    , alStatus_(other.alStatus_)
-    , alStatusCode_(other.alStatusCode_)
+    , stateMgr_(&registers_)
     , configuredAddress_(other.configuredAddress_)
     , stationAlias_(other.stationAlias_)
     , registers_(std::move(other.registers_))
@@ -111,6 +107,9 @@ SlaveCore::SlaveCore(SlaveCore&& other) noexcept
 {
     // Copy SII state from the moved-from emulator (registers_ pointer is set above)
     siiEmulator_.state() = std::move(other.siiEmulator_.state());
+    // Copy AL state from the moved-from state manager
+    stateMgr_.statusRef() = other.stateMgr_.status();
+    stateMgr_.setOnInitCallback([this]() { watchdogMgr_.reset(); });
 }
 
 SlaveCore& SlaveCore::operator=(SlaveCore&& other) noexcept {
@@ -121,8 +120,7 @@ SlaveCore& SlaveCore::operator=(SlaveCore&& other) noexcept {
         objectDictionary_ = std::move(other.objectDictionary_);
         mailboxHandlers_ = std::move(other.mailboxHandlers_);
         running_.store(other.running_.load());
-        alStatus_ = other.alStatus_;
-        alStatusCode_ = other.alStatusCode_;
+        stateMgr_.statusRef() = other.stateMgr_.status();
         configuredAddress_ = other.configuredAddress_;
         stationAlias_ = other.stationAlias_;
         registers_ = std::move(other.registers_);
@@ -370,133 +368,55 @@ uint16_t SlaveCore::processDatagram(DatagramHeader& header, uint8_t* data) {
 }
 
 // ============================================================================
-// State Management
+// State Management (delegated to StateManager)
 // ============================================================================
 
 ALStatus SlaveCore::getALStatus() const {
-    // Note: stateMutex_ should be mutable in the header, or we return a copy
-    // For now, return the cached value without locking (read is atomic for simple structs)
-    return alStatus_;
+    return stateMgr_.status();
 }
 
 bool SlaveCore::requestStateChange(const ALControl& control) {
-    std::lock_guard<std::mutex> lock(stateMutex_);
-    
-    // Check if transition is valid
-    if (!canTransition(alStatus_.state, control.requestedState)) {
-        setErrorLocked(ALStatusCode::InvalidStateChange);
-        return false;
-    }
-    
-    // Handle error acknowledgement
-    if (control.acknowledgeError && alStatus_.error) {
-        clearErrorLocked();
-    }
-    
-    // Perform state change
-    doStateTransition(control.requestedState);
-    return true;
+    return stateMgr_.requestStateChange(control);
 }
 
 void SlaveCore::setStateChangeCallback(StateChangeCallback callback) {
-    stateChangeCallback_ = std::move(callback);
+    stateMgr_.setStateChangeCallback(std::move(callback));
 }
 
 void SlaveCore::setErrorLocked(ALStatusCode code) {
-    alStatusCode_ = code;
-    alStatus_.error = true;
-    
-    // Update registers
-    registers_[ESCReg::ALStatusCode] = static_cast<uint16_t>(code) & 0xFF;
-    registers_[ESCReg::ALStatusCode + 1] = (static_cast<uint16_t>(code) >> 8) & 0xFF;
-    
-    uint16_t statusReg = alStatus_.toRegister();
-    registers_[ESCReg::ALStatus] = statusReg & 0xFF;
-    registers_[ESCReg::ALStatus + 1] = (statusReg >> 8) & 0xFF;
+    stateMgr_.setErrorLocked(code);
 }
 
 void SlaveCore::setError(ALStatusCode code) {
-    std::lock_guard<std::mutex> lock(stateMutex_);
-    setErrorLocked(code);
+    stateMgr_.setError(code);
 }
 
 void SlaveCore::clearErrorLocked() {
-    alStatusCode_ = ALStatusCode::NoError;
-    alStatus_.error = false;
-    
-    registers_[ESCReg::ALStatusCode] = 0;
-    registers_[ESCReg::ALStatusCode + 1] = 0;
-    
-    uint16_t statusReg = alStatus_.toRegister();
-    registers_[ESCReg::ALStatus] = statusReg & 0xFF;
-    registers_[ESCReg::ALStatus + 1] = (statusReg >> 8) & 0xFF;
+    stateMgr_.clearErrorLocked();
 }
 
 void SlaveCore::clearError() {
-    std::lock_guard<std::mutex> lock(stateMutex_);
-    clearErrorLocked();
+    stateMgr_.clearError();
 }
 
 bool SlaveCore::canTransition(SlaveState from, SlaveState to) {
-    // Valid transitions per ETG.1000
-    if (from == to) return true;
-    
-    switch (from) {
-        case SlaveState::INIT:
-            return to == SlaveState::PRE_OP || to == SlaveState::BOOT;
-        case SlaveState::PRE_OP:
-            return to == SlaveState::INIT || to == SlaveState::SAFE_OP;
-        case SlaveState::BOOT:
-            return to == SlaveState::INIT;
-        case SlaveState::SAFE_OP:
-            return to == SlaveState::INIT || to == SlaveState::PRE_OP || to == SlaveState::OP;
-        case SlaveState::OP:
-            return to == SlaveState::INIT || to == SlaveState::PRE_OP || to == SlaveState::SAFE_OP;
-        default:
-            return false;
-    }
+    return StateManager::canTransition(from, to);
 }
 
 void SlaveCore::doStateTransition(SlaveState newState) {
-    SlaveState oldState = alStatus_.state;
-    
-    onExitState(oldState);
-    alStatus_.state = newState;
-    onEnterState(newState);
-    
-    // Update AL status register
-    uint16_t statusReg = alStatus_.toRegister();
-    registers_[ESCReg::ALStatus] = statusReg & 0xFF;
-    registers_[ESCReg::ALStatus + 1] = (statusReg >> 8) & 0xFF;
-    
-    // Notify callback
-    if (stateChangeCallback_) {
-        stateChangeCallback_(oldState, newState);
-    }
+    // Delegate via requestStateChange-like path; this is called internally
+    // so we use the state manager's internal transition.
+    // Note: doStateTransition is private and called from requestStateChange,
+    // which is now delegated to stateMgr_. This stub is kept for ABI compat.
+    (void)newState;
 }
 
 void SlaveCore::onEnterState(SlaveState state) {
-    switch (state) {
-        case SlaveState::INIT:
-            // Reset watchdog
-            watchdogMgr_.reset();
-            break;
-        case SlaveState::PRE_OP:
-            // Mailbox communication starts
-            break;
-        case SlaveState::SAFE_OP:
-            // Inputs active, outputs safe
-            break;
-        case SlaveState::OP:
-            // Full operation
-            break;
-        default:
-            break;
-    }
+    (void)state;  // Delegated to StateManager
 }
 
 void SlaveCore::onExitState(SlaveState state) {
-    (void)state;  // Currently no exit actions
+    (void)state;  // Delegated to StateManager
 }
 
 // ============================================================================
@@ -842,7 +762,7 @@ void SlaveCore::processSIICommand() {
 }
 
 void SlaveCore::updateWatchdog(uint64_t deltaNs) {
-    watchdogMgr_.update(alStatus_.state, deltaNs);
+    watchdogMgr_.update(stateMgr_.status().state, deltaNs);
 }
 
 void SlaveCore::processSyncManager(size_t smIndex) {
