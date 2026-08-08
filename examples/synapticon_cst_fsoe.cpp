@@ -424,11 +424,16 @@ int main(int argc, char** argv) {
     }
 
     // --- Pre-activation safety check: read 0x2611 Safety Module input diagnostics ---
-    // Before enabling the drive, verify the safety module is NOT in safe state.
     // Object 0x2611 (per Synapticon documentation) reports the state of the
     // safety module: 0 = safe state (safety function active, torque inhibited),
-    // 1 = not safe state (motion allowed).  If the drive is in safe state,
-    // attempting to activate it is an error — we shut down immediately.
+    // 1 = not safe state (motion allowed).
+    //
+    // When FSoE is enabled, the drive *starts* in safe state (STO active by
+    // default) and the FSoE master brings it out of safe state once the safety
+    // protocol reaches the Data state.  Aborting here would prevent the FSoE
+    // connection from ever establishing, so we only abort on safe state when
+    // FSoE is disabled (--no-fsoe) — in that case there is no mechanism to
+    // clear the safe state and enabling the drive would be futile.
     {
         auto& slave = master.ethercatMaster().slave(slave_idx);
         const auto safety = EtherCAT::Drives::Synapticon::readSafetyModuleState(slave);
@@ -456,22 +461,33 @@ int main(int argc, char** argv) {
         }
 
         if (safety.isInSafeState()) {
-            // Before failing, tell the operator whether the FSoE safety
-            // function is the cause of the safe state (0x2620:2).  This
-            // distinguishes an active FSoE trip from a hardware/input safe
-            // state and speeds up root-cause diagnosis.
-            TETHER_LOGE(TAG,
-                "Drive is in SAFE STATE (safety function active, motion "
-                "inhibited) — FSoE is %s (0x2620:2=%u) — refusing to "
-                "activate drive, triggering shutdown",
-                safety.fsoeStateSummary(),
-                static_cast<unsigned>(safety.safe_fieldbus));
-            Tether::Examples::stopHostMasterSession(master, session);
-            return 2;
+            if (args.enable_fsoe) {
+                // FSoE is enabled — the drive is expected to start in safe
+                // state.  The FSoE master will bring it out of safe state
+                // once the safety protocol reaches the Data state.  Log the
+                // state and continue; do NOT abort.
+                TETHER_LOGI(TAG,
+                    "Drive is in SAFE STATE (safety function active, motion "
+                    "inhibited) — FSoE is %s (0x2620:2=%u) — continuing; "
+                    "the FSoE master will clear the safe state once the "
+                    "safety protocol reaches the Data state",
+                    safety.fsoeStateSummary(),
+                    static_cast<unsigned>(safety.safe_fieldbus));
+            } else {
+                // FSoE is disabled — there is no mechanism to clear the safe
+                // state, so enabling the drive would be futile.  Abort.
+                TETHER_LOGE(TAG,
+                    "Drive is in SAFE STATE (safety function active, motion "
+                    "inhibited) and FSoE is disabled (--no-fsoe) — there is "
+                    "no mechanism to clear the safe state, refusing to "
+                    "activate drive, triggering shutdown");
+                Tether::Examples::stopHostMasterSession(master, session);
+                return 2;
+            }
+        } else {
+            TETHER_LOGI(TAG,
+                "Safety check passed: safety module reports motion allowed");
         }
-
-        TETHER_LOGI(TAG,
-            "Safety check passed: safety module reports motion allowed");
     }
 
     // --- Configure drive: CST mode, RxPDO 0x1600 / TxPDO 0x1A00 ---
