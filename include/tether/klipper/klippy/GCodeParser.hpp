@@ -47,25 +47,29 @@ struct GcodeLine {
 
     /// @brief Check if a named parameter exists (case-insensitive).
     bool hasNamed(const std::string& key) const {
-        return namedParams.find(toUpperKey(key)) != namedParams.end();
+        std::string upperKey = toUpperKey(key);
+        return namedParams.find(upperKey) != namedParams.end();
     }
 
     /// @brief Get a named parameter as string (case-insensitive).
     std::string getNamed(const std::string& key, const std::string& defaultVal = "") const {
-        auto it = namedParams.find(toUpperKey(key));
+        std::string upperKey = toUpperKey(key);
+        auto it = namedParams.find(upperKey);
         return it == namedParams.end() ? defaultVal : it->second;
     }
 
     /// @brief Get a named parameter as double (case-insensitive).
     double getNamedDouble(const std::string& key, double defaultVal = 0.0) const {
-        auto it = namedParams.find(toUpperKey(key));
+        std::string upperKey = toUpperKey(key);
+        auto it = namedParams.find(upperKey);
         if (it == namedParams.end()) return defaultVal;
         try { return std::stod(it->second); } catch (...) { return defaultVal; }
     }
 
     /// @brief Get a named parameter as int (case-insensitive).
     int getNamedInt(const std::string& key, int defaultVal = 0) const {
-        auto it = namedParams.find(toUpperKey(key));
+        std::string upperKey = toUpperKey(key);
+        auto it = namedParams.find(upperKey);
         if (it == namedParams.end()) return defaultVal;
         try { return std::stoi(it->second); } catch (...) { return defaultVal; }
     }
