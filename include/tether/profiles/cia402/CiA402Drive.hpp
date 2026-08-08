@@ -54,6 +54,7 @@
 #include "tether/drives/DynaDrive/Registers/Controlword.hpp"
 #include "tether/ethercat/TetherConfig.hpp"
 #include "tether/ethercat/Slave.hpp"  // for Slave::MultiPDOAssignment
+#include "tether/profiles/cia402/CiA402StateUtils.hpp"  // ECState, DriveState, getECStateName, etc.
 
 // Forward declarations
 namespace EtherCAT {
@@ -62,40 +63,6 @@ class Master;
 
 namespace EtherCAT {
 
-// ============================================================================
-// EtherCAT State Machine States
-// ============================================================================
-
-enum class ECState : uint8_t {
-    Init      = 0x01,
-    PreOp     = 0x02,
-    Bootstrap = 0x03,
-    SafeOp    = 0x04,
-    Op        = 0x08,
-    Unknown   = 0x00
-};
-
-const char* getECStateName(ECState state);
-
-// ============================================================================
-// CiA 402 State Machine States
-// ============================================================================
-
-enum class DriveState : uint8_t {
-    NotReadyToSwitchOn,
-    SwitchOnDisabled,
-    ReadyToSwitchOn,
-    SwitchedOn,
-    OperationEnabled,
-    QuickStopActive,
-    FaultReactionActive,
-    Fault,
-    Unknown
-};
-
-const char* getDriveStateName(DriveState state);
-DriveState decodeDriveState(uint16_t statusword);
-
 enum class ControlWord : uint16_t {
     DISABLE_VOLTAGE    = 0x0000,
     SHUTDOWN           = 0x0006,
@@ -103,8 +70,6 @@ enum class ControlWord : uint16_t {
     ENABLE_OPERATION   = 0x000F,
     FAULT_RESET        = 0x0080,
 };
-
-const char* formatStatuswordDiagnostics(uint16_t sw, char* buffer, size_t buffer_size);
 
 // ============================================================================
 // CiA 402 Drive Controller
