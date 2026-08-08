@@ -350,6 +350,25 @@ RealtimeKernelInfo ensureRealtimeKernelOrExit(RealtimeRequirement req) {
                 preemptModelStr(info.build_model), info.active_preempt_mode.c_str());
             return info;
         }
+        // Active mode unknown (e.g. PREEMPT_DYNAMIC with debugfs unreadable
+        // without root): we cannot determine the actual active preempt mode.
+        // Warn and continue, optimistically assuming the user has configured
+        // the kernel for low latency (e.g. via boot param or runtime knob).
+        if (info.active_preempt_mode == "unknown") {
+            TETHER_LOGW("Platform",
+                "Hard realtime requirement: kernel realtime class is '%s' "
+                "(build=%s, active=%s). The active preempt mode could not be "
+                "determined — this is unknowable without root/sudo access to "
+                "read debugfs (/sys/kernel/debug/sched/preempt). Assuming the "
+                "kernel has been configured for low latency. Continuing with "
+                "NO realtime guarantees; verify with `sudo cat "
+                "/sys/kernel/debug/sched/preempt` and a PREEMPT_RT kernel for "
+                "hard realtime PDO exchange.",
+                realtimeClassStr(info.realtime_class),
+                preemptModelStr(info.build_model), info.active_preempt_mode.c_str());
+            return info;
+        }
+
         // Below low-latency → error
         TETHER_LOGE("Platform",
             "Hard realtime requirement NOT met: kernel realtime class is '%s' "
