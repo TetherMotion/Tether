@@ -231,19 +231,6 @@ struct LexerConfig {
     bool skipBlockDelete{false};
 };
 
-/**
- * @brief Highlight a single G-code line
- *
- * This is a lightweight utility for editors/UIs. It does not allocate per-token
- * substrings; it only returns byte ranges into the input line.
- *
- * @param line Input line (single line; may include comments)
- * @param config Lexer configuration
- * @return Vector of highlight spans (non-overlapping, in increasing order)
- */
-std::vector<HighlightSpan> highlightLine(std::string_view line,
-                                        const LexerConfig& config = LexerConfig{});
-
 // ============================================================================
 // Lexer Class
 // ============================================================================
@@ -480,62 +467,5 @@ private:
     size_t findLineStart(size_t pos) const;
     size_t findLineEnd(size_t pos) const;
 };
-
-// ============================================================================
-// Line-Based Tokenizer
-// ============================================================================
-
-/**
- * @brief Tokenize a single line of G-code
- * 
- * Convenience function for tokenizing one line without
- * maintaining lexer state.
- * 
- * @param line G-code line to tokenize
- * @param tokens Output: vector of tokens
- * @param config Optional lexer configuration
- * @return Error if tokenization failed
- */
-Error tokenizeLine(const char* line, std::vector<LexerToken>& tokens,
-                   const LexerConfig& config = LexerConfig{});
-
-/**
- * @brief Check if a line is empty or comment-only
- */
-bool isEmptyOrComment(const char* line);
-
-/**
- * @brief Strip comments from a line
- */
-std::string stripComments(const char* line);
-
-// ============================================================================
-// Token Utilities
-// ============================================================================
-
-/**
- * @brief Convert word letter to character
- */
-char wordLetterToChar(WordLetter letter);
-
-/**
- * @brief Convert character to word letter
- */
-WordLetter charToWordLetter(char c);
-
-/**
- * @brief Check if word letter is an axis
- */
-bool isAxisLetter(WordLetter letter);
-
-/**
- * @brief Get axis index from word letter
- */
-int axisFromWordLetter(WordLetter letter);
-
-/**
- * @brief Format token for display/debugging
- */
-std::string formatToken(const LexerToken& token);
 
 } // namespace GCode
