@@ -51,7 +51,14 @@ const char* formatStatuswordDiagnostics(uint16_t sw, char* buffer, size_t buffer
     
     auto append = [&](const char* fmt, auto... args) {
         if (pos >= buffer_size - 1) return;
-        int n = snprintf(buffer + pos, buffer_size - pos, fmt, args...);
+        int n;
+        if constexpr (sizeof...(args) == 0) {
+            // No format arguments: copy the literal directly to avoid
+            // -Wformat-security (format string is not a literal here).
+            n = snprintf(buffer + pos, buffer_size - pos, "%s", fmt);
+        } else {
+            n = snprintf(buffer + pos, buffer_size - pos, fmt, args...);
+        }
         if (n > 0) pos = std::min(pos + static_cast<size_t>(n), buffer_size - 1);
     };
     
