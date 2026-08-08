@@ -43,6 +43,7 @@
 #include "tether/motion_replanner/PathEvaluator.hpp"
 #include "tether/motion_replanner/PathRelativeFFT.hpp"
 #include "tether/motion_replanner/KdeDerivativeAnalyzer.hpp"
+#include "tether/motion_replanner/SvgCanvas.hpp"
 
 #include <string>
 #include <vector>
@@ -265,12 +266,13 @@ public:
         const tether::motion::replanner::KdeEvaluation& kde) const;
 
     const SvgConfig& config() const { return config_; }
-    void setConfig(const SvgConfig& config) { config_ = config; }
+    void setConfig(const SvgConfig& config) { config_ = config; canvas_.updateConfig(config_); }
 
 private:
     SvgConfig config_;
+    SvgCanvas canvas_;
 
-    //--- Low-level SVG element writers ---
+    //--- Low-level SVG element writers (delegated to canvas_) ---
 
     void writeHeader(std::ostream& out, int width, int height) const;
     void writeFooter(std::ostream& out) const;
@@ -298,11 +300,9 @@ private:
                          double x2, double y2,
                          const std::string& stroke, double width) const;
 
-    //--- Coordinate transforms ---
+    //--- Coordinate transforms (delegated to canvas_) ---
 
-    struct AxisBounds {
-        double minX = 0, maxX = 1, minY = 0, maxY = 1;
-    };
+    using AxisBounds = SvgCanvas::AxisBounds;
 
     AxisBounds computeBounds(
         const std::vector<std::pair<double,double>>& points) const;
@@ -314,7 +314,7 @@ private:
         double dataX, double dataY, const AxisBounds& bounds,
         double svgWidth, double svgHeight, double margin) const;
 
-    //--- Axis and grid rendering ---
+    //--- Axis and grid rendering (delegated to canvas_) ---
 
     void renderAxes(std::ostream& out, const AxisBounds& bounds,
                     int svgW, int svgH, int margin,
