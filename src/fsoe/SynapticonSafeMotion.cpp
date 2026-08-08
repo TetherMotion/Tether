@@ -305,41 +305,21 @@ bool MainInstance::exchangeWith(SafeMotionServoEmulator& slave, uint64_t current
         return false;
     }
 
-    if (!typed_view_.write(command_)) {
-        return false;
-    }
+    // Delegate to the generic typed FSoE exchange.  The SafeMotion-specific
+    // pieces are the mid-exchange emulator synchronization (so the servo
+    // consumes the latest command and refreshes its published status before
+    // the slave→master frame is built) and the post-success pulse-bit clear.
+    const bool ok = typed_view_.exchangeWith(
+        slave.rawSlave(), command_, current_time_ms,
+        [&slave] { slave.synchronizeCommandAndStatus(); },
+        [this] { clearPulseBits(); });
 
-    connection_.update(current_time_ms);
-    slave.rawSlave().update(current_time_ms);
-
-    std::array<uint8_t, 64> tx{};
-    std::array<uint8_t, 64> rx{};
-
-    const size_t tx_len = connection_.prepareTxFrame(tx.data(), tx.size());
-    if (tx_len == 0) {
-        return false;
-    }
-
-    if (!slave.rawSlave().processRxFrame(tx.data(), tx_len)) {
-        return false;
-    }
-
-    slave.synchronizeCommandAndStatus();
-
-    const size_t rx_len = slave.rawSlave().prepareTxFrame(rx.data(), rx.size());
-    if (rx_len == 0) {
-        return false;
-    }
-
-    const bool ok = connection_.processRxFrame(rx.data(), rx_len);
     if (ok) {
         if (const auto decoded = typed_view_.read()) {
             status_ = *decoded;
             has_status_ = true;
         }
-        clearPulseBits();
     }
-
     return ok;
 }
 
@@ -354,34 +334,19 @@ bool MainInstance::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max,
         return false;
     }
 
-    // Encode the current command into the connection's safe_outputs.
-    if (!typed_view_.write(command_)) {
-        return false;
-    }
+    // Delegate to the generic typed FSoE-over-PDO exchange.  The only
+    // SafeMotion-specific piece is the post-success pulse-bit clear.
+    const bool ok = typed_view_.exchangeViaPDO(
+        rx_pdo_out, rx_pdo_max, tx_pdo_in, tx_pdo_len,
+        command_, current_time_ms,
+        [this] { clearPulseBits(); });
 
-    // Run the FSoE state machine (watchdog, phase timeouts, auto-recovery).
-    connection_.update(current_time_ms);
-
-    // Build the master→slave FSoE frame into the RxPDO buffer.
-    // The frame size varies by state (Session=5B, Connection=7B,
-    // Parameter=9B, Data=11B).  prepareTxFrame writes only the needed
-    // bytes; the rest of the PDO buffer is left untouched.
-    const size_t tx_len = connection_.prepareTxFrame(rx_pdo_out, rx_pdo_max);
-    if (tx_len == 0) {
-        return false;
-    }
-
-    // Process the slave→master FSoE frame from the TxPDO buffer.
-    // The drive writes its response into TxPDO 0x1B00 each cycle.
-    const bool ok = connection_.processRxFrame(tx_pdo_in, tx_pdo_len);
     if (ok) {
         if (const auto decoded = typed_view_.read()) {
             status_ = *decoded;
             has_status_ = true;
         }
-        clearPulseBits();
     }
-
     return ok;
 }
 
