@@ -76,6 +76,16 @@ bool SDOMailboxIO::waitSm0NotFull(Master& master, uint16_t adp,
     }
     TETHER_LOGE(TAG, "SM0 mailbox stayed full (adp=0x%04X) after %ums timeout — slave PDI not draining mailbox",
                 adp, timeoutMs);
+
+    // Last-resort recovery: cycle SM0 activate register to flush the stuck
+    // write buffer.  This clears the mailbox-full flag so the next SDO attempt
+    // can write its request.  The slave never read the previous request, so
+    // no valid response is lost.
+    const uint16_t slave_index = Master::slaveAddressFromADP(adp).slavePosition();
+    if (master.resetSlaveMailboxSM0(slave_index)) {
+        TETHER_LOGI(TAG, "SM0 reset succeeded (adp=0x%04X) — mailbox ready for next write", adp);
+        return true;
+    }
     return false;
 }
 

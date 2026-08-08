@@ -191,6 +191,42 @@ bool Master::resetSlaveMailboxSM1(uint16_t slave_index)
     return true;
 }
 
+bool Master::resetSlaveMailboxSM0(uint16_t slave_index)
+{
+    const char* local_tag = "mbox_reset";
+    const uint16_t sm0_activate_addr = static_cast<uint16_t>(Raw::EC_REG_SM0 + 0x06u);
+    const uint16_t sm0_status_addr = Raw::sm_status_address(0);
+
+    TETHER_LOGW(local_tag, "Slave %u: cycling SM0 activate register (0x%04X) to clear stuck mailbox-full",
+                slave_index, sm0_activate_addr);
+
+    uint8_t disable = 0x00;
+    uint8_t enable = 0x01;
+    if (!writeRegister(SlaveAddress(slave_index), RegisterAddress(sm0_activate_addr), &disable, sizeof(disable), 200)) {
+        TETHER_LOGE(local_tag, "Slave %u: failed to disable SM0", slave_index);
+        return false;
+    }
+    if (!writeRegister(SlaveAddress(slave_index), RegisterAddress(sm0_activate_addr), &enable, sizeof(enable), 200)) {
+        TETHER_LOGE(local_tag, "Slave %u: failed to re-enable SM0", slave_index);
+        return false;
+    }
+
+    uint8_t sm0_status = 0;
+    if (!readRegister(SlaveAddress(slave_index), RegisterAddress(sm0_status_addr), sm0_status, 100)) {
+        TETHER_LOGE(local_tag, "Slave %u: failed to read SM0 status after reset", slave_index);
+        return false;
+    }
+
+    if ((sm0_status & Raw::EC_SM_STATUS_MBXFULL) != 0) {
+        TETHER_LOGE(local_tag, "Slave %u: SM0 still full after activate reset (status=0x%02X)",
+                    slave_index, sm0_status);
+        return false;
+    }
+
+    TETHER_LOGI(local_tag, "Slave %u: SM0 reset successful", slave_index);
+    return true;
+}
+
 void Master::updateDebugFlags()
 {
     const uint16_t count = static_cast<uint16_t>(slaves_.size());

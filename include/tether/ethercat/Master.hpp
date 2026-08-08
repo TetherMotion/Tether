@@ -684,6 +684,21 @@ public:
     bool resetSlaveMailboxSM1(uint16_t slave_index);
 
     /**
+     * @brief Hardware-reset the master-to-slave mailbox (SM0) by cycling its
+     *        activate register.
+     *
+     * This clears a stuck SM0 that was left full by a failed SDO request (the
+     * master wrote the request but the slave never read it — e.g. because the
+     * slave was not in PRE_OP).  Disabling and re-enabling SM0 flushes the
+     * internal write buffer and clears the mailbox-full flag, allowing the
+     * next SDO request to be written.
+     *
+     * @param slave_index    Slave index (0-based)
+     * @return true if SM0 status reads back clear after the reset
+     */
+    bool resetSlaveMailboxSM0(uint16_t slave_index);
+
+    /**
      * @brief Verify a slave's SII identity against expected values.
      *
      * Reads the slave's identity from SII EEPROM and compares each
