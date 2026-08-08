@@ -254,7 +254,7 @@ int main() {
     execAndPrint(inst, "SET_SMART_EFFECTOR SENSITIVITY=0.5");
     execAndPrint(inst, "ACCELEROMETER_MEASURE CHIP=adxl345");
     execAndPrint(inst, "ACCELEROMETER_QUERY CHIP=adxl345");
-    execAndPrint(inst, "SET_DELAYED_GCODE ID=my_delayed GCODE=M117\ Done");
+    execAndPrint(inst, "SET_DELAYED_GCODE ID=my_delayed GCODE=M117\\ Done");
     execAndPrint(inst, "SET_PRINT_STATS_INFO TOTAL_LAYER=100");
     execAndPrint(inst, "SET_FAN_SPEED FAN=my_fan SPEED=0.75");
     execAndPrint(inst, "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=210");
