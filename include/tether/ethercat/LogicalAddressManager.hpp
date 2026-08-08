@@ -21,9 +21,11 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 #include "tether/platform/EspCompat.hpp"
 #include "tether/ethercat/PDOManager.hpp"
+#include "tether/ethercat/PDOMappingConfig.hpp"
 
 namespace EtherCAT {
 
@@ -52,6 +54,21 @@ public:
      */
     bool buildAddressMap(const PDO::SlaveConfig* configs, uint16_t slave_count);
 
+    /**
+     * @brief Build the logical address map from multi-PDO sync manager configs.
+     *
+     * Allocates per-PDO logical addresses within each slave's FMMU region.
+     * Each PDO mapping gets its own logical address offset, enabling per-PDO
+     * data access during LRW exchanges.
+     *
+     * @param sm_configs  Array of vectors, one per slave, of multi-PDO SM configs
+     * @param slave_count  Number of slaves
+     * @return true on success
+     */
+    bool buildAddressMapFromMultiPDO(
+        const std::vector<PDO::MultiPDOSyncManagerConfig>* sm_configs,
+        uint16_t slave_count);
+
     // ----- FMMU configuration queries -----
 
     uint32_t getRxPDOLogicalAddr(uint16_t slave_index) const;
@@ -60,6 +77,28 @@ public:
     uint16_t getTxPDOLength(uint16_t slave_index) const;
 
     bool hasSlavePDOs(uint16_t slave_index) const;
+
+    // ----- Per-PDO address queries (multi-PDO mode) -----
+
+    /// Per-PDO logical address entry within a slave's FMMU region.
+    struct PDOLogicalAddrEntry {
+        uint16_t pdo_index{0};
+        uint32_t logical_addr{0};
+        uint16_t length{0};
+        uint8_t  sm_index{0xFF};
+        bool     is_output{false};  ///< true = RxPDO (output), false = TxPDO (input)
+    };
+
+    /// Get the logical address of a specific PDO on a specific slave.
+    /// Returns 0 if the PDO is not found.
+    uint32_t getPDOLogicalAddr(uint16_t slave_index, uint16_t pdo_index) const;
+
+    /// Get the length of a specific PDO on a specific slave.
+    /// Returns 0 if the PDO is not found.
+    uint16_t getPDOLength(uint16_t slave_index, uint16_t pdo_index) const;
+
+    /// Get all per-PDO logical address entries for a slave.
+    std::vector<PDOLogicalAddrEntry> getSlavePDOLogicalAddrs(uint16_t slave_index) const;
 
     uint32_t totalRxPDOBytes() const { return total_rxpdo_bytes_; }
     uint32_t totalTxPDOBytes() const { return total_txpdo_bytes_; }
@@ -108,6 +147,19 @@ private:
         uint32_t txpdo_logical_addr{0};
         uint16_t txpdo_length{0};
         bool     active{false};
+
+        /// Per-PDO logical address entries (multi-PDO mode).
+        /// Fixed-size array to avoid heap allocation in real-time paths.
+        static constexpr size_t kMaxPDOEntries = 32;  ///< 16 RxPDO + 16 TxPDO max
+        PDOLogicalAddrEntry pdo_entries[kMaxPDOEntries]{};
+        size_t pdo_entry_count{0};
+
+        const PDOLogicalAddrEntry* findPDO(uint16_t pdo_index) const {
+            for (size_t i = 0; i < pdo_entry_count; i++) {
+                if (pdo_entries[i].pdo_index == pdo_index) return &pdo_entries[i];
+            }
+            return nullptr;
+        }
     };
 
     SlaveLogicalAddr addr_map_[PDO::kMaxPDOSlaves];

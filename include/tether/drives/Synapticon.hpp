@@ -57,6 +57,14 @@ static constexpr uint32_t kSdoTimeoutMs     = 6000;    // ESI ResponseTimeout
 static constexpr uint16_t kOutputsSmAddr = 0x1800;  // SM2 (M->S)
 static constexpr uint16_t kInputsSmAddr  = 0x1C00;  // SM3 (S->M)
 
+// SM control bytes (from ESI Sm ControlByte attributes)
+static constexpr uint8_t kOutputsSmControlByte = 0x64;  // SM2: Buffered|Write|Watchdog|RepeatReq
+static constexpr uint8_t kInputsSmControlByte  = 0x20;  // SM3: Buffered|Read|Watchdog
+
+// Total PDO sizes (from ESI Sm DefaultSize attributes)
+static constexpr uint16_t kOutputsSmSize = 35;  // SM2: 19+8+8 bytes
+static constexpr uint16_t kInputsSmSize  = 47;  // SM3: 13+12+4+18 bytes
+
 } // namespace Synapticon
 
 // ============================================================================

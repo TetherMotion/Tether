@@ -8,6 +8,7 @@
 #include "tether/ethercat/SDOManager.hpp"
 #include "tether/ethercat/CoEManager.hpp"
 #include "tether/ethercat/PDOManager.hpp"
+#include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/SyncManager.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
@@ -1302,6 +1303,182 @@ SlaveError Slave::applyCustomPDOs() {
     return SlaveError::Ok;
 }
 
+// ============================================================================
+// Multi-PDO sync manager configuration
+// ============================================================================
+
+SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
+    if (config.sm_configs.empty()) {
+        TETHER_LOGW(TAG, "Slave %u: configureMultiPDOs called with empty config", index_);
+        return SlaveError::Ok;
+    }
+
+    auto& pdo = master_.pdo();
+    auto* cfgs = pdo.slaveConfigs();
+    if (index_ >= PDO::kMaxPDOSlaves) {
+        TETHER_LOGE(TAG, "Slave %u: index exceeds max PDO slaves (%zu)", index_, PDO::kMaxPDOSlaves);
+        return SlaveError::PDOConfigFailed;
+    }
+
+    TETHER_LOGI(TAG, "Slave %u: Configuring multi-PDO SMs (%zu SM configs)", index_, config.sm_configs.size());
+
+    // Build MultiPDOSyncManagerConfig vector for FMMU and LogicalAddressManager
+    std::vector<PDO::MultiPDOSyncManagerConfig> multi_configs;
+    std::vector<uint16_t> rx_pdo_indices, tx_pdo_indices;
+    uint8_t output_sm_index = 2, input_sm_index = 3;
+
+    for (const auto& sm_cfg : config.sm_configs) {
+        if (sm_cfg.sm_index <= 1) {
+            TETHER_LOGW(TAG, "Slave %u: SM%u is a mailbox SM — assigning PDOs is unusual",
+                        index_, sm_cfg.sm_index);
+        }
+
+        PDO::MultiPDOSyncManagerConfig mc;
+        mc.sm_index = sm_cfg.sm_index;
+        mc.phys_start_addr = sm_cfg.phys_start_addr;
+        mc.control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(sm_cfg.control_byte);
+        mc.enable = true;
+
+        // Determine SM type from control byte direction bit
+        bool is_write = (sm_cfg.control_byte & 0x04) != 0;
+        mc.type = is_write ? PDO::SyncManagerType::ProcessOutput : PDO::SyncManagerType::ProcessInput;
+
+        for (const auto& pdo_region : sm_cfg.pdo_mappings) {
+            mc.addPDOMapping(pdo_region.pdo_index, pdo_region.size_bytes);
+            if (is_write) {
+                rx_pdo_indices.push_back(pdo_region.pdo_index);
+                output_sm_index = sm_cfg.sm_index;
+            } else {
+                tx_pdo_indices.push_back(pdo_region.pdo_index);
+                input_sm_index = sm_cfg.sm_index;
+            }
+        }
+
+        multi_configs.push_back(std::move(mc));
+    }
+
+    // Step 1: Update SlaveConfig SM entries
+    for (const auto& mc : multi_configs) {
+        if (mc.sm_index >= 4) continue;  // SlaveConfig only has sm[4]
+        auto& sm = cfgs[index_].sm[mc.sm_index];
+        sm.phys_start_addr = mc.phys_start_addr;
+        sm.length = mc.totalLength();
+        sm.control = mc.control;
+        sm.enable = false;  // Will be enabled after FMMU config
+        sm.type = mc.type;
+    }
+
+    // Update rxpdo/txpdo sizes for LogicalAddressManager compatibility
+    for (const auto& mc : multi_configs) {
+        if (mc.type == PDO::SyncManagerType::ProcessOutput) {
+            cfgs[index_].rxpdo_size = mc.totalLength();
+            cfgs[index_].rxpdo_sm = mc.sm_index;
+        } else if (mc.type == PDO::SyncManagerType::ProcessInput) {
+            cfgs[index_].txpdo_size = mc.totalLength();
+            cfgs[index_].txpdo_sm = mc.sm_index;
+        }
+    }
+
+    // Step 2: Write SM registers (disabled) — follows the same pattern as
+    // Master::configureProcessDataSyncManagersFromSii
+    const uint16_t adp = pdo.transport().adpForSlaveIndex(index_);
+    for (const auto& mc : multi_configs) {
+        if (mc.pdo_mappings.empty()) continue;
+
+        uint16_t base = static_cast<uint16_t>(0x0800 + mc.sm_index * 8);
+
+        // Disable SM first
+        uint8_t disable = 0x00;
+        master_.writeRegister(EtherCAT::SlaveAddress(index_),
+                              static_cast<uint16_t>(base + 6), &disable, 1, 200);
+
+        // Physical address
+        uint16_t addr_le = mc.phys_start_addr;
+        master_.writeRegister(EtherCAT::SlaveAddress(index_), base, &addr_le, 2, 200);
+
+        // Length
+        uint16_t len_le = mc.totalLength();
+        master_.writeRegister(EtherCAT::SlaveAddress(index_),
+                              static_cast<uint16_t>(base + 2), &len_le, 2, 200);
+
+        // Control
+        uint8_t ctrl_byte = std::bit_cast<uint8_t>(mc.control);
+        master_.writeRegister(EtherCAT::SlaveAddress(index_),
+                              static_cast<uint16_t>(base + 4), &ctrl_byte, 1, 200);
+
+        TETHER_LOGI(TAG, "Slave %u: Wrote SM%u (disabled): addr=0x%04X len=%u ctrl=0x%02X",
+                    index_, mc.sm_index, mc.phys_start_addr, mc.totalLength(), ctrl_byte);
+    }
+
+    // Step 3: Write PDO assignments to OD (0x1C10+n) via SyncManagerAccessor
+    for (const auto& mc : multi_configs) {
+        if (mc.pdo_mappings.empty()) continue;
+
+        std::vector<uint16_t> pdo_indices;
+        pdo_indices.reserve(mc.pdo_mappings.size());
+        for (const auto& p : mc.pdo_mappings) {
+            pdo_indices.push_back(p.pdo_index);
+        }
+
+        auto sm_accessor = this->sm(mc.sm_index);
+        SlaveError err = sm_accessor.writePDOAssignments(pdo_indices);
+        if (err != SlaveError::Ok) {
+            TETHER_LOGE(TAG, "Slave %u: Failed to write PDO assignments for SM%u",
+                        index_, mc.sm_index);
+            // Don't return error — some slaves may not support PDO assignment writes
+        } else {
+            TETHER_LOGI(TAG, "Slave %u: Wrote %zu PDO assignment(s) to SM%u (0x1C1%X)",
+                        index_, pdo_indices.size(), mc.sm_index, mc.sm_index);
+        }
+    }
+
+    // Step 4: Configure FMMUs via FMMUManager::configureFromMultiPDO
+    // Get the base logical address from the LogicalAddressManager if available
+    uint32_t base_log = 0;
+    auto* lam = pdo.logicalAddressManager();
+    if (lam && lam->isInitialized()) {
+        // Use the existing address map — our SM lengths are already set
+        lam->buildAddressMap(cfgs, master_.getDiscoveredSlaveCount());
+        if (lam->hasSlavePDOs(index_)) {
+            base_log = lam->getRxPDOLogicalAddr(index_);
+        }
+    }
+
+    if (!fmmu_mgr_.configureFromMultiPDO(multi_configs, base_log)) {
+        TETHER_LOGE(TAG, "Slave %u: FMMU configuration from multi-PDO failed", index_);
+        return SlaveError::PDOConfigFailed;
+    }
+
+    if (!fmmu_mgr_.writeToSlave(false)) {
+        TETHER_LOGE(TAG, "Slave %u: FMMU write failed", index_);
+        return SlaveError::PDOConfigFailed;
+    }
+
+    // Step 5: Enable SMs now that FMMUs are configured
+    for (const auto& mc : multi_configs) {
+        if (mc.pdo_mappings.empty()) continue;
+
+        uint16_t base = static_cast<uint16_t>(0x0800 + mc.sm_index * 8);
+        uint8_t activate = 0x01;
+        master_.writeRegister(EtherCAT::SlaveAddress(index_),
+                              static_cast<uint16_t>(base + 6), &activate, 1, 200);
+        TETHER_LOGI(TAG, "Slave %u: Enabled SM%u", index_, mc.sm_index);
+
+        // Update SlaveConfig to reflect enabled state
+        if (mc.sm_index < 4) {
+            cfgs[index_].sm[mc.sm_index].enable = true;
+        }
+    }
+
+    cfgs[index_].configured = true;
+    pdo_configured_ = true;
+
+    TETHER_LOGI(TAG, "Slave %u: Multi-PDO configuration complete (%zu SMs, %zu RxPDOs, %zu TxPDOs)",
+                index_, multi_configs.size(), rx_pdo_indices.size(), tx_pdo_indices.size());
+
+    return SlaveError::Ok;
+}
+
 const uint8_t* Slave::customPDOData(uint16_t pdo_index) const {
     for (const auto& info : custom_pdo_infos_) {
         if (info.pdo_index == pdo_index) {
@@ -1404,6 +1581,9 @@ SlaveError NonExistingSlave::configureCustomTxPDO(uint16_t, std::initializer_lis
 }
 SlaveError NonExistingSlave::applyCustomPDOs() {
     logCritical("applyCustomPDOs"); return SlaveError::SlaveNotFound;
+}
+SlaveError NonExistingSlave::configureMultiPDOs(const MultiPDOAssignment&) {
+    logCritical("configureMultiPDOs"); return SlaveError::SlaveNotFound;
 }
 SlaveError NonExistingSlave::transitionTo(SlaveState) {
     logCritical("transitionTo"); return SlaveError::SlaveNotFound;

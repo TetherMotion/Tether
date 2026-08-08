@@ -122,6 +122,113 @@ bool LogicalAddressManager::buildAddressMap(const PDO::SlaveConfig* configs,
 }
 
 // ============================================================================
+// buildAddressMapFromMultiPDO
+// ============================================================================
+
+bool LogicalAddressManager::buildAddressMapFromMultiPDO(
+    const std::vector<PDO::MultiPDOSyncManagerConfig>* sm_configs,
+    uint16_t slave_count) {
+
+    if (!sm_configs || slave_count == 0) {
+        TETHER_LOGW(TAG, "buildAddressMapFromMultiPDO: no configs or zero slave count");
+        return false;
+    }
+    if (slave_count > PDO::kMaxPDOSlaves) {
+        TETHER_LOGE(TAG,
+            "buildAddressMapFromMultiPDO: slave_count %u exceeds max %zu",
+            slave_count, PDO::kMaxPDOSlaves);
+        return false;
+    }
+
+    if (!initialized_) init();
+
+    std::memset(addr_map_, 0, sizeof(addr_map_));
+    slave_count_ = slave_count;
+    total_rxpdo_bytes_ = 0;
+    total_txpdo_bytes_ = 0;
+
+    // Pass 1: compute total RxPDO and TxPDO sizes across all slaves
+    for (uint16_t s = 0; s < slave_count; s++) {
+        const auto& configs = sm_configs[s];
+        for (const auto& sm_cfg : configs) {
+            if (sm_cfg.type == PDO::SyncManagerType::ProcessOutput) {
+                total_rxpdo_bytes_ += sm_cfg.totalLength();
+            } else if (sm_cfg.type == PDO::SyncManagerType::ProcessInput) {
+                total_txpdo_bytes_ += sm_cfg.totalLength();
+            }
+        }
+    }
+
+    // Pass 2: assign logical addresses and per-PDO entries
+    uint32_t rxpdo_offset = kBaseLogicalAddress;
+    uint32_t txpdo_offset = kBaseLogicalAddress + total_rxpdo_bytes_;
+
+    for (uint16_t s = 0; s < slave_count; s++) {
+        const auto& configs = sm_configs[s];
+        auto& entry = addr_map_[s];
+        bool has_any = false;
+
+        for (const auto& sm_cfg : configs) {
+            if (sm_cfg.pdo_mappings.empty()) continue;
+
+            bool is_output = (sm_cfg.type == PDO::SyncManagerType::ProcessOutput);
+            bool is_input = (sm_cfg.type == PDO::SyncManagerType::ProcessInput);
+            if (!is_output && !is_input) continue;
+
+            has_any = true;
+            uint16_t sm_total = sm_cfg.totalLength();
+            uint32_t base_addr = is_output ? rxpdo_offset : txpdo_offset;
+            uint16_t pdo_offset = 0;
+
+            if (is_output) {
+                entry.rxpdo_logical_addr = base_addr;
+                entry.rxpdo_length = sm_total;
+            } else {
+                entry.txpdo_logical_addr = base_addr;
+                entry.txpdo_length = sm_total;
+            }
+
+            // Record per-PDO entries
+            for (const auto& pdo : sm_cfg.pdo_mappings) {
+                if (entry.pdo_entry_count >= SlaveLogicalAddr::kMaxPDOEntries) break;
+                auto& pe = entry.pdo_entries[entry.pdo_entry_count];
+                pe.pdo_index = pdo.pdo_index;
+                pe.logical_addr = base_addr + pdo_offset;
+                pe.length = pdo.size_bytes;
+                pe.sm_index = sm_cfg.sm_index;
+                pe.is_output = is_output;
+                pdo_offset += pdo.size_bytes;
+                entry.pdo_entry_count++;
+
+                TETHER_LOGI(TAG, "Slave %u PDO 0x%04X: log=0x%08lX len=%u SM%u (%s)",
+                            s, pdo.pdo_index, (unsigned long)pe.logical_addr,
+                            pe.length, pe.sm_index, is_output ? "RxPDO" : "TxPDO");
+            }
+
+            if (is_output) {
+                rxpdo_offset += sm_total;
+            } else {
+                txpdo_offset += sm_total;
+            }
+        }
+
+        entry.active = has_any;
+    }
+
+    TETHER_LOGI(TAG, "Multi-PDO address map: %u slaves, RxPDO=%u, TxPDO=%u, total=%u, %zu PDO entries",
+                slave_count, total_rxpdo_bytes_, total_txpdo_bytes_,
+                total_rxpdo_bytes_ + total_txpdo_bytes_,
+                [&] {
+                    size_t total = 0;
+                    for (uint16_t s = 0; s < slave_count; s++)
+                        total += addr_map_[s].pdo_entry_count;
+                    return total;
+                }());
+
+    return true;
+}
+
+// ============================================================================
 // FMMU configuration queries
 // ============================================================================
 
@@ -148,6 +255,34 @@ uint16_t LogicalAddressManager::getTxPDOLength(uint16_t slave_index) const {
 bool LogicalAddressManager::hasSlavePDOs(uint16_t slave_index) const {
     if (slave_index >= slave_count_) return false;
     return addr_map_[slave_index].active;
+}
+
+// ============================================================================
+// Per-PDO address queries (multi-PDO mode)
+// ============================================================================
+
+uint32_t LogicalAddressManager::getPDOLogicalAddr(uint16_t slave_index, uint16_t pdo_index) const {
+    if (slave_index >= slave_count_) return 0;
+    const auto* pe = addr_map_[slave_index].findPDO(pdo_index);
+    return pe ? pe->logical_addr : 0;
+}
+
+uint16_t LogicalAddressManager::getPDOLength(uint16_t slave_index, uint16_t pdo_index) const {
+    if (slave_index >= slave_count_) return 0;
+    const auto* pe = addr_map_[slave_index].findPDO(pdo_index);
+    return pe ? pe->length : 0;
+}
+
+std::vector<LogicalAddressManager::PDOLogicalAddrEntry>
+LogicalAddressManager::getSlavePDOLogicalAddrs(uint16_t slave_index) const {
+    std::vector<PDOLogicalAddrEntry> result;
+    if (slave_index >= slave_count_) return result;
+    const auto& entry = addr_map_[slave_index];
+    result.reserve(entry.pdo_entry_count);
+    for (size_t i = 0; i < entry.pdo_entry_count; i++) {
+        result.push_back(entry.pdo_entries[i]);
+    }
+    return result;
 }
 
 // ============================================================================

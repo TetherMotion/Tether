@@ -48,6 +48,7 @@
 #include "tether/fmmu/FMMUConfiguration.hpp"
 #include "tether/platform/Platform.hpp"
 #include "tether/ethercat/CustomPDOMapping.hpp"
+#include "tether/ethercat/PDOMappingConfig.hpp"
 
 namespace EtherCAT {
 
@@ -412,6 +413,44 @@ public:
      */
     virtual SlaveError applyCustomPDOs();
 
+    // -- Multi-PDO sync manager configuration ---------------------------------
+
+    /**
+     * @brief Configuration for multi-PDO sync manager assignment.
+     *
+     * Each entry describes one sync manager with its physical address,
+     * control byte, and list of PDO mappings to assign to it.
+     */
+    struct MultiPDOAssignment {
+        struct SMConfig {
+            uint8_t  sm_index;          ///< SM index (0-7)
+            uint16_t phys_start_addr;   ///< Physical start address in ESC memory
+            uint8_t  control_byte;      ///< Control register byte
+            std::vector<PDO::PDOMappingRegion> pdo_mappings;
+        };
+        std::vector<SMConfig> sm_configs;
+    };
+
+    /**
+     * @brief Configure multiple PDO mappings per sync manager with FMMU integration.
+     *
+     * This is the high-level entry point for slaves that need multiple PDO
+     * mapping objects assigned to a single sync manager.  It performs the
+     * full configuration sequence:
+     *
+     * 1. Sets up SlaveConfig SM entries with total length = sum of PDO sizes
+     * 2. Writes SM registers (disabled)
+     * 3. Writes PDO assignments to OD (0x1C10+n) via SyncManagerAccessor
+     * 4. Configures FMMUs via FMMUManager::configureFromMultiPDO
+     * 5. Enables SMs
+     *
+     * Must be called in PRE_OP, after mailbox configuration.
+     *
+     * @param config  Multi-PDO assignment configuration
+     * @return SlaveError::Ok on success
+     */
+    virtual SlaveError configureMultiPDOs(const MultiPDOAssignment& config);
+
     /**
      * @brief Get a pointer to the raw PDO buffer for a custom PDO.
      *
@@ -723,6 +762,7 @@ public:
     SlaveError configureCustomRxPDO(uint16_t, std::initializer_list<CustomPDOMappingEntry>) override;
     SlaveError configureCustomTxPDO(uint16_t, std::initializer_list<CustomPDOMappingEntry>) override;
     SlaveError applyCustomPDOs() override;
+    SlaveError configureMultiPDOs(const MultiPDOAssignment&) override;
 
     SlaveError transitionTo(SlaveState) override;
     SlaveError transitionToInit() override;

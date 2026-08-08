@@ -185,6 +185,92 @@ bool FMMUManager::configureManual(uint16_t output_phys, uint16_t output_len,
 }
 
 // ============================================================================
+// FMMUManager — Multi-PDO Configuration
+// ============================================================================
+
+bool FMMUManager::configureFromMultiPDO(
+    const std::vector<PDO::MultiPDOSyncManagerConfig>& sm_configs,
+    uint32_t base_logical_addr) {
+
+    config_.clear();
+    config_.next_logical_addr = base_logical_addr;
+
+    TETHER_LOGI(TAG, "Configuring FMMUs from multi-PDO config (%zu SMs, base_log=0x%08lX)",
+             sm_configs.size(), (unsigned long)base_logical_addr);
+
+    for (const auto& sm_cfg : sm_configs) {
+        if (sm_cfg.pdo_mappings.empty()) {
+            TETHER_LOGD(TAG, "  SM%u: no PDO mappings, skipping", sm_cfg.sm_index);
+            continue;
+        }
+
+        if (sm_cfg.sm_index <= 1) {
+            TETHER_LOGW(TAG, "  SM%u: assigning PDOs to mailbox SM is unusual (proceeding anyway)",
+                        sm_cfg.sm_index);
+        }
+
+        const auto* pdos = sm_cfg.pdo_mappings.data();
+        size_t count = sm_cfg.pdo_mappings.size();
+
+        bool ok = false;
+        if (sm_cfg.type == PDO::SyncManagerType::ProcessOutput) {
+            ok = config_.addOutputWithPDOs(sm_cfg.phys_start_addr, sm_cfg.sm_index, pdos, count);
+        } else if (sm_cfg.type == PDO::SyncManagerType::ProcessInput) {
+            ok = config_.addInputWithPDOs(sm_cfg.phys_start_addr, sm_cfg.sm_index, pdos, count);
+        } else {
+            TETHER_LOGW(TAG, "  SM%u: non-process-data type, skipping FMMU", sm_cfg.sm_index);
+            continue;
+        }
+
+        if (!ok) {
+            TETHER_LOGE(TAG, "  SM%u: failed to add FMMU with PDOs (slots exhausted?)", sm_cfg.sm_index);
+            return false;
+        }
+
+        const FMMUConfig& fmmu = config_.fmmus[config_.fmmu_count - 1];
+        TETHER_LOGI(TAG, "  SM%u: FMMU%zu %s -> log=0x%08lX phy=0x%04X len=%u (%zu PDOs)",
+                 sm_cfg.sm_index, config_.fmmu_count - 1,
+                 (sm_cfg.type == PDO::SyncManagerType::ProcessOutput) ? "Output" : "Input",
+                 (unsigned long)fmmu.logical_start_addr, fmmu.physical_start_addr,
+                 fmmu.length, count);
+
+        for (size_t i = 0; i < count; i++) {
+            const auto& pdo = sm_cfg.pdo_mappings[i];
+            const auto* entry = config_.findPDOByIndex(pdo.pdo_index);
+            if (entry) {
+                TETHER_LOGI(TAG, "    PDO 0x%04X: log=0x%08lX phys_off=%u size=%u",
+                         pdo.pdo_index, (unsigned long)entry->logical_addr,
+                         entry->physical_offset, entry->size_bytes);
+            }
+        }
+    }
+
+    TETHER_LOGI(TAG, "%zu FMMUs configured, %zu PDO entries, next_log=0x%08lX",
+             config_.fmmu_count, config_.pdo_entry_count,
+             (unsigned long)config_.next_logical_addr);
+
+    return config_.fmmu_count > 0;
+}
+
+// ============================================================================
+// FMMUManager — Per-PDO Address Queries
+// ============================================================================
+
+uint32_t FMMUManager::getPDOLogicalAddr(uint16_t pdo_index) const {
+    const FMMUPDOEntry* entry = config_.findPDOByIndex(pdo_index);
+    return entry ? entry->logical_addr : 0;
+}
+
+uint16_t FMMUManager::getPDOSize(uint16_t pdo_index) const {
+    const FMMUPDOEntry* entry = config_.findPDOByIndex(pdo_index);
+    return entry ? entry->size_bytes : 0;
+}
+
+const FMMUPDOEntry* FMMUManager::findPDOEntry(uint16_t pdo_index) const {
+    return config_.findPDOByIndex(pdo_index);
+}
+
+// ============================================================================
 // FMMUManager — Hardware Register Access
 // ============================================================================
 
@@ -436,8 +522,8 @@ uint32_t FMMUManager::getInputLogicalAddr() const {
 // ============================================================================
 
 void FMMUManager::logConfig(const char* tag) const {
-    TETHER_LOGI(tag, "FMMU Config: %zu FMMUs, configured=%s, next_log=0x%08lX",
-             config_.fmmu_count, config_.configured ? "yes" : "no",
+    TETHER_LOGI(tag, "FMMU Config: %zu FMMUs, %zu PDO entries, configured=%s, next_log=0x%08lX",
+             config_.fmmu_count, config_.pdo_entry_count, config_.configured ? "yes" : "no",
              (unsigned long)config_.next_logical_addr);
     for (size_t i = 0; i < config_.fmmu_count; i++) {
         const FMMUConfig& f = config_.fmmus[i];
@@ -446,6 +532,12 @@ void FMMUManager::logConfig(const char* tag) const {
                  (unsigned long)f.logical_start_addr,
                  f.physical_start_addr, f.length,
                  std::bit_cast<uint8_t>(f.type), std::bit_cast<uint8_t>(f.activate), f.associated_sm);
+    }
+    for (size_t i = 0; i < config_.pdo_entry_count; i++) {
+        const FMMUPDOEntry& e = config_.pdo_entries[i];
+        TETHER_LOGI(tag, "  PDO 0x%04X: log=0x%08lX phys_off=%u size=%u SM%u",
+                 e.pdo_index, (unsigned long)e.logical_addr,
+                 e.physical_offset, e.size_bytes, e.sm_index);
     }
 }
 
