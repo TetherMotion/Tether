@@ -715,6 +715,29 @@ bool FSoEMasterConnection::exchangeWith(FSoESlave& slave, uint64_t current_time_
     return processRxFrame(rx.data(), rx_len);
 }
 
+bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max,
+                                          const uint8_t* tx_pdo_in, size_t tx_pdo_len,
+                                          uint64_t current_time_ms)
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+
+    // Run the FSoE state machine (watchdog, phase timeouts, auto-recovery).
+    update(current_time_ms);
+
+    // Build the master→slave FSoE frame into the RxPDO buffer.
+    // The frame size varies by state (Session=5B, Connection=7B,
+    // Parameter=9B, Data=11B).  prepareTxFrame writes only the needed
+    // bytes; the rest of the PDO buffer is left untouched.
+    const size_t tx_len = prepareTxFrame(rx_pdo_out, rx_pdo_max);
+    if (tx_len == 0) {
+        return false;
+    }
+
+    // Process the slave→master FSoE frame from the TxPDO buffer.
+    // The drive writes its response into TxPDO each cycle.
+    return processRxFrame(tx_pdo_in, tx_pdo_len);
+}
+
 bool FSoEMasterConnection::areSafeInputsValid() const
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);

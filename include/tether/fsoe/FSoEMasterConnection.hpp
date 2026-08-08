@@ -117,6 +117,25 @@ public:
     // --- Simulation helper (for testing with FSoESlave) ---
     bool exchangeWith(FSoESlave& slave, uint64_t current_time_ms);
 
+    /// Exchange FSoE frames via EtherCAT PDO buffers (real drive communication).
+    ///
+    /// Runs the FSoE state machine, builds the master→slave frame into
+    /// @p rx_pdo_out (the RxPDO buffer the master writes each cycle), and
+    /// processes the slave→master frame from @p tx_pdo_in (the TxPDO buffer
+    /// the drive populates each cycle).  This is the generic FSoE-over-PDO
+    /// master exchange used by any drive profile that maps FSoE PDUs onto
+    /// EtherCAT PDOs.
+    ///
+    /// @param rx_pdo_out      Output buffer for the master→slave FSoE frame
+    /// @param rx_pdo_max      Capacity of rx_pdo_out
+    /// @param tx_pdo_in       Input buffer with the slave→master FSoE frame
+    /// @param tx_pdo_len      Number of valid bytes in tx_pdo_in
+    /// @param current_time_ms Monotonic time in milliseconds
+    /// @return true if the frame was processed successfully
+    bool exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max,
+                        const uint8_t* tx_pdo_in, size_t tx_pdo_len,
+                        uint64_t current_time_ms);
+
     bool areSafeInputsValid() const;
 
     // --- Bit-level Safe I/O ---
