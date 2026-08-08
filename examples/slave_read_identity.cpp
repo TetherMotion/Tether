@@ -23,6 +23,7 @@
 #include "tether/ethercat/Slave.hpp"
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/SyncManager.hpp"
+#include "tether/ethercat/ESIFile.hpp"
 #include "tether/sii/SIIReader.hpp"
 #include "tether/sii/SIIParser.hpp"
 
@@ -38,6 +39,7 @@ int main(int argc, char** argv) {
     Tether::Examples::addVlanArgs(program);
     Tether::Examples::addMailboxSizeArg(program);
     Tether::Examples::addMailboxAddressArg(program);
+    Tether::Examples::addEsiXmlArg(program);
 
     try { program.parse_args(argc, argv); }
     catch (const std::runtime_error& err) {
@@ -70,9 +72,29 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    std::string esi_xml = program.get<std::string>("--esi-xml");
+    const bool use_esi = !esi_xml.empty();
+
+    // If --esi-xml is provided, construct ESIFile (parses XML; requires
+    // tether_esi linked — TETHER_HAVE_ESI=1). If ESI support is not
+    // compiled in, ESIFile(path) aborts with a critical error.
+    std::optional<EtherCAT::ESIFile> esi;
+    if (use_esi) {
+        esi.emplace(esi_xml);
+        if (esi->empty()) {
+            TETHER_LOGE(TAG, "Failed to parse ESI XML '%s': %s",
+                        esi_xml.c_str(), esi->errorMessage().c_str());
+            return 1;
+        }
+        TETHER_LOGI(TAG, "Loaded ESI XML '%s' (%zu device(s))",
+                    esi_xml.c_str(), esi->devices().size());
+    }
+
     TETHER_LOGI(TAG, "slave_read_identity — interface: %s, target slave: %d",
                 iface.c_str(), slave_idx);
-    Tether::Examples::logMailboxConfig(mbSize, mbAddr, TAG);
+    if (!use_esi) {
+        Tether::Examples::logMailboxConfig(mbSize, mbAddr, TAG);
+    }
 
     Tether::Examples::HostEtherNetSession session;
     if (!Tether::Examples::initHostEthernet(session, iface, TAG)) {
@@ -113,10 +135,15 @@ int main(int argc, char** argv) {
     auto& sl = master.slave(static_cast<uint16_t>(slave_idx));
 
     TETHER_LOGI(TAG, "Configuring mailbox for slave %d...", slave_idx);
-    auto mb_err = sl.configureMailbox(
-        {.address = mbAddr.outAddress, .length = mbSize.outSize},
-        {.address = mbAddr.inAddress, .length = mbSize.inSize},
-        0x0004);
+    EtherCAT::SlaveError mb_err;
+    if (use_esi) {
+        mb_err = sl.configureMailbox(*esi);
+    } else {
+        mb_err = sl.configureMailbox(
+            {.address = mbAddr.outAddress, .length = mbSize.outSize},
+            {.address = mbAddr.inAddress, .length = mbSize.inSize},
+            0x0004);
+    }
     if (mb_err != EtherCAT::SlaveError::Ok) {
         TETHER_LOGE(TAG, "Mailbox configuration failed: %s",
                     EtherCAT::slaveErrorToString(mb_err));

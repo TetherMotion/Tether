@@ -19,6 +19,7 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -29,6 +30,8 @@
 #include "tether/ethercat/FaultDetection.hpp"
 #include "tether/ethercat/ALResetController.hpp"
 #include "tether/ethercat/SyncManager.hpp"
+#include "tether/ethercat/ESIFile.hpp"
+#include "tether/ethercat/ESIParser.hpp"
 #include "tether/platform/EspCompat.hpp"
 
 #include "common/ExampleHelpers.hpp"
@@ -76,6 +79,7 @@ int main(int argc, char** argv) {
     Tether::Examples::addVlanArgs(program);
     Tether::Examples::addMailboxSizeArg(program);
     Tether::Examples::addMailboxAddressArg(program);
+    Tether::Examples::addEsiXmlArg(program);
     program.add_argument("-s", "--slave")
         .append()
         .help("Slave index to reset. Repeatable. Accepts comma list (e.g. -s 1,2,3). Default: all discovered slaves.");
@@ -97,6 +101,19 @@ int main(int argc, char** argv) {
 
     std::string iface       = program.get<std::string>("--interface");
     std::string debug_str   = program.get<std::string>("--debug");
+    std::string esi_xml     = program.get<std::string>("--esi-xml");
+
+    std::optional<EtherCAT::ESIFile> esi;
+    if (!esi_xml.empty()) {
+        esi.emplace(esi_xml);
+        if (esi->empty()) {
+            TETHER_LOGE(TAG, "Failed to parse ESI XML '%s': %s",
+                        esi_xml.c_str(), esi->errorMessage().c_str());
+            return 1;
+        }
+        TETHER_LOGI(TAG, "Loaded ESI XML '%s' (%zu device(s)) for cross-reference",
+                    esi_xml.c_str(), esi->devices().size());
+    }
 
     int max_iterations = 50;
     try {
@@ -267,6 +284,15 @@ int main(int argc, char** argv) {
     }
 
     TETHER_LOGI(TAG, "=== Reset Summary: %u succeeded, %u failed ===", success_count, fail_count);
+
+    // Print ESI device info for cross-reference if --esi-xml was provided
+    if (esi && !esi->empty()) {
+        TETHER_LOGI(TAG, "\n=== ESI XML Cross-Reference (%s) ===", esi_xml.c_str());
+        for (const auto& dev : esi->devices()) {
+            TETHER_LOGI(TAG, "%s",
+                        EtherCAT::ESI::formatDeviceHumanReadable(dev, true).c_str());
+        }
+    }
 
     master.stop();
     Tether::Examples::shutdownHostEthernet(session);

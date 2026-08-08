@@ -43,6 +43,7 @@
 #include "tether/ethercat/SyncManager.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/CoEManager.hpp"
+#include "tether/ethercat/ESIFile.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include "tether/platform/Platform.hpp"
 
@@ -998,6 +999,7 @@ int main(int argc, char** argv) {
     Tether::Examples::addVlanArgs(program);
     Tether::Examples::addMailboxSizeArg(program);
     Tether::Examples::addMailboxAddressArg(program);
+    Tether::Examples::addEsiXmlArg(program);
     Tether::Examples::addDurationArg(program, 0.0);
     program.add_argument("--slot-scan-delay")
         .scan<'i', int>()
@@ -1057,6 +1059,20 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    std::string esi_xml = program.get<std::string>("--esi-xml");
+    const bool use_esi = !esi_xml.empty();
+    std::optional<EtherCAT::ESIFile> esi;
+    if (use_esi) {
+        esi.emplace(esi_xml);
+        if (esi->empty()) {
+            TETHER_LOGE(TAG, "Failed to parse ESI XML '%s': %s",
+                        esi_xml.c_str(), esi->errorMessage().c_str());
+            return 1;
+        }
+        TETHER_LOGI(TAG, "Loaded ESI XML '%s' (%zu device(s))",
+                    esi_xml.c_str(), esi->devices().size());
+    }
+
     TETHER_LOGI(TAG, "kinco_rp20_io — interface: %s, duration: %.1f s",
                 iface.c_str(), duration_sec);
     Tether::Examples::logVlanConfig(vlan, TAG);
@@ -1105,10 +1121,15 @@ int main(int argc, char** argv) {
         auto& sl = master.slave(s);
 
         TETHER_LOGI(TAG, "Slave %u: configuring mailbox...", s);
-        auto mb_err = sl.configureMailbox(
-            {.address = mbAddr.outAddress, .length = mbSize.outSize},
-            {.address = mbAddr.inAddress, .length = mbSize.inSize},
-            0x0004);
+        EtherCAT::SlaveError mb_err;
+        if (use_esi) {
+            mb_err = sl.configureMailbox(*esi);
+        } else {
+            mb_err = sl.configureMailbox(
+                {.address = mbAddr.outAddress, .length = mbSize.outSize},
+                {.address = mbAddr.inAddress, .length = mbSize.inSize},
+                0x0004);
+        }
         if (mb_err != EtherCAT::SlaveError::Ok) {
             TETHER_LOGW(TAG, "Slave %u: explicit mailbox config failed (%s), trying SII auto-config",
                         s, EtherCAT::slaveErrorToString(mb_err));

@@ -387,6 +387,20 @@ void logMailboxConfig(const MailboxSizeConfig& size,
 }
 
 // ============================================================================
+// ESI (EtherCAT Slave Information) XML helpers
+// ============================================================================
+
+void addEsiXmlArg(argparse::ArgumentParser& program,
+                  const std::string& defaultValue) {
+    program.add_argument("--esi-xml")
+        .default_value(defaultValue)
+        .help("Path to an ESI (EtherCAT Slave Information) XML file. "
+              "When provided, mailbox and PDO configuration is read from "
+              "the ESI file instead of SII EEPROM. Requires tether_esi "
+              "library to be linked (TETHER_HAVE_ESI=1).");
+}
+
+// ============================================================================
 // SDO abort reporting
 // ============================================================================
 

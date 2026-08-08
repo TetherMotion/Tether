@@ -11,6 +11,7 @@
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/SyncManager.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
+#include "tether/ethercat/ESITypes.hpp"
 #include "tether/sii/SIIReader.hpp"
 #include "tether/ethercat/FaultDetection.hpp"
 #include "tether/platform/Platform.hpp"
@@ -103,6 +104,97 @@ SlaveError Slave::configureMailbox(
     return SlaveError::Ok;
 }
 
+// -- ESI helper: find matching SyncManager by name ---------------------------
+
+namespace {
+
+/// Find a SyncManagerEntry by name substring (e.g. "MBoxOut", "MBoxIn",
+/// "Outputs", "Inputs").
+const ESI::SyncManagerEntry* findSmByName(const ESI::DeviceInfo& dev,
+                                           const char* needle) {
+    for (const auto& sm : dev.syncManagers) {
+        if (sm.name.find(needle) != std::string::npos) return &sm;
+    }
+    return nullptr;
+}
+
+/// Read SII identity for matching; returns {vendorId, productCode} or {0,0}.
+struct ESIIdentityMatch {
+    uint32_t vendorId{0};
+    uint32_t productCode{0};
+};
+ESIIdentityMatch readIdentityForESIMatch(EtherCAT::Master& master, uint16_t idx) {
+    ESIIdentityMatch m;
+    EtherCAT::SII::SIIIdentity id;
+    if (EtherCAT::SII::readSIIIdentity(master, idx, id)) {
+        m.vendorId = id.vendor_id;
+        m.productCode = id.product_code;
+    }
+    return m;
+}
+
+} // anonymous namespace
+
+SlaveError Slave::configureMailbox(
+    const ESIFile& esi,
+    Tether::Platform::LogLevel log_level)
+{
+    if (esi.empty()) {
+        TETHER_LOGE(TAG, "Slave %u: ESI file is empty — cannot configure mailbox from ESI", index_);
+        return SlaveError::MailboxConfigFailed;
+    }
+
+    // Match device by SII identity
+    auto id = readIdentityForESIMatch(master_, index_);
+    const ESI::DeviceInfo* dev = esi.findDevice(id.vendorId, id.productCode);
+    if (!dev) {
+        TETHER_LOGE(TAG, "Slave %u: ESI file has no devices", index_);
+        return SlaveError::MailboxConfigFailed;
+    }
+
+    if (log_level >= Tether::Platform::LogLevel::Debug) {
+        TETHER_LOGD(TAG, "Slave %u: ESI device '%s' matched (vendor=0x%08X product=0x%08X)",
+                    index_, dev->name.c_str(), dev->vendorId, dev->productCode);
+    }
+
+    // Find MBoxOut (master→slave write, SM0) and MBoxIn (slave→master read, SM1)
+    const ESI::SyncManagerEntry* mbxOut = findSmByName(*dev, "MBoxOut");
+    const ESI::SyncManagerEntry* mbxIn  = findSmByName(*dev, "MBoxIn");
+
+    MailboxSyncManagerConfig mbox_out{};
+    MailboxSyncManagerConfig mbox_in{};
+
+    if (mbxOut) {
+        mbox_out.address = mbxOut->startAddress;
+        mbox_out.length  = mbxOut->defaultSize;
+    } else {
+        TETHER_LOGW(TAG, "Slave %u: ESI has no MBoxOut sync manager — using defaults", index_);
+        mbox_out.address = 0x1000;
+        mbox_out.length  = 256;
+    }
+
+    if (mbxIn) {
+        mbox_in.address = mbxIn->startAddress;
+        mbox_in.length  = mbxIn->defaultSize;
+    } else {
+        TETHER_LOGW(TAG, "Slave %u: ESI has no MBoxIn sync manager — using defaults", index_);
+        mbox_in.address = 0x1200;
+        mbox_in.length  = 256;
+    }
+
+    // Protocol flags
+    uint16_t protocols = 0x0004; // default: CoE
+    if (dev->mailbox.protocols.has_value()) {
+        protocols = *dev->mailbox.protocols;
+    }
+
+    TETHER_LOGI(TAG, "Slave %u: Configuring mailbox from ESI (out=0x%04X/%u, in=0x%04X/%u, proto=0x%04X)",
+                index_, mbox_out.address, mbox_out.length,
+                mbox_in.address, mbox_in.length, protocols);
+
+    return configureMailbox(mbox_out, mbox_in, protocols);
+}
+
 void Slave::assumeMailboxAlreadyConfigured() {
     mailbox_configured_ = true;
     TETHER_LOGI( TAG,
@@ -164,6 +256,40 @@ SlaveError Slave::configurePDOSyncManagers(
 
     pdo_configured_ = true;
     return SlaveError::Ok;
+}
+
+SlaveError Slave::configurePDOSyncManagers(const ESIFile& esi) {
+    if (esi.empty()) {
+        TETHER_LOGE(TAG, "Slave %u: ESI file is empty — cannot configure PDO SMs from ESI", index_);
+        return SlaveError::PDOConfigFailed;
+    }
+
+    auto id = readIdentityForESIMatch(master_, index_);
+    const ESI::DeviceInfo* dev = esi.findDevice(id.vendorId, id.productCode);
+    if (!dev) {
+        TETHER_LOGE(TAG, "Slave %u: ESI file has no devices", index_);
+        return SlaveError::PDOConfigFailed;
+    }
+
+    // Find Outputs (SM2) and Inputs (SM3) sync managers
+    const ESI::SyncManagerEntry* smOut = findSmByName(*dev, "Outputs");
+    const ESI::SyncManagerEntry* smIn  = findSmByName(*dev, "Inputs");
+
+    if (!smOut || !smIn) {
+        TETHER_LOGE(TAG, "Slave %u: ESI missing Outputs/Inputs sync managers", index_);
+        return SlaveError::PDOConfigFailed;
+    }
+
+    uint8_t sm2_ctrl = std::bit_cast<uint8_t>(smOut->control);
+    uint8_t sm3_ctrl = std::bit_cast<uint8_t>(smIn->control);
+
+    TETHER_LOGI(TAG, "Slave %u: Configuring PDO SMs from ESI (SM2=0x%04X/%u ctrl=0x%02X, SM3=0x%04X/%u ctrl=0x%02X)",
+                index_, smOut->startAddress, smOut->defaultSize, sm2_ctrl,
+                smIn->startAddress, smIn->defaultSize, sm3_ctrl);
+
+    return configurePDOSyncManagers(
+        smOut->startAddress, smOut->defaultSize, sm2_ctrl,
+        smIn->startAddress, smIn->defaultSize, sm3_ctrl);
 }
 
 void Slave::assumePDOAlreadyConfigured() {
@@ -798,6 +924,91 @@ SlaveError Slave::registerPDOsFromSII(SIIPDOConfig& out_config) {
     return SlaveError::Ok;
 }
 
+SlaveError Slave::registerPDOsFromESI(const ESIFile& esi, SIIPDOConfig& out_config) {
+    if (esi.empty()) {
+        TETHER_LOGE(TAG, "Slave %u: ESI file is empty — cannot register PDOs from ESI", index_);
+        return SlaveError::PDOConfigFailed;
+    }
+
+    auto id = readIdentityForESIMatch(master_, index_);
+    const ESI::DeviceInfo* dev = esi.findDevice(id.vendorId, id.productCode);
+    if (!dev) {
+        TETHER_LOGE(TAG, "Slave %u: ESI file has no devices", index_);
+        return SlaveError::PDOConfigFailed;
+    }
+
+    // Find best-matching RxPDO (SM2) and TxPDO (SM3) from ESI
+    const ESI::PDO* rxpdo = nullptr;
+    const ESI::PDO* txpdo = nullptr;
+
+    for (const auto& pdo : dev->rxPdos) {
+        if (pdo.sm == 2 || pdo.sm == -1) {
+            rxpdo = &pdo;
+            break;
+        }
+    }
+    for (const auto& pdo : dev->txPdos) {
+        if (pdo.sm == 3 || pdo.sm == -1) {
+            txpdo = &pdo;
+            break;
+        }
+    }
+
+    if (!rxpdo && !txpdo) {
+        TETHER_LOGE(TAG, "Slave %u: No PDO data found in ESI", index_);
+        return SlaveError::PDOConfigFailed;
+    }
+
+    // Compute total byte sizes from ESI entries
+    auto pdoTotalBytes = [](const ESI::PDO& p) -> uint16_t {
+        uint16_t bits = 0;
+        for (const auto& e : p.entries) bits += e.bitLen;
+        return static_cast<uint16_t>((bits + 7) / 8);
+    };
+
+    // Remove any existing entries for this slave to avoid duplicates
+    PDO::PDOMapping& mapping = master_.pdo().mapping();
+    mapping.remove_entries_for_slave(index_);
+
+    out_config = SIIPDOConfig{};
+
+    if (rxpdo) {
+        uint16_t size = pdoTotalBytes(*rxpdo);
+        pdo_rx_buffer_.assign(size, 0);
+        int idx = mapping.add_rxpdo(index_, pdo_rx_buffer_.data(), size,
+                                    rxpdo->index, PDO::PDOAddressMode::Position);
+        if (idx < 0) {
+            TETHER_LOGE(TAG, "Slave %u: Failed to register RxPDO mapping entry from ESI", index_);
+            return SlaveError::PDOMappingFailed;
+        }
+        out_config.rxpdo_index = rxpdo->index;
+        out_config.rxpdo_size  = size;
+        out_config.has_rxpdo   = true;
+        TETHER_LOGI(TAG, "Slave %u: Registered RxPDO 0x%04X (%u bytes) from ESI", index_,
+                    rxpdo->index, size);
+    }
+
+    if (txpdo) {
+        uint16_t size = pdoTotalBytes(*txpdo);
+        pdo_tx_buffer_.assign(size, 0);
+        int idx = mapping.add_txpdo(index_, pdo_tx_buffer_.data(), size,
+                                    txpdo->index, PDO::PDOAddressMode::Position);
+        if (idx < 0) {
+            TETHER_LOGE(TAG, "Slave %u: Failed to register TxPDO mapping entry from ESI", index_);
+            return SlaveError::PDOMappingFailed;
+        }
+        out_config.txpdo_index = txpdo->index;
+        out_config.txpdo_size  = size;
+        out_config.has_txpdo   = true;
+        TETHER_LOGI(TAG, "Slave %u: Registered TxPDO 0x%04X (%u bytes) from ESI", index_,
+                    txpdo->index, size);
+    }
+
+    master_.pdo().finalizeMapping(index_);
+
+    return SlaveError::Ok;
+}
+
 SlaveError Slave::assignPDOs(const SIIPDOConfig& config) {
     if (!config.has_rxpdo && !config.has_txpdo) {
         TETHER_LOGE(TAG, "Slave %u: assignPDOs called with empty config (zero PDOs available), skipping", index_);
@@ -1134,6 +1345,10 @@ SlaveError NonExistingSlave::configureMailbox(const MailboxSyncManagerConfig&,
                                                const MailboxSyncManagerConfig&, uint16_t) {
     logCritical("configureMailbox"); return SlaveError::SlaveNotFound;
 }
+SlaveError NonExistingSlave::configureMailbox(const ESIFile&,
+                                               Tether::Platform::LogLevel) {
+    logCritical("configureMailbox"); return SlaveError::SlaveNotFound;
+}
 void NonExistingSlave::assumeMailboxAlreadyConfigured() {
     logCritical("assumeMailboxAlreadyConfigured");
 }
@@ -1144,11 +1359,17 @@ SlaveError NonExistingSlave::configurePDOSyncManagers(uint16_t, uint16_t, uint8_
                                                        uint16_t, uint16_t, uint8_t) {
     logCritical("configurePDOSyncManagers"); return SlaveError::SlaveNotFound;
 }
+SlaveError NonExistingSlave::configurePDOSyncManagers(const ESIFile&) {
+    logCritical("configurePDOSyncManagers"); return SlaveError::SlaveNotFound;
+}
 void NonExistingSlave::assumePDOAlreadyConfigured() {
     logCritical("assumePDOAlreadyConfigured");
 }
 SlaveError NonExistingSlave::registerPDOsFromSII(SIIPDOConfig&) {
     logCritical("registerPDOsFromSII"); return SlaveError::SlaveNotFound;
+}
+SlaveError NonExistingSlave::registerPDOsFromESI(const ESIFile&, SIIPDOConfig&) {
+    logCritical("registerPDOsFromESI"); return SlaveError::SlaveNotFound;
 }
 SlaveError NonExistingSlave::assignPDOs(const SIIPDOConfig&) {
     logCritical("assignPDOs"); return SlaveError::SlaveNotFound;
