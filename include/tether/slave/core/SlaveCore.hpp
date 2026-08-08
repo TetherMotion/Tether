@@ -22,6 +22,7 @@
 #pragma once
 
 #include "tether/slave/core/SlaveTypes.hpp"
+#include "tether/slave/core/SIIEmulator.hpp"
 #include "tether/slave/logging/SlaveLogger.hpp"
 #include "tether/ethercat/Types.hpp"
 
@@ -554,8 +555,8 @@ private:
     // DC state
     DCState dcState_;
     
-    // SII state
-    SIIState siiState_;
+    // SII state (delegated to SIIEmulator)
+    SIIEmulator siiEmulator_;
     
     // Watchdog state
     WatchdogState watchdog_;
