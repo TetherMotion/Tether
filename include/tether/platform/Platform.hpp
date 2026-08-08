@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <chrono>
 #include <functional>
+#include <string>
 
 #include "logging/Logger.hpp"
 
@@ -132,6 +133,75 @@ bool isLinux();
  *         false if an attempt was made and failed (e.g. insufficient privileges).
  */
 bool setCurrentThreadRealtime(int priority = -1);
+
+//=============================================================================
+// Realtime Kernel Detection
+//=============================================================================
+
+/**
+ * @brief Preempt model compiled into the kernel (from uname)
+ */
+enum class PreemptModel {
+    PreemptRt,        ///< PREEMPT_RT (hard realtime)
+    PreemptDynamic,   ///< PREEMPT_DYNAMIC (mode selectable at runtime)
+    PreemptFull,      ///< Static PREEMPT (full preempt, low-latency desktop)
+    PreemptVoluntary, ///< PREEMPT_VOLUNTARY
+    PreemptNone,      ///< PREEMPT_NONE
+    Unknown,
+};
+
+/**
+ * @brief Classified realtime level (lowest to highest)
+ */
+enum class RealtimeClass {
+    None,          ///< preempt=none or unknown
+    Voluntary,     ///< preempt=voluntary or lazy
+    LowLatency,    ///< full preempt (desktop low-latency, not hard RT)
+    HardRealtime,  ///< PREEMPT_RT
+};
+
+/**
+ * @brief Caller-selectable realtime requirement level
+ */
+enum class RealtimeRequirement {
+    None,          ///< Detect and log only, never exit
+    LowLatency,    ///< Require at least full preempt; error if below
+    HardRealtime,  ///< Require PREEMPT_RT; warn if only low-latency, error if below
+};
+
+/**
+ * @brief Result of realtime kernel detection
+ */
+struct RealtimeKernelInfo {
+    bool is_realtime = false;             ///< true only for PREEMPT_RT
+    bool is_low_latency = false;          ///< true for full preempt or PREEMPT_RT
+    RealtimeClass realtime_class = RealtimeClass::None;
+    PreemptModel build_model = PreemptModel::Unknown;   ///< from uname
+    PreemptModel active_model = PreemptModel::Unknown;  ///< active mode
+    std::string active_preempt_mode;      ///< "full", "lazy", "voluntary", "none", "unknown", "n/a"
+    std::string sysname;
+    std::string kernel_release;
+    std::string kernel_version;
+    std::string detection_source;
+};
+
+/**
+ * @brief Detect the kernel's realtime capabilities
+ * @return RealtimeKernelInfo with build model, active dynamic mode, and classified level
+ */
+RealtimeKernelInfo detectRealtimeKernel();
+
+/**
+ * @brief Ensure the kernel meets the requested realtime level, or exit
+ * @param req Requirement level (default: HardRealtime)
+ * @return RealtimeKernelInfo on success
+ *
+ * Behavior by requirement level:
+ * - HardRealtime: pass if PREEMPT_RT; WARN if low-latency desktop; ERROR+exit if below
+ * - LowLatency:   pass if full preempt or better; ERROR+exit if below
+ * - None:         always pass (detect and log only)
+ */
+RealtimeKernelInfo ensureRealtimeKernelOrExit(RealtimeRequirement req = RealtimeRequirement::HardRealtime);
 
 } // namespace Platform
 } // namespace Tether

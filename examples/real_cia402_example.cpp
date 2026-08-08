@@ -18,6 +18,8 @@
 #include <cstring>
 #include <cmath>
 
+#include "tether/platform/Platform.hpp"
+
 // EtherCAT master includes (using SOEM or similar)
 // #include "ethercat.h"
 
@@ -514,6 +516,8 @@ void cyclicTask(CiA402DriveController& drive) {
 
 int main(int argc, char* argv[]) {
     std::cout << "=== CiA 402 Drive Control Example ===" << std::endl;
+
+    Tether::Platform::ensureRealtimeKernelOrExit();
     
     // Set up signal handler
     signal(SIGINT, signalHandler);

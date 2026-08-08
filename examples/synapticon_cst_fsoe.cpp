@@ -340,6 +340,8 @@ int main(int argc, char** argv) {
     }
     const uint16_t slave_idx = static_cast<uint16_t>(args.slave_index);
 
+    Tether::Platform::ensureRealtimeKernelOrExit();
+
     TETHER_LOGI(TAG,
         "synapticon_cst_fsoe — interface=%s slave=%u duration=%.1f fsoe=%s",
         args.interface.c_str(), slave_idx, args.duration,
