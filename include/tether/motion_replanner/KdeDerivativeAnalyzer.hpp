@@ -456,6 +456,16 @@ struct DependenceMetrics {
     double normalizedMutualInfo = 0.0;
 };
 
+/// @brief Tail risk metrics (VaR, CVaR, ETD).
+/// @see KdeDerivativeAnalyzer::computeTailRisk
+/// @see KdeStatistics::computeTailRisk
+struct TailRisk {
+    double tailFraction = 0.0;
+    double var95 = 0.0;
+    double expectedTailDeviation = 0.0;
+    double conditionalVar95 = 0.0;
+};
+
 class KdeDerivativeAnalyzer {
 public:
     explicit KdeDerivativeAnalyzer(KdeConfig config = {});
@@ -556,12 +566,7 @@ public:
         DeviationAxis devType) const;
 
     /// Compute tail risk metrics (VaR, CVaR, ETD).
-    struct TailRisk {
-        double tailFraction = 0.0;
-        double var95 = 0.0;
-        double expectedTailDeviation = 0.0;
-        double conditionalVar95 = 0.0;
-    };
+    /// @see TailRisk (defined at namespace scope)
     TailRisk computeTailRisk(
         const std::vector<double>& deviations,
         double varPercentile = 0.95) const;
