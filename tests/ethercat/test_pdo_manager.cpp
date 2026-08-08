@@ -40,6 +40,12 @@ public:
     MOCK_METHOD(bool, waitForResponseIdx,
                 (uint8_t idx, unsigned int timeout_ms, RxDatagram& out),
                 (override));
+    MOCK_METHOD(size_t, preRegisterResponseWaiter,
+                (uint8_t idx, uint8_t* buffer, size_t buffer_size),
+                (override));
+    MOCK_METHOD(bool, waitForPreRegistered,
+                (size_t slot, unsigned int timeout_ms, RxDatagram& out),
+                (override));
     MOCK_METHOD(uint8_t, allocIdx, (), (override));
     MOCK_METHOD(uint16_t, adpForSlaveIndex, (uint16_t slave_index), (override));
 };
@@ -605,15 +611,23 @@ TEST_F(PDOManagerTest, ExchangePhysicalSendsAndReceives) {
     mgr.mapping().add_rxpdo(0, &out_buf, sizeof(out_buf));
     mgr.mapping().add_txpdo(0, &in_buf, sizeof(in_buf));
 
-    // exchangePhysical now batches FPWR+FPRD into one frame via sendMultiDatagram
+    // exchangePhysical pre-registers response slots before sending
+    static uint8_t slot_counter = 0;
+    EXPECT_CALL(transport, preRegisterResponseWaiter(_, _, _))
+        .Times(2)
+        .WillRepeatedly([](uint8_t, uint8_t*, size_t) -> size_t {
+            return static_cast<size_t>(slot_counter++);  // valid slots
+        });
+
+    // exchangePhysical batches FPWR+FPRD into one frame via sendMultiDatagram
     EXPECT_CALL(transport, sendMultiDatagram(_, _))
         .WillOnce(Return(1));  // 1 frame with 2 datagrams
 
-    // Wait for write and read responses (called twice)
+    // Wait for write and read responses via pre-registered slots
     uint32_t hw_data = 0x55AA55AA;
-    EXPECT_CALL(transport, waitForResponseIdx(_, _, _))
+    EXPECT_CALL(transport, waitForPreRegistered(_, _, _))
         .Times(2)
-        .WillRepeatedly([&hw_data](uint8_t, unsigned int, RxDatagram& out) -> bool {
+        .WillRepeatedly([&hw_data](size_t, unsigned int, RxDatagram& out) -> bool {
             out.wkc = 1;
             out.datalen = 4;
             std::memcpy(out.data, &hw_data, sizeof(hw_data));

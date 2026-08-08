@@ -23,6 +23,7 @@
  *   ./synapticon_cst_fsoe -i enx34298f762c4e    # specify interface
  *   ./synapticon_cst_fsoe -s 1 -d 30            # slave 1, 30 s
  *   ./synapticon_cst_fsoe --no-fsoe             # CST only, no FSoE
+ *   ./synapticon_cst_fsoe --dc-sync             # enable DC synchronization
  *   ./synapticon_cst_fsoe --connection-id 0x4321 --watchdog-ms 15
  */
 
@@ -275,6 +276,7 @@ struct Args {
     int slave_index = 0;
     double duration = 10.0;
     bool enable_fsoe = true;
+    bool enable_dc_sync = false;
     uint16_t connection_id = 0x1234;
     uint16_t watchdog_ms = EtherCAT::Drives::Synapticon::SafeMotion::Timing::kMinimumWatchdogTimeMs;
     uint32_t diag_interval_ms = 1000;
@@ -297,6 +299,10 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .default_value(false)
         .implicit_value(true)
         .help("Disable FSoE safe-motion (CST-only mode)");
+    program.add_argument("--dc-sync")
+        .default_value(false)
+        .implicit_value(true)
+        .help("Enable EtherCAT distributed-clock synchronization (off by default)");
     program.add_argument("--connection-id")
         .scan<'x', unsigned int>()
         .default_value(static_cast<unsigned int>(0x1234))
@@ -322,6 +328,7 @@ bool parseArgs(int argc, char** argv, Args& out) {
     out.slave_index = program.get<int>("--slave");
     out.duration = program.get<double>("--duration");
     out.enable_fsoe = !program.get<bool>("--no-fsoe");
+    out.enable_dc_sync = program.get<bool>("--dc-sync");
     out.connection_id = static_cast<uint16_t>(program.get<unsigned int>("--connection-id"));
     out.watchdog_ms = static_cast<uint16_t>(program.get<int>("--watchdog-ms"));
     out.diag_interval_ms = static_cast<uint32_t>(program.get<int>("--diag-interval-ms"));
@@ -343,9 +350,10 @@ int main(int argc, char** argv) {
     Tether::Platform::ensureRealtimeKernelOrExit();
 
     TETHER_LOGI(TAG,
-        "synapticon_cst_fsoe — interface=%s slave=%u duration=%.1f fsoe=%s",
+        "synapticon_cst_fsoe — interface=%s slave=%u duration=%.1f fsoe=%s dc_sync=%s",
         args.interface.c_str(), slave_idx, args.duration,
-        args.enable_fsoe ? "on" : "off");
+        args.enable_fsoe ? "on" : "off",
+        args.enable_dc_sync ? "on" : "off");
 
     // --- Start EtherCAT master ---
     EtherCAT::DS402Master master;
@@ -505,7 +513,7 @@ int main(int argc, char** argv) {
     EtherCAT::Master::RealtimeMotionLoopConfig loop_config;
     loop_config.cycle_period_us = 1000;
     loop_config.sync_interval_cycles = 10;
-    loop_config.enable_dc_synchronization = true;
+    loop_config.enable_dc_synchronization = args.enable_dc_sync;
     if (!master.startRealtimeMotionControlLoop(loop_config)) {
         TETHER_LOGE(TAG, "Failed to start realtime motion loop");
         rc = 7;

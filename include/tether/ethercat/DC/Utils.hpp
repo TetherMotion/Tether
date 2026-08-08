@@ -33,7 +33,7 @@ inline bool readSyncActivationMask(EtherCAT::Master& master,
     auto* dc = master.dc().get();
     if (!dc) return false;
     uint8_t buf[2] = {0};
-    if (!dc->readRegister(slave_idx, DCRegisters::DCCuc, buf, 2, timeout_ms))
+    if (!dc->readRegister(slave_idx, DCRegisters::DCSyncAct, buf, 2, timeout_ms))
         return false;
     out_mask = static_cast<uint16_t>(buf[0] | (buf[1] << 8));
     return true;
@@ -61,7 +61,7 @@ inline bool readSystemTimeDiff(EtherCAT::Master& master,
     auto* dc = master.dc().get();
     if (!dc) return false;
     uint8_t buf[4] = {0};
-    if (!master.dc().readRegister(slave_idx, DCRegisters::DCSysDiff, buf, 4, timeout_ms))
+    if (!dc->readRegister(slave_idx, DCRegisters::DCSysDiff, buf, 4, timeout_ms))
         return false;
     out_diff = static_cast<int32_t>(buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24));
     return true;
@@ -75,7 +75,7 @@ inline bool readSyncImpulseCounter(EtherCAT::Master& master,
     auto* dc = master.dc().get();
     if (!dc) return false;
     uint8_t buf[2] = {0};
-    if (!master.dc().readRegister(slave_idx, DCRegisters::DCTimeFilter, buf, 2, timeout_ms))
+    if (!dc->readRegister(slave_idx, DCRegisters::DCTimeFilter, buf, 2, timeout_ms))
         return false;
     out_count = static_cast<uint16_t>(buf[0] | (buf[1] << 8));
     return true;
@@ -118,10 +118,10 @@ inline void printSyncActivationMask(EtherCAT::Master& master,
 {
     uint16_t mask = 0;
     if (readSyncActivationMask(master, slave_idx, mask)) {
-        TETHER_LOGI(tag, "0x0980 (DC Sync Activation) = 0x%04X %s",
+        TETHER_LOGI(tag, "0x0981 (DC Sync Activation) = 0x%04X %s",
                  mask, syncActivationMaskToString(mask).c_str());
     } else {
-        TETHER_LOGW(tag, "0x0980 read FAILED");
+        TETHER_LOGW(tag, "0x0981 read FAILED");
     }
 }
 

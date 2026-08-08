@@ -39,6 +39,12 @@ public:
     MOCK_METHOD(bool, waitForResponseIdx,
                 (uint8_t idx, unsigned int timeout_ms, RxDatagram& out),
                 (override));
+    MOCK_METHOD(size_t, preRegisterResponseWaiter,
+                (uint8_t idx, uint8_t* buffer, size_t buffer_size),
+                (override));
+    MOCK_METHOD(bool, waitForPreRegistered,
+                (size_t slot, unsigned int timeout_ms, RxDatagram& out),
+                (override));
     MOCK_METHOD(uint8_t, allocIdx, (), (override));
     MOCK_METHOD(uint16_t, adpForSlaveIndex, (uint16_t slave_index), (override));
 };

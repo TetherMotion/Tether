@@ -1023,6 +1023,8 @@ bool PDOManager::sendAll() {
     split_state_.send_phase_ok = true;
     split_state_.rx_confirmed_idxs.clear();
     split_state_.rx_confirmed_entry_idxs.clear();
+    split_state_.rx_confirmed_slots.clear();
+    split_state_.rx_confirmed_responses.clear();
     stats_.total_cycles++;
 
     if (rxPDODebug() || txPDODebug()) {
@@ -1083,6 +1085,23 @@ bool PDOManager::sendAll() {
     }
 
     if (!rx_specs.empty()) {
+        // Pre-register response waiter slots for confirmed entries BEFORE
+        // sending to avoid the send-then-register race: multiple datagrams
+        // share one frame, so all responses arrive in one frame on the RX
+        // thread.  If we register slots only after the send returns, later
+        // responses arrive with no pending slot and are dropped ("unrouted").
+        split_state_.rx_confirmed_responses.resize(
+            split_state_.rx_confirmed_idxs.size());
+        split_state_.rx_confirmed_slots.resize(
+            split_state_.rx_confirmed_idxs.size(),
+            IPDOTransport::kPreRegInvalid);
+        for (size_t j = 0; j < split_state_.rx_confirmed_idxs.size(); j++) {
+            auto& resp_buf = split_state_.rx_confirmed_responses[j];
+            split_state_.rx_confirmed_slots[j] = transport_.preRegisterResponseWaiter(
+                split_state_.rx_confirmed_idxs[j],
+                resp_buf.data, sizeof(resp_buf.data));
+        }
+
         size_t frames_sent = transport_.sendMultiDatagram(rx_specs.data(), rx_specs.size());
         if (frames_sent == 0) {
             for (size_t i : rx_entry_idx) {
@@ -1149,7 +1168,16 @@ bool PDOManager::receiveAll() {
     for (size_t j = 0; j < split_state_.rx_confirmed_idxs.size(); j++) {
         size_t entry_i = split_state_.rx_confirmed_entry_idxs[j];
         RxDatagram resp;
-        if (transport_.waitForResponseIdx(split_state_.rx_confirmed_idxs[j], 5, resp) && resp.wkc > 0) {
+        bool got;
+        if (j < split_state_.rx_confirmed_slots.size() &&
+            split_state_.rx_confirmed_slots[j] != IPDOTransport::kPreRegInvalid) {
+            got = transport_.waitForPreRegistered(
+                split_state_.rx_confirmed_slots[j], 5, resp);
+        } else {
+            got = transport_.waitForResponseIdx(
+                split_state_.rx_confirmed_idxs[j], 5, resp);
+        }
+        if (got && resp.wkc > 0) {
             PDO::PDOEntry* e = mapping_.get_entry_mut(entry_i);
             e->success_count++;
             stats_.rxpdo_frames_sent++;
@@ -1170,6 +1198,8 @@ bool PDOManager::receiveAll() {
     }
     split_state_.rx_confirmed_idxs.clear();
     split_state_.rx_confirmed_entry_idxs.clear();
+    split_state_.rx_confirmed_slots.clear();
+    split_state_.rx_confirmed_responses.clear();
 
     // Phase 2: Batch all TxPDO reads into one frame
     if (txPDODebug()) {
@@ -1226,8 +1256,22 @@ bool PDOManager::receiveAll() {
     }
 
     if (!tx_specs.empty()) {
+        // Pre-register response waiter slots for confirmed TxPDO entries
+        // BEFORE sending to avoid the send-then-register race.
+        std::vector<size_t> tx_slots(tx_idxs.size(), IPDOTransport::kPreRegInvalid);
+        std::vector<RxDatagram> tx_responses(tx_idxs.size());
+        for (size_t j = 0; j < tx_idxs.size(); j++) {
+            tx_slots[j] = transport_.preRegisterResponseWaiter(
+                tx_idxs[j], tx_responses[j].data, sizeof(tx_responses[j].data));
+        }
+
         size_t frames_sent = transport_.sendMultiDatagram(tx_specs.data(), tx_specs.size());
         if (frames_sent == 0) {
+            // Cancel any pre-registered slots
+            for (size_t j = 0; j < tx_slots.size(); j++) {
+                if (tx_slots[j] != IPDOTransport::kPreRegInvalid)
+                    transport_.waitForPreRegistered(tx_slots[j], 0, tx_responses[j]);
+            }
             for (size_t i : tx_entry_idx) {
                 mapping_.get_entry_mut(i)->error_count++;
                 stats_.txpdo_errors++;
@@ -1257,7 +1301,13 @@ bool PDOManager::receiveAll() {
                 size_t entry_i = tx_entry_idx[tx_spec_map[j]];
                 PDO::PDOEntry* e = mapping_.get_entry_mut(entry_i);
                 RxDatagram resp;
-                if (transport_.waitForResponseIdx(tx_idxs[j], 5, resp) &&
+                bool got;
+                if (tx_slots[j] != IPDOTransport::kPreRegInvalid) {
+                    got = transport_.waitForPreRegistered(tx_slots[j], 5, resp);
+                } else {
+                    got = transport_.waitForResponseIdx(tx_idxs[j], 5, resp);
+                }
+                if (got &&
                     resp.wkc > 0 && resp.datalen >= e->data_size) {
                     std::memcpy(e->app_buffer, resp.data, e->data_size);
                     e->success_count++;
@@ -1381,10 +1431,28 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
 
     // Build multi-datagram specs: pack FPWR + FPRD into one frame
     if (have_write && have_read) {
-        // Batch both write and read into a single frame
-        const uint16_t adp = transport_.adpForSlaveIndex(0);
+        // Batch both write and read into a single frame.
+        // Use the slave's configured station address for FPWR/FPRD (not the
+        // auto-increment position).  Fall back to adpForSlaveIndex if no
+        // configured address was set.
+        const uint16_t adp = (cfg->configured_address != 0)
+                                 ? cfg->configured_address
+                                 : transport_.adpForSlaveIndex(0);
         const uint8_t write_idx = transport_.allocIdx();
         const uint8_t read_idx = transport_.allocIdx();
+
+        // Pre-register response waiter slots BEFORE sending to avoid the
+        // send-then-register race: both datagrams share one frame, so both
+        // responses arrive in one frame on the RX thread.  If we register
+        // slots only after the send returns, the second response arrives
+        // with no pending slot and is dropped ("unrouted"), causing a 50 ms
+        // timeout per cycle.
+        RxDatagram write_resp{};
+        RxDatagram read_resp{};
+        size_t write_slot = transport_.preRegisterResponseWaiter(
+            write_idx, write_resp.data, sizeof(write_resp.data));
+        size_t read_slot = transport_.preRegisterResponseWaiter(
+            read_idx, read_resp.data, sizeof(read_resp.data));
 
         MultiDatagramSpec specs[2] = {
             {Command::FPWR, write_idx, adp, sm2.phys_start_addr, out_buf, sm2.length, true},
@@ -1393,14 +1461,23 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
 
         size_t frames_sent = transport_.sendMultiDatagram(specs, 2);
         if (frames_sent == 0) {
+            if (write_slot < IPDOTransport::kPreRegInvalid)
+                transport_.waitForPreRegistered(write_slot, 0, write_resp); // cancel
+            if (read_slot < IPDOTransport::kPreRegInvalid)
+                transport_.waitForPreRegistered(read_slot, 0, read_resp);  // cancel
             physical_stats_.fpwr_wkc_errors++;
             physical_stats_.fprd_wkc_errors++;
             return false;
         }
 
         // Wait for write response
-        RxDatagram write_resp;
-        if (transport_.waitForResponseIdx(write_idx, 50, write_resp) && write_resp.wkc > 0) {
+        bool write_ok;
+        if (write_slot < IPDOTransport::kPreRegInvalid) {
+            write_ok = transport_.waitForPreRegistered(write_slot, 50, write_resp);
+        } else {
+            write_ok = transport_.waitForResponseIdx(write_idx, 50, write_resp);
+        }
+        if (write_ok && write_resp.wkc > 0) {
             physical_stats_.fpwr_success++;
         } else {
             physical_stats_.fpwr_wkc_errors++;
@@ -1408,8 +1485,13 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
         }
 
         // Wait for read response
-        RxDatagram read_resp;
-        if (transport_.waitForResponseIdx(read_idx, 50, read_resp) && read_resp.wkc > 0) {
+        bool read_ok;
+        if (read_slot < IPDOTransport::kPreRegInvalid) {
+            read_ok = transport_.waitForPreRegistered(read_slot, 50, read_resp);
+        } else {
+            read_ok = transport_.waitForResponseIdx(read_idx, 50, read_resp);
+        }
+        if (read_ok && read_resp.wkc > 0) {
             physical_stats_.fprd_success++;
             if (txPDODebug()) {
                 char hex[128];
@@ -1442,7 +1524,7 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
             }
         }
     } else if (have_write) {
-        // Write only
+        // Write only — uses APWR via writeRegister (position-based addressing)
         if (transport_.writeRegister(transport_.adpForSlaveIndex(0),
                          sm2.phys_start_addr, out_buf, sm2.length, 50)) {
             physical_stats_.fpwr_success++;
@@ -1451,7 +1533,7 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
             fpwr_ok = false;
         }
     } else if (have_read) {
-        // Read only
+        // Read only — uses APRD via readRegister (position-based addressing)
         uint8_t in_buf[PDO::kMaxPDOSize] = {0};
         if (transport_.readRegister(transport_.adpForSlaveIndex(0),
                         sm3.phys_start_addr, in_buf, sm3.length, 50)) {

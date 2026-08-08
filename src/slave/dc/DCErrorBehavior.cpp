@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <numeric>
 #include <cmath>
+#include <limits>
 
 namespace EtherCAT {
 namespace slave {
@@ -113,16 +114,16 @@ bool DCErrorHandler::processSystemTimeUpdate(uint64_t newSystemTimeNs) {
     
     // Check for clock jump
     if (state_.lastSystemTimeNs > 0) {
-        int64_t delta = static_cast<int64_t>(adjustedTime) - 
+        int64_t delta = static_cast<int64_t>(adjustedTime) -
                         static_cast<int64_t>(state_.lastSystemTimeNs);
-        
-        if (!checkClockJump(delta)) {
+
+        if (!checkClockJumpUnlocked(delta)) {
             return false;
         }
     }
-    
+
     // Check drift (only if we have a reference)
-    if (!checkClockDrift()) {
+    if (!checkClockDriftUnlocked()) {
         return false;
     }
     
@@ -130,14 +131,26 @@ bool DCErrorHandler::processSystemTimeUpdate(uint64_t newSystemTimeNs) {
     if (lastCycleTimeNs_ > 0) {
         int64_t expectedDelta = static_cast<int64_t>(state_.sync0CycleTimeNs);
         int64_t actualDelta = static_cast<int64_t>(adjustedTime - lastCycleTimeNs_);
-        uint32_t jitter = static_cast<uint32_t>(std::abs(actualDelta - expectedDelta));
+        int64_t deviation = actualDelta - expectedDelta;
+
+        // Accumulate drift (cumulative deviation from expected cycle time)
+        state_.offsetToMasterNs += deviation;
+        stats_.totalDriftNs = state_.offsetToMasterNs;
+        if (state_.offsetToMasterNs > stats_.maxDriftNs) {
+            stats_.maxDriftNs = state_.offsetToMasterNs;
+        }
+        if (state_.offsetToMasterNs < stats_.minDriftNs) {
+            stats_.minDriftNs = state_.offsetToMasterNs;
+        }
+
+        uint32_t jitter = static_cast<uint32_t>(std::abs(deviation));
         addJitterSample(jitter);
-        
-        if (!checkJitter()) {
+
+        if (!checkJitterUnlocked()) {
             // Non-fatal by default
         }
     }
-    
+
     lastCycleTimeNs_ = adjustedTime;
     
     return true;
@@ -167,19 +180,23 @@ bool DCErrorHandler::processSync0(uint64_t timestampNs) {
     
     // Check timing
     if (state_.nextExpectedSync0Ns > 0) {
-        int32_t deviation = static_cast<int32_t>(timestampNs - state_.nextExpectedSync0Ns);
-        
-        if (std::abs(deviation) > stats_.maxSync0Deviation) {
-            stats_.maxSync0Deviation = std::abs(deviation);
+        int64_t deviation = static_cast<int64_t>(timestampNs) -
+                            static_cast<int64_t>(state_.nextExpectedSync0Ns);
+
+        int32_t clamped_dev = static_cast<int32_t>(std::clamp(deviation,
+            static_cast<int64_t>(std::numeric_limits<int32_t>::min()), static_cast<int64_t>(std::numeric_limits<int32_t>::max())));
+
+        if (std::abs(clamped_dev) > stats_.maxSync0Deviation) {
+            stats_.maxSync0Deviation = std::abs(clamped_dev);
         }
-        
-        if (deviation > config_.maxSync0DeviationNs) {
-            reportError(DCError::Sync0Late, deviation);
-        } else if (deviation < -config_.maxSync0DeviationNs) {
-            reportError(DCError::Sync0Early, deviation);
+
+        if (clamped_dev > config_.maxSync0DeviationNs) {
+            reportError(DCError::Sync0Late, clamped_dev);
+        } else if (clamped_dev < -config_.maxSync0DeviationNs) {
+            reportError(DCError::Sync0Early, clamped_dev);
         }
     }
-    
+
     // Calculate next expected
     state_.nextExpectedSync0Ns = timestampNs + state_.sync0CycleTimeNs;
     
@@ -207,19 +224,23 @@ bool DCErrorHandler::processSync1(uint64_t timestampNs) {
     state_.consecutiveMissedSync1 = 0;
     
     if (state_.nextExpectedSync1Ns > 0) {
-        int32_t deviation = static_cast<int32_t>(timestampNs - state_.nextExpectedSync1Ns);
-        
-        if (std::abs(deviation) > stats_.maxSync1Deviation) {
-            stats_.maxSync1Deviation = std::abs(deviation);
+        int64_t deviation = static_cast<int64_t>(timestampNs) -
+                            static_cast<int64_t>(state_.nextExpectedSync1Ns);
+
+        int32_t clamped_dev = static_cast<int32_t>(std::clamp(deviation,
+            static_cast<int64_t>(std::numeric_limits<int32_t>::min()), static_cast<int64_t>(std::numeric_limits<int32_t>::max())));
+
+        if (std::abs(clamped_dev) > stats_.maxSync1Deviation) {
+            stats_.maxSync1Deviation = std::abs(clamped_dev);
         }
-        
-        if (deviation > config_.maxSync1DeviationNs) {
-            reportError(DCError::Sync1Late, deviation);
-        } else if (deviation < -config_.maxSync1DeviationNs) {
-            reportError(DCError::Sync1Early, deviation);
+
+        if (clamped_dev > config_.maxSync1DeviationNs) {
+            reportError(DCError::Sync1Late, clamped_dev);
+        } else if (clamped_dev < -config_.maxSync1DeviationNs) {
+            reportError(DCError::Sync1Early, clamped_dev);
         }
     }
-    
+
     state_.nextExpectedSync1Ns = timestampNs + state_.sync1CycleTimeNs;
     
     if (sync1Callback_) {
@@ -250,11 +271,11 @@ bool DCErrorHandler::processPacket(uint32_t sequenceNum, uint64_t timestampNs) {
     
     // Apply delay injection
     if (injection_.enabled && injection_.injectPacketDelay) {
-        timestampNs += injection_.packetDelayUs * 1000;
+        timestampNs += static_cast<uint64_t>(injection_.packetDelayUs) * 1000ULL;
     }
-    
+
     // Check packet order
-    if (!checkPacketOrder(sequenceNum)) {
+    if (!checkPacketOrderUnlocked(sequenceNum)) {
         return false;
     }
     
@@ -297,60 +318,79 @@ void DCErrorHandler::update(uint64_t currentTimeNs) {
     }
     
     // Check for missed SYNC signals
-    checkSyncSignals(currentTimeNs);
-    
+    checkSyncSignalsUnlocked(currentTimeNs);
+
     // Check configuration completeness
-    if (hasPartialConfiguration()) {
+    if (hasPartialConfigurationUnlocked()) {
         reportError(DCError::ConfigIncomplete);
     }
 }
 
 bool DCErrorHandler::isConfigurationComplete() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    
+    return isConfigurationCompleteUnlocked();
+}
+
+bool DCErrorHandler::isConfigurationCompleteUnlocked() const {
     if (!state_.dcConfigured) return false;
     if (state_.sync0Enabled && !state_.sync0Configured) return false;
     if (state_.sync1Enabled && !state_.sync1Configured) return false;
     if (!state_.cycleTimeConfigured) return false;
-    
+
     return true;
 }
 
 bool DCErrorHandler::hasPartialConfiguration() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return hasPartialConfigurationUnlocked();
+}
+
+bool DCErrorHandler::hasPartialConfigurationUnlocked() const {
     // Check for partial configuration (some but not all settings)
     bool hasAny = state_.sync0Enabled || state_.sync1Enabled || state_.cycleTimeConfigured;
     bool hasAll = true;
-    
+
     if (state_.sync0Enabled && !state_.sync0Configured) hasAll = false;
     if (state_.sync1Enabled && !state_.sync1Configured) hasAll = false;
-    
+
     return hasAny && !hasAll;
 }
 
 bool DCErrorHandler::checkClockDrift() {
-    // Calculate drift from expected time
-    // This is a simplified check - real implementation would track over time
-    
+    std::lock_guard<std::mutex> lock(mutex_);
+    return checkClockDriftUnlocked();
+}
+
+bool DCErrorHandler::checkClockDriftUnlocked() {
+    // Drift is accumulated in offsetToMasterNs by processSystemTimeUpdate
     int64_t drift = state_.offsetToMasterNs;
-    
-    if (std::abs(drift) > stats_.maxDriftNs) {
-        stats_.maxDriftNs = std::abs(drift);
+
+    if (drift > stats_.maxDriftNs) {
+        stats_.maxDriftNs = drift;
     }
-    
-    // Check drift rate (would need to track over time)
+    if (drift < stats_.minDriftNs) {
+        stats_.minDriftNs = drift;
+    }
+
+    // Check drift against limit
     if (std::abs(drift) > config_.maxClockJumpNs) {
         stats_.driftErrors++;
         reportError(DCError::ClockDriftExceeded, drift);
         return !config_.driftErrorCritical;
     }
-    
+
     return true;
 }
 
 bool DCErrorHandler::checkClockJump(int64_t deltaTimeNs) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return checkClockJumpUnlocked(deltaTimeNs);
+}
+
+bool DCErrorHandler::checkClockJumpUnlocked(int64_t deltaTimeNs) {
     int64_t expectedDelta = static_cast<int64_t>(state_.sync0CycleTimeNs);
     int64_t deviation = deltaTimeNs - expectedDelta;
-    
+
     // Detect negative time jump (clock went backwards)
     if (deltaTimeNs < 0) {
         stats_.clockJumps++;
@@ -361,80 +401,97 @@ bool DCErrorHandler::checkClockJump(int64_t deltaTimeNs) {
         reportError(DCError::ClockNegativeJump, deltaTimeNs);
         return !config_.jumpErrorCritical;
     }
-    
+
     // Detect large positive jump
     if (static_cast<uint64_t>(std::abs(deviation)) > config_.minClockJumpNs) {
         if (static_cast<uint64_t>(std::abs(deviation)) > config_.maxClockJumpNs) {
             stats_.clockJumps++;
             stats_.jumpErrors++;
-            if (std::abs(deviation) > std::abs(stats_.largestJumpNs)) {
-                stats_.largestJumpNs = deviation;
+            // Store the actual jump amount (deltaTimeNs), not the deviation,
+            // for consistency with the negative-jump branch above.
+            if (std::abs(deltaTimeNs) > std::abs(stats_.largestJumpNs)) {
+                stats_.largestJumpNs = deltaTimeNs;
             }
             reportError(DCError::ClockJumpDetected, deviation);
             return !config_.jumpErrorCritical;
         }
     }
-    
+
     return true;
 }
 
 bool DCErrorHandler::checkSyncSignals(uint64_t currentTimeNs) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return checkSyncSignalsUnlocked(currentTimeNs);
+}
+
+bool DCErrorHandler::checkSyncSignalsUnlocked(uint64_t currentTimeNs) {
     bool result = true;
-    
+
     // Check SYNC0
     if (state_.sync0Enabled && state_.nextExpectedSync0Ns > 0) {
         if (currentTimeNs > state_.nextExpectedSync0Ns + config_.maxSync0DeviationNs) {
             state_.consecutiveMissedSync0++;
             stats_.sync0Missed++;
-            
+
             if (state_.consecutiveMissedSync0 >= config_.maxMissedSync0) {
                 stats_.syncErrors++;
                 reportError(DCError::Sync0Missing, state_.consecutiveMissedSync0);
                 result = !config_.syncMissingCritical;
             }
-            
+
             // Update expected time
             state_.nextExpectedSync0Ns += state_.sync0CycleTimeNs;
         }
     }
-    
+
     // Check SYNC1
     if (state_.sync1Enabled && state_.nextExpectedSync1Ns > 0) {
         if (currentTimeNs > state_.nextExpectedSync1Ns + config_.maxSync1DeviationNs) {
             state_.consecutiveMissedSync1++;
             stats_.sync1Missed++;
-            
+
             if (state_.consecutiveMissedSync1 >= config_.maxMissedSync1) {
                 stats_.syncErrors++;
                 reportError(DCError::Sync1Missing, state_.consecutiveMissedSync1);
                 result = !config_.syncMissingCritical;
             }
-            
+
             state_.nextExpectedSync1Ns += state_.sync1CycleTimeNs;
         }
     }
-    
+
     return result;
 }
 
 bool DCErrorHandler::checkJitter() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return checkJitterUnlocked();
+}
+
+bool DCErrorHandler::checkJitterUnlocked() {
     uint32_t jitter = calculateJitter();
     stats_.currentJitterNs = jitter;
-    
+
     if (jitter > stats_.maxJitterNs) {
         stats_.maxJitterNs = jitter;
     }
-    
+
     if (jitter > config_.maxJitterNs) {
         stats_.jitterErrors++;
         reportError(DCError::JitterExceeded, jitter);
         return !config_.jitterErrorCritical;
     }
-    
+
     return true;
 }
 
 bool DCErrorHandler::checkPacketOrder(uint32_t sequenceNum) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return checkPacketOrderUnlocked(sequenceNum);
+}
+
+bool DCErrorHandler::checkPacketOrderUnlocked(uint32_t sequenceNum) {
     // Check for reordering
     if (injection_.enabled && injection_.injectPacketReorder) {
         // Inject reorder by swapping with a recent packet
@@ -443,7 +500,7 @@ bool DCErrorHandler::checkPacketOrder(uint32_t sequenceNum) {
             stats_.packetsReordered++;
         }
     }
-    
+
     // Simple check: sequence should be greater than last
     if (state_.lastPacketSequence > 0) {
         if (sequenceNum != state_.lastPacketSequence + 1) {
@@ -461,7 +518,7 @@ bool DCErrorHandler::checkPacketOrder(uint32_t sequenceNum) {
             }
         }
     }
-    
+
     return true;
 }
 

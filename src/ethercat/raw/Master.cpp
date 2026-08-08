@@ -262,6 +262,22 @@ public:
         return master_.waitForResponseIdx(idx, timeout_ms, out);
     }
 
+    size_t preRegisterResponseWaiter(uint8_t idx,
+                                     uint8_t* buffer, size_t buffer_size) override {
+        return master_.preRegisterResponseWaiter(idx, buffer, buffer_size);
+    }
+
+    bool waitForPreRegistered(size_t slot, unsigned int timeout_ms,
+                              RxDatagram& out) override {
+        WaitResult wr = master_.waitForPreRegistered(slot, timeout_ms);
+        if (!wr.success) return false;
+        out.idx = wr.idx; out.cmd = wr.cmd; out.adp = wr.adp;
+        out.ado = wr.ado;
+        out.datalen = static_cast<uint16_t>(wr.data_length);
+        out.wkc = wr.wkc;
+        return true;
+    }
+
     uint8_t allocIdx() override {
         return master_.allocIdx();
     }
