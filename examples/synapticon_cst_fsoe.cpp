@@ -409,6 +409,18 @@ int main(int argc, char** argv) {
             "SM0(M->S)=0x%04X/%u SM1(S->M)=0x%04X/%u proto=0x%04X",
             kMailboxWriteAddr, kMailboxWriteSize,
             kMailboxReadAddr, kMailboxReadSize, kMailboxProtocols);
+
+        // Transition to PRE_OP before any SDO exchange.  Mailbox communication
+        // (CoE/SDO) is only valid in PRE_OP or higher — the slave's PDI does
+        // not service the mailbox in INIT, leaving SM0 full and SM1 empty.
+        const auto pre_err = slave.transitionToPreOp();
+        if (pre_err != EtherCAT::SlaveError::Ok) {
+            TETHER_LOGE(TAG, "Failed to transition to PRE_OP: %s",
+                        EtherCAT::slaveErrorToString(pre_err));
+            Tether::Examples::stopHostMasterSession(master, session);
+            return 2;
+        }
+        TETHER_LOGI(TAG, "Slave %u transitioned to PRE_OP", slave_idx);
     }
 
     // --- Pre-activation safety check: read 0x2611 Safety Module input diagnostics ---
