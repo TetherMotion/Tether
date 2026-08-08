@@ -9,6 +9,7 @@
 #include "tether/profiles/cia402/CiA402Drive.hpp"
 #include "tether/profiles/cia402/DynaDriveController.hpp"
 #include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/Slave.hpp"
 #include "tether/ethercat/CoEManager.hpp"
 #include "tether/ethercat/DC.hpp"
 #include "tether/ethercat/PDOManager.hpp"
@@ -411,12 +412,21 @@ bool CiA402Drive::transitionToOp(bool apply_pdo_mapping) {
         }
     }
     
+    // PRE_OP -> SAFE_OP -> OP (common tail)
+    return transitionSafeOpToOp();
+}
+
+// ============================================================================
+// transitionSafeOpToOp — common SAFE_OP → OP tail
+// ============================================================================
+
+bool CiA402Drive::transitionSafeOpToOp() {
     // PRE_OP -> SAFE_OP
     if (!gotoSafeOp()) {
         TETHER_LOGE(TAG, "Slave %u: Failed to reach SAFE_OP", m_slave_index);
         return false;
     }
-    
+
     // CRITICAL: Reconfigure DC SYNC signals AFTER SM configuration
     // The initial DC config during slave discovery may have failed because
     // the slave wasn't ready. Now that we're in SAFE_OP with SM configured,
@@ -427,7 +437,7 @@ bool CiA402Drive::transitionToOp(bool apply_pdo_mapping) {
             TETHER_LOGW(TAG, "Slave %u: DC reconfiguration failed, continuing anyway", m_slave_index);
     }
     Tether::Platform::Clock::instance().delayMilliseconds(50);
-    
+
     // CRITICAL: Enable PDO exchange BEFORE requesting OP!
     // The slave's PDI watchdog starts in SAFE_OP and expects process data.
     // We must start sending PDO data now to prevent watchdog timeout.
@@ -436,10 +446,10 @@ bool CiA402Drive::transitionToOp(bool apply_pdo_mapping) {
         m_master->pdo().resetStats();
         m_master->dc().setPDOEnabled(true);
     }
-    
+
     // Give the PDO exchange a moment to send some frames before OP request
     Tether::Platform::Clock::instance().delayMilliseconds(200);
-    
+
     // DIAGNOSTIC: Read back SM2/SM3 and verify they're correct before OP request
     if (m_master) {
         for (uint8_t sm = 2; sm <= 3; sm++) {
@@ -460,7 +470,7 @@ bool CiA402Drive::transitionToOp(bool apply_pdo_mapping) {
         m_master->readRegister(SlaveAddress(m_slave_index), 0x0440, wdt_status, 200);
         TETHER_LOGI(TAG, "Slave %u: Watchdog Status=0x%04X", m_slave_index, wdt_status);
     }
-    
+
     // DIAGNOSTIC: Read PDO assignment and mode SDOs before OP request
     if (m_master) {
         m_master->sdoManager(m_slave_index).setDiagEnabled(true);
@@ -469,47 +479,47 @@ bool CiA402Drive::transitionToOp(bool apply_pdo_mapping) {
             TETHER_LOGI(TAG, "Slave %u: 0x1C12:0 (SM2 PDO count) = %u", m_slave_index, sm2_count_res.value());
         else
             TETHER_LOGW(TAG, "Slave %u: Failed to read 0x1C12:0", m_slave_index);
-        
+
         auto sm2_pdo_res = m_master->sdoManager(m_slave_index).readU16( 0x1C12, 1, {.timeout_ms = m_sdo_timeout_ms});
         if (sm2_pdo_res.has_value())
             TETHER_LOGI(TAG, "Slave %u: 0x1C12:1 (SM2 RxPDO) = 0x%04X", m_slave_index, sm2_pdo_res.value());
         else
             TETHER_LOGW(TAG, "Slave %u: Failed to read 0x1C12:1", m_slave_index);
-        
+
         auto sm3_count_res = m_master->sdoManager(m_slave_index).readU8( 0x1C13, 0, {.timeout_ms = m_sdo_timeout_ms});
         if (sm3_count_res.has_value())
             TETHER_LOGI(TAG, "Slave %u: 0x1C13:0 (SM3 PDO count) = %u", m_slave_index, sm3_count_res.value());
         else
             TETHER_LOGW(TAG, "Slave %u: Failed to read 0x1C13:0", m_slave_index);
-        
+
         auto sm3_pdo_res = m_master->sdoManager(m_slave_index).readU16( 0x1C13, 1, {.timeout_ms = m_sdo_timeout_ms});
         if (sm3_pdo_res.has_value())
             TETHER_LOGI(TAG, "Slave %u: 0x1C13:1 (SM3 TxPDO) = 0x%04X", m_slave_index, sm3_pdo_res.value());
         else
             TETHER_LOGW(TAG, "Slave %u: Failed to read 0x1C13:1", m_slave_index);
-        
+
         auto mode_op_res = m_master->sdoManager(m_slave_index).readU8( 0x6060, 0, {.timeout_ms = m_sdo_timeout_ms});
         if (mode_op_res.has_value())
             TETHER_LOGI(TAG, "Slave %u: 0x6060 (Modes of Operation) = %d", m_slave_index, (int8_t)mode_op_res.value());
-        
+
         auto mode_disp_res = m_master->sdoManager(m_slave_index).readU8( 0x6061, 0, {.timeout_ms = m_sdo_timeout_ms});
         if (mode_disp_res.has_value())
             TETHER_LOGI(TAG, "Slave %u: 0x6061 (Mode Display) = %d", m_slave_index, (int8_t)mode_disp_res.value());
-        
+
         auto supported_modes_res = m_master->sdoManager(m_slave_index).readU32( 0x6502, 0, {.timeout_ms = m_sdo_timeout_ms});
         if (supported_modes_res.has_value())
             TETHER_LOGI(TAG, "Slave %u: 0x6502 (Supported Modes) = 0x%08X", m_slave_index, supported_modes_res.value());
-        
+
         auto rxpdo_count_res = m_master->sdoManager(m_slave_index).readU8( 0x1600, 0, {.timeout_ms = m_sdo_timeout_ms});
         if (rxpdo_count_res.has_value())
             TETHER_LOGI(TAG, "Slave %u: 0x1600:0 (RxPDO entry count) = %u", m_slave_index, rxpdo_count_res.value());
-        
+
         auto txpdo_count_res = m_master->sdoManager(m_slave_index).readU8( 0x1A00, 0, {.timeout_ms = m_sdo_timeout_ms});
         if (txpdo_count_res.has_value())
             TETHER_LOGI(TAG, "Slave %u: 0x1A00:0 (TxPDO entry count) = %u", m_slave_index, txpdo_count_res.value());
         m_master->sdoManager(m_slave_index).setDiagEnabled(false);
     }
-    
+
     // Clear any pending error by writing Error Acknowledge + OP (0x18)
     // Some slaves need the ACK bit before accepting OP.
     if (m_master) {
@@ -518,7 +528,7 @@ bool CiA402Drive::transitionToOp(bool apply_pdo_mapping) {
         m_master->writeRegister(SlaveAddress(m_slave_index), 0x0120, ack);  // 0x0120 = AL_CONTROL
         Tether::Platform::Clock::instance().delayMilliseconds(50);
     }
-    
+
     // SAFE_OP -> OP
     if (!gotoOp()) {
         TETHER_LOGE(TAG, "Slave %u: Failed to reach OP", m_slave_index);
@@ -529,9 +539,92 @@ bool CiA402Drive::transitionToOp(bool apply_pdo_mapping) {
         return false;
     }
     Tether::Platform::Clock::instance().delayMilliseconds(100);
-    
+
     TETHER_LOGI(TAG, "Slave %u: Successfully transitioned to OP", m_slave_index);
     return true;
+}
+
+// ============================================================================
+// transitionToOp — multi-PDO-per-SM variant
+// ============================================================================
+
+bool CiA402Drive::transitionToOp(const Slave::MultiPDOAssignment& assignment) {
+    TETHER_LOGI(TAG, "Slave %u: Beginning transition to OP (multi-PDO, %zu SM configs)",
+                m_slave_index, assignment.sm_configs.size());
+
+    // Check if slave is already in PRE_OP. If so, skip gotoPreOp() to avoid
+    // re-initializing the slave which would reset all CoE objects.
+    uint8_t current_state = 0;
+    bool need_preop = true;
+    if (m_master && m_master->readSlaveApplicationLayerState(m_slave_index, current_state)) {
+        if (current_state == static_cast<uint8_t>(ECState::PreOp)) {
+            TETHER_LOGI(TAG, "Slave %u: Already in PRE_OP (0x%02X), skipping gotoPreOp()",
+                     m_slave_index, current_state);
+            need_preop = false;
+        } else {
+            TETHER_LOGI(TAG, "Slave %u: Current state=0x%02X, requesting PRE_OP",
+                     m_slave_index, current_state);
+        }
+    }
+
+    if (need_preop) {
+        if (!gotoPreOp()) {
+            TETHER_LOGE(TAG, "Slave %u: Failed to reach PRE_OP", m_slave_index);
+            return false;
+        }
+        Tether::Platform::Clock::instance().delayMilliseconds(100);
+    }
+
+    // Configure multi-PDO sync managers and FMMUs via Slave::configureMultiPDOs.
+    // This writes SM registers, PDO assignments (0x1C12/0x1C13), and FMMU
+    // configuration — all the work that the SII-based path in the single-PDO
+    // transitionToOp(bool) would otherwise do.
+    auto& slave = m_master->slave(m_slave_index);
+    const auto pdo_err = slave.configureMultiPDOs(assignment);
+    if (pdo_err != SlaveError::Ok) {
+        TETHER_LOGE(TAG, "Slave %u: configureMultiPDOs failed: %s",
+                    m_slave_index, slaveErrorToString(pdo_err));
+        return false;
+    }
+    TETHER_LOGI(TAG, "Slave %u: Multi-PDO SM/FMMU configuration complete", m_slave_index);
+
+    // Compute total Rx/Tx sizes from the assignment and set internal buffer
+    // sizes.  assignFixedPDOs() also writes PDO assignments via SDO, but
+    // configureMultiPDOs() already did that — the SDO writes here are
+    // redundant but harmless (the slave already has the correct assignments).
+    // The important effect is setting m_rxpdo_size / m_txpdo_size so that
+    // registerPDOBuffers() can register the correct buffer lengths.
+    uint16_t total_rx = 0, total_tx = 0;
+    uint16_t rx_index = 0, tx_index = 0;
+    for (const auto& sm_cfg : assignment.sm_configs) {
+        const bool is_write = (sm_cfg.control_byte & 0x04) != 0;
+        for (const auto& pdo_region : sm_cfg.pdo_mappings) {
+            if (is_write) {
+                total_rx += pdo_region.size_bytes;
+                if (rx_index == 0) rx_index = pdo_region.pdo_index;
+            } else {
+                total_tx += pdo_region.size_bytes;
+                if (tx_index == 0) tx_index = pdo_region.pdo_index;
+            }
+        }
+    }
+
+    if (total_rx > 0 || total_tx > 0) {
+        if (!assignFixedPDOs(rx_index, tx_index, total_rx, total_tx)) {
+            TETHER_LOGW(TAG, "Slave %u: PDO buffer sizing failed, continuing anyway", m_slave_index);
+        }
+        if (!registerPDOBuffers()) {
+            TETHER_LOGE(TAG, "Slave %u: Failed to register PDO buffers", m_slave_index);
+            return false;
+        }
+        TETHER_LOGI(TAG, "Slave %u: PDO buffers registered: Rx=%u bytes, Tx=%u bytes",
+                    m_slave_index, total_rx, total_tx);
+    }
+
+    // Do NOT call configureProcessDataSyncManagersFromSii() or re-write SM
+    // registers here — configureMultiPDOs() already configured SMs and FMMUs
+    // correctly.  Proceed directly to SAFE_OP → OP.
+    return transitionSafeOpToOp();
 }
 
 // ============================================================================
