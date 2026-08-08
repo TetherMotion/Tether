@@ -188,6 +188,15 @@ int main(int argc, char** argv) {
     }
 
     std::string esi_xml = program.get<std::string>("--esi-xml");
+#if !TETHER_HAVE_ESI
+    if (!esi_xml.empty()) {
+        std::cerr << "ESI support not compiled in (TETHER_BUILD_EXTRACT_ESI=OFF). "
+                     "Cannot use --esi-xml.\n";
+        return 1;
+    }
+    const bool use_esi = false;
+    (void)use_esi;
+#else
     const bool use_esi = !esi_xml.empty();
     std::optional<EtherCAT::ESIFile> esi;
     if (use_esi) {
@@ -200,6 +209,7 @@ int main(int argc, char** argv) {
         TETHER_LOGI(TAG, "Loaded ESI XML '%s' (%zu device(s))",
                     esi_xml.c_str(), esi->devices().size());
     }
+#endif
 
     TETHER_LOGI(TAG, "kinco_rp20_list_modules — interface: %s", iface.c_str());
     Tether::Examples::logVlanConfig(vlan, TAG);
@@ -249,9 +259,12 @@ int main(int argc, char** argv) {
 
         TETHER_LOGI(TAG, "Slave %u: configuring mailbox...", s);
         EtherCAT::SlaveError mb_err;
+#if TETHER_HAVE_ESI
         if (use_esi) {
             mb_err = sl.configureMailbox(*esi);
-        } else {
+        } else
+#endif
+        {
             mb_err = sl.configureMailbox(
                 {.address = mbAddr.outAddress, .length = mbSize.outSize},
                 {.address = mbAddr.inAddress, .length = mbSize.inSize},

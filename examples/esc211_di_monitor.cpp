@@ -231,6 +231,15 @@ int main(int argc, char** argv) {
     }
 
     std::string esi_xml = program.get<std::string>("--esi-xml");
+#if !TETHER_HAVE_ESI
+    if (!esi_xml.empty()) {
+        std::cerr << "ESI support not compiled in (TETHER_BUILD_EXTRACT_ESI=OFF). "
+                     "Cannot use --esi-xml.\n";
+        return 1;
+    }
+    const bool use_esi = false;
+    (void)use_esi;
+#else
     const bool use_esi = !esi_xml.empty();
     std::optional<EtherCAT::ESIFile> esi;
     if (use_esi) {
@@ -243,6 +252,7 @@ int main(int argc, char** argv) {
         TETHER_LOGI(TAG, "Loaded ESI XML '%s' (%zu device(s))",
                     esi_xml.c_str(), esi->devices().size());
     }
+#endif
 
     TETHER_LOGI(TAG, "esc211_di_monitor — interface: %s, slave: %d",
                 iface.c_str(), slave_idx);
@@ -321,9 +331,12 @@ int main(int argc, char** argv) {
 
     TETHER_LOGI(TAG, "Configuring mailbox for slave %d...", slave_idx);
     EtherCAT::SlaveError mb_err;
+#if TETHER_HAVE_ESI
     if (use_esi) {
         mb_err = sl.configureMailbox(*esi);
-    } else {
+    } else
+#endif
+    {
         mb_err = sl.configureMailbox(
             {.address = mbAddr.outAddress, .length = mbSize.outSize},
             {.address = mbAddr.inAddress, .length = mbSize.inSize},

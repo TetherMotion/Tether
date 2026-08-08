@@ -48,10 +48,13 @@ int main(int argc, char** argv) {
     std::string iface = program.get<std::string>("--interface");
     std::string debug_str = program.get<std::string>("--debug");
     std::string esi_xml = program.get<std::string>("--esi-xml");
-
-    // If --esi-xml is provided, parse it for cross-reference printing.
-    // (Requires tether_esi linked — TETHER_HAVE_ESI=1. If not compiled in,
-    // ESIFile(path) aborts with a critical error.)
+#if !TETHER_HAVE_ESI
+    if (!esi_xml.empty()) {
+        std::cerr << "ESI support not compiled in (TETHER_BUILD_EXTRACT_ESI=OFF). "
+                     "Cannot use --esi-xml.\n";
+        return 1;
+    }
+#else
     std::optional<EtherCAT::ESIFile> esi;
     if (!esi_xml.empty()) {
         esi.emplace(esi_xml);
@@ -63,6 +66,7 @@ int main(int argc, char** argv) {
         TETHER_LOGI(TAG, "Loaded ESI XML '%s' (%zu device(s)) for cross-reference",
                     esi_xml.c_str(), esi->devices().size());
     }
+#endif
 
     if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
     auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
@@ -134,6 +138,7 @@ int main(int argc, char** argv) {
     }
 
     // Print ESI device info for cross-reference if --esi-xml was provided
+#if TETHER_HAVE_ESI
     if (esi && !esi->empty()) {
         TETHER_LOGI(TAG, "\n=== ESI XML Cross-Reference (%s) ===", esi_xml.c_str());
         for (const auto& dev : esi->devices()) {
@@ -141,6 +146,7 @@ int main(int argc, char** argv) {
                         EtherCAT::ESI::formatDeviceHumanReadable(dev, true).c_str());
         }
     }
+#endif
 
     master.stop();
     Tether::Examples::shutdownHostEthernet(session);
