@@ -13,6 +13,8 @@
 #include <thread>
 #include <cinttypes>
 #include <utility>
+#include <vector>
+#include <algorithm>
 
 namespace EtherCAT {
 namespace Raw {
@@ -96,16 +98,19 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
                                    unsigned int transactionTimeoutMs,
                                    uint32_t* outAbortCode,
                                    SDOUpload* uploadForDiag) {
-    uint8_t mbxbuf[kRawSDOMbxBufferSize] = {0};
-    if (mbxWriteLen > sizeof(mbxbuf) || mbxReadLen > sizeof(mbxbuf)) {
+    const size_t buf_size = std::max(static_cast<size_t>(mbxWriteLen),
+                                      static_cast<size_t>(mbxReadLen));
+    if (buf_size > kRawSDOMbxBufferSize) {
         TETHER_LOGE(TAG,
-            "Tether internal SDO mailbox buffer too small for slave mailbox size "
-            "(wr=%u rd=%u, Tether max=%zu bytes). This is a Tether limit, not a slave limit. "
-            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= %u.",
-            mbxWriteLen, mbxReadLen, sizeof(mbxbuf),
-            (mbxWriteLen > mbxReadLen) ? mbxWriteLen : mbxReadLen);
+            "Slave mailbox size exceeds Tether safety ceiling "
+            "(wr=%u rd=%u, needed=%zu, ceiling=%u bytes). "
+            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= %zu.",
+            mbxWriteLen, mbxReadLen, buf_size,
+            static_cast<unsigned>(kRawSDOMbxBufferSize), buf_size);
         return false;
     }
+    std::vector<uint8_t> mbxbuf_storage(buf_size, 0);
+    uint8_t* mbxbuf = mbxbuf_storage.data();
 
     // Translate internal CA signal (bit 7 in subindex) to the ETG.1000.6
     // Complete-Access bit (0x10) in the SDO command byte.  See SDOUpload.cpp
@@ -337,16 +342,19 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
                                 unsigned int pollIntervalMs,
                                 unsigned int transactionTimeoutMs,
                                 uint32_t* outAbortCode) {
-    uint8_t mbxbuf[kRawSDOMbxBufferSize] = {0};
-    if (mbxWriteLen > sizeof(mbxbuf) || mbxReadLen > sizeof(mbxbuf)) {
+    const size_t buf_size = std::max(static_cast<size_t>(mbxWriteLen),
+                                      static_cast<size_t>(mbxReadLen));
+    if (buf_size > kRawSDOMbxBufferSize) {
         TETHER_LOGE(TAG,
-            "Tether internal SDO mailbox buffer too small for slave mailbox size "
-            "(wr=%u rd=%u, Tether max=%zu bytes). This is a Tether limit, not a slave limit. "
-            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= %u.",
-            mbxWriteLen, mbxReadLen, sizeof(mbxbuf),
-            (mbxWriteLen > mbxReadLen) ? mbxWriteLen : mbxReadLen);
+            "Slave mailbox size exceeds Tether safety ceiling "
+            "(wr=%u rd=%u, needed=%zu, ceiling=%u bytes). "
+            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= %zu.",
+            mbxWriteLen, mbxReadLen, buf_size,
+            static_cast<unsigned>(kRawSDOMbxBufferSize), buf_size);
         return false;
     }
+    std::vector<uint8_t> mbxbuf_storage(buf_size, 0);
+    uint8_t* mbxbuf = mbxbuf_storage.data();
 
     const size_t sdo_header_size = sizeof(MbxHeader) + sizeof(CoeHeader) + sizeof(SdoInitDownloadReq);
     const size_t msg_len = sdo_header_size + dataLen;
@@ -545,16 +553,19 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                                    unsigned int transactionTimeoutMs,
                                    uint32_t* outAbortCode,
                                    SDOUpload* uploadForDiag) {
-    uint8_t mbxbuf[kRawSDOMbxBufferSize] = {0};
-    if (mbxWriteLen > sizeof(mbxbuf) || mbxReadLen > sizeof(mbxbuf)) {
+    const size_t buf_size = std::max(static_cast<size_t>(mbxWriteLen),
+                                      static_cast<size_t>(mbxReadLen));
+    if (buf_size > kRawSDOMbxBufferSize) {
         TETHER_LOGE(TAG,
-            "Tether internal SDO mailbox buffer too small for slave mailbox size "
-            "(wr=%u rd=%u, Tether max=%zu bytes). This is a Tether limit, not a slave limit. "
-            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= %u.",
-            mbxWriteLen, mbxReadLen, sizeof(mbxbuf),
-            (mbxWriteLen > mbxReadLen) ? mbxWriteLen : mbxReadLen);
+            "Slave mailbox size exceeds Tether safety ceiling "
+            "(wr=%u rd=%u, needed=%zu, ceiling=%u bytes). "
+            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= %zu.",
+            mbxWriteLen, mbxReadLen, buf_size,
+            static_cast<unsigned>(kRawSDOMbxBufferSize), buf_size);
         return false;
     }
+    std::vector<uint8_t> mbxbuf_storage(buf_size, 0);
+    uint8_t* mbxbuf = mbxbuf_storage.data();
 
     // Translate internal CA signal (bit 7 in subindex) to the ETG.1000.6
     // Complete-Access bit (0x10) in the SDO command byte.  See SDOUpload.cpp
@@ -800,7 +811,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
         seg_req.cmd = seg_cmd;
         std::memcpy(seg_req.data, seg_ptr, seg_bytes);
 
-        std::memset(mbxbuf, 0, sizeof(mbxbuf));
+        std::memset(mbxbuf, 0, buf_size);
         std::memcpy(mbxbuf, &seg_mbx, sizeof(seg_mbx));
         std::memcpy(mbxbuf + sizeof(seg_mbx), &seg_coe, sizeof(seg_coe));
         std::memcpy(mbxbuf + sizeof(seg_mbx) + sizeof(seg_coe), &seg_req, sizeof(seg_req));

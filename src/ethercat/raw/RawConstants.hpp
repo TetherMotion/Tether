@@ -26,14 +26,16 @@ namespace Raw {
 
 constexpr uint8_t FIRE_AND_FORGET_IDX = 0xFE;
 
-// Maximum mailbox buffer size supported by the raw SDO layer's stack
-// buffers. Configurable via ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp.
-// Must be >= the largest configured mailbox (SM0/SM1) length.
+// Safety ceiling for the raw SDO layer's dynamically-allocated mailbox
+// buffer. Configurable via ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp.
+// The actual buffer is allocated per-call to match the slave's reported
+// mailbox size (max of SM0/SM1 length); this constant caps that allocation
+// to guard against corrupted or malicious slaves reporting absurd sizes.
 // The ESC211 FNI objects are 256-byte OctetString sections; a 256-byte
 // SDO download needs 272 bytes on the wire (6 mbx + 2 CoE + 8 SDO +
 // 256 data), so a 256-byte mailbox forces segmented transfers that the
-// ESC211 rejects. The manufacturer ENI uses 512-byte mailboxes, so we
-// support at least 512 here.
+// ESC211 rejects. The manufacturer ENI uses 512-byte mailboxes; some
+// slaves use 1024-byte mailboxes.
 constexpr uint16_t kRawSDOMbxBufferSize = ECAT_RAW_SDO_MBX_BUFFER_SIZE;
 
 // ============================================================================

@@ -335,26 +335,29 @@
 // ============================================================================
 
 /**
- * @brief Raw SDO mailbox buffer size (bytes)
+ * @brief Raw SDO mailbox buffer safety ceiling (bytes)
  *
- * Size of the stack-allocated buffer used by the raw SDO upload/download
- * layer for mailbox communication. This is a Tether-internal limit — it
- * must be >= the largest configured mailbox (SM0/SM1) length on any slave.
+ * Safety ceiling for the dynamically-allocated buffer used by the raw SDO
+ * upload/download layer for mailbox communication. The actual buffer is
+ * allocated per-call to match the slave's reported mailbox size
+ * (max of SM0/SM1 length); this constant caps that allocation to guard
+ * against corrupted or malicious slaves reporting absurd mailbox sizes.
  *
  * The ESC211 FNI objects are 256-byte OctetString sections; a 256-byte
  * SDO download needs 272 bytes on the wire (6 mbx + 2 CoE + 8 SDO +
  * 256 data), so a 256-byte mailbox forces segmented transfers that the
- * ESC211 rejects. The manufacturer ENI uses 512-byte mailboxes.
+ * ESC211 rejects. The manufacturer ENI uses 512-byte mailboxes. Some
+ * slaves use 1024-byte mailboxes.
  *
- * @note If a slave's mailbox is larger than this buffer, Tether will
+ * @note If a slave's mailbox is larger than this ceiling, Tether will
  *       reject the transfer with an error that explicitly names Tether's
- *       internal buffer as the limiting factor (not the slave).
+ *       internal ceiling as the limiting factor (not the slave).
  *
- * Memory impact: 2x this value per SDO function (upload + download)
- * Default: 512
+ * Memory impact: up to this value per in-flight SDO call (heap-allocated)
+ * Default: 16384
  */
 #ifndef ECAT_RAW_SDO_MBX_BUFFER_SIZE
-#define ECAT_RAW_SDO_MBX_BUFFER_SIZE   512
+#define ECAT_RAW_SDO_MBX_BUFFER_SIZE   16384
 #endif
 
 /**
