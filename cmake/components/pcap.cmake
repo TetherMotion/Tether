@@ -5,6 +5,7 @@ set(TETHER_PCAP_SOURCES
     ${TETHER_ROOT}/src/packetloggers/pcap/PCAPWriter.cpp
     ${TETHER_ROOT}/src/packetloggers/pcap/PCAPLogger.cpp
     ${TETHER_ROOT}/src/packetloggers/pcap/PCAPNGReader.cpp
+    ${TETHER_ROOT}/src/packetloggers/pcap/FrameInterpreter.cpp
 )
 
 set(TETHER_PCAP_HEADERS
@@ -13,6 +14,7 @@ set(TETHER_PCAP_HEADERS
     ${TETHER_ROOT}/include/tether/packetloggers/pcap/PCAPWriter.hpp
     ${TETHER_ROOT}/include/tether/packetloggers/pcap/PCAPLogger.hpp
     ${TETHER_ROOT}/include/tether/packetloggers/pcap/PCAPNGReader.hpp
+    ${TETHER_ROOT}/include/tether/packetloggers/pcap/FrameInterpreter.hpp
 )
 
 # Create variant targets
