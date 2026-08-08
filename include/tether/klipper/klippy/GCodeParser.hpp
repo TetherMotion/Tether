@@ -11,6 +11,7 @@
 /// RS274/NGC syntax and doesn't recognise multi-letter command names.
 
 #include "tether/gcode/GCodeLexer.hpp"
+#include "tether/gcode/GCodeLexerUtils.hpp"
 #include "tether/gcode/GCodeTypes.hpp"
 
 #include <algorithm>

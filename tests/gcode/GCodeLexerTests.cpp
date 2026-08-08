@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 #include <magic_enum/magic_enum.hpp>
 #include <tether/gcode/GCodeLexer.hpp>
+#include <tether/gcode/GCodeLexerUtils.hpp>
 #include <tether/gcode/GCodeTypes.hpp>
 #include <vector>
 #include <string>
