@@ -7,6 +7,7 @@
 
 #include "tether/ethercat/Types.hpp"
 #include "tether/packetloggers/pcap/PCAPNGReader.hpp"
+#include "tether/packetloggers/pcap/FrameFormatter.hpp"
 
 #include <algorithm>
 #include <cstring>

@@ -376,36 +376,6 @@ private:
     ErrorCallback errorCallback_;
 };
 
-// ============================================================================
-// Human-Readable Formatting
-// ============================================================================
-
-/**
- * @brief Format an interpreted frame as human-readable text.
- * @param frame         Frame to format.
- * @param verbose       If true, include full payload hex dumps.
- * @param maxDataBytes  Maximum payload bytes to dump per datagram (0 = no limit).
- */
-std::string formatInterpretedFrame(const InterpretedFrame& frame,
-                                   bool verbose = false,
-                                   size_t maxDataBytes = 64);
-
-/**
- * @brief Format an interpreted frame as compact JSON.
- */
-std::string frameToJson(const InterpretedFrame& frame);
-
-/**
- * @brief Convert a MAC address to a colon-separated hex string.
- */
-std::string macToString(const std::array<uint8_t, 6>& mac);
-
-/**
- * @brief Convert a byte span to a hex string with optional separator.
- */
-std::string bytesToHex(const uint8_t* data, size_t length,
-                       const std::string& separator = " ");
-
 } // namespace PCAP
 } // namespace PacketLoggers
 } // namespace Tether
