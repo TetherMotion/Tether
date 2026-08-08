@@ -241,11 +241,34 @@ public:
      *
      * Call this when the slave firmware pre-configures SM0/SM1, so the
      * PRE_OP guard is satisfied without writing registers.
+     *
+     * A best-effort mailbox drain is performed automatically to clear any
+     * stale data left in SM1 from slave firmware boot or a previous session.
      */
     virtual void assumeMailboxAlreadyConfigured();
 
     /** @brief True if mailbox has been configured (or assumed configured). */
     bool isMailboxConfigured() const { return mailbox_configured_; }
+
+    /**
+     * @brief Drain any stale data from the slave-to-master mailbox (SM1).
+     *
+     * Reads the SM1 status register and, if it indicates unread data, reads
+     * the configured SM1 address to clear the ESC buffer.  Repeats until SM1
+     * is no longer full or the drain limit is reached.  If read datagrams
+     * fail (WKC == 0), falls back to cycling the SM1 activate register.
+     *
+     * This is called automatically after every mailbox configuration path
+     * (configureMailbox, assumeMailboxAlreadyConfigured).  It is also safe to
+     * call at any later point as a diagnostic recovery step — for example
+     * when stale mailbox responses are observed during SDO transactions.
+     *
+     * @param max_drain  Maximum back-to-back reads to perform (default 16)
+     * @return true if SM1 is empty (or was successfully drained);
+     *         false if the mailbox is not configured, SM1 status could not
+     *         be read, or SM1 is still full after max_drain attempts
+     */
+    virtual bool drainMailbox(unsigned int max_drain = 16);
 
     // -- PDO sync-manager configuration -------------------------------------
 
@@ -684,6 +707,7 @@ public:
     SlaveError configureMailbox(const ESIFile&,
                                  Tether::Platform::LogLevel) override;
     void assumeMailboxAlreadyConfigured() override;
+    bool drainMailbox(unsigned int) override;
 
     SlaveError configurePDOSyncManagers() override;
     SlaveError configurePDOSyncManagers(uint16_t, uint16_t, uint8_t,
