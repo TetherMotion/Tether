@@ -439,6 +439,14 @@ int main(int argc, char** argv) {
             static_cast<unsigned>(safety.input2),
             safety.stateSummary());
 
+        // 0x2620:2 "Safe fieldbus" reports whether the FSoE connection is
+        // active on the drive.  Logged up front so the operator can see the
+        // FSoE state regardless of the safety verdict below.
+        TETHER_LOGI(TAG,
+            "FSoE active indicator (0x2620:2 \"Safe fieldbus\"): raw=%u -> %s",
+            static_cast<unsigned>(safety.safe_fieldbus),
+            safety.fsoeStateSummary());
+
         if (!safety.ok) {
             TETHER_LOGE(TAG,
                 "Failed to read safety module diagnostics (0x2611) via SDO — "
@@ -448,9 +456,16 @@ int main(int argc, char** argv) {
         }
 
         if (safety.isInSafeState()) {
+            // Before failing, tell the operator whether the FSoE safety
+            // function is the cause of the safe state (0x2620:2).  This
+            // distinguishes an active FSoE trip from a hardware/input safe
+            // state and speeds up root-cause diagnosis.
             TETHER_LOGE(TAG,
-                "Drive is in SAFE STATE (safety function active, motion inhibited) — "
-                "refusing to activate drive, triggering shutdown");
+                "Drive is in SAFE STATE (safety function active, motion "
+                "inhibited) — FSoE is %s (0x2620:2=%u) — refusing to "
+                "activate drive, triggering shutdown",
+                safety.fsoeStateSummary(),
+                static_cast<unsigned>(safety.safe_fieldbus));
             Tether::Examples::stopHostMasterSession(master, session);
             return 2;
         }
