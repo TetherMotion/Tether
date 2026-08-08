@@ -27,22 +27,26 @@ class GcodeMacroRegistry {
 public:
     /// @brief Register a macro.
     void registerMacro(const GcodeMacro& macro) {
-        macros_[toUpper(macro.name)] = macro;
+        std::string upperName = toUpper(macro.name);
+        macros_[upperName] = macro;
     }
 
     /// @brief Unregister a macro.
     void unregisterMacro(const std::string& name) {
-        macros_.erase(toUpper(name));
+        std::string upperName = toUpper(name);
+        macros_.erase(upperName);
     }
 
     /// @brief Check if a macro exists.
     bool hasMacro(const std::string& name) const {
-        return macros_.find(toUpper(name)) != macros_.end();
+        std::string upperName = toUpper(name);
+        return macros_.find(upperName) != macros_.end();
     }
 
     /// @brief Get a macro by name.
     const GcodeMacro* getMacro(const std::string& name) const {
-        auto it = macros_.find(toUpper(name));
+        std::string upperName = toUpper(name);
+        auto it = macros_.find(upperName);
         return it == macros_.end() ? nullptr : &it->second;
     }
 
@@ -59,7 +63,8 @@ public:
     /// @return Expanded G-code string, or empty if macro not found.
     std::string expandMacro(const std::string& name,
                             const std::map<std::string, std::string>& params) const {
-        auto it = macros_.find(toUpper(name));
+        std::string upperName = toUpper(name);
+        auto it = macros_.find(upperName);
         if (it == macros_.end()) return {};
         const GcodeMacro& macro = it->second;
 
