@@ -340,49 +340,23 @@ int main(int argc, char** argv) {
         TETHER_LOGI(TAG, "Slave %u transitioned to PRE_OP", slave_idx);
     }
 
-    // --- Configure FSoE-only PDO mapping using multi-PDO API ---
+    // --- Configure FSoE-only PDO mapping and transition to OP ---
     //
     // Only FSoE safety PDOs are mapped — no CiA 402 process data PDOs.
-    // This uses the new Slave::configureMultiPDOs() API with the
-    // makeFSoEPDOAssignment() builder from SynapticonPDO.hpp:
+    // This uses CiA402Drive::transitionToOp(const Slave::MultiPDOAssignment&)
+    // which internally:
+    //   1. Ensures PRE_OP (skips if already there)
+    //   2. Calls Slave::configureMultiPDOs() — writes SM registers, PDO
+    //      assignments (0x1C12/0x1C13), and FMMU configuration
+    //   3. Sets drive PDO buffer sizes from the assignment's total Rx/Tx sizes
+    //   4. Registers PDO buffers with the process data transport
+    //   5. Transitions SAFE_OP → OP (with DC reconfig, diagnostics, etc.)
     //
-    //   SM2 (outputs): RxPDO 0x1700 (11 bytes) — FSoE Control (PLC to Drive)
-    //   SM3 (inputs):  TxPDO 0x1B00 (31 bytes) — FSoE Status (Drive to PLC)
-    //
-    // The configureMultiPDOs() method performs the full configuration:
-    //   1. Sets up SlaveConfig SM entries with total length
-    //   2. Writes SM registers (disabled)
-    //   3. Writes PDO assignments to OD (0x1C12/0x1C13) via SyncManagerAccessor
-    //   4. Configures FMMUs via FMMUManager::configureFromMultiPDO
-    //   5. Enables SMs
-    {
-        auto& slave = master.ethercatMaster().slave(slave_idx);
-
-        // Build the FSoE-only PDO assignment
-        const auto assignment = EtherCAT::Drives::Synapticon_pdo::makeFSoEPDOAssignment();
-
-        TETHER_LOGI(TAG,
-            "Configuring FSoE-only PDO mapping: SM2=RxPDO 0x1700 (%u bytes), "
-            "SM3=TxPDO 0x1B00 (%u bytes)",
-            EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.size,
-            EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.size);
-
-        const auto pdo_err = slave.configureMultiPDOs(assignment);
-        if (pdo_err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGE(TAG, "Failed to configure multi-PDO: %s",
-                        EtherCAT::slaveErrorToString(pdo_err));
-            Tether::Examples::stopHostMasterSession(master, session);
-            return 3;
-        }
-        TETHER_LOGI(TAG, "FSoE-only PDO mapping configured successfully");
-    }
-
-    // --- Set up drive PDO buffers for FSoE data ---
-    //
-    // The drive's internal PDO buffers need to be sized to match the FSoE
-    // PDO sizes (11 bytes Rx, 31 bytes Tx).  We use assignFixedPDOs() to
-    // set the buffer sizes and then registerPDOBuffers() to register them
-    // with the PDO transport layer for cyclic exchange.
+    // PDO layout:
+    //   SM2 (outputs, 0x1800, ctrl=0x64): RxPDO 0x1700 (11 bytes)
+    //     FSoE Command, STO/SS1/SS2/SOS/SLS/SBC/ResetPos flags, CRCs, ConnectionID
+    //   SM3 (inputs, 0x1C00, ctrl=0x20): TxPDO 0x1B00 (31 bytes)
+    //     FSoE Command, safety state flags, diagnostic flags, safe pos/vel, CRCs, ConnectionID
     {
         auto* drive = master.driveBySlaveIndex(slave_idx);
         if (drive == nullptr) {
@@ -393,63 +367,21 @@ int main(int argc, char** argv) {
 
         drive->setSDOTimeout(kSdoTimeoutMs);
 
-        // Set PDO buffer sizes to match the FSoE PDOs.
-        // The SDO writes in assignFixedPDOs are redundant here (configureMultiPDOs
-        // already wrote the PDO assignments), but the method also sets the
-        // internal buffer sizes (m_rxpdo_size/m_txpdo_size) which are needed
-        // for registerPDOBuffers().
-        if (!drive->assignFixedPDOs(
-                EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.index,
-                EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.index,
-                EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.size,
-                EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.size)) {
-            TETHER_LOGE(TAG, "Failed to set FSoE PDO buffer sizes");
-            Tether::Examples::stopHostMasterSession(master, session);
-            return 3;
-        }
-
-        // Register PDO buffers with the process data frame
-        if (!drive->registerPDOBuffers()) {
-            TETHER_LOGE(TAG, "Failed to register PDO buffers");
-            Tether::Examples::stopHostMasterSession(master, session);
-            return 3;
-        }
+        // Build the FSoE-only PDO assignment
+        const auto assignment = EtherCAT::Drives::Synapticon_pdo::makeFSoEPDOAssignment();
 
         TETHER_LOGI(TAG,
-            "Drive PDO buffers registered: Rx=%u bytes (0x%04X), Tx=%u bytes (0x%04X)",
+            "Transitioning to OP with FSoE-only PDO mapping: "
+            "SM2=RxPDO 0x1700 (%u bytes), SM3=TxPDO 0x1B00 (%u bytes)",
             EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.size,
-            EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.index,
-            EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.size,
-            EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.index);
-    }
+            EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.size);
 
-    // --- Transition to SAFE_OP then OP ---
-    //
-    // We use the Slave's state transition methods directly (not
-    // CiA402Drive::transitionToOp) because configureMultiPDOs() already
-    // configured the SM/FMMU registers.  CiA402Drive::transitionToOp would
-    // re-configure SMs from SII, potentially overwriting our multi-PDO
-    // configuration.
-    {
-        auto& slave = master.ethercatMaster().slave(slave_idx);
-
-        const auto safe_err = slave.transitionToSafeOp();
-        if (safe_err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGE(TAG, "Failed to transition to SAFE_OP: %s",
-                        EtherCAT::slaveErrorToString(safe_err));
+        if (!drive->transitionToOp(assignment)) {
+            TETHER_LOGE(TAG, "Failed to transition to OP with multi-PDO assignment");
             Tether::Examples::stopHostMasterSession(master, session);
             return 4;
         }
-        TETHER_LOGI(TAG, "Slave %u transitioned to SAFE_OP", slave_idx);
-
-        const auto op_err = slave.transitionToOp();
-        if (op_err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGE(TAG, "Failed to transition to OP: %s",
-                        EtherCAT::slaveErrorToString(op_err));
-            Tether::Examples::stopHostMasterSession(master, session);
-            return 4;
-        }
-        TETHER_LOGI(TAG, "Slave %u transitioned to OP", slave_idx);
+        TETHER_LOGI(TAG, "Slave %u transitioned to OP with FSoE-only PDOs", slave_idx);
     }
 
     // --- Set up FSoE safe-motion ---

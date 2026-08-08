@@ -53,9 +53,12 @@
 #include "tether/drives/DynaDrive/Registers/Statusword.hpp"
 #include "tether/drives/DynaDrive/Registers/Controlword.hpp"
 #include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/Slave.hpp"  // for Slave::MultiPDOAssignment
 
-// Forward declaration
-namespace EtherCAT { class Master; }
+// Forward declarations
+namespace EtherCAT {
+class Master;
+} // namespace EtherCAT
 
 namespace EtherCAT {
 
@@ -203,6 +206,23 @@ public:
      */
     bool transitionToOp(bool configure_sm = true);
 
+    /**
+     * @brief Full state sequence with multi-PDO-per-SM configuration.
+     *
+     * Calls Slave::configureMultiPDOs() to configure the sync managers and
+     * FMMUs for multiple PDO mappings per SM, then transitions through
+     * PRE_OP → SAFE_OP → OP.  Unlike the single-PDO variant, this does NOT
+     * re-configure SMs from SII (configureMultiPDOs handles all SM/FMMU
+     * setup).  Internal PDO buffer sizes are set from the assignment's total
+     * Rx/Tx sizes, and PDO buffers are registered automatically.
+     *
+     * Must be called in PRE_OP (or the method will transition there first).
+     *
+     * @param assignment  Multi-PDO assignment (SM configs + PDO mappings)
+     * @return true on success, false on any transition or config failure
+     */
+    bool transitionToOp(const Slave::MultiPDOAssignment& assignment);
+
     // ========================================================================
     // CiA 402 State Machine
     // ========================================================================
@@ -261,6 +281,10 @@ private:
     bool writeControlword(uint16_t controlword);
     bool readStatusword(uint16_t& statusword);
     bool waitForDriveState(DriveState target, uint32_t timeout_ms);
+
+    /// Common SAFE_OP → OP tail: DC reconfig, PDO enable, diagnostics, OP request.
+    /// Called by both transitionToOp() variants after SM/FMMU configuration.
+    bool transitionSafeOpToOp();
 
     uint16_t       m_slave_index;
     Master* m_master{nullptr};
