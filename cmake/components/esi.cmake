@@ -5,6 +5,7 @@
 
 set(TETHER_ESI_SOURCES
     ${TETHER_ROOT}/src/ethercat/ESIParser.cpp
+    ${TETHER_ROOT}/src/ethercat/ESIFile.cpp
 )
 
 # Fetch tinyxml2 if not found on the system
@@ -47,6 +48,12 @@ foreach(_tgt IN LISTS _esi_variants)
     )
 
     target_link_libraries(${_tgt} PUBLIC tether_common)
+
+    # Mark ESI support as available for consumers of this library.
+    # ESIFile.cpp uses this to enable the file-parsing constructor; when
+    # tether_esi is not linked, TETHER_HAVE_ESI defaults to 0 and the
+    # ESIFile(path) constructor aborts with a critical error.
+    target_compile_definitions(${_tgt} PUBLIC TETHER_HAVE_ESI=1)
 
     set_target_properties(${_tgt} PROPERTIES
         POSITION_INDEPENDENT_CODE ON

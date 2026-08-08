@@ -12,6 +12,14 @@ target_link_libraries(tether_examples_common PRIVATE
     tether_ethercat_common
     tether_hal
     tether_common)
+# Conditionally link tether_esi so examples can use ESIFile("path.xml").
+# When tether_esi is built (TETHER_BUILD_EXTRACT_ESI or another consumer
+# enables esi.cmake), TETHER_HAVE_ESI=1 is propagated and ESIFile's
+# file-parsing constructor is available. Otherwise ESIFile(path) aborts
+# with a critical error at runtime.
+if(TARGET tether_esi)
+    target_link_libraries(tether_examples_common PUBLIC tether_esi)
+endif()
 target_include_directories(tether_examples_common PUBLIC
     ${PROJECT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR})
@@ -62,6 +70,13 @@ add_tether_example(as715n_sine_motion_native
 # ---AS715N Sine Motion + FSoE Native Example ---
 # Adds an optional Synapticon-style FSoE safe-motion main instance to the sine loop.
 add_tether_example(as715n_sine_motion_fsoe_native
+    LIBRARIES tether_ethercat_master tether_cia_profiles tether_drives tether_fsoe tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# ---Synapticon SOMANET CST + FSoE Example ---
+# Puts a Synapticon SOMANET (AS715N) drive into Cyclic Sync Torque mode,
+# maps RxPDO 0x1702 / TxPDO 0x1B02, sends 0 torque, and runs the FSoE
+# safe-motion protocol with rich diagnostics.
+add_tether_example(synapticon_cst_fsoe
     LIBRARIES tether_ethercat_master tether_cia_profiles tether_drives tether_fsoe tether_ethercat_common tether_hal tether_common tether_examples_common)
 endif()
 

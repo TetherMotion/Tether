@@ -1042,6 +1042,22 @@
 #endif
 
 /**
+ * @brief ESI (EtherCAT Slave Information) XML parser support
+ *
+ * When enabled (set to 1 by CMake when the tether_esi library is built),
+ * ESIFile can parse XML files and the ESI-based Master/Slave overloads
+ * are fully functional. When disabled (0), constructing an ESIFile from
+ * a file path triggers a critical error (std::abort) because the ESI
+ * parser library is not linked.
+ *
+ * Defined by CMake: tether_esi sets TETHER_HAVE_ESI=1 on all its
+ * dependents. If tether_esi is not built, this defaults to 0.
+ */
+#ifndef TETHER_HAVE_ESI
+#define TETHER_HAVE_ESI               0
+#endif
+
+/**
  * @brief Enable conditional debug gating framework
  *
  * When enabled (default), the DebugGate system is compiled in, allowing

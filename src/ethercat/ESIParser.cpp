@@ -125,12 +125,29 @@ bool parseESIFile(const std::string& path, std::vector<DeviceInfo>& devices, std
 
         // Mailbox protocols - try to find <Mailbox> category entries with <Protocols>
         // In many ESI files protocols are under SIIDescription or in other places; search for "Protocols" child
-        // naive search under Device
+        // naive search under Device.
+        //
+        // If no explicit <Protocols> text is found, derive protocol flags from
+        // child elements: <CoE>, <AoE>, <EoE>, <FoE>, <SoE>, <VoE>.
+        // This handles ESI files (e.g. Kinco RP20) that use child elements
+        // rather than a numeric <Protocols> value.
+        uint16_t derived_protocols = 0;
+        bool found_protocols_text = false;
         for (XMLElement* c = dev->FirstChildElement(); c; c = c->NextSiblingElement()) {
             if (std::string(c->Name()) == "Mailbox") {
                 XMLElement* protocols = c->FirstChildElement("Protocols");
                 if (protocols && protocols->GetText()) {
                     info.mailbox.protocols = static_cast<uint16_t>(parseHexAttribute(protocols->GetText()));
+                    found_protocols_text = true;
+                }
+                // Derive from child elements if no <Protocols> text
+                if (!found_protocols_text) {
+                    if (c->FirstChildElement("CoE")) derived_protocols |= SII::MBX_PROTO_COE;
+                    if (c->FirstChildElement("AoE")) derived_protocols |= SII::MBX_PROTO_AOE;
+                    if (c->FirstChildElement("EoE")) derived_protocols |= SII::MBX_PROTO_EOE;
+                    if (c->FirstChildElement("FoE")) derived_protocols |= SII::MBX_PROTO_FOE;
+                    if (c->FirstChildElement("SoE")) derived_protocols |= SII::MBX_PROTO_SOE;
+                    if (c->FirstChildElement("VoE")) derived_protocols |= SII::MBX_PROTO_VOE;
                 }
             }
             // Also check deeper
@@ -139,8 +156,22 @@ bool parseESIFile(const std::string& path, std::vector<DeviceInfo>& devices, std
                 XMLElement* protocols = child->FirstChildElement("Protocols");
                 if (protocols && protocols->GetText()) {
                     info.mailbox.protocols = static_cast<uint16_t>(parseHexAttribute(protocols->GetText()));
+                    found_protocols_text = true;
+                }
+                if (!found_protocols_text) {
+                    if (child->FirstChildElement("CoE")) derived_protocols |= SII::MBX_PROTO_COE;
+                    if (child->FirstChildElement("AoE")) derived_protocols |= SII::MBX_PROTO_AOE;
+                    if (child->FirstChildElement("EoE")) derived_protocols |= SII::MBX_PROTO_EOE;
+                    if (child->FirstChildElement("FoE")) derived_protocols |= SII::MBX_PROTO_FOE;
+                    if (child->FirstChildElement("SoE")) derived_protocols |= SII::MBX_PROTO_SOE;
+                    if (child->FirstChildElement("VoE")) derived_protocols |= SII::MBX_PROTO_VOE;
                 }
             }
+        }
+        // If no explicit <Protocols> text was found but we derived flags from
+        // child elements, use the derived value.
+        if (!found_protocols_text && derived_protocols != 0 && !info.mailbox.protocols) {
+            info.mailbox.protocols = derived_protocols;
         }
 
         // FMMU list (simple name entries)

@@ -135,6 +135,16 @@ void logMailboxConfig(const MailboxSizeConfig& size,
                       const char* tag);
 
 // ============================================================================
+// ESI (EtherCAT Slave Information) XML helpers
+// ============================================================================
+
+/// Add `--esi-xml` to an ArgumentParser (default empty string).
+/// When non-empty, examples use it to construct an EtherCAT::ESIFile and
+/// drive mailbox/PDO configuration from the ESI XML instead of SII EEPROM.
+void addEsiXmlArg(argparse::ArgumentParser& program,
+                  const std::string& defaultValue = "");
+
+// ============================================================================
 // SDO abort reporting helper
 // ============================================================================
 

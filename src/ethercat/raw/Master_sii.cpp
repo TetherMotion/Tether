@@ -15,6 +15,7 @@
 #include "tether/ethercat/FaultDetection.hpp"
 #include "tether/ethercat/RealtimeLoop.hpp"
 #include "tether/ethercat/SyncManagerValidation.hpp"
+#include "tether/ethercat/ESITypes.hpp"
 #include "tether/sii/SIIParser.hpp"
 #include "tether/fmmu/FMMUConfiguration.hpp"
 #include "raw/internal.hpp"
@@ -193,6 +194,190 @@ bool Master::autoConfigureMailbox(SlaveAddress slave_address, Tether::Platform::
     
     return true;
 }
+
+// -- ESI helpers (anonymous namespace) ---------------------------------------
+
+namespace {
+
+/// Find a SyncManagerEntry by name substring (e.g. "MBoxOut", "MBoxIn",
+/// "Outputs", "Inputs").
+const EtherCAT::ESI::SyncManagerEntry* findEsiSmByName(
+    const EtherCAT::ESI::DeviceInfo& dev, const char* needle) {
+    for (const auto& sm : dev.syncManagers) {
+        if (sm.name.find(needle) != std::string::npos) return &sm;
+    }
+    return nullptr;
+}
+
+/// Read SII identity for ESI device matching.
+struct EsiMatchId {
+    uint32_t vendorId{0};
+    uint32_t productCode{0};
+};
+EsiMatchId readEsiMatchId(EtherCAT::Master& m, uint16_t slave_index) {
+    EsiMatchId id;
+    EtherCAT::SII::SIIIdentity sii_id;
+    if (EtherCAT::SII::readSIIIdentity(m, slave_index, sii_id)) {
+        id.vendorId = sii_id.vendor_id;
+        id.productCode = sii_id.product_code;
+    }
+    return id;
+}
+
+} // anonymous namespace
+
+bool Master::autoConfigureMailbox(const ESIFile& esi, SlaveAddress slave_address,
+                                   Tether::Platform::LogLevel log_level)
+{
+    const char* local_tag = "autoMbox";
+    uint16_t slave_index = 0;
+    if (!resolvePhysicalSlaveIndex(slave_address, slave_index)) {
+        return false;
+    }
+
+    if (esi.empty()) {
+        TETHER_LOGE(local_tag, "Slave %u: ESI file is empty — cannot auto-configure mailbox from ESI",
+                    (unsigned)slave_index);
+        return false;
+    }
+
+    auto id = readEsiMatchId(*this, slave_index);
+    const ESI::DeviceInfo* dev = esi.findDevice(id.vendorId, id.productCode);
+    if (!dev) {
+        TETHER_LOGE(local_tag, "Slave %u: ESI file has no devices", (unsigned)slave_index);
+        return false;
+    }
+
+    if (log_level >= Tether::Platform::LogLevel::Debug) {
+        TETHER_LOGD(local_tag, "Slave %u: ESI device '%s' matched (vendor=0x%08X product=0x%08X)",
+                    (unsigned)slave_index, dev->name.c_str(), dev->vendorId, dev->productCode);
+    }
+
+    // Extract MBoxOut (master write, SM0) and MBoxIn (slave read, SM1)
+    const ESI::SyncManagerEntry* mbxOut = findEsiSmByName(*dev, "MBoxOut");
+    const ESI::SyncManagerEntry* mbxIn  = findEsiSmByName(*dev, "MBoxIn");
+
+    uint16_t wr_addr = 0, wr_len = 0, rd_addr = 0, rd_len = 0;
+    if (mbxOut) {
+        // MBoxOut = master write direction (SM0 in Tether convention)
+        wr_addr = mbxOut->startAddress;
+        wr_len  = mbxOut->defaultSize;
+    } else {
+        TETHER_LOGW(local_tag, "Slave %u: ESI has no MBoxOut — using default 0x1000/256",
+                    (unsigned)slave_index);
+        wr_addr = 0x1000; wr_len = 256;
+    }
+    if (mbxIn) {
+        // MBoxIn = slave→master read direction (SM1 in Tether convention)
+        rd_addr = mbxIn->startAddress;
+        rd_len  = mbxIn->defaultSize;
+    } else {
+        TETHER_LOGW(local_tag, "Slave %u: ESI has no MBoxIn — using default 0x1200/256",
+                    (unsigned)slave_index);
+        rd_addr = 0x1200; rd_len = 256;
+    }
+
+    uint16_t proto = 0x0004; // default: CoE
+    if (dev->mailbox.protocols.has_value()) {
+        proto = *dev->mailbox.protocols;
+    }
+
+    if (log_level >= Tether::Platform::LogLevel::Debug) {
+        TETHER_LOGD(local_tag,
+            "Slave %u: ESI mailbox params: wr=0x%04X/%u rd=0x%04X/%u proto=0x%04X",
+            (unsigned)slave_index, wr_addr, (unsigned)wr_len,
+            rd_addr, (unsigned)rd_len, proto);
+    } else {
+        TETHER_LOGI(local_tag, "Slave %u: Auto-configuring mailbox from ESI (wr=0x%04X/%u rd=0x%04X/%u proto=0x%04X)",
+                    (unsigned)slave_index, wr_addr, (unsigned)wr_len,
+                    rd_addr, (unsigned)rd_len, proto);
+    }
+
+    // Apply mailbox override
+    setMailboxOverride(slave_address, wr_addr, wr_len, rd_addr, rd_len, proto);
+
+    // Configure SDO subsystem mailbox
+    sdoManager(slave_index).configureMailbox(wr_addr, wr_len, rd_addr, rd_len);
+
+    // Write mailbox SM registers to slave ESC
+    if (slave_index < PDO::kMaxPDOSlaves) {
+        auto* slave_configs = pdo_->slaveConfigs();
+        slave_configs[slave_index].sm[0] = PDO::SyncManagerConfig::mailbox_write(wr_addr, wr_len);
+        slave_configs[slave_index].sm[1] = PDO::SyncManagerConfig::mailbox_read(rd_addr, rd_len);
+
+        if (pdo_->configureSlavesSMs(slave_index)) {
+            (void)drainSlaveMailbox(slave_index);
+        } else {
+            TETHER_LOGE(local_tag, "Failed to write mailbox SM registers to slave %u", (unsigned)slave_index);
+            return false;
+        }
+    }
+
+    TETHER_LOGI(local_tag, "Mailbox auto-configured from ESI for slave %u",
+                (unsigned)slave_index);
+    return true;
+}
+
+bool Master::configureProcessDataSyncManagersFromESI(const ESIFile& esi,
+                                                      SlaveAddress slave_address)
+{
+    uint16_t slave_index = 0;
+    if (!resolvePhysicalSlaveIndex(slave_address, slave_index)) {
+        return false;
+    }
+
+    if (slave_index >= PDO::kMaxPDOSlaves) {
+        TETHER_LOGE(TAG, "configureProcessDataSyncManagersFromESI: invalid slave index %u", slave_index);
+        return false;
+    }
+
+    if (esi.empty()) {
+        TETHER_LOGE(TAG, "Slave %u: ESI file is empty — cannot configure PDO SMs from ESI", slave_index);
+        return false;
+    }
+
+    auto id = readEsiMatchId(*this, slave_index);
+    const ESI::DeviceInfo* dev = esi.findDevice(id.vendorId, id.productCode);
+    if (!dev) {
+        TETHER_LOGE(TAG, "Slave %u: ESI file has no devices", slave_index);
+        return false;
+    }
+
+    const ESI::SyncManagerEntry* smOut = findEsiSmByName(*dev, "Outputs");
+    const ESI::SyncManagerEntry* smIn  = findEsiSmByName(*dev, "Inputs");
+
+    if (!smOut || !smIn) {
+        TETHER_LOGE(TAG, "Slave %u: ESI missing Outputs/Inputs sync managers", slave_index);
+        return false;
+    }
+
+    auto* slave_configs = pdo_->slaveConfigs();
+
+    // SM2 — Outputs (process data output)
+    slave_configs[slave_index].sm[2].phys_start_addr = smOut->startAddress;
+    slave_configs[slave_index].sm[2].length = smOut->defaultSize;
+    slave_configs[slave_index].sm[2].control = smOut->control;
+    slave_configs[slave_index].sm[2].enable = 1;
+    slave_configs[slave_index].sm[2].type = PDO::SyncManagerType::ProcessOutput;
+
+    // SM3 — Inputs (process data input)
+    slave_configs[slave_index].sm[3].phys_start_addr = smIn->startAddress;
+    slave_configs[slave_index].sm[3].length = smIn->defaultSize;
+    slave_configs[slave_index].sm[3].control = smIn->control;
+    slave_configs[slave_index].sm[3].enable = 1;
+    slave_configs[slave_index].sm[3].type = PDO::SyncManagerType::ProcessInput;
+
+    if (!pdo_->configureSlavesSMs(slave_index)) {
+        TETHER_LOGE(TAG, "Slave %u: Failed to write PDO SM registers from ESI", slave_index);
+        return false;
+    }
+
+    TETHER_LOGI(TAG, "Slave %u: PDO SMs configured from ESI (SM2=0x%04X/%u, SM3=0x%04X/%u)",
+                slave_index, smOut->startAddress, smOut->defaultSize,
+                smIn->startAddress, smIn->defaultSize);
+    return true;
+}
+
 void Master::logDiscoveredSlavesSummary(const char* tag)
 {
     const uint16_t n = getDiscoveredSlaveCount();

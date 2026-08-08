@@ -44,6 +44,7 @@
 #include "tether/ethercat/CachedSIIReader.hpp"
 #include "tether/ethercat/Mailbox.hpp"
 #include "tether/ethercat/SyncManager.hpp"
+#include "tether/ethercat/ESIFile.hpp"
 #include "tether/fmmu/FMMUConfiguration.hpp"
 #include "tether/platform/Platform.hpp"
 #include "tether/ethercat/CustomPDOMapping.hpp"
@@ -217,6 +218,25 @@ public:
         uint16_t protocols);
 
     /**
+     * @brief Configure the mailbox (SM0/SM1) from an ESI file.
+     *
+     * Reads mailbox sync-manager settings (MBoxOut/MBoxIn address, size,
+     * control byte) and protocol flags from the ESI DeviceInfo, then
+     * delegates to the explicit-parameter overload.
+     *
+     * The slave's SII identity (vendor/product) is used to select the
+     * matching device from the ESI file; if no match is found, the first
+     * device is used as a fallback.
+     *
+     * @param esi        ESI file with parsed device info
+     * @param log_level  Verbosity for diagnostic output
+     * @return SlaveError::Ok on success
+     */
+    virtual SlaveError configureMailbox(
+        const ESIFile& esi,
+        Tether::Platform::LogLevel log_level = Tether::Platform::LogLevel::Info);
+
+    /**
      * @brief Inform the slave that mailbox configuration is already done.
      *
      * Call this when the slave firmware pre-configures SM0/SM1, so the
@@ -245,6 +265,18 @@ public:
     virtual SlaveError configurePDOSyncManagers(
         uint16_t sm2_addr, uint16_t sm2_len, uint8_t sm2_ctrl,
         uint16_t sm3_addr, uint16_t sm3_len, uint8_t sm3_ctrl);
+
+    /**
+     * @brief Configure SM2/SM3 (process data SMs) from an ESI file.
+     *
+     * Reads the Outputs/Inputs sync-manager settings (address, size,
+     * control byte) from the ESI DeviceInfo, then delegates to the
+     * explicit-parameter overload.
+     *
+     * @param esi  ESI file with parsed device info
+     * @return SlaveError::Ok on success
+     */
+    virtual SlaveError configurePDOSyncManagers(const ESIFile& esi);
 
     /**
      * @brief Mark PDO sync-managers as already configured.
@@ -281,6 +313,22 @@ public:
      * @return SlaveError::Ok on success
      */
     virtual SlaveError registerPDOsFromSII(SIIPDOConfig& out_config);
+
+    /**
+     * @brief Register PDO mapping entries from an ESI file.
+     *
+     * Like registerPDOsFromSII() but uses ESI XML data instead of reading
+     * from the slave's SII EEPROM. Finds the best-matching RxPDO/TxPDO
+     * (assigned to SM2/SM3 or the default), allocates buffers, and
+     * registers them in the master-side PDO mapping.
+     *
+     * Must be called in PRE_OP.
+     *
+     * @param esi          ESI file with parsed device info
+     * @param[out] out_config  Populated with the discovered PDO indices/sizes
+     * @return SlaveError::Ok on success
+     */
+    virtual SlaveError registerPDOsFromESI(const ESIFile& esi, SIIPDOConfig& out_config);
 
     /**
      * @brief Write PDO assignment objects (0x1C12 / 0x1C13) to the slave.
@@ -633,14 +681,18 @@ public:
     SlaveError configureMailbox(Tether::Platform::LogLevel) override;
     SlaveError configureMailbox(const MailboxSyncManagerConfig&,
                                  const MailboxSyncManagerConfig&, uint16_t) override;
+    SlaveError configureMailbox(const ESIFile&,
+                                 Tether::Platform::LogLevel) override;
     void assumeMailboxAlreadyConfigured() override;
 
     SlaveError configurePDOSyncManagers() override;
     SlaveError configurePDOSyncManagers(uint16_t, uint16_t, uint8_t,
                                          uint16_t, uint16_t, uint8_t) override;
+    SlaveError configurePDOSyncManagers(const ESIFile&) override;
     void assumePDOAlreadyConfigured() override;
 
     SlaveError registerPDOsFromSII(SIIPDOConfig&) override;
+    SlaveError registerPDOsFromESI(const ESIFile&, SIIPDOConfig&) override;
     SlaveError assignPDOs(const SIIPDOConfig&) override;
     SlaveError registerFixedPDOs(const SIIPDOConfig&) override;
 

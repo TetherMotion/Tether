@@ -45,6 +45,7 @@
 #include "tether/ethercat/TetherConfig.hpp"
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/TransactionRouter.hpp"
+#include "tether/ethercat/ESIFile.hpp"
 #include "tether/platform/MessageQueue.hpp"
 #include "tether/platform/EspCompat.hpp"
 
@@ -383,6 +384,20 @@ public:
      */
     bool configureProcessDataSyncManagersFromSii(SlaveAddress slave_address);
 
+    /**
+     * @brief Configure SM2/SM3 (process data SMs) from an ESI file
+     *
+     * Same as configureProcessDataSyncManagersFromSii() but reads
+     * sync-manager settings from the ESI XML file instead of SII EEPROM.
+     * The slave's SII identity is used to match the correct device entry
+     * in the ESI file; if no match is found, the first device is used.
+     *
+     * @param esi           ESI file with parsed device info
+     * @param slave_address Slave address
+     * @return true if SM2/SM3 were configured and written successfully
+     */
+    bool configureProcessDataSyncManagersFromESI(const ESIFile& esi, SlaveAddress slave_address);
+
     // ---- Transport primitives ----------------------------------------------
 
     bool sendRawFrame(const void* buf, size_t len);
@@ -624,6 +639,22 @@ public:
      * @endcode
      */
     bool autoConfigureMailbox(SlaveAddress slave_address, Tether::Platform::LogLevel log_level = Tether::Platform::LogLevel::Info);
+
+    /**
+     * @brief Automatically configure mailbox from an ESI file for a slave
+     *
+     * Same as autoConfigureMailbox(SlaveAddress, LogLevel) but reads
+     * mailbox configuration from the ESI XML file instead of SII EEPROM.
+     * The slave's SII identity is used to match the correct device entry
+     * in the ESI file; if no match is found, the first device is used.
+     *
+     * @param esi           ESI file with parsed device info
+     * @param slave_address Slave address (physical or logical)
+     * @param log_level     Log level for diagnostics
+     * @return true if mailbox was configured successfully
+     */
+    bool autoConfigureMailbox(const ESIFile& esi, SlaveAddress slave_address,
+                              Tether::Platform::LogLevel log_level = Tether::Platform::LogLevel::Info);
 
     /**
      * @brief Drain any stale data from the slave-to-master mailbox (SM1).

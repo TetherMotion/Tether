@@ -13,14 +13,19 @@
 
 #include <cstdint>
 #include <cstring>
+#include <optional>
+#include <string>
 
 #include "tether/ethercat/Diagnostics.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/drives/AS715N.hpp"
 #include "tether/drives/AS715N/Registers/F31-ControlInProgress.hpp"
 #include "tether/ethercat/CoEManager.hpp"
+#include "tether/ethercat/ESIFile.hpp"
+#include "tether/ethercat/ESIParser.hpp"
 #include "tether/platform/EspCompat.hpp"
 
+#include "common/ExampleHelpers.hpp"
 #include "common/EtherCATHostSetup.hpp"
 
 static const char* TAG = "AS715N_CheckError";
@@ -200,6 +205,7 @@ int main(int argc, char** argv) {
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addMailboxSizeArg(program);
     Tether::Examples::addMailboxAddressArg(program);
+    Tether::Examples::addEsiXmlArg(program);
 
     program.add_argument("-r","--reset").default_value(false).implicit_value(true)
         .help("Attempt to reset the reported error (if recoverable)");
@@ -216,6 +222,19 @@ int main(int argc, char** argv) {
     std::string iface = program.get<std::string>("--interface");
     bool do_reset = program.get<bool>("--reset");
     bool do_sw_reset = program.get<bool>("--software-reset");
+    std::string esi_xml = program.get<std::string>("--esi-xml");
+
+    std::optional<EtherCAT::ESIFile> esi;
+    if (!esi_xml.empty()) {
+        esi.emplace(esi_xml);
+        if (esi->empty()) {
+            TETHER_LOGE(TAG, "Failed to parse ESI XML '%s': %s",
+                        esi_xml.c_str(), esi->errorMessage().c_str());
+            return 1;
+        }
+        TETHER_LOGI(TAG, "Loaded ESI XML '%s' (%zu device(s)) for cross-reference",
+                    esi_xml.c_str(), esi->devices().size());
+    }
 
     TETHER_LOGI(TAG, "AS715N error-code inspector (host)\nNetwork interface: %s", iface.c_str());
 
@@ -249,6 +268,15 @@ int main(int argc, char** argv) {
     }
 
     int rc = inspectAndMaybeReset(master, do_reset, do_sw_reset);
+
+    // Print ESI device info for cross-reference if --esi-xml was provided
+    if (esi && !esi->empty()) {
+        TETHER_LOGI(TAG, "\n=== ESI XML Cross-Reference (%s) ===", esi_xml.c_str());
+        for (const auto& dev : esi->devices()) {
+            TETHER_LOGI(TAG, "%s",
+                        EtherCAT::ESI::formatDeviceHumanReadable(dev, true).c_str());
+        }
+    }
 
     Tether::Examples::shutdownHostEthernet(session);
 
