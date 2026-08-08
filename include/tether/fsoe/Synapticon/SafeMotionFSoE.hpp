@@ -117,6 +117,24 @@ public:
 
     bool exchangeWith(SafeMotionServoEmulator& slave, uint64_t current_time_ms);
 
+    /// Exchange FSoE frames via EtherCAT PDO buffers (real drive communication).
+    ///
+    /// Encodes the current command, runs the FSoE state machine, builds the
+    /// master-to-slave frame into @p rx_pdo_out (the RxPDO 0x1700 buffer),
+    /// and processes the slave-to-master frame from @p tx_pdo_in (the TxPDO
+    /// 0x1B00 buffer).  On success, decodes the safety status and clears
+    /// pulse bits.
+    ///
+    /// @param rx_pdo_out      Output buffer for the master→slave FSoE frame (RxPDO)
+    /// @param rx_pdo_max      Capacity of rx_pdo_out (must be ≥ 11 for Data state)
+    /// @param tx_pdo_in       Input buffer with the slave→master FSoE frame (TxPDO)
+    /// @param tx_pdo_len      Number of valid bytes in tx_pdo_in
+    /// @param current_time_ms Monotonic time in milliseconds
+    /// @return true if the frame was processed successfully
+    bool exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max,
+                        const uint8_t* tx_pdo_in, size_t tx_pdo_len,
+                        uint64_t current_time_ms);
+
     const Status& status() const { return status_; }
     bool hasStatus() const { return has_status_; }
     bool motionAllowed() const;
