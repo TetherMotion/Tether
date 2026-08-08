@@ -2,10 +2,10 @@
  * @file synapticon_cst_fsoe.cpp
  * @brief Synapticon SOMANET drive — CST mode + FSoE safe-motion example
  *
- * Interfaces to a Synapticon SOMANET drive (AS715N), puts it into Cyclic Sync
- * Torque (CST) mode, maps the standard PDOs for that mode (RxPDO 0x1702 /
- * TxPDO 0x1B02), sends 0 torque, and runs the FSoE safe-motion protocol
- * alongside the cyclic data exchange.
+ * Interfaces to a Synapticon SOMANET drive (Vendor 0x22D2, CiA 402 firmware
+ * v5.1.x), puts it into Cyclic Sync Torque (CST) mode, maps the SOMANET
+ * PDOs for that mode (RxPDO 0x1600 / TxPDO 0x1A00), sends 0 torque, and
+ * runs the FSoE safe-motion protocol alongside the cyclic data exchange.
  *
  * FSoE frames are exchanged each cycle via the Synapticon SafeMotion
  * integration (MainInstance + SafeMotionServoEmulator).  The safety layer
@@ -36,7 +36,8 @@
 #include <string>
 
 #include "DS402ExampleSupport.hpp"
-#include "tether/drives/AS715N/AS715NPDO.hpp"
+#include "tether/drives/Synapticon.hpp"
+#include "tether/drives/Synapticon/SynapticonPDO.hpp"
 #include "tether/ethercat/Slave.hpp"
 #include "tether/fsoe/FSoEDefs.hpp"
 #include "tether/fsoe/Synapticon/SafeMotionFSoE.hpp"
@@ -51,7 +52,7 @@ namespace {
 constexpr const char* TAG = "synapticon_cst_fsoe";
 
 // ============================================================================
-// Mailbox settings — hardcoded from SOMANET_CiA_402_v5.1.9.xml (ESI)
+// Mailbox settings — from SOMANET_CiA_402_v5.1.9.xml (ESI)
 // ============================================================================
 //
 // All three SOMANET devices in the ESI (SOMANET Node ProductCode 0x0201,
@@ -78,23 +79,32 @@ constexpr const char* TAG = "synapticon_cst_fsoe";
 // Mailbox timeouts (from <Info><Mailbox><Timeout>):
 //   RequestTimeout  = 100 ms
 //   ResponseTimeout = 6000 ms
+//
+// These constants are now provided by the Synapticon driver header
+// (tether/drives/Synapticon.hpp) and are re-exported here for readability.
 
 // SM0 — master→slave write mailbox (ESI "MBoxOut", ControlByte 0x26)
-constexpr uint16_t kMailboxWriteAddr = 0x1000;
-constexpr uint16_t kMailboxWriteSize = 1024;
+constexpr uint16_t kMailboxWriteAddr = EtherCAT::Drives::Synapticon::kMailboxWriteAddr;
+constexpr uint16_t kMailboxWriteSize = EtherCAT::Drives::Synapticon::kMailboxWriteSize;
 
 // SM1 — slave→master read mailbox (ESI "MBoxIn", ControlByte 0x22)
-constexpr uint16_t kMailboxReadAddr = 0x1400;
-constexpr uint16_t kMailboxReadSize = 1024;
+constexpr uint16_t kMailboxReadAddr = EtherCAT::Drives::Synapticon::kMailboxReadAddr;
+constexpr uint16_t kMailboxReadSize = EtherCAT::Drives::Synapticon::kMailboxReadSize;
 
 // CoE | FoE
-constexpr uint16_t kMailboxProtocols = 0x000C;
+constexpr uint16_t kMailboxProtocols = EtherCAT::Drives::Synapticon::kMailboxProtocols;
 
 // SDO response timeout from ESI ResponseTimeout (6000 ms)
-constexpr uint32_t kSdoTimeoutMs = 6000;
+constexpr uint32_t kSdoTimeoutMs = EtherCAT::Drives::Synapticon::kSdoTimeoutMs;
 
-using RxPDO = EtherCAT::Drives::AS715N_pdo::AS715N_RxPDO_1702;
-using TxPDO = EtherCAT::Drives::AS715N_pdo::AS715N_TxPDO_1B02;
+// SOMANET PDO types — from SynapticonPDO.hpp (extracted from ESI)
+//   RxPDO 0x1600: controlword, modes_of_operation, target_torque,
+//                 target_position, target_velocity, torque_offset,
+//                 tuning_command  (19 bytes)
+//   TxPDO 0x1A00: statusword, modes_of_operation_display, position_actual,
+//                 velocity_actual, torque_actual  (13 bytes)
+using RxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_RxPDO_1600;
+using TxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_TxPDO_1A00;
 
 using FSoEMain = EtherCAT::Drives::Synapticon::SafeMotion::MainInstance;
 using FSoEServo = EtherCAT::Drives::Synapticon::SafeMotion::SafeMotionServoEmulator;
@@ -362,12 +372,13 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    // --- Configure mailbox with hardcoded SOMANET ESI values ---
+    // --- Configure mailbox with SOMANET ESI values ---
     // The SOMANET_CiA_402_v5.1.9.xml ESI defines the mailbox sync managers
     // with 1024-byte buffers at 0x1000 (SM0, M→S write) and 0x1400 (SM1,
-    // S→M read), supporting CoE + FoE.  We hardcode these here instead of
-    // relying on SII EEPROM auto-configuration so the correct mailbox
-    // geometry is always used for SOMANET drives.
+    // S→M read), supporting CoE + FoE.  These values are provided by the
+    // Synapticon driver header (tether/drives/Synapticon.hpp) and are used
+    // here instead of relying on SII EEPROM auto-configuration so the
+    // correct mailbox geometry is always used for SOMANET drives.
     {
         if (!master.ethercatMaster().discoverSlaves()) {
             TETHER_LOGW(TAG, "No slaves discovered during pre-config scan");
@@ -400,13 +411,18 @@ int main(int argc, char** argv) {
             kMailboxReadAddr, kMailboxReadSize, kMailboxProtocols);
     }
 
-    // --- Configure drive: CST mode, RxPDO 0x1702 / TxPDO 0x1B02 ---
+    // --- Configure drive: CST mode, RxPDO 0x1600 / TxPDO 0x1A00 ---
+    // These are the standard SOMANET CiA 402 PDO mappings from the ESI:
+    //   RxPDO 0x1600 (19 bytes): controlword, modes_of_operation, target_torque,
+    //     target_position, target_velocity, torque_offset, tuning_command
+    //   TxPDO 0x1A00 (13 bytes): statusword, modes_of_operation_display,
+    //     position_actual, velocity_actual, torque_actual
     Tether::Examples::SingleDriveExampleConfig config;
     config.drive.slave_index = slave_idx;
-    config.drive.rxpdo_index = EtherCAT::Drives::AS715N_pdo::RxPDO_1702.index;
-    config.drive.txpdo_index = EtherCAT::Drives::AS715N_pdo::TxPDO_1B02.index;
-    config.drive.rxpdo_size = EtherCAT::Drives::AS715N_pdo::RxPDO_1702.size;
-    config.drive.txpdo_size = EtherCAT::Drives::AS715N_pdo::TxPDO_1B02.size;
+    config.drive.rxpdo_index = EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.index;
+    config.drive.txpdo_index = EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.index;
+    config.drive.rxpdo_size = EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.size;
+    config.drive.txpdo_size = EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.size;
     config.drive.operating_mode = CiA402::OperatingMode::CyclicSyncTorque;
     config.drive.sdo_timeout_ms = kSdoTimeoutMs;
     // Mailbox already configured explicitly above — skip auto-config so the
