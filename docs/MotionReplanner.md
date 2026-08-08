@@ -506,6 +506,318 @@ auto newPath = extractPath(reblend.blendedPath);
 ProfileReplanResult profile = replanProfile(*newPath, suggestedFeedRate);
 ```
 
+## Path Evaluation Framework
+
+The path evaluation framework provides extensive quantitative and qualitative
+evaluators for comparing desired vs. actual trajectories, along with FFT-based
+oscillation detection and SVG visualization.
+
+### Components
+
+1. **PathEvaluator** (`PathEvaluator.hpp/.cpp`) — Quantitative and qualitative
+   metrics for desired vs. actual path comparison.
+
+2. **PathRelativeFFT** (`PathRelativeFFT.hpp/.cpp`) — FFT-based oscillation
+   detection in both spatial (arc-length) and temporal (time) domains, with
+   Frenet-frame decomposition and path-geometry correlation.
+
+3. **SvgExporter** (`SvgExporter.hpp/.cpp`) — SVG vector graphics export for
+   trajectory comparison, error profiles, spectral plots, and dashboards.
+
+### Quantitative Metrics
+
+The `PathEvaluator::evaluateQuantitative()` method computes:
+
+- **Integral errors**: IAE, ISE, ITAE, ITSE (spatial and temporal)
+- **Norm errors**: L1, L2, L∞ for contour, lag, and combined errors
+- **Shape distances**: Hausdorff, Frechet, DTW, path length ratio
+- **Kinematic tracking**: velocity/acceleration RMS and max errors, jerk, smoothness index
+- **Surface finish estimates**: Ra, Rq, Rz (in µm), peak count
+- **Following error**: max/mean following error, settling distance, cross-correlation
+- **Statistical summaries**: min/max/mean/RMS/std dev/percentiles for each error type
+
+### Qualitative Assessment
+
+The `PathEvaluator::evaluateQualitative()` method produces letter grades (A–F)
+with scores (0–1) for:
+
+- **Path fidelity** (max contour error)
+- **Surface finish** (Ra)
+- **Timing fidelity** (max following error)
+- **Smoothness** (max jerk)
+- **Oscillation severity** (from spectral analysis)
+- **Corner preservation** (max corner error)
+- **Overall** (weighted combination)
+
+Each grade comes with human-readable descriptions and actionable recommendations.
+
+### Path-Relative FFT Analysis
+
+The `PathRelativeFFT::evaluate()` method performs spectral analysis in both
+domains:
+
+- **Spatial domain** (arc-length resampled, frequency in cycles/mm)
+- **Temporal domain** (time resampled, frequency in Hz)
+
+For each domain, it analyzes four Frenet-frame components:
+- Contour (normal to path)
+- Lag (along path)
+- Binormal (out-of-plane)
+- Combined (3D magnitude)
+
+Key features:
+- PCHIP interpolation for uniform resampling
+- Detrending (DC removal + linear trend)
+- Windowing (Hann, Hamming, Blackman, Rectangular)
+- Cooley-Tukey radix-2 FFT
+- Peak detection with prominence filtering
+- Spectral entropy and oscillation index
+- Band power (low/mid/high)
+- Harmonic distortion (2nd + 3rd / fundamental)
+- Cross-domain comparison (feed-rate modulation index)
+- Path-geometry correlation (corner/segment/arc frequencies)
+
+### SVG Export
+
+The `SvgExporter` generates standalone .svg files:
+
+- **Trajectory projections**: XY, XZ, YZ (2D), 3D isometric
+- **Error profiles**: vs path length, vs time
+- **Error histogram**: distribution with P95/P99 markers
+- **Error envelope**: magnified deviation band
+- **Spectral plots**: magnitude/phase with peak markers and geometry lines
+- **Kinematic profiles**: velocity, acceleration
+- **Phase portrait**: position vs velocity
+- **Dashboard**: all plots in a single SVG
+
+### CLI Usage
+
+```bash
+# Evaluate a trajectory and export all results
+./motion_replanner_cli evaluate -i trajectory.csv -o results/
+
+# Skip FFT analysis for faster evaluation
+./motion_replanner_cli evaluate -i trajectory.csv -o results/ --no-fft
+
+# Export as JSON
+./motion_replanner_cli evaluate -i trajectory.csv -o results/ --format json
+```
+
+### C++ API Usage
+
+```cpp
+#include "tether/motion_replanner/PathEvaluator.hpp"
+#include "tether/motion_replanner/PathRelativeFFT.hpp"
+#include "tether/motion_replanner/SvgExporter.hpp"
+
+using namespace tether::motion::replanner;
+
+// Quantitative evaluation
+PathEvaluator evaluator;
+auto quant = evaluator.evaluateQuantitative(desired, actual);
+
+// Spectral evaluation
+PathRelativeFFT fftEval;
+auto spectral = fftEval.evaluate(desired, actual);
+
+// Qualitative evaluation (uses spectral data for oscillation grade)
+auto qual = evaluator.evaluateQualitative(quant, &spectral);
+
+// SVG export
+SvgExporter svgExporter;
+svgExporter.exportDashboard("dashboard.svg", desired, actual, quant, spectral);
+```
+
+## KDE Derivative-vs-Deviation Analysis
+
+The `KdeDerivativeAnalyzer` estimates the joint probability density
+`p(derivative, deviation)` from desired-vs-actual trajectory sample pairs using
+2D kernel density estimation (KDE). This reveals statistical relationships
+between kinematic demands (velocity, acceleration, jerk, curvature) and tracking
+error that are invisible in scatter plots for large N and impossible to extract
+from summary statistics alone.
+
+### Why Derivative vs Deviation?
+
+Tracking error typically scales with kinematic demands:
+
+| Derivative | Reveals |
+|---|---|
+| **Velocity** | Servo lag, resonance bands, feed-rate safety envelopes |
+| **Acceleration** | Inertia-induced overshoot, structural compliance |
+| **Jerk** | Discontinuity-induced vibration, surface finish degradation |
+| **Curvature** | Corner-rounding, controller tolerance limits |
+
+### Algorithm
+
+1. **Sample extraction**: For each `(desired[i], actual[i])` pair, compute the
+   kinematic derivative `d_i` and the deviation `e_i`.
+
+2. **Bandwidth selection**: Controls smoothness of the estimate.
+   - **Silverman** (default): `h = 1.06·σ·n^(-1/5)`
+   - **Scott**: `h = σ·n^(-1/5)`
+   - **ISJ**: Improved Sheather-Jones (data-driven, robust for multimodal)
+   - **Fixed**: User-specified
+   - **LSCV / Likelihood CV**: Cross-validation (expensive)
+
+3. **KDE evaluation**: 2D density at grid point `(d, e)`:
+   ```
+   p(d, e) = (1/(n·h_d·h_e)) Σ_i K((d - d_i)/h_d) · K((e - e_i)/h_e)
+   ```
+   Supported kernels: Gaussian, Epanechnikov, Uniform, Triangular, Quartic
+   (biweight), Cosine. For large N (>5000), a binned approximation is used.
+
+4. **Derived metrics**: Marginal densities, conditional density `p(e|d)`,
+   conditional mean/variance, quantile contours, mutual information,
+   correlation ratio, distance correlation, tail risk (VaR/CVaR).
+
+5. **Threshold extraction**: Finds the derivative value at which deviation
+   exceeds a tolerance with a given probability.
+
+### Configuration
+
+```cpp
+#include "tether/motion_replanner/KdeDerivativeAnalyzer.hpp"
+
+using namespace tether::motion::replanner;
+
+KdeConfig config;
+config.derivativeAxis = DerivativeAxis::Velocity;
+config.deviationAxis = DeviationAxis::ContourError;
+config.kernel = KernelType::Gaussian;
+config.bandwidthMethod = BandwidthMethod::Silverman;
+config.gridX = 128;
+config.gridY = 128;
+config.tolerances = {0.005, 0.01, 0.02, 0.05, 0.1, 0.2};
+config.thresholdProbability = 0.05;
+config.useCertifiedContourError = true;
+
+KdeDerivativeAnalyzer analyzer(config);
+KdeEvaluation eval = analyzer.evaluate(desired, actual);
+
+if (eval.hasSufficientData) {
+    std::cout << "Mutual information: " << eval.mutualInformation << " bits\n";
+    std::cout << "Correlation ratio: " << eval.correlationRatio << "\n";
+    std::cout << "Distance correlation: " << eval.distanceCorrelation << "\n";
+    std::cout << "VaR95: " << eval.var95 << " mm\n";
+    std::cout << "CVaR95: " << eval.conditionalVar95 << " mm\n";
+
+    for (const auto& t : eval.thresholds) {
+        if (t.found) std::cout << t.description << "\n";
+    }
+}
+```
+
+### Available Axes
+
+**Derivative axes** (`DerivativeAxis`):
+- `Velocity` — speed magnitude (mm/s)
+- `Acceleration` — acceleration magnitude (mm/s²)
+- `Jerk` — jerk magnitude (mm/s³)
+- `Curvature` — path curvature (1/mm)
+- `FeedRate` — commanded feed rate (mm/s)
+- `ArcLength` — arc length position (mm)
+- `Time` — time (s)
+
+**Deviation axes** (`DeviationAxis`):
+- `ContourError` — perpendicular distance to path (mm)
+- `LagError` — signed arc-length offset (mm)
+- `CombinedError` — 3D Euclidean distance (mm)
+- `BinormalError` — out-of-plane component (mm)
+- `TrackingError` — position error magnitude (mm)
+- `VelocityError` — velocity tracking error (mm/s)
+- `AccelerationError` — acceleration tracking error (mm/s²)
+
+### Dependence Metrics
+
+The analyzer computes multiple dependence measures between the derivative and
+deviation:
+
+| Metric | Range | Captures |
+|---|---|---|
+| Pearson r | [-1, 1] | Linear correlation |
+| Spearman ρ | [-1, 1] | Monotonic correlation |
+| Kendall τ | [-1, 1] | Rank correlation |
+| Mutual information | [0, ∞) bits | Any dependence |
+| Correlation ratio η² | [0, 1] | Nonlinear dependence |
+| Distance correlation | [0, 1] | Any dependence |
+| Normalized MI | [0, 1] | Symmetric dependence |
+
+### SVG Heatmap Export
+
+The `SvgExporter` renders KDE evaluations as SVG heatmaps:
+
+```cpp
+SvgConfig svgConfig;
+svgConfig.kdeColormap = KdeColormap::Viridis;
+svgConfig.kdeLogScale = false;
+svgConfig.kdeShowMarginals = true;
+svgConfig.kdeShowConditionalMean = true;
+svgConfig.kdeShowScatter = false;
+
+SvgExporter svgExporter(svgConfig);
+svgExporter.exportKdeHeatmap("kde_heatmap.svg", eval);
+svgExporter.exportKdeConditional("kde_conditional.svg", eval);
+svgExporter.exportKdeDashboard("kde_dashboard.svg", eval);
+```
+
+Available colormaps: Viridis, Inferno, Plasma, Magma, Jet, Hot, Cool, Grayscale,
+BlueRed.
+
+### Raw Data Export
+
+The `BatchExporter` exports KDE data in multiple formats:
+
+```cpp
+BatchExporter exporter("output_dir/", exportConfig);
+exporter.exportKdeData(eval, svgConfig);
+exporter.generateManifest("manifest.json");
+```
+
+This generates:
+- `kde_samples.csv` — raw (derivative, deviation) sample pairs
+- `kde_density_grid.csv` — density grid as a matrix
+- `kde_density_grid.json` — density grid with metadata
+- `kde_conditional.csv` — conditional statistics per X bin
+- `kde_marginals.csv` — marginal statistics for both axes
+- `kde_dependence.csv` — all dependence metrics
+- `kde_thresholds.csv` — deviation threshold analysis
+- `kde_tail_risk.csv` — VaR/CVaR/ETD metrics
+- `kde_heatmap.svg`, `kde_conditional.svg`, `kde_marginal_x.svg`,
+  `kde_marginal_y.svg`, `kde_dashboard.svg`
+
+### CLI Usage
+
+The `evaluate` command automatically runs KDE analysis:
+
+```bash
+# Default: velocity vs contour error, Gaussian kernel, Silverman bandwidth
+./motion_replanner_cli evaluate -i trajectory.csv -o results/ --format all
+
+# Custom KDE configuration
+./motion_replanner_cli evaluate -i trajectory.csv -o results/ \
+    --kde-derivative acceleration \
+    --kde-deviation contour \
+    --kde-kernel epanechnikov \
+    --kde-bandwidth isj \
+    --kde-colormap inferno
+
+# Disable KDE analysis
+./motion_replanner_cli evaluate -i trajectory.csv -o results/ --no-kde
+```
+
+CLI options:
+- `--no-kde` / `--kde` — disable/enable KDE analysis (default: enabled)
+- `--kde-derivative <ax>` — velocity, acceleration, jerk, curvature, feedrate,
+  arclength, time
+- `--kde-deviation <ax>` — contour, lag, combined, binormal, tracking, velocity,
+  acceleration
+- `--kde-kernel <k>` — gaussian, epanechnikov, uniform, triangular, quartic,
+  cosine
+- `--kde-bandwidth <m>` — silverman, scott, isj, fixed, lscv, likelihoodcv
+- `--kde-colormap <c>` — viridis, inferno, plasma, magma, jet, hot, cool,
+  grayscale, bluered
+
 ## License
 
 MIT License - see LICENSE file for details.

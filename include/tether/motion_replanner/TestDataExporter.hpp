@@ -14,6 +14,9 @@
 #include "PerformanceHeatmap.hpp"
 #include "MachineTester.hpp"
 #include "SystemIdentifier.hpp"
+#include "PathEvaluator.hpp"
+#include "PathRelativeFFT.hpp"
+#include "SvgExporter.hpp"
 #include <string>
 #include <vector>
 #include <map>
@@ -37,7 +40,8 @@ enum class ExportFormat {
     JSON,           ///< JSON format
     JSONPretty,     ///< Pretty-printed JSON
     Binary,         ///< Binary format for efficiency
-    Numpy           ///< NumPy-compatible binary
+    Numpy,          ///< NumPy-compatible binary
+    SVG             ///< SVG vector graphics
 };
 
 /**
@@ -291,6 +295,47 @@ public:
                                   const DelayIdentificationResult& delay,
                                   const FrictionIdentificationResult& friction,
                                   const PIDTuningAssessment& pid);
+
+    /**
+     * @brief Export complete path evaluation data (quantitative, qualitative,
+     *        spectral, and all SVG plots).
+     *
+     * @param desired Desired trajectory samples.
+     * @param actual Actual trajectory samples.
+     * @param quant Quantitative evaluation results.
+     * @param spectral Spectral evaluation results.
+     * @param qual Qualitative evaluation results.
+     * @param svgConfig SVG export configuration (optional, uses defaults if
+     *        not specified).
+     */
+    void exportEvaluationData(
+        const std::vector<GCodeExport::TrajectorySample>& desired,
+        const std::vector<GCodeExport::TrajectorySample>& actual,
+        const tether::motion::replanner::QuantitativeEvaluation& quant,
+        const tether::motion::replanner::SpectralEvaluation& spectral,
+        const tether::motion::replanner::QualitativeEvaluation& qual,
+        const SvgConfig& svgConfig = {});
+
+    /**
+     * @brief Export KDE derivative-vs-deviation analysis data.
+     *
+     * Exports:
+     * - Raw (derivative, deviation) sample pairs as CSV
+     * - KDE density grid as CSV (matrix format)
+     * - KDE density grid as JSON (with metadata)
+     * - Conditional statistics as CSV
+     * - Marginal statistics as CSV
+     * - Dependence metrics as CSV
+     * - Threshold analysis as CSV
+     * - Tail risk metrics as CSV
+     * - SVG heatmap, conditional, marginal, and dashboard plots
+     *
+     * @param kde The KDE evaluation to export.
+     * @param svgConfig SVG export configuration (optional).
+     */
+    void exportKdeData(
+        const tether::motion::replanner::KdeEvaluation& kde,
+        const SvgConfig& svgConfig = {});
     
     /**
      * @brief Generate manifest file listing all exported files

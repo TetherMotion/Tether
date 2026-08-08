@@ -259,6 +259,9 @@ set(MOTION_REPLANNER_CORE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_OnlineReblender.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_ProfileReplanner.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_CertifiedReplannerHeader.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_PathEvaluator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_PathRelativeFFT.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_KdeDerivativeAnalyzer.cpp"
 )
 set(MOTION_REPLANNER_MACHINE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_MachineTester.cpp"
@@ -272,6 +275,7 @@ set(MOTION_REPLANNER_IDENTIFICATION_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_ModelIdentificationAdvanced.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_PerformanceHeatmap.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_TestDataExporter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_SvgExporter.cpp"
 )
 # Simulation test sources split by sub-area
 set(SIMULATION_SYSTEMS_SOURCES

@@ -344,8 +344,360 @@ bool ReportGenerator::exportLaTeX(const std::string& filename) {
     }
     
     file << "\\end{document}\n";
-    
+
     return file.good();
+}
+
+//=============================================================================
+// BatchExporter::exportEvaluationData
+//=============================================================================
+
+void BatchExporter::exportEvaluationData(
+    const std::vector<GCodeExport::TrajectorySample>& desired,
+    const std::vector<GCodeExport::TrajectorySample>& actual,
+    const tether::motion::replanner::QuantitativeEvaluation& quant,
+    const tether::motion::replanner::SpectralEvaluation& spectral,
+    const tether::motion::replanner::QualitativeEvaluation& qual,
+    const SvgConfig& svgConfig) {
+
+    //--- Export quantitative metrics as CSV ---
+    {
+        std::string fn = makeFilename("evaluation_quantitative", "csv");
+        std::ofstream f(fn);
+        if (f.is_open()) {
+            f << "Metric,Value,Unit\n";
+            f << "SampleCount," << quant.sampleCount << "\n";
+            f << "PathLength," << quant.pathLength << ",mm\n";
+            f << "Duration," << quant.duration << ",s\n";
+            // Integrals
+            f << "IAE_s," << quant.integrals.iae_s << ",mm2\n";
+            f << "ISE_s," << quant.integrals.ise_s << ",mm3\n";
+            f << "ITAE_t," << quant.integrals.itae_t << ",mm*s\n";
+            f << "ITSE_t," << quant.integrals.itse_t << ",mm2*s\n";
+            f << "IAE_lag," << quant.integrals.iae_lag << ",mm2\n";
+            f << "ISE_lag," << quant.integrals.ise_lag << ",mm3\n";
+            // Norms
+            f << "L1_contour," << quant.norms.l1_contour << ",mm2\n";
+            f << "L2_contour," << quant.norms.l2_contour << ",mm^1.5\n";
+            f << "Linf_contour," << quant.norms.linf_contour << ",mm\n";
+            f << "L1_lag," << quant.norms.l1_lag << ",mm2\n";
+            f << "L2_lag," << quant.norms.l2_lag << ",mm^1.5\n";
+            f << "Linf_lag," << quant.norms.linf_lag << ",mm\n";
+            f << "L1_combined," << quant.norms.l1_combined << ",mm2\n";
+            f << "L2_combined," << quant.norms.l2_combined << ",mm^1.5\n";
+            f << "Linf_combined," << quant.norms.linf_combined << ",mm\n";
+            // Shape
+            f << "Hausdorff," << quant.shape.hausdorff << ",mm\n";
+            f << "Frechet," << quant.shape.frechet << ",mm\n";
+            f << "DTW," << quant.shape.dtw << ",mm\n";
+            f << "PathLengthRatio," << quant.shape.pathLengthRatio << "\n";
+            f << "CurvatureErrorMax," << quant.shape.curvatureErrorMax << ",1/mm\n";
+            f << "CurvatureErrorRms," << quant.shape.curvatureErrorRms << ",1/mm\n";
+            // Kinematic
+            f << "VelocityTrackingRms," << quant.kinematic.velocityTrackingRms << ",mm/s\n";
+            f << "VelocityTrackingMax," << quant.kinematic.velocityTrackingMax << ",mm/s\n";
+            f << "AccelTrackingRms," << quant.kinematic.accelTrackingRms << ",mm/s2\n";
+            f << "AccelTrackingMax," << quant.kinematic.accelTrackingMax << ",mm/s2\n";
+            f << "JerkActualMax," << quant.kinematic.jerkActualMax << ",mm/s3\n";
+            f << "JerkActualRms," << quant.kinematic.jerkActualRms << ",mm/s3\n";
+            f << "SmoothnessIndex," << quant.kinematic.smoothnessIndex << ",mm2/s5\n";
+            // Surface finish
+            f << "Ra," << quant.surface.ra << ",um\n";
+            f << "Rq," << quant.surface.rq << ",um\n";
+            f << "Rz," << quant.surface.rz << ",um\n";
+            f << "PeakCount," << quant.surface.peakCount << "\n";
+            // Following error
+            f << "MaxFollowingError," << quant.following.maxFollowingError << ",mm\n";
+            f << "MeanFollowingError," << quant.following.meanFollowingError << ",mm\n";
+            f << "SettlingDistance," << quant.following.settlingDistance << ",mm\n";
+            f << "CrossCorrelationPeak," << quant.following.crossCorrelationPeak << "\n";
+            f << "CrossCorrelationLag," << quant.following.crossCorrelationLag << ",s\n";
+            // Stats
+            f << "ContourMaxError," << quant.contourStats.maxError << ",mm\n";
+            f << "ContourMeanError," << quant.contourStats.meanError << ",mm\n";
+            f << "ContourRmsError," << quant.contourStats.rmsError << ",mm\n";
+            f << "ContourP95," << quant.contourStats.p95Error << ",mm\n";
+            f << "ContourP99," << quant.contourStats.p99Error << ",mm\n";
+            f << "LagMaxError," << quant.lagStats.maxError << ",mm\n";
+            f << "LagMeanError," << quant.lagStats.meanError << ",mm\n";
+        }
+    }
+
+    //--- Export qualitative metrics as CSV ---
+    {
+        std::string fn = makeFilename("evaluation_qualitative", "csv");
+        std::ofstream f(fn);
+        if (f.is_open()) {
+            f << "Aspect,Grade,Score,Description\n";
+            auto writeAssessment = [&](const std::string& name,
+                                       const tether::motion::replanner::QualitativeAssessment& a) {
+                f << name << ","
+                  << tether::motion::replanner::gradeToString(a.grade) << ","
+                  << a.score << ","
+                  << "\"" << a.description << "\"\n";
+            };
+            writeAssessment("PathFidelity", qual.pathFidelity);
+            writeAssessment("SurfaceFinish", qual.surfaceFinish);
+            writeAssessment("TimingFidelity", qual.timingFidelity);
+            writeAssessment("Smoothness", qual.smoothness);
+            writeAssessment("OscillationSeverity", qual.oscillationSeverity);
+            writeAssessment("CornerPreservation", qual.cornerPreservation);
+            writeAssessment("Overall", qual.overall);
+
+            f << "\nDiagnostic Messages:\n";
+            for (const auto& msg : qual.diagnosticMessages) {
+                f << "\"" << msg << "\"\n";
+            }
+        }
+    }
+
+    //--- Export spectral data as CSV ---
+    {
+        auto writeSpectrum = [&](const std::string& name,
+                                 const tether::motion::replanner::ComponentSpectrum& s) {
+            std::string fn = makeFilename(name, "csv");
+            std::ofstream f(fn);
+            if (!f.is_open()) return;
+            f << "frequency,magnitude,phase,psd\n";
+            for (std::size_t i = 0; i < s.frequencies.size(); ++i) {
+                f << s.frequencies[i] << ","
+                  << s.magnitudes[i] << ","
+                  << s.phases[i] << ","
+                  << s.powerSpectralDensity[i] << "\n";
+            }
+        };
+
+        writeSpectrum("spectral_spatial_contour", spectral.spatialContour);
+        writeSpectrum("spectral_spatial_lag", spectral.spatialLag);
+        writeSpectrum("spectral_temporal_contour", spectral.temporalContour);
+        writeSpectrum("spectral_temporal_lag", spectral.temporalLag);
+    }
+
+    //--- Export SVG plots ---
+    {
+        SvgExporter svgExporter(svgConfig);
+        auto svgFiles = svgExporter.exportAllPlots(
+            outputDir_,
+            prefix_.empty() ? "eval" : prefix_,
+            desired, actual, quant, spectral);
+        for (const auto& f : svgFiles) {
+            // Already in output dir, just track
+            auto it = std::find(generatedFiles_.begin(), generatedFiles_.end(), f);
+            if (it == generatedFiles_.end()) {
+                generatedFiles_.push_back(f);
+            }
+        }
+
+        // Also export a dashboard
+        std::string dashPath = outputDir_ + "/" +
+            (prefix_.empty() ? "eval" : prefix_) + "_dashboard.svg";
+        if (svgExporter.exportDashboard(dashPath, desired, actual, quant, spectral)) {
+            auto it = std::find(generatedFiles_.begin(), generatedFiles_.end(), dashPath);
+            if (it == generatedFiles_.end()) {
+                generatedFiles_.push_back(dashPath);
+            }
+        }
+    }
+}
+
+//=============================================================================
+// BatchExporter::exportKdeData
+//=============================================================================
+
+void BatchExporter::exportKdeData(
+    const tether::motion::replanner::KdeEvaluation& kde,
+    const SvgConfig& svgConfig) {
+
+    using namespace tether::motion::replanner;
+
+    //--- Export raw sample pairs as CSV ---
+    {
+        std::string fn = makeFilename("kde_samples", "csv");
+        std::ofstream f(fn);
+        if (f.is_open()) {
+            f << "index,derivative,deviation,arcLength,time\n";
+            for (std::size_t i = 0; i < kde.derivatives.size(); ++i) {
+                f << i << ","
+                  << kde.derivatives[i] << ","
+                  << kde.deviations[i] << ","
+                  << (i < kde.arcLengths.size() ? kde.arcLengths[i] : 0.0) << ","
+                  << (i < kde.times.size() ? kde.times[i] : 0.0) << "\n";
+            }
+        }
+    }
+
+    //--- Export KDE density grid as CSV (matrix) ---
+    {
+        std::string fn = makeFilename("kde_density_grid", "csv");
+        std::ofstream f(fn);
+        if (f.is_open()) {
+            // Header row: Y bin values (descending so top of matrix = high Y)
+            f << "xBin\\\\yBin";
+            for (int iy = static_cast<int>(kde.grid.yBins.size()) - 1; iy >= 0; --iy) {
+                f << "," << kde.grid.yBins[static_cast<std::size_t>(iy)];
+            }
+            f << "\n";
+            // Each row: X bin value, then densities for each Y bin (descending)
+            for (std::size_t ix = 0; ix < kde.grid.xBins.size(); ++ix) {
+                f << kde.grid.xBins[ix];
+                for (int iy = static_cast<int>(kde.grid.yBins.size()) - 1; iy >= 0; --iy) {
+                    f << "," << kde.grid.at(ix, static_cast<std::size_t>(iy));
+                }
+                f << "\n";
+            }
+        }
+    }
+
+    //--- Export KDE density grid as JSON ---
+    {
+        std::string fn = makeFilename("kde_density_grid", "json");
+        std::ofstream f(fn);
+        if (f.is_open()) {
+            f << "{\n";
+            f << "  \"derivativeAxis\": \"" << toString(kde.derivativeAxis) << "\",\n";
+            f << "  \"deviationAxis\": \"" << toString(kde.deviationAxis) << "\",\n";
+            f << "  \"kernel\": \"" << toString(kde.kernel) << "\",\n";
+            f << "  \"bandwidthMethod\": \"" << toString(kde.bandwidthMethod) << "\",\n";
+            f << "  \"bandwidthX\": " << kde.grid.bandwidthX << ",\n";
+            f << "  \"bandwidthY\": " << kde.grid.bandwidthY << ",\n";
+            f << "  \"sampleCount\": " << kde.grid.sampleCount << ",\n";
+            f << "  \"gridSizeX\": " << kde.grid.xBins.size() << ",\n";
+            f << "  \"gridSizeY\": " << kde.grid.yBins.size() << ",\n";
+            f << "  \"xBins\": [";
+            for (std::size_t i = 0; i < kde.grid.xBins.size(); ++i) {
+                if (i > 0) f << ",";
+                f << kde.grid.xBins[i];
+            }
+            f << "],\n";
+            f << "  \"yBins\": [";
+            for (std::size_t i = 0; i < kde.grid.yBins.size(); ++i) {
+                if (i > 0) f << ",";
+                f << kde.grid.yBins[i];
+            }
+            f << "],\n";
+            f << "  \"density\": [";
+            for (std::size_t i = 0; i < kde.grid.density.size(); ++i) {
+                if (i > 0) f << ",";
+                f << kde.grid.density[i];
+            }
+            f << "]\n";
+            f << "}\n";
+        }
+    }
+
+    //--- Export conditional statistics as CSV ---
+    {
+        std::string fn = makeFilename("kde_conditional", "csv");
+        std::ofstream f(fn);
+        if (f.is_open()) {
+            f << "xValue,mass,meanY,stdY,modeY,medianY,p05Y,p25Y,p75Y,p95Y,valid\n";
+            for (const auto& cs : kde.conditional) {
+                f << cs.xValue << ","
+                  << cs.mass << ","
+                  << cs.meanY << ","
+                  << cs.stdY << ","
+                  << cs.modeY << ","
+                  << cs.medianY << ","
+                  << cs.p05Y << ","
+                  << cs.p25Y << ","
+                  << cs.p75Y << ","
+                  << cs.p95Y << ","
+                  << (cs.valid ? 1 : 0) << "\n";
+            }
+        }
+    }
+
+    //--- Export marginal statistics as CSV ---
+    {
+        std::string fn = makeFilename("kde_marginals", "csv");
+        std::ofstream f(fn);
+        if (f.is_open()) {
+            f << "Axis,Mean,StdDev,Skewness,Kurtosis,Min,Max,Median,P05,P25,P75,P95,Mode\n";
+            auto writeMarg = [&](const std::string& name, const MarginalStats& m) {
+                f << name << ","
+                  << m.mean << ","
+                  << m.stdDev << ","
+                  << m.skewness << ","
+                  << m.kurtosis << ","
+                  << m.min << ","
+                  << m.max << ","
+                  << m.median << ","
+                  << m.p05 << ","
+                  << m.p25 << ","
+                  << m.p75 << ","
+                  << m.p95 << ","
+                  << m.mode << "\n";
+            };
+            writeMarg(toString(kde.derivativeAxis), kde.derivativeMarginal);
+            writeMarg(toString(kde.deviationAxis), kde.deviationMarginal);
+        }
+    }
+
+    //--- Export dependence metrics as CSV ---
+    {
+        std::string fn = makeFilename("kde_dependence", "csv");
+        std::ofstream f(fn);
+        if (f.is_open()) {
+            f << "Metric,Value\n";
+            f << "PearsonCorrelation," << kde.pearsonCorrelation << "\n";
+            f << "SpearmanCorrelation," << kde.spearmanCorrelation << "\n";
+            f << "KendallTau," << kde.kendallTau << "\n";
+            f << "MutualInformation_bits," << kde.mutualInformation << "\n";
+            f << "CorrelationRatio," << kde.correlationRatio << "\n";
+            f << "DistanceCorrelation," << kde.distanceCorrelation << "\n";
+            f << "DependenceIndex," << kde.dependenceIndex << "\n";
+            f << "JointEntropy_bits," << kde.jointEntropy << "\n";
+            f << "ConditionalEntropy_bits," << kde.conditionalEntropy << "\n";
+            f << "NormalizedMutualInformation," << kde.normalizedMutualInfo << "\n";
+            f << "ModeDerivative," << kde.modeDerivative << "\n";
+            f << "ModeDeviation," << kde.modeDeviation << "\n";
+            f << "MaxDensity," << kde.maxDensity << "\n";
+        }
+    }
+
+    //--- Export threshold analysis as CSV ---
+    {
+        std::string fn = makeFilename("kde_thresholds", "csv");
+        std::ofstream f(fn);
+        if (f.is_open()) {
+            f << "Tolerance,DerivativeValue,Probability,Found,Description\n";
+            for (const auto& t : kde.thresholds) {
+                f << t.tolerance << ","
+                  << t.derivativeValue << ","
+                  << t.probability << ","
+                  << (t.found ? 1 : 0) << ","
+                  << "\"" << t.description << "\"\n";
+            }
+        }
+    }
+
+    //--- Export tail risk metrics as CSV ---
+    {
+        std::string fn = makeFilename("kde_tail_risk", "csv");
+        std::ofstream f(fn);
+        if (f.is_open()) {
+            f << "Metric,Value,Unit\n";
+            f << "TailFraction," << kde.tailFraction << "\n";
+            f << "VaR95," << kde.var95 << ",mm\n";
+            f << "ExpectedTailDeviation," << kde.expectedTailDeviation << ",mm\n";
+            f << "CVaR95," << kde.conditionalVar95 << ",mm\n";
+        }
+    }
+
+    //--- Export SVG plots ---
+    {
+        SvgExporter svgExporter(svgConfig);
+        auto svgFiles = svgExporter.exportAllKdePlots(
+            outputDir_,
+            prefix_.empty() ? "kde" : prefix_,
+            kde);
+        for (const auto& f : svgFiles) {
+            auto it = std::find(generatedFiles_.begin(), generatedFiles_.end(), f);
+            if (it == generatedFiles_.end()) {
+                generatedFiles_.push_back(f);
+            }
+        }
+    }
 }
 
 } // namespace MotionReplanner
