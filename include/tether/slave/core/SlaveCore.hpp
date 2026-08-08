@@ -23,6 +23,7 @@
 
 #include "tether/slave/core/SlaveTypes.hpp"
 #include "tether/slave/core/SIIEmulator.hpp"
+#include "tether/slave/core/WatchdogManager.hpp"
 #include "tether/slave/logging/SlaveLogger.hpp"
 #include "tether/ethercat/Types.hpp"
 
@@ -558,8 +559,9 @@ private:
     // SII state (delegated to SIIEmulator)
     SIIEmulator siiEmulator_;
     
-    // Watchdog state
+    // Watchdog state (managed by WatchdogManager)
     WatchdogState watchdog_;
+    WatchdogManager watchdogMgr_;
     
     // Mailbox buffers
     std::vector<uint8_t> mailboxOut_;  // Master → Slave
@@ -571,7 +573,6 @@ private:
     StateChangeCallback stateChangeCallback_;
     SyncCallback syncCallback_;
     PDOExchangeCallback pdoExchangeCallback_;
-    WatchdogCallback watchdogCallback_;
     
     // Mutex for thread safety
     mutable std::mutex mutex_;

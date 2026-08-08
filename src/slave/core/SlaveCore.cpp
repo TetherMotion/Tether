@@ -25,6 +25,7 @@ SlaveCore::SlaveCore(const SlaveConfig& config)
     , dcState_()
     , siiEmulator_(&registers_)
     , watchdog_()
+    , watchdogMgr_(config_.watchdogEnabled, &watchdog_)
 {
     // Initialize registers to zero
     registers_.fill(0);
@@ -102,6 +103,7 @@ SlaveCore::SlaveCore(SlaveCore&& other) noexcept
     , dcState_(std::move(other.dcState_))
     , siiEmulator_(&registers_)
     , watchdog_(other.watchdog_)
+    , watchdogMgr_(config_.watchdogEnabled, &watchdog_)
     , mailboxOut_(std::move(other.mailboxOut_))
     , mailboxIn_(std::move(other.mailboxIn_))
     , mailboxOutFull_(other.mailboxOutFull_.load())
@@ -130,6 +132,7 @@ SlaveCore& SlaveCore::operator=(SlaveCore&& other) noexcept {
         dcState_ = std::move(other.dcState_);
         siiEmulator_.state() = std::move(other.siiEmulator_.state());
         watchdog_ = other.watchdog_;
+        // watchdogMgr_ already points to our watchdog_
         mailboxOut_ = std::move(other.mailboxOut_);
         mailboxIn_ = std::move(other.mailboxIn_);
         mailboxOutFull_.store(other.mailboxOutFull_.load());
@@ -476,8 +479,7 @@ void SlaveCore::onEnterState(SlaveState state) {
     switch (state) {
         case SlaveState::INIT:
             // Reset watchdog
-            watchdog_.resetPdiWatchdog();
-            watchdog_.resetSmWatchdog();
+            watchdogMgr_.reset();
             break;
         case SlaveState::PRE_OP:
             // Mailbox communication starts
@@ -624,12 +626,11 @@ bool SlaveCore::writeSIIWord(uint16_t wordAddr, uint16_t data) {
 // ============================================================================
 
 void SlaveCore::setWatchdogCallback(WatchdogCallback callback) {
-    watchdogCallback_ = std::move(callback);
+    watchdogMgr_.setCallback(std::move(callback));
 }
 
 void SlaveCore::resetWatchdog() {
-    watchdog_.resetPdiWatchdog();
-    watchdog_.resetSmWatchdog();
+    watchdogMgr_.reset();
 }
 
 // ============================================================================
@@ -841,21 +842,7 @@ void SlaveCore::processSIICommand() {
 }
 
 void SlaveCore::updateWatchdog(uint64_t deltaNs) {
-    if (!config_.watchdogEnabled) return;
-    
-    // Convert to watchdog ticks (divider is ~100µs)
-    uint64_t ticksNs = static_cast<uint64_t>(watchdog_.divider) * 40;  // 40ns per tick
-    
-    // Check SM watchdog
-    if (alStatus_.state == SlaveState::OP) {
-        watchdog_.smCounter++;
-        if (watchdog_.smCounter >= watchdog_.smTimeout) {
-            watchdog_.status.sm_triggered = 1;  // SM watchdog triggered
-            if (watchdogCallback_) {
-                watchdogCallback_(false, true);
-            }
-        }
-    }
+    watchdogMgr_.update(alStatus_.state, deltaNs);
 }
 
 void SlaveCore::processSyncManager(size_t smIndex) {
