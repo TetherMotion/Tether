@@ -40,6 +40,7 @@ set(TETHER_MOTION_PLANNER_SOURCES
     ${TETHER_ROOT}/src/replanner/FftProcessor.cpp
     ${TETHER_ROOT}/src/replanner/SvgExporter.cpp
     ${TETHER_ROOT}/src/replanner/SvgCanvas.cpp
+    ${TETHER_ROOT}/src/replanner/KdeSvgRenderer.cpp
     ${TETHER_ROOT}/src/replanner/DependenceAnalyzer.cpp
     ${TETHER_ROOT}/src/replanner/BandwidthSelector.cpp
     ${TETHER_ROOT}/src/replanner/KdeStatistics.cpp
