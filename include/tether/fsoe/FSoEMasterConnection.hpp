@@ -19,6 +19,7 @@
 
 #include "fsoe/FSoEDefs.hpp"
 #include "fsoe/FSoECRC.hpp"
+#include "tether/utils/EventSource.hpp"
 #include <cstdint>
 #include <string>
 #include <functional>
@@ -79,6 +80,11 @@ using StateChangeCallback = std::function<void(uint8_t old_state, uint8_t new_st
 using ErrorCallback = std::function<void(uint16_t error_code)>;
 using FailSafeCallback = std::function<void()>;
 using DataCallback = std::function<void(const uint8_t* data, size_t len)>;
+
+/// Event source for FSoE frame events.  Each listener receives an immutable
+/// shared_ptr<const std::vector<uint8_t>> copy of the frame bytes.  When no
+/// listeners are registered, emit() performs no allocation.
+using FrameEventSource = Tether::Utils::EventSource<std::vector<uint8_t>>;
 
 // ============================================================================
 // FSoEMasterConnection — master-side FSoE connection to a single slave
@@ -160,6 +166,15 @@ public:
     void setFailSafeCallback(FailSafeCallback callback);
     void setDataCallback(DataCallback callback);
 
+    // --- Frame event sources ---
+    // Listeners receive a shared_ptr<const std::vector<uint8_t>> copy of the
+    // frame bytes.  When no listeners are registered, no allocation occurs.
+    // Access is protected by the connection's internal mutex; listeners are
+    // invoked synchronously inside prepareTxFrame()/processRxFrame() while
+    // the lock is held (recursive — safe to re-enter the connection).
+    FrameEventSource& txFrameEvents();
+    FrameEventSource& rxFrameEvents();
+
 private:
     // State machine handlers
     void handleSessionState(uint8_t cmd, const uint8_t* data, size_t data_len);
@@ -217,6 +232,10 @@ private:
     ErrorCallback error_callback_;
     FailSafeCallback fail_safe_callback_;
     DataCallback data_callback_;
+
+    // Frame event sources (multi-listener, no-copy-if-empty)
+    FrameEventSource tx_frame_events_;
+    FrameEventSource rx_frame_events_;
 
     // Session ID generation
     std::mt19937 rng_{std::random_device{}()};
