@@ -7,6 +7,8 @@
 #include <numeric>
 #include <cassert>
 
+#include <Eigen/Dense>
+
 namespace Destabilizer {
 
 // ---------------------------------------------------------------------------
@@ -317,62 +319,35 @@ std::vector<double> CMAESOptimizer::sampleNormal() {
 }
 
 void CMAESOptimizer::decomposeCovariance() {
-    // Simple eigendecomposition for symmetric matrix via Jacobi iteration
-    // For production, use a proper linear algebra library
     eigenVectors_.assign(dim_, std::vector<double>(dim_, 0.0));
     eigenValues_.assign(dim_, 0.0);
 
-    // Copy C
-    auto A = C_;
+    // Map C_ (std::vector<std::vector<double>>) to Eigen
+    Eigen::MatrixXd C(dim_, dim_);
+    for (int i = 0; i < dim_; ++i)
+        for (int j = 0; j < dim_; ++j)
+            C(i, j) = C_[i][j];
 
-    // Initialize eigenvectors to identity
-    for (int i = 0; i < dim_; ++i) eigenVectors_[i][i] = 1.0;
-
-    // Jacobi eigenvalue algorithm (simplified)
-    for (int sweep = 0; sweep < 100; ++sweep) {
-        double offDiag = 0.0;
-        for (int p = 0; p < dim_; ++p)
-            for (int q = p + 1; q < dim_; ++q)
-                offDiag += std::abs(A[p][q]);
-
-        if (offDiag < 1e-15 * dim_) break;
-
-        for (int p = 0; p < dim_; ++p) {
-            for (int q = p + 1; q < dim_; ++q) {
-                if (std::abs(A[p][q]) < 1e-30) continue;
-
-                double tau = (A[q][q] - A[p][p]) / (2.0 * A[p][q]);
-                double t = (tau >= 0) ?
-                    1.0 / (tau + std::sqrt(1.0 + tau * tau)) :
-                    -1.0 / (-tau + std::sqrt(1.0 + tau * tau));
-                double c = 1.0 / std::sqrt(1.0 + t * t);
-                double s = t * c;
-
-                // Rotate
-                double app = A[p][p], aqq = A[q][q], apq = A[p][q];
-                A[p][p] = c*c*app - 2*s*c*apq + s*s*aqq;
-                A[q][q] = s*s*app + 2*s*c*apq + c*c*aqq;
-                A[p][q] = A[q][p] = 0.0;
-
-                for (int r = 0; r < dim_; ++r) {
-                    if (r == p || r == q) continue;
-                    double arp = A[r][p], arq = A[r][q];
-                    A[r][p] = A[p][r] = c*arp - s*arq;
-                    A[r][q] = A[q][r] = s*arp + c*arq;
-                }
-
-                // Update eigenvectors
-                for (int r = 0; r < dim_; ++r) {
-                    double vp = eigenVectors_[r][p], vq = eigenVectors_[r][q];
-                    eigenVectors_[r][p] = c*vp - s*vq;
-                    eigenVectors_[r][q] = s*vp + c*vq;
-                }
-            }
+    // Use Eigen's SelfAdjointEigenSolver (replaces manual Jacobi iteration)
+    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(C);
+    if (solver.info() != Eigen::Success) {
+        // Fallback: identity eigenvectors, zero eigenvalues
+        for (int i = 0; i < dim_; ++i) {
+            eigenValues_[i] = 1e-20;
+            eigenVectors_[i][i] = 1.0;
         }
+        needsDecomposition_ = false;
+        return;
     }
 
+    // SelfAdjointEigenSolver returns ascending order; keep as-is
+    const Eigen::VectorXd& vals = solver.eigenvalues();
+    const Eigen::MatrixXd& vecs = solver.eigenvectors();
     for (int i = 0; i < dim_; ++i) {
-        eigenValues_[i] = std::max(1e-20, A[i][i]);
+        eigenValues_[i] = std::max(1e-20, vals(i));
+        for (int j = 0; j < dim_; ++j) {
+            eigenVectors_[j][i] = vecs(j, i);
+        }
     }
     needsDecomposition_ = false;
 }
@@ -435,17 +410,34 @@ double CMAESOptimizer::step(std::vector<double>& theta,
                  (hsig ? std::sqrt(cc_ * (2.0 - cc_) * mueff_) * meanDiff[i] : 0.0);
     }
 
-    // Update covariance matrix
-    for (int i = 0; i < dim_; ++i) {
-        for (int j = 0; j <= i; ++j) {
-            double rankOne = pc_[i] * pc_[j];
-            double rankMu = 0.0;
-            for (int k = 0; k < mu_; ++k) {
-                rankMu += weights_[k] * population[k].z[i] * population[k].z[j];
-            }
-            C_[i][j] = (1.0 - c1_ - cmu_) * C_[i][j] + c1_ * rankOne + cmu_ * rankMu;
-            C_[j][i] = C_[i][j];
+    // Update covariance matrix using Eigen
+    // C = (1 - c1 - cmu) * C + c1 * pc*pc^T + cmu * sum(w_k * z_k * z_k^T)
+    {
+        Eigen::MatrixXd C(dim_, dim_);
+        for (int i = 0; i < dim_; ++i)
+            for (int j = 0; j < dim_; ++j)
+                C(i, j) = C_[i][j];
+
+        Eigen::VectorXd pc(dim_);
+        for (int i = 0; i < dim_; ++i) pc(i) = pc_[i];
+
+        // Rank-one update: c1 * pc * pc^T
+        Eigen::MatrixXd rankOne = pc * pc.transpose();
+
+        // Rank-μ update: cmu * sum(w_k * z_k * z_k^T)
+        Eigen::MatrixXd rankMu = Eigen::MatrixXd::Zero(dim_, dim_);
+        for (int k = 0; k < mu_; ++k) {
+            Eigen::VectorXd z(dim_);
+            for (int i = 0; i < dim_; ++i) z(i) = population[k].z[i];
+            rankMu += weights_[k] * (z * z.transpose());
         }
+
+        C = (1.0 - c1_ - cmu_) * C + c1_ * rankOne + cmu_ * rankMu;
+
+        // Copy back, symmetrizing
+        for (int i = 0; i < dim_; ++i)
+            for (int j = 0; j < dim_; ++j)
+                C_[i][j] = C(i, j);
     }
     needsDecomposition_ = true;
 
