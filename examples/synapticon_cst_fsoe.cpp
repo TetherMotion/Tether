@@ -677,6 +677,37 @@ int main(int argc, char** argv) {
         }
     }
 
+    // --- Read FSoE safety address (0xF980:1) and use as connection ID ---
+    // Object 0xF980:1 contains the safety address configured on the drive.
+    // The master must use this value as the FSoE connection ID so that
+    // master and slave agree on the connection identifier.  Reading it
+    // before starting the FSoE handshake avoids ConnectionIDError
+    // failures caused by a mismatch between the --connection-id default
+    // and the drive's configured value.
+    //
+    // When FSoE is disabled (--no-fsoe), this read is skipped.
+    if (args.enable_fsoe) {
+        auto& slave = master.ethercatMaster().slave(slave_idx);
+        uint16_t drive_safety_address = 0;
+        const auto addr_err =
+            EtherCAT::Drives::Synapticon::readFSoESafetyAddress(
+                slave, drive_safety_address);
+        if (addr_err == EtherCAT::SlaveError::Ok) {
+            TETHER_LOGI(TAG,
+                "FSoE safety address (0xF980:1): 0x%04X — using as "
+                "connection ID (overrides --connection-id=0x%04X)",
+                drive_safety_address,
+                args.connection_id);
+            args.connection_id = drive_safety_address;
+        } else {
+            TETHER_LOGW(TAG,
+                "Failed to read FSoE safety address (0xF980:1) via SDO "
+                "(err=%u) — falling back to --connection-id=0x%04X",
+                static_cast<unsigned>(addr_err),
+                args.connection_id);
+        }
+    }
+
     // --- Configure drive: CST mode + FSoE, combined PDO mapping ---
     //
     // When FSoE is enabled, both the CiA 402 motion PDOs (0x1600/0x1A00) and
