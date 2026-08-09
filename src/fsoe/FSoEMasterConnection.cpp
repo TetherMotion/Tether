@@ -370,8 +370,24 @@ void FSoEMasterConnection::update(uint64_t current_time_ms)
 
 void FSoEMasterConnection::checkPhaseTimeout(uint64_t current_time_ms)
 {
-    if (status_.state == ConnectionState::Reset ||
-        status_.state == ConnectionState::Data ||
+    // Reset state: fall back to Session if the slave doesn't respond within
+    // the reset timeout.  The Reset command (0x2A) is a non-standard extension
+    // that not all FSoE slaves support.  If the slave ignores it, the master
+    // times out and starts the standard FSoE handshake with a Session command.
+    if (status_.state == ConnectionState::Reset) {
+        if (config_.reset_timeout_ms > 0) {
+            uint64_t elapsed = current_time_ms - status_.state_entered_ms;
+            if (elapsed > config_.reset_timeout_ms) {
+                stats_.timeout_events++;
+                // Slave did not respond to Reset(0x2A) — fall back to the
+                // standard FSoE Session handshake.
+                requestSessionReset();
+            }
+        }
+        return;
+    }
+
+    if (status_.state == ConnectionState::Data ||
         status_.state == ConnectionState::FailSafe ||
         status_.state == ConnectionState::Error) {
         return;
@@ -824,6 +840,54 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
     const size_t tx_len = prepareTxFrame(rx_pdo_out, rx_pdo_max);
     if (tx_len == 0) {
         return false;
+    }
+
+    // Pad the frame to the PDO size with ConnID at the last 2 bytes.
+    //
+    // The Synapticon drive's FSoE PDO (0x1700) has a fixed 11-byte layout:
+    //   CMD(1) + Data0(2) + CRC0(2) + Data1(2) + CRC1(2) + ConnID(2)
+    // The ConnID is mapped to the last 2 bytes of the PDO (bytes 9-10),
+    // not to the variable-length position right after the last data chunk.
+    //
+    // The variable-length frame builder (buildFSoEFrame) puts ConnID right
+    // after the last data chunk.  For a Reset frame (0 data), ConnID is at
+    // bytes 1-2.  For a Data frame (4 bytes data), ConnID is at bytes 9-10.
+    //
+    // When the variable-length frame is shorter than the PDO, we need to:
+    // 1. Move ConnID from its variable-length position to the PDO end
+    // 2. Fill the gap with zero-filled data chunks (2B data=0x0000 + 2B CRC)
+    //
+    // CRC of {0x00, 0x00} with init 0x0000 = 0x0000 (from the CRC table),
+    // so zero-filled chunks pass CRC verification trivially.
+    if (tx_len < rx_pdo_max && rx_pdo_max >= CRC::MIN_FSOE_FRAME_SIZE) {
+        // Check that the PDO size is a valid FSoE frame size (all 4-byte chunks)
+        size_t pdo_data_bytes = rx_pdo_max - 1 - 2;  // minus CMD and ConnID
+        if (pdo_data_bytes % 4 == 0) {
+            // Extract ConnID from the variable-length frame
+            uint16_t conn_id = static_cast<uint16_t>(rx_pdo_out[tx_len - 2]) |
+                               (static_cast<uint16_t>(rx_pdo_out[tx_len - 1]) << 8);
+
+            // Fill the gap with zero-filled data chunks
+            size_t gap_start = tx_len - 2;  // Where ConnID was
+            size_t gap_end   = rx_pdo_max - 2;  // Where ConnID will be
+            size_t gap_size  = gap_end - gap_start;
+
+            if (gap_size > 0 && gap_size % 4 == 0) {
+                size_t num_chunks = gap_size / 4;
+                size_t offset = gap_start;
+                for (size_t i = 0; i < num_chunks; i++) {
+                    rx_pdo_out[offset]     = 0x00;  // Data byte 0
+                    rx_pdo_out[offset + 1] = 0x00;  // Data byte 1
+                    rx_pdo_out[offset + 2] = 0x00;  // CRC low (CRC of {0,0} = 0x0000)
+                    rx_pdo_out[offset + 3] = 0x00;  // CRC high
+                    offset += 4;
+                }
+
+                // Write ConnID at the end of the PDO
+                rx_pdo_out[rx_pdo_max - 2] = conn_id & 0xFF;
+                rx_pdo_out[rx_pdo_max - 1] = (conn_id >> 8) & 0xFF;
+            }
+        }
     }
 
     // Startup grace period: skip RxFrame processing for the first few
