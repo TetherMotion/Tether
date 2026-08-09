@@ -495,14 +495,13 @@ int main(int argc, char** argv) {
     //   SM3 (inputs, 0x1C00, ctrl=0x20): TxPDO 0x1B00 (31 bytes)
     //     FSoE Command, safety state flags, diagnostic flags, safe pos/vel, CRCs, ConnectionID
     {
-        auto* drive = master.driveBySlaveIndex(slave_idx);
-        if (drive == nullptr) {
-            TETHER_LOGE(TAG, "Drive %u not found", slave_idx);
-            Tether::Examples::stopHostMasterSession(master, session);
-            return 3;
-        }
-
-        drive->setSDOTimeout(kSdoTimeoutMs);
+        // ensureDrive() creates the CiA402Drive object and marks the slave
+        // as DS402-managed.  This is required because the multi-PDO path
+        // below bypasses configureDrive() (which would otherwise create
+        // the drive).  Without this, driveBySlaveIndex() would return
+        // nullptr.
+        auto& drive = master.ensureDrive(slave_idx);
+        drive.setSDOTimeout(kSdoTimeoutMs);
 
         // Build the FSoE-only PDO assignment
         const auto assignment = EtherCAT::Drives::Synapticon_pdo::makeFSoEPDOAssignment();
@@ -513,7 +512,7 @@ int main(int argc, char** argv) {
             EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.size,
             EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.size);
 
-        if (!drive->transitionToOp(assignment)) {
+        if (!drive.transitionToOp(assignment)) {
             TETHER_LOGE(TAG, "Failed to transition to OP with multi-PDO assignment");
             Tether::Examples::stopHostMasterSession(master, session);
             return 4;

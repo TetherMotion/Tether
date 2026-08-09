@@ -191,6 +191,16 @@ public:
     CiA402Drive* driveBySlaveIndex(uint16_t slave_index);
     const CiA402Drive* driveBySlaveIndex(uint16_t slave_index) const;
 
+    /// Get-or-create the CiA402Drive for @p slave_index.
+    ///
+    /// Ensures the slave is marked as DS402-managed and that a CiA402Drive
+    /// object exists in the internal drive table.  Idempotent: repeated calls
+    /// with the same slave index return the same drive.  Use this instead of
+    /// driveBySlaveIndex() when a drive must be created without going through
+    /// configureDrive() (e.g. when using the multi-PDO-per-sync-manager
+    /// transitionToOp() overload directly).
+    CiA402Drive& ensureDrive(uint16_t slave_index);
+
     bool enableDrive(uint16_t slave_index, uint32_t timeout_ms = 5000);
     bool disableDrive(uint16_t slave_index);
     bool enableAllDrives(uint32_t timeout_ms = 5000);
@@ -198,7 +208,6 @@ public:
 
 private:
     void ensureSlaveRoleCapacity(uint16_t slave_index);
-    CiA402Drive& ensureDrive(uint16_t slave_index);
 
     Master ethercat_master_;
     std::vector<std::unique_ptr<CiA402Drive>> drives_;

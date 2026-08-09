@@ -7,6 +7,11 @@
  * PDOs for that mode (RxPDO 0x1600 / TxPDO 0x1A00), sends 0 torque, and
  * runs the FSoE safe-motion protocol alongside the cyclic data exchange.
  *
+ * On startup the slave is automatically reset to INIT if it is currently
+ * in a higher ESM state (e.g. left over from a previous run that didn't
+ * shut down cleanly).  This ensures a clean starting point for mailbox
+ * configuration and PDO mapping.
+ *
  * FSoE frames are exchanged each cycle with the REAL drive via the FSoE
  * safety PDOs (RxPDO 0x1700 / TxPDO 0x1B00), which are mapped alongside
  * the CiA 402 motion PDOs using the multi-PDO-per-sync-manager API.  The
@@ -45,6 +50,8 @@
 #include "DS402ExampleSupport.hpp"
 #include "tether/drives/Synapticon.hpp"
 #include "tether/drives/Synapticon/SynapticonPDO.hpp"
+#include "tether/ethercat/ALResetController.hpp"
+#include "tether/ethercat/FaultDetection.hpp"
 #include "tether/ethercat/Slave.hpp"
 #include "tether/fsoe/FSoEDefs.hpp"
 #include "tether/fsoe/Synapticon/SafeMotionFSoE.hpp"
@@ -292,10 +299,11 @@ public:
         }
         TETHER_LOGI(TAG,
             "  frames: tx=%u rx=%u | crc_err=%u seq_err=%u watchdog_evt=%u "
-            "reset_evt=%u timeout_evt=%u",
+            "reset_evt=%u timeout_evt=%u dup=%u invalid=%u",
             stats.frames_sent, stats.frames_received,
             stats.crc_errors, stats.sequence_errors, stats.watchdog_events,
-            stats.reset_events, stats.timeout_events);
+            stats.reset_events, stats.timeout_events,
+            stats.duplicate_frames, stats.invalid_frames);
         TETHER_LOGI(TAG,
             "  recovery: attempts=%u successful=%u",
             stats.recovery_attempts, stats.successful_recoveries);
@@ -498,6 +506,77 @@ int main(int argc, char** argv) {
             return 2;
         }
 
+        // --- Reset slave to INIT if currently in a higher state ---
+        // If the slave is already in PRE_OP, SAFE_OP, or OP (e.g. from a
+        // previous run that didn't shut down cleanly), bring it back to INIT
+        // before reconfiguring the mailbox and PDO mapping.  This ensures a
+        // clean starting point regardless of the slave's current state.
+        {
+            uint8_t current_state = 0;
+            if (master.ethercatMaster().readSlaveApplicationLayerState(
+                    slave_idx, current_state)) {
+                TETHER_LOGI(TAG,
+                    "Slave %u current AL state: 0x%02X (%s)",
+                    slave_idx, current_state,
+                    EtherCAT::getECStateName(static_cast<EtherCAT::ECState>(current_state)));
+
+                if (current_state != static_cast<uint8_t>(EtherCAT::ECState::Init)) {
+                    TETHER_LOGI(TAG,
+                        "Slave %u is not in INIT (0x%02X) — resetting to INIT "
+                        "before configuration",
+                        slave_idx, current_state);
+
+                    EtherCAT::ALResetController reset_ctrl(master.ethercatMaster());
+                    reset_ctrl.setProgressCallback(
+                        [](uint16_t si, int iter, int max_iter,
+                           uint16_t al, uint16_t code, bool reached) {
+                            if (!reached) {
+                                const char* state_name =
+                                    EtherCAT::al_status_get_state_name(al);
+                                const bool has_err = EtherCAT::al_status_has_error(al);
+                                TETHER_LOGI(TAG,
+                                    "  Slave %u reset iter %d/%d: "
+                                    "AL_STATUS=0x%04X (state=%s, error=%s)",
+                                    si, iter, max_iter, al,
+                                    state_name, has_err ? "true" : "false");
+                                if (code != 0) {
+                                    TETHER_LOGI(TAG,
+                                        "    AL_STATUS_CODE=0x%04X (%s)",
+                                        code, EtherCAT::getALStatusCodeName(code));
+                                }
+                            }
+                        });
+
+                    const auto result = reset_ctrl.resetSlave(
+                        slave_idx, static_cast<uint8_t>(EtherCAT::ECState::Init));
+
+                    if (result.success) {
+                        TETHER_LOGI(TAG,
+                            "Slave %u reset to INIT OK (%s, %d iterations)",
+                            slave_idx, result.message.c_str(),
+                            result.iterations_used);
+                    } else {
+                        TETHER_LOGE(TAG,
+                            "Slave %u reset to INIT FAILED (%s, %d iterations, "
+                            "final AL_STATUS=0x%04X, AL_STATUS_CODE=0x%04X)",
+                            slave_idx, result.message.c_str(),
+                            result.iterations_used,
+                            result.final_al_status,
+                            result.final_al_status_code);
+                        Tether::Examples::stopHostMasterSession(master, session);
+                        return 2;
+                    }
+
+                    // Give the slave a moment to settle after the reset.
+                    Tether::Platform::Clock::instance().delayMilliseconds(100);
+                }
+            } else {
+                TETHER_LOGW(TAG,
+                    "Could not read AL state for slave %u — continuing anyway",
+                    slave_idx);
+            }
+        }
+
         auto& slave = master.ethercatMaster().slave(slave_idx);
         // configureMailbox(mbox_out, mbox_in, protocols):
         //   mbox_in  → SM0 (mailbox_write, master→slave)
@@ -638,18 +717,18 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Get the drive and configure it for OP transition
-    auto* drive = master.driveBySlaveIndex(slave_idx);
-    if (drive == nullptr) {
-        TETHER_LOGE(TAG, "Drive %u not found", slave_idx);
-        master.stopDistributedClocks();
-        Tether::Examples::stopHostMasterSession(master, session);
-        return 3;
-    }
-    drive->setSDOTimeout(kSdoTimeoutMs);
+    // Get-or-create the drive and configure it for OP transition.
+    //
+    // ensureDrive() is used instead of driveBySlaveIndex() because the
+    // multi-PDO FSoE path below bypasses configureDrive() (which would
+    // otherwise create the drive).  Without this, driveBySlaveIndex()
+    // would return nullptr — no CiA402Drive object exists yet and the
+    // slave role defaults to NonDS402.
+    auto& drive = master.ensureDrive(slave_idx);
+    drive.setSDOTimeout(kSdoTimeoutMs);
 
     // Set operating mode via SDO while in PRE_OP (before PDO mapping)
-    if (!drive->setOperatingMode(CiA402::OperatingMode::CyclicSyncTorque)) {
+    if (!drive.setOperatingMode(CiA402::OperatingMode::CyclicSyncTorque)) {
         TETHER_LOGE(TAG, "Failed to set operating mode to CST");
         master.stopDistributedClocks();
         Tether::Examples::stopHostMasterSession(master, session);
@@ -678,7 +757,7 @@ int main(int argc, char** argv) {
             static_cast<uint16_t>(EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.size +
                                   EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.size));
 
-        if (!drive->transitionToOp(assignment)) {
+        if (!drive.transitionToOp(assignment)) {
             TETHER_LOGE(TAG, "Failed to transition to OP with combined PDO assignment");
             master.stopDistributedClocks();
             Tether::Examples::stopHostMasterSession(master, session);
