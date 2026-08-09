@@ -349,6 +349,14 @@ bool CiA402Drive::transitionSafeOpToOp() {
         else
             TETHER_LOGW(TAG, "Slave %u: Failed to read 0x1C12:1", m_slave_index);
 
+        if (sm2_count_res.has_value() && sm2_count_res.value() >= 2) {
+            auto sm2_pdo2_res = m_master->sdoManager(m_slave_index).readU16( 0x1C12, 2, {.timeout_ms = m_sdo_timeout_ms});
+            if (sm2_pdo2_res.has_value())
+                TETHER_LOGI(TAG, "Slave %u: 0x1C12:2 (SM2 RxPDO #2) = 0x%04X", m_slave_index, sm2_pdo2_res.value());
+            else
+                TETHER_LOGW(TAG, "Slave %u: Failed to read 0x1C12:2", m_slave_index);
+        }
+
         auto sm3_count_res = m_master->sdoManager(m_slave_index).readU8( 0x1C13, 0, {.timeout_ms = m_sdo_timeout_ms});
         if (sm3_count_res.has_value())
             TETHER_LOGI(TAG, "Slave %u: 0x1C13:0 (SM3 PDO count) = %u", m_slave_index, sm3_count_res.value());
@@ -360,6 +368,14 @@ bool CiA402Drive::transitionSafeOpToOp() {
             TETHER_LOGI(TAG, "Slave %u: 0x1C13:1 (SM3 TxPDO) = 0x%04X", m_slave_index, sm3_pdo_res.value());
         else
             TETHER_LOGW(TAG, "Slave %u: Failed to read 0x1C13:1", m_slave_index);
+
+        if (sm3_count_res.has_value() && sm3_count_res.value() >= 2) {
+            auto sm3_pdo2_res = m_master->sdoManager(m_slave_index).readU16( 0x1C13, 2, {.timeout_ms = m_sdo_timeout_ms});
+            if (sm3_pdo2_res.has_value())
+                TETHER_LOGI(TAG, "Slave %u: 0x1C13:2 (SM3 TxPDO #2) = 0x%04X", m_slave_index, sm3_pdo2_res.value());
+            else
+                TETHER_LOGW(TAG, "Slave %u: Failed to read 0x1C13:2", m_slave_index);
+        }
 
         auto mode_op_res = m_master->sdoManager(m_slave_index).readU8( 0x6060, 0, {.timeout_ms = m_sdo_timeout_ms});
         if (mode_op_res.has_value())
@@ -452,11 +468,12 @@ bool CiA402Drive::transitionToOp(const Slave::MultiPDOAssignment& assignment) {
     TETHER_LOGI(TAG, "Slave %u: Multi-PDO SM/FMMU configuration complete", m_slave_index);
 
     // Compute total Rx/Tx sizes from the assignment and set internal buffer
-    // sizes.  assignFixedPDOs() also writes PDO assignments via SDO, but
-    // configureMultiPDOs() already did that — the SDO writes here are
-    // redundant but harmless (the slave already has the correct assignments).
-    // The important effect is setting m_rxpdo_size / m_txpdo_size so that
-    // registerPDOBuffers() can register the correct buffer lengths.
+    // sizes.  We use setPDOBufferSizes() (not assignFixedPDOs()) because
+    // configureMultiPDOs() already wrote the PDO assignments (0x1C12/0x1C13)
+    // via the multi-PDO path.  Calling assignFixedPDOs() here would
+    // overwrite the multi-PDO assignment with a single-PDO assignment,
+    // destroying the FSoE PDO mapping (e.g. removing 0x1700 from SM2 and
+    // 0x1B00 from SM3, leaving only the motion PDOs 0x1600/0x1A00).
     uint16_t total_rx = 0, total_tx = 0;
     uint16_t rx_index = 0, tx_index = 0;
     for (const auto& sm_cfg : assignment.sm_configs) {
@@ -473,9 +490,7 @@ bool CiA402Drive::transitionToOp(const Slave::MultiPDOAssignment& assignment) {
     }
 
     if (total_rx > 0 || total_tx > 0) {
-        if (!assignFixedPDOs(rx_index, tx_index, total_rx, total_tx)) {
-            TETHER_LOGW(TAG, "Slave %u: PDO buffer sizing failed, continuing anyway", m_slave_index);
-        }
+        setPDOBufferSizes(rx_index, tx_index, total_rx, total_tx);
         if (!registerPDOBuffers()) {
             TETHER_LOGE(TAG, "Slave %u: Failed to register PDO buffers", m_slave_index);
             return false;

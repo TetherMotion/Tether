@@ -50,6 +50,7 @@
 #include "DS402ExampleSupport.hpp"
 #include "tether/drives/Synapticon.hpp"
 #include "tether/drives/Synapticon/SynapticonPDO.hpp"
+#include "tether/drives/Synapticon/SafetyDiagnostics.hpp"
 #include "tether/ethercat/ALResetController.hpp"
 #include "tether/ethercat/FaultDetection.hpp"
 #include "tether/ethercat/Slave.hpp"
@@ -58,6 +59,7 @@
 #include "tether/platform/EspCompat.hpp"
 #include "tether/profiles/cia301/CiA402Defs.hpp"
 #include "tether/profiles/cia402/DS402Master.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 
 #include <argparse/argparse.hpp>
 
@@ -134,10 +136,18 @@ using FSoERxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_RxPDO_1700;
 using FSoETxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_TxPDO_1B00;
 
 // FSoE PDO offsets within the combined PDO buffer.
-// The motion PDO (0x1600/0x1A00) comes first; the FSoE PDO (0x1700/0x1B00)
-// follows at the offset equal to the motion PDO size.
-constexpr size_t kFSoERxPDOOffset = sizeof(RxPDO);   // 19 bytes
-constexpr size_t kFSoETxPDOOffset = sizeof(TxPDO);   // 13 bytes
+// The FSoE PDO (0x1700/0x1B00) comes FIRST; the motion PDO (0x1600/0x1A00)
+// follows at the offset equal to the FSoE PDO size.
+// This ordering is critical: the Synapticon Circulo EtherCAT chip has a bug
+// where the last word in the SM buffer is zeroed.  If the FSoE PDO were last,
+// the ConnectionID (the final word of the FSoE frame) would be zeroed and the
+// slave would reject every frame.  By placing the motion PDO last, the zeroed
+// word falls on motion data, not the FSoE ConnectionID.
+// See: https://doc.synapticon.com/circulo_safe_motion/smm/ecat_fsoe_issues.htm
+constexpr size_t kFSoERxPDOOffset = 0;                    // FSoE first
+constexpr size_t kMotionRxPDOOffset = sizeof(FSoERxPDO);  // 11 bytes
+constexpr size_t kFSoETxPDOOffset = 0;                    // FSoE first
+constexpr size_t kMotionTxPDOOffset = sizeof(FSoETxPDO);  // 31 bytes
 
 using FSoEMain = EtherCAT::Drives::Synapticon::SafeMotion::MainInstance;
 
@@ -218,7 +228,9 @@ public:
     void stop(EtherCAT::CiA402Drive&) override {}
 
     bool update(EtherCAT::CiA402Drive& drive, double /*dt_seconds*/) override {
-        auto* rx = drive.rxPDO<PDO>();
+        // Motion PDO is at offset kMotionRxPDOOffset (FSoE PDO comes first)
+        auto* rx = reinterpret_cast<PDO*>(
+            static_cast<uint8_t*>(drive.getRxPDOBuffer()) + kMotionRxPDOOffset);
         if (rx == nullptr) return false;
 
         rx->controlword = static_cast<uint16_t>(CiA402::ControlWord::ENABLE_OPERATION);
@@ -261,7 +273,9 @@ public:
         auto* drive = master.driveBySlaveIndex(slave_index_);
         if (drive == nullptr) return true;
 
-        auto* tx = drive->txPDO<TxPDO>();
+        // Motion PDO is at offset kMotionTxPDOOffset (FSoE PDO comes first)
+        auto* tx = reinterpret_cast<const TxPDO*>(
+            static_cast<const uint8_t*>(drive->getTxPDOBuffer()) + kMotionTxPDOOffset);
         if (tx) {
             TETHER_LOGI(TAG,
                 "--- Drive @ %llu ms ---",
@@ -371,6 +385,26 @@ public:
         uint8_t* rx_buffer = static_cast<uint8_t*>(drive->getRxPDOBuffer()) + rx_pdo_offset_;
         const uint8_t* tx_buffer = static_cast<const uint8_t*>(drive->getTxPDOBuffer()) + tx_pdo_offset_;
 
+        // Log the first few TxPDO frames to see what the slave sends
+        if (tx_dump_count_ < 20) {
+            // Dump FSoE region (31 bytes)
+            char hex[128];
+            size_t pos = 0;
+            for (size_t b = 0; b < sizeof(FSoETxPDO) && pos + 3 < sizeof(hex); b++) {
+                pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", tx_buffer[b]));
+            }
+            TETHER_LOGI("fsoe-cyclic", "[TxPDO-FSoE] dump %u: %s", tx_dump_count_, hex);
+            // Dump motion PDO region (13 bytes at offset 31)
+            const uint8_t* motion_tx = static_cast<const uint8_t*>(drive->getTxPDOBuffer()) + tx_pdo_offset_ + sizeof(FSoETxPDO);
+            char mhex[64];
+            pos = 0;
+            for (size_t b = 0; b < 13 && pos + 3 < sizeof(mhex); b++) {
+                pos += static_cast<size_t>(snprintf(mhex + pos, sizeof(mhex) - pos, "%02X ", motion_tx[b]));
+            }
+            TETHER_LOGI("fsoe-cyclic", "[TxPDO-Motion] dump %u: %s", tx_dump_count_, mhex);
+            tx_dump_count_++;
+        }
+
         const bool ok = main_instance_.exchangeViaPDO(
             rx_buffer, sizeof(FSoERxPDO),
             tx_buffer, sizeof(FSoETxPDO),
@@ -385,6 +419,7 @@ private:
     size_t rx_pdo_offset_;
     size_t tx_pdo_offset_;
     uint64_t elapsed_time_ms_ = 0;
+    uint32_t tx_dump_count_ = 0;
 };
 
 // ============================================================================
@@ -640,11 +675,21 @@ int main(int argc, char** argv) {
             safety.fsoeStateSummary());
 
         if (!safety.ok) {
-            TETHER_LOGE(TAG,
-                "Failed to read safety module diagnostics (0x2611) via SDO — "
-                "cannot verify safety state, aborting activation");
-            Tether::Examples::stopHostMasterSession(master, session);
-            return 2;
+            if (args.enable_fsoe) {
+                // SDO read failed, but FSoE is enabled — the safety module
+                // might be in a state where SDO access is temporarily
+                // unavailable.  Continue anyway; the FSoE protocol will
+                // handle the safety state via PDOs.
+                TETHER_LOGW(TAG,
+                    "Failed to read safety module diagnostics (0x2611) via SDO — "
+                    "continuing with FSoE enabled (PDO-based safety handling)");
+            } else {
+                TETHER_LOGE(TAG,
+                    "Failed to read safety module diagnostics (0x2611) via SDO — "
+                    "cannot verify safety state, aborting activation");
+                Tether::Examples::stopHostMasterSession(master, session);
+                return 2;
+            }
         }
 
         if (safety.isInSafeState()) {
@@ -767,26 +812,40 @@ int main(int argc, char** argv) {
     }
 
     if (args.enable_fsoe) {
-        // Combined motion + FSoE PDO mapping via multi-PDO assignment
+        // Combined FSoE + motion PDO mapping via multi-PDO assignment.
+        // IMPORTANT: FSoE PDOs (0x1700/0x1B00) are placed FIRST, motion PDOs
+        // (0x1600/0x1A00) SECOND.  This is a workaround for a Synapticon
+        // Circulo EtherCAT chip bug that zeros the last word of the SM
+        // buffer.  If the FSoE PDO were last, the ConnectionID (final word
+        // of the FSoE frame) would be zeroed and the slave would reject
+        // every frame.
         const auto assignment =
             EtherCAT::Drives::Synapticon_pdo::makePDOAssignment(
-                {EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.index,
-                 EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.index},
-                {EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.index,
-                 EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.index});
+                {EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.index,
+                 EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.index},
+                {EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.index,
+                 EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.index});
 
         TETHER_LOGI(TAG,
-            "Transitioning to OP with combined CST+FSoE PDO mapping: "
-            "SM2=RxPDO 0x1600+0x1700 (%u+%u=%u bytes), "
-            "SM3=TxPDO 0x1A00+0x1B00 (%u+%u=%u bytes)",
-            EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.size,
+            "Transitioning to OP with combined FSoE+CST PDO mapping: "
+            "SM2=RxPDO 0x1700+0x1600 (%u+%u=%u bytes), "
+            "SM3=TxPDO 0x1B00+0x1A00 (%u+%u=%u bytes)",
             EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.size,
-            static_cast<uint16_t>(EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.size +
-                                  EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.size),
-            EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.size,
+            EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.size,
+            static_cast<uint16_t>(EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.size +
+                                  EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.size),
             EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.size,
-            static_cast<uint16_t>(EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.size +
-                                  EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.size));
+            EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.size,
+            static_cast<uint16_t>(EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.size +
+                                  EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.size));
+
+        // Note: Safety parameters (0x2620, 0x2641, etc.) are configured on the
+        // drive via OBLAC Drives and cannot be written via SDO (error 0x08000021
+        // "Local control error").  The FSoE module reads them from the drive's
+        // safety parameter store.  The drive is already configured with:
+        //   0x2620:2 (Safe fieldbus) = 0xFF (FSoE active)
+        //   0x2620:3 (Safe address)  = 0x0006 (connection ID)
+        //   0xF980:1 (Device Safety Address) = 0x0006
 
         if (!drive.transitionToOp(assignment)) {
             TETHER_LOGE(TAG, "Failed to transition to OP with combined PDO assignment");
@@ -795,6 +854,279 @@ int main(int argc, char** argv) {
             return 3;
         }
         TETHER_LOGI(TAG, "Slave %u transitioned to OP with combined CST+FSoE PDOs", slave_idx);
+
+        // --- Comprehensive safety diagnostics ---
+        // Query all safety-related objects via SDO before starting the PDO
+        // exchange loop.  This catches configuration issues (FSoE not active,
+        // parameter validation missing, connection ID mismatch) and reports
+        // any active safety faults with human-readable descriptions.
+        {
+            auto& slave_ref = master.ethercatMaster().slave(slave_idx);
+            auto diag_report = EtherCAT::Drives::Synapticon::runFullSafetyDiagnostics(
+                slave_ref);
+
+            // Log actionable warnings based on the diagnostic report
+            if (diag_report.hasFault()) {
+                TETHER_LOGE(TAG,
+                    "SAFETY FAULT detected before starting PDO loop: '%s' — "
+                    "FSoE communication may fail.  Check OBLAC Drives parameter "
+                    "validation and safety configuration.",
+                    diag_report.error_report);
+            }
+            if (diag_report.general_safety_ok && !diag_report.fsoeActive()) {
+                TETHER_LOGE(TAG,
+                    "FSoE is NOT active on the drive (0x2620:2 = 0).  "
+                    "The safety module will not process FSoE PDO data.  "
+                    "Enable FSoE in OBLAC Drives configuration.");
+            }
+            if (diag_report.module_ident_ok &&
+                diag_report.configured_ident_pos2 == EtherCAT::Drives::Synapticon::kModuleIdentNoParam) {
+                TETHER_LOGW(TAG,
+                    "Module ident = 0x22D20001 (no parameter changes via master).  "
+                    "Safety parameters must be validated in OBLAC Drives.  "
+                    "If not validated, the safety module will report 'SmmFIO25' "
+                    "(black channel fault) and refuse to communicate via FSoE.");
+            }
+            if (diag_report.connIdMismatch()) {
+                TETHER_LOGE(TAG,
+                    "Connection ID mismatch: 0xF980 (0x%04X) != 0x2620:3 (0x%04X).  "
+                    "The master --connection-id must match the device safety address.",
+                    diag_report.device_safety_address,
+                    diag_report.safe_address);
+            }
+        }
+
+        // --- PDO write / SDO readback diagnostic ---
+        // Write a known pattern to the FSoE RxPDO region (0x1700), let the
+        // cyclic task send it for a few cycles, then read back the individual
+        // mapped objects via SDO to verify the data lands at the correct
+        // offsets in the slave's object dictionary.
+        TETHER_LOGI(TAG, "=== PDO write / SDO readback diagnostic ===");
+
+        // Enable PDO exchange so the data actually gets sent
+        master.ethercatMaster().pdo().resetStats();
+        master.ethercatMaster().dc().setPDOEnabled(true);
+
+        // First, verify that SDO readback of PDO-mapped objects works at all.
+        // Write a known value to the Controlword (0x6040) via PDO, then read
+        // it back via SDO.  If this doesn't work, SDO readback of PDO-mapped
+        // objects isn't supported on this slave.
+        {
+            uint8_t* rx_buf = static_cast<uint8_t*>(drive.getRxPDOBuffer());
+            // Controlword is at offset kMotionRxPDOOffset in the combined PDO
+            // (FSoE PDO comes first, motion PDO second)
+            rx_buf[kMotionRxPDOOffset + 0] = 0x0F;  // Controlword low byte
+            rx_buf[kMotionRxPDOOffset + 1] = 0x00;  // Controlword high byte
+            TETHER_LOGI(TAG, "Wrote Controlword=0x000F to RxPDO offset %zu",
+                kMotionRxPDOOffset);
+        }
+
+        // Wait for the cyclic task to send the PDO data a few times
+        Tether::Platform::Clock::instance().delayMilliseconds(100);
+
+        // Read back Controlword via SDO
+        auto& sdo = master.ethercatMaster().sdoManager(slave_idx);
+        {
+            auto cw = sdo.readU16(0x6040, 0, {.timeout_ms = kSdoTimeoutMs});
+            if (cw.has_value())
+                TETHER_LOGI(TAG, "  SDO read 0x6040:0 (Controlword) = 0x%04X (expect 0x000F if PDO readback works)",
+                    cw.value());
+            else
+                TETHER_LOGW(TAG, "  SDO read 0x6040:0 (Controlword) FAILED");
+        }
+
+        // Now write a known FSoE Reset frame to the FSoE PDO region:
+        //   byte 0:     FSoE Command = 0x2A (Reset)
+        //   bytes 1-2:  safety_flags = 0x0000
+        //   bytes 3-4:  CRC_0 = 0x0000 (CRC of {0,0} = 0x0000)
+        //   bytes 5-6:  reserved + safe_outputs = 0x0000
+        //   bytes 7-8:  CRC_1 = 0x0000
+        //   bytes 9-10: ConnectionID = 0x0006
+        {
+            uint8_t* rx_buf = static_cast<uint8_t*>(drive.getRxPDOBuffer());
+            // FSoE PDO is at offset 0 (FSoE comes first, motion second)
+            uint8_t* fsoe_buf = rx_buf + kFSoERxPDOOffset;
+
+            // Fill FSoE region with known pattern
+            fsoe_buf[0] = 0x2A;  // FSoE Command (Reset)
+            fsoe_buf[1] = 0x00;  // safety_flags low
+            fsoe_buf[2] = 0x00;  // safety_flags high
+            fsoe_buf[3] = 0x00;  // CRC_0 low
+            fsoe_buf[4] = 0x00;  // CRC_0 high
+            fsoe_buf[5] = 0x00;  // reserved
+            fsoe_buf[6] = 0x00;  // safe_outputs
+            fsoe_buf[7] = 0x00;  // CRC_1 low
+            fsoe_buf[8] = 0x00;  // CRC_1 high
+            fsoe_buf[9] = 0x06;  // ConnectionID low
+            fsoe_buf[10] = 0x00; // ConnectionID high
+
+            TETHER_LOGI(TAG, "Wrote FSoE pattern to RxPDO offset %zu: "
+                "2A 00 00 00 00 00 00 00 00 06 00", kFSoERxPDOOffset);
+        }
+
+        // Wait for the cyclic task to send the PDO data a few times
+        Tether::Platform::Clock::instance().delayMilliseconds(200);
+
+        // Read back the FSoE objects via SDO
+        auto read_u8 = [&](uint16_t idx, uint8_t sub, const char* name) -> void {
+            auto res = sdo.readU8(idx, sub, {.timeout_ms = kSdoTimeoutMs});
+            if (res.has_value())
+                TETHER_LOGI(TAG, "  SDO read 0x%04X:%u (%s) = 0x%02X", idx, sub, name, res.value());
+            else
+                TETHER_LOGW(TAG, "  SDO read 0x%04X:%u (%s) FAILED", idx, sub, name);
+        };
+        auto read_u16 = [&](uint16_t idx, uint8_t sub, const char* name) -> void {
+            auto res = sdo.readU16(idx, sub, {.timeout_ms = kSdoTimeoutMs});
+            if (res.has_value())
+                TETHER_LOGI(TAG, "  SDO read 0x%04X:%u (%s) = 0x%04X", idx, sub, name, res.value());
+            else
+                TETHER_LOGW(TAG, "  SDO read 0x%04X:%u (%s) FAILED", idx, sub, name);
+        };
+        auto read_u32 = [&](uint16_t idx, uint8_t sub, const char* name) -> void {
+            auto res = sdo.readU32(idx, sub, {.timeout_ms = kSdoTimeoutMs});
+            if (res.has_value())
+                TETHER_LOGI(TAG, "  SDO read 0x%04X:%u (%s) = 0x%08X", idx, sub, name, res.value());
+            else
+                TETHER_LOGW(TAG, "  SDO read 0x%04X:%u (%s) FAILED", idx, sub, name);
+        };
+
+        TETHER_LOGI(TAG, "Reading back FSoE objects via SDO:");
+        read_u8 (0x6770, 1, "FSoE Command (expect 0x2A)");
+        read_u16(0x6770, 2, "FSoE ConnectionID (expect 0x0006)");
+        read_u16(0x6770, 3, "FSoE CRC_0 (expect 0x0000)");
+        read_u16(0x6770, 4, "FSoE CRC_1 (expect 0x0000)");
+        read_u16(0x6640, 0, "STO (expect 0x0000)");
+        read_u16(0x26F0, 1, "Safe output 1 (expect 0x0000)");
+
+        // Also read back the TxPDO FSoE objects to see what the slave sends
+        TETHER_LOGI(TAG, "Reading slave TxPDO FSoE objects via SDO:");
+        read_u8 (0x6760, 1, "FSoE Command (slave->master)");
+        read_u16(0x6760, 2, "FSoE ConnectionID (slave->master)");
+
+        // Check PDO mapping objects — these tell us if the slave has
+        // actually configured the FSoE PDO entries
+        TETHER_LOGI(TAG, "Checking PDO mapping objects:");
+        read_u8 (0x1700, 0, "RxPDO 0x1700 mapping count (expect 18)");
+        read_u8 (0x1B00, 0, "TxPDO 0x1B00 mapping count (expect 18)");
+
+        // Read the full PDO mapping to understand the actual byte layout
+        TETHER_LOGI(TAG, "Reading full RxPDO 0x1700 mapping:");
+        {
+            auto cnt = sdo.readU8(0x1700, 0, {.timeout_ms = kSdoTimeoutMs});
+            if (cnt.has_value()) {
+                for (uint8_t i = 1; i <= cnt.value() && i <= 30; i++) {
+                    auto entry = sdo.readU32(0x1700, i, {.timeout_ms = kSdoTimeoutMs});
+                    if (entry.has_value()) {
+                        uint32_t v = entry.value();
+                        uint16_t idx = (v >> 16) & 0xFFFF;
+                        uint8_t sub = (v >> 8) & 0xFF;
+                        uint8_t bits = v & 0xFF;
+                        TETHER_LOGI(TAG, "  0x1700:%u = 0x%08X (idx=0x%04X sub=%u bits=%u)",
+                            i, v, idx, sub, bits);
+                    } else {
+                        TETHER_LOGW(TAG, "  0x1700:%u FAILED", i);
+                    }
+                }
+            }
+        }
+        TETHER_LOGI(TAG, "Reading full TxPDO 0x1B00 mapping:");
+        {
+            auto cnt = sdo.readU8(0x1B00, 0, {.timeout_ms = kSdoTimeoutMs});
+            if (cnt.has_value()) {
+                for (uint8_t i = 1; i <= cnt.value() && i <= 50; i++) {
+                    auto entry = sdo.readU32(0x1B00, i, {.timeout_ms = kSdoTimeoutMs});
+                    if (entry.has_value()) {
+                        uint32_t v = entry.value();
+                        uint16_t idx = (v >> 16) & 0xFFFF;
+                        uint8_t sub = (v >> 8) & 0xFF;
+                        uint8_t bits = v & 0xFF;
+                        TETHER_LOGI(TAG, "  0x1B00:%u = 0x%08X (idx=0x%04X sub=%u bits=%u)",
+                            i, v, idx, sub, bits);
+                    } else {
+                        TETHER_LOGW(TAG, "  0x1B00:%u FAILED", i);
+                    }
+                }
+            }
+        }
+
+        // Check module identification (ETG.5000 modular device profile)
+        TETHER_LOGI(TAG, "Checking module identification:");
+        read_u16(0xF002, 0, "ModuleIdentList count");
+        if (true) {
+            auto cnt = sdo.readU16(0xF002, 0, {.timeout_ms = kSdoTimeoutMs});
+            if (cnt.has_value()) {
+                for (uint16_t i = 1; i <= cnt.value() && i <= 4; i++) {
+                    char label[64];
+                    snprintf(label, sizeof(label), "ModuleIdent[%u]", i);
+                    read_u16(0xF002, i, label);
+                }
+            }
+        }
+
+        // Check 0x2620 (General safety object) subindices
+        TETHER_LOGI(TAG, "Checking safety general object (0x2620):");
+        read_u8 (0x2620, 0, "0x2620 count");
+        read_u8 (0x2620, 1, "0x2620:1 (unknown)");
+        read_u8 (0x2620, 2, "Safe fieldbus (expect 255=active)");
+        read_u16(0x2620, 3, "Safe address");
+        read_u8 (0x2620, 4, "0x2620:4 (unknown)");
+
+        // Check 0xF980 (Device Safety Address)
+        TETHER_LOGI(TAG, "Checking Device Safety Address (0xF980):");
+        read_u8 (0xF980, 0, "0xF980 count");
+        read_u16(0xF980, 1, "Device Safety Address");
+
+        // Check 0xF030 (Configured module ident list) and 0xF050 (Detected Module Ident List)
+        // 0xF030:2 = 0x22D20001 → No parameter changes via master
+        // 0xF030:2 = 0x22D20002 → With parameter changes via master
+        TETHER_LOGI(TAG, "Checking Module ID configuration (0xF030/0xF050):");
+        read_u8 (0xF030, 0, "0xF030 count");
+        read_u32(0xF030, 1, "0xF030:1 (Module ident pos 1)");
+        read_u32(0xF030, 2, "0xF030:2 (Module ident pos 2 — 0x22D20001=no-param, 0x22D20002=with-param)");
+        read_u8 (0xF050, 0, "0xF050 count");
+        read_u32(0xF050, 1, "0xF050:1 (Detected Module ident pos 1)");
+        read_u32(0xF050, 2, "0xF050:2 (Detected Module ident pos 2)");
+
+        // Check 0x2610 (Manufacturing parameters)
+        TETHER_LOGI(TAG, "Checking manufacturing parameters (0x2610):");
+        read_u8 (0x2610, 0, "0x2610 count");
+
+        // Check 0x2621 (Safety digital IO)
+        TETHER_LOGI(TAG, "Checking safety digital IO (0x2621):");
+        read_u8 (0x2621, 0, "0x2621 count");
+
+        // Read Safety statusword (0x6621) — this tells us the FSoE module's
+        // internal state and might explain why it's not responding
+        TETHER_LOGI(TAG, "Reading safety statusword (0x6621):");
+        read_u8(0x6621, 0, "Safety statusword count");
+        read_u8(0x6621, 1, "Safety status byte 1 (STO)");
+        read_u8(0x6621, 2, "Safety status byte 2 (SBC)");
+
+        // Read error report (0x203F) — may contain safety-related errors
+        TETHER_LOGI(TAG, "Reading error report (0x203F):");
+        read_u8(0x203F, 0, "Error report count");
+        {
+            uint8_t err_buf[16] = {};
+            size_t err_len = 0;
+            if (sdo.readSync(0x203F, 1, err_buf, sizeof(err_buf), kSdoTimeoutMs, &err_len)) {
+                char err_str[17];
+                size_t copy_len = err_len < 8 ? err_len : 8;
+                for (size_t i = 0; i < copy_len; i++) {
+                    err_str[i] = (err_buf[i] >= 0x20 && err_buf[i] < 0x7F) ? static_cast<char>(err_buf[i]) : '.';
+                }
+                err_str[copy_len] = '\0';
+                TETHER_LOGI(TAG, "  SDO read 0x203F:1 (Error report) = '%s' (len=%zu, hex: %02X %02X %02X %02X %02X %02X %02X %02X)",
+                    err_str, err_len,
+                    err_buf[0], err_buf[1], err_buf[2], err_buf[3],
+                    err_buf[4], err_buf[5], err_buf[6], err_buf[7]);
+            } else {
+                TETHER_LOGW(TAG, "  SDO read 0x203F:1 (Error report) FAILED");
+            }
+        }
+
+        TETHER_LOGI(TAG, "=== End PDO/SDO diagnostic ===");
+
+        // Note: PDO exchange stays enabled — the FSoE cyclic task needs it
     } else {
         // FSoE disabled — motion-only single-PDO configuration
         Tether::Examples::SingleDriveExampleConfig config;

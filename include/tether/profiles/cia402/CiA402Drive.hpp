@@ -117,6 +117,18 @@ public:
     bool assignFixedPDOs(uint16_t rxpdo_index, uint16_t txpdo_index,
                          uint16_t rxpdo_size, uint16_t txpdo_size);
 
+    /// Set PDO buffer sizes and indices without writing PDO assignment SDOs.
+    ///
+    /// This is used after configureMultiPDOs() has already written the PDO
+    /// assignments (0x1C12/0x1C13) via the multi-PDO path.  Calling
+    /// assignFixedPDOs() in that case would overwrite the multi-PDO
+    /// assignment with a single-PDO assignment, destroying the FSoE PDO
+    /// mapping.  This method only sets the internal buffer sizes and
+    /// indices so that registerPDOBuffers() can register the correct
+    /// buffer lengths.
+    void setPDOBufferSizes(uint16_t rxpdo_index, uint16_t txpdo_index,
+                           uint16_t rxpdo_size, uint16_t txpdo_size);
+
     bool registerPDOBuffers();
     bool isPDORegistered() const { return m_pdo_registered; }
     void setSDOTimeout(uint32_t timeout_ms) { m_sdo_timeout_ms = timeout_ms; }

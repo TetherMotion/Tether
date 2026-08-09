@@ -47,6 +47,8 @@ struct MasterConnectionConfig {
     uint16_t conn_timeout_ms = 1000;
     uint16_t session_timeout_ms = 5000;
     uint16_t recovery_delay_ms = 500;
+    uint16_t reset_timeout_ms = 500;   ///< Reset state fallback timeout;
+                                       ///< 0 = wait forever for slave response
     uint8_t  safety_level = SIL::SIL2;
     uint8_t  input_size = 0;
     uint8_t  output_size = 0;

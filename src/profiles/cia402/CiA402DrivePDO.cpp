@@ -70,6 +70,22 @@ bool CiA402Drive::assignFixedPDOs(uint16_t rxpdo_index, uint16_t txpdo_index,
 }
 
 // ============================================================================
+// setPDOBufferSizes — set sizes without SDO writes (multi-PDO path)
+// ============================================================================
+
+void CiA402Drive::setPDOBufferSizes(uint16_t rxpdo_index, uint16_t txpdo_index,
+                                     uint16_t rxpdo_size, uint16_t txpdo_size) {
+    m_rxpdo_index = rxpdo_index;
+    m_txpdo_index = txpdo_index;
+    m_rxpdo_size  = rxpdo_size;
+    m_txpdo_size  = txpdo_size;
+    m_pdo_configured = true;
+
+    TETHER_LOGI(TAG, "Slave %u: setPDOBufferSizes RxPDO=0x%04X/%u bytes, TxPDO=0x%04X/%u bytes",
+             m_slave_index, rxpdo_index, rxpdo_size, txpdo_index, txpdo_size);
+}
+
+// ============================================================================
 // registerPDOBuffers
 // ============================================================================
 
