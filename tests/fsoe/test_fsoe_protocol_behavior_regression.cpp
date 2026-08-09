@@ -97,23 +97,28 @@ protected:
 TEST_F(FSoEProtocolBehaviorTest, FullHandshakeProgression) {
     uint64_t now = 0;
 
-    // Cycle 0: Master sends Session, slave responds with Session
+    // Cycle 0: Master sends Reset, slave responds with Session
+    now += 15;
+    master->exchangeWith(*slave, now);
+    EXPECT_EQ(master->getState(), ConnectionState::Session);
+
+    // Cycle 1: Master sends Session, slave responds with Session
     now += 15;
     master->exchangeWith(*slave, now);
     EXPECT_EQ(master->getState(), ConnectionState::Connection);
 
-    // Cycle 1: Master sends Connection, slave responds with Connection
+    // Cycle 2: Master sends Connection, slave responds with Connection
     now += 15;
     master->exchangeWith(*slave, now);
     EXPECT_EQ(master->getState(), ConnectionState::Parameter);
 
-    // Cycle 2: Master sends Parameter, slave responds with Parameter
+    // Cycle 3: Master sends Parameter, slave responds with Parameter
     now += 15;
     master->exchangeWith(*slave, now);
     // Master transitions to Data after receiving Parameter response
     EXPECT_EQ(master->getState(), ConnectionState::Data);
 
-    // Cycle 3: Master sends ProcessData, slave transitions to Data
+    // Cycle 4: Master sends ProcessData, slave transitions to Data
     now += 15;
     master->exchangeWith(*slave, now);
     EXPECT_EQ(slave->getState(), ConnectionState::Data);

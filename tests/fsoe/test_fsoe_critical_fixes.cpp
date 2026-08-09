@@ -527,12 +527,17 @@ TEST_F(FSoEDuplicateFrameTest, DuplicateFrameIsCountedNotProcessed) {
     last_time += 15;
     ASSERT_TRUE(conn->exchangeWith(*slave, last_time));
 
-    // Force the master back to Session state to test handshake duplicate
+    // Force the master back to handshake phase to test duplicate
     // detection.  In Data state, duplicates are expected (constant inputs)
     // and must be processed for watchdog updates.
     conn->resetConnection();
     slave->reset();
-    // Do one exchange to get to Session state and process a Session response.
+    // Two exchanges to reach Connection state:
+    //   1: Reset→Session (master sends Reset, slave responds with Session)
+    //   2: Session→Connection (master sends Session, slave responds with Session)
+    last_time += 15;
+    ASSERT_TRUE(conn->exchangeWith(*slave, last_time));
+    ASSERT_EQ(conn->getState(), ConnectionState::Session);
     last_time += 15;
     ASSERT_TRUE(conn->exchangeWith(*slave, last_time));
     // Master is now in Connection state (processed Session response).
@@ -565,6 +570,9 @@ TEST_F(FSoEDuplicateFrameTest, MultipleDuplicatesAllCounted) {
     // Reset to handshake phase
     conn->resetConnection();
     slave->reset();
+    // Two exchanges to reach Connection state (Reset→Session→Connection)
+    last_time += 15;
+    ASSERT_TRUE(conn->exchangeWith(*slave, last_time));
     last_time += 15;
     ASSERT_TRUE(conn->exchangeWith(*slave, last_time));
     // Master is now in Connection state.
@@ -590,6 +598,9 @@ TEST_F(FSoEDuplicateFrameTest, DifferentFrameIsProcessed) {
     // Reset to handshake phase
     conn->resetConnection();
     slave->reset();
+    // Two exchanges to reach Connection state (Reset→Session→Connection)
+    last_time += 15;
+    ASSERT_TRUE(conn->exchangeWith(*slave, last_time));
     last_time += 15;
     ASSERT_TRUE(conn->exchangeWith(*slave, last_time));
     // Master is in Connection state.
@@ -650,4 +661,185 @@ TEST_F(FSoEDuplicateFrameTest, DataStateDuplicateIsProcessed) {
     // Watchdog timestamp should be updated
     EXPECT_GE(status_after.last_valid_frame_ms, status_before.last_valid_frame_ms);
     EXPECT_FALSE(conn->isFailSafe());
+}
+
+// ============================================================================
+// Fix #6: Master sends Reset command before starting Session handshake
+// ============================================================================
+//
+// Per ETG.5100, the master must first send a Reset command (0x2A) to force
+// the slave back to its initial state before beginning the Session handshake.
+// This is critical when the slave is in a higher state (Connection, Parameter,
+// Data, or Error) from a previous run that didn't shut down cleanly — a
+// Session command alone would be rejected by a slave in Connection/Parameter
+// state.
+
+class FSoEResetFirstTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        MasterConnectionConfig cfg{};
+        cfg.slave_addr = 0x0100;
+        cfg.slave_safety_addr = 0x0100;
+        cfg.connection_id = 0x1234;
+        cfg.master_addr = 0x0100;
+        cfg.watchdog_timeout_ms = 100;
+        cfg.conn_timeout_ms = 2000;
+        cfg.session_timeout_ms = 5000;
+        cfg.input_size = 4;
+        cfg.output_size = 4;
+        cfg.fail_safe_values = {0, 0, 0, 0, 0, 0, 0, 0};
+        conn = std::make_unique<FSoEMasterConnection>(cfg);
+        conn->initialize();
+        conn->startConnection();
+
+        FSoESlaveConfig slave_cfg{};
+        slave_cfg.slaveAddress = 0x0100;
+        slave_cfg.connectionId = 0x1234;
+        slave_cfg.safetyAddress = 0x0100;
+        slave_cfg.safetyLevel = SIL::SIL2;
+        slave_cfg.watchdogTimeoutMs = 200;
+        slave_cfg.connectionTimeoutMs = 2000;
+        slave_cfg.sessionTimeoutMs = 10000;
+        slave_cfg.safeInputSize = 4;
+        slave_cfg.safeOutputSize = 4;
+        slave_cfg.autoRecoveryEnabled = false;
+        slave_cfg.strictCrcCheck = true;
+        slave_cfg.strictSequenceCheck = true;
+        slave = std::make_unique<FSoESlave>(slave_cfg);
+        slave->initialize();
+    }
+
+    std::unique_ptr<FSoEMasterConnection> conn;
+    std::unique_ptr<FSoESlave> slave;
+};
+
+TEST_F(FSoEResetFirstTest, MasterSendsResetCommandFirst) {
+    // After initialize+startConnection, the master is in Reset state.
+    // prepareTxFrame must build a Reset command (0x2A), NOT a Session
+    // command (0x4E).
+    EXPECT_EQ(conn->getState(), ConnectionState::Reset);
+
+    std::array<uint8_t, 64> tx{};
+    const size_t len = conn->prepareTxFrame(tx.data(), tx.size());
+    ASSERT_GT(len, 0u);
+
+    // First byte is the command byte — must be Reset (0x2A)
+    EXPECT_EQ(tx[0], Command::Reset)
+        << "Master must send Reset command (0x2A) first, got 0x"
+        << std::hex << static_cast<int>(tx[0]);
+
+    // Reset frame has no safe data payload: CMD(1) + ConnID(2) = 3 bytes
+    EXPECT_EQ(len, 3u);
+
+    // Master should still be in Reset state (not auto-transitioned to Session)
+    EXPECT_EQ(conn->getState(), ConnectionState::Reset);
+}
+
+TEST_F(FSoEResetFirstTest, MasterTransitionsToSessionAfterSlaveAck) {
+    // Master sends Reset → slave processes it → slave responds with Session
+    // → master transitions to Session.
+    EXPECT_EQ(conn->getState(), ConnectionState::Reset);
+
+    // One full exchange cycle via exchangeWith (synchronous):
+    //   master prepares Reset frame
+    //   slave processes Reset → transitions to Session
+    //   slave prepares Session response
+    //   master processes Session response → transitions to Session
+    uint64_t now = 10;
+    ASSERT_TRUE(conn->exchangeWith(*slave, now));
+
+    // Master should now be in Session state
+    EXPECT_EQ(conn->getState(), ConnectionState::Session);
+}
+
+TEST_F(FSoEResetFirstTest, FullHandshakeCompletesAfterReset) {
+    // The Reset-then-Session sequence should still allow the full handshake
+    // to complete to Data state.
+    uint64_t now = 0;
+    for (int i = 0; i < 30; ++i) {
+        now += 15;
+        ASSERT_TRUE(conn->exchangeWith(*slave, now))
+            << "exchangeWith failed at cycle " << i
+            << " (master state=" << static_cast<int>(conn->getState()) << ")";
+        if (conn->isOperational()) break;
+    }
+
+    EXPECT_TRUE(conn->isOperational())
+        << "Master should reach Data state after Reset→Session→Connection→Parameter→Data";
+}
+
+TEST_F(FSoEResetFirstTest, ResetRecoversSlaveFromDataState) {
+    // Simulate a slave left in Data state from a previous run.
+    // The master's Reset command must bring it back to Session so the
+    // handshake can proceed.
+    uint64_t now = 0;
+    for (int i = 0; i < 30; ++i) {
+        now += 15;
+        ASSERT_TRUE(conn->exchangeWith(*slave, now));
+        if (conn->isOperational() && slave->getState() == ConnectionState::Data) break;
+    }
+    ASSERT_TRUE(conn->isOperational());
+    ASSERT_EQ(slave->getStateName(), std::string("DATA"));
+
+    // Now reset the master connection — it should send Reset first
+    conn->resetConnection();
+    EXPECT_EQ(conn->getState(), ConnectionState::Reset);
+
+    // The slave is still in Data state. The master sends Reset, the slave
+    // (in Data state) accepts it and transitions back to Session.
+    now += 15;
+    ASSERT_TRUE(conn->exchangeWith(*slave, now));
+
+    // Master should have transitioned to Session (slave acknowledged reset)
+    EXPECT_EQ(conn->getState(), ConnectionState::Session);
+
+    // Slave should be back in Session state
+    EXPECT_EQ(slave->getStateName(), std::string("SESSION"));
+
+    // Full handshake should complete again
+    for (int i = 0; i < 30; ++i) {
+        now += 15;
+        ASSERT_TRUE(conn->exchangeWith(*slave, now));
+        if (conn->isOperational()) break;
+    }
+    EXPECT_TRUE(conn->isOperational());
+}
+
+TEST_F(FSoEResetFirstTest, ResetRecoversSlaveFromConnectionState) {
+    // Advance the slave to Connection state, then verify the master's
+    // Reset command brings it back.
+    uint64_t now = 0;
+    // Three exchanges to get the slave to Connection state:
+    //   1: Reset→Session (master), Reset→Session (slave)
+    //   2: Session→Connection (master), Session→Session (slave)
+    //   3: Connection→Parameter (master), Session→Connection (slave)
+    for (int i = 0; i < 3; ++i) {
+        now += 15;
+        ASSERT_TRUE(conn->exchangeWith(*slave, now));
+    }
+    // Slave should be in Connection state now
+    ASSERT_EQ(slave->getStateName(), std::string("CONNECTION"));
+
+    // Reset master and verify it sends Reset to the slave
+    conn->resetConnection();
+    EXPECT_EQ(conn->getState(), ConnectionState::Reset);
+
+    // Master sends Reset → slave in Connection state must accept it
+    now += 15;
+    ASSERT_TRUE(conn->exchangeWith(*slave, now));
+
+    EXPECT_EQ(conn->getState(), ConnectionState::Session);
+    EXPECT_EQ(slave->getStateName(), std::string("SESSION"));
+}
+
+TEST_F(FSoEResetFirstTest, ResetFrameHasCorrectConnectionID) {
+    // The Reset frame must include the configured connection ID so the
+    // slave can validate it (in states where connection ID is checked).
+    std::array<uint8_t, 64> tx{};
+    const size_t len = conn->prepareTxFrame(tx.data(), tx.size());
+    ASSERT_EQ(len, 3u);
+
+    // ConnID is the last 2 bytes (little-endian)
+    const uint16_t conn_id = tx[1] | (tx[2] << 8);
+    EXPECT_EQ(conn_id, 0x1234);
 }

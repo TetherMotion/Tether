@@ -171,15 +171,17 @@ TEST(FSoEMasterConnectionValidationRegression, ShortConnectionResponseRejected) 
     FSoESlave slave(makeSlaveCfg(4, 4));
     slave.initialize();
 
-    // Advance to Connection state (master sends Session, gets Session response,
-    // then sends Connection, gets Connection response → transitions to Parameter)
+    // Advance to Connection state.
     // We need to catch the master while it's still in Connection state.
-    // After 1 exchange: master in Connection, slave in Session
-    // After 2 exchanges: master in Parameter, slave in Connection
-    // So we send a short Connection response after 1 exchange
+    // After 1 exchange: master in Session (Reset→Session), slave in Session
+    // After 2 exchanges: master in Connection, slave in Session
+    // After 3 exchanges: master in Parameter, slave in Connection
+    // So we send a short Connection response after 2 exchanges
     uint64_t now = 0;
     now += 15;
-    conn.exchangeWith(slave, now);
+    conn.exchangeWith(slave, now);  // Reset → Session
+    now += 15;
+    conn.exchangeWith(slave, now);  // Session → Connection
     ASSERT_EQ(conn.getState(), ConnectionState::Connection);
 
     // Send a short Connection response (2 bytes instead of 4)

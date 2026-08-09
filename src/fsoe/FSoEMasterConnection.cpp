@@ -252,9 +252,8 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
     // Process based on current state
     switch (status_.state) {
         case ConnectionState::Reset:
-            // No frames expected in Reset — prepareTxFrame auto-transitions
-            // to Session, so we should never actually be here.
-            return false;
+            handleResetState(cmd, frame_data, data_len);
+            break;
 
         case ConnectionState::Session:
             handleSessionState(cmd, frame_data, data_len);
@@ -302,15 +301,18 @@ size_t FSoEMasterConnection::prepareTxFrame(uint8_t* data, size_t max_len)
 
     if (!initialized_ || !data) return 0;
 
-    // If in Reset, auto-transition to Session to start the protocol
-    if (status_.state == ConnectionState::Reset) {
-        requestSessionReset();
-    }
-
+    // In Reset state, send a Reset command (0x2A) to force the slave back
+    // to its initial state before starting the Session handshake.  The
+    // master stays in Reset until it receives the slave's Session response
+    // (handled in handleResetState), at which point it transitions to
+    // Session and begins the handshake with a fresh session ID.
     size_t len = 0;
 
     switch (status_.state) {
         case ConnectionState::Reset:
+            len = buildResetFrame(data, max_len);
+            break;
+
         case ConnectionState::Session:
             len = buildSessionResetFrame(data, max_len);
             break;
@@ -413,6 +415,25 @@ void FSoEMasterConnection::attemptAutoRecovery(uint64_t current_time_ms)
 // ============================================================================
 // State Handlers
 // ============================================================================
+
+void FSoEMasterConnection::handleResetState(uint8_t cmd, const uint8_t* data, size_t data_len)
+{
+    (void)data;
+    (void)data_len;
+
+    // The master sent a Reset command (0x2A) to force the slave back to its
+    // initial state.  The slave acknowledges by transitioning to Session and
+    // responding with a Session frame (0x4E).  When we see that response,
+    // generate a fresh session ID and transition to Session to begin the
+    // handshake.  A Reset response (0x2A) is also accepted — some slaves
+    // echo the Reset command before switching to Session.
+    if (cmd == Command::Session || cmd == Command::Reset) {
+        requestSessionReset();
+    } else {
+        // Unexpected command in Reset state — ignore and keep retrying
+        handleError(ErrorCode::CommandError);
+    }
+}
 
 void FSoEMasterConnection::handleSessionState(uint8_t cmd, const uint8_t* data, size_t data_len)
 {
@@ -533,6 +554,15 @@ void FSoEMasterConnection::handleFailSafeState(uint8_t cmd, const uint8_t* data,
 // ============================================================================
 // Frame Building
 // ============================================================================
+
+size_t FSoEMasterConnection::buildResetFrame(uint8_t* data, size_t max_len)
+{
+    // Reset frame: CMD(0x2A) + ConnID (no safe data payload).
+    // This is the minimum FSoE frame size (3 bytes).
+    size_t needed = CRC::fsoeFrameSize(0);
+    if (max_len < needed) return 0;
+    return CRC::buildFSoEFrame(data, Command::Reset, nullptr, 0, config_.connection_id);
+}
 
 size_t FSoEMasterConnection::buildSessionResetFrame(uint8_t* data, size_t max_len)
 {
