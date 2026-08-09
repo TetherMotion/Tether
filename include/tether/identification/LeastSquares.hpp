@@ -6,6 +6,8 @@
 
 #include <tether/identification/Common.hpp>
 
+#include <Eigen/Dense>
+
 namespace Identification {
 
 template <size_t N>
@@ -167,47 +169,20 @@ private:
     size_t m_sample_count;
 
     bool solveCholesky(float A[N][N], float b[N], float x[N]) const {
-        float L[N][N];
-        std::memset(L, 0, sizeof(L));
+        // Map row-major C arrays to Eigen fixed-size matrices
+        using RowMajorMatrix = Eigen::Matrix<float, N, N, Eigen::RowMajor>;
+        Eigen::Map<RowMajorMatrix> eigenA(&A[0][0]);
+        Eigen::Map<Eigen::Matrix<float, N, 1>> eigenB(b);
+        Eigen::Map<Eigen::Matrix<float, N, 1>> eigenX(x);
 
-        for (size_t i = 0; i < N; ++i) {
-            for (size_t j = 0; j <= i; ++j) {
-                float sum = 0;
-                if (j == i) {
-                    for (size_t k = 0; k < j; ++k) {
-                        sum += L[j][k] * L[j][k];
-                    }
-                    const float val = A[j][j] - sum;
-                    if (val <= 0) {
-                        return false; // GCOVR_EXCL_LINE
-                    }
-                    L[j][j] = std::sqrt(val);
-                } else {
-                    for (size_t k = 0; k < j; ++k) {
-                        sum += L[i][k] * L[j][k]; // GCOVR_EXCL_LINE
-                    }
-                    L[i][j] = (A[i][j] - sum) / L[j][j];
-                }
-            }
+        // LDLT decomposition (handles symmetric positive-definite and
+        // symmetric semi-definite matrices, equivalent to Cholesky)
+        Eigen::LDLT<RowMajorMatrix> ldlt(eigenA);
+        if (ldlt.info() != Eigen::Success) {
+            return false; // GCOVR_EXCL_LINE
         }
 
-        float y[N];
-        for (size_t i = 0; i < N; ++i) {
-            float sum = 0;
-            for (size_t j = 0; j < i; ++j) {
-                sum += L[i][j] * y[j];
-            }
-            y[i] = (b[i] - sum) / L[i][i];
-        }
-
-        for (int i = static_cast<int>(N) - 1; i >= 0; --i) {
-            float sum = 0;
-            for (size_t j = static_cast<size_t>(i) + 1; j < N; ++j) {
-                sum += L[j][i] * x[j];
-            }
-            x[i] = (y[i] - sum) / L[i][i];
-        }
-
+        eigenX = ldlt.solve(eigenB);
         return true;
     }
 };

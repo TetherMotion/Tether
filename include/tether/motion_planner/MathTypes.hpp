@@ -34,6 +34,8 @@
 #include <optional>
 #include <vector>
 
+#include <Eigen/Dense>
+
 namespace MotionPlanner {
 
 // ============================================================================
@@ -257,6 +259,26 @@ public:
     constexpr const T* data() const noexcept { return data_.data(); }
     constexpr const storage_type& array() const noexcept { return data_; }
 
+    // ========================================================================
+    // Eigen Interoperability (floating-point types only)
+    // ========================================================================
+
+    /// Convert to Eigen vector (floating-point types only)
+    template<typename U = T, typename = std::enable_if_t<std::is_floating_point_v<U>>>
+    Eigen::Matrix<U, N, 1> toEigen() const noexcept {
+        return Eigen::Matrix<U, N, 1>(data_.data());
+    }
+
+    /// Convert from Eigen vector (floating-point types only)
+    template<typename U = T, typename = std::enable_if_t<std::is_floating_point_v<U>>>
+    static Vec fromEigen(const Eigen::Matrix<U, N, 1>& v) noexcept {
+        Vec result;
+        for (size_t i = 0; i < N; ++i) {
+            result.data_[i] = static_cast<T>(v(i));
+        }
+        return result;
+    }
+
     /// Iterator support
     constexpr auto begin() noexcept { return data_.begin(); }
     constexpr auto end() noexcept { return data_.end(); }
@@ -435,7 +457,11 @@ public:
      * @brief Magnitude (Euclidean length)
      */
     T magnitude() const noexcept {
-        return std::sqrt(magnitudeSq());
+        if constexpr (std::is_floating_point_v<T>) {
+            return static_cast<T>(toEigen().norm());
+        } else {
+            return std::sqrt(magnitudeSq());
+        }
     }
 
     // --------------------------------------------------------------------
@@ -456,7 +482,11 @@ public:
         if (mag < static_cast<T>(MathConstants::EPSILON)) {
             return Vec{};
         }
-        return *this / mag;
+        if constexpr (std::is_floating_point_v<T>) {
+            return fromEigen(toEigen().normalized());
+        } else {
+            return *this / mag;
+        }
     }
 
     /**
@@ -467,7 +497,11 @@ public:
     Vec& normalize() noexcept {
         T mag = magnitude();
         if (mag >= static_cast<T>(MathConstants::EPSILON)) {
-            *this /= mag;
+            if constexpr (std::is_floating_point_v<T>) {
+                *this = fromEigen(toEigen().normalized());
+            } else {
+                *this /= mag;
+            }
         }
         return *this;
     }
@@ -495,7 +529,11 @@ public:
      * @brief Distance to another vector
      */
     T distanceTo(const Vec& other) const noexcept {
-        return (*this - other).magnitude();
+        if constexpr (std::is_floating_point_v<T>) {
+            return static_cast<T>((toEigen() - other.toEigen()).norm());
+        } else {
+            return (*this - other).magnitude();
+        }
     }
 
     /**
@@ -520,7 +558,14 @@ public:
         if (otherMagSq < static_cast<T>(MathConstants::EPSILON)) {
             return Vec{};
         }
-        return other * (dot(other) / otherMagSq);
+        if constexpr (std::is_floating_point_v<T>) {
+            auto eigenOther = other.toEigen();
+            auto eigenThis = toEigen();
+            auto proj = eigenOther * (eigenThis.dot(eigenOther) / eigenOther.squaredNorm());
+            return fromEigen(proj);
+        } else {
+            return other * (dot(other) / otherMagSq);
+        }
     }
 
     /**
@@ -541,12 +586,23 @@ public:
      * @brief Angle between this vector and another (radians)
      */
     T angleTo(const Vec& other) const noexcept {
-        T magProduct = magnitude() * other.magnitude();
-        if (magProduct < static_cast<T>(MathConstants::EPSILON)) {
-            return T(0);
+        if constexpr (std::is_floating_point_v<T>) {
+            auto a = toEigen();
+            auto b = other.toEigen();
+            T denom = static_cast<T>(a.norm() * b.norm());
+            if (denom < static_cast<T>(MathConstants::EPSILON)) {
+                return T(0);
+            }
+            T cosAngle = clamp(static_cast<T>(a.dot(b) / denom), T(-1), T(1));
+            return std::acos(cosAngle);
+        } else {
+            T magProduct = magnitude() * other.magnitude();
+            if (magProduct < static_cast<T>(MathConstants::EPSILON)) {
+                return T(0);
+            }
+            T cosAngle = clamp(dot(other) / magProduct, T(-1), T(1));
+            return std::acos(cosAngle);
         }
-        T cosAngle = clamp(dot(other) / magProduct, T(-1), T(1));
-        return std::acos(cosAngle);
     }
 
     /**

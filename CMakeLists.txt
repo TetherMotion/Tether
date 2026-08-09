@@ -108,6 +108,27 @@ elseif(NOT EXISTS "${GLAZE_PATH}/include/glaze/glaze.hpp")
 endif()
 include_directories("${GLAZE_PATH}/include")
 
+# Eigen (header-only linear algebra library, used by kinematics/control/identification)
+# Note: unlike other dependencies, Eigen headers live at the repo root (Eigen/Dense),
+# not under an include/ subdirectory.
+set(EIGEN_PATH "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/eigen")
+if(NOT EXISTS "${EIGEN_PATH}")
+    message(FATAL_ERROR
+        "Git submodule 'eigen' is not initialized.\n"
+        "Please run the following command in the repository root:\n"
+        "  git submodule update --init\n"
+        "Then re-run CMake."
+    )
+elseif(NOT EXISTS "${EIGEN_PATH}/Eigen/src/Core/util/Meta.h")
+    message(FATAL_ERROR
+        "Git submodule 'eigen' appears to be initialized but is empty or incomplete.\n"
+        "Please run the following command in the repository root:\n"
+        "  git submodule update --init\n"
+        "Then re-run CMake."
+    )
+endif()
+include_directories("${EIGEN_PATH}")
+
 # libSLIPspeed (SLIP encoder/decoder used by tether_io_protocol)
 set(LIBSLIPSPEED_PATH "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/libSLIPspeed")
 if(NOT EXISTS "${LIBSLIPSPEED_PATH}")

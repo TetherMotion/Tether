@@ -11,6 +11,8 @@
 #include <cstring>
 #include <vector>
 
+#include <Eigen/Dense>
+
 namespace Control {
 
 // External matrix functions from MatrixUtils.cpp
@@ -207,34 +209,29 @@ ControllerOutput LQIController::computeImpl(const ControllerInput& input) {
     double dt = input.dt;
     
     std::array<double, MAX_OUTPUT_DIM> y{};
-    for (int i = 0; i < m_p; i++) {
-        double sum = 0;
-        for (int j = 0; j < m_n; j++) {
-            sum += m_C[i * m_n + j] * input.state[j];
-        }
-        y[i] = sum;
+    // y = C * x  (C is m_p × m_n, row-major)
+    {
+        Eigen::Map<const Eigen::MatrixXd> C(m_C.data(), m_p, m_n);
+        Eigen::Map<const Eigen::VectorXd> state(input.state.data(), m_n);
+        Eigen::VectorXd yVec = C * state;
+        for (int i = 0; i < m_p; ++i) y[i] = yVec(i);
     }
-    
+
     for (int i = 0; i < m_p; i++) {
         double error = input.reference - y[i];
         m_xi[i] += error * dt;
         m_xi[i] = std::clamp(m_xi[i], m_integralMin, m_integralMax);
     }
-    
+
     std::array<double, MAX_CONTROL_DIM> u{};
-    
-    for (int i = 0; i < m_m; i++) {
-        double sum = 0;
-        for (int j = 0; j < m_n; j++) {
-            sum += m_Kx[i * m_n + j] * input.state[j];
-        }
-        u[i] = -sum;
-    }
-    
-    for (int i = 0; i < m_m; i++) {
-        for (int j = 0; j < m_p; j++) {
-            u[i] -= m_Ki[i * m_p + j] * m_xi[j];
-        }
+    // u = -Kx * x - Ki * xi  (Kx is m_m × m_n, Ki is m_m × m_p, row-major)
+    {
+        Eigen::Map<const Eigen::MatrixXd> Kx(m_Kx.data(), m_m, m_n);
+        Eigen::Map<const Eigen::MatrixXd> Ki(m_Ki.data(), m_m, m_p);
+        Eigen::Map<const Eigen::VectorXd> state(input.state.data(), m_n);
+        Eigen::Map<Eigen::VectorXd> xi(m_xi.data(), m_p);
+        Eigen::VectorXd uVec = -(Kx * state + Ki * xi);
+        for (int i = 0; i < m_m; ++i) u[i] = uVec(i);
     }
     
     output.control = std::clamp(u[0], m_limits.outputMin, m_limits.outputMax);

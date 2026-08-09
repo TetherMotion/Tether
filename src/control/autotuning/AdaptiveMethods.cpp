@@ -9,6 +9,8 @@
 #include <numeric>
 #include <stdexcept>
 
+#include <Eigen/Dense>
+
 namespace Control {
 namespace Autotuning {
 
@@ -376,54 +378,40 @@ void SelfTuningRegulator::updateEstimate(double y, double /*u*/) {
     
     double error = y - yPred;
     
-    // RLS update
-    std::vector<double> Pphi(m_P.size(), 0.0);
-    for (size_t i = 0; i < m_P.size() && i < phi.size(); ++i) {
-        for (size_t j = 0; j < m_P[i].size() && j < phi.size(); ++j) {
-            Pphi[i] += m_P[i][j] * phi[j];
-        }
-    }
-    
-    double phiPphi = 0.0;
-    for (size_t i = 0; i < phi.size() && i < Pphi.size(); ++i) {
-        phiPphi += phi[i] * Pphi[i];
-    }
-    
+    // RLS update using Eigen
+    const size_t n = m_P.size();
+    Eigen::MatrixXd P(n, n);
+    for (size_t i = 0; i < n; ++i)
+        for (size_t j = 0; j < n; ++j)
+            P(i, j) = m_P[i][j];
+
+    Eigen::VectorXd phiVec(n);
+    for (size_t i = 0; i < n; ++i)
+        phiVec(i) = i < phi.size() ? phi[i] : 0.0;
+
+    Eigen::VectorXd Pphi = P * phiVec;
+    double phiPphi = phiVec.dot(Pphi);
     double denom = m_lambda + phiPphi;
     if (std::abs(denom) < 1e-10) return;
-    
-    std::vector<double> K(Pphi.size());
-    for (size_t i = 0; i < Pphi.size(); ++i) {
-        K[i] = Pphi[i] / denom;
-    }
-    
+
+    Eigen::VectorXd K = Pphi / denom;
+
     // Update parameters
-    for (size_t i = 0; i < m_aHat.size() && i < K.size(); ++i) {
-        m_aHat[i] += K[i] * error;
+    for (size_t i = 0; i < m_aHat.size() && i < static_cast<size_t>(K.size()); ++i) {
+        m_aHat[i] += K(i) * error;
     }
     for (size_t i = 0; i < m_bHat.size(); ++i) {
-        if (m_aHat.size() + i < K.size()) {
-            m_bHat[i] += K[m_aHat.size() + i] * error;
+        if (m_aHat.size() + i < static_cast<size_t>(K.size())) {
+            m_bHat[i] += K(m_aHat.size() + i) * error;
         }
     }
-    
-    // Update covariance
-    std::vector<std::vector<double>> KphiP(m_P.size(), std::vector<double>(m_P.size(), 0.0));
-    for (size_t i = 0; i < m_P.size() && i < K.size(); ++i) {
-        for (size_t j = 0; j < m_P.size() && j < phi.size(); ++j) {
-            for (size_t k = 0; k < m_P.size(); ++k) {
-                if (j < m_P[k].size()) {
-                    KphiP[i][k] += K[i] * phi[j] * m_P[j][k];
-                }
-            }
-        }
-    }
-    
-    for (size_t i = 0; i < m_P.size(); ++i) {
-        for (size_t j = 0; j < m_P[i].size(); ++j) {
-            m_P[i][j] = (m_P[i][j] - KphiP[i][j]) / m_lambda;
-        }
-    }
+
+    // Update covariance: P = (P - K * phi^T * P) / lambda
+    P = (P - K * phiVec.transpose() * P) / m_lambda;
+
+    for (size_t i = 0; i < n; ++i)
+        for (size_t j = 0; j < n; ++j)
+            m_P[i][j] = P(i, j);
 }
 
 void SelfTuningRegulator::updateController() {
@@ -871,46 +859,64 @@ void NeuralNetworkTuning::trainBatch(const std::vector<std::vector<double>>& inp
         for (size_t sample = 0; sample < inputs.size() && sample < targets.size(); ++sample) {
             std::vector<std::vector<double>> activations;
             activations.push_back(inputs[sample]);
-            
+
             std::vector<double> current = inputs[sample];
             for (size_t layer = 0; layer < m_W.size(); ++layer) {
-                std::vector<double> next(m_W[layer].size());
-                for (size_t i = 0; i < m_W[layer].size(); ++i) {
-                    double sum = m_b[layer][i];
-                    for (size_t j = 0; j < current.size() && j < m_W[layer][i].size(); ++j) {
-                        sum += m_W[layer][i][j] * current[j];
+                const int rows = static_cast<int>(m_W[layer].size());
+                const int cols = static_cast<int>(current.size());
+                Eigen::VectorXd currVec(cols);
+                for (int j = 0; j < cols; ++j) currVec(j) = current[j];
+
+                // Build weight matrix and bias vector
+                Eigen::MatrixXd W(rows, cols);
+                Eigen::VectorXd b(rows);
+                for (int i = 0; i < rows; ++i) {
+                    b(i) = m_b[layer][i];
+                    for (int j = 0; j < cols && j < static_cast<int>(m_W[layer][i].size()); ++j) {
+                        W(i, j) = m_W[layer][i][j];
                     }
-                    next[i] = activate(sum);
                 }
+
+                Eigen::VectorXd nextVec = W * currVec + b;
+                std::vector<double> next(rows);
+                for (int i = 0; i < rows; ++i) next[i] = activate(nextVec(i));
                 activations.push_back(next);
                 current = next;
             }
-            
+
             std::vector<double> delta(current.size());
             for (size_t i = 0; i < current.size() && i < targets[sample].size(); ++i) {
                 double error = targets[sample][i] - current[i];
                 delta[i] = error * activateDerivative(current[i]);
             }
-            
+
             for (int layer = static_cast<int>(m_W.size()) - 1; layer >= 0; --layer) {
                 const auto& prevAct = activations[layer];
-                
+
                 for (size_t i = 0; i < m_W[layer].size() && i < delta.size(); ++i) {
                     for (size_t j = 0; j < m_W[layer][i].size() && j < prevAct.size(); ++j) {
                         m_W[layer][i][j] += m_learningRate * delta[i] * prevAct[j];
                     }
                     m_b[layer][i] += m_learningRate * delta[i];
                 }
-                
+
                 if (layer > 0) {
-                    std::vector<double> newDelta(m_W[layer][0].size(), 0.0);
-                    for (size_t j = 0; j < newDelta.size(); ++j) {
-                        for (size_t i = 0; i < m_W[layer].size() && i < delta.size(); ++i) {
-                            if (j < m_W[layer][i].size()) {
-                                newDelta[j] += m_W[layer][i][j] * delta[i];
-                            }
-                        }
-                        newDelta[j] *= activateDerivative(prevAct[j]);
+                    // Backpropagate delta: newDelta = W^T * delta (element-wise * activateDerivative)
+                    const int rows = static_cast<int>(m_W[layer].size());
+                    const int cols = static_cast<int>(m_W[layer][0].size());
+                    Eigen::MatrixXd W(rows, cols);
+                    for (int i = 0; i < rows; ++i)
+                        for (int j = 0; j < cols; ++j)
+                            W(i, j) = m_W[layer][i][j];
+
+                    Eigen::VectorXd deltaVec(rows);
+                    for (int i = 0; i < rows && i < static_cast<int>(delta.size()); ++i)
+                        deltaVec(i) = delta[i];
+
+                    Eigen::VectorXd newDeltaVec = W.transpose() * deltaVec;
+                    std::vector<double> newDelta(cols);
+                    for (int j = 0; j < cols; ++j) {
+                        newDelta[j] = newDeltaVec(j) * activateDerivative(prevAct[j]);
                     }
                     delta = newDelta;
                 }
@@ -921,24 +927,34 @@ void NeuralNetworkTuning::trainBatch(const std::vector<std::vector<double>>& inp
 
 std::vector<double> NeuralNetworkTuning::forward(const std::vector<double>& input) {
     std::vector<double> current = input;
-    
+
     for (size_t layer = 0; layer < m_W.size(); ++layer) {
-        std::vector<double> next(m_W[layer].size());
-        for (size_t i = 0; i < m_W[layer].size(); ++i) {
-            double sum = m_b[layer][i];
-            for (size_t j = 0; j < current.size() && j < m_W[layer][i].size(); ++j) {
-                sum += m_W[layer][i][j] * current[j];
+        const int rows = static_cast<int>(m_W[layer].size());
+        const int cols = static_cast<int>(current.size());
+        Eigen::VectorXd currVec(cols);
+        for (int j = 0; j < cols; ++j) currVec(j) = current[j];
+
+        Eigen::MatrixXd W(rows, cols);
+        Eigen::VectorXd b(rows);
+        for (int i = 0; i < rows; ++i) {
+            b(i) = m_b[layer][i];
+            for (int j = 0; j < cols && j < static_cast<int>(m_W[layer][i].size()); ++j) {
+                W(i, j) = m_W[layer][i][j];
             }
-            
+        }
+
+        Eigen::VectorXd nextVec = W * currVec + b;
+        std::vector<double> next(rows);
+        for (int i = 0; i < rows; ++i) {
             if (layer == m_W.size() - 1) {
-                next[i] = 10.0 / (1.0 + std::exp(-sum));
+                next[i] = 10.0 / (1.0 + std::exp(-nextVec(i)));
             } else {
-                next[i] = activate(sum);
+                next[i] = activate(nextVec(i));
             }
         }
         current = next;
     }
-    
+
     return current;
 }
 
