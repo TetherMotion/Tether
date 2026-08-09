@@ -67,6 +67,16 @@ static constexpr uint8_t  kSafetyModuleInput2Subindex   = 0x02;
 static constexpr uint16_t kGeneralSafetyIndex    = 0x2620;
 static constexpr uint8_t  kSafeFieldbusSubindex  = 0x02;
 
+/// Object 0xF980 "FSoE safety address" — subindex 0x01.
+/// Per Synapticon documentation, this object contains the safety address
+/// configured on the drive.  The master must use this value as the FSoE
+/// connection ID so that master and slave agree on the connection
+/// identifier.  Reading it before starting the FSoE handshake avoids
+/// ConnectionIDError failures caused by a mismatch between the
+/// command-line --connection-id default and the drive's configured value.
+static constexpr uint16_t kFSoESafetyAddressIndex   = 0xF980;
+static constexpr uint8_t  kFSoESafetyAddressSubindex = 0x01;
+
 /// Result of reading the safety module input diagnostics (0x2611) and the
 /// FSoE active indicator (0x2620:2 "Safe fieldbus").
 struct SafetyModuleState {
@@ -165,6 +175,25 @@ inline SafetyModuleState readSafetyModuleState(::EtherCAT::Slave& slave) {
     // This ensures we never falsely report "motion allowed" when we
     // couldn't actually read the safety state.
     return state;
+}
+
+/**
+ * @brief Read the FSoE safety address (0xF980:1) from a SOMANET drive.
+ *
+ * Object 0xF980:1 contains the safety address configured on the drive.
+ * The master must use this value as the FSoE connection ID so that master
+ * and slave agree on the connection identifier.
+ *
+ * @param slave  Reference to the EtherCAT slave (SOMANET drive).
+ * @param[out] safety_address  On success, the value of 0xF980:1.
+ * @return SlaveError::Ok on success, the SDO error code otherwise.
+ *         On failure, @p safety_address is left unmodified.
+ */
+inline ::EtherCAT::SlaveError readFSoESafetyAddress(
+        ::EtherCAT::Slave& slave, uint16_t& safety_address) {
+    return slave.sdoReadU16(kFSoESafetyAddressIndex,
+                            kFSoESafetyAddressSubindex,
+                            safety_address);
 }
 
 } // namespace Synapticon
