@@ -9,6 +9,8 @@
 #include <cmath>
 #include <chrono>
 
+#include <Eigen/Dense>
+
 namespace Control {
 namespace Autotuning {
 
@@ -1033,43 +1035,53 @@ std::pair<double, double> BayesianOptimization::predict(const ParameterVector& x
     if (m_X.empty()) {
         return {0.0, 1.0};
     }
-    
-    size_t n = m_X.size();
-    
-    // Compute kernel vector k(x, X)
-    std::vector<double> kx(n);
-    for (size_t i = 0; i < n; ++i) {
-        kx[i] = kernel(x, m_X[i]);
-    }
-    
-    // Compute K matrix (simplified - should use Cholesky)
-    std::vector<std::vector<double>> K(n, std::vector<double>(n));
+
+    const size_t n = m_X.size();
+
+    // Build kernel matrix K (n×n) with noise on diagonal
+    Eigen::MatrixXd K(n, n);
     for (size_t i = 0; i < n; ++i) {
         for (size_t j = 0; j < n; ++j) {
-            K[i][j] = kernel(m_X[i], m_X[j]);
-            if (i == j) K[i][j] += m_noise;
+            K(i, j) = kernel(m_X[i], m_X[j]);
+            if (i == j) K(i, j) += m_noise;
         }
     }
-    
-    // Simple inversion for small matrices (should use proper linear algebra)
-    // Mean: mu = k^T * K^-1 * y
-    // Variance: sigma^2 = k(x,x) - k^T * K^-1 * k
-    
-    // Simplified: use mean of nearby points
-    double sumWeights = 0;
-    double mean = 0;
+
+    // Build kernel vector k(x, X) and observation vector y
+    Eigen::VectorXd kx(n);
+    Eigen::VectorXd y(n);
     for (size_t i = 0; i < n; ++i) {
-        mean += kx[i] * m_y[i];
-        sumWeights += kx[i];
+        kx(i) = kernel(x, m_X[i]);
+        y(i) = m_y[i];
     }
-    if (sumWeights > 0) mean /= sumWeights;
-    
-    double variance = kernel(x, x);
-    for (size_t i = 0; i < n; ++i) {
-        variance -= kx[i] * kx[i] / (K[i][i] + 1e-10);
+
+    // Cholesky decomposition of K (positive-definite due to noise)
+    Eigen::LLT<Eigen::MatrixXd> chol(K);
+    if (chol.info() != Eigen::Success) {
+        // Fallback to simplified prediction if K is not PD
+        double sumWeights = 0;
+        double mean = 0;
+        for (size_t i = 0; i < n; ++i) {
+            mean += kx(i) * y(i);
+            sumWeights += kx(i);
+        }
+        if (sumWeights > 0) mean /= sumWeights;
+        double variance = std::max(0.0, kernel(x, x));
+        return {mean, std::sqrt(variance)};
     }
+
+    // Solve K * alpha = y  =>  alpha = K^-1 * y via Cholesky
+    Eigen::VectorXd alpha = chol.solve(y);
+
+    // GP posterior mean: mu = k^T * alpha
+    double mean = kx.dot(alpha);
+
+    // GP posterior variance: sigma^2 = k(x,x) - k^T * K^-1 * k
+    // Solve K * v = kx  =>  v = K^-1 * kx
+    Eigen::VectorXd v = chol.solve(kx);
+    double variance = kernel(x, x) - kx.dot(v);
     variance = std::max(0.0, variance);
-    
+
     return {mean, std::sqrt(variance)};
 }
 
