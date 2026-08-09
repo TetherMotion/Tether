@@ -8,6 +8,8 @@
 #include <cassert>
 #include <complex>
 
+#include <Eigen/Dense>
+
 namespace Destabilizer {
 
 // ---------------------------------------------------------------------------
@@ -15,23 +17,22 @@ namespace Destabilizer {
 // ---------------------------------------------------------------------------
 
 double vectorNorm(const std::vector<double>& v) {
-    double sum = 0.0;
-    for (double x : v) sum += x * x;
-    return std::sqrt(sum);
+    if (v.empty()) return 0.0;
+    return Eigen::Map<const Eigen::VectorXd>(v.data(), v.size()).norm();
 }
 
 double vectorNormInf(const std::vector<double>& v) {
-    double m = 0.0;
-    for (double x : v) m = std::max(m, std::abs(x));
-    return m;
+    if (v.empty()) return 0.0;
+    return Eigen::Map<const Eigen::VectorXd>(v.data(), v.size()).cwiseAbs().maxCoeff();
 }
 
 std::vector<double> vectorDiff(const std::vector<double>& a,
                                 const std::vector<double>& b) {
     size_t n = std::min(a.size(), b.size());
-    std::vector<double> result(n);
-    for (size_t i = 0; i < n; ++i) result[i] = a[i] - b[i];
-    return result;
+    if (n == 0) return {};
+    Eigen::VectorXd diff = Eigen::Map<const Eigen::VectorXd>(a.data(), n)
+                         - Eigen::Map<const Eigen::VectorXd>(b.data(), n);
+    return std::vector<double>(diff.data(), diff.data() + n);
 }
 
 std::pair<double, double> linearFit(const std::vector<double>& x,
