@@ -320,6 +320,9 @@ bool FSoESlave::processRxFrame(const uint8_t* data, size_t len) {
                 processData(data, len);
             } else if (command == Command::FailSafeData) {
                 processData(data, len);
+            } else if (command == Command::Reset) {
+                // Master requested reset — go back to Session
+                processSessionReset(data, len);
             } else {
                 return false;
             }
@@ -334,6 +337,9 @@ bool FSoESlave::processRxFrame(const uint8_t* data, size_t len) {
                 processData(data, len);
             } else if (command == Command::FailSafeData) {
                 processData(data, len);
+            } else if (command == Command::Reset) {
+                // Master requested reset — go back to Session
+                processSessionReset(data, len);
             } else {
                 return false;
             }

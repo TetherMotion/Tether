@@ -205,8 +205,8 @@ TEST(FSoEFrameEvents, TxEventFiresOnPrepareTxFrame) {
     ASSERT_TRUE(captured);
     EXPECT_EQ(captured->size(), len);
     EXPECT_EQ(captured->front(), buf[0]);
-    // First byte is the command; in Session state it is the Session command.
-    EXPECT_EQ((*captured)[0], Command::Session);
+    // First byte is the command; in Reset state it is the Reset command.
+    EXPECT_EQ((*captured)[0], Command::Reset);
 }
 
 TEST(FSoEFrameEvents, RxEventFiresOnProcessRxFrame) {
@@ -214,16 +214,16 @@ TEST(FSoEFrameEvents, RxEventFiresOnProcessRxFrame) {
     ASSERT_TRUE(conn.initialize());
     conn.startConnection();
 
-    // Transition to Session state by building a TX frame (auto-transitions
-    // out of Reset).
+    // Master is in Reset state.  Build a TX frame (sends Reset command).
     uint8_t buf[64] = {};
     ASSERT_GT(conn.prepareTxFrame(buf, sizeof(buf)), 0u);
-    ASSERT_EQ(conn.getState(), ConnectionState::Session);
+    ASSERT_EQ(conn.getState(), ConnectionState::Reset);
 
     std::shared_ptr<const std::vector<uint8_t>> captured;
     conn.rxFrameEvents().addListener([&](auto d) { captured = d; });
 
-    // Build a Session response frame (2-byte session id payload).
+    // Build a Session response frame (slave acknowledging the Reset).
+    // The master in Reset state accepts this and transitions to Session.
     uint8_t payload[] = {0x34, 0x12};
     uint8_t frame[64];
     const size_t frame_len = CRC::buildFSoEFrame(frame, Command::Session,
@@ -348,8 +348,9 @@ TEST(FSoEFrameEvents, TxAndRxAreIndependent) {
 }
 
 TEST(FSoEFrameEvents, FullHandshakeEmitsFrames) {
-    // Drive the master through the full Session→Connection→Parameter→Data
-    // handshake with a real FSoESlave and count the emitted TX/RX frames.
+    // Drive the master through the full
+    // Reset→Session→Connection→Parameter→Data handshake with a real
+    // FSoESlave and count the emitted TX/RX frames.
     FSoEMasterConnection conn(makeMasterCfg(2, 2));
     ASSERT_TRUE(conn.initialize());
     conn.startConnection();
@@ -363,15 +364,19 @@ TEST(FSoEFrameEvents, FullHandshakeEmitsFrames) {
     conn.rxFrameEvents().addListener([&](auto) { rx_calls++; });
 
     uint64_t now = 0;
-    // Session
+    // Reset → Session (master sends Reset, slave responds with Session)
+    now += 15;
+    ASSERT_TRUE(conn.exchangeWith(slave, now));
+    ASSERT_EQ(conn.getState(), ConnectionState::Session);
+    // Session → Connection
     now += 15;
     ASSERT_TRUE(conn.exchangeWith(slave, now));
     ASSERT_EQ(conn.getState(), ConnectionState::Connection);
-    // Connection
+    // Connection → Parameter
     now += 15;
     ASSERT_TRUE(conn.exchangeWith(slave, now));
     ASSERT_EQ(conn.getState(), ConnectionState::Parameter);
-    // Parameter
+    // Parameter → Data
     now += 15;
     ASSERT_TRUE(conn.exchangeWith(slave, now));
     ASSERT_EQ(conn.getState(), ConnectionState::Data);
@@ -380,9 +385,9 @@ TEST(FSoEFrameEvents, FullHandshakeEmitsFrames) {
     ASSERT_TRUE(conn.exchangeWith(slave, now));
     ASSERT_EQ(conn.getState(), ConnectionState::Data);
 
-    // 4 exchanges => 4 TX frames and 4 RX frames.
-    EXPECT_EQ(tx_calls, 4);
-    EXPECT_EQ(rx_calls, 4);
-    EXPECT_EQ(conn.getStats().frames_sent, 4u);
-    EXPECT_EQ(conn.getStats().frames_received, 4u);
+    // 5 exchanges => 5 TX frames and 5 RX frames.
+    EXPECT_EQ(tx_calls, 5);
+    EXPECT_EQ(rx_calls, 5);
+    EXPECT_EQ(conn.getStats().frames_sent, 5u);
+    EXPECT_EQ(conn.getStats().frames_received, 5u);
 }

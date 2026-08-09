@@ -376,10 +376,10 @@ TEST(FSoESlaveParameterValidationTest, ShortParameterFrameRejected) {
     conn.initialize();
     conn.startConnection();
 
-    // Advance to Connection state (2 exchanges: Session→Connection→Parameter)
-    // After 2 exchanges, slave is in Connection state
+    // Advance to Connection state (3 exchanges: Reset→Session→Connection→Parameter)
+    // After 3 exchanges, slave is in Connection state
     uint64_t now = 0;
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < 3; ++i) {
         now += 15;
         conn.exchangeWith(slave, now);
     }
@@ -408,7 +408,7 @@ TEST(FSoESlaveParameterValidationTest, FullParameterFrameAccepted) {
 
     // Advance to Connection state
     uint64_t now = 0;
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < 3; ++i) {
         now += 15;
         conn.exchangeWith(slave, now);
     }
@@ -510,9 +510,9 @@ TEST(FSoESlaveFailSafeDataAcceptanceTest, FailSafeDataInConnectionState) {
     conn.initialize();
     conn.startConnection();
 
-    // Advance to Connection state (2 exchanges)
+    // Advance to Connection state (3 exchanges: Reset→Session→Connection)
     uint64_t now = 0;
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < 3; ++i) {
         now += 15;
         conn.exchangeWith(slave, now);
     }
@@ -616,9 +616,9 @@ TEST(FSoESlaveConnIdValidationTest, WrongConnIdRejectedInConnectionState) {
     conn.initialize();
     conn.startConnection();
 
-    // Advance to Connection state (2 exchanges)
+    // Advance to Connection state (3 exchanges: Reset→Session→Connection)
     uint64_t now = 0;
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < 3; ++i) {
         now += 15;
         conn.exchangeWith(slave, now);
     }
