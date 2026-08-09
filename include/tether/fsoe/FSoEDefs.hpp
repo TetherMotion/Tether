@@ -190,7 +190,7 @@ namespace ConfigParam {
  * @param init_crc Initial CRC value (0x0000 for first call)
  * @return CRC-16 value
  */
-inline uint16_t calculateCRC16(const uint8_t* data, size_t len, uint16_t init_crc = CRC::kInitValue)
+inline uint16_t calculateCRC16(const uint8_t* data, size_t len, uint16_t init_crc = 0)
 {
     return CRC::calculate(data, len, init_crc);
 }
@@ -200,7 +200,11 @@ inline uint16_t calculateCRC16(const uint8_t* data, size_t len, uint16_t init_cr
  */
 inline bool verifyCRC16(const uint8_t* data, size_t len)
 {
-    return CRC::verify(data, len);
+    if (len < 2) return false;
+    uint16_t calculated = CRC::calculate(data, len - 2);
+    uint16_t stored = static_cast<uint16_t>(data[len - 2]) |
+                      (static_cast<uint16_t>(data[len - 1]) << 8);
+    return calculated == stored;
 }
 
 /**

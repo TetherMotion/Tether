@@ -156,10 +156,13 @@ protected:
 
 TEST_F(FSoESlaveShortFrameTest, ShortProcessDataRejectedWithError) {
     // Send ProcessData with only 2 bytes (safeOutputSize=4)
+    // Use the slave's current RX CRC state (non-zero after advanceToData).
     uint8_t payload[] = {0x01, 0x02};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::ProcessData,
-                                            payload, 2, 0x1234);
+                                            payload, 2, 0x1234,
+                                            slave->getRxLastCrc0(),
+                                            slave->getRxSeqNo());
 
     auto stats_before = slave->getStats();
     bool ok = slave->processRxFrame(frame, frame_len);
@@ -175,7 +178,9 @@ TEST_F(FSoESlaveShortFrameTest, FullProcessDataAccepted) {
     uint8_t payload[] = {0x01, 0x02, 0x03, 0x04};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::ProcessData,
-                                            payload, 4, 0x1234);
+                                            payload, 4, 0x1234,
+                                            slave->getRxLastCrc0(),
+                                            slave->getRxSeqNo());
 
     auto stats_before = slave->getStats();
     bool ok = slave->processRxFrame(frame, frame_len);
@@ -263,11 +268,14 @@ TEST(FSoESlaveFailSafeSafetyTest, ProcessDataIgnoredInFailSafe) {
     uint8_t fs_outputs[4] = {0};
     slave.getSafeOutputs(fs_outputs, 4);
 
-    // Send ProcessData directly to slave
+    // Send ProcessData directly to slave.
+    // Use the slave's current RX CRC state (non-zero after advanceToData).
     uint8_t payload[] = {0x11, 0x22, 0x33, 0x44};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::ProcessData,
-                                            payload, 4, 0x1234);
+                                            payload, 4, 0x1234,
+                                            slave.getRxLastCrc0(),
+                                            slave.getRxSeqNo());
     slave.processRxFrame(frame, frame_len);
 
     // Fail-safe outputs should be preserved, not overwritten
@@ -300,11 +308,14 @@ TEST(FSoESlaveFailSafeSafetyTest, FailSafeClearedByReset) {
     slave.triggerFailSafe(ErrorCode::ApplicationError);
     EXPECT_TRUE(slave.isFailSafe());
 
-    // Send Reset command
+    // Send Reset command.
+    // Use the slave's current RX CRC state (non-zero after advanceToData).
     uint8_t payload[] = {0x01, 0x00};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::Reset,
-                                            payload, 2, 0x1234);
+                                            payload, 2, 0x1234,
+                                            slave.getRxLastCrc0(),
+                                            slave.getRxSeqNo());
     slave.processRxFrame(frame, frame_len);
 
     EXPECT_FALSE(slave.isFailSafe());
@@ -329,9 +340,12 @@ TEST(FSoESlaveConnectionValidationTest, ShortConnectionFrameRejected) {
     ASSERT_EQ(slave.getState(), ConnectionState::Session);
 
     // Send Connection frame with only 2 bytes (should be 4)
+    // Use the slave's current RX CRC state (updated after Session frame).
     uint8_t short_payload[] = {0x00, 0x01};
     frame_len = CRC::buildFSoEFrame(frame, Command::Connection,
-                                     short_payload, 2, 0x1234);
+                                     short_payload, 2, 0x1234,
+                                     slave.getRxLastCrc0(),
+                                     slave.getRxSeqNo());
     auto stats_before = slave.getStats();
     bool ok = slave.processRxFrame(frame, frame_len);
     auto stats_after = slave.getStats();
@@ -354,9 +368,12 @@ TEST(FSoESlaveConnectionValidationTest, FullConnectionFrameAccepted) {
     slave.processRxFrame(frame, frame_len);
 
     // Send full 4-byte Connection frame
+    // Use the slave's current RX CRC state (updated after Session frame).
     uint8_t conn_payload[] = {0x00, 0x01, 0x00, 0x00};  // safety addr + param CRC
     frame_len = CRC::buildFSoEFrame(frame, Command::Connection,
-                                     conn_payload, 4, 0x1234);
+                                     conn_payload, 4, 0x1234,
+                                     slave.getRxLastCrc0(),
+                                     slave.getRxSeqNo());
     bool ok = slave.processRxFrame(frame, frame_len);
     EXPECT_TRUE(ok);
     EXPECT_EQ(slave.getState(), ConnectionState::Connection);
@@ -386,10 +403,13 @@ TEST(FSoESlaveParameterValidationTest, ShortParameterFrameRejected) {
     ASSERT_EQ(slave.getState(), ConnectionState::Connection);
 
     // Send Parameter frame with only 3 bytes (should be 6)
+    // Use the slave's current RX CRC state (non-zero after 3 exchanges).
     uint8_t short_payload[] = {0x64, 0x00, 0x02};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::Parameter,
-                                            short_payload, 3, 0x1234);
+                                            short_payload, 3, 0x1234,
+                                            slave.getRxLastCrc0(),
+                                            slave.getRxSeqNo());
     slave.processRxFrame(frame, frame_len);
 
     // Should enter fail-safe with DataLengthError
@@ -415,10 +435,13 @@ TEST(FSoESlaveParameterValidationTest, FullParameterFrameAccepted) {
     ASSERT_EQ(slave.getState(), ConnectionState::Connection);
 
     // Send full 6-byte Parameter frame
+    // Use the slave's current RX CRC state (non-zero after 3 exchanges).
     uint8_t param_payload[] = {0xC8, 0x00, 0x02, 0x04, 0x04, 0x00};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::Parameter,
-                                            param_payload, 6, 0x1234);
+                                            param_payload, 6, 0x1234,
+                                            slave.getRxLastCrc0(),
+                                            slave.getRxSeqNo());
     bool ok = slave.processRxFrame(frame, frame_len);
     EXPECT_TRUE(ok);
     EXPECT_EQ(slave.getState(), ConnectionState::Parameter);
@@ -518,11 +541,14 @@ TEST(FSoESlaveFailSafeDataAcceptanceTest, FailSafeDataInConnectionState) {
     }
     ASSERT_EQ(slave.getState(), ConnectionState::Connection);
 
-    // Send FailSafeData
+    // Send FailSafeData.
+    // Use the slave's current RX CRC state (non-zero after 3 exchanges).
     uint8_t payload[] = {0xDE, 0xAD, 0xBE, 0xEF, 0x03, 0x00};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::FailSafeData,
-                                            payload, 6, 0x1234);
+                                            payload, 6, 0x1234,
+                                            slave.getRxLastCrc0(),
+                                            slave.getRxSeqNo());
     bool ok = slave.processRxFrame(frame, frame_len);
     EXPECT_TRUE(ok);
     EXPECT_TRUE(slave.isFailSafe());
@@ -540,11 +566,14 @@ TEST(FSoESlaveFailSafeDataAcceptanceTest, FailSafeDataInDataState) {
     uint64_t now = 0;
     advanceToData(conn, slave, now);
 
-    // Send FailSafeData — the slave processes it and enters fail-safe
+    // Send FailSafeData — the slave processes it and enters fail-safe.
+    // Use the slave's current RX CRC state (non-zero after advanceToData).
     uint8_t payload[] = {0xDE, 0xAD, 0xBE, 0xEF, 0x02, 0x00};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::FailSafeData,
-                                            payload, 6, 0x1234);
+                                            payload, 6, 0x1234,
+                                            slave.getRxLastCrc0(),
+                                            slave.getRxSeqNo());
     bool ok = slave.processRxFrame(frame, frame_len);
     EXPECT_TRUE(ok);
     EXPECT_TRUE(slave.isFailSafe());
@@ -624,11 +653,14 @@ TEST(FSoESlaveConnIdValidationTest, WrongConnIdRejectedInConnectionState) {
     }
     ASSERT_EQ(slave.getState(), ConnectionState::Connection);
 
-    // Send a frame with wrong connection ID
+    // Send a frame with wrong connection ID.
+    // Use the slave's current RX CRC state (non-zero after 3 exchanges).
     uint8_t payload[] = {0x00, 0x01, 0x00, 0x00};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::Connection,
-                                            payload, 4, 0xFFFF);  // Wrong conn_id
+                                            payload, 4, 0xFFFF,  // Wrong conn_id
+                                            slave.getRxLastCrc0(),
+                                            slave.getRxSeqNo());
     bool ok = slave.processRxFrame(frame, frame_len);
 
     // Should be rejected

@@ -67,11 +67,17 @@ TEST(FSoEDefsTest, CalculateFSoECRC_EmptyData) {
     EXPECT_EQ(crc, 0x0000);
 }
 
-TEST(FSoEDefsTest, VerifyFSoECRC) {
+TEST(FSoEDefsTest, VerifyCRC16) {
     uint8_t data[] = {0x01, 0x02, 0x03, 0x04};
     uint16_t crc = CRC::calculate(data, sizeof(data));
-    EXPECT_TRUE(CRC::verifyFSoECRC(data, sizeof(data), crc));
-    EXPECT_FALSE(CRC::verifyFSoECRC(data, sizeof(data), crc + 1));
+    // verifyCRC16 checks data[len-2..len-1] against calculate(data, len-2)
+    uint8_t with_crc[6];
+    std::memcpy(with_crc, data, 4);
+    with_crc[4] = crc & 0xFF;
+    with_crc[5] = (crc >> 8) & 0xFF;
+    EXPECT_TRUE(verifyCRC16(with_crc, 6));
+    with_crc[5] ^= 0xFF;
+    EXPECT_FALSE(verifyCRC16(with_crc, 6));
 }
 
 TEST(FSoEDefsTest, ConnectionStatsDefaults) {

@@ -166,10 +166,13 @@ TEST_F(FSoESequenceNonStrictTest, FrameAcceptedWithoutSequenceField) {
 
     // Build a valid ProcessData frame with new format:
     //   [CMD] [Data0(2B)] [CRC0(2B)] [ConnID(2B)]
+    // Use the slave's current RX CRC state (non-zero after advanceToData).
     uint8_t data[2] = {0xAA, 0x55};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::ProcessData,
-                                            data, 2, 0x5678);
+                                            data, 2, 0x5678,
+                                            slave->getRxLastCrc0(),
+                                            slave->getRxSeqNo());
     EXPECT_GT(frame_len, 0);
 
     // Slave should accept the frame (no sequence check needed)
@@ -374,15 +377,24 @@ protected:
 TEST_F(FSoEStaleTxPDOTest, AllZeroTxPDODoesNotTriggerFailSafe) {
     // Simulate the first few PDO cycles where the drive hasn't populated
     // the TxPDO buffer yet.  Use 31 bytes (the real FSoE TxPDO size for
-    // Synapticon) — this forms a valid FSoE frame structure when all
-    // zeros, which passes CRC trivially but has cmd=0x00 and conn_id=0.
+    // Synapticon).  Build a frame with cmd=0x00 (invalid command) and
+    // valid CRCs so the frame passes CRC verification but is silently
+    // skipped by the command check — the master must not enter fail-safe.
     constexpr size_t kTxPdoSize = 31;
     std::vector<uint8_t> rx_pdo(64, 0);
-    std::vector<uint8_t> tx_pdo(kTxPdoSize, 0);  // all zeros — no slave response yet
+    std::vector<uint8_t> tx_pdo(kTxPdoSize, 0);
 
     uint64_t now = 0;
     for (int i = 0; i < 10; ++i) {
         now += 1;  // 1 ms per cycle
+
+        // Build a stale-response frame with invalid command (0x00) but
+        // correct FSoE CRCs.  31-byte frame → 14 data bytes.
+        std::vector<uint8_t> stale_data(14, 0);
+        CRC::buildFSoEFrame(tx_pdo.data(), 0x00,
+                            stale_data.data(), 14, 0,
+                            conn->getRxLastCrc0(), conn->getRxSeqNo());
+
         // exchangeViaPDO should return false (frame skipped or no valid
         // response) but NOT trigger fail-safe or any error.
         const bool ok = conn->exchangeViaPDO(
@@ -433,10 +445,15 @@ TEST_F(FSoEStaleTxPDOTest, MasterRecoversWhenSlaveResponds) {
 
     uint64_t now = 0;
 
-    // First 3 cycles: stale TxPDO (all zeros) via exchangeViaPDO.
-    // The master should not enter fail-safe.
+    // First 3 cycles: stale TxPDO via exchangeViaPDO.
+    // Build frames with cmd=0x00 (invalid command) and valid CRCs so
+    // they pass CRC but are silently skipped — no fail-safe.
     for (int i = 0; i < 3; ++i) {
         now += 1;
+        std::vector<uint8_t> stale_data(14, 0);
+        CRC::buildFSoEFrame(tx_pdo.data(), 0x00,
+                            stale_data.data(), 14, 0,
+                            conn->getRxLastCrc0(), conn->getRxSeqNo());
         conn->exchangeViaPDO(rx_pdo.data(), rx_pdo.size(),
                              tx_pdo.data(), tx_pdo.size(), now);
         ASSERT_FALSE(conn->isFailSafe()) << "Stale cycle " << i;
@@ -446,9 +463,9 @@ TEST_F(FSoEStaleTxPDOTest, MasterRecoversWhenSlaveResponds) {
     ASSERT_NE(conn->getState(), ConnectionState::FailSafe);
     ASSERT_NE(conn->getState(), ConnectionState::Error);
 
-    // Now switch to the synchronous exchange path (emulator) to verify
-    // the master can complete the handshake from its current state.
-    // The master is in Session state (waiting for a slave response).
+    // Reset the connection to synchronise CRC state with the fresh slave,
+    // then complete the handshake via the synchronous exchange path.
+    conn->resetConnection();
     for (int i = 0; i < 30; ++i) {
         now += 1;
         ASSERT_TRUE(conn->exchangeWith(*slave, now))
@@ -538,21 +555,26 @@ TEST_F(FSoEDuplicateFrameTest, DuplicateFrameIsCountedNotProcessed) {
     last_time += 15;
     ASSERT_TRUE(conn->exchangeWith(*slave, last_time));
     ASSERT_EQ(conn->getState(), ConnectionState::Session);
-    last_time += 15;
-    ASSERT_TRUE(conn->exchangeWith(*slave, last_time));
-    // Master is now in Connection state (processed Session response).
+
+    // Do the second exchange manually so we can capture the slave's
+    // exact response bytes (CRC state changes with each frame, so
+    // calling prepareTxFrame again would build a different frame).
+    std::array<uint8_t, 64> master_tx{};
+    std::array<uint8_t, 64> slave_resp{};
+    size_t master_tx_len = conn->prepareTxFrame(master_tx.data(), master_tx.size());
+    ASSERT_GT(master_tx_len, 0u);
+    ASSERT_TRUE(slave->processRxFrame(master_tx.data(), master_tx_len));
+    size_t resp_len = slave->prepareTxFrame(slave_resp.data(), slave_resp.size());
+    ASSERT_GT(resp_len, 0u);
+    // Master processes the slave's response → transitions to Connection.
+    ASSERT_TRUE(conn->processRxFrame(slave_resp.data(), resp_len));
 
     const auto stats_before = conn->getStats();
     const auto state_before = conn->getState();
 
-    // Capture the slave's current response (same as what exchangeWith just
-    // processed, since the slave hasn't been fed a new master frame)
-    std::array<uint8_t, 64> tx{};
-    const size_t resp_len = slave->prepareTxFrame(tx.data(), tx.size());
-    ASSERT_GT(resp_len, 0u);
-
-    // This is a duplicate in a handshake state — should be counted, not processed
-    ASSERT_FALSE(conn->processRxFrame(tx.data(), resp_len))
+    // Re-send the exact same bytes — this is a duplicate in a handshake
+    // state and should be counted, not processed.
+    ASSERT_FALSE(conn->processRxFrame(slave_resp.data(), resp_len))
         << "Duplicate frame in handshake state should return false";
 
     const auto stats_after = conn->getStats();
@@ -573,17 +595,21 @@ TEST_F(FSoEDuplicateFrameTest, MultipleDuplicatesAllCounted) {
     // Two exchanges to reach Connection state (Reset→Session→Connection)
     last_time += 15;
     ASSERT_TRUE(conn->exchangeWith(*slave, last_time));
-    last_time += 15;
-    ASSERT_TRUE(conn->exchangeWith(*slave, last_time));
-    // Master is now in Connection state.
 
-    std::array<uint8_t, 64> tx{};
-    const size_t resp_len = slave->prepareTxFrame(tx.data(), tx.size());
+    // Do the second exchange manually to capture the slave's exact response.
+    std::array<uint8_t, 64> master_tx{};
+    std::array<uint8_t, 64> slave_resp{};
+    size_t master_tx_len = conn->prepareTxFrame(master_tx.data(), master_tx.size());
+    ASSERT_GT(master_tx_len, 0u);
+    ASSERT_TRUE(slave->processRxFrame(master_tx.data(), master_tx_len));
+    size_t resp_len = slave->prepareTxFrame(slave_resp.data(), slave_resp.size());
     ASSERT_GT(resp_len, 0u);
+    ASSERT_TRUE(conn->processRxFrame(slave_resp.data(), resp_len));
+    // Master is now in Connection state.
 
     // Send the same frame 5 times — all should be duplicates in handshake state
     for (int i = 0; i < 5; ++i) {
-        EXPECT_FALSE(conn->processRxFrame(tx.data(), resp_len))
+        EXPECT_FALSE(conn->processRxFrame(slave_resp.data(), resp_len))
             << "Duplicate " << i << " should not be processed";
     }
 
@@ -601,31 +627,36 @@ TEST_F(FSoEDuplicateFrameTest, DifferentFrameIsProcessed) {
     // Two exchanges to reach Connection state (Reset→Session→Connection)
     last_time += 15;
     ASSERT_TRUE(conn->exchangeWith(*slave, last_time));
-    last_time += 15;
-    ASSERT_TRUE(conn->exchangeWith(*slave, last_time));
+
+    // Do the second exchange manually to capture the slave's exact response.
+    std::array<uint8_t, 64> master_tx{};
+    std::array<uint8_t, 64> slave_resp{};
+    size_t master_tx_len = conn->prepareTxFrame(master_tx.data(), master_tx.size());
+    ASSERT_GT(master_tx_len, 0u);
+    ASSERT_TRUE(slave->processRxFrame(master_tx.data(), master_tx_len));
+    size_t len = slave->prepareTxFrame(slave_resp.data(), slave_resp.size());
+    ASSERT_GT(len, 0u);
+    // Master processes the slave's response.
+    ASSERT_TRUE(conn->processRxFrame(slave_resp.data(), len));
     // Master is in Connection state.
 
-    // Capture the slave's response (duplicate of what was just processed)
-    std::array<uint8_t, 64> tx_dup{};
-    const size_t len = slave->prepareTxFrame(tx_dup.data(), tx_dup.size());
-    ASSERT_GT(len, 0u);
+    // Verify the same bytes are indeed a duplicate
+    ASSERT_FALSE(conn->processRxFrame(slave_resp.data(), len));
 
-    // Verify it's indeed a duplicate
-    ASSERT_FALSE(conn->processRxFrame(tx_dup.data(), len));
-
-    // Create a modified frame that differs from last_rx_frame_
-    // but is still a valid FSoE frame (correct CRC).
-    // The slave's Session response is: [cmd(0x4E)][session_id(2)][connID(2)] = 5 bytes
-    // Modify the session_id byte (offset 1) and recalculate CRC for that chunk
-    std::array<uint8_t, 64> tx_new = tx_dup;
-    tx_new[1] ^= 0x01;
-    uint16_t crc = FSoE::CRC::calculate(tx_new.data() + 1, 2);
-    tx_new[3] = crc & 0xFF;
-    tx_new[4] = (crc >> 8) & 0xFF;
+    // Build a different but valid FSoE frame using the master's current
+    // RX CRC state (which was NOT updated by the duplicate above).
+    // Use a Connection response with different data.
+    uint8_t diff_payload[] = {0x00, 0x02, 0x00, 0x00};
+    std::array<uint8_t, 64> tx_new{};
+    size_t new_len = CRC::buildFSoEFrame(tx_new.data(), Command::Connection,
+                                          diff_payload, 4, 0x1234,
+                                          conn->getRxLastCrc0(),
+                                          conn->getRxSeqNo());
+    ASSERT_GT(new_len, 0u);
 
     // Different frame should be processed (not a duplicate)
     const auto stats_before = conn->getStats();
-    const bool ok = conn->processRxFrame(tx_new.data(), len);
+    const bool ok = conn->processRxFrame(tx_new.data(), new_len);
     const auto stats_after = conn->getStats();
 
     EXPECT_TRUE(ok);
