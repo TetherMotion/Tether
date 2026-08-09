@@ -8,6 +8,8 @@
 #include <numeric>
 #include <cmath>
 
+#include <Eigen/Dense>
+
 namespace Control {
 namespace Autotuning {
 
@@ -559,22 +561,27 @@ void DecentralizedTuning::setSISOTuner(std::unique_ptr<OfflineAutotuner> tuner) 
 std::vector<std::vector<double>> DecentralizedTuning::computeRGA() const {
     size_t n = m_K.size();
     if (n == 0) return {};
-    
-    std::vector<std::vector<double>> RGA(n, std::vector<double>(n, 0.0));
-    
-    // RGA = K .* (K^-1)^T (element-wise product with transpose of inverse)
-    // Simplified: for 2x2, lambda_ij = K_ij / K_ii * K_jj / det(K)
-    
-    if (n == 2) {
-        double det = m_K[0][0] * m_K[1][1] - m_K[0][1] * m_K[1][0];
-        if (std::abs(det) > 1e-10) {
-            RGA[0][0] = m_K[0][0] * m_K[1][1] / det;
-            RGA[0][1] = -m_K[0][1] * m_K[1][0] / det;
-            RGA[1][0] = -m_K[1][0] * m_K[0][1] / det;
-            RGA[1][1] = m_K[1][1] * m_K[0][0] / det;
-        }
+
+    // RGA = K .* (K^-1)^T  (element-wise product with transpose of inverse)
+    Eigen::MatrixXd K(n, n);
+    for (size_t i = 0; i < n; ++i)
+        for (size_t j = 0; j < n; ++j)
+            K(i, j) = m_K[i][j];
+
+    // Compute inverse via LU decomposition
+    Eigen::PartialPivLU<Eigen::MatrixXd> lu(K);
+    if (std::abs(lu.determinant()) < 1e-10) {
+        return std::vector<std::vector<double>>(n, std::vector<double>(n, 0.0));
     }
-    
+
+    Eigen::MatrixXd Kinv = lu.inverse();
+    Eigen::MatrixXd KinvT = Kinv.transpose();
+
+    std::vector<std::vector<double>> RGA(n, std::vector<double>(n, 0.0));
+    for (size_t i = 0; i < n; ++i)
+        for (size_t j = 0; j < n; ++j)
+            RGA[i][j] = K(i, j) * KinvT(i, j);
+
     return RGA;
 }
 
