@@ -162,6 +162,10 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
 
     stats_.frames_received++;
 
+    rx_frame_events_.emit([data, len] {
+        return std::make_shared<const std::vector<uint8_t>>(data, data + len);
+    });
+
     // Parse and validate frame (CRC verification happens inside parseFSoEFrame)
     // Buffer must accommodate MAX_PARSE_DATA_SIZE bytes because the slave's
     // buildFailSafeResponse sends safeInputSize + 2 bytes (inputs + error code),
@@ -293,6 +297,9 @@ size_t FSoEMasterConnection::prepareTxFrame(uint8_t* data, size_t max_len)
 
     if (len > 0) {
         stats_.frames_sent++;
+        tx_frame_events_.emit([data, len] {
+            return std::make_shared<const std::vector<uint8_t>>(data, data + len);
+        });
     }
 
     return len;
@@ -914,6 +921,20 @@ void FSoEMasterConnection::setDataCallback(DataCallback callback)
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     data_callback_ = std::move(callback);
+}
+
+// ============================================================================
+// Frame Event Sources
+// ============================================================================
+
+FrameEventSource& FSoEMasterConnection::txFrameEvents()
+{
+    return tx_frame_events_;
+}
+
+FrameEventSource& FSoEMasterConnection::rxFrameEvents()
+{
+    return rx_frame_events_;
 }
 
 } // namespace FSoE

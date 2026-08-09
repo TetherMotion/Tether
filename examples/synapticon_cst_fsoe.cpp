@@ -25,6 +25,7 @@
  *   ./synapticon_cst_fsoe --no-fsoe             # CST only, no FSoE
  *   ./synapticon_cst_fsoe --dc-sync             # enable DC synchronization
  *   ./synapticon_cst_fsoe --connection-id 0x4321 --watchdog-ms 15
+ *   ./synapticon_cst_fsoe --debug fsoe-master   # verbose per-cycle FSoE frame logging
  */
 
 #include <array>
@@ -147,6 +148,30 @@ const char* fsoeErrorName(uint16_t code) {
         case FSoE::ErrorCode::StartupError:      return "StartupError";
         case FSoE::ErrorCode::CommChannelError:  return "CommChannelError";
         default:                                 return "Unknown";
+    }
+}
+
+const char* fsoeCommandName(uint8_t cmd) {
+    switch (cmd) {
+        case FSoE::Command::ProcessData:    return "ProcessData(0x36)";
+        case FSoE::Command::Reset:          return "Reset(0x2A)";
+        case FSoE::Command::Session:        return "Session(0x4E)";
+        case FSoE::Command::Connection:     return "Connection(0x64)";
+        case FSoE::Command::Parameter:      return "Parameter(0x52)";
+        case FSoE::Command::FailSafeData:   return "FailSafeData(0x08)";
+        default:                            return "Unknown";
+    }
+}
+
+void hexDump(const char* tag, const char* label, const uint8_t* data, size_t len) {
+    constexpr size_t kBytesPerLine = 16;
+    char hex[kBytesPerLine * 3 + 1];
+    for (size_t i = 0; i < len; i += kBytesPerLine) {
+        size_t pos = 0;
+        for (size_t j = i; j < i + kBytesPerLine && j < len; j++) {
+            pos += snprintf(hex + pos, sizeof(hex) - pos, "%02X ", data[j]);
+        }
+        TETHER_LOGI(tag, "  %s [%3zu/%3zu]: %s", label, i, len, hex);
     }
 }
 
@@ -290,6 +315,7 @@ struct Args {
     uint16_t connection_id = 0x1234;
     uint16_t watchdog_ms = EtherCAT::Drives::Synapticon::SafeMotion::Timing::kMinimumWatchdogTimeMs;
     uint32_t diag_interval_ms = 1000;
+    std::string debug;
 };
 
 bool parseArgs(int argc, char** argv, Args& out) {
@@ -326,6 +352,9 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .scan<'i', int>()
         .default_value(1000)
         .help("Diagnostics print interval in ms");
+    program.add_argument("--debug")
+        .default_value(std::string(""))
+        .help("Comma-separated debug flags: 'fsoe-master' for per-cycle FSoE frame logging");
 
     try {
         program.parse_args(argc, argv);
@@ -342,6 +371,7 @@ bool parseArgs(int argc, char** argv, Args& out) {
     out.connection_id = static_cast<uint16_t>(program.get<unsigned int>("--connection-id"));
     out.watchdog_ms = static_cast<uint16_t>(program.get<int>("--watchdog-ms"));
     out.diag_interval_ms = static_cast<uint32_t>(program.get<int>("--diag-interval-ms"));
+    out.debug = program.get<std::string>("--debug");
     return true;
 }
 
@@ -360,10 +390,11 @@ int main(int argc, char** argv) {
     Tether::Platform::ensureRealtimeKernelOrExit();
 
     TETHER_LOGI(TAG,
-        "synapticon_cst_fsoe — interface=%s slave=%u duration=%.1f fsoe=%s dc_sync=%s",
+        "synapticon_cst_fsoe — interface=%s slave=%u duration=%.1f fsoe=%s dc_sync=%s debug='%s'",
         args.interface.c_str(), slave_idx, args.duration,
         args.enable_fsoe ? "on" : "off",
-        args.enable_dc_sync ? "on" : "off");
+        args.enable_dc_sync ? "on" : "off",
+        args.debug.c_str());
 
     // --- Start EtherCAT master ---
     EtherCAT::DS402Master master;
@@ -531,6 +562,9 @@ int main(int argc, char** argv) {
     std::unique_ptr<FSoEServo> fsoe_servo;
 
     if (args.enable_fsoe) {
+        const bool debug_fsoe_master =
+            (args.debug.find("fsoe-master") != std::string::npos);
+
         EtherCAT::Drives::Synapticon::SafeMotion::MainConfig main_config;
         main_config.feature_enabled = true;
         main_config.slave_address = slave_idx;
@@ -578,6 +612,30 @@ int main(int argc, char** argv) {
                 TETHER_LOGW(TAG, "[FSoE] fail-safe activated");
             });
 
+        // Per-cycle FSoE frame trace logging (--debug fsoe-master).
+        // Frame event listeners are invoked from inside the FSoE state
+        // machine for every master→slave (tx) and slave→master (rx) frame,
+        // so this works regardless of whether the exchange goes through the
+        // in-process emulator (MainLoopFeature) or a real drive via PDOs
+        // (exchangeViaPDO).  Each listener receives an immutable
+        // shared_ptr<const std::vector<uint8_t>> copy of the frame bytes.
+        if (debug_fsoe_master) {
+            fsoe_main->rawConnection().txFrameEvents().addListener(
+                [](std::shared_ptr<const std::vector<uint8_t>> data) {
+                    const uint8_t cmd = (!data->empty()) ? (*data)[0] : 0;
+                    TETHER_LOGI(TAG, "[fsoe-master] TX (master->slave) len=%zu cmd=%s",
+                                data->size(), fsoeCommandName(cmd));
+                    hexDump(TAG, "TX (master->slave)", data->data(), data->size());
+                });
+            fsoe_main->rawConnection().rxFrameEvents().addListener(
+                [](std::shared_ptr<const std::vector<uint8_t>> data) {
+                    const uint8_t cmd = (!data->empty()) ? (*data)[0] : 0;
+                    TETHER_LOGI(TAG, "[fsoe-master] RX (slave->master) len=%zu cmd=%s",
+                                data->size(), fsoeCommandName(cmd));
+                    hexDump(TAG, "RX (slave->master)", data->data(), data->size());
+                });
+        }
+
         // Add FSoE exchange as a cyclic task (runs after motion controller)
         if (!master.addCyclicTask(
                 std::make_unique<FSoELoopFeature>(slave_idx, *fsoe_main, *fsoe_servo))) {
@@ -598,8 +656,9 @@ int main(int argc, char** argv) {
         }
 
         TETHER_LOGI(TAG,
-            "FSoE enabled: conn_id=0x%04X watchdog=%u ms",
-            args.connection_id, args.watchdog_ms);
+            "FSoE enabled: conn_id=0x%04X watchdog=%u ms debug_master=%s",
+            args.connection_id, args.watchdog_ms,
+            debug_fsoe_master ? "on" : "off");
     } else {
         TETHER_LOGI(TAG, "FSoE disabled (--no-fsoe)");
     }
