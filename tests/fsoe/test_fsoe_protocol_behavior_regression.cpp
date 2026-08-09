@@ -232,17 +232,22 @@ TEST_F(FSoEProtocolBehaviorTest, FailSafeOutputsAppliedOnSlave) {
     // In fail-safe, data is not valid — getSafeOutputs returns 0
     EXPECT_FALSE(slave->areSafeOutputsValid());
 
-    // But the slave's TX frame should contain fail-safe values
+    // But the slave's TX frame should contain fail-safe values.
+    // Capture the slave's TX CRC state before prepareTxFrame, since
+    // prepareTxFrame updates it (CRC inheritance).
+    uint16_t saved_tx_crc0 = slave->getTxLastCrc0();
+    uint16_t saved_tx_seqno = slave->getTxSeqNo();
     uint8_t tx[64];
     size_t tx_len = slave->prepareTxFrame(tx, sizeof(tx));
     ASSERT_GT(tx_len, 0u);
 
-    // Parse the FailSafeData response
+    // Parse the FailSafeData response with the CRC state used to build it
     uint8_t cmd = 0;
     uint8_t data[18] = {0};
     size_t data_len = 0;
     uint16_t conn_id = 0;
-    ASSERT_TRUE(CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id));
+    ASSERT_TRUE(CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id,
+                                    saved_tx_crc0, saved_tx_seqno));
     EXPECT_EQ(cmd, Command::FailSafeData);
     // Fail-safe inputs are sent in the response
     EXPECT_EQ(data[0], 0xAA);
@@ -407,11 +412,14 @@ TEST_F(FSoEErrorInjectionBehaviorTest, ConnIdErrorInjection) {
     inj.injectConnIdError = true;
     inj.fakeConnId = 0xFFFF;
 
-    // Send a valid frame — slave should reject due to conn_id mismatch
+    // Send a valid frame — slave should reject due to conn_id mismatch.
+    // Use the slave's current RX CRC state (non-zero after advanceToData).
     uint8_t payload[] = {0x01, 0x02, 0x03, 0x04};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::ProcessData,
-                                            payload, 4, 0x1234);
+                                            payload, 4, 0x1234,
+                                            slave->getRxLastCrc0(),
+                                            slave->getRxSeqNo());
     slave->processRxFrame(frame, frame_len);
 
     EXPECT_TRUE(slave->isFailSafe());

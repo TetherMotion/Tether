@@ -188,7 +188,9 @@ TEST(FSoEMasterConnectionValidationRegression, ShortConnectionResponseRejected) 
     uint8_t payload[] = {0x00, 0x01};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::Connection,
-                                            payload, 2, 0x1234);
+                                            payload, 2, 0x1234,
+                                            conn.getRxLastCrc0(),
+                                            conn.getRxSeqNo());
     bool ok = conn.processRxFrame(frame, frame_len);
 
     // Should be rejected with DataLengthError
@@ -217,7 +219,9 @@ TEST(FSoEMasterEarlyFailSafeRegression, ShortFailSafeDataUsesApplicationError) {
     uint8_t payload[] = {0xAA, 0xBB};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::FailSafeData,
-                                            payload, 2, 0x1234);
+                                            payload, 2, 0x1234,
+                                            conn.getRxLastCrc0(),
+                                            conn.getRxSeqNo());
     bool ok = conn.processRxFrame(frame, frame_len);
     EXPECT_TRUE(ok);
     EXPECT_TRUE(conn.isFailSafe());
@@ -240,7 +244,9 @@ TEST(FSoEMasterEarlyFailSafeRegression, FullFailSafeDataExtractsErrorCode) {
     uint8_t payload[] = {0xAA, 0xBB, 0xCC, 0xDD, 0x03, 0x00};  // error=WatchdogError
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::FailSafeData,
-                                            payload, 6, 0x1234);
+                                            payload, 6, 0x1234,
+                                            conn.getRxLastCrc0(),
+                                            conn.getRxSeqNo());
     conn.processRxFrame(frame, frame_len);
     EXPECT_TRUE(conn.isFailSafe());
     EXPECT_EQ(conn.getErrorCode(), ErrorCode::WatchdogError);
@@ -291,7 +297,9 @@ TEST(FSoEMasterFailSafeStateRegression, UnexpectedCommandInFailSafeReportsError)
     uint8_t payload[] = {0x01, 0x02, 0x03, 0x04};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::ProcessData,
-                                            payload, 4, 0x1234);
+                                            payload, 4, 0x1234,
+                                            conn.getRxLastCrc0(),
+                                            conn.getRxSeqNo());
     bool ok = conn.processRxFrame(frame, frame_len);
     // processRxFrame returns true but handleError is called
     EXPECT_TRUE(ok);
@@ -327,7 +335,9 @@ TEST(FSoEMasterErrorStateRegression, ErrorStateRejectsNonResetCommands) {
     uint8_t payload[] = {0x01, 0x02, 0x03, 0x04};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::ProcessData,
-                                            payload, 4, 0x1234);
+                                            payload, 4, 0x1234,
+                                            conn.getRxLastCrc0(),
+                                            conn.getRxSeqNo());
     // Should trigger CommandError
     conn.processRxFrame(frame, frame_len);
     EXPECT_EQ(conn.getErrorCode(), ErrorCode::CommandError);
@@ -357,7 +367,9 @@ TEST(FSoEMasterFailSafeResetRegression, ResetCommandInFailSafeWithAutoRecovery) 
     uint8_t payload[] = {0x01, 0x00};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::Reset,
-                                            payload, 2, 0x1234);
+                                            payload, 2, 0x1234,
+                                            conn.getRxLastCrc0(),
+                                            conn.getRxSeqNo());
     conn.processRxFrame(frame, frame_len);
 
     // Should have recovered (auto_recovery_enabled=true)

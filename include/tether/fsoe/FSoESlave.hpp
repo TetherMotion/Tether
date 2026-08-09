@@ -371,6 +371,14 @@ public:
      */
     FSoESlaveStats getStats() const;
 
+    /// Get the current RX CRC state (for test diagnostics and frame building).
+    /// When building a frame to send to this slave, use:
+    ///   startCrc = slave.getRxLastCrc0(), seqNo = slave.getRxSeqNo()
+    uint16_t getRxLastCrc0() const { return last_rx_crc0_; }
+    uint16_t getRxSeqNo() const { return rx_seq_no_; }
+    uint16_t getTxLastCrc0() const { return last_tx_crc0_; }
+    uint16_t getTxSeqNo() const { return tx_seq_no_; }
+
     /**
      * @brief Reset statistics
      */
@@ -461,6 +469,13 @@ private:
     uint16_t receivedParameterCRC_ = 0;
     uint8_t expectedSequence_ = 0;
     uint8_t txSequence_ = 0;
+
+    // FSoE CRC inheritance and sequence number tracking.
+    // See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
+    uint16_t last_tx_crc0_ = 0;   ///< CRC0 of the last frame we sent (startCrc for next TX)
+    uint16_t last_rx_crc0_ = 0;   ///< CRC0 of the last frame we received (startCrc for next RX)
+    uint16_t tx_seq_no_ = 0;      ///< TX sequence number (for CRC computation)
+    uint16_t rx_seq_no_ = 0;      ///< Expected RX sequence number
     
     // Timing
     uint64_t lastValidFrameMs_ = 0;

@@ -162,6 +162,13 @@ public:
     void resetStats();
     std::string getDiagnostics() const;
 
+    /// Get the current TX CRC state (for test diagnostics and frame building).
+    /// startCrc = last_tx_crc0_, seqNo = tx_seq_no_
+    uint16_t getTxLastCrc0() const { return last_tx_crc0_; }
+    uint16_t getTxSeqNo() const { return tx_seq_no_; }
+    uint16_t getRxLastCrc0() const { return last_rx_crc0_; }
+    uint16_t getRxSeqNo() const { return rx_seq_no_; }
+
     // --- Callbacks ---
     void setStateChangeCallback(StateChangeCallback callback);
     void setErrorCallback(ErrorCallback callback);
@@ -219,6 +226,30 @@ private:
 
     std::array<uint8_t, 16> safe_inputs_{};
     std::array<uint8_t, 16> safe_outputs_{};
+
+    // FSoE CRC inheritance and sequence number tracking.
+    //
+    // The FSoE CRC uses two mechanisms that require state across frames:
+    //
+    // 1. Cross-frame CRC inheritance: each frame's CRC0 is folded into the
+    //    next frame's CRC computation as startCrc.  This creates a chain
+    //    across frames — an attacker cannot replay an old frame because the
+    //    CRC chain would break.
+    //    See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
+    //
+    // 2. Sequence number: a counter shared between master and slave, used in
+    //    the CRC computation but NOT transmitted in the frame.  Both sides
+    //    must agree on the sequence number for CRC verification to succeed.
+    //
+    // The master tracks separate CRC and sequence state for TX (frames it
+    // sends) and RX (frames it receives).
+    uint16_t last_tx_crc0_ = 0;   ///< CRC0 of the last frame we sent (startCrc for next TX)
+    uint16_t last_rx_crc0_ = 0;   ///< CRC0 of the last frame we received (startCrc for next RX)
+    uint16_t tx_seq_no_ = 0;      ///< TX sequence number (incremented each TX frame)
+    uint16_t rx_seq_no_ = 0;      ///< Expected RX sequence number
+
+    // Legacy sequence tracking (kept for API compatibility, no longer used
+    // for actual sequence validation — see tx_seq_no_ / rx_seq_no_ above)
     uint8_t rx_sequence_ = 0;
     uint8_t tx_sequence_ = 0;
 

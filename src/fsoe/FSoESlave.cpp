@@ -62,8 +62,10 @@ bool FSoESlave::initialize() {
     currentConnectionId_ = 0;
     expectedSequence_ = 0;
     txSequence_ = 0;
-    
-    // Reset statistics
+    last_tx_crc0_ = 0;
+    last_rx_crc0_ = 0;
+    tx_seq_no_ = 0;
+    rx_seq_no_ = 0;
     statistics_.resetAll();
 
     // Configure diagnostics
@@ -164,7 +166,11 @@ void FSoESlave::reset() {
     currentConnectionId_ = 0;
     expectedSequence_ = 0;
     txSequence_ = 0;
-    
+    last_tx_crc0_ = 0;
+    last_rx_crc0_ = 0;
+    tx_seq_no_ = 0;
+    rx_seq_no_ = 0;
+
     // Apply fail-safe values
     applyFailSafeOutputs();
     
@@ -426,6 +432,11 @@ size_t FSoESlave::prepareTxFrame(uint8_t* data, size_t maxLen) {
     
     if (frameSize > 0) {
         statistics_.onFrameSent();
+        // Increment TX sequence number for CRC computation — but NOT for
+        // Reset frames (3-byte frames with no CRC).
+        if (frameSize > CRC::MIN_FSOE_FRAME_SIZE) {
+            tx_seq_no_++;
+        }
     }
     
     return frameSize;
@@ -564,7 +575,8 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
     size_t data_len = 0;
     uint16_t conn_id = 0;
 
-    if (!CRC::parseFSoEFrame(data, len, cmd, nullptr, data_len, conn_id)) {
+    if (!CRC::parseFSoEFrame(data, len, cmd, nullptr, data_len, conn_id,
+                             last_rx_crc0_, rx_seq_no_, &last_rx_crc0_)) {
         handleError(ErrorCode::CRCError, config_.treatCrcErrorAsCritical);
         statistics_.onCrcError();
         return false;
@@ -577,6 +589,13 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
         if (!validateConnectionId(conn_id)) {
             return false;
         }
+    }
+
+    // Increment RX sequence number for CRC computation — but NOT for
+    // Reset frames (3-byte frames with no CRC).  Reset frames don't
+    // advance the CRC chain.
+    if (len > CRC::MIN_FSOE_FRAME_SIZE) {
+        rx_seq_no_++;
     }
 
     return true;
@@ -594,11 +613,14 @@ bool FSoESlave::validateCRC(const uint8_t* data, size_t len) {
     uint8_t cmd = 0;
     size_t data_len = 0;
     uint16_t conn_id = 0;
-    return CRC::parseFSoEFrame(data, len, cmd, nullptr, data_len, conn_id);
+    return CRC::parseFSoEFrame(data, len, cmd, nullptr, data_len, conn_id,
+                               last_rx_crc0_, rx_seq_no_);
 }
 
 bool FSoESlave::validateSequence(uint8_t seqNum) {
-    // ETG.5100 does not define a sequence number field.
+    // The FSoE sequence number is NOT transmitted in the frame — it is
+    // folded into the CRC computation and shared between master and slave.
+    // See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
     // Frame integrity is ensured via CRC + watchdog.
     // This method is kept for API compatibility but is a no-op.
     (void)seqNum;
@@ -629,13 +651,13 @@ uint16_t FSoESlave::calculateCRC(const uint8_t* data, size_t len) {
 // ============================================================================
 
 void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
-    // Parse frame to extract session ID from safe data
+    // Extract session ID from safe data (CRC already verified in validateFrame)
     uint8_t cmd = 0;
     uint8_t frame_data[CRC::MAX_PARSE_DATA_SIZE] = {0};
     size_t data_len = 0;
     uint16_t conn_id = 0;
 
-    if (CRC::parseFSoEFrame(data, len, cmd, frame_data, data_len, conn_id)) {
+    if (CRC::extractFSoEFrame(data, len, cmd, frame_data, data_len, conn_id)) {
         // Session ID is in the first 2 bytes of safe data
         if (data_len >= 2) {
             sessionId_ = static_cast<uint16_t>(frame_data[0]) |
@@ -643,9 +665,17 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
         }
     }
 
-    // Reset sequence counters (no longer used but kept for API compat)
-    expectedSequence_ = 0;
-    txSequence_ = 0;
+    // Only reset CRC inheritance state on a Reset command (0x2A).
+    // A Session command (0x4E) continues the CRC chain — resetting would
+    // desynchronize the slave from the master.
+    if (cmd == Command::Reset) {
+        expectedSequence_ = 0;
+        txSequence_ = 0;
+        last_tx_crc0_ = 0;
+        last_rx_crc0_ = 0;
+        tx_seq_no_ = 0;
+        rx_seq_no_ = 0;
+    }
 
     // Clear error state
     lastError_ = ErrorCode::NoError;
@@ -664,7 +694,7 @@ void FSoESlave::processConnection(const uint8_t* data, size_t len) {
     size_t data_len = 0;
     uint16_t conn_id = 0;
 
-    if (!CRC::parseFSoEFrame(data, len, cmd, frame_data, data_len, conn_id)) {
+    if (!CRC::extractFSoEFrame(data, len, cmd, frame_data, data_len, conn_id)) {
         handleError(ErrorCode::CRCError, true);
         return;
     }
@@ -717,7 +747,7 @@ void FSoESlave::processParameter(const uint8_t* data, size_t len) {
     size_t data_len = 0;
     uint16_t conn_id = 0;
 
-    if (!CRC::parseFSoEFrame(data, len, cmd, frame_data, data_len, conn_id)) {
+    if (!CRC::extractFSoEFrame(data, len, cmd, frame_data, data_len, conn_id)) {
         handleError(ErrorCode::CRCError, true);
         return;
     }
@@ -772,7 +802,7 @@ void FSoESlave::processData(const uint8_t* data, size_t len) {
     size_t data_len = 0;
     uint16_t conn_id = 0;
 
-    if (!CRC::parseFSoEFrame(data, len, cmd, frame_data, data_len, conn_id)) {
+    if (!CRC::extractFSoEFrame(data, len, cmd, frame_data, data_len, conn_id)) {
         handleError(ErrorCode::CRCError, true);
         return;
     }
@@ -831,7 +861,8 @@ size_t FSoESlave::buildSessionResponse(uint8_t* data, size_t maxLen) {
     payload[1] = (sessionId_ >> 8) & 0xFF;
     size_t needed = CRC::fsoeFrameSize(2);
     if (maxLen < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Session, payload, 2, config_.connectionId);
+    return CRC::buildFSoEFrame(data, Command::Session, payload, 2, config_.connectionId,
+                               last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
 
 size_t FSoESlave::buildConnectionResponse(uint8_t* data, size_t maxLen) {
@@ -843,7 +874,8 @@ size_t FSoESlave::buildConnectionResponse(uint8_t* data, size_t maxLen) {
     payload[3] = 0;  // Reserved
     size_t needed = CRC::fsoeFrameSize(4);
     if (maxLen < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Connection, payload, 4, currentConnectionId_);
+    return CRC::buildFSoEFrame(data, Command::Connection, payload, 4, currentConnectionId_,
+                               last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
 
 size_t FSoESlave::buildParameterResponse(uint8_t* data, size_t maxLen) {
@@ -851,7 +883,8 @@ size_t FSoESlave::buildParameterResponse(uint8_t* data, size_t maxLen) {
     uint8_t payload[2] = {0, 0};  // Parameter ACK
     size_t needed = CRC::fsoeFrameSize(2);
     if (maxLen < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Parameter, payload, 2, currentConnectionId_);
+    return CRC::buildFSoEFrame(data, Command::Parameter, payload, 2, currentConnectionId_,
+                               last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
 
 size_t FSoESlave::buildDataResponse(uint8_t* data, size_t maxLen) {
@@ -859,7 +892,8 @@ size_t FSoESlave::buildDataResponse(uint8_t* data, size_t maxLen) {
     if (maxLen < needed) return 0;
     return CRC::buildFSoEFrame(data, Command::ProcessData,
                                safeInputs_.data(), config_.safeInputSize,
-                               currentConnectionId_);
+                               currentConnectionId_,
+                               last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
 
 size_t FSoESlave::buildFailSafeResponse(uint8_t* data, size_t maxLen) {
@@ -879,7 +913,8 @@ size_t FSoESlave::buildFailSafeResponse(uint8_t* data, size_t maxLen) {
     size_t needed = CRC::fsoeFrameSize(payload_len);
     if (maxLen < needed) return 0;
     return CRC::buildFSoEFrame(data, Command::FailSafeData,
-                               payload, payload_len, currentConnectionId_);
+                               payload, payload_len, currentConnectionId_,
+                               last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
 
 // ============================================================================

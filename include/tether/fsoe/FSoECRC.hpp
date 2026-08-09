@@ -1,72 +1,342 @@
 #pragma once
 
+// ============================================================================
+// FSoE CRC-16 — Correct implementation per ETG.5100
+// ============================================================================
+//
+// This implementation follows the FSoE (Functional Safety over EtherCAT)
+// CRC-16 algorithm as specified in ETG.5100 S (D) V1.2.0, section 8.1.3.2.
+//
+// The FSoE CRC is NOT a standard CRC-16.  It uses a custom per-byte update
+// step that gives each input byte an extra factor of x^24 compared to a
+// standard byte-wise CRC.  This is achieved by using TWO lookup tables:
+//
+//   T0[i] = (i * x^16) mod P    — the standard byte-wise table (k=0)
+//   T3[i] = (i * x^40) mod P    — the slice-by-4 table (k=3)
+//
+// The per-byte update step is:
+//
+//   crc_new = (crc_lo << 8) ^ T0[crc_hi] ^ T3[input]
+//
+// Compare with a standard CRC-16 update:
+//
+//   crc_std = (crc_lo << 8) ^ T0[crc_hi ^ input]
+//           = (crc_lo << 8) ^ T0[crc_hi] ^ T0[input]
+//
+// The only difference is T3[input] vs T0[input] — an extra factor of x^24
+// per byte.  Equivalently, the FSoE CRC is the CRC of the message as if
+// each byte were followed by 3 zero bytes, but with the initial value
+// shifted only by the actual byte count (not the padded count).
+//
+// References (TechOverflow):
+//   - How to compute the CRC checksum for FSoE PDUs:
+//     https://techoverflow.net/2026/08/09/how-to-compute-the-crc-checksum-for-fsoe-pdus/
+//   - FSoE CRC: Which polynomial does it use?
+//     https://techoverflow.net/2026/06/25/fsoe-crc-which-polynomial-does-it-use/
+//   - How are the FSoE CRC tables constructed?
+//     https://techoverflow.net/2026/08/09/how-are-the-fsoe-crc-tables-constructed/
+//   - FSoE: How does CRC inheritance work?
+//     https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
+//
+// SPDX-License-Identifier: CC0-1.0 (algorithm implementation);
+// see TechOverflow posts for original source.
+// ============================================================================
+
 #include <cstdint>
 #include <cstddef>
+#include <array>
 
 namespace FSoE::CRC {
 
-// ETG.5100 §8.1.3.2 specifies the safety CRC polynomial as 0x139B7
-// (normal/MSB-first form; the implicit leading 1 represents x^16).
-// The 16-bit polynomial value is 0x39B7.
-// The CRC is non-reflected (refIn=false, refOut=false), init=0x0000, no final XOR.
-inline constexpr uint16_t kPolynomial = 0x39B7;
-inline constexpr uint16_t kInitValue  = 0x0000;
+// ---------------------------------------------------------------------------
+// Polynomial
+// ---------------------------------------------------------------------------
+//
+// FSoE uses the 17-bit polynomial:
+//
+//   P(x) = x^16 + x^13 + x^12 + x^11 + x^8 + x^7 + x^5 + x^4 + x^2 + x + 1
+//
+// Packed as a hexadecimal value WITH the implicit x^16 term: 0x139B7.
+// The 16-bit representation used inside the shift register (WITHOUT the
+// x^16 term): 0x39B7.
+//
+// The CRC is processed MSB-first (the "normal" or non-reflected direction):
+// each message bit is taken from the most-significant end of the working
+// register, and the polynomial is XORed in when the shifted-out bit is 1.
+//
+// Source: ETG.5100 S (D) V1.2.0, section 8.1.3.2: CRC polynomial selection.
+// See: https://techoverflow.net/2026/06/25/fsoe-crc-which-polynomial-does-it-use/
+inline constexpr uint16_t kPolynomial     = 0x39B7;  // 16-bit form (x^16 implicit)
+inline constexpr uint32_t kPolynomialFull = 0x139B7; // 17-bit form (for reference)
 
-inline constexpr uint16_t crcTable[256] = {
-    0x0000, 0x39B7, 0x736E, 0x4AD9, 0xE6DC, 0xDF6B, 0x95B2, 0xAC05,
-    0xF40F, 0xCDB8, 0x8761, 0xBED6, 0x12D3, 0x2B64, 0x61BD, 0x580A,
-    0xD1A9, 0xE81E, 0xA2C7, 0x9B70, 0x3775, 0x0EC2, 0x441B, 0x7DAC,
-    0x25A6, 0x1C11, 0x56C8, 0x6F7F, 0xC37A, 0xFACD, 0xB014, 0x89A3,
-    0x9AE5, 0xA352, 0xE98B, 0xD03C, 0x7C39, 0x458E, 0x0F57, 0x36E0,
-    0x6EEA, 0x575D, 0x1D84, 0x2433, 0x8836, 0xB181, 0xFB58, 0xC2EF,
-    0x4B4C, 0x72FB, 0x3822, 0x0195, 0xAD90, 0x9427, 0xDEFE, 0xE749,
-    0xBF43, 0x86F4, 0xCC2D, 0xF59A, 0x599F, 0x6028, 0x2AF1, 0x1346,
-    0x0C7D, 0x35CA, 0x7F13, 0x46A4, 0xEAA1, 0xD316, 0x99CF, 0xA078,
-    0xF872, 0xC1C5, 0x8B1C, 0xB2AB, 0x1EAE, 0x2719, 0x6DC0, 0x5477,
-    0xDDD4, 0xE463, 0xAEBA, 0x970D, 0x3B08, 0x02BF, 0x4866, 0x71D1,
-    0x29DB, 0x106C, 0x5AB5, 0x6302, 0xCF07, 0xF6B0, 0xBC69, 0x85DE,
-    0x9698, 0xAF2F, 0xE5F6, 0xDC41, 0x7044, 0x49F3, 0x032A, 0x3A9D,
-    0x6297, 0x5B20, 0x11F9, 0x284E, 0x844B, 0xBDFC, 0xF725, 0xCE92,
-    0x4731, 0x7E86, 0x345F, 0x0DE8, 0xA1ED, 0x985A, 0xD283, 0xEB34,
-    0xB33E, 0x8A89, 0xC050, 0xF9E7, 0x55E2, 0x6C55, 0x268C, 0x1F3B,
-    0x18FA, 0x214D, 0x6B94, 0x5223, 0xFE26, 0xC791, 0x8D48, 0xB4FF,
-    0xECF5, 0xD542, 0x9F9B, 0xA62C, 0x0A29, 0x339E, 0x7947, 0x40F0,
-    0xC953, 0xF0E4, 0xBA3D, 0x838A, 0x2F8F, 0x1638, 0x5CE1, 0x6556,
-    0x3D5C, 0x04EB, 0x4E32, 0x7785, 0xDB80, 0xE237, 0xA8EE, 0x9159,
-    0x821F, 0xBBA8, 0xF171, 0xC8C6, 0x64C3, 0x5D74, 0x17AD, 0x2E1A,
-    0x7610, 0x4FA7, 0x057E, 0x3CC9, 0x90CC, 0xA97B, 0xE3A2, 0xDA15,
-    0x53B6, 0x6A01, 0x20D8, 0x196F, 0xB56A, 0x8CDD, 0xC604, 0xFFB3,
-    0xA7B9, 0x9E0E, 0xD4D7, 0xED60, 0x4165, 0x78D2, 0x320B, 0x0BBC,
-    0x1487, 0x2D30, 0x67E9, 0x5E5E, 0xF25B, 0xCBEC, 0x8135, 0xB882,
-    0xE088, 0xD93F, 0x93E6, 0xAA51, 0x0654, 0x3FE3, 0x753A, 0x4C8D,
-    0xC52E, 0xFC99, 0xB640, 0x8FF7, 0x23F2, 0x1A45, 0x509C, 0x692B,
-    0x3121, 0x0896, 0x424F, 0x7BF8, 0xD7FD, 0xEE4A, 0xA493, 0x9D24,
-    0x8E62, 0xB7D5, 0xFD0C, 0xC4BB, 0x68BE, 0x5109, 0x1BD0, 0x2267,
-    0x7A6D, 0x43DA, 0x0903, 0x30B4, 0x9CB1, 0xA506, 0xEFDF, 0xD668,
-    0x5FCB, 0x667C, 0x2CA5, 0x1512, 0xB917, 0x80A0, 0xCA79, 0xF3CE,
-    0xABC4, 0x9273, 0xD8AA, 0xE11D, 0x4D18, 0x74AF, 0x3E76, 0x07C1
-};
+// ---------------------------------------------------------------------------
+// Compile-time table choice
+// ---------------------------------------------------------------------------
+//
+// By default, the table-based implementation is used (two 256-entry, 16-bit
+// lookup tables, ~1 KB total).  Define TETHER_FSOE_CRC_NO_TABLE=1 before
+// including this header to use the on-the-fly implementation instead, which
+// computes each table entry on demand using bit-by-bit polynomial long
+// division.  Both variants produce identical results.
+#ifdef TETHER_FSOE_CRC_NO_TABLE
+inline constexpr bool kUseTable = false;
+#else
+inline constexpr bool kUseTable = true;
+#endif
 
-inline uint16_t calculate(const uint8_t* data, size_t len, uint16_t init_crc = kInitValue) {
-    if (!data || len == 0) return init_crc;
-    uint16_t crc = init_crc;
-    for (size_t i = 0; i < len; i++) {
-        crc = (crc << 8) ^ crcTable[(crc >> 8) ^ data[i]];
+// ---------------------------------------------------------------------------
+// constexpr table generation
+// ---------------------------------------------------------------------------
+//
+// The two FSoE tables are derived purely from the polynomial — no hand-typed
+// constants.  Each entry is computed by loading the byte value into the high
+// byte of a 16-bit register and shifting left, XORing the polynomial in
+// whenever bit 15 is set.
+//
+//   T0[i] = (i * x^16) mod P   — 8 left shifts of i << 8  (k=0)
+//   T3[i] = (i * x^40) mod P   — 32 left shifts of i << 8 (k=3)
+//
+// T3 is equivalently the result of applying T0 four times starting from
+// byte i (i.e., processing byte i followed by three zero bytes).
+//
+// See: https://techoverflow.net/2026/08/09/how-are-the-fsoe-crc-tables-constructed/
+
+/// Compute (byte * x^(8+shifts)) mod P by bit-by-bit polynomial long division.
+/// Loads byte into the high byte of a 16-bit register and shifts left
+/// 'shifts' times, XORing POLY in whenever bit 15 is set.
+constexpr uint16_t polyMod(uint8_t byte, int shifts) {
+    uint16_t r = static_cast<uint16_t>(byte) << 8;
+    for (int i = 0; i < shifts; i++)
+        r = (r & 0x8000U) ? static_cast<uint16_t>((r << 1) ^ kPolynomial)
+                          : static_cast<uint16_t>(r << 1);
+    return r;
+}
+
+/// Build T0: the ordinary byte-wise table (k=0, 8 shifts).
+/// T0[i] = (i * x^16) mod P
+constexpr std::array<uint16_t, 256> makeTable0() {
+    std::array<uint16_t, 256> t{};
+    for (int i = 0; i < 256; i++)
+        t[i] = polyMod(static_cast<uint8_t>(i), 8);
+    return t;
+}
+
+/// Build T3: the slice-by-4 table (k=3, 32 shifts).
+/// T3[i] = (i * x^40) mod P
+constexpr std::array<uint16_t, 256> makeTable3() {
+    std::array<uint16_t, 256> t{};
+    for (int i = 0; i < 256; i++)
+        t[i] = polyMod(static_cast<uint8_t>(i), 32);
+    return t;
+}
+
+/// Statically precomputed lookup tables (constexpr-generated at compile time).
+/// See: https://techoverflow.net/2026/08/09/how-are-the-fsoe-crc-tables-constructed/
+inline constexpr auto crcTable0 = makeTable0();  // T0[i] = (i * x^16) mod P
+inline constexpr auto crcTable3 = makeTable3();  // T3[i] = (i * x^40) mod P
+
+// ---------------------------------------------------------------------------
+// Low-level CRC update
+// ---------------------------------------------------------------------------
+
+/// FSoE per-byte CRC update step:
+///
+///   new_crc = (crc_lo << 8) ^ T0[crc_hi] ^ T3[input]
+///
+/// The term (crc_lo << 8) ^ T0[crc_hi] is exactly the standard MSB-first
+/// CRC register shift by one byte (equivalent to processing a zero byte).
+/// Then T3[input] is XORed in, giving each input byte an extra factor of
+/// x^24 compared to a standard CRC.
+///
+/// When TETHER_FSOE_CRC_NO_TABLE is defined, T0 and T3 are computed on the
+/// fly using polyMod() — slower (8+32 shifts per byte) but self-contained.
+///
+/// See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
+inline uint16_t updateCrc(uint16_t crc, uint8_t input) {
+    if constexpr (kUseTable) {
+        return static_cast<uint16_t>(
+            ((crc & 0xFF) << 8) ^ crcTable0[crc >> 8] ^ crcTable3[input]);
+    } else {
+        uint16_t t0 = polyMod(static_cast<uint8_t>(crc >> 8), 8);
+        uint16_t t3 = polyMod(input, 32);
+        return static_cast<uint16_t>(((crc & 0xFF) << 8) ^ t0 ^ t3);
     }
+}
+
+/// Process a 16-bit value in little-endian byte order (lo first, then hi).
+inline uint16_t updateCrc16(uint16_t crc, uint16_t word) {
+    crc = updateCrc(crc, static_cast<uint8_t>(word & 0xFF));
+    crc = updateCrc(crc, static_cast<uint8_t>((word >> 8) & 0xFF));
     return crc;
 }
 
-inline bool verify(const uint8_t* data, size_t len) {
-    if (len < 2) return false;
-    uint16_t calculated = calculate(data, len - 2);
-    uint16_t stored = static_cast<uint16_t>(data[len - 2]) |
-                      (static_cast<uint16_t>(data[len - 1]) << 8);
-    return calculated == stored;
+// ---------------------------------------------------------------------------
+// High-level FSoE CRC functions
+// ---------------------------------------------------------------------------
+//
+// The CRC is reset to 0 at the start of each computation, then bytes are
+// processed in this order:
+//
+//   oldCRC-Lo, oldCRC-Hi, ConnID-Lo, ConnID-Hi, SeqNo-Lo, SeqNo-Hi,
+//   Command, Data[0], [Data[1], ...]
+//
+// For PDUs larger than 10 bytes, multiple CRCs are computed — each segment
+// CRC restarts from a shared crc_common base (the state after processing
+// the first 7 header bytes) and adds an index byte pair and 2 data bytes.
+//
+// CRC inheritance — two levels:
+//
+// 1. Cross-frame: The first two bytes folded into every CRC calculation are
+//    the PREVIOUS frame's CRC0 (startCrc).  This creates a chain across
+//    frames — an attacker cannot replay an old frame because the CRC chain
+//    would break.
+//
+// 2. Intra-frame: Within a single PDU with multiple CRCs, each segment CRC
+//    restarts from crc_common (the shared base after processing oldCRC,
+//    ConnID, SeqNo, and Command).  CRC0 continues from crc_common with
+//    Data[0..1]; CRCi (i >= 1) restarts from crc_common with Index(i) and
+//    Data[2i, 2i+1].  The index byte ensures that even if two segments
+//    contain identical data, their CRCs differ.
+//
+// See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
+
+/// Compute CRC0: the first (and possibly only) CRC for an FSoE PDU.
+///
+/// Processes: startCrc(2), ConnID(2), SeqNo(2), Command(1), Data[0..dataLen-1]
+/// dataLen is 1 for PDU size <= 6, 2 for PDU size > 6.
+///
+/// @param startCrc  The previous frame's CRC0 (CRC inheritance).  0 for the
+///                  very first frame.
+/// @param connId    The connection ID (read from the end of the PDU).
+/// @param seqNo     The sequence number (not transmitted, but shared between
+///                  master and slave).
+/// @param command   The command byte.
+/// @param data      Pointer to the safe data bytes.
+/// @param dataLen   Number of data bytes to include (1 or 2).
+/// @return The CRC0 value.  This becomes startCrc for the next frame.
+inline uint16_t computeCrc0(uint16_t startCrc, uint16_t connId,
+                             uint16_t seqNo, uint8_t command,
+                             const uint8_t* data, int dataLen) {
+    uint16_t crc = 0;
+    crc = updateCrc16(crc, startCrc);   // oldCRC-Lo, oldCRC-Hi
+    crc = updateCrc16(crc, connId);     // ConnID-Lo, ConnID-Hi
+    crc = updateCrc16(crc, seqNo);      // SeqNo-Lo, SeqNo-Hi
+    crc = updateCrc(crc, command);      // Command
+    for (int i = 0; i < dataLen; i++)
+        crc = updateCrc(crc, data[i]);  // Data bytes
+    return crc;
 }
 
-inline bool verifyFSoECRC(const uint8_t* data, size_t len, uint16_t expected_crc) {
-    return calculate(data, len) == expected_crc;
+/// Compute crc_common: the shared base for multi-CRC segments.
+///
+/// Processes: startCrc(2), ConnID(2), SeqNo(2), Command(1) — the 7 header
+/// bytes.  This base encapsulates all the "header" fields: the inherited
+/// old CRC, the Connection ID, the Sequence Number, and the Command byte.
+/// It is saved and reused as the starting point for each segment CRC.
+///
+/// See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
+inline uint16_t computeCrcCommon(uint16_t startCrc, uint16_t connId,
+                                  uint16_t seqNo, uint8_t command) {
+    uint16_t crc = 0;
+    crc = updateCrc16(crc, startCrc);
+    crc = updateCrc16(crc, connId);
+    crc = updateCrc16(crc, seqNo);
+    crc = updateCrc(crc, command);
+    return crc;
 }
+
+/// Compute CRCi (i >= 1): a subsequent segment CRC from crc_common.
+///
+/// Restarts from crc_common, then processes: Index(2), Data[2i], Data[2i+1].
+/// The index byte pair (1-based, little-endian) ensures that even if two
+/// segments contain identical data bytes, their CRCs will differ because
+/// the index differs.  Without the index, swapping two data segments would
+/// go undetected.
+///
+/// See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
+inline uint16_t computeCrcI(uint16_t crcCommon, uint16_t index,
+                             uint8_t data0, uint8_t data1) {
+    uint16_t crc = crcCommon;           // restart from shared base
+    crc = updateCrc16(crc, index);      // Index-Lo, Index-Hi
+    crc = updateCrc(crc, data0);        // Data[2i]
+    crc = updateCrc(crc, data1);        // Data[2i+1]
+    return crc;
+}
+
+/// Compute all CRCs for an FSoE PDU.
+///
+/// @param startCrc  Previous frame's CRC0 (0 for the first frame).
+/// @param connId    Connection ID.
+/// @param seqNo     Sequence number (shared between master and slave).
+/// @param command   Command byte.
+/// @param data      Safe data bytes.
+/// @param numData   Number of data bytes in the PDU.
+/// @param pduSize   Total PDU size in bytes (CMD + data + CRCs + ConnID).
+/// @return Vector of CRCs: [CRC0, CRC1, CRC2, ...].  The first element
+///         becomes startCrc for the next frame (CRC inheritance).
+inline std::array<uint16_t, 16> computeAllCrcs(uint16_t startCrc,
+                                               uint16_t connId,
+                                               uint16_t seqNo,
+                                               uint8_t command,
+                                               const uint8_t* data,
+                                               int numData,
+                                               int pduSize) {
+    std::array<uint16_t, 16> crcs{};
+    int numCrcs = 0;
+
+    // First 1-2 data bytes (before CRC0).
+    // PDU size <= 6: 1 data byte; PDU size > 6: 2 data bytes.
+    int firstData = (pduSize > 6) ? 2 : 1;
+
+    // CRC0: oldCRC + ConnID + SeqNo + Cmd + Data[0..firstData-1]
+    crcs[numCrcs++] = computeCrc0(startCrc, connId, seqNo, command,
+                                   data, firstData);
+
+    // Additional segment CRCs (if there are more data bytes beyond the
+    // first segment).  Each additional segment covers 2 data bytes (or
+    // 1 data byte + 1 zero-padding byte for odd lengths).
+    // Segment layout: 2 data bytes + 2 CRC bytes = 4 bytes (even),
+    // or 1 data byte + 2 CRC bytes = 3 bytes (odd, last segment).
+    if (numData > firstData) {
+        uint16_t crcCommon = computeCrcCommon(startCrc, connId, seqNo,
+                                               command);
+        int numExtra = (numData - firstData + 1) / 2;
+        int dataPos = firstData;
+
+        for (int i = 1; i <= numExtra; i++) {
+            uint8_t d0 = data[dataPos];
+            uint8_t d1 = (dataPos + 1 < numData) ? data[dataPos + 1] : 0;
+            crcs[numCrcs++] = computeCrcI(crcCommon,
+                                           static_cast<uint16_t>(i),
+                                           d0, d1);
+            dataPos += 2;
+        }
+    }
+
+    return crcs;
+}
+
+// ---------------------------------------------------------------------------
+// Frame layout constants and helpers (unchanged from original)
+// ---------------------------------------------------------------------------
+//
+// PDU byte layout (reconstructed from CalcCrc field accesses):
+//
+//   size = 6 (1 data byte, 1 CRC):
+//     [Command, Data0, CRC0Lo, CRC0Hi, ConnIDLo, ConnIDHi]
+//
+//   size = 7..10 (2 data bytes, 1 CRC):
+//     [Command, Data0, Data1, CRC0Lo, CRC0Hi, ConnIDLo, ConnIDHi]
+//
+//   size > 10 (multi-CRC, 2+2k data bytes):
+//     [Command, Data0, Data1, CRC0(2), Data2, Data3, CRC1(2),
+//      Data4, Data5, CRC2(2), ..., ConnIDLo, ConnIDHi]
+//
+// ConnID is always at the last 2 bytes.
+// CRC0 is at offset 2 (size <= 6) or offset 3 (size > 6).
+// Each additional segment is 4 bytes: 2 data + 2 CRC.
+//
+// See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
 
 inline constexpr size_t MIN_FSOE_FRAME_SIZE = 3;
 
@@ -74,19 +344,20 @@ inline constexpr size_t MIN_FSOE_FRAME_SIZE = 3;
 // Accommodates 16 bytes of safe data + 2 bytes error code (fail-safe response).
 inline constexpr size_t MAX_PARSE_DATA_SIZE = 18;
 
-// ETG.5100 frame layout:
-//   [CMD] [Data0(2B)][CRC0(2B)] ... [DataN(1-2B)][CRCN(2B)] [ConnID(2B)]
-// Each 2-byte data chunk gets its own CRC-16.
-// If data_len is odd, the last chunk is 1 data byte + 2 CRC bytes (no padding).
+/// Compute the total frame size (including CMD, CRCs, and ConnID) for a
+/// given data length.
 inline constexpr size_t fsoeFrameSize(size_t data_len) {
+    if (data_len == 0) return MIN_FSOE_FRAME_SIZE;  // CMD(1) + ConnID(2)
     size_t full_chunks = data_len / 2;
     size_t has_odd = data_len % 2;
     return 1 + full_chunks * 4 + (has_odd ? 3 : 0) + 2;
 }
 
+/// Compute the data length from the frame size.
 inline constexpr size_t fsoeDataLen(size_t frame_size) {
     if (frame_size < MIN_FSOE_FRAME_SIZE) return 0;
-    size_t remaining = frame_size - 1 - 2;
+    if (frame_size == MIN_FSOE_FRAME_SIZE) return 0;  // CMD + ConnID only
+    size_t remaining = frame_size - 1 - 2;  // subtract CMD and ConnID
     size_t full_chunks = remaining / 4;
     size_t remainder = remaining % 4;
     // remainder 0 = all full chunks (even data)
@@ -96,98 +367,347 @@ inline constexpr size_t fsoeDataLen(size_t frame_size) {
     return full_chunks * 2 + (remainder == 3 ? 1 : 0);
 }
 
-inline size_t buildFSoEFrame(uint8_t* out, uint8_t cmd,
-                              const uint8_t* data, size_t data_len,
-                              uint16_t conn_id) {
-    size_t full_chunks = data_len / 2;
-    size_t has_odd = data_len % 2;
-    size_t frame_size = fsoeFrameSize(data_len);
-
-    out[0] = cmd;
-
-    size_t offset = 1;
-    for (size_t i = 0; i < full_chunks; i++) {
-        size_t chunk_start = i * 2;
-        out[offset] = data[chunk_start];
-        out[offset + 1] = data[chunk_start + 1];
-        uint16_t crc = calculate(data + chunk_start, 2);
-        out[offset + 2] = crc & 0xFF;
-        out[offset + 3] = (crc >> 8) & 0xFF;
-        offset += 4;
-    }
-
-    // Last odd byte: 1 data byte + 2 CRC bytes (no padding)
-    if (has_odd) {
-        out[offset] = data[data_len - 1];
-        uint16_t crc = calculate(&data[data_len - 1], 1);
-        out[offset + 1] = crc & 0xFF;
-        out[offset + 2] = (crc >> 8) & 0xFF;
-        offset += 3;
-    }
-
-    out[offset] = conn_id & 0xFF;
-    out[offset + 1] = (conn_id >> 8) & 0xFF;
-
-    return frame_size;
+/// Compute the PDU size from the data length.
+/// PDU size = frame size (CMD + data + CRCs + ConnID).
+inline constexpr size_t fsoePduSize(size_t data_len) {
+    return fsoeFrameSize(data_len);
 }
 
-inline bool parseFSoEFrame(const uint8_t* frame, size_t frame_len,
-                            uint8_t& out_cmd,
-                            uint8_t* out_data, size_t& out_data_len,
-                            uint16_t& out_conn_id) {
+/// Extract data fields from an FSoE frame WITHOUT CRC verification.
+///
+/// This is used when CRC has already been verified (e.g., by validateFrame)
+/// and the caller only needs to extract the command, data, and ConnID.
+/// It does NOT update any CRC state and does NOT verify CRCs.
+///
+/// @param frame      Input frame bytes.
+/// @param frame_len  Frame length in bytes.
+/// @param out_cmd    Receives the command byte.
+/// @param out_data   Receives the data bytes (may be nullptr to skip extraction).
+/// @param out_data_len  Receives the data length.
+/// @param out_conn_id   Receives the connection ID.
+/// @return true if the frame format is valid (CRCs are NOT checked).
+inline bool extractFSoEFrame(const uint8_t* frame, size_t frame_len,
+                              uint8_t& out_cmd,
+                              uint8_t* out_data, size_t& out_data_len,
+                              uint16_t& out_conn_id) {
     if (frame_len < MIN_FSOE_FRAME_SIZE) return false;
 
     out_cmd = frame[0];
 
-    size_t remaining = frame_len - 1 - 2;
-    size_t full_chunks = remaining / 4;
-    size_t remainder = remaining % 4;
-    if (remainder != 0 && remainder != 3) return false;
-    bool has_odd = (remainder == 3);
-    out_data_len = full_chunks * 2 + (has_odd ? 1 : 0);
+    if (frame_len == MIN_FSOE_FRAME_SIZE) {
+        out_data_len = 0;
+        out_conn_id = static_cast<uint16_t>(frame[1]) |
+                      (static_cast<uint16_t>(frame[2]) << 8);
+        return true;
+    }
+
+    size_t data_len = fsoeDataLen(frame_len);
+    if (data_len == 0) return false;
+    if (data_len > MAX_PARSE_DATA_SIZE) return false;
+
+    int pduSize = static_cast<int>(frame_len);
+
+    if (out_data) {
+        if (pduSize <= 6) {
+            out_data[0] = frame[1];
+        } else {
+            size_t offset = 1;
+            out_data[0] = frame[offset];
+            out_data[1] = frame[offset + 1];
+            offset += 4;
+            int numExtra = (static_cast<int>(data_len) - 2 + 1) / 2;
+            for (int i = 1; i <= numExtra; i++) {
+                size_t dataPos = 2 + (i - 1) * 2;
+                out_data[dataPos] = frame[offset];
+                if (dataPos + 1 < data_len) {
+                    out_data[dataPos + 1] = frame[offset + 1];
+                    offset += 4;
+                } else {
+                    offset += 3;
+                }
+            }
+        }
+    }
+    out_data_len = data_len;
+
+    out_conn_id = static_cast<uint16_t>(frame[frame_len - 2]) |
+                  (static_cast<uint16_t>(frame[frame_len - 1]) << 8);
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Frame building
+// ---------------------------------------------------------------------------
+
+/// Build an FSoE frame with correct CRCs.
+///
+/// The frame layout is:
+///   [CMD] [Data0] [Data1] [CRC0(2)] [Data2] [Data3] [CRC1(2)] ... [ConnID(2)]
+///
+/// For 0 data bytes: [CMD] [ConnID(2)]  (no CRC — Reset frame)
+/// For 1 data byte:  [CMD] [Data0] [CRC0(2)] [ConnID(2)]
+/// For 2+ data bytes: [CMD] [Data0] [Data1] [CRC0(2)] ... [ConnID(2)]
+///
+/// @param out        Output buffer (must be at least fsoeFrameSize(data_len) bytes)
+/// @param cmd        Command byte
+/// @param data       Safe data bytes (may be nullptr if data_len == 0)
+/// @param data_len   Number of data bytes
+/// @param conn_id    Connection ID
+/// @param start_crc  Previous frame's CRC0 (CRC inheritance).  Use 0 for the
+///                   very first frame.
+/// @param seq_no     Sequence number (shared between master and slave).
+/// @param out_crc0   If non-null, receives the CRC0 value (for CRC inheritance:
+///                   pass as start_crc to the next frame).
+/// @return Frame size in bytes, or 0 on error.
+inline size_t buildFSoEFrame(uint8_t* out, uint8_t cmd,
+                              const uint8_t* data, size_t data_len,
+                              uint16_t conn_id,
+                              uint16_t start_crc = 0,
+                              uint16_t seq_no = 0,
+                              uint16_t* out_crc0 = nullptr) {
+    if (data_len == 0) {
+        // Reset frame: CMD(1) + ConnID(2) = 3 bytes, no CRC
+        if (out_crc0) *out_crc0 = 0;
+        out[0] = cmd;
+        out[1] = conn_id & 0xFF;
+        out[2] = (conn_id >> 8) & 0xFF;
+        return MIN_FSOE_FRAME_SIZE;
+    }
+
+    size_t frame_size = fsoeFrameSize(data_len);
+    int pduSize = static_cast<int>(frame_size);
+
+    // Compute all CRCs for this PDU
+    auto crcs = computeAllCrcs(start_crc, conn_id, seq_no, cmd,
+                               data, static_cast<int>(data_len), pduSize);
+
+    if (out_crc0) *out_crc0 = crcs[0];
+
+    // Build the frame
+    out[0] = cmd;
+
+    if (pduSize <= 6) {
+        // 1 data byte: [CMD] [Data0] [CRC0(2)] [ConnID(2)]
+        out[1] = data[0];
+        out[2] = crcs[0] & 0xFF;
+        out[3] = (crcs[0] >> 8) & 0xFF;
+        out[4] = conn_id & 0xFF;
+        out[5] = (conn_id >> 8) & 0xFF;
+    } else {
+        // 2+ data bytes: [CMD] [Data0] [Data1] [CRC0(2)] [Data2] [Data3] [CRC1(2)] ... [ConnID(2)]
+        size_t offset = 1;
+        // First segment: 2 data bytes + CRC0
+        out[offset]     = data[0];
+        out[offset + 1] = data[1];
+        out[offset + 2] = crcs[0] & 0xFF;
+        out[offset + 3] = (crcs[0] >> 8) & 0xFF;
+        offset += 4;
+
+        // Additional segments: 2 data bytes + CRCi (or 1 data byte + CRCi for odd)
+        int numExtra = (static_cast<int>(data_len) - 2 + 1) / 2;
+        for (int i = 1; i <= numExtra; i++) {
+            size_t dataPos = 2 + (i - 1) * 2;
+            if (dataPos + 1 < data_len) {
+                // Even segment: 2 data bytes + 2 CRC bytes
+                out[offset]     = data[dataPos];
+                out[offset + 1] = data[dataPos + 1];
+                out[offset + 2] = crcs[i] & 0xFF;
+                out[offset + 3] = (crcs[i] >> 8) & 0xFF;
+                offset += 4;
+            } else {
+                // Odd segment: 1 data byte + 2 CRC bytes = 3 bytes
+                out[offset]     = data[dataPos];
+                out[offset + 1] = crcs[i] & 0xFF;
+                out[offset + 2] = (crcs[i] >> 8) & 0xFF;
+                offset += 3;
+            }
+        }
+
+        // ConnID at the end
+        out[offset]     = conn_id & 0xFF;
+        out[offset + 1] = (conn_id >> 8) & 0xFF;
+    }
+
+    return frame_size;
+}
+
+// ---------------------------------------------------------------------------
+// Frame parsing and CRC verification
+// ---------------------------------------------------------------------------
+
+/// Parse an FSoE frame and verify all CRCs.
+///
+/// @param frame      Input frame bytes.
+/// @param frame_len  Frame length in bytes.
+/// @param out_cmd    Receives the command byte.
+/// @param out_data   Receives the data bytes (may be nullptr to skip extraction).
+/// @param out_data_len  Receives the data length.
+/// @param out_conn_id   Receives the connection ID.
+/// @param start_crc  Previous frame's CRC0 (for CRC inheritance).  Use 0 for
+///                   the very first frame.
+/// @param seq_no     Expected sequence number (shared between master and slave).
+/// @param out_crc0   If non-null, receives the frame's CRC0 (for CRC inheritance:
+///                   pass as start_crc when parsing the next frame).
+/// @return true if all CRCs verify, false otherwise.
+inline bool parseFSoEFrame(const uint8_t* frame, size_t frame_len,
+                            uint8_t& out_cmd,
+                            uint8_t* out_data, size_t& out_data_len,
+                            uint16_t& out_conn_id,
+                            uint16_t start_crc = 0,
+                            uint16_t seq_no = 0,
+                            uint16_t* out_crc0 = nullptr) {
+    if (frame_len < MIN_FSOE_FRAME_SIZE) return false;
+
+    out_cmd = frame[0];
+
+    // Reset frame: CMD(1) + ConnID(2) = 3 bytes, no CRC to verify
+    if (frame_len == MIN_FSOE_FRAME_SIZE) {
+        out_data_len = 0;
+        out_conn_id = static_cast<uint16_t>(frame[1]) |
+                      (static_cast<uint16_t>(frame[2]) << 8);
+        if (out_crc0) *out_crc0 = 0;
+        return true;
+    }
+
+    size_t data_len = fsoeDataLen(frame_len);
+    if (data_len == 0 && frame_len != MIN_FSOE_FRAME_SIZE) return false;
 
     // Safety check: reject frames with payload exceeding the maximum
-    // supported size. MAX_PARSE_DATA_SIZE accommodates the largest
-    // valid FSoE payload (16 bytes of safe data + 2 bytes error code
-    // in a fail-safe response).
-    if (out_data_len > MAX_PARSE_DATA_SIZE) {
-        return false;
+    // supported size.
+    if (data_len > MAX_PARSE_DATA_SIZE) return false;
+
+    int pduSize = static_cast<int>(frame_len);
+
+    // Extract data bytes from the frame
+    if (out_data) {
+        if (pduSize <= 6) {
+            // 1 data byte: [CMD] [Data0] [CRC0(2)] [ConnID(2)]
+            out_data[0] = frame[1];
+        } else {
+            // 2+ data bytes
+            size_t offset = 1;
+            // First segment: 2 data bytes
+            out_data[0] = frame[offset];
+            out_data[1] = frame[offset + 1];
+            offset += 4;  // skip CRC0
+
+            // Additional segments: 2 data bytes (even) or 1 (odd, last)
+            int numExtra = (static_cast<int>(data_len) - 2 + 1) / 2;
+            for (int i = 1; i <= numExtra; i++) {
+                size_t dataPos = 2 + (i - 1) * 2;
+                out_data[dataPos] = frame[offset];
+                if (dataPos + 1 < data_len) {
+                    out_data[dataPos + 1] = frame[offset + 1];
+                    offset += 4;  // 2 data + 2 CRC
+                } else {
+                    // Odd last segment: 1 data + 2 CRC = 3 bytes
+                    offset += 3;
+                }
+            }
+        }
+    }
+    out_data_len = data_len;
+
+    // Extract ConnID from the last 2 bytes
+    out_conn_id = static_cast<uint16_t>(frame[frame_len - 2]) |
+                  (static_cast<uint16_t>(frame[frame_len - 1]) << 8);
+
+    // Compute expected CRCs
+    const uint8_t* data_ptr = out_data ? out_data : nullptr;
+    // If out_data is null, we need a temporary buffer to extract data for CRC
+    uint8_t temp_data[MAX_PARSE_DATA_SIZE] = {0};
+    if (!out_data) {
+        if (pduSize <= 6) {
+            temp_data[0] = frame[1];
+        } else {
+            size_t offset = 1;
+            temp_data[0] = frame[offset];
+            temp_data[1] = frame[offset + 1];
+            offset += 4;
+            int numExtra = (static_cast<int>(data_len) - 2 + 1) / 2;
+            for (int i = 1; i <= numExtra; i++) {
+                size_t dataPos = 2 + (i - 1) * 2;
+                temp_data[dataPos] = frame[offset];
+                if (dataPos + 1 < data_len) {
+                    temp_data[dataPos + 1] = frame[offset + 1];
+                    offset += 4;
+                } else {
+                    offset += 3;
+                }
+            }
+        }
+        data_ptr = temp_data;
     }
 
-    size_t offset = 1;
-    for (size_t i = 0; i < full_chunks; i++) {
-        uint8_t chunk[2] = {frame[offset], frame[offset + 1]};
-        uint16_t stored_crc = static_cast<uint16_t>(frame[offset + 2]) |
-                              (static_cast<uint16_t>(frame[offset + 3]) << 8);
-        uint16_t calc_crc = calculate(chunk, 2);
-        if (stored_crc != calc_crc) {
-            return false;
+    auto expected_crcs = computeAllCrcs(start_crc, out_conn_id, seq_no,
+                                        out_cmd, data_ptr,
+                                        static_cast<int>(data_len), pduSize);
+
+    if (out_crc0) *out_crc0 = expected_crcs[0];
+
+    // Verify each CRC
+    if (pduSize <= 6) {
+        // 1 data byte: [CMD] [Data0] [CRC0(2)] [ConnID(2)]
+        uint16_t stored_crc0 = static_cast<uint16_t>(frame[2]) |
+                               (static_cast<uint16_t>(frame[3]) << 8);
+        if (stored_crc0 != expected_crcs[0]) return false;
+    } else {
+        // 2+ data bytes: verify CRC0 and all subsequent CRCi.
+        // Frame layout: [CMD] [D0] [D1] [CRC0(2)] [D2] [D3] [CRC1(2)] ... [ConnID(2)]
+        // For odd data:  [CMD] [D0] [D1] [CRC0(2)] [D2] [CRC1(2)] [ConnID(2)]
+        // CRC0 is at offset 3 (after CMD + 2 data bytes).
+        // After CRC0, each segment is: [data(1-2)] [CRCi(2)]
+        size_t offset = 3;  // CRC0 starts here
+        int numCrcs = 1;
+        int numExtra = (static_cast<int>(data_len) - 2 + 1) / 2;
+        numCrcs += numExtra;
+
+        for (int i = 0; i < numCrcs; i++) {
+            uint16_t stored_crc = static_cast<uint16_t>(frame[offset]) |
+                                  (static_cast<uint16_t>(frame[offset + 1]) << 8);
+            if (stored_crc != expected_crcs[i]) return false;
+            offset += 2;  // skip this CRC's 2 bytes
+            // Skip the next data segment (if not the last CRC)
+            if (i < numCrcs - 1) {
+                size_t dataPos = 2 + i * 2;
+                if (dataPos + 1 < data_len) {
+                    offset += 2;  // 2 data bytes (even segment)
+                } else {
+                    offset += 1;  // 1 data byte (odd segment)
+                }
+            }
         }
-        if (out_data) {
-            out_data[i * 2] = chunk[0];
-            out_data[i * 2 + 1] = chunk[1];
-        }
-        offset += 4;
     }
 
-    // Last odd byte: 1 data byte + 2 CRC bytes
-    if (has_odd) {
-        uint8_t chunk[1] = {frame[offset]};
-        uint16_t stored_crc = static_cast<uint16_t>(frame[offset + 1]) |
-                              (static_cast<uint16_t>(frame[offset + 2]) << 8);
-        uint16_t calc_crc = calculate(chunk, 1);
-        if (stored_crc != calc_crc) {
-            return false;
-        }
-        if (out_data) {
-            out_data[full_chunks * 2] = chunk[0];
-        }
-        offset += 3;
-    }
-
-    out_conn_id = static_cast<uint16_t>(frame[offset]) |
-                  (static_cast<uint16_t>(frame[offset + 1]) << 8);
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Backward-compatible standard CRC-16 (for parameter CRC computation)
+// ---------------------------------------------------------------------------
+//
+// This is a standard MSB-first CRC-16 with polynomial 0x39B7, init=0, no
+// final XOR.  It is NOT the FSoE frame CRC — it is used only for computing
+// the parameter CRC (a checksum over the parameter data to verify that
+// master and slave have the same parameters).
+//
+// Uses only T0 (the standard byte-wise table).
+inline uint16_t calculate(const uint8_t* data, size_t len,
+                           uint16_t init_crc = 0) {
+    if (!data || len == 0) return init_crc;
+    uint16_t crc = init_crc;
+    for (size_t i = 0; i < len; i++) {
+        // Standard CRC update: crc = (crc << 8) ^ T0[(crc >> 8) ^ data[i]]
+        if constexpr (kUseTable) {
+            crc = static_cast<uint16_t>(
+                (crc << 8) ^ crcTable0[(crc >> 8) ^ data[i]]);
+        } else {
+            crc = static_cast<uint16_t>(
+                (crc << 8) ^ polyMod(static_cast<uint8_t>((crc >> 8) ^ data[i]), 8));
+        }
+    }
+    return crc;
 }
 
 } // namespace FSoE::CRC

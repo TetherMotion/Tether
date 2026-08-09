@@ -30,25 +30,17 @@ using namespace FSoE;
 
 TEST(FSoECRCRegression, PolynomialConstant) {
     EXPECT_EQ(CRC::kPolynomial, 0x39B7);
-    EXPECT_EQ(CRC::kInitValue, 0x0000);
 }
 
 TEST(FSoECRCRegression, TableEntryOne) {
-    // crcTable[1] should be the polynomial itself (CRC of single 0x01 byte)
-    // For non-reflected CRC with poly 0x39B7:
-    //   init=0x0000, byte=0x01: (0x00 << 8) ^ table[(0x00 >> 8) ^ 0x01] = table[1]
-    //   table[1] = 0x39B7
-    EXPECT_EQ(CRC::crcTable[1], 0x39B7);
+    // crcTable0[1] = T0[1] = (1 * x^16) mod P = 0x39B7
+    // This is the standard byte-wise table entry for byte 0x01.
+    EXPECT_EQ(CRC::crcTable0[1], 0x39B7);
 }
 
 TEST(FSoECRCRegression, TableEntryTwo) {
-    // crcTable[2] = (0x39B7 << 8) ^ table[(0x39B7 >> 8) ^ 0x02]
-    //             = 0xB700 ^ table[0x39 ^ 0x02] = 0xB700 ^ table[0x3B]
-    // table[0x3B] = 0x6556 → 0xB700 ^ 0x6556 = 0xD256
-    // But let's just verify it's NOT the old reflected value (0x36F1)
-    EXPECT_NE(CRC::crcTable[2], 0x36F1);
-    // The correct non-reflected value:
-    EXPECT_EQ(CRC::crcTable[2], 0x736E);
+    // crcTable0[2] = T0[2] = (2 * x^16) mod P = 0x736E
+    EXPECT_EQ(CRC::crcTable0[2], 0x736E);
 }
 
 TEST(FSoECRCRegression, CalculateSingleByte) {
@@ -75,7 +67,7 @@ TEST(FSoECRCRegression, CalculateNonZeroForNonZeroData) {
 }
 
 TEST(FSoECRCRegression, CalculateEmpty) {
-    EXPECT_EQ(CRC::calculate(nullptr, 0), CRC::kInitValue);
+    EXPECT_EQ(CRC::calculate(nullptr, 0), 0x0000);
     EXPECT_EQ(CRC::calculate(nullptr, 0, 0xABCD), 0xABCD);
 }
 
@@ -92,9 +84,9 @@ TEST(FSoECRCRegression, OldReflectedTableDiffers) {
     // The first few entries of the old reflected table were:
     //   0x0000, 0x22CF, 0x36F1, 0x143E, ...
     // The new non-reflected table should differ:
-    EXPECT_NE(CRC::crcTable[1], 0x22CF);
-    EXPECT_NE(CRC::crcTable[3], 0x143E);
-    EXPECT_NE(CRC::crcTable[4], 0x1E8D);
+    EXPECT_NE(CRC::crcTable0[1], 0x22CF);
+    EXPECT_NE(CRC::crcTable0[3], 0x143E);
+    EXPECT_NE(CRC::crcTable0[4], 0x1E8D);
 }
 
 // ============================================================================
@@ -292,8 +284,8 @@ TEST(FSoEOddLengthFrameRegression, OddByteChunkIs3BytesNot4) {
     // Verify the odd chunk layout: [data_byte] [crc_lo] [crc_hi]
     // No padding byte — the byte after data is CRC, not a padding zero
     EXPECT_EQ(frame[1], 0xAB);  // Data byte
-    // frame[2] and frame[3] are CRC bytes
-    uint16_t crc = CRC::calculate(&data, 1);
+    // frame[2] and frame[3] are CRC bytes (FSoE CRC0, not standard CRC-16)
+    uint16_t crc = CRC::computeCrc0(0, 0x1234, 0, Command::ProcessData, &data, 1);
     EXPECT_EQ(frame[2], crc & 0xFF);
     EXPECT_EQ(frame[3], (crc >> 8) & 0xFF);
     // frame[4] and frame[5] are ConnID
