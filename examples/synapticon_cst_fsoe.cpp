@@ -7,11 +7,17 @@
  * PDOs for that mode (RxPDO 0x1600 / TxPDO 0x1A00), sends 0 torque, and
  * runs the FSoE safe-motion protocol alongside the cyclic data exchange.
  *
- * FSoE frames are exchanged each cycle via the Synapticon SafeMotion
- * integration (MainInstance + SafeMotionServoEmulator).  The safety layer
- * gates torque output: if the FSoE connection is not operational or motion
- * is not allowed, target_torque is forced to 0 regardless of the commanded
- * value.
+ * FSoE frames are exchanged each cycle with the REAL drive via the FSoE
+ * safety PDOs (RxPDO 0x1700 / TxPDO 0x1B00), which are mapped alongside
+ * the CiA 402 motion PDOs using the multi-PDO-per-sync-manager API.  The
+ * FSoE master state machine (MainInstance) builds the command frame into
+ * the RxPDO 0x1700 buffer and processes the drive's safety status frame
+ * from the TxPDO 0x1B00 buffer each cycle.  The drive's safety firmware
+ * handles the slave side of the FSoE protocol.
+ *
+ * The safety layer gates torque output: if the FSoE connection is not
+ * operational or motion is not allowed, target_torque is forced to 0
+ * regardless of the commanded value.
  *
  * Rich diagnostics are printed each cycle:
  *   - Drive statusword, mode display, actual torque/position
@@ -99,18 +105,34 @@ constexpr uint16_t kMailboxProtocols = EtherCAT::Drives::Synapticon::kMailboxPro
 constexpr uint32_t kSdoTimeoutMs = EtherCAT::Drives::Synapticon::kSdoTimeoutMs;
 
 // SOMANET PDO types — from SynapticonPDO.hpp (extracted from ESI)
+//
+// CiA 402 motion PDOs (CST mode):
 //   RxPDO 0x1600: controlword, modes_of_operation, target_torque,
 //                 target_position, target_velocity, torque_offset,
 //                 tuning_command  (19 bytes)
 //   TxPDO 0x1A00: statusword, modes_of_operation_display, position_actual,
 //                 velocity_actual, torque_actual  (13 bytes)
+//
+// FSoE safety PDOs:
+//   RxPDO 0x1700: FSoE command frame (master→slave, 11 bytes)
+//   TxPDO 0x1B00: FSoE status frame (slave→master, 31 bytes)
+//
+// Both sets are mapped simultaneously using the multi-PDO-per-sync-manager
+// API.  The PDO buffer layout is:
+//   SM2 (Rx, master→slave): [0x1600 (19B)][0x1700 (11B)] = 30 bytes
+//   SM3 (Tx, slave→master): [0x1A00 (13B)][0x1B00 (31B)] = 44 bytes
 using RxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_RxPDO_1600;
 using TxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_TxPDO_1A00;
+using FSoERxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_RxPDO_1700;
+using FSoETxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_TxPDO_1B00;
+
+// FSoE PDO offsets within the combined PDO buffer.
+// The motion PDO (0x1600/0x1A00) comes first; the FSoE PDO (0x1700/0x1B00)
+// follows at the offset equal to the motion PDO size.
+constexpr size_t kFSoERxPDOOffset = sizeof(RxPDO);   // 19 bytes
+constexpr size_t kFSoETxPDOOffset = sizeof(TxPDO);   // 13 bytes
 
 using FSoEMain = EtherCAT::Drives::Synapticon::SafeMotion::MainInstance;
-using FSoEServo = EtherCAT::Drives::Synapticon::SafeMotion::SafeMotionServoEmulator;
-using FSoELoopFeature =
-    EtherCAT::Drives::Synapticon::SafeMotion::MainLoopFeature<RxPDO>;
 
 // ============================================================================
 // Decoded name helpers
@@ -300,6 +322,61 @@ private:
     uint32_t interval_ms_;
     uint64_t elapsed_ms_ = 0;
     uint64_t last_print_ms_ = 0;
+};
+
+// ============================================================================
+// FSoE PDO exchange cyclic task (real drive via PDOs)
+// ============================================================================
+//
+// Exchanges FSoE frames with the real Synapticon drive via the FSoE safety
+// PDOs (RxPDO 0x1700 / TxPDO 0x1B00) that are mapped alongside the CiA 402
+// motion PDOs in the combined PDO buffer.  The FSoE PDOs are at a fixed
+// offset within the buffer (after the motion PDO data).
+
+class FSoEPDOExchangeTask final : public EtherCAT::DS402Master::ICyclicTask {
+public:
+    FSoEPDOExchangeTask(uint16_t slave_index,
+                        FSoEMain& main_instance,
+                        size_t rx_pdo_offset,
+                        size_t tx_pdo_offset)
+        : slave_index_(slave_index)
+        , main_instance_(main_instance)
+        , rx_pdo_offset_(rx_pdo_offset)
+        , tx_pdo_offset_(tx_pdo_offset)
+    {}
+
+    bool update(EtherCAT::DS402Master& master, double dt_seconds) override {
+        if (!main_instance_.featureEnabled()) {
+            return true;
+        }
+
+        elapsed_time_ms_ += static_cast<uint64_t>(dt_seconds * 1000.0);
+
+        auto* drive = master.driveBySlaveIndex(slave_index_);
+        if (drive == nullptr) {
+            return true;  // don't stop the process
+        }
+
+        // Access the FSoE PDO region within the combined PDO buffer.
+        // The motion PDO (0x1600/0x1A00) occupies the first bytes; the FSoE
+        // PDO (0x1700/0x1B00) follows at the configured offset.
+        uint8_t* rx_buffer = static_cast<uint8_t*>(drive->getRxPDOBuffer()) + rx_pdo_offset_;
+        const uint8_t* tx_buffer = static_cast<const uint8_t*>(drive->getTxPDOBuffer()) + tx_pdo_offset_;
+
+        const bool ok = main_instance_.exchangeViaPDO(
+            rx_buffer, sizeof(FSoERxPDO),
+            tx_buffer, sizeof(FSoETxPDO),
+            elapsed_time_ms_);
+
+        return ok;
+    }
+
+private:
+    uint16_t slave_index_;
+    FSoEMain& main_instance_;
+    size_t rx_pdo_offset_;
+    size_t tx_pdo_offset_;
+    uint64_t elapsed_time_ms_ = 0;
 };
 
 // ============================================================================
@@ -521,29 +598,113 @@ int main(int argc, char** argv) {
         }
     }
 
-    // --- Configure drive: CST mode, RxPDO 0x1600 / TxPDO 0x1A00 ---
-    // These are the standard SOMANET CiA 402 PDO mappings from the ESI:
-    //   RxPDO 0x1600 (19 bytes): controlword, modes_of_operation, target_torque,
-    //     target_position, target_velocity, torque_offset, tuning_command
-    //   TxPDO 0x1A00 (13 bytes): statusword, modes_of_operation_display,
-    //     position_actual, velocity_actual, torque_actual
-    Tether::Examples::SingleDriveExampleConfig config;
-    config.drive.slave_index = slave_idx;
-    config.drive.rxpdo_index = EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.index;
-    config.drive.txpdo_index = EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.index;
-    config.drive.rxpdo_size = EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.size;
-    config.drive.txpdo_size = EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.size;
-    config.drive.operating_mode = CiA402::OperatingMode::CyclicSyncTorque;
-    config.drive.sdo_timeout_ms = kSdoTimeoutMs;
-    // Mailbox already configured explicitly above — skip auto-config so the
-    // hardcoded ESI values are not overwritten by SII EEPROM reads.
-    config.drive.auto_configure_mailbox = false;
-
+    // --- Configure drive: CST mode + FSoE, combined PDO mapping ---
+    //
+    // When FSoE is enabled, both the CiA 402 motion PDOs (0x1600/0x1A00) and
+    // the FSoE safety PDOs (0x1700/0x1B00) must be mapped simultaneously.
+    // This requires the multi-PDO-per-sync-manager API
+    // (CiA402Drive::transitionToOp(const Slave::MultiPDOAssignment&)).
+    //
+    // PDO buffer layout (combined):
+    //   SM2 (Rx, master→slave): [0x1600 (19B)][0x1700 (11B)] = 30 bytes
+    //   SM3 (Tx, slave→master): [0x1A00 (13B)][0x1B00 (31B)] = 44 bytes
+    //
+    // When FSoE is disabled (--no-fsoe), only the motion PDOs are mapped
+    // using the standard single-PDO configuration path.
     int rc = 0;
-    if (!Tether::Examples::configureAndEnableSingleDrive(master, config, TAG)) {
-        rc = 3;
+
+    // Discover slaves and initialize distributed clocks (common to both paths)
+    if (!master.ethercatMaster().discoverSlaves()) {
+        TETHER_LOGW(TAG, "No slaves discovered");
+    }
+    const uint16_t minimum_drive_count = static_cast<uint16_t>(slave_idx + 1);
+    if (!master.waitForDriveCount(minimum_drive_count, 2000)) {
+        TETHER_LOGE(TAG, "Timed out waiting for %u drive(s)", minimum_drive_count);
         Tether::Examples::stopHostMasterSession(master, session);
-        return rc;
+        return 3;
+    }
+
+    {
+        EtherCAT::DC::DCConfig dc_config = EtherCAT::DC::DCConfig::defaults();
+        if (!master.initializeDistributedClocks(dc_config)) {
+            TETHER_LOGE(TAG, "Failed to initialize distributed clocks");
+            Tether::Examples::stopHostMasterSession(master, session);
+            return 3;
+        }
+        if (!master.startDistributedClocks()) {
+            TETHER_LOGE(TAG, "Failed to start distributed clocks");
+            Tether::Examples::stopHostMasterSession(master, session);
+            return 3;
+        }
+    }
+
+    // Get the drive and configure it for OP transition
+    auto* drive = master.driveBySlaveIndex(slave_idx);
+    if (drive == nullptr) {
+        TETHER_LOGE(TAG, "Drive %u not found", slave_idx);
+        master.stopDistributedClocks();
+        Tether::Examples::stopHostMasterSession(master, session);
+        return 3;
+    }
+    drive->setSDOTimeout(kSdoTimeoutMs);
+
+    // Set operating mode via SDO while in PRE_OP (before PDO mapping)
+    if (!drive->setOperatingMode(CiA402::OperatingMode::CyclicSyncTorque)) {
+        TETHER_LOGE(TAG, "Failed to set operating mode to CST");
+        master.stopDistributedClocks();
+        Tether::Examples::stopHostMasterSession(master, session);
+        return 3;
+    }
+
+    if (args.enable_fsoe) {
+        // Combined motion + FSoE PDO mapping via multi-PDO assignment
+        const auto assignment =
+            EtherCAT::Drives::Synapticon_pdo::makePDOAssignment(
+                {EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.index,
+                 EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.index},
+                {EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.index,
+                 EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.index});
+
+        TETHER_LOGI(TAG,
+            "Transitioning to OP with combined CST+FSoE PDO mapping: "
+            "SM2=RxPDO 0x1600+0x1700 (%u+%u=%u bytes), "
+            "SM3=TxPDO 0x1A00+0x1B00 (%u+%u=%u bytes)",
+            EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.size,
+            EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.size,
+            static_cast<uint16_t>(EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.size +
+                                  EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.size),
+            EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.size,
+            EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.size,
+            static_cast<uint16_t>(EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.size +
+                                  EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.size));
+
+        if (!drive->transitionToOp(assignment)) {
+            TETHER_LOGE(TAG, "Failed to transition to OP with combined PDO assignment");
+            master.stopDistributedClocks();
+            Tether::Examples::stopHostMasterSession(master, session);
+            return 3;
+        }
+        TETHER_LOGI(TAG, "Slave %u transitioned to OP with combined CST+FSoE PDOs", slave_idx);
+    } else {
+        // FSoE disabled — motion-only single-PDO configuration
+        Tether::Examples::SingleDriveExampleConfig config;
+        config.drive.slave_index = slave_idx;
+        config.drive.rxpdo_index = EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.index;
+        config.drive.txpdo_index = EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.index;
+        config.drive.rxpdo_size = EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.size;
+        config.drive.txpdo_size = EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.size;
+        // Operating mode already set above; set to 0 to skip redundant SDO write
+        config.drive.operating_mode = 0;
+        config.drive.sdo_timeout_ms = kSdoTimeoutMs;
+        config.drive.auto_configure_mailbox = false;
+        config.drive.transition_to_operational = true;
+
+        if (!master.configureDrive(config.drive)) {
+            TETHER_LOGE(TAG, "Failed to configure slave %u", slave_idx);
+            master.stopDistributedClocks();
+            Tether::Examples::stopHostMasterSession(master, session);
+            return 3;
+        }
     }
 
     // --- Add zero-torque motion controller ---
@@ -557,9 +718,8 @@ int main(int argc, char** argv) {
         return rc;
     }
 
-    // --- Set up FSoE safe-motion ---
+    // --- Set up FSoE safe-motion (real drive via PDOs) ---
     std::unique_ptr<FSoEMain> fsoe_main;
-    std::unique_ptr<FSoEServo> fsoe_servo;
 
     if (args.enable_fsoe) {
         const bool debug_fsoe_master =
@@ -573,16 +733,9 @@ int main(int argc, char** argv) {
         main_config.master_address = 0x0001;
         main_config.watchdog_time_ms = args.watchdog_ms;
 
-        EtherCAT::Drives::Synapticon::SafeMotion::ServoEmulatorConfig servo_config;
-        servo_config.slave_address = slave_idx;
-        servo_config.connection_id = args.connection_id;
-        servo_config.safety_address = 0x0001;
-        servo_config.watchdog_time_ms = args.watchdog_ms;
-
         fsoe_main = std::make_unique<FSoEMain>(main_config);
-        fsoe_servo = std::make_unique<FSoEServo>(servo_config);
 
-        if (!fsoe_main->initialize() || !fsoe_servo->initialize()) {
+        if (!fsoe_main->initialize()) {
             TETHER_LOGE(TAG, "FSoE initialization failed");
             rc = 5;
             master.clearCyclicTasks();
@@ -614,11 +767,9 @@ int main(int argc, char** argv) {
 
         // Per-cycle FSoE frame trace logging (--debug fsoe-master).
         // Frame event listeners are invoked from inside the FSoE state
-        // machine for every master→slave (tx) and slave→master (rx) frame,
-        // so this works regardless of whether the exchange goes through the
-        // in-process emulator (MainLoopFeature) or a real drive via PDOs
-        // (exchangeViaPDO).  Each listener receives an immutable
-        // shared_ptr<const std::vector<uint8_t>> copy of the frame bytes.
+        // machine for every master→slave (tx) and slave→master (rx) frame.
+        // Each listener receives an immutable shared_ptr<const
+        // std::vector<uint8_t>> copy of the frame bytes.
         if (debug_fsoe_master) {
             fsoe_main->rawConnection().txFrameEvents().addListener(
                 [](std::shared_ptr<const std::vector<uint8_t>> data) {
@@ -636,10 +787,15 @@ int main(int argc, char** argv) {
                 });
         }
 
-        // Add FSoE exchange as a cyclic task (runs after motion controller)
+        // Add FSoE PDO exchange as a cyclic task.
+        // This exchanges FSoE frames with the REAL drive via the FSoE safety
+        // PDOs (0x1700/0x1B00) mapped in the combined PDO buffer.  The FSoE
+        // PDOs are at a fixed offset after the motion PDO data.
         if (!master.addCyclicTask(
-                std::make_unique<FSoELoopFeature>(slave_idx, *fsoe_main, *fsoe_servo))) {
-            TETHER_LOGE(TAG, "Failed to add FSoE loop feature");
+                std::make_unique<FSoEPDOExchangeTask>(
+                    slave_idx, *fsoe_main,
+                    kFSoERxPDOOffset, kFSoETxPDOOffset))) {
+            TETHER_LOGE(TAG, "Failed to add FSoE PDO exchange task");
             rc = 6;
             master.clearCyclicTasks();
             (void)master.removeMotionController(slave_idx);
@@ -664,6 +820,10 @@ int main(int argc, char** argv) {
     }
 
     // --- Start realtime motion loop ---
+    // This must happen BEFORE enabling the drive so that the FSoE cyclic task
+    // can exchange frames and progress toward the Data state.  Once FSoE
+    // reaches Data, the drive's safe state is cleared and the CiA 402 enable
+    // sequence can succeed.
     EtherCAT::Master::RealtimeMotionLoopConfig loop_config;
     loop_config.cycle_period_us = 1000;
     loop_config.sync_interval_cycles = 10;
@@ -676,6 +836,60 @@ int main(int argc, char** argv) {
         Tether::Examples::shutdownSingleDrive(master, slave_idx);
         Tether::Examples::stopHostMasterSession(master, session);
         return rc;
+    }
+
+    // --- Wait for FSoE to reach Data state (if enabled) ---
+    // The drive starts in SAFE STATE when FSoE safety is active.  The FSoE
+    // master must reach the Data state to clear the safe state and allow the
+    // CiA 402 enable sequence to proceed.  We poll the FSoE connection state
+    // for up to 5 seconds.
+    if (fsoe_main) {
+        constexpr uint32_t kFsoEStartupTimeoutMs = 5000;
+        constexpr uint32_t kFsoEPollIntervalMs = 50;
+        TETHER_LOGI(TAG,
+            "Waiting up to %u ms for FSoE to reach Data state...",
+            kFsoEStartupTimeoutMs);
+
+        uint32_t waited_ms = 0;
+        bool fsoe_data_reached = false;
+        while (waited_ms < kFsoEStartupTimeoutMs) {
+            const auto status = fsoe_main->rawConnection().getStatus();
+            if (status.isOperational()) {
+                fsoe_data_reached = true;
+                break;
+            }
+            if (status.hasError()) {
+                TETHER_LOGE(TAG,
+                    "FSoE entered error state (code=0x%04X) during startup",
+                    status.error_code);
+                break;
+            }
+            Tether::Platform::Clock::instance().delayMilliseconds(kFsoEPollIntervalMs);
+            waited_ms += kFsoEPollIntervalMs;
+        }
+
+        if (fsoe_data_reached) {
+            TETHER_LOGI(TAG,
+                "FSoE reached Data state after %u ms — proceeding with drive enable",
+                waited_ms);
+        } else {
+            TETHER_LOGW(TAG,
+                "FSoE did not reach Data state within %u ms (state=%s) — "
+                "attempting drive enable anyway",
+                waited_ms,
+                fsoeStateName(fsoe_main->rawConnection().getStatus().state));
+        }
+    }
+
+    // --- Enable the drive ---
+    // Now that FSoE has had a chance to reach Data state and clear the safe
+    // state, attempt the CiA 402 enable sequence.  If this fails, we continue
+    // running so the user can observe FSoE debug output (--debug fsoe-master).
+    if (!master.enableDrive(slave_idx, 5000)) {
+        TETHER_LOGE(TAG, "Failed to enable slave %u — continuing for diagnostics", slave_idx);
+        rc = 8;
+    } else {
+        TETHER_LOGI(TAG, "Slave %u drive enabled", slave_idx);
     }
 
     TETHER_LOGI(TAG, "CST mode active, sending 0 torque for %.1f s", args.duration);

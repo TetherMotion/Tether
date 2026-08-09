@@ -116,9 +116,9 @@ inline void stopHostMasterSession(EtherCAT::DS402Master& master, HostMasterSessi
     }
 }
 
-inline bool configureAndEnableSingleDrive(EtherCAT::DS402Master& master,
-                                          const SingleDriveExampleConfig& config,
-                                          const char* tag)
+inline bool configureSingleDrive(EtherCAT::DS402Master& master,
+                                  const SingleDriveExampleConfig& config,
+                                  const char* tag)
 {
     if (!master.ethercatMaster().discoverSlaves()) {
         TETHER_LOGW(tag, "No slaves discovered");
@@ -143,6 +143,17 @@ inline bool configureAndEnableSingleDrive(EtherCAT::DS402Master& master,
     if (!master.configureDrive(config.drive)) {
         TETHER_LOGE(tag, "Failed to configure slave %u", config.drive.slave_index);
         master.stopDistributedClocks();
+        return false;
+    }
+
+    return true;
+}
+
+inline bool configureAndEnableSingleDrive(EtherCAT::DS402Master& master,
+                                          const SingleDriveExampleConfig& config,
+                                          const char* tag)
+{
+    if (!configureSingleDrive(master, config, tag)) {
         return false;
     }
 
