@@ -44,6 +44,8 @@ bool FSoEMasterConnection::initialize()
     current_param_index_ = 0;
     parameter_crc_ = 0;
     fail_safe_entered_ms_ = 0;
+    pdo_tx_count_ = 0;
+    last_rx_frame_.clear();
 
     resetStats();
     parameter_crc_ = computeParameterCRC();
@@ -89,6 +91,8 @@ bool FSoEMasterConnection::resetConnection()
     rx_sequence_ = 0x0F;  // Wrap so first expected RX sequence is 0
     tx_sequence_ = 0;
     current_param_index_ = 0;
+    pdo_tx_count_ = 0;
+    last_rx_frame_.clear();
     stats_.reset_events++;
 
     return true;
@@ -162,6 +166,30 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
 
     stats_.frames_received++;
 
+    // Duplicate frame detection: if the slave re-sends the exact same
+    // frame bytes (e.g. it hasn't seen a new master frame yet and is
+    // repeating its last response), skip re-processing.  This avoids
+    // spurious state transitions or error handling from processing the
+    // same handshake response twice (e.g. a Session response arriving
+    // again after the master has already transitioned to Connection).
+    //
+    // Only applied during handshake states (Session, Connection,
+    // Parameter).  In Data and FailSafe states, identical frames are
+    // expected when the slave's inputs don't change — they must still
+    // be processed to update the watchdog timestamp and refresh safe
+    // input data.
+    if ((status_.state == ConnectionState::Session ||
+         status_.state == ConnectionState::Connection ||
+         status_.state == ConnectionState::Parameter) &&
+        !last_rx_frame_.empty() &&
+        last_rx_frame_.size() == len &&
+        std::memcmp(last_rx_frame_.data(), data, len) == 0) {
+        stats_.duplicate_frames++;
+        return false;
+    }
+
+    last_rx_frame_.assign(data, data + len);
+
     rx_frame_events_.emit([data, len] {
         return std::make_shared<const std::vector<uint8_t>>(data, data + len);
     });
@@ -178,6 +206,19 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
     if (!CRC::parseFSoEFrame(data, len, cmd, frame_data, data_len, conn_id)) {
         stats_.crc_errors++;
         handleError(ErrorCode::CRCError);
+        return false;
+    }
+
+    // Reject frames with unrecognized command bytes.
+    //
+    // On the first PDO cycle(s) before the slave has populated the TxPDO
+    // buffer, the buffer is all zeros.  An all-zero frame passes CRC
+    // trivially (CRC-16 of {0,0} with init 0x0000 is 0x0000) and would
+    // otherwise be treated as a ConnectionIDError (conn_id=0 != configured).
+    // Command 0x00 is not a valid FSoE command, so we silently skip these
+    // frames and let the master retry on the next cycle.
+    if (!isValidCommand(cmd)) {
+        stats_.invalid_frames++;
         return false;
     }
 
@@ -578,6 +619,21 @@ bool FSoEMasterConnection::validateConnectionID(uint16_t conn_id) const
     return conn_id == config_.connection_id;
 }
 
+bool FSoEMasterConnection::isValidCommand(uint8_t cmd)
+{
+    switch (cmd) {
+        case Command::ProcessData:
+        case Command::Reset:
+        case Command::Session:
+        case Command::Connection:
+        case Command::Parameter:
+        case Command::FailSafeData:
+            return true;
+        default:
+            return false;
+    }
+}
+
 // ============================================================================
 // State Transitions
 // ============================================================================
@@ -740,6 +796,24 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
         return false;
     }
 
+    // Startup grace period: skip RxFrame processing for the first few
+    // PDO cycles.  The slave cannot have produced a valid response until
+    // it has received at least one master frame and had time to process
+    // it.  Without DC synchronization there is a one-cycle pipeline
+    // delay (master writes cycle N → slave reads N+1 → slave writes N+1
+    // → master reads N+2), so we need to skip 2 cycles.  With DC sync
+    // the slave responds within the same cycle, but skipping 2 is
+    // harmless — the master just re-sends its current-state frame.
+    //
+    // Without this grace period, the stale TxPDO (all zeros or
+    // uninitialized) would be parsed as an FSoE frame, triggering a
+    // spurious CRCError or ConnectionIDError and immediate fail-safe.
+    constexpr uint32_t kStartupSkipCycles = 2;
+    if (pdo_tx_count_ < kStartupSkipCycles) {
+        pdo_tx_count_++;
+        return false;
+    }
+
     // Process the slave→master FSoE frame from the TxPDO buffer.
     // The drive writes its response into TxPDO each cycle.
     return processRxFrame(tx_pdo_in, tx_pdo_len);
@@ -889,6 +963,8 @@ std::string FSoEMasterConnection::getDiagnostics() const
     diag += "  Sequence Errors: " + std::to_string(stats_.sequence_errors) + "\n";
     diag += "  Watchdog Events: " + std::to_string(stats_.watchdog_events) + "\n";
     diag += "  Reset Events: " + std::to_string(stats_.reset_events) + "\n";
+    diag += "  Invalid Frames: " + std::to_string(stats_.invalid_frames) + "\n";
+    diag += "  Duplicate Frames: " + std::to_string(stats_.duplicate_frames) + "\n";
     diag += "  Recovery Attempts: " + std::to_string(stats_.recovery_attempts) + "\n";
     diag += "  Successful Recoveries: " + std::to_string(stats_.successful_recoveries) + "\n";
 

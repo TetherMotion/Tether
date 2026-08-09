@@ -194,6 +194,7 @@ private:
     bool validateCRC(const uint8_t* data, size_t len) const;
     bool validateSequence(uint8_t seq);
     bool validateConnectionID(uint16_t conn_id) const;
+    static bool isValidCommand(uint8_t cmd);
 
     // State transitions
     void transitionTo(uint8_t new_state);
@@ -223,6 +224,19 @@ private:
 
     // Recovery state
     uint64_t fail_safe_entered_ms_ = 0;
+
+    // PDO startup state: number of Tx frames sent via exchangeViaPDO.
+    // The slave cannot respond until it has received at least one frame,
+    // so the first cycle(s) TxPDO is stale (all zeros or uninitialized).
+    // We skip RxFrame processing until enough frames have been sent for
+    // the slave to have produced a valid response.
+    uint32_t pdo_tx_count_ = 0;
+
+    // Last received frame bytes, for duplicate detection.
+    // If the slave re-sends the same frame (e.g. it hasn't seen a new
+    // master frame yet), we skip re-processing and count it as a
+    // duplicate for diagnostics.
+    std::vector<uint8_t> last_rx_frame_;
 
     // Thread safety
     mutable std::recursive_mutex mutex_;

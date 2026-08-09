@@ -263,6 +263,7 @@ struct ConnectionStats {
     uint32_t reset_events = 0;
     uint32_t watchdog_events = 0;
     uint32_t invalid_frames = 0;
+    uint32_t duplicate_frames = 0;
     uint32_t recovery_attempts = 0;
     uint32_t successful_recoveries = 0;
     uint64_t uptime_ms = 0;
@@ -277,6 +278,7 @@ struct ConnectionStats {
         reset_events = 0;
         watchdog_events = 0;
         invalid_frames = 0;
+        duplicate_frames = 0;
         recovery_attempts = 0;
         successful_recoveries = 0;
         uptime_ms = 0;

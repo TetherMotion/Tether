@@ -336,3 +336,318 @@ TEST(FSoEThreadSafetyTest, ConcurrentMasterAccess) {
 
     SUCCEED();
 }
+
+// ============================================================================
+// Fix #4: Master skips all-zeros TxPDO on first PDO cycle
+// ============================================================================
+//
+// When using exchangeViaPDO() with a real drive, the TxPDO buffer is all
+// zeros on the first cycle(s) before the slave has written a response.
+// An all-zero frame passes CRC trivially (CRC-16 of {0,0} with init 0x0000
+// is 0x0000) and would otherwise trigger a spurious ConnectionIDError
+// (conn_id=0 != configured).  The master must silently skip frames with
+// unrecognized command bytes (0x00 is not a valid FSoE command) and keep
+// retrying instead of going to fail-safe.
+
+class FSoEStaleTxPDOTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        MasterConnectionConfig cfg{};
+        cfg.slave_addr = 0x0100;
+        cfg.slave_safety_addr = 0x0100;
+        cfg.connection_id = 0x1234;
+        cfg.master_addr = 0x0100;
+        cfg.watchdog_timeout_ms = 100;
+        cfg.conn_timeout_ms = 2000;
+        cfg.session_timeout_ms = 5000;
+        cfg.input_size = 4;
+        cfg.output_size = 4;
+        cfg.fail_safe_values = {0, 0, 0, 0, 0, 0, 0, 0};
+        conn = std::make_unique<FSoEMasterConnection>(cfg);
+        conn->initialize();
+        conn->startConnection();
+    }
+
+    std::unique_ptr<FSoEMasterConnection> conn;
+};
+
+TEST_F(FSoEStaleTxPDOTest, AllZeroTxPDODoesNotTriggerFailSafe) {
+    // Simulate the first few PDO cycles where the drive hasn't populated
+    // the TxPDO buffer yet.  Use 31 bytes (the real FSoE TxPDO size for
+    // Synapticon) — this forms a valid FSoE frame structure when all
+    // zeros, which passes CRC trivially but has cmd=0x00 and conn_id=0.
+    constexpr size_t kTxPdoSize = 31;
+    std::vector<uint8_t> rx_pdo(64, 0);
+    std::vector<uint8_t> tx_pdo(kTxPdoSize, 0);  // all zeros — no slave response yet
+
+    uint64_t now = 0;
+    for (int i = 0; i < 10; ++i) {
+        now += 1;  // 1 ms per cycle
+        // exchangeViaPDO should return false (frame skipped or no valid
+        // response) but NOT trigger fail-safe or any error.
+        const bool ok = conn->exchangeViaPDO(
+            rx_pdo.data(), rx_pdo.size(),
+            tx_pdo.data(), tx_pdo.size(),
+            now);
+
+        EXPECT_FALSE(ok) << "Cycle " << i << ": exchange should return false for stale TxPDO";
+        EXPECT_FALSE(conn->isFailSafe())
+            << "Cycle " << i << ": master must not enter fail-safe from stale TxPDO";
+        EXPECT_EQ(conn->getErrorCode(), ErrorCode::NoError)
+            << "Cycle " << i << ": no error code expected from stale TxPDO";
+    }
+
+    // The master should still be in Session state (or Reset→Session),
+    // waiting for a valid slave response.
+    EXPECT_NE(conn->getState(), ConnectionState::FailSafe);
+    EXPECT_NE(conn->getState(), ConnectionState::Error);
+}
+
+TEST_F(FSoEStaleTxPDOTest, MasterRecoversWhenSlaveResponds) {
+    // After several stale TxPDO cycles, verify the master can still
+    // complete the handshake.  We use the synchronous exchangeWith()
+    // path (emulator) for the recovery phase because the FSoE handshake
+    // state machine expects same-cycle responses (as in DC-synchronized
+    // PDO exchange).  The key assertion is that stale frames don't
+    // leave the master in an unrecoverable error/fail-safe state.
+    constexpr size_t kPdoSize = 31;
+    std::vector<uint8_t> rx_pdo(kPdoSize, 0);
+    std::vector<uint8_t> tx_pdo(kPdoSize, 0);
+
+    // Set up a slave emulator for the recovery phase
+    FSoESlaveConfig slave_cfg{};
+    slave_cfg.slaveAddress = 0x0100;
+    slave_cfg.connectionId = 0x1234;
+    slave_cfg.safetyAddress = 0x0100;
+    slave_cfg.safetyLevel = SIL::SIL2;
+    slave_cfg.watchdogTimeoutMs = 200;
+    slave_cfg.connectionTimeoutMs = 2000;
+    slave_cfg.sessionTimeoutMs = 10000;
+    slave_cfg.safeInputSize = 4;
+    slave_cfg.safeOutputSize = 4;
+    slave_cfg.autoRecoveryEnabled = false;
+    slave_cfg.strictCrcCheck = true;
+    slave_cfg.strictSequenceCheck = true;
+    auto slave = std::make_unique<FSoESlave>(slave_cfg);
+    slave->initialize();
+
+    uint64_t now = 0;
+
+    // First 3 cycles: stale TxPDO (all zeros) via exchangeViaPDO.
+    // The master should not enter fail-safe.
+    for (int i = 0; i < 3; ++i) {
+        now += 1;
+        conn->exchangeViaPDO(rx_pdo.data(), rx_pdo.size(),
+                             tx_pdo.data(), tx_pdo.size(), now);
+        ASSERT_FALSE(conn->isFailSafe()) << "Stale cycle " << i;
+    }
+
+    // The master should still be in a non-error state.
+    ASSERT_NE(conn->getState(), ConnectionState::FailSafe);
+    ASSERT_NE(conn->getState(), ConnectionState::Error);
+
+    // Now switch to the synchronous exchange path (emulator) to verify
+    // the master can complete the handshake from its current state.
+    // The master is in Session state (waiting for a slave response).
+    for (int i = 0; i < 30; ++i) {
+        now += 1;
+        ASSERT_TRUE(conn->exchangeWith(*slave, now))
+            << "exchangeWith failed at cycle " << i
+            << " (master state=" << (int)conn->getState() << ")";
+        if (conn->isOperational()) break;
+    }
+
+    EXPECT_TRUE(conn->isOperational())
+        << "Master should reach Data state after slave starts responding";
+}
+
+// ============================================================================
+// Fix #5: Master ignores duplicate frames (slave re-sends same response)
+// ============================================================================
+//
+// In cyclic PDO exchange, the slave may re-send the same response frame if
+// it hasn't seen a new master frame yet (e.g. due to PDO pipeline delay).
+// The master must not re-process identical frames — doing so could cause
+// spurious state transitions, watchdog resets, or error handling.  Duplicates
+// are counted for diagnostics but otherwise ignored.
+
+class FSoEDuplicateFrameTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        MasterConnectionConfig cfg{};
+        cfg.slave_addr = 0x0100;
+        cfg.slave_safety_addr = 0x0100;
+        cfg.connection_id = 0x1234;
+        cfg.master_addr = 0x0100;
+        cfg.watchdog_timeout_ms = 100;
+        cfg.input_size = 4;
+        cfg.output_size = 4;
+        cfg.fail_safe_values = {0, 0, 0, 0, 0, 0, 0, 0};
+        conn = std::make_unique<FSoEMasterConnection>(cfg);
+        conn->initialize();
+        conn->startConnection();
+
+        FSoESlaveConfig slave_cfg{};
+        slave_cfg.slaveAddress = 0x0100;
+        slave_cfg.connectionId = 0x1234;
+        slave_cfg.safetyAddress = 0x0100;
+        slave_cfg.safetyLevel = SIL::SIL2;
+        slave_cfg.watchdogTimeoutMs = 200;
+        slave_cfg.connectionTimeoutMs = 2000;
+        slave_cfg.sessionTimeoutMs = 10000;
+        slave_cfg.safeInputSize = 4;
+        slave_cfg.safeOutputSize = 4;
+        slave_cfg.autoRecoveryEnabled = false;
+        slave_cfg.strictCrcCheck = true;
+        slave_cfg.strictSequenceCheck = true;
+        slave = std::make_unique<FSoESlave>(slave_cfg);
+        slave->initialize();
+    }
+
+    void advanceToData() {
+        uint64_t now = 0;
+        for (int i = 0; i < 20; ++i) {
+            now += 15;
+            ASSERT_TRUE(conn->exchangeWith(*slave, now));
+            if (conn->isOperational()) break;
+        }
+        last_time = now;
+        ASSERT_TRUE(conn->isOperational());
+    }
+
+    std::unique_ptr<FSoEMasterConnection> conn;
+    std::unique_ptr<FSoESlave> slave;
+    uint64_t last_time = 0;
+};
+
+TEST_F(FSoEDuplicateFrameTest, DuplicateFrameIsCountedNotProcessed) {
+    advanceToData();
+
+    // Do one more exchange so the master has a fresh last_rx_frame_
+    last_time += 15;
+    ASSERT_TRUE(conn->exchangeWith(*slave, last_time));
+
+    // Force the master back to Session state to test handshake duplicate
+    // detection.  In Data state, duplicates are expected (constant inputs)
+    // and must be processed for watchdog updates.
+    conn->resetConnection();
+    slave->reset();
+    // Do one exchange to get to Session state and process a Session response.
+    last_time += 15;
+    ASSERT_TRUE(conn->exchangeWith(*slave, last_time));
+    // Master is now in Connection state (processed Session response).
+
+    const auto stats_before = conn->getStats();
+    const auto state_before = conn->getState();
+
+    // Capture the slave's current response (same as what exchangeWith just
+    // processed, since the slave hasn't been fed a new master frame)
+    std::array<uint8_t, 64> tx{};
+    const size_t resp_len = slave->prepareTxFrame(tx.data(), tx.size());
+    ASSERT_GT(resp_len, 0u);
+
+    // This is a duplicate in a handshake state — should be counted, not processed
+    ASSERT_FALSE(conn->processRxFrame(tx.data(), resp_len))
+        << "Duplicate frame in handshake state should return false";
+
+    const auto stats_after = conn->getStats();
+
+    EXPECT_EQ(stats_after.duplicate_frames, stats_before.duplicate_frames + 1);
+    EXPECT_EQ(stats_after.frames_received, stats_before.frames_received + 1);
+    EXPECT_EQ(conn->getState(), state_before);
+    EXPECT_FALSE(conn->isFailSafe());
+    EXPECT_EQ(conn->getErrorCode(), ErrorCode::NoError);
+}
+
+TEST_F(FSoEDuplicateFrameTest, MultipleDuplicatesAllCounted) {
+    advanceToData();
+
+    // Reset to handshake phase
+    conn->resetConnection();
+    slave->reset();
+    last_time += 15;
+    ASSERT_TRUE(conn->exchangeWith(*slave, last_time));
+    // Master is now in Connection state.
+
+    std::array<uint8_t, 64> tx{};
+    const size_t resp_len = slave->prepareTxFrame(tx.data(), tx.size());
+    ASSERT_GT(resp_len, 0u);
+
+    // Send the same frame 5 times — all should be duplicates in handshake state
+    for (int i = 0; i < 5; ++i) {
+        EXPECT_FALSE(conn->processRxFrame(tx.data(), resp_len))
+            << "Duplicate " << i << " should not be processed";
+    }
+
+    const auto stats = conn->getStats();
+    EXPECT_EQ(stats.duplicate_frames, 5u);
+    EXPECT_FALSE(conn->isFailSafe());
+}
+
+TEST_F(FSoEDuplicateFrameTest, DifferentFrameIsProcessed) {
+    advanceToData();
+
+    // Reset to handshake phase
+    conn->resetConnection();
+    slave->reset();
+    last_time += 15;
+    ASSERT_TRUE(conn->exchangeWith(*slave, last_time));
+    // Master is in Connection state.
+
+    // Capture the slave's response (duplicate of what was just processed)
+    std::array<uint8_t, 64> tx_dup{};
+    const size_t len = slave->prepareTxFrame(tx_dup.data(), tx_dup.size());
+    ASSERT_GT(len, 0u);
+
+    // Verify it's indeed a duplicate
+    ASSERT_FALSE(conn->processRxFrame(tx_dup.data(), len));
+
+    // Create a modified frame that differs from last_rx_frame_
+    // but is still a valid FSoE frame (correct CRC).
+    // The slave's Session response is: [cmd(0x4E)][session_id(2)][connID(2)] = 5 bytes
+    // Modify the session_id byte (offset 1) and recalculate CRC for that chunk
+    std::array<uint8_t, 64> tx_new = tx_dup;
+    tx_new[1] ^= 0x01;
+    uint16_t crc = FSoE::CRC::calculate(tx_new.data() + 1, 2);
+    tx_new[3] = crc & 0xFF;
+    tx_new[4] = (crc >> 8) & 0xFF;
+
+    // Different frame should be processed (not a duplicate)
+    const auto stats_before = conn->getStats();
+    const bool ok = conn->processRxFrame(tx_new.data(), len);
+    const auto stats_after = conn->getStats();
+
+    EXPECT_TRUE(ok);
+    EXPECT_EQ(stats_after.duplicate_frames, stats_before.duplicate_frames);
+}
+
+TEST_F(FSoEDuplicateFrameTest, DataStateDuplicateIsProcessed) {
+    advanceToData();
+
+    // In Data state, duplicate frames must still be processed to update
+    // the watchdog timestamp.  The duplicate counter should NOT increment.
+    last_time += 15;
+    ASSERT_TRUE(conn->exchangeWith(*slave, last_time));
+
+    // Capture the slave's response (same as what was just processed)
+    std::array<uint8_t, 64> tx{};
+    const size_t resp_len = slave->prepareTxFrame(tx.data(), tx.size());
+    ASSERT_GT(resp_len, 0u);
+
+    const auto stats_before = conn->getStats();
+    const auto status_before = conn->getStatus();
+
+    // In Data state, this duplicate should be processed (not skipped)
+    const bool ok = conn->processRxFrame(tx.data(), resp_len);
+
+    const auto stats_after = conn->getStats();
+    const auto status_after = conn->getStatus();
+
+    // It should be processed successfully
+    EXPECT_TRUE(ok);
+    // Duplicate counter should NOT increment in Data state
+    EXPECT_EQ(stats_after.duplicate_frames, stats_before.duplicate_frames);
+    // Watchdog timestamp should be updated
+    EXPECT_GE(status_after.last_valid_frame_ms, status_before.last_valid_frame_ms);
+    EXPECT_FALSE(conn->isFailSafe());
+}
