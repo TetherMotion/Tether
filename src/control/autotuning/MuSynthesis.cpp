@@ -13,6 +13,8 @@
 #include <algorithm>
 #include <numeric>
 
+#include <Eigen/Dense>
+
 namespace Control {
 
 // ============================================================================
@@ -291,12 +293,9 @@ double MuSynthesisController::computeMuUpperBound(const std::complex<double>* M,
     }
     
     // For larger matrices, would use power iteration or SVD
-    // Simplified: use Frobenius norm / sqrt(min(m,n))
-    double frobNorm = 0.0;
-    for (int i = 0; i < size * size; i++) {
-        frobNorm += std::norm(M[i]);
-    }
-    return std::sqrt(frobNorm);
+    // Simplified: use Frobenius norm as upper bound
+    Eigen::Map<const Eigen::MatrixXcd> mat(M, size, size);
+    return mat.norm();
 }
 
 double MuSynthesisController::computeMuLowerBound(const std::complex<double>* M,

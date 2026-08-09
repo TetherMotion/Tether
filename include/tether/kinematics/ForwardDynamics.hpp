@@ -35,6 +35,8 @@
 #include "ForwardKinematics.hpp"
 #include "LinearAlgebra.hpp"
 
+#include <Eigen/Dense>
+
 namespace tether::kinematics {
 
 // =============================================================================
@@ -275,20 +277,20 @@ public:
         };
         
         // Compute right-hand side: τ - Cq̇ - g - f
-        float rhs[2];
-        rhs[0] = tau[0] - (C[0][0] * dq[0] + C[0][1] * dq[1]) - g[0] - friction[0];
-        rhs[1] = tau[1] - (C[1][0] * dq[0] + C[1][1] * dq[1]) - g[1] - friction[1];
+        // float[2][2] is row-major; use Eigen::RowMajor in the Map
+        using RowMajorMatrix2f = Eigen::Matrix<float, 2, 2, Eigen::RowMajor>;
+        Eigen::Map<Eigen::Vector2f> eigenRhs(ddq);  // reuse ddq storage temporarily
+        Eigen::Map<const RowMajorMatrix2f> eigenM(&M[0][0]);
+        eigenRhs(0) = tau[0] - (C[0][0] * dq[0] + C[0][1] * dq[1]) - g[0] - friction[0];
+        eigenRhs(1) = tau[1] - (C[1][0] * dq[0] + C[1][1] * dq[1]) - g[1] - friction[1];
         
-        // Solve M * ddq = rhs using 2x2 matrix inverse
-        float det = M[0][0] * M[1][1] - M[0][1] * M[1][0];
-        if (std::abs(det) < 1e-10f) {
+        // Solve M * ddq = rhs using Eigen
+        if (std::abs(eigenM.determinant()) < 1e-10f) {
             ddq[0] = ddq[1] = 0;
             return;
         }
         
-        float inv_det = 1.0f / det;
-        ddq[0] = inv_det * (M[1][1] * rhs[0] - M[0][1] * rhs[1]);
-        ddq[1] = inv_det * (-M[1][0] * rhs[0] + M[0][0] * rhs[1]);
+        eigenRhs = eigenM.ldlt().solve(eigenRhs);
     }
     
     /**
@@ -313,11 +315,17 @@ public:
             m_friction2.compute(dq[1])
         };
         
-        // τ = Mq̈ + Cq̇ + g + f
-        tau[0] = M[0][0] * ddq[0] + M[0][1] * ddq[1] + 
-                 C[0][0] * dq[0] + C[0][1] * dq[1] + g[0] + friction[0];
-        tau[1] = M[1][0] * ddq[0] + M[1][1] * ddq[1] + 
-                 C[1][0] * dq[0] + C[1][1] * dq[1] + g[1] + friction[1];
+        // τ = Mq̈ + Cq̇ + g + f  (using Eigen for matrix-vector ops)
+        using RowMajorMatrix2f = Eigen::Matrix<float, 2, 2, Eigen::RowMajor>;
+        Eigen::Map<const RowMajorMatrix2f> eigenM(&M[0][0]);
+        Eigen::Map<const RowMajorMatrix2f> eigenC(&C[0][0]);
+        Eigen::Map<const Eigen::Vector2f> eigenDdq(ddq);
+        Eigen::Map<const Eigen::Vector2f> eigenDq(dq);
+        Eigen::Map<Eigen::Vector2f> eigenTau(tau);
+        
+        eigenTau = eigenM * eigenDdq + eigenC * eigenDq;
+        eigenTau(0) += g[0] + friction[0];
+        eigenTau(1) += g[1] + friction[1];
     }
     
     /**
@@ -328,10 +336,11 @@ public:
         float M[2][2];
         computeMassMatrix(q[0], q[1], M);
         
-        // Kinetic energy: T = 0.5 * q̇ᵀMq̇
-        float kinetic = 0.5f * (M[0][0] * dq[0] * dq[0] + 
-                                2 * M[0][1] * dq[0] * dq[1] + 
-                                M[1][1] * dq[1] * dq[1]);
+        // Kinetic energy: T = 0.5 * q̇ᵀMq̇  (using Eigen)
+        using RowMajorMatrix2f = Eigen::Matrix<float, 2, 2, Eigen::RowMajor>;
+        Eigen::Map<const RowMajorMatrix2f> eigenM(&M[0][0]);
+        Eigen::Map<const Eigen::Vector2f> eigenDq(dq);
+        float kinetic = 0.5f * static_cast<float>(eigenDq.transpose() * eigenM * eigenDq);
         
         // Potential energy (assuming gravity in -Y)
         float m1 = m_link1.mass;
@@ -477,11 +486,15 @@ public:
             m_friction[2].compute(dq[2])
         };
         
+        // τ = Mq̈ + C + g + f  (using Eigen for matrix-vector multiply)
+        using RowMajorMatrix3f = Eigen::Matrix<float, 3, 3, Eigen::RowMajor>;
+        Eigen::Map<const RowMajorMatrix3f> eigenM(&M[0][0]);
+        Eigen::Map<const Eigen::Vector3f> eigenDdq(ddq);
+        Eigen::Map<Eigen::Vector3f> eigenTau(tau);
+        
+        eigenTau = eigenM * eigenDdq;
         for (int i = 0; i < 3; ++i) {
-            tau[i] = g[i] + friction[i] + C_vel[i];
-            for (int j = 0; j < 3; ++j) {
-                tau[i] += M[i][j] * ddq[j];
-            }
+            eigenTau(i) += g[i] + friction[i] + C_vel[i];
         }
     }
     

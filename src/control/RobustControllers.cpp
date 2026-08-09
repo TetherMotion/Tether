@@ -8,6 +8,8 @@
 #include <cmath>
 #include <cstring>
 
+#include <Eigen/Dense>
+
 namespace Control {
 
 // ============================================================================
@@ -193,55 +195,49 @@ bool H2Controller::design() {
     // Extract Q, R from C1'C1, D12'D12
     std::array<double, MAX_STATE_DIM * MAX_STATE_DIM> Q{};
     std::array<double, MAX_CONTROL_DIM * MAX_CONTROL_DIM> R{};
-    
-    // Q = C1'*C1
-    for (int i = 0; i < m_n; i++) {
-        for (int j = 0; j < m_n; j++) {
-            double sum = 0;
-            for (int k = 0; k < m_nz; k++) {
-                sum += m_C1[k * m_n + i] * m_C1[k * m_n + j];
-            }
-            Q[i * m_n + j] = sum;
-        }
+
+    // Q = C1'*C1  (C1 is m_nz × m_n, row-major flat array)
+    {
+        Eigen::Map<const Eigen::MatrixXd> C1(m_C1.data(), m_nz, m_n);
+        Eigen::MatrixXd Qmat = C1.transpose() * C1;
+        for (int i = 0; i < m_n; ++i)
+            for (int j = 0; j < m_n; ++j)
+                Q[i * m_n + j] = Qmat(i, j);
     }
-    
-    // R = D12'*D12
-    for (int i = 0; i < m_nu; i++) {
-        for (int j = 0; j < m_nu; j++) {
-            double sum = 0;
-            for (int k = 0; k < m_nz; k++) {
-                sum += m_D12[k * m_nu + i] * m_D12[k * m_nu + j];
-            }
-            R[i * m_nu + j] = sum;
-        }
+
+    // R = D12'*D12  (D12 is m_nz × m_nu, row-major flat array)
+    {
+        Eigen::Map<const Eigen::MatrixXd> D12(m_D12.data(), m_nz, m_nu);
+        Eigen::MatrixXd Rmat = D12.transpose() * D12;
+        for (int i = 0; i < m_nu; ++i)
+            for (int j = 0; j < m_nu; ++j)
+                R[i * m_nu + j] = Rmat(i, j);
     }
-    
+
     lqg.setLQRWeights(Q.data(), R.data());
-    
+
     // W = B1*B1', V = D21*D21'
     std::array<double, MAX_STATE_DIM * MAX_STATE_DIM> W{};
     std::array<double, MAX_OUTPUT_DIM * MAX_OUTPUT_DIM> V{};
-    
-    for (int i = 0; i < m_n; i++) {
-        for (int j = 0; j < m_n; j++) {
-            double sum = 0;
-            for (int k = 0; k < m_nw; k++) {
-                sum += m_B1[i * m_nw + k] * m_B1[j * m_nw + k];
-            }
-            W[i * m_n + j] = sum;
-        }
+
+    // W = B1*B1'  (B1 is m_n × m_nw, row-major flat array)
+    {
+        Eigen::Map<const Eigen::MatrixXd> B1(m_B1.data(), m_n, m_nw);
+        Eigen::MatrixXd Wmat = B1 * B1.transpose();
+        for (int i = 0; i < m_n; ++i)
+            for (int j = 0; j < m_n; ++j)
+                W[i * m_n + j] = Wmat(i, j);
     }
-    
-    for (int i = 0; i < m_ny; i++) {
-        for (int j = 0; j < m_ny; j++) {
-            double sum = 0;
-            for (int k = 0; k < m_nw; k++) {
-                sum += m_D21[i * m_nw + k] * m_D21[j * m_nw + k];
-            }
-            V[i * m_ny + j] = sum;
-        }
+
+    // V = D21*D21'  (D21 is m_ny × m_nw, row-major flat array)
+    {
+        Eigen::Map<const Eigen::MatrixXd> D21(m_D21.data(), m_ny, m_nw);
+        Eigen::MatrixXd Vmat = D21 * D21.transpose();
+        for (int i = 0; i < m_ny; ++i)
+            for (int j = 0; j < m_ny; ++j)
+                V[i * m_ny + j] = Vmat(i, j);
     }
-    
+
     lqg.setNoiseCovariances(W.data(), V.data());
     
     if (!lqg.design()) {

@@ -24,6 +24,9 @@
 #include <cstdint>
 #include <cstring>
 
+#include <Eigen/Dense>
+#include <Eigen/Geometry>
+
 namespace tether::kinematics {
 
 // =============================================================================
@@ -154,102 +157,84 @@ struct EulerAngles {
 
 /**
  * @brief Quaternion orientation
+ * 
+ * Uses Eigen::Quaternionf internally for optimized operations while
+ * maintaining the same public API (w, x, y, z members).
  */
 struct Quaternion {
     float w{1};
     float x{0};
     float y{0};
     float z{0};
-    
+
     Quaternion() = default;
     Quaternion(float w_, float x_, float y_, float z_) : w(w_), x(x_), y(y_), z(z_) {}
-    
+
+    /// Convert to Eigen quaternion
+    Eigen::Quaternionf toEigen() const {
+        return Eigen::Quaternionf(w, x, y, z);
+    }
+
+    /// Convert from Eigen quaternion
+    static Quaternion fromEigen(const Eigen::Quaternionf& q) {
+        return Quaternion(q.w(), q.x(), q.y(), q.z());
+    }
+
     /**
      * @brief Create quaternion from axis-angle representation
      */
     static Quaternion fromAxisAngle(const Position3D& axis, float angle) {
-        Position3D n = axis.normalized();
-        float half_angle = angle * 0.5f;
-        float s = std::sin(half_angle);
-        return Quaternion(std::cos(half_angle), n.x * s, n.y * s, n.z * s);
+        Eigen::AngleAxisf aa(angle, Eigen::Vector3f(axis.x, axis.y, axis.z).normalized());
+        return fromEigen(Eigen::Quaternionf(aa));
     }
-    
+
     /**
      * @brief Create quaternion from Euler angles (ZYX convention)
      */
     static Quaternion fromEuler(const EulerAngles& euler) {
-        float cy = std::cos(euler.yaw * 0.5f);
-        float sy = std::sin(euler.yaw * 0.5f);
-        float cp = std::cos(euler.pitch * 0.5f);
-        float sp = std::sin(euler.pitch * 0.5f);
-        float cr = std::cos(euler.roll * 0.5f);
-        float sr = std::sin(euler.roll * 0.5f);
-
-        return Quaternion(
-            cr * cp * cy + sr * sp * sy,
-            sr * cp * cy - cr * sp * sy,
-            cr * sp * cy + sr * cp * sy,
-            cr * cp * sy - sr * sp * cy
-        );
+        // ZYX intrinsic convention: R = Rz(yaw) * Ry(pitch) * Rx(roll)
+        Eigen::Quaternionf q = Eigen::AngleAxisf(euler.yaw, Eigen::Vector3f::UnitZ())
+                             * Eigen::AngleAxisf(euler.pitch, Eigen::Vector3f::UnitY())
+                             * Eigen::AngleAxisf(euler.roll, Eigen::Vector3f::UnitX());
+        return fromEigen(q);
     }
-    
+
     /**
      * @brief Convert to Euler angles
      */
     EulerAngles toEuler() const {
-        EulerAngles euler;
-        
-        // Roll (x-axis rotation)
-        float sinr_cosp = 2.0f * (w * x + y * z);
-        float cosr_cosp = 1.0f - 2.0f * (x * x + y * y);
-        euler.roll = std::atan2(sinr_cosp, cosr_cosp);
-        
-        // Pitch (y-axis rotation)
-        float sinp = 2.0f * (w * y - z * x);
-        if (std::abs(sinp) >= 1.0f) {
-            euler.pitch = std::copysign(HALF_PI, sinp);
-        } else {
-            euler.pitch = std::asin(sinp);
-        }
-        
-        // Yaw (z-axis rotation)
-        float siny_cosp = 2.0f * (w * z + x * y);
-        float cosy_cosp = 1.0f - 2.0f * (y * y + z * z);
-        euler.yaw = std::atan2(siny_cosp, cosy_cosp);
-        
-        return euler;
+        Eigen::Quaternionf q = toEigen();
+        // Extract Euler angles using intrinsic ZYX decomposition
+        Eigen::Vector3f euler = q.toRotationMatrix().canonicalEulerAngles(2, 1, 0); // ZYX
+        EulerAngles result;
+        result.yaw = euler(0);
+        result.pitch = euler(1);
+        result.roll = euler(2);
+        return result;
     }
-    
+
     float magnitude() const {
-        return std::sqrt(w*w + x*x + y*y + z*z);
+        return toEigen().norm();
     }
-    
+
     Quaternion normalized() const {
-        float m = magnitude();
-        if (m < 1e-9f) return Quaternion(1, 0, 0, 0);  // Identity if zero
-        return Quaternion(w/m, x/m, y/m, z/m);
+        return fromEigen(toEigen().normalized());
     }
-    
+
     Quaternion conjugate() const {
-        return Quaternion(w, -x, -y, -z);
+        return fromEigen(toEigen().conjugate());
     }
-    
+
     Quaternion operator*(const Quaternion& q) const {
-        return Quaternion(
-            w*q.w - x*q.x - y*q.y - z*q.z,
-            w*q.x + x*q.w + y*q.z - z*q.y,
-            w*q.y - x*q.z + y*q.w + z*q.x,
-            w*q.z + x*q.y - y*q.x + z*q.w
-        );
+        return fromEigen(toEigen() * q.toEigen());
     }
-    
+
     /**
      * @brief Rotate a vector by this quaternion
      */
     Position3D rotate(const Position3D& v) const {
-        Quaternion qv(0, v.x, v.y, v.z);
-        Quaternion result = (*this) * qv * conjugate();
-        return Position3D(result.x, result.y, result.z);
+        Eigen::Vector3f rotated = toEigen() * Eigen::Vector3f(v.x, v.y, v.z);
+        return Position3D(rotated.x(), rotated.y(), rotated.z());
     }
 };
 
@@ -278,209 +263,147 @@ struct Pose6D {
 
 /**
  * @brief 4x4 Homogeneous transformation matrix
- * 
+ *
  * Row-major storage:
  * | R00 R01 R02 Tx |
  * | R10 R11 R12 Ty |
  * | R20 R21 R22 Tz |
  * |  0   0   0   1 |
+ *
+ * Uses Eigen internally for matrix operations while maintaining the
+ * same float m[16] row-major storage and public API.
  */
 struct Transform4x4 {
     float m[16];
-    
+
     Transform4x4() {
         identity();
     }
-    
+
     void identity() {
         std::memset(m, 0, sizeof(m));
         m[0] = m[5] = m[10] = m[15] = 1.0f;
     }
-    
+
     float& at(int row, int col) { return m[row * 4 + col]; }
     float at(int row, int col) const { return m[row * 4 + col]; }
-    
+
+    /// Map to Eigen row-major 4x4 matrix
+    using EigenMatrix = Eigen::Matrix<float, 4, 4, Eigen::RowMajor>;
+    Eigen::Map<const EigenMatrix> toEigen() const {
+        return Eigen::Map<const EigenMatrix>(m);
+    }
+    Eigen::Map<EigenMatrix> toEigen() {
+        return Eigen::Map<EigenMatrix>(m);
+    }
+    static Transform4x4 fromEigen(const Eigen::Matrix4f& mat) {
+        Transform4x4 t;
+        Eigen::Map<EigenMatrix>(t.m) = mat;
+        return t;
+    }
+
     /**
      * @brief Create rotation about X axis
      */
     static Transform4x4 rotX(float angle) {
-        Transform4x4 t;
-        float c = std::cos(angle);
-        float s = std::sin(angle);
-        t.at(1, 1) = c;  t.at(1, 2) = -s;
-        t.at(2, 1) = s;  t.at(2, 2) = c;
-        return t;
+        return fromEigen(Eigen::Affine3f(Eigen::AngleAxisf(angle, Eigen::Vector3f::UnitX())).matrix());
     }
-    
+
     /**
      * @brief Create rotation about Y axis
      */
     static Transform4x4 rotY(float angle) {
-        Transform4x4 t;
-        float c = std::cos(angle);
-        float s = std::sin(angle);
-        t.at(0, 0) = c;   t.at(0, 2) = s;
-        t.at(2, 0) = -s;  t.at(2, 2) = c;
-        return t;
+        return fromEigen(Eigen::Affine3f(Eigen::AngleAxisf(angle, Eigen::Vector3f::UnitY())).matrix());
     }
-    
+
     /**
      * @brief Create rotation about Z axis
      */
     static Transform4x4 rotZ(float angle) {
-        Transform4x4 t;
-        float c = std::cos(angle);
-        float s = std::sin(angle);
-        t.at(0, 0) = c;  t.at(0, 1) = -s;
-        t.at(1, 0) = s;  t.at(1, 1) = c;
-        return t;
+        return fromEigen(Eigen::Affine3f(Eigen::AngleAxisf(angle, Eigen::Vector3f::UnitZ())).matrix());
     }
-    
+
     /**
      * @brief Create translation matrix
      */
     static Transform4x4 translation(float x, float y, float z) {
-        Transform4x4 t;
-        t.at(0, 3) = x;
-        t.at(1, 3) = y;
-        t.at(2, 3) = z;
-        return t;
+        Eigen::Affine3f t = Eigen::Affine3f::Identity();
+        t.translation() = Eigen::Vector3f(x, y, z);
+        return fromEigen(t.matrix());
     }
-    
+
     static Transform4x4 translation(const Position3D& p) {
         return translation(p.x, p.y, p.z);
     }
-    
+
     /**
      * @brief Create DH (Denavit-Hartenberg) transformation
-     * 
+     *
      * Standard DH convention:
      * T = Rz(theta) * Tz(d) * Tx(a) * Rx(alpha)
      */
     static Transform4x4 DH(float theta, float d, float a, float alpha) {
-        Transform4x4 t;
-        float ct = std::cos(theta);
-        float st = std::sin(theta);
-        float ca = std::cos(alpha);
-        float sa = std::sin(alpha);
-        
-        t.at(0, 0) = ct;      t.at(0, 1) = -st * ca;  t.at(0, 2) = st * sa;   t.at(0, 3) = a * ct;
-        t.at(1, 0) = st;      t.at(1, 1) = ct * ca;   t.at(1, 2) = -ct * sa;  t.at(1, 3) = a * st;
-        t.at(2, 0) = 0;       t.at(2, 1) = sa;        t.at(2, 2) = ca;        t.at(2, 3) = d;
-        t.at(3, 0) = 0;       t.at(3, 1) = 0;         t.at(3, 2) = 0;         t.at(3, 3) = 1;
-        
-        return t;
+        Eigen::Affine3f t =
+            Eigen::Affine3f(Eigen::AngleAxisf(theta, Eigen::Vector3f::UnitZ())) *
+            Eigen::Translation3f(0, 0, d) *
+            Eigen::Translation3f(a, 0, 0) *
+            Eigen::Affine3f(Eigen::AngleAxisf(alpha, Eigen::Vector3f::UnitX()));
+        return fromEigen(t.matrix());
     }
-    
+
     /**
-     * @brief Matrix multiplication
+     * @brief Matrix multiplication (using Eigen)
      */
     Transform4x4 operator*(const Transform4x4& other) const {
-        Transform4x4 result;
-        for (int i = 0; i < 4; ++i) {
-            for (int j = 0; j < 4; ++j) {
-                result.at(i, j) = 0;
-                for (int k = 0; k < 4; ++k) {
-                    result.at(i, j) += at(i, k) * other.at(k, j);
-                }
-            }
-        }
-        return result;
+        return fromEigen(toEigen() * other.toEigen());
     }
-    
+
     /**
-     * @brief Transform a point
+     * @brief Transform a point (using Eigen)
      */
     Position3D transformPoint(const Position3D& p) const {
-        return Position3D(
-            at(0, 0) * p.x + at(0, 1) * p.y + at(0, 2) * p.z + at(0, 3),
-            at(1, 0) * p.x + at(1, 1) * p.y + at(1, 2) * p.z + at(1, 3),
-            at(2, 0) * p.x + at(2, 1) * p.y + at(2, 2) * p.z + at(2, 3)
-        );
+        Eigen::Vector4f homogeneous(p.x, p.y, p.z, 1.0f);
+        Eigen::Vector4f result = toEigen() * homogeneous;
+        return Position3D(result.x(), result.y(), result.z());
     }
-    
+
     /**
-     * @brief Transform a direction (no translation)
+     * @brief Transform a direction (no translation, using Eigen)
      */
     Position3D transformDirection(const Position3D& d) const {
-        return Position3D(
-            at(0, 0) * d.x + at(0, 1) * d.y + at(0, 2) * d.z,
-            at(1, 0) * d.x + at(1, 1) * d.y + at(1, 2) * d.z,
-            at(2, 0) * d.x + at(2, 1) * d.y + at(2, 2) * d.z
-        );
+        Eigen::Matrix3f rotation = toEigen().topLeftCorner<3, 3>();
+        Eigen::Vector3f result = rotation * Eigen::Vector3f(d.x, d.y, d.z);
+        return Position3D(result.x(), result.y(), result.z());
     }
-    
+
     /**
      * @brief Get translation component
      */
     Position3D getTranslation() const {
         return Position3D(at(0, 3), at(1, 3), at(2, 3));
     }
-    
+
     /**
-     * @brief Get rotation as quaternion
+     * @brief Get rotation as quaternion (using Eigen)
      */
     Quaternion getRotation() const {
-        float trace = at(0, 0) + at(1, 1) + at(2, 2);
-        Quaternion q;
-        
-        if (trace > 0) {
-            float s = 0.5f / std::sqrt(trace + 1.0f);
-            q.w = 0.25f / s;
-            q.x = (at(2, 1) - at(1, 2)) * s;
-            q.y = (at(0, 2) - at(2, 0)) * s;
-            q.z = (at(1, 0) - at(0, 1)) * s;
-        } else if (at(0, 0) > at(1, 1) && at(0, 0) > at(2, 2)) {
-            float s = 2.0f * std::sqrt(1.0f + at(0, 0) - at(1, 1) - at(2, 2));
-            q.w = (at(2, 1) - at(1, 2)) / s;
-            q.x = 0.25f * s;
-            q.y = (at(0, 1) + at(1, 0)) / s;
-            q.z = (at(0, 2) + at(2, 0)) / s;
-        } else if (at(1, 1) > at(2, 2)) {
-            float s = 2.0f * std::sqrt(1.0f + at(1, 1) - at(0, 0) - at(2, 2));
-            q.w = (at(0, 2) - at(2, 0)) / s;
-            q.x = (at(0, 1) + at(1, 0)) / s;
-            q.y = 0.25f * s;
-            q.z = (at(1, 2) + at(2, 1)) / s;
-        } else {
-            float s = 2.0f * std::sqrt(1.0f + at(2, 2) - at(0, 0) - at(1, 1));
-            q.w = (at(1, 0) - at(0, 1)) / s;
-            q.x = (at(0, 2) + at(2, 0)) / s;
-            q.y = (at(1, 2) + at(2, 1)) / s;
-            q.z = 0.25f * s;
-        }
-        
-        return q.normalized();
+        Eigen::Matrix3f rotation = toEigen().topLeftCorner<3, 3>();
+        return Quaternion::fromEigen(Eigen::Quaternionf(rotation).normalized());
     }
-    
+
     /**
      * @brief Get as 6-DOF pose
      */
     Pose6D toPose() const {
         return Pose6D(getTranslation(), getRotation());
     }
-    
+
     /**
-     * @brief Matrix inverse (assumes valid transformation matrix)
+     * @brief Matrix inverse (using Eigen Affine3f for proper rigid transform inverse)
      */
     Transform4x4 inverse() const {
-        Transform4x4 inv;
-        
-        // Transpose rotation part
-        for (int i = 0; i < 3; ++i) {
-            for (int j = 0; j < 3; ++j) {
-                inv.at(i, j) = at(j, i);
-            }
-        }
-        
-        // Compute -R^T * t
-        for (int i = 0; i < 3; ++i) {
-            inv.at(i, 3) = -(inv.at(i, 0) * at(0, 3) + 
-                            inv.at(i, 1) * at(1, 3) + 
-                            inv.at(i, 2) * at(2, 3));
-        }
-        
-        return inv;
+        Eigen::Affine3f affine(toEigen());
+        return fromEigen(affine.inverse(Eigen::Isometry).matrix());
     }
 };
 

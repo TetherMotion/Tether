@@ -1,9 +1,9 @@
 #include <tether/identification/DenseLinearAlgebra.hpp>
 
-#include <algorithm>
 #include <cmath>
 #include <limits>
-#include <numeric>
+
+#include <Eigen/Dense>
 
 namespace Identification {
 
@@ -17,6 +17,49 @@ size_t rowCount(const Matrix& matrix) {
 
 size_t colCount(const Matrix& matrix) {
     return matrix.empty() ? 0 : matrix.front().size();
+}
+
+// --- Conversion helpers: std::vector<vector<double>> <-> Eigen::MatrixXd ---
+
+Eigen::MatrixXd toEigen(const Matrix& matrix) {
+    if (matrix.empty()) {
+        return {};
+    }
+    const size_t rows = rowCount(matrix);
+    const size_t cols = colCount(matrix);
+    Eigen::MatrixXd result(rows, cols);
+    for (size_t r = 0; r < rows; ++r) {
+        for (size_t c = 0; c < cols; ++c) {
+            result(r, c) = matrix[r][c];
+        }
+    }
+    return result;
+}
+
+Matrix fromEigen(const Eigen::MatrixXd& matrix) {
+    Matrix result(static_cast<size_t>(matrix.rows()), Vector(matrix.cols(), 0.0));
+    for (int r = 0; r < matrix.rows(); ++r) {
+        for (int c = 0; c < matrix.cols(); ++c) {
+            result[r][c] = matrix(r, c);
+        }
+    }
+    return result;
+}
+
+Eigen::VectorXd toEigenVector(const Vector& vector) {
+    Eigen::VectorXd result(vector.size());
+    for (size_t i = 0; i < vector.size(); ++i) {
+        result(i) = vector[i];
+    }
+    return result;
+}
+
+Vector fromEigenVector(const Eigen::VectorXd& vector) {
+    Vector result(vector.size(), 0.0);
+    for (int i = 0; i < vector.size(); ++i) {
+        result[i] = vector(i);
+    }
+    return result;
 }
 
 } // namespace
@@ -37,70 +80,48 @@ Matrix transpose(const Matrix& matrix) {
     if (matrix.empty()) {
         return {};
     }
-
-    Matrix result = makeMatrix(colCount(matrix), rowCount(matrix), 0.0);
-    for (size_t r = 0; r < rowCount(matrix); ++r) {
-        for (size_t c = 0; c < colCount(matrix); ++c) {
-            result[c][r] = matrix[r][c];
-        }
-    }
-    return result;
+    return fromEigen(toEigen(matrix).transpose());
 }
 
 Matrix multiply(const Matrix& lhs, const Matrix& rhs) {
     if (lhs.empty() || rhs.empty()) {
         return {};
     }
-
-    Matrix result = makeMatrix(rowCount(lhs), colCount(rhs), 0.0);
-    for (size_t r = 0; r < rowCount(lhs); ++r) {
-        for (size_t k = 0; k < colCount(lhs); ++k) {
-            for (size_t c = 0; c < colCount(rhs); ++c) {
-                result[r][c] += lhs[r][k] * rhs[k][c];
-            }
-        }
-    }
-    return result;
+    return fromEigen(toEigen(lhs) * toEigen(rhs));
 }
 
 Vector multiply(const Matrix& lhs, const Vector& rhs) {
-    Vector result(rowCount(lhs), 0.0);
-    for (size_t r = 0; r < rowCount(lhs); ++r) {
-        for (size_t c = 0; c < colCount(lhs) && c < rhs.size(); ++c) {
-            result[r] += lhs[r][c] * rhs[c];
-        }
+    if (lhs.empty()) {
+        return {};
     }
-    return result;
+    return fromEigenVector(toEigen(lhs) * toEigenVector(rhs));
 }
 
 Matrix add(const Matrix& lhs, const Matrix& rhs) {
-    Matrix result = lhs;
-    for (size_t r = 0; r < rowCount(lhs); ++r) {
-        for (size_t c = 0; c < colCount(lhs); ++c) {
-            result[r][c] += rhs[r][c];
-        }
+    if (lhs.empty()) {
+        return rhs;
     }
-    return result;
+    if (rhs.empty()) {
+        return lhs;
+    }
+    return fromEigen(toEigen(lhs) + toEigen(rhs));
 }
 
 Matrix subtract(const Matrix& lhs, const Matrix& rhs) {
-    Matrix result = lhs;
-    for (size_t r = 0; r < rowCount(lhs); ++r) {
-        for (size_t c = 0; c < colCount(lhs); ++c) {
-            result[r][c] -= rhs[r][c];
-        }
+    if (lhs.empty()) {
+        return {};
     }
-    return result;
+    if (rhs.empty()) {
+        return lhs;
+    }
+    return fromEigen(toEigen(lhs) - toEigen(rhs));
 }
 
 Matrix outerProduct(const Vector& lhs, const Vector& rhs) {
-    Matrix result = makeMatrix(lhs.size(), rhs.size(), 0.0);
-    for (size_t r = 0; r < lhs.size(); ++r) {
-        for (size_t c = 0; c < rhs.size(); ++c) {
-            result[r][c] = lhs[r] * rhs[c];
-        }
+    if (lhs.empty() || rhs.empty()) {
+        return {};
     }
-    return result;
+    return fromEigen(toEigenVector(lhs) * toEigenVector(rhs).transpose());
 }
 
 Vector solveLinearSystem(Matrix A, Vector b, double regularization) {
@@ -109,49 +130,30 @@ Vector solveLinearSystem(Matrix A, Vector b, double regularization) {
     }
 
     const size_t n = A.size();
+    Eigen::MatrixXd eigenA = toEigen(A);
+    Eigen::VectorXd eigenB = toEigenVector(b);
+
     for (size_t i = 0; i < n; ++i) {
-        A[i][i] += regularization;
+        eigenA(i, i) += regularization;
     }
 
-    for (size_t pivot = 0; pivot < n; ++pivot) {
-        size_t best_row = pivot;
-        double best_value = std::abs(A[pivot][pivot]);
-        for (size_t row = pivot + 1; row < n; ++row) {
-            const double candidate = std::abs(A[row][pivot]);
-            if (candidate > best_value) {
-                best_value = candidate;
-                best_row = row;
-            }
-        }
-
-        if (best_value < kEpsilon) {
+    // Use LDLT decomposition for symmetric systems, LU for general
+    Eigen::VectorXd solution;
+    if (n > 0 && eigenA.isApprox(eigenA.transpose(), kEpsilon)) {
+        Eigen::LDLT<Eigen::MatrixXd> ldlt(eigenA);
+        if (ldlt.info() != Eigen::Success || ldlt.vectorD().cwiseAbs().minCoeff() < kEpsilon) {
             return Vector(n, 0.0);
         }
-        if (best_row != pivot) {
-            std::swap(A[pivot], A[best_row]);
-            std::swap(b[pivot], b[best_row]);
+        solution = ldlt.solve(eigenB);
+    } else {
+        Eigen::PartialPivLU<Eigen::MatrixXd> lu(eigenA);
+        if (lu.determinant() == 0.0) {
+            return Vector(n, 0.0);
         }
-
-        const double diag = A[pivot][pivot];
-        for (size_t col = pivot; col < n; ++col) {
-            A[pivot][col] /= diag;
-        }
-        b[pivot] /= diag;
-
-        for (size_t row = 0; row < n; ++row) {
-            if (row == pivot) {
-                continue;
-            }
-
-            const double factor = A[row][pivot];
-            for (size_t col = pivot; col < n; ++col) {
-                A[row][col] -= factor * A[pivot][col];
-            }
-            b[row] -= factor * b[pivot];
-        }
+        solution = lu.solve(eigenB);
     }
 
-    return b;
+    return fromEigenVector(solution);
 }
 
 Vector solveLeastSquares(const Matrix& A, const Vector& b, double regularization) {
@@ -159,10 +161,25 @@ Vector solveLeastSquares(const Matrix& A, const Vector& b, double regularization
         return {};
     }
 
-    const Matrix At = transpose(A);
-    Matrix normal = multiply(At, A);
-    Vector rhs = multiply(At, b);
-    return solveLinearSystem(normal, rhs, regularization);
+    Eigen::MatrixXd eigenA = toEigen(A);
+    Eigen::VectorXd eigenB = toEigenVector(b);
+
+    // Apply Tikhonov regularization: solve (A^T A + reg*I) x = A^T b
+    // using Eigen's least-squares with regularization
+    if (regularization > 0.0) {
+        Eigen::MatrixXd AtA = eigenA.transpose() * eigenA;
+        AtA += regularization * Eigen::MatrixXd::Identity(AtA.rows(), AtA.cols());
+        Eigen::VectorXd Atb = eigenA.transpose() * eigenB;
+        Eigen::LDLT<Eigen::MatrixXd> ldlt(AtA);
+        if (ldlt.info() != Eigen::Success) {
+            return Vector(eigenA.cols(), 0.0);
+        }
+        return fromEigenVector(ldlt.solve(Atb));
+    }
+
+    // Use QR decomposition for unregularized least squares
+    Eigen::VectorXd solution = eigenA.colPivHouseholderQr().solve(eigenB);
+    return fromEigenVector(solution);
 }
 
 Matrix pseudoInverse(const Matrix& A, double regularization) {
@@ -170,119 +187,80 @@ Matrix pseudoInverse(const Matrix& A, double regularization) {
         return {};
     }
 
-    if (rowCount(A) >= colCount(A)) {
-        Matrix normal = multiply(transpose(A), A);
-        for (size_t i = 0; i < std::min(rowCount(normal), colCount(normal)); ++i) {
-            normal[i][i] += regularization;
-        }
+    Eigen::MatrixXd eigenA = toEigen(A);
 
-        Matrix result = makeMatrix(colCount(A), rowCount(A), 0.0);
-        for (size_t c = 0; c < rowCount(A); ++c) {
-            Vector rhs(colCount(A), 0.0);
-            for (size_t i = 0; i < colCount(A); ++i) {
-                rhs[i] = A[c][i];
+    // Use complete orthogonal decomposition for pseudo-inverse
+    // This handles both tall and wide matrices correctly
+    if (regularization > 0.0) {
+        // Tikhonov-regularized pseudo-inverse: (A^T A + reg I)^-1 A^T  or  A^T (A A^T + reg I)^-1
+        if (eigenA.rows() >= eigenA.cols()) {
+            Eigen::MatrixXd AtA = eigenA.transpose() * eigenA;
+            AtA += regularization * Eigen::MatrixXd::Identity(AtA.rows(), AtA.cols());
+            Eigen::LDLT<Eigen::MatrixXd> ldlt(AtA);
+            if (ldlt.info() == Eigen::Success) {
+                return fromEigen(ldlt.solve(eigenA.transpose()));
             }
-            const Vector solution = solveLinearSystem(normal, rhs, 0.0);
-            for (size_t r = 0; r < solution.size(); ++r) {
-                result[r][c] = solution[r];
+        } else {
+            Eigen::MatrixXd AAt = eigenA * eigenA.transpose();
+            AAt += regularization * Eigen::MatrixXd::Identity(AAt.rows(), AAt.cols());
+            Eigen::LDLT<Eigen::MatrixXd> ldlt(AAt);
+            if (ldlt.info() == Eigen::Success) {
+                return fromEigen(eigenA.transpose() * ldlt.solve(Eigen::MatrixXd::Identity(AAt.rows(), AAt.cols())));
             }
         }
-        return result;
     }
 
-    const Matrix At = transpose(A);
-    Matrix normal = multiply(A, At);
-    for (size_t i = 0; i < std::min(rowCount(normal), colCount(normal)); ++i) {
-        normal[i][i] += regularization;
+    // Unregularized: use Jacobi SVD for robust pseudo-inverse
+    // A+ = V * Sigma+ * U^T, where Sigma+ inverts non-zero singular values
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(eigenA, Eigen::ComputeThinU | Eigen::ComputeThinV);
+    const Eigen::VectorXd& sv = svd.singularValues();
+    const double pinv_tol = kEpsilon * sv.size() > 0 ? sv(0) * kEpsilon : kEpsilon;
+    Eigen::VectorXd sinv(sv.size());
+    for (int i = 0; i < sv.size(); ++i) {
+        sinv(i) = (std::abs(sv(i)) > pinv_tol) ? 1.0 / sv(i) : 0.0;
     }
-
-    Matrix inverse_part = makeMatrix(rowCount(A), rowCount(A), 0.0);
-    for (size_t c = 0; c < rowCount(A); ++c) {
-        Vector e(rowCount(A), 0.0);
-        e[c] = 1.0;
-        const Vector column_solution = solveLinearSystem(normal, e, 0.0);
-        for (size_t r = 0; r < rowCount(A); ++r) {
-            inverse_part[r][c] = column_solution[r];
-        }
-    }
-    return multiply(At, inverse_part);
+    return fromEigen(svd.matrixV() * sinv.asDiagonal() * svd.matrixU().transpose());
 }
 
 EigenDecomposition jacobiEigenDecomposition(const Matrix& symmetric,
-                                            size_t max_iterations,
-                                            double tolerance) {
+                                            size_t /*max_iterations*/,
+                                            double /*tolerance*/) {
     EigenDecomposition result;
     if (symmetric.empty()) {
         return result;
     }
 
-    const size_t n = symmetric.size();
-    Matrix A = symmetric;
-    Matrix V = identityMatrix(n);
+    Eigen::MatrixXd eigenSym = toEigen(symmetric);
 
-    for (size_t iter = 0; iter < max_iterations; ++iter) {
-        size_t p = 0;
-        size_t q = 1;
-        double max_offdiag = 0.0;
-        for (size_t i = 0; i < n; ++i) {
-            for (size_t j = i + 1; j < n; ++j) {
-                const double value = std::abs(A[i][j]);
-                if (value > max_offdiag) {
-                    max_offdiag = value;
-                    p = i;
-                    q = j;
-                }
-            }
-        }
+    // Use Eigen's SelfAdjointEigenSolver (equivalent to Jacobi but more robust)
+    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(eigenSym);
 
-        if (max_offdiag < tolerance) {
-            break;
-        }
-
-        const double app = A[p][p];
-        const double aqq = A[q][q];
-        const double apq = A[p][q];
-        const double phi = 0.5 * std::atan2(2.0 * apq, aqq - app);
-        const double c = std::cos(phi);
-        const double s = std::sin(phi);
-
-        for (size_t i = 0; i < n; ++i) {
-            const double aip = A[i][p];
-            const double aiq = A[i][q];
-            A[i][p] = c * aip - s * aiq;
-            A[i][q] = s * aip + c * aiq;
-        }
-        for (size_t j = 0; j < n; ++j) {
-            const double apj = A[p][j];
-            const double aqj = A[q][j];
-            A[p][j] = c * apj - s * aqj;
-            A[q][j] = s * apj + c * aqj;
-        }
-        A[p][q] = 0.0;
-        A[q][p] = 0.0;
-
-        for (size_t i = 0; i < n; ++i) {
-            const double vip = V[i][p];
-            const double viq = V[i][q];
-            V[i][p] = c * vip - s * viq;
-            V[i][q] = s * vip + c * viq;
-        }
+    if (solver.info() != Eigen::Success) {
+        // Fallback: return zeros
+        const size_t n = symmetric.size();
+        result.values.resize(n, 0.0);
+        result.vectors = identityMatrix(n);
+        return result;
     }
 
-    std::vector<size_t> order(n);
-    std::iota(order.begin(), order.end(), 0);
-    std::sort(order.begin(), order.end(), [&](size_t lhs, size_t rhs) {
-        return A[lhs][lhs] > A[rhs][rhs];
-    });
+    // SelfAdjointEigenSolver returns eigenvalues in ascending order;
+    // we need descending order to match the original API
+    const Eigen::VectorXd& eigenvalues = solver.eigenvalues();
+    const Eigen::MatrixXd& eigenvectors = solver.eigenvectors();
 
+    const int n = static_cast<int>(symmetric.size());
     result.values.resize(n, 0.0);
     result.vectors = makeMatrix(n, n, 0.0);
-    for (size_t i = 0; i < n; ++i) {
-        result.values[i] = A[order[i]][order[i]];
-        for (size_t r = 0; r < n; ++r) {
-            result.vectors[r][i] = V[r][order[i]];
+
+    // Reverse order (Eigen gives ascending, we want descending)
+    for (int i = 0; i < n; ++i) {
+        const int src_idx = n - 1 - i;
+        result.values[i] = eigenvalues(src_idx);
+        for (int r = 0; r < n; ++r) {
+            result.vectors[r][i] = eigenvectors(r, src_idx);
         }
     }
+
     return result;
 }
 
@@ -299,13 +277,10 @@ double norm(const Vector& vector) {
 }
 
 double frobeniusNorm(const Matrix& matrix) {
-    double acc = 0.0;
-    for (const auto& row : matrix) {
-        for (double value : row) {
-            acc += value * value;
-        }
+    if (matrix.empty()) {
+        return 0.0;
     }
-    return std::sqrt(acc);
+    return toEigen(matrix).norm();
 }
 
 Vector column(const Matrix& matrix, size_t index) {
@@ -323,26 +298,28 @@ void appendRow(Matrix& matrix, const Vector& row) {
 }
 
 double conditionNumber(const Matrix& matrix, double regularization) {
-    if (matrix.empty()) {
+    if (matrix.empty() || colCount(matrix) == 0) {
         return 0.0;
     }
 
-    Matrix gram = multiply(transpose(matrix), matrix);
-    for (size_t i = 0; i < std::min(rowCount(gram), colCount(gram)); ++i) {
-        gram[i][i] += regularization;
-    }
-    const EigenDecomposition eig = jacobiEigenDecomposition(gram);
-    if (eig.values.empty()) {
+    Eigen::MatrixXd eigenA = toEigen(matrix);
+
+    // Use SVD to compute singular values directly
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(eigenA);
+    const Eigen::VectorXd& singularValues = svd.singularValues();
+
+    if (singularValues.size() == 0) {
         return 0.0;
     }
 
-    const double largest = std::sqrt(std::max(eig.values.front(), regularization));
-    double smallest = largest;
-    for (double value : eig.values) {
-        if (value > regularization) {
-            smallest = std::sqrt(value);
-        }
+    double largest = singularValues(0);
+    double smallest = singularValues(singularValues.size() - 1);
+
+    // Apply regularization to smallest singular value
+    if (regularization > 0.0) {
+        smallest = std::sqrt(smallest * smallest + regularization * regularization);
     }
+
     return smallest > kEpsilon ? largest / smallest : std::numeric_limits<double>::infinity();
 }
 

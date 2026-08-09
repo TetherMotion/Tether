@@ -5,6 +5,8 @@
 #include <stdexcept>
 #include <cstring>
 
+#include <Eigen/Dense>
+
 namespace Destabilizer {
 
 // ---------------------------------------------------------------------------
@@ -162,22 +164,15 @@ double MLPPerturbation::evaluate(
     if (static_cast<int>(state.size()) < stateDim_) return 0.0;
 
     // Forward pass through MLP
-    std::vector<double> activation(state.begin(), state.begin() + stateDim_);
+    Eigen::VectorXd activation = Eigen::Map<const Eigen::VectorXd>(state.data(), stateDim_);
     int offset = 0;
 
     auto applyLayer = [&](int inputSize, int outputSize) {
-        std::vector<double> next(outputSize, 0.0);
-        for (int j = 0; j < outputSize; ++j) {
-            double sum = 0.0;
-            for (int i = 0; i < inputSize; ++i) {
-                sum += theta[offset + j * inputSize + i] * activation[i];
-            }
-            offset += inputSize;
-            sum += theta[offset + j]; // bias
-            next[j] = std::tanh(sum);  // tanh activation
-        }
-        offset += outputSize;
-        activation = std::move(next);
+        // Layout: row-major W (outputSize × inputSize) followed by bias (outputSize)
+        Eigen::Map<const Eigen::MatrixXd> W(theta.data() + offset, outputSize, inputSize);
+        Eigen::Map<const Eigen::VectorXd> b(theta.data() + offset + outputSize * inputSize, outputSize);
+        activation = (W * activation + b).array().tanh();
+        offset += outputSize * inputSize + outputSize;
     };
 
     // Input layer
@@ -189,14 +184,11 @@ double MLPPerturbation::evaluate(
     }
 
     // Output layer (linear, no activation)
-    double output = 0.0;
-    for (int i = 0; i < hiddenSize_; ++i) {
-        output += theta[offset + i] * activation[i];
+    {
+        Eigen::Map<const Eigen::VectorXd> wOut(theta.data() + offset, hiddenSize_);
+        double output = wOut.dot(activation) + theta[offset + hiddenSize_];
+        return output;
     }
-    offset += hiddenSize_;
-    output += theta[offset]; // bias
-
-    return output;
 }
 
 // ---------------------------------------------------------------------------

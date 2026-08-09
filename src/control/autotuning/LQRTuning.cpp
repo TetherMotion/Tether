@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <numeric>
 
+#include <Eigen/Dense>
+
 namespace Control {
 namespace Autotuning {
 
@@ -959,85 +961,38 @@ std::vector<double> integrate(const std::vector<double>& signal, double Ts) {
 
 std::vector<double> leastSquares(const std::vector<std::vector<double>>& A,
                                   const std::vector<double>& b) {
-    // Solve normal equations: (A'*A)*x = A'*b
     if (A.empty() || b.empty()) return {};
-    
-    size_t m = A[0].size();  // Number of unknowns
-    size_t n = A.size();     // Number of samples
-    
+
+    const size_t m = A[0].size();  // Number of unknowns
+    const size_t n = A.size();     // Number of samples
+
     if (n != b.size()) return {};
-    
-    // Compute A'*A (m x m)
-    std::vector<std::vector<double>> AtA(m, std::vector<double>(m, 0.0));
-    for (size_t i = 0; i < m; i++) {
-        for (size_t j = 0; j < m; j++) {
-            for (size_t k = 0; k < n; k++) {
-                AtA[i][j] += A[k][i] * A[k][j];
-            }
+
+    // Map into Eigen: A is n×m (row-major std::vector), b is n×1
+    Eigen::MatrixXd eigenA(n, m);
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = 0; j < m; ++j) {
+            eigenA(i, j) = A[i][j];
         }
     }
-    
-    // Compute A'*b (m x 1)
-    std::vector<double> Atb(m, 0.0);
-    for (size_t i = 0; i < m; i++) {
-        for (size_t k = 0; k < n; k++) {
-            Atb[i] += A[k][i] * b[k];
-        }
+    Eigen::VectorXd eigenB(n);
+    for (size_t i = 0; i < n; ++i) {
+        eigenB(i) = b[i];
     }
-    
-    // Regularization
-    for (size_t i = 0; i < m; i++) {
-        AtA[i][i] += 1e-6;
+
+    // Solve normal equations with Tikhonov regularization:
+    // (A^T A + λI) x = A^T b
+    Eigen::MatrixXd AtA = eigenA.transpose() * eigenA;
+    AtA += 1e-6 * Eigen::MatrixXd::Identity(m, m);
+    Eigen::VectorXd Atb = eigenA.transpose() * eigenB;
+
+    Eigen::LDLT<Eigen::MatrixXd> ldlt(AtA);
+    if (ldlt.info() != Eigen::Success) {
+        return std::vector<double>(m, 0.0);
     }
-    
-    // Gauss elimination with partial pivoting
-    std::vector<double> x(m, 0.0);
-    
-    // Augmented matrix
-    std::vector<std::vector<double>> aug(m, std::vector<double>(m + 1));
-    for (size_t i = 0; i < m; i++) {
-        for (size_t j = 0; j < m; j++) {
-            aug[i][j] = AtA[i][j];
-        }
-        aug[i][m] = Atb[i];
-    }
-    
-    // Forward elimination
-    for (size_t k = 0; k < m; k++) {
-        // Find pivot
-        size_t maxRow = k;
-        double maxVal = std::abs(aug[k][k]);
-        for (size_t i = k + 1; i < m; i++) {
-            if (std::abs(aug[i][k]) > maxVal) {
-                maxVal = std::abs(aug[i][k]);
-                maxRow = i;
-            }
-        }
-        std::swap(aug[k], aug[maxRow]);
-        
-        if (std::abs(aug[k][k]) < 1e-10) continue;
-        
-        // Eliminate
-        for (size_t i = k + 1; i < m; i++) {
-            double factor = aug[i][k] / aug[k][k];
-            for (size_t j = k; j <= m; j++) {
-                aug[i][j] -= factor * aug[k][j];
-            }
-        }
-    }
-    
-    // Back substitution
-    for (int i = static_cast<int>(m) - 1; i >= 0; i--) {
-        x[i] = aug[i][m];
-        for (size_t j = i + 1; j < m; j++) {
-            x[i] -= aug[i][j] * x[j];
-        }
-        if (std::abs(aug[i][i]) > 1e-10) {
-            x[i] /= aug[i][i];
-        }
-    }
-    
-    return x;
+
+    Eigen::VectorXd x = ldlt.solve(Atb);
+    return std::vector<double>(x.data(), x.data() + m);
 }
 
 std::vector<double> crossCorrelation(const std::vector<double>& x,

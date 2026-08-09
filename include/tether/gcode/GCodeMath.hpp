@@ -14,6 +14,8 @@
 #include <limits>
 #include <vector>
 
+#include <Eigen/Dense>
+
 namespace GCode {
 namespace Math {
 
@@ -76,50 +78,51 @@ struct Vec3 {
     double x = 0.0;
     double y = 0.0;
     double z = 0.0;
-    
+
     constexpr Vec3() = default;
     constexpr Vec3(double x_, double y_, double z_) : x(x_), y(y_), z(z_) {}
-    
+
+    /// Convert to Eigen vector
+    Eigen::Vector3d toEigen() const { return Eigen::Vector3d(x, y, z); }
+    /// Convert from Eigen vector
+    static Vec3 fromEigen(const Eigen::Vector3d& v) { return {v.x(), v.y(), v.z()}; }
+
     constexpr Vec3 operator+(const Vec3& other) const {
         return {x + other.x, y + other.y, z + other.z};
     }
-    
+
     constexpr Vec3 operator-(const Vec3& other) const {
         return {x - other.x, y - other.y, z - other.z};
     }
-    
+
     constexpr Vec3 operator*(double scalar) const {
         return {x * scalar, y * scalar, z * scalar};
     }
-    
+
     constexpr Vec3 operator/(double scalar) const {
         return {x / scalar, y / scalar, z / scalar};
     }
-    
+
     double length() const {
-        return std::sqrt(x * x + y * y + z * z);
+        return toEigen().norm();
     }
-    
+
     double lengthSquared() const {
-        return x * x + y * y + z * z;
+        return toEigen().squaredNorm();
     }
-    
+
     Vec3 normalized() const {
         double len = length();
         if (len < EPSILON) return {0, 0, 0};
         return *this / len;
     }
-    
+
     constexpr double dot(const Vec3& other) const {
         return x * other.x + y * other.y + z * other.z;
     }
-    
-    constexpr Vec3 cross(const Vec3& other) const {
-        return {
-            y * other.z - z * other.y,
-            z * other.x - x * other.z,
-            x * other.y - y * other.x
-        };
+
+    Vec3 cross(const Vec3& other) const {
+        return fromEigen(toEigen().cross(other.toEigen()));
     }
 };
 
@@ -130,36 +133,41 @@ struct Vec3 {
 struct Vec2 {
     double x = 0.0;
     double y = 0.0;
-    
+
     constexpr Vec2() = default;
     constexpr Vec2(double x_, double y_) : x(x_), y(y_) {}
-    
+
+    /// Convert to Eigen vector
+    Eigen::Vector2d toEigen() const { return Eigen::Vector2d(x, y); }
+    /// Convert from Eigen vector
+    static Vec2 fromEigen(const Eigen::Vector2d& v) { return {v.x(), v.y()}; }
+
     constexpr Vec2 operator+(const Vec2& other) const {
         return {x + other.x, y + other.y};
     }
-    
+
     constexpr Vec2 operator-(const Vec2& other) const {
         return {x - other.x, y - other.y};
     }
-    
+
     constexpr Vec2 operator*(double scalar) const {
         return {x * scalar, y * scalar};
     }
-    
+
     double length() const {
-        return std::sqrt(x * x + y * y);
+        return toEigen().norm();
     }
-    
+
     Vec2 normalized() const {
         double len = length();
         if (len < EPSILON) return {0, 0};
         return {x / len, y / len};
     }
-    
+
     constexpr double dot(const Vec2& other) const {
         return x * other.x + y * other.y;
     }
-    
+
     // Perpendicular vector (90 degrees CCW)
     constexpr Vec2 perp() const {
         return {-y, x};
@@ -388,18 +396,21 @@ inline Vec2 interpolateArc(
  * @brief Calculate the perpendicular distance from a point to a line segment
  */
 inline double pointToSegmentDistance(const Vec2& point, const Vec2& segStart, const Vec2& segEnd) {
-    Vec2 seg = segEnd - segStart;
-    double len2 = seg.x * seg.x + seg.y * seg.y;
-    
+    Eigen::Vector2d p = point.toEigen();
+    Eigen::Vector2d s = segStart.toEigen();
+    Eigen::Vector2d e = segEnd.toEigen();
+    Eigen::Vector2d seg = e - s;
+    double len2 = seg.squaredNorm();
+
     if (len2 < EPSILON * EPSILON) {
         // Segment is effectively a point
-        return (point - segStart).length();
+        return (p - s).norm();
     }
-    
+
     // Project point onto line
-    double t = clamp(((point - segStart).dot(seg)) / len2, 0.0, 1.0);
-    Vec2 proj = segStart + seg * t;
-    return (point - proj).length();
+    double t = clamp((p - s).dot(seg) / len2, 0.0, 1.0);
+    Eigen::Vector2d proj = s + seg * t;
+    return (p - proj).norm();
 }
 
 // ============================================================================
