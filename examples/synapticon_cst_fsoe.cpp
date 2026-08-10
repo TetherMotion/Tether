@@ -385,30 +385,54 @@ public:
         uint8_t* rx_buffer = static_cast<uint8_t*>(drive->getRxPDOBuffer()) + rx_pdo_offset_;
         const uint8_t* tx_buffer = static_cast<const uint8_t*>(drive->getTxPDOBuffer()) + tx_pdo_offset_;
 
-        // Log the first few TxPDO frames to see what the slave sends
-        if (tx_dump_count_ < 20) {
-            // Dump FSoE region (31 bytes)
+        // Log the first few PDO frames to see both sides of the conversation.
+        // TxPDO (slave→master) is dumped BEFORE exchangeViaPDO — it contains
+        // what the slave produced in response to the previous master frame.
+        // RxPDO (master→slave) is dumped AFTER exchangeViaPDO — it contains
+        // what the master just built for this cycle.
+        if (dump_count_ < 20) {
+            // --- TxPDO (slave→master) ---
+            // FSoE region (31 bytes)
             char hex[128];
             size_t pos = 0;
             for (size_t b = 0; b < sizeof(FSoETxPDO) && pos + 3 < sizeof(hex); b++) {
                 pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", tx_buffer[b]));
             }
-            TETHER_LOGI("fsoe-cyclic", "[TxPDO-FSoE] dump %u: %s", tx_dump_count_, hex);
-            // Dump motion PDO region (13 bytes at offset 31)
+            TETHER_LOGI("fsoe-cyclic", "[TxPDO-FSoE] dump %u: %s", dump_count_, hex);
+            // Motion PDO region (13 bytes at offset 31)
             const uint8_t* motion_tx = static_cast<const uint8_t*>(drive->getTxPDOBuffer()) + tx_pdo_offset_ + sizeof(FSoETxPDO);
             char mhex[64];
             pos = 0;
             for (size_t b = 0; b < 13 && pos + 3 < sizeof(mhex); b++) {
                 pos += static_cast<size_t>(snprintf(mhex + pos, sizeof(mhex) - pos, "%02X ", motion_tx[b]));
             }
-            TETHER_LOGI("fsoe-cyclic", "[TxPDO-Motion] dump %u: %s", tx_dump_count_, mhex);
-            tx_dump_count_++;
+            TETHER_LOGI("fsoe-cyclic", "[TxPDO-Motion] dump %u: %s", dump_count_, mhex);
         }
 
         const bool ok = main_instance_.exchangeViaPDO(
             rx_buffer, sizeof(FSoERxPDO),
             tx_buffer, sizeof(FSoETxPDO),
             elapsed_time_ms_);
+
+        if (dump_count_ < 20) {
+            // --- RxPDO (master→slave) ---
+            // FSoE region (11 bytes)
+            char hex[128];
+            size_t pos = 0;
+            for (size_t b = 0; b < sizeof(FSoERxPDO) && pos + 3 < sizeof(hex); b++) {
+                pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", rx_buffer[b]));
+            }
+            TETHER_LOGI("fsoe-cyclic", "[RxPDO-FSoE] dump %u: %s", dump_count_, hex);
+            // Motion PDO region (19 bytes at offset 11)
+            const uint8_t* motion_rx = static_cast<const uint8_t*>(drive->getRxPDOBuffer()) + rx_pdo_offset_ + sizeof(FSoERxPDO);
+            char mhex[80];
+            pos = 0;
+            for (size_t b = 0; b < 19 && pos + 3 < sizeof(mhex); b++) {
+                pos += static_cast<size_t>(snprintf(mhex + pos, sizeof(mhex) - pos, "%02X ", motion_rx[b]));
+            }
+            TETHER_LOGI("fsoe-cyclic", "[RxPDO-Motion] dump %u: %s", dump_count_, mhex);
+            dump_count_++;
+        }
 
         return ok;
     }
@@ -419,7 +443,7 @@ private:
     size_t rx_pdo_offset_;
     size_t tx_pdo_offset_;
     uint64_t elapsed_time_ms_ = 0;
-    uint32_t tx_dump_count_ = 0;
+    uint32_t dump_count_ = 0;
 };
 
 // ============================================================================
@@ -1197,10 +1221,16 @@ int main(int argc, char** argv) {
                     fsoeStateName(old_s), fsoeStateName(new_s));
             });
         fsoe_main->rawConnection().setErrorCallback(
-            [](uint16_t code) {
-                TETHER_LOGE(TAG,
-                    "[FSoE] error: 0x%04X (%s)",
-                    code, fsoeErrorName(code));
+            [](uint16_t code, const FSoE::FSoEErrorDetail& detail) {
+                if (detail.message[0] != '\0') {
+                    TETHER_LOGE(TAG,
+                        "[FSoE] error: 0x%04X (%s): %s",
+                        code, fsoeErrorName(code), detail.message);
+                } else {
+                    TETHER_LOGE(TAG,
+                        "[FSoE] error: 0x%04X (%s)",
+                        code, fsoeErrorName(code));
+                }
             });
         fsoe_main->rawConnection().setFailSafeCallback(
             []() {

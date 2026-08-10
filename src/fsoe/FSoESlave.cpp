@@ -466,7 +466,12 @@ void FSoESlave::update(uint64_t currentTimeMs) {
     // Check for simulated watchdog timeout
     if (errorInjection_.enabled && errorInjection_.simulateWatchdogTimeout) {
         if (currentTimeMs - lastValidFrameMs_ > errorInjection_.watchdogDelayMs) {
-            handleError(ErrorCode::WatchdogError, config_.treatTimeoutAsCritical);
+            FSoEErrorDetail detail;
+            snprintf(detail.message, sizeof(detail.message),
+                     "Slave simulated watchdog timeout after %llu ms (injected)",
+                     static_cast<unsigned long long>(
+                         currentTimeMs - lastValidFrameMs_));
+            handleError(ErrorCode::WatchdogError, config_.treatTimeoutAsCritical, detail);
         }
     }
 }
@@ -565,7 +570,11 @@ void FSoESlave::applyFailSafeOutputs() {
 
 bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
     if (len < CRC::MIN_FSOE_FRAME_SIZE) {
-        handleError(ErrorCode::DataLengthError, false);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave received frame too short: %zu bytes (minimum %zu)",
+                 len, static_cast<size_t>(CRC::MIN_FSOE_FRAME_SIZE));
+        handleError(ErrorCode::DataLengthError, false, detail);
         statistics_.onDataLengthError();
         return false;
     }
@@ -574,10 +583,30 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
     uint8_t cmd = 0;
     size_t data_len = 0;
     uint16_t conn_id = 0;
+    CRC::CrcErrorDetail crc_error_detail{};
 
     if (!CRC::parseFSoEFrame(data, len, cmd, nullptr, data_len, conn_id,
-                             last_rx_crc0_, rx_seq_no_, &last_rx_crc0_)) {
-        handleError(ErrorCode::CRCError, config_.treatCrcErrorAsCritical);
+                             last_rx_crc0_, rx_seq_no_, &last_rx_crc0_,
+                             &crc_error_detail)) {
+        FSoEErrorDetail detail;
+        if (crc_error_detail.valid) {
+            detail.crc_valid = true;
+            detail.crc_segment_index = crc_error_detail.segment_index;
+            detail.crc_expected = crc_error_detail.expected_crc;
+            detail.crc_received = crc_error_detail.received_crc;
+            detail.crc_frame_offset = crc_error_detail.frame_offset;
+            snprintf(detail.message, sizeof(detail.message),
+                     "Slave received wrong CRC from master: segment %d "
+                     "expected 0x%04X got 0x%04X (frame offset %zu)",
+                     detail.crc_segment_index,
+                     detail.crc_expected, detail.crc_received,
+                     detail.crc_frame_offset);
+        } else {
+            snprintf(detail.message, sizeof(detail.message),
+                     "Slave received malformed FSoE frame from master "
+                     "(unparseable)");
+        }
+        handleError(ErrorCode::CRCError, config_.treatCrcErrorAsCritical, detail);
         statistics_.onCrcError();
         return false;
     }
@@ -605,7 +634,10 @@ bool FSoESlave::validateCRC(const uint8_t* data, size_t len) {
     // CRC validation is now done inside parseFSoEFrame in validateFrame.
     // This method is kept for compatibility but delegates to parseFSoEFrame.
     if (errorInjection_.enabled && errorInjection_.injectCRCError) {
-        handleError(ErrorCode::CRCError, config_.treatCrcErrorAsCritical);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave CRC error injected (test mode)");
+        handleError(ErrorCode::CRCError, config_.treatCrcErrorAsCritical, detail);
         statistics_.onCrcError();
         return false;
     }
@@ -634,7 +666,15 @@ bool FSoESlave::validateConnectionId(uint16_t connId) {
     }
     
     if (connId != currentConnectionId_) {
-        handleError(ErrorCode::ConnectionIDError, config_.treatConnIdErrorAsCritical);
+        FSoEErrorDetail detail;
+        detail.conn_id_valid = true;
+        detail.expected_conn_id = currentConnectionId_;
+        detail.received_conn_id = connId;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave received wrong ConnectionID from master: "
+                 "expected 0x%04X got 0x%04X",
+                 detail.expected_conn_id, detail.received_conn_id);
+        handleError(ErrorCode::ConnectionIDError, config_.treatConnIdErrorAsCritical, detail);
         statistics_.onConnectionIdError();
         return false;
     }
@@ -695,13 +735,24 @@ void FSoESlave::processConnection(const uint8_t* data, size_t len) {
     uint16_t conn_id = 0;
 
     if (!CRC::extractFSoEFrame(data, len, cmd, frame_data, data_len, conn_id)) {
-        handleError(ErrorCode::CRCError, true);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave failed to extract Connection frame from master");
+        handleError(ErrorCode::CRCError, true, detail);
         return;
     }
 
     // Validate connection ID matches configured value
     if (conn_id != config_.connectionId) {
-        handleError(ErrorCode::ConnectionIDError, true);
+        FSoEErrorDetail detail;
+        detail.conn_id_valid = true;
+        detail.expected_conn_id = config_.connectionId;
+        detail.received_conn_id = conn_id;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave received wrong ConnectionID in Connection phase: "
+                 "expected 0x%04X got 0x%04X",
+                 detail.expected_conn_id, detail.received_conn_id);
+        handleError(ErrorCode::ConnectionIDError, true, detail);
         return;
     }
 
@@ -713,14 +764,26 @@ void FSoESlave::processConnection(const uint8_t* data, size_t len) {
     //   [safetyAddr_lo] [safetyAddr_hi] [paramCRC_lo] [paramCRC_hi]
     // Require the full 4-byte payload — the master always sends 4 bytes.
     if (data_len < 4) {
-        handleError(ErrorCode::DataLengthError, true);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave Connection frame too short: got %zu bytes, expected 4",
+                 data_len);
+        handleError(ErrorCode::DataLengthError, true, detail);
         return;
     }
 
     uint16_t safetyAddr = static_cast<uint16_t>(frame_data[0]) |
                           (static_cast<uint16_t>(frame_data[1]) << 8);
     if (safetyAddr != 0 && safetyAddr != config_.safetyAddress) {
-        handleError(ErrorCode::ConnectionIDError, true);
+        FSoEErrorDetail detail;
+        detail.conn_id_valid = true;
+        detail.expected_conn_id = config_.safetyAddress;
+        detail.received_conn_id = safetyAddr;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave safety address mismatch in Connection phase: "
+                 "expected 0x%04X got 0x%04X",
+                 detail.expected_conn_id, detail.received_conn_id);
+        handleError(ErrorCode::ConnectionIDError, true, detail);
         return;
     }
 
@@ -729,7 +792,11 @@ void FSoESlave::processConnection(const uint8_t* data, size_t len) {
     // Verify parameter CRC if expected value is configured (non-zero)
     if (config_.expectedParameterCRC != 0 &&
         receivedParameterCRC_ != config_.expectedParameterCRC) {
-        handleError(ErrorCode::ParameterError, true);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave parameter CRC mismatch: expected 0x%04X got 0x%04X",
+                 config_.expectedParameterCRC, receivedParameterCRC_);
+        handleError(ErrorCode::ParameterError, true, detail);
         return;
     }
 
@@ -748,7 +815,10 @@ void FSoESlave::processParameter(const uint8_t* data, size_t len) {
     uint16_t conn_id = 0;
 
     if (!CRC::extractFSoEFrame(data, len, cmd, frame_data, data_len, conn_id)) {
-        handleError(ErrorCode::CRCError, true);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave failed to extract Parameter frame from master");
+        handleError(ErrorCode::CRCError, true, detail);
         return;
     }
 
@@ -757,7 +827,11 @@ void FSoESlave::processParameter(const uint8_t* data, size_t len) {
     //   [watchdog_lo] [watchdog_hi] [safety_level] [input_size] [output_size] [reserved]
     // Require the full 6-byte parameter payload (5 data bytes + 1 reserved).
     if (data_len < 6) {
-        handleError(ErrorCode::DataLengthError, true);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave Parameter frame too short: got %zu bytes, expected 6",
+                 data_len);
+        handleError(ErrorCode::DataLengthError, true, detail);
         return;
     }
 
@@ -769,19 +843,32 @@ void FSoESlave::processParameter(const uint8_t* data, size_t len) {
 
     // Validate watchdog range
     if (watchdog < Limits::WatchdogTimeoutMin || watchdog > Limits::WatchdogTimeoutMax) {
-        handleError(ErrorCode::ParameterError, true);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave watchdog %u out of range [%u, %u]",
+                 watchdog, Limits::WatchdogTimeoutMin, Limits::WatchdogTimeoutMax);
+        handleError(ErrorCode::ParameterError, true, detail);
         return;
     }
 
     // Validate safety level
     if (safety_level < config_.safetyLevel) {
-        handleError(ErrorCode::ParameterError, true);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave safety level %u below required %u",
+                 safety_level, config_.safetyLevel);
+        handleError(ErrorCode::ParameterError, true, detail);
         return;
     }
 
     // Validate data sizes match configuration
     if (input_size != config_.safeInputSize || output_size != config_.safeOutputSize) {
-        handleError(ErrorCode::ParameterError, true);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave data size mismatch: input %u/%u output %u/%u",
+                 input_size, config_.safeInputSize,
+                 output_size, config_.safeOutputSize);
+        handleError(ErrorCode::ParameterError, true, detail);
         return;
     }
 
@@ -803,7 +890,10 @@ void FSoESlave::processData(const uint8_t* data, size_t len) {
     uint16_t conn_id = 0;
 
     if (!CRC::extractFSoEFrame(data, len, cmd, frame_data, data_len, conn_id)) {
-        handleError(ErrorCode::CRCError, true);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave failed to extract Data frame from master");
+        handleError(ErrorCode::CRCError, true, detail);
         return;
     }
 
@@ -834,7 +924,11 @@ void FSoESlave::processData(const uint8_t* data, size_t len) {
 
     // Validate data length — reject short ProcessData frames
     if (data_len < config_.safeOutputSize) {
-        handleError(ErrorCode::DataLengthError, false);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave ProcessData frame too short: got %zu bytes, expected %u",
+                 data_len, config_.safeOutputSize);
+        handleError(ErrorCode::DataLengthError, false, detail);
         statistics_.onDataLengthError();
         return;
     }
@@ -939,7 +1033,12 @@ void FSoESlave::handleWatchdog(uint64_t currentTimeMs) {
 
     // Check watchdog timeout
     if (elapsed > config_.watchdogTimeoutMs) {
-        handleError(ErrorCode::WatchdogError, config_.treatTimeoutAsCritical);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave watchdog timeout after %llu ms (limit %u ms)",
+                 static_cast<unsigned long long>(elapsed),
+                 config_.watchdogTimeoutMs);
+        handleError(ErrorCode::WatchdogError, config_.treatTimeoutAsCritical, detail);
         statistics_.onWatchdogTimeout();
     }
 }
@@ -950,14 +1049,25 @@ void FSoESlave::handleTimeout(uint64_t currentTimeMs) {
     switch (state_.load()) {
         case ConnectionState::Session:
             if (elapsed > config_.sessionTimeoutMs) {
-                handleError(ErrorCode::SessionError, false);
+                FSoEErrorDetail detail;
+                snprintf(detail.message, sizeof(detail.message),
+                         "Slave session timeout after %llu ms (limit %u ms)",
+                         static_cast<unsigned long long>(elapsed),
+                         config_.sessionTimeoutMs);
+                handleError(ErrorCode::SessionError, false, detail);
             }
             break;
-            
+
         case ConnectionState::Connection:
         case ConnectionState::Parameter:
             if (elapsed > config_.connectionTimeoutMs) {
-                handleError(ErrorCode::TimeoutError, false);
+                FSoEErrorDetail detail;
+                snprintf(detail.message, sizeof(detail.message),
+                         "Slave phase timeout in state %u after %llu ms (limit %u ms)",
+                         state_.load(),
+                         static_cast<unsigned long long>(elapsed),
+                         config_.connectionTimeoutMs);
+                handleError(ErrorCode::TimeoutError, false, detail);
             }
             break;
             
@@ -976,17 +1086,18 @@ void FSoESlave::handleTimeout(uint64_t currentTimeMs) {
     }
 }
 
-void FSoESlave::handleError(uint16_t errorCode, bool isCritical) {
+void FSoESlave::handleError(uint16_t errorCode, bool isCritical,
+                             const FSoEErrorDetail& detail) {
     lastError_ = errorCode;
-    
+
     char msg[64];
     snprintf(msg, sizeof(msg), "Error 0x%04X (critical=%d)", errorCode, isCritical);
     logDiagnostic(errorCode, msg);
-    
+
     if (errorCallback_) {
-        errorCallback_(errorCode, isCritical);
+        errorCallback_(errorCode, isCritical, detail);
     }
-    
+
     if (isCritical) {
         triggerFailSafe(errorCode);
     }

@@ -225,7 +225,7 @@ TEST_F(FSoEMasterConnectionCoverageTest, StateChangeCallback) {
 
 TEST_F(FSoEMasterConnectionCoverageTest, ErrorCallback) {
     bool called = false;
-    conn->setErrorCallback([&](uint16_t code) {
+    conn->setErrorCallback([&](uint16_t code, const FSoE::FSoEErrorDetail&) {
         called = true;
         EXPECT_NE(code, ErrorCode::NoError);
     });
@@ -401,7 +401,7 @@ TEST_F(FSoESlaveCoverageTest, ErrorInjectionAccess) {
 
 TEST_F(FSoESlaveCoverageTest, Callbacks) {
     slave->setStateCallback([](uint8_t, uint8_t) {});
-    slave->setErrorCallback([](uint16_t, bool) {});
+    slave->setErrorCallback([](uint16_t, bool, const FSoE::FSoEErrorDetail&) {});
     slave->setFailSafeCallback([]() {});
     slave->setDataValidCallback([](const uint8_t*, size_t) {});
     slave->setRecoveryCallback([]() -> bool { return true; });

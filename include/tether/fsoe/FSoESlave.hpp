@@ -171,7 +171,7 @@ struct FSoESlaveConfig {
 // ============================================================================
 
 using FSoEStateCallback = std::function<void(uint8_t oldState, uint8_t newState)>;
-using FSoEErrorCallback = std::function<void(uint16_t errorCode, bool isCritical)>;
+using FSoEErrorCallback = std::function<void(uint16_t errorCode, bool isCritical, const FSoEErrorDetail& detail)>;
 using FSoEFailSafeCallback = std::function<void()>;
 using FSoEDataValidCallback = std::function<void(const uint8_t* data, size_t len)>;
 using FSoERecoveryCallback = std::function<bool()>;  // Return true to allow recovery
@@ -443,7 +443,8 @@ private:
     
     void handleWatchdog(uint64_t currentTimeMs);
     void handleTimeout(uint64_t currentTimeMs);
-    void handleError(uint16_t errorCode, bool isCritical);
+    void handleError(uint16_t errorCode, bool isCritical,
+                     const FSoEErrorDetail& detail = {});
     void logDiagnostic(uint16_t errorCode, const char* message);
     
     bool shouldInjectCRCError();
