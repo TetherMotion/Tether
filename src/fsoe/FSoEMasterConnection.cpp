@@ -210,11 +210,31 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
     uint8_t frame_data[CRC::MAX_PARSE_DATA_SIZE] = {0};
     size_t data_len = 0;
     uint16_t conn_id = 0;
+    CRC::CrcErrorDetail crc_error_detail{};
 
     if (!CRC::parseFSoEFrame(data, len, cmd, frame_data, data_len, conn_id,
-                             last_rx_crc0_, rx_seq_no_, &last_rx_crc0_)) {
+                             last_rx_crc0_, rx_seq_no_, &last_rx_crc0_,
+                             &crc_error_detail)) {
         stats_.crc_errors++;
-        handleError(ErrorCode::CRCError);
+        FSoEErrorDetail detail;
+        if (crc_error_detail.valid) {
+            detail.crc_valid = true;
+            detail.crc_segment_index = crc_error_detail.segment_index;
+            detail.crc_expected = crc_error_detail.expected_crc;
+            detail.crc_received = crc_error_detail.received_crc;
+            detail.crc_frame_offset = crc_error_detail.frame_offset;
+            snprintf(detail.message, sizeof(detail.message),
+                     "Master received wrong CRC from slave: segment %d "
+                     "expected 0x%04X got 0x%04X (frame offset %zu)",
+                     detail.crc_segment_index,
+                     detail.crc_expected, detail.crc_received,
+                     detail.crc_frame_offset);
+        } else {
+            snprintf(detail.message, sizeof(detail.message),
+                     "Master received malformed FSoE frame from slave "
+                     "(frame too short or unparseable)");
+        }
+        handleError(ErrorCode::CRCError, detail);
         return false;
     }
 
@@ -233,7 +253,15 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
 
     // Validate connection ID
     if (!validateConnectionID(conn_id)) {
-        handleError(ErrorCode::ConnectionIDError);
+        FSoEErrorDetail detail;
+        detail.conn_id_valid = true;
+        detail.expected_conn_id = config_.connection_id;
+        detail.received_conn_id = conn_id;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Master received wrong ConnectionID from slave: "
+                 "expected 0x%04X got 0x%04X",
+                 detail.expected_conn_id, detail.received_conn_id);
+        handleError(ErrorCode::ConnectionIDError, detail);
         return false;
     }
 
@@ -258,9 +286,18 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
             uint16_t slave_error = static_cast<uint16_t>(
                 frame_data[config_.input_size] |
                 (frame_data[config_.input_size + 1] << 8));
-            handleError(slave_error);
+            FSoEErrorDetail detail;
+            snprintf(detail.message, sizeof(detail.message),
+                     "Slave entered fail-safe and reported error 0x%04X",
+                     slave_error);
+            handleError(slave_error, detail);
         } else {
-            handleError(ErrorCode::ApplicationError);
+            FSoEErrorDetail detail;
+            snprintf(detail.message, sizeof(detail.message),
+                     "Slave sent fail-safe response but payload too short "
+                     "(got %zu bytes, need %u+2)",
+                     data_len, config_.input_size);
+            handleError(ErrorCode::ApplicationError, detail);
         }
         return true;
     }
@@ -426,7 +463,12 @@ void FSoEMasterConnection::checkPhaseTimeout(uint64_t current_time_ms)
 
     if (elapsed > timeout) {
         stats_.timeout_events++;
-        handleError(ErrorCode::TimeoutError);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Phase timeout in state %u after %llu ms (limit %u ms)",
+                 status_.state, static_cast<unsigned long long>(elapsed),
+                 timeout);
+        handleError(ErrorCode::TimeoutError, detail);
     }
 }
 
@@ -439,7 +481,12 @@ void FSoEMasterConnection::checkWatchdog(uint64_t current_time_ms)
 
     if (elapsed > config_.watchdog_timeout_ms) {
         stats_.watchdog_events++;
-        handleError(ErrorCode::WatchdogError);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Watchdog timeout in Data state after %llu ms (limit %u ms)",
+                 static_cast<unsigned long long>(elapsed),
+                 config_.watchdog_timeout_ms);
+        handleError(ErrorCode::WatchdogError, detail);
     }
 }
 
@@ -471,7 +518,11 @@ void FSoEMasterConnection::handleResetState(uint8_t cmd, const uint8_t* data, si
         requestSessionReset();
     } else {
         // Unexpected command in Reset state — ignore and keep retrying
-        handleError(ErrorCode::CommandError);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Unexpected command 0x%02X in Reset state (expected Session or Reset)",
+                 cmd);
+        handleError(ErrorCode::CommandError, detail);
     }
 }
 
@@ -483,7 +534,11 @@ void FSoEMasterConnection::handleSessionState(uint8_t cmd, const uint8_t* data, 
     if (cmd == Command::Session) {
         transitionTo(ConnectionState::Connection);
     } else {
-        handleError(ErrorCode::CommandError);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Unexpected command 0x%02X in Session state (expected Session)",
+                 cmd);
+        handleError(ErrorCode::CommandError, detail);
     }
 }
 
@@ -494,17 +549,32 @@ void FSoEMasterConnection::handleConnectionState(uint8_t cmd, const uint8_t* dat
         // Parsed data format: [safetyAddr_lo][safetyAddr_hi][sil][reserved]
         // Require the full 4-byte payload — the slave always sends 4 bytes.
         if (data_len < 4) {
-            handleError(ErrorCode::DataLengthError);
+            FSoEErrorDetail detail;
+            snprintf(detail.message, sizeof(detail.message),
+                     "Connection response too short: got %zu bytes, expected 4",
+                     data_len);
+            handleError(ErrorCode::DataLengthError, detail);
             return;
         }
         uint16_t slave_safety_addr = data[0] | (data[1] << 8);
         if (slave_safety_addr != 0 && slave_safety_addr != config_.slave_safety_addr) {
-            handleError(ErrorCode::ConnectionIDError);
+            FSoEErrorDetail detail;
+            detail.conn_id_valid = true;
+            detail.expected_conn_id = config_.slave_safety_addr;
+            detail.received_conn_id = slave_safety_addr;
+            snprintf(detail.message, sizeof(detail.message),
+                     "Slave safety address mismatch: expected 0x%04X got 0x%04X",
+                     detail.expected_conn_id, detail.received_conn_id);
+            handleError(ErrorCode::ConnectionIDError, detail);
             return;
         }
         uint8_t slave_sil = data[2];
         if (slave_sil < config_.safety_level) {
-            handleError(ErrorCode::ApplicationError);
+            FSoEErrorDetail detail;
+            snprintf(detail.message, sizeof(detail.message),
+                     "Slave SIL %u below required SIL %u",
+                     slave_sil, config_.safety_level);
+            handleError(ErrorCode::ApplicationError, detail);
             return;
         }
         if (config_.input_size > 0 || config_.output_size > 0) {
@@ -513,7 +583,11 @@ void FSoEMasterConnection::handleConnectionState(uint8_t cmd, const uint8_t* dat
             transitionTo(ConnectionState::Data);
         }
     } else {
-        handleError(ErrorCode::CommandError);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Unexpected command 0x%02X in Connection state (expected Connection)",
+                 cmd);
+        handleError(ErrorCode::CommandError, detail);
     }
 }
 
@@ -531,7 +605,11 @@ void FSoEMasterConnection::handleParameterState(uint8_t cmd, const uint8_t* data
         transitionTo(ConnectionState::Data);
         handleDataState(cmd, data, data_len);
     } else {
-        handleError(ErrorCode::CommandError);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Unexpected command 0x%02X in Parameter state (expected Parameter or ProcessData)",
+                 cmd);
+        handleError(ErrorCode::CommandError, detail);
     }
 }
 
@@ -542,7 +620,11 @@ void FSoEMasterConnection::handleDataState(uint8_t cmd, const uint8_t* data, siz
             resetConnection();
             return;
         }
-        handleError(ErrorCode::CommandError);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Unexpected command 0x%02X in Data state (expected ProcessData)",
+                 cmd);
+        handleError(ErrorCode::CommandError, detail);
         return;
     }
 
@@ -551,7 +633,11 @@ void FSoEMasterConnection::handleDataState(uint8_t cmd, const uint8_t* data, siz
 
     if (data_len < config_.input_size) {
         stats_.invalid_frames++;
-        handleError(ErrorCode::DataLengthError);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Data frame too short: got %zu bytes, expected %u",
+                 data_len, config_.input_size);
+        handleError(ErrorCode::DataLengthError, detail);
         return;
     }
 
@@ -587,7 +673,11 @@ void FSoEMasterConnection::handleFailSafeState(uint8_t cmd, const uint8_t* data,
         }
     } else {
         // Unexpected command in FailSafe state
-        handleError(ErrorCode::CommandError);
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Unexpected command 0x%02X in FailSafe state (expected Reset or FailSafeData)",
+                 cmd);
+        handleError(ErrorCode::CommandError, detail);
     }
 }
 
@@ -736,7 +826,8 @@ void FSoEMasterConnection::transitionTo(uint8_t new_state)
     }
 }
 
-void FSoEMasterConnection::handleError(uint16_t error_code)
+void FSoEMasterConnection::handleError(uint16_t error_code,
+                                        const FSoEErrorDetail& detail)
 {
     status_.error_code = error_code;
 
@@ -749,7 +840,7 @@ void FSoEMasterConnection::handleError(uint16_t error_code)
     }
 
     if (error_callback_) {
-        error_callback_(error_code);
+        error_callback_(error_code, detail);
     }
 }
 

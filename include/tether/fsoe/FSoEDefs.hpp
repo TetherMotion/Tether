@@ -81,6 +81,37 @@ namespace ErrorCode {
 }
 
 // ============================================================================
+// Error Detail (diagnostic context for error callbacks)
+// ============================================================================
+
+/// Diagnostic detail passed to error callbacks alongside the error code.
+///
+/// This struct carries structured context about *why* an error was raised,
+/// so callers can produce verbose log messages like:
+///   "Master received wrong CRC from slave: segment 0 expected 0x1234 got 0x5678"
+///   "Master received wrong ConnectionID: expected 0x1234 got 0x5678"
+///
+/// Only the fields relevant to the error_code are populated; the rest remain
+/// at their default (zero / -1) values.  The `message` field is a
+/// pre-formatted human-readable summary for convenient logging.
+struct FSoEErrorDetail {
+    // --- CRC error details (error_code == ErrorCode::CRCError) ---
+    bool     crc_valid = false;          ///< True when CRC fields are populated
+    int      crc_segment_index = -1;     ///< 0-based index of the failing CRC segment
+    uint16_t crc_expected = 0;           ///< CRC value computed by the receiver
+    uint16_t crc_received = 0;           ///< CRC value stored in the received frame
+    size_t   crc_frame_offset = 0;       ///< Byte offset of the failing CRC in the frame
+
+    // --- ConnectionID error details (error_code == ErrorCode::ConnectionIDError) ---
+    bool     conn_id_valid = false;      ///< True when conn_id fields are populated
+    uint16_t expected_conn_id = 0;       ///< Expected connection ID (configured)
+    uint16_t received_conn_id = 0;       ///< Connection ID found in the frame
+
+    // --- Human-readable summary ---
+    char message[160] = {};              ///< Pre-formatted description for logging
+};
+
+// ============================================================================
 // Safety Integrity Levels
 // ============================================================================
 

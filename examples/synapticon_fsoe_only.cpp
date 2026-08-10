@@ -582,10 +582,16 @@ int main(int argc, char** argv) {
                     fsoeStateName(old_s), fsoeStateName(new_s));
             });
         fsoe_main->rawConnection().setErrorCallback(
-            [](uint16_t code) {
-                TETHER_LOGE(TAG,
-                    "[FSoE] error: 0x%04X (%s)",
-                    code, fsoeErrorName(code));
+            [](uint16_t code, const FSoE::FSoEErrorDetail& detail) {
+                if (detail.message[0] != '\0') {
+                    TETHER_LOGE(TAG,
+                        "[FSoE] error: 0x%04X (%s): %s",
+                        code, fsoeErrorName(code), detail.message);
+                } else {
+                    TETHER_LOGE(TAG,
+                        "[FSoE] error: 0x%04X (%s)",
+                        code, fsoeErrorName(code));
+                }
             });
         fsoe_main->rawConnection().setFailSafeCallback(
             []() {

@@ -281,7 +281,7 @@ TEST_F(FSoESlaveTest, StateCallback) {
 TEST_F(FSoESlaveTest, ErrorCallback) {
     uint16_t lastCode = 0;
     bool wasCritical = false;
-    slave_->setErrorCallback([&](uint16_t code, bool critical) {
+    slave_->setErrorCallback([&](uint16_t code, bool critical, const FSoE::FSoEErrorDetail&) {
         lastCode = code;
         wasCritical = critical;
     });

@@ -79,7 +79,7 @@ struct MasterConnectionStatus {
 // ============================================================================
 
 using StateChangeCallback = std::function<void(uint8_t old_state, uint8_t new_state)>;
-using ErrorCallback = std::function<void(uint16_t error_code)>;
+using ErrorCallback = std::function<void(uint16_t error_code, const FSoEErrorDetail& detail)>;
 using FailSafeCallback = std::function<void()>;
 using DataCallback = std::function<void(const uint8_t* data, size_t len)>;
 
@@ -209,7 +209,7 @@ private:
 
     // State transitions
     void transitionTo(uint8_t new_state);
-    void handleError(uint16_t error_code);
+    void handleError(uint16_t error_code, const FSoEErrorDetail& detail);
     void checkWatchdog(uint64_t current_time_ms);
     void checkPhaseTimeout(uint64_t current_time_ms);
     void attemptAutoRecovery(uint64_t current_time_ms);

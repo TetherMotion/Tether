@@ -49,6 +49,24 @@
 namespace FSoE::CRC {
 
 // ---------------------------------------------------------------------------
+// CRC Error Detail
+// ---------------------------------------------------------------------------
+
+/// Diagnostic detail populated by parseFSoEFrame when CRC verification fails.
+///
+/// FSoE frames carry multiple CRC-16 segments (one per 2 data bytes).  This
+/// struct identifies which segment failed and what the expected/received
+/// values were, so callers can produce verbose error messages instead of a
+/// bare "CRCError".
+struct CrcErrorDetail {
+    bool valid = false;             ///< Set to true when the struct is populated
+    int segment_index = -1;         ///< 0-based index of the failing CRC segment
+    uint16_t expected_crc = 0;      ///< CRC value computed by the receiver
+    uint16_t received_crc = 0;      ///< CRC value stored in the frame
+    size_t frame_offset = 0;        ///< Byte offset of the failing CRC in the frame
+};
+
+// ---------------------------------------------------------------------------
 // Polynomial
 // ---------------------------------------------------------------------------
 //
@@ -549,6 +567,10 @@ inline size_t buildFSoEFrame(uint8_t* out, uint8_t cmd,
 /// @param seq_no     Expected sequence number (shared between master and slave).
 /// @param out_crc0   If non-null, receives the frame's CRC0 (for CRC inheritance:
 ///                   pass as start_crc when parsing the next frame).
+/// @param out_crc_error  If non-null, receives diagnostic detail (expected vs
+///                       received CRC, failing segment index) when CRC
+///                       verification fails.  Not populated for non-CRC
+///                       failures (e.g. too-short frame).
 /// @return true if all CRCs verify, false otherwise.
 inline bool parseFSoEFrame(const uint8_t* frame, size_t frame_len,
                             uint8_t& out_cmd,
@@ -556,7 +578,8 @@ inline bool parseFSoEFrame(const uint8_t* frame, size_t frame_len,
                             uint16_t& out_conn_id,
                             uint16_t start_crc = 0,
                             uint16_t seq_no = 0,
-                            uint16_t* out_crc0 = nullptr) {
+                            uint16_t* out_crc0 = nullptr,
+                            CrcErrorDetail* out_crc_error = nullptr) {
     if (frame_len < MIN_FSOE_FRAME_SIZE) return false;
 
     out_cmd = frame[0];
@@ -651,7 +674,16 @@ inline bool parseFSoEFrame(const uint8_t* frame, size_t frame_len,
         // 1 data byte: [CMD] [Data0] [CRC0(2)] [ConnID(2)]
         uint16_t stored_crc0 = static_cast<uint16_t>(frame[2]) |
                                (static_cast<uint16_t>(frame[3]) << 8);
-        if (stored_crc0 != expected_crcs[0]) return false;
+        if (stored_crc0 != expected_crcs[0]) {
+            if (out_crc_error) {
+                out_crc_error->valid = true;
+                out_crc_error->segment_index = 0;
+                out_crc_error->expected_crc = expected_crcs[0];
+                out_crc_error->received_crc = stored_crc0;
+                out_crc_error->frame_offset = 2;
+            }
+            return false;
+        }
     } else {
         // 2+ data bytes: verify CRC0 and all subsequent CRCi.
         // Frame layout: [CMD] [D0] [D1] [CRC0(2)] [D2] [D3] [CRC1(2)] ... [ConnID(2)]
@@ -666,7 +698,16 @@ inline bool parseFSoEFrame(const uint8_t* frame, size_t frame_len,
         for (int i = 0; i < numCrcs; i++) {
             uint16_t stored_crc = static_cast<uint16_t>(frame[offset]) |
                                   (static_cast<uint16_t>(frame[offset + 1]) << 8);
-            if (stored_crc != expected_crcs[i]) return false;
+            if (stored_crc != expected_crcs[i]) {
+                if (out_crc_error) {
+                    out_crc_error->valid = true;
+                    out_crc_error->segment_index = i;
+                    out_crc_error->expected_crc = expected_crcs[i];
+                    out_crc_error->received_crc = stored_crc;
+                    out_crc_error->frame_offset = offset;
+                }
+                return false;
+            }
             offset += 2;  // skip this CRC's 2 bytes
             // Skip the next data segment (if not the last CRC)
             if (i < numCrcs - 1) {
