@@ -277,14 +277,17 @@ TEST(FSoEFrameEvents, RxEventFiresEvenForInvalidFrame) {
     std::shared_ptr<const std::vector<uint8_t>> captured;
     conn.rxFrameEvents().addListener([&](auto d) { captured = d; });
 
-    // A frame with a wrong connection ID — will be rejected, but the
+    // A frame with a corrupted CRC — will be rejected, but the
     // listener should still see the bytes.
     uint8_t payload[] = {0x34, 0x12};
     uint8_t frame[64];
     const size_t frame_len = CRC::buildFSoEFrame(frame, Command::Session,
-                                                  payload, 2, 0xFFFF);
+                                                  payload, 2, 0x1234);
+    // Corrupt the CRC0 bytes (offset 3-4 in a 7-byte Session frame)
+    frame[3] ^= 0xFF;
+    frame[4] ^= 0xFF;
     bool ok = conn.processRxFrame(frame, frame_len);
-    EXPECT_FALSE(ok);  // rejected due to connection ID mismatch
+    EXPECT_FALSE(ok);  // rejected due to CRC mismatch
 
     ASSERT_TRUE(captured);
     EXPECT_EQ(captured->size(), frame_len);
