@@ -24,6 +24,7 @@
  *   ./synapticon_fsoe_only -s 1 -d 30            # slave 1, 30 s
  *   ./synapticon_fsoe_only --connection-id 0x4321 --watchdog-ms 15
  *   ./synapticon_fsoe_only --debug fsoe          # high-level FSoE protocol trace
+ *   ./synapticon_fsoe_only --debug fsoe-frame    # decoded FSoE PDO struct fields
  *   ./synapticon_fsoe_only --debug fsoe-raw      # protocol trace + raw frame hex dumps
  */
 
@@ -132,6 +133,146 @@ void hexDump(const char* tag, const char* label, const uint8_t* data, size_t len
 }
 
 // ============================================================================
+// FSoE frame decoder (--debug fsoe-frame)
+// ============================================================================
+//
+// Decodes the device-specific Synapticon FSoE PDO structs into named fields,
+// showing the FSoE protocol data as the drive sees it (not raw hex).
+
+/// Append a flag name to buf if the bit is set.
+static void appendFlag(char* buf, size_t bufpos, size_t bufsize,
+                       bool set, const char* name) {
+    if (!set) return;
+    if (bufpos > 0 && bufpos + 1 < bufsize) {
+        buf[bufpos++] = ' ';
+        buf[bufpos] = '\0';
+    }
+    size_t len = strlen(name);
+    if (bufpos + len < bufsize) {
+        memcpy(buf + bufpos, name, len);
+        bufpos += len;
+        buf[bufpos] = '\0';
+    }
+}
+
+/// Decode the master→slave FSoE frame from the Synapticon RxPDO 0x1700 struct.
+void dumpFSoERxPDO(const char* tag, const FSoERxPDO& rx) {
+    TETHER_LOGI(tag, "[fsoe-frame] TX→slave RxPDO 0x1700 (11 bytes):");
+    TETHER_LOGI(tag, "  cmd=%s  conn_id=0x%04X",
+                fsoeCommandName(rx.fsoe_command), rx.fsoe_connection_id);
+
+    char flags[128] = {};
+    size_t pos = 0;
+    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kSTO, "STO");
+    pos = strlen(flags);
+    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kSS1, "SS1");
+    pos = strlen(flags);
+    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kSS2, "SS2");
+    pos = strlen(flags);
+    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kSOS, "SOS");
+    pos = strlen(flags);
+    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kSBCCommand, "SBC");
+    pos = strlen(flags);
+    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kSLS_Instance1, "SLS1");
+    pos = strlen(flags);
+    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kSLS_Instance2, "SLS2");
+    pos = strlen(flags);
+    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kSLS_Instance3, "SLS3");
+    pos = strlen(flags);
+    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kSLS_Instance4, "SLS4");
+    pos = strlen(flags);
+    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kResetPosition, "ResetPos");
+    pos = strlen(flags);
+    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kErrorAck, "ErrorAck");
+    pos = strlen(flags);
+    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kRestartAck, "RestartAck");
+    TETHER_LOGI(tag, "  safety_flags=0x%04X [%s]", rx.safety_flags,
+                flags[0] ? flags : "(none)");
+
+    TETHER_LOGI(tag, "  crc0=0x%04X  crc1=0x%04X",
+                rx.fsoe_crc_0, rx.fsoe_crc_1);
+
+    char outs[32] = {};
+    pos = 0;
+    appendFlag(outs, pos, sizeof(outs), rx.safe_outputs & FSoERxPDO::kSafeOutput1, "OUT1");
+    pos = strlen(outs);
+    appendFlag(outs, pos, sizeof(outs), rx.safe_outputs & FSoERxPDO::kSafeOutput2, "OUT2");
+    TETHER_LOGI(tag, "  safe_outputs=0x%02X [%s]", rx.safe_outputs,
+                outs[0] ? outs : "(none)");
+}
+
+/// Decode the slave→master FSoE frame from the Synapticon TxPDO 0x1B00 struct.
+void dumpFSoETxPDO(const char* tag, const FSoETxPDO& tx) {
+    TETHER_LOGI(tag, "[fsoe-frame] RX←slave TxPDO 0x1B00 (31 bytes):");
+    TETHER_LOGI(tag, "  cmd=%s  conn_id=0x%04X",
+                fsoeCommandName(tx.fsoe_command), tx.fsoe_connection_id);
+
+    char sflags[128] = {};
+    size_t pos = 0;
+    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & FSoETxPDO::kSTOState, "STO");
+    pos = strlen(sflags);
+    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & FSoETxPDO::kSOSState, "SOS");
+    pos = strlen(sflags);
+    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & FSoETxPDO::kSS1State, "SS1");
+    pos = strlen(sflags);
+    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & FSoETxPDO::kSS2State, "SS2");
+    pos = strlen(sflags);
+    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & FSoETxPDO::kErrorState, "ERR");
+    pos = strlen(sflags);
+    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & FSoETxPDO::kSLSInstance1, "SLS1");
+    pos = strlen(sflags);
+    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & FSoETxPDO::kSLSInstance2, "SLS2");
+    pos = strlen(sflags);
+    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & FSoETxPDO::kSLSInstance3, "SLS3");
+    pos = strlen(sflags);
+    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & FSoETxPDO::kSLSInstance4, "SLS4");
+    TETHER_LOGI(tag, "  safety_state=0x%04X [%s]", tx.safety_state_flags,
+                sflags[0] ? sflags : "(none)");
+
+    char dflags[160] = {};
+    pos = 0;
+    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kRestartAckReq, "RestartAckReq");
+    pos = strlen(dflags);
+    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kSBCState, "SBC");
+    pos = strlen(dflags);
+    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kTemperatureWarning, "TempWarn");
+    pos = strlen(dflags);
+    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kSafePositionValid, "SafePosValid");
+    pos = strlen(dflags);
+    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kSafeSpeedValid, "SafeSpdValid");
+    pos = strlen(dflags);
+    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kSafeInput1, "In1");
+    pos = strlen(dflags);
+    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kSafeInput2, "In2");
+    pos = strlen(dflags);
+    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kSafeInput3, "In3");
+    pos = strlen(dflags);
+    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kSafeInput4, "In4");
+    pos = strlen(dflags);
+    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kSafeOutputMonitor1, "OutMon1");
+    pos = strlen(dflags);
+    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kSafeOutputMonitor2, "OutMon2");
+    pos = strlen(dflags);
+    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kAnalogDiagActive, "AnalogDiag");
+    pos = strlen(dflags);
+    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kAnalogValueValid, "AnalogValid");
+    TETHER_LOGI(tag, "  diag=0x%04X [%s]", tx.diagnostic_flags,
+                dflags[0] ? dflags : "(none)");
+
+    TETHER_LOGI(tag,
+        "  crc0=0x%04X crc1=0x%04X crc2=0x%04X crc3=0x%04X "
+        "crc4=0x%04X crc5=0x%04X crc6=0x%04X",
+        tx.fsoe_crc_0, tx.fsoe_crc_1, tx.fsoe_crc_2, tx.fsoe_crc_3,
+        tx.fsoe_crc_4, tx.fsoe_crc_5, tx.fsoe_crc_6);
+    TETHER_LOGI(tag,
+        "  safe_pos=0x%04X  safe_pos_dup=0x%04X  "
+        "safe_vel=0x%04X  safe_vel_dup=0x%04X  safe_analog=0x%04X",
+        tx.safe_position_actual, tx.safe_position_actual_dup,
+        tx.safe_velocity_actual, tx.safe_velocity_actual_dup,
+        tx.safe_analog_value);
+}
+
+// ============================================================================
 // FSoE diagnostics cyclic task
 // ============================================================================
 
@@ -214,10 +355,12 @@ class FSoEPDOExchangeTask final : public EtherCAT::DS402Master::ICyclicTask {
 public:
     FSoEPDOExchangeTask(uint16_t slave_index,
                         FSoEMain& main_instance,
-                        bool debug_master)
+                        bool debug_raw,
+                        bool debug_frame = false)
         : slave_index_(slave_index)
         , main_instance_(main_instance)
-        , debug_master_(debug_master)
+        , debug_raw_(debug_raw)
+        , debug_frame_(debug_frame)
     {}
 
     bool update(EtherCAT::DS402Master& master, double dt_seconds) override {
@@ -241,6 +384,12 @@ public:
             return true;  // don't stop the process
         }
 
+        // Decode the slave→master FSoE frame BEFORE exchangeViaPDO — it
+        // contains the slave's response to the previous master frame.
+        if (debug_frame_ && frame_dump_count_ < 20) {
+            dumpFSoETxPDO(TAG, *tx);
+        }
+
         // Exchange FSoE frames via the PDO buffers.
         // rx (RxPDO 0x1700) is master→slave: we write the FSoE TX frame here.
         // tx (TxPDO 0x1B00) is slave→master: we read the drive's FSoE RX frame here.
@@ -249,7 +398,14 @@ public:
             reinterpret_cast<const uint8_t*>(tx), sizeof(FSoETxPDO),
             elapsed_time_ms_);
 
-        if (debug_master_) {
+        // Decode the master→slave FSoE frame AFTER exchangeViaPDO — it
+        // contains what the master just built for this cycle.
+        if (debug_frame_ && frame_dump_count_ < 20) {
+            dumpFSoERxPDO(TAG, *rx);
+            frame_dump_count_++;
+        }
+
+        if (debug_raw_) {
             const auto status = main_instance_.rawConnection().getStatus();
             TETHER_LOGI(TAG, "[fsoe-raw] t=%lu ms  state=%s(0x%02X)  ok=%d",
                         static_cast<unsigned long>(elapsed_time_ms_),
@@ -304,8 +460,10 @@ public:
 private:
     uint16_t slave_index_;
     FSoEMain& main_instance_;
-    bool debug_master_;
+    bool debug_raw_;
+    bool debug_frame_ = false;
     uint64_t elapsed_time_ms_ = 0;
+    uint32_t frame_dump_count_ = 0;
 };
 
 // ============================================================================
@@ -342,6 +500,7 @@ bool parseArgs(int argc, char** argv, Args& out) {
     program.add_argument("--debug")
         .default_value(std::string(""))
         .help("Comma-separated debug flags: 'fsoe' for high-level protocol trace, "
+              "'fsoe-frame' for decoded PDO struct fields, "
               "'fsoe-raw' for protocol trace + raw frame hex dumps");
 
     try {
@@ -555,10 +714,13 @@ int main(int argc, char** argv) {
     std::unique_ptr<FSoEMain> fsoe_main;
 
     // Parse --debug flags:
-    //   fsoe       — high-level protocol trace
-    //   fsoe-raw   — protocol trace + raw frame hex dumps
+    //   fsoe        — high-level protocol trace
+    //   fsoe-frame  — decode device-specific FSoE PDO structs into named fields
+    //   fsoe-raw    — protocol trace + raw frame hex dumps
     //   fsoe-master — deprecated alias for fsoe-raw
     const bool debug_fsoe = (args.debug.find("fsoe") != std::string::npos);
+    const bool debug_fsoe_frame =
+        (args.debug.find("fsoe-frame") != std::string::npos);
     const bool debug_fsoe_raw =
         (args.debug.find("fsoe-raw") != std::string::npos ||
          args.debug.find("fsoe-master") != std::string::npos);
@@ -615,9 +777,10 @@ int main(int argc, char** argv) {
         }
 
         TETHER_LOGI(TAG,
-            "FSoE initialized: conn_id=0x%04X watchdog=%u ms debug=%s%s",
+            "FSoE initialized: conn_id=0x%04X watchdog=%u ms debug=%s%s%s",
             args.connection_id, args.watchdog_ms,
             debug_fsoe ? "fsoe" : "off",
+            debug_fsoe_frame ? "+frame" : "",
             debug_fsoe_raw ? "+raw" : "");
     }
 
@@ -625,7 +788,8 @@ int main(int argc, char** argv) {
     int rc = 0;
 
     if (!master.addCyclicTask(
-            std::make_unique<FSoEPDOExchangeTask>(slave_idx, *fsoe_main, debug_fsoe_raw))) {
+            std::make_unique<FSoEPDOExchangeTask>(slave_idx, *fsoe_main,
+                                                  debug_fsoe_raw, debug_fsoe_frame))) {
         TETHER_LOGE(TAG, "Failed to add FSoE PDO exchange task");
         rc = 6;
         Tether::Examples::stopHostMasterSession(master, session);
