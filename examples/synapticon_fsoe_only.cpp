@@ -23,7 +23,8 @@
  *   ./synapticon_fsoe_only -i enx34298f762c4e    # specify interface
  *   ./synapticon_fsoe_only -s 1 -d 30            # slave 1, 30 s
  *   ./synapticon_fsoe_only --connection-id 0x4321 --watchdog-ms 15
- *   ./synapticon_fsoe_only --debug fsoe-master   # verbose per-cycle FSoE logging
+ *   ./synapticon_fsoe_only --debug fsoe          # high-level FSoE protocol trace
+ *   ./synapticon_fsoe_only --debug fsoe-raw      # protocol trace + raw frame hex dumps
  */
 
 #include <array>
@@ -250,7 +251,7 @@ public:
 
         if (debug_master_) {
             const auto status = main_instance_.rawConnection().getStatus();
-            TETHER_LOGI(TAG, "[fsoe-master] t=%lu ms  state=%s(0x%02X)  ok=%d",
+            TETHER_LOGI(TAG, "[fsoe-raw] t=%lu ms  state=%s(0x%02X)  ok=%d",
                         static_cast<unsigned long>(elapsed_time_ms_),
                         fsoeStateName(status.state), status.state,
                         ok ? 1 : 0);
@@ -340,7 +341,8 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .scan<'i', int>().default_value(500);
     program.add_argument("--debug")
         .default_value(std::string(""))
-        .help("Comma-separated debug flags: 'fsoe-master' for per-cycle FSoE frame logging");
+        .help("Comma-separated debug flags: 'fsoe' for high-level protocol trace, "
+              "'fsoe-raw' for protocol trace + raw frame hex dumps");
 
     try {
         program.parse_args(argc, argv);
@@ -552,8 +554,14 @@ int main(int argc, char** argv) {
     // --- Set up FSoE safe-motion (master side only — no emulator) ---
     std::unique_ptr<FSoEMain> fsoe_main;
 
-    // Parse --debug flags for fsoe-master verbose logging
-    const bool debug_fsoe_master = (args.debug.find("fsoe-master") != std::string::npos);
+    // Parse --debug flags:
+    //   fsoe       — high-level protocol trace
+    //   fsoe-raw   — protocol trace + raw frame hex dumps
+    //   fsoe-master — deprecated alias for fsoe-raw
+    const bool debug_fsoe = (args.debug.find("fsoe") != std::string::npos);
+    const bool debug_fsoe_raw =
+        (args.debug.find("fsoe-raw") != std::string::npos ||
+         args.debug.find("fsoe-master") != std::string::npos);
 
     {
         EtherCAT::Drives::Synapticon::SafeMotion::MainConfig main_config;
@@ -598,17 +606,26 @@ int main(int argc, char** argv) {
                 TETHER_LOGW(TAG, "[FSoE] fail-safe activated");
             });
 
+        // High-level protocol trace (--debug fsoe or --debug fsoe-raw).
+        if (debug_fsoe || debug_fsoe_raw) {
+            fsoe_main->rawConnection().setTraceCallback(
+                [](const char* message) {
+                    TETHER_LOGI(TAG, "[fsoe] %s", message);
+                });
+        }
+
         TETHER_LOGI(TAG,
-            "FSoE initialized: conn_id=0x%04X watchdog=%u ms debug_master=%s",
+            "FSoE initialized: conn_id=0x%04X watchdog=%u ms debug=%s%s",
             args.connection_id, args.watchdog_ms,
-            debug_fsoe_master ? "on" : "off");
+            debug_fsoe ? "fsoe" : "off",
+            debug_fsoe_raw ? "+raw" : "");
     }
 
     // --- Add FSoE cyclic tasks ---
     int rc = 0;
 
     if (!master.addCyclicTask(
-            std::make_unique<FSoEPDOExchangeTask>(slave_idx, *fsoe_main, debug_fsoe_master))) {
+            std::make_unique<FSoEPDOExchangeTask>(slave_idx, *fsoe_main, debug_fsoe_raw))) {
         TETHER_LOGE(TAG, "Failed to add FSoE PDO exchange task");
         rc = 6;
         Tether::Examples::stopHostMasterSession(master, session);

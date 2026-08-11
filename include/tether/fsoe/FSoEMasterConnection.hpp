@@ -83,6 +83,20 @@ using ErrorCallback = std::function<void(uint16_t error_code, const FSoEErrorDet
 using FailSafeCallback = std::function<void()>;
 using DataCallback = std::function<void(const uint8_t* data, size_t len)>;
 
+/// Human-readable protocol trace callback.
+///
+/// When installed via setTraceCallback(), the connection emits high-level
+/// descriptions of protocol decisions, e.g.:
+///   "TX Reset(0x2A): forcing slave to initial state"
+///   "RX Session(0x4E): slave accepted session, moving to Connection"
+/// This is the "what is the FSoE master trying to do and what did it get
+/// back" view — no raw frame bytes.  For raw frame dumps, use the
+/// txFrameEvents()/rxFrameEvents() event sources.
+///
+/// The callback is invoked synchronously from within prepareTxFrame() /
+/// processRxFrame() while the connection's recursive mutex is held.
+using TraceCallback = std::function<void(const char* message)>;
+
 /// Event source for FSoE frame events.  Each listener receives an immutable
 /// shared_ptr<const std::vector<uint8_t>> copy of the frame bytes.  When no
 /// listeners are registered, emit() performs no allocation.
@@ -174,6 +188,7 @@ public:
     void setErrorCallback(ErrorCallback callback);
     void setFailSafeCallback(FailSafeCallback callback);
     void setDataCallback(DataCallback callback);
+    void setTraceCallback(TraceCallback callback);
 
     // --- Frame event sources ---
     // Listeners receive a shared_ptr<const std::vector<uint8_t>> copy of the
@@ -213,6 +228,10 @@ private:
     void checkWatchdog(uint64_t current_time_ms);
     void checkPhaseTimeout(uint64_t current_time_ms);
     void attemptAutoRecovery(uint64_t current_time_ms);
+
+    // Protocol trace helper — formats a human-readable message and forwards
+    // it to trace_callback_ (if installed).  No-op when no callback is set.
+    void trace(const char* fmt, ...) const;
 
     // Parameter CRC computation
     uint16_t computeParameterCRC() const;
@@ -281,6 +300,7 @@ private:
     ErrorCallback error_callback_;
     FailSafeCallback fail_safe_callback_;
     DataCallback data_callback_;
+    TraceCallback trace_callback_;
 
     // Frame event sources (multi-listener, no-copy-if-empty)
     FrameEventSource tx_frame_events_;

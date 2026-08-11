@@ -9,8 +9,51 @@
 #include <cstring>
 #include <algorithm>
 #include <cstdio>
+#include <cstdarg>
 
 namespace FSoE {
+
+// ============================================================================
+// Protocol trace helper
+// ============================================================================
+
+namespace {
+const char* stateName(uint8_t state) {
+    switch (state) {
+        case ConnectionState::Reset:      return "Reset";
+        case ConnectionState::Session:    return "Session";
+        case ConnectionState::Connection: return "Connection";
+        case ConnectionState::Parameter:  return "Parameter";
+        case ConnectionState::Data:       return "Data";
+        case ConnectionState::FailSafe:   return "FailSafe";
+        case ConnectionState::Error:      return "Error";
+        default:                          return "Unknown";
+    }
+}
+
+const char* commandName(uint8_t cmd) {
+    switch (cmd) {
+        case Command::ProcessData:    return "ProcessData(0x36)";
+        case Command::Reset:          return "Reset(0x2A)";
+        case Command::Session:        return "Session(0x4E)";
+        case Command::Connection:     return "Connection(0x64)";
+        case Command::Parameter:      return "Parameter(0x52)";
+        case Command::FailSafeData:   return "FailSafeData(0x08)";
+        default:                      return "Unknown";
+    }
+}
+} // namespace
+
+void FSoEMasterConnection::trace(const char* fmt, ...) const
+{
+    if (!trace_callback_) return;
+    char buf[256];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    trace_callback_(buf);
+}
 
 // ============================================================================
 // Construction / Initialization
@@ -193,6 +236,8 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
         last_rx_frame_.size() == len &&
         std::memcmp(last_rx_frame_.data(), data, len) == 0) {
         stats_.duplicate_frames++;
+        trace("RX duplicate %s frame (slave re-sent, skipping) (state=%s)",
+              commandName(data[0]), stateName(status_.state));
         return false;
     }
 
@@ -248,6 +293,8 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
     // frames and let the master retry on the next cycle.
     if (!isValidCommand(cmd)) {
         stats_.invalid_frames++;
+        trace("RX cmd=0x%02X: not a valid FSoE command, skipping (state=%s)",
+              cmd, stateName(status_.state));
         return false;
     }
 
@@ -286,6 +333,9 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
             uint16_t slave_error = static_cast<uint16_t>(
                 frame_data[config_.input_size] |
                 (frame_data[config_.input_size + 1] << 8));
+            trace("RX FailSafeData(0x08): slave entered fail-safe, "
+                  "reported error=0x%04X (state=%s)",
+                  slave_error, stateName(status_.state));
             FSoEErrorDetail detail;
             snprintf(detail.message, sizeof(detail.message),
                      "Slave entered fail-safe and reported error 0x%04X",
@@ -331,11 +381,14 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
         case ConnectionState::Error:
             if (cmd == Command::Reset) {
                 if (config_.auto_recovery_enabled) {
+                    trace("RX Reset(0x2A): recovering from Error state");
                     resetConnection();
                     stats_.successful_recoveries++;
                 }
             } else {
                 // Ignore non-Reset commands in Error state
+                trace("RX %s: ignored in Error state (expected Reset)",
+                      commandName(cmd));
                 return false;
             }
             break;
@@ -364,26 +417,57 @@ size_t FSoEMasterConnection::prepareTxFrame(uint8_t* data, size_t max_len)
     switch (status_.state) {
         case ConnectionState::Reset:
             len = buildResetFrame(data, max_len);
+            if (len > 0) {
+                trace("TX Reset(0x2A): forcing slave to initial state "
+                      "(state=Reset, %zu bytes)", len);
+            }
             break;
 
         case ConnectionState::Session:
             len = buildSessionResetFrame(data, max_len);
+            if (len > 0) {
+                trace("TX Session(0x4E): starting handshake with "
+                      "session_id=0x%04X (state=Session, %zu bytes)",
+                      status_.session_id, len);
+            }
             break;
 
         case ConnectionState::Connection:
             len = buildConnectionFrame(data, max_len);
+            if (len > 0) {
+                trace("TX Connection(0x64): requesting connection with "
+                      "safety_addr=0x%04X param_crc=0x%04X "
+                      "(state=Connection, %zu bytes)",
+                      config_.slave_safety_addr, parameter_crc_, len);
+            }
             break;
 
         case ConnectionState::Parameter:
             len = buildParameterFrame(data, max_len);
+            if (len > 0) {
+                trace("TX Parameter(0x52): watchdog=%u ms safety_level=%u "
+                      "input_size=%u output_size=%u (state=Parameter, %zu bytes)",
+                      config_.watchdog_timeout_ms, config_.safety_level,
+                      config_.input_size, config_.output_size, len);
+            }
             break;
 
         case ConnectionState::Data:
             len = buildDataFrame(data, max_len);
+            if (len > 0) {
+                trace("TX ProcessData(0x36): %u bytes of safe outputs "
+                      "(state=Data, %zu bytes)",
+                      config_.output_size, len);
+            }
             break;
 
         case ConnectionState::FailSafe:
             len = buildFailSafeFrame(data, max_len);
+            if (len > 0) {
+                trace("TX FailSafeData(0x08): %u bytes of fail-safe values "
+                      "(state=FailSafe, %zu bytes)",
+                      config_.output_size, len);
+            }
             break;
 
         case ConnectionState::Error:
@@ -442,6 +526,8 @@ void FSoEMasterConnection::checkPhaseTimeout(uint64_t current_time_ms)
                 stats_.timeout_events++;
                 // Slave did not respond to Reset(0x2A) — fall back to the
                 // standard FSoE Session handshake.
+                trace("Reset state timeout after %llu ms, falling back to Session handshake",
+                      static_cast<unsigned long long>(elapsed));
                 requestSessionReset();
             }
         }
@@ -494,6 +580,8 @@ void FSoEMasterConnection::attemptAutoRecovery(uint64_t current_time_ms)
 {
     uint64_t elapsed = current_time_ms - fail_safe_entered_ms_;
     if (elapsed >= config_.recovery_delay_ms) {
+        trace("Auto-recovery: attempting reset after %llu ms in fail-safe",
+              static_cast<unsigned long long>(elapsed));
         stats_.recovery_attempts++;
         resetConnection();
     }
@@ -515,9 +603,13 @@ void FSoEMasterConnection::handleResetState(uint8_t cmd, const uint8_t* data, si
     // handshake.  A Reset response (0x2A) is also accepted — some slaves
     // echo the Reset command before switching to Session.
     if (cmd == Command::Session || cmd == Command::Reset) {
+        trace("RX %s: slave acknowledged reset, starting session handshake",
+              commandName(cmd));
         requestSessionReset();
     } else {
         // Unexpected command in Reset state — ignore and keep retrying
+        trace("RX %s: unexpected in Reset state (expected Session or Reset)",
+              commandName(cmd));
         FSoEErrorDetail detail;
         snprintf(detail.message, sizeof(detail.message),
                  "Unexpected command 0x%02X in Reset state (expected Session or Reset)",
@@ -532,8 +624,11 @@ void FSoEMasterConnection::handleSessionState(uint8_t cmd, const uint8_t* data, 
     (void)data_len;
 
     if (cmd == Command::Session) {
+        trace("RX Session(0x4E): slave accepted session, moving to Connection");
         transitionTo(ConnectionState::Connection);
     } else {
+        trace("RX %s: unexpected in Session state (expected Session)",
+              commandName(cmd));
         FSoEErrorDetail detail;
         snprintf(detail.message, sizeof(detail.message),
                  "Unexpected command 0x%02X in Session state (expected Session)",
@@ -549,6 +644,8 @@ void FSoEMasterConnection::handleConnectionState(uint8_t cmd, const uint8_t* dat
         // Parsed data format: [safetyAddr_lo][safetyAddr_hi][sil][reserved]
         // Require the full 4-byte payload — the slave always sends 4 bytes.
         if (data_len < 4) {
+            trace("RX Connection(0x64): response too short (%zu bytes, expected 4)",
+                  data_len);
             FSoEErrorDetail detail;
             snprintf(detail.message, sizeof(detail.message),
                      "Connection response too short: got %zu bytes, expected 4",
@@ -558,6 +655,9 @@ void FSoEMasterConnection::handleConnectionState(uint8_t cmd, const uint8_t* dat
         }
         uint16_t slave_safety_addr = data[0] | (data[1] << 8);
         if (slave_safety_addr != 0 && slave_safety_addr != config_.slave_safety_addr) {
+            trace("RX Connection(0x64): safety address mismatch "
+                  "(expected 0x%04X got 0x%04X)",
+                  config_.slave_safety_addr, slave_safety_addr);
             FSoEErrorDetail detail;
             detail.conn_id_valid = true;
             detail.expected_conn_id = config_.slave_safety_addr;
@@ -570,6 +670,8 @@ void FSoEMasterConnection::handleConnectionState(uint8_t cmd, const uint8_t* dat
         }
         uint8_t slave_sil = data[2];
         if (slave_sil < config_.safety_level) {
+            trace("RX Connection(0x64): slave SIL %u below required %u",
+                  slave_sil, config_.safety_level);
             FSoEErrorDetail detail;
             snprintf(detail.message, sizeof(detail.message),
                      "Slave SIL %u below required SIL %u",
@@ -577,12 +679,19 @@ void FSoEMasterConnection::handleConnectionState(uint8_t cmd, const uint8_t* dat
             handleError(ErrorCode::ApplicationError, detail);
             return;
         }
+        trace("RX Connection(0x64): slave confirmed safety_addr=0x%04X SIL=%u, "
+              "moving to %s",
+              slave_safety_addr, slave_sil,
+              (config_.input_size > 0 || config_.output_size > 0)
+                  ? "Parameter" : "Data");
         if (config_.input_size > 0 || config_.output_size > 0) {
             transitionTo(ConnectionState::Parameter);
         } else {
             transitionTo(ConnectionState::Data);
         }
     } else {
+        trace("RX %s: unexpected in Connection state (expected Connection)",
+              commandName(cmd));
         FSoEErrorDetail detail;
         snprintf(detail.message, sizeof(detail.message),
                  "Unexpected command 0x%02X in Connection state (expected Connection)",
@@ -597,14 +706,18 @@ void FSoEMasterConnection::handleParameterState(uint8_t cmd, const uint8_t* data
     (void)data_len;
 
     if (cmd == Command::Parameter) {
+        trace("RX Parameter(0x52): slave accepted parameters, moving to Data");
         current_param_index_++;
         if (current_param_index_ >= 1) {
             transitionTo(ConnectionState::Data);
         }
     } else if (cmd == Command::ProcessData) {
+        trace("RX ProcessData(0x36): slave skippped Parameter phase, moving to Data");
         transitionTo(ConnectionState::Data);
         handleDataState(cmd, data, data_len);
     } else {
+        trace("RX %s: unexpected in Parameter state (expected Parameter or ProcessData)",
+              commandName(cmd));
         FSoEErrorDetail detail;
         snprintf(detail.message, sizeof(detail.message),
                  "Unexpected command 0x%02X in Parameter state (expected Parameter or ProcessData)",
@@ -617,9 +730,12 @@ void FSoEMasterConnection::handleDataState(uint8_t cmd, const uint8_t* data, siz
 {
     if (cmd != Command::ProcessData) {
         if (cmd == Command::Reset) {
+            trace("RX Reset(0x2A): slave requested reset in Data state, resetting connection");
             resetConnection();
             return;
         }
+        trace("RX %s: unexpected in Data state (expected ProcessData)",
+              commandName(cmd));
         FSoEErrorDetail detail;
         snprintf(detail.message, sizeof(detail.message),
                  "Unexpected command 0x%02X in Data state (expected ProcessData)",
@@ -633,6 +749,8 @@ void FSoEMasterConnection::handleDataState(uint8_t cmd, const uint8_t* data, siz
 
     if (data_len < config_.input_size) {
         stats_.invalid_frames++;
+        trace("RX ProcessData(0x36): frame too short (%zu bytes, expected %u)",
+              data_len, config_.input_size);
         FSoEErrorDetail detail;
         snprintf(detail.message, sizeof(detail.message),
                  "Data frame too short: got %zu bytes, expected %u",
@@ -643,6 +761,8 @@ void FSoEMasterConnection::handleDataState(uint8_t cmd, const uint8_t* data, siz
 
     std::copy(data, data + config_.input_size, safe_inputs_.begin());
     status_.data_valid = true;
+    trace("RX ProcessData(0x36): %u bytes of safe inputs (state=Data)",
+          config_.input_size);
 
     if (data_callback_) {
         data_callback_(safe_inputs_.data(), config_.input_size);
@@ -653,8 +773,11 @@ void FSoEMasterConnection::handleFailSafeState(uint8_t cmd, const uint8_t* data,
 {
     if (cmd == Command::Reset) {
         if (config_.auto_recovery_enabled) {
+            trace("RX Reset(0x2A): slave ready to recover, resetting connection");
             stats_.successful_recoveries++;
             resetConnection();
+        } else {
+            trace("RX Reset(0x2A): slave ready to recover, but auto-recovery disabled");
         }
     } else if (cmd == Command::FailSafeData) {
         // Slave is also in fail-safe — acknowledge by staying in fail-safe.
@@ -664,15 +787,21 @@ void FSoEMasterConnection::handleFailSafeState(uint8_t cmd, const uint8_t* data,
         if (data_len >= config_.input_size + 2) {
             uint16_t slave_error = static_cast<uint16_t>(
                 data[config_.input_size] | (data[config_.input_size + 1] << 8));
+            trace("RX FailSafeData(0x08): slave also in fail-safe (error=0x%04X)",
+                  slave_error);
             // Update error code only if the slave reports a different error
             // than what we already have — avoids overwriting our own error.
             if (slave_error != ErrorCode::NoError &&
                 slave_error != status_.error_code) {
                 status_.error_code = slave_error;
             }
+        } else {
+            trace("RX FailSafeData(0x08): slave also in fail-safe (no error code)");
         }
     } else {
         // Unexpected command in FailSafe state
+        trace("RX %s: unexpected in FailSafe state (expected Reset or FailSafeData)",
+              commandName(cmd));
         FSoEErrorDetail detail;
         snprintf(detail.message, sizeof(detail.message),
                  "Unexpected command 0x%02X in FailSafe state (expected Reset or FailSafeData)",
@@ -1030,6 +1159,8 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
     // spurious CRCError or ConnectionIDError and immediate fail-safe.
     constexpr uint32_t kStartupSkipCycles = 2;
     if (pdo_tx_count_ < kStartupSkipCycles) {
+        trace("PDO startup: skipping RX (cycle %u/%u, slave hasn't responded yet)",
+              pdo_tx_count_ + 1, kStartupSkipCycles);
         pdo_tx_count_++;
         return false;
     }
@@ -1221,6 +1352,12 @@ void FSoEMasterConnection::setDataCallback(DataCallback callback)
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     data_callback_ = std::move(callback);
+}
+
+void FSoEMasterConnection::setTraceCallback(TraceCallback callback)
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    trace_callback_ = std::move(callback);
 }
 
 // ============================================================================
