@@ -37,8 +37,9 @@
  *   ./synapticon_cst_fsoe --dc-sync             # enable DC synchronization
  *   ./synapticon_cst_fsoe --connection-id 0x4321 --watchdog-ms 15
  *   ./synapticon_cst_fsoe --debug fsoe          # high-level FSoE protocol trace
- *   ./synapticon_cst_fsoe --debug fsoe-frame    # decoded FSoE PDO struct fields
- *   ./synapticon_cst_fsoe --debug fsoe-raw      # FSoE protocol trace + raw frame hex dumps
+ *   ./synapticon_cst_fsoe --debug fsoe-frame    # decoded FSoE PDO struct fields (on change)
+ *   ./synapticon_cst_fsoe --debug fsoe-raw      # FSoE protocol trace + raw frame hex dumps (on change)
+ *   ./synapticon_cst_fsoe --debug fsoe-wire     # every-cycle PDO wire dumps (firehose)
  */
 
 #include <array>
@@ -509,13 +510,15 @@ public:
                         size_t rx_pdo_offset,
                         size_t tx_pdo_offset,
                         bool debug_raw = false,
-                        bool debug_frame = false)
+                        bool debug_frame = false,
+                        bool debug_wire = false)
         : slave_index_(slave_index)
         , main_instance_(main_instance)
         , rx_pdo_offset_(rx_pdo_offset)
         , tx_pdo_offset_(tx_pdo_offset)
         , debug_raw_(debug_raw)
         , debug_frame_(debug_frame)
+        , debug_wire_(debug_wire)
     {}
 
     bool update(EtherCAT::DS402Master& master, double dt_seconds) override {
@@ -536,36 +539,34 @@ public:
         uint8_t* rx_buffer = static_cast<uint8_t*>(drive->getRxPDOBuffer()) + rx_pdo_offset_;
         const uint8_t* tx_buffer = static_cast<const uint8_t*>(drive->getTxPDOBuffer()) + tx_pdo_offset_;
 
-        // Log the first few PDO frames to see both sides of the conversation.
-        // TxPDO (slave→master) is dumped BEFORE exchangeViaPDO — it contains
-        // what the slave produced in response to the previous master frame.
-        // RxPDO (master→slave) is dumped AFTER exchangeViaPDO — it contains
-        // what the master just built for this cycle.
-        // Only enabled with --debug fsoe-raw.
-        if (debug_raw_ && dump_count_ < 20) {
-            // --- TxPDO (slave→master) ---
-            // FSoE region (31 bytes)
+        // --debug fsoe-wire: dump every cycle, unconditionally.
+        // This is the "firehose" mode for seeing the raw PDO wire bytes
+        // on every single cycle, even when nothing changes.
+        if (debug_wire_) {
+            dumpWire(tx_buffer, rx_buffer);
+        }
+
+        // --debug fsoe-raw / fsoe-frame: dump only when the FSoE frame
+        // content changes.  Compares the current TxPDO (slave-to-master) and
+        // RxPDO (master-to-slave) FSoE regions against the last seen copies.
+        const bool tx_changed = (debug_raw_ || debug_frame_) &&
+            std::memcmp(tx_buffer, last_tx_.data(), sizeof(FSoETxPDO)) != 0;
+        if (tx_changed) {
+            std::memcpy(last_tx_.data(), tx_buffer, sizeof(FSoETxPDO));
+        }
+
+        // --debug fsoe-raw: hex dump on change
+        if (debug_raw_ && tx_changed) {
             char hex[128];
             size_t pos = 0;
             for (size_t b = 0; b < sizeof(FSoETxPDO) && pos + 3 < sizeof(hex); b++) {
                 pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", tx_buffer[b]));
             }
-            TETHER_LOGI("fsoe-cyclic", "[TxPDO-FSoE] dump %u: %s", dump_count_, hex);
-            // Motion PDO region (13 bytes at offset 31)
-            const uint8_t* motion_tx = static_cast<const uint8_t*>(drive->getTxPDOBuffer()) + tx_pdo_offset_ + sizeof(FSoETxPDO);
-            char mhex[64];
-            pos = 0;
-            for (size_t b = 0; b < 13 && pos + 3 < sizeof(mhex); b++) {
-                pos += static_cast<size_t>(snprintf(mhex + pos, sizeof(mhex) - pos, "%02X ", motion_tx[b]));
-            }
-            TETHER_LOGI("fsoe-cyclic", "[TxPDO-Motion] dump %u: %s", dump_count_, mhex);
+            TETHER_LOGI("fsoe-cyclic", "[TxPDO-FSoE] changed: %s", hex);
         }
 
-        // Decode the device-specific FSoE PDO structs into named fields
-        // (--debug fsoe-frame).  TxPDO (slave→master) is decoded BEFORE
-        // exchangeViaPDO — it contains the slave's response to the previous
-        // master frame.
-        if (debug_frame_ && frame_dump_count_ < 20) {
+        // --debug fsoe-frame: decoded struct dump on change
+        if (debug_frame_ && tx_changed) {
             const auto* tx_pdo = reinterpret_cast<const FSoETxPDO*>(tx_buffer);
             dumpFSoETxPDO(TAG, *tx_pdo);
         }
@@ -575,32 +576,26 @@ public:
             tx_buffer, sizeof(FSoETxPDO),
             elapsed_time_ms_);
 
-        // Decode the master→slave FSoE frame from RxPDO AFTER exchangeViaPDO
-        // — it contains what the master just built for this cycle.
-        if (debug_frame_ && frame_dump_count_ < 20) {
-            const auto* rx_pdo = reinterpret_cast<const FSoERxPDO*>(rx_buffer);
-            dumpFSoERxPDO(TAG, *rx_pdo);
-            frame_dump_count_++;
+        // RxPDO (master-to-slave) is checked AFTER exchangeViaPDO -- it
+        // contains what the master just built for this cycle.
+        const bool rx_changed = (debug_raw_ || debug_frame_) &&
+            std::memcmp(rx_buffer, last_rx_.data(), sizeof(FSoERxPDO)) != 0;
+        if (rx_changed) {
+            std::memcpy(last_rx_.data(), rx_buffer, sizeof(FSoERxPDO));
         }
 
-        if (debug_raw_ && dump_count_ < 20) {
-            // --- RxPDO (master→slave) ---
-            // FSoE region (11 bytes)
+        if (debug_frame_ && rx_changed) {
+            const auto* rx_pdo = reinterpret_cast<const FSoERxPDO*>(rx_buffer);
+            dumpFSoERxPDO(TAG, *rx_pdo);
+        }
+
+        if (debug_raw_ && rx_changed) {
             char hex[128];
             size_t pos = 0;
             for (size_t b = 0; b < sizeof(FSoERxPDO) && pos + 3 < sizeof(hex); b++) {
                 pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", rx_buffer[b]));
             }
-            TETHER_LOGI("fsoe-cyclic", "[RxPDO-FSoE] dump %u: %s", dump_count_, hex);
-            // Motion PDO region (19 bytes at offset 11)
-            const uint8_t* motion_rx = static_cast<const uint8_t*>(drive->getRxPDOBuffer()) + rx_pdo_offset_ + sizeof(FSoERxPDO);
-            char mhex[80];
-            pos = 0;
-            for (size_t b = 0; b < 19 && pos + 3 < sizeof(mhex); b++) {
-                pos += static_cast<size_t>(snprintf(mhex + pos, sizeof(mhex) - pos, "%02X ", motion_rx[b]));
-            }
-            TETHER_LOGI("fsoe-cyclic", "[RxPDO-Motion] dump %u: %s", dump_count_, mhex);
-            dump_count_++;
+            TETHER_LOGI("fsoe-cyclic", "[RxPDO-FSoE] changed: %s", hex);
         }
 
         return ok;
@@ -613,9 +608,33 @@ private:
     size_t tx_pdo_offset_;
     bool debug_raw_ = false;
     bool debug_frame_ = false;
+    bool debug_wire_ = false;
     uint64_t elapsed_time_ms_ = 0;
-    uint32_t dump_count_ = 0;
-    uint32_t frame_dump_count_ = 0;
+    uint32_t cycle_count_ = 0;
+    // Last-seen FSoE PDO content for change detection
+    std::array<uint8_t, sizeof(FSoETxPDO)> last_tx_{};
+    std::array<uint8_t, sizeof(FSoERxPDO)> last_rx_{};
+
+    void dumpWire(const uint8_t* tx_buffer, const uint8_t* rx_buffer) {
+        char hex[128];
+        size_t pos;
+
+        // TxPDO (slave-to-master) -- FSoE region
+        pos = 0;
+        for (size_t b = 0; b < sizeof(FSoETxPDO) && pos + 3 < sizeof(hex); b++) {
+            pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", tx_buffer[b]));
+        }
+        TETHER_LOGI("fsoe-wire", "[TxPDO] cycle %u: %s", cycle_count_, hex);
+
+        // RxPDO (master-to-slave) -- FSoE region
+        pos = 0;
+        for (size_t b = 0; b < sizeof(FSoERxPDO) && pos + 3 < sizeof(hex); b++) {
+            pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", rx_buffer[b]));
+        }
+        TETHER_LOGI("fsoe-wire", "[RxPDO] cycle %u: %s", cycle_count_, hex);
+
+        cycle_count_++;
+    }
 };
 
 // ============================================================================
@@ -671,8 +690,9 @@ bool parseArgs(int argc, char** argv, Args& out) {
     program.add_argument("--debug")
         .default_value(std::string(""))
         .help("Comma-separated debug flags: 'fsoe' for high-level protocol trace, "
-              "'fsoe-frame' for decoded PDO struct fields, "
-              "'fsoe-raw' for protocol trace + raw frame hex dumps");
+              "'fsoe-frame' for decoded PDO struct fields (on change), "
+              "'fsoe-raw' for raw frame hex dumps (on change), "
+              "'fsoe-wire' for every-cycle PDO wire dumps");
 
     try {
         program.parse_args(argc, argv);
@@ -1377,6 +1397,8 @@ int main(int argc, char** argv) {
         const bool debug_fsoe_raw =
             (args.debug.find("fsoe-raw") != std::string::npos ||
              args.debug.find("fsoe-master") != std::string::npos);
+        const bool debug_fsoe_wire =
+            (args.debug.find("fsoe-wire") != std::string::npos);
 
         EtherCAT::Drives::Synapticon::SafeMotion::MainConfig main_config;
         main_config.feature_enabled = true;
@@ -1437,19 +1459,26 @@ int main(int argc, char** argv) {
 
         // Raw frame hex dumps (--debug fsoe-raw).
         // Frame event listeners are invoked from inside the FSoE state
-        // machine for every master→slave (tx) and slave→master (rx) frame.
-        // Each listener receives an immutable shared_ptr<const
+        // machine for every master-to-slave (tx) and slave-to-master (rx)
+        // frame.  Each listener receives an immutable shared_ptr<const
         // std::vector<uint8_t>> copy of the frame bytes.
+        // Only prints when the frame content changes from the previous cycle.
         if (debug_fsoe_raw) {
+            auto last_tx = std::make_shared<std::vector<uint8_t>>();
+            auto last_rx = std::make_shared<std::vector<uint8_t>>();
             fsoe_main->rawConnection().txFrameEvents().addListener(
-                [](std::shared_ptr<const std::vector<uint8_t>> data) {
+                [last_tx](std::shared_ptr<const std::vector<uint8_t>> data) {
+                    if (*data == *last_tx) return;  // skip unchanged
+                    *last_tx = *data;
                     const uint8_t cmd = (!data->empty()) ? (*data)[0] : 0;
                     TETHER_LOGI(TAG, "[fsoe-raw] TX (master->slave) len=%zu cmd=%s",
                                 data->size(), fsoeCommandName(cmd));
                     hexDump(TAG, "TX (master->slave)", data->data(), data->size());
                 });
             fsoe_main->rawConnection().rxFrameEvents().addListener(
-                [](std::shared_ptr<const std::vector<uint8_t>> data) {
+                [last_rx](std::shared_ptr<const std::vector<uint8_t>> data) {
+                    if (*data == *last_rx) return;  // skip unchanged
+                    *last_rx = *data;
                     const uint8_t cmd = (!data->empty()) ? (*data)[0] : 0;
                     TETHER_LOGI(TAG, "[fsoe-raw] RX (slave->master) len=%zu cmd=%s",
                                 data->size(), fsoeCommandName(cmd));
@@ -1465,7 +1494,7 @@ int main(int argc, char** argv) {
                 std::make_unique<FSoEPDOExchangeTask>(
                     slave_idx, *fsoe_main,
                     kFSoERxPDOOffset, kFSoETxPDOOffset,
-                    debug_fsoe_raw, debug_fsoe_frame))) {
+                    debug_fsoe_raw, debug_fsoe_frame, debug_fsoe_wire))) {
             TETHER_LOGE(TAG, "Failed to add FSoE PDO exchange task");
             rc = 6;
             master.clearCyclicTasks();
@@ -1483,11 +1512,12 @@ int main(int argc, char** argv) {
         }
 
         TETHER_LOGI(TAG,
-            "FSoE enabled: conn_id=0x%04X watchdog=%u ms debug=%s%s%s",
+            "FSoE enabled: conn_id=0x%04X watchdog=%u ms debug=%s%s%s%s",
             args.connection_id, args.watchdog_ms,
             debug_fsoe ? "fsoe" : "off",
             debug_fsoe_frame ? "+frame" : "",
-            debug_fsoe_raw ? "+raw" : "");
+            debug_fsoe_raw ? "+raw" : "",
+            debug_fsoe_wire ? "+wire" : "");
     } else {
         TETHER_LOGI(TAG, "FSoE disabled (--no-fsoe)");
     }
