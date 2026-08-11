@@ -1407,7 +1407,10 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
             }
         }
         // Periodic hex dump: log RxPDO bytes every 1000 cycles
-        if ((physical_stats_.fpwr_success % 1000) == 0 || rxPDODebug()) {
+        // (skip cycle 0 — fpwr_success==0 makes 0%1000==0 which would
+        //  fire every cycle until the first successful write)
+        if ((physical_stats_.fpwr_success > 0 &&
+             (physical_stats_.fpwr_success % 1000) == 0) || rxPDODebug()) {
             char hex[128];
             size_t pos = 0;
             size_t dump_len = sm2.length < 32 ? sm2.length : 32;

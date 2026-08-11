@@ -24,8 +24,9 @@
  *   ./synapticon_fsoe_only -s 1 -d 30            # slave 1, 30 s
  *   ./synapticon_fsoe_only --connection-id 0x4321 --watchdog-ms 15
  *   ./synapticon_fsoe_only --debug fsoe          # high-level FSoE protocol trace
- *   ./synapticon_fsoe_only --debug fsoe-frame    # decoded FSoE PDO struct fields
- *   ./synapticon_fsoe_only --debug fsoe-raw      # protocol trace + raw frame hex dumps
+ *   ./synapticon_fsoe_only --debug fsoe-frame    # decoded FSoE PDO struct fields (on change)
+ *   ./synapticon_fsoe_only --debug fsoe-raw      # protocol trace + raw frame hex dumps (on change)
+ *   ./synapticon_fsoe_only --debug fsoe-wire     # every-cycle PDO wire dumps (firehose)
  */
 
 #include <array>
@@ -356,11 +357,13 @@ public:
     FSoEPDOExchangeTask(uint16_t slave_index,
                         FSoEMain& main_instance,
                         bool debug_raw,
-                        bool debug_frame = false)
+                        bool debug_frame = false,
+                        bool debug_wire = false)
         : slave_index_(slave_index)
         , main_instance_(main_instance)
         , debug_raw_(debug_raw)
         , debug_frame_(debug_frame)
+        , debug_wire_(debug_wire)
     {}
 
     bool update(EtherCAT::DS402Master& master, double dt_seconds) override {
@@ -380,76 +383,87 @@ public:
         auto* rx = drive->rxPDO<FSoERxPDO>();
         auto* tx = drive->txPDO<FSoETxPDO>();
         if (rx == nullptr || tx == nullptr) {
-            TETHER_LOGW(TAG, "FSoE PDO buffers not available — skipping exchange");
+            TETHER_LOGW(TAG, "FSoE PDO buffers not available -- skipping exchange");
             return true;  // don't stop the process
         }
 
-        // Decode the slave→master FSoE frame BEFORE exchangeViaPDO — it
-        // contains the slave's response to the previous master frame.
-        if (debug_frame_ && frame_dump_count_ < 20) {
+        const auto* rx_bytes = reinterpret_cast<const uint8_t*>(rx);
+        const auto* tx_bytes = reinterpret_cast<const uint8_t*>(tx);
+
+        // --debug fsoe-wire: dump every cycle, unconditionally.
+        if (debug_wire_) {
+            char hex[128];
+            size_t pos;
+
+            pos = 0;
+            for (size_t b = 0; b < sizeof(FSoERxPDO) && pos + 3 < sizeof(hex); b++) {
+                pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", rx_bytes[b]));
+            }
+            TETHER_LOGI("fsoe-wire", "[RxPDO] cycle %u: %s", cycle_count_, hex);
+
+            pos = 0;
+            for (size_t b = 0; b < sizeof(FSoETxPDO) && pos + 3 < sizeof(hex); b++) {
+                pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", tx_bytes[b]));
+            }
+            TETHER_LOGI("fsoe-wire", "[TxPDO] cycle %u: %s", cycle_count_, hex);
+            cycle_count_++;
+        }
+
+        // --debug fsoe-raw / fsoe-frame: only on frame content change
+        const bool tx_changed = (debug_raw_ || debug_frame_) &&
+            std::memcmp(tx_bytes, last_tx_.data(), sizeof(FSoETxPDO)) != 0;
+        if (tx_changed) {
+            std::memcpy(last_tx_.data(), tx_bytes, sizeof(FSoETxPDO));
+        }
+
+        // Decode the slave-to-master FSoE frame BEFORE exchangeViaPDO.
+        if (debug_frame_ && tx_changed) {
             dumpFSoETxPDO(TAG, *tx);
         }
 
         // Exchange FSoE frames via the PDO buffers.
-        // rx (RxPDO 0x1700) is master→slave: we write the FSoE TX frame here.
-        // tx (TxPDO 0x1B00) is slave→master: we read the drive's FSoE RX frame here.
         const bool ok = main_instance_.exchangeViaPDO(
             reinterpret_cast<uint8_t*>(rx), sizeof(FSoERxPDO),
             reinterpret_cast<const uint8_t*>(tx), sizeof(FSoETxPDO),
             elapsed_time_ms_);
 
-        // Decode the master→slave FSoE frame AFTER exchangeViaPDO — it
-        // contains what the master just built for this cycle.
-        if (debug_frame_ && frame_dump_count_ < 20) {
-            dumpFSoERxPDO(TAG, *rx);
-            frame_dump_count_++;
+        const bool rx_changed = (debug_raw_ || debug_frame_) &&
+            std::memcmp(rx_bytes, last_rx_.data(), sizeof(FSoERxPDO)) != 0;
+        if (rx_changed) {
+            std::memcpy(last_rx_.data(), rx_bytes, sizeof(FSoERxPDO));
         }
 
-        if (debug_raw_) {
+        // Decode the master-to-slave FSoE frame AFTER exchangeViaPDO.
+        if (debug_frame_ && rx_changed) {
+            dumpFSoERxPDO(TAG, *rx);
+        }
+
+        if (debug_raw_ && (tx_changed || rx_changed)) {
             const auto status = main_instance_.rawConnection().getStatus();
             TETHER_LOGI(TAG, "[fsoe-raw] t=%lu ms  state=%s(0x%02X)  ok=%d",
                         static_cast<unsigned long>(elapsed_time_ms_),
                         fsoeStateName(status.state), status.state,
                         ok ? 1 : 0);
-            // Dump the master→slave frame written into RxPDO 0x1700
-            hexDump(TAG, "TX→RxPDO 0x1700",
-                    reinterpret_cast<const uint8_t*>(rx), sizeof(FSoERxPDO));
-            // Dump the slave→master frame read from TxPDO 0x1B00
-            hexDump(TAG, "RX←TxPDO 0x1B00",
-                    reinterpret_cast<const uint8_t*>(tx), sizeof(FSoETxPDO));
-            // Decode FSoE command bytes
-            TETHER_LOGI(TAG, "  TX cmd=%s  RX cmd=%s",
-                        fsoeCommandName(rx->fsoe_command),
-                        fsoeCommandName(tx->fsoe_command));
-            // Decode safety flags from the PDO structs
-            TETHER_LOGI(TAG,
-                "  RX safety: STO=%d SS1=%d SS2=%d SOS=%d SBC=%d "
-                "conn_id=0x%04X  crc0=0x%04X crc1=0x%04X",
-                (rx->safety_flags & FSoERxPDO::kSTO) ? 1 : 0,
-                (rx->safety_flags & FSoERxPDO::kSS1) ? 1 : 0,
-                (rx->safety_flags & FSoERxPDO::kSS2) ? 1 : 0,
-                (rx->safety_flags & FSoERxPDO::kSOS) ? 1 : 0,
-                (rx->safety_flags & FSoERxPDO::kSBCCommand) ? 1 : 0,
-                rx->fsoe_connection_id,
-                rx->fsoe_crc_0, rx->fsoe_crc_1);
-            TETHER_LOGI(TAG,
-                "  TX safety: STO=%d SOS=%d SS1=%d SS2=%d err=%d "
-                "conn_id=0x%04X  crc0=0x%04X",
-                (tx->safety_state_flags & FSoETxPDO::kSTOState) ? 1 : 0,
-                (tx->safety_state_flags & FSoETxPDO::kSOSState) ? 1 : 0,
-                (tx->safety_state_flags & FSoETxPDO::kSS1State) ? 1 : 0,
-                (tx->safety_state_flags & FSoETxPDO::kSS2State) ? 1 : 0,
-                (tx->safety_state_flags & FSoETxPDO::kErrorState) ? 1 : 0,
-                tx->fsoe_connection_id,
-                tx->fsoe_crc_0);
+            if (rx_changed) {
+                hexDump(TAG, "TX->RxPDO 0x1700",
+                        reinterpret_cast<const uint8_t*>(rx), sizeof(FSoERxPDO));
+                TETHER_LOGI(TAG, "  TX cmd=%s conn_id=0x%04X crc0=0x%04X crc1=0x%04X",
+                            fsoeCommandName(rx->fsoe_command),
+                            rx->fsoe_connection_id,
+                            rx->fsoe_crc_0, rx->fsoe_crc_1);
+            }
+            if (tx_changed) {
+                hexDump(TAG, "RX<-TxPDO 0x1B00",
+                        reinterpret_cast<const uint8_t*>(tx), sizeof(FSoETxPDO));
+                TETHER_LOGI(TAG, "  RX cmd=%s conn_id=0x%04X crc0=0x%04X",
+                            fsoeCommandName(tx->fsoe_command),
+                            tx->fsoe_connection_id,
+                            tx->fsoe_crc_0);
+            }
         }
 
         if (!ok) {
-            // Log the failure but do NOT return false — keep the process
-            // running so the operator can see FSoE diagnostics and state
-            // transitions even when the drive is in safe state or not
-            // responding correctly.
-            TETHER_LOGW(TAG, "FSoE exchange failed at t=%lu ms (state=%s) — continuing",
+            TETHER_LOGW(TAG, "FSoE exchange failed at t=%lu ms (state=%s) -- continuing",
                         static_cast<unsigned long>(elapsed_time_ms_),
                         fsoeStateName(main_instance_.rawConnection().getState()));
         }
@@ -462,8 +476,11 @@ private:
     FSoEMain& main_instance_;
     bool debug_raw_;
     bool debug_frame_ = false;
+    bool debug_wire_ = false;
     uint64_t elapsed_time_ms_ = 0;
-    uint32_t frame_dump_count_ = 0;
+    uint32_t cycle_count_ = 0;
+    std::array<uint8_t, sizeof(FSoETxPDO)> last_tx_{};
+    std::array<uint8_t, sizeof(FSoERxPDO)> last_rx_{};
 };
 
 // ============================================================================
@@ -724,6 +741,8 @@ int main(int argc, char** argv) {
     const bool debug_fsoe_raw =
         (args.debug.find("fsoe-raw") != std::string::npos ||
          args.debug.find("fsoe-master") != std::string::npos);
+    const bool debug_fsoe_wire =
+        (args.debug.find("fsoe-wire") != std::string::npos);
 
     {
         EtherCAT::Drives::Synapticon::SafeMotion::MainConfig main_config;
@@ -781,7 +800,8 @@ int main(int argc, char** argv) {
             args.connection_id, args.watchdog_ms,
             debug_fsoe ? "fsoe" : "off",
             debug_fsoe_frame ? "+frame" : "",
-            debug_fsoe_raw ? "+raw" : "");
+            debug_fsoe_raw ? "+raw" : "",
+            debug_fsoe_wire ? "+wire" : "");
     }
 
     // --- Add FSoE cyclic tasks ---
@@ -789,7 +809,8 @@ int main(int argc, char** argv) {
 
     if (!master.addCyclicTask(
             std::make_unique<FSoEPDOExchangeTask>(slave_idx, *fsoe_main,
-                                                  debug_fsoe_raw, debug_fsoe_frame))) {
+                                                  debug_fsoe_raw, debug_fsoe_frame,
+                                                  debug_fsoe_wire))) {
         TETHER_LOGE(TAG, "Failed to add FSoE PDO exchange task");
         rc = 6;
         Tether::Examples::stopHostMasterSession(master, session);
