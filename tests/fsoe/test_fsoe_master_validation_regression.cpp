@@ -365,12 +365,12 @@ TEST(FSoEMasterFailSafeResetRegression, ResetCommandInFailSafeWithAutoRecovery) 
 
     // Send Reset command — Reset frames use start_crc=0 and seq_no=0
     // (Reset resets the CRC chain).  The frame is the full fixed size
-    // with data_len = fsoeFixedDataLen(output_size).
+    // with data_len = output_size.
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     payload[0] = 0x01;  // error code
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::Reset,
-                                            payload, CRC::fsoeFixedDataLen(4),
+                                            payload, 4u,
                                             0x1234,
                                             0,  // start_crc = 0 (Reset resets CRC chain)
                                             0);  // seq_no = 0 (Reset resets sequence)
@@ -421,7 +421,7 @@ TEST(FSoEMasterFailSafeFrameRegression, FailSafeFrameContainsFailSafeValues) {
     ASSERT_TRUE(CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id));
     EXPECT_EQ(cmd, Command::FailSafeData);
     // Frame data length is the fixed data length (max(output_size, 6) = 6)
-    EXPECT_EQ(data_len, CRC::fsoeFixedDataLen(4));
+    EXPECT_EQ(data_len, 4u);
     EXPECT_EQ(data[0], 0xDE);
     EXPECT_EQ(data[1], 0xAD);
     EXPECT_EQ(data[2], 0xBE);

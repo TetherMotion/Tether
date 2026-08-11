@@ -217,18 +217,20 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
 
     stats_.frames_received++;
 
-    // Duplicate frame detection: if the slave re-sends the exact same
-    // frame bytes (e.g. it hasn't seen a new master frame yet and is
-    // repeating its last response), skip re-processing.  This avoids
-    // spurious state transitions or error handling from processing the
-    // same handshake response twice (e.g. a Session response arriving
-    // again after the master has already transitioned to Connection).
+    // Store the raw frame for duplicate detection.
+    // last_rx_frame_ is cleared in prepareTxFrame() so that a frame
+    // received after the master sent a new frame is never considered a
+    // duplicate — it's a fresh response, even if the bytes happen to be
+    // identical (e.g. with 0-byte safe data where CRC doesn't change).
+    //
+    // Duplicate detection: if the slave re-sends the exact same frame
+    // bytes WITHOUT the master having sent a new frame in between, skip
+    // re-processing.  This happens in the PDO path when the slave hasn't
+    // seen the master's new frame yet and is repeating its last response.
     //
     // Only applied during handshake states (Session, Connection,
-    // Parameter).  In Data and FailSafe states, identical frames are
-    // expected when the slave's inputs don't change — they must still
-    // be processed to update the watchdog timestamp and refresh safe
-    // input data.
+    // Parameter).  In Data/FailSafe states, identical frames are normal
+    // and must be processed to update the watchdog.
     if ((status_.state == ConnectionState::Session ||
          status_.state == ConnectionState::Connection ||
          status_.state == ConnectionState::Parameter) &&
@@ -331,6 +333,19 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
         }
     }
 
+    // Log detailed frame evaluation for debugging.
+    trace("RX eval: cmd=%s(0x%02X) data_len=%zu conn_id=0x%04X "
+          "state=%s expected_cmd=%s",
+          commandName(cmd), cmd, data_len, conn_id,
+          stateName(status_.state),
+          status_.state == ConnectionState::Reset ? "Session/Reset" :
+          status_.state == ConnectionState::Session ? "Session" :
+          status_.state == ConnectionState::Connection ? "Connection" :
+          status_.state == ConnectionState::Parameter ? "Parameter" :
+          status_.state == ConnectionState::Data ? "ProcessData" :
+          status_.state == ConnectionState::FailSafe ? "FailSafeData" :
+          "Reset");
+
     // Update watchdog timestamp
     status_.last_valid_frame_ms = current_time_ms_;
 
@@ -424,6 +439,11 @@ size_t FSoEMasterConnection::prepareTxFrame(uint8_t* data, size_t max_len)
     std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     if (!initialized_ || !data) return 0;
+
+    // Clear last_rx_frame_ so that the next received frame is not considered
+    // a duplicate — the master is sending a new frame, so any response (even
+    // if byte-identical) is a fresh response to this new frame.
+    last_rx_frame_.clear();
 
     // In Reset state, send a Reset command (0x2A) to force the slave back
     // to its initial state before starting the Session handshake.  The
@@ -546,6 +566,21 @@ void FSoEMasterConnection::checkPhaseTimeout(uint64_t current_time_ms)
                 // standard FSoE Session handshake.
                 trace("Reset state timeout after %llu ms, falling back to Session handshake",
                       static_cast<unsigned long long>(elapsed));
+                // Dump the last TxPDO content for debugging.
+                if (!last_txpdo_.empty()) {
+                    char hex[256];
+                    size_t pos = 0;
+                    for (size_t b = 0; b < last_txpdo_.size() && pos + 3 < sizeof(hex); b++) {
+                        pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", last_txpdo_[b]));
+                    }
+                    trace("  last TxPDO (%zu bytes): %s", last_txpdo_.size(), hex);
+                    const uint8_t last_cmd = last_txpdo_[0];
+                    trace("  last TxPDO cmd=%s(0x%02X) — slave was %s",
+                          commandName(last_cmd), last_cmd,
+                          isValidCommand(last_cmd) ? "sending valid FSoE frames" : "NOT sending FSoE frames");
+                } else {
+                    trace("  no TxPDO received from slave (last_txpdo_ is empty)");
+                }
                 requestSessionReset();
             }
         }
@@ -567,6 +602,26 @@ void FSoEMasterConnection::checkPhaseTimeout(uint64_t current_time_ms)
 
     if (elapsed > timeout) {
         stats_.timeout_events++;
+        // Dump the last TxPDO content for debugging.
+        if (!last_txpdo_.empty()) {
+            char hex[256];
+            size_t pos = 0;
+            for (size_t b = 0; b < last_txpdo_.size() && pos + 3 < sizeof(hex); b++) {
+                pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", last_txpdo_[b]));
+            }
+            trace("%s state timeout after %llu ms — last TxPDO (%zu bytes): %s",
+                  stateName(status_.state),
+                  static_cast<unsigned long long>(elapsed),
+                  last_txpdo_.size(), hex);
+            const uint8_t last_cmd = last_txpdo_[0];
+            trace("  last TxPDO cmd=%s(0x%02X) — slave was %s",
+                  commandName(last_cmd), last_cmd,
+                  isValidCommand(last_cmd) ? "sending valid FSoE frames" : "NOT sending FSoE frames");
+        } else {
+            trace("%s state timeout after %llu ms — no TxPDO received from slave",
+                  stateName(status_.state),
+                  static_cast<unsigned long long>(elapsed));
+        }
         FSoEErrorDetail detail;
         snprintf(detail.message, sizeof(detail.message),
                  "Phase timeout in state %u after %llu ms (limit %u ms)",
@@ -661,8 +716,39 @@ void FSoEMasterConnection::handleConnectionState(uint8_t cmd, const uint8_t* dat
     if (cmd == Command::Connection) {
         // Validate slave's safety address and SIL from connection response.
         // Parsed data format: [safetyAddr_lo][safetyAddr_hi][sil][reserved]
-        // Require the full 4-byte payload — the slave always sends 4 bytes.
+        // The frame data length is the PDO's safe-data size (input_size),
+        // which may be < 4.  We require at least 2 bytes (safety address).
+        if (data_len < 2) {
+            // Too short to carry safety address — skip validation.
+            if (config_.input_size < 2) {
+                if (config_.input_size > 0 || config_.output_size > 0) {
+                    transitionTo(ConnectionState::Parameter);
+                } else {
+                    transitionTo(ConnectionState::Data);
+                }
+                return;
+            }
+            FSoEErrorDetail detail;
+            snprintf(detail.message, sizeof(detail.message),
+                     "Connection response too short: got %zu bytes, expected 2",
+                     data_len);
+            handleError(ErrorCode::DataLengthError, detail);
+            return;
+        }
         if (data_len < 4) {
+            // Has safety address (2+ bytes) but not SIL.
+            // Only accept when input_size < 4 (PDO can't carry 4 bytes).
+            // When input_size >= 4, a short response is a protocol error.
+            if (config_.input_size < 4) {
+                trace("RX Connection(0x64): response short (%zu bytes, "
+                      "skipping SIL validation)", data_len);
+                if (config_.input_size > 0 || config_.output_size > 0) {
+                    transitionTo(ConnectionState::Parameter);
+                } else {
+                    transitionTo(ConnectionState::Data);
+                }
+                return;
+            }
             trace("RX Connection(0x64): response too short (%zu bytes, expected 4)",
                   data_len);
             FSoEErrorDetail detail;
@@ -849,9 +935,9 @@ size_t FSoEMasterConnection::buildResetFrame(uint8_t* data, size_t max_len)
     // spec where the Reset exchange resets the CRC chain on both sides.
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     payload[0] = ResetErrorCode::None;  // Local reset
-    size_t needed = CRC::fsoeFixedFrameSize(config_.output_size);
+    size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Reset, payload, CRC::fsoeFixedDataLen(config_.output_size),
+    return CRC::buildFSoEFrame(data, Command::Reset, payload, config_.output_size,
                                config_.connection_id,
                                0,  // start_crc = 0 (Reset resets CRC chain)
                                0,  // seq_no = 0 (Reset resets sequence)
@@ -865,9 +951,9 @@ size_t FSoEMasterConnection::buildSessionResetFrame(uint8_t* data, size_t max_le
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     payload[0] = static_cast<uint8_t>(status_.session_id & 0xFF);
     payload[1] = static_cast<uint8_t>((status_.session_id >> 8) & 0xFF);
-    size_t needed = CRC::fsoeFixedFrameSize(config_.output_size);
+    size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Session, payload, CRC::fsoeFixedDataLen(config_.output_size),
+    return CRC::buildFSoEFrame(data, Command::Session, payload, config_.output_size,
                                config_.connection_id,
                                last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
@@ -881,9 +967,9 @@ size_t FSoEMasterConnection::buildConnectionFrame(uint8_t* data, size_t max_len)
     payload[1] = (config_.slave_safety_addr >> 8) & 0xFF;
     payload[2] = parameter_crc_ & 0xFF;
     payload[3] = (parameter_crc_ >> 8) & 0xFF;
-    size_t needed = CRC::fsoeFixedFrameSize(config_.output_size);
+    size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Connection, payload, CRC::fsoeFixedDataLen(config_.output_size),
+    return CRC::buildFSoEFrame(data, Command::Connection, payload, config_.output_size,
                                config_.connection_id,
                                last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
@@ -900,9 +986,9 @@ size_t FSoEMasterConnection::buildParameterFrame(uint8_t* data, size_t max_len)
     payload[3] = config_.input_size;
     payload[4] = config_.output_size;
     payload[5] = 0;  // reserved
-    size_t needed = CRC::fsoeFixedFrameSize(config_.output_size);
+    size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Parameter, payload, CRC::fsoeFixedDataLen(config_.output_size),
+    return CRC::buildFSoEFrame(data, Command::Parameter, payload, config_.output_size,
                                config_.connection_id,
                                last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
@@ -910,10 +996,10 @@ size_t FSoEMasterConnection::buildParameterFrame(uint8_t* data, size_t max_len)
 size_t FSoEMasterConnection::buildDataFrame(uint8_t* data, size_t max_len)
 {
     // Data frame: CMD + safe_outputs + ConnID
-    size_t needed = CRC::fsoeFixedFrameSize(config_.output_size);
+    size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
     return CRC::buildFSoEFrame(data, Command::ProcessData,
-                               safe_outputs_.data(), CRC::fsoeFixedDataLen(config_.output_size),
+                               safe_outputs_.data(), config_.output_size,
                                config_.connection_id,
                                last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
@@ -921,10 +1007,10 @@ size_t FSoEMasterConnection::buildDataFrame(uint8_t* data, size_t max_len)
 size_t FSoEMasterConnection::buildFailSafeFrame(uint8_t* data, size_t max_len)
 {
     // Fail-safe frame sends FailSafeData command with fail-safe output values
-    size_t needed = CRC::fsoeFixedFrameSize(config_.output_size);
+    size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
     return CRC::buildFSoEFrame(data, Command::FailSafeData,
-                               config_.fail_safe_values.data(), CRC::fsoeFixedDataLen(config_.output_size),
+                               config_.fail_safe_values.data(), config_.output_size,
                                config_.connection_id,
                                last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
@@ -1144,24 +1230,26 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
     // to the PDO.  ConnID is at the last 2 bytes of the frame/PDO.
     const size_t tx_len = prepareTxFrame(rx_pdo_out, rx_pdo_max);
     if (tx_len == 0) {
+        trace("PDO TX: prepareTxFrame returned 0 (state=%s, rx_pdo_max=%zu)",
+              stateName(status_.state), rx_pdo_max);
         return false;
     }
 
     // Zero-fill any remaining PDO bytes after the frame.
-    // (The frame should already be the PDO size, but this ensures stale
-    // data from a previous cycle doesn't leak into unused bytes.)
     if (tx_len < rx_pdo_max) {
         std::fill(rx_pdo_out + tx_len, rx_pdo_out + rx_pdo_max, 0x00);
+    }
+
+    // Store the raw TxPDO for timeout diagnostics.
+    if (tx_pdo_in && tx_pdo_len > 0) {
+        last_txpdo_.assign(tx_pdo_in, tx_pdo_in + tx_pdo_len);
     }
 
     // Startup grace period: skip RxFrame processing for the first few
     // PDO cycles.  The slave cannot have produced a valid response until
     // it has received at least one master frame and had time to process
     // it.  Without DC synchronization there is a one-cycle pipeline
-    // delay (master writes cycle N → slave reads N+1 → slave writes N+1
-    // → master reads N+2), so we need to skip 2 cycles.  With DC sync
-    // the slave responds within the same cycle, but skipping 2 is
-    // harmless — the master just re-sends its current-state frame.
+    // delay, so we need to skip 2 cycles.
     constexpr uint32_t kStartupSkipCycles = 2;
     if (pdo_tx_count_ < kStartupSkipCycles) {
         trace("PDO startup: skipping RX (cycle %u/%u, slave hasn't responded yet)",
@@ -1171,11 +1259,11 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
     }
 
     if (tx_pdo_len == 0 || tx_pdo_in == nullptr) {
+        trace("PDO RX: empty TxPDO (tx_pdo_len=%zu)", tx_pdo_len);
         return false;
     }
 
     // Check for stale/empty TxPDO (all zeros or invalid command byte).
-    // The slave hasn't populated the buffer yet — silently skip and retry.
     const uint8_t rx_cmd = tx_pdo_in[0];
     if (!isValidCommand(rx_cmd)) {
         stats_.invalid_frames++;
@@ -1184,9 +1272,12 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
         return false;
     }
 
+    trace("PDO RX: processing frame cmd=%s(0x%02X) len=%zu state=%s",
+          commandName(rx_cmd), rx_cmd, tx_pdo_len, stateName(status_.state));
+
     // RX path: the FSoE frame is the entire TxPDO buffer.
-    // The frame is always fsoeFrameSize(input_size) bytes and maps 1:1
-    // to the PDO.  ConnID is at the last 2 bytes of the frame/PDO.
+    // Duplicate detection is handled inside processRxFrame (it checks
+    // last_rx_frame_ which is cleared by prepareTxFrame above).
     return processRxFrame(tx_pdo_in, tx_pdo_len);
 }
 

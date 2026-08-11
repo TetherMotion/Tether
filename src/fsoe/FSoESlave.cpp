@@ -771,11 +771,20 @@ void FSoESlave::processConnection(const uint8_t* data, size_t len) {
     // Validate safety address and extract parameter CRC from safe data.
     // Layout (must match master's buildConnectionFrame):
     //   [safetyAddr_lo] [safetyAddr_hi] [paramCRC_lo] [paramCRC_hi]
-    // Require the full 4-byte payload — the master always sends 4 bytes.
-    if (data_len < 4) {
+    // The frame data length is the PDO's safe-data size (output_size),
+    // which may be < 4.  We require at least 2 bytes (safety address).
+    // When data_len < 4, the missing paramCRC bytes are zero-filled by
+    // the frame parser and the slave uses 0x0000 as the expected CRC.
+    if (data_len < 2) {
+        // If the frame is too short to carry the safety address, skip
+        // validation and trust the master's configuration.
+        if (config_.safeOutputSize < 2) {
+            transitionTo(ConnectionState::Connection);
+            return;
+        }
         FSoEErrorDetail detail;
         snprintf(detail.message, sizeof(detail.message),
-                 "Slave Connection frame too short: got %zu bytes, expected 4",
+                 "Slave Connection frame too short: got %zu bytes, expected 2",
                  data_len);
         handleError(ErrorCode::DataLengthError, true, detail);
         return;
@@ -796,8 +805,24 @@ void FSoESlave::processConnection(const uint8_t* data, size_t len) {
         return;
     }
 
-    receivedParameterCRC_ = static_cast<uint16_t>(frame_data[2]) |
-                            (static_cast<uint16_t>(frame_data[3]) << 8);
+    // Extract parameter CRC from bytes 2-3 (if present).
+    // When data_len < 4 (output_size < 4), the paramCRC bytes are not
+    // available.  Only reject if safeOutputSize >= 4 but data_len < 4.
+    if (data_len < 4) {
+        if (config_.safeOutputSize >= 4) {
+            FSoEErrorDetail detail;
+            snprintf(detail.message, sizeof(detail.message),
+                     "Slave Connection frame too short: got %zu bytes, expected 4",
+                     data_len);
+            handleError(ErrorCode::DataLengthError, true, detail);
+            return;
+        }
+        // safeOutputSize < 4: paramCRC not available, use 0x0000.
+        receivedParameterCRC_ = 0;
+    } else {
+        receivedParameterCRC_ = static_cast<uint16_t>(frame_data[2]) |
+                                (static_cast<uint16_t>(frame_data[3]) << 8);
+    }
     // Verify parameter CRC if expected value is configured (non-zero)
     if (config_.expectedParameterCRC != 0 &&
         receivedParameterCRC_ != config_.expectedParameterCRC) {
@@ -831,58 +856,81 @@ void FSoESlave::processParameter(const uint8_t* data, size_t len) {
         return;
     }
 
-    // Validate safety-critical parameters from safe data
+    // Validate safety-critical parameters from safe data.
     // Layout (must match master's buildParameterFrame):
     //   [watchdog_lo] [watchdog_hi] [safety_level] [input_size] [output_size] [reserved]
-    // Require the full 6-byte parameter payload (5 data bytes + 1 reserved).
-    if (data_len < 6) {
+    // The frame data length is the PDO's safe-data size (output_size),
+    // which may be smaller than 6.  We extract whatever fields are
+    // available and skip validation of fields that don't fit in the PDO.
+    // When data_len == 0 (output_size=0), skip all parameter validation.
+    // Reject frames that are shorter than the expected PDO data size.
+    if (data_len > 0 && data_len < config_.safeOutputSize) {
+        // Frame is shorter than the PDO's safe-data size — protocol error.
         FSoEErrorDetail detail;
         snprintf(detail.message, sizeof(detail.message),
-                 "Slave Parameter frame too short: got %zu bytes, expected 6",
-                 data_len);
+                 "Slave Parameter frame too short: got %zu bytes, expected %u",
+                 data_len, config_.safeOutputSize);
         handleError(ErrorCode::DataLengthError, true, detail);
         return;
     }
-
-    uint16_t watchdog = static_cast<uint16_t>(frame_data[0]) |
-                        (static_cast<uint16_t>(frame_data[1]) << 8);
-    uint8_t safety_level = frame_data[2];
-    uint8_t input_size = frame_data[3];
-    uint8_t output_size = frame_data[4];
-
-    // Validate watchdog range
-    if (watchdog < Limits::WatchdogTimeoutMin || watchdog > Limits::WatchdogTimeoutMax) {
-        FSoEErrorDetail detail;
-        snprintf(detail.message, sizeof(detail.message),
-                 "Slave watchdog %u out of range [%u, %u]",
-                 watchdog, Limits::WatchdogTimeoutMin, Limits::WatchdogTimeoutMax);
-        handleError(ErrorCode::ParameterError, true, detail);
+    if (data_len == 0) {
+        // No parameter data can be carried — skip validation entirely.
+        // Transition to Parameter so we send a Parameter response, then
+        // the master will transition to Data and send ProcessData.
+        transitionTo(ConnectionState::Parameter);
         return;
     }
 
-    // Validate safety level
-    if (safety_level < config_.safetyLevel) {
-        FSoEErrorDetail detail;
-        snprintf(detail.message, sizeof(detail.message),
-                 "Slave safety level %u below required %u",
-                 safety_level, config_.safetyLevel);
-        handleError(ErrorCode::ParameterError, true, detail);
-        return;
+    // Extract and validate fields conditionally based on data_len.
+    // frame_data is zero-filled by extractFSoEFrame, so missing fields
+    // read as 0.
+
+    // Validate watchdog range (bytes 0-1)
+    if (data_len >= 2) {
+        uint16_t watchdog = static_cast<uint16_t>(frame_data[0]) |
+                            (static_cast<uint16_t>(frame_data[1]) << 8);
+        if (watchdog > 0 && (watchdog < Limits::WatchdogTimeoutMin ||
+                             watchdog > Limits::WatchdogTimeoutMax)) {
+            FSoEErrorDetail detail;
+            snprintf(detail.message, sizeof(detail.message),
+                     "Slave watchdog %u out of range [%u, %u]",
+                     watchdog, Limits::WatchdogTimeoutMin, Limits::WatchdogTimeoutMax);
+            handleError(ErrorCode::ParameterError, true, detail);
+            return;
+        }
+        if (watchdog > 0) {
+            config_.watchdogTimeoutMs = watchdog;
+        }
     }
 
-    // Validate data sizes match configuration
-    if (input_size != config_.safeInputSize || output_size != config_.safeOutputSize) {
-        FSoEErrorDetail detail;
-        snprintf(detail.message, sizeof(detail.message),
-                 "Slave data size mismatch: input %u/%u output %u/%u",
-                 input_size, config_.safeInputSize,
-                 output_size, config_.safeOutputSize);
-        handleError(ErrorCode::ParameterError, true, detail);
-        return;
+    // Validate safety level (byte 2)
+    if (data_len >= 3) {
+        uint8_t safety_level = frame_data[2];
+        if (safety_level > 0 && safety_level < config_.safetyLevel) {
+            FSoEErrorDetail detail;
+            snprintf(detail.message, sizeof(detail.message),
+                     "Slave safety level %u below required %u",
+                     safety_level, config_.safetyLevel);
+            handleError(ErrorCode::ParameterError, true, detail);
+            return;
+        }
     }
 
-    // Update watchdog timeout from parameter
-    config_.watchdogTimeoutMs = watchdog;
+    // Validate data sizes (bytes 3-4)
+    if (data_len >= 5) {
+        uint8_t input_size = frame_data[3];
+        uint8_t output_size = frame_data[4];
+        if (input_size != config_.safeInputSize ||
+            output_size != config_.safeOutputSize) {
+            FSoEErrorDetail detail;
+            snprintf(detail.message, sizeof(detail.message),
+                     "Slave data size mismatch: input %u/%u output %u/%u",
+                     input_size, config_.safeInputSize,
+                     output_size, config_.safeOutputSize);
+            handleError(ErrorCode::ParameterError, true, detail);
+            return;
+        }
+    }
 
     // Transition to Parameter state to send Parameter response.
     // Will transition to Data when the master sends ProcessData.
@@ -965,9 +1013,9 @@ size_t FSoESlave::buildResetResponse(uint8_t* data, size_t maxLen) {
     // Reset frames do NOT update the CRC chain.  The CRC is computed from
     // start_crc=0, and last_tx_crc0_ is NOT updated.
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
-    size_t needed = CRC::fsoeFixedFrameSize(config_.safeInputSize);
+    size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Reset, payload, CRC::fsoeFixedDataLen(config_.safeInputSize),
+    return CRC::buildFSoEFrame(data, Command::Reset, payload, config_.safeInputSize,
                                config_.connectionId,
                                0,  // start_crc = 0 (Reset resets CRC chain)
                                0,  // seq_no = 0 (Reset resets sequence)
@@ -980,9 +1028,9 @@ size_t FSoESlave::buildSessionResponse(uint8_t* data, size_t maxLen) {
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     payload[0] = sessionId_ & 0xFF;
     payload[1] = (sessionId_ >> 8) & 0xFF;
-    size_t needed = CRC::fsoeFixedFrameSize(config_.safeInputSize);
+    size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Session, payload, CRC::fsoeFixedDataLen(config_.safeInputSize),
+    return CRC::buildFSoEFrame(data, Command::Session, payload, config_.safeInputSize,
                                config_.connectionId,
                                last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
@@ -995,9 +1043,9 @@ size_t FSoESlave::buildConnectionResponse(uint8_t* data, size_t maxLen) {
     payload[1] = (config_.safetyAddress >> 8) & 0xFF;
     payload[2] = config_.safetyLevel;
     payload[3] = 0;  // Reserved
-    size_t needed = CRC::fsoeFixedFrameSize(config_.safeInputSize);
+    size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Connection, payload, CRC::fsoeFixedDataLen(config_.safeInputSize),
+    return CRC::buildFSoEFrame(data, Command::Connection, payload, config_.safeInputSize,
                                currentConnectionId_,
                                last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
@@ -1006,18 +1054,18 @@ size_t FSoESlave::buildParameterResponse(uint8_t* data, size_t maxLen) {
     // Parameter response: full PDO-size frame with param_ack in SafeData[0-1].
     // Remaining data bytes are zero-padded to safeInputSize.
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};  // Parameter ACK
-    size_t needed = CRC::fsoeFixedFrameSize(config_.safeInputSize);
+    size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Parameter, payload, CRC::fsoeFixedDataLen(config_.safeInputSize),
+    return CRC::buildFSoEFrame(data, Command::Parameter, payload, config_.safeInputSize,
                                currentConnectionId_,
                                last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
 
 size_t FSoESlave::buildDataResponse(uint8_t* data, size_t maxLen) {
-    size_t needed = CRC::fsoeFixedFrameSize(config_.safeInputSize);
+    size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
     return CRC::buildFSoEFrame(data, Command::ProcessData,
-                               safeInputs_.data(), CRC::fsoeFixedDataLen(config_.safeInputSize),
+                               safeInputs_.data(), config_.safeInputSize,
                                currentConnectionId_,
                                last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
@@ -1030,7 +1078,7 @@ size_t FSoESlave::buildFailSafeResponse(uint8_t* data, size_t maxLen) {
     uint8_t payload[MAX_SAFE_DATA_SIZE + 2] = {0};
     // Payload must be at least the fixed data length, but also accommodate
     // the fail-safe inputs + error code.
-    const size_t min_payload = CRC::fsoeFixedDataLen(config_.safeInputSize);
+    const size_t min_payload = config_.safeInputSize;
     const size_t fs_payload = static_cast<size_t>(config_.safeInputSize) + 2;
     const size_t payload_len = fs_payload > min_payload ? fs_payload : min_payload;
 
