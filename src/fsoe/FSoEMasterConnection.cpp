@@ -298,18 +298,29 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
         return false;
     }
 
-    // Validate connection ID
-    if (!validateConnectionID(conn_id)) {
-        FSoEErrorDetail detail;
-        detail.conn_id_valid = true;
-        detail.expected_conn_id = config_.connection_id;
-        detail.received_conn_id = conn_id;
-        snprintf(detail.message, sizeof(detail.message),
-                 "Master received wrong ConnectionID from slave: "
-                 "expected 0x%04X got 0x%04X",
-                 detail.expected_conn_id, detail.received_conn_id);
-        handleError(ErrorCode::ConnectionIDError, detail);
-        return false;
+    // Validate connection ID — but only after the connection is established.
+    //
+    // In Reset and Session states, the slave may not know the ConnID yet
+    // (it has just been reset).  The real Synapticon drive echoes the Reset
+    // command with conn_id=0x0000.  Skipping ConnID validation in these
+    // early states matches the FSoE slave behavior (which also only validates
+    // ConnID in Connection/Parameter/Data states).
+    if (status_.state == ConnectionState::Connection ||
+        status_.state == ConnectionState::Parameter ||
+        status_.state == ConnectionState::Data ||
+        status_.state == ConnectionState::FailSafe) {
+        if (!validateConnectionID(conn_id)) {
+            FSoEErrorDetail detail;
+            detail.conn_id_valid = true;
+            detail.expected_conn_id = config_.connection_id;
+            detail.received_conn_id = conn_id;
+            snprintf(detail.message, sizeof(detail.message),
+                     "Master received wrong ConnectionID from slave: "
+                     "expected 0x%04X got 0x%04X",
+                     detail.expected_conn_id, detail.received_conn_id);
+            handleError(ErrorCode::ConnectionIDError, detail);
+            return false;
+        }
     }
 
     // Update watchdog timestamp
