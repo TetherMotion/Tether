@@ -36,7 +36,8 @@
  *   ./synapticon_cst_fsoe --no-fsoe             # CST only, no FSoE
  *   ./synapticon_cst_fsoe --dc-sync             # enable DC synchronization
  *   ./synapticon_cst_fsoe --connection-id 0x4321 --watchdog-ms 15
- *   ./synapticon_cst_fsoe --debug fsoe-master   # verbose per-cycle FSoE frame logging
+ *   ./synapticon_cst_fsoe --debug fsoe          # high-level FSoE protocol trace
+ *   ./synapticon_cst_fsoe --debug fsoe-raw      # FSoE protocol trace + raw frame hex dumps
  */
 
 #include <array>
@@ -360,11 +361,13 @@ public:
     FSoEPDOExchangeTask(uint16_t slave_index,
                         FSoEMain& main_instance,
                         size_t rx_pdo_offset,
-                        size_t tx_pdo_offset)
+                        size_t tx_pdo_offset,
+                        bool debug_raw = false)
         : slave_index_(slave_index)
         , main_instance_(main_instance)
         , rx_pdo_offset_(rx_pdo_offset)
         , tx_pdo_offset_(tx_pdo_offset)
+        , debug_raw_(debug_raw)
     {}
 
     bool update(EtherCAT::DS402Master& master, double dt_seconds) override {
@@ -390,7 +393,8 @@ public:
         // what the slave produced in response to the previous master frame.
         // RxPDO (master→slave) is dumped AFTER exchangeViaPDO — it contains
         // what the master just built for this cycle.
-        if (dump_count_ < 20) {
+        // Only enabled with --debug fsoe-raw.
+        if (debug_raw_ && dump_count_ < 20) {
             // --- TxPDO (slave→master) ---
             // FSoE region (31 bytes)
             char hex[128];
@@ -414,7 +418,7 @@ public:
             tx_buffer, sizeof(FSoETxPDO),
             elapsed_time_ms_);
 
-        if (dump_count_ < 20) {
+        if (debug_raw_ && dump_count_ < 20) {
             // --- RxPDO (master→slave) ---
             // FSoE region (11 bytes)
             char hex[128];
@@ -442,6 +446,7 @@ private:
     FSoEMain& main_instance_;
     size_t rx_pdo_offset_;
     size_t tx_pdo_offset_;
+    bool debug_raw_ = false;
     uint64_t elapsed_time_ms_ = 0;
     uint32_t dump_count_ = 0;
 };
@@ -498,7 +503,8 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .help("Diagnostics print interval in ms");
     program.add_argument("--debug")
         .default_value(std::string(""))
-        .help("Comma-separated debug flags: 'fsoe-master' for per-cycle FSoE frame logging");
+        .help("Comma-separated debug flags: 'fsoe' for high-level protocol trace, "
+              "'fsoe-raw' for protocol trace + raw frame hex dumps");
 
     try {
         program.parse_args(argc, argv);
@@ -1188,8 +1194,17 @@ int main(int argc, char** argv) {
     std::unique_ptr<FSoEMain> fsoe_main;
 
     if (args.enable_fsoe) {
-        const bool debug_fsoe_master =
-            (args.debug.find("fsoe-master") != std::string::npos);
+        // Debug flags:
+        //   fsoe       — high-level protocol trace ("TX Reset(0x2A): ...",
+        //                "RX Session(0x4E): slave accepted session, ...")
+        //   fsoe-raw   — protocol trace + raw frame hex dumps via the
+        //                txFrameEvents/rxFrameEvents listeners
+        //   fsoe-master — deprecated alias for fsoe-raw (backward compat)
+        const bool debug_fsoe =
+            (args.debug.find("fsoe") != std::string::npos);
+        const bool debug_fsoe_raw =
+            (args.debug.find("fsoe-raw") != std::string::npos ||
+             args.debug.find("fsoe-master") != std::string::npos);
 
         EtherCAT::Drives::Synapticon::SafeMotion::MainConfig main_config;
         main_config.feature_enabled = true;
@@ -1237,23 +1252,34 @@ int main(int argc, char** argv) {
                 TETHER_LOGW(TAG, "[FSoE] fail-safe activated");
             });
 
-        // Per-cycle FSoE frame trace logging (--debug fsoe-master).
+        // High-level protocol trace (--debug fsoe or --debug fsoe-raw).
+        // The trace callback emits human-readable descriptions of every
+        // protocol decision: what the master is sending and why, what it
+        // received from the slave and how it interpreted it.
+        if (debug_fsoe || debug_fsoe_raw) {
+            fsoe_main->rawConnection().setTraceCallback(
+                [](const char* message) {
+                    TETHER_LOGI(TAG, "[fsoe] %s", message);
+                });
+        }
+
+        // Raw frame hex dumps (--debug fsoe-raw).
         // Frame event listeners are invoked from inside the FSoE state
         // machine for every master→slave (tx) and slave→master (rx) frame.
         // Each listener receives an immutable shared_ptr<const
         // std::vector<uint8_t>> copy of the frame bytes.
-        if (debug_fsoe_master) {
+        if (debug_fsoe_raw) {
             fsoe_main->rawConnection().txFrameEvents().addListener(
                 [](std::shared_ptr<const std::vector<uint8_t>> data) {
                     const uint8_t cmd = (!data->empty()) ? (*data)[0] : 0;
-                    TETHER_LOGI(TAG, "[fsoe-master] TX (master->slave) len=%zu cmd=%s",
+                    TETHER_LOGI(TAG, "[fsoe-raw] TX (master->slave) len=%zu cmd=%s",
                                 data->size(), fsoeCommandName(cmd));
                     hexDump(TAG, "TX (master->slave)", data->data(), data->size());
                 });
             fsoe_main->rawConnection().rxFrameEvents().addListener(
                 [](std::shared_ptr<const std::vector<uint8_t>> data) {
                     const uint8_t cmd = (!data->empty()) ? (*data)[0] : 0;
-                    TETHER_LOGI(TAG, "[fsoe-master] RX (slave->master) len=%zu cmd=%s",
+                    TETHER_LOGI(TAG, "[fsoe-raw] RX (slave->master) len=%zu cmd=%s",
                                 data->size(), fsoeCommandName(cmd));
                     hexDump(TAG, "RX (slave->master)", data->data(), data->size());
                 });
@@ -1266,7 +1292,8 @@ int main(int argc, char** argv) {
         if (!master.addCyclicTask(
                 std::make_unique<FSoEPDOExchangeTask>(
                     slave_idx, *fsoe_main,
-                    kFSoERxPDOOffset, kFSoETxPDOOffset))) {
+                    kFSoERxPDOOffset, kFSoETxPDOOffset,
+                    debug_fsoe_raw))) {
             TETHER_LOGE(TAG, "Failed to add FSoE PDO exchange task");
             rc = 6;
             master.clearCyclicTasks();
@@ -1284,9 +1311,10 @@ int main(int argc, char** argv) {
         }
 
         TETHER_LOGI(TAG,
-            "FSoE enabled: conn_id=0x%04X watchdog=%u ms debug_master=%s",
+            "FSoE enabled: conn_id=0x%04X watchdog=%u ms debug=%s%s",
             args.connection_id, args.watchdog_ms,
-            debug_fsoe_master ? "on" : "off");
+            debug_fsoe ? "fsoe" : "off",
+            debug_fsoe_raw ? "+raw" : "");
     } else {
         TETHER_LOGI(TAG, "FSoE disabled (--no-fsoe)");
     }
@@ -1356,7 +1384,7 @@ int main(int argc, char** argv) {
     // --- Enable the drive ---
     // Now that FSoE has had a chance to reach Data state and clear the safe
     // state, attempt the CiA 402 enable sequence.  If this fails, we continue
-    // running so the user can observe FSoE debug output (--debug fsoe-master).
+    // running so the user can observe FSoE debug output (--debug fsoe).
     if (!master.enableDrive(slave_idx, 5000)) {
         TETHER_LOGE(TAG, "Failed to enable slave %u — continuing for diagnostics", slave_idx);
         rc = 8;
