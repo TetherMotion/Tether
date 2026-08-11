@@ -759,8 +759,9 @@ TEST_F(FSoEResetFirstTest, MasterSendsResetCommandFirst) {
         << "Master must send Reset command (0x2A) first, got 0x"
         << std::hex << static_cast<int>(tx[0]);
 
-    // Reset frame has no safe data payload: CMD(1) + ConnID(2) = 3 bytes
-    EXPECT_EQ(len, 3u);
+    // Reset frame is the full fixed PDO size: CMD(1) + data(6) + CRCs(3) + ConnID(2) = 15 bytes
+    // (with output_size=4, fsoeFixedDataLen=max(4,6)=6, fsoeFrameSize(6)=15)
+    EXPECT_EQ(len, CRC::fsoeFixedFrameSize(4));
 
     // Master should still be in Reset state (not auto-transitioned to Session)
     EXPECT_EQ(conn->getState(), ConnectionState::Reset);
@@ -868,9 +869,9 @@ TEST_F(FSoEResetFirstTest, ResetFrameHasCorrectConnectionID) {
     // slave can validate it (in states where connection ID is checked).
     std::array<uint8_t, 64> tx{};
     const size_t len = conn->prepareTxFrame(tx.data(), tx.size());
-    ASSERT_EQ(len, 3u);
+    ASSERT_EQ(len, CRC::fsoeFixedFrameSize(4));
 
     // ConnID is the last 2 bytes (little-endian)
-    const uint16_t conn_id = tx[1] | (tx[2] << 8);
+    const uint16_t conn_id = tx[len - 2] | (tx[len - 1] << 8);
     EXPECT_EQ(conn_id, 0x1234);
 }

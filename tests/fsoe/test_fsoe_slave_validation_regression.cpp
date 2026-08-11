@@ -308,14 +308,16 @@ TEST(FSoESlaveFailSafeSafetyTest, FailSafeClearedByReset) {
     slave.triggerFailSafe(ErrorCode::ApplicationError);
     EXPECT_TRUE(slave.isFailSafe());
 
-    // Send Reset command.
-    // Use the slave's current RX CRC state (non-zero after advanceToData).
-    uint8_t payload[] = {0x01, 0x00};
+    // Send Reset command — Reset frames use start_crc=0 and seq_no=0
+    // (Reset resets the CRC chain).  The frame is the full fixed size.
+    uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
+    payload[0] = 0x01;  // error code
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::Reset,
-                                            payload, 2, 0x1234,
-                                            slave.getRxLastCrc0(),
-                                            slave.getRxSeqNo());
+                                            payload, CRC::fsoeFixedDataLen(4),
+                                            0x1234,
+                                            0,  // start_crc = 0 (Reset resets CRC chain)
+                                            0);  // seq_no = 0 (Reset resets sequence)
     slave.processRxFrame(frame, frame_len);
 
     EXPECT_FALSE(slave.isFailSafe());
