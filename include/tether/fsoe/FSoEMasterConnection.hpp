@@ -222,6 +222,17 @@ private:
     bool validateConnectionID(uint16_t conn_id) const;
     static bool isValidCommand(uint8_t cmd);
 
+    /// Compute the expected FSoE frame size for a received command byte.
+    /// The FSoE frame has a variable length (ConnID at the end of the frame,
+    /// not at a fixed PDO position).  When the frame is mapped into a
+    /// fixed-size PDO, only the first N bytes are the actual FSoE frame;
+    /// the remaining bytes are unused/stale.
+    /// @param cmd Command byte from the PDO buffer
+    /// @param pdo_size Size of the PDO buffer (caps the frame size)
+    /// @return Expected frame size in bytes, or 0 if the command is
+    ///         unrecognized (stale/empty PDO)
+    size_t expectedRxFrameSize(uint8_t cmd, size_t pdo_size) const;
+
     // State transitions
     void transitionTo(uint8_t new_state);
     void handleError(uint16_t error_code, const FSoEErrorDetail& detail);
