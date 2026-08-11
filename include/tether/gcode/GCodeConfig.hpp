@@ -193,6 +193,18 @@ struct CoordinateConfig {
     double unitsPerMM{1.0};
 };
 
+/**
+ * @brief Scaling (G51) configuration
+ */
+struct ScalingConfig {
+    /// Minimum allowed scale factor (per axis)
+    double minScale{0.01};
+    /// Maximum allowed scale factor (per axis)
+    double maxScale{100.0};
+    /// Reject zero scale (would collapse an axis to a point)
+    bool rejectZeroScale{true};
+};
+
 // ============================================================================
 // Tool Configuration
 // ============================================================================
@@ -340,8 +352,10 @@ struct FeatureFlags {
     /// G-code features
     bool cutterCompensation{true};
     bool toolLengthOffset{true};
-    bool coordinateRotation{true};
+    bool coordinateRotation{true};      ///< G68/G69 coordinate rotation
     bool polarCoordinates{false};
+    bool localOffset{true};             ///< G52 local coordinate offset
+    bool scaling{true};                 ///< G51/G50 coordinate scaling
     
     /// Motion features
     bool pathBlending{true};

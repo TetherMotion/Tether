@@ -178,6 +178,13 @@ struct Position {
         double dz = z() - other.z();
         return std::sqrt(dx*dx + dy*dy + dz*dz);
     }
+
+    /// @brief All-ones position (unity scale factor for every axis).
+    static Position ones() {
+        Position p;
+        p.coords.fill(1.0);
+        return p;
+    }
 };
 
 // ============================================================================
@@ -859,7 +866,19 @@ struct MachineState {
     std::array<Position, MAX_COORD_SYSTEMS> coordOffsets{};
     Position g92Offset{};        ///< G92 offset
     Position g52Offset{};        ///< G52 local offset
-    double coordRotation{0.0};   ///< XY rotation (degrees)
+    double coordRotation{0.0};   ///< XY rotation (degrees) — legacy 2D angle
+
+    // G68 coordinate rotation (extended)
+    bool g68Active{false};              ///< G68 rotation active
+    int  g68Mode{0};                    ///< 0=2D plane, 1=Euler XYZ, 2=axis-angle
+    Position g68Pivot{};                ///< Rotation pivot (program coords)
+    std::array<double,3> g68Euler{0,0,0};   ///< A/B/C Euler angles (degrees)
+    std::array<double,3> g68Axis{0,0,0};    ///< I/J/K rotation axis (axis-angle)
+    double g68AxisAngle{0.0};            ///< R angle for axis-angle mode (degrees)
+
+    // G51 scaling
+    bool g51Active{false};               ///< G51 scaling active
+    Position scaleFactors{Position::ones()}; ///< Per-axis scale (default 1.0 each)
     
     // Canned cycle state
     CannedCycleParams cannedCycle{};

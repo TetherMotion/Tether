@@ -641,9 +641,55 @@ private:
     // State management
     void updateModalState(const Block& block);
     void updatePositionVariables();
-    
+
     // Initialization
     void initializeDefaults();
+
+    // ------------------------------------------------------------------
+    // Coordinate system dispatch helpers (G52/G68/G69/G51/G50)
+    //
+    // These wire the parsed G-code words into the CoordinateSystemManager,
+    // which in turn rebuilds the composed CoordinateTransform. The
+    // interpreter's motion handlers should call m_coordinates.toMachineCoords()
+    // to transform program coordinates to machine coordinates before
+    // emitting MotionSegments.
+    // ------------------------------------------------------------------
+
+    /// @brief Dispatch G52 (local offset) to the coordinate manager.
+    Error dispatchG52(const Block& block) {
+        return m_coordinates.processG52(block, m_machineState);
+    }
+
+    /// @brief Dispatch G68 (coordinate rotation) to the coordinate manager.
+    Error dispatchG68(const Block& block) {
+        return m_coordinates.processG68(block, m_machineState);
+    }
+
+    /// @brief Dispatch G69 (cancel rotation) to the coordinate manager.
+    Error dispatchG69() {
+        return m_coordinates.processG69(m_machineState);
+    }
+
+    /// @brief Dispatch G51 (scaling) to the coordinate manager.
+    Error dispatchG51(const Block& block) {
+        return m_coordinates.processG51(block, m_machineState);
+    }
+
+    /// @brief Dispatch G50 (cancel scaling) to the coordinate manager.
+    Error dispatchG50() {
+        return m_coordinates.processG50(m_machineState);
+    }
+
+    /// @brief Transform a program-space position to machine coordinates
+    /// using the composed coordinate transform (WCS + G52 + G92 + G68 + G51).
+    Position toMachine(const Position& programPos) const {
+        return m_coordinates.toMachineCoords(programPos);
+    }
+
+    /// @brief Transform machine coordinates back to program space.
+    Position toProgram(const Position& machinePos) const {
+        return m_coordinates.toProgramCoords(machinePos);
+    }
 };
 
 } // namespace GCode

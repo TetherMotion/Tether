@@ -147,7 +147,10 @@ enum class ModalGroup : uint8_t {
     COORD_SYSTEM = 12,  ///< G54-G59.3
     PATH_MODE = 13,     ///< G61, G61.1, G64
     SPINDLE_MODE = 14,  ///< G96, G97
-    LATHE_DIAMETER = 15 ///< G7, G8
+    LATHE_DIAMETER = 15, ///< G7, G8
+    LOCAL_OFFSET = 16,  ///< G52 (local coordinate offset)
+    COORD_ROTATION = 17, ///< G68, G69 (coordinate system rotation)
+    SCALING = 18        ///< G51, G50 (scaling on/off)
 };
 
 /**

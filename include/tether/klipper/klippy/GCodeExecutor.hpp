@@ -16,8 +16,15 @@
 /// - Tool compensation (G40-G42, G43-G49)
 /// - Full canned cycle semantics (G73-G89 with rigid tapping)
 /// - NURBS splines (G5.1, G5.2/G5.3)
-/// - Coordinate rotation (G68/G69)
 /// - Execution modes (MDI, STEP, VERIFY)
+///
+/// Coordinate system features that ARE supported:
+/// - Work coordinate systems G54-G59.3 (selection + offsets)
+/// - G52 local coordinate offset
+/// - G68/G69 coordinate rotation (2D plane + 3D Euler + axis-angle)
+/// - G51/G50 per-axis and uniform scaling
+/// - G53 machine coordinates (non-modal bypass)
+/// - G92 position offset and G92.1/G92.2/G92.3 reset
 ///
 /// Conversely, it provides 3D-printer-specific features not in the main
 /// interpreter: temperature control, bed mesh leveling, input shaping,
@@ -924,6 +931,56 @@ public:
         } else if (g.code == "G59.3") {
             state_->activeCoordSystem = 8;
             if (callbacks_.selectCoordinateSystem) callbacks_.selectCoordinateSystem(8);
+            return true;
+        } else if (g.code == "G52") {
+            // G52 — local coordinate offset. NaN means "unchanged" for
+            // unspecified axes; no axis words means reset to zero.
+            double x = g.has('X') ? g.get('X') : NAN;
+            double y = g.has('Y') ? g.get('Y') : NAN;
+            double z = g.has('Z') ? g.get('Z') : NAN;
+            if (callbacks_.setLocalOffset) callbacks_.setLocalOffset(x, y, z);
+            return true;
+        } else if (g.code == "G68") {
+            // G68 — coordinate rotation. Dispatch on which words are present.
+            const bool hasA = g.has('A'), hasB = g.has('B'), hasC = g.has('C');
+            const bool hasI = g.has('I'), hasJ = g.has('J'), hasK = g.has('K');
+            const bool hasR = g.has('R');
+            double px = g.get('X', 0.0), py = g.get('Y', 0.0), pz = g.get('Z', 0.0);
+            if (hasI || hasJ || hasK) {
+                // 3D axis-angle: I/J/K axis + R angle.
+                double ix = g.get('I', 0.0), iy = g.get('J', 0.0), iz = g.get('K', 0.0);
+                double angle = hasR ? g.get('R') : 0.0;
+                if (callbacks_.setCoordinateRotationAxis)
+                    callbacks_.setCoordinateRotationAxis(ix, iy, iz, angle, px, py, pz);
+            } else if (hasA || hasB || hasC) {
+                // 3D Euler XYZ: A/B/C angles.
+                double a = g.get('A', 0.0), b = g.get('B', 0.0), c = g.get('C', 0.0);
+                if (callbacks_.setCoordinateRotation3D)
+                    callbacks_.setCoordinateRotation3D(a, b, c, px, py, pz);
+            } else {
+                // 2D plane rotation: R angle, X/Y pivot.
+                double angle = hasR ? g.get('R') : 0.0;
+                if (callbacks_.setCoordinateRotation2D)
+                    callbacks_.setCoordinateRotation2D(angle, px, py);
+            }
+            return true;
+        } else if (g.code == "G69") {
+            // G69 — cancel coordinate rotation.
+            if (callbacks_.cancelCoordinateRotation) callbacks_.cancelCoordinateRotation();
+            return true;
+        } else if (g.code == "G51") {
+            // G51 — scaling. P word = uniform; X/Y/Z = per-axis.
+            if (g.has('P')) {
+                double s = g.get('P');
+                if (callbacks_.setScaling) callbacks_.setScaling(s, s, s);
+            } else {
+                double sx = g.get('X', 1.0), sy = g.get('Y', 1.0), sz = g.get('Z', 1.0);
+                if (callbacks_.setScaling) callbacks_.setScaling(sx, sy, sz);
+            }
+            return true;
+        } else if (g.code == "G50") {
+            // G50 — cancel scaling.
+            if (callbacks_.cancelScaling) callbacks_.cancelScaling();
             return true;
         } else if (g.code == "G61.1") {
             state_->pathControlMode = 1;

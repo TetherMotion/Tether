@@ -478,15 +478,24 @@ public:
         // in addition to updating the printer object model.
         gcode_.callbacks().move = [this](double x, double y, double z,
                                           double e, double speed) {
-            // Route through the wire protocol (G-code space, no offset).
+            // Apply G-code offset (program-space additive) then the
+            // coordinate transform (WCS + G52 + G68 rotation + G51 scale)
+            // before routing to the motion dispatcher in machine coords.
+            double px = x + gcodeOffset_[0];
+            double py = y + gcodeOffset_[1];
+            double pz = z + gcodeOffset_[2];
+            auto m = motionState_.coordTransform.toMachineXYZ(px, py, pz);
             if (motionDispatcher_) {
-                motionDispatcher_->move(x, y, z, e, speed);
+                motionDispatcher_->move(m[0], m[1], m[2],
+                                        e + gcodeOffset_[3], speed);
             }
-            // Update the printer object model (with G-code offset for display).
-            std::array<double, 4> pos = {x + gcodeOffset_[0], y + gcodeOffset_[1],
-                                         z + gcodeOffset_[2], e + gcodeOffset_[3]};
+            // Update the printer object model (machine coordinates).
+            std::array<double, 4> pos = {m[0], m[1], m[2], e + gcodeOffset_[3]};
             toolheadObj_->setPosition(pos);
             motionReportObj_->setPosition(pos);
+            // Report program coordinates for gcode_move.gcode_position.
+            std::array<double, 4> gpos = {px, py, pz, e + gcodeOffset_[3]};
+            gcodeMoveObj_->setGcodePosition(gpos);
             motionReportObj_->setVelocity(speed);
             moveQueueDepth_++;
             noteActivity();

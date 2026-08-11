@@ -190,6 +190,8 @@ set(GCODE_INTERPOLATION_SOURCES
 set(GCODE_TYPES_VARIABLES_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/gcode/GCodeTypesTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/gcode/GCodeVariablesTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gcode/test_CoordinateTransform.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gcode/test_CoordinateSystemManager.cpp"
 )
 set(GCODE_EXPORT_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/gcode/ExportTests.cpp"

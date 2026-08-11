@@ -321,6 +321,7 @@
 
 #include "../GCodeTypes.hpp"
 #include "../GCodeConfig.hpp"
+#include "CoordinateTransform.hpp"
 #include <array>
 #include <vector>
 
@@ -485,7 +486,78 @@ public:
      * @brief Clear G53 mode (call after block executed)
      */
     void clearG53() { m_g53Active = false; }
-    
+
+    // ========================================================================
+    // G52 - Local Coordinate Offset
+    // ========================================================================
+
+    /**
+     * @brief Process G52 (set local coordinate offset)
+     *
+     * Sets a temporary offset applied in program space, before scale/rotation.
+     * G52 with no axis words resets the local offset to zero.
+     *
+     * @param block  G-code block with X/Y/Z/A/B/C/U/V/W words
+     * @param state  Machine state (updated with g52Offset)
+     */
+    Error processG52(const Block& block, MachineState& state);
+
+    /**
+     * @brief Reset G52 offset to zero.
+     */
+    Error clearG52(MachineState& state);
+
+    // ========================================================================
+    // G68 / G69 - Coordinate System Rotation
+    // ========================================================================
+
+    /**
+     * @brief Process G68 (coordinate system rotation)
+     *
+     * Syntax variants:
+     * - `G68 X__ Y__ R__`        : 2D rotation in the active plane (G17=XY
+     *   about Z, G18=ZX about Y, G19=YZ about X). X/Y are the in-plane pivot.
+     * - `G68 X__ Y__ Z__ A__ B__ C__` : 3D intrinsic XYZ Euler rotation
+     *   about pivot (X,Y,Z). A/B/C are angles in degrees.
+     * - `G68 X__ Y__ Z__ I__ J__ K__ R__` : 3D axis-angle rotation about
+     *   pivot (X,Y,Z). I/J/K is the rotation axis, R is the angle in degrees.
+     *
+     * The rotation mode is inferred from which words are present:
+     * - Only R (plus optional X/Y pivot) -> 2D plane rotation
+     * - A/B/C present -> 3D Euler XYZ
+     * - I/J/K present -> 3D axis-angle (R is the angle)
+     *
+     * @param block  G-code block
+     * @param state  Machine state (updated with g68* fields)
+     */
+    Error processG68(const Block& block, MachineState& state);
+
+    /**
+     * @brief Process G69 (cancel coordinate rotation)
+     */
+    Error processG69(MachineState& state);
+
+    // ========================================================================
+    // G51 / G50 - Scaling
+    // ========================================================================
+
+    /**
+     * @brief Process G51 (scaling)
+     *
+     * Syntax variants:
+     * - `G51 P<scale>`           : uniform scale factor for all axes
+     * - `G51 X__ Y__ Z__ A__ B__ C__ U__ V__ W__` : per-axis scale factors
+     *
+     * @param block  G-code block
+     * @param state  Machine state (updated with scaleFactors)
+     */
+    Error processG51(const Block& block, MachineState& state);
+
+    /**
+     * @brief Process G50 (cancel scaling)
+     */
+    Error processG50(MachineState& state);
+
     // ========================================================================
     // G10 - Set Coordinate Data
     // ========================================================================
@@ -567,28 +639,43 @@ public:
     // ========================================================================
     // Coordinate Transformation
     // ========================================================================
-    
+
     /**
      * @brief Convert program coordinates to machine coordinates
-     * 
-     * Machine = Program + WCS + G92
-     * 
+     *
+     * Applies the full composed transform: scale -> rotate -> translate
+     * (G52 + G92 + WCS). See @ref CoordinateTransform for the composition.
+     *
      * @param programPos Program coordinates
      * @return Machine coordinates
      */
     Position toMachineCoords(const Position& programPos) const;
-    
+
     /**
-     * @brief Convert machine coordinates to program coordinates
-     * 
-     * Program = Machine - WCS - G92
+     * @brief Convert machine coordinates to program coordinates (inverse).
      */
     Position toProgramCoords(const Position& machinePos) const;
-    
+
     /**
-     * @brief Get total offset (WCS + G92)
+     * @brief Get total additive offset (WCS + G92 + G52).
+     * @note This ignores rotation and scaling; it is the legacy additive
+     *       offset only. For the full transform use @ref toMachineCoords.
      */
     Position getTotalOffset() const;
+
+    /**
+     * @brief Access the composed CoordinateTransform (scale + rotation +
+     *        translation). Rebuilt whenever WCS/G52/G92/G68/G51 parameters
+     *        change via the process* methods.
+     */
+    const CoordinateTransform& transform() const { return m_transform; }
+
+    /**
+     * @brief Rebuild the transform from the current MachineState.
+     * Called automatically by the process* methods; can also be called
+     * manually after directly modifying state fields.
+     */
+    void syncTransform(const MachineState& state);
     
     // ========================================================================
     // Variable Synchronization
@@ -645,11 +732,15 @@ private:
     
     // G53 flag (non-modal)
     bool m_g53Active{false};
-    
+
     // Reference points
     Position m_g28Reference;
     std::array<Position, 4> m_g30References;
-    
+
+    // Composed coordinate transform (scale + rotation + translation).
+    // Rebuilt by syncTransform() whenever WCS/G52/G92/G68/G51 change.
+    CoordinateTransform m_transform;
+
     // Convert WCS number (1-9) to index (0-8)
     int32_t wcsIndex(int32_t number) const {
         return std::clamp(number, 1, 9) - 1;

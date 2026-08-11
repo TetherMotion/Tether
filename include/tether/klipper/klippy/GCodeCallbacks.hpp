@@ -379,6 +379,41 @@ struct GcodeCallbacks {
     /// @brief Set coordinate system offset (G10 L2/L20).
     std::function<void(int system, double x, double y, double z)> setCoordinateSystemOffset;
 
+    // --- Local offset (G52) ---
+
+    /// @brief Set local coordinate offset (G52). NaN axis = unchanged.
+    std::function<void(double x, double y, double z)> setLocalOffset;
+
+    // --- Coordinate rotation (G68/G69) ---
+
+    /// @brief Set 2D coordinate rotation (G68 with R word only).
+    /// @param angleDeg  Rotation angle in degrees.
+    /// @param pivotX    Pivot X coordinate (in-plane first axis).
+    /// @param pivotY    Pivot Y coordinate (in-plane second axis).
+    std::function<void(double angleDeg, double pivotX, double pivotY)>
+        setCoordinateRotation2D;
+
+    /// @brief Set 3D coordinate rotation via Euler angles (G68 A/B/C).
+    std::function<void(double aDeg, double bDeg, double cDeg,
+                        double px, double py, double pz)>
+        setCoordinateRotation3D;
+
+    /// @brief Set 3D coordinate rotation via axis-angle (G68 I/J/K + R).
+    std::function<void(double ix, double iy, double iz, double angleDeg,
+                        double px, double py, double pz)>
+        setCoordinateRotationAxis;
+
+    /// @brief Cancel coordinate rotation (G69).
+    std::function<void()> cancelCoordinateRotation;
+
+    // --- Scaling (G51/G50) ---
+
+    /// @brief Set per-axis scaling (G51).
+    std::function<void(double sx, double sy, double sz)> setScaling;
+
+    /// @brief Cancel scaling (G50).
+    std::function<void()> cancelScaling;
+
     // --- Machine coordinates ---
 
     /// @brief Move in machine coordinates (G53). Non-modal.
