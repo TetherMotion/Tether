@@ -44,6 +44,28 @@ namespace ParameterID {
 }
 
 // ============================================================================
+// FSoE Reset Error Codes (ETG.5100)
+// ============================================================================
+//
+// In the master Reset PDU, SafeData[0] (octet 1) carries the error code.
+// A value of 0x00 indicates a local reset or acknowledgement.
+// These codes are also used by the slave to report the cause of a reset.
+
+namespace ResetErrorCode {
+    constexpr uint8_t None               = 0x00;  // Local reset or acknowledgement
+    constexpr uint8_t InvalidCommand     = 0x01;  // Unexpected command (INVALID_CMD)
+    constexpr uint8_t UnknownCommand     = 0x02;  // Unknown command (UNKNOWN_CMD)
+    constexpr uint8_t InvalidConnID      = 0x03;  // Invalid connection ID (INVALID_CONNID)
+    constexpr uint8_t InvalidCRC         = 0x04;  // CRC error (INVALID_CRC)
+    constexpr uint8_t WatchdogExpired    = 0x05;  // Watchdog has expired (WD_EXPIRED)
+    constexpr uint8_t InvalidAddress     = 0x06;  // Invalid FSoE Slave Address (INVALID_ADDRESS)
+    constexpr uint8_t InvalidData        = 0x07;  // Invalid safety data (INVALID_DATA)
+    constexpr uint8_t InvalidCommParaLen = 0x08;  // Invalid comm parameter length (INVALID_COMPARALEN)
+    constexpr uint8_t InvalidCommPara    = 0x09;  // Invalid comm parameter data (INVALID_COMPARA)
+    constexpr uint8_t InvalidUserParaLen = 0x0A;  // Invalid app parameter length (INVALID_USERPARALEN)
+}
+
+// ============================================================================
 // FSoE Connection States
 // ============================================================================
 

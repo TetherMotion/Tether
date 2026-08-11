@@ -435,6 +435,7 @@ private:
     void processParameter(const uint8_t* data, size_t len);
     void processData(const uint8_t* data, size_t len);
     
+    size_t buildResetResponse(uint8_t* data, size_t maxLen);
     size_t buildSessionResponse(uint8_t* data, size_t maxLen);
     size_t buildConnectionResponse(uint8_t* data, size_t maxLen);
     size_t buildParameterResponse(uint8_t* data, size_t maxLen);

@@ -251,14 +251,22 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
     // Buffer must accommodate MAX_PARSE_DATA_SIZE bytes because the slave's
     // buildFailSafeResponse sends safeInputSize + 2 bytes (inputs + error code),
     // which can be up to 18 bytes when safeInputSize = 16.
+    //
+    // Reset frames (cmd=0x2A) reset the CRC chain: they are parsed with
+    // start_crc=0 and do NOT update last_rx_crc0_ or increment rx_seq_no_.
     uint8_t cmd = 0;
     uint8_t frame_data[CRC::MAX_PARSE_DATA_SIZE] = {0};
     size_t data_len = 0;
     uint16_t conn_id = 0;
     CRC::CrcErrorDetail crc_error_detail{};
 
+    const bool is_reset_frame = (data[0] == Command::Reset);
+    const uint16_t parse_start_crc = is_reset_frame ? 0 : last_rx_crc0_;
+    const uint16_t parse_seq_no = is_reset_frame ? 0 : rx_seq_no_;
+
     if (!CRC::parseFSoEFrame(data, len, cmd, frame_data, data_len, conn_id,
-                             last_rx_crc0_, rx_seq_no_, &last_rx_crc0_,
+                             parse_start_crc, parse_seq_no,
+                             is_reset_frame ? nullptr : &last_rx_crc0_,
                              &crc_error_detail)) {
         stats_.crc_errors++;
         FSoEErrorDetail detail;
@@ -298,13 +306,13 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
         return false;
     }
 
-    // Validate connection ID — but only after the connection is established.
+    // Validate connection ID.
     //
-    // In Reset and Session states, the slave may not know the ConnID yet
-    // (it has just been reset).  The real Synapticon drive echoes the Reset
-    // command with conn_id=0x0000.  Skipping ConnID validation in these
-    // early states matches the FSoE slave behavior (which also only validates
-    // ConnID in Connection/Parameter/Data states).
+    // The FSoE frame is always full PDO size with ConnID at the last 2 bytes.
+    // In Reset/Session states, the slave may send ConnID=0 (it hasn't learned
+    // the ConnID yet).  We skip validation in Reset and Session states,
+    // matching the FSoE slave behavior (which also only validates ConnID in
+    // Connection/Parameter/Data states).
     if (status_.state == ConnectionState::Connection ||
         status_.state == ConnectionState::Parameter ||
         status_.state == ConnectionState::Data ||
@@ -327,9 +335,8 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
     status_.last_valid_frame_ms = current_time_ms_;
 
     // Increment RX sequence number for CRC computation — but NOT for
-    // Reset frames (3-byte frames with no CRC).  Reset frames don't
-    // advance the CRC chain.
-    if (len > CRC::MIN_FSOE_FRAME_SIZE) {
+    // Reset frames.  Reset frames don't advance the CRC chain.
+    if (!is_reset_frame) {
         rx_seq_no_++;
     }
 
@@ -489,11 +496,11 @@ size_t FSoEMasterConnection::prepareTxFrame(uint8_t* data, size_t max_len)
     if (len > 0) {
         stats_.frames_sent++;
         // Increment TX sequence number for CRC computation — but NOT for
-        // Reset frames (3-byte frames with no CRC).  Reset frames don't
-        // advance the CRC chain, so the sequence number must stay the same.
-        // The sequence number is NOT transmitted — it is folded into the CRC
-        // and shared between master and slave.
-        if (len > CRC::MIN_FSOE_FRAME_SIZE) {
+        // Reset frames.  Reset frames don't advance the CRC chain, so the
+        // sequence number must stay the same.  The sequence number is NOT
+        // transmitted — it is folded into the CRC and shared between master
+        // and slave.
+        if (data[0] != Command::Reset) {
             tx_seq_no_++;
         }
         tx_frame_events_.emit([data, len] {
@@ -616,6 +623,7 @@ void FSoEMasterConnection::handleResetState(uint8_t cmd, const uint8_t* data, si
     if (cmd == Command::Session || cmd == Command::Reset) {
         trace("RX %s: slave acknowledged reset, starting session handshake",
               commandName(cmd));
+        // CRC chain is already at 0 — Reset frames don't update it.
         requestSessionReset();
     } else {
         // Unexpected command in Reset state — ignore and keep retrying
@@ -827,64 +835,85 @@ void FSoEMasterConnection::handleFailSafeState(uint8_t cmd, const uint8_t* data,
 
 size_t FSoEMasterConnection::buildResetFrame(uint8_t* data, size_t max_len)
 {
-    // Reset frame: CMD(0x2A) + ConnID (no safe data payload).
-    // This is the minimum FSoE frame size (3 bytes).
-    size_t needed = CRC::fsoeFrameSize(0);
+    // Reset frame: full PDO-size frame with error code in SafeData[0].
+    //
+    // The FSoE frame is ALWAYS fixed-length (= fsoeFrameSize(output_size)).
+    // ConnID is always at the end of the frame.  The Reset frame has:
+    //   SafeData[0] = error code (0x00 for local reset/acknowledgement)
+    //   SafeData[1..output_size-1] = 0 (padding)
+    //   CRCs computed over each 2-byte data chunk (from start_crc=0)
+    //   ConnID at the last 2 bytes
+    //
+    // Reset frames do NOT update the CRC chain.  The CRC is computed from
+    // start_crc=0, and last_tx_crc0_ is NOT updated.  This matches the FSoE
+    // spec where the Reset exchange resets the CRC chain on both sides.
+    uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
+    payload[0] = ResetErrorCode::None;  // Local reset
+    size_t needed = CRC::fsoeFixedFrameSize(config_.output_size);
     if (max_len < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Reset, nullptr, 0, config_.connection_id,
-                               last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
+    return CRC::buildFSoEFrame(data, Command::Reset, payload, CRC::fsoeFixedDataLen(config_.output_size),
+                               config_.connection_id,
+                               0,  // start_crc = 0 (Reset resets CRC chain)
+                               0,  // seq_no = 0 (Reset resets sequence)
+                               nullptr);  // don't update CRC chain
 }
 
 size_t FSoEMasterConnection::buildSessionResetFrame(uint8_t* data, size_t max_len)
 {
-    // Session reset: CMD + session_id (2B payload) + ConnID
-    uint8_t payload[2] = {0, 0};
+    // Session frame: full PDO-size frame with session_id in SafeData[0-1].
+    // Remaining data bytes are zero-padded to output_size.
+    uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     payload[0] = static_cast<uint8_t>(status_.session_id & 0xFF);
     payload[1] = static_cast<uint8_t>((status_.session_id >> 8) & 0xFF);
-    size_t needed = CRC::fsoeFrameSize(2);
+    size_t needed = CRC::fsoeFixedFrameSize(config_.output_size);
     if (max_len < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Session, payload, 2, config_.connection_id,
+    return CRC::buildFSoEFrame(data, Command::Session, payload, CRC::fsoeFixedDataLen(config_.output_size),
+                               config_.connection_id,
                                last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
 
 size_t FSoEMasterConnection::buildConnectionFrame(uint8_t* data, size_t max_len)
 {
-    // Connection frame: CMD + payload(safety_addr 2B + param_crc 2B = 4B) + ConnID
-    uint8_t payload[4] = {0, 0, 0, 0};
+    // Connection frame: full PDO-size frame with safety_addr + param_crc in SafeData[0-3].
+    // Remaining data bytes are zero-padded to output_size.
+    uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     payload[0] = config_.slave_safety_addr & 0xFF;
     payload[1] = (config_.slave_safety_addr >> 8) & 0xFF;
     payload[2] = parameter_crc_ & 0xFF;
     payload[3] = (parameter_crc_ >> 8) & 0xFF;
-    size_t needed = CRC::fsoeFrameSize(4);
+    size_t needed = CRC::fsoeFixedFrameSize(config_.output_size);
     if (max_len < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Connection, payload, 4, config_.connection_id,
+    return CRC::buildFSoEFrame(data, Command::Connection, payload, CRC::fsoeFixedDataLen(config_.output_size),
+                               config_.connection_id,
                                last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
 
 size_t FSoEMasterConnection::buildParameterFrame(uint8_t* data, size_t max_len)
 {
-    // Parameter frame: CMD + param data (6B) + ConnID
+    // Parameter frame: full PDO-size frame with parameter data in SafeData[0-5].
+    // Remaining data bytes are zero-padded to output_size.
     // Layout: [watchdog_lo] [watchdog_hi] [safety_level] [input_size] [output_size] [reserved]
-    uint8_t payload[6] = {0, 0, 0, 0, 0, 0};
+    uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     payload[0] = config_.watchdog_timeout_ms & 0xFF;
     payload[1] = (config_.watchdog_timeout_ms >> 8) & 0xFF;
     payload[2] = config_.safety_level;
     payload[3] = config_.input_size;
     payload[4] = config_.output_size;
     payload[5] = 0;  // reserved
-    size_t needed = CRC::fsoeFrameSize(6);
+    size_t needed = CRC::fsoeFixedFrameSize(config_.output_size);
     if (max_len < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Parameter, payload, 6, config_.connection_id,
+    return CRC::buildFSoEFrame(data, Command::Parameter, payload, CRC::fsoeFixedDataLen(config_.output_size),
+                               config_.connection_id,
                                last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
 
 size_t FSoEMasterConnection::buildDataFrame(uint8_t* data, size_t max_len)
 {
     // Data frame: CMD + safe_outputs + ConnID
-    size_t needed = CRC::fsoeFrameSize(config_.output_size);
+    size_t needed = CRC::fsoeFixedFrameSize(config_.output_size);
     if (max_len < needed) return 0;
     return CRC::buildFSoEFrame(data, Command::ProcessData,
-                               safe_outputs_.data(), config_.output_size,
+                               safe_outputs_.data(), CRC::fsoeFixedDataLen(config_.output_size),
                                config_.connection_id,
                                last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
@@ -892,10 +921,10 @@ size_t FSoEMasterConnection::buildDataFrame(uint8_t* data, size_t max_len)
 size_t FSoEMasterConnection::buildFailSafeFrame(uint8_t* data, size_t max_len)
 {
     // Fail-safe frame sends FailSafeData command with fail-safe output values
-    size_t needed = CRC::fsoeFrameSize(config_.output_size);
+    size_t needed = CRC::fsoeFixedFrameSize(config_.output_size);
     if (max_len < needed) return 0;
     return CRC::buildFSoEFrame(data, Command::FailSafeData,
-                               config_.fail_safe_values.data(), config_.output_size,
+                               config_.fail_safe_values.data(), CRC::fsoeFixedDataLen(config_.output_size),
                                config_.connection_id,
                                last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
@@ -1091,67 +1120,15 @@ bool FSoEMasterConnection::exchangeWith(FSoESlave& slave, uint64_t current_time_
 }
 
 // ============================================================================
-// PDO frame-size translation
+// PDO exchange
 // ============================================================================
 //
-// The FSoE frame has a variable length (ConnID at the END of the frame, not
-// at a fixed PDO position).  When mapped into a fixed-size EtherCAT PDO,
-// only the first N bytes of the PDO are the actual FSoE frame; the remaining
-// bytes are unused/stale.  Both master and slave must determine the frame
-// size from the command byte and only process the first N bytes.
+// The FSoE frame is ALWAYS fixed-length:
+//   TX (master→slave): fsoeFrameSize(output_size) = PDO size of RxPDO
+//   RX (slave→master): fsoeFrameSize(input_size)  = PDO size of TxPDO
 //
-// Frame sizes by command:
-//   Reset(0x2A)      : 3 bytes  (0 data bytes, no CRC)
-//   Session(0x4E)    : 7 bytes  (2 data bytes, 1 CRC)
-//   Connection(0x64) : 11 bytes (4 data bytes, 2 CRCs)
-//   Parameter(0x52)  : 15 bytes (6 data bytes, 3 CRCs)
-//   ProcessData(0x36): fsoeFrameSize(input_size)
-//   FailSafeData(0x08): fsoeFrameSize(input_size)
-
-size_t FSoEMasterConnection::expectedRxFrameSize(uint8_t cmd, size_t pdo_size) const
-{
-    size_t frame_size = 0;
-
-    switch (cmd) {
-        case Command::Reset:
-            frame_size = CRC::fsoeFrameSize(0);       // 3 bytes
-            break;
-        case Command::Session:
-            frame_size = CRC::fsoeFrameSize(2);       // 7 bytes
-            break;
-        case Command::Connection:
-            frame_size = CRC::fsoeFrameSize(4);       // 11 bytes
-            break;
-        case Command::Parameter:
-            frame_size = CRC::fsoeFrameSize(6);       // 15 bytes
-            break;
-        case Command::ProcessData:
-        case Command::FailSafeData:
-            // Data/FailSafe frames use the negotiated input_size.
-            // FailSafeData may include a 2-byte error code after the safe
-            // inputs, but that only fits if the PDO is large enough.
-            frame_size = CRC::fsoeFrameSize(config_.input_size);
-            // Also check if FailSafeData with error code fits
-            if (cmd == Command::FailSafeData) {
-                size_t with_error = CRC::fsoeFrameSize(
-                    static_cast<size_t>(config_.input_size) + 2);
-                if (with_error <= pdo_size) {
-                    frame_size = with_error;
-                }
-            }
-            break;
-        default:
-            // Unrecognized command (0x00 = stale/empty PDO, or garbage)
-            return 0;
-    }
-
-    // Cap at PDO size — the frame can't be larger than the PDO buffer
-    if (frame_size > pdo_size) {
-        frame_size = pdo_size;
-    }
-
-    return frame_size;
-}
+// ConnID is ALWAYS at the last 2 bytes of the frame (= last 2 bytes of PDO).
+// The frame maps directly to the PDO buffer — no translation needed.
 
 bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max,
                                           const uint8_t* tx_pdo_in, size_t tx_pdo_len,
@@ -1162,73 +1139,20 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
     // Run the FSoE state machine (watchdog, phase timeouts, auto-recovery).
     update(current_time_ms);
 
-    // ========================================================================
-    // TX path: build FSoE frame and translate to device-specific RxPDO
-    // ========================================================================
-    //
-    // The FSoE frame (ETG.5100) has ConnID at the END of the frame at a
-    // variable position:
-    //   Reset(0x2A):      [CMD, ConnID]                           = 3 bytes
-    //   Session(0x4E):    [CMD, D0, D1, CRC0, ConnID]             = 7 bytes
-    //   Connection(0x64): [CMD, D0, D1, CRC0, D2, D3, CRC1, ConnID] = 11 bytes
-    //   ProcessData(0x36): [CMD, D0, D1, CRC0, D2, D3, CRC1, ConnID] = 11 bytes
-    //
-    // But the device-specific PDO (e.g. Synapticon SOMANET_RxPDO_1700)
-    // has ConnID at a FIXED position — the last 2 bytes of the PDO:
-    //   [CMD, Data..., CRCs..., ..., ConnID]  (ConnID always at end of PDO)
-    //
-    // For the DATA state, the FSoE frame size equals the PDO size, so
-    // the layouts match and no translation is needed.
-    //
-    // For shorter frames (Reset, Session, Connection), the FSoE frame
-    // is shorter than the PDO.  We need to:
-    //   1. Write the FSoE frame at the beginning of the PDO
-    //   2. Move ConnID from its variable-length position to the PDO end
-    //   3. Zero-fill the gap between the frame and ConnID
-    //
-    // The slave determines the frame size from the command byte and only
-    // processes the relevant data+CRC pairs.  The zero-filled gap and the
-    // ConnID at the PDO end are ignored by the FSoE stack but are part of
-    // the fixed PDO mapping expected by the EtherCAT slave.
-
+    // TX path: build the FSoE frame directly into the RxPDO buffer.
+    // The frame is always fsoeFrameSize(output_size) bytes and maps 1:1
+    // to the PDO.  ConnID is at the last 2 bytes of the frame/PDO.
     const size_t tx_len = prepareTxFrame(rx_pdo_out, rx_pdo_max);
     if (tx_len == 0) {
         return false;
     }
 
-    // Translate the FSoE frame to the device-specific PDO layout.
-    // Move ConnID from its variable-length position (end of frame) to the
-    // fixed position (end of PDO), and zero-fill the gap.
-    if (tx_len < rx_pdo_max && rx_pdo_max >= CRC::MIN_FSOE_FRAME_SIZE) {
-        // Extract ConnID from the variable-length frame (last 2 bytes of frame)
-        uint16_t conn_id = static_cast<uint16_t>(rx_pdo_out[tx_len - 2]) |
-                           (static_cast<uint16_t>(rx_pdo_out[tx_len - 1]) << 8);
-
-        // Zero-fill from the end of the frame to the end of the PDO
-        // (overwrites the ConnID at its variable-length position)
-        std::fill(rx_pdo_out + tx_len - 2, rx_pdo_out + rx_pdo_max, 0x00);
-
-        // Write ConnID at the fixed position (last 2 bytes of PDO)
-        rx_pdo_out[rx_pdo_max - 2] = conn_id & 0xFF;
-        rx_pdo_out[rx_pdo_max - 1] = (conn_id >> 8) & 0xFF;
+    // Zero-fill any remaining PDO bytes after the frame.
+    // (The frame should already be the PDO size, but this ensures stale
+    // data from a previous cycle doesn't leak into unused bytes.)
+    if (tx_len < rx_pdo_max) {
+        std::fill(rx_pdo_out + tx_len, rx_pdo_out + rx_pdo_max, 0x00);
     }
-
-    // ========================================================================
-    // RX path: extract FSoE frame from device-specific TxPDO
-    // ========================================================================
-    //
-    // The slave writes its FSoE response into the TxPDO with ConnID at the
-    // fixed position (last 2 bytes of PDO).  The FSoE frame data (CMD +
-    // data + CRCs) is at the beginning of the PDO.
-    //
-    // We need to reconstruct the variable-length FSoE frame by:
-    //   1. Reading the command byte from PDO byte 0
-    //   2. Determining the frame size from the command
-    //   3. Taking bytes 0..frame_size-3 from the PDO (CMD + data + CRCs)
-    //   4. Appending ConnID from the last 2 bytes of the PDO
-    //
-    // This reconstructs the FSoE frame with ConnID at the variable-length
-    // position, which processRxFrame can parse correctly.
 
     // Startup grace period: skip RxFrame processing for the first few
     // PDO cycles.  The slave cannot have produced a valid response until
@@ -1250,46 +1174,20 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
         return false;
     }
 
+    // Check for stale/empty TxPDO (all zeros or invalid command byte).
+    // The slave hasn't populated the buffer yet — silently skip and retry.
     const uint8_t rx_cmd = tx_pdo_in[0];
-    const size_t rx_frame_size = expectedRxFrameSize(rx_cmd, tx_pdo_len);
-
-    if (rx_frame_size == 0) {
-        // Unrecognized command (0x00 = stale/empty PDO, or garbage).
-        // Silently skip — the master keeps retrying with its current-state
-        // frame.  This handles the first few cycles before the slave has
-        // populated the TxPDO.
-        trace("PDO RX: skipping frame with unrecognized cmd=0x%02X (stale PDO?)",
+    if (!isValidCommand(rx_cmd)) {
+        stats_.invalid_frames++;
+        trace("PDO RX: cmd=0x%02X not a valid FSoE command, skipping (stale PDO?)",
               rx_cmd);
         return false;
     }
 
-    // Reconstruct the FSoE frame from the TxPDO.
-    //
-    // For the DATA state, the frame size equals the PDO size, so the
-    // frame is the entire PDO (ConnID is already at the right position).
-    //
-    // For shorter frames, ConnID is at the END of the PDO (fixed position),
-    // not at the end of the frame.  We take the first (frame_size - 2)
-    // bytes (CMD + data + CRCs) and append ConnID from the PDO end.
-    if (rx_frame_size == tx_pdo_len) {
-        // Frame fills the entire PDO — no reconstruction needed
-        // (e.g. ProcessData with 14 input bytes in a 31-byte TxPDO)
-        return processRxFrame(tx_pdo_in, rx_frame_size);
-    }
-
-    // Reconstruct: take first (frame_size - 2) bytes, append ConnID from PDO end
-    uint8_t reconstructed[CRC::MAX_PARSE_DATA_SIZE + 10] = {0};
-    const size_t data_and_crc_len = rx_frame_size - 2;  // everything except ConnID
-
-    if (data_and_crc_len > 0) {
-        std::copy(tx_pdo_in, tx_pdo_in + data_and_crc_len, reconstructed);
-    }
-
-    // Append ConnID from the last 2 bytes of the TxPDO (fixed position)
-    reconstructed[data_and_crc_len]     = tx_pdo_in[tx_pdo_len - 2];
-    reconstructed[data_and_crc_len + 1] = tx_pdo_in[tx_pdo_len - 1];
-
-    return processRxFrame(reconstructed, rx_frame_size);
+    // RX path: the FSoE frame is the entire TxPDO buffer.
+    // The frame is always fsoeFrameSize(input_size) bytes and maps 1:1
+    // to the PDO.  ConnID is at the last 2 bytes of the frame/PDO.
+    return processRxFrame(tx_pdo_in, tx_pdo_len);
 }
 
 bool FSoEMasterConnection::areSafeInputsValid() const

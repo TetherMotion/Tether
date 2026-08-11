@@ -362,6 +362,12 @@ inline constexpr size_t MIN_FSOE_FRAME_SIZE = 3;
 // Accommodates 16 bytes of safe data + 2 bytes error code (fail-safe response).
 inline constexpr size_t MAX_PARSE_DATA_SIZE = 18;
 
+// The Parameter command carries 6 bytes of data (watchdog(2) + safety_level(1)
+// + input_size(1) + output_size(1) + reserved(1)), which is the largest
+// non-ProcessData payload.  The FSoE frame is always a fixed size that must
+// accommodate ALL command types, so the effective data length is at least 6.
+inline constexpr size_t MIN_FIXED_DATA_SIZE = 6;
+
 /// Compute the total frame size (including CMD, CRCs, and ConnID) for a
 /// given data length.
 inline constexpr size_t fsoeFrameSize(size_t data_len) {
@@ -369,6 +375,21 @@ inline constexpr size_t fsoeFrameSize(size_t data_len) {
     size_t full_chunks = data_len / 2;
     size_t has_odd = data_len % 2;
     return 1 + full_chunks * 4 + (has_odd ? 3 : 0) + 2;
+}
+
+/// Compute the fixed FSoE frame size for a given safe-data size.
+/// The frame must accommodate ALL command types, including the Parameter
+/// command (6 data bytes).  So the effective data length is
+/// max(data_size, MIN_FIXED_DATA_SIZE).
+inline constexpr size_t fsoeFixedFrameSize(size_t data_size) {
+    return fsoeFrameSize(data_size > MIN_FIXED_DATA_SIZE ? data_size : MIN_FIXED_DATA_SIZE);
+}
+
+/// Compute the fixed data length (payload bytes) for a given safe-data size.
+/// This is max(data_size, MIN_FIXED_DATA_SIZE), ensuring all command types
+/// fit in the frame.
+inline constexpr size_t fsoeFixedDataLen(size_t data_size) {
+    return data_size > MIN_FIXED_DATA_SIZE ? data_size : MIN_FIXED_DATA_SIZE;
 }
 
 /// Compute the data length from the frame size.

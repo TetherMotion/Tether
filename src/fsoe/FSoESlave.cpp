@@ -46,7 +46,7 @@ bool FSoESlave::initialize() {
     }
     
     // Initialize buffers with fail-safe values
-    std::copy(config_.failSafeInputs.begin(), 
+    std::copy(config_.failSafeInputs.begin(),
               config_.failSafeInputs.begin() + config_.safeInputSize,
               safeInputs_.begin());
     std::copy(config_.failSafeOutputs.begin(),
@@ -394,6 +394,9 @@ size_t FSoESlave::prepareTxFrame(uint8_t* data, size_t maxLen) {
     
     switch (state_.load()) {
         case ConnectionState::Reset:
+            frameSize = buildResetResponse(data, maxLen);
+            break;
+
         case ConnectionState::Session:
             frameSize = buildSessionResponse(data, maxLen);
             break;
@@ -433,8 +436,8 @@ size_t FSoESlave::prepareTxFrame(uint8_t* data, size_t maxLen) {
     if (frameSize > 0) {
         statistics_.onFrameSent();
         // Increment TX sequence number for CRC computation — but NOT for
-        // Reset frames (3-byte frames with no CRC).
-        if (frameSize > CRC::MIN_FSOE_FRAME_SIZE) {
+        // Reset frames.  Reset frames don't advance the CRC chain.
+        if (data[0] != Command::Reset) {
             tx_seq_no_++;
         }
     }
@@ -579,14 +582,21 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
         return false;
     }
 
-    // Parse frame with interleaved CRC verification
+    // Parse frame with interleaved CRC verification.
+    // Reset frames (cmd=0x2A) reset the CRC chain: they are parsed with
+    // start_crc=0 and do NOT update last_rx_crc0_.
     uint8_t cmd = 0;
     size_t data_len = 0;
     uint16_t conn_id = 0;
     CRC::CrcErrorDetail crc_error_detail{};
 
+    const bool is_reset_frame = (data[0] == Command::Reset);
+    const uint16_t parse_start_crc = is_reset_frame ? 0 : last_rx_crc0_;
+    const uint16_t parse_seq_no = is_reset_frame ? 0 : rx_seq_no_;
+
     if (!CRC::parseFSoEFrame(data, len, cmd, nullptr, data_len, conn_id,
-                             last_rx_crc0_, rx_seq_no_, &last_rx_crc0_,
+                             parse_start_crc, parse_seq_no,
+                             is_reset_frame ? nullptr : &last_rx_crc0_,
                              &crc_error_detail)) {
         FSoEErrorDetail detail;
         if (crc_error_detail.valid) {
@@ -621,9 +631,8 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
     }
 
     // Increment RX sequence number for CRC computation — but NOT for
-    // Reset frames (3-byte frames with no CRC).  Reset frames don't
-    // advance the CRC chain.
-    if (len > CRC::MIN_FSOE_FRAME_SIZE) {
+    // Reset frames.  Reset frames don't advance the CRC chain.
+    if (!is_reset_frame) {
         rx_seq_no_++;
     }
 
@@ -948,44 +957,67 @@ void FSoESlave::processData(const uint8_t* data, size_t len) {
 // Frame Building
 // ============================================================================
 
+size_t FSoESlave::buildResetResponse(uint8_t* data, size_t maxLen) {
+    // Reset response: full PDO-size frame with all-zero safety data.
+    // SafeData[0] = 0 (no error code — acknowledgement).
+    // The frame is always fsoeFrameSize(safeInputSize) bytes.
+    //
+    // Reset frames do NOT update the CRC chain.  The CRC is computed from
+    // start_crc=0, and last_tx_crc0_ is NOT updated.
+    uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
+    size_t needed = CRC::fsoeFixedFrameSize(config_.safeInputSize);
+    if (maxLen < needed) return 0;
+    return CRC::buildFSoEFrame(data, Command::Reset, payload, CRC::fsoeFixedDataLen(config_.safeInputSize),
+                               config_.connectionId,
+                               0,  // start_crc = 0 (Reset resets CRC chain)
+                               0,  // seq_no = 0 (Reset resets sequence)
+                               nullptr);  // don't update CRC chain
+}
+
 size_t FSoESlave::buildSessionResponse(uint8_t* data, size_t maxLen) {
-    // Session response: CMD + session_id (2B) + ConnID (2B)
-    uint8_t payload[2];
+    // Session response: full PDO-size frame with session_id in SafeData[0-1].
+    // Remaining data bytes are zero-padded to safeInputSize.
+    uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     payload[0] = sessionId_ & 0xFF;
     payload[1] = (sessionId_ >> 8) & 0xFF;
-    size_t needed = CRC::fsoeFrameSize(2);
+    size_t needed = CRC::fsoeFixedFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Session, payload, 2, config_.connectionId,
+    return CRC::buildFSoEFrame(data, Command::Session, payload, CRC::fsoeFixedDataLen(config_.safeInputSize),
+                               config_.connectionId,
                                last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
 
 size_t FSoESlave::buildConnectionResponse(uint8_t* data, size_t maxLen) {
-    // Connection response: CMD + safety_addr (2B) + safety_level (1B) + reserved (1B) + ConnID (2B)
-    uint8_t payload[4];
+    // Connection response: full PDO-size frame with safety_addr + SIL in SafeData[0-3].
+    // Remaining data bytes are zero-padded to safeInputSize.
+    uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     payload[0] = config_.safetyAddress & 0xFF;
     payload[1] = (config_.safetyAddress >> 8) & 0xFF;
     payload[2] = config_.safetyLevel;
     payload[3] = 0;  // Reserved
-    size_t needed = CRC::fsoeFrameSize(4);
+    size_t needed = CRC::fsoeFixedFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Connection, payload, 4, currentConnectionId_,
+    return CRC::buildFSoEFrame(data, Command::Connection, payload, CRC::fsoeFixedDataLen(config_.safeInputSize),
+                               currentConnectionId_,
                                last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
 
 size_t FSoESlave::buildParameterResponse(uint8_t* data, size_t maxLen) {
-    // Parameter response: CMD + param_ack (2B) + ConnID (2B)
-    uint8_t payload[2] = {0, 0};  // Parameter ACK
-    size_t needed = CRC::fsoeFrameSize(2);
+    // Parameter response: full PDO-size frame with param_ack in SafeData[0-1].
+    // Remaining data bytes are zero-padded to safeInputSize.
+    uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};  // Parameter ACK
+    size_t needed = CRC::fsoeFixedFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Parameter, payload, 2, currentConnectionId_,
+    return CRC::buildFSoEFrame(data, Command::Parameter, payload, CRC::fsoeFixedDataLen(config_.safeInputSize),
+                               currentConnectionId_,
                                last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
 
 size_t FSoESlave::buildDataResponse(uint8_t* data, size_t maxLen) {
-    size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
+    size_t needed = CRC::fsoeFixedFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
     return CRC::buildFSoEFrame(data, Command::ProcessData,
-                               safeInputs_.data(), config_.safeInputSize,
+                               safeInputs_.data(), CRC::fsoeFixedDataLen(config_.safeInputSize),
                                currentConnectionId_,
                                last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
 }
@@ -996,7 +1028,11 @@ size_t FSoESlave::buildFailSafeResponse(uint8_t* data, size_t maxLen) {
     // Buffer must be large enough for safeInputSize + 2 (error code) bytes.
     // MAX_SAFE_DATA_SIZE is 16, so we need MAX_SAFE_DATA_SIZE + 2 for the worst case.
     uint8_t payload[MAX_SAFE_DATA_SIZE + 2] = {0};
-    size_t payload_len = config_.safeInputSize + 2;  // inputs + error code
+    // Payload must be at least the fixed data length, but also accommodate
+    // the fail-safe inputs + error code.
+    const size_t min_payload = CRC::fsoeFixedDataLen(config_.safeInputSize);
+    const size_t fs_payload = static_cast<size_t>(config_.safeInputSize) + 2;
+    const size_t payload_len = fs_payload > min_payload ? fs_payload : min_payload;
 
     std::copy(config_.failSafeInputs.begin(),
               config_.failSafeInputs.begin() + config_.safeInputSize,
