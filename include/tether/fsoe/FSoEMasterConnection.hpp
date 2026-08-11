@@ -292,6 +292,12 @@ private:
     // duplicate for diagnostics.
     std::vector<uint8_t> last_rx_frame_;
 
+    // Last raw TxPDO bytes received from the slave, for timeout diagnostics.
+    // Updated on every exchangeViaPDO call, even when the frame is skipped
+    // (startup grace, invalid command, duplicate).  On timeout, this shows
+    // what the slave was actually sending.
+    std::vector<uint8_t> last_txpdo_;
+
     // Thread safety
     mutable std::recursive_mutex mutex_;
 

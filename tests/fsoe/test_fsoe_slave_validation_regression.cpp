@@ -314,7 +314,7 @@ TEST(FSoESlaveFailSafeSafetyTest, FailSafeClearedByReset) {
     payload[0] = 0x01;  // error code
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::Reset,
-                                            payload, CRC::fsoeFixedDataLen(4),
+                                            payload, 4u,
                                             0x1234,
                                             0,  // start_crc = 0 (Reset resets CRC chain)
                                             0);  // seq_no = 0 (Reset resets sequence)
