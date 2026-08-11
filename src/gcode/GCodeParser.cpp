@@ -111,6 +111,17 @@ ModalGroup getModalGroup(int gcode) {
         case 7:
         case 8:
             return ModalGroup::LATHE_DIAMETER;
+        // Local offset (modal group 16): G52
+        case 52:
+            return ModalGroup::LOCAL_OFFSET;
+        // Coordinate rotation (modal group 17): G68, G69
+        case 68:
+        case 69:
+            return ModalGroup::COORD_ROTATION;
+        // Scaling (modal group 18): G51, G50
+        case 51:
+        case 50:
+            return ModalGroup::SCALING;
         default:
             // G4 (dwell), G10, G28, G30, G53, G92, etc. are non-modal.
             return ModalGroup::NON_MODAL;

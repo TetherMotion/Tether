@@ -440,11 +440,61 @@ interpreter provides:
 - Volumetric compensation (3D error grid with trilinear interpolation)
 - Velocity-dependent backlash compensation
 
-Coordinate Rotation
-~~~~~~~~~~~~~~~~~~~
+Coordinate Rotation & Scaling
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The Klipper executor does not support coordinate rotation. The main Tether
-interpreter supports ``G68`` / ``G69`` (coordinate rotation on/off).
+Both the Klipper executor and the main Tether interpreter support
+coordinate rotation and scaling via a composed ``CoordinateTransform``
+(Eigen-based affine transform).
+
+**G68 — Coordinate System Rotation**
+
+Three syntax variants are supported:
+
+- ``G68 X__ Y__ R__`` — 2D rotation in the active plane (G17=XY about Z,
+  G18=ZX about Y, G19=YZ about X). ``X``/``Y`` are the in-plane pivot.
+- ``G68 X__ Y__ Z__ A__ B__ C__`` — 3D intrinsic XYZ Euler rotation about
+  pivot ``(X, Y, Z)``. ``A``/``B``/``C`` are angles in degrees.
+- ``G68 X__ Y__ Z__ I__ J__ K__ R__`` — 3D axis-angle rotation about
+  pivot ``(X, Y, Z)``. ``I``/``J``/``K`` is the rotation axis, ``R`` is
+  the angle in degrees.
+
+**G69 — Cancel Coordinate Rotation**
+
+Cancels the active G68 rotation and resets all rotation parameters.
+
+**G51 — Scaling**
+
+- ``G51 P<scale>`` — uniform scale factor for all axes
+- ``G51 X__ Y__ Z__`` — per-axis scale factors
+
+**G50 — Cancel Scaling**
+
+Resets all scale factors to 1.0.
+
+**G52 — Local Coordinate Offset**
+
+- ``G52 X__ Y__ Z__`` — set local offset (unspecified axes unchanged)
+- ``G52`` (no axis words) — reset local offset to zero
+
+**Transform Pipeline**
+
+The full coordinate transform pipeline (applied in order, innermost first):
+
+::
+
+    Program coords
+      → G52 local offset
+      → G51 scaling
+      → G68 rotation (about pivot)
+      → G92 offset
+      → WCS offset (G54-G59.3)
+      → Machine coords
+
+The transform is composed as a single ``Eigen::Affine3d`` matrix and
+applied to all motion commands. Position reporting (M114,
+``gcode_move.gcode_position``) uses the inverse transform to show
+program coordinates.
 
 Execution Modes
 ~~~~~~~~~~~~~~~

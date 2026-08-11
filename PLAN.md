@@ -37,9 +37,9 @@ Priority tags (for future implementation work):
 | **G65** (non-modal macro call) | MISSING | P0 | Not referenced anywhere in the codebase. No `parseG65`, no enum value. |
 | **G66 / G66.1** (modal macro call) | MISSING | P0 | Not found. |
 | **G67** (modal macro cancel) | MISSING | P0 | Not found. |
-| **G51** (scaling) | MISSING | P1 | No scaling state in `MachineState`. |
-| **G50** (max RPM clamp, Fanuc lathe) | MISSING | P1 | Collides with RS274 G50 (no-op); not handled. |
-| **G68 / G69** (coordinate system rotation) | MISSING | P1 | `MachineState::coordRotation` field exists but no G68/G69 case in `getModalGroup` or any handler. |
+| **G51** (scaling) | DONE | P1 | Implemented via `CoordinateTransform` (Eigen). Per-axis and uniform scaling. G50 cancels. |
+| **G50** (max RPM clamp, Fanuc lathe) | MISSING | P1 | Collides with RS274 G50 (cancel scaling); Fanuc lathe max RPM not handled. |
+| **G68 / G69** (coordinate system rotation) | DONE | P1 | Full 2D plane rotation + 3D Euler XYZ + axis-angle via `CoordinateTransform`. G69 cancels. |
 | **G51.1 / G50.1** (mirror image) | MISSING | P2 | Not handled. |
 | **G70 / G71 / G72 / G73** (Fanuc lathe roughing/finishing) | MISSING | P1 | G73 collides with RS274 peck-drill; parser treats G73 as peck-drill only. No lathe roughing path. |
 | **G70 / G71** (Imperial/Metric in some Fanuc lathe dialects) | MISSING | P2 | Only G20/G21 are supported for units. |
@@ -186,7 +186,7 @@ These are accepted by the lexer/parser and have full header APIs but **no
 | G5 / G5.1 / G5.2 / G5.3 splines + NURBS | `GCodeSplines.hpp` | Math functions declared; no `.cpp`. |
 | G41/G42/G41.1/G42.1 cutter comp | `GCodeToolComp.hpp` | `CutterRadiusComp` class; no `.cpp`. |
 | G43/G43.1/G43.2/G49 tool length comp | `GCodeToolComp.hpp` | `ToolLengthComp` class; no `.cpp`. |
-| G54–G59.3 / G52 / G92 / G28 / G30 / G10 L2/L20 | `GCodeCoordinates.hpp` | `CoordinateSystemManager` class; no `.cpp`. |
+| G54–G59.3 / G52 / G92 / G28 / G30 / G10 L2/L20 | `GCodeCoordinates.hpp` | `CoordinateSystemManager` class + `GCodeCoordinates.cpp`. Full implementation with `CoordinateTransform` (Eigen). |
 | O-code control flow | `GCodeOCodes.hpp` | `OCodeExecutor` class; no `.cpp`. |
 | M98/M99 Fanuc subroutines | `GCodeOCodes.hpp` | Declared; no `.cpp`. |
 | Feed/spindle/rapid override M48–M53 | `GCodeTypes.hpp` | Enum + `MachineState` fields only; no handler. |
@@ -256,5 +256,5 @@ M5. These well-known M-codes are **accepted but have no handler**:
 12. **RepRap/Marlin M-code coverage** (§4) — fill the ~30 missing M-codes.
     (P1)
 13. **Ternary `? :`** (§6). (P1)
-14. **Coordinate rotation G68/G69, scaling G51** (§1). (P1)
+14. **Coordinate rotation G68/G69, scaling G51** (§1). (P1) — **DONE**
 15. **Haas extensions G150/G187/G12/G13** (§2). (P1)

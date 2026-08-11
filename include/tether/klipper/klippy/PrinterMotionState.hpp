@@ -11,6 +11,7 @@
 /// provided so existing consumers don't need to change.
 
 #include "tether/gcode/GCodeTypes.hpp"
+#include "tether/gcode/motion/CoordinateTransform.hpp"
 
 #include <array>
 #include <map>
@@ -88,6 +89,56 @@ struct PrinterMotionState {
     // Coordinate systems (G54-G59.3)
     int activeCoordSystem = 0;      ///< 0=G54, ..., 8=G59.3
     std::array<std::array<double, 3>, 9> coordSystemOffsets = {};  ///< Per-system X/Y/Z offsets
+
+    // G52 local coordinate offset
+    std::array<double, 3> g52Offset = {0, 0, 0};
+
+    // G68 coordinate rotation
+    bool g68Active = false;                 ///< G68 rotation active
+    int  g68Mode = 0;                       ///< 0=2D plane, 1=Euler XYZ, 2=axis-angle
+    double coordRotation = 0.0;             ///< 2D rotation angle (degrees)
+    std::array<double, 3> g68Pivot = {0, 0, 0};     ///< Rotation pivot
+    std::array<double, 3> g68Euler = {0, 0, 0};     ///< A/B/C Euler angles (degrees)
+    std::array<double, 3> g68Axis = {0, 0, 0};      ///< I/J/K rotation axis
+    double g68AxisAngle = 0.0;              ///< Axis-angle R (degrees)
+
+    // G51 scaling
+    bool g51Active = false;                 ///< G51 scaling active
+    std::array<double, 3> scaleFactors = {1, 1, 1};  ///< Per-axis XYZ scale
+
+    /// Composed coordinate transform (scale + rotation + WCS/G52/G92 offset).
+    /// Rebuilt by rebuildCoordTransform() whenever any of the above change.
+    GCode::CoordinateTransform coordTransform;
+
+    /// @brief Rebuild coordTransform from the current state fields.
+    void rebuildCoordTransform() {
+        coordTransform.setWCSOffset(coordSystemOffsets[activeCoordSystem]);
+        coordTransform.setG52Offset(g52Offset);
+        // G92 is handled via setPosition in the Klipper path; keep zero here.
+        coordTransform.setG92Offset({0, 0, 0});
+        if (g51Active)
+            coordTransform.setScale(scaleFactors[0], scaleFactors[1], scaleFactors[2]);
+        else
+            coordTransform.clearScale();
+        if (g68Active) {
+            switch (g68Mode) {
+                case 0:
+                    coordTransform.setRotation2D(
+                        coordRotation, plane, g68Pivot[0], g68Pivot[1]);
+                    break;
+                case 1:
+                    coordTransform.setRotation3DEuler(
+                        g68Euler[0], g68Euler[1], g68Euler[2], g68Pivot);
+                    break;
+                case 2:
+                    coordTransform.setRotation3DAxisAngle(
+                        g68Axis, g68AxisAngle, g68Pivot);
+                    break;
+            }
+        } else {
+            coordTransform.clearRotation();
+        }
+    }
 
     // Path control
     int pathControlMode = 0;        ///< 0=exact stop, 1=exact path, 2=blending

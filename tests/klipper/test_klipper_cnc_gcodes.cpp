@@ -140,6 +140,259 @@ TEST(KlipperCoordSystems, SetCoordinateSystemOffset) {
 }
 
 // ============================================================================
+// Part 2b: G52 Local Coordinate Offset
+// ============================================================================
+
+TEST(KlipperCoordSystems, G52SetsLocalOffset) {
+    GcodeCallbacks cb;
+    double offX = -1, offY = -1, offZ = -1;
+    cb.setLocalOffset = [&](double x, double y, double z) {
+        offX = x; offY = y; offZ = z;
+    };
+
+    PrinterMotionState state;
+    GCodeExecutor exec(std::move(cb), &state);
+
+    EXPECT_TRUE(exec.executeLine("G52 X5 Y10 Z15"));
+    EXPECT_NEAR(offX, 5.0, 0.01);
+    EXPECT_NEAR(offY, 10.0, 0.01);
+    EXPECT_NEAR(offZ, 15.0, 0.01);
+}
+
+TEST(KlipperCoordSystems, G52NoAxesResetsOffset) {
+    GcodeCallbacks cb;
+    double offX = 99, offY = 99, offZ = 99;
+    cb.setLocalOffset = [&](double x, double y, double z) {
+        offX = x; offY = y; offZ = z;
+    };
+
+    PrinterMotionState state;
+    GCodeExecutor exec(std::move(cb), &state);
+
+    // G52 with no axis words should signal reset (all NaN).
+    EXPECT_TRUE(exec.executeLine("G52"));
+    EXPECT_TRUE(std::isnan(offX));
+    EXPECT_TRUE(std::isnan(offY));
+    EXPECT_TRUE(std::isnan(offZ));
+}
+
+TEST(KlipperCoordSystems, G52PartialUpdateKeepsOtherAxes) {
+    GcodeCallbacks cb;
+    double offX = -1, offY = -1, offZ = -1;
+    cb.setLocalOffset = [&](double x, double y, double z) {
+        offX = x; offY = y; offZ = z;
+    };
+
+    PrinterMotionState state;
+    GCodeExecutor exec(std::move(cb), &state);
+
+    // Set initial offset.
+    EXPECT_TRUE(exec.executeLine("G52 X1 Y2 Z3"));
+    // Update only X; Y and Z should be NaN (unchanged).
+    EXPECT_TRUE(exec.executeLine("G52 X10"));
+    EXPECT_NEAR(offX, 10.0, 0.01);
+    EXPECT_TRUE(std::isnan(offY));
+    EXPECT_TRUE(std::isnan(offZ));
+}
+
+// ============================================================================
+// Part 2c: G68/G69 Coordinate Rotation
+// ============================================================================
+
+TEST(KlipperCoordSystems, G68_2DRotation) {
+    GcodeCallbacks cb;
+    double angle = -1, px = -1, py = -1;
+    cb.setCoordinateRotation2D = [&](double a, double x, double y) {
+        angle = a; px = x; py = y;
+    };
+
+    PrinterMotionState state;
+    GCodeExecutor exec(std::move(cb), &state);
+
+    EXPECT_TRUE(exec.executeLine("G68 X5 Y10 R45"));
+    EXPECT_NEAR(angle, 45.0, 0.01);
+    EXPECT_NEAR(px, 5.0, 0.01);
+    EXPECT_NEAR(py, 10.0, 0.01);
+}
+
+TEST(KlipperCoordSystems, G68_3DEuler) {
+    GcodeCallbacks cb;
+    double a = -1, b = -1, c = -1, px = -1, py = -1, pz = -1;
+    cb.setCoordinateRotation3D = [&](double aa, double bb, double cc,
+                                      double x, double y, double z) {
+        a = aa; b = bb; c = cc; px = x; py = y; pz = z;
+    };
+
+    PrinterMotionState state;
+    GCodeExecutor exec(std::move(cb), &state);
+
+    EXPECT_TRUE(exec.executeLine("G68 X1 Y2 Z3 A10 B20 C30"));
+    EXPECT_NEAR(a, 10.0, 0.01);
+    EXPECT_NEAR(b, 20.0, 0.01);
+    EXPECT_NEAR(c, 30.0, 0.01);
+    EXPECT_NEAR(px, 1.0, 0.01);
+    EXPECT_NEAR(py, 2.0, 0.01);
+    EXPECT_NEAR(pz, 3.0, 0.01);
+}
+
+TEST(KlipperCoordSystems, G68_3DAxisAngle) {
+    GcodeCallbacks cb;
+    double ix = -1, iy = -1, iz = -1, angle = -1;
+    double px = -1, py = -1, pz = -1;
+    cb.setCoordinateRotationAxis = [&](double i, double j, double k, double a,
+                                        double x, double y, double z) {
+        ix = i; iy = j; iz = k; angle = a;
+        px = x; py = y; pz = z;
+    };
+
+    PrinterMotionState state;
+    GCodeExecutor exec(std::move(cb), &state);
+
+    EXPECT_TRUE(exec.executeLine("G68 X1 Y2 Z3 I0 J0 K1 R90"));
+    EXPECT_NEAR(ix, 0.0, 0.01);
+    EXPECT_NEAR(iy, 0.0, 0.01);
+    EXPECT_NEAR(iz, 1.0, 0.01);
+    EXPECT_NEAR(angle, 90.0, 0.01);
+    EXPECT_NEAR(px, 1.0, 0.01);
+    EXPECT_NEAR(py, 2.0, 0.01);
+    EXPECT_NEAR(pz, 3.0, 0.01);
+}
+
+TEST(KlipperCoordSystems, G69CancelRotation) {
+    GcodeCallbacks cb;
+    bool cancelled = false;
+    cb.cancelCoordinateRotation = [&]() { cancelled = true; };
+
+    PrinterMotionState state;
+    GCodeExecutor exec(std::move(cb), &state);
+
+    EXPECT_TRUE(exec.executeLine("G69"));
+    EXPECT_TRUE(cancelled);
+}
+
+// ============================================================================
+// Part 2d: G51/G50 Scaling
+// ============================================================================
+
+TEST(KlipperCoordSystems, G51UniformScaling) {
+    GcodeCallbacks cb;
+    double sx = 0, sy = 0, sz = 0;
+    cb.setScaling = [&](double x, double y, double z) {
+        sx = x; sy = y; sz = z;
+    };
+
+    PrinterMotionState state;
+    GCodeExecutor exec(std::move(cb), &state);
+
+    EXPECT_TRUE(exec.executeLine("G51 P2.0"));
+    EXPECT_NEAR(sx, 2.0, 0.01);
+    EXPECT_NEAR(sy, 2.0, 0.01);
+    EXPECT_NEAR(sz, 2.0, 0.01);
+}
+
+TEST(KlipperCoordSystems, G51PerAxisScaling) {
+    GcodeCallbacks cb;
+    double sx = 0, sy = 0, sz = 0;
+    cb.setScaling = [&](double x, double y, double z) {
+        sx = x; sy = y; sz = z;
+    };
+
+    PrinterMotionState state;
+    GCodeExecutor exec(std::move(cb), &state);
+
+    EXPECT_TRUE(exec.executeLine("G51 X2 Y0.5 Z1"));
+    EXPECT_NEAR(sx, 2.0, 0.01);
+    EXPECT_NEAR(sy, 0.5, 0.01);
+    EXPECT_NEAR(sz, 1.0, 0.01);
+}
+
+TEST(KlipperCoordSystems, G50CancelScaling) {
+    GcodeCallbacks cb;
+    bool cancelled = false;
+    cb.cancelScaling = [&]() { cancelled = true; };
+
+    PrinterMotionState state;
+    GCodeExecutor exec(std::move(cb), &state);
+
+    EXPECT_TRUE(exec.executeLine("G50"));
+    EXPECT_TRUE(cancelled);
+}
+
+// ============================================================================
+// Part 2e: CoordinateTransform integration in PrinterMotionState
+// ============================================================================
+
+TEST(KlipperCoordSystems, TransformAppliesWCSOffset) {
+    PrinterMotionState state;
+    state.coordSystemOffsets[0] = {10.0, 20.0, 30.0};
+    state.activeCoordSystem = 0;
+    state.rebuildCoordTransform();
+
+    auto m = state.coordTransform.toMachineXYZ(1.0, 2.0, 3.0);
+    EXPECT_NEAR(m[0], 11.0, 0.001);
+    EXPECT_NEAR(m[1], 22.0, 0.001);
+    EXPECT_NEAR(m[2], 33.0, 0.001);
+}
+
+TEST(KlipperCoordSystems, TransformAppliesG52Offset) {
+    PrinterMotionState state;
+    state.g52Offset = {5.0, 10.0, 15.0};
+    state.rebuildCoordTransform();
+
+    auto m = state.coordTransform.toMachineXYZ(1.0, 2.0, 3.0);
+    EXPECT_NEAR(m[0], 6.0, 0.001);
+    EXPECT_NEAR(m[1], 12.0, 0.001);
+    EXPECT_NEAR(m[2], 18.0, 0.001);
+}
+
+TEST(KlipperCoordSystems, TransformAppliesG68Rotation2D) {
+    PrinterMotionState state;
+    state.g68Active = true;
+    state.g68Mode = 0;
+    state.coordRotation = 90.0;  // 90° about Z
+    state.g68Pivot = {0, 0, 0};
+    state.rebuildCoordTransform();
+
+    // (1, 0, 0) rotated 90° about Z -> (0, 1, 0)
+    auto m = state.coordTransform.toMachineXYZ(1.0, 0.0, 0.0);
+    EXPECT_NEAR(m[0], 0.0, 0.001);
+    EXPECT_NEAR(m[1], 1.0, 0.001);
+    EXPECT_NEAR(m[2], 0.0, 0.001);
+}
+
+TEST(KlipperCoordSystems, TransformAppliesG51Scaling) {
+    PrinterMotionState state;
+    state.g51Active = true;
+    state.scaleFactors = {2.0, 3.0, 4.0};
+    state.rebuildCoordTransform();
+
+    auto m = state.coordTransform.toMachineXYZ(1.0, 1.0, 1.0);
+    EXPECT_NEAR(m[0], 2.0, 0.001);
+    EXPECT_NEAR(m[1], 3.0, 0.001);
+    EXPECT_NEAR(m[2], 4.0, 0.001);
+}
+
+TEST(KlipperCoordSystems, TransformRoundTrip) {
+    PrinterMotionState state;
+    state.coordSystemOffsets[0] = {10.0, 20.0, 30.0};
+    state.g52Offset = {1.0, 2.0, 3.0};
+    state.g68Active = true;
+    state.g68Mode = 0;
+    state.coordRotation = 45.0;
+    state.g68Pivot = {5.0, 5.0, 0};
+    state.g51Active = true;
+    state.scaleFactors = {2.0, 2.0, 1.0};
+    state.rebuildCoordTransform();
+
+    double px = 10.0, py = 20.0, pz = 30.0;
+    auto m = state.coordTransform.toMachineXYZ(px, py, pz);
+    auto p = state.coordTransform.toProgramXYZ(m[0], m[1], m[2]);
+    EXPECT_NEAR(p[0], px, 0.001);
+    EXPECT_NEAR(p[1], py, 0.001);
+    EXPECT_NEAR(p[2], pz, 0.001);
+}
+
+// ============================================================================
 // Part 3: G53 Machine Coordinates (Tier 2.7)
 // ============================================================================
 

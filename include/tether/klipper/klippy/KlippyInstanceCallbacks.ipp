@@ -9,21 +9,38 @@
         GcodeCallbacks cb;
 
         // Motion
+        // cb.move is overridden later in KlippyInstance.hpp to route through
+        // the motion dispatcher with coordinate transform applied. Here we
+        // set up the stored callbacks used by G53 and canned cycles.
         cb.move = [this](double x, double y, double z, double e, double speed) {
-            // Apply G-code offset
-            std::array<double, 4> pos = {x + gcodeOffset_[0], y + gcodeOffset_[1],
-                                         z + gcodeOffset_[2], e + gcodeOffset_[3]};
+            // Apply G-code offset (program-space additive) then coordinate
+            // transform (WCS + G52 + G68 rotation + G51 scale).
+            double px = x + gcodeOffset_[0];
+            double py = y + gcodeOffset_[1];
+            double pz = z + gcodeOffset_[2];
+            auto m = motionState_.coordTransform.toMachineXYZ(px, py, pz);
+            std::array<double, 4> pos = {m[0], m[1], m[2], e + gcodeOffset_[3]};
             toolheadObj_->setPosition(pos);
             motionReportObj_->setPosition(pos);
             motionReportObj_->setVelocity(speed);
             moveQueueDepth_++;
             noteActivity();
         };
-        // Store move callback for reuse by G53 and canned cycles
+        // Stored move callback (applies transform) — for canned cycles.
         moveCallback_ = [this](double x, double y, double z, double e, double speed) {
-            // Apply G-code offset
-            std::array<double, 4> pos = {x + gcodeOffset_[0], y + gcodeOffset_[1],
-                                         z + gcodeOffset_[2], e + gcodeOffset_[3]};
+            double px = x + gcodeOffset_[0];
+            double py = y + gcodeOffset_[1];
+            double pz = z + gcodeOffset_[2];
+            auto m = motionState_.coordTransform.toMachineXYZ(px, py, pz);
+            std::array<double, 4> pos = {m[0], m[1], m[2], e + gcodeOffset_[3]};
+            toolheadObj_->setPosition(pos);
+            motionReportObj_->setPosition(pos);
+            motionReportObj_->setVelocity(speed);
+            moveQueueDepth_++;
+        };
+        // Raw move callback (bypasses transform) — for G53 machine coords.
+        moveCallbackRaw_ = [this](double x, double y, double z, double e, double speed) {
+            std::array<double, 4> pos = {x, y, z, e};
             toolheadObj_->setPosition(pos);
             motionReportObj_->setPosition(pos);
             motionReportObj_->setVelocity(speed);
@@ -164,10 +181,14 @@
 
         // Status queries
         cb.getPositionStatus = [this]() {
+            // Report program coordinates (inverse-transformed from machine).
+            auto p = motionState_.coordTransform.toProgramXYZ(
+                motionState_.position[0], motionState_.position[1],
+                motionState_.position[2]);
             std::ostringstream ss;
-            ss << "X:" << motionState_.position[0]
-               << " Y:" << motionState_.position[1]
-               << " Z:" << motionState_.position[2]
+            ss << "X:" << p[0]
+               << " Y:" << p[1]
+               << " Z:" << p[2]
                << " E:" << motionState_.position[3]
                << " Count A:0 B:0 C:0";
             return ss.str();
@@ -625,25 +646,88 @@
         // --- Coordinate systems (G54-G59.3) ---
         cb.selectCoordinateSystem = [this](int system) {
             motionState_.activeCoordSystem = system;
+            motionState_.rebuildCoordTransform();
         };
         cb.setCoordinateSystemOffset = [this](int system, double x, double y, double z) {
             if (system >= 0 && system < 9) {
                 motionState_.coordSystemOffsets[system] = {x, y, z};
+                motionState_.rebuildCoordTransform();
             }
+        };
+
+        // --- Local offset (G52) ---
+        cb.setLocalOffset = [this](double x, double y, double z) {
+            if (!std::isnan(x)) motionState_.g52Offset[0] = x;
+            if (!std::isnan(y)) motionState_.g52Offset[1] = y;
+            if (!std::isnan(z)) motionState_.g52Offset[2] = z;
+            // If all three are NaN (no axis words), reset to zero.
+            if (std::isnan(x) && std::isnan(y) && std::isnan(z))
+                motionState_.g52Offset = {0, 0, 0};
+            motionState_.rebuildCoordTransform();
+        };
+
+        // --- Coordinate rotation (G68/G69) ---
+        cb.setCoordinateRotation2D = [this](double angleDeg, double px, double py) {
+            motionState_.g68Active = true;
+            motionState_.g68Mode = 0;
+            motionState_.coordRotation = angleDeg;
+            motionState_.g68Pivot = {px, py, 0};
+            motionState_.rebuildCoordTransform();
+        };
+        cb.setCoordinateRotation3D = [this](double a, double b, double c,
+                                             double px, double py, double pz) {
+            motionState_.g68Active = true;
+            motionState_.g68Mode = 1;
+            motionState_.g68Euler = {a, b, c};
+            motionState_.g68Pivot = {px, py, pz};
+            motionState_.rebuildCoordTransform();
+        };
+        cb.setCoordinateRotationAxis = [this](double ix, double iy, double iz,
+                                               double angleDeg,
+                                               double px, double py, double pz) {
+            motionState_.g68Active = true;
+            motionState_.g68Mode = 2;
+            motionState_.g68Axis = {ix, iy, iz};
+            motionState_.g68AxisAngle = angleDeg;
+            motionState_.g68Pivot = {px, py, pz};
+            motionState_.rebuildCoordTransform();
+        };
+        cb.cancelCoordinateRotation = [this]() {
+            motionState_.g68Active = false;
+            motionState_.g68Mode = 0;
+            motionState_.coordRotation = 0.0;
+            motionState_.g68Euler = {0, 0, 0};
+            motionState_.g68Axis = {0, 0, 0};
+            motionState_.g68AxisAngle = 0.0;
+            motionState_.g68Pivot = {0, 0, 0};
+            motionState_.rebuildCoordTransform();
+        };
+
+        // --- Scaling (G51/G50) ---
+        cb.setScaling = [this](double sx, double sy, double sz) {
+            motionState_.g51Active = true;
+            motionState_.scaleFactors = {sx, sy, sz};
+            motionState_.rebuildCoordTransform();
+        };
+        cb.cancelScaling = [this]() {
+            motionState_.g51Active = false;
+            motionState_.scaleFactors = {1, 1, 1};
+            motionState_.rebuildCoordTransform();
         };
 
         // --- Machine coordinates (G53) ---
         cb.moveMachine = [this](double x, double y, double z, double speed) {
-            // Move in machine coordinates (ignoring coordinate system offsets)
+            // Move in machine coordinates (bypassing coordinate transforms).
+            // We set the position directly in machine space and call the
+            // raw move callback without applying coordTransform.
             if (!std::isnan(x)) motionState_.position[0] = x;
             if (!std::isnan(y)) motionState_.position[1] = y;
             if (!std::isnan(z)) motionState_.position[2] = z;
-            // Execute the move via the motion callback
-            if (moveCallback_) {
-                moveCallback_(motionState_.position[0],
-                              motionState_.position[1],
-                              motionState_.position[2],
-                              motionState_.position[3], speed);
+            if (moveCallbackRaw_) {
+                moveCallbackRaw_(motionState_.position[0],
+                                 motionState_.position[1],
+                                 motionState_.position[2],
+                                 motionState_.position[3], speed);
             }
         };
 
