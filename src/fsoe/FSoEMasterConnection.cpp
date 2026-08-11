@@ -1079,6 +1079,69 @@ bool FSoEMasterConnection::exchangeWith(FSoESlave& slave, uint64_t current_time_
     return processRxFrame(rx.data(), rx_len);
 }
 
+// ============================================================================
+// PDO frame-size translation
+// ============================================================================
+//
+// The FSoE frame has a variable length (ConnID at the END of the frame, not
+// at a fixed PDO position).  When mapped into a fixed-size EtherCAT PDO,
+// only the first N bytes of the PDO are the actual FSoE frame; the remaining
+// bytes are unused/stale.  Both master and slave must determine the frame
+// size from the command byte and only process the first N bytes.
+//
+// Frame sizes by command:
+//   Reset(0x2A)      : 3 bytes  (0 data bytes, no CRC)
+//   Session(0x4E)    : 7 bytes  (2 data bytes, 1 CRC)
+//   Connection(0x64) : 11 bytes (4 data bytes, 2 CRCs)
+//   Parameter(0x52)  : 15 bytes (6 data bytes, 3 CRCs)
+//   ProcessData(0x36): fsoeFrameSize(input_size)
+//   FailSafeData(0x08): fsoeFrameSize(input_size)
+
+size_t FSoEMasterConnection::expectedRxFrameSize(uint8_t cmd, size_t pdo_size) const
+{
+    size_t frame_size = 0;
+
+    switch (cmd) {
+        case Command::Reset:
+            frame_size = CRC::fsoeFrameSize(0);       // 3 bytes
+            break;
+        case Command::Session:
+            frame_size = CRC::fsoeFrameSize(2);       // 7 bytes
+            break;
+        case Command::Connection:
+            frame_size = CRC::fsoeFrameSize(4);       // 11 bytes
+            break;
+        case Command::Parameter:
+            frame_size = CRC::fsoeFrameSize(6);       // 15 bytes
+            break;
+        case Command::ProcessData:
+        case Command::FailSafeData:
+            // Data/FailSafe frames use the negotiated input_size.
+            // FailSafeData may include a 2-byte error code after the safe
+            // inputs, but that only fits if the PDO is large enough.
+            frame_size = CRC::fsoeFrameSize(config_.input_size);
+            // Also check if FailSafeData with error code fits
+            if (cmd == Command::FailSafeData) {
+                size_t with_error = CRC::fsoeFrameSize(
+                    static_cast<size_t>(config_.input_size) + 2);
+                if (with_error <= pdo_size) {
+                    frame_size = with_error;
+                }
+            }
+            break;
+        default:
+            // Unrecognized command (0x00 = stale/empty PDO, or garbage)
+            return 0;
+    }
+
+    // Cap at PDO size — the frame can't be larger than the PDO buffer
+    if (frame_size > pdo_size) {
+        frame_size = pdo_size;
+    }
+
+    return frame_size;
+}
+
 bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max,
                                           const uint8_t* tx_pdo_in, size_t tx_pdo_len,
                                           uint64_t current_time_ms)
@@ -1089,60 +1152,26 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
     update(current_time_ms);
 
     // Build the master→slave FSoE frame into the RxPDO buffer.
-    // The frame size varies by state (Session=5B, Connection=7B,
-    // Parameter=9B, Data=11B).  prepareTxFrame writes only the needed
-    // bytes; the rest of the PDO buffer is left untouched.
+    // The frame size varies by state (Reset=3B, Session=7B, Connection=11B,
+    // Parameter=15B, Data=11B).  prepareTxFrame writes only the needed
+    // bytes; the rest of the PDO buffer is zero-filled below.
     const size_t tx_len = prepareTxFrame(rx_pdo_out, rx_pdo_max);
     if (tx_len == 0) {
         return false;
     }
 
-    // Pad the frame to the PDO size with ConnID at the last 2 bytes.
+    // Zero-fill the rest of the PDO buffer after the FSoE frame.
     //
-    // The Synapticon drive's FSoE PDO (0x1700) has a fixed 11-byte layout:
-    //   CMD(1) + Data0(2) + CRC0(2) + Data1(2) + CRC1(2) + ConnID(2)
-    // The ConnID is mapped to the last 2 bytes of the PDO (bytes 9-10),
-    // not to the variable-length position right after the last data chunk.
+    // The FSoE frame is placed at the BEGINNING of the PDO.  ConnID is at
+    // the end of the frame (variable position), NOT at the end of the PDO.
+    // The remaining bytes in the PDO are unused — the slave determines the
+    // frame size from the command byte and only processes the first N bytes.
     //
-    // The variable-length frame builder (buildFSoEFrame) puts ConnID right
-    // after the last data chunk.  For a Reset frame (0 data), ConnID is at
-    // bytes 1-2.  For a Data frame (4 bytes data), ConnID is at bytes 9-10.
-    //
-    // When the variable-length frame is shorter than the PDO, we need to:
-    // 1. Move ConnID from its variable-length position to the PDO end
-    // 2. Fill the gap with zero-filled data chunks (2B data=0x0000 + 2B CRC)
-    //
-    // CRC of {0x00, 0x00} with init 0x0000 = 0x0000 (from the CRC table),
-    // so zero-filled chunks pass CRC verification trivially.
-    if (tx_len < rx_pdo_max && rx_pdo_max >= CRC::MIN_FSOE_FRAME_SIZE) {
-        // Check that the PDO size is a valid FSoE frame size (all 4-byte chunks)
-        size_t pdo_data_bytes = rx_pdo_max - 1 - 2;  // minus CMD and ConnID
-        if (pdo_data_bytes % 4 == 0) {
-            // Extract ConnID from the variable-length frame
-            uint16_t conn_id = static_cast<uint16_t>(rx_pdo_out[tx_len - 2]) |
-                               (static_cast<uint16_t>(rx_pdo_out[tx_len - 1]) << 8);
-
-            // Fill the gap with zero-filled data chunks
-            size_t gap_start = tx_len - 2;  // Where ConnID was
-            size_t gap_end   = rx_pdo_max - 2;  // Where ConnID will be
-            size_t gap_size  = gap_end - gap_start;
-
-            if (gap_size > 0 && gap_size % 4 == 0) {
-                size_t num_chunks = gap_size / 4;
-                size_t offset = gap_start;
-                for (size_t i = 0; i < num_chunks; i++) {
-                    rx_pdo_out[offset]     = 0x00;  // Data byte 0
-                    rx_pdo_out[offset + 1] = 0x00;  // Data byte 1
-                    rx_pdo_out[offset + 2] = 0x00;  // CRC low (CRC of {0,0} = 0x0000)
-                    rx_pdo_out[offset + 3] = 0x00;  // CRC high
-                    offset += 4;
-                }
-
-                // Write ConnID at the end of the PDO
-                rx_pdo_out[rx_pdo_max - 2] = conn_id & 0xFF;
-                rx_pdo_out[rx_pdo_max - 1] = (conn_id >> 8) & 0xFF;
-            }
-        }
+    // Zero-filling ensures that stale data from a previous (longer) frame
+    // doesn't leak into the unused region, which could confuse diagnostics
+    // or debug dumps.
+    if (tx_len < rx_pdo_max) {
+        std::fill(rx_pdo_out + tx_len, rx_pdo_out + rx_pdo_max, 0x00);
     }
 
     // Startup grace period: skip RxFrame processing for the first few
@@ -1153,10 +1182,6 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
     // → master reads N+2), so we need to skip 2 cycles.  With DC sync
     // the slave responds within the same cycle, but skipping 2 is
     // harmless — the master just re-sends its current-state frame.
-    //
-    // Without this grace period, the stale TxPDO (all zeros or
-    // uninitialized) would be parsed as an FSoE frame, triggering a
-    // spurious CRCError or ConnectionIDError and immediate fail-safe.
     constexpr uint32_t kStartupSkipCycles = 2;
     if (pdo_tx_count_ < kStartupSkipCycles) {
         trace("PDO startup: skipping RX (cycle %u/%u, slave hasn't responded yet)",
@@ -1165,9 +1190,33 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
         return false;
     }
 
-    // Process the slave→master FSoE frame from the TxPDO buffer.
-    // The drive writes its response into TxPDO each cycle.
-    return processRxFrame(tx_pdo_in, tx_pdo_len);
+    // Extract the FSoE frame from the TxPDO buffer.
+    //
+    // The slave→master FSoE frame is at the BEGINNING of the TxPDO.  The
+    // frame size is determined by the command byte (and the negotiated
+    // input_size for Data/FailSafe frames).  Only the first N bytes are
+    // the actual FSoE frame; the remaining bytes in the PDO are unused
+    // and must NOT be passed to processRxFrame (they would be parsed as
+    // extra data+CRC segments, causing spurious CRC errors).
+    if (tx_pdo_len == 0 || tx_pdo_in == nullptr) {
+        return false;
+    }
+
+    const uint8_t rx_cmd = tx_pdo_in[0];
+    const size_t rx_frame_size = expectedRxFrameSize(rx_cmd, tx_pdo_len);
+
+    if (rx_frame_size == 0) {
+        // Unrecognized command (0x00 = stale/empty PDO, or garbage).
+        // Silently skip — the master keeps retrying with its current-state
+        // frame.  This handles the first few cycles before the slave has
+        // populated the TxPDO.
+        trace("PDO RX: skipping frame with unrecognized cmd=0x%02X (stale PDO?)",
+              rx_cmd);
+        return false;
+    }
+
+    // Process only the first rx_frame_size bytes of the TxPDO.
+    return processRxFrame(tx_pdo_in, rx_frame_size);
 }
 
 bool FSoEMasterConnection::areSafeInputsValid() const
