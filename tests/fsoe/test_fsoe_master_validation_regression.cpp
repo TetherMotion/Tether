@@ -363,9 +363,9 @@ TEST(FSoEMasterFailSafeResetRegression, ResetCommandInFailSafeWithAutoRecovery) 
     conn.triggerFailSafe(ErrorCode::WatchdogError);
     ASSERT_TRUE(conn.isFailSafe());
 
-    // Send Reset command — Reset frames use start_crc=0 and seq_no=0
-    // (Reset resets the CRC chain).  The frame is the full fixed size
-    // with data_len = output_size.
+    // Send Reset command — Reset frames use start_crc=0 and seq_no=1
+    // (Reset resets the CRC chain and sequence to 1, per ETG.5100 §8.1.3.4).
+    // The frame is the full fixed size with data_len = output_size.
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     payload[0] = 0x01;  // error code
     uint8_t frame[64];
@@ -373,7 +373,7 @@ TEST(FSoEMasterFailSafeResetRegression, ResetCommandInFailSafeWithAutoRecovery) 
                                             payload, 4u,
                                             0x1234,
                                             0,  // start_crc = 0 (Reset resets CRC chain)
-                                            0);  // seq_no = 0 (Reset resets sequence)
+                                            1);  // seq_no = 1 (Reset resets sequence to 1)
     conn.processRxFrame(frame, frame_len);
 
     // Should have recovered (auto_recovery_enabled=true)
@@ -409,16 +409,22 @@ TEST(FSoEMasterFailSafeFrameRegression, FailSafeFrameContainsFailSafeValues) {
 
     conn.triggerFailSafe(ErrorCode::ApplicationError);
 
+    // Capture TX CRC state before prepareTxFrame updates it
+    const uint16_t saved_tx_crc0 = conn.getTxLastCrc0();
+    const uint16_t saved_tx_seq = conn.getTxSeqNo();
+
     uint8_t tx[64];
     size_t tx_len = conn.prepareTxFrame(tx, sizeof(tx));
     ASSERT_GT(tx_len, 0u);
 
     // Parse and verify fail-safe values are in the payload
+    // Use the master's TX CRC state that was used to build the frame.
     uint8_t cmd = 0;
     uint8_t data[18] = {0};
     size_t data_len = 0;
     uint16_t conn_id = 0;
-    ASSERT_TRUE(CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id));
+    ASSERT_TRUE(CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id,
+                                    saved_tx_crc0, saved_tx_seq));
     EXPECT_EQ(cmd, Command::FailSafeData);
     // Frame data length is the fixed data length (max(output_size, 6) = 6)
     EXPECT_EQ(data_len, 4u);

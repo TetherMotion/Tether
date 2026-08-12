@@ -86,8 +86,8 @@ bool FSoEMasterConnection::initialize()
     tx_sequence_ = 0;
     last_tx_crc0_ = 0;
     last_rx_crc0_ = 0;
-    tx_seq_no_ = 0;
-    rx_seq_no_ = 0;
+    tx_seq_no_ = 1;   // ETG.5100 §8.1.3.4: sequence starts at 1 (0 is never used)
+    rx_seq_no_ = 1;   // Expected slave sequence also starts at 1
     current_param_index_ = 0;
     parameter_crc_ = 0;
     fail_safe_entered_ms_ = 0;
@@ -139,8 +139,8 @@ bool FSoEMasterConnection::resetConnection()
     tx_sequence_ = 0;
     last_tx_crc0_ = 0;   // CRC inheritance starts at 0
     last_rx_crc0_ = 0;
-    tx_seq_no_ = 0;
-    rx_seq_no_ = 0;
+    tx_seq_no_ = 1;   // ETG.5100 §8.1.3.4: sequence starts at 1 (0 is never used)
+    rx_seq_no_ = 1;   // Expected slave sequence also starts at 1
     current_param_index_ = 0;
     pdo_tx_count_ = 0;
     last_rx_frame_.clear();
@@ -249,13 +249,18 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
         return std::make_shared<const std::vector<uint8_t>>(data, data + len);
     });
 
-    // Parse and validate frame (CRC verification happens inside parseFSoEFrame)
+    // Parse and validate frame (CRC verification happens inside
+    // parseFSoEFrameWithCollisionAvoidance, which also replicates the
+    // ETG.5100 §8.1.3.4 collision avoidance algorithm on the checking side).
     // Buffer must accommodate MAX_PARSE_DATA_SIZE bytes because the slave's
     // buildFailSafeResponse sends safeInputSize + 2 bytes (inputs + error code),
     // which can be up to 18 bytes when safeInputSize = 16.
     //
-    // Reset frames (cmd=0x2A) reset the CRC chain: they are parsed with
-    // start_crc=0 and do NOT update last_rx_crc0_ or increment rx_seq_no_.
+    // Reset frames (cmd=0x2A) reset the CRC chain AND the sequence number:
+    //   - start_crc = 0 (CRC chain reset)
+    //   - seq = 1 (sequence reset to initial value)
+    // After a Reset frame, the next frame uses seq=2.
+    // Non-Reset frames use the current rx_seq_no_ and last_rx_crc0_.
     uint8_t cmd = 0;
     uint8_t frame_data[CRC::MAX_PARSE_DATA_SIZE] = {0};
     size_t data_len = 0;
@@ -264,12 +269,14 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
 
     const bool is_reset_frame = (data[0] == Command::Reset);
     const uint16_t parse_start_crc = is_reset_frame ? 0 : last_rx_crc0_;
-    const uint16_t parse_seq_no = is_reset_frame ? 0 : rx_seq_no_;
+    const uint16_t parse_seq_no = is_reset_frame ? 1 : rx_seq_no_;
+    uint16_t seq_used = 0;
 
-    if (!CRC::parseFSoEFrame(data, len, cmd, frame_data, data_len, conn_id,
-                             parse_start_crc, parse_seq_no,
-                             is_reset_frame ? nullptr : &last_rx_crc0_,
-                             &crc_error_detail)) {
+    if (!CRC::parseFSoEFrameWithCollisionAvoidance(
+            data, len, cmd, frame_data, data_len, conn_id,
+            parse_start_crc, parse_seq_no,
+            is_reset_frame ? nullptr : &last_rx_crc0_,
+            &seq_used, &crc_error_detail)) {
         stats_.crc_errors++;
         FSoEErrorDetail detail;
         if (crc_error_detail.valid) {
@@ -292,6 +299,11 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
         handleError(ErrorCode::CRCError, detail);
         return false;
     }
+
+    // Update the expected RX sequence number to the value that matched
+    // (after collision avoidance).  The next expected RX seq is the
+    // incremented value.
+    rx_seq_no_ = CRC::incrementSeqNo(seq_used);
 
     // Reject frames with unrecognized command bytes.
     //
@@ -349,11 +361,8 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
     // Update watchdog timestamp
     status_.last_valid_frame_ms = current_time_ms_;
 
-    // Increment RX sequence number for CRC computation — but NOT for
-    // Reset frames.  Reset frames don't advance the CRC chain.
-    if (!is_reset_frame) {
-        rx_seq_no_++;
-    }
+    // RX sequence number was already updated above (after collision-aware
+    // parse).  No additional increment needed here.
 
     // Early detection of slave fail-safe response
     if (cmd == Command::FailSafeData &&
@@ -515,14 +524,13 @@ size_t FSoEMasterConnection::prepareTxFrame(uint8_t* data, size_t max_len)
 
     if (len > 0) {
         stats_.frames_sent++;
-        // Increment TX sequence number for CRC computation — but NOT for
-        // Reset frames.  Reset frames don't advance the CRC chain, so the
-        // sequence number must stay the same.  The sequence number is NOT
-        // transmitted — it is folded into the CRC and shared between master
-        // and slave.
-        if (data[0] != Command::Reset) {
-            tx_seq_no_++;
-        }
+        // Increment TX sequence number for the NEXT frame.
+        // Per ETG.5100 §8.1.3.4, every PDU (including Reset) advances the
+        // sequence counter.  The sequence number is NOT transmitted — it is
+        // folded into the CRC.  The actual seq used for this frame (after
+        // collision avoidance) was already set by the build* function;
+        // here we advance to the next expected value.
+        tx_seq_no_ = CRC::incrementSeqNo(tx_seq_no_);
         tx_frame_events_.emit([data, len] {
             return std::make_shared<const std::vector<uint8_t>>(data, data + len);
         });
@@ -930,18 +938,27 @@ size_t FSoEMasterConnection::buildResetFrame(uint8_t* data, size_t max_len)
     //   CRCs computed over each 2-byte data chunk (from start_crc=0)
     //   ConnID at the last 2 bytes
     //
-    // Reset frames do NOT update the CRC chain.  The CRC is computed from
-    // start_crc=0, and last_tx_crc0_ is NOT updated.  This matches the FSoE
-    // spec where the Reset exchange resets the CRC chain on both sides.
+    // Reset frames reset the CRC chain AND the sequence number:
+    //   - start_crc = 0 (CRC chain reset)
+    //   - seq = 1 (sequence reset to initial value, per ETG.5100 §8.1.3.4)
+    // After the Reset frame, the next frame uses seq=2.
+    // last_tx_crc0_ is NOT updated (stays at 0 for the next frame).
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     payload[0] = ResetErrorCode::None;  // Local reset
     size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Reset, payload, config_.output_size,
-                               config_.connection_id,
-                               0,  // start_crc = 0 (Reset resets CRC chain)
-                               0,  // seq_no = 0 (Reset resets sequence)
-                               nullptr);  // don't update CRC chain
+    uint16_t seq_used = 0;
+    size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
+        data, Command::Reset, payload, config_.output_size,
+        config_.connection_id,
+        0,  // start_crc = 0 (Reset resets CRC chain)
+        1,  // seq = 1 (Reset resets sequence to initial value)
+        nullptr,  // don't update CRC chain (Reset resets it)
+        &seq_used);
+    // Set tx_seq_no_ to the seq used (1, or higher if collision avoidance
+    // incremented it).  prepareTxFrame will increment it to 2 for the next frame.
+    tx_seq_no_ = seq_used;
+    return result;
 }
 
 size_t FSoEMasterConnection::buildSessionResetFrame(uint8_t* data, size_t max_len)
@@ -953,9 +970,13 @@ size_t FSoEMasterConnection::buildSessionResetFrame(uint8_t* data, size_t max_le
     payload[1] = static_cast<uint8_t>((status_.session_id >> 8) & 0xFF);
     size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Session, payload, config_.output_size,
-                               config_.connection_id,
-                               last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
+    uint16_t seq_used = 0;
+    size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
+        data, Command::Session, payload, config_.output_size,
+        config_.connection_id,
+        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+    tx_seq_no_ = seq_used;
+    return result;
 }
 
 size_t FSoEMasterConnection::buildConnectionFrame(uint8_t* data, size_t max_len)
@@ -969,9 +990,13 @@ size_t FSoEMasterConnection::buildConnectionFrame(uint8_t* data, size_t max_len)
     payload[3] = (parameter_crc_ >> 8) & 0xFF;
     size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Connection, payload, config_.output_size,
-                               config_.connection_id,
-                               last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
+    uint16_t seq_used = 0;
+    size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
+        data, Command::Connection, payload, config_.output_size,
+        config_.connection_id,
+        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+    tx_seq_no_ = seq_used;
+    return result;
 }
 
 size_t FSoEMasterConnection::buildParameterFrame(uint8_t* data, size_t max_len)
@@ -988,9 +1013,13 @@ size_t FSoEMasterConnection::buildParameterFrame(uint8_t* data, size_t max_len)
     payload[5] = 0;  // reserved
     size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Parameter, payload, config_.output_size,
-                               config_.connection_id,
-                               last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
+    uint16_t seq_used = 0;
+    size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
+        data, Command::Parameter, payload, config_.output_size,
+        config_.connection_id,
+        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+    tx_seq_no_ = seq_used;
+    return result;
 }
 
 size_t FSoEMasterConnection::buildDataFrame(uint8_t* data, size_t max_len)
@@ -998,10 +1027,14 @@ size_t FSoEMasterConnection::buildDataFrame(uint8_t* data, size_t max_len)
     // Data frame: CMD + safe_outputs + ConnID
     size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::ProcessData,
-                               safe_outputs_.data(), config_.output_size,
-                               config_.connection_id,
-                               last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
+    uint16_t seq_used = 0;
+    size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
+        data, Command::ProcessData,
+        safe_outputs_.data(), config_.output_size,
+        config_.connection_id,
+        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+    tx_seq_no_ = seq_used;
+    return result;
 }
 
 size_t FSoEMasterConnection::buildFailSafeFrame(uint8_t* data, size_t max_len)
@@ -1009,10 +1042,14 @@ size_t FSoEMasterConnection::buildFailSafeFrame(uint8_t* data, size_t max_len)
     // Fail-safe frame sends FailSafeData command with fail-safe output values
     size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::FailSafeData,
-                               config_.fail_safe_values.data(), config_.output_size,
-                               config_.connection_id,
-                               last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
+    uint16_t seq_used = 0;
+    size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
+        data, Command::FailSafeData,
+        config_.fail_safe_values.data(), config_.output_size,
+        config_.connection_id,
+        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+    tx_seq_no_ = seq_used;
+    return result;
 }
 
 // ============================================================================
@@ -1024,8 +1061,9 @@ bool FSoEMasterConnection::validateCRC(const uint8_t* data, size_t len) const
     uint8_t cmd = 0;
     size_t data_len = 0;
     uint16_t conn_id = 0;
-    return CRC::parseFSoEFrame(data, len, cmd, nullptr, data_len, conn_id,
-                               last_rx_crc0_, rx_seq_no_);
+    return CRC::parseFSoEFrameWithCollisionAvoidance(
+        data, len, cmd, nullptr, data_len, conn_id,
+        last_rx_crc0_, rx_seq_no_);
 }
 
 bool FSoEMasterConnection::validateSequence(uint8_t seq)
