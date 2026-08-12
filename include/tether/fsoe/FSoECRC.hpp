@@ -751,4 +751,203 @@ inline uint16_t calculate(const uint8_t* data, size_t len,
     return crc;
 }
 
+// ---------------------------------------------------------------------------
+// ETG.5100 §8.1.3.4 — Sequence number and CRC collision avoidance
+// ---------------------------------------------------------------------------
+//
+// The FSoE standard requires a virtual 16-bit sequence number that is folded
+// into the CRC computation but NOT transmitted in the frame.  Key rules:
+//
+//   1. The sequence number range is 1..65535.  The value 0 is NEVER used.
+//      After 65535 the counter wraps back to 1.
+//
+//   2. The master maintains a master sequence number (incremented with each
+//      new master PDU); the slave maintains a slave sequence number
+//      (incremented with each new slave PDU).  They are independent counters.
+//
+//   3. CRC collision avoidance (do…while loop):
+//      - Master side: if CRC0 of the new master PDU equals CRC0 of the
+//        previous master PDU, increment the master seq and recompute until
+//        they differ.
+//      - Slave side: if CRC0 of the new slave PDU equals CRC0 of the
+//        previous slave PDU, increment the slave seq and recompute until
+//        they differ.
+//
+//   4. The checker (slave checking master PDUs, master checking slave PDUs)
+//      must replicate the same algorithm: try the expected seq, and if the
+//      CRC doesn't verify, increment the seq and retry.
+//
+// See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
+
+/// Increment a sequence number with ETG.5100 wrap-around (1..65535, skip 0).
+///
+///   0     → 1   (initial value)
+///   1     → 2
+///   65534 → 65535
+///   65535 → 1   (wrap, skip 0)
+inline uint16_t incrementSeqNo(uint16_t seq) {
+    return (seq == 65535) ? 1 : static_cast<uint16_t>(seq + 1);
+}
+
+/// Build an FSoE frame with ETG.5100 §8.1.3.4 CRC collision avoidance.
+///
+/// This is a wrapper around buildFSoEFrame that implements the do…while loop:
+/// if the computed CRC0 equals the previous frame's CRC0 (start_crc), the
+/// sequence number is incremented (wrapping 65535 → 1, skipping 0) and the
+/// CRC is recomputed until they differ.
+///
+/// @param out            Output buffer.
+/// @param cmd            Command byte.
+/// @param data           Safe data bytes (may be nullptr if data_len == 0).
+/// @param data_len       Number of data bytes.
+/// @param conn_id        Connection ID.
+/// @param start_crc      Previous frame's CRC0 (CRC inheritance).  Use 0 for
+///                       the very first frame.  This is also the value used
+///                       for collision detection.
+/// @param initial_seq    Initial sequence number to try (must be 1..65535).
+/// @param out_crc0       If non-null, receives the frame's CRC0.
+/// @param out_seq_used   If non-null, receives the sequence number that was
+///                       actually used (after collision avoidance).  The
+///                       caller should update its counter to this value.
+/// @return Frame size in bytes, or 0 on error.
+inline size_t buildFSoEFrameWithCollisionAvoidance(
+    uint8_t* out, uint8_t cmd,
+    const uint8_t* data, size_t data_len,
+    uint16_t conn_id,
+    uint16_t start_crc,
+    uint16_t initial_seq,
+    uint16_t* out_crc0 = nullptr,
+    uint16_t* out_seq_used = nullptr)
+{
+    // Reset frames (data_len == 0) have no CRC, so collision avoidance
+    // doesn't apply.  Just build the frame with the given seq.
+    if (data_len == 0) {
+        if (out_seq_used) *out_seq_used = initial_seq;
+        return buildFSoEFrame(out, cmd, data, data_len, conn_id,
+                              start_crc, initial_seq, out_crc0);
+    }
+
+    uint16_t seq = initial_seq;
+    uint16_t crc0 = 0;
+    size_t frame_size = 0;
+
+    // do…while loop per ETG.5100 §8.1.3.4:
+    //   Compute CRC0 with the current seq.
+    //   If CRC0 == start_crc (previous frame's CRC0), increment seq and retry.
+    //   Continue until CRC0 != start_crc.
+    //
+    // The loop is guaranteed to terminate: with 65535 possible seq values
+    // and only 65536 possible CRC0 values, at most 65535 iterations are
+    // needed (and in practice, collisions are extremely rare).
+    do {
+        frame_size = buildFSoEFrame(out, cmd, data, data_len, conn_id,
+                                    start_crc, seq, &crc0);
+        if (frame_size == 0) {
+            // Build failed — shouldn't happen for valid inputs
+            if (out_seq_used) *out_seq_used = seq;
+            return 0;
+        }
+        if (crc0 != start_crc) {
+            // No collision — accept this frame
+            break;
+        }
+        // CRC collision: increment seq and retry
+        seq = incrementSeqNo(seq);
+    } while (true);
+
+    if (out_crc0) *out_crc0 = crc0;
+    if (out_seq_used) *out_seq_used = seq;
+    return frame_size;
+}
+
+/// Parse an FSoE frame with ETG.5100 §8.1.3.4 CRC collision avoidance.
+///
+/// This is a wrapper around parseFSoEFrame that replicates the collision
+/// avoidance algorithm on the checking side.  The algorithm is:
+///
+///   1. Try the expected seq → compute CRC.
+///   2. If CRC matches:
+///      a. If CRC0 != start_crc (no collision) → accept.
+///      b. If CRC0 == start_crc (collision) → increment seq, go to 1.
+///   3. If CRC doesn't match → FAIL (genuine CRC error).
+///
+/// The key insight: the checker only tries incrementing the seq when the
+/// CRC *matches* but there's a collision.  If the CRC doesn't match at all,
+/// it's a genuine error — the frame is corrupted or the wrong seq was used.
+/// This prevents false positives where a corrupted frame happens to match
+/// a different seq value by chance.
+///
+/// @param frame          Input frame bytes.
+/// @param frame_len      Frame length in bytes.
+/// @param out_cmd        Receives the command byte.
+/// @param out_data       Receives the data bytes (may be nullptr).
+/// @param out_data_len   Receives the data length.
+/// @param out_conn_id    Receives the connection ID.
+/// @param start_crc      Previous frame's CRC0 (for CRC inheritance).
+/// @param initial_seq    Expected sequence number (must be 1..65535).
+/// @param out_crc0       If non-null, receives the frame's CRC0.
+/// @param out_seq_used   If non-null, receives the seq that matched.
+/// @param out_crc_error  If non-null, receives diagnostic detail on failure.
+/// @param max_attempts   Maximum number of collision retries (default 65535).
+/// @return true if all CRCs verify and no collision, false otherwise.
+inline bool parseFSoEFrameWithCollisionAvoidance(
+    const uint8_t* frame, size_t frame_len,
+    uint8_t& out_cmd,
+    uint8_t* out_data, size_t& out_data_len,
+    uint16_t& out_conn_id,
+    uint16_t start_crc,
+    uint16_t initial_seq,
+    uint16_t* out_crc0 = nullptr,
+    uint16_t* out_seq_used = nullptr,
+    CrcErrorDetail* out_crc_error = nullptr,
+    uint32_t max_attempts = 65535)
+{
+    // Reset frames (data_len == 0) have no CRC, so collision avoidance
+    // doesn't apply.  Just parse the frame with the given seq.
+    if (frame_len == MIN_FSOE_FRAME_SIZE) {
+        if (out_seq_used) *out_seq_used = initial_seq;
+        return parseFSoEFrame(frame, frame_len, out_cmd,
+                              out_data, out_data_len, out_conn_id,
+                              start_crc, initial_seq,
+                              out_crc0, out_crc_error);
+    }
+
+    uint16_t seq = initial_seq;
+    CrcErrorDetail crc_error{};
+
+    for (uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
+        uint16_t crc0 = 0;
+        CrcErrorDetail err{};
+        if (parseFSoEFrame(frame, frame_len, out_cmd,
+                           out_data, out_data_len, out_conn_id,
+                           start_crc, seq, &crc0, &err)) {
+            // CRC verified.  Now check for collision: the generator would
+            // have incremented seq if CRC0 == start_crc.  If we see a frame
+            // where CRC0 == start_crc, the generator should have used a
+            // different seq — replicate the collision avoidance.
+            if (crc0 == start_crc) {
+                // Collision — increment seq and retry
+                seq = incrementSeqNo(seq);
+                continue;
+            }
+            // Success: CRC verified and no collision
+            if (out_crc0) *out_crc0 = crc0;
+            if (out_seq_used) *out_seq_used = seq;
+            return true;
+        }
+        // CRC didn't match with this seq.  Per the standard, the checker
+        // only increments seq on collision (CRC matches but equals previous).
+        // A CRC mismatch is a genuine error — don't try other seq values.
+        if (err.valid && !crc_error.valid) {
+            crc_error = err;
+        }
+        break;
+    }
+
+    // CRC verification failed — report the error
+    if (out_crc_error) *out_crc_error = crc_error;
+    if (out_seq_used) *out_seq_used = initial_seq;  // unchanged on failure
+    return false;
+}
+
 } // namespace FSoE::CRC

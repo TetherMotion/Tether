@@ -64,8 +64,8 @@ bool FSoESlave::initialize() {
     txSequence_ = 0;
     last_tx_crc0_ = 0;
     last_rx_crc0_ = 0;
-    tx_seq_no_ = 0;
-    rx_seq_no_ = 0;
+    tx_seq_no_ = 1;   // ETG.5100 §8.1.3.4: sequence starts at 1 (0 is never used)
+    rx_seq_no_ = 1;   // Expected master sequence also starts at 1
     statistics_.resetAll();
 
     // Configure diagnostics
@@ -168,8 +168,8 @@ void FSoESlave::reset() {
     txSequence_ = 0;
     last_tx_crc0_ = 0;
     last_rx_crc0_ = 0;
-    tx_seq_no_ = 0;
-    rx_seq_no_ = 0;
+    tx_seq_no_ = 1;   // ETG.5100 §8.1.3.4: sequence starts at 1 (0 is never used)
+    rx_seq_no_ = 1;   // Expected master sequence also starts at 1
 
     // Apply fail-safe values
     applyFailSafeOutputs();
@@ -435,13 +435,14 @@ size_t FSoESlave::prepareTxFrame(uint8_t* data, size_t maxLen) {
     
     if (frameSize > 0) {
         statistics_.onFrameSent();
-        // Increment TX sequence number for CRC computation — but NOT for
-        // Reset frames.  Reset frames don't advance the CRC chain.
-        if (data[0] != Command::Reset) {
-            tx_seq_no_++;
-        }
+        // Increment TX sequence number for the NEXT frame.
+        // Per ETG.5100 §8.1.3.4, every PDU (including Reset) advances the
+        // sequence counter.  The actual seq used for this frame (after
+        // collision avoidance) was already set by the build* function;
+        // here we advance to the next expected value.
+        tx_seq_no_ = CRC::incrementSeqNo(tx_seq_no_);
     }
-    
+
     return frameSize;
 }
 
@@ -582,9 +583,13 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
         return false;
     }
 
-    // Parse frame with interleaved CRC verification.
-    // Reset frames (cmd=0x2A) reset the CRC chain: they are parsed with
-    // start_crc=0 and do NOT update last_rx_crc0_.
+    // Parse frame with interleaved CRC verification using collision-aware
+    // parsing (ETG.5100 §8.1.3.4).  Reset frames (cmd=0x2A) reset the CRC
+    // chain AND the sequence number:
+    //   - start_crc = 0 (CRC chain reset)
+    //   - seq = 1 (sequence reset to initial value)
+    // After a Reset frame, the next frame uses seq=2.
+    // Non-Reset frames use the current rx_seq_no_ and last_rx_crc0_.
     uint8_t cmd = 0;
     size_t data_len = 0;
     uint16_t conn_id = 0;
@@ -592,12 +597,14 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
 
     const bool is_reset_frame = (data[0] == Command::Reset);
     const uint16_t parse_start_crc = is_reset_frame ? 0 : last_rx_crc0_;
-    const uint16_t parse_seq_no = is_reset_frame ? 0 : rx_seq_no_;
+    const uint16_t parse_seq_no = is_reset_frame ? 1 : rx_seq_no_;
+    uint16_t seq_used = 0;
 
-    if (!CRC::parseFSoEFrame(data, len, cmd, nullptr, data_len, conn_id,
-                             parse_start_crc, parse_seq_no,
-                             is_reset_frame ? nullptr : &last_rx_crc0_,
-                             &crc_error_detail)) {
+    if (!CRC::parseFSoEFrameWithCollisionAvoidance(
+            data, len, cmd, nullptr, data_len, conn_id,
+            parse_start_crc, parse_seq_no,
+            is_reset_frame ? nullptr : &last_rx_crc0_,
+            &seq_used, &crc_error_detail)) {
         FSoEErrorDetail detail;
         if (crc_error_detail.valid) {
             detail.crc_valid = true;
@@ -630,11 +637,10 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
         }
     }
 
-    // Increment RX sequence number for CRC computation — but NOT for
-    // Reset frames.  Reset frames don't advance the CRC chain.
-    if (!is_reset_frame) {
-        rx_seq_no_++;
-    }
+    // Update the expected RX sequence number to the value that matched
+    // (after collision avoidance).  The next expected RX seq is the
+    // incremented value.
+    rx_seq_no_ = CRC::incrementSeqNo(seq_used);
 
     return true;
 }
@@ -654,8 +660,9 @@ bool FSoESlave::validateCRC(const uint8_t* data, size_t len) {
     uint8_t cmd = 0;
     size_t data_len = 0;
     uint16_t conn_id = 0;
-    return CRC::parseFSoEFrame(data, len, cmd, nullptr, data_len, conn_id,
-                               last_rx_crc0_, rx_seq_no_);
+    return CRC::parseFSoEFrameWithCollisionAvoidance(
+        data, len, cmd, nullptr, data_len, conn_id,
+        last_rx_crc0_, rx_seq_no_);
 }
 
 bool FSoESlave::validateSequence(uint8_t seqNum) {
@@ -717,13 +724,27 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
     // Only reset CRC inheritance state on a Reset command (0x2A).
     // A Session command (0x4E) continues the CRC chain — resetting would
     // desynchronize the slave from the master.
+    //
+    // For a Reset command:
+    //   - Reset the CRC chain (last_tx_crc0_ = 0, last_rx_crc0_ = 0)
+    //   - Reset tx_seq_no_ to 1 (the slave's TX sequence starts fresh)
+    //   - Do NOT reset rx_seq_no_ — it was already advanced by validateFrame
+    //     (which used seq=1 for the Reset frame and set rx_seq_no_ to 2)
+    //
+    // This handles both cases:
+    //   1. Slave in Reset state receiving Reset (normal handshake start):
+    //      tx_seq_no_ was already 1, no change.
+    //   2. Slave in Data/Connection/Parameter state receiving Reset (recovery):
+    //      tx_seq_no_ was at some advanced value, needs to be reset to 1
+    //      so the slave's next frame (Session response) uses seq=1, matching
+    //      the master's expected rx_seq_no_=1.
     if (cmd == Command::Reset) {
         expectedSequence_ = 0;
         txSequence_ = 0;
         last_tx_crc0_ = 0;
         last_rx_crc0_ = 0;
-        tx_seq_no_ = 0;
-        rx_seq_no_ = 0;
+        tx_seq_no_ = 1;  // Reset TX sequence for new connection
+        // rx_seq_no_ is NOT reset — validateFrame already advanced it to 2
     }
 
     // Clear error state
@@ -1010,16 +1031,26 @@ size_t FSoESlave::buildResetResponse(uint8_t* data, size_t maxLen) {
     // SafeData[0] = 0 (no error code — acknowledgement).
     // The frame is always fsoeFrameSize(safeInputSize) bytes.
     //
-    // Reset frames do NOT update the CRC chain.  The CRC is computed from
-    // start_crc=0, and last_tx_crc0_ is NOT updated.
+    // Reset frames reset the CRC chain AND the sequence number:
+    //   - start_crc = 0 (CRC chain reset)
+    //   - seq = 1 (sequence reset to initial value, per ETG.5100 §8.1.3.4)
+    // After the Reset frame, the next frame uses seq=2.
+    // last_tx_crc0_ is NOT updated (stays at 0 for the next frame).
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Reset, payload, config_.safeInputSize,
-                               config_.connectionId,
-                               0,  // start_crc = 0 (Reset resets CRC chain)
-                               0,  // seq_no = 0 (Reset resets sequence)
-                               nullptr);  // don't update CRC chain
+    uint16_t seq_used = 0;
+    size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
+        data, Command::Reset, payload, config_.safeInputSize,
+        config_.connectionId,
+        0,  // start_crc = 0 (Reset resets CRC chain)
+        1,  // seq = 1 (Reset resets sequence to initial value)
+        nullptr,  // don't update CRC chain (Reset resets it)
+        &seq_used);
+    // Set tx_seq_no_ to the seq used (1, or higher if collision avoidance
+    // incremented it).  prepareTxFrame will increment it to 2 for the next frame.
+    tx_seq_no_ = seq_used;
+    return result;
 }
 
 size_t FSoESlave::buildSessionResponse(uint8_t* data, size_t maxLen) {
@@ -1030,9 +1061,13 @@ size_t FSoESlave::buildSessionResponse(uint8_t* data, size_t maxLen) {
     payload[1] = (sessionId_ >> 8) & 0xFF;
     size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Session, payload, config_.safeInputSize,
-                               config_.connectionId,
-                               last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
+    uint16_t seq_used = 0;
+    size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
+        data, Command::Session, payload, config_.safeInputSize,
+        config_.connectionId,
+        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+    tx_seq_no_ = seq_used;
+    return result;
 }
 
 size_t FSoESlave::buildConnectionResponse(uint8_t* data, size_t maxLen) {
@@ -1045,9 +1080,13 @@ size_t FSoESlave::buildConnectionResponse(uint8_t* data, size_t maxLen) {
     payload[3] = 0;  // Reserved
     size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Connection, payload, config_.safeInputSize,
-                               currentConnectionId_,
-                               last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
+    uint16_t seq_used = 0;
+    size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
+        data, Command::Connection, payload, config_.safeInputSize,
+        currentConnectionId_,
+        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+    tx_seq_no_ = seq_used;
+    return result;
 }
 
 size_t FSoESlave::buildParameterResponse(uint8_t* data, size_t maxLen) {
@@ -1056,18 +1095,26 @@ size_t FSoESlave::buildParameterResponse(uint8_t* data, size_t maxLen) {
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};  // Parameter ACK
     size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::Parameter, payload, config_.safeInputSize,
-                               currentConnectionId_,
-                               last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
+    uint16_t seq_used = 0;
+    size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
+        data, Command::Parameter, payload, config_.safeInputSize,
+        currentConnectionId_,
+        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+    tx_seq_no_ = seq_used;
+    return result;
 }
 
 size_t FSoESlave::buildDataResponse(uint8_t* data, size_t maxLen) {
     size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::ProcessData,
-                               safeInputs_.data(), config_.safeInputSize,
-                               currentConnectionId_,
-                               last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
+    uint16_t seq_used = 0;
+    size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
+        data, Command::ProcessData,
+        safeInputs_.data(), config_.safeInputSize,
+        currentConnectionId_,
+        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+    tx_seq_no_ = seq_used;
+    return result;
 }
 
 size_t FSoESlave::buildFailSafeResponse(uint8_t* data, size_t maxLen) {
@@ -1090,9 +1137,13 @@ size_t FSoESlave::buildFailSafeResponse(uint8_t* data, size_t maxLen) {
 
     size_t needed = CRC::fsoeFrameSize(payload_len);
     if (maxLen < needed) return 0;
-    return CRC::buildFSoEFrame(data, Command::FailSafeData,
-                               payload, payload_len, currentConnectionId_,
-                               last_tx_crc0_, tx_seq_no_, &last_tx_crc0_);
+    uint16_t seq_used = 0;
+    size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
+        data, Command::FailSafeData,
+        payload, payload_len, currentConnectionId_,
+        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+    tx_seq_no_ = seq_used;
+    return result;
 }
 
 // ============================================================================

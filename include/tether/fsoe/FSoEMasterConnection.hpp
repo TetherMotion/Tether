@@ -256,16 +256,19 @@ private:
     //    CRC chain would break.
     //    See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
     //
-    // 2. Sequence number: a counter shared between master and slave, used in
-    //    the CRC computation but NOT transmitted in the frame.  Both sides
-    //    must agree on the sequence number for CRC verification to succeed.
+    // 2. Sequence number (ETG.5100 §8.1.3.4): a virtual 16-bit counter folded
+    //    into the CRC but NOT transmitted.  Range is 1..65535 (0 is never
+    //    used; after 65535 it wraps to 1).  The master and slave each maintain
+    //    their own independent counter.  CRC collision avoidance: if the new
+    //    CRC0 equals the previous CRC0, the seq is incremented until they
+    //    differ.  The checker replicates this algorithm.
     //
     // The master tracks separate CRC and sequence state for TX (frames it
     // sends) and RX (frames it receives).
     uint16_t last_tx_crc0_ = 0;   ///< CRC0 of the last frame we sent (startCrc for next TX)
     uint16_t last_rx_crc0_ = 0;   ///< CRC0 of the last frame we received (startCrc for next RX)
-    uint16_t tx_seq_no_ = 0;      ///< TX sequence number (incremented each TX frame)
-    uint16_t rx_seq_no_ = 0;      ///< Expected RX sequence number
+    uint16_t tx_seq_no_ = 1;      ///< TX (master) sequence number (1..65535, never 0)
+    uint16_t rx_seq_no_ = 1;      ///< Expected RX (slave) sequence number (1..65535, never 0)
 
     // Legacy sequence tracking (kept for API compatibility, no longer used
     // for actual sequence validation — see tx_seq_no_ / rx_seq_no_ above)

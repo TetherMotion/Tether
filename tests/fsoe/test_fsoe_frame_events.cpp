@@ -224,10 +224,13 @@ TEST(FSoEFrameEvents, RxEventFiresOnProcessRxFrame) {
 
     // Build a Session response frame (slave acknowledging the Reset).
     // The master in Reset state accepts this and transitions to Session.
+    // Use the master's expected RX CRC state (seq=1, start_crc=0 after init).
     uint8_t payload[] = {0x34, 0x12};
     uint8_t frame[64];
     const size_t frame_len = CRC::buildFSoEFrame(frame, Command::Session,
-                                                  payload, 2, 0x1234);
+                                                  payload, 2, 0x1234,
+                                                  conn.getRxLastCrc0(),
+                                                  conn.getRxSeqNo());
     ASSERT_TRUE(conn.processRxFrame(frame, frame_len));
 
     ASSERT_TRUE(captured);
@@ -258,10 +261,13 @@ TEST(FSoEFrameEvents, NoListenersNoAllocation) {
     EXPECT_EQ(conn.getStats().frames_sent, 1u);
 
     // Build a Session response to feed back.
+    // Use the master's expected RX CRC state (seq=1, start_crc=0 after init).
     uint8_t payload[] = {0x34, 0x12};
     uint8_t frame[64];
     const size_t frame_len = CRC::buildFSoEFrame(frame, Command::Session,
-                                                  payload, 2, 0x1234);
+                                                  payload, 2, 0x1234,
+                                                  conn.getRxLastCrc0(),
+                                                  conn.getRxSeqNo());
     ASSERT_TRUE(conn.processRxFrame(frame, frame_len));
     EXPECT_EQ(conn.getStats().frames_received, 1u);
 }
@@ -279,10 +285,14 @@ TEST(FSoEFrameEvents, RxEventFiresEvenForInvalidFrame) {
 
     // A frame with a corrupted CRC — will be rejected, but the
     // listener should still see the bytes.
+    // Use the master's expected RX CRC state so the frame would be valid
+    // without the corruption.
     uint8_t payload[] = {0x34, 0x12};
     uint8_t frame[64];
     const size_t frame_len = CRC::buildFSoEFrame(frame, Command::Session,
-                                                  payload, 2, 0x1234);
+                                                  payload, 2, 0x1234,
+                                                  conn.getRxLastCrc0(),
+                                                  conn.getRxSeqNo());
     // Corrupt the CRC0 bytes (offset 3-4 in a 7-byte Session frame)
     frame[3] ^= 0xFF;
     frame[4] ^= 0xFF;
@@ -341,10 +351,13 @@ TEST(FSoEFrameEvents, TxAndRxAreIndependent) {
     EXPECT_EQ(rx_calls, 0);
 
     // RX only (Session response)
+    // Use the master's expected RX CRC state (seq=1, start_crc=0 after init).
     uint8_t payload[] = {0x34, 0x12};
     uint8_t frame[64];
     const size_t frame_len = CRC::buildFSoEFrame(frame, Command::Session,
-                                                  payload, 2, 0x1234);
+                                                  payload, 2, 0x1234,
+                                                  conn.getRxLastCrc0(),
+                                                  conn.getRxSeqNo());
     ASSERT_TRUE(conn.processRxFrame(frame, frame_len));
     EXPECT_EQ(tx_calls, 1);
     EXPECT_EQ(rx_calls, 1);

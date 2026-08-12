@@ -474,10 +474,11 @@ private:
 
     // FSoE CRC inheritance and sequence number tracking.
     // See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
+    // ETG.5100 §8.1.3.4: sequence numbers are 1..65535 (0 is never used).
     uint16_t last_tx_crc0_ = 0;   ///< CRC0 of the last frame we sent (startCrc for next TX)
     uint16_t last_rx_crc0_ = 0;   ///< CRC0 of the last frame we received (startCrc for next RX)
-    uint16_t tx_seq_no_ = 0;      ///< TX sequence number (for CRC computation)
-    uint16_t rx_seq_no_ = 0;      ///< Expected RX sequence number
+    uint16_t tx_seq_no_ = 1;      ///< TX (slave) sequence number (1..65535, never 0)
+    uint16_t rx_seq_no_ = 1;      ///< Expected RX (master) sequence number (1..65535, never 0)
     
     // Timing
     uint64_t lastValidFrameMs_ = 0;

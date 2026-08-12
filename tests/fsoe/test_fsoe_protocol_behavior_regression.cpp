@@ -541,10 +541,13 @@ TEST_F(FSoEProtocolBehaviorTest, StateChangeCallbackFiresOnTransition) {
     });
 
     // Trigger a state transition by sending Session command
+    // Use the slave's RX CRC state (seq=1, start_crc=0 after init).
     uint8_t payload[] = {0x01, 0x00};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::Session,
-                                            payload, 2, 0x1234);
+                                            payload, 2, 0x1234,
+                                            slave->getRxLastCrc0(),
+                                            slave->getRxSeqNo());
     slave->processRxFrame(frame, frame_len);
 
     EXPECT_TRUE(callback_fired);

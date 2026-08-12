@@ -119,6 +119,10 @@ TEST(FSoESlaveBufferOverflowTest, FailSafeResponseWithMaxInputSize) {
     slave.initialize();
 
     // Trigger fail-safe then prepare TX — buildFailSafeResponse writes 18 bytes
+    // Capture the slave's TX CRC state before prepareTxFrame, since
+    // prepareTxFrame updates it (CRC inheritance + seq increment).
+    const uint16_t saved_tx_crc0 = slave.getTxLastCrc0();
+    const uint16_t saved_tx_seq = slave.getTxSeqNo();
     slave.triggerFailSafe(ErrorCode::WatchdogError);
 
     uint8_t tx[64];
@@ -126,11 +130,13 @@ TEST(FSoESlaveBufferOverflowTest, FailSafeResponseWithMaxInputSize) {
     EXPECT_GT(tx_len, 0u);
 
     // Verify the frame can be parsed back (18-byte payload)
+    // Use the slave's TX CRC state that was used to build the frame.
     uint8_t cmd = 0;
     uint8_t data[18] = {0};
     size_t data_len = 0;
     uint16_t conn_id = 0;
-    EXPECT_TRUE(CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id));
+    EXPECT_TRUE(CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id,
+                                    saved_tx_crc0, saved_tx_seq));
     EXPECT_EQ(data_len, 18u);
     EXPECT_EQ(cmd, Command::FailSafeData);
 }
@@ -308,8 +314,9 @@ TEST(FSoESlaveFailSafeSafetyTest, FailSafeClearedByReset) {
     slave.triggerFailSafe(ErrorCode::ApplicationError);
     EXPECT_TRUE(slave.isFailSafe());
 
-    // Send Reset command — Reset frames use start_crc=0 and seq_no=0
-    // (Reset resets the CRC chain).  The frame is the full fixed size.
+    // Send Reset command — Reset frames use start_crc=0 and seq_no=1
+    // (Reset resets the CRC chain and sequence to 1, per ETG.5100 §8.1.3.4).
+    // The frame is the full fixed size.
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     payload[0] = 0x01;  // error code
     uint8_t frame[64];
@@ -317,7 +324,7 @@ TEST(FSoESlaveFailSafeSafetyTest, FailSafeClearedByReset) {
                                             payload, 4u,
                                             0x1234,
                                             0,  // start_crc = 0 (Reset resets CRC chain)
-                                            0);  // seq_no = 0 (Reset resets sequence)
+                                            1);  // seq_no = 1 (Reset resets sequence to 1)
     slave.processRxFrame(frame, frame_len);
 
     EXPECT_FALSE(slave.isFailSafe());
@@ -334,10 +341,13 @@ TEST(FSoESlaveConnectionValidationTest, ShortConnectionFrameRejected) {
     slave.initialize();
 
     // Advance to Session state first
+    // Use the slave's RX CRC state (seq=1, start_crc=0 after init).
     uint8_t session_payload[] = {0x01, 0x00};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::Session,
-                                            session_payload, 2, 0x1234);
+                                            session_payload, 2, 0x1234,
+                                            slave.getRxLastCrc0(),
+                                            slave.getRxSeqNo());
     slave.processRxFrame(frame, frame_len);
     ASSERT_EQ(slave.getState(), ConnectionState::Session);
 
@@ -363,10 +373,13 @@ TEST(FSoESlaveConnectionValidationTest, FullConnectionFrameAccepted) {
     slave.initialize();
 
     // Advance to Session
+    // Use the slave's RX CRC state (seq=1, start_crc=0 after init).
     uint8_t session_payload[] = {0x01, 0x00};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::Session,
-                                            session_payload, 2, 0x1234);
+                                            session_payload, 2, 0x1234,
+                                            slave.getRxLastCrc0(),
+                                            slave.getRxSeqNo());
     slave.processRxFrame(frame, frame_len);
 
     // Send full 4-byte Connection frame
@@ -460,6 +473,9 @@ TEST(FSoESlaveFailSafeResponseTest, FailSafeResponseWithMaxInputSizeNoOverflow) 
     FSoESlave slave(cfg);
     slave.initialize();
 
+    // Capture TX CRC state before prepareTxFrame updates it
+    const uint16_t saved_tx_crc0 = slave.getTxLastCrc0();
+    const uint16_t saved_tx_seq = slave.getTxSeqNo();
     slave.triggerFailSafe(ErrorCode::CRCError);
 
     uint8_t tx[64];
@@ -467,11 +483,13 @@ TEST(FSoESlaveFailSafeResponseTest, FailSafeResponseWithMaxInputSizeNoOverflow) 
     EXPECT_GT(tx_len, 0u);
 
     // Parse the response and verify error code at offset 16
+    // Use the slave's TX CRC state that was used to build the frame.
     uint8_t cmd = 0;
     uint8_t data[18] = {0};
     size_t data_len = 0;
     uint16_t conn_id = 0;
-    ASSERT_TRUE(CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id));
+    ASSERT_TRUE(CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id,
+                                    saved_tx_crc0, saved_tx_seq));
     EXPECT_EQ(data_len, 18u);
     EXPECT_EQ(cmd, Command::FailSafeData);
 
@@ -486,6 +504,10 @@ TEST(FSoESlaveFailSafeResponseTest, FailSafeResponseWithInputSize15) {
     FSoESlave slave(cfg);
     slave.initialize();
 
+    // Capture TX CRC state before prepareTxFrame updates it
+    const uint16_t saved_tx_crc0 = slave.getTxLastCrc0();
+    const uint16_t saved_tx_seq = slave.getTxSeqNo();
+
     slave.triggerFailSafe(ErrorCode::WatchdogError);
 
     uint8_t tx[64];
@@ -496,7 +518,8 @@ TEST(FSoESlaveFailSafeResponseTest, FailSafeResponseWithInputSize15) {
     uint8_t data[18] = {0};
     size_t data_len = 0;
     uint16_t conn_id = 0;
-    ASSERT_TRUE(CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id));
+    ASSERT_TRUE(CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id,
+                                    saved_tx_crc0, saved_tx_seq));
     EXPECT_EQ(data_len, 17u);
 
     // Error code at offset 15
@@ -517,10 +540,13 @@ TEST(FSoESlaveFailSafeDataAcceptanceTest, FailSafeDataInSessionState) {
     ASSERT_LE(slave.getState(), ConnectionState::Session);
 
     // Send FailSafeData command
+    // Use the slave's RX CRC state (seq=1, start_crc=0 after init).
     uint8_t payload[] = {0xDE, 0xAD, 0xBE, 0xEF, 0x08, 0x00};  // 4 inputs + error code
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::FailSafeData,
-                                            payload, 6, 0x1234);
+                                            payload, 6, 0x1234,
+                                            slave.getRxLastCrc0(),
+                                            slave.getRxSeqNo());
     bool ok = slave.processRxFrame(frame, frame_len);
     EXPECT_TRUE(ok);
     EXPECT_TRUE(slave.isFailSafe());
