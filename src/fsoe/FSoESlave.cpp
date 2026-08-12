@@ -59,6 +59,8 @@ bool FSoESlave::initialize() {
     failSafeActive_ = false;
     dataValid_ = false;
     sessionId_ = 0;
+    sessionOctetIdx_ = 0;
+    sessionOctetAdvancePending_ = false;
     currentConnectionId_ = 0;
     expectedSequence_ = 0;
     txSequence_ = 0;
@@ -165,6 +167,8 @@ void FSoESlave::reset() {
     failSafeActive_ = false;
     dataValid_ = false;
     sessionId_ = 0;
+    sessionOctetIdx_ = 0;
+    sessionOctetAdvancePending_ = false;
     currentConnectionId_ = 0;
     expectedSequence_ = 0;
     txSequence_ = 0;
@@ -729,10 +733,18 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
         return false;
     }
 
-    // Validate connection ID (after connection is established)
-    if (state_ == ConnectionState::Connection ||
-        state_ == ConnectionState::Parameter ||
-        state_ == ConnectionState::Data) {
+    // Validate connection ID (after connection is established).
+    // ETG.5100 §8.2.2.2: Reset frames ALWAYS have Conn_Id=0 — the
+    // connection has not been established (or is being reset), so there
+    // is no Connection ID to check.  Skip validation for Reset frames
+    // in any state, so the slave can accept a master-initiated reset
+    // from Connection/Parameter/Data states without rejecting it as
+    // an InvalidConnID error.
+    // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
+    if (cmd != Command::Reset &&
+        (state_ == ConnectionState::Connection ||
+         state_ == ConnectionState::Parameter ||
+         state_ == ConnectionState::Data)) {
         if (!validateConnectionId(conn_id)) {
             return false;
         }
@@ -812,19 +824,21 @@ uint16_t FSoESlave::calculateCRC(const uint8_t* data, size_t len) {
 // ============================================================================
 
 void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
-    // Extract session ID from safe data (CRC already verified in validateFrame)
+    // ETG.5100 S (D) V1.2.0, §8.2.2.3:
+    // The slave does NOT echo the master's Session ID.  Instead, it
+    // generates its own independent random Slave Session ID and sends
+    // that back in its Session response.  The master's Session ID is
+    // received but not checked (it has no safety relevance).
+    // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
     uint8_t cmd = 0;
     uint8_t frame_data[CRC::MAX_PARSE_DATA_SIZE] = {0};
     size_t data_len = 0;
     uint16_t conn_id = 0;
 
-    if (CRC::extractFSoEFrame(data, len, cmd, frame_data, data_len, conn_id)) {
-        // Session ID is in the first 2 bytes of safe data
-        if (data_len >= 2) {
-            sessionId_ = static_cast<uint16_t>(frame_data[0]) |
-                         (static_cast<uint16_t>(frame_data[1]) << 8);
-        }
-    }
+    // Extract the frame to determine the command (CRC already verified).
+    // The master's Session ID bytes are intentionally NOT stored — the
+    // slave uses its own independently generated Session ID.
+    (void)CRC::extractFSoEFrame(data, len, cmd, frame_data, data_len, conn_id);
 
     // Only reset CRC inheritance state on a Reset command (0x2A).
     // A Session command (0x4E) continues the CRC chain — resetting would
@@ -857,11 +871,29 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
         cached_tx_response_.clear();   // Clear TX response cache
         cached_tx_state_ = 0xFF;
         tx_cache_valid_ = false;
+        // Generate a fresh Slave Session ID on Reset.
+        // ETG.5100 §8.2.2.3: the slave generates a random Session ID once
+        // per connection attempt.  Must be non-zero (0 is not a valid ID).
+        sessionId_ = static_cast<uint16_t>(rng_() & 0xFFFF);
+        if (sessionId_ == 0) sessionId_ = 1;
+        sessionOctetIdx_ = 0;
     }
 
     // Clear error state
     lastError_ = ErrorCode::NoError;
     failSafeActive_ = false;
+
+    // For 1-octet safety data, defer advancing the Session ID octet
+    // index until AFTER the response is built.  The first Session command
+    // (from Reset state) uses index 0 (low byte); the second Session
+    // command (from Session state) sets a pending-advance flag so the
+    // NEXT buildSessionResponse call sends the high byte (index 1).
+    // ETG.5100 §8.2.2.3.
+    // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
+    if (cmd == Command::Session && config_.safeInputSize < 2 &&
+        state_.load() == ConnectionState::Session) {
+        sessionOctetAdvancePending_ = true;
+    }
 
     transitionTo(ConnectionState::Session);
 
@@ -1128,9 +1160,12 @@ void FSoESlave::processData(const uint8_t* data, size_t len) {
 // ============================================================================
 
 size_t FSoESlave::buildResetResponse(uint8_t* data, size_t maxLen) {
+    // ETG.5100 S (D) V1.2.0, §8.2.2.2:
     // Reset response: full PDO-size frame with all-zero safety data.
     // SafeData[0] = 0 (no error code — acknowledgement).
-    // The frame is always fsoeFrameSize(safeInputSize) bytes.
+    // Conn_Id is unused and set to 0 (the connection has not been
+    // established yet — there is no Connection ID to check).
+    // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
     //
     // The slave's Reset response uses seq = initialSeqNo + 1 (the slave
     // increments the seq after receiving the master's Reset which used
@@ -1144,7 +1179,7 @@ size_t FSoESlave::buildResetResponse(uint8_t* data, size_t maxLen) {
     uint16_t seq_used = 0;
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Reset, payload, config_.safeInputSize,
-        config_.connectionId,
+        0,  // Conn_Id = 0 in Reset state (ETG.5100 §8.2.2.2)
         0,  // start_crc = 0 (Reset resets CRC chain)
         reset_resp_seq,
         nullptr,  // don't update CRC chain (Reset resets it)
@@ -1157,20 +1192,44 @@ size_t FSoESlave::buildResetResponse(uint8_t* data, size_t maxLen) {
 }
 
 size_t FSoESlave::buildSessionResponse(uint8_t* data, size_t maxLen) {
-    // Session response: full PDO-size frame with session_id in SafeData[0-1].
-    // Remaining data bytes are zero-padded to safeInputSize.
+    // ETG.5100 S (D) V1.2.0, §8.2.2.3, Table 14:
+    // Session response carries the slave's OWN random Session ID in
+    // SafeData[0..1].  All other SafeData octets are 0.  Conn_Id is
+    // unused and set to 0 (the connection has not been established yet).
+    // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
-    payload[0] = sessionId_ & 0xFF;
-    payload[1] = (sessionId_ >> 8) & 0xFF;
+    if (config_.safeInputSize >= 2) {
+        // Safety data length >= 2: both Session ID octets fit in one PDU.
+        payload[0] = sessionId_ & 0xFF;
+        payload[1] = (sessionId_ >> 8) & 0xFF;
+    } else {
+        // Safety data length == 1: transfer Session ID in two successive
+        // PDUs (low byte first, then high byte).  ETG.5100 §8.2.2.3.
+        payload[0] = (sessionOctetIdx_ == 0)
+            ? (sessionId_ & 0xFF)
+            : ((sessionId_ >> 8) & 0xFF);
+    }
     size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
     uint16_t seq_used = 0;
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Session, payload, config_.safeInputSize,
-        config_.connectionId,
+        0,  // Conn_Id = 0 in Session state (ETG.5100 §8.2.2.3)
         last_rx_crc0_, rx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
+
+    // NOTE: sessionOctetIdx_ is advanced via a deferred flag set in
+    // processSessionReset().  This ensures the slave sends the correct
+    // byte for the CURRENT Session command, then advances for the NEXT
+    // one.  The flag is cleared after the first build so subsequent
+    // cached rebuilds don't advance the index again.
+
+    if (sessionOctetAdvancePending_) {
+        sessionOctetIdx_ = (sessionOctetIdx_ + 1) & 1;
+        sessionOctetAdvancePending_ = false;
+    }
+
     return result;
 }
 

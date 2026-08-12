@@ -145,6 +145,8 @@ bool FSoEMasterConnection::resetConnection()
     status_.error_code = ErrorCode::NoError;
     status_.data_valid = false;
     status_.fail_safe_active = false;
+    status_.slave_session_id = 0;
+    session_octet_idx_ = 0;
     rx_sequence_ = 0x0F;  // Wrap so first expected RX sequence is 0
     tx_sequence_ = 0;
     last_tx_crc0_ = 0;   // CRC inheritance starts at 0
@@ -175,10 +177,13 @@ bool FSoEMasterConnection::requestSessionReset()
     if (!initialized_) return false;
 
     // Generate non-predictable session ID
+    // ETG.5100 §8.2.2.3: the master generates a random Session ID once
+    // per connection attempt.  Must be non-zero (0 is not a valid ID).
     status_.session_id = static_cast<uint16_t>(rng_() & 0xFFFF);
     if (status_.session_id == 0) {
         status_.session_id = 1;
     }
+    session_octet_idx_ = 0;
 
     transitionTo(ConnectionState::Session);
     return true;
@@ -892,17 +897,67 @@ void FSoEMasterConnection::handleResetState(uint8_t cmd, const uint8_t* data, si
 
 void FSoEMasterConnection::handleSessionState(uint8_t cmd, const uint8_t* data, size_t data_len)
 {
-    (void)data;
-    (void)data_len;
-
+    // ETG.5100 S (D) V1.2.0, §8.2.2.3:
+    // The slave responds with its OWN Slave Session ID in SafeData[0..1].
+    // The master stores this for connection instance identification.
+    // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
     if (cmd == Command::Reset) {
         trace("RX Reset(0x2A): slave requested reset in Session state, resetting connection");
         resetConnection();
         return;
     }
     if (cmd == Command::Session) {
-        trace("RX Session(0x4E): slave accepted session, moving to Connection");
-        transitionTo(ConnectionState::Connection);
+        // Extract the Slave Session ID from the response.
+        // For safety data >= 2 octets, both bytes are in SafeData[0..1].
+        // For 1-octet safety data, only one byte is present per cycle
+        // (low byte on the first response, high byte on the second).
+        // For 0-octet safety data, no Session ID can be transferred —
+        // the frame is just [CMD][ConnID] with no data payload.  The
+        // master transitions to Connection immediately (the Session ID
+        // exchange is skipped, which is acceptable since the Session ID
+        // has no safety relevance per ETG.5100 §8.2.2.3).
+        if (config_.input_size == 0) {
+            trace("RX Session(0x4E): 0-octet safety data, moving to Connection");
+            session_octet_idx_ = 0;
+            transitionTo(ConnectionState::Connection);
+        } else if (config_.input_size >= 2) {
+            if (data && data_len >= 2) {
+                status_.slave_session_id =
+                    static_cast<uint16_t>(data[0]) |
+                    (static_cast<uint16_t>(data[1]) << 8);
+            }
+            trace("RX Session(0x4E): slave session_id=0x%04X, moving to Connection",
+                  status_.slave_session_id);
+            session_octet_idx_ = 0;
+            transitionTo(ConnectionState::Connection);
+        } else {
+            // 1-octet safety data: two cycles needed for the full 16-bit ID.
+            // ETG.5100 §8.2.2.3: the 16-bit Session ID is transferred in
+            // two successive PDUs (low byte first, then high byte).
+            // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
+            if (data && data_len >= 1) {
+                if (session_octet_idx_ == 0) {
+                    status_.slave_session_id =
+                        static_cast<uint16_t>(data[0]);
+                    session_octet_idx_ = 1;
+                    trace("RX Session(0x4E): slave session_id low byte=0x%02X, "
+                          "waiting for high byte", data[0]);
+                    // Stay in Session state — need the high byte next.
+                    // Invalidate TX cache so the master builds a new frame
+                    // with advanced CRCs.  This ensures the slave sees a
+                    // new (non-duplicate) frame and advances its own
+                    // sessionOctetIdx_ to send the high byte.
+                    tx_cache_dirty_ = true;
+                } else {
+                    status_.slave_session_id |=
+                        (static_cast<uint16_t>(data[0]) << 8);
+                    trace("RX Session(0x4E): slave session_id=0x%04X, "
+                          "moving to Connection", status_.slave_session_id);
+                    session_octet_idx_ = 0;
+                    transitionTo(ConnectionState::Connection);
+                }
+            }
+        }
     } else {
         trace("RX %s: unexpected in Session state (expected Session)",
               commandName(cmd));
@@ -1123,11 +1178,10 @@ size_t FSoEMasterConnection::buildResetFrame(uint8_t* data, size_t max_len)
     // Reset frame: full PDO-size frame with error code in SafeData[0].
     //
     // The FSoE frame is ALWAYS fixed-length (= fsoeFrameSize(output_size)).
-    // ConnID is always at the end of the frame.  The Reset frame has:
-    //   SafeData[0] = error code (0x00 for local reset/acknowledgement)
-    //   SafeData[1..output_size-1] = 0 (padding)
-    //   CRCs computed over each 2-byte data chunk (from start_crc=0)
-    //   ConnID at the last 2 bytes
+    // ETG.5100 S (D) V1.2.0, §8.2.2.2:
+    // Conn_Id is unused and set to 0 in Reset state — the connection has
+    // not been established yet, so there is no Connection ID to check.
+    // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
     //
     // Reset frames reset the CRC chain AND the sequence number:
     //   - start_crc = 0 (CRC chain reset)
@@ -1141,7 +1195,7 @@ size_t FSoEMasterConnection::buildResetFrame(uint8_t* data, size_t max_len)
     uint16_t seq_used = 0;
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Reset, payload, config_.output_size,
-        config_.connection_id,
+        0,  // Conn_Id = 0 in Reset state (ETG.5100 §8.2.2.2)
         0,  // start_crc = 0 (Reset resets CRC chain)
         config_.initial_seq_no,
         nullptr,  // don't update CRC chain (Reset resets it)
@@ -1153,17 +1207,29 @@ size_t FSoEMasterConnection::buildResetFrame(uint8_t* data, size_t max_len)
 
 size_t FSoEMasterConnection::buildSessionResetFrame(uint8_t* data, size_t max_len)
 {
-    // Session frame: full PDO-size frame with session_id in SafeData[0-1].
-    // Remaining data bytes are zero-padded to output_size.
+    // ETG.5100 S (D) V1.2.0, §8.2.2.3, Table 13:
+    // Session frame carries the Master Session ID in SafeData[0..1].
+    // All other SafeData octets are 0.  Conn_Id is unused and set to 0
+    // (the connection has not been established yet).
+    // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
-    payload[0] = static_cast<uint8_t>(status_.session_id & 0xFF);
-    payload[1] = static_cast<uint8_t>((status_.session_id >> 8) & 0xFF);
+    if (config_.output_size >= 2) {
+        // Safety data length >= 2: both Session ID octets fit in one PDU.
+        payload[0] = static_cast<uint8_t>(status_.session_id & 0xFF);
+        payload[1] = static_cast<uint8_t>((status_.session_id >> 8) & 0xFF);
+    } else {
+        // Safety data length == 1: transfer Session ID in two successive
+        // PDUs (low byte first, then high byte).  ETG.5100 §8.2.2.3.
+        payload[0] = (session_octet_idx_ == 0)
+            ? static_cast<uint8_t>(status_.session_id & 0xFF)
+            : static_cast<uint8_t>((status_.session_id >> 8) & 0xFF);
+    }
     size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
     uint16_t seq_used = 0;
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Session, payload, config_.output_size,
-        config_.connection_id,
+        0,  // Conn_Id = 0 in Session state (ETG.5100 §8.2.2.3)
         last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
