@@ -86,8 +86,8 @@ bool FSoEMasterConnection::initialize()
     tx_sequence_ = 0;
     last_tx_crc0_ = 0;
     last_rx_crc0_ = 0;
-    tx_seq_no_ = 1;   // ETG.5100 §8.1.3.4: sequence starts at 1 (0 is never used)
-    rx_seq_no_ = 1;   // Expected slave sequence also starts at 1
+    tx_seq_no_ = config_.initial_seq_no;
+    rx_seq_no_ = config_.initial_seq_no;
     current_param_index_ = 0;
     parameter_crc_ = 0;
     fail_safe_entered_ms_ = 0;
@@ -145,8 +145,8 @@ bool FSoEMasterConnection::resetConnection()
     tx_sequence_ = 0;
     last_tx_crc0_ = 0;   // CRC inheritance starts at 0
     last_rx_crc0_ = 0;
-    tx_seq_no_ = 1;   // ETG.5100 §8.1.3.4: sequence starts at 1 (0 is never used)
-    rx_seq_no_ = 1;   // Expected slave sequence also starts at 1
+    tx_seq_no_ = config_.initial_seq_no;
+    rx_seq_no_ = config_.initial_seq_no;
     current_param_index_ = 0;
     pdo_tx_count_ = 0;
     last_rx_frame_.clear();
@@ -272,8 +272,8 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
     //
     // Reset frames (cmd=0x2A) reset the CRC chain AND the sequence number:
     //   - start_crc = 0 (CRC chain reset)
-    //   - seq = 1 (sequence reset to initial value)
-    // After a Reset frame, the next frame uses seq=2.
+    //   - seq = config_.initial_seq_no (0 for Synapticon, 1 per ETG.5100)
+    // After a Reset frame, the next frame uses seq+1.
     // Non-Reset frames use the current rx_seq_no_ and last_rx_crc0_.
     uint8_t cmd = 0;
     uint8_t frame_data[CRC::MAX_PARSE_DATA_SIZE] = {0};
@@ -283,7 +283,7 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
 
     const bool is_reset_frame = (data[0] == Command::Reset);
     const uint16_t parse_start_crc = is_reset_frame ? 0 : last_rx_crc0_;
-    const uint16_t parse_seq_no = is_reset_frame ? 1 : rx_seq_no_;
+    const uint16_t parse_seq_no = is_reset_frame ? config_.initial_seq_no : rx_seq_no_;
     uint16_t seq_used = 0;
 
     if (!CRC::parseFSoEFrameWithCollisionAvoidance(
@@ -954,8 +954,8 @@ size_t FSoEMasterConnection::buildResetFrame(uint8_t* data, size_t max_len)
     //
     // Reset frames reset the CRC chain AND the sequence number:
     //   - start_crc = 0 (CRC chain reset)
-    //   - seq = 1 (sequence reset to initial value, per ETG.5100 §8.1.3.4)
-    // After the Reset frame, the next frame uses seq=2.
+    //   - seq = config_.initial_seq_no (0 for Synapticon, 1 per ETG.5100)
+    // After the Reset frame, the next frame uses seq+1.
     // last_tx_crc0_ is NOT updated (stays at 0 for the next frame).
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     payload[0] = ResetErrorCode::None;  // Local reset
@@ -966,11 +966,12 @@ size_t FSoEMasterConnection::buildResetFrame(uint8_t* data, size_t max_len)
         data, Command::Reset, payload, config_.output_size,
         config_.connection_id,
         0,  // start_crc = 0 (Reset resets CRC chain)
-        1,  // seq = 1 (Reset resets sequence to initial value)
+        config_.initial_seq_no,
         nullptr,  // don't update CRC chain (Reset resets it)
         &seq_used);
-    // Set tx_seq_no_ to the seq used (1, or higher if collision avoidance
-    // incremented it).  prepareTxFrame will increment it to 2 for the next frame.
+    // Set tx_seq_no_ to the seq used (initial_seq_no, or higher if
+    // collision avoidance incremented it).  prepareTxFrame will
+    // increment it for the next frame.
     tx_seq_no_ = seq_used;
     return result;
 }

@@ -109,58 +109,56 @@ TEST(FSoEIncrementSeqNo, SequentialIncrement) {
 // Initial sequence number tests
 // ============================================================================
 
-TEST(FSoESequenceConformance, MasterInitialSeqIsOne) {
+TEST(FSoESequenceConformance, MasterInitialSeqIsZero) {
     FSoEMasterConnection conn(makeMasterCfg(4, 4));
     conn.initialize();
     conn.startConnection();
-    EXPECT_EQ(conn.getTxSeqNo(), 1u);
-    EXPECT_EQ(conn.getRxSeqNo(), 1u);
+    EXPECT_EQ(conn.getTxSeqNo(), 0u);
+    EXPECT_EQ(conn.getRxSeqNo(), 0u);
 }
 
-TEST(FSoESequenceConformance, SlaveInitialSeqIsOne) {
+TEST(FSoESequenceConformance, SlaveInitialSeqIsZero) {
     FSoESlave slave(makeSlaveCfg(4, 4));
     slave.initialize();
-    EXPECT_EQ(slave.getTxSeqNo(), 1u);
-    EXPECT_EQ(slave.getRxSeqNo(), 1u);
+    EXPECT_EQ(slave.getTxSeqNo(), 0u);
+    EXPECT_EQ(slave.getRxSeqNo(), 0u);
 }
 
-TEST(FSoESequenceConformance, MasterSeqNeverZeroAfterReset) {
+TEST(FSoESequenceConformance, MasterSeqResetsToZeroAfterReset) {
     FSoEMasterConnection conn(makeMasterCfg(4, 4));
     conn.initialize();
     conn.startConnection();
     conn.resetConnection();
-    EXPECT_NE(conn.getTxSeqNo(), 0u);
-    EXPECT_NE(conn.getRxSeqNo(), 0u);
-    EXPECT_EQ(conn.getTxSeqNo(), 1u);
-    EXPECT_EQ(conn.getRxSeqNo(), 1u);
+    EXPECT_EQ(conn.getTxSeqNo(), 0u);
+    EXPECT_EQ(conn.getRxSeqNo(), 0u);
 }
 
-TEST(FSoESequenceConformance, SlaveSeqNeverZeroAfterReset) {
+TEST(FSoESequenceConformance, SlaveSeqResetsToZeroAfterReset) {
     FSoESlave slave(makeSlaveCfg(4, 4));
     slave.initialize();
     slave.reset();
-    EXPECT_NE(slave.getTxSeqNo(), 0u);
-    EXPECT_NE(slave.getRxSeqNo(), 0u);
-    EXPECT_EQ(slave.getTxSeqNo(), 1u);
-    EXPECT_EQ(slave.getRxSeqNo(), 1u);
+    EXPECT_EQ(slave.getTxSeqNo(), 0u);
+    EXPECT_EQ(slave.getRxSeqNo(), 0u);
 }
 
 // ============================================================================
-// Reset frame sequence number tests
+// Configurable initial sequence number
 // ============================================================================
 
-TEST(FSoESequenceConformance, MasterResetFrameUsesSeqOne) {
-    // After init, the master's first TX frame should be a Reset with seq=1.
-    // Verify by parsing the frame.
-    FSoEMasterConnection conn(makeMasterCfg(4, 4));
+TEST(FSoESequenceConformance, MasterInitialSeqIsConfigurableToOne) {
+    // ETG.5100 §8.1.3.4 says seq starts at 1.  Verify the config works.
+    MasterConnectionConfig cfg = makeMasterCfg(4, 4);
+    cfg.initial_seq_no = 1;
+    FSoEMasterConnection conn(cfg);
     conn.initialize();
     conn.startConnection();
+    EXPECT_EQ(conn.getTxSeqNo(), 1u);
+    EXPECT_EQ(conn.getRxSeqNo(), 1u);
 
+    // First TX frame should be a Reset with seq=1
     uint8_t buf[64] = {};
     size_t len = conn.prepareTxFrame(buf, sizeof(buf));
     ASSERT_GT(len, 0u);
-
-    // Parse the frame with start_crc=0, seq=1 (Reset frame parameters)
     uint8_t cmd = 0;
     uint8_t data[16] = {0};
     size_t data_len = 0;
@@ -170,40 +168,82 @@ TEST(FSoESequenceConformance, MasterResetFrameUsesSeqOne) {
     EXPECT_EQ(cmd, Command::Reset);
 }
 
-TEST(FSoESequenceConformance, SlaveResetResponseUsesSeqOne) {
-    // When the slave receives a Reset, its response should use seq=1.
+TEST(FSoESequenceConformance, SlaveInitialSeqIsConfigurableToOne) {
+    FSoESlaveConfig cfg = makeSlaveCfg(4, 4);
+    cfg.initialSeqNo = 1;
+    FSoESlave slave(cfg);
+    slave.initialize();
+    EXPECT_EQ(slave.getTxSeqNo(), 1u);
+    EXPECT_EQ(slave.getRxSeqNo(), 1u);
+}
+
+// ============================================================================
+// Reset frame sequence number tests
+// ============================================================================
+
+TEST(FSoESequenceConformance, MasterResetFrameUsesSeqZero) {
+    // After init, the master's first TX frame should be a Reset with seq=0.
+    // Verify by parsing the frame.
+    FSoEMasterConnection conn(makeMasterCfg(4, 4));
+    conn.initialize();
+    conn.startConnection();
+
+    uint8_t buf[64] = {};
+    size_t len = conn.prepareTxFrame(buf, sizeof(buf));
+    ASSERT_GT(len, 0u);
+
+    // Parse the frame with start_crc=0, seq=0 (Reset frame parameters)
+    uint8_t cmd = 0;
+    uint8_t data[16] = {0};
+    size_t data_len = 0;
+    uint16_t conn_id = 0;
+    EXPECT_TRUE(CRC::parseFSoEFrame(buf, len, cmd, data, data_len, conn_id,
+                                    0, 0));
+    EXPECT_EQ(cmd, Command::Reset);
+}
+
+TEST(FSoESequenceConformance, SlaveResetResponseUsesSeqZero) {
+    // When the slave receives a Reset, its response should use seq=0.
     FSoESlave slave(makeSlaveCfg(4, 4));
     slave.initialize();
 
-    // Build a Reset frame with seq=1, start_crc=0
+    // Build a Reset frame with seq=0, start_crc=0
     uint8_t payload[4] = {0, 0, 0, 0};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::Reset,
-                                           payload, 4, 0x1234, 0, 1);
+                                           payload, 4, 0x1234, 0, 0);
     ASSERT_GT(frame_len, 0u);
     ASSERT_TRUE(slave.processRxFrame(frame, frame_len));
 
     // Slave should now be in Session state
     EXPECT_EQ(slave.getState(), ConnectionState::Session);
 
-    // Build the slave's TX frame — should be a Session response with seq=1
-    // (tx_seq_no_ was reset to 1 by processSessionReset)
+    // Build the slave's TX frame — should be a Session response with
+    // seq=initialSeqNo (0), since tx_seq_no_ was reset to 0 by
+    // processSessionReset and buildSessionResponse uses it directly.
     uint8_t tx[64];
     size_t tx_len = slave.prepareTxFrame(tx, sizeof(tx));
     ASSERT_GT(tx_len, 0u);
 
-    // Parse with start_crc=0 (CRC chain was reset), seq=1
+    // Parse with start_crc=0 (CRC chain was reset), seq=0
+    // (or seq=1 if collision avoidance incremented it)
     uint8_t cmd = 0;
     uint8_t data[16] = {0};
     size_t data_len = 0;
     uint16_t conn_id = 0;
-    EXPECT_TRUE(CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id,
-                                    0, 1));
+    // Try seq=0 first, then seq=1 (collision avoidance may have incremented)
+    bool parsed = CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id,
+                                      0, 0);
+    if (!parsed) {
+        parsed = CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id,
+                                     0, 1);
+    }
+    EXPECT_TRUE(parsed) << "Failed to parse with seq=0 or seq=1";
     EXPECT_EQ(cmd, Command::Session);
 }
 
 TEST(FSoESequenceConformance, SeqAdvancesAfterResetFrame) {
-    // After a Reset frame (seq=1), the next frame should use seq=2.
+    // After a Reset frame (seq=0), the next frame should use seq=1.
     FSoEMasterConnection conn(makeMasterCfg(4, 4));
     conn.initialize();
     conn.startConnection();
@@ -212,20 +252,20 @@ TEST(FSoESequenceConformance, SeqAdvancesAfterResetFrame) {
     uint8_t buf1[64] = {};
     size_t len1 = conn.prepareTxFrame(buf1, sizeof(buf1));
     ASSERT_GT(len1, 0u);
-    // After prepareTxFrame, tx_seq_no_ should be 2
-    EXPECT_EQ(conn.getTxSeqNo(), 2u);
+    // After prepareTxFrame, tx_seq_no_ should be 1
+    EXPECT_EQ(conn.getTxSeqNo(), 1u);
 
     // Feed a Reset response to advance to Session
     uint8_t rx_payload[4] = {0, 0, 0, 0};
     uint8_t rx_frame[64];
     size_t rx_len = CRC::buildFSoEFrame(rx_frame, Command::Reset,
-                                        rx_payload, 4, 0x1234, 0, 1);
+                                        rx_payload, 4, 0x1234, 0, 0);
     ASSERT_TRUE(conn.processRxFrame(rx_frame, rx_len));
     EXPECT_EQ(conn.getState(), ConnectionState::Session);
-    // After receiving Reset response, rx_seq_no_ should be 2
-    EXPECT_EQ(conn.getRxSeqNo(), 2u);
+    // After receiving Reset response, rx_seq_no_ should be 1
+    EXPECT_EQ(conn.getRxSeqNo(), 1u);
 
-    // Second TX: Session frame — should use seq=2
+    // Second TX: Session frame — should use seq=1
     uint8_t buf2[64] = {};
     size_t len2 = conn.prepareTxFrame(buf2, sizeof(buf2));
     ASSERT_GT(len2, 0u);
@@ -234,9 +274,9 @@ TEST(FSoESequenceConformance, SeqAdvancesAfterResetFrame) {
     uint8_t data[16] = {0};
     size_t data_len = 0;
     uint16_t conn_id = 0;
-    // Parse with start_crc=0 (CRC chain was reset by Reset), seq=2
+    // Parse with start_crc=0 (CRC chain was reset by Reset), seq=1
     EXPECT_TRUE(CRC::parseFSoEFrame(buf2, len2, cmd, data, data_len, conn_id,
-                                    0, 2));
+                                    0, 1));
     EXPECT_EQ(cmd, Command::Session);
 }
 
@@ -252,31 +292,31 @@ TEST(FSoESequenceConformance, FullHandshakeSeqProgression) {
     FSoESlave slave(makeSlaveCfg(4, 4));
     slave.initialize();
 
-    // Initial state: both at seq=1
+    // Initial state: both at seq=0
+    EXPECT_EQ(conn.getTxSeqNo(), 0u);
+    EXPECT_EQ(conn.getRxSeqNo(), 0u);
+    EXPECT_EQ(slave.getTxSeqNo(), 0u);
+    EXPECT_EQ(slave.getRxSeqNo(), 0u);
+
+    // Exchange 1: Master sends Reset (seq=0), slave responds with Reset (seq=0)
+    uint64_t now = 15;
+    ASSERT_TRUE(conn.exchangeWith(slave, now));
+
+    // After exchange 1:
+    // Master: tx_seq=1 (sent Reset with seq=0, incremented), rx_seq=1 (received Reset response with seq=0, incremented)
+    // Slave: tx_seq=1 (sent Reset response with seq=0, incremented), rx_seq=1 (received Reset with seq=0, incremented)
     EXPECT_EQ(conn.getTxSeqNo(), 1u);
     EXPECT_EQ(conn.getRxSeqNo(), 1u);
     EXPECT_EQ(slave.getTxSeqNo(), 1u);
     EXPECT_EQ(slave.getRxSeqNo(), 1u);
 
-    // Exchange 1: Master sends Reset (seq=1), slave responds with Reset (seq=1)
-    uint64_t now = 15;
+    // Exchange 2: Master sends Session (seq=1), slave responds with Session (seq=1)
+    now += 15;
     ASSERT_TRUE(conn.exchangeWith(slave, now));
-
-    // After exchange 1:
-    // Master: tx_seq=2 (sent Reset with seq=1, incremented), rx_seq=2 (received Reset response with seq=1, incremented)
-    // Slave: tx_seq=2 (sent Reset response with seq=1, incremented), rx_seq=2 (received Reset with seq=1, incremented)
     EXPECT_EQ(conn.getTxSeqNo(), 2u);
     EXPECT_EQ(conn.getRxSeqNo(), 2u);
     EXPECT_EQ(slave.getTxSeqNo(), 2u);
     EXPECT_EQ(slave.getRxSeqNo(), 2u);
-
-    // Exchange 2: Master sends Session (seq=2), slave responds with Session (seq=2)
-    now += 15;
-    ASSERT_TRUE(conn.exchangeWith(slave, now));
-    EXPECT_EQ(conn.getTxSeqNo(), 3u);
-    EXPECT_EQ(conn.getRxSeqNo(), 3u);
-    EXPECT_EQ(slave.getTxSeqNo(), 3u);
-    EXPECT_EQ(slave.getRxSeqNo(), 3u);
 
     // Continue to Data
     for (int i = 0; i < 30; ++i) {
@@ -311,22 +351,22 @@ TEST(FSoESequenceConformance, MidStreamResetResynchronizesSeq) {
     uint16_t master_tx = conn.getTxSeqNo();
     uint16_t slave_rx = slave.getRxSeqNo();
     EXPECT_EQ(master_tx, slave_rx);
-    EXPECT_GT(master_tx, 1u);  // Should have advanced past initial value
+    EXPECT_GT(master_tx, 0u);  // Should have advanced past initial value
 
     // Master resets
     conn.resetConnection();
-    EXPECT_EQ(conn.getTxSeqNo(), 1u);
-    EXPECT_EQ(conn.getRxSeqNo(), 1u);
+    EXPECT_EQ(conn.getTxSeqNo(), 0u);
+    EXPECT_EQ(conn.getRxSeqNo(), 0u);
 
     // Slave is still at the old seq — exchange should resynchronize
     now += 15;
     ASSERT_TRUE(conn.exchangeWith(slave, now));
 
-    // After the Reset exchange, both should be synchronized at seq=2
-    EXPECT_EQ(conn.getTxSeqNo(), 2u);
-    EXPECT_EQ(conn.getRxSeqNo(), 2u);
-    EXPECT_EQ(slave.getTxSeqNo(), 2u);
-    EXPECT_EQ(slave.getRxSeqNo(), 2u);
+    // After the Reset exchange, both should be synchronized at seq=1
+    EXPECT_EQ(conn.getTxSeqNo(), 1u);
+    EXPECT_EQ(conn.getRxSeqNo(), 1u);
+    EXPECT_EQ(slave.getTxSeqNo(), 1u);
+    EXPECT_EQ(slave.getRxSeqNo(), 1u);
 
     // Full handshake should complete again
     for (int i = 0; i < 30; ++i) {
@@ -365,11 +405,11 @@ TEST(FSoESequenceConformance, MultipleResetsResynchronize) {
         now += 15;
         ASSERT_TRUE(conn.exchangeWith(slave, now));
 
-        // After reset exchange, both at seq=2
-        EXPECT_EQ(conn.getTxSeqNo(), 2u) << "Reset iteration " << reset_iter;
-        EXPECT_EQ(conn.getRxSeqNo(), 2u) << "Reset iteration " << reset_iter;
-        EXPECT_EQ(slave.getTxSeqNo(), 2u) << "Reset iteration " << reset_iter;
-        EXPECT_EQ(slave.getRxSeqNo(), 2u) << "Reset iteration " << reset_iter;
+        // After reset exchange, both at seq=1
+        EXPECT_EQ(conn.getTxSeqNo(), 1u) << "Reset iteration " << reset_iter;
+        EXPECT_EQ(conn.getRxSeqNo(), 1u) << "Reset iteration " << reset_iter;
+        EXPECT_EQ(slave.getTxSeqNo(), 1u) << "Reset iteration " << reset_iter;
+        EXPECT_EQ(slave.getRxSeqNo(), 1u) << "Reset iteration " << reset_iter;
     }
 }
 
@@ -622,37 +662,37 @@ TEST(FSoESequenceConformance, SeqWrapsFrom65535ToOne) {
 }
 
 // ============================================================================
-// Reset frame with seq=0 is rejected
+// Reset frame with wrong seq is rejected
 // ============================================================================
 
-TEST(FSoESequenceConformance, MasterRejectsResetWithSeqZero) {
-    // A Reset frame with seq=0 should be rejected by the master,
-    // since 0 is never a valid sequence number per ETG.5100.
+TEST(FSoESequenceConformance, MasterRejectsResetWithSeqOne) {
+    // A Reset frame with seq=1 should be rejected by the master,
+    // since the master expects seq=0 for Reset frames (Synapticon convention).
     FSoEMasterConnection conn(makeMasterCfg(4, 4));
     conn.initialize();
     conn.startConnection();
 
-    // Build a Reset frame with seq=0 (invalid)
+    // Build a Reset frame with seq=1 (wrong — master expects seq=0)
     uint8_t payload[4] = {0, 0, 0, 0};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::Reset,
-                                           payload, 4, 0x1234, 0, 0);
+                                           payload, 4, 0x1234, 0, 1);
     ASSERT_GT(frame_len, 0u);
 
-    // Master should reject it (CRC won't match with seq=0 vs expected seq=1)
+    // Master should reject it (CRC won't match with seq=1 vs expected seq=0)
     EXPECT_FALSE(conn.processRxFrame(frame, frame_len));
 }
 
-TEST(FSoESequenceConformance, SlaveRejectsResetWithSeqZero) {
-    // A Reset frame with seq=0 should be rejected by the slave.
+TEST(FSoESequenceConformance, SlaveRejectsResetWithSeqOne) {
+    // A Reset frame with seq=1 should be rejected by the slave.
     FSoESlave slave(makeSlaveCfg(4, 4));
     slave.initialize();
 
-    // Build a Reset frame with seq=0 (invalid)
+    // Build a Reset frame with seq=1 (wrong — slave expects seq=0)
     uint8_t payload[4] = {0, 0, 0, 0};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::Reset,
-                                           payload, 4, 0x1234, 0, 0);
+                                           payload, 4, 0x1234, 0, 1);
     ASSERT_GT(frame_len, 0u);
 
     // Slave should reject it
