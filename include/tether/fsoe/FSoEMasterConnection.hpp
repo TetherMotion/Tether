@@ -305,32 +305,42 @@ private:
     // the slave to have produced a valid response.
     uint32_t pdo_tx_count_ = 0;
 
-    // Last TX command byte sent via exchangeViaPDO.  When the master
-    // transitions to a new state (e.g. Reset→Session), the TX command
-    // changes.  The slave's TxPDO still contains the response to the
-    // PREVIOUS command for `slave_response_delay_cycles` cycles (EtherCAT
-    // pipeline delay + slave internal processing delay).  We skip RX
-    // processing for that many cycles after a command change to avoid
-    // processing a stale response that would trigger a spurious fail-safe.
-    uint8_t last_tx_cmd_ = 0;
-    bool has_last_tx_cmd_ = false;
-    uint8_t cmd_change_skip_remaining_ = 0;  ///< Cycles left to skip after cmd change
-
-    // Cached TX PDO frame for the current state.  In the PDO path, the
-    // master must send the SAME frame bytes every cycle (same CRC, same
-    // seq) until the state changes.  This prevents CRC chain divergence
-    // with slaves that don't process every frame (e.g. Synapticon's FSoE
-    // task runs every 8 cycles).  The frame is rebuilt only when the
-    // state transitions.
+    // --- PDO exchange: TX frame caching ---
+    // In the PDO path, the master sends the SAME frame bytes every cycle
+    // (same CRC, same seq) while the state and safe outputs are unchanged.
+    // This prevents CRC chain divergence with slaves that don't process
+    // every frame (e.g. Synapticon's FSoE task runs every 8 cycles).
+    // The frame is rebuilt only when the state transitions or safe outputs
+    // change (tx_cache_dirty_).
     std::vector<uint8_t> cached_tx_pdo_;
     uint8_t cached_tx_pdo_state_ = 0xFF;  ///< State when cached frame was built
     bool tx_cache_dirty_ = true;  ///< True when safe outputs changed (rebuild needed)
 
-    // Last received frame bytes, for duplicate detection.
-    // If the slave re-sends the same frame (e.g. it hasn't seen a new
-    // master frame yet), we skip re-processing and count it as a
-    // duplicate for diagnostics.
-    std::vector<uint8_t> last_rx_frame_;
+    // --- PDO exchange: RX change detection ---
+    // In a simultaneous PDO exchange, the RxPDO frame CANNOT be the
+    // response to the TxPDO frame sent in the same cycle — the slave
+    // has not had time to process it.  The RX is always a response to
+    // a PREVIOUS TX (pipeline delay).
+    //
+    // When the master's TX changes (state transition or safe-output
+    // change), the slave's RX will still be the response to the OLD TX
+    // for some number of cycles.  The master uses change detection to
+    // skip these stale responses:
+    //
+    //   1. When TX changes, store the current RX as "baseline_rx" (the
+    //      last response to the old TX) and enter "expecting_change" mode.
+    //   2. In "expecting_change" mode, compare each new RX to baseline_rx:
+    //      - Same → stale, increment stale_counter, skip processing.
+    //      - Different → slave has processed the new TX, process the RX.
+    //      - stale_counter > slave_response_delay_cycles → error → fail-safe.
+    //   3. The FSoE timeout (watchdog/conn_timeout) is the ultimate backstop.
+    //
+    // No hardcoded frame-count assumptions are made beyond the configured
+    // FSoE timeout and the configurable stale-frame budget.
+    std::vector<uint8_t> baseline_rx_;       ///< RX captured when TX changed (stale baseline)
+    std::vector<uint8_t> last_rx_frame_;     ///< Last RX frame received (for diagnostics)
+    bool expecting_rx_change_ = false;       ///< True when waiting for RX to reflect new TX
+    uint32_t stale_rx_count_ = 0;            ///< Consecutive stale RX frames since TX change
 
     // Last raw TxPDO bytes received from the slave, for timeout diagnostics.
     // Updated on every exchangeViaPDO call, even when the frame is skipped

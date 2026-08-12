@@ -366,6 +366,10 @@ protected:
         cfg.input_size = 4;
         cfg.output_size = 4;
         cfg.fail_safe_values = {0, 0, 0, 0, 0, 0, 0, 0};
+        // Use a generous stale budget so the stale-exhaustion logic
+        // doesn't fire during the test (these tests verify invalid
+        // command byte handling, not stale budget exhaustion).
+        cfg.slave_response_delay_cycles = 20;
         conn = std::make_unique<FSoEMasterConnection>(cfg);
         conn->initialize();
         conn->startConnection();
