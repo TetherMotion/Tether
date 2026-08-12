@@ -789,6 +789,16 @@ inline uint16_t incrementSeqNo(uint16_t seq) {
     return (seq == 65535) ? 1 : static_cast<uint16_t>(seq + 1);
 }
 
+/// Decrement a sequence number with ETG.5100 wrap-around (1..65535, skip 0).
+///
+///   0     → 65535 (wrap)
+///   1     → 65535 (wrap, skip 0)
+///   2     → 1
+///   65535 → 65534
+inline uint16_t decrementSeqNo(uint16_t seq) {
+    return (seq <= 1) ? 65535 : static_cast<uint16_t>(seq - 1);
+}
+
 /// Build an FSoE frame with ETG.5100 §8.1.3.4 CRC collision avoidance.
 ///
 /// This is a wrapper around buildFSoEFrame that implements the do…while loop:

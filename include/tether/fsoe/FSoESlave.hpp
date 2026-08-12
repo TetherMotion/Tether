@@ -383,10 +383,11 @@ public:
     uint16_t getRxLastCrc0() const { return last_rx_crc0_; }
     uint16_t getRxSeqNo() const { return rx_seq_no_; }
     /// Get the current TX CRC state (cross-direction TX — slave inherits
-    /// from master's last TX CRC0/seq).
-    /// startCrc = last_rx_crc0_, seqNo = last_rx_seq_no_
+    /// from master's last RX CRC0, uses rx_seq_no_ which is incremented
+    /// after each received frame).
+    /// startCrc = last_rx_crc0_, seqNo = rx_seq_no_
     uint16_t getTxLastCrc0() const { return last_rx_crc0_; }
-    uint16_t getTxSeqNo() const { return last_rx_seq_no_; }
+    uint16_t getTxSeqNo() const { return rx_seq_no_; }
 
     /**
      * @brief Reset statistics
