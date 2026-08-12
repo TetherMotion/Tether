@@ -113,12 +113,14 @@ INSTANTIATE_TEST_SUITE_P(Sizes, FSoESlaveBufferOverflowTest,
     ::testing::Values(1, 2, 4, 8, 15, 16));
 
 TEST(FSoESlaveBufferOverflowTest, FailSafeResponseWithMaxInputSize) {
-    // Slave with safeInputSize=16: fail-safe response = 16 inputs + 2 error = 18 bytes
+    // ETG.5100 §8.2.2.6, Table 26: FailSafeData Slave PDU has the same
+    // structure and size as ProcessData (all SafeData = 0, no error code).
+    // With safeInputSize=16, the payload is 16 bytes (not 18).
     FSoESlaveConfig cfg = makeSlaveConfig(16, 16);
     FSoESlave slave(cfg);
     slave.initialize();
 
-    // Trigger fail-safe then prepare TX — buildFailSafeResponse writes 18 bytes
+    // Trigger fail-safe then prepare TX
     // Capture the slave's TX CRC state before prepareTxFrame, since
     // prepareTxFrame updates it (CRC inheritance + seq increment).
     const uint16_t saved_tx_crc0 = slave.getTxLastCrc0();
@@ -129,7 +131,7 @@ TEST(FSoESlaveBufferOverflowTest, FailSafeResponseWithMaxInputSize) {
     size_t tx_len = slave.prepareTxFrame(tx, sizeof(tx));
     EXPECT_GT(tx_len, 0u);
 
-    // Verify the frame can be parsed back (18-byte payload)
+    // Verify the frame can be parsed back (16-byte payload = safeInputSize)
     // Use the slave's TX CRC state that was used to build the frame.
     uint8_t cmd = 0;
     uint8_t data[18] = {0};
@@ -137,7 +139,8 @@ TEST(FSoESlaveBufferOverflowTest, FailSafeResponseWithMaxInputSize) {
     uint16_t conn_id = 0;
     EXPECT_TRUE(CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id,
                                     saved_tx_crc0, saved_tx_seq));
-    EXPECT_EQ(data_len, 18u);
+    // FailSafeData has same size as ProcessData (no error code field)
+    EXPECT_EQ(data_len, 16u);
     EXPECT_EQ(cmd, Command::FailSafeData);
 }
 
@@ -469,7 +472,9 @@ TEST(FSoESlaveParameterValidationTest, FullParameterFrameAccepted) {
 // ============================================================================
 
 TEST(FSoESlaveFailSafeResponseTest, FailSafeResponseWithMaxInputSizeNoOverflow) {
-    // safeInputSize=16: fail-safe response payload = 16 + 2 = 18 bytes
+    // ETG.5100 §8.2.2.6, Table 26: FailSafeData Slave PDU has the same
+    // structure and size as ProcessData (all SafeData = 0, no error code).
+    // With safeInputSize=16, the payload is 16 bytes (not 18).
     FSoESlaveConfig cfg = makeSlaveConfig(16, 16);
     FSoESlave slave(cfg);
     slave.initialize();
@@ -483,7 +488,7 @@ TEST(FSoESlaveFailSafeResponseTest, FailSafeResponseWithMaxInputSizeNoOverflow) 
     size_t tx_len = slave.prepareTxFrame(tx, sizeof(tx));
     EXPECT_GT(tx_len, 0u);
 
-    // Parse the response and verify error code at offset 16
+    // Parse the response — payload is safeInputSize bytes (all zeros)
     // Use the slave's TX CRC state that was used to build the frame.
     uint8_t cmd = 0;
     uint8_t data[18] = {0};
@@ -491,16 +496,19 @@ TEST(FSoESlaveFailSafeResponseTest, FailSafeResponseWithMaxInputSizeNoOverflow) 
     uint16_t conn_id = 0;
     ASSERT_TRUE(CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id,
                                     saved_tx_crc0, saved_tx_seq));
-    EXPECT_EQ(data_len, 18u);
+    // FailSafeData has same size as ProcessData (no error code field)
+    EXPECT_EQ(data_len, 16u);
     EXPECT_EQ(cmd, Command::FailSafeData);
-
-    // Error code at offset safeInputSize=16
-    uint16_t error_code = data[16] | (data[17] << 8);
-    EXPECT_EQ(error_code, ErrorCode::CRCError);
+    // All SafeData octets are 0 per spec
+    for (size_t i = 0; i < data_len; ++i) {
+        EXPECT_EQ(data[i], 0x00) << "at offset " << i;
+    }
 }
 
 TEST(FSoESlaveFailSafeResponseTest, FailSafeResponseWithInputSize15) {
-    // safeInputSize=15: odd payload = 15 + 2 = 17 bytes
+    // ETG.5100 §8.2.2.6, Table 26: FailSafeData Slave PDU has the same
+    // structure and size as ProcessData (all SafeData = 0, no error code).
+    // With safeInputSize=15, the payload is 15 bytes (not 17).
     FSoESlaveConfig cfg = makeSlaveConfig(15, 15);
     FSoESlave slave(cfg);
     slave.initialize();
@@ -521,11 +529,13 @@ TEST(FSoESlaveFailSafeResponseTest, FailSafeResponseWithInputSize15) {
     uint16_t conn_id = 0;
     ASSERT_TRUE(CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id,
                                     saved_tx_crc0, saved_tx_seq));
-    EXPECT_EQ(data_len, 17u);
-
-    // Error code at offset 15
-    uint16_t error_code = data[15] | (data[16] << 8);
-    EXPECT_EQ(error_code, ErrorCode::WatchdogError);
+    // FailSafeData has same size as ProcessData (no error code field)
+    EXPECT_EQ(data_len, 15u);
+    EXPECT_EQ(cmd, Command::FailSafeData);
+    // All SafeData octets are 0 per spec
+    for (size_t i = 0; i < data_len; ++i) {
+        EXPECT_EQ(data[i], 0x00) << "at offset " << i;
+    }
 }
 
 // ============================================================================
@@ -584,6 +594,11 @@ TEST(FSoESlaveFailSafeDataAcceptanceTest, FailSafeDataInConnectionState) {
 }
 
 TEST(FSoESlaveFailSafeDataAcceptanceTest, FailSafeDataInDataState) {
+    // ETG.5100 §8.2.2.6: In Data state, the slave does NOT auto-enter
+    // fail-safe when the master sends FailSafeData.  The choice between
+    // ProcessData and FailSafeData is independent in each direction.
+    // The slave accepts the master's fail-safe outputs (all zeros) and
+    // stays in its current mode.
     FSoESlaveConfig cfg = makeSlaveConfig(4, 4);
     FSoESlave slave(cfg);
     slave.initialize();
@@ -595,17 +610,19 @@ TEST(FSoESlaveFailSafeDataAcceptanceTest, FailSafeDataInDataState) {
     uint64_t now = 0;
     advanceToData(conn, slave, now);
 
-    // Send FailSafeData — the slave processes it and enters fail-safe.
-    // Use the slave's current RX CRC state (non-zero after advanceToData).
-    uint8_t payload[] = {0xDE, 0xAD, 0xBE, 0xEF, 0x02, 0x00};
+    // Send FailSafeData — the slave accepts it but does NOT enter fail-safe.
+    // Per spec, FailSafeData has the same structure as ProcessData (no error
+    // code field).  Payload is safeOutputSize bytes (all zeros per spec).
+    uint8_t payload[] = {0x00, 0x00, 0x00, 0x00};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::FailSafeData,
-                                            payload, 6, 0x1234,
+                                            payload, 4, 0x1234,
                                             slave.getRxLastCrc0(),
                                             slave.getRxSeqNo());
     bool ok = slave.processRxFrame(frame, frame_len);
     EXPECT_TRUE(ok);
-    EXPECT_TRUE(slave.isFailSafe());
+    // Slave does NOT enter fail-safe (independent per direction)
+    EXPECT_FALSE(slave.isFailSafe());
 }
 
 // ============================================================================

@@ -80,12 +80,18 @@ TEST_F(FSoEFailSafeResponseTest, MasterRecognizesSlaveFailSafeResponse) {
     slave->triggerFailSafe(ErrorCode::WatchdogError);
     EXPECT_TRUE(slave->isFailSafe());
 
-    // Exchange one cycle — slave will send fail-safe response (0x80)
+    // Exchange one cycle — slave will send FailSafeData response (0x08)
     ASSERT_TRUE(conn->exchangeWith(*slave, last_time + 15));
 
-    // Master should now be in fail-safe
-    EXPECT_TRUE(conn->isFailSafe());
-    EXPECT_EQ(conn->getErrorCode(), ErrorCode::WatchdogError);
+    // ETG.5100 §8.2.2.6: The choice between ProcessData and FailSafeData is
+    // INDEPENDENT in each direction.  The master does NOT auto-enter fail-safe
+    // when the slave sends FailSafeData.  The master accepts the slave's
+    // fail-safe inputs (all zeros) and stays in its current mode.
+    EXPECT_FALSE(conn->isFailSafe());
+    EXPECT_FALSE(conn->getStatus().data_valid);
+    // Master keeps its own error code (NoError) — the slave's FailSafeData
+    // PDU has no error code field per ETG.5100 Table 26.
+    EXPECT_EQ(conn->getErrorCode(), ErrorCode::NoError);
 }
 
 TEST_F(FSoEFailSafeResponseTest, MasterFailSafeResponseExtractsErrorCode) {
@@ -94,8 +100,12 @@ TEST_F(FSoEFailSafeResponseTest, MasterFailSafeResponseExtractsErrorCode) {
     slave->triggerFailSafe(ErrorCode::CRCError);
     ASSERT_TRUE(conn->exchangeWith(*slave, last_time + 15));
 
-    EXPECT_TRUE(conn->isFailSafe());
-    EXPECT_EQ(conn->getErrorCode(), ErrorCode::CRCError);
+    // ETG.5100 §8.2.2.6: FailSafeData PDU has no error code field.
+    // The master does NOT enter fail-safe and does NOT extract an error code.
+    // The master stays in Data state with data_valid=false.
+    EXPECT_FALSE(conn->isFailSafe());
+    EXPECT_FALSE(conn->getStatus().data_valid);
+    EXPECT_EQ(conn->getErrorCode(), ErrorCode::NoError);
 }
 
 TEST_F(FSoEFailSafeResponseTest, FailSafeDataConstant) {
