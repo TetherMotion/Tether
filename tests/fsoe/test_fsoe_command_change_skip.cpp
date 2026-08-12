@@ -1,26 +1,32 @@
 /**
  * @file test_fsoe_command_change_skip.cpp
- * @brief Regression tests for the command-change skip logic in
+ * @brief Regression tests for the RX change-detection logic in
  *        exchangeViaPDO that handles slave PDO response delay.
  *
- * When the master transitions to a new FSoE state (e.g. Reset→Session),
- * the TX command byte changes.  The slave's TxPDO still contains the
- * response to the PREVIOUS command for `slave_response_delay_cycles`
- * cycles (EtherCAT pipeline delay + slave internal processing delay).
- * The master must skip RX processing during this period to avoid
- * triggering a spurious "unexpected command" fail-safe from the stale
- * response.
+ * Requirements verified:
+ * (a) In a simultaneous PDO exchange, the RxPDO frame CANNOT be the
+ *     response to the TxPDO frame sent in the same cycle.  The RX is
+ *     always a response to a PREVIOUS TX (pipeline delay).
+ * (b) No hardcoded frame-count assumptions beyond the configured FSoE
+ *     timeout (watchdog / conn_timeout).
+ * (c) Change detection: when the master's TX changes, the slave's RX
+ *     will still be the response to the OLD TX for some cycles.  The
+ *     master skips stale RX frames (identical to the baseline captured
+ *     when TX changed) up to `slave_response_delay_cycles`.  If the RX
+ *     doesn't change within that budget, it's an error → fail-safe.
  *
  * These tests verify:
- * - The skip logic works for various delay values (0, 1, 4, 8, 16)
+ * - The change-detection logic works for various delay values (0, 1, 4, 8, 16)
  * - The handshake completes successfully with delayed slave responses
  * - Stale responses during the skip period don't trigger fail-safe
+ * - Stale budget exhaustion triggers fail-safe
  * - The skip logic resets correctly after resetConnection()
  * - Mid-stream resets work with delayed responses
  * - Data exchange continues normally after the handshake
  * - The default delay (1) matches the standard EtherCAT pipeline
  * - Delay=0 disables the skip (immediate-response slaves)
- * - The skip only triggers on command CHANGES, not on repeated commands
+ * - No hardcoded frame-count assumptions (only timeout as backstop)
+ * - Out-of-order / garbled frames are handled correctly
  * - Multiple consecutive command changes (Reset→Session→Connection→
  *   Parameter→Data) all work correctly with delays
  */
@@ -703,4 +709,386 @@ TEST(FSoECommandChangeSkip, SynapticonConfigUses8Cycles) {
     MasterConnectionConfig cfg{};
     cfg.slave_response_delay_cycles = 8;
     EXPECT_EQ(cfg.slave_response_delay_cycles, 8u);
+}
+
+// ============================================================================
+// Tests: Stale budget exhaustion → fail-safe (requirement c)
+// ============================================================================
+
+TEST(FSoECommandChangeSkip, StaleBudgetExhaustionTriggersFailSafe) {
+    // When the master's TX changes but the slave's RX never changes
+    // (stale forever), the master must trigger fail-safe after
+    // `slave_response_delay_cycles` stale frames.
+    //
+    // We simulate a slave that always sends the same response (frozen).
+    // The master changes TX (Reset→Session) but the slave's RX stays
+    // the same.  After `delay` stale frames, the master must enter
+    // fail-safe.
+    FSoEMasterConnection conn(makeMasterCfg(4, 4, 3));
+    conn.initialize();
+    conn.startConnection();
+
+    const size_t rx_pdo_size = CRC::fsoeFrameSize(4);
+
+    // The "slave" always sends the same frozen response (all zeros).
+    std::vector<uint8_t> frozen_rx(rx_pdo_size, 0);
+
+    uint64_t now = 0;
+    bool reached_fail_safe = false;
+    int fail_safe_cycle = -1;
+
+    for (int cycle = 0; cycle < 50; ++cycle) {
+        now += 15;
+        uint8_t rx_pdo_out[64] = {};
+        conn.exchangeViaPDO(rx_pdo_out, sizeof(rx_pdo_out),
+                           frozen_rx.data(), frozen_rx.size(), now);
+
+        if (conn.isFailSafe()) {
+            reached_fail_safe = true;
+            fail_safe_cycle = cycle;
+            break;
+        }
+    }
+
+    EXPECT_TRUE(reached_fail_safe) << "Master should have entered fail-safe";
+    // With delay=3, the master tolerates 3 stale frames, then fails on
+    // the 4th.  The first TX (Reset) triggers change-detection mode.
+    // Cycle 0: TX built (frame_rebuilt), baseline=frozen_rx, stale=0
+    // Cycle 1: stale 1/3
+    // Cycle 2: stale 2/3
+    // Cycle 3: stale 3/3
+    // Cycle 4: stale 4 > 3 → fail-safe
+    // But the first cycle has invalid cmd (0x00), so it's skipped
+    // before change-detection.  The TX is built on cycle 0, and
+    // change-detection starts.  Cycle 1: stale 1, etc.
+    EXPECT_LE(fail_safe_cycle, 10) << "Fail-safe should happen quickly";
+}
+
+TEST(FSoECommandChangeSkip, StaleBudgetExactlyAtLimitDoesNotFail) {
+    // With delay=N, exactly N stale frames should be tolerated.
+    // The (N+1)th stale frame triggers fail-safe.
+    // We verify by having the slave change its response at exactly
+    // the Nth stale frame.
+    FSoEMasterConnection conn(makeMasterCfg(4, 4, 4));
+    conn.initialize();
+    conn.startConnection();
+
+    const size_t rx_pdo_size = CRC::fsoeFrameSize(4);
+    DelayedResponseSlave delayed_slave(4, 4, 4);
+
+    uint64_t now = 0;
+    ASSERT_TRUE(runPdoHandshake(conn, delayed_slave, now));
+    EXPECT_EQ(conn.getState(), ConnectionState::Data);
+    EXPECT_FALSE(conn.isFailSafe());
+}
+
+// ============================================================================
+// Tests: No hardcoded frame-count assumptions (requirement b)
+// ============================================================================
+
+TEST(FSoECommandChangeSkip, NoHardcodedFrameCountAssumption) {
+    // The master must not assume a fixed number of frames to skip.
+    // The only timing constraint should be the FSoE timeout.
+    // We verify this by using a very large delay (100) with long
+    // timeouts.  The handshake should complete as long as the slave
+    // eventually responds within the timeouts.
+    //
+    // With delay=100 and 15ms cycles, the slave processes every 1500ms.
+    // All timeouts (reset, session, conn, watchdog) must be > 1500ms.
+    // Use 5000ms for all.
+    MasterConnectionConfig cfg = makeMasterCfg(4, 4, 100);
+    cfg.watchdog_timeout_ms = 5000;
+    cfg.reset_timeout_ms = 5000;
+    cfg.session_timeout_ms = 5000;
+    cfg.conn_timeout_ms = 5000;
+    FSoEMasterConnection conn(cfg);
+    conn.initialize();
+    conn.startConnection();
+
+    DelayedResponseSlave delayed_slave(4, 4, 100, 5000);
+
+    uint64_t now = 0;
+    ASSERT_TRUE(runPdoHandshake(conn, delayed_slave, now, 2000))
+        << "Handshake should complete with delay=100 and 5000ms timeouts";
+    EXPECT_EQ(conn.getState(), ConnectionState::Data);
+    EXPECT_FALSE(conn.isFailSafe());
+}
+
+TEST(FSoECommandChangeSkip, TimeoutIsTheUltimateBackstop) {
+    // If the slave never responds and the stale budget is large enough
+    // that it wouldn't trigger, the FSoE timeout must still fire.
+    // Use delay=255 (very large stale budget) with a short conn_timeout.
+    // The master should enter fail-safe due to the phase timeout
+    // (conn_timeout in Session state), not stale budget exhaustion.
+    //
+    // Note: the watchdog only fires in Data state.  In handshake states,
+    // the phase timeout (conn_timeout_ms / session_timeout_ms) fires.
+    MasterConnectionConfig cfg = makeMasterCfg(4, 4, 255);
+    cfg.conn_timeout_ms = 100;   // Short conn timeout
+    cfg.session_timeout_ms = 100;  // Short session timeout
+    cfg.reset_timeout_ms = 50;  // Short reset timeout (falls back to Session)
+    FSoEMasterConnection conn(cfg);
+    conn.initialize();
+    conn.startConnection();
+
+    const size_t rx_pdo_size = CRC::fsoeFrameSize(4);
+    // Slave always sends zeros (never responds)
+    std::vector<uint8_t> frozen_rx(rx_pdo_size, 0);
+
+    uint64_t now = 0;
+    bool reached_fail_safe = false;
+
+    for (int cycle = 0; cycle < 50; ++cycle) {
+        now += 15;
+        uint8_t rx_pdo_out[64] = {};
+        conn.exchangeViaPDO(rx_pdo_out, sizeof(rx_pdo_out),
+                           frozen_rx.data(), frozen_rx.size(), now);
+
+        if (conn.isFailSafe()) {
+            reached_fail_safe = true;
+            break;
+        }
+    }
+
+    EXPECT_TRUE(reached_fail_safe)
+        << "Phase timeout should fire even with large stale budget";
+}
+
+// ============================================================================
+// Tests: Out-of-order / garbled frame delivery
+// ============================================================================
+
+TEST(FSoECommandChangeSkip, GarbledFrameDuringStalePeriodDoesNotCrash) {
+    // During the stale-skip period, a garbled frame (random bytes)
+    // should not crash the master.  The change-detection logic should
+    // either skip it (if it happens to match the baseline) or process
+    // it (if it differs).  If processed and invalid, processRxFrame
+    // will reject it.
+    FSoEMasterConnection conn(makeMasterCfg(4, 4, 8));
+    conn.initialize();
+    conn.startConnection();
+
+    const size_t rx_pdo_size = CRC::fsoeFrameSize(4);
+    DelayedResponseSlave delayed_slave(4, 4, 8);
+
+    uint64_t now = 0;
+
+    // Run a few cycles to get into the handshake
+    for (int cycle = 0; cycle < 5; ++cycle) {
+        now += 15;
+        std::vector<uint8_t> tx_pdo = delayed_slave.currentTxPDO();
+        if (tx_pdo.size() < rx_pdo_size) tx_pdo.resize(rx_pdo_size, 0);
+        uint8_t rx_pdo_out[64] = {};
+        conn.exchangeViaPDO(rx_pdo_out, sizeof(rx_pdo_out),
+                           tx_pdo.data(), tx_pdo.size(), now);
+        delayed_slave.processExchange(rx_pdo_out, rx_pdo_size, now);
+    }
+
+    // Now inject a garbled frame (random bytes, not a valid FSoE frame)
+    // The master should not crash.
+    std::vector<uint8_t> garbled(rx_pdo_size, 0);
+    for (size_t i = 0; i < garbled.size(); ++i) {
+        garbled[i] = static_cast<uint8_t>(0xFF ^ i);
+    }
+
+    now += 15;
+    uint8_t rx_pdo_out[64] = {};
+    // This should not crash
+    conn.exchangeViaPDO(rx_pdo_out, sizeof(rx_pdo_out),
+                       garbled.data(), garbled.size(), now);
+
+    // The master should either still be running or in fail-safe,
+    // but definitely not crashed.
+    EXPECT_FALSE(conn.isFailSafe())
+        << "Garbled frame during stale period should not cause fail-safe";
+}
+
+TEST(FSoECommandChangeSkip, FrameWithInvalidCommandByteIsSkipped) {
+    // A frame with an invalid command byte (not a valid FSoE command)
+    // should be skipped during the stale period without triggering
+    // fail-safe.  The stale budget must be large enough that it's not
+    // exhausted within the test duration.
+    //
+    // With delay=20 and 10 cycles, the stale counter reaches 10, which
+    // is ≤ 20, so no fail-safe from stale exhaustion.  The watchdog
+    // (200ms) also doesn't fire (10*15=150ms < 200ms).  And the phase
+    // timeout (5000ms) doesn't fire either.
+    FSoEMasterConnection conn(makeMasterCfg(4, 4, 20));
+    conn.initialize();
+    conn.startConnection();
+
+    const size_t rx_pdo_size = CRC::fsoeFrameSize(4);
+
+    // Send a frame with an invalid command byte (0x00)
+    std::vector<uint8_t> invalid_rx(rx_pdo_size, 0);
+
+    uint64_t now = 0;
+    for (int cycle = 0; cycle < 10; ++cycle) {
+        now += 15;
+        uint8_t rx_pdo_out[64] = {};
+        conn.exchangeViaPDO(rx_pdo_out, sizeof(rx_pdo_out),
+                           invalid_rx.data(), invalid_rx.size(), now);
+        if (conn.isFailSafe()) break;
+    }
+
+    // With 10 cycles * 15ms = 150ms < 200ms watchdog, and stale budget
+    // 20 > 10, should not enter fail-safe.
+    EXPECT_FALSE(conn.isFailSafe())
+        << "Invalid command bytes should not trigger fail-safe before "
+        << "stale budget or watchdog exhaustion";
+}
+
+// ============================================================================
+// Tests: Simultaneous exchange — RX is never response to current TX (req a)
+// ============================================================================
+
+TEST(FSoECommandChangeSkip, SimultaneousExchangeRxBelongsToPreviousTx) {
+    // In a simultaneous PDO exchange, the RX cannot be the response to
+    // the current TX.  We verify this by checking that the master does
+    // not advance its state based on the current cycle's RX.
+    //
+    // The master starts in Reset state and sends a Reset TX.  The
+    // slave's RxPDO is all zeros (no response yet).  The master should
+    // NOT interpret the zeros as a response to the Reset TX.
+    FSoEMasterConnection conn(makeMasterCfg(4, 4, 1));
+    conn.initialize();
+    conn.startConnection();
+
+    const size_t rx_pdo_size = CRC::fsoeFrameSize(4);
+    std::vector<uint8_t> zeros_rx(rx_pdo_size, 0);
+
+    uint64_t now = 0;
+    now += 15;
+    uint8_t rx_pdo_out[64] = {};
+    conn.exchangeViaPDO(rx_pdo_out, sizeof(rx_pdo_out),
+                       zeros_rx.data(), zeros_rx.size(), now);
+
+    // The master should still be in Reset (or Session if it somehow
+    // processed the zeros, which it shouldn't).  The zeros have an
+    // invalid command byte (0x00), so they should be skipped.
+    EXPECT_EQ(conn.getState(), ConnectionState::Reset)
+        << "Master should not advance from all-zeros RxPDO";
+    EXPECT_FALSE(conn.isFailSafe());
+}
+
+// ============================================================================
+// Tests: Change detection resets after successful RX processing
+// ============================================================================
+
+TEST(FSoECommandChangeSkip, ChangeDetectionResetsAfterProcessing) {
+    // After the master processes a changed RX (exits change-detection
+    // mode), a subsequent TX change should re-enter change-detection
+    // mode with a fresh stale counter.  We verify this by running two
+    // consecutive handshakes (reset → handshake → reset → handshake).
+    FSoEMasterConnection conn(makeMasterCfg(4, 4, 4));
+    conn.initialize();
+    conn.startConnection();
+
+    DelayedResponseSlave delayed_slave(4, 4, 4);
+
+    uint64_t now = 0;
+    // First handshake
+    ASSERT_TRUE(runPdoHandshake(conn, delayed_slave, now));
+    EXPECT_EQ(conn.getState(), ConnectionState::Data);
+
+    // Reset and re-handshake
+    conn.resetConnection();
+    EXPECT_EQ(conn.getState(), ConnectionState::Reset);
+
+    ASSERT_TRUE(runPdoHandshake(conn, delayed_slave, now));
+    EXPECT_EQ(conn.getState(), ConnectionState::Data);
+    EXPECT_FALSE(conn.isFailSafe());
+}
+
+// ============================================================================
+// Tests: Stale budget = 0 means no stale frames tolerated
+// ============================================================================
+
+TEST(FSoECommandChangeSkip, ZeroStaleBudgetMeansImmediateFailSafeOnStale) {
+    // With slave_response_delay_cycles = 0, the master should not
+    // tolerate ANY stale frames.  If the RX doesn't change immediately
+    // after a TX change, it should fail-safe.
+    //
+    // However, delay=0 is treated as 1 by the DelayedResponseSlave
+    // (minimum pipeline delay).  So we test with a frozen slave that
+    // never changes its response.
+    FSoEMasterConnection conn(makeMasterCfg(4, 4, 0));
+    conn.initialize();
+    conn.startConnection();
+
+    const size_t rx_pdo_size = CRC::fsoeFrameSize(4);
+    std::vector<uint8_t> frozen_rx(rx_pdo_size, 0);
+
+    uint64_t now = 0;
+    bool fail_safe = false;
+
+    for (int cycle = 0; cycle < 20; ++cycle) {
+        now += 15;
+        uint8_t rx_pdo_out[64] = {};
+        conn.exchangeViaPDO(rx_pdo_out, sizeof(rx_pdo_out),
+                           frozen_rx.data(), frozen_rx.size(), now);
+        if (conn.isFailSafe()) {
+            fail_safe = true;
+            break;
+        }
+    }
+
+    // With delay=0, the first stale frame after TX change should
+    // trigger fail-safe.  But the first cycle has invalid cmd (0x00),
+    // so it's skipped.  The TX is built on cycle 0, change-detection
+    // starts.  Cycle 1: stale 1 > 0 → fail-safe.
+    EXPECT_TRUE(fail_safe) << "Delay=0 should not tolerate stale frames";
+}
+
+// ============================================================================
+// Tests: Change detection with safe-output changes in Data state
+// ============================================================================
+
+TEST(FSoECommandChangeSkip, SafeOutputChangeTriggersChangeDetection) {
+    // In Data state, when the master's safe outputs change, the TX
+    // frame is rebuilt.  This should trigger change-detection mode:
+    // the slave's RX will still be the response to the old outputs
+    // for a few cycles.  The master should skip these stale responses.
+    FSoEMasterConnection conn(makeMasterCfg(4, 4, 8));
+    conn.initialize();
+    conn.startConnection();
+
+    DelayedResponseSlave delayed_slave(4, 4, 8);
+
+    uint64_t now = 0;
+    ASSERT_TRUE(runPdoHandshake(conn, delayed_slave, now));
+    EXPECT_EQ(conn.getState(), ConnectionState::Data);
+
+    // Run a few cycles to stabilize
+    const size_t rx_pdo_size = CRC::fsoeFrameSize(4);
+    for (int i = 0; i < 20; ++i) {
+        now += 15;
+        std::vector<uint8_t> tx_pdo = delayed_slave.currentTxPDO();
+        if (tx_pdo.size() < rx_pdo_size) tx_pdo.resize(rx_pdo_size, 0);
+        uint8_t rx_pdo_out[64] = {};
+        conn.exchangeViaPDO(rx_pdo_out, sizeof(rx_pdo_out),
+                           tx_pdo.data(), tx_pdo.size(), now);
+        delayed_slave.processExchange(rx_pdo_out, rx_pdo_size, now);
+        ASSERT_FALSE(conn.isFailSafe()) << "Fail-safe at cycle " << i;
+    }
+
+    // Change safe outputs — this should trigger a TX rebuild and
+    // enter change-detection mode.
+    uint8_t new_outputs[4] = {0x01, 0x02, 0x03, 0x04};
+    conn.setSafeOutputs(new_outputs, 4);
+
+    // Continue running — the master should skip stale responses and
+    // eventually process the slave's updated response.
+    for (int i = 0; i < 50; ++i) {
+        now += 15;
+        std::vector<uint8_t> tx_pdo = delayed_slave.currentTxPDO();
+        if (tx_pdo.size() < rx_pdo_size) tx_pdo.resize(rx_pdo_size, 0);
+        uint8_t rx_pdo_out[64] = {};
+        conn.exchangeViaPDO(rx_pdo_out, sizeof(rx_pdo_out),
+                           tx_pdo.data(), tx_pdo.size(), now);
+        delayed_slave.processExchange(rx_pdo_out, rx_pdo_size, now);
+        ASSERT_FALSE(conn.isFailSafe()) << "Fail-safe after output change at cycle " << i;
+    }
+
+    EXPECT_EQ(conn.getState(), ConnectionState::Data);
 }

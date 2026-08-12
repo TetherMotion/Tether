@@ -92,10 +92,10 @@ bool FSoEMasterConnection::initialize()
     parameter_crc_ = 0;
     fail_safe_entered_ms_ = 0;
     pdo_tx_count_ = 0;
-    last_tx_cmd_ = 0;
-    has_last_tx_cmd_ = false;
-    cmd_change_skip_remaining_ = 0;
     last_rx_frame_.clear();
+    baseline_rx_.clear();
+    expecting_rx_change_ = false;
+    stale_rx_count_ = 0;
     cached_tx_pdo_.clear();
     cached_tx_pdo_state_ = 0xFF;
     tx_cache_dirty_ = true;
@@ -149,10 +149,10 @@ bool FSoEMasterConnection::resetConnection()
     rx_seq_no_ = 1;   // Expected slave sequence also starts at 1
     current_param_index_ = 0;
     pdo_tx_count_ = 0;
-    last_tx_cmd_ = 0;
-    has_last_tx_cmd_ = false;
-    cmd_change_skip_remaining_ = 0;
     last_rx_frame_.clear();
+    baseline_rx_.clear();
+    expecting_rx_change_ = false;
+    stale_rx_count_ = 0;
     cached_tx_pdo_.clear();
     cached_tx_pdo_state_ = 0xFF;
     tx_cache_dirty_ = true;
@@ -1362,74 +1362,116 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
         last_txpdo_.assign(tx_pdo_in, tx_pdo_in + tx_pdo_len);
     }
 
-    // Startup grace period: skip RxFrame processing for the first few
-    // PDO cycles.  The slave cannot have produced a valid response until
-    // it has received at least one master frame and had time to process
-    // it.  Without DC synchronization there is a one-cycle pipeline
-    // delay, so we need at least 2 cycles.  With a slow slave (high
-    // slave_response_delay_cycles), we need to skip for that many cycles
-    // to avoid processing a stale response from a previous connection
-    // (e.g. after a reset).
-    const uint32_t startup_skip = std::max(
-        2u, static_cast<uint32_t>(config_.slave_response_delay_cycles));
-    if (pdo_tx_count_ < startup_skip) {
-        trace("PDO startup: skipping RX (cycle %u/%u, slave hasn't responded yet)",
-              pdo_tx_count_ + 1, startup_skip);
-        pdo_tx_count_++;
-        // Track the TX command for the command-change skip logic below.
-        last_tx_cmd_ = rx_pdo_out[0];
-        has_last_tx_cmd_ = true;
-        return false;
-    }
-
-    // Command-change skip: when the master transitions to a new state
-    // (e.g. Reset→Session), the TX command byte changes.  The slave's
-    // TxPDO still contains the response to the PREVIOUS command for
-    // `slave_response_delay_cycles` cycles (EtherCAT pipeline delay +
-    // slave internal processing delay).  Processing this stale response
-    // would trigger a spurious "unexpected command" fail-safe.
-    //
-    // We also trigger the skip when the master rebuilds its frame for
-    // any reason (e.g. safe outputs changed in Data state), because the
-    // slave's TxPDO still contains the response to the PREVIOUS frame
-    // for `slave_response_delay_cycles` cycles.
-    //
-    // We detect the change and skip RX processing for the configured
-    // number of cycles, giving the slave time to process the new frame
-    // and produce a fresh response.
-    const uint8_t current_tx_cmd = rx_pdo_out[0];
-    const uint8_t delay_cycles = config_.slave_response_delay_cycles;
-
-    if (has_last_tx_cmd_ && current_tx_cmd != last_tx_cmd_) {
-        // Command changed — start the skip countdown
-        cmd_change_skip_remaining_ = delay_cycles;
-        trace("PDO RX: TX cmd changed %s→%s, skipping RX for %u cycle(s) "
-              "(slave response delay)",
-              commandName(last_tx_cmd_), commandName(current_tx_cmd),
-              delay_cycles);
-    } else if (frame_rebuilt && delay_cycles > 0) {
-        // Frame rebuilt (e.g. safe outputs changed) but command is the
-        // same.  The slave still needs time to process the new frame.
-        cmd_change_skip_remaining_ = delay_cycles;
-        trace("PDO RX: TX frame rebuilt (cmd=%s), skipping RX for %u cycle(s) "
-              "(slave response delay)",
-              commandName(current_tx_cmd), delay_cycles);
-    }
-    last_tx_cmd_ = current_tx_cmd;
-    has_last_tx_cmd_ = true;
     pdo_tx_count_++;
 
-    if (cmd_change_skip_remaining_ > 0) {
-        trace("PDO RX: skipping stale response (%u cycle(s) remaining, "
-              "TX cmd=%s, slave TxPDO is behind)",
-              cmd_change_skip_remaining_, commandName(current_tx_cmd));
-        cmd_change_skip_remaining_--;
+    // ====================================================================
+    // RX change detection (requirements a, b, c)
+    // ====================================================================
+    //
+    // (a) In a simultaneous PDO exchange, the RxPDO frame CANNOT be the
+    //     response to the TxPDO frame sent in the same cycle — the slave
+    //     has not had time to process it.  The RX is always a response
+    //     to a PREVIOUS TX.  We therefore NEVER treat the current RX as
+    //     a response to the current TX.
+    //
+    // (b) No hardcoded frame-count assumptions are made.  The only timing
+    //     backstop is the configured FSoE timeout (watchdog / conn_timeout).
+    //
+    // (c) When the master's TX changes (state transition or safe-output
+    //     change), the slave's RX will still be the response to the OLD
+    //     TX for some cycles (pipeline + processing delay).  We use
+    //     change detection: compare the current RX to the "baseline" RX
+    //     (captured when TX changed).  If the RX hasn't changed after
+    //     `slave_response_delay_cycles` stale frames, it's an error →
+    //     fail-safe.  The FSoE timeout is the ultimate backstop.
+    //
+    // When TX is rebuilt (frame_rebuilt == true), the current RX is the
+    // last response to the OLD TX.  We capture it as the baseline and
+    // enter "expecting_rx_change" mode.  In this mode, we skip stale
+    // RX frames (identical to baseline) up to the configured budget.
+    // When the RX changes, we process it.  When the budget is exhausted,
+    // we trigger fail-safe.
+
+    if (frame_rebuilt) {
+        // TX changed — capture current RX as the baseline (last response
+        // to the old TX) and enter change-detection mode.  The current
+        // cycle's RX is the old response by definition (the slave hasn't
+        // seen the new TX yet), so we skip it immediately without
+        // counting it as a stale frame.  Stale counting starts from the
+        // NEXT cycle.
+        if (tx_pdo_in && tx_pdo_len > 0) {
+            baseline_rx_.assign(tx_pdo_in, tx_pdo_in + tx_pdo_len);
+        } else {
+            baseline_rx_.clear();
+        }
+        expecting_rx_change_ = true;
+        stale_rx_count_ = 0;
+        trace("PDO RX: TX changed, capturing baseline (%zu bytes), "
+              "entering change-detection mode (max stale=%u)",
+              baseline_rx_.size(), config_.slave_response_delay_cycles);
+        // Skip this cycle's RX — it's the old response by definition.
         return false;
     }
+
+    // NOTE: last_rx_frame_ is NOT set here — it is managed by
+    // processRxFrame (set on successful processing) and prepareTxFrame
+    // (cleared when a new TX is built).  Setting it here would break
+    // processRxFrame's own duplicate detection for handshake states.
+    // For diagnostics, last_txpdo_ (set above) stores the raw RxPDO bytes.
 
     if (tx_pdo_len == 0 || tx_pdo_in == nullptr) {
         trace("PDO RX: empty TxPDO (tx_pdo_len=%zu)", tx_pdo_len);
         return false;
+    }
+
+    // --- Change detection: skip stale RX frames ---
+    //
+    // This check runs BEFORE the valid-command check so that stale
+    // frames with invalid command bytes (e.g. all-zeros from a previous
+    // connection) are still counted as stale.  This ensures the stale
+    // budget is exhausted correctly even when the slave's old response
+    // has an invalid command byte.
+    //
+    // In "expecting_rx_change" mode, compare the current RX to the
+    // baseline.  If identical, the slave hasn't processed the new TX yet
+    // — skip and count.  If the stale count exceeds the configured
+    // budget, trigger fail-safe (the slave is not responding to the
+    // new TX).
+    if (expecting_rx_change_) {
+        const bool rx_is_stale =
+            !baseline_rx_.empty() &&
+            baseline_rx_.size() == tx_pdo_len &&
+            std::memcmp(baseline_rx_.data(), tx_pdo_in, tx_pdo_len) == 0;
+
+        if (rx_is_stale) {
+            stale_rx_count_++;
+            if (stale_rx_count_ > config_.slave_response_delay_cycles) {
+                // Stale budget exhausted — the slave has not updated its
+                // response within the allowed frame budget.  This is an
+                // error → fail-safe.
+                trace("PDO RX: stale budget exhausted (%u stale frames > %u max), "
+                      "triggering fail-safe (TX cmd=%s, RX still baseline)",
+                      stale_rx_count_, config_.slave_response_delay_cycles,
+                      commandName(rx_pdo_out[0]));
+                FSoEErrorDetail detail;
+                snprintf(detail.message, sizeof(detail.message),
+                         "Slave response stale after %u cycles (budget %u)",
+                         stale_rx_count_, config_.slave_response_delay_cycles);
+                handleError(ErrorCode::TimeoutError, detail);
+                return false;
+            }
+            trace("PDO RX: stale frame (%u/%u), skipping (TX changed, "
+                  "slave hasn't responded yet)",
+                  stale_rx_count_, config_.slave_response_delay_cycles);
+            return false;
+        }
+
+        // RX changed — slave has processed the new TX.  Exit
+        // change-detection mode and process the frame.
+        trace("PDO RX: frame changed after %u stale cycle(s), processing",
+              stale_rx_count_);
+        expecting_rx_change_ = false;
+        stale_rx_count_ = 0;
     }
 
     // Check for stale/empty TxPDO (all zeros or invalid command byte).
@@ -1444,14 +1486,18 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
     trace("PDO RX: processing frame cmd=%s(0x%02X) len=%zu state=%s",
           commandName(rx_cmd), rx_cmd, tx_pdo_len, stateName(status_.state));
 
-    // Data state duplicate detection (PDO path only).
+    // Duplicate detection for Data state in the PDO path.
     //
-    // In the PDO path with a slow slave, the slave resends the same
-    // response between processing cycles.  The master must skip these
-    // duplicates to avoid CRC chain divergence.  This check is ONLY in
-    // the PDO path (not in processRxFrame) so that the direct exchange
-    // path (exchangeWith) still processes duplicates in Data state
-    // (needed by the DataStateDuplicateIsProcessed test).
+    // processRxFrame already does duplicate detection for handshake
+    // states (Session, Connection, Parameter).  In Data state, when
+    // the master's TX is unchanged (cached), the slave sends the same
+    // response every cycle.  The master must skip these duplicates to
+    // avoid CRC chain divergence (the slave's TX CRC only advances
+    // when it processes a new master frame).
+    //
+    // This check is ONLY in the PDO path (not in processRxFrame) so
+    // that the direct exchange path (exchangeWith) still processes
+    // duplicates in Data state (needed by DataStateDuplicateIsProcessed).
     //
     // The watchdog timestamp IS updated — a duplicate frame proves the
     // slave is still alive and communicating.
@@ -1469,7 +1515,7 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
     // RX path: the FSoE frame is the entire TxPDO buffer.
     // Duplicate detection for handshake states is handled inside
     // processRxFrame (it checks last_rx_frame_ which is cleared by
-    // prepareTxFrame above).
+    // prepareTxFrame above when a new frame is built).
     return processRxFrame(tx_pdo_in, tx_pdo_len);
 }
 
