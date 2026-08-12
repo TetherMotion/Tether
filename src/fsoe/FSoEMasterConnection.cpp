@@ -1193,8 +1193,11 @@ bool FSoEMasterConnection::setSafeOutputs(const uint8_t* data, size_t len)
     // cache would be invalidated every cycle, causing the master to
     // rebuild the frame (advancing the CRC chain) every cycle —
     // breaking CRC synchronization with slow slaves.
-    const bool changed = (len != safe_outputs_.size() ||
-                          std::memcmp(data, safe_outputs_.data(), len) != 0);
+    //
+    // NOTE: safe_outputs_ is a std::array<uint8_t, 16>, so its size()
+    // is always 16, not config_.output_size.  Compare only the
+    // relevant bytes.
+    const bool changed = (std::memcmp(data, safe_outputs_.data(), len) != 0);
     std::copy(data, data + len, safe_outputs_.begin());
     if (changed) {
         tx_cache_dirty_ = true;
