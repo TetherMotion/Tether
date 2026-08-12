@@ -1187,9 +1187,18 @@ bool FSoEMasterConnection::setSafeOutputs(const uint8_t* data, size_t len)
     if (!data || len != config_.output_size) return false;
     if (status_.isFailSafe()) return false;
 
+    // Only invalidate the TX cache if the data actually changed.
+    // The typed view calls write() (→ setSafeOutputs) every cycle,
+    // even when the payload is identical.  Without this check, the
+    // cache would be invalidated every cycle, causing the master to
+    // rebuild the frame (advancing the CRC chain) every cycle —
+    // breaking CRC synchronization with slow slaves.
+    const bool changed = (len != safe_outputs_.size() ||
+                          std::memcmp(data, safe_outputs_.data(), len) != 0);
     std::copy(data, data + len, safe_outputs_.begin());
-    // Invalidate TX cache — safe outputs changed, need to rebuild frame
-    tx_cache_dirty_ = true;
+    if (changed) {
+        tx_cache_dirty_ = true;
+    }
     return true;
 }
 
@@ -1554,14 +1563,17 @@ bool FSoEMasterConnection::setSafeOutputBit(uint8_t bit_index, bool value)
 
     if (byte_idx >= config_.output_size) return false;
 
+    const uint8_t old = safe_outputs_[byte_idx];
     if (value) {
         safe_outputs_[byte_idx] |= (1 << bit_pos);
     } else {
         safe_outputs_[byte_idx] &= ~(1 << bit_pos);
     }
 
-    // Invalidate TX cache — safe outputs changed
-    tx_cache_dirty_ = true;
+    // Only invalidate TX cache if the bit actually changed
+    if (safe_outputs_[byte_idx] != old) {
+        tx_cache_dirty_ = true;
+    }
     return true;
 }
 
