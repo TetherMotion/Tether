@@ -697,18 +697,16 @@ TEST(FSoECommandChangeSkip, ConfigFieldAccessible) {
 }
 
 // ============================================================================
-// Tests: Synapticon config uses 8 cycles
+// Tests: Synapticon config uses 25 cycles
 // ============================================================================
 
-TEST(FSoECommandChangeSkip, SynapticonConfigUses8Cycles) {
-    // The Synapticon SafeMotion MainInstance should configure
-    // slave_response_delay_cycles = 8.  We verify this by checking
-    // the config that the SynapticonSafeMotion code produces.
-    // (This is tested indirectly via the integration tests, but we
-    // can verify the config field here.)
+TEST(FSoECommandChangeSkip, SynapticonConfigUses25Cycles) {
+    // The Synapticon SafeMotion MainInstance configures
+    // slave_response_delay_cycles = 25 to tolerate the ~8-cycle FSoE
+    // task delay plus jitter and multiple task periods.
     MasterConnectionConfig cfg{};
-    cfg.slave_response_delay_cycles = 8;
-    EXPECT_EQ(cfg.slave_response_delay_cycles, 8u);
+    cfg.slave_response_delay_cycles = 25;
+    EXPECT_EQ(cfg.slave_response_delay_cycles, 25u);
 }
 
 // ============================================================================
