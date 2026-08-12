@@ -66,6 +66,7 @@ bool FSoESlave::initialize() {
     last_rx_crc0_ = 0;
     tx_seq_no_ = config_.initialSeqNo;
     rx_seq_no_ = config_.initialSeqNo;
+    last_rx_seq_no_ = 0;
     statistics_.resetAll();
 
     // Configure diagnostics
@@ -170,6 +171,7 @@ void FSoESlave::reset() {
     last_rx_crc0_ = 0;
     tx_seq_no_ = config_.initialSeqNo;
     rx_seq_no_ = config_.initialSeqNo;
+    last_rx_seq_no_ = 0;
     last_rx_frame_bytes_.clear();  // Clear duplicate detection state
     cached_tx_response_.clear();   // Clear TX response cache
     cached_tx_state_ = 0xFF;
@@ -735,9 +737,11 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
         }
     }
 
-    // Update the expected RX sequence number to the value that matched
-    // (after collision avoidance).  The next expected RX seq is the
-    // incremented value.
+    // Save the seq that matched (after collision avoidance) for use in the
+    // slave's TX builders (cross-direction CRC inheritance: the slave uses
+    // the master's last TX seq).
+    last_rx_seq_no_ = seq_used;
+    // Update rx_seq_no_ for diagnostics.
     rx_seq_no_ = CRC::incrementSeqNo(seq_used);
 
     return true;
@@ -758,9 +762,13 @@ bool FSoESlave::validateCRC(const uint8_t* data, size_t len) {
     uint8_t cmd = 0;
     size_t data_len = 0;
     uint16_t conn_id = 0;
+    // Slave RX uses self-inheriting CRC (last_rx_crc0_ = master's last TX CRC0)
+    // and the expected master seq.
+    const bool is_reset_frame = (!data || len == 0) ? false : (data[0] == Command::Reset);
     return CRC::parseFSoEFrameWithCollisionAvoidance(
         data, len, cmd, nullptr, data_len, conn_id,
-        last_rx_crc0_, rx_seq_no_);
+        is_reset_frame ? 0 : last_rx_crc0_,
+        is_reset_frame ? config_.initialSeqNo : rx_seq_no_);
 }
 
 bool FSoESlave::validateSequence(uint8_t seqNum) {
@@ -842,6 +850,7 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
         txSequence_ = 0;
         last_tx_crc0_ = 0;
         last_rx_crc0_ = 0;
+        last_rx_seq_no_ = 0;
         tx_seq_no_ = config_.initialSeqNo;
         // rx_seq_no_ is NOT reset — validateFrame already advanced it
         last_rx_frame_bytes_.clear();  // Clear duplicate detection
@@ -1169,7 +1178,7 @@ size_t FSoESlave::buildSessionResponse(uint8_t* data, size_t maxLen) {
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Session, payload, config_.safeInputSize,
         config_.connectionId,
-        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+        last_rx_crc0_, last_rx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     return result;
 }
@@ -1188,7 +1197,7 @@ size_t FSoESlave::buildConnectionResponse(uint8_t* data, size_t maxLen) {
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Connection, payload, config_.safeInputSize,
         currentConnectionId_,
-        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+        last_rx_crc0_, last_rx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     return result;
 }
@@ -1203,7 +1212,7 @@ size_t FSoESlave::buildParameterResponse(uint8_t* data, size_t maxLen) {
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Parameter, payload, config_.safeInputSize,
         currentConnectionId_,
-        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+        last_rx_crc0_, last_rx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     return result;
 }
@@ -1216,7 +1225,7 @@ size_t FSoESlave::buildDataResponse(uint8_t* data, size_t maxLen) {
         data, Command::ProcessData,
         safeInputs_.data(), config_.safeInputSize,
         currentConnectionId_,
-        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+        last_rx_crc0_, last_rx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     return result;
 }
@@ -1245,7 +1254,7 @@ size_t FSoESlave::buildFailSafeResponse(uint8_t* data, size_t maxLen) {
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::FailSafeData,
         payload, payload_len, currentConnectionId_,
-        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+        last_rx_crc0_, last_rx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     return result;
 }
