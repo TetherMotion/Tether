@@ -9,10 +9,10 @@
  * writes) into *machine coordinates* (absolute stepper space, before
  * printer kinematics such as CoreXY/Delta).
  *
- * The composition order is:
+ * The composition order is (RS274/LinuxCNC compliant):
  *
  * ```
- * P_machine = T_wcs + T(pivot) * R * T(-pivot) * S * (P_program + T_g52 + T_g92)
+ * P_machine = T_g52 + T_tlo + T_wcs + T(pivot) * R * T(-pivot) * S * (P_program + T_g92)
  * ```
  *
  * Where:
@@ -20,9 +20,10 @@
  * - `R`        = rotation (G68): 2D in the active plane by default, or full
  *                3D (intrinsic XYZ Euler angles A/B/C, or axis-angle I/J/K + R)
  * - `pivot`    = rotation pivot point (specified in program coordinates)
- * - `T_g52`    = G52 local offset (program space, additive)
- * - `T_g92`    = G92 basic offset (program space, additive)
+ * - `T_g92`    = G92 basic offset (program space, applied before scale/rotate)
  * - `T_wcs`    = active work coordinate system offset (G54-G59.3)
+ * - `T_tlo`    = tool length offset (G43/G43.1, Z-axis only, after WCS)
+ * - `T_g52`    = G52 local offset (applied after WCS+TLO, per RS274)
  *
  * G53 (machine coordinates) bypasses the entire transform.
  *
@@ -102,9 +103,22 @@ public:
         recompute();
     }
 
-    /// @brief Set the G52 local offset (program space).
+    /// @brief Set the G52 local offset (applied after WCS, per RS274).
     void setG52Offset(const std::array<double, 3>& offset) {
         m_g52Offset = offset;
+        recompute();
+    }
+
+    /// @brief Set tool length offset (G43/G43.1). Z-axis only.
+    /// Applied after WCS offset, before G52.
+    void setToolLengthOffset(double zOffset) {
+        m_toolLengthOffset = zOffset;
+        recompute();
+    }
+
+    /// @brief Clear tool length offset (G49).
+    void clearToolLengthOffset() {
+        m_toolLengthOffset = 0.0;
         recompute();
     }
 
@@ -190,6 +204,7 @@ public:
         m_wcsOffset = {0.0, 0.0, 0.0};
         m_g92Offset = {0.0, 0.0, 0.0};
         m_g52Offset = {0.0, 0.0, 0.0};
+        m_toolLengthOffset = 0.0;
         m_scale = {1.0, 1.0, 1.0};
         m_extScale = {1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
         m_rotationMode = RotationMode::NONE;
@@ -209,6 +224,7 @@ public:
         return m_wcsOffset == std::array<double,3>{0,0,0}
             && m_g92Offset == std::array<double,3>{0,0,0}
             && m_g52Offset == std::array<double,3>{0,0,0}
+            && m_toolLengthOffset == 0.0
             && m_scale == std::array<double,3>{1,1,1}
             && m_extScale == std::array<double,6>{1,1,1,1,1,1}
             && m_rotationMode == RotationMode::NONE;
@@ -225,6 +241,7 @@ public:
     const std::array<double,3>& wcsOffset() const { return m_wcsOffset; }
     const std::array<double,3>& g92Offset() const { return m_g92Offset; }
     const std::array<double,3>& g52Offset() const { return m_g52Offset; }
+    double toolLengthOffset() const { return m_toolLengthOffset; }
 
     // ------------------------------------------------------------------
     // Forward transform: program -> machine
@@ -314,6 +331,7 @@ private:
     std::array<double, 3> m_wcsOffset{0, 0, 0};
     std::array<double, 3> m_g92Offset{0, 0, 0};
     std::array<double, 3> m_g52Offset{0, 0, 0};
+    double m_toolLengthOffset{0.0};
     std::array<double, 3> m_scale{1, 1, 1};
     std::array<double, 6> m_extScale{1, 1, 1, 1, 1, 1};
 
@@ -328,24 +346,27 @@ private:
     // Recompute the cached matrices from the current parameters.
     // ------------------------------------------------------------------
     void recompute() {
-        // Build the forward transform:
-        //   M = T(wcs) * T(pivot) * R * T(-pivot) * S * T(g52 + g92)
+        // Build the forward transform (RS274/LinuxCNC compliant order):
+        //   M = T(g52) * T(tlo) * T(wcs) * T(pivot) * R * T(-pivot) * S * T(g92)
         //
-        // Eigen composes transforms via operator*; the rightmost is
-        // applied first to a point. We build from the innermost
-        // (g52+g92 translation) outward.
+        // Applied to a point P (rightmost first):
+        //   1. T(g92)   — G92 offset (program space, before scale/rotate)
+        //   2. S        — per-axis scaling
+        //   3. T(-pivot)— translate to rotation pivot
+        //   4. R        — rotate
+        //   5. T(pivot) — translate back from pivot
+        //   6. T(wcs)   — WCS offset (G54-G59.3)
+        //   7. T(tlo)   — tool length offset (G43, Z-axis only)
+        //   8. T(g52)   — G52 local offset (after WCS, per RS274)
 
         namespace Eg = Eigen;
 
-        // Start with identity and compose left-to-right by multiplying
-        // on the left as we go outward.
+        // Start with identity and compose from innermost (g92) outward.
         Eg::Affine3d m = Eg::Affine3d::Identity();
 
-        // Innermost: T(g52 + g92) — translate in program space.
+        // Innermost: T(g92) — translate in program space.
         m = Eg::Translation3d(
-            m_g52Offset[0] + m_g92Offset[0],
-            m_g52Offset[1] + m_g92Offset[1],
-            m_g52Offset[2] + m_g92Offset[2]) * m;
+            m_g92Offset[0], m_g92Offset[1], m_g92Offset[2]) * m;
 
         // S — per-axis scaling.
         m = Eg::Scaling(m_scale[0], m_scale[1], m_scale[2]) * m;
@@ -359,9 +380,16 @@ private:
         // T(pivot) after rotation.
         m = Eg::Translation3d(m_pivot[0], m_pivot[1], m_pivot[2]) * m;
 
-        // T(wcs) — translate to machine space.
+        // T(wcs) — WCS offset to machine space.
         m = Eg::Translation3d(
             m_wcsOffset[0], m_wcsOffset[1], m_wcsOffset[2]) * m;
+
+        // T(tlo) — tool length offset (Z-axis only, after WCS).
+        m = Eg::Translation3d(0.0, 0.0, m_toolLengthOffset) * m;
+
+        // T(g52) — G52 local offset (outermost, after WCS+TLO).
+        m = Eg::Translation3d(
+            m_g52Offset[0], m_g52Offset[1], m_g52Offset[2]) * m;
 
         m_forward = m;
         m_inverse = m_forward.inverse();

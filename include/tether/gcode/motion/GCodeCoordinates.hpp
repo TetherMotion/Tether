@@ -363,6 +363,32 @@ constexpr int32_t G30_PARAM_BASE[4] = {5181, 5186, 5191, 5196};
 /// Current position parameter base
 constexpr int32_t CURRENT_POS_PARAM_BASE = 5420;
 
+/// G68 coordinate rotation parameter base (custom extension).
+/// #5400 = rotation active (0/1)
+/// #5401 = rotation mode (0=2D, 1=Euler, 2=axis-angle)
+/// #5402 = 2D rotation angle (degrees)
+/// #5403 = pivot X
+/// #5404 = pivot Y
+/// #5405 = pivot Z
+/// #5406 = Euler A angle (degrees)
+/// #5407 = Euler B angle (degrees)
+/// #5408 = Euler C angle (degrees)
+/// #5409 = axis I
+/// #5410 = axis J
+/// #5411 = axis K
+/// #5412 = axis-angle R (degrees)
+constexpr int32_t G68_PARAM_BASE = 5400;
+
+/// G51 scaling parameter base (custom extension).
+/// #5413 = scaling active (0/1)
+/// #5414 = scale X
+/// #5415 = scale Y
+/// #5416 = scale Z
+/// #5417 = scale A
+/// #5418 = scale B
+/// #5419 = scale C
+constexpr int32_t G51_PARAM_BASE = 5413;
+
 // ============================================================================
 // Work Coordinate System
 // ============================================================================
@@ -373,13 +399,17 @@ constexpr int32_t CURRENT_POS_PARAM_BASE = 5420;
 struct WorkCoordinateSystem {
     /// Offset from machine coordinates
     Position offset;
-    
+
+    /// WCS rotation angle in degrees (G10 L2 R word).
+    /// Applied as a 2D rotation in the active plane when this WCS is selected.
+    double rotation{0.0};
+
     /// WCS number (1-9)
     int32_t number{1};
-    
+
     /// Name (optional, e.g., "PART_1")
     std::string name;
-    
+
     /// Is modified from default
     bool modified{false};
 };

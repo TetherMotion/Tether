@@ -116,6 +116,17 @@ Error VariableSystem::set(int32_t number, double value) {
         return err;
     }
 
+    // System parameters (5001-5600): writable for custom extensions
+    // (#5400-#5419 G68/G51 state). Standard RS274 system params
+    // (#5001-#5399) are typically read-only via isReadOnly() check above.
+    if (number >= 5001 && number <= 5600) {
+        const size_t idx = static_cast<size_t>(number - 5001);
+        if (idx < m_systemParams.size()) {
+            m_systemParams[idx] = value;
+            return err;
+        }
+    }
+
     set_error(err, ErrorCode::PARAMETER_ERROR, 0, "Parameter number out of supported range");
     return err;
 }
@@ -139,7 +150,16 @@ bool VariableSystem::isDefined(int32_t number) const {
 }
 
 bool VariableSystem::isReadOnly(int32_t number) const {
-    return (number >= 5001 && number <= 5600);
+    // Standard RS274 system parameters (5001-5399) are read-only.
+    // Custom extension parameters (#5400-#5419 for G68/G51 state) are
+    // writable by the coordinate system manager.
+    if (number >= 5001 && number <= 5399)
+        return true;
+    // #5400-#5419: custom G68/G51 extension params — writable
+    // #5420-#5600: position/state feedback — read-only
+    if (number >= 5420 && number <= 5600)
+        return true;
+    return false;
 }
 
 std::optional<double> VariableSystem::getNamed(const std::string& name) const {

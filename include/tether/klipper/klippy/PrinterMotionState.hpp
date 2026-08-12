@@ -89,9 +89,14 @@ struct PrinterMotionState {
     // Coordinate systems (G54-G59.3)
     int activeCoordSystem = 0;      ///< 0=G54, ..., 8=G59.3
     std::array<std::array<double, 3>, 9> coordSystemOffsets = {};  ///< Per-system X/Y/Z offsets
+    std::array<double, 9> coordSystemRotations = {};  ///< Per-system rotation angle (degrees, G10 L2 R)
 
     // G52 local coordinate offset
     std::array<double, 3> g52Offset = {0, 0, 0};
+
+    // G92 position offset (program space)
+    std::array<double, 3> g92Offset = {0, 0, 0};
+    bool g92Active = false;
 
     // G68 coordinate rotation
     bool g68Active = false;                 ///< G68 rotation active
@@ -105,6 +110,10 @@ struct PrinterMotionState {
     // G51 scaling
     bool g51Active = false;                 ///< G51 scaling active
     std::array<double, 3> scaleFactors = {1, 1, 1};  ///< Per-axis XYZ scale
+    std::array<double, 6> extScaleFactors = {1, 1, 1, 1, 1, 1}; ///< A/B/C/U/V/W scale
+
+    // Tool length offset (G43/G43.1, Z-axis only)
+    double toolLengthOffset = 0.0;
 
     /// Composed coordinate transform (scale + rotation + WCS/G52/G92 offset).
     /// Rebuilt by rebuildCoordTransform() whenever any of the above change.
@@ -114,11 +123,17 @@ struct PrinterMotionState {
     void rebuildCoordTransform() {
         coordTransform.setWCSOffset(coordSystemOffsets[activeCoordSystem]);
         coordTransform.setG52Offset(g52Offset);
-        // G92 is handled via setPosition in the Klipper path; keep zero here.
-        coordTransform.setG92Offset({0, 0, 0});
-        if (g51Active)
-            coordTransform.setScale(scaleFactors[0], scaleFactors[1], scaleFactors[2]);
+        // G92 offset: applied in program space as part of the transform.
+        if (g92Active)
+            coordTransform.setG92Offset(g92Offset);
         else
+            coordTransform.setG92Offset({0, 0, 0});
+        // Tool length offset (G43, Z-axis only, after WCS)
+        coordTransform.setToolLengthOffset(toolLengthOffset);
+        if (g51Active) {
+            coordTransform.setScale(scaleFactors[0], scaleFactors[1], scaleFactors[2]);
+            coordTransform.setExtendedScale(extScaleFactors);
+        } else
             coordTransform.clearScale();
         if (g68Active) {
             switch (g68Mode) {
@@ -136,7 +151,17 @@ struct PrinterMotionState {
                     break;
             }
         } else {
-            coordTransform.clearRotation();
+            // Apply WCS rotation (G10 L2 R) when G68 is not active.
+            // The rotation is about the program origin (0,0); T(wcs) is
+            // applied after, so the effective pivot in machine space is
+            // the WCS offset point — i.e. the WCS origin.
+            double wcsRot = coordSystemRotations[activeCoordSystem];
+            if (wcsRot != 0.0) {
+                const auto& wcsOff = coordSystemOffsets[activeCoordSystem];
+                coordTransform.setRotation2D(wcsRot, plane, 0.0, 0.0);
+            } else {
+                coordTransform.clearRotation();
+            }
         }
     }
 

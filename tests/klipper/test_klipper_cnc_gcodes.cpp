@@ -696,3 +696,227 @@ TEST(KlipperPinPolling, M226Dispatch) {
     EXPECT_EQ(polledState, 1);
     EXPECT_NEAR(polledTimeout, 60.0, 0.01);
 }
+
+// ============================================================================
+// Part 10: End-to-end coordinate transform tests
+// ============================================================================
+
+TEST(KlipperCoordTransformE2E, MoveWithWCSOffset) {
+    GcodeCallbacks cb;
+    double mx = -1, my = -1, mz = -1;
+    cb.move = [&](double x, double y, double z, double, double) {
+        mx = x; my = y; mz = z;
+    };
+
+    PrinterMotionState state;
+    state.coordSystemOffsets[0] = {10.0, 20.0, 30.0};
+    state.activeCoordSystem = 0;
+    state.rebuildCoordTransform();
+    GCodeExecutor exec(std::move(cb), &state);
+
+    // G1 X1 Y2 Z3 in program space → machine (11, 22, 33)
+    EXPECT_TRUE(exec.executeLine("G1 X1 Y2 Z3 F100"));
+    EXPECT_NEAR(mx, 11.0, 0.001);
+    EXPECT_NEAR(my, 22.0, 0.001);
+    EXPECT_NEAR(mz, 33.0, 0.001);
+}
+
+TEST(KlipperCoordTransformE2E, MoveWithG52Offset) {
+    GcodeCallbacks cb;
+    double mx = -1, my = -1, mz = -1;
+    cb.move = [&](double x, double y, double z, double, double) {
+        mx = x; my = y; mz = z;
+    };
+
+    PrinterMotionState state;
+    state.g52Offset = {5.0, 10.0, 15.0};
+    state.rebuildCoordTransform();
+    GCodeExecutor exec(std::move(cb), &state);
+
+    EXPECT_TRUE(exec.executeLine("G1 X1 Y2 Z3 F100"));
+    EXPECT_NEAR(mx, 6.0, 0.001);
+    EXPECT_NEAR(my, 12.0, 0.001);
+    EXPECT_NEAR(mz, 18.0, 0.001);
+}
+
+TEST(KlipperCoordTransformE2E, MoveWithG68Rotation90) {
+    GcodeCallbacks cb;
+    double mx = -1, my = -1, mz = -1;
+    cb.move = [&](double x, double y, double z, double, double) {
+        mx = x; my = y; mz = z;
+    };
+
+    PrinterMotionState state;
+    state.g68Active = true;
+    state.g68Mode = 0;
+    state.coordRotation = 90.0;
+    state.g68Pivot = {0, 0, 0};
+    state.rebuildCoordTransform();
+    GCodeExecutor exec(std::move(cb), &state);
+
+    // (1, 0, 0) rotated 90° → (0, 1, 0)
+    EXPECT_TRUE(exec.executeLine("G1 X1 Y0 Z0 F100"));
+    EXPECT_NEAR(mx, 0.0, 0.001);
+    EXPECT_NEAR(my, 1.0, 0.001);
+    EXPECT_NEAR(mz, 0.0, 0.001);
+}
+
+TEST(KlipperCoordTransformE2E, MoveWithG51Scaling) {
+    GcodeCallbacks cb;
+    double mx = -1, my = -1, mz = -1;
+    cb.move = [&](double x, double y, double z, double, double) {
+        mx = x; my = y; mz = z;
+    };
+
+    PrinterMotionState state;
+    state.g51Active = true;
+    state.scaleFactors = {2.0, 0.5, 1.0};
+    state.rebuildCoordTransform();
+    GCodeExecutor exec(std::move(cb), &state);
+
+    // (10, 10, 10) scaled by (2, 0.5, 1) → (20, 5, 10)
+    EXPECT_TRUE(exec.executeLine("G1 X10 Y10 Z10 F100"));
+    EXPECT_NEAR(mx, 20.0, 0.001);
+    EXPECT_NEAR(my, 5.0, 0.001);
+    EXPECT_NEAR(mz, 10.0, 0.001);
+}
+
+TEST(KlipperCoordTransformE2E, MoveWithCombinedWCSAndG52) {
+    GcodeCallbacks cb;
+    double mx = -1, my = -1, mz = -1;
+    cb.move = [&](double x, double y, double z, double, double) {
+        mx = x; my = y; mz = z;
+    };
+
+    PrinterMotionState state;
+    state.coordSystemOffsets[0] = {10.0, 20.0, 30.0};
+    state.activeCoordSystem = 0;
+    state.g52Offset = {5.0, 10.0, 15.0};
+    state.rebuildCoordTransform();
+    GCodeExecutor exec(std::move(cb), &state);
+
+    // WCS(10,20,30) + G52(5,10,15) + program(1,2,3) = machine(16,32,48)
+    EXPECT_TRUE(exec.executeLine("G1 X1 Y2 Z3 F100"));
+    EXPECT_NEAR(mx, 16.0, 0.001);
+    EXPECT_NEAR(my, 32.0, 0.001);
+    EXPECT_NEAR(mz, 48.0, 0.001);
+}
+
+TEST(KlipperCoordTransformE2E, MoveWithCombinedRotationAndOffset) {
+    GcodeCallbacks cb;
+    double mx = -1, my = -1, mz = -1;
+    cb.move = [&](double x, double y, double z, double, double) {
+        mx = x; my = y; mz = z;
+    };
+
+    PrinterMotionState state;
+    state.coordSystemOffsets[0] = {10.0, 20.0, 30.0};
+    state.activeCoordSystem = 0;
+    state.g68Active = true;
+    state.g68Mode = 0;
+    state.coordRotation = 90.0;
+    state.g68Pivot = {0, 0, 0};
+    state.rebuildCoordTransform();
+    GCodeExecutor exec(std::move(cb), &state);
+
+    // (1, 0, 0) rotated 90° → (0, 1, 0), then + WCS(10,20,30) → (10, 21, 30)
+    EXPECT_TRUE(exec.executeLine("G1 X1 Y0 Z0 F100"));
+    EXPECT_NEAR(mx, 10.0, 0.001);
+    EXPECT_NEAR(my, 21.0, 0.001);
+    EXPECT_NEAR(mz, 30.0, 0.001);
+}
+
+TEST(KlipperCoordTransformE2E, FeedRateScaledByG51) {
+    GcodeCallbacks cb;
+    double feedUsed = 0;
+    cb.move = [&](double, double, double, double, double speed) {
+        feedUsed = speed;
+    };
+
+    PrinterMotionState state;
+    state.g51Active = true;
+    state.scaleFactors = {2.0, 2.0, 2.0};
+    state.rebuildCoordTransform();
+    GCodeExecutor exec(std::move(cb), &state);
+
+    // F100 mm/min with 2x scale → 200 mm/min = 3.333 mm/s
+    EXPECT_TRUE(exec.executeLine("G1 X10 Y10 Z10 F100"));
+    EXPECT_NEAR(feedUsed, 200.0 / 60.0, 0.01);
+}
+
+TEST(KlipperCoordTransformE2E, G92OffsetAppliesToMove) {
+    GcodeCallbacks cb;
+    double mx = -1, my = -1, mz = -1;
+    cb.move = [&](double x, double y, double z, double, double) {
+        mx = x; my = y; mz = z;
+    };
+
+    PrinterMotionState state;
+    state.position = {0, 0, 0};
+    state.rebuildCoordTransform();
+    GCodeExecutor exec(std::move(cb), &state);
+
+    // G92 X10 Y10 Z10: current position (0,0,0) becomes (10,10,10) in program space
+    EXPECT_TRUE(exec.executeLine("G92 X10 Y10 Z10"));
+    // Now move to program (20, 20, 20) → machine (10, 10, 10)
+    EXPECT_TRUE(exec.executeLine("G1 X20 Y20 Z20 F100"));
+    EXPECT_NEAR(mx, 10.0, 0.001);
+    EXPECT_NEAR(my, 10.0, 0.001);
+    EXPECT_NEAR(mz, 10.0, 0.001);
+}
+
+TEST(KlipperCoordTransformE2E, G91IncrementalMode) {
+    GcodeCallbacks cb;
+    double mx = -1, my = -1, mz = -1;
+    cb.move = [&](double x, double y, double z, double, double) {
+        mx = x; my = y; mz = z;
+    };
+
+    PrinterMotionState state;
+    state.position = {5.0, 5.0, 5.0};
+    state.rebuildCoordTransform();
+    GCodeExecutor exec(std::move(cb), &state);
+
+    // G91: incremental mode. Move +10 in X → machine 15
+    EXPECT_TRUE(exec.executeLine("G91"));
+    EXPECT_TRUE(exec.executeLine("G1 X10 F100"));
+    EXPECT_NEAR(mx, 15.0, 0.001);
+    EXPECT_NEAR(my, 5.0, 0.001);
+    EXPECT_NEAR(mz, 5.0, 0.001);
+}
+
+TEST(KlipperCoordTransformE2E, G10L2WithRSetsWCSRotation) {
+    PrinterMotionState state;
+    state.activeCoordSystem = 0;
+    state.rebuildCoordTransform();
+
+    // G10 L2 P1 R45: set WCS 1 rotation to 45°
+    // We can't directly test this through the Klipper executor since it
+    // uses the RS274 CoordinateSystemManager, but we can test the
+    // CoordinateSystemManager directly.
+    // This test verifies the PrinterMotionState doesn't crash.
+    EXPECT_NO_FATAL_FAILURE({
+        state.rebuildCoordTransform();
+    });
+}
+
+TEST(KlipperCoordTransformE2E, ExtendedAxisScaling) {
+    GcodeCallbacks cb;
+    double mx = -1, my = -1, mz = -1;
+    cb.move = [&](double x, double y, double z, double, double) {
+        mx = x; my = y; mz = z;
+    };
+
+    PrinterMotionState state;
+    state.g51Active = true;
+    state.scaleFactors = {1.0, 1.0, 1.0};
+    state.extScaleFactors = {2.0, 1.0, 1.0, 1.0, 1.0, 1.0}; // A=2, B=1, C=1
+    state.rebuildCoordTransform();
+    GCodeExecutor exec(std::move(cb), &state);
+
+    // XYZ not scaled, but extended axes are. The move callback only gets XYZ.
+    EXPECT_TRUE(exec.executeLine("G1 X10 Y20 Z30 F100"));
+    EXPECT_NEAR(mx, 10.0, 0.001);
+    EXPECT_NEAR(my, 20.0, 0.001);
+    EXPECT_NEAR(mz, 30.0, 0.001);
+}

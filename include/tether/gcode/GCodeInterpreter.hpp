@@ -580,6 +580,9 @@ private:
     VariableSystem m_variables;
     std::unique_ptr<OCodeExecutor> m_oCodeExecutor;
     
+    // Tool management (must be before motion handlers that reference it)
+    ToolTable m_toolTable;
+    
     // Motion handlers
     LinearMotionHandler m_linearMotion;
     ArcMotionHandler m_arcMotion;
@@ -595,9 +598,6 @@ private:
     BacklashCompensation m_backlashComp;
     AdaptiveFeedController m_adaptiveFeed;
     OverrideController m_overrides;
-    
-    // Tool management
-    ToolTable m_toolTable;
     
     // State
     InterpreterMode m_mode{InterpreterMode::AUTO};
@@ -629,6 +629,9 @@ private:
     Error processGCodes(const Block& block, std::vector<MotionSegment>& segments);
     Error processMCodes(const Block& block);
     Error handleMotion(const Block& block, std::vector<MotionSegment>& segments);
+    Error handleArc(const Block& block, const Position& target,
+                    MotionMode mode, double unitScale,
+                    std::vector<MotionSegment>& segments);
     Error outputSegments(const std::vector<MotionSegment>& segments);
     
     // G-code dispatch
@@ -641,6 +644,9 @@ private:
     // State management
     void updateModalState(const Block& block);
     void updatePositionVariables();
+
+    /// @brief Check if the block has any motion axis words (X/Y/Z/A/B/C/U/V/W).
+    bool hasMotionWords(const Block& block) const;
 
     // Initialization
     void initializeDefaults();
