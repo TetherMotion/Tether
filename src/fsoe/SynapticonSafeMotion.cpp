@@ -241,7 +241,9 @@ MainInstance::MainInstance(const MainConfig& config)
         // Synapticon SOMANET drives run FSoE at a lower internal rate
         // than the EtherCAT bus cycle, resulting in ~8 cycles of delay
         // between the master's TX command and the slave's TX response.
-        cfg.slave_response_delay_cycles = 8;
+        // Use a generous budget (25) to tolerate jitter and multiple
+        // FSoE task periods before the stale-exhaustion fail-safe fires.
+        cfg.slave_response_delay_cycles = 25;
         return cfg;
     }())
     , connection_(connection_config_)
