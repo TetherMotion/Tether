@@ -101,6 +101,8 @@ bool FSoEMasterConnection::initialize()
     cached_tx_pdo_.clear();
     cached_tx_pdo_state_ = 0xFF;
     tx_cache_dirty_ = true;
+    consecutive_seq_fallback_ = 0;
+    seq_fallback_disabled_ = false;
 
     resetStats();
     parameter_crc_ = computeParameterCRC();
@@ -160,6 +162,8 @@ bool FSoEMasterConnection::resetConnection()
     cached_tx_pdo_.clear();
     cached_tx_pdo_state_ = 0xFF;
     tx_cache_dirty_ = true;
+    consecutive_seq_fallback_ = 0;
+    seq_fallback_disabled_ = false;
     stats_.reset_events++;
 
     return true;
@@ -288,18 +292,97 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
     const bool is_reset_frame = (data[0] == Command::Reset);
     const uint16_t parse_start_crc = is_reset_frame ? 0 : last_tx_crc0_;
     // The slave's Reset response uses seq = initial_seq_no + 1.
-    // Non-Reset frames use last_tx_seq_no_ (the master's actual last TX seq,
-    // which the slave echoes back without incrementing).
+    // Non-Reset frames use tx_seq_no_ (the master's NEXT TX seq, which was
+    // incremented after the master's last TX).  The slave increments its
+    // rx_seq_no_ after receiving the master's TX, and uses that incremented
+    // value for its TX response.  So the master's RX must use tx_seq_no_
+    // (which was also incremented after TX) to match.
     const uint16_t parse_seq_no = is_reset_frame
         ? CRC::incrementSeqNo(config_.initial_seq_no)
-        : last_tx_seq_no_;
+        : tx_seq_no_;
     uint16_t seq_used = 0;
+
+    // CRC trace tracking (for --debug fsoe-crc)
+    bool crc_trace_fb_used = false;
+    int  crc_trace_fb_delta = 0;
+    bool crc_trace_ok = false;
+    uint16_t crc_trace_crc0 = 0;
 
     if (!CRC::parseFSoEFrameWithCollisionAvoidance(
             data, len, cmd, frame_data, data_len, conn_id,
             parse_start_crc, parse_seq_no,
             is_reset_frame ? nullptr : &last_rx_crc0_,
             &seq_used, &crc_error_detail)) {
+        // --- Diagnostic seq±1 fallback ---
+        // The CRC didn't verify with the expected seq.  As a diagnostic
+        // aid, try seq-1 and seq+1 to detect off-by-one seq
+        // synchronization issues (common during interoperability
+        // debugging with real slaves).  This is rate-limited: if the
+        // fallback rescues frames more than kMaxConsecutiveSeqFallback
+        // times in a row, it is disabled (the seq is permanently off,
+        // indicating a real bug, not a transient glitch).  The counter
+        // resets whenever a frame verifies with the expected seq.
+        if (!is_reset_frame && !seq_fallback_disabled_) {
+            const uint16_t seq_minus = CRC::decrementSeqNo(parse_seq_no);
+            const uint16_t seq_plus = CRC::incrementSeqNo(parse_seq_no);
+            uint16_t fb_seq_used = 0;
+            CRC::CrcErrorDetail fb_error{};
+            const uint16_t fb_crc0_save = last_rx_crc0_;
+
+            // Try seq-1
+            if (CRC::parseFSoEFrameWithCollisionAvoidance(
+                    data, len, cmd, frame_data, data_len, conn_id,
+                    parse_start_crc, seq_minus,
+                    &last_rx_crc0_, &fb_seq_used, &fb_error)) {
+                consecutive_seq_fallback_++;
+                seq_used = fb_seq_used;
+                crc_trace_fb_used = true;
+                crc_trace_fb_delta = -1;
+                crc_trace_ok = true;
+                crc_trace_crc0 = last_rx_crc0_;
+                trace("RX CRC: seq±1 fallback SUCCEEDED with seq-1 "
+                      "(expected=%u, used=%u, consecutive=%u/%u)",
+                      parse_seq_no, seq_minus,
+                      consecutive_seq_fallback_, kMaxConsecutiveSeqFallback);
+                if (consecutive_seq_fallback_ >= kMaxConsecutiveSeqFallback) {
+                    seq_fallback_disabled_ = true;
+                    trace("RX CRC: seq±1 fallback DISABLED after %u "
+                          "consecutive rescues — seq is permanently off",
+                          consecutive_seq_fallback_);
+                }
+                // Fall through to normal processing with the fallback result.
+                // Skip the "expected seq" reset below since this was a fallback.
+                goto crc_fallback_succeeded;
+            }
+            last_rx_crc0_ = fb_crc0_save;  // restore on failure
+
+            // Try seq+1
+            if (CRC::parseFSoEFrameWithCollisionAvoidance(
+                    data, len, cmd, frame_data, data_len, conn_id,
+                    parse_start_crc, seq_plus,
+                    &last_rx_crc0_, &fb_seq_used, &fb_error)) {
+                consecutive_seq_fallback_++;
+                seq_used = fb_seq_used;
+                crc_trace_fb_used = true;
+                crc_trace_fb_delta = +1;
+                crc_trace_ok = true;
+                crc_trace_crc0 = last_rx_crc0_;
+                trace("RX CRC: seq±1 fallback SUCCEEDED with seq+1 "
+                      "(expected=%u, used=%u, consecutive=%u/%u)",
+                      parse_seq_no, seq_plus,
+                      consecutive_seq_fallback_, kMaxConsecutiveSeqFallback);
+                if (consecutive_seq_fallback_ >= kMaxConsecutiveSeqFallback) {
+                    seq_fallback_disabled_ = true;
+                    trace("RX CRC: seq±1 fallback DISABLED after %u "
+                          "consecutive rescues — seq is permanently off",
+                          consecutive_seq_fallback_);
+                }
+                goto crc_fallback_succeeded;
+            }
+            last_rx_crc0_ = fb_crc0_save;  // restore on failure
+        }
+
+        // No fallback worked (or fallback disabled) — report the error.
         stats_.crc_errors++;
         FSoEErrorDetail detail;
         if (crc_error_detail.valid) {
@@ -319,8 +402,52 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
                      "Master received malformed FSoE frame from slave "
                      "(frame too short or unparseable)");
         }
+
+        // Emit CRC trace (RX failure): show what parameters were tried.
+        if (crc_trace_callback_) {
+            CrcTraceInfo info{};
+            info.direction = CrcTraceInfo::Direction::RX;
+            info.command = (len > 0) ? data[0] : 0;
+            info.state = status_.state;
+            info.start_crc = parse_start_crc;
+            info.seq_expected = parse_seq_no;
+            info.seq_used = 0;  // no seq matched
+            info.crc0 = 0;
+            info.crc_ok = false;
+            info.fallback_used = false;
+            info.fallback_delta = 0;
+            info.conn_id = conn_id;
+            info.data_len = data_len;
+            crc_trace_callback_(info);
+        }
+
         handleError(ErrorCode::CRCError, detail);
         return false;
+    }
+
+    // Frame verified with the expected seq — reset the fallback counter.
+    consecutive_seq_fallback_ = 0;
+    crc_trace_ok = true;
+    crc_trace_crc0 = last_rx_crc0_;
+
+crc_fallback_succeeded:
+
+    // Emit CRC trace (RX success): show what parameters verified the frame.
+    if (crc_trace_callback_) {
+        CrcTraceInfo info{};
+        info.direction = CrcTraceInfo::Direction::RX;
+        info.command = cmd;
+        info.state = status_.state;
+        info.start_crc = parse_start_crc;
+        info.seq_expected = parse_seq_no;
+        info.seq_used = seq_used;
+        info.crc0 = crc_trace_crc0;
+        info.crc_ok = crc_trace_ok;
+        info.fallback_used = crc_trace_fb_used;
+        info.fallback_delta = crc_trace_fb_delta;
+        info.conn_id = conn_id;
+        info.data_len = data_len;
+        crc_trace_callback_(info);
     }
 
     // Save the seq that matched (after collision avoidance).
@@ -490,6 +617,11 @@ size_t FSoEMasterConnection::prepareTxFrame(uint8_t* data, size_t max_len)
     // master stays in Reset until it receives the slave's Session response
     // (handled in handleResetState), at which point it transitions to
     // Session and begins the handshake with a fresh session ID.
+    //
+    // Save CRC input parameters before the build function updates them,
+    // so we can emit a CRC trace with both input and output values.
+    const uint16_t tx_start_crc_before = last_tx_crc0_;
+    const uint16_t tx_seq_before = tx_seq_no_;
     size_t len = 0;
 
     switch (status_.state) {
@@ -555,12 +687,40 @@ size_t FSoEMasterConnection::prepareTxFrame(uint8_t* data, size_t max_len)
 
     if (len > 0) {
         stats_.frames_sent++;
+        // The build* function already set tx_seq_no_ = seq_used and
+        // last_tx_crc0_ = new CRC0.  Save seq_used before incrementing.
+        const uint16_t tx_seq_used = tx_seq_no_;
+        const uint16_t tx_crc0_result = last_tx_crc0_;
+
         // Increment TX sequence number for the NEXT frame (self-inheriting
         // TX: the master's next TX inherits from this TX's CRC0 and uses
         // seq+1).  The actual seq used for this frame (after collision
         // avoidance) was already set by the build* function; here we
         // advance to the next expected value.
+        // NOTE: In the PDO path, the TX cache prevents prepareTxFrame from
+        // being called every cycle, so the increment only happens once per
+        // state transition.  In the direct exchangeWith path, it increments
+        // per frame as expected.
         tx_seq_no_ = CRC::incrementSeqNo(tx_seq_no_);
+
+        // Emit CRC trace (TX): show the parameters used to build this frame.
+        if (crc_trace_callback_) {
+            CrcTraceInfo info{};
+            info.direction = CrcTraceInfo::Direction::TX;
+            info.command = (len > 0) ? data[0] : 0;
+            info.state = status_.state;
+            info.start_crc = tx_start_crc_before;
+            info.seq_expected = tx_seq_before;
+            info.seq_used = tx_seq_used;
+            info.crc0 = tx_crc0_result;
+            info.crc_ok = true;
+            info.fallback_used = false;
+            info.fallback_delta = 0;
+            info.conn_id = config_.connection_id;
+            info.data_len = config_.output_size;
+            crc_trace_callback_(info);
+        }
+
         tx_frame_events_.emit([data, len] {
             return std::make_shared<const std::vector<uint8_t>>(data, data + len);
         });
@@ -1100,12 +1260,13 @@ bool FSoEMasterConnection::validateCRC(const uint8_t* data, size_t len) const
     uint8_t cmd = 0;
     size_t data_len = 0;
     uint16_t conn_id = 0;
-    // Self-inheriting RX: verify using own last TX CRC0 and seq.
+    // Self-inheriting RX: verify using own last TX CRC0 and tx_seq_no_
+    // (the incremented value, matching the slave's rx_seq_no_ after RX).
     const bool is_reset_frame = (!data || len == 0) ? false : (data[0] == Command::Reset);
     return CRC::parseFSoEFrameWithCollisionAvoidance(
         data, len, cmd, nullptr, data_len, conn_id,
         is_reset_frame ? 0 : last_tx_crc0_,
-        is_reset_frame ? CRC::incrementSeqNo(config_.initial_seq_no) : last_tx_seq_no_);
+        is_reset_frame ? CRC::incrementSeqNo(config_.initial_seq_no) : tx_seq_no_);
 }
 
 bool FSoEMasterConnection::validateSequence(uint8_t seq)
@@ -1836,6 +1997,12 @@ void FSoEMasterConnection::setSequenceTraceCallback(SequenceTraceCallback callba
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     sequence_trace_callback_ = std::move(callback);
+}
+
+void FSoEMasterConnection::setCrcTraceCallback(CrcTraceCallback callback)
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    crc_trace_callback_ = std::move(callback);
 }
 
 // ============================================================================

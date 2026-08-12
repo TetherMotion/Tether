@@ -143,6 +143,35 @@ struct SequenceTraceInfo {
 
 using SequenceTraceCallback = std::function<void(const SequenceTraceInfo&)>;
 
+/// CRC trace info (--debug fsoe-crc).
+///
+/// When installed via setCrcTraceCallback(), the connection emits the
+/// exact CRC parameters used when building (TX) and checking (RX) every
+/// FSoE frame.  This is the low-level "what CRC inputs did the master
+/// use" view — essential for diagnosing CRC/seq synchronization issues
+/// with real slaves.
+///
+/// For TX frames, the callback is invoked from prepareTxFrame() after the
+/// frame is built.  For RX frames, it is invoked from processRxFrame()
+/// after the CRC check (whether it passed or failed).
+struct CrcTraceInfo {
+    enum class Direction : uint8_t { TX, RX };
+    Direction direction;      ///< TX (master building) or RX (master checking)
+    uint8_t  command;         ///< FSoE command byte (0x2A, 0x4E, 0x64, ...)
+    uint8_t  state;           ///< FSoE state when this frame was built/checked
+    uint16_t start_crc;       ///< start_crc used for CRC computation (inheritance)
+    uint16_t seq_expected;    ///< seq initially tried (before collision avoidance)
+    uint16_t seq_used;        ///< seq that actually matched/was used (after CA)
+    uint16_t crc0;            ///< resulting CRC0 (0 if parse failed and no fallback)
+    bool     crc_ok;          ///< true if CRC verified (RX) or frame built (TX)
+    bool     fallback_used;   ///< true if seq±1 fallback was used (RX only)
+    int      fallback_delta;  ///< -1, 0, or +1 (RX only; 0 = no fallback)
+    uint16_t conn_id;         ///< Connection ID in the frame
+    size_t   data_len;        ///< SafeData length in bytes
+};
+
+using CrcTraceCallback = std::function<void(const CrcTraceInfo&)>;
+
 /// Event source for FSoE frame events.  Each listener receives an immutable
 /// shared_ptr<const std::vector<uint8_t>> copy of the frame bytes.  When no
 /// listeners are registered, emit() performs no allocation.
@@ -226,11 +255,12 @@ public:
     /// startCrc = last_tx_crc0_, seqNo = tx_seq_no_
     uint16_t getTxLastCrc0() const { return last_tx_crc0_; }
     uint16_t getTxSeqNo() const { return tx_seq_no_; }
-    /// Get the current RX CRC state (self-inheriting RX — slave echoes
-    /// master's last TX CRC0/seq).
-    /// startCrc = last_tx_crc0_, seqNo = last_tx_seq_no_
+    /// Get the current RX CRC state (self-inheriting RX — slave uses
+    /// rx_seq_no_ after incrementing, master uses tx_seq_no_ after
+    /// incrementing).
+    /// startCrc = last_tx_crc0_, seqNo = tx_seq_no_
     uint16_t getRxLastCrc0() const { return last_tx_crc0_; }
-    uint16_t getRxSeqNo() const { return last_tx_seq_no_; }
+    uint16_t getRxSeqNo() const { return tx_seq_no_; }
 
     // --- Callbacks ---
     void setStateChangeCallback(StateChangeCallback callback);
@@ -239,6 +269,7 @@ public:
     void setDataCallback(DataCallback callback);
     void setTraceCallback(TraceCallback callback);
     void setSequenceTraceCallback(SequenceTraceCallback callback);
+    void setCrcTraceCallback(CrcTraceCallback callback);
 
     // --- Frame event sources ---
     // Listeners receive a shared_ptr<const std::vector<uint8_t>> copy of the
@@ -393,6 +424,20 @@ private:
     // what the slave was actually sending.
     std::vector<uint8_t> last_txpdo_;
 
+    // --- Diagnostic seq±1 fallback ---
+    // When a CRC mismatch occurs, the master retries with seq-1 and seq+1
+    // to detect off-by-one seq synchronization issues (common during
+    // interoperability debugging with real slaves).  This is a DIAGNOSTIC
+    // aid only — it must not mask persistent errors.  To prevent infinite
+    // fallback, a consecutive-fallback counter limits how many times in a
+    // row the fallback can rescue a frame.  When a frame verifies with the
+    // expected seq (no fallback needed), the counter resets to 0.  When
+    // the counter exceeds the configured limit, the fallback is disabled
+    // and the CRC error is reported normally.
+    static constexpr uint32_t kMaxConsecutiveSeqFallback = 3;
+    uint32_t consecutive_seq_fallback_ = 0;
+    bool seq_fallback_disabled_ = false;
+
     // Thread safety
     mutable std::recursive_mutex mutex_;
 
@@ -403,6 +448,7 @@ private:
     DataCallback data_callback_;
     TraceCallback trace_callback_;
     SequenceTraceCallback sequence_trace_callback_;
+    CrcTraceCallback crc_trace_callback_;
 
     // Frame event sources (multi-listener, no-copy-if-empty)
     FrameEventSource tx_frame_events_;

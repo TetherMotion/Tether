@@ -41,6 +41,7 @@
  *   ./synapticon_cst_fsoe --debug fsoe-raw      # FSoE protocol trace + raw frame hex dumps (on change)
  *   ./synapticon_cst_fsoe --debug fsoe-wire     # every-cycle PDO wire dumps (firehose)
  *   ./synapticon_cst_fsoe --debug fsoe-sequence # per-cycle frame accept/reject + state change summary
+ *   ./synapticon_cst_fsoe --debug fsoe-crc      # CRC parameters used for TX build and RX check
  */
 
 #include <array>
@@ -694,7 +695,8 @@ bool parseArgs(int argc, char** argv, Args& out) {
               "'fsoe-frame' for decoded PDO struct fields (on change), "
               "'fsoe-raw' for raw frame hex dumps (on change), "
               "'fsoe-wire' for every-cycle PDO wire dumps, "
-              "'fsoe-sequence' for per-cycle frame accept/reject + state change summary");
+              "'fsoe-sequence' for per-cycle frame accept/reject + state change summary, "
+              "'fsoe-crc' for CRC parameters used in TX build and RX check");
 
     try {
         program.parse_args(argc, argv);
@@ -1393,6 +1395,8 @@ int main(int argc, char** argv) {
         //                 txFrameEvents/rxFrameEvents listeners
         //   fsoe-master — deprecated alias for fsoe-raw (backward compat)
         //   fsoe-sequence — per-cycle frame accept/reject + state change summary
+        //   fsoe-crc     — CRC parameters used for TX build and RX check
+        //                 (start_crc, seq, CRC0, fallback info)
         const bool debug_fsoe =
             (args.debug.find("fsoe") != std::string::npos);
         const bool debug_fsoe_frame =
@@ -1404,6 +1408,8 @@ int main(int argc, char** argv) {
             (args.debug.find("fsoe-wire") != std::string::npos);
         const bool debug_fsoe_sequence =
             (args.debug.find("fsoe-sequence") != std::string::npos);
+        const bool debug_fsoe_crc =
+            (args.debug.find("fsoe-crc") != std::string::npos);
 
         EtherCAT::Drives::Synapticon::SafeMotion::MainConfig main_config;
         main_config.feature_enabled = true;
@@ -1482,6 +1488,63 @@ int main(int argc, char** argv) {
                 });
         }
 
+        // CRC parameter trace (--debug fsoe-crc).
+        // Emits the exact CRC inputs and outputs for every frame built (TX)
+        // and checked (RX): start_crc, seq_expected, seq_used, CRC0, and
+        // whether the seq±1 fallback was used.  This is the low-level
+        // diagnostic view for debugging CRC/seq synchronization issues.
+        if (debug_fsoe_crc) {
+            fsoe_main->rawConnection().setCrcTraceCallback(
+                [](const FSoE::CrcTraceInfo& info) {
+                    if (info.direction ==
+                        FSoE::CrcTraceInfo::Direction::TX) {
+                        // TX: master building a frame
+                        TETHER_LOGI(TAG,
+                            "[fsoe-crc] TX %s cmd=0x%02X: "
+                            "start_crc=0x%04X seq=%u -> "
+                            "CRC0=0x%04X (conn_id=0x%04X data_len=%zu)",
+                            fsoeStateName(info.state),
+                            info.command,
+                            info.start_crc, info.seq_used,
+                            info.crc0,
+                            info.conn_id, info.data_len);
+                    } else {
+                        // RX: master checking a frame
+                        if (info.crc_ok) {
+                            const char* fb = "";
+                            char fb_buf[64] = {};
+                            if (info.fallback_used) {
+                                snprintf(fb_buf, sizeof(fb_buf),
+                                    " [FALLBACK seq%+d: expected=%u]",
+                                    info.fallback_delta, info.seq_expected);
+                                fb = fb_buf;
+                            }
+                            TETHER_LOGI(TAG,
+                                "[fsoe-crc] RX %s cmd=0x%02X: "
+                                "start_crc=0x%04X seq=%u -> "
+                                "CRC0=0x%04X OK (conn_id=0x%04X "
+                                "data_len=%zu)%s",
+                                fsoeStateName(info.state),
+                                info.command,
+                                info.start_crc, info.seq_used,
+                                info.crc0,
+                                info.conn_id, info.data_len, fb);
+                        } else {
+                            TETHER_LOGE(TAG,
+                                "[fsoe-crc] RX %s cmd=0x%02X: "
+                                "start_crc=0x%04X seq=%u -> "
+                                "CRC FAIL (tried seq=%u, "
+                                "conn_id=0x%04X data_len=%zu)",
+                                fsoeStateName(info.state),
+                                info.command,
+                                info.start_crc, info.seq_expected,
+                                info.seq_expected,
+                                info.conn_id, info.data_len);
+                        }
+                    }
+                });
+        }
+
         // Raw frame hex dumps (--debug fsoe-raw).
         // Frame event listeners are invoked from inside the FSoE state
         // machine for every master-to-slave (tx) and slave-to-master (rx)
@@ -1537,13 +1600,14 @@ int main(int argc, char** argv) {
         }
 
         TETHER_LOGI(TAG,
-            "FSoE enabled: conn_id=0x%04X watchdog=%u ms debug=%s%s%s%s%s",
+            "FSoE enabled: conn_id=0x%04X watchdog=%u ms debug=%s%s%s%s%s%s",
             args.connection_id, args.watchdog_ms,
             debug_fsoe ? "fsoe" : "off",
             debug_fsoe_frame ? "+frame" : "",
             debug_fsoe_raw ? "+raw" : "",
             debug_fsoe_wire ? "+wire" : "",
-            debug_fsoe_sequence ? "+seq" : "");
+            debug_fsoe_sequence ? "+seq" : "",
+            debug_fsoe_crc ? "+crc" : "");
     } else {
         TETHER_LOGI(TAG, "FSoE disabled (--no-fsoe)");
     }
@@ -1572,6 +1636,13 @@ int main(int argc, char** argv) {
     // master must reach the Data state to clear the safe state and allow the
     // CiA 402 enable sequence to proceed.  We poll the FSoE connection state
     // for up to 5 seconds.
+    //
+    // If FSoE does NOT reach Data state (handshake fails, slave sends Reset,
+    // CRC error, watchdog timeout, etc.), we do NOT attempt to enable the
+    // drive — the safe state is still active and the enable would fail or
+    // be unsafe.  Instead, we skip the run loop and proceed directly to
+    // clean shutdown.
+    bool fsoe_data_reached = false;
     if (fsoe_main) {
         constexpr uint32_t kFsoEStartupTimeoutMs = 5000;
         constexpr uint32_t kFsoEPollIntervalMs = 50;
@@ -1580,16 +1651,17 @@ int main(int argc, char** argv) {
             kFsoEStartupTimeoutMs);
 
         uint32_t waited_ms = 0;
-        bool fsoe_data_reached = false;
         while (waited_ms < kFsoEStartupTimeoutMs) {
             const auto status = fsoe_main->rawConnection().getStatus();
             if (status.isOperational()) {
                 fsoe_data_reached = true;
                 break;
             }
-            if (status.hasError()) {
+            if (status.isFailSafe() || status.hasError()) {
                 TETHER_LOGE(TAG,
-                    "FSoE entered error state (code=0x%04X) during startup",
+                    "FSoE entered %s state (code=0x%04X) during startup — "
+                    "aborting drive enable",
+                    status.isFailSafe() ? "FailSafe" : "Error",
                     status.error_code);
                 break;
             }
@@ -1602,29 +1674,66 @@ int main(int argc, char** argv) {
                 "FSoE reached Data state after %u ms — proceeding with drive enable",
                 waited_ms);
         } else {
-            TETHER_LOGW(TAG,
-                "FSoE did not reach Data state within %u ms (state=%s) — "
-                "attempting drive enable anyway",
-                waited_ms,
-                fsoeStateName(fsoe_main->rawConnection().getStatus().state));
+            const auto status = fsoe_main->rawConnection().getStatus();
+            TETHER_LOGE(TAG,
+                "FSoE did not reach Data state (state=%s, error=0x%04X) — "
+                "drive enable SKIPPED, proceeding to shutdown",
+                fsoeStateName(status.state),
+                status.error_code);
+        }
+    } else {
+        // FSoE not enabled — drive enable can proceed directly.
+        fsoe_data_reached = true;
+    }
+
+    // --- Enable the drive (only if FSoE is operational or not enabled) ---
+    if (fsoe_data_reached) {
+        if (!master.enableDrive(slave_idx, 5000)) {
+            TETHER_LOGE(TAG, "Failed to enable slave %u", slave_idx);
+            rc = 8;
+        } else {
+            TETHER_LOGI(TAG, "Slave %u drive enabled", slave_idx);
+        }
+    } else {
+        // FSoE failed — skip drive enable, set error code.
+        rc = 9;
+    }
+
+    // --- Run loop ---
+    // If the drive was enabled, run the CST loop for the requested duration.
+    // If FSoE is enabled, monitor it during the run: if the slave enters
+    // FailSafe or Error (e.g. sends a Reset due to a CRC error), shut down
+    // cleanly immediately rather than continuing to run in an unsafe state.
+    if (rc == 0) {
+        TETHER_LOGI(TAG, "CST mode active, sending 0 torque for %.1f s", args.duration);
+
+        const auto run_start_ms = Tether::Platform::Clock::instance().getMilliseconds();
+        const uint32_t run_duration_ms =
+            static_cast<uint32_t>(args.duration * 1000.0);
+
+        while (true) {
+            const auto elapsed_ms =
+                Tether::Platform::Clock::instance().getMilliseconds() - run_start_ms;
+            if (elapsed_ms >= run_duration_ms) break;
+
+            // If FSoE is enabled, check that it's still operational.
+            // If the slave enters FailSafe or Error, stop immediately.
+            if (fsoe_main) {
+                const auto status = fsoe_main->rawConnection().getStatus();
+                if (status.isFailSafe() || status.hasError()) {
+                    TETHER_LOGE(TAG,
+                        "FSoE entered %s state during run (code=0x%04X) — "
+                        "shutting down cleanly",
+                        status.isFailSafe() ? "FailSafe" : "Error",
+                        status.error_code);
+                    rc = 10;
+                    break;
+                }
+            }
+
+            Tether::Platform::Clock::instance().delayMilliseconds(50);
         }
     }
-
-    // --- Enable the drive ---
-    // Now that FSoE has had a chance to reach Data state and clear the safe
-    // state, attempt the CiA 402 enable sequence.  If this fails, we continue
-    // running so the user can observe FSoE debug output (--debug fsoe).
-    if (!master.enableDrive(slave_idx, 5000)) {
-        TETHER_LOGE(TAG, "Failed to enable slave %u — continuing for diagnostics", slave_idx);
-        rc = 8;
-    } else {
-        TETHER_LOGI(TAG, "Slave %u drive enabled", slave_idx);
-    }
-
-    TETHER_LOGI(TAG, "CST mode active, sending 0 torque for %.1f s", args.duration);
-
-    Tether::Platform::Clock::instance().delayMilliseconds(
-        static_cast<uint32_t>(args.duration * 1000.0));
 
     // --- Stop and clean up ---
     master.stopMotionControlLoop();
