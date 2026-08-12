@@ -151,6 +151,13 @@ struct FSoESlaveConfig {
     uint32_t recoveryDelayMs = 1000;   ///< Delay before attempting recovery
     bool strictCrcCheck = true;        ///< Reject all CRC errors (always enforced)
     bool strictSequenceCheck = true;   ///< Reject sequence errors (deprecated, no-op)
+
+    /// Initial sequence number used for the Reset response and the
+    /// expected master Reset frame.  ETG.5100 §8.1.3.4 says
+    /// sequence numbers start at 1 (0 is never used), but some
+    /// masters (e.g. for Synapticon SOMANET) use seq=0 for the
+    /// initial Reset frame.  Default is 0 (Synapticon convention).
+    uint16_t initialSeqNo = 0;
     
     // Error handling
     bool treatCrcErrorAsCritical = true;

@@ -72,6 +72,13 @@ struct MasterConnectionConfig {
     /// with an immediate-response slave).  Default is 1 (standard
     /// one-cycle EtherCAT pipeline delay).
     uint8_t slave_response_delay_cycles = 1;
+
+    /// Initial sequence number used for the Reset frame and the
+    /// expected slave Reset response.  ETG.5100 §8.1.3.4 says
+    /// sequence numbers start at 1 (0 is never used), but some
+    /// slaves (e.g. Synapticon SOMANET) expect seq=0 for the
+    /// initial Reset frame.  Default is 0 (Synapticon convention).
+    uint16_t initial_seq_no = 0;
 };
 
 struct MasterConnectionStatus {

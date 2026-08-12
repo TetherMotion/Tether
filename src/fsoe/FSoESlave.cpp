@@ -64,8 +64,8 @@ bool FSoESlave::initialize() {
     txSequence_ = 0;
     last_tx_crc0_ = 0;
     last_rx_crc0_ = 0;
-    tx_seq_no_ = 1;   // ETG.5100 §8.1.3.4: sequence starts at 1 (0 is never used)
-    rx_seq_no_ = 1;   // Expected master sequence also starts at 1
+    tx_seq_no_ = config_.initialSeqNo;
+    rx_seq_no_ = config_.initialSeqNo;
     statistics_.resetAll();
 
     // Configure diagnostics
@@ -168,8 +168,8 @@ void FSoESlave::reset() {
     txSequence_ = 0;
     last_tx_crc0_ = 0;
     last_rx_crc0_ = 0;
-    tx_seq_no_ = 1;   // ETG.5100 §8.1.3.4: sequence starts at 1 (0 is never used)
-    rx_seq_no_ = 1;   // Expected master sequence also starts at 1
+    tx_seq_no_ = config_.initialSeqNo;
+    rx_seq_no_ = config_.initialSeqNo;
     last_rx_frame_bytes_.clear();  // Clear duplicate detection state
     cached_tx_response_.clear();   // Clear TX response cache
     cached_tx_state_ = 0xFF;
@@ -685,8 +685,8 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
     // parsing (ETG.5100 §8.1.3.4).  Reset frames (cmd=0x2A) reset the CRC
     // chain AND the sequence number:
     //   - start_crc = 0 (CRC chain reset)
-    //   - seq = 1 (sequence reset to initial value)
-    // After a Reset frame, the next frame uses seq=2.
+    //   - seq = config_.initialSeqNo (0 for Synapticon, 1 per ETG.5100)
+    // After a Reset frame, the next frame uses seq+1.
     // Non-Reset frames use the current rx_seq_no_ and last_rx_crc0_.
     uint8_t cmd = 0;
     size_t data_len = 0;
@@ -695,7 +695,7 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
 
     const bool is_reset_frame = (data[0] == Command::Reset);
     const uint16_t parse_start_crc = is_reset_frame ? 0 : last_rx_crc0_;
-    const uint16_t parse_seq_no = is_reset_frame ? 1 : rx_seq_no_;
+    const uint16_t parse_seq_no = is_reset_frame ? config_.initialSeqNo : rx_seq_no_;
     uint16_t seq_used = 0;
 
     if (!CRC::parseFSoEFrameWithCollisionAvoidance(
@@ -825,24 +825,25 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
     //
     // For a Reset command:
     //   - Reset the CRC chain (last_tx_crc0_ = 0, last_rx_crc0_ = 0)
-    //   - Reset tx_seq_no_ to 1 (the slave's TX sequence starts fresh)
+    //   - Reset tx_seq_no_ to config_.initialSeqNo (fresh start)
     //   - Do NOT reset rx_seq_no_ — it was already advanced by validateFrame
-    //     (which used seq=1 for the Reset frame and set rx_seq_no_ to 2)
+    //     (which used initialSeqNo for the Reset frame and set rx_seq_no_
+    //     to initialSeqNo+1)
     //
     // This handles both cases:
     //   1. Slave in Reset state receiving Reset (normal handshake start):
-    //      tx_seq_no_ was already 1, no change.
+    //      tx_seq_no_ was already initialSeqNo, no change.
     //   2. Slave in Data/Connection/Parameter state receiving Reset (recovery):
-    //      tx_seq_no_ was at some advanced value, needs to be reset to 1
-    //      so the slave's next frame (Session response) uses seq=1, matching
-    //      the master's expected rx_seq_no_=1.
+    //      tx_seq_no_ was at some advanced value, needs to be reset to
+    //      initialSeqNo so the slave's next frame (Reset response) uses
+    //      seq=initialSeqNo, matching the master's expected rx_seq_no_.
     if (cmd == Command::Reset) {
         expectedSequence_ = 0;
         txSequence_ = 0;
         last_tx_crc0_ = 0;
         last_rx_crc0_ = 0;
-        tx_seq_no_ = 1;  // Reset TX sequence for new connection
-        // rx_seq_no_ is NOT reset — validateFrame already advanced it to 2
+        tx_seq_no_ = config_.initialSeqNo;
+        // rx_seq_no_ is NOT reset — validateFrame already advanced it
         last_rx_frame_bytes_.clear();  // Clear duplicate detection
         cached_tx_response_.clear();   // Clear TX response cache
         cached_tx_state_ = 0xFF;
@@ -1135,8 +1136,8 @@ size_t FSoESlave::buildResetResponse(uint8_t* data, size_t maxLen) {
     //
     // Reset frames reset the CRC chain AND the sequence number:
     //   - start_crc = 0 (CRC chain reset)
-    //   - seq = 1 (sequence reset to initial value, per ETG.5100 §8.1.3.4)
-    // After the Reset frame, the next frame uses seq=2.
+    //   - seq = config_.initialSeqNo (0 for Synapticon, 1 per ETG.5100)
+    // After the Reset frame, the next frame uses seq+1.
     // last_tx_crc0_ is NOT updated (stays at 0 for the next frame).
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
@@ -1146,11 +1147,12 @@ size_t FSoESlave::buildResetResponse(uint8_t* data, size_t maxLen) {
         data, Command::Reset, payload, config_.safeInputSize,
         config_.connectionId,
         0,  // start_crc = 0 (Reset resets CRC chain)
-        1,  // seq = 1 (Reset resets sequence to initial value)
+        config_.initialSeqNo,
         nullptr,  // don't update CRC chain (Reset resets it)
         &seq_used);
-    // Set tx_seq_no_ to the seq used (1, or higher if collision avoidance
-    // incremented it).  prepareTxFrame will increment it to 2 for the next frame.
+    // Set tx_seq_no_ to the seq used (initialSeqNo, or higher if
+    // collision avoidance incremented it).  prepareTxFrame will
+    // increment it for the next frame.
     tx_seq_no_ = seq_used;
     return result;
 }

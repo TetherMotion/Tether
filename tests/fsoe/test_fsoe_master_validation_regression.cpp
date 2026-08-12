@@ -363,8 +363,8 @@ TEST(FSoEMasterFailSafeResetRegression, ResetCommandInFailSafeWithAutoRecovery) 
     conn.triggerFailSafe(ErrorCode::WatchdogError);
     ASSERT_TRUE(conn.isFailSafe());
 
-    // Send Reset command — Reset frames use start_crc=0 and seq_no=1
-    // (Reset resets the CRC chain and sequence to 1, per ETG.5100 §8.1.3.4).
+    // Send Reset command — Reset frames use start_crc=0 and seq_no=0
+    // (Reset resets the CRC chain and sequence to 0, Synapticon convention).
     // The frame is the full fixed size with data_len = output_size.
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     payload[0] = 0x01;  // error code
@@ -373,7 +373,7 @@ TEST(FSoEMasterFailSafeResetRegression, ResetCommandInFailSafeWithAutoRecovery) 
                                             payload, 4u,
                                             0x1234,
                                             0,  // start_crc = 0 (Reset resets CRC chain)
-                                            1);  // seq_no = 1 (Reset resets sequence to 1)
+                                            0);  // seq_no = 0 (Reset resets sequence to 0)
     conn.processRxFrame(frame, frame_len);
 
     // Should have recovered (auto_recovery_enabled=true)
