@@ -289,6 +289,16 @@ private:
     // the slave to have produced a valid response.
     uint32_t pdo_tx_count_ = 0;
 
+    // Last TX command byte sent via exchangeViaPDO.  When the master
+    // transitions to a new state (e.g. Reset→Session), the TX command
+    // changes.  The slave's TxPDO in the same cycle still contains the
+    // response to the PREVIOUS command (EtherCAT pipeline delay: master
+    // TX → slave processes → slave TX in the NEXT cycle).  We skip RX
+    // processing for one cycle after a command change to avoid processing
+    // a stale response that would trigger a spurious fail-safe.
+    uint8_t last_tx_cmd_ = 0;
+    bool has_last_tx_cmd_ = false;
+
     // Last received frame bytes, for duplicate detection.
     // If the slave re-sends the same frame (e.g. it hasn't seen a new
     // master frame yet), we skip re-processing and count it as a
