@@ -165,6 +165,11 @@ bool FSoEMasterConnection::resetConnection()
     last_tx_seq_no_ = 0;
     last_rx_seq_no_ = 0;
     current_param_index_ = 0;
+    parameter_crc_ = 0;
+    param_tx_idx_ = 0;
+    param_rx_idx_ = 0;
+    param_tx_buf_.clear();
+    param_rx_buf_.clear();
     pdo_tx_count_ = 0;
     last_rx_frame_.clear();
     baseline_rx_.clear();
@@ -669,10 +674,11 @@ size_t FSoEMasterConnection::prepareTxFrame(uint8_t* data, size_t max_len)
         case ConnectionState::Parameter:
             len = buildParameterFrame(data, max_len);
             if (len > 0) {
-                trace("TX Parameter(0x52): watchdog=%u ms safety_level=%u "
-                      "input_size=%u output_size=%u (state=Parameter, %zu bytes)",
-                      config_.watchdog_timeout_ms, config_.safety_level,
-                      config_.input_size, config_.output_size, len);
+                trace("TX Parameter(0x52): watchdog=%u ms app_param_len=%zu "
+                      "tx_idx=%u/%zu (state=Parameter, %zu bytes)",
+                      config_.watchdog_timeout_ms,
+                      config_.app_parameters.size(),
+                      param_tx_idx_, param_tx_buf_.size(), len);
             }
             break;
 
@@ -1043,17 +1049,21 @@ void FSoEMasterConnection::handleConnectionState(uint8_t cmd, const uint8_t* dat
             }
         } else {
             // Slave sends input_size bytes per cycle from its TX offset.
-            // Accumulate at connection_rx_idx_.
+            // Accumulate at connection_rx_idx_, limited by TX progress
+            // (the slave can only echo bytes it has received from the master).
             if (connection_rx_idx_ < 4) {
                 const uint8_t rx_off = std::min(connection_rx_idx_,
                                                  static_cast<uint8_t>(4));
+                // Valid echo bytes: limited by TX progress and rx_chunk.
+                const uint8_t echo_avail = (connection_tx_idx_ > connection_rx_idx_)
+                    ? static_cast<uint8_t>(connection_tx_idx_ - connection_rx_idx_) : 0;
                 const uint8_t valid = std::min(static_cast<uint8_t>(4 - rx_off),
-                                                rx_chunk);
+                                                std::min(rx_chunk, echo_avail));
                 for (uint8_t i = 0; i < valid && i < data_len; ++i) {
                     connection_rx_buf_[rx_off + i] = data[i];
                 }
                 connection_rx_idx_ = std::min(
-                    static_cast<uint8_t>(connection_rx_idx_ + rx_chunk),
+                    static_cast<uint8_t>(connection_rx_idx_ + valid),
                     static_cast<uint8_t>(4));
             }
         }
@@ -1099,6 +1109,7 @@ void FSoEMasterConnection::handleConnectionState(uint8_t cmd, const uint8_t* dat
                   (config_.input_size > 0 || config_.output_size > 0)
                       ? "Parameter" : "Data");
             if (config_.input_size > 0 || config_.output_size > 0) {
+                initParameterTxBuf();
                 transitionTo(ConnectionState::Parameter);
             } else {
                 transitionTo(ConnectionState::Data);
@@ -1123,22 +1134,95 @@ void FSoEMasterConnection::handleConnectionState(uint8_t cmd, const uint8_t* dat
 
 void FSoEMasterConnection::handleParameterState(uint8_t cmd, const uint8_t* data, size_t data_len)
 {
-    (void)data;
-    (void)data_len;
-
+    // ETG.5100 S (D) V1.2.0, §8.2.2.5:
+    // The slave echoes back the parameter SafeData each cycle.
+    // The master validates the echo and advances to the next chunk.
+    // When all bytes are transferred and echoed, transition to Data.
+    // See: https://techoverflow.net/2026/08/12/fsoe-parameter-pdu-master-and-slave-structure/
     if (cmd == Command::Reset) {
         trace("RX Reset(0x2A): slave requested reset in Parameter state, resetting connection");
         resetConnection();
         return;
     }
     if (cmd == Command::Parameter) {
-        trace("RX Parameter(0x52): slave accepted parameters, moving to Data");
-        current_param_index_++;
-        if (current_param_index_ >= 1) {
+        // 0-octet safety data: no SafeData to transfer.  The parameter
+        // payload is empty (or rather, can't be transferred via SafeData).
+        // Transition immediately to Data.
+        if (config_.input_size == 0) {
+            trace("RX Parameter(0x52): 0-octet data, moving to Data");
             transitionTo(ConnectionState::Data);
+            return;
+        }
+
+        const size_t total_len = param_tx_buf_.size();
+        const uint8_t rx_chunk = std::min(static_cast<size_t>(config_.input_size),
+                                           static_cast<size_t>(CRC::MAX_PARSE_DATA_SIZE));
+        // Reject frames with insufficient data length.
+        if (data_len < rx_chunk) {
+            FSoEErrorDetail detail;
+            snprintf(detail.message, sizeof(detail.message),
+                     "Parameter response too short: got %zu bytes, expected %u",
+                     data_len, rx_chunk);
+            handleError(ErrorCode::DataLengthError, detail);
+            return;
+        }
+
+        // Advance TX index FIRST (the slave has already received and
+        // echoed this cycle's TX bytes).
+        const uint8_t tx_chunk = std::min(static_cast<size_t>(config_.output_size),
+                                           static_cast<size_t>(CRC::MAX_PARSE_DATA_SIZE));
+        param_tx_idx_ = std::min(static_cast<size_t>(param_tx_idx_) + tx_chunk,
+                                  total_len);
+
+        // Accumulate echo bytes.
+        // The slave can only echo bytes it has received, which equals
+        // the master's TX progress (param_tx_idx_).  So the master's
+        // RX progress cannot exceed its TX progress.
+        if (param_rx_idx_ < total_len) {
+            const size_t rx_off = std::min(static_cast<size_t>(param_rx_idx_),
+                                            total_len);
+            // Valid echo bytes: limited by TX progress and rx_chunk.
+            const size_t echo_avail = (param_tx_idx_ > param_rx_idx_)
+                ? static_cast<size_t>(param_tx_idx_ - param_rx_idx_) : 0;
+            const size_t valid = std::min(total_len - rx_off,
+                                           std::min(static_cast<size_t>(rx_chunk),
+                                                    echo_avail));
+            for (size_t i = 0; i < valid && i < data_len; ++i) {
+                param_rx_buf_[rx_off + i] = data[i];
+            }
+            param_rx_idx_ = std::min(static_cast<size_t>(param_rx_idx_) + valid,
+                                      total_len);
+        }
+
+        // Check if all bytes have been transferred AND echoed.
+        if (param_tx_idx_ >= total_len && param_rx_idx_ >= total_len) {
+            // Validate the accumulated echo against what we sent.
+            for (size_t i = 0; i < total_len; ++i) {
+                if (param_rx_buf_[i] != param_tx_buf_[i]) {
+                    trace("RX Parameter(0x52): echo mismatch at byte %zu "
+                          "(expected 0x%02X got 0x%02X)",
+                          i, param_tx_buf_[i], param_rx_buf_[i]);
+                    FSoEErrorDetail detail;
+                    snprintf(detail.message, sizeof(detail.message),
+                             "Parameter echo mismatch at byte %zu: "
+                             "expected 0x%02X got 0x%02X",
+                             i, param_tx_buf_[i], param_rx_buf_[i]);
+                    handleError(ErrorCode::ParameterError, detail);
+                    return;
+                }
+            }
+            trace("RX Parameter(0x52): all %zu bytes echoed correctly, "
+                  "moving to Data", total_len);
+            transitionTo(ConnectionState::Data);
+        } else {
+            // More cycles needed — invalidate TX cache to send next chunk.
+            trace("RX Parameter(0x52): multi-cycle transfer in progress "
+                  "(tx_idx=%u/%zu rx_idx=%u/%zu)",
+                  param_tx_idx_, total_len, param_rx_idx_, total_len);
+            tx_cache_dirty_ = true;
         }
     } else if (cmd == Command::ProcessData) {
-        trace("RX ProcessData(0x36): slave skippped Parameter phase, moving to Data");
+        trace("RX ProcessData(0x36): slave skipped Parameter phase, moving to Data");
         transitionTo(ConnectionState::Data);
         handleDataState(cmd, data, data_len);
     } else {
@@ -1342,16 +1426,27 @@ size_t FSoEMasterConnection::buildConnectionFrame(uint8_t* data, size_t max_len)
 
 size_t FSoEMasterConnection::buildParameterFrame(uint8_t* data, size_t max_len)
 {
-    // Parameter frame: full PDO-size frame with parameter data in SafeData[0-5].
-    // Remaining data bytes are zero-padded to output_size.
-    // Layout: [watchdog_lo] [watchdog_hi] [safety_level] [input_size] [output_size] [reserved]
+    // ETG.5100 S (D) V1.2.0, §8.2.2.5, Table 18:
+    //   SafeData[0-1]: comm param length (always 2, LE)
+    //   SafeData[2-3]: FSoE watchdog (ms, LE)
+    //   SafeData[4-5]: app param length (LE)
+    //   SafeData[6+]:  app param bytes
+    // Total payload = 6 + app_parameters.size().
+    // Multi-cycle: transferred in ceil(payload_len / output_size) cycles.
+    // Unused octets in the last cycle are set to 0.
+    // See: https://techoverflow.net/2026/08/12/fsoe-parameter-pdu-master-and-slave-structure/
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
-    payload[0] = config_.watchdog_timeout_ms & 0xFF;
-    payload[1] = (config_.watchdog_timeout_ms >> 8) & 0xFF;
-    payload[2] = config_.safety_level;
-    payload[3] = config_.input_size;
-    payload[4] = config_.output_size;
-    payload[5] = 0;  // reserved
+    const size_t total_len = param_tx_buf_.size();
+    const uint8_t chunk = std::min(static_cast<size_t>(config_.output_size),
+                                    static_cast<size_t>(CRC::MAX_PARSE_DATA_SIZE));
+    // TX offset: clamped at total_len.  Once all bytes are sent, the
+    // master sends zero-padded frames while waiting for the final echo.
+    const size_t tx_off = std::min(static_cast<size_t>(param_tx_idx_), total_len);
+    const size_t valid = std::min(total_len - tx_off, static_cast<size_t>(chunk));
+    for (size_t i = 0; i < valid; ++i) {
+        payload[i] = param_tx_buf_[tx_off + i];
+    }
+    // Remaining payload bytes are 0 (padding).
     size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
     uint16_t seq_used = 0;
@@ -1481,6 +1576,35 @@ void FSoEMasterConnection::initConnectionTxBuf()
     connection_tx_idx_ = 0;
     connection_rx_idx_ = 0;
     memset(connection_rx_buf_, 0, sizeof(connection_rx_buf_));
+}
+
+void FSoEMasterConnection::initParameterTxBuf()
+{
+    // ETG.5100 S (D) V1.2.0, §8.2.2.5, Table 18:
+    //   octets 0-1: comm param length (always 2, LE)
+    //   octets 2-3: FSoE watchdog (ms, LE)
+    //   octets 4-5: app param length (LE)
+    //   octets 6+:  app param bytes
+    param_tx_buf_.clear();
+    param_tx_buf_.reserve(6 + config_.app_parameters.size());
+    // Comm param length = 2 (always, just the watchdog)
+    param_tx_buf_.push_back(0x02);
+    param_tx_buf_.push_back(0x00);
+    // FSoE watchdog (ms, LE)
+    param_tx_buf_.push_back(static_cast<uint8_t>(config_.watchdog_timeout_ms & 0xFF));
+    param_tx_buf_.push_back(static_cast<uint8_t>((config_.watchdog_timeout_ms >> 8) & 0xFF));
+    // App param length (LE)
+    uint16_t app_len = static_cast<uint16_t>(config_.app_parameters.size());
+    param_tx_buf_.push_back(static_cast<uint8_t>(app_len & 0xFF));
+    param_tx_buf_.push_back(static_cast<uint8_t>((app_len >> 8) & 0xFF));
+    // App param bytes
+    for (uint8_t b : config_.app_parameters) {
+        param_tx_buf_.push_back(b);
+    }
+    // Reset indices
+    param_tx_idx_ = 0;
+    param_rx_idx_ = 0;
+    param_rx_buf_.assign(param_tx_buf_.size(), 0);
 }
 
 void FSoEMasterConnection::handleError(uint16_t error_code,

@@ -70,6 +70,11 @@ bool FSoESlave::initialize() {
     connectionTxIdx_ = 0;
     connectionTxAdvancePending_ = false;
     memset(connectionBuf_, 0, sizeof(connectionBuf_));
+    // Reset Parameter state multi-cycle transfer.
+    paramRxIdx_ = 0;
+    paramTxIdx_ = 0;
+    paramTxAdvancePending_ = false;
+    paramBuf_.clear();
     currentConnectionId_ = 0;
     expectedSequence_ = 0;
     txSequence_ = 0;
@@ -182,6 +187,11 @@ void FSoESlave::reset() {
     connectionTxIdx_ = 0;
     connectionTxAdvancePending_ = false;
     memset(connectionBuf_, 0, sizeof(connectionBuf_));
+    // Reset Parameter state multi-cycle transfer.
+    paramRxIdx_ = 0;
+    paramTxIdx_ = 0;
+    paramTxAdvancePending_ = false;
+    paramBuf_.clear();
     currentConnectionId_ = 0;
     expectedSequence_ = 0;
     txSequence_ = 0;
@@ -896,6 +906,11 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
         connectionTxIdx_ = 0;
         connectionTxAdvancePending_ = false;
         memset(connectionBuf_, 0, sizeof(connectionBuf_));
+        // Reset Parameter state multi-cycle transfer.
+        paramRxIdx_ = 0;
+        paramTxIdx_ = 0;
+        paramTxAdvancePending_ = false;
+        paramBuf_.clear();
     }
 
     // Clear error state
@@ -1049,7 +1064,14 @@ void FSoESlave::processConnection(const uint8_t* data, size_t len) {
 }
 
 void FSoESlave::processParameter(const uint8_t* data, size_t len) {
-    // Parse frame to extract parameter data
+    // ETG.5100 S (D) V1.2.0, §8.2.2.5, Table 18:
+    //   octets 0-1: comm param length (always 2, LE)
+    //   octets 2-3: FSoE watchdog (ms, LE)
+    //   octets 4-5: app param length (LE)
+    //   octets 6+:  app param bytes
+    // The slave accumulates received bytes and echoes them back.
+    // Multi-cycle: ceil((6 + appParamLen) / safeOutputSize) cycles.
+    // See: https://techoverflow.net/2026/08/12/fsoe-parameter-pdu-master-and-slave-structure/
     uint8_t cmd = 0;
     uint8_t frame_data[CRC::MAX_PARSE_DATA_SIZE] = {0};
     size_t data_len = 0;
@@ -1063,16 +1085,16 @@ void FSoESlave::processParameter(const uint8_t* data, size_t len) {
         return;
     }
 
-    // Validate safety-critical parameters from safe data.
-    // Layout (must match master's buildParameterFrame):
-    //   [watchdog_lo] [watchdog_hi] [safety_level] [input_size] [output_size] [reserved]
-    // The frame data length is the PDO's safe-data size (output_size),
-    // which may be smaller than 6.  We extract whatever fields are
-    // available and skip validation of fields that don't fit in the PDO.
-    // When data_len == 0 (output_size=0), skip all parameter validation.
-    // Reject frames that are shorter than the expected PDO data size.
+    // 0-octet safety data: no SafeData to accumulate.  Just transition
+    // to Parameter state (no parameter data can be transferred).
+    if (config_.safeOutputSize == 0) {
+        transitionTo(ConnectionState::Parameter);
+        logDiagnostic(ErrorCode::NoError, "Parameter state (0-octet data)");
+        return;
+    }
+
+    // Reject frames shorter than the PDO's safe-data size.
     if (data_len > 0 && data_len < config_.safeOutputSize) {
-        // Frame is shorter than the PDO's safe-data size — protocol error.
         FSoEErrorDetail detail;
         snprintf(detail.message, sizeof(detail.message),
                  "Slave Parameter frame too short: got %zu bytes, expected %u",
@@ -1080,70 +1102,141 @@ void FSoESlave::processParameter(const uint8_t* data, size_t len) {
         handleError(ErrorCode::DataLengthError, true, detail);
         return;
     }
-    if (data_len == 0) {
-        // No parameter data can be carried — skip validation entirely.
-        // Transition to Parameter so we send a Parameter response, then
-        // the master will transition to Data and send ProcessData.
-        transitionTo(ConnectionState::Parameter);
-        return;
+
+    // Ensure paramBuf_ is large enough.  The total payload size is
+    // 6 + appParamLen, but we don't know appParamLen until we receive
+    // octets 4-5.  We use a dynamic buffer that grows as needed.
+    const uint8_t rx_chunk = std::min(static_cast<uint16_t>(config_.safeOutputSize),
+                                       static_cast<uint16_t>(CRC::MAX_PARSE_DATA_SIZE));
+
+    // Determine the effective total payload length if we already know it.
+    // Once we have the 6-byte header, we can compute total_len.
+    size_t known_total = 0;
+    if (paramBuf_.size() >= 6) {
+        uint16_t app_param_len = static_cast<uint16_t>(paramBuf_[4]) |
+                                 (static_cast<uint16_t>(paramBuf_[5]) << 8);
+        known_total = static_cast<size_t>(6) + app_param_len;
     }
 
-    // Extract and validate fields conditionally based on data_len.
-    // frame_data is zero-filled by extractFSoEFrame, so missing fields
-    // read as 0.
+    // Accumulate received bytes into paramBuf_ at paramRxIdx_.
+    // Stop accumulating once we have all bytes (known_total > 0 and
+    // paramRxIdx_ >= known_total) to avoid overwriting with padding zeros.
+    bool can_accumulate = (known_total == 0) ||
+                          (paramRxIdx_ < known_total);
+    if (can_accumulate && paramRxIdx_ < PARAM_BUF_SIZE) {
+        const size_t rx_off = std::min(static_cast<size_t>(paramRxIdx_),
+                                        static_cast<size_t>(PARAM_BUF_SIZE));
+        size_t valid = std::min(static_cast<size_t>(PARAM_BUF_SIZE - rx_off),
+                                 static_cast<size_t>(rx_chunk));
+        // If we know the total, don't accumulate beyond it.
+        if (known_total > 0 && rx_off + valid > known_total) {
+            valid = known_total - rx_off;
+        }
+        // Ensure buffer is large enough.
+        if (paramBuf_.size() < rx_off + valid) {
+            paramBuf_.resize(rx_off + valid, 0);
+        }
+        for (size_t i = 0; i < valid && i < data_len; ++i) {
+            paramBuf_[rx_off + i] = frame_data[i];
+        }
+        size_t advance = valid;
+        if (known_total == 0) {
+            // Don't know total yet — advance by rx_chunk.
+            advance = rx_chunk;
+        }
+        paramRxIdx_ = std::min(static_cast<size_t>(paramRxIdx_) + advance,
+                                static_cast<size_t>(PARAM_BUF_SIZE));
+    }
 
-    // Validate watchdog range (bytes 0-1)
-    if (data_len >= 2) {
-        uint16_t watchdog = static_cast<uint16_t>(frame_data[0]) |
-                            (static_cast<uint16_t>(frame_data[1]) << 8);
-        if (watchdog > 0 && (watchdog < Limits::WatchdogTimeoutMin ||
-                             watchdog > Limits::WatchdogTimeoutMax)) {
+    // Set pending TX advance flag (applied in buildParameterResponse
+    // after the echo is built).
+    paramTxAdvancePending_ = true;
+
+    // Once we have received the 6-byte header (octets 0-5), we can
+    // validate the comm param length and extract the app param length
+    // to know the total payload size.
+    if (paramRxIdx_ >= 6 && paramBuf_.size() >= 6) {
+        uint16_t comm_param_len = static_cast<uint16_t>(paramBuf_[0]) |
+                                  (static_cast<uint16_t>(paramBuf_[1]) << 8);
+        // ETG.5100 §8.2.2.5: comm param length is always 2.
+        if (comm_param_len != 2) {
+            FSoEErrorDetail detail;
+            snprintf(detail.message, sizeof(detail.message),
+                     "Slave comm param length mismatch: expected 2 got %u",
+                     comm_param_len);
+            handleError(ErrorCode::ParameterError, true, detail);
+            return;
+        }
+
+        // Extract watchdog (octets 2-3) and validate range.
+        uint16_t watchdog = static_cast<uint16_t>(paramBuf_[2]) |
+                            (static_cast<uint16_t>(paramBuf_[3]) << 8);
+        if (watchdog < Limits::WatchdogTimeoutMin ||
+            watchdog > Limits::WatchdogTimeoutMax) {
             FSoEErrorDetail detail;
             snprintf(detail.message, sizeof(detail.message),
                      "Slave watchdog %u out of range [%u, %u]",
-                     watchdog, Limits::WatchdogTimeoutMin, Limits::WatchdogTimeoutMax);
+                     watchdog, Limits::WatchdogTimeoutMin,
+                     Limits::WatchdogTimeoutMax);
             handleError(ErrorCode::ParameterError, true, detail);
             return;
         }
-        if (watchdog > 0) {
-            config_.watchdogTimeoutMs = watchdog;
-        }
-    }
+        // Update the slave's watchdog from the master's configured value.
+        config_.watchdogTimeoutMs = watchdog;
 
-    // Validate safety level (byte 2)
-    if (data_len >= 3) {
-        uint8_t safety_level = frame_data[2];
-        if (safety_level > 0 && safety_level < config_.safetyLevel) {
+        // Extract app param length (octets 4-5).
+        uint16_t app_param_len = static_cast<uint16_t>(paramBuf_[4]) |
+                                 (static_cast<uint16_t>(paramBuf_[5]) << 8);
+
+        // Early validation: if expected app parameters are configured,
+        // check the app param length matches immediately.
+        if (app_param_len != config_.expectedAppParameters.size()) {
             FSoEErrorDetail detail;
             snprintf(detail.message, sizeof(detail.message),
-                     "Slave safety level %u below required %u",
-                     safety_level, config_.safetyLevel);
+                     "Slave app param length mismatch: expected %zu got %u",
+                     config_.expectedAppParameters.size(), app_param_len);
             handleError(ErrorCode::ParameterError, true, detail);
             return;
         }
-    }
 
-    // Validate data sizes (bytes 3-4)
-    if (data_len >= 5) {
-        uint8_t input_size = frame_data[3];
-        uint8_t output_size = frame_data[4];
-        if (input_size != config_.safeInputSize ||
-            output_size != config_.safeOutputSize) {
-            FSoEErrorDetail detail;
-            snprintf(detail.message, sizeof(detail.message),
-                     "Slave data size mismatch: input %u/%u output %u/%u",
-                     input_size, config_.safeInputSize,
-                     output_size, config_.safeOutputSize);
-            handleError(ErrorCode::ParameterError, true, detail);
-            return;
+        // Compute total expected payload size.
+        size_t total_len = static_cast<size_t>(6) + app_param_len;
+
+        // Ensure paramBuf_ is sized to the full payload.
+        if (paramBuf_.size() < total_len) {
+            paramBuf_.resize(total_len, 0);
+        }
+
+        // Once all bytes are received, validate the app parameters.
+        if (paramRxIdx_ >= total_len) {
+            // Validate app parameters against expected values.
+            if (app_param_len != config_.expectedAppParameters.size()) {
+                FSoEErrorDetail detail;
+                snprintf(detail.message, sizeof(detail.message),
+                         "Slave app param length mismatch: expected %zu got %u",
+                         config_.expectedAppParameters.size(), app_param_len);
+                handleError(ErrorCode::ParameterError, true, detail);
+                return;
+            }
+            for (size_t i = 0; i < app_param_len; ++i) {
+                if (paramBuf_[6 + i] != config_.expectedAppParameters[i]) {
+                    FSoEErrorDetail detail;
+                    snprintf(detail.message, sizeof(detail.message),
+                             "Slave app param mismatch at byte %zu: "
+                             "expected 0x%02X got 0x%02X",
+                             i, config_.expectedAppParameters[i],
+                             paramBuf_[6 + i]);
+                    handleError(ErrorCode::ParameterError, true, detail);
+                    return;
+                }
+            }
+            logDiagnostic(ErrorCode::NoError, "Parameters accepted");
         }
     }
 
     // Transition to Parameter state to send Parameter response.
     // Will transition to Data when the master sends ProcessData.
     transitionTo(ConnectionState::Parameter);
-
-    logDiagnostic(ErrorCode::NoError, "Parameters accepted");
 }
 
 void FSoESlave::processData(const uint8_t* data, size_t len) {
@@ -1335,9 +1428,26 @@ size_t FSoESlave::buildConnectionResponse(uint8_t* data, size_t maxLen) {
 }
 
 size_t FSoESlave::buildParameterResponse(uint8_t* data, size_t maxLen) {
-    // Parameter response: full PDO-size frame with param_ack in SafeData[0-1].
-    // Remaining data bytes are zero-padded to safeInputSize.
-    uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};  // Parameter ACK
+    // ETG.5100 S (D) V1.2.0, §8.2.2.5, Tables 20/22:
+    // The slave echoes back the same safety data it received.
+    // Multi-cycle: echo is sent in safeInputSize-sized chunks.
+    // See: https://techoverflow.net/2026/08/12/fsoe-parameter-pdu-master-and-slave-structure/
+    uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
+    const uint8_t chunk = std::min(static_cast<uint16_t>(config_.safeInputSize),
+                                    static_cast<uint16_t>(CRC::MAX_PARSE_DATA_SIZE));
+    // TX offset: clamped at paramBuf_.size().  Can only echo bytes
+    // that have been received (paramTxIdx_ < paramRxIdx_).
+    const size_t tx_off = std::min(static_cast<size_t>(paramTxIdx_),
+                                    paramBuf_.size());
+    const size_t rx_avail = (paramRxIdx_ > paramTxIdx_)
+        ? static_cast<size_t>(paramRxIdx_ - paramTxIdx_) : 0;
+    const size_t valid = std::min(static_cast<size_t>(chunk),
+                                   std::min(paramBuf_.size() - std::min(tx_off, paramBuf_.size()),
+                                            rx_avail));
+    for (size_t i = 0; i < valid; ++i) {
+        payload[i] = paramBuf_[tx_off + i];
+    }
+    // Remaining payload bytes are 0 (padding).
     size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
     uint16_t seq_used = 0;
@@ -1347,6 +1457,19 @@ size_t FSoESlave::buildParameterResponse(uint8_t* data, size_t maxLen) {
         last_rx_crc0_, rx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
+
+    // Apply deferred TX advance (set in processParameter).
+    // TX advance is limited by RX progress: can't echo more bytes than
+    // have been received.
+    if (paramTxAdvancePending_) {
+        size_t max_advance = (paramTxIdx_ < paramRxIdx_)
+            ? static_cast<size_t>(paramRxIdx_ - paramTxIdx_) : 0;
+        size_t advance = std::min(static_cast<size_t>(chunk), max_advance);
+        paramTxIdx_ = std::min(static_cast<size_t>(paramTxIdx_) + advance,
+                                static_cast<size_t>(PARAM_BUF_SIZE));
+        paramTxAdvancePending_ = false;
+    }
+
     return result;
 }
 

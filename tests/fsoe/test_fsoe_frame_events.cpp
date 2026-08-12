@@ -395,7 +395,13 @@ TEST(FSoEFrameEvents, FullHandshakeEmitsFrames) {
     now += 15;
     ASSERT_TRUE(conn.exchangeWith(slave, now));
     ASSERT_EQ(conn.getState(), ConnectionState::Parameter);
-    // Parameter → Data
+    // Parameter → Data (2-octet data, 6-byte payload → ceil(6/2) = 3 cycles)
+    now += 15;
+    ASSERT_TRUE(conn.exchangeWith(slave, now));
+    ASSERT_EQ(conn.getState(), ConnectionState::Parameter);
+    now += 15;
+    ASSERT_TRUE(conn.exchangeWith(slave, now));
+    ASSERT_EQ(conn.getState(), ConnectionState::Parameter);
     now += 15;
     ASSERT_TRUE(conn.exchangeWith(slave, now));
     ASSERT_EQ(conn.getState(), ConnectionState::Data);
@@ -404,9 +410,9 @@ TEST(FSoEFrameEvents, FullHandshakeEmitsFrames) {
     ASSERT_TRUE(conn.exchangeWith(slave, now));
     ASSERT_EQ(conn.getState(), ConnectionState::Data);
 
-    // 6 exchanges => 6 TX frames and 6 RX frames.
-    EXPECT_EQ(tx_calls, 6);
-    EXPECT_EQ(rx_calls, 6);
-    EXPECT_EQ(conn.getStats().frames_sent, 6u);
-    EXPECT_EQ(conn.getStats().frames_received, 6u);
+    // 8 exchanges => 8 TX frames and 8 RX frames.
+    EXPECT_EQ(tx_calls, 8);
+    EXPECT_EQ(rx_calls, 8);
+    EXPECT_EQ(conn.getStats().frames_sent, 8u);
+    EXPECT_EQ(conn.getStats().frames_received, 8u);
 }
