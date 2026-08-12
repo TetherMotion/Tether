@@ -1134,25 +1134,25 @@ size_t FSoESlave::buildResetResponse(uint8_t* data, size_t maxLen) {
     // SafeData[0] = 0 (no error code — acknowledgement).
     // The frame is always fsoeFrameSize(safeInputSize) bytes.
     //
-    // Reset frames reset the CRC chain AND the sequence number:
-    //   - start_crc = 0 (CRC chain reset)
-    //   - seq = config_.initialSeqNo (0 for Synapticon, 1 per ETG.5100)
-    // After the Reset frame, the next frame uses seq+1.
+    // The slave's Reset response uses seq = initialSeqNo + 1 (the slave
+    // increments the seq after receiving the master's Reset which used
+    // seq = initialSeqNo).  The CRC chain is reset (start_crc = 0).
+    // After the Reset response, the next frame uses seq+1 again.
     // last_tx_crc0_ is NOT updated (stays at 0 for the next frame).
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
+    const uint16_t reset_resp_seq = CRC::incrementSeqNo(config_.initialSeqNo);
     uint16_t seq_used = 0;
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Reset, payload, config_.safeInputSize,
         config_.connectionId,
         0,  // start_crc = 0 (Reset resets CRC chain)
-        config_.initialSeqNo,
+        reset_resp_seq,
         nullptr,  // don't update CRC chain (Reset resets it)
         &seq_used);
-    // Set tx_seq_no_ to the seq used (initialSeqNo, or higher if
-    // collision avoidance incremented it).  prepareTxFrame will
-    // increment it for the next frame.
+    // Set tx_seq_no_ to the seq used.  prepareTxFrame will increment it
+    // for the next frame.
     tx_seq_no_ = seq_used;
     return result;
 }

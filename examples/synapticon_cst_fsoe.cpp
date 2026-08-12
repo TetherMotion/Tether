@@ -40,6 +40,7 @@
  *   ./synapticon_cst_fsoe --debug fsoe-frame    # decoded FSoE PDO struct fields (on change)
  *   ./synapticon_cst_fsoe --debug fsoe-raw      # FSoE protocol trace + raw frame hex dumps (on change)
  *   ./synapticon_cst_fsoe --debug fsoe-wire     # every-cycle PDO wire dumps (firehose)
+ *   ./synapticon_cst_fsoe --debug fsoe-sequence # per-cycle frame accept/reject + state change summary
  */
 
 #include <array>
@@ -692,7 +693,8 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .help("Comma-separated debug flags: 'fsoe' for high-level protocol trace, "
               "'fsoe-frame' for decoded PDO struct fields (on change), "
               "'fsoe-raw' for raw frame hex dumps (on change), "
-              "'fsoe-wire' for every-cycle PDO wire dumps");
+              "'fsoe-wire' for every-cycle PDO wire dumps, "
+              "'fsoe-sequence' for per-cycle frame accept/reject + state change summary");
 
     try {
         program.parse_args(argc, argv);
@@ -1390,6 +1392,7 @@ int main(int argc, char** argv) {
         //   fsoe-raw    — protocol trace + raw frame hex dumps via the
         //                 txFrameEvents/rxFrameEvents listeners
         //   fsoe-master — deprecated alias for fsoe-raw (backward compat)
+        //   fsoe-sequence — per-cycle frame accept/reject + state change summary
         const bool debug_fsoe =
             (args.debug.find("fsoe") != std::string::npos);
         const bool debug_fsoe_frame =
@@ -1399,6 +1402,8 @@ int main(int argc, char** argv) {
              args.debug.find("fsoe-master") != std::string::npos);
         const bool debug_fsoe_wire =
             (args.debug.find("fsoe-wire") != std::string::npos);
+        const bool debug_fsoe_sequence =
+            (args.debug.find("fsoe-sequence") != std::string::npos);
 
         EtherCAT::Drives::Synapticon::SafeMotion::MainConfig main_config;
         main_config.feature_enabled = true;
@@ -1457,6 +1462,26 @@ int main(int argc, char** argv) {
                 });
         }
 
+        // Per-cycle sequence trace (--debug fsoe-sequence).
+        // Emits one line per exchangeViaPDO() call summarizing:
+        //   cycle N: state_before -> state_after  cmd=0xXX  accepted/rejected  reason
+        if (debug_fsoe_sequence) {
+            fsoe_main->rawConnection().setSequenceTraceCallback(
+                [](const FSoE::SequenceTraceInfo& info) {
+                    const char* arrow = info.state_changed ? " -> " : " == ";
+                    TETHER_LOGI(TAG,
+                        "[fsoe-seq] cycle %u: %s%s%s  cmd=0x%02X  %s%s  reason=%s",
+                        info.cycle,
+                        fsoeStateName(info.state_before),
+                        arrow,
+                        fsoeStateName(info.state_after),
+                        info.rx_cmd,
+                        info.frame_accepted ? "ACCEPTED" : "REJECTED",
+                        info.tx_rebuilt ? " (tx rebuilt)" : "",
+                        info.reason);
+                });
+        }
+
         // Raw frame hex dumps (--debug fsoe-raw).
         // Frame event listeners are invoked from inside the FSoE state
         // machine for every master-to-slave (tx) and slave-to-master (rx)
@@ -1512,12 +1537,13 @@ int main(int argc, char** argv) {
         }
 
         TETHER_LOGI(TAG,
-            "FSoE enabled: conn_id=0x%04X watchdog=%u ms debug=%s%s%s%s",
+            "FSoE enabled: conn_id=0x%04X watchdog=%u ms debug=%s%s%s%s%s",
             args.connection_id, args.watchdog_ms,
             debug_fsoe ? "fsoe" : "off",
             debug_fsoe_frame ? "+frame" : "",
             debug_fsoe_raw ? "+raw" : "",
-            debug_fsoe_wire ? "+wire" : "");
+            debug_fsoe_wire ? "+wire" : "",
+            debug_fsoe_sequence ? "+seq" : "");
     } else {
         TETHER_LOGI(TAG, "FSoE disabled (--no-fsoe)");
     }

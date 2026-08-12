@@ -248,22 +248,23 @@ TEST(FSoESequenceConformance, SeqAdvancesAfterResetFrame) {
     conn.initialize();
     conn.startConnection();
 
-    // First TX: Reset frame
+    // First TX: Reset frame (seq=0)
     uint8_t buf1[64] = {};
     size_t len1 = conn.prepareTxFrame(buf1, sizeof(buf1));
     ASSERT_GT(len1, 0u);
     // After prepareTxFrame, tx_seq_no_ should be 1
     EXPECT_EQ(conn.getTxSeqNo(), 1u);
 
-    // Feed a Reset response to advance to Session
+    // Feed a Reset response to advance to Session.
+    // The slave's Reset response uses seq=1 (initial_seq_no + 1).
     uint8_t rx_payload[4] = {0, 0, 0, 0};
     uint8_t rx_frame[64];
     size_t rx_len = CRC::buildFSoEFrame(rx_frame, Command::Reset,
-                                        rx_payload, 4, 0x1234, 0, 0);
+                                        rx_payload, 4, 0x1234, 0, 1);
     ASSERT_TRUE(conn.processRxFrame(rx_frame, rx_len));
     EXPECT_EQ(conn.getState(), ConnectionState::Session);
-    // After receiving Reset response, rx_seq_no_ should be 1
-    EXPECT_EQ(conn.getRxSeqNo(), 1u);
+    // After receiving Reset response, rx_seq_no_ should be 2
+    EXPECT_EQ(conn.getRxSeqNo(), 2u);
 
     // Second TX: Session frame — should use seq=1
     uint8_t buf2[64] = {};
@@ -665,21 +666,41 @@ TEST(FSoESequenceConformance, SeqWrapsFrom65535ToOne) {
 // Reset frame with wrong seq is rejected
 // ============================================================================
 
-TEST(FSoESequenceConformance, MasterRejectsResetWithSeqOne) {
-    // A Reset frame with seq=1 should be rejected by the master,
-    // since the master expects seq=0 for Reset frames (Synapticon convention).
+TEST(FSoESequenceConformance, MasterAcceptsResetResponseWithSeqOne) {
+    // The slave's Reset response uses seq=1 (initial_seq_no + 1).
+    // The master should accept it.
     FSoEMasterConnection conn(makeMasterCfg(4, 4));
     conn.initialize();
     conn.startConnection();
 
-    // Build a Reset frame with seq=1 (wrong — master expects seq=0)
+    // Build a Reset response with seq=1 (correct — slave increments seq)
     uint8_t payload[4] = {0, 0, 0, 0};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::Reset,
                                            payload, 4, 0x1234, 0, 1);
     ASSERT_GT(frame_len, 0u);
 
-    // Master should reject it (CRC won't match with seq=1 vs expected seq=0)
+    // Master should accept it
+    EXPECT_TRUE(conn.processRxFrame(frame, frame_len));
+    EXPECT_EQ(conn.getState(), ConnectionState::Session);
+}
+
+TEST(FSoESequenceConformance, MasterRejectsResetResponseWithSeqZero) {
+    // A Reset response with seq=0 should be rejected by the master,
+    // since the master expects seq=1 for the slave's Reset response
+    // (initial_seq_no + 1 = 0 + 1 = 1).
+    FSoEMasterConnection conn(makeMasterCfg(4, 4));
+    conn.initialize();
+    conn.startConnection();
+
+    // Build a Reset frame with seq=0 (wrong — master expects seq=1)
+    uint8_t payload[4] = {0, 0, 0, 0};
+    uint8_t frame[64];
+    size_t frame_len = CRC::buildFSoEFrame(frame, Command::Reset,
+                                           payload, 4, 0x1234, 0, 0);
+    ASSERT_GT(frame_len, 0u);
+
+    // Master should reject it (CRC won't match with seq=0 vs expected seq=1)
     EXPECT_FALSE(conn.processRxFrame(frame, frame_len));
 }
 

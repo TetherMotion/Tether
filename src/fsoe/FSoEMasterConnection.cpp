@@ -283,7 +283,12 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
 
     const bool is_reset_frame = (data[0] == Command::Reset);
     const uint16_t parse_start_crc = is_reset_frame ? 0 : last_rx_crc0_;
-    const uint16_t parse_seq_no = is_reset_frame ? config_.initial_seq_no : rx_seq_no_;
+    // The slave's Reset response uses seq = initial_seq_no + 1 (the slave
+    // increments the seq after receiving the master's Reset).  The master's
+    // own Reset frame uses seq = initial_seq_no.
+    const uint16_t parse_seq_no = is_reset_frame
+        ? CRC::incrementSeqNo(config_.initial_seq_no)
+        : rx_seq_no_;
     uint16_t seq_used = 0;
 
     if (!CRC::parseFSoEFrameWithCollisionAvoidance(
@@ -1289,6 +1294,42 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
 
+    // --- Sequence trace setup (--debug fsoe-sequence) ---
+    // Capture state at entry; emit one structured summary at exit.
+    const uint8_t seq_state_before = status_.state;
+    bool seq_accepted = false;
+    bool seq_tx_rebuilt = false;
+    uint8_t seq_rx_cmd = 0;
+    const char* seq_reason = "no rx";
+    const bool seq_trace = static_cast<bool>(sequence_trace_callback_);
+    // RAII emitter: fires the callback when the function returns.
+    struct SeqEmitter {
+        FSoEMasterConnection* self;
+        bool active;
+        uint8_t state_before;
+        bool& accepted;
+        bool& tx_rebuilt;
+        uint8_t& rx_cmd;
+        const char*& reason;
+        uint32_t cycle;
+        ~SeqEmitter() {
+            if (!active) return;
+            uint8_t state_after = self->status_.state;
+            SequenceTraceInfo info{};
+            info.cycle = cycle;
+            info.state_before = state_before;
+            info.state_after = state_after;
+            info.state_changed = (state_before != state_after);
+            info.frame_accepted = accepted;
+            info.tx_rebuilt = tx_rebuilt;
+            info.rx_cmd = rx_cmd;
+            info.reason = reason;
+            self->sequence_trace_callback_(info);
+        }
+    } seq_emitter{this, seq_trace, seq_state_before,
+                  seq_accepted, seq_tx_rebuilt, seq_rx_cmd, seq_reason,
+                  pdo_tx_count_ + 1};
+
     // Run the FSoE state machine (watchdog, phase timeouts, auto-recovery).
     update(current_time_ms);
 
@@ -1351,10 +1392,12 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
         // considered a duplicate (the master is sending a new frame).
         last_rx_frame_.clear();
         frame_rebuilt = true;
+        seq_tx_rebuilt = true;
         tx_len = prepareTxFrame(rx_pdo_out, rx_pdo_max);
         if (tx_len == 0) {
             trace("PDO TX: prepareTxFrame returned 0 (state=%s, rx_pdo_max=%zu)",
                   stateName(status_.state), rx_pdo_max);
+            seq_reason = "tx build failed";
             return false;
         }
         // Cache the new frame (only for handshake states)
@@ -1430,6 +1473,7 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
               "entering change-detection mode (max stale=%u)",
               baseline_rx_.size(), config_.slave_response_delay_cycles);
         // Skip this cycle's RX — it's the old response by definition.
+        seq_reason = "tx rebuilt, capturing baseline";
         return false;
     }
 
@@ -1441,6 +1485,7 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
 
     if (tx_pdo_len == 0 || tx_pdo_in == nullptr) {
         trace("PDO RX: empty TxPDO (tx_pdo_len=%zu)", tx_pdo_len);
+        seq_reason = "empty txpdo";
         return false;
     }
 
@@ -1478,11 +1523,13 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
                          "Slave response stale after %u cycles (budget %u)",
                          stale_rx_count_, config_.slave_response_delay_cycles);
                 handleError(ErrorCode::TimeoutError, detail);
+                seq_reason = "stale budget exhausted";
                 return false;
             }
             trace("PDO RX: stale frame (%u/%u), skipping (TX changed, "
                   "slave hasn't responded yet)",
                   stale_rx_count_, config_.slave_response_delay_cycles);
+            seq_reason = "stale frame";
             return false;
         }
 
@@ -1492,6 +1539,7 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
               stale_rx_count_);
         expecting_rx_change_ = false;
         stale_rx_count_ = 0;
+        seq_reason = "frame changed after stale";
     }
 
     // Check for stale/empty TxPDO (all zeros or invalid command byte).
@@ -1500,6 +1548,8 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
         stats_.invalid_frames++;
         trace("PDO RX: cmd=0x%02X not a valid FSoE command, skipping (stale PDO?)",
               rx_cmd);
+        seq_rx_cmd = rx_cmd;
+        seq_reason = "invalid command";
         return false;
     }
 
@@ -1514,6 +1564,8 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
         trace("PDO RX: in Reset state, skipping cmd=%s(0x%02X) "
               "(stale response from previous connection)",
               commandName(rx_cmd), rx_cmd);
+        seq_rx_cmd = rx_cmd;
+        seq_reason = "wrong cmd in Reset";
         return false;
     }
 
@@ -1543,6 +1595,8 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
         status_.last_valid_frame_ms = current_time_ms_;
         trace("PDO RX: duplicate %s frame (slave re-sent, skipping) (state=Data)",
               commandName(rx_cmd));
+        seq_rx_cmd = rx_cmd;
+        seq_reason = "duplicate (Data)";
         return false;
     }
 
@@ -1550,7 +1604,15 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
     // Duplicate detection for handshake states is handled inside
     // processRxFrame (it checks last_rx_frame_ which is cleared by
     // prepareTxFrame above when a new frame is built).
-    return processRxFrame(tx_pdo_in, tx_pdo_len);
+    seq_rx_cmd = rx_cmd;
+    const bool rx_ok = processRxFrame(tx_pdo_in, tx_pdo_len);
+    if (rx_ok) {
+        seq_accepted = true;
+        seq_reason = "processed";
+    } else {
+        seq_reason = "processRxFrame rejected";
+    }
+    return rx_ok;
 }
 
 bool FSoEMasterConnection::areSafeInputsValid() const
@@ -1746,6 +1808,12 @@ void FSoEMasterConnection::setTraceCallback(TraceCallback callback)
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     trace_callback_ = std::move(callback);
+}
+
+void FSoEMasterConnection::setSequenceTraceCallback(SequenceTraceCallback callback)
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    sequence_trace_callback_ = std::move(callback);
 }
 
 // ============================================================================

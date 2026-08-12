@@ -120,6 +120,29 @@ using DataCallback = std::function<void(const uint8_t* data, size_t len)>;
 /// processRxFrame() while the connection's recursive mutex is held.
 using TraceCallback = std::function<void(const char* message)>;
 
+/// Per-cycle sequence trace info (--debug fsoe-sequence).
+///
+/// When installed via setSequenceTraceCallback(), the connection emits one
+/// structured summary per exchangeViaPDO() call, describing:
+///   - whether the RX frame was accepted or rejected (and why)
+///   - whether the TX frame was rebuilt this cycle
+///   - whether the FSoE state changed as a result
+///
+/// This is the "every cycle, what happened" view — useful for debugging
+/// handshake stalls and understanding why the master is stuck in a state.
+struct SequenceTraceInfo {
+    uint32_t cycle;           ///< PDO cycle count (1-based)
+    uint8_t  state_before;    ///< FSoE state at start of cycle
+    uint8_t  state_after;     ///< FSoE state at end of cycle
+    bool     state_changed;   ///< true if state_before != state_after
+    bool     frame_accepted;  ///< true if RX frame was processed by processRxFrame
+    bool     tx_rebuilt;      ///< true if TX frame was rebuilt (state change or output change)
+    uint8_t  rx_cmd;          ///< Command byte from RX frame (0 if no RX processed)
+    const char* reason;       ///< Short reason string for accept/reject
+};
+
+using SequenceTraceCallback = std::function<void(const SequenceTraceInfo&)>;
+
 /// Event source for FSoE frame events.  Each listener receives an immutable
 /// shared_ptr<const std::vector<uint8_t>> copy of the frame bytes.  When no
 /// listeners are registered, emit() performs no allocation.
@@ -212,6 +235,7 @@ public:
     void setFailSafeCallback(FailSafeCallback callback);
     void setDataCallback(DataCallback callback);
     void setTraceCallback(TraceCallback callback);
+    void setSequenceTraceCallback(SequenceTraceCallback callback);
 
     // --- Frame event sources ---
     // Listeners receive a shared_ptr<const std::vector<uint8_t>> copy of the
@@ -364,6 +388,7 @@ private:
     FailSafeCallback fail_safe_callback_;
     DataCallback data_callback_;
     TraceCallback trace_callback_;
+    SequenceTraceCallback sequence_trace_callback_;
 
     // Frame event sources (multi-listener, no-copy-if-empty)
     FrameEventSource tx_frame_events_;
