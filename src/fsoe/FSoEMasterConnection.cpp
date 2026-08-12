@@ -92,6 +92,8 @@ bool FSoEMasterConnection::initialize()
     parameter_crc_ = 0;
     fail_safe_entered_ms_ = 0;
     pdo_tx_count_ = 0;
+    last_tx_cmd_ = 0;
+    has_last_tx_cmd_ = false;
     last_rx_frame_.clear();
 
     resetStats();
@@ -143,6 +145,8 @@ bool FSoEMasterConnection::resetConnection()
     rx_seq_no_ = 1;   // Expected slave sequence also starts at 1
     current_param_index_ = 0;
     pdo_tx_count_ = 0;
+    last_tx_cmd_ = 0;
+    has_last_tx_cmd_ = false;
     last_rx_frame_.clear();
     stats_.reset_events++;
 
@@ -1293,8 +1297,30 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
         trace("PDO startup: skipping RX (cycle %u/%u, slave hasn't responded yet)",
               pdo_tx_count_ + 1, kStartupSkipCycles);
         pdo_tx_count_++;
+        // Track the TX command for the command-change skip logic below.
+        last_tx_cmd_ = rx_pdo_out[0];
+        has_last_tx_cmd_ = true;
         return false;
     }
+
+    // Command-change skip: when the master transitions to a new state
+    // (e.g. Reset→Session), the TX command byte changes.  The slave's
+    // TxPDO in the SAME cycle still contains the response to the
+    // PREVIOUS command (EtherCAT pipeline delay: master TX in cycle N
+    // → slave processes → slave TX in cycle N+1).  Processing this stale
+    // response would trigger a spurious "unexpected command" fail-safe.
+    // Skip RX for one cycle after a command change.
+    const uint8_t current_tx_cmd = rx_pdo_out[0];
+    if (has_last_tx_cmd_ && current_tx_cmd != last_tx_cmd_) {
+        trace("PDO RX: skipping stale response (TX cmd changed %s→%s, "
+              "slave TxPDO is one cycle behind)",
+              commandName(last_tx_cmd_), commandName(current_tx_cmd));
+        last_tx_cmd_ = current_tx_cmd;
+        return false;
+    }
+    last_tx_cmd_ = current_tx_cmd;
+    has_last_tx_cmd_ = true;
+    pdo_tx_count_++;
 
     if (tx_pdo_len == 0 || tx_pdo_in == nullptr) {
         trace("PDO RX: empty TxPDO (tx_pdo_len=%zu)", tx_pdo_len);
