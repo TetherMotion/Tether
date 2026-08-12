@@ -869,13 +869,15 @@ TEST_F(FSoEResetFirstTest, ResetRecoversSlaveFromConnectionState) {
 }
 
 TEST_F(FSoEResetFirstTest, ResetFrameHasCorrectConnectionID) {
-    // The Reset frame must include the configured connection ID so the
-    // slave can validate it (in states where connection ID is checked).
+    // ETG.5100 S (D) V1.2.0, §8.2.2.2:
+    // The Reset frame must have Conn_Id = 0 — the connection has not been
+    // established yet, so there is no Connection ID to check.
+    // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
     std::array<uint8_t, 64> tx{};
     const size_t len = conn->prepareTxFrame(tx.data(), tx.size());
     ASSERT_EQ(len, CRC::fsoeFrameSize(4));
 
-    // ConnID is the last 2 bytes (little-endian)
+    // ConnID is the last 2 bytes (little-endian) — must be 0 in Reset state
     const uint16_t conn_id = tx[len - 2] | (tx[len - 1] << 8);
-    EXPECT_EQ(conn_id, 0x1234);
+    EXPECT_EQ(conn_id, 0u);
 }

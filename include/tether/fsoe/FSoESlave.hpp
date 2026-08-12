@@ -53,6 +53,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <random>
 #include <span>
 #include <vector>
 
@@ -389,6 +390,10 @@ public:
     uint16_t getTxLastCrc0() const { return last_rx_crc0_; }
     uint16_t getTxSeqNo() const { return rx_seq_no_; }
 
+    /// Get the slave's own Session ID (ETG.5100 §8.2.2.3: the slave
+    /// generates its own random Session ID, independent of the master's).
+    uint16_t getSessionId() const { return sessionId_; }
+
     /**
      * @brief Reset statistics
      */
@@ -476,11 +481,23 @@ private:
     bool dataValid_ = false;
     
     // Session/sequence management
+    // ETG.5100 S (D) V1.2.0, §8.2.2.3: The slave generates its OWN random
+    // Slave Session ID — it must NOT echo the master's Session ID.
+    // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
     uint16_t sessionId_ = 0;
     uint16_t currentConnectionId_ = 0;
     uint16_t receivedParameterCRC_ = 0;
     uint8_t expectedSequence_ = 0;
     uint8_t txSequence_ = 0;
+
+    // Session ID octet index for 1-octet safety data.
+    // ETG.5100 §8.2.2.3: When safety data length is 1 octet, the 16-bit
+    // Session ID is transferred in two successive PDUs (low byte first,
+    // then high byte).  For safety data length >= 2, both bytes fit in a
+    // single PDU and this index stays at 0.
+    // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
+    uint8_t sessionOctetIdx_ = 0;
+    bool sessionOctetAdvancePending_ = false;  ///< Advance sessionOctetIdx_ after next buildSessionResponse
 
     // FSoE CRC inheritance and sequence number tracking.
     // See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
@@ -545,9 +562,13 @@ private:
     
     // Error injection
     FSoEErrorInjection errorInjection_;
-    
+
     // Thread safety
     mutable std::recursive_mutex mutex_;
+
+    // Session ID generation (ETG.5100 §8.2.2.3: slave generates its own
+    // random Session ID, independent of the master's)
+    std::mt19937 rng_{std::random_device{}()};
 };
 
 // ============================================================================

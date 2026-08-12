@@ -84,7 +84,8 @@ struct MasterConnectionConfig {
 struct MasterConnectionStatus {
     uint8_t  state = ConnectionState::Reset;
     uint16_t error_code = ErrorCode::NoError;
-    uint16_t session_id = 0;
+    uint16_t session_id = 0;          ///< Master Session ID (generated locally)
+    uint16_t slave_session_id = 0;    ///< Slave Session ID (received from slave)
     uint8_t  sequence_number = 0;
     bool     data_valid = false;
     bool     fail_safe_active = false;
@@ -373,6 +374,14 @@ private:
 
     // Recovery state
     uint64_t fail_safe_entered_ms_ = 0;
+
+    // Session ID octet index for 1-octet safety data.
+    // ETG.5100 §8.2.2.3: When safety data length is 1 octet, the 16-bit
+    // Session ID is transferred in two successive PDUs (low byte first,
+    // then high byte).  For safety data length >= 2, both bytes fit in a
+    // single PDU and this index stays at 0.
+    // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
+    uint8_t session_octet_idx_ = 0;
 
     // PDO startup state: number of Tx frames sent via exchangeViaPDO.
     // The slave cannot respond until it has received at least one frame,
