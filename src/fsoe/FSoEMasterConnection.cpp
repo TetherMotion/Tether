@@ -1404,8 +1404,15 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
     // RX frames (identical to baseline) up to the configured budget.
     // When the RX changes, we process it.  When the budget is exhausted,
     // we trigger fail-safe.
+    //
+    // EXCEPTION: In Reset state, the slave is already sending a valid
+    // Reset response — it doesn't need to "change" its TxPDO in response
+    // to the master's Reset.  The master should process the slave's
+    // Reset response directly (checking length and CRC), then advance
+    // to Session.  Change-detection would incorrectly skip the valid
+    // Reset response as "stale".
 
-    if (frame_rebuilt) {
+    if (frame_rebuilt && status_.state != ConnectionState::Reset) {
         // TX changed — capture current RX as the baseline (last response
         // to the old TX) and enter change-detection mode.  The current
         // cycle's RX is the old response by definition (the slave hasn't
@@ -1493,6 +1500,20 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
         stats_.invalid_frames++;
         trace("PDO RX: cmd=0x%02X not a valid FSoE command, skipping (stale PDO?)",
               rx_cmd);
+        return false;
+    }
+
+    // In Reset state, only accept Reset (0x2A) and Session (0x4E)
+    // responses.  The slave acknowledges a Reset by either echoing Reset
+    // or transitioning to Session and responding with Session.  Other
+    // commands (e.g. ProcessData from a previous connection) would cause
+    // CRC errors and trigger fail-safe.  Skip them silently — the slave
+    // will eventually process the master's Reset and respond correctly.
+    if (status_.state == ConnectionState::Reset &&
+        rx_cmd != Command::Reset && rx_cmd != Command::Session) {
+        trace("PDO RX: in Reset state, skipping cmd=%s(0x%02X) "
+              "(stale response from previous connection)",
+              commandName(rx_cmd), rx_cmd);
         return false;
     }
 

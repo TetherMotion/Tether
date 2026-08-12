@@ -718,18 +718,30 @@ TEST(FSoECommandChangeSkip, StaleBudgetExhaustionTriggersFailSafe) {
     // (stale forever), the master must trigger fail-safe after
     // `slave_response_delay_cycles` stale frames.
     //
-    // We simulate a slave that always sends the same response (frozen).
-    // The master changes TX (Reset→Session) but the slave's RX stays
-    // the same.  After `delay` stale frames, the master must enter
-    // fail-safe.
+    // In Reset state, the master does NOT use change-detection (it just
+    // keeps sending Reset and waiting for a valid response).  The stale
+    // budget applies to non-Reset states (Session, Connection, etc.).
+    //
+    // To test stale budget, we first get the master to Session state by
+    // feeding it a valid Reset response, then freeze the slave's RX.
+    // The master transitions to Session, builds a Session TX, and enters
+    // change-detection mode.  The frozen RX never changes → fail-safe
+    // after `delay` stale frames.
     FSoEMasterConnection conn(makeMasterCfg(4, 4, 3));
     conn.initialize();
     conn.startConnection();
 
     const size_t rx_pdo_size = CRC::fsoeFrameSize(4);
 
-    // The "slave" always sends the same frozen response (all zeros).
-    std::vector<uint8_t> frozen_rx(rx_pdo_size, 0);
+    // Build a valid Reset response (cmd=0x4E, seq=0, start_crc=0) to get
+    // the master out of Reset state into Session state.
+    uint8_t reset_payload[4] = {0, 0, 0, 0};
+    uint8_t reset_resp[CRC::MAX_PARSE_DATA_SIZE];
+    size_t reset_resp_len = CRC::buildFSoEFrame(reset_resp, Command::Session,
+                                                 reset_payload, 4, 0x1234, 0, 0);
+    ASSERT_GT(reset_resp_len, 0u);
+    std::vector<uint8_t> frozen_rx(reset_resp, reset_resp + reset_resp_len);
+    frozen_rx.resize(rx_pdo_size, 0);  // Pad to expected PDO size
 
     uint64_t now = 0;
     bool reached_fail_safe = false;
@@ -749,16 +761,11 @@ TEST(FSoECommandChangeSkip, StaleBudgetExhaustionTriggersFailSafe) {
     }
 
     EXPECT_TRUE(reached_fail_safe) << "Master should have entered fail-safe";
-    // With delay=3, the master tolerates 3 stale frames, then fails on
-    // the 4th.  The first TX (Reset) triggers change-detection mode.
-    // Cycle 0: TX built (frame_rebuilt), baseline=frozen_rx, stale=0
-    // Cycle 1: stale 1/3
-    // Cycle 2: stale 2/3
-    // Cycle 3: stale 3/3
-    // Cycle 4: stale 4 > 3 → fail-safe
-    // But the first cycle has invalid cmd (0x00), so it's skipped
-    // before change-detection.  The TX is built on cycle 0, and
-    // change-detection starts.  Cycle 1: stale 1, etc.
+    // The master processes the Reset response and transitions to Session.
+    // In Session state, it builds a Session TX (frame_rebuilt) and enters
+    // change-detection.  The frozen RX (Reset response) is the baseline.
+    // Subsequent cycles: the RX is still the same Reset response → stale.
+    // After 3 stale frames, the master enters fail-safe.
     EXPECT_LE(fail_safe_cycle, 10) << "Fail-safe should happen quickly";
 }
 
@@ -1004,18 +1011,26 @@ TEST(FSoECommandChangeSkip, ChangeDetectionResetsAfterProcessing) {
 
 TEST(FSoECommandChangeSkip, ZeroStaleBudgetMeansImmediateFailSafeOnStale) {
     // With slave_response_delay_cycles = 0, the master should not
-    // tolerate ANY stale frames.  If the RX doesn't change immediately
-    // after a TX change, it should fail-safe.
+    // tolerate ANY stale frames in non-Reset states.  If the RX doesn't
+    // change immediately after a TX change, it should fail-safe.
     //
-    // However, delay=0 is treated as 1 by the DelayedResponseSlave
-    // (minimum pipeline delay).  So we test with a frozen slave that
-    // never changes its response.
+    // In Reset state, change-detection is not used (the master just
+    // keeps sending Reset).  So we first get the master to Session
+    // state, then freeze the RX.
     FSoEMasterConnection conn(makeMasterCfg(4, 4, 0));
     conn.initialize();
     conn.startConnection();
 
     const size_t rx_pdo_size = CRC::fsoeFrameSize(4);
-    std::vector<uint8_t> frozen_rx(rx_pdo_size, 0);
+
+    // Build a valid Session response to get the master into Session state
+    uint8_t reset_payload[4] = {0, 0, 0, 0};
+    uint8_t reset_resp[CRC::MAX_PARSE_DATA_SIZE];
+    size_t reset_resp_len = CRC::buildFSoEFrame(reset_resp, Command::Session,
+                                                 reset_payload, 4, 0x1234, 0, 0);
+    ASSERT_GT(reset_resp_len, 0u);
+    std::vector<uint8_t> frozen_rx(reset_resp, reset_resp + reset_resp_len);
+    frozen_rx.resize(rx_pdo_size, 0);
 
     uint64_t now = 0;
     bool fail_safe = false;
@@ -1031,10 +1046,10 @@ TEST(FSoECommandChangeSkip, ZeroStaleBudgetMeansImmediateFailSafeOnStale) {
         }
     }
 
-    // With delay=0, the first stale frame after TX change should
-    // trigger fail-safe.  But the first cycle has invalid cmd (0x00),
-    // so it's skipped.  The TX is built on cycle 0, change-detection
-    // starts.  Cycle 1: stale 1 > 0 → fail-safe.
+    // The master processes the Session response and transitions to Session.
+    // It builds a Session TX (frame_rebuilt) and enters change-detection
+    // with delay=0.  The next cycle's RX is still the same → stale 1 > 0
+    // → fail-safe.
     EXPECT_TRUE(fail_safe) << "Delay=0 should not tolerate stale frames";
 }
 
