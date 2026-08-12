@@ -222,12 +222,15 @@ public:
     void resetStats();
     std::string getDiagnostics() const;
 
-    /// Get the current TX CRC state (for test diagnostics and frame building).
+    /// Get the current TX CRC state (self-inheriting TX).
     /// startCrc = last_tx_crc0_, seqNo = tx_seq_no_
     uint16_t getTxLastCrc0() const { return last_tx_crc0_; }
     uint16_t getTxSeqNo() const { return tx_seq_no_; }
-    uint16_t getRxLastCrc0() const { return last_rx_crc0_; }
-    uint16_t getRxSeqNo() const { return rx_seq_no_; }
+    /// Get the current RX CRC state (self-inheriting RX — slave echoes
+    /// master's last TX CRC0/seq).
+    /// startCrc = last_tx_crc0_, seqNo = last_tx_seq_no_
+    uint16_t getRxLastCrc0() const { return last_tx_crc0_; }
+    uint16_t getRxSeqNo() const { return last_tx_seq_no_; }
 
     // --- Callbacks ---
     void setStateChangeCallback(StateChangeCallback callback);
@@ -314,18 +317,19 @@ private:
     // sends) and RX (frames it receives).
     //
     // CRC inheritance model (verified on real Synapticon hardware):
-    //   - Master TX: start_crc = last_tx_crc0_ (self-inheriting)
-    //   - Slave TX:  start_crc = master's TX CRC0 (cross-direction)
+    //   - Master TX: start_crc = last_rx_crc0_ (slave's last TX CRC0, cross-direction)
+    //     seq = last_rx_seq_no_ (slave's last TX seq, cross-direction)
+    //   - Master RX: start_crc = last_tx_crc0_ (own last TX CRC0, self-inheriting)
+    //     seq = last_tx_seq_no_ (own last TX seq, self-inheriting)
     //   - Reset breaks the chain: both sides reset to start_crc=0
-    //
-    // Therefore, when parsing the slave's response:
-    //   - start_crc = last_tx_crc0_ (the master's own last TX CRC0)
-    //   - seq = last_tx_seq_no_ (the seq used in the master's last TX)
-    uint16_t last_tx_crc0_ = 0;   ///< CRC0 of the last frame we sent (startCrc for next TX)
-    uint16_t last_rx_crc0_ = 0;   ///< CRC0 of the last frame we received (for diagnostics)
-    uint16_t tx_seq_no_ = 1;      ///< TX (master) sequence number (1..65535, never 0)
-    uint16_t rx_seq_no_ = 1;      ///< Expected RX (slave) sequence number (1..65535, never 0)
-    uint16_t last_tx_seq_no_ = 0; ///< Seq used in the last TX (before incrementing)
+    //   - No seq increment between frames — seq only advances via collision
+    //     avoidance (ETG.5100 §8.1.3.4).
+    uint16_t last_tx_crc0_ = 0;   ///< CRC0 of the last frame we sent (for RX parsing)
+    uint16_t last_rx_crc0_ = 0;   ///< CRC0 of the last frame we received (startCrc for TX)
+    uint16_t tx_seq_no_ = 1;      ///< Kept for diagnostics (not used for TX — use last_rx_seq_no_)
+    uint16_t rx_seq_no_ = 1;      ///< Kept for diagnostics (not used for RX — use last_tx_seq_no_)
+    uint16_t last_tx_seq_no_ = 0; ///< Seq used in the last TX (for RX parsing)
+    uint16_t last_rx_seq_no_ = 0; ///< Seq used by slave in its last TX (startSeq for TX)
 
     // Legacy sequence tracking (kept for API compatibility, no longer used
     // for actual sequence validation — see tx_seq_no_ / rx_seq_no_ above)

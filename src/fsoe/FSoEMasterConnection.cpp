@@ -89,6 +89,7 @@ bool FSoEMasterConnection::initialize()
     tx_seq_no_ = config_.initial_seq_no;
     rx_seq_no_ = config_.initial_seq_no;
     last_tx_seq_no_ = 0;
+    last_rx_seq_no_ = 0;
     current_param_index_ = 0;
     parameter_crc_ = 0;
     fail_safe_entered_ms_ = 0;
@@ -149,6 +150,7 @@ bool FSoEMasterConnection::resetConnection()
     tx_seq_no_ = config_.initial_seq_no;
     rx_seq_no_ = config_.initial_seq_no;
     last_tx_seq_no_ = 0;
+    last_rx_seq_no_ = 0;
     current_param_index_ = 0;
     pdo_tx_count_ = 0;
     last_rx_frame_.clear();
@@ -272,11 +274,11 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
     // buildFailSafeResponse sends safeInputSize + 2 bytes (inputs + error code),
     // which can be up to 18 bytes when safeInputSize = 16.
     //
-    // CRC inheritance for RX parsing:
+    // CRC inheritance for RX parsing (self-inheriting):
     //   - Reset frames: start_crc=0, seq=initial_seq_no+1 (Reset resets chain)
     //   - Non-Reset frames: start_crc=last_tx_crc0_, seq=last_tx_seq_no_
-    //     (the slave uses the master's last TX CRC0 and seq — cross-direction
-    //     CRC inheritance, verified on real Synapticon hardware)
+    //     (the slave's TX inherits from the master's last TX CRC0 and seq,
+    //      so the master verifies using its own last TX CRC0 and seq)
     uint8_t cmd = 0;
     uint8_t frame_data[CRC::MAX_PARSE_DATA_SIZE] = {0};
     size_t data_len = 0;
@@ -285,11 +287,9 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
 
     const bool is_reset_frame = (data[0] == Command::Reset);
     const uint16_t parse_start_crc = is_reset_frame ? 0 : last_tx_crc0_;
-    // The slave's Reset response uses seq = initial_seq_no + 1 (the slave
-    // increments the seq after receiving the master's Reset).  The master's
-    // own Reset frame uses seq = initial_seq_no.
-    // Non-Reset frames use last_tx_seq_no_ (the seq of the master's last TX)
-    // because the slave echoes the master's TX seq.
+    // The slave's Reset response uses seq = initial_seq_no + 1.
+    // Non-Reset frames use last_tx_seq_no_ (the master's actual last TX seq,
+    // which the slave echoes back without incrementing).
     const uint16_t parse_seq_no = is_reset_frame
         ? CRC::incrementSeqNo(config_.initial_seq_no)
         : last_tx_seq_no_;
@@ -323,10 +323,11 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
         return false;
     }
 
-    // Update rx_seq_no_ for diagnostics (the seq that matched after collision
-    // avoidance).  This is no longer used for parsing — the RX parser uses
-    // last_tx_seq_no_ (cross-direction CRC inheritance).
-    rx_seq_no_ = seq_used;
+    // Save the seq that matched (after collision avoidance).
+    // The slave echoes the master's last TX seq, so rx_seq_no_ = seq_used
+    // (no increment — the slave doesn't advance seq independently).
+    last_rx_seq_no_ = seq_used;
+    rx_seq_no_ = seq_used;  // for diagnostics
 
     // Reject frames with unrecognized command bytes.
     //
@@ -350,10 +351,17 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
     // the ConnID yet).  We skip validation in Reset and Session states,
     // matching the FSoE slave behavior (which also only validates ConnID in
     // Connection/Parameter/Data states).
-    if (status_.state == ConnectionState::Connection ||
-        status_.state == ConnectionState::Parameter ||
-        status_.state == ConnectionState::Data ||
-        status_.state == ConnectionState::FailSafe) {
+    //
+    // Reset command frames (0x2A) ALWAYS have conn_id=0x0000 — the slave
+    // resets its conn_id when it receives a Reset.  Skip validation for
+    // Reset frames in any state, so the master can handle a slave-initiated
+    // reset from Connection/Parameter/Data states without rejecting it as
+    // a ConnectionIDError.
+    if (cmd != Command::Reset &&
+        (status_.state == ConnectionState::Connection ||
+         status_.state == ConnectionState::Parameter ||
+         status_.state == ConnectionState::Data ||
+         status_.state == ConnectionState::FailSafe)) {
         if (!validateConnectionID(conn_id)) {
             FSoEErrorDetail detail;
             detail.conn_id_valid = true;
@@ -547,17 +555,11 @@ size_t FSoEMasterConnection::prepareTxFrame(uint8_t* data, size_t max_len)
 
     if (len > 0) {
         stats_.frames_sent++;
-        // Save the seq used in this TX (before incrementing) so that the
-        // RX parser can use it when parsing the slave's response.  The
-        // slave uses the same seq as the master's TX (cross-direction
-        // CRC inheritance).
-        last_tx_seq_no_ = tx_seq_no_;
-        // Increment TX sequence number for the NEXT frame.
-        // Per ETG.5100 §8.1.3.4, every PDU (including Reset) advances the
-        // sequence counter.  The sequence number is NOT transmitted — it is
-        // folded into the CRC.  The actual seq used for this frame (after
-        // collision avoidance) was already set by the build* function;
-        // here we advance to the next expected value.
+        // Increment TX sequence number for the NEXT frame (self-inheriting
+        // TX: the master's next TX inherits from this TX's CRC0 and uses
+        // seq+1).  The actual seq used for this frame (after collision
+        // avoidance) was already set by the build* function; here we
+        // advance to the next expected value.
         tx_seq_no_ = CRC::incrementSeqNo(tx_seq_no_);
         tx_frame_events_.emit([data, len] {
             return std::make_shared<const std::vector<uint8_t>>(data, data + len);
@@ -733,6 +735,11 @@ void FSoEMasterConnection::handleSessionState(uint8_t cmd, const uint8_t* data, 
     (void)data;
     (void)data_len;
 
+    if (cmd == Command::Reset) {
+        trace("RX Reset(0x2A): slave requested reset in Session state, resetting connection");
+        resetConnection();
+        return;
+    }
     if (cmd == Command::Session) {
         trace("RX Session(0x4E): slave accepted session, moving to Connection");
         transitionTo(ConnectionState::Connection);
@@ -749,13 +756,20 @@ void FSoEMasterConnection::handleSessionState(uint8_t cmd, const uint8_t* data, 
 
 void FSoEMasterConnection::handleConnectionState(uint8_t cmd, const uint8_t* data, size_t data_len)
 {
+    if (cmd == Command::Reset) {
+        trace("RX Reset(0x2A): slave requested reset in Connection state, resetting connection");
+        resetConnection();
+        return;
+    }
     if (cmd == Command::Connection) {
-        // Validate slave's safety address and SIL from connection response.
-        // Parsed data format: [safetyAddr_lo][safetyAddr_hi][sil][reserved]
-        // The frame data length is the PDO's safe-data size (input_size),
-        // which may be < 4.  We require at least 2 bytes (safety address).
+        // Validate slave's Connection response per ETG.5100 §8.2.2.4 Table 17:
+        //   SafeData[0] = Connection ID, low octet
+        //   SafeData[1] = Connection ID, high octet
+        //   SafeData[2] = FSoE Slave Address, low octet
+        //   SafeData[3] = FSoE Slave Address, high octet
+        // The slave echoes back the Connection ID and its own Slave Address.
         if (data_len < 2) {
-            // Too short to carry safety address — skip validation.
+            // Too short to carry Connection ID — skip validation.
             if (config_.input_size < 2) {
                 if (config_.input_size > 0 || config_.output_size > 0) {
                     transitionTo(ConnectionState::Parameter);
@@ -771,58 +785,42 @@ void FSoEMasterConnection::handleConnectionState(uint8_t cmd, const uint8_t* dat
             handleError(ErrorCode::DataLengthError, detail);
             return;
         }
-        if (data_len < 4) {
-            // Has safety address (2+ bytes) but not SIL.
-            // Only accept when input_size < 4 (PDO can't carry 4 bytes).
-            // When input_size >= 4, a short response is a protocol error.
-            if (config_.input_size < 4) {
-                trace("RX Connection(0x64): response short (%zu bytes, "
-                      "skipping SIL validation)", data_len);
-                if (config_.input_size > 0 || config_.output_size > 0) {
-                    transitionTo(ConnectionState::Parameter);
-                } else {
-                    transitionTo(ConnectionState::Data);
-                }
-                return;
-            }
-            trace("RX Connection(0x64): response too short (%zu bytes, expected 4)",
-                  data_len);
-            FSoEErrorDetail detail;
-            snprintf(detail.message, sizeof(detail.message),
-                     "Connection response too short: got %zu bytes, expected 4",
-                     data_len);
-            handleError(ErrorCode::DataLengthError, detail);
-            return;
-        }
-        uint16_t slave_safety_addr = data[0] | (data[1] << 8);
-        if (slave_safety_addr != 0 && slave_safety_addr != config_.slave_safety_addr) {
-            trace("RX Connection(0x64): safety address mismatch "
+        // Validate Connection ID (bytes 0-1)
+        uint16_t slave_conn_id = static_cast<uint16_t>(data[0]) |
+            (static_cast<uint16_t>(data[1]) << 8);
+        if (slave_conn_id != 0 && slave_conn_id != config_.connection_id) {
+            trace("RX Connection(0x64): Connection ID mismatch "
                   "(expected 0x%04X got 0x%04X)",
-                  config_.slave_safety_addr, slave_safety_addr);
+                  config_.connection_id, slave_conn_id);
             FSoEErrorDetail detail;
             detail.conn_id_valid = true;
-            detail.expected_conn_id = config_.slave_safety_addr;
-            detail.received_conn_id = slave_safety_addr;
+            detail.expected_conn_id = config_.connection_id;
+            detail.received_conn_id = slave_conn_id;
             snprintf(detail.message, sizeof(detail.message),
-                     "Slave safety address mismatch: expected 0x%04X got 0x%04X",
+                     "Slave Connection ID mismatch: expected 0x%04X got 0x%04X",
                      detail.expected_conn_id, detail.received_conn_id);
             handleError(ErrorCode::ConnectionIDError, detail);
             return;
         }
-        uint8_t slave_sil = data[2];
-        if (slave_sil < config_.safety_level) {
-            trace("RX Connection(0x64): slave SIL %u below required %u",
-                  slave_sil, config_.safety_level);
-            FSoEErrorDetail detail;
-            snprintf(detail.message, sizeof(detail.message),
-                     "Slave SIL %u below required SIL %u",
-                     slave_sil, config_.safety_level);
-            handleError(ErrorCode::ApplicationError, detail);
-            return;
+        // Validate Slave Address (bytes 2-3) if present
+        if (data_len >= 4) {
+            uint16_t slave_safety_addr = static_cast<uint16_t>(data[2]) |
+                (static_cast<uint16_t>(data[3]) << 8);
+            if (slave_safety_addr != 0 && slave_safety_addr != config_.slave_safety_addr) {
+                trace("RX Connection(0x64): slave address mismatch "
+                      "(expected 0x%04X got 0x%04X)",
+                      config_.slave_safety_addr, slave_safety_addr);
+                FSoEErrorDetail detail;
+                snprintf(detail.message, sizeof(detail.message),
+                         "Slave safety address mismatch: expected 0x%04X got 0x%04X",
+                         config_.slave_safety_addr, slave_safety_addr);
+                handleError(ErrorCode::ConnectionIDError, detail);
+                return;
+            }
         }
-        trace("RX Connection(0x64): slave confirmed safety_addr=0x%04X SIL=%u, "
+        trace("RX Connection(0x64): slave confirmed conn_id=0x%04X, "
               "moving to %s",
-              slave_safety_addr, slave_sil,
+              slave_conn_id,
               (config_.input_size > 0 || config_.output_size > 0)
                   ? "Parameter" : "Data");
         if (config_.input_size > 0 || config_.output_size > 0) {
@@ -846,6 +844,11 @@ void FSoEMasterConnection::handleParameterState(uint8_t cmd, const uint8_t* data
     (void)data;
     (void)data_len;
 
+    if (cmd == Command::Reset) {
+        trace("RX Reset(0x2A): slave requested reset in Parameter state, resetting connection");
+        resetConnection();
+        return;
+    }
     if (cmd == Command::Parameter) {
         trace("RX Parameter(0x52): slave accepted parameters, moving to Data");
         current_param_index_++;
@@ -969,8 +972,8 @@ size_t FSoEMasterConnection::buildResetFrame(uint8_t* data, size_t max_len)
     // Reset frames reset the CRC chain AND the sequence number:
     //   - start_crc = 0 (CRC chain reset)
     //   - seq = config_.initial_seq_no (0 for Synapticon, 1 per ETG.5100)
-    // After the Reset frame, the next frame uses seq+1.
     // last_tx_crc0_ is NOT updated (stays at 0 for the next frame).
+    // last_tx_seq_no_ is set for diagnostics.
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     payload[0] = ResetErrorCode::None;  // Local reset
     size_t needed = CRC::fsoeFrameSize(config_.output_size);
@@ -983,10 +986,8 @@ size_t FSoEMasterConnection::buildResetFrame(uint8_t* data, size_t max_len)
         config_.initial_seq_no,
         nullptr,  // don't update CRC chain (Reset resets it)
         &seq_used);
-    // Set tx_seq_no_ to the seq used (initial_seq_no, or higher if
-    // collision avoidance incremented it).  prepareTxFrame will
-    // increment it for the next frame.
     tx_seq_no_ = seq_used;
+    last_tx_seq_no_ = seq_used;
     return result;
 }
 
@@ -1005,18 +1006,23 @@ size_t FSoEMasterConnection::buildSessionResetFrame(uint8_t* data, size_t max_le
         config_.connection_id,
         last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
+    last_tx_seq_no_ = seq_used;
     return result;
 }
 
 size_t FSoEMasterConnection::buildConnectionFrame(uint8_t* data, size_t max_len)
 {
-    // Connection frame: full PDO-size frame with safety_addr + param_crc in SafeData[0-3].
+    // Connection frame per ETG.5100 §8.2.2.4 Table 15/16:
+    //   SafeData[0] = Connection ID, low octet
+    //   SafeData[1] = Connection ID, high octet
+    //   SafeData[2] = FSoE Slave Address, low octet
+    //   SafeData[3] = FSoE Slave Address, high octet
     // Remaining data bytes are zero-padded to output_size.
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
-    payload[0] = config_.slave_safety_addr & 0xFF;
-    payload[1] = (config_.slave_safety_addr >> 8) & 0xFF;
-    payload[2] = parameter_crc_ & 0xFF;
-    payload[3] = (parameter_crc_ >> 8) & 0xFF;
+    payload[0] = static_cast<uint8_t>(config_.connection_id & 0xFF);
+    payload[1] = static_cast<uint8_t>((config_.connection_id >> 8) & 0xFF);
+    payload[2] = static_cast<uint8_t>(config_.slave_safety_addr & 0xFF);
+    payload[3] = static_cast<uint8_t>((config_.slave_safety_addr >> 8) & 0xFF);
     size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
     uint16_t seq_used = 0;
@@ -1025,6 +1031,7 @@ size_t FSoEMasterConnection::buildConnectionFrame(uint8_t* data, size_t max_len)
         config_.connection_id,
         last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
+    last_tx_seq_no_ = seq_used;
     return result;
 }
 
@@ -1048,6 +1055,7 @@ size_t FSoEMasterConnection::buildParameterFrame(uint8_t* data, size_t max_len)
         config_.connection_id,
         last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
+    last_tx_seq_no_ = seq_used;
     return result;
 }
 
@@ -1063,6 +1071,7 @@ size_t FSoEMasterConnection::buildDataFrame(uint8_t* data, size_t max_len)
         config_.connection_id,
         last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
+    last_tx_seq_no_ = seq_used;
     return result;
 }
 
@@ -1078,6 +1087,7 @@ size_t FSoEMasterConnection::buildFailSafeFrame(uint8_t* data, size_t max_len)
         config_.connection_id,
         last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
+    last_tx_seq_no_ = seq_used;
     return result;
 }
 
@@ -1090,8 +1100,7 @@ bool FSoEMasterConnection::validateCRC(const uint8_t* data, size_t len) const
     uint8_t cmd = 0;
     size_t data_len = 0;
     uint16_t conn_id = 0;
-    // Use cross-direction CRC inheritance: the slave's TX uses the master's
-    // last TX CRC0 and seq.
+    // Self-inheriting RX: verify using own last TX CRC0 and seq.
     const bool is_reset_frame = (!data || len == 0) ? false : (data[0] == Command::Reset);
     return CRC::parseFSoEFrameWithCollisionAvoidance(
         data, len, cmd, nullptr, data_len, conn_id,

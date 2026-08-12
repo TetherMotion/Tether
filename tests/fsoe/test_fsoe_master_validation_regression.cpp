@@ -184,11 +184,12 @@ TEST(FSoEMasterConnectionValidationRegression, ShortConnectionResponseRejected) 
     conn.exchangeWith(slave, now);  // Session → Connection
     ASSERT_EQ(conn.getState(), ConnectionState::Connection);
 
-    // Send a short Connection response (2 bytes instead of 4)
-    uint8_t payload[] = {0x00, 0x01};
+    // Send a short Connection response (1 byte instead of 4)
+    // This triggers the data_len < 2 check in handleConnectionState.
+    uint8_t payload[] = {0x34};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::Connection,
-                                            payload, 2, 0x1234,
+                                            payload, 1, 0x1234,
                                             conn.getRxLastCrc0(),
                                             conn.getRxSeqNo());
     bool ok = conn.processRxFrame(frame, frame_len);
