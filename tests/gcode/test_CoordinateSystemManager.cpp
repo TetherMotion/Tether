@@ -415,3 +415,195 @@ TEST(CoordinateSystemManager, ModalGroupG51G50) {
     EXPECT_EQ(getModalGroup(510), ModalGroup::SCALING);
     EXPECT_EQ(getModalGroup(500), ModalGroup::SCALING);
 }
+
+// ============================================================================
+// G10 L20 with R word (WCS rotation)
+// ============================================================================
+
+TEST(CoordinateSystemManager, G10L20WithRWord) {
+    CoordinateSystemManager csm;
+    MachineState s = makeState();
+    VariableSystem vars;
+
+    Block b;
+    setWord(b, WordLetter::P, 1);
+    setWord(b, WordLetter::X, 10);
+    setWord(b, WordLetter::Y, 20);
+    setWord(b, WordLetter::R, 30);  // 30 degree rotation
+
+    Position machinePos;
+    machinePos.x() = 50;
+    machinePos.y() = 60;
+    machinePos.z() = 0;
+
+    csm.processG10L20(1, b, machinePos, vars);
+
+    auto& wcs = csm.getWCS(1);
+    // L20: offset = machine - program
+    EXPECT_NEAR(wcs.offset.x(), 40, 0.001);  // 50 - 10
+    EXPECT_NEAR(wcs.offset.y(), 40, 0.001);  // 60 - 20
+    EXPECT_NEAR(wcs.rotation, 30, 0.001);
+}
+
+TEST(CoordinateSystemManager, G10L20WithoutRWord) {
+    CoordinateSystemManager csm;
+    MachineState s = makeState();
+    VariableSystem vars;
+
+    Block b;
+    setWord(b, WordLetter::P, 2);
+    setWord(b, WordLetter::X, 5);
+    setWord(b, WordLetter::Y, 10);
+
+    Position machinePos;
+    machinePos.x() = 25;
+    machinePos.y() = 30;
+    machinePos.z() = 0;
+
+    csm.processG10L20(2, b, machinePos, vars);
+
+    auto& wcs = csm.getWCS(2);
+    EXPECT_NEAR(wcs.offset.x(), 20, 0.001);  // 25 - 5
+    EXPECT_NEAR(wcs.offset.y(), 20, 0.001);  // 30 - 10
+    EXPECT_NEAR(wcs.rotation, 0, 0.001);  // No R word → no rotation
+}
+
+// ============================================================================
+// G68/G51 variable exposure (syncToVariables)
+// ============================================================================
+
+TEST(CoordinateSystemManager, G68VariableExposure_2D) {
+    CoordinateSystemManager csm;
+    MachineState s = makeState();
+    VariableSystem vars;
+
+    // Set G68 2D rotation with pivot via X/Y words in the block
+    Block b68;
+    setWord(b68, WordLetter::R, 45);  // 45 degrees
+    setWord(b68, WordLetter::X, 10);  // pivot X
+    setWord(b68, WordLetter::Y, 20);  // pivot Y
+    s.g68Active = true;
+    s.g68Mode = 0;
+    s.coordRotation = 45;
+    csm.processG68(b68, s);
+    csm.syncTransform(s);
+    csm.syncToVariables(vars);
+
+    // #5400 = rotation active (1)
+    EXPECT_NEAR(vars.get(5400), 1.0, 0.001);
+    // #5401 = rotation mode (1 = PLANE_2D)
+    EXPECT_NEAR(vars.get(5401), 1.0, 0.001);
+    // #5402 = angle
+    EXPECT_NEAR(vars.get(5402), 45.0, 0.001);
+    // #5403-5405 = pivot XYZ
+    EXPECT_NEAR(vars.get(5403), 10.0, 0.001);
+    EXPECT_NEAR(vars.get(5404), 20.0, 0.001);
+}
+
+TEST(CoordinateSystemManager, G68VariableExposure_Inactive) {
+    CoordinateSystemManager csm;
+    MachineState s = makeState();
+    VariableSystem vars;
+
+    csm.syncTransform(s);
+    csm.syncToVariables(vars);
+
+    // #5400 = rotation active (0)
+    EXPECT_NEAR(vars.get(5400), 0.0, 0.001);
+}
+
+TEST(CoordinateSystemManager, G51VariableExposure) {
+    CoordinateSystemManager csm;
+    MachineState s = makeState();
+    VariableSystem vars;
+
+    // Set G51 scaling
+    Block b51;
+    setWord(b51, WordLetter::X, 2);
+    setWord(b51, WordLetter::Y, 0.5);
+    setWord(b51, WordLetter::Z, 1);
+    s.g51Active = true;
+    s.scaleFactors.x() = 2;
+    s.scaleFactors.y() = 0.5;
+    s.scaleFactors.z() = 1;
+    csm.processG51(b51, s);
+    csm.syncTransform(s);
+    csm.syncToVariables(vars);
+
+    // #5413 = scaling active (1)
+    EXPECT_NEAR(vars.get(5413), 1.0, 0.001);
+    // #5414-5416 = scale X, Y, Z
+    EXPECT_NEAR(vars.get(5414), 2.0, 0.001);
+    EXPECT_NEAR(vars.get(5415), 0.5, 0.001);
+    EXPECT_NEAR(vars.get(5416), 1.0, 0.001);
+}
+
+TEST(CoordinateSystemManager, G51VariableExposure_Inactive) {
+    CoordinateSystemManager csm;
+    MachineState s = makeState();
+    VariableSystem vars;
+
+    csm.syncTransform(s);
+    csm.syncToVariables(vars);
+
+    // #5413 = scaling active (0)
+    EXPECT_NEAR(vars.get(5413), 0.0, 0.001);
+    // Scale factors should be 1.0
+    EXPECT_NEAR(vars.get(5414), 1.0, 0.001);
+    EXPECT_NEAR(vars.get(5415), 1.0, 0.001);
+    EXPECT_NEAR(vars.get(5416), 1.0, 0.001);
+}
+
+// ============================================================================
+// WCS rotation (G10 L2 R) integration with transform
+// ============================================================================
+
+TEST(CoordinateSystemManager, WCSRotationAppliesToTransform) {
+    CoordinateSystemManager csm;
+    MachineState s = makeState();
+    VariableSystem vars;
+
+    // Set WCS 1 with offset and rotation
+    Block b10;
+    setWord(b10, WordLetter::P, 1);
+    setWord(b10, WordLetter::X, 100);
+    setWord(b10, WordLetter::Y, 200);
+    setWord(b10, WordLetter::R, 90);
+    csm.processG10L2(1, b10, vars);
+
+    // Select WCS 1
+    csm.selectWCS(1);
+    csm.syncTransform(s);
+
+    // Program (10, 0, 0) with 90° rotation about origin + WCS (100, 200, 0):
+    // R(90°) * (10, 0) = (0, 10), + WCS = (100, 210)
+    Position program;
+    program.x() = 10;
+    program.y() = 0;
+    program.z() = 0;
+    Position machine = csm.toMachineCoords(program);
+    EXPECT_NEAR(machine.x(), 100, 0.001);
+    EXPECT_NEAR(machine.y(), 210, 0.001);
+}
+
+// ============================================================================
+// Tool length offset in transform (via syncTransform)
+// ============================================================================
+
+TEST(CoordinateSystemManager, ToolLengthOffsetInTransform) {
+    CoordinateSystemManager csm;
+    MachineState s = makeState();
+
+    // Set tool offset
+    s.toolOffset.z() = 25.0;
+
+    csm.syncTransform(s);
+
+    // Program (0, 0, 10) → machine (0, 0, 35)
+    Position program;
+    program.x() = 0;
+    program.y() = 0;
+    program.z() = 10;
+    Position machine = csm.toMachineCoords(program);
+    EXPECT_NEAR(machine.z(), 35, 0.001);  // 10 + 25 TLO
+}

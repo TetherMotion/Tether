@@ -183,15 +183,63 @@ public:
             state_->extrudeFactor = g.get('S', 100.0) / 100.0;
             return true;
         } else if (g.code == "G10") {
-            // Firmware retract
+            // G10 has multiple meanings depending on L word:
+            // - No L word: firmware retract
+            // - L2: set WCS offset (absolute)
+            // - L20: set WCS offset from current position
+            if (g.has('L')) {
+                int lVal = static_cast<int>(g.get('L'));
+                int pWord = static_cast<int>(g.get('P', 1));
+                if (pWord < 1 || pWord > 9)
+                    return false;
+                int wcsIdx = pWord - 1;
+
+                if (lVal == 2) {
+                    // G10 L2: set WCS offset (absolute)
+                    if (g.has('X'))
+                        state_->coordSystemOffsets[wcsIdx][0] = g.get('X');
+                    if (g.has('Y'))
+                        state_->coordSystemOffsets[wcsIdx][1] = g.get('Y');
+                    if (g.has('Z'))
+                        state_->coordSystemOffsets[wcsIdx][2] = g.get('Z');
+                    if (g.has('R'))
+                        state_->coordSystemRotations[wcsIdx] = g.get('R');
+                    state_->rebuildCoordTransform();
+                    return true;
+                } else if (lVal == 20) {
+                    // G10 L20: set WCS so current position becomes specified
+                    // coordinate. offset = machine - program.
+                    auto machine = state_->coordTransform.toMachineXYZ(
+                        state_->position[0], state_->position[1],
+                        state_->position[2]);
+                    if (g.has('X'))
+                        state_->coordSystemOffsets[wcsIdx][0] =
+                            machine[0] - g.get('X');
+                    if (g.has('Y'))
+                        state_->coordSystemOffsets[wcsIdx][1] =
+                            machine[1] - g.get('Y');
+                    if (g.has('Z'))
+                        state_->coordSystemOffsets[wcsIdx][2] =
+                            machine[2] - g.get('Z');
+                    if (g.has('R'))
+                        state_->coordSystemRotations[wcsIdx] = g.get('R');
+                    state_->rebuildCoordTransform();
+                    return true;
+                }
+            }
+
+            // Firmware retract (no L word)
             if (callbacks_.retract) {
                 double eMove = callbacks_.retract();
                 if (!std::isnan(eMove)) {
                     state_->position[3] += eMove;
                     if (callbacks_.move) {
-                        callbacks_.move(
+                        auto machine = state_->coordTransform.toMachineXYZ(
                             state_->position[0], state_->position[1],
-                            state_->position[2], state_->position[3], 20.0);
+                            state_->position[2]);
+                        callbacks_.move(
+                            machine[0], machine[1], machine[2],
+                            state_->position[3], 20.0);
                     }
                 }
             }
@@ -203,9 +251,12 @@ public:
                 if (!std::isnan(eMove)) {
                     state_->position[3] += eMove;
                     if (callbacks_.move) {
-                        callbacks_.move(
+                        auto machine = state_->coordTransform.toMachineXYZ(
                             state_->position[0], state_->position[1],
-                            state_->position[2], state_->position[3], 10.0);
+                            state_->position[2]);
+                        callbacks_.move(
+                            machine[0], machine[1], machine[2],
+                            state_->position[3], 10.0);
                     }
                 }
             }
@@ -811,11 +862,31 @@ public:
             }
             return true;
         } else if (g.code == "G92.1" || g.code == "G92.2" || g.code == "G92.3") {
-            // Reset G92 offsets
+            // Reset G92 offsets.
+            // G92.1: reset G92 offsets and set position to zero.
+            // G92.2: reset G92 offsets but keep position (suspend).
+            // G92.3: restore G92 offsets (resume from suspended).
+            int mode = 1;
+            if (g.code == "G92.2") mode = 2;
+            else if (g.code == "G92.3") mode = 3;
+
+            if (mode == 1) {
+                // G92.1: zero out G92 offset and reset position to 0.
+                state_->g92Offset = {0, 0, 0};
+                state_->g92Active = false;
+                state_->position[0] = 0;
+                state_->position[1] = 0;
+                state_->position[2] = 0;
+                state_->rebuildCoordTransform();
+            } else if (mode == 2) {
+                // G92.2: suspend G92 offset (reset to zero, keep position).
+                state_->g92Offset = {0, 0, 0};
+                state_->g92Active = false;
+                state_->rebuildCoordTransform();
+            }
+            // G92.3: restore — no-op for now (would need saved state).
+
             if (callbacks_.resetG92Offsets) {
-                int mode = 1;
-                if (g.code == "G92.2") mode = 2;
-                else if (g.code == "G92.3") mode = 3;
                 callbacks_.resetG92Offsets(mode);
             }
             return true;
@@ -968,19 +1039,47 @@ public:
             // G69 — cancel coordinate rotation.
             if (callbacks_.cancelCoordinateRotation) callbacks_.cancelCoordinateRotation();
             return true;
+        } else if (g.code == "G43") {
+            // G43 — tool length offset from tool table (H word).
+            // For now, use H value directly as Z offset (tool table lookup
+            // would be done by the callback if available).
+            double offset = g.get('H', 0.0);
+            state_->toolLengthOffset = offset;
+            state_->rebuildCoordTransform();
+            return true;
+        } else if (g.code == "G43.1") {
+            // G43.1 — dynamic tool length offset (Z word specifies offset).
+            double offset = g.get('Z', 0.0);
+            state_->toolLengthOffset = offset;
+            state_->rebuildCoordTransform();
+            return true;
+        } else if (g.code == "G49") {
+            // G49 — cancel tool length offset.
+            state_->toolLengthOffset = 0.0;
+            state_->rebuildCoordTransform();
+            return true;
         } else if (g.code == "G51") {
             // G51 — scaling. P word = uniform; X/Y/Z = per-axis.
+            // Extended axes (A/B/C, U/V/W) can also be scaled.
             if (g.has('P')) {
                 double s = g.get('P');
                 if (callbacks_.setScaling) callbacks_.setScaling(s, s, s);
             } else {
                 double sx = g.get('X', 1.0), sy = g.get('Y', 1.0), sz = g.get('Z', 1.0);
                 if (callbacks_.setScaling) callbacks_.setScaling(sx, sy, sz);
+                // Extended axis scaling (stored in state, applied by transform).
+                state_->extScaleFactors = {
+                    g.get('A', 1.0), g.get('B', 1.0), g.get('C', 1.0),
+                    g.get('U', 1.0), g.get('V', 1.0), g.get('W', 1.0)
+                };
+                state_->rebuildCoordTransform();
             }
             return true;
         } else if (g.code == "G50") {
             // G50 — cancel scaling.
             if (callbacks_.cancelScaling) callbacks_.cancelScaling();
+            state_->extScaleFactors = {1, 1, 1, 1, 1, 1};
+            state_->rebuildCoordTransform();
             return true;
         } else if (g.code == "G61.1") {
             state_->pathControlMode = 1;
@@ -1124,6 +1223,43 @@ public:
     const GcodeCallbacks& callbacks() const { return callbacks_; }
 
 private:
+    /// @brief Compute machine-space speed from program-space feed rate.
+    ///
+    /// When G51 scaling or G68 rotation is active, the machine-space distance
+    /// differs from the program-space distance. This method computes the
+    /// ratio by transforming the direction vector and scales the feed rate
+    /// accordingly. If the transform is identity, the speed is unchanged.
+    ///
+    /// @param progStartX/Y/Z  Program-space start position.
+    /// @param progEndX/Y/Z    Program-space end position.
+    /// @param feedRate        Program-space feed rate (mm/min).
+    /// @return Machine-space speed (mm/s).
+    double computeScaledSpeed(
+        double progStartX, double progStartY, double progStartZ,
+        double progEndX, double progEndY, double progEndZ,
+        double feedRate) const
+    {
+        double baseSpeed = feedRate / 60.0 * state_->speedFactor;
+        if (state_->coordTransform.isIdentity())
+            return baseSpeed;
+
+        // Program-space direction vector.
+        double dx = progEndX - progStartX;
+        double dy = progEndY - progStartY;
+        double dz = progEndZ - progStartZ;
+        double progLen = std::sqrt(dx*dx + dy*dy + dz*dz);
+        if (progLen < 1e-12)
+            return baseSpeed;
+
+        // Transform the direction vector (rotation + scale, no translation).
+        auto mv = state_->coordTransform.transformVelocity(dx, dy, dz);
+        double machLen = std::sqrt(mv[0]*mv[0] + mv[1]*mv[1] + mv[2]*mv[2]);
+        if (machLen < 1e-12)
+            return baseSpeed;
+
+        return baseSpeed * (machLen / progLen);
+    }
+
     bool executeMove(const GcodeLine& g) {
         double x = g.has('X') ? g.get('X') : NAN;
         double y = g.has('Y') ? g.get('Y') : NAN;
@@ -1132,6 +1268,11 @@ private:
         double f = g.has('F') ? g.get('F') : state_->feedrate;
 
         state_->feedrate = f;
+
+        // Record start position for speed scaling.
+        double startX = state_->position[0];
+        double startY = state_->position[1];
+        double startZ = state_->position[2];
 
         // Apply absolute/relative mode
         if (state_->distanceMode == GCode::DistanceMode::ABSOLUTE) {
@@ -1154,12 +1295,20 @@ private:
         }
 
         if (callbacks_.move) {
-            double speed = f / 60.0 * state_->speedFactor; // mm/min -> mm/s
+            double speed = computeScaledSpeed(
+                startX, startY, startZ,
+                state_->position[0], state_->position[1], state_->position[2],
+                f);
+            // Transform program-space position to machine space.
+            auto machine = state_->coordTransform.toMachineXYZ(
+                state_->position[0],
+                state_->position[1],
+                state_->position[2]);
             callbacks_.move(
-                std::isnan(x) ? state_->position[0] : state_->position[0],
-                std::isnan(y) ? state_->position[1] : state_->position[1],
-                std::isnan(z) ? state_->position[2] : state_->position[2],
-                std::isnan(e) ? state_->position[3] : state_->position[3],
+                machine[0],
+                machine[1],
+                machine[2],
+                state_->position[3],
                 speed
             );
         }
@@ -1203,14 +1352,41 @@ private:
         double z = g.has('Z') ? g.get('Z') : NAN;
         double e = g.has('E') ? g.get('E') : NAN;
 
+        // G92 semantics: "the current position IS now <v>".
+        // This sets a G92 offset so that the machine position stays the
+        // same while the program position reads as the specified value.
+        // newG92 = oldG92 + oldProgramPos - v
+        // Then the program position is updated to v.
+        bool anyLinear = false;
+        if (!std::isnan(x)) {
+            state_->g92Offset[0] += state_->position[0] - x;
+            state_->position[0] = x;
+            anyLinear = true;
+        }
+        if (!std::isnan(y)) {
+            state_->g92Offset[1] += state_->position[1] - y;
+            state_->position[1] = y;
+            anyLinear = true;
+        }
+        if (!std::isnan(z)) {
+            state_->g92Offset[2] += state_->position[2] - z;
+            state_->position[2] = z;
+            anyLinear = true;
+        }
+        if (anyLinear) {
+            state_->g92Active = true;
+            state_->rebuildCoordTransform();
+        }
+
+        // E axis: G92 E0 is common for resetting extruder position.
+        // E is not part of the coordinate transform; set directly.
+        if (!std::isnan(e)) {
+            state_->position[3] = e;
+        }
+
         if (callbacks_.setPosition) {
             callbacks_.setPosition(x, y, z, e);
         }
-
-        if (!std::isnan(x)) state_->position[0] = x;
-        if (!std::isnan(y)) state_->position[1] = y;
-        if (!std::isnan(z)) state_->position[2] = z;
-        if (!std::isnan(e)) state_->position[3] = e;
         return true;
     }
 
@@ -1248,11 +1424,23 @@ private:
 
     /// @brief Execute an arc move (G2/G3).
     /// Decomposes the arc into line segments and calls move for each.
+    ///
+    /// @details
+    /// The arc center and all interpolated points are computed in **program
+    /// space**. The move callback applies the coordinate transform
+    /// (WCS + G52 + G68 rotation + G51 scale) to each interpolated point,
+    /// so a circle in program space correctly maps to an ellipse in machine
+    /// space when rotation or non-uniform scaling is active.
+    ///
+    /// The I/J/K center offsets are relative to the start position in
+    /// program space and define the arc geometry in program space. The
+    /// transform is applied to each interpolated point via the move
+    /// callback (through @ref CoordinateTransform::toMachineXYZ).
+    ///
+    /// For G17 (XY plane): I=X offset, J=Y offset
+    /// For G18 (ZX plane): I=X offset, K=Z offset
+    /// For G19 (YZ plane): J=Y offset, K=Z offset
     bool executeArcMove(const GcodeLine& g) {
-        // Arc parameters: I/J/K = relative center offsets, R = radius
-        // For XY plane (G17): I=X offset, J=Y offset
-        // For XZ plane (G18): I=X offset, K=Z offset
-        // For YZ plane (G19): J=Y offset, K=Z offset
         double x = g.has('X') ? g.get('X') : state_->position[0];
         double y = g.has('Y') ? g.get('Y') : state_->position[1];
         double z = g.has('Z') ? g.get('Z') : state_->position[2];
@@ -1272,53 +1460,56 @@ private:
         double startY = state_->position[1];
         double startZ = state_->position[2];
 
+        // Select in-plane axes based on the active plane (G17/G18/G19).
+        // For G17 (XY): axisA=X, axisB=Y, normal=Z
+        // For G18 (ZX): axisA=Z, axisB=X, normal=Y
+        // For G19 (YZ): axisA=Y, axisB=Z, normal=X
+        // We compute the arc in the (axisA, axisB) plane, then map back.
+        double startA, startB, endA, endB; // in-plane coordinates
+        double *pA, *pB;                   // pointers to the axis in state
+        switch (state_->plane) {
+            case GCode::Plane::ZX:
+                startA = startZ; startB = startX;
+                endA = z; endB = x;
+                pA = &state_->position[2]; pB = &state_->position[0];
+                break;
+            case GCode::Plane::YZ:
+                startA = startY; startB = startZ;
+                endA = y; endB = z;
+                pA = &state_->position[1]; pB = &state_->position[2];
+                break;
+            default: // XY
+                startA = startX; startB = startY;
+                endA = x; endB = y;
+                pA = &state_->position[0]; pB = &state_->position[1];
+                break;
+        }
+
         if (g.has('R')) {
             // Radius mode — compute center from radius.
-            // The center lies on the perpendicular bisector of the chord
-            // from start to end, at a distance h = sqrt(R^2 - d^2) from
-            // the midpoint, where d is half the chord length.
-            //
-            // The sign of R determines which arc:
-            //   R > 0: arc <= 180 degrees (short arc)
-            //   R < 0: arc > 180 degrees (long arc)
-            //
-            // The direction (CW/CCW) determines which side of the chord
-            // the center is on.
             double r = g.get('R') * unitScale;
             bool longArc = (r < 0);
             r = std::abs(r);
 
-            double mx = (startX + x) / 2.0;
-            double my = (startY + y) / 2.0;
-            double dx = (x - startX) / 2.0;
-            double dy = (y - startY) / 2.0;
-            double halfChord = std::sqrt(dx * dx + dy * dy);
+            double mA = (startA + endA) / 2.0;
+            double mB = (startB + endB) / 2.0;
+            double dA = (endA - startA) / 2.0;
+            double dB = (endB - startB) / 2.0;
+            double halfChord = std::sqrt(dA * dA + dB * dB);
 
-            // Clamp halfChord to r to avoid NaN from numerical errors
             if (halfChord > r) halfChord = r;
 
             double h = std::sqrt(std::max(0.0, r * r - halfChord * halfChord));
 
-            // Perpendicular direction (normalized)
-            double perpX, perpY;
+            double perpA, perpB;
             if (halfChord > 1e-12) {
-                perpX = -dy / halfChord;
-                perpY = dx / halfChord;
+                perpA = -dB / halfChord;
+                perpB = dA / halfChord;
             } else {
-                perpX = 0;
-                perpY = 0;
+                perpA = 0;
+                perpB = 0;
             }
 
-            // For CW (G2): center is to the right of the direction of travel
-            // For CCW (G3): center is to the left
-            // For short arc (R > 0): h is smaller (center closer to chord)
-            // For long arc (R < 0): h is larger (center farther from chord)
-            //
-            // The side is determined by:
-            //   CW short:  center = midpoint + perp * (-h)
-            //   CW long:   center = midpoint + perp * (+h)
-            //   CCW short: center = midpoint + perp * (+h)
-            //   CCW long:  center = midpoint + perp * (-h)
             double sideSign;
             if (clockwise) {
                 sideSign = longArc ? 1.0 : -1.0;
@@ -1326,24 +1517,57 @@ private:
                 sideSign = longArc ? -1.0 : 1.0;
             }
 
-            cx = mx + sideSign * perpX * h;
-            cy = my + sideSign * perpY * h;
-            cz = startZ;
+            double centerA = mA + sideSign * perpA * h;
+            double centerB = mB + sideSign * perpB * h;
+            // Map center back to XYZ based on plane.
+            switch (state_->plane) {
+                case GCode::Plane::ZX: cx = centerB; cy = startY; cz = centerA; break;
+                case GCode::Plane::YZ: cx = startX; cy = centerA; cz = centerB; break;
+                default: cx = centerA; cy = centerB; cz = startZ; break;
+            }
         } else {
-            // IJK mode — center is relative to start
-            cx = startX + g.get('I', 0.0) * unitScale;
-            cy = startY + g.get('J', 0.0) * unitScale;
-            cz = startZ + g.get('K', 0.0) * unitScale;
+            // IJK mode — center is relative to start in program space.
+            // I/J/K map to the in-plane axes based on the active plane.
+            double offA = 0, offB = 0;
+            switch (state_->plane) {
+                case GCode::Plane::ZX:
+                    offA = g.get('K', 0.0) * unitScale; // Z offset
+                    offB = g.get('I', 0.0) * unitScale; // X offset
+                    cx = startX + offB; cy = startY; cz = startZ + offA;
+                    break;
+                case GCode::Plane::YZ:
+                    offA = g.get('J', 0.0) * unitScale; // Y offset
+                    offB = g.get('K', 0.0) * unitScale; // Z offset
+                    cx = startX; cy = startY + offA; cz = startZ + offB;
+                    break;
+                default: // XY
+                    offA = g.get('I', 0.0) * unitScale; // X offset
+                    offB = g.get('J', 0.0) * unitScale; // Y offset
+                    cx = startX + offA; cy = startY + offB; cz = startZ;
+                    break;
+            }
         }
 
-        // Compute start and end angles
-        double startAngle = std::atan2(startY - cy, startX - cx);
-        double endAngle = std::atan2(y - cy, x - cx);
-        double radius = std::sqrt((startX - cx) * (startX - cx) +
-                                  (startY - cy) * (startY - cy));
+        // Compute start and end angles in the active plane.
+        double centerA, centerB;
+        switch (state_->plane) {
+            case GCode::Plane::ZX: centerA = cz; centerB = cx; break;
+            case GCode::Plane::YZ: centerA = cy; centerB = cz; break;
+            default: centerA = cx; centerB = cy; break;
+        }
+        double startAngle = std::atan2(startB - centerB, startA - centerA);
+        double endAngle = std::atan2(endB - centerB, endA - centerA);
+        double radius = std::sqrt((startA - centerA) * (startA - centerA) +
+                                  (startB - centerB) * (startB - centerB));
 
-        // Adjust angle range for clockwise/counter-clockwise
-        if (clockwise) {
+        // Adjust angle range for clockwise/counter-clockwise.
+        // In G18 (ZX) and G19 (YZ), the CW/CCW direction is reversed
+        // when viewed from the positive normal axis (Y for ZX, X for YZ).
+        bool effClockwise = clockwise;
+        if (state_->plane == GCode::Plane::ZX || state_->plane == GCode::Plane::YZ)
+            effClockwise = !clockwise; // RS274 convention
+
+        if (effClockwise) {
             if (endAngle >= startAngle) endAngle -= 2.0 * M_PI;
         } else {
             if (endAngle <= startAngle) endAngle += 2.0 * M_PI;
@@ -1354,37 +1578,70 @@ private:
         int segments = std::max(8, static_cast<int>(totalAngle / (M_PI / 16)));
         double angleStep = (endAngle - startAngle) / segments;
 
-        double zStep = (z - startZ) / segments;
+        // Z (or out-of-plane axis) linear interpolation
+        double outOfPlaneStart, outOfPlaneEnd;
+        double *pOut;
+        switch (state_->plane) {
+            case GCode::Plane::ZX: outOfPlaneStart = startY; outOfPlaneEnd = y; pOut = &state_->position[1]; break;
+            case GCode::Plane::YZ: outOfPlaneStart = startX; outOfPlaneEnd = x; pOut = &state_->position[0]; break;
+            default: outOfPlaneStart = startZ; outOfPlaneEnd = z; pOut = &state_->position[2]; break;
+        }
+        double outStep = (outOfPlaneEnd - outOfPlaneStart) / segments;
+
         double ePerSegment = 0;
         if (!std::isnan(e)) {
             double totalE = state_->absoluteExtrude ? (e - state_->position[3]) : e;
             ePerSegment = totalE / segments;
         }
 
-        double speed = f / 60.0 * state_->speedFactor;
+        double baseSpeed = f / 60.0 * state_->speedFactor;
         for (int i = 1; i <= segments; ++i) {
             double angle = startAngle + angleStep * i;
-            double px = cx + radius * std::cos(angle);
-            double py = cy + radius * std::sin(angle);
-            double pz = startZ + zStep * i;
+            double pa = centerA + radius * std::cos(angle);
+            double pb = centerB + radius * std::sin(angle);
+            double pOutVal = outOfPlaneStart + outStep * i;
             double pe = std::isnan(e) ? state_->position[3] :
                         (state_->absoluteExtrude ? e : state_->position[3] + ePerSegment);
 
-            if (state_->distanceMode == GCode::DistanceMode::ABSOLUTE) {
-                state_->position[0] = px;
-                state_->position[1] = py;
-                state_->position[2] = pz;
-            } else {
-                state_->position[0] += px - (i == 1 ? startX : state_->position[0]);
-                state_->position[1] += py - (i == 1 ? startY : state_->position[1]);
+            // Record previous position for per-segment speed scaling.
+            double prevX = state_->position[0];
+            double prevY = state_->position[1];
+            double prevZ = state_->position[2];
+
+            // Map back to XYZ and update state position (program space).
+            switch (state_->plane) {
+                case GCode::Plane::ZX:
+                    state_->position[0] = pb;  // X = axisB
+                    state_->position[1] = pOutVal; // Y = out-of-plane
+                    state_->position[2] = pa;  // Z = axisA
+                    break;
+                case GCode::Plane::YZ:
+                    state_->position[0] = pOutVal; // X = out-of-plane
+                    state_->position[1] = pa;  // Y = axisA
+                    state_->position[2] = pb;  // Z = axisB
+                    break;
+                default: // XY
+                    state_->position[0] = pa;  // X = axisA
+                    state_->position[1] = pb;  // Y = axisB
+                    state_->position[2] = pOutVal; // Z = out-of-plane
+                    break;
             }
             if (!std::isnan(e)) {
                 state_->position[3] = state_->absoluteExtrude ? e : state_->position[3] + ePerSegment;
             }
 
             if (callbacks_.move) {
-                callbacks_.move(state_->position[0], state_->position[1],
-                               state_->position[2], state_->position[3], speed);
+                double speed = computeScaledSpeed(
+                    prevX, prevY, prevZ,
+                    state_->position[0], state_->position[1], state_->position[2],
+                    f);
+                // Transform program-space position to machine space.
+                auto machine = state_->coordTransform.toMachineXYZ(
+                    state_->position[0],
+                    state_->position[1],
+                    state_->position[2]);
+                callbacks_.move(machine[0], machine[1],
+                               machine[2], state_->position[3], speed);
             }
         }
         return true;
@@ -1419,7 +1676,6 @@ private:
 
         // Sample the Bezier curve
         int segments = 32;
-        double speed = f / 60.0 * state_->speedFactor;
         double startE = state_->position[3];
 
         for (int i = 1; i <= segments; ++i) {
@@ -1444,6 +1700,10 @@ private:
                 pe = state_->position[3];
             }
 
+            double prevX = state_->position[0];
+            double prevY = state_->position[1];
+            double prevZ = state_->position[2];
+
             if (state_->distanceMode == GCode::DistanceMode::ABSOLUTE) {
                 state_->position[0] = px;
                 state_->position[1] = py;
@@ -1456,8 +1716,17 @@ private:
             }
 
             if (callbacks_.move) {
-                callbacks_.move(state_->position[0], state_->position[1],
-                               state_->position[2], state_->position[3], speed);
+                double speed = computeScaledSpeed(
+                    prevX, prevY, prevZ,
+                    state_->position[0], state_->position[1], state_->position[2],
+                    f);
+                // Transform program-space position to machine space.
+                auto machine = state_->coordTransform.toMachineXYZ(
+                    state_->position[0],
+                    state_->position[1],
+                    state_->position[2]);
+                callbacks_.move(machine[0], machine[1],
+                               machine[2], state_->position[3], speed);
             }
         }
         return true;

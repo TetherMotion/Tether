@@ -456,3 +456,160 @@ TEST(CoordinateTransform, ResetClearsEverything) {
     EXPECT_NEAR(m[1], 20, kTol);
     EXPECT_NEAR(m[2], 30, kTol);
 }
+
+// ============================================================================
+// Tool length offset (G43)
+// ============================================================================
+
+TEST(CoordinateTransform, ToolLengthOffset) {
+    CoordinateTransform t;
+    t.setToolLengthOffset(25.0);
+    // Z is shifted by TLO, X/Y unchanged
+    auto m = t.toMachineXYZ(10, 20, 30);
+    EXPECT_NEAR(m[0], 10, kTol);
+    EXPECT_NEAR(m[1], 20, kTol);
+    EXPECT_NEAR(m[2], 55, kTol);  // 30 + 25
+}
+
+TEST(CoordinateTransform, ToolLengthOffsetClear) {
+    CoordinateTransform t;
+    t.setToolLengthOffset(25.0);
+    t.clearToolLengthOffset();
+    auto m = t.toMachineXYZ(10, 20, 30);
+    EXPECT_NEAR(m[0], 10, kTol);
+    EXPECT_NEAR(m[1], 20, kTol);
+    EXPECT_NEAR(m[2], 30, kTol);
+}
+
+TEST(CoordinateTransform, ToolLengthOffsetWithWCS) {
+    // TLO is applied after WCS: machine = WCS + TLO + program
+    CoordinateTransform t;
+    t.setWCSOffset({100, 200, 300});
+    t.setToolLengthOffset(50.0);
+    auto m = t.toMachineXYZ(0, 0, 0);
+    EXPECT_NEAR(m[0], 100, kTol);
+    EXPECT_NEAR(m[1], 200, kTol);
+    EXPECT_NEAR(m[2], 350, kTol);  // 300 + 50
+}
+
+TEST(CoordinateTransform, ToolLengthOffsetRoundTrip) {
+    CoordinateTransform t;
+    t.setWCSOffset({10, 20, 30});
+    t.setToolLengthOffset(15.0);
+    t.setScale(2, 2, 2);
+    t.setRotation2D(45, Plane::XY, 5, 5);
+    auto m = t.toMachineXYZ(3, 4, 5);
+    auto p = t.toProgramXYZ(m[0], m[1], m[2]);
+    EXPECT_NEAR(p[0], 3, 1e-7);
+    EXPECT_NEAR(p[1], 4, 1e-7);
+    EXPECT_NEAR(p[2], 5, 1e-7);
+}
+
+TEST(CoordinateTransform, ToolLengthOffsetReset) {
+    CoordinateTransform t;
+    t.setToolLengthOffset(25.0);
+    EXPECT_FALSE(t.isIdentity());
+    t.reset();
+    EXPECT_TRUE(t.isIdentity());
+    EXPECT_NEAR(t.toolLengthOffset(), 0.0, kTol);
+}
+
+// ============================================================================
+// RS274 transform order: G52 after WCS+rotation
+// ============================================================================
+
+TEST(CoordinateTransform, G52AfterWCS_NoRotation) {
+    // Without rotation, G52 + WCS + program all add up (commutative)
+    CoordinateTransform t;
+    t.setG52Offset({1, 2, 3});
+    t.setWCSOffset({100, 200, 300});
+    auto m = t.toMachineXYZ(10, 20, 30);
+    EXPECT_NEAR(m[0], 111, kTol);  // 10 + 100 + 1
+    EXPECT_NEAR(m[1], 222, kTol);
+    EXPECT_NEAR(m[2], 333, kTol);
+}
+
+TEST(CoordinateTransform, G52AfterWCSWithRotation) {
+    // With rotation, G52 is applied AFTER rotation+WCS.
+    // Transform: T(g52) * T(wcs) * R * P
+    // Point (0,0,0): R*(0,0,0)=(0,0,0), +WCS=(100,200,0), +G52=(101,202,0)
+    CoordinateTransform t;
+    t.setG52Offset({1, 2, 0});
+    t.setWCSOffset({100, 200, 0});
+    t.setRotation2D(90, Plane::XY, 0, 0);
+    auto m = t.toMachineXYZ(0, 0, 0);
+    EXPECT_NEAR(m[0], 101, kTol);
+    EXPECT_NEAR(m[1], 202, kTol);
+    // Point (10, 0, 0): R*(10,0,0)=(0,10,0), +WCS=(100,210,0), +G52=(101,212,0)
+    auto m2 = t.toMachineXYZ(10, 0, 0);
+    EXPECT_NEAR(m2[0], 101, kTol);
+    EXPECT_NEAR(m2[1], 212, kTol);
+}
+
+TEST(CoordinateTransform, G52NotAffectedByScale) {
+    // G52 is applied after scale, so G52 offset is NOT scaled.
+    // Transform: T(g52) * S * P
+    // Point (10,0,0): S*(10,0,0)=(20,0,0), +G52=(22,1,0)
+    CoordinateTransform t;
+    t.setG52Offset({2, 1, 0});
+    t.setScale(2, 2, 1);
+    auto m = t.toMachineXYZ(10, 0, 0);
+    EXPECT_NEAR(m[0], 22, kTol);  // 10*2 + 2
+    EXPECT_NEAR(m[1], 1, kTol);   // 0*2 + 1
+}
+
+TEST(CoordinateTransform, G92BeforeScale) {
+    // G92 is applied BEFORE scale, so G92 offset IS scaled.
+    // Transform: S * T(g92) * P
+    // Point (0,0,0): T(g92)=(10,0,0), S=(20,0,0)
+    CoordinateTransform t;
+    t.setG92Offset({10, 0, 0});
+    t.setScale(2, 2, 1);
+    auto m = t.toMachineXYZ(0, 0, 0);
+    EXPECT_NEAR(m[0], 20, kTol);  // (0+10)*2
+}
+
+TEST(CoordinateTransform, G52AfterTLO) {
+    // G52 is applied after TLO.
+    // Transform: T(g52) * T(tlo) * P
+    CoordinateTransform t;
+    t.setG52Offset({5, 0, 0});
+    t.setToolLengthOffset(10.0);
+    auto m = t.toMachineXYZ(0, 0, 5);
+    EXPECT_NEAR(m[0], 5, kTol);   // 0 + 5 (G52)
+    EXPECT_NEAR(m[1], 0, kTol);
+    EXPECT_NEAR(m[2], 15, kTol);  // 5 + 10 (TLO)
+}
+
+// ============================================================================
+// Full composed transform with TLO and G52 in correct order
+// ============================================================================
+
+TEST(CoordinateTransform, FullComposedWithTLO) {
+    // Full transform: T(g52) * T(tlo) * T(wcs) * T(pivot) * R * T(-pivot) * S * T(g92)
+    CoordinateTransform t;
+    t.setG92Offset({1, 2, 3});
+    t.setScale(2, 2, 2);
+    t.setRotation2D(90, Plane::XY, 0, 0);
+    t.setWCSOffset({100, 200, 300});
+    t.setToolLengthOffset(50.0);
+    t.setG52Offset({10, 20, 30});
+
+    // Point (0,0,0):
+    // T(g92): (1,2,3)
+    // S: (2,4,6)
+    // R(90° about Z): (-4,2,6)
+    // T(wcs): (96,202,306)
+    // T(tlo): (96,202,356)
+    // T(g52): (106,222,386)
+    auto m = t.toMachineXYZ(0, 0, 0);
+    EXPECT_NEAR(m[0], 106, kTol);
+    EXPECT_NEAR(m[1], 222, kTol);
+    EXPECT_NEAR(m[2], 386, kTol);
+
+    // Round trip
+    auto p = t.toProgramXYZ(m[0], m[1], m[2]);
+    EXPECT_NEAR(p[0], 0, 1e-7);
+    EXPECT_NEAR(p[1], 0, 1e-7);
+    EXPECT_NEAR(p[2], 0, 1e-7);
+}

@@ -337,6 +337,8 @@ Error CoordinateSystemManager::processG10L2(
     if (block.hasWord(WordLetter::A)) wcs.offset[Axis::A] = block.getWord(WordLetter::A);
     if (block.hasWord(WordLetter::B)) wcs.offset[Axis::B] = block.getWord(WordLetter::B);
     if (block.hasWord(WordLetter::C)) wcs.offset[Axis::C] = block.getWord(WordLetter::C);
+    // R word: WCS rotation angle (degrees) in the active plane.
+    if (block.hasWord(WordLetter::R)) wcs.rotation = block.getWord(WordLetter::R);
     wcs.modified = true;
     (void)vars;
     return Error{};
@@ -356,6 +358,8 @@ Error CoordinateSystemManager::processG10L20(
     if (block.hasWord(WordLetter::A)) wcs.offset[Axis::A] = machinePos[Axis::A] - block.getWord(WordLetter::A);
     if (block.hasWord(WordLetter::B)) wcs.offset[Axis::B] = machinePos[Axis::B] - block.getWord(WordLetter::B);
     if (block.hasWord(WordLetter::C)) wcs.offset[Axis::C] = machinePos[Axis::C] - block.getWord(WordLetter::C);
+    // R word: WCS rotation angle (degrees), same as G10 L2.
+    if (block.hasWord(WordLetter::R)) wcs.rotation = block.getWord(WordLetter::R);
     wcs.modified = true;
     (void)vars;
     return Error{};
@@ -421,6 +425,9 @@ void CoordinateSystemManager::syncTransform(const MachineState& state) {
     // G52 offset
     m_transform.setG52Offset({state.g52Offset.x(), state.g52Offset.y(), state.g52Offset.z()});
 
+    // Tool length offset (G43/G43.1, Z-axis only)
+    m_transform.setToolLengthOffset(state.toolOffset.z());
+
     // Scaling (G51)
     if (state.g51Active) {
         m_transform.setScale(state.scaleFactors.x(), state.scaleFactors.y(), state.scaleFactors.z());
@@ -434,7 +441,9 @@ void CoordinateSystemManager::syncTransform(const MachineState& state) {
         m_transform.clearScale();
     }
 
-    // Rotation (G68)
+    // Rotation (G68). G68 overrides any WCS rotation (G10 L2 R).
+    // If G68 is not active but the active WCS has a rotation, apply it.
+    double wcsRotation = m_wcs[wcsIndex(m_activeWCS)].rotation;
     if (state.g68Active) {
         switch (state.g68Mode) {
             case 0: {
@@ -462,6 +471,12 @@ void CoordinateSystemManager::syncTransform(const MachineState& state) {
                 m_transform.clearRotation();
                 break;
         }
+    } else if (wcsRotation != 0.0) {
+        // Apply WCS rotation (G10 L2 R) as a 2D rotation about the program
+        // origin (0,0). Since T(wcs) is applied after the rotation, the
+        // effective rotation center in machine space is the WCS offset
+        // point — i.e. the WCS origin. This matches LinuxCNC behavior.
+        m_transform.setRotation2D(wcsRotation, state.plane, 0.0, 0.0);
     } else {
         m_transform.clearRotation();
     }
@@ -506,6 +521,39 @@ void CoordinateSystemManager::syncToVariables(VariableSystem& vars) const {
     // G28 reference: #5161-#5169
     for (size_t i = 0; i < 9 && i < MAX_AXES; ++i)
         vars.set(G28_PARAM_BASE + static_cast<int32_t>(i), m_g28Reference[i]);
+
+    // G68 coordinate rotation state (custom extension #5400-#5412).
+    vars.set(G68_PARAM_BASE + 0, m_transform.rotationMode() !=
+                GCode::RotationMode::NONE ? 1.0 : 0.0);
+    vars.set(G68_PARAM_BASE + 1, static_cast<double>(
+                static_cast<uint8_t>(m_transform.rotationMode())));
+    vars.set(G68_PARAM_BASE + 2, m_transform.angle());
+    const auto& pivot = m_transform.pivot();
+    vars.set(G68_PARAM_BASE + 3, pivot[0]);
+    vars.set(G68_PARAM_BASE + 4, pivot[1]);
+    vars.set(G68_PARAM_BASE + 5, pivot[2]);
+    const auto& euler = m_transform.euler();
+    vars.set(G68_PARAM_BASE + 6, euler[0]);
+    vars.set(G68_PARAM_BASE + 7, euler[1]);
+    vars.set(G68_PARAM_BASE + 8, euler[2]);
+    const auto& axis = m_transform.axis();
+    vars.set(G68_PARAM_BASE + 9, axis[0]);
+    vars.set(G68_PARAM_BASE + 10, axis[1]);
+    vars.set(G68_PARAM_BASE + 11, axis[2]);
+
+    // G51 scaling state (custom extension #5413-#5419).
+    const auto& scale = m_transform.scale();
+    const auto& extScale = m_transform.extendedScale();
+    bool scalingActive = (scale[0] != 1.0 || scale[1] != 1.0 || scale[2] != 1.0);
+    for (size_t i = 0; i < 6; ++i)
+        if (extScale[i] != 1.0) { scalingActive = true; break; }
+    vars.set(G51_PARAM_BASE + 0, scalingActive ? 1.0 : 0.0);
+    vars.set(G51_PARAM_BASE + 1, scale[0]);
+    vars.set(G51_PARAM_BASE + 2, scale[1]);
+    vars.set(G51_PARAM_BASE + 3, scale[2]);
+    vars.set(G51_PARAM_BASE + 4, extScale[0]);
+    vars.set(G51_PARAM_BASE + 5, extScale[1]);
+    vars.set(G51_PARAM_BASE + 6, extScale[2]);
 }
 
 void CoordinateSystemManager::loadFromVariables(const VariableSystem& vars) {
