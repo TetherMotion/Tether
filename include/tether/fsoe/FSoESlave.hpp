@@ -499,6 +499,18 @@ private:
     uint8_t sessionOctetIdx_ = 0;
     bool sessionOctetAdvancePending_ = false;  ///< Advance sessionOctetIdx_ after next buildSessionResponse
 
+    // Connection state multi-cycle transfer.
+    // ETG.5100 S (D) V1.2.0, §8.2.2.4, Table 15:
+    // The Connection state transfers 4 bytes (2-byte Connection ID +
+    // 2-byte FSoE Slave Address) in SafeData.  When safety data length
+    // is less than 4 octets, multiple cycles are needed:
+    //   4 octets → 1 cycle, 2 octets → 2 cycles, 1 octet → 4 cycles
+    // See: https://techoverflow.net/2026/08/12/fsoe-connection-pdu-master-and-slave-structure/
+    uint8_t connectionRxIdx_ = 0;       ///< RX byte offset (advances by safeOutputSize)
+    uint8_t connectionTxIdx_ = 0;       ///< TX echo byte offset (advances by safeInputSize)
+    uint8_t connectionBuf_[4] = {0};    ///< Accumulated RX / echo buffer
+    bool connectionTxAdvancePending_ = false;  ///< Advance connectionTxIdx_ after next buildConnectionResponse
+
     // FSoE CRC inheritance and sequence number tracking.
     // See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
     // ETG.5100 §8.1.3.4: sequence numbers are 1..65535 (0 is never used).

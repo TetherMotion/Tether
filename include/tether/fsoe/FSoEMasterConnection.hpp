@@ -306,6 +306,10 @@ private:
 
     // State transitions
     void transitionTo(uint8_t new_state);
+    /// Initialize connection_tx_buf_ with Connection ID + Slave Address
+    /// and reset connection TX/RX indices.  Called when entering the
+    /// Connection state.
+    void initConnectionTxBuf();
     void handleError(uint16_t error_code, const FSoEErrorDetail& detail);
     void checkWatchdog(uint64_t current_time_ms);
     void checkPhaseTimeout(uint64_t current_time_ms);
@@ -382,6 +386,20 @@ private:
     // single PDU and this index stays at 0.
     // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
     uint8_t session_octet_idx_ = 0;
+
+    // Connection state multi-cycle transfer.
+    // ETG.5100 S (D) V1.2.0, §8.2.2.4, Table 15:
+    // The Connection state transfers 4 bytes (2-byte Connection ID +
+    // 2-byte FSoE Slave Address) in SafeData.  When the safety data
+    // length is less than 4 octets, multiple cycles are needed:
+    //   4 octets → 1 cycle
+    //   2 octets → 2 cycles
+    //   1 octet  → 4 cycles
+    // See: https://techoverflow.net/2026/08/12/fsoe-connection-pdu-master-and-slave-structure/
+    uint8_t connection_tx_idx_ = 0;       ///< TX byte offset (advances by output_size)
+    uint8_t connection_rx_idx_ = 0;       ///< RX byte offset (advances by input_size)
+    uint8_t connection_tx_buf_[4] = {0};  ///< TX payload: ConnID_lo, ConnID_hi, Addr_lo, Addr_hi
+    uint8_t connection_rx_buf_[4] = {0};  ///< RX echo accumulation buffer
 
     // PDO startup state: number of Tx frames sent via exchangeViaPDO.
     // The slave cannot respond until it has received at least one frame,
