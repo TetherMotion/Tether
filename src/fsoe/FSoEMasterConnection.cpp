@@ -88,6 +88,7 @@ bool FSoEMasterConnection::initialize()
     last_rx_crc0_ = 0;
     tx_seq_no_ = config_.initial_seq_no;
     rx_seq_no_ = config_.initial_seq_no;
+    last_tx_seq_no_ = 0;
     current_param_index_ = 0;
     parameter_crc_ = 0;
     fail_safe_entered_ms_ = 0;
@@ -147,6 +148,7 @@ bool FSoEMasterConnection::resetConnection()
     last_rx_crc0_ = 0;
     tx_seq_no_ = config_.initial_seq_no;
     rx_seq_no_ = config_.initial_seq_no;
+    last_tx_seq_no_ = 0;
     current_param_index_ = 0;
     pdo_tx_count_ = 0;
     last_rx_frame_.clear();
@@ -270,11 +272,11 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
     // buildFailSafeResponse sends safeInputSize + 2 bytes (inputs + error code),
     // which can be up to 18 bytes when safeInputSize = 16.
     //
-    // Reset frames (cmd=0x2A) reset the CRC chain AND the sequence number:
-    //   - start_crc = 0 (CRC chain reset)
-    //   - seq = config_.initial_seq_no (0 for Synapticon, 1 per ETG.5100)
-    // After a Reset frame, the next frame uses seq+1.
-    // Non-Reset frames use the current rx_seq_no_ and last_rx_crc0_.
+    // CRC inheritance for RX parsing:
+    //   - Reset frames: start_crc=0, seq=initial_seq_no+1 (Reset resets chain)
+    //   - Non-Reset frames: start_crc=last_tx_crc0_, seq=last_tx_seq_no_
+    //     (the slave uses the master's last TX CRC0 and seq — cross-direction
+    //     CRC inheritance, verified on real Synapticon hardware)
     uint8_t cmd = 0;
     uint8_t frame_data[CRC::MAX_PARSE_DATA_SIZE] = {0};
     size_t data_len = 0;
@@ -282,13 +284,15 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
     CRC::CrcErrorDetail crc_error_detail{};
 
     const bool is_reset_frame = (data[0] == Command::Reset);
-    const uint16_t parse_start_crc = is_reset_frame ? 0 : last_rx_crc0_;
+    const uint16_t parse_start_crc = is_reset_frame ? 0 : last_tx_crc0_;
     // The slave's Reset response uses seq = initial_seq_no + 1 (the slave
     // increments the seq after receiving the master's Reset).  The master's
     // own Reset frame uses seq = initial_seq_no.
+    // Non-Reset frames use last_tx_seq_no_ (the seq of the master's last TX)
+    // because the slave echoes the master's TX seq.
     const uint16_t parse_seq_no = is_reset_frame
         ? CRC::incrementSeqNo(config_.initial_seq_no)
-        : rx_seq_no_;
+        : last_tx_seq_no_;
     uint16_t seq_used = 0;
 
     if (!CRC::parseFSoEFrameWithCollisionAvoidance(
@@ -319,10 +323,10 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
         return false;
     }
 
-    // Update the expected RX sequence number to the value that matched
-    // (after collision avoidance).  The next expected RX seq is the
-    // incremented value.
-    rx_seq_no_ = CRC::incrementSeqNo(seq_used);
+    // Update rx_seq_no_ for diagnostics (the seq that matched after collision
+    // avoidance).  This is no longer used for parsing — the RX parser uses
+    // last_tx_seq_no_ (cross-direction CRC inheritance).
+    rx_seq_no_ = seq_used;
 
     // Reject frames with unrecognized command bytes.
     //
@@ -543,6 +547,11 @@ size_t FSoEMasterConnection::prepareTxFrame(uint8_t* data, size_t max_len)
 
     if (len > 0) {
         stats_.frames_sent++;
+        // Save the seq used in this TX (before incrementing) so that the
+        // RX parser can use it when parsing the slave's response.  The
+        // slave uses the same seq as the master's TX (cross-direction
+        // CRC inheritance).
+        last_tx_seq_no_ = tx_seq_no_;
         // Increment TX sequence number for the NEXT frame.
         // Per ETG.5100 §8.1.3.4, every PDU (including Reset) advances the
         // sequence counter.  The sequence number is NOT transmitted — it is
@@ -1081,9 +1090,13 @@ bool FSoEMasterConnection::validateCRC(const uint8_t* data, size_t len) const
     uint8_t cmd = 0;
     size_t data_len = 0;
     uint16_t conn_id = 0;
+    // Use cross-direction CRC inheritance: the slave's TX uses the master's
+    // last TX CRC0 and seq.
+    const bool is_reset_frame = (!data || len == 0) ? false : (data[0] == Command::Reset);
     return CRC::parseFSoEFrameWithCollisionAvoidance(
         data, len, cmd, nullptr, data_len, conn_id,
-        last_rx_crc0_, rx_seq_no_);
+        is_reset_frame ? 0 : last_tx_crc0_,
+        is_reset_frame ? CRC::incrementSeqNo(config_.initial_seq_no) : last_tx_seq_no_);
 }
 
 bool FSoEMasterConnection::validateSequence(uint8_t seq)
