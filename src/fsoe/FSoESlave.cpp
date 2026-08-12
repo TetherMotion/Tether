@@ -1254,14 +1254,38 @@ void FSoESlave::processData(const uint8_t* data, size_t len) {
         return;
     }
 
-    // Handle fail-safe command within Data state
+    // Handle fail-safe command within Data state.
+    // ETG.5100 S (D) V1.2.0, §8.2.2.6: The choice between ProcessData and
+    // FailSafeData is INDEPENDENT in each direction.  When the master sends
+    // FailSafeData in the Data state, the slave accepts the master's fail-safe
+    // outputs (all zeros per spec) but does NOT automatically enter fail-safe
+    // itself.  The slave independently decides whether its own SafeInputs
+    // are valid.
+    // See: https://techoverflow.net/2026/08/12/fsoe-data-pdu-master-and-slave-structure/
     if (cmd == Command::FailSafeData) {
-        // Master is sending fail-safe data — enter fail-safe via triggerFailSafe
-        // to properly set failSafeEnteredMs_, increment stats, and fire callback.
-        // triggerFailSafe skips if already in fail-safe, which is correct.
-        // Preserve existing error code; use ApplicationError if none set yet.
-        triggerFailSafe(lastError_ != ErrorCode::NoError ? lastError_
-                                                         : ErrorCode::ApplicationError);
+        // In non-Data states (Session/Connection/Parameter), the master
+        // sending FailSafeData is aborting the handshake.  The slave enters
+        // fail-safe to acknowledge the abort.
+        if (state_ != ConnectionState::Data) {
+            triggerFailSafe(lastError_ != ErrorCode::NoError ? lastError_
+                                                             : ErrorCode::ApplicationError);
+            return;
+        }
+
+        // In Data state: master is sending fail-safe data (all SafeData = 0
+        // per spec).  Copy the master's fail-safe outputs (zeros) to
+        // safeOutputs_.  The slave stays in its current mode — it does NOT
+        // auto-enter fail-safe.  The slave will send ProcessData if its
+        // SafeInputs are valid, or FailSafeData if they are not.
+        if (data_len >= config_.safeOutputSize) {
+            std::copy(frame_data, frame_data + config_.safeOutputSize,
+                      safeOutputs_.begin());
+        }
+        // Master's data is not valid (fail-safe), but the slave's data
+        // may still be valid — don't clear dataValid_.
+        if (dataValidCallback_) {
+            dataValidCallback_(safeOutputs_.data(), config_.safeOutputSize);
+        }
         return;
     }
 
@@ -1488,29 +1512,21 @@ size_t FSoESlave::buildDataResponse(uint8_t* data, size_t maxLen) {
 }
 
 size_t FSoESlave::buildFailSafeResponse(uint8_t* data, size_t maxLen) {
-    // Fail-safe response: CMD + fail_safe_inputs (safeInputSize) + error_code (2B) + ConnID (2B)
-    // Use a temporary buffer to combine fail-safe inputs and error code.
-    // Buffer must be large enough for safeInputSize + 2 (error code) bytes.
-    // MAX_SAFE_DATA_SIZE is 16, so we need MAX_SAFE_DATA_SIZE + 2 for the worst case.
-    uint8_t payload[MAX_SAFE_DATA_SIZE + 2] = {0};
-    // Payload must be at least the fixed data length, but also accommodate
-    // the fail-safe inputs + error code.
-    const size_t min_payload = config_.safeInputSize;
-    const size_t fs_payload = static_cast<size_t>(config_.safeInputSize) + 2;
-    const size_t payload_len = fs_payload > min_payload ? fs_payload : min_payload;
-
-    std::copy(config_.failSafeInputs.begin(),
-              config_.failSafeInputs.begin() + config_.safeInputSize,
-              payload);
-    payload[config_.safeInputSize] = lastError_ & 0xFF;
-    payload[config_.safeInputSize + 1] = (lastError_ >> 8) & 0xFF;
-
-    size_t needed = CRC::fsoeFrameSize(payload_len);
+    // ETG.5100 S (D) V1.2.0, §8.2.2.6, Table 26:
+    // FailSafeData Slave PDU: all SafeData octets are set to 0.
+    // The PDU has the SAME structure and size as the ProcessData PDU
+    // (no error code field).  The fail-safe data carries no useful
+    // payload; it signals that the sender has switched its outputs to
+    // the safe state.  Conn_Id and CRC fields behave exactly as in the
+    // ProcessData PDU.
+    // See: https://techoverflow.net/2026/08/12/fsoe-data-pdu-master-and-slave-structure/
+    static const uint8_t zero_payload[MAX_SAFE_DATA_SIZE] = {0};
+    size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
     uint16_t seq_used = 0;
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::FailSafeData,
-        payload, payload_len, currentConnectionId_,
+        zero_payload, config_.safeInputSize, currentConnectionId_,
         last_rx_crc0_, rx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;

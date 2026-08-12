@@ -215,11 +215,17 @@ void FSoEMasterConnection::triggerFailSafe(uint16_t error_code)
         status_.error_code = error_code;
     }
 
-    std::copy(config_.fail_safe_values.begin(),
-              config_.fail_safe_values.begin() + config_.output_size,
-              safe_outputs_.begin());
-
-    transitionTo(ConnectionState::FailSafe);
+    // ETG.5100 S (D) V1.2.0, §8.2.2.6: FailSafeData is a command used
+    // within the Data state, NOT a separate state.  The master stays in
+    // Data state and uses the fail_safe_active flag to select the
+    // FailSafeData command (all-zero SafeData) instead of ProcessData.
+    // If triggerFailSafe is called from a non-Data state (e.g. an error
+    // during handshake), transition to Data so the FailSafeData command
+    // can be sent.  This matches the slave's behavior.
+    // See: https://techoverflow.net/2026/08/12/fsoe-data-pdu-master-and-slave-structure/
+    if (status_.state != ConnectionState::Data) {
+        transitionTo(ConnectionState::Data);
+    }
     fail_safe_entered_ms_ = current_time_ms_;
 
     if (!was_fail_safe && fail_safe_callback_) {
@@ -231,8 +237,10 @@ bool FSoEMasterConnection::clearError()
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
 
+    // Fail-safe is now a flag within the Data state, not a separate state.
+    // Allow clearing from Error state or from Data state with fail_safe_active.
     if (status_.state != ConnectionState::Error &&
-        status_.state != ConnectionState::FailSafe) {
+        !(status_.state == ConnectionState::Data && status_.fail_safe_active)) {
         return false;
     }
 
@@ -541,36 +549,6 @@ crc_fallback_succeeded:
     // RX sequence number was already updated above (after collision-aware
     // parse).  No additional increment needed here.
 
-    // Early detection of slave fail-safe response
-    if (cmd == Command::FailSafeData &&
-        status_.state != ConnectionState::FailSafe &&
-        status_.state != ConnectionState::Error) {
-        // Slave's fail-safe response contains input_size bytes of fail-safe
-        // inputs followed by a 2-byte error code. Extract the error code
-        // only if the full payload is present; otherwise use ApplicationError.
-        if (data_len >= config_.input_size + 2) {
-            uint16_t slave_error = static_cast<uint16_t>(
-                frame_data[config_.input_size] |
-                (frame_data[config_.input_size + 1] << 8));
-            trace("RX FailSafeData(0x08): slave entered fail-safe, "
-                  "reported error=0x%04X (state=%s)",
-                  slave_error, stateName(status_.state));
-            FSoEErrorDetail detail;
-            snprintf(detail.message, sizeof(detail.message),
-                     "Slave entered fail-safe and reported error 0x%04X",
-                     slave_error);
-            handleError(slave_error, detail);
-        } else {
-            FSoEErrorDetail detail;
-            snprintf(detail.message, sizeof(detail.message),
-                     "Slave sent fail-safe response but payload too short "
-                     "(got %zu bytes, need %u+2)",
-                     data_len, config_.input_size);
-            handleError(ErrorCode::ApplicationError, detail);
-        }
-        return true;
-    }
-
     // Process based on current state
     switch (status_.state) {
         case ConnectionState::Reset:
@@ -683,20 +661,36 @@ size_t FSoEMasterConnection::prepareTxFrame(uint8_t* data, size_t max_len)
             break;
 
         case ConnectionState::Data:
-            len = buildDataFrame(data, max_len);
-            if (len > 0) {
-                trace("TX ProcessData(0x36): %u bytes of safe outputs "
-                      "(state=Data, %zu bytes)",
-                      config_.output_size, len);
+            // ETG.5100 S (D) V1.2.0, §8.2.2.6: In the Data state, the command
+            // (ProcessData vs FailSafeData) is chosen independently based on
+            // local circumstances.  If fail_safe_active is true, send
+            // FailSafeData (all-zero SafeData); otherwise send ProcessData
+            // with the current SafeOutputs.
+            // See: https://techoverflow.net/2026/08/12/fsoe-data-pdu-master-and-slave-structure/
+            if (status_.fail_safe_active) {
+                len = buildFailSafeFrame(data, max_len);
+                if (len > 0) {
+                    trace("TX FailSafeData(0x08): all-zero safe data "
+                          "(state=Data, fail-safe, %zu bytes)", len);
+                }
+            } else {
+                len = buildDataFrame(data, max_len);
+                if (len > 0) {
+                    trace("TX ProcessData(0x36): %u bytes of safe outputs "
+                          "(state=Data, %zu bytes)",
+                          config_.output_size, len);
+                }
             }
             break;
 
         case ConnectionState::FailSafe:
+            // Dead code: the master no longer transitions to FailSafe state.
+            // FailSafeData is sent from the Data state when fail_safe_active
+            // is set.  This case is kept for backwards compatibility.
             len = buildFailSafeFrame(data, max_len);
             if (len > 0) {
-                trace("TX FailSafeData(0x08): %u bytes of fail-safe values "
-                      "(state=FailSafe, %zu bytes)",
-                      config_.output_size, len);
+                trace("TX FailSafeData(0x08): all-zero safe data "
+                      "(state=FailSafe [legacy], %zu bytes)", len);
             }
             break;
 
@@ -763,8 +757,10 @@ void FSoEMasterConnection::update(uint64_t current_time_ms)
     checkPhaseTimeout(current_time_ms);
     checkWatchdog(current_time_ms);
 
-    // Auto-recovery attempt
-    if (status_.state == ConnectionState::FailSafe && config_.auto_recovery_enabled) {
+    // Auto-recovery attempt — fail-safe is now a flag within the Data state,
+    // not a separate state (ETG.5100 §8.2.2.6).
+    if (status_.state == ConnectionState::Data &&
+        status_.fail_safe_active && config_.auto_recovery_enabled) {
         attemptAutoRecovery(current_time_ms);
     }
 }
@@ -806,8 +802,9 @@ void FSoEMasterConnection::checkPhaseTimeout(uint64_t current_time_ms)
     }
 
     if (status_.state == ConnectionState::Data ||
-        status_.state == ConnectionState::FailSafe ||
         status_.state == ConnectionState::Error) {
+        // Data state runs indefinitely (no phase timeout).
+        // Fail-safe is now a flag within Data state, not a separate state.
         return;
     }
 
@@ -898,6 +895,13 @@ void FSoEMasterConnection::handleResetState(uint8_t cmd, const uint8_t* data, si
               commandName(cmd));
         // CRC chain is already at 0 — Reset frames don't update it.
         requestSessionReset();
+    } else if (cmd == Command::FailSafeData) {
+        // Slave is aborting by sending FailSafeData.
+        trace("RX FailSafeData(0x08): slave aborting in Reset state");
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave sent FailSafeData in Reset state (handshake abort)");
+        handleError(ErrorCode::ApplicationError, detail);
     } else {
         // Unexpected command in Reset state — ignore and keep retrying
         trace("RX %s: unexpected in Reset state (expected Session or Reset)",
@@ -976,6 +980,16 @@ void FSoEMasterConnection::handleSessionState(uint8_t cmd, const uint8_t* data, 
                 }
             }
         }
+    } else if (cmd == Command::FailSafeData) {
+        // Slave is aborting the handshake by sending FailSafeData.
+        // ETG.5100 §8.2.2.6: FailSafeData is normally a Data-state command,
+        // but receiving it during the handshake means the slave detected an
+        // error.  Enter fail-safe to acknowledge the abort.
+        trace("RX FailSafeData(0x08): slave aborting in Session state");
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave sent FailSafeData in Session state (handshake abort)");
+        handleError(ErrorCode::ApplicationError, detail);
     } else {
         trace("RX %s: unexpected in Session state (expected Session)",
               commandName(cmd));
@@ -1121,6 +1135,13 @@ void FSoEMasterConnection::handleConnectionState(uint8_t cmd, const uint8_t* dat
                   connection_tx_idx_, 4, connection_rx_idx_, 4);
             tx_cache_dirty_ = true;
         }
+    } else if (cmd == Command::FailSafeData) {
+        // Slave is aborting the handshake by sending FailSafeData.
+        trace("RX FailSafeData(0x08): slave aborting in Connection state");
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave sent FailSafeData in Connection state (handshake abort)");
+        handleError(ErrorCode::ApplicationError, detail);
     } else {
         trace("RX %s: unexpected in Connection state (expected Connection)",
               commandName(cmd));
@@ -1225,6 +1246,13 @@ void FSoEMasterConnection::handleParameterState(uint8_t cmd, const uint8_t* data
         trace("RX ProcessData(0x36): slave skipped Parameter phase, moving to Data");
         transitionTo(ConnectionState::Data);
         handleDataState(cmd, data, data_len);
+    } else if (cmd == Command::FailSafeData) {
+        // Slave is aborting the handshake by sending FailSafeData.
+        trace("RX FailSafeData(0x08): slave aborting in Parameter state");
+        FSoEErrorDetail detail;
+        snprintf(detail.message, sizeof(detail.message),
+                 "Slave sent FailSafeData in Parameter state (handshake abort)");
+        handleError(ErrorCode::ApplicationError, detail);
     } else {
         trace("RX %s: unexpected in Parameter state (expected Parameter or ProcessData)",
               commandName(cmd));
@@ -1238,25 +1266,65 @@ void FSoEMasterConnection::handleParameterState(uint8_t cmd, const uint8_t* data
 
 void FSoEMasterConnection::handleDataState(uint8_t cmd, const uint8_t* data, size_t data_len)
 {
-    if (cmd != Command::ProcessData) {
-        if (cmd == Command::Reset) {
-            trace("RX Reset(0x2A): slave requested reset in Data state, resetting connection");
-            resetConnection();
+    // ETG.5100 S (D) V1.2.0, §8.2.2.6: The Data state uses two commands:
+    // ProcessData (valid data) and FailSafeData (safe state).  The choice
+    // between them is INDEPENDENT in each direction — the master may send
+    // ProcessData while the slave sends FailSafeData, or vice versa.
+    // The master must accept FailSafeData from the slave without entering
+    // fail-safe itself (the decision is purely local).
+    // See: https://techoverflow.net/2026/08/12/fsoe-data-pdu-master-and-slave-structure/
+
+    if (cmd == Command::Reset) {
+        trace("RX Reset(0x2A): slave requested reset in Data state, resetting connection");
+        resetConnection();
+        return;
+    }
+
+    if (cmd == Command::FailSafeData) {
+        // Slave is sending FailSafeData — its SafeInputs are all zeros
+        // (ETG.5100 Table 26).  The master accepts this without entering
+        // fail-safe itself; the choice between ProcessData and FailSafeData
+        // is independent in each direction.
+        //
+        // Per spec, the FailSafeData PDU has the SAME structure as ProcessData
+        // (no error code field).  All SafeData octets are 0.
+        if (data_len < config_.input_size) {
+            stats_.invalid_frames++;
+            trace("RX FailSafeData(0x08): frame too short (%zu bytes, expected %u)",
+                  data_len, config_.input_size);
+            FSoEErrorDetail detail;
+            snprintf(detail.message, sizeof(detail.message),
+                     "FailSafeData frame too short: got %zu bytes, expected %u",
+                     data_len, config_.input_size);
+            handleError(ErrorCode::DataLengthError, detail);
             return;
         }
-        trace("RX %s: unexpected in Data state (expected ProcessData)",
+
+        // Copy the slave's fail-safe inputs (all zeros per spec) to
+        // safe_inputs_ and mark data as not valid.
+        std::copy(data, data + config_.input_size, safe_inputs_.begin());
+        status_.data_valid = false;
+        trace("RX FailSafeData(0x08): slave in fail-safe, %u bytes of "
+              "zero safe inputs (state=Data)", config_.input_size);
+
+        if (data_callback_) {
+            data_callback_(safe_inputs_.data(), config_.input_size);
+        }
+        return;
+    }
+
+    if (cmd != Command::ProcessData) {
+        trace("RX %s: unexpected in Data state (expected ProcessData or FailSafeData)",
               commandName(cmd));
         FSoEErrorDetail detail;
         snprintf(detail.message, sizeof(detail.message),
-                 "Unexpected command 0x%02X in Data state (expected ProcessData)",
+                 "Unexpected command 0x%02X in Data state (expected ProcessData or FailSafeData)",
                  cmd);
         handleError(ErrorCode::CommandError, detail);
         return;
     }
 
-    // ETG.5100 does not define a sequence number field
-    // Frame integrity is ensured via CRC + watchdog
-
+    // Normal ProcessData command
     if (data_len < config_.input_size) {
         stats_.invalid_frames++;
         trace("RX ProcessData(0x36): frame too short (%zu bytes, expected %u)",
@@ -1281,6 +1349,10 @@ void FSoEMasterConnection::handleDataState(uint8_t cmd, const uint8_t* data, siz
 
 void FSoEMasterConnection::handleFailSafeState(uint8_t cmd, const uint8_t* data, size_t data_len)
 {
+    // Legacy FailSafe state handler — the master no longer transitions to
+    // this state (fail-safe is now a flag within the Data state per
+    // ETG.5100 §8.2.2.6).  This handler is kept for backwards compatibility.
+    // See: https://techoverflow.net/2026/08/12/fsoe-data-pdu-master-and-slave-structure/
     if (cmd == Command::Reset) {
         if (config_.auto_recovery_enabled) {
             trace("RX Reset(0x2A): slave ready to recover, resetting connection");
@@ -1292,22 +1364,9 @@ void FSoEMasterConnection::handleFailSafeState(uint8_t cmd, const uint8_t* data,
     } else if (cmd == Command::FailSafeData) {
         // Slave is also in fail-safe — acknowledge by staying in fail-safe.
         // Recovery will be attempted by attemptAutoRecovery() in update().
-        // Extract slave error code for diagnostics (input_size bytes of
-        // fail-safe inputs followed by 2-byte error code).
-        if (data_len >= config_.input_size + 2) {
-            uint16_t slave_error = static_cast<uint16_t>(
-                data[config_.input_size] | (data[config_.input_size + 1] << 8));
-            trace("RX FailSafeData(0x08): slave also in fail-safe (error=0x%04X)",
-                  slave_error);
-            // Update error code only if the slave reports a different error
-            // than what we already have — avoids overwriting our own error.
-            if (slave_error != ErrorCode::NoError &&
-                slave_error != status_.error_code) {
-                status_.error_code = slave_error;
-            }
-        } else {
-            trace("RX FailSafeData(0x08): slave also in fail-safe (no error code)");
-        }
+        // Per ETG.5100 Table 26, FailSafeData has the same structure as
+        // ProcessData (all SafeData = 0, no error code field).
+        trace("RX FailSafeData(0x08): slave also in fail-safe");
     } else {
         // Unexpected command in FailSafe state
         trace("RX %s: unexpected in FailSafe state (expected Reset or FailSafeData)",
@@ -1477,13 +1536,19 @@ size_t FSoEMasterConnection::buildDataFrame(uint8_t* data, size_t max_len)
 
 size_t FSoEMasterConnection::buildFailSafeFrame(uint8_t* data, size_t max_len)
 {
-    // Fail-safe frame sends FailSafeData command with fail-safe output values
+    // ETG.5100 S (D) V1.2.0, §8.2.2.6, Table 25:
+    // FailSafeData Master PDU: all SafeData octets are set to 0.
+    // The fail-safe data carries no useful payload; it signals that
+    // the sender has switched its outputs to the safe state.
+    // Conn_Id and CRC fields behave exactly as in the ProcessData PDU.
+    // See: https://techoverflow.net/2026/08/12/fsoe-data-pdu-master-and-slave-structure/
+    static const std::array<uint8_t, 16> zero_safe_data = {0};
     size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
     uint16_t seq_used = 0;
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::FailSafeData,
-        config_.fail_safe_values.data(), config_.output_size,
+        zero_safe_data.data(), config_.output_size,
         config_.connection_id,
         last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;

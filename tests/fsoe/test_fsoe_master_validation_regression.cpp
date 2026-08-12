@@ -87,7 +87,9 @@ static void advanceToData(FSoEMasterConnection& conn, FSoESlave& slave,
 // ============================================================================
 
 TEST(FSoEMasterBufferOverflowRegression, MaxPayloadFailSafeResponseNoOverflow) {
-    // Slave with safeInputSize=16 sends fail-safe response with 18-byte payload
+    // ETG.5100 §8.2.2.6: FailSafeData has the same structure as ProcessData
+    // (all SafeData = 0, no error code).  With safeInputSize=16, the payload
+    // is 16 bytes.  The master should accept it without overflow.
     FSoESlave slave(makeSlaveCfg(16, 16));
     slave.initialize();
 
@@ -102,11 +104,13 @@ TEST(FSoEMasterBufferOverflowRegression, MaxPayloadFailSafeResponseNoOverflow) {
     // Trigger fail-safe on slave
     slave.triggerFailSafe(ErrorCode::WatchdogError);
 
-    // Exchange — master receives 18-byte FailSafeData response
+    // Exchange — master receives 16-byte FailSafeData response
     // This should not overflow (U1 fix enlarged buffer to MAX_PARSE_DATA_SIZE)
     bool ok = conn.exchangeWith(slave, now + 15);
     EXPECT_TRUE(ok);
-    EXPECT_TRUE(conn.isFailSafe());
+    // ETG.5100 §8.2.2.6: Master does NOT auto-enter fail-safe when slave
+    // sends FailSafeData (independent per direction)
+    EXPECT_FALSE(conn.isFailSafe());
 }
 
 TEST(FSoEMasterBufferOverflowRegression, MaxPayloadProcessDataNoOverflow) {
@@ -201,10 +205,13 @@ TEST(FSoEMasterConnectionValidationRegression, ShortConnectionResponseRejected) 
 }
 
 // ============================================================================
-// X6: Early FailSafe Error Code Extraction (commit 9b9cd34)
+// X6: FailSafeData handling in Data state (ETG.5100 §8.2.2.6)
 // ============================================================================
 
 TEST(FSoEMasterEarlyFailSafeRegression, ShortFailSafeDataUsesApplicationError) {
+    // ETG.5100 §8.2.2.6: FailSafeData in Data state with a payload shorter
+    // than input_size is a DataLengthError.  The master enters fail-safe
+    // via handleError (auto_fail_safe_on_error=true).
     FSoEMasterConnection conn(makeMasterCfg(4, 4));
     conn.initialize();
     conn.startConnection();
@@ -215,8 +222,7 @@ TEST(FSoEMasterEarlyFailSafeRegression, ShortFailSafeDataUsesApplicationError) {
     uint64_t now = 0;
     advanceToData(conn, slave, now);
 
-    // Send a FailSafeData frame with only 2 bytes (less than input_size + 2 = 6)
-    // The 2 bytes are fail-safe inputs, NOT the error code
+    // Send a FailSafeData frame with only 2 bytes (less than input_size=4)
     uint8_t payload[] = {0xAA, 0xBB};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::FailSafeData,
@@ -225,12 +231,16 @@ TEST(FSoEMasterEarlyFailSafeRegression, ShortFailSafeDataUsesApplicationError) {
                                             conn.getRxSeqNo());
     bool ok = conn.processRxFrame(frame, frame_len);
     EXPECT_TRUE(ok);
+    // Short frame triggers DataLengthError → fail-safe
     EXPECT_TRUE(conn.isFailSafe());
-    // Should use ApplicationError, not read 0xBBAA from fail-safe inputs
-    EXPECT_EQ(conn.getErrorCode(), ErrorCode::ApplicationError);
+    EXPECT_EQ(conn.getErrorCode(), ErrorCode::DataLengthError);
 }
 
 TEST(FSoEMasterEarlyFailSafeRegression, FullFailSafeDataExtractsErrorCode) {
+    // ETG.5100 §8.2.2.6, Table 26: FailSafeData has the same structure as
+    // ProcessData (all SafeData = 0, no error code field).  The master
+    // accepts FailSafeData without entering fail-safe (independent per
+    // direction).  No error code is extracted.
     FSoEMasterConnection conn(makeMasterCfg(4, 4));
     conn.initialize();
     conn.startConnection();
@@ -241,16 +251,19 @@ TEST(FSoEMasterEarlyFailSafeRegression, FullFailSafeDataExtractsErrorCode) {
     uint64_t now = 0;
     advanceToData(conn, slave, now);
 
-    // Send full FailSafeData with 4 inputs + 2-byte error code
-    uint8_t payload[] = {0xAA, 0xBB, 0xCC, 0xDD, 0x03, 0x00};  // error=WatchdogError
+    // Send FailSafeData with 4 bytes of SafeData (all zeros per spec)
+    uint8_t payload[] = {0x00, 0x00, 0x00, 0x00};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::FailSafeData,
-                                            payload, 6, 0x1234,
+                                            payload, 4, 0x1234,
                                             conn.getRxLastCrc0(),
                                             conn.getRxSeqNo());
     conn.processRxFrame(frame, frame_len);
-    EXPECT_TRUE(conn.isFailSafe());
-    EXPECT_EQ(conn.getErrorCode(), ErrorCode::WatchdogError);
+    // Master does NOT enter fail-safe (independent per direction)
+    EXPECT_FALSE(conn.isFailSafe());
+    // No error code extracted (no error code field in FailSafeData PDU)
+    EXPECT_EQ(conn.getErrorCode(), ErrorCode::NoError);
+    EXPECT_FALSE(conn.getStatus().data_valid);
 }
 
 TEST(FSoEMasterEarlyFailSafeRegression, ZeroInputSizeExtractsErrorCode) {
@@ -280,6 +293,12 @@ TEST(FSoEMasterEarlyFailSafeRegression, ZeroInputSizeExtractsErrorCode) {
 // ============================================================================
 
 TEST(FSoEMasterFailSafeStateRegression, UnexpectedCommandInFailSafeReportsError) {
+    // ETG.5100 §8.2.2.6: FailSafeData is a command within the Data state,
+    // not a separate state.  The master stays in Data state with
+    // fail_safe_active flag.  ProcessData is a valid command in Data state
+    // (the slave may send ProcessData while the master sends FailSafeData —
+    // the choice is independent per direction).  So ProcessData should be
+    // accepted, not rejected.
     FSoEMasterConnection conn(makeMasterCfg(4, 4));
     conn.initialize();
     conn.startConnection();
@@ -290,11 +309,14 @@ TEST(FSoEMasterFailSafeStateRegression, UnexpectedCommandInFailSafeReportsError)
     uint64_t now = 0;
     advanceToData(conn, slave, now);
 
-    // Trigger fail-safe on master
+    // Trigger fail-safe on master — stays in Data state with fail_safe_active
     conn.triggerFailSafe(ErrorCode::WatchdogError);
     ASSERT_TRUE(conn.isFailSafe());
+    // Master is still in Data state (not a separate FailSafe state)
+    EXPECT_EQ(conn.getState(), ConnectionState::Data);
 
-    // Send a ProcessData command while in FailSafe state
+    // Send a ProcessData command — this is valid in Data state.
+    // The slave may send ProcessData while the master sends FailSafeData.
     uint8_t payload[] = {0x01, 0x02, 0x03, 0x04};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::ProcessData,
@@ -302,10 +324,9 @@ TEST(FSoEMasterFailSafeStateRegression, UnexpectedCommandInFailSafeReportsError)
                                             conn.getRxLastCrc0(),
                                             conn.getRxSeqNo());
     bool ok = conn.processRxFrame(frame, frame_len);
-    // processRxFrame returns true but handleError is called
     EXPECT_TRUE(ok);
-    // Error code should be CommandError (overwriting WatchdogError)
-    EXPECT_EQ(conn.getErrorCode(), ErrorCode::CommandError);
+    // ProcessData is accepted — error code should NOT be overwritten
+    EXPECT_EQ(conn.getErrorCode(), ErrorCode::WatchdogError);
 }
 
 // ============================================================================
@@ -313,15 +334,13 @@ TEST(FSoEMasterFailSafeStateRegression, UnexpectedCommandInFailSafeReportsError)
 // ============================================================================
 
 TEST(FSoEMasterErrorStateRegression, ErrorStateRejectsNonResetCommands) {
+    // ETG.5100 §8.2.2.6: FailSafeData is a command within the Data state.
+    // The master stays in Data state with fail_safe_active flag.
+    // ProcessData is a valid command in Data state (the choice between
+    // ProcessData and FailSafeData is independent per direction).
     FSoEMasterConnection conn(makeMasterCfg(4, 4));
     conn.initialize();
     conn.startConnection();
-
-    // Disable auto_fail_safe to stay in Error state
-    auto cfg = conn.getConfig();
-    // Can't change config after init, so use auto_fail_safe_on_error=true
-    // and then clearError won't work from Error state.
-    // Instead, let's test via the FailSafe state path.
 
     FSoESlave slave(makeSlaveCfg(4, 4));
     slave.initialize();
@@ -331,17 +350,20 @@ TEST(FSoEMasterErrorStateRegression, ErrorStateRejectsNonResetCommands) {
 
     conn.triggerFailSafe(ErrorCode::ApplicationError);
     ASSERT_TRUE(conn.isFailSafe());
+    // Master is still in Data state (not a separate FailSafe state)
+    EXPECT_EQ(conn.getState(), ConnectionState::Data);
 
-    // Send a non-Reset command (ProcessData) while in FailSafe
+    // Send a ProcessData command — this is valid in Data state.
+    // The slave may send ProcessData while the master sends FailSafeData.
     uint8_t payload[] = {0x01, 0x02, 0x03, 0x04};
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::ProcessData,
                                             payload, 4, 0x1234,
                                             conn.getRxLastCrc0(),
                                             conn.getRxSeqNo());
-    // Should trigger CommandError
+    // ProcessData is accepted in Data state — no CommandError
     conn.processRxFrame(frame, frame_len);
-    EXPECT_EQ(conn.getErrorCode(), ErrorCode::CommandError);
+    EXPECT_EQ(conn.getErrorCode(), ErrorCode::ApplicationError);
 }
 
 // ============================================================================
@@ -349,6 +371,9 @@ TEST(FSoEMasterErrorStateRegression, ErrorStateRejectsNonResetCommands) {
 // ============================================================================
 
 TEST(FSoEMasterFailSafeResetRegression, ResetCommandInFailSafeWithAutoRecovery) {
+    // ETG.5100 §8.2.2.6: FailSafeData is a command within the Data state.
+    // The master stays in Data state with fail_safe_active flag.
+    // A Reset command in Data state triggers resetConnection().
     MasterConnectionConfig cfg = makeMasterCfg(4, 4);
     cfg.auto_recovery_enabled = true;
     FSoEMasterConnection conn(cfg);
@@ -363,6 +388,8 @@ TEST(FSoEMasterFailSafeResetRegression, ResetCommandInFailSafeWithAutoRecovery) 
 
     conn.triggerFailSafe(ErrorCode::WatchdogError);
     ASSERT_TRUE(conn.isFailSafe());
+    // Master is still in Data state (not a separate FailSafe state)
+    EXPECT_EQ(conn.getState(), ConnectionState::Data);
 
     // Send Reset command — the slave's Reset response uses start_crc=0
     // and seq_no=1 (initial_seq_no + 1, since the slave increments the seq
@@ -378,9 +405,9 @@ TEST(FSoEMasterFailSafeResetRegression, ResetCommandInFailSafeWithAutoRecovery) 
                                             1);  // seq_no = 1 (slave increments after Reset)
     conn.processRxFrame(frame, frame_len);
 
-    // Should have recovered (auto_recovery_enabled=true)
-    auto stats = conn.getStats();
-    EXPECT_GT(stats.successful_recoveries, 0u);
+    // Reset in Data state triggers resetConnection() — master goes to Reset
+    EXPECT_EQ(conn.getState(), ConnectionState::Reset);
+    EXPECT_FALSE(conn.isFailSafe());
 }
 
 // ============================================================================
@@ -403,6 +430,9 @@ TEST(FSoEMasterFailSafeFrameRegression, FailSafeFrameUsesFailSafeDataCommand) {
 }
 
 TEST(FSoEMasterFailSafeFrameRegression, FailSafeFrameContainsFailSafeValues) {
+    // ETG.5100 S (D) V1.2.0, §8.2.2.6, Table 25:
+    // FailSafeData Master PDU: all SafeData octets are set to 0.
+    // The fail-safe data carries no useful payload.
     MasterConnectionConfig cfg = makeMasterCfg(4, 4);
     cfg.fail_safe_values = {0xDE, 0xAD, 0xBE, 0xEF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     FSoEMasterConnection conn(cfg);
@@ -419,7 +449,7 @@ TEST(FSoEMasterFailSafeFrameRegression, FailSafeFrameContainsFailSafeValues) {
     size_t tx_len = conn.prepareTxFrame(tx, sizeof(tx));
     ASSERT_GT(tx_len, 0u);
 
-    // Parse and verify fail-safe values are in the payload
+    // Parse and verify all SafeData is zero per ETG.5100 Table 25.
     // Use the master's TX CRC state that was used to build the frame.
     uint8_t cmd = 0;
     uint8_t data[18] = {0};
@@ -428,12 +458,12 @@ TEST(FSoEMasterFailSafeFrameRegression, FailSafeFrameContainsFailSafeValues) {
     ASSERT_TRUE(CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id,
                                     saved_tx_crc0, saved_tx_seq));
     EXPECT_EQ(cmd, Command::FailSafeData);
-    // Frame data length is the fixed data length (max(output_size, 6) = 6)
     EXPECT_EQ(data_len, 4u);
-    EXPECT_EQ(data[0], 0xDE);
-    EXPECT_EQ(data[1], 0xAD);
-    EXPECT_EQ(data[2], 0xBE);
-    EXPECT_EQ(data[3], 0xEF);
+    // All SafeData octets must be 0 per spec (not fail_safe_values)
+    EXPECT_EQ(data[0], 0x00);
+    EXPECT_EQ(data[1], 0x00);
+    EXPECT_EQ(data[2], 0x00);
+    EXPECT_EQ(data[3], 0x00);
 }
 
 // ============================================================================

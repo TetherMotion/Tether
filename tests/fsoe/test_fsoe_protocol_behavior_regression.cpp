@@ -191,21 +191,35 @@ TEST_F(FSoEProtocolBehaviorTest, DataExchangePreservesValues) {
 // ============================================================================
 
 TEST_F(FSoEProtocolBehaviorTest, SlaveFailSafePropagatesToMaster) {
+    // ETG.5100 §8.2.2.6: The choice between ProcessData and FailSafeData is
+    // INDEPENDENT in each direction.  When the slave enters fail-safe and
+    // sends FailSafeData, the master does NOT auto-enter fail-safe.
+    // The master accepts the slave's fail-safe inputs (all zeros) and
+    // stays in its current mode.
     uint64_t now = 0;
     advanceToData(*master, *slave, now);
 
     // Trigger fail-safe on slave
     slave->triggerFailSafe(ErrorCode::WatchdogError);
 
-    // Exchange — master should detect slave's fail-safe
+    // Exchange — master receives slave's FailSafeData
     now += 15;
     master->exchangeWith(*slave, now);
 
-    EXPECT_TRUE(master->isFailSafe());
-    EXPECT_EQ(master->getErrorCode(), ErrorCode::WatchdogError);
+    // Master does NOT enter fail-safe (independent per direction)
+    EXPECT_FALSE(master->isFailSafe());
+    // Master's data is not valid (slave sent fail-safe data)
+    EXPECT_FALSE(master->getStatus().data_valid);
+    // Master keeps its own error code (no error code in FailSafeData PDU)
+    EXPECT_EQ(master->getErrorCode(), ErrorCode::NoError);
 }
 
 TEST_F(FSoEProtocolBehaviorTest, MasterFailSafePropagatesToSlave) {
+    // ETG.5100 §8.2.2.6: The choice between ProcessData and FailSafeData is
+    // INDEPENDENT in each direction.  When the master sends FailSafeData,
+    // the slave does NOT auto-enter fail-safe in Data state.
+    // The slave accepts the master's fail-safe outputs (all zeros) and
+    // stays in its current mode.
     uint64_t now = 0;
     advanceToData(*master, *slave, now);
 
@@ -216,11 +230,14 @@ TEST_F(FSoEProtocolBehaviorTest, MasterFailSafePropagatesToSlave) {
     now += 15;
     master->exchangeWith(*slave, now);
 
-    // Slave should be in fail-safe
-    EXPECT_TRUE(slave->isFailSafe());
+    // Slave does NOT enter fail-safe (independent per direction)
+    EXPECT_FALSE(slave->isFailSafe());
 }
 
 TEST_F(FSoEProtocolBehaviorTest, FailSafeOutputsAppliedOnSlave) {
+    // ETG.5100 §8.2.2.6, Table 26: FailSafeData Slave PDU has all SafeData
+    // octets set to 0 (not failSafeInputs).  The PDU has the same structure
+    // and size as the ProcessData PDU (no error code field).
     uint64_t now = 0;
     advanceToData(*master, *slave, now);
 
@@ -236,7 +253,7 @@ TEST_F(FSoEProtocolBehaviorTest, FailSafeOutputsAppliedOnSlave) {
     // In fail-safe, data is not valid — getSafeOutputs returns 0
     EXPECT_FALSE(slave->areSafeOutputsValid());
 
-    // But the slave's TX frame should contain fail-safe values.
+    // The slave's TX frame should contain all-zero SafeData per ETG.5100 Table 26.
     // Capture the slave's TX CRC state before prepareTxFrame, since
     // prepareTxFrame updates it (CRC inheritance).
     uint16_t saved_tx_crc0 = slave->getTxLastCrc0();
@@ -253,11 +270,11 @@ TEST_F(FSoEProtocolBehaviorTest, FailSafeOutputsAppliedOnSlave) {
     ASSERT_TRUE(CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id,
                                     saved_tx_crc0, saved_tx_seqno));
     EXPECT_EQ(cmd, Command::FailSafeData);
-    // Fail-safe inputs are sent in the response
-    EXPECT_EQ(data[0], 0xAA);
-    EXPECT_EQ(data[1], 0xBB);
-    EXPECT_EQ(data[2], 0xCC);
-    EXPECT_EQ(data[3], 0xDD);
+    // All SafeData octets must be 0 per ETG.5100 Table 26
+    EXPECT_EQ(data[0], 0x00);
+    EXPECT_EQ(data[1], 0x00);
+    EXPECT_EQ(data[2], 0x00);
+    EXPECT_EQ(data[3], 0x00);
 }
 
 TEST_F(FSoEProtocolBehaviorTest, FailSafeOutputsAppliedOnMaster) {
@@ -324,13 +341,16 @@ TEST_F(FSoEProtocolBehaviorTest, SlaveAutoRecoveryFromFailSafe) {
 }
 
 TEST_F(FSoEProtocolBehaviorTest, ManualRecoveryViaResetCommand) {
+    // ETG.5100 §8.2.2.6: The choice between ProcessData and FailSafeData is
+    // independent per direction.  The master does NOT auto-enter fail-safe
+    // when the slave sends FailSafeData.  For this test, we manually
+    // trigger fail-safe on both sides.
     uint64_t now = 0;
     advanceToData(*master, *slave, now);
 
-    // Both in fail-safe
+    // Both in fail-safe (triggered independently)
     slave->triggerFailSafe(ErrorCode::WatchdogError);
-    now += 15;
-    master->exchangeWith(*slave, now);
+    master->triggerFailSafe(ErrorCode::WatchdogError);
     ASSERT_TRUE(master->isFailSafe());
     ASSERT_TRUE(slave->isFailSafe());
 
@@ -339,7 +359,7 @@ TEST_F(FSoEProtocolBehaviorTest, ManualRecoveryViaResetCommand) {
     now += 15;
     master->exchangeWith(*slave, now);
 
-    // Both should be back in earlier states
+    // Master should be back in earlier states
     EXPECT_FALSE(master->isFailSafe());
 }
 

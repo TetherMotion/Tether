@@ -100,8 +100,8 @@ struct MasterConnectionStatus {
     uint64_t last_valid_frame_ms = 0;
     uint64_t state_entered_ms = 0;
 
-    bool isOperational() const { return state == ConnectionState::Data; }
-    bool isFailSafe() const { return state == ConnectionState::FailSafe || fail_safe_active; }
+    bool isOperational() const { return state == ConnectionState::Data && !fail_safe_active; }
+    bool isFailSafe() const { return fail_safe_active; }
     bool hasError() const { return state == ConnectionState::Error || error_code != ErrorCode::NoError; }
 };
 
