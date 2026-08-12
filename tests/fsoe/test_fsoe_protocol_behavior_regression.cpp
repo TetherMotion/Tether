@@ -112,13 +112,17 @@ TEST_F(FSoEProtocolBehaviorTest, FullHandshakeProgression) {
     master->exchangeWith(*slave, now);
     EXPECT_EQ(master->getState(), ConnectionState::Parameter);
 
-    // Cycle 3: Master sends Parameter, slave responds with Parameter
+    // Parameter state: 4-octet data, 6-byte payload (no app params)
+    // → ceil(6/4) = 2 cycles
     now += 15;
     master->exchangeWith(*slave, now);
-    // Master transitions to Data after receiving Parameter response
+    EXPECT_EQ(master->getState(), ConnectionState::Parameter);
+    now += 15;
+    master->exchangeWith(*slave, now);
+    // Master transitions to Data after all parameter bytes echoed
     EXPECT_EQ(master->getState(), ConnectionState::Data);
 
-    // Cycle 4: Master sends ProcessData, slave transitions to Data
+    // Cycle 5: Master sends ProcessData, slave transitions to Data
     now += 15;
     master->exchangeWith(*slave, now);
     EXPECT_EQ(slave->getState(), ConnectionState::Data);

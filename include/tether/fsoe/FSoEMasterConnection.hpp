@@ -54,6 +54,13 @@ struct MasterConnectionConfig {
     uint8_t  output_size = 0;
     std::array<uint8_t, 16> fail_safe_values = {0};
 
+    /// Safety-related application parameters transferred in the Parameter
+    /// state (ETG.5100 S (D) V1.2.0, §8.2.2.5, Table 18, octets 6+).
+    /// Device-specific parameters configured via the safety configurator.
+    /// Empty = no application parameters (app param length = 0).
+    /// See: https://techoverflow.net/2026/08/12/fsoe-parameter-pdu-master-and-slave-structure/
+    std::vector<uint8_t> app_parameters;
+
     bool auto_recovery_enabled = true;
     bool auto_fail_safe_on_error = true;
 
@@ -310,6 +317,11 @@ private:
     /// and reset connection TX/RX indices.  Called when entering the
     /// Connection state.
     void initConnectionTxBuf();
+    /// Initialize param_tx_buf_ with the ETG.5100 §8.2.2.5 Table 18
+    /// parameter payload (comm param len + watchdog + app param len +
+    /// app param bytes) and reset TX/RX indices.  Called when entering
+    /// the Parameter state.
+    void initParameterTxBuf();
     void handleError(uint16_t error_code, const FSoEErrorDetail& detail);
     void checkWatchdog(uint64_t current_time_ms);
     void checkPhaseTimeout(uint64_t current_time_ms);
@@ -372,9 +384,23 @@ private:
     uint8_t rx_sequence_ = 0;
     uint8_t tx_sequence_ = 0;
 
-    // Parameter exchange state
-    uint8_t current_param_index_ = 0;
-    uint16_t parameter_crc_ = 0;
+    // Parameter exchange state — ETG.5100 S (D) V1.2.0, §8.2.2.5, Table 18.
+    // The Parameter state transfers a variable-length payload:
+    //   octets 0-1: comm param length (always 2, LE)
+    //   octets 2-3: FSoE watchdog (ms, LE)
+    //   octets 4-5: app param length (LE)
+    //   octets 6+:  app param bytes
+    // Total payload = 6 + app_parameters.size().
+    // Transferred in ceil(payload_len / output_size) cycles.
+    // The slave echoes each cycle's SafeData back; the master validates.
+    // See: https://techoverflow.net/2026/08/12/fsoe-parameter-pdu-master-and-slave-structure/
+    uint8_t current_param_index_ = 0;   ///< Legacy: parameter cycle count
+    uint16_t parameter_crc_ = 0;        ///< Legacy: parameter CRC (diagnostics)
+    uint8_t param_tx_idx_ = 0;          ///< TX byte offset into param_tx_buf_
+    uint8_t param_rx_idx_ = 0;          ///< RX echo byte offset into param_rx_buf_
+    static constexpr uint16_t PARAM_BUF_SIZE = 256 + 6;  ///< 6-byte header + max app params
+    std::vector<uint8_t> param_tx_buf_;  ///< Full parameter payload to send
+    std::vector<uint8_t> param_rx_buf_;  ///< Accumulated echo from slave
 
     // Recovery state
     uint64_t fail_safe_entered_ms_ = 0;

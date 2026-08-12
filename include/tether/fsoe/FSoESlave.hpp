@@ -146,6 +146,14 @@ struct FSoESlaveConfig {
     uint8_t safeOutputSize = 0;        ///< Safe output data size (bytes)
     std::array<uint8_t, 16> failSafeInputs{};   ///< Fail-safe input values
     std::array<uint8_t, 16> failSafeOutputs{};  ///< Fail-safe output values
+
+    /// Expected safety-related application parameters received from the
+    /// master in the Parameter state (ETG.5100 S (D) V1.2.0, §8.2.2.5,
+    /// Table 18, octets 6+).  The slave validates that the received app
+    /// parameters match these expected values.  Empty = no app parameters
+    /// expected (app param length = 0).
+    /// See: https://techoverflow.net/2026/08/12/fsoe-parameter-pdu-master-and-slave-structure/
+    std::vector<uint8_t> expectedAppParameters;
     
     // Behavior configuration
     bool autoRecoveryEnabled = true;   ///< Automatically recover from fail-safe
@@ -510,6 +518,21 @@ private:
     uint8_t connectionTxIdx_ = 0;       ///< TX echo byte offset (advances by safeInputSize)
     uint8_t connectionBuf_[4] = {0};    ///< Accumulated RX / echo buffer
     bool connectionTxAdvancePending_ = false;  ///< Advance connectionTxIdx_ after next buildConnectionResponse
+
+    // Parameter state multi-cycle transfer.
+    // ETG.5100 S (D) V1.2.0, §8.2.2.5, Table 18:
+    // The Parameter state transfers a variable-length payload:
+    //   octets 0-1: comm param length (always 2, LE)
+    //   octets 2-3: FSoE watchdog (ms, LE)
+    //   octets 4-5: app param length (LE)
+    //   octets 6+:  app param bytes
+    // The slave accumulates received bytes and echoes them back each cycle.
+    // See: https://techoverflow.net/2026/08/12/fsoe-parameter-pdu-master-and-slave-structure/
+    static constexpr uint16_t PARAM_BUF_SIZE = 256 + 6;
+    uint16_t paramRxIdx_ = 0;           ///< RX byte offset (advances by safeOutputSize)
+    uint16_t paramTxIdx_ = 0;           ///< TX echo byte offset (advances by safeInputSize)
+    std::vector<uint8_t> paramBuf_;     ///< Accumulated RX / echo buffer
+    bool paramTxAdvancePending_ = false; ///< Advance paramTxIdx_ after next buildParameterResponse
 
     // FSoE CRC inheritance and sequence number tracking.
     // See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
