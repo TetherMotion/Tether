@@ -562,7 +562,7 @@ public:
             for (size_t b = 0; b < sizeof(FSoETxPDO) && pos + 3 < sizeof(hex); b++) {
                 pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", tx_buffer[b]));
             }
-            TETHER_LOGI("fsoe-cyclic", "[TxPDO-FSoE] changed: %s", hex);
+            TETHER_LOGI("fsoe-cyclic", "[TxPDO-FSoE slave→master] changed: %s", hex);
         }
 
         // --debug fsoe-frame: decoded struct dump on change
@@ -595,7 +595,7 @@ public:
             for (size_t b = 0; b < sizeof(FSoERxPDO) && pos + 3 < sizeof(hex); b++) {
                 pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", rx_buffer[b]));
             }
-            TETHER_LOGI("fsoe-cyclic", "[RxPDO-FSoE] changed: %s", hex);
+            TETHER_LOGI("fsoe-cyclic", "[RxPDO-FSoE master→slave] changed: %s", hex);
         }
 
         return ok;
