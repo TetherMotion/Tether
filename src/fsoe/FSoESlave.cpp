@@ -170,6 +170,10 @@ void FSoESlave::reset() {
     last_rx_crc0_ = 0;
     tx_seq_no_ = 1;   // ETG.5100 §8.1.3.4: sequence starts at 1 (0 is never used)
     rx_seq_no_ = 1;   // Expected master sequence also starts at 1
+    last_rx_frame_bytes_.clear();  // Clear duplicate detection state
+    cached_tx_response_.clear();   // Clear TX response cache
+    cached_tx_state_ = 0xFF;
+    tx_cache_valid_ = false;
 
     // Apply fail-safe values
     applyFailSafeOutputs();
@@ -196,6 +200,11 @@ void FSoESlave::triggerFailSafe(uint16_t errorCode) {
     if (state_ != ConnectionState::Data) {
         transitionTo(ConnectionState::Data);
     }
+
+    // Clear TX cache — fail-safe changes the response (cmd=FailSafeData)
+    cached_tx_response_.clear();
+    cached_tx_state_ = 0xFF;
+    tx_cache_valid_ = false;
 
     applyFailSafeOutputs();
 
@@ -257,6 +266,12 @@ void FSoESlave::transitionTo(uint8_t newState) {
     state_ = newState;
     stateEntryTimeMs_ = lastUpdateTimeMs_;
 
+    // Clear TX response cache on state transition — the new state requires
+    // a different response (different command, different CRC chain entry).
+    cached_tx_response_.clear();
+    cached_tx_state_ = 0xFF;
+    tx_cache_valid_ = false;
+
     if (stateCallback_) {
         stateCallback_(oldState, newState);
     }
@@ -268,11 +283,11 @@ void FSoESlave::transitionTo(uint8_t newState) {
 
 bool FSoESlave::processRxFrame(const uint8_t* data, size_t len) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    
+
     if (!initialized_) {
         return false;
     }
-    
+
     statistics_.onFrameReceived();
 
     // Check for frame drop injection
@@ -287,11 +302,48 @@ bool FSoESlave::processRxFrame(const uint8_t* data, size_t len) {
         return false;
     }
 
+    // Duplicate frame detection for the PDO path.
+    //
+    // In the PDO path, the master sends the SAME frame bytes every cycle
+    // (same CRC, same seq) while in the same state.  This is correct FSoE
+    // behavior: the master only rebuilds the frame on state transitions.
+    // The slave must detect these duplicates and skip CRC advancement,
+    // otherwise the slave's RX CRC would advance on every duplicate,
+    // causing CRC divergence with the master.
+    //
+    // On a duplicate frame:
+    // - Update the watchdog timestamp (the master is still alive)
+    // - Do NOT advance the RX CRC or sequence number
+    // - Do NOT re-process the command (state machine unchanged)
+    // - Return true (valid frame, just a duplicate)
+    if (!last_rx_frame_bytes_.empty() &&
+        last_rx_frame_bytes_.size() == len &&
+        std::memcmp(last_rx_frame_bytes_.data(), data, len) == 0) {
+        lastValidFrameMs_ = lastUpdateTimeMs_;
+        // Mark TX cache as valid — the master resent the same frame, so
+        // the slave should resend its cached response (no CRC advancement).
+        // This is only used in the PDO path where the master caches and
+        // resends frames.
+        tx_cache_valid_ = true;
+        return true;
+    }
+
     // Validate frame
     if (!validateFrame(data, len)) {
         statistics_.onInvalidFrame();
         return false;
     }
+
+    // Store frame bytes for duplicate detection (only on successful validation)
+    last_rx_frame_bytes_.assign(data, data + len);
+
+    // Clear TX response cache — we received a NEW frame (not a duplicate),
+    // so the slave should build a fresh response with the advanced CRC chain.
+    // (transitionTo also clears the cache, but the state might not change
+    // e.g. Session→Session with a new master frame.)
+    cached_tx_response_.clear();
+    cached_tx_state_ = 0xFF;
+    tx_cache_valid_ = false;  // Next prepareTxFrame must build a new response
 
     statistics_.onValidFrame();
     lastValidFrameMs_ = lastUpdateTimeMs_;
@@ -379,20 +431,52 @@ bool FSoESlave::processRxFrame(const uint8_t* data, size_t len) {
 
 size_t FSoESlave::prepareTxFrame(uint8_t* data, size_t maxLen) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    
+
     if (!initialized_ || maxLen < 8) {
         return 0;
     }
-    
-    size_t frameSize = 0;
-    
+
     // Check for delayed response injection
     if (errorInjection_.enabled && errorInjection_.delayResponse) {
         // Simulate delay by not responding
         return 0;
     }
-    
-    switch (state_.load()) {
+
+    const uint8_t current_state = state_.load();
+    const bool current_fail_safe = failSafeActive_;
+
+    // TX response caching: in the PDO path, the slave should send the SAME
+    // response bytes every cycle while in the same state.  This prevents
+    // CRC chain divergence when the master resends the same frame (duplicate
+    // detection).  The response is rebuilt only when the state transitions
+    // or the fail-safe flag changes.
+    //
+    // In Data state with non-fail-safe, the safe inputs may change between
+    // cycles.  However, the slave should still cache its response and only
+    // rebuild when it processes a NEW master frame (which is handled by
+    // the duplicate detection in processRxFrame clearing the cache).  This
+    // ensures the slave's TX CRC only advances when the master's TX CRC
+    // advances (i.e. when both sides process a new frame).
+    const bool can_cache = true;
+    if (can_cache && tx_cache_valid_ && !cached_tx_response_.empty() &&
+        cached_tx_state_ == current_state &&
+        cached_tx_fail_safe_ == current_fail_safe) {
+        // State and fail-safe flag haven't changed — resend cached response.
+        // This does NOT advance last_tx_crc0_ or tx_seq_no_.
+        const size_t cached_size = cached_tx_response_.size();
+        if (maxLen >= cached_size) {
+            std::memcpy(data, cached_tx_response_.data(), cached_size);
+            statistics_.onFrameSent();
+            return cached_size;
+        }
+        // Buffer too small — fall through to rebuild
+        cached_tx_response_.clear();
+        cached_tx_state_ = 0xFF;
+    }
+
+    size_t frameSize = 0;
+
+    switch (current_state) {
         case ConnectionState::Reset:
             frameSize = buildResetResponse(data, maxLen);
             break;
@@ -400,15 +484,15 @@ size_t FSoESlave::prepareTxFrame(uint8_t* data, size_t maxLen) {
         case ConnectionState::Session:
             frameSize = buildSessionResponse(data, maxLen);
             break;
-            
+
         case ConnectionState::Connection:
             frameSize = buildConnectionResponse(data, maxLen);
             break;
-            
+
         case ConnectionState::Parameter:
             frameSize = buildParameterResponse(data, maxLen);
             break;
-            
+
         case ConnectionState::Data:
             if (failSafeActive_) {
                 frameSize = buildFailSafeResponse(data, maxLen);
@@ -416,23 +500,23 @@ size_t FSoESlave::prepareTxFrame(uint8_t* data, size_t maxLen) {
                 frameSize = buildDataResponse(data, maxLen);
             }
             break;
-            
+
         default:
             break;
     }
-    
+
     // Apply CRC error injection
     if (frameSize > 2 && errorInjection_.enabled && shouldInjectCRCError()) {
         // Corrupt the CRC
         data[frameSize - 1] ^= 0xFF;
         statistics_.onCrcError();  // Track injected errors
     }
-    
+
     // Apply data corruption
     if (frameSize > 0 && errorInjection_.enabled && errorInjection_.corruptData) {
         applyDataCorruption(data, frameSize);
     }
-    
+
     if (frameSize > 0) {
         statistics_.onFrameSent();
         // Increment TX sequence number for the NEXT frame.
@@ -441,6 +525,20 @@ size_t FSoESlave::prepareTxFrame(uint8_t* data, size_t maxLen) {
         // collision avoidance) was already set by the build* function;
         // here we advance to the next expected value.
         tx_seq_no_ = CRC::incrementSeqNo(tx_seq_no_);
+
+        // Cache the response for future cycles (only for cacheable states)
+        // Note: tx_cache_valid_ is NOT set here.  It's only set when the
+        // slave receives a DUPLICATE frame (in processRxFrame).  This
+        // ensures that in the direct exchange path (exchangeWith), where
+        // prepareTxFrame may be called multiple times without a duplicate
+        // RX, the slave always builds a fresh response with the correct
+        // CRC.
+        if (can_cache) {
+            cached_tx_response_.assign(data, data + frameSize);
+            cached_tx_state_ = current_state;
+            cached_tx_fail_safe_ = current_fail_safe;
+            // tx_cache_valid_ is NOT set here — only set on duplicate RX
+        }
     }
 
     return frameSize;
@@ -745,6 +843,10 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
         last_rx_crc0_ = 0;
         tx_seq_no_ = 1;  // Reset TX sequence for new connection
         // rx_seq_no_ is NOT reset — validateFrame already advanced it to 2
+        last_rx_frame_bytes_.clear();  // Clear duplicate detection
+        cached_tx_response_.clear();   // Clear TX response cache
+        cached_tx_state_ = 0xFF;
+        tx_cache_valid_ = false;
     }
 
     // Clear error state
