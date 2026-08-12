@@ -56,6 +56,22 @@ struct MasterConnectionConfig {
 
     bool auto_recovery_enabled = true;
     bool auto_fail_safe_on_error = true;
+
+    /// Number of PDO cycles the slave's FSoE response is delayed relative
+    /// to the master's TX command.  In EtherCAT, the slave's TxPDO is
+    /// always at least one cycle behind the master's RxPDO (master TX in
+    /// cycle N → slave processes → slave TX in cycle N+1).  Some slaves
+    /// have additional internal processing delay (e.g. the Synapticon
+    /// SOMANET runs FSoE at a lower rate, resulting in ~8 cycles of
+    /// delay).  When the master transitions to a new state (changing the
+    /// TX command byte), the slave's TxPDO still contains the response
+    /// to the PREVIOUS command for this many cycles.  The master skips
+    /// RX processing during this period to avoid triggering a spurious
+    /// "unexpected command" fail-safe from the stale response.
+    /// Set to 0 to disable command-change skipping (useful for tests
+    /// with an immediate-response slave).  Default is 1 (standard
+    /// one-cycle EtherCAT pipeline delay).
+    uint8_t slave_response_delay_cycles = 1;
 };
 
 struct MasterConnectionStatus {
@@ -291,13 +307,24 @@ private:
 
     // Last TX command byte sent via exchangeViaPDO.  When the master
     // transitions to a new state (e.g. Reset→Session), the TX command
-    // changes.  The slave's TxPDO in the same cycle still contains the
-    // response to the PREVIOUS command (EtherCAT pipeline delay: master
-    // TX → slave processes → slave TX in the NEXT cycle).  We skip RX
-    // processing for one cycle after a command change to avoid processing
-    // a stale response that would trigger a spurious fail-safe.
+    // changes.  The slave's TxPDO still contains the response to the
+    // PREVIOUS command for `slave_response_delay_cycles` cycles (EtherCAT
+    // pipeline delay + slave internal processing delay).  We skip RX
+    // processing for that many cycles after a command change to avoid
+    // processing a stale response that would trigger a spurious fail-safe.
     uint8_t last_tx_cmd_ = 0;
     bool has_last_tx_cmd_ = false;
+    uint8_t cmd_change_skip_remaining_ = 0;  ///< Cycles left to skip after cmd change
+
+    // Cached TX PDO frame for the current state.  In the PDO path, the
+    // master must send the SAME frame bytes every cycle (same CRC, same
+    // seq) until the state changes.  This prevents CRC chain divergence
+    // with slaves that don't process every frame (e.g. Synapticon's FSoE
+    // task runs every 8 cycles).  The frame is rebuilt only when the
+    // state transitions.
+    std::vector<uint8_t> cached_tx_pdo_;
+    uint8_t cached_tx_pdo_state_ = 0xFF;  ///< State when cached frame was built
+    bool tx_cache_dirty_ = true;  ///< True when safe outputs changed (rebuild needed)
 
     // Last received frame bytes, for duplicate detection.
     // If the slave re-sends the same frame (e.g. it hasn't seen a new

@@ -492,6 +492,25 @@ private:
     std::array<uint8_t, 16> safeOutputs_{};
     std::array<uint8_t, 32> rxBuffer_{};
     std::array<uint8_t, 32> txBuffer_{};
+
+    // Duplicate frame detection for the PDO path.  When the master
+    // resends the same frame bytes every cycle (which is the correct
+    // PDO behavior — the master only rebuilds the frame on state
+    // transitions), the slave must detect duplicates and skip CRC
+    // advancement.  Without this, the slave's RX CRC would advance
+    // on every duplicate, causing CRC divergence with the master.
+    std::vector<uint8_t> last_rx_frame_bytes_;
+
+    // Cached TX response for the current state.  In the PDO path, the
+    // slave should send the SAME response bytes every cycle while in the
+    // same state (same CRC, same seq).  This prevents CRC chain divergence
+    // when the master resends the same frame (duplicate detection).  The
+    // response is rebuilt only when the state transitions or the fail-safe
+    // flag changes.
+    std::vector<uint8_t> cached_tx_response_;
+    uint8_t cached_tx_state_ = 0xFF;       ///< State when cached response was built
+    bool cached_tx_fail_safe_ = false;     ///< Fail-safe flag when cached
+    bool tx_cache_valid_ = false;          ///< True when cache should be used (after RX duplicate)
     
     // Callbacks
     FSoEStateCallback stateCallback_;

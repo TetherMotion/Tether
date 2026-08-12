@@ -238,6 +238,10 @@ MainInstance::MainInstance(const MainConfig& config)
         cfg.safety_level = ::FSoE::SIL::SIL2;
         cfg.input_size = static_cast<uint8_t>(Codec::kSlaveToMainSize);
         cfg.output_size = static_cast<uint8_t>(Codec::kMainToSlaveSize);
+        // Synapticon SOMANET drives run FSoE at a lower internal rate
+        // than the EtherCAT bus cycle, resulting in ~8 cycles of delay
+        // between the master's TX command and the slave's TX response.
+        cfg.slave_response_delay_cycles = 8;
         return cfg;
     }())
     , connection_(connection_config_)
