@@ -34,6 +34,11 @@ bool FSoESlave::initialize() {
         return false;
     }
 
+    // ETG.5100 §8.2.2.4: Connection ID 0x0000 is not permitted.
+    if (config_.connectionId == 0) {
+        return false;
+    }
+
     // Validate watchdog timeout range (ETG.5100 / Object 0x6791: 50-60000 ms)
     if (config_.watchdogTimeoutMs < Limits::WatchdogTimeoutMin ||
         config_.watchdogTimeoutMs > Limits::WatchdogTimeoutMax) {
@@ -61,6 +66,10 @@ bool FSoESlave::initialize() {
     sessionId_ = 0;
     sessionOctetIdx_ = 0;
     sessionOctetAdvancePending_ = false;
+    connectionRxIdx_ = 0;
+    connectionTxIdx_ = 0;
+    connectionTxAdvancePending_ = false;
+    memset(connectionBuf_, 0, sizeof(connectionBuf_));
     currentConnectionId_ = 0;
     expectedSequence_ = 0;
     txSequence_ = 0;
@@ -169,6 +178,10 @@ void FSoESlave::reset() {
     sessionId_ = 0;
     sessionOctetIdx_ = 0;
     sessionOctetAdvancePending_ = false;
+    connectionRxIdx_ = 0;
+    connectionTxIdx_ = 0;
+    connectionTxAdvancePending_ = false;
+    memset(connectionBuf_, 0, sizeof(connectionBuf_));
     currentConnectionId_ = 0;
     expectedSequence_ = 0;
     txSequence_ = 0;
@@ -877,6 +890,12 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
         sessionId_ = static_cast<uint16_t>(rng_() & 0xFFFF);
         if (sessionId_ == 0) sessionId_ = 1;
         sessionOctetIdx_ = 0;
+        sessionOctetAdvancePending_ = false;
+        // Reset Connection state multi-cycle transfer.
+        connectionRxIdx_ = 0;
+        connectionTxIdx_ = 0;
+        connectionTxAdvancePending_ = false;
+        memset(connectionBuf_, 0, sizeof(connectionBuf_));
     }
 
     // Clear error state
@@ -902,7 +921,11 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
 }
 
 void FSoESlave::processConnection(const uint8_t* data, size_t len) {
-    // Parse frame to extract connection data
+    // ETG.5100 S (D) V1.2.0, §8.2.2.4, Tables 15-17:
+    // The Connection state transfers 4 bytes (Connection ID + Slave Address)
+    // in SafeData.  When safety data < 4 octets, multiple cycles are needed.
+    // The slave accumulates received bytes and echoes them back.
+    // See: https://techoverflow.net/2026/08/12/fsoe-connection-pdu-master-and-slave-structure/
     uint8_t cmd = 0;
     uint8_t frame_data[CRC::MAX_PARSE_DATA_SIZE] = {0};
     size_t data_len = 0;
@@ -916,7 +939,8 @@ void FSoESlave::processConnection(const uint8_t* data, size_t len) {
         return;
     }
 
-    // Validate connection ID matches configured value
+    // Validate Conn_Id field (always strict — the Connection ID is now active).
+    // ETG.5100 §8.2.2.4: Connection ID 0x0000 is not permitted.
     if (conn_id != config_.connectionId) {
         FSoEErrorDetail detail;
         detail.conn_id_valid = true;
@@ -930,59 +954,87 @@ void FSoESlave::processConnection(const uint8_t* data, size_t len) {
         return;
     }
 
-    // Connection ID from end of frame (ConnID field)
     currentConnectionId_ = conn_id;
 
-    // Parse Connection frame safe data per ETG.5100 §8.2.2.4 Table 16:
-    //   SafeData[0] = Connection ID, low octet
-    //   SafeData[1] = Connection ID, high octet
-    //   SafeData[2] = FSoE Slave Address, low octet
-    //   SafeData[3] = FSoE Slave Address, high octet
-    // The slave verifies that the Connection ID and Slave Address match.
-    if (data_len < 2) {
-        // If the frame is too short to carry the Connection ID, skip
-        // validation and trust the master's configuration.
-        if (config_.safeOutputSize < 2) {
-            transitionTo(ConnectionState::Connection);
-            return;
-        }
+    // 0-octet safety data: no SafeData to accumulate.  Just transition
+    // to Connection state (the Conn_Id field carries the Connection ID).
+    if (config_.safeOutputSize == 0) {
+        transitionTo(ConnectionState::Connection);
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Connection established: ID=0x%04X", currentConnectionId_);
+        logDiagnostic(ErrorCode::NoError, msg);
+        return;
+    }
+
+    // Accumulate received bytes into connectionBuf_ at connectionRxIdx_.
+    // When safeOutputSize >= 4, the master sends all 4 bytes in one cycle.
+    // When safeOutputSize < 4, the master sends chunks and we accumulate.
+    const uint8_t rx_chunk = std::min(static_cast<uint8_t>(4), config_.safeOutputSize);
+    // Reject frames with insufficient data length.
+    if (data_len < rx_chunk) {
         FSoEErrorDetail detail;
         snprintf(detail.message, sizeof(detail.message),
-                 "Slave Connection frame too short: got %zu bytes, expected 2",
-                 data_len);
+                 "Slave Connection frame too short: got %zu bytes, expected %u",
+                 data_len, rx_chunk);
         handleError(ErrorCode::DataLengthError, true, detail);
         return;
     }
-
-    // Validate Connection ID from SafeData[0-1]
-    uint16_t frame_conn_id = static_cast<uint16_t>(frame_data[0]) |
-                             (static_cast<uint16_t>(frame_data[1]) << 8);
-    if (frame_conn_id != 0 && frame_conn_id != config_.connectionId) {
-        FSoEErrorDetail detail;
-        detail.conn_id_valid = true;
-        detail.expected_conn_id = config_.connectionId;
-        detail.received_conn_id = frame_conn_id;
-        snprintf(detail.message, sizeof(detail.message),
-                 "Slave Connection ID mismatch in SafeData: "
-                 "expected 0x%04X got 0x%04X",
-                 detail.expected_conn_id, detail.received_conn_id);
-        handleError(ErrorCode::ConnectionIDError, true, detail);
-        return;
+    if (config_.safeOutputSize >= 4) {
+        // Master sends all 4 bytes in one cycle — copy from offset 0.
+        // Only copy if we haven't received all 4 bytes yet (the master
+        // may send zero-padded frames after all bytes are transferred).
+        if (connectionRxIdx_ < 4) {
+            for (uint8_t i = 0; i < 4 && i < data_len; ++i) {
+                connectionBuf_[i] = frame_data[i];
+            }
+            connectionRxIdx_ = 4;
+        }
+    } else {
+        // Master sends safeOutputSize bytes per cycle — accumulate.
+        if (connectionRxIdx_ < 4) {
+            const uint8_t rx_off = std::min(connectionRxIdx_,
+                                             static_cast<uint8_t>(4));
+            const uint8_t valid = std::min(static_cast<uint8_t>(4 - rx_off),
+                                            rx_chunk);
+            for (uint8_t i = 0; i < valid && i < data_len; ++i) {
+                connectionBuf_[rx_off + i] = frame_data[i];
+            }
+            connectionRxIdx_ = std::min(
+                static_cast<uint8_t>(connectionRxIdx_ + rx_chunk),
+                static_cast<uint8_t>(4));
+        }
     }
 
-    // Validate Slave Address from SafeData[2-3] (if present)
-    if (data_len >= 4) {
-        uint16_t safetyAddr = static_cast<uint16_t>(frame_data[2]) |
-                              (static_cast<uint16_t>(frame_data[3]) << 8);
-        if (safetyAddr != 0 && safetyAddr != config_.safetyAddress) {
+    // Set pending TX advance flag (applied in buildConnectionResponse
+    // after the echo is built, to handle PDO caching correctly).
+    connectionTxAdvancePending_ = true;
+
+    // Validate accumulated data once all 4 bytes are received.
+    if (connectionRxIdx_ >= 4) {
+        uint16_t frame_conn_id = static_cast<uint16_t>(connectionBuf_[0]) |
+                                 (static_cast<uint16_t>(connectionBuf_[1]) << 8);
+        uint16_t safetyAddr = static_cast<uint16_t>(connectionBuf_[2]) |
+                              (static_cast<uint16_t>(connectionBuf_[3]) << 8);
+
+        // ETG.5100 §8.2.2.4: Connection ID 0x0000 is not permitted.
+        if (frame_conn_id != config_.connectionId) {
             FSoEErrorDetail detail;
             detail.conn_id_valid = true;
-            detail.expected_conn_id = config_.safetyAddress;
-            detail.received_conn_id = safetyAddr;
+            detail.expected_conn_id = config_.connectionId;
+            detail.received_conn_id = frame_conn_id;
+            snprintf(detail.message, sizeof(detail.message),
+                     "Slave Connection ID mismatch in SafeData: "
+                     "expected 0x%04X got 0x%04X",
+                     detail.expected_conn_id, detail.received_conn_id);
+            handleError(ErrorCode::ConnectionIDError, true, detail);
+            return;
+        }
+        if (safetyAddr != config_.safetyAddress) {
+            FSoEErrorDetail detail;
             snprintf(detail.message, sizeof(detail.message),
                      "Slave safety address mismatch in Connection phase: "
                      "expected 0x%04X got 0x%04X",
-                     detail.expected_conn_id, detail.received_conn_id);
+                     config_.safetyAddress, safetyAddr);
             handleError(ErrorCode::ConnectionIDError, true, detail);
             return;
         }
@@ -991,7 +1043,8 @@ void FSoESlave::processConnection(const uint8_t* data, size_t len) {
     transitionTo(ConnectionState::Connection);
 
     char msg[64];
-    snprintf(msg, sizeof(msg), "Connection established: ID=0x%04X", currentConnectionId_);
+    snprintf(msg, sizeof(msg), "Connection transfer: rx_idx=%u/4 ID=0x%04X",
+             connectionRxIdx_, currentConnectionId_);
     logDiagnostic(ErrorCode::NoError, msg);
 }
 
@@ -1234,17 +1287,27 @@ size_t FSoESlave::buildSessionResponse(uint8_t* data, size_t maxLen) {
 }
 
 size_t FSoESlave::buildConnectionResponse(uint8_t* data, size_t maxLen) {
-    // Connection response per ETG.5100 §8.2.2.4 Table 17:
-    //   SafeData[0] = Connection ID, low octet
-    //   SafeData[1] = Connection ID, high octet
-    //   SafeData[2] = FSoE Slave Address, low octet
-    //   SafeData[3] = FSoE Slave Address, high octet
-    // The slave echoes back the Connection ID and its own Slave Address.
+    // ETG.5100 S (D) V1.2.0, §8.2.2.4, Table 17:
+    // The slave echoes back the Connection ID and FSoE Slave Address.
+    // When safety data < 4 octets, the echo is sent in safeInputSize-sized
+    // chunks over multiple cycles, matching the received data.
+    // See: https://techoverflow.net/2026/08/12/fsoe-connection-pdu-master-and-slave-structure/
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
-    payload[0] = currentConnectionId_ & 0xFF;
-    payload[1] = (currentConnectionId_ >> 8) & 0xFF;
-    payload[2] = config_.safetyAddress & 0xFF;
-    payload[3] = (config_.safetyAddress >> 8) & 0xFF;
+    const uint8_t chunk = std::min(static_cast<uint8_t>(4), config_.safeInputSize);
+    // When safeInputSize >= 4, the slave echoes from offset 0 each cycle
+    // (all received bytes).  When < 4, it echoes from connectionTxIdx_.
+    const uint8_t tx_off = (config_.safeInputSize >= 4)
+        ? 0
+        : std::min(connectionTxIdx_, static_cast<uint8_t>(4));
+    // Valid bytes: can only echo bytes that have been received.
+    const uint8_t rx_avail = (connectionRxIdx_ > tx_off)
+        ? static_cast<uint8_t>(connectionRxIdx_ - tx_off) : 0;
+    const uint8_t valid = std::min(static_cast<uint8_t>(4 - tx_off),
+                                    std::min(chunk, rx_avail));
+    for (uint8_t i = 0; i < valid; ++i) {
+        payload[i] = connectionBuf_[tx_off + i];
+    }
+    // Remaining payload bytes are 0 (padding).
     size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
     uint16_t seq_used = 0;
@@ -1254,6 +1317,20 @@ size_t FSoESlave::buildConnectionResponse(uint8_t* data, size_t maxLen) {
         last_rx_crc0_, rx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
+
+    // Apply deferred TX advance (set in processConnection).
+    // TX advance is limited by RX progress: can't echo more bytes than
+    // have been received.
+    if (connectionTxAdvancePending_) {
+        uint8_t max_advance = (connectionTxIdx_ < connectionRxIdx_)
+            ? static_cast<uint8_t>(connectionRxIdx_ - connectionTxIdx_) : 0;
+        uint8_t advance = std::min(chunk, max_advance);
+        connectionTxIdx_ = std::min(
+            static_cast<uint8_t>(connectionTxIdx_ + advance),
+            static_cast<uint8_t>(4));
+        connectionTxAdvancePending_ = false;
+    }
+
     return result;
 }
 
