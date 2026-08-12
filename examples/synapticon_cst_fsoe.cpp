@@ -1408,7 +1408,7 @@ int main(int argc, char** argv) {
         EtherCAT::Drives::Synapticon::SafeMotion::MainConfig main_config;
         main_config.feature_enabled = true;
         main_config.slave_address = slave_idx;
-        main_config.safety_address = 0x0001;
+        main_config.safety_address = 0x0006;
         main_config.connection_id = args.connection_id;
         main_config.master_address = 0x0001;
         main_config.watchdog_time_ms = args.watchdog_ms;

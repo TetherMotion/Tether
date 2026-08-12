@@ -351,11 +351,11 @@ TEST(FSoESlaveConnectionValidationTest, ShortConnectionFrameRejected) {
     slave.processRxFrame(frame, frame_len);
     ASSERT_EQ(slave.getState(), ConnectionState::Session);
 
-    // Send Connection frame with only 2 bytes (should be 4)
+    // Send Connection frame with only 1 byte (should be at least 2)
     // Use the slave's current RX CRC state (updated after Session frame).
-    uint8_t short_payload[] = {0x00, 0x01};
+    uint8_t short_payload[] = {0x34};
     frame_len = CRC::buildFSoEFrame(frame, Command::Connection,
-                                     short_payload, 2, 0x1234,
+                                     short_payload, 1, 0x1234,
                                      slave.getRxLastCrc0(),
                                      slave.getRxSeqNo());
     auto stats_before = slave.getStats();
@@ -382,9 +382,10 @@ TEST(FSoESlaveConnectionValidationTest, FullConnectionFrameAccepted) {
                                             slave.getRxSeqNo());
     slave.processRxFrame(frame, frame_len);
 
-    // Send full 4-byte Connection frame
-    // Use the slave's current RX CRC state (updated after Session frame).
-    uint8_t conn_payload[] = {0x00, 0x01, 0x00, 0x00};  // safety addr + param CRC
+    // Send full 4-byte Connection frame per ETG.5100 §8.2.2.4:
+    //   SafeData[0-1] = Connection ID (little-endian)
+    //   SafeData[2-3] = FSoE Slave Address (little-endian)
+    uint8_t conn_payload[] = {0x34, 0x12, 0x00, 0x01};  // conn_id=0x1234, addr=0x0100
     frame_len = CRC::buildFSoEFrame(frame, Command::Connection,
                                      conn_payload, 4, 0x1234,
                                      slave.getRxLastCrc0(),
