@@ -2016,10 +2016,20 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
     // In Data state, the cache is invalidated when setSafeOutputs() is
     // called (via the tx_cache_dirty_ flag), so changing safe outputs
     // triggers a frame rebuild.
+    //
+    // IMPORTANT: When in change-detection mode (expecting_rx_change_),
+    // we must NOT rebuild the frame even if tx_cache_dirty_ is true.
+    // Rebuilding advances the CRC/seq, but the slave hasn't processed
+    // the current cached frame yet.  If we rebuild now, the master's
+    // CRC/seq will be ahead of the slave's, causing a CRC mismatch when
+    // the slave eventually processes the new frame.  Instead, keep
+    // sending the cached frame until the slave confirms processing (RX
+    // changes), then rebuild with the new outputs.
     const bool can_cache = true;
+    const bool suppress_rebuild = expecting_rx_change_;
 
     if (can_cache && !cached_tx_pdo_.empty() && cached_tx_pdo_state_ == current_state &&
-        !tx_cache_dirty_) {
+        (!tx_cache_dirty_ || suppress_rebuild)) {
         // State hasn't changed — resend the cached frame.
         // This does NOT advance last_tx_crc0_ or tx_seq_no_, keeping
         // the CRC chain in sync with slaves that process at a slower
@@ -2260,6 +2270,16 @@ bool FSoEMasterConnection::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max
     if (rx_ok) {
         seq_accepted = true;
         seq_reason = "processed";
+
+        // In Data state, a non-duplicate RX means the slave has processed
+        // our TX and advanced its CRC chain.  Invalidate the TX cache so
+        // the next frame is rebuilt with the advanced CRC, keeping both
+        // sides in lockstep.  Without this, the master keeps sending the
+        // same cached frame (same CRC), but the slave's CRC has moved on,
+        // causing CRC mismatches and eventual watchdog timeout.
+        if (status_.state == ConnectionState::Data) {
+            tx_cache_dirty_ = true;
+        }
     } else {
         seq_reason = "processRxFrame rejected";
     }

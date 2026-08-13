@@ -10,7 +10,7 @@
 namespace EtherCAT::Drives::Synapticon::SafeMotion {
 
 struct Timing {
-    static constexpr uint16_t kMinimumWatchdogTimeMs = 15;
+    static constexpr uint16_t kMinimumWatchdogTimeMs = 200;
     static constexpr uint16_t kTypicalMasterToSlaveDelayMs = 8;
     static constexpr uint16_t kTypicalSlaveToMasterDelayMs = 7;
     static constexpr uint16_t kTypicalRoundTripTimeMs = 15;
