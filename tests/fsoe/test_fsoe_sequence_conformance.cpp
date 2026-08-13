@@ -819,9 +819,15 @@ TEST(FSoESequenceConformance, ResetFrameResetsCrcChain) {
     now += 15;
     ASSERT_TRUE(conn.exchangeWith(slave, now));
 
-    // Reset frame sides: CRC chain stays at 0
-    EXPECT_EQ(conn.getTxLastCrc0(), 0u);  // Master sent Reset
-    EXPECT_EQ(slave.getRxLastCrc0(), 0u);  // Slave received Reset
+    // Reset frame sides: CRC chain stays at 0.
+    // With cross-direction inheritance, getRxLastCrc0() returns the
+    // master's own last TX CRC0 (last_tx_crc0_), which stays at 0
+    // because the Reset TX doesn't update it.  Similarly, the slave's
+    // getTxLastCrc0() returns last_rx_crc0_ (what the slave received
+    // from the master), which stays at 0 because the Reset RX doesn't
+    // update it.
+    EXPECT_EQ(conn.getRxLastCrc0(), 0u);  // Master sent Reset (last_tx_crc0_=0)
+    EXPECT_EQ(slave.getTxLastCrc0(), 0u);  // Slave received Reset (last_rx_crc0_=0)
 
     // Session response sides: CRC chain is updated (non-zero)
     // (These may be 0 in the rare case where the Session response's CRC0

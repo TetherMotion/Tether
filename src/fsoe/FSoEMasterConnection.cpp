@@ -42,6 +42,32 @@ const char* commandName(uint8_t cmd) {
         default:                      return "Unknown";
     }
 }
+
+/// Decode the slave's Reset reason code (SafeData[0] of the slave's Reset PDU).
+/// See ETG.5100 S (D) V1.2.0, §8.2.2.2 and ResetErrorCode in FSoEDefs.hpp.
+const char* resetReasonName(uint8_t reason) {
+    switch (reason) {
+        case ResetErrorCode::None:               return "None(0x00)";
+        case ResetErrorCode::InvalidCommand:     return "InvalidCommand(0x01)";
+        case ResetErrorCode::UnknownCommand:     return "UnknownCommand(0x02)";
+        case ResetErrorCode::InvalidConnID:      return "InvalidConnID(0x03)";
+        case ResetErrorCode::InvalidCRC:         return "InvalidCRC(0x04)";
+        case ResetErrorCode::WatchdogExpired:    return "WatchdogExpired(0x05)";
+        case ResetErrorCode::InvalidAddress:     return "InvalidAddress(0x06)";
+        case ResetErrorCode::InvalidData:        return "InvalidData(0x07)";
+        case ResetErrorCode::InvalidCommParaLen: return "InvalidCommParaLen(0x08)";
+        case ResetErrorCode::InvalidCommPara:    return "InvalidCommPara(0x09)";
+        case ResetErrorCode::InvalidUserParaLen: return "InvalidUserParaLen(0x0A)";
+        default:                                  return "Unknown";
+    }
+}
+
+/// Extract the slave's reset reason from a parsed Reset frame.
+/// Returns ResetErrorCode::None if data is null or empty.
+uint8_t extractResetReason(const uint8_t* data, size_t data_len) {
+    if (data && data_len >= 1) return data[0];
+    return ResetErrorCode::None;
+}
 } // namespace
 
 void FSoEMasterConnection::trace(const char* fmt, ...) const
@@ -445,6 +471,17 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
             info.fallback_delta = 0;
             info.conn_id = conn_id;
             info.data_len = data_len;
+            // Extract data bytes even on CRC failure (for diagnosis).
+            if (data_len > 0 && data_len <= sizeof(info.data)) {
+                std::memcpy(info.data, frame_data, data_len);
+            }
+            // Extract actual CRC0 from the frame bytes (the received CRC0
+            // that failed to match the expected CRC0).
+            if (len > CRC::MIN_FSOE_FRAME_SIZE) {
+                const size_t crc0_off = (len <= 6) ? 2 : 3;
+                info.crc0 = static_cast<uint16_t>(data[crc0_off]) |
+                            (static_cast<uint16_t>(data[crc0_off + 1]) << 8);
+            }
             crc_trace_callback_(info);
         }
 
@@ -474,6 +511,21 @@ crc_fallback_succeeded:
         info.fallback_delta = crc_trace_fb_delta;
         info.conn_id = conn_id;
         info.data_len = data_len;
+        if (data_len > 0 && data_len <= sizeof(info.data)) {
+            std::memcpy(info.data, frame_data, data_len);
+        }
+        // Extract actual CRC0 from the frame bytes.
+        // For Reset frames, last_rx_crc0_ is not updated (nullptr passed
+        // for out_crc0), so crc_trace_crc0 is 0.  Read the real CRC0 from
+        // the frame to show what the slave actually sent.
+        // Layout: [CMD][D0][CRC0(2)]... (pduSize <= 6)
+        //         [CMD][D0][D1][CRC0(2)]... (pduSize > 6)
+        // 3-byte Reset frames (len == MIN_FSOE_FRAME_SIZE) have no CRC.
+        if (len > CRC::MIN_FSOE_FRAME_SIZE) {
+            const size_t crc0_off = (len <= 6) ? 2 : 3;
+            info.crc0 = static_cast<uint16_t>(data[crc0_off]) |
+                        (static_cast<uint16_t>(data[crc0_off + 1]) << 8);
+        }
         crc_trace_callback_(info);
     }
 
@@ -577,10 +629,17 @@ crc_fallback_succeeded:
 
         case ConnectionState::Error:
             if (cmd == Command::Reset) {
+                const uint8_t reason = extractResetReason(frame_data, data_len);
                 if (config_.auto_recovery_enabled) {
-                    trace("RX Reset(0x2A): recovering from Error state");
+                    trace("RX Reset(0x2A): recovering from Error state "
+                          "(reset_reason=%s, data[0]=0x%02X)",
+                          resetReasonName(reason), reason);
                     resetConnection();
                     stats_.successful_recoveries++;
+                } else {
+                    trace("RX Reset(0x2A): auto-recovery disabled, staying in Error "
+                          "(reset_reason=%s, data[0]=0x%02X)",
+                          resetReasonName(reason), reason);
                 }
             } else {
                 // Ignore non-Reset commands in Error state
@@ -732,6 +791,30 @@ size_t FSoEMasterConnection::prepareTxFrame(uint8_t* data, size_t max_len)
             info.fallback_delta = 0;
             info.conn_id = config_.connection_id;
             info.data_len = config_.output_size;
+            // Extract actual SafeData, conn_id, and CRC0 from the built
+            // frame.  This is important because the build* functions for
+            // Reset and Session frames use conn_id=0 (not config_.connection_id),
+            // and buildResetFrame passes nullptr for out_crc0 (so
+            // last_tx_crc0_ is not updated).  Reading from the frame bytes
+            // gives the true values that the slave will see on the wire.
+            {
+                uint8_t trace_cmd = 0;
+                size_t trace_dl = 0;
+                uint16_t trace_cid = 0;
+                CRC::extractFSoEFrame(data, len, trace_cmd, info.data,
+                                      trace_dl, trace_cid);
+                info.data_len = trace_dl;
+                info.conn_id = trace_cid;
+                // Extract CRC0 from the frame bytes.
+                // Layout: [CMD][D0][CRC0(2)]... (pduSize <= 6)
+                //         [CMD][D0][D1][CRC0(2)]... (pduSize > 6)
+                // Reset frames (len == MIN_FSOE_FRAME_SIZE == 3) have no CRC.
+                if (len > CRC::MIN_FSOE_FRAME_SIZE) {
+                    const size_t crc0_off = (len <= 6) ? 2 : 3;
+                    info.crc0 = static_cast<uint16_t>(data[crc0_off]) |
+                                (static_cast<uint16_t>(data[crc0_off + 1]) << 8);
+                }
+            }
             crc_trace_callback_(info);
         }
 
@@ -891,8 +974,15 @@ void FSoEMasterConnection::handleResetState(uint8_t cmd, const uint8_t* data, si
     // handshake.  A Reset response (0x2A) is also accepted — some slaves
     // echo the Reset command before switching to Session.
     if (cmd == Command::Session || cmd == Command::Reset) {
-        trace("RX %s: slave acknowledged reset, starting session handshake",
-              commandName(cmd));
+        if (cmd == Command::Reset) {
+            const uint8_t reason = extractResetReason(data, data_len);
+            trace("RX Reset(0x2A): slave acknowledged reset "
+                  "(reset_reason=%s, data[0]=0x%02X), starting session handshake",
+                  resetReasonName(reason), reason);
+        } else {
+            trace("RX %s: slave acknowledged reset, starting session handshake",
+                  commandName(cmd));
+        }
         // CRC chain is already at 0 — Reset frames don't update it.
         requestSessionReset();
     } else if (cmd == Command::FailSafeData) {
@@ -921,7 +1011,10 @@ void FSoEMasterConnection::handleSessionState(uint8_t cmd, const uint8_t* data, 
     // The master stores this for connection instance identification.
     // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
     if (cmd == Command::Reset) {
-        trace("RX Reset(0x2A): slave requested reset in Session state, resetting connection");
+        const uint8_t reason = extractResetReason(data, data_len);
+        trace("RX Reset(0x2A): slave requested reset in Session state "
+              "(reset_reason=%s, data[0]=0x%02X), resetting connection",
+              resetReasonName(reason), reason);
         resetConnection();
         return;
     }
@@ -1008,7 +1101,10 @@ void FSoEMasterConnection::handleConnectionState(uint8_t cmd, const uint8_t* dat
     // When safety data < 4 octets, the echo arrives in multiple cycles.
     // See: https://techoverflow.net/2026/08/12/fsoe-connection-pdu-master-and-slave-structure/
     if (cmd == Command::Reset) {
-        trace("RX Reset(0x2A): slave requested reset in Connection state, resetting connection");
+        const uint8_t reason = extractResetReason(data, data_len);
+        trace("RX Reset(0x2A): slave requested reset in Connection state "
+              "(reset_reason=%s, data[0]=0x%02X), resetting connection",
+              resetReasonName(reason), reason);
         resetConnection();
         return;
     }
@@ -1161,7 +1257,10 @@ void FSoEMasterConnection::handleParameterState(uint8_t cmd, const uint8_t* data
     // When all bytes are transferred and echoed, transition to Data.
     // See: https://techoverflow.net/2026/08/12/fsoe-parameter-pdu-master-and-slave-structure/
     if (cmd == Command::Reset) {
-        trace("RX Reset(0x2A): slave requested reset in Parameter state, resetting connection");
+        const uint8_t reason = extractResetReason(data, data_len);
+        trace("RX Reset(0x2A): slave requested reset in Parameter state "
+              "(reset_reason=%s, data[0]=0x%02X), resetting connection",
+              resetReasonName(reason), reason);
         resetConnection();
         return;
     }
@@ -1275,7 +1374,10 @@ void FSoEMasterConnection::handleDataState(uint8_t cmd, const uint8_t* data, siz
     // See: https://techoverflow.net/2026/08/12/fsoe-data-pdu-master-and-slave-structure/
 
     if (cmd == Command::Reset) {
-        trace("RX Reset(0x2A): slave requested reset in Data state, resetting connection");
+        const uint8_t reason = extractResetReason(data, data_len);
+        trace("RX Reset(0x2A): slave requested reset in Data state "
+              "(reset_reason=%s, data[0]=0x%02X), resetting connection",
+              resetReasonName(reason), reason);
         resetConnection();
         return;
     }
@@ -1354,12 +1456,17 @@ void FSoEMasterConnection::handleFailSafeState(uint8_t cmd, const uint8_t* data,
     // ETG.5100 §8.2.2.6).  This handler is kept for backwards compatibility.
     // See: https://techoverflow.net/2026/08/12/fsoe-data-pdu-master-and-slave-structure/
     if (cmd == Command::Reset) {
+        const uint8_t reason = extractResetReason(data, data_len);
         if (config_.auto_recovery_enabled) {
-            trace("RX Reset(0x2A): slave ready to recover, resetting connection");
+            trace("RX Reset(0x2A): slave ready to recover "
+                  "(reset_reason=%s, data[0]=0x%02X), resetting connection",
+                  resetReasonName(reason), reason);
             stats_.successful_recoveries++;
             resetConnection();
         } else {
-            trace("RX Reset(0x2A): slave ready to recover, but auto-recovery disabled");
+            trace("RX Reset(0x2A): slave ready to recover, but auto-recovery disabled "
+                  "(reset_reason=%s, data[0]=0x%02X)",
+                  resetReasonName(reason), reason);
         }
     } else if (cmd == Command::FailSafeData) {
         // Slave is also in fail-safe — acknowledge by staying in fail-safe.
@@ -1437,10 +1544,13 @@ size_t FSoEMasterConnection::buildSessionResetFrame(uint8_t* data, size_t max_le
     size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
     uint16_t seq_used = 0;
+    // Cross-direction CRC inheritance: the master's TX chains from the
+    // slave's last TX CRC0 (last_rx_crc0_), not from the master's own
+    // last TX CRC0.  See buildConnectionFrame for full documentation.
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Session, payload, config_.output_size,
         0,  // Conn_Id = 0 in Session state (ETG.5100 §8.2.2.3)
-        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+        last_rx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
     return result;
@@ -1474,10 +1584,14 @@ size_t FSoEMasterConnection::buildConnectionFrame(uint8_t* data, size_t max_len)
     size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
     uint16_t seq_used = 0;
+    // Cross-direction CRC inheritance: the master's TX chains from the
+    // slave's last TX CRC0 (last_rx_crc0_), not from the master's own
+    // last TX CRC0.  The slave verifies the master's TX using its own
+    // last TX CRC0 as start_crc.
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Connection, payload, config_.output_size,
         config_.connection_id,
-        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+        last_rx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
     return result;
@@ -1509,10 +1623,11 @@ size_t FSoEMasterConnection::buildParameterFrame(uint8_t* data, size_t max_len)
     size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
     uint16_t seq_used = 0;
+    // Cross-direction CRC inheritance (see buildConnectionFrame).
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Parameter, payload, config_.output_size,
         config_.connection_id,
-        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+        last_rx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
     return result;
@@ -1524,11 +1639,12 @@ size_t FSoEMasterConnection::buildDataFrame(uint8_t* data, size_t max_len)
     size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
     uint16_t seq_used = 0;
+    // Cross-direction CRC inheritance (see buildConnectionFrame).
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::ProcessData,
         safe_outputs_.data(), config_.output_size,
         config_.connection_id,
-        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+        last_rx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
     return result;
@@ -1546,11 +1662,12 @@ size_t FSoEMasterConnection::buildFailSafeFrame(uint8_t* data, size_t max_len)
     size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
     uint16_t seq_used = 0;
+    // Cross-direction CRC inheritance (see buildConnectionFrame).
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::FailSafeData,
         zero_safe_data.data(), config_.output_size,
         config_.connection_id,
-        last_tx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+        last_rx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
     return result;

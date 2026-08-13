@@ -716,15 +716,17 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
     // chain AND the sequence number:
     //   - start_crc = 0 (CRC chain reset)
     //   - seq = config_.initialSeqNo (0 for Synapticon, 1 per ETG.5100)
-    // Non-Reset frames use cross-direction CRC (the master's last TX CRC0
-    // and seq = the slave's last_rx_crc0_ and rx_seq_no_).
+    // Non-Reset frames use cross-direction CRC inheritance: the master's
+    // TX chains from the slave's last TX CRC0, so the slave verifies using
+    // its own last_tx_crc0_ (not last_rx_crc0_).  The sequence number is
+    // shared (rx_seq_no_).
     uint8_t cmd = 0;
     size_t data_len = 0;
     uint16_t conn_id = 0;
     CRC::CrcErrorDetail crc_error_detail{};
 
     const bool is_reset_frame = (data[0] == Command::Reset);
-    const uint16_t parse_start_crc = is_reset_frame ? 0 : last_rx_crc0_;
+    const uint16_t parse_start_crc = is_reset_frame ? 0 : last_tx_crc0_;
     const uint16_t parse_seq_no = is_reset_frame ? config_.initialSeqNo : rx_seq_no_;
     uint16_t seq_used = 0;
 
@@ -797,11 +799,12 @@ bool FSoESlave::validateCRC(const uint8_t* data, size_t len) {
     uint8_t cmd = 0;
     size_t data_len = 0;
     uint16_t conn_id = 0;
-    // Cross-direction RX: verify using the master's last TX CRC0 and seq.
+    // Cross-direction RX: verify using the slave's own last TX CRC0
+    // (the master's TX chains from the slave's last TX CRC0).
     const bool is_reset_frame = (!data || len == 0) ? false : (data[0] == Command::Reset);
     return CRC::parseFSoEFrameWithCollisionAvoidance(
         data, len, cmd, nullptr, data_len, conn_id,
-        is_reset_frame ? 0 : last_rx_crc0_,
+        is_reset_frame ? 0 : last_tx_crc0_,
         is_reset_frame ? config_.initialSeqNo : rx_seq_no_);
 }
 
@@ -890,7 +893,14 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
         last_rx_seq_no_ = 0;
         tx_seq_no_ = config_.initialSeqNo;
         // rx_seq_no_ is NOT reset — validateFrame already advanced it
-        last_rx_frame_bytes_.clear();  // Clear duplicate detection
+        // NOTE: last_rx_frame_bytes_ is NOT cleared here.  It was already
+        // updated by processRxFrame (line ~369) with the current Reset
+        // frame bytes.  Keeping it allows duplicate detection to work in
+        // the PDO path: the master resends the same Reset frame every
+        // cycle (TX cache), and the slave must detect these duplicates
+        // and skip re-processing.  Without this, the slave would reset
+        // its CRC state and generate a new Session ID on every duplicate
+        // Reset, desynchronizing the CRC chains.
         cached_tx_response_.clear();   // Clear TX response cache
         cached_tx_state_ = 0xFF;
         tx_cache_valid_ = false;

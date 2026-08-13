@@ -387,13 +387,15 @@ public:
      */
     FSoESlaveStats getStats() const;
 
-    /// Get the current RX CRC state (cross-direction RX).
-    /// startCrc = last_rx_crc0_, seqNo = rx_seq_no_
-    uint16_t getRxLastCrc0() const { return last_rx_crc0_; }
+    /// Get the RX CRC state that the MASTER should chain from when
+    /// building frames to send TO this slave (cross-direction inheritance).
+    /// The master's TX start_crc = the slave's own last TX CRC0.
+    /// Tests that simulate master→slave TX should use this as start_crc.
+    uint16_t getRxLastCrc0() const { return last_tx_crc0_; }
     uint16_t getRxSeqNo() const { return rx_seq_no_; }
-    /// Get the current TX CRC state (cross-direction TX — slave inherits
-    /// from master's last RX CRC0, uses rx_seq_no_ which is incremented
-    /// after each received frame).
+    /// Get the TX CRC state that this slave chains from when building
+    /// its own TX frames (cross-direction: slave TX inherits from the
+    /// master's last TX CRC0 = last_rx_crc0_).
     /// startCrc = last_rx_crc0_, seqNo = rx_seq_no_
     uint16_t getTxLastCrc0() const { return last_rx_crc0_; }
     uint16_t getTxSeqNo() const { return rx_seq_no_; }

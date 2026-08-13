@@ -962,10 +962,14 @@ int main(int argc, char** argv) {
         if (addr_err == EtherCAT::SlaveError::Ok) {
             TETHER_LOGI(TAG,
                 "FSoE safety address (0xF980:1): 0x%04X — using as "
-                "connection ID (overrides --connection-id=0x%04X)",
+                "slave_safety_addr (NOT connection_id; "
+                "--connection-id=0x%04X is kept)",
                 drive_safety_address,
                 args.connection_id);
-            args.connection_id = drive_safety_address;
+            // Use the drive's safety address as the slave_safety_addr
+            // (already set to 0x0006 in main_config below), but do NOT
+            // override the connection_id — they are separate FSoE concepts.
+            // The connection_id comes from --connection-id (default 0x1234).
         } else {
             TETHER_LOGW(TAG,
                 "Failed to read FSoE safety address (0xF980:1) via SDO "
@@ -1414,8 +1418,8 @@ int main(int argc, char** argv) {
         EtherCAT::Drives::Synapticon::SafeMotion::MainConfig main_config;
         main_config.feature_enabled = true;
         main_config.slave_address = slave_idx;
-        main_config.safety_address = 0x0006;
-        main_config.connection_id = args.connection_id;
+        main_config.safety_address = 0x0006;  // FSoE slave safety address
+        main_config.connection_id = args.connection_id;  // FSoE connection ID
         main_config.master_address = 0x0001;
         main_config.watchdog_time_ms = args.watchdog_ms;
 
@@ -1496,20 +1500,52 @@ int main(int argc, char** argv) {
         if (debug_fsoe_crc) {
             fsoe_main->rawConnection().setCrcTraceCallback(
                 [](const FSoE::CrcTraceInfo& info) {
+                    // Format SafeData bytes as hex string.
+                    char data_hex[64] = {};
+                    size_t pos = 0;
+                    for (size_t i = 0; i < info.data_len && pos < sizeof(data_hex) - 4; i++) {
+                        pos += static_cast<size_t>(snprintf(
+                            data_hex + pos, sizeof(data_hex) - pos, "%02X ", info.data[i]));
+                    }
+                    if (pos == 0) {
+                        snprintf(data_hex, sizeof(data_hex), "(none)");
+                    }
+
                     if (info.direction ==
                         FSoE::CrcTraceInfo::Direction::TX) {
-                        // TX: master building a frame
+                        // TX: master building a frame.
+                        // CRC inputs (in byte processing order):
+                        //   start_crc(Lo,Hi), conn_id(Lo,Hi),
+                        //   seq(Lo,Hi), command, data[0..n-1]
                         TETHER_LOGI(TAG,
                             "[fsoe-crc] TX %s cmd=0x%02X: "
                             "start_crc=0x%04X seq=%u -> "
-                            "CRC0=0x%04X (conn_id=0x%04X data_len=%zu)",
+                            "CRC0=0x%04X | "
+                            "CRC inputs: oldCRC=0x%04X conn_id=0x%04X "
+                            "seq=%u cmd=0x%02X data[%zu]={%s}",
                             fsoeStateName(info.state),
                             info.command,
                             info.start_crc, info.seq_used,
                             info.crc0,
-                            info.conn_id, info.data_len);
+                            info.start_crc, info.conn_id,
+                            info.seq_used, info.command,
+                            info.data_len, data_hex);
                     } else {
-                        // RX: master checking a frame
+                        // RX: master checking a frame.
+                        // Compute the expected CRC0 from the master's
+                        // parameters to show the mismatch directly.
+                        uint16_t expected_crc0 = 0;
+                        if (info.data_len > 0) {
+                            uint8_t tmpbuf[32];
+                            FSoE::CRC::buildFSoEFrame(
+                                tmpbuf, info.command,
+                                info.data, info.data_len,
+                                info.conn_id,
+                                info.start_crc,
+                                info.crc_ok ? info.seq_used : info.seq_expected,
+                                &expected_crc0);
+                        }
+
                         if (info.crc_ok) {
                             const char* fb = "";
                             char fb_buf[64] = {};
@@ -1522,24 +1558,30 @@ int main(int argc, char** argv) {
                             TETHER_LOGI(TAG,
                                 "[fsoe-crc] RX %s cmd=0x%02X: "
                                 "start_crc=0x%04X seq=%u -> "
-                                "CRC0=0x%04X OK (conn_id=0x%04X "
-                                "data_len=%zu)%s",
+                                "CRC0=0x%04X OK (expected=0x%04X) | "
+                                "CRC inputs: oldCRC=0x%04X conn_id=0x%04X "
+                                "seq=%u cmd=0x%02X data[%zu]={%s}%s",
                                 fsoeStateName(info.state),
                                 info.command,
                                 info.start_crc, info.seq_used,
-                                info.crc0,
-                                info.conn_id, info.data_len, fb);
+                                info.crc0, expected_crc0,
+                                info.start_crc, info.conn_id,
+                                info.seq_used, info.command,
+                                info.data_len, data_hex, fb);
                         } else {
                             TETHER_LOGE(TAG,
                                 "[fsoe-crc] RX %s cmd=0x%02X: "
                                 "start_crc=0x%04X seq=%u -> "
-                                "CRC FAIL (tried seq=%u, "
-                                "conn_id=0x%04X data_len=%zu)",
+                                "CRC FAIL: received=0x%04X expected=0x%04X | "
+                                "CRC inputs: oldCRC=0x%04X conn_id=0x%04X "
+                                "seq=%u cmd=0x%02X data[%zu]={%s}",
                                 fsoeStateName(info.state),
                                 info.command,
                                 info.start_crc, info.seq_expected,
-                                info.seq_expected,
-                                info.conn_id, info.data_len);
+                                info.crc0, expected_crc0,
+                                info.start_crc, info.conn_id,
+                                info.seq_expected, info.command,
+                                info.data_len, data_hex);
                         }
                     }
                 });
