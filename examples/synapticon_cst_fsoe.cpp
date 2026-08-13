@@ -4,8 +4,9 @@
  *
  * Interfaces to a Synapticon SOMANET drive (Vendor 0x22D2, CiA 402 firmware
  * v5.1.x), puts it into Cyclic Sync Torque (CST) mode, maps the SOMANET
- * PDOs for that mode (RxPDO 0x1600 / TxPDO 0x1A00), sends 0 torque, and
- * runs the FSoE safe-motion protocol alongside the cyclic data exchange.
+ * PDOs for that mode (RxPDO 0x1600 / TxPDO 0x1A00), sends a sinusoidal
+ * torque command (default 0.5 Nm peak-to-peak at 0.5 Hz), and runs the FSoE
+ * safe-motion protocol alongside the cyclic data exchange.
  *
  * On startup the slave is automatically reset to INIT if it is currently
  * in a higher ESM state (e.g. left over from a previous run that didn't
@@ -42,9 +43,12 @@
  *   ./synapticon_cst_fsoe --debug fsoe-wire     # every-cycle PDO wire dumps (firehose)
  *   ./synapticon_cst_fsoe --debug fsoe-sequence # per-cycle frame accept/reject + state change summary
  *   ./synapticon_cst_fsoe --debug fsoe-crc      # CRC parameters used for TX build and RX check
+ *   ./synapticon_cst_fsoe --torque-nm 10 --freq-hz 1.0  # 10 Nm P-P at 1 Hz
+ *   ./synapticon_cst_fsoe --rated-torque-mnm 4200       # override rated torque
  */
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -365,29 +369,71 @@ void dumpFSoETxPDO(const char* tag, const FSoETxPDO& tx) {
 }
 
 // ============================================================================
-// Zero-torque motion controller for CST mode
+// Sine-wave torque motion controller for CST mode
 // ============================================================================
+//
+// Generates a sinusoidal torque command at the specified frequency and
+// peak-to-peak amplitude.  The torque is converted from Nm to CiA 402
+// per-mille units (0.1% of rated torque) using the motor's rated torque
+// (object 0x6076, in mNm):
+//
+//   target_torque_permille = (torque_Nm * 1'000'000) / rated_torque_mNm
+//
+// The safety layer (FSoE) gates the actual torque output at the drive
+// level — if the FSoE connection is not in the Data state, the drive's
+// safety firmware inhibits torque regardless of the commanded value.
 
 template <typename PDO>
-class ZeroTorqueController final : public EtherCAT::DS402Master::IDriveMotionController {
+class SineTorqueController final : public EtherCAT::DS402Master::IDriveMotionController {
 public:
+    /// @param amplitude_nm   Peak torque amplitude in Nm (half of peak-to-peak)
+    /// @param frequency_hz   Sine frequency in Hz
+    /// @param rated_torque_mnm  Motor rated torque in mNm (from object 0x6076)
+    SineTorqueController(double amplitude_nm, double frequency_hz,
+                         uint32_t rated_torque_mnm)
+        : amplitude_nm_(amplitude_nm)
+        , frequency_hz_(frequency_hz)
+        , rated_torque_mnm_(rated_torque_mnm)
+    {
+        // Pre-compute the per-mille scaling factor:
+        //   permille = Nm * 1e6 / mNm
+        if (rated_torque_mnm > 0) {
+            nm_to_permille_ = 1'000'000.0 / static_cast<double>(rated_torque_mnm);
+        }
+    }
+
     bool start(EtherCAT::CiA402Drive& drive) override {
         return drive.setOperatingMode(CiA402::OperatingMode::CyclicSyncTorque);
     }
 
     void stop(EtherCAT::CiA402Drive&) override {}
 
-    bool update(EtherCAT::CiA402Drive& drive, double /*dt_seconds*/) override {
+    bool update(EtherCAT::CiA402Drive& drive, double dt_seconds) override {
         // Motion PDO is at offset kMotionRxPDOOffset (FSoE PDO comes first)
         auto* rx = reinterpret_cast<PDO*>(
             static_cast<uint8_t*>(drive.getRxPDOBuffer()) + kMotionRxPDOOffset);
         if (rx == nullptr) return false;
 
+        // Advance the phase accumulator
+        elapsed_s_ += dt_seconds;
+
+        // Compute the sine torque command in Nm, then convert to per-mille
+        const double torque_nm =
+            amplitude_nm_ * std::sin(2.0 * M_PI * frequency_hz_ * elapsed_s_);
+        const double torque_permille = torque_nm * nm_to_permille_;
+
+        // Clamp to INT16 range (-32768..32767 per-mille = ±3276.8% rated)
+        constexpr double kMaxPermille = 32767.0;
+        constexpr double kMinPermille = -32768.0;
+        const double clamped = (torque_permille > kMaxPermille) ? kMaxPermille :
+                               (torque_permille < kMinPermille) ? kMinPermille :
+                               torque_permille;
+
         rx->controlword = static_cast<uint16_t>(CiA402::ControlWord::ENABLE_OPERATION);
         rx->modes_of_operation = CiA402::OperatingMode::CyclicSyncTorque;
 
         if constexpr (requires(PDO& pdo) { pdo.target_torque; }) {
-            rx->target_torque = 0;
+            rx->target_torque = static_cast<int16_t>(clamped);
         }
         if constexpr (requires(PDO& pdo) { pdo.target_velocity; }) {
             rx->target_velocity = 0;
@@ -396,8 +442,20 @@ public:
             rx->target_position = 0;
         }
 
+        last_torque_nm_ = torque_nm;
         return true;
     }
+
+    /// Returns the most recently commanded torque in Nm (for diagnostics)
+    double lastTorqueNm() const { return last_torque_nm_; }
+
+private:
+    double   amplitude_nm_      = 0.0;
+    double   frequency_hz_      = 0.0;
+    uint32_t rated_torque_mnm_  = 0;
+    double   nm_to_permille_    = 0.0;  // per-mille per Nm
+    double   elapsed_s_         = 0.0;
+    double   last_torque_nm_    = 0.0;
 };
 
 // ============================================================================
@@ -426,15 +484,20 @@ public:
         // Motion PDO is at offset kMotionTxPDOOffset (FSoE PDO comes first)
         auto* tx = reinterpret_cast<const TxPDO*>(
             static_cast<const uint8_t*>(drive->getTxPDOBuffer()) + kMotionTxPDOOffset);
+        // Also read the commanded target_torque from the RxPDO for comparison
+        auto* rx = reinterpret_cast<const RxPDO*>(
+            static_cast<const uint8_t*>(drive->getRxPDOBuffer()) + kMotionRxPDOOffset);
         if (tx) {
             TETHER_LOGI(TAG,
                 "--- Drive @ %llu ms ---",
                 static_cast<unsigned long long>(elapsed_ms_));
             TETHER_LOGI(TAG,
-                "  statusword=0x%04X mode_display=%d torque_actual=%d "
+                "  statusword=0x%04X mode_display=%d "
+                "target_torque=%d torque_actual=%d "
                 "position_actual=%lld",
                 tx->statusword,
                 static_cast<int>(tx->modes_of_operation_display),
+                rx ? static_cast<int>(rx->target_torque) : 0,
                 static_cast<int>(tx->torque_actual),
                 static_cast<long long>(tx->position_actual));
         }
@@ -653,6 +716,9 @@ struct Args {
     uint16_t watchdog_ms = EtherCAT::Drives::Synapticon::SafeMotion::Timing::kMinimumWatchdogTimeMs;
     uint32_t diag_interval_ms = 1000;
     std::string debug;
+    double torque_pp_nm = 0.5;       ///< Peak-to-peak torque amplitude in Nm
+    double freq_hz = 0.5;            ///< Sine wave frequency in Hz
+    uint32_t rated_torque_mnm = 0;   ///< Motor rated torque in mNm (0 = auto-detect from 0x6076)
 };
 
 bool parseArgs(int argc, char** argv, Args& out) {
@@ -697,6 +763,18 @@ bool parseArgs(int argc, char** argv, Args& out) {
               "'fsoe-wire' for every-cycle PDO wire dumps, "
               "'fsoe-sequence' for per-cycle frame accept/reject + state change summary, "
               "'fsoe-crc' for CRC parameters used in TX build and RX check");
+    program.add_argument("--torque-nm")
+        .scan<'g', double>()
+        .default_value(0.5)
+        .help("Peak-to-peak sine torque amplitude in Nm (default 0.5 = ±0.25 Nm)");
+    program.add_argument("--freq-hz")
+        .scan<'g', double>()
+        .default_value(0.5)
+        .help("Sine torque frequency in Hz (default 0.5)");
+    program.add_argument("--rated-torque-mnm")
+        .scan<'i', int>()
+        .default_value(static_cast<int>(0))
+        .help("Motor rated torque in mNm (0 = auto-detect from object 0x6076)");
 
     try {
         program.parse_args(argc, argv);
@@ -714,6 +792,9 @@ bool parseArgs(int argc, char** argv, Args& out) {
     out.watchdog_ms = static_cast<uint16_t>(program.get<int>("--watchdog-ms"));
     out.diag_interval_ms = static_cast<uint32_t>(program.get<int>("--diag-interval-ms"));
     out.debug = program.get<std::string>("--debug");
+    out.torque_pp_nm = program.get<double>("--torque-nm");
+    out.freq_hz = program.get<double>("--freq-hz");
+    out.rated_torque_mnm = static_cast<uint32_t>(program.get<int>("--rated-torque-mnm"));
     return true;
 }
 
@@ -732,11 +813,13 @@ int main(int argc, char** argv) {
     Tether::Platform::ensureRealtimeKernelOrExit();
 
     TETHER_LOGI(TAG,
-        "synapticon_cst_fsoe — interface=%s slave=%u duration=%.1f fsoe=%s dc_sync=%s debug='%s'",
+        "synapticon_cst_fsoe — interface=%s slave=%u duration=%.1f fsoe=%s dc_sync=%s debug='%s' "
+        "torque_pp=%.3fNm freq=%.3fHz rated_torque_mnm=%u",
         args.interface.c_str(), slave_idx, args.duration,
         args.enable_fsoe ? "on" : "off",
         args.enable_dc_sync ? "on" : "off",
-        args.debug.c_str());
+        args.debug.c_str(),
+        args.torque_pp_nm, args.freq_hz, args.rated_torque_mnm);
 
     // --- Start EtherCAT master ---
     EtherCAT::DS402Master master;
@@ -1375,11 +1458,50 @@ int main(int argc, char** argv) {
         }
     }
 
-    // --- Add zero-torque motion controller ---
+    // --- Read motor rated torque (0x6076) for Nm→per-mille conversion ---
+    // CiA 402 target_torque (0x6071) is in per-mille (0.1%) of rated torque.
+    // Object 0x6076 (Motor Rated Torque) is in mNm.  We read it here so the
+    // sine torque controller can convert Nm commands to per-mille units.
+    // If --rated-torque-mnm was given non-zero, use that instead of SDO read.
+    uint32_t rated_torque_mnm = args.rated_torque_mnm;
+    if (rated_torque_mnm == 0) {
+        auto& sdo_mgr = master.ethercatMaster().sdoManager(slave_idx);
+        auto rated = sdo_mgr.readU32(0x6076, 0, {.timeout_ms = kSdoTimeoutMs});
+        if (rated.has_value() && rated.value() > 0) {
+            rated_torque_mnm = rated.value();
+            TETHER_LOGI(TAG,
+                "Motor rated torque (0x6076) = %u mNm (%.3f Nm)",
+                rated_torque_mnm, rated_torque_mnm / 1000.0);
+        } else {
+            TETHER_LOGE(TAG,
+                "Failed to read motor rated torque (0x6076) via SDO — "
+                "cannot convert Nm to per-mille.  Use --rated-torque-mnm to "
+                "specify it manually.");
+            master.stopDistributedClocks();
+            Tether::Examples::stopHostMasterSession(master, session);
+            return 3;
+        }
+    } else {
+        TETHER_LOGI(TAG,
+            "Using --rated-torque-mnm = %u mNm (%.3f Nm)",
+            rated_torque_mnm, rated_torque_mnm / 1000.0);
+    }
+
+    // --- Add sine torque motion controller ---
+    // Amplitude is half the peak-to-peak value (±torque_pp_nm/2).
+    const double amplitude_nm = args.torque_pp_nm / 2.0;
+    TETHER_LOGI(TAG,
+        "Sine torque: %.3f Nm P-P (%.3f Nm amplitude) at %.3f Hz, "
+        "rated torque %u mNm -> %.1f per-mille peak",
+        args.torque_pp_nm, amplitude_nm, args.freq_hz,
+        rated_torque_mnm,
+        amplitude_nm * 1'000'000.0 / static_cast<double>(rated_torque_mnm));
+
     if (!master.addMotionController(
             slave_idx,
-            std::make_unique<ZeroTorqueController<RxPDO>>())) {
-        TETHER_LOGE(TAG, "Failed to add zero-torque controller");
+            std::make_unique<SineTorqueController<RxPDO>>(
+                amplitude_nm, args.freq_hz, rated_torque_mnm))) {
+        TETHER_LOGE(TAG, "Failed to add sine torque controller");
         rc = 4;
         Tether::Examples::shutdownSingleDrive(master, slave_idx);
         Tether::Examples::stopHostMasterSession(master, session);
@@ -1747,7 +1869,9 @@ int main(int argc, char** argv) {
     // FailSafe or Error (e.g. sends a Reset due to a CRC error), shut down
     // cleanly immediately rather than continuing to run in an unsafe state.
     if (rc == 0) {
-        TETHER_LOGI(TAG, "CST mode active, sending 0 torque for %.1f s", args.duration);
+        TETHER_LOGI(TAG,
+            "CST mode active, sine torque %.3f Nm P-P at %.3f Hz for %.1f s",
+            args.torque_pp_nm, args.freq_hz, args.duration);
 
         const auto run_start_ms = Tether::Platform::Clock::instance().getMilliseconds();
         const uint32_t run_duration_ms =
