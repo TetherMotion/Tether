@@ -443,10 +443,10 @@ std::string padRight(const std::string& s, size_t width) {
     return s + std::string(width - s.size(), ' ');
 }
 
-std::string coloredValue(const ColorTags& c, RunGrade g, double us, int prec,
-                         size_t width) {
+std::string coloredValue(const ColorTags& c, RunGrade g, double value,
+                         int prec, size_t width, const char* unit = "") {
     std::ostringstream oss;
-    oss << std::fixed << std::setprecision(prec) << us;
+    oss << std::fixed << std::setprecision(prec) << value << unit;
     return gradeColor(c, g) + padRight(oss.str(), width) + c.reset;
 }
 
@@ -540,8 +540,8 @@ void printRecommendations(const ColorTags& c,
     }
     if (best_tx_mean != std::numeric_limits<double>::max()) {
         std::cout << "  Raw sendto latency:  best mean " << std::fixed
-                  << std::setprecision(1) << best_tx_mean << " us, worst mean "
-                  << worst_tx_mean << " us\n";
+                  << std::setprecision(1) << best_tx_mean << " µs, worst mean "
+                  << worst_tx_mean << " µs\n";
         if (best_tx_mean < 10.0) {
             std::cout << c.green
                       << "  * Network interface latency looks excellent."
@@ -589,8 +589,8 @@ void printRecommendations(const ColorTags& c,
         if (best_rx_mean != std::numeric_limits<double>::max()) {
             std::cout << "  best mean " << std::fixed
                       << std::setprecision(1) << best_rx_mean
-                      << " us, worst mean " << worst_rx_mean
-                      << " us, best stddev " << best_rx_stddev << " us\n";
+                      << " µs, worst mean " << worst_rx_mean
+                      << " µs, best stddev " << best_rx_stddev << " µs\n";
         } else {
             std::cout << "  no responses received\n";
         }
@@ -654,7 +654,7 @@ void printRecommendations(const ColorTags& c,
             const double rx_overhead = best_rx_mean - best_tx_mean;
             std::cout << "  RX overhead over TX: ~" << std::fixed
                       << std::setprecision(1) << rx_overhead
-                      << " us (slave processing + cable round-trip)\n";
+                      << " µs (slave processing + cable round-trip)\n";
             if (rx_overhead > 5.0 * best_tx_mean && best_tx_mean > 0.0) {
                 std::cout << c.orange
                           << "  * Receive delay is dominated by slave/cable, not "
@@ -1100,30 +1100,30 @@ int main(int argc, char** argv) {
               << "  Affinity  CPU affinity: on = pinned to core " << affinity_core
               << ", off = any core.\n"
               << "  Sched     Whether SCHED_FIFO was successfully applied.\n"
-              << "  CycMean   Mean inter-cycle delta (us).\n"
-              << "  CycMax    Maximum observed inter-cycle delta (us).\n"
-              << "  CycStd    Standard deviation of inter-cycle deltas (us).\n";
+              << "  CycMean   Mean inter-cycle delta (µs).\n"
+              << "  CycMax    Maximum observed inter-cycle delta (µs).\n"
+              << "  CycStd    Standard deviation of inter-cycle deltas (µs).\n";
     if (real_slave_mode) {
         table_oss
-            << "  TxMean    Mean raw sendto() duration for the APRD frame (us).\n"
-            << "  TxMax     Maximum observed sendto() duration (us).\n"
-            << "  RxMean    Mean transmit-to-receive delay (us) — time from\n"
+            << "  TxMean    Mean raw sendto() duration for the APRD frame (µs).\n"
+            << "  TxMax     Maximum observed sendto() duration (µs).\n"
+            << "  RxMean    Mean transmit-to-receive delay (µs) — time from\n"
             << "            sendto() completion to recvfrom() completion.\n"
-            << "  RxMax     Maximum observed transmit-to-receive delay (us).\n"
-            << "  RxStd     Standard deviation of receive delays (us).\n"
+            << "  RxMax     Maximum observed transmit-to-receive delay (µs).\n"
+            << "  RxStd     Standard deviation of receive delays (µs).\n"
             << "  RxLoss%   Percentage of cycles with no response (timeout).\n";
     } else {
         table_oss
             << "  TxMean    Mean raw sendto() duration for the " << pdo_size
-            << "-byte PDO (us).\n"
-            << "  TxMax     Maximum observed sendto() duration (us).\n";
+            << "-byte PDO (µs).\n"
+            << "  TxMax     Maximum observed sendto() duration (µs).\n";
     }
     table_oss << "  CPU%      Thread CPU time / wall time * 100.\n"
               << "  Lost%     Estimated percentage of lost cycles (when the "
                  "previous cycle did not finish in time).\n"
               << "  Status    Overall run status.\n\n"
               << "Color thresholds are evaluated per row relative to the nominal "
-                 "period P (us):\n"
+                 "period P (µs):\n"
               << "  Cycle jitter (CycMean/CycMax/CycStd):\n"
               << "    green           = max deviation < P/10  (10%)\n"
               << "    orange (warn)   = max deviation < P/5   (20%)\n"
@@ -1160,19 +1160,19 @@ int main(int argc, char** argv) {
               << std::setw(10) << "Prio"
               << std::setw(10) << "Affinity"
               << std::setw(8) << "Sched"
-              << std::setw(12) << "CycMean"
-              << std::setw(12) << "CycMax"
-              << std::setw(12) << "CycStd"
-              << std::setw(12) << "TxMean"
-              << std::setw(12) << "TxMax";
+              << std::setw(14) << "CycMeanµs"
+              << std::setw(14) << "CycMaxµs"
+              << std::setw(14) << "CycStdµs"
+              << std::setw(14) << "TxMeanµs"
+              << std::setw(14) << "TxMaxµs";
     if (real_slave_mode) {
-        table_oss << std::setw(12) << "RxMean"
-                  << std::setw(12) << "RxMax"
-                  << std::setw(12) << "RxStd"
-                  << std::setw(10) << "RxLoss%";
+        table_oss << std::setw(14) << "RxMeanµs"
+                  << std::setw(14) << "RxMaxµs"
+                  << std::setw(14) << "RxStdµs"
+                  << std::setw(12) << "RxLoss%";
     }
-    table_oss << std::setw(10) << "CPU%"
-              << std::setw(10) << "Lost%"
+    table_oss << std::setw(12) << "CPU%"
+              << std::setw(12) << "Lost%"
               << std::setw(20) << "Status"
               << color.reset << "\n";
 
@@ -1263,20 +1263,20 @@ int main(int argc, char** argv) {
                         : 0.0;
 
                 std::ostringstream cpu_oss;
-                cpu_oss << std::fixed << std::setprecision(1) << cpu_pct;
+                cpu_oss << std::fixed << std::setprecision(1) << cpu_pct << "%";
                 std::ostringstream lost_oss;
-                lost_oss << std::fixed << std::setprecision(5) << lost_pct;
+                lost_oss << std::fixed << std::setprecision(5) << lost_pct << "%";
 
                 table_oss << std::left
                           << std::setw(8) << formatFrequency(freq)
                           << std::setw(10) << priority
                           << std::setw(10) << (affinity ? "on" : "off")
                           << std::setw(8) << (result.sched_ok ? "OK" : "NO")
-                          << coloredValue(color, cyc_grade, cs.mean_us, 1, 12)
-                          << coloredValue(color, cyc_grade, cs.max_us, 1, 12)
-                          << coloredValue(color, cyc_grade, cs.stddev_us, 1, 12)
-                          << coloredValue(color, tx_grade, ts.mean_us, 1, 12)
-                          << coloredValue(color, tx_grade, ts.max_us, 1, 12);
+                          << coloredValue(color, cyc_grade, cs.mean_us, 1, 14, "µs")
+                          << coloredValue(color, cyc_grade, cs.max_us, 1, 14, "µs")
+                          << coloredValue(color, cyc_grade, cs.stddev_us, 1, 14, "µs")
+                          << coloredValue(color, tx_grade, ts.mean_us, 1, 14, "µs")
+                          << coloredValue(color, tx_grade, ts.max_us, 1, 14, "µs");
                 if (real_slave_mode) {
                     const RunGrade rxd_grade =
                         classifyRxDelay(result.period_us, rs.mean_us);
@@ -1290,15 +1290,15 @@ int main(int argc, char** argv) {
                             : 0.0;
                     std::ostringstream rxloss_oss;
                     rxloss_oss << std::fixed << std::setprecision(2)
-                               << rxloss_pct;
+                               << rxloss_pct << "%";
                     table_oss
-                        << coloredValue(color, rxd_grade, rs.mean_us, 1, 12)
-                        << coloredValue(color, rxd_grade, rs.max_us, 1, 12)
-                        << coloredValue(color, rxj_grade, rs.stddev_us, 1, 12)
-                        << padRight(rxloss_oss.str(), 10);
+                        << coloredValue(color, rxd_grade, rs.mean_us, 1, 14, "µs")
+                        << coloredValue(color, rxd_grade, rs.max_us, 1, 14, "µs")
+                        << coloredValue(color, rxj_grade, rs.stddev_us, 1, 14, "µs")
+                        << padRight(rxloss_oss.str(), 12);
                 }
-                table_oss << padRight(cpu_oss.str(), 10)
-                          << padRight(lost_oss.str(), 10)
+                table_oss << padRight(cpu_oss.str(), 12)
+                          << padRight(lost_oss.str(), 12)
                           << gradeColor(color, run_grade)
                           << padRight(gradeString(run_grade), 20)
                           << color.reset << "\n";
