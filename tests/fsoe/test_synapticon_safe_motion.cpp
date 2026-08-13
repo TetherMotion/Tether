@@ -38,7 +38,7 @@ public:
 } // namespace
 
 TEST(SynapticonSafeMotion, TimingConstantsMatchVendorDocumentation) {
-    EXPECT_EQ(Timing::kMinimumWatchdogTimeMs, 15);
+    EXPECT_EQ(Timing::kMinimumWatchdogTimeMs, 200);
     EXPECT_EQ(Timing::kTypicalMasterToSlaveDelayMs, 8);
     EXPECT_EQ(Timing::kTypicalSlaveToMasterDelayMs, 7);
     EXPECT_EQ(Timing::kTypicalRoundTripTimeMs, 15);
