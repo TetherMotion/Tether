@@ -1062,13 +1062,17 @@ void runThroughputTest(const ColorTags& c,
                        const sockaddr_ll* sll,
                        bool real_slave,
                        double threshold_pct) {
+    // threshold_pct is given as a fraction (0.01 = 1%).  Convert to the
+    // same unit as loss_pct (percent: 1.0 = 1%) for all comparisons.
+    const double threshold_percent = threshold_pct * 100.0;
+
     std::cout << "\n" << c.bold << c.cyan
               << "=== Throughput Test ===" << c.reset << "\n";
     std::cout << "  Sweeping inter-frame delay from 2000 µs down to 10 µs.\n";
     std::cout << "  1000 frames per step.  ";
     if (real_slave) {
         std::cout << "Stopping when RX loss > "
-                  << std::fixed << std::setprecision(5) << threshold_pct
+                  << std::fixed << std::setprecision(5) << threshold_percent
                   << "%.\n";
     } else {
         std::cout << "No RX expected (fake slave mode).\n";
@@ -1103,7 +1107,7 @@ void runThroughputTest(const ColorTags& c,
         }
         std::cout << "\n";
 
-        if (real_slave && r.loss_pct > threshold_pct) {
+        if (real_slave && r.loss_pct > threshold_percent) {
             threshold_crossed = true;
             first_bad_delay = delay;
             first_bad_loss = r.loss_pct;
@@ -1130,7 +1134,7 @@ void runThroughputTest(const ColorTags& c,
                   << "  Refining with piecewise-linear interpolation:\n";
 
         refined = refineThreshold(sock, frame, sll, real_slave,
-                                  threshold_pct,
+                                  threshold_percent,
                                   last_good_delay, last_good_loss,
                                   first_bad_delay, first_bad_loss);
     }
@@ -1139,7 +1143,7 @@ void runThroughputTest(const ColorTags& c,
     for (const auto& r : refined) steps.push_back(r);
 
     // Print results table.
-    printThroughputResults(c, steps, real_slave, threshold_pct);
+    printThroughputResults(c, steps, real_slave, threshold_percent);
 
     // Summary.
     std::cout << "\n" << c.bold << c.cyan
@@ -1150,7 +1154,7 @@ void runThroughputTest(const ColorTags& c,
             uint64_t best_delay = 0;
             double best_loss = 0.0;
             for (const auto& s : steps) {
-                if (s.loss_pct <= threshold_pct && s.delay_us > best_delay) {
+                if (s.loss_pct <= threshold_percent && s.delay_us > best_delay) {
                     best_delay = s.delay_us;
                     best_loss = s.loss_pct;
                 }
@@ -1159,7 +1163,7 @@ void runThroughputTest(const ColorTags& c,
             uint64_t worst_delay = UINT64_MAX;
             double worst_loss = 0.0;
             for (const auto& s : steps) {
-                if (s.loss_pct > threshold_pct && s.delay_us < worst_delay) {
+                if (s.loss_pct > threshold_percent && s.delay_us < worst_delay) {
                     worst_delay = s.delay_us;
                     worst_loss = s.loss_pct;
                 }
