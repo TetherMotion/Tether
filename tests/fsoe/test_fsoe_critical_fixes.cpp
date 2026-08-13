@@ -832,14 +832,21 @@ TEST_F(FSoEResetFirstTest, ResetRecoversSlaveFromDataState) {
     EXPECT_EQ(conn->getState(), ConnectionState::Reset);
 
     // The slave is still in Data state. The master sends Reset, the slave
-    // (in Data state) accepts it and transitions back to Session.
+    // (in Data state) accepts it and transitions back to Reset state,
+    // sending a Reset response.  The master receives the Reset response
+    // and transitions to Session.
     now += 15;
     ASSERT_TRUE(conn->exchangeWith(*slave, now));
 
     // Master should have transitioned to Session (slave acknowledged reset)
     EXPECT_EQ(conn->getState(), ConnectionState::Session);
 
-    // Slave should be back in Session state
+    // Slave should be in Reset state (waiting for Session command)
+    EXPECT_EQ(slave->getStateName(), std::string("RESET"));
+
+    // Next exchange: master sends Session, slave transitions to Session
+    now += 15;
+    ASSERT_TRUE(conn->exchangeWith(*slave, now));
     EXPECT_EQ(slave->getStateName(), std::string("SESSION"));
 
     // Full handshake should complete again
@@ -856,9 +863,9 @@ TEST_F(FSoEResetFirstTest, ResetRecoversSlaveFromConnectionState) {
     // Reset command brings it back.
     uint64_t now = 0;
     // Three exchanges to get the slave to Connection state:
-    //   1: Reset→Session (master), Reset→Session (slave)
-    //   2: Session→Connection (master), Session→Session (slave)
-    //   3: Connection→Parameter (master), Session→Connection (slave)
+    //   1: Master Reset→Session, Slave Reset→Reset (sends Reset response)
+    //   2: Master Session→Connection, Slave Reset→Session (sends Session response)
+    //   3: Master Connection→Parameter, Slave Session→Connection
     for (int i = 0; i < 3; ++i) {
         now += 15;
         ASSERT_TRUE(conn->exchangeWith(*slave, now));
@@ -870,12 +877,13 @@ TEST_F(FSoEResetFirstTest, ResetRecoversSlaveFromConnectionState) {
     conn->resetConnection();
     EXPECT_EQ(conn->getState(), ConnectionState::Reset);
 
-    // Master sends Reset → slave in Connection state must accept it
+    // Master sends Reset → slave in Connection state transitions to Reset,
+    // sends Reset response.  Master transitions to Session.
     now += 15;
     ASSERT_TRUE(conn->exchangeWith(*slave, now));
 
     EXPECT_EQ(conn->getState(), ConnectionState::Session);
-    EXPECT_EQ(slave->getStateName(), std::string("SESSION"));
+    EXPECT_EQ(slave->getStateName(), std::string("RESET"));
 }
 
 TEST_F(FSoEResetFirstTest, ResetFrameHasCorrectConnectionID) {

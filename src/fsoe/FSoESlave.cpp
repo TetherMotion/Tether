@@ -550,10 +550,10 @@ size_t FSoESlave::prepareTxFrame(uint8_t* data, size_t maxLen) {
 
     if (frameSize > 0) {
         statistics_.onFrameSent();
-        // No seq increment — the slave's TX uses cross-direction CRC
-        // inheritance (master's last TX CRC0 and seq).  The seq only
+        // No seq increment — the slave echoes the master's last TX seq
+        // (last_rx_seq_no_) for non-Reset responses.  The seq only
         // advances when the master sends a new frame with a new seq.
-        // last_tx_seq_no_ and last_tx_crc0_ are already updated by the
+        // last_tx_seq_no_ and last_tx_crc0_ are already set by the
         // build* function above.
 
         // Cache the response for future cycles (only for cacheable states)
@@ -882,8 +882,7 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
     //      tx_seq_no_ was already initialSeqNo, no change.
     //   2. Slave in Data/Connection/Parameter state receiving Reset (recovery):
     //      tx_seq_no_ was at some advanced value, needs to be reset to
-    //      initialSeqNo so the slave's next frame (Reset response) uses
-    //      seq=initialSeqNo, matching the master's expected rx_seq_no_.
+    //      initialSeqNo for diagnostics.
     if (cmd == Command::Reset) {
         expectedSequence_ = 0;
         txSequence_ = 0;
@@ -939,7 +938,18 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
         sessionOctetAdvancePending_ = true;
     }
 
-    transitionTo(ConnectionState::Session);
+    // State transition:
+    // - On Reset command: transition to Reset state.  The slave sends a
+    //   Reset response (buildResetResponse) with seq=initialSeqNo+1, then
+    //   waits for a Session command from the master.
+    // - On Session command: transition to Session state.  The slave sends
+    //   a Session response (buildSessionResponse) with its own Session ID.
+    // This matches the physical Synapticon slave behavior.
+    if (cmd == Command::Reset) {
+        transitionTo(ConnectionState::Reset);
+    } else if (cmd == Command::Session) {
+        transitionTo(ConnectionState::Session);
+    }
 
     statistics_.onSessionReset();
     logDiagnostic(ErrorCode::NoError, "Session reset received");
@@ -1385,6 +1395,12 @@ size_t FSoESlave::buildSessionResponse(uint8_t* data, size_t maxLen) {
     } else {
         // Safety data length == 1: transfer Session ID in two successive
         // PDUs (low byte first, then high byte).  ETG.5100 §8.2.2.3.
+        // Advance the index BEFORE building if the pending flag is set,
+        // so the second Session response uses the high byte.
+        if (sessionOctetAdvancePending_) {
+            sessionOctetIdx_ = (sessionOctetIdx_ + 1) & 1;
+            sessionOctetAdvancePending_ = false;
+        }
         payload[0] = (sessionOctetIdx_ == 0)
             ? (sessionId_ & 0xFF)
             : ((sessionId_ >> 8) & 0xFF);
@@ -1395,20 +1411,15 @@ size_t FSoESlave::buildSessionResponse(uint8_t* data, size_t maxLen) {
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Session, payload, config_.safeInputSize,
         0,  // Conn_Id = 0 in Session state (ETG.5100 §8.2.2.3)
-        last_rx_crc0_, rx_seq_no_, &last_tx_crc0_, &seq_used);
+        last_rx_crc0_, last_rx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
 
     // NOTE: sessionOctetIdx_ is advanced via a deferred flag set in
-    // processSessionReset().  This ensures the slave sends the correct
-    // byte for the CURRENT Session command, then advances for the NEXT
-    // one.  The flag is cleared after the first build so subsequent
-    // cached rebuilds don't advance the index again.
-
-    if (sessionOctetAdvancePending_) {
-        sessionOctetIdx_ = (sessionOctetIdx_ + 1) & 1;
-        sessionOctetAdvancePending_ = false;
-    }
+    // processSessionReset() (when the slave receives a Session command
+    // while already in Session state).  The advance is applied at the
+    // BEGINNING of buildSessionResponse so the second Session response
+    // uses the high byte.
 
     return result;
 }
@@ -1441,7 +1452,7 @@ size_t FSoESlave::buildConnectionResponse(uint8_t* data, size_t maxLen) {
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Connection, payload, config_.safeInputSize,
         currentConnectionId_,
-        last_rx_crc0_, rx_seq_no_, &last_tx_crc0_, &seq_used);
+        last_rx_crc0_, last_rx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
 
@@ -1488,7 +1499,7 @@ size_t FSoESlave::buildParameterResponse(uint8_t* data, size_t maxLen) {
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Parameter, payload, config_.safeInputSize,
         currentConnectionId_,
-        last_rx_crc0_, rx_seq_no_, &last_tx_crc0_, &seq_used);
+        last_rx_crc0_, last_rx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
 
@@ -1515,7 +1526,7 @@ size_t FSoESlave::buildDataResponse(uint8_t* data, size_t maxLen) {
         data, Command::ProcessData,
         safeInputs_.data(), config_.safeInputSize,
         currentConnectionId_,
-        last_rx_crc0_, rx_seq_no_, &last_tx_crc0_, &seq_used);
+        last_rx_crc0_, last_rx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
     return result;
@@ -1537,7 +1548,7 @@ size_t FSoESlave::buildFailSafeResponse(uint8_t* data, size_t maxLen) {
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::FailSafeData,
         zero_payload, config_.safeInputSize, currentConnectionId_,
-        last_rx_crc0_, rx_seq_no_, &last_tx_crc0_, &seq_used);
+        last_rx_crc0_, last_rx_seq_no_, &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
     return result;

@@ -396,9 +396,10 @@ public:
     /// Get the TX CRC state that this slave chains from when building
     /// its own TX frames (cross-direction: slave TX inherits from the
     /// master's last TX CRC0 = last_rx_crc0_).
-    /// startCrc = last_rx_crc0_, seqNo = rx_seq_no_
+    /// startCrc = last_rx_crc0_, seqNo = last_rx_seq_no_ (echoes master's
+    /// last TX seq; Reset response is special: seq=initialSeqNo+1)
     uint16_t getTxLastCrc0() const { return last_rx_crc0_; }
-    uint16_t getTxSeqNo() const { return rx_seq_no_; }
+    uint16_t getTxSeqNo() const { return last_rx_seq_no_; }
 
     /// Get the slave's own Session ID (ETG.5100 §8.2.2.3: the slave
     /// generates its own random Session ID, independent of the master's).
@@ -542,18 +543,19 @@ private:
     //
     // CRC inheritance model (verified on real Synapticon hardware):
     //   - Slave TX: start_crc = last_rx_crc0_ (master's last TX CRC0, cross-direction)
-    //     seq = last_rx_seq_no_ (master's last TX seq, cross-direction)
-    //   - Slave RX: start_crc = last_tx_crc0_ (own last TX CRC0, self-inheriting)
-    //     seq = last_tx_seq_no_ (own last TX seq, self-inheriting)
+    //     seq = last_rx_seq_no_ (echoes master's last TX seq, cross-direction)
+    //     Exception: Reset response uses seq = initialSeqNo+1 (ETG.5100 §8.2.2.2)
+    //   - Slave RX: start_crc = last_tx_crc0_ (own last TX CRC0, cross-direction)
+    //     seq = rx_seq_no_ (expected next master TX seq)
     //   - Reset breaks the chain: both sides reset to start_crc=0
-    //   - No seq increment between frames — seq only advances via collision
-    //     avoidance (ETG.5100 §8.1.3.4).
+    //   - The slave echoes the master's last TX seq (no independent increment).
+    //     The master expects slave TX seq = last_tx_seq_no_ (the seq it just used).
     uint16_t last_tx_crc0_ = 0;   ///< CRC0 of the last frame we sent (for RX parsing)
     uint16_t last_rx_crc0_ = 0;   ///< CRC0 of the master's last TX (startCrc for slave TX)
-    uint16_t tx_seq_no_ = 1;      ///< Kept for diagnostics (not used for TX — use last_rx_seq_no_)
-    uint16_t rx_seq_no_ = 1;      ///< Kept for diagnostics (not used for RX — use last_tx_seq_no_)
-    uint16_t last_tx_seq_no_ = 0; ///< Seq used in the last TX (for RX parsing)
-    uint16_t last_rx_seq_no_ = 0; ///< Seq used by master in its last TX (startSeq for TX)
+    uint16_t tx_seq_no_ = 1;      ///< Kept for diagnostics (TX uses last_rx_seq_no_)
+    uint16_t rx_seq_no_ = 1;      ///< Expected next master TX seq (for RX validation)
+    uint16_t last_tx_seq_no_ = 0; ///< Seq used in the last TX (for diagnostics)
+    uint16_t last_rx_seq_no_ = 0; ///< Seq used by master in its last TX (echoed in slave TX)
     
     // Timing
     uint64_t lastValidFrameMs_ = 0;
