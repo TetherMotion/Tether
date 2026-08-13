@@ -564,6 +564,19 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
             static_cast<unsigned>(kRawSDOMbxBufferSize), buf_size);
         return false;
     }
+    // Check that the mailbox buffer is large enough to hold the SDO
+    // init-download header (MbxHeader + CoeHeader + SdoInitDownloadReq).
+    // Without this check, a too-small mailbox would cause a heap-buffer-
+    // overflow when writing the header into mbxbuf below.
+    const size_t min_buf_size = sizeof(MbxHeader) + sizeof(CoeHeader) + sizeof(SdoInitDownloadReq);
+    if (buf_size < min_buf_size) {
+        TETHER_LOGE(TAG,
+            "Mailbox too small for SDO segmented download header "
+            "(wr=%u rd=%u, needed=%zu bytes). "
+            "The slave mailbox must be at least %zu bytes.",
+            mbxWriteLen, mbxReadLen, min_buf_size, min_buf_size);
+        return false;
+    }
     std::vector<uint8_t> mbxbuf_storage(buf_size, 0);
     uint8_t* mbxbuf = mbxbuf_storage.data();
 
