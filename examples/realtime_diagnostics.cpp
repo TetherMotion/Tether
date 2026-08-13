@@ -1160,19 +1160,19 @@ int main(int argc, char** argv) {
               << std::setw(10) << "Prio"
               << std::setw(10) << "Affinity"
               << std::setw(8) << "Sched"
-              << std::setw(14) << "CycMeanµs"
-              << std::setw(14) << "CycMaxµs"
-              << std::setw(14) << "CycStdµs"
-              << std::setw(14) << "TxMeanµs"
-              << std::setw(14) << "TxMaxµs";
+              << std::setw(14) << "CycMean[µs]"
+              << std::setw(14) << "CycMax[µs]"
+              << std::setw(14) << "CycStd[µs]"
+              << std::setw(14) << "TxMean[µs]"
+              << std::setw(14) << "TxMax[µs]";
     if (real_slave_mode) {
-        table_oss << std::setw(14) << "RxMeanµs"
-                  << std::setw(14) << "RxMaxµs"
-                  << std::setw(14) << "RxStdµs"
-                  << std::setw(12) << "RxLoss%";
+        table_oss << std::setw(14) << "RxMean[µs]"
+                  << std::setw(14) << "RxMax[µs]"
+                  << std::setw(14) << "RxStd[µs]"
+                  << std::setw(12) << "RxLoss[%]";
     }
-    table_oss << std::setw(12) << "CPU%"
-              << std::setw(12) << "Lost%"
+    table_oss << std::setw(12) << "CPU[%]"
+              << std::setw(12) << "Lost[%]"
               << std::setw(20) << "Status"
               << color.reset << "\n";
 
