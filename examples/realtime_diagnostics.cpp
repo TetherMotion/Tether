@@ -1290,9 +1290,9 @@ int main(int argc, char** argv) {
     program.add_argument("--throughput-threshold")
         .scan<'g', double>()
         .default_value(0.01)
-        .help("RX loss percentage threshold (1%% = 0.01) at which the throughput "
+        .help("RX loss percentage threshold (1% = 0.01) at which the throughput "
               "test stops the coarse sweep and refines the exact crossing point "
-              "(default 0.01 = 1%%).");
+              "(default 0.01 = 1%).");
 
     try {
         program.parse_args(argc, argv);
