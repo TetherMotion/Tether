@@ -818,6 +818,420 @@ void printRecommendations(const ColorTags& c,
     }
 }
 
+// ============================================================================
+// Throughput test
+// ============================================================================
+// Sends 1000 frames at a given inter-frame delay, measuring how many
+// responses are received (real-slave mode) or simply how many frames
+// are sent successfully (fake-slave mode).  The delay is halved from
+// 2000 µs down to 10 µs until either 10 µs is reached or the RX loss
+// exceeds the configured threshold.  When the threshold is crossed,
+// a piecewise-linear iterative refinement finds the exact delay at
+// which the threshold is reached.
+
+struct ThroughputStepResult {
+    uint64_t delay_us = 0;
+    uint64_t frames_sent = 0;
+    uint64_t responses_received = 0;
+    double loss_pct = 0.0;       // 0 in fake-slave mode (no RX)
+    double mean_rtt_us = 0.0;    // 0 in fake-slave mode
+    double max_rtt_us = 0.0;     // 0 in fake-slave mode
+};
+
+ThroughputStepResult runThroughputStep(int sock,
+                                       const std::vector<uint8_t>& frame,
+                                       const sockaddr_ll* sll,
+                                       uint64_t delay_us,
+                                       bool real_slave,
+                                       uint64_t frame_count = 1000) {
+    ThroughputStepResult r;
+    r.delay_us = delay_us;
+    r.frames_sent = frame_count;
+
+    const uint64_t delay_ns = delay_us * 1000ULL;
+    uint8_t rx_buffer[1514];
+
+    // Use absolute-time scheduling so jitter in sendto doesn't accumulate.
+    const uint64_t start_ns = now_ns();
+    uint64_t next_ns = start_ns + delay_ns;
+
+    std::vector<uint64_t> rtt_ns;
+
+    for (uint64_t i = 0; i < frame_count; ++i) {
+        // Wait until next send time.
+        if (delay_ns > 0) {
+            struct timespec next_ts;
+            next_ts.tv_sec = static_cast<time_t>(next_ns / 1'000'000'000ULL);
+            next_ts.tv_nsec = static_cast<long>(next_ns % 1'000'000'000ULL);
+            clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next_ts,
+                            nullptr);
+        }
+
+        const uint64_t tx_end = now_ns();
+
+        (void)::sendto(sock, frame.data(), frame.size(), 0,
+                       reinterpret_cast<const struct sockaddr*>(sll),
+                       sizeof(*sll));
+
+        if (real_slave) {
+            // Poll for response with timeout = delay (so we don't miss
+            // the next send slot, but still give the slave time to reply).
+            struct pollfd pfd;
+            pfd.fd = sock;
+            pfd.events = POLLIN;
+            pfd.revents = 0;
+
+            const int poll_timeout_ms = static_cast<int>(
+                std::clamp(static_cast<double>(delay_us) / 1000.0,
+                           0.0, 50.0));
+
+            if (::poll(&pfd, 1, poll_timeout_ms) > 0 &&
+                (pfd.revents & POLLIN)) {
+                struct sockaddr_ll rx_sll;
+                socklen_t rx_sll_len = sizeof(rx_sll);
+                const ssize_t rx_len =
+                    ::recvfrom(sock, rx_buffer, sizeof(rx_buffer),
+                               MSG_DONTWAIT,
+                               reinterpret_cast<struct sockaddr*>(&rx_sll),
+                               &rx_sll_len);
+                if (rx_len > 0) {
+                    const uint64_t rx_end = now_ns();
+                    ++r.responses_received;
+                    rtt_ns.push_back(rx_end - tx_end);
+                }
+            }
+        }
+
+        next_ns += delay_ns;
+    }
+
+    if (real_slave && frame_count > 0) {
+        const uint64_t lost = frame_count - r.responses_received;
+        r.loss_pct = 100.0 * static_cast<double>(lost) /
+                     static_cast<double>(frame_count);
+    }
+
+    if (!rtt_ns.empty()) {
+        const SampleStats rs = computeStats(rtt_ns);
+        r.mean_rtt_us = rs.mean_us;
+        r.max_rtt_us = rs.max_us;
+    }
+
+    return r;
+}
+
+void printThroughputResults(const ColorTags& c,
+                            const std::vector<ThroughputStepResult>& steps,
+                            bool real_slave,
+                            double threshold_pct) {
+    std::cout << "\n" << c.bold << c.cyan
+              << "=== Throughput Test Results ===" << c.reset << "\n\n";
+
+    std::cout << "  Method: 1000 frames per delay step, delay halved from "
+                 "2000 µs to 10 µs.\n";
+    if (real_slave) {
+        std::cout << "  Mode: real slave — RX loss measured against threshold "
+                  << std::fixed << std::setprecision(5) << threshold_pct
+                  << "%\n\n";
+    } else {
+        std::cout << "  Mode: fake slave — no RX expected, measuring TX "
+                     "throughput only.\n\n";
+    }
+
+    std::cout << "  Column explanation:\n"
+              << "    Delay[µs]   Inter-frame delay.\n"
+              << "    Frames      Number of frames sent.\n";
+    if (real_slave) {
+        std::cout << "    RX          Responses received.\n"
+                  << "    Loss[%]     Percentage of frames with no response.\n"
+                  << "    RTTmean[µs] Mean round-trip time.\n"
+                  << "    RTTmax[µs]  Maximum round-trip time.\n";
+    }
+    std::cout << "    Status      Step status.\n\n";
+
+    std::cout << c.bold << c.cyan << std::left
+              << std::setw(14) << "Delay[µs]"
+              << std::setw(10) << "Frames";
+    if (real_slave) {
+        std::cout << std::setw(10) << "RX"
+                  << std::setw(14) << "Loss[%]"
+                  << std::setw(14) << "RTTmean[µs]"
+                  << std::setw(14) << "RTTmax[µs]";
+    }
+    std::cout << std::setw(20) << "Status"
+              << c.reset << "\n";
+
+    for (const auto& s : steps) {
+        std::ostringstream delay_oss;
+        delay_oss << s.delay_us;
+
+        std::ostringstream loss_oss;
+        loss_oss << std::fixed << std::setprecision(5) << s.loss_pct << "%";
+
+        const char* status = "OK";
+        const char* status_color = c.green;
+        if (real_slave) {
+            if (s.loss_pct > threshold_pct) {
+                status = "THRESHOLD-EXCEEDED";
+                status_color = c.red;
+            } else if (s.loss_pct > 0.0) {
+                status = "LOSS";
+                status_color = c.orange;
+            }
+        }
+
+        std::ostringstream rtt_mean_oss, rtt_max_oss;
+        rtt_mean_oss << std::fixed << std::setprecision(1)
+                     << s.mean_rtt_us << "µs";
+        rtt_max_oss << std::fixed << std::setprecision(1)
+                    << s.max_rtt_us << "µs";
+
+        std::cout << std::left
+                  << padRight(delay_oss.str() + "µs", 14)
+                  << padRight(std::to_string(s.frames_sent), 10);
+        if (real_slave) {
+            std::cout << padRight(std::to_string(s.responses_received), 10)
+                      << padRight(loss_oss.str(), 14)
+                      << padRight(rtt_mean_oss.str(), 14)
+                      << padRight(rtt_max_oss.str(), 14);
+        }
+        std::cout << status_color << padRight(status, 20) << c.reset << "\n";
+    }
+}
+
+// Piecewise-linear iterative refinement: given two delays (lo, hi) where
+// lo has loss < threshold and hi has loss > threshold, find the delay
+// at which loss crosses the threshold by linearly interpolating and
+// testing the midpoint, similar to binary search.
+std::vector<ThroughputStepResult> refineThreshold(
+    int sock, const std::vector<uint8_t>& frame,
+    const sockaddr_ll* sll, bool real_slave,
+    double threshold_pct,
+    uint64_t lo_delay_us, double lo_loss_pct,
+    uint64_t hi_delay_us, double hi_loss_pct,
+    int max_iterations = 10) {
+    std::vector<ThroughputStepResult> refined;
+
+    for (int iter = 0; iter < max_iterations; ++iter) {
+        // Linear interpolation: estimate delay at which loss == threshold.
+        // loss(delay) is assumed monotonic (more delay → less loss).
+        const double d_lo = static_cast<double>(lo_delay_us);
+        const double d_hi = static_cast<double>(hi_delay_us);
+        const double l_lo = lo_loss_pct;
+        const double l_hi = hi_loss_pct;
+
+        if (std::abs(l_hi - l_lo) < 1e-9) break;
+
+        // Linear estimate:
+        //   delay = d_lo + (threshold - l_lo) * (d_hi - d_lo) / (l_hi - l_lo)
+        double est_delay = d_lo +
+            (threshold_pct - l_lo) * (d_hi - d_lo) / (l_hi - l_lo);
+        uint64_t mid_delay = static_cast<uint64_t>(std::round(est_delay));
+        if (mid_delay < 10) mid_delay = 10;
+        if (mid_delay == lo_delay_us || mid_delay == hi_delay_us) break;
+        if (mid_delay <= lo_delay_us || mid_delay >= hi_delay_us) break;
+
+        ThroughputStepResult mid = runThroughputStep(
+            sock, frame, sll, mid_delay, real_slave);
+
+        std::cout << "    refinement iter " << iter + 1
+                  << ": delay=" << mid_delay << "µs, loss="
+                  << std::fixed << std::setprecision(5) << mid.loss_pct
+                  << "%\n";
+
+        refined.push_back(mid);
+
+        if (mid.loss_pct < threshold_pct) {
+            lo_delay_us = mid_delay;
+            lo_loss_pct = mid.loss_pct;
+        } else {
+            hi_delay_us = mid_delay;
+            hi_loss_pct = mid.loss_pct;
+        }
+
+        // Convergence: the interval is small enough.
+        if (hi_delay_us - lo_delay_us <= 1) break;
+    }
+
+    return refined;
+}
+
+void runThroughputTest(const ColorTags& c,
+                       int sock,
+                       const std::vector<uint8_t>& frame,
+                       const sockaddr_ll* sll,
+                       bool real_slave,
+                       double threshold_pct) {
+    std::cout << "\n" << c.bold << c.cyan
+              << "=== Throughput Test ===" << c.reset << "\n";
+    std::cout << "  Sweeping inter-frame delay from 2000 µs down to 10 µs.\n";
+    std::cout << "  1000 frames per step.  ";
+    if (real_slave) {
+        std::cout << "Stopping when RX loss > "
+                  << std::fixed << std::setprecision(5) << threshold_pct
+                  << "%.\n";
+    } else {
+        std::cout << "No RX expected (fake slave mode).\n";
+    }
+    std::cout << "\n";
+
+    std::vector<ThroughputStepResult> steps;
+
+    // Coarse sweep: start at 2000 µs, halve until 10 µs or threshold exceeded.
+    constexpr uint64_t kStartDelayUs = 2000;
+    constexpr uint64_t kMinDelayUs = 10;
+    constexpr uint64_t kFramesPerStep = 1000;
+
+    uint64_t delay = kStartDelayUs;
+    bool threshold_crossed = false;
+    uint64_t last_good_delay = 0;
+    double last_good_loss = 0.0;
+    uint64_t first_bad_delay = 0;
+    double first_bad_loss = 0.0;
+
+    while (true) {
+        ThroughputStepResult r = runThroughputStep(
+            sock, frame, sll, delay, real_slave, kFramesPerStep);
+        steps.push_back(r);
+
+        std::cout << "  delay=" << std::setw(6) << delay << "µs"
+                  << "  frames=" << r.frames_sent;
+        if (real_slave) {
+            std::cout << "  RX=" << std::setw(5) << r.responses_received
+                      << "  loss=" << std::fixed << std::setprecision(5)
+                      << r.loss_pct << "%";
+        }
+        std::cout << "\n";
+
+        if (real_slave && r.loss_pct > threshold_pct) {
+            threshold_crossed = true;
+            first_bad_delay = delay;
+            first_bad_loss = r.loss_pct;
+            break;
+        }
+
+        last_good_delay = delay;
+        last_good_loss = r.loss_pct;
+
+        if (delay <= kMinDelayUs) break;
+        delay /= 2;
+        if (delay < kMinDelayUs) delay = kMinDelayUs;
+    }
+
+    // Refinement: find exact threshold crossing point.
+    std::vector<ThroughputStepResult> refined;
+    if (threshold_crossed && last_good_delay > 0 && first_bad_delay > 0 &&
+        last_good_delay != first_bad_delay) {
+        std::cout << "\n  Threshold crossed between "
+                  << last_good_delay << "µs (loss="
+                  << std::fixed << std::setprecision(5) << last_good_loss
+                  << "%) and " << first_bad_delay << "µs (loss="
+                  << first_bad_loss << "%).\n"
+                  << "  Refining with piecewise-linear interpolation:\n";
+
+        refined = refineThreshold(sock, frame, sll, real_slave,
+                                  threshold_pct,
+                                  last_good_delay, last_good_loss,
+                                  first_bad_delay, first_bad_loss);
+    }
+
+    // Append refined steps to the results.
+    for (const auto& r : refined) steps.push_back(r);
+
+    // Print results table.
+    printThroughputResults(c, steps, real_slave, threshold_pct);
+
+    // Summary.
+    std::cout << "\n" << c.bold << c.cyan
+              << "=== Throughput Summary ===" << c.reset << "\n";
+    if (real_slave) {
+        if (threshold_crossed) {
+            // Find the last good delay (highest loss < threshold).
+            uint64_t best_delay = 0;
+            double best_loss = 0.0;
+            for (const auto& s : steps) {
+                if (s.loss_pct <= threshold_pct && s.delay_us > best_delay) {
+                    best_delay = s.delay_us;
+                    best_loss = s.loss_pct;
+                }
+            }
+            // Find the first bad delay (lowest loss > threshold).
+            uint64_t worst_delay = UINT64_MAX;
+            double worst_loss = 0.0;
+            for (const auto& s : steps) {
+                if (s.loss_pct > threshold_pct && s.delay_us < worst_delay) {
+                    worst_delay = s.delay_us;
+                    worst_loss = s.loss_pct;
+                }
+            }
+
+            if (best_delay > 0) {
+                std::cout << "  Maximum reliable inter-frame delay: "
+                          << best_delay << "µs (loss="
+                          << std::fixed << std::setprecision(5) << best_loss
+                          << "%)\n";
+            }
+            if (worst_delay != UINT64_MAX) {
+                std::cout << "  First failing inter-frame delay:    "
+                          << worst_delay << "µs (loss="
+                          << std::fixed << std::setprecision(5) << worst_loss
+                          << "%)\n";
+            }
+            if (best_delay > 0 && worst_delay != UINT64_MAX) {
+                const double max_fps =
+                    1'000'000.0 / static_cast<double>(best_delay);
+                const double fail_fps =
+                    1'000'000.0 / static_cast<double>(worst_delay);
+                std::cout << "  Maximum reliable frame rate:       "
+                          << std::fixed << std::setprecision(0) << max_fps
+                          << " fps (at " << best_delay << "µs delay)\n";
+                std::cout << "  Frame rate at first failure:       "
+                          << std::fixed << std::setprecision(0) << fail_fps
+                          << " fps (at " << worst_delay << "µs delay)\n";
+            }
+            std::cout << c.orange
+                      << "  * Throughput is limited by slave response time "
+                         "and/or network turnaround."
+                      << c.reset << "\n";
+        } else {
+            // All steps passed — find the minimum delay tested.
+            uint64_t min_delay = UINT64_MAX;
+            for (const auto& s : steps) {
+                if (s.delay_us < min_delay) min_delay = s.delay_us;
+            }
+            if (min_delay != UINT64_MAX) {
+                const double max_fps =
+                    1'000'000.0 / static_cast<double>(min_delay);
+                std::cout << c.green
+                          << "  All steps passed — no RX loss exceeded "
+                             "threshold down to "
+                          << min_delay << "µs delay ("
+                          << std::fixed << std::setprecision(0) << max_fps
+                          << " fps).\n"
+                          << c.reset;
+            }
+        }
+    } else {
+        // Fake-slave mode: report TX throughput at minimum delay.
+        uint64_t min_delay = UINT64_MAX;
+        for (const auto& s : steps) {
+            if (s.delay_us < min_delay) min_delay = s.delay_us;
+        }
+        if (min_delay != UINT64_MAX) {
+            const double max_fps =
+                1'000'000.0 / static_cast<double>(min_delay);
+            std::cout << "  Minimum tested inter-frame delay: "
+                      << min_delay << "µs ("
+                      << std::fixed << std::setprecision(0) << max_fps
+                      << " fps TX rate)\n";
+            std::cout << c.green
+                      << "  * TX throughput test completed.  Use --slave N to "
+                         "measure RX throughput limits."
+                      << c.reset << "\n";
+        }
+    }
+}
+
 #endif // __linux__
 
 } // namespace
@@ -866,6 +1280,19 @@ int main(int argc, char** argv) {
         .help("Real slave index for round-trip communication (default -1 = fake slave, "
               "no reception). When >= 0, sends APRD datagrams to the slave at the "
               "given position and measures transmit-to-receive delay.");
+    program.add_argument("--throughput")
+        .default_value(false)
+        .implicit_value(true)
+        .help("Run an additional throughput test after the main diagnostics. "
+              "Sweeps inter-frame delay from 2000 µs down to 10 µs (1000 frames "
+              "per step) and, in real-slave mode, finds the delay at which RX "
+              "loss exceeds --throughput-threshold.");
+    program.add_argument("--throughput-threshold")
+        .scan<'g', double>()
+        .default_value(0.01)
+        .help("RX loss percentage threshold (1%% = 0.01) at which the throughput "
+              "test stops the coarse sweep and refines the exact crossing point "
+              "(default 0.01 = 1%%).");
 
     try {
         program.parse_args(argc, argv);
@@ -923,6 +1350,13 @@ int main(int argc, char** argv) {
     const bool real_slave_mode = (slave_index >= 0);
     if (real_slave_mode && slave_index > 65534) {
         std::cerr << "Slave index must be 0-65534\n";
+        return 1;
+    }
+
+    const bool run_throughput = program.get<bool>("--throughput");
+    const double throughput_threshold = program.get<double>("--throughput-threshold");
+    if (throughput_threshold <= 0.0 || throughput_threshold >= 100.0) {
+        std::cerr << "Throughput threshold must be between 0 and 100 (exclusive)\n";
         return 1;
     }
 
@@ -1312,6 +1746,11 @@ int main(int argc, char** argv) {
 
     printRecommendations(color, results, kernel_info, priorities,
                          affinity_core);
+
+    if (run_throughput) {
+        runThroughputTest(color, sock, frame, &sll, real_slave_mode,
+                          throughput_threshold);
+    }
 
     Tether::Examples::shutdownHostEthernet(session);
     return 0;
