@@ -1012,9 +1012,14 @@ std::vector<ThroughputStepResult> refineThreshold(
     int max_iterations = 10) {
     std::vector<ThroughputStepResult> refined;
 
+    // lo = good (loss < threshold), hi = bad (loss > threshold).
+    // In our sweep, lo_delay > hi_delay (more delay → less loss).
+    // The interpolation works regardless of ordering, but the bounds
+    // check must use min/max to handle both directions.
+    const uint64_t bound_lo = std::min(lo_delay_us, hi_delay_us);
+    const uint64_t bound_hi = std::max(lo_delay_us, hi_delay_us);
+
     for (int iter = 0; iter < max_iterations; ++iter) {
-        // Linear interpolation: estimate delay at which loss == threshold.
-        // loss(delay) is assumed monotonic (more delay → less loss).
         const double d_lo = static_cast<double>(lo_delay_us);
         const double d_hi = static_cast<double>(hi_delay_us);
         const double l_lo = lo_loss_pct;
@@ -1029,7 +1034,8 @@ std::vector<ThroughputStepResult> refineThreshold(
         uint64_t mid_delay = static_cast<uint64_t>(std::round(est_delay));
         if (mid_delay < 10) mid_delay = 10;
         if (mid_delay == lo_delay_us || mid_delay == hi_delay_us) break;
-        if (mid_delay <= lo_delay_us || mid_delay >= hi_delay_us) break;
+        // mid must be strictly inside the [bound_lo, bound_hi] interval.
+        if (mid_delay <= bound_lo || mid_delay >= bound_hi) break;
 
         ThroughputStepResult mid = runThroughputStep(
             sock, frame, sll, mid_delay, real_slave);
@@ -1050,7 +1056,10 @@ std::vector<ThroughputStepResult> refineThreshold(
         }
 
         // Convergence: the interval is small enough.
-        if (hi_delay_us - lo_delay_us <= 1) break;
+        const uint64_t interval =
+            (lo_delay_us > hi_delay_us) ? (lo_delay_us - hi_delay_us)
+                                        : (hi_delay_us - lo_delay_us);
+        if (interval <= 1) break;
     }
 
     return refined;
@@ -1150,38 +1159,38 @@ void runThroughputTest(const ColorTags& c,
               << "=== Throughput Summary ===" << c.reset << "\n";
     if (real_slave) {
         if (threshold_crossed) {
-            // Find the last good delay (highest loss < threshold).
-            uint64_t best_delay = 0;
+            // Find the minimum delay (fastest frame rate) with loss <= threshold.
+            uint64_t best_delay = UINT64_MAX;
             double best_loss = 0.0;
             for (const auto& s : steps) {
-                if (s.loss_pct <= threshold_percent && s.delay_us > best_delay) {
+                if (s.loss_pct <= threshold_percent && s.delay_us < best_delay) {
                     best_delay = s.delay_us;
                     best_loss = s.loss_pct;
                 }
             }
-            // Find the first bad delay (lowest loss > threshold).
-            uint64_t worst_delay = UINT64_MAX;
+            // Find the maximum delay (slowest frame rate) with loss > threshold.
+            uint64_t worst_delay = 0;
             double worst_loss = 0.0;
             for (const auto& s : steps) {
-                if (s.loss_pct > threshold_percent && s.delay_us < worst_delay) {
+                if (s.loss_pct > threshold_percent && s.delay_us > worst_delay) {
                     worst_delay = s.delay_us;
                     worst_loss = s.loss_pct;
                 }
             }
 
-            if (best_delay > 0) {
-                std::cout << "  Maximum reliable inter-frame delay: "
+            if (best_delay != UINT64_MAX) {
+                std::cout << "  Minimum reliable inter-frame delay: "
                           << best_delay << "µs (loss="
                           << std::fixed << std::setprecision(5) << best_loss
                           << "%)\n";
             }
-            if (worst_delay != UINT64_MAX) {
+            if (worst_delay > 0) {
                 std::cout << "  First failing inter-frame delay:    "
                           << worst_delay << "µs (loss="
                           << std::fixed << std::setprecision(5) << worst_loss
                           << "%)\n";
             }
-            if (best_delay > 0 && worst_delay != UINT64_MAX) {
+            if (best_delay != UINT64_MAX && worst_delay > 0) {
                 const double max_fps =
                     1'000'000.0 / static_cast<double>(best_delay);
                 const double fail_fps =
