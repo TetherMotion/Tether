@@ -43,7 +43,7 @@ struct MasterConnectionConfig {
     uint16_t slave_safety_addr = 0;     // FSoE slave safety address
     uint16_t connection_id = 0;
     uint16_t master_addr = 0;
-    uint16_t watchdog_timeout_ms = 100;
+    uint16_t watchdog_timeout_ms = 200;
     uint16_t conn_timeout_ms = 1000;
     uint16_t session_timeout_ms = 5000;
     uint16_t recovery_delay_ms = 500;
