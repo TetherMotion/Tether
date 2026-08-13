@@ -344,15 +344,16 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
 
     const bool is_reset_frame = (data[0] == Command::Reset);
     const uint16_t parse_start_crc = is_reset_frame ? 0 : last_tx_crc0_;
-    // The slave's Reset response uses seq = initial_seq_no + 1.
-    // Non-Reset frames use tx_seq_no_ (the master's NEXT TX seq, which was
-    // incremented after the master's last TX).  The slave increments its
-    // rx_seq_no_ after receiving the master's TX, and uses that incremented
-    // value for its TX response.  So the master's RX must use tx_seq_no_
-    // (which was also incremented after TX) to match.
+    // The slave echoes the master's last TX seq in its responses (no
+    // independent increment).  So for non-Reset frames, the expected
+    // slave TX seq = last_tx_seq_no_ (the seq the master just used in
+    // its last TX, before the increment in prepareTxFrame).
+    // The slave's Reset response is special: it uses seq = initialSeqNo+1
+    // (ETG.5100 §8.2.2.2), so we use incrementSeqNo(initial_seq_no) for
+    // Reset frames.
     const uint16_t parse_seq_no = is_reset_frame
         ? CRC::incrementSeqNo(config_.initial_seq_no)
-        : tx_seq_no_;
+        : last_tx_seq_no_;
     uint16_t seq_used = 0;
 
     // CRC trace tracking (for --debug fsoe-crc)
@@ -529,9 +530,9 @@ crc_fallback_succeeded:
         crc_trace_callback_(info);
     }
 
-    // Save the seq that matched (after collision avoidance).
-    // The slave echoes the master's last TX seq, so rx_seq_no_ = seq_used
-    // (no increment — the slave doesn't advance seq independently).
+    // Save the seq that matched (after collision avoidance) for diagnostics.
+    // The slave has its own independent TX seq counter; we don't use this
+    // for any CRC chain — it's purely informational.
     last_rx_seq_no_ = seq_used;
     rx_seq_no_ = seq_used;  // for diagnostics
 

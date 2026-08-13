@@ -147,23 +147,25 @@ TEST(FSoESequenceConformance, SlaveSeqResetsToZeroAfterReset) {
 
 TEST(FSoESequenceConformance, MasterInitialSeqIsConfigurableToOne) {
     // ETG.5100 §8.1.3.4 says seq starts at 1.  Verify the config works.
-    // In the self-inheriting RX model, getRxSeqNo() = tx_seq_no_ (the
-    // incremented value used for RX parsing), which equals tx_seq_no_
-    // before any TX.
+    // getTxSeqNo() = tx_seq_no_ (the master's own TX seq counter).
+    // getRxSeqNo() = last_tx_seq_no_ (the seq used in the last TX, which
+    // the slave echoes — 0 before any TX).
     MasterConnectionConfig cfg = makeMasterCfg(4, 4);
     cfg.initial_seq_no = 1;
     FSoEMasterConnection conn(cfg);
     conn.initialize();
     conn.startConnection();
     EXPECT_EQ(conn.getTxSeqNo(), 1u);
-    EXPECT_EQ(conn.getRxSeqNo(), 1u);  // tx_seq_no_ = 1 (same as TX)
+    EXPECT_EQ(conn.getRxSeqNo(), 0u);  // last_tx_seq_no_ = 0 (no TX yet)
 
     // First TX frame should be a Reset with seq=1
     uint8_t buf[64] = {};
     size_t len = conn.prepareTxFrame(buf, sizeof(buf));
     ASSERT_GT(len, 0u);
-    // After TX, tx_seq_no_ = 2 (incremented for next TX), getRxSeqNo() = 2
-    EXPECT_EQ(conn.getRxSeqNo(), 2u);
+    // After TX, tx_seq_no_ = 2 (incremented for next TX)
+    // getRxSeqNo() = last_tx_seq_no_ = 1 (the seq just used)
+    EXPECT_EQ(conn.getTxSeqNo(), 2u);
+    EXPECT_EQ(conn.getRxSeqNo(), 1u);
     uint8_t cmd = 0;
     uint8_t data[16] = {0};
     size_t data_len = 0;
@@ -174,14 +176,14 @@ TEST(FSoESequenceConformance, MasterInitialSeqIsConfigurableToOne) {
 }
 
 TEST(FSoESequenceConformance, SlaveInitialSeqIsConfigurableToOne) {
-    // In the cross-direction TX model, getTxSeqNo() = rx_seq_no_ (the
-    // incremented value used for TX building), which equals rx_seq_no_
-    // before any RX from the master.
+    // getTxSeqNo() = last_rx_seq_no_ (the master's last TX seq, echoed
+    // by the slave — 0 before any RX from the master).
+    // getRxSeqNo() = rx_seq_no_ (expected next master TX seq).
     FSoESlaveConfig cfg = makeSlaveCfg(4, 4);
     cfg.initialSeqNo = 1;
     FSoESlave slave(cfg);
     slave.initialize();
-    EXPECT_EQ(slave.getTxSeqNo(), 1u);  // rx_seq_no_ = 1 (same as RX)
+    EXPECT_EQ(slave.getTxSeqNo(), 0u);  // last_rx_seq_no_ = 0 (no RX yet)
     EXPECT_EQ(slave.getRxSeqNo(), 1u);
 }
 
@@ -211,7 +213,8 @@ TEST(FSoESequenceConformance, MasterResetFrameUsesSeqZero) {
 }
 
 TEST(FSoESequenceConformance, SlaveResetResponseUsesSeqZero) {
-    // When the slave receives a Reset, its response should use seq=0.
+    // When the slave receives a Reset, it stays in Reset state and sends
+    // a Reset response with seq=initialSeqNo+1 (ETG.5100 §8.2.2.2).
     FSoESlave slave(makeSlaveCfg(4, 4));
     slave.initialize();
 
@@ -223,38 +226,38 @@ TEST(FSoESequenceConformance, SlaveResetResponseUsesSeqZero) {
     ASSERT_GT(frame_len, 0u);
     ASSERT_TRUE(slave.processRxFrame(frame, frame_len));
 
-    // Slave should now be in Session state
-    EXPECT_EQ(slave.getState(), ConnectionState::Session);
+    // Slave should still be in Reset state (it sends a Reset response first,
+    // then transitions to Session when it receives a Session command)
+    EXPECT_EQ(slave.getState(), ConnectionState::Reset);
 
-    // Build the slave's TX frame — should be a Session response with
-    // seq=initialSeqNo (0), since tx_seq_no_ was reset to 0 by
-    // processSessionReset and buildSessionResponse uses it directly.
+    // Build the slave's TX frame — should be a Reset response with
+    // seq=initialSeqNo+1 = 1 (ETG.5100 §8.2.2.2).
     uint8_t tx[64];
     size_t tx_len = slave.prepareTxFrame(tx, sizeof(tx));
     ASSERT_GT(tx_len, 0u);
 
-    // Parse with start_crc=0 (CRC chain was reset), seq=0
-    // (or seq=1 if collision avoidance incremented it)
+    // Parse with start_crc=0 (CRC chain was reset), seq=1
+    // (or seq=2 if collision avoidance incremented it)
     uint8_t cmd = 0;
     uint8_t data[16] = {0};
     size_t data_len = 0;
     uint16_t conn_id = 0;
-    // Try seq=0 first, then seq=1 (collision avoidance may have incremented)
+    // Try seq=1 first, then seq=2 (collision avoidance may have incremented)
     bool parsed = CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id,
-                                      0, 0);
+                                      0, 1);
     if (!parsed) {
         parsed = CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id,
-                                     0, 1);
+                                     0, 2);
     }
-    EXPECT_TRUE(parsed) << "Failed to parse with seq=0 or seq=1";
-    EXPECT_EQ(cmd, Command::Session);
+    EXPECT_TRUE(parsed) << "Failed to parse with seq=1 or seq=2";
+    EXPECT_EQ(cmd, Command::Reset);
 }
 
 TEST(FSoESequenceConformance, SeqAdvancesAfterResetFrame) {
     // After a Reset frame (seq=0), the next frame should use seq=1.
-    // In the self-inheriting model:
-    // - Master TX: self-inheriting (own tx_seq_no_, incremented after TX)
-    // - Master RX: self-inheriting (own tx_seq_no_, the incremented value)
+    // Model:
+    // - Master TX: own tx_seq_no_, incremented after TX
+    // - Master RX: expects slave TX seq = last_tx_seq_no_ (the seq just used)
     FSoEMasterConnection conn(makeMasterCfg(4, 4));
     conn.initialize();
     conn.startConnection();
@@ -265,8 +268,8 @@ TEST(FSoESequenceConformance, SeqAdvancesAfterResetFrame) {
     ASSERT_GT(len1, 0u);
     // After prepareTxFrame, tx_seq_no_ = 1 (incremented for next TX)
     EXPECT_EQ(conn.getTxSeqNo(), 1u);
-    // getRxSeqNo() = tx_seq_no_ = 1 (the incremented value for RX parsing)
-    EXPECT_EQ(conn.getRxSeqNo(), 1u);
+    // getRxSeqNo() = last_tx_seq_no_ = 0 (the seq just used, before increment)
+    EXPECT_EQ(conn.getRxSeqNo(), 0u);
 
     // Feed a Reset response to advance to Session.
     // The slave's Reset response uses seq=1 (initial_seq_no + 1).
@@ -276,8 +279,8 @@ TEST(FSoESequenceConformance, SeqAdvancesAfterResetFrame) {
                                         rx_payload, 4, 0x1234, 0, 1);
     ASSERT_TRUE(conn.processRxFrame(rx_frame, rx_len));
     EXPECT_EQ(conn.getState(), ConnectionState::Session);
-    // RX doesn't change tx_seq_no_, so getRxSeqNo() = 1
-    EXPECT_EQ(conn.getRxSeqNo(), 1u);
+    // RX doesn't change last_tx_seq_no_, so getRxSeqNo() = 0
+    EXPECT_EQ(conn.getRxSeqNo(), 0u);
 
     // Second TX: Session frame — should use seq=1
     uint8_t buf2[64] = {};
@@ -285,7 +288,8 @@ TEST(FSoESequenceConformance, SeqAdvancesAfterResetFrame) {
     ASSERT_GT(len2, 0u);
     // After TX, tx_seq_no_ = 2
     EXPECT_EQ(conn.getTxSeqNo(), 2u);
-    EXPECT_EQ(conn.getRxSeqNo(), 2u);
+    // getRxSeqNo() = last_tx_seq_no_ = 1 (the seq just used)
+    EXPECT_EQ(conn.getRxSeqNo(), 1u);
 
     uint8_t cmd = 0;
     uint8_t data[16] = {0};
@@ -304,10 +308,10 @@ TEST(FSoESequenceConformance, SeqAdvancesAfterResetFrame) {
 TEST(FSoESequenceConformance, FullHandshakeSeqProgression) {
     // Verify seq numbers through the full handshake.
     // Model:
-    // - Master TX: self-inheriting, seq = tx_seq_no_, incremented after TX
-    // - Master RX: self-inheriting, uses tx_seq_no_ (the incremented value)
-    // - Slave TX: cross-direction, uses rx_seq_no_ (the incremented value)
-    // - Slave RX: cross-direction, seq = rx_seq_no_, incremented after RX
+    // - Master TX: own tx_seq_no_, incremented after TX
+    // - Master RX: expects slave TX seq = last_tx_seq_no_ (the seq just used)
+    // - Slave TX: echoes last_rx_seq_no_ (master's last TX seq)
+    // - Slave RX: rx_seq_no_ (expected next master TX seq)
     FSoEMasterConnection conn(makeMasterCfg(4, 4));
     conn.initialize();
     conn.startConnection();
@@ -316,30 +320,31 @@ TEST(FSoESequenceConformance, FullHandshakeSeqProgression) {
 
     // Initial state
     EXPECT_EQ(conn.getTxSeqNo(), 0u);
-    EXPECT_EQ(conn.getRxSeqNo(), 0u);  // tx_seq_no_ = 0 (no TX yet)
-    EXPECT_EQ(slave.getTxSeqNo(), 0u);  // rx_seq_no_ = 0 (no RX yet)
+    EXPECT_EQ(conn.getRxSeqNo(), 0u);  // last_tx_seq_no_ = 0 (no TX yet)
+    EXPECT_EQ(slave.getTxSeqNo(), 0u);  // last_rx_seq_no_ = 0 (no RX yet)
     EXPECT_EQ(slave.getRxSeqNo(), 0u);
 
-    // Exchange 1: Master sends Reset (seq=0), slave responds
+    // Exchange 1: Master sends Reset (seq=0), slave sends Reset response (seq=1)
     uint64_t now = 15;
     ASSERT_TRUE(conn.exchangeWith(slave, now));
 
     // After exchange 1:
-    // Master: tx_seq=1 (incremented), rx_seq=1 (tx_seq_no_ after increment)
-    // Slave: tx_seq=1 (rx_seq_no_ after increment), rx_seq=1 (incremented)
+    // Master: tx_seq=1 (incremented), rx_seq=0 (last_tx_seq_no_=0)
+    // Slave: tx_seq=0 (last_rx_seq_no_=0, reset in processSessionReset),
+    //        rx_seq=1 (incremented by validateFrame)
     EXPECT_EQ(conn.getTxSeqNo(), 1u);
-    EXPECT_EQ(conn.getRxSeqNo(), 1u);
-    EXPECT_EQ(slave.getTxSeqNo(), 1u);
+    EXPECT_EQ(conn.getRxSeqNo(), 0u);
+    EXPECT_EQ(slave.getTxSeqNo(), 0u);
     EXPECT_EQ(slave.getRxSeqNo(), 1u);
 
-    // Exchange 2: Master sends Session (seq=1), slave responds
+    // Exchange 2: Master sends Session (seq=1), slave sends Session response (seq=1)
     now += 15;
     ASSERT_TRUE(conn.exchangeWith(slave, now));
-    // Master: tx_seq=2, rx_seq=2 (tx_seq_no_ after increment)
-    // Slave: tx_seq=2 (rx_seq_no_ after increment), rx_seq=2
+    // Master: tx_seq=2, rx_seq=1 (last_tx_seq_no_=1)
+    // Slave: tx_seq=1 (last_rx_seq_no_=1), rx_seq=2
     EXPECT_EQ(conn.getTxSeqNo(), 2u);
-    EXPECT_EQ(conn.getRxSeqNo(), 2u);
-    EXPECT_EQ(slave.getTxSeqNo(), 2u);
+    EXPECT_EQ(conn.getRxSeqNo(), 1u);
+    EXPECT_EQ(slave.getTxSeqNo(), 1u);
     EXPECT_EQ(slave.getRxSeqNo(), 2u);
 
     // Continue to Data
@@ -352,7 +357,8 @@ TEST(FSoESequenceConformance, FullHandshakeSeqProgression) {
 
     // Master TX seq == slave RX seq (master sends, slave receives)
     EXPECT_EQ(conn.getTxSeqNo(), slave.getRxSeqNo());
-    // Master RX seq == slave TX seq (both use the incremented value)
+    // Master RX seq (last_tx_seq_no_) == slave TX seq (last_rx_seq_no_)
+    // Both equal the seq the master used in its last TX.
     EXPECT_EQ(conn.getRxSeqNo(), slave.getTxSeqNo());
 }
 
@@ -381,18 +387,18 @@ TEST(FSoESequenceConformance, MidStreamResetResynchronizesSeq) {
     // Master resets
     conn.resetConnection();
     EXPECT_EQ(conn.getTxSeqNo(), 0u);
-    EXPECT_EQ(conn.getRxSeqNo(), 0u);  // tx_seq_no_ = 0
+    EXPECT_EQ(conn.getRxSeqNo(), 0u);  // last_tx_seq_no_ = 0
 
     // Slave is still at the old seq — exchange should resynchronize
     now += 15;
     ASSERT_TRUE(conn.exchangeWith(slave, now));
 
     // After the Reset exchange:
-    // Master: tx_seq=1 (incremented), rx_seq=1 (tx_seq_no_ after increment)
-    // Slave: tx_seq=1 (rx_seq_no_ after increment), rx_seq=1 (incremented)
+    // Master: tx_seq=1 (incremented), rx_seq=0 (last_tx_seq_no_=0)
+    // Slave: tx_seq=0 (last_rx_seq_no_=0, reset), rx_seq=1 (incremented)
     EXPECT_EQ(conn.getTxSeqNo(), 1u);
-    EXPECT_EQ(conn.getRxSeqNo(), 1u);
-    EXPECT_EQ(slave.getTxSeqNo(), 1u);
+    EXPECT_EQ(conn.getRxSeqNo(), 0u);
+    EXPECT_EQ(slave.getTxSeqNo(), 0u);
     EXPECT_EQ(slave.getRxSeqNo(), 1u);
 
     // Full handshake should complete again
@@ -433,11 +439,11 @@ TEST(FSoESequenceConformance, MultipleResetsResynchronize) {
         ASSERT_TRUE(conn.exchangeWith(slave, now));
 
         // After reset exchange:
-        // Master: tx_seq=1, rx_seq=1 (tx_seq_no_ after increment)
-        // Slave: tx_seq=1 (rx_seq_no_ after increment), rx_seq=1
+        // Master: tx_seq=1 (incremented), rx_seq=0 (last_tx_seq_no_=0)
+        // Slave: tx_seq=0 (last_rx_seq_no_=0, reset), rx_seq=1 (incremented)
         EXPECT_EQ(conn.getTxSeqNo(), 1u) << "Reset iteration " << reset_iter;
-        EXPECT_EQ(conn.getRxSeqNo(), 1u) << "Reset iteration " << reset_iter;
-        EXPECT_EQ(slave.getTxSeqNo(), 1u) << "Reset iteration " << reset_iter;
+        EXPECT_EQ(conn.getRxSeqNo(), 0u) << "Reset iteration " << reset_iter;
+        EXPECT_EQ(slave.getTxSeqNo(), 0u) << "Reset iteration " << reset_iter;
         EXPECT_EQ(slave.getRxSeqNo(), 1u) << "Reset iteration " << reset_iter;
     }
 }
