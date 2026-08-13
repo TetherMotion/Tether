@@ -407,8 +407,8 @@ private:
     // See: https://techoverflow.net/2026/08/12/fsoe-parameter-pdu-master-and-slave-structure/
     uint8_t current_param_index_ = 0;   ///< Legacy: parameter cycle count
     uint16_t parameter_crc_ = 0;        ///< Legacy: parameter CRC (diagnostics)
-    uint8_t param_tx_idx_ = 0;          ///< TX byte offset into param_tx_buf_
-    uint8_t param_rx_idx_ = 0;          ///< RX echo byte offset into param_rx_buf_
+    uint16_t param_tx_idx_ = 0;         ///< TX byte offset into param_tx_buf_
+    uint16_t param_rx_idx_ = 0;         ///< RX echo byte offset into param_rx_buf_
     static constexpr uint16_t PARAM_BUF_SIZE = 256 + 6;  ///< 6-byte header + max app params
     std::vector<uint8_t> param_tx_buf_;  ///< Full parameter payload to send
     std::vector<uint8_t> param_rx_buf_;  ///< Accumulated echo from slave

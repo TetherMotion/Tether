@@ -1220,7 +1220,17 @@ void FSoESlave::processParameter(const uint8_t* data, size_t len) {
         }
 
         // Compute total expected payload size.
+        // Limit to PARAM_BUF_SIZE to prevent a malicious master from
+        // triggering a huge allocation via a large app_param_len.
         size_t total_len = static_cast<size_t>(6) + app_param_len;
+        if (total_len > PARAM_BUF_SIZE) {
+            FSoEErrorDetail detail;
+            snprintf(detail.message, sizeof(detail.message),
+                     "Slave app param length too large: %u (max %u)",
+                     app_param_len, static_cast<uint16_t>(PARAM_BUF_SIZE - 6));
+            handleError(ErrorCode::ParameterError, true, detail);
+            return;
+        }
 
         // Ensure paramBuf_ is sized to the full payload.
         if (paramBuf_.size() < total_len) {
