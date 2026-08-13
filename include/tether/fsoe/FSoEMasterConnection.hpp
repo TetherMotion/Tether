@@ -176,6 +176,10 @@ struct CrcTraceInfo {
     int      fallback_delta;  ///< -1, 0, or +1 (RX only; 0 = no fallback)
     uint16_t conn_id;         ///< Connection ID in the frame
     size_t   data_len;        ///< SafeData length in bytes
+    /// SafeData bytes that flow into the CRC computation (first data_len
+    /// entries are valid).  The CRC is computed over: start_crc(Lo,Hi),
+    /// conn_id(Lo,Hi), seq(Lo,Hi), command, data[0..data_len-1].
+    uint8_t  data[18];        ///< SafeData payload (max MAX_PARSE_DATA_SIZE = 18)
 };
 
 using CrcTraceCallback = std::function<void(const CrcTraceInfo&)>;
@@ -259,14 +263,17 @@ public:
     void resetStats();
     std::string getDiagnostics() const;
 
-    /// Get the current TX CRC state (self-inheriting TX).
-    /// startCrc = last_tx_crc0_, seqNo = tx_seq_no_
-    uint16_t getTxLastCrc0() const { return last_tx_crc0_; }
+    /// Get the TX CRC state: the start_crc that the master chains from
+    /// when building its next TX frame.  With cross-direction inheritance,
+    /// this is the slave's last TX CRC0 (last_rx_crc0_).
+    /// Tests that parse a master TX frame should use this as start_crc.
+    uint16_t getTxLastCrc0() const { return last_rx_crc0_; }
     uint16_t getTxSeqNo() const { return tx_seq_no_; }
-    /// Get the current RX CRC state (self-inheriting RX — slave uses
-    /// rx_seq_no_ after incrementing, master uses tx_seq_no_ after
-    /// incrementing).
-    /// startCrc = last_tx_crc0_, seqNo = tx_seq_no_
+    /// Get the RX CRC state: the start_crc that the master uses to verify
+    /// incoming slave TX frames.  With cross-direction inheritance, the
+    /// slave's TX chains from the master's last TX CRC0 (last_tx_crc0_).
+    /// Tests that build frames simulating slave→master TX should use this
+    /// as start_crc.
     uint16_t getRxLastCrc0() const { return last_tx_crc0_; }
     uint16_t getRxSeqNo() const { return tx_seq_no_; }
 

@@ -133,6 +133,12 @@ add_tether_example(reset_slaves_al
 add_tether_example(slave_read_identity
     LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common tether_examples_common)
 
+# --- Realtime kernel + network diagnostics example ---
+# Runs a fake PDO loop while sweeping priorities, frequencies and CPU affinity,
+# reporting color-coded timing, transmit latency and CPU-usage statistics.
+add_tether_example(realtime_diagnostics
+    LIBRARIES tether_examples_common tether_hal tether_common)
+
 # ---ATI Axia80 F/T Sensor streaming example ---
 # Streams 6-DOF force/torque data with engineering-unit conversion.
 # Links tether_esi for optional --esi-xml register verification, so it is
