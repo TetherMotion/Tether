@@ -1265,7 +1265,7 @@ int main(int argc, char** argv) {
                 std::ostringstream cpu_oss;
                 cpu_oss << std::fixed << std::setprecision(1) << cpu_pct;
                 std::ostringstream lost_oss;
-                lost_oss << std::fixed << std::setprecision(2) << lost_pct;
+                lost_oss << std::fixed << std::setprecision(5) << lost_pct;
 
                 table_oss << std::left
                           << std::setw(8) << formatFrequency(freq)
