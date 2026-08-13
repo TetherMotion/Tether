@@ -600,7 +600,7 @@ void printRecommendations(const ColorTags& c,
                 100.0 * static_cast<double>(total_lost_resp) /
                 static_cast<double>(total_cycles_all);
             std::cout << "  Response loss:       " << std::fixed
-                      << std::setprecision(2) << resp_loss_pct << "% ("
+                      << std::setprecision(5) << resp_loss_pct << "% ("
                       << total_lost_resp << "/" << total_cycles_all
                       << " cycles without response)\n";
         }
@@ -1289,7 +1289,7 @@ int main(int argc, char** argv) {
                                   100.0
                             : 0.0;
                     std::ostringstream rxloss_oss;
-                    rxloss_oss << std::fixed << std::setprecision(2)
+                    rxloss_oss << std::fixed << std::setprecision(5)
                                << rxloss_pct << "%";
                     table_oss
                         << coloredValue(color, rxd_grade, rs.mean_us, 1, 14, "µs")
