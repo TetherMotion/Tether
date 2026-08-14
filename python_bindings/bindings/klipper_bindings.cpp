@@ -303,6 +303,7 @@ PYBIND11_MODULE(_klipper, m) {
         .def_property_readonly("progress", &VirtualSdcard::progress);
 
     // Pressure advance
+#if TETHER_ENABLE_PRESSURE_ADVANCE
     py::class_<PressureAdvanceParams>(m, "PressureAdvanceParams")
         .def(py::init<>())
         .def_readwrite("pressure_advance", &PressureAdvanceParams::pressureAdvance)
@@ -311,10 +312,13 @@ PYBIND11_MODULE(_klipper, m) {
     py::class_<PressureAdvance, std::shared_ptr<PressureAdvance>>(m, "PressureAdvance")
         .def(py::init<PressureAdvanceParams>())
         .def("set_params", &PressureAdvance::setParams)
+        .def("set_enabled", &PressureAdvance::setEnabled)
+        .def("is_enabled", &PressureAdvance::isEnabled)
         .def("is_active", &PressureAdvance::isActive)
         .def("compute_extrusion", &PressureAdvance::computeExtrusion)
         .def("smooth_extrusion_rate", &PressureAdvance::smoothExtrusionRate)
         .def("reset", &PressureAdvance::reset);
+#endif
 
     // Input shaper
     py::enum_<ShaperType>(m, "ShaperType")

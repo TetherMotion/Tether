@@ -26,6 +26,10 @@
 #include "tether/kinematics/KinematicsTransform.hpp"
 #include "tether/motion_planner/MotionPlan.hpp"
 
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+#include "tether/klipper/klippy/PressureAdvance.hpp"
+#endif
+
 #include <cstdint>
 #include <vector>
 #include <array>
@@ -42,6 +46,20 @@ struct AxisConfig {
     /// Direction invert (true = reverse direction).
     bool invertDirection = false;
 };
+
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+/// @brief Pressure advance configuration for the motion translator.
+///
+/// PA is applied only when `enabled` is true AND `pressureAdvance > 0`.
+/// This allows compile-time inclusion (TETHER_ENABLE_PRESSURE_ADVANCE=ON)
+/// with runtime opt-in via config or G-code.
+struct PressureAdvanceConfig {
+    bool enabled = false;            ///< Runtime enable/disable (default: off)
+    double pressureAdvance = 0.0;    ///< PA amount in seconds
+    double smoothTime = 0.0;         ///< Smoothing window in seconds (0 = no smoothing)
+    size_t extruderAxis = 3;         ///< Axis index of the extruder (typically 3 = E)
+};
+#endif
 
 /// @brief A translated step sequence for one axis.
 struct AxisStepSequence {
@@ -97,11 +115,22 @@ public:
     /// @brief Get the kinematics transform.
     const KinematicsTransform& kinematicsTransform() const { return kinematics_; }
 
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+    /// @brief Set pressure advance configuration for extruder step generation.
+    void setPressureAdvanceConfig(const PressureAdvanceConfig& pa) { paConfig_ = pa; }
+
+    /// @brief Get the current pressure advance configuration.
+    const PressureAdvanceConfig& pressureAdvanceConfig() const { return paConfig_; }
+#endif
+
 private:
     std::array<AxisConfig, Dim> axisConfigs_;
     std::array<uint8_t, Dim> axisOids_;
     std::string sourceLabel_;
     KinematicsTransform kinematics_;
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+    PressureAdvanceConfig paConfig_{};
+#endif
 };
 
 // ---------------------------------------------------------------------------
@@ -185,6 +214,55 @@ std::vector<AxisStepSequence> MotionTranslator<Dim, T>::translate(
             axisVel[axis][i] = vel * axisConfigs_[axis].stepsPerMm; // steps/sec
         }
     }
+
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+    // Apply pressure advance to the extruder axis.
+    //
+    // The PA-adjusted position is:  adjusted_e = e + PA * smoothed_velocity
+    //
+    // We smooth the extruder velocity with a centered moving average over the
+    // smoothTime window, then recompute the E-axis step positions. The step
+    // deltas (computed later) naturally become:  Δe + PA * Δv, which is the
+    // correct PA adjustment per segment.
+    if (paConfig_.enabled && paConfig_.pressureAdvance > 0.0 && paConfig_.extruderAxis < Dim) {
+        const size_t eAxis = paConfig_.extruderAxis;
+        const double pa = paConfig_.pressureAdvance;
+        const double spm = axisConfigs_[eAxis].stepsPerMm;
+
+        // Recover raw E positions in mm (axisSteps already has invertDirection
+        // applied, so the PA offset is computed in the same frame).
+        std::vector<double> rawPosMm(numSamples + 1);
+        for (int i = 0; i <= numSamples; ++i)
+            rawPosMm[i] = static_cast<double>(axisSteps[eAxis][i]) / spm;
+
+        // Smooth velocity (mm/s) with a centered moving average.
+        std::vector<double> smoothedVelMm(numSamples + 1, 0.0);
+        if (paConfig_.smoothTime > 0.0) {
+            int halfWindow = std::max(1,
+                static_cast<int>(paConfig_.smoothTime / sampleIntervalSec / 2.0));
+            for (int i = 0; i <= numSamples; ++i) {
+                double sum = 0.0;
+                int count = 0;
+                for (int j = std::max(0, i - halfWindow);
+                     j <= std::min(numSamples, i + halfWindow); ++j) {
+                    sum += axisVel[eAxis][j] / spm; // steps/sec → mm/s
+                    ++count;
+                }
+                smoothedVelMm[i] = (count > 0) ? sum / count : 0.0;
+            }
+        } else {
+            for (int i = 0; i <= numSamples; ++i)
+                smoothedVelMm[i] = axisVel[eAxis][i] / spm;
+        }
+
+        // Recompute E-axis step positions with PA offset.
+        for (int i = 0; i <= numSamples; ++i) {
+            double adjustedPos = rawPosMm[i] + pa * smoothedVelMm[i];
+            axisSteps[eAxis][i] = static_cast<int64_t>(
+                std::round(adjustedPos * spm));
+        }
+    }
+#endif
 
     // Build step sequences per axis with acceleration grouping.
     // For each axis, we compute per-step intervals from the velocity

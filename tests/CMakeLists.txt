@@ -1040,12 +1040,17 @@ if(TETHER_BUILD_KLIPPER)
     file(GLOB KLIPPER_TEST_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/klipper/*.cpp"
     )
+    set(_klipper_test_defs "TETHER_ENABLE_KLIPPER=1")
+    if(TETHER_ENABLE_PRESSURE_ADVANCE)
+        list(APPEND _klipper_test_defs "TETHER_ENABLE_PRESSURE_ADVANCE=1")
+    endif()
     create_module_test_timeout(klipper
         "${KLIPPER_TEST_SOURCES}"
         "tether_klipper;tether_common;tether_motion_planner;tether_gcode;tether_export;tether_controls;tether_simulation;tether_io_protocol"
-        "TETHER_ENABLE_KLIPPER=1"
+        "${_klipper_test_defs}"
         120
     )
+    unset(_klipper_test_defs)
 endif()
 
 if(TETHER_BUILD_KLIPPER AND TETHER_ENABLE_KLIPPER_HTTP)

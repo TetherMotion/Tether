@@ -234,10 +234,20 @@
         };
 
         // Pressure advance / input shaper
+#if TETHER_ENABLE_PRESSURE_ADVANCE
         cb.setPressureAdvance = [this](int extruder, double pa) {
+            pressureAdvance_->setEnabled(true);
             pressureAdvance_->setParams({pa, pressureAdvance_->params().smoothTime});
             extruderObj_->setPressureAdvance(pa);
+            // Sync to the motion dispatcher for step generation.
+            if (motionDispatcher_) {
+                auto paCfg = motionDispatcher_->pressureAdvanceConfig();
+                paCfg.enabled = true;
+                paCfg.pressureAdvance = pa;
+                motionDispatcher_->setPressureAdvanceConfig(paCfg);
+            }
         };
+#endif
         cb.setInputShaperParams = [this](const std::string&, double freq, const std::string& type) {
             InputShaperParams params = inputShaper_->params();
             params.freq = freq;

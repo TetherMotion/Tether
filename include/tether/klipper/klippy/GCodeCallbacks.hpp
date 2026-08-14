@@ -114,8 +114,10 @@ struct GcodeCallbacks {
 
     // --- Advanced motion settings ---
 
+#if TETHER_ENABLE_PRESSURE_ADVANCE
     /// @brief Set pressure advance (M900).
     std::function<void(int extruder, double pa)> setPressureAdvance;
+#endif
 
     /// @brief Set input shaper parameters (M593).
     std::function<void(const std::string& axis, double freq, const std::string& type)> setInputShaperParams;

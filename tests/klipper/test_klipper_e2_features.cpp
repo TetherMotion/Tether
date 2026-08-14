@@ -110,8 +110,14 @@ microsteps = 16
 nozzle_diameter = 0.4
 filament_diameter = 1.75
 max_extrude_only_velocity = 25
+)"
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+R"(
 pressure_advance = 0.045
 smooth_time = 0.02
+)"
+#endif
+R"(
 min_extrude_temp = 180
 pid_Kp = 14.5
 pid_Ki = 0.5
@@ -125,8 +131,10 @@ pid_Kd = 100.0
     EXPECT_NEAR(settings.nozzleDiameter, 0.4, 1e-9);
     EXPECT_NEAR(settings.filamentDiameter, 1.75, 1e-9);
     EXPECT_NEAR(settings.maxFeedrate["e"], 25.0, 1e-9);
+#if TETHER_ENABLE_PRESSURE_ADVANCE
     EXPECT_NEAR(settings.extruderPressureAdvance, 0.045, 1e-9);
     EXPECT_NEAR(settings.extruderSmoothTime, 0.02, 1e-9);
+#endif
     EXPECT_NEAR(settings.hotendKp, 14.5, 1e-9);
     EXPECT_NEAR(settings.hotendKi, 0.5, 1e-9);
     EXPECT_NEAR(settings.hotendKd, 100.0, 1e-9);

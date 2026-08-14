@@ -65,6 +65,31 @@
             inputShaper_->setParams(paramsX);
         }
 
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+        // --- Pressure advance (runtime opt-in from config) ---
+        // When pressure_advance is specified in [extruder] config, enable PA
+        // and sync to the motion dispatcher for step generation.
+        if (settings_.extruderPressureAdvance > 0.0) {
+            pressureAdvance_->setEnabled(true);
+            pressureAdvance_->setParams({settings_.extruderPressureAdvance,
+                                         settings_.extruderSmoothTime});
+            if (extruderObj_) {
+                extruderObj_->setPressureAdvance(settings_.extruderPressureAdvance);
+            }
+            if (pressureAdvanceObj_) {
+                pressureAdvanceObj_->setPressureAdvance(settings_.extruderPressureAdvance);
+                pressureAdvanceObj_->setSmoothTime(settings_.extruderSmoothTime);
+            }
+            if (motionDispatcher_) {
+                auto paCfg = motionDispatcher_->pressureAdvanceConfig();
+                paCfg.enabled = true;
+                paCfg.pressureAdvance = settings_.extruderPressureAdvance;
+                paCfg.smoothTime = settings_.extruderSmoothTime;
+                motionDispatcher_->setPressureAdvanceConfig(paCfg);
+            }
+        }
+#endif
+
         // --- Skew correction ---
         skewCorrection_->setParams(settings_.skewParams);
 
@@ -384,12 +409,14 @@
                 if (section.has("max_extrude_only_velocity")) {
                     try { settings_.maxFeedrate["e"] = section.getDouble("max_extrude_only_velocity"); } catch (...) {}
                 }
+#if TETHER_ENABLE_PRESSURE_ADVANCE
                 if (section.has("pressure_advance")) {
                     try { settings_.extruderPressureAdvance = section.getDouble("pressure_advance"); } catch (...) {}
                 }
                 if (section.has("smooth_time")) {
                     try { settings_.extruderSmoothTime = section.getDouble("smooth_time"); } catch (...) {}
                 }
+#endif
                 if (section.has("min_extrude_temp")) {
                     try { config_.minExtrudeTemp = section.getDouble("min_extrude_temp"); } catch (...) {}
                 }

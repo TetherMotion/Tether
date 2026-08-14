@@ -227,6 +227,7 @@ option(TETHER_BUILD_DESTABILIZER "Build destabilizer adversarial testing" ON)
 option(TETHER_BUILD_IO_PROTOCOL "Build IO protocol (SLIP-based parameter streaming)" ON)
 option(TETHER_BUILD_KLIPPER "Build Klipper protocol implementation" ON)
 option(TETHER_ENABLE_KLIPPER_CAN "Enable Klipper CAN transport (requires SocketCAN)" OFF)
+option(TETHER_ENABLE_PRESSURE_ADVANCE "Enable pressure advance for extruders (compile-time; runtime opt-in)" ON)
 
 # Native HTTP/WebSocket server for Mainsail/Fluidd (requires Drogon).
 # Default: ON if Drogon is found, OFF if not.
@@ -518,6 +519,14 @@ if(TETHER_ENABLE_KLIPPER_HTTP)
         message(FATAL_ERROR "TETHER_ENABLE_KLIPPER_HTTP requires TETHER_BUILD_KLIPPER=ON.")
     endif()
     add_compile_definitions(TETHER_ENABLE_KLIPPER_HTTP=1)
+endif()
+
+# Validate and enable the pressure advance feature.
+if(TETHER_ENABLE_PRESSURE_ADVANCE)
+    if(NOT TETHER_BUILD_KLIPPER)
+        message(FATAL_ERROR "TETHER_ENABLE_PRESSURE_ADVANCE requires TETHER_BUILD_KLIPPER=ON.")
+    endif()
+    add_compile_definitions(TETHER_ENABLE_PRESSURE_ADVANCE=1)
 endif()
 
 # Propagate blend runtime checks option to all targets

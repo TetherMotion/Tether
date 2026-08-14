@@ -162,10 +162,12 @@ int main() {
     isObj.setShaperFreqY(55.0);
     printStatus("input_shaper", isObj.status({}));
 
+#if TETHER_ENABLE_PRESSURE_ADVANCE
     PressureAdvanceObject paObj;
     paObj.setPressureAdvance(0.05);
     paObj.setSmoothTime(0.040);
     printStatus("pressure_advance", paObj.status({}));
+#endif
 
     SkewCorrectionObject skewObj;
     skewObj.setSkew(0.123, 0.0, 0.0);

@@ -50,10 +50,12 @@ public:
     }
 
     void setName(const std::string& n) { name_ = n; }
+#if TETHER_ENABLE_PRESSURE_ADVANCE
     void setPressureAdvance(double pa) { pressureAdvance_ = pa; }
+    double pressureAdvance() const { return pressureAdvance_; }
+#endif
     void setMinExtrudeTemp(double t) { minExtrudeTemp_ = t; }
     void setMotionQueue(const std::string& q) { motionQueue_ = q; }
-    double pressureAdvance() const { return pressureAdvance_; }
     double minExtrudeTemp() const { return minExtrudeTemp_; }
     const std::string& motionQueue() const { return motionQueue_; }
 

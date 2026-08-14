@@ -426,7 +426,9 @@ public:
                 callbacks_.waitForMoves();
             }
             return true;
-        } else if (g.code == "M900") {
+        }
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+        else if (g.code == "M900") {
             // Set pressure advance
             if (callbacks_.setPressureAdvance) {
                 int extruder = static_cast<int>(g.get('T', 0));
@@ -434,7 +436,9 @@ public:
                 callbacks_.setPressureAdvance(extruder, pa);
             }
             return true;
-        } else if (g.code == "M593") {
+        }
+#endif
+        else if (g.code == "M593") {
             // Set input shaper
             if (callbacks_.setInputShaperParams) {
                 double freq = g.get('F', g.get('S', 0.0));
