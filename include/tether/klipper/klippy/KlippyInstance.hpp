@@ -162,7 +162,7 @@ public:
 
     /// @return Reference to the instance mutex. Use for multi-threaded
     ///         access synchronization (see threading model above).
-    std::mutex& mutex() { return instanceMutex_; }
+    std::recursive_mutex& mutex() { return instanceMutex_; }
 
     KlippyServer& server() { return server_; }
     KlippyUdsServer& udsTransport() { return udsTransport_; }
@@ -392,6 +392,7 @@ public:
 
     /// @brief Execute a G-code script.
     bool executeGcode(const std::string& script) {
+        std::lock_guard<std::recursive_mutex> lock(instanceMutex_);
         return gcode_.execute(script);
     }
 
@@ -535,6 +536,7 @@ public:
     /// Executes any delayed G-codes whose scheduled time has passed.
     /// Also checks idle timeout and executes timeout G-code if expired.
     void tick() {
+        std::lock_guard<std::recursive_mutex> lock(instanceMutex_);
         auto now = std::chrono::steady_clock::now();
 
         // Pump the motion backend so protocol messages flow.
@@ -806,7 +808,7 @@ private:
     // Internal state
     // ------------------------------------------------------------------
 
-    std::mutex instanceMutex_; ///< For multi-threaded access (see threading model)
+    std::recursive_mutex instanceMutex_; ///< Protects KlippyInstance state (recursive: tick() may call executeGcode())
     KlippyInstanceConfig config_;
     KlippyServer server_;
     KlippyUdsServer udsTransport_;

@@ -81,8 +81,9 @@ TEST_F(KlippyHostTest, SendCommand) {
 TEST_F(KlippyHostTest, AllocateOid) {
     host_->connect();
     ASSERT_TRUE(host_->downloadDictionary([this](){ dev_->pump(); }));
-    uint8_t oid = host_->allocateOid("stepper");
-    EXPECT_LT(oid, 255u);
+    auto oid = host_->allocateOid("stepper");
+    ASSERT_TRUE(oid.has_value());
+    EXPECT_LT(*oid, 255u);
 }
 
 TEST_F(KlippyHostTest, OnResponse) {

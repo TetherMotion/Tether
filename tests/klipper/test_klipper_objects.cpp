@@ -28,8 +28,9 @@ TEST(KlipperOidAllocator, BlockAllocation) {
 
 TEST(KlipperOidAllocator, AssignAndLookup) {
     OidAllocator alloc;
-    alloc.allocate();
-    alloc.assign(0, "stepper");
+    auto oid = alloc.allocate();
+    ASSERT_TRUE(oid.has_value());
+    alloc.assign(*oid, "stepper");
     EXPECT_EQ(alloc.typeOf(0), "stepper");
     EXPECT_EQ(alloc.typeOf(1), "");
 }

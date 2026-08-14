@@ -33,6 +33,7 @@
 
 #include <memory>
 #include <functional>
+#include <optional>
 #include <vector>
 #include <unordered_map>
 #include <string>
@@ -61,7 +62,8 @@ public:
     bool syncClock(std::function<void()> devicePump = nullptr);
 
     /// @brief Allocate an OID for a peripheral type.
-    uint8_t allocateOid(const std::string& type);
+    /// @return The allocated OID, or std::nullopt if OIDs are exhausted.
+    std::optional<uint8_t> allocateOid(const std::string& type);
 
     /// @brief Send a command by format string with parameter values.
     bool sendCommand(const std::string& formatStr,

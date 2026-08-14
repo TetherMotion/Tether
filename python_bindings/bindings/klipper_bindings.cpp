@@ -387,7 +387,7 @@ PYBIND11_MODULE(_klipper, m) {
         .def("execute_gcode", &KlippyInstance::executeGcode)
         .def("register_macro", &KlippyInstance::registerMacro)
         .def("load_config", &KlippyInstance::loadConfig)
-        .def_property_readonly("server", [](KlippyInstance& i) -> KlippyUdsServer& { return i.server(); }, py::return_value_policy::reference)
+        .def_property_readonly("server", [](KlippyInstance& i) -> KlippyServer& { return i.server(); }, py::return_value_policy::reference)
         .def_property_readonly("sdcard", [](KlippyInstance& i) -> VirtualSdcard& { return i.sdcard(); }, py::return_value_policy::reference)
         .def_property_readonly("macros", [](KlippyInstance& i) -> GcodeMacroRegistry& { return i.macros(); }, py::return_value_policy::reference);
 

@@ -20,19 +20,23 @@ using namespace tether::klipper::objects;
 TEST(KlipperOidAllocatorExt, AllocateSequential) {
     OidAllocator alloc;
     for (uint8_t i = 0; i < 10; ++i) {
-        EXPECT_EQ(alloc.allocate(), i);
+        auto oid = alloc.allocate();
+        ASSERT_TRUE(oid.has_value());
+        EXPECT_EQ(*oid, i);
     }
     EXPECT_EQ(alloc.nextOid(), 10);
 }
 
 TEST(KlipperOidAllocatorExt, AllocateBlock) {
     OidAllocator alloc;
-    uint8_t first = alloc.allocateBlock(5);
-    EXPECT_EQ(first, 0);
+    auto first = alloc.allocateBlock(5);
+    ASSERT_TRUE(first.has_value());
+    EXPECT_EQ(*first, 0);
     EXPECT_EQ(alloc.nextOid(), 5);
 
-    uint8_t second = alloc.allocateBlock(3);
-    EXPECT_EQ(second, 5);
+    auto second = alloc.allocateBlock(3);
+    ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(*second, 5);
     EXPECT_EQ(alloc.nextOid(), 8);
 }
 
@@ -41,22 +45,25 @@ TEST(KlipperOidAllocatorExt, AllocateBlockTooLarge) {
     // Allocate most OIDs
     alloc.allocateBlock(250);
     // Try to allocate more than remaining
-    uint8_t result = alloc.allocateBlock(10);
-    // Should return 255 (failure)
-    EXPECT_EQ(result, 255);
+    auto result = alloc.allocateBlock(10);
+    // Should return nullopt (failure)
+    EXPECT_FALSE(result.has_value());
+    EXPECT_TRUE(alloc.isFull());
 }
 
 TEST(KlipperOidAllocatorExt, AssignAndLookupType) {
     OidAllocator alloc;
-    uint8_t oid = alloc.allocate();
-    alloc.assign(oid, "stepper");
-    EXPECT_EQ(alloc.typeOf(oid), "stepper");
+    auto oid = alloc.allocate();
+    ASSERT_TRUE(oid.has_value());
+    alloc.assign(*oid, "stepper");
+    EXPECT_EQ(alloc.typeOf(*oid), "stepper");
 }
 
 TEST(KlipperOidAllocatorExt, LookupUnassignedType) {
     OidAllocator alloc;
-    uint8_t oid = alloc.allocate();
-    EXPECT_EQ(alloc.typeOf(oid), ""); // Not assigned yet
+    auto oid = alloc.allocate();
+    ASSERT_TRUE(oid.has_value());
+    EXPECT_EQ(alloc.typeOf(*oid), ""); // Not assigned yet
 }
 
 TEST(KlipperOidAllocatorExt, LookupNonexistentOid) {
@@ -83,9 +90,8 @@ TEST(KlipperOidAllocatorExt, IsFullFalseInitially) {
 TEST(KlipperOidAllocatorExt, ManyAllocations) {
     OidAllocator alloc;
     for (int i = 0; i < 200; ++i) {
-        uint8_t oid = alloc.allocate();
-        // OIDs are uint8_t, will wrap at 255
-        (void)oid;
+        auto oid = alloc.allocate();
+        ASSERT_TRUE(oid.has_value());
     }
 }
 

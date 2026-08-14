@@ -237,8 +237,9 @@ TEST(KlippyHostReset, ClearsOidAllocator) {
     // after reset + reconnect, allocation should start from 0 again).
     host.reset();
     host.connect();
-    uint8_t oid = host.allocateOid("stepper");
-    EXPECT_EQ(oid, 0u);
+    auto oid = host.allocateOid("stepper");
+    ASSERT_TRUE(oid.has_value());
+    EXPECT_EQ(*oid, 0u);
 }
 
 TEST(KlippyHostReset, BlockParseStatsAccessible) {

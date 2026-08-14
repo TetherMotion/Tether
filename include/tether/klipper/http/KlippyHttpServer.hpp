@@ -273,6 +273,10 @@ private:
     std::thread refreshThread_;
     std::atomic<bool> refreshRunning_{false};
 
+    // Drogon event loop thread (joined in stop() to prevent use-after-free)
+    std::thread drogonThread_;
+    std::atomic<bool> drogonStopped_{false};
+
     // File root paths
     std::map<std::string, std::string> fileRoots_;
 };
