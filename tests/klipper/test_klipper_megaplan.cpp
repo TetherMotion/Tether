@@ -88,6 +88,7 @@ TEST(KlipperPrinterObjects, ExtruderObject) {
     EXPECT_TRUE(status["can_extrude"].asBool()); // 200 > 170 default
 }
 
+#if TETHER_ENABLE_PRESSURE_ADVANCE
 TEST(KlipperPrinterObjects, ExtruderObjectPressureAdvance) {
     auto heater = std::make_shared<Heater>(0, [](double) {}, []() { return 25.0; });
     ExtruderObject obj(heater);
@@ -95,6 +96,7 @@ TEST(KlipperPrinterObjects, ExtruderObjectPressureAdvance) {
     auto status = obj.status({"pressure_advance"});
     EXPECT_NEAR(status["pressure_advance"].asDouble(), 0.045, 0.001);
 }
+#endif
 
 TEST(KlipperPrinterObjects, ExtruderObjectCannotExtrude) {
     auto heater = std::make_shared<Heater>(0, [](double) {}, []() { return 25.0; });
@@ -348,6 +350,7 @@ TEST(KlipperGcodeNew, G17G18G19ArcPlane) {
     EXPECT_EQ(exec.state().arcPlane(), 2);
 }
 
+#if TETHER_ENABLE_PRESSURE_ADVANCE
 TEST(KlipperGcodeNew, M900PressureAdvance) {
     int setExtruder = -1;
     double setPa = -1;
@@ -358,6 +361,7 @@ TEST(KlipperGcodeNew, M900PressureAdvance) {
     EXPECT_EQ(setExtruder, 0);
     EXPECT_NEAR(setPa, 0.045, 0.001);
 }
+#endif
 
 TEST(KlipperGcodeNew, M593InputShaper) {
     std::string setAxis, setType;
@@ -532,10 +536,12 @@ TEST_F(KlippyInstanceTest, SdcardOperations) {
     EXPECT_FALSE(sd.isPaused());
 }
 
+#if TETHER_ENABLE_PRESSURE_ADVANCE
 TEST_F(KlippyInstanceTest, PressureAdvanceUpdate) {
     instance_->executeGcode("M900 K0.045");
     EXPECT_NEAR(instance_->pressureAdvance().params().pressureAdvance, 0.045, 0.001);
 }
+#endif
 
 TEST_F(KlippyInstanceTest, InputShaperUpdate) {
     instance_->executeGcode("M593 X F50 S2");

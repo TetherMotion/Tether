@@ -983,17 +983,32 @@
         }
 
         // Direct setting commands
+#if TETHER_ENABLE_PRESSURE_ADVANCE
         if (cmd == "SET_PRESSURE_ADVANCE") {
             double pa = g.getNamedDouble("ADVANCE", 0.0);
             double smoothTime = g.getNamedDouble("SMOOTH_TIME", 0.040);
+            pressureAdvance_->setEnabled(true);
+            pressureAdvance_->setParams({pa, smoothTime});
             if (pressureAdvanceObj_) {
                 pressureAdvanceObj_->setPressureAdvance(pa);
                 pressureAdvanceObj_->setSmoothTime(smoothTime);
+            }
+            if (extruderObj_) {
+                extruderObj_->setPressureAdvance(pa);
+            }
+            // Sync to the motion dispatcher for step generation.
+            if (motionDispatcher_) {
+                auto paCfg = motionDispatcher_->pressureAdvanceConfig();
+                paCfg.enabled = true;
+                paCfg.pressureAdvance = pa;
+                paCfg.smoothTime = smoothTime;
+                motionDispatcher_->setPressureAdvanceConfig(paCfg);
             }
             respond("// pressure_advance: advance=" + std::to_string(pa) +
                     " smooth_time=" + std::to_string(smoothTime) + "\n");
             return true;
         }
+#endif
 
         if (cmd == "SET_INPUT_SHAPER") {
             std::string shaperX = g.getNamed("SHAPER_FREQ_X", "");

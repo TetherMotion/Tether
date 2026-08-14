@@ -8,7 +8,9 @@
 
 #include "tether/klipper/klippy/VirtualSdcard.hpp"
 #include "tether/klipper/klippy/BedMeshPrinterObject.hpp"
+#if TETHER_ENABLE_PRESSURE_ADVANCE
 #include "tether/klipper/klippy/PressureAdvance.hpp"
+#endif
 #include "tether/klipper/klippy/InputShaper.hpp"
 #include "tether/klipper/klippy/FirmwareRetraction.hpp"
 #include "tether/kinematics/DeltaPrinter.hpp"

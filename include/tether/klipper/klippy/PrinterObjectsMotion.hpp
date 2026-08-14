@@ -78,6 +78,7 @@ private:
     std::string shaperTypeY_ = "ei";
 };
 
+#if TETHER_ENABLE_PRESSURE_ADVANCE
 /// @brief Pressure advance printer object (pressure_advance).
 class PressureAdvanceObject : public PrinterObject {
 public:
@@ -102,6 +103,7 @@ private:
     double pressureAdvance_ = 0.0;
     double smoothTime_ = 0.040;
 };
+#endif // TETHER_ENABLE_PRESSURE_ADVANCE
 
 /// @brief Force move printer object (force_move).
 class ForceMoveObject : public PrinterObject {

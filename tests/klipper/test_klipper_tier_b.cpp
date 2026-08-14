@@ -210,7 +210,9 @@ TEST(TierBPrinterObjects, NewObjectsExist) {
     EXPECT_EQ(std::make_shared<DeltaCalibrateObject>()->name(), "delta_calibrate");
     EXPECT_EQ(std::make_shared<SkewCorrectionObject>()->name(), "skew_correction");
     EXPECT_EQ(std::make_shared<InputShaperObject>()->name(), "input_shaper");
+#if TETHER_ENABLE_PRESSURE_ADVANCE
     EXPECT_EQ(std::make_shared<PressureAdvanceObject>()->name(), "pressure_advance");
+#endif
     EXPECT_EQ(std::make_shared<ExcludeObjectObject>()->name(), "exclude_object");
     EXPECT_EQ(std::make_shared<ZThermalAdjustObject>()->name(), "z_thermal_adjust");
     EXPECT_EQ(std::make_shared<HeaterGenericObject>("heater_generic")->name(), "heater_generic");

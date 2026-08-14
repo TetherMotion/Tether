@@ -13,6 +13,10 @@ and Moonraker-compatible UDS API.
 # Configure (with Klipper support)
 cmake -B build -DTETHER_ENABLE_KLIPPER=1
 
+# Configure with pressure advance (compile-time default ON, runtime opt-in)
+# To compile out PA entirely: -DTETHER_ENABLE_PRESSURE_ADVANCE=OFF
+cmake -B build -DTETHER_ENABLE_KLIPPER=1 -DTETHER_ENABLE_PRESSURE_ADVANCE=ON
+
 # Build all
 cmake --build build -j$(nproc)
 

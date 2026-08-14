@@ -19,7 +19,9 @@
 #include "tether/klipper/klippy/PrinterObjectsE2.hpp"
 #include "tether/klipper/klippy/VirtualSdcard.hpp"
 #include "tether/klipper/klippy/FirmwareRetraction.hpp"
+#if TETHER_ENABLE_PRESSURE_ADVANCE
 #include "tether/klipper/klippy/PressureAdvance.hpp"
+#endif
 #include "tether/klipper/klippy/InputShaper.hpp"
 #include "tether/klipper/objects/BedLevel.hpp"
 #include "tether/klipper/objects/Peripherals.hpp"
@@ -80,7 +82,9 @@ struct PrinterObjectRegistry {
     std::shared_ptr<DeltaCalibrateObject> deltaCalibrateObj_;
     std::shared_ptr<SkewCorrectionObject> skewCorrectionObj_;
     std::shared_ptr<InputShaperObject> inputShaperObj_;
+#if TETHER_ENABLE_PRESSURE_ADVANCE
     std::shared_ptr<PressureAdvanceObject> pressureAdvanceObj_;
+#endif
     std::shared_ptr<ExcludeObjectObject> excludeObjectObj_;
     std::shared_ptr<ZThermalAdjustObject> zThermalAdjustObj_;
     std::shared_ptr<HeaterGenericObject> heaterGenericObj_;

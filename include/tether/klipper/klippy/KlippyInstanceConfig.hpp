@@ -127,8 +127,10 @@ struct KlippySettings {
 
     // Extruder
     double nozzleDiameter = 0.4;
+#if TETHER_ENABLE_PRESSURE_ADVANCE
     double extruderPressureAdvance = 0.0;
     double extruderSmoothTime = 0.040;
+#endif
 
     // Heater bed
     double bedMinTemp = 0.0;
@@ -396,6 +398,16 @@ struct MotionBackendConfig {
     /// If true and deviceTransport is set, register 4 steppers on the
     /// device and enable default queue_step motion handlers.
     bool registerDeviceSteppers = true;
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+    /// Runtime enable flag for pressure advance (default: off).
+    /// Must be true for PA to be applied in the motion pipeline.
+    bool pressureAdvanceEnabled = false;
+    /// Pressure advance amount for the extruder (seconds).
+    /// Set to 0 to disable PA in the motion pipeline.
+    double pressureAdvance = 0.0;
+    /// Pressure advance smoothing window (seconds, 0 = no smoothing).
+    double smoothTime = 0.0;
+#endif
 };
 
 /// @brief Configuration for a KlippyInstance.

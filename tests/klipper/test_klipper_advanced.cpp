@@ -266,17 +266,30 @@ TEST(KlipperAdxl345Object, StatusMeasuring) {
 // Pressure Advance tests
 // ============================================================================
 
+#if TETHER_ENABLE_PRESSURE_ADVANCE
 TEST(KlipperPressureAdvance, InactiveByDefault) {
     PressureAdvance pa;
+    EXPECT_FALSE(pa.isActive());
+    EXPECT_FALSE(pa.isEnabled()); // Runtime opt-in: off by default
+    double result = pa.computeExtrusion(0, 1, 10, 20, 0.1);
+    EXPECT_NEAR(result, 1.0, 0.001); // No PA adjustment
+}
+
+TEST(KlipperPressureAdvance, InactiveEvenWithPAValueUntilEnabled) {
+    PressureAdvanceParams params;
+    params.pressureAdvance = 0.05;
+    PressureAdvance pa(params);
+    // PA value is set but runtime not enabled → still inactive
     EXPECT_FALSE(pa.isActive());
     double result = pa.computeExtrusion(0, 1, 10, 20, 0.1);
     EXPECT_NEAR(result, 1.0, 0.001); // No PA adjustment
 }
 
-TEST(KlipperPressureAdvance, ActiveWithPA) {
+TEST(KlipperPressureAdvance, ActiveAfterEnable) {
     PressureAdvanceParams params;
     params.pressureAdvance = 0.05;
     PressureAdvance pa(params);
+    pa.setEnabled(true);
     EXPECT_TRUE(pa.isActive());
     // PA = 0.05, velChange = 20-10 = 10, paExtrusion = 0.05 * 10 = 0.5
     // baseExtrusion = 1-0 = 1, total = 1.5
@@ -288,9 +301,22 @@ TEST(KlipperPressureAdvance, Deceleration) {
     PressureAdvanceParams params;
     params.pressureAdvance = 0.05;
     PressureAdvance pa(params);
+    pa.setEnabled(true);
     // Decelerating: velChange = 10-20 = -10, paExtrusion = 0.05 * -10 = -0.5
     double result = pa.computeExtrusion(0, 1, 20, 10, 0.1);
     EXPECT_NEAR(result, 0.5, 0.01);
+}
+
+TEST(KlipperPressureAdvance, CanDisable) {
+    PressureAdvanceParams params;
+    params.pressureAdvance = 0.05;
+    PressureAdvance pa(params);
+    pa.setEnabled(true);
+    EXPECT_TRUE(pa.isActive());
+    pa.setEnabled(false);
+    EXPECT_FALSE(pa.isActive());
+    double result = pa.computeExtrusion(0, 1, 10, 20, 0.1);
+    EXPECT_NEAR(result, 1.0, 0.001); // No PA adjustment after disable
 }
 
 TEST(KlipperPressureAdvance, Smoothing) {
@@ -317,6 +343,7 @@ TEST(KlipperPressureAdvance, Reset) {
     double r = pa.smoothExtrusionRate(30.0, 0.1);
     EXPECT_NEAR(r, 30.0, 0.01); // Only one entry after reset
 }
+#endif // TETHER_ENABLE_PRESSURE_ADVANCE
 
 // ============================================================================
 // Input Shaper tests

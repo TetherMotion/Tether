@@ -7,6 +7,12 @@
 #include <deque>
 #include <vector>
 
+#if !TETHER_ENABLE_PRESSURE_ADVANCE
+// When pressure advance is disabled at compile time, the entire feature is
+// compiled out. All code that references PressureAdvance must be guarded by
+// #if TETHER_ENABLE_PRESSURE_ADVANCE.
+#else
+
 namespace tether::klipper::klippy {
 
 /// @brief Pressure advance parameters for an extruder.
@@ -21,6 +27,9 @@ struct PressureAdvanceParams {
 /// When the extruder accelerates, pressure builds in the hotend.
 /// PA advances the extruder timing so that pressure is built up
 /// before the move starts and released after the move ends.
+///
+/// Runtime opt-in: PA is inactive unless `setEnabled(true)` has been
+/// called (e.g. via config or G-code), even when compiled in.
 class PressureAdvance {
 public:
     explicit PressureAdvance(PressureAdvanceParams params = {})
@@ -32,8 +41,14 @@ public:
     /// @brief Get the current parameters.
     const PressureAdvanceParams& params() const { return params_; }
 
-    /// @brief Check if pressure advance is active.
-    bool isActive() const { return params_.pressureAdvance > 0.0; }
+    /// @brief Enable or disable pressure advance at runtime.
+    void setEnabled(bool enabled) { enabled_ = enabled; }
+
+    /// @brief Check if pressure advance is enabled at runtime.
+    bool isEnabled() const { return enabled_; }
+
+    /// @brief Check if pressure advance is active (enabled AND non-zero PA).
+    bool isActive() const { return enabled_ && params_.pressureAdvance > 0.0; }
 
     /// @brief Compute the pressure-adjusted extrusion for a move segment.
     /// @param startE Extrusion at start of segment (mm)
@@ -77,13 +92,32 @@ public:
     /// @brief Reset the smoothing history.
     void reset() { history_.clear(); }
 
+    /// @brief Compute the PA-adjusted absolute position at a sample point.
+    ///
+    /// The pressure-advance position is:  adjusted_e = e + PA * velocity
+    ///
+    /// When the translator samples the motion plan at regular intervals,
+    /// applying this offset to each sample naturally produces the correct
+    /// PA-adjusted step deltas:  Δ(adjusted_e) = Δe + PA * Δv.
+    ///
+    /// @param e   Raw extrusion position (mm)
+    /// @param vel Extrusion velocity (mm/s)
+    /// @return PA-adjusted position (mm), or raw position if PA inactive.
+    double advancedPosition(double e, double vel) const {
+        if (!isActive()) return e;
+        return e + params_.pressureAdvance * vel;
+    }
+
 private:
     struct HistoryEntry {
         double time;
         double rate;
     };
     PressureAdvanceParams params_;
+    bool enabled_ = false;  ///< Runtime opt-in flag (default: off)
     std::deque<HistoryEntry> history_;
 };
 
 } // namespace tether::klipper::klippy
+
+#endif // TETHER_ENABLE_PRESSURE_ADVANCE

@@ -57,6 +57,10 @@ struct MotionDispatcherConfig {
     double sampleIntervalSec = 0.0001;
     /// Kinematic limits for the MotionPlanBuilder.
     MotionPlanner::KinematicLimits<4, double> limits{};
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+    /// Pressure advance configuration for the extruder axis.
+    PressureAdvanceConfig pressureAdvance{};
+#endif
 };
 
 /// @brief Bridges G-code move callbacks to the Klipper queue_step protocol path.
@@ -80,6 +84,9 @@ public:
         std::ranges::replace_if(config_.limits.axis.maxJerk,         [](auto v) { return v <= 0; }, 20000.0);
         if (config_.limits.path.maxPathVelocity <= 0)      config_.limits.path.maxPathVelocity = 200.0;
         if (config_.limits.path.maxPathAcceleration <= 0)  config_.limits.path.maxPathAcceleration = 2000.0;
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+        translator_.setPressureAdvanceConfig(config_.pressureAdvance);
+#endif
     }
 
     /// @brief Set the callback that sends step sequences to the device.
@@ -92,6 +99,20 @@ public:
     void setKinematicsTransform(const KinematicsTransform& kt) {
         translator_.setKinematicsTransform(kt);
     }
+
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+    /// @brief Update pressure advance config at runtime.
+    /// Allows G-code (M900 / SET_PRESSURE_ADVANCE) to enable/disable
+    /// and tune PA without recreating the dispatcher.
+    void setPressureAdvanceConfig(const PressureAdvanceConfig& pa) {
+        translator_.setPressureAdvanceConfig(pa);
+    }
+
+    /// @brief Get the current pressure advance config.
+    const PressureAdvanceConfig& pressureAdvanceConfig() const {
+        return translator_.pressureAdvanceConfig();
+    }
+#endif
 
     /// @brief Set/override the current position (mm). Used after homing/G92.
     void setPosition(std::array<double, 4> pos) { current_ = pos; }

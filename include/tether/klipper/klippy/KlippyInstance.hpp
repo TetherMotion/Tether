@@ -138,7 +138,9 @@ public:
         , sdcard_(std::make_shared<VirtualSdcard>(config_.sdcardDir))
         , macros_(std::make_shared<GcodeMacroRegistry>())
         , firmwareRetraction_(std::make_shared<FirmwareRetraction>())
+#if TETHER_ENABLE_PRESSURE_ADVANCE
         , pressureAdvance_(std::make_shared<PressureAdvance>())
+#endif
         , inputShaper_(std::make_shared<InputShaper>())
         , bedMesh_(std::make_shared<objects::BedMesh>())
         , deltaPrinter_(std::make_shared<DeltaPrinter>())
@@ -170,7 +172,9 @@ public:
     VirtualSdcard& sdcard() { return *sdcard_; }
     GcodeMacroRegistry& macros() { return *macros_; }
     FirmwareRetraction& firmwareRetraction() { return *firmwareRetraction_; }
+#if TETHER_ENABLE_PRESSURE_ADVANCE
     PressureAdvance& pressureAdvance() { return *pressureAdvance_; }
+#endif
     InputShaper& inputShaper() { return *inputShaper_; }
     objects::BedMesh& bedMesh() { return *bedMesh_; }
     KlippySettings& settings() { return settings_; }
@@ -459,6 +463,11 @@ public:
         dcfg.axisOids = mb.axisOids;
         dcfg.clockFreqHz = mb.clockFreqHz;
         dcfg.sampleIntervalSec = mb.sampleIntervalSec;
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+        dcfg.pressureAdvance.enabled = mb.pressureAdvanceEnabled;
+        dcfg.pressureAdvance.pressureAdvance = mb.pressureAdvance;
+        dcfg.pressureAdvance.smoothTime = mb.smoothTime;
+#endif
         motionDispatcher_ = std::make_unique<motion::MotionDispatcher>(dcfg);
         motionDispatcher_->setKinematicsTransform(kinematicsTransform_);
 
@@ -606,7 +615,9 @@ private:
         newObj->setName("extruder");
         // Preserve settings from the old object if it existed.
         if (extruderObj_) {
+#if TETHER_ENABLE_PRESSURE_ADVANCE
             newObj->setPressureAdvance(extruderObj_->pressureAdvance());
+#endif
             newObj->setMinExtrudeTemp(extruderObj_->minExtrudeTemp());
             newObj->setMotionQueue(extruderObj_->motionQueue());
         }
@@ -714,7 +725,9 @@ private:
         deltaCalibrateObj_ = std::make_shared<DeltaCalibrateObject>();
         skewCorrectionObj_ = std::make_shared<SkewCorrectionObject>();
         inputShaperObj_ = std::make_shared<InputShaperObject>();
+#if TETHER_ENABLE_PRESSURE_ADVANCE
         pressureAdvanceObj_ = std::make_shared<PressureAdvanceObject>();
+#endif
         excludeObjectObj_ = std::make_shared<ExcludeObjectObject>();
         zThermalAdjustObj_ = std::make_shared<ZThermalAdjustObject>();
         heaterGenericObj_ = std::make_shared<HeaterGenericObject>("heater_generic");
@@ -748,7 +761,9 @@ private:
         server_.registerObject(deltaCalibrateObj_);
         server_.registerObject(skewCorrectionObj_);
         server_.registerObject(inputShaperObj_);
+#if TETHER_ENABLE_PRESSURE_ADVANCE
         server_.registerObject(pressureAdvanceObj_);
+#endif
         server_.registerObject(excludeObjectObj_);
         server_.registerObject(zThermalAdjustObj_);
         server_.registerObject(heaterGenericObj_);
@@ -816,7 +831,9 @@ private:
     std::shared_ptr<VirtualSdcard> sdcard_;
     std::shared_ptr<GcodeMacroRegistry> macros_;
     std::shared_ptr<FirmwareRetraction> firmwareRetraction_;
+#if TETHER_ENABLE_PRESSURE_ADVANCE
     std::shared_ptr<PressureAdvance> pressureAdvance_;
+#endif
     std::shared_ptr<InputShaper> inputShaper_;
     std::shared_ptr<objects::BedMesh> bedMesh_;
     std::shared_ptr<objects::Adxl345> adxl345_;

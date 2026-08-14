@@ -61,8 +61,6 @@ from ._klipper import (
     DebugManager,
     # Advanced objects
     VirtualSdcard,
-    PressureAdvanceParams,
-    PressureAdvance,
     ShaperType,
     InputShaperParams,
     InputShaper,
@@ -121,6 +119,14 @@ from ._klipper import (
     TmcUartObject,
 )
 
+# Pressure advance is an opt-in feature (TETHER_ENABLE_PRESSURE_ADVANCE).
+# When compiled out, the C++ extension does not export these classes.
+try:
+    from ._klipper import PressureAdvanceParams, PressureAdvance  # noqa: F401
+    _HAS_PRESSURE_ADVANCE = True
+except ImportError:
+    _HAS_PRESSURE_ADVANCE = False
+
 __all__ = [
     "ThermistorParams", "Thermistor", "HeaterPidParams", "Heater",
     "HomingAxisConfig", "HomingResult", "HomingSequence", "Probe",
@@ -133,7 +139,6 @@ __all__ = [
     "ConfigSection", "ConfigParser",
     "DebugFlag", "DebugManager",
     "VirtualSdcard",
-    "PressureAdvanceParams", "PressureAdvance",
     "ShaperType", "InputShaperParams", "InputShaper", "shaper_type_to_string",
     "FirmwareRetractionParams", "FirmwareRetraction",
     "KlippyInstanceConfig", "KlippyInstance",
@@ -153,3 +158,6 @@ __all__ = [
     "EndstopObject", "TrsyncObject", "HallFilamentSensorObject",
     "PulseCounterObject", "NeopixelObject", "TmcUartObject",
 ]
+
+if _HAS_PRESSURE_ADVANCE:
+    __all__ += ["PressureAdvanceParams", "PressureAdvance"]
