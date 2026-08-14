@@ -33,6 +33,8 @@
 
 namespace tether::klipper::http {
 
+class AuthFilter;
+
 /// @brief Native HTTP/WebSocket server implementing the Moonraker API.
 ///
 /// Wraps Drogon's HttpAppFramework and registers all routes, controllers,
@@ -76,6 +78,14 @@ public:
 
     /// @brief Get the NotificationSink for this server (for registering with UDS server).
     NotificationSink* notificationSink() { return notificationBridge_.get(); }
+
+    // ------------------------------------------------------------------
+    // Auth (public for AuthFilter access)
+    // ------------------------------------------------------------------
+
+    bool checkAuth(const drogon::HttpRequestPtr& req) const;
+    void addCorsHeaders(const drogon::HttpResponsePtr& resp,
+                        const drogon::HttpRequestPtr& req) const;
 
     // ------------------------------------------------------------------
     // WebSocket handling (public for KlippyWsController access)
@@ -223,7 +233,6 @@ private:
     // Auth helpers
     // ------------------------------------------------------------------
 
-    bool checkAuth(const drogon::HttpRequestPtr& req) const;
     bool isTrustedClient(const std::string& ip) const;
     bool checkApiKey(const std::string& key) const;
     bool checkJwt(const std::string& token) const;
@@ -236,8 +245,6 @@ private:
     // CORS helpers
     // ------------------------------------------------------------------
 
-    void addCorsHeaders(const drogon::HttpResponsePtr& resp,
-                        const drogon::HttpRequestPtr& req) const;
     bool isCorsAllowed(const std::string& origin) const;
 
     // ------------------------------------------------------------------
@@ -251,6 +258,7 @@ private:
     JsonRpcDispatcher dispatcher_;
     WsSessionManager wsSessions_;
     std::unique_ptr<NotificationSink> notificationBridge_;
+    std::shared_ptr<AuthFilter> authFilter_;
 
     std::mutex oneshotMutex_;
     struct OneshotToken {

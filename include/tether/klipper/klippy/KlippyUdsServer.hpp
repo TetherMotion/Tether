@@ -473,6 +473,92 @@ public:
     /// @brief Set system permissions for a resource.
     void setSystemPerms(const std::string& resource, const std::vector<std::string>& perms);
 
+    // ------------------------------------------------------------------
+    // Event callbacks (for external observers like the HTTP server)
+    // ------------------------------------------------------------------
+
+    /// @brief Callback type for G-code response events.
+    using GcodeResponseCallback = std::function<void(const std::string&)>;
+    /// @brief Callback type for printer state change events.
+    using StateChangeCallback = std::function<void(PrinterState, const std::string&)>;
+    /// @brief Callback type for file list change events.
+    using FilelistChangedCallback = std::function<void(const std::string& action,
+                                                       const std::string& path,
+                                                       const std::string& root)>;
+    /// @brief Callback type for job history change events.
+    using HistoryChangedCallback = std::function<void(const std::string& action, int64_t jobId)>;
+    /// @brief Callback type for job queue change events.
+    using JobQueueChangedCallback = std::function<void(const std::string& action)>;
+    /// @brief Callback type for power device change events.
+    using PowerChangedCallback = std::function<void(const std::string& device, const std::string& state)>;
+
+    void setGcodeResponseCallback(GcodeResponseCallback cb) { gcodeResponseCb_ = std::move(cb); }
+    void setStateChangeCallback(StateChangeCallback cb) { stateChangeCb_ = std::move(cb); }
+    void setFilelistChangedCallback(FilelistChangedCallback cb) { filelistChangedCb_ = std::move(cb); }
+    void setHistoryChangedCallback(HistoryChangedCallback cb) { historyChangedCb_ = std::move(cb); }
+    void setJobQueueChangedCallback(JobQueueChangedCallback cb) { jobQueueChangedCb_ = std::move(cb); }
+    void setPowerChangedCallback(PowerChangedCallback cb) { powerChangedCb_ = std::move(cb); }
+
+    // ------------------------------------------------------------------
+    // Data accessors (for HTTP-only handlers)
+    // ------------------------------------------------------------------
+
+    /// Job history entry (public for HTTP server access)
+    struct JobHistoryEntry {
+        int64_t jobId = 0;
+        std::string filename;
+        std::string status;
+        double startTime = 0.0;
+        double endTime = 0.0;
+        double printDuration = 0.0;
+        double totalDuration = 0.0;
+        double filamentUsed = 0.0;
+        int64_t layerCount = 0;
+        int64_t firstLayerHeight = 0;
+        int64_t firstLayerExtruder = 0;
+    };
+
+    /// User account (public for HTTP server access)
+    struct User {
+        std::string username;
+        std::string password;
+        std::vector<std::string> permissions;
+        std::string source = "moonraker";
+        std::string jwtSecret;
+    };
+
+    /// Log file entry (public for HTTP server access)
+    struct LogFile {
+        std::string name;
+        std::string path;
+        int64_t size = 0;
+        int64_t modified = 0;
+    };
+
+    /// @brief Get job history entries.
+    const std::vector<JobHistoryEntry>& jobHistory() const { return jobHistory_; }
+
+    /// @brief Get registered users.
+    const std::map<std::string, User>& users() const { return users_; }
+
+    /// @brief Delete a user. Returns true if the user was found and deleted.
+    bool deleteUser(const std::string& username);
+
+    /// @brief Get log files.
+    const std::vector<LogFile>& logFiles() const { return logFiles_; }
+
+    /// @brief Get API key.
+    const std::string& apiKey() const { return apiKey_; }
+
+    /// @brief Set API key.
+    void setApiKey(const std::string& key) { apiKey_ = key; }
+
+    /// @brief Generate a oneshot token.
+    std::string generateOneshotToken();
+
+    /// @brief Validate and consume a oneshot token. Returns true if valid.
+    bool consumeOneshotToken(const std::string& token);
+
 private:
     /// @brief Helper to execute a handler lambda with the mutex held and
     ///        wrap its result in a JSON object map.
@@ -580,20 +666,7 @@ private:
     // C1: Job queue (list of filenames)
     std::vector<std::string> jobQueue_;
 
-    // C1: Job history
-    struct JobHistoryEntry {
-        int64_t jobId = 0;
-        std::string filename;
-        std::string status; // "completed", "cancelled", "error", "in_progress"
-        double startTime = 0.0;
-        double endTime = 0.0;
-        double printDuration = 0.0;
-        double totalDuration = 0.0;
-        double filamentUsed = 0.0;
-        int64_t layerCount = 0;
-        int64_t firstLayerHeight = 0;
-        int64_t firstLayerExtruder = 0;
-    };
+    // C1: Job history (struct defined publicly above)
     std::vector<JobHistoryEntry> jobHistory_;
     int64_t nextJobId_ = 1;
 
@@ -647,14 +720,7 @@ private:
     // E1: System permissions
     std::map<std::string, std::vector<std::string>> systemPerms_;
 
-    // E1: Access / user management
-    struct User {
-        std::string username;
-        std::string password;
-        std::vector<std::string> permissions;
-        std::string source = "moonraker";
-        std::string jwtSecret;
-    };
+    // E1: Access / user management (User struct defined publicly above)
     std::map<std::string, User> users_;
     std::string apiKey_ = "tether_default_api_key";
     std::vector<std::string> oneshotTokens_;
@@ -683,17 +749,19 @@ private:
     int64_t currentSpoolId_ = 0;
     std::map<std::string, JsonValue> spoolmanInfo_;
 
-    // E1: Log files
-    struct LogFile {
-        std::string name;
-        std::string path;
-        int64_t size = 0;
-        int64_t modified = 0;
-    };
+    // E1: Log files (LogFile struct defined publicly above)
     std::vector<LogFile> logFiles_;
 
     // Subscription refresh timing
     std::chrono::steady_clock::time_point lastRefresh_;
+
+    // Event callbacks (for external observers like the HTTP server)
+    GcodeResponseCallback gcodeResponseCb_;
+    StateChangeCallback stateChangeCb_;
+    FilelistChangedCallback filelistChangedCb_;
+    HistoryChangedCallback historyChangedCb_;
+    JobQueueChangedCallback jobQueueChangedCb_;
+    PowerChangedCallback powerChangedCb_;
 };
 
 } // namespace tether::klipper::klippy

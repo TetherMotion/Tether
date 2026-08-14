@@ -18,6 +18,7 @@
 #include <iomanip>
 #include <iostream>
 #include <netinet/in.h>
+#include <random>
 #include <set>
 #include <signal.h>
 #include <sstream>
@@ -295,6 +296,7 @@ void KlippyUdsServer::stop() {
 
 void KlippyUdsServer::setState(PrinterState newState, const std::string& message) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
+    PrinterState oldState = state_;
     // Validate transitions
     if (state_ == PrinterState::Ready && newState == PrinterState::Shutdown) {
         state_ = newState;
@@ -314,6 +316,10 @@ void KlippyUdsServer::setState(PrinterState newState, const std::string& message
     } else if (newState == state_) {
         // Same state, just update message
         if (!message.empty()) stateMessage_ = message;
+    }
+    // Notify external observers if state actually changed
+    if (state_ != oldState && stateChangeCb_) {
+        stateChangeCb_(state_, stateMessage_);
     }
 }
 
@@ -416,6 +422,8 @@ void KlippyUdsServer::emitGcodeResponse(const std::string& response) {
             conn->sendFrame(JsonValue(msg).dump());
         }
     }
+    // Notify external observers (HTTP server)
+    if (gcodeResponseCb_) gcodeResponseCb_(response);
 }
 
 size_t KlippyUdsServer::subscriptionCount() const {
@@ -544,6 +552,35 @@ void KlippyUdsServer::sendError(UdsConnection& conn, const JsonValue& id,
 
 void KlippyUdsServer::sendPush(UdsConnection& conn, const JsonValue& msg) {
     conn.sendFrame(msg.dump());
+}
+
+bool KlippyUdsServer::deleteUser(const std::string& username) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    auto it = users_.find(username);
+    if (it == users_.end()) return false;
+    users_.erase(it);
+    return true;
+}
+
+std::string KlippyUdsServer::generateOneshotToken() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    std::random_device rd;
+    std::stringstream ss;
+    ss << std::hex;
+    for (int i = 0; i < 16; ++i) {
+        ss << std::setw(2) << std::setfill('0') << (rd() & 0xFF);
+    }
+    std::string token = ss.str();
+    oneshotTokens_.push_back(token);
+    return token;
+}
+
+bool KlippyUdsServer::consumeOneshotToken(const std::string& token) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    auto it = std::find(oneshotTokens_.begin(), oneshotTokens_.end(), token);
+    if (it == oneshotTokens_.end()) return false;
+    oneshotTokens_.erase(it);
+    return true;
 }
 
 } // namespace tether::klipper::klippy

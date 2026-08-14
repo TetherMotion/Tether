@@ -18,9 +18,10 @@ public:
     explicit NotificationBridge(WsSessionManager& sessions) : sessions_(sessions) {}
 
     void onStatusUpdate(const klippy::JsonValue& status, double eventtime) override {
-        std::map<std::string, klippy::JsonValue> params;
-        params["status"] = status;
-        params["eventtime"] = klippy::JsonValue(eventtime);
+        // Moonraker sends params as a JSON array: [status, eventtime]
+        std::vector<klippy::JsonValue> params;
+        params.push_back(status);
+        params.push_back(klippy::JsonValue(eventtime));
         auto msg = buildJsonRpcNotification("notify_status_update",
                                             klippy::JsonValue(params));
         sessions_.broadcastToIdentified(msg);
