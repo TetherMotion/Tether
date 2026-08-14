@@ -40,8 +40,25 @@ public:
             JsonValue(mesh_ ? mesh_->maxX() : 0.0),
             JsonValue(mesh_ ? mesh_->maxY() : 0.0)
         }));
-        addField("matrix", JsonValue(mesh_ && mesh_->isComplete()));
-        addField("probed_matrix", JsonValue(mesh_ && mesh_->isComplete()));
+        // Report actual mesh matrix data as a 2D JSON array
+        if (mesh_ && mesh_->isComplete()) {
+            const auto& mat = mesh_->matrix();
+            std::vector<JsonValue> matrixRows;
+            matrixRows.reserve(mat.size());
+            for (const auto& row : mat) {
+                std::vector<JsonValue> jsonRow;
+                jsonRow.reserve(row.size());
+                for (double v : row) {
+                    jsonRow.emplace_back(v);
+                }
+                matrixRows.emplace_back(jsonRow);
+            }
+            addField("matrix", JsonValue(matrixRows));
+            addField("probed_matrix", JsonValue(matrixRows));
+        } else {
+            addField("matrix", JsonValue(std::vector<JsonValue>{}));
+            addField("probed_matrix", JsonValue(std::vector<JsonValue>{}));
+        }
         return result;
     }
 

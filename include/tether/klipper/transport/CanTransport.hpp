@@ -67,7 +67,7 @@ private:
     void pumpRx();
 
     CanTransportConfig config_;
-    std::mutex rxMtx_;
+    mutable std::mutex rxMtx_;
     std::deque<uint8_t> rxBuf_;
     std::atomic<bool> open_{false};
 };

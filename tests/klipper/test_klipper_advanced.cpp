@@ -18,7 +18,7 @@
 
 #include "tether/klipper/klippy/AdvancedObjects.hpp"
 #include "tether/klipper/klippy/GCodeExecutor.hpp"
-#include "tether/klipper/klippy/KlippyUdsServer.hpp"
+#include "tether/klipper/klippy/KlippyServer.hpp"
 #include "tether/klipper/objects/BedLevel.hpp"
 #include "tether/klipper/objects/Peripherals.hpp"
 
@@ -673,7 +673,7 @@ TEST(KlipperConfigLoading, LoadConfigFile) {
 
     UdsServerConfig cfg;
     cfg.socketPath = "/tmp/tether_test_uds_" + std::to_string(getpid());
-    KlippyUdsServer server(cfg);
+    KlippyServer server(cfg);
     EXPECT_TRUE(server.loadConfigFile(configPath));
     auto& parser = server.configParser();
     EXPECT_TRUE(parser.hasSection("stepper_x"));
@@ -686,7 +686,7 @@ TEST(KlipperConfigLoading, LoadConfigFile) {
 TEST(KlipperConfigLoading, LoadNonexistentConfig) {
     UdsServerConfig cfg;
     cfg.socketPath = "/tmp/tether_test_uds2_" + std::to_string(getpid());
-    KlippyUdsServer server(cfg);
+    KlippyServer server(cfg);
     EXPECT_FALSE(server.loadConfigFile("/nonexistent/path/printer.cfg"));
     ::unlink(cfg.socketPath.c_str());
 }
@@ -701,7 +701,7 @@ TEST(KlipperConfigLoading, LoadConfigFromConfigPath) {
     UdsServerConfig cfg;
     cfg.socketPath = "/tmp/tether_test_uds3_" + std::to_string(getpid());
     cfg.configFile = configPath;
-    KlippyUdsServer server(cfg);
+    KlippyServer server(cfg);
     EXPECT_TRUE(server.loadConfig());
     auto& parser = server.configParser();
     EXPECT_TRUE(parser.hasSection("printer"));

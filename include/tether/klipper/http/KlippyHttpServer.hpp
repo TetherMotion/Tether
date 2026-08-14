@@ -5,8 +5,9 @@
 ///
 /// This server implements the full Moonraker HTTP + WebSocket API directly
 /// in C++ using Drogon as the web framework and Glaze for JSON serialization.
-/// It reuses all existing KlippyUdsServer endpoint handlers via callEndpoint(),
-/// so there is zero business-logic duplication.
+/// It delegates all business logic to a shared KlippyServer instance via
+/// callEndpoint(), so there is zero business-logic duplication between
+/// the UDS and HTTP transports.
 ///
 /// The server provides:
 ///   - REST HTTP endpoints (GET/POST/DELETE) for all Moonraker APIs
@@ -18,7 +19,7 @@
 ///   - Static asset serving for SPA frontends
 ///   - All 26+ WebSocket notification types
 
-#include "tether/klipper/klippy/KlippyUdsServer.hpp"
+#include "tether/klipper/klippy/KlippyServer.hpp"
 #include "tether/klipper/http/HttpServerConfig.hpp"
 #include "tether/klipper/http/JsonRpcDispatcher.hpp"
 #include "tether/klipper/http/WsSessionManager.hpp"
@@ -41,10 +42,10 @@ class AuthFilter;
 /// and filters needed to serve Mainsail/Fluidd directly.
 class KlippyHttpServer : public std::enable_shared_from_this<KlippyHttpServer> {
 public:
-    /// @brief Construct with a reference to the UDS server and config.
-    /// @param udsServer The existing KlippyUdsServer (must outlive this).
+    /// @brief Construct with a reference to the shared server and config.
+    /// @param server The KlippyServer instance (must outlive this).
     /// @param cfg HTTP server configuration.
-    explicit KlippyHttpServer(klippy::KlippyUdsServer& udsServer,
+    explicit KlippyHttpServer(klippy::KlippyServer& server,
                                HttpServerConfig cfg = {});
 
     ~KlippyHttpServer();
@@ -251,7 +252,7 @@ private:
     // Internal state
     // ------------------------------------------------------------------
 
-    klippy::KlippyUdsServer& udsServer_;
+    klippy::KlippyServer& server_;
     HttpServerConfig config_;
     std::atomic<bool> running_{false};
 

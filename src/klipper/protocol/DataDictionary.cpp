@@ -321,11 +321,12 @@ bool DataDictionary::fromJson(std::string_view json) {
 std::vector<uint8_t> DataDictionary::toWire() const {
     std::string json = toJson();
 #ifdef TETHER_KLIPPER_HAS_ZLIB
+    // Allocate buffer large enough for worst case (input + input/1000 + 12 per zlib docs)
     std::vector<uint8_t> out;
-    out.resize(json.size() + 64);
-    uLongf destLen = out.size();
+    uLongf destLen = compressBound(static_cast<uLong>(json.size()));
+    out.resize(destLen);
     if (compress2(reinterpret_cast<Bytef*>(out.data()), &destLen,
-                  reinterpret_cast<const Bytef*>(json.data()), json.size(), 9) == Z_OK) {
+                  reinterpret_cast<const Bytef*>(json.data()), static_cast<uLong>(json.size()), 9) == Z_OK) {
         out.resize(destLen);
         return out;
     }
@@ -344,13 +345,18 @@ std::string DataDictionary::fromWire(std::span<const uint8_t> wire) {
     // Heuristic: zlib streams start with 0x78 (most common deflate headers).
     if (wire[0] == 0x78 || wire[0] == 0x68 || wire[0] == 0x08 || wire[0] == 0x28 ||
         wire[0] == 0x38 || wire[0] == 0x48 || wire[0] == 0x58) {
-        std::string out;
-        out.resize(wire.size() * 8 + 1024);
-        uLongf destLen = out.size();
-        if (uncompress(reinterpret_cast<Bytef*>(out.data()), &destLen,
-                       reinterpret_cast<const Bytef*>(wire.data()), wire.size()) == Z_OK) {
+        // Iteratively try larger buffers for decompression
+        for (size_t attempt = 0; attempt < 5; ++attempt) {
+            std::string out;
+            uLongf destLen = static_cast<uLongf>(wire.size() * (8 << attempt) + 1024);
             out.resize(destLen);
-            return out;
+            int ret = uncompress(reinterpret_cast<Bytef*>(out.data()), &destLen,
+                                 reinterpret_cast<const Bytef*>(wire.data()), static_cast<uLong>(wire.size()));
+            if (ret == Z_OK) {
+                out.resize(destLen);
+                return out;
+            }
+            if (ret != Z_BUF_ERROR) break; // Error other than buffer too small
         }
     }
 #endif

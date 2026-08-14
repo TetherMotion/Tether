@@ -172,7 +172,7 @@ add_tether_example(interpret_pcapng
 # These examples use Boost.Beast/Boost.Asio (header-only). They are only built
 # when Boost is available so the rest of the examples build without it.
 find_package(Boost QUIET)
-if(Boost_FOUND)
+if(Boost_FOUND AND TARGET Boost::headers)
     add_executable(tether_ui_backend
         tether_ui_backend.cpp
         WebSocketTransport.cpp)
@@ -285,4 +285,11 @@ if(TETHER_BUILD_KLIPPER)
     add_tether_example(klipper_config_macros
         SOURCE klipper_config_macros.cpp
         LIBRARIES Tether::Klipper tether_common)
+
+    # HTTP/Mainsail example requires the optional HTTP component
+    if(TARGET Tether::KlipperHttp)
+        add_tether_example(klipper_http_mainsail
+            SOURCE klipper_http_mainsail.cpp
+            LIBRARIES Tether::KlipperHttp Tether::Klipper tether_common)
+    endif()
 endif()

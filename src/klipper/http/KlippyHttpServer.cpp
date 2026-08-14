@@ -52,12 +52,12 @@ withAuth(bool requireAuth, std::initializer_list<drogon::HttpMethod> methods) {
 // Constructor / Destructor
 // ============================================================================
 
-KlippyHttpServer::KlippyHttpServer(klippy::KlippyUdsServer& udsServer,
+KlippyHttpServer::KlippyHttpServer(klippy::KlippyServer& server,
                                      HttpServerConfig cfg)
-    : udsServer_(udsServer)
+    : server_(server)
     , config_(std::move(cfg))
     , dispatcher_([this](const std::string& method, const klippy::JsonValue& params) {
-        return udsServer_.callEndpoint(method, params);
+        return server_.callEndpoint(method, params);
     })
     , notificationBridge_(std::make_unique<NotificationBridge>(wsSessions_))
 {
@@ -86,11 +86,11 @@ bool KlippyHttpServer::start() {
 
     // Wire notification callbacks from UDS server to our NotificationBridge
     auto* sink = notificationBridge_.get();
-    udsServer_.setGcodeResponseCallback(
+    server_.addGcodeResponseCallback(
         [sink](const std::string& response) {
             if (sink) sink->onGcodeResponse(response);
         });
-    udsServer_.setStateChangeCallback(
+    server_.addStateChangeCallback(
         [sink](klippy::PrinterState newState, const std::string& msg) {
             if (!sink) return;
             switch (newState) {
@@ -104,20 +104,20 @@ bool KlippyHttpServer::start() {
                     break;
             }
         });
-    udsServer_.setFilelistChangedCallback(
+    server_.addFilelistChangedCallback(
         [sink](const std::string& action, const std::string& path,
                const std::string& root) {
             if (sink) sink->onFilelistChanged(action, path, root);
         });
-    udsServer_.setHistoryChangedCallback(
+    server_.addHistoryChangedCallback(
         [sink](const std::string& action, int64_t jobId) {
             if (sink) sink->onHistoryChanged(action, jobId);
         });
-    udsServer_.setJobQueueChangedCallback(
+    server_.addJobQueueChangedCallback(
         [sink](const std::string& action) {
             if (sink) sink->onJobQueueChanged(action);
         });
-    udsServer_.setPowerChangedCallback(
+    server_.addPowerChangedCallback(
         [sink](const std::string& device, const std::string& state) {
             if (sink) sink->onPowerChanged(device, state);
         });
@@ -233,7 +233,7 @@ void KlippyHttpServer::registerRestRoutes() {
             resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
             addCorsHeaders(resp, req);
             // Find klippy log file
-            for (const auto& lf : udsServer_.logFiles()) {
+            for (const auto& lf : server_.logFiles()) {
                 if (lf.name == "klippy.log" && fs::exists(lf.path)) {
                     auto fileResp = drogon::HttpResponse::newFileResponse(lf.path);
                     fileResp->addHeader("Content-Type", "text/plain");
@@ -254,7 +254,7 @@ void KlippyHttpServer::registerRestRoutes() {
             resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
             addCorsHeaders(resp, req);
             // Find moonraker log file (or tether log)
-            for (const auto& lf : udsServer_.logFiles()) {
+            for (const auto& lf : server_.logFiles()) {
                 if ((lf.name == "moonraker.log" || lf.name == "tether.log") &&
                     fs::exists(lf.path)) {
                     auto fileResp = drogon::HttpResponse::newFileResponse(lf.path);
@@ -1352,7 +1352,7 @@ drogon::HttpResponsePtr KlippyHttpServer::callEndpointAndBuildResponse(
     resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
 
     try {
-        klippy::JsonValue result = udsServer_.callEndpoint(method, params);
+        klippy::JsonValue result = server_.callEndpoint(method, params);
 
         // Check if the result is an error
         if (result.isObject() && result.has("error")) {
@@ -1619,7 +1619,7 @@ void KlippyHttpServer::handleFileUpload(
         std::string fullPath = path.empty() ? fileName : (path + "/" + fileName);
         std::map<std::string, klippy::JsonValue> printParams;
         printParams["filename"] = klippy::JsonValue(fullPath);
-        udsServer_.callEndpoint("printer/start", klippy::JsonValue(printParams));
+        server_.callEndpoint("printer/start", klippy::JsonValue(printParams));
         result["print_started"] = klippy::JsonValue(true);
     }
 
@@ -1855,11 +1855,9 @@ void KlippyHttpServer::handleFileZip(
     resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
     addCorsHeaders(resp, req);
 
-    // ZIP creation is a stub — return empty result
-    std::map<std::string, klippy::JsonValue> result;
-    result["destination"] = klippy::JsonValue("");
-    result["response"] = klippy::JsonValue("ok");
-    resp->setBody(buildSuccessResponse(klippy::JsonValue(result)));
+    // ZIP file creation is not yet implemented
+    resp->setStatusCode(drogon::HttpStatusCode::k501NotImplemented);
+    resp->setBody(buildErrorResponse(501, "ZIP file creation not implemented"));
     callback(resp);
 }
 
@@ -1930,7 +1928,7 @@ void KlippyHttpServer::handleHistoryTotals(
     double longestJob = 0.0;
     double longestPrint = 0.0;
 
-    for (const auto& job : udsServer_.jobHistory()) {
+    for (const auto& job : server_.jobHistory()) {
         totalJobs++;
         totalTime += job.totalDuration;
         totalPrintTime += job.printDuration;
@@ -2042,7 +2040,7 @@ void KlippyHttpServer::handleAccessUserPost(
     }
 
     // Register user via UDS server
-    udsServer_.registerUser(username, password);
+    server_.registerUser(username, password);
 
     auto resp = drogon::HttpResponse::newHttpResponse();
     resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
@@ -2073,7 +2071,7 @@ void KlippyHttpServer::handleAccessUserDelete(
     }
 
     // Delete user via UDS server
-    if (!udsServer_.deleteUser(username)) {
+    if (!server_.deleteUser(username)) {
         resp->setStatusCode(drogon::HttpStatusCode::k404NotFound);
         resp->setBody(buildErrorResponse(404, "User not found: " + username));
         callback(resp);
@@ -2106,7 +2104,7 @@ void KlippyHttpServer::handleAccessUsersList(
 
     // Build user list from UDS server's registered users
     std::vector<klippy::JsonValue> users;
-    for (const auto& [username, user] : udsServer_.users()) {
+    for (const auto& [username, user] : server_.users()) {
         std::map<std::string, klippy::JsonValue> userObj;
         userObj["username"] = klippy::JsonValue(username);
         userObj["source"] = klippy::JsonValue(user.source);
@@ -2231,8 +2229,8 @@ void KlippyHttpServer::handleOctoprintPrinter(
     addCorsHeaders(resp, req);
 
     // Query real printer state
-    auto printerState = udsServer_.state();
-    auto status = udsServer_.queryObjects({{"toolhead", {}}, {"print_stats", {}},
+    auto printerState = server_.state();
+    auto status = server_.queryObjects({{"toolhead", {}}, {"print_stats", {}},
                                             {"heater_bed", {}}, {"extruder", {}}});
 
     // Map PrinterState to OctoPrint state text
@@ -2320,8 +2318,8 @@ void KlippyHttpServer::handleOctoprintJob(
     addCorsHeaders(resp, req);
 
     // Query real print stats
-    auto status = udsServer_.queryObjects({{"print_stats", {}}, {"virtual_sdcard", {}}});
-    auto printerState = udsServer_.state();
+    auto status = server_.queryObjects({{"print_stats", {}}, {"virtual_sdcard", {}}});
+    auto printerState = server_.state();
 
     std::string stateText = "Operational";
     double completion = 0.0;
@@ -2480,7 +2478,7 @@ void KlippyHttpServer::handleWsMessage(const drogon::WebSocketConnectionPtr& con
                     wsSessions_.setSubscriptions(session->id, subs);
 
                     // Get initial snapshot
-                    auto status = udsServer_.queryObjects(subs);
+                    auto status = server_.queryObjects(subs);
                     std::map<std::string, klippy::JsonValue> statusJson;
                     for (const auto& [objName, fields] : status) {
                         std::map<std::string, klippy::JsonValue> fieldMap;
@@ -2561,7 +2559,7 @@ void KlippyHttpServer::subscriptionRefreshTick() {
         auto baseline = wsSessions_.getBaseline(session->id);
 
         // Compute current status
-        auto current = udsServer_.queryObjects(subs);
+        auto current = server_.queryObjects(subs);
 
         // Compute diff
         std::map<std::string, klippy::JsonValue> diff;
@@ -2715,8 +2713,17 @@ bool KlippyHttpServer::checkJwt(const std::string& token) const {
     auto secondDot = token.find('.', firstDot + 1);
     if (secondDot == std::string::npos) return false;
 
+    std::string headerB64 = token.substr(0, firstDot);
+    std::string payloadB64 = token.substr(firstDot + 1, secondDot - firstDot - 1);
     std::string headerPayload = token.substr(0, secondDot);
     std::string signature = token.substr(secondDot + 1);
+
+    // Parse header to validate algorithm (reject "none")
+    auto headerJson = klippy::JsonValue::parse(base64urlDecode(headerB64));
+    if (!headerJson || !headerJson->isObject()) return false;
+    const auto* alg = headerJson->find("alg");
+    if (alg == nullptr || !alg->isString()) return false;
+    if (alg->asString() == "none") return false;
 
     // Compute expected signature
     std::string expectedSig = hmacSha256(config_.jwtSecret, headerPayload);
@@ -2727,7 +2734,22 @@ bool KlippyHttpServer::checkJwt(const std::string& token) const {
     for (size_t i = 0; i < signature.size(); i++) {
         diff |= signature[i] ^ expectedSig[i];
     }
-    return diff == 0;
+    if (diff != 0) return false;
+
+    // Parse payload and validate expiration
+    auto payloadJson = klippy::JsonValue::parse(base64urlDecode(payloadB64));
+    if (!payloadJson || !payloadJson->isObject()) return false;
+    const auto* exp = payloadJson->find("exp");
+    if (exp != nullptr && (exp->isInt() || exp->isDouble())) {
+        int64_t expVal = exp->isInt()
+            ? exp->asInt()
+            : static_cast<int64_t>(exp->asDouble());
+        auto nowSec = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        if (expVal < nowSec) return false;  // token expired
+    }
+
+    return true;
 }
 
 bool KlippyHttpServer::checkOneshotToken(const std::string& token, const std::string& ip) {

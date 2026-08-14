@@ -23,14 +23,15 @@ namespace tether::klipper::objects {
  */
 class OidAllocator {
 public:
-    /// @brief Allocate the next OID (0..255). Returns 255 and sets full_ if exhausted.
+    /// @brief Allocate the next OID (0..254). Returns 255 and sets full_ if exhausted.
+    /// Callers should check isFull() after allocation to detect exhaustion.
     uint8_t allocate() {
         if (nextOid_ > 254) { full_ = true; return 255; }
         return nextOid_++;
     }
 
     /// @brief Allocate a contiguous block of @p count OIDs; returns the first.
-    ///        Returns 255 if not enough OIDs remain.
+    ///        Returns 255 if not enough OIDs remain. Callers should check isFull().
     uint8_t allocateBlock(uint8_t count) {
         if (nextOid_ + count > 255) { full_ = true; return 255; }
         uint8_t first = nextOid_;

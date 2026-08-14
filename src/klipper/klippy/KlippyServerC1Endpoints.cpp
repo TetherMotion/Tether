@@ -3,28 +3,19 @@
  * @brief C1 Moonraker-compatible endpoint handlers
  */
 
-#include "tether/klipper/klippy/KlippyUdsServer.hpp"
+#include "tether/klipper/klippy/KlippyServer.hpp"
 #include "tether/klipper/klippy/AdvancedObjects.hpp"
-#include "UdsConnection_internal.hpp"
 
 #include <algorithm>
-#include <cerrno>
 #include <chrono>
-#include <cstring>
 #include <ctime>
-#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <netinet/in.h>
 #include <set>
-#include <signal.h>
 #include <sstream>
-#include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/un.h>
-#include <unistd.h>
 
 namespace tether::klipper::klippy {
 
@@ -32,11 +23,11 @@ namespace tether::klipper::klippy {
 // C1: New Moonraker-compatible endpoint handlers
 // ============================================================================
 
-JsonValue KlippyUdsServer::handleServerConfig(const JsonValue& params) {
+JsonValue KlippyServer::handleServerConfig(const JsonValue& params) {
     return withLockResult(serverConfig_);
 }
 
-JsonValue KlippyUdsServer::handleServerFilesRoots(const JsonValue& params) {
+JsonValue KlippyServer::handleServerFilesRoots(const JsonValue& params) {
     return withLock([&]() {
         std::map<std::string, JsonValue> result;
         std::map<std::string, JsonValue> roots;
@@ -51,7 +42,7 @@ JsonValue KlippyUdsServer::handleServerFilesRoots(const JsonValue& params) {
     });
 }
 
-JsonValue KlippyUdsServer::handleServerFilesCreateDir(const JsonValue& params) {
+JsonValue KlippyServer::handleServerFilesCreateDir(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     std::string path = params.has("path") && params.find("path")->isString()
         ? params.find("path")->asString() : "";
@@ -71,7 +62,7 @@ JsonValue KlippyUdsServer::handleServerFilesCreateDir(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleServerFilesMetascan(const JsonValue& params) {
+JsonValue KlippyServer::handleServerFilesMetascan(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     std::string filename = params.has("filename") && params.find("filename")->isString()
         ? params.find("filename")->asString() : "";
@@ -139,27 +130,23 @@ JsonValue KlippyUdsServer::handleServerFilesMetascan(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleServerFilesThumbnails(const JsonValue& params) {
+JsonValue KlippyServer::handleServerFilesThumbnails(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
-    std::string filename = params.has("filename") && params.find("filename")->isString()
-        ? params.find("filename")->asString() : "";
-
-    // Thumbnails are typically embedded in G-code as base64 images
-    // Return empty array if no thumbnails found
-    std::vector<JsonValue> thumbnails;
-    (void)filename; // Would scan the G-code file for thumbnail data
-    result["result"] = JsonValue(thumbnails);
+    // Thumbnail extraction from G-code is not yet implemented
+    result["error"] = JsonValue("Thumbnail extraction not implemented");
+    result["code"] = JsonValue(static_cast<int64_t>(501));
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleServerLogsRollover(const JsonValue& params) {
+JsonValue KlippyServer::handleServerLogsRollover(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
-    // In a real system, this would rotate log files
-    result["result"] = JsonValue(true);
+    // Log rotation requires system-level access not available in this context
+    result["error"] = JsonValue("Log rotation not implemented");
+    result["code"] = JsonValue(static_cast<int64_t>(501));
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleServerKlippyLog(const JsonValue& params) {
+JsonValue KlippyServer::handleServerKlippyLog(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     // Return log file path or content summary
     std::map<std::string, JsonValue> logInfo;
@@ -172,7 +159,7 @@ JsonValue KlippyUdsServer::handleServerKlippyLog(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleServerMoonrakerLog(const JsonValue& params) {
+JsonValue KlippyServer::handleServerMoonrakerLog(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     std::map<std::string, JsonValue> logInfo;
     std::string moonrakerLog = "/var/log/tether-moonraker.log";
@@ -185,7 +172,7 @@ JsonValue KlippyUdsServer::handleServerMoonrakerLog(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleMachineServicesList(const JsonValue& params) {
+JsonValue KlippyServer::handleMachineServicesList(const JsonValue& params) {
     return withLock([&]() {
         std::map<std::string, JsonValue> result;
         std::map<std::string, JsonValue> services;
@@ -200,7 +187,7 @@ JsonValue KlippyUdsServer::handleMachineServicesList(const JsonValue& params) {
     });
 }
 
-JsonValue KlippyUdsServer::handleMachineServiceAction(const JsonValue& params) {
+JsonValue KlippyServer::handleMachineServiceAction(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
     std::string service = params.has("service") && params.find("service")->isString()
@@ -217,12 +204,13 @@ JsonValue KlippyUdsServer::handleMachineServiceAction(const JsonValue& params) {
         return JsonValue(result);
     }
 
-    // In a real system, this would call systemctl restart/stop/start
-    result["result"] = JsonValue(true);
+    // Service control via systemctl is not implemented in this context
+    result["error"] = JsonValue("Service action '" + service + "' not implemented (requires systemctl access)");
+    result["code"] = JsonValue(static_cast<int64_t>(501));
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleMachineUpdateList(const JsonValue& params) {
+JsonValue KlippyServer::handleMachineUpdateList(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
     std::map<std::string, JsonValue> updates;
@@ -235,31 +223,40 @@ JsonValue KlippyUdsServer::handleMachineUpdateList(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleMachineUpdateRefresh(const JsonValue& params) {
+JsonValue KlippyServer::handleMachineUpdateRefresh(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
-    result["result"] = JsonValue(true);
+    result["error"] = JsonValue("Update refresh not implemented");
+    result["code"] = JsonValue(static_cast<int64_t>(501));
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleMachineUpdateUpdate(const JsonValue& params) {
-    std::map<std::string, JsonValue> result;
-    std::string component = params.has("component") && params.find("component")->isString()
-        ? params.find("component")->asString() : "";
-    (void)component;
-    result["result"] = JsonValue(true);
-    return JsonValue(result);
-}
-
-JsonValue KlippyUdsServer::handleMachineUpdateRecover(const JsonValue& params) {
+JsonValue KlippyServer::handleMachineUpdateUpdate(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     std::string component = params.has("component") && params.find("component")->isString()
         ? params.find("component")->asString() : "";
-    (void)component;
-    result["result"] = JsonValue(true);
+    if (component.empty()) {
+        result["error"] = JsonValue("Missing 'component' parameter");
+        return JsonValue(result);
+    }
+    result["error"] = JsonValue("Update of '" + component + "' not implemented");
+    result["code"] = JsonValue(static_cast<int64_t>(501));
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleDatabaseList(const JsonValue& params) {
+JsonValue KlippyServer::handleMachineUpdateRecover(const JsonValue& params) {
+    std::map<std::string, JsonValue> result;
+    std::string component = params.has("component") && params.find("component")->isString()
+        ? params.find("component")->asString() : "";
+    if (component.empty()) {
+        result["error"] = JsonValue("Missing 'component' parameter");
+        return JsonValue(result);
+    }
+    result["error"] = JsonValue("Recovery of '" + component + "' not implemented");
+    result["code"] = JsonValue(static_cast<int64_t>(501));
+    return JsonValue(result);
+}
+
+JsonValue KlippyServer::handleDatabaseList(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
     std::string ns = params.has("namespace") && params.find("namespace")->isString()
@@ -276,7 +273,7 @@ JsonValue KlippyUdsServer::handleDatabaseList(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleDatabaseGet(const JsonValue& params) {
+JsonValue KlippyServer::handleDatabaseGet(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
     std::string ns = params.has("namespace") && params.find("namespace")->isString()
@@ -293,7 +290,7 @@ JsonValue KlippyUdsServer::handleDatabaseGet(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleDatabasePut(const JsonValue& params) {
+JsonValue KlippyServer::handleDatabasePut(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
     std::string ns = params.has("namespace") && params.find("namespace")->isString()
@@ -311,7 +308,7 @@ JsonValue KlippyUdsServer::handleDatabasePut(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleDatabaseDelete(const JsonValue& params) {
+JsonValue KlippyServer::handleDatabaseDelete(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
     std::string ns = params.has("namespace") && params.find("namespace")->isString()
@@ -327,7 +324,7 @@ JsonValue KlippyUdsServer::handleDatabaseDelete(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleJobQueueStatus(const JsonValue& params) {
+JsonValue KlippyServer::handleJobQueueStatus(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
     std::vector<JsonValue> queue;
@@ -340,44 +337,59 @@ JsonValue KlippyUdsServer::handleJobQueueStatus(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleJobQueuePost(const JsonValue& params) {
+JsonValue KlippyServer::handleJobQueuePost(const JsonValue& params) {
+    std::vector<JobQueueChangedCallback> cbs;
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        // Accept either a single filename or a list
+        const JsonValue* filenames = params.find("filenames");
+        if (filenames && filenames->isArray()) {
+            for (const auto& f : filenames->asArray()) {
+                if (f.isString()) jobQueue_.push_back(f.asString());
+            }
+        } else {
+            std::string filename = params.has("filename") && params.find("filename")->isString()
+                ? params.find("filename")->asString() : "";
+            if (!filename.empty()) {
+                jobQueue_.push_back(filename);
+            }
+        }
+        cbs = jobQueueChangedCbs_;
+    }
+    for (const auto& cb : cbs) {
+        if (cb) cb("post");
+    }
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
-    // Accept either a single filename or a list
-    const JsonValue* filenames = params.find("filenames");
-    if (filenames && filenames->isArray()) {
-        for (const auto& f : filenames->asArray()) {
-            if (f.isString()) jobQueue_.push_back(f.asString());
-        }
-    } else {
-        std::string filename = params.has("filename") && params.find("filename")->isString()
-            ? params.find("filename")->asString() : "";
-        if (!filename.empty()) {
-            jobQueue_.push_back(filename);
-        }
-    }
     result["result"] = JsonValue(static_cast<int64_t>(jobQueue_.size()));
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleJobQueueDelete(const JsonValue& params) {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    std::map<std::string, JsonValue> result;
-    std::string filename = params.has("filename") && params.find("filename")->isString()
-        ? params.find("filename")->asString() : "";
-    if (!filename.empty()) {
-        jobQueue_.erase(
-            std::remove(jobQueue_.begin(), jobQueue_.end(), filename),
-            jobQueue_.end());
-    } else {
-        // Clear all
-        jobQueue_.clear();
+JsonValue KlippyServer::handleJobQueueDelete(const JsonValue& params) {
+    std::vector<JobQueueChangedCallback> cbs;
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        std::string filename = params.has("filename") && params.find("filename")->isString()
+            ? params.find("filename")->asString() : "";
+        if (!filename.empty()) {
+            jobQueue_.erase(
+                std::remove(jobQueue_.begin(), jobQueue_.end(), filename),
+                jobQueue_.end());
+        } else {
+            // Clear all
+            jobQueue_.clear();
+        }
+        cbs = jobQueueChangedCbs_;
     }
+    for (const auto& cb : cbs) {
+        if (cb) cb("delete");
+    }
+    std::map<std::string, JsonValue> result;
     result["result"] = JsonValue(true);
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleJobHistoryList(const JsonValue& params) {
+JsonValue KlippyServer::handleJobHistoryList(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
     std::vector<JsonValue> jobs;
@@ -397,7 +409,7 @@ JsonValue KlippyUdsServer::handleJobHistoryList(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleJobHistoryGet(const JsonValue& params) {
+JsonValue KlippyServer::handleJobHistoryGet(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
     int64_t jobId = params.has("job_id") && params.find("job_id")->isInt()
@@ -422,7 +434,7 @@ JsonValue KlippyUdsServer::handleJobHistoryGet(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleAnnouncementsList(const JsonValue& params) {
+JsonValue KlippyServer::handleAnnouncementsList(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
     std::vector<JsonValue> entries;
@@ -441,13 +453,14 @@ JsonValue KlippyUdsServer::handleAnnouncementsList(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleAnnouncementsUpdate(const JsonValue& params) {
+JsonValue KlippyServer::handleAnnouncementsUpdate(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
-    result["result"] = JsonValue(true);
+    result["error"] = JsonValue("Announcement update not implemented (requires network access to Moonraker announcement API)");
+    result["code"] = JsonValue(static_cast<int64_t>(501));
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleAnnouncementsDismiss(const JsonValue& params) {
+JsonValue KlippyServer::handleAnnouncementsDismiss(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
     std::string entryId = params.has("entry_id") && params.find("entry_id")->isString()
@@ -463,7 +476,7 @@ JsonValue KlippyUdsServer::handleAnnouncementsDismiss(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleWebcamsList(const JsonValue& params) {
+JsonValue KlippyServer::handleWebcamsList(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
     std::map<std::string, JsonValue> webcams;
@@ -481,7 +494,7 @@ JsonValue KlippyUdsServer::handleWebcamsList(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleWebcamsGet(const JsonValue& params) {
+JsonValue KlippyServer::handleWebcamsGet(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
     std::string name = params.has("name") && params.find("name")->isString()
@@ -502,7 +515,7 @@ JsonValue KlippyUdsServer::handleWebcamsGet(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleWebcamsTest(const JsonValue& params) {
+JsonValue KlippyServer::handleWebcamsTest(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     std::string name = params.has("name") && params.find("name")->isString()
         ? params.find("name")->asString() : "";
@@ -519,7 +532,7 @@ JsonValue KlippyUdsServer::handleWebcamsTest(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleDevicesList(const JsonValue& params) {
+JsonValue KlippyServer::handleDevicesList(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
     // Devices include power devices, sensors, etc.
@@ -535,7 +548,7 @@ JsonValue KlippyUdsServer::handleDevicesList(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleDevicesGet(const JsonValue& params) {
+JsonValue KlippyServer::handleDevicesGet(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
     std::string name = params.has("device") && params.find("device")->isString()

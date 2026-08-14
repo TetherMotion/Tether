@@ -5,7 +5,7 @@
  */
 
 #include "tether/klipper/klippy/GCodeExecutor.hpp"
-#include "tether/klipper/klippy/KlippyUdsServer.hpp"
+#include "tether/klipper/klippy/KlippyServer.hpp"
 #include "tether/klipper/klippy/PrinterObjects.hpp"
 #include "tether/klipper/motion/MotionReconstructor.hpp"
 #include "tether/klipper/objects/Stepper.hpp"
@@ -102,7 +102,7 @@ TEST(TierBExtendedCommands, RegularGcodeNotExtended) {
 // ============================================================================
 
 TEST(TierBUds, TemperatureStoreRecord) {
-    KlippyUdsServer server;
+    KlippyServer server;
     server.recordTemperature("extruder", 25.0, 0.0);
     server.recordTemperature("extruder", 30.0, 200.0);
     server.recordTemperature("heater_bed", 60.0, 60.0);
@@ -112,7 +112,7 @@ TEST(TierBUds, TemperatureStoreRecord) {
 }
 
 TEST(TierBUds, GcodeStoreRecord) {
-    KlippyUdsServer server;
+    KlippyServer server;
     server.emitGcodeResponse("Test message 1");
     server.emitGcodeResponse("Test message 2");
 
@@ -122,7 +122,7 @@ TEST(TierBUds, GcodeStoreRecord) {
 }
 
 TEST(TierBUds, PowerDevices) {
-    KlippyUdsServer server;
+    KlippyServer server;
     server.registerPowerDevice("psu", "off");
     server.registerPowerDevice("light", "on");
 
@@ -131,7 +131,7 @@ TEST(TierBUds, PowerDevices) {
 }
 
 TEST(TierBUds, NewEndpointsRegistered) {
-    KlippyUdsServer server;
+    KlippyServer server;
     auto endpoints = server.listEndpoints();
 
     auto hasEndpoint = [&](const std::string& name) {
@@ -171,7 +171,7 @@ TEST(TierBUds, FilesListWithTempDir) {
     f1 << "G28\nG1 X10 Y10\n";
     f1.close();
 
-    KlippyUdsServer server;
+    KlippyServer server;
     server.setFileRoot(testDir);
 
     auto endpoints = server.listEndpoints();
@@ -182,7 +182,7 @@ TEST(TierBUds, FilesListWithTempDir) {
 }
 
 TEST(TierBUds, UpdateStatus) {
-    KlippyUdsServer server;
+    KlippyServer server;
     server.setUpdateStatus("klipper", "up_to_date");
     server.setUpdateStatus("moonraker", "update_available");
     SUCCEED();

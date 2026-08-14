@@ -202,13 +202,40 @@ private:
                             else if (h >= 'A' && h <= 'F') cp |= h - 'A' + 10;
                             else return std::nullopt;
                         }
-                        // Simple UTF-8 encoding
-                        if (cp < 0x80) s += static_cast<char>(cp);
-                        else if (cp < 0x800) {
+                        // Handle UTF-16 surrogate pairs
+                        if (cp >= 0xD800 && cp <= 0xDBFF) {
+                            // High surrogate — expect a low surrogate following
+                            if (pos_ + 6 <= s_.size() && s_[pos_] == '\\' && s_[pos_ + 1] == 'u') {
+                                pos_ += 2; // skip \u
+                                unsigned int low = 0;
+                                for (int i = 0; i < 4; ++i) {
+                                    char h = get();
+                                    low <<= 4;
+                                    if (h >= '0' && h <= '9') low |= h - '0';
+                                    else if (h >= 'a' && h <= 'f') low |= h - 'a' + 10;
+                                    else if (h >= 'A' && h <= 'F') low |= h - 'A' + 10;
+                                    else break;
+                                }
+                                if (low >= 0xDC00 && low <= 0xDFFF) {
+                                    // Combine surrogate pair into a single code point
+                                    cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+                                }
+                            }
+                        }
+                        // UTF-8 encoding (1-4 bytes)
+                        if (cp < 0x80) {
+                            s += static_cast<char>(cp);
+                        } else if (cp < 0x800) {
                             s += static_cast<char>(0xC0 | (cp >> 6));
                             s += static_cast<char>(0x80 | (cp & 0x3F));
-                        } else {
+                        } else if (cp < 0x10000) {
                             s += static_cast<char>(0xE0 | (cp >> 12));
+                            s += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+                            s += static_cast<char>(0x80 | (cp & 0x3F));
+                        } else {
+                            // 4-byte UTF-8 for code points U+10000 to U+10FFFF
+                            s += static_cast<char>(0xF0 | (cp >> 18));
+                            s += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
                             s += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
                             s += static_cast<char>(0x80 | (cp & 0x3F));
                         }

@@ -73,6 +73,7 @@ inline std::optional<uint16_t> decodeMsgId(const uint8_t*& p, const uint8_t* end
     if (p >= end) return std::nullopt;
     uint8_t b1 = *p++;
     uint16_t v = static_cast<uint16_t>((b0 & 0x7F) << 7) | static_cast<uint16_t>(b1 & 0x7F);
+    if (v > 0x3FFF) return std::nullopt; // exceeds kMaxMsgId
     return v;
 }
 

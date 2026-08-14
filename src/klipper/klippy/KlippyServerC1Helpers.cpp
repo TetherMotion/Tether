@@ -3,28 +3,19 @@
  * @brief C1 helper methods (registration, database, job queue, etc.)
  */
 
-#include "tether/klipper/klippy/KlippyUdsServer.hpp"
+#include "tether/klipper/klippy/KlippyServer.hpp"
 #include "tether/klipper/klippy/AdvancedObjects.hpp"
-#include "UdsConnection_internal.hpp"
 
 #include <algorithm>
-#include <cerrno>
 #include <chrono>
-#include <cstring>
 #include <ctime>
-#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <netinet/in.h>
 #include <set>
-#include <signal.h>
 #include <sstream>
-#include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/un.h>
-#include <unistd.h>
 
 namespace tether::klipper::klippy {
 
@@ -32,7 +23,7 @@ namespace tether::klipper::klippy {
 // C1: Helper methods for new state
 // ============================================================================
 
-void KlippyUdsServer::registerWebcam(const std::string& name, const std::string& url,
+void KlippyServer::registerWebcam(const std::string& name, const std::string& url,
                                        const std::string& service) {
     Webcam cam;
     cam.name = name;
@@ -41,18 +32,18 @@ void KlippyUdsServer::registerWebcam(const std::string& name, const std::string&
     webcams_[name] = cam;
 }
 
-void KlippyUdsServer::registerService(const std::string& name,
+void KlippyServer::registerService(const std::string& name,
                                         const std::string& activeState,
                                         const std::string& subState) {
     services_[name] = {name, activeState, subState};
 }
 
-void KlippyUdsServer::registerFileRoot(const std::string& name, const std::string& path,
+void KlippyServer::registerFileRoot(const std::string& name, const std::string& path,
                                          bool writable) {
     fileRoots_[name] = {name, path, writable};
 }
 
-void KlippyUdsServer::initServerConfig() {
+void KlippyServer::initServerConfig() {
     // Emulate a Moonraker server config that reflects the loaded Klipper config
     // This is what frontends like Mainsail/Fluidd query via server/config
 
@@ -206,12 +197,12 @@ void KlippyUdsServer::initServerConfig() {
     serverConfig_ = printerConfig;
 }
 
-void KlippyUdsServer::databasePut(const std::string& ns, const std::string& key,
+void KlippyServer::databasePut(const std::string& ns, const std::string& key,
                                     const JsonValue& value) {
     database_[ns][key] = value;
 }
 
-std::optional<JsonValue> KlippyUdsServer::databaseGet(const std::string& ns,
+std::optional<JsonValue> KlippyServer::databaseGet(const std::string& ns,
                                                         const std::string& key) {
     auto it = database_.find(ns);
     if (it == database_.end()) return std::nullopt;
@@ -220,7 +211,7 @@ std::optional<JsonValue> KlippyUdsServer::databaseGet(const std::string& ns,
     return kit->second;
 }
 
-bool KlippyUdsServer::databaseDelete(const std::string& ns, const std::string& key) {
+bool KlippyServer::databaseDelete(const std::string& ns, const std::string& key) {
     auto it = database_.find(ns);
     if (it == database_.end()) return false;
     auto kit = it->second.find(key);
@@ -229,11 +220,11 @@ bool KlippyUdsServer::databaseDelete(const std::string& ns, const std::string& k
     return true;
 }
 
-void KlippyUdsServer::jobQueueAdd(const std::string& filename) {
+void KlippyServer::jobQueueAdd(const std::string& filename) {
     jobQueue_.push_back(filename);
 }
 
-int64_t KlippyUdsServer::jobHistoryAdd(const std::string& filename,
+int64_t KlippyServer::jobHistoryAdd(const std::string& filename,
                                          const std::string& status) {
     JobHistoryEntry entry;
     entry.jobId = nextJobId_++;
@@ -242,11 +233,19 @@ int64_t KlippyUdsServer::jobHistoryAdd(const std::string& filename,
     entry.startTime = static_cast<double>(
         std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()).count());
-    jobHistory_.push_back(entry);
+    std::vector<HistoryChangedCallback> cbs;
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        jobHistory_.push_back(entry);
+        cbs = historyChangedCbs_;
+    }
+    for (const auto& cb : cbs) {
+        if (cb) cb("add", entry.jobId);
+    }
     return entry.jobId;
 }
 
-void KlippyUdsServer::announcementAdd(const std::string& entryId,
+void KlippyServer::announcementAdd(const std::string& entryId,
                                         const std::string& title,
                                         const std::string& description,
                                         const std::string& severity) {

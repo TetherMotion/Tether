@@ -52,7 +52,13 @@ bool PipeTransport::open() {
         }
         // Set non-blocking mode for the protocol layer's poll-based reads.
         int flags = ::fcntl(fd, F_GETFL, 0);
-        ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+        if (flags == -1) {
+            KLIPPER_LOG_ERROR("PipeTransport: fcntl F_GETFL failed");
+            return false;
+        }
+        if (::fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+            KLIPPER_LOG_ERROR("PipeTransport: fcntl F_SETFL failed");
+        }
         rfd = fd;
         wfd = fd;
     }

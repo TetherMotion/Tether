@@ -3,28 +3,19 @@
  * @brief Built-in printer object status implementations
  */
 
-#include "tether/klipper/klippy/KlippyUdsServer.hpp"
+#include "tether/klipper/klippy/KlippyServer.hpp"
 #include "tether/klipper/klippy/AdvancedObjects.hpp"
-#include "UdsConnection_internal.hpp"
 
 #include <algorithm>
-#include <cerrno>
 #include <chrono>
-#include <cstring>
 #include <ctime>
-#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <netinet/in.h>
 #include <set>
-#include <signal.h>
 #include <sstream>
-#include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/un.h>
-#include <unistd.h>
 
 namespace tether::klipper::klippy {
 

@@ -7,13 +7,13 @@
 # web frontends.
 #
 # Dependencies:
-#   - tether_klipper (for KlippyUdsServer endpoint handlers)
+#   - tether_klipper (for KlippyServer endpoint handlers)
 #   - Drogon (HTTP/WebSocket framework)
 #   - Glaze (JSON serialization, already a submodule)
 #
 # This component is optional and gated behind TETHER_ENABLE_KLIPPER_HTTP.
 # It links against tether_klipper and reuses all existing endpoint handlers
-# via KlippyUdsServer::callEndpoint().
+# via KlippyServer::callEndpoint().
 
 file(GLOB_RECURSE TETHER_KLIPPER_HTTP_SOURCES CONFIGURE_DEPENDS
     "${TETHER_ROOT}/src/klipper/http/*.cpp"
