@@ -1048,6 +1048,18 @@ if(TETHER_BUILD_KLIPPER)
     )
 endif()
 
+if(TETHER_BUILD_KLIPPER AND TETHER_ENABLE_KLIPPER_HTTP)
+    file(GLOB KLIPPER_HTTP_TEST_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/klipper/http/*.cpp"
+    )
+    create_module_test_timeout(klipper_http
+        "${KLIPPER_HTTP_TEST_SOURCES}"
+        "tether_klipper_http;tether_klipper;tether_common;tether_motion_planner;tether_gcode;tether_export;tether_controls;tether_simulation;tether_io_protocol"
+        "TETHER_ENABLE_KLIPPER=1;TETHER_ENABLE_KLIPPER_HTTP=1"
+        120
+    )
+endif()
+
 if(TETHER_ENABLE_COVERAGE)
     find_program(GCOVR_EXECUTABLE NAMES gcovr)
     if(GCOVR_EXECUTABLE)

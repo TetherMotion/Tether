@@ -227,6 +227,54 @@ option(TETHER_BUILD_DESTABILIZER "Build destabilizer adversarial testing" ON)
 option(TETHER_BUILD_IO_PROTOCOL "Build IO protocol (SLIP-based parameter streaming)" ON)
 option(TETHER_BUILD_KLIPPER "Build Klipper protocol implementation" ON)
 option(TETHER_ENABLE_KLIPPER_CAN "Enable Klipper CAN transport (requires SocketCAN)" OFF)
+
+# Native HTTP/WebSocket server for Mainsail/Fluidd (requires Drogon).
+# Default: ON if Drogon is found, OFF if not.
+# Hard error if user forces ON but Drogon is unavailable.
+# Note: Drogon depends on jsoncpp; if jsoncpp dev headers are missing,
+# we FetchContent jsoncpp so Drogon's CMake config can find it.
+find_package(Jsoncpp QUIET)
+if(NOT Jsoncpp_FOUND)
+    # Try pkg-config or manual detection as a fallback
+    find_path(JSONCPP_INCLUDE_DIRS NAMES json/json.h PATH_SUFFIXES jsoncpp)
+    find_library(JSONCPP_LIBRARIES NAMES jsoncpp)
+    if(JSONCPP_INCLUDE_DIRS AND JSONCPP_LIBRARIES)
+        set(Jsoncpp_FOUND TRUE)
+    endif()
+endif()
+if(NOT Jsoncpp_FOUND AND NOT JSONCPP_INCLUDE_DIRS)
+    # FetchContent jsoncpp so Drogon's find_dependency(Jsoncpp) succeeds.
+    include(FetchContent)
+    FetchContent_Declare(jsoncpp
+        GIT_REPOSITORY https://github.com/open-source-parsers/jsoncpp.git
+        GIT_TAG 1.9.5)
+    FetchContent_MakeAvailable(jsoncpp)
+    # jsoncpp's CMake config exports target jsoncpp_lib
+    # Provide variables that Drogon's FindJsoncpp.cmake expects
+    set(JSONCPP_INCLUDE_DIRS ${jsoncpp_SOURCE_DIR}/include)
+    set(JSONCPP_LIBRARIES jsoncpp_lib)
+    set(Jsoncpp_FOUND TRUE)
+    # jsoncpp's CMake references ${PROJECT_BINARY_DIR}/include/json in its
+    # BUILD_INTERFACE include dirs, but that directory may not be created
+    # automatically. Create it to avoid CMake configuration errors.
+    file(MAKE_DIRECTORY ${jsoncpp_BINARY_DIR}/include/json)
+endif()
+
+# Provide stub find modules for Drogon's optional DB dependencies (pg, SQLite3,
+# MySQL) that may not be installed. The Debian Drogon package was built with
+# these enabled, so its CMake config requires them. Tether's HTTP server does
+# not use any database — these stubs satisfy find_dependency() so the config
+# completes. They provide empty INTERFACE targets with no actual linkage.
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/drogon_compat")
+
+find_package(Drogon QUIET)
+if(Drogon_FOUND)
+    set(TETHER_ENABLE_KLIPPER_HTTP_DEFAULT ON)
+else()
+    set(TETHER_ENABLE_KLIPPER_HTTP_DEFAULT OFF)
+endif()
+option(TETHER_ENABLE_KLIPPER_HTTP "Build native HTTP/WebSocket server for Mainsail/Fluidd (requires Drogon)"
+       ${TETHER_ENABLE_KLIPPER_HTTP_DEFAULT})
 option(TETHER_BUILD_TESTS "Build tests" ON)
 option(TETHER_BUILD_EXAMPLES "Build examples" ON)
 option(TETHER_BUILD_BENCHMARKS "Build benchmarks" OFF)
@@ -457,6 +505,21 @@ if(TETHER_BUILD_KLIPPER)
     add_compile_definitions(TETHER_ENABLE_KLIPPER=1)
 endif()
 
+# Validate and enable the Klipper HTTP server feature.
+if(TETHER_ENABLE_KLIPPER_HTTP)
+    if(NOT Drogon_FOUND)
+        message(FATAL_ERROR
+            "TETHER_ENABLE_KLIPPER_HTTP=ON but Drogon was not found.\n"
+            "Install Drogon (e.g. 'apt install libdrogon-dev', 'vcpkg install drogon', "
+            "or build from https://github.com/drogonframework/drogon) "
+            "or set -DTETHER_ENABLE_KLIPPER_HTTP=OFF.")
+    endif()
+    if(NOT TETHER_BUILD_KLIPPER)
+        message(FATAL_ERROR "TETHER_ENABLE_KLIPPER_HTTP requires TETHER_BUILD_KLIPPER=ON.")
+    endif()
+    add_compile_definitions(TETHER_ENABLE_KLIPPER_HTTP=1)
+endif()
+
 # Propagate blend runtime checks option to all targets
 if(TETHER_BLEND_RUNTIME_CHECKS)
     add_compile_definitions(TETHER_BLEND_RUNTIME_CHECKS=1)
@@ -528,6 +591,11 @@ if(TETHER_BUILD_KLIPPER)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/klipper.cmake)
 endif()
 
+# Klipper native HTTP/WebSocket server (optional, requires Drogon)
+if(TETHER_BUILD_KLIPPER AND TETHER_ENABLE_KLIPPER_HTTP)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/klipper_http.cmake)
+endif()
+
 # =============================================================================
 # Create Combined "tether" Library (for backward compatibility)
 # =============================================================================
@@ -567,6 +635,7 @@ tether_collect_targets(TETHER_SIMULATION)
 tether_collect_targets(TETHER_DESTABILIZER)
 tether_collect_targets(TETHER_IO_PROTOCOL)
 tether_collect_targets(TETHER_KLIPPER)
+tether_collect_targets(TETHER_KLIPPER_HTTP)
 tether_collect_targets(TETHER_SLIPSPEED)
 
 # Aliases for consumer linking (shared preferred, then static)
@@ -630,6 +699,9 @@ if(TARGET tether_io_protocol)
 endif()
 if(TARGET tether_klipper)
     list(APPEND TETHER_ALL_COMPONENTS tether_klipper)
+endif()
+if(TARGET tether_klipper_http)
+    list(APPEND TETHER_ALL_COMPONENTS tether_klipper_http)
 endif()
 if(TARGET slipspeed)
     list(APPEND TETHER_ALL_COMPONENTS slipspeed)
@@ -787,6 +859,7 @@ message(STATUS "    tether_fsoe:           ${TETHER_BUILD_FSOE}")
 message(STATUS "    tether_ethercat_slave: ${TETHER_BUILD_ETHERCAT_SLAVE}")
 message(STATUS "    tether_simulation:    ${TETHER_BUILD_SIMULATION}")
 message(STATUS "    tether_io_protocol:   ${TETHER_BUILD_IO_PROTOCOL}")
+message(STATUS "    tether_klipper_http:  ${TETHER_ENABLE_KLIPPER_HTTP}")
 message(STATUS "")
 message(STATUS "  Optional:")
 message(STATUS "    Tests:           ${TETHER_BUILD_TESTS}")
