@@ -315,7 +315,7 @@ void FSoESlave::transitionTo(uint8_t newState) {
 bool FSoESlave::processRxFrame(const uint8_t* data, size_t len) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
 
-    if (!initialized_) {
+    if (!initialized_ || !data || len < CRC::MIN_FSOE_FRAME_SIZE) {
         return false;
     }
 
@@ -701,7 +701,7 @@ void FSoESlave::applyFailSafeOutputs() {
 // ============================================================================
 
 bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
-    if (len < CRC::MIN_FSOE_FRAME_SIZE) {
+    if (!data || len < CRC::MIN_FSOE_FRAME_SIZE) {
         FSoEErrorDetail detail;
         snprintf(detail.message, sizeof(detail.message),
                  "Slave received frame too short: %zu bytes (minimum %zu)",

@@ -26,8 +26,30 @@
 #include <unordered_map>
 #include <span>
 #include <optional>
+#include <algorithm>
+#include <limits>
 
 namespace tether::klipper::protocol {
+
+/// @brief Clamp an integer to the target type's range before casting.
+/// @details Prevents silent truncation when narrowing int32_t to smaller
+///          types (uint8_t, int16_t, uint16_t, etc.). Out-of-range values
+///          are clamped to the nearest representable value.
+template <typename Target, typename Source>
+constexpr Target clampCast(Source value) noexcept {
+    if constexpr (std::numeric_limits<Target>::is_signed) {
+        return static_cast<Target>(std::clamp<Source>(
+            value,
+            static_cast<Source>(std::numeric_limits<Target>::min()),
+            static_cast<Source>(std::numeric_limits<Target>::max())));
+    } else {
+        if (value < static_cast<Source>(0)) return static_cast<Target>(0);
+        return static_cast<Target>(std::clamp<Source>(
+            value,
+            static_cast<Source>(0),
+            static_cast<Source>(std::numeric_limits<Target>::max())));
+    }
+}
 
 /// @brief A decoded parameter value (integer or string/buffer bytes).
 struct ParamValue {

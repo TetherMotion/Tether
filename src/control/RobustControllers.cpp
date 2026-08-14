@@ -135,19 +135,19 @@ void H2Controller::setGeneralizedPlant(const double* A, const double* B1, const 
                                         const double* D21, const double* D22,
                                         int n, int nw, int nu, int nz, int ny) {
     m_n = std::min(n, static_cast<int>(MAX_STATE_DIM));
-    m_nw = nw;
-    m_nu = nu;
-    m_nz = nz;
-    m_ny = ny;
-    
-    std::memcpy(m_A.data(), A, m_n * m_n * sizeof(double));
-    std::memcpy(m_B1.data(), B1, m_n * nw * sizeof(double));
-    std::memcpy(m_B2.data(), B2, m_n * nu * sizeof(double));
-    std::memcpy(m_C1.data(), C1, nz * m_n * sizeof(double));
-    std::memcpy(m_C2.data(), C2, ny * m_n * sizeof(double));
-    std::memcpy(m_D12.data(), D12, nz * nu * sizeof(double));
-    std::memcpy(m_D21.data(), D21, ny * nw * sizeof(double));
-    
+    m_nw = std::min(nw, static_cast<int>(MAX_STATE_DIM));
+    m_nu = std::min(nu, static_cast<int>(MAX_CONTROL_DIM));
+    m_nz = std::min(nz, static_cast<int>(MAX_OUTPUT_DIM));
+    m_ny = std::min(ny, static_cast<int>(MAX_OUTPUT_DIM));
+
+    std::memcpy(m_A.data(), A, static_cast<size_t>(m_n) * static_cast<size_t>(m_n) * sizeof(double));
+    std::memcpy(m_B1.data(), B1, static_cast<size_t>(m_n) * static_cast<size_t>(m_nw) * sizeof(double));
+    std::memcpy(m_B2.data(), B2, static_cast<size_t>(m_n) * static_cast<size_t>(m_nu) * sizeof(double));
+    std::memcpy(m_C1.data(), C1, static_cast<size_t>(m_nz) * static_cast<size_t>(m_n) * sizeof(double));
+    std::memcpy(m_C2.data(), C2, static_cast<size_t>(m_ny) * static_cast<size_t>(m_n) * sizeof(double));
+    std::memcpy(m_D12.data(), D12, static_cast<size_t>(m_nz) * static_cast<size_t>(m_nu) * sizeof(double));
+    std::memcpy(m_D21.data(), D21, static_cast<size_t>(m_ny) * static_cast<size_t>(m_nw) * sizeof(double));
+
     m_designed = false;
 }
 
@@ -156,15 +156,15 @@ void H2Controller::setRegulatorProblem(const double* A, const double* B, const d
                                         const double* W, const double* V,
                                         int n, int m, int p) {
     // Convert LQG problem to generalized plant form
-    m_n = n;
-    m_nw = n + p;  // [process noise; measurement noise]
-    m_nu = m;
-    m_nz = n + m;  // [state error; control]
-    m_ny = p;
-    
-    std::memcpy(m_A.data(), A, n * n * sizeof(double));
-    std::memcpy(m_B2.data(), B, n * m * sizeof(double));
-    std::memcpy(m_C2.data(), C, p * n * sizeof(double));
+    m_n = std::min(n, static_cast<int>(MAX_STATE_DIM));
+    m_nu = std::min(m, static_cast<int>(MAX_CONTROL_DIM));
+    m_ny = std::min(p, static_cast<int>(MAX_OUTPUT_DIM));
+    m_nw = std::min(m_n + m_ny, static_cast<int>(MAX_STATE_DIM));
+    m_nz = std::min(m_n + m_nu, static_cast<int>(MAX_OUTPUT_DIM));
+
+    std::memcpy(m_A.data(), A, static_cast<size_t>(m_n) * static_cast<size_t>(m_n) * sizeof(double));
+    std::memcpy(m_B2.data(), B, static_cast<size_t>(m_n) * static_cast<size_t>(m_nu) * sizeof(double));
+    std::memcpy(m_C2.data(), C, static_cast<size_t>(m_ny) * static_cast<size_t>(m_n) * sizeof(double));
     
     // B1 = [W^½  0]
     // C1 = [Q^½; 0]
@@ -317,42 +317,42 @@ void H2Controller::resetImpl() {
 // H∞ Controller Implementation
 // ============================================================================
 
-void HInfinityController::setPlant(const double* A, const double* B, 
+void HInfinityController::setPlant(const double* A, const double* B,
                                     const double* C, const double* D,
                                     int n, int m, int p) {
     m_n = std::min(n, static_cast<int>(MAX_STATE_DIM));
-    m_m = m;
-    m_p = p;
-    
-    std::memcpy(m_A.data(), A, m_n * m_n * sizeof(double));
-    std::memcpy(m_B.data(), B, m_n * m * sizeof(double));
-    std::memcpy(m_C.data(), C, p * m_n * sizeof(double));
+    m_m = std::min(m, static_cast<int>(MAX_CONTROL_DIM));
+    m_p = std::min(p, static_cast<int>(MAX_OUTPUT_DIM));
+
+    std::memcpy(m_A.data(), A, static_cast<size_t>(m_n) * static_cast<size_t>(m_n) * sizeof(double));
+    std::memcpy(m_B.data(), B, static_cast<size_t>(m_n) * static_cast<size_t>(m_m) * sizeof(double));
+    std::memcpy(m_C.data(), C, static_cast<size_t>(m_p) * static_cast<size_t>(m_n) * sizeof(double));
     if (D) {
-        std::memcpy(m_D.data(), D, p * m * sizeof(double));
+        std::memcpy(m_D.data(), D, static_cast<size_t>(m_p) * static_cast<size_t>(m_m) * sizeof(double));
     }
-    
+
     m_designed = false;
 }
 
-void HInfinityController::setGeneralizedPlant(const double* A, const double* B1, 
+void HInfinityController::setGeneralizedPlant(const double* A, const double* B1,
                                                const double* B2,
                                                const double* C1, const double* C2,
                                                const double* D11, const double* D12,
                                                const double* D21, const double* D22,
                                                int n, int nw, int nu, int nz, int ny) {
-    m_n = n;
-    m_nw = nw;
-    m_nu = nu;
-    m_nz = nz;
-    m_ny = ny;
-    m_na = n;  // Will be augmented with weights
-    
-    std::memcpy(m_Aa.data(), A, n * n * sizeof(double));
-    std::memcpy(m_B1a.data(), B1, n * nw * sizeof(double));
-    std::memcpy(m_B2a.data(), B2, n * nu * sizeof(double));
-    std::memcpy(m_C1a.data(), C1, nz * n * sizeof(double));
-    std::memcpy(m_C2a.data(), C2, ny * n * sizeof(double));
-    
+    m_n = std::min(n, static_cast<int>(MAX_STATE_DIM));
+    m_nw = std::min(nw, static_cast<int>(MAX_STATE_DIM));
+    m_nu = std::min(nu, static_cast<int>(MAX_CONTROL_DIM));
+    m_nz = std::min(nz, static_cast<int>(MAX_OUTPUT_DIM));
+    m_ny = std::min(ny, static_cast<int>(MAX_OUTPUT_DIM));
+    m_na = std::min(n, static_cast<int>(MAX_AUG));
+
+    std::memcpy(m_Aa.data(), A, static_cast<size_t>(m_na) * static_cast<size_t>(m_na) * sizeof(double));
+    std::memcpy(m_B1a.data(), B1, static_cast<size_t>(m_na) * static_cast<size_t>(m_nw) * sizeof(double));
+    std::memcpy(m_B2a.data(), B2, static_cast<size_t>(m_na) * static_cast<size_t>(m_nu) * sizeof(double));
+    std::memcpy(m_C1a.data(), C1, static_cast<size_t>(m_nz) * static_cast<size_t>(m_na) * sizeof(double));
+    std::memcpy(m_C2a.data(), C2, static_cast<size_t>(m_ny) * static_cast<size_t>(m_na) * sizeof(double));
+
     m_designed = false;
 }
 

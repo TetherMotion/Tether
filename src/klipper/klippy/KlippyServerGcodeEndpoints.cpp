@@ -84,8 +84,9 @@ JsonValue KlippyServer::handleGcodeHelp(const JsonValue& params) {
 
 JsonValue KlippyServer::handleGcodeScript(const JsonValue& params) {
     std::string script;
-    if (params.has("script")) {
-        script = params.find("script")->asString();
+    const auto* scriptVal = params.find("script");
+    if (scriptVal && scriptVal->isString()) {
+        script = scriptVal->asString();
     }
     {
         std::lock_guard<std::recursive_mutex> lock(mutex_);

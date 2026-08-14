@@ -33,14 +33,14 @@ extern bool matInverse(const double* A, double* Ainv, int n);
 void LQGController::setSystemMatrices(const double* A, const double* B,
                                        const double* C, const double* D,
                                        int n, int m, int p) {
-    m_n = n;
-    m_m = m;
-    m_p = p;
-    
-    m_lqr.setSystemMatrices(A, B, n, m);
-    m_kf.setSystemMatrices(A, B, C, n, m, p);
-    
-    std::memcpy(m_C.data(), C, p * n * sizeof(double));
+    m_n = std::min(n, static_cast<int>(MAX_STATE_DIM));
+    m_m = std::min(m, static_cast<int>(MAX_CONTROL_DIM));
+    m_p = std::min(p, static_cast<int>(MAX_OUTPUT_DIM));
+
+    m_lqr.setSystemMatrices(A, B, m_n, m_m);
+    m_kf.setSystemMatrices(A, B, C, m_n, m_m, m_p);
+
+    std::memcpy(m_C.data(), C, static_cast<size_t>(m_p) * static_cast<size_t>(m_n) * sizeof(double));
 }
 
 void LQGController::setLQRWeights(const double* Q, const double* R) {
@@ -127,9 +127,9 @@ void LQIController::setSystemMatrices(const double* A, const double* B, const do
 }
 
 void LQIController::setAugmentedWeights(const double* Qa, const double* R) {
-    int na = m_n + m_p;
-    std::memcpy(m_Qa.data(), Qa, na * na * sizeof(double));
-    std::memcpy(m_R.data(), R, m_m * m_m * sizeof(double));
+    int na = std::min(m_n + m_p, static_cast<int>(MAX_AUG));
+    std::memcpy(m_Qa.data(), Qa, static_cast<size_t>(na) * static_cast<size_t>(na) * sizeof(double));
+    std::memcpy(m_R.data(), R, static_cast<size_t>(m_m) * static_cast<size_t>(m_m) * sizeof(double));
     m_designed = false;
 }
 

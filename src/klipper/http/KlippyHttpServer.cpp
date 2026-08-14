@@ -144,8 +144,9 @@ bool KlippyHttpServer::start() {
 
     // Start Drogon in a separate thread (non-blocking)
     running_ = true;
+    drogonStopped_ = false;
 
-    std::thread([this]() {
+    drogonThread_ = std::thread([this]() {
         auto& app = drogon::app();
         try {
             std::string addr = config_.bindAddress.empty() ? "0.0.0.0" : config_.bindAddress;
@@ -159,7 +160,8 @@ bool KlippyHttpServer::start() {
         } catch (...) {
             running_ = false;
         }
-    }).detach();
+        drogonStopped_ = true;
+    });
 
     // Give Drogon time to start
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -172,6 +174,7 @@ void KlippyHttpServer::stop() {
     refreshRunning_ = false;
     if (refreshThread_.joinable()) refreshThread_.join();
     drogon::app().quit();
+    if (drogonThread_.joinable()) drogonThread_.join();
 }
 
 // ============================================================================
@@ -2414,8 +2417,10 @@ void KlippyHttpServer::handleWsMessage(const drogon::WebSocketConnectionPtr& con
 
     // Handle special WebSocket methods
     auto parsed = parseJson(std::string_view(message));
-    if (parsed && parsed->isObject() && parsed->has("method")) {
-        std::string method = parsed->find("method")->asString();
+    if (parsed && parsed->isObject()) {
+        const auto* methodVal = parsed->find("method");
+        if (!methodVal || !methodVal->isString()) return;
+        std::string method = methodVal->asString();
 
         if (method == "server.connection.identify") {
             // Find session by connection and mark as identified

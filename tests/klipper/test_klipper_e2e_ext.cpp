@@ -97,12 +97,15 @@ TEST_F(KlipperE2EExt, MultipleCommands) {
 TEST_F(KlipperE2EExt, AllocateOid) {
     ASSERT_TRUE(host_->downloadDictionary([this](){ dev_->pump(); }));
 
-    uint8_t oid1 = host_->allocateOid("stepper");
-    EXPECT_EQ(oid1, 0);
-    uint8_t oid2 = host_->allocateOid("stepper");
-    EXPECT_EQ(oid2, 1);
-    uint8_t oid3 = host_->allocateOid("digital_out");
-    EXPECT_EQ(oid3, 2);
+    auto oid1 = host_->allocateOid("stepper");
+    ASSERT_TRUE(oid1.has_value());
+    EXPECT_EQ(*oid1, 0);
+    auto oid2 = host_->allocateOid("stepper");
+    ASSERT_TRUE(oid2.has_value());
+    EXPECT_EQ(*oid2, 1);
+    auto oid3 = host_->allocateOid("digital_out");
+    ASSERT_TRUE(oid3.has_value());
+    EXPECT_EQ(*oid3, 2);
 }
 
 TEST_F(KlipperE2EExt, SendCommandWithParams) {

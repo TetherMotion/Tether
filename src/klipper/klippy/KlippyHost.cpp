@@ -108,9 +108,9 @@ bool KlippyHost::syncClock(std::function<void()> devicePump) {
     return !getClockPending_;
 }
 
-uint8_t KlippyHost::allocateOid(const std::string& type) {
-    uint8_t oid = oidAllocator_.allocate();
-    oidAllocator_.assign(oid, type);
+std::optional<uint8_t> KlippyHost::allocateOid(const std::string& type) {
+    auto oid = oidAllocator_.allocate();
+    if (oid) oidAllocator_.assign(*oid, type);
     return oid;
 }
 

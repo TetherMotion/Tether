@@ -950,11 +950,15 @@
         gcode_ = GCodeExecutor(std::move(cb), &motionState_);
         gcode_.setMacroRegistry(macros_.get());
 
-        // Wire the UDS server to use our G-code executor
+        // Wire the UDS server to use our G-code executor.
+        // All callbacks acquire instanceMutex_ to prevent races with the
+        // tick() thread (see threading model in KlippyInstance.hpp).
         server_.setGcodeScriptHandler([this](const std::string& script) {
+            std::lock_guard<std::recursive_mutex> lock(instanceMutex_);
             gcode_.execute(script);
         });
         server_.setEmergencyStopHandler([this]() {
+            std::lock_guard<std::recursive_mutex> lock(instanceMutex_);
             server_.setState(PrinterState::Shutdown, "Emergency stop");
         });
         // Wire VirtualSdcard and file root for file operations
@@ -962,22 +966,26 @@
         server_.setFileRoot(config_.sdcardDir);
         // Wire print control endpoints to G-code callbacks
         server_.setPrintStartHandler([this]() {
+            std::lock_guard<std::recursive_mutex> lock(instanceMutex_);
             sdcard_->startPrint();
             printStatsObj_->setState("printing");
             idleTimeoutObj_->setState("Printing");
         });
         server_.setPrintCancelHandler([this]() {
+            std::lock_guard<std::recursive_mutex> lock(instanceMutex_);
             sdcard_->cancelPrint();
             printStatsObj_->setState("cancelled");
             idleTimeoutObj_->setState("Idle");
             if (pauseResumeObj_) pauseResumeObj_->setPaused(false);
         });
         server_.setPrintPauseHandler([this]() {
+            std::lock_guard<std::recursive_mutex> lock(instanceMutex_);
             sdcard_->pausePrint();
             printStatsObj_->setState("paused");
             if (pauseResumeObj_) pauseResumeObj_->setPaused(true);
         });
         server_.setPrintResumeHandler([this]() {
+            std::lock_guard<std::recursive_mutex> lock(instanceMutex_);
             sdcard_->resumePrint();
             printStatsObj_->setState("printing");
             if (pauseResumeObj_) pauseResumeObj_->setPaused(false);

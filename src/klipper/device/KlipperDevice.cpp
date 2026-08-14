@@ -95,7 +95,7 @@ void KlipperDevice::processBlock(const protocol::MessageBlock& block) {
         auto countOpt = protocol::decodeParam(p, end);
         if (offsetOpt && countOpt) {
             uint32_t offset = static_cast<uint32_t>(*offsetOpt);
-            uint8_t count = static_cast<uint8_t>(*countOpt);
+            uint8_t count = protocol::clampCast<uint8_t>(*countOpt);
             auto respContent = identifyServer_->buildResponseContent(offset, count);
             auto blockBytes = protocol::buildBlockVec(block.sequence, respContent);
             size_t written = transport_->write(blockBytes);
@@ -149,7 +149,7 @@ void KlipperDevice::enableDefaultCommands() {
     onCommand("allocate_oids oid=%c",
         [this](const std::vector<protocol::ParamValue>& params) {
             if (params.size() < 1) return;
-            uint8_t count = static_cast<uint8_t>(params[0].integer);
+            uint8_t count = protocol::clampCast<uint8_t>(params[0].integer);
             oidAllocator_.allocateBlock(count);
         });
 
@@ -205,13 +205,13 @@ void KlipperDevice::enableStepperMotion() {
     onCommand("queue_step oid=%c interval=%u count=%hu add=%hi",
         [this](const std::vector<protocol::ParamValue>& params) {
             if (params.size() < 4) return;
-            uint8_t oid = static_cast<uint8_t>(params[0].integer);
+            uint8_t oid = protocol::clampCast<uint8_t>(params[0].integer);
             auto it = steppers_.find(oid);
             if (it == steppers_.end()) return;
             objects::StepCommand cmd;
             cmd.interval = static_cast<uint32_t>(params[1].integer);
-            cmd.count    = static_cast<uint16_t>(params[2].integer);
-            cmd.add      = static_cast<int16_t>(params[3].integer);
+            cmd.count    = protocol::clampCast<uint16_t>(params[2].integer);
+            cmd.add      = protocol::clampCast<int16_t>(params[3].integer);
             cmd.dir      = it->second->direction();
             uint32_t start = stepperBaseClocks_.count(oid) ? stepperBaseClocks_[oid] : 0;
             it->second->enqueueStep(cmd, start);
@@ -243,7 +243,7 @@ void KlipperDevice::enableStepperMotion() {
     onCommand("set_next_step_dir oid=%c dir=%c",
         [this](const std::vector<protocol::ParamValue>& params) {
             if (params.size() < 2) return;
-            uint8_t oid = static_cast<uint8_t>(params[0].integer);
+            uint8_t oid = protocol::clampCast<uint8_t>(params[0].integer);
             auto it = steppers_.find(oid);
             if (it == steppers_.end()) return;
             int8_t dir = (params[1].integer == 0) ? -1 : 1;
@@ -254,7 +254,7 @@ void KlipperDevice::enableStepperMotion() {
     onCommand("reset_step_clock oid=%c clock=%u",
         [this](const std::vector<protocol::ParamValue>& params) {
             if (params.size() < 2) return;
-            uint8_t oid = static_cast<uint8_t>(params[0].integer);
+            uint8_t oid = protocol::clampCast<uint8_t>(params[0].integer);
             stepperBaseClocks_[oid] = static_cast<uint32_t>(params[1].integer);
         });
 }

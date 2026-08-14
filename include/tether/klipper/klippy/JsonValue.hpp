@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <stdexcept>
 #include <vector>
 
 namespace tether::klipper::klippy {
@@ -48,6 +49,42 @@ public:
     std::map<std::string, JsonValue>& asObject() { return obj_; }
     const std::vector<JsonValue>& asArray() const { return arr_; }
     const std::map<std::string, JsonValue>& asObject() const { return obj_; }
+
+    // ------------------------------------------------------------------
+    // Type-checked accessors (inherently safe — return nullopt on mismatch)
+    // ------------------------------------------------------------------
+
+    /// @brief Type-checked bool access. Returns nullopt if not a bool.
+    std::optional<bool> tryBool() const {
+        return isBool() ? std::optional<bool>(bool_) : std::nullopt;
+    }
+
+    /// @brief Type-checked int access. Returns nullopt if not an int.
+    std::optional<int64_t> tryInt() const {
+        return isInt() ? std::optional<int64_t>(int_) : std::nullopt;
+    }
+
+    /// @brief Type-checked double access. Returns nullopt if not a double or int.
+    std::optional<double> tryDouble() const {
+        if (isDouble()) return double_;
+        if (isInt()) return static_cast<double>(int_);
+        return std::nullopt;
+    }
+
+    /// @brief Type-checked string access. Returns nullptr if not a string.
+    const std::string* tryString() const {
+        return isString() ? &str_ : nullptr;
+    }
+
+    /// @brief Type-checked array access. Returns nullptr if not an array.
+    const std::vector<JsonValue>* tryArray() const {
+        return isArray() ? &arr_ : nullptr;
+    }
+
+    /// @brief Type-checked object access. Returns nullptr if not an object.
+    const std::map<std::string, JsonValue>* tryObject() const {
+        return isObject() ? &obj_ : nullptr;
+    }
 
     /// @brief Serialise to compact JSON string.
     std::string dump() const;
