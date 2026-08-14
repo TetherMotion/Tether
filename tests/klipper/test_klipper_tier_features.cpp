@@ -9,7 +9,7 @@
 #include "tether/klipper/klippy/GCodeExecutor.hpp"
 #include "tether/klipper/klippy/AdvancedObjects.hpp"
 #include "tether/klipper/klippy/PrinterObjects.hpp"
-#include "tether/klipper/klippy/KlippyUdsServer.hpp"
+#include "tether/klipper/klippy/KlippyServer.hpp"
 #include "tether/klipper/objects/Thermal.hpp"
 #include "tether/klipper/objects/Peripherals.hpp"
 #include "tether/klipper/objects/Homing.hpp"
@@ -244,35 +244,35 @@ TEST(KlipperFirmwareRetractionObject, StatusFields) {
 // ============================================================================
 
 TEST(KlipperUdsPrintControl, StartEndpointRegistered) {
-    KlippyUdsServer server(UdsServerConfig{uniqueSocketPath()});
+    KlippyServer server(UdsServerConfig{uniqueSocketPath()});
     auto endpoints = server.listEndpoints();
     EXPECT_NE(std::find(endpoints.begin(), endpoints.end(), "printer/start"),
               endpoints.end());
 }
 
 TEST(KlipperUdsPrintControl, CancelEndpointRegistered) {
-    KlippyUdsServer server(UdsServerConfig{uniqueSocketPath()});
+    KlippyServer server(UdsServerConfig{uniqueSocketPath()});
     auto endpoints = server.listEndpoints();
     EXPECT_NE(std::find(endpoints.begin(), endpoints.end(), "printer/cancel"),
               endpoints.end());
 }
 
 TEST(KlipperUdsPrintControl, PauseEndpointRegistered) {
-    KlippyUdsServer server(UdsServerConfig{uniqueSocketPath()});
+    KlippyServer server(UdsServerConfig{uniqueSocketPath()});
     auto endpoints = server.listEndpoints();
     EXPECT_NE(std::find(endpoints.begin(), endpoints.end(), "printer/pause"),
               endpoints.end());
 }
 
 TEST(KlipperUdsPrintControl, ResumeEndpointRegistered) {
-    KlippyUdsServer server(UdsServerConfig{uniqueSocketPath()});
+    KlippyServer server(UdsServerConfig{uniqueSocketPath()});
     auto endpoints = server.listEndpoints();
     EXPECT_NE(std::find(endpoints.begin(), endpoints.end(), "printer/resume"),
               endpoints.end());
 }
 
 TEST(KlipperUdsPrintControl, StartHandlerCalled) {
-    KlippyUdsServer server(UdsServerConfig{uniqueSocketPath()});
+    KlippyServer server(UdsServerConfig{uniqueSocketPath()});
     bool called = false;
     server.setPrintStartHandler([&]() { called = true; });
 
@@ -284,7 +284,7 @@ TEST(KlipperUdsPrintControl, StartHandlerCalled) {
 }
 
 TEST(KlipperUdsPrintControl, PauseHandlerCalled) {
-    KlippyUdsServer server(UdsServerConfig{uniqueSocketPath()});
+    KlippyServer server(UdsServerConfig{uniqueSocketPath()});
     bool called = false;
     server.setPrintPauseHandler([&]() { called = true; });
 
@@ -298,35 +298,35 @@ TEST(KlipperUdsPrintControl, PauseHandlerCalled) {
 // ============================================================================
 
 TEST(KlipperUdsMoonraker, ServerInfoEndpoint) {
-    KlippyUdsServer server(UdsServerConfig{uniqueSocketPath()});
+    KlippyServer server(UdsServerConfig{uniqueSocketPath()});
     auto endpoints = server.listEndpoints();
     EXPECT_NE(std::find(endpoints.begin(), endpoints.end(), "server/info"),
               endpoints.end());
 }
 
 TEST(KlipperUdsMoonraker, ServerFilesListEndpoint) {
-    KlippyUdsServer server(UdsServerConfig{uniqueSocketPath()});
+    KlippyServer server(UdsServerConfig{uniqueSocketPath()});
     auto endpoints = server.listEndpoints();
     EXPECT_NE(std::find(endpoints.begin(), endpoints.end(), "server/files/list"),
               endpoints.end());
 }
 
 TEST(KlipperUdsMoonraker, MachineSystemInfoEndpoint) {
-    KlippyUdsServer server(UdsServerConfig{uniqueSocketPath()});
+    KlippyServer server(UdsServerConfig{uniqueSocketPath()});
     auto endpoints = server.listEndpoints();
     EXPECT_NE(std::find(endpoints.begin(), endpoints.end(), "machine/system_info"),
               endpoints.end());
 }
 
 TEST(KlipperUdsMoonraker, MachineProcstatsEndpoint) {
-    KlippyUdsServer server(UdsServerConfig{uniqueSocketPath()});
+    KlippyServer server(UdsServerConfig{uniqueSocketPath()});
     auto endpoints = server.listEndpoints();
     EXPECT_NE(std::find(endpoints.begin(), endpoints.end(), "machine/procstats"),
               endpoints.end());
 }
 
 TEST(KlipperUdsMoonraker, ServerInfoReturnsState) {
-    KlippyUdsServer server(UdsServerConfig{uniqueSocketPath()});
+    KlippyServer server(UdsServerConfig{uniqueSocketPath()});
     // Verify endpoint is registered
     auto endpoints = server.listEndpoints();
     EXPECT_NE(std::find(endpoints.begin(), endpoints.end(), "server/info"),

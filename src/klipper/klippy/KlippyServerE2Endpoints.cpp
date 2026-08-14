@@ -3,28 +3,19 @@
  * @brief E2 additional Moonraker-compatible endpoint handlers.
  */
 
-#include "tether/klipper/klippy/KlippyUdsServer.hpp"
+#include "tether/klipper/klippy/KlippyServer.hpp"
 #include "tether/klipper/klippy/AdvancedObjects.hpp"
-#include "UdsConnection_internal.hpp"
 
 #include <algorithm>
-#include <cerrno>
 #include <chrono>
-#include <cstring>
 #include <ctime>
-#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <netinet/in.h>
 #include <set>
-#include <signal.h>
 #include <sstream>
-#include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/un.h>
-#include <unistd.h>
 
 namespace tether::klipper::klippy {
 
@@ -32,7 +23,7 @@ namespace tether::klipper::klippy {
 // E2: server/restart — Restart the Moonraker server process
 // ============================================================================
 
-JsonValue KlippyUdsServer::handleServerRestart(const JsonValue& params) {
+JsonValue KlippyServer::handleServerRestart(const JsonValue& params) {
     (void)params;
     // Trigger restart via the restart handler if available
     if (restartHandler_) {
@@ -49,7 +40,7 @@ JsonValue KlippyUdsServer::handleServerRestart(const JsonValue& params) {
 // E2: printer/query_endstops/status — Query endstop states
 // ============================================================================
 
-JsonValue KlippyUdsServer::handleQueryEndstopsStatus(const JsonValue& params) {
+JsonValue KlippyServer::handleQueryEndstopsStatus(const JsonValue& params) {
     (void)params;
     // Query all registered endstop objects
     std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -76,7 +67,7 @@ JsonValue KlippyUdsServer::handleQueryEndstopsStatus(const JsonValue& params) {
 // E2: machine/peripherals/usb — List USB devices
 // ============================================================================
 
-JsonValue KlippyUdsServer::handleMachinePeripheralsUsb(const JsonValue& params) {
+JsonValue KlippyServer::handleMachinePeripheralsUsb(const JsonValue& params) {
     (void)params;
     std::map<std::string, JsonValue> result;
     std::vector<JsonValue> usbDevices;
@@ -135,7 +126,7 @@ JsonValue KlippyUdsServer::handleMachinePeripheralsUsb(const JsonValue& params) 
 // E2: machine/peripherals/serial — List serial devices
 // ============================================================================
 
-JsonValue KlippyUdsServer::handleMachinePeripheralsSerial(const JsonValue& params) {
+JsonValue KlippyServer::handleMachinePeripheralsSerial(const JsonValue& params) {
     (void)params;
     std::map<std::string, JsonValue> result;
     std::vector<JsonValue> serialDevices;
@@ -195,7 +186,7 @@ JsonValue KlippyUdsServer::handleMachinePeripheralsSerial(const JsonValue& param
 // E2: machine/update/client — Update a specific client
 // ============================================================================
 
-JsonValue KlippyUdsServer::handleMachineUpdateClient(const JsonValue& params) {
+JsonValue KlippyServer::handleMachineUpdateClient(const JsonValue& params) {
     std::string clientName;
     if (params.isObject()) {
         const auto* nameVal = params.find("client");
@@ -236,7 +227,7 @@ JsonValue KlippyUdsServer::handleMachineUpdateClient(const JsonValue& params) {
 // E2: machine/update/rollback — Rollback a client update
 // ============================================================================
 
-JsonValue KlippyUdsServer::handleMachineUpdateRollback(const JsonValue& params) {
+JsonValue KlippyServer::handleMachineUpdateRollback(const JsonValue& params) {
     std::string clientName;
     if (params.isObject()) {
         const auto* nameVal = params.find("client");

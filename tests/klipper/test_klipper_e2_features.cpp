@@ -5,7 +5,7 @@
  */
 
 #include "tether/klipper/klippy/KlippyInstance.hpp"
-#include "tether/klipper/klippy/KlippyUdsServer.hpp"
+#include "tether/klipper/klippy/KlippyServer.hpp"
 #include "tether/klipper/klippy/GCodeExecutor.hpp"
 #include "tether/klipper/klippy/PrinterObjects.hpp"
 #include "tether/klipper/config/ConfigParser.hpp"
@@ -661,7 +661,7 @@ protected:
         socketPath = uniqueSocketPath();
         UdsServerConfig cfg;
         cfg.socketPath = socketPath;
-        server = std::make_unique<KlippyUdsServer>(cfg);
+        server = std::make_unique<KlippyServer>(cfg);
     }
 
     void TearDown() override {
@@ -670,7 +670,7 @@ protected:
     }
 
     std::string socketPath;
-    std::unique_ptr<KlippyUdsServer> server;
+    std::unique_ptr<KlippyServer> server;
 };
 
 TEST_F(E2EndpointsTest, ServerRestartEndpointRegistered) {

@@ -4,25 +4,15 @@
  */
 
 #include "tether/klipper/klippy/KlippyUdsServer.hpp"
-#include "tether/klipper/klippy/AdvancedObjects.hpp"
 #include "UdsConnection_internal.hpp"
 
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
-#include <ctime>
 #include <fcntl.h>
-#include <filesystem>
-#include <fstream>
-#include <iomanip>
-#include <iostream>
-#include <netinet/in.h>
-#include <set>
 #include <signal.h>
-#include <sstream>
 #include <sys/socket.h>
-#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -42,7 +32,7 @@ void KlippyUdsServer::eventLoop() {
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - lastRefresh_);
-        if (elapsed.count() >= config_.refreshIntervalMs) {
+        if (elapsed.count() >= transportConfig_.refreshIntervalMs) {
             subscriptionRefreshTick();
             lastRefresh_ = now;
         }
@@ -60,7 +50,7 @@ void KlippyUdsServer::acceptConnection() {
         return;
     }
 
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(transportMutex_);
     auto conn = std::make_unique<UdsConnection>(fd, nextConnId_++);
     conn->setNonBlocking();
     connections_.push_back(std::move(conn));
@@ -68,7 +58,6 @@ void KlippyUdsServer::acceptConnection() {
 
 void KlippyUdsServer::processConnections() {
     // Read frames from each connection without holding the lock
-    // (readFrames uses non-blocking I/O, so it returns quickly)
     struct ConnFrames {
         UdsConnection* conn;
         std::vector<std::string> frames;
@@ -76,7 +65,7 @@ void KlippyUdsServer::processConnections() {
     std::vector<ConnFrames> allFrames;
 
     {
-        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(transportMutex_);
         for (auto& conn : connections_) {
             if (conn->closed()) continue;
             auto frames = conn->readFrames();
@@ -90,7 +79,7 @@ void KlippyUdsServer::processConnections() {
     for (auto& cf : allFrames) {
         for (const auto& frameStr : cf.frames) {
             auto parsed = JsonValue::parse(frameStr);
-            if (!parsed) continue; // Malformed JSON
+            if (!parsed) continue;
 
             // Handle special endpoints that need connection context
             if (parsed->has("method")) {
@@ -105,7 +94,7 @@ void KlippyUdsServer::processConnections() {
                         ? *params.find("response_template")
                         : JsonValue(std::map<std::string, JsonValue>{});
                     if (!methodName.empty()) {
-                        std::lock_guard<std::recursive_mutex> lock(mutex_);
+                        std::lock_guard<std::recursive_mutex> lock(transportMutex_);
                         RemoteMethod reg{methodName, tmpl, cf.conn};
                         remoteMethods_[methodName].push_back(reg);
                     }
@@ -117,7 +106,7 @@ void KlippyUdsServer::processConnections() {
                 }
                 if (method == "gcode/subscribe_output") {
                     {
-                        std::lock_guard<std::recursive_mutex> lock(mutex_);
+                        std::lock_guard<std::recursive_mutex> lock(transportMutex_);
                         gcodeSubscribers_.insert(cf.conn);
                     }
                     if (parsed->has("id")) {
@@ -148,8 +137,8 @@ void KlippyUdsServer::processConnections() {
                             sub.objects[objName] = fields;
                         }
                     }
-                    // Get initial snapshot
-                    auto status = queryObjects(sub.objects);
+                    // Get initial snapshot from KlippyServer
+                    auto status = server().queryObjects(sub.objects);
                     std::map<std::string, JsonValue> result;
                     std::map<std::string, JsonValue> statusJson;
                     for (const auto& [objName, fields] : status) {
@@ -168,7 +157,7 @@ void KlippyUdsServer::processConnections() {
                         sendResponse(*cf.conn, *parsed->find("id"), JsonValue(result));
                     }
                     {
-                        std::lock_guard<std::recursive_mutex> lock(mutex_);
+                        std::lock_guard<std::recursive_mutex> lock(transportMutex_);
                         subscriptions_.push_back(std::move(sub));
                     }
                     continue;
@@ -180,7 +169,7 @@ void KlippyUdsServer::processConnections() {
 }
 
 void KlippyUdsServer::cleanupConnections() {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(transportMutex_);
     // Remove closed connections
     connections_.erase(
         std::remove_if(connections_.begin(), connections_.end(),
@@ -208,24 +197,29 @@ void KlippyUdsServer::cleanupConnections() {
 }
 
 void KlippyUdsServer::subscriptionRefreshTick() {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    // Copy subscription list under lock
+    std::vector<Subscription*> activeSubs;
+    {
+        std::lock_guard<std::recursive_mutex> lock(transportMutex_);
+        for (auto& sub : subscriptions_) {
+            if (sub.conn && !sub.conn->closed()) {
+                activeSubs.push_back(&sub);
+            }
+        }
+    }
+
     double eventtime = std::chrono::duration<double>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
 
-    for (auto& sub : subscriptions_) {
-        if (!sub.conn || sub.conn->closed()) continue;
+    for (auto* subPtr : activeSubs) {
+        auto& sub = *subPtr;
 
-        // Compute current status for subscribed objects
-        std::map<std::string, std::map<std::string, JsonValue>> current;
-        for (const auto& [objName, fields] : sub.objects) {
-            auto it = objects_.find(objName);
-            if (it == objects_.end()) continue;
-            current[objName] = it->second->status(fields);
-        }
+        // Query current status from KlippyServer
+        auto status = server().queryObjects(sub.objects);
 
         // Compute diff against baseline
         std::map<std::string, JsonValue> diff;
-        for (const auto& [objName, fields] : current) {
+        for (const auto& [objName, fields] : status) {
             std::map<std::string, JsonValue> objDiff;
             for (const auto& [f, v] : fields) {
                 auto baseIt = sub.baseline.find(objName);
@@ -250,10 +244,15 @@ void KlippyUdsServer::subscriptionRefreshTick() {
             {"eventtime", JsonValue(eventtime)}
         });
 
-        sub.conn->sendFrame(msg.dump());
+        {
+            std::lock_guard<std::recursive_mutex> lock(transportMutex_);
+            if (sub.conn && !sub.conn->closed()) {
+                sub.conn->sendFrame(msg.dump());
+            }
+        }
 
         // Update baseline
-        for (const auto& [objName, fields] : current) {
+        for (const auto& [objName, fields] : status) {
             for (const auto& [f, v] : fields) {
                 sub.baseline[objName][f] = v;
             }

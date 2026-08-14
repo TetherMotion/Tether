@@ -178,6 +178,7 @@ private:
     bool shutdown_ = false;
     bool configFinalized_ = false;
     uint32_t configCrc_ = 0;
+    bool receivedFirstBlock_ = false;
 };
 
 } // namespace tether::klipper::device

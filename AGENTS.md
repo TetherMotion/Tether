@@ -56,12 +56,13 @@ threading model, and performance characteristics.
 ### Key Layers (top to bottom)
 
 1. **KlippyInstance** — Top-level orchestrator (header-only)
-2. **KlippyHost** — MCU communication client
-3. **KlippyUdsServer** — Unix domain socket JSON-RPC server
-4. **KlippyHttpServer** — Native HTTP/WebSocket server for Mainsail/Fluidd (optional, requires Drogon)
-5. **MotionTranslator** — MotionPlan to queue_step translation
-6. **KlipperDevice** — Device-side protocol handler (implements `IKlipperDevice`)
-7. **Transport** — Byte-stream abstraction (loopback, pipe, TCP)
+2. **KlippyServer** — Business logic: endpoints, state, data stores (transport-agnostic)
+3. **KlippyUdsServer** — Thin UDS transport (delegates to KlippyServer)
+4. **KlippyHttpServer** — Thin HTTP/WebSocket transport for Mainsail/Fluidd (delegates to KlippyServer)
+5. **KlippyHost** — MCU communication client
+6. **MotionTranslator** — MotionPlan to queue_step translation
+7. **KlipperDevice** — Device-side protocol handler (implements `IKlipperDevice`)
+8. **Transport** — Byte-stream abstraction (loopback, pipe, TCP)
 
 ### Native HTTP/WebSocket Server (tether_klipper_http)
 
@@ -71,8 +72,8 @@ Tether and Mainsail/Fluidd frontends.
 
 **Key design:**
 - Uses Drogon as the HTTP/WebSocket framework and Glaze for JSON serialization
-- Reuses all 120+ existing `KlippyUdsServer` endpoint handlers via `callEndpoint()`
-- `GlazeAdapter` converts between `JsonValue` (UDS) and `glz::generic` (Glaze JSON)
+- Delegates all 120+ endpoint handlers to the shared `KlippyServer` via `callEndpoint()`
+- `GlazeAdapter` converts between `JsonValue` (KlippyServer) and `glz::generic` (Glaze JSON)
 - `JsonRpcDispatcher` maps dotted JSON-RPC method names (e.g. `server.info`) to
   slash-style UDS method names (e.g. `server/info`)
 - `WsSessionManager` tracks WebSocket client sessions and subscriptions
@@ -90,6 +91,18 @@ are provided in `cmake/drogon_compat/`.
 - `IKlipperDevice` — Abstract device interface (breaks klippy->device coupling)
 - `IByteStreamTransport` — Abstract transport interface
 - `MotionBlockSink` — Abstract motion block consumer
+
+### Transport-Agnostic Server Architecture
+
+`KlippyServer` holds all business logic (endpoint handlers, state management,
+data stores). Transport layers are thin wrappers:
+
+- `KlippyUdsServer` — UDS transport (socket lifecycle, frame parsing, UDS subscriptions)
+- `KlippyHttpServer` — HTTP/WebSocket transport (Drogon routes, JSON-RPC, WS sessions)
+
+Both transports share a single `KlippyServer` instance. See
+`examples/klipper_http_mainsail.cpp` for a complete example running both
+transports, and `docs/MainsailDocker.md` for Docker deployment with Mainsail.
 
 ## Code Conventions
 

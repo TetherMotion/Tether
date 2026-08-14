@@ -1,13 +1,13 @@
 #pragma once
 
 /// @file PrinterObjectsBuiltin.hpp
-/// @brief Built-in printer objects that reference KlippyUdsServer directly.
+/// @brief Built-in printer objects that reference KlippyServer directly.
 ///
 /// These objects (webhooks, gcode_move, toolhead, configfile, pause_resume,
 /// virtual_sdcard, display_status) are defined here because they need access
-/// to KlippyUdsServer's state.
+/// to KlippyServer's state.
 
-#include "tether/klipper/klippy/KlippyUdsServer.hpp"
+#include "tether/klipper/klippy/KlippyServer.hpp"
 
 #include <array>
 #include <map>
@@ -24,7 +24,7 @@ namespace tether::klipper::klippy {
 /// @brief The webhooks printer object (exposes state and state_message).
 class WebhooksObject : public PrinterObject {
 public:
-    explicit WebhooksObject(KlippyUdsServer& server) : server_(server) {}
+    explicit WebhooksObject(KlippyServer& server) : server_(server) {}
 
     std::string name() const override { return "webhooks"; }
 
@@ -36,7 +36,7 @@ public:
     }
 
 private:
-    KlippyUdsServer& server_;
+    KlippyServer& server_;
 };
 
 /// @brief The gcode_move printer object.

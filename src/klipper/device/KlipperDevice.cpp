@@ -7,6 +7,7 @@
 #include "tether/klipper/protocol/MessageBlock.hpp"
 #include "tether/klipper/protocol/Crc16.hpp"
 #include "tether/klipper/reliability/SequenceCounter.hpp"
+#include "tether/klipper/KlipperLog.hpp"
 
 #include <cstring>
 
@@ -73,8 +74,9 @@ void KlipperDevice::processBlock(const protocol::MessageBlock& block) {
     // Simple in-order check: accept if seq == lastRecvSeq_ + 1 (mod 16) or
     // if this is the first block.
     uint8_t expected = (lastRecvSeq_ + 1) & 0x0F;
-    if (block.sequence == expected || lastRecvSeq_ == 0 && block.sequence == 0) {
+    if (block.sequence == expected || (lastRecvSeq_ == 0 && block.sequence == 0 && !receivedFirstBlock_)) {
         lastRecvSeq_ = block.sequence;
+        receivedFirstBlock_ = true;
     }
     // Send ack for the received block.
     sendAck(lastRecvSeq_);
@@ -96,7 +98,10 @@ void KlipperDevice::processBlock(const protocol::MessageBlock& block) {
             uint8_t count = static_cast<uint8_t>(*countOpt);
             auto respContent = identifyServer_->buildResponseContent(offset, count);
             auto blockBytes = protocol::buildBlockVec(block.sequence, respContent);
-            transport_->write(blockBytes);
+            size_t written = transport_->write(blockBytes);
+            if (written != blockBytes.size()) {
+                KLIPPER_LOG_ERROR("KlipperDevice: partial write");
+            }
         }
         return;
     }
@@ -104,20 +109,6 @@ void KlipperDevice::processBlock(const protocol::MessageBlock& block) {
     // Decode and dispatch commands.
     auto msgs = protocol::decodeMessages(dict_, block.content);
     for (const auto& msg : msgs) {
-        // Check for identify command (msgid 1).
-        if (msg.msgid == protocol::kMsgIdIdentify) {
-            // Build identify_response and send it.
-            if (msg.params.size() >= 2) {
-                uint32_t offset = static_cast<uint32_t>(msg.params[0].integer);
-                uint8_t count = static_cast<uint8_t>(msg.params[1].integer);
-                auto respContent = identifyServer_->buildResponseContent(offset, count);
-                // Build a response block and send it.
-                std::vector<uint8_t> blockBytes = protocol::buildBlockVec(
-                    block.sequence, respContent);
-                transport_->write(blockBytes);
-            }
-            continue;
-        }
         // Check for get_clock command.
         auto getClockOpt = dict_.lookupCommand("get_clock");
         if (getClockOpt && msg.msgid == *getClockOpt) {
@@ -132,7 +123,10 @@ void KlipperDevice::processBlock(const protocol::MessageBlock& block) {
 
 void KlipperDevice::sendAck(uint8_t seq) {
     auto ack = protocol::buildAckBlock(seq);
-    transport_->write(ack);
+    size_t written = transport_->write(ack);
+    if (written != ack.size()) {
+        KLIPPER_LOG_ERROR("KlipperDevice: partial write");
+    }
 }
 
 void KlipperDevice::advanceClock(uint32_t deltaTicks) {
@@ -229,11 +223,18 @@ void KlipperDevice::enableStepperMotion() {
             // the next queue_step continues seamlessly. With `add`, the
             // interval changes each step: duration = count*interval +
             // add*(count-1)*count/2.
-            uint64_t dur = static_cast<uint64_t>(cmd.interval) * cmd.count;
+            uint64_t intervalCount = static_cast<uint64_t>(cmd.interval) * static_cast<uint64_t>(cmd.count);
             if (cmd.count > 1) {
-                dur += static_cast<uint64_t>(static_cast<int64_t>(cmd.add)) *
-                       (cmd.count - 1) * cmd.count / 2;
+                uint64_t addPart = static_cast<uint64_t>(static_cast<int64_t>(cmd.add)) *
+                                   static_cast<uint64_t>(cmd.count - 1) * static_cast<uint64_t>(cmd.count) / 2;
+                if (addPart > UINT64_MAX - intervalCount) {
+                    // Overflow — clamp
+                    intervalCount = UINT64_MAX;
+                } else {
+                    intervalCount += addPart;
+                }
             }
+            uint64_t dur = intervalCount;
             stepperBaseClocks_[oid] = static_cast<uint32_t>(
                 static_cast<uint64_t>(start) + dur);
         });
@@ -276,7 +277,10 @@ bool KlipperDevice::sendResponse(const std::string& formatStr,
     std::vector<uint8_t> content;
     if (!protocol::encodeMessage(dict_, *msgidOpt, params, content)) return false;
     auto blockBytes = protocol::buildBlockVec(lastRecvSeq_, content);
-    transport_->write(blockBytes);
+    size_t written = transport_->write(blockBytes);
+    if (written != blockBytes.size()) {
+        KLIPPER_LOG_ERROR("KlipperDevice: partial write");
+    }
     return true;
 }
 

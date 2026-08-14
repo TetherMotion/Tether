@@ -399,7 +399,7 @@ TEST_F(KlippyUdsTest, SubscriptionPushOnStateChange) {
     ASSERT_TRUE(resp.has_value());
 
     // Change state to ready
-    server_->setState(PrinterState::Ready, "Printer is ready");
+    server_->server().setState(PrinterState::Ready, "Printer is ready");
 
     // Wait for push message
     auto pushed = readFrame_(fd, 1000);
@@ -420,7 +420,7 @@ TEST_F(KlippyUdsTest, GcodeScriptEndpoint) {
     ASSERT_GE(fd, 0);
 
     std::string receivedScript;
-    server_->setGcodeScriptHandler([&](const std::string& script) {
+    server_->server().setGcodeScriptHandler([&](const std::string& script) {
         receivedScript = script;
     });
 
@@ -438,13 +438,13 @@ TEST_F(KlippyUdsTest, EmergencyStopEndpoint) {
     ASSERT_GE(fd, 0);
 
     bool stopCalled = false;
-    server_->setEmergencyStopHandler([&]() { stopCalled = true; });
+    server_->server().setEmergencyStopHandler([&]() { stopCalled = true; });
 
     auto resp = sendRecv_(fd, R"({"id":8,"method":"emergency_stop"})");
     ASSERT_TRUE(resp.has_value());
     EXPECT_TRUE(resp->has("result"));
     EXPECT_TRUE(stopCalled);
-    EXPECT_EQ(server_->state(), PrinterState::Shutdown);
+    EXPECT_EQ(server_->server().state(), PrinterState::Shutdown);
 
     ::close(fd);
 }
@@ -460,7 +460,7 @@ TEST_F(KlippyUdsTest, GcodeSubscribeOutput) {
     EXPECT_TRUE(resp->has("result"));
 
     // Emit a G-code response
-    server_->emitGcodeResponse("// Hello from G-code");
+    server_->server().emitGcodeResponse("// Hello from G-code");
 
     // Read the push
     auto pushed = readFrame_(fd, 1000);
@@ -516,34 +516,34 @@ TEST_F(KlippyUdsTest, UnknownMethodReturnsError) {
 
 TEST_F(KlippyUdsTest, StateTransitions) {
     // Initial state is startup
-    EXPECT_EQ(server_->state(), PrinterState::Startup);
+    EXPECT_EQ(server_->server().state(), PrinterState::Startup);
 
     // Transition to ready
-    server_->setState(PrinterState::Ready, "Printer is ready");
-    EXPECT_EQ(server_->state(), PrinterState::Ready);
-    EXPECT_EQ(server_->stateMessage(), "Printer is ready");
+    server_->server().setState(PrinterState::Ready, "Printer is ready");
+    EXPECT_EQ(server_->server().state(), PrinterState::Ready);
+    EXPECT_EQ(server_->server().stateMessage(), "Printer is ready");
 
     // Transition to shutdown
-    server_->setState(PrinterState::Shutdown, "Emergency stop");
-    EXPECT_EQ(server_->state(), PrinterState::Shutdown);
-    EXPECT_EQ(server_->stateMessage(), "Emergency stop");
+    server_->server().setState(PrinterState::Shutdown, "Emergency stop");
+    EXPECT_EQ(server_->server().state(), PrinterState::Shutdown);
+    EXPECT_EQ(server_->server().stateMessage(), "Emergency stop");
 }
 
 TEST_F(KlippyUdsTest, InvalidStateTransitionIgnored) {
-    EXPECT_EQ(server_->state(), PrinterState::Startup);
+    EXPECT_EQ(server_->server().state(), PrinterState::Startup);
 
     // Cannot go from startup to ready then back to startup
-    server_->setState(PrinterState::Ready);
-    EXPECT_EQ(server_->state(), PrinterState::Ready);
+    server_->server().setState(PrinterState::Ready);
+    EXPECT_EQ(server_->server().state(), PrinterState::Ready);
 
     // Cannot go from ready back to startup
-    server_->setState(PrinterState::Startup);
-    EXPECT_EQ(server_->state(), PrinterState::Ready);
+    server_->server().setState(PrinterState::Startup);
+    EXPECT_EQ(server_->server().state(), PrinterState::Ready);
 }
 
 TEST_F(KlippyUdsTest, CustomEndpointRegistration) {
     // Register a custom endpoint
-    server_->registerEndpoint("custom/test", [](const JsonValue& params) {
+    server_->server().registerEndpoint("custom/test", [](const JsonValue& params) {
         std::map<std::string, JsonValue> result;
         result["echo"] = params;
         return JsonValue(result);
@@ -596,7 +596,7 @@ TEST_F(KlippyUdsTest, CustomPrinterObject) {
         }
     };
 
-    server_->registerObject(std::make_shared<TestObject>());
+    server_->server().registerObject(std::make_shared<TestObject>());
 
     int fd = connectClient_();
     ASSERT_GE(fd, 0);
@@ -630,7 +630,7 @@ TEST_F(KlippyUdsTest, RestartEndpoint) {
     ASSERT_GE(fd, 0);
 
     bool restartCalled = false;
-    server_->setRestartHandler([&]() { restartCalled = true; });
+    server_->server().setRestartHandler([&]() { restartCalled = true; });
 
     auto resp = sendRecv_(fd, R"({"id":15,"method":"gcode/restart"})");
     ASSERT_TRUE(resp.has_value());

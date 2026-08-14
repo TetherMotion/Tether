@@ -37,3 +37,4 @@ build-tsan/
 # Build files
 .ninja*
 build.ninja
+test_output/

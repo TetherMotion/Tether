@@ -3,29 +3,20 @@
  * @brief G-code, query, and print control endpoint handlers
  */
 
-#include "tether/klipper/klippy/KlippyUdsServer.hpp"
+#include "tether/klipper/klippy/KlippyServer.hpp"
 #include "tether/klipper/klippy/AdvancedObjects.hpp"
 #include "tether/klipper/klippy/KlippyUdsHelpText.hpp"
-#include "UdsConnection_internal.hpp"
 
 #include <algorithm>
-#include <cerrno>
 #include <chrono>
-#include <cstring>
 #include <ctime>
-#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <netinet/in.h>
 #include <set>
-#include <signal.h>
 #include <sstream>
-#include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/un.h>
-#include <unistd.h>
 
 namespace tether::klipper::klippy {
 
@@ -33,7 +24,7 @@ namespace tether::klipper::klippy {
 // Core endpoint handlers
 // ============================================================================
 
-JsonValue KlippyUdsServer::handleInfo(const JsonValue& params) {
+JsonValue KlippyServer::handleInfo(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
     result["state"] = JsonValue(stateToString(state_));
@@ -56,7 +47,7 @@ JsonValue KlippyUdsServer::handleInfo(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleEmergencyStop(const JsonValue& params) {
+JsonValue KlippyServer::handleEmergencyStop(const JsonValue& params) {
     {
         std::lock_guard<std::recursive_mutex> lock(mutex_);
         if (emergencyStopHandler_) emergencyStopHandler_();
@@ -65,14 +56,14 @@ JsonValue KlippyUdsServer::handleEmergencyStop(const JsonValue& params) {
     return JsonValue(std::map<std::string, JsonValue>{});
 }
 
-JsonValue KlippyUdsServer::handleRegisterRemoteMethod(const JsonValue& params) {
+JsonValue KlippyServer::handleRegisterRemoteMethod(const JsonValue& params) {
     // Remote method registration is handled specially in processConnections()
     // where the connection context is available. This handler is a no-op
     // fallback — the actual registration logic is in the frame processing path.
     return JsonValue(std::map<std::string, JsonValue>{});
 }
 
-JsonValue KlippyUdsServer::handleListEndpoints(const JsonValue& params) {
+JsonValue KlippyServer::handleListEndpoints(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
     std::vector<JsonValue> endpoints;
@@ -87,11 +78,11 @@ JsonValue KlippyUdsServer::handleListEndpoints(const JsonValue& params) {
 // G-code endpoint handlers
 // ============================================================================
 
-JsonValue KlippyUdsServer::handleGcodeHelp(const JsonValue& params) {
+JsonValue KlippyServer::handleGcodeHelp(const JsonValue& params) {
     return getGcodeHelpJson();
 }
 
-JsonValue KlippyUdsServer::handleGcodeScript(const JsonValue& params) {
+JsonValue KlippyServer::handleGcodeScript(const JsonValue& params) {
     std::string script;
     if (params.has("script")) {
         script = params.find("script")->asString();
@@ -103,7 +94,7 @@ JsonValue KlippyUdsServer::handleGcodeScript(const JsonValue& params) {
     return JsonValue(std::map<std::string, JsonValue>{});
 }
 
-JsonValue KlippyUdsServer::handleGcodeRestart(const JsonValue& params) {
+JsonValue KlippyServer::handleGcodeRestart(const JsonValue& params) {
     {
         std::lock_guard<std::recursive_mutex> lock(mutex_);
         if (restartHandler_) restartHandler_();
@@ -111,7 +102,7 @@ JsonValue KlippyUdsServer::handleGcodeRestart(const JsonValue& params) {
     return JsonValue(std::map<std::string, JsonValue>{});
 }
 
-JsonValue KlippyUdsServer::handleGcodeFirmwareRestart(const JsonValue& params) {
+JsonValue KlippyServer::handleGcodeFirmwareRestart(const JsonValue& params) {
     {
         std::lock_guard<std::recursive_mutex> lock(mutex_);
         if (firmwareRestartHandler_) firmwareRestartHandler_();
@@ -119,7 +110,7 @@ JsonValue KlippyUdsServer::handleGcodeFirmwareRestart(const JsonValue& params) {
     return JsonValue(std::map<std::string, JsonValue>{});
 }
 
-JsonValue KlippyUdsServer::handleGcodeSubscribeOutput(const JsonValue& params) {
+JsonValue KlippyServer::handleGcodeSubscribeOutput(const JsonValue& params) {
     // The connection that sends this becomes a G-code output subscriber.
     // We need the connection context - handled specially in handleRequest.
     // Return empty result.
@@ -130,7 +121,7 @@ JsonValue KlippyUdsServer::handleGcodeSubscribeOutput(const JsonValue& params) {
 // Query endpoint handlers
 // ============================================================================
 
-JsonValue KlippyUdsServer::handleObjectsList(const JsonValue& params) {
+JsonValue KlippyServer::handleObjectsList(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
     std::vector<JsonValue> objList;
@@ -141,7 +132,7 @@ JsonValue KlippyUdsServer::handleObjectsList(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleObjectsQuery(const JsonValue& params) {
+JsonValue KlippyServer::handleObjectsQuery(const JsonValue& params) {
     std::map<std::string, std::vector<std::string>> queryObjs;
     if (params.has("objects") && params.find("objects")->isObject()) {
         for (const auto& [objName, fieldsVal] : params.find("objects")->asObject()) {
@@ -174,7 +165,7 @@ JsonValue KlippyUdsServer::handleObjectsQuery(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleObjectsSubscribe(const JsonValue& params) {
+JsonValue KlippyServer::handleObjectsSubscribe(const JsonValue& params) {
     // Parse requested objects
     std::map<std::string, std::vector<std::string>> queryObjs;
     if (params.has("objects") && params.find("objects")->isObject()) {
@@ -221,37 +212,46 @@ JsonValue KlippyUdsServer::handleObjectsSubscribe(const JsonValue& params) {
 // Print control endpoint handlers
 // ============================================================================
 
-JsonValue KlippyUdsServer::handlePrintStart(const JsonValue& params) {
+JsonValue KlippyServer::handlePrintStart(const JsonValue& params) {
+    std::string filename;
+    if (params.isObject()) {
+        auto* fn = params.find("filename");
+        if (fn && fn->isString()) filename = fn->asString();
+    }
     if (printStartHandler_) {
         printStartHandler_();
     }
+    setState(PrinterState::Printing, filename.empty() ? "Print started" : "Printing: " + filename);
     std::map<std::string, JsonValue> result;
     result["result"] = JsonValue("ok");
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handlePrintCancel(const JsonValue& params) {
+JsonValue KlippyServer::handlePrintCancel(const JsonValue& params) {
     if (printCancelHandler_) {
         printCancelHandler_();
     }
+    setState(PrinterState::Ready, "Print cancelled");
     std::map<std::string, JsonValue> result;
     result["result"] = JsonValue("ok");
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handlePrintPause(const JsonValue& params) {
+JsonValue KlippyServer::handlePrintPause(const JsonValue& params) {
     if (printPauseHandler_) {
         printPauseHandler_();
     }
+    setState(PrinterState::Paused, "Print paused");
     std::map<std::string, JsonValue> result;
     result["result"] = JsonValue("ok");
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handlePrintResume(const JsonValue& params) {
+JsonValue KlippyServer::handlePrintResume(const JsonValue& params) {
     if (printResumeHandler_) {
         printResumeHandler_();
     }
+    setState(PrinterState::Printing, "Print resumed");
     std::map<std::string, JsonValue> result;
     result["result"] = JsonValue("ok");
     return JsonValue(result);

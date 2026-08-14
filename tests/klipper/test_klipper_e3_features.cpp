@@ -5,7 +5,7 @@
  */
 
 #include "tether/klipper/klippy/KlippyInstance.hpp"
-#include "tether/klipper/klippy/KlippyUdsServer.hpp"
+#include "tether/klipper/klippy/KlippyServer.hpp"
 #include "tether/klipper/klippy/KlippyInstanceConfig.hpp"
 #include "tether/klipper/klippy/PrinterObjects.hpp"
 #include "tether/klipper/motion/MotionTranslator.hpp"
@@ -645,7 +645,7 @@ protected:
         socketPath = uniqueSocketPath();
         UdsServerConfig udsCfg;
         udsCfg.socketPath = socketPath;
-        server = std::make_unique<KlippyUdsServer>(udsCfg);
+        server = std::make_unique<KlippyServer>(udsCfg);
     }
 
     void TearDown() override {
@@ -654,7 +654,7 @@ protected:
     }
 
     std::string socketPath;
-    std::unique_ptr<KlippyUdsServer> server;
+    std::unique_ptr<KlippyServer> server;
 };
 
 TEST_F(E3SpoolmanTest, ProxyReturnsNotConnectedWhenUrlEmpty) {
@@ -678,7 +678,7 @@ TEST_F(E3SpoolmanTest, ProxyUrlConfigured) {
     UdsServerConfig udsCfg;
     udsCfg.socketPath = uniqueSocketPath() + "_2";
     udsCfg.spoolmanUrl = "http://localhost:8080";
-    auto s = std::make_unique<KlippyUdsServer>(udsCfg);
+    auto s = std::make_unique<KlippyServer>(udsCfg);
     s->callEndpoint("spoolman/info", JsonValue(std::map<std::string, JsonValue>{}));
     // Just verify it doesn't crash; the URL is stored internally
     SUCCEED();

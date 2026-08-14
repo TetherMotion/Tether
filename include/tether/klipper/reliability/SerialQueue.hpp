@@ -30,6 +30,7 @@
 #include <deque>
 #include <chrono>
 #include <functional>
+#include <mutex>
 #include <optional>
 
 namespace tether::klipper::reliability {
@@ -58,16 +59,16 @@ public:
         : transport_(transport), maxPending_(maxPending) {}
 
     /// @return The next sequence number that will be assigned.
-    uint8_t nextSequence() const { return sendSeq_.value(); }
+    uint8_t nextSequence() const { std::lock_guard<std::mutex> lk(mutex_); return sendSeq_.value(); }
 
     /// @return Number of blocks currently pending acknowledgement.
-    size_t pendingCount() const { return pending_.size(); }
+    size_t pendingCount() const { std::lock_guard<std::mutex> lk(mutex_); return pending_.size(); }
 
     /// @return True if the window allows sending another block.
-    bool canSend() const { return pending_.size() < maxPending_; }
+    bool canSend() const { std::lock_guard<std::mutex> lk(mutex_); return pending_.size() < maxPending_; }
 
     /// @brief Set the ack callback (for RTT measurement).
-    void setAckCallback(AckCallback cb) { ackCb_ = std::move(cb); }
+    void setAckCallback(AckCallback cb) { std::lock_guard<std::mutex> lk(mutex_); ackCb_ = std::move(cb); }
 
     /**
      * @brief Send a content payload as a new message block.
@@ -104,18 +105,19 @@ public:
     /// @brief Reset the queue (e.g. on connection re-establishment).
     void reset();
 
-    /// @return The RTO estimator (for inspection/tuning).
+    /// @return The RTO estimator (for inspection/tuning). Not thread-safe; call from same thread as checkTimeouts.
     const RtoEstimator& rtoEstimator() const { return rto_; }
 
 private:
     transport::IByteStreamTransport& transport_;
     uint8_t maxPending_;
+    static constexpr uint8_t kMaxRetransmits = 5; ///< Max retransmits before dropping
     SequenceCounter sendSeq_;
     SequenceCounter ackSeq_; // last acked sequence (starts behind sendSeq)
     std::deque<PendingBlock> pending_;
     RtoEstimator rto_;
     AckCallback ackCb_;
-    bool firstAck_ = true;
+    mutable std::mutex mutex_;
 };
 
 } // namespace tether::klipper::reliability

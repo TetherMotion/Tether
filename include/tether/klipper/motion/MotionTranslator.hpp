@@ -271,7 +271,7 @@ std::vector<AxisStepSequence> MotionTranslator<Dim, T>::translate(
                    (rawSteps[idx + mergedSamples].delta > 0 ? 1 : -1) == deltaSign) {
                 uint32_t nextAbs = static_cast<uint32_t>(
                     std::abs(rawSteps[idx + mergedSamples].delta));
-                if (static_cast<uint64_t>(totalSteps) + nextAbs > 65535) break;
+                if (static_cast<uint64_t>(totalSteps) + static_cast<uint64_t>(nextAbs) > 65535) break;
 
                 // Check if adding this sample would cause add to overflow.
                 if (mergedSamples > 1) {

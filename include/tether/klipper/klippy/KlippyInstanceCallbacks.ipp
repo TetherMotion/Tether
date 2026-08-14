@@ -132,7 +132,10 @@
             if (!std::isnan(e)) motionState_.position[3] = e;
         };
 
-        // Dwell — actually sleep for the specified duration (in seconds)
+        // Dwell — blocks the G-code executor for the specified duration.
+        // This is intentional: the G-code executor is single-threaded and processes
+        // commands sequentially. A dwell is supposed to pause execution.
+        // For very long dwells, consider yielding to allow UDS event processing.
         cb.dwell = [](double seconds) {
             if (seconds > 0) {
                 std::this_thread::sleep_for(

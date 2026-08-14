@@ -6,7 +6,7 @@
  */
 
 #include "tether/klipper/klippy/GCodeExecutor.hpp"
-#include "tether/klipper/klippy/KlippyUdsServer.hpp"
+#include "tether/klipper/klippy/KlippyServer.hpp"
 #include "tether/klipper/klippy/PrinterObjects.hpp"
 
 #include <gtest/gtest.h>
@@ -23,7 +23,7 @@ using namespace tether::klipper::klippy;
 // ============================================================================
 
 TEST(TierC1MoonrakerEndpoints, NewEndpointsRegistered) {
-    KlippyUdsServer server;
+    KlippyServer server;
     auto endpoints = server.listEndpoints();
 
     auto hasEndpoint = [&](const std::string& name) {
@@ -67,7 +67,7 @@ TEST(TierC1MoonrakerEndpoints, NewEndpointsRegistered) {
 }
 
 TEST(TierC1MoonrakerEndpoints, DatabaseOperations) {
-    KlippyUdsServer server;
+    KlippyServer server;
 
     // Put a value
     server.databasePut("test_ns", "test_key", JsonValue(42));
@@ -85,7 +85,7 @@ TEST(TierC1MoonrakerEndpoints, DatabaseOperations) {
 }
 
 TEST(TierC1MoonrakerEndpoints, JobQueueOperations) {
-    KlippyUdsServer server;
+    KlippyServer server;
 
     server.jobQueueAdd("test.gcode");
     server.jobQueueAdd("test2.gcode");
@@ -95,7 +95,7 @@ TEST(TierC1MoonrakerEndpoints, JobQueueOperations) {
 }
 
 TEST(TierC1MoonrakerEndpoints, JobHistoryOperations) {
-    KlippyUdsServer server;
+    KlippyServer server;
 
     int64_t jobId = server.jobHistoryAdd("test.gcode", "completed");
     EXPECT_GT(jobId, 0);
@@ -105,7 +105,7 @@ TEST(TierC1MoonrakerEndpoints, JobHistoryOperations) {
 }
 
 TEST(TierC1MoonrakerEndpoints, AnnouncementsOperations) {
-    KlippyUdsServer server;
+    KlippyServer server;
 
     server.announcementAdd("test-001", "Test Announcement", "This is a test", "info");
     server.announcementAdd("test-002", "Warning", "Warning test", "warning");
@@ -115,7 +115,7 @@ TEST(TierC1MoonrakerEndpoints, AnnouncementsOperations) {
 }
 
 TEST(TierC1MoonrakerEndpoints, WebcamRegistration) {
-    KlippyUdsServer server;
+    KlippyServer server;
 
     server.registerWebcam("cam1", "http://localhost:8080/?action=stream", "mjpegstreamer");
     server.registerWebcam("cam2", "http://localhost:8081/?action=stream", "mjpegstreamer");
@@ -125,7 +125,7 @@ TEST(TierC1MoonrakerEndpoints, WebcamRegistration) {
 }
 
 TEST(TierC1MoonrakerEndpoints, ServiceRegistration) {
-    KlippyUdsServer server;
+    KlippyServer server;
 
     server.registerService("custom_service", "active", "running");
 
@@ -134,7 +134,7 @@ TEST(TierC1MoonrakerEndpoints, ServiceRegistration) {
 }
 
 TEST(TierC1MoonrakerEndpoints, FileRootRegistration) {
-    KlippyUdsServer server;
+    KlippyServer server;
 
     server.registerFileRoot("custom", "/tmp/custom_root", true);
 
@@ -143,7 +143,7 @@ TEST(TierC1MoonrakerEndpoints, FileRootRegistration) {
 }
 
 TEST(TierC1MoonrakerEndpoints, InitServerConfig) {
-    KlippyUdsServer server;
+    KlippyServer server;
 
     // initServerConfig is called in constructor, just verify it doesn't crash
     server.initServerConfig();
@@ -595,7 +595,7 @@ TEST(TierD3StateWiring, PrintStatsInfoInAvailableFields) {
 // ============================================================================
 
 TEST(TierE1HighEndpoints, JobQueuePauseStart) {
-    KlippyUdsServer server;
+    KlippyServer server;
     auto endpoints = server.listEndpoints();
     EXPECT_NE(std::find(endpoints.begin(), endpoints.end(), "job_queue/pause"), endpoints.end());
     EXPECT_NE(std::find(endpoints.begin(), endpoints.end(), "job_queue/start"), endpoints.end());
@@ -603,20 +603,20 @@ TEST(TierE1HighEndpoints, JobQueuePauseStart) {
 }
 
 TEST(TierE1HighEndpoints, JobHistoryDelete) {
-    KlippyUdsServer server;
+    KlippyServer server;
     auto endpoints = server.listEndpoints();
     EXPECT_NE(std::find(endpoints.begin(), endpoints.end(), "job_history/delete"), endpoints.end());
 }
 
 TEST(TierE1HighEndpoints, WebcamsUpdateDelete) {
-    KlippyUdsServer server;
+    KlippyServer server;
     auto endpoints = server.listEndpoints();
     EXPECT_NE(std::find(endpoints.begin(), endpoints.end(), "webcams/update"), endpoints.end());
     EXPECT_NE(std::find(endpoints.begin(), endpoints.end(), "webcams/delete"), endpoints.end());
 }
 
 TEST(TierE1HighEndpoints, DevicePowerOnOffToggle) {
-    KlippyUdsServer server;
+    KlippyServer server;
     server.registerPowerDevice("psu", "off");
 
     auto endpoints = server.listEndpoints();
@@ -626,7 +626,7 @@ TEST(TierE1HighEndpoints, DevicePowerOnOffToggle) {
 }
 
 TEST(TierE1HighEndpoints, SystemPerms) {
-    KlippyUdsServer server;
+    KlippyServer server;
     server.setSystemPerms("read", {"read"});
     server.setSystemPerms("write", {"write"});
 
@@ -635,7 +635,7 @@ TEST(TierE1HighEndpoints, SystemPerms) {
 }
 
 TEST(TierE1HighEndpoints, AnnouncementsFeed) {
-    KlippyUdsServer server;
+    KlippyServer server;
     server.announcementAdd("feed-001", "Feed Test", "Feed description", "info");
 
     auto endpoints = server.listEndpoints();
@@ -643,13 +643,13 @@ TEST(TierE1HighEndpoints, AnnouncementsFeed) {
 }
 
 TEST(TierE1HighEndpoints, ServerFilesGet) {
-    KlippyUdsServer server;
+    KlippyServer server;
     auto endpoints = server.listEndpoints();
     EXPECT_NE(std::find(endpoints.begin(), endpoints.end(), "server/files/get"), endpoints.end());
 }
 
 TEST(TierE1HighEndpoints, ServerLogsList) {
-    KlippyUdsServer server;
+    KlippyServer server;
     server.addLogFile("klippy.log", "/tmp/klippy.log");
 
     auto endpoints = server.listEndpoints();
@@ -657,7 +657,7 @@ TEST(TierE1HighEndpoints, ServerLogsList) {
 }
 
 TEST(TierE1HighEndpoints, PrinterGcodeSubscribeOutputAlias) {
-    KlippyUdsServer server;
+    KlippyServer server;
     auto endpoints = server.listEndpoints();
     EXPECT_NE(std::find(endpoints.begin(), endpoints.end(), "printer/gcode/subscribe_output"), endpoints.end());
 }
@@ -667,7 +667,7 @@ TEST(TierE1HighEndpoints, PrinterGcodeSubscribeOutputAlias) {
 // ============================================================================
 
 TEST(TierE1LowAccess, AccessEndpointsRegistered) {
-    KlippyUdsServer server;
+    KlippyServer server;
     auto endpoints = server.listEndpoints();
     auto has = [&](const std::string& n) {
         return std::find(endpoints.begin(), endpoints.end(), n) != endpoints.end();
@@ -681,7 +681,7 @@ TEST(TierE1LowAccess, AccessEndpointsRegistered) {
 }
 
 TEST(TierE1LowAccess, UserRegistration) {
-    KlippyUdsServer server;
+    KlippyServer server;
     server.registerUser("admin", "password123", {"read", "write"});
     // Just verify it doesn't crash
     SUCCEED();
@@ -692,7 +692,7 @@ TEST(TierE1LowAccess, UserRegistration) {
 // ============================================================================
 
 TEST(TierE1LowBots, BotEndpointsRegistered) {
-    KlippyUdsServer server;
+    KlippyServer server;
     auto endpoints = server.listEndpoints();
     auto has = [&](const std::string& n) {
         return std::find(endpoints.begin(), endpoints.end(), n) != endpoints.end();
@@ -704,7 +704,7 @@ TEST(TierE1LowBots, BotEndpointsRegistered) {
 }
 
 TEST(TierE1LowBots, BotRegistration) {
-    KlippyUdsServer server;
+    KlippyServer server;
     server.registerBot("telegram_bot", "telegram", "token123", true);
     SUCCEED();
 }
@@ -714,7 +714,7 @@ TEST(TierE1LowBots, BotRegistration) {
 // ============================================================================
 
 TEST(TierE1LowNotepad, NotepadEndpointsRegistered) {
-    KlippyUdsServer server;
+    KlippyServer server;
     auto endpoints = server.listEndpoints();
     auto has = [&](const std::string& n) {
         return std::find(endpoints.begin(), endpoints.end(), n) != endpoints.end();
@@ -726,7 +726,7 @@ TEST(TierE1LowNotepad, NotepadEndpointsRegistered) {
 }
 
 TEST(TierE1LowNotepad, NotepadPutGet) {
-    KlippyUdsServer server;
+    KlippyServer server;
     server.notepadPut("test_key", "test_value");
     auto val = server.notepadGet("test_key");
     ASSERT_TRUE(val.has_value());
@@ -738,7 +738,7 @@ TEST(TierE1LowNotepad, NotepadPutGet) {
 // ============================================================================
 
 TEST(TierE1LowSpoolman, SpoolmanEndpointsRegistered) {
-    KlippyUdsServer server;
+    KlippyServer server;
     auto endpoints = server.listEndpoints();
     auto has = [&](const std::string& n) {
         return std::find(endpoints.begin(), endpoints.end(), n) != endpoints.end();
@@ -749,7 +749,7 @@ TEST(TierE1LowSpoolman, SpoolmanEndpointsRegistered) {
 }
 
 TEST(TierE1LowSpoolman, SpoolmanState) {
-    KlippyUdsServer server;
+    KlippyServer server;
     server.setSpoolmanConnected(true, "http://localhost:8000");
     server.setSpoolId(42);
     SUCCEED();
@@ -760,7 +760,7 @@ TEST(TierE1LowSpoolman, SpoolmanState) {
 // ============================================================================
 
 TEST(TierE1LowDevices, DeviceCrudEndpointsRegistered) {
-    KlippyUdsServer server;
+    KlippyServer server;
     auto endpoints = server.listEndpoints();
     auto has = [&](const std::string& n) {
         return std::find(endpoints.begin(), endpoints.end(), n) != endpoints.end();
@@ -770,7 +770,7 @@ TEST(TierE1LowDevices, DeviceCrudEndpointsRegistered) {
 }
 
 TEST(TierE1LowDatabase, DatabaseNsEndpointRegistered) {
-    KlippyUdsServer server;
+    KlippyServer server;
     auto endpoints = server.listEndpoints();
     EXPECT_NE(std::find(endpoints.begin(), endpoints.end(), "database/ns"), endpoints.end());
 }

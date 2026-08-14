@@ -3,28 +3,19 @@
  * @brief File operation and server info endpoint handlers
  */
 
-#include "tether/klipper/klippy/KlippyUdsServer.hpp"
+#include "tether/klipper/klippy/KlippyServer.hpp"
 #include "tether/klipper/klippy/AdvancedObjects.hpp"
-#include "UdsConnection_internal.hpp"
 
 #include <algorithm>
-#include <cerrno>
 #include <chrono>
-#include <cstring>
 #include <ctime>
-#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <netinet/in.h>
 #include <set>
-#include <signal.h>
 #include <sstream>
-#include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/un.h>
-#include <unistd.h>
 
 namespace tether::klipper::klippy {
 
@@ -32,7 +23,7 @@ namespace tether::klipper::klippy {
 // Additional Moonraker-compatible endpoint handlers
 // ============================================================================
 
-JsonValue KlippyUdsServer::handleServerInfo(const JsonValue& params) {
+JsonValue KlippyServer::handleServerInfo(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     std::map<std::string, JsonValue> info;
     info["version"] = JsonValue(config_.softwareVersion);
@@ -44,7 +35,7 @@ JsonValue KlippyUdsServer::handleServerInfo(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleServerFilesList(const JsonValue& params) {
+JsonValue KlippyServer::handleServerFilesList(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     std::vector<JsonValue> files;
 
@@ -74,7 +65,7 @@ JsonValue KlippyUdsServer::handleServerFilesList(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleServerFilesMetadata(const JsonValue& params) {
+JsonValue KlippyServer::handleServerFilesMetadata(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     std::map<std::string, JsonValue> metadata;
 
@@ -125,7 +116,7 @@ JsonValue KlippyUdsServer::handleServerFilesMetadata(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleMachineSystemInfo(const JsonValue& params) {
+JsonValue KlippyServer::handleMachineSystemInfo(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     std::map<std::string, JsonValue> info;
 
@@ -135,7 +126,7 @@ JsonValue KlippyUdsServer::handleMachineSystemInfo(const JsonValue& params) {
     if (cpuinfo) {
         std::string line;
         while (std::getline(cpuinfo, line)) {
-            if (line.substr(0, 10) == "model name") {
+            if (line.size() >= 10 && line.compare(0, 10, "model name") == 0) {
                 auto pos = line.find(':');
                 if (pos != std::string::npos) {
                     cpuModel = line.substr(pos + 2);
@@ -151,7 +142,7 @@ JsonValue KlippyUdsServer::handleMachineSystemInfo(const JsonValue& params) {
     if (osrelease) {
         std::string line;
         while (std::getline(osrelease, line)) {
-            if (line.substr(0, 11) == "PRETTY_NAME") {
+            if (line.size() >= 11 && line.compare(0, 11, "PRETTY_NAME") == 0) {
                 auto pos = line.find('=');
                 if (pos != std::string::npos) {
                     osName = line.substr(pos + 1);
@@ -172,7 +163,7 @@ JsonValue KlippyUdsServer::handleMachineSystemInfo(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleMachineProcstats(const JsonValue& params) {
+JsonValue KlippyServer::handleMachineProcstats(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     std::map<std::string, JsonValue> stats;
 
@@ -196,10 +187,10 @@ JsonValue KlippyUdsServer::handleMachineProcstats(const JsonValue& params) {
         std::string line;
         long memTotal = 0, memAvail = 0;
         while (std::getline(meminfo, line)) {
-            if (line.substr(0, 9) == "MemTotal:") {
+            if (line.size() >= 9 && line.compare(0, 9, "MemTotal:") == 0) {
                 std::istringstream iss(line.substr(9));
                 iss >> memTotal;
-            } else if (line.substr(0, 13) == "MemAvailable:") {
+            } else if (line.size() >= 13 && line.compare(0, 13, "MemAvailable:") == 0) {
                 std::istringstream iss(line.substr(13));
                 iss >> memAvail;
             }
@@ -211,7 +202,7 @@ JsonValue KlippyUdsServer::handleMachineProcstats(const JsonValue& params) {
 
     stats["cpu_usage"] = JsonValue(cpuUsage);
     stats["memory_usage"] = JsonValue(memUsage);
-    stats["webhooks_connections"] = JsonValue(static_cast<int64_t>(connections_.size()));
+    stats["webhooks_connections"] = JsonValue(static_cast<int64_t>(0));
     result["result"] = JsonValue(stats);
     return JsonValue(result);
 }
@@ -220,7 +211,7 @@ JsonValue KlippyUdsServer::handleMachineProcstats(const JsonValue& params) {
 // New Moonraker-compatible endpoint handlers
 // ============================================================================
 
-JsonValue KlippyUdsServer::handleServerTemperatureStore(const JsonValue& params) {
+JsonValue KlippyServer::handleServerTemperatureStore(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     std::map<std::string, JsonValue> store;
 
@@ -240,7 +231,7 @@ JsonValue KlippyUdsServer::handleServerTemperatureStore(const JsonValue& params)
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleServerGcodeStore(const JsonValue& params) {
+JsonValue KlippyServer::handleServerGcodeStore(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     std::vector<JsonValue> gcodes;
 
@@ -257,7 +248,7 @@ JsonValue KlippyUdsServer::handleServerGcodeStore(const JsonValue& params) {
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleServerFilesDirectory(const JsonValue& params) {
+JsonValue KlippyServer::handleServerFilesDirectory(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     std::map<std::string, JsonValue> dirInfo;
 
@@ -298,21 +289,25 @@ JsonValue KlippyUdsServer::handleServerFilesDirectory(const JsonValue& params) {
         try {
             fs::create_directories(fullPath);
             result["result"] = JsonValue(true);
-        } catch (...) {
-            result["result"] = JsonValue(false);
+            notifyFilelistChanged("create_dir", path, "gcodes");
+        } catch (const std::exception& e) {
+            result["error"] = JsonValue(std::string("Create directory failed: ") + e.what());
         }
     } else if (action == "delete_dir") {
         try {
             fs::remove_all(fullPath);
             result["result"] = JsonValue(true);
-        } catch (...) {
-            result["result"] = JsonValue(false);
+            notifyFilelistChanged("delete_dir", path, "gcodes");
+        } catch (const std::exception& e) {
+            result["error"] = JsonValue(std::string("Delete directory failed: ") + e.what());
         }
+    } else {
+        result["error"] = JsonValue("Invalid action: " + action + " (expected 'list', 'create_dir', or 'delete_dir')");
     }
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleServerFilesMove(const JsonValue& params) {
+JsonValue KlippyServer::handleServerFilesMove(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     std::string src = params.has("source") && params.find("source")->isString()
         ? params.find("source")->asString() : "";
@@ -324,16 +319,17 @@ JsonValue KlippyUdsServer::handleServerFilesMove(const JsonValue& params) {
         try {
             fs::rename(fileRoot_ + "/" + src, fileRoot_ + "/" + dst);
             result["result"] = JsonValue(true);
-        } catch (...) {
-            result["result"] = JsonValue(false);
+            notifyFilelistChanged("move", dst, "gcodes");
+        } catch (const std::exception& e) {
+            result["error"] = JsonValue(std::string("Move failed: ") + e.what());
         }
     } else {
-        result["result"] = JsonValue(false);
+        result["error"] = JsonValue("Missing 'source' or 'dest' parameter");
     }
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleServerFilesCopy(const JsonValue& params) {
+JsonValue KlippyServer::handleServerFilesCopy(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     std::string src = params.has("source") && params.find("source")->isString()
         ? params.find("source")->asString() : "";
@@ -346,16 +342,17 @@ JsonValue KlippyUdsServer::handleServerFilesCopy(const JsonValue& params) {
             fs::copy(fileRoot_ + "/" + src, fileRoot_ + "/" + dst,
                      fs::copy_options::recursive);
             result["result"] = JsonValue(true);
-        } catch (...) {
-            result["result"] = JsonValue(false);
+            notifyFilelistChanged("copy", dst, "gcodes");
+        } catch (const std::exception& e) {
+            result["error"] = JsonValue(std::string("Copy failed: ") + e.what());
         }
     } else {
-        result["result"] = JsonValue(false);
+        result["error"] = JsonValue("Missing 'source' or 'dest' parameter");
     }
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleServerFilesDelete(const JsonValue& params) {
+JsonValue KlippyServer::handleServerFilesDelete(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     std::string path = params.has("path") && params.find("path")->isString()
         ? params.find("path")->asString() : "";
@@ -365,16 +362,17 @@ JsonValue KlippyUdsServer::handleServerFilesDelete(const JsonValue& params) {
         try {
             fs::remove_all(fileRoot_ + "/" + path);
             result["result"] = JsonValue(true);
-        } catch (...) {
-            result["result"] = JsonValue(false);
+            notifyFilelistChanged("delete", path, "gcodes");
+        } catch (const std::exception& e) {
+            result["error"] = JsonValue(std::string("Delete failed: ") + e.what());
         }
     } else {
-        result["result"] = JsonValue(false);
+        result["error"] = JsonValue("Missing 'path' parameter");
     }
     return JsonValue(result);
 }
 
-JsonValue KlippyUdsServer::handleServerFilesUpload(const JsonValue& params) {
+JsonValue KlippyServer::handleServerFilesUpload(const JsonValue& params) {
     // File upload is typically done via HTTP multipart in Moonraker.
     // For UDS, we accept a simple path + content.
     std::map<std::string, JsonValue> result;
@@ -392,16 +390,30 @@ JsonValue KlippyUdsServer::handleServerFilesUpload(const JsonValue& params) {
             if (f) {
                 f << content;
                 result["result"] = JsonValue(true);
+                notifyFilelistChanged("upload", path, "gcodes");
             } else {
-                result["result"] = JsonValue(false);
+                result["error"] = JsonValue("Failed to open file for writing");
             }
-        } catch (...) {
-            result["result"] = JsonValue(false);
+        } catch (const std::exception& e) {
+            result["error"] = JsonValue(std::string("Upload failed: ") + e.what());
         }
     } else {
-        result["result"] = JsonValue(false);
+        result["error"] = JsonValue("Missing 'path' parameter");
     }
     return JsonValue(result);
+}
+
+void KlippyServer::notifyFilelistChanged(const std::string& action,
+                                          const std::string& path,
+                                          const std::string& root) {
+    std::vector<FilelistChangedCallback> cbs;
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        cbs = filelistChangedCbs_;
+    }
+    for (const auto& cb : cbs) {
+        if (cb) cb(action, path, root);
+    }
 }
 
 } // namespace tether::klipper::klippy

@@ -7,7 +7,7 @@
 #include "tether/klipper/klippy/PrinterObjects.hpp"
 #include "tether/klipper/klippy/AdvancedObjects.hpp"
 #include "tether/klipper/klippy/GCodeExecutor.hpp"
-#include "tether/klipper/klippy/KlippyUdsServer.hpp"
+#include "tether/klipper/klippy/KlippyServer.hpp"
 #include "tether/klipper/objects/Thermal.hpp"
 #include "tether/klipper/objects/Peripherals.hpp"
 #include "tether/klipper/objects/Homing.hpp"
@@ -571,7 +571,7 @@ TEST(KlipperMotionTranslatorAccel, NonZeroAddForAcceleration) {
 TEST(KlipperGcodeHelp, ComprehensiveHelp) {
     UdsServerConfig cfg;
     cfg.socketPath = uniqueSocketPath();
-    KlippyUdsServer server(cfg);
+    KlippyServer server(cfg);
 
     // Access the help handler via the endpoint
     auto endpoints = server.listEndpoints();

@@ -1,10 +1,10 @@
 /**
  * @file klipper_moonraker_api.cpp
- * @brief Example: Moonraker-compatible API endpoints via KlippyUdsServer.
+ * @brief Example: Moonraker-compatible API endpoints via KlippyServer.
  *
  * @details
  * This example demonstrates the full Moonraker API surface exposed by
- * Tether's KlippyUdsServer. It covers:
+ * Tether's KlippyServer. It covers:
  *
  *   1. Server info and configuration
  *   2. File operations (list, metadata, roots)
@@ -31,7 +31,7 @@
  * without a socket connection, using the public C++ API directly.
  */
 
-#include "tether/klipper/klippy/KlippyUdsServer.hpp"
+#include "tether/klipper/klippy/KlippyServer.hpp"
 
 #include <cstdio>
 #include <string>
@@ -42,7 +42,7 @@ static void printSection(const char* title) {
     std::printf("\n--- %s ---\n\n", title);
 }
 
-static void printEndpoints(KlippyUdsServer& server, const std::string& prefix) {
+static void printEndpoints(KlippyServer& server, const std::string& prefix) {
     auto endpoints = server.listEndpoints();
     int count = 0;
     for (const auto& ep : endpoints) {
@@ -58,7 +58,7 @@ int main() {
     UdsServerConfig cfg;
     cfg.socketPath = "/tmp/tether_moonraker_api_uds";
     cfg.logFile = "/tmp/tether_moonraker_api.log";
-    KlippyUdsServer server(cfg);
+    KlippyServer server(cfg);
 
     std::printf("Tether Klipper Moonraker API Reference\n");
     std::printf("========================================\n");

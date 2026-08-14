@@ -47,7 +47,7 @@ size_t CanTransport::write(std::span<const uint8_t> data) {
 
 size_t CanTransport::available() const {
     if (!open_ || !config_.can) return 0;
-    std::lock_guard<std::mutex> lk(const_cast<std::mutex&>(rxMtx_));
+    std::lock_guard<std::mutex> lk(rxMtx_);
     return rxBuf_.size();
 }
 

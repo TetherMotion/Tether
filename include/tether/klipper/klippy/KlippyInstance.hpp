@@ -3,7 +3,8 @@
  * @brief Integrated Klippy instance that auto-wires all components.
  *
  * The KlippyInstance is a top-level facade that connects:
- *   - KlippyUdsServer (Moonraker-facing UDS API)
+ *   - KlippyServer (business logic: endpoints, state, data stores)
+ *   - KlippyUdsServer (UDS transport, delegates to KlippyServer)
  *   - GCodeExecutor (G-code parsing and dispatch)
  *   - VirtualSdcard (G-code file management)
  *   - Printer objects (extruder, heater_bed, fan, toolhead, etc.)
@@ -96,7 +97,7 @@ private:
 /// KlippyInstance is **not internally synchronized**. The UDS server
 /// runs its event loop on a dedicated thread (`eventThread_`) and calls
 /// back into KlippyInstance via endpoint handlers. The UDS server
-/// protects its own state with `KlippyUdsServer::mutex_` (a
+/// protects its own state with `KlippyServer::mutex_` (a
 /// `std::recursive_mutex`), but KlippyInstance's state (settings,
 /// motion state, heater/fan backends, etc.) is **not** protected by
 /// that mutex.
@@ -133,6 +134,7 @@ public:
     explicit KlippyInstance(KlippyInstanceConfig cfg = {})
         : config_(std::move(cfg))
         , server_(config_.udsConfig)
+        , udsTransport_(server_, config_.udsConfig)
         , sdcard_(std::make_shared<VirtualSdcard>(config_.sdcardDir))
         , macros_(std::make_shared<GcodeMacroRegistry>())
         , firmwareRetraction_(std::make_shared<FirmwareRetraction>())
@@ -162,7 +164,8 @@ public:
     ///         access synchronization (see threading model above).
     std::mutex& mutex() { return instanceMutex_; }
 
-    KlippyUdsServer& server() { return server_; }
+    KlippyServer& server() { return server_; }
+    KlippyUdsServer& udsTransport() { return udsTransport_; }
     GCodeExecutor& gcode() { return gcode_; }
     VirtualSdcard& sdcard() { return *sdcard_; }
     GcodeMacroRegistry& macros() { return *macros_; }
@@ -232,7 +235,8 @@ public:
     }
     void setProbe(std::shared_ptr<objects::Probe> p) {
         probe_ = p;
-        if (probeObj_) probeObj_ = std::make_shared<ProbeObject>(p);
+        probeObj_ = std::make_shared<ProbeObject>(p);
+        server_.registerObject(probeObj_);
     }
 
     /// @brief Register an ADC read callback for a given pin name.
@@ -355,11 +359,11 @@ public:
     // ------------------------------------------------------------------
 
     bool start() {
-        return server_.start();
+        return udsTransport_.start();
     }
 
     void stop() {
-        server_.stop();
+        udsTransport_.stop();
     }
 
     /// @return The motion backend's KlippyHost, or nullptr if not configured.
@@ -804,7 +808,8 @@ private:
 
     std::mutex instanceMutex_; ///< For multi-threaded access (see threading model)
     KlippyInstanceConfig config_;
-    KlippyUdsServer server_;
+    KlippyServer server_;
+    KlippyUdsServer udsTransport_;
     std::shared_ptr<ISystemStatsProvider> systemStatsProvider_; ///< Injectable system stats
     std::shared_ptr<VirtualSdcard> sdcard_;
     std::shared_ptr<GcodeMacroRegistry> macros_;

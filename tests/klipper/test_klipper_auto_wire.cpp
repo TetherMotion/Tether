@@ -5,7 +5,7 @@
  */
 
 #include "tether/klipper/klippy/KlippyInstance.hpp"
-#include "tether/klipper/klippy/KlippyUdsServer.hpp"
+#include "tether/klipper/klippy/KlippyServer.hpp"
 #include "tether/klipper/klippy/KlippyInstanceConfig.hpp"
 #include "tether/klipper/objects/Thermal.hpp"
 #include "tether/klipper/objects/Peripherals.hpp"
