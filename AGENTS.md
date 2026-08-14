@@ -19,8 +19,17 @@ cmake --build build -j$(nproc)
 # Build only klipper tests
 cmake --build build --target tether_klipper_tests -j$(nproc)
 
+# Build klipper HTTP server (requires Drogon)
+cmake --build build --target tether_klipper_http_shared -j$(nproc)
+
+# Build klipper HTTP tests
+cmake --build build --target tether_klipper_http_tests -j$(nproc)
+
 # Run klipper tests (excluding slow thermal simulation)
 ./build/bin/tests/tether_klipper_tests --gtest_filter='-ThermalIntegrationTest.*'
+
+# Run klipper HTTP tests
+./build/bin/tests/tether_klipper_http_tests
 
 # Run all klipper tests (including thermal, takes ~6 min)
 ./build/bin/tests/tether_klipper_tests
@@ -49,9 +58,32 @@ threading model, and performance characteristics.
 1. **KlippyInstance** — Top-level orchestrator (header-only)
 2. **KlippyHost** — MCU communication client
 3. **KlippyUdsServer** — Unix domain socket JSON-RPC server
-4. **MotionTranslator** — MotionPlan to queue_step translation
-5. **KlipperDevice** — Device-side protocol handler (implements `IKlipperDevice`)
-6. **Transport** — Byte-stream abstraction (loopback, pipe, TCP)
+4. **KlippyHttpServer** — Native HTTP/WebSocket server for Mainsail/Fluidd (optional, requires Drogon)
+5. **MotionTranslator** — MotionPlan to queue_step translation
+6. **KlipperDevice** — Device-side protocol handler (implements `IKlipperDevice`)
+7. **Transport** — Byte-stream abstraction (loopback, pipe, TCP)
+
+### Native HTTP/WebSocket Server (tether_klipper_http)
+
+The `tether_klipper_http` component implements the full Moonraker HTTP + WebSocket
+API directly in C++, eliminating the need for a separate Moonraker process between
+Tether and Mainsail/Fluidd frontends.
+
+**Key design:**
+- Uses Drogon as the HTTP/WebSocket framework and Glaze for JSON serialization
+- Reuses all 120+ existing `KlippyUdsServer` endpoint handlers via `callEndpoint()`
+- `GlazeAdapter` converts between `JsonValue` (UDS) and `glz::generic` (Glaze JSON)
+- `JsonRpcDispatcher` maps dotted JSON-RPC method names (e.g. `server.info`) to
+  slash-style UDS method names (e.g. `server/info`)
+- `WsSessionManager` tracks WebSocket client sessions and subscriptions
+- `NotificationBridge` implements `NotificationSink` to fan out events to WS clients
+- `KlippyWsController` is a Drogon WebSocketController for the `/websocket` endpoint
+
+**Build:** Requires Drogon. Enabled automatically when Drogon is found, or
+explicitly with `-DTETHER_ENABLE_KLIPPER_HTTP=ON`. If jsoncpp dev headers are
+missing, the build system FetchContent's jsoncpp automatically. Stub CMake
+find modules for Drogon's optional DB dependencies (pg, SQLite3, MySQL, etc.)
+are provided in `cmake/drogon_compat/`.
 
 ### Interface Boundaries
 
@@ -81,6 +113,7 @@ New test files are automatically picked up by CMake on re-configure.
 - `test_klipper_error_paths.cpp` — Error-path and failure injection tests
 - `test_klipper_fuzz.cpp` — Fuzz/property-based tests (VLQ, MessageBlock, JSON)
 - `test_helpers.hpp` — Shared test utilities (temp dirs, socket paths)
+- `http/test_glaze_adapter.cpp` — HTTP server unit tests (GlazeAdapter, ResponseBuilder, JsonRpcDispatcher, WsSessionManager)
 
 ## Known Issues
 

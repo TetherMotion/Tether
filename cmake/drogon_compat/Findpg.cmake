@@ -1,0 +1,6 @@
+set(pg_FOUND TRUE)
+set(PG_LIBRARIES "")
+set(PG_INCLUDE_DIRS "")
+if(NOT TARGET pg_lib)
+    add_library(pg_lib INTERFACE IMPORTED)
+endif()
