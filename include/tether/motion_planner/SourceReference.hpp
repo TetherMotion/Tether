@@ -37,6 +37,7 @@
 #include <vector>
 #include <optional>
 #include <memory>
+#include <algorithm>
 
 namespace MotionPlanner {
 

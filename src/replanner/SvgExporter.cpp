@@ -913,4 +913,127 @@ std::vector<std::string> SvgExporter::exportAllKdePlots(
     return renderer.exportAll(outputDir, filePrefix, kde);
 }
 
+//=============================================================================
+// ReNURBS Profile Rendering
+//=============================================================================
+
+void SvgExporter::renderReNurbsQuantity(
+    std::ostream& out, int svgW, int svgH,
+    const tether::motion::profile_renurbs::ReNurbsProfile& renurbs,
+    tether::motion::profile_renurbs::SegmentViolation::Quantity quantity,
+    const std::string& title,
+    const std::string& yLabel) const {
+
+    using namespace tether::motion::profile_renurbs;
+
+    // Collect points from all segments
+    std::vector<std::pair<double,double>> points;
+    std::vector<std::pair<double,double>> segmentBoundaries;
+
+    for (const auto& seg : renurbs.perSegment) {
+        const auto& curveOpt =
+            (quantity == SegmentViolation::Quantity::Velocity)   ? seg.velocity.curve :
+            (quantity == SegmentViolation::Quantity::Acceleration)? seg.acceleration.curve :
+            (quantity == SegmentViolation::Quantity::Jerk)       ? seg.jerk.curve :
+                                                                     seg.time.curve;
+        if (!curveOpt.has_value()) continue;
+        const auto& curve = curveOpt.value();
+
+        double sStart = seg.sStart;
+        double sEnd = seg.sEnd;
+        double segLen = sEnd - sStart;
+        if (segLen <= 0) continue;
+
+        double uMin = curve.knotMin();
+        double uMax = curve.knotMax();
+        int nEval = 100;
+        for (int k = 0; k <= nEval; ++k) {
+            double u = static_cast<double>(k) / nEval;
+            double uu = uMin + u * (uMax - uMin);
+            double s = sStart + u * segLen;
+            double val = curve.evaluate(uu)[0];
+            points.emplace_back(s, val);
+        }
+        segmentBoundaries.emplace_back(sEnd, 0);
+    }
+
+    if (points.empty()) return;
+
+    AxisBounds bounds = computeBounds(points);
+    // Ensure y includes 0 for reference
+    if (bounds.minY > 0) bounds.minY = 0;
+    if (bounds.maxY < 0) bounds.maxY = 0;
+
+    auto transformPts = [&](const std::vector<std::pair<double,double>>& pts) {
+        std::vector<std::pair<double,double>> result;
+        for (const auto& [x, y] : pts) {
+            result.push_back(transform(x, y, bounds, svgW, svgH, config_.margin));
+        }
+        return result;
+    };
+
+    renderGrid(out, bounds, svgW, svgH, config_.margin);
+    renderAxes(out, bounds, svgW, svgH, config_.margin, "Arc Length (mm)", yLabel);
+    renderTitle(out, title, svgW, config_.margin);
+
+    // Draw segment boundaries as dashed vertical lines
+    for (const auto& [sx, sy] : segmentBoundaries) {
+        if (sx >= bounds.maxX) continue; // skip the last boundary
+        auto [px1, py1] = transform(sx, bounds.minY, bounds, svgW, svgH, config_.margin);
+        auto [px2, py2] = transform(sx, bounds.maxY, bounds, svgW, svgH, config_.margin);
+        writeDashedLine(out, px1, py1, px2, py2, "#888888", 1);
+    }
+
+    // Draw the NURBS curve as a polyline
+    writePolyline(out, transformPts(points), config_.desiredColor, config_.lineWidth);
+}
+
+bool SvgExporter::exportReNurbsProfile(
+    const std::string& filename,
+    const tether::motion::profile_renurbs::ReNurbsProfile& renurbs) const {
+
+    if (renurbs.empty()) return false;
+
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+
+    int totalW = config_.width;
+    int totalH = config_.height * 4; // 4 sub-plots stacked
+    int subH = config_.height;
+    int subW = totalW;
+
+    writeHeader(file, totalW, totalH);
+    writeBackground(file, totalW, totalH);
+
+    int yOffset = 0;
+
+    // Velocity
+    renderReNurbsQuantity(file, subW, subH, renurbs,
+        tether::motion::profile_renurbs::SegmentViolation::Quantity::Velocity,
+        "ReNURBS Velocity Profile", "Velocity (mm/s)");
+    yOffset += subH;
+
+    // For subsequent plots, we need to offset the y-coordinates.
+    // Since the canvas doesn't support offsets directly, we'll write
+    // each plot in its own SVG group with a transform.
+    auto writeSubPlot = [&](const std::string& title,
+                            const std::string& yLabel,
+                            tether::motion::profile_renurbs::SegmentViolation::Quantity q) {
+        file << "<g transform=\"translate(0," << yOffset << ")\">\n";
+        renderReNurbsQuantity(file, subW, subH, renurbs, q, title, yLabel);
+        file << "</g>\n";
+        yOffset += subH;
+    };
+
+    writeSubPlot("ReNURBS Acceleration Profile", "Acceleration (mm/s²)",
+                 tether::motion::profile_renurbs::SegmentViolation::Quantity::Acceleration);
+    writeSubPlot("ReNURBS Jerk Profile", "Jerk (mm/s³)",
+                 tether::motion::profile_renurbs::SegmentViolation::Quantity::Jerk);
+    writeSubPlot("ReNURBS Time Profile", "Time (s)",
+                 tether::motion::profile_renurbs::SegmentViolation::Quantity::Time);
+
+    writeFooter(file);
+    return true;
+}
+
 } // namespace MotionReplanner

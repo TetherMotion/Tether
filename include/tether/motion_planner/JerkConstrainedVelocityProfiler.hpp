@@ -264,6 +264,12 @@ public:
             }
             pt.time = currentTime;
 
+            // Store the velocity and acceleration limits used by the
+            // profiler, so downstream consumers (ReNURBS) can check
+            // constraint preservation against the exact limits.
+            pt.velocityLimit = vLim[i];
+            pt.accelerationLimit = aMax;
+
             // Compute acceleration and jerk from the velocity profile.
             // Since the forward/backward passes use jerk-limited distance
             // functions, the acceleration is continuous and jerk is bounded.

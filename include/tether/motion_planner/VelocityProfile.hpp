@@ -41,6 +41,7 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <optional>
 
 namespace MotionPlanner {
@@ -191,7 +192,18 @@ struct VelocityProfilePoint {
     
     /// Time to reach this point from path start
     T time = T(0);
-    
+
+    /// Velocity limit at this point (the v_lim(s) used by the profiler).
+    /// Populated by the profiler so downstream consumers (e.g. ReNURBS)
+    /// can check constraint preservation against the *exact* limits the
+    /// profiler used, without reconstructing them. Default +infinity so
+    /// hand-built profiles (e.g. in tests) remain unconstrained.
+    T velocityLimit = std::numeric_limits<T>::infinity();
+
+    /// Tangential acceleration limit at this point (the a_max(s) used by
+    /// the profiler). Default +infinity for backward compatibility.
+    T accelerationLimit = std::numeric_limits<T>::infinity();
+
     /// Limiting factor (for debugging)
     enum class LimitType : uint8_t {
         None,
@@ -577,7 +589,13 @@ public:
             }
             
             pt.time = currentTime;
-            
+
+            // Store the velocity and acceleration limits used by the
+            // profiler, so downstream consumers (ReNURBS) can check
+            // constraint preservation against the exact limits.
+            pt.velocityLimit = velocityLimit[i];
+            pt.accelerationLimit = computeMaxAcceleration(samples[i], pt.velocity);
+
             // Compute acceleration
             if (i == 0) {
                 pt.acceleration = startAcceleration;
@@ -589,7 +607,7 @@ public:
                     pt.acceleration = (pt.velocity - prevVel) / dt;
                 }
             }
-            
+
             profile.addPoint(pt);
         }
         

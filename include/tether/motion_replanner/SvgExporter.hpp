@@ -44,6 +44,7 @@
 #include "tether/motion_replanner/PathRelativeFFT.hpp"
 #include "tether/motion_replanner/KdeDerivativeAnalyzer.hpp"
 #include "tether/motion_replanner/SvgCanvas.hpp"
+#include "tether/motion_planner/profile_renurbs/ReNurbsProfile.hpp"
 
 #include <string>
 #include <vector>
@@ -265,6 +266,17 @@ public:
         const std::string& filePrefix,
         const tether::motion::replanner::KdeEvaluation& kde) const;
 
+    //--- ReNURBS profile export ---
+
+    /// Export a ReNURBS profile (analytical v(s), a(s), j(s), t(s) curves)
+    /// as an SVG file with four sub-plots.
+    ///
+    /// @param filename Output .svg filename.
+    /// @param renurbs The ReNURBS profile to visualize.
+    /// @return True if file was written successfully.
+    bool exportReNurbsProfile(const std::string& filename,
+                              const tether::motion::profile_renurbs::ReNurbsProfile& renurbs) const;
+
     const SvgConfig& config() const { return config_; }
     void setConfig(const SvgConfig& config) { config_ = config; canvas_.updateConfig(config_); }
 
@@ -363,6 +375,16 @@ private:
     void renderPhasePortrait(std::ostream& out,
                              int svgW, int svgH,
                              const std::vector<GCodeExport::TrajectorySample>& actual) const;
+
+    //--- ReNURBS profile renderer ---
+
+    /// Render a single ReNURBS quantity curve (v, a, j, or t) as an SVG
+    /// polyline by evaluating the NURBS on a fine grid.
+    void renderReNurbsQuantity(std::ostream& out, int svgW, int svgH,
+                               const tether::motion::profile_renurbs::ReNurbsProfile& renurbs,
+                               tether::motion::profile_renurbs::SegmentViolation::Quantity quantity,
+                               const std::string& title,
+                               const std::string& yLabel) const;
 
     //--- KDE renderers ---
 
