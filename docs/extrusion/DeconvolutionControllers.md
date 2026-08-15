@@ -3,39 +3,35 @@
 ## Overview
 
 The `LTIFrequencyDomainDeconvolver` is the baseline deconvolution controller.
-Given a measured LTI impulse response `h[n]` and a target output trajectory
-`y_tgt[n]`, it computes the required input `x_req[n]` such that the convolution
-`(x_req * h)[n]` approximates `y_tgt[n]`.
+Given a measured LTI impulse response $h[n]$ and a target output trajectory
+$y_{\text{tgt}}[n]$, it computes the required input $x_{\text{req}}[n]$ such that the convolution
+$(x_{\text{req}} * h)[n]$ approximates $y_{\text{tgt}}[n]$.
 
 In the frequency domain, convolution becomes multiplication:
 
-```
-Y[k] = H[k] · X[k]
-```
+$$ Y[k] = H[k] \cdot X[k] $$
 
-Naive inversion `X[k] = Y[k] / H[k]` is ill-posed because `|H[k]| → 0` at
+Naive inversion $X[k] = Y[k] / H[k]$ is ill-posed because $|H[k]| \to 0$ at
 high frequencies (the system is low-pass).  Tikhonov regularization
 stabilises the inversion:
 
-```
-X_req[k] = Y_tgt[k] · H*[k] / (|H[k]|² + λ)
-```
+$$ X_{\text{req}}[k] = \frac{Y_{\text{tgt}}[k] \cdot H^*[k]}{|H[k]|^2 + \lambda} $$
 
-where `λ > 0` is the regularization parameter.  This is equivalent to the
-Wiener filter when `λ` represents the noise-to-signal ratio.
+where $\lambda > 0$ is the regularization parameter.  This is equivalent to the
+Wiener filter when $\lambda$ represents the noise-to-signal ratio.
 
 ## Algorithm
 
-1. **Zero-padding**: Pad `h` and `y_tgt` to length `N ≥ L_y + L_h − 1`
+1. **Zero-padding**: Pad $h$ and $y_{\text{tgt}}$ to length $N \geq L_y + L_h - 1$
    (next power of 2 for FFT efficiency) to prevent circular-convolution
    artifacts (time-aliasing).
-2. **Forward FFT**: Compute `H[k] = FFT(h_padded)` and
-   `Y_tgt[k] = FFT(y_tgt_padded)`.
+2. **Forward FFT**: Compute $H[k] = \text{FFT}(h_{\text{padded}})$ and
+   $Y_{\text{tgt}}[k] = \text{FFT}(y_{\text{tgt,padded}})$.
 3. **Regularized division**:
-   `X_req[k] = Y_tgt[k] · conj(H[k]) / (|H[k]|² + λ)`.
-4. **Inverse FFT**: `x_req_padded[n] = IFFT(X_req[k])`.
-5. **Truncation & shift**: Extract the first `L_y` real values, shifted left
-   by the group delay (peak index of `h[n]`) for causal alignment.
+   $X_{\text{req}}[k] = Y_{\text{tgt}}[k] \cdot \text{conj}(H[k]) / (|H[k]|^2 + \lambda)$.
+4. **Inverse FFT**: $x_{\text{req,padded}}[n] = \text{IFFT}(X_{\text{req}}[k])$.
+5. **Truncation & shift**: Extract the first $L_y$ real values, shifted left
+   by the group delay (peak index of $h[n]$) for causal alignment.
 
 ## API
 
@@ -66,7 +62,7 @@ auto x = deconv.deconvolve(y_tgt, h);
 
 | Parameter          | Type   | Default | Description                              |
 |--------------------|--------|---------|------------------------------------------|
-| `lambda`           | double | `1e-6`  | Tikhonov regularization parameter λ > 0  |
+| `lambda`           | double | `1e-6`  | Tikhonov regularization parameter $\lambda > 0$  |
 | `padToPowerOfTwo`  | bool   | `true`  | Pad to next power of 2 for FFT efficiency|
 
 ### Key methods
@@ -74,23 +70,23 @@ auto x = deconv.deconvolve(y_tgt, h);
 | Method                      | Description                              |
 |-----------------------------|------------------------------------------|
 | `setImpulseResponse(h)`     | Set the measured LTI impulse response    |
-| `precomputeInverseFilter()` | Build the regularized inverse `h_inv[n]` |
+| `precomputeInverseFilter()` | Build the regularized inverse $h_{\text{inv}}[n]$ |
 | `deconvolve(y_tgt)`         | Deconvolve using precomputed inverse     |
 | `deconvolve(y_tgt, h)`      | One-shot: set h, precompute, deconvolve  |
-| `setLambda(λ)`              | Update λ and recompute the inverse       |
-| `groupDelay()`              | Peak index of `h[n]` (causal alignment)  |
-| `inverseFilter()`           | Read-only access to `h_inv[n]`           |
+| `setLambda($\lambda$)`      | Update $\lambda$ and recompute the inverse       |
+| `groupDelay()`              | Peak index of $h[n]$ (causal alignment)  |
+| `inverseFilter()`           | Read-only access to $h_{\text{inv}}[n]$           |
 | `reset()`                   | Clear all state                          |
 
 ## Tuning Guide
 
-### Choosing λ
+### Choosing $\lambda$
 
-The regularization parameter `λ` is the single most important knob.  It
-balances **tracking accuracy** (small `λ`) against **noise rejection**
-(large `λ`).
+The regularization parameter $\lambda$ is the single most important knob.  It
+balances **tracking accuracy** (small $\lambda$) against **noise rejection**
+(large $\lambda$).
 
-| λ range     | Behaviour                                   | When to use          |
+| $\lambda$ range | Behaviour                                   | When to use          |
 |-------------|---------------------------------------------|----------------------|
 | `1e-10`     | Near-exact inversion; amplifies noise       | Clean signals, identity-like `h` |
 | `1e-8`–`1e-6` | Good tracking with moderate noise rejection | Default starting point |
@@ -99,16 +95,16 @@ balances **tracking accuracy** (small `λ`) against **noise rejection**
 
 **Tuning procedure:**
 
-1. Start with `λ = 1e-6`.
+1. Start with $\lambda = 1\text{e-}6$.
 2. Record a known input `x`, convolve with `h` to get `y`, then deconvolve.
 3. Compare `x_req` to `x`:
-   - If `x_req` is noisy/oscillatory → increase `λ` by 10×.
-   - If `x_req` is too smooth (lags `x` at edges) → decrease `λ` by 10×.
+   - If `x_req` is noisy/oscillatory → increase $\lambda$ by 10×.
+   - If `x_req` is too smooth (lags `x` at edges) → decrease $\lambda$ by 10×.
 4. Iterate until the tracking error in the region of interest is acceptable.
 
 ### Group delay alignment
 
-The deconvolver automatically shifts the output by the peak index of `h[n]`
+The deconvolver automatically shifts the output by the peak index of $h[n]$
 to align the command causally.  If your impulse response has a non-obvious
 peak (e.g., a delayed resonance), verify that `groupDelay()` returns the
 expected value.  You can override the shift by post-processing the output.
@@ -116,7 +112,7 @@ expected value.  You can override the shift by post-processing the output.
 ### FFT size
 
 When `padToPowerOfTwo = true` (default), the FFT size is the next power of 2
-≥ `L_y + L_h − 1`.  This is optimal for most FFT backends.  Disable it only
+$\geq L_y + L_h - 1$.  This is optimal for most FFT backends.  Disable it only
 if you need exact-length convolution and are using a backend that handles
 non-power-of-2 sizes efficiently.
 
@@ -142,10 +138,10 @@ recomputes the inverse filter every call.
 - **LTI assumption**: The impulse response must be constant.  If the system
   varies with a scheduling parameter (e.g., speed-dependent viscosity), use
   one of the LPV variants instead.
-- **Causality**: The shift by group delay assumes the peak of `h[n]`
+- **Causality**: The shift by group delay assumes the peak of $h[n]$
   represents the dominant delay.  Systems with significant pre-ring (non-
   minimum phase) may require additional delay compensation.
-- **Edge effects**: The first and last `L_h` samples of `x_req` are less
+- **Edge effects**: The first and last $L_h$ samples of `x_req` are less
   accurate due to the zero-padding boundary.  In practice, discard or
   weight these samples less.
 

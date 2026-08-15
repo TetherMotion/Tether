@@ -11,7 +11,7 @@
  *   Bang-bang acceleration; no jerk limiting. Fastest possible trajectory
  *   but acceleration is discontinuous at constraint switching points.
  *
- * - **JerkLimitedVelocityProfiler** (jerk-integrated TOPP-RA): 3rd-order
+ * - **JerkConstrainedVelocityProfiler** (jerk-integrated TOPP-RA): 3rd-order
  *   time-optimal profile with jerk as a first-class constraint inside the
  *   optimizer. Acceleration is continuous; jerk is bounded by j_max.
  *   Slightly slower than basic TOPP-RA (jerk limiting costs time) but
@@ -33,7 +33,7 @@
  * smoothing of a TOPP-RA profile breaks both optimality and feasibility —
  * the smoothed trajectory was never checked against the curvature/centripetal/
  * per-axis constraints that TOPP-RA verified. By making jerk a constraint
- * in the JerkLimitedVelocityProfiler, we get smooth trajectories that are
+ * in the JerkConstrainedVelocityProfiler, we get smooth trajectories that are
  * still guaranteed feasible.
  *
  * The SCurveVelocityProfiler is provided as an alternative for users who
@@ -64,7 +64,7 @@ enum class ProfilerType : uint8_t {
     /// Basic 2nd-order TOPP-RA (bang-bang acceleration, no jerk limit)
     ToppraBasic,
     /// 3rd-order TOPP-RA with jerk constraints inside the optimizer
-    ToppraJerkLimited,
+    ToppraJerkConstrained,
     /// Basic per-piece S-curve (jerk-limited but not time-optimal)
     SCurve,
 };

@@ -63,10 +63,25 @@ PiecewiseNurbsPath  (lazy arc length, certified derivatives)
     ▼
 BlendedPath  (new piece sequence + audit trail)
     │
-    │  VelocityProfile (Phase 5)
+    │  IVelocityProfiler::computeProfile (Phase 5)
+    │   ├─ VelocityProfiler        (ToppraBasic: 2nd-order, bang-bang)
+    │   ├─ JerkConstrainedVelocityProfiler (ToppraJerkConstrained: 3rd-order)
+    │   └─ SCurveVelocityProfiler  (SCurve: per-piece S-curves)
     ▼
-Time-parameterized trajectory → SCurveProfile → MotionPlan::evaluateAt
+VelocityProfile  (tabulated v(s) with accel + jerk)
+    │
+    │  MotionPlanBuilder::build → MotionPlan
+    ▼
+MotionPlan::evaluateAt(t) → MotionState
+    │
+    │  MotionTranslator::translate
+    ▼
+AxisStepSequence[]  → StepScheduler → real-time step execution
 ```
+
+See [MotionChain.md](MotionChain.md) for the full pipeline description
+and [VelocityProfilerSelection.md](VelocityProfilerSelection.md) for
+choosing between the three profilers.
 
 ---
 
@@ -172,6 +187,10 @@ explicit and documented (no "magic 1e-6").
 
 | Document | Scope |
 |---|---|
+| [MotionChain.md](MotionChain.md) | Top-level pipeline: G-code → parsing → blending → profiling → execution |
+| [VelocityProfilerSelection.md](VelocityProfilerSelection.md) | Choosing between ToppraBasic, ToppraJerkConstrained, and SCurve |
+| [CertificationPath.md](CertificationPath.md) | Hausdorff/Lipschitz certification for continuity and tolerance |
+| [ToppraDerivation.md](ToppraDerivation.md) | TOPP-RA and jerk-limited profiling mathematical derivation |
 | `GeometryFoundations.md` | Phase 1 math (G.1-G.26, P0-P5) |
 | `BlendingAlgorithm.md` | Phase 2-3 math (M11-M20, T1-T3, L1-L2) |
 | `AlgorithmComparison.md` | Why-this vs rejected alternatives |
