@@ -160,7 +160,19 @@ cmake --build build --target tether_klipper_tests -j$(nproc)
 
 ### Key source files
 
-- `include/tether/control/extrusion/` — Rheology models, PA models, thermal observer, flow-adaptive heater
+- `include/tether/control/extrusion/` — Rheology models, PA models, thermal observer, flow-adaptive heater, deconvolution controllers
 - `include/tether/klipper/motion/ExtrusionFlowTracker.hpp` — Shared flow tap
 - `include/tether/klipper/motion/MotionTranslator.hpp` — PA offset application (3 models)
 - `include/tether/klipper/objects/Thermal.hpp` — Heater flow-compensation hook
+
+## LTI and LPV Deconvolution Controllers
+
+Four deconvolution controllers for extrusion feedforward compensation:
+
+- `LTIFrequencyDomainDeconvolver` — Baseline regularized spectral deconvolution (Tikhonov/Wiener)
+- `OverlapAddLPVDeconvolver` — Gain-scheduled overlap-add for host-side planning
+- `ARXLPVInverseFilter` — Time-domain IIR inverse for bare-metal MCU streaming
+- `StateSpaceLPVInputEstimator` — State-space input estimation with Tikhonov-regularized matrix inversion
+
+See `docs/extrusion/DeconvolutionControllers.md` and
+`docs/extrusion/LPVDeconvolution.md` for full documentation and tuning guides.

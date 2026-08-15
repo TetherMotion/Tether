@@ -28,6 +28,8 @@ Welcome to the Tether library documentation. Tether is a modular C++ library for
    extrusion/NonNewtonianPressureAdvance
    extrusion/FlowAdaptiveTemperatureControl
    extrusion/RheologyModels
+   extrusion/DeconvolutionControllers
+   extrusion/LPVDeconvolution
    GLOBAL_STATE
 
 Overview
