@@ -176,3 +176,16 @@ Four deconvolution controllers for extrusion feedforward compensation:
 
 See `docs/extrusion/DeconvolutionControllers.md` and
 `docs/extrusion/LPVDeconvolution.md` for full documentation and tuning guides.
+
+### Klipper integration
+
+The deconvolution controllers are fully integrated into the Klipper layer:
+
+- **Config**: `[extruder]` keys `deconvolution_controller`, `deconvolution_enabled`,
+  `deconvolution_lambda`, `lti_pad_to_power_of_two`, `overlap_add_block_size`,
+  `overlap_add_overlap_ratio`, `arx_na`, `arx_nb`, `state_space_state_dim`,
+  `state_space_input_dim`, `state_space_output_dim`
+- **G-code**: `SET_DECONVOLUTION_CONTROLLER ENABLE=1 CONTROLLER=lti_freq LAMBDA=0.001`
+- **Status object**: `deconvolution` exposes `controller`, `enabled`, `lambda`
+- **Accessors**: `KlippyInstance::ltiDeconvolver()`, `overlapAddDeconvolver()`,
+  `arxInverseFilter()`, `stateSpaceEstimator()`, `applyDeconvolutionSettings()`

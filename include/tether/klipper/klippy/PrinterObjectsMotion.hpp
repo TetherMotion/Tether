@@ -106,6 +106,34 @@ private:
     double smoothTime_ = 0.040;
     std::string model_ = "linear";
 };
+
+/// @brief Deconvolution feedforward controller printer object (deconvolution).
+class DeconvolutionObject : public PrinterObject {
+public:
+    std::string name() const override { return "deconvolution"; }
+
+    std::map<std::string, JsonValue> status(
+        const std::vector<std::string>& fields) const override {
+        auto s = buildStatus(fields);
+        s.add("controller", JsonValue(controller_));
+        s.add("enabled", JsonValue(enabled_));
+        s.add("lambda", JsonValue(lambda_));
+        return std::move(s).take();
+    }
+
+    std::vector<std::string> availableFields() const override {
+        return {"controller", "enabled", "lambda"};
+    }
+
+    void setController(const std::string& c) { controller_ = c; }
+    void setEnabled(bool e) { enabled_ = e; }
+    void setLambda(double l) { lambda_ = l; }
+
+private:
+    std::string controller_ = "none";
+    bool enabled_ = false;
+    double lambda_ = 1e-6;
+};
 #endif // TETHER_ENABLE_PRESSURE_ADVANCE
 
 /// @brief Force move printer object (force_move).

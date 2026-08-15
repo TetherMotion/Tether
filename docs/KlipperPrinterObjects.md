@@ -144,6 +144,7 @@ Object                       Description                                 Fields
 ===========================  ===========================================  ==================================
 ``input_shaper``             Input shaper config                         shaper_type_x, shaper_freq_x, shaper_type_y, shaper_freq_y
 ``pressure_advance``         Pressure advance state                      pressure_advance, smooth_time, model
+``deconvolution``           Deconvolution feedforward controller        controller, enabled, lambda
 ``skew_correction``          Skew correction state                       x_factor, y_factor, xy_factor, max_skew, current_skew
 ``exclude_object``           Exclude object state                        objects, excluded_objects, current_object
 ``firmware_retraction``      Firmware retraction                         retract_length, retract_speed, unretract_extra_length, unretract_speed, z_hop, is_retracted

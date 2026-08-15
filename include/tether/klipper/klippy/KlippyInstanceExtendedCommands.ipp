@@ -1056,6 +1056,49 @@
             respond("// heater_flow_compensation: enable=" + std::to_string(enable ? 1 : 0) + "\n");
             return true;
         }
+
+        if (cmd == "SET_DECONVOLUTION_CONTROLLER") {
+            // Toggle / tune the deconvolution feedforward controller.
+            // Args: ENABLE=0|1, CONTROLLER=none|lti_freq|overlap_add_lpv|arx_lpv|statespace_lpv,
+            //       LAMBDA=, PAD_TO_POWER_OF_TWO=0|1,
+            //       BLOCK_SIZE=, OVERLAP_RATIO=,
+            //       ARX_NA=, ARX_NB=,
+            //       STATE_DIM=, INPUT_DIM=, OUTPUT_DIM=
+            bool enable = g.getNamedInt("ENABLE", 0) != 0;
+            settings_.deconvolutionEnabled = enable;
+            std::string controller = g.getNamed("CONTROLLER", "");
+            if (!controller.empty()) {
+                settings_.deconvolutionController = controller;
+            }
+            if (g.hasNamed("LAMBDA"))
+                settings_.deconvolutionLambda = g.getNamedDouble("LAMBDA", settings_.deconvolutionLambda);
+            if (g.hasNamed("PAD_TO_POWER_OF_TWO"))
+                settings_.ltiPadToPowerOfTwo = g.getNamedInt("PAD_TO_POWER_OF_TWO", 1) != 0;
+            if (g.hasNamed("BLOCK_SIZE"))
+                settings_.overlapAddBlockSize = g.getNamedInt("BLOCK_SIZE", settings_.overlapAddBlockSize);
+            if (g.hasNamed("OVERLAP_RATIO"))
+                settings_.overlapAddOverlapRatio = g.getNamedDouble("OVERLAP_RATIO", settings_.overlapAddOverlapRatio);
+            if (g.hasNamed("ARX_NA"))
+                settings_.arxNa = g.getNamedInt("ARX_NA", settings_.arxNa);
+            if (g.hasNamed("ARX_NB"))
+                settings_.arxNb = g.getNamedInt("ARX_NB", settings_.arxNb);
+            if (g.hasNamed("STATE_DIM"))
+                settings_.stateSpaceStateDim = g.getNamedInt("STATE_DIM", settings_.stateSpaceStateDim);
+            if (g.hasNamed("INPUT_DIM"))
+                settings_.stateSpaceInputDim = g.getNamedInt("INPUT_DIM", settings_.stateSpaceInputDim);
+            if (g.hasNamed("OUTPUT_DIM"))
+                settings_.stateSpaceOutputDim = g.getNamedInt("OUTPUT_DIM", settings_.stateSpaceOutputDim);
+            applyDeconvolutionSettings();
+            if (deconvolutionObj_) {
+                deconvolutionObj_->setLambda(settings_.deconvolutionLambda);
+            }
+            std::string msg = "// deconvolution_controller: enable=" +
+                              std::to_string(enable ? 1 : 0) +
+                              " controller=" + settings_.deconvolutionController +
+                              " lambda=" + std::to_string(settings_.deconvolutionLambda) + "\n";
+            respond(msg);
+            return true;
+        }
 #endif
 
         if (cmd == "SET_INPUT_SHAPER") {

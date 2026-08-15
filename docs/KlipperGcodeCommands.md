@@ -170,6 +170,7 @@ Command                           Description                                   
 ``SET_EXTRUDER_STEP_DISTANCE``    Set step distance                                  EXTRUDER, DISTANCE
 ``SET_PRESSURE_ADVANCE``          Set pressure advance                               ADVANCE, SMOOTH_TIME, MODEL, FLOW_INDEX, CONSISTENCY
 ``SET_HEATER_FLOW_COMPENSATION``  Toggle flow-adaptive heater compensation           ENABLE, FILAMENT_HEAT_CAPACITY, MELT_ZONE_CAPACITANCE, HEATER_MELT_CONDUCTANCE, DEBT_TIME_CONSTANT, MAX_PRE_EMPHASIS_POWER, MAX_POST_EMPHASIS_POWER, MAX_HEATER_OVERSHOOT
+``SET_DECONVOLUTION_CONTROLLER``  Configure deconvolution feedforward controller     ENABLE, CONTROLLER, LAMBDA, PAD_TO_POWER_OF_TWO, BLOCK_SIZE, OVERLAP_RATIO, ARX_NA, ARX_NB, STATE_DIM, INPUT_DIM, OUTPUT_DIM
 ``SYNC_EXTRUDER_STEPPER``         Sync extruder to stepper                           EXTRUDER, STEPPER
 ================================  =================================================  ==================================
 

@@ -435,4 +435,148 @@ TEST_F(KlippyExtrusionInstanceTest, SetHeaterFlowCompensationTuning) {
     EXPECT_NEAR(instance_->settings().maxHeaterOvershoot, 12.0, 1e-9);
 }
 
+// ============================================================================
+// Deconvolution controller: config parsing
+// ============================================================================
+
+TEST(KlipperExtrusionCompensation, ConfigParsesDeconvolutionKeys) {
+    std::string cfgPath = "/tmp/tether_test_deconv_cfg_" +
+                          std::to_string(getpid()) + ".cfg";
+    {
+        std::ofstream f(cfgPath);
+        f << "[extruder]\n"
+          << "nozzle_diameter: 0.4\n"
+          << "filament_diameter: 1.75\n"
+          << "deconvolution_controller: lti_freq\n"
+          << "deconvolution_enabled: true\n"
+          << "deconvolution_lambda: 0.0001\n"
+          << "lti_pad_to_power_of_two: false\n"
+          << "overlap_add_block_size: 128\n"
+          << "overlap_add_overlap_ratio: 0.75\n"
+          << "arx_na: 3\n"
+          << "arx_nb: 2\n"
+          << "state_space_state_dim: 4\n"
+          << "state_space_input_dim: 2\n"
+          << "state_space_output_dim: 2\n";
+    }
+    klippy::KlippyInstanceConfig cfg;
+    klippy::KlippyInstance instance(cfg);
+    ASSERT_TRUE(instance.loadConfig(cfgPath));
+    const auto& s = instance.settings();
+    EXPECT_EQ(s.deconvolutionController, "lti_freq");
+    EXPECT_TRUE(s.deconvolutionEnabled);
+    EXPECT_NEAR(s.deconvolutionLambda, 0.0001, 1e-12);
+    EXPECT_FALSE(s.ltiPadToPowerOfTwo);
+    EXPECT_EQ(s.overlapAddBlockSize, 128);
+    EXPECT_NEAR(s.overlapAddOverlapRatio, 0.75, 1e-9);
+    EXPECT_EQ(s.arxNa, 3);
+    EXPECT_EQ(s.arxNb, 2);
+    EXPECT_EQ(s.stateSpaceStateDim, 4);
+    EXPECT_EQ(s.stateSpaceInputDim, 2);
+    EXPECT_EQ(s.stateSpaceOutputDim, 2);
+    std::filesystem::remove(cfgPath);
+}
+
+// ============================================================================
+// Deconvolution controller: G-code command
+// ============================================================================
+
+TEST_F(KlippyExtrusionInstanceTest, SetDeconvolutionControllerLtiFreq) {
+    EXPECT_TRUE(instance_->executeGcode(
+        "SET_DECONVOLUTION_CONTROLLER ENABLE=1 CONTROLLER=lti_freq LAMBDA=0.001"));
+    EXPECT_EQ(instance_->settings().deconvolutionController, "lti_freq");
+    EXPECT_TRUE(instance_->settings().deconvolutionEnabled);
+    EXPECT_NEAR(instance_->settings().deconvolutionLambda, 0.001, 1e-12);
+    // The controller should be built.
+    ASSERT_NE(instance_->ltiDeconvolver(), nullptr);
+    // Other controllers should not be built.
+    EXPECT_EQ(instance_->overlapAddDeconvolver(), nullptr);
+    EXPECT_EQ(instance_->arxInverseFilter(), nullptr);
+    EXPECT_EQ(instance_->stateSpaceEstimator(), nullptr);
+}
+
+TEST_F(KlippyExtrusionInstanceTest, SetDeconvolutionControllerOverlapAdd) {
+    EXPECT_TRUE(instance_->executeGcode(
+        "SET_DECONVOLUTION_CONTROLLER ENABLE=1 CONTROLLER=overlap_add_lpv "
+        "BLOCK_SIZE=128 OVERLAP_RATIO=0.75"));
+    EXPECT_EQ(instance_->settings().deconvolutionController, "overlap_add_lpv");
+    EXPECT_TRUE(instance_->settings().deconvolutionEnabled);
+    EXPECT_EQ(instance_->settings().overlapAddBlockSize, 128);
+    EXPECT_NEAR(instance_->settings().overlapAddOverlapRatio, 0.75, 1e-9);
+    ASSERT_NE(instance_->overlapAddDeconvolver(), nullptr);
+    EXPECT_EQ(instance_->ltiDeconvolver(), nullptr);
+}
+
+TEST_F(KlippyExtrusionInstanceTest, SetDeconvolutionControllerArx) {
+    EXPECT_TRUE(instance_->executeGcode(
+        "SET_DECONVOLUTION_CONTROLLER ENABLE=1 CONTROLLER=arx_lpv "
+        "ARX_NA=3 ARX_NB=2"));
+    EXPECT_EQ(instance_->settings().deconvolutionController, "arx_lpv");
+    EXPECT_TRUE(instance_->settings().deconvolutionEnabled);
+    EXPECT_EQ(instance_->settings().arxNa, 3);
+    EXPECT_EQ(instance_->settings().arxNb, 2);
+    ASSERT_NE(instance_->arxInverseFilter(), nullptr);
+    EXPECT_EQ(instance_->ltiDeconvolver(), nullptr);
+}
+
+TEST_F(KlippyExtrusionInstanceTest, SetDeconvolutionControllerStateSpace) {
+    EXPECT_TRUE(instance_->executeGcode(
+        "SET_DECONVOLUTION_CONTROLLER ENABLE=1 CONTROLLER=statespace_lpv "
+        "STATE_DIM=3 INPUT_DIM=1 OUTPUT_DIM=1 LAMBDA=0.0001"));
+    EXPECT_EQ(instance_->settings().deconvolutionController, "statespace_lpv");
+    EXPECT_TRUE(instance_->settings().deconvolutionEnabled);
+    EXPECT_EQ(instance_->settings().stateSpaceStateDim, 3);
+    EXPECT_NEAR(instance_->settings().deconvolutionLambda, 0.0001, 1e-12);
+    ASSERT_NE(instance_->stateSpaceEstimator(), nullptr);
+    EXPECT_EQ(instance_->ltiDeconvolver(), nullptr);
+}
+
+TEST_F(KlippyExtrusionInstanceTest, SetDeconvolutionControllerDisable) {
+    // Enable first, then disable.
+    EXPECT_TRUE(instance_->executeGcode(
+        "SET_DECONVOLUTION_CONTROLLER ENABLE=1 CONTROLLER=lti_freq"));
+    ASSERT_NE(instance_->ltiDeconvolver(), nullptr);
+    EXPECT_TRUE(instance_->executeGcode(
+        "SET_DECONVOLUTION_CONTROLLER ENABLE=0"));
+    EXPECT_FALSE(instance_->settings().deconvolutionEnabled);
+    EXPECT_EQ(instance_->ltiDeconvolver(), nullptr);
+}
+
+TEST_F(KlippyExtrusionInstanceTest, SetDeconvolutionControllerSwitchType) {
+    // Start with LTI, switch to ARX — LTI should be torn down.
+    EXPECT_TRUE(instance_->executeGcode(
+        "SET_DECONVOLUTION_CONTROLLER ENABLE=1 CONTROLLER=lti_freq"));
+    ASSERT_NE(instance_->ltiDeconvolver(), nullptr);
+    EXPECT_TRUE(instance_->executeGcode(
+        "SET_DECONVOLUTION_CONTROLLER ENABLE=1 CONTROLLER=arx_lpv"));
+    EXPECT_EQ(instance_->ltiDeconvolver(), nullptr);
+    ASSERT_NE(instance_->arxInverseFilter(), nullptr);
+}
+
+// ============================================================================
+// Deconvolution controller: printer object status
+// ============================================================================
+
+TEST_F(KlippyExtrusionInstanceTest, DeconvolutionObjectStatus) {
+    EXPECT_TRUE(instance_->executeGcode(
+        "SET_DECONVOLUTION_CONTROLLER ENABLE=1 CONTROLLER=lti_freq LAMBDA=0.002"));
+    auto result = instance_->server().queryObjects({{"deconvolution", {}}});
+    ASSERT_TRUE(result.count("deconvolution") > 0);
+    const auto& status = result["deconvolution"];
+    ASSERT_TRUE(status.count("controller") > 0);
+    EXPECT_EQ(status.at("controller").asString(), "lti_freq");
+    ASSERT_TRUE(status.count("enabled") > 0);
+    EXPECT_TRUE(status.at("enabled").asBool());
+    ASSERT_TRUE(status.count("lambda") > 0);
+    EXPECT_NEAR(status.at("lambda").asDouble(), 0.002, 1e-12);
+}
+
+TEST_F(KlippyExtrusionInstanceTest, DeconvolutionObjectDefaultIsNone) {
+    auto result = instance_->server().queryObjects({{"deconvolution", {}}});
+    ASSERT_TRUE(result.count("deconvolution") > 0);
+    const auto& status = result["deconvolution"];
+    EXPECT_EQ(status.at("controller").asString(), "none");
+    EXPECT_FALSE(status.at("enabled").asBool());
+}
+
 #endif // TETHER_ENABLE_PRESSURE_ADVANCE
