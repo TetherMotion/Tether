@@ -28,6 +28,8 @@
 
 #if TETHER_ENABLE_PRESSURE_ADVANCE
 #include "tether/klipper/klippy/PressureAdvance.hpp"
+#include "tether/control/extrusion/ExtrusionPressureModels.hpp"
+#include "tether/control/extrusion/PressureFlowLut.hpp"
 #endif
 
 #include <cstdint>
@@ -36,6 +38,7 @@
 #include <functional>
 #include <cmath>
 #include <algorithm>
+#include <memory>
 
 namespace tether::klipper::motion {
 
@@ -48,16 +51,55 @@ struct AxisConfig {
 };
 
 #if TETHER_ENABLE_PRESSURE_ADVANCE
-/// @brief Pressure advance configuration for the motion translator.
+/// @brief Compensation model selector. `Linear` reproduces classic Klipper PA.
+enum class ExtrusionCompensationModel {
+    Linear,    ///< Classic Newtonian PA: δe = PA · v_e (default)
+    PowerLaw,  ///< Power-law: δe = K_base · (v_e·A_f)^n
+    CrossWlf   ///< Cross-WLF LUT: δe = (βV_m/A_f) · P_LUT(Q, T)
+};
+
+/// @brief Pressure advance / extrusion-compensation configuration.
 ///
-/// PA is applied only when `enabled` is true AND `pressureAdvance > 0`.
-/// This allows compile-time inclusion (TETHER_ENABLE_PRESSURE_ADVANCE=ON)
-/// with runtime opt-in via config or G-code.
+/// This extends the classic Klipper PA with non-Newtonian models. The default
+/// model is `Linear` with `pressureAdvance = 0`, which reproduces the existing
+/// behavior exactly (zero compensation). PA is applied only when `enabled`
+/// is true AND the model's effective gain is non-zero.
+///
+/// For `PowerLaw`:
+///   - `powerLawBaseGain` = K_base = βV_m·C_n/A_f [filament-mm / (mm³/s)^n]
+///   - `flowIndex` = n (1 = Newtonian limit → equivalent to Linear)
+/// For `CrossWlf`:
+///   - `crossWlfCompressibilityOverArea` = βV_m/A_f [mm/Pa]
+///   - `lut` must be set to a built {Q,T}→P table
+///   - `meltTempC` is the melt-temperature estimate used for the LUT lookup
+///     (typically fed from a MeltZoneThermalObserver at runtime).
 struct PressureAdvanceConfig {
     bool enabled = false;            ///< Runtime enable/disable (default: off)
-    double pressureAdvance = 0.0;    ///< PA amount in seconds
+    double pressureAdvance = 0.0;    ///< Linear PA amount in seconds
     double smoothTime = 0.0;         ///< Smoothing window in seconds (0 = no smoothing)
     size_t extruderAxis = 3;         ///< Axis index of the extruder (typically 3 = E)
+
+    /// @brief Compensation model (default Linear = classic PA).
+    ExtrusionCompensationModel model = ExtrusionCompensationModel::Linear;
+
+    /// @brief Filament diameter [mm] (used for PowerLaw/CrossWlf flow).
+    double filamentDiameterMm = 1.75;
+
+    // --- PowerLaw model parameters ---
+    /// @brief K_base for the power-law model [filament-mm / (mm³/s)^n].
+    double powerLawBaseGain = 0.0;
+    /// @brief Flow index n (1 = Newtonian limit).
+    double flowIndex = 1.0;
+    /// @brief Maximum absolute compensation [mm] (safety clamp).
+    double maxCompensation = 0.5;
+
+    // --- CrossWlf model parameters ---
+    /// @brief βV_m/A_f for the Cross-WLF model [mm/Pa].
+    double crossWlfCompressibilityOverArea = 0.0;
+    /// @brief Melt-temperature estimate [°C] for the LUT lookup.
+    double meltTempC = 210.0;
+    /// @brief Shared {Q,T}→P lookup table (must be built before use).
+    std::shared_ptr<tether::control::extrusion::PressureFlowLut> lut;
 };
 #endif
 
@@ -216,50 +258,89 @@ std::vector<AxisStepSequence> MotionTranslator<Dim, T>::translate(
     }
 
 #if TETHER_ENABLE_PRESSURE_ADVANCE
-    // Apply pressure advance to the extruder axis.
+    // Apply extrusion compensation (pressure advance) to the extruder axis.
     //
-    // The PA-adjusted position is:  adjusted_e = e + PA * smoothed_velocity
+    // Three models are supported, selected by paConfig_.model:
+    //   Linear   — classic Klipper PA: adjusted_e = e + PA * smoothed_velocity
+    //   PowerLaw — position-offset: adjusted_e = e + K_base * (v_e*A_f)^n
+    //   CrossWlf — position-offset: adjusted_e = e + (βV_m/A_f) * P_LUT(Q, T)
     //
-    // We smooth the extruder velocity with a centered moving average over the
-    // smoothTime window, then recompute the E-axis step positions. The step
-    // deltas (computed later) naturally become:  Δe + PA * Δv, which is the
-    // correct PA adjustment per segment.
-    if (paConfig_.enabled && paConfig_.pressureAdvance > 0.0 && paConfig_.extruderAxis < Dim) {
+    // The Linear path is unchanged from the original implementation. The
+    // PowerLaw/CrossWlf paths use the position-offset form (see
+    // docs/extrusion/NonNewtonianPressureAdvance.md §2), which avoids
+    // numerical differentiation and the Q→0 singularity. The smoothed
+    // extruder velocity is computed once and reused across all models.
+    if (paConfig_.enabled && paConfig_.extruderAxis < Dim) {
         const size_t eAxis = paConfig_.extruderAxis;
-        const double pa = paConfig_.pressureAdvance;
         const double spm = axisConfigs_[eAxis].stepsPerMm;
-
-        // Recover raw E positions in mm (axisSteps already has invertDirection
-        // applied, so the PA offset is computed in the same frame).
-        std::vector<double> rawPosMm(numSamples + 1);
-        for (int i = 0; i <= numSamples; ++i)
-            rawPosMm[i] = static_cast<double>(axisSteps[eAxis][i]) / spm;
-
-        // Smooth velocity (mm/s) with a centered moving average.
-        std::vector<double> smoothedVelMm(numSamples + 1, 0.0);
-        if (paConfig_.smoothTime > 0.0) {
-            int halfWindow = std::max(1,
-                static_cast<int>(paConfig_.smoothTime / sampleIntervalSec / 2.0));
-            for (int i = 0; i <= numSamples; ++i) {
-                double sum = 0.0;
-                int count = 0;
-                for (int j = std::max(0, i - halfWindow);
-                     j <= std::min(numSamples, i + halfWindow); ++j) {
-                    sum += axisVel[eAxis][j] / spm; // steps/sec → mm/s
-                    ++count;
-                }
-                smoothedVelMm[i] = (count > 0) ? sum / count : 0.0;
-            }
-        } else {
+        const bool linearActive = paConfig_.model == ExtrusionCompensationModel::Linear
+                                  && paConfig_.pressureAdvance > 0.0;
+        const bool powerLawActive = paConfig_.model == ExtrusionCompensationModel::PowerLaw
+                                    && paConfig_.powerLawBaseGain > 0.0;
+        const bool crossWlfActive = paConfig_.model == ExtrusionCompensationModel::CrossWlf
+                                    && paConfig_.crossWlfCompressibilityOverArea > 0.0
+                                    && paConfig_.lut && !paConfig_.lut->empty();
+        if (linearActive || powerLawActive || crossWlfActive) {
+            // Recover raw E positions in mm (axisSteps already has
+            // invertDirection applied, so the offset is computed in the
+            // same frame).
+            std::vector<double> rawPosMm(numSamples + 1);
             for (int i = 0; i <= numSamples; ++i)
-                smoothedVelMm[i] = axisVel[eAxis][i] / spm;
-        }
+                rawPosMm[i] = static_cast<double>(axisSteps[eAxis][i]) / spm;
 
-        // Recompute E-axis step positions with PA offset.
-        for (int i = 0; i <= numSamples; ++i) {
-            double adjustedPos = rawPosMm[i] + pa * smoothedVelMm[i];
-            axisSteps[eAxis][i] = static_cast<int64_t>(
-                std::round(adjustedPos * spm));
+            // Smooth velocity (mm/s) with a centered moving average.
+            std::vector<double> smoothedVelMm(numSamples + 1, 0.0);
+            if (paConfig_.smoothTime > 0.0) {
+                int halfWindow = std::max(1,
+                    static_cast<int>(paConfig_.smoothTime / sampleIntervalSec / 2.0));
+                for (int i = 0; i <= numSamples; ++i) {
+                    double sum = 0.0;
+                    int count = 0;
+                    for (int j = std::max(0, i - halfWindow);
+                         j <= std::min(numSamples, i + halfWindow); ++j) {
+                        sum += axisVel[eAxis][j] / spm; // steps/sec → mm/s
+                        ++count;
+                    }
+                    smoothedVelMm[i] = (count > 0) ? sum / count : 0.0;
+                }
+            } else {
+                for (int i = 0; i <= numSamples; ++i)
+                    smoothedVelMm[i] = axisVel[eAxis][i] / spm;
+            }
+
+            // Recompute E-axis step positions with the model's offset.
+            const double Af = M_PI * paConfig_.filamentDiameterMm *
+                              paConfig_.filamentDiameterMm / 4.0;
+            for (int i = 0; i <= numSamples; ++i) {
+                double offset = 0.0;
+                if (linearActive) {
+                    offset = paConfig_.pressureAdvance * smoothedVelMm[i];
+                } else if (powerLawActive) {
+                    const double Q = smoothedVelMm[i] * Af;
+                    if (Q > 0.0) {
+                        offset = paConfig_.powerLawBaseGain *
+                                 std::pow(Q, paConfig_.flowIndex);
+                        if (offset > paConfig_.maxCompensation)
+                            offset = paConfig_.maxCompensation;
+                        if (offset < -paConfig_.maxCompensation)
+                            offset = -paConfig_.maxCompensation;
+                    }
+                } else if (crossWlfActive) {
+                    const double Q = smoothedVelMm[i] * Af;
+                    if (Q > 0.0) {
+                        const double P = paConfig_.lut->pressure(
+                            Q, paConfig_.meltTempC);
+                        offset = paConfig_.crossWlfCompressibilityOverArea * P;
+                        if (offset > paConfig_.maxCompensation)
+                            offset = paConfig_.maxCompensation;
+                        if (offset < -paConfig_.maxCompensation)
+                            offset = -paConfig_.maxCompensation;
+                    }
+                }
+                double adjustedPos = rawPosMm[i] + offset;
+                axisSteps[eAxis][i] = static_cast<int64_t>(
+                    std::round(adjustedPos * spm));
+            }
         }
     }
 #endif

@@ -37,6 +37,12 @@ public:
             auto ps = heater_->pidState();
             power = std::clamp(ps.output, 0.0, 1.0);
             s.add("power", JsonValue(power));
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+            // Flow-adaptive heater compensation diagnostics.
+            s.add("melt_temp_estimate", JsonValue(heater_->meltTempEstimate()));
+            s.add("pre_emphasis_power", JsonValue(heater_->preEmphasisPwm()));
+            s.add("post_emphasis_power", JsonValue(heater_->postEmphasisPwm()));
+#endif
         }
         s.add("pressure_advance", JsonValue(pressureAdvance_));
         s.add("can_extrude", JsonValue(heater_ && heater_->currentTemp() > minExtrudeTemp_));
@@ -46,7 +52,12 @@ public:
 
     std::vector<std::string> availableFields() const override {
         return {"temperature", "target", "power", "pressure_advance",
-                "can_extrude", "motion_queue"};
+                "can_extrude", "motion_queue"
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+                , "melt_temp_estimate", "pre_emphasis_power",
+                "post_emphasis_power"
+#endif
+               };
     }
 
     void setName(const std::string& n) { name_ = n; }

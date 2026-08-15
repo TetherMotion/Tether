@@ -35,6 +35,7 @@
 #pragma once
 
 #include "tether/klipper/motion/MotionTranslator.hpp"
+#include "tether/klipper/motion/ExtrusionFlowTracker.hpp"
 #include "tether/motion_planner/MotionPlan.hpp"
 #include "tether/motion_planner/MotionSegment.hpp"
 
@@ -42,6 +43,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <vector>
 
 namespace tether::klipper::motion {
@@ -117,6 +119,18 @@ public:
     /// @brief Set/override the current position (mm). Used after homing/G92.
     void setPosition(std::array<double, 4> pos) { current_ = pos; }
 
+    /// @brief Set the shared extrusion-flow tracker. When set, each move
+    /// updates the tracker with the per-move E-axis velocity so the
+    /// flow-adaptive heater compensation can react to flow changes.
+    void setFlowTracker(std::shared_ptr<ExtrusionFlowTracker> tracker) {
+        flowTracker_ = std::move(tracker);
+    }
+
+    /// @brief Get the flow tracker (may be null).
+    std::shared_ptr<ExtrusionFlowTracker> flowTracker() const {
+        return flowTracker_;
+    }
+
     /// @return The current logical position (mm).
     std::array<double, 4> position() const { return current_; }
 
@@ -152,6 +166,16 @@ public:
         auto seqs = translator_.translate(plan, config_.clockFreqHz,
                                           config_.sampleIntervalSec, startClock);
         size_t dispatched = send_(seqs);
+
+        // Feed the shared flow tracker with the per-move E-axis velocity
+        // (mm/s) so the flow-adaptive heater compensation can react.
+        if (flowTracker_) {
+            const double dE = target[3] - current_[3];
+            const double dt = plan.totalDuration();
+            const double vE = (dt > 0.0) ? dE / dt : 0.0;
+            flowTracker_->setExtruderVelocityMmPerS(vE, dt);
+        }
+
         current_ = target;
         return dispatched;
     }
@@ -162,6 +186,7 @@ private:
     SendCallback send_;
     ClockProvider clock_;
     std::array<double, 4> current_{0, 0, 0, 0};
+    std::shared_ptr<ExtrusionFlowTracker> flowTracker_;
 };
 
 } // namespace tether::klipper::motion

@@ -89,19 +89,22 @@ public:
         auto s = buildStatus(fields);
         s.add("pressure_advance", JsonValue(pressureAdvance_));
         s.add("smooth_time", JsonValue(smoothTime_));
+        s.add("model", JsonValue(model_));
         return std::move(s).take();
     }
 
     std::vector<std::string> availableFields() const override {
-        return {"pressure_advance", "smooth_time"};
+        return {"pressure_advance", "smooth_time", "model"};
     }
 
     void setPressureAdvance(double pa) { pressureAdvance_ = pa; }
     void setSmoothTime(double t) { smoothTime_ = t; }
+    void setModel(const std::string& m) { model_ = m; }
 
 private:
     double pressureAdvance_ = 0.0;
     double smoothTime_ = 0.040;
+    std::string model_ = "linear";
 };
 #endif // TETHER_ENABLE_PRESSURE_ADVANCE
 

@@ -18,6 +18,10 @@
 #pragma once
 
 #include "tether/control/PIDControllers.hpp"
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+#include "tether/control/extrusion/FlowAdaptiveHeaterController.hpp"
+#include "tether/klipper/motion/ExtrusionFlowTracker.hpp"
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -334,6 +338,38 @@ public:
     /// @brief Set the control interval in seconds.
     void setControlInterval(double interval) { controlInterval_ = interval; }
 
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+    /// @brief Flow-adaptive compensation hook.
+    /// When set, control() feeds the current flow (from the tracker) into
+    /// the controller and adds its feed-forward output to the PID PWM.
+    /// Pass nullptr to disable.
+    void setFlowCompensation(
+        std::shared_ptr<tether::control::extrusion::FlowAdaptiveHeaterController>
+            controller,
+        std::shared_ptr<tether::klipper::motion::ExtrusionFlowTracker> tracker) {
+        flowController_ = std::move(controller);
+        flowTracker_ = std::move(tracker);
+    }
+    void setFlowCompensation(std::nullptr_t) {
+        flowController_.reset();
+        flowTracker_.reset();
+    }
+
+    /// @brief Estimated melt-zone temperature from the flow controller's
+    /// internal observer (0.0 if no controller is wired).
+    double meltTempEstimate() const {
+        return flowController_ ? flowController_->meltTempEst() : 0.0;
+    }
+    /// @brief Last pre-emphasis PWM contribution (0.0 if none).
+    double preEmphasisPwm() const {
+        return flowController_ ? flowController_->emphasis().preEmphasisPwm : 0.0;
+    }
+    /// @brief Last post-emphasis PWM contribution (0.0 if none).
+    double postEmphasisPwm() const {
+        return flowController_ ? flowController_->emphasis().postEmphasisPwm : 0.0;
+    }
+#endif
+
     /// @brief Run one PID control iteration.
     /// @return PWM output (0.0 to 1.0).
     double control() {
@@ -357,6 +393,27 @@ public:
             pwmWrite_(0.0);
             return 0.0;
         }
+
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+        // Flow-adaptive path: delegate to the controller, which runs the
+        // PID backend internally and adds pre/post-emphasis feed-forward.
+        if (flowController_) {
+            if (flowTracker_) {
+                flowController_->setFlow(
+                    flowTracker_->smoothedFlowMm3PerS());
+            }
+            Control::ControllerInput input{};
+            input.reference = target_;
+            input.measured = measured;
+            input.dt = controlInterval_;
+            auto output = flowController_->compute(input);
+            lastOutput_ = output;
+            double pwm = std::clamp(output.control, pidParams_.pwmMin,
+                                    pidParams_.pwmMax);
+            pwmWrite_(pwm);
+            return pwm;
+        }
+#endif
 
         // PID computation via Control::PIDController
         Control::ControllerInput input{};
@@ -439,6 +496,11 @@ private:
     Control::PIDController pid_;
     Control::ControllerOutput lastOutput_;
     double controlInterval_ = 0.1; // 100ms default
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+    std::shared_ptr<tether::control::extrusion::FlowAdaptiveHeaterController>
+        flowController_;
+    std::shared_ptr<tether::klipper::motion::ExtrusionFlowTracker> flowTracker_;
+#endif
 };
 
 // ============================================================================

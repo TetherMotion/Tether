@@ -32,7 +32,11 @@
 #include "tether/klipper/device/KlipperDevice.hpp" // Needed for std::make_unique in setupMotionBackend()
 #include "tether/klipper/motion/MotionTranslator.hpp"
 #include "tether/klipper/motion/MotionDispatcher.hpp"
+#include "tether/klipper/motion/ExtrusionFlowTracker.hpp"
 #include "tether/klipper/config/StandardCommands.hpp"
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+#include "tether/control/extrusion/FlowAdaptiveHeaterController.hpp"
+#endif
 #include "tether/klipper/objects/Thermal.hpp"
 #include "tether/klipper/objects/Peripherals.hpp"
 #include "tether/klipper/objects/Homing.hpp"
@@ -380,6 +384,24 @@ public:
     /// @return The motion backend's MotionDispatcher, or nullptr if not configured.
     motion::MotionDispatcher* motionDispatcher() { return motionDispatcher_.get(); }
 
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+    /// @return The shared extrusion-flow tracker (may be null if no motion
+    ///         backend is configured). Updated by the dispatcher on each move.
+    std::shared_ptr<motion::ExtrusionFlowTracker> extrusionFlowTracker() {
+        return extrusionFlowTracker_;
+    }
+
+    /// @return The flow-adaptive heater controller, or nullptr if not enabled.
+    std::shared_ptr<tether::control::extrusion::FlowAdaptiveHeaterController>
+    flowAdaptiveHeater() { return flowAdaptiveHeater_; }
+
+    /// @brief Apply the current flow-adaptive heater settings from settings_.
+    /// Builds the controller if enabled and wires it to the extruder heater
+    /// and the extrusion flow tracker. Called from applySettings() and from
+    /// the SET_HEATER_FLOW_COMPENSATION G-code command.
+    void applyFlowAdaptiveHeaterSettings() { applyFlowAdaptiveHeaterSettingsImpl(); }
+#endif
+
     /// @return True if the motion backend is wired and the host is ready
     ///         (connected + dict downloaded + clock synced).
     bool motionBackendReady() const {
@@ -467,9 +489,30 @@ public:
         dcfg.pressureAdvance.enabled = mb.pressureAdvanceEnabled;
         dcfg.pressureAdvance.pressureAdvance = mb.pressureAdvance;
         dcfg.pressureAdvance.smoothTime = mb.smoothTime;
+        dcfg.pressureAdvance.filamentDiameterMm = settings_.filamentDiameter;
+        if (mb.extrusionCompensationModel == "power_law") {
+            dcfg.pressureAdvance.model = motion::ExtrusionCompensationModel::PowerLaw;
+            dcfg.pressureAdvance.powerLawBaseGain = mb.paConsistency;
+            dcfg.pressureAdvance.flowIndex = mb.paFlowIndex;
+            dcfg.pressureAdvance.maxCompensation = mb.paMaxCompensation;
+        } else if (mb.extrusionCompensationModel == "cross_wlf") {
+            dcfg.pressureAdvance.model = motion::ExtrusionCompensationModel::CrossWlf;
+            dcfg.pressureAdvance.crossWlfCompressibilityOverArea =
+                mb.crossWlfCompressibilityOverArea;
+            dcfg.pressureAdvance.meltTempC = mb.meltTempC;
+            dcfg.pressureAdvance.maxCompensation = mb.paMaxCompensation;
+        }
 #endif
         motionDispatcher_ = std::make_unique<motion::MotionDispatcher>(dcfg);
         motionDispatcher_->setKinematicsTransform(kinematicsTransform_);
+
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+        // Create the shared extrusion-flow tracker and wire it to the
+        // dispatcher so the flow-adaptive heater compensation can react.
+        extrusionFlowTracker_ = std::make_shared<motion::ExtrusionFlowTracker>();
+        extrusionFlowTracker_->setFilamentDiameterMm(settings_.filamentDiameter);
+        motionDispatcher_->setFlowTracker(extrusionFlowTracker_);
+#endif
 
         // Wire the dispatcher's send callback to the host's step sender.
         // Pump both device and host when the serial window is full.
@@ -515,6 +558,47 @@ public:
             noteActivity();
         };
     }
+
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+    /// @brief Apply the current flow-adaptive heater settings from settings_.
+    /// Builds the controller if enabled and wires it to the extruder heater
+    /// and the extrusion flow tracker. Called from applySettings() and from
+    /// the SET_HEATER_FLOW_COMPENSATION G-code command.
+    void applyFlowAdaptiveHeaterSettingsImpl() {
+        if (!settings_.heaterFlowPreEmphasis) {
+            flowAdaptiveHeater_.reset();
+            if (extruderHeater_) extruderHeater_->setFlowCompensation(nullptr);
+            return;
+        }
+        tether::control::extrusion::FlowAdaptiveHeaterParams p;
+        p.filamentHeatCapacity = settings_.filamentHeatCapacity;
+        p.meltZoneCapacitance = settings_.meltZoneCapacitance;
+        p.heaterMeltConductance = settings_.heaterMeltConductance;
+        p.debtTimeConstant = settings_.debtTimeConstant;
+        p.maxPreEmphasisPower = settings_.maxPreEmphasisPower;
+        p.maxPostEmphasisPower = settings_.maxPostEmphasisPower;
+        p.maxHeaterOvershoot = settings_.maxHeaterOvershoot;
+        if (!flowAdaptiveHeater_) {
+            flowAdaptiveHeater_ = std::make_shared<
+                tether::control::extrusion::FlowAdaptiveHeaterController>(p);
+            // Inherit PID gains from the extruder heater if available.
+            if (extruderHeater_) {
+                const auto& hp = extruderHeater_->pidParams();
+                flowAdaptiveHeater_->setGains(hp.Kp, hp.Ki, hp.Kd);
+            }
+        } else {
+            flowAdaptiveHeater_->setParams(p);
+        }
+        // Wire the flow tracker so the controller can read the current flow.
+        // The actual per-cycle flow is fed by the application calling
+        // flowAdaptiveHeater()->setFlow(...) before compute(), or by the
+        // Heater hook reading from the shared tracker.
+        if (extruderHeater_ && extrusionFlowTracker_) {
+            extruderHeater_->setFlowCompensation(flowAdaptiveHeater_,
+                                                 extrusionFlowTracker_);
+        }
+    }
+#endif
 
     /// @brief Set a custom system stats provider (for testing).
     /// Pass nullptr to restore the default Linux provider.
@@ -844,6 +928,15 @@ private:
     std::unique_ptr<device::IKlipperDevice> motionDevice_;
     std::unique_ptr<motion::MotionDispatcher> motionDispatcher_;
     std::vector<std::shared_ptr<objects::Stepper>> deviceSteppers_;
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+    /// @brief Shared extrusion-flow tap between the dispatcher and the
+    /// flow-adaptive heater compensation.
+    std::shared_ptr<motion::ExtrusionFlowTracker> extrusionFlowTracker_;
+    /// @brief Optional flow-adaptive heater controller (built when
+    /// heater_flow_pre_emphasis is enabled in config or via G-code).
+    std::shared_ptr<tether::control::extrusion::FlowAdaptiveHeaterController>
+        flowAdaptiveHeater_;
+#endif
 
     // Heater/Fan/Probe backends (set by user)
     std::shared_ptr<objects::Heater> extruderHeater_;  ///< active extruder's heater

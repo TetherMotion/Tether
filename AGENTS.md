@@ -139,3 +139,28 @@ New test files are automatically picked up by CMake on re-configure.
 - `ThermalIntegrationTest` tests take ~6 minutes total (real-time simulation)
 - `test_klipper_tier_features.cpp` is the largest test file (1092 lines) and
   could be split for better parallelization
+
+## Non-Newtonian Extrusion Compensation
+
+Tether extends Klipper's pressure advance with non-Newtonian rheology models
+(power-law, Cross-WLF) and flow-adaptive heater control.  See
+`docs/extrusion/` for full documentation.
+
+### Build & test
+
+```bash
+# Build control-level extrusion tests
+cmake --build build --target tether_control_extrusion_tests -j$(nproc)
+./build/bin/tests/tether_control_extrusion_tests
+
+# Build klipper-level extrusion compensation tests (requires TETHER_ENABLE_KLIPPER=1)
+cmake --build build --target tether_klipper_tests -j$(nproc)
+./build/bin/tests/tether_klipper_tests --gtest_filter='*ExtrusionCompensation*:*ExtrusionFlowTracker*:*ExtrusionInstance*'
+```
+
+### Key source files
+
+- `include/tether/control/extrusion/` — Rheology models, PA models, thermal observer, flow-adaptive heater
+- `include/tether/klipper/motion/ExtrusionFlowTracker.hpp` — Shared flow tap
+- `include/tether/klipper/motion/MotionTranslator.hpp` — PA offset application (3 models)
+- `include/tether/klipper/objects/Thermal.hpp` — Heater flow-compensation hook

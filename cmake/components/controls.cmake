@@ -15,6 +15,11 @@ set(TETHER_CONTROLS_SOURCES
     ${TETHER_ROOT}/src/control/LearningControllers.cpp
     ${TETHER_ROOT}/src/control/CompositeControllers.cpp
     ${TETHER_ROOT}/src/control/MatrixUtils.cpp
+    # Non-Newtonian extrusion + flow-adaptive temperature control
+    ${TETHER_ROOT}/src/control/extrusion/CrossWlfRheology.cpp
+    ${TETHER_ROOT}/src/control/extrusion/PressureFlowLut.cpp
+    ${TETHER_ROOT}/src/control/extrusion/MeltZoneThermalObserver.cpp
+    ${TETHER_ROOT}/src/control/extrusion/FlowAdaptiveHeaterController.cpp
 )
 
 # Filter to only existing files
@@ -48,10 +53,12 @@ foreach(_tgt IN LISTS _variants)
             $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
             $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/control>
             $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/control/autotuning>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/control/extrusion>
             $<INSTALL_INTERFACE:include>
             $<INSTALL_INTERFACE:include/tether>
             $<INSTALL_INTERFACE:include/tether/control>
             $<INSTALL_INTERFACE:include/tether/control/autotuning>
+            $<INSTALL_INTERFACE:include/tether/control/extrusion>
         PRIVATE
             ${TETHER_ROOT}/src
     )
