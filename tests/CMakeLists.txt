@@ -147,6 +147,7 @@ set(CONTROL_EXTRUSION_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_power_law_rheology.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_extrusion_pressure_models.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_flow_adaptive_heater.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/control/test_deconvolution_controllers.cpp"
 )
 set(CONTROL_COMPOSITE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/control/CompositeControllersTests.cpp"
