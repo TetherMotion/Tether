@@ -79,7 +79,8 @@ MotionPlan2D buildPlanWithCurveType(
                                            0.0, 0.0, 20);
 
     MotionPlanConfig<double> config;
-    MotionPlan2D plan(std::move(pathResult.path), std::move(profile), config);
+    MotionPlan2D plan(std::move(pathResult.path), std::move(profile),
+                      limits, config);
     if (!segments.empty()) {
         std::vector<SourceReference> refs;
         for (size_t i = 0; i < segments.size(); ++i) {

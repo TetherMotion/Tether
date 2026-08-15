@@ -381,6 +381,101 @@ public:
         return std::nullopt;
     }
 
+    /**
+     * @brief Compute distance to accelerate from v0 to v1 with jerk limiting
+     *
+     * This is the jerk-limited analogue of the kinematic equation
+     * v² = v₀² + 2·a·Δs. It computes the exact arc length needed to
+     * change velocity from v0 to v1, respecting max acceleration and
+     * max jerk. Used by the jerk-limited TOPP-RA forward/backward passes.
+     *
+     * @param v0 Starting velocity
+     * @param v1 Ending velocity (must be >= v0)
+     * @param aMax Maximum acceleration
+     * @param jMax Maximum jerk
+     * @return Distance required for the velocity change
+     */
+    static T computeAccelDistance(T v0, T v1, T aMax, T jMax) {
+        if (v1 <= v0) return T(0);
+        if (aMax <= T(0) || jMax <= T(0)) return T(0);
+
+        T tJerk = aMax / jMax;
+        T deltaV = v1 - v0;
+        T deltaVJerk = T(0.5) * jMax * tJerk * tJerk;
+
+        if (deltaV <= T(2) * deltaVJerk) {
+            // Can't reach max acceleration: symmetric jerk-only phases
+            T t = std::sqrt(deltaV / jMax);
+            return v0 * T(2) * t + jMax * t * t * t;
+        }
+
+        // Full acceleration profile
+        T tConst = (deltaV - T(2) * deltaVJerk) / aMax;
+
+        T d1 = v0 * tJerk + (T(1)/T(6)) * jMax * tJerk * tJerk * tJerk;
+        T v1_temp = v0 + deltaVJerk;
+        T d2 = v1_temp * tConst + T(0.5) * aMax * tConst * tConst;
+        T v2_temp = v1_temp + aMax * tConst;
+        T d3 = v2_temp * tJerk + T(0.5) * aMax * tJerk * tJerk -
+               (T(1)/T(6)) * jMax * tJerk * tJerk * tJerk;
+
+        return d1 + d2 + d3;
+    }
+
+    /**
+     * @brief Compute distance to decelerate from v0 to v1 with jerk limiting
+     *
+     * Symmetric to computeAccelDistance. Computes the arc length needed
+     * to reduce velocity from v0 to v1 (v1 <= v0).
+     *
+     * @param v0 Starting velocity
+     * @param v1 Ending velocity (must be <= v0)
+     * @param aMax Maximum deceleration magnitude
+     * @param jMax Maximum jerk
+     * @return Distance required for the velocity change
+     */
+    static T computeDecelDistance(T v0, T v1, T aMax, T jMax) {
+        return computeAccelDistance(v1, v0, aMax, jMax);
+    }
+
+    /**
+     * @brief Find the maximum velocity reachable from v0 over distance d,
+     *        respecting jerk-limited acceleration.
+     *
+     * Used by the jerk-limited TOPP-RA forward pass: given the current
+     * velocity v0 and the available distance Δs to the next sample,
+     * compute the maximum v1 such that
+     * computeAccelDistance(v0, v1, aMax, jMax) <= d.
+     *
+     * Uses binary search (same approach as computeCruiseVelocity).
+     *
+     * @param v0 Starting velocity
+     * @param distance Available distance
+     * @param vMax Velocity ceiling (from v_lim or feed rate)
+     * @param aMax Maximum acceleration
+     * @param jMax Maximum jerk
+     * @return Maximum reachable velocity
+     */
+    static T maxVelocityAfterDistance(T v0, T distance, T vMax,
+                                       T aMax, T jMax) {
+        if (distance <= T(0)) return v0;
+        if (v0 >= vMax) return vMax;
+
+        // Binary search for max v1 such that accelDist(v0, v1) <= distance
+        T vLow = v0;
+        T vHigh = vMax;
+        for (int iter = 0; iter < 60; ++iter) {
+            T vMid = (vLow + vHigh) / T(2);
+            T needed = computeAccelDistance(v0, vMid, aMax, jMax);
+            if (needed <= distance) {
+                vLow = vMid;
+            } else {
+                vHigh = vMid;
+            }
+        }
+        return vLow;
+    }
+
 private:
     /**
      * @brief Compute cruise velocity for given distance
@@ -423,45 +518,6 @@ private:
         }
         
         return (vLow + vHigh) / T(2);
-    }
-
-    /**
-     * @brief Compute distance to accelerate from v0 to v1
-     */
-    T computeAccelDistance(T v0, T v1, T aMax, T jMax) const {
-        if (v1 <= v0) return T(0);
-        
-        T tJerk = aMax / jMax;
-        T deltaV = v1 - v0;
-        T deltaVJerk = T(0.5) * jMax * tJerk * tJerk;
-        
-        if (deltaV <= T(2) * deltaVJerk) {
-            // Can't reach max acceleration: symmetric jerk-only phases
-            T t = std::sqrt(deltaV / jMax);
-            // Distance for two jerk phases (phase1 + phase3): 2*v0*t + j*t^3
-            return v0 * T(2) * t + jMax * t * t * t;
-        }
-        
-        // Full acceleration profile
-        T tConst = (deltaV - T(2) * deltaVJerk) / aMax;
-        
-        // Distance = jerk phases + const accel phase
-        T d1 = v0 * tJerk + (T(1)/T(6)) * jMax * tJerk * tJerk * tJerk;  // First jerk
-        T v1_temp = v0 + deltaVJerk;
-        T d2 = v1_temp * tConst + T(0.5) * aMax * tConst * tConst;  // Const accel
-        T v2_temp = v1_temp + aMax * tConst;
-        T d3 = v2_temp * tJerk + T(0.5) * aMax * tJerk * tJerk - 
-               (T(1)/T(6)) * jMax * tJerk * tJerk * tJerk;  // Final jerk
-        
-        return d1 + d2 + d3;
-    }
-
-    /**
-     * @brief Compute distance to decelerate from v0 to v1
-     */
-    T computeDecelDistance(T v0, T v1, T aMax, T jMax) const {
-        // Symmetric to acceleration
-        return computeAccelDistance(v1, v0, aMax, jMax);
     }
 
     /**

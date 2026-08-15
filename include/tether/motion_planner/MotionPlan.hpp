@@ -6,9 +6,15 @@
  * This is the top-level interface for querying motion state at any time t.
  * It combines:
  * - Piecewise Bézier path (geometry)
- * - Velocity profile (time parameterization)
- * - S-curve profiles (jerk-limited phases)
+ * - Velocity profile (time parameterization, from any IVelocityProfiler)
  * - Source references (G-code traceability)
+ *
+ * The velocity profile is produced by an IVelocityProfiler implementation
+ * (basic TOPP-RA, jerk-limited TOPP-RA, or basic S-curve). MotionPlan
+ * consumes the profile's per-point velocity, acceleration, and jerk
+ * directly — it does not perform post-hoc smoothing or finite-difference
+ * estimation. This ensures that the constraints verified by the profiler
+ * are preserved exactly.
  *
  * ## Query Interface
  *
@@ -29,7 +35,7 @@
  *
  * @see PiecewiseNurbsPath.hpp
  * @see VelocityProfile.hpp
- * @see SCurveProfile.hpp
+ * @see IVelocityProfiler.hpp
  */
 
 #pragma once
@@ -37,6 +43,9 @@
 #include "MathTypes.hpp"
 #include "PathAdapter.hpp"
 #include "VelocityProfile.hpp"
+#include "IVelocityProfiler.hpp"
+#include "JerkLimitedVelocityProfiler.hpp"
+#include "SCurveVelocityProfiler.hpp"
 #include "SCurveProfile.hpp"
 #include "MotionSegment.hpp"
 #include "SourceReference.hpp"
@@ -150,10 +159,10 @@ class MotionPlan : public Traceable {
 public:
     using Path = PathAdapter<Dim, T>;
     using Profile = VelocityProfile<T>;
-    using SCurve = SCurveProfile<T>;
     using State = MotionState<Dim, T>;
     using Config = MotionPlanConfig<T>;
     using Point = Vec<Dim, T>;
+    using Limits = KinematicLimits<Dim, T>;
 
     MotionPlan() = default;
 
@@ -163,14 +172,30 @@ public:
     MotionPlan(Path path, Profile profile, Config config = {})
         : path_(std::move(path))
         , profile_(std::move(profile))
-        , config_(std::move(config)) {
-        initialize();
-    }
+        , config_(std::move(config)) {}
+
+    /**
+     * @brief Construct from path, velocity profile, and kinematic limits
+     *
+     * The limits are stored for reference and downstream use (e.g. by
+     * the motion replanner). The velocity profile is consumed as-is —
+     * no post-hoc smoothing is applied. The profiler that produced the
+     * profile is responsible for respecting all constraints.
+     */
+    MotionPlan(Path path, Profile profile, Limits limits, Config config = {})
+        : path_(std::move(path))
+        , profile_(std::move(profile))
+        , limits_(std::move(limits))
+        , config_(std::move(config)) {}
 
     /**
      * @brief Evaluate complete motion state at time t
      *
-     * This is the primary query interface.
+     * This is the primary query interface. It reads velocity, acceleration,
+     * and jerk directly from the velocity profile (which was produced by
+     * an IVelocityProfiler). No post-hoc smoothing or finite-difference
+     * estimation is performed — the profile's values are used as-is,
+     * preserving the constraints verified by the profiler.
      */
     State evaluateAt(T t) const {
         State state;
@@ -218,8 +243,6 @@ public:
         
         // Get velocity from profile
         state.pathVelocity = profile_.velocityAt(state.arcLength);
-        
-        // Apply feed override
         state.pathVelocity *= currentFeedOverride_;
         
         // Reverse direction if needed
@@ -233,22 +256,16 @@ public:
         // Get curvature
         state.curvature = path_.curvatureAtArcLength(state.arcLength);
         
-        // Compute acceleration
-        // a = dv/dt * tangent + v²·κ·normal
-        if (config_.enableSCurve && scurveIndex_ < scurves_.size()) {
-            auto scurveState = scurves_[scurveIndex_].evaluateAt(effectiveTime - scurveStartTime_);
-            state.pathAcceleration = scurveState.acceleration * currentFeedOverride_;
-            state.pathJerk = scurveState.jerk * currentFeedOverride_;
-            state.scurvePhase = scurveState.phase;
-        } else {
-            // Estimate acceleration from profile
-            state.pathAcceleration = estimateAcceleration(effectiveTime);
-        }
+        // Get acceleration and jerk directly from the profile.
+        // These are populated by the profiler (basic TOPP-RA, jerk-limited
+        // TOPP-RA, or S-curve) and are NOT estimated by finite differences.
+        state.pathAcceleration = profile_.accelerationAt(state.arcLength) * currentFeedOverride_;
+        state.pathJerk = profile_.jerkAt(state.arcLength) * currentFeedOverride_;
         
         // Tangential acceleration
         Point tangentialAccel = pathEval.tangent * state.pathAcceleration;
         
-        // Centripetal acceleration
+        // Centripetal acceleration: a_cent = v² · κ
         T v = std::abs(state.pathVelocity);
         T centripetalMag = v * v * state.curvature;
         Point normal = computeNormal(pathEval.tangent, state.arcLength);
@@ -256,7 +273,7 @@ public:
         
         state.acceleration = tangentialAccel + centripetalAccel;
         
-        // Jerk (simplified - mainly from S-curve)
+        // Jerk vector (tangential component from profile)
         state.jerk = pathEval.tangent * state.pathJerk;
         
         // Get source reference
@@ -472,6 +489,11 @@ public:
      */
     const Config& config() const { return config_; }
 
+    /**
+     * @brief Access kinematic limits
+     */
+    const Limits& limits() const { return limits_; }
+
     // ========================================================================
     // Traceable Interface
     // ========================================================================
@@ -486,93 +508,19 @@ public:
 
 private:
     /**
-     * @brief Initialize internal structures
-     */
-    void initialize() {
-        if (config_.enableSCurve) {
-            buildSCurveProfiles();
-        }
-    }
-
-    /**
-     * @brief Build S-curve profiles for path segments
-     *
-     * @note STUB (Phase 5.2): The S-curve constraints below are hardcoded
-     *       (maxVelocity=100, maxAcceleration=500, maxJerk=5000) rather
-     *       than being taken from the MotionPlan's KinematicLimits. A full
-     *       implementation would:
-     *       1. Read the limits from `config_` / the builder's limits.
-     *       2. Build a *per-segment* S-curve profile (one per
-     *          PiecewiseNurbsPath piece) instead of a single profile for
-     *          the entire path, so that blend transitions get proper
-     *          jerk-limited ramps.
-     *       3. Use the certified per-span curvature from
-     *          CertifiedCurvatureSampler to set the velocity limit per
-     *          segment.
-     *       The current single-profile approach is adequate for
-     *       feedrate-only planning but does not respect per-axis jerk
-     *       limits at blend boundaries.
-     */
-    void buildSCurveProfiles() {
-        // Build S-curve profiles based on velocity profile points
-        SCurveConstraints<T> constraints;
-        constraints.maxVelocity = T(100);  // Would come from limits
-        constraints.maxAcceleration = T(500);
-        constraints.maxJerk = T(5000);
-
-        SCurveProfileBuilder<T> builder(constraints);
-
-        // For now, create one S-curve for the entire path
-        // A full implementation would create per-segment profiles
-        if (profile_.points().size() >= 2) {
-            SCurve profile;
-            profile.compute(path_.totalLength(), T(0), T(0), constraints);
-            scurves_.push_back(std::move(profile));
-        }
-    }
-
-    /**
      * @brief Compute effective time accounting for feed override
      */
     T computeEffectiveTime(T t) const {
-        // Simple model: effective_time = integral of feed_override over time
-        // For constant override: effective_time = t * feed_override
-        // With ramping, would need to integrate
         return (t - timeOffset_) * currentFeedOverride_;
-    }
-
-    /**
-     * @brief Estimate acceleration from velocity profile
-     *
-     * @note STUB (Phase 5.2): Acceleration is estimated by finite
-     *       differencing the velocity profile with a fixed dt = 0.001 s.
-     *       This is first-order accurate and introduces numerical noise
-     *       on noisy velocity profiles. A full implementation would:
-     *       1. Use the analytic acceleration from the SCurveProfile
-     *          (which has closed-form a(t) per segment).
-     *       2. Or use a higher-order finite-difference stencil
-     *          (e.g. 4th-order central difference) if the velocity
-     *          profile remains tabulated.
-     *       The current approach is adequate for display/debugging but
-     *       should not be used for closed-loop control.
-     */
-    T estimateAcceleration(T t) const {
-        T dt = T(0.001);
-        T v1 = profile_.velocityAt(profile_.arcLengthAt(t));
-        T v2 = profile_.velocityAt(profile_.arcLengthAt(t + dt));
-        return (v2 - v1) / dt;
     }
 
     /**
      * @brief Compute normal vector at arc length
      */
     Point computeNormal(const Point& tangent, T arcLength) const {
-        // For 2D, rotate tangent 90°
-        // For 3D, use Frenet normal from curvature
         if constexpr (Dim == 2) {
             return Point{-tangent[1], tangent[0]};
         } else if constexpr (Dim >= 3) {
-            // Approximate by numerical differentiation of tangent
             T ds = T(0.001);
             Point t1 = path_.evaluateAtArcLength(arcLength - ds).tangent;
             Point t2 = path_.evaluateAtArcLength(arcLength + ds).tangent;
@@ -585,11 +533,8 @@ private:
 
     Path path_;
     Profile profile_;
+    Limits limits_;
     Config config_;
-    
-    std::vector<SCurve> scurves_;
-    size_t scurveIndex_ = 0;
-    T scurveStartTime_ = T(0);
     
     T currentFeedOverride_ = T(1);
     T timeOffset_ = T(0);
@@ -606,7 +551,21 @@ private:
 // ============================================================================
 
 /**
- * @brief Builds MotionPlan from motion segments
+ * @brief Builds MotionPlan from motion segments.
+ *
+ * The builder allows choosing a velocity profiling strategy via the
+ * ProfilerType enum or by providing a custom IVelocityProfiler instance.
+ *
+ * - ProfilerType::ToppraBasic: Basic 2nd-order TOPP-RA (no jerk limit).
+ *   Fastest trajectory; acceleration is discontinuous at switching points.
+ *
+ * - ProfilerType::ToppraJerkLimited: 3rd-order TOPP-RA with jerk as a
+ *   constraint inside the optimizer. Continuous acceleration; bounded jerk.
+ *   Slightly slower than basic TOPP-RA. This is the recommended default
+ *   when jerk limiting is needed.
+ *
+ * - ProfilerType::SCurve: Basic per-piece S-curve profiles. Jerk-limited
+ *   but not time-optimal. Simpler than TOPP-RA.
  */
 template<size_t Dim, typename T = double>
 class MotionPlanBuilder {
@@ -616,16 +575,39 @@ public:
     using Profile = VelocityProfile<T>;
     using Config = MotionPlanConfig<T>;
     using Limits = KinematicLimits<Dim, T>;
+    using IProfiler = IVelocityProfiler<Dim, T>;
 
     /**
-     * @brief Constructor
+     * @brief Constructor with profiler type selection.
+     * @param limits Kinematic limits.
+     * @param config Motion plan configuration.
+     * @param profilerType Which profiler to use (default: ToppraBasic).
      */
-    MotionPlanBuilder(Limits limits = {}, Config config = {})
+    MotionPlanBuilder(Limits limits = {}, Config config = {},
+                      ProfilerType profilerType = ProfilerType::ToppraBasic)
         : limits_(std::move(limits))
-        , config_(std::move(config)) {}
+        , config_(std::move(config))
+        , profilerType_(profilerType) {}
 
     /**
-     * @brief Build motion plan from segment list
+     * @brief Constructor with custom profiler instance.
+     *
+     * Allows providing a fully-configured IVelocityProfiler. The builder
+     * takes ownership of the profiler.
+     *
+     * @param profiler Custom profiler instance.
+     * @param limits Kinematic limits (used for the MotionPlan; the profiler
+     *               has its own copy).
+     * @param config Motion plan configuration.
+     */
+    MotionPlanBuilder(std::unique_ptr<IProfiler> profiler,
+                      Limits limits = {}, Config config = {})
+        : limits_(std::move(limits))
+        , config_(std::move(config))
+        , customProfiler_(std::move(profiler)) {}
+
+    /**
+     * @brief Build motion plan from segment list.
      *
      * @param segments Motion segments (from G-code parser)
      * @param feedRate Default feed rate
@@ -635,20 +617,29 @@ public:
         // Build path with corner blending using the new geometry core.
         PathBuilderAdapter<Dim, T> pathBuilder;
         tether::motion::BlendSpec blendSpec;
-        // Translate the old BlendingConfig to the new BlendSpec.
-        // (The old config is on the segments; use defaults for now.)
+        // Use a sensible default tolerance for blending. The BlendSpec
+        // default is 0, which fails validation for multi-segment paths.
+        blendSpec.tolerance = 0.1;  // 0.1 mm corner tolerance
+        blendSpec.continuity = tether::motion::Continuity::G2;
+        blendSpec.maxBlendFraction = 0.25;
         auto pathResult = pathBuilder.build(segments, blendSpec);
 
         if (!pathResult.success || pathResult.path.numSegments() == 0) {
             return Plan{};
         }
 
-        // Compute velocity profile using the adapted path.
-        VelocityProfiler<Dim, T> profiler(limits_);
-        Profile profile = profiler.computeProfile(pathResult.path, feedRate);
+        // Compute velocity profile using the selected profiler.
+        Profile profile;
+        if (customProfiler_) {
+            profile = customProfiler_->computeProfile(pathResult.path, feedRate);
+        } else {
+            auto profiler = createProfiler(profilerType_);
+            profile = profiler->computeProfile(pathResult.path, feedRate);
+        }
 
-        // Create motion plan with the adapted path.
-        Plan plan(std::move(pathResult.path), std::move(profile), config_);
+        // Create motion plan with the adapted path and kinematic limits.
+        Plan plan(std::move(pathResult.path), std::move(profile),
+                  limits_, config_);
         
         // Set source reference to cover all input segments
         if (!segments.empty()) {
@@ -674,9 +665,30 @@ public:
     Config& config() { return config_; }
     const Config& config() const { return config_; }
 
+    /**
+     * @brief Get/set the profiler type (ignored if custom profiler is set).
+     */
+    ProfilerType profilerType() const { return profilerType_; }
+    void setProfilerType(ProfilerType type) { profilerType_ = type; }
+
 private:
     Limits limits_;
     Config config_;
+    ProfilerType profilerType_ = ProfilerType::ToppraBasic;
+    std::unique_ptr<IProfiler> customProfiler_;
+
+    /// Create a profiler instance for the given type.
+    std::unique_ptr<IProfiler> createProfiler(ProfilerType type) {
+        switch (type) {
+            case ProfilerType::ToppraJerkLimited:
+                return std::make_unique<JerkLimitedVelocityProfiler<Dim, T>>(limits_);
+            case ProfilerType::SCurve:
+                return std::make_unique<SCurveVelocityProfiler<Dim, T>>(limits_);
+            case ProfilerType::ToppraBasic:
+            default:
+                return std::make_unique<VelocityProfiler<Dim, T>>(limits_);
+        }
+    }
 };
 
 // ============================================================================
