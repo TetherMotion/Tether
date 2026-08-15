@@ -34,6 +34,7 @@
 
 #include "MathTypes.hpp"
 #include "PathAdapter.hpp"
+#include "IVelocityProfiler.hpp"
 #include <tether/motion_planner/geometry/CertifiedCurvatureSampler.hpp>
 #include <tether/motion_planner/blend/PHQuinticBlendBuilder.hpp>
 #include <vector>
@@ -184,6 +185,10 @@ struct VelocityProfilePoint {
     /// Acceleration at this point
     T acceleration = T(0);
     
+    /// Jerk at this point (units/second³)
+    /// Populated by jerk-limited profilers; zero for basic TOPP-RA.
+    T jerk = T(0);
+    
     /// Time to reach this point from path start
     T time = T(0);
     
@@ -195,7 +200,8 @@ struct VelocityProfilePoint {
         Curvature,
         AxisVelocity,
         AxisAcceleration,
-        FeedRate
+        FeedRate,
+        Jerk
     } limitedBy = LimitType::None;
 };
 
@@ -234,6 +240,57 @@ public:
         auto prev = it - 1;
         T alpha = (arcLength - prev->arcLength) / (it->arcLength - prev->arcLength);
         return prev->velocity * (T(1) - alpha) + it->velocity * alpha;
+    }
+
+    /**
+     * @brief Get acceleration at arc length position
+     *
+     * Linearly interpolates the acceleration stored in profile points.
+     * For jerk-limited profilers, this is the analytic acceleration
+     * computed during the forward/backward passes. For basic TOPP-RA,
+     * this is the post-hoc estimate.
+     */
+    T accelerationAt(T arcLength) const {
+        if (points_.empty()) return T(0);
+        
+        auto it = std::lower_bound(points_.begin(), points_.end(), arcLength,
+            [](const Point& p, T s) { return p.arcLength < s; });
+        
+        if (it == points_.begin()) {
+            return points_.front().acceleration;
+        }
+        if (it == points_.end()) {
+            return points_.back().acceleration;
+        }
+        
+        auto prev = it - 1;
+        T alpha = (arcLength - prev->arcLength) / (it->arcLength - prev->arcLength);
+        return prev->acceleration * (T(1) - alpha) + it->acceleration * alpha;
+    }
+
+    /**
+     * @brief Get jerk at arc length position
+     *
+     * Linearly interpolates the jerk stored in profile points.
+     * For jerk-limited profilers, this is ±j_max or 0 (by construction).
+     * For basic TOPP-RA, this is zero (jerk is not constrained).
+     */
+    T jerkAt(T arcLength) const {
+        if (points_.empty()) return T(0);
+        
+        auto it = std::lower_bound(points_.begin(), points_.end(), arcLength,
+            [](const Point& p, T s) { return p.arcLength < s; });
+        
+        if (it == points_.begin()) {
+            return points_.front().jerk;
+        }
+        if (it == points_.end()) {
+            return points_.back().jerk;
+        }
+        
+        auto prev = it - 1;
+        T alpha = (arcLength - prev->arcLength) / (it->arcLength - prev->arcLength);
+        return prev->jerk * (T(1) - alpha) + it->jerk * alpha;
     }
 
     /**
@@ -327,9 +384,15 @@ private:
 
 /**
  * @brief Computes velocity profiles using TOPP-RA inspired algorithm
+ *
+ * This is the basic 2nd-order TOPP-RA profiler. It produces a time-optimal
+ * velocity profile with bang-bang acceleration (no jerk limiting).
+ * Acceleration is discontinuous at constraint switching points.
+ *
+ * For jerk-limited profiling, use JerkLimitedVelocityProfiler instead.
  */
 template<size_t Dim, typename T = double>
-class VelocityProfiler {
+class VelocityProfiler : public IVelocityProfiler<Dim, T> {
 public:
     using Path = PathAdapter<Dim, T>;
     using Profile = VelocityProfile<T>;
@@ -362,7 +425,7 @@ public:
                            T endVelocity = T(0),
                            size_t numSamples = 100,
                            T startAcceleration = T(0),
-                           T startJerk = T(0)) {
+                           T startJerk = T(0)) override {
         Profile profile;
 
         if (path.numSegments() == 0) {
@@ -537,7 +600,10 @@ public:
      * @brief Get/set kinematic limits
      */
     Limits& limits() { return limits_; }
-    const Limits& limits() const { return limits_; }
+    Limits limits() const override { return limits_; }
+
+    ProfilerType type() const override { return ProfilerType::ToppraBasic; }
+    const char* name() const override { return "VelocityProfiler (TOPP-RA basic)"; }
 
 private:
     /**
