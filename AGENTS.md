@@ -143,8 +143,10 @@ New test files are automatically picked up by CMake on re-configure.
 ## Non-Newtonian Extrusion Compensation
 
 Tether extends Klipper's pressure advance with non-Newtonian rheology models
-(power-law, Cross-WLF) and flow-adaptive heater control.  See
-`docs/extrusion/` for full documentation.
+(power-law, Cross-WLF) and flow-adaptive heater control. The flow-adaptive
+heater controller uses a **three-state thermal model** (heater block → sensor →
+melt zone) with a Luenberger observer that corrects the state estimate from
+the real thermistor reading. See `docs/extrusion/` for full documentation.
 
 ### Build & test
 

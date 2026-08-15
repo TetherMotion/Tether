@@ -478,18 +478,36 @@
                 if (section.has("cross_wlf_lut_path")) {
                     try { settings_.crossWlfLutPath = section.get("cross_wlf_lut_path"); } catch (...) {}
                 }
-                // Flow-adaptive heater compensation
+                // Flow-adaptive heater compensation (three-state thermal model)
                 if (section.has("heater_flow_pre_emphasis")) {
                     try { settings_.heaterFlowPreEmphasis = section.getBool("heater_flow_pre_emphasis"); } catch (...) {}
                 }
                 if (section.has("filament_heat_capacity")) {
                     try { settings_.filamentHeatCapacity = section.getDouble("filament_heat_capacity"); } catch (...) {}
                 }
+                if (section.has("heater_block_capacitance")) {
+                    try { settings_.heaterBlockCapacitance = section.getDouble("heater_block_capacitance"); } catch (...) {}
+                }
+                if (section.has("sensor_capacitance")) {
+                    try { settings_.sensorCapacitance = section.getDouble("sensor_capacitance"); } catch (...) {}
+                }
                 if (section.has("melt_zone_capacitance")) {
                     try { settings_.meltZoneCapacitance = section.getDouble("melt_zone_capacitance"); } catch (...) {}
                 }
-                if (section.has("heater_melt_conductance")) {
-                    try { settings_.heaterMeltConductance = section.getDouble("heater_melt_conductance"); } catch (...) {}
+                if (section.has("heater_sensor_conductance")) {
+                    try { settings_.heaterSensorConductance = section.getDouble("heater_sensor_conductance"); } catch (...) {}
+                }
+                if (section.has("sensor_melt_conductance")) {
+                    try { settings_.sensorMeltConductance = section.getDouble("sensor_melt_conductance"); } catch (...) {}
+                }
+                if (section.has("luenberger_gain_heater")) {
+                    try { settings_.luenbergerGainHeater = section.getDouble("luenberger_gain_heater"); } catch (...) {}
+                }
+                if (section.has("luenberger_gain_sensor")) {
+                    try { settings_.luenbergerGainSensor = section.getDouble("luenberger_gain_sensor"); } catch (...) {}
+                }
+                if (section.has("luenberger_gain_melt")) {
+                    try { settings_.luenbergerGainMelt = section.getDouble("luenberger_gain_melt"); } catch (...) {}
                 }
                 if (section.has("debt_time_constant")) {
                     try { settings_.debtTimeConstant = section.getDouble("debt_time_constant"); } catch (...) {}

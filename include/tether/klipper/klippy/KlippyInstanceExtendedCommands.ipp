@@ -1031,19 +1031,36 @@
         }
 
         if (cmd == "SET_HEATER_FLOW_COMPENSATION") {
-            // Toggle / tune the flow-adaptive heater controller.
-            // Args: ENABLE=0|1, FILAMENT_HEAT_CAPACITY=, MELT_ZONE_CAPACITANCE=,
-            //       HEATER_MELT_CONDUCTANCE=, DEBT_TIME_CONSTANT=,
+            // Toggle / tune the flow-adaptive heater controller (three-state model).
+            // Args: ENABLE=0|1, FILAMENT_HEAT_CAPACITY=,
+            //       HEATER_BLOCK_CAPACITANCE=, SENSOR_CAPACITANCE=,
+            //       MELT_ZONE_CAPACITANCE=,
+            //       HEATER_SENSOR_CONDUCTANCE=, SENSOR_MELT_CONDUCTANCE=,
+            //       LUENBERGER_GAIN_HEATER=, LUENBERGER_GAIN_SENSOR=,
+            //       LUENBERGER_GAIN_MELT=,
+            //       DEBT_TIME_CONSTANT=,
             //       MAX_PRE_EMPHASIS_POWER=, MAX_POST_EMPHASIS_POWER=,
             //       MAX_HEATER_OVERSHOOT=
             bool enable = g.getNamedInt("ENABLE", 0) != 0;
             settings_.heaterFlowPreEmphasis = enable;
             if (g.hasNamed("FILAMENT_HEAT_CAPACITY"))
                 settings_.filamentHeatCapacity = g.getNamedDouble("FILAMENT_HEAT_CAPACITY", settings_.filamentHeatCapacity);
+            if (g.hasNamed("HEATER_BLOCK_CAPACITANCE"))
+                settings_.heaterBlockCapacitance = g.getNamedDouble("HEATER_BLOCK_CAPACITANCE", settings_.heaterBlockCapacitance);
+            if (g.hasNamed("SENSOR_CAPACITANCE"))
+                settings_.sensorCapacitance = g.getNamedDouble("SENSOR_CAPACITANCE", settings_.sensorCapacitance);
             if (g.hasNamed("MELT_ZONE_CAPACITANCE"))
                 settings_.meltZoneCapacitance = g.getNamedDouble("MELT_ZONE_CAPACITANCE", settings_.meltZoneCapacitance);
-            if (g.hasNamed("HEATER_MELT_CONDUCTANCE"))
-                settings_.heaterMeltConductance = g.getNamedDouble("HEATER_MELT_CONDUCTANCE", settings_.heaterMeltConductance);
+            if (g.hasNamed("HEATER_SENSOR_CONDUCTANCE"))
+                settings_.heaterSensorConductance = g.getNamedDouble("HEATER_SENSOR_CONDUCTANCE", settings_.heaterSensorConductance);
+            if (g.hasNamed("SENSOR_MELT_CONDUCTANCE"))
+                settings_.sensorMeltConductance = g.getNamedDouble("SENSOR_MELT_CONDUCTANCE", settings_.sensorMeltConductance);
+            if (g.hasNamed("LUENBERGER_GAIN_HEATER"))
+                settings_.luenbergerGainHeater = g.getNamedDouble("LUENBERGER_GAIN_HEATER", settings_.luenbergerGainHeater);
+            if (g.hasNamed("LUENBERGER_GAIN_SENSOR"))
+                settings_.luenbergerGainSensor = g.getNamedDouble("LUENBERGER_GAIN_SENSOR", settings_.luenbergerGainSensor);
+            if (g.hasNamed("LUENBERGER_GAIN_MELT"))
+                settings_.luenbergerGainMelt = g.getNamedDouble("LUENBERGER_GAIN_MELT", settings_.luenbergerGainMelt);
             if (g.hasNamed("DEBT_TIME_CONSTANT"))
                 settings_.debtTimeConstant = g.getNamedDouble("DEBT_TIME_CONSTANT", settings_.debtTimeConstant);
             if (g.hasNamed("MAX_PRE_EMPHASIS_POWER"))

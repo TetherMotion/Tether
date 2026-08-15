@@ -606,8 +606,14 @@ public:
         }
         tether::control::extrusion::FlowAdaptiveHeaterParams p;
         p.filamentHeatCapacity = settings_.filamentHeatCapacity;
+        p.heaterBlockCapacitance = settings_.heaterBlockCapacitance;
+        p.sensorCapacitance = settings_.sensorCapacitance;
         p.meltZoneCapacitance = settings_.meltZoneCapacitance;
-        p.heaterMeltConductance = settings_.heaterMeltConductance;
+        p.heaterSensorConductance = settings_.heaterSensorConductance;
+        p.sensorMeltConductance = settings_.sensorMeltConductance;
+        p.luenbergerGainHeater = settings_.luenbergerGainHeater;
+        p.luenbergerGainSensor = settings_.luenbergerGainSensor;
+        p.luenbergerGainMelt = settings_.luenbergerGainMelt;
         p.debtTimeConstant = settings_.debtTimeConstant;
         p.maxPreEmphasisPower = settings_.maxPreEmphasisPower;
         p.maxPostEmphasisPower = settings_.maxPostEmphasisPower;
