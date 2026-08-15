@@ -237,7 +237,7 @@ velocity planning (curvature sampling + profile computation) — on a
 **Interpretation:**
 
 - The PH fast path delivers a **12.8× speedup in velocity planning**
-  because the closed-form curvature κ(ξ) = 2(uv′−u′v)/σ²(ξ) (M16)
+  because the closed-form curvature $\kappa(\xi) = 2(uv' - u'v)/\sigma^2(\xi)$ (M16)
   replaces the certified per-span Lipschitz-bound sampler, which must
   adaptively subdivide each span to bound the curvature.
 - However, **blend construction is 1.47× slower** with PH because the
@@ -254,7 +254,7 @@ velocity planning (curvature sampling + profile computation) — on a
   feed rates, acceleration limits, or look-ahead windows), the 12.8×
   velocity-planning speedup amortizes the blend construction cost
   after ~2 replanning passes.
-- **Real-time interpolation:** the closed-form arc length s(ξ) and its
+- **Real-time interpolation:** the closed-form arc length $s(\xi)$ and its
   polynomial Newton inversion (M19) eliminate adaptive quadrature
   during real-time setpoint generation, which is the primary use case
   for PH curves in CNC (Farouki & Shah 1996).

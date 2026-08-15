@@ -4,7 +4,7 @@
 
 Tether provides standalone, framework-agnostic rheology models for polymer
 melts used in FFF/FDM 3D printing.  These models relate **volumetric flow rate**
-(Q) and **melt temperature** (T) to the **pressure** (P) inside the nozzle,
+$(Q)$ and **melt temperature** $(T)$ to the **pressure** $(P)$ inside the nozzle,
 which is the physical basis for non-Newtonian pressure advance and flow-adaptive
 temperature control.
 
@@ -18,25 +18,19 @@ Klipper or motion-planning layers.
 The simplest non-Newtonian model.  The apparent viscosity is a power law in
 shear rate:
 
-```
-η(γ̇) = K · γ̇^(n-1)
+$$ \eta(\dot{\gamma}) = K \cdot \dot{\gamma}^{n-1} $$
 
-τ = K · γ̇^n     (shear stress)
-```
+$$ \tau = K \cdot \dot{\gamma}^n \quad \text{(shear stress)} $$
 
 For pressure-driven flow in a capillary (nozzle):
 
-```
-P = (2·K·L / R) · ((n+3)/4)^(1/n) · (Q / (π·R³))^(1/n)
-```
+$$ P = \frac{2 K L}{R} \cdot \left(\frac{n+3}{4}\right)^{1/n} \cdot \left(\frac{Q}{\pi R^3}\right)^{1/n} $$
 
-Wait — this is the **forward** direction (Q → P).  The PA compensation needs
-the **inverse**: given the flow Q, compute the pressure P.  The forward form is
+Wait — this is the **forward** direction ($Q \to P$).  The PA compensation needs
+the **inverse**: given the flow $Q$, compute the pressure $P$.  The forward form is
 already what we need:
 
-```
-P(Q) = C_n · K · Q^n
-```
+$$ P(Q) = C_n \cdot K \cdot Q^n $$
 
 where `C_n` collects the nozzle geometry constants.
 
@@ -57,15 +51,15 @@ double P = tether::control::extrusion::PowerLawRheology::pressure(
 
 | Parameter     | Symbol | Unit         | Description                    |
 |---------------|--------|--------------|--------------------------------|
-| `consistency` | K      | Pa·s^n       | Melt consistency               |
-| `flowIndex`   | n      | —            | Flow index (n<1 = thinning)    |
+| `consistency` | $K$      | Pa·s^n       | Melt consistency               |
+| `flowIndex`   | $n$      | —            | Flow index ($n<1$ = thinning)  |
 
 ### Nozzle geometry
 
 | Parameter     | Symbol | Unit | Description            |
 |---------------|--------|------|------------------------|
-| `radius`      | R      | mm   | Nozzle bore radius     |
-| `length`      | L      | mm   | Melt channel length    |
+| `radius`      | $R$      | mm   | Nozzle bore radius     |
+| `length`      | $L$      | mm   | Melt channel length    |
 
 ## Cross-WLF Model
 
@@ -74,24 +68,18 @@ double P = tether::control::extrusion::PowerLawRheology::pressure(
 The Cross model with WLF (Williams–Landel–Ferry) temperature shift captures the
 full shear-rate and temperature dependence of amorphous polymer melts:
 
-```
-η(T, γ̇) = η_0(T) / (1 + (η_0(T)·γ̇ / τ*)^((1-n)/n))
+$$ \eta(T, \dot{\gamma}) = \frac{\eta_0(T)}{1 + \left(\frac{\eta_0(T) \cdot \dot{\gamma}}{\tau^*}\right)^{(1-n)/n}} $$
 
-η_0(T) = η_ref · exp( -C1·(T-T_ref) / (C2 + T-T_ref) )   [WLF shift]
-```
+$$ \eta_0(T) = \eta_{\text{ref}} \cdot \exp\left(-\frac{C_1 (T - T_{\text{ref}})}{C_2 + T - T_{\text{ref}}}\right) \quad \text{[WLF shift]} $$
 
 For capillary flow, the wall shear rate is:
 
-```
-γ̇_w = 4·Q / (π·R³)
-```
+$$ \dot{\gamma}_w = \frac{4Q}{\pi R^3} $$
 
 and the pressure is obtained by integrating the wall shear stress over the
 nozzle length:
 
-```
-P = 2·L·τ_w / R = 2·L·η(T, γ̇_w)·γ̇_w / R
-```
+$$ P = \frac{2 L \tau_w}{R} = \frac{2 L \eta(T, \dot{\gamma}_w) \dot{\gamma}_w}{R} $$
 
 ### API
 
@@ -114,19 +102,19 @@ double P = tether::control::extrusion::CrossWlfRheology::pressure(
 
 | Parameter                 | Symbol  | Unit   | Description              |
 |---------------------------|---------|--------|--------------------------|
-| `tauStar`                 | τ*      | Pa     | Critical stress          |
-| `flowIndex`               | n       | —      | Cross flow index         |
-| `c1`                      | C1      | —      | WLF C1                   |
-| `c2`                      | C2      | K      | WLF C2                   |
-| `refTempC`                | T_ref   | °C     | WLF reference temperature|
-| `zeroShearViscosityRef`   | η_ref   | Pa·s   | Zero-shear viscosity at T_ref |
+| `tauStar`                 | $\tau^*$      | Pa     | Critical stress          |
+| `flowIndex`               | $n$       | —      | Cross flow index         |
+| `c1`                      | $C_1$      | —      | WLF $C_1$                   |
+| `c2`                      | $C_2$      | K      | WLF $C_2$                   |
+| `refTempC`                | $T_{\text{ref}}$   | °C     | WLF reference temperature|
+| `zeroShearViscosityRef`   | $\eta_{\text{ref}}$   | Pa·s   | Zero-shear viscosity at $T_{\text{ref}}$ |
 
 ## Pressure-Flow LUT
 
 ### Overview
 
 For online use in the motion pipeline, calling the full Cross-WLF equation
-per sample is too expensive.  A {Q, T} → P lookup table (`PressureFlowLut`)
+per sample is too expensive.  A $\{Q, T\} \to P$ lookup table (`PressureFlowLut`)
 is built at startup and queried with bilinear interpolation at runtime.
 
 ### API
@@ -156,7 +144,7 @@ double P = lut->pressure(Q, T);  // bilinear interpolation
 |------|-------------|
 | `include/tether/control/extrusion/PowerLawRheology.hpp` | Power-law model |
 | `include/tether/control/extrusion/CrossWlfRheology.hpp` | Cross-WLF model |
-| `include/tether/control/extrusion/PressureFlowLut.hpp` | {Q,T}→P LUT |
+| `include/tether/control/extrusion/PressureFlowLut.hpp` | $\{Q,T\} \to P$ LUT |
 | `src/control/extrusion/CrossWlfRheology.cpp` | Cross-WLF implementation |
 | `src/control/extrusion/PressureFlowLut.cpp` | LUT implementation |
 | `tests/control/test_power_law_rheology.cpp` | Power-law unit tests |

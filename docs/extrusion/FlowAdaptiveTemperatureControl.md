@@ -12,11 +12,11 @@ The key physical insight is that the **thermistor is not at the melt zone** —
 it is physically between the heater block and the melt zone, with its own
 thermal mass and coupling resistances. This means:
 
-1. **T_m drops first** (enthalpy drain is at the melt zone)
-2. **T_s drops second** (sensor is coupled to melt zone through the barrel, with some thermal resistance and delay)
-3. **T_h drops last** (heater block has the largest thermal mass, and the PID reacts to T_s, not T_m)
+1. **$T_m$ drops first** (enthalpy drain is at the melt zone)
+2. **$T_s$ drops second** (sensor is coupled to melt zone through the barrel, with some thermal resistance and delay)
+3. **$T_h$ drops last** (heater block has the largest thermal mass, and the PID reacts to $T_s$, not $T_m$)
 
-The PID reacts to T_s, so it *partially* compensates on its own — but with a
+The PID reacts to $T_s$, so it *partially* compensates on its own — but with a
 lag and a gain error, because the sensor doesn't see the full magnitude of the
 melt-zone drop. After flow stops, the sensor overshoots because the heater
 block is still hot while the melt zone has recovered — the PID sees a falsely
@@ -26,17 +26,17 @@ Tether's **flow-adaptive heater controller** addresses this with a three-state
 thermal model and model-based feed-forward:
 
 1. **Three-state thermal observer** (`MeltZoneThermalObserver`): Models the
-   heater block (T_h), sensor point (T_s), and melt zone (T_m) as three coupled
+   heater block ($T_h$), sensor point ($T_s$), and melt zone ($T_m$) as three coupled
    thermal masses. A Luenberger observer uses the actual thermistor reading to
    correct the state estimate, compensating for unmodelled losses (radiation,
    convection, fan cooling).
 2. **Pre-emphasis**: When flow starts, a feed-forward power boost is applied
-   *before* the melt zone cools. The boost is scaled by (1 - α), where α is the
+   *before* the melt zone cools. The boost is scaled by $(1 - \alpha)$, where $\alpha$ is the
    sensor coupling factor — the fraction of the disturbance the PID will see
    and react to on its own. This avoids double-compensating.
 3. **Post-emphasis**: When flow stops, a decaying power offset compensates the
    thermal debt left in the melt zone, counteracting the PID's premature power
-   reduction caused by the sensor's thermal lag. Also scaled by (1 - α).
+   reduction caused by the sensor's thermal lag. Also scaled by $(1 - \alpha)$.
 4. **Closed-loop PID**: A PID controller drives the sensor temperature to the
    target, with the pre/post-emphasis added as feed-forward.
 
@@ -49,36 +49,36 @@ thermal model and model-based feed-forward:
 | Key                        | Type   | Default | Description                          |
 |----------------------------|--------|---------|--------------------------------------|
 | `heater_flow_pre_emphasis` | bool   | `false` | Enable flow-adaptive heater control  |
-| `filament_heat_capacity`   | float  | `2.1`   | ρ·c_p [J/(mm³·K)]                    |
+| `filament_heat_capacity`   | float  | `2.1`   | $\rho \cdot c_p$ [J/(mm³·K)]                    |
 
 #### Three-state thermal model — capacitances
 
 | Key                        | Type   | Default | Description                          |
 |----------------------------|--------|---------|--------------------------------------|
-| `heater_block_capacitance` | float  | `8.0`   | C_h [J/K] — heater block mass        |
-| `sensor_capacitance`       | float  | `1.0`   | C_s [J/K] — thermistor + surrounding |
-| `melt_zone_capacitance`    | float  | `2.0`   | C_m [J/K] — melt zone thermal mass   |
+| `heater_block_capacitance` | float  | `8.0`   | $C_h$ [J/K] — heater block mass        |
+| `sensor_capacitance`       | float  | `1.0`   | $C_s$ [J/K] — thermistor + surrounding |
+| `melt_zone_capacitance`    | float  | `2.0`   | $C_m$ [J/K] — melt zone thermal mass   |
 
 #### Three-state thermal model — conductances
 
 | Key                        | Type   | Default | Description                          |
 |----------------------------|--------|---------|--------------------------------------|
-| `heater_sensor_conductance`| float  | `2.0`   | G_hs [W/K] — heater block → sensor   |
-| `sensor_melt_conductance`  | float  | `1.5`   | G_sm [W/K] — sensor → melt zone      |
+| `heater_sensor_conductance`| float  | `2.0`   | $G_{hs}$ [W/K] — heater block → sensor   |
+| `sensor_melt_conductance`  | float  | `1.5`   | $G_{sm}$ [W/K] — sensor → melt zone      |
 
 #### Luenberger observer gains
 
 | Key                        | Type   | Default | Description                          |
 |----------------------------|--------|---------|--------------------------------------|
-| `luenberger_gain_heater`   | float  | `0.5`   | L_h [1/s] — correction to T_h        |
-| `luenberger_gain_sensor`   | float  | `2.0`   | L_s [1/s] — correction to T_s        |
-| `luenberger_gain_melt`     | float  | `0.3`   | L_m [1/s] — correction to T_m        |
+| `luenberger_gain_heater`   | float  | `0.5`   | $L_h$ [1/s] — correction to $T_h$        |
+| `luenberger_gain_sensor`   | float  | `2.0`   | $L_s$ [1/s] — correction to $T_s$        |
+| `luenberger_gain_melt`     | float  | `0.3`   | $L_m$ [1/s] — correction to $T_m$        |
 
 #### Feed-forward limits
 
 | Key                        | Type   | Default | Description                          |
 |----------------------------|--------|---------|--------------------------------------|
-| `debt_time_constant`       | float  | `2.0`   | τ [s] — thermal debt decay           |
+| `debt_time_constant`       | float  | `2.0`   | $\tau$ [s] — thermal debt decay           |
 | `max_pre_emphasis_power`   | float  | `0.4`   | Max pre-emphasis PWM boost [0–1]     |
 | `max_post_emphasis_power`  | float  | `0.2`   | Max post-emphasis PWM cut [0–1]      |
 | `max_heater_overshoot`     | float  | `10.0`  | Max allowed overshoot above target [°C] |
@@ -140,16 +140,14 @@ The `extruder` printer object now exposes flow-compensation diagnostics:
 
 A three-state lumped-capacitance thermal model with Luenberger correction:
 
-```
-C_h · dT_h/dt = P_heater - G_hs·(T_h - T_s)
-C_s · dT_s/dt = G_hs·(T_h - T_s) - G_sm·(T_s - T_m)
-C_m · dT_m/dt = G_sm·(T_s - T_m) - ρ·c_p·Q·(T_m - T_in)
-```
+$$ C_h \frac{dT_h}{dt} = P_{\text{heater}} - G_{hs}(T_h - T_s) $$
+$$ C_s \frac{dT_s}{dt} = G_{hs}(T_h - T_s) - G_{sm}(T_s - T_m) $$
+$$ C_m \frac{dT_m}{dt} = G_{sm}(T_s - T_m) - \rho \cdot c_p \cdot Q \cdot (T_m - T_{\text{in}}) $$
 
 States:
-- `T_h` — heater block temperature [°C] (directly heated by cartridge)
-- `T_s` — sensor point temperature [°C] (where the thermistor sits)
-- `T_m` — melt-zone temperature estimate [°C] (where filament melts)
+- $T_h$ — heater block temperature [°C] (directly heated by cartridge)
+- $T_s$ — sensor point temperature [°C] (where the thermistor sits)
+- $T_m$ — melt-zone temperature estimate [°C] (where filament melts)
 
 Physical layout:
 
@@ -164,63 +162,55 @@ Melt zone (T_m)     — cold plastic enters here
 ```
 
 Inputs:
-- `P_heater` — heater power [W] (PWM × power scale)
-- `Q` — volumetric flow [mm³/s] (from `ExtrusionFlowTracker`)
-- `T_s_measured` — actual thermistor reading [°C] (for Luenberger correction)
-- `dt` — time step [s]
+- $P_{\text{heater}}$ — heater power [W] (PWM × power scale)
+- $Q$ — volumetric flow [mm³/s] (from `ExtrusionFlowTracker`)
+- $T_{s,\text{measured}}$ — actual thermistor reading [°C] (for Luenberger correction)
+- $dt$ — time step [s]
 
 #### Luenberger correction
 
 The observer uses the real sensor measurement to correct all three state
 estimates:
 
-```
-innovation = T_s_measured - T_s_estimated
-T_h += L_h · innovation · dt
-T_s += L_s · innovation · dt
-T_m += L_m · innovation · dt
-```
+$$ \text{innovation} = T_{s,\text{measured}} - T_{s,\text{estimated}} $$
+$$ T_h \mathrel{+}= L_h \cdot \text{innovation} \cdot dt $$
+$$ T_s \mathrel{+}= L_s \cdot \text{innovation} \cdot dt $$
+$$ T_m \mathrel{+}= L_m \cdot \text{innovation} \cdot dt $$
 
 This is critical because:
 - Without correction, the open-loop model drifts due to unmodelled losses.
 - The sensor carries information about the melt-zone state that the heater-block
   temperature alone cannot provide.
 - The gains determine how aggressively the observer trusts the measurement vs.
-  the model. L_s is largest (direct measurement), L_h and L_m are moderate
+  the model. $L_s$ is largest (direct measurement), $L_h$ and $L_m$ are moderate
   (indirect).
 
 ### `FlowAdaptiveHeaterController`
 
 Wraps a PID controller and adds model-based feed-forward:
 
-```
-PWM_total = clamp(PWM_pid + PWM_pre + PWM_post, 0, 1)
-```
+$$ \text{PWM}_{\text{total}} = \text{clamp}(\text{PWM}_{\text{pid}} + \text{PWM}_{\text{pre}} + \text{PWM}_{\text{post}}, 0, 1) $$
 
-#### Sensor coupling factor α
+#### Sensor coupling factor $\alpha$
 
 The key innovation is the **sensor coupling factor**:
 
-```
-α = G_sm / (G_hs + G_sm)
-```
+$$ \alpha = \frac{G_{sm}}{G_{hs} + G_{sm}} $$
 
 This represents the fraction of the melt-zone thermal disturbance that the PID
-(which reacts to T_s) will compensate on its own. The feed-forward only needs
-to cover the remaining (1 - α) fraction, avoiding double-compensation.
+(which reacts to $T_s$) will compensate on its own. The feed-forward only needs
+to cover the remaining $(1 - \alpha)$ fraction, avoiding double-compensation.
 
-- **High α** (G_sm >> G_hs): Sensor is tightly coupled to melt zone → PID sees
+- **High $\alpha$** ($G_{sm} \gg G_{hs}$): Sensor is tightly coupled to melt zone → PID sees
   most of the disturbance → small feed-forward needed.
-- **Low α** (G_hs >> G_sm): Sensor is tightly coupled to heater block → PID
+- **Low $\alpha$** ($G_{hs} \gg G_{sm}$): Sensor is tightly coupled to heater block → PID
   barely sees the melt-zone disturbance → large feed-forward needed.
 
 #### Pre-emphasis
 
 At flow onset, the feed-forward covers the uncompensated enthalpy power:
 
-```
-P_pre = (1 - α) · ρ·c_p·Q·(T_target - T_inlet)
-```
+$$ P_{\text{pre}} = (1 - \alpha) \cdot \rho \cdot c_p \cdot Q \cdot (T_{\text{target}} - T_{\text{inlet}}) $$
 
 Plus a gradient boost to establish the thermal gradient across the heater→melt
 path ahead of the thermal lag. Both are bounded by `maxPreEmphasisPower` and
@@ -232,14 +222,12 @@ Pre-emphasis is suppressed when the measured temperature is far from target
 #### Post-emphasis
 
 After flow stops, the melt zone is thermally depleted but the sensor is still
-lagging. A "thermal debt" D relaxes toward zero with time constant τ:
+lagging. A "thermal debt" $D$ relaxes toward zero with time constant $\tau$:
 
-```
-Ḋ = (D_target(Q) - D) / τ
-P_post = (1 - α) · max(-D, 0) / P_scale
-```
+$$ \dot{D} = \frac{D_{\text{target}}(Q) - D}{\tau} $$
+$$ P_{\text{post}} = (1 - \alpha) \cdot \max(-D, 0) / P_{\text{scale}} $$
 
-When flow stops, D_target → 0 but D is still positive, so a decaying positive
+When flow stops, $D_{\text{target}} \to 0$ but $D$ is still positive, so a decaying positive
 power is added to compensate the dip. Bounded by `maxPostEmphasisPower`.
 
 The controller inherits PID gains from the extruder heater's existing PID
@@ -270,26 +258,26 @@ unchanged.
 
 ### Thermal model parameters
 
-The three-state model parameters (C_h, C_s, C_m, G_hs, G_sm) should be
+The three-state model parameters ($C_h$, $C_s$, $C_m$, $G_{hs}$, $G_{sm}$) should be
 identified from step-response data. A simple procedure:
 
 1. Heat the hotend to a stable temperature with no flow.
 2. Apply a step in heater power and record the thermistor response.
 3. Fit the three capacitances and two conductances to match the response.
 4. Alternatively, use physical estimates:
-   - C_h ≈ mass_heater_block × c_aluminum ≈ 8 J/K for a typical hotend
-   - C_s ≈ mass_thermistor_mount × c_steel ≈ 1 J/K
-   - C_m ≈ mass_melt_zone × c_polymer ≈ 2 J/K
-   - G_hs, G_sm: estimate from the thermal resistance of the barrel/throat
+   - $C_h \approx \text{mass}_{\text{heater\_block}} \times c_{\text{aluminum}} \approx 8 \text{ J/K}$ for a typical hotend
+   - $C_s \approx \text{mass}_{\text{thermistor\_mount}} \times c_{\text{steel}} \approx 1 \text{ J/K}$
+   - $C_m \approx \text{mass}_{\text{melt\_zone}} \times c_{\text{polymer}} \approx 2 \text{ J/K}$
+   - $G_{hs}$, $G_{sm}$: estimate from the thermal resistance of the barrel/throat
 
 ### Luenberger gains
 
-Start with the defaults (L_h=0.5, L_s=2.0, L_m=0.3). If the observer diverges
+Start with the defaults ($L_h=0.5$, $L_s=2.0$, $L_m=0.3$). If the observer diverges
 or oscillates:
 
 - **Oscillation**: Reduce all gains by 2×.
-- **Slow convergence**: Increase L_s (the direct measurement gain).
-- **T_m estimate drifts**: Increase L_m, but watch for oscillation.
+- **Slow convergence**: Increase $L_s$ (the direct measurement gain).
+- **$T_m$ estimate drifts**: Increase $L_m$, but watch for oscillation.
 
 ### Feed-forward limits
 
