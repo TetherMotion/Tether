@@ -79,8 +79,8 @@ TEST(KlipperDigitalOut, ScheduleValue) {
     EXPECT_EQ(d.pending(), 0u);
 }
 
-TEST(KlipperPwmOut, SetDuty) {
-    PwmOut p(0);
+TEST(KlipperPWMOut, SetDuty) {
+    PWMOut p(0);
     p.setDuty(512, 1024);
     EXPECT_EQ(p.duty(), 512u);
     EXPECT_EQ(p.maxCycle(), 1024u);

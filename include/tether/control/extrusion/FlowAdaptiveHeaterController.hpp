@@ -104,8 +104,8 @@ public:
 
     /// @brief Last computed feed-forward contributions (diagnostics).
     struct EmphasisState {
-        double preEmphasisPwm = 0.0;
-        double postEmphasisPwm = 0.0;
+        double preEmphasisPWM = 0.0;
+        double postEmphasisPWM = 0.0;
         double thermalDebt = 0.0;
     };
     const EmphasisState& emphasis() const { return emphasis_; }

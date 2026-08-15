@@ -2,7 +2,7 @@
 #pragma once
 
 /**
- * @file FftProcessor.hpp
+ * @file FFTProcessor.hpp
  * @brief FFT and spectral analysis helpers extracted from PathRelativeFFT
  *
  * @details
@@ -22,7 +22,7 @@
 
 namespace tether::motion::replanner {
 
-class FftProcessor {
+class FFTProcessor {
 public:
     /// Cooley-Tukey radix-2 FFT (in-place, complex).
     /// @param data Must be a power-of-2 sized complex vector.

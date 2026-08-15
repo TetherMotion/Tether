@@ -1,5 +1,5 @@
 /**
- * @file OverlapAddLpvDeconvolver.hpp
+ * @file OverlapAddLPVDeconvolver.hpp
  * @brief Gain-scheduled overlap-add LPV deconvolution (pseudo-frequency domain).
  *
  * @details
@@ -11,7 +11,7 @@
  *
  * Algorithm:
  *   1. LUT generation: at M operating points p_m, measure h_m[n] and compute
- *      the regularized inverse h_inv_m[n] via LtiFrequencyDomainDeconvolver.
+ *      the regularized inverse h_inv_m[n] via LTIFrequencyDomainDeconvolver.
  *   2. Windowing: segment y_tgt[n] into overlapping blocks of length B with
  *      50% overlap, multiplied by a Hann window.
  *   3. Block processing: for each block i, compute the average scheduling
@@ -27,14 +27,14 @@
 
 #pragma once
 
-#include "tether/control/extrusion/LtiFrequencyDomainDeconvolver.hpp"
+#include "tether/control/extrusion/LTIFrequencyDomainDeconvolver.hpp"
 #include <map>
 #include <vector>
 
 namespace tether::control::extrusion {
 
 /// @brief Parameters for the overlap-add LPV deconvolver.
-struct OverlapAddLpvParams {
+struct OverlapAddLPVParams {
     /// @brief Block size B (samples).  Must be > 0.
     int blockSize = 256;
 
@@ -51,9 +51,9 @@ struct OverlapAddLpvParams {
 /// parameter.  At runtime, the target trajectory is segmented into
 /// overlapping Hann-windowed blocks; each block is convolved with an
 /// interpolated inverse filter and the results are overlap-added.
-class OverlapAddLpvDeconvolver {
+class OverlapAddLPVDeconvolver {
 public:
-    explicit OverlapAddLpvDeconvolver(OverlapAddLpvParams params = {});
+    explicit OverlapAddLPVDeconvolver(OverlapAddLPVParams params = {});
 
     /// @brief Add an operating point to the inverse-filter LUT.
     /// @param p Scheduling parameter value (e.g., nominal speed).
@@ -78,13 +78,13 @@ public:
     size_t numOperatingPoints() const { return inverseFilterLut_.size(); }
 
     /// @return The parameters.
-    const OverlapAddLpvParams& params() const { return params_; }
+    const OverlapAddLPVParams& params() const { return params_; }
 
     /// @brief Clear the LUT and reset state.
     void reset();
 
 private:
-    OverlapAddLpvParams params_;
+    OverlapAddLPVParams params_;
     std::map<double, std::vector<double>> inverseFilterLut_;
 
     /// @brief Interpolate an inverse filter at scheduling parameter p.

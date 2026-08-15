@@ -284,44 +284,44 @@ TEST(KlipperDigitalOutExt, Proxy) {
 }
 
 // ============================================================================
-// PwmOut extended tests
+// PWMOut extended tests
 // ============================================================================
 
-TEST(KlipperPwmOutExt, InitialState) {
-    PwmOut p(0);
+TEST(KlipperPWMOutExt, InitialState) {
+    PWMOut p(0);
     EXPECT_EQ(p.oid(), 0);
     EXPECT_EQ(p.duty(), 0u);
 }
 
-TEST(KlipperPwmOutExt, SetDuty) {
-    PwmOut p(0);
+TEST(KlipperPWMOutExt, SetDuty) {
+    PWMOut p(0);
     p.setDuty(512, 1024);
     EXPECT_EQ(p.duty(), 512u);
     EXPECT_EQ(p.maxCycle(), 1024u);
 }
 
-TEST(KlipperPwmOutExt, SetFullDuty) {
-    PwmOut p(0);
+TEST(KlipperPWMOutExt, SetFullDuty) {
+    PWMOut p(0);
     p.setDuty(1024, 1024);
     EXPECT_EQ(p.duty(), 1024u);
 }
 
-TEST(KlipperPwmOutExt, SetZeroDuty) {
-    PwmOut p(0);
+TEST(KlipperPWMOutExt, SetZeroDuty) {
+    PWMOut p(0);
     p.setDuty(512, 1024);
     p.setDuty(0, 1024);
     EXPECT_EQ(p.duty(), 0u);
 }
 
-TEST(KlipperPwmOutExt, ScheduleDuty) {
-    PwmOut p(0);
+TEST(KlipperPWMOutExt, ScheduleDuty) {
+    PWMOut p(0);
     p.scheduleDuty(256, 1000);
     p.tick(1000);
     EXPECT_EQ(p.duty(), 256u);
 }
 
-TEST(KlipperPwmOutExt, Proxy) {
-    PwmOutProxy p(5);
+TEST(KlipperPWMOutExt, Proxy) {
+    PWMOutProxy p(5);
     EXPECT_EQ(p.oid(), 5);
 }
 

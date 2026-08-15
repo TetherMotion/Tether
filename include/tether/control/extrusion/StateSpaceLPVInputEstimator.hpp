@@ -1,5 +1,5 @@
 /**
- * @file StateSpaceLpvInputEstimator.hpp
+ * @file StateSpaceLPVInputEstimator.hpp
  * @brief LPV state-space input estimation with Tikhonov-regularized inversion.
  *
  * @details
@@ -48,22 +48,22 @@
 namespace tether::control::extrusion {
 
 /// @brief State-space model at a single operating point.
-struct StateSpaceLpvModelPoint {
+struct StateSpaceLPVModelPoint {
     double parameter = 0.0;
     Eigen::MatrixXd A;  ///< State transition matrix [stateDim × stateDim]
     Eigen::MatrixXd B;  ///< Input matrix [stateDim × inputDim]
     Eigen::MatrixXd C;  ///< Output matrix [outputDim × stateDim]
     Eigen::MatrixXd D;  ///< Feedthrough matrix [outputDim × inputDim] (usually 0)
 
-    StateSpaceLpvModelPoint() = default;
-    StateSpaceLpvModelPoint(double p, Eigen::MatrixXd a, Eigen::MatrixXd b,
+    StateSpaceLPVModelPoint() = default;
+    StateSpaceLPVModelPoint(double p, Eigen::MatrixXd a, Eigen::MatrixXd b,
                             Eigen::MatrixXd c, Eigen::MatrixXd d = {})
         : parameter(p), A(std::move(a)), B(std::move(b)),
           C(std::move(c)), D(std::move(d)) {}
 };
 
 /// @brief Parameters for the state-space LPV input estimator.
-struct StateSpaceLpvParams {
+struct StateSpaceLPVParams {
     /// @brief Tikhonov regularization λ for the matrix pseudo-inverse.
     double lambda = 1e-8;
 };
@@ -73,18 +73,18 @@ struct StateSpaceLpvParams {
 /// Propagates the internal state v[n] in a feedforward simulation and
 /// recovers the required input x[n] by inverting the one-step-ahead
 /// output equation with Tikhonov regularization.
-class StateSpaceLpvInputEstimator {
+class StateSpaceLPVInputEstimator {
 public:
     /// @brief Construct with system dimensions.
     /// @param stateDim Dimension of the state vector v.
     /// @param inputDim Dimension of the input x (1 for SISO).
     /// @param outputDim Dimension of the output y (1 for SISO).
-    StateSpaceLpvInputEstimator(int stateDim, int inputDim = 1,
+    StateSpaceLPVInputEstimator(int stateDim, int inputDim = 1,
                                 int outputDim = 1,
-                                StateSpaceLpvParams params = {});
+                                StateSpaceLPVParams params = {});
 
     /// @brief Add a state-space model at operating point p.
-    void addModelPoint(const StateSpaceLpvModelPoint& point);
+    void addModelPoint(const StateSpaceLPVModelPoint& point);
 
     /// @brief Process one step with one-step-ahead lookahead.
     /// @param yTargetNext y_tgt[n+1] (the lookahead target).
@@ -116,12 +116,12 @@ private:
     int stateDim_;
     int inputDim_;
     int outputDim_;
-    StateSpaceLpvParams params_;
-    std::map<double, StateSpaceLpvModelPoint> modelLut_;
+    StateSpaceLPVParams params_;
+    std::map<double, StateSpaceLPVModelPoint> modelLut_;
     Eigen::VectorXd v_;  ///< current state vector
 
     /// @brief Interpolate state-space matrices at scheduling parameter p.
-    StateSpaceLpvModelPoint interpolateModel(double p) const;
+    StateSpaceLPVModelPoint interpolateModel(double p) const;
 
     /// @brief Tikhonov-regularized solve: x = (M^T M + λI)^{-1} M^T b.
     /// For SISO (scalar M), uses the scalar form x = M·b / (M² + λ).

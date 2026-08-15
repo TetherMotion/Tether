@@ -24,7 +24,7 @@ from ._klipper import (
     # Thermal
     ThermistorParams,
     Thermistor,
-    HeaterPidParams,
+    HeaterPIDParams,
     Heater,
     # Homing
     HomingAxisConfig,
@@ -97,7 +97,7 @@ from ._klipper import (
     ConfigValidator,
     # Peripheral device classes
     DigitalOut,
-    PwmOut,
+    PWMOut,
     AnalogIn,
     Spi,
     I2c,
@@ -107,7 +107,7 @@ from ._klipper import (
     HallFilamentSensor,
     # PrinterObject wrapper classes
     DigitalOutObject,
-    PwmOutObject,
+    PWMOutObject,
     AnalogInObject,
     SpiObject,
     I2cObject,
@@ -128,7 +128,7 @@ except ImportError:
     _HAS_PRESSURE_ADVANCE = False
 
 __all__ = [
-    "ThermistorParams", "Thermistor", "HeaterPidParams", "Heater",
+    "ThermistorParams", "Thermistor", "HeaterPIDParams", "Heater",
     "HomingAxisConfig", "HomingResult", "HomingSequence", "Probe",
     "BedMesh",
     "Fan", "LedColor", "Neopixel", "FilamentSensor", "PulseCounter",
@@ -151,9 +151,9 @@ __all__ = [
     "SkewParams", "SkewCorrection",
     "CaseLight",
     "ConfigValidationResult", "ConfigValidator",
-    "DigitalOut", "PwmOut", "AnalogIn", "Spi", "I2c",
+    "DigitalOut", "PWMOut", "AnalogIn", "Spi", "I2c",
     "Endstop", "TrsyncState", "Trsync", "HallFilamentSensor",
-    "DigitalOutObject", "PwmOutObject", "AnalogInObject",
+    "DigitalOutObject", "PWMOutObject", "AnalogInObject",
     "SpiObject", "I2cObject",
     "EndstopObject", "TrsyncObject", "HallFilamentSensorObject",
     "PulseCounterObject", "NeopixelObject", "TmcUartObject",

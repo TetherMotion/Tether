@@ -1,6 +1,6 @@
 /**
  * @file Gpio.hpp
- * @brief Digital and analog GPIO peripherals: DigitalOut, PwmOut, AnalogIn and proxies.
+ * @brief Digital and analog GPIO peripherals: DigitalOut, PWMOut, AnalogIn and proxies.
  */
 
 #pragma once
@@ -92,12 +92,12 @@ private:
 // ============================================================================
 
 /// @brief PWM output pin object.
-class PwmOut {
+class PWMOut {
 public:
     using WriteFunc = std::function<void(double)>;
 
-    PwmOut(uint8_t oid) : oid_(oid) {}
-    PwmOut(uint8_t oid, WriteFunc writeFunc)
+    PWMOut(uint8_t oid) : oid_(oid) {}
+    PWMOut(uint8_t oid, WriteFunc writeFunc)
         : oid_(oid), writeFunc_(std::move(writeFunc)) {}
 
     uint8_t oid() const { return oid_; }
@@ -198,10 +198,10 @@ private:
     uint32_t pending_ = 0;
 };
 
-/// @brief Proxy for PwmOut that tracks pending scheduled values.
-class PwmOutProxy {
+/// @brief Proxy for PWMOut that tracks pending scheduled values.
+class PWMOutProxy {
 public:
-    explicit PwmOutProxy(uint8_t oid) : oid_(oid) {}
+    explicit PWMOutProxy(uint8_t oid) : oid_(oid) {}
 
     uint8_t oid() const { return oid_; }
 

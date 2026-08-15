@@ -1,35 +1,35 @@
 /**
- * @file OverlapAddLpvDeconvolver.cpp
+ * @file OverlapAddLPVDeconvolver.cpp
  * @brief Gain-scheduled overlap-add LPV deconvolution implementation.
  */
 
-#include "tether/control/extrusion/OverlapAddLpvDeconvolver.hpp"
+#include "tether/control/extrusion/OverlapAddLPVDeconvolver.hpp"
 
 #include <algorithm>
 #include <cmath>
 
 namespace tether::control::extrusion {
 
-OverlapAddLpvDeconvolver::OverlapAddLpvDeconvolver(OverlapAddLpvParams params)
+OverlapAddLPVDeconvolver::OverlapAddLPVDeconvolver(OverlapAddLPVParams params)
     : params_(std::move(params)) {}
 
-void OverlapAddLpvDeconvolver::addOperatingPoint(
+void OverlapAddLPVDeconvolver::addOperatingPoint(
     double p, const std::vector<double>& h) {
-    LtiFrequencyDomainDeconvolver lti;
-    LtiDeconvolutionParams lp;
+    LTIFrequencyDomainDeconvolver lti;
+    LTIDeconvolutionParams lp;
     lp.lambda = params_.lambda;
-    lti = LtiFrequencyDomainDeconvolver(lp);
+    lti = LTIFrequencyDomainDeconvolver(lp);
     lti.setImpulseResponse(h);
     lti.precomputeInverseFilter();
     inverseFilterLut_[p] = lti.inverseFilter();
 }
 
-void OverlapAddLpvDeconvolver::addInverseFilter(
+void OverlapAddLPVDeconvolver::addInverseFilter(
     double p, const std::vector<double>& hInv) {
     inverseFilterLut_[p] = hInv;
 }
 
-std::vector<double> OverlapAddLpvDeconvolver::deconvolve(
+std::vector<double> OverlapAddLPVDeconvolver::deconvolve(
     const std::vector<double>& y_tgt, const std::vector<double>& p) const {
     if (y_tgt.empty() || inverseFilterLut_.empty()) return {};
     if (y_tgt.size() != p.size()) return {};
@@ -79,11 +79,11 @@ std::vector<double> OverlapAddLpvDeconvolver::deconvolve(
     return result;
 }
 
-void OverlapAddLpvDeconvolver::reset() {
+void OverlapAddLPVDeconvolver::reset() {
     inverseFilterLut_.clear();
 }
 
-std::vector<double> OverlapAddLpvDeconvolver::interpolateInverseFilter(
+std::vector<double> OverlapAddLPVDeconvolver::interpolateInverseFilter(
     double p) const {
     if (inverseFilterLut_.empty()) return {};
 
@@ -117,7 +117,7 @@ std::vector<double> OverlapAddLpvDeconvolver::interpolateInverseFilter(
     return result;
 }
 
-std::vector<double> OverlapAddLpvDeconvolver::hannWindow(int N) {
+std::vector<double> OverlapAddLPVDeconvolver::hannWindow(int N) {
     std::vector<double> w(N, 0.0);
     for (int i = 0; i < N; ++i) {
         // Hann window: 0.5 * (1 - cos(2π n / (N-1)))
@@ -128,7 +128,7 @@ std::vector<double> OverlapAddLpvDeconvolver::hannWindow(int N) {
     return w;
 }
 
-std::vector<double> OverlapAddLpvDeconvolver::convolve(
+std::vector<double> OverlapAddLPVDeconvolver::convolve(
     const std::vector<double>& a, const std::vector<double>& b) {
     if (a.empty() || b.empty()) return {};
     const int la = static_cast<int>(a.size());

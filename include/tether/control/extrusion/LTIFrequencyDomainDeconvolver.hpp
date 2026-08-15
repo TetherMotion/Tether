@@ -1,5 +1,5 @@
 /**
- * @file LtiFrequencyDomainDeconvolver.hpp
+ * @file LTIFrequencyDomainDeconvolver.hpp
  * @brief Regularized LTI frequency-domain deconvolution (Wiener/Tikhonov).
  *
  * @details
@@ -40,7 +40,7 @@
 namespace tether::control::extrusion {
 
 /// @brief Parameters for the LTI frequency-domain deconvolver.
-struct LtiDeconvolutionParams {
+struct LTIDeconvolutionParams {
     /// @brief Tikhonov regularization parameter λ > 0.
     /// Larger values produce smoother (less aggressive) input commands
     /// at the cost of tracking accuracy.  Typical range: 1e-8 … 1e-2.
@@ -59,9 +59,9 @@ struct LtiDeconvolutionParams {
 ///   3. deconvolve(y_tgt) — compute the required input for a target trajectory.
 ///
 /// Alternatively, deconvolve(y_tgt, h) performs all three steps in one call.
-class LtiFrequencyDomainDeconvolver {
+class LTIFrequencyDomainDeconvolver {
 public:
-    explicit LtiFrequencyDomainDeconvolver(LtiDeconvolutionParams params = {});
+    explicit LTIFrequencyDomainDeconvolver(LTIDeconvolutionParams params = {});
 
     /// @brief Set the measured LTI impulse response h[n].
     void setImpulseResponse(const std::vector<double>& h);
@@ -89,7 +89,7 @@ public:
     const std::vector<double>& inverseFilter() const { return hInv_; }
 
     /// @return The current parameters.
-    const LtiDeconvolutionParams& params() const { return params_; }
+    const LTIDeconvolutionParams& params() const { return params_; }
 
     /// @brief Update the regularization parameter and recompute the inverse.
     void setLambda(double lambda);
@@ -98,14 +98,14 @@ public:
     void reset();
 
 private:
-    LtiDeconvolutionParams params_;
+    LTIDeconvolutionParams params_;
     std::vector<double> h_;       ///< impulse response
     std::vector<double> hInv_;    ///< regularized inverse filter
     int groupDelay_ = 0;          ///< peak index of h
     int fftSize_ = 0;             ///< last FFT size used
 
     /// @brief Compute the next valid FFT size ≥ minSize.
-    int computeFftSize(int minSize) const;
+    int computeFFTSize(int minSize) const;
 
     /// @brief Find the index of the peak of h (group delay estimate).
     int findPeakIndex(const std::vector<double>& h) const;

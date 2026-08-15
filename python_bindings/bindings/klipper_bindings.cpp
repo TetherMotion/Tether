@@ -51,22 +51,22 @@ PYBIND11_MODULE(_klipper, m) {
         .def_property_readonly("oid", &Thermistor::oid)
         .def_property_readonly("last_temperature", &Thermistor::lastTemperature);
 
-    py::class_<HeaterPidParams>(m, "HeaterPidParams")
+    py::class_<HeaterPIDParams>(m, "HeaterPIDParams")
         .def(py::init<>())
-        .def_readwrite("kp", &HeaterPidParams::Kp)
-        .def_readwrite("ki", &HeaterPidParams::Ki)
-        .def_readwrite("kd", &HeaterPidParams::Kd)
-        .def_readwrite("imax", &HeaterPidParams::imax)
-        .def_readwrite("pwm_min", &HeaterPidParams::pwmMin)
-        .def_readwrite("pwm_max", &HeaterPidParams::pwmMax);
+        .def_readwrite("kp", &HeaterPIDParams::Kp)
+        .def_readwrite("ki", &HeaterPIDParams::Ki)
+        .def_readwrite("kd", &HeaterPIDParams::Kd)
+        .def_readwrite("imax", &HeaterPIDParams::imax)
+        .def_readwrite("pwm_min", &HeaterPIDParams::pwmMin)
+        .def_readwrite("pwm_max", &HeaterPIDParams::pwmMax);
 
     py::class_<Heater, std::shared_ptr<Heater>>(m, "Heater")
-        .def(py::init<uint8_t, Heater::PwmWriteFunc, Heater::SensorReadFunc>())
+        .def(py::init<uint8_t, Heater::PWMWriteFunc, Heater::SensorReadFunc>())
         .def("set_target", &Heater::setTarget)
         .def("control", &Heater::control)
         .def("reset", &Heater::reset)
         .def("at_target", &Heater::atTarget, py::arg("tolerance") = 2.0)
-        .def("set_pid_params", &Heater::setPidParams)
+        .def("set_pid_params", &Heater::setPIDParams)
         .def("set_safety_limits", &Heater::setSafetyLimits)
         .def("set_shutdown_callback", &Heater::setShutdownCallback)
         .def("set_control_interval", &Heater::setControlInterval)
@@ -128,7 +128,7 @@ PYBIND11_MODULE(_klipper, m) {
     // Peripherals
     // ----------------------------------------------------------------
     py::class_<Fan, std::shared_ptr<Fan>>(m, "Fan")
-        .def(py::init<uint8_t, Fan::PwmWriteFunc>())
+        .def(py::init<uint8_t, Fan::PWMWriteFunc>())
         .def("set_speed", &Fan::setSpeed)
         .def("set_off_time", &Fan::setOffTime)
         .def_property_readonly("oid", &Fan::oid)
@@ -622,18 +622,18 @@ PYBIND11_MODULE(_klipper, m) {
         .def_property_readonly("oid", &objects::DigitalOut::oid)
         .def_property_readonly("value", &objects::DigitalOut::value);
 
-    py::class_<objects::PwmOut, std::shared_ptr<objects::PwmOut>>(m, "PwmOut",
+    py::class_<objects::PWMOut, std::shared_ptr<objects::PWMOut>>(m, "PWMOut",
         "PWM output pin object.")
         .def(py::init<uint8_t>())
-        .def(py::init<uint8_t, objects::PwmOut::WriteFunc>())
-        .def("set_duty", py::overload_cast<double>(&objects::PwmOut::setDuty))
-        .def("set_duty_raw", py::overload_cast<uint32_t, uint32_t>(&objects::PwmOut::setDuty))
-        .def("set_cycle_time", &objects::PwmOut::setCycleTime)
-        .def("set_write_func", &objects::PwmOut::setWriteFunc)
-        .def_property_readonly("oid", &objects::PwmOut::oid)
-        .def_property_readonly("duty", &objects::PwmOut::duty)
-        .def_property_readonly("duty_double", &objects::PwmOut::dutyDouble)
-        .def_property_readonly("cycle_time", &objects::PwmOut::cycleTime);
+        .def(py::init<uint8_t, objects::PWMOut::WriteFunc>())
+        .def("set_duty", py::overload_cast<double>(&objects::PWMOut::setDuty))
+        .def("set_duty_raw", py::overload_cast<uint32_t, uint32_t>(&objects::PWMOut::setDuty))
+        .def("set_cycle_time", &objects::PWMOut::setCycleTime)
+        .def("set_write_func", &objects::PWMOut::setWriteFunc)
+        .def_property_readonly("oid", &objects::PWMOut::oid)
+        .def_property_readonly("duty", &objects::PWMOut::duty)
+        .def_property_readonly("duty_double", &objects::PWMOut::dutyDouble)
+        .def_property_readonly("cycle_time", &objects::PWMOut::cycleTime);
 
     py::class_<objects::AnalogIn, std::shared_ptr<objects::AnalogIn>>(m, "AnalogIn",
         "Analog input pin object.")
@@ -720,10 +720,10 @@ PYBIND11_MODULE(_klipper, m) {
         .def(py::init<std::shared_ptr<objects::DigitalOut>, std::string>(),
              py::arg("dev"), py::arg("name") = "output_pin");
 
-    py::class_<PwmOutObject, PrinterObject, std::shared_ptr<PwmOutObject>>(
-        m, "PwmOutObject",
+    py::class_<PWMOutObject, PrinterObject, std::shared_ptr<PWMOutObject>>(
+        m, "PWMOutObject",
         "PWM output pin printer object (UDS wrapper).")
-        .def(py::init<std::shared_ptr<objects::PwmOut>, std::string>(),
+        .def(py::init<std::shared_ptr<objects::PWMOut>, std::string>(),
              py::arg("dev"), py::arg("name") = "pwm_tool");
 
     py::class_<AnalogInObject, PrinterObject, std::shared_ptr<AnalogInObject>>(

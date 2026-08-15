@@ -10,13 +10,13 @@
 
 namespace tether::control::extrusion {
 
-void MeltZoneThermalObserver::update(double heaterPwm, double flowMm3PerS,
+void MeltZoneThermalObserver::update(double heaterPWM, double flowMm3PerS,
                                      double dt) {
     if (dt <= 0.0) return;
-    heaterPwm = std::clamp(heaterPwm, 0.0, 1.0);
+    heaterPWM = std::clamp(heaterPWM, 0.0, 1.0);
     if (flowMm3PerS < 0.0) flowMm3PerS = 0.0;
 
-    const double P_heater = heaterPwm * params_.heaterPowerScale; // [W]
+    const double P_heater = heaterPWM * params_.heaterPowerScale; // [W]
     const double dT_hm = heaterBlockTemp_ - meltTemp_;            // [K]
     const double enthalpy = params_.filamentHeatCapacity * flowMm3PerS *
                             (meltTemp_ - params_.inletTempC);     // [W]

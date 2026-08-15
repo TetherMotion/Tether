@@ -16,7 +16,7 @@ Vector makeStepInput(size_t count, double step_value) {
     return input;
 }
 
-Vector simulateArxPlant(const Vector& input, double a1, double b1) {
+Vector simulateARXPlant(const Vector& input, double a1, double b1) {
     Vector output(input.size(), 0.0);
     for (size_t i = 1; i < input.size(); ++i) {
         output[i] = -a1 * output[i - 1] + b1 * input[i - 1];
@@ -28,7 +28,7 @@ Vector simulateArxPlant(const Vector& input, double a1, double b1) {
 
 TEST(PolynomialModelsTest, IdentifiersFitStablePlant) {
     const Vector input = makeStepInput(240, 1.0);
-    const Vector output = simulateArxPlant(input, -0.72, 0.45);
+    const Vector output = simulateARXPlant(input, -0.72, 0.45);
 
     PolynomialModelOrders orders;
     orders.na = 1;

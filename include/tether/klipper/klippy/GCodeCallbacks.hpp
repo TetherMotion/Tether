@@ -196,13 +196,13 @@ struct GcodeCallbacks {
     // --- PID ---
 
     /// @brief Set hotend PID (M301).
-    std::function<void(double kp, double ki, double kd)> setHotendPid;
+    std::function<void(double kp, double ki, double kd)> setHotendPID;
 
     /// @brief Set bed PID (M304).
-    std::function<void(double kp, double ki, double kd)> setBedPid;
+    std::function<void(double kp, double ki, double kd)> setBedPID;
 
     /// @brief Run PID autotune (M303).
-    std::function<std::string(double temp, int cycles)> runPidAutotune;
+    std::function<std::string(double temp, int cycles)> runPIDAutotune;
 
     // --- Probe control ---
 

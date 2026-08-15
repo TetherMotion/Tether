@@ -158,7 +158,7 @@ TEST(KlipperStandardCommandsExt, RegistersDigitalOut) {
     EXPECT_TRUE(dict.lookupCommand("config_digital_out oid=%c pin=%u value=%c").has_value());
 }
 
-TEST(KlipperStandardCommandsExt, RegistersPwmOut) {
+TEST(KlipperStandardCommandsExt, RegistersPWMOut) {
     KlipperConfig cfg;
     withStandardCommands(cfg, 180000000);
     auto dict = cfg.build();

@@ -585,22 +585,22 @@ public:
             return true;
         } else if (g.code == "M301") {
             // Set hotend PID
-            if (callbacks_.setHotendPid) {
-                callbacks_.setHotendPid(g.get('P', 0.0), g.get('I', 0.0), g.get('D', 0.0));
+            if (callbacks_.setHotendPID) {
+                callbacks_.setHotendPID(g.get('P', 0.0), g.get('I', 0.0), g.get('D', 0.0));
             }
             return true;
         } else if (g.code == "M303") {
             // PID autotune
-            if (callbacks_.runPidAutotune) {
-                std::string result = callbacks_.runPidAutotune(g.get('S', 200.0),
+            if (callbacks_.runPIDAutotune) {
+                std::string result = callbacks_.runPIDAutotune(g.get('S', 200.0),
                     static_cast<int>(g.get('C', 5)));
                 if (callbacks_.output) callbacks_.output(result);
             }
             return true;
         } else if (g.code == "M304") {
             // Set bed PID
-            if (callbacks_.setBedPid) {
-                callbacks_.setBedPid(g.get('P', 0.0), g.get('I', 0.0), g.get('D', 0.0));
+            if (callbacks_.setBedPID) {
+                callbacks_.setBedPID(g.get('P', 0.0), g.get('I', 0.0), g.get('D', 0.0));
             }
             return true;
         } else if (g.code == "M350") {

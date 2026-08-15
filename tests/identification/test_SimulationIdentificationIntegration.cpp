@@ -29,7 +29,7 @@ using ScalarInputFn = std::function<double(double)>;
 using DisturbanceFn = std::function<double(double, const Simulation::StateVector&, double)>;
 using MeasurementFn = std::function<double(double, double)>;
 
-struct SisoExperiment {
+struct SISOExperiment {
     Vector commanded_input;
     Vector plant_input;
     Vector clean_output;
@@ -65,13 +65,13 @@ Simulation::StateVector rk4Step(const Simulation::DynamicalSystem& system,
     return next_state;
 }
 
-SisoExperiment simulateSisoExperiment(const Simulation::DynamicalSystem& system,
+SISOExperiment simulateSISOExperiment(const Simulation::DynamicalSystem& system,
                                       double dt,
                                       size_t sample_count,
                                       const ScalarInputFn& command,
                                       const DisturbanceFn& disturbance = {},
                                       const MeasurementFn& measurement = {}) {
-    SisoExperiment experiment;
+    SISOExperiment experiment;
     experiment.commanded_input.reserve(sample_count);
     experiment.plant_input.reserve(sample_count);
     experiment.clean_output.reserve(sample_count);
@@ -196,7 +196,7 @@ TEST(SimulationIdentificationIntegrationTest, MassSpringDamperResonanceIsRecover
     system.setParameters({{"m", 1.0}, {"k", 16.0}, {"c", 0.4}});
 
     const double dt = 0.02;
-    const auto experiment = simulateSisoExperiment(system, dt, 2500, richExcitation);
+    const auto experiment = simulateSISOExperiment(system, dt, 2500, richExcitation);
 
     const auto centered_input = removeMean(experiment.commanded_input);
     const auto centered_output = removeMean(experiment.clean_output);
@@ -222,7 +222,7 @@ TEST(SimulationIdentificationIntegrationTest, MassSpringDamperIdentificationRema
     std::normal_distribution<double> white_noise(0.0, 0.015);
 
     const double dt = 0.02;
-    const auto experiment = simulateSisoExperiment(
+    const auto experiment = simulateSISOExperiment(
         system,
         dt,
         2500,
@@ -265,7 +265,7 @@ TEST(SimulationIdentificationIntegrationTest, FlexibleShaftOeModelCapturesDomina
     std::normal_distribution<double> sensor_noise(0.0, 0.0025);
 
     const double dt = 0.01;
-    const auto experiment = simulateSisoExperiment(
+    const auto experiment = simulateSISOExperiment(
         system,
         dt,
         3000,
@@ -300,7 +300,7 @@ TEST(SimulationIdentificationIntegrationTest, HammersteinWienerOutperformsLinear
     std::normal_distribution<double> sensor_noise(0.0, 0.006);
 
     const double dt = 0.02;
-    const auto experiment = simulateSisoExperiment(
+    const auto experiment = simulateSISOExperiment(
         system,
         dt,
         2200,
@@ -347,7 +347,7 @@ TEST(SimulationIdentificationIntegrationTest, DuffingEtfeRetainsForcedPeakWithCo
     });
 
     const double dt = 0.01;
-    const auto experiment = simulateSisoExperiment(
+    const auto experiment = simulateSISOExperiment(
         system,
         dt,
         4000,

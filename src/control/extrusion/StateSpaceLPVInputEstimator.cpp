@@ -1,26 +1,26 @@
 /**
- * @file StateSpaceLpvInputEstimator.cpp
+ * @file StateSpaceLPVInputEstimator.cpp
  * @brief LPV state-space input estimation implementation.
  */
 
-#include "tether/control/extrusion/StateSpaceLpvInputEstimator.hpp"
+#include "tether/control/extrusion/StateSpaceLPVInputEstimator.hpp"
 
 #include <algorithm>
 #include <cmath>
 
 namespace tether::control::extrusion {
 
-StateSpaceLpvInputEstimator::StateSpaceLpvInputEstimator(
-    int stateDim, int inputDim, int outputDim, StateSpaceLpvParams params)
+StateSpaceLPVInputEstimator::StateSpaceLPVInputEstimator(
+    int stateDim, int inputDim, int outputDim, StateSpaceLPVParams params)
     : stateDim_(stateDim), inputDim_(inputDim), outputDim_(outputDim),
       params_(std::move(params)), v_(Eigen::VectorXd::Zero(stateDim)) {}
 
-void StateSpaceLpvInputEstimator::addModelPoint(
-    const StateSpaceLpvModelPoint& point) {
+void StateSpaceLPVInputEstimator::addModelPoint(
+    const StateSpaceLPVModelPoint& point) {
     modelLut_[point.parameter] = point;
 }
 
-double StateSpaceLpvInputEstimator::process(
+double StateSpaceLPVInputEstimator::process(
     double yTargetNext, double pCurrent, double pNext) {
     if (modelLut_.empty()) return 0.0;
 
@@ -60,7 +60,7 @@ double StateSpaceLpvInputEstimator::process(
     return (inputDim_ == 1) ? xReq(0) : xReq(0);
 }
 
-std::vector<double> StateSpaceLpvInputEstimator::process(
+std::vector<double> StateSpaceLPVInputEstimator::process(
     const std::vector<double>& yTarget, const std::vector<double>& p) {
     if (yTarget.empty() || yTarget.size() != p.size()) return {};
     reset();
@@ -77,14 +77,14 @@ std::vector<double> StateSpaceLpvInputEstimator::process(
     return xReq;
 }
 
-void StateSpaceLpvInputEstimator::reset() {
+void StateSpaceLPVInputEstimator::reset() {
     v_ = Eigen::VectorXd::Zero(stateDim_);
 }
 
-StateSpaceLpvModelPoint StateSpaceLpvInputEstimator::interpolateModel(
+StateSpaceLPVModelPoint StateSpaceLPVInputEstimator::interpolateModel(
     double p) const {
     if (modelLut_.empty()) {
-        return StateSpaceLpvModelPoint{};
+        return StateSpaceLPVModelPoint{};
     }
 
     auto it = modelLut_.find(p);
@@ -99,7 +99,7 @@ StateSpaceLpvModelPoint StateSpaceLpvInputEstimator::interpolateModel(
     const double p1 = upper->first;
     const double t = (p - p0) / (p1 - p0);
 
-    StateSpaceLpvModelPoint result;
+    StateSpaceLPVModelPoint result;
     result.parameter = p;
     result.A = lower->second.A + t * (upper->second.A - lower->second.A);
     result.B = lower->second.B + t * (upper->second.B - lower->second.B);
@@ -108,7 +108,7 @@ StateSpaceLpvModelPoint StateSpaceLpvInputEstimator::interpolateModel(
     return result;
 }
 
-Eigen::VectorXd StateSpaceLpvInputEstimator::regularizedSolve(
+Eigen::VectorXd StateSpaceLPVInputEstimator::regularizedSolve(
     const Eigen::MatrixXd& M, const Eigen::VectorXd& b, double lambda) const {
     // Tikhonov-regularized least squares: x = (M^T M + λI)^{-1} M^T b
     //

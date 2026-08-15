@@ -40,7 +40,7 @@ subsystem; the Klipper protocol is purely a wire format and execution layer.
 │  │ McuClock  │  │ CommandTable│  └──────────────┘          │
 │  └──────────┘  └──────────┘                               │
 │  ┌──────────────────────────────────────────────────────  │
-│  │ PeripheralHandler: Stepper, DigitalOut, PwmOut, ...    │
+│  │ PeripheralHandler: Stepper, DigitalOut, PWMOut, ...    │
 │  │ MotionReconstructor → MotionBlockSink (analysis)      │
 │  └──────────────────────────────────────────────────────  │
 └─────────────────────────────────────────────────────────┘
@@ -143,7 +143,7 @@ Peripherals are identified by 8-bit OIDs allocated during the config phase:
 | OidAllocator | `objects/OidAllocator.hpp` | OID allocation |
 | Stepper | `objects/Stepper.hpp` | Step execution with queue_step |
 | DigitalOut | `objects/Peripherals.hpp` | Digital output with scheduling |
-| PwmOut | `objects/Peripherals.hpp` | PWM output with scheduling |
+| PWMOut | `objects/Peripherals.hpp` | PWM output with scheduling |
 | AnalogIn | `objects/Peripherals.hpp` | Analog input sampling |
 | Endstop | `objects/Peripherals.hpp` | Endstop input |
 | Trsync | `objects/Peripherals.hpp` | Trigger synchronisation |

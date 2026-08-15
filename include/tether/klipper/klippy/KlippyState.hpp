@@ -55,7 +55,7 @@ struct KlippyState {
 
     // --- Named output pins (SET_PIN / SET_PWM_PIN) ---
     std::map<std::string, double> namedOutputPins_;
-    std::map<std::string, double> namedPwmPins_;
+    std::map<std::string, double> namedPWMPins_;
 
     // --- Generic fan speeds (SET_FAN_SPEED) ---
     std::map<std::string, double> genericFanSpeeds_;

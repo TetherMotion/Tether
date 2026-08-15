@@ -313,10 +313,10 @@ TEST(KlipperNewGcodes, M300Beep) {
     EXPECT_NEAR(duration, 200.0, 0.1);
 }
 
-TEST(KlipperNewGcodes, M301HotendPid) {
+TEST(KlipperNewGcodes, M301HotendPID) {
     double kp = 0, ki = 0, kd = 0;
     GcodeCallbacks cb;
-    cb.setHotendPid = [&](double p, double i, double d) { kp = p; ki = i; kd = d; };
+    cb.setHotendPID = [&](double p, double i, double d) { kp = p; ki = i; kd = d; };
     GCodeExecutor exec(cb);
     exec.executeLine("M301 P22.0 I1.5 D120.0");
     EXPECT_NEAR(kp, 22.0, 0.01);
@@ -324,10 +324,10 @@ TEST(KlipperNewGcodes, M301HotendPid) {
     EXPECT_NEAR(kd, 120.0, 0.01);
 }
 
-TEST(KlipperNewGcodes, M303PidAutotune) {
+TEST(KlipperNewGcodes, M303PIDAutotune) {
     std::string output;
     GcodeCallbacks cb;
-    cb.runPidAutotune = [](double temp, int cycles) {
+    cb.runPIDAutotune = [](double temp, int cycles) {
         return "PID autotune starting at " + std::to_string(temp) + "C";
     };
     cb.output = [&](const std::string& msg) { output = msg; };
@@ -336,10 +336,10 @@ TEST(KlipperNewGcodes, M303PidAutotune) {
     EXPECT_TRUE(output.find("200") != std::string::npos);
 }
 
-TEST(KlipperNewGcodes, M304BedPid) {
+TEST(KlipperNewGcodes, M304BedPID) {
     double kp = 0, ki = 0, kd = 0;
     GcodeCallbacks cb;
-    cb.setBedPid = [&](double p, double i, double d) { kp = p; ki = i; kd = d; };
+    cb.setBedPID = [&](double p, double i, double d) { kp = p; ki = i; kd = d; };
     GCodeExecutor exec(cb);
     exec.executeLine("M304 P10.0 I0.5 D50.0");
     EXPECT_NEAR(kp, 10.0, 0.01);
@@ -537,7 +537,7 @@ TEST_F(KlippyStubsFix, M600FilamentChangePausesPrint) {
     EXPECT_EQ(instance_->printStatsObject()->status({})["state"].asString(), "paused");
 }
 
-TEST_F(KlippyStubsFix, M301HotendPidViaInstance) {
+TEST_F(KlippyStubsFix, M301HotendPIDViaInstance) {
     auto heater = std::make_shared<Heater>(0, [](double) {}, []() { return 25.0; });
     instance_->setExtruderHeater(heater);
     // Note: PID is set in settings, but the heater was set after construction

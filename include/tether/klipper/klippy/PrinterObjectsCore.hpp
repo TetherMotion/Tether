@@ -40,8 +40,8 @@ public:
 #if TETHER_ENABLE_PRESSURE_ADVANCE
             // Flow-adaptive heater compensation diagnostics.
             s.add("melt_temp_estimate", JsonValue(heater_->meltTempEstimate()));
-            s.add("pre_emphasis_power", JsonValue(heater_->preEmphasisPwm()));
-            s.add("post_emphasis_power", JsonValue(heater_->postEmphasisPwm()));
+            s.add("pre_emphasis_power", JsonValue(heater_->preEmphasisPWM()));
+            s.add("post_emphasis_power", JsonValue(heater_->postEmphasisPWM()));
 #endif
         }
         s.add("pressure_advance", JsonValue(pressureAdvance_));

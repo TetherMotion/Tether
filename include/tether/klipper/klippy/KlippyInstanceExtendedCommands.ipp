@@ -207,8 +207,8 @@
 
             // Run PID autotune via the Tether autotuning bridge
             if (heater == "extruder" || heater == "heater_extruder") {
-                if (gcode_.callbacks().runPidAutotune) {
-                    std::string result = gcode_.callbacks().runPidAutotune(temp, cycles);
+                if (gcode_.callbacks().runPIDAutotune) {
+                    std::string result = gcode_.callbacks().runPIDAutotune(temp, cycles);
                     respond(result);
                 }
             } else if (heater == "heater_bed") {
@@ -267,7 +267,7 @@
             std::string pin = g.getNamed("PIN", "");
             double value = g.getNamedDouble("VALUE", 0.0);
             if (!pin.empty()) {
-                namedPwmPins_[pin] = value;
+                namedPWMPins_[pin] = value;
             }
             return true;
         }

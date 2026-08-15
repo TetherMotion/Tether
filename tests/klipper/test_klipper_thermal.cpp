@@ -206,21 +206,21 @@ TEST(KlipperHeater, SetTarget) {
     EXPECT_EQ(heater.target(), 200.0);
 }
 
-TEST(KlipperHeater, PidControl) {
+TEST(KlipperHeater, PIDControl) {
     double pwmOutput = -1.0;
     double currentTemp = 25.0;
     Heater heater(0,
         [&pwmOutput](double v) { pwmOutput = v; },
         [&currentTemp]() { return currentTemp; });
 
-    HeaterPidParams params;
+    HeaterPIDParams params;
     params.Kp = 0.5;
     params.Ki = 0.01;
     params.Kd = 0.0;
     params.imax = 10.0;
     params.pwmMin = 0.0;
     params.pwmMax = 1.0;
-    heater.setPidParams(params);
+    heater.setPIDParams(params);
     heater.setTarget(100.0);
     heater.setControlInterval(0.1);
 
@@ -230,18 +230,18 @@ TEST(KlipperHeater, PidControl) {
     EXPECT_NEAR(pwmOutput, 1.0, 0.01);
 }
 
-TEST(KlipperHeater, PidAtTarget) {
+TEST(KlipperHeater, PIDAtTarget) {
     double pwmOutput = -1.0;
     Heater heater(0,
         [&pwmOutput](double v) { pwmOutput = v; },
         []() { return 100.0; });
 
-    HeaterPidParams params;
+    HeaterPIDParams params;
     params.Kp = 0.5;
     params.Ki = 0.01;
     params.Kd = 0.0;
     params.imax = 10.0;
-    heater.setPidParams(params);
+    heater.setPIDParams(params);
     heater.setTarget(100.0);
     heater.setControlInterval(0.1);
 
@@ -308,7 +308,7 @@ TEST(KlipperHeater, Reset) {
         []() { return 25.0; });
 
     heater.setTarget(200.0);
-    heater.setPidParams({0.5, 0.01, 0.0, 10.0, 0.0, 1.0});
+    heater.setPIDParams({0.5, 0.01, 0.0, 10.0, 0.0, 1.0});
     heater.control(); // Run one iteration
 
     heater.reset();
@@ -346,14 +346,14 @@ TEST(KlipperHeater, IntegralWindupClamped) {
         [&pwmOutput](double v) { pwmOutput = v; },
         [&currentTemp]() { return currentTemp; });
 
-    HeaterPidParams params;
+    HeaterPIDParams params;
     params.Kp = 0.0;
     params.Ki = 1.0;
     params.Kd = 0.0;
     params.imax = 5.0;
     params.pwmMin = 0.0;
     params.pwmMax = 1.0;
-    heater.setPidParams(params);
+    heater.setPIDParams(params);
     heater.setTarget(100.0);
     heater.setControlInterval(1.0);
 
@@ -365,19 +365,19 @@ TEST(KlipperHeater, IntegralWindupClamped) {
     EXPECT_NEAR(pwmOutput, 1.0, 0.01);
 }
 
-TEST(KlipperHeater, PwmClampedToMin) {
+TEST(KlipperHeater, PWMClampedToMin) {
     double pwmOutput = 1.0;
     Heater heater(0,
         [&pwmOutput](double v) { pwmOutput = v; },
         []() { return 200.0; }); // Above target
 
-    HeaterPidParams params;
+    HeaterPIDParams params;
     params.Kp = 1.0;
     params.Ki = 0.0;
     params.Kd = 0.0;
     params.pwmMin = 0.0;
     params.pwmMax = 1.0;
-    heater.setPidParams(params);
+    heater.setPIDParams(params);
     heater.setTarget(100.0);
     heater.setControlInterval(0.1);
 
@@ -394,14 +394,14 @@ TEST(KlipperHeater, MultipleControlIterations) {
         [&pwmOutput](double v) { pwmOutput = v; },
         [&currentTemp]() { return currentTemp; });
 
-    HeaterPidParams params;
+    HeaterPIDParams params;
     params.Kp = 0.1;
     params.Ki = 0.001;
     params.Kd = 0.0;
     params.imax = 5.0;
     params.pwmMin = 0.0;
     params.pwmMax = 1.0;
-    heater.setPidParams(params);
+    heater.setPIDParams(params);
     heater.setTarget(60.0);
     heater.setControlInterval(0.1);
 

@@ -237,7 +237,7 @@ int main() {
     cbObj.setBusState("error-active");
     printStatus("canbus_stats", cbObj.status({}));
 
-    PwmCycleTimeObject pctObj("pwm_cycle_time");
+    PWMCycleTimeObject pctObj("pwm_cycle_time");
     pctObj.setValue(0.75);
     pctObj.setCycleTime(0.050);
     printStatus("pwm_cycle_time", pctObj.status({}));

@@ -145,7 +145,7 @@ TEST(FlowAdaptiveHeaterController, PostEmphasisDecaysAfterFlowStops) {
     // Run with flow to build up thermal debt.
     ctrl.setFlow(5.0);
     for (int i = 0; i < 50; ++i) ctrl.compute(in);
-    const double postDuring = ctrl.emphasis().postEmphasisPwm;
+    const double postDuring = ctrl.emphasis().postEmphasisPWM;
     // Stop flow; post-emphasis should appear then decay.
     ctrl.setFlow(0.0);
     double postFirst = 0.0;
@@ -156,7 +156,7 @@ TEST(FlowAdaptiveHeaterController, PostEmphasisDecaysAfterFlowStops) {
     EXPECT_GT(postFirst, 0.0); // post-emphasis appears after flow stops
     // Continue running; feed-forward should decay toward 0.
     for (int i = 0; i < 500; ++i) ctrl.compute(in);
-    EXPECT_LT(ctrl.emphasis().postEmphasisPwm, postFirst);
+    EXPECT_LT(ctrl.emphasis().postEmphasisPWM, postFirst);
     (void)postDuring;
 }
 
@@ -198,6 +198,6 @@ TEST(FlowAdaptiveHeaterController, ResetClearsState) {
     ctrl.compute(in);
     ctrl.reset();
     EXPECT_NEAR(ctrl.flow(), 0.0, 1e-9);
-    EXPECT_NEAR(ctrl.emphasis().preEmphasisPwm, 0.0, 1e-9);
+    EXPECT_NEAR(ctrl.emphasis().preEmphasisPWM, 0.0, 1e-9);
     EXPECT_NEAR(ctrl.emphasis().thermalDebt, 0.0, 1e-9);
 }

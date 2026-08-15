@@ -275,8 +275,8 @@ TEST(KlipperExtrusionCompensation, HeaterFlowCompensationHook) {
         []() { return 200.0; });
     // Without a controller wired, diagnostics report 0.
     EXPECT_EQ(heater->meltTempEstimate(), 0.0);
-    EXPECT_EQ(heater->preEmphasisPwm(), 0.0);
-    EXPECT_EQ(heater->postEmphasisPwm(), 0.0);
+    EXPECT_EQ(heater->preEmphasisPWM(), 0.0);
+    EXPECT_EQ(heater->postEmphasisPWM(), 0.0);
 
     auto ctrl = std::make_shared<
         tether::control::extrusion::FlowAdaptiveHeaterController>();

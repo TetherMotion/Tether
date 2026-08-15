@@ -8,7 +8,7 @@
  * to work without modification.
  *
  * Split sub-headers:
- *   - Gpio.hpp       : DigitalOut, PwmOut, DigitalOutProxy, PwmOutProxy, AnalogIn, AnalogInProxy
+ *   - Gpio.hpp       : DigitalOut, PWMOut, DigitalOutProxy, PWMOutProxy, AnalogIn, AnalogInProxy
  *   - Endstop.hpp    : Endstop, EndstopProxy
  *   - Sync.hpp       : TrsyncState, Trsync, TrsyncProxy
  *   - Bus.hpp        : Spi, SpiProxy, I2c, I2cProxy

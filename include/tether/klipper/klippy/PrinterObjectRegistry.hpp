@@ -66,7 +66,7 @@ struct PrinterObjectRegistry {
 
     // --- B4: Extended printer objects ---
     std::shared_ptr<OutputPinObject> outputPinObj_;
-    std::shared_ptr<PwmToolObject> pwmToolObj_;
+    std::shared_ptr<PWMToolObject> pwmToolObj_;
     std::shared_ptr<TemperatureFanObject> temperatureFanObj_;
     std::shared_ptr<ControllerFanObject> controllerFanObj_;
     std::shared_ptr<HeaterFanObject> heaterFanObj_;
@@ -106,7 +106,7 @@ struct PrinterObjectRegistry {
     std::shared_ptr<class FilamentMotionSensorObject> filamentMotionSensorObj_;
     std::shared_ptr<class LoadCellObject> loadCellObj_;
     std::shared_ptr<class CanbusStatsObject> canbusStatsObj_;
-    std::shared_ptr<class PwmCycleTimeObject> pwmCycleTimeObj_;
+    std::shared_ptr<class PWMCycleTimeObject> pwmCycleTimeObj_;
     std::shared_ptr<class ResonanceTesterObject> resonanceTesterObj_;
     std::shared_ptr<class AngleObject> angleObj_;
     std::shared_ptr<class Palette2Object> palette2Obj_;

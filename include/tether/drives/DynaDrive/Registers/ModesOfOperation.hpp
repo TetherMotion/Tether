@@ -24,7 +24,7 @@ enum class Options : uint16_t {
     JointTorque             = 10,
     JointPositionVelocity   = 11,
     JointPositionVelocityTorque = 12,
-    JointPositionVelocityTorquePidGains = 13,
+    JointPositionVelocityTorquePIDGains = 13,
     JointPositionTorque     = 16,
 };
 
