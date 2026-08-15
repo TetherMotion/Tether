@@ -36,7 +36,7 @@
  *   path-level jerk is bounded).
  * - Does not use the certified curvature sampler (uses midpoint curvature).
  *
- * @see JerkLimitedVelocityProfiler for the time-optimal jerk-limited option.
+ * @see JerkConstrainedVelocityProfiler for the time-optimal jerk-limited option.
  * @see VelocityProfiler for the basic TOPP-RA option.
  * @see IVelocityProfiler.hpp for the abstract interface.
  */

@@ -44,7 +44,7 @@
 #include "PathAdapter.hpp"
 #include "VelocityProfile.hpp"
 #include "IVelocityProfiler.hpp"
-#include "JerkLimitedVelocityProfiler.hpp"
+#include "JerkConstrainedVelocityProfiler.hpp"
 #include "SCurveVelocityProfiler.hpp"
 #include "SCurveProfile.hpp"
 #include "MotionSegment.hpp"
@@ -559,7 +559,7 @@ private:
  * - ProfilerType::ToppraBasic: Basic 2nd-order TOPP-RA (no jerk limit).
  *   Fastest trajectory; acceleration is discontinuous at switching points.
  *
- * - ProfilerType::ToppraJerkLimited: 3rd-order TOPP-RA with jerk as a
+ * - ProfilerType::ToppraJerkConstrained: 3rd-order TOPP-RA with jerk as a
  *   constraint inside the optimizer. Continuous acceleration; bounded jerk.
  *   Slightly slower than basic TOPP-RA. This is the recommended default
  *   when jerk limiting is needed.
@@ -680,8 +680,8 @@ private:
     /// Create a profiler instance for the given type.
     std::unique_ptr<IProfiler> createProfiler(ProfilerType type) {
         switch (type) {
-            case ProfilerType::ToppraJerkLimited:
-                return std::make_unique<JerkLimitedVelocityProfiler<Dim, T>>(limits_);
+            case ProfilerType::ToppraJerkConstrained:
+                return std::make_unique<JerkConstrainedVelocityProfiler<Dim, T>>(limits_);
             case ProfilerType::SCurve:
                 return std::make_unique<SCurveVelocityProfiler<Dim, T>>(limits_);
             case ProfilerType::ToppraBasic:
