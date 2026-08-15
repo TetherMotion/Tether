@@ -253,6 +253,10 @@ struct PlanningSegment {
     int32_t blockIndex = -1;                ///< Source G-code block
     bool isRapid = false;                   ///< True for G0 moves
 
+    /// G64 path blending tolerance (P value, mm). 0 = no blending (G61).
+    /// Used by the viewer to color by corner deviation percentage.
+    double blendTolerance = 0.0;
+
     // Spline control points (for G5, NURBS)
     std::vector<Position> controlPoints;
     std::vector<double> weights;            ///< NURBS weights

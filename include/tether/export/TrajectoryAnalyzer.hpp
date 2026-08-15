@@ -43,6 +43,12 @@ struct TrajectorySample {
     int32_t segmentIndex = -1;
     int32_t blockIndex = -1;
     uint8_t motionType = 0;                     ///< 0=rapid, 1=linear, 2=arcCW, 3=arcCCW
+
+    /// G64 corner deviation as percentage of blend tolerance (0-100).
+    /// 0 = straight (no deviation), 100 = full reversal (max deviation).
+    /// Computed from the turn angle between consecutive segments.
+    /// 0 when G64 blending is not active (G61 exact stop mode).
+    double deviation = 0.0;
 };
 
 /**
