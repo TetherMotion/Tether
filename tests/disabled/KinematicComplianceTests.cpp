@@ -544,7 +544,7 @@ TEST_F(CornerModeComplianceTest, TangentialMarginLarge) {
 class DecelerationProfileTest : public KinematicComplianceTest {
 };
 
-TEST_F(DecelerationProfileTest, JerkLimitedDeceleration) {
+TEST_F(DecelerationProfileTest, JerkConstrainedDeceleration) {
     // When decelerating for a corner, jerk should be limited
     
     auto segments = createCorner(90.0, 100.0, limits_.maxVelocityLinear);

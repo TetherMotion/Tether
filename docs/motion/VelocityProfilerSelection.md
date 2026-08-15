@@ -13,7 +13,7 @@ Tether provides three velocity profilers, all implementing the
 | Profiler | `ProfilerType` | Jerk-limited | Time-optimal | Accel continuity |
 |---|---|---|---|---|
 | `VelocityProfiler` | `ToppraBasic` | No | Yes | No (bang-bang) |
-| `JerkLimitedVelocityProfiler` | `ToppraJerkLimited` | Yes | Yes (subject to jerk) | Yes |
+| `JerkConstrainedVelocityProfiler` | `ToppraJerkConstrained` | Yes | Yes (subject to jerk) | Yes |
 | `SCurveVelocityProfiler` | `SCurve` | Yes | No | Yes |
 
 All three produce a `VelocityProfile<T>` — a tabulated v(s) profile with
@@ -103,9 +103,9 @@ auto profile = profiler.computeProfile(path, feedRate);
 
 ---
 
-## 2. `JerkLimitedVelocityProfiler` (Jerk-Integrated TOPP-RA)
+## 2. `JerkConstrainedVelocityProfiler` (Jerk-Integrated TOPP-RA)
 
-**`ProfilerType::ToppraJerkLimited`**
+**`ProfilerType::ToppraJerkConstrained`**
 
 ### Algorithm
 
@@ -190,15 +190,15 @@ limits.path.maxPathJerk = 5000.0;          // mm/s³
 limits.path.jerkLimitEnabled = true;
 
 // Option A: via MotionPlanBuilder (recommended)
-MotionPlanBuilder3D builder(limits, {}, ProfilerType::ToppraJerkLimited);
+MotionPlanBuilder3D builder(limits, {}, ProfilerType::ToppraJerkConstrained);
 auto plan = builder.build(segments, feedRate);
 
 // Option B: direct
-JerkLimitedVelocityProfiler<3, double> profiler(limits);
+JerkConstrainedVelocityProfiler<3, double> profiler(limits);
 auto profile = profiler.computeProfile(path, feedRate);
 
 // Option C: custom profiler instance
-auto custom = std::make_unique<JerkLimitedVelocityProfiler<3, double>>(limits);
+auto custom = std::make_unique<JerkConstrainedVelocityProfiler<3, double>>(limits);
 MotionPlanBuilder3D builder2(std::move(custom), limits);
 auto plan2 = builder2.build(segments, feedRate);
 ```
@@ -255,7 +255,7 @@ with jerk-limited transitions.
 
 ### When NOT to Choose
 
-- **When time-optimality matters:** Use `ToppraJerkLimited` instead.
+- **When time-optimality matters:** Use `ToppraJerkConstrained` instead.
   It's 10-30% faster for the same constraints.
 - **For production 3D printing:** The TOPP-RA profilers are better
   optimized for complex paths with varying curvature.
@@ -293,7 +293,7 @@ auto plan = builder.build(segments, feedRate);
 
 ## Decision Matrix
 
-| Criterion | ToppraBasic | ToppraJerkLimited | SCurve |
+| Criterion | ToppraBasic | ToppraJerkConstrained | SCurve |
 |---|---|---|---|
 | **Time-optimality** | Best (baseline) | Good (5-15% slower) | Poor (10-30% slower) |
 | **Jerk bounded** | No | Yes | Yes |
@@ -340,7 +340,7 @@ struct AxisLimits<NumAxes, T> {
 ### Jerk Limit Configuration
 
 - If `jerkLimitEnabled` is `false` or `maxPathJerk` is `0`, the
-  `JerkLimitedVelocityProfiler` automatically falls back to basic
+  `JerkConstrainedVelocityProfiler` automatically falls back to basic
   TOPP-RA behavior.
 - The `SCurveVelocityProfiler` requires a valid jerk limit; if not
   provided, it returns an empty profile.
@@ -366,7 +366,7 @@ struct AxisLimits<NumAxes, T> {
    slower. The optimal value depends on the machine's mechanical
    resonance characteristics.
 4. **Measure the time cost:** Compare `plan.totalDuration()` between
-   `ToppraBasic` and `ToppraJerkLimited` to quantify the cost of jerk
+   `ToppraBasic` and `ToppraJerkConstrained` to quantify the cost of jerk
    limiting for your specific paths.
 
 ---
@@ -377,11 +377,11 @@ struct AxisLimits<NumAxes, T> {
 
 ```cpp
 // Via enum (most common)
-MotionPlanBuilder3D builder(limits, config, ProfilerType::ToppraJerkLimited);
+MotionPlanBuilder3D builder(limits, config, ProfilerType::ToppraJerkConstrained);
 auto plan = builder.build(segments, feedRate);
 
 // Via custom instance (for advanced configuration)
-auto profiler = std::make_unique<JerkLimitedVelocityProfiler<3, double>>(limits);
+auto profiler = std::make_unique<JerkConstrainedVelocityProfiler<3, double>>(limits);
 MotionPlanBuilder3D builder(std::move(profiler), limits, config);
 auto plan = builder.build(segments, feedRate);
 ```
@@ -391,7 +391,7 @@ auto plan = builder.build(segments, feedRate);
 ```cpp
 // All profilers implement IVelocityProfiler
 std::unique_ptr<IVelocityProfiler<3, double>> profiler =
-    std::make_unique<JerkLimitedVelocityProfiler<3, double>>(limits);
+    std::make_unique<JerkConstrainedVelocityProfiler<3, double>>(limits);
 
 auto profile = profiler->computeProfile(path, feedRate);
 
@@ -437,7 +437,7 @@ std::println("Total time: {:.3f}s", plan.totalDuration());
 ```
 IVelocityProfiler<Dim, T>          (abstract interface)
     ├── VelocityProfiler<Dim, T>           (ToppraBasic)
-    ├── JerkLimitedVelocityProfiler<Dim, T> (ToppraJerkLimited)
+    ├── JerkConstrainedVelocityProfiler<Dim, T> (ToppraJerkConstrained)
     └── SCurveVelocityProfiler<Dim, T>      (SCurve)
 ```
 
@@ -448,7 +448,7 @@ optimization:
 
 - **2nd-order (ToppraBasic):** State = $(s, \dot{s})$. Control = $\ddot{s}$ (unbounded
   jerk). The optimizer can switch acceleration instantaneously.
-- **3rd-order (ToppraJerkLimited):** State = $(s, \dot{s}, \ddot{s})$. Control = $\dddot{s}$
+- **3rd-order (ToppraJerkConstrained):** State = $(s, \dot{s}, \ddot{s})$. Control = $\dddot{s}$
   (bounded jerk). The optimizer must ramp acceleration smoothly.
 
 The 3rd-order formulation is what produces continuous acceleration.
@@ -472,7 +472,7 @@ TOPP-RA optimization. This was removed because:
    compensation, step generation) that derived timing from the TOPP-RA
    profile would be desynchronized by the post-hoc smoothing.
 
-The correct approach — implemented in `JerkLimitedVelocityProfiler` —
+The correct approach — implemented in `JerkConstrainedVelocityProfiler` —
 is to integrate jerk as a constraint *inside* the optimizer.
 
 ---

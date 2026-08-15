@@ -133,13 +133,13 @@ both ensures both constraints are satisfied simultaneously.
 
 ### The Key Difference: 2nd-Order vs 3rd-Order
 
-The difference between `ToppraBasic` and `ToppraJerkLimited` is the
+The difference between `ToppraBasic` and `ToppraJerkConstrained` is the
 equation used in the forward/backward passes:
 
 | Profiler | State | Control | Distance Equation |
 |---|---|---|---|
 | ToppraBasic | $(s, \dot{s})$ | $\ddot{s}$ (unbounded jerk) | $v^2 = v_0^2 + 2a\Delta s$ |
-| ToppraJerkLimited | $(s, \dot{s}, \ddot{s})$ | $\dddot{s}$ (bounded jerk) | $\Delta s = d_{\text{sc}}(v_0, v_1, a, j)$ |
+| ToppraJerkConstrained | $(s, \dot{s}, \ddot{s})$ | $\dddot{s}$ (bounded jerk) | $\Delta s = d_{\text{sc}}(v_0, v_1, a, j)$ |
 
 where $d_{\text{sc}}$ is the jerk-limited S-curve distance function
 (derived below).
@@ -364,7 +364,7 @@ $$
 \Delta s_{\text{decel}}(v_0, v_1) = \Delta s_{\text{accel}}(v_1, v_0)
 $$
 
-### (T.6) The 3rd-Order Forward/Backward Pass (ToppraJerkLimited)
+### (T.6) The 3rd-Order Forward/Backward Pass (ToppraJerkConstrained)
 
 The jerk-limited profiler replaces the 2nd-order kinematic equation
 with the jerk-limited distance function (T.5).
@@ -540,7 +540,7 @@ TOPP-RA optimization. This was removed because:
    compensation, step generation) that derived timing from the TOPP-RA
    profile would be desynchronized by the post-hoc smoothing.
 
-**The correct approach** — implemented in `JerkLimitedVelocityProfiler`
+**The correct approach** — implemented in `JerkConstrainedVelocityProfiler`
 — is to integrate jerk as a constraint *inside* the optimizer, using
 the jerk-limited distance function (T.5) in place of the 2nd-order
 kinematic equation (T.2).
@@ -549,7 +549,7 @@ kinematic equation (T.2).
 
 ## Summary of Profiler Properties
 
-| Property | ToppraBasic | ToppraJerkLimited | SCurve |
+| Property | ToppraBasic | ToppraJerkConstrained | SCurve |
 |---|---|---|---|
 | **State** | $(s, \dot{s})$ | $(s, \dot{s}, \ddot{s})$ | per-piece |
 | **Control** | $\ddot{s}$ (unbounded) | $\dddot{s}$ (bounded) | 7-phase |
@@ -571,4 +571,4 @@ kinematic equation (T.2).
 | [MotionChain.md](MotionChain.md) | Full motion pipeline |
 | [Architecture.md](Architecture.md) | Motion planner architecture |
 | `SCurveProfile.hpp` | 7-phase S-curve implementation |
-| `JerkLimitedVelocityProfiler.hpp` | Jerk-integrated TOPP-RA implementation |
+| `JerkConstrainedVelocityProfiler.hpp` | Jerk-integrated TOPP-RA implementation |

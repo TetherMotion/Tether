@@ -389,7 +389,7 @@ private:
  * velocity profile with bang-bang acceleration (no jerk limiting).
  * Acceleration is discontinuous at constraint switching points.
  *
- * For jerk-limited profiling, use JerkLimitedVelocityProfiler instead.
+ * For jerk-limited profiling, use JerkConstrainedVelocityProfiler instead.
  */
 template<size_t Dim, typename T = double>
 class VelocityProfiler : public IVelocityProfiler<Dim, T> {

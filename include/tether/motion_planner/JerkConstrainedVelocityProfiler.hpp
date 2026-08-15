@@ -1,5 +1,5 @@
 /**
- * @file JerkLimitedVelocityProfiler.hpp
+ * @file JerkConstrainedVelocityProfiler.hpp
  * @brief Jerk-limited TOPP-RA velocity profiler (3rd-order time-optimal).
  *
  * @details
@@ -82,7 +82,7 @@ namespace MotionPlanner {
  * with jerk as a first-class constraint inside the optimization.
  */
 template<size_t Dim, typename T = double>
-class JerkLimitedVelocityProfiler : public IVelocityProfiler<Dim, T> {
+class JerkConstrainedVelocityProfiler : public IVelocityProfiler<Dim, T> {
 public:
     using Path = PathAdapter<Dim, T>;
     using Profile = VelocityProfile<T>;
@@ -94,7 +94,7 @@ public:
      * @brief Constructor.
      * @param limits Kinematic limits (must have valid path jerk limit).
      */
-    explicit JerkLimitedVelocityProfiler(Limits limits = {})
+    explicit JerkConstrainedVelocityProfiler(Limits limits = {})
         : limits_(std::move(limits)) {}
 
     /**
@@ -304,9 +304,9 @@ public:
     }
 
     Limits limits() const override { return limits_; }
-    ProfilerType type() const override { return ProfilerType::ToppraJerkLimited; }
+    ProfilerType type() const override { return ProfilerType::ToppraJerkConstrained; }
     const char* name() const override {
-        return "JerkLimitedVelocityProfiler (TOPP-RA + jerk constraint)";
+        return "JerkConstrainedVelocityProfiler (TOPP-RA + jerk constraint)";
     }
 
 private:

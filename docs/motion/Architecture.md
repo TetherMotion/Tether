@@ -65,7 +65,7 @@ BlendedPath  (new piece sequence + audit trail)
     │
     │  IVelocityProfiler::computeProfile (Phase 5)
     │   ├─ VelocityProfiler        (ToppraBasic: 2nd-order, bang-bang)
-    │   ├─ JerkLimitedVelocityProfiler (ToppraJerkLimited: 3rd-order)
+    │   ├─ JerkConstrainedVelocityProfiler (ToppraJerkConstrained: 3rd-order)
     │   └─ SCurveVelocityProfiler  (SCurve: per-piece S-curves)
     ▼
 VelocityProfile  (tabulated v(s) with accel + jerk)
@@ -188,7 +188,7 @@ explicit and documented (no "magic 1e-6").
 | Document | Scope |
 |---|---|
 | [MotionChain.md](MotionChain.md) | Top-level pipeline: G-code → parsing → blending → profiling → execution |
-| [VelocityProfilerSelection.md](VelocityProfilerSelection.md) | Choosing between ToppraBasic, ToppraJerkLimited, and SCurve |
+| [VelocityProfilerSelection.md](VelocityProfilerSelection.md) | Choosing between ToppraBasic, ToppraJerkConstrained, and SCurve |
 | [CertificationPath.md](CertificationPath.md) | Hausdorff/Lipschitz certification for continuity and tolerance |
 | [ToppraDerivation.md](ToppraDerivation.md) | TOPP-RA and jerk-limited profiling mathematical derivation |
 | `GeometryFoundations.md` | Phase 1 math (G.1-G.26, P0-P5) |
