@@ -45,6 +45,7 @@
 #include "tether/motion_replanner/KdeDerivativeAnalyzer.hpp"
 #include "tether/motion_replanner/SvgCanvas.hpp"
 #include "tether/motion_planner/profile_renurbs/ReNurbsProfile.hpp"
+#include "tether/motion_planner/profile_renurbs/GenericReNurbsProfile.hpp"
 
 #include <string>
 #include <vector>
@@ -277,6 +278,16 @@ public:
     bool exportReNurbsProfile(const std::string& filename,
                               const tether::motion::profile_renurbs::ReNurbsProfile& renurbs) const;
 
+    /// Export a generic ReNURBS profile (any sampled curve with any
+    /// quantities) as an SVG file with one sub-plot per quantity.
+    ///
+    /// @param filename Output .svg filename.
+    /// @param renurbs The generic ReNURBS profile to visualize.
+    /// @return True if file was written successfully.
+    bool exportGenericReNurbsProfile(
+        const std::string& filename,
+        const tether::motion::profile_renurbs::GenericReNurbsProfile& renurbs) const;
+
     const SvgConfig& config() const { return config_; }
     void setConfig(const SvgConfig& config) { config_ = config; canvas_.updateConfig(config_); }
 
@@ -383,6 +394,13 @@ private:
     void renderReNurbsQuantity(std::ostream& out, int svgW, int svgH,
                                const tether::motion::profile_renurbs::ReNurbsProfile& renurbs,
                                tether::motion::profile_renurbs::SegmentViolation::Quantity quantity,
+                               const std::string& title,
+                               const std::string& yLabel) const;
+
+    /// Render a single generic quantity curve by index.
+    void renderGenericQuantity(std::ostream& out, int svgW, int svgH,
+                               const tether::motion::profile_renurbs::GenericReNurbsProfile& renurbs,
+                               std::size_t quantityIndex,
                                const std::string& title,
                                const std::string& yLabel) const;
 

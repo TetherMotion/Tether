@@ -588,6 +588,7 @@ set(MOTION_RENURBS_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/profile_renurbs/test_ReNurbsProfileBuilder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/profile_renurbs/test_ProfileConstraintCertifier.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/profile_renurbs/test_ReNurbsEdgeCases.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/profile_renurbs/test_GenericReNurbs.cpp"
 )
 add_executable(tether_motion_planner_renurbs_tests
     main.cpp

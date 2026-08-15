@@ -21,21 +21,17 @@
 #pragma once
 
 #include "tether/motion_planner/profile_renurbs/ReNurbsProfile.hpp"
+#include "tether/motion_planner/profile_renurbs/GenericReNurbsProfile.hpp"
 #include "tether/motion_planner/profile_renurbs/ProfileSplineFitter.hpp"
 #include "tether/motion_planner/VelocityProfile.hpp"
 #include "tether/motion_planner/PathAdapter.hpp"
 
 #include <optional>
-#include <stdexcept>
 
 namespace tether::motion::profile_renurbs {
 
-/// Exception thrown when certification fails and certifyThrowOnFailure is true.
-class ReNurbsCertificationError : public std::runtime_error {
-public:
-    explicit ReNurbsCertificationError(const std::string& msg)
-        : std::runtime_error(msg) {}
-};
+// ReNurbsCertificationError is now defined in GenericReNurbsProfile.hpp
+// and re-exported here via the include above.
 
 /**
  * @brief Build a ReNurbsProfile from a sampled velocity profile and path.
