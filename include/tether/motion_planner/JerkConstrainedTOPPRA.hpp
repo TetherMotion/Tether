@@ -1,5 +1,5 @@
 /**
- * @file JerkConstrainedVelocityProfiler.hpp
+ * @file JerkConstrainedTOPPRA.hpp
  * @brief Jerk-limited TOPP-RA velocity profiler (3rd-order time-optimal).
  *
  * @details
@@ -56,14 +56,16 @@
  * the jerk constraint*. This is the correct way to get smooth trajectories:
  * constrain the jerk inside the optimizer, don't filter it afterward.
  *
- * @see VelocityProfile.hpp for the basic TOPP-RA profiler.
+ * @see BasicTOPPRA.hpp for the basic TOPP-RA profiler.
  * @see SCurveProfile.hpp for computeAccelDistance / maxVelocityAfterDistance.
- * @see IVelocityProfiler.hpp for the abstract interface.
+ * @see VelocityProfiler.hpp for the abstract interface.
  */
 
 #pragma once
 
 #include "VelocityProfile.hpp"
+#include "VelocityProfiler.hpp"
+#include "BasicTOPPRA.hpp"
 #include "SCurveProfile.hpp"
 #include "PathAdapter.hpp"
 #include <tether/motion_planner/geometry/CertifiedCurvatureSampler.hpp>
@@ -78,11 +80,11 @@ namespace MotionPlanner {
 /**
  * @brief Jerk-limited TOPP-RA velocity profiler.
  *
- * Implements IVelocityProfiler. Produces a time-optimal velocity profile
+ * Implements VelocityProfiler. Produces a time-optimal velocity profile
  * with jerk as a first-class constraint inside the optimization.
  */
 template<size_t Dim, typename T = double>
-class JerkConstrainedVelocityProfiler : public IVelocityProfiler<Dim, T> {
+class JerkConstrainedTOPPRA : public VelocityProfiler<Dim, T> {
 public:
     using Path = PathAdapter<Dim, T>;
     using Profile = VelocityProfile<T>;
@@ -94,7 +96,7 @@ public:
      * @brief Constructor.
      * @param limits Kinematic limits (must have valid path jerk limit).
      */
-    explicit JerkConstrainedVelocityProfiler(Limits limits = {})
+    explicit JerkConstrainedTOPPRA(Limits limits = {})
         : limits_(std::move(limits)) {}
 
     /**
@@ -134,7 +136,7 @@ public:
 
         // If jerk limiting is disabled, delegate to the basic profiler.
         if (!jerkEnabled) {
-            VelocityProfiler<Dim, T> basic(limits_);
+            BasicTOPPRA<Dim, T> basic(limits_);
             return basic.computeProfile(path, feedRate, startVelocity,
                                         endVelocity, numSamples,
                                         startAcceleration, startJerk);
@@ -306,7 +308,7 @@ public:
     Limits limits() const override { return limits_; }
     ProfilerType type() const override { return ProfilerType::ToppraJerkConstrained; }
     const char* name() const override {
-        return "JerkConstrainedVelocityProfiler (TOPP-RA + jerk constraint)";
+        return "JerkConstrainedTOPPRA (TOPP-RA + jerk constraint)";
     }
 
 private:

@@ -22,7 +22,7 @@
  *
  *   v_lim(s) = sqrt(a_cent_max / kappa_certified_upper(s))
  *
- * This is the same formula used by the kernel's VelocityProfiler
+ * This is the same formula used by the kernel's BasicTOPPRA
  * (TOPP-RA inspired), giving the replanner access to the same certified
  * velocity limit curve without needing the full TOPP-RA machinery.
  *

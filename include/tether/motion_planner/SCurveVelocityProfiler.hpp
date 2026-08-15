@@ -36,14 +36,15 @@
  *   path-level jerk is bounded).
  * - Does not use the certified curvature sampler (uses midpoint curvature).
  *
- * @see JerkConstrainedVelocityProfiler for the time-optimal jerk-limited option.
- * @see VelocityProfiler for the basic TOPP-RA option.
- * @see IVelocityProfiler.hpp for the abstract interface.
+ * @see JerkConstrainedTOPPRA for the time-optimal jerk-limited option.
+ * @see BasicTOPPRA for the basic TOPP-RA option.
+ * @see VelocityProfiler.hpp for the abstract interface.
  */
 
 #pragma once
 
 #include "VelocityProfile.hpp"
+#include "VelocityProfiler.hpp"
 #include "SCurveProfile.hpp"
 #include "PathAdapter.hpp"
 
@@ -56,11 +57,11 @@ namespace MotionPlanner {
 /**
  * @brief Basic S-curve velocity profiler.
  *
- * Implements IVelocityProfiler. Produces a jerk-limited velocity profile
+ * Implements VelocityProfiler. Produces a jerk-limited velocity profile
  * using per-piece 7-phase S-curve profiles. Not time-optimal but simple.
  */
 template<size_t Dim, typename T = double>
-class SCurveVelocityProfiler : public IVelocityProfiler<Dim, T> {
+class SCurveVelocityProfiler : public VelocityProfiler<Dim, T> {
 public:
     using Path = PathAdapter<Dim, T>;
     using Profile = VelocityProfile<T>;

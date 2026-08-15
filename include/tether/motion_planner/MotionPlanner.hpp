@@ -95,7 +95,7 @@
  *                         │
  *                         ▼
  *              ┌─────────────────────┐
- *              │  VelocityProfiler   │  (Step 7)
+ *              │  BasicTOPPRA        │  (Step 7)
  *              │  (TOPP-RA Style)    │
  *              └─────────────────────┘
  *                         │
@@ -149,7 +149,10 @@
  * | PiecewiseNurbsPath.hpp | Arc-length parameterized piecewise path |
  * | MotionSegment.hpp | Motion segment data structures |
  * | PathAdapter.hpp | Segment→path conversion (SegmentConverter+PathBlender) |
- * | VelocityProfile.hpp | TOPP-RA velocity profiling |
+ * | VelocityProfile.hpp | TOPP-RA velocity profile data structure |
+ * | BasicTOPPRA.hpp | Basic 2nd-order TOPP-RA profiler |
+ * | VelocityProfiler.hpp | Abstract velocity profiler interface |
+ * | JerkConstrainedTOPPRA.hpp | Jerk-constrained 3rd-order TOPP-RA profiler |
  * | SCurveProfile.hpp | 7-phase jerk-limited profiles |
  * | MotionPlan.hpp | Unified query interface |
  * | GCodeAdapter.hpp | G-code parser integration |
@@ -179,6 +182,9 @@
 
 // Velocity profiling
 #include "VelocityProfile.hpp"
+#include "VelocityProfiler.hpp"
+#include "BasicTOPPRA.hpp"
+#include "JerkConstrainedTOPPRA.hpp"
 
 // S-curve jerk-limited profiles
 #include "SCurveProfile.hpp"
