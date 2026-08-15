@@ -165,15 +165,15 @@ class TestDigitalOut(unittest.TestCase):
         self.assertTrue(dout.value)
 
 
-class TestPwmOut(unittest.TestCase):
-    """PwmOut peripheral."""
+class TestPWMOut(unittest.TestCase):
+    """PWMOut peripheral."""
 
     def test_default_duty(self):
-        pwm = klipper.PwmOut(0)
+        pwm = klipper.PWMOut(0)
         self.assertEqual(pwm.duty, 0)
 
     def test_set_duty(self):
-        pwm = klipper.PwmOut(0)
+        pwm = klipper.PWMOut(0)
         pwm.set_duty(0.75)
         # duty_double is a property returning the float duty cycle
         self.assertAlmostEqual(pwm.duty_double, 0.75, places=2)

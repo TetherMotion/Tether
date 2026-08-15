@@ -126,7 +126,7 @@
         for (const auto& [name, cfg] : settings_.outputPins) {
             namedOutputPins_[name] = cfg.value;
             if (cfg.pwm) {
-                namedPwmPins_[name] = cfg.value;
+                namedPWMPins_[name] = cfg.value;
             }
         }
 

@@ -21,7 +21,7 @@ Vector makeStepInput(size_t count, double step_value) {
     return input;
 }
 
-Vector simulateArxPlant(const Vector& input, double a1, double b1) {
+Vector simulateARXPlant(const Vector& input, double a1, double b1) {
     Vector output(input.size(), 0.0);
     for (size_t i = 1; i < input.size(); ++i) {
         output[i] = -a1 * output[i - 1] + b1 * input[i - 1];
@@ -51,7 +51,7 @@ std::vector<DynamicFrictionSample> makeDynamicSamples() {
     return samples;
 }
 
-Matrix makeMimoInputs(size_t count) {
+Matrix makeMIMOInputs(size_t count) {
     Matrix inputs;
     inputs.reserve(count);
     for (size_t k = 0; k < count; ++k) {
@@ -499,7 +499,7 @@ TEST(PolynomialModelsTest, CoversInvalidAndNominalIdentificationPaths) {
     EXPECT_TRUE(invalid_armax.valid());
 
     const Vector input = makeRichInput(400);
-    const Vector output = simulateArxPlant(input, -0.72, 0.45);
+    const Vector output = simulateARXPlant(input, -0.72, 0.45);
 
     const auto arx = ARXIdentifier::identify(input, output, orders);
     const auto iv = InstrumentalVariablesIdentifier::identify(input, output, orders);
@@ -536,13 +536,13 @@ TEST(PolynomialModelsTest, CoversInvalidAndNominalIdentificationPaths) {
     EXPECT_TRUE(refined_oe.valid());
 }
 
-TEST(SubspaceIdentificationTest, CoversEarlyReturnAndNominalMimoFits) {
+TEST(SubspaceIdentificationTest, CoversEarlyReturnAndNominalMIMOFits) {
     EXPECT_FALSE(N4SIDIdentifier::identify({}, {}, 4).valid());
 
     Matrix empty_channels(16, Vector{});
     EXPECT_FALSE(MOESPIdentifier::identify(empty_channels, empty_channels, 4).valid());
 
-    const Matrix inputs = makeMimoInputs(160);
+    const Matrix inputs = makeMIMOInputs(160);
     const Matrix outputs = simulateStateSpaceOutputs(inputs);
 
     const auto n4sid = N4SIDIdentifier::identify(inputs, outputs, 6, 0);

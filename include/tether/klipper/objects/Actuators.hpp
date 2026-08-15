@@ -21,10 +21,10 @@ namespace tether::klipper::objects {
 /// @brief PWM-controlled fan with optional tachometer.
 class Fan {
 public:
-    using PwmWriteFunc = std::function<void(double)>;
+    using PWMWriteFunc = std::function<void(double)>;
     using TachReadFunc = std::function<uint32_t()>;
 
-    Fan(uint8_t oid, PwmWriteFunc pwmWrite)
+    Fan(uint8_t oid, PWMWriteFunc pwmWrite)
         : oid_(oid)
         , pwmWrite_(std::move(pwmWrite)) {}
 
@@ -71,7 +71,7 @@ public:
 
 private:
     uint8_t oid_;
-    PwmWriteFunc pwmWrite_;
+    PWMWriteFunc pwmWrite_;
     TachReadFunc tachRead_;
     double speed_ = 0.0;
     uint32_t lastTach_ = 0;

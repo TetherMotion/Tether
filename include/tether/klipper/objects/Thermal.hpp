@@ -9,7 +9,7 @@
  *   - Thermocouple: SPI-based thermocouple (MAX31856, etc.)
  *   - Heater: PWM-controlled heater with PID regulation and safety limits
  *
- * The Heater class wraps a PwmOut peripheral and uses a PID controller
+ * The Heater class wraps a PWMOut peripheral and uses a PID controller
  * (from tether_controls) to maintain a target temperature. It includes
  * min_temp / max_temp safety watchdog that triggers shutdown if the
  * sensor reading goes out of bounds.
@@ -278,7 +278,7 @@ private:
 // ============================================================================
 
 /// @brief PID controller parameters for a heater.
-struct HeaterPidParams {
+struct HeaterPIDParams {
     double Kp = 0.0;    ///< Proportional gain
     double Ki = 0.0;    ///< Integral gain
     double Kd = 0.0;    ///< Derivative gain
@@ -290,17 +290,17 @@ struct HeaterPidParams {
 /// @brief Heater peripheral: PWM output with PID temperature control.
 class Heater {
 public:
-    using PwmWriteFunc = std::function<void(double)>;
+    using PWMWriteFunc = std::function<void(double)>;
     using SensorReadFunc = std::function<double()>;
     using ShutdownCallback = std::function<void(const std::string&)>;
 
-    Heater(uint8_t oid, PwmWriteFunc pwmWrite, SensorReadFunc sensorRead)
+    Heater(uint8_t oid, PWMWriteFunc pwmWrite, SensorReadFunc sensorRead)
         : oid_(oid)
         , pwmWrite_(std::move(pwmWrite))
         , sensorRead_(std::move(sensorRead)) {
         // Configure the PID controller with default heater limits.
         pid_.setGains(0.0, 0.0, 0.0);
-        applyPidLimits();
+        applyPIDLimits();
     }
 
     uint8_t oid() const { return oid_; }
@@ -315,14 +315,14 @@ public:
     double currentTemp() const { return currentTemp_; }
 
     /// @brief Set PID parameters.
-    void setPidParams(const HeaterPidParams& params) {
+    void setPIDParams(const HeaterPIDParams& params) {
         pidParams_ = params;
         pid_.setGains(params.Kp, params.Ki, params.Kd);
-        applyPidLimits();
+        applyPIDLimits();
     }
 
     /// @brief Get PID parameters.
-    const HeaterPidParams& pidParams() const { return pidParams_; }
+    const HeaterPIDParams& pidParams() const { return pidParams_; }
 
     /// @brief Set safety limits.
     void setSafetyLimits(double minTemp, double maxTemp) {
@@ -361,12 +361,12 @@ public:
         return flowController_ ? flowController_->meltTempEst() : 0.0;
     }
     /// @brief Last pre-emphasis PWM contribution (0.0 if none).
-    double preEmphasisPwm() const {
-        return flowController_ ? flowController_->emphasis().preEmphasisPwm : 0.0;
+    double preEmphasisPWM() const {
+        return flowController_ ? flowController_->emphasis().preEmphasisPWM : 0.0;
     }
     /// @brief Last post-emphasis PWM contribution (0.0 if none).
-    double postEmphasisPwm() const {
-        return flowController_ ? flowController_->emphasis().postEmphasisPwm : 0.0;
+    double postEmphasisPWM() const {
+        return flowController_ ? flowController_->emphasis().postEmphasisPWM : 0.0;
     }
 #endif
 
@@ -459,21 +459,21 @@ public:
     }
 
     /// @brief Get PID diagnostic values.
-    struct PidState {
+    struct PIDState {
         double error;
         double integral;
         double derivative;
         double output;
     };
 
-    PidState pidState() const {
+    PIDState pidState() const {
         return {lastOutput_.error, lastOutput_.integral,
                 lastOutput_.derivative, lastOutput_.control};
     }
 
 private:
     /// @brief Apply integral and output limits from pidParams_ to the PID controller.
-    void applyPidLimits() {
+    void applyPIDLimits() {
         Control::SaturationLimits limits;
         limits.outputMin = pidParams_.pwmMin;
         limits.outputMax = pidParams_.pwmMax;
@@ -483,7 +483,7 @@ private:
     }
 
     uint8_t oid_;
-    PwmWriteFunc pwmWrite_;
+    PWMWriteFunc pwmWrite_;
     SensorReadFunc sensorRead_;
     ShutdownCallback shutdownCallback_;
 
@@ -492,7 +492,7 @@ private:
     double minTemp_ = -50.0;
     double maxTemp_ = 300.0;
 
-    HeaterPidParams pidParams_;
+    HeaterPIDParams pidParams_;
     Control::PIDController pid_;
     Control::ControllerOutput lastOutput_;
     double controlInterval_ = 0.1; // 100ms default

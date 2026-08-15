@@ -42,9 +42,9 @@ namespace ctrl = ::Control;
 // Adapter: PIDController -> SimController
 // ============================================================================
 
-class ThermalPidAdapter : public SimController {
+class ThermalPIDAdapter : public SimController {
 public:
-    explicit ThermalPidAdapter(double kp, double ki, double kd,
+    explicit ThermalPIDAdapter(double kp, double ki, double kd,
                               double outputMin, double outputMax) {
         pid_.setGains(kp, ki, kd);
         ctrl::SaturationLimits limits;
@@ -124,7 +124,7 @@ protected:
         // Tuned for the thermal plant: dT = (eta*Q - (T-T_amb)/R) / C
         // At steady state: Q_ss = (T_set - T_amb) / (R * eta)
         // For T_set=200: Q_ss = (200-25)/(0.5*0.9) = 388.9 W
-        pidController_ = std::make_shared<ThermalPidAdapter>(
+        pidController_ = std::make_shared<ThermalPIDAdapter>(
             5.0,    // Kp
             0.5,    // Ki
             1.0,    // Kd
@@ -150,7 +150,7 @@ protected:
     std::unique_ptr<device::KlipperDevice> dev_;
     std::shared_ptr<klippy::KlippyHost> host_;
     std::shared_ptr<SingleZoneOven> thermalSystem_;
-    std::shared_ptr<ThermalPidAdapter> pidController_;
+    std::shared_ptr<ThermalPIDAdapter> pidController_;
     SimulationEngine simEngine_;
 };
 
@@ -396,7 +396,7 @@ TEST_F(ThermalIntegrationTest, MultipleThermalZones) {
     SimulationEngine engine2;
     engine2.setSystem(zone2);
 
-    auto pid2 = std::make_shared<ThermalPidAdapter>(
+    auto pid2 = std::make_shared<ThermalPIDAdapter>(
         4.0, 0.4, 0.5, 0.0, 400.0
     );
     engine2.setController(pid2);

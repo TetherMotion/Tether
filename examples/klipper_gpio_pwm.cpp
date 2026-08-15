@@ -5,7 +5,7 @@
  * @details
  * Demonstrates the peripheral objects:
  *   1. Create a DigitalOut and schedule value changes.
- *   2. Create a PwmOut and set duty cycles.
+ *   2. Create a PWMOut and set duty cycles.
  *   3. Tick both at simulated clock times.
  */
 
@@ -32,9 +32,9 @@ int main() {
     }
 
     // 2. PWM output with duty cycle changes
-    PwmOut pwm(1);
+    PWMOut pwm(1);
     pwm.setDuty(256, 1024); // 25% duty
-    std::printf("\nPwmOut OID=%u duty=%u/%u (%.1f%%)\n",
+    std::printf("\nPWMOut OID=%u duty=%u/%u (%.1f%%)\n",
                 pwm.oid(), pwm.duty(), pwm.maxCycle(),
                 100.0 * pwm.duty() / pwm.maxCycle());
 

@@ -144,7 +144,7 @@ external source code.
 | **`KlippyHost`** | The Tether class that manages the MCU-facing side: data dictionary download, clock sync, command dispatch, and motion translation. |
 | **`KlipperDevice`** | The Tether class that implements the MCU device role: serves the data dictionary, processes commands, executes motion. |
 | **`MotionPlan`** | A Tether motion-planning abstraction. The `gcode/script` endpoint parses G-code into a `MotionPlan`, which the `MotionTranslator` converts to `queue_step` sequences for the device. |
-| **Printer object** | In the Moonraker interface, a named entity exposing a status interface (e.g. `toolhead`, `extruder`, `webhooks`). In Tether, these are backed by the peripheral objects (Stepper, DigitalOut, PwmOut, etc.) and the host state. |
+| **Printer object** | In the Moonraker interface, a named entity exposing a status interface (e.g. `toolhead`, `extruder`, `webhooks`). In Tether, these are backed by the peripheral objects (Stepper, DigitalOut, PWMOut, etc.) and the host state. |
 
 ---
 

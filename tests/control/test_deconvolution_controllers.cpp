@@ -3,18 +3,18 @@
  * @brief Unit tests for LTI and LPV deconvolution controllers.
  *
  * Tests:
- *   - LtiFrequencyDomainDeconvolver: regularized spectral deconvolution
- *   - OverlapAddLpvDeconvolver: gain-scheduled overlap-add
- *   - ArxLpvInverseFilter: time-domain IIR inverse with delay
- *   - StateSpaceLpvInputEstimator: state-space input estimation
+ *   - LTIFrequencyDomainDeconvolver: regularized spectral deconvolution
+ *   - OverlapAddLPVDeconvolver: gain-scheduled overlap-add
+ *   - ARXLPVInverseFilter: time-domain IIR inverse with delay
+ *   - StateSpaceLPVInputEstimator: state-space input estimation
  */
 
 #include <gtest/gtest.h>
 
-#include "tether/control/extrusion/LtiFrequencyDomainDeconvolver.hpp"
-#include "tether/control/extrusion/OverlapAddLpvDeconvolver.hpp"
-#include "tether/control/extrusion/ArxLpvInverseFilter.hpp"
-#include "tether/control/extrusion/StateSpaceLpvInputEstimator.hpp"
+#include "tether/control/extrusion/LTIFrequencyDomainDeconvolver.hpp"
+#include "tether/control/extrusion/OverlapAddLPVDeconvolver.hpp"
+#include "tether/control/extrusion/ARXLPVInverseFilter.hpp"
+#include "tether/control/extrusion/StateSpaceLPVInputEstimator.hpp"
 
 #include <Eigen/Dense>
 #include <cmath>
@@ -51,17 +51,17 @@ static std::vector<double> convolve(const std::vector<double>& a,
 }
 
 // ============================================================================
-// LtiFrequencyDomainDeconvolver
+// LTIFrequencyDomainDeconvolver
 // ============================================================================
 
-TEST(LtiFrequencyDomainDeconvolver, IdentityImpulseResponseReturnsInput) {
+TEST(LTIFrequencyDomainDeconvolver, IdentityImpulseResponseReturnsInput) {
     // h = [1, 0, 0, ...] → inverse is also identity → x_req = y_tgt.
     std::vector<double> h(16, 0.0);
     h[0] = 1.0;
 
-    LtiDeconvolutionParams params;
+    LTIDeconvolutionParams params;
     params.lambda = 1e-10;
-    LtiFrequencyDomainDeconvolver deconv(params);
+    LTIFrequencyDomainDeconvolver deconv(params);
     deconv.setImpulseResponse(h);
     deconv.precomputeInverseFilter();
 
@@ -76,7 +76,7 @@ TEST(LtiFrequencyDomainDeconvolver, IdentityImpulseResponseReturnsInput) {
     }
 }
 
-TEST(LtiFrequencyDomainDeconvolver, RecoversInputFromLowPassOutput) {
+TEST(LTIFrequencyDomainDeconvolver, RecoversInputFromLowPassOutput) {
     // Create a known input, convolve with a low-pass h to get y,
     // then deconvolve y to recover x.
     auto h = makeLowPassImpulseResponse(32, 5.0);
@@ -87,9 +87,9 @@ TEST(LtiFrequencyDomainDeconvolver, RecoversInputFromLowPassOutput) {
     auto y = convolve(x, h);
     y.resize(64);  // truncate to same length as x
 
-    LtiDeconvolutionParams params;
+    LTIDeconvolutionParams params;
     params.lambda = 1e-6;
-    LtiFrequencyDomainDeconvolver deconv(params);
+    LTIFrequencyDomainDeconvolver deconv(params);
     auto x_req = deconv.deconvolve(y, h);
 
     ASSERT_EQ(x_req.size(), x.size());
@@ -101,21 +101,21 @@ TEST(LtiFrequencyDomainDeconvolver, RecoversInputFromLowPassOutput) {
     }
 }
 
-TEST(LtiFrequencyDomainDeconvolver, LargerLambdaProducesSmootherResult) {
+TEST(LTIFrequencyDomainDeconvolver, LargerLambdaProducesSmootherResult) {
     auto h = makeLowPassImpulseResponse(32, 5.0);
     std::vector<double> x(64, 0.0);
     for (int i = 10; i < 40; ++i) x[i] = 1.0;
     auto y = convolve(x, h);
     y.resize(64);
 
-    LtiDeconvolutionParams p1;
+    LTIDeconvolutionParams p1;
     p1.lambda = 1e-8;
-    LtiFrequencyDomainDeconvolver deconv1(p1);
+    LTIFrequencyDomainDeconvolver deconv1(p1);
     auto x1 = deconv1.deconvolve(y, h);
 
-    LtiDeconvolutionParams p2;
+    LTIDeconvolutionParams p2;
     p2.lambda = 1e-2;
-    LtiFrequencyDomainDeconvolver deconv2(p2);
+    LTIFrequencyDomainDeconvolver deconv2(p2);
     auto x2 = deconv2.deconvolve(y, h);
 
     // Compute roughness: sum of |second differences|.
@@ -130,44 +130,44 @@ TEST(LtiFrequencyDomainDeconvolver, LargerLambdaProducesSmootherResult) {
     EXPECT_LT(roughness(x2), roughness(x1));
 }
 
-TEST(LtiFrequencyDomainDeconvolver, GroupDelayIsPeakIndex) {
+TEST(LTIFrequencyDomainDeconvolver, GroupDelayIsPeakIndex) {
     std::vector<double> h(32, 0.0);
     h[5] = 1.0;  // peak at index 5
-    LtiFrequencyDomainDeconvolver deconv;
+    LTIFrequencyDomainDeconvolver deconv;
     deconv.setImpulseResponse(h);
     EXPECT_EQ(deconv.groupDelay(), 5);
 }
 
-TEST(LtiFrequencyDomainDeconvolver, EmptyInputReturnsEmpty) {
-    LtiFrequencyDomainDeconvolver deconv;
+TEST(LTIFrequencyDomainDeconvolver, EmptyInputReturnsEmpty) {
+    LTIFrequencyDomainDeconvolver deconv;
     deconv.setImpulseResponse({1.0, 0.0, 0.0});
     deconv.precomputeInverseFilter();
     auto result = deconv.deconvolve({});
     EXPECT_TRUE(result.empty());
 }
 
-TEST(LtiFrequencyDomainDeconvolver, SetLambdaRecomputesInverse) {
+TEST(LTIFrequencyDomainDeconvolver, SetLambdaRecomputesInverse) {
     std::vector<double> h = makeLowPassImpulseResponse(16, 3.0);
-    LtiFrequencyDomainDeconvolver deconv;
+    LTIFrequencyDomainDeconvolver deconv;
     deconv.setImpulseResponse(h);
     deconv.setLambda(1e-4);
     EXPECT_FALSE(deconv.inverseFilter().empty());
 }
 
 // ============================================================================
-// OverlapAddLpvDeconvolver
+// OverlapAddLPVDeconvolver
 // ============================================================================
 
-TEST(OverlapAddLpvDeconvolver, SingleOperatingPointMatchesLti) {
+TEST(OverlapAddLPVDeconvolver, SingleOperatingPointMatchesLTI) {
     // With a single operating point, the overlap-add result should
     // approximate the LTI deconvolution (with some windowing artifacts).
     auto h = makeLowPassImpulseResponse(32, 5.0);
 
-    OverlapAddLpvParams params;
+    OverlapAddLPVParams params;
     params.blockSize = 128;
     params.overlapRatio = 0.5;
     params.lambda = 1e-6;
-    OverlapAddLpvDeconvolver lpv(params);
+    OverlapAddLPVDeconvolver lpv(params);
     lpv.addOperatingPoint(50.0, h);
 
     EXPECT_EQ(lpv.numOperatingPoints(), 1u);
@@ -183,16 +183,16 @@ TEST(OverlapAddLpvDeconvolver, SingleOperatingPointMatchesLti) {
     EXPECT_GT(x_req[50], 0.0);
 }
 
-TEST(OverlapAddLpvDeconvolver, InterpolatesBetweenOperatingPoints) {
+TEST(OverlapAddLPVDeconvolver, InterpolatesBetweenOperatingPoints) {
     // Two operating points with different impulse responses.
     auto h1 = makeLowPassImpulseResponse(32, 3.0);  // faster
     auto h2 = makeLowPassImpulseResponse(32, 8.0);  // slower
 
-    OverlapAddLpvParams params;
+    OverlapAddLPVParams params;
     params.blockSize = 64;
     params.overlapRatio = 0.5;
     params.lambda = 1e-6;
-    OverlapAddLpvDeconvolver lpv(params);
+    OverlapAddLPVDeconvolver lpv(params);
     lpv.addOperatingPoint(20.0, h1);
     lpv.addOperatingPoint(100.0, h2);
 
@@ -212,16 +212,16 @@ TEST(OverlapAddLpvDeconvolver, InterpolatesBetweenOperatingPoints) {
     EXPECT_TRUE(hasNonZero);
 }
 
-TEST(OverlapAddLpvDeconvolver, EmptyLutReturnsEmpty) {
-    OverlapAddLpvDeconvolver lpv;
+TEST(OverlapAddLPVDeconvolver, EmptyLutReturnsEmpty) {
+    OverlapAddLPVDeconvolver lpv;
     std::vector<double> y_tgt = {1.0, 2.0, 3.0};
     std::vector<double> p = {1.0, 1.0, 1.0};
     auto result = lpv.deconvolve(y_tgt, p);
     EXPECT_TRUE(result.empty());
 }
 
-TEST(OverlapAddLpvDeconvolver, MismatchedSizesReturnsEmpty) {
-    OverlapAddLpvDeconvolver lpv;
+TEST(OverlapAddLPVDeconvolver, MismatchedSizesReturnsEmpty) {
+    OverlapAddLPVDeconvolver lpv;
     lpv.addInverseFilter(1.0, {1.0, 0.5, 0.25});
     std::vector<double> y_tgt = {1.0, 2.0, 3.0};
     std::vector<double> p = {1.0, 1.0};  // wrong size
@@ -229,8 +229,8 @@ TEST(OverlapAddLpvDeconvolver, MismatchedSizesReturnsEmpty) {
     EXPECT_TRUE(result.empty());
 }
 
-TEST(OverlapAddLpvDeconvolver, ResetClearsLut) {
-    OverlapAddLpvDeconvolver lpv;
+TEST(OverlapAddLPVDeconvolver, ResetClearsLut) {
+    OverlapAddLPVDeconvolver lpv;
     lpv.addInverseFilter(1.0, {1.0, 0.5});
     EXPECT_EQ(lpv.numOperatingPoints(), 1u);
     lpv.reset();
@@ -238,16 +238,16 @@ TEST(OverlapAddLpvDeconvolver, ResetClearsLut) {
 }
 
 // ============================================================================
-// ArxLpvInverseFilter
+// ARXLPVInverseFilter
 // ============================================================================
 
-TEST(ArxLpvInverseFilter, FirstOrderSystemInversion) {
+TEST(ARXLPVInverseFilter, FirstOrderSystemInversion) {
     // Simple first-order system: y[n] = b0 * x[n] - a1 * y[n-1]
     // With a1 = -0.5, b0 = 0.5:
     //   y[n] = 0.5 * x[n] + 0.5 * y[n-1]
     // Inverse: x[n] = (y[n] - 0.5 * y[n-1]) / 0.5 = 2*y[n] - y[n-1]
 
-    ArxLpvInverseFilter filter(1, 0);  // na=1, nb=0
+    ARXLPVInverseFilter filter(1, 0);  // na=1, nb=0
     // aCoeffs = [a1] = [-0.5] (A(z) = 1 + a1*z^-1 = 1 - 0.5*z^-1)
     // bCoeffs = [b0] = [0.5]
     filter.addModelPoint(0.0, {-0.5}, {0.5}, 0);
@@ -266,13 +266,13 @@ TEST(ArxLpvInverseFilter, FirstOrderSystemInversion) {
     EXPECT_NEAR(x_req[4], 1.0, 1e-9);
 }
 
-TEST(ArxLpvInverseFilter, DelayCompensation) {
+TEST(ARXLPVInverseFilter, DelayCompensation) {
     // System with delay d=1: y[n] = b0 * x[n-1] - a1 * y[n-1]
     // A(z) = 1 + a1*z^-1, B(z) = z^-1 * b0
     // Forward: y[n] = 0.7*x[n-1] - (-0.3)*y[n-1] = 0.7*x[n-1] + 0.3*y[n-1]
     // Inverse: x[n] = (y[n+1] + a1*y[n]) / b0 = (y[n+1] - 0.3*y[n]) / 0.7
 
-    ArxLpvInverseFilter filter(1, 0);  // na=1, nb=0
+    ARXLPVInverseFilter filter(1, 0);  // na=1, nb=0
     filter.addModelPoint(0.0, {-0.3}, {0.7}, 1);  // delay=1
 
     // y_tgt = [1, 1, 1, 1, 1]
@@ -288,9 +288,9 @@ TEST(ArxLpvInverseFilter, DelayCompensation) {
     EXPECT_NEAR(x_req[1], expected, 1e-9);
 }
 
-TEST(ArxLpvInverseFilter, ParameterInterpolation) {
+TEST(ARXLPVInverseFilter, ParameterInterpolation) {
     // Two operating points with different b0.
-    ArxLpvInverseFilter filter(0, 0);  // na=0, nb=0
+    ARXLPVInverseFilter filter(0, 0);  // na=0, nb=0
     filter.addModelPoint(10.0, {}, {1.0}, 0);   // x = y / 1.0
     filter.addModelPoint(20.0, {}, {2.0}, 0);   // x = y / 2.0
 
@@ -305,8 +305,8 @@ TEST(ArxLpvInverseFilter, ParameterInterpolation) {
     EXPECT_NEAR(x_req[1], 3.0 / 1.5, 1e-9);
 }
 
-TEST(ArxLpvInverseFilter, ResetClearsState) {
-    ArxLpvInverseFilter filter(1, 0);
+TEST(ARXLPVInverseFilter, ResetClearsState) {
+    ARXLPVInverseFilter filter(1, 0);
     filter.addModelPoint(0.0, {-0.5}, {0.5}, 0);
 
     // Process some samples to build up state.
@@ -323,18 +323,18 @@ TEST(ArxLpvInverseFilter, ResetClearsState) {
         EXPECT_NEAR(x1[i], x2[i], 1e-12);
 }
 
-TEST(ArxLpvInverseFilter, EmptyLutReturnsZero) {
-    ArxLpvInverseFilter filter(1, 1);
+TEST(ARXLPVInverseFilter, EmptyLutReturnsZero) {
+    ARXLPVInverseFilter filter(1, 1);
     auto result = filter.process({1.0, 2.0}, {0.0, 0.0});
     ASSERT_EQ(result.size(), 2u);
     EXPECT_EQ(result[0], 0.0);
 }
 
 // ============================================================================
-// StateSpaceLpvInputEstimator
+// StateSpaceLPVInputEstimator
 // ============================================================================
 
-TEST(StateSpaceLpvInputEstimator, FirstOrderSystem) {
+TEST(StateSpaceLPVInputEstimator, FirstOrderSystem) {
     // First-order system: v[n+1] = a*v[n] + b*x[n], y[n] = c*v[n]
     // With a=0.5, b=1.0, c=1.0:
     //   v[n+1] = 0.5*v[n] + 1.0*x[n]
@@ -342,7 +342,7 @@ TEST(StateSpaceLpvInputEstimator, FirstOrderSystem) {
     // Inverse: x[n] = y[n+1] - 0.5*v[n]
     // At n=0 with v[0]=0: x[0] = y[1]
 
-    StateSpaceLpvInputEstimator estimator(1, 1, 1);
+    StateSpaceLPVInputEstimator estimator(1, 1, 1);
     Eigen::MatrixXd A(1, 1), B(1, 1), C(1, 1);
     A << 0.5; B << 1.0; C << 1.0;
     estimator.addModelPoint({0.0, A, B, C});
@@ -365,12 +365,12 @@ TEST(StateSpaceLpvInputEstimator, FirstOrderSystem) {
     EXPECT_NEAR(x_req[2], 0.5, 1e-6);
 }
 
-TEST(StateSpaceLpvInputEstimator, TikhonovRegularizationStabilizes) {
+TEST(StateSpaceLPVInputEstimator, TikhonovRegularizationStabilizes) {
     // System where C*B is very small (near-singular).
     // Without regularization, the inverse would amplify noise.
-    StateSpaceLpvParams params;
+    StateSpaceLPVParams params;
     params.lambda = 1e-4;
-    StateSpaceLpvInputEstimator estimator(1, 1, 1, params);
+    StateSpaceLPVInputEstimator estimator(1, 1, 1, params);
     Eigen::MatrixXd A(1, 1), B(1, 1), C(1, 1);
     A << 0.9; B << 1e-6; C << 1.0;
     estimator.addModelPoint({0.0, A, B, C});
@@ -385,9 +385,9 @@ TEST(StateSpaceLpvInputEstimator, TikhonovRegularizationStabilizes) {
     EXPECT_GT(std::abs(x), 0.0);
 }
 
-TEST(StateSpaceLpvInputEstimator, ParameterInterpolation) {
+TEST(StateSpaceLPVInputEstimator, ParameterInterpolation) {
     // Two operating points with different B matrices.
-    StateSpaceLpvInputEstimator estimator(1, 1, 1);
+    StateSpaceLPVInputEstimator estimator(1, 1, 1);
 
     Eigen::MatrixXd A(1, 1), B1(1, 1), B2(1, 1), C(1, 1);
     A << 0.5; B1 << 1.0; B2 << 2.0; C << 1.0;
@@ -406,8 +406,8 @@ TEST(StateSpaceLpvInputEstimator, ParameterInterpolation) {
     EXPECT_NEAR(x_req[0], 1.0 / 1.5, 0.01);
 }
 
-TEST(StateSpaceLpvInputEstimator, ResetClearsState) {
-    StateSpaceLpvInputEstimator estimator(2, 1, 1);
+TEST(StateSpaceLPVInputEstimator, ResetClearsState) {
+    StateSpaceLPVInputEstimator estimator(2, 1, 1);
     Eigen::MatrixXd A = Eigen::MatrixXd::Identity(2, 2);
     Eigen::MatrixXd B(2, 1); B << 1.0, 0.0;
     Eigen::MatrixXd C(1, 2); C << 1.0, 0.0;
@@ -421,17 +421,17 @@ TEST(StateSpaceLpvInputEstimator, ResetClearsState) {
     EXPECT_EQ(estimator.state().norm(), 0.0);
 }
 
-TEST(StateSpaceLpvInputEstimator, EmptyLutReturnsZero) {
-    StateSpaceLpvInputEstimator estimator(1, 1, 1);
+TEST(StateSpaceLPVInputEstimator, EmptyLutReturnsZero) {
+    StateSpaceLPVInputEstimator estimator(1, 1, 1);
     auto result = estimator.process({1.0, 2.0}, {0.0, 0.0});
     ASSERT_EQ(result.size(), 2u);
     EXPECT_EQ(result[0], 0.0);
 }
 
-TEST(StateSpaceLpvInputEstimator, SecondOrderSystem) {
+TEST(StateSpaceLPVInputEstimator, SecondOrderSystem) {
     // Second-order system with two states.
     // A = [[0.8, 0.1], [0, 0.9]], B = [[1], [0]], C = [[1, 0]]
-    StateSpaceLpvInputEstimator estimator(2, 1, 1);
+    StateSpaceLPVInputEstimator estimator(2, 1, 1);
     Eigen::MatrixXd A(2, 2), B(2, 1), C(1, 2);
     A << 0.8, 0.1, 0.0, 0.9;
     B << 1.0, 0.0;

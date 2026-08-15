@@ -1,9 +1,9 @@
 /**
- * @file LtiFrequencyDomainDeconvolver.cpp
+ * @file LTIFrequencyDomainDeconvolver.cpp
  * @brief Regularized LTI frequency-domain deconvolution implementation.
  */
 
-#include "tether/control/extrusion/LtiFrequencyDomainDeconvolver.hpp"
+#include "tether/control/extrusion/LTIFrequencyDomainDeconvolver.hpp"
 
 #include <unsupported/Eigen/FFT>
 
@@ -12,11 +12,11 @@
 
 namespace tether::control::extrusion {
 
-LtiFrequencyDomainDeconvolver::LtiFrequencyDomainDeconvolver(
-    LtiDeconvolutionParams params)
+LTIFrequencyDomainDeconvolver::LTIFrequencyDomainDeconvolver(
+    LTIDeconvolutionParams params)
     : params_(std::move(params)) {}
 
-void LtiFrequencyDomainDeconvolver::setImpulseResponse(
+void LTIFrequencyDomainDeconvolver::setImpulseResponse(
     const std::vector<double>& h) {
     h_ = h;
     groupDelay_ = findPeakIndex(h);
@@ -24,14 +24,14 @@ void LtiFrequencyDomainDeconvolver::setImpulseResponse(
     fftSize_ = 0;
 }
 
-void LtiFrequencyDomainDeconvolver::precomputeInverseFilter() {
+void LTIFrequencyDomainDeconvolver::precomputeInverseFilter() {
     if (h_.empty()) return;
 
     // FFT size: at least 1 (we only need the inverse filter, not a full
     // convolution), but we use a reasonable size for spectral resolution.
     // Use next power of 2 ≥ max(h_.size(), 16) for decent frequency resolution.
     const int minSize = static_cast<int>(h_.size());
-    const int N = computeFftSize(minSize);
+    const int N = computeFFTSize(minSize);
     fftSize_ = N;
 
     // Zero-pad h to length N.
@@ -61,7 +61,7 @@ void LtiFrequencyDomainDeconvolver::precomputeInverseFilter() {
     hInv_ = hInvPadded;
 }
 
-std::vector<double> LtiFrequencyDomainDeconvolver::deconvolve(
+std::vector<double> LTIFrequencyDomainDeconvolver::deconvolve(
     const std::vector<double>& y_tgt) const {
     if (hInv_.empty() || y_tgt.empty()) return {};
 
@@ -71,7 +71,7 @@ std::vector<double> LtiFrequencyDomainDeconvolver::deconvolve(
     // filter which has length fftSize_.  We need N >= Ly + fftSize_ - 1
     // for linear convolution.  Recompute if necessary.
     const int minN = Ly + static_cast<int>(hInv_.size()) - 1;
-    const int N = computeFftSize(minN);
+    const int N = computeFFTSize(minN);
 
     // Zero-pad y_tgt and h_inv to N.
     std::vector<double> yPadded(N, 0.0);
@@ -108,33 +108,33 @@ std::vector<double> LtiFrequencyDomainDeconvolver::deconvolve(
     return xReq;
 }
 
-std::vector<double> LtiFrequencyDomainDeconvolver::deconvolve(
+std::vector<double> LTIFrequencyDomainDeconvolver::deconvolve(
     const std::vector<double>& y_tgt, const std::vector<double>& h) {
     setImpulseResponse(h);
     precomputeInverseFilter();
     return deconvolve(y_tgt);
 }
 
-void LtiFrequencyDomainDeconvolver::setLambda(double lambda) {
+void LTIFrequencyDomainDeconvolver::setLambda(double lambda) {
     params_.lambda = lambda;
     if (!h_.empty()) precomputeInverseFilter();
 }
 
-void LtiFrequencyDomainDeconvolver::reset() {
+void LTIFrequencyDomainDeconvolver::reset() {
     h_.clear();
     hInv_.clear();
     groupDelay_ = 0;
     fftSize_ = 0;
 }
 
-int LtiFrequencyDomainDeconvolver::computeFftSize(int minSize) const {
+int LTIFrequencyDomainDeconvolver::computeFFTSize(int minSize) const {
     if (!params_.padToPowerOfTwo) return std::max(minSize, 1);
     int n = 1;
     while (n < minSize) n <<= 1;
     return n;
 }
 
-int LtiFrequencyDomainDeconvolver::findPeakIndex(
+int LTIFrequencyDomainDeconvolver::findPeakIndex(
     const std::vector<double>& h) const {
     if (h.empty()) return 0;
     int peakIdx = 0;

@@ -483,8 +483,8 @@ TEST(TierD2PrinterObjects, CanbusStatsObject) {
     EXPECT_EQ(status["bus_state"].asString(), "error-passive");
 }
 
-TEST(TierD2PrinterObjects, PwmCycleTimeObject) {
-    PwmCycleTimeObject obj("pwm_cycle_time");
+TEST(TierD2PrinterObjects, PWMCycleTimeObject) {
+    PWMCycleTimeObject obj("pwm_cycle_time");
     EXPECT_EQ(obj.name(), "pwm_cycle_time");
     auto fields = obj.availableFields();
     EXPECT_EQ(fields.size(), 2u);

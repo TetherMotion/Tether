@@ -57,14 +57,14 @@ int main() {
         0, [&](double pwm) { pwmOutput = pwm; },
         [&]() { return thermistor->read(); });
 
-    HeaterPidParams pid;
+    HeaterPIDParams pid;
     pid.Kp = 14.0;
     pid.Ki = 0.5;
     pid.Kd = 50.0;
     pid.imax = 100.0;
     pid.pwmMin = 0.0;
     pid.pwmMax = 1.0;
-    heater->setPidParams(pid);
+    heater->setPIDParams(pid);
     heater->setSafetyLimits(0.0, 300.0);
     heater->setControlInterval(0.1); // 100ms control loop
 

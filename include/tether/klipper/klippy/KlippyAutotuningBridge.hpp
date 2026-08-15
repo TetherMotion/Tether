@@ -146,7 +146,7 @@ inline std::vector<std::string> listAutotuneMethods() {
 // ============================================================================
 
 /// @brief Result of a PID autotuning run.
-struct PidAutotuneResult {
+struct PIDAutotuneResult {
     bool success = false;
     double Kp = 0.0;
     double Ki = 0.0;
@@ -172,7 +172,7 @@ class HeaterAutotuneBridge {
 public:
     /// @brief Construct the bridge for a specific heater.
     /// @param heater The heater to tune (must have sensor + PWM callbacks wired).
-    /// @param settingsPid Reference to settings PID params (to store results).
+    /// @param settingsPID Reference to settings PID params (to store results).
     HeaterAutotuneBridge(objects::Heater& heater,
                           double& settingsKp, double& settingsKi, double& settingsKd)
         : heater_(heater)
@@ -190,13 +190,13 @@ public:
     /// @param relayAmplitude Relay output amplitude (0.0–1.0 PWM).
     /// @param rule Tuning rule (ZN, TyreusLuyben, or AMIGO).
     /// @return Result with PID gains.
-    PidAutotuneResult runRelayFeedback(
+    PIDAutotuneResult runRelayFeedback(
         double targetTemp,
         int cycles = 5,
         double relayAmplitude = 0.5,
         AstromHagglundRelay::TuningRule rule = AstromHagglundRelay::TuningRule::ZieglerNichols) {
 
-        PidAutotuneResult result;
+        PIDAutotuneResult result;
         result.method = autotuneMethodName(AutotuneMethod::RelayFeedback);
 
         // Configure the Åström-Hägglund relay autotuner
@@ -304,14 +304,14 @@ public:
     /// @param form PID form (Parallel/Standard/Series).
     /// @param lambda Lambda parameter (for Lambda/SIMC methods, -1 = auto).
     /// @return Result with PID gains.
-    PidAutotuneResult runFromStepResponse(
+    PIDAutotuneResult runFromStepResponse(
         const std::vector<std::pair<double, double>>& stepData,
         double stepPower,
         AutotuneMethod method,
         PIDForm form = PIDForm::Parallel,
         double lambda = -1.0) {
 
-        PidAutotuneResult result;
+        PIDAutotuneResult result;
         result.method = autotuneMethodName(method);
 
         if (stepData.size() < 10) {
@@ -374,12 +374,12 @@ public:
     /// @param method Tuning method (ZN ultimate, Tyreus-Luyben).
     /// @param form PID form.
     /// @return Result with PID gains.
-    PidAutotuneResult runFromUltimateParams(
+    PIDAutotuneResult runFromUltimateParams(
         double Ku, double Tu,
         AutotuneMethod method,
         PIDForm form = PIDForm::Parallel) {
 
-        PidAutotuneResult result;
+        PIDAutotuneResult result;
         result.method = autotuneMethodName(method);
         result.Ku = Ku;
         result.Tu = Tu;
@@ -422,13 +422,13 @@ public:
     /// @param form PID form.
     /// @param lambda Lambda parameter (for Lambda/SIMC, -1 = auto).
     /// @return Result with PID gains.
-    PidAutotuneResult runFromModel(
+    PIDAutotuneResult runFromModel(
         const FOPDTModel& model,
         AutotuneMethod method,
         PIDForm form = PIDForm::Parallel,
         double lambda = -1.0) {
 
-        PidAutotuneResult result;
+        PIDAutotuneResult result;
         result.method = autotuneMethodName(method);
 
         if (!model.isValid()) {
@@ -479,7 +479,7 @@ public:
     /// @param form PID form.
     /// @param lambda Lambda parameter (for Lambda/SIMC).
     /// @return Result with PID gains.
-    PidAutotuneResult autotune(
+    PIDAutotuneResult autotune(
         double targetTemp,
         AutotuneMethod method = AutotuneMethod::RelayFeedback,
         int cycles = 5,
@@ -507,12 +507,12 @@ private:
     double& settingsKd_;
 
     /// @brief Apply computed gains to the heater and settings.
-    void applyGains(const PidAutotuneResult& result) {
+    void applyGains(const PIDAutotuneResult& result) {
         if (!result.success) return;
         settingsKp_ = result.Kp;
         settingsKi_ = result.Ki;
         settingsKd_ = result.Kd;
-        heater_.setPidParams({result.Kp, result.Ki, result.Kd, 100.0, 0.0, 1.0});
+        heater_.setPIDParams({result.Kp, result.Ki, result.Kd, 100.0, 0.0, 1.0});
     }
 
     /// @brief Compute PID gains from a FOPDT model using the specified method.

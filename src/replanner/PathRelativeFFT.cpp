@@ -4,7 +4,7 @@
  */
 
 #include "tether/motion_replanner/PathRelativeFFT.hpp"
-#include "tether/motion_replanner/FftProcessor.hpp"
+#include "tether/motion_replanner/FFTProcessor.hpp"
 #include "tether/motion_replanner/CertifiedCornerDetection.hpp"
 #include "tether/motion_planner/geometry/NurbsCurve.hpp"
 
@@ -356,10 +356,10 @@ ComponentSpectrum PathRelativeFFT::computeComponentSpectrum(
         errorSignal, abscissa, xMin, xMax, nResampled);
 
     // Detrend
-    FftProcessor::detrend(uniform, config_.removeDC, config_.removeLinearTrend);
+    FFTProcessor::detrend(uniform, config_.removeDC, config_.removeLinearTrend);
 
     // Apply window
-    FftProcessor::applyWindow(uniform, config_.window);
+    FFTProcessor::applyWindow(uniform, config_.window);
 
     // Prepare complex input for FFT (zero-padded to nResampled which is already pow2)
     std::vector<std::complex<double>> data(nResampled);
@@ -368,7 +368,7 @@ ComponentSpectrum PathRelativeFFT::computeComponentSpectrum(
     }
 
     // Run FFT
-    FftProcessor::fft(data);
+    FFTProcessor::fft(data);
 
     // Extract one-sided spectrum (positive frequencies)
     std::size_t numFreqs = nResampled / 2 + 1;
@@ -405,7 +405,7 @@ ComponentSpectrum PathRelativeFFT::computeComponentSpectrum(
     spec.rmsAmplitude = std::sqrt(spec.totalPower / static_cast<double>(numFreqs));
 
     // Find peaks
-    spec.peaks = FftProcessor::findPeaks(spec.frequencies, spec.magnitudes, spec.phases,
+    spec.peaks = FFTProcessor::findPeaks(spec.frequencies, spec.magnitudes, spec.phases,
                            spec.powerSpectralDensity,
                            config_.maxPeaks, config_.peakProminenceThreshold);
 

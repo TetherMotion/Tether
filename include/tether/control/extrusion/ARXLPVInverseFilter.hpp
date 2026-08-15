@@ -1,5 +1,5 @@
 /**
- * @file ArxLpvInverseFilter.hpp
+ * @file ARXLPVInverseFilter.hpp
  * @brief Time-domain LPV inverse IIR filter with ARX model interpolation.
  *
  * @details
@@ -43,15 +43,15 @@
 namespace tether::control::extrusion {
 
 /// @brief ARX model identified at a single operating point.
-struct ArxLpvModelPoint {
+struct ARXLPVModelPoint {
     double parameter = 0.0;            ///< Scheduling parameter p
     std::vector<double> aCoeffs;       ///< A(z) = 1 + a_1 z^{-1} + ... + a_{Na} z^{-Na}
     std::vector<double> bCoeffs;       ///< B'(z) = b_0 + b_1 z^{-1} + ... + b_{Nb} z^{-Nb}
     int delay = 0;                     ///< Transport delay d (steps)
 
     /// @brief Default constructor for container compatibility.
-    ArxLpvModelPoint() = default;
-    ArxLpvModelPoint(double p, std::vector<double> a, std::vector<double> b, int d)
+    ARXLPVModelPoint() = default;
+    ARXLPVModelPoint(double p, std::vector<double> a, std::vector<double> b, int d)
         : parameter(p), aCoeffs(std::move(a)), bCoeffs(std::move(b)), delay(d) {}
 };
 
@@ -60,15 +60,15 @@ struct ArxLpvModelPoint {
 /// Processes one sample at a time using the algebraic inverse of the ARX
 /// difference equation.  Coefficients are interpolated from a LUT of
 /// identified model points.
-class ArxLpvInverseFilter {
+class ARXLPVInverseFilter {
 public:
     /// @brief Construct with polynomial orders.
     /// @param na Order of A(z) (autoregressive part).
     /// @param nb Order of B'(z) (exogenous part, excluding delay).
-    ArxLpvInverseFilter(int na = 0, int nb = 0);
+    ARXLPVInverseFilter(int na = 0, int nb = 0);
 
     /// @brief Add an identified ARX model at operating point p.
-    void addModelPoint(const ArxLpvModelPoint& point);
+    void addModelPoint(const ARXLPVModelPoint& point);
 
     /// @brief Add an identified ARX model (convenience overload).
     void addModelPoint(double p, std::vector<double> a,
@@ -100,7 +100,7 @@ public:
 private:
     int na_;  ///< Order of A(z)
     int nb_;  ///< Order of B'(z)
-    std::map<double, ArxLpvModelPoint> modelLut_;
+    std::map<double, ARXLPVModelPoint> modelLut_;
 
     // Ring buffers for past values
     std::deque<double> yTargetHistory_;  ///< y_tgt[n-1], y_tgt[n-2], ...

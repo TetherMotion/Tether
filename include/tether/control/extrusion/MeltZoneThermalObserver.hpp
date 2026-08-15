@@ -65,10 +65,10 @@ public:
     void setHeaterBlockTemp(double tempC) { heaterBlockTemp_ = tempC; }
 
     /// @brief Advance the observer by one control interval.
-    /// @param heaterPwm Heater PWM fraction [0,1].
+    /// @param heaterPWM Heater PWM fraction [0,1].
     /// @param flowMm3PerS Volumetric flow [mm³/s].
     /// @param dt Time step [s].
-    void update(double heaterPwm, double flowMm3PerS, double dt);
+    void update(double heaterPWM, double flowMm3PerS, double dt);
 
     /// @brief Estimated melt-zone temperature [°C].
     double meltTempEst() const { return meltTemp_; }

@@ -29,19 +29,19 @@ namespace tether::control::extrusion {
     // The boost is bounded by maxHeaterOvershoot (in °C, converted to PWM
     // via G_hm and heaterPowerScale). The boost is only added when there is
     // actual flow (P_ff > 0); with no flow there is no gradient to establish.
-    const double boostPwm = (P_ff > 0.0 && params_.heaterMeltConductance > 0.0 &&
+    const double boostPWM = (P_ff > 0.0 && params_.heaterMeltConductance > 0.0 &&
                              params_.heaterPowerScale > 0.0)
         ? std::min(params_.maxHeaterOvershoot *
                        params_.heaterMeltConductance /
                        params_.heaterPowerScale,
                    params_.maxPreEmphasisPower)
         : 0.0;
-    double prePwm = std::clamp(P_ff_pwm + boostPwm, 0.0,
+    double prePWM = std::clamp(P_ff_pwm + boostPWM, 0.0,
                                params_.maxPreEmphasisPower);
     // Only apply pre-emphasis when we are at/near target (avoid fighting
     // the PID during initial warmup).
     if (std::abs(measured - target) > params_.maxHeaterOvershoot) {
-        prePwm = 0.0;
+        prePWM = 0.0;
     }
 
     // --- Post-emphasis: thermal-debt relaxation.
@@ -58,27 +58,27 @@ namespace tether::control::extrusion {
     // add a decaying positive power to compensate the dip. We expose the
     // signed debt and clamp the applied PWM.
     const double deficit = D_target - thermalDebt_; // [W], negative after stop
-    double postPwm = (params_.heaterPowerScale > 0.0)
+    double postPWM = (params_.heaterPowerScale > 0.0)
         ? std::clamp(-deficit / params_.heaterPowerScale, 0.0,
                      params_.maxPostEmphasisPower)
         : 0.0;
 
     // --- PID backend ---
     auto pidOut = pid_.compute(input);
-    double pwm = pidOut.control + prePwm + postPwm;
+    double pwm = pidOut.control + prePWM + postPWM;
     pwm = std::clamp(pwm, 0.0, 1.0);
 
     // --- Update the thermal observer with the applied PWM ---
     observer_.update(pwm, Q, dt);
 
     // --- Diagnostics ---
-    emphasis_.preEmphasisPwm = prePwm;
-    emphasis_.postEmphasisPwm = postPwm;
+    emphasis_.preEmphasisPWM = prePWM;
+    emphasis_.postEmphasisPWM = postPWM;
     emphasis_.thermalDebt = thermalDebt_;
 
     ::Control::ControllerOutput out = pidOut;
     out.control = pwm;
-    out.feedforward = prePwm + postPwm;
+    out.feedforward = prePWM + postPWM;
     return out;
 }
 

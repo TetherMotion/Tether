@@ -74,9 +74,9 @@ private:
 };
 
 /// @brief PWM tool printer object (pwm_tool).
-class PwmToolObject : public PrinterObject {
+class PWMToolObject : public PrinterObject {
 public:
-    explicit PwmToolObject(const std::string& name) : name_(name) {}
+    explicit PWMToolObject(const std::string& name) : name_(name) {}
 
     std::string name() const override { return name_; }
 
@@ -231,9 +231,9 @@ private:
 };
 
 /// @brief PWM cycle time printer object (pwm_cycle_time).
-class PwmCycleTimeObject : public PrinterObject {
+class PWMCycleTimeObject : public PrinterObject {
 public:
-    explicit PwmCycleTimeObject(const std::string& name) : name_(name) {}
+    explicit PWMCycleTimeObject(const std::string& name) : name_(name) {}
 
     std::string name() const override { return name_; }
 

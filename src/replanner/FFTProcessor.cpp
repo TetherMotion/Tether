@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 
 /**
- * @file FftProcessor.cpp
+ * @file FFTProcessor.cpp
  * @brief Implementation of FFT and spectral analysis helpers
  */
 
-#include "tether/motion_replanner/FftProcessor.hpp"
+#include "tether/motion_replanner/FFTProcessor.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -21,7 +21,7 @@ namespace tether::motion::replanner {
 // Private helpers
 //=============================================================================
 
-double FftProcessor::mean(const std::vector<double>& v) {
+double FFTProcessor::mean(const std::vector<double>& v) {
     if (v.empty()) return 0.0;
     return std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size());
 }
@@ -30,7 +30,7 @@ double FftProcessor::mean(const std::vector<double>& v) {
 // FFT
 //=============================================================================
 
-void FftProcessor::fft(std::vector<std::complex<double>>& data) {
+void FFTProcessor::fft(std::vector<std::complex<double>>& data) {
     auto n = data.size();
     if (n <= 1) return;
 
@@ -63,7 +63,7 @@ void FftProcessor::fft(std::vector<std::complex<double>>& data) {
 // Window functions
 //=============================================================================
 
-void FftProcessor::applyWindow(std::vector<double>& signal,
+void FFTProcessor::applyWindow(std::vector<double>& signal,
                                 FFTConfig::Window window) {
     auto n = signal.size();
     if (n < 2) return;
@@ -95,7 +95,7 @@ void FftProcessor::applyWindow(std::vector<double>& signal,
 // Detrending
 //=============================================================================
 
-void FftProcessor::detrend(std::vector<double>& signal,
+void FFTProcessor::detrend(std::vector<double>& signal,
                             bool removeDC, bool removeLinear) {
     if (signal.empty()) return;
 
@@ -129,7 +129,7 @@ void FftProcessor::detrend(std::vector<double>& signal,
 // Peak detection
 //=============================================================================
 
-std::vector<SpectralPeak> FftProcessor::findPeaks(
+std::vector<SpectralPeak> FFTProcessor::findPeaks(
     const std::vector<double>& freqs,
     const std::vector<double>& mags,
     const std::vector<double>& phases,

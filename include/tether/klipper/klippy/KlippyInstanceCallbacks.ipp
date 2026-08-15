@@ -380,19 +380,19 @@
         };
 
         // PID
-        cb.setHotendPid = [this](double kp, double ki, double kd) {
+        cb.setHotendPID = [this](double kp, double ki, double kd) {
             settings_.hotendKp = kp; settings_.hotendKi = ki; settings_.hotendKd = kd;
             if (extruderHeater_) {
-                extruderHeater_->setPidParams({kp, ki, kd, 100.0, 0.0, 1.0});
+                extruderHeater_->setPIDParams({kp, ki, kd, 100.0, 0.0, 1.0});
             }
         };
-        cb.setBedPid = [this](double kp, double ki, double kd) {
+        cb.setBedPID = [this](double kp, double ki, double kd) {
             settings_.bedKp = kp; settings_.bedKi = ki; settings_.bedKd = kd;
             if (heaterBed_) {
-                heaterBed_->setPidParams({kp, ki, kd, 100.0, 0.0, 1.0});
+                heaterBed_->setPIDParams({kp, ki, kd, 100.0, 0.0, 1.0});
             }
         };
-        cb.runPidAutotune = [this](double temp, int cycles) {
+        cb.runPIDAutotune = [this](double temp, int cycles) {
             // PID autotune is delegated to the Tether autotuning framework
             // via the HeaterAutotuneBridge.  No inline autotuning code here.
             std::ostringstream ss;

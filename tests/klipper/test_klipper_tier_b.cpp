@@ -194,7 +194,7 @@ TEST(TierBUds, UpdateStatus) {
 
 TEST(TierBPrinterObjects, NewObjectsExist) {
     EXPECT_EQ(std::make_shared<OutputPinObject>("output_pin")->name(), "output_pin");
-    EXPECT_EQ(std::make_shared<PwmToolObject>("pwm_tool")->name(), "pwm_tool");
+    EXPECT_EQ(std::make_shared<PWMToolObject>("pwm_tool")->name(), "pwm_tool");
     EXPECT_EQ(std::make_shared<TemperatureFanObject>("temperature_fan")->name(), "temperature_fan");
     EXPECT_EQ(std::make_shared<ControllerFanObject>("controller_fan")->name(), "controller_fan");
     EXPECT_EQ(std::make_shared<HeaterFanObject>("heater_fan")->name(), "heater_fan");

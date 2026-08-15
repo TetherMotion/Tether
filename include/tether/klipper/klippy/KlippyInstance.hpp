@@ -293,7 +293,7 @@ public:
     /// @brief Set the PID autotuning method to use for M303/PID_CALIBRATE.
     /// Default is RelayFeedback (Åström-Hägglund).  All Tether autotuning
     /// methods are supported (see AutotuneMethod enum).
-    void setPidAutotuneMethod(AutotuneMethod method) {
+    void setPIDAutotuneMethod(AutotuneMethod method) {
         pidAutotuneMethod_ = method;
     }
 
@@ -327,9 +327,9 @@ public:
     }
 
     /// @brief Register a PWM output pin.
-    void registerPwmOut(const std::string& name,
-                         std::shared_ptr<objects::PwmOut> dev) {
-        server_.registerObject(std::make_shared<PwmOutObject>(dev, name));
+    void registerPWMOut(const std::string& name,
+                         std::shared_ptr<objects::PWMOut> dev) {
+        server_.registerObject(std::make_shared<PWMOutObject>(dev, name));
     }
 
     /// @brief Register an analog input pin.
@@ -793,7 +793,7 @@ private:
 
         // B4: Register new printer objects
         outputPinObj_ = std::make_shared<OutputPinObject>("output_pin");
-        pwmToolObj_ = std::make_shared<PwmToolObject>("pwm_tool");
+        pwmToolObj_ = std::make_shared<PWMToolObject>("pwm_tool");
         temperatureFanObj_ = std::make_shared<TemperatureFanObject>("temperature_fan");
         controllerFanObj_ = std::make_shared<ControllerFanObject>("controller_fan");
         heaterFanObj_ = std::make_shared<HeaterFanObject>("heater_fan");
@@ -873,7 +873,7 @@ private:
         server_.registerObject(loadCellObj_);
         canbusStatsObj_ = std::make_shared<CanbusStatsObject>("canbus_stats");
         server_.registerObject(canbusStatsObj_);
-        pwmCycleTimeObj_ = std::make_shared<PwmCycleTimeObject>("pwm_cycle_time");
+        pwmCycleTimeObj_ = std::make_shared<PWMCycleTimeObject>("pwm_cycle_time");
         server_.registerObject(pwmCycleTimeObj_);
         resonanceTesterObj_ = std::make_shared<ResonanceTesterObject>();
         server_.registerObject(resonanceTesterObj_);

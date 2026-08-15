@@ -43,11 +43,11 @@ int main() {
 
     auto extruderHeater = std::make_shared<Heater>(
         0, [](double) {}, [&]() { return extruderSensor->read(); });
-    extruderHeater->setPidParams({14.0, 0.1, 50.0, 100.0, 0.0, 1.0});
+    extruderHeater->setPIDParams({14.0, 0.1, 50.0, 100.0, 0.0, 1.0});
 
     auto bedHeater = std::make_shared<Heater>(
         1, [](double) {}, [&]() { return bedSensor->read(); });
-    bedHeater->setPidParams({10.0, 0.05, 30.0, 100.0, 0.0, 1.0});
+    bedHeater->setPIDParams({10.0, 0.05, 30.0, 100.0, 0.0, 1.0});
 
     inst.setExtruderHeater(extruderHeater);
     inst.setHeaterBed(bedHeater);

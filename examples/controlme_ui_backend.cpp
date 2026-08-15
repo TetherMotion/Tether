@@ -96,9 +96,9 @@ std::shared_ptr<Simulation::DynamicalSystem> makeSharedSystem(int systemId) {
     return std::shared_ptr<Simulation::DynamicalSystem>(system.release());
 }
 
-class ScalarPidController final : public Simulation::SimController {
+class ScalarPIDController final : public Simulation::SimController {
 public:
-    explicit ScalarPidController(size_t outputIndex)
+    explicit ScalarPIDController(size_t outputIndex)
         : outputIndex_(outputIndex) {
         Control::SaturationLimits limits;
         limits.outputMin = -1.0e6;
@@ -158,7 +158,7 @@ public:
     explicit SystemRunner(SystemSpec spec)
         : spec_(std::move(spec))
         , system_(makeSharedSystem(spec_.systemId))
-        , controller_(std::make_shared<ScalarPidController>(spec_.controlledOutputIndex)) {
+        , controller_(std::make_shared<ScalarPIDController>(spec_.controlledOutputIndex)) {
         controller_->setGains(spec_.defaultKp, spec_.defaultKi, spec_.defaultKd);
         setupEngineLocked();
         refreshCachesLocked();
@@ -367,7 +367,7 @@ private:
 
     SystemSpec spec_;
     std::shared_ptr<Simulation::DynamicalSystem> system_;
-    std::shared_ptr<ScalarPidController> controller_;
+    std::shared_ptr<ScalarPIDController> controller_;
     mutable std::mutex mutex_;
     Simulation::SimulationEngine engine_;
     Simulation::SimConfig config_{};

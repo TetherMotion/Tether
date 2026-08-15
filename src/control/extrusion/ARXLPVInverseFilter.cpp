@@ -1,9 +1,9 @@
 /**
- * @file ArxLpvInverseFilter.cpp
+ * @file ARXLPVInverseFilter.cpp
  * @brief Time-domain LPV inverse IIR filter implementation.
  */
 
-#include "tether/control/extrusion/ArxLpvInverseFilter.hpp"
+#include "tether/control/extrusion/ARXLPVInverseFilter.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -11,21 +11,21 @@
 
 namespace tether::control::extrusion {
 
-ArxLpvInverseFilter::ArxLpvInverseFilter(int na, int nb)
+ARXLPVInverseFilter::ARXLPVInverseFilter(int na, int nb)
     : na_(na), nb_(nb) {
     ensureBufferSize();
 }
 
-void ArxLpvInverseFilter::addModelPoint(const ArxLpvModelPoint& point) {
+void ARXLPVInverseFilter::addModelPoint(const ARXLPVModelPoint& point) {
     modelLut_[point.parameter] = point;
 }
 
-void ArxLpvInverseFilter::addModelPoint(
+void ARXLPVInverseFilter::addModelPoint(
     double p, std::vector<double> a, std::vector<double> b, int delay) {
-    addModelPoint(ArxLpvModelPoint(p, std::move(a), std::move(b), delay));
+    addModelPoint(ARXLPVModelPoint(p, std::move(a), std::move(b), delay));
 }
 
-double ArxLpvInverseFilter::process(double yTargetCurrent,
+double ARXLPVInverseFilter::process(double yTargetCurrent,
                                      double yTargetAhead,
                                      double pCurrent) {
     if (modelLut_.empty()) return 0.0;
@@ -113,7 +113,7 @@ double ArxLpvInverseFilter::process(double yTargetCurrent,
     return xReq;
 }
 
-std::vector<double> ArxLpvInverseFilter::process(
+std::vector<double> ARXLPVInverseFilter::process(
     const std::vector<double>& yTarget, const std::vector<double>& p) {
     if (yTarget.empty() || yTarget.size() != p.size()) return {};
     reset();
@@ -138,7 +138,7 @@ std::vector<double> ArxLpvInverseFilter::process(
     return xReq;
 }
 
-void ArxLpvInverseFilter::reset() {
+void ARXLPVInverseFilter::reset() {
     yTargetHistory_.clear();
     xReqHistory_.clear();
     lastP_ = std::numeric_limits<double>::quiet_NaN();
@@ -147,7 +147,7 @@ void ArxLpvInverseFilter::reset() {
     currentDelay_ = 0;
 }
 
-void ArxLpvInverseFilter::interpolateCoefficients(double p) {
+void ARXLPVInverseFilter::interpolateCoefficients(double p) {
     if (modelLut_.empty()) return;
 
     auto it = modelLut_.find(p);
@@ -202,7 +202,7 @@ void ArxLpvInverseFilter::interpolateCoefficients(double p) {
         lower->second.delay + t * (upper->second.delay - lower->second.delay)));
 }
 
-void ArxLpvInverseFilter::ensureBufferSize() {
+void ARXLPVInverseFilter::ensureBufferSize() {
     const int yHistSize = na_ + currentDelay_;
     while (static_cast<int>(yTargetHistory_.size()) < yHistSize) {
         yTargetHistory_.push_back(0.0);

@@ -14,7 +14,7 @@
 #   - transport: IByteStreamTransport, Loopback, Pipe, TCP, CAN
 #   - reliability: SequenceCounter, RtoEstimator, SerialQueue, AckMessage
 #   - clock: McuClock, ClockSync
-#   - objects: OidAllocator, Stepper, DigitalOut, PwmOut, AnalogIn, Endstop,
+#   - objects: OidAllocator, Stepper, DigitalOut, PWMOut, AnalogIn, Endstop,
 #     Trsync, Spi, I2c
 #   - motion: MotionBlock, MotionTranslator, MotionReconstructor, MotionBlockSink
 #   - klippy: KlippyHost

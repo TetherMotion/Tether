@@ -45,9 +45,9 @@ private:
 };
 
 /// @brief PWM output pin printer object.
-class PwmOutObject : public PrinterObject {
+class PWMOutObject : public PrinterObject {
 public:
-    explicit PwmOutObject(std::shared_ptr<objects::PwmOut> dev,
+    explicit PWMOutObject(std::shared_ptr<objects::PWMOut> dev,
                           const std::string& name = "pwm_tool")
         : dev_(std::move(dev)), name_(name) {}
 
@@ -67,7 +67,7 @@ public:
     }
 
 private:
-    std::shared_ptr<objects::PwmOut> dev_;
+    std::shared_ptr<objects::PWMOut> dev_;
     std::string name_;
 };
 
