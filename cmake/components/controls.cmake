@@ -26,6 +26,9 @@ set(TETHER_CONTROLS_SOURCES
     ${TETHER_ROOT}/src/control/extrusion/OverlapAddLPVDeconvolver.cpp
     ${TETHER_ROOT}/src/control/extrusion/ARXLPVInverseFilter.cpp
     ${TETHER_ROOT}/src/control/extrusion/StateSpaceLPVInputEstimator.cpp
+    # Pressure-advance calibration + flow-rate analysis
+    ${TETHER_ROOT}/src/control/extrusion/PressureAdvanceCalibrator.cpp
+    ${TETHER_ROOT}/src/control/extrusion/FlowRateAnalyzer.cpp
 )
 
 # Filter to only existing files
