@@ -20,6 +20,11 @@ set(TETHER_CONTROLS_SOURCES
     ${TETHER_ROOT}/src/control/extrusion/PressureFlowLut.cpp
     ${TETHER_ROOT}/src/control/extrusion/MeltZoneThermalObserver.cpp
     ${TETHER_ROOT}/src/control/extrusion/FlowAdaptiveHeaterController.cpp
+    # LPV/LTI deconvolution controllers
+    ${TETHER_ROOT}/src/control/extrusion/LtiFrequencyDomainDeconvolver.cpp
+    ${TETHER_ROOT}/src/control/extrusion/OverlapAddLpvDeconvolver.cpp
+    ${TETHER_ROOT}/src/control/extrusion/ArxLpvInverseFilter.cpp
+    ${TETHER_ROOT}/src/control/extrusion/StateSpaceLpvInputEstimator.cpp
 )
 
 # Filter to only existing files
