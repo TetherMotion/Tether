@@ -168,7 +168,8 @@ Command                           Description                                   
 ``ACTIVATE_EXTRUDER``             Switch active extruder                             EXTRUDER
 ``SET_EXTRUDER_ROTATION_DISTANCE`` Set rotation distance                            EXTRUDER, DISTANCE
 ``SET_EXTRUDER_STEP_DISTANCE``    Set step distance                                  EXTRUDER, DISTANCE
-``SET_PRESSURE_ADVANCE``          Set pressure advance                               ADVANCE, SMOOTH_TIME
+``SET_PRESSURE_ADVANCE``          Set pressure advance                               ADVANCE, SMOOTH_TIME, MODEL, FLOW_INDEX, CONSISTENCY
+``SET_HEATER_FLOW_COMPENSATION``  Toggle flow-adaptive heater compensation           ENABLE, FILAMENT_HEAT_CAPACITY, MELT_ZONE_CAPACITANCE, HEATER_MELT_CONDUCTANCE, DEBT_TIME_CONSTANT, MAX_PRE_EMPHASIS_POWER, MAX_POST_EMPHASIS_POWER, MAX_HEATER_OVERSHOOT
 ``SYNC_EXTRUDER_STEPPER``         Sync extruder to stepper                           EXTRUDER, STEPPER
 ================================  =================================================  ==================================
 

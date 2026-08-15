@@ -25,6 +25,9 @@ Welcome to the Tether library documentation. Tether is a modular C++ library for
    KlipperGcodeCommands
    KlipperMoonrakerApi
    KlipperPrinterObjects
+   extrusion/NonNewtonianPressureAdvance
+   extrusion/FlowAdaptiveTemperatureControl
+   extrusion/RheologyModels
    GLOBAL_STATE
 
 Overview

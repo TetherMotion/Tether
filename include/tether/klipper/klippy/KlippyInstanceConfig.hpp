@@ -130,6 +130,29 @@ struct KlippySettings {
 #if TETHER_ENABLE_PRESSURE_ADVANCE
     double extruderPressureAdvance = 0.0;
     double extruderSmoothTime = 0.040;
+    // Non-Newtonian extrusion compensation (extends PA; default Linear = classic PA)
+    std::string extrusionCompensationModel = "linear"; ///< linear|power_law|cross_wlf
+    double paFlowIndex = 1.0;              ///< n [-] (power-law flow index)
+    double paConsistency = 0.0;            ///< K_base [filament-mm / (mm³/s)^n]
+    double paMaxCompensation = 0.5;        ///< [mm] safety clamp
+    // Cross-WLF parameters
+    double crossWlfTauStar = 1.0e5;        ///< τ* [Pa]
+    double crossWlfFlowIndex = 0.4;        ///< n [-] (Cross index)
+    double crossWlfC1 = 17.44;             ///< WLF C1
+    double crossWlfC2 = 51.6;              ///< WLF C2 [K]
+    double crossWlfRefTempC = 200.0;       ///< T_ref [°C]
+    double crossWlfZeroShearViscosityRef = 1000.0; ///< η_ref [Pa·s]
+    double crossWlfCompressibilityOverArea = 0.0;  ///< βV_m/A_f [mm/Pa]
+    std::string crossWlfLutPath;           ///< optional serialized LUT path
+    // Flow-adaptive heater compensation
+    bool heaterFlowPreEmphasis = false;    ///< enable flow-adaptive heater ctrl
+    double filamentHeatCapacity = 2.1;     ///< ρ·c_p [J/(mm³·K)]
+    double meltZoneCapacitance = 2.0;      ///< C_m [J/K]
+    double heaterMeltConductance = 0.8;    ///< G_hm [W/K]
+    double debtTimeConstant = 2.0;         ///< τ [s]
+    double maxPreEmphasisPower = 0.4;      ///< [0-1 PWM]
+    double maxPostEmphasisPower = 0.2;     ///< [0-1 PWM]
+    double maxHeaterOvershoot = 10.0;      ///< [°C]
 #endif
 
     // Heater bed
@@ -407,6 +430,18 @@ struct MotionBackendConfig {
     double pressureAdvance = 0.0;
     /// Pressure advance smoothing window (seconds, 0 = no smoothing).
     double smoothTime = 0.0;
+    /// Extrusion compensation model (default Linear = classic PA).
+    std::string extrusionCompensationModel = "linear";
+    /// Power-law flow index n (1 = Newtonian limit).
+    double paFlowIndex = 1.0;
+    /// Power-law K_base [filament-mm / (mm³/s)^n].
+    double paConsistency = 0.0;
+    /// Maximum absolute compensation [mm] (safety clamp).
+    double paMaxCompensation = 0.5;
+    /// Cross-WLF βV_m/A_f [mm/Pa].
+    double crossWlfCompressibilityOverArea = 0.0;
+    /// Melt-temperature estimate [°C] for the Cross-WLF LUT lookup.
+    double meltTempC = 210.0;
 #endif
 };
 

@@ -143,6 +143,11 @@ set(CONTROL_CORE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_scurve_ramper.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_classical_tuning_factory.cpp"
 )
+set(CONTROL_EXTRUSION_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/control/test_power_law_rheology.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/control/test_extrusion_pressure_models.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/control/test_flow_adaptive_heater.cpp"
+)
 set(CONTROL_COMPOSITE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/control/CompositeControllersTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/StateSpaceControllersTests.cpp"
@@ -404,6 +409,7 @@ set(TETHER_FULL_TEST_LIBS
 )
 
 create_module_test(control_core "${CONTROL_CORE_SOURCES}" "${CONTROL_TEST_LIBS}" "")
+create_module_test(control_extrusion "${CONTROL_EXTRUSION_SOURCES}" "${CONTROL_TEST_LIBS}" "")
 create_module_test(control_composite "${CONTROL_COMPOSITE_SOURCES}" "${CONTROL_TEST_LIBS}" "")
 create_module_test(control_robust "${CONTROL_ROBUST_SOURCES}" "${CONTROL_TEST_LIBS}" "")
 create_module_test(control_qft "${CONTROL_QFT_SOURCES}" "${CONTROL_TEST_LIBS}" "")

@@ -987,11 +987,15 @@
         if (cmd == "SET_PRESSURE_ADVANCE") {
             double pa = g.getNamedDouble("ADVANCE", 0.0);
             double smoothTime = g.getNamedDouble("SMOOTH_TIME", 0.040);
+            std::string model = g.getNamed("MODEL", "");
+            double flowIndex = g.getNamedDouble("FLOW_INDEX", -1.0);
+            double consistency = g.getNamedDouble("CONSISTENCY", -1.0);
             pressureAdvance_->setEnabled(true);
             pressureAdvance_->setParams({pa, smoothTime});
             if (pressureAdvanceObj_) {
                 pressureAdvanceObj_->setPressureAdvance(pa);
                 pressureAdvanceObj_->setSmoothTime(smoothTime);
+                if (!model.empty()) pressureAdvanceObj_->setModel(model);
             }
             if (extruderObj_) {
                 extruderObj_->setPressureAdvance(pa);
@@ -1000,12 +1004,56 @@
             if (motionDispatcher_) {
                 auto paCfg = motionDispatcher_->pressureAdvanceConfig();
                 paCfg.enabled = true;
-                paCfg.pressureAdvance = pa;
                 paCfg.smoothTime = smoothTime;
+                if (!model.empty()) {
+                    if (model == "power_law") {
+                        paCfg.model = motion::ExtrusionCompensationModel::PowerLaw;
+                    } else if (model == "cross_wlf") {
+                        paCfg.model = motion::ExtrusionCompensationModel::CrossWlf;
+                    } else {
+                        paCfg.model = motion::ExtrusionCompensationModel::Linear;
+                    }
+                }
+                if (flowIndex > 0.0)  paCfg.flowIndex = flowIndex;
+                if (consistency >= 0.0) paCfg.powerLawBaseGain = consistency;
+                // Always keep the linear PA value in sync (used when model=Linear).
+                paCfg.pressureAdvance = pa;
                 motionDispatcher_->setPressureAdvanceConfig(paCfg);
             }
-            respond("// pressure_advance: advance=" + std::to_string(pa) +
-                    " smooth_time=" + std::to_string(smoothTime) + "\n");
+            std::string msg = "// pressure_advance: advance=" + std::to_string(pa) +
+                              " smooth_time=" + std::to_string(smoothTime);
+            if (!model.empty()) msg += " model=" + model;
+            if (flowIndex > 0.0) msg += " flow_index=" + std::to_string(flowIndex);
+            if (consistency >= 0.0) msg += " consistency=" + std::to_string(consistency);
+            msg += "\n";
+            respond(msg);
+            return true;
+        }
+
+        if (cmd == "SET_HEATER_FLOW_COMPENSATION") {
+            // Toggle / tune the flow-adaptive heater controller.
+            // Args: ENABLE=0|1, FILAMENT_HEAT_CAPACITY=, MELT_ZONE_CAPACITANCE=,
+            //       HEATER_MELT_CONDUCTANCE=, DEBT_TIME_CONSTANT=,
+            //       MAX_PRE_EMPHASIS_POWER=, MAX_POST_EMPHASIS_POWER=,
+            //       MAX_HEATER_OVERSHOOT=
+            bool enable = g.getNamedInt("ENABLE", 0) != 0;
+            settings_.heaterFlowPreEmphasis = enable;
+            if (g.hasNamed("FILAMENT_HEAT_CAPACITY"))
+                settings_.filamentHeatCapacity = g.getNamedDouble("FILAMENT_HEAT_CAPACITY", settings_.filamentHeatCapacity);
+            if (g.hasNamed("MELT_ZONE_CAPACITANCE"))
+                settings_.meltZoneCapacitance = g.getNamedDouble("MELT_ZONE_CAPACITANCE", settings_.meltZoneCapacitance);
+            if (g.hasNamed("HEATER_MELT_CONDUCTANCE"))
+                settings_.heaterMeltConductance = g.getNamedDouble("HEATER_MELT_CONDUCTANCE", settings_.heaterMeltConductance);
+            if (g.hasNamed("DEBT_TIME_CONSTANT"))
+                settings_.debtTimeConstant = g.getNamedDouble("DEBT_TIME_CONSTANT", settings_.debtTimeConstant);
+            if (g.hasNamed("MAX_PRE_EMPHASIS_POWER"))
+                settings_.maxPreEmphasisPower = g.getNamedDouble("MAX_PRE_EMPHASIS_POWER", settings_.maxPreEmphasisPower);
+            if (g.hasNamed("MAX_POST_EMPHASIS_POWER"))
+                settings_.maxPostEmphasisPower = g.getNamedDouble("MAX_POST_EMPHASIS_POWER", settings_.maxPostEmphasisPower);
+            if (g.hasNamed("MAX_HEATER_OVERSHOOT"))
+                settings_.maxHeaterOvershoot = g.getNamedDouble("MAX_HEATER_OVERSHOOT", settings_.maxHeaterOvershoot);
+            applyFlowAdaptiveHeaterSettings();
+            respond("// heater_flow_compensation: enable=" + std::to_string(enable ? 1 : 0) + "\n");
             return true;
         }
 #endif

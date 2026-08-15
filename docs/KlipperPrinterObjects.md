@@ -40,7 +40,7 @@ Heater Objects
 ===========================  ===========================================  ==================================
 Object                       Description                                 Fields
 ===========================  ===========================================  ==================================
-``extruder``                 Primary extruder                            temperature, target, power, pressure_advance, smooth_time
+``extruder``                 Primary extruder                            temperature, target, power, pressure_advance, smooth_time, melt_temp_estimate, pre_emphasis_power, post_emphasis_power
 ``heater_bed``               Heated bed                                  temperature, target, power
 ``heaters``                  All heaters summary                         available_heaters, available_sensors
 ``heater_generic``           Generic heater                              temperature, target, power
@@ -143,7 +143,7 @@ Advanced Objects
 Object                       Description                                 Fields
 ===========================  ===========================================  ==================================
 ``input_shaper``             Input shaper config                         shaper_type_x, shaper_freq_x, shaper_type_y, shaper_freq_y
-``pressure_advance``         Pressure advance state                      pressure_advance, smooth_time
+``pressure_advance``         Pressure advance state                      pressure_advance, smooth_time, model
 ``skew_correction``          Skew correction state                       x_factor, y_factor, xy_factor, max_skew, current_skew
 ``exclude_object``           Exclude object state                        objects, excluded_objects, current_object
 ``firmware_retraction``      Firmware retraction                         retract_length, retract_speed, unretract_extra_length, unretract_speed, z_hop, is_retracted

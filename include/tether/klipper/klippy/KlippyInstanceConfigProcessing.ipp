@@ -66,10 +66,15 @@
         }
 
 #if TETHER_ENABLE_PRESSURE_ADVANCE
-        // --- Pressure advance (runtime opt-in from config) ---
-        // When pressure_advance is specified in [extruder] config, enable PA
-        // and sync to the motion dispatcher for step generation.
-        if (settings_.extruderPressureAdvance > 0.0) {
+        // --- Pressure advance / extrusion compensation (runtime opt-in) ---
+        // The classic linear PA is enabled when pressure_advance > 0 and the
+        // model is "linear" (the default). For power_law/cross_wlf models the
+        // dispatcher is configured with the model + its parameters; the
+        // classic pressure_advance value is ignored for those models.
+        const bool wantsPA = settings_.extruderPressureAdvance > 0.0 ||
+                             settings_.paConsistency > 0.0 ||
+                             settings_.crossWlfCompressibilityOverArea > 0.0;
+        if (wantsPA) {
             pressureAdvance_->setEnabled(true);
             pressureAdvance_->setParams({settings_.extruderPressureAdvance,
                                          settings_.extruderSmoothTime});
@@ -79,15 +84,32 @@
             if (pressureAdvanceObj_) {
                 pressureAdvanceObj_->setPressureAdvance(settings_.extruderPressureAdvance);
                 pressureAdvanceObj_->setSmoothTime(settings_.extruderSmoothTime);
+                pressureAdvanceObj_->setModel(settings_.extrusionCompensationModel);
             }
             if (motionDispatcher_) {
                 auto paCfg = motionDispatcher_->pressureAdvanceConfig();
                 paCfg.enabled = true;
-                paCfg.pressureAdvance = settings_.extruderPressureAdvance;
                 paCfg.smoothTime = settings_.extruderSmoothTime;
+                paCfg.filamentDiameterMm = settings_.filamentDiameter;
+                paCfg.maxCompensation = settings_.paMaxCompensation;
+                if (settings_.extrusionCompensationModel == "power_law") {
+                    paCfg.model = motion::ExtrusionCompensationModel::PowerLaw;
+                    paCfg.powerLawBaseGain = settings_.paConsistency;
+                    paCfg.flowIndex = settings_.paFlowIndex;
+                } else if (settings_.extrusionCompensationModel == "cross_wlf") {
+                    paCfg.model = motion::ExtrusionCompensationModel::CrossWlf;
+                    paCfg.crossWlfCompressibilityOverArea =
+                        settings_.crossWlfCompressibilityOverArea;
+                    // LUT is built lazily on first use if not already set.
+                } else {
+                    paCfg.model = motion::ExtrusionCompensationModel::Linear;
+                    paCfg.pressureAdvance = settings_.extruderPressureAdvance;
+                }
                 motionDispatcher_->setPressureAdvanceConfig(paCfg);
             }
         }
+        // Flow-adaptive heater compensation (built/wired if enabled).
+        applyFlowAdaptiveHeaterSettings();
 #endif
 
         // --- Skew correction ---
@@ -415,6 +437,69 @@
                 }
                 if (section.has("smooth_time")) {
                     try { settings_.extruderSmoothTime = section.getDouble("smooth_time"); } catch (...) {}
+                }
+                // Non-Newtonian extrusion compensation (extends PA)
+                if (section.has("pressure_advance_model")) {
+                    try { settings_.extrusionCompensationModel = section.get("pressure_advance_model"); } catch (...) {}
+                }
+                if (section.has("pa_flow_index")) {
+                    try { settings_.paFlowIndex = section.getDouble("pa_flow_index"); } catch (...) {}
+                }
+                if (section.has("pa_consistency")) {
+                    try { settings_.paConsistency = section.getDouble("pa_consistency"); } catch (...) {}
+                }
+                if (section.has("pa_max_compensation")) {
+                    try { settings_.paMaxCompensation = section.getDouble("pa_max_compensation"); } catch (...) {}
+                }
+                // Cross-WLF parameters
+                if (section.has("cross_wlf_tau_star")) {
+                    try { settings_.crossWlfTauStar = section.getDouble("cross_wlf_tau_star"); } catch (...) {}
+                }
+                if (section.has("cross_wlf_flow_index")) {
+                    try { settings_.crossWlfFlowIndex = section.getDouble("cross_wlf_flow_index"); } catch (...) {}
+                }
+                if (section.has("cross_wlf_c1")) {
+                    try { settings_.crossWlfC1 = section.getDouble("cross_wlf_c1"); } catch (...) {}
+                }
+                if (section.has("cross_wlf_c2")) {
+                    try { settings_.crossWlfC2 = section.getDouble("cross_wlf_c2"); } catch (...) {}
+                }
+                if (section.has("cross_wlf_ref_temp")) {
+                    try { settings_.crossWlfRefTempC = section.getDouble("cross_wlf_ref_temp"); } catch (...) {}
+                }
+                if (section.has("cross_wlf_zero_shear_viscosity")) {
+                    try { settings_.crossWlfZeroShearViscosityRef = section.getDouble("cross_wlf_zero_shear_viscosity"); } catch (...) {}
+                }
+                if (section.has("cross_wlf_compressibility_over_area")) {
+                    try { settings_.crossWlfCompressibilityOverArea = section.getDouble("cross_wlf_compressibility_over_area"); } catch (...) {}
+                }
+                if (section.has("cross_wlf_lut_path")) {
+                    try { settings_.crossWlfLutPath = section.get("cross_wlf_lut_path"); } catch (...) {}
+                }
+                // Flow-adaptive heater compensation
+                if (section.has("heater_flow_pre_emphasis")) {
+                    try { settings_.heaterFlowPreEmphasis = section.getBool("heater_flow_pre_emphasis"); } catch (...) {}
+                }
+                if (section.has("filament_heat_capacity")) {
+                    try { settings_.filamentHeatCapacity = section.getDouble("filament_heat_capacity"); } catch (...) {}
+                }
+                if (section.has("melt_zone_capacitance")) {
+                    try { settings_.meltZoneCapacitance = section.getDouble("melt_zone_capacitance"); } catch (...) {}
+                }
+                if (section.has("heater_melt_conductance")) {
+                    try { settings_.heaterMeltConductance = section.getDouble("heater_melt_conductance"); } catch (...) {}
+                }
+                if (section.has("debt_time_constant")) {
+                    try { settings_.debtTimeConstant = section.getDouble("debt_time_constant"); } catch (...) {}
+                }
+                if (section.has("max_pre_emphasis_power")) {
+                    try { settings_.maxPreEmphasisPower = section.getDouble("max_pre_emphasis_power"); } catch (...) {}
+                }
+                if (section.has("max_post_emphasis_power")) {
+                    try { settings_.maxPostEmphasisPower = section.getDouble("max_post_emphasis_power"); } catch (...) {}
+                }
+                if (section.has("max_heater_overshoot")) {
+                    try { settings_.maxHeaterOvershoot = section.getDouble("max_heater_overshoot"); } catch (...) {}
                 }
 #endif
                 if (section.has("min_extrude_temp")) {
