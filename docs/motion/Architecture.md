@@ -189,6 +189,8 @@ explicit and documented (no "magic 1e-6").
 |---|---|
 | [MotionChain.md](MotionChain.md) | Top-level pipeline: G-code → parsing → blending → profiling → execution |
 | [VelocityProfilerSelection.md](VelocityProfilerSelection.md) | Choosing between ToppraBasic, ToppraJerkLimited, and SCurve |
+| [CertificationPath.md](CertificationPath.md) | Hausdorff/Lipschitz certification for continuity and tolerance |
+| [ToppraDerivation.md](ToppraDerivation.md) | TOPP-RA and jerk-limited profiling mathematical derivation |
 | `GeometryFoundations.md` | Phase 1 math (G.1-G.26, P0-P5) |
 | `BlendingAlgorithm.md` | Phase 2-3 math (M11-M20, T1-T3, L1-L2) |
 | `AlgorithmComparison.md` | Why-this vs rejected alternatives |
