@@ -315,8 +315,14 @@ TEST(KlipperExtrusionCompensation, ConfigParsesNewExtruderKeys) {
           << "pa_max_compensation: 0.3\n"
           << "heater_flow_pre_emphasis: true\n"
           << "filament_heat_capacity: 2.1\n"
+          << "heater_block_capacitance: 8.0\n"
+          << "sensor_capacitance: 1.0\n"
           << "melt_zone_capacitance: 2.0\n"
-          << "heater_melt_conductance: 0.8\n"
+          << "heater_sensor_conductance: 2.0\n"
+          << "sensor_melt_conductance: 1.5\n"
+          << "luenberger_gain_heater: 0.5\n"
+          << "luenberger_gain_sensor: 2.0\n"
+          << "luenberger_gain_melt: 0.3\n"
           << "debt_time_constant: 1.5\n"
           << "max_pre_emphasis_power: 0.35\n"
           << "max_post_emphasis_power: 0.15\n"
@@ -332,8 +338,14 @@ TEST(KlipperExtrusionCompensation, ConfigParsesNewExtruderKeys) {
     EXPECT_NEAR(s.paMaxCompensation, 0.3, 1e-9);
     EXPECT_TRUE(s.heaterFlowPreEmphasis);
     EXPECT_NEAR(s.filamentHeatCapacity, 2.1, 1e-9);
+    EXPECT_NEAR(s.heaterBlockCapacitance, 8.0, 1e-9);
+    EXPECT_NEAR(s.sensorCapacitance, 1.0, 1e-9);
     EXPECT_NEAR(s.meltZoneCapacitance, 2.0, 1e-9);
-    EXPECT_NEAR(s.heaterMeltConductance, 0.8, 1e-9);
+    EXPECT_NEAR(s.heaterSensorConductance, 2.0, 1e-9);
+    EXPECT_NEAR(s.sensorMeltConductance, 1.5, 1e-9);
+    EXPECT_NEAR(s.luenbergerGainHeater, 0.5, 1e-9);
+    EXPECT_NEAR(s.luenbergerGainSensor, 2.0, 1e-9);
+    EXPECT_NEAR(s.luenbergerGainMelt, 0.3, 1e-9);
     EXPECT_NEAR(s.debtTimeConstant, 1.5, 1e-9);
     EXPECT_NEAR(s.maxPreEmphasisPower, 0.35, 1e-9);
     EXPECT_NEAR(s.maxPostEmphasisPower, 0.15, 1e-9);

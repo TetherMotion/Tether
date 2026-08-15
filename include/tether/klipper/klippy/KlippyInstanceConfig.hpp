@@ -144,11 +144,21 @@ struct KlippySettings {
     double crossWlfZeroShearViscosityRef = 1000.0; ///< η_ref [Pa·s]
     double crossWlfCompressibilityOverArea = 0.0;  ///< βV_m/A_f [mm/Pa]
     std::string crossWlfLutPath;           ///< optional serialized LUT path
-    // Flow-adaptive heater compensation
+    // Flow-adaptive heater compensation (three-state thermal model)
     bool heaterFlowPreEmphasis = false;    ///< enable flow-adaptive heater ctrl
     double filamentHeatCapacity = 2.1;     ///< ρ·c_p [J/(mm³·K)]
+    // Three-state thermal model capacitances
+    double heaterBlockCapacitance = 8.0;   ///< C_h [J/K]
+    double sensorCapacitance = 1.0;        ///< C_s [J/K]
     double meltZoneCapacitance = 2.0;      ///< C_m [J/K]
-    double heaterMeltConductance = 0.8;    ///< G_hm [W/K]
+    // Three-state thermal model conductances
+    double heaterSensorConductance = 2.0;  ///< G_hs [W/K]
+    double sensorMeltConductance = 1.5;    ///< G_sm [W/K]
+    // Luenberger observer gains
+    double luenbergerGainHeater = 0.5;     ///< L_h [1/s]
+    double luenbergerGainSensor = 2.0;     ///< L_s [1/s]
+    double luenbergerGainMelt = 0.3;       ///< L_m [1/s]
+    // Feed-forward parameters
     double debtTimeConstant = 2.0;         ///< τ [s]
     double maxPreEmphasisPower = 0.4;      ///< [0-1 PWM]
     double maxPostEmphasisPower = 0.2;     ///< [0-1 PWM]
