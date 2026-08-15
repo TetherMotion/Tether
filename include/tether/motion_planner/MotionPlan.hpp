@@ -6,10 +6,10 @@
  * This is the top-level interface for querying motion state at any time t.
  * It combines:
  * - Piecewise Bézier path (geometry)
- * - Velocity profile (time parameterization, from any IVelocityProfiler)
+ * - Velocity profile (time parameterization, from any VelocityProfiler)
  * - Source references (G-code traceability)
  *
- * The velocity profile is produced by an IVelocityProfiler implementation
+ * The velocity profile is produced by an VelocityProfiler implementation
  * (basic TOPP-RA, jerk-limited TOPP-RA, or basic S-curve). MotionPlan
  * consumes the profile's per-point velocity, acceleration, and jerk
  * directly — it does not perform post-hoc smoothing or finite-difference
@@ -35,7 +35,7 @@
  *
  * @see PiecewiseNurbsPath.hpp
  * @see VelocityProfile.hpp
- * @see IVelocityProfiler.hpp
+ * @see VelocityProfiler.hpp
  */
 
 #pragma once
@@ -43,8 +43,9 @@
 #include "MathTypes.hpp"
 #include "PathAdapter.hpp"
 #include "VelocityProfile.hpp"
-#include "IVelocityProfiler.hpp"
-#include "JerkConstrainedVelocityProfiler.hpp"
+#include "VelocityProfiler.hpp"
+#include "BasicTOPPRA.hpp"
+#include "JerkConstrainedTOPPRA.hpp"
 #include "SCurveVelocityProfiler.hpp"
 #include "SCurveProfile.hpp"
 #include "MotionSegment.hpp"
@@ -193,7 +194,7 @@ public:
      *
      * This is the primary query interface. It reads velocity, acceleration,
      * and jerk directly from the velocity profile (which was produced by
-     * an IVelocityProfiler). No post-hoc smoothing or finite-difference
+     * an VelocityProfiler). No post-hoc smoothing or finite-difference
      * estimation is performed — the profile's values are used as-is,
      * preserving the constraints verified by the profiler.
      */
@@ -554,7 +555,7 @@ private:
  * @brief Builds MotionPlan from motion segments.
  *
  * The builder allows choosing a velocity profiling strategy via the
- * ProfilerType enum or by providing a custom IVelocityProfiler instance.
+ * ProfilerType enum or by providing a custom VelocityProfiler instance.
  *
  * - ProfilerType::ToppraBasic: Basic 2nd-order TOPP-RA (no jerk limit).
  *   Fastest trajectory; acceleration is discontinuous at switching points.
@@ -575,7 +576,7 @@ public:
     using Profile = VelocityProfile<T>;
     using Config = MotionPlanConfig<T>;
     using Limits = KinematicLimits<Dim, T>;
-    using IProfiler = IVelocityProfiler<Dim, T>;
+    using IProfiler = VelocityProfiler<Dim, T>;
 
     /**
      * @brief Constructor with profiler type selection.
@@ -592,7 +593,7 @@ public:
     /**
      * @brief Constructor with custom profiler instance.
      *
-     * Allows providing a fully-configured IVelocityProfiler. The builder
+     * Allows providing a fully-configured VelocityProfiler. The builder
      * takes ownership of the profiler.
      *
      * @param profiler Custom profiler instance.
@@ -681,12 +682,12 @@ private:
     std::unique_ptr<IProfiler> createProfiler(ProfilerType type) {
         switch (type) {
             case ProfilerType::ToppraJerkConstrained:
-                return std::make_unique<JerkConstrainedVelocityProfiler<Dim, T>>(limits_);
+                return std::make_unique<JerkConstrainedTOPPRA<Dim, T>>(limits_);
             case ProfilerType::SCurve:
                 return std::make_unique<SCurveVelocityProfiler<Dim, T>>(limits_);
             case ProfilerType::ToppraBasic:
             default:
-                return std::make_unique<VelocityProfiler<Dim, T>>(limits_);
+                return std::make_unique<BasicTOPPRA<Dim, T>>(limits_);
         }
     }
 };

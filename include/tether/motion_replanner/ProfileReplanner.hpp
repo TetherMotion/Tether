@@ -6,7 +6,7 @@
  * Replaces the scalar quinticBlend limit transitions in
  * MotionReplanner::getSuggestedLimits / quinticBlend with:
  *
- * 1. **TOPP-RA velocity profile** via MotionPlanner::VelocityProfiler:
+ * 1. **TOPP-RA velocity profile** via MotionPlanner::BasicTOPPRA:
  *    forward/backward passes + curvature-aware limit curve, producing
  *    a time-optimal profile that respects per-axis and path-level
  *    kinematic limits.

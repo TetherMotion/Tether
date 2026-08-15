@@ -1,14 +1,14 @@
 /**
  * @file VelocityProfilerInterfaceTest.cpp
- * @brief Tests for the IVelocityProfiler interface and both profiler
- *        implementations (JerkConstrainedVelocityProfiler and
+ * @brief Tests for the VelocityProfiler interface and both profiler
+ *        implementations (JerkConstrainedTOPPRA and
  *        SCurveVelocityProfiler).
  *
  * Verifies:
- *   1. Both profilers implement the IVelocityProfiler interface.
- *   2. JerkConstrainedVelocityProfiler: jerk bounded by j_max everywhere.
- *   3. JerkConstrainedVelocityProfiler: acceleration bounded by a_max.
- *   4. JerkConstrainedVelocityProfiler: velocity bounded by v_lim / feedRate.
+ *   1. Both profilers implement the VelocityProfiler interface.
+ *   2. JerkConstrainedTOPPRA: jerk bounded by j_max everywhere.
+ *   3. JerkConstrainedTOPPRA: acceleration bounded by a_max.
+ *   4. JerkConstrainedTOPPRA: velocity bounded by v_lim / feedRate.
  *   5. SCurveVelocityProfiler: jerk bounded by j_max everywhere.
  *   6. SCurveVelocityProfiler: acceleration bounded by a_max.
  *   7. Both profilers: position trajectory starts and ends at correct endpoints.
@@ -21,7 +21,7 @@
 #include <gtest/gtest.h>
 #include <tether/motion_planner/MotionPlanner.hpp>
 #include <tether/motion_planner/MotionSegment.hpp>
-#include <tether/motion_planner/JerkConstrainedVelocityProfiler.hpp>
+#include <tether/motion_planner/JerkConstrainedTOPPRA.hpp>
 #include <tether/motion_planner/SCurveVelocityProfiler.hpp>
 #include <tether/motion_planner/blend/BlendSpec.hpp>
 
@@ -60,15 +60,15 @@ PathAdapter<2, double> buildPath(const MotionSegmentList& segments) {
 } // namespace
 
 // ============================================================================
-// 1. Interface compliance: both profilers are IVelocityProfiler
+// 1. Interface compliance: both profilers are VelocityProfiler
 // ============================================================================
 TEST(VelocityProfilerInterface, BothProfilersImplementInterface) {
     KinematicLimits<2, double> limits;
     limits.path.jerkLimitEnabled = true;
 
-    std::unique_ptr<IVelocityProfiler<2, double>> jerkLimited =
-        std::make_unique<JerkConstrainedVelocityProfiler<2, double>>(limits);
-    std::unique_ptr<IVelocityProfiler<2, double>> scurve =
+    std::unique_ptr<VelocityProfiler<2, double>> jerkLimited =
+        std::make_unique<JerkConstrainedTOPPRA<2, double>>(limits);
+    std::unique_ptr<VelocityProfiler<2, double>> scurve =
         std::make_unique<SCurveVelocityProfiler<2, double>>(limits);
 
     EXPECT_EQ(jerkLimited->type(), ProfilerType::ToppraJerkConstrained);
@@ -78,9 +78,9 @@ TEST(VelocityProfilerInterface, BothProfilersImplementInterface) {
 }
 
 // ============================================================================
-// 2. JerkConstrainedVelocityProfiler: jerk bounded by j_max
+// 2. JerkConstrainedTOPPRA: jerk bounded by j_max
 // ============================================================================
-TEST(JerkConstrainedVelocityProfilerTest, JerkBounded) {
+TEST(JerkConstrainedTOPPRATest, JerkBounded) {
     MotionSegmentList segments;
     segments.append(MotionSegment::linear(Vec2{0, 0}, Vec2{50, 0}, 100.0));
 
@@ -89,7 +89,7 @@ TEST(JerkConstrainedVelocityProfilerTest, JerkBounded) {
     limits.path.jerkLimitEnabled = true;
 
     auto path = buildPath(segments);
-    JerkConstrainedVelocityProfiler<2, double> profiler(limits);
+    JerkConstrainedTOPPRA<2, double> profiler(limits);
     auto profile = profiler.computeProfile(path, 100.0, 0, 0, 200);
 
     ASSERT_GT(profile.points().size(), 1u);
@@ -103,9 +103,9 @@ TEST(JerkConstrainedVelocityProfilerTest, JerkBounded) {
 }
 
 // ============================================================================
-// 3. JerkConstrainedVelocityProfiler: acceleration bounded by a_max
+// 3. JerkConstrainedTOPPRA: acceleration bounded by a_max
 // ============================================================================
-TEST(JerkConstrainedVelocityProfilerTest, AccelerationBounded) {
+TEST(JerkConstrainedTOPPRATest, AccelerationBounded) {
     MotionSegmentList segments;
     segments.append(MotionSegment::linear(Vec2{0, 0}, Vec2{50, 0}, 100.0));
 
@@ -115,7 +115,7 @@ TEST(JerkConstrainedVelocityProfilerTest, AccelerationBounded) {
     limits.path.jerkLimitEnabled = true;
 
     auto path = buildPath(segments);
-    JerkConstrainedVelocityProfiler<2, double> profiler(limits);
+    JerkConstrainedTOPPRA<2, double> profiler(limits);
     auto profile = profiler.computeProfile(path, 100.0, 0, 0, 200);
 
     ASSERT_GT(profile.points().size(), 1u);
@@ -129,9 +129,9 @@ TEST(JerkConstrainedVelocityProfilerTest, AccelerationBounded) {
 }
 
 // ============================================================================
-// 4. JerkConstrainedVelocityProfiler: velocity bounded by feedRate
+// 4. JerkConstrainedTOPPRA: velocity bounded by feedRate
 // ============================================================================
-TEST(JerkConstrainedVelocityProfilerTest, VelocityBounded) {
+TEST(JerkConstrainedTOPPRATest, VelocityBounded) {
     MotionSegmentList segments;
     segments.append(MotionSegment::linear(Vec2{0, 0}, Vec2{50, 0}, 100.0));
 
@@ -139,7 +139,7 @@ TEST(JerkConstrainedVelocityProfilerTest, VelocityBounded) {
     limits.path.jerkLimitEnabled = true;
 
     auto path = buildPath(segments);
-    JerkConstrainedVelocityProfiler<2, double> profiler(limits);
+    JerkConstrainedTOPPRA<2, double> profiler(limits);
     auto profile = profiler.computeProfile(path, 80.0, 0, 0, 200);
 
     ASSERT_GT(profile.points().size(), 1u);
@@ -337,7 +337,7 @@ TEST(VelocityProfilerInterface, CustomProfilerInstance) {
     limits.path.jerkLimitEnabled = true;
 
     auto customProfiler =
-        std::make_unique<JerkConstrainedVelocityProfiler<2, double>>(limits);
+        std::make_unique<JerkConstrainedTOPPRA<2, double>>(limits);
 
     MotionPlanBuilder2D builder(std::move(customProfiler), limits);
     auto plan = builder.build(segments, 100.0);
@@ -350,9 +350,9 @@ TEST(VelocityProfilerInterface, CustomProfilerInstance) {
 }
 
 // ============================================================================
-// 12. JerkConstrainedVelocityProfiler: custom limits respected
+// 12. JerkConstrainedTOPPRA: custom limits respected
 // ============================================================================
-TEST(JerkConstrainedVelocityProfilerTest, CustomLimitsRespected) {
+TEST(JerkConstrainedTOPPRATest, CustomLimitsRespected) {
     MotionSegmentList segments;
     segments.append(MotionSegment::linear(Vec2{0, 0}, Vec2{50, 0}, 200.0));
 
@@ -363,7 +363,7 @@ TEST(JerkConstrainedVelocityProfilerTest, CustomLimitsRespected) {
     limits.path.jerkLimitEnabled = true;
 
     auto path = buildPath(segments);
-    JerkConstrainedVelocityProfiler<2, double> profiler(limits);
+    JerkConstrainedTOPPRA<2, double> profiler(limits);
     auto profile = profiler.computeProfile(path, 200.0, 0, 0, 200);
 
     ASSERT_GT(profile.points().size(), 1u);
