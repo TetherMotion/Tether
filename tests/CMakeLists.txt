@@ -255,6 +255,7 @@ set(MOTION_PLANNER_INTEGRATION_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/test_GCodeAdapter_coverage.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/Phase5IntegrationTest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/PHFastPathTest.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/DebugSCurveTest2.cpp"
 )
 # NOTE: MotionPlannerIntegrationTest.cpp removed — it tested the old
 # PiecewiseBezierPath/PathBuilder/CornerAnalyzer stack.
