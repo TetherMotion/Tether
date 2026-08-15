@@ -218,6 +218,12 @@ struct CornerAnalysis {
 
     double maxInsideDeviation = 0.0;        ///< Maximum deviation toward inside
     double maxOutsideDeviation = 0.0;       ///< Maximum deviation toward outside
+
+    /// Corner sharpness as a percentage of the blend tolerance (0–100).
+    /// 100 % = straight-through (no corner), 0 % = full reversal (180° turn).
+    /// Computed as cos(halfAngle) × 100 where halfAngle = angle / 2.
+    /// Useful for color-mapping corner severity in visualization tools.
+    double deviationPercentage = 100.0;
 };
 
 /**
@@ -249,6 +255,12 @@ public:
         dot = std::max(-1.0, std::min(1.0, dot));
 
         result.angle = std::acos(dot) * 180.0 / InterpolationConstants::PI;
+
+        // Deviation percentage: cos(halfAngle) × 100.
+        // 100 % = straight, 0 % = full reversal. Uses the raw dot product
+        // (not the degree-converted angle) for maximum precision.
+        double halfAngleRad = std::acos(dot) * 0.5;
+        result.deviationPercentage = std::cos(halfAngleRad) * 100.0;
 
         // Compute cross product for turn direction (2D in XY plane)
         double cross = result.incomingDir[0] * result.outgoingDir[1] -

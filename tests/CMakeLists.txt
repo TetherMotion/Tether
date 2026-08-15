@@ -193,6 +193,7 @@ set(GCODE_TYPES_VARIABLES_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/gcode/test_CoordinateTransform.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/gcode/test_CoordinateSystemManager.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/gcode/test_GCodeInterpreter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gcode/test_PlanningSegmentBuilder.cpp"
 )
 set(GCODE_EXPORT_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/gcode/ExportTests.cpp"
@@ -477,6 +478,7 @@ set(MOTION_GEOMETRY_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/geometry/PointCurveDistanceTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/geometry/PiecewiseNurbsPathTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/geometry/CertifiedCurvatureSamplerTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/geometry/PlanningSegmentConverterTests.cpp"
 )
 add_executable(tether_motion_geometry_tests
     main.cpp
