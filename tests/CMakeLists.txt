@@ -148,6 +148,8 @@ set(CONTROL_EXTRUSION_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_extrusion_pressure_models.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_flow_adaptive_heater.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_deconvolution_controllers.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/control/test_pressure_advance_calibrator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/control/test_flow_rate_analyzer.cpp"
 )
 set(CONTROL_COMPOSITE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/control/CompositeControllersTests.cpp"
