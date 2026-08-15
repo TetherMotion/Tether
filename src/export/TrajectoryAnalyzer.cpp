@@ -3,7 +3,7 @@
  * @brief Implementation of trajectory analysis with derivative computation
  */
 
-#include "TrajectoryAnalyzer.hpp"
+#include "tether/export/TrajectoryAnalyzer.hpp"
 #include <cmath>
 #include <algorithm>
 #include <numeric>
@@ -23,21 +23,21 @@ std::vector<TrajectorySample> TrajectoryAnalyzer::analyze(
 ) {
     std::vector<TrajectorySample> samples;
     if (segments.empty()) return samples;
-    
+
     double currentTime = 0.0;
     double pathPosition = 0.0;
-    
+
     for (size_t segIdx = 0; segIdx < segments.size(); ++segIdx) {
         const auto& seg = segments[segIdx];
-        
+
         if (seg.segmentTime <= 0) continue;
-        
+
         // Determine number of samples for this segment
         size_t numSteps = std::max(
-            size_t(1), 
+            size_t(1),
             static_cast<size_t>(std::ceil(seg.segmentTime / config_.timeStep))
         );
-        
+
         const double dt = seg.segmentTime / static_cast<double>(numSteps);
         
         // For all segments except the last, don't include the endpoint (t=1.0)
@@ -45,7 +45,7 @@ std::vector<TrajectorySample> TrajectoryAnalyzer::analyze(
         // This avoids duplicate time points at segment boundaries.
         bool isLastSegment = (segIdx == segments.size() - 1);
         size_t maxStep = isLastSegment ? numSteps : numSteps - 1;
-        
+
         for (size_t step = 0; step <= maxStep; ++step) {
             const double t = static_cast<double>(step) / static_cast<double>(numSteps);
             
