@@ -460,6 +460,20 @@ public:
      */
     void setDryRun(bool dryRun) { m_dryRun = dryRun; }
     bool isDryRun() const { return m_dryRun; }
+
+    /**
+     * @brief Set emit-arc-segments mode.
+     *
+     * When true, arc moves (G2/G3) emit a single MotionSegment of type
+     * ARC_CW / ARC_CCW with fully populated ArcParams (center, radius,
+     * sweep, plane, angles) instead of being tessellated into many
+     * LINEAR segments. This preserves exact arc geometry for consumers
+     * that need it (e.g. NURBS path construction).
+     *
+     * Default: false (tessellate, backward compatible).
+     */
+    void setEmitArcSegments(bool emit) { m_emitArcSegments = emit; }
+    bool emitArcSegments() const { return m_emitArcSegments; }
     
     /**
      * @brief Set block delete mode
@@ -604,6 +618,7 @@ private:
     InterpreterState m_state{InterpreterState::IDLE};
     MachineState m_machineState;
     bool m_dryRun{false};
+    bool m_emitArcSegments{false};
     std::string m_filename;
     std::string m_programSource;
     

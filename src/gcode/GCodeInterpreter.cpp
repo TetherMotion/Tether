@@ -966,6 +966,45 @@ Error Interpreter::handleArc(const Block& block, const Position& target,
         sweep = (mode == MotionMode::CW_ARC) ? -2.0 * M_PI : 2.0 * M_PI;
     }
 
+    // When emit-arc-segments mode is active, emit a single arc MotionSegment
+    // with full ArcParams instead of tessellating into line segments.
+    if (m_emitArcSegments) {
+        MotionSegment seg;
+        seg.type = (mode == MotionMode::CW_ARC)
+                       ? MotionSegment::Type::ARC_CW
+                       : MotionSegment::Type::ARC_CCW;
+        seg.endPosition = m_coordinates.toMachineCoords(end);
+        seg.feedRate = m_machineState.feedRate;
+        seg.lineNumber = block.sourceLineNumber;
+
+        // centerOffset is relative to start (in program coordinates)
+        Position centerPos = start;
+        centerPos[a1] = center1;
+        centerPos[a2] = center2;
+        seg.centerOffset = centerPos - start;
+
+        // Populate ArcParams
+        seg.arc.center = centerPos;
+        seg.arc.startPoint = start;
+        seg.arc.endPoint = end;
+        seg.arc.radius = radius;
+        seg.arc.startAngle = startAngle;
+        seg.arc.endAngle = endAngle;
+        seg.arc.sweepAngle = sweep;
+        seg.arc.clockwise = (mode == MotionMode::CW_ARC);
+        seg.arc.plane = m_machineState.plane;
+        seg.arc.helixDelta = end[ah] - start[ah];
+        seg.arc.valid = true;
+
+        segments.push_back(seg);
+
+        // Update machine state positions
+        m_machineState.workPosition = end;
+        m_machineState.machinePosition = m_coordinates.toMachineCoords(end);
+        m_stats.motionSegments++;
+        return Error{};
+    }
+
     // Number of segments: aim for ~1mm chord deviation
     // chord deviation d = r * (1 - cos(theta/2))
     // theta = 2 * acos(1 - d/r)

@@ -287,6 +287,32 @@ struct PlanningSegment {
     int arcDirection() const {
         return (motionType == SegmentMotionType::ArcCCW) ? 1 : -1;
     }
+
+    /// Compute segment duration from feed rate and segment length.
+    /// Stores the result in @ref segmentTime.
+    ///
+    /// Feed rate is in mm/min (standard G-code F word); it is converted to
+    /// mm/s internally. Rapid moves (G0) use a minimum effective speed of
+    /// 200 mm/s so that rapids are not unrealistically slow when the feed
+    /// rate is low. Zero-length segments get a minimum 1 ms duration to
+    /// avoid division-by-zero downstream.
+    ///
+    /// @param minRapidSpeed  Minimum effective speed for rapid moves (mm/s).
+    /// @param minSegmentTime Minimum segment duration (seconds).
+    void computeTimeFromFeedRate(double minRapidSpeed = 200.0,
+                                 double minSegmentTime = 0.001) {
+        if (segmentLength <= 0.0) {
+            segmentTime = minSegmentTime;
+            return;
+        }
+        double feedMmPerSec = feedRate / 60.0;
+        if (feedMmPerSec < 1e-6) feedMmPerSec = 1.0; // avoid div-by-zero
+        if (isRapid) {
+            feedMmPerSec = std::max(feedMmPerSec, minRapidSpeed);
+        }
+        segmentTime = segmentLength / feedMmPerSec;
+        segmentTime = std::max(segmentTime, minSegmentTime);
+    }
 };
 
 // ============================================================================
