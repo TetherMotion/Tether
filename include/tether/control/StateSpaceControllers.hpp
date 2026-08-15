@@ -205,6 +205,7 @@
 #pragma once
 
 #include "ControllerBase.hpp"
+#include "KalmanFilter.hpp"
 #include <array>
 #include <functional>
 
@@ -341,100 +342,6 @@ private:
     // Riccati equation solver
     bool solveRiccati();
     bool solveDiscreteRiccati();
-};
-
-// ============================================================================
-// Kalman Filter (State Estimator)
-// ============================================================================
-
-/**
- * @brief Kalman Filter for State Estimation
- * 
- * Optimal state estimator for linear systems with Gaussian noise.
- * Can be used standalone or as part of LQG controller.
- * 
- * ## System Model
- * ```
- * ẋ = Ax + Bu + w    (w ~ N(0, W))
- * y = Cx + v         (v ~ N(0, V))
- * ```
- */
-class KalmanFilter : public StateEstimator {
-public:
-    const char* getName() const { return "Kalman Filter"; }
-    
-    /**
-     * @brief Set system matrices
-     * @param A System matrix (n×n)
-     * @param B Input matrix (n×m)
-     * @param C Output matrix (p×n)
-     * @param n States, m Inputs, p Outputs
-     */
-    void setSystemMatrices(const double* A, const double* B, const double* C,
-                           int n, int m, int p);
-    
-    /**
-     * @brief Set noise covariance matrices
-     * @param W Process noise covariance (n×n)
-     * @param V Measurement noise covariance (p×p)
-     */
-    void setNoiseCovariances(const double* W, const double* V);
-    
-    /**
-     * @brief Compute steady-state Kalman gain
-     * @return true if computation succeeded
-     */
-    bool computeGain();
-    
-    /**
-     * @brief Set Kalman gain directly
-     * @param L Kalman gain matrix (n×p)
-     */
-    void setKalmanGain(const double* L);
-    
-    /**
-     * @brief Get estimated state
-     * @param x Output buffer (n elements)
-     */
-    void getEstimatedState(double* x) const;
-    
-    /**
-     * @brief Set initial state estimate
-     * @param x0 Initial state (n elements)
-     */
-    void setInitialState(const double* x0);
-    
-    // Internal prediction/update methods (raw pointer interface)
-    void predict(const double* u, double dt);
-    void update(const double* y);
-    void getState(double* x) const;
-    
-    // StateEstimator interface
-    StateVector estimate(const OutputVector& measurement,
-                        const ControlVector& control,
-                        double dt) override;
-    StateVector getState() const override;
-    size_t getStateDim() const override;
-    void reset() override;
-    
-private:
-    int m_n{0}, m_m{0}, m_p{0};
-    
-    std::array<double, MAX_STATE_DIM * MAX_STATE_DIM> m_A{};
-    std::array<double, MAX_STATE_DIM * MAX_CONTROL_DIM> m_B{};
-    std::array<double, MAX_OUTPUT_DIM * MAX_STATE_DIM> m_C{};
-    
-    std::array<double, MAX_STATE_DIM * MAX_STATE_DIM> m_W{};  // Process noise
-    std::array<double, MAX_OUTPUT_DIM * MAX_OUTPUT_DIM> m_V{};  // Measurement noise
-    
-    std::array<double, MAX_STATE_DIM * MAX_OUTPUT_DIM> m_L{};  // Kalman gain
-    std::array<double, MAX_STATE_DIM * MAX_STATE_DIM> m_P{};   // Error covariance
-    
-    std::array<double, MAX_STATE_DIM> m_xHat{};  // State estimate
-    
-    bool m_gainComputed{false};
-    
-    bool solveFilterRiccati();
 };
 
 // ============================================================================
