@@ -153,6 +153,22 @@ struct KlippySettings {
     double maxPreEmphasisPower = 0.4;      ///< [0-1 PWM]
     double maxPostEmphasisPower = 0.2;     ///< [0-1 PWM]
     double maxHeaterOvershoot = 10.0;      ///< [°C]
+    // Deconvolution feedforward controller
+    std::string deconvolutionController = "none"; ///< none|lti_freq|overlap_add_lpv|arx_lpv|statespace_lpv
+    double deconvolutionLambda = 1e-6;     ///< Tikhonov λ (LTI & state-space)
+    bool deconvolutionEnabled = false;     ///< runtime enable/disable
+    // LTI frequency-domain deconvolver
+    bool ltiPadToPowerOfTwo = true;        ///< FFT padding
+    // Overlap-add LPV deconvolver
+    int overlapAddBlockSize = 256;         ///< Block size B (samples)
+    double overlapAddOverlapRatio = 0.5;   ///< Overlap fraction [0,1)
+    // ARX LPV inverse filter
+    int arxNa = 2;                         ///< Order of A(z)
+    int arxNb = 1;                         ///< Order of B'(z)
+    // State-space LPV input estimator
+    int stateSpaceStateDim = 2;            ///< State vector dimension
+    int stateSpaceInputDim = 1;            ///< Input dimension
+    int stateSpaceOutputDim = 1;           ///< Output dimension
 #endif
 
     // Heater bed

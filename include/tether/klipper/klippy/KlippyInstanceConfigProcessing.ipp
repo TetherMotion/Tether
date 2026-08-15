@@ -110,6 +110,8 @@
         }
         // Flow-adaptive heater compensation (built/wired if enabled).
         applyFlowAdaptiveHeaterSettings();
+        // Deconvolution feedforward controller (built if enabled).
+        applyDeconvolutionSettings();
 #endif
 
         // --- Skew correction ---
@@ -500,6 +502,40 @@
                 }
                 if (section.has("max_heater_overshoot")) {
                     try { settings_.maxHeaterOvershoot = section.getDouble("max_heater_overshoot"); } catch (...) {}
+                }
+                // Deconvolution feedforward controller
+                if (section.has("deconvolution_controller")) {
+                    try { settings_.deconvolutionController = section.get("deconvolution_controller"); } catch (...) {}
+                }
+                if (section.has("deconvolution_lambda")) {
+                    try { settings_.deconvolutionLambda = section.getDouble("deconvolution_lambda"); } catch (...) {}
+                }
+                if (section.has("deconvolution_enabled")) {
+                    try { settings_.deconvolutionEnabled = section.getBool("deconvolution_enabled"); } catch (...) {}
+                }
+                if (section.has("lti_pad_to_power_of_two")) {
+                    try { settings_.ltiPadToPowerOfTwo = section.getBool("lti_pad_to_power_of_two"); } catch (...) {}
+                }
+                if (section.has("overlap_add_block_size")) {
+                    try { settings_.overlapAddBlockSize = section.getInt("overlap_add_block_size"); } catch (...) {}
+                }
+                if (section.has("overlap_add_overlap_ratio")) {
+                    try { settings_.overlapAddOverlapRatio = section.getDouble("overlap_add_overlap_ratio"); } catch (...) {}
+                }
+                if (section.has("arx_na")) {
+                    try { settings_.arxNa = section.getInt("arx_na"); } catch (...) {}
+                }
+                if (section.has("arx_nb")) {
+                    try { settings_.arxNb = section.getInt("arx_nb"); } catch (...) {}
+                }
+                if (section.has("state_space_state_dim")) {
+                    try { settings_.stateSpaceStateDim = section.getInt("state_space_state_dim"); } catch (...) {}
+                }
+                if (section.has("state_space_input_dim")) {
+                    try { settings_.stateSpaceInputDim = section.getInt("state_space_input_dim"); } catch (...) {}
+                }
+                if (section.has("state_space_output_dim")) {
+                    try { settings_.stateSpaceOutputDim = section.getInt("state_space_output_dim"); } catch (...) {}
                 }
 #endif
                 if (section.has("min_extrude_temp")) {

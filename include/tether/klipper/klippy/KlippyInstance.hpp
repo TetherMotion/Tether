@@ -36,6 +36,10 @@
 #include "tether/klipper/config/StandardCommands.hpp"
 #if TETHER_ENABLE_PRESSURE_ADVANCE
 #include "tether/control/extrusion/FlowAdaptiveHeaterController.hpp"
+#include "tether/control/extrusion/LTIFrequencyDomainDeconvolver.hpp"
+#include "tether/control/extrusion/OverlapAddLPVDeconvolver.hpp"
+#include "tether/control/extrusion/ARXLPVInverseFilter.hpp"
+#include "tether/control/extrusion/StateSpaceLPVInputEstimator.hpp"
 #endif
 #include "tether/klipper/objects/Thermal.hpp"
 #include "tether/klipper/objects/Peripherals.hpp"
@@ -400,6 +404,36 @@ public:
     /// and the extrusion flow tracker. Called from applySettings() and from
     /// the SET_HEATER_FLOW_COMPENSATION G-code command.
     void applyFlowAdaptiveHeaterSettings() { applyFlowAdaptiveHeaterSettingsImpl(); }
+
+    /// @return The active deconvolution controller type name, or "none".
+    const std::string& deconvolutionControllerType() const {
+        return settings_.deconvolutionController;
+    }
+
+    /// @return True if the deconvolution controller is enabled at runtime.
+    bool deconvolutionEnabled() const { return settings_.deconvolutionEnabled; }
+
+    /// @return The LTI frequency-domain deconvolver, or nullptr if not active.
+    std::shared_ptr<tether::control::extrusion::LTIFrequencyDomainDeconvolver>
+    ltiDeconvolver() { return ltiDeconvolver_; }
+
+    /// @return The overlap-add LPV deconvolver, or nullptr if not active.
+    std::shared_ptr<tether::control::extrusion::OverlapAddLPVDeconvolver>
+    overlapAddDeconvolver() { return overlapAddDeconvolver_; }
+
+    /// @return The ARX LPV inverse filter, or nullptr if not active.
+    std::shared_ptr<tether::control::extrusion::ARXLPVInverseFilter>
+    arxInverseFilter() { return arxInverseFilter_; }
+
+    /// @return The state-space LPV input estimator, or nullptr if not active.
+    std::shared_ptr<tether::control::extrusion::StateSpaceLPVInputEstimator>
+    stateSpaceEstimator() { return stateSpaceEstimator_; }
+
+    /// @brief Apply the current deconvolution controller settings from
+    /// settings_. Builds the selected controller if enabled. Called from
+    /// applySettings() and from the SET_DECONVOLUTION_CONTROLLER G-code
+    /// command.
+    void applyDeconvolutionSettings() { applyDeconvolutionSettingsImpl(); }
 #endif
 
     /// @return True if the motion backend is wired and the host is ready
@@ -596,6 +630,85 @@ public:
         if (extruderHeater_ && extrusionFlowTracker_) {
             extruderHeater_->setFlowCompensation(flowAdaptiveHeater_,
                                                  extrusionFlowTracker_);
+        }
+    }
+
+    /// @brief Apply the current deconvolution controller settings from
+    /// settings_. Builds the selected controller if enabled, or tears down
+    /// all controllers if disabled. Called from applySettings() and from
+    /// the SET_DECONVOLUTION_CONTROLLER G-code command.
+    void applyDeconvolutionSettingsImpl() {
+        // Tear down all controllers when disabled or set to "none".
+        const auto& type = settings_.deconvolutionController;
+        if (type == "none" || !settings_.deconvolutionEnabled) {
+            ltiDeconvolver_.reset();
+            overlapAddDeconvolver_.reset();
+            arxInverseFilter_.reset();
+            stateSpaceEstimator_.reset();
+            if (deconvolutionObj_) {
+                deconvolutionObj_->setController("none");
+                deconvolutionObj_->setEnabled(false);
+            }
+            return;
+        }
+
+        // Build or reconfigure the selected controller.
+        if (type == "lti_freq") {
+            if (!ltiDeconvolver_) {
+                tether::control::extrusion::LTIDeconvolutionParams p;
+                p.lambda = settings_.deconvolutionLambda;
+                p.padToPowerOfTwo = settings_.ltiPadToPowerOfTwo;
+                ltiDeconvolver_ = std::make_shared<
+                    tether::control::extrusion::LTIFrequencyDomainDeconvolver>(p);
+            } else {
+                ltiDeconvolver_->setLambda(settings_.deconvolutionLambda);
+            }
+            // Clear other controllers.
+            overlapAddDeconvolver_.reset();
+            arxInverseFilter_.reset();
+            stateSpaceEstimator_.reset();
+        } else if (type == "overlap_add_lpv") {
+            if (!overlapAddDeconvolver_) {
+                tether::control::extrusion::OverlapAddLPVParams p;
+                p.blockSize = settings_.overlapAddBlockSize;
+                p.overlapRatio = settings_.overlapAddOverlapRatio;
+                p.lambda = settings_.deconvolutionLambda;
+                overlapAddDeconvolver_ = std::make_shared<
+                    tether::control::extrusion::OverlapAddLPVDeconvolver>(p);
+            }
+            ltiDeconvolver_.reset();
+            arxInverseFilter_.reset();
+            stateSpaceEstimator_.reset();
+        } else if (type == "arx_lpv") {
+            if (!arxInverseFilter_) {
+                arxInverseFilter_ = std::make_shared<
+                    tether::control::extrusion::ARXLPVInverseFilter>(
+                        settings_.arxNa, settings_.arxNb);
+            }
+            ltiDeconvolver_.reset();
+            overlapAddDeconvolver_.reset();
+            stateSpaceEstimator_.reset();
+        } else if (type == "statespace_lpv") {
+            if (!stateSpaceEstimator_) {
+                tether::control::extrusion::StateSpaceLPVParams p;
+                p.lambda = settings_.deconvolutionLambda;
+                stateSpaceEstimator_ = std::make_shared<
+                    tether::control::extrusion::StateSpaceLPVInputEstimator>(
+                        settings_.stateSpaceStateDim,
+                        settings_.stateSpaceInputDim,
+                        settings_.stateSpaceOutputDim, p);
+            } else {
+                stateSpaceEstimator_->setLambda(settings_.deconvolutionLambda);
+            }
+            ltiDeconvolver_.reset();
+            overlapAddDeconvolver_.reset();
+            arxInverseFilter_.reset();
+        }
+
+        // Update the printer object.
+        if (deconvolutionObj_) {
+            deconvolutionObj_->setController(type);
+            deconvolutionObj_->setEnabled(true);
         }
     }
 #endif
@@ -811,6 +924,7 @@ private:
         inputShaperObj_ = std::make_shared<InputShaperObject>();
 #if TETHER_ENABLE_PRESSURE_ADVANCE
         pressureAdvanceObj_ = std::make_shared<PressureAdvanceObject>();
+        deconvolutionObj_ = std::make_shared<DeconvolutionObject>();
 #endif
         excludeObjectObj_ = std::make_shared<ExcludeObjectObject>();
         zThermalAdjustObj_ = std::make_shared<ZThermalAdjustObject>();
@@ -847,6 +961,7 @@ private:
         server_.registerObject(inputShaperObj_);
 #if TETHER_ENABLE_PRESSURE_ADVANCE
         server_.registerObject(pressureAdvanceObj_);
+        server_.registerObject(deconvolutionObj_);
 #endif
         server_.registerObject(excludeObjectObj_);
         server_.registerObject(zThermalAdjustObj_);
@@ -936,6 +1051,17 @@ private:
     /// heater_flow_pre_emphasis is enabled in config or via G-code).
     std::shared_ptr<tether::control::extrusion::FlowAdaptiveHeaterController>
         flowAdaptiveHeater_;
+    /// @brief Deconvolution feedforward controllers (at most one active).
+    std::shared_ptr<tether::control::extrusion::LTIFrequencyDomainDeconvolver>
+        ltiDeconvolver_;
+    std::shared_ptr<tether::control::extrusion::OverlapAddLPVDeconvolver>
+        overlapAddDeconvolver_;
+    std::shared_ptr<tether::control::extrusion::ARXLPVInverseFilter>
+        arxInverseFilter_;
+    std::shared_ptr<tether::control::extrusion::StateSpaceLPVInputEstimator>
+        stateSpaceEstimator_;
+    /// @brief Deconvolution printer object (for status reporting).
+    std::shared_ptr<klippy::DeconvolutionObject> deconvolutionObj_;
 #endif
 
     // Heater/Fan/Probe backends (set by user)
