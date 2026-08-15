@@ -3,7 +3,7 @@
  * @brief SVG export implementation
  */
 
-#include "SVGExporter.hpp"
+#include "tether/export/SVGExporter.hpp"
 #include <fstream>
 #include <sstream>
 #include <iomanip>
