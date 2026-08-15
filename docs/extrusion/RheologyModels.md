@@ -22,17 +22,25 @@ $$ \eta(\dot{\gamma}) = K \cdot \dot{\gamma}^{n-1} $$
 
 $$ \tau = K \cdot \dot{\gamma}^n \quad \text{(shear stress)} $$
 
-For pressure-driven flow in a capillary (nozzle):
+For pressure-driven flow in a capillary (nozzle), the wall shear rate is
+$\dot{\gamma}_w = 4Q / (\pi R^3)$, and the pressure drop is obtained by
+integrating the wall shear stress over the nozzle length:
 
-$$ P = \frac{2 K L}{R} \cdot \left(\frac{n+3}{4}\right)^{1/n} \cdot \left(\frac{Q}{\pi R^3}\right)^{1/n} $$
+$$ P = \frac{2 L \tau_w}{R} = \frac{2 L K \dot{\gamma}_w^n}{R} $$
 
-Wait — this is the **forward** direction ($Q \to P$).  The PA compensation needs
-the **inverse**: given the flow $Q$, compute the pressure $P$.  The forward form is
-already what we need:
+Substituting the wall shear rate and collecting the nozzle geometry
+constants ($R$, $L$, $n$) into a single coefficient $C_n$:
 
 $$ P(Q) = C_n \cdot K \cdot Q^n $$
 
-where `C_n` collects the nozzle geometry constants.
+where $C_n = \frac{2L}{R} \cdot \left(\frac{4}{\pi R^3}\right)^n \cdot \left(\frac{n+3}{4}\right)^{1/n}$.
+
+This is the **forward model** ($Q \to P$): given the volumetric flow rate,
+compute the nozzle pressure.  Pressure advance uses this directly — the
+compensating filament offset is $\delta e = (\beta V_m / A_f) \cdot P(Q)$,
+so the full chain is $Q \to P \to \delta e$.  The inverse direction
+($P \to Q$) is not needed; PA always knows the flow rate (from the
+extruder velocity) and needs the resulting pressure.
 
 ### API
 
@@ -80,6 +88,16 @@ and the pressure is obtained by integrating the wall shear stress over the
 nozzle length:
 
 $$ P = \frac{2 L \tau_w}{R} = \frac{2 L \eta(T, \dot{\gamma}_w) \dot{\gamma}_w}{R} $$
+
+As with the power-law model, this is the **forward direction** ($Q, T \to P$):
+given the volumetric flow rate and melt temperature, compute the nozzle
+pressure.  PA uses the result via $\delta e = (\beta V_m / A_f) \cdot P$.
+
+Unlike the power-law model, the Cross-WLF equation has no closed-form
+simplification — the viscosity $\eta(T, \dot{\gamma})$ is a rational function
+of $\dot{\gamma}$, making $P(Q, T)$ a non-trivial nonlinear function.  For
+online use, a pre-computed lookup table is built at startup (see
+[Pressure-Flow LUT](#pressure-flow-lut) below).
 
 ### API
 
