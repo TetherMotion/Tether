@@ -9,6 +9,7 @@ set(TETHER_CONTROLS_SOURCES
     ${TETHER_ROOT}/src/control/PIDControllers.cpp
     ${TETHER_ROOT}/src/control/FractionalPID.cpp
     ${TETHER_ROOT}/src/control/KalmanFilter.cpp
+    ${TETHER_ROOT}/src/control/ExtendedKalmanFilter.cpp
     ${TETHER_ROOT}/src/control/LQRController.cpp
     ${TETHER_ROOT}/src/control/LQGLQIControllers.cpp
     ${TETHER_ROOT}/src/control/RobustControllers.cpp

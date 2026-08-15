@@ -10,8 +10,12 @@
 #include <vector>
 #include <array>
 
+#include <Eigen/Dense>
+
 #include "tether/control/Controllers.hpp"
 #include "tether/control/StateSpaceControllers.hpp"
+#include "tether/control/KalmanFilter.hpp"
+#include "tether/control/ExtendedKalmanFilter.hpp"
 
 using namespace Control;
 
@@ -165,101 +169,100 @@ protected:
     void SetUp() override {
         kf = std::make_unique<KalmanFilter>();
     }
-    
+
     std::unique_ptr<KalmanFilter> kf;
 };
 
-TEST_F(KalmanFilterTest, GetName) {
-    EXPECT_STREQ(kf->getName(), "Kalman Filter");
-}
-
 TEST_F(KalmanFilterTest, SetSystemMatrices) {
-    double A[4] = {0, 1, -1, -1};
-    double B[2] = {0, 1};
-    double C[2] = {1, 0};  // Measure position only
-    
-    kf->setSystemMatrices(A, B, C, 2, 1, 1);
+    Eigen::Matrix2d A;
+    A << 0, 1, -1, -1;
+    Eigen::Vector2d B(0, 1);
+    Eigen::Matrix<double, 1, 2> C;
+    C << 1, 0;
+
+    kf->setSystemMatrices(A, B, C);
+    EXPECT_EQ(kf->getStateDim(), 2);
 }
 
 TEST_F(KalmanFilterTest, SetNoiseCovariances) {
-    double W[4] = {0.01, 0, 0, 0.01};  // Process noise
-    double V[1] = {0.1};               // Measurement noise
-    
+    Eigen::Matrix2d W = Eigen::Matrix2d::Identity() * 0.01;
+    Eigen::Matrix<double, 1, 1> V;
+    V << 0.1;
+
     kf->setNoiseCovariances(W, V);
 }
 
 TEST_F(KalmanFilterTest, ComputeGain) {
-    double A[4] = {0, 1, -1, -1};
-    double B[2] = {0, 1};
-    double C[2] = {1, 0};
-    double W[4] = {0.01, 0, 0, 0.01};
-    double V[1] = {0.1};
-    
-    kf->setSystemMatrices(A, B, C, 2, 1, 1);
+    Eigen::Matrix2d A;
+    A << 0, 1, -1, -1;
+    Eigen::Vector2d B(0, 1);
+    Eigen::Matrix<double, 1, 2> C;
+    C << 1, 0;
+    Eigen::Matrix2d W = Eigen::Matrix2d::Identity() * 0.01;
+    Eigen::Matrix<double, 1, 1> V;
+    V << 0.1;
+
+    kf->setSystemMatrices(A, B, C);
     kf->setNoiseCovariances(W, V);
-    
-    bool result = kf->computeGain();
+
+    EXPECT_TRUE(kf->computeGain());
+    EXPECT_GT(kf->getGain().norm(), 0.0);
 }
 
 TEST_F(KalmanFilterTest, SetKalmanGain) {
-    double L[2] = {0.5, 0.2};  // Pre-computed Kalman gain (2x1)
+    Eigen::Vector2d L(0.5, 0.2);
     kf->setKalmanGain(L);
 }
 
 TEST_F(KalmanFilterTest, SetInitialState) {
-    double x0[2] = {0.0, 0.0};
+    Eigen::Vector2d x0(0.0, 0.0);
     kf->setInitialState(x0);
-}
-
-TEST_F(KalmanFilterTest, GetEstimatedState) {
-    double A[4] = {1, 0.1, 0, 1};  // Discrete system
-    double B[2] = {0.005, 0.1};
-    double C[2] = {1, 0};
-    
-    kf->setSystemMatrices(A, B, C, 2, 1, 1);
-    
-    double x[2];
-    kf->getEstimatedState(x);
+    EXPECT_EQ(kf->getState()[0], 0.0);
 }
 
 TEST_F(KalmanFilterTest, PredictAndUpdate) {
-    double A[4] = {1, 0.1, 0, 1};
-    double B[2] = {0.005, 0.1};
-    double C[2] = {1, 0};
-    double W[4] = {0.01, 0, 0, 0.01};
-    double V[1] = {0.1};
-    
-    kf->setSystemMatrices(A, B, C, 2, 1, 1);
+    Eigen::Matrix2d A;
+    A << 1, 0.1, 0, 1;
+    Eigen::Vector2d B(0.005, 0.1);
+    Eigen::Matrix<double, 1, 2> C;
+    C << 1, 0;
+    Eigen::Matrix2d W = Eigen::Matrix2d::Identity() * 0.01;
+    Eigen::Matrix<double, 1, 1> V;
+    V << 0.1;
+
+    kf->setSystemMatrices(A, B, C);
     kf->setNoiseCovariances(W, V);
-    kf->computeGain();
-    
-    double x0[2] = {0.0, 0.0};
-    kf->setInitialState(x0);
-    
-    // Predict with control input
-    double u = 1.0;
-    kf->predict(&u, 0.1);
-    
-    // Update with measurement
-    double y = 0.1;
-    kf->update(&y);
-    
-    double x[2];
-    kf->getEstimatedState(x);
+    kf->setInitialState(Eigen::Vector2d::Zero());
+
+    Eigen::VectorXd u(1);
+    u << 1.0;
+    kf->predict(u);
+
+    Eigen::VectorXd y(1);
+    y << 0.1;
+    kf->update(y);
+
+    EXPECT_FALSE(std::isnan(kf->getState()[0]));
+    EXPECT_FALSE(std::isnan(kf->getState()[1]));
 }
 
 TEST_F(KalmanFilterTest, GetStateDim) {
-    double A[4] = {0, 1, -1, -1};
-    double B[2] = {0, 1};
-    double C[2] = {1, 0};
-    
-    kf->setSystemMatrices(A, B, C, 2, 1, 1);
-    
+    Eigen::Matrix2d A;
+    A << 0, 1, -1, -1;
+    Eigen::Vector2d B(0, 1);
+    Eigen::Matrix<double, 1, 2> C;
+    C << 1, 0;
+
+    kf->setSystemMatrices(A, B, C);
     EXPECT_EQ(kf->getStateDim(), 2);
 }
 
 TEST_F(KalmanFilterTest, Reset) {
+    kf->setSystemMatrices(Eigen::Matrix2d::Identity(), Eigen::Vector2d::Zero(), Eigen::Matrix<double, 1, 2>::Zero());
+    kf->setInitialState(Eigen::Vector2d(3.0, 4.0));
     kf->reset();
+    EXPECT_DOUBLE_EQ(kf->getState()[0], 0.0);
+    EXPECT_DOUBLE_EQ(kf->getState()[1], 0.0);
 }
 
 // ============================================================================
@@ -853,94 +856,310 @@ TEST_F(LQRControllerTest, FeedforwardEnabled) {
 // ============================================================================
 
 TEST_F(KalmanFilterTest, EstimateFunction) {
-    double A[4] = {1, 0.1, 0, 1};  // Discrete system
-    double B[2] = {0.005, 0.1};
-    double C[2] = {1, 0};
-    double W[4] = {0.01, 0, 0, 0.01};
-    double V[1] = {0.1};
-    
-    kf->setSystemMatrices(A, B, C, 2, 1, 1);
+    Eigen::Matrix2d A;
+    A << 1, 0.1, 0, 1;
+    Eigen::Vector2d B(0.005, 0.1);
+    Eigen::Matrix<double, 1, 2> C;
+    C << 1, 0;
+    Eigen::Matrix2d W = Eigen::Matrix2d::Identity() * 0.01;
+    Eigen::Matrix<double, 1, 1> V;
+    V << 0.1;
+
+    kf->setSystemMatrices(A, B, C);
     kf->setNoiseCovariances(W, V);
-    kf->computeGain();
-    
-    double x0[2] = {0.0, 0.0};
-    kf->setInitialState(x0);
-    
-    // Use the estimate() function (combines predict and update)
-    OutputVector measurement = {0.5};  // OutputVector for measurement
-    ControlVector control = {1.0};
-    
-    StateVector state = kf->estimate(measurement, control, 0.1);
-    
-    // State should be updated
+    kf->setInitialState(Eigen::Vector2d::Zero());
+
+    Eigen::VectorXd measurement(1);
+    measurement << 0.5;
+    Eigen::VectorXd control(1);
+    control << 1.0;
+
+    Eigen::VectorXd state = kf->estimate(measurement, control);
+
     EXPECT_FALSE(std::isnan(state[0]));
     EXPECT_FALSE(std::isnan(state[1]));
 }
 
 TEST_F(KalmanFilterTest, GetStateFunction) {
-    double A[4] = {1, 0.1, 0, 1};
-    double B[2] = {0.005, 0.1};
-    double C[2] = {1, 0};
-    
-    kf->setSystemMatrices(A, B, C, 2, 1, 1);
-    
-    double x0[2] = {3.0, 4.0};
-    kf->setInitialState(x0);
-    
-    // Use the getState() function that returns StateVector
-    StateVector state = kf->getState();
-    
+    Eigen::Matrix2d A;
+    A << 1, 0.1, 0, 1;
+    Eigen::Vector2d B(0.005, 0.1);
+    Eigen::Matrix<double, 1, 2> C;
+    C << 1, 0;
+
+    kf->setSystemMatrices(A, B, C);
+    kf->setInitialState(Eigen::Vector2d(3.0, 4.0));
+
+    Eigen::VectorXd state = kf->getStateVector();
+
     EXPECT_DOUBLE_EQ(state[0], 3.0);
     EXPECT_DOUBLE_EQ(state[1], 4.0);
 }
 
 TEST_F(KalmanFilterTest, MultipleEstimateCalls) {
-    double A[4] = {1, 0.1, 0, 1};
-    double B[2] = {0.005, 0.1};
-    double C[2] = {1, 0};
-    double W[4] = {0.01, 0, 0, 0.01};
-    double V[1] = {0.1};
-    
-    kf->setSystemMatrices(A, B, C, 2, 1, 1);
+    Eigen::Matrix2d A;
+    A << 1, 0.1, 0, 1;
+    Eigen::Vector2d B(0.005, 0.1);
+    Eigen::Matrix<double, 1, 2> C;
+    C << 1, 0;
+    Eigen::Matrix2d W = Eigen::Matrix2d::Identity() * 0.01;
+    Eigen::Matrix<double, 1, 1> V;
+    V << 0.1;
+
+    kf->setSystemMatrices(A, B, C);
     kf->setNoiseCovariances(W, V);
-    kf->computeGain();
-    
-    double x0[2] = {0.0, 0.0};
-    kf->setInitialState(x0);
-    
-    // Multiple estimation cycles
+    kf->setInitialState(Eigen::Vector2d::Zero());
+
     for (int i = 0; i < 50; ++i) {
-        OutputVector measurement = {0.1 * i};  // OutputVector
-        ControlVector control = {0.5};
-        
-        StateVector state = kf->estimate(measurement, control, 0.01);
+        Eigen::VectorXd measurement(1);
+        measurement << 0.1 * i;
+        Eigen::VectorXd control(1);
+        control << 0.5;
+
+        Eigen::VectorXd state = kf->estimate(measurement, control);
         EXPECT_FALSE(std::isnan(state[0]));
     }
 }
 
 TEST_F(KalmanFilterTest, ResetAndReuseEstimate) {
-    double A[4] = {1, 0.1, 0, 1};
-    double B[2] = {0.005, 0.1};
-    double C[2] = {1, 0};
-    double W[4] = {0.01, 0, 0, 0.01};
-    double V[1] = {0.1};
-    
-    kf->setSystemMatrices(A, B, C, 2, 1, 1);
+    Eigen::Matrix2d A;
+    A << 1, 0.1, 0, 1;
+    Eigen::Vector2d B(0.005, 0.1);
+    Eigen::Matrix<double, 1, 2> C;
+    C << 1, 0;
+    Eigen::Matrix2d W = Eigen::Matrix2d::Identity() * 0.01;
+    Eigen::Matrix<double, 1, 1> V;
+    V << 0.1;
+
+    kf->setSystemMatrices(A, B, C);
     kf->setNoiseCovariances(W, V);
-    kf->computeGain();
-    
-    // Run some estimates
+
     for (int i = 0; i < 20; ++i) {
-        OutputVector measurement = {1.0};  // OutputVector
-        ControlVector control = {0.1};
-        kf->estimate(measurement, control, 0.01);
+        Eigen::VectorXd measurement(1);
+        measurement << 1.0;
+        Eigen::VectorXd control(1);
+        control << 0.1;
+        kf->estimate(measurement, control);
     }
-    
-    // Reset
+
     kf->reset();
-    
-    // State should be zero after reset
-    StateVector state = kf->getState();
+
+    Eigen::VectorXd state = kf->getStateVector();
     EXPECT_DOUBLE_EQ(state[0], 0.0);
     EXPECT_DOUBLE_EQ(state[1], 0.0);
+}
+
+TEST_F(KalmanFilterTest, ConstantVelocityTrackingConvergence) {
+    // Constant velocity model: [position; velocity]
+    double dt = 0.1;
+    Eigen::Matrix2d A;
+    A << 1, dt, 0, 1;
+    Eigen::Vector2d B(0.0, 0.0);
+    Eigen::Matrix<double, 1, 2> C;
+    C << 1, 0;
+
+    Eigen::Matrix2d W;
+    W << 0.01, 0.0, 0.0, 0.001;
+    Eigen::Matrix<double, 1, 1> V;
+    V << 0.5;
+
+    kf->setSystemMatrices(A, B, C);
+    kf->setNoiseCovariances(W, V);
+    kf->setInitialState(Eigen::Vector2d(0.0, 0.0));
+
+    // True state: constant velocity of 1 m/s, starting at 0
+    double true_pos = 0.0;
+    double true_vel = 1.0;
+
+    Eigen::VectorXd u(1);
+    u << 0.0;
+
+    for (int i = 0; i < 100; ++i) {
+        true_pos += true_vel * dt;
+
+        Eigen::VectorXd y(1);
+        y << true_pos;
+
+        kf->estimate(y, u);
+    }
+
+    Eigen::VectorXd state = kf->getStateVector();
+    EXPECT_NEAR(state[0], true_pos, 0.5);
+    EXPECT_NEAR(state[1], true_vel, 0.2);
+}
+
+// ============================================================================
+// ExtendedKalmanFilter Tests
+// ============================================================================
+
+class ExtendedKalmanFilterTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        ekf = std::make_unique<ExtendedKalmanFilter>();
+    }
+
+    std::unique_ptr<ExtendedKalmanFilter> ekf;
+};
+
+TEST_F(ExtendedKalmanFilterTest, SetDims) {
+    ekf->setDims(3, 1, 1);
+    EXPECT_EQ(ekf->getStateDim(), 3);
+}
+
+TEST_F(ExtendedKalmanFilterTest, PredictAndUpdate) {
+    ekf->setDims(2, 1, 1);
+
+    ekf->setModelFunctions(
+        [](const Eigen::VectorXd& x, const Eigen::VectorXd& /*u*/, double dt) {
+            Eigen::VectorXd x_new(2);
+            x_new << x(0) + x(1) * dt, x(1);
+            return x_new;
+        },
+        [](const Eigen::VectorXd& x) {
+            Eigen::VectorXd y(1);
+            y << x(0);
+            return y;
+        });
+
+    ekf->setProcessNoise(Eigen::Matrix2d::Identity() * 0.01);
+    ekf->setMeasurementNoise(Eigen::Matrix<double, 1, 1>::Identity() * 0.1);
+    ekf->setInitialState(Eigen::Vector2d::Zero());
+
+    Eigen::VectorXd u(1);
+    u << 0.0;
+    ekf->predict(u, 0.1);
+
+    Eigen::VectorXd y(1);
+    y << 1.0;
+    ekf->update(y);
+
+    EXPECT_FALSE(std::isnan(ekf->getState()[0]));
+    EXPECT_FALSE(std::isnan(ekf->getState()[1]));
+}
+
+TEST_F(ExtendedKalmanFilterTest, PendulumAngleEstimation) {
+    // Estimate pendulum angle from horizontal position measurement.
+    // State: [theta; omega], measurement: x = sin(theta)
+    const double g = 9.81;
+    const double L = 1.0;
+    const double dt = 0.01;
+
+    ekf->setDims(2, 0, 1);
+
+    ekf->setModelFunctions(
+        [g, L, dt](const Eigen::VectorXd& x, const Eigen::VectorXd& /*u*/, double /*dt*/) {
+            Eigen::VectorXd x_new(2);
+            double theta = x(0);
+            double omega = x(1);
+            double alpha = -(g / L) * std::sin(theta);
+            x_new << theta + omega * dt, omega + alpha * dt;
+            return x_new;
+        },
+        [](const Eigen::VectorXd& x) {
+            Eigen::VectorXd y(1);
+            y << std::sin(x(0));
+            return y;
+        });
+
+    Eigen::Matrix2d W;
+    W << 0.001, 0.0, 0.0, 0.01;
+    ekf->setProcessNoise(W);
+    ekf->setMeasurementNoise(Eigen::Matrix<double, 1, 1>::Identity() * 0.01);
+    ekf->setInitialState(Eigen::Vector2d(0.5, 0.0));
+
+    // Simulate true pendulum and feed measurements
+    double theta = 0.5;
+    double omega = 0.0;
+    Eigen::VectorXd u(0);
+
+    for (int i = 0; i < 500; ++i) {
+        double alpha = -(g / L) * std::sin(theta);
+        omega += alpha * dt;
+        theta += omega * dt;
+
+        Eigen::VectorXd y(1);
+        y << std::sin(theta);
+
+        ekf->estimate(y, u, dt);
+    }
+
+    // EKF angle estimate should track the true angle modulo 2*pi
+    double est_theta = std::fmod(ekf->getState()[0], 2.0 * M_PI);
+    double true_theta = std::fmod(theta, 2.0 * M_PI);
+    EXPECT_NEAR(est_theta, true_theta, 0.3);
+}
+
+TEST_F(ExtendedKalmanFilterTest, AnalyticJacobians) {
+    ekf->setDims(2, 1, 1);
+
+    ekf->setModelFunctions(
+        [](const Eigen::VectorXd& x, const Eigen::VectorXd& u, double dt) {
+            Eigen::VectorXd x_new(2);
+            x_new << x(0) + x(1) * dt, x(1) + u(0) * dt;
+            return x_new;
+        },
+        [](const Eigen::VectorXd& x) {
+            Eigen::VectorXd y(1);
+            y << x(0);
+            return y;
+        });
+
+    ekf->setJacobianFunctions(
+        [](const Eigen::VectorXd& /*x*/, const Eigen::VectorXd& /*u*/, double dt) {
+            Eigen::MatrixXd F(2, 2);
+            F << 1, dt, 0, 1;
+            return F;
+        },
+        [](const Eigen::VectorXd& /*x*/) {
+            Eigen::MatrixXd H(1, 2);
+            H << 1, 0;
+            return H;
+        });
+
+    ekf->setProcessNoise(Eigen::Matrix2d::Identity() * 0.01);
+    ekf->setMeasurementNoise(Eigen::Matrix<double, 1, 1>::Identity() * 0.1);
+    ekf->setInitialState(Eigen::Vector2d::Zero());
+
+    Eigen::VectorXd u(1);
+    u << 0.1;
+    Eigen::VectorXd y(1);
+    y << 1.0;
+
+    ekf->estimate(y, u, 0.1);
+
+    EXPECT_FALSE(std::isnan(ekf->getState()[0]));
+    EXPECT_FALSE(std::isnan(ekf->getState()[1]));
+}
+
+TEST_F(ExtendedKalmanFilterTest, StateEstimatorInterface) {
+    ekf->setDims(2, 1, 1);
+
+    ekf->setModelFunctions(
+        [](const Eigen::VectorXd& x, const Eigen::VectorXd& /*u*/, double dt) {
+            Eigen::VectorXd x_new(2);
+            x_new << x(0) + x(1) * dt, x(1);
+            return x_new;
+        },
+        [](const Eigen::VectorXd& x) {
+            Eigen::VectorXd y(1);
+            y << x(0);
+            return y;
+        });
+
+    ekf->setProcessNoise(Eigen::Matrix2d::Identity() * 0.01);
+    ekf->setMeasurementNoise(Eigen::Matrix<double, 1, 1>::Identity() * 0.1);
+
+    OutputVector measurement = {0.5};
+    ControlVector control = {0.0};
+
+    StateVector state = ekf->estimate(measurement, control, 0.1);
+    EXPECT_FALSE(std::isnan(state[0]));
+}
+
+TEST_F(ExtendedKalmanFilterTest, Reset) {
+    ekf->setDims(2, 0, 1);
+    ekf->setInitialState(Eigen::Vector2d(1.0, 2.0));
+    ekf->reset();
+    EXPECT_DOUBLE_EQ(ekf->getState()[0], 0.0);
+    EXPECT_DOUBLE_EQ(ekf->getState()[1], 0.0);
 }

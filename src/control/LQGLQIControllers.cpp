@@ -38,7 +38,16 @@ void LQGController::setSystemMatrices(const double* A, const double* B,
     m_p = std::min(p, static_cast<int>(MAX_OUTPUT_DIM));
 
     m_lqr.setSystemMatrices(A, B, m_n, m_m);
-    m_kf.setSystemMatrices(A, B, C, m_n, m_m, m_p);
+
+    // Convert raw row-major arrays to Eigen matrices for the Eigen-based KF
+    Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+        eigenA(A, m_n, m_n);
+    Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+        eigenB(B, m_n, m_m);
+    Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+        eigenC(C, m_p, m_n);
+
+    m_kf.setSystemMatrices(eigenA, eigenB, eigenC);
 
     std::memcpy(m_C.data(), C, static_cast<size_t>(m_p) * static_cast<size_t>(m_n) * sizeof(double));
 }
@@ -48,7 +57,11 @@ void LQGController::setLQRWeights(const double* Q, const double* R) {
 }
 
 void LQGController::setNoiseCovariances(const double* W, const double* V) {
-    m_kf.setNoiseCovariances(W, V);
+    Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+        eigenW(W, m_n, m_n);
+    Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+        eigenV(V, m_p, m_p);
+    m_kf.setNoiseCovariances(eigenW, eigenV);
 }
 
 bool LQGController::design() {
@@ -58,25 +71,30 @@ bool LQGController::design() {
 }
 
 ControllerOutput LQGController::computeImpl(const ControllerInput& input) {
-    double u[MAX_CONTROL_DIM] = {m_lastControl};
-    m_kf.predict(u, input.dt);
-    
-    double y[MAX_OUTPUT_DIM] = {input.measured};
+    Eigen::VectorXd u(static_cast<Eigen::Index>(m_m));
+    u.setZero();
+    u(0) = m_lastControl;
+    m_kf.predict(u);
+
+    Eigen::VectorXd y(static_cast<Eigen::Index>(m_p));
+    y.setZero();
+    y(0) = input.measured;
     m_kf.update(y);
-    
-    double xHat[MAX_STATE_DIM];
-    m_kf.getState(xHat);
-    
+
+    Eigen::VectorXd xHat = m_kf.getStateVector();
+
     ControllerInput lqrInput = input;
-    std::memcpy(lqrInput.state.data(), xHat, m_n * sizeof(double));
-    
+    for (int i = 0; i < m_n && i < static_cast<int>(MAX_STATE_DIM); ++i) {
+        lqrInput.state[i] = xHat(i);
+    }
+
     double xRef[MAX_STATE_DIM] = {m_reference};
     m_lqr.setReferenceState(xRef);
-    
+
     ControllerOutput output = m_lqr.compute(lqrInput);
-    
+
     m_lastControl = output.control;
-    
+
     return output;
 }
 

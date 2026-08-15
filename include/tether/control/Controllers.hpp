@@ -126,6 +126,10 @@
 // State-space optimal controllers (LQR, LQG, LQI)
 #include "control/StateSpaceControllers.hpp"
 
+// Kalman filters (linear and extended)
+#include "control/KalmanFilter.hpp"
+#include "control/ExtendedKalmanFilter.hpp"
+
 // Robust controllers (H2, H∞)
 #include "control/RobustControllers.hpp"
 
@@ -163,7 +167,8 @@
  * 
  * ### Optimal Control
  * - LQRController - Linear Quadratic Regulator
- * - KalmanFilter - Linear state estimator
+ * - KalmanFilter - Linear state estimator (Eigen-based)
+ * - ExtendedKalmanFilter - Nonlinear state estimator (Eigen-based)
  * - LQGController - LQR + Kalman Filter
  * - LQIController - LQR with integral action
  * 
