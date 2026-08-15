@@ -1036,4 +1036,113 @@ bool SvgExporter::exportReNurbsProfile(
     return true;
 }
 
+//=============================================================================
+// Generic ReNURBS Profile Rendering
+//=============================================================================
+
+void SvgExporter::renderGenericQuantity(
+    std::ostream& out, int svgW, int svgH,
+    const tether::motion::profile_renurbs::GenericReNurbsProfile& renurbs,
+    std::size_t quantityIndex,
+    const std::string& title,
+    const std::string& yLabel) const {
+
+    using namespace tether::motion::profile_renurbs;
+
+    std::vector<std::pair<double,double>> points;
+    std::vector<std::pair<double,double>> segmentBoundaries;
+
+    for (const auto& seg : renurbs.perSegment) {
+        if (quantityIndex >= seg.quantities.size()) continue;
+        const auto& curveOpt = seg.quantities[quantityIndex].curve;
+        if (!curveOpt.has_value()) continue;
+        const auto& curve = curveOpt.value();
+
+        double pStart = seg.paramStart;
+        double pEnd = seg.paramEnd;
+        double segLen = pEnd - pStart;
+        if (segLen <= 0) continue;
+
+        double uMin = curve.knotMin();
+        double uMax = curve.knotMax();
+        int nEval = 100;
+        for (int k = 0; k <= nEval; ++k) {
+            double u = static_cast<double>(k) / nEval;
+            double uu = uMin + u * (uMax - uMin);
+            double p = pStart + u * segLen;
+            double val = curve.evaluate(uu)[0];
+            points.emplace_back(p, val);
+        }
+        segmentBoundaries.emplace_back(pEnd, 0);
+    }
+
+    if (points.empty()) return;
+
+    AxisBounds bounds = computeBounds(points);
+    if (bounds.minY > 0) bounds.minY = 0;
+    if (bounds.maxY < 0) bounds.maxY = 0;
+
+    auto transformPts = [&](const std::vector<std::pair<double,double>>& pts) {
+        std::vector<std::pair<double,double>> result;
+        for (const auto& [x, y] : pts) {
+            result.push_back(transform(x, y, bounds, svgW, svgH, config_.margin));
+        }
+        return result;
+    };
+
+    renderGrid(out, bounds, svgW, svgH, config_.margin);
+    renderAxes(out, bounds, svgW, svgH, config_.margin, "Parameter", yLabel);
+    renderTitle(out, title, svgW, config_.margin);
+
+    for (const auto& [sx, sy] : segmentBoundaries) {
+        if (sx >= bounds.maxX) continue;
+        auto [px1, py1] = transform(sx, bounds.minY, bounds, svgW, svgH, config_.margin);
+        auto [px2, py2] = transform(sx, bounds.maxY, bounds, svgW, svgH, config_.margin);
+        writeDashedLine(out, px1, py1, px2, py2, "#888888", 1);
+    }
+
+    writePolyline(out, transformPts(points), config_.desiredColor, config_.lineWidth);
+}
+
+bool SvgExporter::exportGenericReNurbsProfile(
+    const std::string& filename,
+    const tether::motion::profile_renurbs::GenericReNurbsProfile& renurbs) const {
+
+    if (renurbs.empty()) return false;
+
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+
+    std::size_t numQuantities = renurbs.numQuantities();
+    if (numQuantities == 0) return false;
+
+    int totalW = config_.width;
+    int totalH = config_.height * static_cast<int>(numQuantities);
+    int subH = config_.height;
+    int subW = totalW;
+
+    writeHeader(file, totalW, totalH);
+    writeBackground(file, totalW, totalH);
+
+    int yOffset = 0;
+
+    // First plot (no offset)
+    renderGenericQuantity(file, subW, subH, renurbs, 0,
+        "ReNURBS: " + renurbs.quantityNames[0], renurbs.quantityNames[0]);
+    yOffset += subH;
+
+    // Subsequent plots with y-offset
+    for (std::size_t qi = 1; qi < numQuantities; ++qi) {
+        file << "<g transform=\"translate(0," << yOffset << ")\">\n";
+        renderGenericQuantity(file, subW, subH, renurbs, qi,
+            "ReNURBS: " + renurbs.quantityNames[qi],
+            renurbs.quantityNames[qi]);
+        file << "</g>\n";
+        yOffset += subH;
+    }
+
+    writeFooter(file);
+    return true;
+}
+
 } // namespace MotionReplanner

@@ -50,6 +50,8 @@ set(TETHER_MOTION_PLANNER_SOURCES
     ${TETHER_ROOT}/src/motion_planner/profile_renurbs/ProfileSplineFitter.cpp
     ${TETHER_ROOT}/src/motion_planner/profile_renurbs/ReNurbsProfileBuilder.cpp
     ${TETHER_ROOT}/src/motion_planner/profile_renurbs/ProfileConstraintCertifier.cpp
+    ${TETHER_ROOT}/src/motion_planner/profile_renurbs/GenericReNurbsBuilder.cpp
+    ${TETHER_ROOT}/src/motion_planner/profile_renurbs/GenericReNurbsCertifier.cpp
 )
 
 # Filter to only existing files
