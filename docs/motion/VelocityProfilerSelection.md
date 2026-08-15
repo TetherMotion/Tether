@@ -38,15 +38,15 @@ profile along a path subject to:
 
 The profile is computed in two sweeps:
 
-1. **Forward pass:** `v² = v₀² + 2·a_max·Δs` — maximum velocity reachable
-   from the start, accelerating at `a_max`.
-2. **Backward pass:** `v² = v₁² + 2·a_max·Δs` — maximum velocity that
-   allows stopping by the end, decelerating at `a_max`.
-3. **Final profile:** `v(s) = min(forward, backward, v_lim(s))`
+1. **Forward pass:** $v^2 = v_0^2 + 2 \cdot a_{\max} \cdot \Delta s$ — maximum velocity reachable
+   from the start, accelerating at $a_{\max}$.
+2. **Backward pass:** $v^2 = v_1^2 + 2 \cdot a_{\max} \cdot \Delta s$ — maximum velocity that
+   allows stopping by the end, decelerating at $a_{\max}$.
+3. **Final profile:** $v(s) = \min(v_{\text{fwd}}, v_{\text{bwd}}, v_{\text{lim}}(s))$
 
-The velocity limit curve `v_lim(s)` incorporates:
+The velocity limit curve $v_{\text{lim}}(s)$ incorporates:
 - Feed rate
-- Curvature: `v ≤ √(a_centripetal / κ)`
+- Curvature: $v \leq \sqrt{a_{\text{cent}} / \kappa}$
 - Per-axis velocity limits projected onto the path tangent
 
 ### Properties
@@ -54,7 +54,7 @@ The velocity limit curve `v_lim(s)` incorporates:
 - **Time-optimal:** Produces the fastest possible trajectory for the
   given constraints. No other profiler can be faster.
 - **Bang-bang acceleration:** Acceleration switches instantaneously
-  between `+a_max` and `-a_max` at constraint switching points. This
+  between $+a_{\max}$ and $-a_{\max}$ at constraint switching points. This
   means **jerk is theoretically infinite** at these switching points.
 - **Acceleration discontinuity:** The acceleration profile has step
   changes. This can cause mechanical vibration, ringing, and excitation
@@ -113,15 +113,15 @@ Third-order TOPP-RA with jerk as a first-class constraint inside the
 optimizer. This is the **recommended profiler for most applications**.
 
 The algorithm extends the basic TOPP-RA by replacing the 2nd-order
-kinematic equation `v² = v₀² + 2·a·Δs` with the jerk-limited distance
+kinematic equation $v^2 = v_0^2 + 2 \cdot a \cdot \Delta s$ with the jerk-limited distance
 function from `SCurveProfile`:
 
-```
-Δs = computeAccelDistance(v₀, v₁, a_max, j_max)
-```
+$$
+\Delta s = \text{computeAccelDistance}(v_0, v_1, a_{\max}, j_{\max})
+$$
 
 This function computes the exact arc length needed to change velocity
-from `v₀` to `v₁`, accounting for the finite time required to ramp
+from $v_0$ to $v_1$, accounting for the finite time required to ramp
 acceleration up and down (jerk-limited S-curve acceleration profile).
 
 The forward and backward passes use binary search
@@ -136,8 +136,8 @@ within the available distance, subject to jerk limits.
   difference is typically 5-15% depending on the path.
 - **Continuous acceleration:** Acceleration ramps smoothly between
   values. No step changes at switching points.
-- **Bounded jerk:** `|jerk(t)| ≤ j_max` everywhere, by construction.
-  The jerk is `±j_max` during acceleration transitions and `0` during
+- **Bounded jerk:** $|\text{jerk}(t)| \leq j_{\max}$ everywhere, by construction.
+  The jerk is $\pm j_{\max}$ during acceleration transitions and $0$ during
   constant-acceleration or cruise phases.
 - **All constraints verified:** Velocity, acceleration, curvature, and
   per-axis limits are all checked at every sample point during the
@@ -170,11 +170,11 @@ within the available distance, subject to jerk limits.
 
 ### Performance Characteristics
 
-- **Compute time:** O(N × log(V_max/ε)) per pass, where N is the number
+- **Compute time:** $O(N \times \log(V_{\max}/\varepsilon))$ per pass, where $N$ is the number
   of samples and the log factor comes from binary search in
   `maxVelocityAfterDistance`. Typically 2-5× slower than basic TOPP-RA
   due to the binary search, but still fast (< 10ms for 1000 samples).
-- **Memory:** O(N) — same as basic TOPP-RA.
+- **Memory:** $O(N)$ — same as basic TOPP-RA.
 - **Trajectory time:** 5-15% slower than basic TOPP-RA, depending on
   path geometry and jerk/acceleration ratio.
 
@@ -216,10 +216,10 @@ Per-piece 7-phase S-curve profiles. The path is divided into pieces
 with jerk-limited transitions.
 
 1. For each path piece, compute a cruise velocity limited by curvature
-   (`v = √(a_cent / κ)`) and the path-level max velocity.
+   ($v = \sqrt{a_{\text{cent}} / \kappa}$) and the path-level max velocity.
 2. Build a sequence of S-curve profiles with velocity continuity:
    - Piece 0 starts at velocity 0 (rest).
-   - Each piece's exit velocity is `min(this cruise, next cruise)`.
+   - Each piece's exit velocity is $\min(v_{\text{cruise,this}}, v_{\text{cruise,next}})$.
    - The last piece ends at velocity 0 (rest).
 3. Sample the S-curve profiles at uniform arc length intervals.
 
@@ -227,7 +227,7 @@ with jerk-limited transitions.
 
 - **Jerk-limited:** Each piece uses a 7-phase S-curve (jerk ramp-up,
   constant accel, jerk ramp-down, cruise, jerk ramp-down, constant
-  decel, jerk ramp-up). Jerk is bounded by `j_max` by construction.
+  decel, jerk ramp-up). Jerk is bounded by $j_{\max}$ by construction.
 - **Continuous acceleration:** Within each piece, acceleration is
   continuous. At piece boundaries, velocity is continuous but
   acceleration may have small discontinuities.
@@ -359,8 +359,8 @@ struct AxisLimits<NumAxes, T> {
 
 1. **Start with conservative values** and increase until mechanical
    issues appear (ringing, skipping steps, layer shifting).
-2. **Jerk/acceleration ratio matters:** `j_max / a_max` determines the
-   S-curve transition time. A ratio of 10 (e.g., a=500, j=5000) gives
+2. **Jerk/acceleration ratio matters:** $j_{\max} / a_{\max}$ determines the
+   S-curve transition time. A ratio of 10 (e.g., $a=500$, $j=5000$) gives
    a 0.1s transition; a ratio of 5 gives a 0.2s transition.
 3. **Higher jerk = faster but less smooth.** Lower jerk = smoother but
    slower. The optimal value depends on the machine's mechanical
@@ -446,16 +446,16 @@ IVelocityProfiler<Dim, T>          (abstract interface)
 The fundamental difference between the profilers is the order of the
 optimization:
 
-- **2nd-order (ToppraBasic):** State = (s, ṡ). Control = s̈ (unbounded
+- **2nd-order (ToppraBasic):** State = $(s, \dot{s})$. Control = $\ddot{s}$ (unbounded
   jerk). The optimizer can switch acceleration instantaneously.
-- **3rd-order (ToppraJerkLimited):** State = (s, ṡ, s̈). Control = s⃛
+- **3rd-order (ToppraJerkLimited):** State = $(s, \dot{s}, \ddot{s})$. Control = $\dddot{s}$
   (bounded jerk). The optimizer must ramp acceleration smoothly.
 
 The 3rd-order formulation is what produces continuous acceleration.
 The `SCurveProfile::computeAccelDistance()` function is the key
 building block — it computes the exact distance needed for a
 jerk-limited velocity change, replacing the 2nd-order
-`v² = v₀² + 2·a·Δs`.
+$v^2 = v_0^2 + 2 \cdot a \cdot \Delta s$.
 
 ### Why Not Post-Hoc Smoothing?
 

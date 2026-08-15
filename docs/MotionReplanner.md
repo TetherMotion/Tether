@@ -654,16 +654,18 @@ Tracking error typically scales with kinematic demands:
    kinematic derivative `d_i` and the deviation `e_i`.
 
 2. **Bandwidth selection**: Controls smoothness of the estimate.
-   - **Silverman** (default): `h = 1.06·σ·n^(-1/5)`
-   - **Scott**: `h = σ·n^(-1/5)`
+   - **Silverman** (default): $h = 1.06 \cdot \sigma \cdot n^{-1/5}$
+   - **Scott**: $h = \sigma \cdot n^{-1/5}$
    - **ISJ**: Improved Sheather-Jones (data-driven, robust for multimodal)
    - **Fixed**: User-specified
    - **LSCV / Likelihood CV**: Cross-validation (expensive)
 
-3. **KDE evaluation**: 2D density at grid point `(d, e)`:
-   ```
-   p(d, e) = (1/(n·h_d·h_e)) Σ_i K((d - d_i)/h_d) · K((e - e_i)/h_e)
-   ```
+3. **KDE evaluation**: 2D density at grid point $(d, e)$:
+
+$$
+   p(d, e) = \frac{1}{n \cdot h_d \cdot h_e} \sum_i K\!\left(\frac{d - d_i}{h_d}\right) \cdot K\!\left(\frac{e - e_i}{h_e}\right)
+$$
+
    Supported kernels: Gaussian, Epanechnikov, Uniform, Triangular, Quartic
    (biweight), Cosine. For large N (>5000), a binned approximation is used.
 
@@ -735,13 +737,13 @@ deviation:
 
 | Metric | Range | Captures |
 |---|---|---|
-| Pearson r | [-1, 1] | Linear correlation |
-| Spearman ρ | [-1, 1] | Monotonic correlation |
-| Kendall τ | [-1, 1] | Rank correlation |
-| Mutual information | [0, ∞) bits | Any dependence |
-| Correlation ratio η² | [0, 1] | Nonlinear dependence |
-| Distance correlation | [0, 1] | Any dependence |
-| Normalized MI | [0, 1] | Symmetric dependence |
+| Pearson $r$ | $[-1, 1]$ | Linear correlation |
+| Spearman $\rho$ | $[-1, 1]$ | Monotonic correlation |
+| Kendall $\tau$ | $[-1, 1]$ | Rank correlation |
+| Mutual information | $[0, \infty)$ bits | Any dependence |
+| Correlation ratio $\eta^2$ | $[0, 1]$ | Nonlinear dependence |
+| Distance correlation | $[0, 1]$ | Any dependence |
+| Normalized MI | $[0, 1]$ | Symmetric dependence |
 
 ### SVG Heatmap Export
 

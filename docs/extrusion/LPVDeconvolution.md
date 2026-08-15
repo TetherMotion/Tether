@@ -2,7 +2,7 @@
 
 ## Overview
 
-When the system impulse response varies with a scheduling parameter `p[n]`
+When the system impulse response varies with a scheduling parameter $p[n]$
 (e.g., toolhead speed affecting polymer viscosity), the LTI assumption
 breaks.  Tether provides three LPV (Linear Parameter-Varying) deconvolution
 variants, each suited to a different compute platform and causality
@@ -11,7 +11,7 @@ requirement:
 | Class                          | Domain    | Best for                  | Lookahead? |
 |--------------------------------|-----------|---------------------------|------------|
 | `OverlapAddLPVDeconvolver`     | Frequency | Host-side planning        | Non-causal |
-| `ARXLPVInverseFilter`          | Time      | Bare-metal MCU streaming  | d steps    |
+| `ARXLPVInverseFilter`          | Time      | Bare-metal MCU streaming  | $d$ steps    |
 | `StateSpaceLPVInputEstimator`  | Time      | Embedded with Eigen       | 1 step     |
 
 All three share the same pattern: a **LUT of models** identified at M
@@ -29,15 +29,15 @@ operating points, with **linear interpolation** of coefficients at runtime.
 
 ### Algorithm
 
-1. **LUT generation**: At M operating points `p_m`, measure `h_m[n]` and
-   precompute the regularized inverse `h_inv_m[n]` via
+1. **LUT generation**: At M operating points $p_m$, measure $h_m[n]$ and
+   precompute the regularized inverse $h_{\text{inv},m}[n]$ via
    `LTIFrequencyDomainDeconvolver`.
-2. **Windowing**: Segment `y_tgt[n]` into overlapping blocks of length `B`
+2. **Windowing**: Segment $y_{\text{tgt}}[n]$ into overlapping blocks of length `B`
    (default 50% overlap), multiplied by a Hann window.
 3. **Block processing**: For each block `i`:
-   - Compute the average scheduling parameter `p̄_i`.
-   - Linearly interpolate `h_inv(p̄_i)` from the two closest LUT entries.
-   - Time-domain convolution of the windowed block with `h_inv(p̄_i)`.
+   - Compute the average scheduling parameter $\bar{p}_i$.
+   - Linearly interpolate $h_{\text{inv}}(\bar{p}_i)$ from the two closest LUT entries.
+   - Time-domain convolution of the windowed block with $h_{\text{inv}}(\bar{p}_i)$.
 4. **Overlap-add**: Sum the block outputs at their time offsets.
 
 ### API
@@ -68,7 +68,7 @@ auto x_req = lpv.deconvolve(y_tgt, p_trajectory);
 |------------------|--------|---------|------------------------------------------|
 | `blockSize`      | int    | `256`   | Block length B (samples)                 |
 | `overlapRatio`   | double | `0.5`   | Overlap fraction in [0, 1)               |
-| `lambda`         | double | `1e-6`  | Tikhonov λ for inverse filter precompute |
+| `lambda`         | double | `1e-6`  | Tikhonov $\lambda$ for inverse filter precompute |
 
 ### Tuning guide
 
@@ -95,9 +95,9 @@ ramp from 20 to 100 mm/s over 2 seconds, B = 256 (0.256 s) gives a
 #### Lambda
 
 Same tuning as the LTI deconvolver (see
-[DeconvolutionControllers.md](DeconvolutionControllers.md)).  The same `λ`
+[DeconvolutionControllers.md](DeconvolutionControllers.md)).  The same $\lambda$
 is used for all LUT entries.  If different operating points need different
-regularization, precompute inverse filters externally with per-point `λ`
+regularization, precompute inverse filters externally with per-point $\lambda$
 and add them via `addInverseFilter()`.
 
 #### Number of operating points M
@@ -127,24 +127,18 @@ spacing.  Extrapolation outside the LUT range clamps to the nearest entry.
 
 The system is modelled as a parameter-varying ARX transfer function:
 
-```
-A(z, p) y[n] = z^{-d} B'(z, p) x[n]
-```
+$$ A(z, p) \, y[n] = z^{-d} B'(z, p) \, x[n] $$
 
 where:
-- `A(z, p) = 1 + a_1(p) z^{-1} + ... + a_{Na}(p) z^{-Na}`
-- `B'(z, p) = b_0(p) + b_1(p) z^{-1} + ... + b_{Nb}(p) z^{-Nb}`
-- `d` = discrete transport delay (steps)
+- $A(z, p) = 1 + a_1(p) z^{-1} + \dots + a_{N_a}(p) z^{-N_a}$
+- $B'(z, p) = b_0(p) + b_1(p) z^{-1} + \dots + b_{N_b}(p) z^{-N_b}$
+- $d$ = discrete transport delay (steps)
 
-The inverse (deconvolution) solves for `x[n]` algebraically:
+The inverse (deconvolution) solves for $x[n]$ algebraically:
 
-```
-x_req[n] = (1 / b_0(p[n])) · ( y_tgt[n+d]
-          + Σ_{i=1}^{Na} a_i(p[n]) · y_tgt[n+d-i]
-          − Σ_{j=1}^{Nb} b_j(p[n]) · x_req[n-j] )
-```
+$$ x_{\text{req}}[n] = \frac{1}{b_0(p[n])} \left( y_{\text{tgt}}[n+d] + \sum_{i=1}^{N_a} a_i(p[n]) \, y_{\text{tgt}}[n+d-i] - \sum_{j=1}^{N_b} b_j(p[n]) \, x_{\text{req}}[n-j] \right) $$
 
-The delay `d` is explicitly factored out so that `b_0` is the first non-zero
+The delay $d$ is explicitly factored out so that $b_0$ is the first non-zero
 coefficient.  This avoids the instability trap of non-minimum-phase zeros.
 
 ### API
@@ -176,7 +170,7 @@ double x = filter.process(y_tgt[n], y_tgt[n+d], p[n]);
 | `parameter` | double               | Scheduling parameter `p`       |
 | `aCoeffs`   | `std::vector<double>`| AR coefficients `[a1, a2, ...]`|
 | `bCoeffs`   | `std::vector<double>`| B' coefficients `[b0, b1, ...]`|
-| `delay`     | int                  | Transport delay `d` (steps)    |
+| `delay`     | int                  | Transport delay $d$ (steps)    |
 
 ### Tuning guide
 
@@ -198,16 +192,16 @@ Or use Python's `statsmodels.tsa.ar_model` or `scipy.signal.dlsim`.
 
 #### Delay estimation
 
-The transport delay `d` is critical for stability:
+The transport delay $d$ is critical for stability:
 
 | Symptom                        | Cause                    | Fix                |
 |--------------------------------|--------------------------|--------------------|
-| Explosive oscillation in `x_req` | `d` too small (b_0 ≈ 0) | Increase `d`       |
-| Excessive lag in tracking       | `d` too large           | Decrease `d`       |
-| Stable but poor tracking        | `d` correct, λ tuning   | Tune model orders  |
+| Explosive oscillation in $x_{\text{req}}$ | $d$ too small ($b_0 \approx 0$) | Increase $d$       |
+| Excessive lag in tracking       | $d$ too large           | Decrease $d$       |
+| Stable but poor tracking        | $d$ correct, $\lambda$ tuning   | Tune model orders  |
 
-**Procedure**: Start with `d = round(measured_delay_seconds × loop_rate_Hz)`.
-Verify that `b_0` is not near zero.  If `|b_0| < 0.01`, increase `d` by 1
+**Procedure**: Start with $d = \text{round}(\text{measured\_delay\_seconds} \times \text{loop\_rate\_Hz})$.
+Verify that $b_0$ is not near zero.  If $|b_0| < 0.01$, increase $d$ by 1
 and re-identify.
 
 #### Model orders (Na, Nb)
@@ -219,7 +213,7 @@ and re-identify.
 | Na=3, Nb=2 | Higher-order dynamics, resonance       |
 
 **Rule of thumb**: Start with Na=2, Nb=1.  Increase if the residual
-`(y_tgt - simulated_y)` is too large.  Decrease if the filter is unstable
+$(y_{\text{tgt}} - \text{simulated\_y})$ is too large.  Decrease if the filter is unstable
 or noisy.
 
 #### Coefficient interpolation
@@ -258,31 +252,23 @@ for (double p = p_min; p <= p_max; p += step) {
 
 The LPV system is represented in state-space form:
 
-```
-v[n+1] = A(p[n]) v[n] + B(p[n]) x[n]
-y[n]   = C(p[n]) v[n] + D(p[n]) x[n]
-```
+$$ v[n+1] = A(p[n]) \,v[n] + B(p[n]) \,x[n] $$
+$$ y[n] = C(p[n]) \,v[n] + D(p[n]) \,x[n] $$
 
-For strictly proper systems (D = 0, relative degree d = 1), the input is
+For strictly proper systems (D = 0, relative degree $d = 1$), the input is
 recovered by looking one step ahead:
 
-```
-x_req[n] = [C(p[n+1]) B(p[n])]^{+} (y_tgt[n+1] - C(p[n+1]) A(p[n]) v[n])
-```
+$$ x_{\text{req}}[n] = [C(p[n+1]) \, B(p[n])]^{+} (y_{\text{tgt}}[n+1] - C(p[n+1]) \, A(p[n]) \, v[n]) $$
 
-The pseudo-inverse `[C·B]^{+}` is computed with **Tikhonov regularization**:
+The pseudo-inverse $[C \cdot B]^{+}$ is computed with **Tikhonov regularization**:
 
-```
-x = (M^T M + λI)^{-1} M^T b
-```
+$$ x = (M^T M + \lambda I)^{-1} M^T b $$
 
-For SISO systems (scalar M), this reduces to `x = M·b / (M² + λ)`.
+For SISO systems (scalar M), this reduces to $x = M \cdot b / (M^2 + \lambda)$.
 
-The internal state `v[n]` is propagated in a feedforward simulation:
+The internal state $v[n]$ is propagated in a feedforward simulation:
 
-```
-v[n+1] = A(p[n]) v[n] + B(p[n]) x_req[n]
-```
+$$ v[n+1] = A(p[n]) \,v[n] + B(p[n]) \,x_{\text{req}}[n] $$
 
 ### API
 
@@ -316,16 +302,16 @@ double x = estimator.process(y_tgt[n+1], p[n], p[n+1]);
 | Field       | Type              | Description                    |
 |-------------|-------------------|--------------------------------|
 | `parameter` | double            | Scheduling parameter `p`       |
-| `A`         | `Eigen::MatrixXd` | State transition [stateDim × stateDim] |
-| `B`         | `Eigen::MatrixXd` | Input matrix [stateDim × inputDim] |
-| `C`         | `Eigen::MatrixXd` | Output matrix [outputDim × stateDim] |
+| `A`         | `Eigen::MatrixXd` | State transition $[\text{stateDim} \times \text{stateDim}]$ |
+| `B`         | `Eigen::MatrixXd` | Input matrix $[\text{stateDim} \times \text{inputDim}]$ |
+| `C`         | `Eigen::MatrixXd` | Output matrix $[\text{outputDim} \times \text{stateDim}]$ |
 | `D`         | `Eigen::MatrixXd` | Feedthrough (usually 0)        |
 
 ### Parameters
 
 | Parameter | Type   | Default | Description                              |
 |-----------|--------|---------|------------------------------------------|
-| `lambda`  | double | `1e-8`  | Tikhonov λ for matrix pseudo-inverse     |
+| `lambda`  | double | `1e-8`  | Tikhonov $\lambda$ for matrix pseudo-inverse     |
 
 ### Tuning guide
 
@@ -346,25 +332,25 @@ realization order from impulse-response data.
 
 #### Lambda (Tikhonov regularization)
 
-The `λ` parameter regularizes the matrix pseudo-inverse `[C·B]^{+}`:
+The $\lambda$ parameter regularizes the matrix pseudo-inverse $[C \cdot B]^{+}$:
 
-| λ range     | Effect                                        |
+| $\lambda$ range     | Effect                                        |
 |-------------|-----------------------------------------------|
 | `1e-12`     | Near-exact inversion; may amplify noise       |
 | `1e-8` (default) | Good balance for well-conditioned systems |
 | `1e-4`      | Conservative; smooths input at cost of tracking |
 | `1e-2`      | Very conservative; use only for ill-conditioned systems |
 
-**When to increase λ**:
-- `C·B` is near-singular (small `|C·B|` relative to other terms)
-- The input `x_req` shows high-frequency oscillation
+**When to increase $\lambda$**:
+- $C \cdot B$ is near-singular (small $|C \cdot B|$ relative to other terms)
+- The input $x_{\text{req}}$ shows high-frequency oscillation
 - The system has a near-non-minimum-phase zero
 
 **Procedure**:
-1. Start with `λ = 1e-8`.
+1. Start with $\lambda = 10^{-8}$.
 2. Process a known target and check the tracking error.
-3. If `x_req` oscillates, increase `λ` by 100× and retry.
-4. If tracking error is too large, decrease `λ` by 100×.
+3. If $x_{\text{req}}$ oscillates, increase $\lambda$ by 100× and retry.
+4. If tracking error is too large, decrease $\lambda$ by 100×.
 
 #### Matrix interpolation
 
@@ -388,7 +374,7 @@ switch to a log-interpolation scheme for the eigenvalues.
 
 #### Relative degree > 1
 
-The current implementation assumes relative degree `d = 1` (input affects
+The current implementation assumes relative degree $d = 1$ (input affects
 output on the next step).  For higher relative degree, chain multiple
 lookahead steps:
 
@@ -407,11 +393,9 @@ For multi-input, multi-output systems, set `inputDim > 1` and
 `outputDim > 1`.  The Tikhonov-regularized solve handles the general
 rectangular case:
 
-```
-x = (M^T M + λI)^{-1} M^T b
-```
+$$ x = (M^T M + \lambda I)^{-1} M^T b $$
 
-where `M = C·B` is `[outputDim × inputDim]`.  The regularization term `λI`
+where $M = C \cdot B$ is $[\text{outputDim} \times \text{inputDim}]$.  The regularization term $\lambda I$
 ensures invertibility even when `M` is not square.
 
 ---
@@ -421,13 +405,13 @@ ensures invertibility even when `M` is not square.
 | Feature                | OverlapAddLPV      | ARXLPV             | StateSpaceLPV      |
 |------------------------|--------------------|--------------------|--------------------|
 | Domain                 | Frequency (FFT)    | Time (IIR)         | Time (state-space) |
-| Compute per sample     | O(B log B) per block | O(Na + Nb)       | O(stateDim²)       |
-| Lookahead              | Full block         | d steps            | 1 step             |
-| Memory                 | O(M·B)             | O(M·(Na+Nb))      | O(M·stateDim²)     |
+| Compute per sample     | $O(B \log B)$ per block | $O(N_a + N_b)$       | $O(\text{stateDim}^2)$       |
+| Lookahead              | Full block         | $d$ steps            | 1 step             |
+| Memory                 | $O(M \cdot B)$             | $O(M \cdot (N_a + N_b))$      | $O(M \cdot \text{stateDim}^2)$     |
 | Matrix library needed  | No (Eigen::FFT)    | No                 | Yes (Eigen)        |
 | MIMO support           | No                 | No                 | Yes                |
 | Delay handling         | Implicit (in h)    | Explicit (d param) | Implicit (in A,B)  |
-| Regularization         | Tikhonov (λ)       | N/A (algebraic)    | Tikhonov (λ)       |
+| Regularization         | Tikhonov ($\lambda$)       | N/A (algebraic)    | Tikhonov ($\lambda$)       |
 | Best platform          | Host CPU           | Bare-metal MCU     | Embedded with Eigen|
 
 ## Source files

@@ -131,7 +131,7 @@ control points directly.
 
 ### 4.2 Clamping acos arguments
 
-**Pitfall:** `std::acos(T_in · T_out)` can return NaN if the dot
+**Pitfall:** `std::acos(dot)` where $\text{dot} = T_{\text{in}} \cdot T_{\text{out}}$ can return NaN if the dot
 product is slightly outside $[-1, 1]$ due to floating-point error.
 
 **Fix:** `std::acos(std::clamp(dot, -1.0, 1.0))`. This is done in
