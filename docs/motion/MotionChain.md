@@ -42,7 +42,7 @@ system.
 │  4. Velocity Profiling                                      (host)   │
 │  IVelocityProfiler::computeProfile() → VelocityProfile               │
 │  Output: time-parameterized v(s) profile with accel + jerk           │
-│  Choice: ToppraBasic | ToppraJerkLimited | SCurve                   │
+│  Choice: ToppraBasic | ToppraJerkConstrained | SCurve                   │
 └──────────────────────────┬──────────────────────────────────────────┘
                            │
                            ▼
@@ -235,7 +235,7 @@ per-point velocity, acceleration, jerk, and time.
 |---|---|---|
 | `IVelocityProfiler<Dim,T>` | `include/tether/motion_planner/IVelocityProfiler.hpp` | Abstract interface |
 | `VelocityProfiler<Dim,T>` | `include/tether/motion_planner/VelocityProfile.hpp` | Standard TOPP-RA (no jerk limit) |
-| `JerkLimitedVelocityProfiler<Dim,T>` | `include/tether/motion_planner/JerkLimitedVelocityProfiler.hpp` | Jerk-integrated TOPP-RA |
+| `JerkConstrainedVelocityProfiler<Dim,T>` | `include/tether/motion_planner/JerkConstrainedVelocityProfiler.hpp` | Jerk-integrated TOPP-RA |
 | `SCurveVelocityProfiler<Dim,T>` | `include/tether/motion_planner/SCurveVelocityProfiler.hpp` | Basic per-piece S-curve |
 | `VelocityProfile<T>` | `include/tether/motion_planner/VelocityProfile.hpp` | Profile data structure + queries |
 
@@ -269,7 +269,7 @@ three profilers and when to choose each.
 | Profiler | Use When |
 |---|---|
 | `ToppraBasic` | Maximum speed, stiff machine, jerk handled downstream |
-| `ToppraJerkLimited` | **Default for 3D printing** — smooth + time-optimal |
+| `ToppraJerkConstrained` | **Default for 3D printing** — smooth + time-optimal |
 | `SCurve` | Simplicity, testing, when time-optimality doesn't matter |
 
 ---
@@ -298,7 +298,7 @@ interface for motion state at any time `t`.
 result into a `MotionPlan`:
 
 ```cpp
-MotionPlanBuilder3D builder(limits, config, ProfilerType::ToppraJerkLimited);
+MotionPlanBuilder3D builder(limits, config, ProfilerType::ToppraJerkConstrained);
 auto plan = builder.build(segments, feedRate);
 ```
 
@@ -497,7 +497,7 @@ limits.path.maxPathJerk = 5000.0;          // mm/s³
 limits.path.jerkLimitEnabled = true;
 
 MotionPlanConfig<double> config;
-MotionPlanBuilder2D builder(limits, config, ProfilerType::ToppraJerkLimited);
+MotionPlanBuilder2D builder(limits, config, ProfilerType::ToppraJerkConstrained);
 auto plan = builder.build(segments, 100.0);  // 100 mm/s feed rate
 
 // ── Query the plan ──
@@ -594,7 +594,7 @@ See `docs/MotionReplanner.md` for details.
 
 | Document | Scope |
 |---|---|
-| [Velocity Profiler Selection](VelocityProfilerSelection.md) | Choosing between ToppraBasic, ToppraJerkLimited, and SCurve |
+| [Velocity Profiler Selection](VelocityProfilerSelection.md) | Choosing between ToppraBasic, ToppraJerkConstrained, and SCurve |
 | [Architecture](Architecture.md) | Motion planner layer architecture and class hierarchy |
 | [BlendingAlgorithm.md](BlendingAlgorithm.md) | Corner blending math (M11-M20, T1-T3) |
 | [GeometryFoundations.md](GeometryFoundations.md) | NURBS geometry core math |
