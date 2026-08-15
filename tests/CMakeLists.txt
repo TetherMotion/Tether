@@ -49,6 +49,7 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/replanner)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/motion_planner)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/io)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/identification)
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/analysis)
 
 # Helper function to create module test executable
 function(create_module_test MODULE_NAME SOURCES LIBS DEFINITIONS)
@@ -422,6 +423,12 @@ if(CONTROL_AUTOTUNING_METHODS_SOURCES)
     create_module_test(control_autotuning_methods "${CONTROL_AUTOTUNING_METHODS_SOURCES}" "${CONTROL_TEST_LIBS}" "")
 endif()
 
+# Analysis tests (G-code / motion path analysis)
+set(ANALYSIS_TEST_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/analysis/test_analysis.cpp"
+)
+create_module_test(analysis "${ANALYSIS_TEST_SOURCES}" "tether_common;tether_analysis;tether_io_protocol" "")
+
 if(DC_TEST_SOURCES)
     create_module_test(dc
         "${DC_TEST_SOURCES}"
@@ -572,6 +579,48 @@ target_compile_definitions(tether_motion_blend_new_tests PRIVATE
 gtest_discover_tests(tether_motion_blend_new_tests
     TEST_PREFIX motion_blend_new.
     PROPERTIES TIMEOUT 300
+)
+
+# ReNURBS profile representation (namespace tether::motion::profile_renurbs).
+# `ctest -R motion_renurbs` selects exactly this suite.
+set(MOTION_RENURBS_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/profile_renurbs/test_ProfileSplineFitter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/profile_renurbs/test_ReNurbsProfileBuilder.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/profile_renurbs/test_ProfileConstraintCertifier.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/profile_renurbs/test_ReNurbsEdgeCases.cpp"
+)
+add_executable(tether_motion_planner_renurbs_tests
+    main.cpp
+    ${MOTION_RENURBS_SOURCES}
+)
+target_include_directories(tether_motion_planner_renurbs_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/mocks
+    ${CMAKE_CURRENT_SOURCE_DIR}/mocks/esp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/export
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_replanner
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_planner
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+)
+target_link_libraries(tether_motion_planner_renurbs_tests PRIVATE
+    tether_common
+    tether_motion_planner
+    GTest::gtest
+    GTest::gtest_main
+    GTest::gmock
+    GTest::gmock_main
+)
+target_compile_definitions(tether_motion_planner_renurbs_tests PRIVATE
+    GCODE_STANDALONE_CAPI=1
+    TETHER_ENABLE_ETHERCAT=1
+    TETHER_COMPILE_MASTER=1
+    TEST_PROJECT_ROOT=\"${CMAKE_SOURCE_DIR}\"
+)
+gtest_discover_tests(tether_motion_planner_renurbs_tests
+    TEST_PREFIX motion_renurbs.
+    PROPERTIES TIMEOUT 120
 )
 
 create_module_test(motion_replanner_core "${MOTION_REPLANNER_CORE_SOURCES}" "${MOTION_REPLANNER_LIBS}" "")

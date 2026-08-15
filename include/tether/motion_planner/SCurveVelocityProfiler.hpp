@@ -230,6 +230,14 @@ public:
             pt.time = currentTime;
             prevVel = pt.velocity;
 
+            // Store the velocity and acceleration limits used by the
+            // profiler, so downstream consumers (ReNURBS) can check
+            // constraint preservation against the exact limits.
+            // For the S-curve profiler, v_lim is the cruise velocity of
+            // the containing piece, and a_max is the path acceleration limit.
+            pt.velocityLimit = vMax;
+            pt.accelerationLimit = aMax;
+
             profile.addPoint(pt);
         }
 

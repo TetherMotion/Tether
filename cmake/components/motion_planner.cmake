@@ -47,6 +47,9 @@ set(TETHER_MOTION_PLANNER_SOURCES
     ${TETHER_ROOT}/src/replanner/KdeStatistics.cpp
     ${TETHER_ROOT}/src/replanner/KdeGridEvaluator.cpp
     ${TETHER_ROOT}/src/replanner/KdeDerivativeAnalyzer.cpp
+    ${TETHER_ROOT}/src/motion_planner/profile_renurbs/ProfileSplineFitter.cpp
+    ${TETHER_ROOT}/src/motion_planner/profile_renurbs/ReNurbsProfileBuilder.cpp
+    ${TETHER_ROOT}/src/motion_planner/profile_renurbs/ProfileConstraintCertifier.cpp
 )
 
 # Filter to only existing files
