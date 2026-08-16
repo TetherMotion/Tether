@@ -1,5 +1,5 @@
 /**
- * @file IVelocityProfiler.hpp
+ * @file VelocityProfiler.hpp
  * @brief Abstract interface for velocity profilers.
  *
  * @details
@@ -7,11 +7,11 @@
  * between different velocity profiling strategies without being coupled
  * to a specific implementation:
  *
- * - **VelocityProfiler** (basic TOPP-RA): 2nd-order time-optimal profile.
+ * - **BasicTOPPRA** (basic TOPP-RA): 2nd-order time-optimal profile.
  *   Bang-bang acceleration; no jerk limiting. Fastest possible trajectory
  *   but acceleration is discontinuous at constraint switching points.
  *
- * - **JerkConstrainedVelocityProfiler** (jerk-integrated TOPP-RA): 3rd-order
+ * - **JerkConstrainedTOPPRA** (jerk-integrated TOPP-RA): 3rd-order
  *   time-optimal profile with jerk as a first-class constraint inside the
  *   optimizer. Acceleration is continuous; jerk is bounded by j_max.
  *   Slightly slower than basic TOPP-RA (jerk limiting costs time) but
@@ -33,7 +33,7 @@
  * smoothing of a TOPP-RA profile breaks both optimality and feasibility —
  * the smoothed trajectory was never checked against the curvature/centripetal/
  * per-axis constraints that TOPP-RA verified. By making jerk a constraint
- * in the JerkConstrainedVelocityProfiler, we get smooth trajectories that are
+ * in the JerkConstrainedTOPPRA, we get smooth trajectories that are
  * still guaranteed feasible.
  *
  * The SCurveVelocityProfiler is provided as an alternative for users who
@@ -80,13 +80,13 @@ enum class ProfilerType : uint8_t {
  * @tparam T   Numeric type (default: double)
  */
 template<size_t Dim, typename T = double>
-class IVelocityProfiler {
+class VelocityProfiler {
 public:
     using Profile = VelocityProfile<T>;
     using Path = PathAdapter<Dim, T>;
     using Limits = KinematicLimits<Dim, T>;
 
-    virtual ~IVelocityProfiler() = default;
+    virtual ~VelocityProfiler() = default;
 
     /**
      * @brief Compute a velocity profile for the given path.

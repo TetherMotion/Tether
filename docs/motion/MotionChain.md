@@ -40,7 +40,7 @@ system.
                            ▼
 ┌──────────────────────────────────────────────────────────────────────┐
 │  4. Velocity Profiling                                      (host)   │
-│  IVelocityProfiler::computeProfile() → VelocityProfile               │
+│  VelocityProfiler::computeProfile() → VelocityProfile               │
 │  Output: time-parameterized v(s) profile with accel + jerk           │
 │  Choice: ToppraBasic | ToppraJerkConstrained | SCurve                   │
 └──────────────────────────┬──────────────────────────────────────────┘
@@ -233,9 +233,9 @@ per-point velocity, acceleration, jerk, and time.
 
 | Class | File | Role |
 |---|---|---|
-| `IVelocityProfiler<Dim,T>` | `include/tether/motion_planner/IVelocityProfiler.hpp` | Abstract interface |
-| `VelocityProfiler<Dim,T>` | `include/tether/motion_planner/VelocityProfile.hpp` | Standard TOPP-RA (no jerk limit) |
-| `JerkConstrainedVelocityProfiler<Dim,T>` | `include/tether/motion_planner/JerkConstrainedVelocityProfiler.hpp` | Jerk-integrated TOPP-RA |
+| `VelocityProfiler<Dim,T>` | `include/tether/motion_planner/VelocityProfiler.hpp` | Abstract interface |
+| `BasicTOPPRA<Dim,T>` | `include/tether/motion_planner/BasicTOPPRA.hpp` | Standard TOPP-RA (no jerk limit) |
+| `JerkConstrainedTOPPRA<Dim,T>` | `include/tether/motion_planner/JerkConstrainedTOPPRA.hpp` | Jerk-integrated TOPP-RA |
 | `SCurveVelocityProfiler<Dim,T>` | `include/tether/motion_planner/SCurveVelocityProfiler.hpp` | Basic per-piece S-curve |
 | `VelocityProfile<T>` | `include/tether/motion_planner/VelocityProfile.hpp` | Profile data structure + queries |
 
@@ -583,7 +583,7 @@ Replanning is used when:
 - A new segment is appended to an in-progress plan
 - Corner tolerances are adjusted mid-print
 
-The replanner uses the same `IVelocityProfiler` interface, so the
+The replanner uses the same `VelocityProfiler` interface, so the
 profiler choice applies to replanning as well.
 
 See `docs/MotionReplanner.md` for details.

@@ -71,7 +71,7 @@ and better print quality.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  All Profilers (IVelocityProfiler)                          │
+│  All Profilers (VelocityProfiler)                          │
 │                                                             │
 │  1. Sample path at uniform arc-length intervals             │
 │  2. Compute velocity limit curve v_lim(s)                   │
@@ -540,7 +540,7 @@ TOPP-RA optimization. This was removed because:
    compensation, step generation) that derived timing from the TOPP-RA
    profile would be desynchronized by the post-hoc smoothing.
 
-**The correct approach** — implemented in `JerkConstrainedVelocityProfiler`
+**The correct approach** — implemented in `JerkConstrainedTOPPRA`
 — is to integrate jerk as a constraint *inside* the optimizer, using
 the jerk-limited distance function (T.5) in place of the 2nd-order
 kinematic equation (T.2).
@@ -571,4 +571,4 @@ kinematic equation (T.2).
 | [MotionChain.md](MotionChain.md) | Full motion pipeline |
 | [Architecture.md](Architecture.md) | Motion planner architecture |
 | `SCurveProfile.hpp` | 7-phase S-curve implementation |
-| `JerkConstrainedVelocityProfiler.hpp` | Jerk-integrated TOPP-RA implementation |
+| `JerkConstrainedTOPPRA.hpp` | Jerk-integrated TOPP-RA implementation |

@@ -449,7 +449,7 @@ fallback" guarantee — every decision is visible to the caller.
 Replaces scalar `quinticBlend` transitions with:
 
 - `replanProfile`: TOPP-RA velocity profile via
-  `MotionPlanner::VelocityProfiler` (curvature-aware limit curve)
+  `MotionPlanner::BasicTOPPRA` (curvature-aware limit curve)
 - `computeSCurveTransition`: 7-phase jerk-limited S-curve via
   `MotionPlanner::SCurveProfile`
 
