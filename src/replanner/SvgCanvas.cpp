@@ -238,11 +238,27 @@ void SvgCanvas::renderAxes(std::ostream& out, const AxisBounds& bounds,
             << yLabel << "</text>\n";
     }
 
-    // Tick labels (min/max)
-    writeText(out, bx1, by1 + 20, std::format("{:.2f}", bounds.minX),
-              config().fontSize - 2, config().textColor, "middle");
-    writeText(out, bx2, by2 + 20, std::format("{:.2f}", bounds.maxX),
-              config().fontSize - 2, config().textColor, "middle");
+    // Tick labels (min/max) — orthogonal to the axis being labeled
+    // X-axis ticks: rotated -90° (vertical, orthogonal to horizontal X axis)
+    {
+        double tx = bx1, ty = by1 + 20;
+        out << "<text x=\"" << fmt(tx) << "\" y=\"" << fmt(ty)
+            << "\" font-family=\"sans-serif\" font-size=\"" << (config().fontSize - 2)
+            << "\" fill=\"" << config().textColor
+            << "\" text-anchor=\"middle\" transform=\"rotate(-90 "
+            << fmt(tx) << " " << fmt(ty) << ")\">"
+            << std::format("{:.2f}", bounds.minX) << "</text>\n";
+    }
+    {
+        double tx = bx2, ty = by2 + 20;
+        out << "<text x=\"" << fmt(tx) << "\" y=\"" << fmt(ty)
+            << "\" font-family=\"sans-serif\" font-size=\"" << (config().fontSize - 2)
+            << "\" fill=\"" << config().textColor
+            << "\" text-anchor=\"middle\" transform=\"rotate(-90 "
+            << fmt(tx) << " " << fmt(ty) << ")\">"
+            << std::format("{:.2f}", bounds.maxX) << "</text>\n";
+    }
+    // Y-axis ticks: horizontal (orthogonal to vertical Y axis)
     writeText(out, ay1 - 10, ax1 + 5, std::format("{:.2f}", bounds.minY),
               config().fontSize - 2, config().textColor, "end");
     writeText(out, ay2 - 10, ax2 + 5, std::format("{:.2f}", bounds.maxY),
