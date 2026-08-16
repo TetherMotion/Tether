@@ -261,6 +261,15 @@ set(MOTION_PLANNER_INTEGRATION_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/ToppraAuditTest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/ParetoTimeEnergyTest.cpp"
 )
+# Analytical extrusion compensation tests (linear PressureAdvance, power-law PressureAdvance, Cross-WLF PressureAdvance,
+# LTI/LPV deconvolution, state-space LPV, flow-adaptive heater, thermal observer).
+# These need tether_controls for PressureFlowLut/CrossWlfRheology.
+set(MOTION_PLANNER_ANALYTICAL_EXTRUSION_LIBS
+    "tether_common;tether_motion_control;tether_motion_planner;tether_controls;tether_ethercat_common")
+set(MOTION_PLANNER_ANALYTICAL_EXTRUSION_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/test_analytical_extrusion.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/test_analytical_extrusion_gcode.cpp"
+)
 # NOTE: MotionPlannerIntegrationTest.cpp removed — it tested the old
 # PiecewiseBezierPath/PathBuilder/CornerAnalyzer stack.
 # Motion replanner test sources split by sub-area
@@ -487,6 +496,8 @@ create_module_test(motion_planner_curves "${MOTION_PLANNER_CURVES_SOURCES}" "${M
 create_module_test(motion_planner_blend "${MOTION_PLANNER_BLEND_SOURCES}" "${MOTION_PLANNER_LIBS}" "")
 # PH fast-path integration tests need a longer timeout (PH blend certification is expensive).
 create_module_test_timeout(motion_planner_integration "${MOTION_PLANNER_INTEGRATION_SOURCES}" "${MOTION_PLANNER_LIBS}" "" 120)
+# Analytical extrusion compensation on WSS arcs (needs tether_controls for LUT/rheology).
+create_module_test(motion_planner_analytical_extrusion "${MOTION_PLANNER_ANALYTICAL_EXTRUSION_SOURCES}" "${MOTION_PLANNER_ANALYTICAL_EXTRUSION_LIBS}" "")
 
 # New geometry core (namespace tether::motion), Phase 1 of the motion-planner
 # rewrite. Same wiring as create_module_test, plus a TEST_PREFIX so that
