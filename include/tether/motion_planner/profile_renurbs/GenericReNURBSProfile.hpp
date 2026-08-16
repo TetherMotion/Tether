@@ -1,5 +1,5 @@
 /**
- * @file GenericReNurbsProfile.hpp
+ * @file GenericReNURBSProfile.hpp
  * @brief Generic data structures for ReNURBS — applicable to any sampled curve.
  *
  * @details
@@ -25,13 +25,13 @@
  *                                                   ├──▶ SampledCurve
  *   PA offset array ──▶ PressureAdvanceAdapter ──┘       │
  *                                                         ▼
- *                                                  GenericReNurbsBuilder
+ *                                                  GenericReNURBSBuilder
  *                                                         │
  *                                                         ▼
- *                                                  GenericReNurbsProfile
+ *                                                  GenericReNURBSProfile
  *                                                         │
  *                                                         ▼
- *                                                  GenericReNurbsCertifier
+ *                                                  GenericReNURBSCertifier
  *                                                         │
  *                                                         ▼
  *                                                  ProfileConstraintCertificate
@@ -42,7 +42,7 @@
 
 #include "tether/motion_planner/geometry/NurbsCurve.hpp"
 #include "tether/motion_planner/SourceReference.hpp"
-#include "tether/motion_planner/profile_renurbs/ReNurbsProfile.hpp"
+#include "tether/motion_planner/profile_renurbs/ReNURBSProfile.hpp"
 
 #include <vector>
 #include <optional>
@@ -56,9 +56,9 @@ namespace tether::motion::profile_renurbs {
 /// Base exception for ReNURBS certification failures.
 /// Defined here (in the base data header) so both the velocity-specific
 /// and generic builders can reference it without circular dependencies.
-class ReNurbsCertificationError : public std::runtime_error {
+class ReNURBSCertificationError : public std::runtime_error {
 public:
-    explicit ReNurbsCertificationError(const std::string& msg)
+    explicit ReNURBSCertificationError(const std::string& msg)
         : std::runtime_error(msg) {}
 };
 
@@ -137,7 +137,7 @@ struct QuantitySpec {
 };
 
 /// Generic ReNURBS configuration.
-struct GenericReNurbsConfig {
+struct GenericReNURBSConfig {
     /// Master switch.
     bool enabled = false;
 
@@ -177,10 +177,10 @@ struct SegmentInfo {
 };
 
 /// NURBS curve result for one quantity in one segment (reuses the
-/// existing ReNurbsQuantityCurves struct since it's already generic
+/// existing ReNURBSQuantityCurves struct since it's already generic
 /// in its fields — only the naming is velocity-specific, but the
 /// data is just "a NURBS curve + fit metadata").
-using GenericQuantityCurve = ReNurbsQuantityCurves;
+using GenericQuantityCurve = ReNURBSQuantityCurves;
 
 /// All quantity curves for one segment.
 struct GenericSegmentProfile {
@@ -230,7 +230,7 @@ struct GenericCertificate {
 };
 
 /// The complete generic ReNURBS profile.
-struct GenericReNurbsProfile {
+struct GenericReNURBSProfile {
     /// Per-segment curves.
     std::vector<GenericSegmentProfile> perSegment;
 
@@ -254,16 +254,16 @@ struct GenericReNurbsProfile {
 // Convenience: convert between generic and velocity-specific structures
 // ===========================================================================
 
-/// Convert a GenericReNurbsProfile to a velocity-specific ReNurbsProfile.
+/// Convert a GenericReNURBSProfile to a velocity-specific ReNURBSProfile.
 ///
 /// This is used by the velocity adapter to maintain backward compatibility.
 /// The generic profile must have exactly 4 quantities named (in order)
 /// "velocity", "acceleration", "jerk", "time".
 ///
-ReNurbsProfile toVelocityProfile(const GenericReNurbsProfile& generic);
+ReNURBSProfile toVelocityProfile(const GenericReNURBSProfile& generic);
 
-/// Convert a velocity-specific ReNurbsProfile to a generic one.
-GenericReNurbsProfile fromVelocityProfile(const ReNurbsProfile& velocity);
+/// Convert a velocity-specific ReNURBSProfile to a generic one.
+GenericReNURBSProfile fromVelocityProfile(const ReNURBSProfile& velocity);
 
 /// Convert a GenericCertificate to a velocity-specific
 /// ProfileConstraintCertificate.

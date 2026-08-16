@@ -7,7 +7,7 @@
 | **Status** | PLANNING — not yet implemented |
 | **Scope** | `tether::motion::profile_renurbs` (new component), `MotionPlanner::VelocityProfile` extension, `MotionReplanner::SvgExporter` consumer |
 | **Depends on** | `tether::motion::NurbsCurve`, `MotionPlanner::VelocityProfile<T>`, `MotionPlanner::KinematicLimits`, existing `DeviationCertifier` / `CertifiedCurvatureSampler` Lipschitz patterns |
-| **Opt-in** | API optional; default OFF. Enabled per-build via `TETHER_ENABLE_RENURBS` and per-plan via `MotionPlanConfig::enableReNurbs` |
+| **Opt-in** | API optional; default OFF. Enabled per-build via `TETHER_ENABLE_RENURBS` and per-plan via `MotionPlanConfig::enableReNURBS` |
 | **Target continuity** | v(s): C³/G³, a(s): C²/G², j(s): C¹/G¹, t(s): C³/G³ — *where the source profile permits* (see §5 Edge Cases for the basic-TOPP-RA caveat) |
 | **Minimum continuity** | v(s): C¹/G¹, a(s): C⁰/G⁰, j(s): C⁰/G⁰, t(s): C¹/G¹ |
 
@@ -91,12 +91,12 @@ and audit tooling.
           │                                                        │
           │   ┌──────────── ReNURBS (NEW, optional) ────────────┐ │
           │   │                                                  │ │
-          └──▶│  ReNurbsProfileBuilder::build(                  │ │
+          └──▶│  ReNURBSProfileBuilder::build(                  │ │
                   profile, path, limits, config)                 │ │
                   │                                              │ │
                   ▼                                              │ │
-              ReNurbsProfile {                                   │ │
-                perSegment: vector<ReNurbsSegmentProfile>        │ │
+              ReNURBSProfile {                                   │ │
+                perSegment: vector<ReNURBSSegmentProfile>        │ │
                 certificate?: ProfileConstraintCertificate       │ │
               }                                                  │ │
                   │                                              │ │
@@ -112,28 +112,28 @@ and audit tooling.
 
 | Path | Purpose |
 |---|---|
-| `include/tether/motion_planner/profile_renurbs/ReNurbsProfile.hpp` | Data structures: `ReNurbsSegmentProfile`, `ReNurbsProfile` |
-| `include/tether/motion_planner/profile_renurbs/ReNurbsProfileBuilder.hpp` | The builder class (adaptive B-spline fit + constraint shrink) |
+| `include/tether/motion_planner/profile_renurbs/ReNURBSProfile.hpp` | Data structures: `ReNURBSSegmentProfile`, `ReNURBSProfile` |
+| `include/tether/motion_planner/profile_renurbs/ReNURBSProfileBuilder.hpp` | The builder class (adaptive B-spline fit + constraint shrink) |
 | `include/tether/motion_planner/profile_renurbs/ProfileConstraintCertifier.hpp` | Optional Lipschitz certifier (mirrors `DeviationCertifier`) |
 | `include/tether/motion_planner/profile_renurbs/ProfileSplineFitter.hpp` | Low-level adaptive B-spline interpolation through samples |
-| `src/motion_planner/profile_renurbs/ReNurbsProfileBuilder.cpp` | Implementation |
+| `src/motion_planner/profile_renurbs/ReNURBSProfileBuilder.cpp` | Implementation |
 | `src/motion_planner/profile_renurbs/ProfileConstraintCertifier.cpp` | Implementation |
 | `src/motion_planner/profile_renurbs/ProfileSplineFitter.cpp` | Implementation |
-| `tests/motion_planner/profile_renurbs/test_ReNurbsProfileBuilder.cpp` | Unit tests (see §7) |
+| `tests/motion_planner/profile_renurbs/test_ReNURBSProfileBuilder.cpp` | Unit tests (see §7) |
 | `tests/motion_planner/profile_renurbs/test_ProfileSplineFitter.cpp` | Unit tests for the fitter |
 | `tests/motion_planner/profile_renurbs/test_ProfileConstraintCertifier.cpp` | Unit tests for the certifier |
-| `tests/motion_planner/profile_renurbs/test_ReNurbsEdgeCases.cpp` | Edge-case + property tests |
-| `tests/motion_planner/profile_renurbs/ReNurbsTestHelpers.hpp` | Shared fixtures: synthetic profiles, limit configs |
+| `tests/motion_planner/profile_renurbs/test_ReNURBSEdgeCases.cpp` | Edge-case + property tests |
+| `tests/motion_planner/profile_renurbs/ReNURBSTestHelpers.hpp` | Shared fixtures: synthetic profiles, limit configs |
 
 ### Modified files
 
 | Path | Change |
 |---|---|
-| `include/tether/motion_planner/MotionPlan.hpp` | Add `std::optional<ReNurbsProfile> renurbsProfile_` + accessor; `MotionPlanConfig::enableReNurbs` flag |
-| `include/tether/motion_planner/MotionPlan.hpp` (`MotionPlanBuilder::build`) | After computing the sampled profile, if `config.enableReNurbs`, call `ReNurbsProfileBuilder::build` and attach |
+| `include/tether/motion_planner/MotionPlan.hpp` | Add `std::optional<ReNURBSProfile> renurbsProfile_` + accessor; `MotionPlanConfig::enableReNURBS` flag |
+| `include/tether/motion_planner/MotionPlan.hpp` (`MotionPlanBuilder::build`) | After computing the sampled profile, if `config.enableReNURBS`, call `ReNURBSProfileBuilder::build` and attach |
 | `include/tether/motion_replanner/SvgExporter.hpp` / `.cpp` | New `SvgPlotType::NurbsVelocityProfile` etc. that render the NURBS curves via adaptive sampling of the *curve* (not the original samples) — see §6 |
 | `tests/CMakeLists.txt` | Add `profile_renurbs` test executable (GLOB, mirroring `motion_planner/geometry/`) |
-| `CMakeLists.txt` (root) | `option(TETHER_ENABLE_RENURBS "Enable ReNURBS profile representation" ON)` — on by default but inert unless `MotionPlanConfig::enableReNurbs` is set |
+| `CMakeLists.txt` (root) | `option(TETHER_ENABLE_RENURBS "Enable ReNURBS profile representation" ON)` — on by default but inert unless `MotionPlanConfig::enableReNURBS` is set |
 | `AGENTS.md` | Append build/test commands for the new target |
 
 ---
@@ -287,21 +287,21 @@ The `NurbsCurve` constructor requires `dim ≥ 1` and accepts 1-D curves
 
 | # | Case | Detection | Handling |
 |---|---|---|---|
-| E1 | **Empty profile** (0 samples) | `profile.points().empty()` | Return empty `ReNurbsProfile`; log warning. |
+| E1 | **Empty profile** (0 samples) | `profile.points().empty()` | Return empty `ReNURBSProfile`; log warning. |
 | E2 | **Single sample** (1 point) | `points().size() == 1` | Degenerate: a constant NURBS (degree-1, 2 control points, both = the sample value). No derivative info. |
 | E3 | **Zero-length segment** (`s_k^end == s_k^start`) | `PathAdapter::getSegment(k).arcLength == 0` | Skip; emit no curve for that segment. |
 | E4 | **Segment with 1–2 samples** (very short segment) | sample count < `p_q + 1` | Reduce degree to `min(p_q, n−1)`; if `n == 1`, see E2. |
 | E5 | **v(s) = 0 region** (start/end at rest, or a stall) | `velocity == 0` over a range | t(s) has a singularity (`dt/ds = 1/v → ∞`). Split the segment at the zero-crossing; on zero-velocity sub-segments, t(s) is linear in the *dwell-like* pause duration (read from the sample `time` deltas), not `∫ ds/v`. Fit t(s) as a line there. v(s) is fit normally (passes through 0). |
-| E6 | **Discontinuous acceleration** (basic TOPP-RA, `ProfilerType::ToppraBasic`) | `limitedBy` tag changes from `ForwardAccel` to `BackwardDecel` (or to `Curvature`) between adjacent samples with a jump in `acceleration` > tol | a(s) cannot be C¹. **Option A (default)**: fit a(s) as C⁰ piecewise — split the segment at the detected discontinuity, fit each sub-piece as a smooth spline, join at C⁰. **Option B (opt-in via config)**: smooth a(s) to C¹ by least-squares relaxation *away from the samples* (no longer interpolates a exactly, only within ε). Document the continuity downgrade in the `ReNurbsSegmentProfile::achievedContinuity` field. |
+| E6 | **Discontinuous acceleration** (basic TOPP-RA, `ProfilerType::ToppraBasic`) | `limitedBy` tag changes from `ForwardAccel` to `BackwardDecel` (or to `Curvature`) between adjacent samples with a jump in `acceleration` > tol | a(s) cannot be C¹. **Option A (default)**: fit a(s) as C⁰ piecewise — split the segment at the detected discontinuity, fit each sub-piece as a smooth spline, join at C⁰. **Option B (opt-in via config)**: smooth a(s) to C¹ by least-squares relaxation *away from the samples* (no longer interpolates a exactly, only within ε). Document the continuity downgrade in the `ReNURBSSegmentProfile::achievedContinuity` field. |
 | E7 | **Discontinuous jerk** (jerk-limited TOPP-RA, `ProfilerType::ToppraJerkConstrained`) | `jerk` field jumps between ±`j_max` and 0 | Same as E6 but for j(s): C⁰ piecewise by default. |
 | E8 | **Reversal** (`MotionPlan::isReverse`) | n/a (runtime state, not in profile) | ReNURBS is built from the *forward* profile; reversal is a display-time flip (`s → totalLength − s`). No special build-time handling. |
 | E9 | **Feed override active during build** | n/a | ReNURBS is built from the *nominal* profile (override = 1.0). The visualization layer applies the override as a scalar multiply at render time. |
 | E10 | **Sample not monotonic in s** (shouldn't happen, but defensive) | `points_[i].arcLength > points_[i+1].arcLength` | Sort a copy; log error. TOPP-RA guarantees monotonicity, so this is a corruption guard. |
 | E11 | **Sample not monotonic in t** | `points_[i].time > points_[i+1].time` | Same as E10. |
-| E12 | **Adaptive refinement hits `maxCpPerSegment`** | control point count cap reached | Stop refining; report the worst residual in `ReNurbsSegmentProfile::maxResidual`. The certifier (§4.6 of the *certifier*, not this section) will flag the segment as "uncertified — residual budget exhausted" rather than falsely claiming compliance. |
+| E12 | **Adaptive refinement hits `maxCpPerSegment`** | control point count cap reached | Stop refining; report the worst residual in `ReNURBSSegmentProfile::maxResidual`. The certifier (§4.6 of the *certifier*, not this section) will flag the segment as "uncertified — residual budget exhausted" rather than falsely claiming compliance. |
 | E13 | **Constraint shrink pushes a control point below 0** (velocity can't be negative) | `P_i < 0` after shrink | Clamp at 0; if this breaks interpolation (a sample is at 0 and the spline must pass through it, fine; if a sample is > 0 and the clamp makes the spline miss it by > ε), insert a knot and re-fit. v ≥ 0 is itself a constraint (no reverse in the profile). |
 | E14 | **Segment spans a blend curve** (the path piece is a blend, not an original G-code segment) | `PathAdapter::getSegment(k).sourceRef` is the blend's ref, or the piece came from `PathBlender` | Treat identically — ReNURBS is per *path piece*, not per original G-code line. The `sourceRef` is propagated so the visualization can label it. |
-| E15 | **Rational exact fit** (a span where `v(s) = √(a_cent/κ)` with constant κ over the span) | detect by checking if the samples on the span fit a `√`-shape within ε | Optional optimization: emit a degree-2 rational NURBS with the exact `√` weight. Off by default; on via `ReNurbsConfig::allowRationalExactFit`. |
+| E15 | **Rational exact fit** (a span where `v(s) = √(a_cent/κ)` with constant κ over the span) | detect by checking if the samples on the span fit a `√`-shape within ε | Optional optimization: emit a degree-2 rational NURBS with the exact `√` weight. Off by default; on via `ReNURBSConfig::allowRationalExactFit`. |
 
 ---
 
@@ -319,7 +319,7 @@ Add to `SvgPlotType` <ref_snippet file="/home/uli/dev/Tether/include/tether/moti
 
 ### 6.2 Rendering
 
-`SvgExporter` gains an overload accepting `const ReNurbsProfile&`. The render
+`SvgExporter` gains an overload accepting `const ReNURBSProfile&`. The render
 functions:
 
 1. Iterate `perSegment`.
@@ -335,7 +335,7 @@ functions:
 
 The existing `SvgPlotType::VelocityProfile` (polyline) is kept. The NURBS
 variants are additive. `exportAllPlots` gains the NURBS variants when a
-`ReNurbsProfile` is available.
+`ReNURBSProfile` is available.
 
 ---
 
@@ -364,7 +364,7 @@ test executable: `tether_motion_planner_renurbs_tests`.
 | `ThrowsOnEmptySamples` | Empty input → throws. |
 | `ThrowsOnDimensionMismatch` | (N/A for scalar, but test the 1-D RVec path.) |
 
-### 7.2 `test_ReNurbsProfileBuilder.cpp` — end-to-end
+### 7.2 `test_ReNURBSProfileBuilder.cpp` — end-to-end
 
 | Test | What it verifies |
 |---|---|
@@ -382,9 +382,9 @@ test executable: `tether_motion_planner_renurbs_tests`.
 | `TimeCurveMonotonic` | `t_NURBS(s)` strictly increasing (where v > 0). |
 | `TimeCurveMatchesIntegral` | `t_NURBS(s_end) − t_NURBS(s_start) ≈ ∫ ds/v` to within ε on a smooth region. |
 | `DisabledByDefault` | `MotionPlanConfig` default → `plan.renurbsProfile() == std::nullopt`. |
-| `EnabledByConfig` | `config.enableReNurbs = true` → profile is populated. |
+| `EnabledByConfig` | `config.enableReNURBS = true` → profile is populated. |
 | `SourceRefPropagated` | `perSegment[k].sourceRef` matches `PathAdapter::getSegment(k).sourceRef`. |
-| `EmptyProfile` | Empty `VelocityProfile` → empty `ReNurbsProfile`, no throw. |
+| `EmptyProfile` | Empty `VelocityProfile` → empty `ReNURBSProfile`, no throw. |
 | `SingleSampleProfile` | 1 point → constant curves, no throw. |
 
 ### 7.3 `test_ProfileConstraintCertifier.cpp`
@@ -399,7 +399,7 @@ test executable: `tether_motion_planner_renurbs_tests`.
 | `InterpolationCertificate` | Certifies `|B(u_i) − q_i| ≤ ε` at all samples (separate from constraint cert). |
 | `MaxCpExhaustedFlag` | E12 case → certificate reports `residualBudgetExhausted == true` instead of false-positive compliance. |
 
-### 7.4 `test_ReNurbsEdgeCases.cpp` — edge cases & property tests
+### 7.4 `test_ReNURBSEdgeCases.cpp` — edge cases & property tests
 
 Every edge case in §5 gets at least one test. Plus property-based / fuzz tests:
 
@@ -422,7 +422,7 @@ Every edge case in §5 gets at least one test. Plus property-based / fuzz tests:
 | `Property_SampleInterpolationHolds` | For any profile, all samples interpolated within ε after refinement. |
 | `Regression_RealWorldKlipperPath` | A 200-segment Klipper G-code path → builds without crash, constraint-preserved, CP count per segment < 64. (Use the `test_helpers.hpp` fixture loader.) |
 
-### 7.5 Test helpers (`ReNurbsTestHelpers.hpp`)
+### 7.5 Test helpers (`ReNURBSTestHelpers.hpp`)
 
 - `makeLinearProfile(numSamples, vMax)` — a trapezoidal profile.
 - `makeSCurveProfile(numSamples, vMax, jMax)` — a 7-phase S-curve.
@@ -449,7 +449,7 @@ cmake --build build --target tether_motion_planner_renurbs_tests -j$(nproc)
 
 ```cpp
 // in MotionPlanConfig<T>
-struct ReNurbsConfig {
+struct ReNURBSConfig {
     bool enabled = false;                 // master switch (also gated by TETHER_ENABLE_RENURBS)
 
     // Interpolation tolerances (per quantity)
@@ -484,7 +484,7 @@ struct ReNurbsConfig {
 };
 
 // in MotionPlanConfig<T>
-ReNurbsConfig renurbs;
+ReNURBSConfig renurbs;
 ```
 
 When `renurbs.enabled == false` (default), `MotionPlanBuilder::build` skips the
@@ -534,11 +534,11 @@ struct SegmentViolation {
 
 ### 9.3 Failure policy
 
-If `certify == true` and the certificate is non-compliant, `ReNurbsProfileBuilder::build`:
-- By default: **throws `ReNurbsCertificationError`** (a `std::runtime_error`
+If `certify == true` and the certificate is non-compliant, `ReNURBSProfileBuilder::build`:
+- By default: **throws `ReNURBSCertificationError`** (a `std::runtime_error`
   subclass) with the violation summary. This is the safe default — a
   non-compliant visualization profile is a bug.
-- If `ReNurbsConfig::certifyThrowOnFailure == false`: logs the violations via
+- If `ReNURBSConfig::certifyThrowOnFailure == false`: logs the violations via
   `KLIPPER_LOG_ERROR` (or the motion-planner equivalent) and returns the
   profile with the certificate attached, so the caller can inspect it. Intended
   for debugging.
@@ -550,10 +550,10 @@ If `certify == true` and the certificate is non-compliant, `ReNurbsProfileBuilde
 | Phase | Scope | Deliverable |
 |---|---|---|
 | **P1** | `ProfileSplineFitter` (interpolation + adaptive refinement + convex-hull clamp), unit-tested in isolation. | `test_ProfileSplineFitter.cpp` passing. No `NurbsCurve` dependency yet — pure B-spline math on `std::vector<double>`. |
-| **P2** | Wrap as `NurbsCurve` (1-D, weights all 1); `ReNurbsSegmentProfile` + `ReNurbsProfile` structs; `ReNurbsProfileBuilder` skeleton that builds per-segment curves from a `VelocityProfile` + `PathAdapter` (no constraint shrink yet). | `test_ReNurbsProfileBuilder.cpp` interpolation + continuity tests passing. |
+| **P2** | Wrap as `NurbsCurve` (1-D, weights all 1); `ReNURBSSegmentProfile` + `ReNURBSProfile` structs; `ReNURBSProfileBuilder` skeleton that builds per-segment curves from a `VelocityProfile` + `PathAdapter` (no constraint shrink yet). | `test_ReNURBSProfileBuilder.cpp` interpolation + continuity tests passing. |
 | **P3** | Constraint shrink (§4.3) + limit-curve reconstruction (§4.4). | Constraint-preservation tests passing. |
 | **P4** | `ProfileConstraintCertifier` (§9). | Certifier tests passing. |
-| **P5** | Edge cases E1–E15 (§5) + fuzz/property tests. | `test_ReNurbsEdgeCases.cpp` passing. |
+| **P5** | Edge cases E1–E15 (§5) + fuzz/property tests. | `test_ReNURBSEdgeCases.cpp` passing. |
 | **P6** | `MotionPlan` / `MotionPlanConfig` integration; `MotionPlanBuilder` wiring; CMake option. | End-to-end: `builder.build(segments, feed)` with `config.renurbs.enabled = true` produces a plan with `renurbsProfile()` populated. |
 | **P7** | `SvgExporter` NURBS rendering (§6). | Visual regression: NURBS-rendered velocity profile matches the polyline version within rendering tolerance, at <10% of the SVG file size on a 1000-sample profile. |
 

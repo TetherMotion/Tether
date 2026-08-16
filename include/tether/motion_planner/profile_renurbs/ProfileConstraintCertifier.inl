@@ -9,9 +9,9 @@
 #pragma once
 
 #include "tether/motion_planner/profile_renurbs/ProfileConstraintCertifier.hpp"
-#include "tether/motion_planner/profile_renurbs/GenericReNurbsCertifier.hpp"
-#include "tether/motion_planner/profile_renurbs/GenericReNurbsBuilder.hpp"
-#include "tether/motion_planner/profile_renurbs/ReNurbsProfileBuilder.hpp"
+#include "tether/motion_planner/profile_renurbs/GenericReNURBSCertifier.hpp"
+#include "tether/motion_planner/profile_renurbs/GenericReNURBSBuilder.hpp"
+#include "tether/motion_planner/profile_renurbs/ReNURBSProfileBuilder.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -20,15 +20,15 @@
 namespace tether::motion::profile_renurbs {
 
 template<std::size_t Dim, typename T>
-ProfileConstraintCertificate certifyReNurbsProfile(
-    const ReNurbsProfile& renurbs,
+ProfileConstraintCertificate certifyReNURBSProfile(
+    const ReNURBSProfile& renurbs,
     const MotionPlanner::VelocityProfile<T>& profile,
     const MotionPlanner::PathAdapter<Dim, T>& path,
     const MotionPlanner::KinematicLimits<Dim, T>& limits,
     double epsilon) {
 
     // Convert to generic format
-    ReNurbsConfig defaultCfg; // use defaults for quantity specs
+    ReNURBSConfig defaultCfg; // use defaults for quantity specs
     auto genericConfig = detail::toGenericConfig<Dim, T>(defaultCfg, limits);
     genericConfig.certificationEpsilon = epsilon;
 
@@ -36,11 +36,11 @@ ProfileConstraintCertificate certifyReNurbsProfile(
     std::vector<SegmentInfo> segments;
     detail::toGenericSamples(profile, path, samples, segments);
 
-    // Convert the ReNurbsProfile to a GenericReNurbsProfile
+    // Convert the ReNURBSProfile to a GenericReNURBSProfile
     auto genericProfile = fromVelocityProfile(renurbs);
 
     // Certify using the generic certifier
-    auto genericCert = certifyGenericReNurbsProfile(
+    auto genericCert = certifyGenericReNURBSProfile(
         genericProfile, samples, segments, genericConfig, epsilon);
 
     // Convert back to velocity-specific format

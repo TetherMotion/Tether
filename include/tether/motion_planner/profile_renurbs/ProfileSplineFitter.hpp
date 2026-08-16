@@ -19,7 +19,7 @@
  *    defining control points when weights are uniform).
  *
  * The fitter operates on plain doubles (no NurbsCurve dependency) so it can
- * be unit-tested in isolation. The ReNurbsProfileBuilder wraps the result
+ * be unit-tested in isolation. The ReNURBSProfileBuilder wraps the result
  * as a 1-D NurbsCurve (weights all 1).
  *
  * ## Algorithm

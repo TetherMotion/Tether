@@ -1,5 +1,5 @@
 /**
- * @file PressureAdvanceReNurbsAdapter.hpp
+ * @file PressureAdvanceReNURBSAdapter.hpp
  * @brief Adapter to convert pressure advance outputs into ReNURBS profiles.
  *
  * @details
@@ -29,21 +29,21 @@
  * auto offsets = pa.offsetSeries(velocities, sampleInterval);
  *
  * // 2. Build a ReNURBS profile from the offsets
- * auto profile = buildPressureAdvanceReNurbs(
+ * auto profile = buildPressureAdvanceReNURBS(
  *     offsets, sampleInterval, pa.params().maxCompensation);
  *
  * // 3. Use the profile (e.g., for SVG visualization)
- * exporter.exportGenericReNurbsProfile("pa_profile.svg", profile);
+ * exporter.exportGenericReNURBSProfile("pa_profile.svg", profile);
  * ```
  *
- * The resulting GenericReNurbsProfile has a single quantity named
+ * The resulting GenericReNURBSProfile has a single quantity named
  * "pressure_offset" with a SymmetricUniform constraint at ±maxCompensation.
  */
 
 #pragma once
 
-#include "tether/motion_planner/profile_renurbs/GenericReNurbsProfile.hpp"
-#include "tether/motion_planner/profile_renurbs/GenericReNurbsBuilder.hpp"
+#include "tether/motion_planner/profile_renurbs/GenericReNURBSProfile.hpp"
+#include "tether/motion_planner/profile_renurbs/GenericReNURBSBuilder.hpp"
 
 #include <vector>
 #include <string>
@@ -51,7 +51,7 @@
 namespace tether::motion::profile_renurbs {
 
 /// Configuration for pressure-advance ReNURBS construction.
-struct PressureAdvanceReNurbsConfig {
+struct PressureAdvanceReNURBSConfig {
     /// Interpolation tolerance for the offset curve [mm].
     double epsilon = 1e-6;
 
@@ -88,18 +88,18 @@ struct PressureAdvanceReNurbsConfig {
  * @param sampleInterval Time between samples [s].
  * @param maxCompensation The ±maxCompensation safety clamp [mm].
  * @param config Configuration (tolerances, degree, etc.).
- * @return A GenericReNurbsProfile with a single "pressure_offset" quantity,
+ * @return A GenericReNURBSProfile with a single "pressure_offset" quantity,
  *         constrained to ±maxCompensation.
  *
  * The resulting profile has a single segment covering the full time range
  * [0, (n-1)·sampleInterval]. The offset is parameterized by time and
  * constrained to ±maxCompensation via a SymmetricUniform limit.
  */
-inline GenericReNurbsProfile buildPressureAdvanceReNurbs(
+inline GenericReNURBSProfile buildPressureAdvanceReNURBS(
     const std::vector<double>& offsets,
     double sampleInterval,
     double maxCompensation,
-    const PressureAdvanceReNurbsConfig& config = {}) {
+    const PressureAdvanceReNURBSConfig& config = {}) {
 
     // Build generic samples
     std::vector<GenericSample> samples;
@@ -122,7 +122,7 @@ inline GenericReNurbsProfile buildPressureAdvanceReNurbs(
     }
 
     // Build generic config
-    GenericReNurbsConfig gcfg;
+    GenericReNURBSConfig gcfg;
     gcfg.enabled = true;
     gcfg.maxControlPointsPerSegment = config.maxControlPointsPerSegment;
     gcfg.refinementGridMultiplier = config.refinementGridMultiplier;
@@ -140,7 +140,7 @@ inline GenericReNurbsProfile buildPressureAdvanceReNurbs(
     qs.uniformLimit = maxCompensation;
     gcfg.quantities = {qs};
 
-    return buildGenericReNurbsProfile(samples, segments, gcfg);
+    return buildGenericReNURBSProfile(samples, segments, gcfg);
 }
 
 /**
@@ -153,12 +153,12 @@ inline GenericReNurbsProfile buildPressureAdvanceReNurbs(
  *
  * Both are parameterized by time.
  */
-inline GenericReNurbsProfile buildPressureAdvanceReNurbs(
+inline GenericReNURBSProfile buildPressureAdvanceReNURBS(
     const std::vector<double>& offsets,
     const std::vector<double>& velocities,
     double sampleInterval,
     double maxCompensation,
-    const PressureAdvanceReNurbsConfig& config = {}) {
+    const PressureAdvanceReNURBSConfig& config = {}) {
 
     std::size_t n = std::min(offsets.size(), velocities.size());
 
@@ -184,7 +184,7 @@ inline GenericReNurbsProfile buildPressureAdvanceReNurbs(
     }
 
     // Build generic config
-    GenericReNurbsConfig gcfg;
+    GenericReNURBSConfig gcfg;
     gcfg.enabled = true;
     gcfg.maxControlPointsPerSegment = config.maxControlPointsPerSegment;
     gcfg.refinementGridMultiplier = config.refinementGridMultiplier;
@@ -212,7 +212,7 @@ inline GenericReNurbsProfile buildPressureAdvanceReNurbs(
     qsVel.limitType = LimitType::None;
     gcfg.quantities.push_back(qsVel);
 
-    return buildGenericReNurbsProfile(samples, segments, gcfg);
+    return buildGenericReNURBSProfile(samples, segments, gcfg);
 }
 
 } // namespace tether::motion::profile_renurbs

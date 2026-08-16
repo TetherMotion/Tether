@@ -18,14 +18,14 @@
 
 #pragma once
 
-#include "tether/motion_planner/profile_renurbs/ReNurbsProfile.hpp"
+#include "tether/motion_planner/profile_renurbs/ReNURBSProfile.hpp"
 #include "tether/motion_planner/VelocityProfile.hpp"
 #include "tether/motion_planner/PathAdapter.hpp"
 
 namespace tether::motion::profile_renurbs {
 
 /**
- * @brief Certify a ReNurbsProfile against the original sampled profile.
+ * @brief Certify a ReNURBSProfile against the original sampled profile.
  *
  * @tparam Dim Spatial dimension.
  * @tparam T   Numeric type.
@@ -37,8 +37,8 @@ namespace tether::motion::profile_renurbs {
  * @return The certificate (compliant flag, violations, continuity reports).
  */
 template<std::size_t Dim, typename T = double>
-ProfileConstraintCertificate certifyReNurbsProfile(
-    const ReNurbsProfile& renurbs,
+ProfileConstraintCertificate certifyReNURBSProfile(
+    const ReNURBSProfile& renurbs,
     const MotionPlanner::VelocityProfile<T>& profile,
     const MotionPlanner::PathAdapter<Dim, T>& path,
     const MotionPlanner::KinematicLimits<Dim, T>& limits,

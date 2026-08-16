@@ -1,18 +1,18 @@
 /**
- * @file ReNurbsProfileBuilder.inl
- * @brief Template implementation of ReNurbsProfileBuilder.
+ * @file ReNURBSProfileBuilder.inl
+ * @brief Template implementation of ReNURBSProfileBuilder.
  *
  * @details
  * This is now a thin adapter that converts the velocity-specific inputs
  * (VelocityProfile, PathAdapter, KinematicLimits) into the generic
- * SampledCurve format and delegates to buildGenericReNurbsProfile.
+ * SampledCurve format and delegates to buildGenericReNURBSProfile.
  */
 
 #pragma once
 
-#include "tether/motion_planner/profile_renurbs/ReNurbsProfileBuilder.hpp"
-#include "tether/motion_planner/profile_renurbs/GenericReNurbsBuilder.hpp"
-#include "tether/motion_planner/profile_renurbs/GenericReNurbsCertifier.hpp"
+#include "tether/motion_planner/profile_renurbs/ReNURBSProfileBuilder.hpp"
+#include "tether/motion_planner/profile_renurbs/GenericReNURBSBuilder.hpp"
+#include "tether/motion_planner/profile_renurbs/GenericReNURBSCertifier.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -22,14 +22,14 @@ namespace tether::motion::profile_renurbs {
 
 namespace detail {
 
-/// Convert a ReNurbsConfig to a GenericReNurbsConfig with 4 quantities
+/// Convert a ReNURBSConfig to a GenericReNURBSConfig with 4 quantities
 /// (velocity, acceleration, jerk, time).
 template<std::size_t Dim, typename T>
-GenericReNurbsConfig toGenericConfig(
-    const ReNurbsConfig& cfg,
+GenericReNURBSConfig toGenericConfig(
+    const ReNURBSConfig& cfg,
     const MotionPlanner::KinematicLimits<Dim, T>& limits) {
 
-    GenericReNurbsConfig gc;
+    GenericReNURBSConfig gc;
     gc.enabled = cfg.enabled;
     gc.maxControlPointsPerSegment = cfg.maxControlPointsPerSegment;
     gc.refinementGridMultiplier = cfg.refinementGridMultiplier;
@@ -128,11 +128,11 @@ void toGenericSamples(
 } // namespace detail
 
 template<std::size_t Dim, typename T>
-ReNurbsProfile buildReNurbsProfile(
+ReNURBSProfile buildReNURBSProfile(
     const MotionPlanner::VelocityProfile<T>& profile,
     const MotionPlanner::PathAdapter<Dim, T>& path,
     const MotionPlanner::KinematicLimits<Dim, T>& limits,
-    const ReNurbsConfig& config) {
+    const ReNURBSConfig& config) {
 
     // Convert to generic format
     auto genericConfig = detail::toGenericConfig<Dim, T>(config, limits);
@@ -142,7 +142,7 @@ ReNurbsProfile buildReNurbsProfile(
     detail::toGenericSamples(profile, path, samples, segments);
 
     // Build using the generic builder
-    auto genericProfile = buildGenericReNurbsProfile(samples, segments, genericConfig);
+    auto genericProfile = buildGenericReNURBSProfile(samples, segments, genericConfig);
 
     // Convert back to velocity-specific format
     return toVelocityProfile(genericProfile);

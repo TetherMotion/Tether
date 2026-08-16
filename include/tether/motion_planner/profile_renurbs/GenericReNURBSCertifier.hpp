@@ -1,9 +1,9 @@
 /**
- * @file GenericReNurbsCertifier.hpp
+ * @file GenericReNURBSCertifier.hpp
  * @brief Generic Lipschitz-based certifier for any ReNURBS profile.
  *
  * @details
- * This certifier works with the generic GenericReNurbsProfile, checking:
+ * This certifier works with the generic GenericReNURBSProfile, checking:
  *
  * 1. **Interpolation**: |q_NURBS(p_i) − q_sample(p_i)| ≤ ε at every sample.
  * 2. **Constraint preservation**: q_NURBS(p) ≤ q_lim(p) for all p in each
@@ -17,7 +17,7 @@
 
 #pragma once
 
-#include "tether/motion_planner/profile_renurbs/GenericReNurbsProfile.hpp"
+#include "tether/motion_planner/profile_renurbs/GenericReNURBSProfile.hpp"
 
 #include <vector>
 
@@ -33,11 +33,11 @@ namespace tether::motion::profile_renurbs {
  * @param epsilon Lipschitz certificate width goal.
  * @return The certificate (compliant flag, violations, continuity reports).
  */
-GenericCertificate certifyGenericReNurbsProfile(
-    const GenericReNurbsProfile& profile,
+GenericCertificate certifyGenericReNURBSProfile(
+    const GenericReNURBSProfile& profile,
     const std::vector<GenericSample>& samples,
     const std::vector<SegmentInfo>& segments,
-    const GenericReNurbsConfig& config,
+    const GenericReNURBSConfig& config,
     double epsilon = 1e-5);
 
 } // namespace tether::motion::profile_renurbs

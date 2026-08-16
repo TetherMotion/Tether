@@ -1,11 +1,11 @@
 /**
- * @file test_ReNurbsProfileBuilder.cpp
- * @brief End-to-end tests for ReNurbsProfileBuilder (ReNURBS §7.2).
+ * @file test_ReNURBSProfileBuilder.cpp
+ * @brief End-to-end tests for ReNURBSProfileBuilder (ReNURBS §7.2).
  */
 
 #include <gtest/gtest.h>
-#include "tether/motion_planner/profile_renurbs/ReNurbsProfileBuilder.hpp"
-#include "tether/motion_planner/profile_renurbs/ReNurbsProfile.hpp"
+#include "tether/motion_planner/profile_renurbs/ReNURBSProfileBuilder.hpp"
+#include "tether/motion_planner/profile_renurbs/ReNURBSProfile.hpp"
 #include "tether/motion_planner/VelocityProfile.hpp"
 #include "tether/motion_planner/PathAdapter.hpp"
 #include "tether/motion_planner/MotionSegment.hpp"
@@ -128,17 +128,17 @@ VelocityProfile<double> makeSCurveProfile(
 // Basic construction
 // ============================================================================
 
-TEST(ReNurbsProfileBuilderTest, BuildsFromTrapezoidalProfile) {
+TEST(ReNURBSProfileBuilderTest, BuildsFromTrapezoidalProfile) {
     auto path = makeLinearPath2D(100.0);
     auto profile = makeTrapezoidalProfile(100.0, 50.0, 500.0, 100);
     KinematicLimits<2, double> limits;
     limits.path.maxPathVelocity = 50.0;
     limits.path.maxPathAcceleration = 500.0;
 
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false; // disable for basic test
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
 
     ASSERT_EQ(renurbs.perSegment.size(), 1u);
     const auto& seg = renurbs.perSegment[0];
@@ -147,7 +147,7 @@ TEST(ReNurbsProfileBuilderTest, BuildsFromTrapezoidalProfile) {
     EXPECT_TRUE(seg.time.curve.has_value());
 }
 
-TEST(ReNurbsProfileBuilderTest, BuildsFromSCurveProfile) {
+TEST(ReNURBSProfileBuilderTest, BuildsFromSCurveProfile) {
     auto path = makeLinearPath2D(100.0);
     auto profile = makeSCurveProfile(100.0, 50.0, 500.0, 5000.0, 100);
     KinematicLimits<2, double> limits;
@@ -156,10 +156,10 @@ TEST(ReNurbsProfileBuilderTest, BuildsFromSCurveProfile) {
     limits.path.maxPathJerk = 5000.0;
     limits.path.jerkLimitEnabled = true;
 
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
 
     ASSERT_EQ(renurbs.perSegment.size(), 1u);
     const auto& seg = renurbs.perSegment[0];
@@ -167,15 +167,15 @@ TEST(ReNurbsProfileBuilderTest, BuildsFromSCurveProfile) {
     EXPECT_TRUE(seg.jerk.curve.has_value());
 }
 
-TEST(ReNurbsProfileBuilderTest, PerSegmentCountMatchesPathPieces) {
+TEST(ReNURBSProfileBuilderTest, PerSegmentCountMatchesPathPieces) {
     auto path = makeTwoSegmentPath2D(50.0, 50.0);
     auto profile = makeTrapezoidalProfile(100.0, 50.0, 500.0, 100);
     KinematicLimits<2, double> limits;
 
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
     EXPECT_EQ(renurbs.perSegment.size(), 2u);
 }
 
@@ -183,16 +183,16 @@ TEST(ReNurbsProfileBuilderTest, PerSegmentCountMatchesPathPieces) {
 // Interpolation
 // ============================================================================
 
-TEST(ReNurbsProfileBuilderTest, VelocityInterpolatesSamples) {
+TEST(ReNURBSProfileBuilderTest, VelocityInterpolatesSamples) {
     auto path = makeLinearPath2D(100.0);
     auto profile = makeSCurveProfile(100.0, 50.0, 500.0, 5000.0, 50);
     KinematicLimits<2, double> limits;
 
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
     cfg.epsilonVelocity = 1e-3;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
 
     ASSERT_EQ(renurbs.perSegment.size(), 1u);
     const auto& seg = renurbs.perSegment[0];
@@ -215,16 +215,16 @@ TEST(ReNurbsProfileBuilderTest, VelocityInterpolatesSamples) {
     }
 }
 
-TEST(ReNurbsProfileBuilderTest, TimeInterpolatesSamples) {
+TEST(ReNURBSProfileBuilderTest, TimeInterpolatesSamples) {
     auto path = makeLinearPath2D(100.0);
     auto profile = makeSCurveProfile(100.0, 50.0, 500.0, 5000.0, 50);
     KinematicLimits<2, double> limits;
 
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
     cfg.epsilonTime = 1e-4;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
 
     const auto& seg = renurbs.perSegment[0];
     ASSERT_TRUE(seg.time.curve.has_value());
@@ -248,17 +248,17 @@ TEST(ReNurbsProfileBuilderTest, TimeInterpolatesSamples) {
 // Constraint preservation
 // ============================================================================
 
-TEST(ReNurbsProfileBuilderTest, VelocityNeverExceedsLimit) {
+TEST(ReNURBSProfileBuilderTest, VelocityNeverExceedsLimit) {
     auto path = makeLinearPath2D(100.0);
     auto profile = makeTrapezoidalProfile(100.0, 50.0, 500.0, 100);
     KinematicLimits<2, double> limits;
     limits.path.maxPathVelocity = 50.0;
 
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
     cfg.safetyMarginVelocity = 0.01;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
 
     const auto& seg = renurbs.perSegment[0];
     ASSERT_TRUE(seg.velocity.curve.has_value());
@@ -275,15 +275,15 @@ TEST(ReNurbsProfileBuilderTest, VelocityNeverExceedsLimit) {
     }
 }
 
-TEST(ReNurbsProfileBuilderTest, VelocityNonNegative) {
+TEST(ReNURBSProfileBuilderTest, VelocityNonNegative) {
     auto path = makeLinearPath2D(100.0);
     auto profile = makeTrapezoidalProfile(100.0, 50.0, 500.0, 100);
     KinematicLimits<2, double> limits;
 
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
 
     const auto& seg = renurbs.perSegment[0];
     ASSERT_TRUE(seg.velocity.curve.has_value());
@@ -303,19 +303,19 @@ TEST(ReNurbsProfileBuilderTest, VelocityNonNegative) {
 // Edge cases
 // ============================================================================
 
-TEST(ReNurbsProfileBuilderTest, EmptyProfileReturnsEmpty) {
+TEST(ReNURBSProfileBuilderTest, EmptyProfileReturnsEmpty) {
     auto path = makeLinearPath2D(100.0);
     VelocityProfile<double> profile; // empty
     KinematicLimits<2, double> limits;
 
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
     EXPECT_TRUE(renurbs.empty());
 }
 
-TEST(ReNurbsProfileBuilderTest, SingleSampleProfileReturnsConstant) {
+TEST(ReNURBSProfileBuilderTest, SingleSampleProfileReturnsConstant) {
     auto path = makeLinearPath2D(100.0);
     VelocityProfile<double> profile;
     VelocityProfilePoint<double> pt;
@@ -327,10 +327,10 @@ TEST(ReNurbsProfileBuilderTest, SingleSampleProfileReturnsConstant) {
     profile.addPoint(pt);
 
     KinematicLimits<2, double> limits;
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
     ASSERT_EQ(renurbs.perSegment.size(), 1u);
     const auto& seg = renurbs.perSegment[0];
     ASSERT_TRUE(seg.velocity.curve.has_value());
@@ -339,7 +339,7 @@ TEST(ReNurbsProfileBuilderTest, SingleSampleProfileReturnsConstant) {
     EXPECT_NEAR(val, 10.0, 1e-10);
 }
 
-TEST(ReNurbsProfileBuilderTest, ZeroVelocityStartEnd) {
+TEST(ReNURBSProfileBuilderTest, ZeroVelocityStartEnd) {
     auto path = makeLinearPath2D(100.0);
     auto profile = makeTrapezoidalProfile(100.0, 50.0, 500.0, 100);
     // Ensure start and end are at rest
@@ -347,10 +347,10 @@ TEST(ReNurbsProfileBuilderTest, ZeroVelocityStartEnd) {
     profile.points().back().velocity = 0.0;
 
     KinematicLimits<2, double> limits;
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
 
     const auto& seg = renurbs.perSegment[0];
     ASSERT_TRUE(seg.velocity.curve.has_value());
@@ -361,15 +361,15 @@ TEST(ReNurbsProfileBuilderTest, ZeroVelocityStartEnd) {
     EXPECT_NEAR(vEnd, 0.0, 1e-6);
 }
 
-TEST(ReNurbsProfileBuilderTest, SourceRefPropagated) {
+TEST(ReNURBSProfileBuilderTest, SourceRefPropagated) {
     auto path = makeTwoSegmentPath2D(50.0, 50.0);
     auto profile = makeTrapezoidalProfile(100.0, 50.0, 500.0, 100);
     KinematicLimits<2, double> limits;
 
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
     ASSERT_EQ(renurbs.perSegment.size(), 2u);
     // Source refs should match the path segments
     for (std::size_t i = 0; i < renurbs.perSegment.size(); ++i) {
@@ -377,15 +377,15 @@ TEST(ReNurbsProfileBuilderTest, SourceRefPropagated) {
     }
 }
 
-TEST(ReNurbsProfileBuilderTest, TimeCurveMonotonic) {
+TEST(ReNURBSProfileBuilderTest, TimeCurveMonotonic) {
     auto path = makeLinearPath2D(100.0);
     auto profile = makeSCurveProfile(100.0, 50.0, 500.0, 5000.0, 50);
     KinematicLimits<2, double> limits;
 
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
 
     const auto& seg = renurbs.perSegment[0];
     ASSERT_TRUE(seg.time.curve.has_value());
@@ -407,18 +407,18 @@ TEST(ReNurbsProfileBuilderTest, TimeCurveMonotonic) {
 // Certification integration
 // ============================================================================
 
-TEST(ReNurbsProfileBuilderTest, CertificationPassesForCompliantProfile) {
+TEST(ReNURBSProfileBuilderTest, CertificationPassesForCompliantProfile) {
     auto path = makeLinearPath2D(100.0);
     auto profile = makeTrapezoidalProfile(100.0, 50.0, 500.0, 100);
     KinematicLimits<2, double> limits;
     limits.path.maxPathVelocity = 50.0;
     limits.path.maxPathAcceleration = 500.0;
 
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = true;
     cfg.certifyThrowOnFailure = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
 
     ASSERT_TRUE(renurbs.certificate.has_value());
     // The trapezoidal profile should be compliant (all samples within limits)
@@ -426,7 +426,7 @@ TEST(ReNurbsProfileBuilderTest, CertificationPassesForCompliantProfile) {
                 renurbs.certificate->violations.empty());
 }
 
-TEST(ReNurbsProfileBuilderTest, CertificationThrowsOnFailure) {
+TEST(ReNURBSProfileBuilderTest, CertificationThrowsOnFailure) {
     auto path = makeLinearPath2D(100.0);
     auto profile = makeTrapezoidalProfile(100.0, 50.0, 500.0, 100);
     // Set an impossibly tight limit to force violations
@@ -437,10 +437,10 @@ TEST(ReNurbsProfileBuilderTest, CertificationThrowsOnFailure) {
     KinematicLimits<2, double> limits;
     limits.path.maxPathVelocity = 1.0;
 
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = true;
     cfg.certifyThrowOnFailure = true;
-    EXPECT_THROW(buildReNurbsProfile(profile, path, limits, cfg),
-                 ReNurbsCertificationError);
+    EXPECT_THROW(buildReNURBSProfile(profile, path, limits, cfg),
+                 ReNURBSCertificationError);
 }

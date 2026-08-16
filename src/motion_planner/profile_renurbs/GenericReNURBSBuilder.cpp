@@ -1,10 +1,10 @@
 /**
- * @file GenericReNurbsBuilder.cpp
+ * @file GenericReNURBSBuilder.cpp
  * @brief Implementation of the generic ReNURBS builder.
  */
 
-#include "tether/motion_planner/profile_renurbs/GenericReNurbsBuilder.hpp"
-#include "tether/motion_planner/profile_renurbs/GenericReNurbsCertifier.hpp"
+#include "tether/motion_planner/profile_renurbs/GenericReNURBSBuilder.hpp"
+#include "tether/motion_planner/profile_renurbs/GenericReNURBSCertifier.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -213,12 +213,12 @@ inline GenericQuantityCurve makeConstantCurve(double val) {
 // Conversion functions (generic ↔ velocity-specific)
 // ===========================================================================
 
-ReNurbsProfile toVelocityProfile(const GenericReNurbsProfile& generic) {
-    ReNurbsProfile result;
+ReNURBSProfile toVelocityProfile(const GenericReNURBSProfile& generic) {
+    ReNURBSProfile result;
     if (generic.numQuantities() < 4) return result;
 
     for (const auto& gseg : generic.perSegment) {
-        ReNurbsSegmentProfile seg;
+        ReNURBSSegmentProfile seg;
         seg.segmentIndex = gseg.segmentIndex;
         seg.sStart = gseg.paramStart;
         seg.sEnd = gseg.paramEnd;
@@ -244,8 +244,8 @@ ReNurbsProfile toVelocityProfile(const GenericReNurbsProfile& generic) {
     return result;
 }
 
-GenericReNurbsProfile fromVelocityProfile(const ReNurbsProfile& velocity) {
-    GenericReNurbsProfile result;
+GenericReNURBSProfile fromVelocityProfile(const ReNURBSProfile& velocity) {
+    GenericReNURBSProfile result;
     result.quantityNames = {"velocity", "acceleration", "jerk", "time"};
 
     for (const auto& vseg : velocity.perSegment) {
@@ -310,12 +310,12 @@ ProfileConstraintCertificate toVelocityCertificate(
 // Main builder
 // ===========================================================================
 
-GenericReNurbsProfile buildGenericReNurbsProfile(
+GenericReNURBSProfile buildGenericReNURBSProfile(
     const std::vector<GenericSample>& samples,
     const std::vector<SegmentInfo>& segments,
-    const GenericReNurbsConfig& config) {
+    const GenericReNURBSConfig& config) {
 
-    GenericReNurbsProfile result;
+    GenericReNURBSProfile result;
 
     if (samples.empty()) return result;
     if (config.quantities.empty()) return result;
@@ -403,7 +403,7 @@ GenericReNurbsProfile buildGenericReNurbsProfile(
 
     // Optional certification
     if (config.certify) {
-        result.certificate = certifyGenericReNurbsProfile(
+        result.certificate = certifyGenericReNURBSProfile(
             result, samples, effectiveSegments, config,
             config.certificationEpsilon);
         if (config.certifyThrowOnFailure && result.certificate &&
@@ -418,7 +418,7 @@ GenericReNurbsProfile buildGenericReNurbsProfile(
                        " at p=" + std::to_string(v.parameter) +
                        " overshoot=" + std::to_string(v.overshoot) + ")";
             }
-            throw GenericReNurbsCertificationError(msg);
+            throw GenericReNURBSCertificationError(msg);
         }
     }
 

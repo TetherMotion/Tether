@@ -5,7 +5,7 @@
 
 #include <gtest/gtest.h>
 #include "tether/motion_planner/profile_renurbs/ProfileConstraintCertifier.hpp"
-#include "tether/motion_planner/profile_renurbs/ReNurbsProfileBuilder.hpp"
+#include "tether/motion_planner/profile_renurbs/ReNURBSProfileBuilder.hpp"
 #include "tether/motion_planner/VelocityProfile.hpp"
 #include "tether/motion_planner/PathAdapter.hpp"
 #include "tether/motion_planner/geometry/NurbsCurve.hpp"
@@ -61,20 +61,20 @@ TEST(ProfileConstraintCertifierTest, CertifiesCompliantProfile) {
     limits.path.maxPathVelocity = 50.0;
     limits.path.maxPathAcceleration = 500.0;
 
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
 
-    auto cert = certifyReNurbsProfile(renurbs, profile, path, limits, 1e-5);
+    auto cert = certifyReNURBSProfile(renurbs, profile, path, limits, 1e-5);
     EXPECT_TRUE(cert.compliant);
     EXPECT_TRUE(cert.violations.empty());
 }
 
 TEST(ProfileConstraintCertifierTest, RejectsViolatingProfile) {
-    // Build a ReNurbsProfile with a deliberately violating curve.
-    ReNurbsProfile renurbs;
-    ReNurbsSegmentProfile seg;
+    // Build a ReNURBSProfile with a deliberately violating curve.
+    ReNURBSProfile renurbs;
+    ReNURBSSegmentProfile seg;
     seg.segmentIndex = 0;
     seg.sStart = 0.0;
     seg.sEnd = 100.0;
@@ -99,7 +99,7 @@ TEST(ProfileConstraintCertifierTest, RejectsViolatingProfile) {
     KinematicLimits<2, double> limits;
     limits.path.maxPathVelocity = 50.0;
 
-    auto cert = certifyReNurbsProfile(renurbs, profile, path, limits, 1e-5);
+    auto cert = certifyReNURBSProfile(renurbs, profile, path, limits, 1e-5);
     EXPECT_FALSE(cert.compliant);
     EXPECT_FALSE(cert.violations.empty());
 }
@@ -109,12 +109,12 @@ TEST(ProfileConstraintCertifierTest, ContinuityReportPopulated) {
     auto profile = makeSimpleProfile(100.0, 50.0, 50);
     KinematicLimits<2, double> limits;
 
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
 
-    auto cert = certifyReNurbsProfile(renurbs, profile, path, limits, 1e-5);
+    auto cert = certifyReNURBSProfile(renurbs, profile, path, limits, 1e-5);
     EXPECT_EQ(cert.continuity.size(), renurbs.perSegment.size());
 }
 
@@ -122,9 +122,9 @@ TEST(ProfileConstraintCertifierTest, EmptyProfileCertifiesAsCompliant) {
     auto path = makeLinearPath2D(100.0);
     VelocityProfile<double> profile;
     KinematicLimits<2, double> limits;
-    ReNurbsProfile renurbs;
+    ReNURBSProfile renurbs;
 
-    auto cert = certifyReNurbsProfile(renurbs, profile, path, limits, 1e-5);
+    auto cert = certifyReNURBSProfile(renurbs, profile, path, limits, 1e-5);
     EXPECT_TRUE(cert.compliant);
     EXPECT_TRUE(cert.violations.empty());
 }
@@ -136,12 +136,12 @@ TEST(ProfileConstraintCertifierTest, JerkCertificationWhenJerkLimited) {
     limits.path.maxPathJerk = 5000.0;
     limits.path.jerkLimitEnabled = true;
 
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
 
-    auto cert = certifyReNurbsProfile(renurbs, profile, path, limits, 1e-5);
+    auto cert = certifyReNURBSProfile(renurbs, profile, path, limits, 1e-5);
     // The jerk curve should be certified against jMax
     // (may or may not be compliant depending on the profile, but the
     //  certifier should run without crashing)
