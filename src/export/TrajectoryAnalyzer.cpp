@@ -24,6 +24,42 @@ std::vector<TrajectorySample> TrajectoryAnalyzer::analyze(
     std::vector<TrajectorySample> samples;
     if (segments.empty()) return samples;
 
+    // Compute total trajectory time and estimate sample count.
+    double totalTime = 0.0;
+    for (const auto& seg : segments) {
+        if (seg.segmentTime > 0) totalTime += seg.segmentTime;
+    }
+
+    // If maxSamples is set and the estimated count exceeds it, increase the
+    // effective time step to cap the sample count. This prevents OOM on very
+    // long trajectories (e.g. 3-hour print at 1ms = 10.8M samples → 7GB).
+    double effectiveTimeStep = config_.timeStep;
+    if (config_.maxSamples > 0 && totalTime > 0.0) {
+        double estimatedSamples = totalTime / config_.timeStep;
+        if (estimatedSamples > static_cast<double>(config_.maxSamples)) {
+            effectiveTimeStep = totalTime / static_cast<double>(config_.maxSamples);
+        }
+    }
+
+    // Pre-compute per-segment step counts and reserve the vector.
+    // This avoids repeated reallocations that dominate performance for
+    // large sample counts (each TrajectorySample is ~680 bytes).
+    size_t totalSamples = 0;
+    {
+        size_t segCount = segments.size();
+        for (size_t segIdx = 0; segIdx < segCount; ++segIdx) {
+            const auto& seg = segments[segIdx];
+            if (seg.segmentTime <= 0) continue;
+            size_t numSteps = std::max(
+                size_t(1),
+                static_cast<size_t>(std::ceil(seg.segmentTime / effectiveTimeStep))
+            );
+            bool isLast = (segIdx == segCount - 1);
+            totalSamples += isLast ? (numSteps + 1) : numSteps;
+        }
+    }
+    samples.reserve(totalSamples);
+
     double currentTime = 0.0;
     double pathPosition = 0.0;
 
@@ -35,7 +71,7 @@ std::vector<TrajectorySample> TrajectoryAnalyzer::analyze(
         // Determine number of samples for this segment
         size_t numSteps = std::max(
             size_t(1),
-            static_cast<size_t>(std::ceil(seg.segmentTime / config_.timeStep))
+            static_cast<size_t>(std::ceil(seg.segmentTime / effectiveTimeStep))
         );
 
         const double dt = seg.segmentTime / static_cast<double>(numSteps);
@@ -245,9 +281,24 @@ TrajectoryStatistics TrajectoryAnalyzer::computeStatistics(const std::vector<Tra
         stats.axisStats[axis].maxJerk = std::numeric_limits<double>::lowest();
     }
     
-    // Accumulate statistics
+    // Accumulate statistics + check limit compliance in a single pass.
+    // Previously these were two separate O(n) passes over the samples;
+    // merging them halves the iteration cost for large trajectories.
     std::array<double, 9> velSum{}, accSum{};
-    
+    std::vector<LimitViolation> violations;
+    const size_t maxViolations = config_.maxViolations;
+    // Reserve a reasonable chunk for violations to avoid reallocations.
+    if (maxViolations > 0) violations.reserve(std::min(maxViolations, size_t(1024)));
+    else violations.reserve(1024);
+    stats.meetsLimits = true;
+
+    const double velLimitLin = config_.limits.maxVelocityLinear / 60.0;
+    const double velLimitLinTol = velLimitLin * (1.0 + config_.violationTolerance);
+    const double accLimitLin = config_.limits.maxAcceleration;
+    const double accLimitLinTol = accLimitLin * (1.0 + config_.violationTolerance);
+    const double jerkLimitLin = config_.limits.maxJerk;
+    const double jerkLimitLinTol = jerkLimitLin * (1.0 + config_.violationTolerance);
+
     for (const auto& sample : samples) {
         for (size_t axis = 0; axis < 9; ++axis) {
             auto& as = stats.axisStats[axis];
@@ -270,6 +321,75 @@ TrajectoryStatistics TrajectoryAnalyzer::computeStatistics(const std::vector<Tra
         stats.maxLinearJerk = std::max(stats.maxLinearJerk, sample.linearJerk);
         stats.maxCurvature = std::max(stats.maxCurvature, sample.curvature);
         stats.maxCentripetalAccel = std::max(stats.maxCentripetalAccel, sample.centripetalAccel);
+
+        // ── Limit compliance (merged from checkLimitCompliance) ──
+        // Only collect violation details if we haven't hit the cap.
+        const bool canStoreViolation = (maxViolations == 0) ||
+            (violations.size() < maxViolations);
+
+        if (sample.linearVelocity > velLimitLinTol) {
+            stats.meetsLimits = false;
+            if (canStoreViolation) {
+                violations.push_back({sample.time, -1, "velocity",
+                    sample.linearVelocity, velLimitLin,
+                    (sample.linearVelocity / velLimitLin - 1.0) * 100.0});
+            }
+        }
+        if (sample.linearAcceleration > accLimitLinTol) {
+            stats.meetsLimits = false;
+            if (canStoreViolation) {
+                violations.push_back({sample.time, -1, "acceleration",
+                    sample.linearAcceleration, accLimitLin,
+                    (sample.linearAcceleration / accLimitLin - 1.0) * 100.0});
+            }
+        }
+        if (sample.linearJerk > jerkLimitLinTol) {
+            stats.meetsLimits = false;
+            if (canStoreViolation) {
+                violations.push_back({sample.time, -1, "jerk",
+                    sample.linearJerk, jerkLimitLin,
+                    (sample.linearJerk / jerkLimitLin - 1.0) * 100.0});
+            }
+        }
+
+        // Per-axis limits
+        for (size_t axis = 0; axis < 9; ++axis) {
+            double axisVelLimit = config_.limits.axisMaxVelocity[axis] / 60.0;
+            double axisAccLimit = config_.limits.axisMaxAcceleration[axis];
+            double axisJerkLimit = config_.limits.axisMaxJerk[axis];
+            double axisVelTol = axisVelLimit * (1.0 + config_.violationTolerance);
+            double axisAccTol = axisAccLimit * (1.0 + config_.violationTolerance);
+            double axisJerkTol = axisJerkLimit * (1.0 + config_.violationTolerance);
+
+            double absVel = std::abs(sample.velocity[axis]);
+            double absAcc = std::abs(sample.acceleration[axis]);
+            double absJerk = std::abs(sample.jerk[axis]);
+
+            if (absVel > axisVelTol) {
+                stats.meetsLimits = false;
+                if (canStoreViolation) {
+                    violations.push_back({sample.time, static_cast<int>(axis),
+                        "velocity", absVel, axisVelLimit,
+                        (absVel / axisVelLimit - 1.0) * 100.0});
+                }
+            }
+            if (absAcc > axisAccTol) {
+                stats.meetsLimits = false;
+                if (canStoreViolation) {
+                    violations.push_back({sample.time, static_cast<int>(axis),
+                        "acceleration", absAcc, axisAccLimit,
+                        (absAcc / axisAccLimit - 1.0) * 100.0});
+                }
+            }
+            if (absJerk > axisJerkTol) {
+                stats.meetsLimits = false;
+                if (canStoreViolation) {
+                    violations.push_back({sample.time, static_cast<int>(axis),
+                        "jerk", absJerk, axisJerkLimit,
+                        (absJerk / axisJerkLimit - 1.0) * 100.0});
+                }
+            }
+        }
     }
     
     // Compute averages
@@ -278,9 +398,6 @@ TrajectoryStatistics TrajectoryAnalyzer::computeStatistics(const std::vector<Tra
         stats.axisStats[axis].avgAcceleration = accSum[axis] / stats.sampleCount;
     }
     
-    // Check limit compliance
-    std::vector<LimitViolation> violations;
-    stats.meetsLimits = checkLimitCompliance(samples, &violations);
     stats.violations = std::move(violations);
     
     return stats;
@@ -416,7 +533,30 @@ std::vector<TrajectorySample> FixedDeviationApproximation::generateTrajectory(
     const GCode::KinematicLimits& limits
 ) {
     std::vector<TrajectorySample> samples;
-    
+
+    // Pre-compute step counts and reserve to avoid reallocations.
+    size_t totalSamples = 0;
+    for (const auto& seg : segments) {
+        if (seg.segmentLength <= 0) continue;
+        size_t numSteps = 1;
+        if (seg.isArc()) {
+            if (seg.arcRadius > 0 && maxDeviation_ > 0) {
+                double ratio = maxDeviation_ / seg.arcRadius;
+                if (ratio < 1.0) {
+                    double anglePerStep = 2.0 * std::acos(1.0 - ratio);
+                    if (anglePerStep > 0) {
+                        numSteps = static_cast<size_t>(std::ceil(std::abs(seg.arcSweep) / anglePerStep));
+                    }
+                }
+            }
+            numSteps = std::max(numSteps, size_t(4));
+        } else {
+            numSteps = std::max(size_t(1), static_cast<size_t>(std::ceil(seg.segmentLength / maxDeviation_)));
+        }
+        totalSamples += numSteps + 1;
+    }
+    samples.reserve(totalSamples);
+
     double currentTime = 0.0;
     double pathPosition = 0.0;
     
