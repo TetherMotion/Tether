@@ -44,8 +44,8 @@
 #include "tether/motion_replanner/PathRelativeFFT.hpp"
 #include "tether/motion_replanner/KdeDerivativeAnalyzer.hpp"
 #include "tether/motion_replanner/SvgCanvas.hpp"
-#include "tether/motion_planner/profile_renurbs/ReNurbsProfile.hpp"
-#include "tether/motion_planner/profile_renurbs/GenericReNurbsProfile.hpp"
+#include "tether/motion_planner/profile_renurbs/ReNURBSProfile.hpp"
+#include "tether/motion_planner/profile_renurbs/GenericReNURBSProfile.hpp"
 
 #include <string>
 #include <vector>
@@ -275,8 +275,8 @@ public:
     /// @param filename Output .svg filename.
     /// @param renurbs The ReNURBS profile to visualize.
     /// @return True if file was written successfully.
-    bool exportReNurbsProfile(const std::string& filename,
-                              const tether::motion::profile_renurbs::ReNurbsProfile& renurbs) const;
+    bool exportReNURBSProfile(const std::string& filename,
+                              const tether::motion::profile_renurbs::ReNURBSProfile& renurbs) const;
 
     /// Export a generic ReNURBS profile (any sampled curve with any
     /// quantities) as an SVG file with one sub-plot per quantity.
@@ -284,9 +284,9 @@ public:
     /// @param filename Output .svg filename.
     /// @param renurbs The generic ReNURBS profile to visualize.
     /// @return True if file was written successfully.
-    bool exportGenericReNurbsProfile(
+    bool exportGenericReNURBSProfile(
         const std::string& filename,
-        const tether::motion::profile_renurbs::GenericReNurbsProfile& renurbs) const;
+        const tether::motion::profile_renurbs::GenericReNURBSProfile& renurbs) const;
 
     const SvgConfig& config() const { return config_; }
     void setConfig(const SvgConfig& config) { config_ = config; canvas_.updateConfig(config_); }
@@ -391,15 +391,15 @@ private:
 
     /// Render a single ReNURBS quantity curve (v, a, j, or t) as an SVG
     /// polyline by evaluating the NURBS on a fine grid.
-    void renderReNurbsQuantity(std::ostream& out, int svgW, int svgH,
-                               const tether::motion::profile_renurbs::ReNurbsProfile& renurbs,
+    void renderReNURBSQuantity(std::ostream& out, int svgW, int svgH,
+                               const tether::motion::profile_renurbs::ReNURBSProfile& renurbs,
                                tether::motion::profile_renurbs::SegmentViolation::Quantity quantity,
                                const std::string& title,
                                const std::string& yLabel) const;
 
     /// Render a single generic quantity curve by index.
     void renderGenericQuantity(std::ostream& out, int svgW, int svgH,
-                               const tether::motion::profile_renurbs::GenericReNurbsProfile& renurbs,
+                               const tether::motion::profile_renurbs::GenericReNURBSProfile& renurbs,
                                std::size_t quantityIndex,
                                const std::string& title,
                                const std::string& yLabel) const;

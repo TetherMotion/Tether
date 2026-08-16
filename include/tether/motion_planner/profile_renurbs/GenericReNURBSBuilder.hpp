@@ -1,11 +1,11 @@
 /**
- * @file GenericReNurbsBuilder.hpp
+ * @file GenericReNURBSBuilder.hpp
  * @brief Generic ReNURBS builder — works with any sampled curve.
  *
  * @details
  * This builder converts a generic SampledCurve (a vector of GenericSample
  * + segment boundaries + per-quantity configuration) into a
- * GenericReNurbsProfile with per-segment NURBS curves.
+ * GenericReNURBSProfile with per-segment NURBS curves.
  *
  * It is domain-agnostic: it doesn't know about velocity, acceleration,
  * pressure advance, or any specific physical quantity. The caller
@@ -29,7 +29,7 @@
  * }
  *
  * // 2. Configure quantities
- * GenericReNurbsConfig config;
+ * GenericReNURBSConfig config;
  * config.enabled = true;
  * QuantitySpec qs;
  * qs.name = "pressure_offset";
@@ -46,13 +46,13 @@
  * };
  *
  * // 4. Build
- * auto profile = buildGenericReNurbsProfile(samples, segments, config);
+ * auto profile = buildGenericReNURBSProfile(samples, segments, config);
  * ```
  */
 
 #pragma once
 
-#include "tether/motion_planner/profile_renurbs/GenericReNurbsProfile.hpp"
+#include "tether/motion_planner/profile_renurbs/GenericReNURBSProfile.hpp"
 #include "tether/motion_planner/profile_renurbs/ProfileSplineFitter.hpp"
 
 #include <vector>
@@ -62,12 +62,12 @@ namespace tether::motion::profile_renurbs {
 
 /// Exception thrown when generic certification fails and
 /// certifyThrowOnFailure is true.
-/// Inherits from ReNurbsCertificationError so existing code catching
+/// Inherits from ReNURBSCertificationError so existing code catching
 /// the velocity-specific exception type still works.
-class GenericReNurbsCertificationError : public ReNurbsCertificationError {
+class GenericReNURBSCertificationError : public ReNURBSCertificationError {
 public:
-    explicit GenericReNurbsCertificationError(const std::string& msg)
-        : ReNurbsCertificationError(msg) {}
+    explicit GenericReNURBSCertificationError(const std::string& msg)
+        : ReNURBSCertificationError(msg) {}
 };
 
 /**
@@ -81,12 +81,12 @@ public:
  *
  * @throws std::invalid_argument if samples is empty or config.quantities
  *         is empty.
- * @throws GenericReNurbsCertificationError if certification is enabled,
+ * @throws GenericReNURBSCertificationError if certification is enabled,
  *         fails, and certifyThrowOnFailure is true.
  */
-GenericReNurbsProfile buildGenericReNurbsProfile(
+GenericReNURBSProfile buildGenericReNURBSProfile(
     const std::vector<GenericSample>& samples,
     const std::vector<SegmentInfo>& segments,
-    const GenericReNurbsConfig& config);
+    const GenericReNURBSConfig& config);
 
 } // namespace tether::motion::profile_renurbs

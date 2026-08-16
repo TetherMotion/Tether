@@ -1,13 +1,13 @@
 /**
- * @file test_GenericReNurbs.cpp
+ * @file test_GenericReNURBS.cpp
  * @brief Tests for the generic ReNURBS builder, certifier, and PA adapter.
  */
 
 #include <gtest/gtest.h>
 
-#include "tether/motion_planner/profile_renurbs/GenericReNurbsBuilder.hpp"
-#include "tether/motion_planner/profile_renurbs/GenericReNurbsCertifier.hpp"
-#include "tether/motion_planner/profile_renurbs/PressureAdvanceReNurbsAdapter.hpp"
+#include "tether/motion_planner/profile_renurbs/GenericReNURBSBuilder.hpp"
+#include "tether/motion_planner/profile_renurbs/GenericReNURBSCertifier.hpp"
+#include "tether/motion_planner/profile_renurbs/PressureAdvanceReNURBSAdapter.hpp"
 #include "tether/motion_planner/profile_renurbs/ProfileSplineFitter.hpp"
 
 #include <cmath>
@@ -38,12 +38,12 @@ static std::vector<GenericSample> makeSmoothSamples(
 // Generic Builder Tests
 // ============================================================================
 
-TEST(GenericReNurbsBuilderTest, BuildsSingleQuantitySmoothCurve) {
+TEST(GenericReNURBSBuilderTest, BuildsSingleQuantitySmoothCurve) {
     auto samples = makeSmoothSamples(50, [](double t) {
         return std::sin(2.0 * M_PI * t);
     });
 
-    GenericReNurbsConfig config;
+    GenericReNURBSConfig config;
     config.enabled = true;
     config.certify = false;
     QuantitySpec qs;
@@ -59,7 +59,7 @@ TEST(GenericReNurbsBuilderTest, BuildsSingleQuantitySmoothCurve) {
     si.paramEnd = 1.0;
     segments.push_back(si);
 
-    auto profile = buildGenericReNurbsProfile(samples, segments, config);
+    auto profile = buildGenericReNURBSProfile(samples, segments, config);
 
     ASSERT_EQ(profile.numSegments(), 1u);
     ASSERT_EQ(profile.numQuantities(), 1u);
@@ -79,26 +79,26 @@ TEST(GenericReNurbsBuilderTest, BuildsSingleQuantitySmoothCurve) {
     }
 }
 
-TEST(GenericReNurbsBuilderTest, EmptySamplesReturnsEmptyProfile) {
+TEST(GenericReNURBSBuilderTest, EmptySamplesReturnsEmptyProfile) {
     std::vector<GenericSample> samples;
-    GenericReNurbsConfig config;
+    GenericReNURBSConfig config;
     config.enabled = true;
     config.quantities = {{"q", 1e-4, 1e-4, 5, std::nullopt, LimitType::None}};
 
-    auto profile = buildGenericReNurbsProfile(samples, {}, config);
+    auto profile = buildGenericReNURBSProfile(samples, {}, config);
     EXPECT_TRUE(profile.empty());
 }
 
-TEST(GenericReNurbsBuilderTest, SingleSampleProducesConstant) {
+TEST(GenericReNURBSBuilderTest, SingleSampleProducesConstant) {
     std::vector<GenericSample> samples = {
         {1.0, {42.0}, {}}
     };
-    GenericReNurbsConfig config;
+    GenericReNURBSConfig config;
     config.enabled = true;
     config.certify = false;
     config.quantities = {{"q", 1e-4, 1e-4, 5, std::nullopt, LimitType::None}};
 
-    auto profile = buildGenericReNurbsProfile(samples, {}, config);
+    auto profile = buildGenericReNURBSProfile(samples, {}, config);
     ASSERT_EQ(profile.numSegments(), 1u);
     ASSERT_TRUE(profile.perSegment[0].quantities[0].curve.has_value());
     const auto& curve = *profile.perSegment[0].quantities[0].curve;
@@ -106,7 +106,7 @@ TEST(GenericReNurbsBuilderTest, SingleSampleProducesConstant) {
     EXPECT_NEAR(curve.evaluate(curve.knotMax())[0], 42.0, 1e-10);
 }
 
-TEST(GenericReNurbsBuilderTest, MultipleQuantities) {
+TEST(GenericReNURBSBuilderTest, MultipleQuantities) {
     // 2 quantities: sin and cos
     std::vector<GenericSample> samples;
     for (int i = 0; i < 50; ++i) {
@@ -117,7 +117,7 @@ TEST(GenericReNurbsBuilderTest, MultipleQuantities) {
         samples.push_back(s);
     }
 
-    GenericReNurbsConfig config;
+    GenericReNURBSConfig config;
     config.enabled = true;
     config.certify = false;
     config.quantities = {
@@ -127,7 +127,7 @@ TEST(GenericReNurbsBuilderTest, MultipleQuantities) {
 
     std::vector<SegmentInfo> segments = {{0.0, 1.0, {}}};
 
-    auto profile = buildGenericReNurbsProfile(samples, segments, config);
+    auto profile = buildGenericReNURBSProfile(samples, segments, config);
     ASSERT_EQ(profile.numQuantities(), 2u);
     EXPECT_EQ(profile.quantityNames[0], "sin_q");
     EXPECT_EQ(profile.quantityNames[1], "cos_q");
@@ -136,15 +136,15 @@ TEST(GenericReNurbsBuilderTest, MultipleQuantities) {
     EXPECT_TRUE(profile.perSegment[0].quantities[1].curve.has_value());
 }
 
-TEST(GenericReNurbsBuilderTest, NoSegmentsUsesFullRange) {
+TEST(GenericReNURBSBuilderTest, NoSegmentsUsesFullRange) {
     auto samples = makeSmoothSamples(20, [](double t) { return t * t; });
-    GenericReNurbsConfig config;
+    GenericReNURBSConfig config;
     config.enabled = true;
     config.certify = false;
     config.quantities = {{"q", 1e-4, 1e-4, 3, std::nullopt, LimitType::None}};
 
     // No segments provided — should auto-create one covering [0, 1]
-    auto profile = buildGenericReNurbsProfile(samples, {}, config);
+    auto profile = buildGenericReNURBSProfile(samples, {}, config);
     ASSERT_EQ(profile.numSegments(), 1u);
     EXPECT_NEAR(profile.perSegment[0].paramStart, 0.0, 1e-10);
     EXPECT_NEAR(profile.perSegment[0].paramEnd, 1.0, 1e-10);
@@ -154,13 +154,13 @@ TEST(GenericReNurbsBuilderTest, NoSegmentsUsesFullRange) {
 // Constraint Tests
 // ============================================================================
 
-TEST(GenericReNurbsBuilderTest, SymmetricUniformLimitRespected) {
+TEST(GenericReNURBSBuilderTest, SymmetricUniformLimitRespected) {
     // Generate samples that are within ±1.0
     auto samples = makeSmoothSamples(50, [](double t) {
         return 0.9 * std::sin(2 * M_PI * t);
     });
 
-    GenericReNurbsConfig config;
+    GenericReNURBSConfig config;
     config.enabled = true;
     config.certify = true;
     config.certifyThrowOnFailure = false;
@@ -175,7 +175,7 @@ TEST(GenericReNurbsBuilderTest, SymmetricUniformLimitRespected) {
 
     std::vector<SegmentInfo> segments = {{0.0, 1.0, {}}};
 
-    auto profile = buildGenericReNurbsProfile(samples, segments, config);
+    auto profile = buildGenericReNURBSProfile(samples, segments, config);
 
     ASSERT_EQ(profile.numSegments(), 1u);
     ASSERT_TRUE(profile.perSegment[0].quantities[0].curve.has_value());
@@ -193,7 +193,7 @@ TEST(GenericReNurbsBuilderTest, SymmetricUniformLimitRespected) {
     }
 }
 
-TEST(GenericReNurbsBuilderTest, UpperPerSampleLimitRespected) {
+TEST(GenericReNURBSBuilderTest, UpperPerSampleLimitRespected) {
     // Samples with a varying upper limit
     std::vector<GenericSample> samples;
     for (int i = 0; i < 50; ++i) {
@@ -205,7 +205,7 @@ TEST(GenericReNurbsBuilderTest, UpperPerSampleLimitRespected) {
         samples.push_back(s);
     }
 
-    GenericReNurbsConfig config;
+    GenericReNURBSConfig config;
     config.enabled = true;
     config.certify = true;
     config.certifyThrowOnFailure = false;
@@ -219,7 +219,7 @@ TEST(GenericReNurbsBuilderTest, UpperPerSampleLimitRespected) {
 
     std::vector<SegmentInfo> segments = {{0.0, 1.0, {}}};
 
-    auto profile = buildGenericReNurbsProfile(samples, segments, config);
+    auto profile = buildGenericReNURBSProfile(samples, segments, config);
     ASSERT_EQ(profile.numSegments(), 1u);
     ASSERT_TRUE(profile.perSegment[0].quantities[0].curve.has_value());
 
@@ -241,12 +241,12 @@ TEST(GenericReNurbsBuilderTest, UpperPerSampleLimitRespected) {
 // Generic Certifier Tests
 // ============================================================================
 
-TEST(GenericReNurbsCertifierTest, CertifiesCompliantProfile) {
+TEST(GenericReNURBSCertifierTest, CertifiesCompliantProfile) {
     auto samples = makeSmoothSamples(50, [](double t) {
         return 0.5 * std::sin(2 * M_PI * t);
     });
 
-    GenericReNurbsConfig config;
+    GenericReNURBSConfig config;
     config.enabled = true;
     config.certify = false;
     QuantitySpec qs;
@@ -259,20 +259,20 @@ TEST(GenericReNurbsCertifierTest, CertifiesCompliantProfile) {
     config.quantities = {qs};
 
     std::vector<SegmentInfo> segments = {{0.0, 1.0, {}}};
-    auto profile = buildGenericReNurbsProfile(samples, segments, config);
+    auto profile = buildGenericReNURBSProfile(samples, segments, config);
 
-    auto cert = certifyGenericReNurbsProfile(profile, samples, segments, config);
+    auto cert = certifyGenericReNURBSProfile(profile, samples, segments, config);
     EXPECT_TRUE(cert.compliant);
     EXPECT_TRUE(cert.violations.empty());
 }
 
-TEST(GenericReNurbsCertifierTest, DetectsViolation) {
+TEST(GenericReNURBSCertifierTest, DetectsViolation) {
     // Build a profile with a tight limit, then manually violate it
     auto samples = makeSmoothSamples(50, [](double t) {
         return 0.5 * std::sin(2 * M_PI * t);
     });
 
-    GenericReNurbsConfig config;
+    GenericReNURBSConfig config;
     config.enabled = true;
     config.certify = false;
     QuantitySpec qs;
@@ -285,7 +285,7 @@ TEST(GenericReNurbsCertifierTest, DetectsViolation) {
     config.quantities = {qs};
 
     std::vector<SegmentInfo> segments = {{0.0, 1.0, {}}};
-    auto profile = buildGenericReNurbsProfile(samples, segments, config);
+    auto profile = buildGenericReNURBSProfile(samples, segments, config);
 
     // Manually replace a control point to violate the limit
     ASSERT_TRUE(profile.perSegment[0].quantities[0].curve.has_value());
@@ -299,7 +299,7 @@ TEST(GenericReNurbsCertifierTest, DetectsViolation) {
     profile.perSegment[0].quantities[0].curve =
         NurbsCurve(cps, weights, knots, origCurve.degree());
 
-    auto cert = certifyGenericReNurbsProfile(profile, samples, segments, config);
+    auto cert = certifyGenericReNURBSProfile(profile, samples, segments, config);
     EXPECT_FALSE(cert.compliant);
     EXPECT_FALSE(cert.violations.empty());
     EXPECT_EQ(cert.violations[0].quantityName, "q");
@@ -309,7 +309,7 @@ TEST(GenericReNurbsCertifierTest, DetectsViolation) {
 // Pressure Advance Adapter Tests
 // ============================================================================
 
-TEST(PressureAdvanceReNurbsAdapterTest, BuildsFromOffsetSeries) {
+TEST(PressureAdvanceReNURBSAdapterTest, BuildsFromOffsetSeries) {
     // Simulate a PA offset series: smooth ramp up and down
     std::vector<double> velocities;
     std::vector<double> offsets;
@@ -324,11 +324,11 @@ TEST(PressureAdvanceReNurbsAdapterTest, BuildsFromOffsetSeries) {
     }
 
     double maxComp = 0.5;
-    PressureAdvanceReNurbsConfig config;
+    PressureAdvanceReNURBSConfig config;
     config.certify = false;
     config.epsilon = 1e-6;
 
-    auto profile = buildPressureAdvanceReNurbs(
+    auto profile = buildPressureAdvanceReNURBS(
         offsets, dt, maxComp, config);
 
     ASSERT_EQ(profile.numSegments(), 1u);
@@ -353,7 +353,7 @@ TEST(PressureAdvanceReNurbsAdapterTest, BuildsFromOffsetSeries) {
     }
 }
 
-TEST(PressureAdvanceReNurbsAdapterTest, RespectsMaxCompensation) {
+TEST(PressureAdvanceReNURBSAdapterTest, RespectsMaxCompensation) {
     // Generate offsets that are pre-clamped to ±maxCompensation (as a
     // real PA model would do before producing the output).
     std::vector<double> offsets;
@@ -369,12 +369,12 @@ TEST(PressureAdvanceReNurbsAdapterTest, RespectsMaxCompensation) {
         offsets.push_back(raw);
     }
 
-    PressureAdvanceReNurbsConfig config;
+    PressureAdvanceReNURBSConfig config;
     config.certify = true;
     config.certifyThrowOnFailure = false;
     config.safetyMargin = 0.01;
 
-    auto profile = buildPressureAdvanceReNurbs(
+    auto profile = buildPressureAdvanceReNURBS(
         offsets, dt, maxComp, config);
 
     ASSERT_EQ(profile.numSegments(), 1u);
@@ -398,7 +398,7 @@ TEST(PressureAdvanceReNurbsAdapterTest, RespectsMaxCompensation) {
     }
 }
 
-TEST(PressureAdvanceReNurbsAdapterTest, TwoQuantityWithVelocity) {
+TEST(PressureAdvanceReNURBSAdapterTest, TwoQuantityWithVelocity) {
     std::vector<double> offsets, velocities;
     double dt = 0.001;
     int n = 100;
@@ -409,10 +409,10 @@ TEST(PressureAdvanceReNurbsAdapterTest, TwoQuantityWithVelocity) {
         offsets.push_back(0.05 * v);
     }
 
-    PressureAdvanceReNurbsConfig config;
+    PressureAdvanceReNURBSConfig config;
     config.certify = false;
 
-    auto profile = buildPressureAdvanceReNurbs(
+    auto profile = buildPressureAdvanceReNURBS(
         offsets, velocities, dt, 0.5, config);
 
     ASSERT_EQ(profile.numQuantities(), 2u);
@@ -423,10 +423,10 @@ TEST(PressureAdvanceReNurbsAdapterTest, TwoQuantityWithVelocity) {
     EXPECT_TRUE(profile.perSegment[0].quantities[1].curve.has_value());
 }
 
-TEST(PressureAdvanceReNurbsAdapterTest, EmptyOffsetsReturnsEmpty) {
+TEST(PressureAdvanceReNURBSAdapterTest, EmptyOffsetsReturnsEmpty) {
     std::vector<double> offsets;
-    PressureAdvanceReNurbsConfig config;
-    auto profile = buildPressureAdvanceReNurbs(offsets, 0.001, 0.5, config);
+    PressureAdvanceReNURBSConfig config;
+    auto profile = buildPressureAdvanceReNURBS(offsets, 0.001, 0.5, config);
     EXPECT_TRUE(profile.empty());
 }
 
@@ -434,9 +434,9 @@ TEST(PressureAdvanceReNurbsAdapterTest, EmptyOffsetsReturnsEmpty) {
 // Conversion Tests (generic ↔ velocity-specific)
 // ============================================================================
 
-TEST(GenericReNurbsConversionTest, RoundTripPreservesData) {
+TEST(GenericReNURBSConversionTest, RoundTripPreservesData) {
     // Create a generic profile with 4 quantities
-    GenericReNurbsProfile generic;
+    GenericReNURBSProfile generic;
     generic.quantityNames = {"velocity", "acceleration", "jerk", "time"};
 
     GenericSegmentProfile seg;

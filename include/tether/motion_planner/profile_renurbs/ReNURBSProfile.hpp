@@ -1,10 +1,10 @@
 /**
- * @file ReNurbsProfile.hpp
+ * @file ReNURBSProfile.hpp
  * @brief Data structures for the ReNURBS profile representation.
  *
  * @details
  * See ReNURBS.md for the full design. This file defines the output
- * structures of ReNurbsProfileBuilder: per-segment NURBS curves for
+ * structures of ReNURBSProfileBuilder: per-segment NURBS curves for
  * v(s), a(s), j(s), t(s), plus an optional constraint certificate.
  *
  * The curves are stored as tether::motion::NurbsCurve (1-D, weights all 1)
@@ -34,7 +34,7 @@ enum class ContinuityClass : uint8_t {
 };
 
 /// NURBS curves for one profile quantity on one segment.
-struct ReNurbsQuantityCurves {
+struct ReNURBSQuantityCurves {
     /// The NURBS curve (1-D, parameterized by u ∈ [0,1] within the segment).
     /// May be std::nullopt if the segment is degenerate (zero-length, etc.).
     std::optional<NurbsCurve> curve;
@@ -59,7 +59,7 @@ struct ReNurbsQuantityCurves {
 };
 
 /// All four NURBS curves for one motion segment.
-struct ReNurbsSegmentProfile {
+struct ReNURBSSegmentProfile {
     /// Segment index in the PathAdapter.
     std::size_t segmentIndex = 0;
 
@@ -71,10 +71,10 @@ struct ReNurbsSegmentProfile {
     MotionPlanner::SourceReference sourceRef;
 
     /// NURBS curves for velocity v(s), acceleration a(s), jerk j(s), time t(s).
-    ReNurbsQuantityCurves velocity;
-    ReNurbsQuantityCurves acceleration;
-    ReNurbsQuantityCurves jerk;
-    ReNurbsQuantityCurves time;
+    ReNURBSQuantityCurves velocity;
+    ReNURBSQuantityCurves acceleration;
+    ReNURBSQuantityCurves jerk;
+    ReNURBSQuantityCurves time;
 
     /// Continuity achieved at the *boundary* between this segment and the
     /// next (Cᵏ means both position and k derivatives match). For the last
@@ -114,9 +114,9 @@ struct ProfileConstraintCertificate {
 };
 
 /// The complete ReNURBS profile: per-segment NURBS curves + optional certificate.
-struct ReNurbsProfile {
+struct ReNURBSProfile {
     /// Per-segment curves (one entry per PathAdapter segment).
-    std::vector<ReNurbsSegmentProfile> perSegment;
+    std::vector<ReNURBSSegmentProfile> perSegment;
 
     /// Optional constraint certificate (populated if config.certify == true).
     std::optional<ProfileConstraintCertificate> certificate;
@@ -129,7 +129,7 @@ struct ReNurbsProfile {
 };
 
 /// Configuration for ReNURBS profile construction.
-struct ReNurbsConfig {
+struct ReNURBSConfig {
     bool enabled = false;
 
     // Interpolation tolerances

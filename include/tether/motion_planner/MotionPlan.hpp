@@ -46,8 +46,8 @@
 #include "IVelocityProfiler.hpp"
 #include "JerkConstrainedVelocityProfiler.hpp"
 #include "SCurveVelocityProfiler.hpp"
-#include "tether/motion_planner/profile_renurbs/ReNurbsProfile.hpp"
-#include "tether/motion_planner/profile_renurbs/ReNurbsProfileBuilder.hpp"
+#include "tether/motion_planner/profile_renurbs/ReNURBSProfile.hpp"
+#include "tether/motion_planner/profile_renurbs/ReNURBSProfileBuilder.hpp"
 #include "SCurveProfile.hpp"
 #include "MotionSegment.hpp"
 #include "SourceReference.hpp"
@@ -150,10 +150,10 @@ struct MotionPlanConfig {
 
     /// ReNURBS configuration (analytical NURBS representation of the
     /// velocity/acceleration/jerk/time profiles). When enabled, the
-    /// MotionPlanBuilder builds a ReNurbsProfile from the sampled
+    /// MotionPlanBuilder builds a ReNURBSProfile from the sampled
     /// VelocityProfile and stores it in the MotionPlan.
     /// Default: disabled (the sampled profile is used as-is).
-    tether::motion::profile_renurbs::ReNurbsConfig renurbs;
+    tether::motion::profile_renurbs::ReNURBSConfig renurbs;
 };
 
 // ============================================================================
@@ -508,13 +508,13 @@ public:
      *        representation of v(s), a(s), j(s), t(s)).
      * @return std::nullopt if ReNURBS was not enabled in the config.
      */
-    const std::optional<tether::motion::profile_renurbs::ReNurbsProfile>&
+    const std::optional<tether::motion::profile_renurbs::ReNURBSProfile>&
     renurbsProfile() const { return renurbsProfile_; }
 
     /**
      * @brief Set the ReNURBS profile (used by MotionPlanBuilder).
      */
-    void setRenurbsProfile(tether::motion::profile_renurbs::ReNurbsProfile p) {
+    void setRenurbsProfile(tether::motion::profile_renurbs::ReNURBSProfile p) {
         renurbsProfile_ = std::move(p);
     }
 
@@ -561,7 +561,7 @@ private:
     Config config_;
 
     /// Optional ReNURBS profile (populated if config_.renurbs.enabled).
-    std::optional<tether::motion::profile_renurbs::ReNurbsProfile> renurbsProfile_;
+    std::optional<tether::motion::profile_renurbs::ReNURBSProfile> renurbsProfile_;
 
     T currentFeedOverride_ = T(1);
     T timeOffset_ = T(0);
@@ -672,12 +672,12 @@ public:
         if (config_.renurbs.enabled) {
             try {
                 auto renurbsProfile = tether::motion::profile_renurbs::
-                    buildReNurbsProfile<Dim, T>(
+                    buildReNURBSProfile<Dim, T>(
                         plan.profile(), plan.path(), limits_,
                         config_.renurbs);
                 plan.setRenurbsProfile(std::move(renurbsProfile));
             } catch (const tether::motion::profile_renurbs::
-                     ReNurbsCertificationError&) {
+                     ReNURBSCertificationError&) {
                 // Certification failed; the plan is still valid with
                 // just the sampled profile. The error is propagated to
                 // the caller via the empty renurbsProfile_ optional.

@@ -1,9 +1,9 @@
 /**
- * @file GenericReNurbsCertifier.cpp
+ * @file GenericReNURBSCertifier.cpp
  * @brief Implementation of the generic ReNURBS certifier.
  */
 
-#include "tether/motion_planner/profile_renurbs/GenericReNurbsCertifier.hpp"
+#include "tether/motion_planner/profile_renurbs/GenericReNURBSCertifier.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -164,11 +164,11 @@ inline CertSegmentSamples collectCertSamples(
 
 } // namespace detail
 
-GenericCertificate certifyGenericReNurbsProfile(
-    const GenericReNurbsProfile& profile,
+GenericCertificate certifyGenericReNURBSProfile(
+    const GenericReNURBSProfile& profile,
     const std::vector<GenericSample>& samples,
     const std::vector<SegmentInfo>& segments,
-    const GenericReNurbsConfig& config,
+    const GenericReNURBSConfig& config,
     double /*epsilon*/) {
 
     GenericCertificate cert;

@@ -1,6 +1,6 @@
 /**
- * @file ReNurbsProfileBuilder.hpp
- * @brief Builds a ReNurbsProfile from a sampled VelocityProfile + PathAdapter.
+ * @file ReNURBSProfileBuilder.hpp
+ * @brief Builds a ReNURBSProfile from a sampled VelocityProfile + PathAdapter.
  *
  * @details
  * See ReNURBS.md §3–§5 for the full design. The builder:
@@ -14,14 +14,14 @@
  *    profile supports it).
  * 5. Optionally runs ProfileConstraintCertifier to certify the result.
  *
- * The builder is API-optional: if ReNurbsConfig::enabled is false (default),
+ * The builder is API-optional: if ReNURBSConfig::enabled is false (default),
  * MotionPlanBuilder skips it entirely.
  */
 
 #pragma once
 
-#include "tether/motion_planner/profile_renurbs/ReNurbsProfile.hpp"
-#include "tether/motion_planner/profile_renurbs/GenericReNurbsProfile.hpp"
+#include "tether/motion_planner/profile_renurbs/ReNURBSProfile.hpp"
+#include "tether/motion_planner/profile_renurbs/GenericReNURBSProfile.hpp"
 #include "tether/motion_planner/profile_renurbs/ProfileSplineFitter.hpp"
 #include "tether/motion_planner/VelocityProfile.hpp"
 #include "tether/motion_planner/PathAdapter.hpp"
@@ -30,11 +30,11 @@
 
 namespace tether::motion::profile_renurbs {
 
-// ReNurbsCertificationError is now defined in GenericReNurbsProfile.hpp
+// ReNURBSCertificationError is now defined in GenericReNURBSProfile.hpp
 // and re-exported here via the include above.
 
 /**
- * @brief Build a ReNurbsProfile from a sampled velocity profile and path.
+ * @brief Build a ReNURBSProfile from a sampled velocity profile and path.
  *
  * @tparam Dim Spatial dimension of the path (2 or 3).
  * @tparam T   Numeric type (default: double).
@@ -45,13 +45,13 @@ namespace tether::motion::profile_renurbs {
  * @return The ReNURBS profile with per-segment NURBS curves + optional certificate.
  */
 template<std::size_t Dim, typename T = double>
-ReNurbsProfile buildReNurbsProfile(
+ReNURBSProfile buildReNURBSProfile(
     const MotionPlanner::VelocityProfile<T>& profile,
     const MotionPlanner::PathAdapter<Dim, T>& path,
     const MotionPlanner::KinematicLimits<Dim, T>& limits,
-    const ReNurbsConfig& config = {});
+    const ReNURBSConfig& config = {});
 
 } // namespace tether::motion::profile_renurbs
 
 // Include the template implementation.
-#include "tether/motion_planner/profile_renurbs/ReNurbsProfileBuilder.inl"
+#include "tether/motion_planner/profile_renurbs/ReNURBSProfileBuilder.inl"

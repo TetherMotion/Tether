@@ -917,9 +917,9 @@ std::vector<std::string> SvgExporter::exportAllKdePlots(
 // ReNURBS Profile Rendering
 //=============================================================================
 
-void SvgExporter::renderReNurbsQuantity(
+void SvgExporter::renderReNURBSQuantity(
     std::ostream& out, int svgW, int svgH,
-    const tether::motion::profile_renurbs::ReNurbsProfile& renurbs,
+    const tether::motion::profile_renurbs::ReNURBSProfile& renurbs,
     tether::motion::profile_renurbs::SegmentViolation::Quantity quantity,
     const std::string& title,
     const std::string& yLabel) const {
@@ -988,9 +988,9 @@ void SvgExporter::renderReNurbsQuantity(
     writePolyline(out, transformPts(points), config_.desiredColor, config_.lineWidth);
 }
 
-bool SvgExporter::exportReNurbsProfile(
+bool SvgExporter::exportReNURBSProfile(
     const std::string& filename,
-    const tether::motion::profile_renurbs::ReNurbsProfile& renurbs) const {
+    const tether::motion::profile_renurbs::ReNURBSProfile& renurbs) const {
 
     if (renurbs.empty()) return false;
 
@@ -1008,7 +1008,7 @@ bool SvgExporter::exportReNurbsProfile(
     int yOffset = 0;
 
     // Velocity
-    renderReNurbsQuantity(file, subW, subH, renurbs,
+    renderReNURBSQuantity(file, subW, subH, renurbs,
         tether::motion::profile_renurbs::SegmentViolation::Quantity::Velocity,
         "ReNURBS Velocity Profile", "Velocity (mm/s)");
     yOffset += subH;
@@ -1020,7 +1020,7 @@ bool SvgExporter::exportReNurbsProfile(
                             const std::string& yLabel,
                             tether::motion::profile_renurbs::SegmentViolation::Quantity q) {
         file << "<g transform=\"translate(0," << yOffset << ")\">\n";
-        renderReNurbsQuantity(file, subW, subH, renurbs, q, title, yLabel);
+        renderReNURBSQuantity(file, subW, subH, renurbs, q, title, yLabel);
         file << "</g>\n";
         yOffset += subH;
     };
@@ -1042,7 +1042,7 @@ bool SvgExporter::exportReNurbsProfile(
 
 void SvgExporter::renderGenericQuantity(
     std::ostream& out, int svgW, int svgH,
-    const tether::motion::profile_renurbs::GenericReNurbsProfile& renurbs,
+    const tether::motion::profile_renurbs::GenericReNURBSProfile& renurbs,
     std::size_t quantityIndex,
     const std::string& title,
     const std::string& yLabel) const {
@@ -1104,9 +1104,9 @@ void SvgExporter::renderGenericQuantity(
     writePolyline(out, transformPts(points), config_.desiredColor, config_.lineWidth);
 }
 
-bool SvgExporter::exportGenericReNurbsProfile(
+bool SvgExporter::exportGenericReNURBSProfile(
     const std::string& filename,
-    const tether::motion::profile_renurbs::GenericReNurbsProfile& renurbs) const {
+    const tether::motion::profile_renurbs::GenericReNURBSProfile& renurbs) const {
 
     if (renurbs.empty()) return false;
 

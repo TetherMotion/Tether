@@ -585,10 +585,10 @@ gtest_discover_tests(tether_motion_blend_new_tests
 # `ctest -R motion_renurbs` selects exactly this suite.
 set(MOTION_RENURBS_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/profile_renurbs/test_ProfileSplineFitter.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/profile_renurbs/test_ReNurbsProfileBuilder.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/profile_renurbs/test_ReNURBSProfileBuilder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/profile_renurbs/test_ProfileConstraintCertifier.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/profile_renurbs/test_ReNurbsEdgeCases.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/profile_renurbs/test_GenericReNurbs.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/profile_renurbs/test_ReNURBSEdgeCases.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/profile_renurbs/test_GenericReNURBS.cpp"
 )
 add_executable(tether_motion_planner_renurbs_tests
     main.cpp

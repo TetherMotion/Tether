@@ -1,10 +1,10 @@
 /**
- * @file test_ReNurbsEdgeCases.cpp
+ * @file test_ReNURBSEdgeCases.cpp
  * @brief Edge-case and property/fuzz tests for ReNURBS (ReNURBS §7.4).
  */
 
 #include <gtest/gtest.h>
-#include "tether/motion_planner/profile_renurbs/ReNurbsProfileBuilder.hpp"
+#include "tether/motion_planner/profile_renurbs/ReNURBSProfileBuilder.hpp"
 #include "tether/motion_planner/profile_renurbs/ProfileSplineFitter.hpp"
 #include "tether/motion_planner/VelocityProfile.hpp"
 #include "tether/motion_planner/PathAdapter.hpp"
@@ -114,18 +114,18 @@ VelocityProfile<double> makeBangBangProfile(
 // Edge cases E1–E15
 // ============================================================================
 
-TEST(ReNurbsEdgeCasesTest, E1_EmptyProfile) {
+TEST(ReNURBSEdgeCasesTest, E1_EmptyProfile) {
     auto path = makeLinearPath2D(100.0);
     VelocityProfile<double> profile;
     KinematicLimits<2, double> limits;
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
     EXPECT_TRUE(renurbs.empty());
 }
 
-TEST(ReNurbsEdgeCasesTest, E2_SingleSample) {
+TEST(ReNURBSEdgeCasesTest, E2_SingleSample) {
     auto path = makeLinearPath2D(100.0);
     VelocityProfile<double> profile;
     VelocityProfilePoint<double> pt;
@@ -134,45 +134,45 @@ TEST(ReNurbsEdgeCasesTest, E2_SingleSample) {
     pt.time = 5.0;
     profile.addPoint(pt);
     KinematicLimits<2, double> limits;
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
     ASSERT_EQ(renurbs.perSegment.size(), 1u);
     EXPECT_TRUE(renurbs.perSegment[0].velocity.curve.has_value());
 }
 
-TEST(ReNurbsEdgeCasesTest, E3_ZeroLengthSegment) {
+TEST(ReNURBSEdgeCasesTest, E3_ZeroLengthSegment) {
     // A path with a zero-length segment should be skipped.
     // NurbsCurve::fromLine throws for zero-length lines, so we test that
     // the builder handles very short segments gracefully.
     auto path = makeMultiSegmentPath(3, 33.33);
     auto profile = makeBangBangProfile(100.0, 50.0, 500.0, 100);
     KinematicLimits<2, double> limits;
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
     // Should have 3 segments (or fewer if some are too short)
     EXPECT_LE(renurbs.perSegment.size(), 3u);
     EXPECT_GE(renurbs.perSegment.size(), 1u);
 }
 
-TEST(ReNurbsEdgeCasesTest, E4_ShortSegmentDegreeReduction) {
+TEST(ReNURBSEdgeCasesTest, E4_ShortSegmentDegreeReduction) {
     // A profile with very few samples in a segment
     auto path = makeMultiSegmentPath(5, 20.0);
     auto profile = makeBangBangProfile(100.0, 50.0, 500.0, 10); // only 10 samples
     KinematicLimits<2, double> limits;
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
     cfg.degreeVelocity = 5;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
     // Should not crash; degree may be reduced
     EXPECT_GE(renurbs.perSegment.size(), 1u);
 }
 
-TEST(ReNurbsEdgeCasesTest, E5_ZeroVelocityRegion) {
+TEST(ReNURBSEdgeCasesTest, E5_ZeroVelocityRegion) {
     // A profile with a zero-velocity region (discontinuous velocity).
     // The spline will overshoot near the discontinuity; this is a known
     // limitation that will be addressed by discontinuity splitting (P3).
@@ -181,10 +181,10 @@ TEST(ReNurbsEdgeCasesTest, E5_ZeroVelocityRegion) {
     auto path = makeLinearPath2D(100.0);
     auto profile = makeProfileWithZeroVelocityMiddle(100.0, 50.0, 100);
     KinematicLimits<2, double> limits;
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
     ASSERT_EQ(renurbs.perSegment.size(), 1u);
     const auto& seg = renurbs.perSegment[0];
     ASSERT_TRUE(seg.velocity.curve.has_value());
@@ -201,21 +201,21 @@ TEST(ReNurbsEdgeCasesTest, E5_ZeroVelocityRegion) {
     }
 }
 
-TEST(ReNurbsEdgeCasesTest, E6_DiscontinuousAccelBasicToppra) {
+TEST(ReNURBSEdgeCasesTest, E6_DiscontinuousAccelBasicToppra) {
     // Bang-bang profile has discontinuous acceleration at the midpoint
     auto path = makeLinearPath2D(100.0);
     auto profile = makeBangBangProfile(100.0, 50.0, 500.0, 100);
     KinematicLimits<2, double> limits;
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
     ASSERT_EQ(renurbs.perSegment.size(), 1u);
     // The acceleration curve should exist (may be C⁰, not C¹)
     EXPECT_TRUE(renurbs.perSegment[0].acceleration.curve.has_value());
 }
 
-TEST(ReNurbsEdgeCasesTest, E12_MaxCpExhausted) {
+TEST(ReNURBSEdgeCasesTest, E12_MaxCpExhausted) {
     // Very high-frequency profile with tight CP cap
     auto path = makeLinearPath2D(100.0);
     VelocityProfile<double> profile;
@@ -240,17 +240,17 @@ TEST(ReNurbsEdgeCasesTest, E12_MaxCpExhausted) {
     }
 
     KinematicLimits<2, double> limits;
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
     cfg.maxControlPointsPerSegment = 16;
     cfg.epsilonVelocity = 1e-10;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
     ASSERT_EQ(renurbs.perSegment.size(), 1u);
     EXPECT_TRUE(renurbs.perSegment[0].velocity.controlPointCapHit);
 }
 
-TEST(ReNurbsEdgeCasesTest, E13_NegativeVelocityClamp) {
+TEST(ReNURBSEdgeCasesTest, E13_NegativeVelocityClamp) {
     // Profile with values that might cause negative overshoot
     auto path = makeLinearPath2D(100.0);
     VelocityProfile<double> profile;
@@ -276,10 +276,10 @@ TEST(ReNurbsEdgeCasesTest, E13_NegativeVelocityClamp) {
     }
 
     KinematicLimits<2, double> limits;
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
     const auto& seg = renurbs.perSegment[0];
     ASSERT_TRUE(seg.velocity.curve.has_value());
     const auto& curve = *seg.velocity.curve;
@@ -293,15 +293,15 @@ TEST(ReNurbsEdgeCasesTest, E13_NegativeVelocityClamp) {
     }
 }
 
-TEST(ReNurbsEdgeCasesTest, E14_BlendSegment) {
+TEST(ReNURBSEdgeCasesTest, E14_BlendSegment) {
     // Multi-segment path simulating blend pieces
     auto path = makeMultiSegmentPath(4, 25.0);
     auto profile = makeBangBangProfile(100.0, 50.0, 500.0, 100);
     KinematicLimits<2, double> limits;
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
     EXPECT_GE(renurbs.perSegment.size(), 1u);
     // Each segment should have curves
     for (const auto& seg : renurbs.perSegment) {
@@ -313,7 +313,7 @@ TEST(ReNurbsEdgeCasesTest, E14_BlendSegment) {
 // Property / fuzz tests
 // ============================================================================
 
-TEST(ReNurbsEdgeCasesTest, Fuzz_RandomProfilesConstraintPreserved) {
+TEST(ReNURBSEdgeCasesTest, Fuzz_RandomProfilesConstraintPreserved) {
     std::mt19937 rng(123);
     std::uniform_real_distribution<double> lenDist(50.0, 200.0);
     std::uniform_real_distribution<double> vMaxDist(10.0, 100.0);
@@ -357,11 +357,11 @@ TEST(ReNurbsEdgeCasesTest, Fuzz_RandomProfilesConstraintPreserved) {
         limits.path.maxPathVelocity = vMax;
         limits.path.maxPathAcceleration = aMax;
 
-        ReNurbsConfig cfg;
+        ReNURBSConfig cfg;
         cfg.enabled = true;
         cfg.certify = false;
         cfg.safetyMarginVelocity = 0.1;
-        auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+        auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
 
         if (renurbs.perSegment.empty()) continue;
         const auto& seg = renurbs.perSegment[0];
@@ -382,7 +382,7 @@ TEST(ReNurbsEdgeCasesTest, Fuzz_RandomProfilesConstraintPreserved) {
     }
 }
 
-TEST(ReNurbsEdgeCasesTest, Property_MonotonicTime) {
+TEST(ReNURBSEdgeCasesTest, Property_MonotonicTime) {
     auto path = makeLinearPath2D(100.0);
     VelocityProfile<double> profile;
     double ds = 100.0 / 49;
@@ -406,10 +406,10 @@ TEST(ReNurbsEdgeCasesTest, Property_MonotonicTime) {
     }
 
     KinematicLimits<2, double> limits;
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
 
     const auto& seg = renurbs.perSegment[0];
     ASSERT_TRUE(seg.time.curve.has_value());
@@ -427,7 +427,7 @@ TEST(ReNurbsEdgeCasesTest, Property_MonotonicTime) {
     }
 }
 
-TEST(ReNurbsEdgeCasesTest, Property_SampleInterpolationHolds) {
+TEST(ReNURBSEdgeCasesTest, Property_SampleInterpolationHolds) {
     auto path = makeLinearPath2D(100.0);
     VelocityProfile<double> profile;
     double ds = 100.0 / 29;
@@ -452,11 +452,11 @@ TEST(ReNurbsEdgeCasesTest, Property_SampleInterpolationHolds) {
     }
 
     KinematicLimits<2, double> limits;
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
     cfg.epsilonVelocity = 1e-3;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
 
     const auto& seg = renurbs.perSegment[0];
     ASSERT_TRUE(seg.velocity.curve.has_value());
@@ -476,7 +476,7 @@ TEST(ReNurbsEdgeCasesTest, Property_SampleInterpolationHolds) {
     }
 }
 
-TEST(ReNurbsEdgeCasesTest, Regression_RealWorldMultiSegmentPath) {
+TEST(ReNURBSEdgeCasesTest, Regression_RealWorldMultiSegmentPath) {
     // Simulate a 200-segment path (stress test)
     std::size_t nSegs = 50; // reduced from 200 for test speed
     double segLen = 2.0;
@@ -506,11 +506,11 @@ TEST(ReNurbsEdgeCasesTest, Regression_RealWorldMultiSegmentPath) {
     }
 
     KinematicLimits<2, double> limits;
-    ReNurbsConfig cfg;
+    ReNURBSConfig cfg;
     cfg.enabled = true;
     cfg.certify = false;
     cfg.maxControlPointsPerSegment = 32;
-    auto renurbs = buildReNurbsProfile(profile, path, limits, cfg);
+    auto renurbs = buildReNURBSProfile(profile, path, limits, cfg);
 
     // Should build without crash
     EXPECT_GE(renurbs.perSegment.size(), 1u);
