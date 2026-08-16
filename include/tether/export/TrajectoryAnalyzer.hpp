@@ -125,15 +125,26 @@ struct AnalysisConfig {
     double timeStep = 0.001;                    ///< Sample time step (seconds)
     bool useAdaptiveSampling = false;
     double maxChordError = 0.005;               ///< For adaptive sampling (mm)
-    
+
+    /// Maximum number of samples to generate. If the estimated sample count
+    /// (totalTime / timeStep) exceeds this, the effective time step is
+    /// increased to cap the sample count. 0 = no cap. Prevents OOM on very
+    /// long trajectories (e.g. 3-hour print at 1ms = 10.8M samples → 7GB).
+    size_t maxSamples = 0;
+
     // Derivative computation
     int derivativeOrder = 4;                    ///< Central difference order (2, 4, 6)
-    
+
     // Kinematic limits for compliance checking
     GCode::KinematicLimits limits;
-    
+
     // Tolerance for violation detection
     double violationTolerance = 0.01;           ///< 1% over limit before flagging
+
+    /// Maximum number of limit violations to store in TrajectoryStatistics.
+    /// 0 = no cap (stores all). Capping prevents unbounded memory growth on
+    /// trajectories with many violations.
+    size_t maxViolations = 10000;
 };
 
 /**
