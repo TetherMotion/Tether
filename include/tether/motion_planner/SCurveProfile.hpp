@@ -32,8 +32,10 @@
 #include "SourceReference.hpp"
 #include <array>
 #include <cmath>
+#include <limits>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace MotionPlanner {
 
@@ -397,7 +399,12 @@ public:
      */
     static T computeAccelDistance(T v0, T v1, T aMax, T jMax) {
         if (v1 <= v0) return T(0);
-        if (aMax <= T(0) || jMax <= T(0)) return T(0);
+        // Degenerate limits: the velocity change is infeasible within any
+        // finite distance. Returning infinity (rather than 0) makes the
+        // binary search in maxVelocityAfterDistance degrade to v0 instead
+        // of vMax — i.e. the profiler stays at the current velocity instead
+        // of jumping to the ceiling (which would imply infinite acceleration).
+        if (aMax <= T(0) || jMax <= T(0)) return std::numeric_limits<T>::infinity();
 
         T tJerk = aMax / jMax;
         T deltaV = v1 - v0;
@@ -438,6 +445,243 @@ public:
         return computeAccelDistance(v1, v0, aMax, jMax);
     }
 
+    // ========================================================================
+    // WI-8: State-aware 3rd-order functions (carry acceleration as state)
+    // ========================================================================
+    //
+    // These functions generalize computeAccelDistance / maxVelocityAfterDistance
+    // to carry the acceleration as state, enabling a true 3rd-order TOPP-RA
+    // that does NOT force a = 0 at every sample point. See
+    // docs/motion/ToppraDerivation.md (T.5b, T.6b) for the derivation.
+
+    /**
+     * @brief Solve the cubic  d = v0·t + ½·a0·t² + (1/6)·j·t³  for t.
+     *
+     * Used when the available distance is too short to complete the jerk
+     * ramp from a0 to aMax. The cubic is strictly monotone in t for
+     * t > 0 (its derivative  v0 + a0·t + ½·j·t²  is positive when
+     * v0 > 0), so Newton's method converges in 3–5 iterations.
+     */
+    static T solveAccelCubic(T v0, T a0, T jMax, T distance) {
+        if (distance <= T(0)) return T(0);
+        // Initial guess: ignore acceleration terms.
+        T t = (v0 > T(0)) ? distance / v0 : std::cbrt(T(6) * distance / jMax);
+        for (int iter = 0; iter < 20; ++iter) {
+            T f = v0 * t + T(0.5) * a0 * t * t
+                  + (T(1) / T(6)) * jMax * t * t * t - distance;
+            T fp = v0 + a0 * t + T(0.5) * jMax * t * t;
+            if (std::abs(fp) < T(1e-15)) break;
+            T dt = f / fp;
+            t -= dt;
+            if (std::abs(dt) < T(1e-12) * std::max(t, T(1))) break;
+        }
+        return std::max(t, T(0));
+    }
+
+    /**
+     * @brief Distance to accelerate from (v0, a0) to (v1, 0) with
+     *        jerk-bang-bang control, |a| ≤ aMax, |j| ≤ jMax.
+     *
+     * Generalizes computeAccelDistance to handle non-zero initial
+     * acceleration. The trajectory consists of up to 3 phases:
+     * 1. Jerk ramp: j = +jMax, a goes from a0 to aMax (or a_peak)
+     * 2. Constant accel: a = aMax (trapezoidal case only)
+     * 3. Jerk ramp: j = -jMax, a goes from aMax (or a_peak) to 0
+     *
+     * @param v0 Starting velocity
+     * @param a0 Starting acceleration (may be non-zero, clamped to [-aMax, aMax])
+     * @param v1 Ending velocity (must be >= v0)
+     * @param aMax Maximum acceleration magnitude
+     * @param jMax Maximum jerk magnitude
+     * @return Distance required for the velocity change
+     */
+    static T computeAccelDistanceWithState(T v0, T a0, T v1,
+                                             T aMax, T jMax) {
+        if (v1 <= v0) return T(0);
+        if (aMax <= T(0) || jMax <= T(0))
+            return std::numeric_limits<T>::infinity();
+
+        a0 = std::clamp(a0, -aMax, aMax);
+        T deltaV = v1 - v0;
+
+        // Velocity gain in phase 1 (ramp a0 → aMax): (aMax² − a0²)/(2·jMax)
+        T deltaV1_trap = (aMax * aMax - a0 * a0) / (T(2) * jMax);
+        // Velocity gain in phase 3 (ramp aMax → 0): aMax²/(2·jMax)
+        T deltaV3 = aMax * aMax / (T(2) * jMax);
+
+        if (deltaV >= deltaV1_trap + deltaV3) {
+            // Trapezoidal: a reaches aMax
+            T t1 = (aMax - a0) / jMax;
+            T t3 = aMax / jMax;
+            T v_after_1 = v0 + deltaV1_trap;
+            T deltaV2 = deltaV - deltaV1_trap - deltaV3;
+            T t2 = deltaV2 / aMax;
+
+            T d1 = v0 * t1 + T(0.5) * a0 * t1 * t1
+                   + (T(1) / T(6)) * jMax * t1 * t1 * t1;
+            T d2 = v_after_1 * t2 + T(0.5) * aMax * t2 * t2;
+            T v_after_2 = v_after_1 + aMax * t2;
+            T d3 = v_after_2 * t3 + T(0.5) * aMax * t3 * t3
+                   - (T(1) / T(6)) * jMax * t3 * t3 * t3;
+            return d1 + d2 + d3;
+        } else {
+            // Triangular: a doesn't reach aMax
+            // 2·a_peak² = 2·jMax·Δv + a0²  →  a_peak = √(jMax·Δv + a0²/2)
+            T a_peak_sq = jMax * deltaV + a0 * a0 / T(2);
+            if (a_peak_sq <= T(0)) return T(0);
+            T a_peak = std::sqrt(a_peak_sq);
+
+            T t1 = (a_peak - a0) / jMax;
+            T t3 = a_peak / jMax;
+            T deltaV1 = (a_peak * a_peak - a0 * a0) / (T(2) * jMax);
+            T v_after_1 = v0 + deltaV1;
+
+            T d1 = v0 * t1 + T(0.5) * a0 * t1 * t1
+                   + (T(1) / T(6)) * jMax * t1 * t1 * t1;
+            T d3 = v_after_1 * t3 + T(0.5) * a_peak * t3 * t3
+                   - (T(1) / T(6)) * jMax * t3 * t3 * t3;
+            return d1 + d3;
+        }
+    }
+
+    /**
+     * @brief Distance to decelerate from (v0, a0) to (v1, 0) with
+     *        jerk-bang-bang control.
+     *
+     * By time-reversal symmetry, this equals the acceleration distance
+     * from (v1, 0) to (v0, -a0).
+     */
+    static T computeDecelDistanceWithState(T v0, T a0, T v1,
+                                             T aMax, T jMax) {
+        return computeAccelDistanceWithState(v1, -a0, v0, aMax, jMax);
+    }
+
+    /**
+     * @brief Maximum velocity reachable from (v0, a0) over distance d,
+     *        carrying acceleration state.
+     *
+     * Generalizes maxVelocityAfterDistance to carry the acceleration.
+     * The optimal control is jerk-bang-bang: j = +jMax until a = aMax,
+     * then hold a = aMax. If the resulting v would exceed vMax, the
+     * function plans a jerk-limited approach that arrives at vMax with
+     * a = 0 (cruise).
+     *
+     * @param v0 Starting velocity
+     * @param a0 Starting acceleration
+     * @param distance Available distance
+     * @param vMax Velocity ceiling (from v_lim or feed rate)
+     * @param aMax Maximum acceleration
+     * @param jMax Maximum jerk
+     * @return Pair (max reachable velocity, acceleration at that velocity)
+     */
+    static std::pair<T, T> maxVelocityWithState(T v0, T a0, T distance,
+                                                  T vMax, T aMax, T jMax) {
+        if (distance <= T(0)) return {v0, a0};
+        if (v0 >= vMax) return {vMax, T(0)};
+        if (aMax <= T(0) || jMax <= T(0)) return {v0, a0};
+
+        T a0c = std::clamp(a0, -aMax, aMax);
+
+        // --- Uncapped max v1 (no vMax constraint) ---
+        T v1_uncapped, a1_uncapped;
+        if (a0c < aMax - T(1e-12)) {
+            // Phase 1: ramp from a0 to aMax
+            T t1 = (aMax - a0c) / jMax;
+            T d1 = v0 * t1 + T(0.5) * a0c * t1 * t1
+                   + (T(1) / T(6)) * jMax * t1 * t1 * t1;
+            T v_after_1 = v0 + a0c * t1 + T(0.5) * jMax * t1 * t1;
+
+            if (d1 >= distance) {
+                // Can't complete the jerk ramp — solve cubic
+                T t = solveAccelCubic(v0, a0c, jMax, distance);
+                v1_uncapped = v0 + a0c * t + T(0.5) * jMax * t * t;
+                a1_uncapped = a0c + jMax * t;
+            } else {
+                // Phase 2: constant a = aMax for remaining distance
+                T d2 = distance - d1;
+                T disc = v_after_1 * v_after_1 + T(2) * aMax * d2;
+                T t2 = (-v_after_1 + std::sqrt(std::max(disc, T(0)))) / aMax;
+                v1_uncapped = v_after_1 + aMax * t2;
+                a1_uncapped = aMax;
+            }
+        } else {
+            // a0 >= aMax — constant aMax
+            T disc = v0 * v0 + T(2) * aMax * distance;
+            T t = (-v0 + std::sqrt(std::max(disc, T(0)))) / aMax;
+            v1_uncapped = v0 + aMax * t;
+            a1_uncapped = aMax;
+        }
+
+        if (v1_uncapped <= vMax) {
+            return {v1_uncapped, a1_uncapped};
+        }
+
+        // --- v1 would exceed vMax: approach vMax with a = 0 ---
+        // Binary search for max v1 ≤ vMax such that
+        // computeAccelDistanceWithState(v0, a0, v1, aMax, jMax) ≤ distance.
+        T vLow = v0;
+        T vHigh = vMax;
+        for (int iter = 0; iter < 60; ++iter) {
+            T vMid = (vLow + vHigh) / T(2);
+            T needed = computeAccelDistanceWithState(v0, a0, vMid, aMax, jMax);
+            if (needed <= distance) {
+                vLow = vMid;
+            } else {
+                vHigh = vMid;
+            }
+        }
+        return {vLow, T(0)};
+    }
+
+    /**
+     * @brief Maximum entry velocity that allows reaching (v1, a1) over
+     *        distance d, carrying acceleration state (backward pass).
+     *
+     * By time-reversal symmetry, this is the forward problem from
+     * (v1, -a1) with negated result acceleration.
+     *
+     * @param v1 Target ending velocity
+     * @param a1 Target ending acceleration
+     * @param distance Available distance
+     * @param vMax Velocity ceiling
+     * @param aMax Maximum acceleration magnitude
+     * @param jMax Maximum jerk
+     * @return Pair (max entry velocity, entry acceleration)
+     */
+    static std::pair<T, T> maxEntryVelocityWithState(T v1, T a1, T distance,
+                                                       T vMax, T aMax,
+                                                       T jMax) {
+        auto [v0, a0_neg] = maxVelocityWithState(v1, -a1, distance,
+                                                   vMax, aMax, jMax);
+        return {v0, -a0_neg};
+    }
+
+    /**
+     * @brief Derivative of computeAccelDistance with respect to v1.
+     *
+     * WI-P1: Used by Newton's method in maxVelocityAfterDistance.
+     * The derivative is piecewise:
+     * - Triangular case (Δv ≤ 2·ΔvJerk): dd/dv1 = (3·v1 − v0) / (2·jMax·t)
+     *   where t = √(Δv / jMax)
+     * - Trapezoidal case: dd/dv1 = (v1 − ΔvJerk) / aMax + tJerk
+     */
+    static T computeAccelDistanceDerivative(T v0, T v1, T aMax, T jMax) {
+        if (v1 <= v0) return T(0);
+        T tJerk = aMax / jMax;
+        T deltaV = v1 - v0;
+        T deltaVJerk = T(0.5) * jMax * tJerk * tJerk;
+
+        if (deltaV <= T(2) * deltaVJerk) {
+            // Triangular: d = 2·v0·t + jMax·t³, t = √(Δv/jMax)
+            T t = std::sqrt(deltaV / jMax);
+            if (t < T(1e-15)) return T(0);
+            return (T(2) * v0 + T(3) * jMax * t * t) / (T(2) * jMax * t);
+        } else {
+            // Trapezoidal: dd/dv1 = (v1 − ΔvJerk) / aMax + tJerk
+            return (v1 - deltaVJerk) / aMax + tJerk;
+        }
+    }
+
     /**
      * @brief Find the maximum velocity reachable from v0 over distance d,
      *        respecting jerk-limited acceleration.
@@ -447,7 +691,9 @@ public:
      * compute the maximum v1 such that
      * computeAccelDistance(v0, v1, aMax, jMax) <= d.
      *
-     * Uses binary search (same approach as computeCruiseVelocity).
+     * WI-P1: Uses Newton's method with the analytical derivative of
+     * computeAccelDistance, converging in 2–4 iterations. Falls back to
+     * bisection if Newton diverges or goes out of bounds.
      *
      * @param v0 Starting velocity
      * @param distance Available distance
@@ -460,20 +706,42 @@ public:
                                        T aMax, T jMax) {
         if (distance <= T(0)) return v0;
         if (v0 >= vMax) return vMax;
+        if (aMax <= T(0) || jMax <= T(0)) return v0;
 
-        // Binary search for max v1 such that accelDist(v0, v1) <= distance
-        T vLow = v0;
-        T vHigh = vMax;
-        for (int iter = 0; iter < 60; ++iter) {
-            T vMid = (vLow + vHigh) / T(2);
-            T needed = computeAccelDistance(v0, vMid, aMax, jMax);
-            if (needed <= distance) {
-                vLow = vMid;
-            } else {
-                vHigh = vMid;
+        // WI-P1: Newton's method with bisection fallback.
+        // f(v1) = computeAccelDistance(v0, v1, aMax, jMax) - distance
+        // f'(v1) = computeAccelDistanceDerivative(v0, v1, aMax, jMax)
+        // We want the root of f in [v0, vMax].
+
+        // Initial guess: linear approximation (ignore jerk ramp cost).
+        T v1 = v0 + std::min(distance * aMax / (T(2) * v0 + T(1)),
+                              vMax - v0);
+        v1 = std::clamp(v1, v0, vMax);
+
+        T vLow = v0, vHigh = vMax;
+        for (int iter = 0; iter < 20; ++iter) {
+            T needed = computeAccelDistance(v0, v1, aMax, jMax);
+            T f = needed - distance;
+            T fp = computeAccelDistanceDerivative(v0, v1, aMax, jMax);
+
+            // Update bisection bracket.
+            if (f <= T(0)) vLow = v1;
+            else vHigh = v1;
+
+            if (std::abs(f) < T(1e-10) * std::max(distance, T(1))) break;
+
+            // Newton step.
+            if (fp > T(1e-15)) {
+                T vNew = v1 - f / fp;
+                if (vNew > vLow && vNew < vHigh) {
+                    v1 = vNew;
+                    continue;
+                }
             }
+            // Fallback: bisection.
+            v1 = (vLow + vHigh) / T(2);
         }
-        return vLow;
+        return std::clamp(v1, vLow, vHigh);
     }
 
 private:

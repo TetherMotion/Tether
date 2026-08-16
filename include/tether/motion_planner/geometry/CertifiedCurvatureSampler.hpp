@@ -119,6 +119,45 @@ public:
         return maxCurvature(path_.locate(s).piece);
     }
 
+    /**
+     * @brief Certified maximum curvature over the arc-length interval
+     *        [sStart, sEnd].
+     *
+     * WI-5: Iterates all spans (pieces) that intersect the interval and
+     * takes the max of their certified upper bounds. This closes the
+     * "between-sample curvature gap" — uniform arc-length sampling can
+     * skip a narrow high-curvature span entirely; this method ensures
+     * the velocity limit reflects the worst-case curvature in every
+     * interval.
+     *
+     * @param sStart Start of the interval (arc length).
+     * @param sEnd End of the interval (arc length, must be >= sStart).
+     * @return CertifiedCurvature with the max upper bound over all
+     *         intersecting spans.
+     */
+    CertifiedCurvature maxCurvatureOverInterval(double sStart,
+                                                  double sEnd) const {
+        if (sStart >= sEnd) return maxCurvatureAtArcLength(sStart);
+        // Clamp to path bounds.
+        const double total = path_.totalLength();
+        if (sStart < 0.0) sStart = 0.0;
+        if (sEnd > total) sEnd = total;
+
+        auto locStart = path_.locate(sStart);
+        auto locEnd = path_.locate(sEnd);
+
+        CertifiedCurvature result;
+        result.maxKappa = 0.0;
+        // Iterate all pieces from the start piece to the end piece.
+        for (std::size_t p = locStart.piece; p <= locEnd.piece && p < path_.numPieces(); ++p) {
+            auto cert = maxCurvature(p);
+            if (cert.maxKappa > result.maxKappa) {
+                result = cert;
+            }
+        }
+        return result;
+    }
+
     /// Number of spans actually sampled so far (laziness diagnostic).
     std::size_t spansSampled() const;
 

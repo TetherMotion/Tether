@@ -13,8 +13,15 @@ Tether provides three velocity profilers, all implementing the
 | Profiler | `ProfilerType` | Jerk-limited | Time-optimal | Accel continuity |
 |---|---|---|---|---|
 | `BasicTOPPRA` | `ToppraBasic` | No | Yes | No (bang-bang) |
-| `JerkConstrainedTOPPRA` | `ToppraJerkConstrained` | Yes | Yes (subject to jerk) | Yes |
+| `JerkConstrainedTOPPRA` | `ToppraJerkConstrained` | Yes | Approx. (subject to jerk + grid) | Yes |
 | `SCurveVelocityProfiler` | `SCurve` | Yes | No | Yes |
+
+> **Note (WI-8):** `JerkConstrainedTOPPRA` was rewritten to carry
+> acceleration as state in both passes (Option B). The total time is now
+> approximately independent of `numSamples` (previously it grew with the
+> sample count because each sample paid a full jerk-ramp-up + ramp-down
+> cost). See `docs/motion/ToppraDerivation.md` (T.5b, T.6) for the
+> derivation.
 
 All three produce a `VelocityProfile<T>` — a tabulated v(s) profile with
 per-point velocity, acceleration, jerk, and time. `MotionPlan` consumes
@@ -113,35 +120,45 @@ Third-order TOPP-RA with jerk as a first-class constraint inside the
 optimizer. This is the **recommended profiler for most applications**.
 
 The algorithm extends the basic TOPP-RA by replacing the 2nd-order
-kinematic equation $v^2 = v_0^2 + 2 \cdot a \cdot \Delta s$ with the jerk-limited distance
-function from `SCurveProfile`:
+kinematic equation $v^2 = v_0^2 + 2 \cdot a \cdot \Delta s$ with the
+**state-aware** jerk-limited distance function from `SCurveProfile`
+(WI-8 Option B):
 
 $$
-\Delta s = \text{computeAccelDistance}(v_0, v_1, a_{\max}, j_{\max})
+\Delta s = \text{computeAccelDistanceWithState}(v_0, a_0, v_1, a_{\max}, j_{\max})
 $$
 
 This function computes the exact arc length needed to change velocity
-from $v_0$ to $v_1$, accounting for the finite time required to ramp
-acceleration up and down (jerk-limited S-curve acceleration profile).
+from $v_0$ to $v_1$ starting from acceleration $a_0$, accounting for
+the finite time required to ramp acceleration up and down (jerk-bang-bang
+control). The acceleration is carried as state in both the forward and
+backward passes, so the profile does NOT force $a = 0$ at every sample
+point (unlike the pre-WI-8 implementation).
 
-The forward and backward passes use binary search
-(`maxVelocityAfterDistance`) to find the maximum velocity reachable
-within the available distance, subject to jerk limits.
+The forward and backward passes use Newton's method with bisection
+fallback (`maxVelocityAfterDistance`, WI-P1) to find the maximum
+velocity reachable within the available distance, subject to jerk
+limits. Newton converges in 2–4 iterations (vs. 60 for the previous
+binary search).
 
 ### Properties
 
-- **Time-optimal subject to jerk constraint:** Produces the fastest
-  trajectory that respects both acceleration AND jerk limits. Slightly
-  slower than basic TOPP-RA (jerk limiting costs time), but the
-  difference is typically 5-15% depending on the path.
+- **Approximately time-optimal subject to jerk constraint:** Produces a
+  fast, feasible trajectory that respects both acceleration AND jerk
+  limits. The state-carrying implementation (WI-8 Option B) makes the
+  total time approximately independent of `numSamples` (the pre-WI-8
+  implementation's time grew with `numSamples` because each sample
+  paid a full jerk-ramp-up + jerk-ramp-down cost).
 - **Continuous acceleration:** Acceleration ramps smoothly between
-  values. No step changes at switching points.
-- **Bounded jerk:** $|\text{jerk}(t)| \leq j_{\max}$ everywhere, by construction.
-  The jerk is $\pm j_{\max}$ during acceleration transitions and $0$ during
-  constant-acceleration or cruise phases.
-- **All constraints verified:** Velocity, acceleration, curvature, and
-  per-axis limits are all checked at every sample point during the
-  optimization. The output is guaranteed feasible.
+  values. No step changes at switching points (jerk-limited smoothing
+  pass enforces $|\Delta a / \Delta t| \leq j_{\max}$).
+- **Bounded jerk:** $|\text{jerk}(t)| \leq j_{\max}$ everywhere, by
+  construction. The jerk is computed from the acceleration change over
+  time and reported truthfully (WI-3: not clamped).
+- **All constraints verified:** Velocity, acceleration, curvature,
+  per-axis velocity/acceleration/jerk limits (WI-2), and junction
+  velocity at tangent discontinuities (WI-4) are all checked. The
+  output is guaranteed feasible.
 - **No post-hoc smoothing:** Jerk is constrained *inside* the optimizer,
   not filtered afterward. This preserves both feasibility and optimality.
 

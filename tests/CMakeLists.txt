@@ -258,6 +258,7 @@ set(MOTION_PLANNER_INTEGRATION_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/PHFastPathTest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/DebugSCurveTest2.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/AnalyticalTOPPRATest.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/ToppraAuditTest.cpp"
 )
 # NOTE: MotionPlannerIntegrationTest.cpp removed — it tested the old
 # PiecewiseBezierPath/PathBuilder/CornerAnalyzer stack.

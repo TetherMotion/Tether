@@ -24,6 +24,7 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <optional>
 
 namespace MotionPlanner {
@@ -62,7 +63,9 @@ public:
      * @param endVelocity Target final velocity (default: 0)
      * @param numSamples Number of sample points along path
      * @param startAcceleration Initial acceleration (default: 0) - Required for replanning from moving state
-     * @param startJerk Initial jerk (default: 0) - Required for replanning from moving state
+     * @param startJerk Initial jerk (default: 0) - Ignored; basic TOPP-RA has
+     *                 unbounded jerk (2nd-order profiler). Accepted only for
+     *                 interface compatibility with jerk-limited profilers.
      * @return Computed velocity profile
      */
     Profile computeProfile(const Path& path,
@@ -72,11 +75,19 @@ public:
                            size_t numSamples = 100,
                            T startAcceleration = T(0),
                            T startJerk = T(0)) override {
+        (void)startJerk; // WI-6.4: ignored — basic TOPP-RA has unbounded jerk.
         Profile profile;
 
         if (path.numSegments() == 0) {
             return profile;
         }
+
+        // WI-1: Validate inputs — degenerate configs must return an empty
+        // (or all-rest) profile, never NaN or a velocity jump.
+        if (numSamples < 2) return profile;          // ds would divide by 0
+        if (feedRate <= T(0)) return profile;         // no motion commanded
+        if (limits_.path.maxPathAcceleration <= T(0)) return profile;
+        if (limits_.path.maxCentripetalAcceleration < T(0)) return profile;
 
         T pathLength = path.totalLength();
         if (pathLength <= T(0)) {
@@ -111,6 +122,7 @@ public:
             auto eval = path.evaluateAtArcLength(s);
             samples[i].position = eval.position;
             samples[i].tangent = eval.tangent;
+            samples[i].segmentIndex = eval.segmentIndex;
 
             // --- PH fast path (Phase 5.4) -------------------------------
             // If the current piece has PHData, use the closed-form
@@ -152,9 +164,38 @@ public:
         }
 
         // Compute velocity limit curve (from curvature and feed rate)
+        // WI-5: Use interval-max curvature to close the between-sample
+        // curvature gap. For each sample, query the certified sampler for
+        // the max curvature over the surrounding interval [s_{i-1}, s_{i+1}].
+        // This ensures narrow high-curvature spans between uniform samples
+        // are reflected in v_lim.
         std::vector<T> velocityLimit(numSamples);
         for (size_t i = 0; i < numSamples; ++i) {
-            velocityLimit[i] = computeVelocityLimit(samples[i], feedRate);
+            PathSample intervalSample = samples[i];
+            if (curvatureSampler && !path.hasPHData()) {
+                T sPrev = (i > 0) ? samples[i - 1].arcLength : samples[i].arcLength;
+                T sNext = (i + 1 < numSamples) ? samples[i + 1].arcLength : samples[i].arcLength;
+                auto cert = curvatureSampler->maxCurvatureOverInterval(
+                    static_cast<double>(sPrev), static_cast<double>(sNext));
+                intervalSample.curvature = static_cast<T>(cert.maxKappa);
+            }
+            velocityLimit[i] = computeVelocityLimit(intervalSample, feedRate);
+        }
+
+        // WI-4: Junction velocity at piece boundaries with tangent
+        // discontinuity (exact path mode — no blending). When two adjacent
+        // samples cross a piece boundary with a tangent discontinuity,
+        // force v = 0 at the boundary (exact-stop semantics, matching
+        // LinuxCNC "exact path" mode).
+        for (size_t i = 1; i < numSamples; ++i) {
+            if (samples[i].segmentIndex != samples[i - 1].segmentIndex) {
+                T junctionVel = computeJunctionVelocity(
+                    samples[i - 1].tangent, samples[i].tangent);
+                if (junctionVel < velocityLimit[i])
+                    velocityLimit[i] = junctionVel;
+                if (junctionVel < velocityLimit[i - 1])
+                    velocityLimit[i - 1] = junctionVel;
+            }
         }
 
         // Forward pass: accelerating from start
@@ -177,7 +218,13 @@ public:
         backwardVelocity[numSamples - 1] = std::min(endVelocity, velocityLimit[numSamples - 1]);
 
         for (size_t i = numSamples - 1; i > 0; --i) {
-            T maxDecel = computeMaxAcceleration(samples[i], backwardVelocity[i]);
+            // WI-6.1: Take the min acceleration budget over both endpoints of
+            // the interval (conservative — matches the interval semantics
+            // used in WI-2/WI-5). The old code evaluated only at samples[i]
+            // (the destination), which is asymmetric with the forward pass.
+            T maxDecelEnd = computeMaxAcceleration(samples[i], backwardVelocity[i]);
+            T maxDecelStart = computeMaxAcceleration(samples[i - 1], backwardVelocity[i]);
+            T maxDecel = std::min(maxDecelEnd, maxDecelStart);
             T deltaS = samples[i].arcLength - samples[i - 1].arcLength;
 
             // v₀² = v² - 2·a·s  →  v₀ = √(v² + 2·a·s) when decelerating
@@ -224,12 +271,16 @@ public:
 
             pt.time = currentTime;
 
-            // Compute acceleration
+            // Compute acceleration (backward finite difference of the
+            // min()-combined profile).
+            // WI-6.2: removed dead `nextVel = forwardVelocity[i+1]` variable
+            //         that read the forward-pass velocity (not the final one).
+            // WI-6.3: the last point now gets an acceleration value too
+            //         (was left at 0 even during final deceleration).
             if (i == 0) {
                 pt.acceleration = startAcceleration;
-            } else if (i > 0 && i + 1 < numSamples) {
+            } else {
                 T prevVel = profile.points()[i - 1].velocity;
-                T nextVel = forwardVelocity[i + 1];  // Estimate
                 T dt = pt.time - profile.points()[i - 1].time;
                 if (dt > MathConstants::EPSILON) {
                     pt.acceleration = (pt.velocity - prevVel) / dt;
@@ -260,6 +311,7 @@ private:
         Vec<Dim, T> position;
         Vec<Dim, T> tangent;
         T curvature = T(0);
+        size_t segmentIndex = 0;
     };
 
     /**
@@ -274,7 +326,10 @@ private:
         T limit = feedRate;
 
         // Curvature limit: v² · κ ≤ a_centripetal
-        if (sample.curvature > MathConstants::EPSILON) {
+        // WI-1: guard against negative maxCentripetalAcceleration (would
+        // produce NaN from sqrt of a negative number).
+        if (sample.curvature > MathConstants::EPSILON &&
+            limits_.path.maxCentripetalAcceleration > T(0)) {
             T curvatureLimit = std::sqrt(
                 limits_.path.maxCentripetalAcceleration / sample.curvature);
             limit = std::min(limit, curvatureLimit);
@@ -296,6 +351,23 @@ private:
     T computeMaxAcceleration(const PathSample& sample, T currentVelocity) const {
         return limits_.maxAccelerationForDirection(
             sample.tangent, sample.curvature, currentVelocity);
+    }
+
+    /// WI-4: Compute junction velocity at a tangent discontinuity.
+    /// Currently implements exact-stop semantics (v = 0 at corners),
+    /// matching LinuxCNC "exact path" mode.
+    T computeJunctionVelocity(const Vec<Dim, T>& tPrev,
+                                const Vec<Dim, T>& tCur) const {
+        T dot = T(0);
+        for (size_t i = 0; i < Dim; ++i) dot += tPrev[i] * tCur[i];
+        dot = std::clamp(dot, T(-1), T(1));
+        T angle = std::acos(dot);
+        if (angle < T(1e-6)) {
+            // Tangents are parallel — no junction.
+            return std::numeric_limits<T>::infinity();
+        }
+        // Exact-stop: velocity must be zero at the corner.
+        return T(0);
     }
 
     Limits limits_;
