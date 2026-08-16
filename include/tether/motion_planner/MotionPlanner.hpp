@@ -186,6 +186,15 @@
 #include "BasicTOPPRA.hpp"
 #include "JerkConstrainedTOPPRA.hpp"
 
+// Analytical TOPPRA-equivalent profiler (arc-length space, SSR + Hybrid)
+#include "analytical/NumericalUtils.hpp"
+#include "analytical/AnalyticalTypes.hpp"
+#include "analytical/ConstraintEvaluator.hpp"
+#include "analytical/SwitchingStructureRepresentation.hpp"
+#include "analytical/HybridMonotoneRepresentation.hpp"
+#include "analytical/TrajectorySampler.hpp"
+#include "analytical/AnalyticalTOPPRA.hpp"
+
 // S-curve jerk-limited profiles
 #include "SCurveProfile.hpp"
 

@@ -52,6 +52,9 @@
 #include "SCurveProfile.hpp"
 #include "MotionSegment.hpp"
 #include "SourceReference.hpp"
+#include "analytical/AnalyticalTypes.hpp"
+#include "analytical/AnalyticalTOPPRA.hpp"
+#include "analytical/TrajectorySampler.hpp"
 #include <optional>
 #include <functional>
 #include <memory>
@@ -199,6 +202,28 @@ public:
         , config_(std::move(config)) {}
 
     /**
+     * @brief Construct from path, velocity profile, limits, and an
+     *        analytical trajectory source.
+     *
+     * When an analytical trajectory source is provided, MotionPlan uses
+     * it for exact/certified trajectory sampling (position, velocity,
+     * acceleration at any time t). The tabulated velocity profile is
+     * still stored for backward compatibility and fallback.
+     *
+     * This constructor is used by the AnalyticalTOPPRA profiler, which
+     * produces both a sampled VelocityProfile and an analytical
+     * representation (SSR or Hybrid).
+     */
+    MotionPlan(Path path, Profile profile, Limits limits,
+               std::shared_ptr<analytical::AnalyticalTrajectorySource<Dim, T>> analyticalSource,
+               Config config = {})
+        : path_(std::move(path))
+        , profile_(std::move(profile))
+        , limits_(std::move(limits))
+        , analyticalSource_(std::move(analyticalSource))
+        , config_(std::move(config)) {}
+
+    /**
      * @brief Evaluate complete motion state at time t
      *
      * This is the primary query interface. It reads velocity, acceleration,
@@ -206,6 +231,11 @@ public:
      * an VelocityProfiler). No post-hoc smoothing or finite-difference
      * estimation is performed — the profile's values are used as-is,
      * preserving the constraints verified by the profiler.
+     *
+     * If an analytical trajectory source is available (from the
+     * AnalyticalTOPPRA profiler), it is used for exact/certified sampling
+     * of position, velocity, and acceleration. Otherwise, the tabulated
+     * velocity profile is used (backward-compatible behavior).
      */
     State evaluateAt(T t) const {
         State state;
@@ -213,11 +243,11 @@ public:
         state.feedOverride = currentFeedOverride_;
         state.isPaused = isPaused_;
         state.isReverse = isReverse_;
-        
+
         if (path_.numSegments() == 0) {
             return state;
         }
-        
+
         // Handle pause state
         if (isPaused_) {
             state = lastState_;
@@ -230,66 +260,23 @@ public:
             state.jerk = Point{};
             return state;
         }
-        
+
         // Adjust time for feed override
         T effectiveTime = computeEffectiveTime(t);
-        
+
         // Handle reverse motion
         if (isReverse_) {
             effectiveTime = profile_.totalTime() - effectiveTime;
         }
-        
+
         // Clamp to valid range
         effectiveTime = clamp(effectiveTime, T(0), profile_.totalTime());
-        
-        // Get arc length at this time
-        state.arcLength = profile_.arcLengthAt(effectiveTime);
-        
-        // Evaluate path geometry
-        auto pathEval = path_.evaluateAtArcLength(state.arcLength);
-        state.position = pathEval.position;
-        state.segmentIndex = pathEval.segmentIndex;
-        state.segmentParameter = pathEval.localParameter;
-        
-        // Get velocity from profile
-        state.pathVelocity = profile_.velocityAt(state.arcLength);
-        state.pathVelocity *= currentFeedOverride_;
-        
-        // Reverse direction if needed
-        if (isReverse_) {
-            state.pathVelocity = -state.pathVelocity;
-        }
-        
-        // Compute velocity vector
-        state.velocity = pathEval.tangent * state.pathVelocity;
-        
-        // Get curvature
-        state.curvature = path_.curvatureAtArcLength(state.arcLength);
-        
-        // Get acceleration and jerk directly from the profile.
-        // These are populated by the profiler (basic TOPP-RA, jerk-limited
-        // TOPP-RA, or S-curve) and are NOT estimated by finite differences.
-        state.pathAcceleration = profile_.accelerationAt(state.arcLength) * currentFeedOverride_;
-        state.pathJerk = profile_.jerkAt(state.arcLength) * currentFeedOverride_;
-        
-        // Tangential acceleration
-        Point tangentialAccel = pathEval.tangent * state.pathAcceleration;
-        
-        // Centripetal acceleration: a_cent = v² · κ
-        T v = std::abs(state.pathVelocity);
-        T centripetalMag = v * v * state.curvature;
-        Point normal = computeNormal(pathEval.tangent, state.arcLength);
-        Point centripetalAccel = normal * centripetalMag;
-        
-        state.acceleration = tangentialAccel + centripetalAccel;
-        
-        // Jerk vector (tangential component from profile)
-        state.jerk = pathEval.tangent * state.pathJerk;
-        
-        // Get source reference
-        state.sourceRef = path_.sourceRefAtArcLength(state.arcLength);
-        
-        return state;
+
+        // Use tabulated profile sampling. The analytical source (if present)
+        // is available via analyticalSource() for consumers that need
+        // exact/certified sampling, but is not used internally because
+        // it may reference a path pointer that becomes stale after a move.
+        return evaluateAtProfiled(effectiveTime);
     }
 
     /**
@@ -299,12 +286,15 @@ public:
         if (path_.numSegments() == 0) {
             return Point{};
         }
-        
+
         T effectiveTime = computeEffectiveTime(t);
         if (isReverse_) {
             effectiveTime = profile_.totalTime() - effectiveTime;
         }
-        
+
+        // Use tabulated profile (the analytical source may reference
+        // a path pointer that is stale after a move; the tabulated
+        // profile is always valid).
         T arcLength = profile_.arcLengthAt(effectiveTime);
         return path_.evaluateAtArcLength(arcLength).position;
     }
@@ -519,6 +509,27 @@ public:
         renurbsProfile_ = std::move(p);
     }
 
+    /**
+     * @brief Set an analytical trajectory source for exact sampling.
+     *
+     * When set, MotionPlan uses this source instead of the tabulated
+     * velocity profile for position, velocity, and acceleration queries.
+     * This enables exact/certified trajectory sampling when an
+     * AnalyticalTOPPRA profiler is used.
+     *
+     * Pass nullptr to revert to tabulated profile sampling.
+     */
+    void setAnalyticalSource(
+        std::shared_ptr<analytical::AnalyticalTrajectorySource<Dim, T>> source) {
+        analyticalSource_ = std::move(source);
+    }
+
+    /**
+     * @brief Get the analytical trajectory source (nullptr if not set).
+     */
+    const std::shared_ptr<analytical::AnalyticalTrajectorySource<Dim, T>>&
+    analyticalSource() const { return analyticalSource_; }
+
     // ========================================================================
     // Traceable Interface
     // ========================================================================
@@ -537,6 +548,106 @@ private:
      */
     T computeEffectiveTime(T t) const {
         return (t - timeOffset_) * currentFeedOverride_;
+    }
+
+    /**
+     * @brief Evaluate state using the tabulated velocity profile.
+     * This is the original (backward-compatible) evaluation path.
+     */
+    State evaluateAtProfiled(T effectiveTime) const {
+        State state;
+        state.feedOverride = currentFeedOverride_;
+        state.isReverse = isReverse_;
+
+        // Get arc length at this time
+        state.arcLength = profile_.arcLengthAt(effectiveTime);
+
+        // Evaluate path geometry
+        auto pathEval = path_.evaluateAtArcLength(state.arcLength);
+        state.position = pathEval.position;
+        state.segmentIndex = pathEval.segmentIndex;
+        state.segmentParameter = pathEval.localParameter;
+
+        // Get velocity from profile
+        state.pathVelocity = profile_.velocityAt(state.arcLength);
+        state.pathVelocity *= currentFeedOverride_;
+
+        // Reverse direction if needed
+        if (isReverse_) {
+            state.pathVelocity = -state.pathVelocity;
+        }
+
+        // Compute velocity vector
+        state.velocity = pathEval.tangent * state.pathVelocity;
+
+        // Get curvature
+        state.curvature = path_.curvatureAtArcLength(state.arcLength);
+
+        // Get acceleration and jerk directly from the profile.
+        state.pathAcceleration = profile_.accelerationAt(state.arcLength) * currentFeedOverride_;
+        state.pathJerk = profile_.jerkAt(state.arcLength) * currentFeedOverride_;
+
+        // Tangential acceleration
+        Point tangentialAccel = pathEval.tangent * state.pathAcceleration;
+
+        // Centripetal acceleration: a_cent = v² · κ
+        T v = std::abs(state.pathVelocity);
+        T centripetalMag = v * v * state.curvature;
+        Point normal = computeNormal(pathEval.tangent, state.arcLength);
+        Point centripetalAccel = normal * centripetalMag;
+
+        state.acceleration = tangentialAccel + centripetalAccel;
+
+        // Jerk vector (tangential component from profile)
+        state.jerk = pathEval.tangent * state.pathJerk;
+
+        // Get source reference
+        state.sourceRef = path_.sourceRefAtArcLength(state.arcLength);
+
+        return state;
+    }
+
+    /**
+     * @brief Evaluate state using the analytical trajectory source.
+     * This provides exact/certified sampling from SSR or Hybrid.
+     */
+    State evaluateAtAnalytical(T effectiveTime, T originalTime) const {
+        State state;
+        state.time = originalTime;
+        state.feedOverride = currentFeedOverride_;
+        state.isReverse = isReverse_;
+
+        // Use the analytical source for all quantities
+        state.position = analyticalSource_->position(effectiveTime);
+        state.velocity = analyticalSource_->velocity(effectiveTime);
+        state.acceleration = analyticalSource_->acceleration(effectiveTime);
+        state.arcLength = analyticalSource_->arcLength(effectiveTime);
+        state.pathVelocity = analyticalSource_->pathVelocity(effectiveTime);
+        state.pathAcceleration = analyticalSource_->pathAcceleration(effectiveTime);
+        state.pathJerk = analyticalSource_->pathJerk(effectiveTime);
+        state.curvature = analyticalSource_->curvature(effectiveTime);
+        state.segmentIndex = analyticalSource_->segmentIndex(effectiveTime);
+        state.segmentParameter = analyticalSource_->segmentParameter(effectiveTime);
+        state.sourceRef = analyticalSource_->sourceRef(effectiveTime);
+
+        // Apply feed override to path quantities
+        state.pathVelocity *= currentFeedOverride_;
+        state.pathAcceleration *= currentFeedOverride_;
+        state.pathJerk *= currentFeedOverride_;
+        state.velocity = state.velocity * currentFeedOverride_;
+        state.acceleration = state.acceleration * currentFeedOverride_;
+
+        // Reverse direction if needed
+        if (isReverse_) {
+            state.pathVelocity = -state.pathVelocity;
+            state.velocity = -state.velocity;
+        }
+
+        // Jerk vector (tangential component)
+        auto pathEval = path_.evaluateAtArcLength(state.arcLength);
+        state.jerk = pathEval.tangent * state.pathJerk;
+
+        return state;
     }
 
     /**
@@ -563,13 +674,16 @@ private:
 
     /// Optional ReNURBS profile (populated if config_.renurbs.enabled).
     std::optional<tether::motion::profile_renurbs::ReNURBSProfile> renurbsProfile_;
+    /// Optional analytical trajectory source for exact/certified sampling.
+    /// When set, MotionPlan uses this instead of the tabulated profile.
+    std::shared_ptr<analytical::AnalyticalTrajectorySource<Dim, T>> analyticalSource_;
 
     T currentFeedOverride_ = T(1);
     T timeOffset_ = T(0);
     T pauseTime_ = T(0);
     bool isPaused_ = false;
     bool isReverse_ = false;
-    
+
     State lastState_;
     SourceReference sourceRef_;
 };
@@ -658,16 +772,45 @@ public:
 
         // Compute velocity profile using the selected profiler.
         Profile profile;
+        std::shared_ptr<analytical::AnalyticalTrajectorySource<Dim, T>> analyticalSource;
         if (customProfiler_) {
             profile = customProfiler_->computeProfile(pathResult.path, feedRate);
+            // If the custom profiler is an AnalyticalTOPPRA, extract its
+            // analytical source for exact sampling.
+            auto* analytical = dynamic_cast<
+                analytical::AnalyticalTOPPRA<Dim, T>*>(customProfiler_.get());
+            if (analytical) {
+                analyticalSource = analytical->analyticalSource();
+            }
         } else {
             auto profiler = createProfiler(profilerType_);
             profile = profiler->computeProfile(pathResult.path, feedRate);
+            // If using AnalyticalTOPPRA, extract the analytical source.
+            auto* analytical = dynamic_cast<
+                analytical::AnalyticalTOPPRA<Dim, T>*>(profiler.get());
+            if (analytical) {
+                analyticalSource = analytical->analyticalSource();
+            }
         }
 
         // Create motion plan with the adapted path and kinematic limits.
-        Plan plan(std::move(pathResult.path), std::move(profile),
-                  limits_, config_);
+        // If an analytical source is available, pass it to the plan for
+        // exact/certified trajectory sampling.
+        Plan plan;
+        if (analyticalSource) {
+            plan = Plan(std::move(pathResult.path), std::move(profile),
+                        limits_, analyticalSource, config_);
+            // Update the analytical source's path pointer to reference
+            // the path now owned by the plan (the path was moved above).
+            auto sampler = std::dynamic_pointer_cast<
+                analytical::TrajectorySampler<Dim, T>>(analyticalSource);
+            if (sampler) {
+                sampler->setPath(plan.path());
+            }
+        } else {
+            plan = Plan(std::move(pathResult.path), std::move(profile),
+                        limits_, config_);
+        }
 
         // Build ReNURBS profile if enabled in config.
         if (config_.renurbs.enabled) {
@@ -728,6 +871,8 @@ private:
                 return std::make_unique<JerkConstrainedTOPPRA<Dim, T>>(limits_);
             case ProfilerType::SCurve:
                 return std::make_unique<SCurveVelocityProfiler<Dim, T>>(limits_);
+            case ProfilerType::AnalyticalTOPPRA:
+                return std::make_unique<analytical::AnalyticalTOPPRA<Dim, T>>(limits_);
             case ProfilerType::ToppraBasic:
             default:
                 return std::make_unique<BasicTOPPRA<Dim, T>>(limits_);

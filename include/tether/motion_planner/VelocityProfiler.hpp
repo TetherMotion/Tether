@@ -67,6 +67,9 @@ enum class ProfilerType : uint8_t {
     ToppraJerkConstrained,
     /// Basic per-piece S-curve (jerk-limited but not time-optimal)
     SCurve,
+    /// Analytical TOPPRA-equivalent operating in arc-length space with
+    /// exact SSR and certifiable Hybrid representations (see analytical/)
+    AnalyticalTOPPRA,
 };
 
 /**
