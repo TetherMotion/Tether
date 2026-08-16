@@ -1,20 +1,27 @@
 # Velocity Profiler Selection Guide
 
-This document explains the three velocity profilers available in Tether,
+This document explains the velocity profilers available in Tether,
 their trade-offs, and when to choose each one.
 
 ---
 
 ## Overview
 
-Tether provides three velocity profilers, all implementing the
+Tether provides four velocity profilers, all implementing the
 `VelocityProfiler<Dim, T>` interface:
 
 | Profiler | `ProfilerType` | Jerk-limited | Time-optimal | Accel continuity |
 |---|---|---|---|---|
+| `ParetoTimeEnergyOptimalVelocityPlanner` | `ParetoTimeEnergy` (default) | Yes | Configurable | Yes |
 | `BasicTOPPRA` | `ToppraBasic` | No | Yes | No (bang-bang) |
 | `JerkConstrainedTOPPRA` | `ToppraJerkConstrained` | Yes | Approx. (subject to jerk + grid) | Yes |
 | `SCurveVelocityProfiler` | `SCurve` | Yes | No | Yes |
+
+> **Default:** `ParetoTimeEnergy` is the default profiler used by
+> `MotionPlanBuilder` and `MotionDispatcher` when no profiler type is
+> specified. It recovers time-optimal behavior when `w_a = 0` and smoothly
+> trades time for energy as `w_a` increases. See
+> `docs/motion/ParetoTimeEnergyOptimal.md` for the full derivation.
 
 > **Note (WI-8):** `JerkConstrainedTOPPRA` was rewritten to carry
 > acceleration as state in both passes (Option B). The total time is now
@@ -164,8 +171,10 @@ binary search).
 
 ### When to Choose
 
-- **3D printers:** The default choice. Smooth acceleration reduces
-  ringing, ghosting, and mechanical stress.
+- **3D printers:** Smooth acceleration reduces ringing, ghosting, and
+  mechanical stress. Use `ParetoTimeEnergy` (the default) with a small
+  `w_a` for a near-time-optimal but smoother profile, or
+  `ToppraJerkConstrained` for strict jerk-limited time-optimality.
 - **Extrusion systems:** Continuous acceleration means smooth pressure
   changes in the extruder, leading to consistent extrusion.
 - **When mechanical smoothness matters:** Any application where
@@ -176,8 +185,9 @@ binary search).
 
 ### When NOT to Choose
 
-- **When maximum speed is the only priority:** Use `ToppraBasic` instead.
-  The jerk-limited profiler is 5-15% slower.
+- **When maximum speed is the only priority:** Use `ToppraBasic` instead,
+  or `ParetoTimeEnergy` with `w_a = 0` (which degenerates toward the
+  time-optimal solution while still producing jerk-bounded arcs).
 - **When jerk limits are not configured:** If `jerkLimitEnabled` is false
   or `maxPathJerk` is zero, the profiler automatically falls back to
   basic TOPP-RA behavior.

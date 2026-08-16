@@ -62,6 +62,11 @@ template<size_t NumAxes, typename T> struct KinematicLimits;
 
 /// Enum identifying the profiler type (for logging/debugging).
 enum class ProfilerType : uint8_t {
+    /// Pareto time-energy-optimal planner with configurable cost
+    /// J = ∫[w_t + w_a·a²]dt (see analytical/ParetoTimeEnergyOptimalVelocityPlanner.hpp).
+    /// This is the default profiler — it recovers time-optimal behavior
+    /// when w_a = 0 and smoothly trades time for energy as w_a increases.
+    ParetoTimeEnergy,
     /// Basic 2nd-order TOPP-RA (bang-bang acceleration, no jerk limit)
     ToppraBasic,
     /// 3rd-order TOPP-RA with jerk constraints inside the optimizer
