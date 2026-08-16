@@ -131,9 +131,32 @@ TEST(KlipperExtrusionCompensation, PowerLawChangesEStepsVsLinear) {
     // Both should produce steps (the move extrudes 10 mm of filament).
     EXPECT_GT(stepsLin, 0);
     EXPECT_GT(stepsPl, 0);
-    // The power-law offset shifts E positions non-linearly, so the total
-    // step count over the move should differ from the linear case.
-    EXPECT_NE(stepsPl, stepsLin);
+
+    // The power-law offset shifts E positions non-linearly during the move,
+    // so the step pattern (intervals/counts) should differ from the linear
+    // case. With the analytical PA, the total step count may be the same
+    // (both models have offset=0 at the start and end where v=0), but the
+    // intermediate step distribution differs.
+    //
+    // Compare the E-axis step sequences: if they are identical, the PA
+    // models are not being applied differently.
+    const auto& linSeq = seqsLin[3]; // E-axis (oid=3)
+    const auto& plSeq = seqsPl[3];
+    bool sequencesDiffer = false;
+    if (linSeq.steps.size() != plSeq.steps.size()) {
+        sequencesDiffer = true;
+    } else {
+        for (size_t i = 0; i < linSeq.steps.size(); ++i) {
+            if (linSeq.steps[i].interval != plSeq.steps[i].interval ||
+                linSeq.steps[i].count != plSeq.steps[i].count ||
+                linSeq.steps[i].add != plSeq.steps[i].add) {
+                sequencesDiffer = true;
+                break;
+            }
+        }
+    }
+    EXPECT_TRUE(sequencesDiffer)
+        << "Linear and PowerLaw PA produced identical E-axis step sequences";
 }
 
 TEST(KlipperExtrusionCompensation, LinearModelReproducesClassicPA) {

@@ -30,6 +30,11 @@
 #include "tether/klipper/klippy/PressureAdvance.hpp"
 #include "tether/control/extrusion/ExtrusionPressureModels.hpp"
 #include "tether/control/extrusion/PressureFlowLut.hpp"
+#include "tether/motion_planner/analytical/extrusion/AnalyticalExtrusionTypes.hpp"
+#include "tether/motion_planner/analytical/extrusion/AnalyticalLinearPressureAdvance.hpp"
+#include "tether/motion_planner/analytical/extrusion/AnalyticalPowerLawPressureAdvance.hpp"
+#include "tether/motion_planner/analytical/extrusion/AnalyticalCrossWLFPressureAdvance.hpp"
+#include "tether/motion_planner/analytical/ParetoTimeEnergyOptimalVelocityPlanner.hpp"
 #endif
 
 #include <cstdint>
@@ -260,16 +265,22 @@ std::vector<AxisStepSequence> MotionTranslator<Dim, T>::translate(
 #if TETHER_ENABLE_PRESSURE_ADVANCE
     // Apply extrusion compensation (pressure advance) to the extruder axis.
     //
+    // Two computation paths are supported:
+    //
+    // 1. **Analytical PA** (preferred): When the MotionPlan carries a WSS
+    //    (Weighted Switching Structure) as its analytical source, closed-form
+    //    PA computation is used via the AnalyticalLinearPressureAdvance,
+    //    AnalyticalPowerLawPressureAdvance, and AnalyticalCrossWLFPressureAdvance
+    //    classes. These operate directly on the polynomial velocity arcs,
+    //    avoiding numerical sampling errors.
+    //
+    // 2. **Control-level PA** (fallback): When no WSS is available, the
+    //    classic sampled-space approach is used with inline formulas.
+    //
     // Three models are supported, selected by paConfig_.model:
     //   Linear   — classic Klipper PA: adjusted_e = e + PA * smoothed_velocity
     //   PowerLaw — position-offset: adjusted_e = e + K_base * (v_e*A_f)^n
     //   CrossWlf — position-offset: adjusted_e = e + (βV_m/A_f) * P_LUT(Q, T)
-    //
-    // The Linear path is unchanged from the original implementation. The
-    // PowerLaw/CrossWlf paths use the position-offset form (see
-    // docs/extrusion/NonNewtonianPressureAdvance.md §2), which avoids
-    // numerical differentiation and the Q→0 singularity. The smoothed
-    // extruder velocity is computed once and reused across all models.
     if (paConfig_.enabled && paConfig_.extruderAxis < Dim) {
         const size_t eAxis = paConfig_.extruderAxis;
         const double spm = axisConfigs_[eAxis].stepsPerMm;
@@ -281,65 +292,150 @@ std::vector<AxisStepSequence> MotionTranslator<Dim, T>::translate(
                                     && paConfig_.crossWlfCompressibilityOverArea > 0.0
                                     && paConfig_.lut && !paConfig_.lut->empty();
         if (linearActive || powerLawActive || crossWlfActive) {
-            // Recover raw E positions in mm (axisSteps already has
-            // invertDirection applied, so the offset is computed in the
-            // same frame).
-            std::vector<double> rawPosMm(numSamples + 1);
-            for (int i = 0; i <= numSamples; ++i)
-                rawPosMm[i] = static_cast<double>(axisSteps[eAxis][i]) / spm;
+            // Try analytical PA path first (requires WSS from the plan)
+            bool analyticalApplied = false;
+            const auto& analyticalSource = plan.analyticalSource();
+            if (analyticalSource) {
+                // Cast to WeightedSwitchingStructure for ExtrusionTrajectory
+                auto wss = std::dynamic_pointer_cast<
+                    MotionPlanner::analytical::WeightedSwitchingStructure<Dim, T>>(
+                    analyticalSource);
+                if (wss) {
+                    // Compute extrusion ratio for this move from E-axis travel
+                    // and path length.
+                    double dE = std::abs(
+                        static_cast<double>(axisSteps[eAxis][numSamples] -
+                        axisSteps[eAxis][0]) / spm);
+                    double pathLen = plan.totalLength();
+                    double extRatio = (pathLen > 1e-12) ? dE / pathLen : 0.0;
 
-            // Smooth velocity (mm/s) with a centered moving average.
-            std::vector<double> smoothedVelMm(numSamples + 1, 0.0);
-            if (paConfig_.smoothTime > 0.0) {
-                int halfWindow = std::max(1,
-                    static_cast<int>(paConfig_.smoothTime / sampleIntervalSec / 2.0));
-                for (int i = 0; i <= numSamples; ++i) {
-                    double sum = 0.0;
-                    int count = 0;
-                    for (int j = std::max(0, i - halfWindow);
-                         j <= std::min(numSamples, i + halfWindow); ++j) {
-                        sum += axisVel[eAxis][j] / spm; // steps/sec → mm/s
-                        ++count;
+                    try {
+                        using ExtrusionTrajectory =
+                            MotionPlanner::analytical::extrusion::ExtrusionTrajectory<Dim, T>;
+                        ExtrusionTrajectory traj(*wss, extRatio);
+
+                        // Sample times matching the step generation grid
+                        std::vector<double> times(numSamples + 1);
+                        for (int i = 0; i <= numSamples; ++i)
+                            times[i] = static_cast<double>(i) * sampleIntervalSec;
+
+                        std::vector<double> offsets(numSamples + 1, 0.0);
+                        if (linearActive) {
+                            MotionPlanner::analytical::extrusion::
+                                AnalyticalLinearPressureAdvanceParams params;
+                            params.pressureAdvance = paConfig_.pressureAdvance;
+                            params.smoothTime = paConfig_.smoothTime;
+                            params.maxCompensation = paConfig_.maxCompensation;
+                            MotionPlanner::analytical::extrusion::
+                                AnalyticalLinearPressureAdvance<Dim, T> pa(traj, params);
+                            offsets = pa.offsetSeries(times);
+                            analyticalApplied = true;
+                        } else if (powerLawActive) {
+                            MotionPlanner::analytical::extrusion::
+                                AnalyticalPowerLawPressureAdvanceParams params;
+                            params.baseGain = paConfig_.powerLawBaseGain;
+                            params.flowIndex = paConfig_.flowIndex;
+                            params.filamentDiameterMm = paConfig_.filamentDiameterMm;
+                            params.smoothTime = paConfig_.smoothTime;
+                            params.maxCompensation = paConfig_.maxCompensation;
+                            MotionPlanner::analytical::extrusion::
+                                AnalyticalPowerLawPressureAdvance<Dim, T> pa(traj, params);
+                            offsets = pa.offsetSeries(times);
+                            analyticalApplied = true;
+                        } else if (crossWlfActive) {
+                            MotionPlanner::analytical::extrusion::
+                                AnalyticalCrossWLFPressureAdvanceParams params;
+                            params.compressibilityOverArea =
+                                paConfig_.crossWlfCompressibilityOverArea;
+                            params.filamentDiameterMm = paConfig_.filamentDiameterMm;
+                            params.smoothTime = paConfig_.smoothTime;
+                            params.maxCompensation = paConfig_.maxCompensation;
+                            params.defaultTempC = paConfig_.meltTempC;
+                            MotionPlanner::analytical::extrusion::
+                                AnalyticalCrossWLFPressureAdvance<Dim, T> pa(
+                                    traj, paConfig_.lut, params);
+                            offsets = pa.offsetSeries(times);
+                            analyticalApplied = true;
+                        }
+
+                        if (analyticalApplied) {
+                            // Recover raw E positions in mm and apply offsets
+                            for (int i = 0; i <= numSamples; ++i) {
+                                double rawPosMm = static_cast<double>(
+                                    axisSteps[eAxis][i]) / spm;
+                                double adjustedPos = rawPosMm + offsets[i];
+                                axisSteps[eAxis][i] = static_cast<int64_t>(
+                                    std::round(adjustedPos * spm));
+                            }
+                        }
+                    } catch (const std::exception&) {
+                        analyticalApplied = false;
                     }
-                    smoothedVelMm[i] = (count > 0) ? sum / count : 0.0;
                 }
-            } else {
-                for (int i = 0; i <= numSamples; ++i)
-                    smoothedVelMm[i] = axisVel[eAxis][i] / spm;
             }
 
-            // Recompute E-axis step positions with the model's offset.
-            const double Af = M_PI * paConfig_.filamentDiameterMm *
-                              paConfig_.filamentDiameterMm / 4.0;
-            for (int i = 0; i <= numSamples; ++i) {
-                double offset = 0.0;
-                if (linearActive) {
-                    offset = paConfig_.pressureAdvance * smoothedVelMm[i];
-                } else if (powerLawActive) {
-                    const double Q = smoothedVelMm[i] * Af;
-                    if (Q > 0.0) {
-                        offset = paConfig_.powerLawBaseGain *
-                                 std::pow(Q, paConfig_.flowIndex);
-                        if (offset > paConfig_.maxCompensation)
-                            offset = paConfig_.maxCompensation;
-                        if (offset < -paConfig_.maxCompensation)
-                            offset = -paConfig_.maxCompensation;
+            // Fallback: control-level sampled-space PA
+            if (!analyticalApplied) {
+                // Recover raw E positions in mm (axisSteps already has
+                // invertDirection applied, so the offset is computed in the
+                // same frame).
+                std::vector<double> rawPosMm(numSamples + 1);
+                for (int i = 0; i <= numSamples; ++i)
+                    rawPosMm[i] = static_cast<double>(axisSteps[eAxis][i]) / spm;
+
+                // Smooth velocity (mm/s) with a centered moving average.
+                std::vector<double> smoothedVelMm(numSamples + 1, 0.0);
+                if (paConfig_.smoothTime > 0.0) {
+                    int halfWindow = std::max(1,
+                        static_cast<int>(paConfig_.smoothTime / sampleIntervalSec / 2.0));
+                    for (int i = 0; i <= numSamples; ++i) {
+                        double sum = 0.0;
+                        int count = 0;
+                        for (int j = std::max(0, i - halfWindow);
+                             j <= std::min(numSamples, i + halfWindow); ++j) {
+                            sum += axisVel[eAxis][j] / spm; // steps/sec → mm/s
+                            ++count;
+                        }
+                        smoothedVelMm[i] = (count > 0) ? sum / count : 0.0;
                     }
-                } else if (crossWlfActive) {
-                    const double Q = smoothedVelMm[i] * Af;
-                    if (Q > 0.0) {
-                        const double P = paConfig_.lut->pressure(
-                            Q, paConfig_.meltTempC);
-                        offset = paConfig_.crossWlfCompressibilityOverArea * P;
-                        if (offset > paConfig_.maxCompensation)
-                            offset = paConfig_.maxCompensation;
-                        if (offset < -paConfig_.maxCompensation)
-                            offset = -paConfig_.maxCompensation;
-                    }
+                } else {
+                    for (int i = 0; i <= numSamples; ++i)
+                        smoothedVelMm[i] = axisVel[eAxis][i] / spm;
                 }
-                double adjustedPos = rawPosMm[i] + offset;
-                axisSteps[eAxis][i] = static_cast<int64_t>(
-                    std::round(adjustedPos * spm));
+
+                // Recompute E-axis step positions with the model's offset.
+                const double Af = M_PI * paConfig_.filamentDiameterMm *
+                                  paConfig_.filamentDiameterMm / 4.0;
+                for (int i = 0; i <= numSamples; ++i) {
+                    double offset = 0.0;
+                    if (linearActive) {
+                        offset = paConfig_.pressureAdvance * smoothedVelMm[i];
+                    } else if (powerLawActive) {
+                        const double Q = smoothedVelMm[i] * Af;
+                        if (Q > 0.0) {
+                            offset = paConfig_.powerLawBaseGain *
+                                     std::pow(Q, paConfig_.flowIndex);
+                            if (offset > paConfig_.maxCompensation)
+                                offset = paConfig_.maxCompensation;
+                            if (offset < -paConfig_.maxCompensation)
+                                offset = -paConfig_.maxCompensation;
+                        }
+                    } else if (crossWlfActive) {
+                        const double Q = smoothedVelMm[i] * Af;
+                        if (Q > 0.0) {
+                            const double P = paConfig_.lut->pressure(
+                                Q, paConfig_.meltTempC);
+                            offset = paConfig_.crossWlfCompressibilityOverArea * P;
+                            if (offset > paConfig_.maxCompensation)
+                                offset = paConfig_.maxCompensation;
+                            if (offset < -paConfig_.maxCompensation)
+                                offset = -paConfig_.maxCompensation;
+                        }
+                    }
+                    double adjustedPos = rawPosMm[i] + offset;
+                    axisSteps[eAxis][i] = static_cast<int64_t>(
+                        std::round(adjustedPos * spm));
+                }
             }
         }
     }

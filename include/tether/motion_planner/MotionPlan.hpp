@@ -789,6 +789,16 @@ public:
             if (analytical) {
                 analyticalSource = analytical->analyticalSource();
             }
+            // If the custom profiler is a ParetoTimeEnergyOptimalVelocityPlanner,
+            // extract its WSS (Weighted Switching Structure) for analytical PA.
+            if (!analyticalSource) {
+                auto* pareto = dynamic_cast<
+                    analytical::ParetoTimeEnergyOptimalVelocityPlanner<Dim, T>*>(
+                    customProfiler_.get());
+                if (pareto) {
+                    analyticalSource = pareto->weightedSource();
+                }
+            }
         } else {
             auto profiler = createProfiler(profilerType_);
             profile = profiler->computeProfile(pathResult.path, feedRate);
@@ -797,6 +807,15 @@ public:
                 analytical::AnalyticalTOPPRA<Dim, T>*>(profiler.get());
             if (analytical) {
                 analyticalSource = analytical->analyticalSource();
+            }
+            // If using ParetoTimeEnergyOptimalVelocityPlanner, extract the WSS.
+            if (!analyticalSource) {
+                auto* pareto = dynamic_cast<
+                    analytical::ParetoTimeEnergyOptimalVelocityPlanner<Dim, T>*>(
+                    profiler.get());
+                if (pareto) {
+                    analyticalSource = pareto->weightedSource();
+                }
             }
         }
 
