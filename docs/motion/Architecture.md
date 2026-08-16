@@ -63,9 +63,9 @@ PiecewiseNurbsPath  (lazy arc length, certified derivatives)
     ▼
 BlendedPath  (new piece sequence + audit trail)
     │
-    │  IVelocityProfiler::computeProfile (Phase 5)
-    │   ├─ VelocityProfiler        (ToppraBasic: 2nd-order, bang-bang)
-    │   ├─ JerkConstrainedVelocityProfiler (ToppraJerkConstrained: 3rd-order)
+    │  VelocityProfiler::computeProfile (Phase 5)
+    │   ├─ BasicTOPPRA            (ToppraBasic: 2nd-order, bang-bang)
+    │   ├─ JerkConstrainedTOPPRA (ToppraJerkConstrained: 3rd-order)
     │   └─ SCurveVelocityProfiler  (SCurve: per-piece S-curves)
     ▼
 VelocityProfile  (tabulated v(s) with accel + jerk)

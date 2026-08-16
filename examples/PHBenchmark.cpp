@@ -13,7 +13,7 @@
 #include <tether/motion_planner/MotionPlanner.hpp>
 #include <tether/motion_planner/MotionSegment.hpp>
 #include <tether/motion_planner/blend/BlendSpec.hpp>
-#include <tether/motion_planner/VelocityProfile.hpp>
+#include <tether/motion_planner/BasicTOPPRA.hpp>
 #include <tether/motion_planner/MotionPlan.hpp>
 
 #include <chrono>
@@ -64,7 +64,7 @@ PlanTiming planWith(const MotionSegmentList& segments,
     timing.blendMs = duration_cast<microseconds>(t1 - t0).count() / 1000.0;
 
     KinematicLimits<2, double> limits;
-    VelocityProfiler<2, double> profiler(limits);
+    BasicTOPPRA<2, double> profiler(limits);
     auto profile = profiler.computeProfile(pathResult.path, 100.0,
                                            0.0, 0.0, numProfileSamples);
 

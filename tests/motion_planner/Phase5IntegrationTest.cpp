@@ -72,7 +72,7 @@ MotionPlan2D buildPlanWithCurveType(
         return MotionPlan2D{};
     }
 
-    VelocityProfiler<2, double> profiler(limits);
+    BasicTOPPRA<2, double> profiler(limits);
     // Use a small number of profile samples to keep the test fast
     // (the CertifiedCurvatureSampler is expensive on blend curves).
     auto profile = profiler.computeProfile(pathResult.path, feedrate,

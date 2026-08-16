@@ -21,8 +21,8 @@ Path2D createLinearPath(double length) {
     return path;
 }
 
-TEST(VelocityProfilerTest, InitialAcceleration) {
-    VelocityProfiler2D profiler;
+TEST(BasicTOPPRATest, InitialAcceleration) {
+    BasicTOPPRA2D profiler;
     auto path = createLinearPath(100.0);
     double feedRate = 50.0;
     
@@ -48,9 +48,9 @@ TEST(VelocityProfilerTest, InitialAcceleration) {
     EXPECT_EQ(profileDefault.points()[0].acceleration, 0.0);
 }
 
-TEST(VelocityProfilerTest, InitialJerkArgument) {
+TEST(BasicTOPPRATest, InitialJerkArgument) {
     // Just verify the argument is accepted and doesn't crash
-    VelocityProfiler2D profiler;
+    BasicTOPPRA2D profiler;
     auto path = createLinearPath(100.0);
     
     auto profile = profiler.computeProfile(

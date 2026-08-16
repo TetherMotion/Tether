@@ -5,6 +5,7 @@
 
 #include "tether/motion_replanner/ProfileReplanner.hpp"
 #include "tether/motion_planner/geometry/NurbsCurve.hpp"
+#include "tether/motion_planner/BasicTOPPRA.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -50,7 +51,7 @@ ProfileReplanResult runProfiler(
 
     MotionPlanner::PathAdapter<Dim, double> adapter(path);
     auto kl = toKinematicLimits<Dim>(limits);
-    MotionPlanner::VelocityProfiler<Dim, double> profiler(kl);
+    MotionPlanner::BasicTOPPRA<Dim, double> profiler(kl);
 
     // feedRate is in mm/min; the profiler expects mm/s.
     double feedRateMmPerSec = feedRate / 60.0;
