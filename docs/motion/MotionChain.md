@@ -42,7 +42,7 @@ system.
 │  4. Velocity Profiling                                      (host)   │
 │  VelocityProfiler::computeProfile() → VelocityProfile               │
 │  Output: time-parameterized v(s) profile with accel + jerk           │
-│  Choice: ToppraBasic | ToppraJerkConstrained | SCurve                   │
+│  Choice: ToppraBasic | ToppraJerkConstrained | SCurve | AnalyticalTOPPRA │
 └──────────────────────────┬──────────────────────────────────────────┘
                            │
                            ▼
@@ -56,7 +56,8 @@ system.
 ┌──────────────────────────────────────────────────────────────────────┐
 │  6. Motion Translation                                      (host)   │
 │  MotionTranslator::translate() → AxisStepSequence[]                  │
-│  Applies: kinematics transform, pressure advance, step rounding      │
+│  Applies: kinematics transform, step rounding                        │
+│           + pressure advance / extrusion compensation (if applicable) │
 │  Output: per-axis queue_step command sequences                       │
 └──────────────────────────┬──────────────────────────────────────────┘
                            │
@@ -237,6 +238,7 @@ per-point velocity, acceleration, jerk, and time.
 | `BasicTOPPRA<Dim,T>` | `include/tether/motion_planner/BasicTOPPRA.hpp` | Standard TOPP-RA (no jerk limit) |
 | `JerkConstrainedTOPPRA<Dim,T>` | `include/tether/motion_planner/JerkConstrainedTOPPRA.hpp` | Jerk-integrated TOPP-RA |
 | `SCurveVelocityProfiler<Dim,T>` | `include/tether/motion_planner/SCurveVelocityProfiler.hpp` | Basic per-piece S-curve |
+| `analytical::AnalyticalTOPPRA<Dim,T>` | `include/tether/motion_planner/analytical/AnalyticalTOPPRA.hpp` | Analytical TOPPRA with SSR/Hybrid representations |
 | `VelocityProfile<T>` | `include/tether/motion_planner/VelocityProfile.hpp` | Profile data structure + queries |
 
 **What Happens:**
@@ -271,6 +273,11 @@ three profilers and when to choose each.
 | `ToppraBasic` | Maximum speed, stiff machine, jerk handled downstream |
 | `ToppraJerkConstrained` | **Default for 3D printing** — smooth + time-optimal |
 | `SCurve` | Simplicity, testing, when time-optimality doesn't matter |
+| `AnalyticalTOPPRA` | Certified trajectory with SSR/Hybrid representations, exact sampling |
+
+See [Analytical TOPPRA](AnalyticalTOPPRA.md) for details on the
+analytical profiler and its Switching Structure Representation (SSR)
+and Hybrid Monotone + Exact Composition representations.
 
 ---
 
@@ -358,23 +365,74 @@ command sequences ready for the MCU.
    - `interval`: clock ticks per step
    - `count`: number of steps in this group
    - `add`: interval change per step (for acceleration)
-5. **Apply pressure advance** to the extruder axis (see below).
+5. **Apply pressure advance / extrusion compensation** to the extruder
+   axis, *if applicable* (see below).
 6. **Emit per-axis sequences** tagged with the start clock.
 
-**Pressure Advance Integration:**
+**Pressure Advance / Extrusion Compensation (if applicable):**
 
-The `MotionTranslator` applies pressure advance (PA) to the extruder
-axis during step generation. Three models are supported:
+Pressure advance (PA) is an *optional* extrusion-compensation stage
+applied to the extruder (E) axis during step generation. It is **not
+part of the core motion pipeline** — it is applied only when all of the
+following conditions are met:
+
+1. **Compile-time gate:** Tether is built with
+   `-DTETHER_ENABLE_PRESSURE_ADVANCE=ON` (default: ON). When compiled
+   out, the `PressureAdvanceConfig` struct and all PA code paths are
+   absent from the binary, with zero overhead.
+2. **Runtime enable:** `PressureAdvanceConfig::enabled` is `true`
+   (default: `false`). This can be toggled at runtime via G-code
+   (`M900` / `SET_PRESSURE_ADVANCE`) or the
+   `MotionDispatcher::setPressureAdvanceConfig()` API.
+3. **Non-zero gain:** The selected model's effective gain is non-zero
+   (e.g. `pressureAdvance > 0` for Linear, `powerLawBaseGain > 0` for
+   PowerLaw, etc.). With zero gain, PA is a no-op even if enabled.
+4. **Extruder axis present:** The move involves the configured extruder
+   axis (default: axis index 3 = E). Non-extrusion moves (travel moves)
+   are never compensated.
+
+When all conditions are satisfied, the `MotionTranslator` applies a
+position offset `δe` to the extruder axis, advancing or retracting the
+extruder to compensate for pressure lag in the Bowden tube or hotend.
+Three compensation models are supported:
 
 | Model | Formula | When to Use |
 |---|---|---|
 | Linear (classic) | `δe = PA · v_e` | Standard PA, works for most filaments |
-| PowerLaw | `δe = K · (v_e · A_f)^n` | Non-Newtonian filaments (PETG, TPU) |
-| Cross-WLF | `δe = f(Q, T) · v_e` | Temperature-dependent rheology |
+| PowerLaw | `δe = K_base · (v_e · A_f)^n` | Non-Newtonian filaments (PETG, TPU) |
+| Cross-WLF | `δe = (βV_m/A_f) · P_LUT(Q, T)` | Temperature-dependent rheology |
 
-PA is applied as a position offset on the extruder axis, advancing or
-retracting the extruder to compensate for pressure lag in the Bowden
-tube or hotend.
+**Configuration:**
+
+```cpp
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+PressureAdvanceConfig pa;
+pa.enabled = true;
+pa.pressureAdvance = 0.045;       // 45 ms linear PA
+pa.smoothTime = 0.02;             // 20 ms smoothing window
+pa.extruderAxis = 3;              // E axis
+pa.model = ExtrusionCompensationModel::Linear;  // or PowerLaw, CrossWlf
+
+translator.setPressureAdvanceConfig(pa);
+#endif
+```
+
+**Key Classes:**
+
+| Class | File | Role |
+|---|---|---|
+| `PressureAdvanceConfig` | `include/tether/klipper/motion/MotionTranslator.hpp` | PA configuration (model, gain, smoothing) |
+| `ExtrusionCompensationModel` | same file | Enum: `Linear`, `PowerLaw`, `CrossWlf` |
+| `MotionTranslator` | same file | Applies PA offset during step generation |
+| `MotionDispatcher` | `include/tether/klipper/motion/MotionDispatcher.hpp` | Runtime PA config updates from G-code |
+
+**Smoothing:** When `smoothTime > 0`, the extruder velocity is
+EWMA-smoothed before computing the PA offset. This reduces discontinuities
+at the start/end of extrusion moves. The smoothing window should be
+≤ the `MotionTranslator` sample interval × number of samples.
+
+**Safety clamp:** `maxCompensation` (default: 0.5 mm) limits the absolute
+PA offset to prevent runaway compensation on non-Newtonian models.
 
 ---
 
@@ -424,10 +482,14 @@ callbacks.
 
 ---
 
-## Extrusion Compensation (Cross-Cutting)
+## Extrusion Compensation (Cross-Cutting, if applicable)
 
 Extrusion compensation is not a sequential step in the pipeline but
-rather a cross-cutting concern that touches multiple stages:
+rather a cross-cutting concern that touches multiple stages. All
+extrusion-compensation features are **opt-in** — they apply only when
+explicitly enabled and configured. When disabled (the default), the
+motion pipeline behaves as a pure Cartesian/kinematics step generator
+with no extrusion-specific processing.
 
 ```
                     ┌─────────────────────────┐
@@ -440,8 +502,8 @@ rather a cross-cutting concern that touches multiple stages:
     ▼                        ▼                        ▼
 Step 4: Profiling      Step 6: Translation     Flow-Adaptive Heater
 (curvature limits      (pressure advance       (feed-forward temperature
- affect extruder       offset on E axis)       based on instantaneous
- velocity)                                      flow rate)
+ affect extruder       offset on E axis,       based on instantaneous
+ velocity)             if applicable)          flow rate, if enabled)
 ```
 
 **ExtrusionFlowTracker** (`include/tether/klipper/motion/ExtrusionFlowTracker.hpp`):
@@ -449,17 +511,19 @@ Step 4: Profiling      Step 6: Translation     Flow-Adaptive Heater
 - Provides instantaneous and EWMA-smoothed flow rate
 - Used by the flow-adaptive heater controller for feed-forward
 
-**Pressure Advance** (in `MotionTranslator`):
+**Pressure Advance** (in `MotionTranslator`, if applicable):
 - Three models: Linear, PowerLaw, Cross-WLF
 - Applied as a position offset on the extruder axis
 - Compensates for pressure lag in the Bowden tube / hotend
+- See [Step 6: Pressure Advance / Extrusion Compensation](#step-6-motion-translation)
+  for the full conditional application rules
 
-**Flow-Adaptive Heater** (`include/tether/control/extrusion/`):
+**Flow-Adaptive Heater** (`include/tether/control/extrusion/`, if enabled):
 - Three-state thermal model (heater block → sensor → melt zone)
 - Luenberger observer corrects state estimate from thermistor reading
 - Feed-forward uses flow rate from `ExtrusionFlowTracker`
 
-**Deconvolution Controllers** (`include/tether/control/extrusion/`):
+**Deconvolution Controllers** (`include/tether/control/extrusion/`, if enabled):
 - Four controllers for extrusion feedforward compensation:
   - `LTIFrequencyDomainDeconvolver` — Baseline spectral deconvolution
   - `OverlapAddLPVDeconvolver` — Gain-scheduled overlap-add
@@ -519,6 +583,18 @@ translatorConfig.clockFrequency = 32000000;  // 32 MHz MCU clock
 translatorConfig.sampleInterval = 0.001;     // 1ms sampling
 
 MotionTranslator<2, double> translator(translatorConfig);
+
+// Pressure advance (if applicable — opt-in, disabled by default)
+#if TETHER_ENABLE_PRESSURE_ADVANCE
+PressureAdvanceConfig pa;
+pa.enabled = true;                // Runtime enable
+pa.pressureAdvance = 0.045;       // 45 ms linear PA
+pa.smoothTime = 0.02;             // 20 ms smoothing window
+pa.extruderAxis = 3;              // E axis
+pa.model = ExtrusionCompensationModel::Linear;
+translator.setPressureAdvanceConfig(pa);
+#endif
+
 auto stepSequences = translator.translate(plan);
 
 std::println("Generated {} step sequences", stepSequences.size());
@@ -595,6 +671,7 @@ See `docs/MotionReplanner.md` for details.
 | Document | Scope |
 |---|---|
 | [Velocity Profiler Selection](VelocityProfilerSelection.md) | Choosing between ToppraBasic, ToppraJerkConstrained, and SCurve |
+| [Analytical TOPPRA](AnalyticalTOPPRA.md) | Analytical TOPPRA-equivalent profiler with SSR/Hybrid representations |
 | [Architecture](Architecture.md) | Motion planner layer architecture and class hierarchy |
 | [BlendingAlgorithm.md](BlendingAlgorithm.md) | Corner blending math (M11-M20, T1-T3) |
 | [GeometryFoundations.md](GeometryFoundations.md) | NURBS geometry core math |
