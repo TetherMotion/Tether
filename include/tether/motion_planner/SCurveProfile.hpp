@@ -483,17 +483,37 @@ public:
      *        jerk-bang-bang control, |a| ≤ aMax, |j| ≤ jMax.
      *
      * Generalizes computeAccelDistance to handle non-zero initial
-     * acceleration. The trajectory consists of up to 3 phases:
-     * 1. Jerk ramp: j = +jMax, a goes from a0 to aMax (or a_peak)
-     * 2. Constant accel: a = aMax (trapezoidal case only)
-     * 3. Jerk ramp: j = -jMax, a goes from aMax (or a_peak) to 0
+     * acceleration.
+     *
+     * **WI-8b.1 — Feasibility domain (a0 > 0):**
+     * When a0 > 0, the acceleration must be shed to 0 before the velocity
+     * reaches v1. Shedding a0 (ramping a from a0 to 0 with j = −jMax)
+     * mandatorily gains Δv_shed = a0²/(2·jMax) of velocity. If
+     * Δv = v1 − v0 < Δv_shed, reaching (v1, a = 0) is physically
+     * impossible — shedding a0 alone overshoots v1. In that case the
+     * function returns infinity (infeasible), so the binary search in
+     * maxVelocityWithState degrades to v0 instead of producing a
+     * garbage finite distance that implies infinite jerk.
+     *
+     * For the feasible regime (Δv ≥ Δv_shed), the distance-minimal
+     * *feasible* control sheds a0 first (j = −jMax, a: a0 → 0), then
+     * solves the a0 = 0 problem (computeAccelDistance) from
+     * (v0 + Δv_shed, 0) to (v1, 0) for the remainder. This is slightly
+     * more conservative than the "ramp up to aMax first" structure (which
+     * is only valid for Δv ≥ (aMax²−a0²)/(2j) + aMax²/(2j)), but it is
+     * always feasible and never produces negative phase times.
+     *
+     * For a0 ≤ 0, the existing triangular/trapezoidal structure is
+     * correct (t1 = (a_peak − a0)/jMax > 0 always since a_peak ≥ 0 ≥ a0),
+     * so it is retained.
      *
      * @param v0 Starting velocity
      * @param a0 Starting acceleration (may be non-zero, clamped to [-aMax, aMax])
      * @param v1 Ending velocity (must be >= v0)
      * @param aMax Maximum acceleration magnitude
      * @param jMax Maximum jerk magnitude
-     * @return Distance required for the velocity change
+     * @return Distance required for the velocity change, or infinity if
+     *         (v1, a = 0) is unreachable from (v0, a0) under the jerk bound
      */
     static T computeAccelDistanceWithState(T v0, T a0, T v1,
                                              T aMax, T jMax) {
@@ -504,6 +524,25 @@ public:
         a0 = std::clamp(a0, -aMax, aMax);
         T deltaV = v1 - v0;
 
+        if (a0 > T(0)) {
+            // WI-8b.1: shed a0 first (j = -jMax, a: a0 → 0).
+            // Mandatory velocity gain: Δv_shed = a0²/(2·jMax).
+            T deltaVShed = a0 * a0 / (T(2) * jMax);
+            if (deltaV < deltaVShed - T(1e-12)) {
+                // Infeasible: shedding a0 alone overshoots v1.
+                return std::numeric_limits<T>::infinity();
+            }
+            // Phase A: ramp a from a0 to 0 with j = -jMax.
+            T tA = a0 / jMax;
+            T dA = v0 * tA + T(0.5) * a0 * tA * tA
+                   - (T(1) / T(6)) * jMax * tA * tA * tA;
+            T vA = v0 + deltaVShed;
+            // Phase B: solve the a0 = 0 problem from (vA, 0) to (v1, 0).
+            T dB = computeAccelDistance(vA, v1, aMax, jMax);
+            return dA + dB;
+        }
+
+        // a0 ≤ 0: existing triangular/trapezoidal structure (t1 > 0 always).
         // Velocity gain in phase 1 (ramp a0 → aMax): (aMax² − a0²)/(2·jMax)
         T deltaV1_trap = (aMax * aMax - a0 * a0) / (T(2) * jMax);
         // Velocity gain in phase 3 (ramp aMax → 0): aMax²/(2·jMax)
@@ -566,6 +605,19 @@ public:
      * function plans a jerk-limited approach that arrives at vMax with
      * a = 0 (cruise).
      *
+     * **WI-8b.2 — Shed-acceleration ceiling constraint:**
+     * A returned state (v1, a1) with a1 > 0 is only feasible w.r.t. the
+     * ceiling if the acceleration can be shed before v exceeds vMax:
+     *   a1² / (2·jMax) ≤ vMax − v1
+     * (the LHS is the velocity gained while ramping a from a1 to 0 with
+     * j = −jMax). If the uncapped result violates this, the function
+     * finds the point where the trajectory crosses the shed boundary
+     * (v + a²/(2·jMax) = vMax) and follows the boundary (j = −jMax)
+     * for the remaining distance. This makes ceiling arrival tangent
+     * (a → 0 as v → vMax) and carries a non-zero acceleration right up
+     * to the shed boundary, avoiding the over-conservative "force a = 0"
+     * behavior that would make the profile grid-dependent again.
+     *
      * @param v0 Starting velocity
      * @param a0 Starting acceleration
      * @param distance Available distance
@@ -612,25 +664,126 @@ public:
             a1_uncapped = aMax;
         }
 
-        if (v1_uncapped <= vMax) {
-            return {v1_uncapped, a1_uncapped};
+        // WI-8b.2: Check both the velocity ceiling AND the shed-acceleration
+        // constraint. A state (v1, a1) with a1 > 0 is feasible only if
+        // a1²/(2·jMax) ≤ vMax − v1 (acceleration can be shed before v
+        // exceeds the ceiling).
+        T shedVel = (a1_uncapped > T(0))
+            ? a1_uncapped * a1_uncapped / (T(2) * jMax) : T(0);
+        if (v1_uncapped <= vMax && v1_uncapped + shedVel <= vMax + T(1e-9)) {
+            return {std::min(v1_uncapped, vMax), a1_uncapped};
         }
 
-        // --- v1 would exceed vMax: approach vMax with a = 0 ---
-        // Binary search for max v1 ≤ vMax such that
-        // computeAccelDistanceWithState(v0, a0, v1, aMax, jMax) ≤ distance.
-        T vLow = v0;
-        T vHigh = vMax;
-        for (int iter = 0; iter < 60; ++iter) {
-            T vMid = (vLow + vHigh) / T(2);
-            T needed = computeAccelDistanceWithState(v0, a0, vMid, aMax, jMax);
-            if (needed <= distance) {
-                vLow = vMid;
+        // --- Uncapped result violates the shed constraint or vMax ---
+        // Find where the trajectory crosses the shed boundary
+        //   v(t) + a(t)²/(2·jMax) = vMax
+        // and follow the boundary (j = −jMax) for the remaining distance.
+        //
+        // The shed value along the trajectory in phase 1 (j = +jMax):
+        //   v(t) + a(t)²/(2·jMax) = v0 + a0²/(2·jMax) + 2·a0·t + jMax·t²
+        // which is a quadratic in t. In phase 2 (a = aMax):
+        //   v(t) + aMax²/(2·jMax) = vMax  →  v(t) = vMax − aMax²/(2·jMax).
+
+        T shed0 = v0 + a0c * a0c / (T(2) * jMax);
+        if (shed0 >= vMax - T(1e-9)) {
+            // Already on the shed boundary — follow it (j = −jMax) to
+            // shed acceleration and gain velocity toward vMax. The
+            // trajectory stays on the boundary v + a²/(2·jMax) = vMax.
+            T tShed = solveAccelCubic(v0, a0c, -jMax, distance);
+            T v1 = v0 + a0c * tShed - T(0.5) * jMax * tShed * tShed;
+            T a1 = a0c - jMax * tShed;
+            if (a1 <= T(1e-9)) {
+                return {vMax, T(0)};
+            }
+            return {v1, a1};
+        }
+
+        // Try crossing in phase 1 (j = +jMax):
+        // jMax·t² + 2·a0·t + (shed0 − vMax) = 0
+        // t = (−a0 + √(a0²/2 + jMax·(vMax − v0))) / jMax
+        T disc1 = a0c * a0c / T(2) + jMax * (vMax - v0);
+        T t1_full = (a0c < aMax - T(1e-12))
+            ? (aMax - a0c) / jMax : T(0);
+        T d1_full = (t1_full > T(0))
+            ? v0 * t1_full + T(0.5) * a0c * t1_full * t1_full
+              + (T(1) / T(6)) * jMax * t1_full * t1_full * t1_full
+            : T(0);
+        T v_after_1 = v0 + a0c * t1_full + T(0.5) * jMax * t1_full * t1_full;
+
+        T dCross, vCross, aCross;
+        bool crossingFound = false;
+
+        if (disc1 > T(0) && (a0c >= aMax - T(1e-12) ||
+                             (-a0c + std::sqrt(disc1)) / jMax <= t1_full)) {
+            // Crossing in phase 1 (or a0 >= aMax with constant aMax).
+            if (a0c >= aMax - T(1e-12)) {
+                // Constant aMax phase: v + aMax²/(2jMax) = vMax
+                vCross = vMax - aMax * aMax / (T(2) * jMax);
+                if (vCross <= v0) {
+                    // Already past the crossing — follow the boundary.
+                    T tShed = solveAccelCubic(v0, a0c, -jMax, distance);
+                    T v1 = v0 + a0c * tShed - T(0.5) * jMax * tShed * tShed;
+                    T a1 = a0c - jMax * tShed;
+                    if (a1 <= T(1e-9)) return {vMax, T(0)};
+                    return {v1, a1};
+                }
+                T tCross = (vCross - v0) / aMax;
+                dCross = v0 * tCross + T(0.5) * aMax * tCross * tCross;
+                aCross = aMax;
             } else {
-                vHigh = vMid;
+                T tCross = (-a0c + std::sqrt(disc1)) / jMax;
+                dCross = v0 * tCross + T(0.5) * a0c * tCross * tCross
+                         + (T(1) / T(6)) * jMax * tCross * tCross * tCross;
+                vCross = v0 + a0c * tCross + T(0.5) * jMax * tCross * tCross;
+                aCross = a0c + jMax * tCross;
+            }
+            crossingFound = true;
+        } else if (t1_full > T(0)) {
+            // Crossing in phase 2 (constant a = aMax).
+            vCross = vMax - aMax * aMax / (T(2) * jMax);
+            if (vCross > v_after_1) {
+                T t2Cross = (vCross - v_after_1) / aMax;
+                dCross = d1_full + v_after_1 * t2Cross
+                         + T(0.5) * aMax * t2Cross * t2Cross;
+                aCross = aMax;
+                crossingFound = true;
             }
         }
-        return {vLow, T(0)};
+
+        if (!crossingFound) {
+            // Fallback: binary search for max v1 with a = 0.
+            T vLow = v0, vHigh = vMax;
+            for (int iter = 0; iter < 60; ++iter) {
+                T vMid = (vLow + vHigh) / T(2);
+                T needed = computeAccelDistanceWithState(v0, a0, vMid, aMax, jMax);
+                if (needed <= distance) vLow = vMid;
+                else vHigh = vMid;
+            }
+            return {vLow, T(0)};
+        }
+
+        if (dCross >= distance) {
+            // Crossing happens after distance d — the uncapped trajectory
+            // at distance d hasn't reached the boundary yet. But the
+            // uncapped result violated the shed constraint, which means
+            // d < dCross is impossible. Use the uncapped result clamped
+            // to vMax (shouldn't normally reach here).
+            return {std::min(v1_uncapped, vMax), a1_uncapped};
+        }
+
+        // Follow the shed boundary (j = −jMax) for the remaining distance.
+        T dRemaining = distance - dCross;
+        // Solve: dRem = vCross·t + ½·aCross·t² − (1/6)·jMax·t³
+        // (cubic with negative jerk — use solveAccelCubic with j = −jMax)
+        T tShed = solveAccelCubic(vCross, aCross, -jMax, dRemaining);
+        T v1 = vCross + aCross * tShed - T(0.5) * jMax * tShed * tShed;
+        T a1 = aCross - jMax * tShed;
+
+        if (a1 <= T(1e-9)) {
+            // Fully shed — arrived at vMax with a = 0.
+            return {vMax, T(0)};
+        }
+        return {v1, a1};
     }
 
     /**

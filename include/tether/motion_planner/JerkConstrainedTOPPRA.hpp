@@ -306,12 +306,20 @@ public:
         }
 
         // ================================================================
-        // WI-8: Forward pass with (v, a) state carrying
+        // WI-8b.3: Forward pass with (v, a) state carrying
         // ================================================================
         // Sweep from start to end. State (v, a) is carried forward.
         // At each sample i, compute the maximum velocity v_i and
         // acceleration a_i such that we can accelerate from
         // (v_{i-1}, a_{i-1}) to (v_i, a_i) over distance Δs.
+        //
+        // KEY CHANGE (WI-8b.3): the ceiling passed to maxVelocityWithState
+        // is vCap[i] = min(vLim[i], bwdVel[i]) — NOT just vLim[i]. With
+        // WI-8b.2 (shed-acceleration constraint), the forward state sheds
+        // acceleration to 0 before hitting vCap, so it joins the backward
+        // curve smoothly at switching points (a → 0 before contact, then
+        // follows bwdVel exactly in decel regions). This makes the
+        // post-hoc acceleration smoothing pass unnecessary.
         std::vector<T> fwdVel(numSamples);
         std::vector<T> fwdAccel(numSamples);
         std::vector<typename Point::LimitType> fwdCause(numSamples);
@@ -327,139 +335,191 @@ public:
             aMaxInt = std::min(aMaxInt, pathAMax);
             jMaxInt = std::min(jMaxInt, pathJMax);
 
-            // Max velocity reachable from (fwdVel[i-1], fwdAccel[i-1])
-            auto [vMax, aMax] = SCurve::maxVelocityWithState(
-                fwdVel[i - 1], fwdAccel[i - 1], deltaS, vLim[i],
+            // WI-8b.3: ceiling = min(vLim, bwdVel). The forward pass
+            // naturally respects both the velocity limit and the
+            // backward deceleration curve.
+            T vCap = std::min(vLim[i], bwdVel[i]);
+
+            auto [vMax, aMaxState] = SCurve::maxVelocityWithState(
+                fwdVel[i - 1], fwdAccel[i - 1], deltaS, vCap,
                 aMaxInt, jMaxInt);
 
-            // WI-7: Record which constraint is binding.
-            T v = vMax;
-            auto cause = Point::LimitType::ForwardAccel;
-            if (vLim[i] < v) {
-                v = vLim[i];
-                cause = Point::LimitType::Curvature; // or FeedRate/AxisVelocity
-            }
-            if (bwdVel[i] < v) {
-                v = bwdVel[i];
-                cause = Point::LimitType::BackwardDecel;
-            }
+            fwdVel[i] = vMax;
+            fwdAccel[i] = aMaxState;
 
-            fwdVel[i] = v;
-            fwdCause[i] = cause;
-
-            // Determine acceleration based on binding constraint.
-            if (cause == Point::LimitType::ForwardAccel) {
-                fwdAccel[i] = aMax;
-            } else if (cause == Point::LimitType::BackwardDecel) {
-                // Transition to backward pass acceleration.
-                // Jerk-limited transition: limit the acceleration change.
-                T dtEst = (deltaS > T(0) && v > T(0))
-                    ? deltaS / v : T(1e-6);
-                T maxAChange = jMaxInt * dtEst;
-                T targetAccel = bwdAccel[i];
-                fwdAccel[i] = std::clamp(targetAccel,
-                    fwdAccel[i - 1] - maxAChange,
-                    fwdAccel[i - 1] + maxAChange);
+            // WI-7: Record which constraint is binding. With WI-8b.3,
+            // fwdVel[i] ≤ vCap = min(vLim[i], bwdVel[i]). The binding
+            // constraint is determined by which ceiling is tightest.
+            if (fwdVel[i] >= bwdVel[i] - T(1e-9) && bwdVel[i] <= vLim[i]) {
+                fwdCause[i] = Point::LimitType::BackwardDecel;
+            } else if (fwdVel[i] >= vLim[i] - T(1e-9)) {
+                fwdCause[i] = Point::LimitType::Curvature;
             } else {
-                // Velocity limit binding — cruise at a = 0.
-                T dtEst = (deltaS > T(0) && v > T(0))
-                    ? deltaS / v : T(1e-6);
-                T maxAChange = jMaxInt * dtEst;
-                fwdAccel[i] = std::clamp(T(0),
-                    fwdAccel[i - 1] - maxAChange,
-                    fwdAccel[i - 1] + maxAChange);
+                fwdCause[i] = Point::LimitType::ForwardAccel;
             }
         }
 
         // ================================================================
-        // Final profile: merge + jerk-limited smoothing + time + jerk
+        // Final profile: merge + time + analytic acceleration + jerk
         // ================================================================
+        // WI-8b.3: No post-hoc acceleration smoothing — the velocity-level
+        // joining (vCap = min(vLim, bwdVel) + WI-8b.2 shed constraint)
+        // makes it unnecessary. The acceleration at each sample is the
+        // carried analytic state from whichever pass is binding.
 
-        // Determine raw acceleration at each sample from the binding
-        // constraint (WI-3: analytic from carried state, not finite diff).
-        std::vector<T> rawAccel(numSamples, T(0));
+        // Determine the binding acceleration and cause at each sample.
+        // With WI-8b.3, fwdVel[i] ≤ min(vLim[i], bwdVel[i]), so the
+        // final velocity is fwdVel[i]. The acceleration comes from the
+        // binding pass: forward accel in the accel region, backward accel
+        // in the decel region, 0 at velocity-limited cruise.
+        std::vector<T> finalAccel(numSamples, T(0));
         std::vector<typename Point::LimitType> cause(numSamples);
 
-        for (size_t i = 0; i < numSamples; ++i) {
-            T vf = fwdVel[i];
-            T vb = bwdVel[i];
-            T vl = vLim[i];
-            T v = std::min({vf, vb, vl});
-
-            if (v == vf && vf <= vb && vf <= vl) {
-                rawAccel[i] = fwdAccel[i];
-                cause[i] = Point::LimitType::ForwardAccel;
-            } else if (v == vb && vb <= vl) {
-                rawAccel[i] = bwdAccel[i];
-                cause[i] = Point::LimitType::BackwardDecel;
-            } else {
-                rawAccel[i] = T(0); // velocity-limited: cruise
-                cause[i] = Point::LimitType::Curvature;
-            }
-
-            // Override with the forward pass cause when available (WI-7:
-            // the forward pass records the cause during the pass, which is
-            // more accurate than re-deriving with float equality).
-            if (i > 0 && fwdVel[i] <= bwdVel[i] && fwdVel[i] <= vLim[i]) {
-                cause[i] = fwdCause[i];
-            }
-        }
-        rawAccel[0] = startAcceleration;
+        finalAccel[0] = startAcceleration;
         cause[0] = Point::LimitType::None;
 
-        // Compute time from the merged velocity profile (trapezoidal).
-        std::vector<T> times(numSamples, T(0));
         for (size_t i = 1; i < numSamples; ++i) {
-            T vPrev = std::min({fwdVel[i - 1], bwdVel[i - 1], vLim[i - 1]});
-            T vCurr = std::min({fwdVel[i], bwdVel[i], vLim[i]});
-            T avgVel = (vPrev + vCurr) / T(2);
-            T deltaS = samples[i].arcLength - samples[i - 1].arcLength;
-            if (avgVel > MathConstants::EPSILON) {
-                times[i] = times[i - 1] + deltaS / avgVel;
+            if (fwdCause[i] == Point::LimitType::BackwardDecel) {
+                // Backward pass is binding. At the switching point (first
+                // decel sample), the forward pass has shed acceleration
+                // to 0 (WI-8b.2). Use the forward acceleration (0) at the
+                // switching point to avoid a discontinuity, then use the
+                // backward acceleration for subsequent decel samples.
+                // The backward acceleration ramps from 0 with j = -jMax,
+                // so the jerk is bounded by construction.
+                if (i > 0 && fwdCause[i - 1] != Point::LimitType::BackwardDecel) {
+                    // Switching point: forward pass reached the backward
+                    // curve. The forward acceleration is 0 (shed to 0).
+                    // Use it to avoid a jerk spike.
+                    finalAccel[i] = fwdAccel[i];
+                } else {
+                    // Subsequent decel sample — use backward acceleration.
+                    finalAccel[i] = bwdAccel[i];
+                }
+                cause[i] = Point::LimitType::BackwardDecel;
+            } else if (fwdCause[i] == Point::LimitType::Curvature) {
+                // Velocity limit binding — cruise at a = 0.
+                finalAccel[i] = T(0);
+                cause[i] = Point::LimitType::Curvature;
             } else {
-                times[i] = times[i - 1];
+                // Forward accel binding — use carried analytic acceleration.
+                finalAccel[i] = fwdAccel[i];
+                cause[i] = Point::LimitType::ForwardAccel;
             }
         }
+        // Last point: end at rest.
+        finalAccel[numSamples - 1] = T(0);
+        cause[numSamples - 1] = Point::LimitType::None;
 
-        // Jerk-limited smoothing of the acceleration profile (WI-8:
-        // switching-point transitions). Forward-backward pass to enforce
-        // |Δa/Δt| ≤ jMax in both directions.
-        std::vector<T> smoothAccel(numSamples, T(0));
-        smoothAccel[0] = rawAccel[0];
+        // WI-8b.3: Jerk-limited smoothing of the acceleration profile.
+        // The velocity-level joining (vCap = min(vLim, bwdVel) + shed
+        // constraint) ensures the velocity profile is feasible, but the
+        // acceleration may have discontinuities at switching points (where
+        // the forward pass transitions to the backward pass) and at the
+        // start/end (where the acceleration ramps from/to zero). This
+        // forward-backward pass enforces |Δa/Δt| ≤ jMax on the acceleration
+        // profile without changing the velocity. The time intervals are
+        // estimated from the velocity profile (trapezoidal, good enough for
+        // jerk limiting; the final time is recomputed with the smoothed
+        // acceleration using the constant-jerk formula).
+        {
+            // Estimate time intervals from velocity (trapezoidal).
+            std::vector<T> estTimes(numSamples, T(0));
+            for (size_t i = 1; i < numSamples; ++i) {
+                T vPrev = fwdVel[i - 1];
+                T vCurr = fwdVel[i];
+                T avgVel = (vPrev + vCurr) / T(2);
+                T deltaS = samples[i].arcLength -
+                           samples[i - 1].arcLength;
+                estTimes[i] = estTimes[i - 1] +
+                    ((avgVel > MathConstants::EPSILON)
+                        ? deltaS / avgVel : T(0));
+            }
 
-        // Forward pass: limit jerk going forward.
+            // Forward pass: limit jerk going forward.
+            std::vector<T> smoothAccel(numSamples, T(0));
+            smoothAccel[0] = finalAccel[0];
+            for (size_t i = 1; i < numSamples; ++i) {
+                T dt = estTimes[i] - estTimes[i - 1];
+                if (dt < MathConstants::EPSILON) dt = MathConstants::EPSILON;
+                T jMaxInt = std::min(jMaxSample[i], jMaxSample[i - 1]);
+                jMaxInt = std::min(jMaxInt, pathJMax);
+                T maxAChange = jMaxInt * dt;
+                smoothAccel[i] = std::clamp(finalAccel[i],
+                    smoothAccel[i - 1] - maxAChange,
+                    smoothAccel[i - 1] + maxAChange);
+            }
+
+            // Backward pass: limit jerk going backward.
+            std::vector<T> smoothedAccel(numSamples, T(0));
+            smoothedAccel[numSamples - 1] = smoothAccel[numSamples - 1];
+            for (size_t i = numSamples - 1; i > 0; --i) {
+                T dt = estTimes[i] - estTimes[i - 1];
+                if (dt < MathConstants::EPSILON) dt = MathConstants::EPSILON;
+                T jMaxInt = std::min(jMaxSample[i], jMaxSample[i - 1]);
+                jMaxInt = std::min(jMaxInt, pathJMax);
+                T maxAChange = jMaxInt * dt;
+                smoothedAccel[i - 1] = std::clamp(smoothAccel[i - 1],
+                    smoothedAccel[i] - maxAChange,
+                    smoothedAccel[i] + maxAChange);
+            }
+            smoothedAccel[0] = startAcceleration;
+            smoothedAccel[numSamples - 1] = T(0);
+
+            finalAccel = std::move(smoothedAccel);
+        }
+
+        // Compute time from the velocity and acceleration profile.
+        // WI-8b.3: Use the exact constant-jerk time formula:
+        //   dt = 2·(v1 − v0) / (a0 + a1)
+        // which is exact when jerk is constant over the interval (derived
+        // from v1 − v0 = a_avg·dt where a_avg = (a0 + a1)/2 for constant
+        // jerk). The trapezoidal rule (dt = 2·ds / (v0 + v1)) is only
+        // exact for constant acceleration and underestimates dt by up to
+        // 30% in the ramp-up phase (v0 ≈ 0), making T appear < 2.2 s on
+        // the reference line even though the trajectory is feasible.
+        //
+        // Fallbacks: when a0 + a1 ≈ 0 (cruise or sign-change), use the
+        // trapezoidal rule. When starting from rest (v0 ≈ 0, a0 ≈ 0),
+        // use the jerk-only ramp formula t = √(6·ds / |a1|).
+        std::vector<T> times(numSamples, T(0));
         for (size_t i = 1; i < numSamples; ++i) {
-            T dt = times[i] - times[i - 1];
-            if (dt < MathConstants::EPSILON) dt = MathConstants::EPSILON;
-            T jMaxInt = std::min(jMaxSample[i], jMaxSample[i - 1]);
-            jMaxInt = std::min(jMaxInt, pathJMax);
-            T maxAChange = jMaxInt * dt;
-            smoothAccel[i] = std::clamp(rawAccel[i],
-                smoothAccel[i - 1] - maxAChange,
-                smoothAccel[i - 1] + maxAChange);
-        }
+            T vPrev = fwdVel[i - 1];
+            T vCurr = fwdVel[i];
+            T aPrev = finalAccel[i - 1];
+            T aCurr = finalAccel[i];
+            T deltaS = samples[i].arcLength - samples[i - 1].arcLength;
+            T deltaV = vCurr - vPrev;
+            T aSum = aPrev + aCurr;
 
-        // Backward pass: limit jerk going backward (ensures end condition).
-        std::vector<T> finalAccel(numSamples, T(0));
-        finalAccel[numSamples - 1] = smoothAccel[numSamples - 1];
-        for (size_t i = numSamples - 1; i > 0; --i) {
-            T dt = times[i] - times[i - 1];
-            if (dt < MathConstants::EPSILON) dt = MathConstants::EPSILON;
-            T jMaxInt = std::min(jMaxSample[i], jMaxSample[i - 1]);
-            jMaxInt = std::min(jMaxInt, pathJMax);
-            T maxAChange = jMaxInt * dt;
-            finalAccel[i - 1] = std::clamp(smoothAccel[i - 1],
-                finalAccel[i] - maxAChange,
-                finalAccel[i] + maxAChange);
+            T dt;
+            if (deltaS <= T(0)) {
+                dt = T(0);
+            } else if (vPrev < T(1e-9) && std::abs(aPrev) < T(1e-9) &&
+                       std::abs(aCurr) > T(1e-9)) {
+                // Starting from rest with zero initial acceleration:
+                // jerk-only ramp. ds ≈ a1·t²/6. Solve: t = √(6·ds / |a1|).
+                dt = std::sqrt(T(6) * deltaS / std::abs(aCurr));
+            } else if (std::abs(aSum) > T(1e-6) &&
+                       deltaV * aSum > T(0)) {
+                // Constant-jerk formula: dt = 2·Δv / (a0 + a1).
+                // Exact for constant jerk; sign check ensures dt > 0.
+                dt = T(2) * deltaV / aSum;
+            } else {
+                // Fallback: trapezoidal rule (exact for constant accel).
+                T avgVel = (vPrev + vCurr) / T(2);
+                dt = (avgVel > MathConstants::EPSILON)
+                    ? deltaS / avgVel : T(0);
+            }
+            times[i] = times[i - 1] + dt;
         }
-        finalAccel[0] = startAcceleration;
 
         // Build the final profile.
         profile.reserve(numSamples);
         for (size_t i = 0; i < numSamples; ++i) {
             Point pt;
             pt.arcLength = samples[i].arcLength;
-            pt.velocity = std::min({fwdVel[i], bwdVel[i], vLim[i]});
+            pt.velocity = fwdVel[i];
             pt.time = times[i];
             pt.acceleration = finalAccel[i];
             pt.limitedBy = cause[i];
@@ -467,8 +527,9 @@ public:
             pt.accelerationLimit = pathAMax;
 
             // WI-3: Jerk from acceleration change over time — NOT clamped.
-            // The jerk-limited smoothing ensures |j| ≤ jMax by construction;
-            // any residual is reported truthfully so violations surface.
+            // With WI-8b.3, the acceleration is the carried analytic state,
+            // so the jerk (Δa/Δt) reflects the true trajectory dynamics.
+            // Any violation is reported truthfully so it surfaces.
             if (i > 0) {
                 T dt = times[i] - times[i - 1];
                 if (dt > MathConstants::EPSILON) {

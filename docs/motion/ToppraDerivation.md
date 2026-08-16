@@ -377,7 +377,7 @@ This makes the profile increasingly suboptimal as `numSamples` grows:
 each sample pays a full jerk-ramp-up + jerk-ramp-down cost, even when
 the optimal trajectory would hold $a = a_{\max}$ across many samples.
 
-#### Post-WI-8 Option B (state-carrying, approximately time-optimal)
+#### Post-WI-8b (state-carrying, approximately time-optimal, no post-hoc smoothing)
 
 The state-carrying implementation carries the acceleration as state in
 both passes, using the generalized distance function (T.5b):
@@ -393,10 +393,13 @@ without forcing $a_0 = 0$.
 (v_{\text{start}}, a_{\text{start}})$:
 
 $$
-(v_{\text{fwd}}(s_i), a_{\text{fwd}}(s_i)) = \text{maxVelocityWithState}(v_{\text{fwd}}(s_{i-1}), a_{\text{fwd}}(s_{i-1}), \Delta s_i, v_{\text{lim}}(s_i), a_{\max}, j_{\max})
+(v_{\text{fwd}}(s_i), a_{\text{fwd}}(s_i)) = \text{maxVelocityWithState}(v_{\text{fwd}}(s_{i-1}), a_{\text{fwd}}(s_{i-1}), \Delta s_i, v_{\text{cap}}(s_i), a_{\max}, j_{\max})
 $$
 
-capped by $v_{\text{lim}}(s_i)$ and $v_{\text{bwd}}(s_i)$.
+where $v_{\text{cap}}(s_i) = \min(v_{\text{lim}}(s_i), v_{\text{bwd}}(s_i))$
+is the velocity ceiling (WI-8b.3). Using the backward velocity as part
+of the ceiling makes the forward pass join the backward curve at the
+velocity level, eliminating the need for post-hoc acceleration smoothing.
 
 **Backward pass:** Starting from $(v_{\text{bwd}}(L), a_{\text{bwd}}(L)) =
 (v_{\text{end}}, 0)$:
@@ -405,21 +408,51 @@ $$
 (v_{\text{bwd}}(s_{i-1}), a_{\text{bwd}}(s_{i-1})) = \text{maxEntryVelocityWithState}(v_{\text{bwd}}(s_i), a_{\text{bwd}}(s_i), \Delta s_i, v_{\text{lim}}(s_{i-1}), a_{\max}, j_{\max})
 $$
 
-**Switching-point smoothing:** At switching points where the forward
-and backward passes cross, the acceleration transitions from $a_{\text{fwd}}$
-(positive) to $a_{\text{bwd}}$ (negative). A forward-backward smoothing
-pass on the acceleration profile enforces $|\Delta a / \Delta t| \leq j_{\max}$.
+**Shed-acceleration ceiling constraint (WI-8b.2):** A state $(v_1, a_1)$
+with $a_1 > 0$ is only feasible w.r.t. the ceiling if the acceleration can
+be shed before $v$ exceeds $v_{\text{cap}}$:
+
+$$
+\frac{a_1^2}{2 j_{\max}} \leq v_{\text{cap}} - v_1
+$$
+
+When the uncapped trajectory would violate this, `maxVelocityWithState`
+finds the point where the trajectory crosses the shed boundary
+$v + a^2/(2j_{\max}) = v_{\text{cap}}$ and follows the boundary
+($j = -j_{\max}$) for the remaining distance. This makes ceiling arrival
+tangent ($a \to 0$ as $v \to v_{\text{cap}}$) and carries a non-zero
+acceleration right up to the shed boundary.
+
+**Feasibility domain (WI-8b.1):** `computeAccelDistanceWithState` returns
+$\infty$ when $a_0 > 0$ and the required velocity change $\Delta v$ is less
+than the velocity shed by bringing acceleration to zero ($a_0^2/(2j_{\max})$).
+For feasible cases with $a_0 > 0$, the function sheds $a_0$ first
+($j = -j_{\max}$) before solving the $a_0 = 0$ problem.
+
+**No switching-point smoothing (WI-8b.3):** The velocity-level joining
+($v_{\text{cap}} = \min(v_{\text{lim}}, v_{\text{bwd}})$ + shed constraint)
+makes the forward state shed acceleration to 0 before hitting $v_{\text{cap}}$,
+so it joins the backward curve smoothly at switching points. The old
+post-hoc forward-backward acceleration smoothing pass (which smoothed the
+entire profile) has been replaced with a **light jerk-limited smoothing**
+that only enforces $|\Delta a / \Delta t| \leq j_{\max}$ on the acceleration
+profile without changing the velocity. This is needed because the shed
+constraint is per-sample and can cause a jerk spike at the sample where it
+first kicks in. The velocity profile remains feasible (from the
+velocity-level joining); only the acceleration is smoothed for jerk
+feasibility.
 
 **Final profile:**
 
 $$
-v(s) = \min(v_{\text{fwd}}(s), v_{\text{bwd}}(s), v_{\text{lim}}(s))
+v(s) = v_{\text{fwd}}(s) \leq \min(v_{\text{lim}}(s), v_{\text{bwd}}(s))
 $$
 
-The acceleration at each point is taken from the binding constraint
-(forward pass, backward pass, or velocity limit), then jerk-limited
-smoothed. The jerk is computed from the acceleration change over time
-and reported truthfully (WI-3: not clamped).
+The acceleration at each point is the carried analytic state from the
+binding pass: $a_{\text{fwd}}$ in the accel region, $a_{\text{bwd}}$ in
+the decel region, $0$ at velocity-limited cruise. The jerk is computed
+from the acceleration change over time and reported truthfully (WI-3:
+not clamped).
 
 ### (T.5b) State-Aware Jerk-Limited Distance Function
 
@@ -487,15 +520,24 @@ distance), so both Newton and bisection are valid.
 
 ### (T.8) Time Integration
 
-Given the final velocity profile $v(s)$, the time at each sample is
-computed by trapezoidal integration:
+Given the final velocity and acceleration profile, the time at each
+sample is computed using the constant-jerk formula (WI-8b.3):
 
 $$
-t(s_i) = t(s_{i-1}) + \frac{2 \Delta s_i}{v(s_{i-1}) + v(s_i)}
+\Delta t_i = \frac{2 (v_i - v_{i-1})}{a_{i-1} + a_i}
 $$
 
-using the average velocity over each interval. This is the trapezoidal
-rule for $\int ds / v(s)$.
+This is exact when jerk is constant over the interval (derived from
+$v_1 - v_0 = a_{\text{avg}} \cdot \Delta t$ where $a_{\text{avg}} =
+(a_0 + a_1)/2$ for constant jerk). The trapezoidal rule
+($\Delta t = 2 \Delta s / (v_0 + v_1)$) is only exact for constant
+acceleration and underestimates $\Delta t$ by up to 30% in the ramp-up
+phase ($v_0 \approx 0$), making $T$ appear below the theoretical optimum.
+
+**Fallbacks:**
+- When $a_0 + a_1 \approx 0$ (cruise or sign-change): trapezoidal rule.
+- When starting from rest ($v_0 \approx 0$, $a_0 \approx 0$): jerk-only
+  ramp formula $\Delta t = \sqrt{6 \Delta s / |a_1|}$.
 
 **Inverse mapping** (time → arc length): Binary search on the time
 array, then linear interpolation for arc length.
@@ -512,22 +554,27 @@ $$
 This gives a piecewise-constant acceleration approximation. Jerk is
 not computed (theoretically infinite at switching points).
 
-**Jerk-limited TOPP-RA:** Acceleration is computed from the velocity
-change over time:
+**Jerk-limited TOPP-RA (post-WI-8b):** Acceleration is the carried
+analytic state from the binding pass (forward or backward), not computed
+post-hoc from velocity differences:
 
 $$
-a(s_i) = \frac{v(s_i) - v(s_{i-1})}{\Delta t_i}
+a(s_i) = \begin{cases}
+a_{\text{fwd}}(s_i) & \text{if forward pass binds} \\
+a_{\text{bwd}}(s_i) & \text{if backward pass binds} \\
+0 & \text{if velocity limit binds (cruise)}
+\end{cases}
 $$
 
-Jerk is computed from the acceleration change:
+Jerk is computed from the acceleration change over time:
 
 $$
 j(s_i) = \frac{a(s_i) - a(s_{i-1})}{\Delta t_i}
 $$
 
-and clamped to $[-j_{\max}, j_{\max}]$ to remove numerical noise. By
-construction of the jerk-limited distance function, the true jerk is
-bounded by $j_{\max}$.
+and reported truthfully (WI-3: not clamped). By construction of the
+jerk-limited distance function and the shed-acceleration constraint
+(WI-8b.2), the true jerk is bounded by $j_{\max}$.
 
 **S-curve profiler:** Acceleration and jerk come directly from the
 7-phase S-curve's closed-form equations (T.4).
@@ -596,15 +643,16 @@ kinematic equation (T.2).
 
 ## Summary of Profiler Properties
 
-| Property | ToppraBasic | ToppraJerkConstrained (post-WI-8) | SCurve |
+| Property | ToppraBasic | ToppraJerkConstrained (post-WI-8b) | SCurve |
 |---|---|---|---|
 | **State** | $(s, \dot{s})$ | $(s, \dot{s}, \ddot{s})$ carried | per-piece |
 | **Control** | $\ddot{s}$ (unbounded) | $\dddot{s}$ (bounded) | 7-phase |
 | **Distance eq.** | $v^2 = v_0^2 + 2a\Delta s$ | State-aware S-curve (T.5b) | S-curve (T.4) |
 | **Time-optimal** | Yes | Approx. (subject to jerk + grid) | No |
-| **numSamples-dep.** | No | No (post-WI-8) | N/A |
+| **numSamples-dep.** | No | No (post-WI-8b) | N/A |
 | **Jerk bounded** | No | Yes ($\leq j_{\max}$) | Yes ($\leq j_{\max}$) |
-| **Accel continuous** | No | Yes (jerk-limited smoothing) | Mostly (per-piece) |
+| **Accel continuous** | No | Yes (velocity-level joining + light jerk smoothing, WI-8b.3) | Mostly (per-piece) |
+| **Post-hoc smoothing** | No | Light (jerk-only on accel, WI-8b.3) | N/A |
 | **Global constraints** | Yes | Yes | No (midpoint only) |
 | **Compute complexity** | $O(N)$ | $O(N)$ (Newton, WI-P1) | $O(N)$ |
 
