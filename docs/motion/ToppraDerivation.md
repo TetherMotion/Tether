@@ -369,34 +369,46 @@ $$
 The jerk-limited profiler replaces the 2nd-order kinematic equation
 with the jerk-limited distance function (T.5).
 
-**Forward pass:** Starting from $v_{\text{fwd}}(0) = v_{\text{start}}$:
+#### Pre-WI-8 (stateless, suboptimal)
+
+The original implementation used the symmetric S-curve distance
+function (T.5), which implicitly forces $a = 0$ at every sample point.
+This makes the profile increasingly suboptimal as `numSamples` grows:
+each sample pays a full jerk-ramp-up + jerk-ramp-down cost, even when
+the optimal trajectory would hold $a = a_{\max}$ across many samples.
+
+#### Post-WI-8 Option B (state-carrying, approximately time-optimal)
+
+The state-carrying implementation carries the acceleration as state in
+both passes, using the generalized distance function (T.5b):
 
 $$
-v_{\text{fwd}}(s_i) = \min\left(v_{\text{max-accel}}, \; v_{\text{lim}}(s_i)\right)
+\Delta s = d_{\text{sc,state}}(v_0, a_0, v_1, a_{\max}, j_{\max})
 $$
 
-where $v_{\text{max-accel}}$ is the maximum velocity reachable from
-$v_{\text{fwd}}(s_{i-1})$ over distance $\Delta s_i$ with jerk-limited
-acceleration:
+which plans a jerk-bang-bang trajectory from $(v_0, a_0)$ to $(v_1, 0)$
+without forcing $a_0 = 0$.
+
+**Forward pass:** Starting from $(v_{\text{fwd}}(0), a_{\text{fwd}}(0)) =
+(v_{\text{start}}, a_{\text{start}})$:
 
 $$
-v_{\text{max-accel}} = \max\left\{ v_1 : \Delta s_{\text{accel}}(v_{\text{fwd}}(s_{i-1}), v_1, a_{\max}, j_{\max}) \leq \Delta s_i \right\}
+(v_{\text{fwd}}(s_i), a_{\text{fwd}}(s_i)) = \text{maxVelocityWithState}(v_{\text{fwd}}(s_{i-1}), a_{\text{fwd}}(s_{i-1}), \Delta s_i, v_{\text{lim}}(s_i), a_{\max}, j_{\max})
 $$
 
-This is solved by binary search (see T.7).
+capped by $v_{\text{lim}}(s_i)$ and $v_{\text{bwd}}(s_i)$.
 
-**Backward pass:** Starting from $v_{\text{bwd}}(L) = v_{\text{end}}$:
-
-$$
-v_{\text{bwd}}(s_{i-1}) = \min\left(v_{\text{max-decel}}, \; v_{\text{lim}}(s_{i-1})\right)
-$$
-
-where $v_{\text{max-decel}}$ is the maximum velocity that allows
-decelerating to $v_{\text{bwd}}(s_i)$ over distance $\Delta s_i$:
+**Backward pass:** Starting from $(v_{\text{bwd}}(L), a_{\text{bwd}}(L)) =
+(v_{\text{end}}, 0)$:
 
 $$
-v_{\text{max-decel}} = \max\left\{ v_0 : \Delta s_{\text{decel}}(v_0, v_{\text{bwd}}(s_i), a_{\max}, j_{\max}) \leq \Delta s_i \right\}
+(v_{\text{bwd}}(s_{i-1}), a_{\text{bwd}}(s_{i-1})) = \text{maxEntryVelocityWithState}(v_{\text{bwd}}(s_i), a_{\text{bwd}}(s_i), \Delta s_i, v_{\text{lim}}(s_{i-1}), a_{\max}, j_{\max})
 $$
+
+**Switching-point smoothing:** At switching points where the forward
+and backward passes cross, the acceleration transitions from $a_{\text{fwd}}$
+(positive) to $a_{\text{bwd}}$ (negative). A forward-backward smoothing
+pass on the acceleration profile enforces $|\Delta a / \Delta t| \leq j_{\max}$.
 
 **Final profile:**
 
@@ -404,7 +416,36 @@ $$
 v(s) = \min(v_{\text{fwd}}(s), v_{\text{bwd}}(s), v_{\text{lim}}(s))
 $$
 
-### (T.7) Binary Search for Maximum Velocity After Distance
+The acceleration at each point is taken from the binding constraint
+(forward pass, backward pass, or velocity limit), then jerk-limited
+smoothed. The jerk is computed from the acceleration change over time
+and reported truthfully (WI-3: not clamped).
+
+### (T.5b) State-Aware Jerk-Limited Distance Function
+
+Generalizes (T.5) to carry the acceleration as state. The trajectory
+from $(v_0, a_0)$ to $(v_1, 0)$ consists of up to 3 phases:
+
+1. **Jerk ramp:** $j = +j_{\max}$, $a$ goes from $a_0$ to $a_{\max}$ (or $a_{\text{peak}}$)
+2. **Constant accel:** $a = a_{\max}$ (trapezoidal case only)
+3. **Jerk ramp:** $j = -j_{\max}$, $a$ goes from $a_{\max}$ (or $a_{\text{peak}}$) to $0$
+
+**Trapezoidal case** ($\Delta v \geq (a_{\max}^2 - a_0^2)/(2j_{\max}) + a_{\max}^2/(2j_{\max})$):
+
+$$
+t_1 = \frac{a_{\max} - a_0}{j_{\max}}, \quad t_3 = \frac{a_{\max}}{j_{\max}}, \quad t_2 = \frac{\Delta v - \Delta v_1 - \Delta v_3}{a_{\max}}
+$$
+
+**Triangular case** ($\Delta v < $ threshold):
+
+$$
+a_{\text{peak}} = \sqrt{j_{\max} \Delta v + a_0^2 / 2}
+$$
+
+The distance is the sum of the phase distances. See
+`SCurveProfile::computeAccelDistanceWithState` for the full formula.
+
+### (T.7) Newton Iteration for Maximum Velocity After Distance (WI-P1)
 
 **Problem:** Given starting velocity $v_0$, available distance $d$,
 velocity ceiling $v_{\max}$, acceleration limit $a_{\max}$, and jerk
@@ -414,29 +455,35 @@ $$
 \Delta s_{\text{accel}}(v_0, v_1, a_{\max}, j_{\max}) \leq d
 $$
 
-**Algorithm:** Binary search on $v_1 \in [v_0, v_{\max}]$:
+**Algorithm (WI-P1):** Newton's method with bisection fallback. The
+derivative of $\Delta s_{\text{accel}}$ with respect to $v_1$ is
+analytically known (piecewise: triangular vs. trapezoidal), so Newton
+converges in 2–4 iterations. Bisection is used as a fallback if Newton
+diverges or goes out of bounds.
 
 ```
-v_low = v_0
-v_high = v_max
-for 60 iterations:
-    v_mid = (v_low + v_high) / 2
-    needed = computeAccelDistance(v_0, v_mid, a_max, j_max)
-    if needed ≤ d:
-        v_low = v_mid      // v_mid is achievable, try higher
+v_low = v_0, v_high = v_max
+v_1 = initial_guess (linear approximation)
+for up to 20 iterations:
+    f = computeAccelDistance(v_0, v_1, a, j) - d
+    f' = computeAccelDistanceDerivative(v_0, v_1, a, j)
+    update bisection bracket from sign of f
+    if |f| < tolerance: break
+    if f' > 0 and v_low < v_1 - f/f' < v_high:
+        v_1 = v_1 - f/f'    // Newton step
     else:
-        v_high = v_mid     // v_mid needs too much distance, try lower
-return v_low
+        v_1 = (v_low + v_high) / 2    // bisection fallback
+return v_1
 ```
 
-**Convergence:** After $k$ iterations, the uncertainty is
-$(v_{\max} - v_0) / 2^k$. With 60 iterations and $v_{\max} - v_0 \leq
-1000$ mm/s, the precision is $\sim 10^{-15}$ mm/s — far beyond
-machine precision.
+**Convergence:** Newton converges quadratically (2–4 iterations for
+$10^{-10}$ relative precision). Bisection converges linearly (20
+iterations for the same precision). The hybrid approach is both fast
+and robust.
 
 **Monotonicity:** $\Delta s_{\text{accel}}(v_0, v_1, a, j)$ is
 strictly increasing in $v_1$ (more velocity change requires more
-distance), so binary search is valid.
+distance), so both Newton and bisection are valid.
 
 ### (T.8) Time Integration
 
@@ -549,16 +596,17 @@ kinematic equation (T.2).
 
 ## Summary of Profiler Properties
 
-| Property | ToppraBasic | ToppraJerkConstrained | SCurve |
+| Property | ToppraBasic | ToppraJerkConstrained (post-WI-8) | SCurve |
 |---|---|---|---|
-| **State** | $(s, \dot{s})$ | $(s, \dot{s}, \ddot{s})$ | per-piece |
+| **State** | $(s, \dot{s})$ | $(s, \dot{s}, \ddot{s})$ carried | per-piece |
 | **Control** | $\ddot{s}$ (unbounded) | $\dddot{s}$ (bounded) | 7-phase |
-| **Distance eq.** | $v^2 = v_0^2 + 2a\Delta s$ | S-curve distance (T.5) | S-curve (T.4) |
-| **Time-optimal** | Yes | Yes (subject to jerk) | No |
+| **Distance eq.** | $v^2 = v_0^2 + 2a\Delta s$ | State-aware S-curve (T.5b) | S-curve (T.4) |
+| **Time-optimal** | Yes | Approx. (subject to jerk + grid) | No |
+| **numSamples-dep.** | No | No (post-WI-8) | N/A |
 | **Jerk bounded** | No | Yes ($\leq j_{\max}$) | Yes ($\leq j_{\max}$) |
-| **Accel continuous** | No | Yes | Mostly (per-piece) |
+| **Accel continuous** | No | Yes (jerk-limited smoothing) | Mostly (per-piece) |
 | **Global constraints** | Yes | Yes | No (midpoint only) |
-| **Compute complexity** | $O(N)$ | $O(N \log(v_{\max}/\varepsilon))$ | $O(N)$ |
+| **Compute complexity** | $O(N)$ | $O(N)$ (Newton, WI-P1) | $O(N)$ |
 
 ---
 

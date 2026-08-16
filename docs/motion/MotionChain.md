@@ -329,6 +329,15 @@ It does NOT perform post-hoc smoothing or finite-difference estimation.
 The acceleration and jerk values come directly from the profiler, so
 the constraints verified during profiling are preserved exactly.
 
+> **WI-3 (truthful outputs):** For `JerkConstrainedTOPPRA` (post-WI-8),
+> the acceleration is the analytic value from the carried (v, a) state,
+> and the jerk is computed from the acceleration change over time —
+> **not clamped**. The jerk-limited smoothing of the acceleration
+> profile ensures $|j| \leq j_{\max}$ by construction; any residual
+> (e.g. from numerical noise at switching points) is reported truthfully
+> so violations surface in audit tests. For `BasicTOPPRA`, jerk is zero
+> (not constrained — theoretically infinite at switching points).
+
 ---
 
 ## Step 6: Motion Translation

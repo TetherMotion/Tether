@@ -12,10 +12,11 @@
  *   but acceleration is discontinuous at constraint switching points.
  *
  * - **JerkConstrainedTOPPRA** (jerk-integrated TOPP-RA): 3rd-order
- *   time-optimal profile with jerk as a first-class constraint inside the
- *   optimizer. Acceleration is continuous; jerk is bounded by j_max.
- *   Slightly slower than basic TOPP-RA (jerk limiting costs time) but
- *   produces smoother trajectories without post-hoc filtering.
+ *   feasible, jerk-bounded profile with jerk as a first-class constraint
+ *   inside the optimizer. Acceleration is carried as state in both passes
+ *   (WI-8 Option B), making the profile approximately time-optimal subject
+ *   to the jerk constraint and approximately independent of the sample
+ *   count. Acceleration is continuous; jerk is bounded by j_max.
  *
  * - **SCurveVelocityProfiler** (basic S-curve): Per-piece S-curve profiles
  *   with jerk-limited transitions. Simpler than TOPP-RA; does not produce
@@ -101,8 +102,15 @@ public:
      * @param endVelocity Target final velocity (default: 0, end at rest).
      * @param numSamples Number of sample points along the path.
      * @param startAcceleration Initial acceleration (for replanning from
-     *                          a moving state; default: 0).
+     *                          a moving state; default: 0). Stored on the
+     *                          first profile point; the optimization
+     *                          assumes a(0) = 0 for the forward pass
+     *                          (WI-P3: not yet honored as a state
+     *                          constraint in the passes).
      * @param startJerk Initial jerk (for replanning; default: 0).
+     *                  Ignored by BasicTOPPRA (unbounded jerk) and
+     *                  JerkConstrainedTOPPRA (assumes j(0) = 0). Accepted
+     *                  for interface compatibility only (WI-P3).
      * @return The computed velocity profile.
      */
     virtual Profile computeProfile(

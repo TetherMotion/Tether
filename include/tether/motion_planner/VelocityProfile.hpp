@@ -135,30 +135,49 @@ struct KinematicLimits {
     }
     
     /**
-     * @brief Compute maximum acceleration for a direction and velocity
+     * @brief Compute maximum tangential acceleration for a direction and
+     *        velocity, accounting for the centripetal load.
      *
-     * Considers both tangential and centripetal components.
+     * WI-P2: If maxPathAcceleration is a magnitude limit, the available
+     * tangential part is sqrt(a_path² − (v²κ)²). The centripetal load
+     * v²κ is subtracted from the total acceleration budget before
+     * computing the tangential limit. The dead `return 0` branch (which
+     * was unreachable because v_lim already enforces v²κ ≤ a_cent) has
+     * been removed.
+     *
+     * @param tangent Unit tangent vector at the path point.
+     * @param curvature Curvature at the path point (≥ 0).
+     * @param velocity Current velocity (for centripetal load computation).
+     * @return Maximum tangential acceleration (≥ 0).
      */
     T maxAccelerationForDirection(const Vec<NumAxes, T>& tangent,
                                    T curvature,
                                    T velocity) const {
-        // Centripetal acceleration uses some of the available acceleration
+        // WI-P2: Centripetal load v²κ consumes part of the total
+        // acceleration budget. The available tangential acceleration is
+        // sqrt(a_path² − (v²κ)²) when maxPathAcceleration is a magnitude
+        // limit. If the centripetal load exceeds the budget, tangential
+        // acceleration is zero (all budget consumed by centripetal).
         T centripetalAccel = velocity * velocity * curvature;
-        T availableTangential = path.maxPathAcceleration;
-        
-        if (centripetalAccel > path.maxCentripetalAcceleration) {
-            // Velocity too high for this curvature
-            return T(0);
+        T aPath = path.maxPathAcceleration;
+
+        T availableTangential;
+        if (centripetalAccel >= aPath) {
+            // Centripetal load consumes the entire budget.
+            availableTangential = T(0);
+        } else {
+            availableTangential = std::sqrt(aPath * aPath
+                                            - centripetalAccel * centripetalAccel);
         }
-        
-        // Per-axis acceleration limits
+
+        // Per-axis acceleration limits (tangential projection).
         for (size_t i = 0; i < NumAxes; ++i) {
             if (std::abs(tangent[i]) > MathConstants::EPSILON) {
                 T axisAccel = axis.maxAcceleration[i] / std::abs(tangent[i]);
                 availableTangential = std::min(availableTangential, axisAccel);
             }
         }
-        
+
         return availableTangential;
     }
 };
@@ -182,11 +201,16 @@ struct VelocityProfilePoint {
     /// Velocity at this point
     T velocity = T(0);
     
-    /// Acceleration at this point
+    /// Acceleration at this point (interval-average finite-difference
+    /// approximation for BasicTOPPRA; analytic from carried state for
+    /// JerkConstrainedTOPPRA after WI-8).
     T acceleration = T(0);
-    
-    /// Jerk at this point (units/second³)
-    /// Populated by jerk-limited profilers; zero for basic TOPP-RA.
+
+    /// Jerk at this point (units/second³).
+    /// For JerkConstrainedTOPPRA (post-WI-8): computed from the
+    /// acceleration change over time, reported truthfully (not clamped).
+    /// For BasicTOPPRA: zero (jerk is not constrained — theoretically
+    /// infinite at switching points).
     T jerk = T(0);
     
     /// Time to reach this point from path start
@@ -257,9 +281,11 @@ public:
      * @brief Get acceleration at arc length position
      *
      * Linearly interpolates the acceleration stored in profile points.
-     * For jerk-limited profilers, this is the analytic acceleration
-     * computed during the forward/backward passes. For basic TOPP-RA,
-     * this is the post-hoc estimate.
+     * For JerkConstrainedTOPPRA (post-WI-8), the stored acceleration is
+     * the analytic value from the carried (v, a) state, jerk-limited
+     * smoothed at switching points. For BasicTOPPRA, it is a
+     * backward finite-difference approximation of the min()-combined
+     * profile.
      */
     T accelerationAt(T arcLength) const {
         if (points_.empty()) return T(0);
@@ -283,8 +309,11 @@ public:
      * @brief Get jerk at arc length position
      *
      * Linearly interpolates the jerk stored in profile points.
-     * For jerk-limited profilers, this is ±j_max or 0 (by construction).
-     * For basic TOPP-RA, this is zero (jerk is not constrained).
+     * For JerkConstrainedTOPPRA (post-WI-8), the stored jerk is computed
+     * from the acceleration change over time and reported truthfully
+     * (not clamped — WI-3). The jerk-limited smoothing of the
+     * acceleration profile ensures |j| ≤ j_max by construction.
+     * For BasicTOPPRA, jerk is zero (not constrained).
      */
     T jerkAt(T arcLength) const {
         if (points_.empty()) return T(0);
