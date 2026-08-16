@@ -54,6 +54,7 @@
 #include "SourceReference.hpp"
 #include "analytical/AnalyticalTypes.hpp"
 #include "analytical/AnalyticalTOPPRA.hpp"
+#include "analytical/ParetoTimeEnergyOptimalVelocityPlanner.hpp"
 #include "analytical/TrajectorySampler.hpp"
 #include <optional>
 #include <functional>
@@ -698,13 +699,19 @@ private:
  * The builder allows choosing a velocity profiling strategy via the
  * ProfilerType enum or by providing a custom VelocityProfiler instance.
  *
+ * - ProfilerType::ParetoTimeEnergy: Configurable energy/time-optimal
+ *   planner with tunable cost J = ∫[w_t + w_a·a²]dt. Produces smooth
+ *   trajectories via Pontryagin's maximum principle (bang-singular-bang
+ *   arc structure). This is the default — it recovers time-optimal
+ *   behavior when w_a = 0 and smoothly trades time for energy as w_a
+ *   increases.
+ *
  * - ProfilerType::ToppraBasic: Basic 2nd-order TOPP-RA (no jerk limit).
  *   Fastest trajectory; acceleration is discontinuous at switching points.
  *
  * - ProfilerType::ToppraJerkConstrained: 3rd-order TOPP-RA with jerk as a
  *   constraint inside the optimizer. Continuous acceleration; bounded jerk.
- *   Slightly slower than basic TOPP-RA. This is the recommended default
- *   when jerk limiting is needed.
+ *   Slightly slower than basic TOPP-RA.
  *
  * - ProfilerType::SCurve: Basic per-piece S-curve profiles. Jerk-limited
  *   but not time-optimal. Simpler than TOPP-RA.
@@ -723,10 +730,10 @@ public:
      * @brief Constructor with profiler type selection.
      * @param limits Kinematic limits.
      * @param config Motion plan configuration.
-     * @param profilerType Which profiler to use (default: ToppraBasic).
+     * @param profilerType Which profiler to use (default: ParetoTimeEnergy).
      */
     MotionPlanBuilder(Limits limits = {}, Config config = {},
-                      ProfilerType profilerType = ProfilerType::ToppraBasic)
+                      ProfilerType profilerType = ProfilerType::ParetoTimeEnergy)
         : limits_(std::move(limits))
         , config_(std::move(config))
         , profilerType_(profilerType) {}
@@ -861,21 +868,23 @@ public:
 private:
     Limits limits_;
     Config config_;
-    ProfilerType profilerType_ = ProfilerType::ToppraBasic;
+    ProfilerType profilerType_ = ProfilerType::ParetoTimeEnergy;
     std::unique_ptr<IProfiler> customProfiler_;
 
     /// Create a profiler instance for the given type.
     std::unique_ptr<IProfiler> createProfiler(ProfilerType type) {
         switch (type) {
+            case ProfilerType::ToppraBasic:
+                return std::make_unique<BasicTOPPRA<Dim, T>>(limits_);
             case ProfilerType::ToppraJerkConstrained:
                 return std::make_unique<JerkConstrainedTOPPRA<Dim, T>>(limits_);
             case ProfilerType::SCurve:
                 return std::make_unique<SCurveVelocityProfiler<Dim, T>>(limits_);
             case ProfilerType::AnalyticalTOPPRA:
                 return std::make_unique<analytical::AnalyticalTOPPRA<Dim, T>>(limits_);
-            case ProfilerType::ToppraBasic:
+            case ProfilerType::ParetoTimeEnergy:
             default:
-                return std::make_unique<BasicTOPPRA<Dim, T>>(limits_);
+                return std::make_unique<analytical::ParetoTimeEnergyOptimalVelocityPlanner<Dim, T>>(limits_);
         }
     }
 };

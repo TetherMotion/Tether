@@ -59,6 +59,9 @@ struct MotionDispatcherConfig {
     double sampleIntervalSec = 0.0001;
     /// Kinematic limits for the MotionPlanBuilder.
     MotionPlanner::KinematicLimits<4, double> limits{};
+    /// Velocity profiler type (default: ParetoTimeEnergy).
+    MotionPlanner::ProfilerType profilerType =
+        MotionPlanner::ProfilerType::ParetoTimeEnergy;
 #if TETHER_ENABLE_PRESSURE_ADVANCE
     /// Pressure advance configuration for the extruder axis.
     PressureAdvanceConfig pressureAdvance{};
@@ -155,7 +158,8 @@ public:
         MotionPlanner::Vec<4> endVec{target[0], target[1], target[2], target[3]};
         segments.append(MotionPlanner::MotionSegment::linear(startVec, endVec, feedMmMin));
 
-        MotionPlanner::MotionPlanBuilder<4, double> builder(config_.limits);
+        MotionPlanner::MotionPlanBuilder<4, double> builder(
+            config_.limits, {}, config_.profilerType);
         auto plan = builder.build(segments, feedMmMin);
         if (plan.totalDuration() <= 0.0) {
             current_ = target;

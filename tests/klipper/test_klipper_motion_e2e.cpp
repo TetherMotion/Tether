@@ -92,6 +92,7 @@ TEST_F(KlipperMotionE2E, DispatcherMoveDrivesSteppers) {
     dcfg.axisOids = {0, 1, 2, 3};
     dcfg.clockFreqHz = kClockFreq;
     dcfg.sampleIntervalSec = 0.0002;
+    dcfg.profilerType = MotionPlanner::ProfilerType::ToppraBasic;
     motion::MotionDispatcher disp(dcfg);
     disp.setSendCallback([this](const std::vector<motion::AxisStepSequence>& seqs) {
         return host_->sendStepSequences(seqs, [this](){ dev_->pump(); host_->pump(); });
@@ -130,6 +131,7 @@ TEST_F(KlipperMotionE2E, DispatcherMultiAxisMove) {
     dcfg.axisOids = {0, 1, 2, 3};
     dcfg.clockFreqHz = kClockFreq;
     dcfg.sampleIntervalSec = 0.0002;
+    dcfg.profilerType = MotionPlanner::ProfilerType::ToppraBasic;
     motion::MotionDispatcher disp(dcfg);
     disp.setSendCallback([this](const std::vector<motion::AxisStepSequence>& seqs) {
         return host_->sendStepSequences(seqs, [this](){ dev_->pump(); host_->pump(); });
@@ -155,6 +157,7 @@ TEST_F(KlipperMotionE2E, DispatcherReverseMoveNegativeDirection) {
     dcfg.axisOids = {0, 1, 2, 3};
     dcfg.clockFreqHz = kClockFreq;
     dcfg.sampleIntervalSec = 0.0002;
+    dcfg.profilerType = MotionPlanner::ProfilerType::ToppraBasic;
     motion::MotionDispatcher disp(dcfg);
     disp.setSendCallback([this](const std::vector<motion::AxisStepSequence>& seqs) {
         return host_->sendStepSequences(seqs, [this](){ dev_->pump(); host_->pump(); });

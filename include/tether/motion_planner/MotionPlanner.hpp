@@ -194,6 +194,7 @@
 #include "analytical/HybridMonotoneRepresentation.hpp"
 #include "analytical/TrajectorySampler.hpp"
 #include "analytical/AnalyticalTOPPRA.hpp"
+#include "analytical/ParetoTimeEnergyOptimalVelocityPlanner.hpp"
 
 // S-curve jerk-limited profiles
 #include "SCurveProfile.hpp"
