@@ -22,6 +22,8 @@
  * - P15: ProfilerType and name identification
  * - P16: MotionPlanBuilder integration (ProfilerType::ParetoTimeEnergy)
  * - P17: Degenerate inputs (empty path, zero feed rate)
+ * - P21: Short path rest-to-rest (regression for terminal braking)
+ * - P22: Infeasible boundary conditions surface solve failure
  */
 
 #include <gtest/gtest.h>
@@ -753,4 +755,58 @@ TEST(ParetoTimeEnergyTest, P20_WeightSetter) {
     w2.w_a = 0.5;
     profiler.setWeights(w2);
     EXPECT_NEAR(profiler.weights().w_a, 0.5, 1e-12);
+}
+
+// ============================================================================
+// P21: Short-path regression — terminal braking must still reach rest
+// ============================================================================
+
+TEST(ParetoTimeEnergyTest, P21_ShortPathRestToRest) {
+    // A very short line has so little distance that the solver must start
+    // braking almost immediately. This is a regression test for the terminal
+    // arc feasibility check and the acceleration-guidance tolerance that used to
+    // cause the state machine to stall at s ≈ 0 with tiny dsArc steps.
+    auto path = makeLinePath2D(0.1);
+    ASSERT_GT(path.totalLength(), 0.0);
+
+    auto limits = makeLimits2D();
+    CostWeights w;
+    w.w_t = 1.0;
+    w.w_a = 1.0;
+
+    ParetoTimeEnergyOptimalVelocityPlanner<2> profiler(limits, w);
+    auto profile = profiler.computeProfile(path, 50.0, 0, 0, 200);
+
+    EXPECT_GT(profile.totalTime(), 0.0);
+    ASSERT_FALSE(profile.points().empty());
+
+    // Must start and end at rest.
+    EXPECT_NEAR(profile.points().front().velocity, 0.0, 1e-2);
+    EXPECT_NEAR(profile.points().back().velocity, 0.0, 1e-2);
+
+    // Must traverse the whole path.
+    EXPECT_NEAR(profile.totalLength(), path.totalLength(), 1e-6);
+}
+
+// ============================================================================
+// P22: Infeasible final-velocity boundary must surface solve failure
+// ============================================================================
+
+TEST(ParetoTimeEnergyTest, P22_InfeasibleFinalVelocitySurfacesFailure) {
+    // A 0.1 m line starting from rest cannot end at 50 m/s, so the planner
+    // should return an empty profile (rather than silently producing a profile
+    // that does not satisfy the boundary).
+    auto path = makeLinePath2D(0.1);
+    ASSERT_GT(path.totalLength(), 0.0);
+
+    auto limits = makeLimits2D();
+    CostWeights w;
+    w.w_t = 1.0;
+    w.w_a = 0.05;
+
+    ParetoTimeEnergyOptimalVelocityPlanner<2> profiler(limits, w);
+    auto profile = profiler.computeProfile(path, 50.0, 0, 50, 200);
+
+    EXPECT_EQ(profile.points().size(), 0u);
+    EXPECT_EQ(profile.totalTime(), 0.0);
 }

@@ -62,15 +62,18 @@
 #include "AnalyticalTypes.hpp"
 #include "ConstraintEvaluator.hpp"
 #include "NumericalUtils.hpp"
+#include "AnalyticalTOPPRA.hpp"
 #include "../VelocityProfile.hpp"
 #include "../VelocityProfiler.hpp"
 #include "../PathAdapter.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <functional>
 #include <limits>
 #include <memory>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -219,26 +222,263 @@ struct BangSeg {
      * @brief Solve for τ given Δs: smallest positive root of
      *        (e/6)τ³ + (a0/2)τ² + v0·τ − ds = 0
      *
-     * Newton's method with monotone safeguard. The cubic is strictly
-     * increasing for τ > 0 when v > 0 (ds/dτ = v > 0), so convergence
-     * is guaranteed.
+     * Safeguarded Newton-bisection hybrid. The cubic is strictly
+     * increasing while v > 0, so a bracket [0, τ_hi] can be established
+     * by doubling. The caller must only invoke this on arcs where v
+     * stays positive; if no positive root exists, the returned τ is
+     * clamped to the last bracket endpoint and the caller should treat
+     * the arc as infeasible.
      */
     static double tau_for_ds(double v0, double a0, double e, double ds) {
         if (ds <= 0.0) return 0.0;
-        // Initial guess: ignore acceleration terms.
-        double tau = ds / std::max(v0, 1e-12);
-        for (int i = 0; i < 50; ++i) {
-            double f = (e / 6.0) * tau * tau * tau
-                       + (a0 / 2.0) * tau * tau
-                       + v0 * tau - ds;
-            double df = (e / 2.0) * tau * tau + a0 * tau + v0;
-            if (std::abs(df) < 1e-15) break;
-            double d = f / df;
-            tau -= d;
-            if (tau < 0.0) tau = ds / std::max(v0, 1e-12); // safeguard
-            if (std::fabs(d) < 1e-15 * (1.0 + tau)) break;
+
+        auto f = [&](double t) {
+            return v0 * t + 0.5 * a0 * t * t + (e / 6.0) * t * t * t;
+        };
+
+        // If the velocity would hit zero before we travel ds, return the
+        // stopping time. Callers that ignore this will see v(tau)=0 and can
+        // detect that the requested ds was infeasible.
+        double tStop = timeToStop(v0, a0, e);
+        if (std::isfinite(tStop) && tStop > 0.0) {
+            double sMax = f(tStop);
+            if (ds >= sMax) return tStop;
+
+            // f is monotone increasing on [0, tStop] because v(t) >= 0.
+            // Bisection/Newton on this bracket is safe and unique.
+            double lo = 0.0, hi = tStop;
+            double tau = 0.5 * (lo + hi);
+            for (int i = 0; i < 100; ++i) {
+                double val = f(tau) - ds;
+                double der = v0 + a0 * tau + 0.5 * e * tau * tau;
+                if (val > 0.0) hi = tau; else lo = tau;
+                double next = (std::abs(der) > 1e-14) ? tau - val / der
+                                                      : 0.5 * (lo + hi);
+                if (next <= lo || next >= hi) next = 0.5 * (lo + hi);
+                tau = next;
+                if (hi - lo < 1e-13 * (1.0 + tau)) break;
+            }
+            return tau;
         }
+
+        // No positive stopping time: v(t) stays positive, f is monotone.
+        double lo = 0.0;
+        double hi = std::max(ds / std::max(v0, 1e-3), 1e-6);
+        const double kMaxHi = 1e6;
+        while (f(hi) < ds) {
+            hi *= 2.0;
+            if (hi > kMaxHi) break;
+        }
+
+        double tau = 0.5 * (lo + hi);
+        for (int i = 0; i < 100; ++i) {
+            double val = f(tau) - ds;
+            double der = v0 + a0 * tau + 0.5 * e * tau * tau;
+            if (val > 0.0) {
+                hi = tau;
+            } else {
+                lo = tau;
+            }
+            double next = (std::abs(der) > 1e-14) ? tau - val / der
+                                                  : 0.5 * (lo + hi);
+            if (next <= lo || next >= hi) next = 0.5 * (lo + hi);
+            tau = next;
+            if (hi - lo < 1e-13 * (1.0 + tau)) break;
+        }
+
         return tau;
+    }
+
+    /// Smallest positive time τ such that v(τ) = 0.
+    /// Returns +∞ if v(t) stays positive for all τ > 0.
+    /// Returns 0 if the state is already at rest or any motion would make
+    /// v negative immediately (e.g., v0 = 0 and a0 < 0).
+    static double timeToStop(double v0, double a0, double e) {
+        const double inf = std::numeric_limits<double>::infinity();
+
+        // States that cannot move forward without v going negative first.
+        if (v0 <= 0.0 && (a0 < 0.0 || (a0 == 0.0 && e < 0.0))) {
+            return 0.0;
+        }
+
+        if (std::abs(e) > MathConstants::EPSILON) {
+            double disc = a0 * a0 - 2.0 * e * v0;
+            if (disc < 0.0) return inf;
+            double sqrtDisc = std::sqrt(disc);
+            double t1 = (-a0 - sqrtDisc) / e;
+            double t2 = (-a0 + sqrtDisc) / e;
+            double tPos = inf;
+            if (t1 > 0.0) tPos = std::min(tPos, t1);
+            if (t2 > 0.0) tPos = std::min(tPos, t2);
+            return tPos;
+        } else if (a0 < 0.0) {
+            return -v0 / a0;
+        } else {
+            return inf;
+        }
+    }
+
+    /// Maximum forward distance reachable while keeping v ≥ 0.
+    static double maxForwardDistance(double v0, double a0, double e) {
+        double tStop = timeToStop(v0, a0, e);
+        if (!std::isfinite(tStop) || tStop <= 0.0) return std::numeric_limits<double>::infinity();
+        return ds(v0, a0, e, tStop);
+    }
+
+    /**
+     * @brief Shortest distance needed to bring the state to v=0 with a single
+     * constant-η arc while respecting ηMin and aMinBound.
+     *
+     * The shortest stop uses the most negative feasible final acceleration.
+     */
+    static double terminalMinDistance(double v0, double a0, double etaMin,
+                                      double etaMax, double aMinBound) {
+        if (v0 <= 0.0) return 0.0;
+        if (aMinBound > 0.0) aMinBound = 0.0;
+
+        double jerkLimitTerm = a0 * a0 - 2.0 * v0 * etaMin;
+        if (jerkLimitTerm < 0.0) return 0.0;
+        double aEndJerkLim = -std::sqrt(jerkLimitTerm);
+        double aEndLow = std::max(aMinBound, aEndJerkLim);
+        if (aEndLow > 0.0) return 0.0;
+
+        double aE = aEndLow;
+        if (a0 + aE >= -1e-14) return 0.0;
+        double t = -2.0 * v0 / (a0 + aE);
+        if (!std::isfinite(t) || t < 0.0) return 0.0;
+        double e = (aE * aE - a0 * a0) / (-2.0 * v0);
+        if (e > etaMax) return 0.0;
+        return ds(v0, a0, e, t);
+    }
+
+    /**
+     * @brief Solve a single constant-η arc that brings the state to v=0 at
+     * exactly sRemaining, with a final acceleration aEnd in [aMinBound, 0].
+     *
+     * Given (v0, a0), choose a final acceleration aEnd (≤ 0, ≥ aMinBound) such
+     * that the arc length equals sRemaining and the final velocity is zero.
+     * The jerk η and duration τ follow from the boundary conditions:
+     *   aEnd = a0 + η·τ
+     *   0    = v0 + a0·τ + ½·η·τ²
+     * Solving yields τ = -2·v0 / (a0 + aEnd) and
+     *   η    = (aEnd² - a0²) / (-2·v0).
+     *
+     * The chosen η must satisfy ηMin ≤ η ≤ 0 and aEnd must be within the
+     * acceleration bounds. We bisect on aEnd.
+     *
+     * @return true if a feasible arc exists, populating eta, tau, and aEnd.
+     */
+    static bool terminalArc(double v0, double a0, double sRemaining,
+                            double etaMin, double etaMax, double aMinBound,
+                            double& eta, double& tau, double& aEnd) {
+        if (sRemaining <= 0.0) {
+            tau = 0.0;
+            eta = 0.0;
+            aEnd = a0;
+            return true;
+        }
+        if (v0 <= 0.0) return false;
+
+        // aEnd must be in [aMinBound, 0].
+        if (aMinBound > 0.0) aMinBound = 0.0;
+
+        auto sAt = [&](double aE) -> double {
+            if (a0 + aE >= -1e-14) {
+                // a never becomes negative enough to stop forward motion.
+                return std::numeric_limits<double>::infinity();
+            }
+            double t = -2.0 * v0 / (a0 + aE);
+            if (!std::isfinite(t) || t < 0.0) return 0.0;
+            double e = (aE * aE - a0 * a0) / (-2.0 * v0);
+            if (e > etaMax) return std::numeric_limits<double>::infinity();
+            if (e < etaMin) return 0.0;
+            return ds(v0, a0, e, t);
+        };
+
+        // Most negative feasible aEnd comes from the jerk lower bound and the
+        // acceleration lower bound.
+        double jerkLimitTerm = a0 * a0 - 2.0 * v0 * etaMin;
+        if (jerkLimitTerm < 0.0) return false;
+        double aEndJerkLim = -std::sqrt(jerkLimitTerm);
+        double lo = std::max(aMinBound, aEndJerkLim);
+
+        // Least negative feasible aEnd is constrained by the jerk upper bound.
+        // For a0 >= 0 we also need aEnd < -a0, otherwise the stopping time
+        // would be non-positive.
+        double hi;
+        if (a0 >= 0.0) {
+            hi = -a0 - 1e-12;
+        } else {
+            double etaMaxTerm = a0 * a0 - 2.0 * v0 * etaMax;
+            if (etaMaxTerm <= 0.0) {
+                hi = 0.0;
+            } else {
+                hi = -std::sqrt(etaMaxTerm);
+            }
+        }
+        if (hi > 0.0) hi = 0.0;
+        if (lo > hi) return false;
+
+        double sLo = sAt(lo);
+        double sHi = sAt(hi);
+
+        if (!std::isfinite(sLo)) {
+            // lo should always give a finite stop distance if it is feasible.
+            return false;
+        }
+        if (sRemaining < sLo - 1e-12) return false;
+
+        // If the upper bound gives an infinite stopping distance, the required
+        // aEnd lies very close to the critical value (aEnd -> -a0 for a0 >= 0
+        // or aEnd -> 0 for a0 < 0).  In that case bisect against a bracketed
+        // upper value by moving hi toward lo until sAt(hi) is finite and
+        // larger than sRemaining.
+        if (!std::isfinite(sHi) || sHi <= sRemaining) {
+            double hiTry = hi;
+            const double kHiMin = lo + 1e-12;
+            for (int k = 0; k < 60; ++k) {
+                double mid = 0.5 * (lo + hiTry);
+                if (mid <= kHiMin) break;
+                double sMid = sAt(mid);
+                if (std::isfinite(sMid) && sMid > sRemaining) {
+                    hiTry = mid;
+                    sHi = sMid;
+                    if (sMid - sRemaining > sRemaining - sLo) break;
+                } else {
+                    lo = mid;
+                    sLo = std::isfinite(sMid) ? sMid : sLo;
+                }
+            }
+            if (!std::isfinite(sHi) || sHi <= sRemaining) return false;
+            hi = hiTry;
+        }
+
+        // Bisect on aEnd to match sRemaining.
+        for (int iter = 0; iter < 80; ++iter) {
+            double mid = 0.5 * (lo + hi);
+            double sMid = sAt(mid);
+            if (!std::isfinite(sMid)) {
+                // mid is infeasible; move hi left.
+                hi = mid;
+                continue;
+            }
+            if (sMid > sRemaining) {
+                // Need more deceleration (more negative aEnd).
+                hi = mid;
+                sHi = sMid;
+            } else {
+                lo = mid;
+                sLo = sMid;
+            }
+            if (hi - lo < 1e-12 * (1.0 + std::abs(mid))) break;
+        }
+
+        aEnd = 0.5 * (lo + hi);
+        tau = -2.0 * v0 / (a0 + aEnd);
+        eta = (aEnd * aEnd - a0 * a0) / (-2.0 * v0);
+        return std::isfinite(tau) && tau > 0.0 &&
+               eta >= etaMin - 1e-12 && eta <= etaMax + 1e-12 &&
+               aEnd >= aMinBound - 1e-12 && aEnd <= 1e-12;
     }
 };
 
@@ -416,22 +656,28 @@ public:
     /**
      * @brief Construct the WSS from a path and arc list.
      *
-     * @param path The path (stored by const reference — caller must
-     *             ensure lifetime)
+     * The WSS keeps the path alive via shared_ptr, eliminating the
+     * lifetime hazard of the previous const-reference design.
+     *
+     * @param path The path (shared ownership)
      * @param arcs The weighted arcs (the solution)
      * @param w The cost weights used
      * @param evaluator The constraint evaluator (for velocity limit
      *                  queries during sampling)
+     * @param optimalAStar The optimal singular acceleration level found by
+     *                     the solver (used by optimalAStar())
      */
     WeightedSwitchingStructure(
-        const Path& path,
+        std::shared_ptr<const Path> path,
         std::vector<Arc> arcs,
         CostWeights w,
-        ConstraintEvaluator<Dim, T> evaluator)
-        : path_(path)
+        ConstraintEvaluator<Dim, T> evaluator,
+        double optimalAStar = 0.0)
+        : pathPtr_(std::move(path))
         , arcs_(std::move(arcs))
         , w_(w)
-        , evaluator_(std::move(evaluator)) {
+        , evaluator_(std::move(evaluator))
+        , optimalAStar_(optimalAStar) {
 
         // Use pre-computed t0 and duration from the solver.
         // Recompute total time from the arc list.
@@ -439,9 +685,10 @@ public:
         double tAccum = 0.0;
         for (auto& arc : arcs_) {
             arc.t0 = tAccum;
-            if (arc.duration <= 0.0) {
-                arc.duration = computeArcDuration(arc);
-            }
+            // Recompute durations so that WALL arcs use the velocity-limit
+            // quadrature instead of any approximate constant-velocity value
+            // supplied by the solver.
+            arc.duration = computeArcDuration(arc);
             tAccum += arc.duration;
         }
         totalTime_ = tAccum;
@@ -450,17 +697,44 @@ public:
     // --- AnalyticalTrajectorySource interface ---
 
     T totalTime() const override { return static_cast<T>(totalTime_); }
-    T totalLength() const override { return path_.totalLength(); }
+    T totalLength() const override { return pathPtr_->totalLength(); }
+
+    /**
+     * @brief Compute the time at which the trajectory reaches arc length s.
+     *
+     * Inverts each arc's s(t) relation exactly (BANG/SINGULAR via closed-form
+     * polynomials, WALL via the velocity-limit quadrature).
+     */
+    T timeAtArcLength(T s_query) const {
+        double s = static_cast<double>(s_query);
+        if (arcs_.empty()) return T(0);
+        for (const auto& arc : arcs_) {
+            if (s <= arc.s1) {
+                double dsLocal = s - arc.s0;
+                if (dsLocal < 0.0) dsLocal = 0.0;
+                double tau = 0.0;
+                if (arc.type == WeightedArcType::SINGULAR) {
+                    tau = SingSeg::tau_for_ds(arc.v0, arc.a_star, dsLocal);
+                } else if (arc.type == WeightedArcType::WALL) {
+                    tau = wallDuration(arc.s0, arc.s0 + dsLocal);
+                } else {
+                    tau = BangSeg::tau_for_ds(arc.v0, arc.a0, arc.eta, dsLocal);
+                }
+                return static_cast<T>(arc.t0 + tau);
+            }
+        }
+        return static_cast<T>(totalTime_);
+    }
 
     Vec<Dim, T> position(T t) const override {
         auto [arcIdx, tau, s, v, a, eta] = locateAndState(t);
-        auto eval = path_.evaluateAtArcLength(static_cast<T>(s));
+        auto eval = pathPtr_->evaluateAtArcLength(static_cast<T>(s));
         return eval.position;
     }
 
     Vec<Dim, T> velocity(T t) const override {
         auto [arcIdx, tau, s, v, a, eta] = locateAndState(t);
-        auto eval = path_.evaluateAtArcLength(static_cast<T>(s));
+        auto eval = pathPtr_->evaluateAtArcLength(static_cast<T>(s));
         // qdot = T * v (tangent * path velocity)
         Vec<Dim, T> result;
         for (size_t i = 0; i < Dim; ++i)
@@ -470,7 +744,7 @@ public:
 
     Vec<Dim, T> acceleration(T t) const override {
         auto [arcIdx, tau, s, v, a, eta] = locateAndState(t);
-        auto eval = path_.evaluateAtArcLength(static_cast<T>(s));
+        auto eval = pathPtr_->evaluateAtArcLength(static_cast<T>(s));
         // qddot = κ⃗ * v² + T * a (curvature * v² + tangent * a)
         Vec<Dim, T> result;
         for (size_t i = 0; i < Dim; ++i) {
@@ -502,23 +776,23 @@ public:
 
     T curvature(T t) const override {
         auto [arcIdx, tau, s, v, a, eta] = locateAndState(t);
-        return path_.curvatureAtArcLength(static_cast<T>(s));
+        return pathPtr_->curvatureAtArcLength(static_cast<T>(s));
     }
 
     SourceReference sourceRef(T t) const override {
         auto [arcIdx, tau, s, v, a, eta] = locateAndState(t);
-        return path_.sourceRefAtArcLength(static_cast<T>(s));
+        return pathPtr_->sourceRefAtArcLength(static_cast<T>(s));
     }
 
     size_t segmentIndex(T t) const override {
         auto [arcIdx, tau, s, v, a, eta] = locateAndState(t);
-        auto eval = path_.evaluateAtArcLength(static_cast<T>(s));
+        auto eval = pathPtr_->evaluateAtArcLength(static_cast<T>(s));
         return eval.segmentIndex;
     }
 
     T segmentParameter(T t) const override {
         auto [arcIdx, tau, s, v, a, eta] = locateAndState(t);
-        auto eval = path_.evaluateAtArcLength(static_cast<T>(s));
+        auto eval = pathPtr_->evaluateAtArcLength(static_cast<T>(s));
         return eval.localParameter;
     }
 
@@ -536,18 +810,38 @@ public:
     /**
      * @brief The optimal singular acceleration level a* found by the solver.
      */
-    double optimalAStar() const {
-        return arcs_.empty() ? 0.0
-            : std::abs(arcs_.front().a_star);
+    double optimalAStar() const { return optimalAStar_; }
+
+    /**
+     * @brief The arc type active at time t.
+     */
+    WeightedArcType arcTypeAt(T t) const {
+        double tD = static_cast<double>(t);
+        if (arcs_.empty()) return WeightedArcType::SINGULAR;
+
+        size_t lo = 0, hi = arcs_.size();
+        while (lo < hi) {
+            size_t mid = (lo + hi) / 2;
+            if (arcs_[mid].t0 + arcs_[mid].duration < tD)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        size_t idx = std::min(lo, arcs_.size() - 1);
+        return arcs_[idx].type;
     }
 
+    /// Access the path (kept alive by the WSS).
+    std::shared_ptr<const Path> path() const { return pathPtr_; }
+
 private:
-    const Path& path_;
+    std::shared_ptr<const Path> pathPtr_;
     std::vector<Arc> arcs_;
     CostWeights w_;
     ConstraintEvaluator<Dim, T> evaluator_;
     double totalTime_ = 0.0;
     double costValue_ = 0.0;
+    double optimalAStar_ = 0.0;
 
     /**
      * @brief Locate the arc containing time t and compute the full state.
@@ -583,12 +877,10 @@ private:
             s = arc.s0 + SingSeg::ds(arc.v0, arc.a_star, tau);
             eta = 0.0;
         } else if (arc.type == WeightedArcType::WALL) {
-            // WALL: approximate with constant velocity
-            // (proper implementation would use precomputed quadrature)
-            double vWall = arc.v0;
-            v = vWall;
-            a = 0.0;
-            s = arc.s0 + vWall * tau;
+            // WALL: follow the velocity-limit curve exactly.
+            s = wallTimeToS(arc, tau);
+            v = wallVelocityLimit(s);
+            a = wallAcceleration(s);
             eta = 0.0;
         } else {
             // BANG_PLUS or BANG_MINUS
@@ -600,10 +892,31 @@ private:
         }
 
         // Clamp s to path bounds
-        double sMax = static_cast<double>(path_.totalLength());
+        double sMax = static_cast<double>(pathPtr_->totalLength());
         if (s > sMax) s = sMax;
         if (s < 0.0) s = 0.0;
         if (v < 0.0) v = 0.0;
+
+        // Hard guard: never report a velocity above the wall at this s.
+        double vLim = static_cast<double>(evaluator_.velocityLimit(
+            static_cast<T>(s), *pathPtr_));
+        if (v > vLim) v = vLim;
+
+        // Clamp acceleration and jerk to feasible limits at the current state.
+        // This protects downstream consumers from spurious overshoots caused
+        // by infeasible constant-eta arcs that the solver used to bridge
+        // discrete sampling steps.
+        auto [aMinB, aMaxB] = evaluator_.accelerationBounds(
+            static_cast<T>(s), static_cast<T>(v), *pathPtr_);
+        a = std::clamp(a, static_cast<double>(aMinB),
+                            static_cast<double>(aMaxB));
+
+        auto etaBounds = evaluator_.etaBounds(
+            static_cast<T>(s), static_cast<T>(v), static_cast<T>(a),
+            *pathPtr_);
+        eta = std::clamp(eta,
+                         static_cast<double>(etaBounds.eta_min),
+                         static_cast<double>(etaBounds.eta_max));
 
         return {idx, tau, s, v, a, eta};
     }
@@ -618,12 +931,85 @@ private:
         if (arc.type == WeightedArcType::SINGULAR) {
             return SingSeg::tau_for_ds(arc.v0, arc.a_star, ds);
         } else if (arc.type == WeightedArcType::WALL) {
-            // Approximate: constant velocity at v0
-            return ds / std::max(arc.v0, 1e-12);
+            return wallDuration(arc.s0, arc.s1);
         } else {
             // BANG
             return BangSeg::tau_for_ds(arc.v0, arc.a0, arc.eta, ds);
         }
+    }
+
+    /// 8-point Gauss-Legendre quadrature for ∫_{s0}^{s1} 1/v_lim(s) ds.
+    double wallDuration(double s0, double s1) const {
+        const double mid = 0.5 * (s0 + s1);
+        const double half = 0.5 * (s1 - s0);
+        const std::array<double, 4> nodes = {
+            0.9602898564975363,
+            0.7966664774136268,
+            0.5255324099163290,
+            0.1834346424956498
+        };
+        const std::array<double, 4> weights = {
+            0.1012285362903763,
+            0.2223810344533745,
+            0.3137066458778873,
+            0.3626837833783620
+        };
+        double sum = 0.0;
+        for (size_t i = 0; i < nodes.size(); ++i) {
+            double x = nodes[i];
+            double w = weights[i];
+            double sPlus = mid + half * x;
+            double sMinus = mid - half * x;
+            double vPlus = wallVelocityLimit(sPlus);
+            double vMinus = wallVelocityLimit(sMinus);
+            sum += w * (1.0 / std::max(vPlus, 1e-12) +
+                        1.0 / std::max(vMinus, 1e-12));
+        }
+        return half * sum;
+    }
+
+    /// Invert the wall time integral: find s in [arc.s0, arc.s1] such that
+    /// ∫_{arc.s0}^{s} 1/v_lim(σ) dσ = tau.
+    double wallTimeToS(const Arc& arc, double tau) const {
+        double s0 = arc.s0;
+        double s1 = arc.s1;
+        double tTotal = wallDuration(s0, s1);
+        if (tTotal <= 0.0 || tau <= 0.0) return s0;
+        if (tau >= tTotal) return s1;
+
+        double lo = s0, hi = s1;
+        for (int iter = 0; iter < 80; ++iter) {
+            double mid = 0.5 * (lo + hi);
+            double tMid = wallDuration(s0, mid);
+            if (tMid < tau) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+            if (hi - lo < 1e-13 * (1.0 + std::abs(mid))) break;
+        }
+        return 0.5 * (lo + hi);
+    }
+
+    /// Velocity limit at arc length s.
+    double wallVelocityLimit(double s) const {
+        return static_cast<double>(
+            evaluator_.velocityLimit(static_cast<T>(s), *pathPtr_));
+    }
+
+    /// Wall acceleration a = v * dv_lim/ds, clamped to feasible bounds.
+    double wallAcceleration(double s) const {
+        const double eps = 1e-6;
+        double vL = wallVelocityLimit(s - eps);
+        double vC = wallVelocityLimit(s);
+        double vR = wallVelocityLimit(s + eps);
+        double dvds = (vR - vL) / (2.0 * eps);
+        double a = vC * dvds;
+
+        auto [aMin, aMax] = evaluator_.accelerationBounds(
+            static_cast<T>(s), static_cast<T>(vC), *pathPtr_);
+        return std::clamp(a, static_cast<double>(aMin),
+                               static_cast<double>(aMax));
     }
 };
 
@@ -706,12 +1092,14 @@ public:
         double aLo = 1e-6 * aMax;  // near-zero a* → very slow
         double aHi = aMax;
 
-        auto [aOpt, Jmin] = goldenSection(J, aLo, aHi, 1e-6 * aMax);
+        // A sub-millimetre tolerance is enough for the trajectory cost and
+        // keeps the search bounded (≤ ~25 iterations for a 500-unit range).
+        double tol = std::max(1e-6 * aMax, 0.01);
+        auto [aOpt, Jmin] = goldenSection(J, aLo, aHi, tol);
 
         // Rebuild the optimal arc list
         arcs_.clear();
         double Jfinal = simulateAndCost(aOpt, /*record=*/true);
-        (void)Jfinal;
 
         return arcs_;
     }
@@ -793,8 +1181,6 @@ private:
         double s = 0.0, t = 0.0;
         double v = v0_, a = 0.0;
         double J = 0.0;
-        bool braking = false;
-        double aStarEff = aStar;  // effective a* (negated during braking)
 
         const double ds = sTotal_ / static_cast<double>(numSamples_);
         const double sEnd = sTotal_;
@@ -802,11 +1188,10 @@ private:
         // Get jerk bounds (use path-level as default; per-interval recompute
         // would be more accurate but slower)
         auto getEtaBounds = [&](double sCur, double vCur, double aCur)
-            -> std::pair<double, double> {
-            auto bounds = evaluator_.etaBounds(
+            -> EtaBounds {
+            return evaluator_.etaBounds(
                 static_cast<T>(sCur), static_cast<T>(vCur),
                 static_cast<T>(aCur), path_);
-            return {bounds.eta_min, bounds.eta_max};
         };
 
         auto getVLimit = [&](double sCur) -> double {
@@ -814,35 +1199,95 @@ private:
                 evaluator_.velocityLimit(static_cast<T>(sCur), path_));
         };
 
+        bool infeasible = false;
         int maxIter = static_cast<int>(numSamples_) * 20;
         for (int iter = 0; iter < maxIter && s < sEnd - 1e-10; ++iter) {
-            auto [etaMin, etaMax] = getEtaBounds(s, v, a);
+            EtaBounds etaBounds = getEtaBounds(s, v, a);
+            if (!etaBounds.feasible()) {
+                infeasible = true;
+                break;
+            }
             double vLim = getVLimit(s);
 
-            // Check if we need to start braking
+            // Acceleration bounds at this state.
+            auto aBounds = evaluator_.accelerationBounds(
+                static_cast<T>(s), static_cast<T>(v), path_);
+            if (aBounds.first > aBounds.second) {
+                infeasible = true;
+                break;
+            }
+            double aMinBound = static_cast<double>(aBounds.first);
+            double aMaxBound = static_cast<double>(aBounds.second);
+
             double sRemaining = sEnd - s;
-            double sBrake = brake_distance(v, aStarEff, etaMin, etaMax);
-            if (!braking && sRemaining <= sBrake + ds * 0.5) {
-                braking = true;
-                aStarEff = -aStar;  // switch to braking with -a*
+
+            // Terminal braking check: if the remaining distance is within the
+            // shortest feasible stopping distance, solve a single constant-η arc
+            // that lands at (sEnd, v=0). This guarantees rest-to-rest.
+            double sStopMin = BangSeg::terminalMinDistance(
+                v, a, etaBounds.eta_min, etaBounds.eta_max, aMinBound);
+            if (sRemaining <= sStopMin * 1.2 + ds) {
+                if (sRemaining < sStopMin - 1e-9) {
+                    // We have already moved past the point where we can stop in
+                    // the remaining distance: this a* is infeasible.
+                    infeasible = true;
+                    break;
+                }
+                double etaTerm, tauTerm, aEndTerm;
+                bool terminalOk = BangSeg::terminalArc(
+                    v, a, sRemaining, etaBounds.eta_min, etaBounds.eta_max,
+                    aMinBound, etaTerm, tauTerm, aEndTerm);
+                if (terminalOk) {
+                    // Record the terminal arc and finish.
+                    double a1 = std::clamp(aEndTerm, aMinBound, aMaxBound);
+
+                    double intA2 = a * a * tauTerm
+                                 + a * etaTerm * tauTerm * tauTerm
+                                 + (etaTerm * etaTerm * tauTerm * tauTerm
+                                    * tauTerm) / 3.0;
+                    J += w_.w_t * tauTerm + w_.w_a * intA2;
+
+                    if (record) {
+                        Arc arc;
+                        arc.type = (std::abs(etaTerm) > 1e-12)
+                                       ? WeightedArcType::BANG_MINUS
+                                       : WeightedArcType::SINGULAR;
+                        arc.s0 = s;
+                        arc.s1 = sEnd;
+                        arc.t0 = t;
+                        arc.v0 = v;
+                        arc.a0 = a;
+                        arc.eta = etaTerm;
+                        arc.a_star = aStar;
+                        arc.duration = tauTerm;
+                        tmp.push_back(arc);
+                    }
+                    s = sEnd;
+                    t += tauTerm;
+                    v = 0.0;
+                    a = a1;
+                    break;
+                }
             }
 
             // Select desired eta per the a* guidance law
+            double aStarEff = std::clamp(aStar, aMinBound, aMaxBound);
+            double aTol = 1e-7 * std::max(1.0, std::abs(aStarEff));
             double etaDes;
             if (v >= vLim - 1e-10) {
                 // At velocity wall — cruise
                 etaDes = 0.0;
                 a = 0.0;  // hold at wall
-            } else if (a < aStarEff - 1e-10) {
-                etaDes = etaMax;  // BANG_PLUS: raise a toward a*
-            } else if (a > aStarEff + 1e-10) {
-                etaDes = etaMin;  // BANG_MINUS: lower a toward a*
+            } else if (a < aStarEff - aTol) {
+                etaDes = etaBounds.eta_max;  // BANG_PLUS: raise a toward a*
+            } else if (a > aStarEff + aTol) {
+                etaDes = etaBounds.eta_min;  // BANG_MINUS: lower a toward a*
             } else {
                 etaDes = 0.0;     // SINGULAR: hold at a*
             }
 
             // Clamp to feasible bounds
-            double eta = std::clamp(etaDes, etaMin, etaMax);
+            double eta = etaBounds.clamp(etaDes);
 
             // Determine arc type
             WeightedArcType arcType;
@@ -894,27 +1339,45 @@ private:
             // Ensure minimum step
             if (dsArc < 1e-12) dsArc = 1e-12;
 
-            // Compute tau (time for this arc)
+            // Compute tau (time for this arc). If the constant-eta control
+            // would cause v to hit zero before we cover dsArc, we truncate the
+            // step to the feasible stopping distance. This prevents the solver
+            // from producing physically meaningless arcs with huge duration.
+            bool stoppedBeforeEnd = false;
             double tau;
-            if (arcType == WeightedArcType::SINGULAR) {
-                tau = SingSeg::tau_for_ds(v, aStarEff, dsArc);
-            } else if (arcType == WeightedArcType::WALL) {
-                tau = dsArc / std::max(v, 1e-12);
-            } else {
-                tau = BangSeg::tau_for_ds(v, a, eta, dsArc);
-            }
-
-            // Compute end state
             double v1, a1;
-            if (arcType == WeightedArcType::SINGULAR) {
-                a1 = aStarEff;
-                v1 = SingSeg::v(v, aStarEff, tau);
-            } else if (arcType == WeightedArcType::WALL) {
+            if (arcType == WeightedArcType::WALL) {
+                tau = dsArc / std::max(v, 1e-12);
                 a1 = 0.0;
-                v1 = v;  // hold at wall
+                v1 = v;
+            } else if (arcType == WeightedArcType::SINGULAR) {
+                double as = aStarEff;
+                double sMax = (as < 0.0) ? (-v * v / (2.0 * as))
+                                         : std::numeric_limits<double>::infinity();
+                if (sMax < dsArc) {
+                    dsArc = std::max(sMax, 0.0);
+                    tau = (as < 0.0 && v > 0.0) ? -v / as : 0.0;
+                    v1 = 0.0;
+                    a1 = as;
+                    stoppedBeforeEnd = (s + dsArc < sEnd - 1e-6);
+                } else {
+                    tau = SingSeg::tau_for_ds(v, as, dsArc);
+                    a1 = as;
+                    v1 = SingSeg::v(v, as, tau);
+                }
             } else {
-                a1 = BangSeg::a(a, eta, tau);
-                v1 = BangSeg::v(v, a, eta, tau);
+                double sMax = BangSeg::maxForwardDistance(v, a, eta);
+                if (sMax < dsArc) {
+                    dsArc = std::max(sMax, 0.0);
+                    tau = BangSeg::timeToStop(v, a, eta);
+                    v1 = 0.0;
+                    a1 = BangSeg::a(a, eta, tau);
+                    stoppedBeforeEnd = (s + dsArc < sEnd - 1e-6);
+                } else {
+                    tau = BangSeg::tau_for_ds(v, a, eta, dsArc);
+                    a1 = BangSeg::a(a, eta, tau);
+                    v1 = BangSeg::v(v, a, eta, tau);
+                }
             }
 
             // Clamp velocity to limit
@@ -925,10 +1388,14 @@ private:
             if (v1 < 0.0) v1 = 0.0;
 
             // Clamp acceleration to acceleration bounds
-            auto [aMinBound, aMaxBound] = evaluator_.accelerationBounds(
+            auto aEndBounds = evaluator_.accelerationBounds(
                 static_cast<T>(s + dsArc), static_cast<T>(v1), path_);
-            a1 = std::clamp(a1, static_cast<double>(aMinBound),
-                                 static_cast<double>(aMaxBound));
+            if (aEndBounds.first > aEndBounds.second) {
+                infeasible = true;
+                break;
+            }
+            a1 = std::clamp(a1, static_cast<double>(aEndBounds.first),
+                                 static_cast<double>(aEndBounds.second));
 
             // Exact cost increment: ∫(w_t + w_a * a²)dt
             // For BANG: a(t) = a0 + eta*tau, so
@@ -971,38 +1438,34 @@ private:
             v = v1;
             a = a1;
 
-            // Safety: if velocity is zero and we're not at the end, break
-            if (v < 1e-12 && s < sEnd - 1e-6) {
-                // Stuck — give a tiny velocity to continue
-                v = 1e-6;
+            // If we had to stop before reaching the end, the chosen a* is
+            // infeasible for the remaining distance. Add a large penalty and exit.
+            if (stoppedBeforeEnd) {
+                J += 1e8 * (sEnd - s);
+                break;
             }
         }
 
-        // Ensure we reach the end
-        if (s < sEnd - 1e-10 && !tmp.empty() && record) {
-            // Extend last arc to the end
-            tmp.back().s1 = sEnd;
+        // Surface infeasibility or failure to traverse the entire path.
+        if (infeasible || s < sEnd - 1e-6) {
+            if (record) arcs_.clear();
+            lastCost_ = 1e12;
+            return 1e12;
         }
 
-        // Force final velocity to zero (rest-to-rest)
-        if (record && !tmp.empty()) {
-            // Adjust the last arc's final state to ensure v=0
-            // by clamping the last arc's velocity
-            if (vf_ <= 1e-10) {
-                // Add a final zero-velocity point if needed
-                Arc& last = tmp.back();
-                last.s1 = sEnd;
+        // The trajectory must also satisfy the final velocity boundary.
+        if (std::abs(v - vf_) > 1e-3) {
+            if (record) {
+                arcs_.clear();
+                lastCost_ = 1e12;
+                return 1e12;
             }
+            J += 1e8 * std::abs(v - vf_);
         }
 
         if (record) {
             arcs_ = std::move(tmp);
             lastAStar_ = aStar;
-        }
-
-        // Penalize incomplete simulations (didn't reach the end)
-        if (s < sEnd - 1e-6) {
-            J += 1e6 * (sEnd - s);  // large penalty per unit of untraversed path
         }
 
         lastCost_ = J;
@@ -1088,15 +1551,26 @@ public:
         CostWeights wEff = weights_;
         if (wEff.w_t <= 0.0) wEff.w_t = 1e-12;
 
+        // Keep the path alive for the WSS by taking shared ownership.
+        auto pathCopy = std::make_shared<Path>(path);
+        pathCopy_ = pathCopy;
+
         // Solve
-        Solver solver(path, limits_, wEff, feedRate);
-        auto arcs = solver.solve(startVelocity, endVelocity,
-                                  std::max(numSamples, size_t(200)));
+        Solver solver(*pathCopy, limits_, wEff, feedRate);
+        auto arcs = solver.solve(startVelocity, endVelocity, numSamples);
+        if (arcs.empty()) {
+            // The solver could not find a feasible trajectory (e.g. the
+            // requested boundary velocities are unreachable for the path).
+            wss_.reset();
+            pathCopy_.reset();
+            return profile;
+        }
 
         // Build the WSS
         Evaluator evaluator(limits_, feedRate);
         auto wss = std::make_shared<WSS>(
-            path, std::move(arcs), wEff, std::move(evaluator));
+            pathCopy, std::move(arcs), wEff, std::move(evaluator),
+            solver.optimalAStar());
         wss_ = wss;
         wss_->setCostValue(solver.costValue());
 
@@ -1151,6 +1625,7 @@ public:
 private:
     Limits limits_;
     CostWeights weights_;
+    std::shared_ptr<const Path> pathCopy_;
     std::shared_ptr<WSS> wss_;
 
     /**
@@ -1169,8 +1644,8 @@ private:
         for (size_t i = 0; i < numSamples; ++i) {
             T s = std::min(T(i) * ds, pathLength);
 
-            // Find time at this arc length by walking arcs
-            T t = timeAtArcLength(wss, s);
+            // Find time at this arc length using the exact WSS mapping
+            T t = wss.timeAtArcLength(s);
 
             // Sample state from WSS
             T v = wss.pathVelocity(t);
@@ -1202,20 +1677,17 @@ private:
             profile.addPoint(pt);
         }
 
-        // Ensure the last point has zero velocity for rest-to-rest
-        if (!profile.points().empty()) {
-            auto& last = profile.points().back();
-            last.velocity = T(0);
-            last.acceleration = T(0);
-            last.jerk = T(0);
-        }
+        // Do not falsify the terminal state. The WSS already produces the
+        // state that the solver actually reaches, which must honor
+        // endVelocity for a valid solution.
 
         return profile;
     }
 
     /**
      * @brief Find the time corresponding to an arc length by walking
-     *        the arc list.
+     *        the arc list. (Kept for compatibility; new code should use
+     *        WSS::timeAtArcLength.)
      */
     T timeAtArcLength(const WSS& wss, T s) const {
         const auto& arcs = wss.arcs();
