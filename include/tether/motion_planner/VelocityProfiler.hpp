@@ -23,9 +23,15 @@
  *   a time-optimal profile but is well-understood and easy to reason about.
  *   Useful for applications where simplicity matters more than optimality.
  *
- * All three produce a `VelocityProfile<T>` — a tabulated v(s) profile with
- * per-point acceleration, jerk, and time. MotionPlan consumes this profile
- * directly; it does not need to know which profiler produced it.
+ * - **AnalyticalTOPPRA** and **ParetoTimeEnergyOptimalVelocityPlanner**:
+ *   Analytical profilers that return a `VelocityProfile` abstract pointer.
+ *   Downstream consumers call the query API and do not need to know the
+ *   concrete representation.
+ *
+ * All profilers now return a `std::unique_ptr<VelocityProfile>`, which may
+ * point to a `SampledVelocityProfile`, an `AnalyticalSSRVelocityProfile`,
+ * or another concrete type. MotionPlan consumes this profile through the
+ * abstract query interface.
  *
  * ## Design Rationale
  *
@@ -48,15 +54,17 @@
 
 #pragma once
 
+#include "VelocityProfile.hpp"
+
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 
 namespace MotionPlanner {
 
 // Forward declarations — the full definitions are in VelocityProfile.hpp
-// and PathAdapter.hpp. They are needed at template instantiation time,
-// not at the point of class definition.
-template<typename T> class VelocityProfile;
+// and PathAdapter.hpp.
+class VelocityProfile;
 template<size_t Dim, typename T> class PathAdapter;
 template<size_t NumAxes, typename T> struct KinematicLimits;
 
@@ -91,7 +99,7 @@ enum class ProfilerType : uint8_t {
 template<size_t Dim, typename T = double>
 class VelocityProfiler {
 public:
-    using Profile = VelocityProfile<T>;
+    using Profile = VelocityProfile;
     using Path = PathAdapter<Dim, T>;
     using Limits = KinematicLimits<Dim, T>;
 
@@ -116,9 +124,9 @@ public:
      *                  Ignored by BasicTOPPRA (unbounded jerk) and
      *                  JerkConstrainedTOPPRA (assumes j(0) = 0). Accepted
      *                  for interface compatibility only (WI-P3).
-     * @return The computed velocity profile.
+     * @return A unique pointer to the computed velocity profile.
      */
-    virtual Profile computeProfile(
+    virtual std::unique_ptr<VelocityProfile> computeProfile(
         const Path& path,
         T feedRate,
         T startVelocity = T(0),

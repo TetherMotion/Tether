@@ -71,6 +71,7 @@ using MotionPlanner::analytical::ParetoTimeEnergyOptimalVelocityPlanner;
 using MotionPlanner::analytical::CostWeights;
 using MotionPlanner::KinematicLimits;
 using MotionPlanner::VelocityProfile;
+using MotionPlanner::SampledVelocityProfile;
 using GCodeExport::TrajectoryAnalyzer;
 using GCodeExport::AnalysisConfig;
 using GCodeExport::TrajectorySample;
@@ -507,7 +508,7 @@ int main(int argc, char* argv[]) {
     // With w_a = 0 it degenerates to pure time-optimal (TOPPRA).
     // Skip for very large files (mirrors GCodeProcessor's kMaxSegmentsForReNurbs).
     constexpr std::size_t kMaxSegmentsForReNurbs = 1'000'000;
-    std::optional<VelocityProfile<double>> velocityProfile;
+    std::shared_ptr<VelocityProfile> velocityProfile;
     std::optional<tether::motion::profile_renurbs::ReNURBSProfile> renurbsProfile;
 
     if (nurbsResult->path.numPieces() <= kMaxSegmentsForReNurbs) {
@@ -543,10 +544,11 @@ int main(int argc, char* argv[]) {
         ParetoTimeEnergyOptimalVelocityPlanner<3, double> profiler(limits, weights);
         try {
             Timer t; t.start();
-            velocityProfile = profiler.computeProfile(
-                pathAdapter, feedRate, 0.0, 0.0, numSamples);
+            velocityProfile = std::shared_ptr<VelocityProfile>(
+                profiler.computeProfile(pathAdapter, feedRate, 0.0, 0.0, numSamples));
+            auto sampled = dynamic_cast<SampledVelocityProfile*>(velocityProfile.get());
             report.add("Step 3b: Pareto computeProfile", t.ms(),
-                       velocityProfile->points().size());
+                       sampled ? sampled->points().size() : 0);
         } catch (const std::exception& e) {
             report.add("Step 3b: Pareto computeProfile (FAILED)", 0.0, 0,
                        std::string("exception: ") + e.what());

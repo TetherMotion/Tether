@@ -107,9 +107,7 @@ template<size_t Dim, typename T = double>
 class JerkConstrainedTOPPRA : public VelocityProfiler<Dim, T> {
 public:
     using Path = PathAdapter<Dim, T>;
-    using Profile = VelocityProfile<T>;
     using Limits = KinematicLimits<Dim, T>;
-    using Point = VelocityProfilePoint<T>;
     using SCurve = SCurveProfile<T>;
 
     /**
@@ -133,7 +131,7 @@ public:
      * The acceleration and jerk fields are reported truthfully (WI-3:
      * no clamping of stored jerk).
      */
-    Profile computeProfile(
+    std::unique_ptr<VelocityProfile> computeProfile(
         const Path& path,
         T feedRate,
         T startVelocity = T(0),
@@ -144,7 +142,7 @@ public:
 
         (void)startJerk; // WI-P3: stored on first point only; not honored
                          // in the optimization (assumes a(0) = 0).
-        Profile profile;
+        auto profile = std::make_unique<SampledVelocityProfile>();
         if (path.numSegments() == 0) return profile;
 
         // WI-1: Validate inputs — degenerate configs must return an empty
@@ -322,11 +320,11 @@ public:
         // post-hoc acceleration smoothing pass unnecessary.
         std::vector<T> fwdVel(numSamples);
         std::vector<T> fwdAccel(numSamples);
-        std::vector<typename Point::LimitType> fwdCause(numSamples);
+        std::vector<typename VelocityProfilePoint::LimitType> fwdCause(numSamples);
 
         fwdVel[0] = std::min(startVelocity, vLim[0]);
         fwdAccel[0] = startAcceleration;
-        fwdCause[0] = Point::LimitType::None;
+        fwdCause[0] = VelocityProfilePoint::LimitType::None;
 
         for (size_t i = 1; i < numSamples; ++i) {
             T deltaS = samples[i].arcLength - samples[i - 1].arcLength;
@@ -351,11 +349,11 @@ public:
             // fwdVel[i] ≤ vCap = min(vLim[i], bwdVel[i]). The binding
             // constraint is determined by which ceiling is tightest.
             if (fwdVel[i] >= bwdVel[i] - T(1e-9) && bwdVel[i] <= vLim[i]) {
-                fwdCause[i] = Point::LimitType::BackwardDecel;
+                fwdCause[i] = VelocityProfilePoint::LimitType::BackwardDecel;
             } else if (fwdVel[i] >= vLim[i] - T(1e-9)) {
-                fwdCause[i] = Point::LimitType::Curvature;
+                fwdCause[i] = VelocityProfilePoint::LimitType::Curvature;
             } else {
-                fwdCause[i] = Point::LimitType::ForwardAccel;
+                fwdCause[i] = VelocityProfilePoint::LimitType::ForwardAccel;
             }
         }
 
@@ -373,13 +371,13 @@ public:
         // binding pass: forward accel in the accel region, backward accel
         // in the decel region, 0 at velocity-limited cruise.
         std::vector<T> finalAccel(numSamples, T(0));
-        std::vector<typename Point::LimitType> cause(numSamples);
+        std::vector<typename VelocityProfilePoint::LimitType> cause(numSamples);
 
         finalAccel[0] = startAcceleration;
-        cause[0] = Point::LimitType::None;
+        cause[0] = VelocityProfilePoint::LimitType::None;
 
         for (size_t i = 1; i < numSamples; ++i) {
-            if (fwdCause[i] == Point::LimitType::BackwardDecel) {
+            if (fwdCause[i] == VelocityProfilePoint::LimitType::BackwardDecel) {
                 // Backward pass is binding. At the switching point (first
                 // decel sample), the forward pass has shed acceleration
                 // to 0 (WI-8b.2). Use the forward acceleration (0) at the
@@ -387,7 +385,7 @@ public:
                 // backward acceleration for subsequent decel samples.
                 // The backward acceleration ramps from 0 with j = -jMax,
                 // so the jerk is bounded by construction.
-                if (i > 0 && fwdCause[i - 1] != Point::LimitType::BackwardDecel) {
+                if (i > 0 && fwdCause[i - 1] != VelocityProfilePoint::LimitType::BackwardDecel) {
                     // Switching point: forward pass reached the backward
                     // curve. The forward acceleration is 0 (shed to 0).
                     // Use it to avoid a jerk spike.
@@ -396,20 +394,20 @@ public:
                     // Subsequent decel sample — use backward acceleration.
                     finalAccel[i] = bwdAccel[i];
                 }
-                cause[i] = Point::LimitType::BackwardDecel;
-            } else if (fwdCause[i] == Point::LimitType::Curvature) {
+                cause[i] = VelocityProfilePoint::LimitType::BackwardDecel;
+            } else if (fwdCause[i] == VelocityProfilePoint::LimitType::Curvature) {
                 // Velocity limit binding — cruise at a = 0.
                 finalAccel[i] = T(0);
-                cause[i] = Point::LimitType::Curvature;
+                cause[i] = VelocityProfilePoint::LimitType::Curvature;
             } else {
                 // Forward accel binding — use carried analytic acceleration.
                 finalAccel[i] = fwdAccel[i];
-                cause[i] = Point::LimitType::ForwardAccel;
+                cause[i] = VelocityProfilePoint::LimitType::ForwardAccel;
             }
         }
         // Last point: end at rest.
         finalAccel[numSamples - 1] = T(0);
-        cause[numSamples - 1] = Point::LimitType::None;
+        cause[numSamples - 1] = VelocityProfilePoint::LimitType::None;
 
         // WI-8b.3: Jerk-limited smoothing of the acceleration profile.
         // The velocity-level joining (vCap = min(vLim, bwdVel) + shed
@@ -515,9 +513,9 @@ public:
         }
 
         // Build the final profile.
-        profile.reserve(numSamples);
+        profile->reserve(numSamples);
         for (size_t i = 0; i < numSamples; ++i) {
-            Point pt;
+            VelocityProfilePoint pt;
             pt.arcLength = samples[i].arcLength;
             pt.velocity = fwdVel[i];
             pt.time = times[i];
@@ -537,7 +535,7 @@ public:
                 }
             }
 
-            profile.addPoint(pt);
+            profile->addPoint(pt);
         }
 
         return profile;

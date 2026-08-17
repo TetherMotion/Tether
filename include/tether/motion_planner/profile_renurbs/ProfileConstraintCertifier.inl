@@ -22,7 +22,7 @@ namespace tether::motion::profile_renurbs {
 template<std::size_t Dim, typename T>
 ProfileConstraintCertificate certifyReNURBSProfile(
     const ReNURBSProfile& renurbs,
-    const MotionPlanner::VelocityProfile<T>& profile,
+    const MotionPlanner::VelocityProfile& profile,
     const MotionPlanner::PathAdapter<Dim, T>& path,
     const MotionPlanner::KinematicLimits<Dim, T>& limits,
     double epsilon) {

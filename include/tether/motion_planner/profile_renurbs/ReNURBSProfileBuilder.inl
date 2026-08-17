@@ -94,15 +94,44 @@ GenericReNURBSConfig toGenericConfig(
     return gc;
 }
 
+/// Sample an arbitrary VelocityProfile into tabulated points.
+/// If the profile is already a SampledVelocityProfile, reuse its points.
+/// Otherwise, sample the public query API uniformly in arc length.
+inline std::vector<MotionPlanner::VelocityProfilePoint>
+sampleProfileToPoints(const MotionPlanner::VelocityProfile& profile,
+                      std::size_t numSamples = 200) {
+    if (auto* sampled = dynamic_cast<const MotionPlanner::SampledVelocityProfile*>(&profile)) {
+        return sampled->points();
+    }
+
+    std::vector<MotionPlanner::VelocityProfilePoint> points;
+    double totalLength = profile.totalLength();
+    if (totalLength <= 0.0 || numSamples < 2) return points;
+
+    points.reserve(numSamples);
+    double ds = totalLength / static_cast<double>(numSamples - 1);
+    for (std::size_t i = 0; i < numSamples; ++i) {
+        double s = std::min(i * ds, totalLength);
+        MotionPlanner::VelocityProfilePoint pt;
+        pt.arcLength = s;
+        pt.velocity = profile.velocityAt(s);
+        pt.acceleration = profile.accelerationAt(s);
+        pt.jerk = profile.jerkAt(s);
+        pt.time = profile.timeAt(s);
+        points.push_back(pt);
+    }
+    return points;
+}
+
 /// Convert a VelocityProfile + PathAdapter into generic samples + segments.
 template<std::size_t Dim, typename T>
 void toGenericSamples(
-    const MotionPlanner::VelocityProfile<T>& profile,
+    const MotionPlanner::VelocityProfile& profile,
     const MotionPlanner::PathAdapter<Dim, T>& path,
     std::vector<GenericSample>& samples,
     std::vector<SegmentInfo>& segments) {
 
-    const auto& pts = profile.points();
+    const auto pts = sampleProfileToPoints(profile);
     samples.reserve(pts.size());
     for (const auto& pt : pts) {
         GenericSample s;
@@ -129,7 +158,7 @@ void toGenericSamples(
 
 template<std::size_t Dim, typename T>
 ReNURBSProfile buildReNURBSProfile(
-    const MotionPlanner::VelocityProfile<T>& profile,
+    const MotionPlanner::VelocityProfile& profile,
     const MotionPlanner::PathAdapter<Dim, T>& path,
     const MotionPlanner::KinematicLimits<Dim, T>& limits,
     const ReNURBSConfig& config) {

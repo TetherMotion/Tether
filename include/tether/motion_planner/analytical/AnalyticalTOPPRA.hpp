@@ -77,6 +77,7 @@
 #include "SwitchingStructureRepresentation.hpp"
 #include "HybridMonotoneRepresentation.hpp"
 #include "TrajectorySampler.hpp"
+#include "AnalyticalSSRVelocityProfile.hpp"
 #include "../VelocityProfile.hpp"
 #include "../VelocityProfiler.hpp"
 #include "../PathAdapter.hpp"
@@ -113,9 +114,8 @@ template<size_t Dim, typename T = double>
 class AnalyticalTOPPRA : public VelocityProfiler<Dim, T> {
 public:
     using Path = PathAdapter<Dim, T>;
-    using Profile = VelocityProfile<T>;
     using Limits = KinematicLimits<Dim, T>;
-    using Point = VelocityProfilePoint<T>;
+    using Point = VelocityProfilePoint;
     using Evaluator = ConstraintEvaluator<Dim, T>;
     using SSR = SwitchingStructureRepresentation<Dim, T>;
     using Hybrid = HybridMonotoneRepresentation<Dim, T>;
@@ -148,7 +148,7 @@ public:
      * existing downstream consumers. The SSR and Hybrid representations
      * are accessible via `analyticalSource()` and `hybridSource()`.
      */
-    Profile computeProfile(
+    std::unique_ptr<VelocityProfile> computeProfile(
         const Path& path,
         T feedRate,
         T startVelocity = T(0),
@@ -157,11 +157,14 @@ public:
         T startAcceleration = T(0),
         T startJerk = T(0)) override {
 
-        Profile profile;
-        if (path.numSegments() == 0) return profile;
+        if (path.numSegments() == 0) {
+            return std::make_unique<SampledVelocityProfile>();
+        }
 
         T pathLength = path.totalLength();
-        if (pathLength <= T(0)) return profile;
+        if (pathLength <= T(0)) {
+            return std::make_unique<SampledVelocityProfile>();
+        }
 
         // Create constraint evaluator
         Evaluator evaluator(limits_, feedRate);
@@ -178,19 +181,23 @@ public:
             path, std::move(arcs), std::move(evaluator));
         ssr_ = ssr;
 
-        // Optionally build the Hybrid representation
+        // Wrap the SSR in a sampler. This is the exact representation used
+        // by the returned velocity profile. The Hybrid representation (if
+        // requested) is kept separately for consumers that need it.
+        sampler_ = std::make_shared<Sampler>(ssr);
+
+        // Optionally build the Hybrid representation.
         if (buildHybrid_) {
-            auto hybrid = std::make_shared<Hybrid>(*ssr, hybridTolerance_);
-            hybrid_ = hybrid;
-            sampler_ = std::make_shared<Sampler>(hybrid);
-        } else {
-            sampler_ = std::make_shared<Sampler>(ssr);
+            hybrid_ = std::make_shared<Hybrid>(*ssr, hybridTolerance_);
         }
 
-        // Sample the SSR to produce a tabulated VelocityProfile
-        profile = sampleToProfile(*ssr, numSamples);
+        // Return an analytical profile that wraps the SSR/Hybrid sampler.
+        if (ssr_ || hybrid_) {
+            return std::make_unique<AnalyticalSSRVelocityProfile<Dim, T>>(sampler_);
+        }
 
-        return profile;
+        // Fallback: empty profile.
+        return std::make_unique<SampledVelocityProfile>();
     }
 
     /**
@@ -636,8 +643,8 @@ private:
      * This makes the analytical profiler compatible with all existing
      * downstream consumers that expect a sampled VelocityProfile.
      */
-    Profile sampleToProfile(const SSR& ssr, size_t numSamples) const {
-        Profile profile;
+    SampledVelocityProfile sampleToProfile(const SSR& ssr, size_t numSamples) const {
+        SampledVelocityProfile profile;
         T pathLength = ssr.totalLength();
         if (pathLength <= T(0)) return profile;
 
@@ -767,19 +774,19 @@ private:
             // Determine limiting factor
             switch (arc.mode) {
                 case ControlMode::ACCEL_MAX:
-                    pt.limitedBy = Point::LimitType::ForwardAccel;
+                    pt.limitedBy = VelocityProfilePoint::LimitType::ForwardAccel;
                     break;
                 case ControlMode::DECEL_MAX:
-                    pt.limitedBy = Point::LimitType::BackwardDecel;
+                    pt.limitedBy = VelocityProfilePoint::LimitType::BackwardDecel;
                     break;
                 case ControlMode::CONSTRAINT_SURFACE:
-                    pt.limitedBy = Point::LimitType::Curvature;
+                    pt.limitedBy = VelocityProfilePoint::LimitType::Curvature;
                     break;
                 case ControlMode::ZERO_JERK:
-                    pt.limitedBy = Point::LimitType::Jerk;
+                    pt.limitedBy = VelocityProfilePoint::LimitType::Jerk;
                     break;
                 default:
-                    pt.limitedBy = Point::LimitType::None;
+                    pt.limitedBy = VelocityProfilePoint::LimitType::None;
                     break;
             }
 
