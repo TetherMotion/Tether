@@ -1,6 +1,6 @@
 #include "tether/control/autotuning/classical/TyreusLuyben.hpp"
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 std::string TyreusLuyben::getName() const { return "Tyreus-Luyben"; }
@@ -39,4 +39,4 @@ PIDGains TyreusLuyben::calculateGains(double Ku, double Tu, bool includeDterm) {
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

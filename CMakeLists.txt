@@ -184,11 +184,11 @@ endif()
 #
 # Component dependency graph:
 #   fsoe             → cia_profiles, ethercat_master, common
-#   cia_profiles     → ethercat_master, motion_control, common
+#   cia_profiles     → ethercat_master, common
 #   drives           → ethercat_master, common
-#   ethercat_master  → ethercat_common, controls, hal, common
+#   ethercat_master  → ethercat_common, hal, common
 #   ethercat_common  → hal, common
-#   motion_control   → controls, common
+#   motion_control   → controls, kinematics, common
 #   identification   → common
 #   controls         → common
 #   autotuning       → common
@@ -318,8 +318,8 @@ if(DEFINED TETHER_COMPONENTS)
     set(_tether_component_deps_motion_control  "kinematics;controls;common")
     set(_tether_component_deps_identification  "common")
     set(_tether_component_deps_ethercat_common "hal;common")
-    set(_tether_component_deps_ethercat_master "ethercat_common;controls;hal;common")
-    set(_tether_component_deps_cia_profiles    "ethercat_master;motion_control;common")
+    set(_tether_component_deps_ethercat_master "ethercat_common;hal;common")
+    set(_tether_component_deps_cia_profiles    "ethercat_master;common")
     set(_tether_component_deps_drives          "ethercat_master;common")
     set(_tether_component_deps_fsoe            "cia_profiles;ethercat_master;common")
     set(_tether_component_deps_ethercat_slave  "ethercat_common;hal;common")
@@ -571,8 +571,8 @@ if(TETHER_BUILD_ETHERCAT_MASTER)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/ethercat_master.cmake)
 endif()
 
-# CiA device profiles + ETG5000 (depends on ethercat_master and motion_control)
-if(TETHER_BUILD_CIA_PROFILES AND TETHER_BUILD_ETHERCAT_MASTER AND TETHER_BUILD_MOTION_CONTROL)
+# CiA device profiles + ETG5000 (depends on ethercat_master and common)
+if(TETHER_BUILD_CIA_PROFILES AND TETHER_BUILD_ETHERCAT_MASTER)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/cia_profiles.cmake)
 endif()
 
@@ -582,7 +582,7 @@ if(TETHER_BUILD_DRIVES AND TETHER_BUILD_ETHERCAT_MASTER)
 endif()
 
 # FSoE — Fail-Safe over EtherCAT (depends on ethercat_master and cia_profiles)
-if(TETHER_BUILD_FSOE AND TETHER_BUILD_ETHERCAT_MASTER AND TETHER_BUILD_CIA_PROFILES AND TETHER_BUILD_MOTION_CONTROL)
+if(TETHER_BUILD_FSOE AND TETHER_BUILD_ETHERCAT_MASTER AND TETHER_BUILD_CIA_PROFILES)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/fsoe.cmake)
 endif()
 

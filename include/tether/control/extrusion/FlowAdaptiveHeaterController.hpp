@@ -4,7 +4,7 @@
  *        observer, pre-emphasis, and post-emphasis feed-forward.
  *
  * @details
- * Wraps a Control::PIDController (the same style as objects::Heater) and adds
+ * Wraps a tether::control::PIDController (the same style as objects::Heater) and adds
  * two physically-motivated feed-forward terms that compensate for the enthalpy
  * carried away by the flowing filament:
  *
@@ -57,7 +57,7 @@
  * (1 - α) because the PID's own reaction (through the sensor lag) will
  * partially cover the recovery.
  *
- * The controller derives from Control::ControllerBase (like all controllers)
+ * The controller derives from tether::control::ControllerBase (like all controllers)
  * so it composes with the existing framework. The PID backend is owned
  * internally and tuned via setGains(); the flow input is provided per-cycle
  * via the ControllerInput::feedforward field (reused as Q in mm³/s) or via
@@ -101,15 +101,15 @@ struct FlowAdaptiveHeaterParams {
 };
 
 /// @brief Flow-adaptive heater controller (PID + model-based pre/post-emphasis).
-class FlowAdaptiveHeaterController : public ::Control::ControllerBase {
+class FlowAdaptiveHeaterController : public ::tether::control::ControllerBase {
 public:
     explicit FlowAdaptiveHeaterController(FlowAdaptiveHeaterParams params = FlowAdaptiveHeaterParams{})
         : params_(params),
           observer_(toObserverParams(params)) {}
 
     // --- ControllerBase interface ---
-    ::Control::ControllerType getType() const override {
-        return ::Control::ControllerType::Custom;
+    ::tether::control::ControllerType getType() const override {
+        return ::tether::control::ControllerType::Custom;
     }
     const char* getName() const override {
         return "FlowAdaptiveHeaterController";
@@ -162,8 +162,8 @@ public:
     }
 
 protected:
-    ::Control::ControllerOutput computeImpl(
-        const ::Control::ControllerInput& input) override;
+    ::tether::control::ControllerOutput computeImpl(
+        const ::tether::control::ControllerInput& input) override;
 
 private:
     static MeltZoneThermalParams toObserverParams(
@@ -201,7 +201,7 @@ private:
     }
 
     FlowAdaptiveHeaterParams params_;
-    ::Control::PIDController pid_;
+    ::tether::control::PIDController pid_;
     MeltZoneThermalObserver observer_;
     double flowMm3PerS_ = 0.0;
     double thermalDebt_ = 0.0;   ///< current thermal-debt state [W]

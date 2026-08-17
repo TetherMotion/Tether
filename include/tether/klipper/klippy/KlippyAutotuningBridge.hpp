@@ -59,21 +59,21 @@ namespace tether::klipper::klippy {
 // Type aliases for the Tether autotuning framework
 // ============================================================================
 
-using ::Control::Autotuning::PIDGains;
-using ::Control::Autotuning::PIDForm;
-using ::Control::Autotuning::FOPDTModel;
-using ::Control::Autotuning::SOPDTModel;
-using ::Control::Autotuning::AstromHagglundRelay;
-using ::Control::Autotuning::ZieglerNicholsStepResponse;
-using ::Control::Autotuning::ZieglerNicholsUltimateCycle;
-using ::Control::Autotuning::CohenCoon;
-using ::Control::Autotuning::LambdaTuning;
-using ::Control::Autotuning::SIMCMethod;
-using ::Control::Autotuning::AMIGOMethod;
-using ::Control::Autotuning::TyreusLuyben;
-using ::Control::Autotuning::ChienHronesReswick;
-using ::Control::Autotuning::LopezMethod;
-using ::Control::Autotuning::ProcessIdentification;
+using ::tether::control::Autotuning::PIDGains;
+using ::tether::control::Autotuning::PIDForm;
+using ::tether::control::Autotuning::FOPDTModel;
+using ::tether::control::Autotuning::SOPDTModel;
+using ::tether::control::Autotuning::AstromHagglundRelay;
+using ::tether::control::Autotuning::ZieglerNicholsStepResponse;
+using ::tether::control::Autotuning::ZieglerNicholsUltimateCycle;
+using ::tether::control::Autotuning::CohenCoon;
+using ::tether::control::Autotuning::LambdaTuning;
+using ::tether::control::Autotuning::SIMCMethod;
+using ::tether::control::Autotuning::AMIGOMethod;
+using ::tether::control::Autotuning::TyreusLuyben;
+using ::tether::control::Autotuning::ChienHronesReswick;
+using ::tether::control::Autotuning::LopezMethod;
+using ::tether::control::Autotuning::ProcessIdentification;
 
 // ============================================================================
 // Tuning method enumeration (mirrors Tether's available methods)

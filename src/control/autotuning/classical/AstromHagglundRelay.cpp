@@ -4,7 +4,7 @@
 #include <numeric>
 #include <cmath>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 std::string AstromHagglundRelay::getName() const { return "Åström-Hägglund Relay"; }
@@ -75,4 +75,4 @@ void AstromHagglundRelay::stop() { m_state = State::Idle; }
 TuningResult AstromHagglundRelay::getIntermediateResult() const { TuningResult result; result.success = (m_state == State::Complete); result.parameters = {m_gains.Kp, m_gains.Ki, m_gains.Kd}; result.iterations = m_cycles; result.message = result.success ? "Relay identification complete" : "Relay identification in progress"; return result; }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

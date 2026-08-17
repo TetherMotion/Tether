@@ -9,7 +9,7 @@
 #include <vector>
 #include <cmath>
 
-using namespace Control;
+using namespace tether::control;
 
 // ============================================================================
 // NicholsPoint Tests

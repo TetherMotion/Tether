@@ -11,8 +11,8 @@
 #include "tether/control/autotuning/AutotuningFramework.hpp"
 #include "TestHelpers.hpp"
 
-using namespace Control::Autotuning;
-using namespace Control::Autotuning::Testing;
+using namespace tether::control::Autotuning;
+using namespace tether::control::Autotuning::Testing;
 
 // ============================================================================
 // FOPDTModel Tests

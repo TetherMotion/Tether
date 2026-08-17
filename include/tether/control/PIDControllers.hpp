@@ -169,7 +169,7 @@
 
 #include "ControllerBase.hpp"
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // P Controller
@@ -1245,4 +1245,4 @@ private:
     double m_velocityMax{std::numeric_limits<double>::max()};
 };
 
-} // namespace Control
+} // namespace tether::control

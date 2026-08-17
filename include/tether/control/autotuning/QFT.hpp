@@ -85,7 +85,7 @@
 #include <utility>
 #include <functional>
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // QFT Data Structures
@@ -615,4 +615,4 @@ public:
     }
 };
 
-} // namespace Control
+} // namespace tether::control

@@ -2,7 +2,7 @@
 
 #include "tether/control/Controllers.hpp"
 
-using namespace Control;
+using namespace tether::control;
 
 // Comprehensive unit tests that exercise ControllerBase polymorphism and
 // core behaviors (type/name, compute contributions, saturation, reset,

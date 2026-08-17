@@ -15,13 +15,14 @@
 #pragma once
 
 #include "control/ParameterRamping.hpp"
+#include "tether/common/ISetpointSource.hpp"
 #include <cmath>
 #include <array>
 #include <memory>
 #include <vector>
 #include <functional>
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // Sine Motion Controller
@@ -30,7 +31,7 @@ namespace Control {
 /**
  * @brief Sine wave motion generator with smooth parameter transitions
  */
-class SineMotionController {
+class SineMotionController : public tether::common::ISetpointSource {
 public:
     /**
      * @brief Configuration parameters
@@ -72,47 +73,57 @@ public:
     explicit SineMotionController(const Config& config);
     
     /**
+     * @brief Start oscillation from phase zero
+     */
+    void start() override { start(0.0); }
+
+    /**
      * @brief Start oscillation
      * @param initialPhase Starting phase (radians)
      */
     void start(double initialPhase = 0.0);
-    
+
     /**
      * @brief Stop oscillation with smooth envelope
      */
-    void stop();
-    
+    void stop() override;
+
     /**
      * @brief Immediate stop
      */
-    void stopImmediate();
-    
+    void stopImmediate() override;
+
     /**
      * @brief Update and get current position
      * @param dt Time step
      * @return Current position
      */
-    double update(double dt);
-    
+    double update(double dt) override;
+
     /**
      * @brief Get current state
      */
     const State& getState() const { return m_state; }
-    
+
     /**
      * @brief Get current position
      */
-    double getPosition() const { return m_state.position; }
-    
+    double getPosition() const override { return m_state.position; }
+
     /**
      * @brief Get current velocity
      */
-    double getVelocity() const { return m_state.velocity; }
-    
+    double getVelocity() const override { return m_state.velocity; }
+
     /**
      * @brief Get current acceleration
      */
-    double getAcceleration() const { return m_state.acceleration; }
+    double getAcceleration() const override { return m_state.acceleration; }
+
+    /**
+     * @brief Check if the controller is currently running
+     */
+    bool isRunning() const override { return m_state.running; }
 
     /**
      * @brief Convenience helpers that apply a scaling factor to the output.
@@ -733,5 +744,5 @@ inline void SineMotionController::reset() {
     m_envelopeTime = 0.0;
 }
 
-} // namespace Control
+} // namespace tether::control
 

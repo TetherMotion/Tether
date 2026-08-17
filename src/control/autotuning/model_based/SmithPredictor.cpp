@@ -1,6 +1,6 @@
 #include "tether/control/autotuning/model_based/SmithPredictor.hpp"
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 bool SmithPredictor::isCompatible(const TunableController& controller) const {
@@ -56,4 +56,4 @@ SmithPredictor::SmithPredictorStructure SmithPredictor::design(
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

@@ -6,6 +6,7 @@ set(TETHER_COMMON_SOURCES
     ${TETHER_ROOT}/src/platform/HostTimer.cpp
     ${TETHER_ROOT}/src/logging/Logger.cpp
     ${TETHER_ROOT}/src/logging/DeduplicatingLogger.cpp
+    ${TETHER_ROOT}/src/common/MotionProfile.cpp
 )
 
 # Add ESP32-specific platform sources if building for ESP32
@@ -18,6 +19,10 @@ endif()
 set(TETHER_COMMON_HEADERS
     ${TETHER_ROOT}/include/tether/Tether.hpp
     ${TETHER_ROOT}/include/tether/TetherConfig.hpp
+    ${TETHER_ROOT}/include/tether/common/IMotionController.hpp
+    ${TETHER_ROOT}/include/tether/common/ISetpointSource.hpp
+    ${TETHER_ROOT}/include/tether/common/IAxis.hpp
+    ${TETHER_ROOT}/include/tether/common/MotionTypes.hpp
     ${TETHER_ROOT}/include/tether/platform/Platform.hpp
     ${TETHER_ROOT}/include/tether/platform/ESPStubs.hpp
     ${TETHER_ROOT}/include/tether/platform/IPlatformTimer.hpp

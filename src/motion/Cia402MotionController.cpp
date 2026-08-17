@@ -11,40 +11,44 @@
  * - Utility functions
  */
 
-#include "profiles/cia402/MotionController.hpp"
+#include "tether/motion/Cia402MotionController.hpp"
+#include "tether/common/IAxis.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include <algorithm>
 #include <cmath>
 
-static const char* TAG = "MotionController";
+static const char* TAG = "Cia402MotionController";
 
-namespace CiA402 {
+namespace tether::motion {
+
+using AxisId = Cia402MotionController::AxisId;
+
+using namespace CiA402;
 
 // ============================================================================
 // MotionController Implementation - Construction and Axis Management
 // ============================================================================
 
-MotionController::MotionController() = default;
-MotionController::~MotionController() = default;
+Cia402MotionController::Cia402MotionController() = default;
+Cia402MotionController::~Cia402MotionController() = default;
 
-CiA402AxisPtr MotionController::addAxis(CiA402Axis::AxisId id, DriveBackendUPtr backend) {
+std::shared_ptr<tether::common::IAxis> Cia402MotionController::addAxis(AxisId id, std::shared_ptr<tether::common::IAxis> axis) {
     std::lock_guard<std::mutex> lock(m_mutex);
     
-    auto axis = std::make_shared<CiA402Axis>(id, std::move(backend));
     m_axes[id] = axis;
     
     TETHER_LOGI(TAG, "Added axis %lu", (unsigned long)id);
     return axis;
 }
 
-CiA402AxisPtr MotionController::getAxis(CiA402Axis::AxisId id) {
+std::shared_ptr<tether::common::IAxis> Cia402MotionController::getAxis(AxisId id) {
     std::lock_guard<std::mutex> lock(m_mutex);
     
     auto it = m_axes.find(id);
     return (it != m_axes.end()) ? it->second : nullptr;
 }
 
-bool MotionController::removeAxis(CiA402Axis::AxisId id) {
+bool Cia402MotionController::removeAxis(AxisId id) {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_axes.erase(id) > 0;
 }
@@ -53,7 +57,7 @@ bool MotionController::removeAxis(CiA402Axis::AxisId id) {
 // Collective Operations
 // ============================================================================
 
-bool MotionController::enableAll(uint32_t timeoutMs) {
+bool Cia402MotionController::enableAll(uint32_t timeoutMs) {
     for (auto& [id, axis] : m_axes) {
         if (!axis->enable(timeoutMs)) {
             TETHER_LOGE(TAG, "Failed to enable axis %lu", (unsigned long)id);
@@ -63,7 +67,7 @@ bool MotionController::enableAll(uint32_t timeoutMs) {
     return true;
 }
 
-bool MotionController::disableAll(uint32_t timeoutMs) {
+bool Cia402MotionController::disableAll(uint32_t timeoutMs) {
     bool success = true;
     for (auto& [id, axis] : m_axes) {
         if (!axis->disable(timeoutMs)) {
@@ -73,30 +77,30 @@ bool MotionController::disableAll(uint32_t timeoutMs) {
     return success;
 }
 
-void MotionController::quickStopAll() {
+void Cia402MotionController::quickStopAll() {
     for (auto& [id, axis] : m_axes) {
-        axis->quickStop();
+        axis->stop();
     }
 }
 
-void MotionController::clearAllFaults() {
+void Cia402MotionController::clearAllFaults() {
     for (auto& [id, axis] : m_axes) {
         axis->clearFault();
     }
 }
 
-bool MotionController::allEnabled() const {
+bool Cia402MotionController::allEnabled() const {
     for (const auto& [id, axis] : m_axes) {
-        if (axis->getState() != State::OperationEnabled) {
+        if (!axis->isEnabled()) {
             return false;
         }
     }
     return true;
 }
 
-bool MotionController::anyFault() const {
+bool Cia402MotionController::anyFault() const {
     for (const auto& [id, axis] : m_axes) {
-        if (axis->getState() == State::Fault) {
+        if (axis->hasFault()) {
             return true;
         }
     }
@@ -107,12 +111,12 @@ bool MotionController::anyFault() const {
 // Coordinated Motion
 // ============================================================================
 
-void MotionController::setCoordinatedAxes(const std::vector<CiA402Axis::AxisId>& axisIds) {
+void Cia402MotionController::setCoordinatedAxes(const std::vector<AxisId>& axisIds) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_coordinatedAxes = axisIds;
 }
 
-bool MotionController::moveLinear(const std::vector<double>& targetPositions, double velocity) {
+bool Cia402MotionController::moveLinear(const std::vector<double>& targetPositions, double velocity) {
     if (targetPositions.size() != m_coordinatedAxes.size()) {
         TETHER_LOGE(TAG, "Target position count doesn't match coordinated axis count");
         return false;
@@ -123,7 +127,7 @@ bool MotionController::moveLinear(const std::vector<double>& targetPositions, do
     for (auto id : m_coordinatedAxes) {
         auto axis = getAxis(id);
         if (!axis) return false;
-        startPositions.push_back(static_cast<double>(axis->getStatus().actualPosition));
+        startPositions.push_back(static_cast<double>(axis->getActualPosition()));
     }
     
     // Create linear path using LinearConfig
@@ -142,18 +146,10 @@ bool MotionController::moveLinear(const std::vector<double>& targetPositions, do
     m_pathTime = 0.0;
     m_pathExecuting = true;
     
-    // Set all axes to CSP mode
-    for (auto id : m_coordinatedAxes) {
-        auto axis = getAxis(id);
-        if (axis) {
-            axis->setOperatingMode(OperatingMode::CyclicSyncPosition);
-        }
-    }
-    
     return true;
 }
 
-bool MotionController::moveCircular(double centerX, double centerY, 
+bool Cia402MotionController::moveCircular(double centerX, double centerY, 
                                     double endX, double endY,
                                     bool clockwise, double velocity) {
     if (m_coordinatedAxes.size() < 2) {
@@ -166,8 +162,8 @@ bool MotionController::moveCircular(double centerX, double centerY,
     auto axis1 = getAxis(m_coordinatedAxes[1]);
     if (!axis0 || !axis1) return false;
     
-    double startX = static_cast<double>(axis0->getStatus().actualPosition);
-    double startY = static_cast<double>(axis1->getStatus().actualPosition);
+    double startX = static_cast<double>(axis0->getActualPosition());
+    double startY = static_cast<double>(axis1->getActualPosition());
     
     // Create circular path using CircularConfig
     CircularConfig config;
@@ -189,7 +185,7 @@ bool MotionController::moveCircular(double centerX, double centerY,
     return true;
 }
 
-bool MotionController::moveHelical(double centerX, double centerY,
+bool Cia402MotionController::moveHelical(double centerX, double centerY,
                                    double endX, double endY,
                                    double pitch, bool clockwise, double velocity) {
     if (m_coordinatedAxes.size() < 3) {
@@ -202,8 +198,8 @@ bool MotionController::moveHelical(double centerX, double centerY,
     auto axis2 = getAxis(m_coordinatedAxes[2]);
     if (!axis0 || !axis1 || !axis2) return false;
     
-    double startX = static_cast<double>(axis0->getStatus().actualPosition);
-    double startY = static_cast<double>(axis1->getStatus().actualPosition);
+    double startX = static_cast<double>(axis0->getActualPosition());
+    double startY = static_cast<double>(axis1->getActualPosition());
     // startZ not needed for helical config, Z is computed from pitch
     
     // Calculate radius from start position to center
@@ -248,7 +244,7 @@ bool MotionController::moveHelical(double centerX, double centerY,
 // Path Execution
 // ============================================================================
 
-bool MotionController::executePath(MultiSegmentPath& path, double velocity) {
+bool Cia402MotionController::executePath(MultiSegmentPath& path, double velocity) {
     m_pathSampler = std::make_unique<PathSampler>(
         std::make_unique<MultiSegmentPath>(std::move(path)), velocity);
     m_pathTime = 0.0;
@@ -257,7 +253,7 @@ bool MotionController::executePath(MultiSegmentPath& path, double velocity) {
     return true;
 }
 
-bool MotionController::addPathSegment(std::unique_ptr<PathSegment> segment) {
+bool Cia402MotionController::addPathSegment(std::unique_ptr<PathSegment> segment) {
     if (!m_activePath) {
         m_activePath = std::make_unique<MultiSegmentPath>();
     }
@@ -265,7 +261,7 @@ bool MotionController::addPathSegment(std::unique_ptr<PathSegment> segment) {
     return true;
 }
 
-bool MotionController::startPath(double velocity) {
+bool Cia402MotionController::startPath(double velocity) {
     if (!m_activePath) return false;
     
     m_pathSampler = std::make_unique<PathSampler>(std::move(m_activePath), velocity);
@@ -275,7 +271,7 @@ bool MotionController::startPath(double velocity) {
     return true;
 }
 
-void MotionController::stopPath() {
+void Cia402MotionController::stopPath() {
     m_pathExecuting = false;
     m_pathSampler.reset();
 }
@@ -284,7 +280,7 @@ void MotionController::stopPath() {
 // Global Parameters
 // ============================================================================
 
-void MotionController::setSpeedFactor(float factor) {
+void Cia402MotionController::setSpeedFactor(float factor) {
     if (m_globalParams.allowNegativeSpeed) {
         factor = std::clamp(factor, -m_globalParams.maxSpeedFactor, 
                            m_globalParams.maxSpeedFactor);
@@ -295,73 +291,44 @@ void MotionController::setSpeedFactor(float factor) {
     m_globalParams.speedFactor = factor;
 }
 
-void MotionController::setGlobalParams(const GlobalParams& params) {
+void Cia402MotionController::setGlobalParams(const GlobalParams& params) {
     m_globalParams = params;
-}
-
-// ============================================================================
-// Gearing
-// ============================================================================
-
-bool MotionController::configureGearing(CiA402Axis::AxisId slaveId, 
-                                        CiA402Axis::AxisId masterId,
-                                        int32_t numerator, int32_t denominator) {
-    auto slave = getAxis(slaveId);
-    auto master = getAxis(masterId);
-    
-    if (!slave || !master) {
-        TETHER_LOGE(TAG, "Invalid axis IDs for gearing");
-        return false;
-    }
-    
-    slave->setGearingMaster(master.get());
-    slave->setGearRatio(numerator, denominator);
-    
-    return true;
-}
-
-bool MotionController::enableGearing(CiA402Axis::AxisId slaveId, bool enable) {
-    auto slave = getAxis(slaveId);
-    if (!slave) return false;
-    
-    slave->enableGearing(enable);
-    return true;
 }
 
 // ============================================================================
 // Homing
 // ============================================================================
 
-bool MotionController::homeAxis(CiA402Axis::AxisId id, const HomingCommand& cmd) {
+bool Cia402MotionController::homeAxis(AxisId id, const tether::common::HomingCommand& cmd) {
     auto axis = getAxis(id);
     if (!axis) return false;
     
-    return axis->startHoming(cmd);
+    return axis->home(cmd);
 }
 
-bool MotionController::homeAxesSequential(const std::vector<CiA402Axis::AxisId>& ids,
-                                          const HomingCommand& cmd) {
+bool Cia402MotionController::homeAxesSequential(const std::vector<AxisId>& ids,
+                                          const tether::common::HomingCommand& cmd) {
     for (auto id : ids) {
         auto axis = getAxis(id);
         if (!axis) return false;
         
-        if (!axis->startHoming(cmd)) {
+        if (!axis->home(cmd)) {
             return false;
         }
-        
-        if (!axis->waitHomingComplete(static_cast<uint32_t>(cmd.timeoutMs))) {
+
+        if (!axis->waitHomingComplete(cmd.timeoutMs)) {
             return false;
         }
     }
     return true;
 }
 
-bool MotionController::homeAxesSimultaneous(const std::vector<CiA402Axis::AxisId>& ids,
-                                            const HomingCommand& cmd) {
+bool Cia402MotionController::homeAxesSimultaneous(const std::vector<AxisId>& ids,
+                                            const tether::common::HomingCommand& cmd) {
     // Start homing on all axes
     for (auto id : ids) {
         auto axis = getAxis(id);
-        if (!axis || !axis->startHoming(cmd)) {
+        if (!axis || !axis->home(cmd)) {
             return false;
         }
     }
@@ -375,7 +342,7 @@ bool MotionController::homeAxesSimultaneous(const std::vector<CiA402Axis::AxisId
         
         for (auto id : ids) {
             auto axis = getAxis(id);
-            if (axis && !axis->isHomingComplete()) {
+            if (axis && !axis->isHomed()) {
                 allComplete = false;
                 break;
             }
@@ -391,7 +358,7 @@ bool MotionController::homeAxesSimultaneous(const std::vector<CiA402Axis::AxisId
     return false;
 }
 
-bool MotionController::allHomed() const {
+bool Cia402MotionController::allHomed() const {
     for (const auto& [id, axis] : m_axes) {
         if (!axis->isHomed()) {
             return false;
@@ -404,9 +371,9 @@ bool MotionController::allHomed() const {
 // Cyclic Update
 // ============================================================================
 
-void MotionController::update(float dtSeconds) {
+void Cia402MotionController::update(double dtSeconds) {
     // Apply speed factor to dt
-    float effectiveDt = dtSeconds * m_globalParams.speedFactor;
+    double effectiveDt = dtSeconds * m_globalParams.speedFactor;
     
     // Update path execution
     if (m_pathExecuting) {
@@ -415,11 +382,11 @@ void MotionController::update(float dtSeconds) {
     
     // Update all axes
     for (auto& [id, axis] : m_axes) {
-        axis->update(dtSeconds); // Axes use real dt
+        axis->update(dtSeconds);
     }
 }
 
-void MotionController::updatePathExecution(float dt) {
+void Cia402MotionController::updatePathExecution(double dt) {
     if (!m_pathSampler || !m_pathExecuting) return;
     
     // Advance time
@@ -438,74 +405,24 @@ void MotionController::updatePathExecution(float dt) {
     }
 }
 
-void MotionController::applyPathPoint(const PathPoint& point) {
+void Cia402MotionController::applyPathPoint(const CiA402::PathPoint& point) {
     size_t numAxes = std::min(m_coordinatedAxes.size(), point.position.size());
     
     for (size_t i = 0; i < numAxes; i++) {
         auto axis = getAxis(m_coordinatedAxes[i]);
         if (axis) {
             int32_t pos = static_cast<int32_t>(point.position[i]);
-            int32_t vel = (i < point.velocity.size()) ? 
+            int32_t vel = (i < point.velocity.size()) ?
                          static_cast<int32_t>(point.velocity[i]) : 0;
-            axis->setCyclicPosition(pos, vel, 0);
+            tether::common::MotionCommand cmd;
+            cmd.targetPosition = pos;
+            cmd.velocity = static_cast<uint32_t>(std::abs(vel));
+            cmd.immediate = true;
+            cmd.buffered = false;
+            axis->setTargetPosition(pos, cmd);
         }
     }
 }
 
 // ============================================================================
-// Utility Functions
-// ============================================================================
-
-std::unique_ptr<MotionProfile> createProfile(ProfileType type, 
-                                             const MotionLimits& limits) {
-    std::unique_ptr<MotionProfile> profile;
-    
-    switch (type) {
-        case ProfileType::Linear:
-            profile = std::make_unique<LinearProfile>();
-            break;
-        case ProfileType::Trapezoidal:
-            profile = std::make_unique<TrapezoidalProfile>();
-            break;
-        case ProfileType::Triangular:
-            profile = std::make_unique<TriangularProfile>();
-            break;
-        case ProfileType::SCurve:
-            profile = std::make_unique<SCurveProfile>();
-            break;
-        case ProfileType::Polynomial:
-            profile = std::make_unique<PolynomialProfile>();
-            break;
-        default:
-            profile = std::make_unique<TrapezoidalProfile>();
-            break;
-    }
-    
-    if (profile) {
-        profile->setLimits(limits);
-    }
-    
-    return profile;
-}
-
-const char* errorToString(uint16_t errorCode) {
-    switch (static_cast<ErrorCode>(errorCode)) {
-        case ErrorCode::None:                  return "No Error";
-        case ErrorCode::GenericError:          return "Generic Error";
-        case ErrorCode::OverCurrent:           return "Overcurrent";
-        case ErrorCode::OverVoltage:           return "Overvoltage";
-        case ErrorCode::UnderVoltage:          return "Undervoltage";
-        case ErrorCode::OverTemperature:       return "Overtemperature";
-        case ErrorCode::SupplyTemp:            return "Supply Temperature Error";
-        case ErrorCode::EncoderError:          return "Encoder Error";
-        case ErrorCode::MotorBlocked:          return "Motor Blocked";
-        case ErrorCode::FollowingError:        return "Following Error";
-        case ErrorCode::PositionLimit:         return "Position Limit";
-        case ErrorCode::VelocityLimit:         return "Velocity Limit";
-        case ErrorCode::CommunicationError:    return "Communication Error";
-        case ErrorCode::HomingError:           return "Homing Error";
-        default:                               return "Unknown Error";
-    }
-}
-
-} // namespace CiA402
+} // namespace tether::motion

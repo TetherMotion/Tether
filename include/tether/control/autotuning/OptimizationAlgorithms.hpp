@@ -44,7 +44,7 @@
 #include <queue>
 #include <map>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 // ============================================================================
@@ -837,4 +837,4 @@ std::shared_ptr<OptimizationAlgorithm> createOptimizer(const std::string& name);
 std::vector<std::string> getAvailableOptimizers();
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

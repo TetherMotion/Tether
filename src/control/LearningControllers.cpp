@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <numeric>
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // ILCBase Implementation
@@ -612,4 +612,4 @@ void RepetitiveController::resetImpl() {
     m_filterState = 0.0;
 }
 
-} // namespace Control
+} // namespace tether::control

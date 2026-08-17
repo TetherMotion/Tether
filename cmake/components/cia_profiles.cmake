@@ -34,7 +34,6 @@ file(GLOB CIA402_PROFILE_SOURCES CONFIGURE_DEPENDS "${TETHER_ROOT}/src/profiles/
 list(FILTER CIA402_PROFILE_SOURCES EXCLUDE REGEX "MotionController\\.cpp$")
 list(FILTER CIA402_PROFILE_SOURCES EXCLUDE REGEX "MotorModel.*\\.cpp$")
 list(FILTER CIA402_PROFILE_SOURCES EXCLUDE REGEX "MultiAxisPath\\.cpp$")
-list(FILTER CIA402_PROFILE_SOURCES EXCLUDE REGEX "PIDController\\.cpp$")
 list(FILTER CIA402_PROFILE_SOURCES EXCLUDE REGEX "ProfileGenerator\\.cpp$")
 
 # Other CiA profile sources
@@ -155,7 +154,7 @@ foreach(_tgt IN LISTS _variants)
             ${TETHER_ROOT}/src
     )
 
-    target_link_libraries(${_tgt} PUBLIC tether_common tether_ethercat_master tether_motion_control)
+    target_link_libraries(${_tgt} PUBLIC tether_common tether_ethercat_master tether_ethercat_common tether_hal)
 
     set_target_properties(${_tgt} PROPERTIES
         POSITION_INDEPENDENT_CODE ON

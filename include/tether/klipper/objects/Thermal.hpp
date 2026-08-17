@@ -402,7 +402,7 @@ public:
                 flowController_->setFlow(
                     flowTracker_->smoothedFlowMm3PerS());
             }
-            Control::ControllerInput input{};
+            tether::control::ControllerInput input{};
             input.reference = target_;
             input.measured = measured;
             input.dt = controlInterval_;
@@ -415,8 +415,8 @@ public:
         }
 #endif
 
-        // PID computation via Control::PIDController
-        Control::ControllerInput input{};
+        // PID computation via tether::control::PIDController
+        tether::control::ControllerInput input{};
         input.reference = target_;
         input.measured = measured;
         input.dt = controlInterval_;
@@ -474,7 +474,7 @@ public:
 private:
     /// @brief Apply integral and output limits from pidParams_ to the PID controller.
     void applyPIDLimits() {
-        Control::SaturationLimits limits;
+        tether::control::SaturationLimits limits;
         limits.outputMin = pidParams_.pwmMin;
         limits.outputMax = pidParams_.pwmMax;
         limits.integralMin = -pidParams_.imax;
@@ -493,8 +493,8 @@ private:
     double maxTemp_ = 300.0;
 
     HeaterPIDParams pidParams_;
-    Control::PIDController pid_;
-    Control::ControllerOutput lastOutput_;
+    tether::control::PIDController pid_;
+    tether::control::ControllerOutput lastOutput_;
     double controlInterval_ = 0.1; // 100ms default
 #if TETHER_ENABLE_PRESSURE_ADVANCE
     std::shared_ptr<tether::control::extrusion::FlowAdaptiveHeaterController>

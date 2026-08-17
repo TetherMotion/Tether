@@ -2,8 +2,8 @@
 #include "../TestHelpers.hpp"
 #include "tether/control/autotuning/model_based/DahlinAlgorithm.hpp"
 
-using namespace Control::Autotuning;
-using namespace Control::Autotuning::Testing;
+using namespace tether::control::Autotuning;
+using namespace tether::control::Autotuning::Testing;
 
 class DahlinAlgorithmTest : public ::testing::Test {
 protected:

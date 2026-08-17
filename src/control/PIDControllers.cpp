@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // P Controller
@@ -766,4 +766,4 @@ void DualLoopPIDController::resetImpl() {
     m_velocityCommand = 0.0;
 }
 
-} // namespace Control
+} // namespace tether::control

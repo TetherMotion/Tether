@@ -88,7 +88,7 @@
 #include <functional>
 #include <memory>
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // Cascade Controller
@@ -620,4 +620,4 @@ public:
     static std::unique_ptr<ControllerBase> create(const char* name);
 };
 
-} // namespace Control
+} // namespace tether::control

@@ -56,6 +56,8 @@
 
 #pragma once
 
+#include "tether/common/MotionTypes.hpp"
+
 #include <cstdint>
 #include <cstddef>
 #include <magic_enum/magic_enum.hpp>
@@ -793,5 +795,17 @@ enum class ErrorCode : uint32_t {
     CommunicationError  = 0x8100,
     HomingError         = 0x8620,
 };
+
+// Generic motion types (re-exported from tether::common)
+using ProfileType    = tether::common::ProfileType;
+using MotionLimits   = tether::common::MotionLimits;
+using MotionState    = tether::common::MotionState;
+using MotionCommand  = tether::common::MotionCommand;
+using VelocityCommand = tether::common::VelocityCommand;
+using TorqueCommand  = tether::common::TorqueCommand;
+using HomingCommand  = tether::common::HomingCommand;
+
+/// Convert a CiA 402 error code to a human-readable string.
+const char* errorToString(uint16_t errorCode);
 
 } // namespace CiA402

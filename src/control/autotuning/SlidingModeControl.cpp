@@ -12,7 +12,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // SlidingModeController Implementation
@@ -770,4 +770,4 @@ double HigherOrderSMC::compute(double sigma, const std::vector<double>& sigmaDer
     return u;
 }
 
-} // namespace Control
+} // namespace tether::control

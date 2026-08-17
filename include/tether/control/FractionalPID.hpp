@@ -136,7 +136,7 @@
 #include <vector>
 #include <deque>
 
-namespace Control {
+namespace tether::control {
 
 /**
  * @brief Approximation method for fractional operators
@@ -380,4 +380,4 @@ private:
     std::vector<double> m_state;  // Filter state
 };
 
-} // namespace Control
+} // namespace tether::control

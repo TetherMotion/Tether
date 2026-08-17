@@ -41,7 +41,7 @@
 #include <deque>
 #include <functional>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 // ============================================================================
@@ -731,4 +731,4 @@ private:
 };
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control
