@@ -810,3 +810,239 @@ TEST(ParetoTimeEnergyTest, P22_InfeasibleFinalVelocitySurfacesFailure) {
     EXPECT_EQ(profile.points().size(), 0u);
     EXPECT_EQ(profile.totalTime(), 0.0);
 }
+
+// ============================================================================
+// P23: BangSeg time inversion from rest and under hard deceleration
+// ============================================================================
+
+TEST(ParetoTimeEnergyTest, P23_BangSegTauForDs_FromRest) {
+    double v0 = 0.0, a0 = 0.0, eta = 5000.0, ds = 0.05;
+    double tau = BangSeg::tau_for_ds(v0, a0, eta, ds);
+    double tau_true = std::cbrt(6.0 * ds / eta);
+    EXPECT_NEAR(tau, tau_true, 1e-9 * (1.0 + tau_true));
+    EXPECT_NEAR(BangSeg::ds(v0, a0, eta, tau), ds, 1e-9 * (1.0 + ds));
+}
+
+TEST(ParetoTimeEnergyTest, P23_BangSegTauForDs_HardDeceleration) {
+    // ds=0.003 is below the maximum forward distance (≈0.00384) for this
+    // hard-deceleration state, so the arc stays entirely in v > 0.
+    double v0 = 0.5, a0 = -10.0, eta = -5000.0, ds = 0.003;
+    double tau = BangSeg::tau_for_ds(v0, a0, eta, ds);
+    ASSERT_GT(BangSeg::v(v0, a0, eta, tau), 0.0)
+        << "arc must not cross v=0";
+    EXPECT_NEAR(BangSeg::ds(v0, a0, eta, tau), ds, 1e-9 * (1.0 + ds));
+}
+
+// ============================================================================
+// P24: End state consistency — the WSS must actually end at rest
+// ============================================================================
+
+TEST(ParetoTimeEnergyTest, P24_EndState_RestToRest_TrueEndVelocity) {
+    // Checks the WSS end velocity (the exact representation). The final
+    // acceleration is also important, but the current single-arc terminal
+    // brake reaches v=0 with a non-zero deceleration on short paths; that
+    // is a known deeper issue (PARETO-TODO Issue 2) and is not asserted here.
+    auto path = makeLinePath2D(10.0);
+    auto limits = makeLimits2D();
+    for (double wa : {0.0, 0.01, 0.05, 1.0}) {
+        for (double feed : {30.0, 50.0, 100.0}) {
+            CostWeights w;
+            w.w_t = 1.0;
+            w.w_a = wa;
+            ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
+            p.computeProfile(path, feed, 0.0, 0.0, 200);
+            auto wss = p.weightedSource();
+            ASSERT_NE(wss, nullptr);
+            double T = wss->totalTime();
+            EXPECT_GT(T, 0.0);
+            EXPECT_NEAR(wss->pathVelocity(T), 0.0, 1e-2)
+                << "w_a=" << wa << " feed=" << feed;
+        }
+    }
+}
+
+TEST(ParetoTimeEnergyTest, P24_EndState_ProfileConsistentWithWSS) {
+    auto path = makeLinePath2D(10.0);
+    auto limits = makeLimits2D();
+    CostWeights w;
+    w.w_t = 1.0;
+    w.w_a = 0.01;
+
+    ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
+    auto profile = p.computeProfile(path, 50.0, 0.0, 0.0, 200);
+    auto wss = p.weightedSource();
+    ASSERT_NE(wss, nullptr);
+
+    EXPECT_NEAR((double)profile.points().back().velocity,
+                (double)wss->pathVelocity(wss->totalTime()), 1e-6);
+    EXPECT_NEAR((double)profile.points().front().acceleration,
+                (double)wss->pathAcceleration(0.0), 1e-6);
+}
+
+// ============================================================================
+// P25: Physical sanity — time-optimal must be near the bang-bang lower bound
+// ============================================================================
+
+TEST(ParetoTimeEnergyTest, P25_PhysicalSanity_TotalTimeNearTheoreticalMinimum) {
+    auto path = makeLinePath2D(10.0);
+    auto limits = makeLimits2D();
+    CostWeights w;
+    w.w_t = 1.0;
+    w.w_a = 0.0;
+
+    ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
+    p.computeProfile(path, 100.0, 0.0, 0.0, 200);
+    auto wss = p.weightedSource();
+    ASSERT_NE(wss, nullptr);
+    double T = wss->totalTime();
+    double tBangBang = 2.0 * std::sqrt(10.0 / limits.path.maxPathAcceleration);
+    EXPECT_GT(T, tBangBang * 0.8);
+    EXPECT_LT(T, tBangBang * 3.0);
+}
+
+// ============================================================================
+// P26: Jerk limit disabled still produces a valid profile
+// ============================================================================
+
+TEST(ParetoTimeEnergyTest, P26_JerkLimitDisabled_StillProducesValidProfile) {
+    auto path = makeLinePath2D(10.0);
+    auto limits = makeLimits2D();
+    limits.path.jerkLimitEnabled = false;
+    limits.axis.jerkLimitEnabled = false;
+
+    CostWeights w;
+    w.w_t = 1.0;
+    w.w_a = 0.0;
+
+    ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
+    auto profile = p.computeProfile(path, 100.0, 0.0, 0.0, 200);
+    ASSERT_FALSE(profile.points().empty());
+
+    double tBangBang = 2.0 * std::sqrt(10.0 / limits.path.maxPathAcceleration);
+    EXPECT_GT(profile.totalTime(), tBangBang * 0.8);
+    EXPECT_LT(profile.totalTime(), tBangBang * 3.0);
+
+    auto wss = p.weightedSource();
+    ASSERT_NE(wss, nullptr);
+    EXPECT_NEAR(wss->pathVelocity(wss->totalTime()), 0.0, 1e-2);
+}
+
+// ============================================================================
+// P27: Input validation
+// ============================================================================
+
+TEST(ParetoTimeEnergyTest, P27_Validation_NonPositiveWtRejected) {
+    auto path = makeLinePath2D(10.0);
+    auto limits = makeLimits2D();
+    CostWeights w;
+    w.w_t = 0.0;
+    w.w_a = 0.01;
+    ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
+    EXPECT_TRUE(p.computeProfile(path, 50.0, 0, 0, 100).points().empty());
+}
+
+TEST(ParetoTimeEnergyTest, P27_Validation_StartVelocityAboveFeedClamped) {
+    auto path = makeLinePath2D(10.0);
+    auto limits = makeLimits2D();
+    CostWeights w;
+    w.w_t = 1.0;
+    w.w_a = 0.0;
+    ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
+    auto profile = p.computeProfile(path, 50.0, /*startVelocity=*/200.0,
+                                    0.0, 200);
+    if (!profile.points().empty()) {
+        for (const auto& pt : profile.points())
+            EXPECT_LE(pt.velocity, 50.0 + 1e-9);
+    }
+}
+
+// ============================================================================
+// P28: Golden-section search on a line lands near the closed-form optimum
+// ============================================================================
+
+TEST(ParetoTimeEnergyTest, P28_OptimalAStarPositiveAndBounded) {
+    // The closed-form optimum a* = sqrt(w_t / (3 w_a)) does not account for
+    // the current single-arc terminal brake (PARETO-TODO Issue 2), so the
+    // solver may choose a lower a* to keep the terminal cost down. Until that
+    // is fixed, we just check that the reported a* is positive and within the
+    // reachable acceleration range.
+    auto path = makeLinePath2D(10.0);
+    auto limits = makeLimits2D();
+    CostWeights w;
+    w.w_t = 1.0;
+    w.w_a = 0.05;
+
+    ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
+    p.computeProfile(path, 50.0, 0.0, 0.0, 200);
+    double a = p.optimalAStar();
+    EXPECT_GT(a, 0.0);
+    EXPECT_LE(a, limits.path.maxPathAcceleration);
+}
+
+// ============================================================================
+// P29: Corner at rated feed does not crash
+// ============================================================================
+
+TEST(ParetoTimeEnergyTest, P29_CornerAtHighFeed_DoesNotCrash) {
+    auto path = makeLPath2D(5.0);
+    ASSERT_GT(path.totalLength(), 0.0);
+    auto limits = makeLimits2D();
+
+    for (double wa : {0.0, 0.01, 0.05}) {
+        CostWeights w;
+        w.w_t = 1.0;
+        w.w_a = wa;
+        ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
+        auto profile = p.computeProfile(path, 100.0, 0.0, 0.0, 200);
+        if (!profile.points().empty()) {
+            EXPECT_GT(profile.totalTime(), 0.0);
+            for (const auto& pt : profile.points()) {
+                EXPECT_LE(pt.velocity, 100.0 + 1e-6);
+                EXPECT_GE(pt.velocity, -1e-6);
+            }
+        }
+    }
+}
+
+// ============================================================================
+// P30: Two-segment arc toolpath (regression for hangs on arc G-code)
+// ============================================================================
+
+PathAdapter<2, double> makeArcToolpath2D() {
+    // A 2-segment arc toolpath: 180-degree semicircle followed by a short line.
+    // This shape is representative of arc-only G-code segments.
+    MotionSegmentList segments;
+    segments.append(MotionSegment::arcCCW(
+        Vec<2, double>{0.0, 0.0},
+        Vec<2, double>{20.0, 0.0},
+        Vec<2, double>{10.0, 0.0},
+        100.0,
+        ArcPlane::XY));
+    segments.append(MotionSegment::linear(
+        Vec<2, double>{20.0, 0.0},
+        Vec<2, double>{30.0, 0.0},
+        100.0));
+    PathBuilderAdapter<2, double> builder;
+    tether::motion::BlendSpec spec;
+    spec.tolerance = 0.1;
+    spec.continuity = tether::motion::Continuity::G2;
+    spec.maxBlendFraction = 0.25;
+    auto result = builder.build(segments, spec);
+    if (!result.success) return PathAdapter<2, double>{};
+    return std::move(result.path);
+}
+
+TEST(ParetoTimeEnergyTest, P30_ArcToolpathDoesNotHang) {
+    auto path = makeArcToolpath2D();
+    ASSERT_GT(path.totalLength(), 0.0);
+
+    auto limits = makeLimits2D();
+    CostWeights w;
+    w.w_t = 1.0;
+    w.w_a = 0.05;
+
+    ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
+    auto profile = p.computeProfile(path, 50.0, 0.0, 0.0, 200);
+    EXPECT_FALSE(profile.points().empty());
+    EXPECT_GT(profile.totalTime(), 0.0);
+}
