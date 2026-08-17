@@ -95,8 +95,8 @@ KinematicLimits<2, double> makeLimits2D() {
 }
 
 /// Compute ∫a²dt from a velocity profile (trapezoidal integration).
-double computeIntegralA2(const VelocityProfile<double>& profile) {
-    const auto& pts = profile.points();
+double computeIntegralA2(const VelocityProfile& p) {
+    const auto& pts = p.points();
     double integral = 0.0;
     for (size_t i = 1; i < pts.size(); ++i) {
         double dt = pts[i].time - pts[i - 1].time;
@@ -264,9 +264,9 @@ TEST(ParetoTimeEnergyTest, P5_BasicProfileComputation) {
     ParetoTimeEnergyOptimalVelocityPlanner<2> profiler(limits, w);
     auto profile = profiler.computeProfile(path, 50.0, 0, 0, 200);
 
-    EXPECT_GT(profile.points().size(), 0u);
-    EXPECT_GT(profile.totalTime(), 0.0);
-    EXPECT_NEAR(profile.totalLength(), path.totalLength(), 1e-6);
+    EXPECT_GT(profile->points().size(), 0u);
+    EXPECT_GT(profile->totalTime(), 0.0);
+    EXPECT_NEAR(profile->totalLength(), path.totalLength(), 1e-6);
 }
 
 // ============================================================================
@@ -285,13 +285,13 @@ TEST(ParetoTimeEnergyTest, P6_RestToRestBoundaries) {
     ParetoTimeEnergyOptimalVelocityPlanner<2> profiler(limits, w);
     auto profile = profiler.computeProfile(path, 50.0, 0, 0, 200);
 
-    ASSERT_GT(profile.points().size(), 1u);
+    ASSERT_GT(profile->points().size(), 1u);
 
     // Start velocity should be ~0
-    EXPECT_NEAR(profile.points().front().velocity, 0.0, 1e-3);
+    EXPECT_NEAR(profile->points().front().velocity, 0.0, 1e-3);
 
     // End velocity should be ~0
-    EXPECT_NEAR(profile.points().back().velocity, 0.0, 1e-3);
+    EXPECT_NEAR(profile->points().back().velocity, 0.0, 1e-3);
 }
 
 // ============================================================================
@@ -312,7 +312,7 @@ TEST(ParetoTimeEnergyTest, P7_VelocityLimitSatisfied) {
     ParetoTimeEnergyOptimalVelocityPlanner<2> profiler(limits, w);
     auto profile = profiler.computeProfile(path, feedRate, 0, 0, 200);
 
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         EXPECT_LE(pt.velocity, feedRate + 1e-6)
             << "Velocity " << pt.velocity << " exceeds feed rate " << feedRate
             << " at s=" << pt.arcLength;
@@ -340,7 +340,7 @@ TEST(ParetoTimeEnergyTest, P8_AccelerationLimitSatisfied) {
     auto profile = profiler.computeProfile(path, 50.0, 0, 0, 200);
 
     double tol = aMax * 0.05;  // 5% tolerance for numerical effects
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         EXPECT_LE(std::abs(pt.acceleration), aMax + tol)
             << "Acceleration " << pt.acceleration << " exceeds limit " << aMax
             << " at s=" << pt.arcLength;
@@ -366,7 +366,7 @@ TEST(ParetoTimeEnergyTest, P9_JerkLimitSatisfied) {
     auto profile = profiler.computeProfile(path, 50.0, 0, 0, 200);
 
     double tol = jMax * 0.10;  // 10% tolerance for sampling/interpolation
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         EXPECT_LE(std::abs(pt.jerk), jMax + tol)
             << "Jerk " << pt.jerk << " exceeds limit " << jMax
             << " at s=" << pt.arcLength;
@@ -394,7 +394,7 @@ TEST(ParetoTimeEnergyTest, P10_ZeroWADegeneratesToTimeOptimal) {
     ParetoTimeEnergyOptimalVelocityPlanner<2> profiler_to(limits, w_to);
     auto profile_to = profiler_to.computeProfile(path, 50.0, 0, 0, 200);
 
-    EXPECT_GT(profile_to.totalTime(), 0.0);
+    EXPECT_GT(profile_to->totalTime(), 0.0);
 
     // The optimal a* should be positive and produce a valid trajectory
     double aStar = profiler_to.optimalAStar();
@@ -409,7 +409,7 @@ TEST(ParetoTimeEnergyTest, P10_ZeroWADegeneratesToTimeOptimal) {
     auto profile_smooth = profiler_smooth.computeProfile(path, 50.0, 0, 0, 200);
 
     // Time-optimal should be at least as fast as smoothed
-    EXPECT_LE(profile_to.totalTime(), profile_smooth.totalTime() * 1.5)
+    EXPECT_LE(profile_to->totalTime(), profile_smooth->totalTime() * 1.5)
         << "Time-optimal (w_a=0) should be faster than smoothed (w_a=1.0)";
 }
 
@@ -433,8 +433,8 @@ TEST(ParetoTimeEnergyTest, P11_LargerWA_LongerTime) {
     auto prof1 = p1.computeProfile(path, 50.0, 0, 0, 200);
     auto prof2 = p2.computeProfile(path, 50.0, 0, 0, 200);
 
-    double t1 = prof1.totalTime();
-    double t2 = prof2.totalTime();
+    double t1 = prof1->totalTime();
+    double t2 = prof2->totalTime();
 
     // Strong smoothing should take at least as long as mild smoothing
     EXPECT_GE(t2, t1 * 0.95)
@@ -462,8 +462,8 @@ TEST(ParetoTimeEnergyTest, P12_LargerWA_LowerIntegralA2) {
     auto prof1 = p1.computeProfile(path, 50.0, 0, 0, 200);
     auto prof2 = p2.computeProfile(path, 50.0, 0, 0, 200);
 
-    double intA2_1 = computeIntegralA2(prof1);
-    double intA2_2 = computeIntegralA2(prof2);
+    double intA2_1 = computeIntegralA2(*prof1);
+    double intA2_2 = computeIntegralA2(*prof2);
 
     // Strong smoothing should have lower ∫a²dt
     EXPECT_LE(intA2_2, intA2_1 * 1.05)
@@ -492,10 +492,10 @@ TEST(ParetoTimeEnergyTest, P13_ParetoFrontSweep) {
         ParetoTimeEnergyOptimalVelocityPlanner<2> profiler(limits, w);
         auto profile = profiler.computeProfile(path, 50.0, 0, 0, 200);
 
-        if (profile.points().empty()) continue;
+        if (profile->points().empty()) continue;
 
-        double T = profile.totalTime();
-        double intA2 = computeIntegralA2(profile);
+        double T = profile->totalTime();
+        double intA2 = computeIntegralA2(*profile);
         pareto.push_back({T, intA2});
 
         EXPECT_GT(T, 0.0) << "w_a = " << wa;
@@ -640,7 +640,7 @@ TEST(ParetoTimeEnergyTest, P17_EmptyPath) {
     auto profile = profiler.computeProfile(emptyPath, 50.0, 0, 0, 100);
 
     // Should return empty profile, not crash
-    EXPECT_EQ(profile.points().size(), 0u);
+    EXPECT_EQ(profile->points().size(), 0u);
 }
 
 TEST(ParetoTimeEnergyTest, P17_ZeroFeedRate) {
@@ -656,7 +656,7 @@ TEST(ParetoTimeEnergyTest, P17_ZeroFeedRate) {
     auto profile = profiler.computeProfile(path, 0.0, 0, 0, 100);
 
     // Should return empty profile (guard against zero feed rate)
-    EXPECT_EQ(profile.points().size(), 0u);
+    EXPECT_EQ(profile->points().size(), 0u);
 }
 
 TEST(ParetoTimeEnergyTest, P17_ZeroAccelerationLimit) {
@@ -674,7 +674,7 @@ TEST(ParetoTimeEnergyTest, P17_ZeroAccelerationLimit) {
     auto profile = profiler.computeProfile(path, 50.0, 0, 0, 100);
 
     // Should return empty profile (guard against zero acceleration limit)
-    EXPECT_EQ(profile.points().size(), 0u);
+    EXPECT_EQ(profile->points().size(), 0u);
 }
 
 // ============================================================================
@@ -693,18 +693,18 @@ TEST(ParetoTimeEnergyTest, P18_CornerPathProfile) {
     ParetoTimeEnergyOptimalVelocityPlanner<2> profiler(limits, w);
     auto profile = profiler.computeProfile(path, 30.0, 0, 0, 200);
 
-    EXPECT_GT(profile.points().size(), 0u);
-    EXPECT_GT(profile.totalTime(), 0.0);
+    EXPECT_GT(profile->points().size(), 0u);
+    EXPECT_GT(profile->totalTime(), 0.0);
 
     // Velocity should respect feed rate
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         EXPECT_LE(pt.velocity, 30.0 + 1e-6);
         EXPECT_GE(pt.velocity, -1e-6);
     }
 
     // Rest-to-rest
-    EXPECT_NEAR(profile.points().front().velocity, 0.0, 1e-2);
-    EXPECT_NEAR(profile.points().back().velocity, 0.0, 1e-2);
+    EXPECT_NEAR(profile->points().front().velocity, 0.0, 1e-2);
+    EXPECT_NEAR(profile->points().back().velocity, 0.0, 1e-2);
 }
 
 // ============================================================================
@@ -777,15 +777,15 @@ TEST(ParetoTimeEnergyTest, P21_ShortPathRestToRest) {
     ParetoTimeEnergyOptimalVelocityPlanner<2> profiler(limits, w);
     auto profile = profiler.computeProfile(path, 50.0, 0, 0, 200);
 
-    EXPECT_GT(profile.totalTime(), 0.0);
-    ASSERT_FALSE(profile.points().empty());
+    EXPECT_GT(profile->totalTime(), 0.0);
+    ASSERT_FALSE(profile->points().empty());
 
     // Must start and end at rest.
-    EXPECT_NEAR(profile.points().front().velocity, 0.0, 1e-2);
-    EXPECT_NEAR(profile.points().back().velocity, 0.0, 1e-2);
+    EXPECT_NEAR(profile->points().front().velocity, 0.0, 1e-2);
+    EXPECT_NEAR(profile->points().back().velocity, 0.0, 1e-2);
 
     // Must traverse the whole path.
-    EXPECT_NEAR(profile.totalLength(), path.totalLength(), 1e-6);
+    EXPECT_NEAR(profile->totalLength(), path.totalLength(), 1e-6);
 }
 
 // ============================================================================
@@ -807,8 +807,8 @@ TEST(ParetoTimeEnergyTest, P22_InfeasibleFinalVelocitySurfacesFailure) {
     ParetoTimeEnergyOptimalVelocityPlanner<2> profiler(limits, w);
     auto profile = profiler.computeProfile(path, 50.0, 0, 50, 200);
 
-    EXPECT_EQ(profile.points().size(), 0u);
-    EXPECT_EQ(profile.totalTime(), 0.0);
+    EXPECT_EQ(profile->points().size(), 0u);
+    EXPECT_EQ(profile->totalTime(), 0.0);
 }
 
 // ============================================================================
@@ -873,9 +873,9 @@ TEST(ParetoTimeEnergyTest, P24_EndState_ProfileConsistentWithWSS) {
     auto wss = p.weightedSource();
     ASSERT_NE(wss, nullptr);
 
-    EXPECT_NEAR((double)profile.points().back().velocity,
+    EXPECT_NEAR((double)profile->points().back().velocity,
                 (double)wss->pathVelocity(wss->totalTime()), 1e-6);
-    EXPECT_NEAR((double)profile.points().front().acceleration,
+    EXPECT_NEAR((double)profile->points().front().acceleration,
                 (double)wss->pathAcceleration(0.0), 1e-6);
 }
 
@@ -916,11 +916,11 @@ TEST(ParetoTimeEnergyTest, P26_JerkLimitDisabled_StillProducesValidProfile) {
 
     ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
     auto profile = p.computeProfile(path, 100.0, 0.0, 0.0, 200);
-    ASSERT_FALSE(profile.points().empty());
+    ASSERT_FALSE(profile->points().empty());
 
     double tBangBang = 2.0 * std::sqrt(10.0 / limits.path.maxPathAcceleration);
-    EXPECT_GT(profile.totalTime(), tBangBang * 0.8);
-    EXPECT_LT(profile.totalTime(), tBangBang * 3.0);
+    EXPECT_GT(profile->totalTime(), tBangBang * 0.8);
+    EXPECT_LT(profile->totalTime(), tBangBang * 3.0);
 
     auto wss = p.weightedSource();
     ASSERT_NE(wss, nullptr);
@@ -938,7 +938,7 @@ TEST(ParetoTimeEnergyTest, P27_Validation_NonPositiveWtRejected) {
     w.w_t = 0.0;
     w.w_a = 0.01;
     ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
-    EXPECT_TRUE(p.computeProfile(path, 50.0, 0, 0, 100).points().empty());
+    EXPECT_TRUE(p.computeProfile(path, 50.0, 0, 0, 100)->points().empty());
 }
 
 TEST(ParetoTimeEnergyTest, P27_Validation_StartVelocityAboveFeedClamped) {
@@ -950,8 +950,8 @@ TEST(ParetoTimeEnergyTest, P27_Validation_StartVelocityAboveFeedClamped) {
     ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
     auto profile = p.computeProfile(path, 50.0, /*startVelocity=*/200.0,
                                     0.0, 200);
-    if (!profile.points().empty()) {
-        for (const auto& pt : profile.points())
+    if (!profile->points().empty()) {
+        for (const auto& pt : profile->points())
             EXPECT_LE(pt.velocity, 50.0 + 1e-9);
     }
 }
@@ -994,9 +994,9 @@ TEST(ParetoTimeEnergyTest, P29_CornerAtHighFeed_DoesNotCrash) {
         w.w_a = wa;
         ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
         auto profile = p.computeProfile(path, 100.0, 0.0, 0.0, 200);
-        if (!profile.points().empty()) {
-            EXPECT_GT(profile.totalTime(), 0.0);
-            for (const auto& pt : profile.points()) {
+        if (!profile->points().empty()) {
+            EXPECT_GT(profile->totalTime(), 0.0);
+            for (const auto& pt : profile->points()) {
                 EXPECT_LE(pt.velocity, 100.0 + 1e-6);
                 EXPECT_GE(pt.velocity, -1e-6);
             }
@@ -1043,6 +1043,6 @@ TEST(ParetoTimeEnergyTest, P30_ArcToolpathDoesNotHang) {
 
     ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
     auto profile = p.computeProfile(path, 50.0, 0.0, 0.0, 200);
-    EXPECT_FALSE(profile.points().empty());
-    EXPECT_GT(profile.totalTime(), 0.0);
+    EXPECT_FALSE(profile->points().empty());
+    EXPECT_GT(profile->totalTime(), 0.0);
 }

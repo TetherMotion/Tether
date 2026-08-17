@@ -92,10 +92,10 @@ TEST(JerkConstrainedTOPPRATest, JerkBounded) {
     JerkConstrainedTOPPRA<2, double> profiler(limits);
     auto profile = profiler.computeProfile(path, 100.0, 0, 0, 200);
 
-    ASSERT_GT(profile.points().size(), 1u);
+    ASSERT_GT(profile->points().size(), 1u);
 
     double maxJerk = 0.0;
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         maxJerk = std::max(maxJerk, std::abs(pt.jerk));
     }
     EXPECT_LE(maxJerk, 2000.0 * 1.05)
@@ -118,10 +118,10 @@ TEST(JerkConstrainedTOPPRATest, AccelerationBounded) {
     JerkConstrainedTOPPRA<2, double> profiler(limits);
     auto profile = profiler.computeProfile(path, 100.0, 0, 0, 200);
 
-    ASSERT_GT(profile.points().size(), 1u);
+    ASSERT_GT(profile->points().size(), 1u);
 
     double maxAccel = 0.0;
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         maxAccel = std::max(maxAccel, std::abs(pt.acceleration));
     }
     EXPECT_LE(maxAccel, 200.0 * 1.05)
@@ -142,10 +142,10 @@ TEST(JerkConstrainedTOPPRATest, VelocityBounded) {
     JerkConstrainedTOPPRA<2, double> profiler(limits);
     auto profile = profiler.computeProfile(path, 80.0, 0, 0, 200);
 
-    ASSERT_GT(profile.points().size(), 1u);
+    ASSERT_GT(profile->points().size(), 1u);
 
     double maxVel = 0.0;
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         maxVel = std::max(maxVel, std::abs(pt.velocity));
     }
     EXPECT_LE(maxVel, 80.0 * 1.01)
@@ -167,10 +167,10 @@ TEST(SCurveVelocityProfilerTest, JerkBounded) {
     SCurveVelocityProfiler<2, double> profiler(limits);
     auto profile = profiler.computeProfile(path, 100.0, 0, 0, 200);
 
-    ASSERT_GT(profile.points().size(), 1u);
+    ASSERT_GT(profile->points().size(), 1u);
 
     double maxJerk = 0.0;
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         maxJerk = std::max(maxJerk, std::abs(pt.jerk));
     }
     EXPECT_LE(maxJerk, 2000.0 * 1.05)
@@ -193,10 +193,10 @@ TEST(SCurveVelocityProfilerTest, AccelerationBounded) {
     SCurveVelocityProfiler<2, double> profiler(limits);
     auto profile = profiler.computeProfile(path, 100.0, 0, 0, 200);
 
-    ASSERT_GT(profile.points().size(), 1u);
+    ASSERT_GT(profile->points().size(), 1u);
 
     double maxAccel = 0.0;
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         maxAccel = std::max(maxAccel, std::abs(pt.acceleration));
     }
     EXPECT_LE(maxAccel, 200.0 * 1.05)
@@ -366,10 +366,10 @@ TEST(JerkConstrainedTOPPRATest, CustomLimitsRespected) {
     JerkConstrainedTOPPRA<2, double> profiler(limits);
     auto profile = profiler.computeProfile(path, 200.0, 0, 0, 200);
 
-    ASSERT_GT(profile.points().size(), 1u);
+    ASSERT_GT(profile->points().size(), 1u);
 
     double maxAccel = 0.0, maxJerk = 0.0;
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         maxAccel = std::max(maxAccel, std::abs(pt.acceleration));
         maxJerk = std::max(maxJerk, std::abs(pt.jerk));
     }

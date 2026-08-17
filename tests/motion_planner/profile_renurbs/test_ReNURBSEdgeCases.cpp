@@ -41,14 +41,14 @@ PathAdapter<2, double> makeMultiSegmentPath(std::size_t nSegs, double segLen) {
     return PathAdapter<2, double>(std::move(path), std::move(refs));
 }
 
-VelocityProfile<double> makeProfileWithZeroVelocityMiddle(
+SampledVelocityProfile makeProfileWithZeroVelocityMiddle(
     double pathLength, double vMax, std::size_t n = 100) {
-    VelocityProfile<double> profile;
+    SampledVelocityProfile profile;
     double ds = pathLength / (n - 1);
     double t = 0.0;
     for (std::size_t i = 0; i < n; ++i) {
         double s = i * ds;
-        VelocityProfilePoint<double> pt;
+        VelocityProfilePoint pt;
         pt.arcLength = s;
         pt.velocityLimit = vMax;
         pt.accelerationLimit = 500.0;
@@ -75,15 +75,15 @@ VelocityProfile<double> makeProfileWithZeroVelocityMiddle(
     return profile;
 }
 
-VelocityProfile<double> makeBangBangProfile(
+SampledVelocityProfile makeBangBangProfile(
     double pathLength, double vMax, double aMax, std::size_t n = 100) {
-    VelocityProfile<double> profile;
+    SampledVelocityProfile profile;
     double ds = pathLength / (n - 1);
     double t = 0.0;
     double accelDist = pathLength / 2;
     for (std::size_t i = 0; i < n; ++i) {
         double s = i * ds;
-        VelocityProfilePoint<double> pt;
+        VelocityProfilePoint pt;
         pt.arcLength = s;
         pt.velocityLimit = vMax;
         pt.accelerationLimit = aMax;
@@ -116,7 +116,7 @@ VelocityProfile<double> makeBangBangProfile(
 
 TEST(ReNURBSEdgeCasesTest, E1_EmptyProfile) {
     auto path = makeLinearPath2D(100.0);
-    VelocityProfile<double> profile;
+    SampledVelocityProfile profile;
     KinematicLimits<2, double> limits;
     ReNURBSConfig cfg;
     cfg.enabled = true;
@@ -127,8 +127,8 @@ TEST(ReNURBSEdgeCasesTest, E1_EmptyProfile) {
 
 TEST(ReNURBSEdgeCasesTest, E2_SingleSample) {
     auto path = makeLinearPath2D(100.0);
-    VelocityProfile<double> profile;
-    VelocityProfilePoint<double> pt;
+    SampledVelocityProfile profile;
+    VelocityProfilePoint pt;
     pt.arcLength = 50.0;
     pt.velocity = 10.0;
     pt.time = 5.0;
@@ -218,12 +218,12 @@ TEST(ReNURBSEdgeCasesTest, E6_DiscontinuousAccelBasicToppra) {
 TEST(ReNURBSEdgeCasesTest, E12_MaxCpExhausted) {
     // Very high-frequency profile with tight CP cap
     auto path = makeLinearPath2D(100.0);
-    VelocityProfile<double> profile;
+    SampledVelocityProfile profile;
     double ds = 100.0 / 99;
     double t = 0;
     for (std::size_t i = 0; i < 100; ++i) {
         double s = i * ds;
-        VelocityProfilePoint<double> pt;
+        VelocityProfilePoint pt;
         pt.arcLength = s;
         pt.velocityLimit = 100.0;
         pt.accelerationLimit = 500.0;
@@ -253,12 +253,12 @@ TEST(ReNURBSEdgeCasesTest, E12_MaxCpExhausted) {
 TEST(ReNURBSEdgeCasesTest, E13_NegativeVelocityClamp) {
     // Profile with values that might cause negative overshoot
     auto path = makeLinearPath2D(100.0);
-    VelocityProfile<double> profile;
+    SampledVelocityProfile profile;
     double ds = 100.0 / 49;
     double t = 0;
     for (std::size_t i = 0; i < 50; ++i) {
         double s = i * ds;
-        VelocityProfilePoint<double> pt;
+        VelocityProfilePoint pt;
         pt.arcLength = s;
         pt.velocityLimit = 100.0;
         pt.accelerationLimit = 500.0;
@@ -327,12 +327,12 @@ TEST(ReNURBSEdgeCasesTest, Fuzz_RandomProfilesConstraintPreserved) {
         int n = nDist(rng);
 
         auto path = makeLinearPath2D(pathLen);
-        VelocityProfile<double> profile;
+        SampledVelocityProfile profile;
         double ds = pathLen / (n - 1);
         double t = 0;
         for (int i = 0; i < n; ++i) {
             double s = i * ds;
-            VelocityProfilePoint<double> pt;
+            VelocityProfilePoint pt;
             pt.arcLength = s;
             pt.velocityLimit = vMax;
             pt.accelerationLimit = aMax;
@@ -384,12 +384,12 @@ TEST(ReNURBSEdgeCasesTest, Fuzz_RandomProfilesConstraintPreserved) {
 
 TEST(ReNURBSEdgeCasesTest, Property_MonotonicTime) {
     auto path = makeLinearPath2D(100.0);
-    VelocityProfile<double> profile;
+    SampledVelocityProfile profile;
     double ds = 100.0 / 49;
     double t = 0;
     for (std::size_t i = 0; i < 50; ++i) {
         double s = i * ds;
-        VelocityProfilePoint<double> pt;
+        VelocityProfilePoint pt;
         pt.arcLength = s;
         pt.velocityLimit = 50.0;
         pt.accelerationLimit = 500.0;
@@ -429,12 +429,12 @@ TEST(ReNURBSEdgeCasesTest, Property_MonotonicTime) {
 
 TEST(ReNURBSEdgeCasesTest, Property_SampleInterpolationHolds) {
     auto path = makeLinearPath2D(100.0);
-    VelocityProfile<double> profile;
+    SampledVelocityProfile profile;
     double ds = 100.0 / 29;
     double t = 0;
     for (std::size_t i = 0; i < 30; ++i) {
         double s = i * ds;
-        VelocityProfilePoint<double> pt;
+        VelocityProfilePoint pt;
         pt.arcLength = s;
         pt.velocityLimit = 50.0;
         pt.accelerationLimit = 500.0;
@@ -483,13 +483,13 @@ TEST(ReNURBSEdgeCasesTest, Regression_RealWorldMultiSegmentPath) {
     auto path = makeMultiSegmentPath(nSegs, segLen);
     double totalLen = nSegs * segLen;
 
-    VelocityProfile<double> profile;
+    SampledVelocityProfile profile;
     int n = 200;
     double ds = totalLen / (n - 1);
     double t = 0;
     for (int i = 0; i < n; ++i) {
         double s = i * ds;
-        VelocityProfilePoint<double> pt;
+        VelocityProfilePoint pt;
         pt.arcLength = s;
         pt.velocityLimit = 100.0;
         pt.accelerationLimit = 500.0;

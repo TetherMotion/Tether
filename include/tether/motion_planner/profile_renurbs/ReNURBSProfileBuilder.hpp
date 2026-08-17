@@ -38,7 +38,7 @@ namespace tether::motion::profile_renurbs {
  *
  * @tparam Dim Spatial dimension of the path (2 or 3).
  * @tparam T   Numeric type (default: double).
- * @param profile The sampled velocity profile (from any IVelocityProfiler).
+ * @param profile The velocity profile (sampled or analytical) to fit.
  * @param path The path adapter (provides segment boundaries + source refs).
  * @param limits Kinematic limits (for jerk limit, if jerk-constrained).
  * @param config ReNURBS configuration.
@@ -46,7 +46,7 @@ namespace tether::motion::profile_renurbs {
  */
 template<std::size_t Dim, typename T = double>
 ReNURBSProfile buildReNURBSProfile(
-    const MotionPlanner::VelocityProfile<T>& profile,
+    const MotionPlanner::VelocityProfile& profile,
     const MotionPlanner::PathAdapter<Dim, T>& path,
     const MotionPlanner::KinematicLimits<Dim, T>& limits,
     const ReNURBSConfig& config = {});

@@ -42,9 +42,7 @@ template<size_t Dim, typename T = double>
 class BasicTOPPRA : public VelocityProfiler<Dim, T> {
 public:
     using Path = PathAdapter<Dim, T>;
-    using Profile = VelocityProfile<T>;
     using Limits = KinematicLimits<Dim, T>;
-    using Point = VelocityProfilePoint<T>;
 
     /**
      * @brief Constructor
@@ -68,7 +66,7 @@ public:
      *                 interface compatibility with jerk-limited profilers.
      * @return Computed velocity profile
      */
-    Profile computeProfile(const Path& path,
+    std::unique_ptr<VelocityProfile> computeProfile(const Path& path,
                            T feedRate,
                            T startVelocity = T(0),
                            T endVelocity = T(0),
@@ -76,7 +74,7 @@ public:
                            T startAcceleration = T(0),
                            T startJerk = T(0)) override {
         (void)startJerk; // WI-6.4: ignored — basic TOPP-RA has unbounded jerk.
-        Profile profile;
+        auto profile = std::make_unique<SampledVelocityProfile>();
 
         if (path.numSegments() == 0) {
             return profile;
@@ -235,11 +233,11 @@ public:
         }
 
         // Final profile: minimum of all constraints
-        profile.reserve(numSamples);
+        profile->reserve(numSamples);
         T currentTime = T(0);
 
         for (size_t i = 0; i < numSamples; ++i) {
-            Point pt;
+            VelocityProfilePoint pt;
             pt.arcLength = samples[i].arcLength;
 
             // Take minimum of all velocity constraints
@@ -251,18 +249,18 @@ public:
 
             // Determine limiting factor
             if (pt.velocity == fwd && fwd < bwd && fwd < lim) {
-                pt.limitedBy = Point::LimitType::ForwardAccel;
+                pt.limitedBy = VelocityProfilePoint::LimitType::ForwardAccel;
             } else if (pt.velocity == bwd && bwd < lim) {
-                pt.limitedBy = Point::LimitType::BackwardDecel;
+                pt.limitedBy = VelocityProfilePoint::LimitType::BackwardDecel;
             } else if (pt.velocity == lim) {
-                pt.limitedBy = Point::LimitType::Curvature;
+                pt.limitedBy = VelocityProfilePoint::LimitType::Curvature;
             }
 
             // Compute time
             if (i > 0) {
-                T prevVel = profile.points()[i - 1].velocity;
+                T prevVel = profile->points()[i - 1].velocity;
                 T avgVel = (prevVel + pt.velocity) / T(2);
-                T deltaS = pt.arcLength - profile.points()[i - 1].arcLength;
+                T deltaS = pt.arcLength - profile->points()[i - 1].arcLength;
 
                 if (avgVel > MathConstants::EPSILON) {
                     currentTime += deltaS / avgVel;
@@ -280,14 +278,14 @@ public:
             if (i == 0) {
                 pt.acceleration = startAcceleration;
             } else {
-                T prevVel = profile.points()[i - 1].velocity;
-                T dt = pt.time - profile.points()[i - 1].time;
+                T prevVel = profile->points()[i - 1].velocity;
+                T dt = pt.time - profile->points()[i - 1].time;
                 if (dt > MathConstants::EPSILON) {
                     pt.acceleration = (pt.velocity - prevVel) / dt;
                 }
             }
 
-            profile.addPoint(pt);
+            profile->addPoint(pt);
         }
 
         return profile;
