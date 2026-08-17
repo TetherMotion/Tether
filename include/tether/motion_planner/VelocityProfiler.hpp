@@ -113,7 +113,9 @@ public:
      *                 velocity will not exceed this.
      * @param startVelocity Initial velocity (default: 0, start at rest).
      * @param endVelocity Target final velocity (default: 0, end at rest).
-     * @param numSamples Number of sample points along the path.
+     * @param numSamples Number of sample points along the path, or the
+     *                   constraint-cache size for profilers that use a grid
+     *                   (e.g., ParetoTimeEnergyOptimalVelocityPlanner).
      * @param startAcceleration Initial acceleration (for replanning from
      *                          a moving state; default: 0). Stored on the
      *                          first profile point; the optimization

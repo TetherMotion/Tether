@@ -1121,15 +1121,15 @@ public:
      *
      * @param startVelocity Initial velocity (default 0)
      * @param endVelocity Final velocity (default 0)
-     * @param numSamples Number of sample points for the simulation grid
+     * @param constraintCacheSize Number of grid points for the constraint cache
      * @return Vector of weighted arcs (the solution)
      */
     std::vector<Arc> solve(T startVelocity = T(0),
                             T endVelocity = T(0),
-                            size_t numSamples = 200) {
+                            size_t constraintCacheSize = 200) {
         v0_ = static_cast<double>(startVelocity);
         vf_ = static_cast<double>(endVelocity);
-        numSamples_ = std::max(numSamples, size_t(10));
+        constraintCacheSize_ = std::max(constraintCacheSize, size_t(10));
 
         // Precompute the path geometry and velocity limit on the solver grid.
         // This is done once per solve and reused by every simulateAndCost call.
@@ -1253,7 +1253,7 @@ private:
     double sTotal_ = 0.0;
     double v0_ = 0.0;
     double vf_ = 0.0;
-    size_t numSamples_ = 200;
+    size_t constraintCacheSize_ = 200;
     double ds_ = 0.0;
 
     std::vector<KinematicCoefficients> gridCoeffs_;
@@ -1287,17 +1287,17 @@ private:
      *
      * This is the dominant cost for NURBS/arc paths: each constraint query
      * otherwise inverts arc length and evaluates high-order NURBS derivatives.
-     * Caching once per solve makes every simulateAndCost call O(numSamples)
-     * instead of O(numSamples * pathEvalCost).
+     * Caching once per solve makes every simulateAndCost call
+     * O(constraintCacheSize) instead of O(constraintCacheSize * pathEvalCost).
      */
     void buildConstraintCache() {
-        if (sTotal_ <= 0.0 || numSamples_ == 0) return;
+        if (sTotal_ <= 0.0 || constraintCacheSize_ == 0) return;
 
-        ds_ = sTotal_ / static_cast<double>(numSamples_);
-        gridCoeffs_.resize(numSamples_ + 1);
-        vLimGrid_.resize(numSamples_ + 1);
+        ds_ = sTotal_ / static_cast<double>(constraintCacheSize_);
+        gridCoeffs_.resize(constraintCacheSize_ + 1);
+        vLimGrid_.resize(constraintCacheSize_ + 1);
 
-        for (size_t i = 0; i <= numSamples_; ++i) {
+        for (size_t i = 0; i <= constraintCacheSize_; ++i) {
             double s = std::min(static_cast<double>(i) * ds_, sTotal_);
             gridCoeffs_[i] = evaluator_.computeCoefficients(
                 static_cast<T>(s), T(0), T(0), path_);
@@ -1333,7 +1333,7 @@ private:
         if (ds_ <= 0.0) return 0;
         long idx = static_cast<long>(std::floor(s / ds_ + 0.5));
         return static_cast<size_t>(
-            std::clamp(idx, 0L, static_cast<long>(numSamples_)));
+            std::clamp(idx, 0L, static_cast<long>(constraintCacheSize_)));
     }
 
     /// Compute acceleration bounds [a_min, a_max] from cached grid coefficients.
@@ -1432,7 +1432,7 @@ private:
         double v = v0_, a = 0.0;
         double J = 0.0;
 
-        const double ds = sTotal_ / static_cast<double>(numSamples_);
+        const double ds = sTotal_ / static_cast<double>(constraintCacheSize_);
         const double sEnd = sTotal_;
 
         // Constraint queries are served from the precomputed grid.  This
@@ -1448,7 +1448,7 @@ private:
         };
 
         bool infeasible = false;
-        int maxIter = static_cast<int>(numSamples_) * 20;
+        int maxIter = static_cast<int>(constraintCacheSize_) * 20;
         for (int iter = 0; iter < maxIter && s < sEnd - 1e-10; ++iter) {
             EtaBounds etaBounds = getEtaBounds(s, v, a);
             if (!etaBounds.feasible()) {
@@ -1764,15 +1764,15 @@ public:
     /**
      * @brief Compute a weighted time-energy-optimal velocity profile.
      *
-     * Solves the weighted-cost problem, produces a WeightedSwitchingStructure,
-     * and samples it to a tabulated VelocityProfile for backward compatibility.
+     * Solves the weighted-cost problem and produces a WeightedSwitchingStructure
+     * wrapped in an AnalyticalSSRVelocityProfile.
      */
     std::unique_ptr<VelocityProfile> computeProfile(
         const Path& path,
         T feedRate,
         T startVelocity = T(0),
         T endVelocity = T(0),
-        size_t numSamples = 100,
+        size_t constraintCacheSize = 100,
         T startAcceleration = T(0),
         T startJerk = T(0)) override {
 
@@ -1785,7 +1785,7 @@ public:
         if (pathLength <= T(0)) return std::make_unique<SampledVelocityProfile>();
 
         // Validate inputs (same guards as other profilers)
-        if (numSamples < 2) return std::make_unique<SampledVelocityProfile>();
+        if (constraintCacheSize < 2) return std::make_unique<SampledVelocityProfile>();
         if (feedRate <= T(0)) return std::make_unique<SampledVelocityProfile>();
         if (limits_.path.maxPathAcceleration <= T(0)) return std::make_unique<SampledVelocityProfile>();
         if (limits_.path.maxCentripetalAcceleration < T(0)) return std::make_unique<SampledVelocityProfile>();
@@ -1815,7 +1815,7 @@ public:
 
         // Solve
         Solver solver(*pathCopy, limits_, wEff, feedRate);
-        auto arcs = solver.solve(v0, endVelocity, numSamples);
+        auto arcs = solver.solve(v0, endVelocity, constraintCacheSize);
         if (arcs.empty()) {
             // The solver could not find a feasible trajectory (e.g. the
             // requested boundary velocities are unreachable for the path).

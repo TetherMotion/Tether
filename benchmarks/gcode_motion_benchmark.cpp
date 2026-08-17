@@ -24,11 +24,11 @@
  * outputs an analytical SSR/WSS profile.
  *
  * Usage:
- *   gcode_motion_benchmark <gcode_file> [--dense] [--samples N]
+ *   gcode_motion_benchmark <gcode_file> [--dense] [--constraint-cache-size N]
  *                          [--max-velocity V] [--max-accel A] [--max-jerk J]
  *
- * --dense         : Run Step 4 (dense sampling via TrajectoryAnalyzer).
- * --samples N     : Number of TOPPRA profile samples (default 20000, capped).
+ * --dense                  : Run Step 4 (dense sampling via TrajectoryAnalyzer).
+ * --constraint-cache-size N : Pareto solver constraint cache size (default 20000, capped).
  * --max-velocity  : Path velocity limit mm/s (default 200).
  * --max-accel     : Path acceleration limit mm/s² (default 2000).
  * --max-jerk      : Path jerk limit mm/s³ (default 20000; 0 disables jerk).
@@ -552,7 +552,7 @@ void print_table(const std::vector<StageRow>& rows) {
 struct Options {
     std::string file;
     bool dense = false;
-    size_t num_samples = 20000;
+    size_t constraintCacheSize = 20000;
     size_t max_dense_samples = 1000000;  ///< Cap dense samples to prevent OOM
     double max_velocity = 200.0;     // mm/s
     double max_accel = 2000.0;       // mm/s²
@@ -570,7 +570,8 @@ bool parse_args(int argc, char* argv[], Options& opt) {
             return argv[++i];
         };
         if (a == "--dense")              opt.dense = true;
-        else if (a == "--samples")       { const char* v = next("--samples"); if (!v) return false; opt.num_samples = std::strtoull(v, nullptr, 10); }
+        else if (a == "--constraint-cache-size")
+            { const char* v = next("--constraint-cache-size"); if (!v) return false; opt.constraintCacheSize = std::strtoull(v, nullptr, 10); }
         else if (a == "--max-samples")   { const char* v = next("--max-samples"); if (!v) return false; opt.max_dense_samples = std::strtoull(v, nullptr, 10); }
         else if (a == "--max-velocity")  { const char* v = next("--max-velocity"); if (!v) return false; opt.max_velocity = std::strtod(v, nullptr); }
         else if (a == "--max-accel")     { const char* v = next("--max-accel"); if (!v) return false; opt.max_accel = std::strtod(v, nullptr); }
@@ -580,9 +581,9 @@ bool parse_args(int argc, char* argv[], Options& opt) {
                 "Usage: gcode_motion_benchmark <gcode_file> [options]\n"
                 "\n"
                 "Options:\n"
-                "  --dense           Run Step 4 (dense sampling via TrajectoryAnalyzer)\n"
-                "  --samples N       Pareto profile sample count (default 20000)\n"
-                "  --max-samples N   Cap dense sample count (default 1000000; 0=uncapped)\n"
+                "  --dense                   Run Step 4 (dense sampling via TrajectoryAnalyzer)\n"
+                "  --constraint-cache-size N Pareto solver constraint cache size (default 20000)\n"
+                "  --max-samples N           Cap dense sample count (default 1000000; 0=uncapped)\n"
                 "  --max-velocity V  Path velocity limit mm/s (default 200)\n"
                 "  --max-accel A     Path acceleration limit mm/s² (default 2000)\n"
                 "  --max-jerk J      Path jerk limit mm/s³ (default 20000; 0 disables)\n";
@@ -625,7 +626,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Limits:       v=" << opt.max_velocity << " mm/s, "
               << "a=" << opt.max_accel << " mm/s², "
               << "j=" << opt.max_jerk << " mm/s³\n";
-    std::cout << "Pareto samples: " << opt.num_samples
+    std::cout << "Pareto constraint cache size: " << opt.constraintCacheSize
               << (opt.dense ? "  (dense sampling ON)" : "  (dense sampling OFF)") << '\n';
     std::cout << "Peak RSS at start: " << fmt_mem(peak_rss_bytes()) << '\n';
 
@@ -759,7 +760,7 @@ int main(int argc, char* argv[]) {
                 break;
             }
         }
-        std::size_t numSamples = std::min(opt.num_samples,
+        std::size_t constraintCacheSize = std::min(opt.constraintCacheSize,
             std::max<std::size_t>(200, pathAdapter.numSegments() * 20));
 
         // Pareto planner with default weights (w_t=1, w_a=0 → time-optimal).
@@ -770,7 +771,7 @@ int main(int argc, char* argv[]) {
         try {
             Timer t; t.start();
             velocityProfile = std::shared_ptr<VelocityProfile>(
-                profiler.computeProfile(pathAdapter, feedRate, 0.0, 0.0, numSamples));
+                profiler.computeProfile(pathAdapter, feedRate, 0.0, 0.0, constraintCacheSize));
             auto sampled = dynamic_cast<SampledVelocityProfile*>(velocityProfile.get());
             report.add("Step 3b: Pareto computeProfile", t.ms(),
                        sampled ? sampled->points().size() : 0);
