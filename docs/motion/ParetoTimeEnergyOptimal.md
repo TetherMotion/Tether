@@ -34,6 +34,7 @@ search.
 5. [Data Structures](#5-data-structures)
 6. [Solver Algorithm](#6-solver-algorithm)
 7. [Output Representation (WSS)](#7-output-representation-wss)
+   - See [`docs/motion/WeightedSwitchingStructure.md`](WeightedSwitchingStructure.md) for the full WSS reference.
 8. [Sampling](#8-sampling)
 9. [Certification and Error Bounds](#9-certification-and-error-bounds)
 10. [Tuning Guide](#10-tuning-guide)
@@ -271,6 +272,30 @@ Constraint **algebra** is identical. What changes is the **control law**:
 instead of always banging $\eta$ to a bound, we select between bang,
 singular ($\eta=0$), and wall-following, using the $a_*$ guidance.
 
+### 4.5 Wall Arcs
+
+A `WALL` arc is created whenever the state machine detects $v \ge v_{\text{wall}}$
+at a grid point. On the wall:
+
+- velocity follows the constraint curve: $v(s) = v_{\text{wall}}(s)$;
+- acceleration is slaved to the wall slope:
+  $a = v \, dv_{\text{wall}}/ds$;
+- jerk is set to $0$ (the arc follows the wall rather than applying control);
+- the arc duration is computed by quadrature:
+  $$\Delta t = \int_{s_0}^{s_1} \frac{1}{v_{\text{wall}}(s)} \, ds.$$
+
+The wall velocity $v_{\text{wall}}(s)$ is the minimum of:
+
+- the feed rate,
+- the path-level maximum velocity,
+- the curvature-based centripetal limit $v \le \sqrt{a_{\text{cent}} / \kappa(s)}$,
+- per-axis velocity limits projected onto the path tangent.
+
+Wall arcs are the only arcs that are not polynomial in time; they require
+Gauss-Legendre quadrature for duration and bisection for time-at-arc-length
+inversion. See the WSS reference for the exact quadrature and inversion
+procedures.
+
 ---
 
 ## 5. Data Structures
@@ -391,16 +416,122 @@ If during simulation the clamp activates ($\eta_{\text{desired}}$ outside
 $[\eta_{\min}, \eta_{\max}]$), the arc is recorded with the clamped $\eta$.
 The structure theorem still holds; $J(a_*)$ remains piecewise closed-form.
 
+### Step 5: Event-Driven Simulation
+
+The forward state machine does not integrate with a fixed time step. It walks
+a cached constraint grid and chooses the next arc length as the **nearest** of
+three candidate events:
+
+1. **End of grid cell:** the default step size $\Delta s = s_f / N_{\text{cache}}$.
+2. **Velocity-limit intersection:** for a `BANG_PLUS` arc, solve
+   $v(\tau) = v_{\text{lim}}$ and truncate the step at the corresponding $s$.
+3. **Target-acceleration intersection:** for a `BANG` arc, solve
+   $a(\tau) = a_*$ and truncate the step there.
+
+The smallest positive distance is selected as `ds_arc`. This guarantees that
+arcs end exactly at switching events, not at arbitrary grid points, and that
+the coalesced WSS reflects the true bang-singular-bang structure.
+
+### Step 6: Terminal Braking
+
+When the remaining distance $s_f - s$ is within the shortest feasible stopping
+distance (computed by `BangSeg::terminalMinDistance`), the solver attempts to
+solve a single constant-$\eta$ arc that lands at $v = 0$ exactly at $s_f$. The
+arc is chosen to satisfy:
+
+- final velocity $v_f = 0$,
+- final acceleration $a_f \in [a_{\min}, 0]$,
+- jerk $\eta \in [\eta_{\min}, \eta_{\max}]$,
+- arc length $\Delta s = s_f - s$.
+
+If no feasible arc exists, the candidate $a_*$ is infeasible and receives a
+large cost penalty. On short paths this terminal arc may end with a small
+non-zero deceleration; the rest-to-rest boundary on $v$ is still enforced.
+
+### Step 7: Closed-Form Cost Accumulation
+
+The cost increment for each arc is computed analytically:
+
+- **BANG:** $a(t) = a_0 + \eta t$, so
+  $$
+  \int a^2 \, dt = a_0^2 \tau + a_0 \eta \tau^2 + \frac{\eta^2 \tau^3}{3}
+  $$
+- **SINGULAR:** $a(t) \equiv a_*$, so
+  $$
+  \int a^2 \, dt = a_*^2 \tau
+  $$
+- **WALL:** $a \equiv 0$ on the wall, so
+  $$
+  \int a^2 \, dt = 0
+  $$
+
+The total cost is:
+
+$$
+J(a_*) = w_t \sum_i \tau_i + w_a \sum_i \int_{\text{arc } i} a^2 \, dt
+$$
+
+which is a closed-form scalar function of $a_*$.
+
+### Step 8: Coalescing
+
+The raw simulation produces one arc per grid step. After the optimal $a_*$ is
+found, arcs with the same `type`, the same `eta`, and the same `a_star` that
+are contiguous in $s$ are merged into a single arc. This removes
+discretization artifacts and produces the true switching structure. The merged
+arc list is what is stored in the `WeightedSwitchingStructure`.
+
 ---
 
 ## 7. Output Representation (WSS)
 
-The `WeightedSwitchingStructure` stores the arc list and provides exact
-sampling. Because every arc is analytic, position/velocity/acceleration/and
-jerk are all sampled in closed form.
+The primary output of the planner is the `WeightedSwitchingStructure<Dim, T>`
+(WSS): a piecewise-analytic, exact representation of the trajectory. It is the
+source of truth for all downstream consumers; the tabulated `VelocityProfile`
+returned by `computeProfile()` is a sampled view derived from the WSS.
 
-Sampling cost: $O(\log \#\text{arcs})$ for arc location + $O(1)$ polynomial
-evaluation + one NURBS evaluation. Real-time capable (kHz+).
+### What the WSS contains
+
+The WSS stores an ordered, contiguous, coalesced list of `WeightedArc` records.
+Each record is one of four types:
+
+| Type | Meaning | Time-domain shape |
+|---|---|---|
+| `BANG_PLUS` | $\eta = +\eta_{\max}$ (raise $a$ toward $a_*$) | $a$ linear, $v$ quadratic, $s$ cubic in $\tau$ |
+| `BANG_MINUS` | $\eta = -\eta_{\min}$ (lower $a$ toward $a_*$ or brake) | $a$ linear, $v$ quadratic, $s$ cubic in $\tau$ |
+| `SINGULAR` | $\eta = 0$, $a \equiv a_*$ (constant acceleration cruise) | $a$ constant, $v$ linear, $s$ quadratic in $\tau$ |
+| `WALL` | $v = v_{\text{wall}}(s)$ (active velocity constraint) | not polynomial; quadrature in $s$ |
+
+Every arc records its initial state `(s0, t0, v0, a0, u0)`, the control
+parameter (`eta` or `a_star`), and the time `duration` needed to traverse the
+arc. From these fields the state at any time $t$ is reconstructed in closed
+form (or by quadrature for `WALL` arcs), without numerical ODE integration.
+
+### Coalescing
+
+The forward state machine runs on a fine constraint grid, producing one raw arc
+per grid step. Before the WSS is exposed, arcs of the same type with the same
+control are coalesced into the true switching structure. The coalesced arc list
+is the analytical trajectory, not a finite-difference approximation.
+
+### Sampling
+
+Querying at time $t$ is:
+
+1. Binary search for the arc containing $t$: $O(\log N_{\text{arcs}})$.
+2. Local time $\tau = t - t_0$.
+3. Closed-form polynomial evaluation for `(s, v, a, eta)`.
+4. Task-space mapping through the path's `evaluateAtArcLength(s)`.
+5. Final hard clamps to feasible velocity, acceleration, and jerk bounds.
+
+Total cost is $O(\log N_{\text{arcs}}) + O(1)$ per sample, plus one NURBS
+evaluation. It is real-time capable at kHz rates.
+
+### Full reference
+
+For the complete specification of `WeightedArc`, `WeightedSwitchingStructure`,
+arc-list interpretation, lifetime rules, and downstream consumption, see
+[`docs/motion/WeightedSwitchingStructure.md`](WeightedSwitchingStructure.md).
 
 ---
 
@@ -586,5 +717,7 @@ auto plan = builder.build(segments, feedRate);
 | `include/tether/motion_planner/analytical/ParetoTimeEnergyOptimalVelocityPlanner.hpp` | Main implementation |
 | `include/tether/motion_planner/analytical/ConstraintEvaluator.hpp` | Constraint algebra (shared with AnalyticalTOPPRA) |
 | `include/tether/motion_planner/analytical/AnalyticalTypes.hpp` | Shared types (EtaBounds, etc.) |
-| `docs/motion/ParetoTimeEnergyOptimal.md` | This document |
+| `include/tether/motion_planner/analytical/AnalyticalSSRVelocityProfile.hpp` | `VelocityProfile` adapter for the WSS |
+| `docs/motion/ParetoTimeEnergyOptimal.md` | This document (theory, tuning, API) |
+| `docs/motion/WeightedSwitchingStructure.md` | Full WSS reference and consumer guide |
 | `tests/motion_planner/ParetoTimeEnergyTest.cpp` | Regression tests |

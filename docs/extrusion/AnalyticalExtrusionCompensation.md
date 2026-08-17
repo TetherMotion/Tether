@@ -9,6 +9,8 @@ Tether.  Unlike the existing *sampled-space* implementations in
 velocity/temperature arrays, the analytical variants operate directly on the
 **Weighted Switching Structure (WSS)** data structures produced by the
 [`ParetoTimeEnergyOptimalVelocityPlanner`](../motion/ParetoTimeEnergyOptimal.md).
+For the full WSS data-structure reference and consumer guide, see
+[`docs/motion/WeightedSwitchingStructure.md`](../motion/WeightedSwitchingStructure.md).
 
 The WSS represents the trajectory as a sequence of **analytically integrable
 arcs**, each with a closed-form expression for the path velocity $v(t)$:
