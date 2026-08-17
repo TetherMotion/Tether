@@ -1,45 +1,30 @@
 /**
  * @file VelocityProfile.hpp
- * @brief TOPP-RA Inspired Velocity Profiling
+ * @brief Velocity profile abstract base and sampled concrete type.
  *
  * @details
- * This file implements the velocity profiler that computes a time-optimal
- * velocity profile along the path subject to kinematic constraints.
+ * This file defines the velocity profile hierarchy used by the motion planner.
+ * The base class `VelocityProfile` is a non-template abstract interface that
+ * exposes the kinematic quantities along a path as functions of either arc
+ * length or time. The concrete `SampledVelocityProfile` stores tabulated
+ * points and linearly interpolates between them.
  *
- * ## Algorithm (Inspired by TOPP-RA)
+ * Kinematic limit structures (`KinematicLimits`, `AxisLimits`, `PathLimits`)
+ * remain in this header because they are consumed throughout the planner and
+ * are intentionally kept unchanged.
  *
- * 1. **Forward Pass**: Starting from initial velocity, compute maximum
- *    achievable velocity respecting acceleration limits.
- *
- * 2. **Backward Pass**: Starting from final velocity, compute maximum
- *    achievable velocity respecting deceleration limits.
- *
- * 3. **Velocity Limit Curve**: At each point, compute the maximum velocity
- *    that keeps acceleration within bounds given the path curvature.
- *
- * 4. **Final Profile**: Take minimum of forward, backward, and velocity
- *    limit curves.
- *
- * ## Constraints
- *
- * - Per-axis velocity limits
- * - Per-axis acceleration limits
- * - Per-axis jerk limits (optional)
- * - Centripetal acceleration limit (function of velocity and curvature)
- *
- * @see PiecewiseNurbsPath.hpp
+ * @see VelocityProfiler.hpp for the abstract profiler interface.
+ * @see SampledVelocityProfile for the tabulated concrete type.
  */
 
 #pragma once
 
 #include "MathTypes.hpp"
-#include "PathAdapter.hpp"
-#include <tether/motion_planner/geometry/CertifiedCurvatureSampler.hpp>
-#include <tether/motion_planner/blend/PHQuinticBlendBuilder.hpp>
 #include <vector>
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <optional>
 
@@ -193,39 +178,38 @@ using KinematicLimits2D = KinematicLimits<2, double>;
 /**
  * @brief A point on the velocity profile
  */
-template<typename T = double>
 struct VelocityProfilePoint {
     /// Arc length position along path
-    T arcLength = T(0);
+    double arcLength = 0.0;
     
     /// Velocity at this point
-    T velocity = T(0);
+    double velocity = 0.0;
     
     /// Acceleration at this point (interval-average finite-difference
     /// approximation for BasicTOPPRA; analytic from carried state for
     /// JerkConstrainedTOPPRA after WI-8).
-    T acceleration = T(0);
+    double acceleration = 0.0;
 
     /// Jerk at this point (units/second³).
     /// For JerkConstrainedTOPPRA (post-WI-8): computed from the
     /// acceleration change over time, reported truthfully (not clamped).
     /// For BasicTOPPRA: zero (jerk is not constrained — theoretically
     /// infinite at switching points).
-    T jerk = T(0);
+    double jerk = 0.0;
     
     /// Time to reach this point from path start
-    T time = T(0);
+    double time = 0.0;
 
     /// Velocity limit at this point (the v_lim(s) used by the profiler).
     /// Populated by the profiler so downstream consumers (e.g. ReNURBS)
     /// can check constraint preservation against the *exact* limits the
     /// profiler used, without reconstructing them. Default +infinity so
     /// hand-built profiles (e.g. in tests) remain unconstrained.
-    T velocityLimit = std::numeric_limits<T>::infinity();
+    double velocityLimit = std::numeric_limits<double>::infinity();
 
     /// Tangential acceleration limit at this point (the a_max(s) used by
     /// the profiler). Default +infinity for backward compatibility.
-    T accelerationLimit = std::numeric_limits<T>::infinity();
+    double accelerationLimit = std::numeric_limits<double>::infinity();
 
     /// Limiting factor (for debugging)
     enum class LimitType : uint8_t {
@@ -241,160 +225,135 @@ struct VelocityProfilePoint {
 };
 
 // ============================================================================
-// Velocity Profile
+// Velocity Profile Abstract Base
 // ============================================================================
 
 /**
- * @brief Complete velocity profile for a path
+ * @brief Abstract base class for a velocity profile along a path.
+ *
+ * All queries are in double precision and clamped to the valid domain by
+ * concrete derived classes.
  */
-template<typename T = double>
 class VelocityProfile {
 public:
-    using Point = VelocityProfilePoint<T>;
+    virtual ~VelocityProfile() = default;
 
-    VelocityProfile() = default;
+    /// Velocity at the given arc length.
+    virtual double velocityAt(double arcLength) const = 0;
+
+    /// Acceleration at the given arc length.
+    virtual double accelerationAt(double arcLength) const = 0;
+
+    /// Jerk at the given arc length.
+    virtual double jerkAt(double arcLength) const = 0;
+
+    /// Time at the given arc length.
+    virtual double timeAt(double arcLength) const = 0;
+
+    /// Arc length at the given time.
+    virtual double arcLengthAt(double time) const = 0;
+
+    /// Total traversal time.
+    virtual double totalTime() const = 0;
+
+    /// Total path length.
+    virtual double totalLength() const = 0;
+
+    /// Tabulated points, if available. The default implementation returns
+    /// an empty vector; SampledVelocityProfile and AnalyticalSSRVelocityProfile
+    /// override it with their actual tabulated representation.
+    virtual const std::vector<VelocityProfilePoint>& points() const {
+        static const std::vector<VelocityProfilePoint> empty;
+        return empty;
+    }
+};
+
+// ============================================================================
+// Sampled Velocity Profile
+// ============================================================================
+
+/**
+ * @brief Tabulated velocity profile with linear interpolation.
+ *
+ * This is the concrete profile type produced by the discrete TOPPRA and
+ * S-curve profilers. It stores points sampled along arc length and
+ * interpolates velocity, acceleration, jerk, and time as functions of
+ * arc length; arc length is recovered as a function of time by linear
+ * interpolation over the time coordinate.
+ */
+class SampledVelocityProfile : public VelocityProfile {
+public:
+    using Point = VelocityProfilePoint;
+
+    SampledVelocityProfile() = default;
 
     /**
      * @brief Get velocity at arc length position
      */
-    T velocityAt(T arcLength) const {
-        if (points_.empty()) return T(0);
-        
-        // Binary search for bracket
-        auto it = std::lower_bound(points_.begin(), points_.end(), arcLength,
-            [](const Point& p, T s) { return p.arcLength < s; });
-        
-        if (it == points_.begin()) {
-            return points_.front().velocity;
-        }
-        if (it == points_.end()) {
-            return points_.back().velocity;
-        }
-        
-        // Linear interpolation
-        auto prev = it - 1;
-        T alpha = (arcLength - prev->arcLength) / (it->arcLength - prev->arcLength);
-        return prev->velocity * (T(1) - alpha) + it->velocity * alpha;
+    double velocityAt(double arcLength) const override {
+        return interpolate(&Point::velocity, arcLength);
     }
 
     /**
      * @brief Get acceleration at arc length position
-     *
-     * Linearly interpolates the acceleration stored in profile points.
-     * For JerkConstrainedTOPPRA (post-WI-8), the stored acceleration is
-     * the analytic value from the carried (v, a) state, jerk-limited
-     * smoothed at switching points. For BasicTOPPRA, it is a
-     * backward finite-difference approximation of the min()-combined
-     * profile.
      */
-    T accelerationAt(T arcLength) const {
-        if (points_.empty()) return T(0);
-        
-        auto it = std::lower_bound(points_.begin(), points_.end(), arcLength,
-            [](const Point& p, T s) { return p.arcLength < s; });
-        
-        if (it == points_.begin()) {
-            return points_.front().acceleration;
-        }
-        if (it == points_.end()) {
-            return points_.back().acceleration;
-        }
-        
-        auto prev = it - 1;
-        T alpha = (arcLength - prev->arcLength) / (it->arcLength - prev->arcLength);
-        return prev->acceleration * (T(1) - alpha) + it->acceleration * alpha;
+    double accelerationAt(double arcLength) const override {
+        return interpolate(&Point::acceleration, arcLength);
     }
 
     /**
      * @brief Get jerk at arc length position
-     *
-     * Linearly interpolates the jerk stored in profile points.
-     * For JerkConstrainedTOPPRA (post-WI-8), the stored jerk is computed
-     * from the acceleration change over time and reported truthfully
-     * (not clamped — WI-3). The jerk-limited smoothing of the
-     * acceleration profile ensures |j| ≤ j_max by construction.
-     * For BasicTOPPRA, jerk is zero (not constrained).
      */
-    T jerkAt(T arcLength) const {
-        if (points_.empty()) return T(0);
-        
-        auto it = std::lower_bound(points_.begin(), points_.end(), arcLength,
-            [](const Point& p, T s) { return p.arcLength < s; });
-        
-        if (it == points_.begin()) {
-            return points_.front().jerk;
-        }
-        if (it == points_.end()) {
-            return points_.back().jerk;
-        }
-        
-        auto prev = it - 1;
-        T alpha = (arcLength - prev->arcLength) / (it->arcLength - prev->arcLength);
-        return prev->jerk * (T(1) - alpha) + it->jerk * alpha;
+    double jerkAt(double arcLength) const override {
+        return interpolate(&Point::jerk, arcLength);
     }
 
     /**
      * @brief Get time at arc length position
      */
-    T timeAt(T arcLength) const {
-        if (points_.empty()) return T(0);
-        
-        auto it = std::lower_bound(points_.begin(), points_.end(), arcLength,
-            [](const Point& p, T s) { return p.arcLength < s; });
-        
-        if (it == points_.begin()) {
-            return points_.front().time;
-        }
-        if (it == points_.end()) {
-            return points_.back().time;
-        }
-        
-        auto prev = it - 1;
-        T alpha = (arcLength - prev->arcLength) / (it->arcLength - prev->arcLength);
-        return prev->time * (T(1) - alpha) + it->time * alpha;
+    double timeAt(double arcLength) const override {
+        return interpolate(&Point::time, arcLength);
     }
 
     /**
      * @brief Get arc length at time
-     *
-     * Inverse of timeAt() - given a time, find the arc length position.
      */
-    T arcLengthAt(T time) const {
-        if (points_.empty()) return T(0);
-        
+    double arcLengthAt(double time) const override {
+        if (points_.empty()) return 0.0;
+
         auto it = std::lower_bound(points_.begin(), points_.end(), time,
-            [](const Point& p, T t) { return p.time < t; });
-        
+            [](const Point& p, double t) { return p.time < t; });
+
         if (it == points_.begin()) {
             return points_.front().arcLength;
         }
         if (it == points_.end()) {
             return points_.back().arcLength;
         }
-        
+
         auto prev = it - 1;
-        T alpha = (time - prev->time) / (it->time - prev->time);
-        return prev->arcLength * (T(1) - alpha) + it->arcLength * alpha;
+        double alpha = (time - prev->time) / (it->time - prev->time);
+        return prev->arcLength * (1.0 - alpha) + it->arcLength * alpha;
     }
 
     /**
      * @brief Total time to traverse the path
      */
-    T totalTime() const {
-        return points_.empty() ? T(0) : points_.back().time;
+    double totalTime() const override {
+        return points_.empty() ? 0.0 : points_.back().time;
     }
 
     /**
      * @brief Total path length
      */
-    T totalLength() const {
-        return points_.empty() ? T(0) : points_.back().arcLength;
+    double totalLength() const override {
+        return points_.empty() ? 0.0 : points_.back().arcLength;
     }
 
     /**
      * @brief Access profile points
      */
-    const std::vector<Point>& points() const { return points_; }
+    const std::vector<Point>& points() const override { return points_; }
     std::vector<Point>& points() { return points_; }
 
     /**
@@ -416,6 +375,26 @@ public:
 
 private:
     std::vector<Point> points_;
+
+    using Field = double Point::*;
+
+    double interpolate(Field field, double arcLength) const {
+        if (points_.empty()) return 0.0;
+
+        auto it = std::lower_bound(points_.begin(), points_.end(), arcLength,
+            [](const Point& p, double s) { return p.arcLength < s; });
+
+        if (it == points_.begin()) {
+            return points_.front().*field;
+        }
+        if (it == points_.end()) {
+            return points_.back().*field;
+        }
+
+        auto prev = it - 1;
+        double alpha = (arcLength - prev->arcLength) / (it->arcLength - prev->arcLength);
+        return (*prev).*field * (1.0 - alpha) + (*it).*field * alpha;
+    }
 };
 
 // ============================================================================
@@ -432,6 +411,7 @@ template<size_t N>
 using KinematicLimitsN = KinematicLimits<N, double>;
 using KinematicLimits3D = KinematicLimits<3, double>;
 
-using VelocityProfileD = VelocityProfile<double>;
+/// Backward-compatible alias for the old concrete sampled profile type.
+using VelocityProfileD = SampledVelocityProfile;
 
 }  // namespace MotionPlanner

@@ -313,9 +313,9 @@ TEST(AnalyticalTOPPRA, ComputesProfile_Line) {
     AnalyticalTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
-    ASSERT_GT(profile.points().size(), 0u);
-    EXPECT_GT(profile.totalTime(), 0.0);
-    EXPECT_NEAR(profile.totalLength(), 10.0, 1e-6);
+    ASSERT_GT(profile->points().size(), 0u);
+    EXPECT_GT(profile->totalTime(), 0.0);
+    EXPECT_NEAR(profile->totalLength(), 10.0, 1e-6);
 }
 
 TEST(AnalyticalTOPPRA, ProfileStartsAtRest) {
@@ -324,8 +324,8 @@ TEST(AnalyticalTOPPRA, ProfileStartsAtRest) {
     AnalyticalTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
-    ASSERT_GT(profile.points().size(), 0u);
-    EXPECT_NEAR(profile.points().front().velocity, 0.0, 1e-6);
+    ASSERT_GT(profile->points().size(), 0u);
+    EXPECT_NEAR(profile->points().front().velocity, 0.0, 1e-6);
 }
 
 TEST(AnalyticalTOPPRA, ProfileEndsAtRest) {
@@ -334,8 +334,8 @@ TEST(AnalyticalTOPPRA, ProfileEndsAtRest) {
     AnalyticalTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
-    ASSERT_GT(profile.points().size(), 0u);
-    EXPECT_NEAR(profile.points().back().velocity, 0.0, 1e-3);
+    ASSERT_GT(profile->points().size(), 0u);
+    EXPECT_NEAR(profile->points().back().velocity, 0.0, 1e-3);
 }
 
 TEST(AnalyticalTOPPRA, ProfileRespectsFeedRate) {
@@ -345,9 +345,9 @@ TEST(AnalyticalTOPPRA, ProfileRespectsFeedRate) {
 
     double feedRate = 15.0;
     auto profile = profiler.computeProfile(path, feedRate, 0.0, 0.0, 200);
-    ASSERT_GT(profile.points().size(), 0u);
+    ASSERT_GT(profile->points().size(), 0u);
 
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         EXPECT_LE(pt.velocity, feedRate * 1.01);  // Small tolerance
     }
 }
@@ -358,9 +358,9 @@ TEST(AnalyticalTOPPRA, ProfileRespectsAccelerationLimit) {
     AnalyticalTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
-    ASSERT_GT(profile.points().size(), 0u);
+    ASSERT_GT(profile->points().size(), 0u);
 
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         EXPECT_LE(std::abs(pt.acceleration), limits.path.maxPathAcceleration * 1.05);
     }
 }
@@ -371,9 +371,9 @@ TEST(AnalyticalTOPPRA, ProfileRespectsJerkLimit) {
     AnalyticalTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
-    ASSERT_GT(profile.points().size(), 0u);
+    ASSERT_GT(profile->points().size(), 0u);
 
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         EXPECT_LE(std::abs(pt.jerk), limits.path.maxPathJerk * 1.1);
     }
 }
@@ -653,8 +653,11 @@ TEST(AnalyticalMotionPlan, AnalyticalSourceAvailable) {
     MotionPlanBuilder<2, double> builder(limits, {}, ProfilerType::AnalyticalTOPPRA);
     auto plan = builder.build(segments, 50.0);
 
-    // The analytical source should be set
-    EXPECT_NE(plan.analyticalSource(), nullptr);
+    // The profile should wrap an analytical source.
+    auto* avp = dynamic_cast<const AnalyticalSSRVelocityProfile<2, double>*>(
+        plan.profile().get());
+    ASSERT_NE(avp, nullptr);
+    EXPECT_NE(avp->source(), nullptr);
 }
 
 TEST(AnalyticalMotionPlan, BackwardCompatibleWithoutAnalyticalSource) {
@@ -667,8 +670,9 @@ TEST(AnalyticalMotionPlan, BackwardCompatibleWithoutAnalyticalSource) {
     MotionPlanBuilder<2, double> builder(limits, {}, ProfilerType::ToppraBasic);
     auto plan = builder.build(segments, 50.0);
 
-    // No analytical source → should still work (tabulated profile)
-    EXPECT_EQ(plan.analyticalSource(), nullptr);
+    // Basic TOPPRA returns a sampled profile.
+    auto* svp = dynamic_cast<const SampledVelocityProfile*>(plan.profile().get());
+    EXPECT_NE(svp, nullptr);
 
     auto p0 = plan.positionAt(0.0);
     EXPECT_NEAR(p0[0], 0.0, 1e-3);
@@ -780,8 +784,8 @@ TEST(AnalyticalCornerPath, BuildsAndEvaluates) {
     AnalyticalTOPPRA<2, double> profiler(limits);
     auto profile = profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
 
-    ASSERT_GT(profile.points().size(), 0u);
-    EXPECT_GT(profile.totalTime(), 0.0);
+    ASSERT_GT(profile->points().size(), 0u);
+    EXPECT_GT(profile->totalTime(), 0.0);
 }
 
 TEST(AnalyticalCornerPath, PositionContinuity) {
@@ -879,5 +883,8 @@ TEST(AnalyticalCustomProfiler, BuilderAcceptsCustomProfiler) {
     auto plan = builder.build(segments, 50.0);
 
     EXPECT_GT(plan.totalLength(), 0.0);
-    EXPECT_NE(plan.analyticalSource(), nullptr);
+    auto* avp = dynamic_cast<const AnalyticalSSRVelocityProfile<2, double>*>(
+        plan.profile().get());
+    EXPECT_NE(avp, nullptr);
+    EXPECT_NE(avp->source(), nullptr);
 }

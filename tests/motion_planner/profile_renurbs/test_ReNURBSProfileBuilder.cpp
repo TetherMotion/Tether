@@ -44,9 +44,9 @@ PathAdapter<2, double> makeTwoSegmentPath2D(double len1, double len2) {
 }
 
 /// Build a trapezoidal velocity profile (accel, cruise, decel) over a path.
-VelocityProfile<double> makeTrapezoidalProfile(
+SampledVelocityProfile makeTrapezoidalProfile(
     double pathLength, double vMax, double aMax, std::size_t n = 100) {
-    VelocityProfile<double> profile;
+    SampledVelocityProfile profile;
     double ds = pathLength / (n - 1);
     double t = 0.0;
     double v = 0.0;
@@ -62,7 +62,7 @@ VelocityProfile<double> makeTrapezoidalProfile(
     }
     for (std::size_t i = 0; i < n; ++i) {
         double s = i * ds;
-        VelocityProfilePoint<double> pt;
+        VelocityProfilePoint pt;
         pt.arcLength = s;
         pt.velocityLimit = vMax;
         pt.accelerationLimit = aMax;
@@ -92,16 +92,16 @@ VelocityProfile<double> makeTrapezoidalProfile(
 }
 
 /// Build an S-curve-like profile (smooth jerk transitions).
-VelocityProfile<double> makeSCurveProfile(
+SampledVelocityProfile makeSCurveProfile(
     double pathLength, double vMax, double aMax, double jMax,
     std::size_t n = 100) {
-    VelocityProfile<double> profile;
+    SampledVelocityProfile profile;
     double ds = pathLength / (n - 1);
     double t = 0.0;
     for (std::size_t i = 0; i < n; ++i) {
         double s = i * ds;
         double u = s / pathLength;
-        VelocityProfilePoint<double> pt;
+        VelocityProfilePoint pt;
         pt.arcLength = s;
         pt.velocityLimit = vMax;
         pt.accelerationLimit = aMax;
@@ -305,7 +305,7 @@ TEST(ReNURBSProfileBuilderTest, VelocityNonNegative) {
 
 TEST(ReNURBSProfileBuilderTest, EmptyProfileReturnsEmpty) {
     auto path = makeLinearPath2D(100.0);
-    VelocityProfile<double> profile; // empty
+    SampledVelocityProfile profile; // empty
     KinematicLimits<2, double> limits;
 
     ReNURBSConfig cfg;
@@ -317,8 +317,8 @@ TEST(ReNURBSProfileBuilderTest, EmptyProfileReturnsEmpty) {
 
 TEST(ReNURBSProfileBuilderTest, SingleSampleProfileReturnsConstant) {
     auto path = makeLinearPath2D(100.0);
-    VelocityProfile<double> profile;
-    VelocityProfilePoint<double> pt;
+    SampledVelocityProfile profile;
+    VelocityProfilePoint pt;
     pt.arcLength = 50.0;
     pt.velocity = 10.0;
     pt.acceleration = 0.0;

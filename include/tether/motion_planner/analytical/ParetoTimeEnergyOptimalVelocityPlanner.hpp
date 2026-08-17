@@ -63,6 +63,7 @@
 #include "ConstraintEvaluator.hpp"
 #include "NumericalUtils.hpp"
 #include "AnalyticalTOPPRA.hpp"
+#include "AnalyticalSSRVelocityProfile.hpp"
 #include "../VelocityProfile.hpp"
 #include "../VelocityProfiler.hpp"
 #include "../PathAdapter.hpp"
@@ -705,7 +706,7 @@ public:
      * Inverts each arc's s(t) relation exactly (BANG/SINGULAR via closed-form
      * polynomials, WALL via the velocity-limit quadrature).
      */
-    T timeAtArcLength(T s_query) const {
+    T timeAtArcLength(T s_query) const override {
         double s = static_cast<double>(s_query);
         if (arcs_.empty()) return T(0);
         for (const auto& arc : arcs_) {
@@ -811,6 +812,61 @@ public:
      * @brief The optimal singular acceleration level a* found by the solver.
      */
     double optimalAStar() const { return optimalAStar_; }
+
+    /**
+     * @brief Sample the WSS at uniform arc-length intervals to produce
+     *        a tabulated SampledVelocityProfile.
+     *
+     * @param numSamples Number of sample points along the path.
+     * @param startAcceleration Initial acceleration at the path start.
+     * @return A sampled velocity profile compatible with the tabulated API.
+     */
+    SampledVelocityProfile toVelocityProfile(
+        size_t numSamples,
+        T startAcceleration = T(0)) const {
+        SampledVelocityProfile profile;
+        T pathLength = totalLength();
+        if (pathLength <= T(0) || numSamples < 2) return profile;
+
+        T ds = pathLength / T(numSamples - 1);
+        profile.reserve(numSamples);
+
+        for (size_t i = 0; i < numSamples; ++i) {
+            T s = std::min(T(i) * ds, pathLength);
+
+            // Find time at this arc length using the exact WSS mapping
+            T t = timeAtArcLength(s);
+
+            // Sample state from WSS
+            T v = pathVelocity(t);
+            T a = pathAcceleration(t);
+            T j = pathJerk(t);
+
+            VelocityProfilePoint pt;
+            pt.arcLength = static_cast<double>(s);
+            pt.velocity = static_cast<double>(v);
+            pt.acceleration = (i == 0) ? static_cast<double>(startAcceleration) : static_cast<double>(a);
+            pt.jerk = static_cast<double>(j);
+            pt.time = static_cast<double>(t);
+
+            // Determine limiting factor from the arc type
+            if (std::abs(j) > T(1e-10)) {
+                pt.limitedBy = (j > T(0))
+                    ? VelocityProfilePoint::LimitType::ForwardAccel
+                    : VelocityProfilePoint::LimitType::BackwardDecel;
+            } else if (std::abs(a) > T(1e-10)) {
+                pt.limitedBy = VelocityProfilePoint::LimitType::Jerk;  // singular arc
+            } else if (v > T(1e-10)) {
+                pt.limitedBy = VelocityProfilePoint::LimitType::Curvature;  // wall/cruise
+            } else {
+                pt.limitedBy = VelocityProfilePoint::LimitType::None;
+            }
+
+            profile.addPoint(pt);
+        }
+
+        return profile;
+    }
 
     /**
      * @brief The arc type active at time t.
@@ -1689,9 +1745,7 @@ template<size_t Dim, typename T = double>
 class ParetoTimeEnergyOptimalVelocityPlanner : public VelocityProfiler<Dim, T> {
 public:
     using Path = PathAdapter<Dim, T>;
-    using Profile = VelocityProfile<T>;
     using Limits = KinematicLimits<Dim, T>;
-    using Point = VelocityProfilePoint<T>;
     using Evaluator = ConstraintEvaluator<Dim, T>;
     using WSS = WeightedSwitchingStructure<Dim, T>;
     using Solver = WeightedTimeEnergySolver<Dim, T>;
@@ -1713,7 +1767,7 @@ public:
      * Solves the weighted-cost problem, produces a WeightedSwitchingStructure,
      * and samples it to a tabulated VelocityProfile for backward compatibility.
      */
-    Profile computeProfile(
+    std::unique_ptr<VelocityProfile> computeProfile(
         const Path& path,
         T feedRate,
         T startVelocity = T(0),
@@ -1723,17 +1777,18 @@ public:
         T startJerk = T(0)) override {
 
         (void)startJerk;  // not honored (WI-P3 style)
-        Profile profile;
-        if (path.numSegments() == 0) return profile;
+        if (path.numSegments() == 0) {
+            return std::make_unique<SampledVelocityProfile>();
+        }
 
         T pathLength = path.totalLength();
-        if (pathLength <= T(0)) return profile;
+        if (pathLength <= T(0)) return std::make_unique<SampledVelocityProfile>();
 
         // Validate inputs (same guards as other profilers)
-        if (numSamples < 2) return profile;
-        if (feedRate <= T(0)) return profile;
-        if (limits_.path.maxPathAcceleration <= T(0)) return profile;
-        if (limits_.path.maxCentripetalAcceleration < T(0)) return profile;
+        if (numSamples < 2) return std::make_unique<SampledVelocityProfile>();
+        if (feedRate <= T(0)) return std::make_unique<SampledVelocityProfile>();
+        if (limits_.path.maxPathAcceleration <= T(0)) return std::make_unique<SampledVelocityProfile>();
+        if (limits_.path.maxCentripetalAcceleration < T(0)) return std::make_unique<SampledVelocityProfile>();
 
         // If w_a = 0, this degenerates to time-optimal. We still solve
         // via the same machinery (a* → a_max), but the user could also
@@ -1741,7 +1796,7 @@ public:
         CostWeights wEff = weights_;
         if (wEff.w_t <= 0.0) {
             // The problem is ill-posed without a positive time weight.
-            return profile;
+            return std::make_unique<SampledVelocityProfile>();
         }
 
         // Clamp an overspeed start velocity to the lesser of the feed rate
@@ -1766,7 +1821,7 @@ public:
             // requested boundary velocities are unreachable for the path).
             wss_.reset();
             pathCopy_.reset();
-            return profile;
+            return std::make_unique<SampledVelocityProfile>();
         }
 
         // Build the WSS
@@ -1777,10 +1832,8 @@ public:
         wss_ = wss;
         wss_->setCostValue(solver.costValue());
 
-        // Sample the WSS to produce a tabulated VelocityProfile
-        profile = sampleToProfile(*wss_, numSamples, startAcceleration);
-
-        return profile;
+        // Return an analytical profile that wraps the WSS.
+        return std::make_unique<AnalyticalSSRVelocityProfile<Dim, T>>(wss_);
     }
 
     /**
@@ -1830,97 +1883,6 @@ private:
     CostWeights weights_;
     std::shared_ptr<const Path> pathCopy_;
     std::shared_ptr<WSS> wss_;
-
-    /**
-     * @brief Sample the WSS at uniform arc-length intervals to produce
-     *        a tabulated VelocityProfile.
-     */
-    Profile sampleToProfile(const WSS& wss, size_t numSamples,
-                             T startAcceleration) const {
-        Profile profile;
-        T pathLength = wss.totalLength();
-        if (pathLength <= T(0) || numSamples < 2) return profile;
-
-        T ds = pathLength / T(numSamples - 1);
-        profile.reserve(numSamples);
-
-        for (size_t i = 0; i < numSamples; ++i) {
-            T s = std::min(T(i) * ds, pathLength);
-
-            // Find time at this arc length using the exact WSS mapping
-            T t = wss.timeAtArcLength(s);
-
-            // Sample state from WSS
-            T v = wss.pathVelocity(t);
-            T a = wss.pathAcceleration(t);
-            T j = wss.pathJerk(t);
-
-            Point pt;
-            pt.arcLength = s;
-            pt.velocity = v;
-            pt.acceleration = (i == 0) ? startAcceleration : a;
-            pt.jerk = j;
-            pt.time = t;
-
-            // Determine limiting factor from the arc type
-            // (simplified — the WSS doesn't expose per-sample arc type
-            //  directly, so we infer from acceleration/jerk)
-            if (std::abs(j) > T(1e-10)) {
-                pt.limitedBy = (j > T(0))
-                    ? Point::LimitType::ForwardAccel
-                    : Point::LimitType::BackwardDecel;
-            } else if (std::abs(a) > T(1e-10)) {
-                pt.limitedBy = Point::LimitType::Jerk;  // singular arc
-            } else if (v > T(1e-10)) {
-                pt.limitedBy = Point::LimitType::Curvature;  // wall/cruise
-            } else {
-                pt.limitedBy = Point::LimitType::None;
-            }
-
-            profile.addPoint(pt);
-        }
-
-        // Do not falsify the terminal state. The WSS already produces the
-        // state that the solver actually reaches, which must honor
-        // endVelocity for a valid solution.
-
-        return profile;
-    }
-
-    /**
-     * @brief Find the time corresponding to an arc length by walking
-     *        the arc list. (Kept for compatibility; new code should use
-     *        WSS::timeAtArcLength.)
-     */
-    T timeAtArcLength(const WSS& wss, T s) const {
-        const auto& arcs = wss.arcs();
-        if (arcs.empty()) return T(0);
-
-        double sTarget = static_cast<double>(s);
-        double t = 0.0;
-
-        for (const auto& arc : arcs) {
-            if (sTarget <= arc.s1) {
-                // Target is within this arc
-                double dsLocal = sTarget - arc.s0;
-                if (dsLocal < 0.0) dsLocal = 0.0;
-
-                double tau;
-                if (arc.type == WeightedArcType::SINGULAR) {
-                    tau = SingSeg::tau_for_ds(arc.v0, arc.a_star, dsLocal);
-                } else if (arc.type == WeightedArcType::WALL) {
-                    tau = dsLocal / std::max(arc.v0, 1e-12);
-                } else {
-                    tau = BangSeg::tau_for_ds(arc.v0, arc.a0, arc.eta, dsLocal);
-                }
-                return static_cast<T>(arc.t0 + tau);
-            }
-            t = arc.t0 + arc.duration;
-        }
-
-        // Past the end
-        return static_cast<T>(t);
-    }
 };
 
 } // namespace MotionPlanner::analytical

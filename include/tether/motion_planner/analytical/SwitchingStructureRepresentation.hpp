@@ -245,7 +245,7 @@ public:
     /**
      * @brief Estimate time at a given arc length.
      */
-    T timeAtArcLength(T s) const {
+    T timeAtArcLength(T s) const override {
         for (const auto& arc : arcs_) {
             if (s >= arc.s_begin - T(1e-10) && s <= arc.s_end + T(1e-10)) {
                 double frac = static_cast<double>(
@@ -391,10 +391,25 @@ private:
             // Use simple RK4 (fixed step) for speed; adaptive for accuracy
             auto yNew = rk4Step(rhs, t, y, h);
 
-            // Check feasibility: if v goes negative, clamp to near-zero
+            // Check feasibility: clamp to physical limits.
             if (yNew.v < 1e-12) {
                 yNew.v = 1e-12;
             }
+
+            // Enforce the velocity limit at this arc length.
+            double vLim = static_cast<double>(
+                evaluator_.velocityLimit(static_cast<T>(yNew.s), *path_));
+            if (vLim < 1e-12) vLim = 1e-12;
+            yNew.v = std::min(yNew.v, vLim);
+
+            // Enforce the acceleration bounds.
+            auto [aMin, aMax] = evaluator_.accelerationBounds(
+                static_cast<T>(yNew.s),
+                static_cast<T>(yNew.v),
+                *path_);
+            yNew.a = std::clamp(yNew.a,
+                                static_cast<double>(aMin),
+                                static_cast<double>(aMax));
 
             y = yNew;
             t += h;

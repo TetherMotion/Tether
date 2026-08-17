@@ -60,11 +60,11 @@ ProfileReplanResult runProfiler(
         adapter, feedRateMmPerSec, startVelocity, endVelocity, numSamples);
 
     ProfileReplanResult result;
-    result.totalTime = profile.totalTime();
-    result.totalLength = profile.totalLength();
+    result.totalTime = profile->totalTime();
+    result.totalLength = profile->totalLength();
     result.jerkLimited = limits.jerkLimitEnabled;
 
-    const auto& pts = profile.points();
+    const auto& pts = profile->points();
     result.points.reserve(pts.size());
     for (const auto& p : pts) {
         ProfilePoint pp;

@@ -286,6 +286,9 @@ public:
     /// Arc length position at time t
     virtual T arcLength(T t) const = 0;
 
+    /// Time at which the trajectory reaches arc length s
+    virtual T timeAtArcLength(T s) const = 0;
+
     /// Path (tangential) velocity magnitude at time t
     virtual T pathVelocity(T t) const = 0;
 

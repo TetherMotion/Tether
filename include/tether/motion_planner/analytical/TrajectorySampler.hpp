@@ -103,6 +103,11 @@ public:
             ? ssr_->arcLength(t) : hybrid_->arcLength(t);
     }
 
+    T timeAtArcLength(T s) const override {
+        return type_ == RepresentationType::SSR
+            ? ssr_->timeAtArcLength(s) : hybrid_->timeAtArcLength(s);
+    }
+
     T pathVelocity(T t) const override {
         return type_ == RepresentationType::SSR
             ? ssr_->pathVelocity(t) : hybrid_->pathVelocity(t);

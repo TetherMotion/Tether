@@ -143,8 +143,8 @@ bool isNan(double x) { return std::isnan(x); }
 
 /// Compute the implied acceleration from consecutive profile points:
 /// a_implied = (v_i² − v_{i-1}²) / (2 · Δs)
-double impliedAccel(const VelocityProfilePoint<double>& prev,
-                      const VelocityProfilePoint<double>& curr) {
+double impliedAccel(const VelocityProfilePoint& prev,
+                      const VelocityProfilePoint& curr) {
     double ds = curr.arcLength - prev.arcLength;
     if (std::abs(ds) < 1e-12) return 0.0;
     return (curr.velocity * curr.velocity - prev.velocity * prev.velocity)
@@ -176,9 +176,9 @@ TEST(ToppraAudit, T1_OptimalityBoundJerk) {
     JerkConstrainedTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 50.0, 0.0, 0.0, 200);
-    ASSERT_GT(profile.points().size(), 0u);
+    ASSERT_GT(profile->points().size(), 0u);
 
-    double totalTime = profile.points().back().time;
+    double totalTime = profile->points().back().time;
     // Theoretical optimum (no jerk): ~2.2 s. Allow 30% overhead for
     // jerk limiting + grid discretization.
     EXPECT_LE(totalTime, 2.2 * 1.30) << "Total time: " << totalTime;
@@ -206,7 +206,7 @@ TEST(ToppraAudit, T1_ImpliedJerkBound) {
     JerkConstrainedTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 50.0, 0.0, 0.0, 200);
-    ASSERT_GT(profile.points().size(), 2u);
+    ASSERT_GT(profile->points().size(), 2u);
 
     double jMax = limits.path.maxPathJerk;
     double eps = jMax * 0.02; // 2% tolerance for numerical noise
@@ -214,16 +214,16 @@ TEST(ToppraAudit, T1_ImpliedJerkBound) {
     // Check implied jerk using forward difference (same formula as the
     // stored jerk): j = (a[i] - a[i-1]) / (t[i] - t[i-1]).
     // This is exact for constant jerk over the interval.
-    for (size_t i = 1; i < profile.points().size(); ++i) {
-        double dt = profile.points()[i].time -
-                    profile.points()[i - 1].time;
+    for (size_t i = 1; i < profile->points().size(); ++i) {
+        double dt = profile->points()[i].time -
+                    profile->points()[i - 1].time;
         if (dt < 1e-12) continue;
-        double a0 = profile.points()[i - 1].acceleration;
-        double a1 = profile.points()[i].acceleration;
+        double a0 = profile->points()[i - 1].acceleration;
+        double a1 = profile->points()[i].acceleration;
         double j = (a1 - a0) / dt;
         EXPECT_LE(std::abs(j), jMax + eps)
             << "Implied jerk exceeds jMax at s="
-            << profile.points()[i].arcLength << " j=" << j;
+            << profile->points()[i].arcLength << " j=" << j;
     }
 }
 
@@ -242,23 +242,23 @@ TEST(ToppraAudit, T2_BasicCorrectness) {
     BasicTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 50.0, 0.0, 0.0, 200);
-    ASSERT_GT(profile.points().size(), 1u);
+    ASSERT_GT(profile->points().size(), 1u);
 
     // Total time should be positive and reasonable.
-    double totalTime = profile.points().back().time;
+    double totalTime = profile->points().back().time;
     EXPECT_GT(totalTime, 0.1);
     EXPECT_LT(totalTime, 10.0);
 
     // Last-point acceleration should be set (WI-6: not left at zero).
     // For a start-at-rest, end-at-rest profile, the last point should
     // have negative acceleration (decelerating to stop).
-    const auto& lastPt = profile.points().back();
+    const auto& lastPt = profile->points().back();
     EXPECT_NE(lastPt.acceleration, 0.0)
         << "Last-point acceleration should be non-zero (WI-6.3)";
 
     // Max stored |a| should be close to a_max (500).
     double maxAbsAccel = 0.0;
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         maxAbsAccel = std::max(maxAbsAccel, std::abs(pt.acceleration));
     }
     EXPECT_GT(maxAbsAccel, 100.0)
@@ -280,24 +280,24 @@ TEST(ToppraAudit, T3_PerAxisAccelLimit) {
     JerkConstrainedTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 50.0, 0.0, 0.0, 200);
-    ASSERT_GT(profile.points().size(), 1u);
+    ASSERT_GT(profile->points().size(), 1u);
 
     double axisAccelLimit = 100.0;
     double eps = 5.0; // tolerance for numerical noise + smoothing
 
     // Check stored acceleration.
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         EXPECT_LE(std::abs(pt.acceleration), axisAccelLimit + eps)
             << "Stored accel exceeds per-axis limit at s=" << pt.arcLength;
     }
 
     // Check implied acceleration from velocity profile.
-    for (size_t i = 1; i < profile.points().size(); ++i) {
-        double aImp = impliedAccel(profile.points()[i - 1],
-                                    profile.points()[i]);
+    for (size_t i = 1; i < profile->points().size(); ++i) {
+        double aImp = impliedAccel(profile->points()[i - 1],
+                                    profile->points()[i]);
         EXPECT_LE(std::abs(aImp), axisAccelLimit + eps)
             << "Implied accel exceeds per-axis limit at s="
-            << profile.points()[i].arcLength;
+            << profile->points()[i].arcLength;
     }
 }
 
@@ -319,11 +319,11 @@ TEST(ToppraAudit, T4_NoJerkClamping) {
     JerkConstrainedTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 50.0, 0.0, 0.0, 200);
-    ASSERT_GT(profile.points().size(), 2u);
+    ASSERT_GT(profile->points().size(), 2u);
 
     // Check that jerk values are present (not all zero).
     bool hasNonZeroJerk = false;
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         if (std::abs(pt.jerk) > 1.0) {
             hasNonZeroJerk = true;
             break;
@@ -333,7 +333,7 @@ TEST(ToppraAudit, T4_NoJerkClamping) {
 
     // Check that jerk is within bounds (by construction).
     double jMax = limits.path.maxPathJerk;
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         EXPECT_LE(std::abs(pt.jerk), jMax * 1.01)
             << "Jerk exceeds jMax at s=" << pt.arcLength
             << " j=" << pt.jerk;
@@ -357,21 +357,21 @@ TEST(ToppraAudit, T5_DegenerateInputs) {
     {
         JerkConstrainedTOPPRA<2, double> profiler(limits);
         auto profile = profiler.computeProfile(path, 50.0, 0.0, 0.0, 0);
-        EXPECT_EQ(profile.points().size(), 0u);
+        EXPECT_EQ(profile->points().size(), 0u);
     }
 
     // numSamples = 1 → empty profile (ds would divide by 0)
     {
         JerkConstrainedTOPPRA<2, double> profiler(limits);
         auto profile = profiler.computeProfile(path, 50.0, 0.0, 0.0, 1);
-        EXPECT_EQ(profile.points().size(), 0u);
+        EXPECT_EQ(profile->points().size(), 0u);
     }
 
     // feedRate = 0 → empty profile
     {
         JerkConstrainedTOPPRA<2, double> profiler(limits);
         auto profile = profiler.computeProfile(path, 0.0, 0.0, 0.0, 100);
-        EXPECT_EQ(profile.points().size(), 0u);
+        EXPECT_EQ(profile->points().size(), 0u);
     }
 
     // aMax = 0 → empty profile
@@ -380,7 +380,7 @@ TEST(ToppraAudit, T5_DegenerateInputs) {
         badLimits.path.maxPathAcceleration = 0.0;
         JerkConstrainedTOPPRA<2, double> profiler(badLimits);
         auto profile = profiler.computeProfile(path, 50.0, 0.0, 0.0, 100);
-        EXPECT_EQ(profile.points().size(), 0u);
+        EXPECT_EQ(profile->points().size(), 0u);
     }
 
     // maxCentripetalAcceleration = -1 → empty profile (no NaN)
@@ -389,33 +389,33 @@ TEST(ToppraAudit, T5_DegenerateInputs) {
         badLimits.path.maxCentripetalAcceleration = -1.0;
         JerkConstrainedTOPPRA<2, double> profiler(badLimits);
         auto profile = profiler.computeProfile(path, 50.0, 0.0, 0.0, 100);
-        EXPECT_EQ(profile.points().size(), 0u);
+        EXPECT_EQ(profile->points().size(), 0u);
     }
 
     // Same for BasicTOPPRA
     {
         BasicTOPPRA<2, double> profiler(limits);
         auto profile = profiler.computeProfile(path, 50.0, 0.0, 0.0, 0);
-        EXPECT_EQ(profile.points().size(), 0u);
+        EXPECT_EQ(profile->points().size(), 0u);
     }
     {
         BasicTOPPRA<2, double> profiler(limits);
         auto profile = profiler.computeProfile(path, 0.0, 0.0, 0.0, 100);
-        EXPECT_EQ(profile.points().size(), 0u);
+        EXPECT_EQ(profile->points().size(), 0u);
     }
     {
         auto badLimits = limits;
         badLimits.path.maxPathAcceleration = 0.0;
         BasicTOPPRA<2, double> profiler(badLimits);
         auto profile = profiler.computeProfile(path, 50.0, 0.0, 0.0, 100);
-        EXPECT_EQ(profile.points().size(), 0u);
+        EXPECT_EQ(profile->points().size(), 0u);
     }
     {
         auto badLimits = limits;
         badLimits.path.maxCentripetalAcceleration = -1.0;
         BasicTOPPRA<2, double> profiler(badLimits);
         auto profile = profiler.computeProfile(path, 50.0, 0.0, 0.0, 100);
-        EXPECT_EQ(profile.points().size(), 0u);
+        EXPECT_EQ(profile->points().size(), 0u);
     }
 }
 
@@ -435,11 +435,11 @@ TEST(ToppraAudit, T6_ExactCorner) {
     JerkConstrainedTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 50.0, 0.0, 0.0, 200);
-    ASSERT_GT(profile.points().size(), 1u);
+    ASSERT_GT(profile->points().size(), 1u);
 
     // Find the minimum velocity in the profile (should be near the corner).
     double minVel = std::numeric_limits<double>::max();
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         minVel = std::min(minVel, pt.velocity);
     }
 
@@ -468,11 +468,11 @@ TEST(ToppraAudit, T7_CurvatureGap) {
     JerkConstrainedTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 50.0, 0.0, 0.0, 100);
-    ASSERT_GT(profile.points().size(), 1u);
+    ASSERT_GT(profile->points().size(), 1u);
 
     // For a straight line, v²κ = 0 everywhere, so centripetal accel ≤ a_cent.
     double aCent = limits.path.maxCentripetalAcceleration;
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         // No NaN allowed.
         EXPECT_FALSE(isNan(pt.velocity));
         EXPECT_FALSE(isNan(pt.acceleration));
@@ -498,14 +498,14 @@ TEST(ToppraAudit, T6_ExactPath) {
     JerkConstrainedTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 50.0, 0.0, 0.0, 200);
-    ASSERT_GT(profile.points().size(), 1u);
+    ASSERT_GT(profile->points().size(), 1u);
 
     // Find the minimum velocity in the profile (should be at the corner).
     double minVel = std::numeric_limits<double>::max();
     size_t minIdx = 0;
-    for (size_t i = 0; i < profile.points().size(); ++i) {
-        if (profile.points()[i].velocity < minVel) {
-            minVel = profile.points()[i].velocity;
+    for (size_t i = 0; i < profile->points().size(); ++i) {
+        if (profile->points()[i].velocity < minVel) {
+            minVel = profile->points()[i].velocity;
             minIdx = i;
         }
     }
@@ -514,10 +514,10 @@ TEST(ToppraAudit, T6_ExactPath) {
     // The junction velocity should be very low (near zero).
     EXPECT_LT(minVel, 1.0)
         << "Min velocity at corner (ExactPath) should be near 0, got "
-        << minVel << " at s=" << profile.points()[minIdx].arcLength;
+        << minVel << " at s=" << profile->points()[minIdx].arcLength;
 
     // No NaN in the profile.
-    for (const auto& pt : profile.points()) {
+    for (const auto& pt : profile->points()) {
         EXPECT_FALSE(isNan(pt.velocity));
         EXPECT_FALSE(isNan(pt.acceleration));
         EXPECT_FALSE(isNan(pt.time));
@@ -542,7 +542,7 @@ TEST(ToppraAudit, T7_CurvedPath) {
     JerkConstrainedTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 50.0, 0.0, 0.0, 200);
-    ASSERT_GT(profile.points().size(), 1u);
+    ASSERT_GT(profile->points().size(), 1u);
 
     // Curvature κ = 1/radius = 0.1. Centripetal accel limit:
     //   v²·κ ≤ a_cent = 500  →  v ≤ √(500/0.1) = √5000 ≈ 70.7
@@ -554,14 +554,14 @@ TEST(ToppraAudit, T7_CurvedPath) {
     JerkConstrainedTOPPRA<2, double> tightProfiler(tightLimits);
 
     auto tightProfile = tightProfiler.computeProfile(path, 50.0, 0.0, 0.0, 200);
-    ASSERT_GT(tightProfile.points().size(), 1u);
+    ASSERT_GT(tightProfile->points().size(), 1u);
 
     // With a_cent = 100, κ = 0.1: v_max = √(100/0.1) ≈ 31.6.
     // The velocity in the curved region should be ≤ 31.6 + ε.
     double vMaxCurvature = std::sqrt(100.0 / 0.1);
     double eps = 1.0;
     double maxVel = 0.0;
-    for (const auto& pt : tightProfile.points()) {
+    for (const auto& pt : tightProfile->points()) {
         maxVel = std::max(maxVel, pt.velocity);
         EXPECT_FALSE(isNan(pt.velocity));
         EXPECT_FALSE(isNan(pt.acceleration));
@@ -593,7 +593,7 @@ TEST(ToppraAudit, T_VAConsistency) {
     JerkConstrainedTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 50.0, 0.0, 0.0, 200);
-    ASSERT_GT(profile.points().size(), 2u);
+    ASSERT_GT(profile->points().size(), 2u);
 
     // Check v1 ≈ v0 + (a0 + a1)/2 · dt (constant-jerk velocity formula).
     // This is exact when jerk is constant over the interval, and a good
@@ -607,13 +607,13 @@ TEST(ToppraAudit, T_VAConsistency) {
     size_t skipBoundary = 5; // skip first/last 5 intervals
 
     int checked = 0;
-    for (size_t i = 1; i < profile.points().size(); ++i) {
+    for (size_t i = 1; i < profile->points().size(); ++i) {
         // Skip boundary intervals where smoothing has the most effect.
         if (i <= skipBoundary ||
-            i >= profile.points().size() - skipBoundary) continue;
+            i >= profile->points().size() - skipBoundary) continue;
 
-        const auto& p0 = profile.points()[i - 1];
-        const auto& p1 = profile.points()[i];
+        const auto& p0 = profile->points()[i - 1];
+        const auto& p1 = profile->points()[i];
         double dt = p1.time - p0.time;
         if (dt < 1e-9) continue;
         double v0 = p0.velocity, v1 = p1.velocity;
@@ -645,7 +645,7 @@ TEST(ToppraAudit, T8_LimitedByDiagnostics) {
     JerkConstrainedTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 50.0, 0.0, 0.0, 200);
-    ASSERT_GT(profile.points().size(), 1u);
+    ASSERT_GT(profile->points().size(), 1u);
 
     // Count the different limit types.
     int forwardAccelCount = 0;
@@ -653,8 +653,8 @@ TEST(ToppraAudit, T8_LimitedByDiagnostics) {
     int curvatureCount = 0;
     int otherCount = 0;
 
-    for (const auto& pt : profile.points()) {
-        using LT = VelocityProfilePoint<double>::LimitType;
+    for (const auto& pt : profile->points()) {
+        using LT = VelocityProfilePoint::LimitType;
         switch (pt.limitedBy) {
             case LT::ForwardAccel: ++forwardAccelCount; break;
             case LT::BackwardDecel: ++backwardDecelCount; break;
@@ -687,11 +687,11 @@ TEST(ToppraAudit, T9_GridIndependence) {
     auto profile100 = profiler.computeProfile(path, 50.0, 0.0, 0.0, 100);
     auto profile400 = profiler.computeProfile(path, 50.0, 0.0, 0.0, 400);
 
-    ASSERT_GT(profile100.points().size(), 0u);
-    ASSERT_GT(profile400.points().size(), 0u);
+    ASSERT_GT(profile100->points().size(), 0u);
+    ASSERT_GT(profile400->points().size(), 0u);
 
-    double t100 = profile100.points().back().time;
-    double t400 = profile400.points().back().time;
+    double t100 = profile100->points().back().time;
+    double t400 = profile400->points().back().time;
 
     // The state-carrying implementation should have grid-independent time.
     // Allow 15% difference for discretization error.

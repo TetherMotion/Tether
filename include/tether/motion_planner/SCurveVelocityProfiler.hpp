@@ -64,9 +64,7 @@ template<size_t Dim, typename T = double>
 class SCurveVelocityProfiler : public VelocityProfiler<Dim, T> {
 public:
     using Path = PathAdapter<Dim, T>;
-    using Profile = VelocityProfile<T>;
     using Limits = KinematicLimits<Dim, T>;
-    using Point = VelocityProfilePoint<T>;
     using SCurve = SCurveProfile<T>;
 
     /**
@@ -79,7 +77,7 @@ public:
     /**
      * @brief Compute a basic S-curve velocity profile for the given path.
      */
-    Profile computeProfile(
+    std::unique_ptr<VelocityProfile> computeProfile(
         const Path& path,
         T feedRate,
         T startVelocity = T(0),
@@ -88,7 +86,7 @@ public:
         T startAcceleration = T(0),
         T startJerk = T(0)) override {
 
-        Profile profile;
+        auto profile = std::make_unique<SampledVelocityProfile>();
         if (path.numSegments() == 0) return profile;
 
         T pathLength = path.totalLength();
@@ -187,7 +185,7 @@ public:
 
         for (size_t i = 0; i < numSamples; ++i) {
             T s = std::min(i * ds, pathLength);
-            Point pt;
+            VelocityProfilePoint pt;
             pt.arcLength = s;
 
             // Find which S-curve contains this arc length
@@ -223,7 +221,7 @@ public:
             // Compute time from arc length and velocity
             if (i > 0) {
                 T avgVel = (prevVel + pt.velocity) / T(2);
-                T deltaS = pt.arcLength - profile.points()[i - 1].arcLength;
+                T deltaS = pt.arcLength - profile->points()[i - 1].arcLength;
                 if (avgVel > MathConstants::EPSILON) {
                     currentTime += deltaS / avgVel;
                 }
@@ -239,7 +237,7 @@ public:
             pt.velocityLimit = vMax;
             pt.accelerationLimit = aMax;
 
-            profile.addPoint(pt);
+            profile->addPoint(pt);
         }
 
         return profile;
