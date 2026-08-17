@@ -506,7 +506,7 @@ int main(int argc, char* argv[]) {
     // Pontryagin's maximum principle, producing BANG + SINGULAR arcs.
     // With w_a = 0 it degenerates to pure time-optimal (TOPPRA).
     // Skip for very large files (mirrors GCodeProcessor's kMaxSegmentsForReNurbs).
-    constexpr std::size_t kMaxSegmentsForReNurbs = 5000;
+    constexpr std::size_t kMaxSegmentsForReNurbs = 1'000'000;
     std::optional<VelocityProfile<double>> velocityProfile;
     std::optional<tether::motion::profile_renurbs::ReNURBSProfile> renurbsProfile;
 
