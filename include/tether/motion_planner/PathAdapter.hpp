@@ -140,7 +140,7 @@ public:
         }
         if (!curvatureSampler_) {
             curvatureSampler_ =
-                std::make_unique<tether::motion::CertifiedCurvatureSampler>(
+                std::make_shared<tether::motion::CertifiedCurvatureSampler>(
                     *path_);
         }
         return *curvatureSampler_;
@@ -300,7 +300,7 @@ private:
     std::vector<SourceReference> sourceRefs_;
     std::vector<SegmentInfo> segments_;
     std::vector<std::optional<tether::motion::PHData>> phData_;
-    mutable std::unique_ptr<tether::motion::CertifiedCurvatureSampler>
+    mutable std::shared_ptr<tether::motion::CertifiedCurvatureSampler>
         curvatureSampler_; ///< Lazy, memoized.
 
     void rebuildSegmentInfo() {
