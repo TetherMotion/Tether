@@ -1075,6 +1075,10 @@ public:
         vf_ = static_cast<double>(endVelocity);
         numSamples_ = std::max(numSamples, size_t(10));
 
+        // Precompute the path geometry and velocity limit on the solver grid.
+        // This is done once per solve and reused by every simulateAndCost call.
+        buildConstraintCache();
+
         // Step 0: Estimate max reachable acceleration
         double aMax = estimateMaxReachableAccel();
 
@@ -1092,14 +1096,67 @@ public:
         double aLo = 1e-6 * aMax;  // near-zero a* → very slow
         double aHi = aMax;
 
+        // Harden the search: J(a*) is not guaranteed to be unimodal, so
+        // scan a coarse log-spaced grid first, take the best bracket, and
+        // only then run golden-section inside that bracket. This finds the
+        // global trend and also handles the w_a = 0 endpoint optimum.
+        const int coarseN = 17;
+        double aBest = aLo;
+        double JBest = std::numeric_limits<double>::infinity();
+        for (int i = 0; i < coarseN; ++i) {
+            double t = static_cast<double>(i) / (coarseN - 1.0);
+            double a = aLo * std::pow(aHi / aLo, t);
+            double Ji = simulateAndCost(a, /*record=*/false);
+            if (Ji < JBest) {
+                JBest = Ji;
+                aBest = a;
+            }
+        }
+
+        // Golden-section in the two cells surrounding the best grid point.
+        double cellLo = std::max(aLo, aBest * std::pow(aHi / aLo, -1.0 / (coarseN - 1.0)));
+        double cellHi = std::min(aHi, aBest * std::pow(aHi / aLo,  1.0 / (coarseN - 1.0)));
+        if (cellLo >= cellHi) { cellLo = aLo; cellHi = aHi; }
+
         // A sub-millimetre tolerance is enough for the trajectory cost and
         // keeps the search bounded (≤ ~25 iterations for a 500-unit range).
         double tol = std::max(1e-6 * aMax, 0.01);
-        auto [aOpt, Jmin] = goldenSection(J, aLo, aHi, tol);
+        auto [aOpt, Jmin] = goldenSection(J, cellLo, cellHi, tol);
+
+        // The endpoint aHi can be optimal for w_a = 0 (time-optimal at the
+        // largest feasible a*). Compare it explicitly.
+        if (aOpt < aHi) {
+            double Jhi = simulateAndCost(aHi, /*record=*/false);
+            if (Jhi < Jmin) {
+                aOpt = aHi;
+                Jmin = Jhi;
+            }
+        }
 
         // Rebuild the optimal arc list
         arcs_.clear();
         double Jfinal = simulateAndCost(aOpt, /*record=*/true);
+
+        // Coalesce consecutive arcs with identical type/eta/a_star that are
+        // contiguous in arc length. This collapses the grid-dump into the
+        // true switching structure and keeps the WSS small and exact.
+        std::vector<Arc> coalesced;
+        coalesced.reserve(arcs_.size());
+        for (auto& arc : arcs_) {
+            if (!coalesced.empty() &&
+                coalesced.back().type == arc.type &&
+                coalesced.back().eta == arc.eta &&
+                coalesced.back().a_star == arc.a_star &&
+                std::abs(coalesced.back().s1 - arc.s0) < 1e-12) {
+                coalesced.back().s1 = arc.s1;
+                coalesced.back().duration += arc.duration;
+            } else {
+                coalesced.push_back(std::move(arc));
+            }
+        }
+        arcs_ = std::move(coalesced);
+
+        (void)Jfinal;
 
         return arcs_;
     }
@@ -1141,6 +1198,10 @@ private:
     double v0_ = 0.0;
     double vf_ = 0.0;
     size_t numSamples_ = 200;
+    double ds_ = 0.0;
+
+    std::vector<KinematicCoefficients> gridCoeffs_;
+    std::vector<double> vLimGrid_;
 
     std::vector<Arc> arcs_;
     double lastCost_ = 0.0;
@@ -1166,6 +1227,139 @@ private:
     }
 
     /**
+     * @brief Precompute the path geometry and velocity limit on the solver grid.
+     *
+     * This is the dominant cost for NURBS/arc paths: each constraint query
+     * otherwise inverts arc length and evaluates high-order NURBS derivatives.
+     * Caching once per solve makes every simulateAndCost call O(numSamples)
+     * instead of O(numSamples * pathEvalCost).
+     */
+    void buildConstraintCache() {
+        if (sTotal_ <= 0.0 || numSamples_ == 0) return;
+
+        ds_ = sTotal_ / static_cast<double>(numSamples_);
+        gridCoeffs_.resize(numSamples_ + 1);
+        vLimGrid_.resize(numSamples_ + 1);
+
+        for (size_t i = 0; i <= numSamples_; ++i) {
+            double s = std::min(static_cast<double>(i) * ds_, sTotal_);
+            gridCoeffs_[i] = evaluator_.computeCoefficients(
+                static_cast<T>(s), T(0), T(0), path_);
+
+            // Velocity limit from the cached coefficients (path-level + curvature
+            // + per-axis directional limit).
+            double kappa = gridCoeffs_[i].kappa;
+            double vLim = static_cast<double>(
+                std::min(feedRate_, limits_.path.maxPathVelocity));
+            if (kappa > static_cast<double>(MathConstants::EPSILON)) {
+                double vCurvature = std::sqrt(
+                    static_cast<double>(limits_.path.maxCentripetalAcceleration)
+                    / kappa);
+                vLim = std::min(vLim, vCurvature);
+            }
+            auto maxVel = limits_.maxVelocityForDirection(
+                toVec(gridCoeffs_[i].tangent));
+            vLim = std::min(vLim, static_cast<double>(maxVel));
+            vLimGrid_[i] = std::max(vLim, 0.0);
+        }
+    }
+
+    /// Convert a std::vector<double> to Vec<Dim,T> for limits helpers.
+    Vec<Dim, T> toVec(const std::vector<double>& v) const {
+        Vec<Dim, T> result;
+        for (size_t i = 0; i < Dim && i < v.size(); ++i) {
+            result[i] = static_cast<T>(v[i]);
+        }
+        return result;
+    }
+
+    size_t gridIndex(double s) const {
+        if (ds_ <= 0.0) return 0;
+        long idx = static_cast<long>(std::floor(s / ds_ + 0.5));
+        return static_cast<size_t>(
+            std::clamp(idx, 0L, static_cast<long>(numSamples_)));
+    }
+
+    /// Compute acceleration bounds [a_min, a_max] from cached grid coefficients.
+    std::pair<double, double> accelBoundsFromCache(size_t idx, double v) const {
+        const auto& c = gridCoeffs_[idx];
+        double a_min = -static_cast<double>(limits_.path.maxPathAcceleration);
+        double a_max =  static_cast<double>(limits_.path.maxPathAcceleration);
+
+        double v2 = v * v;
+        for (size_t i = 0; i < Dim && i < c.tangent.size(); ++i) {
+            double Ti = c.tangent[i];
+            double kappai_v2 = c.curvature[i] * v2;
+            double axMaxI = static_cast<double>(limits_.axis.maxAcceleration[i]);
+
+            if (std::abs(Ti) > static_cast<double>(MathConstants::EPSILON)) {
+                double a_lo = (-axMaxI - kappai_v2) / Ti;
+                double a_hi = ( axMaxI - kappai_v2) / Ti;
+                if (a_lo > a_hi) std::swap(a_lo, a_hi);
+                a_min = std::max(a_min, a_lo);
+                a_max = std::min(a_max, a_hi);
+            } else {
+                if (std::abs(kappai_v2) > axMaxI) {
+                    return {1.0, -1.0};  // infeasible
+                }
+            }
+        }
+        return {a_min, a_max};
+    }
+
+    /// Compute eta bounds [eta_min, eta_max] from cached grid coefficients.
+    EtaBounds etaBoundsFromCache(size_t idx, double v, double a) const {
+        EtaBounds b;
+        b.eta_min = -static_cast<double>(limits_.path.maxPathJerk);
+        b.eta_max =  static_cast<double>(limits_.path.maxPathJerk);
+
+        // If jerk limiting is disabled the evaluator returns huge bounds.
+        // Cap to a finite effective jerk to keep the arc time scale healthy.
+        if (!limits_.path.jerkLimitEnabled) {
+            b.eta_min = -1e18;
+            b.eta_max =  1e18;
+        }
+
+        double jEff = std::max(
+            static_cast<double>(limits_.path.maxPathJerk),
+            1000.0 * static_cast<double>(limits_.path.maxPathAcceleration));
+        if (jEff > 0.0) {
+            b.eta_min = std::max(b.eta_min, -jEff);
+            b.eta_max = std::min(b.eta_max,  jEff);
+        }
+
+        const auto& c = gridCoeffs_[idx];
+        double v_d = v;
+        double a_d = a;
+        double v3 = v_d * v_d * v_d;
+        double va = v_d * a_d;
+
+        for (size_t i = 0; i < Dim && i < c.tangent.size(); ++i) {
+            double alpha = c.tangent[i];
+            double beta = c.jounce[i] * v3 + 3.0 * c.curvature[i] * va;
+            double jMaxI = static_cast<double>(limits_.axis.maxJerk[i]);
+
+            if (!limits_.axis.jerkLimitEnabled || jMaxI <= 0.0) continue;
+
+            if (std::abs(alpha) > static_cast<double>(MathConstants::EPSILON)) {
+                double eta_lo = (-jMaxI - beta) / alpha;
+                double eta_hi = ( jMaxI - beta) / alpha;
+                if (eta_lo > eta_hi) std::swap(eta_lo, eta_hi);
+                b.eta_min = std::max(b.eta_min, eta_lo);
+                b.eta_max = std::min(b.eta_max, eta_hi);
+            } else {
+                if (std::abs(beta) > jMaxI) {
+                    b.eta_min = 1.0;
+                    b.eta_max = -1.0;
+                    return b;
+                }
+            }
+        }
+
+        return b;
+    }
+
+    /**
      * @brief Forward state-machine simulation for fixed a*.
      *
      * Walks the path from s=0 to s=s_f, selecting the control at each
@@ -1185,18 +1379,16 @@ private:
         const double ds = sTotal_ / static_cast<double>(numSamples_);
         const double sEnd = sTotal_;
 
-        // Get jerk bounds (use path-level as default; per-interval recompute
-        // would be more accurate but slower)
+        // Constraint queries are served from the precomputed grid.  This
+        // avoids the expensive arc-length inversion + high-order NURBS
+        // derivative evaluation on every simulation step.
         auto getEtaBounds = [&](double sCur, double vCur, double aCur)
             -> EtaBounds {
-            return evaluator_.etaBounds(
-                static_cast<T>(sCur), static_cast<T>(vCur),
-                static_cast<T>(aCur), path_);
+            return etaBoundsFromCache(gridIndex(sCur), vCur, aCur);
         };
 
         auto getVLimit = [&](double sCur) -> double {
-            return static_cast<double>(
-                evaluator_.velocityLimit(static_cast<T>(sCur), path_));
+            return vLimGrid_[gridIndex(sCur)];
         };
 
         bool infeasible = false;
@@ -1210,8 +1402,7 @@ private:
             double vLim = getVLimit(s);
 
             // Acceleration bounds at this state.
-            auto aBounds = evaluator_.accelerationBounds(
-                static_cast<T>(s), static_cast<T>(v), path_);
+            auto aBounds = accelBoundsFromCache(gridIndex(s), v);
             if (aBounds.first > aBounds.second) {
                 infeasible = true;
                 break;
@@ -1388,8 +1579,8 @@ private:
             if (v1 < 0.0) v1 = 0.0;
 
             // Clamp acceleration to acceleration bounds
-            auto aEndBounds = evaluator_.accelerationBounds(
-                static_cast<T>(s + dsArc), static_cast<T>(v1), path_);
+            auto aEndBounds = accelBoundsFromCache(
+                gridIndex(s + dsArc), v1);
             if (aEndBounds.first > aEndBounds.second) {
                 infeasible = true;
                 break;
@@ -1547,9 +1738,21 @@ public:
         // If w_a = 0, this degenerates to time-optimal. We still solve
         // via the same machinery (a* → a_max), but the user could also
         // use AnalyticalTOPPRA directly for that case.
-        // If w_t = 0, the problem is ill-posed — clamp to a tiny value.
         CostWeights wEff = weights_;
-        if (wEff.w_t <= 0.0) wEff.w_t = 1e-12;
+        if (wEff.w_t <= 0.0) {
+            // The problem is ill-posed without a positive time weight.
+            return profile;
+        }
+
+        // Clamp an overspeed start velocity to the lesser of the feed rate
+        // and the actual velocity limit at the path start.
+        T v0 = startVelocity;
+        Evaluator startEval(limits_, feedRate);
+        T vStartLim = std::min(feedRate,
+                               startEval.velocityLimit(T(0), path));
+        if (v0 > vStartLim) {
+            v0 = vStartLim;
+        }
 
         // Keep the path alive for the WSS by taking shared ownership.
         auto pathCopy = std::make_shared<Path>(path);
@@ -1557,7 +1760,7 @@ public:
 
         // Solve
         Solver solver(*pathCopy, limits_, wEff, feedRate);
-        auto arcs = solver.solve(startVelocity, endVelocity, numSamples);
+        auto arcs = solver.solve(v0, endVelocity, numSamples);
         if (arcs.empty()) {
             // The solver could not find a feasible trajectory (e.g. the
             // requested boundary velocities are unreachable for the path).
