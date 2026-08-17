@@ -539,7 +539,9 @@ either the sampled-space or the analytical variant, selected by configuration.
 | `include/tether/motion_planner/analytical/extrusion/AnalyticalOverlapAddLPV.hpp` | Analytical overlap-add LPV |
 | `include/tether/motion_planner/analytical/extrusion/AnalyticalARXLPVInverse.hpp` | Analytical ARX LPV inverse |
 | `include/tether/motion_planner/analytical/extrusion/AnalyticalStateSpaceLPV.hpp` | Analytical state-space LPV |
-| `include/tether/motion_planner/analytical/extrusion/AnalyticalFlowAdaptiveHeater.hpp` | Analytical flow-adaptive heater |
+| `include/tether/motion_planner/analytical/extrusion/AnalyticalFlowAdaptiveHeater.hpp` | Flow-adaptive heater, no explicit sampling |
+|| `include/tether/motion_planner/analytical/extrusion/FlowAdaptiveHeaterBase.hpp` | Parameters and shared flow-adaptive heater logic |
+|| `include/tether/motion_planner/analytical/extrusion/SamplingFlowAdaptiveHeater.hpp` | Flow-adaptive heater, explicit sampling reference |
 | `include/tether/motion_planner/analytical/extrusion/AnalyticalMeltZoneThermalObserver.hpp` | Analytical melt-zone thermal observer |
 | `tests/motion_planner/test_analytical_extrusion.cpp` | Unit tests for all analytical extrusion algorithms |
 | `tests/motion_planner/test_analytical_extrusion_gcode.cpp` | G-code integration tests |

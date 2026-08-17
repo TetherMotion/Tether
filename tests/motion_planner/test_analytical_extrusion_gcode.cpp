@@ -440,10 +440,11 @@ TEST(AnalyticalExtrusionGcodeTest, SyntheticGcode_AllAlgorithmsFinite) {
         params.targetTempC = 210.0;
         AnalyticalFlowAdaptiveHeater<2> heater(traj, params);
         for (double t : times) {
-            double ff = heater.feedforwardAtTime(t);
-            EXPECT_TRUE(std::isfinite(ff)) << "Heater FF non-finite at t=" << t;
-            EXPECT_GE(ff, 0.0) << "Heater FF negative at t=" << t;
-            EXPECT_LE(ff, 1.0) << "Heater FF > 1 at t=" << t;
+            double dt = heater.temperatureDeltaAtTime(t);
+            EXPECT_TRUE(std::isfinite(dt)) << "Heater delta non-finite at t=" << t;
+            EXPECT_GE(dt, 0.0) << "Heater delta negative at t=" << t;
+            EXPECT_LE(dt, params.maxHeaterOvershoot)
+                << "Heater delta exceeds maxHeaterOvershoot at t=" << t;
         }
     }
 }
@@ -550,10 +551,10 @@ TEST(AnalyticalExtrusionGcodeTest, RealGcode_KissenPunctperi) {
     AnalyticalFlowAdaptiveHeater<2> heater(traj, heaterParams);
 
     for (double t : times) {
-        double ff = heater.feedforwardAtTime(t);
-        EXPECT_TRUE(std::isfinite(ff));
-        EXPECT_GE(ff, 0.0);
-        EXPECT_LE(ff, 1.0);
+        double dt = heater.temperatureDeltaAtTime(t);
+        EXPECT_TRUE(std::isfinite(dt));
+        EXPECT_GE(dt, 0.0);
+        EXPECT_LE(dt, heaterParams.maxHeaterOvershoot);
     }
 }
 
@@ -724,7 +725,7 @@ TEST(AnalyticalExtrusionGcodeTest, RealGcode_AllAlgorithmsRun) {
         AnalyticalFlowAdaptiveHeater<2> heater(traj, p);
         for (double t : times) {
             ++totalChecks;
-            if (std::isfinite(heater.feedforwardAtTime(t))) ++finiteChecks;
+            if (std::isfinite(heater.temperatureDeltaAtTime(t))) ++finiteChecks;
         }
     }
 
