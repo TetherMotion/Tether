@@ -26,14 +26,14 @@ PathAdapter<2, double> makeLinearPath2D(double length) {
     return PathAdapter<2, double>(std::move(path), {SourceReference{}});
 }
 
-VelocityProfile<double> makeSimpleProfile(double pathLength, double vMax,
+SampledVelocityProfile makeSimpleProfile(double pathLength, double vMax,
                                           std::size_t n = 50) {
-    VelocityProfile<double> profile;
+    SampledVelocityProfile profile;
     double ds = pathLength / (n - 1);
     double t = 0.0;
     for (std::size_t i = 0; i < n; ++i) {
         double s = i * ds;
-        VelocityProfilePoint<double> pt;
+        VelocityProfilePoint pt;
         pt.arcLength = s;
         pt.velocityLimit = vMax;
         pt.accelerationLimit = 500.0;
@@ -120,7 +120,7 @@ TEST(ProfileConstraintCertifierTest, ContinuityReportPopulated) {
 
 TEST(ProfileConstraintCertifierTest, EmptyProfileCertifiesAsCompliant) {
     auto path = makeLinearPath2D(100.0);
-    VelocityProfile<double> profile;
+    SampledVelocityProfile profile;
     KinematicLimits<2, double> limits;
     ReNURBSProfile renurbs;
 

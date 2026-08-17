@@ -30,7 +30,7 @@ namespace tether::motion::profile_renurbs {
  * @tparam Dim Spatial dimension.
  * @tparam T   Numeric type.
  * @param renurbs The ReNURBS profile to certify.
- * @param profile The original sampled velocity profile (ground truth).
+ * @param profile The original velocity profile (ground truth).
  * @param path The path adapter (for segment boundaries).
  * @param limits Kinematic limits (for jerk limit).
  * @param epsilon Lipschitz certificate width goal.
@@ -39,7 +39,7 @@ namespace tether::motion::profile_renurbs {
 template<std::size_t Dim, typename T = double>
 ProfileConstraintCertificate certifyReNURBSProfile(
     const ReNURBSProfile& renurbs,
-    const MotionPlanner::VelocityProfile<T>& profile,
+    const MotionPlanner::VelocityProfile& profile,
     const MotionPlanner::PathAdapter<Dim, T>& path,
     const MotionPlanner::KinematicLimits<Dim, T>& limits,
     double epsilon = 1e-5);

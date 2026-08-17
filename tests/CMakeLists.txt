@@ -260,6 +260,7 @@ set(MOTION_PLANNER_INTEGRATION_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/AnalyticalTOPPRATest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/ToppraAuditTest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/ParetoTimeEnergyTest.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/VelocityProfileTest.cpp"
 )
 # Analytical extrusion compensation tests (linear PressureAdvance, power-law PressureAdvance, Cross-WLF PressureAdvance,
 # LTI/LPV deconvolution, state-space LPV, flow-adaptive heater, thermal observer).

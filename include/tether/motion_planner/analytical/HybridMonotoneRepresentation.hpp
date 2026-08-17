@@ -423,7 +423,7 @@ public:
     /**
      * @brief Estimate time at a given arc length.
      */
-    T timeAtArcLength(T s) const {
+    T timeAtArcLength(T s) const override {
         // Find the element containing this arc length
         for (const auto& elem : elements_) {
             if (s >= elem.s_begin - T(1e-10) && s <= elem.s_end + T(1e-10)) {
