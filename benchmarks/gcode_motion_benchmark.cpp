@@ -10,17 +10,18 @@
  *   Step 1: Parse G-code → PlanningSegments + block metadata
  *           (PlanningSegmentBuilder::fromText, with stopOnError=false retry)
  *   Step 2: Per-segment corner deviation (CornerAnalyzer::analyze)
- *           + extruder speed computation
+ *           + extrusion ratio and extruder speed computation
  *   Step 3: Build NURBS path (piecewiseNurbsFromSegments)
  *   Step 3b: Pareto time-energy-optimal velocity profile
  *           (ParetoTimeEnergyOptimalVelocityPlanner::computeProfile)
- *   Step 3c: ReNURBS profile fit (buildReNURBSProfile)
+ *   Step 3c: Analytical extrusion/pressure-advance planners
+ *           (linear, power-law, Cross-WLF, thermal observer, LTI,
+ *            overlap-add LPV, ARX LPV, state-space LPV, flow-adaptive heater)
  *   Step 4 (optional): Dense sampling (TrajectoryAnalyzer::analyze)
  *                       + computeStatistics
  *
- * Pressure-advance profiles (Step 3d in the viewer) are viewer-specific
- * (tether::web::PaProfileBuilder) and are not part of the Tether library,
- * so they are not benchmarked here.
+ * ReNURBS fitting is intentionally omitted because the Pareto profiler now
+ * outputs an analytical SSR/WSS profile.
  *
  * Usage:
  *   gcode_motion_benchmark <gcode_file> [--dense] [--samples N]
@@ -39,8 +40,21 @@
 #include "tether/motion_planner/PathAdapter.hpp"
 #include "tether/motion_planner/analytical/ParetoTimeEnergyOptimalVelocityPlanner.hpp"
 #include "tether/motion_planner/geometry/PlanningSegmentConverter.hpp"
-#include "tether/motion_planner/profile_renurbs/ReNURBSProfileBuilder.hpp"
+#include "tether/motion_planner/analytical/extrusion/AnalyticalExtrusionTypes.hpp"
+#include "tether/motion_planner/analytical/extrusion/AnalyticalLinearPressureAdvance.hpp"
+#include "tether/motion_planner/analytical/extrusion/AnalyticalPowerLawPressureAdvance.hpp"
+#include "tether/motion_planner/analytical/extrusion/AnalyticalCrossWLFPressureAdvance.hpp"
+#include "tether/motion_planner/analytical/extrusion/AnalyticalMeltZoneThermalObserver.hpp"
+#include "tether/motion_planner/analytical/extrusion/AnalyticalLTIDeconvolution.hpp"
+#include "tether/motion_planner/analytical/extrusion/AnalyticalOverlapAddLPV.hpp"
+#include "tether/motion_planner/analytical/extrusion/AnalyticalARXLPVInverse.hpp"
+#include "tether/motion_planner/analytical/extrusion/AnalyticalStateSpaceLPV.hpp"
+#include "tether/motion_planner/analytical/extrusion/AnalyticalFlowAdaptiveHeater.hpp"
+#include "tether/control/extrusion/PressureFlowLut.hpp"
+#include "tether/control/extrusion/CrossWlfRheology.hpp"
 #include "tether/export/TrajectoryAnalyzer.hpp"
+
+#include <Eigen/Dense>
 
 #include <algorithm>
 #include <chrono>
@@ -69,9 +83,32 @@ using GCode::CornerAnalyzer;
 using MotionPlanner::PathAdapter;
 using MotionPlanner::analytical::ParetoTimeEnergyOptimalVelocityPlanner;
 using MotionPlanner::analytical::CostWeights;
+using MotionPlanner::analytical::WeightedSwitchingStructure;
 using MotionPlanner::KinematicLimits;
 using MotionPlanner::VelocityProfile;
 using MotionPlanner::SampledVelocityProfile;
+using MotionPlanner::analytical::extrusion::ExtrusionTrajectory;
+using MotionPlanner::analytical::extrusion::AnalyticalLinearPressureAdvance;
+using MotionPlanner::analytical::extrusion::AnalyticalLinearPressureAdvanceParams;
+using MotionPlanner::analytical::extrusion::AnalyticalPowerLawPressureAdvance;
+using MotionPlanner::analytical::extrusion::AnalyticalPowerLawPressureAdvanceParams;
+using MotionPlanner::analytical::extrusion::AnalyticalCrossWLFPressureAdvance;
+using MotionPlanner::analytical::extrusion::AnalyticalCrossWLFPressureAdvanceParams;
+using MotionPlanner::analytical::extrusion::AnalyticalMeltZoneThermalObserver;
+using MotionPlanner::analytical::extrusion::AnalyticalThermalParams;
+using MotionPlanner::analytical::extrusion::AnalyticalLTIDeconvolution;
+using MotionPlanner::analytical::extrusion::AnalyticalLTIDeconvParams;
+using MotionPlanner::analytical::extrusion::AnalyticalOverlapAddLPV;
+using MotionPlanner::analytical::extrusion::AnalyticalOverlapAddLPVParams;
+using MotionPlanner::analytical::extrusion::AnalyticalARXLPVInverse;
+using MotionPlanner::analytical::extrusion::AnalyticalARXLPVParams;
+using MotionPlanner::analytical::extrusion::AnalyticalStateSpaceLPV;
+using MotionPlanner::analytical::extrusion::AnalyticalStateSpaceLPVParams;
+using MotionPlanner::analytical::extrusion::AnalyticalFlowAdaptiveHeater;
+using MotionPlanner::analytical::extrusion::AnalyticalFlowAdaptiveHeaterParams;
+using tether::control::extrusion::PressureFlowLut;
+using tether::control::extrusion::CrossWlfParams;
+using tether::control::extrusion::NozzleGeometry;
 using GCodeExport::TrajectoryAnalyzer;
 using GCodeExport::AnalysisConfig;
 using GCodeExport::TrajectorySample;
@@ -284,6 +321,191 @@ void compute_extruder_speed(std::vector<PlanningSegment>& segs) {
     }
 }
 
+/// Compute the average extrusion ratio (E mm / path mm) for extruding moves.
+/// This must be called *before* compute_extruder_speed() overwrites exitVelocity.
+double compute_average_extrusion_ratio(const std::vector<PlanningSegment>& segs) {
+    double totalE = 0.0;
+    double totalLen = 0.0;
+    for (const auto& seg : segs) {
+        if (seg.isRapid || seg.segmentLength < 1e-9) continue;
+        double eDelta = seg.exitVelocity; // E-delta before it is repurposed
+        if (std::abs(eDelta) < 1e-12) continue;
+        totalE += eDelta;
+        totalLen += seg.segmentLength;
+    }
+    return (totalLen > 1e-9) ? (totalE / totalLen) : 0.0;
+}
+
+/// Generate N evenly spaced sample times in [0, totalTime].
+std::vector<double> linspace_times(double totalTime, std::size_t n) {
+    std::vector<double> times;
+    if (n == 0 || totalTime <= 0.0) return times;
+    times.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        double alpha = (n == 1) ? 0.0
+            : static_cast<double>(i) / static_cast<double>(n - 1);
+        times.push_back(alpha * totalTime);
+    }
+    return times;
+}
+
+// ── Analytical extrusion / pressure-advance benchmark ────────────────────────
+
+void run_analytical_extrusion_benchmarks(
+    StageReport& report,
+    const WeightedSwitchingStructure<3, double>* wss,
+    double avgExtrusionRatio,
+    std::size_t numSamples = 1000) {
+
+    if (!wss || wss->arcs().empty()) {
+        report.add("Step 3c: ExtrusionTrajectory (SKIPPED)", 0.0, 0,
+                   "no WSS available");
+        return;
+    }
+
+    // Build the extrusion trajectory (uniform average ratio for the benchmark).
+    Timer tm; tm.start();
+    ExtrusionTrajectory<3, double> traj(*wss, avgExtrusionRatio);
+    double traj_ms = tm.ms();
+    if (traj.numArcs() == 0 || traj.totalTime() <= 0.0) {
+        report.add("Step 3c: ExtrusionTrajectory (FAILED)", 0.0, 0,
+                   "empty trajectory");
+        return;
+    }
+    report.add("Step 3c: ExtrusionTrajectory", traj_ms, traj.numArcs());
+
+    double totalT = traj.totalTime();
+    std::vector<double> times = linspace_times(totalT, numSamples);
+
+    // 1. Linear PressureAdvance
+    {
+        AnalyticalLinearPressureAdvanceParams params;
+        params.pressureAdvance = 0.045;
+        params.smoothTime = 0.0;
+        Timer tm; tm.start();
+        AnalyticalLinearPressureAdvance<3> pa(traj, params);
+        for (double t : times) { (void)pa.offsetAtTime(t); }
+        report.add("Step 3c.1: Linear PressureAdvance", tm.ms(), numSamples);
+    }
+
+    // 2. Power-law PressureAdvance
+    {
+        AnalyticalPowerLawPressureAdvanceParams params;
+        params.baseGain = 0.012;
+        params.flowIndex = 0.5;
+        Timer tm; tm.start();
+        AnalyticalPowerLawPressureAdvance<3> pa(traj, params);
+        for (double t : times) { (void)pa.offsetAtTime(t); }
+        report.add("Step 3c.2: PowerLaw PressureAdvance", tm.ms(), numSamples);
+    }
+
+    // 3. Melt-zone thermal observer (also used by Cross-WLF below)
+    AnalyticalMeltZoneThermalObserver<3>* thermalObs = nullptr;
+    {
+        AnalyticalThermalParams params;
+        params.heaterPWM = 0.5;
+        Timer tm; tm.start();
+        static thread_local AnalyticalMeltZoneThermalObserver<3> thermal(traj, params);
+        thermal.initialize(210.0);
+        double construct_ms = tm.ms();
+        thermalObs = &thermal;
+        tm.start();
+        for (double t : times) { (void)thermal.meltTempAt(t); }
+        report.add("Step 3c.3: MeltZone ThermalObserver",
+                   construct_ms + tm.ms(), numSamples);
+    }
+
+    // 4. Cross-WLF PressureAdvance
+    {
+        CrossWlfParams cwParams;
+        NozzleGeometry geom;
+        auto lut = std::make_shared<PressureFlowLut>();
+        std::vector<double> flowAxis = {0.0, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0};
+        std::vector<double> tempAxis = {180.0, 200.0, 210.0, 220.0, 240.0};
+        lut->build(cwParams, geom, flowAxis, tempAxis);
+
+        AnalyticalCrossWLFPressureAdvanceParams params;
+        params.compressibilityOverArea = 1e-5;
+        Timer tm; tm.start();
+        AnalyticalCrossWLFPressureAdvance<3> pa(traj, lut, params, thermalObs);
+        for (double t : times) { (void)pa.offsetAtTime(t); }
+        report.add("Step 3c.4: CrossWLF PressureAdvance", tm.ms(), numSamples);
+    }
+
+    // 5. LTI deconvolution
+    {
+        std::vector<double> h = {0.0, 0.5, 0.3, 0.15, 0.08, 0.04, 0.02, 0.01};
+        AnalyticalLTIDeconvParams params;
+        params.lambda = 1e-4;
+        Timer tm; tm.start();
+        AnalyticalLTIDeconvolution<3> deconv(traj, h, 1000.0, params);
+        for (double t : times) { (void)deconv.inputAtTime(t, false); }
+        report.add("Step 3c.5: LTI Deconvolution", tm.ms(), numSamples);
+    }
+
+    // 6. Overlap-add LPV
+    {
+        AnalyticalOverlapAddLPVParams params;
+        params.lambda = 1e-4;
+        Timer tm; tm.start();
+        AnalyticalOverlapAddLPV<3> lpv(traj, params);
+        std::vector<double> h1 = {0.0, 0.5, 0.3, 0.15, 0.08, 0.04, 0.02, 0.01};
+        std::vector<double> h2 = {0.0, 0.7, 0.2, 0.05, 0.02, 0.01, 0.005, 0.002};
+        lpv.addOperatingPoint(10.0, h1, 1000.0);
+        lpv.addOperatingPoint(300.0, h2, 1000.0);
+        for (double t : times) { (void)lpv.inputAtTime(t, false); }
+        report.add("Step 3c.6: OverlapAdd LPV", tm.ms(), numSamples);
+    }
+
+    // 7. ARX LPV inverse
+    {
+        AnalyticalARXLPVParams params;
+        params.na = 1;
+        params.nb = 0;
+        Timer tm; tm.start();
+        AnalyticalARXLPVInverse<3> filter(traj, params);
+        filter.addModelPoint(10.0, {2.0}, {5.0}, 0.0);
+        filter.addModelPoint(300.0, {1.0}, {8.0}, 0.0);
+        for (double t : times) { (void)filter.inputAtTime(t); }
+        report.add("Step 3c.7: ARX LPV Inverse", tm.ms(), numSamples);
+    }
+
+    // 8. State-space LPV
+    {
+        AnalyticalStateSpaceLPVParams params;
+        params.stateDim = 2;
+        params.lambda = 1e-6;
+        Timer tm; tm.start();
+        AnalyticalStateSpaceLPV<3> estimator(traj, params);
+
+        Eigen::MatrixXd A(2, 2), B(2, 1), C(1, 2);
+        A << -1.0, 0.0, 0.0, -2.0;
+        B << 1.0, 0.0;
+        C << 1.0, 0.0;
+        estimator.addModelPoint({10.0, A, B, C});
+
+        A << -0.5, 0.0, 0.0, -1.0;
+        B << 1.5, 0.0;
+        estimator.addModelPoint({300.0, A, B, C});
+
+        for (double t : times) {
+            if (t < 0.01 || t > totalT * 0.99) continue;
+            (void)estimator.inputAtTime(t);
+        }
+        report.add("Step 3c.8: StateSpace LPV", tm.ms(), numSamples);
+    }
+
+    // 9. Flow-adaptive heater
+    {
+        AnalyticalFlowAdaptiveHeaterParams params;
+        params.targetTempC = 210.0;
+        Timer tm; tm.start();
+        AnalyticalFlowAdaptiveHeater<3> heater(traj, params);
+        for (double t : times) { (void)heater.feedforwardAtTime(t); }
+        report.add("Step 3c.9: FlowAdaptive Heater", tm.ms(), numSamples);
+    }
+}
+
 // ── Pretty printing ──────────────────────────────────────────────────────────
 
 void print_separator() {
@@ -470,19 +692,23 @@ int main(int argc, char* argv[]) {
               << (parseResult.error.ok() ? "" : " (with non-fatal parse warnings)")
               << '\n';
 
-    // ── Step 2: Corner deviation + extruder speed ────────────────────────────
-    {
-        Timer t; t.start();
-        compute_corner_deviation(segments);
-        double corner_ms = t.ms();
-        t.start();
-        compute_extruder_speed(segments);
-        double extruder_ms = t.ms();
-        report.add("Step 2a: corner deviation (CornerAnalyzer)", corner_ms,
-                   segments.size());
-        report.add("Step 2b: extruder speed computation", extruder_ms,
-                   segments.size());
-    }
+    // ── Step 2: Corner deviation + extrusion ratio + extruder speed ─────────
+    Timer t2; t2.start();
+    compute_corner_deviation(segments);
+    double corner_ms = t2.ms();
+    t2.start();
+    double avgExtrusionRatio = compute_average_extrusion_ratio(segments);
+    double ratio_ms = t2.ms();
+    t2.start();
+    compute_extruder_speed(segments);
+    double extruder_ms = t2.ms();
+    report.add("Step 2a: corner deviation (CornerAnalyzer)", corner_ms,
+               segments.size());
+    report.add("Step 2b: average extrusion ratio extraction", ratio_ms,
+               segments.size(),
+               "avg_ratio=" + std::to_string(avgExtrusionRatio));
+    report.add("Step 2c: extruder speed computation", extruder_ms,
+               segments.size());
 
     // ── Step 3: Build NURBS path ─────────────────────────────────────────────
     std::optional<tether::motion::PlanningSegmentNurbsResult> nurbsResult;
@@ -509,7 +735,6 @@ int main(int argc, char* argv[]) {
     // Skip for very large files (mirrors GCodeProcessor's kMaxSegmentsForReNurbs).
     constexpr std::size_t kMaxSegmentsForReNurbs = 1'000'000;
     std::shared_ptr<VelocityProfile> velocityProfile;
-    std::optional<tether::motion::profile_renurbs::ReNURBSProfile> renurbsProfile;
 
     if (nurbsResult->path.numPieces() <= kMaxSegmentsForReNurbs) {
         PathAdapter<3, double> pathAdapter(std::move(nurbsResult->path));
@@ -554,28 +779,20 @@ int main(int argc, char* argv[]) {
                        std::string("exception: ") + e.what());
         }
 
-        // ── Step 3c: ReNURBS profile fit ─────────────────────────────────────
-        if (velocityProfile) {
-            tether::motion::profile_renurbs::ReNURBSConfig cfg;
-            cfg.enabled = true;
-            cfg.certify = false;
-            cfg.certifyThrowOnFailure = false;
-            try {
-                Timer t; t.start();
-                renurbsProfile = tether::motion::profile_renurbs::buildReNURBSProfile(
-                    *velocityProfile, pathAdapter, limits, cfg);
-                report.add("Step 3c: buildReNURBSProfile", t.ms(),
-                           renurbsProfile->perSegment.size());
-            } catch (const std::exception& e) {
-                report.add("Step 3c: buildReNURBSProfile (FAILED)", 0.0, 0,
-                           std::string("exception: ") + e.what());
-            }
+        // ── Step 3c: Analytical extrusion / pressure-advance planners ────────
+        auto wss = profiler.weightedSource();
+        try {
+            run_analytical_extrusion_benchmarks(report, wss.get(),
+                                                avgExtrusionRatio, 1000);
+        } catch (const std::exception& e) {
+            report.add("Step 3c: Analytical extrusion (FAILED)", 0.0, 0,
+                       std::string("exception: ") + e.what());
         }
     } else {
         report.add("Step 3b: Pareto (SKIPPED — too many pieces)", 0.0, 0,
             "pieces=" + std::to_string(nurbsResult->path.numPieces()) +
             " > limit " + std::to_string(kMaxSegmentsForReNurbs));
-        report.add("Step 3c: buildReNURBSProfile (SKIPPED)", 0.0, 0, {});
+        report.add("Step 3c: Analytical extrusion (SKIPPED)", 0.0, 0, {});
     }
 
     // ── Step 4 (optional): Dense sampling ────────────────────────────────────

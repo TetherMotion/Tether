@@ -12,6 +12,7 @@ target_link_libraries(gcode_motion_benchmark PRIVATE
     tether_motion_planner
     tether_gcode
     tether_export
+    tether_controls
     tether_common)
 
 target_include_directories(gcode_motion_benchmark PRIVATE
