@@ -495,13 +495,13 @@ void run_analytical_extrusion_benchmarks(
         report.add("Step 3c.8: StateSpace LPV", tm.ms(), numSamples);
     }
 
-    // 9. Flow-adaptive heater
+    // 9. Flow-adaptive heater (analytical, no explicit sampling)
     {
         AnalyticalFlowAdaptiveHeaterParams params;
         params.targetTempC = 210.0;
         Timer tm; tm.start();
         AnalyticalFlowAdaptiveHeater<3> heater(traj, params);
-        for (double t : times) { (void)heater.feedforwardAtTime(t); }
+        for (double t : times) { (void)heater.temperatureDeltaAtTime(t); }
         report.add("Step 3c.9: FlowAdaptive Heater", tm.ms(), numSamples);
     }
 }

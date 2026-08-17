@@ -38,6 +38,7 @@
 #include <tether/motion_planner/analytical/extrusion/AnalyticalARXLPVInverse.hpp>
 #include <tether/motion_planner/analytical/extrusion/AnalyticalStateSpaceLPV.hpp>
 #include <tether/motion_planner/analytical/extrusion/AnalyticalFlowAdaptiveHeater.hpp>
+#include <tether/motion_planner/analytical/extrusion/SamplingFlowAdaptiveHeater.hpp>
 #include <tether/control/extrusion/PressureFlowLut.hpp>
 #include <tether/control/extrusion/CrossWlfRheology.hpp>
 
@@ -846,98 +847,97 @@ TEST(AnalyticalExtrusionTest, StateSpaceLPV_SingleOperatingPoint) {
 }
 
 // ============================================================================
-// 9. AnalyticalFlowAdaptiveHeater Tests
+// 9. FlowAdaptiveHeater (analytical + sampling) Tests
 // ============================================================================
 
-TEST(AnalyticalExtrusionTest, FlowAdaptiveHeater_SteadyStateFeedforward) {
-    auto wss = makeWSS(50.0, 50.0);
-    ASSERT_NE(wss.wss, nullptr);
-    auto traj = *makeExtrusionTrajectory(wss, 0.02);
+namespace {
 
-    AnalyticalFlowAdaptiveHeaterParams params;
-    params.targetTempC = 210.0;
-    params.inletTempC = 25.0;
-    AnalyticalFlowAdaptiveHeater<2> heater(traj, params);
-
-    double totalT = traj.totalTime();
-
-    // At t=0 (no flow), feedforward should be ~0
-    double ff0 = heater.steadyStateFeedforward(0.0);
-    EXPECT_NEAR(ff0, 0.0, 1e-6);
-
-    // At mid-trajectory (flow > 0), feedforward should be positive
-    double ffMid = heater.steadyStateFeedforward(totalT * 0.5);
-    EXPECT_GT(ffMid, 0.0);
-}
-
-TEST(AnalyticalExtrusionTest, FlowAdaptiveHeater_PreEmphasis) {
-    auto wss = makeWSS(50.0, 50.0);
-    ASSERT_NE(wss.wss, nullptr);
-    auto traj = *makeExtrusionTrajectory(wss, 0.02);
-
-    AnalyticalFlowAdaptiveHeaterParams params;
-    params.targetTempC = 210.0;
-    params.inletTempC = 25.0;
-    params.preEmphasisDuration = 0.5;
-    AnalyticalFlowAdaptiveHeater<2> heater(traj, params);
-
-    if (heater.hasFlowOnset()) {
-        double onsetT = heater.flowOnsetTime();
-
-        // Before onset: no pre-emphasis
-        EXPECT_NEAR(heater.preEmphasis(onsetT - 0.1), 0.0, 1e-10);
-
-        // At onset: pre-emphasis should be positive
-        double preAtOnset = heater.preEmphasis(onsetT + 0.01);
-        EXPECT_GE(preAtOnset, 0.0);
-
-        // After pre-emphasis duration: no pre-emphasis
-        double preAfter = heater.preEmphasis(onsetT + params.preEmphasisDuration + 0.1);
-        EXPECT_NEAR(preAfter, 0.0, 1e-10);
-    }
-}
-
-TEST(AnalyticalExtrusionTest, FlowAdaptiveHeater_PostEmphasis) {
-    auto wss = makeWSS(50.0, 50.0);
-    ASSERT_NE(wss.wss, nullptr);
-    auto traj = *makeExtrusionTrajectory(wss, 0.02);
-
+template<typename HeaterT>
+void testFlowAdaptiveHeaterBasic(const ExtrusionTrajectory<2, double>& traj) {
     AnalyticalFlowAdaptiveHeaterParams params;
     params.targetTempC = 210.0;
     params.inletTempC = 25.0;
     params.debtTimeConstant = 2.0;
-    AnalyticalFlowAdaptiveHeater<2> heater(traj, params);
+    params.preEmphasisDuration = 0.5;
 
-    if (heater.hasFlowStop()) {
+    HeaterT heater(traj, params);
+
+    double totalT = traj.totalTime();
+    std::vector<double> times = linspace(0, totalT, 50);
+
+    // Temperature delta is always in [0, maxHeaterOvershoot] and finite.
+    for (double t : times) {
+        double dt = heater.temperatureDeltaAtTime(t);
+        EXPECT_TRUE(std::isfinite(dt)) << "non-finite delta at t=" << t;
+        EXPECT_GE(dt, 0.0) << "negative delta at t=" << t;
+        EXPECT_LE(dt, params.maxHeaterOvershoot)
+            << "delta exceeds maxHeaterOvershoot at t=" << t;
+    }
+
+    if (heater.hasFlowOnset() && heater.hasFlowStop()) {
+        double onsetT = heater.flowOnsetTime();
         double stopT = heater.flowStopTime();
 
-        // Before stop: no post-emphasis
-        EXPECT_NEAR(heater.postEmphasis(stopT - 0.1), 0.0, 1e-10);
+        // Outside the transient windows, the delta should be ~0.
+        EXPECT_NEAR(heater.temperatureDeltaAtTime(onsetT - 0.1), 0.0, 1e-9);
+        EXPECT_NEAR(heater.temperatureDeltaAtTime(stopT + 10.0 * params.debtTimeConstant),
+                    0.0, 1e-2);
 
-        // At stop: post-emphasis should be positive (debt is high)
-        double postAtStop = heater.postEmphasis(stopT + 0.01);
-        EXPECT_GE(postAtStop, 0.0);
+        // At onset the pre-emphasis produces a positive delta.
+        double deltaAtOnset = heater.temperatureDeltaAtTime(onsetT + 0.01);
+        EXPECT_GT(deltaAtOnset, 0.0);
 
-        // Long after stop: post-emphasis should decay toward 0
-        double postLong = heater.postEmphasis(stopT + 10.0 * params.debtTimeConstant);
-        EXPECT_NEAR(postLong, 0.0, 1e-3);
+        // At stop the post-emphasis produces a positive delta.
+        double deltaAtStop = heater.temperatureDeltaAtTime(stopT + 0.01);
+        EXPECT_GT(deltaAtStop, 0.0);
     }
 }
 
-TEST(AnalyticalExtrusionTest, FlowAdaptiveHeater_TotalFeedforward) {
+} // namespace
+
+TEST(AnalyticalExtrusionTest, FlowAdaptiveHeater_Analytical) {
+    auto wss = makeWSS(50.0, 50.0);
+    ASSERT_NE(wss.wss, nullptr);
+    auto traj = *makeExtrusionTrajectory(wss, 0.02);
+    testFlowAdaptiveHeaterBasic<AnalyticalFlowAdaptiveHeater<2>>(traj);
+}
+
+TEST(AnalyticalExtrusionTest, FlowAdaptiveHeater_Sampling) {
+    auto wss = makeWSS(50.0, 50.0);
+    ASSERT_NE(wss.wss, nullptr);
+    auto traj = *makeExtrusionTrajectory(wss, 0.02);
+    testFlowAdaptiveHeaterBasic<SamplingFlowAdaptiveHeater<2>>(traj);
+}
+
+TEST(AnalyticalExtrusionTest, FlowAdaptiveHeater_AnalyticalMatchesSampling) {
     auto wss = makeWSS(50.0, 50.0);
     ASSERT_NE(wss.wss, nullptr);
     auto traj = *makeExtrusionTrajectory(wss, 0.02);
 
     AnalyticalFlowAdaptiveHeaterParams params;
-    AnalyticalFlowAdaptiveHeater<2> heater(traj, params);
+    params.targetTempC = 210.0;
+    params.inletTempC = 25.0;
+
+    AnalyticalFlowAdaptiveHeater<2> analytical(traj, params);
+    SamplingFlowAdaptiveHeater<2> sampling(traj, params);
+
+    // Onset/stop times should agree between the two detectors.
+    EXPECT_EQ(analytical.hasFlowOnset(), sampling.hasFlowOnset());
+    EXPECT_EQ(analytical.hasFlowStop(), sampling.hasFlowStop());
+    if (analytical.hasFlowOnset() && sampling.hasFlowOnset()) {
+        EXPECT_NEAR(analytical.flowOnsetTime(), sampling.flowOnsetTime(), 0.01);
+    }
+    if (analytical.hasFlowStop() && sampling.hasFlowStop()) {
+        EXPECT_NEAR(analytical.flowStopTime(), sampling.flowStopTime(), 0.01);
+    }
 
     double totalT = traj.totalTime();
     std::vector<double> times = linspace(0, totalT, 50);
     for (double t : times) {
-        double ff = heater.feedforwardAtTime(t);
-        EXPECT_GE(ff, 0.0) << "Negative feedforward at t=" << t;
-        EXPECT_LE(ff, 1.0) << "Feedforward > 1 at t=" << t;
+        double da = analytical.temperatureDeltaAtTime(t);
+        double ds = sampling.temperatureDeltaAtTime(t);
+        EXPECT_NEAR(da, ds, 1e-9)
+            << "analytical and sampling delta differ at t=" << t;
     }
 }
 
@@ -1006,7 +1006,7 @@ TEST(AnalyticalExtrusionTest, CrossAlgorithm_AllProduceFiniteResults) {
         EXPECT_TRUE(std::isfinite(linPressureAdvance.offsetAtTime(t)));
         EXPECT_TRUE(std::isfinite(plPressureAdvance.offsetAtTime(t)));
         EXPECT_TRUE(std::isfinite(thermal.meltTempAt(t)));
-        EXPECT_TRUE(std::isfinite(heater.feedforwardAtTime(t)));
+        EXPECT_TRUE(std::isfinite(heater.temperatureDeltaAtTime(t)));
     }
 }
 
