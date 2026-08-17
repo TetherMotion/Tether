@@ -51,21 +51,90 @@ file(GLOB CIA430_SOURCES  CONFIGURE_DEPENDS "${TETHER_ROOT}/src/profiles/cia430/
 # ETG5000 modular device profile
 file(GLOB ETG5000_SOURCES CONFIGURE_DEPENDS "${TETHER_ROOT}/src/etg5000/*.cpp")
 
-set(TETHER_CIA_PROFILES_SOURCES
-    ${CIA402_PROFILE_SOURCES}
-    ${CIA301_SOURCES}
-    ${CIA401_SOURCES}
-    ${CIA404_SOURCES}
-    ${CIA405_SOURCES}
-    ${CIA406_SOURCES}
-    ${CIA408_SOURCES}
-    ${CIA410_SOURCES}
-    ${CIA417_SOURCES}
-    ${CIA430_SOURCES}
-    ${ETG5000_SOURCES}
-)
+set(TETHER_CIA_PROFILES_SOURCES "")
+if(TETHER_ENABLE_CIA402)
+    list(APPEND TETHER_CIA_PROFILES_SOURCES ${CIA402_PROFILE_SOURCES})
+endif()
+if(TETHER_ENABLE_CIA301)
+    list(APPEND TETHER_CIA_PROFILES_SOURCES ${CIA301_SOURCES})
+endif()
+if(TETHER_ENABLE_CIA401)
+    list(APPEND TETHER_CIA_PROFILES_SOURCES ${CIA401_SOURCES})
+endif()
+if(TETHER_ENABLE_CIA404)
+    list(APPEND TETHER_CIA_PROFILES_SOURCES ${CIA404_SOURCES})
+endif()
+if(TETHER_ENABLE_CIA405)
+    list(APPEND TETHER_CIA_PROFILES_SOURCES ${CIA405_SOURCES})
+endif()
+if(TETHER_ENABLE_CIA406)
+    list(APPEND TETHER_CIA_PROFILES_SOURCES ${CIA406_SOURCES})
+endif()
+if(TETHER_ENABLE_CIA408)
+    list(APPEND TETHER_CIA_PROFILES_SOURCES ${CIA408_SOURCES})
+endif()
+if(TETHER_ENABLE_CIA410)
+    list(APPEND TETHER_CIA_PROFILES_SOURCES ${CIA410_SOURCES})
+endif()
+if(TETHER_ENABLE_CIA417)
+    list(APPEND TETHER_CIA_PROFILES_SOURCES ${CIA417_SOURCES})
+endif()
+if(TETHER_ENABLE_CIA430)
+    list(APPEND TETHER_CIA_PROFILES_SOURCES ${CIA430_SOURCES})
+endif()
+if(TETHER_ENABLE_ETG5000)
+    list(APPEND TETHER_CIA_PROFILES_SOURCES ${ETG5000_SOURCES})
+endif()
 
 list(REMOVE_DUPLICATES TETHER_CIA_PROFILES_SOURCES)
+
+if(NOT TETHER_CIA_PROFILES_SOURCES)
+    message(WARNING "TETHER_BUILD_CIA_PROFILES is ON but all per-profile options are OFF; skipping tether_cia_profiles")
+    return()
+endif()
+
+# Public include directories only for enabled profiles
+set(TETHER_CIA_PROFILES_PUBLIC_INCLUDES
+    $<BUILD_INTERFACE:${TETHER_ROOT}/include>
+    $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
+)
+if(TETHER_ENABLE_CIA301)
+    list(APPEND TETHER_CIA_PROFILES_PUBLIC_INCLUDES $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia301>)
+endif()
+if(TETHER_ENABLE_CIA401)
+    list(APPEND TETHER_CIA_PROFILES_PUBLIC_INCLUDES $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia401>)
+endif()
+if(TETHER_ENABLE_CIA402)
+    list(APPEND TETHER_CIA_PROFILES_PUBLIC_INCLUDES $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia402>)
+endif()
+if(TETHER_ENABLE_CIA404)
+    list(APPEND TETHER_CIA_PROFILES_PUBLIC_INCLUDES $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia404>)
+endif()
+if(TETHER_ENABLE_CIA405)
+    list(APPEND TETHER_CIA_PROFILES_PUBLIC_INCLUDES $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia405>)
+endif()
+if(TETHER_ENABLE_CIA406)
+    list(APPEND TETHER_CIA_PROFILES_PUBLIC_INCLUDES $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia406>)
+endif()
+if(TETHER_ENABLE_CIA408)
+    list(APPEND TETHER_CIA_PROFILES_PUBLIC_INCLUDES $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia408>)
+endif()
+if(TETHER_ENABLE_CIA410)
+    list(APPEND TETHER_CIA_PROFILES_PUBLIC_INCLUDES $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia410>)
+endif()
+if(TETHER_ENABLE_CIA417)
+    list(APPEND TETHER_CIA_PROFILES_PUBLIC_INCLUDES $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia417>)
+endif()
+if(TETHER_ENABLE_CIA430)
+    list(APPEND TETHER_CIA_PROFILES_PUBLIC_INCLUDES $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia430>)
+endif()
+if(TETHER_ENABLE_ETG5000)
+    list(APPEND TETHER_CIA_PROFILES_PUBLIC_INCLUDES $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/etg5000>)
+endif()
+list(APPEND TETHER_CIA_PROFILES_PUBLIC_INCLUDES
+    $<INSTALL_INTERFACE:include>
+    $<INSTALL_INTERFACE:include/tether>
+)
 
 # Create variant targets
 set(_variants "")
@@ -81,21 +150,7 @@ endif()
 foreach(_tgt IN LISTS _variants)
     target_include_directories(${_tgt}
         PUBLIC
-            $<BUILD_INTERFACE:${TETHER_ROOT}/include>
-            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
-            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia301>
-            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia401>
-            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia402>
-            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia404>
-            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia405>
-            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia406>
-            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia408>
-            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia410>
-            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia417>
-            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/profiles/cia430>
-            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/etg5000>
-            $<INSTALL_INTERFACE:include>
-            $<INSTALL_INTERFACE:include/tether>
+            ${TETHER_CIA_PROFILES_PUBLIC_INCLUDES}
         PRIVATE
             ${TETHER_ROOT}/src
     )
