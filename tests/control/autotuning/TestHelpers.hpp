@@ -15,16 +15,16 @@
 #include "tether/control/autotuning/AutotuningFramework.hpp"
 
 // Use existing types from AutotuningFramework
-using Control::Autotuning::FOPDTModel;
-using Control::Autotuning::ProcessModel;
-using Control::Autotuning::ProcessModelType;
-using Control::Autotuning::TunableController;
-using Control::Autotuning::CostFunction;
-using Control::Autotuning::ParameterDescriptors;
-using Control::Autotuning::ParameterVector;
-using Control::Autotuning::PIDForm;
+using tether::control::Autotuning::FOPDTModel;
+using tether::control::Autotuning::ProcessModel;
+using tether::control::Autotuning::ProcessModelType;
+using tether::control::Autotuning::TunableController;
+using tether::control::Autotuning::CostFunction;
+using tether::control::Autotuning::ParameterDescriptors;
+using tether::control::Autotuning::ParameterVector;
+using tether::control::Autotuning::PIDForm;
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 namespace Testing {
 
@@ -335,7 +335,7 @@ constexpr double DT = 0.01;
 
 } // namespace Testing
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control
 
 // Create namespace alias for tests using the new naming convention
 namespace tether {
@@ -344,15 +344,15 @@ namespace autotuning {
 namespace test {
 
 // Re-export test utilities - use SimplePIDController as TestPIDController for simulation tests
-using TestPIDController = Control::Autotuning::Testing::SimplePIDController;
-using TestFOPDTProcessModel = Control::Autotuning::Testing::TestFOPDTProcessModel;
-using SimpleQuadraticCost = Control::Autotuning::Testing::SimpleQuadraticCost;
+using TestPIDController = tether::control::Autotuning::Testing::SimplePIDController;
+using TestFOPDTProcessModel = tether::control::Autotuning::Testing::TestFOPDTProcessModel;
+using SimpleQuadraticCost = tether::control::Autotuning::Testing::SimpleQuadraticCost;
 
 // Also export the original TunableController-based version
-using TunablePIDController = Control::Autotuning::Testing::TestPIDController;
+using TunablePIDController = tether::control::Autotuning::Testing::TestPIDController;
 
-constexpr double TOLERANCE = Control::Autotuning::Testing::TOLERANCE;
-constexpr double DT = Control::Autotuning::Testing::DT;
+constexpr double TOLERANCE = tether::control::Autotuning::Testing::TOLERANCE;
+constexpr double DT = tether::control::Autotuning::Testing::DT;
 
 } // namespace test
 } // namespace autotuning

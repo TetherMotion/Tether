@@ -10,7 +10,7 @@
 #include "tether/control/autotuning/classical/AMIGOMethod.hpp"
 #include "tether/control/autotuning/classical/AstromHagglundRelay.hpp"
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 std::unique_ptr<AutotunerBase> ClassicalTuningFactory::create(Method method) {
@@ -64,4 +64,4 @@ std::string ClassicalTuningFactory::getMethodName(Method method) {
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

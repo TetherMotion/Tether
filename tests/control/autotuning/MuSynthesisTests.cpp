@@ -9,8 +9,8 @@
 #include <complex>
 #include <vector>
 
-using namespace Control;
-using namespace Control::Autotuning::Testing;
+using namespace tether::control;
+using namespace tether::control::Autotuning::Testing;
 
 // ============================================================================
 // MuSynthesisController Tests

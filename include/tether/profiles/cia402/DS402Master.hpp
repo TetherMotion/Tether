@@ -5,7 +5,7 @@
 #include <utility>
 #include <vector>
 
-#include "tether/control/SineMotionController.hpp"
+#include "tether/common/ISetpointSource.hpp"
 #include "tether/ethercat/DC.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/CyclicTaskScheduler.hpp"
@@ -38,24 +38,24 @@ public:
     using ICyclicTask = EtherCAT::ICyclicTask;
 
     template<typename RxPDO>
-    class SineDriveMotionController final : public IDriveMotionController {
+    class GenericDriveMotionController final : public IDriveMotionController {
     public:
-        SineDriveMotionController(CyclicTarget target,
-                                  const Control::SineMotionController::Config& config,
-                                  double scale)
+        GenericDriveMotionController(CyclicTarget target,
+                                     std::unique_ptr<tether::common::ISetpointSource> source,
+                                     double scale)
             : target_(target)
-            , controller_(config)
+            , controller_(std::move(source))
             , scale_(scale)
         {
         }
 
         bool start(CiA402Drive& drive) override {
-            controller_.start();
+            controller_->start();
             return drive.setOperatingMode(modeForTarget());
         }
 
         void stop(CiA402Drive&) override {
-            controller_.stopImmediate();
+            controller_->stopImmediate();
         }
 
         bool update(CiA402Drive& drive, double dt_seconds) override {
@@ -64,14 +64,14 @@ public:
                 return false;
             }
 
-            controller_.update(dt_seconds);
+            controller_->update(dt_seconds);
             rx->controlword = static_cast<uint16_t>(ControlWord::ENABLE_OPERATION);
             rx->modes_of_operation = modeForTarget();
 
             switch (target_) {
                 case CyclicTarget::Position:
                     if constexpr (requires(RxPDO& pdo) { pdo.target_position; }) {
-                        rx->target_position = controller_.getPositionScaled(scale_);
+                        rx->target_position = static_cast<int32_t>(controller_->getPosition() * scale_);
                     } else {
                         return false;
                     }
@@ -81,14 +81,14 @@ public:
                     break;
                 case CyclicTarget::Velocity:
                     if constexpr (requires(RxPDO& pdo) { pdo.target_velocity; }) {
-                        rx->target_velocity = controller_.getVelocityScaled(scale_);
+                        rx->target_velocity = static_cast<int32_t>(controller_->getVelocity() * scale_);
                     } else {
                         return false;
                     }
                     break;
                 case CyclicTarget::Torque:
                     if constexpr (requires(RxPDO& pdo) { pdo.target_torque; }) {
-                        rx->target_torque = static_cast<int16_t>(controller_.getPosition() * scale_);
+                        rx->target_torque = static_cast<int16_t>(controller_->getPosition() * scale_);
                     } else {
                         return false;
                     }
@@ -113,7 +113,7 @@ public:
         }
 
         CyclicTarget target_;
-        Control::SineMotionController controller_;
+        std::unique_ptr<tether::common::ISetpointSource> controller_;
         double scale_{1.0};
     };
 
@@ -160,14 +160,14 @@ public:
 
     bool addMotionController(uint16_t slave_index, std::unique_ptr<IDriveMotionController> controller);
     template<typename RxPDO>
-    bool addSineMotionController(uint16_t slave_index,
-                                 CyclicTarget target,
-                                 const Control::SineMotionController::Config& config,
-                                 double scale = 1.0)
+    bool addMotionController(uint16_t slave_index,
+                             CyclicTarget target,
+                             std::unique_ptr<tether::common::ISetpointSource> source,
+                             double scale = 1.0)
     {
         return addMotionController(
             slave_index,
-            std::make_unique<SineDriveMotionController<RxPDO>>(target, config, scale));
+            std::make_unique<GenericDriveMotionController<RxPDO>>(target, std::move(source), scale));
     }
     bool removeMotionController(uint16_t slave_index);
     void clearMotionControllers();

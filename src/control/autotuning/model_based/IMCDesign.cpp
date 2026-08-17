@@ -1,7 +1,7 @@
 #include "tether/control/autotuning/model_based/IMCDesign.hpp"
 #include <cmath>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 bool IMCDesign::isCompatible(const TunableController& controller) const {
@@ -104,4 +104,4 @@ PIDGains IMCDesign::designForIPDT(const IPDTModel& model, double lambda) {
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

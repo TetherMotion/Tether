@@ -15,7 +15,7 @@
 #include <Eigen/Dense>
 #include <functional>
 
-namespace Control {
+namespace tether::control {
 
 /**
  * @brief Discrete-time linear Kalman filter
@@ -153,4 +153,4 @@ private:
     bool gain_computed_{false};
 };
 
-} // namespace Control
+} // namespace tether::control

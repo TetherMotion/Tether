@@ -1,7 +1,7 @@
 #include "tether/control/autotuning/classical/LopezMethod.hpp"
 #include <cmath>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 std::string LopezMethod::getName() const { return "Lopez (ITAE/IAE/ISE)"; }
@@ -48,4 +48,4 @@ PIDGains LopezMethod::calculateGains(const FOPDTModel& model, PIDForm form, Crit
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

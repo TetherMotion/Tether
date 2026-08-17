@@ -13,6 +13,9 @@
 
 #pragma once
 
+#include "tether/common/IMotionController.hpp"
+#include "tether/common/IAxis.hpp"
+
 #include "CiA402Config.hpp"
 #include "CiA402StateMachine.hpp"
 #include "DriveBackend.hpp"
@@ -34,56 +37,6 @@
 namespace CiA402 {
 
 // ============================================================================
-// Motion Command Types
-// ============================================================================
-
-/**
- * @brief Point-to-point motion command
- */
-struct MotionCommand {
-    int32_t targetPosition{0};
-    uint32_t velocity{0};           // 0 = use profile default
-    uint32_t acceleration{0};       // 0 = use profile default
-    uint32_t deceleration{0};       // 0 = use profile default
-    uint32_t jerk{0};               // 0 = use default (for S-curve)
-    bool relative{false};           // Relative move
-    bool immediate{false};          // Start immediately (don't wait for previous)
-    bool buffered{false};           // Add to motion buffer
-    ProfileType profileType{ProfileType::Trapezoidal};
-};
-
-/**
- * @brief Velocity command
- */
-struct VelocityCommand {
-    int32_t targetVelocity{0};
-    uint32_t acceleration{0};       // 0 = use profile default
-    uint32_t deceleration{0};       // 0 = use profile default
-    int32_t maxDuration{-1};        // -1 = indefinite
-};
-
-/**
- * @brief Torque command  
- */
-struct TorqueCommand {
-    int16_t targetTorque{0};
-    int16_t torqueSlope{0};         // Torque ramp rate
-    int32_t maxDuration{-1};        // -1 = indefinite
-};
-
-/**
- * @brief Homing command
- */
-struct HomingCommand {
-    HomingMethod method{HomingMethod::CurrentPosition};
-    uint32_t speedSwitch{1000};
-    uint32_t speedZero{100};
-    uint32_t acceleration{1000};
-    int32_t offset{0};
-    int64_t timeoutMs{30000};
-};
-
-// ============================================================================
 // Axis Controller
 // ============================================================================
 
@@ -92,7 +45,7 @@ struct HomingCommand {
  * 
  * Manages state machine, motion generation, and communication for one drive.
  */
-class CiA402Axis {
+class CiA402Axis : public tether::common::IAxis {
 public:
     using AxisId = uint32_t;
     using MotionCompleteCallback = std::function<void(bool success)>;
@@ -160,12 +113,12 @@ public:
     /**
      * @brief Enable drive (transition to OperationEnabled)
      */
-    bool enable(uint32_t timeoutMs = 5000);
+    bool enable(uint32_t timeoutMs = 5000) override;
     
     /**
      * @brief Disable drive (transition to SwitchOnDisabled)
      */
-    bool disable(uint32_t timeoutMs = 5000);
+    bool disable(uint32_t timeoutMs = 5000) override;
     
     /**
      * @brief Quick stop
@@ -175,7 +128,7 @@ public:
     /**
      * @brief Clear fault and reset
      */
-    bool clearFault();
+    bool clearFault() override;
     
     // ========================================================================
     // Operating Mode
@@ -219,7 +172,7 @@ public:
      * @brief Wait for motion complete
      * @param timeoutMs Timeout in milliseconds
      */
-    bool waitMotionComplete(uint32_t timeoutMs = 60000);
+    bool waitMotionComplete(uint32_t timeoutMs = 60000) override;
     
     // ========================================================================
     // Velocity Mode Commands
@@ -285,7 +238,7 @@ public:
     /**
      * @brief Wait for homing complete
      */
-    bool waitHomingComplete(uint32_t timeoutMs = 30000);
+    bool waitHomingComplete(uint32_t timeoutMs = 30000) override;
     
     /**
      * @brief Check if homing is complete
@@ -295,7 +248,25 @@ public:
     /**
      * @brief Check if axis is homed
      */
-    bool isHomed() const;
+    bool isHomed() const override;
+    
+    // ========================================================================
+    // IAxis interface (remaining methods)
+    // ========================================================================
+    
+    bool stop() override { return halt(); }
+    bool hasFault() const override;
+    bool isEnabled() const override;
+    
+    int32_t getActualPosition() const override { return m_backend->getActualPosition(); }
+    int32_t getActualVelocity() const override { return m_backend->getActualVelocity(); }
+    int16_t getActualTorque() const override { return m_backend->getActualTorque(); }
+    
+    bool setTargetPosition(int32_t target, const MotionCommand& mode) override;
+    bool setTargetVelocity(int32_t target, const VelocityCommand& mode) override;
+    bool setTargetTorque(int16_t target, const TorqueCommand& mode) override;
+    bool home(const HomingCommand& cmd) override;
+    void update(double dtSeconds) override { update(static_cast<float>(dtSeconds)); }
     
     // ========================================================================
     // Motion Profile Configuration
@@ -304,12 +275,12 @@ public:
     /**
      * @brief Set motion limits
      */
-    void setMotionLimits(const MotionLimits& limits);
+    void setMotionLimits(const MotionLimits& limits) override;
     
     /**
      * @brief Get motion limits
      */
-    MotionLimits getMotionLimits() const;
+    MotionLimits getMotionLimits() const override;
     
     /**
      * @brief Set profile velocity
@@ -454,264 +425,5 @@ private:
 };
 
 using CiA402AxisPtr = std::shared_ptr<CiA402Axis>;
-
-// ============================================================================
-// Multi-Axis Motion Controller
-// ============================================================================
-
-/**
- * @brief Multi-axis coordinated motion controller
- */
-class MotionController {
-public:
-    using AxisMap = std::map<CiA402Axis::AxisId, CiA402AxisPtr>;
-    
-    /**
-     * @brief Global motion parameters
-     */
-    struct GlobalParams {
-        float speedFactor{1.0f};        // Global speed override (0.0 to 2.0)
-        bool allowNegativeSpeed{false}; // Allow negative speed factor (reverse)
-        float minSpeedFactor{0.0f};
-        float maxSpeedFactor{2.0f};
-    };
-    
-    MotionController();
-    ~MotionController();
-    
-    // ========================================================================
-    // Axis Management
-    // ========================================================================
-    
-    /**
-     * @brief Add axis to controller
-     */
-    CiA402AxisPtr addAxis(CiA402Axis::AxisId id, DriveBackendUPtr backend);
-    
-    /**
-     * @brief Get axis by ID
-     */
-    CiA402AxisPtr getAxis(CiA402Axis::AxisId id);
-    
-    /**
-     * @brief Get all axes
-     */
-    const AxisMap& getAxes() const { return m_axes; }
-    
-    /**
-     * @brief Remove axis
-     */
-    bool removeAxis(CiA402Axis::AxisId id);
-    
-    /**
-     * @brief Get number of axes
-     */
-    size_t getAxisCount() const { return m_axes.size(); }
-    
-    // ========================================================================
-    // Group Operations
-    // ========================================================================
-    
-    /**
-     * @brief Enable all axes
-     */
-    bool enableAll(uint32_t timeoutMs = 5000);
-    
-    /**
-     * @brief Disable all axes
-     */
-    bool disableAll(uint32_t timeoutMs = 5000);
-    
-    /**
-     * @brief Quick stop all axes
-     */
-    void quickStopAll();
-    
-    /**
-     * @brief Clear faults on all axes
-     */
-    void clearAllFaults();
-    
-    /**
-     * @brief Check if all axes are enabled
-     */
-    bool allEnabled() const;
-    
-    /**
-     * @brief Check if any axis has fault
-     */
-    bool anyFault() const;
-    
-    // ========================================================================
-    // Multi-Axis Coordinated Motion
-    // ========================================================================
-    
-    /**
-     * @brief Set axes for coordinated motion
-     * @param axisIds Ordered list of axis IDs for path interpolation
-     */
-    void setCoordinatedAxes(const std::vector<CiA402Axis::AxisId>& axisIds);
-    
-    /**
-     * @brief Execute multi-axis linear move
-     */
-    bool moveLinear(const std::vector<double>& targetPositions, double velocity);
-    
-    /**
-     * @brief Execute circular arc (2D)
-     */
-    bool moveCircular(double centerX, double centerY, double endX, double endY,
-                     bool clockwise, double velocity);
-    
-    /**
-     * @brief Execute helical move (circular + linear Z)
-     */
-    bool moveHelical(double centerX, double centerY, double endX, double endY,
-                    double pitch, bool clockwise, double velocity);
-    
-    /**
-     * @brief Execute path (multi-segment)
-     */
-    bool executePath(MultiSegmentPath& path, double velocity);
-    
-    /**
-     * @brief Add path segment to buffer
-     */
-    bool addPathSegment(std::unique_ptr<PathSegment> segment);
-    
-    /**
-     * @brief Start buffered path execution
-     */
-    bool startPath(double velocity);
-    
-    /**
-     * @brief Stop path execution
-     */
-    void stopPath();
-    
-    /**
-     * @brief Check if path is executing
-     */
-    bool isPathExecuting() const { return m_pathExecuting; }
-    
-    // ========================================================================
-    // Global Parameters
-    // ========================================================================
-    
-    /**
-     * @brief Set global speed factor
-     * @param factor Speed multiplier (1.0 = normal)
-     */
-    void setSpeedFactor(float factor);
-    
-    /**
-     * @brief Get global speed factor
-     */
-    float getSpeedFactor() const { return m_globalParams.speedFactor; }
-    
-    /**
-     * @brief Set global parameters
-     */
-    void setGlobalParams(const GlobalParams& params);
-    
-    /**
-     * @brief Get global parameters
-     */
-    const GlobalParams& getGlobalParams() const { return m_globalParams; }
-    
-    // ========================================================================
-    // Electronic Gearing
-    // ========================================================================
-    
-    /**
-     * @brief Configure electronic gearing
-     */
-    bool configureGearing(CiA402Axis::AxisId slaveId, CiA402Axis::AxisId masterId,
-                         int32_t numerator, int32_t denominator);
-    
-    /**
-     * @brief Enable gearing for axis
-     */
-    bool enableGearing(CiA402Axis::AxisId slaveId, bool enable);
-    
-    // ========================================================================
-    // Homing
-    // ========================================================================
-    
-    /**
-     * @brief Home single axis
-     */
-    bool homeAxis(CiA402Axis::AxisId id, const HomingCommand& cmd);
-    
-    /**
-     * @brief Home multiple axes sequentially
-     */
-    bool homeAxesSequential(const std::vector<CiA402Axis::AxisId>& ids,
-                           const HomingCommand& cmd);
-    
-    /**
-     * @brief Home multiple axes simultaneously
-     */
-    bool homeAxesSimultaneous(const std::vector<CiA402Axis::AxisId>& ids,
-                             const HomingCommand& cmd);
-    
-    /**
-     * @brief Check if all axes are homed
-     */
-    bool allHomed() const;
-    
-    // ========================================================================
-    // Cycle Update
-    // ========================================================================
-    
-    /**
-     * @brief Update all axes - call once per control cycle
-     * @param dtSeconds Time since last update
-     */
-    void update(float dtSeconds);
-    
-    /**
-     * @brief Set cycle time
-     */
-    void setCycleTimeUs(uint32_t cycleTimeUs) { m_cycleTimeUs = cycleTimeUs; }
-    
-    /**
-     * @brief Get cycle time
-     */
-    uint32_t getCycleTimeUs() const { return m_cycleTimeUs; }
-    
-private:
-    void updatePathExecution(float dt);
-    void applyPathPoint(const PathPoint& point);
-    
-    AxisMap m_axes;
-    GlobalParams m_globalParams;
-    
-    // Coordinated motion
-    std::vector<CiA402Axis::AxisId> m_coordinatedAxes;
-    std::unique_ptr<MultiSegmentPath> m_activePath;
-    std::unique_ptr<PathSampler> m_pathSampler;
-    double m_pathTime{0.0};
-    bool m_pathExecuting{false};
-    
-    uint32_t m_cycleTimeUs{1000}; // 1ms default
-    
-    mutable std::mutex m_mutex;
-};
-
-// ============================================================================
-// Utility Functions
-// ============================================================================
-
-/**
- * @brief Create motion profile based on type
- */
-std::unique_ptr<MotionProfile> createProfile(ProfileType type,
-                                             const MotionLimits& limits);
-
-/**
- * @brief Convert error code to string
- */
-const char* errorToString(uint16_t errorCode);
 
 } // namespace CiA402

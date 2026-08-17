@@ -6,14 +6,14 @@
 
 #include "tether/control/autotuning/ClassicalTuningMethods.hpp"
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 // Compatibility stub: concrete implementations live in
 // src/control/autotuning/classical/*. No definitions here.
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control
 
 
 #if 0
@@ -747,4 +747,4 @@ std::string ClassicalTuningFactory::getMethodName(Method method) {
 } // namespace Autotuning
 
 #endif
-} // namespace Control
+} // namespace tether::control

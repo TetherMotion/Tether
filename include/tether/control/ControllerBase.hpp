@@ -105,7 +105,7 @@
 #include <algorithm>
 #include <limits>
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // Forward Declarations
@@ -783,4 +783,4 @@ inline double deadband(double value, double threshold) {
     return value - sign(value) * threshold;
 }
 
-} // namespace Control
+} // namespace tether::control

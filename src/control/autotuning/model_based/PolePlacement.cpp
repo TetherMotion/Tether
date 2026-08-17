@@ -2,7 +2,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 bool PolePlacement::isCompatible(const TunableController& controller) const {
@@ -171,4 +171,4 @@ void PolePlacement::setSystemMatrices(const double* A, const double* B, int n, i
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

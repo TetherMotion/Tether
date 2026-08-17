@@ -23,7 +23,7 @@
 #include <memory>
 #include <algorithm>
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // Base Classes
@@ -509,5 +509,5 @@ private:
 
 
 
-} // namespace Control
+} // namespace tether::control
 

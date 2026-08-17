@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // Helper: Gamma function approximation for binomial coefficients
@@ -462,4 +462,4 @@ void OustaloupFilter::reset() {
     std::fill(m_state.begin(), m_state.end(), 0.0);
 }
 
-} // namespace Control
+} // namespace tether::control

@@ -4,8 +4,8 @@
 #include "TestHelpers.hpp"
 #include "tether/control/autotuning/IndustrialAutotuners.hpp"
 
-using namespace Control::Autotuning;
-using namespace Control::Autotuning::Testing;
+using namespace tether::control::Autotuning;
+using namespace tether::control::Autotuning::Testing;
 
 // ============================================================================
 // Test Fixture Classes

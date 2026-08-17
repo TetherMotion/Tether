@@ -819,4 +819,4 @@ void MinimumVarianceControl::setARMAXModel(const std::vector<double>& A,
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

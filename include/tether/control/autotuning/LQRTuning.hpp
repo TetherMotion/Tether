@@ -36,7 +36,7 @@
 #include "OptimizationAlgorithms.hpp"
 #include <functional>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 // ============================================================================
@@ -591,4 +591,4 @@ namespace DataDrivenUtils {
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

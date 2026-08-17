@@ -12,7 +12,7 @@
 #include "tether/control/Controllers.hpp"
 #include "tether/control/LearningControllers.hpp"
 
-using namespace Control;
+using namespace tether::control;
 
 // ============================================================================
 // ILCBase Tests (using PTypeILC as concrete implementation)

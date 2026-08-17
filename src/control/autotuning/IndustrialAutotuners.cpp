@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <numeric>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 // ============================================================================
@@ -1355,4 +1355,4 @@ TuningResult AutoSelectTuner::getIntermediateResult() const {
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

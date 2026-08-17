@@ -1,6 +1,6 @@
 #include "tether/control/autotuning/classical/ZieglerNicholsUltimateCycle.hpp"
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 std::string ZieglerNicholsUltimateCycle::getName() const { return "Ziegler-Nichols Ultimate Cycle"; }
@@ -49,4 +49,4 @@ void ZieglerNicholsUltimateCycle::setUltimateParameters(double Ku, double Tu) {
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

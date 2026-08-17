@@ -1,7 +1,7 @@
 #include "tether/control/autotuning/model_based/MinimumVarianceControl.hpp"
 #include <cmath>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 bool MinimumVarianceControl::isCompatible(const TunableController& controller) const {
@@ -73,4 +73,4 @@ void MinimumVarianceControl::setARMAXModel(const std::vector<double>& A,
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "tether/control/StepMotionController.hpp"
-using namespace Control;
+using namespace tether::control;
 
 // Basic sequence test: two steps with hold periods.  Verify final
 // position and that each hold interval occurred.

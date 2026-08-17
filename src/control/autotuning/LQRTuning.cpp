@@ -10,7 +10,7 @@
 
 #include <Eigen/Dense>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 // Helper wrapper class to convert lambda functions to CostFunction interface
@@ -1023,4 +1023,4 @@ std::vector<double> crossCorrelation(const std::vector<double>& x,
 } // namespace DataDrivenUtils
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

@@ -7,8 +7,8 @@
 #include "TestHelpers.hpp"
 #include "../include/tether/control/autotuning/LQRTuning.hpp"
 
-using namespace Control::Autotuning;
-using namespace Control::Autotuning::Testing;
+using namespace tether::control::Autotuning;
+using namespace tether::control::Autotuning::Testing;
 
 // ============================================================================
 // QROptimizer Tests

@@ -23,17 +23,17 @@ static constexpr double TWO_PI = 2.0 * PI;
 // ============================================================================
 
 MotorModel::MotorModel()
-    : positionPID_(std::make_unique<Control::PIDController>())
-    , velocityPID_(std::make_unique<Control::PIDController>())
-    , velocityOnlyPID_(std::make_unique<Control::PIDController>())
+    : positionPID_(std::make_unique<tether::control::PIDController>())
+    , velocityPID_(std::make_unique<tether::control::PIDController>())
+    , velocityOnlyPID_(std::make_unique<tether::control::PIDController>())
 {
 }
 
 MotorModel::MotorModel(const MotorParams& params)
     : motorParams_(params)
-    , positionPID_(std::make_unique<Control::PIDController>())
-    , velocityPID_(std::make_unique<Control::PIDController>())
-    , velocityOnlyPID_(std::make_unique<Control::PIDController>())
+    , positionPID_(std::make_unique<tether::control::PIDController>())
+    , velocityPID_(std::make_unique<tether::control::PIDController>())
+    , velocityOnlyPID_(std::make_unique<tether::control::PIDController>())
 {
 }
 
@@ -244,12 +244,12 @@ double MotorModel::runControlLoop(double dt) {
         case ControlMode::Position: {
             // Dual-loop position control
             // Outer loop: position -> velocity command
-            Control::ControllerInput posInput;
+            tether::control::ControllerInput posInput;
             posInput.reference = countsToRadians(targetPosition_);
             posInput.measured = state_.position;
             posInput.dt = dt;
             
-            Control::ControllerOutput posOutput = positionPID_->compute(posInput);
+            tether::control::ControllerOutput posOutput = positionPID_->compute(posInput);
             
             // Limit velocity command
             double velCmd = std::clamp(posOutput.control, 
@@ -260,12 +260,12 @@ double MotorModel::runControlLoop(double dt) {
             // (would need trajectory generator for proper feed-forward)
             
             // Inner loop: velocity -> torque command
-            Control::ControllerInput velInput;
+            tether::control::ControllerInput velInput;
             velInput.reference = velCmd;
             velInput.measured = state_.velocity;
             velInput.dt = dt;
             
-            Control::ControllerOutput velOutput = velocityPID_->compute(velInput);
+            tether::control::ControllerOutput velOutput = velocityPID_->compute(velInput);
             
             // Limit torque command
             torqueCmd = std::clamp(velOutput.control,
@@ -276,13 +276,13 @@ double MotorModel::runControlLoop(double dt) {
         
         case ControlMode::Velocity: {
             // Single-loop velocity control
-            Control::ControllerInput velInput;
+            tether::control::ControllerInput velInput;
             velInput.reference = countsToRadians(targetVelocity_) * 
                                  TWO_PI / motorParams_.encoderResolution;
             velInput.measured = state_.velocity;
             velInput.dt = dt;
             
-            Control::ControllerOutput velOutput = velocityOnlyPID_->compute(velInput);
+            tether::control::ControllerOutput velOutput = velocityOnlyPID_->compute(velInput);
             
             // Add torque feed-forward
             torqueCmd = velOutput.control + velCtrlParams_.torqueFeedforward;

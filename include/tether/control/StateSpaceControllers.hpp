@@ -209,7 +209,7 @@
 #include <array>
 #include <functional>
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // LQR Controller
@@ -625,4 +625,4 @@ void matrixExponential(const double* A, double t, double* expAt, int n);
 
 } // namespace StateSpace
 
-} // namespace Control
+} // namespace tether::control

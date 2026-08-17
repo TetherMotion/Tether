@@ -14,7 +14,7 @@
 #include <complex>
 #include <vector>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 /**
@@ -70,4 +70,4 @@ private:
 };
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

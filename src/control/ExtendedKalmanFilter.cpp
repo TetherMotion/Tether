@@ -7,7 +7,7 @@
 #include <cmath>
 #include <limits>
 
-namespace Control {
+namespace tether::control {
 
 namespace {
 
@@ -177,4 +177,4 @@ void ExtendedKalmanFilter::reset() {
     P_ = W_;
 }
 
-} // namespace Control
+} // namespace tether::control
