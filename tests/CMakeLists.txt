@@ -873,6 +873,7 @@ function(create_ethercat_test NAME)
         ${CMAKE_CURRENT_SOURCE_DIR}/../include
         ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
         ${CMAKE_CURRENT_SOURCE_DIR}/../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/ethercat
     )
     target_link_libraries(tether_ethercat_${NAME}_tests
         tether_ethercat_common
@@ -1060,6 +1061,33 @@ target_compile_definitions(tether_ethercat_master_tests PRIVATE
 )
 
 gtest_discover_tests(tether_ethercat_master_tests PROPERTIES TIMEOUT 30)
+
+# EtherCAT slave supervisor tests (needs full Master linkage for ALResetController,
+# SlaveStatusPoller, and Slave access)
+add_executable(tether_ethercat_supervisor_tests
+    ethercat/test_slave_supervisor.cpp
+)
+
+target_include_directories(tether_ethercat_supervisor_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ethercat
+)
+
+target_link_libraries(tether_ethercat_supervisor_tests
+    tether_ethercat_common
+    tether_ethercat_master
+    GTest::gtest_main
+    GTest::gmock
+)
+
+target_compile_definitions(tether_ethercat_supervisor_tests PRIVATE
+    TETHER_COMPILE_MASTER=1
+)
+
+gtest_discover_tests(tether_ethercat_supervisor_tests PROPERTIES TIMEOUT 30)
 
 add_executable(tether_model_identification_tests
     identification/test_ModelIdentification.cpp
