@@ -232,7 +232,11 @@ bool CoEManager::init() {
 }
 
 void CoEManager::deinit() {
-    initialized_.store(false);
+    // Guard against multiple deinit() calls (from Master::stop(), ~Master(),
+    // and ~CoEManager()).  Only the first call performs the full shutdown.
+    if (!initialized_.exchange(false)) {
+        return;
+    }
 
     // Hold queue_mutex while setting shutdown_requested and notifying the
     // worker.  This closes the lost-wakeup window: without the lock, the
