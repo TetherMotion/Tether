@@ -668,6 +668,15 @@ bool CiA402Drive::waitForDriveState(DriveState target, uint32_t timeout_ms) {
 }
 
 bool CiA402Drive::writeControlword(uint16_t controlword) {
+    m_controlword = controlword;
+    // Fast path: when the drive is in OP with RxPDOs registered, write the
+    // controlword directly into the PDO buffer instead of issuing a slow SDO
+    // transaction.  The cyclic PDO exchange picks up the buffer contents.
+    if (m_pdo_registered && getECState() == ECState::Op &&
+        m_rxpdo_size >= sizeof(controlword)) {
+        std::memcpy(m_rxpdo_buffer, &controlword, sizeof(controlword));
+        return true;
+    }
     auto result = m_master->sdoManager(m_slave_index).writeU16(
         static_cast<uint16_t>(CiA402::Register::Controlword), 0, controlword,
         {.timeout_ms = m_sdo_timeout_ms});
@@ -676,15 +685,29 @@ bool CiA402Drive::writeControlword(uint16_t controlword) {
 
 // Public wrapper to allow immediate SDO write from other modules
 bool CiA402Drive::sendControlwordSDO(uint16_t controlword) {
-    return writeControlword(controlword);
+    m_controlword = controlword;
+    auto result = m_master->sdoManager(m_slave_index).writeU16(
+        static_cast<uint16_t>(CiA402::Register::Controlword), 0, controlword,
+        {.timeout_ms = m_sdo_timeout_ms});
+    return result.has_value();
 }
 
 bool CiA402Drive::readStatusword(uint16_t& statusword) {
+    // Fast path: when the drive is in OP with TxPDOs registered, read the
+    // statusword directly from the PDO buffer (populated by the cyclic PDO
+    // exchange) instead of issuing a slow SDO transaction.
+    if (m_pdo_registered && getECState() == ECState::Op &&
+        m_txpdo_size >= sizeof(statusword)) {
+        std::memcpy(&statusword, m_txpdo_buffer, sizeof(statusword));
+        m_statusword = statusword;
+        return true;
+    }
     auto result = m_master->sdoManager(m_slave_index).readU16(
         static_cast<uint16_t>(CiA402::Register::Statusword), 0,
         {.timeout_ms = m_sdo_timeout_ms});
     if (!result.has_value()) return false;
     statusword = result.value();
+    m_statusword = statusword;
     return true;
 }
 
