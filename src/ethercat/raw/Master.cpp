@@ -16,6 +16,7 @@
 #include "tether/ethercat/EoE.hpp"
 #include "tether/ethercat/FaultDetection.hpp"
 #include "tether/ethercat/SlaveStatusPoller.hpp"
+#include "tether/ethercat/SlaveSupervisor.hpp"
 #include "tether/ethercat/RealtimeLoop.hpp"
 #include "tether/ethercat/SyncManagerValidation.hpp"
 #include "tether/ethercat/CoeSDOChannel.hpp"
@@ -430,6 +431,7 @@ Master::Master(const Config& config)
     fault_transport_ = std::make_unique<MasterFaultTransport>(*this);
     faults_ = std::make_unique<FaultDetector>(*fault_transport_);
     status_poller_ = std::make_unique<SlaveStatusPoller>(*fault_transport_);
+    slave_supervisor_ = std::make_unique<SlaveSupervisor>(*this);
 }
 
 Master::~Master()
@@ -479,6 +481,9 @@ void Master::stop()
     requestCancel();
     packet_router_.cancel();
     stopMotionControlLoop();
+    if (slave_supervisor_) {
+        slave_supervisor_->stop();
+    }
     if (status_poller_) {
         status_poller_->shutdown();
     }
@@ -719,6 +724,8 @@ EoEManager&    Master::eoe()    { return *eoe_; }
 FaultDetector& Master::faults() { return *faults_; }
 
 SlaveStatusPoller& Master::statusPoller() { return *status_poller_; }
+
+SlaveSupervisor& Master::slaveSupervisor() { return *slave_supervisor_; }
 
 ConditionalPacketRouter& Master::packetRouter() { return packet_router_; }
 

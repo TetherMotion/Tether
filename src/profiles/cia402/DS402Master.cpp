@@ -246,7 +246,17 @@ void DS402Master::clearCyclicTasks()
 
 bool DS402Master::updateMotionControllers(double dt_seconds)
 {
+    // Check if any slave is suspended by the supervisor.
+    // Suspended slaves must not have their PDO data passed to motion
+    // controllers — the slave is being re-initialized and its PDO buffers
+    // are not valid.
+    auto& supervisor = ethercat_master_.slaveSupervisor();
+
     for (auto& entry : motion_controllers_) {
+        // Skip slaves that are suspended (in recovery)
+        if (supervisor.isSlaveSuspended(entry.first)) {
+            continue;
+        }
         auto* drive = driveBySlaveIndex(entry.first);
         if (drive == nullptr || !entry.second || !entry.second->update(*drive, dt_seconds)) {
             return false;
@@ -400,6 +410,89 @@ void DS402Master::ensureSlaveRoleCapacity(uint16_t slave_index)
     if (slave_roles_.size() <= slave_index) {
         slave_roles_.resize(static_cast<size_t>(slave_index) + 1, SlaveRole::NonDS402);
     }
+}
+
+// ============================================================================
+// Slave Recovery / Supervision
+// ============================================================================
+
+SlaveSupervisor& DS402Master::slaveSupervisor()
+{
+    return ethercat_master_.slaveSupervisor();
+}
+
+DS402Master::DS402RecoveryHandler::DS402RecoveryHandler(
+    DS402Master& master,
+    const std::vector<DriveConfiguration>& configs)
+    : master_(master)
+    , configs_(configs)
+{
+}
+
+bool DS402Master::DS402RecoveryHandler::reinitializeSlave(uint16_t slave_index)
+{
+    // Find the configuration for this slave
+    const DriveConfiguration* cfg = nullptr;
+    for (const auto& c : configs_) {
+        if (c.slave_index == slave_index) {
+            cfg = &c;
+            break;
+        }
+    }
+    if (cfg == nullptr) {
+        TETHER_LOGE("DS402Recovery", "Slave %u: No configuration stored for recovery",
+                    slave_index);
+        return false;
+    }
+
+    // Reset the drive's PDO registration state and remove stale PDO
+    // mapping entries.  After a forced INIT, the old PDO entries in the
+    // PDOManager are invalid and must be removed before re-registering.
+    auto* drive = master_.driveBySlaveIndex(slave_index);
+    if (drive != nullptr) {
+        drive->resetPDORegistration();
+    }
+    master_.ethercatMaster().pdo().mapping().remove_entries_for_slave(slave_index);
+
+    // Re-configure the drive (this re-does mailbox, PDO, SM, and OP transition)
+    DriveConfiguration reinit_cfg = *cfg;
+    reinit_cfg.transition_to_operational = true;
+    if (!master_.configureDrive(reinit_cfg)) {
+        TETHER_LOGE("DS402Recovery", "Slave %u: configureDrive() failed during recovery",
+                    slave_index);
+        return false;
+    }
+
+    // Re-enable the drive (CiA 402 fault reset + enable)
+    if (!master_.enableDrive(slave_index)) {
+        TETHER_LOGE("DS402Recovery", "Slave %u: enableDrive() failed during recovery",
+                    slave_index);
+        return false;
+    }
+
+    TETHER_LOGI("DS402Recovery", "Slave %u: Re-initialized and enabled successfully",
+                slave_index);
+    return true;
+}
+
+bool DS402Master::enableSlaveRecovery(const RecoveryConfig& config,
+                                       const std::vector<DriveConfiguration>& configs)
+{
+    auto& sup = slaveSupervisor();
+
+    RecoveryConfig cfg = config;
+    cfg.enabled = true;
+    sup.configure(cfg);
+    sup.setRecoveryHandler(
+        std::make_unique<DS402RecoveryHandler>(*this, configs));
+
+    return sup.start();
+}
+
+void DS402Master::disableSlaveRecovery()
+{
+    auto& sup = slaveSupervisor();
+    sup.stop();
 }
 
 } // namespace EtherCAT
