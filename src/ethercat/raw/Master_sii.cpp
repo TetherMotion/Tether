@@ -80,7 +80,7 @@ bool Master::autoConfigureMailbox(SlaveAddress slave_address, Tether::Platform::
         TETHER_LOGD(local_tag, "[1/3] Reading mailbox configuration from SII EEPROM...");
     }
     
-    bool sii_ok = configureMailboxFromSii(adp, &wr_addr, &wr_len, &rd_addr, &rd_len, &proto);
+    bool sii_ok = configureMailboxFromSii(slave_index, &wr_addr, &wr_len, &rd_addr, &rd_len, &proto);
     
     if (!sii_ok) {
         TETHER_LOGE(local_tag, "Failed to read SII mailbox configuration for slave %u", 
