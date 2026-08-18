@@ -13,6 +13,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
 #include <bit>
 
 namespace EtherCAT {
@@ -159,14 +160,28 @@ bool FMMUManager::configureFromSii(const SII::SIIData* sii,
 bool FMMUManager::configureManual(uint16_t output_phys, uint16_t output_len,
                                    uint16_t input_phys, uint16_t input_len,
                                    uint32_t base_logical_addr) {
-    config_.clear();
-    config_.next_logical_addr = base_logical_addr;
+    // Delegate to the separate-logical-address overload, placing the input
+    // FMMU contiguously after the output FMMU (the classic single-base layout).
+    const uint32_t input_logical_addr = base_logical_addr + output_len;
+    return configureManual(output_phys, output_len, base_logical_addr,
+                           input_phys, input_len, input_logical_addr);
+}
 
-    TETHER_LOGI(TAG, "Manual FMMU config: out_phy=0x%04X out_len=%u, in_phy=0x%04X in_len=%u, base=0x%08lX",
-             output_phys, output_len, input_phys, input_len, (unsigned long)base_logical_addr);
+bool FMMUManager::configureManual(uint16_t output_phys, uint16_t output_len,
+                                   uint32_t output_logical_addr,
+                                   uint16_t input_phys, uint16_t input_len,
+                                   uint32_t input_logical_addr) {
+    config_.clear();
+
+    TETHER_LOGI(TAG,
+             "Manual FMMU config: out_phy=0x%04X out_len=%u out_log=0x%08lX, "
+             "in_phy=0x%04X in_len=%u in_log=0x%08lX",
+             output_phys, output_len, (unsigned long)output_logical_addr,
+             input_phys, input_len, (unsigned long)input_logical_addr);
 
     if (output_len > 0) {
-        config_.addOutput(output_phys, output_len, 2);
+        config_.next_logical_addr = output_logical_addr;
+        if (!config_.addOutput(output_phys, output_len, 2)) return false;
         TETHER_LOGI(TAG, "  FMMU0 Output: log=0x%08lX phy=0x%04X len=%u",
                  (unsigned long)config_.fmmus[0].logical_start_addr,
                  config_.fmmus[0].physical_start_addr,
@@ -174,13 +189,24 @@ bool FMMUManager::configureManual(uint16_t output_phys, uint16_t output_len,
     }
 
     if (input_len > 0) {
-        config_.addInput(input_phys, input_len, 3);
-        TETHER_LOGI(TAG, "  FMMU1 Input: log=0x%08lX phy=0x%04X len=%u",
+        config_.next_logical_addr = input_logical_addr;
+        if (!config_.addInput(input_phys, input_len, 3)) return false;
+        TETHER_LOGI(TAG, "  FMMU%zu Input: log=0x%08lX phy=0x%04X len=%u",
+                 config_.fmmu_count - 1,
                  (unsigned long)config_.fmmus[config_.fmmu_count - 1].logical_start_addr,
                  config_.fmmus[config_.fmmu_count - 1].physical_start_addr,
                  config_.fmmus[config_.fmmu_count - 1].length);
     }
 
+    // next_logical_addr must cover both regions; on a contiguous bus this
+    // equals base + output_len + input_len (matching the legacy overload),
+    // but on a PBLR bus the regions may be non-contiguous so take the max end.
+    const uint32_t output_end =
+        output_len > 0 ? output_logical_addr + output_len : output_logical_addr;
+    const uint32_t input_end =
+        input_len > 0 ? input_logical_addr + input_len : input_logical_addr;
+    config_.next_logical_addr = std::max(output_end, input_end);
+    config_.configured = config_.fmmu_count > 0;
     return true;
 }
 
