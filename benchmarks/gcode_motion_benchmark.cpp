@@ -20,8 +20,10 @@
  *   Step 4 (optional): Dense sampling (TrajectoryAnalyzer::analyze)
  *                       + computeStatistics
  *
- * ReNURBS fitting is intentionally omitted because the Pareto profiler now
- * outputs an analytical SSR/WSS profile.
+ * ReNURBS fitting is intentionally omitted. The Pareto profiler outputs an
+ * analytical SSR/WSS profile, and pressure advance parameters are packaged
+ * as compact algorithm parameters (TWPA format) for frontend analytical
+ * evaluation — no sampling, no NURBS fitting.
  *
  * Usage:
  *   gcode_motion_benchmark <gcode_file> [--dense] [--constraint-cache-size N]
