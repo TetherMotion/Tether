@@ -38,7 +38,7 @@ public:
     bool sendAndWait(Master& master, uint16_t adp,
                      uint16_t mbxWriteAddr, uint16_t mbxWriteLen,
                      uint16_t mbxReadAddr, uint16_t mbxReadLen,
-                     const uint8_t* mbxbuf, unsigned int timeoutMs,
+                     uint8_t* mbxbuf, unsigned int timeoutMs,
                      unsigned int pollIntervalMs,
                      unsigned int transactionTimeoutMs,
                      const char* phaseLabel);
@@ -51,13 +51,34 @@ public:
     bool handleMailboxError(const uint8_t* mbxbuf, const MbxResponseHeader& hdr,
                             uint16_t adp, uint16_t index, uint8_t sub);
 
+    // Check if a mailbox error response indicates a counter mismatch —
+    // specifically, ETG.1000.6 error code 0x0001 (Syntax error in mailbox
+    // message) with detail 0x0004 or 0x0005 (offset of the priority or
+    // type/counter byte in the mailbox header).  Slaves that validate the
+    // incoming mailbox counter (e.g. ESC211) return this error when the
+    // master's counter doesn't match the slave's expected value.
+    static bool isCounterMismatchError(const uint8_t* mbxbuf, const MbxResponseHeader& hdr);
+
+    // Check for a stale mailbox response (counter mismatch) and re-send.
+    // When a mismatch is detected, the master's mailbox counter is synced
+    // to the slave's counter (extracted from the stale response) before
+    // re-sending, so that slaves that validate the incoming counter (e.g.
+    // ESC211) will accept the re-sent request.
+    //
+    // @param inoutMbxCnt  Pointer to the master's persistent mailbox counter.
+    //                     Updated to the synced value on counter mismatch.
+    // @param inOutExpectedCnt  Pointer to the expected response counter.
+    //                          Updated to the synced value on mismatch.
+    // @return true if the caller should continue polling (re-send succeeded
+    //         or retry budget exhausted), false on fatal error.
     bool checkStaleCounter(Master& master, uint16_t adp,
                            uint16_t mbxWriteAddr, uint16_t mbxWriteLen,
                            uint16_t mbxReadAddr, uint16_t mbxReadLen,
-                           const uint8_t* mbxbuf, unsigned int pollIntervalMs,
+                           uint8_t* mbxbuf, unsigned int pollIntervalMs,
                            unsigned int transactionTimeoutMs,
                            const MbxResponseHeader& hdr,
-                           uint8_t expectedMbxCnt, int& staleRetryCount,
+                           uint8_t* inoutMbxCnt, uint8_t& inOutExpectedCnt,
+                           int& staleRetryCount,
                            uint16_t index_, uint8_t sub_,
                            const char* phaseLabel);
 

@@ -70,7 +70,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
         mbx_cnt = *inoutMbxCnt;
     }
 
-    const uint8_t expected_mbx_cnt = mbx_cnt;
+    uint8_t expected_mbx_cnt = mbx_cnt;
 
     MbxHeader mbx{};
     mbx.length_le = host_to_le16(static_cast<uint16_t>(sizeof(CoeHeader) + sizeof(SdoInitUploadReq)));
@@ -190,6 +190,19 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
 #endif
             }
             if (hdr.type == EC_MBXT_ERR) {
+                if (isCounterMismatchError(mbxbuf, hdr) && stale_retry_count < MAX_STALE_RETRIES) {
+                    TETHER_LOGW(TAG, "Mailbox counter mismatch error (upload): syncing counter %u -> %u and retrying",
+                                expected_mbx_cnt, SDOMailboxIO::nextMbxCnt(hdr.cnt));
+                    SDOMailboxIO::syncMbxCounter(hdr.cnt, inoutMbxCnt, mbxbuf);
+                    expected_mbx_cnt = SDOMailboxIO::nextMbxCnt(hdr.cnt);
+                    ++stale_retry_count;
+                    if (!sendAndWait(master, adp, mbxWriteAddr, mbxWriteLen,
+                                     mbxReadAddr, mbxReadLen, mbxbuf, 500,
+                                     pollIntervalMs, transactionTimeoutMs, "upload")) {
+                        return false;
+                    }
+                    continue;
+                }
                 handleMailboxError(mbxbuf, hdr, adp, index, sub);
                 return false;
             }
@@ -276,7 +289,8 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
             if (hdr.cnt != expected_mbx_cnt) {
                 if (!checkStaleCounter(master, adp, mbxWriteAddr, mbxWriteLen,
                                        mbxReadAddr, mbxReadLen, mbxbuf, pollIntervalMs,
-                                       transactionTimeoutMs, hdr, expected_mbx_cnt,
+                                       transactionTimeoutMs, hdr,
+                                       inoutMbxCnt, expected_mbx_cnt,
                                        stale_retry_count, index, sub, "upload")) {
                     return false;
                 }
@@ -292,8 +306,10 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                 const uint16_t r_index = le16_to_host(res->index_le);
                 const uint8_t r_sub = res->sub;
                 if (r_index != index || r_sub != sub) {
-                    TETHER_LOGW(TAG, "Stale SDO response: idx=0x%04X:%u expected=0x%04X:%u (adp=0x%04X) — clearing and re-sending",
+                    TETHER_LOGW(TAG, "Stale SDO response: idx=0x%04X:%u expected=0x%04X:%u (adp=0x%04X) — syncing counter and re-sending",
                                 r_index, r_sub, index, sub, adp);
+                    SDOMailboxIO::syncMbxCounter(hdr.cnt, inoutMbxCnt, mbxbuf);
+                    expected_mbx_cnt = SDOMailboxIO::nextMbxCnt(hdr.cnt);
                     if (++stale_retry_count <= MAX_STALE_RETRIES) {
                         if (!sendAndWait(master, adp, mbxWriteAddr, mbxWriteLen,
                                          mbxReadAddr, mbxReadLen, mbxbuf, 500,
