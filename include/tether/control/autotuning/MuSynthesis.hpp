@@ -87,7 +87,7 @@
 #include <string>
 #include <memory>
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // Uncertainty Block Types
@@ -524,4 +524,4 @@ private:
     std::vector<UncertaintyDesc> m_uncertainties;
 };
 
-} // namespace Control
+} // namespace tether::control

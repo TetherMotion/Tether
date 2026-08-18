@@ -1,6 +1,6 @@
 #include "tether/control/autotuning/classical/LambdaTuning.hpp"
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 std::string LambdaTuning::getName() const { return "Lambda/IMC Tuning"; }
@@ -40,4 +40,4 @@ void LambdaTuning::setRobustness(double robustness) {
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

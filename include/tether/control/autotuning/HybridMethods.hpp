@@ -35,7 +35,7 @@
 #include "AdaptiveMethods.hpp"
 #include <memory>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 // ============================================================================
@@ -623,4 +623,4 @@ private:
 };
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

@@ -6,7 +6,7 @@
 #include "control/ControllerBase.hpp"
 #include "tether/platform/EspCompat.hpp"
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // ControllerBase Implementation
@@ -120,4 +120,4 @@ void ControllerBase::updateDiagnostics(const ControllerInput& input,
     }
 }
 
-} // namespace Control
+} // namespace tether::control

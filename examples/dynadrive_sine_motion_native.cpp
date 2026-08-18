@@ -4,6 +4,7 @@
 #include <string>
 
 #include "DS402ExampleSupport.hpp"
+#include "tether/control/SineMotionController.hpp"
 #include "tether/drives/DynaDrive.hpp"
 #include "tether/drives/DynaDrive/DynaDrivePDO.hpp"
 #include "tether/platform/EspCompat.hpp"
@@ -20,7 +21,7 @@ constexpr double kTwoPi = 6.28318530717958647692;
 
 class DynaDriveSineMotionController final : public EtherCAT::DS402Master::IDriveMotionController {
 public:
-    explicit DynaDriveSineMotionController(const Control::SineMotionController::Config& config)
+    explicit DynaDriveSineMotionController(const tether::control::SineMotionController::Config& config)
         : controller_(config)
     {
     }
@@ -59,7 +60,7 @@ public:
     }
 
 private:
-    Control::SineMotionController controller_;
+    tether::control::SineMotionController controller_;
 };
 
 // ============================================================================
@@ -70,7 +71,7 @@ int runSineMotion(EtherCAT::DS402Master& master, double duration_seconds)
 {
     constexpr double kAmplitudeDegrees = 45.0;
     constexpr double kFrequencyHz = 0.25;
-    Control::SineMotionController::Config config = Control::SineMotionController::Config::getDefault();
+    tether::control::SineMotionController::Config config = tether::control::SineMotionController::Config::getDefault();
     config.frequency = kFrequencyHz;
     config.amplitude = kAmplitudeDegrees * (kTwoPi / 360.0);
 

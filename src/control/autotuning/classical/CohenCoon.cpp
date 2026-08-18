@@ -1,6 +1,6 @@
 #include "tether/control/autotuning/classical/CohenCoon.hpp"
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 std::string CohenCoon::getName() const { return "Cohen-Coon"; }
@@ -36,4 +36,4 @@ PIDGains CohenCoon::calculateGains(const FOPDTModel& model, PIDForm form) {
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

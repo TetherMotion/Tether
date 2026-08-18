@@ -1,6 +1,6 @@
 #include "tether/control/autotuning/classical/ChienHronesReswick.hpp"
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 std::string ChienHronesReswick::getName() const { return "Chien-Hrones-Reswick"; }
@@ -44,4 +44,4 @@ PIDGains ChienHronesReswick::calculateGains(const FOPDTModel& model, PIDForm for
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

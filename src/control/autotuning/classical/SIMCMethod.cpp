@@ -1,7 +1,7 @@
 #include "tether/control/autotuning/classical/SIMCMethod.hpp"
 #include <algorithm>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 std::string SIMCMethod::getName() const { return "SIMC (Skogestad)"; }
@@ -41,4 +41,4 @@ PIDGains SIMCMethod::calculateGains(const SOPDTModel& model, double tauC) {
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

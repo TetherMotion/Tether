@@ -15,7 +15,7 @@
 
 #include <Eigen/Dense>
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // Matrix Helper Functions (Eigen-backed)
@@ -135,4 +135,4 @@ bool matInverse(const double* A, double* Ainv, int n) {
     return true;
 }
 
-} // namespace Control
+} // namespace tether::control

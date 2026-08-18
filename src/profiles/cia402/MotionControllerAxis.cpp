@@ -31,10 +31,12 @@ CiA402Axis::CiA402Axis(AxisId id, DriveBackendUPtr backend)
     m_name = "Axis " + std::to_string(id);
     
     // Initialize with default limits
-    m_limits.maxVelocity = CIA402_DEFAULT_MAX_VELOCITY;
-    m_limits.maxAcceleration = CIA402_DEFAULT_MAX_ACCELERATION;
-    m_limits.maxDeceleration = CIA402_DEFAULT_MAX_DECELERATION;
-    m_limits.maxJerk = CIA402_DEFAULT_MAX_JERK;
+    m_limits.maxVelocity = static_cast<uint32_t>(CIA402_DEFAULT_MAX_VELOCITY);
+    m_limits.maxAcceleration = static_cast<uint32_t>(CIA402_DEFAULT_MAX_ACCELERATION);
+    m_limits.maxDeceleration = (CIA402_DEFAULT_MAX_DECELERATION > 0.0)
+        ? static_cast<uint32_t>(CIA402_DEFAULT_MAX_DECELERATION)
+        : m_limits.maxAcceleration;
+    m_limits.maxJerk = static_cast<uint32_t>(CIA402_DEFAULT_MAX_JERK);
     
     // Set up callbacks from backend
     if (m_backend) {
@@ -445,7 +447,7 @@ bool CiA402Axis::startHoming(const HomingCommand& cmd) {
 
 bool CiA402Axis::startHoming(HomingMethod method) {
     HomingCommand cmd;
-    cmd.method = method;
+    cmd.method = static_cast<uint16_t>(static_cast<int8_t>(method));
     return startHoming(cmd);
 }
 
@@ -475,6 +477,36 @@ bool CiA402Axis::isHomed() const {
     return m_homed;
 }
 
+bool CiA402Axis::hasFault() const {
+    return getStatus().fault;
+}
+
+bool CiA402Axis::isEnabled() const {
+    return getState() == State::OperationEnabled;
+}
+
+bool CiA402Axis::setTargetPosition(int32_t target, const MotionCommand& mode) {
+    MotionCommand cmd = mode;
+    cmd.targetPosition = target;
+    return executeMotion(cmd);
+}
+
+bool CiA402Axis::setTargetVelocity(int32_t target, const VelocityCommand& mode) {
+    VelocityCommand cmd = mode;
+    cmd.targetVelocity = target;
+    return executeVelocity(cmd);
+}
+
+bool CiA402Axis::setTargetTorque(int16_t target, const TorqueCommand& mode) {
+    TorqueCommand cmd = mode;
+    cmd.targetTorque = target;
+    return executeTorque(cmd);
+}
+
+bool CiA402Axis::home(const HomingCommand& cmd) {
+    return startHoming(cmd);
+}
+
 // ============================================================================
 // Configuration
 // ============================================================================
@@ -493,21 +525,21 @@ void CiA402Axis::setProfileVelocity(uint32_t velocity) {
     if (m_backend) {
         m_backend->setProfileVelocity(velocity);
     }
-    m_limits.maxVelocity = static_cast<double>(velocity);
+    m_limits.maxVelocity = velocity;
 }
 
 void CiA402Axis::setProfileAcceleration(uint32_t acceleration) {
     if (m_backend) {
         m_backend->setProfileAcceleration(acceleration);
     }
-    m_limits.maxAcceleration = static_cast<double>(acceleration);
+    m_limits.maxAcceleration = acceleration;
 }
 
 void CiA402Axis::setProfileDeceleration(uint32_t deceleration) {
     if (m_backend) {
         m_backend->setProfileDeceleration(deceleration);
     }
-    m_limits.maxDeceleration = static_cast<double>(deceleration);
+    m_limits.maxDeceleration = deceleration;
 }
 
 void CiA402Axis::setDefaultProfileType(ProfileType type) {

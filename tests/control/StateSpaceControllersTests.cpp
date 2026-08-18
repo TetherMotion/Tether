@@ -17,7 +17,7 @@
 #include "tether/control/KalmanFilter.hpp"
 #include "tether/control/ExtendedKalmanFilter.hpp"
 
-using namespace Control;
+using namespace tether::control;
 
 // ============================================================================
 // LQRController Tests

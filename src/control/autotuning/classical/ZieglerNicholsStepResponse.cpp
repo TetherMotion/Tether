@@ -1,7 +1,7 @@
 #include "tether/control/autotuning/classical/ZieglerNicholsStepResponse.hpp"
 #include <algorithm>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 std::string ZieglerNicholsStepResponse::getName() const { return "Ziegler-Nichols Step Response"; }
@@ -104,4 +104,4 @@ void ZieglerNicholsStepResponse::setStepResponseData(const std::vector<double>& 
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

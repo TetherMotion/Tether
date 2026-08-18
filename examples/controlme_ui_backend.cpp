@@ -100,7 +100,7 @@ class ScalarPIDController final : public Simulation::SimController {
 public:
     explicit ScalarPIDController(size_t outputIndex)
         : outputIndex_(outputIndex) {
-        Control::SaturationLimits limits;
+        tether::control::SaturationLimits limits;
         limits.outputMin = -1.0e6;
         limits.outputMax = 1.0e6;
         pid_.setSaturationLimits(limits);
@@ -114,7 +114,7 @@ public:
         double dt) override {
         const double measuredValue = outputIndex_ < measured.size() ? measured[outputIndex_] : 0.0;
         const double referenceValue = outputIndex_ < reference.size() ? reference[outputIndex_] : 0.0;
-        Control::ControllerInput input;
+        tether::control::ControllerInput input;
         input.reference = referenceValue;
         input.measured = measuredValue;
         input.dt = dt;
@@ -140,7 +140,7 @@ public:
 
 private:
     size_t outputIndex_;
-    Control::PIDController pid_;
+    tether::control::PIDController pid_;
 };
 
 struct SystemSpec {

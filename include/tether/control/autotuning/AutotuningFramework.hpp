@@ -65,7 +65,7 @@
 #include <complex>
 #include <limits>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 // ============================================================================
@@ -630,4 +630,4 @@ FrequencyResponseMetrics analyzeFrequencyResponse(
     const TunableController& controller);
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

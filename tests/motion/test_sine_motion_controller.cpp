@@ -2,7 +2,7 @@
 
 #include "tether/control/SineMotionController.hpp"
 
-using namespace Control;
+using namespace tether::control;
 
 TEST(SineMotionController, BasicPositionVelocity)
 {

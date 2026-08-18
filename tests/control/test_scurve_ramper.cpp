@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "tether/control/ParameterRamping.hpp"
-using namespace Control;
+using namespace tether::control;
 
 // Verify that the default configuration for the S-curve ramper matches the
 // newly-specified 10x‑faster values and that a ramper built with the default

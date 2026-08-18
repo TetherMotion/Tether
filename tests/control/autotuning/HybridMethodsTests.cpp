@@ -7,8 +7,8 @@
 #include "TestHelpers.hpp"
 #include "tether/control/autotuning/HybridMethods.hpp"
 
-using namespace Control::Autotuning;
-using namespace Control::Autotuning::Testing;
+using namespace tether::control::Autotuning;
+using namespace tether::control::Autotuning::Testing;
 
 // ============================================================================
 // ZNWithOptimization Tests

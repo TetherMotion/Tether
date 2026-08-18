@@ -11,7 +11,7 @@
 #include "tether/control/Controllers.hpp"
 #include "tether/control/CompositeControllers.hpp"
 
-using namespace Control;
+using namespace tether::control;
 
 // ============================================================================
 // CascadeController Tests

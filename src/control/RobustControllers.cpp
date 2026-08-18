@@ -10,7 +10,7 @@
 
 #include <Eigen/Dense>
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // WeightingFunction Implementation
@@ -681,4 +681,4 @@ bool MuSynthesisFramework::dkIteration() {
     return true;
 }
 
-} // namespace Control
+} // namespace tether::control

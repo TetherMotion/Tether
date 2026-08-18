@@ -11,7 +11,7 @@
 #include "tether/control/Controllers.hpp"
 #include "tether/control/FractionalPID.hpp"
 
-using namespace Control;
+using namespace tether::control;
 
 // ============================================================================
 // FractionalPIDController Tests

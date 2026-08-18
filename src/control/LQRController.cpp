@@ -10,7 +10,7 @@
 #include <cmath>
 #include <cstring>
 
-namespace Control {
+namespace tether::control {
 
 // External matrix functions from MatrixUtils.cpp
 extern void matMul(const double* A, const double* B, double* C, int m, int n, int p);
@@ -252,4 +252,4 @@ void LQRController::resetImpl() {
     std::fill(m_xRef.begin(), m_xRef.end(), 0.0);
 }
 
-} // namespace Control
+} // namespace tether::control

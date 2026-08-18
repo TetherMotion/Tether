@@ -8,7 +8,7 @@
 #include <cmath>
 #include <vector>
 
-using namespace Control;
+using namespace tether::control;
 
 // ============================================================================
 // Enum Tests

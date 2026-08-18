@@ -629,11 +629,11 @@ private:
     // ========================================================================
     
     // Position loop (dual loop)
-    std::unique_ptr<Control::PIDController> positionPID_;
-    std::unique_ptr<Control::PIDController> velocityPID_;
+    std::unique_ptr<tether::control::PIDController> positionPID_;
+    std::unique_ptr<tether::control::PIDController> velocityPID_;
     
     // Velocity loop (single loop)
-    std::unique_ptr<Control::PIDController> velocityOnlyPID_;
+    std::unique_ptr<tether::control::PIDController> velocityOnlyPID_;
     
     // ========================================================================
     // Callbacks

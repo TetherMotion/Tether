@@ -9,7 +9,7 @@
 #include <numeric>
 #include <stdexcept>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 // ============================================================================
@@ -286,4 +286,4 @@ FrequencyResponseMetrics analyzeFrequencyResponse(
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

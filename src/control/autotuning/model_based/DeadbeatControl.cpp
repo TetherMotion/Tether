@@ -1,7 +1,7 @@
 #include "tether/control/autotuning/model_based/DeadbeatControl.hpp"
 #include <cmath>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 bool DeadbeatControl::isCompatible(const TunableController& controller) const {
@@ -58,4 +58,4 @@ std::vector<double> DeadbeatControl::design(const double* A, const double* B,
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

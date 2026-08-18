@@ -10,7 +10,7 @@
 
 #include <Eigen/Dense>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 // ============================================================================
@@ -627,4 +627,4 @@ TuningResult DecentralizedTuning::tune(TunableController& controller,
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

@@ -12,7 +12,7 @@
 #include "tether/control/autotuning/AutotuningFramework.hpp"
 #include "tether/control/autotuning/ClassicalTuningMethods.hpp"
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 /**
@@ -60,4 +60,4 @@ private:
 };
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

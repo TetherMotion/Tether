@@ -173,7 +173,7 @@
 #include <array>
 #include <functional>
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // Weighting Function
@@ -562,4 +562,4 @@ private:
     int m_numBlocks{0};
 };
 
-} // namespace Control
+} // namespace tether::control

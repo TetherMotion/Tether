@@ -94,7 +94,7 @@
 #include <cmath>
 #include <complex>
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // SMC Configuration Types
@@ -766,4 +766,4 @@ private:
     std::vector<double> m_integralStates;
 };
 
-} // namespace Control
+} // namespace tether::control

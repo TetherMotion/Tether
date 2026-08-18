@@ -2,7 +2,7 @@
 #include "../TestHelpers.hpp"
 #include "tether/control/autotuning/ClassicalTuningMethods.hpp"
 
-using namespace Control::Autotuning;
+using namespace tether::control::Autotuning;
 
 TEST(PIDGainsTest, DefaultConstruction) {
     PIDGains gains;

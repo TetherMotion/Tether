@@ -12,7 +12,7 @@
 #include <cmath>
 #include <complex>
 
-using namespace Control;
+using namespace tether::control;
 
 // ============================================================================
 // NicholsPoint — near-zero magnitude

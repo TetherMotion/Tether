@@ -56,7 +56,7 @@
 #include <memory>
 #include <vector>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 class ClassicalTuningFactory {
@@ -85,6 +85,6 @@ public:
 };
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control
 
 

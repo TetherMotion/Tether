@@ -7,8 +7,8 @@
 #include "TestHelpers.hpp"
 #include "tether/control/autotuning/AdaptiveMethods.hpp"
 
-using namespace Control::Autotuning;
-using namespace Control::Autotuning::Testing;
+using namespace tether::control::Autotuning;
+using namespace tether::control::Autotuning::Testing;
 
 // ============================================================================
 // GainScheduler Tests

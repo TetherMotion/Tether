@@ -184,11 +184,11 @@ endif()
 #
 # Component dependency graph:
 #   fsoe             → cia_profiles, ethercat_master, common
-#   cia_profiles     → ethercat_master, motion_control, common
+#   cia_profiles     → ethercat_master, common
 #   drives           → ethercat_master, common
-#   ethercat_master  → ethercat_common, controls, hal, common
+#   ethercat_master  → ethercat_common, hal, common
 #   ethercat_common  → hal, common
-#   motion_control   → controls, common
+#   motion_control   → controls, kinematics, common
 #   identification   → common
 #   controls         → common
 #   autotuning       → common
@@ -213,6 +213,17 @@ option(TETHER_BUILD_IDENTIFICATION "Build system identification" ON)
 option(TETHER_BUILD_ETHERCAT_COMMON "Build EtherCAT common" ON)
 option(TETHER_BUILD_ETHERCAT_MASTER "Build EtherCAT master core" ON)
 option(TETHER_BUILD_CIA_PROFILES "Build CiA device profiles and ETG5000" ON)
+option(TETHER_ENABLE_CIA301 "Build CiA 301 common communication profile" ON)
+option(TETHER_ENABLE_CIA401 "Build CiA 401 generic I/O modules" ON)
+option(TETHER_ENABLE_CIA402 "Build CiA 402 drive protocol profile" ON)
+option(TETHER_ENABLE_CIA404 "Build CiA 404 weighing/torque measurement" ON)
+option(TETHER_ENABLE_CIA405 "Build CiA 405 IEC 61131-3 programmable" ON)
+option(TETHER_ENABLE_CIA406 "Build CiA 406 encoder" ON)
+option(TETHER_ENABLE_CIA408 "Build CiA 408 fluid power / valves" ON)
+option(TETHER_ENABLE_CIA410 "Build CiA 410 inclinometer" ON)
+option(TETHER_ENABLE_CIA417 "Build CiA 417 lift control" ON)
+option(TETHER_ENABLE_CIA430 "Build CiA 430 energy metering" ON)
+option(TETHER_ENABLE_ETG5000 "Build ETG5000 modular device profile" ON)
 option(TETHER_BUILD_DRIVES "Build vendor-specific drive helpers" ON)
 option(TETHER_DRIVE_AS715N           "Build AS715N servo drive helper"          ON)
 option(TETHER_DRIVE_DYNADRIVE        "Build DynaDrive (ANYdrive) helper"        ON)
@@ -307,8 +318,8 @@ if(DEFINED TETHER_COMPONENTS)
     set(_tether_component_deps_motion_control  "kinematics;controls;common")
     set(_tether_component_deps_identification  "common")
     set(_tether_component_deps_ethercat_common "hal;common")
-    set(_tether_component_deps_ethercat_master "ethercat_common;controls;hal;common")
-    set(_tether_component_deps_cia_profiles    "ethercat_master;motion_control;common")
+    set(_tether_component_deps_ethercat_master "ethercat_common;hal;common")
+    set(_tether_component_deps_cia_profiles    "ethercat_master;common")
     set(_tether_component_deps_drives          "ethercat_master;common")
     set(_tether_component_deps_fsoe            "cia_profiles;ethercat_master;common")
     set(_tether_component_deps_ethercat_slave  "ethercat_common;hal;common")
@@ -560,8 +571,8 @@ if(TETHER_BUILD_ETHERCAT_MASTER)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/ethercat_master.cmake)
 endif()
 
-# CiA device profiles + ETG5000 (depends on ethercat_master and motion_control)
-if(TETHER_BUILD_CIA_PROFILES AND TETHER_BUILD_ETHERCAT_MASTER AND TETHER_BUILD_MOTION_CONTROL)
+# CiA device profiles + ETG5000 (depends on ethercat_master and common)
+if(TETHER_BUILD_CIA_PROFILES AND TETHER_BUILD_ETHERCAT_MASTER)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/cia_profiles.cmake)
 endif()
 
@@ -571,7 +582,7 @@ if(TETHER_BUILD_DRIVES AND TETHER_BUILD_ETHERCAT_MASTER)
 endif()
 
 # FSoE — Fail-Safe over EtherCAT (depends on ethercat_master and cia_profiles)
-if(TETHER_BUILD_FSOE AND TETHER_BUILD_ETHERCAT_MASTER AND TETHER_BUILD_CIA_PROFILES AND TETHER_BUILD_MOTION_CONTROL)
+if(TETHER_BUILD_FSOE AND TETHER_BUILD_ETHERCAT_MASTER AND TETHER_BUILD_CIA_PROFILES)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/fsoe.cmake)
 endif()
 

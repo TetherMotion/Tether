@@ -11,7 +11,7 @@
 
 #include <Eigen/Dense>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 // ============================================================================
@@ -1798,4 +1798,4 @@ std::vector<std::string> getAvailableOptimizers() {
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

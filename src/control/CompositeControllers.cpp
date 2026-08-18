@@ -13,7 +13,7 @@
 #include <algorithm>
 #include <cstring>
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // Cascade Controller Implementation
@@ -421,4 +421,4 @@ std::unique_ptr<ControllerBase> ControllerFactory::create(const char* name) {
     return nullptr;
 }
 
-} // namespace Control
+} // namespace tether::control

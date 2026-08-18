@@ -17,13 +17,14 @@
 #pragma once
 
 #include "control/ParameterRamping.hpp"
+#include "tether/common/ISetpointSource.hpp"
 #include <vector>
 #include <memory>
 #include <algorithm>
 
-namespace Control {
+namespace tether::control {
 
-class StepMotionController {
+class StepMotionController : public tether::common::ISetpointSource {
 public:
     /**
      * @brief Single motion step description
@@ -75,7 +76,7 @@ public:
     /**
      * @brief Start or restart the sequence
      */
-    void start() {
+    void start() override {
         m_position = m_config.initialPosition;
         m_currentStep = 0;
         m_holdTimer = 0.0;
@@ -89,10 +90,15 @@ public:
     /**
      * @brief Stop the sequence immediately (ramper is discarded)
      */
-    void stop() {
+    void stop() override {
         m_running = false;
         m_ramper.reset();
     }
+
+    /**
+     * @brief Immediate stop
+     */
+    void stopImmediate() override { stop(); }
 
     /**
      * @brief Reset controller to a given absolute position
@@ -109,7 +115,7 @@ public:
     /**
      * @brief Advance the controller by dt seconds and return current position
      */
-    double update(double dt) {
+    double update(double dt) override {
         if (!m_running) {
             return m_position;
         }
@@ -150,8 +156,10 @@ public:
         return m_position;
     }
 
-    double getPosition() const { return m_position; }
-    bool isRunning() const { return m_running; }
+    double getPosition() const override { return m_position; }
+    double getVelocity() const override { return 0.0; }
+    double getAcceleration() const override { return 0.0; }
+    bool isRunning() const override { return m_running; }
 
 private:
     void startStep() {
@@ -180,4 +188,4 @@ private:
     std::unique_ptr<SCurveRamper> m_ramper;
 };
 
-} // namespace Control
+} // namespace tether::control

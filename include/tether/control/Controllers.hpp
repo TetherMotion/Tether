@@ -27,7 +27,7 @@
  * 
  * ```cpp
  * #include "control/Controllers.hpp"
- * using namespace Control;
+ * using namespace tether::control;
  * 
  * // Create a PID controller
  * PIDController pid;
@@ -140,7 +140,7 @@
 #include "control/CompositeControllers.hpp"
 
 /**
- * @namespace Control
+ * @namespace tether::control
  * @brief Control algorithm namespace
  * 
  * Contains all controller classes and utilities.
@@ -198,7 +198,7 @@
  * - ControllerFactory - Create controllers by type/name
  * - StateSpace namespace - Matrix operations
  */
-namespace Control {
+namespace tether::control {
 
 /**
  * @brief Controller version information
@@ -210,4 +210,4 @@ constexpr const char* CONTROLLER_VERSION = "1.0.0";
  */
 inline const char* getVersion() { return CONTROLLER_VERSION; }
 
-} // namespace Control
+} // namespace tether::control

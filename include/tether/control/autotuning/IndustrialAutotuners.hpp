@@ -26,7 +26,7 @@
 #include "ClassicalTuningMethods.hpp"
 #include <deque>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 // ============================================================================
@@ -697,4 +697,4 @@ private:
 };
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

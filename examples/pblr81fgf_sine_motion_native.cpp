@@ -4,6 +4,7 @@
 #include <string>
 
 #include "DS402ExampleSupport.hpp"
+#include "tether/control/SineMotionController.hpp"
 #include "tether/drives/PBLR81FGF/PBLR81FGFPDO.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include "tether/profiles/cia301/CiA402Defs.hpp"
@@ -18,14 +19,14 @@ int runSineMotion(EtherCAT::DS402Master& master, double duration_seconds)
 {
     constexpr double kAmplitudeDegrees = 90.0;
     constexpr double kFrequencyHz = 0.2;
-    Control::SineMotionController::Config config = Control::SineMotionController::Config::getDefault();
+    tether::control::SineMotionController::Config config = tether::control::SineMotionController::Config::getDefault();
     config.frequency = kFrequencyHz;
     config.amplitude = kAmplitudeDegrees;
 
-    if (!master.addSineMotionController<EtherCAT::Drives::PBLR81FGF::PBLR81FGF_RxPDO_1600>(
+    if (!master.addMotionController<EtherCAT::Drives::PBLR81FGF::PBLR81FGF_RxPDO_1600>(
             kSlaveIndex,
             EtherCAT::DS402Master::CyclicTarget::Position,
-            config,
+            std::make_unique<tether::control::SineMotionController>(config),
             kCountsPerRevolution / 360.0)) {
         return 2;
     }

@@ -11,7 +11,7 @@
 
 #include <Eigen/Dense>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 // ============================================================================
@@ -1143,4 +1143,4 @@ ParameterVector MMAC::computeMixedGains() const {
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

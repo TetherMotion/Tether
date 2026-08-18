@@ -138,7 +138,7 @@ TEST(FlowAdaptiveHeaterController, PreEmphasisAddsPowerAtFlowOnset) {
     p.maxPreEmphasisPower = 0.4;
     FlowAdaptiveHeaterController ctrl(p);
     ctrl.setGains(0.0, 0.0, 0.0); // disable PID to isolate feed-forward
-    ::Control::ControllerInput in{};
+    ::tether::control::ControllerInput in{};
     in.reference = 220.0;
     in.measured = 220.0; // at target → pre-emphasis allowed
     in.dt = 0.1;
@@ -159,7 +159,7 @@ TEST(FlowAdaptiveHeaterController, PreEmphasisBoundedByMax) {
     p.heaterPowerScale = 1.0; // tiny so P_ff_pwm is huge → clamp
     FlowAdaptiveHeaterController ctrl(p);
     ctrl.setGains(0.0, 0.0, 0.0);
-    ::Control::ControllerInput in{};
+    ::tether::control::ControllerInput in{};
     in.reference = 220.0;
     in.measured = 220.0;
     in.dt = 0.1;
@@ -173,7 +173,7 @@ TEST(FlowAdaptiveHeaterController, PreEmphasisSuppressedDuringWarmup) {
     p.maxHeaterOvershoot = 10.0;
     FlowAdaptiveHeaterController ctrl(p);
     ctrl.setGains(0.0, 0.0, 0.0);
-    ::Control::ControllerInput in{};
+    ::tether::control::ControllerInput in{};
     in.reference = 220.0;
     in.measured = 25.0; // far from target
     in.dt = 0.1;
@@ -190,7 +190,7 @@ TEST(FlowAdaptiveHeaterController, PostEmphasisDecaysAfterFlowStops) {
     p.heaterPowerScale = 40.0;
     FlowAdaptiveHeaterController ctrl(p);
     ctrl.setGains(0.0, 0.0, 0.0);
-    ::Control::ControllerInput in{};
+    ::tether::control::ControllerInput in{};
     in.reference = 220.0;
     in.measured = 220.0;
     in.dt = 0.1;
@@ -230,7 +230,7 @@ TEST(FlowAdaptiveHeaterController, SensorCouplingAlphaReducesFeedForward) {
     FlowAdaptiveHeaterController ctrlLow(pLow);
     ctrlLow.setGains(0.0, 0.0, 0.0);
 
-    ::Control::ControllerInput in{};
+    ::tether::control::ControllerInput in{};
     in.reference = 220.0;
     in.measured = 220.0;
     in.dt = 0.1;
@@ -258,7 +258,7 @@ TEST(FlowAdaptiveHeaterController, ClosedLoopReachesTarget) {
     const double C = 8.0;
     const double loss = 0.5;
     const double ambient = 25.0;
-    ::Control::ControllerInput in{};
+    ::tether::control::ControllerInput in{};
     in.reference = 200.0;
     in.dt = 0.1;
     ctrl.setFlow(0.0);
@@ -274,7 +274,7 @@ TEST(FlowAdaptiveHeaterController, ClosedLoopReachesTarget) {
 TEST(FlowAdaptiveHeaterController, ResetClearsState) {
     FlowAdaptiveHeaterController ctrl;
     ctrl.setGains(1.0, 0.1, 0.0);
-    ::Control::ControllerInput in{};
+    ::tether::control::ControllerInput in{};
     in.reference = 200.0;
     in.measured = 25.0;
     in.dt = 0.1;
@@ -293,7 +293,7 @@ TEST(FlowAdaptiveHeaterController, ObserverTracksMeasuredSensorTemp) {
     p.luenbergerGainSensor = 5.0;
     FlowAdaptiveHeaterController ctrl(p);
     ctrl.setGains(2.0, 0.5, 0.0);
-    ::Control::ControllerInput in{};
+    ::tether::control::ControllerInput in{};
     in.reference = 200.0;
     in.measured = 200.0;
     in.dt = 0.1;
