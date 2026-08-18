@@ -464,13 +464,22 @@ SlaveError Slave::transitionToPreOp() {
             "Slave %u: Failed to transition to PRE_OP", index_);
         return SlaveError::TransportError;
     }
-    
+
+    // Drain any stale mailbox data that the slave firmware may have written
+    // into SM1 during or after the PRE-OP transition.  configureMailbox()
+    // drains once before the transition, but the firmware can emit AL status
+    // notifications or initialization messages as it enters PRE-OP, leaving
+    // stale data whose mailbox counter doesn't match the master's first SDO
+    // request — this causes "Stale mailbox response" errors and SDO failures
+    // on the first SDO exchange after entering PRE-OP.
+    (void)drainMailbox();
+
     if (slave_debug_flags_.stateMachine) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
         TETHER_LOGI(TAG, "║  Transition Result: Slave %u => PRE_OP SUCCESS                ║", index_);
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
     }
-    
+
     return SlaveError::Ok;
 }
 
