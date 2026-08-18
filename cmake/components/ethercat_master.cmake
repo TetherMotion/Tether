@@ -82,7 +82,7 @@ foreach(_tgt IN LISTS _variants)
     )
 
     target_link_libraries(${_tgt}
-        PUBLIC tether_common tether_hal tether_ethercat_common tether_controls
+        PUBLIC tether_common tether_hal tether_ethercat_common
     )
 
     target_compile_definitions(${_tgt} PUBLIC TETHER_COMPILE_MASTER=1)

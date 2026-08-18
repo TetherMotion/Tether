@@ -3,13 +3,13 @@
  * @brief Motion profile implementations
  */
 
-#include "profiles/cia402/MotionProfile.hpp"
+#include "tether/common/MotionProfile.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include <cstring>
 
 static const char* TAG = "MotionProfile";
 
-namespace CiA402 {
+namespace tether::common {
 
 // ============================================================================
 // Base Class
@@ -34,7 +34,7 @@ double LinearProfile::plan(double startPos, double endPos,
     double distance = std::abs(endPos - startPos);
     m_direction = (endPos >= startPos) ? 1 : -1;
     
-    m_velocity = m_limits.maxVelocity * m_direction * m_speedFactor;
+    m_velocity = static_cast<double>(m_limits.maxVelocity) * m_direction * m_speedFactor;
     
     if (std::abs(m_velocity) > 1e-9) {
         m_duration = distance / std::abs(m_velocity);
@@ -84,7 +84,7 @@ double TrapezoidalProfile::plan(double startPos, double endPos,
     m_direction = (endPos >= startPos) ? 1 : -1;
     
     // Apply speed factor to limits
-    double maxVel = m_limits.maxVelocity * std::abs(m_speedFactor);
+    double maxVel = static_cast<double>(m_limits.maxVelocity) * std::abs(m_speedFactor);
     double accel = m_limits.maxAcceleration;
     double decel = m_limits.maxDeceleration;
     
@@ -239,7 +239,7 @@ double TriangularProfile::plan(double startPos, double endPos,
     
     // Limit to max velocity
     if (m_peakVelocity > m_limits.maxVelocity * std::abs(m_speedFactor)) {
-        m_peakVelocity = m_limits.maxVelocity * std::abs(m_speedFactor);
+        m_peakVelocity = static_cast<double>(m_limits.maxVelocity) * std::abs(m_speedFactor);
     }
     
     m_t1 = m_peakVelocity / accel;
@@ -317,9 +317,9 @@ double SCurveProfile::plan(double startPos, double endPos,
         return m_duration;
     }
     
-    m_jerk = m_limits.maxJerk;
-    m_accel = m_limits.maxAcceleration;
-    m_peakVel = m_limits.maxVelocity * std::abs(m_speedFactor);
+    m_jerk = static_cast<double>(m_limits.maxJerk);
+    m_accel = static_cast<double>(m_limits.maxAcceleration);
+    m_peakVel = static_cast<double>(m_limits.maxVelocity) * std::abs(m_speedFactor);
     
     calculatePhases();
     
@@ -654,6 +654,15 @@ MotionState PolynomialProfile::evaluate(double time) const {
 // Factory Functions
 // ============================================================================
 
+std::unique_ptr<MotionProfile> createProfile(ProfileType type,
+                                             const MotionLimits& limits) {
+    auto profile = createProfile(type);
+    if (profile) {
+        profile->setLimits(limits);
+    }
+    return profile;
+}
+
 std::unique_ptr<MotionProfile> createProfile(ProfileType type) {
     switch (type) {
         case ProfileType::Linear:
@@ -686,7 +695,7 @@ ProfileType selectOptimalProfile(double distance, const MotionLimits& limits) {
     }
     
     // If jerk limit is significant, use S-curve
-    double t_jerk = accel / jerk;
+    double t_jerk = static_cast<double>(accel) / static_cast<double>(jerk);
     if (t_jerk > 0.01) {
         return ProfileType::SCurve;
     }
@@ -695,4 +704,4 @@ ProfileType selectOptimalProfile(double distance, const MotionLimits& limits) {
     return ProfileType::Trapezoidal;
 }
 
-} // namespace CiA402
+} // namespace tether::common

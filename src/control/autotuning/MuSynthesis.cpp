@@ -15,7 +15,7 @@
 
 #include <Eigen/Dense>
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // MuSynthesisController Implementation
@@ -581,4 +581,4 @@ void StructuredUncertainModel::sampleUncertainty(double* A, double* B,
     }
 }
 
-} // namespace Control
+} // namespace tether::control

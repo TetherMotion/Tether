@@ -12,6 +12,6 @@ TEST(ModelBasedMethodsMoved, Present) {
     double A[] = {1.0, -0.5, 0.0, 0.0};
     double B[] = {0.0, 0.5, 0.0, 0.0};
     double C[] = {1.0, 0.0, 0.0, 0.0};
-    auto coeffs = Control::Autotuning::DeadbeatControl::design(A, B, C, 2, 1, 1, 0.1, 1);
+    auto coeffs = tether::control::Autotuning::DeadbeatControl::design(A, B, C, 2, 1, 1, 0.1, 1);
     EXPECT_FALSE(coeffs.empty());
 }

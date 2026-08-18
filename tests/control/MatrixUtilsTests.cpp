@@ -10,7 +10,7 @@
 #include <vector>
 
 // Forward declarations for internal matrix utilities
-namespace Control {
+namespace tether::control {
     void matMul(const double* A, const double* B, double* C, int m, int n, int p);
     void matTranspose(const double* A, double* B, int m, int n);
     void matAdd(const double* A, const double* B, double* C, int m, int n);
@@ -26,7 +26,7 @@ namespace Control {
                       double* X, int n, int m, int maxIter = 100, double tol = 1e-10);
 }
 
-using namespace Control;
+using namespace tether::control;
 
 // ============================================================================
 // Matrix Multiplication Tests

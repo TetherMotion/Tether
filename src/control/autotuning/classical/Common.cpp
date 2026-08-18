@@ -3,7 +3,7 @@
 #include <numeric>
 #include <algorithm>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 void PIDGains::toStandardForm() {
@@ -176,4 +176,4 @@ std::pair<double, double> ProcessIdentification::estimateUltimate(const FOPDTMod
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

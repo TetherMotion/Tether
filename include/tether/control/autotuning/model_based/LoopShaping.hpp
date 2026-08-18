@@ -13,7 +13,7 @@
 #include "tether/control/autotuning/QFT.hpp"
 #include <cmath>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 /**
@@ -68,4 +68,4 @@ private:
 };
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

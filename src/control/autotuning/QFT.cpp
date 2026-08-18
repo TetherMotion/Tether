@@ -12,7 +12,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // NicholsPoint Implementation
@@ -1073,4 +1073,4 @@ TransferFunction QFTLoopShaper::optimize(
     return best;
 }
 
-} // namespace Control
+} // namespace tether::control

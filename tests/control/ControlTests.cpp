@@ -9,7 +9,7 @@
 
 #include "tether/control/Controllers.hpp"
 
-using namespace Control;
+using namespace tether::control;
 
 // ============================================================================
 // ControllerBase Tests

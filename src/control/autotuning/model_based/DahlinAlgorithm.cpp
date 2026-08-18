@@ -1,7 +1,7 @@
 #include "tether/control/autotuning/model_based/DahlinAlgorithm.hpp"
 #include <cmath>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 bool DahlinAlgorithm::isCompatible(const TunableController& controller) const {
@@ -65,4 +65,4 @@ std::array<double, 3> DahlinAlgorithm::designDigital(const FOPDTModel& model,
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

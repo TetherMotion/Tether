@@ -13,7 +13,7 @@
 
 #include <Eigen/Dense>
 
-namespace Control {
+namespace tether::control {
 
 // External matrix functions from MatrixUtils.cpp
 extern void matMul(const double* A, const double* B, double* C, int m, int n, int p);
@@ -351,4 +351,4 @@ void matrixExponential(const double* A, double t, double* expAt, int n) {
 
 } // namespace StateSpace
 
-} // namespace Control
+} // namespace tether::control

@@ -5,7 +5,7 @@
 #include <gtest/gtest.h>
 #include "tether/control/autotuning/ClassicalTuningMethods.hpp"
 
-using Control::Autotuning::ClassicalTuningFactory;
+using tether::control::Autotuning::ClassicalTuningFactory;
 
 TEST(ClassicalTuningMethods_CompatibilityPlaceholder, Compiles) {
     // Ensure factory returns at least one classical method (behavioral check)

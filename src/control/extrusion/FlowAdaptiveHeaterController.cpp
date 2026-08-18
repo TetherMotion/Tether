@@ -10,8 +10,8 @@
 
 namespace tether::control::extrusion {
 
-::Control::ControllerOutput FlowAdaptiveHeaterController::computeImpl(
-    const ::Control::ControllerInput& input) {
+::tether::control::ControllerOutput FlowAdaptiveHeaterController::computeImpl(
+    const ::tether::control::ControllerInput& input) {
     const double dt = (input.dt > 0.0) ? input.dt : 0.1;
     const double target = input.reference;
     const double measured = input.measured;
@@ -102,7 +102,7 @@ namespace tether::control::extrusion {
     emphasis_.thermalDebt = thermalDebt_;
     emphasis_.sensorCouplingAlpha = alpha;
 
-    ::Control::ControllerOutput out = pidOut;
+    ::tether::control::ControllerOutput out = pidOut;
     out.control = pwm;
     out.feedforward = prePWM + postPWM;
     return out;

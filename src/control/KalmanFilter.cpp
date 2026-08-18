@@ -7,7 +7,7 @@
 #include <cmath>
 #include <limits>
 
-namespace Control {
+namespace tether::control {
 
 KalmanFilter::KalmanFilter(size_t n, size_t m, size_t p)
     : n_(n), m_(m), p_(p) {
@@ -157,4 +157,4 @@ void KalmanFilter::reset() {
     gain_computed_ = false;
 }
 
-} // namespace Control
+} // namespace tether::control

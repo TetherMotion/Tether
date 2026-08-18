@@ -1,6 +1,6 @@
 #include "tether/control/autotuning/classical/AMIGOMethod.hpp"
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 std::string AMIGOMethod::getName() const { return "AMIGO"; }
@@ -34,4 +34,4 @@ PIDGains AMIGOMethod::calculateGains(const FOPDTModel& model, PIDForm form) {
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

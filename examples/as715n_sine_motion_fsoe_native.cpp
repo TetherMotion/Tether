@@ -6,6 +6,7 @@
 #include <string>
 
 #include "DS402ExampleSupport.hpp"
+#include "tether/control/SineMotionController.hpp"
 #include "tether/drives/AS715N/AS715NPDO.hpp"
 #include "tether/fsoe/Synapticon/SafeMotionFSoE.hpp"
 #include "tether/platform/EspCompat.hpp"
@@ -31,15 +32,15 @@ int runSineMotion(EtherCAT::DS402Master& master,
 {
     constexpr double kAmplitudeCountsPerSecond = 30000.0;
     constexpr double kFrequencyHz = 0.25;
-    Control::SineMotionController::Config config =
-        Control::SineMotionController::Config::getDefault();
+    tether::control::SineMotionController::Config config =
+        tether::control::SineMotionController::Config::getDefault();
     config.frequency = kFrequencyHz;
     config.amplitude = kAmplitudeCountsPerSecond / (kTwoPi * kFrequencyHz);
 
-    if (!master.addSineMotionController<EtherCAT::Drives::AS715N_pdo::AS715N_RxPDO_1705>(
+    if (!master.addMotionController<EtherCAT::Drives::AS715N_pdo::AS715N_RxPDO_1705>(
             kSlaveIndex,
             EtherCAT::DS402Master::CyclicTarget::Velocity,
-            config)) {
+            std::make_unique<tether::control::SineMotionController>(config))) {
         return 2;
     }
 

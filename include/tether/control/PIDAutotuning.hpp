@@ -41,7 +41,7 @@
 #include <numeric>
 #include <limits>
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // Process Model Types
@@ -899,5 +899,5 @@ inline FOPDTModel ProcessIdentification::identifyFOPDT(
     return twoPointMethod(time, response, stepSize);
 }
 
-} // namespace Control
+} // namespace tether::control
 

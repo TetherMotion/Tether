@@ -1,6 +1,6 @@
 #include "tether/control/autotuning/model_based/DirectSynthesis.hpp"
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 bool DirectSynthesis::isCompatible(const TunableController& controller) const {
@@ -70,4 +70,4 @@ PIDGains DirectSynthesis::designForSOPDT(const SOPDTModel& model,
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

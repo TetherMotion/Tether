@@ -9,6 +9,7 @@
  */
 
 #include "tether/profiles/cia402/CiA402StateUtils.hpp"
+#include "tether/profiles/cia402/CiA402Config.hpp"
 
 #include <cstdio>
 #include <algorithm>
@@ -166,3 +167,27 @@ DriveState decodeDriveState(uint16_t statusword) {
 }
 
 } // namespace EtherCAT
+
+namespace CiA402 {
+
+const char* errorToString(uint16_t errorCode) {
+    switch (static_cast<ErrorCode>(errorCode)) {
+        case ErrorCode::None:                  return "No Error";
+        case ErrorCode::GenericError:          return "Generic Error";
+        case ErrorCode::OverCurrent:           return "Overcurrent";
+        case ErrorCode::OverVoltage:           return "Overvoltage";
+        case ErrorCode::UnderVoltage:          return "Undervoltage";
+        case ErrorCode::OverTemperature:       return "Overtemperature";
+        case ErrorCode::SupplyTemp:            return "Supply Temperature Error";
+        case ErrorCode::EncoderError:          return "Encoder Error";
+        case ErrorCode::MotorBlocked:          return "Motor Blocked";
+        case ErrorCode::FollowingError:        return "Following Error";
+        case ErrorCode::PositionLimit:         return "Position Limit";
+        case ErrorCode::VelocityLimit:         return "Velocity Limit";
+        case ErrorCode::CommunicationError:    return "Communication Error";
+        case ErrorCode::HomingError:           return "Homing Error";
+        default:                               return "Unknown Error";
+    }
+}
+
+} // namespace CiA402

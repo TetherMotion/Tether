@@ -13,7 +13,7 @@
 #include "tether/control/autotuning/model_based/PolePlacement.hpp"
 #include <vector>
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 /**
@@ -60,4 +60,4 @@ private:
 };
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

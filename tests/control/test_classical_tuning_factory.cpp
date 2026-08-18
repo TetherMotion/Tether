@@ -2,7 +2,7 @@
 
 #include "tether/control/autotuning/ClassicalTuningMethods.hpp"
 
-using Control::Autotuning::ClassicalTuningFactory;
+using tether::control::Autotuning::ClassicalTuningFactory;
 
 TEST(ClassicalTuningFactory, AvailableMethodsAreStableAndNamesAreNonEmpty) {
     auto methods = ClassicalTuningFactory::getAvailableMethods();

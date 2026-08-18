@@ -9,17 +9,13 @@ set(TETHER_MOTION_CONTROL_SOURCES
     ${TETHER_ROOT}/src/motion/MotionGenerator.cpp
 
     # CiA 402 motion control (not drive protocol, but motion logic)
-    ${TETHER_ROOT}/src/profiles/cia402/MotionController.cpp
-    ${TETHER_ROOT}/src/profiles/cia402/AxisMotion.cpp
-    ${TETHER_ROOT}/src/profiles/cia402/PathMotion.cpp
-    ${TETHER_ROOT}/src/profiles/cia402/ProfileGenerator.cpp
+    ${TETHER_ROOT}/src/motion/Cia402MotionController.cpp
     ${TETHER_ROOT}/src/profiles/cia402/MultiAxisPath.cpp
     ${TETHER_ROOT}/src/profiles/cia402/MotorModel.cpp
     ${TETHER_ROOT}/src/profiles/cia402/AdvancedMotorModelCore.cpp
     ${TETHER_ROOT}/src/profiles/cia402/AdvancedMotorModelPhysics.cpp
     ${TETHER_ROOT}/src/profiles/cia402/AdvancedMotorModelFactory.cpp
     ${TETHER_ROOT}/src/profiles/cia402/MotorModelFactory.cpp
-    ${TETHER_ROOT}/src/profiles/cia402/PIDController.cpp
 )
 
 # Filter to only existing files

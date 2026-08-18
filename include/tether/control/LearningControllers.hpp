@@ -163,7 +163,7 @@
 #include <deque>
 #include <functional>
 
-namespace Control {
+namespace tether::control {
 
 // ============================================================================
 // ILC Base Class
@@ -724,4 +724,4 @@ private:
     double m_filterAlpha{0.9};
 };
 
-} // namespace Control
+} // namespace tether::control

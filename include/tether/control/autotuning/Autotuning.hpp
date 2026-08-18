@@ -63,7 +63,7 @@
  * ```cpp
  * #include <tether/control/autotuning/Autotuning.hpp>
  * 
- * using namespace Control::Autotuning;
+ * using namespace tether::control::Autotuning;
  * 
  * // Create a tunable PID controller
  * class MyPIDController : public TunableController {
@@ -127,7 +127,7 @@
 // Industrial autotuners
 #include "IndustrialAutotuners.hpp"
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 /**
@@ -165,4 +165,4 @@ std::vector<std::string> listOfflineAutotuners();
 std::string getAutotunerDescription(const std::string& name);
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

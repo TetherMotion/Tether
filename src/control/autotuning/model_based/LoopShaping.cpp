@@ -15,7 +15,7 @@ double clamp_double(double v, double lo, double hi) {
 
 } // namespace
 
-namespace Control {
+namespace tether::control {
 namespace Autotuning {
 
 bool LoopShaping::isCompatible(const TunableController& controller) const {
@@ -117,4 +117,4 @@ TransferFunction LoopShaping::designLeadLag(const ProcessModel& plant,
 }
 
 } // namespace Autotuning
-} // namespace Control
+} // namespace tether::control

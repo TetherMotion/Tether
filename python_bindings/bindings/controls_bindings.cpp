@@ -16,7 +16,7 @@
 #include "tether/control/CompositeControllers.hpp"
 
 namespace py = pybind11;
-using namespace Control;
+using namespace tether::control;
 
 PYBIND11_MODULE(_controls, m) {
     m.doc() = "Python bindings for PID and control algorithms";

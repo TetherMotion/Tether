@@ -16,7 +16,7 @@
 #include <Eigen/Dense>
 #include <functional>
 
-namespace Control {
+namespace tether::control {
 
 /**
  * @brief Extended Kalman filter for nonlinear state estimation
@@ -163,4 +163,4 @@ private:
     bool use_numdiff_{true};
 };
 
-} // namespace Control
+} // namespace tether::control
