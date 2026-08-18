@@ -503,9 +503,8 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
         uint16_t tx_len = logical_addr_mgr_->getTxPDOLength(slave_index);
 
         fmmu_mgr.configureManual(
-            slave_configs[slave_index].sm[2].phys_start_addr, rx_len,
-            slave_configs[slave_index].sm[3].phys_start_addr, tx_len,
-            rx_log);
+            slave_configs[slave_index].sm[2].phys_start_addr, rx_len, rx_log,
+            slave_configs[slave_index].sm[3].phys_start_addr, tx_len, tx_log);
         if (!fmmu_mgr.writeToSlave(debug_flags_.fmmu && debug_flags_.fmmuFilt.allows(slave_index))) {
             TETHER_LOGE(TAG, "Slave %u: FMMU write (manual) failed", slave_index);
             return false;
