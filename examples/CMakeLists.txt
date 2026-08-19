@@ -133,6 +133,12 @@ add_tether_example(reset_slaves_al
 add_tether_example(slave_read_identity
     LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common tether_examples_common)
 
+# --- DC SYNC0/SYNC1 characterization example ---
+# Brings up a single slave, probes SYNC0/SYNC1 support, then sweeps SYNC0
+# cycle times until the slave reports an AL error.
+add_tether_example(dc_sync_characterize
+    LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common tether_examples_common)
+
 # --- Realtime kernel + network diagnostics example ---
 # Runs a fake PDO loop while sweeping priorities, frequencies and CPU affinity,
 # reporting color-coded timing, transmit latency and CPU-usage statistics.
