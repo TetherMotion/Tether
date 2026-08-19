@@ -267,6 +267,30 @@ bool EtherCATDC::initialize() {
 
     uint16_t dc_capable_count = 0;
     for (uint16_t i = 0; i < slave_count_; i++) {
+        // Check if this slave is in the sync_disabled_slaves filter.
+        // Filtered slaves get NO DC configuration at all — their DCSyncAct
+        // register is cleared to 0x00 and they are not marked dc_active,
+        // so no time sync datagrams or SYNC signals are sent to them.
+        // This is needed for slaves like the RP20 that report AL status
+        // 0x001A (Synchronization error) when the DC unit is enabled.
+        bool sync_disabled = false;
+        for (uint16_t idx : config_.sync_disabled_slaves) {
+            if (idx == i) { sync_disabled = true; break; }
+        }
+
+        if (sync_disabled) {
+            // Explicitly disable DC on this slave
+            uint8_t zero = 0x00;
+            transport_.writeRegister(i, toUInt16(DCRegisters::DCSyncAct),
+                                      &zero, sizeof(zero), 200);
+            slaves_[i].dc_supported = false;
+            slaves_[i].dc_active = false;
+            if (dc_debug_) {
+                TETHER_LOGI(TAG, "Slave[%u]: DC completely disabled by filter", i);
+            }
+            continue;
+        }
+
         if (readSlaveCapabilities(i)) {
             dc_capable_count++;
 
@@ -397,14 +421,6 @@ bool EtherCATDC::updateSyncStartTime() {
     for (uint16_t i = 0; i < slave_count_; i++) {
         if (!slaves_[i].dc_supported || !slaves_[i].dc_active) continue;
 
-        // Skip SYNC0 start time for slaves in the sync_disabled filter —
-        // they don't have SYNC0 enabled so the start time is irrelevant.
-        bool sync_disabled = false;
-        for (uint16_t idx : config_.sync_disabled_slaves) {
-            if (idx == i) { sync_disabled = true; break; }
-        }
-        if (sync_disabled) continue;
-
         // Read the slave's current local DC System Time
         uint8_t sysTime[8] = {0};
         if (!transport_.readRegister(i, toUInt16(DCRegisters::DCSysTime), sysTime, sizeof(sysTime), 200)) {
@@ -456,31 +472,6 @@ bool EtherCATDC::updateSyncStartTime() {
 bool EtherCATDC::configureSyncSignals(uint16_t slave_index) {
     if (slave_index >= slave_count_) {
         return false;
-    }
-
-    // Check if this slave is in the sync_disabled_slaves filter.
-    // These slaves still get DC time sync (offset/delay compensation) but
-    // do NOT get SYNC0/SYNC1 signal activation.
-    bool sync_disabled = false;
-    for (uint16_t idx : config_.sync_disabled_slaves) {
-        if (idx == slave_index) {
-            sync_disabled = true;
-            break;
-        }
-    }
-
-    if (sync_disabled) {
-        // Deactivate SYNC signals for this slave but still mark it as
-        // DC-active so time sync datagrams continue.
-        uint8_t sync_act = DC_SYNCACT_ENA | DC_SYNCACT_AUTO_ACT;
-        transport_.writeRegister(slave_index, toUInt16(DCRegisters::DCSyncAct),
-                                  &sync_act, sizeof(sync_act), 200);
-        slaves_[slave_index].dc_active = true;
-        if (dc_debug_) {
-            TETHER_LOGI(TAG, "Slave[%u]: SYNC0/SYNC1 disabled by filter "
-                         "(time sync still active)", slave_index);
-        }
-        return true;
     }
 
     // Build sync activation register value from config flags
