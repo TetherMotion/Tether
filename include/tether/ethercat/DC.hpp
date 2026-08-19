@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <vector>
 #include <atomic>
 #include <memory>
 
@@ -65,6 +66,10 @@ struct DCConfig {
     int32_t  sync0_shift_ns;        ///< SYNC0 shift time in nanoseconds
     bool     enable_sync0;          ///< Enable SYNC0 signal generation
     bool     enable_sync1;          ///< Enable SYNC1 signal generation
+    /// Slave indices that should NOT receive SYNC0/SYNC1 activation.
+    /// All other DC-capable slaves get SYNC signals as normal.
+    /// Empty by default (all slaves enabled).
+    std::vector<uint16_t> sync_disabled_slaves;
 
     static DCConfig defaults() {
         return DCConfig{
@@ -74,7 +79,8 @@ struct DCConfig {
             .sync1_cycle_time_ns = 0,       // SYNC1 disabled
             .sync0_shift_ns = 0,
             .enable_sync0 = true,
-            .enable_sync1 = false
+            .enable_sync1 = false,
+            .sync_disabled_slaves = {}
         };
     }
 };

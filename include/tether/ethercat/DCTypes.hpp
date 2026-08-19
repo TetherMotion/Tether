@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <vector>
 #include "tether/ethercat/TetherConfig.hpp"
 
 namespace EtherCAT {
@@ -46,6 +47,10 @@ struct DCConfig {
     int32_t  sync0_shift_ns;
     bool     enable_sync0;
     bool     enable_sync1;
+    /// Slave indices that should NOT receive SYNC0/SYNC1 activation.
+    /// All other DC-capable slaves get SYNC signals as normal.
+    /// Empty by default (all slaves enabled).
+    std::vector<uint16_t> sync_disabled_slaves;
 
     static DCConfig defaults() {
         return DCConfig{
@@ -55,7 +60,8 @@ struct DCConfig {
             .sync1_cycle_time_ns = 0,
             .sync0_shift_ns = 0,
             .enable_sync0 = true,
-            .enable_sync1 = false
+            .enable_sync1 = false,
+            .sync_disabled_slaves = {}
         };
     }
 };
