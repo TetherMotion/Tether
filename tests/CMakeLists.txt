@@ -1040,6 +1040,7 @@ gtest_discover_tests(tether_ethercat_integration_tests PROPERTIES TIMEOUT 30)
 # EtherCAT master + slave state-machine tests (needs full Master/Slave linkage)
 add_executable(tether_ethercat_master_tests
     ethercat/test_ethercat_slave.cpp
+    ethercat/test_slave_names.cpp
 )
 
 target_include_directories(tether_ethercat_master_tests PRIVATE

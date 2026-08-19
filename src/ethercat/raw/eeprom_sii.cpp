@@ -66,9 +66,9 @@ bool configure_mailbox_from_sii(
     if (!sii_ok) {
         const char* err = sii_parser.lastError();
         if (err && err[0]) {
-            TETHER_LOGW(TAG, "Slave %u: SII mailbox read failed: %s — using defaults", slave_index, err);
+            TETHER_LOGW(TAG, "%s: SII mailbox read failed: %s — using defaults", master.slaveLogPrefix(slave_index).c_str(), err);
         } else {
-            TETHER_LOGW(TAG, "Slave %u: SII mailbox read failed — using defaults", slave_index);
+            TETHER_LOGW(TAG, "%s: SII mailbox read failed — using defaults", master.slaveLogPrefix(slave_index).c_str());
         }
     }
     

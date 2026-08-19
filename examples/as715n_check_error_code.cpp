@@ -34,13 +34,13 @@ using namespace EtherCAT::Drives;
 
 static void printAS715NErrorDetails(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx, uint16_t mfr_error, uint16_t cia402_error) {
     if (mfr_error == 0 && cia402_error == 0) {
-        TETHER_LOGI(TAG, "Slave %u: no manufacturer or CiA402 error reported", slave_idx);
+        TETHER_LOGI(TAG, "%s: no manufacturer or CiA402 error reported", master.slaveLogPrefix(slave_idx).c_str());
         return;
     }
 
     auto mfr_ext = AS715NFaultHandler::readManufacturerFaultExtended(sdo, slave_idx);
-    TETHER_LOGI(TAG, "Slave %u: Manufacturer fault 0x203F (external=0x%04X internal=0x%04X)",
-               slave_idx, mfr_ext.external_code, mfr_ext.internal_code);
+    TETHER_LOGI(TAG, "%s: Manufacturer fault 0x203F (external=0x%04X internal=0x%04X)",
+               master.slaveLogPrefix(slave_idx).c_str(), mfr_ext.external_code, mfr_ext.internal_code);
     if (mfr_error != 0) {
         AS715NError err = AS715NError::parse(mfr_error);
         char name[32] = {0};
@@ -53,7 +53,7 @@ static void printAS715NErrorDetails(EtherCAT::CoE::CoEManager& sdo, uint16_t sla
                    err.isDCSyncError() ? " YES" : " NO");
     }
 
-    TETHER_LOGI(TAG, "Slave %u: CiA402 error (0x%04X / %u)", slave_idx, cia402_error, cia402_error);
+    TETHER_LOGI(TAG, "%s: CiA402 error (0x%04X / %u)", master.slaveLogPrefix(slave_idx).c_str(), cia402_error, cia402_error);
     if (cia402_error != 0) {
         TETHER_LOGI(TAG, "  - Raw CiA402 error: 0x%04X (%u)\n  - Note: CiA402 manufacturer-specific faults are reported with high-byte 0x87 (see device documentation)", cia402_error, cia402_error);
     }
@@ -80,10 +80,10 @@ static int inspectAndMaybeReset(EtherCAT::Master& master, bool do_reset, bool do
 
     TETHER_LOGI(TAG, "Requesting PREOP state for slave %u...", slave_idx);
     if (!master.transitionSlaveToPreOperational(slave_idx)) {
-        TETHER_LOGE(TAG, "Failed to bring slave %u to PREOP state", slave_idx);
+        TETHER_LOGE(TAG, "Failed to bring %s to PREOP state", master.slaveLogPrefix(slave_idx).c_str());
         return 7;
     }
-    TETHER_LOGI(TAG, "Slave %u is now in PREOP state", slave_idx);
+    TETHER_LOGI(TAG, "%s is now in PREOP state", master.slaveLogPrefix(slave_idx).c_str());
 
     // Print full parsed SII (human-readable) for diagnostics
     (void)EtherCAT::Diagnostics::logParsedSlaveSII(master, slave_idx, TAG);
@@ -93,7 +93,7 @@ static int inspectAndMaybeReset(EtherCAT::Master& master, bool do_reset, bool do
     bool has_fault = AS715NFaultHandler::checkFault(sdo, slave_idx, &mfr_error, &cia402_error);
 
     if (!has_fault) {
-        TETHER_LOGI(TAG, "Slave %u reports no fault (0x203F=0, 0x603F=0)", slave_idx);
+        TETHER_LOGI(TAG, "%s reports no fault (0x203F=0, 0x603F=0)", master.slaveLogPrefix(slave_idx).c_str());
         return 0;
     }
 
@@ -113,8 +113,8 @@ static int inspectAndMaybeReset(EtherCAT::Master& master, bool do_reset, bool do
         TETHER_LOGI(TAG, "Performing software reset via %04X:%02X (%s)...",
                    SwReg.index, SwReg.subindex, SwReg.name);
         if (!sdo.writeU16(SwReg.index, SwReg.subindex, 1, {.timeout_ms = 3000}).has_value()) {
-            TETHER_LOGE(TAG, "Slave %u: Failed to write %04X:%02X = 1 (software reset)",
-                       slave_idx, SwReg.index, SwReg.subindex);
+            TETHER_LOGE(TAG, "%s: Failed to write %04X:%02X = 1 (software reset)",
+                       master.slaveLogPrefix(slave_idx).c_str(), SwReg.index, SwReg.subindex);
             return 3;
         }
         TETHER_LOGI(TAG, "Software reset command sent to slave %u", slave_idx);
@@ -125,20 +125,20 @@ static int inspectAndMaybeReset(EtherCAT::Master& master, bool do_reset, bool do
     if (do_reset) {
         auto cw_result = sdo.readU16(0x6040, 0x00, {.timeout_ms = 3000});
         if (!cw_result.has_value()) {
-            TETHER_LOGE(TAG, "Slave %u: failed to read Controlword (0x6040) — cannot proceed with -r reset", slave_idx);
+            TETHER_LOGE(TAG, "%s: failed to read Controlword (0x6040) — cannot proceed with -r reset", master.slaveLogPrefix(slave_idx).c_str());
             return 3;
         }
         uint16_t cw = cw_result.value();
         uint16_t new_cw = static_cast<uint16_t>(cw & ~static_cast<uint16_t>(0x0001)); // clear Switch-On bit (bit 0)
         if (new_cw != cw) {
-            TETHER_LOGI(TAG, "Slave %u: clearing Switch-On bit in Controlword (0x6040): 0x%04X -> 0x%04X", slave_idx, cw, new_cw);
+            TETHER_LOGI(TAG, "%s: clearing Switch-On bit in Controlword (0x6040): 0x%04X -> 0x%04X", master.slaveLogPrefix(slave_idx).c_str(), cw, new_cw);
             if (!sdo.writeU16(0x6040, 0x00, new_cw, {.timeout_ms = 3000}).has_value()) {
-                TETHER_LOGE(TAG, "Slave %u: failed to write Controlword (0x6040) to clear Switch-On bit", slave_idx);
+                TETHER_LOGE(TAG, "%s: failed to write Controlword (0x6040) to clear Switch-On bit", master.slaveLogPrefix(slave_idx).c_str());
                 return 3;
             }
             Tether::Platform::Clock::instance().delayMilliseconds(50);
         } else {
-            TETHER_LOGD(TAG, "Slave %u: Switch-On bit already cleared (Controlword=0x%04X)", slave_idx, cw);
+            TETHER_LOGD(TAG, "%s: Switch-On bit already cleared (Controlword=0x%04X)", master.slaveLogPrefix(slave_idx).c_str(), cw);
         }
         (void)cw; // used in log above
     }
@@ -165,12 +165,12 @@ static int inspectAndMaybeReset(EtherCAT::Master& master, bool do_reset, bool do
 
         // Follow the 0 -> 1 -> 0 sequence the device expects.
         if (!sdo.writeU16(Reg.index, Reg.subindex, 0, {.timeout_ms = 3000}).has_value()) {
-            TETHER_LOGE(TAG, "Slave %u: Failed to write %04X:%02X = 0", slave_idx, Reg.index, Reg.subindex);
+            TETHER_LOGE(TAG, "%s: Failed to write %04X:%02X = 0", master.slaveLogPrefix(slave_idx).c_str(), Reg.index, Reg.subindex);
             reset_ok = false;
         } else {
             Tether::Platform::Clock::instance().delayMilliseconds(50);
             if (!sdo.writeU16(Reg.index, Reg.subindex, 1, {.timeout_ms = 3000}).has_value()) {
-                TETHER_LOGE(TAG, "Slave %u: Failed to write %04X:%02X = 1", slave_idx, Reg.index, Reg.subindex);
+                TETHER_LOGE(TAG, "%s: Failed to write %04X:%02X = 1", master.slaveLogPrefix(slave_idx).c_str(), Reg.index, Reg.subindex);
                 reset_ok = false;
             } else {
                 Tether::Platform::Clock::instance().delayMilliseconds(200);

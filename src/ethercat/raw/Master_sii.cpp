@@ -236,21 +236,21 @@ bool Master::autoConfigureMailbox(const ESIFile& esi, SlaveAddress slave_address
     }
 
     if (esi.empty()) {
-        TETHER_LOGE(local_tag, "Slave %u: ESI file is empty — cannot auto-configure mailbox from ESI",
-                    (unsigned)slave_index);
+        TETHER_LOGE(local_tag, "%s: ESI file is empty — cannot auto-configure mailbox from ESI",
+                    slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
     auto id = readEsiMatchId(*this, slave_index);
     const ESI::DeviceInfo* dev = esi.findDevice(id.vendorId, id.productCode);
     if (!dev) {
-        TETHER_LOGE(local_tag, "Slave %u: ESI file has no devices", (unsigned)slave_index);
+        TETHER_LOGE(local_tag, "%s: ESI file has no devices", slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
     if (log_level >= Tether::Platform::LogLevel::Debug) {
-        TETHER_LOGD(local_tag, "Slave %u: ESI device '%s' matched (vendor=0x%08X product=0x%08X)",
-                    (unsigned)slave_index, dev->name.c_str(), dev->vendorId, dev->productCode);
+        TETHER_LOGD(local_tag, "%s: ESI device '%s' matched (vendor=0x%08X product=0x%08X)",
+                    slaveLogPrefix(slave_index).c_str(), dev->name.c_str(), dev->vendorId, dev->productCode);
     }
 
     // Extract MBoxOut (master write, SM0) and MBoxIn (slave read, SM1)
@@ -263,8 +263,8 @@ bool Master::autoConfigureMailbox(const ESIFile& esi, SlaveAddress slave_address
         wr_addr = mbxOut->startAddress;
         wr_len  = mbxOut->defaultSize;
     } else {
-        TETHER_LOGW(local_tag, "Slave %u: ESI has no MBoxOut — using default 0x1000/256",
-                    (unsigned)slave_index);
+        TETHER_LOGW(local_tag, "%s: ESI has no MBoxOut — using default 0x1000/256",
+                    slaveLogPrefix(slave_index).c_str());
         wr_addr = 0x1000; wr_len = 256;
     }
     if (mbxIn) {
@@ -272,8 +272,8 @@ bool Master::autoConfigureMailbox(const ESIFile& esi, SlaveAddress slave_address
         rd_addr = mbxIn->startAddress;
         rd_len  = mbxIn->defaultSize;
     } else {
-        TETHER_LOGW(local_tag, "Slave %u: ESI has no MBoxIn — using default 0x1200/256",
-                    (unsigned)slave_index);
+        TETHER_LOGW(local_tag, "%s: ESI has no MBoxIn — using default 0x1200/256",
+                    slaveLogPrefix(slave_index).c_str());
         rd_addr = 0x1200; rd_len = 256;
     }
 
@@ -284,12 +284,12 @@ bool Master::autoConfigureMailbox(const ESIFile& esi, SlaveAddress slave_address
 
     if (log_level >= Tether::Platform::LogLevel::Debug) {
         TETHER_LOGD(local_tag,
-            "Slave %u: ESI mailbox params: wr=0x%04X/%u rd=0x%04X/%u proto=0x%04X",
-            (unsigned)slave_index, wr_addr, (unsigned)wr_len,
+            "%s: ESI mailbox params: wr=0x%04X/%u rd=0x%04X/%u proto=0x%04X",
+            slaveLogPrefix(slave_index).c_str(), wr_addr, (unsigned)wr_len,
             rd_addr, (unsigned)rd_len, proto);
     } else {
-        TETHER_LOGI(local_tag, "Slave %u: Auto-configuring mailbox from ESI (wr=0x%04X/%u rd=0x%04X/%u proto=0x%04X)",
-                    (unsigned)slave_index, wr_addr, (unsigned)wr_len,
+        TETHER_LOGI(local_tag, "%s: Auto-configuring mailbox from ESI (wr=0x%04X/%u rd=0x%04X/%u proto=0x%04X)",
+                    slaveLogPrefix(slave_index).c_str(), wr_addr, (unsigned)wr_len,
                     rd_addr, (unsigned)rd_len, proto);
     }
 
@@ -332,14 +332,14 @@ bool Master::configureProcessDataSyncManagersFromESI(const ESIFile& esi,
     }
 
     if (esi.empty()) {
-        TETHER_LOGE(TAG, "Slave %u: ESI file is empty — cannot configure PDO SMs from ESI", slave_index);
+        TETHER_LOGE(TAG, "%s: ESI file is empty — cannot configure PDO SMs from ESI", slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
     auto id = readEsiMatchId(*this, slave_index);
     const ESI::DeviceInfo* dev = esi.findDevice(id.vendorId, id.productCode);
     if (!dev) {
-        TETHER_LOGE(TAG, "Slave %u: ESI file has no devices", slave_index);
+        TETHER_LOGE(TAG, "%s: ESI file has no devices", slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
@@ -347,7 +347,7 @@ bool Master::configureProcessDataSyncManagersFromESI(const ESIFile& esi,
     const ESI::SyncManagerEntry* smIn  = findEsiSmByName(*dev, "Inputs");
 
     if (!smOut || !smIn) {
-        TETHER_LOGE(TAG, "Slave %u: ESI missing Outputs/Inputs sync managers", slave_index);
+        TETHER_LOGE(TAG, "%s: ESI missing Outputs/Inputs sync managers", slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
@@ -368,12 +368,12 @@ bool Master::configureProcessDataSyncManagersFromESI(const ESIFile& esi,
     slave_configs[slave_index].sm[3].type = PDO::SyncManagerType::ProcessInput;
 
     if (!pdo_->configureSlavesSMs(slave_index)) {
-        TETHER_LOGE(TAG, "Slave %u: Failed to write PDO SM registers from ESI", slave_index);
+        TETHER_LOGE(TAG, "%s: Failed to write PDO SM registers from ESI", slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
-    TETHER_LOGI(TAG, "Slave %u: PDO SMs configured from ESI (SM2=0x%04X/%u, SM3=0x%04X/%u)",
-                slave_index, smOut->startAddress, smOut->defaultSize,
+    TETHER_LOGI(TAG, "%s: PDO SMs configured from ESI (SM2=0x%04X/%u, SM3=0x%04X/%u)",
+                slaveLogPrefix(slave_index).c_str(), smOut->startAddress, smOut->defaultSize,
                 smIn->startAddress, smIn->defaultSize);
     return true;
 }
@@ -387,7 +387,7 @@ void Master::logDiscoveredSlavesSummary(const char* tag)
         EtherCAT::SII::SIIData sii_data;
         if (EtherCAT::SII::readSII(*this, i, sii_data)) {
             // Detailed summary handled by SII module
-            EtherCAT::SII::logSIISummary(sii_data, i, tag);
+            EtherCAT::SII::logSIISummary(sii_data, slaveLogPrefix(i), tag);
         }
         else {
             // Fallback: try reading identity only
@@ -417,7 +417,7 @@ bool Master::verifySlaveIdentity(uint16_t slave_index,
 {
     EtherCAT::SII::SIIIdentity id;
     if (!EtherCAT::SII::readSIIIdentity(*this, slave_index, id)) {
-        TETHER_LOGE(tag, "Slave %u: Failed to read SII identity", slave_index);
+        TETHER_LOGE(tag, "%s: Failed to read SII identity", slaveLogPrefix(slave_index).c_str());
         if (exit_on_error) {
             stop();
             std::exit(1);

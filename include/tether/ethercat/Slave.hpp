@@ -164,6 +164,20 @@ public:
     /** @brief Auto-increment ADP for this slave. */
     uint16_t adp() const;
 
+    // -- Human-readable name ------------------------------------------------
+
+    /** @brief Assign a human-readable name to this slave (used in log messages). */
+    void setName(std::string name);
+
+    /** @brief The human-readable name assigned to this slave, or empty if unset. */
+    std::string_view name() const;
+
+    /**
+     * @brief Log prefix for this slave.
+     * Returns "Slave <name> (#<index>)" if a name is set, else "Slave <index>".
+     */
+    std::string logPrefix() const;
+
     // -- Debug flags --------------------------------------------------------
 
     /** @brief Update the per-slave debug flags distributed by the master. */

@@ -48,6 +48,8 @@
 #include <functional>
 #include <array>
 #include <memory>
+#include <format>
+#include <string>
 #include "profiles/cia301/CiA301Defs.hpp"
 #include "profiles/cia301/CiA402Defs.hpp"
 #include "tether/drives/DynaDrive/Registers/Statusword.hpp"
@@ -100,6 +102,13 @@ public:
     // ========================================================================
 
     uint16_t slaveIndex() const { return m_slave_index; }
+
+    /// @brief Log prefix for this drive (delegates to Master's per-slave name).
+    /// Returns "Slave <name> (#<index>)" if a name is set, else "Slave <index>".
+    std::string logPrefix() const {
+        if (m_master) return m_master->slaveLogPrefix(m_slave_index);
+        return std::format("Slave {}", m_slave_index);
+    }
 
     /**
      * @brief Assign fixed (slave-defined) PDOs to SM2 / SM3

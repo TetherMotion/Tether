@@ -127,7 +127,7 @@ void logSlaveApplicationLayerDiagnostics(
                     state,
                     EtherCAT::Master::getECStateName(state));
     } else {
-        TETHER_LOGW(tag, "Slave %u: failed to read EC state (possible WKC=0 / transport issue)", slave_index);
+        TETHER_LOGW(tag, "%s: failed to read EC state (possible WKC=0 / transport issue)", master.slaveLogPrefix(slave_index).c_str());
     }
 
     uint16_t al_status = 0;

@@ -18,6 +18,7 @@
 
 #include <cinttypes>
 #include <cstring>
+#include <string>
 
 namespace EtherCAT {
 namespace SII {
@@ -329,10 +330,10 @@ void debugSIIMailboxDerivation(Master& master, uint16_t slave_index, const char*
     TETHER_LOGI(tag, "\n╔══════════════════════════════════════════════════════════════╗\n║  End of SII Mailbox Derivation Debug                          ║\n╚══════════════════════════════════════════════════════════════╝\n");
 }
 
-void logSIISummary(const SIIData& data, uint16_t slave_index, const char* tag) {
-    TETHER_LOGI(tag, "Slave %u: %s (Vendor=0x%08" PRIx32 " Product=0x%08" PRIx32 ") "
+void logSIISummary(const SIIData& data, std::string_view log_prefix, const char* tag) {
+    TETHER_LOGI(tag, "%s: %s (Vendor=0x%08" PRIx32 " Product=0x%08" PRIx32 ") "
              "SM:%zu RxPDO:%zu/%zuB TxPDO:%zu/%zuB %s",
-             slave_index,
+             std::string(log_prefix).c_str(),
              data.deviceName(),
              data.identity.vendor_id,
              data.identity.product_code,

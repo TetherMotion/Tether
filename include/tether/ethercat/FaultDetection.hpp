@@ -43,6 +43,8 @@
 #include <functional>
 #include <array>
 #include <algorithm>
+#include <format>
+#include <string>
 #include "tether/ethercat/TetherConfig.hpp"
 
 namespace EtherCAT {
@@ -395,6 +397,14 @@ public:
      */
     void setCallback(FaultCallback callback);
 
+    // ----- Log Prefix (set by Master from per-slave name) -----
+
+    /// @brief Set a function that returns the log prefix for a given slave index.
+    /// Called by Master to inject per-slave names into fault detection logs.
+    void setPrefixProvider(std::function<std::string(uint16_t)> provider) {
+        prefix_provider_ = std::move(provider);
+    }
+
     // ----- Diagnostics -----
 
     /**
@@ -413,6 +423,13 @@ private:
     uint16_t slave_count_ = 0;
     bool initialized_ = false;
     FaultCallback fault_callback_;
+    std::function<std::string(uint16_t)> prefix_provider_;
+
+    /// Build the log prefix for a slave (uses prefix_provider_ if set, else default)
+    std::string slavePrefix(uint16_t idx) const {
+        if (prefix_provider_) return prefix_provider_(idx);
+        return std::format("Slave {}", idx);
+    }
 };
 
 // ============================================================================

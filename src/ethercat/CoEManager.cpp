@@ -18,6 +18,7 @@
 #include <cstring>
 #include <algorithm>
 #include <vector>
+#include <format>
 
 namespace EtherCAT {
 namespace CoE {
@@ -222,12 +223,12 @@ bool CoEManager::init() {
         state_.worker_thread = std::make_unique<std::thread>(&CoEManager::workerLoop, this);
         state_.worker_running.store(true);
     } catch (...) {
-        TETHER_LOGE(TAG, "Slave %u: Failed to create CoE worker thread", slave_index_);
+        TETHER_LOGE(TAG, "%s: Failed to create CoE worker thread", log_prefix_.c_str());
         return false;
     }
 
     initialized_.store(true);
-    TETHER_LOGI(TAG, "CoEManager initialized for slave %u", slave_index_);
+    TETHER_LOGI(TAG, "%s: CoEManager initialized", log_prefix_.c_str());
     return true;
 }
 
@@ -284,7 +285,7 @@ void CoEManager::deinit() {
     next_request_id_.store(1);
     state_.shutdown_requested.store(false);
 
-    TETHER_LOGI(TAG, "CoEManager deinitialized for slave %u", slave_index_);
+    TETHER_LOGI(TAG, "%s: CoEManager deinitialized", log_prefix_.c_str());
 }
 
 bool CoEManager::isInitialized() const {
@@ -304,8 +305,8 @@ void CoEManager::configureMailbox(uint16_t mbx_write_addr, uint16_t mbx_write_le
     mbx_.mbx_counter = 1;
     mbx_.configured  = true;
 
-    TETHER_LOGI(TAG, "Slave %u mailbox: Receive(SM0/MbxIn)=0x%04x/%u, Send(SM1/MbxOut)=0x%04x/%u",
-             slave_index_, mbx_write_addr, mbx_write_len, mbx_read_addr, mbx_read_len);
+    TETHER_LOGI(TAG, "%s: mailbox: Receive(SM0/MbxIn)=0x%04x/%u, Send(SM1/MbxOut)=0x%04x/%u",
+             log_prefix_.c_str(), mbx_write_addr, mbx_write_len, mbx_read_addr, mbx_read_len);
 }
 
 bool CoEManager::getMailbox(uint16_t* mbx_write_addr, uint16_t* mbx_write_len,
@@ -350,7 +351,7 @@ bool CoEManager::sdoUploadWithRetry(uint16_t index, uint8_t subindex,
                                     const CoETransactionOptions& options) {
     uint16_t wr_addr = 0, wr_len = 0, rd_addr = 0, rd_len = 0;
     if (!resolveMailbox(wr_addr, wr_len, rd_addr, rd_len)) {
-        TETHER_LOGE(TAG, "Slave %u: sdoUploadWithRetry: mailbox not configured", slave_index_);
+        TETHER_LOGE(TAG, "%s: sdoUploadWithRetry: mailbox not configured", log_prefix_.c_str());
         return false;
     }
 
@@ -365,8 +366,8 @@ bool CoEManager::sdoUploadWithRetry(uint16_t index, uint8_t subindex,
         : subindex;
 
     if (options.complete_access) {
-        TETHER_LOGI(TAG, "Slave %u: SDO upload 0x%04X:%u (Complete Access) cap=%zu",
-                    slave_index_, index, subindex, out_cap);
+        TETHER_LOGI(TAG, "%s: SDO upload 0x%04X:%u (Complete Access) cap=%zu",
+                    log_prefix_.c_str(), index, subindex, out_cap);
     }
 
     last_sdo_abort_code_.store(0, std::memory_order_relaxed);
@@ -397,20 +398,20 @@ bool CoEManager::sdoUploadWithRetry(uint16_t index, uint8_t subindex,
         if (abort_code != 0) {
             last_sdo_abort_code_.store(abort_code, std::memory_order_relaxed);
             Raw::SDOErrorDecoder decoder;
-            TETHER_LOGE(TAG, "Slave %u: SDO upload 0x%04X:%u aborted by slave — code 0x%08X (%s). Attempted read buffer capacity: %zu bytes. Not retrying.",
-                        slave_index_, index, subindex, abort_code,
+            TETHER_LOGE(TAG, "%s: SDO upload 0x%04X:%u aborted by slave — code 0x%08X (%s). Attempted read buffer capacity: %zu bytes. Not retrying.",
+                        log_prefix_.c_str(), index, subindex, abort_code,
                         decoder.sdoAbortCodeStr(abort_code), out_cap);
             return false;
         }
 
         if (attempt + 1 < max_attempts) {
-            TETHER_LOGW(TAG, "Slave %u: SDO upload 0x%04X:%u failed on attempt %u/%u, retrying",
-                        slave_index_, index, subindex, attempt + 1, max_attempts);
+            TETHER_LOGW(TAG, "%s: SDO upload 0x%04X:%u failed on attempt %u/%u, retrying",
+                        log_prefix_.c_str(), index, subindex, attempt + 1, max_attempts);
         }
     }
 
-    TETHER_LOGE(TAG, "Slave %u: SDO upload 0x%04X:%u failed after %u attempts",
-                slave_index_, index, subindex, max_attempts);
+    TETHER_LOGE(TAG, "%s: SDO upload 0x%04X:%u failed after %u attempts",
+                log_prefix_.c_str(), index, subindex, max_attempts);
     return false;
 }
 
@@ -419,7 +420,7 @@ bool CoEManager::sdoDownloadWithRetry(uint16_t index, uint8_t subindex,
                                       const CoETransactionOptions& options) {
     uint16_t wr_addr = 0, wr_len = 0, rd_addr = 0, rd_len = 0;
     if (!resolveMailbox(wr_addr, wr_len, rd_addr, rd_len)) {
-        TETHER_LOGE(TAG, "Slave %u: sdoDownloadWithRetry: mailbox not configured", slave_index_);
+        TETHER_LOGE(TAG, "%s: sdoDownloadWithRetry: mailbox not configured", log_prefix_.c_str());
         return false;
     }
 
@@ -428,8 +429,8 @@ bool CoEManager::sdoDownloadWithRetry(uint16_t index, uint8_t subindex,
         : subindex;
 
     if (options.complete_access) {
-        TETHER_LOGI(TAG, "Slave %u: SDO download 0x%04X:%u (Complete Access) %zu bytes",
-                    slave_index_, index, subindex, data_len);
+        TETHER_LOGI(TAG, "%s: SDO download 0x%04X:%u (Complete Access) %zu bytes",
+                    log_prefix_.c_str(), index, subindex, data_len);
     }
 
     last_sdo_abort_code_.store(0, std::memory_order_relaxed);
@@ -460,20 +461,20 @@ bool CoEManager::sdoDownloadWithRetry(uint16_t index, uint8_t subindex,
         if (abort_code != 0) {
             last_sdo_abort_code_.store(abort_code, std::memory_order_relaxed);
             Raw::SDOErrorDecoder decoder;
-            TETHER_LOGE(TAG, "Slave %u: SDO download 0x%04X:%u aborted by slave — code 0x%08X (%s). Attempted payload length: %zu bytes. Not retrying.",
-                        slave_index_, index, subindex, abort_code,
+            TETHER_LOGE(TAG, "%s: SDO download 0x%04X:%u aborted by slave — code 0x%08X (%s). Attempted payload length: %zu bytes. Not retrying.",
+                        log_prefix_.c_str(), index, subindex, abort_code,
                         decoder.sdoAbortCodeStr(abort_code), data_len);
             return false;
         }
 
         if (attempt + 1 < max_attempts) {
-            TETHER_LOGW(TAG, "Slave %u: SDO download 0x%04X:%u failed on attempt %u/%u, retrying",
-                        slave_index_, index, subindex, attempt + 1, max_attempts);
+            TETHER_LOGW(TAG, "%s: SDO download 0x%04X:%u failed on attempt %u/%u, retrying",
+                        log_prefix_.c_str(), index, subindex, attempt + 1, max_attempts);
         }
     }
 
-    TETHER_LOGE(TAG, "Slave %u: SDO download 0x%04X:%u failed after %u attempts",
-                slave_index_, index, subindex, max_attempts);
+    TETHER_LOGE(TAG, "%s: SDO download 0x%04X:%u failed after %u attempts",
+                log_prefix_.c_str(), index, subindex, max_attempts);
     return false;
 }
 
@@ -486,7 +487,7 @@ void CoEManager::logALStatusAfterRequest() {
     uint16_t al_code = 0;
 
     if (!transport_.readSlaveRegister(slave_index_, 0x0130, &al_status, sizeof(al_status), 200)) {
-        TETHER_LOGW(TAG, "Slave %u: post-SDO AL_STATUS read FAILED", slave_index_);
+        TETHER_LOGW(TAG, "%s: post-SDO AL_STATUS read FAILED", log_prefix_.c_str());
         return;
     }
     if (!transport_.readSlaveRegister(slave_index_, 0x0134, &al_code, sizeof(al_code), 200)) {
@@ -494,8 +495,8 @@ void CoEManager::logALStatusAfterRequest() {
     }
 
     if (al_status_has_error(al_status) || al_code != 0) {
-        TETHER_LOGE(TAG, "Slave %u: post-SDO AL_STATUS=0x%04X (%s)%s | AL status code: %s (0x%04X)",
-                    slave_index_,
+        TETHER_LOGE(TAG, "%s: post-SDO AL_STATUS=0x%04X (%s)%s | AL status code: %s (0x%04X)",
+                    log_prefix_.c_str(),
                     al_status,
                     al_status_get_state_name(al_status),
                     al_status_has_error(al_status) ? " ERROR" : "",
@@ -641,8 +642,8 @@ std::future<CoEResult<void>> CoEManager::write(uint16_t index, uint8_t subindex,
                                                 const void* data, size_t size,
                                                 CoETransactionOptions options) {
     if (debug_flags_.coeWrites) {
-        TETHER_LOGI(TAG, "Slave %u: CoE write START index=0x%04X:%u size=%zu",
-                    slave_index_, index, subindex, size);
+        TETHER_LOGI(TAG, "%s: CoE write START index=0x%04X:%u size=%zu",
+                    log_prefix_.c_str(), index, subindex, size);
     }
 
     CoEWriteTransaction txn;
@@ -673,10 +674,10 @@ std::future<CoEResult<void>> CoEManager::write(uint16_t index, uint8_t subindex,
         if (state_.write_queue.size() >= kMaxQueueDepth) {
             if (debug_flags_.coeWrites) {
                 TETHER_LOGI(TAG,
-                    "Slave %u: CoE write QUEUE FULL (index=0x%04X:%u, "
+                    "%s: CoE write QUEUE FULL (index=0x%04X:%u, "
                     "Tether max=%zu pending). This is a Tether limit, not a slave limit. "
                     "Increase ECAT_COE_QUEUE_DEPTH in TetherConfig.hpp.",
-                    slave_index_, index, subindex, kMaxQueueDepth);
+                    log_prefix_.c_str(), index, subindex, kMaxQueueDepth);
             }
             CoEWriteTransaction fail_txn;
             fail_txn.promise.set_value(std::unexpected(CoEError::QueueFull));
@@ -687,8 +688,8 @@ std::future<CoEResult<void>> CoEManager::write(uint16_t index, uint8_t subindex,
     state_.work_cv.notify_one();
 
     if (debug_flags_.coeWrites) {
-        TETHER_LOGI(TAG, "Slave %u: CoE write ENQUEUED index=0x%04X:%u",
-                    slave_index_, index, subindex);
+        TETHER_LOGI(TAG, "%s: CoE write ENQUEUED index=0x%04X:%u",
+                    log_prefix_.c_str(), index, subindex);
     }
     return future;
 }
@@ -701,8 +702,8 @@ CoEResult<void> CoEManager::writeSync(uint16_t index, uint8_t subindex,
                                        const void* data, size_t size,
                                        CoETransactionOptions options) {
     if (debug_flags_.coeWrites) {
-        TETHER_LOGI(TAG, "Slave %u: CoE writeSync index=0x%04X:%u size=%zu",
-                    slave_index_, index, subindex, size);
+        TETHER_LOGI(TAG, "%s: CoE writeSync index=0x%04X:%u size=%zu",
+                    log_prefix_.c_str(), index, subindex, size);
     }
     return write(index, subindex, data, size, options).get();
 }
@@ -711,8 +712,8 @@ bool CoEManager::readSync(uint16_t index, uint8_t subindex,
                            void* data, size_t max_size, uint32_t timeout_ms,
                            size_t* actual_size) {
     if (debug_flags_.coeReads) {
-        TETHER_LOGI(TAG, "Slave %u: CoE readSync index=0x%04X:%u max_size=%zu",
-                    slave_index_, index, subindex, max_size);
+        TETHER_LOGI(TAG, "%s: CoE readSync index=0x%04X:%u max_size=%zu",
+                    log_prefix_.c_str(), index, subindex, max_size);
     }
     CoETransactionOptions opts;
     opts.timeout_ms = timeout_ms;
@@ -796,7 +797,7 @@ size_t CoEManager::totalPendingCount() const {
 // ============================================================================
 
 void CoEManager::workerLoop() {
-    TETHER_LOGI(TAG, "Slave %u: CoE worker thread started", slave_index_);
+    TETHER_LOGI(TAG, "%s: CoE worker thread started", log_prefix_.c_str());
 
     while (!state_.shutdown_requested.load()) {
         {
@@ -818,8 +819,8 @@ void CoEManager::workerLoop() {
                 lock.unlock();
 
                 if (request_in_flight_.exchange(true)) {
-                    TETHER_LOGW(TAG, "Slave %u: CoE read started while previous request in flight — stale response possible",
-                                slave_index_);
+                    TETHER_LOGW(TAG, "%s: CoE read started while previous request in flight — stale response possible",
+                                log_prefix_.c_str());
                 }
                 try {
                     txn->execute(*this);
@@ -829,9 +830,9 @@ void CoEManager::workerLoop() {
                     request_in_flight_.store(false);
                     txn->deliver();
                 } catch (const std::exception& e) {
-                    TETHER_LOGE(TAG, "Slave %u: CoE read threw: %s", slave_index_, e.what());
+                    TETHER_LOGE(TAG, "%s: CoE read threw: %s", log_prefix_.c_str(), e.what());
                 } catch (...) {
-                    TETHER_LOGE(TAG, "Slave %u: CoE read threw unknown exception", slave_index_);
+                    TETHER_LOGE(TAG, "%s: CoE read threw unknown exception", log_prefix_.c_str());
                 }
                 request_in_flight_.store(false);
                 continue;
@@ -847,8 +848,8 @@ void CoEManager::workerLoop() {
 
                 auto& txn = entry.txn;
                 if (request_in_flight_.exchange(true)) {
-                    TETHER_LOGW(TAG, "Slave %u: CoE write started while previous request in flight — stale response possible",
-                                slave_index_);
+                    TETHER_LOGW(TAG, "%s: CoE write started while previous request in flight — stale response possible",
+                                log_prefix_.c_str());
                 }
                 bool ok = false;
                 try {
@@ -862,9 +863,9 @@ void CoEManager::workerLoop() {
                         txn.data.data(), txn.data.size(),
                         txn.options);
                 } catch (const std::exception& e) {
-                    TETHER_LOGE(TAG, "Slave %u: CoE write threw: %s", slave_index_, e.what());
+                    TETHER_LOGE(TAG, "%s: CoE write threw: %s", log_prefix_.c_str(), e.what());
                 } catch (...) {
-                    TETHER_LOGE(TAG, "Slave %u: CoE write threw unknown exception", slave_index_);
+                    TETHER_LOGE(TAG, "%s: CoE write threw unknown exception", log_prefix_.c_str());
                 }
                 request_in_flight_.store(false);
 
@@ -885,7 +886,7 @@ void CoEManager::workerLoop() {
     }
 
     state_.worker_running.store(false);
-    TETHER_LOGI(TAG, "Slave %u: CoE worker thread stopped", slave_index_);
+    TETHER_LOGI(TAG, "%s: CoE worker thread stopped", log_prefix_.c_str());
 }
 
 // ============================================================================
@@ -949,11 +950,11 @@ void CoEReadTransactionImpl<T>::execute(CoEManager& mgr) {
         // received length and the expected length so the caller can correct
         // the read type instead of chasing a misleading "transport" error.
         TETHER_LOGE(TAG,
-                    "Slave %u: SDO upload 0x%04X:%u succeeded but response size "
+                    "%s: SDO upload 0x%04X:%u succeeded but response size "
                     "does not match requested type: got %zu byte(s), expected %zu. "
                     "Use a smaller typed read (e.g. sdoReadU8 for a 1-byte object) "
                     "or read as a raw byte vector.",
-                    mgr.slaveIndex(), txn_.index, txn_.subindex,
+                    mgr.logPrefix().c_str(), txn_.index, txn_.subindex,
                     out_len, sizeof(T));
         result_ = CoEResult<T>(std::unexpected(CoEError::InternalError));
         return;
@@ -969,10 +970,10 @@ void CoEReadTransactionImpl<T>::execute(CoEManager& mgr) {
         // warning for this transaction.
         if (!txn_.options.allow_trailing_bytes) {
             TETHER_LOGW(TAG,
-                        "Slave %u: SDO upload 0x%04X:%u returned %zu bytes, only "
+                        "%s: SDO upload 0x%04X:%u returned %zu bytes, only "
                         "the first %zu are used for the requested typed read (trailing "
                         "%zu byte(s) discarded).",
-                        mgr.slaveIndex(), txn_.index, txn_.subindex,
+                        mgr.logPrefix().c_str(), txn_.index, txn_.subindex,
                         out_len, sizeof(T), out_len - sizeof(T));
         }
     }
