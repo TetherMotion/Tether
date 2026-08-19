@@ -170,6 +170,21 @@ DriveState decodeDriveState(uint16_t statusword) {
 
 namespace CiA402 {
 
+const char* getOperatingModeName(int8_t mode) {
+    switch (static_cast<OperatingMode>(mode)) {
+        case OperatingMode::ProfilePosition:      return "PP";
+        case OperatingMode::Velocity:             return "VL";
+        case OperatingMode::ProfileVelocity:      return "PV";
+        case OperatingMode::ProfileTorque:        return "PT";
+        case OperatingMode::Homing:               return "HM";
+        case OperatingMode::InterpolatedPosition: return "IP";
+        case OperatingMode::CyclicSyncPosition:   return "CSP";
+        case OperatingMode::CyclicSyncVelocity:   return "CSV";
+        case OperatingMode::CyclicSyncTorque:     return "CST";
+        default:                                  return "Unknown";
+    }
+}
+
 const char* errorToString(uint16_t errorCode) {
     switch (static_cast<ErrorCode>(errorCode)) {
         case ErrorCode::None:                  return "No Error";

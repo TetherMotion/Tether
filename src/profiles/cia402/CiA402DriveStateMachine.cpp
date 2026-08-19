@@ -526,8 +526,6 @@ uint16_t CiA402Drive::getStatusword() {
 }
 
 bool CiA402Drive::enable(uint32_t timeout_ms) {
-    TETHER_LOGI(TAG, "Slave %u: Enabling drive...", m_slave_index);
-    
     // Reset any fault first
     DriveState state = getDriveState();
     if (state == DriveState::Fault) {
@@ -568,7 +566,7 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
         }
     }
     
-    TETHER_LOGI(TAG, "Slave %u: Drive enabled", m_slave_index);
+    TETHER_LOGI(TAG, "Slave %u: Drive enabled successfully", m_slave_index);
     return true;
 }
 
@@ -721,8 +719,6 @@ bool CiA402Drive::setOperatingMode(int8_t mode) {
         static_cast<uint16_t>(CiA402::Register::ModesOfOperation), 0, umode,
         {.timeout_ms = m_sdo_timeout_ms});
     if (write_res.has_value()) {
-        TETHER_LOGI(TAG, "Slave %u: Operating mode set to %d via SDO", m_slave_index, mode);
-
         // Read back mode display to verify
         uint8_t mode_display = 0;
         Tether::Platform::Clock::instance().delayMilliseconds(50); // Give drive time to process
@@ -731,10 +727,18 @@ bool CiA402Drive::setOperatingMode(int8_t mode) {
             {.timeout_ms = m_sdo_timeout_ms});
         if (read_res.has_value()) {
             mode_display = read_res.value();
-            TETHER_LOGI(TAG, "Slave %u: Mode Display readback via SDO = %d (expected %d)",
-                     m_slave_index, (int8_t)mode_display, mode);
+            if (static_cast<int8_t>(mode_display) == mode) {
+                TETHER_LOGI(TAG, "Slave %u: Operating mode set to %s (%d), readback successful",
+                         m_slave_index, CiA402::getOperatingModeName(mode), mode);
+            } else {
+                TETHER_LOGW(TAG, "Slave %u: Operating mode set to %s (%d), readback mismatch: %s (%d)",
+                         m_slave_index, CiA402::getOperatingModeName(mode), mode,
+                         CiA402::getOperatingModeName(static_cast<int8_t>(mode_display)),
+                         (int8_t)mode_display);
+            }
         } else {
-            TETHER_LOGW(TAG, "Slave %u: Failed to read Mode Display via SDO", m_slave_index);
+            TETHER_LOGW(TAG, "Slave %u: Operating mode set to %s (%d), readback failed",
+                     m_slave_index, CiA402::getOperatingModeName(mode), mode);
         }
         return true;
     }

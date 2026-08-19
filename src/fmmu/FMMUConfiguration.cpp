@@ -60,13 +60,16 @@ FMMUManager::FMMUManager(IFMMUTransport& transport)
 
 bool FMMUManager::configureFromSii(const SII::SIIData* sii,
                                     const PDO::SlaveConfig* sm_config,
-                                    uint32_t base_logical_addr) {
+                                    uint32_t base_logical_addr,
+                                    bool fmmu_debug) {
     config_.clear();
     config_.next_logical_addr = base_logical_addr;
 
     size_t sii_fmmu_count = sii ? sii->fmmu_count : 0;
 
-    TETHER_LOGI(TAG, "Configuring FMMUs from SII (%zu FMMU hints)", sii_fmmu_count);
+    if (fmmu_debug) {
+        TETHER_LOGI(TAG, "Configuring FMMUs from SII (%zu FMMU hints)", sii_fmmu_count);
+    }
 
     uint16_t sm2_addr = 0x1800;
     uint16_t sm2_len = 0;
@@ -90,7 +93,9 @@ bool FMMUManager::configureFromSii(const SII::SIIData* sii,
         }
     }
 
-    TETHER_LOGI(TAG, "  SM2 (Output): addr=0x%04X len=%u\n  SM3 (Input):  addr=0x%04X len=%u", sm2_addr, sm2_len, sm3_addr, sm3_len);
+    if (fmmu_debug) {
+        TETHER_LOGI(TAG, "  SM2 (Output): addr=0x%04X len=%u\n  SM3 (Input):  addr=0x%04X len=%u", sm2_addr, sm2_len, sm3_addr, sm3_len);
+    }
 
     bool has_output = false;
     bool has_input = false;
@@ -105,20 +110,24 @@ bool FMMUManager::configureFromSii(const SII::SIIData* sii,
                     if (!has_output && sm2_len > 0) {
                         config_.addOutput(sm2_addr, sm2_len, 2);
                         has_output = true;
-                        TETHER_LOGI(TAG, "  FMMU%zu: Output -> SM2 (log=0x%08lX phy=0x%04X len=%u)",
-                                 config_.fmmu_count - 1,
-                                 (unsigned long)(config_.next_logical_addr - sm2_len),
-                                 sm2_addr, sm2_len);
+                        if (fmmu_debug) {
+                            TETHER_LOGI(TAG, "  FMMU%zu: Output -> SM2 (log=0x%08lX phy=0x%04X len=%u)",
+                                     config_.fmmu_count - 1,
+                                     (unsigned long)(config_.next_logical_addr - sm2_len),
+                                     sm2_addr, sm2_len);
+                        }
                     }
                     break;
                 case SII::FMMU_TYPE_INPUT:
                     if (!has_input && sm3_len > 0) {
                         config_.addInput(sm3_addr, sm3_len, 3);
                         has_input = true;
-                        TETHER_LOGI(TAG, "  FMMU%zu: Input -> SM3 (log=0x%08lX phy=0x%04X len=%u)",
-                                 config_.fmmu_count - 1,
-                                 (unsigned long)(config_.next_logical_addr - sm3_len),
-                                 sm3_addr, sm3_len);
+                        if (fmmu_debug) {
+                            TETHER_LOGI(TAG, "  FMMU%zu: Input -> SM3 (log=0x%08lX phy=0x%04X len=%u)",
+                                     config_.fmmu_count - 1,
+                                     (unsigned long)(config_.next_logical_addr - sm3_len),
+                                     sm3_addr, sm3_len);
+                        }
                     }
                     break;
                 case SII::FMMU_TYPE_MBX_SYNC:
@@ -133,22 +142,28 @@ bool FMMUManager::configureFromSii(const SII::SIIData* sii,
 
     if (!has_output && sm2_len > 0) {
         config_.addOutput(sm2_addr, sm2_len, 2);
-        TETHER_LOGI(TAG, "  FMMU%zu: Output -> SM2 (DEFAULT, log=0x%08lX phy=0x%04X len=%u)",
-                 config_.fmmu_count - 1,
-                 (unsigned long)(config_.next_logical_addr - sm2_len),
-                 sm2_addr, sm2_len);
+        if (fmmu_debug) {
+            TETHER_LOGI(TAG, "  FMMU%zu: Output -> SM2 (DEFAULT, log=0x%08lX phy=0x%04X len=%u)",
+                     config_.fmmu_count - 1,
+                     (unsigned long)(config_.next_logical_addr - sm2_len),
+                     sm2_addr, sm2_len);
+        }
     }
 
     if (!has_input && sm3_len > 0) {
         config_.addInput(sm3_addr, sm3_len, 3);
-        TETHER_LOGI(TAG, "  FMMU%zu: Input -> SM3 (DEFAULT, log=0x%08lX phy=0x%04X len=%u)",
-                 config_.fmmu_count - 1,
-                 (unsigned long)(config_.next_logical_addr - sm3_len),
-                 sm3_addr, sm3_len);
+        if (fmmu_debug) {
+            TETHER_LOGI(TAG, "  FMMU%zu: Input -> SM3 (DEFAULT, log=0x%08lX phy=0x%04X len=%u)",
+                     config_.fmmu_count - 1,
+                     (unsigned long)(config_.next_logical_addr - sm3_len),
+                     sm3_addr, sm3_len);
+        }
     }
 
-    TETHER_LOGI(TAG, "%zu FMMUs configured, next_log=0x%08lX",
-             config_.fmmu_count, (unsigned long)config_.next_logical_addr);
+    if (fmmu_debug) {
+        TETHER_LOGI(TAG, "%zu FMMUs configured, next_log=0x%08lX",
+                 config_.fmmu_count, (unsigned long)config_.next_logical_addr);
+    }
 
     return config_.fmmu_count > 0;
 }
@@ -159,43 +174,52 @@ bool FMMUManager::configureFromSii(const SII::SIIData* sii,
 
 bool FMMUManager::configureManual(uint16_t output_phys, uint16_t output_len,
                                    uint16_t input_phys, uint16_t input_len,
-                                   uint32_t base_logical_addr) {
+                                   uint32_t base_logical_addr,
+                                   bool fmmu_debug) {
     // Delegate to the separate-logical-address overload, placing the input
     // FMMU contiguously after the output FMMU (the classic single-base layout).
     const uint32_t input_logical_addr = base_logical_addr + output_len;
     return configureManual(output_phys, output_len, base_logical_addr,
-                           input_phys, input_len, input_logical_addr);
+                           input_phys, input_len, input_logical_addr,
+                           fmmu_debug);
 }
 
 bool FMMUManager::configureManual(uint16_t output_phys, uint16_t output_len,
                                    uint32_t output_logical_addr,
                                    uint16_t input_phys, uint16_t input_len,
-                                   uint32_t input_logical_addr) {
+                                   uint32_t input_logical_addr,
+                                   bool fmmu_debug) {
     config_.clear();
 
-    TETHER_LOGI(TAG,
-             "Manual FMMU config: out_phy=0x%04X out_len=%u out_log=0x%08lX, "
-             "in_phy=0x%04X in_len=%u in_log=0x%08lX",
-             output_phys, output_len, (unsigned long)output_logical_addr,
-             input_phys, input_len, (unsigned long)input_logical_addr);
+    if (fmmu_debug) {
+        TETHER_LOGI(TAG,
+                 "Manual FMMU config: out_phy=0x%04X out_len=%u out_log=0x%08lX, "
+                 "in_phy=0x%04X in_len=%u in_log=0x%08lX",
+                 output_phys, output_len, (unsigned long)output_logical_addr,
+                 input_phys, input_len, (unsigned long)input_logical_addr);
+    }
 
     if (output_len > 0) {
         config_.next_logical_addr = output_logical_addr;
         if (!config_.addOutput(output_phys, output_len, 2)) return false;
-        TETHER_LOGI(TAG, "  FMMU0 Output: log=0x%08lX phy=0x%04X len=%u",
-                 (unsigned long)config_.fmmus[0].logical_start_addr,
-                 config_.fmmus[0].physical_start_addr,
-                 config_.fmmus[0].length);
+        if (fmmu_debug) {
+            TETHER_LOGI(TAG, "  FMMU0 Output: log=0x%08lX phy=0x%04X len=%u",
+                     (unsigned long)config_.fmmus[0].logical_start_addr,
+                     config_.fmmus[0].physical_start_addr,
+                     config_.fmmus[0].length);
+        }
     }
 
     if (input_len > 0) {
         config_.next_logical_addr = input_logical_addr;
         if (!config_.addInput(input_phys, input_len, 3)) return false;
-        TETHER_LOGI(TAG, "  FMMU%zu Input: log=0x%08lX phy=0x%04X len=%u",
-                 config_.fmmu_count - 1,
-                 (unsigned long)config_.fmmus[config_.fmmu_count - 1].logical_start_addr,
-                 config_.fmmus[config_.fmmu_count - 1].physical_start_addr,
-                 config_.fmmus[config_.fmmu_count - 1].length);
+        if (fmmu_debug) {
+            TETHER_LOGI(TAG, "  FMMU%zu Input: log=0x%08lX phy=0x%04X len=%u",
+                     config_.fmmu_count - 1,
+                     (unsigned long)config_.fmmus[config_.fmmu_count - 1].logical_start_addr,
+                     config_.fmmus[config_.fmmu_count - 1].physical_start_addr,
+                     config_.fmmus[config_.fmmu_count - 1].length);
+        }
     }
 
     // next_logical_addr must cover both regions; on a contiguous bus this
@@ -216,13 +240,16 @@ bool FMMUManager::configureManual(uint16_t output_phys, uint16_t output_len,
 
 bool FMMUManager::configureFromMultiPDO(
     const std::vector<PDO::MultiPDOSyncManagerConfig>& sm_configs,
-    uint32_t base_logical_addr) {
+    uint32_t base_logical_addr,
+    bool fmmu_debug) {
 
     config_.clear();
     config_.next_logical_addr = base_logical_addr;
 
-    TETHER_LOGI(TAG, "Configuring FMMUs from multi-PDO config (%zu SMs, base_log=0x%08lX)",
-             sm_configs.size(), (unsigned long)base_logical_addr);
+    if (fmmu_debug) {
+        TETHER_LOGI(TAG, "Configuring FMMUs from multi-PDO config (%zu SMs, base_log=0x%08lX)",
+                 sm_configs.size(), (unsigned long)base_logical_addr);
+    }
 
     for (const auto& sm_cfg : sm_configs) {
         if (sm_cfg.pdo_mappings.empty()) {
@@ -254,26 +281,30 @@ bool FMMUManager::configureFromMultiPDO(
         }
 
         const FMMUConfig& fmmu = config_.fmmus[config_.fmmu_count - 1];
-        TETHER_LOGI(TAG, "  SM%u: FMMU%zu %s -> log=0x%08lX phy=0x%04X len=%u (%zu PDOs)",
-                 sm_cfg.sm_index, config_.fmmu_count - 1,
-                 (sm_cfg.type == PDO::SyncManagerType::ProcessOutput) ? "Output" : "Input",
-                 (unsigned long)fmmu.logical_start_addr, fmmu.physical_start_addr,
-                 fmmu.length, count);
+        if (fmmu_debug) {
+            TETHER_LOGI(TAG, "  SM%u: FMMU%zu %s -> log=0x%08lX phy=0x%04X len=%u (%zu PDOs)",
+                     sm_cfg.sm_index, config_.fmmu_count - 1,
+                     (sm_cfg.type == PDO::SyncManagerType::ProcessOutput) ? "Output" : "Input",
+                     (unsigned long)fmmu.logical_start_addr, fmmu.physical_start_addr,
+                     fmmu.length, count);
 
-        for (size_t i = 0; i < count; i++) {
-            const auto& pdo = sm_cfg.pdo_mappings[i];
-            const auto* entry = config_.findPDOByIndex(pdo.pdo_index);
-            if (entry) {
-                TETHER_LOGI(TAG, "    PDO 0x%04X: log=0x%08lX phys_off=%u size=%u",
-                         pdo.pdo_index, (unsigned long)entry->logical_addr,
-                         entry->physical_offset, entry->size_bytes);
+            for (size_t i = 0; i < count; i++) {
+                const auto& pdo = sm_cfg.pdo_mappings[i];
+                const auto* entry = config_.findPDOByIndex(pdo.pdo_index);
+                if (entry) {
+                    TETHER_LOGI(TAG, "    PDO 0x%04X: log=0x%08lX phys_off=%u size=%u",
+                             pdo.pdo_index, (unsigned long)entry->logical_addr,
+                             entry->physical_offset, entry->size_bytes);
+                }
             }
         }
     }
 
-    TETHER_LOGI(TAG, "%zu FMMUs configured, %zu PDO entries, next_log=0x%08lX",
-             config_.fmmu_count, config_.pdo_entry_count,
-             (unsigned long)config_.next_logical_addr);
+    if (fmmu_debug) {
+        TETHER_LOGI(TAG, "%zu FMMUs configured, %zu PDO entries, next_log=0x%08lX",
+                 config_.fmmu_count, config_.pdo_entry_count,
+                 (unsigned long)config_.next_logical_addr);
+    }
 
     return config_.fmmu_count > 0;
 }
@@ -306,7 +337,9 @@ bool FMMUManager::writeToSlave(bool fmmu_debug) {
         return true;
     }
 
-    TETHER_LOGI(TAG, "Writing %zu FMMUs to slave...", config_.fmmu_count);
+    if (fmmu_debug) {
+        TETHER_LOGI(TAG, "Writing %zu FMMUs to slave...", config_.fmmu_count);
+    }
 
     bool all_ok = true;
 
@@ -327,15 +360,15 @@ bool FMMUManager::writeToSlave(bool fmmu_debug) {
 
         uint16_t reg_addr = kFMMURegBase + (static_cast<uint16_t>(i) * kFMMURegSize);
 
-        TETHER_LOGI(TAG, "  FMMU%zu @ 0x%04X: log=0x%08lX->phy=0x%04X len=%u type=0x%02X act=0x%02X",
-                 i, reg_addr,
-                 (unsigned long)fmmu.logical_start_addr,
-                 fmmu.physical_start_addr,
-                 fmmu.length,
-                 std::bit_cast<uint8_t>(fmmu.type),
-                 std::bit_cast<uint8_t>(fmmu.activate));
-
         if (fmmu_debug) {
+            TETHER_LOGI(TAG, "  FMMU%zu @ 0x%04X: log=0x%08lX->phy=0x%04X len=%u type=0x%02X act=0x%02X",
+                     i, reg_addr,
+                     (unsigned long)fmmu.logical_start_addr,
+                     fmmu.physical_start_addr,
+                     fmmu.length,
+                     std::bit_cast<uint8_t>(fmmu.type),
+                     std::bit_cast<uint8_t>(fmmu.activate));
+
             char hex_buf[128];
             hexDump(reinterpret_cast<const uint8_t*>(&regs), sizeof(regs), hex_buf, sizeof(hex_buf));
             TETHER_LOGI(TAG, "  [FMMU-DEBUG] apwr ado=0x%04X len=%zu bytes: %s",
@@ -376,7 +409,7 @@ bool FMMUManager::writeToSlave(bool fmmu_debug) {
 
     config_.configured = all_ok;
 
-    if (all_ok) {
+    if (all_ok && fmmu_debug) {
         TETHER_LOGI(TAG, "All %zu FMMUs written successfully", config_.fmmu_count);
     }
 

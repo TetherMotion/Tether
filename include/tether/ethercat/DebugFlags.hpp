@@ -85,6 +85,7 @@ struct EtherCATSlaveDebugFlags {
     bool verifyPreOp = false;
     bool verifySafeOp = false;
     bool pdoSm = false;
+    bool dc = false;
 };
 
 /**
@@ -110,6 +111,7 @@ public:
     bool verifyPreOp = false;
     bool verifySafeOp = false;
     bool pdoSm = false;
+    bool dc = false;
 
     SlaveFilter rxPDOFilt;
     SlaveFilter txPDOFilt;
@@ -125,6 +127,7 @@ public:
     SlaveFilter verifyPreOpFilt;
     SlaveFilter verifySafeOpFilt;
     SlaveFilter pdoSmFilt;
+    SlaveFilter dcFilt;
 
     // Gate for conditional debugging (nullptr = always active, current behavior)
     DebugGate* gate_ = nullptr;
@@ -137,7 +140,7 @@ public:
     bool isAnyFlagEnabled() const {
         return rxPDO || txPDO || stateMachine || txPackets || rxPackets ||
                fmmu || siiEeprom || coeReads || coeWrites || coeRxPackets ||
-               coeTxPackets || verifyPreOp || verifySafeOp || pdoSm;
+               coeTxPackets || verifyPreOp || verifySafeOp || pdoSm || dc;
     }
 
     /**
@@ -164,6 +167,7 @@ public:
         s.verifyPreOp   = verifyPreOp && verifyPreOpFilt.allows(slave_index);
         s.verifySafeOp  = verifySafeOp && verifySafeOpFilt.allows(slave_index);
         s.pdoSm         = pdoSm && pdoSmFilt.allows(slave_index);
+        s.dc            = dc && dcFilt.allows(slave_index);
         return s;
     }
 

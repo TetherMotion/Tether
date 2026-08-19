@@ -14,7 +14,7 @@
 
 namespace EtherCAT {
 
-static const char* TAG = "ethercat_dc_class";
+static const char* TAG = "DC sync";
 
 // DC register enums moved to the public header `include/tether/ethercat/DCClass.hpp`.
 
@@ -261,26 +261,30 @@ bool EtherCATDC::init() {
 bool EtherCATDC::initialize() {
     state_.store(DCState::Initializing, std::memory_order_release);
     
-    TETHER_LOGI(TAG, "Reading DC capabilities from %u slaves...", slave_count_);
-    
+    if (dc_debug_) {
+        TETHER_LOGI(TAG, "Reading DC capabilities from %u slaves...", slave_count_);
+    }
+
     uint16_t dc_capable_count = 0;
     for (uint16_t i = 0; i < slave_count_; i++) {
         if (readSlaveCapabilities(i)) {
             dc_capable_count++;
-            
+
             // Calculate propagation delay
             if (!calcPropagationDelay(i)) {
                 TETHER_LOGW(TAG, "Slave[%u]: propagation delay calculation failed", i);
             }
-            
+
             // Calculate offset from master
             const uint64_t master_time = getMasterTimeNs();
-            slaves_[i].offset_to_master_ns = 
+            slaves_[i].offset_to_master_ns =
                 static_cast<int64_t>(slaves_[i].system_time_ns) - static_cast<int64_t>(master_time);
-            
-            TETHER_LOGI(TAG, "Slave[%u]: offset=%lld ns, delay=%u ns",
-                     i, (long long)slaves_[i].offset_to_master_ns, 
-                     slaves_[i].propagation_delay_ns);
+
+            if (dc_debug_) {
+                TETHER_LOGI(TAG, "Slave[%u]: offset=%lld ns, delay=%u ns",
+                         i, (long long)slaves_[i].offset_to_master_ns,
+                         slaves_[i].propagation_delay_ns);
+            }
             
             // Write system time offset
             if (!writeSystemTimeOffset(i, -slaves_[i].offset_to_master_ns)) {
@@ -296,8 +300,10 @@ bool EtherCATDC::initialize() {
         }
     }
     
-    TETHER_LOGI(TAG, "Found %u DC-capable slaves out of %u total", 
-             dc_capable_count, slave_count_);
+    if (dc_debug_) {
+        TETHER_LOGI(TAG, "Found %u DC-capable slaves out of %u total",
+                 dc_capable_count, slave_count_);
+    }
     
     if (dc_capable_count == 0) {
         TETHER_LOGW(TAG, "No DC-capable slaves found, DC sync disabled");
@@ -322,7 +328,9 @@ bool EtherCATDC::readSlaveCapabilities(uint16_t slave_index) {
 
     SlaveTimeInfo& info = slaves_[slave_index];
 
-    TETHER_LOGI(TAG, "Slave[%u]: Reading DC System Time (reg=0x0910)...", slave_index);
+    if (dc_debug_) {
+        TETHER_LOGI(TAG, "Slave[%u]: Reading DC System Time (reg=0x0910)...", slave_index);
+    }
     
     uint8_t sysTime[8] = {0};
     if (!transport_.readRegister(slave_index, toUInt16(DCRegisters::DCSysTime), sysTime, sizeof(sysTime), 200)) {
@@ -428,9 +436,11 @@ bool EtherCATDC::updateSyncStartTime() {
             continue;
         }
 
-        TETHER_LOGI(TAG, "Slave[%u]: SYNC0 start=%llu (delta=%llu ns)",
-                 i, (unsigned long long)start_time,
-                 (unsigned long long)(start_time - slave_time));
+        if (dc_debug_) {
+            TETHER_LOGI(TAG, "Slave[%u]: SYNC0 start=%llu (delta=%llu ns)",
+                     i, (unsigned long long)start_time,
+                     (unsigned long long)(start_time - slave_time));
+        }
     }
     return true;
 }
@@ -494,7 +504,9 @@ void EtherCATDC::readSyncConfig(uint16_t slave_index) {
     if (transport_.readRegister(slave_index, toUInt16(DCRegisters::DCCycle0),
                                  &sync0_cycle_le, sizeof(sync0_cycle_le), 200)) {
         uint32_t sync0_ns = le32_to_host(sync0_cycle_le);
-        TETHER_LOGI(TAG, "Slave[%u] SYNC0 cycle: %lu ns", slave_index, (unsigned long)sync0_ns);
+        if (dc_debug_) {
+            TETHER_LOGI(TAG, "Slave[%u] SYNC0 cycle: %lu ns", slave_index, (unsigned long)sync0_ns);
+        }
     }
 }
 

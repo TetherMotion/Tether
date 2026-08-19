@@ -66,6 +66,7 @@ bool EtherCATMasterDebugFlags::isEnabled(const std::string& name, uint16_t slave
     if (name == "verify-preop")      return verifyPreOp && verifyPreOpFilt.allows(slave_index);
     if (name == "verify-safeop")     return verifySafeOp && verifySafeOpFilt.allows(slave_index);
     if (name == "pdo-sm")            return pdoSm && pdoSmFilt.allows(slave_index);
+    if (name == "dc")                return dc && dcFilt.allows(slave_index);
     return false;
 }
 
@@ -84,6 +85,7 @@ void EtherCATMasterDebugFlags::setFlag(const std::string& name, bool enabled) {
     else if (name == "verify-preop")   verifyPreOp = enabled;
     else if (name == "verify-safeop")  verifySafeOp = enabled;
     else if (name == "pdo-sm")         pdoSm = enabled;
+    else if (name == "dc")             dc = enabled;
 }
 
 void EtherCATMasterDebugFlags::setFilter(const std::string& name, const SlaveFilter& filter) {
@@ -101,6 +103,7 @@ void EtherCATMasterDebugFlags::setFilter(const std::string& name, const SlaveFil
     else if (name == "verify-preop")   verifyPreOpFilt = filter;
     else if (name == "verify-safeop")  verifySafeOpFilt = filter;
     else if (name == "pdo-sm")         pdoSmFilt = filter;
+    else if (name == "dc")             dcFilt = filter;
 }
 
 void EtherCATMasterDebugFlags::applyFromString(const std::string& spec,
@@ -173,6 +176,7 @@ void EtherCATMasterDebugFlags::resizeFilters(uint16_t slave_count) {
     verifyPreOpFilt.resize(slave_count);
     verifySafeOpFilt.resize(slave_count);
     pdoSmFilt.resize(slave_count);
+    dcFilt.resize(slave_count);
 }
 
 namespace debug {

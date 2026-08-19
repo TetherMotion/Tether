@@ -4,6 +4,7 @@
  */
 
 #include "profiles/cia402/CiA402StateMachine.hpp"
+#include "tether/profiles/cia402/CiA402StateUtils.hpp"
 #include "tether/platform/EspCompat.hpp"
 
 static const char* TAG = "CiA402SM";
@@ -367,7 +368,9 @@ bool StateMachine::setOperatingMode(OperatingMode mode) {
         m_modeCallback(mode);
     }
     
-    TETHER_LOGI(TAG, "Operating mode set to %d", static_cast<int>(mode));
+    TETHER_LOGI(TAG, "Operating mode set to %s (%d)",
+             CiA402::getOperatingModeName(static_cast<int8_t>(mode)),
+             static_cast<int>(mode));
     return true;
 }
 

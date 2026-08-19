@@ -1453,12 +1453,12 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         }
     }
 
-    if (!fmmu_mgr_.configureFromMultiPDO(multi_configs, base_log)) {
+    if (!fmmu_mgr_.configureFromMultiPDO(multi_configs, base_log, slave_debug_flags_.fmmu)) {
         TETHER_LOGE(TAG, "Slave %u: FMMU configuration from multi-PDO failed", index_);
         return SlaveError::PDOConfigFailed;
     }
 
-    if (!fmmu_mgr_.writeToSlave(false)) {
+    if (!fmmu_mgr_.writeToSlave(slave_debug_flags_.fmmu)) {
         TETHER_LOGE(TAG, "Slave %u: FMMU write failed", index_);
         return SlaveError::PDOConfigFailed;
     }
