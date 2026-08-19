@@ -293,13 +293,13 @@ inline bool Axia80Sensor::isAxia80Device()
 {
     EtherCAT::SII::SIIIdentity id;
     if (!EtherCAT::SII::readSIIIdentity(master_, slave_index_, id)) {
-        TETHER_LOGW("Axia80", "Slave %u: SII identity read failed — cannot verify device type", slave_index_);
+        TETHER_LOGW("Axia80", "%s: SII identity read failed — cannot verify device type", master_.slaveLogPrefix(slave_index_).c_str());
         return false;
     }
     bool match = (id.vendor_id == Axia80::kVendorId) && (id.product_code == Axia80::kProductCode);
     if (!match) {
-        TETHER_LOGW("Axia80", "Slave %u: VID/PID mismatch — expected 0x%08X/0x%08X, got 0x%08X/0x%08X",
-                    slave_index_, Axia80::kVendorId, Axia80::kProductCode,
+        TETHER_LOGW("Axia80", "%s: VID/PID mismatch — expected 0x%08X/0x%08X, got 0x%08X/0x%08X",
+                    master_.slaveLogPrefix(slave_index_).c_str(), Axia80::kVendorId, Axia80::kProductCode,
                     id.vendor_id, id.product_code);
     }
     return match;
@@ -317,13 +317,13 @@ inline bool Axia80Sensor::init(Tether::Platform::LogLevel log_level,
 
     // 1. Mailbox
     if (sl.configureMailbox(log_level) != SlaveError::Ok) {
-        TETHER_LOGE("Axia80", "Slave %u: mailbox config failed", slave_index_);
+        TETHER_LOGE("Axia80", "%s: mailbox config failed", master_.slaveLogPrefix(slave_index_).c_str());
         return false;
     }
 
     // 2. PRE_OP
     if (sl.transitionToPreOp() != SlaveError::Ok) {
-        TETHER_LOGE("Axia80", "Slave %u: PRE_OP failed", slave_index_);
+        TETHER_LOGE("Axia80", "%s: PRE_OP failed", master_.slaveLogPrefix(slave_index_).c_str());
         return false;
     }
 
@@ -341,24 +341,24 @@ inline bool Axia80Sensor::init(Tether::Platform::LogLevel log_level,
                                  PDO::PDOAddressMode::Position);
 
     if (!pdo_mgr.finalizeMapping(slave_index_)) {
-        TETHER_LOGE("Axia80", "Slave %u: PDO finalize failed", slave_index_);
+        TETHER_LOGE("Axia80", "%s: PDO finalize failed", master_.slaveLogPrefix(slave_index_).c_str());
         return false;
     }
 
     // 4. Configure SM2/SM3
     if (sl.configurePDOSyncManagers() != SlaveError::Ok) {
-        TETHER_LOGE("Axia80", "Slave %u: PDO SM config failed", slave_index_);
+        TETHER_LOGE("Axia80", "%s: PDO SM config failed", master_.slaveLogPrefix(slave_index_).c_str());
         return false;
     }
 
     // 5. SAFE_OP → OP
     if (sl.transitionToSafeOp() != SlaveError::Ok) {
-        TETHER_LOGE("Axia80", "Slave %u: SAFE_OP failed", slave_index_);
+        TETHER_LOGE("Axia80", "%s: SAFE_OP failed", master_.slaveLogPrefix(slave_index_).c_str());
         return false;
     }
     if (transition_to_op) {
         if (sl.transitionToOp() != SlaveError::Ok) {
-            TETHER_LOGE("Axia80", "Slave %u: OP failed", slave_index_);
+            TETHER_LOGE("Axia80", "%s: OP failed", master_.slaveLogPrefix(slave_index_).c_str());
             return false;
         }
     }

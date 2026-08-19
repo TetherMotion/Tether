@@ -31,6 +31,7 @@
 #include <cerrno>
 #include <bit>
 #include <vector>
+#include <format>
 #include "sii/SIIReader.hpp"
 #include <inttypes.h>
 
@@ -60,6 +61,8 @@ void Master::initSlaves(uint16_t count)
 {
     slaves_.clear();
     slaves_.reserve(count);
+    slave_names_.clear();
+    slave_names_.resize(count);
     {
         std::lock_guard<std::mutex> lock(sii_cache_mutex_);
         sii_word_caches_.clear();
@@ -82,6 +85,27 @@ void Master::initSlaves(uint16_t count)
     updateDebugFlags();
 }
 
+void Master::setSlaveName(uint16_t idx, std::string name) {
+    if (idx >= slave_names_.size()) {
+        TETHER_LOGW("master", "setSlaveName: index %u out of range (slaves=%zu)",
+                    idx, slave_names_.size());
+        return;
+    }
+    slave_names_[idx] = std::move(name);
+}
+
+std::string_view Master::slaveName(uint16_t idx) const {
+    if (idx >= slave_names_.size()) return {};
+    return slave_names_[idx];
+}
+
+std::string Master::slaveLogPrefix(uint16_t idx) const {
+    if (idx >= slave_names_.size()) return std::format("Slave {}", idx);
+    const auto& n = slave_names_[idx];
+    if (n.empty()) return std::format("Slave {}", idx);
+    return std::format("Slave {} (#{})", n, idx);
+}
+
 bool Master::drainSlaveMailbox(uint16_t slave_index, unsigned int max_drain)
 {
     const char* local_tag = "mbox_drain";
@@ -90,12 +114,12 @@ bool Master::drainSlaveMailbox(uint16_t slave_index, unsigned int max_drain)
     uint16_t mbx_rd_addr = 0, mbx_rd_len = 0;
     if (!sdoManager(slave_index).getMailbox(&mbx_wr_addr, &mbx_wr_len,
                                             &mbx_rd_addr, &mbx_rd_len)) {
-        TETHER_LOGW(local_tag, "Slave %u: cannot drain mailbox, no mailbox configured", slave_index);
+        TETHER_LOGW(local_tag, "%s: cannot drain mailbox, no mailbox configured", slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
     if (mbx_rd_len == 0) {
-        TETHER_LOGW(local_tag, "Slave %u: cannot drain mailbox, read length is zero", slave_index);
+        TETHER_LOGW(local_tag, "%s: cannot drain mailbox, read length is zero", slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
@@ -110,7 +134,7 @@ bool Master::drainSlaveMailbox(uint16_t slave_index, unsigned int max_drain)
     for (unsigned int i = 0; i < max_drain; ++i) {
         uint8_t sm1_status = 0;
         if (!readRegister(SlaveAddress(slave_index), Raw::sm_status_address(1), sm1_status, 100)) {
-            TETHER_LOGW(local_tag, "Slave %u: failed to read SM1 status while draining", slave_index);
+            TETHER_LOGW(local_tag, "%s: failed to read SM1 status while draining", slaveLogPrefix(slave_index).c_str());
             return false;
         }
 
@@ -121,33 +145,33 @@ bool Master::drainSlaveMailbox(uint16_t slave_index, unsigned int max_drain)
         // transiently set bit 7 before writing the response.
         if ((sm1_status & Raw::EC_SM_STATUS_MBXFULL) == 0) {
             if (drained_any) {
-                TETHER_LOGI(local_tag, "Slave %u: SM1 drained successfully", slave_index);
+                TETHER_LOGI(local_tag, "%s: SM1 drained successfully", slaveLogPrefix(slave_index).c_str());
             }
             break;
         }
 
         if (!drained_any) {
-            TETHER_LOGW(local_tag, "Slave %u: SM1 full at startup (status=0x%02X). Draining stale mailbox data...",
-                        slave_index, sm1_status);
+            TETHER_LOGW(local_tag, "%s: SM1 full at startup (status=0x%02X). Draining stale mailbox data...",
+                        slaveLogPrefix(slave_index).c_str(), sm1_status);
         }
 
         if (!readRegister(SlaveAddress(slave_index), mbx_rd_addr,
                           drain_buf.data(), static_cast<uint16_t>(drain_buf.size()), 200)) {
-            TETHER_LOGW(local_tag, "Slave %u: SM1 drain read failed, attempting SM1 activate reset", slave_index);
+            TETHER_LOGW(local_tag, "%s: SM1 drain read failed, attempting SM1 activate reset", slaveLogPrefix(slave_index).c_str());
             if (resetSlaveMailboxSM1(slave_index)) {
                 // After a successful reset the buffer should be empty; re-check
                 // before continuing so we don't loop on stale status.
                 uint8_t sm1_status = 0;
                 if (readRegister(SlaveAddress(slave_index), Raw::sm_status_address(1), sm1_status, 100) &&
                     (sm1_status & Raw::EC_SM_STATUS_MBXFULL) == 0) {
-                    TETHER_LOGI(local_tag, "Slave %u: SM1 empty after reset", slave_index);
+                    TETHER_LOGI(local_tag, "%s: SM1 empty after reset", slaveLogPrefix(slave_index).c_str());
                     return true;
                 }
             }
             return false;
         }
-        TETHER_LOGW(local_tag, "Slave %u: drained stale mailbox data #%u (len=%u)",
-                    slave_index, i + 1, static_cast<unsigned>(drain_buf.size()));
+        TETHER_LOGW(local_tag, "%s: drained stale mailbox data #%u (len=%u)",
+                    slaveLogPrefix(slave_index).c_str(), i + 1, static_cast<unsigned>(drain_buf.size()));
         drained_any = true;
 
         // Extract the slave's mailbox counter from the drained response.
@@ -169,8 +193,8 @@ bool Master::drainSlaveMailbox(uint16_t slave_index, unsigned int max_drain)
         const uint8_t synced_cnt = Raw::SDOMailboxIO::nextMbxCnt(last_slave_cnt);
         uint8_t* mbx_counter_ptr = sdoManager(slave_index).mbxCounterPtr();
         if (mbx_counter_ptr != nullptr && *mbx_counter_ptr != synced_cnt) {
-            TETHER_LOGI(local_tag, "Slave %u: syncing mailbox counter %u -> %u (slave's last response cnt=%u)",
-                        slave_index, *mbx_counter_ptr, synced_cnt, last_slave_cnt);
+            TETHER_LOGI(local_tag, "%s: syncing mailbox counter %u -> %u (slave's last response cnt=%u)",
+                        slaveLogPrefix(slave_index).c_str(), *mbx_counter_ptr, synced_cnt, last_slave_cnt);
             *mbx_counter_ptr = synced_cnt;
         }
     }
@@ -183,7 +207,7 @@ bool Master::drainSlaveMailbox(uint16_t slave_index, unsigned int max_drain)
     // After max_drain reads, SM1 is still reporting full. The slave may be
     // continuously refilling the buffer or the ESC is not acknowledging the
     // reads; do not pretend the drain succeeded.
-    TETHER_LOGE(local_tag, "Slave %u: SM1 still full after %u drain attempts", slave_index, max_drain);
+    TETHER_LOGE(local_tag, "%s: SM1 still full after %u drain attempts", slaveLogPrefix(slave_index).c_str(), max_drain);
     return false;
 }
 
@@ -193,33 +217,33 @@ bool Master::resetSlaveMailboxSM1(uint16_t slave_index)
     const uint16_t sm1_activate_addr = static_cast<uint16_t>(Raw::EC_REG_SM1 + 0x06u);
     const uint16_t sm1_status_addr = Raw::sm_status_address(1);
 
-    TETHER_LOGW(local_tag, "Slave %u: cycling SM1 activate register (0x%04X) to clear stuck WRITE_BUF_FULL",
-                slave_index, sm1_activate_addr);
+    TETHER_LOGW(local_tag, "%s: cycling SM1 activate register (0x%04X) to clear stuck WRITE_BUF_FULL",
+                slaveLogPrefix(slave_index).c_str(), sm1_activate_addr);
 
     uint8_t disable = 0x00;
     uint8_t enable = 0x01;
     if (!writeRegister(SlaveAddress(slave_index), RegisterAddress(sm1_activate_addr), &disable, sizeof(disable), 200)) {
-        TETHER_LOGE(local_tag, "Slave %u: failed to disable SM1", slave_index);
+        TETHER_LOGE(local_tag, "%s: failed to disable SM1", slaveLogPrefix(slave_index).c_str());
         return false;
     }
     if (!writeRegister(SlaveAddress(slave_index), RegisterAddress(sm1_activate_addr), &enable, sizeof(enable), 200)) {
-        TETHER_LOGE(local_tag, "Slave %u: failed to re-enable SM1", slave_index);
+        TETHER_LOGE(local_tag, "%s: failed to re-enable SM1", slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
     uint8_t sm1_status = 0;
     if (!readRegister(SlaveAddress(slave_index), RegisterAddress(sm1_status_addr), sm1_status, 100)) {
-        TETHER_LOGE(local_tag, "Slave %u: failed to read SM1 status after reset", slave_index);
+        TETHER_LOGE(local_tag, "%s: failed to read SM1 status after reset", slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
     if ((sm1_status & Raw::EC_SM_STATUS_MBXFULL) != 0) {
-        TETHER_LOGE(local_tag, "Slave %u: SM1 still full after activate reset (status=0x%02X)",
-                    slave_index, sm1_status);
+        TETHER_LOGE(local_tag, "%s: SM1 still full after activate reset (status=0x%02X)",
+                    slaveLogPrefix(slave_index).c_str(), sm1_status);
         return false;
     }
 
-    TETHER_LOGI(local_tag, "Slave %u: SM1 reset successful", slave_index);
+    TETHER_LOGI(local_tag, "%s: SM1 reset successful", slaveLogPrefix(slave_index).c_str());
     return true;
 }
 
@@ -229,33 +253,33 @@ bool Master::resetSlaveMailboxSM0(uint16_t slave_index)
     const uint16_t sm0_activate_addr = static_cast<uint16_t>(Raw::EC_REG_SM0 + 0x06u);
     const uint16_t sm0_status_addr = Raw::sm_status_address(0);
 
-    TETHER_LOGW(local_tag, "Slave %u: cycling SM0 activate register (0x%04X) to clear stuck mailbox-full",
-                slave_index, sm0_activate_addr);
+    TETHER_LOGW(local_tag, "%s: cycling SM0 activate register (0x%04X) to clear stuck mailbox-full",
+                slaveLogPrefix(slave_index).c_str(), sm0_activate_addr);
 
     uint8_t disable = 0x00;
     uint8_t enable = 0x01;
     if (!writeRegister(SlaveAddress(slave_index), RegisterAddress(sm0_activate_addr), &disable, sizeof(disable), 200)) {
-        TETHER_LOGE(local_tag, "Slave %u: failed to disable SM0", slave_index);
+        TETHER_LOGE(local_tag, "%s: failed to disable SM0", slaveLogPrefix(slave_index).c_str());
         return false;
     }
     if (!writeRegister(SlaveAddress(slave_index), RegisterAddress(sm0_activate_addr), &enable, sizeof(enable), 200)) {
-        TETHER_LOGE(local_tag, "Slave %u: failed to re-enable SM0", slave_index);
+        TETHER_LOGE(local_tag, "%s: failed to re-enable SM0", slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
     uint8_t sm0_status = 0;
     if (!readRegister(SlaveAddress(slave_index), RegisterAddress(sm0_status_addr), sm0_status, 100)) {
-        TETHER_LOGE(local_tag, "Slave %u: failed to read SM0 status after reset", slave_index);
+        TETHER_LOGE(local_tag, "%s: failed to read SM0 status after reset", slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
     if ((sm0_status & Raw::EC_SM_STATUS_MBXFULL) != 0) {
-        TETHER_LOGE(local_tag, "Slave %u: SM0 still full after activate reset (status=0x%02X)",
-                    slave_index, sm0_status);
+        TETHER_LOGE(local_tag, "%s: SM0 still full after activate reset (status=0x%02X)",
+                    slaveLogPrefix(slave_index).c_str(), sm0_status);
         return false;
     }
 
-    TETHER_LOGI(local_tag, "Slave %u: SM0 reset successful", slave_index);
+    TETHER_LOGI(local_tag, "%s: SM0 reset successful", slaveLogPrefix(slave_index).c_str());
     return true;
 }
 
@@ -540,17 +564,17 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
             slave_configs[slave_index].sm[3].phys_start_addr, tx_len, tx_log,
             fmmu_dbg);
         if (!fmmu_mgr.writeToSlave(fmmu_dbg)) {
-            TETHER_LOGE(TAG, "Slave %u: FMMU write (manual) failed", slave_index);
+            TETHER_LOGE(TAG, "%s: FMMU write (manual) failed", slaveLogPrefix(slave_index).c_str());
             return false;
         }
     } else if (sii_valid) {
         fmmu_mgr.configureFromSii(&sii, &slave_configs[slave_index], 0, fmmu_dbg);
         if (!fmmu_mgr.writeToSlave(fmmu_dbg)) {
-            TETHER_LOGE(TAG, "Slave %u: FMMU write (from SII) failed", slave_index);
+            TETHER_LOGE(TAG, "%s: FMMU write (from SII) failed", slaveLogPrefix(slave_index).c_str());
             return false;
         }
     } else {
-        TETHER_LOGW(TAG, "Slave %u: SII unavailable — FMMU not configured", slave_index);
+        TETHER_LOGW(TAG, "%s: SII unavailable — FMMU not configured", slaveLogPrefix(slave_index).c_str());
     }
 
     // Phase 3: Enable SM2/SM3 NOW that FMMUs are configured.

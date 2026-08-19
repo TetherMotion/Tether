@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 
 namespace EtherCAT {
 class Master;
@@ -54,7 +55,10 @@ void logSIISyncManagers(const SIIData& data, const char* tag);
 void logSIIPDOs(const SIIData& data, const char* tag);
 
 /// Log a one-line SII summary for a slave.
-void logSIISummary(const SIIData& data, uint16_t slave_index, const char* tag);
+/// @param data        Parsed SII data
+/// @param log_prefix  Log prefix string (e.g. "Slave My Drive (#0)" or "Slave 0")
+/// @param tag         Log tag
+void logSIISummary(const SIIData& data, std::string_view log_prefix, const char* tag);
 
 /// Debug SII mailbox derivation with step-by-step detail.
 ///

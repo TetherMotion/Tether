@@ -440,8 +440,8 @@ bool DS402Master::DS402RecoveryHandler::reinitializeSlave(uint16_t slave_index)
         }
     }
     if (cfg == nullptr) {
-        TETHER_LOGE("DS402Recovery", "Slave %u: No configuration stored for recovery",
-                    slave_index);
+        TETHER_LOGE("DS402Recovery", "%s: No configuration stored for recovery",
+                    master_.ethercatMaster().slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
@@ -458,20 +458,20 @@ bool DS402Master::DS402RecoveryHandler::reinitializeSlave(uint16_t slave_index)
     DriveConfiguration reinit_cfg = *cfg;
     reinit_cfg.transition_to_operational = true;
     if (!master_.configureDrive(reinit_cfg)) {
-        TETHER_LOGE("DS402Recovery", "Slave %u: configureDrive() failed during recovery",
-                    slave_index);
+        TETHER_LOGE("DS402Recovery", "%s: configureDrive() failed during recovery",
+                    master_.ethercatMaster().slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
     // Re-enable the drive (CiA 402 fault reset + enable)
     if (!master_.enableDrive(slave_index)) {
-        TETHER_LOGE("DS402Recovery", "Slave %u: enableDrive() failed during recovery",
-                    slave_index);
+        TETHER_LOGE("DS402Recovery", "%s: enableDrive() failed during recovery",
+                    master_.ethercatMaster().slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
-    TETHER_LOGI("DS402Recovery", "Slave %u: Re-initialized and enabled successfully",
-                slave_index);
+    TETHER_LOGI("DS402Recovery", "%s: Re-initialized and enabled successfully",
+                master_.ethercatMaster().slaveLogPrefix(slave_index).c_str());
     return true;
 }
 

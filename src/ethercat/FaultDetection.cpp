@@ -368,11 +368,11 @@ bool FaultDetector::clear(uint16_t slave_index) {
 
     if (!state.has_fault) {
         slave_faults_[slave_index].clear();
-        TETHER_LOGI(TAG, "Slave %u: Fault cleared", slave_index);
+        TETHER_LOGI(TAG, "%s: Fault cleared", slavePrefix(slave_index).c_str());
         return true;
     }
 
-    TETHER_LOGW(TAG, "Slave %u: Fault still active after clear attempt", slave_index);
+    TETHER_LOGW(TAG, "%s: Fault still active after clear attempt", slavePrefix(slave_index).c_str());
     return false;
 }
 
@@ -397,8 +397,8 @@ void FaultDetector::diagnose(uint16_t slave_index) const {
     // fault but past errors were recorded (statistics), INFO otherwise.
     char buf[256];
     int n = snprintf(buf, sizeof(buf),
-             "Slave %u: AL_STATUS=0x%04X (State=%s%s) AL_STATUS_CODE=%s (0x%04X)",
-             slave_index,
+             "%s: AL_STATUS=0x%04X (State=%s%s) AL_STATUS_CODE=%s (0x%04X)",
+             slavePrefix(slave_index).c_str(),
              state.al_status,
              al_status_get_state_name(state.al_status),
              al_status_has_error(state.al_status) ? ", ERROR" : "",

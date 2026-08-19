@@ -300,38 +300,38 @@ bool RP20Device::assignPDOs(uint16_t slave_index) {
 
     if (!rxpdos.empty()) {
         if (!sdo.writeU8(CiA301::SyncManager2PDOAssign, 0, 0).has_value()) {
-            TETHER_LOGW(TAG, "Slave %u: failed to clear SM2 PDO count", slave_index);
+            TETHER_LOGW(TAG, "%s: failed to clear SM2 PDO count", master_.slaveLogPrefix(slave_index).c_str());
         }
         for (size_t i = 0; i < rxpdos.size(); ++i) {
             if (!sdo.writeU16(CiA301::SyncManager2PDOAssign,
                               static_cast<uint8_t>(i + 1), rxpdos[i]).has_value()) {
-                TETHER_LOGW(TAG, "Slave %u: failed to assign RxPDO 0x%04X to SM2",
-                            slave_index, rxpdos[i]);
+                TETHER_LOGW(TAG, "%s: failed to assign RxPDO 0x%04X to SM2",
+                            master_.slaveLogPrefix(slave_index).c_str(), rxpdos[i]);
             }
         }
         if (!sdo.writeU8(CiA301::SyncManager2PDOAssign, 0,
                          static_cast<uint8_t>(rxpdos.size())).has_value()) {
-            TETHER_LOGW(TAG, "Slave %u: failed to set SM2 PDO count", slave_index);
+            TETHER_LOGW(TAG, "%s: failed to set SM2 PDO count", master_.slaveLogPrefix(slave_index).c_str());
         }
-        TETHER_LOGI(TAG, "Slave %u: assigned %zu RxPDO(s) to SM2", slave_index, rxpdos.size());
+        TETHER_LOGI(TAG, "%s: assigned %zu RxPDO(s) to SM2", master_.slaveLogPrefix(slave_index).c_str(), rxpdos.size());
     }
 
     if (!txpdos.empty()) {
         if (!sdo.writeU8(CiA301::SyncManager3PDOAssign, 0, 0).has_value()) {
-            TETHER_LOGW(TAG, "Slave %u: failed to clear SM3 PDO count", slave_index);
+            TETHER_LOGW(TAG, "%s: failed to clear SM3 PDO count", master_.slaveLogPrefix(slave_index).c_str());
         }
         for (size_t i = 0; i < txpdos.size(); ++i) {
             if (!sdo.writeU16(CiA301::SyncManager3PDOAssign,
                               static_cast<uint8_t>(i + 1), txpdos[i]).has_value()) {
-                TETHER_LOGW(TAG, "Slave %u: failed to assign TxPDO 0x%04X to SM3",
-                            slave_index, txpdos[i]);
+                TETHER_LOGW(TAG, "%s: failed to assign TxPDO 0x%04X to SM3",
+                            master_.slaveLogPrefix(slave_index).c_str(), txpdos[i]);
             }
         }
         if (!sdo.writeU8(CiA301::SyncManager3PDOAssign, 0,
                          static_cast<uint8_t>(txpdos.size())).has_value()) {
-            TETHER_LOGW(TAG, "Slave %u: failed to set SM3 PDO count", slave_index);
+            TETHER_LOGW(TAG, "%s: failed to set SM3 PDO count", master_.slaveLogPrefix(slave_index).c_str());
         }
-        TETHER_LOGI(TAG, "Slave %u: assigned %zu TxPDO(s) to SM3", slave_index, txpdos.size());
+        TETHER_LOGI(TAG, "%s: assigned %zu TxPDO(s) to SM3", master_.slaveLogPrefix(slave_index).c_str(), txpdos.size());
     }
 
     return true;
@@ -371,14 +371,14 @@ void RP20Device::updateSyncManagerLengths(uint16_t slave_index) {
     if (!cfgs) return;
 
     if (total_rx > 0) {
-        TETHER_LOGI(TAG, "Slave %u: SM2 length: %u -> %u",
-                    slave_index, cfgs[slave_index].sm[2].length, total_rx);
+        TETHER_LOGI(TAG, "%s: SM2 length: %u -> %u",
+                    master_.slaveLogPrefix(slave_index).c_str(), cfgs[slave_index].sm[2].length, total_rx);
         cfgs[slave_index].sm[2].length = total_rx;
         cfgs[slave_index].rxpdo_size = total_rx;
     }
     if (total_tx > 0) {
-        TETHER_LOGI(TAG, "Slave %u: SM3 length: %u -> %u",
-                    slave_index, cfgs[slave_index].sm[3].length, total_tx);
+        TETHER_LOGI(TAG, "%s: SM3 length: %u -> %u",
+                    master_.slaveLogPrefix(slave_index).c_str(), cfgs[slave_index].sm[3].length, total_tx);
         cfgs[slave_index].sm[3].length = total_tx;
         cfgs[slave_index].txpdo_size = total_tx;
     }

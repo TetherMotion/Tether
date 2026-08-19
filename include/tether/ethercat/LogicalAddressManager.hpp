@@ -21,6 +21,9 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
+#include <format>
+#include <string>
 #include <vector>
 
 #include "tether/platform/EspCompat.hpp"
@@ -138,6 +141,13 @@ public:
     Stats getStats() const;
     void  resetStats();
 
+    // ----- Log Prefix (set by Master from per-slave name) -----
+
+    /// @brief Set a function that returns the log prefix for a given slave index.
+    void setPrefixProvider(std::function<std::string(uint16_t)> provider) {
+        prefix_provider_ = std::move(provider);
+    }
+
 private:
     IPDOTransport& transport_;
 
@@ -168,6 +178,13 @@ private:
     uint32_t total_txpdo_bytes_{0};
     Stats    stats_{};
     bool     initialized_{false};
+    std::function<std::string(uint16_t)> prefix_provider_;
+
+    /// Build the log prefix for a slave (uses prefix_provider_ if set, else default)
+    std::string slavePrefix(uint16_t idx) const {
+        if (prefix_provider_) return prefix_provider_(idx);
+        return std::format("Slave {}", idx);
+    }
 };
 
 } // namespace EtherCAT

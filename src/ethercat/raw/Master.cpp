@@ -422,6 +422,8 @@ Master::Master(const Config& config)
     pdo_transport_ = std::make_unique<MasterPDOTransport>(*this);
     pdo_    = std::make_unique<PDOManager>(*pdo_transport_);
     logical_addr_mgr_ = std::make_unique<LogicalAddressManager>(*pdo_transport_);
+    logical_addr_mgr_->setPrefixProvider(
+        [this](uint16_t i) { return slaveLogPrefix(i); });
     pdo_->setLogicalAddressManager(logical_addr_mgr_.get());
     pdo_->setDebugGate(debug_gate_.get());
     dc_     = std::make_unique<DCManager>(*this);
@@ -430,6 +432,8 @@ Master::Master(const Config& config)
     eoe_    = std::make_unique<EoEManager>(*this);
     fault_transport_ = std::make_unique<MasterFaultTransport>(*this);
     faults_ = std::make_unique<FaultDetector>(*fault_transport_);
+    faults_->setPrefixProvider(
+        [this](uint16_t i) { return slaveLogPrefix(i); });
     status_poller_ = std::make_unique<SlaveStatusPoller>(*fault_transport_);
     slave_supervisor_ = std::make_unique<SlaveSupervisor>(*this);
 }
@@ -709,6 +713,7 @@ LogicalAddressManager& Master::logicalAddressManager() { return *logical_addr_mg
         for (size_t i = old_size; i <= slave_index; ++i) {
             sdo_managers_[i] = std::make_unique<::EtherCAT::CoE::CoEManager>(
                 static_cast<uint16_t>(i), *sdo_transport_);
+            sdo_managers_[i]->setLogPrefix(slaveLogPrefix(static_cast<uint16_t>(i)));
             sdo_managers_[i]->setPDOManager(pdo_.get());
             if (running_.load()) {
                 sdo_managers_[i]->init();

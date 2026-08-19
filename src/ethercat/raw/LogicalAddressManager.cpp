@@ -108,8 +108,8 @@ bool LogicalAddressManager::buildAddressMap(const PDO::SlaveConfig* configs,
             txpdo_offset += cfg.txpdo_size;
         }
 
-        TETHER_LOGI(TAG, "Slave %u: RxPDO log=0x%08lX len=%u  TxPDO log=0x%08lX len=%u",
-                    i,
+        TETHER_LOGI(TAG, "%s: RxPDO log=0x%08lX len=%u  TxPDO log=0x%08lX len=%u",
+                    slavePrefix(i).c_str(),
                     static_cast<unsigned long>(entry.rxpdo_logical_addr), entry.rxpdo_length,
                     static_cast<unsigned long>(entry.txpdo_logical_addr), entry.txpdo_length);
     }

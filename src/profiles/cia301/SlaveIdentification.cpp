@@ -163,7 +163,7 @@ bool SlaveIdentifier::identify(uint16_t slave_index, SlaveIdentity& identity) {
         identity.setIdentityRecord(record);
         any_success = true;
     } else {
-        TETHER_LOGW(TAG, "Slave %u: Failed to read identity record", slave_index);
+        TETHER_LOGW(TAG, "%s: Failed to read identity record", m_master.slaveLogPrefix(slave_index).c_str());
     }
     
     // Read device type (0x1000)

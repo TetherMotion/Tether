@@ -26,6 +26,7 @@
 #include <chrono>
 #include <map>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace EtherCAT {
@@ -86,6 +87,14 @@ public:
     bool isInitialized() const;
 
     uint16_t slaveIndex() const { return slave_index_; }
+
+    // ----- Log Prefix (set by Master from per-slave name) -----
+
+    /// @brief Set the log prefix string (e.g. "Slave X-Axis (#0)").
+    void setLogPrefix(std::string prefix) { log_prefix_ = std::move(prefix); }
+
+    /// @brief Get the current log prefix string.
+    const std::string& logPrefix() const { return log_prefix_; }
 
     // ----- Mailbox Configuration -----
 
@@ -257,6 +266,7 @@ private:
 
     uint16_t slave_index_;
     SDO::ISDOTransport& transport_;
+    std::string log_prefix_;
     MailboxConfig mbx_;
     SlaveState state_;
 
@@ -311,7 +321,7 @@ template<typename T>
 std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
                                             CoETransactionOptions options) {
     if (debug_flags_.coeReads) {
-        TETHER_LOGI("coe_mgr", "Slave %u: CoE read START index=0x%04X:%u", slave_index_, index, subindex);
+        TETHER_LOGI("coe_mgr", "%s: CoE read START index=0x%04X:%u", log_prefix_.c_str(), index, subindex);
     }
 
     CoEReadTransaction<T> txn;
@@ -339,7 +349,7 @@ std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
         }
         if (state_.read_queue.size() >= kMaxQueueDepth) {
             if (debug_flags_.coeReads) {
-                TETHER_LOGI("coe_mgr", "Slave %u: CoE read QUEUE FULL index=0x%04X:%u", slave_index_, index, subindex);
+                TETHER_LOGI("coe_mgr", "%s: CoE read QUEUE FULL index=0x%04X:%u", log_prefix_.c_str(), index, subindex);
             }
             CoEReadTransaction<T> fail_txn;
             fail_txn.promise.set_value(std::unexpected(CoEError::QueueFull));
@@ -350,7 +360,7 @@ std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
     state_.work_cv.notify_one();
 
     if (debug_flags_.coeReads) {
-        TETHER_LOGI("coe_mgr", "Slave %u: CoE read ENQUEUED index=0x%04X:%u", slave_index_, index, subindex);
+        TETHER_LOGI("coe_mgr", "%s: CoE read ENQUEUED index=0x%04X:%u", log_prefix_.c_str(), index, subindex);
     }
     return future;
 }

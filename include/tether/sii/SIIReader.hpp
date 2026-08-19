@@ -31,6 +31,7 @@
 #include "tether/sii/SIILogger.hpp"
 #include <cstdint>
 #include <cstddef>
+#include <string>
 
 namespace EtherCAT {
 
@@ -124,7 +125,11 @@ public:
      * @brief Set read timeout
      */
     void setTimeout(uint32_t timeout_ms) { m_timeout_ms = timeout_ms; }
-    
+
+    /// @brief Access the owning Master (for log prefix queries)
+    Master& master() { return m_master; }
+    const Master& master() const { return m_master; }
+
 private:
     Master& m_master;
     uint32_t m_timeout_ms{500};
@@ -193,6 +198,9 @@ private:
                  uint16_t size_bytes, SIIData& data);
     
     void setError(const char* fmt, ...);
+
+    /// Build the log prefix for a slave (delegates to Master)
+    std::string logPrefix(uint16_t slave_index) const;
 };
 
 // ============================================================================

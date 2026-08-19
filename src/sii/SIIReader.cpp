@@ -375,13 +375,17 @@ void SIIParser::setError(const char* fmt, ...) {
     TETHER_LOGE(TAG, "%s", m_last_error);
 }
 
+std::string SIIParser::logPrefix(uint16_t slave_index) const {
+    return m_reader.master().slaveLogPrefix(slave_index);
+}
+
 bool SIIParser::parseConfigArea(uint16_t slave_index, SIIData& out_data) {
     // Read configuration area (words 0x0000-0x0007)
     uint16_t config[8];
     size_t words_read = m_reader.readWords(slave_index, 0, config, 8);
     if (words_read != 8) {
-        setError("Slave %u: Failed to read SII config area (addr=0x0000, requested=8, got=%zu)",
-                 slave_index, words_read);
+        setError("%s: Failed to read SII config area (addr=0x0000, requested=8, got=%zu)",
+                 logPrefix(slave_index).c_str(), words_read);
         return false;
     }
 
@@ -420,9 +424,9 @@ bool SIIParser::parseConfigArea(uint16_t slave_index, SIIData& out_data) {
 
     if (!out_data.checksum_ok) {
         // Log an error but continue parsing (backwards-compatible)
-        setError("Slave %u: SII config CRC mismatch: expected=0x%02X calculated=0x%02X "
+        setError("%s: SII config CRC mismatch: expected=0x%02X calculated=0x%02X "
                  "(raw words: %04X %04X %04X %04X %04X %04X %04X %04X)",
-                 slave_index,
+                 logPrefix(slave_index).c_str(),
                  static_cast<unsigned>(stored_crc), static_cast<unsigned>(calc_crc),
                  config[0], config[1], config[2], config[3],
                  config[4], config[5], config[6], config[7]);
@@ -441,19 +445,19 @@ bool SIIParser::parseIdentity(uint16_t slave_index, SIIData& out_data) {
     uint32_t vendor_id = 0, product_code = 0, revision = 0, serial = 0;
     
     if (!m_reader.readDWord(slave_index, SII_VENDOR_ID, vendor_id)) {
-        setError("Slave %u: Failed to read SII vendor ID (addr=0x%04X)", slave_index, SII_VENDOR_ID);
+        setError("%s: Failed to read SII vendor ID (addr=0x%04X)", logPrefix(slave_index).c_str(), SII_VENDOR_ID);
         return false;
     }
     if (!m_reader.readDWord(slave_index, SII_PRODUCT_CODE, product_code)) {
-        setError("Slave %u: Failed to read SII product code (addr=0x%04X)", slave_index, SII_PRODUCT_CODE);
+        setError("%s: Failed to read SII product code (addr=0x%04X)", logPrefix(slave_index).c_str(), SII_PRODUCT_CODE);
         return false;
     }
     if (!m_reader.readDWord(slave_index, SII_REVISION, revision)) {
-        setError("Slave %u: Failed to read SII revision (addr=0x%04X)", slave_index, SII_REVISION);
+        setError("%s: Failed to read SII revision (addr=0x%04X)", logPrefix(slave_index).c_str(), SII_REVISION);
         return false;
     }
     if (!m_reader.readDWord(slave_index, SII_SERIAL_NUMBER, serial)) {
-        setError("Slave %u: Failed to read SII serial number (addr=0x%04X)", slave_index, SII_SERIAL_NUMBER);
+        setError("%s: Failed to read SII serial number (addr=0x%04X)", logPrefix(slave_index).c_str(), SII_SERIAL_NUMBER);
         return false;
     }
     
@@ -466,8 +470,8 @@ bool SIIParser::parseIdentity(uint16_t slave_index, SIIData& out_data) {
     uint16_t mbx_data[10];
     size_t mbx_words = m_reader.readWords(slave_index, SII_BOOTSTRAP_RX_MBX_OFFSET, mbx_data, 10);
     if (mbx_words != 10) {
-        setError("Slave %u: Failed to read SII mailbox config (addr=0x%04X, requested=10, got=%zu)",
-                 slave_index, SII_BOOTSTRAP_RX_MBX_OFFSET, mbx_words);
+        setError("%s: Failed to read SII mailbox config (addr=0x%04X, requested=10, got=%zu)",
+                 logPrefix(slave_index).c_str(), SII_BOOTSTRAP_RX_MBX_OFFSET, mbx_words);
         return false;
     }
     

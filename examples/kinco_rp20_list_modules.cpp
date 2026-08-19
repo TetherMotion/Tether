@@ -89,13 +89,13 @@ static std::vector<DiscoveredModule> scanSlots(EtherCAT::Master& master,
 
             const RP20Mod::ModuleDescriptor* desc = RP20Mod::findByIdent(module_id);
             if (!desc) {
-                TETHER_LOGW(TAG, "Slave %u slot %u: unknown module ID 0x%02X, skipping",
-                            s, slot, module_id);
+                TETHER_LOGW(TAG, "%s slot %u: unknown module ID 0x%02X, skipping",
+                            master.slaveLogPrefix(s).c_str(), slot, module_id);
                 continue;
             }
 
-            TETHER_LOGI(TAG, "Slave %u slot %u: found %s (%s, ident=0x%02X)",
-                        s, slot, desc->name, desc->module_class, module_id);
+            TETHER_LOGI(TAG, "%s slot %u: found %s (%s, ident=0x%02X)",
+                        master.slaveLogPrefix(s).c_str(), slot, desc->name, desc->module_class, module_id);
 
             DiscoveredModule mod;
             mod.slave_index = s;
@@ -257,7 +257,7 @@ int main(int argc, char** argv) {
     for (uint16_t s = 0; s < slave_count; ++s) {
         auto& sl = master.slave(s);
 
-        TETHER_LOGI(TAG, "Slave %u: configuring mailbox...", s);
+        TETHER_LOGI(TAG, "%master.slaveLogPrefix(s).c_str(): configuring mailbox...", s);
         EtherCAT::SlaveError mb_err;
 #if TETHER_HAVE_ESI
         if (use_esi) {
@@ -271,10 +271,10 @@ int main(int argc, char** argv) {
                 0x0004);
         }
         if (mb_err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGW(TAG, "Slave %u: explicit mailbox config failed (%s), trying SII auto-config",
+            TETHER_LOGW(TAG, "%master.slaveLogPrefix(s).c_str(): explicit mailbox config failed (%s), trying SII auto-config",
                         s, EtherCAT::slaveErrorToString(mb_err));
             if (!master.autoConfigureMailbox(s, Tether::Platform::LogLevel::Info)) {
-                TETHER_LOGE(TAG, "Slave %u: autoConfigureMailbox also failed", s);
+                TETHER_LOGE(TAG, "%master.slaveLogPrefix(s).c_str(): autoConfigureMailbox also failed", s);
                 master.stop();
                 Tether::Examples::shutdownHostEthernet(session);
                 return 7;
@@ -284,13 +284,13 @@ int main(int argc, char** argv) {
 
         auto pre_err = sl.transitionToPreOp();
         if (pre_err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGE(TAG, "Slave %u: PRE-OP transition failed: %s",
+            TETHER_LOGE(TAG, "%master.slaveLogPrefix(s).c_str(): PRE-OP transition failed: %s",
                         s, EtherCAT::slaveErrorToString(pre_err));
             master.stop();
             Tether::Examples::shutdownHostEthernet(session);
             return 8;
         }
-        TETHER_LOGI(TAG, "Slave %u: in PRE-OP", s);
+        TETHER_LOGI(TAG, "%master.slaveLogPrefix(s).c_str(): in PRE-OP", s);
     }
 
     // ---- Delay for slaves to settle ----

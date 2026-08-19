@@ -32,6 +32,8 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 #include <unordered_map>
@@ -316,6 +318,33 @@ public:
      * @endcode
      */
     Slave& slave(uint16_t slave_index);
+
+    // ---- Slave names --------------------------------------------------------
+
+    /**
+     * @brief Assign a human-readable name to a slave.
+     *
+     * The name is used in log messages instead of the bare index.
+     * If the index is out of range, a warning is logged and the call is ignored.
+     *
+     * @param idx   Slave index (0-based)
+     * @param name  Human-readable name (e.g. "X-Axis", "Extruder-1")
+     */
+    void setSlaveName(uint16_t idx, std::string name);
+
+    /**
+     * @brief Get the human-readable name assigned to a slave.
+     * @return The name, or an empty string_view if no name is set.
+     */
+    std::string_view slaveName(uint16_t idx) const;
+
+    /**
+     * @brief Build a log prefix for a slave.
+     *
+     * Returns "Slave <name> (#<index>)" if a name is set,
+     * or "Slave <index>" if no name is set.
+     */
+    std::string slaveLogPrefix(uint16_t idx) const;
 
     /**
      * @brief Initialise the slave vector after discovery.
@@ -1004,6 +1033,9 @@ private:
     // Per-slave state machines
     std::vector<std::unique_ptr<Slave>> slaves_;
     std::unique_ptr<NonExistingSlave> non_existing_slave_;
+
+    // Per-slave human-readable names (for log messages)
+    std::vector<std::string> slave_names_;
 
     // Debug flags (master-level with per-slave filtering)
     EtherCATMasterDebugFlags debug_flags_;

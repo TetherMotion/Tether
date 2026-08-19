@@ -117,13 +117,13 @@ static std::vector<DiscoveredModule> scanSlots(EtherCAT::Master& master,
 
             const RP20Mod::ModuleDescriptor* desc = RP20Mod::findByIdent(module_id);
             if (!desc) {
-                TETHER_LOGW(TAG, "Slave %u slot %u: unknown module ID 0x%02X, skipping",
-                            s, slot, module_id);
+                TETHER_LOGW(TAG, "%s slot %u: unknown module ID 0x%02X, skipping",
+                            master.slaveLogPrefix(s).c_str(), slot, module_id);
                 continue;
             }
 
-            TETHER_LOGI(TAG, "Slave %u slot %u: found %s (%s, ident=0x%02X)",
-                        s, slot, desc->name, desc->module_class, module_id);
+            TETHER_LOGI(TAG, "%s slot %u: found %s (%s, ident=0x%02X)",
+                        master.slaveLogPrefix(s).c_str(), slot, desc->name, desc->module_class, module_id);
 
             DiscoveredModule mod;
             mod.slave_index = s;
@@ -542,39 +542,39 @@ static bool assignPDOsToSlave(EtherCAT::Master& master,
     // Assign RxPDOs to SM2 (0x1C12)
     if (!rxpdos.empty()) {
         if (!sdo.writeU8(CiA301::SyncManager2PDOAssign, 0, 0).has_value()) {
-            TETHER_LOGW(TAG, "Slave %u: failed to clear SM2 PDO count", slave_index);
+            TETHER_LOGW(TAG, "%s: failed to clear SM2 PDO count", master.slaveLogPrefix(slave_index).c_str());
         }
         for (size_t i = 0; i < rxpdos.size(); ++i) {
             if (!sdo.writeU16(CiA301::SyncManager2PDOAssign,
                               static_cast<uint8_t>(i + 1), rxpdos[i]).has_value()) {
-                TETHER_LOGW(TAG, "Slave %u: failed to assign RxPDO 0x%04X to SM2",
-                            slave_index, rxpdos[i]);
+                TETHER_LOGW(TAG, "%s: failed to assign RxPDO 0x%04X to SM2",
+                            master.slaveLogPrefix(slave_index).c_str(), rxpdos[i]);
             }
         }
         if (!sdo.writeU8(CiA301::SyncManager2PDOAssign, 0,
                          static_cast<uint8_t>(rxpdos.size())).has_value()) {
-            TETHER_LOGW(TAG, "Slave %u: failed to set SM2 PDO count", slave_index);
+            TETHER_LOGW(TAG, "%s: failed to set SM2 PDO count", master.slaveLogPrefix(slave_index).c_str());
         }
-        TETHER_LOGI(TAG, "Slave %u: assigned %zu RxPDO(s) to SM2", slave_index, rxpdos.size());
+        TETHER_LOGI(TAG, "%s: assigned %zu RxPDO(s) to SM2", master.slaveLogPrefix(slave_index).c_str(), rxpdos.size());
     }
 
     // Assign TxPDOs to SM3 (0x1C13)
     if (!txpdos.empty()) {
         if (!sdo.writeU8(CiA301::SyncManager3PDOAssign, 0, 0).has_value()) {
-            TETHER_LOGW(TAG, "Slave %u: failed to clear SM3 PDO count", slave_index);
+            TETHER_LOGW(TAG, "%s: failed to clear SM3 PDO count", master.slaveLogPrefix(slave_index).c_str());
         }
         for (size_t i = 0; i < txpdos.size(); ++i) {
             if (!sdo.writeU16(CiA301::SyncManager3PDOAssign,
                               static_cast<uint8_t>(i + 1), txpdos[i]).has_value()) {
-                TETHER_LOGW(TAG, "Slave %u: failed to assign TxPDO 0x%04X to SM3",
-                            slave_index, txpdos[i]);
+                TETHER_LOGW(TAG, "%s: failed to assign TxPDO 0x%04X to SM3",
+                            master.slaveLogPrefix(slave_index).c_str(), txpdos[i]);
             }
         }
         if (!sdo.writeU8(CiA301::SyncManager3PDOAssign, 0,
                          static_cast<uint8_t>(txpdos.size())).has_value()) {
-            TETHER_LOGW(TAG, "Slave %u: failed to set SM3 PDO count", slave_index);
+            TETHER_LOGW(TAG, "%s: failed to set SM3 PDO count", master.slaveLogPrefix(slave_index).c_str());
         }
-        TETHER_LOGI(TAG, "Slave %u: assigned %zu TxPDO(s) to SM3", slave_index, txpdos.size());
+        TETHER_LOGI(TAG, "%s: assigned %zu TxPDO(s) to SM3", master.slaveLogPrefix(slave_index).c_str(), txpdos.size());
     }
 
     return true;
@@ -602,14 +602,14 @@ static void updateSMLengths(EtherCAT::Master& master,
     if (!cfgs) return;
 
     if (total_rx > 0) {
-        TETHER_LOGI(TAG, "Slave %u: SM2 length: %u -> %u",
-                    slave_index, cfgs[slave_index].sm[2].length, total_rx);
+        TETHER_LOGI(TAG, "%s: SM2 length: %u -> %u",
+                    master.slaveLogPrefix(slave_index).c_str(), cfgs[slave_index].sm[2].length, total_rx);
         cfgs[slave_index].sm[2].length = total_rx;
         cfgs[slave_index].rxpdo_size = total_rx;
     }
     if (total_tx > 0) {
-        TETHER_LOGI(TAG, "Slave %u: SM3 length: %u -> %u",
-                    slave_index, cfgs[slave_index].sm[3].length, total_tx);
+        TETHER_LOGI(TAG, "%s: SM3 length: %u -> %u",
+                    master.slaveLogPrefix(slave_index).c_str(), cfgs[slave_index].sm[3].length, total_tx);
         cfgs[slave_index].sm[3].length = total_tx;
         cfgs[slave_index].txpdo_size = total_tx;
     }
@@ -1132,7 +1132,7 @@ int main(int argc, char** argv) {
     for (uint16_t s = 0; s < slave_count; ++s) {
         auto& sl = master.slave(s);
 
-        TETHER_LOGI(TAG, "Slave %u: configuring mailbox...", s);
+        TETHER_LOGI(TAG, "%s: configuring mailbox...", master.slaveLogPrefix(s).c_str());
         EtherCAT::SlaveError mb_err;
 #if TETHER_HAVE_ESI
         if (use_esi) {
@@ -1146,10 +1146,10 @@ int main(int argc, char** argv) {
                 0x0004);
         }
         if (mb_err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGW(TAG, "Slave %u: explicit mailbox config failed (%s), trying SII auto-config",
-                        s, EtherCAT::slaveErrorToString(mb_err));
+            TETHER_LOGW(TAG, "%s: explicit mailbox config failed (%s), trying SII auto-config",
+                        master.slaveLogPrefix(s).c_str(), EtherCAT::slaveErrorToString(mb_err));
             if (!master.autoConfigureMailbox(s, Tether::Platform::LogLevel::Info)) {
-                TETHER_LOGE(TAG, "Slave %u: autoConfigureMailbox also failed", s);
+                TETHER_LOGE(TAG, "%s: autoConfigureMailbox also failed", master.slaveLogPrefix(s).c_str());
                 master.stop();
                 Tether::Examples::shutdownHostEthernet(session);
                 return 7;
@@ -1159,13 +1159,13 @@ int main(int argc, char** argv) {
 
         auto pre_err = sl.transitionToPreOp();
         if (pre_err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGE(TAG, "Slave %u: PRE-OP transition failed: %s",
-                        s, EtherCAT::slaveErrorToString(pre_err));
+            TETHER_LOGE(TAG, "%s: PRE-OP transition failed: %s",
+                        master.slaveLogPrefix(s).c_str(), EtherCAT::slaveErrorToString(pre_err));
             master.stop();
             Tether::Examples::shutdownHostEthernet(session);
             return 8;
         }
-        TETHER_LOGI(TAG, "Slave %u: in PRE-OP", s);
+        TETHER_LOGI(TAG, "%s: in PRE-OP", master.slaveLogPrefix(s).c_str());
     }
 
     // ---- Delay for slaves to settle ----
@@ -1215,7 +1215,7 @@ int main(int argc, char** argv) {
 
         // Configure SM2/SM3 from SII
         if (!master.configureProcessDataSyncManagersFromSii(s)) {
-            TETHER_LOGW(TAG, "Slave %u: SM2/SM3 config from SII failed", s);
+            TETHER_LOGW(TAG, "%s: SM2/SM3 config from SII failed", master.slaveLogPrefix(s).c_str());
         }
 
         // Update SM2/SM3 lengths to match total PDO sizes
@@ -1230,13 +1230,13 @@ int main(int argc, char** argv) {
 
         auto safe_err = sl.transitionToSafeOp();
         if (safe_err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGE(TAG, "Slave %u: SAFE-OP transition failed: %s",
-                        s, EtherCAT::slaveErrorToString(safe_err));
+            TETHER_LOGE(TAG, "%s: SAFE-OP transition failed: %s",
+                        master.slaveLogPrefix(s).c_str(), EtherCAT::slaveErrorToString(safe_err));
             master.stop();
             Tether::Examples::shutdownHostEthernet(session);
             return 10;
         }
-        TETHER_LOGI(TAG, "Slave %u: in SAFE-OP", s);
+        TETHER_LOGI(TAG, "%s: in SAFE-OP", master.slaveLogPrefix(s).c_str());
     }
 
     // ---- Start realtime motion loop ----
@@ -1277,14 +1277,14 @@ int main(int argc, char** argv) {
         auto& sl = master.slave(s);
         auto op_err = sl.transitionToOp();
         if (op_err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGE(TAG, "Slave %u: OP transition failed: %s",
-                        s, EtherCAT::slaveErrorToString(op_err));
+            TETHER_LOGE(TAG, "%s: OP transition failed: %s",
+                        master.slaveLogPrefix(s).c_str(), EtherCAT::slaveErrorToString(op_err));
             master.stopMotionControlLoop();
             master.stop();
             Tether::Examples::shutdownHostEthernet(session);
             return 12;
         }
-        TETHER_LOGI(TAG, "Slave %u: in OP", s);
+        TETHER_LOGI(TAG, "%s: in OP", master.slaveLogPrefix(s).c_str());
     }
 
     TETHER_LOGI(TAG, "All slaves in OP — starting cyclic I/O");

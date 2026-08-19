@@ -370,8 +370,8 @@ bool SlaveSupervisor::forceSlaveToInit(uint16_t slave_index) {
                                    20,  // max iterations
                                    50); // sleep ms
     if (!result.success) {
-        TETHER_LOGE(TAG, "Slave %u: Failed to force to INIT: %s",
-                    slave_index, result.message.c_str());
+        TETHER_LOGE(TAG, "%s: Failed to force to INIT: %s",
+                    master_.slaveLogPrefix(slave_index).c_str(), result.message.c_str());
         return false;
     }
 
@@ -379,8 +379,8 @@ bool SlaveSupervisor::forceSlaveToInit(uint16_t slave_index) {
     auto& slave = master_.slave(slave_index);
     (void)slave.transitionToInit();
 
-    TETHER_LOGI(TAG, "Slave %u: Forced to INIT (%s)",
-                slave_index, result.message.c_str());
+    TETHER_LOGI(TAG, "%s: Forced to INIT (%s)",
+                master_.slaveLogPrefix(slave_index).c_str(), result.message.c_str());
     return true;
 }
 
@@ -394,8 +394,8 @@ bool SlaveSupervisor::attemptRecovery(uint16_t slave_index) {
 
     const int max = config_.max_attempts;
 
-    TETHER_LOGE(TAG, "Slave %u: Critical condition detected: %s (AL code 0x%04X)",
-                slave_index, ss.last_detail.c_str(), ss.last_al_status_code);
+    TETHER_LOGE(TAG, "%s: Critical condition detected: %s (AL code 0x%04X)",
+                master_.slaveLogPrefix(slave_index).c_str(), ss.last_detail.c_str(), ss.last_al_status_code);
     dispatchEvent(RecoveryEventType::CriticalDetected, slave_index,
                   ss.last_al_status_code, 0, ss.last_detail);
 
@@ -406,8 +406,8 @@ bool SlaveSupervisor::attemptRecovery(uint16_t slave_index) {
 
         if (max > 0 && current_attempt > max) {
             ss.state.store(SlaveRecoveryState::Failed, std::memory_order_release);
-            TETHER_LOGE(TAG, "Slave %u: Recovery permanently failed after %d attempts",
-                        slave_index, max);
+            TETHER_LOGE(TAG, "%s: Recovery permanently failed after %d attempts",
+                        master_.slaveLogPrefix(slave_index).c_str(), max);
             dispatchEvent(RecoveryEventType::RecoveryGaveUp, slave_index,
                           ss.last_al_status_code, current_attempt - 1,
                           "Retry limit exhausted");
@@ -418,8 +418,8 @@ bool SlaveSupervisor::attemptRecovery(uint16_t slave_index) {
         // Enter recovering state
         ss.state.store(SlaveRecoveryState::Recovering, std::memory_order_release);
 
-        TETHER_LOGI(TAG, "Slave %u: Recovery attempt %d/%d started",
-                    slave_index, current_attempt, max > 0 ? max : -1);
+        TETHER_LOGI(TAG, "%s: Recovery attempt %d/%d started",
+                    master_.slaveLogPrefix(slave_index).c_str(), current_attempt, max > 0 ? max : -1);
         dispatchEvent(RecoveryEventType::RecoveryStarted, slave_index,
                       ss.last_al_status_code, current_attempt, ss.last_detail);
 
@@ -438,8 +438,8 @@ bool SlaveSupervisor::attemptRecovery(uint16_t slave_index) {
 
         // --- Force slave to INIT ---
         if (!forceSlaveToInit(slave_index)) {
-            TETHER_LOGE(TAG, "Slave %u: Failed to force to INIT on attempt %d",
-                        slave_index, current_attempt);
+            TETHER_LOGE(TAG, "%s: Failed to force to INIT on attempt %d",
+                        master_.slaveLogPrefix(slave_index).c_str(), current_attempt);
             dispatchEvent(RecoveryEventType::RecoveryFailed, slave_index,
                           ss.last_al_status_code, current_attempt,
                           "Failed to force slave to INIT");
@@ -453,7 +453,7 @@ bool SlaveSupervisor::attemptRecovery(uint16_t slave_index) {
 
             // --- Call the recovery handler to re-initialize from scratch ---
             if (!recovery_handler_) {
-                TETHER_LOGE(TAG, "Slave %u: No recovery handler set", slave_index);
+                TETHER_LOGE(TAG, "%s: No recovery handler set", master_.slaveLogPrefix(slave_index).c_str());
                 ss.state.store(SlaveRecoveryState::Failed, std::memory_order_release);
                 dispatchEvent(RecoveryEventType::RecoveryGaveUp, slave_index,
                               ss.last_al_status_code, current_attempt,
@@ -465,12 +465,12 @@ bool SlaveSupervisor::attemptRecovery(uint16_t slave_index) {
             try {
                 ok = recovery_handler_->reinitializeSlave(slave_index);
             } catch (const std::exception& e) {
-                TETHER_LOGE(TAG, "Slave %u: Recovery handler threw: %s",
-                            slave_index, e.what());
+                TETHER_LOGE(TAG, "%s: Recovery handler threw: %s",
+                            master_.slaveLogPrefix(slave_index).c_str(), e.what());
                 ok = false;
             } catch (...) {
-                TETHER_LOGE(TAG, "Slave %u: Recovery handler threw unknown exception",
-                            slave_index);
+                TETHER_LOGE(TAG, "%s: Recovery handler threw unknown exception",
+                            master_.slaveLogPrefix(slave_index).c_str());
                 ok = false;
             }
 
@@ -488,15 +488,15 @@ bool SlaveSupervisor::attemptRecovery(uint16_t slave_index) {
                 ss.state.store(SlaveRecoveryState::Normal, std::memory_order_release);
                 ss.attempt_count.store(0, std::memory_order_release);
 
-                TETHER_LOGI(TAG, "Slave %u: Recovery succeeded on attempt %d",
-                            slave_index, current_attempt);
+                TETHER_LOGI(TAG, "%s: Recovery succeeded on attempt %d",
+                            master_.slaveLogPrefix(slave_index).c_str(), current_attempt);
                 dispatchEvent(RecoveryEventType::RecoverySucceeded, slave_index,
                               0, current_attempt, "Slave re-initialized successfully");
                 return true;
             }
 
-            TETHER_LOGE(TAG, "Slave %u: Recovery handler failed on attempt %d",
-                        slave_index, current_attempt);
+            TETHER_LOGE(TAG, "%s: Recovery handler failed on attempt %d",
+                        master_.slaveLogPrefix(slave_index).c_str(), current_attempt);
             dispatchEvent(RecoveryEventType::RecoveryFailed, slave_index,
                           ss.last_al_status_code, current_attempt,
                           "Recovery handler returned false");
@@ -505,7 +505,7 @@ bool SlaveSupervisor::attemptRecovery(uint16_t slave_index) {
         // Check if we've exhausted retries
         if (max > 0 && current_attempt >= max) {
             ss.state.store(SlaveRecoveryState::Failed, std::memory_order_release);
-            TETHER_LOGE(TAG, "Slave %u: Giving up after %d attempts", slave_index, max);
+            TETHER_LOGE(TAG, "%s: Giving up after %d attempts", master_.slaveLogPrefix(slave_index).c_str(), max);
             dispatchEvent(RecoveryEventType::RecoveryGaveUp, slave_index,
                           ss.last_al_status_code, current_attempt,
                           "Retry limit exhausted");
