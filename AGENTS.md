@@ -191,3 +191,87 @@ The deconvolution controllers are fully integrated into the Klipper layer:
 - **Status object**: `deconvolution` exposes `controller`, `enabled`, `lambda`
 - **Accessors**: `KlippyInstance::ltiDeconvolver()`, `overlapAddDeconvolver()`,
   `arxInverseFilter()`, `stateSpaceEstimator()`, `applyDeconvolutionSettings()`
+
+## EtherCAT Slave Supervision and Automatic Recovery
+
+The `SlaveSupervisor` monitors EtherCAT slaves for critical conditions and
+automatically attempts recovery by forcing the slave to `INIT` and
+re-initializing it from scratch.
+
+### Key components
+
+- `SlaveSupervisor` (`include/tether/ethercat/SlaveSupervisor.hpp`) —
+  Detects critical conditions, orchestrates recovery with retry limiting,
+  dispatches events to listeners, and manages per-slave suspension state.
+- `ISlaveRecoveryHandler` — Interface for re-initializing a slave after
+  forced INIT.  The application provides a handler that re-configures PDOs,
+  mailbox, and transitions the slave back to OP.
+- `DS402Master::DS402RecoveryHandler` — Built-in handler for CiA 402 drives
+  that replays `configureDrive()` + `enableDrive()`.
+- `RecoveryConfig` — Configures trigger sources, critical AL status codes,
+  retry limits, delays, and whether to suspend all slaves during recovery.
+- `IRecoveryEventListener` — Callback interface for recovery events
+  (CriticalDetected, RecoveryStarted, RecoverySucceeded, RecoveryFailed,
+  RecoveryGaveUp, SlaveSuspended, SlaveResumed).
+
+### Trigger sources
+
+- `CriticalTrigger::ALStatusCodes` — Error flag set with a critical AL
+  status code (default set includes `SlaveNeedsInit`, `FatalSyncError`,
+  `NoSyncError`, `SynchronizationError`, etc.)
+- `CriticalTrigger::TransitionFailures` — State drop from SAFE_OP/OP to
+  INIT/PRE_OP, or explicit `handleTransitionFailure()` calls
+- `CriticalTrigger::AppInjected` — Application calls `markCritical()`
+- `CriticalTrigger::All` — All of the above (default)
+
+### Recovery flow
+
+1. Critical condition detected → `CriticalDetected` event
+2. Slave(s) suspended (PDO data not passed to motion controllers)
+3. `ALResetController` forces slave to `INIT` (two-step AL reset with ack)
+4. `ISlaveRecoveryHandler::reinitializeSlave()` called
+5. On success: slave resumed, `RecoverySucceeded` event, attempt count reset
+6. On failure: retry (up to `max_attempts`), then `RecoveryGaveUp` + `Failed`
+
+### Usage with DS402Master
+
+```cpp
+// Enable automatic recovery for DS402 drives
+RecoveryConfig cfg;
+cfg.max_attempts = 3;
+cfg.retry_delay_ms = 500;
+cfg.stop_loop_during_recovery = false;
+ds402.enableSlaveRecovery(cfg, drive_configs);
+
+// Or use the supervisor directly
+auto& sup = master.slaveSupervisor();
+sup.configure(cfg);
+sup.setRecoveryHandler(std::make_unique<MyHandler>());
+sup.start();
+
+// Mark a slave as critical from application code
+sup.markCritical(slave_index, "Custom critical condition");
+
+// Check suspension state in the motion loop (realtime-safe)
+if (sup.isSlaveSuspended(slave_index)) {
+    // Skip PDO processing for this slave
+}
+```
+
+### Build & test
+
+```bash
+# Build the supervisor test
+cmake --build build --target tether_ethercat_supervisor_tests -j$(nproc)
+
+# Run tests
+./build/bin/tests/tether_ethercat_supervisor_tests
+```
+
+### Key source files
+
+- `include/tether/ethercat/SlaveSupervisor.hpp` — Public API
+- `src/ethercat/SlaveSupervisor.cpp` — Implementation
+- `src/profiles/cia402/DS402Master.cpp` — DS402 integration + recovery handler
+- `tests/ethercat/test_slave_supervisor.cpp` — Unit tests (32 tests)
+

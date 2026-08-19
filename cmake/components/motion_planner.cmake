@@ -96,7 +96,6 @@ foreach(_tgt IN LISTS _variants)
     target_link_libraries(${_tgt}
         PUBLIC
             tether_common
-            tether_gcode
             tether_motion_geometry
         PRIVATE
             tether_export

@@ -7,6 +7,8 @@ _deps/
 CTestTestfile.cmake
 TetherConfig.cmake
 TetherConfigVersion.cmake
+# Generated from TetherConfig.hpp.in by configure_file()
+include/tether/TetherConfig.hpp
 # CMake test discovery files
 tests/cmake_test_discovery_*.json
 

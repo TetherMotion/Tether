@@ -25,7 +25,7 @@ SDOTransactionBase::SDOTransactionBase(SDOErrorDecoder& errorDecoder,
 bool SDOTransactionBase::sendAndWait(Master& master, uint16_t adp,
                                      uint16_t mbxWriteAddr, uint16_t mbxWriteLen,
                                      uint16_t mbxReadAddr, uint16_t mbxReadLen,
-                                     const uint8_t* mbxbuf, unsigned int timeoutMs,
+                                     uint8_t* mbxbuf, unsigned int timeoutMs,
                                      unsigned int pollIntervalMs,
                                      unsigned int transactionTimeoutMs,
                                      const char* phaseLabel) {
@@ -96,17 +96,37 @@ bool SDOTransactionBase::handleMailboxError(const uint8_t* mbxbuf, const MbxResp
     return false;
 }
 
+bool SDOTransactionBase::isCounterMismatchError(const uint8_t* mbxbuf, const MbxResponseHeader& hdr) {
+    if (hdr.type != EC_MBXT_ERR || hdr.len < 4) {
+        return false;
+    }
+    const uint16_t err = le16_to_host(*reinterpret_cast<const uint16_t*>(mbxbuf + sizeof(MbxHeader) + 0));
+    const uint16_t detail = le16_to_host(*reinterpret_cast<const uint16_t*>(mbxbuf + sizeof(MbxHeader) + 2));
+    // ETG.1000.6 error 0x0001 = "Syntax error in mailbox message".
+    // detail 0x0004 = offset of priority byte, 0x0005 = offset of type/counter
+    // byte in the mailbox header.  Either indicates the slave rejected the
+    // mailbox header — most commonly due to a counter mismatch.
+    return (err == 0x0001 && (detail == 0x0004 || detail == 0x0005));
+}
+
 bool SDOTransactionBase::checkStaleCounter(Master& master, uint16_t adp,
                                            uint16_t mbxWriteAddr, uint16_t mbxWriteLen,
                                            uint16_t mbxReadAddr, uint16_t mbxReadLen,
-                                           const uint8_t* mbxbuf, unsigned int pollIntervalMs,
+                                           uint8_t* mbxbuf, unsigned int pollIntervalMs,
                                            unsigned int transactionTimeoutMs,
                                            const MbxResponseHeader& hdr,
-                                           uint8_t expectedMbxCnt, int& staleRetryCount,
+                                           uint8_t* inoutMbxCnt, uint8_t& inOutExpectedCnt,
+                                           int& staleRetryCount,
                                            uint16_t index_, uint8_t sub_,
                                            const char* phaseLabel) {
-    TETHER_LOGW(TAG, "Stale mailbox response (%s): cnt=%u expected=%u (adp=0x%04X index=0x%04X:%u) — re-sending",
-                phaseLabel, hdr.cnt, expectedMbxCnt, adp, index_, sub_);
+    TETHER_LOGW(TAG, "Stale mailbox response (%s): cnt=%u expected=%u (adp=0x%04X index=0x%04X:%u) — syncing counter and re-sending",
+                phaseLabel, hdr.cnt, inOutExpectedCnt, adp, index_, sub_);
+    // Sync the master's counter to the slave's counter.  The slave increments
+    // its counter after each response, so the next value it expects is one
+    // past the cnt we just saw.  This updates both the persistent counter
+    // (*inoutMbxCnt) and the counter byte embedded in the mbxbuf.
+    SDOMailboxIO::syncMbxCounter(hdr.cnt, inoutMbxCnt, mbxbuf);
+    inOutExpectedCnt = SDOMailboxIO::nextMbxCnt(hdr.cnt);
     if (++staleRetryCount <= MAX_STALE_RETRIES) {
         if (!sendAndWait(master, adp, mbxWriteAddr, mbxWriteLen,
                          mbxReadAddr, mbxReadLen, mbxbuf, 500,
