@@ -24,7 +24,8 @@ static EtherCAT::DCConfig convertConfig(const DC::DCConfig& dc_config) {
         .sync1_cycle_time_ns = dc_config.sync1_cycle_time_ns,
         .sync0_shift_ns = dc_config.sync0_shift_ns,
         .enable_sync0 = dc_config.enable_sync0,
-        .enable_sync1 = dc_config.enable_sync1
+        .enable_sync1 = dc_config.enable_sync1,
+        .sync_disabled_slaves = dc_config.sync_disabled_slaves
     };
 }
 
