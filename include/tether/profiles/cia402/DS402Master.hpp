@@ -9,6 +9,7 @@
 #include "tether/ethercat/DC.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/CyclicTaskScheduler.hpp"
+#include "tether/ethercat/SlaveSupervisor.hpp"
 #include "tether/profiles/cia402/CiA402Drive.hpp"
 
 namespace EtherCAT {
@@ -176,6 +177,66 @@ public:
     void clearCyclicTasks();
     CyclicTaskScheduler& cyclicTaskScheduler() { return cyclic_task_scheduler_; }
     bool updateMotionControllers(double dt_seconds);
+
+    // ========================================================================
+    // Slave Recovery / Supervision
+    // ========================================================================
+
+    /**
+     * @brief Access the underlying Master's SlaveSupervisor.
+     *
+     * The supervisor is always present on the Master but is disabled by
+     * default.  Use this to configure and enable automatic slave recovery.
+     *
+     * @code
+     *   auto& sup = ds402.slaveSupervisor();
+     *   RecoveryConfig cfg;
+     *   cfg.enabled = true;
+     *   cfg.max_attempts = 3;
+     *   sup.configure(cfg);
+     *   sup.setRecoveryHandler(
+     *       std::make_unique<DS402RecoveryHandler>(ds402, configs));
+     *   sup.start();
+     * @endcode
+     */
+    SlaveSupervisor& slaveSupervisor();
+
+    /**
+     * @brief Built-in recovery handler that re-configures and re-enables a
+     *        DS402 drive from scratch.
+     *
+     * Stores a copy of the DriveConfiguration for each slave and replays the
+     * full configureDrive() + enableDrive() sequence when
+     * reinitializeSlave() is called.
+     */
+    class DS402RecoveryHandler : public ISlaveRecoveryHandler {
+    public:
+        DS402RecoveryHandler(DS402Master& master,
+                             const std::vector<DriveConfiguration>& configs);
+
+        bool reinitializeSlave(uint16_t slave_index) override;
+
+    private:
+        DS402Master& master_;
+        std::vector<DriveConfiguration> configs_;
+    };
+
+    /**
+     * @brief Convenience: enable slave recovery with a DS402 re-init handler.
+     *
+     * Configures the supervisor with the given RecoveryConfig, installs a
+     * DS402RecoveryHandler using the provided drive configurations, and
+     * starts supervision.
+     *
+     * @param config       Recovery configuration (enabled is forced to true)
+     * @param configs      Drive configurations for re-initialization
+     * @return true if supervision started successfully
+     */
+    bool enableSlaveRecovery(const RecoveryConfig& config,
+                              const std::vector<DriveConfiguration>& configs);
+
+    /// Disable and stop slave recovery supervision.
+    void disableSlaveRecovery();
 
     bool startRealtimeMotionControlLoop();
     bool startRealtimeMotionControlLoop(

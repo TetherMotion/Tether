@@ -131,6 +131,17 @@ public:
 
     bool registerPDOBuffers();
     bool isPDORegistered() const { return m_pdo_registered; }
+
+    /**
+     * @brief Reset PDO registration state so buffers can be re-registered.
+     *
+     * After a forced INIT (e.g. during slave recovery), the PDO mapping
+     * entries in the PDOManager are stale.  Call this to clear the
+     * registration flag so that a subsequent registerPDOBuffers() call
+     * re-adds the entries.  The old entries should be removed from the
+     * PDOManager mapping first (e.g. via remove_entries_for_slave()).
+     */
+    void resetPDORegistration();
     void setSDOTimeout(uint32_t timeout_ms) { m_sdo_timeout_ms = timeout_ms; }
 
     // ========================================================================

@@ -133,4 +133,14 @@ bool CiA402Drive::registerPDOBuffers() {
     return true;
 }
 
+// ============================================================================
+// resetPDORegistration
+// ============================================================================
+
+void CiA402Drive::resetPDORegistration() {
+    m_pdo_registered = false;
+    m_rxpdo_entry_index = -1;
+    m_txpdo_entry_index = -1;
+}
+
 } // namespace EtherCAT

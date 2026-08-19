@@ -147,5 +147,24 @@ bool SDOMailboxIO::pollSm1Full(Master& master, uint16_t adp,
     return false;
 }
 
+void SDOMailboxIO::syncMbxCounter(uint8_t slaveResponseCnt,
+                                   uint8_t* inoutMbxCnt,
+                                   uint8_t* mbxbuf) {
+    // The slave increments its counter after each response it sends, so the
+    // value it expects in the next request is one past the cnt we just saw.
+    const uint8_t synced_cnt = nextMbxCnt(slaveResponseCnt);
+
+    if (inoutMbxCnt != nullptr) {
+        *inoutMbxCnt = synced_cnt;
+    }
+
+    // Update the counter nibble in MbxHeader.mbxtype (byte offset 5).
+    // Preserve the type low nibble; replace the counter high nibble.
+    if (mbxbuf != nullptr) {
+        mbxbuf[5] = static_cast<uint8_t>(
+            ((synced_cnt & 0x07u) << 4) | (mbxbuf[5] & 0x0Fu));
+    }
+}
+
 } // namespace Raw
 } // namespace EtherCAT

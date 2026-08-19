@@ -315,7 +315,7 @@ if(DEFINED TETHER_COMPONENTS)
     set(_tether_component_deps_controls        "common")
     set(_tether_component_deps_autotuning      "common")
     set(_tether_component_deps_kinematics       "common")
-    set(_tether_component_deps_motion_control  "kinematics;controls;common")
+    set(_tether_component_deps_motion_control  "common")
     set(_tether_component_deps_identification  "common")
     set(_tether_component_deps_ethercat_common "hal;common")
     set(_tether_component_deps_ethercat_master "ethercat_common;hal;common")
@@ -738,12 +738,15 @@ endif()
 add_library(tether INTERFACE)
 target_link_libraries(tether INTERFACE ${TETHER_ALL_COMPONENTS})
 
-# Add include directories to the interface library
+# Add include directories to the interface library.
+# NOTE: The build dir is listed BEFORE the source dir so that the generated
+# TetherConfig.hpp (from configure_file()) takes precedence over any stale
+# copy that may exist in the source tree. See .gitignore.
 target_include_directories(tether INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/tether>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include/tether>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/tether>
     $<INSTALL_INTERFACE:include>
     $<INSTALL_INTERFACE:include/tether>
 )

@@ -9,6 +9,7 @@
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/SDOManager.hpp"
 #include "tether/ethercat/SlaveStatusPoller.hpp"
+#include "tether/ethercat/SlaveSupervisor.hpp"
 #include "tether/ethercat/FoE.hpp"
 #include "tether/ethercat/VoE.hpp"
 #include "tether/ethercat/EoE.hpp"
@@ -104,6 +105,9 @@ bool Master::discoverSlaves()
             }
             if (status_poller_) {
                 status_poller_->init(resp.wkc);
+            }
+            if (slave_supervisor_) {
+                slave_supervisor_->init(resp.wkc);
             }
             // Debug gate checkpoint: discovery complete
             if (debug_gate_) {

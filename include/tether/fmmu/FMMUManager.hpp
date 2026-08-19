@@ -184,6 +184,28 @@ public:
                          uint32_t base_logical_addr = 0);
 
     /**
+     * @brief Configure FMMUs with separate output/input logical addresses.
+     *
+     * Unlike the single-base overload (which places the input FMMU
+     * contiguously after the output FMMU), this variant allows the output
+     * and input FMMU regions to live at independent logical addresses.
+     * This is required for buses that use Position-Based Logical Routing
+     * (PBLR) where the RxPDO and TxPDO logical regions are not contiguous.
+     *
+     * @param output_phys        Physical start address of the output SM (SM2)
+     * @param output_len         Output PDO length in bytes (0 to skip)
+     * @param output_logical_addr Logical start address for the output FMMU
+     * @param input_phys         Physical start address of the input SM (SM3)
+     * @param input_len          Input PDO length in bytes (0 to skip)
+     * @param input_logical_addr Logical start address for the input FMMU
+     * @return true if at least one FMMU was configured
+     */
+    bool configureManual(uint16_t output_phys, uint16_t output_len,
+                         uint32_t output_logical_addr,
+                         uint16_t input_phys, uint16_t input_len,
+                         uint32_t input_logical_addr);
+
+    /**
      * @brief Configure FMMUs from multiple PDO sync manager configs.
      *
      * Creates one FMMU per SM (output/input), with per-PDO logical address

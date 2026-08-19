@@ -121,6 +121,7 @@ class EoEManager;
 class FaultDetector;
 class IFaultTransport;
 class SlaveStatusPoller;
+class SlaveSupervisor;
 class Slave;
 class NonExistingSlave;
 
@@ -795,6 +796,7 @@ public:
     EoEManager&     eoe();
     FaultDetector&     faults();
     SlaveStatusPoller&  statusPoller();
+    SlaveSupervisor&    slaveSupervisor();
 private:
     // Mailbox override storage — guarded by a mutex and sized to kMaxPDOSlaves
     struct MailboxOverrideInternal {
@@ -997,6 +999,7 @@ private:
     std::unique_ptr<IFaultTransport>    fault_transport_;
     std::unique_ptr<FaultDetector>      faults_;
     std::unique_ptr<SlaveStatusPoller>  status_poller_;
+    std::unique_ptr<SlaveSupervisor>    slave_supervisor_;
 
     // Per-slave state machines
     std::vector<std::unique_ptr<Slave>> slaves_;
