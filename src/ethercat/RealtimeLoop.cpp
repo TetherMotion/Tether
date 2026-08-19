@@ -162,7 +162,7 @@ bool RealtimeLoop::startPDOThread() {
     timer_cfg.callback    = pdoTimerCallback;
     timer_cfg.user_data   = this;
     timer_cfg.auto_reload = true;
-    timer_cfg.priority    = 0;
+    timer_cfg.priority    = config_.pdo_priority;  // PDO timer = PDO thread priority
 
     if (!pdo_timer_->configure(timer_cfg) || !pdo_timer_->start()) {
         TETHER_LOGE(TAG, "Failed to configure/start PDO timer");
@@ -210,7 +210,7 @@ void RealtimeLoop::pdoTaskEntry(void* param) {
 
     TETHER_LOGI(TAG, "PDO realtime task started");
 
-    if (!Tether::Platform::setCurrentThreadRealtime(-1)) {
+    if (!Tether::Platform::setCurrentThreadRealtime(loop->config_.pdo_priority)) {
         TETHER_LOGW(TAG, "PDO thread could not acquire SCHED_FIFO priority; running with normal scheduling");
     }
 
@@ -301,7 +301,7 @@ bool RealtimeLoop::startDCThread() {
     timer_cfg.callback    = dcTimerCallback;
     timer_cfg.user_data   = this;
     timer_cfg.auto_reload = true;
-    timer_cfg.priority    = 0;
+    timer_cfg.priority    = config_.dc_priority;  // DC timer = DC thread priority
 
     if (!dc_timer_->configure(timer_cfg) || !dc_timer_->start()) {
         TETHER_LOGE(TAG, "Failed to configure/start DC timer");
@@ -349,7 +349,7 @@ void RealtimeLoop::dcTaskEntry(void* param) {
 
     TETHER_LOGI(TAG, "DC realtime task started");
 
-    if (!Tether::Platform::setCurrentThreadRealtime(-1)) {
+    if (!Tether::Platform::setCurrentThreadRealtime(loop->config_.dc_priority)) {
         TETHER_LOGW(TAG, "DC thread could not acquire SCHED_FIFO priority; running with normal scheduling");
     }
 
