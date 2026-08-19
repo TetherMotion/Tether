@@ -177,11 +177,13 @@ public:
 
     bool configureFromSii(const SII::SIIData* sii,
                           const PDO::SlaveConfig* sm_config,
-                          uint32_t base_logical_addr = 0);
+                          uint32_t base_logical_addr = 0,
+                          bool fmmu_debug = false);
 
     bool configureManual(uint16_t output_phys, uint16_t output_len,
                          uint16_t input_phys, uint16_t input_len,
-                         uint32_t base_logical_addr = 0);
+                         uint32_t base_logical_addr = 0,
+                         bool fmmu_debug = false);
 
     /**
      * @brief Configure FMMUs with separate output/input logical addresses.
@@ -203,7 +205,8 @@ public:
     bool configureManual(uint16_t output_phys, uint16_t output_len,
                          uint32_t output_logical_addr,
                          uint16_t input_phys, uint16_t input_len,
-                         uint32_t input_logical_addr);
+                         uint32_t input_logical_addr,
+                         bool fmmu_debug = false);
 
     /**
      * @brief Configure FMMUs from multiple PDO sync manager configs.
@@ -217,7 +220,8 @@ public:
      * @return true if at least one FMMU was configured
      */
     bool configureFromMultiPDO(const std::vector<PDO::MultiPDOSyncManagerConfig>& sm_configs,
-                               uint32_t base_logical_addr = 0);
+                               uint32_t base_logical_addr = 0,
+                               bool fmmu_debug = false);
 
     bool writeToSlave(bool fmmu_debug = false);
     size_t readFromSlave(FMMUConfig* out_configs, size_t max_fmmus);

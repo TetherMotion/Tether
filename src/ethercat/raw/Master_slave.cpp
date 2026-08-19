@@ -528,6 +528,7 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
 
     // Phase 2: Configure FMMUs while SMs are still disabled.
     auto& fmmu_mgr = slave(slave_index).fmmuManager();
+    const bool fmmu_dbg = debug_flags_.fmmu && debug_flags_.fmmuFilt.allows(slave_index);
     if (sii_valid && logical_addr_mgr_->hasSlavePDOs(slave_index)) {
         uint32_t rx_log = logical_addr_mgr_->getRxPDOLogicalAddr(slave_index);
         uint16_t rx_len = logical_addr_mgr_->getRxPDOLength(slave_index);
@@ -536,14 +537,15 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
 
         fmmu_mgr.configureManual(
             slave_configs[slave_index].sm[2].phys_start_addr, rx_len, rx_log,
-            slave_configs[slave_index].sm[3].phys_start_addr, tx_len, tx_log);
-        if (!fmmu_mgr.writeToSlave(debug_flags_.fmmu && debug_flags_.fmmuFilt.allows(slave_index))) {
+            slave_configs[slave_index].sm[3].phys_start_addr, tx_len, tx_log,
+            fmmu_dbg);
+        if (!fmmu_mgr.writeToSlave(fmmu_dbg)) {
             TETHER_LOGE(TAG, "Slave %u: FMMU write (manual) failed", slave_index);
             return false;
         }
     } else if (sii_valid) {
-        fmmu_mgr.configureFromSii(&sii, &slave_configs[slave_index], 0);
-        if (!fmmu_mgr.writeToSlave(debug_flags_.fmmu && debug_flags_.fmmuFilt.allows(slave_index))) {
+        fmmu_mgr.configureFromSii(&sii, &slave_configs[slave_index], 0, fmmu_dbg);
+        if (!fmmu_mgr.writeToSlave(fmmu_dbg)) {
             TETHER_LOGE(TAG, "Slave %u: FMMU write (from SII) failed", slave_index);
             return false;
         }

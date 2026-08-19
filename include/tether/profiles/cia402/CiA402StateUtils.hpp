@@ -62,3 +62,11 @@ DriveState decodeDriveState(uint16_t statusword);
 const char* formatStatuswordDiagnostics(uint16_t sw, char* buffer, size_t buffer_size);
 
 } // namespace EtherCAT
+
+namespace CiA402 {
+
+/// Map a CiA 402 operating mode code (0x6060) to its standard abbreviation.
+/// Returns "PP", "VL", "PV", "PT", "HM", "IP", "CSP", "CSV", "CST", or "Mode N".
+const char* getOperatingModeName(int8_t mode);
+
+} // namespace CiA402

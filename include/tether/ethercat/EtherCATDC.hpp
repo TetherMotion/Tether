@@ -55,6 +55,9 @@ public:
                        unsigned int timeout_ms = 200);
     virtual bool sendSyncFrame();
 
+    /** @brief Enable/disable verbose DC debug logging (gated by --debug dc). */
+    void setDebugLogging(bool enabled) { dc_debug_ = enabled; }
+
 private:
     DCConfig config_;
     std::atomic<DCState> state_{DCState::Disabled};
@@ -69,6 +72,7 @@ private:
     IDCTransport& transport_;
     std::unique_ptr<RealtimeLoop> realtime_loop_;
     std::function<bool()> pdo_exchange_fn_;
+    bool dc_debug_ = false;  ///< Verbose DC debug logging (enabled via --debug dc)
 
     bool initialize();
     bool readSlaveCapabilities(uint16_t slave_index);

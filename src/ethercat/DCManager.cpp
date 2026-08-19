@@ -8,6 +8,8 @@
 
 namespace EtherCAT {
 
+static const char* TAG = "DC sync";
+
 DCManager::DCManager(Master& master)
     : master_(master), sentinel_(std::make_unique<NoDistributedClockConfigured>())
 {
@@ -55,7 +57,7 @@ static DC::DCLoopStats convertStats(const EtherCAT::DCLoopStats& stats) {
 bool DCManager::init(const DC::DCConfig& config, uint16_t slave_count)
 {
     if (slave_count == 0) {
-        TETHER_LOGW("ethercat_dc", "DCManager::init: invalid slave count (0)");
+        TETHER_LOGW(TAG, "DCManager::init: invalid slave count (0)");
         return false;
     }
 
@@ -68,16 +70,18 @@ bool DCManager::init(const DC::DCConfig& config, uint16_t slave_count)
 
         // Create EtherCATDC instance via transport
         dc_instance_ = std::make_unique<EtherCATDC>(*transport_, slave_count, &class_config);
+        // Propagate the master's --debug dc flag to the DC instance.
+        dc_instance_->setDebugLogging(master_.debugFlags().dc);
         // Perform explicit initialization step (reads capabilities). Return true
         // if instance created even if initialization was incomplete.
         bool init_ok = dc_instance_->init();
         if (!init_ok) {
-            TETHER_LOGW("ethercat_dc", "DCManager: DC initialization incomplete after init() call");
+            TETHER_LOGW(TAG, "DCManager: DC initialization incomplete after init() call");
         }
-        TETHER_LOGI("ethercat_dc", "DCManager: created EtherCATDC instance (slaves=%u)", (unsigned)slave_count);
+        TETHER_LOGI(TAG, "DCManager: created EtherCATDC instance (slaves=%u)", (unsigned)slave_count);
         return true;
     } catch (const std::exception& ex) {
-        TETHER_LOGW("ethercat_dc", "DCManager: failed to create EtherCATDC: %s", ex.what());
+        TETHER_LOGW(TAG, "DCManager: failed to create EtherCATDC: %s", ex.what());
         dc_instance_.reset();
         return false;
     }
@@ -95,7 +99,7 @@ DCManager::~DCManager()
 bool DCManager::start()
 {
     if (!dc_instance_) {
-        TETHER_LOGW("ethercat_dc", "DCManager::start: DC not initialized (call init() first)");
+        TETHER_LOGW(TAG, "DCManager::start: DC not initialized (call init() first)");
         return false;
     }
     // Automatically wire in the master's PDO physical exchange so the
@@ -109,7 +113,7 @@ bool DCManager::start()
 bool DCManager::start(std::function<bool()> pdo_exchange_fn)
 {
     if (!dc_instance_) {
-        TETHER_LOGW("ethercat_dc", "DCManager::start: DC not initialized (call init() first)");
+        TETHER_LOGW(TAG, "DCManager::start: DC not initialized (call init() first)");
         return false;
     }
     return dc_instance_->start(std::move(pdo_exchange_fn));
@@ -155,7 +159,7 @@ void DCManager::setPDOEnabled(bool en)
 bool DCManager::reconfigureSync(uint16_t slave_index)
 {
     if (!dc_instance_) {
-        TETHER_LOGW("ethercat_dc", "DCManager::reconfigureSync: DC not initialized");
+        TETHER_LOGW(TAG, "DCManager::reconfigureSync: DC not initialized");
         return false;
     }
     return dc_instance_->reconfigureSync(slave_index);
