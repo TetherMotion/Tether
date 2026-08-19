@@ -308,10 +308,12 @@ void Master::updateDebugFlags()
 
 Slave& Master::slave(uint16_t slave_index)
 {
-    if (slave_index < slaves_.size()) {
+    if (slave_index < slaves_.size() && slaves_[slave_index]) {
         return *slaves_[slave_index];
     }
-    // Return sentinel for invalid index
+    // Return sentinel for invalid index (or null entry from a partially
+    // initialized/cleaned-up master).  This prevents SIGSEGV during
+    // shutdown if slave_count was corrupted (e.g. garbage WKC).
     if (!non_existing_slave_) {
         non_existing_slave_ = std::make_unique<NonExistingSlave>(*this, slave_index);
     }
