@@ -90,6 +90,19 @@ bool Master::discoverSlaves()
 
         WaitResult result = waitForPreRegistered(slot, 300);
         if (result.success && result.wkc > 0) {
+            // Sanity-check the WKC (working counter).  For a BRD datagram,
+            // the WKC equals the number of slaves that processed the frame.
+            // A corrupted or misrouted frame can produce a garbage WKC (e.g.
+            // 12568 = 0x3110), which would cause initSlaves() to allocate
+            // thousands of phantom Slave objects and trigger cascading errors.
+            // Reject any WKC that exceeds the status-poller/supervisor maximum.
+            if (result.wkc > ECAT_STATUS_POLLER_MAX_SLAVES) {
+                TETHER_LOGW(TAG, "discoverSlaves: WKC=%u exceeds max %d — "
+                             "likely corrupted frame, retrying",
+                             result.wkc, ECAT_STATUS_POLLER_MAX_SLAVES);
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                continue;
+            }
             // Copy received data to resp datagram structure
             resp.idx = result.idx;
             resp.cmd = result.cmd;
