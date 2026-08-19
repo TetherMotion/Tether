@@ -166,6 +166,13 @@ public:
     void clearError();
     void synchronizeCommandAndStatus();
 
+    /// Reset the emulator to the safe state (STO active, SBC active / brakes
+    /// engaged).  Resets last_command_ to safeStop(), clears error state,
+    /// and republishes the status.  Call this after rawSlave().reset() to
+    /// ensure the slave reports STO+SBC active immediately, before the master
+    /// sends any new command.
+    void resetToSafeState();
+
     const Status& status() const { return published_status_; }
     const Command& lastCommand() const { return last_command_; }
     bool motionAllowed() const { return published_status_.motionAllowed(); }

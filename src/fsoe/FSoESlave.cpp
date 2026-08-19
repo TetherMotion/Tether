@@ -556,18 +556,23 @@ size_t FSoESlave::prepareTxFrame(uint8_t* data, size_t maxLen) {
         // last_tx_seq_no_ and last_tx_crc0_ are already set by the
         // build* function above.
 
-        // Cache the response for future cycles (only for cacheable states)
-        // Note: tx_cache_valid_ is NOT set here.  It's only set when the
-        // slave receives a DUPLICATE frame (in processRxFrame).  This
-        // ensures that in the direct exchange path (exchangeWith), where
-        // prepareTxFrame may be called multiple times without a duplicate
-        // RX, the slave always builds a fresh response with the correct
-        // CRC.
+        // Cache the response for future cycles.
+        // tx_cache_valid_ is set here so that subsequent calls to
+        // prepareTxFrame (without a new RX frame) resend the same
+        // response bytes instead of rebuilding with stale state.
+        // This is critical for the Parameter phase: buildParameterResponse
+        // advances paramTxIdx_ on the first call (consuming
+        // paramTxAdvancePending_), so a second call without a new RX
+        // frame would produce an all-zero payload (rx_avail=0).
+        // The cache is cleared in processRxFrame when a new non-duplicate
+        // frame arrives, ensuring the next response is freshly built.
+        // For duplicate frames, processRxFrame sets tx_cache_valid_
+        // directly to resend the same response without rebuilding.
         if (can_cache) {
             cached_tx_response_.assign(data, data + frameSize);
             cached_tx_state_ = current_state;
             cached_tx_fail_safe_ = current_fail_safe;
-            // tx_cache_valid_ is NOT set here — only set on duplicate RX
+            tx_cache_valid_ = true;
         }
     }
 
@@ -726,6 +731,7 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
     CRC::CrcErrorDetail crc_error_detail{};
 
     const bool is_reset_frame = (data[0] == Command::Reset);
+    const bool is_session_frame = (data[0] == Command::Session);
     const uint16_t parse_start_crc = is_reset_frame ? 0 : last_tx_crc0_;
     const uint16_t parse_seq_no = is_reset_frame ? config_.initialSeqNo : rx_seq_no_;
     uint16_t seq_used = 0;
@@ -735,6 +741,34 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
             parse_start_crc, parse_seq_no,
             is_reset_frame ? nullptr : &last_rx_crc0_,
             &seq_used, &crc_error_detail)) {
+        // ESC211 CRC model fallback for Session frames:
+        //
+        // The Synapticon master uses cross-direction CRC inheritance for
+        // Session TX (start_crc = slave's Reset response CRC0).  The ESC211
+        // master resets the CRC chain for Session TX (start_crc=0,
+        // seq=initialSeqNo), matching the ETG.5100 §8.1.3.4 provision that
+        // the CRC chain is reset at each state transition.
+        //
+        // If cross-direction validation fails for a Session frame, retry
+        // with start_crc=0 and seq=initialSeqNo (ESC211 model).
+        if (is_session_frame) {
+            const uint16_t fb_start_crc = 0;
+            const uint16_t fb_seq_no = config_.initialSeqNo;
+            uint16_t fb_seq_used = 0;
+            CRC::CrcErrorDetail fb_error{};
+            const uint16_t saved_last_rx_crc0 = last_rx_crc0_;
+
+            if (CRC::parseFSoEFrameWithCollisionAvoidance(
+                    data, len, cmd, nullptr, data_len, conn_id,
+                    fb_start_crc, fb_seq_no,
+                    &last_rx_crc0_, &fb_seq_used, &fb_error)) {
+                // ESC211 Session fallback succeeded.
+                seq_used = fb_seq_used;
+                goto session_fallback_succeeded;
+            }
+            last_rx_crc0_ = saved_last_rx_crc0;  // restore on failure
+        }
+
         FSoEErrorDetail detail;
         if (crc_error_detail.valid) {
             detail.crc_valid = true;
@@ -757,6 +791,8 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
         statistics_.onCrcError();
         return false;
     }
+
+session_fallback_succeeded:
 
     // Validate connection ID (after connection is established).
     // ETG.5100 §8.2.2.2: Reset frames ALWAYS have Conn_Id=0 — the
@@ -891,7 +927,12 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
         last_tx_seq_no_ = 0;
         last_rx_seq_no_ = 0;
         tx_seq_no_ = config_.initialSeqNo;
-        // rx_seq_no_ is NOT reset — validateFrame already advanced it
+        // Reset rx_seq_no_ to initialSeqNo.  The ESC211 master uses
+        // seq=initialSeqNo for the first frame of each state (Reset,
+        // Session, Connection, etc.), NOT seq=initialSeqNo+1 after the
+        // Reset.  This matches the ETG.5100 §8.1.3.4 provision that the
+        // sequence counter is reset at each state transition.
+        rx_seq_no_ = config_.initialSeqNo;
         // NOTE: last_rx_frame_bytes_ is NOT cleared here.  It was already
         // updated by processRxFrame (line ~369) with the current Reset
         // frame bytes.  Keeping it allows duplicate detection to work in
@@ -1294,9 +1335,16 @@ void FSoESlave::processData(const uint8_t* data, size_t len) {
     // See: https://techoverflow.net/2026/08/12/fsoe-data-pdu-master-and-slave-structure/
     if (cmd == Command::FailSafeData) {
         // In non-Data states (Session/Connection/Parameter), the master
-        // sending FailSafeData is aborting the handshake.  The slave enters
-        // fail-safe to acknowledge the abort.
-        if (state_ != ConnectionState::Data) {
+        // sending FailSafeData may be transitioning from Parameter to Data
+        // (the ESC211 master sends FailSafeData for a few cycles between
+        // the last Parameter frame and the first ProcessData frame).
+        // If we're in Parameter state, transition to Data and accept the
+        // fail-safe outputs without triggering an error.
+        if (state_ == ConnectionState::Parameter) {
+            transitionTo(ConnectionState::Data);
+            // Fall through to the Data-state FailSafeData handling below.
+        } else if (state_ != ConnectionState::Data) {
+            // In Session/Connection states, FailSafeData is an abort.
             triggerFailSafe(lastError_ != ErrorCode::NoError ? lastError_
                                                              : ErrorCode::ApplicationError);
             return;
