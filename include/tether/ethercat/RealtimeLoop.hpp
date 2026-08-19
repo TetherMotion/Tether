@@ -57,6 +57,12 @@ public:
         uint32_t cycle_period_us      = 1000;  ///< PDO timer period in µs (default 1 kHz)
         uint32_t sync_interval_cycles = 10;    ///< DC sync period = cycle_period_us × this
 
+        /// SCHED_FIFO priorities (-1 = use platform default of 80).
+        /// The DC thread should have higher priority than the PDO thread
+        /// because it is CPU-light but time-critical (SYNC0 window).
+        int pdo_priority = 80;   ///< PDO thread SCHED_FIFO priority
+        int dc_priority  = 90;   ///< DC thread SCHED_FIFO priority (higher = more urgent)
+
         /// Jitter thresholds for the PDO thread (auto-derived from cycle_period_us)
         JitterConfig pdo_jitter = JitterConfig::defaults(1000);
         /// Jitter thresholds for the DC thread (auto-derived from sync period)
