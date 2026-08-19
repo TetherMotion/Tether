@@ -391,6 +391,9 @@ SafeMotionServoEmulator::SafeMotionServoEmulator(const ServoEmulatorConfig& conf
         slave_config.treatConnIdErrorAsCritical = true;
         slave_config.enableDiagnostics = true;
         slave_config.maxErrorLogEntries = 100;
+        // ETG.5100 §8.1.3.4: sequence numbers start at 1 (0 is never used).
+        // The ESC211 firmware uses seq=1 for the initial Reset frame.
+        slave_config.initialSeqNo = 1;
         return slave_config;
     }())
     , slave_(slave_config_)
@@ -447,6 +450,23 @@ void SafeMotionServoEmulator::clearError()
     refreshPublishedStatus();
 }
 
+void SafeMotionServoEmulator::resetToSafeState()
+{
+    // Reset the command to safeStop() — STO active, SBC active (brakes engaged).
+    // This ensures the slave reports the safe state immediately after a reset,
+    // before the master sends any new command.  Without this, last_command_
+    // would retain the previous command (e.g. motionEnabled with STO=off) and
+    // the slave would report STO=off after reset, causing the ESC211 to report
+    // "Drive does not switch to STO status within the specified time."
+    last_command_ = Command::safeStop();
+    previous_error_acknowledge_ = false;
+    previous_restart_acknowledge_ = false;
+    previous_reset_position_ = false;
+    error_active_ = false;
+    restart_required_ = false;
+    refreshPublishedStatus();
+}
+
 void SafeMotionServoEmulator::synchronizeCommandAndStatus()
 {
     consumeLatestCommand();
@@ -484,8 +504,16 @@ void SafeMotionServoEmulator::consumeLatestCommand()
 
 void SafeMotionServoEmulator::refreshPublishedStatus()
 {
+    // STO (Safe Torque Off) — follows the master's command.
+    //   sto_active = true  → torque removed (safe state)
+    //   sto_active = false → motion allowed (master commanded STO=off)
+    // Error forces STO active regardless of the master's command.
     published_status_.sto_active = error_active_ || last_command_.sto;
+
+    // SS1 (Safe Stop 1) — follows the master's command, error forces active.
     published_status_.ss1_active = error_active_ || last_command_.ss1;
+
+    // SS2, SOS — follow the master's command when monitoring is enabled.
     published_status_.ss2_active = config_.position_monitoring_enabled ? last_command_.ss2 : false;
     published_status_.sos_active = config_.position_monitoring_enabled ? last_command_.sos : false;
     published_status_.sls_active = {
@@ -496,6 +524,13 @@ void SafeMotionServoEmulator::refreshPublishedStatus()
     };
     published_status_.error_active = error_active_;
     published_status_.restart_acknowledge_required = restart_required_;
+
+    // SBC (Safe Brake Control) — follows the master's brake_engage command.
+    //   brake_engaged = true  → brakes engaged (safe state)
+    //   brake_engaged = false → brakes released (master commanded SBC=off)
+    // Safety interlock: brakes are also engaged when STO or SS1 is active,
+    // even if the master commands SBC=off, to prevent the load from moving
+    // when torque is removed.  Error forces brakes engaged.
     published_status_.brake_engaged = error_active_ || last_command_.brake_engage ||
                                       published_status_.sto_active || published_status_.ss1_active;
     published_status_.temperature_ok = config_.temperature_ok;
