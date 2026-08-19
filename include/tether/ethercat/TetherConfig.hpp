@@ -262,10 +262,10 @@
  *
  * Memory impact: ~64 bytes per slot
  * Range: 1-247 (EtherCAT limit)
- * Default: 16
+ * Default: 64
  */
 #ifndef ECAT_PDO_MAX_SLAVES
-#define ECAT_PDO_MAX_SLAVES             16
+#define ECAT_PDO_MAX_SLAVES             64
 #endif
 
 /**
@@ -875,10 +875,10 @@
  * Tether will silently clamp to this limit. Increase if you have more
  * slaves and need fault detection for all of them.
  *
- * Default: 16
+ * Default: 64
  */
 #ifndef ECAT_FAULT_DETECTION_MAX_SLAVES
-#define ECAT_FAULT_DETECTION_MAX_SLAVES 16
+#define ECAT_FAULT_DETECTION_MAX_SLAVES 64
 #endif
 
 /**
@@ -887,10 +887,10 @@
  * Limits the SlaveStatusPoller's internal slave array. This is a
  * Tether-internal limit.
  *
- * Default: 16
+ * Default: 64
  */
 #ifndef ECAT_STATUS_POLLER_MAX_SLAVES
-#define ECAT_STATUS_POLLER_MAX_SLAVES   16
+#define ECAT_STATUS_POLLER_MAX_SLAVES   64
 #endif
 
 /**
@@ -899,10 +899,10 @@
  * Limits the DC subsystem's per-slave time info array. This is a
  * Tether-internal limit.
  *
- * Default: 16
+ * Default: 64
  */
 #ifndef ECAT_DC_MAX_SLAVES
-#define ECAT_DC_MAX_SLAVES              16
+#define ECAT_DC_MAX_SLAVES              64
 #endif
 
 // ============================================================================
