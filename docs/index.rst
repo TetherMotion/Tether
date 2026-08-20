@@ -11,6 +11,7 @@ Welcome to the Tether library documentation. Tether is a modular C++ library for
    ETHERCAT_INVENTORY
    EXTRACT_ESI
    HAL_PORTING_GUIDE
+   CrossCompiling
    IOProtocol
    IOProtocolWireFormat
    ModelIdentification
