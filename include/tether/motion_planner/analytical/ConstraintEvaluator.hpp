@@ -110,6 +110,11 @@ public:
         T limit = feedRate_;
         limit = std::min(limit, limits_.path.maxPathVelocity);
 
+        // Per-segment feed rate and corner velocity limits
+        // (from G-code F-values and junction deviation model)
+        T segLimit = static_cast<T>(path.maxVelocityAtArcLength(s));
+        limit = std::min(limit, segLimit);
+
         // Curvature (centripetal) limit
         T kappa = path.curvatureAtArcLength(s);
         if (kappa > MathConstants::EPSILON) {

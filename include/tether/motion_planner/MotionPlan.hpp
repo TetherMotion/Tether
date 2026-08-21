@@ -722,6 +722,18 @@ public:
         Plan plan = Plan(std::move(pathResult.path), std::move(profilePtr),
                          limits_, config_);
 
+        // Fix: The AnalyticalTOPPRA profiler's SSR stores a raw pointer to
+        // the path. When pathResult.path was moved into the plan above, that
+        // pointer became dangling. Update it to point to the plan's path.
+        auto source = plan.analyticalSource();
+        if (source) {
+            auto sampler = std::dynamic_pointer_cast<
+                analytical::TrajectorySampler<Dim, T>>(source);
+            if (sampler) {
+                sampler->setPath(plan.path());
+            }
+        }
+
         // Build ReNURBS profile if enabled in config.
         if (config_.renurbs.enabled) {
             try {

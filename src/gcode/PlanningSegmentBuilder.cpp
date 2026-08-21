@@ -296,8 +296,14 @@ PlanningSegmentResult PlanningSegmentBuilder::fromText(
             pseg.exitVelocity = 0.0;
         }
 
-        // Compute segment time from feed rate
-        pseg.computeTimeFromFeedRate();
+        // Compute segment time from feed rate.
+        // For dwell segments, use the dwell duration from the G4 command
+        // (stored in mseg.duration) instead of computing from feed rate.
+        if (mseg.type == MotionSegment::Type::DWELL) {
+            pseg.segmentTime = mseg.duration;
+        } else {
+            pseg.computeTimeFromFeedRate();
+        }
 
         result.segments.push_back(std::move(pseg));
         currentPos = mseg.endPosition;
