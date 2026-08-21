@@ -11,6 +11,7 @@ set(TETHER_MOTION_PLANNER_SOURCES
     ${TETHER_ROOT}/src/motion_planner/blend/BlendSolver.cpp
     ${TETHER_ROOT}/src/motion_planner/blend/PathBlender.cpp
     ${TETHER_ROOT}/src/motion_planner/blend/SegmentConverter.cpp
+    ${TETHER_ROOT}/src/motion_planner/blend/OutsideCircleBlender.cpp
     ${TETHER_ROOT}/src/motion_planner/geometry/PlanningSegmentConverter.cpp
     ${TETHER_ROOT}/src/replanner/MotionReplanner.cpp
     ${TETHER_ROOT}/src/replanner/TrajectorySampleConverter.cpp
