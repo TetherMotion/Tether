@@ -1419,3 +1419,173 @@ TEST(RoundedSquareGCodeTest, Dwell_Infeasible_LargeNumberOfDwells) {
               << "  WSS arcs: " << arcs.size() << "\n"
               << "  Total time: " << result.wss->totalTime() << " s\n";
 }
+
+TEST(RoundedSquareGCodeTest, Dwell_NonDefaultCentripetalAccel) {
+    // Test that the planner correctly uses limits_.path.maxCentripetalAcceleration
+    // for sub-path and WSS path corner velocity computation, not a hardcoded
+    // value. Uses a non-default maxCentripetalAcceleration (500 mm/s² instead
+    // of the default 2000) and verifies the planner produces a valid result.
+    std::ostringstream os;
+    os << "G21\nG90\nG92 E0\nG0 X0 Y0 F18000\n";
+    os << "G1 X100 Y0 E5 F3000\n";
+    os << "G4 P200 ; dwell\n";
+    os << "G1 X100 Y100 E5 F3000\n";  // 90-degree corner → corner velocity matters
+    os << "G4 P300 ; dwell\n";
+    os << "G1 X200 Y100 E5 F3000\n";
+
+    auto parseResult = GCode::PlanningSegmentBuilder::fromText(os.str());
+    ASSERT_TRUE(parseResult.error.ok());
+
+    auto nurbsResult = piecewiseNurbsFromSegments(parseResult.segments);
+    ASSERT_EQ(nurbsResult.dwellPoints.size(), 2u);
+
+    PathAdapter<3, double> pathAdapter(nurbsResult.path);
+    if (!nurbsResult.feedRates.empty()) {
+        pathAdapter.setSegmentVelocityLimits(nurbsResult.feedRates);
+        // Use 500 mm/s² for corner velocities (non-default)
+        pathAdapter.computeCornerVelocities(0.05, 500.0);
+    }
+    std::vector<std::pair<double, double>> dwells;
+    for (const auto& dp : nurbsResult.dwellPoints) {
+        dwells.push_back({dp.arcLength, dp.duration});
+    }
+    pathAdapter.setDwellPoints(dwells);
+
+    // Use 500 mm/s² for maxCentripetalAcceleration to match
+    KinematicLimits<3, double> limits;
+    limits.path.maxPathVelocity = 200.0;
+    limits.path.maxPathAcceleration = 2000.0;
+    limits.path.maxPathJerk = 20000.0;
+    limits.path.jerkLimitEnabled = true;
+    limits.path.maxCentripetalAcceleration = 500.0;  // non-default
+    for (int i = 0; i < 3; ++i) {
+        limits.axis.maxVelocity[i] = 200.0;
+        limits.axis.maxAcceleration[i] = 2000.0;
+        limits.axis.maxJerk[i] = 20000.0;
+    }
+    limits.axis.jerkLimitEnabled = true;
+
+    double feedRate = 200.0;
+    std::size_t numSamples = std::min<std::size_t>(
+        20000, std::max<std::size_t>(200, pathAdapter.numSegments() * 20));
+
+    ParetoTimeEnergyOptimalVelocityPlanner<3, double> profiler(limits);
+    auto profile = profiler.computeProfile(pathAdapter, feedRate, 0.0, 0.0, numSamples);
+    ASSERT_NE(profile, nullptr)
+        << "Planner returned null with non-default maxCentripetalAcceleration";
+
+    auto wss = profiler.weightedSource();
+    ASSERT_NE(wss, nullptr);
+
+    const auto& arcs = wss->arcs();
+    ASSERT_GT(arcs.size(), 2u);
+
+    // Count DWELL arcs
+    int dwellArcCount = 0;
+    for (const auto& arc : arcs) {
+        if (arc.type == WeightedArcType::DWELL) {
+            dwellArcCount++;
+            EXPECT_NEAR(arc.v0, 0.0, 1e-10);
+        }
+    }
+    EXPECT_EQ(dwellArcCount, 2);
+
+    // Total time should be reasonable (not 1e14 s which would indicate
+    // WALL arc duration divergence from v=0 corner velocities)
+    EXPECT_LT(wss->totalTime(), 100.0)
+        << "Total time too large — possible WALL arc duration divergence";
+
+    // Start/end velocity = 0
+    EXPECT_NEAR(arcs.front().v0, 0.0, 1e-3);
+    EXPECT_NEAR(arcEndVelocity(arcs.back()), 0.0, 1e-3);
+
+    std::cout << "Dwell_NonDefaultCentripetalAccel summary:\n"
+              << "  WSS arcs: " << arcs.size() << "\n"
+              << "  DWELL arcs: " << dwellArcCount << "\n"
+              << "  Total time: " << wss->totalTime() << " s\n";
+}
+
+TEST(RoundedSquareGCodeTest, Dwell_UnsortedDwellPoints) {
+    // Test that the planner handles unsorted dwell points correctly.
+    // The NURBS converter emits dwell points in arc-length order, but
+    // setDwellPoints doesn't enforce sorting. The planner should sort
+    // them defensively.
+    std::ostringstream os;
+    os << "G21\nG90\nG92 E0\nG0 X0 Y0 F18000\n";
+    os << "G1 X100 Y0 E5 F3000\n";
+    os << "G4 P100 ; dwell at s≈100\n";
+    os << "G1 X200 Y0 E5 F3000\n";
+    os << "G4 P200 ; dwell at s≈200\n";
+    os << "G1 X300 Y0 E5 F3000\n";
+
+    auto parseResult = GCode::PlanningSegmentBuilder::fromText(os.str());
+    ASSERT_TRUE(parseResult.error.ok());
+
+    auto nurbsResult = piecewiseNurbsFromSegments(parseResult.segments);
+    ASSERT_EQ(nurbsResult.dwellPoints.size(), 2u);
+
+    // Deliberately reverse the dwell points order
+    std::vector<std::pair<double, double>> dwells;
+    for (const auto& dp : nurbsResult.dwellPoints) {
+        dwells.push_back({dp.arcLength, dp.duration});
+    }
+    std::reverse(dwells.begin(), dwells.end());
+
+    PathAdapter<3, double> pathAdapter(nurbsResult.path);
+    if (!nurbsResult.feedRates.empty()) {
+        pathAdapter.setSegmentVelocityLimits(nurbsResult.feedRates);
+        pathAdapter.computeCornerVelocities(0.05, 2000.0);
+    }
+    pathAdapter.setDwellPoints(dwells);
+
+    KinematicLimits<3, double> limits;
+    limits.path.maxPathVelocity = 200.0;
+    limits.path.maxPathAcceleration = 2000.0;
+    limits.path.maxPathJerk = 20000.0;
+    limits.path.jerkLimitEnabled = true;
+    limits.path.maxCentripetalAcceleration = 2000.0;
+    for (int i = 0; i < 3; ++i) {
+        limits.axis.maxVelocity[i] = 200.0;
+        limits.axis.maxAcceleration[i] = 2000.0;
+        limits.axis.maxJerk[i] = 20000.0;
+    }
+    limits.axis.jerkLimitEnabled = true;
+
+    double feedRate = 200.0;
+    std::size_t numSamples = std::min<std::size_t>(
+        20000, std::max<std::size_t>(200, pathAdapter.numSegments() * 20));
+
+    ParetoTimeEnergyOptimalVelocityPlanner<3, double> profiler(limits);
+    auto profile = profiler.computeProfile(pathAdapter, feedRate, 0.0, 0.0, numSamples);
+    ASSERT_NE(profile, nullptr)
+        << "Planner returned null for unsorted dwell points";
+
+    auto wss = profiler.weightedSource();
+    ASSERT_NE(wss, nullptr);
+
+    const auto& arcs = wss->arcs();
+    ASSERT_GT(arcs.size(), 2u);
+
+    // Count DWELL arcs — should be 2, with correct durations
+    int dwellArcCount = 0;
+    std::vector<double> dwellDurations;
+    for (const auto& arc : arcs) {
+        if (arc.type == WeightedArcType::DWELL) {
+            dwellArcCount++;
+            dwellDurations.push_back(arc.duration);
+        }
+    }
+    EXPECT_EQ(dwellArcCount, 2);
+
+    // Durations should be in arc-length order (0.1s first, 0.2s second),
+    // even though we passed them reversed to setDwellPoints.
+    ASSERT_EQ(dwellDurations.size(), 2u);
+    EXPECT_NEAR(dwellDurations[0], 0.1, 1e-6);
+    EXPECT_NEAR(dwellDurations[1], 0.2, 1e-6);
+
+    std::cout << "Dwell_UnsortedDwellPoints summary:\n"
+              << "  WSS arcs: " << arcs.size() << "\n"
+              << "  DWELL arcs: " << dwellArcCount << "\n"
+              << "  Dwell durations: [" << dwellDurations[0] << ", "
+              << dwellDurations[1] << "] s\n";
+}

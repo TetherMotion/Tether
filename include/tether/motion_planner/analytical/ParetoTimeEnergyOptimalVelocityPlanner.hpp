@@ -2348,11 +2348,20 @@ public:
         double costValue = 0.0;
 
         if (!dwellPoints.empty()) {
+            // Sort dwell points by arc length (defensive — the NURBS
+            // converter emits them in order, but setDwellPoints doesn't
+            // enforce sorting).
+            auto sortedDwells = dwellPoints;
+            std::sort(sortedDwells.begin(), sortedDwells.end(),
+                      [](const auto& a, const auto& b) {
+                          return a.first < b.first;
+                      });
+
             // Build split points: [0, s_d1, s_d2, ..., L]
             // Each consecutive pair defines a sub-path.
             std::vector<double> splitS;
             splitS.push_back(0.0);
-            for (const auto& [s, dur] : dwellPoints) {
+            for (const auto& [s, dur] : sortedDwells) {
                 splitS.push_back(s);
             }
             splitS.push_back(static_cast<double>(pathLength));
@@ -2380,10 +2389,10 @@ public:
 
                 // Insert DWELL arc at the start of this segment (if not
                 // the very first split, which is the path start).
-                // The dwell at splitS[i] is dwellPoints[i-1] (for i > 0).
+                // The dwell at splitS[i] is sortedDwells[i-1] (for i > 0).
                 if (i > 0) {
                     arcs.push_back(
-                        makeDwellArc(sStart, dwellPoints[i - 1].second));
+                        makeDwellArc(sStart, sortedDwells[i - 1].second));
                 }
 
                 // Skip zero-length sub-paths (consecutive dwells)
@@ -2423,18 +2432,10 @@ public:
                             subSegs[j].cumulativeArcLength +
                             subSegs[j].arcLength * 0.5;
                         double globalS = sStart + subMidLocal;
-                        // Find the original segment index.
-                        size_t origIdx = 0;
-                        for (origIdx = 0; origIdx < origSegs.size(); ++origIdx) {
-                            double origStart =
-                                origSegs[origIdx].cumulativeArcLength;
-                            double origEnd =
-                                origStart + origSegs[origIdx].arcLength;
-                            if (globalS >= origStart - 1e-9 &&
-                                globalS <= origEnd + 1e-9) {
-                                break;
-                            }
-                        }
+                        // Binary search for the original segment containing
+                        // globalS. origSegs is sorted by cumulativeArcLength.
+                        size_t origIdx = pathCopy->segmentIndexAtArcLength(
+                            static_cast<T>(globalS));
                         if (origIdx < origFeedRates.size()) {
                             subFeedRates.push_back(origFeedRates[origIdx]);
                         } else {
@@ -2451,7 +2452,16 @@ public:
                     // corner velocities default to infinity, which is
                     // correct since the v=0 constraint is enforced by
                     // the solver's boundary velocities.
-                    subPathAdapter.computeCornerVelocities(0.05, 2000.0);
+                    //
+                    // Use the same centripetal acceleration limit as the
+                    // planner's kinematic limits. The junction deviation
+                    // (0.05 mm) is a fixed default — PathAdapter doesn't
+                    // store the value used by the caller, so we use the
+                    // same default as GCodeProcessor.
+                    subPathAdapter.computeCornerVelocities(
+                        0.05,
+                        static_cast<double>(
+                            limits_.path.maxCentripetalAcceleration));
                 }
 
                 // Boundary velocities: v=0 at dwell points, original
@@ -2475,8 +2485,13 @@ public:
                     return std::make_unique<SampledVelocityProfile>();
                 }
 
-                // Accumulate cost and optimalAStar from sub-solvers
-                optimalAStar = subSolver.optimalAStar();
+                // Accumulate cost from sub-solvers. optimalAStar is a
+                // per-sub-problem singular acceleration; we keep the first
+                // sub-solver's value as a representative (it's metadata,
+                // not used in WSS trajectory computation).
+                if (i == 0) {
+                    optimalAStar = subSolver.optimalAStar();
+                }
                 costValue += subSolver.costValue();
 
                 // Offset arc positions from sub-path local to global
@@ -2523,7 +2538,10 @@ public:
             if (pathCopy->hasPerSegmentVelocityLimits()) {
                 wssPath->setSegmentVelocityLimits(
                     pathCopy->segmentMaxVelocities());
-                wssPath->computeCornerVelocities(0.05, 2000.0);
+                wssPath->computeCornerVelocities(
+                    0.05,
+                    static_cast<double>(
+                        limits_.path.maxCentripetalAcceleration));
                 // Do NOT call setDwellPoints — we want clean corner velocities.
             }
         }
