@@ -1,31 +1,37 @@
 /**
  * @file gcode_path_compare.cpp
- * @brief Example: parse a G-code file, plan its motion, and export an SVG
- *        showing the original G-code path (gray) overlaid with the planned
- *        NURBS path (red).
+ * @brief Example: parse a G-code file, optionally blend corners with G64
+ *        path deviation tolerance, and export an SVG showing the original
+ *        G-code path (gray) overlaid with the Tether-planned path (red).
  *
- * This example demonstrates the full Tether pipeline:
+ * This example demonstrates the Tether path-planning pipeline:
  *   1. Parse G-code → PlanningSegments
- *   2. Convert segments → PiecewiseNurbsPath (the "planned" path)
- *   3. Export both the raw G-code segments and the NURBS path to a single SVG
+ *   2. Convert segments → PiecewiseNurbsPath (raw, sharp corners)
+ *   3. Optionally blend corners via PathBlender with a G64 deviation
+ *      tolerance (or --exact-stop for G61 mode)
+ *   4. Export both the raw G-code path and the planned path to a single SVG
  *
  * The SVG uses:
  *   - Gray for the original G-code path (from PlanningSegments)
- *   - Red for the Tether-planned NURBS path
+ *   - Red for the Tether-planned path (blended or exact-stop)
  *
  * Usage:
- *   gcode_path_compare <gcode_file> [-o <output.svg>] \
- *       [--max-velocity V] [--max-acceleration A] [--max-jerk J]
+ *   gcode_path_compare <gcode_file> [options]
  *
- * Defaults: v=200 mm/s, a=2000 mm/s², j=20000 mm/s³
+ * Options:
+ *   -o, --output FILE       Output SVG file (default: path_compare.svg)
+ *   --g64-tolerance TOL     G64 path deviation tolerance in mm (default: 0.05)
+ *   --exact-stop            G61 exact stop mode (no corner blending)
  */
+
+#include <argparse/argparse.hpp>
 
 #include <tether/gcode/PlanningSegmentBuilder.hpp>
 #include <tether/gcode/GCodeInterpreter.hpp>
 #include <tether/motion_planner/geometry/PiecewiseNurbsPath.hpp>
 #include <tether/motion_planner/geometry/PlanningSegmentConverter.hpp>
-#include <tether/motion_planner/PathAdapter.hpp>
-#include <tether/motion_planner/analytical/ParetoTimeEnergyOptimalVelocityPlanner.hpp>
+#include <tether/motion_planner/blend/PathBlender.hpp>
+#include <tether/motion_planner/blend/BlendSpec.hpp>
 #include <tether/export/SVGExporter.hpp>
 
 #include <algorithm>
@@ -120,7 +126,7 @@ std::string filterKlipperCommands(const std::string& gcodeText) {
 }
 
 /// Convert PlanningSegments to NurbsCurves for the gray "raw G-code" path.
-/// Each segment becomes a single linear NurbsCurve (degree 1).
+/// Each segment becomes a single linear NurbsCurve (degree 1), XY projection.
 std::vector<tether::motion::NurbsCurve> segmentsToNurbsCurves(
     const std::vector<PlanningSegment>& segments)
 {
@@ -131,8 +137,6 @@ std::vector<tether::motion::NurbsCurve> segmentsToNurbsCurves(
         double dx = seg.end[0] - seg.start[0];
         double dy = seg.end[1] - seg.start[1];
         if (std::hypot(dx, dy) < 1e-12) continue;
-        // Create a degree-1 NURBS (line) from start to end.
-        // Use only X/Y for the 2D SVG projection.
         tether::motion::RVec start{seg.start[0], seg.start[1]};
         tether::motion::RVec end{seg.end[0], seg.end[1]};
         auto curve = tether::motion::NurbsCurve::fromLine(start, end);
@@ -143,33 +147,40 @@ std::vector<tether::motion::NurbsCurve> segmentsToNurbsCurves(
 
 } // anonymous namespace
 
-int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        std::cerr << "Usage: " << argv[0]
-                  << " <gcode_file> [-o <output.svg>]"
-                  << " [--max-velocity V] [--max-acceleration A] [--max-jerk J]\n"
-                  << "\nDefaults: v=200 mm/s, a=2000 mm/s², j=20000 mm/s³\n";
+int main(int argc, char** argv) {
+    argparse::ArgumentParser program("gcode_path_compare");
+    program.add_description(
+        "Parse a G-code file, optionally blend corners with G64 path "
+        "deviation tolerance, and export an SVG showing the original "
+        "G-code path (gray) overlaid with the Tether-planned path (red).");
+
+    program.add_argument("gcode_file")
+        .help("Input G-code file path");
+
+    program.add_argument("-o", "--output")
+        .default_value(std::string("path_compare.svg"))
+        .help("Output SVG file path (default: path_compare.svg)");
+
+    program.add_argument("--g64-tolerance")
+        .default_value(0.05)
+        .scan<'g', double>()
+        .help("G64 path deviation tolerance in mm (default: 0.05)");
+
+    program.add_argument("--exact-stop")
+        .flag()
+        .help("G61 exact stop mode — no corner blending");
+
+    try {
+        program.parse_args(argc, argv);
+    } catch (const std::runtime_error& err) {
+        std::cerr << err.what() << "\n" << program;
         return 1;
     }
 
-    std::string gcodeFile = argv[1];
-    std::string outputFile = "path_compare.svg";
-    double maxVelocity = 200.0;
-    double maxAcceleration = 2000.0;
-    double maxJerk = 20000.0;
-
-    for (int i = 2; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "-o" && i + 1 < argc) {
-            outputFile = argv[++i];
-        } else if (arg == "--max-velocity" && i + 1 < argc) {
-            maxVelocity = std::stod(argv[++i]);
-        } else if (arg == "--max-acceleration" && i + 1 < argc) {
-            maxAcceleration = std::stod(argv[++i]);
-        } else if (arg == "--max-jerk" && i + 1 < argc) {
-            maxJerk = std::stod(argv[++i]);
-        }
-    }
+    std::string gcodeFile = program.get<std::string>("gcode_file");
+    std::string outputFile = program.get<std::string>("--output");
+    bool exactStop = program.get<bool>("--exact-stop");
+    double g64Tolerance = program.get<double>("--g64-tolerance");
 
     // ── Read G-code file ──
     std::ifstream file(gcodeFile);
@@ -181,7 +192,11 @@ int main(int argc, char* argv[]) {
     ss << file.rdbuf();
     std::string gcodeText = ss.str();
     std::cout << "G-code file: " << gcodeFile << " (" << gcodeText.size() << " bytes)\n";
-    std::cout << "Limits: v=" << maxVelocity << " a=" << maxAcceleration << " j=" << maxJerk << "\n";
+    if (exactStop) {
+        std::cout << "Mode: exact stop (G61, no blending)\n";
+    } else {
+        std::cout << "Mode: G64 blending, tolerance = " << g64Tolerance << " mm\n";
+    }
 
     // ── Step 1: Parse G-code → PlanningSegments ──
     std::string filtered = filterKlipperCommands(gcodeText);
@@ -203,50 +218,49 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // ── Step 2: Build NURBS path (the "planned" path) ──
+    // ── Step 2: Build raw NURBS path from segments ──
     auto nurbsResult = tether::motion::piecewiseNurbsFromSegments(segments);
-    std::cout << "NURBS path: " << nurbsResult.path.numPieces() << " pieces, "
+    std::cout << "Raw NURBS path: " << nurbsResult.path.numPieces() << " pieces, "
               << nurbsResult.path.totalLength() << " mm\n";
 
-    // ── Step 3: Run the Pareto planner to verify the path is plannable ──
-    // (This also validates that the WSS can be generated.)
-    MotionPlanner::PathAdapter<3, double> pathAdapter(nurbsResult.path);
-    if (!nurbsResult.feedRates.empty()) {
-        pathAdapter.setSegmentVelocityLimits(nurbsResult.feedRates);
-        pathAdapter.computeCornerVelocities(0.05, maxAcceleration);
-    }
+    // ── Step 3: Blend corners (or exact stop) ──
+    // The planned path is either:
+    //   - The blended path (G64 with deviation tolerance), or
+    //   - The raw path as-is (G61 exact stop)
+    std::vector<tether::motion::NurbsCurve> plannedPieces;
 
-    MotionPlanner::KinematicLimits<3, double> limits;
-    limits.path.maxPathVelocity = maxVelocity;
-    limits.path.maxPathAcceleration = maxAcceleration;
-    limits.path.maxPathJerk = maxJerk;
-    limits.path.jerkLimitEnabled = (maxJerk > 0.0);
-    for (int i = 0; i < 3; ++i) {
-        limits.axis.maxVelocity[i] = maxVelocity;
-        limits.axis.maxAcceleration[i] = maxAcceleration;
-        limits.axis.maxJerk[i] = maxJerk;
-    }
-    limits.axis.jerkLimitEnabled = limits.path.jerkLimitEnabled;
-
-    MotionPlanner::analytical::ParetoTimeEnergyOptimalVelocityPlanner<3, double> profiler(limits);
-    std::size_t numSamples = std::min<std::size_t>(
-        20000, std::max<std::size_t>(200, pathAdapter.numSegments() * 20));
-    auto velocityProfile = profiler.computeProfile(
-        pathAdapter, maxVelocity, 0.0, 0.0, numSamples);
-
-    if (!velocityProfile) {
-        std::cerr << "WARNING: ParetoPlanner returned null velocity profile.\n";
-    } else {
-        auto wss = profiler.weightedSource();
-        if (wss) {
-            std::cout << "WSS: " << wss->arcs().size() << " arcs, "
-                      << "totalTime=" << wss->totalTime() << "s\n";
+    if (exactStop) {
+        // No blending — use the raw pieces directly
+        for (std::size_t i = 0; i < nurbsResult.path.numPieces(); ++i) {
+            plannedPieces.push_back(nurbsResult.path.piece(i));
         }
+        std::cout << "Planned path: " << plannedPieces.size()
+                  << " pieces (exact stop, no blending)\n";
+    } else {
+        // Blend corners with PathBlender
+        tether::motion::BlendSpec blendSpec;
+        blendSpec.mode = tether::motion::PathMode::Blend;
+        blendSpec.tolerance = g64Tolerance;
+
+        tether::motion::PathBlender blender;
+        auto blended = blender.blend(nurbsResult.path, blendSpec);
+
+        plannedPieces = blended.pieces;
+        std::cout << "Planned path: " << plannedPieces.size()
+                  << " pieces (blended: " << blended.blendedCount
+                  << " corners, " << blended.exactStopCount
+                  << " exact-stop fallbacks, "
+                  << blended.straightCount << " straight)\n";
+    }
+
+    if (plannedPieces.empty()) {
+        std::cerr << "ERROR: Planned path is empty.\n";
+        return 1;
     }
 
     // ── Step 4: Export SVG with both paths overlaid ──
     // Gray: raw G-code path (from PlanningSegments)
-    // Red:  Tether-planned NURBS path
+    // Red:  Tether-planned path (blended or exact-stop)
     std::vector<RenderableBezierPath> paths;
 
     // Gray path: raw G-code segments as linear NURBS curves
@@ -257,11 +271,11 @@ int main(int argc, char* argv[]) {
     grayPath.width = 2.0;
     paths.push_back(std::move(grayPath));
 
-    // Red path: planned NURBS path (decomposed into Bézier curves)
+    // Red path: planned path (decomposed into Bézier curves for SVG)
     std::vector<tether::motion::NurbsCurve> plannedBeziers;
-    for (std::size_t i = 0; i < nurbsResult.path.numPieces(); ++i) {
-        auto pieces = nurbsResult.path.piece(i).bezierDecompose();
-        for (auto& p : pieces) {
+    for (const auto& piece : plannedPieces) {
+        auto decomposed = piece.bezierDecompose();
+        for (auto& p : decomposed) {
             plannedBeziers.push_back(std::move(p));
         }
     }

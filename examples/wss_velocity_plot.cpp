@@ -29,6 +29,8 @@
  * Defaults: v=200 mm/s, a=2000 mm/s², j=20000 mm/s³, samples=2000
  */
 
+#include <argparse/argparse.hpp>
+
 #include <tether/gcode/PlanningSegmentBuilder.hpp>
 #include <tether/gcode/GCodeInterpreter.hpp>
 #include <tether/motion_planner/geometry/PiecewiseNurbsPath.hpp>
@@ -41,6 +43,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -343,37 +346,53 @@ bool writePlotSvg(const std::string& filename,
 } // anonymous namespace
 
 int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        std::cerr << "Usage: " << argv[0]
-                  << " <gcode_file> [-o <output_prefix>]"
-                  << " [--max-velocity V] [--max-acceleration A] [--max-jerk J]"
-                  << " [--samples N]\n"
-                  << "\nOutputs: <prefix>_velocity.svg, <prefix>_acceleration.svg\n"
-                  << "\nDefaults: v=200 mm/s, a=2000 mm/s², j=20000 mm/s³, samples=2000\n";
+    argparse::ArgumentParser program("wss_velocity_plot");
+    program.add_description(
+        "Parse a G-code file, run the Pareto time-energy optimal velocity "
+        "planner, and export velocity(t) and acceleration(t) as SVG plots "
+        "by evaluating WSS arcs in closed form.\n\n"
+        "Outputs: <prefix>_velocity.svg, <prefix>_acceleration.svg");
+
+    program.add_argument("gcode_file")
+        .help("Input G-code file path");
+
+    program.add_argument("-o", "--output")
+        .default_value(std::string("wss_plot"))
+        .help("Output file prefix (default: wss_plot)");
+
+    program.add_argument("--max-velocity")
+        .default_value(200.0)
+        .scan<'g', double>()
+        .help("Max path velocity in mm/s (default: 200)");
+
+    program.add_argument("--max-acceleration")
+        .default_value(2000.0)
+        .scan<'g', double>()
+        .help("Max path acceleration in mm/s² (default: 2000)");
+
+    program.add_argument("--max-jerk")
+        .default_value(20000.0)
+        .scan<'g', double>()
+        .help("Max path jerk in mm/s³ (default: 20000)");
+
+    program.add_argument("--samples")
+        .default_value(2000)
+        .scan<'i', int>()
+        .help("Number of sample points (default: 2000)");
+
+    try {
+        program.parse_args(argc, argv);
+    } catch (const std::runtime_error& err) {
+        std::cerr << err.what() << "\n" << program;
         return 1;
     }
 
-    std::string gcodeFile = argv[1];
-    std::string outputPrefix = "wss_plot";
-    double maxVelocity = 200.0;
-    double maxAcceleration = 2000.0;
-    double maxJerk = 20000.0;
-    size_t numSamples = 2000;
-
-    for (int i = 2; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "-o" && i + 1 < argc) {
-            outputPrefix = argv[++i];
-        } else if (arg == "--max-velocity" && i + 1 < argc) {
-            maxVelocity = std::stod(argv[++i]);
-        } else if (arg == "--max-acceleration" && i + 1 < argc) {
-            maxAcceleration = std::stod(argv[++i]);
-        } else if (arg == "--max-jerk" && i + 1 < argc) {
-            maxJerk = std::stod(argv[++i]);
-        } else if (arg == "--samples" && i + 1 < argc) {
-            numSamples = static_cast<size_t>(std::stoul(argv[++i]));
-        }
-    }
+    std::string gcodeFile = program.get<std::string>("gcode_file");
+    std::string outputPrefix = program.get<std::string>("--output");
+    double maxVelocity = program.get<double>("--max-velocity");
+    double maxAcceleration = program.get<double>("--max-acceleration");
+    double maxJerk = program.get<double>("--max-jerk");
+    size_t numSamples = static_cast<size_t>(program.get<int>("--samples"));
 
     // ── Read G-code file ──
     std::ifstream file(gcodeFile);

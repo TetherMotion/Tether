@@ -62,8 +62,9 @@ add_tether_example(g64_demo_export
     LIBRARIES tether_export tether_common)
 
 # --- G-Code Path Comparison Example ---
-# Parses a G-code file, plans its motion, and exports an SVG showing the
-# original G-code path (gray) overlaid with the Tether-planned NURBS path (red).
+# Parses a G-code file, blends corners with G64 path deviation tolerance
+# (or --exact-stop for G61), and exports an SVG showing the original G-code
+# path (gray) overlaid with the Tether-planned path (red).
 add_tether_example(gcode_path_compare
     LIBRARIES tether_gcode tether_motion_planner tether_motion_geometry tether_export tether_common)
 
