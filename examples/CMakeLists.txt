@@ -61,6 +61,18 @@ add_tether_example(simple_gcode_example
 add_tether_example(g64_demo_export
     LIBRARIES tether_export tether_common)
 
+# --- G-Code Path Comparison Example ---
+# Parses a G-code file, plans its motion, and exports an SVG showing the
+# original G-code path (gray) overlaid with the Tether-planned NURBS path (red).
+add_tether_example(gcode_path_compare
+    LIBRARIES tether_gcode tether_motion_planner tether_motion_geometry tether_export tether_common)
+
+# --- WSS Velocity/Acceleration Plot Example ---
+# Parses a G-code file, runs the Pareto time-energy optimal velocity planner,
+# and exports velocity and acceleration curves as SVG plots from the WSS arcs.
+add_tether_example(wss_velocity_plot
+    LIBRARIES tether_gcode tether_motion_planner tether_motion_geometry tether_common)
+
 # ---AS715N Sine Motion Native Example ---
 # Demonstrates EtherCAT master with CiA 402 drive control
 if(TETHER_DRIVE_AS715N)
