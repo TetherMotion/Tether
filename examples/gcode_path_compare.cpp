@@ -32,6 +32,7 @@
 #include <tether/motion_planner/geometry/PlanningSegmentConverter.hpp>
 #include <tether/motion_planner/blend/PathBlender.hpp>
 #include <tether/motion_planner/blend/BlendSpec.hpp>
+#include <tether/motion_planner/blend/OutsideCircleBlender.hpp>
 #include <tether/export/SVGExporter.hpp>
 
 #include <algorithm>
@@ -164,7 +165,8 @@ int main(int argc, char** argv) {
     program.add_argument("--g64-tolerance")
         .default_value(0.05)
         .scan<'g', double>()
-        .help("G64 path deviation tolerance in mm (default: 0.05)");
+        .help("G64 path deviation tolerance in mm (default: 0.05). "
+              "Negative = outside circle blend (radius = |tol|)");
 
     program.add_argument("--exact-stop")
         .flag()
@@ -236,8 +238,26 @@ int main(int argc, char** argv) {
         }
         std::cout << "Planned path: " << plannedPieces.size()
                   << " pieces (exact stop, no blending)\n";
+    } else if (g64Tolerance < 0.0) {
+        // Negative tolerance → outside circle blend
+        // Place a circle of radius |tol| at each corner vertex,
+        // intersect with the exact path, replace the corner with
+        // the major (outside) arc.
+        tether::motion::OutsideCircleBlendConfig blendConfig;
+        blendConfig.radius = std::abs(g64Tolerance);
+        auto blendResult = tether::motion::OutsideCircleBlender::blend(
+            nurbsResult.path, blendConfig);
+        if (blendResult.path) {
+            for (std::size_t i = 0; i < blendResult.path->numPieces(); ++i) {
+                plannedPieces.push_back(blendResult.path->piece(i));
+            }
+        }
+        std::cout << "Planned path: " << plannedPieces.size()
+                  << " pieces (outside circle blend: "
+                  << blendResult.blendedCount << " corners blended, "
+                  << blendResult.skippedCount << " skipped)\n";
     } else {
-        // Blend corners with PathBlender
+        // Positive tolerance → inside blend with PathBlender
         tether::motion::BlendSpec blendSpec;
         blendSpec.mode = tether::motion::PathMode::Blend;
         blendSpec.tolerance = g64Tolerance;
