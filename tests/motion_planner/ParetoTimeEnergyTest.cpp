@@ -1046,3 +1046,324 @@ TEST(ParetoTimeEnergyTest, P30_ArcToolpathDoesNotHang) {
     EXPECT_FALSE(profile->points().empty());
     EXPECT_GT(profile->totalTime(), 0.0);
 }
+
+// ============================================================================
+// P31: Velocity continuity at corners (no GAPs in WSS arcs)
+// ============================================================================
+//
+// Tests that the WSS arcs have velocity continuity — the end velocity of
+// each arc matches the start velocity of the next arc. This is a regression
+// test for the "GAP" issue where the old v1 clamping created velocity
+// discontinuities at corners.
+
+namespace {
+
+/// Compute the end velocity of a WeightedArc from its parameters.
+double arcEndVelocity(const MotionPlanner::analytical::WeightedArc& arc) {
+    using namespace MotionPlanner::analytical;
+    if (arc.type == WeightedArcType::SINGULAR) {
+        return SingSeg::v(arc.v0, arc.a_star, arc.duration);
+    } else if (arc.type == WeightedArcType::WALL) {
+        return arc.v0;  // WALL: constant velocity
+    } else {
+        // BANG_PLUS / BANG_MINUS
+        return BangSeg::v(arc.v0, arc.a0, arc.eta, arc.duration);
+    }
+}
+
+/// Check velocity continuity across all arcs in the WSS.
+/// Returns the maximum velocity gap found.
+double maxVelocityGap(const std::vector<MotionPlanner::analytical::WeightedArc>& arcs) {
+    double maxGap = 0.0;
+    for (size_t i = 1; i < arcs.size(); ++i) {
+        double vEndPrev = arcEndVelocity(arcs[i - 1]);
+        double v0Curr = arcs[i].v0;
+        double gap = std::abs(v0Curr - vEndPrev);
+        if (gap > maxGap) maxGap = gap;
+    }
+    return maxGap;
+}
+
+} // namespace
+
+TEST(ParetoTimeEnergyTest, P31_VelocityContinuity_LinePath) {
+    // A simple line path should have no velocity discontinuities.
+    auto path = makeLinePath2D(10.0);
+    ASSERT_GT(path.totalLength(), 0.0);
+
+    auto limits = makeLimits2D();
+    CostWeights w;
+    w.w_t = 1.0;
+    w.w_a = 0.01;
+
+    ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
+    p.computeProfile(path, 50.0, 0.0, 0.0, 200);
+
+    auto wss = p.weightedSource();
+    ASSERT_NE(wss, nullptr);
+    const auto& arcs = wss->arcs();
+    ASSERT_GT(arcs.size(), 1u);
+
+    double maxGap = maxVelocityGap(arcs);
+    // Velocity continuity: gaps should be negligible (< 1.0 mm/s)
+    EXPECT_LT(maxGap, 1.0)
+        << "Velocity discontinuity (GAP) detected in WSS arcs";
+}
+
+TEST(ParetoTimeEnergyTest, P31_VelocityContinuity_LPath) {
+    // An L-shaped path has a 90-degree corner that requires velocity
+    // reduction. The WSS arcs should still have velocity continuity.
+    auto path = makeLPath2D(5.0);
+    ASSERT_GT(path.totalLength(), 0.0);
+
+    auto limits = makeLimits2D();
+    CostWeights w;
+    w.w_t = 1.0;
+    w.w_a = 0.01;
+
+    ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
+    p.computeProfile(path, 50.0, 0.0, 0.0, 200);
+
+    auto wss = p.weightedSource();
+    ASSERT_NE(wss, nullptr);
+    const auto& arcs = wss->arcs();
+    ASSERT_GT(arcs.size(), 1u);
+
+    double maxGap = maxVelocityGap(arcs);
+    EXPECT_LT(maxGap, 1.0)
+        << "Velocity discontinuity (GAP) detected at L-path corner";
+}
+
+// ============================================================================
+// P32: Corner velocity satisfaction (v ≤ v_corner at corner positions)
+// ============================================================================
+//
+// Tests that the velocity profile respects corner velocity constraints.
+// The L-shaped path has a 90-degree corner at the midpoint, which has a
+// finite corner velocity computed by the junction deviation model.
+
+TEST(ParetoTimeEnergyTest, P32_CornerVelocitySatisfied_LPath) {
+    auto path = makeLPath2D(5.0);
+    ASSERT_GT(path.totalLength(), 0.0);
+
+    // Compute corner velocities using the junction deviation model
+    path.computeCornerVelocities(0.1, 500.0);
+
+    // Get corner velocities (size = numPieces + 1; blending may create
+    // extra pieces, so we find the minimum finite corner velocity)
+    const auto& cornerVels = path.cornerVelocities();
+    ASSERT_GT(cornerVels.size(), 2u);
+
+    double vCorner = std::numeric_limits<double>::infinity();
+    for (size_t i = 1; i + 1 < cornerVels.size(); ++i) {
+        if (cornerVels[i] < vCorner && cornerVels[i] > 0.0) {
+            vCorner = cornerVels[i];
+        }
+    }
+    ASSERT_LT(vCorner, 100.0);  // should have a finite corner limit
+
+    auto limits = makeLimits2D();
+    CostWeights w;
+    w.w_t = 1.0;
+    w.w_a = 0.01;
+
+    ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
+    p.computeProfile(path, 50.0, 0.0, 0.0, 200);
+
+    auto wss = p.weightedSource();
+    ASSERT_NE(wss, nullptr);
+
+    // Sample the WSS at each corner position and check velocity
+    for (size_t i = 1; i + 1 < cornerVels.size(); ++i) {
+        if (cornerVels[i] >= 100.0) continue;  // skip non-limiting corners
+        double sCorner = path.segments()[i].cumulativeArcLength;
+        double tCorner = wss->timeAtArcLength(static_cast<double>(sCorner));
+        double vAtCorner = wss->pathVelocity(tCorner);
+        EXPECT_LE(vAtCorner, cornerVels[i] + 2.0)
+            << "Velocity " << vAtCorner << " at corner (s=" << sCorner
+            << ") exceeds corner limit " << cornerVels[i];
+    }
+}
+
+// ============================================================================
+// P33: Look-ahead TOPPRA backward pass (velocity limit at corners)
+// ============================================================================
+//
+// Tests that the analytical TOPPRA backward pass correctly limits velocity
+// approaching corners. The velocity at a distance d before a corner should
+// satisfy: v ≤ sqrt(v_corner² + 2*a_max*d).
+
+TEST(ParetoTimeEnergyTest, P33_LookAheadVelocityLimit_LPath) {
+    auto path = makeLPath2D(10.0);
+    ASSERT_GT(path.totalLength(), 0.0);
+
+    path.computeCornerVelocities(0.1, 500.0);
+
+    const auto& cornerVels = path.cornerVelocities();
+    ASSERT_GT(cornerVels.size(), 2u);
+
+    // Find the minimum finite corner velocity and its position
+    double vCorner = std::numeric_limits<double>::infinity();
+    size_t cornerIdx = 0;
+    for (size_t i = 1; i + 1 < cornerVels.size(); ++i) {
+        if (cornerVels[i] < vCorner && cornerVels[i] > 0.0) {
+            vCorner = cornerVels[i];
+            cornerIdx = i;
+        }
+    }
+    ASSERT_GT(vCorner, 0.0);
+    ASSERT_LT(vCorner, 100.0);
+
+    auto limits = makeLimits2D();
+    double aMax = limits.path.maxPathAcceleration;
+
+    CostWeights w;
+    w.w_t = 1.0;
+    w.w_a = 0.01;
+
+    ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
+    p.computeProfile(path, 50.0, 0.0, 0.0, 400);
+
+    auto wss = p.weightedSource();
+    ASSERT_NE(wss, nullptr);
+
+    // Sample at several points approaching the corner and verify
+    // v(s) ≤ sqrt(v_corner² + 2*a_max*(s_corner - s))
+    double sCorner = path.segments()[cornerIdx].cumulativeArcLength;
+
+    // Check at several distances before the corner
+    for (double d : {0.5, 1.0, 2.0, 5.0}) {
+        double s = sCorner - d;
+        if (s < 0.0) continue;
+        double t = wss->timeAtArcLength(s);
+        double v = wss->pathVelocity(t);
+        double vMax = std::sqrt(vCorner * vCorner + 2.0 * aMax * d);
+        // Allow some tolerance for jerk-limited dynamics (which require
+        // more braking distance, so the actual v should be ≤ vMax)
+        EXPECT_LE(v, vMax + 5.0)
+            << "Velocity " << v << " at s=" << s << " (d=" << d
+            << " before corner) exceeds look-ahead limit " << vMax;
+    }
+}
+
+// ============================================================================
+// P34: Per-segment feed rate satisfaction
+// ============================================================================
+//
+// Tests that the velocity profile respects per-segment feed rates when
+// different segments have different F-values.
+
+TEST(ParetoTimeEnergyTest, P34_PerSegmentFeedRateSatisfied) {
+    // Build a 2-segment path with different feed rates
+    MotionSegmentList segments;
+    segments.append(MotionSegment::linear(
+        Vec<2, double>{0.0, 0.0}, Vec<2, double>{5.0, 0.0}, 100.0));
+    segments.append(MotionSegment::linear(
+        Vec<2, double>{5.0, 0.0}, Vec<2, double>{10.0, 0.0}, 30.0));  // lower feed
+
+    PathBuilderAdapter<2, double> builder;
+    tether::motion::BlendSpec spec;
+    spec.tolerance = 0.1;
+    spec.continuity = tether::motion::Continuity::G2;
+    spec.maxBlendFraction = 0.25;
+    auto result = builder.build(segments, spec);
+    ASSERT_TRUE(result.success);
+    auto path = std::move(result.path);
+    ASSERT_GT(path.totalLength(), 0.0);
+
+    auto limits = makeLimits2D();
+    CostWeights w;
+    w.w_t = 1.0;
+    w.w_a = 0.01;
+
+    ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
+    // Use a high global feed rate; the per-segment limit should still apply
+    p.computeProfile(path, 100.0, 0.0, 0.0, 400);
+
+    auto wss = p.weightedSource();
+    ASSERT_NE(wss, nullptr);
+
+    // Sample in the second segment and check velocity ≤ 30.0
+    double sMid2 = path.segments()[0].cumulativeArcLength +
+                   path.segments()[0].arcLength +
+                   path.segments()[1].arcLength * 0.5;
+    double tMid2 = wss->timeAtArcLength(sMid2);
+    double vMid2 = wss->pathVelocity(tMid2);
+
+    EXPECT_LE(vMid2, 30.0 + 2.0)
+        << "Velocity " << vMid2 << " in second segment exceeds "
+        << "per-segment feed rate 30.0";
+}
+
+// ============================================================================
+// P35: Velocity continuity with per-segment feed rates (GAP regression)
+// ============================================================================
+
+TEST(ParetoTimeEnergyTest, P35_VelocityContinuity_PerSegmentFeedRates) {
+    // Build a 3-segment path with varying feed rates to stress-test
+    // the corner-distance limiting and v1 shortening logic.
+    MotionSegmentList segments;
+    segments.append(MotionSegment::linear(
+        Vec<2, double>{0.0, 0.0}, Vec<2, double>{5.0, 0.0}, 80.0));
+    segments.append(MotionSegment::linear(
+        Vec<2, double>{5.0, 0.0}, Vec<2, double>{10.0, 0.0}, 20.0));
+    segments.append(MotionSegment::linear(
+        Vec<2, double>{10.0, 0.0}, Vec<2, double>{15.0, 0.0}, 80.0));
+
+    PathBuilderAdapter<2, double> builder;
+    tether::motion::BlendSpec spec;
+    spec.tolerance = 0.1;
+    spec.continuity = tether::motion::Continuity::G2;
+    spec.maxBlendFraction = 0.25;
+    auto result = builder.build(segments, spec);
+    ASSERT_TRUE(result.success);
+    auto path = std::move(result.path);
+    ASSERT_GT(path.totalLength(), 0.0);
+
+    auto limits = makeLimits2D();
+    CostWeights w;
+    w.w_t = 1.0;
+    w.w_a = 0.01;
+
+    ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
+    p.computeProfile(path, 80.0, 0.0, 0.0, 400);
+
+    auto wss = p.weightedSource();
+    ASSERT_NE(wss, nullptr);
+    const auto& arcs = wss->arcs();
+    ASSERT_GT(arcs.size(), 1u);
+
+    double maxGap = maxVelocityGap(arcs);
+    EXPECT_LT(maxGap, 1.0)
+        << "Velocity discontinuity (GAP) detected with per-segment feed rates";
+}
+
+// ============================================================================
+// P36: AnalyticalMotionPlan evaluateAt does not segfault (dangling pointer)
+// ============================================================================
+//
+// Regression test for the pre-existing segfault in
+// AnalyticalMotionPlan.EvaluateAtProvidesState. The SSR stored a raw pointer
+// to the path that became dangling when the path was moved into the MotionPlan.
+
+TEST(ParetoTimeEnergyTest, P36_AnalyticalTOPPRA_EvaluateAtNoSegfault) {
+    // This test uses MotionPlanBuilder with AnalyticalTOPPRA, which creates
+    // an SSR with a raw path pointer. The builder must call setPath() after
+    // moving the path into the plan.
+    MotionSegmentList segments;
+    segments.append(MotionSegment::linear(
+        Vec<2, double>{0.0, 0.0}, Vec<2, double>{10.0, 0.0}, 100.0));
+
+    auto limits = makeLimits2D();
+    MotionPlanBuilder<2, double> builder(limits, {}, ProfilerType::AnalyticalTOPPRA);
+    auto plan = builder.build(segments, 50.0);
+
+    ASSERT_GT(plan.totalLength(), 0.0);
+    ASSERT_GT(plan.totalDuration(), 0.0);
+
+    // This call used to segfault due to the dangling path pointer
+    auto state = plan.evaluateAt(plan.totalDuration() * 0.5);
+    EXPECT_GE(state.position[0], 0.0);
+    EXPECT_LE(state.position[0], 10.0);
+    EXPECT_NEAR(state.position[1], 0.0, 1e-2);
+}

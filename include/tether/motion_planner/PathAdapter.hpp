@@ -30,6 +30,9 @@
 #include "tether/motion_planner/geometry/CertifiedCurvatureSampler.hpp"
 #include "tether/motion_planner/geometry/PiecewiseNurbsPath.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -61,6 +64,18 @@ struct PathAdapterSegment {
     T arcLength = T(0);
     // The underlying NURBS piece (reference into the PiecewiseNurbsPath).
     // We don't expose the curve directly; callers use the path API.
+
+    /// Per-segment maximum velocity (from G-code F-value, mm/s).
+    /// Default +infinity means "not set" — the global feedRate is used.
+    T maxVelocity = std::numeric_limits<T>::infinity();
+
+    /// Corner velocity at the segment start (junction with previous segment).
+    /// Default +infinity means "no corner limit".
+    T entryCornerVelocity = std::numeric_limits<T>::infinity();
+
+    /// Corner velocity at the segment end (junction with next segment).
+    /// Default +infinity means "no corner limit".
+    T exitCornerVelocity = std::numeric_limits<T>::infinity();
 };
 
 /// Adapter wrapping `tether::motion::PiecewiseNurbsPath` with the old
@@ -295,6 +310,275 @@ public:
         return ForwardIterator(this, startArcLength);
     }
 
+    // ========================================================================
+    // Per-Segment Velocity Limits (opt-in)
+    // ========================================================================
+
+    /// True if per-segment velocity limits (feed rates and/or corner
+    /// velocities) have been set via setSegmentVelocityLimits() or
+    /// computeCornerVelocities().
+    bool hasPerSegmentVelocityLimits() const noexcept {
+        return hasPerSegmentLimits_;
+    }
+
+    /// Set per-segment maximum velocities (from G-code F-values).
+    /// @param feedRates One entry per segment, in mm/s. The vector size
+    ///        must match numSegments(). Values <= 0 are treated as
+    ///        "no limit" (infinity).
+    void setSegmentVelocityLimits(const std::vector<double>& feedRates) {
+        if (!path_ || feedRates.empty()) return;
+        segmentMaxVelocities_.assign(path_->numPieces(),
+                                     std::numeric_limits<double>::infinity());
+        const size_t n = std::min(feedRates.size(), segmentMaxVelocities_.size());
+        for (size_t i = 0; i < n; ++i) {
+            if (feedRates[i] > 0.0) {
+                segmentMaxVelocities_[i] = feedRates[i];
+            }
+        }
+        hasPerSegmentLimits_ = true;
+        updateSegmentVelocityFields();
+    }
+
+    /// Compute corner velocities at all junctions using the junction
+    /// deviation model (Marlin-style):
+    ///
+    ///   v_corner = sqrt(a_max * delta / sin(theta/2))
+    ///
+    /// where theta is the junction angle between consecutive segment
+    /// tangents, delta is the allowed junction deviation, and a_max is
+    /// the maximum centripetal acceleration.
+    ///
+    /// For collinear segments (theta = 0), no corner limit is applied.
+    /// For 180-degree reversals, v_corner = sqrt(a_max * delta).
+    ///
+    /// @param junctionDeviation Allowed junction deviation (mm). Typical
+    ///        values: 0.01–0.1 mm. 0 disables cornering.
+    /// @param maxCentripetalAccel Maximum centripetal acceleration (mm/s²).
+    void computeCornerVelocities(double junctionDeviation,
+                                 double maxCentripetalAccel) {
+        if (!path_ || path_->numPieces() == 0) return;
+        if (junctionDeviation <= 0.0 || maxCentripetalAccel <= 0.0) return;
+
+        const size_t N = path_->numPieces();
+        cornerVelocities_.assign(N + 1,
+                                 std::numeric_limits<double>::infinity());
+
+        // Compute tangent for each segment from NURBS control points.
+        // For degree-1 (polyline): tangent = (endPoint - startPoint) / len.
+        // For arcs: tangent = derivative at midpoint, normalized.
+        std::vector<tether::motion::RVec> tangents(N);
+        for (size_t i = 0; i < N; ++i) {
+            const auto& piece = path_->piece(i);
+            if (piece.isPolyline() && piece.numControlPoints() >= 2) {
+                const auto& cps = piece.controlPoints();
+                tether::motion::RVec diff = cps.back() - cps.front();
+                double len = diff.norm();
+                if (len > 1e-12) {
+                    tangents[i] = diff / len;
+                } else {
+                    tangents[i] = tether::motion::RVec::zero(piece.dim());
+                    tangents[i][0] = 1.0; // fallback
+                }
+            } else {
+                // Arc or higher-degree: evaluate tangent at midpoint.
+                try {
+                    double uMid = 0.5 * (piece.knotMin() + piece.knotMax());
+                    tether::motion::RVec d = piece.derivative(uMid, 1);
+                    double len = d.norm();
+                    if (len > 1e-12) {
+                        tangents[i] = d / len;
+                    } else {
+                        tangents[i] = tether::motion::RVec::zero(piece.dim());
+                        tangents[i][0] = 1.0;
+                    }
+                } catch (...) {
+                    tangents[i] = tether::motion::RVec::zero(piece.dim());
+                    tangents[i][0] = 1.0;
+                }
+            }
+        }
+
+        // Path start and end: no corner limit (boundary conditions).
+        cornerVelocities_[0] = std::numeric_limits<double>::infinity();
+        cornerVelocities_[N] = std::numeric_limits<double>::infinity();
+
+        // Compute corner velocity at each interior junction.
+        const double kMinSinHalfTheta = 1e-12;
+        for (size_t i = 0; i + 1 < N; ++i) {
+            double dot = tangents[i].dot(tangents[i + 1]);
+            // Clamp dot product to [-1, 1] for numerical safety.
+            dot = std::clamp(dot, -1.0, 1.0);
+            // sin(theta/2) = sqrt((1 - cos(theta)) / 2) = sqrt((1 - dot) / 2)
+            double sinHalfTheta = std::sqrt(std::max(0.0, (1.0 - dot) / 2.0));
+            if (sinHalfTheta < kMinSinHalfTheta) {
+                // Collinear — no corner limit.
+                cornerVelocities_[i + 1] = std::numeric_limits<double>::infinity();
+            } else {
+                double vCorner = std::sqrt(
+                    maxCentripetalAccel * junctionDeviation / sinHalfTheta);
+                cornerVelocities_[i + 1] = vCorner;
+            }
+        }
+
+        hasPerSegmentLimits_ = true;
+        updateSegmentVelocityFields();
+    }
+
+    /// Get the per-segment velocity limit at arc length s.
+    /// Combines the segment feed rate and the corner velocity at the
+    /// nearest junction. Returns +infinity if per-segment limits are
+    /// not set.
+    double maxVelocityAtArcLength(T s) const {
+        if (!hasPerSegmentLimits_) return std::numeric_limits<double>::infinity();
+        const size_t N = segments_.size();
+        if (N == 0) return std::numeric_limits<double>::infinity();
+
+        // Clamp s to [0, totalLength].
+        const T total = totalLength();
+        if (s < T(0)) s = T(0);
+        if (s > total) s = total;
+
+        // Binary search for the segment containing s.
+        size_t segIdx = segmentIndexAtArcLength(s);
+
+        // Get the segment feed rate.
+        double vSeg = std::numeric_limits<double>::infinity();
+        if (segIdx < segmentMaxVelocities_.size()) {
+            vSeg = segmentMaxVelocities_[segIdx];
+        }
+
+        // Get corner velocities at the segment boundaries.
+        double vEntry = std::numeric_limits<double>::infinity();
+        double vExit = std::numeric_limits<double>::infinity();
+        if (!cornerVelocities_.empty()) {
+            if (segIdx < cornerVelocities_.size()) {
+                vEntry = cornerVelocities_[segIdx];
+            }
+            if (segIdx + 1 < cornerVelocities_.size()) {
+                vExit = cornerVelocities_[segIdx + 1];
+            }
+        }
+
+        // Interpolate: at segment start → min(vSeg, vEntry),
+        //              at segment end → min(vSeg, vExit),
+        //              interior → vSeg.
+        const T segStart = segments_[segIdx].cumulativeArcLength;
+        const T segLen = segments_[segIdx].arcLength;
+        double t = T(0);
+        if (segLen > T(0)) {
+            t = std::clamp(static_cast<double>((s - segStart) / segLen), 0.0, 1.0);
+        }
+
+        double vAtEntry = std::min(vSeg, vEntry);
+        double vAtExit = std::min(vSeg, vExit);
+        // Linear interpolation between entry and exit corner limits.
+        double vCorner = vAtEntry * (1.0 - t) + vAtExit * t;
+        return std::min(vSeg, vCorner);
+    }
+
+    /// Get the segment index containing arc length s (binary search).
+    size_t segmentIndexAtArcLength(T s) const {
+        const size_t N = segments_.size();
+        if (N == 0) return 0;
+        if (s <= segments_[0].cumulativeArcLength) return 0;
+        if (s >= segments_[N - 1].cumulativeArcLength + segments_[N - 1].arcLength)
+            return N - 1;
+
+        // Binary search.
+        size_t lo = 0, hi = N - 1;
+        while (lo < hi) {
+            size_t mid = lo + (hi - lo) / 2;
+            T segEnd = segments_[mid].cumulativeArcLength + segments_[mid].arcLength;
+            if (s < segEnd) {
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        }
+        return lo;
+    }
+
+    /// Direct access to per-segment max velocities vector (empty if not set).
+    const std::vector<double>& segmentMaxVelocities() const noexcept {
+        return segmentMaxVelocities_;
+    }
+
+    /// Direct access to corner velocities vector (empty if not set).
+    /// Size = numSegments + 1 (one per junction, including path start/end).
+    const std::vector<double>& cornerVelocities() const noexcept {
+        return cornerVelocities_;
+    }
+
+    // ========================================================================
+    // Dwell Points (G4 dwell commands)
+    // ========================================================================
+
+    /// Set dwell points on the path. Each dwell point forces velocity to 0
+    /// at the given arc length (the planner will decelerate to a stop,
+    /// pause for the dwell duration, then accelerate from 0).
+    ///
+    /// This method:
+    /// 1. Stores the dwell points for the planner to insert dwell arcs.
+    /// 2. Sets the corner velocity at the nearest segment boundary to 0
+    ///    (or creates a corner velocity vector if not already set).
+    ///
+    /// @param dwellPoints Vector of (arcLength, duration) pairs, in
+    ///                   arc-length order. Duration is in seconds.
+    void setDwellPoints(const std::vector<std::pair<double, double>>& dwellPoints) {
+        dwellPoints_.clear();
+        dwellPoints_.reserve(dwellPoints.size());
+        for (const auto& [arcLen, dur] : dwellPoints) {
+            dwellPoints_.push_back({arcLen, dur});
+        }
+
+        // Ensure corner velocities are initialized (needed to force v=0
+        // at dwell positions).
+        if (cornerVelocities_.empty() && path_ && path_->numPieces() > 0) {
+            cornerVelocities_.assign(path_->numPieces() + 1,
+                                     std::numeric_limits<double>::infinity());
+            hasPerSegmentLimits_ = true;
+        }
+
+        // Set corner velocity to 0 at the segment boundary nearest to
+        // each dwell arc length. This forces the planner to stop.
+        //
+        // Corner velocity indices: cornerVelocities_[j] is at the boundary
+        // between segment j-1 and segment j, i.e., at arc length =
+        // segments_[j-1].cumulativeArcLength + segments_[j-1].arcLength.
+        // We find the nearest boundary to the dwell arc length.
+        const size_t N = segments_.size();
+        if (N == 0 || cornerVelocities_.empty()) return;
+
+        for (const auto& [arcLen, dur] : dwellPoints) {
+            T s = static_cast<T>(arcLen);
+            // Find the nearest segment boundary.
+            // Boundaries are at: 0, end(seg0), end(seg1), ..., end(segN-1).
+            // cornerVelocities_[j] corresponds to the j-th boundary.
+            size_t bestJ = 0;
+            double bestDist = std::abs(static_cast<double>(s));
+            for (size_t j = 1; j <= N; ++j) {
+                T boundary = segments_[j-1].cumulativeArcLength +
+                             segments_[j-1].arcLength;
+                double dist = std::abs(static_cast<double>(s - boundary));
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestJ = j;
+                }
+            }
+            // Set the corner velocity at the nearest boundary to 0.
+            if (bestJ < cornerVelocities_.size()) {
+                cornerVelocities_[bestJ] = 0.0;
+            }
+        }
+        updateSegmentVelocityFields();
+    }
+
+    /// Get the dwell points set on this path.
+    /// @return Vector of (arcLength, duration) pairs. Empty if no dwells.
+    const std::vector<std::pair<double, double>>& dwellPoints() const noexcept {
+        return dwellPoints_;
+    }
+
 private:
     std::optional<tether::motion::PiecewiseNurbsPath> path_;
     std::vector<SourceReference> sourceRefs_;
@@ -302,6 +586,21 @@ private:
     std::vector<std::optional<tether::motion::PHData>> phData_;
     mutable std::shared_ptr<tether::motion::CertifiedCurvatureSampler>
         curvatureSampler_; ///< Lazy, memoized.
+
+    /// Per-segment maximum velocity (from G-code F-values, mm/s).
+    /// Empty = not set (use global feedRate only).
+    std::vector<double> segmentMaxVelocities_;
+
+    /// Per-junction corner velocity (size = numSegments + 1).
+    /// Entry 0 = start of path, entry N = end of path.
+    /// Empty = not set.
+    std::vector<double> cornerVelocities_;
+
+    /// Dwell points: (arcLength, duration) pairs from G4 commands.
+    std::vector<std::pair<double, double>> dwellPoints_;
+
+    /// True if per-segment velocity limits have been set.
+    bool hasPerSegmentLimits_ = false;
 
     void rebuildSegmentInfo() {
         segments_.clear();
@@ -318,6 +617,29 @@ private:
             }
             segments_.push_back(info);
             cumLen += pieceLen;
+        }
+        updateSegmentVelocityFields();
+    }
+
+    /// Sync the maxVelocity/entryCornerVelocity/exitCornerVelocity fields
+    /// on each SegmentInfo from the internal vectors.
+    void updateSegmentVelocityFields() {
+        if (segments_.empty()) return;
+        for (size_t i = 0; i < segments_.size(); ++i) {
+            if (i < segmentMaxVelocities_.size()) {
+                segments_[i].maxVelocity =
+                    static_cast<T>(segmentMaxVelocities_[i]);
+            }
+            if (!cornerVelocities_.empty()) {
+                if (i < cornerVelocities_.size()) {
+                    segments_[i].entryCornerVelocity =
+                        static_cast<T>(cornerVelocities_[i]);
+                }
+                if (i + 1 < cornerVelocities_.size()) {
+                    segments_[i].exitCornerVelocity =
+                        static_cast<T>(cornerVelocities_[i + 1]);
+                }
+            }
         }
     }
 

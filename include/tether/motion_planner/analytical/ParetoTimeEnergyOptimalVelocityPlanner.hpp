@@ -135,6 +135,7 @@ enum class WeightedArcType : uint8_t {
     BANG_MINUS,  ///< η = -η_max (lowering acceleration toward a*)
     SINGULAR,    ///< η = 0, a = a* (constant acceleration cruising)
     WALL,        ///< v = v_wall(u(s)); acceleration slaved to geometry
+    DWELL,       ///< v = 0, a = 0, s = const (G4 dwell pause)
 };
 
 /**
@@ -146,6 +147,7 @@ inline const char* weightedArcTypeName(WeightedArcType type) {
         case WeightedArcType::BANG_MINUS: return "BANG_MINUS";
         case WeightedArcType::SINGULAR:   return "SINGULAR";
         case WeightedArcType::WALL:       return "WALL";
+        case WeightedArcType::DWELL:      return "DWELL";
     }
     return "UNKNOWN";
 }
@@ -711,6 +713,9 @@ public:
         if (arcs_.empty()) return T(0);
         for (const auto& arc : arcs_) {
             if (s <= arc.s1) {
+                if (arc.type == WeightedArcType::DWELL) {
+                    return static_cast<T>(arc.t0);
+                }
                 double dsLocal = s - arc.s0;
                 if (dsLocal < 0.0) dsLocal = 0.0;
                 double tau = 0.0;
@@ -927,7 +932,13 @@ private:
 
         // Compute state at tau using closed-form arc formulas
         double s, v, a, eta;
-        if (arc.type == WeightedArcType::SINGULAR) {
+        if (arc.type == WeightedArcType::DWELL) {
+            // DWELL: v=0, a=0, s=const for the entire duration
+            s = arc.s0;
+            v = 0.0;
+            a = 0.0;
+            eta = 0.0;
+        } else if (arc.type == WeightedArcType::SINGULAR) {
             a = arc.a_star;
             v = SingSeg::v(arc.v0, arc.a_star, tau);
             s = arc.s0 + SingSeg::ds(arc.v0, arc.a_star, tau);
@@ -981,6 +992,9 @@ private:
      * @brief Compute the duration of an arc (time span).
      */
     double computeArcDuration(const Arc& arc) const {
+        if (arc.type == WeightedArcType::DWELL) {
+            return arc.duration;  // dwell time is pre-set
+        }
         double ds = arc.s1 - arc.s0;
         if (ds <= 0.0) return 0.0;
 
@@ -1196,14 +1210,37 @@ public:
         // Coalesce consecutive arcs with identical type/eta/a_star that are
         // contiguous in arc length. This collapses the grid-dump into the
         // true switching structure and keeps the WSS small and exact.
+        //
+        // For BANG arcs (BANG_PLUS/BANG_MINUS), we additionally require that
+        // a0 of the next arc matches a1 (= a0 + eta*duration) of the previous
+        // arc. Without this check, coalescing BANG arcs with different a0
+        // values produces an arc whose v1 (computed from v0, a0, eta, tau)
+        // does not match the actual velocity at the end — creating velocity
+        // discontinuities (GAPs) in the WSS.
         std::vector<Arc> coalesced;
         coalesced.reserve(arcs_.size());
         for (auto& arc : arcs_) {
+            bool canCoalesce = false;
             if (!coalesced.empty() &&
                 coalesced.back().type == arc.type &&
                 coalesced.back().eta == arc.eta &&
                 coalesced.back().a_star == arc.a_star &&
                 std::abs(coalesced.back().s1 - arc.s0) < 1e-12) {
+                if (arc.type == WeightedArcType::BANG_PLUS ||
+                    arc.type == WeightedArcType::BANG_MINUS) {
+                    // For BANG arcs, check a0 continuity:
+                    // a1 of previous = a0_prev + eta * dur_prev
+                    // must equal a0 of current
+                    double a1Prev = coalesced.back().a0 +
+                                    coalesced.back().eta *
+                                    coalesced.back().duration;
+                    canCoalesce = (std::abs(a1Prev - arc.a0) < 1.0);
+                } else {
+                    // WALL and SINGULAR: safe to coalesce (constant v or a)
+                    canCoalesce = true;
+                }
+            }
+            if (canCoalesce) {
                 coalesced.back().s1 = arc.s1;
                 coalesced.back().duration += arc.duration;
             } else {
@@ -1253,8 +1290,30 @@ private:
     double sTotal_ = 0.0;
     double v0_ = 0.0;
     double vf_ = 0.0;
-    size_t constraintCacheSize_ = 200;
-    double ds_ = 0.0;
+    size_t constraintCacheSize_ = 200;  ///< Coarse grid size (for coefficients)
+    double ds_ = 0.0;                   ///< Coarse grid spacing
+
+    /// Fine grid for velocity limits (per-segment feed rates + cornering).
+    /// When per-segment limits are present, the fine grid is larger than
+    /// the coarse grid to capture per-segment velocity transitions.
+    /// When no per-segment limits, fineGridSize_ == constraintCacheSize_
+    /// and vLimFineGrid_ is identical to vLimGrid_.
+    size_t fineGridSize_ = 0;
+    double dsFine_ = 0.0;
+    std::vector<double> vLimFineGrid_;
+
+    /// Sorted list of corner constraints (arcLength, velocity) for the
+    /// analytical TOPPRA backward pass (look-ahead).
+    ///
+    /// The look-ahead computes the exact deceleration profile from corner
+    /// positions: v_req(s) = sqrt(v_corner² + 2*a_max*(s_corner - s)).
+    /// This is the continuous form of the TOPPRA backward pass, evaluated
+    /// at the exact corner position instead of at grid points. It works
+    /// regardless of grid resolution, which is critical for large paths
+    /// where the grid step (mm) can be much larger than the braking
+    /// distance (sub-mm).
+    std::vector<std::pair<double, double>> corners_;
+    double aMaxForLookahead_ = 0.0;
 
     std::vector<KinematicCoefficients> gridCoeffs_;
     std::vector<double> vLimGrid_;
@@ -1289,10 +1348,19 @@ private:
      * otherwise inverts arc length and evaluates high-order NURBS derivatives.
      * Caching once per solve makes every simulateAndCost call
      * O(constraintCacheSize) instead of O(constraintCacheSize * pathEvalCost).
+     *
+     * When the path has per-segment velocity limits (feed rates + corner
+     * velocities), a fine velocity-limit grid is built in addition to the
+     * coarse coefficient grid. The fine grid captures per-segment feed rate
+     * transitions and corner velocity dips. Backward and forward velocity
+     * limit propagation ensures the solver decelerates before corners and
+     * accelerates after them, given the acceleration constraints.
      */
     void buildConstraintCache() {
         if (sTotal_ <= 0.0 || constraintCacheSize_ == 0) return;
 
+        // --- Coarse grid: geometric coefficients (tangent, curvature, etc.) ---
+        // This is the expensive part (NURBS evaluation per point).
         ds_ = sTotal_ / static_cast<double>(constraintCacheSize_);
         gridCoeffs_.resize(constraintCacheSize_ + 1);
         vLimGrid_.resize(constraintCacheSize_ + 1);
@@ -1318,6 +1386,224 @@ private:
             vLim = std::min(vLim, static_cast<double>(maxVel));
             vLimGrid_[i] = std::max(vLim, 0.0);
         }
+
+        // --- Fine grid: velocity limit with per-segment constraints ---
+        buildFineVelocityGrid();
+    }
+
+    /**
+     * @brief Build the fine velocity-limit grid.
+     *
+     * If the path has per-segment velocity limits, the fine grid is enlarged
+     * to capture per-segment feed rate transitions and corner velocity dips.
+     * The geometric velocity limit is interpolated from the coarse grid.
+     * Backward and forward propagation ensures the velocity limit accounts
+     * for the machine's acceleration/deceleration capabilities.
+     *
+     * If no per-segment limits are present, the fine grid is identical to
+     * the coarse grid (backward compatible).
+     */
+    void buildFineVelocityGrid() {
+        const bool hasPerSeg = path_.hasPerSegmentVelocityLimits();
+
+        if (!hasPerSeg) {
+            // Backward compatible: fine grid = coarse grid.
+            fineGridSize_ = constraintCacheSize_;
+            dsFine_ = ds_;
+            vLimFineGrid_ = vLimGrid_;  // copy
+            return;
+        }
+
+        // Build a fine velocity-limit grid with per-segment feed rates,
+        // corner velocities, and backward/forward propagation.
+        //
+        // The solver queries this fine grid for velocity limits, but uses
+        // the coarse grid step size for the simulation. The backward/forward
+        // propagation on the fine grid ensures the velocity limit profile
+        // is achievable given the acceleration constraints, creating a
+        // smooth deceleration/acceleration profile around corners.
+        const size_t numSegs = path_.numSegments();
+        const size_t minFine = numSegs * 2;
+        fineGridSize_ = std::max(constraintCacheSize_, minFine);
+        const size_t kMaxFine = 500000;
+        fineGridSize_ = std::min(fineGridSize_, kMaxFine);
+
+        dsFine_ = sTotal_ / static_cast<double>(fineGridSize_);
+        vLimFineGrid_.resize(fineGridSize_ + 1);
+
+        // Fill the fine grid: interpolate geometric vLim from coarse grid
+        // and apply per-segment velocity limits (feed rate + corner velocity).
+        for (size_t i = 0; i <= fineGridSize_; ++i) {
+            double s = std::min(static_cast<double>(i) * dsFine_, sTotal_);
+            double geoVLim = interpolateCoarseVLim(s);
+            double segVLim = path_.maxVelocityAtArcLength(static_cast<T>(s));
+            vLimFineGrid_[i] = std::max(std::min(geoVLim, segVLim), 0.0);
+        }
+
+        // Direct corner constraint stamping on the fine grid.
+        double aMax = static_cast<double>(limits_.path.maxPathAcceleration);
+        if (aMax <= 0.0) aMax = 1.0;
+        aMaxForLookahead_ = aMax;  // Cache for look-ahead in simulateAndCost
+
+        const double vMaxGlobal = static_cast<double>(
+            std::min(feedRate_, limits_.path.maxPathVelocity));
+        const double maxStampDist = vMaxGlobal * vMaxGlobal / (2.0 * aMax);
+        const int stampRadius = std::max(1,
+            (int)std::ceil(maxStampDist / dsFine_));
+
+        const auto& cornerVel = path_.cornerVelocities();
+        corners_.clear();
+        if (!cornerVel.empty()) {
+            const auto& segs = path_.segments();
+            for (size_t i = 0; i < cornerVel.size(); ++i) {
+                if (!std::isfinite(cornerVel[i])) continue;
+                if (i == 0 || i + 1 >= cornerVel.size()) continue;
+                double s;
+                if (i < segs.size()) {
+                    s = static_cast<double>(segs[i].cumulativeArcLength);
+                } else {
+                    s = sTotal_;
+                }
+                corners_.emplace_back(s, cornerVel[i]);
+            }
+        }
+        // corners_ is already sorted by arc length (segments are ordered).
+
+        for (const auto& [sCorner, vCorner] : corners_) {
+            if (vCorner >= vMaxGlobal && vCorner > 0) continue;
+            int centerIdx = (int)(sCorner / dsFine_ + 0.5);
+            int lo = std::max(0, centerIdx - stampRadius);
+            int hi = std::min((int)fineGridSize_, centerIdx + stampRadius);
+            for (int i = lo; i <= hi; ++i) {
+                double s = static_cast<double>(i) * dsFine_;
+                double d = std::abs(s - sCorner);
+                double vMax = std::sqrt(vCorner * vCorner + 2.0 * aMax * d);
+                vLimFineGrid_[i] = std::min(vLimFineGrid_[i], vMax);
+            }
+        }
+
+        // Also update the coarse grid with the min-filtered fine grid values
+        // so that the coarse grid is consistent.
+        for (size_t i = 0; i <= constraintCacheSize_; ++i) {
+            double sCoarse = static_cast<double>(i) * ds_;
+            size_t iFineLo = (size_t)(sCoarse / dsFine_);
+            size_t iFineHi = (size_t)((sCoarse + ds_) / dsFine_);
+            if (iFineHi > fineGridSize_) iFineHi = fineGridSize_;
+            if (iFineLo > fineGridSize_) iFineLo = fineGridSize_;
+            double vMin = vLimFineGrid_[iFineLo];
+            for (size_t j = iFineLo + 1; j <= iFineHi; ++j) {
+                if (vLimFineGrid_[j] < vMin) vMin = vLimFineGrid_[j];
+            }
+            vLimGrid_[i] = std::min(vLimGrid_[i], vMin);
+        }
+
+        // Apply backward/forward propagation on the FINE grid.
+        //
+        // This is the TOPPRA backward/forward pass, computed at fine grid
+        // resolution so that corner dips (which can be narrower than one
+        // coarse grid step) are properly spread into smooth deceleration
+        // profiles. The solver queries this fine grid for velocity limits,
+        // so the deceleration points emerge naturally from the profile.
+        //
+        // Backward: vLim[i] = min(vLim[i], sqrt(vLim[i+1]^2 + 2*aMax*dsFine))
+        for (size_t i = fineGridSize_; i > 0; --i) {
+            double vNext = vLimFineGrid_[i];
+            double vProp = std::sqrt(vNext * vNext + 2.0 * aMax * dsFine_);
+            vLimFineGrid_[i - 1] = std::min(vLimFineGrid_[i - 1], vProp);
+        }
+        // Forward: vLim[i] = min(vLim[i], sqrt(vLim[i-1]^2 + 2*aMax*dsFine))
+        for (size_t i = 1; i <= fineGridSize_; ++i) {
+            double vPrev = vLimFineGrid_[i - 1];
+            double vProp = std::sqrt(vPrev * vPrev + 2.0 * aMax * dsFine_);
+            vLimFineGrid_[i] = std::min(vLimFineGrid_[i], vProp);
+        }
+
+        // Re-update the coarse grid from the propagated fine grid.
+        for (size_t i = 0; i <= constraintCacheSize_; ++i) {
+            double sCoarse = static_cast<double>(i) * ds_;
+            size_t iFineLo = (size_t)(sCoarse / dsFine_);
+            size_t iFineHi = (size_t)((sCoarse + ds_) / dsFine_);
+            if (iFineHi > fineGridSize_) iFineHi = fineGridSize_;
+            if (iFineLo > fineGridSize_) iFineLo = fineGridSize_;
+            double vMin = vLimFineGrid_[iFineLo];
+            for (size_t j = iFineLo + 1; j <= iFineHi; ++j) {
+                if (vLimFineGrid_[j] < vMin) vMin = vLimFineGrid_[j];
+            }
+            vLimGrid_[i] = std::min(vLimGrid_[i], vMin);
+        }
+
+        // Note: The analytical TOPPRA backward pass (look-ahead from exact
+        // corner positions) is NOT precomputed into the coarse grid. Instead,
+        // it is computed on-the-fly in simulateAndCost() via lookAheadVLimit().
+        // This is the continuous-form TOPPRA backward pass:
+        //   v_req(s) = min over upcoming corners of sqrt(v_c² + 2*a_max*d)
+        // It works regardless of grid resolution, which is critical for large
+        // paths where the grid step is much larger than the braking distance.
+    }
+
+    /// Interpolate the geometric velocity limit from the coarse grid.
+    double interpolateCoarseVLim(double s) const {
+        if (constraintCacheSize_ == 0 || ds_ <= 0.0) {
+            return static_cast<double>(
+                std::min(feedRate_, limits_.path.maxPathVelocity));
+        }
+        double idxF = s / ds_;
+        size_t idx0 = static_cast<size_t>(std::floor(idxF));
+        size_t idx1 = idx0 + 1;
+        if (idx0 >= constraintCacheSize_) return vLimGrid_.back();
+        if (idx1 > constraintCacheSize_) idx1 = constraintCacheSize_;
+        double frac = idxF - static_cast<double>(idx0);
+        return vLimGrid_[idx0] * (1.0 - frac) + vLimGrid_[idx1] * frac;
+    }
+
+    /// Fine grid index for arc length s (uniform grid, O(1)).
+    size_t fineGridIndex(double s) const {
+        if (dsFine_ <= 0.0) return 0;
+        long idx = static_cast<long>(std::floor(s / dsFine_ + 0.5));
+        return static_cast<size_t>(
+            std::clamp(idx, 0L, static_cast<long>(fineGridSize_)));
+    }
+
+    /// Analytical TOPPRA backward pass (look-ahead): computes the maximum
+    /// velocity at position s such that the tool can decelerate to the
+    /// corner velocity by the time it reaches each upcoming corner.
+    ///
+    /// For each corner at (s_c, v_c) ahead of s, the required velocity at s
+    /// is: v_req = sqrt(v_c² + 2 * a_max * (s_c - s)).
+    ///
+    /// This is the continuous form of the TOPPRA backward pass, evaluated at
+    /// the exact corner position. It works regardless of grid resolution,
+    /// which is critical for large paths where the grid step can be much
+    /// larger than the braking distance.
+    ///
+    /// @param s Current arc length position
+    /// @param vGridLim Velocity limit from the fine/coarse grid at s
+    /// @return The effective velocity limit (min of grid and look-ahead)
+    double lookAheadVLimit(double s, double vGridLim) const {
+        if (corners_.empty() || aMaxForLookahead_ <= 0.0) return vGridLim;
+
+        // Binary search for the first corner at or after s.
+        auto it = std::lower_bound(corners_.begin(), corners_.end(), s,
+            [](const std::pair<double, double>& c, double val) {
+                return c.first < val;
+            });
+
+        // Check upcoming corners within braking distance.
+        double vEff = vGridLim;
+        double dMax = vGridLim * vGridLim / (2.0 * aMaxForLookahead_);
+
+        for (; it != corners_.end(); ++it) {
+            double sCorner = it->first;
+            double vCorner = it->second;
+            double d = sCorner - s;
+            if (d < 0.0) continue;
+            if (d > dMax) break;
+
+            double vReq = std::sqrt(vCorner * vCorner + 2.0 * aMaxForLookahead_ * d);
+            if (vReq < vEff) vEff = vReq;
+        }
+
+        return vEff;
     }
 
     /// Convert a std::vector<double> to Vec<Dim,T> for limits helpers.
@@ -1432,23 +1718,43 @@ private:
         double v = v0_, a = 0.0;
         double J = 0.0;
 
-        const double ds = sTotal_ / static_cast<double>(constraintCacheSize_);
+        // Keep the coarse grid step size for the simulation. The fine grid
+        // is used only for velocity limit queries (per-segment + cornering).
+        // Using the fine grid spacing for the step would make the solver
+        // take too many steps and cause velocity discontinuities.
+        const double ds = ds_;
         const double sEnd = sTotal_;
 
         // Constraint queries are served from the precomputed grid.  This
         // avoids the expensive arc-length inversion + high-order NURBS
         // derivative evaluation on every simulation step.
+        // - Eta/accel bounds use the coarse grid (geometric coefficients).
+        // - Velocity limit uses the fine grid (per-segment + cornering).
         auto getEtaBounds = [&](double sCur, double vCur, double aCur)
             -> EtaBounds {
             return etaBoundsFromCache(gridIndex(sCur), vCur, aCur);
         };
 
         auto getVLimit = [&](double sCur) -> double {
-            return vLimGrid_[gridIndex(sCur)];
+            // Analytical TOPPRA backward pass: compute the velocity limit
+            // from exact corner positions, without any grid.
+            //
+            // v_req(s) = min over all upcoming corners (s_c, v_c) of:
+            //   sqrt(v_c² + 2*a_max*(s_c - s))
+            //
+            // This is the continuous-form TOPPRA backward pass. It works
+            // regardless of grid resolution. The grid vLimGrid_ is used
+            // only for the geometric velocity limit (curvature, axis
+            // limits, per-segment feed rates).
+            double vGrid = vLimGrid_[gridIndex(sCur)];
+            return lookAheadVLimit(sCur, vGrid);
         };
 
         bool infeasible = false;
-        int maxIter = static_cast<int>(constraintCacheSize_) * 20;
+        // Increase maxIter to account for sub-step arcs at corners
+        // (WALL arcs limited to where vLim drops, BANG_MINUS arcs limited
+        // to where v reaches vLim).
+        int maxIter = static_cast<int>(constraintCacheSize_) * 50;
         for (int iter = 0; iter < maxIter && s < sEnd - 1e-10; ++iter) {
             EtaBounds etaBounds = getEtaBounds(s, v, a);
             if (!etaBounds.feasible()) {
@@ -1465,6 +1771,26 @@ private:
             }
             double aMinBound = static_cast<double>(aBounds.first);
             double aMaxBound = static_cast<double>(aBounds.second);
+
+            // Clamp eta bounds based on acceleration limits: if a is at or
+            // near the acceleration bound, prevent jerk from pushing it
+            // further beyond the bound. This avoids producing BANG arcs
+            // whose end acceleration exceeds the limit.
+            {
+                double aTol = 1e-6 * std::max(1.0, std::abs(aMaxBound));
+                if (a <= aMinBound + aTol) {
+                    // Can't decrease a further — clamp eta_min to 0
+                    etaBounds.eta_min = std::max(etaBounds.eta_min, 0.0);
+                }
+                if (a >= aMaxBound - aTol) {
+                    // Can't increase a further — clamp eta_max to 0
+                    etaBounds.eta_max = std::min(etaBounds.eta_max, 0.0);
+                }
+                if (!etaBounds.feasible()) {
+                    infeasible = true;
+                    break;
+                }
+            }
 
             double sRemaining = sEnd - s;
 
@@ -1517,11 +1843,38 @@ private:
                 }
             }
 
-            // Select desired eta per the a* guidance law
+            // Select desired eta per the a* guidance law.
+            //
+            // The velocity limit from the analytical TOPPRA backward pass
+            // (look-ahead) defines a smooth deceleration profile at corners.
+            // The solver follows this profile:
+            // - v > vLim: overshoot → BANG_MINUS to decelerate back to vLim
+            // - v ≈ vLim: WALL (cruise) — but check if vLim is about to drop
+            // - v < vLim: follow a* guidance (BANG_PLUS / SINGULAR / BANG_MINUS)
             double aStarEff = std::clamp(aStar, aMinBound, aMaxBound);
             double aTol = 1e-7 * std::max(1.0, std::abs(aStarEff));
             double etaDes;
-            if (v >= vLim - 1e-10) {
+
+            // Check if the look-ahead vLim is dropping (corner approaching).
+            // If vLim at s+epsilon is less than v, we need to decelerate.
+            //
+            // Note: the jerk-limited braking distance early trigger was removed.
+            // The corner-distance limiting + v1 shortening (for BANG arcs)
+            // already prevents velocity discontinuities (GAPs) at corners.
+            // The solver arrives at the corner with v > v_corner, then takes
+            // a BANG_MINUS arc that correctly decelerates to v_corner using
+            // the actual jerk-limited dynamics.
+            bool vLimDropping = false;
+            if (!corners_.empty() && v >= vLim - 1e-10) {
+                double vLimAhead = lookAheadVLimit(
+                    s + 1e-6, vLim);
+                if (vLimAhead < v - 1e-6) vLimDropping = true;
+            }
+
+            if (v > vLim + 1e-6 || vLimDropping) {
+                // Overshooting or about to overshoot — decelerate
+                etaDes = etaBounds.eta_min;
+            } else if (v >= vLim - 1e-10) {
                 // At velocity wall — cruise
                 etaDes = 0.0;
                 a = 0.0;  // hold at wall
@@ -1538,7 +1891,10 @@ private:
 
             // Determine arc type
             WeightedArcType arcType;
-            if (v >= vLim - 1e-10) {
+            if (v > vLim + 1e-6 || vLimDropping) {
+                // Overshooting or about to overshoot — BANG_MINUS
+                arcType = WeightedArcType::BANG_MINUS;
+            } else if (v >= vLim - 1e-10) {
                 arcType = WeightedArcType::WALL;
                 eta = 0.0;
             } else if (std::abs(eta) < 1e-12) {
@@ -1555,19 +1911,101 @@ private:
             // Don't overshoot the end
             if (s + dsArc > sEnd) dsArc = sEnd - s;
 
-            // Don't overshoot velocity limit
+            // Limit arc to the nearest corner where the arc dynamics would
+            // violate the corner velocity. For each corner within the arc,
+            // compute v at the corner from the arc dynamics. If v > v_corner,
+            // shorten the arc to stop at the corner.
+            //
+            // This is more precise than blindly stopping at every corner with
+            // v_corner < v: BANG_MINUS arcs that are already decelerating may
+            // reach v_corner by the corner without needing to stop.
+            if (!corners_.empty()) {
+                auto it = std::lower_bound(corners_.begin(), corners_.end(),
+                    s,
+                    [](const std::pair<double, double>& c, double val) {
+                        return c.first < val;
+                    });
+                for (; it != corners_.end() && it->first <= s + dsArc + 1e-9; ++it) {
+                    double dCorner = it->first - s;
+                    if (dCorner <= 1e-9) continue;
+                    double vCorner = it->second;
+                    if (vCorner >= v - 1e-6) continue;  // no constraint
+                    // Compute v at the corner from the arc dynamics
+                    double vAtCorner;
+                    if (arcType == WeightedArcType::WALL) {
+                        vAtCorner = v;  // constant velocity
+                    } else if (arcType == WeightedArcType::SINGULAR) {
+                        double tau_c = SingSeg::tau_for_ds(v, aStarEff, dCorner);
+                        vAtCorner = SingSeg::v(v, aStarEff, tau_c);
+                    } else {
+                        double tau_c = BangSeg::tau_for_ds(v, a, eta, dCorner);
+                        vAtCorner = BangSeg::v(v, a, eta, tau_c);
+                    }
+                    if (vAtCorner > vCorner + 1e-6) {
+                        dsArc = dCorner;
+                        break;
+                    }
+                }
+            }
+
+            // Don't overshoot velocity limit (BANG_PLUS: v reaching vLim)
             if (arcType == WeightedArcType::BANG_PLUS) {
-                // Check how far until v reaches vLim
                 double vTarget = vLim;
-                // v(t) = v0 + a0*tau + 0.5*eta*tau^2
-                // Solve for tau when v = vTarget:
-                // 0.5*eta*tau^2 + a0*tau + (v0 - vTarget) = 0
                 double disc = a * a - 2.0 * eta * (v - vTarget);
                 if (disc > 0.0 && eta > 0.0) {
                     double tauV = (-a + std::sqrt(disc)) / eta;
                     if (tauV > 0.0) {
                         double dsV = BangSeg::ds(v, a, eta, tauV);
                         if (dsV > 0.0 && dsV < dsArc) dsArc = dsV;
+                    }
+                }
+            }
+
+            // Don't undershoot velocity limit (BANG_MINUS: v reaching vLim)
+            // When decelerating from overshoot or from a dropping vLim, limit
+            // the arc so the solver can follow the TOPPRA backward-pass profile.
+            if (arcType == WeightedArcType::BANG_MINUS &&
+                (v > vLim + 1e-6 || vLimDropping)) {
+                // When vLimDropping, the nearest corner is within braking
+                // distance. Limit the arc to the distance to that corner
+                // so the solver takes small steps and doesn't overshoot
+                // to v=0 over a large ds step.
+                if (vLimDropping && !corners_.empty()) {
+                    auto it = std::lower_bound(corners_.begin(), corners_.end(),
+                        s,
+                        [](const std::pair<double, double>& c, double val) {
+                            return c.first < val;
+                        });
+                    for (; it != corners_.end(); ++it) {
+                        double dCorner = it->first - s;
+                        if (dCorner > 1e-9) {
+                            if (dCorner < dsArc) dsArc = dCorner;
+                            break;
+                        }
+                    }
+                }
+
+                // Limit the arc to the distance where v reaches vLim.
+                // When overshooting (v > vLim), target the current vLim
+                // (the corner velocity). When vLimDropping, use the
+                // fixed-point iteration with the look-ahead vLim.
+                double vTarget;
+                if (v > vLim + 1e-6) {
+                    // Overshooting: target the current vLim
+                    vTarget = vLim;
+                } else {
+                    // vLimDropping: iterate with look-ahead vLim
+                    vTarget = getVLimit(std::min(s + dsArc, sEnd));
+                }
+
+                if (vTarget < v - 1e-6) {
+                    double disc = a * a - 2.0 * eta * (v - vTarget);
+                    if (disc > 0.0 && eta < 0.0) {
+                        double tauV = (-a - std::sqrt(disc)) / eta;
+                        if (tauV > 0.0) {
+                            double dsV = BangSeg::ds(v, a, eta, tauV);
+                            if (dsV > 0.0 && dsV < dsArc) dsArc = dsV;
+                        }
                     }
                 }
             }
@@ -1627,10 +2065,54 @@ private:
                 }
             }
 
-            // Clamp velocity to limit
-            if (v1 > vLim) {
-                v1 = vLim;
-                if (a1 > 0.0) a1 = 0.0;
+            // If v exceeds the velocity limit at the end of the arc, shorten
+            // the arc to where v reaches vLim exactly. This replaces the old
+            // v1 clamping that created velocity discontinuities (GAPs) in the
+            // WSS — the arc was recorded with the full duration but v1 was
+            // clamped, so the arc parameters were inconsistent with the state.
+            //
+            // The velocity limit at the end of the arc is the look-ahead vLim
+            // (TOPPRA backward pass), which accounts for corner velocities.
+            double vLimEnd = getVLimit(std::min(s + dsArc, sEnd));
+            if (v1 > vLimEnd + 1e-6 && !stoppedBeforeEnd) {
+                if (arcType == WeightedArcType::SINGULAR) {
+                    // v(t) = v0 + a* * t = vLimEnd → t = (vLimEnd - v0) / a*
+                    double as = aStarEff;
+                    if (std::abs(as) > 1e-12) {
+                        double tauV = (vLimEnd - v) / as;
+                        if (tauV > 0.0 && tauV < tau) {
+                            tau = tauV;
+                            dsArc = SingSeg::ds(v, as, tau);
+                            v1 = vLimEnd;
+                            a1 = as;
+                        }
+                    }
+                } else if (arcType == WeightedArcType::WALL) {
+                    // WALL: v = const. If v > vLimEnd, the solver should
+                    // have decelerated earlier. Don't shorten to zero (that
+                    // causes an infinite loop via the minimum-step guard).
+                    // Instead, let the arc run to the corner — the next
+                    // iteration will see v > vLim and take BANG_MINUS.
+                    // The v1 shortening for BANG arcs will then produce a
+                    // correct deceleration arc without a GAP.
+                } else {
+                    // BANG: v(t) = v0 + a0*tau + 0.5*eta*tau^2 = vLimEnd
+                    // Solve for tau: 0.5*eta*tau^2 + a0*tau + (v0 - vLimEnd) = 0
+                    // For eta < 0 (decelerating): tau = (-a - sqrt(disc)) / eta
+                    // For eta > 0 (accelerating): tau = (-a + sqrt(disc)) / eta
+                    double disc = a * a - 2.0 * eta * (v - vLimEnd);
+                    if (disc > 0.0 && std::abs(eta) > 1e-12) {
+                        double tauV = (eta < 0.0)
+                            ? (-a - std::sqrt(disc)) / eta
+                            : (-a + std::sqrt(disc)) / eta;
+                        if (tauV > 0.0 && tauV < tau) {
+                            tau = tauV;
+                            dsArc = BangSeg::ds(v, a, eta, tau);
+                            v1 = vLimEnd;
+                            a1 = BangSeg::a(a, eta, tau);
+                        }
+                    }
+                }
             }
             if (v1 < 0.0) v1 = 0.0;
 
@@ -1641,6 +2123,35 @@ private:
                 infeasible = true;
                 break;
             }
+
+            // For BANG arcs, if a1 = a0 + eta*tau would exceed the
+            // acceleration bounds, shorten the arc so that a1 exactly
+            // reaches the bound. This prevents the WSS from containing
+            // arcs whose end acceleration exceeds the limit.
+            if (arcType == WeightedArcType::BANG_PLUS ||
+                arcType == WeightedArcType::BANG_MINUS) {
+                double a1Raw = a + eta * tau;
+                double aHi = static_cast<double>(aEndBounds.second);
+                double aLo = static_cast<double>(aEndBounds.first);
+                if (a1Raw > aHi + 1e-6 && std::abs(eta) > 1e-12) {
+                    double tauA = (aHi - a) / eta;
+                    if (tauA > 0.0 && tauA < tau) {
+                        tau = tauA;
+                        dsArc = BangSeg::ds(v, a, eta, tau);
+                        v1 = BangSeg::v(v, a, eta, tau);
+                        a1 = aHi;
+                    }
+                } else if (a1Raw < aLo - 1e-6 && std::abs(eta) > 1e-12) {
+                    double tauA = (aLo - a) / eta;
+                    if (tauA > 0.0 && tauA < tau) {
+                        tau = tauA;
+                        dsArc = BangSeg::ds(v, a, eta, tau);
+                        v1 = BangSeg::v(v, a, eta, tau);
+                        a1 = aLo;
+                    }
+                }
+            }
+
             a1 = std::clamp(a1, static_cast<double>(aEndBounds.first),
                                  static_cast<double>(aEndBounds.second));
 
@@ -1813,24 +2324,218 @@ public:
         auto pathCopy = std::make_shared<Path>(path);
         pathCopy_ = pathCopy;
 
-        // Solve
-        Solver solver(*pathCopy, limits_, wEff, feedRate);
-        auto arcs = solver.solve(v0, endVelocity, constraintCacheSize);
-        if (arcs.empty()) {
-            // The solver could not find a feasible trajectory (e.g. the
-            // requested boundary velocities are unreachable for the path).
-            wss_.reset();
-            pathCopy_.reset();
-            return std::make_unique<SampledVelocityProfile>();
+        // --- Dwell handling: split path at dwell points ---
+        //
+        // G4 dwell commands require the tool to stop (v=0) at specific arc
+        // lengths for a given duration. If we solve the entire path at once,
+        // the velocity limit function returns 0 at dwell positions (corner
+        // velocity = 0), which makes the WALL arc duration integral
+        // ∫ 1/v_lim ds diverge. Clamping to a small positive value is a
+        // workaround that fails with consecutive dwells on short segments.
+        //
+        // The correct approach is to split the path at dwell points into
+        // sub-paths, solve each sub-path independently with v=0 boundary
+        // conditions at the split points, then insert DWELL arcs between
+        // the sub-path solutions. This way:
+        //   - The velocity limit never returns 0 inside a sub-path
+        //   - Any number of consecutive dwells works (zero-length sub-paths
+        //     produce no arcs, just the DWELL arcs)
+        //   - Each dwell is individually trackable as a separate DWELL arc
+        //
+        const auto& dwellPoints = pathCopy->dwellPoints();
+        std::vector<typename WSS::Arc> arcs;
+        double optimalAStar = 0.0;
+        double costValue = 0.0;
+
+        if (!dwellPoints.empty()) {
+            // Build split points: [0, s_d1, s_d2, ..., L]
+            // Each consecutive pair defines a sub-path.
+            std::vector<double> splitS;
+            splitS.push_back(0.0);
+            for (const auto& [s, dur] : dwellPoints) {
+                splitS.push_back(s);
+            }
+            splitS.push_back(static_cast<double>(pathLength));
+
+            // Helper: create a DWELL arc at position s with duration dur
+            auto makeDwellArc = [](double s, double dur) {
+                typename WSS::Arc arc;
+                arc.type = WeightedArcType::DWELL;
+                arc.s0 = s;
+                arc.s1 = s;
+                arc.v0 = 0.0;
+                arc.a0 = 0.0;
+                arc.eta = 0.0;
+                arc.a_star = 0.0;
+                arc.duration = dur;
+                return arc;
+            };
+
+            const auto& originalPath = pathCopy->inner();
+
+            for (size_t i = 0; i + 1 < splitS.size(); ++i) {
+                double sStart = splitS[i];
+                double sEnd = splitS[i + 1];
+                double subLen = sEnd - sStart;
+
+                // Insert DWELL arc at the start of this segment (if not
+                // the very first split, which is the path start).
+                // The dwell at splitS[i] is dwellPoints[i-1] (for i > 0).
+                if (i > 0) {
+                    arcs.push_back(
+                        makeDwellArc(sStart, dwellPoints[i - 1].second));
+                }
+
+                // Skip zero-length sub-paths (consecutive dwells)
+                if (subLen < 1e-9) continue;
+
+                // Create trimmed sub-path
+                auto subNurbsPath = originalPath.trim(sStart, sEnd);
+                Path subPathAdapter(std::move(subNurbsPath));
+
+                // Set segment velocity limits and corner velocities on
+                // the sub-path. We need to map the original path's
+                // per-segment feed rates and corner velocities to the
+                // sub-path's segments.
+                //
+                // Important: we must NOT use maxVelocityAtArcLength() on
+                // the original path, because it includes the dwell corner
+                // velocities (set to 0 by setDwellPoints), which would
+                // make the sub-path's feed rates 0 near dwell positions.
+                // Instead, we use segmentMaxVelocities() directly and
+                // recompute corner velocities fresh on the sub-path.
+                if (pathCopy->hasPerSegmentVelocityLimits()) {
+                    // Map original segment feed rates to sub-path segments.
+                    // The original path's segments are indexed by piece
+                    // index. The sub-path's pieces may be trimmed versions
+                    // of the original pieces, so we need to find which
+                    // original piece each sub-path piece corresponds to.
+                    const auto& origSegs = pathCopy->segments();
+                    const auto& subSegs = subPathAdapter.segments();
+                    const auto& origFeedRates = pathCopy->segmentMaxVelocities();
+
+                    std::vector<double> subFeedRates;
+                    subFeedRates.reserve(subSegs.size());
+                    for (size_t j = 0; j < subSegs.size(); ++j) {
+                        // Find the original segment that contains the
+                        // midpoint of this sub-path segment.
+                        double subMidLocal =
+                            subSegs[j].cumulativeArcLength +
+                            subSegs[j].arcLength * 0.5;
+                        double globalS = sStart + subMidLocal;
+                        // Find the original segment index.
+                        size_t origIdx = 0;
+                        for (origIdx = 0; origIdx < origSegs.size(); ++origIdx) {
+                            double origStart =
+                                origSegs[origIdx].cumulativeArcLength;
+                            double origEnd =
+                                origStart + origSegs[origIdx].arcLength;
+                            if (globalS >= origStart - 1e-9 &&
+                                globalS <= origEnd + 1e-9) {
+                                break;
+                            }
+                        }
+                        if (origIdx < origFeedRates.size()) {
+                            subFeedRates.push_back(origFeedRates[origIdx]);
+                        } else {
+                            subFeedRates.push_back(
+                                std::numeric_limits<double>::infinity());
+                        }
+                    }
+                    subPathAdapter.setSegmentVelocityLimits(subFeedRates);
+
+                    // Compute corner velocities on the sub-path fresh.
+                    // This computes the correct corner velocities at
+                    // internal junctions based on the sub-path's geometry.
+                    // At the sub-path boundaries (s=0 and s=end), the
+                    // corner velocities default to infinity, which is
+                    // correct since the v=0 constraint is enforced by
+                    // the solver's boundary velocities.
+                    subPathAdapter.computeCornerVelocities(0.05, 2000.0);
+                }
+
+                // Boundary velocities: v=0 at dwell points, original
+                // boundaries at path start/end.
+                T subV0 = (i == 0) ? v0 : T(0);
+                T subVEnd =
+                    (i + 2 == splitS.size()) ? endVelocity : T(0);
+
+                // Solve sub-path
+                Solver subSolver(subPathAdapter, limits_, wEff, feedRate);
+                auto subArcs =
+                    subSolver.solve(subV0, subVEnd, constraintCacheSize);
+
+                if (subArcs.empty()) {
+                    // Solver could not find a feasible trajectory for
+                    // this sub-path. This can happen when the sub-path
+                    // is too short for the solver to decelerate to v=0
+                    // and accelerate back within the available distance.
+                    wss_.reset();
+                    pathCopy_.reset();
+                    return std::make_unique<SampledVelocityProfile>();
+                }
+
+                // Accumulate cost and optimalAStar from sub-solvers
+                optimalAStar = subSolver.optimalAStar();
+                costValue += subSolver.costValue();
+
+                // Offset arc positions from sub-path local to global
+                for (auto& arc : subArcs) {
+                    arc.s0 += sStart;
+                    arc.s1 += sStart;
+                }
+
+                // Append sub-path arcs
+                arcs.insert(arcs.end(),
+                            std::make_move_iterator(subArcs.begin()),
+                            std::make_move_iterator(subArcs.end()));
+            }
+        } else {
+            // No dwell points: solve the entire path at once
+            Solver solver(*pathCopy, limits_, wEff, feedRate);
+            arcs = solver.solve(v0, endVelocity, constraintCacheSize);
+            if (arcs.empty()) {
+                wss_.reset();
+                pathCopy_.reset();
+                return std::make_unique<SampledVelocityProfile>();
+            }
+            optimalAStar = solver.optimalAStar();
+            costValue = solver.costValue();
         }
 
-        // Build the WSS
+        // Build the WSS.
+        //
+        // When dwell points are present, the pathCopy has corner velocities
+        // set to 0 at dwell positions (by setDwellPoints). The WSS uses
+        // wallVelocityLimit(s) which calls evaluator_.velocityLimit(s, path)
+        // to compute WALL arc durations via quadrature. If the path has v=0
+        // at dwell positions, the 1/v integral diverges, producing huge
+        // durations (e.g. 1e14 s).
+        //
+        // Fix: create a "clean" path for the WSS that has the same NURBS
+        // path and segment velocity limits, but with corner velocities
+        // recomputed without dwell zeroing. This way, wallVelocityLimit
+        // returns the true corner velocity at dwell positions (not 0),
+        // and the WALL arc duration integral converges.
+        std::shared_ptr<Path> wssPath = pathCopy;
+        if (!dwellPoints.empty()) {
+            wssPath = std::make_shared<Path>(pathCopy->inner());
+            if (pathCopy->hasPerSegmentVelocityLimits()) {
+                wssPath->setSegmentVelocityLimits(
+                    pathCopy->segmentMaxVelocities());
+                wssPath->computeCornerVelocities(0.05, 2000.0);
+                // Do NOT call setDwellPoints — we want clean corner velocities.
+            }
+        }
+
         Evaluator evaluator(limits_, feedRate);
         auto wss = std::make_shared<WSS>(
-            pathCopy, std::move(arcs), wEff, std::move(evaluator),
-            solver.optimalAStar());
+            wssPath, std::move(arcs), wEff, std::move(evaluator),
+            optimalAStar);
         wss_ = wss;
-        wss_->setCostValue(solver.costValue());
+        wss_->setCostValue(costValue);
+        // Keep the WSS path alive (may differ from pathCopy when dwells exist).
+        pathCopy_ = wssPath;
 
         // Return an analytical profile that wraps the WSS.
         return std::make_unique<AnalyticalSSRVelocityProfile<Dim, T>>(wss_);

@@ -235,7 +235,7 @@ set(IO_SERVICES_SOURCES
 set(IO_TEST_SOURCES ${IO_PROTOCOL_SOURCES} ${IO_TRANSPORT_SOURCES} ${IO_SERVICES_SOURCES})
 file(GLOB_RECURSE MOTION_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/motion/*.cpp")
 # Motion planner test sources split by sub-area
-set(MOTION_PLANNER_LIBS "tether_common;tether_motion_control;tether_motion_planner;tether_ethercat_common")
+set(MOTION_PLANNER_LIBS "tether_common;tether_motion_control;tether_motion_planner;tether_ethercat_common;tether_gcode")
 set(MOTION_PLANNER_CURVES_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/MathTypesTest.cpp"
 )
@@ -261,6 +261,7 @@ set(MOTION_PLANNER_INTEGRATION_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/ToppraAuditTest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/ParetoTimeEnergyTest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/VelocityProfileTest.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/RoundedSquareGCodeTest.cpp"
 )
 # Analytical extrusion compensation tests (linear PressureAdvance, power-law PressureAdvance, Cross-WLF PressureAdvance,
 # LTI/LPV deconvolution, state-space LPV, flow-adaptive heater, thermal observer).

@@ -578,6 +578,10 @@ Error Interpreter::dispatchGCode(double gcode, const Block& block,
                     seg.type = MotionSegment::Type::DWELL;
                     seg.duration = seconds;
                     seg.lineNumber = block.sourceLineNumber;
+                    // Set endPosition to the current position so that
+                    // downstream consumers (PlanningSegmentBuilder) can
+                    // correctly track position across dwell segments.
+                    seg.endPosition = m_machineState.workPosition;
                     segments.push_back(seg);
                     return Error{};
                 }
