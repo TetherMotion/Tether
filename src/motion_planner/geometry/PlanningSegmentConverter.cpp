@@ -4,6 +4,7 @@
  */
 
 #include "tether/motion_planner/geometry/PlanningSegmentConverter.hpp"
+#include "tether/motion_planner/blend/OutsideCircleBlender.hpp"
 
 #include <cmath>
 #include <limits>
@@ -124,6 +125,48 @@ PlanningSegmentNurbsResult piecewiseNurbsFromSegments(
                 // Skip degenerate segments
             }
         }
+    }
+
+    // ── Outside circle blend (negative G64 P) ──
+    // When any segment has a negative blendTolerance (G64 P < 0), apply
+    // the outside circle blend: place a circle of radius |P| at each
+    // corner vertex, find the intersection with the exact path, and
+    // replace the corner with the major (outside) arc.
+    double blendRadius = 0.0;
+    for (const auto& seg : segments) {
+        if (seg.blendTolerance < 0.0) {
+            blendRadius = std::abs(seg.blendTolerance);
+            break;
+        }
+    }
+
+    if (blendRadius > 0.0 && !curves.empty()) {
+        OutsideCircleBlendConfig blendConfig;
+        blendConfig.radius = blendRadius;
+        PiecewiseNurbsPath originalPath(std::move(curves));
+        auto blendResult = OutsideCircleBlender::blend(originalPath, blendConfig);
+        if (blendResult.path && blendResult.blendedCount > 0) {
+            // Replace the path with the blended version. Per-piece
+            // attributes (deviations, extruderSpeeds, feedRates) are no
+            // longer valid since the piece count changed. Use default
+            // values for the new pieces.
+            auto& blended = *blendResult.path;
+            deviations.assign(blended.numPieces(), 0.0f);
+            extruderSpeeds.assign(blended.numPieces(), 0.0f);
+            feedRates.assign(blended.numPieces(),
+                             std::numeric_limits<double>::infinity());
+            return {std::move(blended),
+                    std::move(deviations),
+                    std::move(extruderSpeeds),
+                    std::move(feedRates),
+                    std::move(dwellPoints)};
+        }
+        // Blend didn't apply — return the original path
+        return {std::move(originalPath),
+                std::move(deviations),
+                std::move(extruderSpeeds),
+                std::move(feedRates),
+                std::move(dwellPoints)};
     }
 
     return {PiecewiseNurbsPath(std::move(curves)),
