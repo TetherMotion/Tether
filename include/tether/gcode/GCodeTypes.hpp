@@ -885,7 +885,7 @@ struct MachineState {
     double cannedInitialZ{0.0};  ///< Z before canned cycle
     
     // Path blending
-    double blendTolerance{0.0};  ///< G64 P value
+    double blendTolerance{0.05};  ///< G64 P value (default 0.05 mm inside blend)
     double naiveCamTolerance{0.0}; ///< G64 Q value
     
     // Coolant
