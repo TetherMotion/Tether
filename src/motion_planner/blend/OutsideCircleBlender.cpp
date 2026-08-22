@@ -42,6 +42,8 @@ OutsideCircleBlendResult OutsideCircleBlender::blend(
 
     std::vector<NurbsCurve> output;
     output.reserve(n + n / 2);  // estimate
+    std::vector<std::size_t> sourceIndices;
+    sourceIndices.reserve(n + n / 2);
 
     double carryStartTrim = 0.0;  // arc length to trim from the start of the next piece
 
@@ -60,6 +62,7 @@ OutsideCircleBlendResult OutsideCircleBlender::blend(
         if (i + 1 >= n) {
             if (pieceLen > config.tol) {
                 output.push_back(std::move(current));
+                sourceIndices.push_back(i);
             }
             break;
         }
@@ -88,6 +91,7 @@ OutsideCircleBlendResult OutsideCircleBlender::blend(
             result.skippedCount++;
             if (pieceLen > config.tol) {
                 output.push_back(std::move(current));
+                sourceIndices.push_back(i);
             }
             continue;
         }
@@ -121,6 +125,7 @@ OutsideCircleBlendResult OutsideCircleBlender::blend(
             result.skippedCount++;
             if (pieceLen > config.tol) {
                 output.push_back(std::move(current));
+                sourceIndices.push_back(i);
             }
             continue;
         }
@@ -134,6 +139,7 @@ OutsideCircleBlendResult OutsideCircleBlender::blend(
             result.skippedCount++;
             if (pieceLen > config.tol) {
                 output.push_back(std::move(current));
+                sourceIndices.push_back(i);
             }
             continue;
         }
@@ -173,6 +179,7 @@ OutsideCircleBlendResult OutsideCircleBlender::blend(
             result.skippedCount++;
             if (pieceLen > config.tol) {
                 output.push_back(std::move(current));
+                sourceIndices.push_back(i);
             }
             continue;
         }
@@ -296,13 +303,17 @@ OutsideCircleBlendResult OutsideCircleBlender::blend(
                         // 1. Trimmed current piece
                         if (sP1 > config.tol) {
                             output.push_back(current.trim(0.0, sP1));
+                            sourceIndices.push_back(i);
                         }
                         // 2. Transition 1: P1 → Q1
                         output.push_back(std::move(*trans1));
+                        sourceIndices.push_back(i);
                         // 3. Circle arc: Q1 → Q2
                         output.push_back(std::move(*circleArc));
+                        sourceIndices.push_back(i);
                         // 4. Transition 2: Q2 → P2
                         output.push_back(std::move(*trans2));
+                        sourceIndices.push_back(i + 1);
 
                         result.blendedCount++;
                         result.cornerOutcomes.push_back(true);
@@ -326,6 +337,7 @@ OutsideCircleBlendResult OutsideCircleBlender::blend(
             result.skippedCount++;
             if (pieceLen > config.tol) {
                 output.push_back(std::move(current));
+                sourceIndices.push_back(i);
             }
             continue;
         }
@@ -336,21 +348,25 @@ OutsideCircleBlendResult OutsideCircleBlender::blend(
         } else {
             NurbsCurve trimmedCurrent = current.trim(0.0, s1);
             output.push_back(std::move(trimmedCurrent));
+            sourceIndices.push_back(i);
         }
 
         // Create the outside arc from I1 to I2 centered at V
         auto arcOpt = makeOutsideArc(I1, I2, V, d1, d2, axis1, axis2);
         if (arcOpt) {
             output.push_back(std::move(*arcOpt));
+            sourceIndices.push_back(i);
             result.blendedCount++;
             result.cornerOutcomes.push_back(true);
         } else {
             // Arc creation failed — add the untrimmed current piece back
             if (s1 >= config.tol) {
                 output.pop_back();
+                sourceIndices.pop_back();
             }
             if (pieceLen > config.tol) {
                 output.push_back(std::move(current));
+                sourceIndices.push_back(i);
             }
             result.skippedCount++;
             result.cornerOutcomes.push_back(false);
@@ -366,6 +382,7 @@ OutsideCircleBlendResult OutsideCircleBlender::blend(
         result.path = path;
     } else {
         result.path = PiecewiseNurbsPath(std::move(output));
+        result.sourcePieceIndices = std::move(sourceIndices);
     }
 
 

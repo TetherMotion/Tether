@@ -146,15 +146,29 @@ PlanningSegmentNurbsResult piecewiseNurbsFromSegments(
         PiecewiseNurbsPath originalPath(std::move(curves));
         auto blendResult = OutsideCircleBlender::blend(originalPath, blendConfig);
         if (blendResult.path && blendResult.blendedCount > 0) {
-            // Replace the path with the blended version. Per-piece
-            // attributes (deviations, extruderSpeeds, feedRates) are no
-            // longer valid since the piece count changed. Use default
-            // values for the new pieces.
+            // Replace the path with the blended version. Map per-piece
+            // attributes from the original pieces to the blended pieces
+            // using the sourcePieceIndices mapping.
             auto& blended = *blendResult.path;
+            const auto& srcIdx = blendResult.sourcePieceIndices;
+            // Save originals before resizing
+            auto origDeviations = std::move(deviations);
+            auto origExtruderSpeeds = std::move(extruderSpeeds);
+            auto origFeedRates = std::move(feedRates);
             deviations.assign(blended.numPieces(), 0.0f);
             extruderSpeeds.assign(blended.numPieces(), 0.0f);
             feedRates.assign(blended.numPieces(),
                              std::numeric_limits<double>::infinity());
+            for (std::size_t j = 0; j < blended.numPieces() && j < srcIdx.size(); ++j) {
+                std::size_t src = srcIdx[j];
+                if (src < origDeviations.size()) {
+                    deviations[j] = origDeviations[src];
+                    extruderSpeeds[j] = origExtruderSpeeds[src];
+                }
+                if (src < origFeedRates.size()) {
+                    feedRates[j] = origFeedRates[src];
+                }
+            }
             return {std::move(blended),
                     std::move(deviations),
                     std::move(extruderSpeeds),

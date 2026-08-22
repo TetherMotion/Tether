@@ -89,6 +89,12 @@ struct OutsideCircleBlendResult {
 
     /// Per-corner audit: true = blended, false = skipped.
     std::vector<bool> cornerOutcomes;
+
+    /// Maps each output piece to the index of the original piece it
+    /// originated from. For blended pieces (transitions, arcs), the
+    /// index is the incoming piece at that junction. Size matches
+    /// the number of pieces in `path` (if present).
+    std::vector<std::size_t> sourcePieceIndices;
 };
 
 /// @brief Outside circle blender: replaces outside corners with exact
