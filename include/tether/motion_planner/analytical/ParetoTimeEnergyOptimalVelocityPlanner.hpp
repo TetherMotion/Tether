@@ -1402,6 +1402,27 @@ public:
 
         (void)Jfinal;
 
+        // Feasibility check: reject if the solver cannot satisfy the boundary
+        // conditions. Two cases:
+        // 1. vf > 0 (flying end): the solver must reach v ≈ vf. If the residual
+        //    is large, the boundary is physically impossible → reject.
+        // 2. vf ≈ 0 (rest end): the solver may have a small residual due to
+        //    discretization. Only reject if it also didn't reach the end of
+        //    the path (the solver got stuck or stopped early).
+        if (vf_ > 1e-3) {
+            // Flying end: check terminal velocity residual
+            if (std::abs(lastV_ - vf_) > 5.0) {
+                arcs_.clear();
+                return arcs_;
+            }
+        } else {
+            // Rest end: only reject if solver didn't reach the end
+            if (lastS_ < sTotal_ - 1e-6) {
+                arcs_.clear();
+                return arcs_;
+            }
+        }
+
         return arcs_;
     }
 
@@ -1415,8 +1436,13 @@ public:
      */
     double optimalJStar() const { return lastJStar_; }
 
-    /// @deprecated Use optimalJStar() instead.
-    double optimalAStar() const { return lastJStar_; }
+    /// @deprecated Use optimalJStar() instead. Returns j* clamped to aMax
+    /// for backward compatibility with callers expecting an acceleration-like
+    /// value bounded by aMax.
+    double optimalAStar() const {
+        double aMax = static_cast<double>(limits_.path.maxPathAcceleration);
+        return std::min(lastJStar_, aMax);
+    }
 
     /**
      * @brief Get the total traversal time of the solution.
@@ -2082,6 +2108,29 @@ private:
         return lo;
     }
 
+    /// Inverse of sStopFromState with worst-case (aMax, jMax): given a
+    /// distance d, find the max v such that
+    /// sStopFromState(v, aMax, jMax) - sStopFromRest(vCorner) <= d.
+    /// This accounts for the extra braking distance when the solver has
+    /// non-zero (a, j) at the switching point.
+    double sStopFromStateInverse(double d, double vCorner = 0.0) const {
+        if (d <= 0.0) return 0.0;
+        double aMax = static_cast<double>(limits_.path.maxPathAcceleration);
+        if (aMax <= 0.0) aMax = 500.0;
+        double jMax = static_cast<double>(limits_.path.maxPathJerk);
+        if (jMax <= 0.0) jMax = 5000.0;
+        double sStopCorner = sStopFromRest(vCorner);
+        double targetDist = d + sStopCorner;
+        // Bisection: find max v such that sStopFromState(v, aMax, jMax) <= targetDist
+        double lo = 0.0, hi = 1e6;
+        for (int b = 0; b < 60; ++b) {
+            double mid = 0.5 * (lo + hi);
+            if (sStopFromState(mid, aMax, jMax) <= targetDist) lo = mid; else hi = mid;
+            if (hi - lo < 1e-6) break;
+        }
+        return lo;
+    }
+
     /// Snapspace-aware braking distance from state (v, a, j) to vCorner.
     /// This is sStopFromState(v, a, j) - sStopFromRest(vCorner), which equals
     /// the distance needed to decelerate from (v, a, j) to (vCorner, 0, 0).
@@ -2423,10 +2472,22 @@ private:
             });
 
         // Check upcoming corners within braking distance.
-        // Uses the constant-acceleration TOPPRA formula:
-        //   v_req = sqrt(v_c² + 2 * a_max * d)
-        // This is the continuous-form backward pass that works regardless
-        // of grid resolution.
+        //
+        // For intermediate corners (vCorner > 0), use the constant-acceleration
+        // TOPPRA formula: v_req = sqrt(v_c² + 2·aMax·d). This is slightly
+        // aggressive (ignores jerk/snap ramp time) but works well in practice
+        // because the solver's v_lim tracking logic handles the extra distance.
+        //
+        // For intermediate corners, use the constant-acceleration TOPPRA
+        // formula: v_req = sqrt(v_c² + 2·aMax·d).
+        //
+        // For the terminal corner (vCorner ≈ 0, rest-to-stop), use
+        // sStopFromRestInverse(d) with a safety factor. The snapspace
+        // braking distance from v to 0 is significantly larger than
+        // v²/(2·aMax) because the solver must first reverse jerk and
+        // acceleration. The predictive braking safety net in the forward
+        // pass also handles this, but having the v_lim profile start
+        // dropping earlier prevents the solver from accelerating too long.
         double vEff = vGridLim;
         double dMax = vGridLim * vGridLim / (2.0 * aMaxForLookahead_);
 
@@ -2435,9 +2496,18 @@ private:
             double vCorner = it->second;
             double d = sCorner - s;
             if (d < 0.0) continue;
-            if (d > dMax) break;
 
-            double vReq = std::sqrt(vCorner * vCorner + 2.0 * aMaxForLookahead_ * d);
+            double vReq;
+            if (vCorner < 1e-3) {
+                // Terminal corner: use snapspace formula with safety factor.
+                // Don't skip based on dMax — the snapspace braking distance
+                // can exceed the TOPPRA dMax.
+                vReq = sStopFromRestInverse(d) * 0.7;
+            } else {
+                // Intermediate corner: use TOPPRA formula
+                if (d > dMax) break;
+                vReq = std::sqrt(vCorner * vCorner + 2.0 * aMaxForLookahead_ * d);
+            }
             if (vReq < vEff) vEff = vReq;
         }
 
@@ -2589,14 +2659,29 @@ private:
 
         bool infeasible = false;
         int maxIter = static_cast<int>(constraintCacheSize_) * 200;
+        double sPrevStuck = -1.0;
+        int stuckCount = 0;
 
         for (int iter = 0; iter < maxIter && s < sEnd - 1e-10; ++iter) {
             // If v has dropped to ~0 after starting, the solver can't
             // continue (would need to re-accelerate from rest). Mark as
             // infeasible. Skip this check at the very start (iter==0)
             // since v0 may legitimately be 0.
+            // Also skip if we're near a corner position — the solver may
+            // legitimately have v≈0 at a corner with vC=0.
             if (iter > 0 && v < 1e-6 && s < sEnd - 1e-6) {
-                infeasible = true; break;
+                // Check if we're near a corner with vC > 0 — if so, the solver
+                // should be able to re-accelerate from the corner velocity.
+                bool nearCorner = false;
+                for (const auto& [sC, vC] : corners_) {
+                    if (std::abs(sC - s) < dsStep * 2.0 && vC > 1e-3) {
+                        nearCorner = true;
+                        break;
+                    }
+                }
+                if (!nearCorner) {
+                    infeasible = true; break;
+                }
             }
 
             auto aBounds = accelBoundsFromCache(gridIndex(s), v);
@@ -2621,33 +2706,73 @@ private:
             if (aHi < aLo) aHi = aLo;
 
             // Choose desired acceleration based on v vs vLim.
-            // The vLim profile from the backward pass already encodes
-            // the exact braking distance (using snapspace sStop), so we
-            // just track it — no separate mustBrake heuristic needed.
+            // The vLim profile from the backward pass encodes the braking
+            // distance from rest (a=0, j=0), but the solver may have non-zero
+            // (a, j) when braking begins. As a safety net, also check the
+            // actual snapspace stopping distance from the current state.
+            // If sStopFromState(v, a, j) exceeds the remaining distance to
+            // the terminal corner, brake immediately regardless of v_lim.
             double a_des;
             double dtEst = dsStep / std::max(v, 1e-3);
             double margin = aMax * dtEst + 1e-3;
 
-            if (v > vLimNow + 1e-6) {
-                // Overshooting vLim — decelerate as hard as possible
+            // Predictive braking: check if we need to start braking now
+            // to reach the nearest upcoming corner at the right velocity.
+            // This catches cases where the v_lim profile (based on
+            // sStopFromRest) is too aggressive.
+            // We only check the NEAREST upcoming corner, not all corners,
+            // because the solver needs to pass intermediate corners before
+            // braking for the terminal one.
+            // Skip predictive braking if the solver is already braking
+            // (a < 0 and j < 0) — the v_lim tracking logic handles it.
+            bool mustBrake = false;
+            if (v > 1e-3 && (a > 0.0 || j > 0.0)) {
+                double sStopCurrent = sStopFromState(v, a, j);
+                for (const auto& [sC, vC] : corners_) {
+                    if (sC <= s + 1e-6) continue;
+                    // Found the nearest upcoming corner
+                    double d = sC - s;
+                    double sStopCorner = sStopFromRest(vC);
+                    double decelDist = sStopCurrent - sStopCorner;
+                    if (decelDist > d - 1e-6) {
+                        mustBrake = true;
+                    }
+                    break;  // only check the nearest corner
+                }
+            }
+
+            if (mustBrake || v > vLimNow + 1e-6) {
+                // Must brake — decelerate as hard as possible
                 a_des = aLo;
             } else if (v >= vLimNow - margin) {
                 // At vLim — track it (follow the vLim slope)
                 a_des = std::clamp(aTrack, aLo, aHi);
             } else {
                 // Below vLim — accelerate using j* as the target jerk.
+                // Don't clamp to aHi here — aHi may be very negative if
+                // v_lim is dropping fast (e.g. after a corner with a
+                // terminal corner ahead). The solver needs to accelerate
+                // to re-gain speed after passing a corner, even if v_lim
+                // is low. The v_lim tracking will catch up when v approaches
+                // v_lim.
                 double aFromJ = a + jStar * dtEst;
-                a_des = std::min(aFromJ, aHi);
+                a_des = std::max(aFromJ, aLo);
+                // Only clamp to aLo (physical lower bound), not aHi
+                // (which may be artificially low from v_lim tracking)
             }
-            a_des = std::clamp(a_des, aLo, aHi);
 
             // Desired jerk to reach a_des. When accelerating from rest
             // (v < vLim, a < aHi), use j* as the target jerk. Otherwise
             // compute from a_des/dtEst. The dtEst clamp at 1.0s prevents
             // the v→0 singularity from making j_des → 0.
+            // When mustBrake, use -jMax to reverse acceleration as fast as
+            // possible (don't derive from a_des/dt which may be too slow).
             double dtEff = std::min(dtEst, 1.0);
             double j_des;
-            if (v < vLimNow - margin && a < aHi - 1e-6 && a_des > 0.0) {
+            if (mustBrake) {
+                // Predictive braking: ramp jerk to -jMax immediately
+                j_des = -jMax;
+            } else if (v < vLimNow - margin && a < aHi - 1e-6 && a_des > 0.0) {
                 // Acceleration phase: target jerk is j*
                 j_des = std::clamp(jStar, -jMax, jMax);
             } else {
@@ -2911,6 +3036,18 @@ private:
             // Safety: if s went backwards or v is NaN, something is wrong
             if (s < 0.0 || !std::isfinite(v) || !std::isfinite(s)) {
                 infeasible = true; break;
+            }
+
+            // Stuck detection: if s didn't advance meaningfully, count it.
+            // If stuck for too many iterations, mark infeasible.
+            if (s - sPrevStuck < 1e-9) {
+                ++stuckCount;
+                if (stuckCount > 200) {
+                    infeasible = true; break;
+                }
+            } else {
+                stuckCount = 0;
+                sPrevStuck = s;
             }
 
             if (stoppedBeforeEnd) {
