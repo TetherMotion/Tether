@@ -4,6 +4,8 @@
  */
 
 #include "tether/motion_planner/blend/OutsideCircleBlender.hpp"
+#include "tether/motion_planner/blend/BlendCurveBuilder.hpp"
+#include "tether/motion_planner/blend/BoundaryConditions.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -178,13 +180,148 @@ OutsideCircleBlendResult OutsideCircleBlender::blend(
         double s1 = *s1Opt;  // arc length along current piece (from its start)
         double s2 = *s2Opt;  // arc length along next piece (from its start)
 
-        // Check trim limits: don't trim more than maxTrimFraction of either piece
-        double trimCurrent = pieceLen - s1;  // how much we trim from the end of current
-        double trimNext = s2;                 // how much we trim from the start of next
+        // Get the actual intersection points (I1 on current, I2 on next)
+        RVec I1 = current.evaluate(current.invertLength(s1));
+        RVec I2 = next.evaluate(next.invertLength(s2));
 
+        // ── Compute the major arc sweep ──
+        // Angles of I1, I2 on the circle (in the plane basis axis1, axis2)
+        RVec VI1 = I1 - V;
+        RVec VI2 = I2 - V;
+        double theta1 = std::atan2(VI1.dot(axis2), VI1.dot(axis1));
+        double theta2 = std::atan2(VI2.dot(axis2), VI2.dot(axis1));
+
+        double minorSweep = theta2 - theta1;
+        while (minorSweep > M_PI) minorSweep -= 2.0 * M_PI;
+        while (minorSweep < -M_PI) minorSweep += 2.0 * M_PI;
+        double majorSweep = (minorSweep > 0.0)
+            ? minorSweep - 2.0 * M_PI
+            : minorSweep + 2.0 * M_PI;
+        double sweepSign = (majorSweep > 0.0) ? 1.0 : -1.0;
+
+        // ── Determine transition offset δ ──
+        double delta = 0.0;
+        if (config.transitionFraction > 0.0) {
+            delta = r * config.transitionFraction;
+            // Clamp δ so transitions fit within both pieces
+            double nextLen = next.length();
+            delta = std::min(delta, s1);                    // before start of current
+            delta = std::min(delta, nextLen - s2);          // past end of next
+            // Respect maxTrimFraction (total trim = base trim + δ)
+            double maxDeltaCurrent = pieceLen * config.maxTrimFraction
+                                   - (pieceLen - s1);
+            double maxDeltaNext = nextLen * config.maxTrimFraction - s2;
+            delta = std::min(delta, std::max(0.0, maxDeltaCurrent));
+            delta = std::min(delta, std::max(0.0, maxDeltaNext));
+            // Ensure shortened arc is still a major arc (|sweep| > π)
+            double deltaAngle = delta / r;
+            double newSweepMag = std::abs(majorSweep) - 2.0 * deltaAngle;
+            if (newSweepMag < M_PI + 0.05) {
+                // Shortened too much — reduce δ
+                deltaAngle = (std::abs(majorSweep) - M_PI - 0.05) / 2.0;
+                delta = deltaAngle * r;
+            }
+        }
+
+        if (delta > config.tol && config.transitionFraction > 0.0) {
+            // ══════════════════════════════════════════════════════════════
+            // G2 mode: quintic Bézier transitions + shortened circle arc
+            // ══════════════════════════════════════════════════════════════
+            double deltaAngle = delta / r;
+            double thetaQ1 = theta1 + deltaAngle * sweepSign;
+            double thetaQ2 = theta2 - deltaAngle * sweepSign;
+            double newSweep = majorSweep - 2.0 * deltaAngle * sweepSign;
+
+            // Trim points on the path pieces
+            double sP1 = s1 - delta;   // on current piece
+            double sP2 = s2 + delta;   // on next piece
+
+            // Build the shortened circle arc from Q1 to Q2
+            std::optional<NurbsCurve> circleArc;
+            try {
+                circleArc = NurbsCurve::fromArc(
+                    V, r, axis1, axis2, thetaQ1, newSweep);
+            } catch (...) {
+                // Arc construction failed — fall back to G1
+                delta = 0.0;
+            }
+
+            if (delta > config.tol && circleArc) {
+                // Positions of transition endpoints
+                RVec P1pos = current.evaluate(current.invertLength(sP1));
+                RVec P2pos = next.evaluate(next.invertLength(sP2));
+                RVec Q1 = V + axis1 * (r * std::cos(thetaQ1))
+                             + axis2 * (r * std::sin(thetaQ1));
+                RVec Q2 = V + axis1 * (r * std::cos(thetaQ2))
+                             + axis2 * (r * std::sin(thetaQ2));
+
+                // Extract boundary conditions
+                // Entry of transition 1: end of trimmed current piece
+                // Exit of transition 1: start of circle arc
+                // Entry of transition 2: end of circle arc
+                // Exit of transition 2: start of trimmed next piece
+                BoundaryConditions bcP1, bcQ1, bcQ2, bcP2;
+                try {
+                    bcP1 = boundaryAt(current, sP1, true);
+                    bcQ1 = boundaryAt(*circleArc, 0.0, false);
+                    bcQ2 = boundaryAt(*circleArc, circleArc->length(), true);
+                    bcP2 = boundaryAt(next, sP2, false);
+                } catch (...) {
+                    // BC extraction failed — fall back to G1
+                    delta = 0.0;
+                }
+
+                if (delta > config.tol) {
+                    // Speed parameters: proportional to endpoint distance
+                    double dist1 = P1pos.distanceTo(Q1);
+                    double dist2 = Q2.distanceTo(P2pos);
+                    double alpha1 = std::max(dist1, 1e-6);
+                    double beta1 = std::max(dist1, 1e-6);
+                    double alpha2 = std::max(dist2, 1e-6);
+                    double beta2 = std::max(dist2, 1e-6);
+
+                    std::optional<NurbsCurve> trans1, trans2;
+                    try {
+                        trans1 = BlendCurveBuilder::buildQuintic(
+                            bcP1, bcQ1, alpha1, beta1);
+                        trans2 = BlendCurveBuilder::buildQuintic(
+                            bcQ2, bcP2, alpha2, beta2);
+                    } catch (...) {
+                        // Quintic construction failed — fall back to G1
+                        delta = 0.0;
+                    }
+
+                    if (delta > config.tol && trans1 && trans2) {
+                        // ── Assemble output ──
+                        // 1. Trimmed current piece
+                        if (sP1 > config.tol) {
+                            output.push_back(current.trim(0.0, sP1));
+                        }
+                        // 2. Transition 1: P1 → Q1
+                        output.push_back(std::move(*trans1));
+                        // 3. Circle arc: Q1 → Q2
+                        output.push_back(std::move(*circleArc));
+                        // 4. Transition 2: Q2 → P2
+                        output.push_back(std::move(*trans2));
+
+                        result.blendedCount++;
+                        result.cornerOutcomes.push_back(true);
+                        carryStartTrim = sP2;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        // G1 mode (or G2 fallback): direct circle arc, no transitions
+        // ══════════════════════════════════════════════════════════════
+
+        // Check trim limits: don't trim more than maxTrimFraction
+        double trimCurrent = pieceLen - s1;
+        double trimNext = s2;
         if (trimCurrent > pieceLen * config.maxTrimFraction ||
             trimNext > next.length() * config.maxTrimFraction) {
-            // Would trim too much — skip
             result.cornerOutcomes.push_back(false);
             result.skippedCount++;
             if (pieceLen > config.tol) {
@@ -201,21 +338,14 @@ OutsideCircleBlendResult OutsideCircleBlender::blend(
             output.push_back(std::move(trimmedCurrent));
         }
 
-        // Get the actual intersection points
-        RVec P1 = current.evaluate(
-            current.invertLength(s1));
-        RVec P2 = next.evaluate(
-            next.invertLength(s2));
-
-        // Create the outside arc from P1 to P2 centered at V
-        auto arcOpt = makeOutsideArc(P1, P2, V, d1, d2, axis1, axis2);
+        // Create the outside arc from I1 to I2 centered at V
+        auto arcOpt = makeOutsideArc(I1, I2, V, d1, d2, axis1, axis2);
         if (arcOpt) {
             output.push_back(std::move(*arcOpt));
             result.blendedCount++;
             result.cornerOutcomes.push_back(true);
         } else {
             // Arc creation failed — add the untrimmed current piece back
-            // (we already added the trimmed version, so remove it)
             if (s1 >= config.tol) {
                 output.pop_back();
             }

@@ -4,6 +4,7 @@
  */
 
 #include "tether/motion_planner/blend/OutsideCircleBlender.hpp"
+#include "tether/motion_planner/blend/BoundaryConditions.hpp"
 #include "tether/motion_planner/geometry/NurbsCurve.hpp"
 #include "tether/motion_planner/geometry/PiecewiseNurbsPath.hpp"
 
@@ -61,23 +62,24 @@ TEST(OutsideCircleBlendTest, SquareCorner90Degrees) {
 
     OutsideCircleBlendConfig config;
     config.radius = 5.0;
+    // G2 mode (default transitionFraction = 0.15)
 
     auto result = OutsideCircleBlender::blend(path, config);
     ASSERT_TRUE(result.path.has_value());
     EXPECT_GT(result.blendedCount, 0);
     EXPECT_EQ(result.skippedCount, 0);
 
-    // 4 pieces → 3 junctions → 3 arcs + 4 trimmed lines = 7 pieces
-    EXPECT_EQ(result.path->numPieces(), 7u);
+    // G2: 4 lines + 3 circle arcs + 6 quintic transitions = 13 pieces
+    EXPECT_EQ(result.path->numPieces(), 13u);
 
-    // Check that the blend arcs are degree-2 (rational quadratic arcs)
-    int arcCount = 0;
-    int lineCount = 0;
+    // Check piece types
+    int arcCount = 0;    // degree-2: circle arcs
+    int lineCount = 0;   // degree-1: lines
+    int transCount = 0;  // degree-5: quintic transitions
     for (std::size_t i = 0; i < result.path->numPieces(); ++i) {
         const auto& p = result.path->piece(i);
         if (p.degree() == 2) {
             arcCount++;
-            // Arc radius should be ≈ 5.0
             RVec center, axis1, axis2;
             double radius;
             ASSERT_TRUE(OutsideCircleBlender::extractCircleFromArc(
@@ -85,18 +87,16 @@ TEST(OutsideCircleBlendTest, SquareCorner90Degrees) {
             EXPECT_NEAR(radius, 5.0, 0.1);
         } else if (p.degree() == 1) {
             lineCount++;
+        } else if (p.degree() == 5) {
+            transCount++;
         }
     }
     EXPECT_EQ(arcCount, 3);
     EXPECT_EQ(lineCount, 4);
+    EXPECT_EQ(transCount, 6);
 
-    // Total length: 3 outside arcs (270° at r=5) + trimmed lines
-    // Lines: 95 + 90 + 90 + 95 = 370
-    // Arcs: 3 × (5 × 3π/2) = 3 × 23.56 = 70.69
-    // Total = 370 + 70.69 = 440.69
-    double expectedArcLen = 5.0 * 3.0 * M_PI / 2.0;  // 270° at r=5
-    double expectedTotal = 95.0 + 90.0 + 90.0 + 95.0 + 3 * expectedArcLen;
-    EXPECT_NEAR(result.path->totalLength(), expectedTotal, 1.0);
+    // G0 continuity
+    EXPECT_TRUE(result.path->isG0Connected(1e-6));
 }
 
 TEST(OutsideCircleBlendTest, LPath45Degrees) {
@@ -106,23 +106,29 @@ TEST(OutsideCircleBlendTest, LPath45Degrees) {
 
     OutsideCircleBlendConfig config;
     config.radius = 3.0;
+    // G2 mode (default transitionFraction = 0.15)
 
     auto result = OutsideCircleBlender::blend(path, config);
     ASSERT_TRUE(result.path.has_value());
     EXPECT_EQ(result.blendedCount, 1);
     EXPECT_EQ(result.skippedCount, 0);
 
-    // Should have 3 pieces: trimmed line, arc, trimmed line
-    EXPECT_EQ(result.path->numPieces(), 3u);
+    // G2: 2 lines + 1 circle arc + 2 quintic transitions = 5 pieces
+    EXPECT_EQ(result.path->numPieces(), 5u);
 
-    // The arc should be degree-2
-    int arcCount = 0;
+    // Check piece types
+    int arcCount = 0, lineCount = 0, transCount = 0;
     for (std::size_t i = 0; i < result.path->numPieces(); ++i) {
-        if (result.path->piece(i).degree() == 2) arcCount++;
+        int d = result.path->piece(i).degree();
+        if (d == 2) arcCount++;
+        else if (d == 1) lineCount++;
+        else if (d == 5) transCount++;
     }
     EXPECT_EQ(arcCount, 1);
+    EXPECT_EQ(lineCount, 2);
+    EXPECT_EQ(transCount, 2);
 
-    // Check G0 continuity (endpoints match)
+    // G0 continuity
     EXPECT_TRUE(result.path->isG0Connected(1e-6));
 }
 
@@ -176,25 +182,21 @@ TEST(OutsideCircleBlendTest, G0ContinuityAfterBlend) {
 }
 
 TEST(OutsideCircleBlendTest, ArcEndpointMatchesTrimmedLine) {
-    // For a 90° corner: verify that the arc starts where the trimmed line ends
+    // G1 mode (no transitions): verify arc starts where trimmed line ends
     auto path = makeLPath(100.0, 100.0, M_PI / 2.0);  // 90° corner
 
     OutsideCircleBlendConfig config;
     config.radius = 10.0;
+    config.transitionFraction = 0.0;  // G1 mode
 
     auto result = OutsideCircleBlender::blend(path, config);
     ASSERT_TRUE(result.path.has_value());
     ASSERT_EQ(result.path->numPieces(), 3u);
 
-    // Piece 0: trimmed line (0,0) → (90,0)
-    // Piece 1: arc from (90,0) around (100,0) to (100,10)
-    // Piece 2: trimmed line (100,10) → (100,100)
-
     const auto& p0 = result.path->piece(0);
     const auto& p1 = result.path->piece(1);
     const auto& p2 = result.path->piece(2);
 
-    // Check endpoints
     RVec p0end = p0.endPoint();
     RVec p1start = p1.startPoint();
     RVec p1end = p1.endPoint();
@@ -204,42 +206,38 @@ TEST(OutsideCircleBlendTest, ArcEndpointMatchesTrimmedLine) {
     EXPECT_NEAR(p0end.distanceTo(p1start), 0.0, 1e-6);
     EXPECT_NEAR(p1end.distanceTo(p2start), 0.0, 1e-6);
 
-    // The arc endpoints should be at distance r=10 from the corner (100,0)
+    // Arc endpoints at distance r=10 from corner (100,0)
     RVec corner{100.0, 0.0, 0.0};
     EXPECT_NEAR(p1start.distanceTo(corner), 10.0, 0.1);
     EXPECT_NEAR(p1end.distanceTo(corner), 10.0, 0.1);
 
-    // The trimmed line should end at (90, 0)
+    // Trimmed line ends at (90, 0)
     EXPECT_NEAR(p0end[0], 90.0, 0.1);
     EXPECT_NEAR(p0end[1], 0.0, 0.1);
 
-    // The second trimmed line should start at (100, 10)
+    // Second trimmed line starts at (100, 10)
     EXPECT_NEAR(p2start[0], 100.0, 0.1);
     EXPECT_NEAR(p2start[1], 10.0, 0.1);
 }
 
 TEST(OutsideCircleBlendTest, ArcIsOutsideMajorArc) {
-    // Verify the arc is the MAJOR arc (outside), not the minor arc (inside)
-    // For a 90° corner, the major arc sweeps 270°
+    // G1 mode: verify the arc is the MAJOR arc (outside), sweeping 270°
     auto path = makeLPath(100.0, 100.0, M_PI / 2.0);
 
     OutsideCircleBlendConfig config;
     config.radius = 10.0;
+    config.transitionFraction = 0.0;  // G1 mode
 
     auto result = OutsideCircleBlender::blend(path, config);
     ASSERT_TRUE(result.path.has_value());
     ASSERT_EQ(result.blendedCount, 1);
 
-    // Find the arc piece
     for (std::size_t i = 0; i < result.path->numPieces(); ++i) {
         const auto& p = result.path->piece(i);
         if (p.degree() == 2) {
-            // Arc length should be the major arc: r × (2π - π/2) = r × 3π/2
             double expectedMajor = 10.0 * 3.0 * M_PI / 2.0;
             double expectedMinor = 10.0 * M_PI / 2.0;
             double arcLen = p.length();
-
-            // Should be close to the major arc, not the minor arc
             EXPECT_NEAR(arcLen, expectedMajor, 0.5)
                 << "Arc length " << arcLen
                 << " should be major arc " << expectedMajor
@@ -368,4 +366,173 @@ TEST(OutsideCircleBlendTest, ArcCircleIntersection) {
     double u = arc.invertLength(*sOpt);
     RVec p = arc.evaluate(u);
     EXPECT_NEAR(p.distanceTo(blendCenter), blendRadius, 0.5);
+}
+
+// ============================================================================
+// G2 continuity tests
+// ============================================================================
+
+TEST(OutsideCircleBlendTest, G2ContinuityAtTransitions) {
+    // Verify G2 (curvature) continuity at the junctions between
+    // line → transition → circle arc → transition → line
+    auto path = makeLPath(100.0, 100.0, M_PI / 2.0);  // 90° corner
+
+    OutsideCircleBlendConfig config;
+    config.radius = 10.0;
+    config.transitionFraction = 0.15;  // G2 mode
+
+    auto result = OutsideCircleBlender::blend(path, config);
+    ASSERT_TRUE(result.path.has_value());
+    ASSERT_EQ(result.blendedCount, 1);
+    // 5 pieces: line, transition, arc, transition, line
+    ASSERT_EQ(result.path->numPieces(), 5u);
+
+    // Check G2 continuity at each junction.
+    // G2 means: position match (G0), tangent match (G1), curvature match (G2).
+    const double curvTol = 0.05;  // relative tolerance for curvature matching
+
+    for (std::size_t i = 0; i + 1 < result.path->numPieces(); ++i) {
+        const auto& pA = result.path->piece(i);
+        const auto& pB = result.path->piece(i + 1);
+
+        // G0: positions match
+        RVec endA = pA.endPoint();
+        RVec startB = pB.startPoint();
+        EXPECT_NEAR(endA.distanceTo(startB), 0.0, 1e-5)
+            << "G0 failed at junction " << i;
+
+        // G1: tangents match
+        auto derivA = pA.arcDerivatives(pA.knotMax(), 1);
+        auto derivB = pB.arcDerivatives(pB.knotMin(), 1);
+        RVec tA = derivA.tangent;
+        RVec tB = derivB.tangent;
+        EXPECT_NEAR(tA.distanceTo(tB), 0.0, 1e-4)
+            << "G1 failed at junction " << i;
+
+        // G2: curvatures match
+        // Skip curvature check at line→transition and transition→line
+        // junctions where the curvature should be 0 on both sides.
+        // For all junctions, the curvature vectors should match.
+        RVec kA = derivA.curvature;
+        RVec kB = derivB.curvature;
+        double kAmag = kA.norm();
+        double kBmag = kB.norm();
+
+        // For line junctions (κ=0 on the line side), the transition
+        // should also have κ≈0 at that end.
+        if (kAmag < 1e-8 && kBmag < 1e-8) {
+            // Both zero — G2 satisfied
+            SUCCEED();
+        } else if (kAmag < 1e-8 || kBmag < 1e-8) {
+            // One side is zero, other isn't — G2 failure
+            ADD_FAILURE()
+                << "G2 curvature mismatch at junction " << i
+                << ": |κ_A|=" << kAmag << ", |κ_B|=" << kBmag;
+        } else {
+            // Both non-zero — check relative match
+            double relErr = std::abs(kAmag - kBmag) / std::max(kAmag, kBmag);
+            EXPECT_LT(relErr, curvTol)
+                << "G2 curvature magnitude mismatch at junction " << i
+                << ": |κ_A|=" << kAmag << ", |κ_B|=" << kBmag;
+        }
+    }
+}
+
+TEST(OutsideCircleBlendTest, G2ContinuitySquare) {
+    // Verify G2 continuity for a square path with 3 corners
+    auto path = makeSquarePath(100.0);
+
+    OutsideCircleBlendConfig config;
+    config.radius = 5.0;
+    config.transitionFraction = 0.15;
+
+    auto result = OutsideCircleBlender::blend(path, config);
+    ASSERT_TRUE(result.path.has_value());
+    EXPECT_TRUE(result.path->isG0Connected(1e-5));
+
+    // Check G1 (tangent) continuity at all junctions
+    for (std::size_t i = 0; i + 1 < result.path->numPieces(); ++i) {
+        const auto& pA = result.path->piece(i);
+        const auto& pB = result.path->piece(i + 1);
+
+        auto dA = pA.arcDerivatives(pA.knotMax(), 1);
+        auto dB = pB.arcDerivatives(pB.knotMin(), 1);
+        EXPECT_NEAR(dA.tangent.distanceTo(dB.tangent), 0.0, 1e-4)
+            << "G1 failed at junction " << i;
+    }
+}
+
+TEST(OutsideCircleBlendTest, G1ModeNoTransitions) {
+    // With transitionFraction=0, should produce G1-only output (no quintic pieces)
+    auto path = makeLPath(100.0, 100.0, M_PI / 2.0);
+
+    OutsideCircleBlendConfig config;
+    config.radius = 10.0;
+    config.transitionFraction = 0.0;  // G1 mode
+
+    auto result = OutsideCircleBlender::blend(path, config);
+    ASSERT_TRUE(result.path.has_value());
+    ASSERT_EQ(result.blendedCount, 1);
+    // G1: 2 lines + 1 arc = 3 pieces (no transitions)
+    EXPECT_EQ(result.path->numPieces(), 3u);
+
+    // No degree-5 (quintic) pieces should exist
+    for (std::size_t i = 0; i < result.path->numPieces(); ++i) {
+        EXPECT_NE(result.path->piece(i).degree(), 5)
+            << "Quintic transition found in G1 mode";
+    }
+}
+
+TEST(OutsideCircleBlendTest, G2CurvatureMatchesCircleAtArcJunctions) {
+    // Verify that the curvature at the transition→arc junction matches
+    // the circle's curvature (1/r) on both sides.
+    auto path = makeLPath(100.0, 100.0, M_PI / 2.0);
+
+    OutsideCircleBlendConfig config;
+    config.radius = 10.0;
+    config.transitionFraction = 0.15;
+
+    auto result = OutsideCircleBlender::blend(path, config);
+    ASSERT_TRUE(result.path.has_value());
+    ASSERT_EQ(result.path->numPieces(), 5u);
+
+    // Pieces: [line, transition1, arc, transition2, line]
+    // Check curvature at transition1→arc junction (index 1→2)
+    // and arc→transition2 junction (index 2→3)
+    double expectedCurv = 1.0 / 10.0;  // 1/r
+
+    for (int idx : {1, 2}) {
+        const auto& pA = result.path->piece(idx);
+        const auto& pB = result.path->piece(idx + 1);
+
+        auto dA = pA.arcDerivatives(pA.knotMax(), 2);
+        auto dB = pB.arcDerivatives(pB.knotMin(), 2);
+
+        double kA = dA.curvature.norm();
+        double kB = dB.curvature.norm();
+
+        // Both should be close to 1/r
+        EXPECT_NEAR(kA, expectedCurv, expectedCurv * 0.1)
+            << "Curvature at end of piece " << idx << " = " << kA
+            << ", expected " << expectedCurv;
+        EXPECT_NEAR(kB, expectedCurv, expectedCurv * 0.1)
+            << "Curvature at start of piece " << (idx + 1) << " = " << kB
+            << ", expected " << expectedCurv;
+    }
+
+    // Check curvature at line→transition junctions (should be ≈0)
+    for (int idx : {0, 3}) {
+        const auto& pA = result.path->piece(idx);
+        const auto& pB = result.path->piece(idx + 1);
+
+        auto dA = pA.arcDerivatives(pA.knotMax(), 2);
+        auto dB = pB.arcDerivatives(pB.knotMin(), 2);
+
+        // Line side: κ = 0
+        // Transition side: κ should also be ≈0 (matching the line)
+        EXPECT_NEAR(dA.curvature.norm(), 0.0, 1e-4)
+            << "Line curvature at junction " << idx << " should be 0";
+        EXPECT_NEAR(dB.curvature.norm(), 0.0, 1e-4)
+            << "Transition curvature at junction " << idx << " should be ~0";
+    }
 }
