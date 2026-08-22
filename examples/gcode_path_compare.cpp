@@ -168,6 +168,14 @@ int main(int argc, char** argv) {
         .help("G64 path deviation tolerance in mm (default: 0.05). "
               "Negative = outside circle blend (radius = |tol|)");
 
+    program.add_argument("--transition-fraction")
+        .default_value(0.15)
+        .scan<'g', double>()
+        .help("Transition fraction for G2 outside blend (default: 0.15). "
+              "Fraction of blend radius used for quintic transition curves. "
+              "0 = G1 only (tangent continuous), >0 = G2 (curvature continuous). "
+              "Only used with negative --g64-tolerance.");
+
     program.add_argument("--exact-stop")
         .flag()
         .help("G61 exact stop mode — no corner blending");
@@ -183,6 +191,7 @@ int main(int argc, char** argv) {
     std::string outputFile = program.get<std::string>("--output");
     bool exactStop = program.get<bool>("--exact-stop");
     double g64Tolerance = program.get<double>("--g64-tolerance");
+    double transitionFraction = program.get<double>("--transition-fraction");
 
     // ── Read G-code file ──
     std::ifstream file(gcodeFile);
@@ -245,6 +254,7 @@ int main(int argc, char** argv) {
         // the major (outside) arc.
         tether::motion::OutsideCircleBlendConfig blendConfig;
         blendConfig.radius = std::abs(g64Tolerance);
+        blendConfig.transitionFraction = transitionFraction;
         auto blendResult = tether::motion::OutsideCircleBlender::blend(
             nurbsResult.path, blendConfig);
         if (blendResult.path) {
