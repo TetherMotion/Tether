@@ -20,13 +20,20 @@
  * Usage:
  *   wss_velocity_plot <gcode_file> [-o <output_prefix>] \
  *       [--max-velocity V] [--max-acceleration A] [--max-jerk J] \
- *       [--samples N]
+ *       [--samples N] [--g64-tolerance T] [--transition-fraction F]
+ *
+ * Path blending (default: exact stop, no blending):
+ *   --g64-tolerance T        G64 deviation tolerance (mm). Positive = inside
+ *                            Bézier blend, negative = outside circle blend
+ *                            (radius = |T|). If not specified, exact stop.
+ *   --transition-fraction F  Transition fraction for G2 outside blend
+ *                            (default: 0.5). 0 = G1 only.
  *
  * Outputs:
  *   <prefix>_velocity.svg     — velocity vs time plot (mm/s vs s)
  *   <prefix>_acceleration.svg — acceleration vs time plot (mm/s² vs s)
  *
- * Defaults: v=200 mm/s, a=2000 mm/s², j=20000 mm/s³, samples=2000
+ * Defaults: v=200 mm/s, a=2000 mm/s², j=20000 mm/s³, samples=2000, exact stop
  */
 
 #include <argparse/argparse.hpp>
@@ -35,6 +42,9 @@
 #include <tether/gcode/GCodeInterpreter.hpp>
 #include <tether/motion_planner/geometry/PiecewiseNurbsPath.hpp>
 #include <tether/motion_planner/geometry/PlanningSegmentConverter.hpp>
+#include <tether/motion_planner/blend/PathBlender.hpp>
+#include <tether/motion_planner/blend/BlendSpec.hpp>
+#include <tether/motion_planner/blend/OutsideCircleBlender.hpp>
 #include <tether/motion_planner/PathAdapter.hpp>
 #include <tether/motion_planner/analytical/ParetoTimeEnergyOptimalVelocityPlanner.hpp>
 
@@ -380,6 +390,20 @@ int main(int argc, char* argv[]) {
         .scan<'i', int>()
         .help("Number of sample points (default: 2000)");
 
+    program.add_argument("--g64-tolerance")
+        .scan<'g', double>()
+        .help("G64 path deviation tolerance in mm. Positive = inside "
+              "Bézier blend, negative = outside circle blend (radius = |T|). "
+              "If not specified, exact stop (no blending).");
+
+    program.add_argument("--transition-fraction")
+        .default_value(0.5)
+        .scan<'g', double>()
+        .help("Transition fraction for G2 outside blend (default: 0.5). "
+              "Fraction of blend radius used for quintic transition curves. "
+              "0 = G1 only (tangent continuous), >0 = G2 (curvature continuous). "
+              "Only used with negative --g64-tolerance.");
+
     try {
         program.parse_args(argc, argv);
     } catch (const std::runtime_error& err) {
@@ -393,6 +417,10 @@ int main(int argc, char* argv[]) {
     double maxAcceleration = program.get<double>("--max-acceleration");
     double maxJerk = program.get<double>("--max-jerk");
     size_t numSamples = static_cast<size_t>(program.get<int>("--samples"));
+    double transitionFraction = program.get<double>("--transition-fraction");
+    bool hasG64Tolerance = program.is_used("--g64-tolerance");
+    double g64Tolerance = hasG64Tolerance
+        ? program.get<double>("--g64-tolerance") : 0.0;
 
     // ── Read G-code file ──
     std::ifstream file(gcodeFile);
@@ -405,6 +433,16 @@ int main(int argc, char* argv[]) {
     std::string gcodeText = ss.str();
     std::cout << "G-code file: " << gcodeFile << " (" << gcodeText.size() << " bytes)\n";
     std::cout << "Limits: v=" << maxVelocity << " a=" << maxAcceleration << " j=" << maxJerk << "\n";
+    if (hasG64Tolerance) {
+        if (g64Tolerance < 0.0) {
+            std::cout << "Mode: outside circle blend, radius=" << std::abs(g64Tolerance)
+                      << " mm, transitionFraction=" << transitionFraction << "\n";
+        } else {
+            std::cout << "Mode: inside Bézier blend, tolerance=" << g64Tolerance << " mm\n";
+        }
+    } else {
+        std::cout << "Mode: exact stop (no blending)\n";
+    }
 
     // ── Step 1: Parse G-code → PlanningSegments ──
     std::string filtered = filterKlipperCommands(gcodeText);
@@ -428,13 +466,53 @@ int main(int argc, char* argv[]) {
 
     // ── Step 2: Build NURBS path ──
     auto nurbsResult = tether::motion::piecewiseNurbsFromSegments(segments);
-    std::cout << "NURBS path: " << nurbsResult.path.numPieces() << " pieces, "
-              << nurbsResult.path.totalLength() << " mm\n";
+
+    // Apply path blending based on CLI arguments.
+    // Default: exact stop (no blending). Only blend if --g64-tolerance was
+    // explicitly provided.
+    tether::motion::PiecewiseNurbsPath plannedPath = std::move(nurbsResult.path);
+    std::vector<double> plannedFeedRates = std::move(nurbsResult.feedRates);
+
+    if (hasG64Tolerance) {
+        if (g64Tolerance < 0.0) {
+            // Outside circle blend
+            tether::motion::OutsideCircleBlendConfig blendConfig;
+            blendConfig.radius = std::abs(g64Tolerance);
+            blendConfig.transitionFraction = transitionFraction;
+            auto blendResult = tether::motion::OutsideCircleBlender::blend(
+                plannedPath, blendConfig);
+            if (blendResult.path && blendResult.blendedCount > 0) {
+                plannedPath = std::move(*blendResult.path);
+                plannedFeedRates.assign(plannedPath.numPieces(), maxVelocity);
+                std::cout << "Outside circle blend: " << blendResult.blendedCount
+                          << " corners blended, "
+                          << plannedPath.numPieces() << " pieces\n";
+            }
+        } else {
+            // Inside Bézier blend
+            tether::motion::BlendSpec blendSpec;
+            blendSpec.mode = tether::motion::PathMode::Blend;
+            blendSpec.tolerance = g64Tolerance;
+            tether::motion::PathBlender blender;
+            auto blended = blender.blend(plannedPath, blendSpec);
+            if (!blended.pieces.empty()) {
+                plannedPath = tether::motion::PiecewiseNurbsPath(
+                    std::move(blended.pieces));
+                plannedFeedRates.assign(plannedPath.numPieces(), maxVelocity);
+                std::cout << "Inside Bézier blend: " << blended.blendedCount
+                          << " corners blended, "
+                          << plannedPath.numPieces() << " pieces\n";
+            }
+        }
+    }
+
+    std::cout << "NURBS path: " << plannedPath.numPieces() << " pieces, "
+              << plannedPath.totalLength() << " mm\n";
 
     // ── Step 3: Run Pareto planner → WSS ──
-    MotionPlanner::PathAdapter<3, double> pathAdapter(nurbsResult.path);
-    if (!nurbsResult.feedRates.empty()) {
-        pathAdapter.setSegmentVelocityLimits(nurbsResult.feedRates);
+    MotionPlanner::PathAdapter<3, double> pathAdapter(plannedPath);
+    if (!plannedFeedRates.empty()) {
+        pathAdapter.setSegmentVelocityLimits(plannedFeedRates);
         pathAdapter.computeCornerVelocities(0.05, maxAcceleration);
     }
 
