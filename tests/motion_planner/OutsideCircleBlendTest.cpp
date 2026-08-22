@@ -62,7 +62,7 @@ TEST(OutsideCircleBlendTest, SquareCorner90Degrees) {
 
     OutsideCircleBlendConfig config;
     config.radius = 5.0;
-    // G2 mode (default transitionFraction = 0.15)
+    config.transitionFraction = 0.15;
 
     auto result = OutsideCircleBlender::blend(path, config);
     ASSERT_TRUE(result.path.has_value());
@@ -106,7 +106,7 @@ TEST(OutsideCircleBlendTest, LPath45Degrees) {
 
     OutsideCircleBlendConfig config;
     config.radius = 3.0;
-    // G2 mode (default transitionFraction = 0.15)
+    config.transitionFraction = 0.15;
 
     auto result = OutsideCircleBlender::blend(path, config);
     ASSERT_TRUE(result.path.has_value());

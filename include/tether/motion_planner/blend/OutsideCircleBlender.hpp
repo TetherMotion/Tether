@@ -72,8 +72,8 @@ struct OutsideCircleBlendConfig {
     /// the circle arc, achieving G2 (curvature) continuity. The transition
     /// length is transitionFraction * radius at each end of the arc.
     /// Set to 0 for G1-only (tangent continuous, no curvature matching).
-    /// Default: 0.15 (15% of radius on each side).
-    double transitionFraction = 0.15;
+    /// Default: 0.5 (50% of radius on each side).
+    double transitionFraction = 0.5;
 };
 
 /// @brief Result of an outside circle blend operation.

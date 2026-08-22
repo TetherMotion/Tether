@@ -169,9 +169,9 @@ int main(int argc, char** argv) {
               "Negative = outside circle blend (radius = |tol|)");
 
     program.add_argument("--transition-fraction")
-        .default_value(0.15)
+        .default_value(0.5)
         .scan<'g', double>()
-        .help("Transition fraction for G2 outside blend (default: 0.15). "
+        .help("Transition fraction for G2 outside blend (default: 0.5). "
               "Fraction of blend radius used for quintic transition curves. "
               "0 = G1 only (tangent continuous), >0 = G2 (curvature continuous). "
               "Only used with negative --g64-tolerance.");
