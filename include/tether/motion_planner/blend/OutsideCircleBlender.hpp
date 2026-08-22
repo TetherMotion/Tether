@@ -66,6 +66,14 @@ struct OutsideCircleBlendConfig {
 
     /// Tolerance for geometric comparisons (mm).
     double tol = 1e-9;
+
+    /// Transition fraction for G2-continuous blending. When > 0, quintic
+    /// Bézier transition curves are inserted between the path pieces and
+    /// the circle arc, achieving G2 (curvature) continuity. The transition
+    /// length is transitionFraction * radius at each end of the arc.
+    /// Set to 0 for G1-only (tangent continuous, no curvature matching).
+    /// Default: 0.15 (15% of radius on each side).
+    double transitionFraction = 0.15;
 };
 
 /// @brief Result of an outside circle blend operation.
