@@ -47,10 +47,16 @@ struct AxisLimits {
     
     /// Maximum jerk per axis (units/second³) - optional
     std::array<T, NumAxes> maxJerk;
-    
+
+    /// Maximum snap (jerk derivative) per axis (units/second⁴) - optional
+    std::array<T, NumAxes> maxSnap;
+
     /// Whether jerk limits are enabled
     bool jerkLimitEnabled = false;
-    
+
+    /// Whether snap limits are enabled
+    bool snapLimitEnabled = false;
+
     /**
      * @brief Default constructor with typical machine limits
      */
@@ -58,16 +64,19 @@ struct AxisLimits {
         maxVelocity.fill(T(100));      // 100 units/sec
         maxAcceleration.fill(T(500));   // 500 units/sec²
         maxJerk.fill(T(5000));          // 5000 units/sec³
+        maxSnap.fill(T(50000));         // 50000 units/sec⁴
     }
-    
+
     /**
      * @brief Constructor with uniform limits
      */
-    AxisLimits(T vel, T accel, T jerk = T(0)) {
+    AxisLimits(T vel, T accel, T jerk = T(0), T snap = T(0)) {
         maxVelocity.fill(vel);
         maxAcceleration.fill(accel);
         maxJerk.fill(jerk);
+        maxSnap.fill(snap);
         jerkLimitEnabled = (jerk > T(0));
+        snapLimitEnabled = (snap > T(0));
     }
 };
 
@@ -84,12 +93,18 @@ struct PathLimits {
     
     /// Maximum tangential jerk along path
     T maxPathJerk = T(5000);
-    
+
+    /// Maximum tangential snap (jerk derivative) along path
+    T maxPathSnap = T(50000);
+
     /// Maximum centripetal acceleration (limits velocity on curves)
     T maxCentripetalAcceleration = T(500);
-    
+
     /// Whether jerk limits are enabled
     bool jerkLimitEnabled = false;
+
+    /// Whether snap limits are enabled
+    bool snapLimitEnabled = false;
 };
 
 /**

@@ -459,21 +459,17 @@ public:
             }
         }
 
-        // Interpolate: at segment start → min(vSeg, vEntry),
-        //              at segment end → min(vSeg, vExit),
-        //              interior → vSeg.
-        const T segStart = segments_[segIdx].cumulativeArcLength;
-        const T segLen = segments_[segIdx].arcLength;
-        double t = T(0);
-        if (segLen > T(0)) {
-            t = std::clamp(static_cast<double>((s - segStart) / segLen), 0.0, 1.0);
-        }
-
-        double vAtEntry = std::min(vSeg, vEntry);
-        double vAtExit = std::min(vSeg, vExit);
-        // Linear interpolation between entry and exit corner limits.
-        double vCorner = vAtEntry * (1.0 - t) + vAtExit * t;
-        return std::min(vSeg, vCorner);
+        // The velocity limit is the segment feed rate in the interior.
+        // Corner velocities only apply at the exact junction between
+        // segments — they are stamped onto the fine grid separately by
+        // the solver's buildFineVelocityGrid() with backward/forward
+        // propagation to create smooth deceleration/acceleration profiles.
+        //
+        // Do NOT linearly interpolate between entry and exit corner
+        // velocities — that would give the corner velocity for the entire
+        // segment when both corners have the same velocity, preventing
+        // the solver from ever accelerating to the feed rate.
+        return vSeg;
     }
 
     /// Get the segment index containing arc length s (binary search).
