@@ -23,13 +23,27 @@ Session::Session(std::unique_ptr<ITransport> transport,
                  TimestampFn tsFn,
                  LogFn logFn,
                  const FeatureSet* serverFeatures,
-                 DatalogRecorder* datalogRecorder)
+                 DatalogRecorder* datalogRecorder,
+                 InputStreamCreateFn inputStreamCreateFn,
+                 InputStreamDataFn inputStreamDataFn,
+                 ReceiveBufferFactory encodedBufferFactory,
+                 ReceiveBufferFactory decodedBufferFactory)
     : transport_(std::move(transport))
     , registry_(registry)
     , getTimestampUs_(tsFn)
     , logFn_(logFn)
     , serverFeatures_(serverFeatures)
     , datalogRecorder_(datalogRecorder)
+    , inputStreamCreateFn_(std::move(inputStreamCreateFn))
+    , inputStreamDataFn_(std::move(inputStreamDataFn))
+    , slipRxBuf_(encodedBufferFactory ? encodedBufferFactory()
+                                      : std::make_unique<DynamicReceiveBuffer>(
+                                            DEFAULT_RECEIVE_BUFFER_CAPACITY,
+                                            MAX_ENCODED_MESSAGE_SIZE))
+    , decodeBuf_(decodedBufferFactory ? decodedBufferFactory()
+                                      : std::make_unique<DynamicReceiveBuffer>(
+                                            DEFAULT_RECEIVE_BUFFER_CAPACITY,
+                                            MAX_MESSAGE_SIZE))
 {}
 
 Session::~Session() {
@@ -127,24 +141,26 @@ void Session::feedSlipData(const uint8_t* data, size_t len) {
             continue;
         }
 
-        if (slipRxPos_ >= SLIP_RX_BUF_SIZE) {
+        if (!slipRxBuf_->resize(slipRxPos_ + 1)) {
             slipRxPos_ = 0;
             slipDiscardUntilEnd_ = (data[i] != 0xC0);
             continue;
         }
-        slipRxBuf_[slipRxPos_++] = data[i];
+        slipRxBuf_->data()[slipRxPos_++] = data[i];
 
         if (data[i] == 0xC0) {  // SLIP END
-            size_t decLen = SLIPStream::decoded_length(slipRxBuf_, slipRxPos_);
+            size_t decLen = SLIPStream::decoded_length(slipRxBuf_->data(), slipRxPos_);
             if (decLen != SLIPStream::DECODE_ERROR && decLen > 0 &&
-                decLen <= DECODE_BUF_SIZE) {
+                decLen <= decodeBuf_->maxCapacity() && decodeBuf_->resize(decLen)) {
                 size_t wrote = SLIPStream::decode_packet(
-                    slipRxBuf_, slipRxPos_, decodeBuf_, DECODE_BUF_SIZE);
+                    slipRxBuf_->data(), slipRxPos_, decodeBuf_->data(), decodeBuf_->capacity());
                 if (wrote != SLIPStream::DECODE_ERROR && wrote > 0) {
-                    onSlipMessage(decodeBuf_, wrote);
+                    onSlipMessage(decodeBuf_->data(), wrote);
                 }
             }
             slipRxPos_ = 0;
+            slipRxBuf_->clear();
+            decodeBuf_->clear();
         }
     }
 }
@@ -181,6 +197,9 @@ void Session::onSlipMessage(const uint8_t* data, size_t len) {
         case MessageType::DescribeStructReq:   handleDescribeStructReq(body, bodyLen); break;
         case MessageType::ListFunctionsReq:    handleListFunctionsReq(body, bodyLen); break;
         case MessageType::CallFunctionReq:     handleCallFunctionReq(body, bodyLen); break;
+        case MessageType::CreateInputStreamReq: handleCreateInputStreamReq(body, bodyLen); break;
+        case MessageType::InputStreamData:      handleInputStreamData(body, bodyLen); break;
+        case MessageType::CloseInputStreamReq:  handleCloseInputStreamReq(body, bodyLen); break;
         default:
             sendError(ErrorCode::UnknownMessageType, "Unknown message type");
             break;
@@ -915,6 +934,16 @@ void Session::handleListFunctionsReq(const uint8_t* body, size_t len) {
                 return;
             }
             size += 1 + 1 + 8 + 8 + 4;
+            if (parameter.valueDescriptor) {
+                size += 1 + 4;
+                size_t descriptorSize = 0;
+                if (!valueDescriptorWireSize(*parameter.valueDescriptor, descriptorSize) ||
+                    descriptorSize > UINT32_MAX || size > MAX_MESSAGE_SIZE - descriptorSize) {
+                    sendError(ErrorCode::TooManyEntries, "Invalid function descriptor");
+                    return;
+                }
+                size += descriptorSize;
+            }
             if (parameter.hasDefault) {
                 if (parameter.defaultValue.size() > MAX_VARIABLE_VALUE_SIZE ||
                     size > MAX_MESSAGE_SIZE - MAX_VARINT_SIZE - parameter.defaultValue.size()) {
@@ -948,6 +977,16 @@ void Session::handleListFunctionsReq(const uint8_t* body, size_t len) {
                 return;
             }
             size += 1 + 1 + 8 + 8 + 4;
+            if (result.valueDescriptor) {
+                size += 1 + 4;
+                size_t descriptorSize = 0;
+                if (!valueDescriptorWireSize(*result.valueDescriptor, descriptorSize) ||
+                    descriptorSize > UINT32_MAX || size > MAX_MESSAGE_SIZE - descriptorSize) {
+                    sendError(ErrorCode::TooManyEntries, "Invalid function descriptor");
+                    return;
+                }
+                size += descriptorSize;
+            }
             if (result.metadata.size() > MAX_COLLECTION_COUNT) {
                 sendError(ErrorCode::TooManyEntries, "Function metadata too large");
                 return;
@@ -996,6 +1035,20 @@ void Session::handleListFunctionsReq(const uint8_t* body, size_t len) {
             w.putU64(parameter.enumReference);
             w.putU64(parameter.structReference);
             w.putU32(parameter.maxValueSize);
+            w.putU8(parameter.valueDescriptor ? 1 : 0);
+            if (parameter.valueDescriptor) {
+                const size_t descriptorStart = w.pos;
+                w.putU32(0);
+                const size_t payloadStart = w.pos;
+                encodeValueDescriptor(w, *parameter.valueDescriptor);
+                const uint32_t descriptorSize = static_cast<uint32_t>(w.pos - payloadStart);
+                if (w.ok()) {
+                    txRawBuf_[descriptorStart] = static_cast<uint8_t>(descriptorSize);
+                    txRawBuf_[descriptorStart + 1] = static_cast<uint8_t>(descriptorSize >> 8);
+                    txRawBuf_[descriptorStart + 2] = static_cast<uint8_t>(descriptorSize >> 16);
+                    txRawBuf_[descriptorStart + 3] = static_cast<uint8_t>(descriptorSize >> 24);
+                }
+            }
             if (parameter.hasDefault) {
                 w.putVarint(static_cast<uint32_t>(parameter.defaultValue.size()));
                 w.putBytes(parameter.defaultValue.data(), parameter.defaultValue.size());
@@ -1017,6 +1070,20 @@ void Session::handleListFunctionsReq(const uint8_t* body, size_t len) {
             w.putU64(result.enumReference);
             w.putU64(result.structReference);
             w.putU32(result.maxValueSize);
+            w.putU8(result.valueDescriptor ? 1 : 0);
+            if (result.valueDescriptor) {
+                const size_t descriptorStart = w.pos;
+                w.putU32(0);
+                const size_t payloadStart = w.pos;
+                encodeValueDescriptor(w, *result.valueDescriptor);
+                const uint32_t descriptorSize = static_cast<uint32_t>(w.pos - payloadStart);
+                if (w.ok()) {
+                    txRawBuf_[descriptorStart] = static_cast<uint8_t>(descriptorSize);
+                    txRawBuf_[descriptorStart + 1] = static_cast<uint8_t>(descriptorSize >> 8);
+                    txRawBuf_[descriptorStart + 2] = static_cast<uint8_t>(descriptorSize >> 16);
+                    txRawBuf_[descriptorStart + 3] = static_cast<uint8_t>(descriptorSize >> 24);
+                }
+            }
             w.putU32(static_cast<uint32_t>(result.metadata.size()));
             for (const auto& [key, value] : result.metadata) {
                 writeString(key);
@@ -1068,6 +1135,16 @@ void Session::handleCallFunctionReq(const uint8_t* body, size_t len) {
             sendError(ErrorCode::FunctionInvocationError, "Wrong or duplicate function argument");
             return;
         }
+        if (parameter.valueDescriptor &&
+            !validateValuePayload(*parameter.valueDescriptor, argument.value.data(),
+                                  argument.value.size())) {
+            sendError(ErrorCode::FunctionInvocationError, "Invalid aggregate function argument");
+            return;
+        }
+        if (parameter.maxValueSize != 0 && argument.value.size() > parameter.maxValueSize) {
+            sendError(ErrorCode::FunctionInvocationError, "Invalid function argument size");
+            return;
+        }
         const auto fixedSize = valueTypeSize(parameter.type);
         if ((fixedSize != 0 && argument.value.size() != fixedSize) ||
             argument.value.size() > parameter.maxValueSize && parameter.maxValueSize != 0) {
@@ -1093,6 +1170,17 @@ void Session::handleCallFunctionReq(const uint8_t* body, size_t len) {
             supplied[position].type = parameter.type;
             supplied[position].value = parameter.defaultValue;
             supplied[position].provided = false;
+            if (parameter.valueDescriptor &&
+                !validateValuePayload(*parameter.valueDescriptor, supplied[position].value.data(),
+                                      supplied[position].value.size())) {
+                sendError(ErrorCode::FunctionInvocationError, "Invalid default function argument");
+                return;
+            }
+            if (parameter.maxValueSize != 0 &&
+                supplied[position].value.size() > parameter.maxValueSize) {
+                sendError(ErrorCode::FunctionInvocationError, "Invalid default function argument");
+                return;
+            }
         }
     }
 
@@ -1108,7 +1196,13 @@ void Session::handleCallFunctionReq(const uint8_t* body, size_t len) {
                  (returnValue.maxValueSize != 0 ? returnValue.maxValueSize
                                                 : MAX_VARIABLE_VALUE_SIZE)) ||
             (!returnValue.present && result.returnValue.empty());
-        if (!validReturn) {
+        const bool validAggregateReturn =
+            !returnValue.valueDescriptor ||
+            validateValuePayload(*returnValue.valueDescriptor, result.returnValue.data(),
+                                 result.returnValue.size());
+        const bool withinReturnLimit =
+            returnValue.maxValueSize == 0 || result.returnValue.size() <= returnValue.maxValueSize;
+        if (!validReturn || !validAggregateReturn || !withinReturnLimit) {
             result.success = false;
             result.error = ErrorCode::FunctionInvocationError;
             result.errorMessage = "Invalid function return value";
@@ -1116,6 +1210,91 @@ void Session::handleCallFunctionReq(const uint8_t* body, size_t len) {
         }
     }
     sendFunctionCallResponse(functionId, returnValue, result);
+}
+
+void Session::handleCreateInputStreamReq(const uint8_t* body, size_t len) {
+    if (!inputStreamCreateFn_) {
+        sendError(ErrorCode::FeatureNotSupported, "Input streams not supported");
+        return;
+    }
+
+    BufReader reader(body, len);
+    ValueDescriptor descriptor;
+    const uint32_t maxValueSize = reader.getU32();
+    const uint32_t maxBatchSize = reader.getU32();
+    if (!reader.ok() || !decodeValueDescriptor(reader, descriptor) ||
+        reader.remaining() != 0 || maxValueSize == 0 || maxValueSize > MAX_VARIABLE_VALUE_SIZE ||
+        maxBatchSize == 0 || maxBatchSize > MAX_AGGREGATE_ELEMENTS) {
+        sendError(ErrorCode::InvalidMessage, "Invalid input stream descriptor");
+        return;
+    }
+
+    if (nextInputStreamId_ == 0) nextInputStreamId_ = 1;
+    const uint32_t streamId = nextInputStreamId_++;
+    if (!inputStreamCreateFn_(streamId, descriptor, maxValueSize, maxBatchSize)) {
+        sendError(ErrorCode::InternalError, "Input stream rejected");
+        return;
+    }
+    inputStreams_.push_back({streamId, std::move(descriptor), maxValueSize, maxBatchSize});
+    sendInputStreamResponse(MessageType::CreateInputStreamResp, streamId, true);
+}
+
+void Session::handleInputStreamData(const uint8_t* body, size_t len) {
+    BufReader reader(body, len);
+    const uint32_t streamId = reader.getU32();
+    const uint32_t count = reader.getU32();
+    auto stream = std::find_if(inputStreams_.begin(), inputStreams_.end(),
+                               [streamId](const InputStreamState& state) {
+                                   return state.id == streamId;
+                               });
+    if (!reader.ok()) {
+        sendError(ErrorCode::InvalidMessage, "Invalid input stream data");
+        return;
+    }
+    if (stream == inputStreams_.end() || count == 0 ||
+        count > stream->maxBatchSize) {
+        sendError(stream == inputStreams_.end() ? ErrorCode::InvalidId
+                                                : ErrorCode::InvalidMessage,
+                  "Invalid input stream data");
+        return;
+    }
+
+    std::vector<std::vector<uint8_t>> values;
+    values.reserve(count);
+    for (uint32_t index = 0; index < count; ++index) {
+        const uint32_t valueLength = reader.getU32();
+        const uint8_t* value = reader.getBytes(valueLength);
+        if (!reader.ok() || valueLength > stream->maxValueSize ||
+            !validateValuePayload(stream->value, value, valueLength)) {
+            sendError(ErrorCode::InvalidMessage, "Invalid input stream value");
+            return;
+        }
+        values.emplace_back(value, value + valueLength);
+    }
+    if (reader.remaining() != 0) {
+        sendError(ErrorCode::InvalidMessage, "Trailing input stream data");
+        return;
+    }
+    if (inputStreamDataFn_) inputStreamDataFn_(streamId, values);
+}
+
+void Session::handleCloseInputStreamReq(const uint8_t* body, size_t len) {
+    BufReader reader(body, len);
+    const uint32_t streamId = reader.getU32();
+    if (!reader.ok() || reader.remaining() != 0) {
+        sendError(ErrorCode::InvalidMessage, "Invalid input stream close request");
+        return;
+    }
+    const auto stream = std::find_if(inputStreams_.begin(), inputStreams_.end(),
+                                     [streamId](const InputStreamState& state) {
+                                         return state.id == streamId;
+                                     });
+    if (stream == inputStreams_.end()) {
+        sendError(ErrorCode::InvalidId, "Input stream not found");
+        return;
+    }
+    inputStreams_.erase(stream);
+    sendInputStreamResponse(MessageType::CloseInputStreamResp, streamId, true);
 }
 
 // --------------------------------------------------------------------------
@@ -1230,6 +1409,15 @@ void Session::sendFunctionCallResponse(uint64_t functionId,
     if (writer.ok()) sendRaw(raw.data(), writer.pos);
 }
 
+void Session::sendInputStreamResponse(MessageType type, uint32_t streamId, bool success) {
+    uint8_t buffer[1 + 4 + 1];
+    BufWriter writer(buffer, sizeof(buffer));
+    writer.putU8(static_cast<uint8_t>(type));
+    writer.putU32(streamId);
+    writer.putU8(success ? 0 : 1);
+    if (writer.ok()) sendRaw(buffer, writer.pos);
+}
+
 void Session::publishLog(LogSeverity severity, std::string_view component,
                          std::string_view message, std::string_view location) {
     LogRecord record;
@@ -1255,7 +1443,8 @@ void Session::publishLog(LogSeverity severity, std::string_view component,
 }
 
 void Session::sendError(ErrorCode code, const char* msg) {
-    size_t msgLen = msg ? std::strlen(msg) : 0;
+    size_t msgLen = std::min(msg ? std::strlen(msg) : 0,
+                             static_cast<size_t>(UINT16_MAX));
     size_t totalLen = 1 + 4 + 2 + msgLen;
     if (txRawBuf_.size() < totalLen) txRawBuf_.resize(totalLen);
 

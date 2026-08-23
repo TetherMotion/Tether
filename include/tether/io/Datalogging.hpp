@@ -73,7 +73,7 @@ struct DatalogMetadata {
         out.recordSize = r.getU32();
         out.sampleRateHz = r.getU32();
         uint32_t fc = r.getU32();
-        if (!r.ok()) return false;
+        if (!r.ok() || fc > MAX_COLLECTION_COUNT) return false;
         out.fields.resize(fc);
         for (uint32_t i = 0; i < fc; ++i) {
             out.fields[i].entryId = r.getU64();
@@ -115,7 +115,7 @@ struct DatalogConfig {
         out.sampleRateHz = r.getU32();
         out.enabled = (r.getU8() != 0);
         uint32_t ec = r.getU32();
-        if (!r.ok()) return false;
+        if (!r.ok() || ec > MAX_COLLECTION_COUNT) return false;
         out.entryIds.resize(ec);
         for (uint32_t i = 0; i < ec; ++i) {
             out.entryIds[i] = r.getU64();

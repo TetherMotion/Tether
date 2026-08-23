@@ -100,6 +100,11 @@ enum class MessageType : uint8_t {
     ListFunctionsResp   = 0x36,
     CallFunctionReq     = 0x37,
     CallFunctionResp    = 0x38,
+    CreateInputStreamReq  = 0x39,
+    CreateInputStreamResp = 0x3A,
+    InputStreamData       = 0x3B,
+    CloseInputStreamReq   = 0x3C,
+    CloseInputStreamResp  = 0x3D,
 
     // Source-compatible Tether names for the canonical v4 operations.
     ConfigureStreamReq  = ConfigureStream,
@@ -132,13 +137,16 @@ enum class ValueType : uint8_t {
     UVarint = 18,
     IVarint = 19,
     Struct  = 20,   ///< Tether extension: composite binary struct
+    Array   = 21,   ///< Length-prefixed sequence of values
+    Stream  = 22,   ///< U32 stream handle
 };
 
 /// Returns true for variable-length types in the canonical v4 value namespace.
 inline constexpr bool isVariableLength(ValueType t) {
     return t == ValueType::String || t == ValueType::Binary ||
            t == ValueType::Enum || t == ValueType::UVarint ||
-           t == ValueType::IVarint || t == ValueType::Struct;
+           t == ValueType::IVarint || t == ValueType::Struct ||
+           t == ValueType::Array;
 }
 
 /// Returns the byte size of a fixed-size ValueType, or 0 for variable-length/unknown.
@@ -152,7 +160,9 @@ inline constexpr uint8_t valueTypeSize(ValueType t) {
         case ValueType::IPv6: return 16;
         case ValueType::MAC: return 6;
         case ValueType::String: case ValueType::Binary: case ValueType::Enum:
-        case ValueType::UVarint: case ValueType::IVarint: case ValueType::Struct: return 0;
+            case ValueType::UVarint: case ValueType::IVarint: case ValueType::Struct:
+            case ValueType::Array: return 0;
+            case ValueType::Stream: return 4;
         default: return 0;
     }
 }
@@ -403,6 +413,7 @@ struct BufWriter {
         putU64(u);
     }
     void putBytes(const void* d, size_t n) {
+        if (n != 0 && d == nullptr) { overflow = true; return; }
         if (pos > cap || n > cap - pos) { overflow = true; return; }
         std::memcpy(buf + pos, d, n); pos += n;
     }

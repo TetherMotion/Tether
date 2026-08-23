@@ -216,8 +216,10 @@ set(IO_PROTOCOL_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_feature_exchange.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_binary_struct.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_wire_contract.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_malformed.cpp"
 )
 set(IO_TRANSPORT_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_receive_buffer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_session.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_session_integration.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_tcp_transport.cpp"

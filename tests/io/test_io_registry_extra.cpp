@@ -46,6 +46,50 @@ TEST(IORegistryExtra, FunctionRejectsRequiredAfterOptional) {
     EXPECT_FALSE(reg.addFunction(std::move(function)));
 }
 
+TEST(IORegistryExtra, FunctionRejectsEmptyParameterName) {
+    Registry reg;
+    FunctionEntry function;
+    function.id = 102;
+    function.name = "invalid";
+    function.parameters = {{"", "", ValueType::U8}};
+    function.callback = [](const std::vector<FunctionArgument>&) {
+        return FunctionCallResult{};
+    };
+    EXPECT_FALSE(reg.addFunction(std::move(function)));
+}
+
+TEST(IORegistryExtra, FunctionRejectsEmptyNameOrCallback) {
+    Registry reg;
+    FunctionEntry noName;
+    noName.id = 103;
+    noName.callback = [](const std::vector<FunctionArgument>&) {
+        return FunctionCallResult{};
+    };
+    EXPECT_FALSE(reg.addFunction(std::move(noName)));
+
+    FunctionEntry noCallback;
+    noCallback.id = 104;
+    noCallback.name = "no_callback";
+    EXPECT_FALSE(reg.addFunction(std::move(noCallback)));
+}
+
+TEST(IORegistryExtra, FunctionPageHandlesOffsetAndZeroCount) {
+    Registry reg;
+    for (uint64_t id = 1; id <= 2; ++id) {
+        FunctionEntry function;
+        function.id = id;
+        function.name = "f" + std::to_string(id);
+        function.callback = [](const std::vector<FunctionArgument>&) {
+            return FunctionCallResult{};
+        };
+        ASSERT_TRUE(reg.addFunction(std::move(function)));
+    }
+    EXPECT_TRUE(reg.functionPage(2, 1).empty());
+    EXPECT_TRUE(reg.functionPage(0, 0).empty());
+    ASSERT_EQ(reg.functionPage(1, 1).size(), 1u);
+    EXPECT_EQ(reg.functionPage(1, 1)[0].id(), 2u);
+}
+
 // ===========================================================================
 // EntryView edge cases
 // ===========================================================================

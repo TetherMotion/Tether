@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include "tether/io/Datalogging.hpp"
 #include <cstring>
+#include <cstdint>
 
 using namespace tether::io;
 
@@ -136,6 +137,45 @@ TEST(IODatalogExtra, StatusBytesWritten) {
     auto status = recorder.status();
     EXPECT_EQ(status.recordsWritten, 3u);
     EXPECT_GT(status.bytesWritten, 0u);
+}
+
+TEST(IODatalogExtra, RecorderTimestampOnlyLayoutIsSelfConsistent) {
+    DatalogRecorder recorder;
+    DatalogConfig cfg;
+    cfg.logName = "timestamp_only";
+    cfg.entryIds = {};
+
+    uint64_t timestamp = 0x1122334455667788ULL;
+    std::vector<uint8_t> record;
+    recorder.configure(cfg, nullptr, [&timestamp] { return timestamp; },
+                       [&record](const uint8_t* data, size_t size) {
+                           record.assign(data, data + size);
+                       });
+    recorder.start();
+    recorder.sampleOnce();
+
+    ASSERT_EQ(record.size(), recorder.metadata().recordSize);
+    ASSERT_EQ(record.size(), 8u);
+    uint64_t encodedTimestamp = 0;
+    std::memcpy(&encodedTimestamp, record.data(), sizeof(encodedTimestamp));
+    EXPECT_EQ(encodedTimestamp, timestamp);
+}
+
+TEST(IODatalogExtra, RecorderReadCallbackReceivesNoPlaceholderFields) {
+    DatalogRecorder recorder;
+    DatalogConfig cfg;
+    cfg.logName = "configured";
+    cfg.entryIds = {1};
+    size_t readCalls = 0;
+    auto readFn = [&readCalls](uint64_t, void*, size_t) -> bool {
+        ++readCalls;
+        return true;
+    };
+    recorder.configure(cfg, readFn, [] { return 1ULL; },
+                       [](const uint8_t*, size_t) {});
+    recorder.start();
+    recorder.sampleOnce();
+    EXPECT_EQ(readCalls, 0u);
 }
 
 // ===========================================================================

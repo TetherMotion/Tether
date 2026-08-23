@@ -57,7 +57,7 @@ struct StructDescriptor {
         out.name.assign(reinterpret_cast<const char*>(nb), nlen);
         out.totalSize = r.getU32();
         uint32_t fc = r.getU32();
-        if (!r.ok()) return false;
+        if (!r.ok() || fc > MAX_COLLECTION_COUNT) return false;
         out.fields.resize(fc);
         for (uint32_t i = 0; i < fc; ++i) {
             uint16_t fnl = r.getU16();

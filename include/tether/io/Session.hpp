@@ -19,6 +19,7 @@
 #include "tether/io/Protocol.hpp"
 #include "tether/io/Registry.hpp"
 #include "tether/io/Transport.hpp"
+#include "tether/io/ReceiveBuffer.hpp"
 #include "tether/io/ThresholdFilter.hpp"
 #include "tether/io/FeatureExchange.hpp"
 #include "tether/io/Datalogging.hpp"
@@ -47,6 +48,16 @@ using TimestampFn = std::function<uint64_t()>;
 /// Optional printf-style log callback.
 using LogFn = void(*)(const char* tag, const char* fmt, ...);
 
+/// Called when a client creates an input stream. The descriptor describes each
+/// value in the stream; the callback may reject the requested stream.
+using InputStreamCreateFn = std::function<bool(
+    uint32_t streamId, const ValueDescriptor& value, uint32_t maxValueSize,
+    uint32_t maxBatchSize)>;
+
+/// Called on the session worker after a validated input batch is received.
+using InputStreamDataFn = std::function<void(
+    uint32_t streamId, const std::vector<std::vector<uint8_t>>& values)>;
+
 /**
  * @class Session
  * @brief Manages one transport connection for parameter/signal streaming.
@@ -63,7 +74,11 @@ public:
             TimestampFn tsFn,
             LogFn logFn = nullptr,
             const FeatureSet* serverFeatures = nullptr,
-            DatalogRecorder* datalogRecorder = nullptr);
+            DatalogRecorder* datalogRecorder = nullptr,
+            InputStreamCreateFn inputStreamCreateFn = nullptr,
+            InputStreamDataFn inputStreamDataFn = nullptr,
+            ReceiveBufferFactory encodedBufferFactory = nullptr,
+            ReceiveBufferFactory decodedBufferFactory = nullptr);
     ~Session();
 
     /// Run event loop (blocking).
@@ -110,6 +125,9 @@ private:
     void handleDescribeStructReq(const uint8_t* body, size_t len);
     void handleListFunctionsReq(const uint8_t* body, size_t len);
     void handleCallFunctionReq(const uint8_t* body, size_t len);
+    void handleCreateInputStreamReq(const uint8_t* body, size_t len);
+    void handleInputStreamData(const uint8_t* body, size_t len);
+    void handleCloseInputStreamReq(const uint8_t* body, size_t len);
 
     // ---- Response senders ----
     bool sendRaw(const uint8_t* data, size_t len);
@@ -124,6 +142,7 @@ private:
     void sendLogData(const LogRecord& record);
     void sendFunctionCallResponse(uint64_t functionId, const FunctionReturn& returnValue,
                                   const FunctionCallResult& result);
+    void sendInputStreamResponse(MessageType type, uint32_t streamId, bool success);
 
     // ---- Streaming internals ----
     void buildCollectPlan();
@@ -143,6 +162,8 @@ private:
     LogFn            logFn_;
     const FeatureSet* serverFeatures_;
     DatalogRecorder* datalogRecorder_;
+    InputStreamCreateFn inputStreamCreateFn_;
+    InputStreamDataFn inputStreamDataFn_;
 
     // ==== Run state ====
     std::atomic<bool> running_{false};
@@ -177,6 +198,15 @@ private:
     ThresholdFilter thresholdFilter_;
     std::vector<std::vector<uint8_t>> lastValues_;  ///< Per-slot last value
 
+    struct InputStreamState {
+        uint32_t id = 0;
+        ValueDescriptor value;
+        uint32_t maxValueSize = 0;
+        uint32_t maxBatchSize = 0;
+    };
+    std::vector<InputStreamState> inputStreams_;
+    uint32_t nextInputStreamId_ = 1;
+
     // ==== OnChange trigger state ====
     std::vector<uint8_t> lastTriggerValue_;
 
@@ -193,13 +223,11 @@ private:
     mutable std::mutex sendMutex_;
 
     // ==== SLIP receive buffers ====
-    static constexpr size_t SLIP_RX_BUF_SIZE = 8192;
-    uint8_t slipRxBuf_[SLIP_RX_BUF_SIZE];
+    std::unique_ptr<IReceiveBuffer> slipRxBuf_;
     size_t  slipRxPos_ = 0;
     bool    slipDiscardUntilEnd_ = false;
 
-    static constexpr size_t DECODE_BUF_SIZE = 8192;
-    uint8_t decodeBuf_[DECODE_BUF_SIZE];
+    std::unique_ptr<IReceiveBuffer> decodeBuf_;
 
     // ==== TX buffers ====
     std::vector<uint8_t> txRawBuf_;
