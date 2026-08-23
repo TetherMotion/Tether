@@ -215,6 +215,7 @@ set(IO_PROTOCOL_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_protocol_extra.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_feature_exchange.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_binary_struct.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_wire_contract.cpp"
 )
 set(IO_TRANSPORT_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_session.cpp"

@@ -123,6 +123,46 @@ protected:
             p.metadata["range"] = "0..1000";
             registry_.addParam(std::move(p));
         }
+        {
+            FunctionEntry function;
+            function.id = 100;
+            function.name = "add";
+            function.description = "Add two unsigned values";
+            function.group = "math";
+            function.parameters = {
+                {"left", "Left operand", ValueType::U32},
+                {"right", "Right operand", ValueType::U32, true, true,
+                 {2, 0, 0, 0}}};
+            function.returnValue.present = true;
+            function.returnValue.name = "sum";
+            function.returnValue.description = "The sum";
+            function.returnValue.type = ValueType::U32;
+            function.callback = [this](const std::vector<FunctionArgument>& arguments) {
+                ++functionCalls_;
+                FunctionCallResult result;
+                uint32_t left = 0;
+                uint32_t right = 0;
+                for (const auto& argument : arguments) {
+                    if (argument.value.size() != 4) {
+                        result.errorMessage = "bad argument";
+                        return result;
+                    }
+                    uint32_t value = static_cast<uint32_t>(argument.value[0]) |
+                                     (static_cast<uint32_t>(argument.value[1]) << 8) |
+                                     (static_cast<uint32_t>(argument.value[2]) << 16) |
+                                     (static_cast<uint32_t>(argument.value[3]) << 24);
+                    if (argument.position == 0) left = value;
+                    else if (argument.position == 1) right = value;
+                }
+                const uint32_t sum = left + right;
+                result.success = true;
+                result.returnValue = {
+                    static_cast<uint8_t>(sum), static_cast<uint8_t>(sum >> 8),
+                    static_cast<uint8_t>(sum >> 16), static_cast<uint8_t>(sum >> 24)};
+                return result;
+            };
+            registry_.addFunction(std::move(function));
+        }
         // U32 signal (read-only)
         {
             SignalEntry s;
@@ -254,15 +294,73 @@ protected:
     StructDescriptor structDesc_;
     float vec3_[3] = {1.0f, 2.0f, 3.0f};
     std::atomic<float> temperature_{25.0f};
+    std::atomic<int> functionCalls_{0};
 
     uint64_t fakeTimestamp_ = 1000000;
-    TimestampFn tsFn_ = [this]() -> uint64_t { return fakeTimestamp_++; };
+    TimestampFn tsFn_ = [this]() -> uint64_t {
+        fakeTimestamp_ += 1000; // one millisecond per clock sample
+        return fakeTimestamp_;
+    };
     LogFn logFn_ = nullptr;
 };
 
 // ===========================================================================
 // GetParam / SetParam
 // ===========================================================================
+
+TEST_F(SessionIntegrationTest, ListAndCallFunctionWithDefault) {
+    auto ctx = createSession();
+    uint8_t request[9];
+    BufWriter requestWriter(request, sizeof(request));
+    requestWriter.putU8(static_cast<uint8_t>(MessageType::ListFunctionsReq));
+    requestWriter.putU32(0);
+    requestWriter.putU32(10);
+    auto catalog = roundtrip(*ctx, request, requestWriter.pos);
+    ASSERT_FALSE(catalog.empty());
+    BufReader catalogReader(catalog.data(), catalog.size());
+    EXPECT_EQ(catalogReader.getU8(), static_cast<uint8_t>(MessageType::ListFunctionsResp));
+    EXPECT_EQ(catalogReader.getU32(), 1u);
+    EXPECT_EQ(catalogReader.getU32(), 0u);
+    EXPECT_EQ(catalogReader.getU32(), 1u);
+
+    uint8_t call[64];
+    BufWriter callWriter(call, sizeof(call));
+    callWriter.putU8(static_cast<uint8_t>(MessageType::CallFunctionReq));
+    callWriter.putU64(100);
+    callWriter.putU32(1);
+    const uint8_t left[] = {3, 0, 0, 0};
+    ASSERT_TRUE(encodeFunctionTlv(callWriter, 0, ValueType::U32,
+                                  left, sizeof(left)));
+    auto response = roundtrip(*ctx, call, callWriter.pos);
+    BufReader responseReader(response.data(), response.size());
+    EXPECT_EQ(responseReader.getU8(), static_cast<uint8_t>(MessageType::CallFunctionResp));
+    EXPECT_EQ(responseReader.getU64(), 100u);
+    EXPECT_EQ(responseReader.getU8(), 0u);
+    EXPECT_EQ(responseReader.getU32(), 0u);
+    EXPECT_EQ(responseReader.getU16(), 0u);
+    FunctionArgument returned;
+    ASSERT_TRUE(decodeFunctionTlv(responseReader, returned));
+    EXPECT_EQ(returned.position, 0u);
+    EXPECT_EQ(returned.type, ValueType::U32);
+    ASSERT_EQ(returned.value.size(), 4u);
+    EXPECT_EQ(returned.value[0], 5u);
+}
+
+TEST_F(SessionIntegrationTest, CallFunctionRejectsOutOfRangeTlvPosition) {
+    auto ctx = createSession();
+    uint8_t call[64];
+    BufWriter writer(call, sizeof(call));
+    writer.putU8(static_cast<uint8_t>(MessageType::CallFunctionReq));
+    writer.putU64(100);
+    writer.putU32(1);
+    const uint8_t value[] = {1, 0, 0, 0};
+    ASSERT_TRUE(encodeFunctionTlv(writer, 99, ValueType::U32, value, sizeof(value)));
+    auto response = roundtrip(*ctx, call, writer.pos);
+    BufReader reader(response.data(), response.size());
+    EXPECT_EQ(reader.getU8(), static_cast<uint8_t>(MessageType::Error));
+    EXPECT_EQ(reader.getU32(), static_cast<uint32_t>(ErrorCode::FunctionInvocationError));
+    EXPECT_EQ(functionCalls_.load(), 0);
+}
 
 TEST_F(SessionIntegrationTest, GetParamF64) {
     auto ctx = createSession();
@@ -807,9 +905,11 @@ TEST_F(SessionIntegrationTest, ConfigureStreamAck) {
     w.putU32(10000);  // interval 10ms
     w.putU32(1);      // chunk=1
     w.putU32(0);      // skip=0
+    w.putU64(0);      // trigger parameter ID (time mode)
     w.putU32(2);      // 2 entries
     w.putU64(1);      // position (F64)
     w.putU64(6);      // temperature (F32)
+    w.putU32(0);      // filter count
 
     auto resp = roundtrip(*ctx, msg, w.pos);
     ASSERT_GE(resp.size(), 9u);
@@ -840,8 +940,8 @@ TEST_F(SessionIntegrationTest, StartStreamAlreadyStreamingFails) {
     uint8_t cfgMsg[64];
     BufWriter w(cfgMsg, sizeof(cfgMsg));
     w.putU8(static_cast<uint8_t>(MessageType::ConfigureStreamReq));
-    w.putU8(0); w.putU32(100000); w.putU32(1); w.putU32(0); w.putU32(1);
-    w.putU64(1);
+    w.putU8(0); w.putU32(100000); w.putU32(1); w.putU32(0); w.putU64(0); w.putU32(1);
+    w.putU64(1); w.putU32(0);
     slipSend(ctx->client.get(), cfgMsg, w.pos);
     slipReceive(ctx->client.get());
 
@@ -886,8 +986,10 @@ TEST_F(SessionIntegrationTest, StreamDataFlowTimeBased) {
     w.putU32(1);     // 1µs interval (very fast)
     w.putU32(1);     // chunk=1
     w.putU32(0);     // skip=0
+    w.putU64(0);     // trigger parameter ID
     w.putU32(1);     // 1 entry
     w.putU64(6);     // temperature (F32)
+    w.putU32(0);     // filter count
 
     slipSend(ctx->client.get(), cfgMsg, w.pos);
     auto ack = slipReceive(ctx->client.get());
@@ -933,9 +1035,11 @@ TEST_F(SessionIntegrationTest, StreamVariableLengthEntries) {
     w.putU32(1);     // fast interval
     w.putU32(1);     // chunk=1
     w.putU32(0);     // skip=0
+    w.putU64(0);     // trigger parameter ID
     w.putU32(2);     // two entries
     w.putU64(4);     // variable-length device_name
     w.putU64(6);     // fixed-size temperature
+    w.putU32(0);     // filter count
 
     slipSend(ctx->client.get(), cfgMsg, w.pos);
     auto ack = slipReceive(ctx->client.get());
@@ -984,8 +1088,10 @@ TEST_F(SessionIntegrationTest, ConfigureStreamInvalidTriggerMode) {
     w.putU32(1000);
     w.putU32(1);
     w.putU32(0);
+    w.putU64(0);
     w.putU32(1);
     w.putU64(1);
+    w.putU32(0);
 
     auto resp = roundtrip(*ctx, msg, w.pos);
     BufReader r(resp.data(), resp.size());
@@ -1003,8 +1109,10 @@ TEST_F(SessionIntegrationTest, StreamWithSkipCount) {
     w.putU32(1);     // 1µs
     w.putU32(1);     // chunk=1
     w.putU32(2);     // skip=2
+    w.putU64(0);     // trigger parameter ID
     w.putU32(1);
     w.putU64(6);
+    w.putU32(0);     // filter count
 
     slipSend(ctx->client.get(), cfgMsg, w.pos);
     slipReceive(ctx->client.get());
@@ -1031,8 +1139,10 @@ TEST_F(SessionIntegrationTest, StreamWithChunking) {
     w.putU32(1);     // 1µs
     w.putU32(5);     // chunk=5 — 5 rows per packet
     w.putU32(0);
+    w.putU64(0);
     w.putU32(1);
     w.putU64(6);
+    w.putU32(0);
 
     slipSend(ctx->client.get(), cfgMsg, w.pos);
     auto ack = slipReceive(ctx->client.get());
@@ -1064,8 +1174,8 @@ TEST_F(SessionIntegrationTest, ReconfigureStreamWhileStreaming) {
     uint8_t cfgMsg[64];
     BufWriter w(cfgMsg, sizeof(cfgMsg));
     w.putU8(static_cast<uint8_t>(MessageType::ConfigureStreamReq));
-    w.putU8(0); w.putU32(100000); w.putU32(1); w.putU32(0); w.putU32(1);
-    w.putU64(6);
+    w.putU8(0); w.putU32(100000); w.putU32(1); w.putU32(0); w.putU64(0); w.putU32(1);
+    w.putU64(6); w.putU32(0);
     slipSend(ctx->client.get(), cfgMsg, w.pos);
     slipReceive(ctx->client.get());
 
@@ -1076,8 +1186,8 @@ TEST_F(SessionIntegrationTest, ReconfigureStreamWhileStreaming) {
     // Reconfigure (should stop streaming first)
     BufWriter w2(cfgMsg, sizeof(cfgMsg));
     w2.putU8(static_cast<uint8_t>(MessageType::ConfigureStreamReq));
-    w2.putU8(0); w2.putU32(50000); w2.putU32(2); w2.putU32(0); w2.putU32(1);
-    w2.putU64(1);
+    w2.putU8(0); w2.putU32(50000); w2.putU32(2); w2.putU32(0); w2.putU64(0); w2.putU32(1);
+    w2.putU64(1); w2.putU32(0);
     slipSend(ctx->client.get(), cfgMsg, w2.pos);
 
     auto ack = slipReceive(ctx->client.get(), 500);
@@ -1110,8 +1220,10 @@ TEST_F(SessionIntegrationTest, StreamOnChange) {
     w.putU32(1);      // interval
     w.putU32(1);      // chunk=1
     w.putU32(0);      // skip=0
+    w.putU64(6);      // trigger parameter ID
     w.putU32(1);      // 1 entry
     w.putU64(6);      // temperature
+    w.putU32(0);      // filter count
 
     slipSend(ctx->client.get(), cfgMsg, w.pos);
     slipReceive(ctx->client.get());
@@ -1311,7 +1423,7 @@ TEST_F(SessionIntegrationTest, CatalogChangedOnRegistryUpdate) {
 
     // Add a new param — should trigger CatalogChanged
     ParamEntry newParam;
-    newParam.id = 100;
+    newParam.id = 101;
     newParam.name = "new_param";
     newParam.valueType = ValueType::U8;
     newParam.readFn = [](void* d) { uint8_t v = 0; std::memcpy(d, &v, 1); };
@@ -1374,6 +1486,39 @@ TEST_F(SessionIntegrationTest, LoggingCallback) {
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     session->requestStop();
     t.join();
+}
+
+TEST_F(SessionIntegrationTest, LogSubscriptionFiltersAndPublishes) {
+    auto ctx = createSession();
+
+    uint8_t request[128];
+    BufWriter w(request, sizeof(request));
+    w.putU8(static_cast<uint8_t>(MessageType::SubscribeLogReq));
+    w.putU8(static_cast<uint8_t>(LogSeverity::Warn));
+    w.putStr16("motion", 6);
+    w.putStr16("", 0);
+    w.putStr16("", 0);
+    auto response = roundtrip(*ctx, request, w.pos);
+    ASSERT_FALSE(response.empty());
+    BufReader responseReader(response.data(), response.size());
+    EXPECT_EQ(responseReader.getU8(), static_cast<uint8_t>(MessageType::SubscribeLogResp));
+    const uint32_t subscriptionId = responseReader.getVarint();
+    EXPECT_NE(subscriptionId, 0u);
+    EXPECT_EQ(responseReader.getU8(), 0u);
+
+    ctx->session->publishLog(LogSeverity::Info, "motion", "ignored");
+    EXPECT_TRUE(slipReceive(ctx->client.get(), 20).empty());
+
+    ctx->session->publishLog(LogSeverity::Error, "motion", "limit reached", "planner.cpp:42");
+    auto logPacket = slipReceive(ctx->client.get(), 500);
+    ASSERT_FALSE(logPacket.empty());
+    BufReader logReader(logPacket.data(), logPacket.size());
+    EXPECT_EQ(logReader.getU8(), static_cast<uint8_t>(MessageType::LogData));
+    logReader.getU64();
+    EXPECT_EQ(logReader.getU8(), static_cast<uint8_t>(LogSeverity::Error));
+    const uint16_t componentLength = logReader.getU16();
+    EXPECT_EQ(std::string(reinterpret_cast<const char*>(logReader.getBytes(componentLength)),
+                          componentLength), "motion");
 }
 
 // ===========================================================================
@@ -1451,8 +1596,8 @@ TEST_F(SessionIntegrationTest, StreamWithThresholdFiltering) {
     uint8_t cfgMsg[64];
     BufWriter w(cfgMsg, sizeof(cfgMsg));
     w.putU8(static_cast<uint8_t>(MessageType::ConfigureStreamReq));
-    w.putU8(0); w.putU32(1); w.putU32(1); w.putU32(0); w.putU32(1);
-    w.putU64(6);
+    w.putU8(0); w.putU32(1); w.putU32(1); w.putU32(0); w.putU64(0); w.putU32(1);
+    w.putU64(6); w.putU32(0);
     slipSend(ctx->client.get(), cfgMsg, w.pos);
     slipReceive(ctx->client.get());
 
@@ -1480,8 +1625,10 @@ TEST_F(SessionIntegrationTest, ConfigureStreamZeroChunkAndInterval) {
     w.putU32(0);     // interval=0 should be clamped to 1
     w.putU32(0);     // chunk=0 should be clamped to 1
     w.putU32(0);
+    w.putU64(0);
     w.putU32(1);
     w.putU64(6);
+    w.putU32(0);
 
     auto resp = roundtrip(*ctx, cfgMsg, w.pos);
     ASSERT_FALSE(resp.empty());
@@ -1497,9 +1644,10 @@ TEST_F(SessionIntegrationTest, ConfigureStreamWithInvalidEntries) {
     uint8_t cfgMsg[64];
     BufWriter w(cfgMsg, sizeof(cfgMsg));
     w.putU8(static_cast<uint8_t>(MessageType::ConfigureStreamReq));
-    w.putU8(0); w.putU32(1000); w.putU32(1); w.putU32(0); w.putU32(2);
+    w.putU8(0); w.putU32(1000); w.putU32(1); w.putU32(0); w.putU64(0); w.putU32(2);
     w.putU64(6);    // valid
     w.putU64(9999); // invalid — should be skipped
+    w.putU32(0);    // filter count
 
     auto resp = roundtrip(*ctx, cfgMsg, w.pos);
     BufReader r(resp.data(), resp.size());

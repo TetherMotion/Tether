@@ -8,6 +8,44 @@
 
 using namespace tether::io;
 
+TEST(IORegistryExtra, FunctionSignatureAndStableLookup) {
+    Registry reg;
+    FunctionEntry function;
+    function.id = 100;
+    function.name = "move";
+    function.parameters = {
+        {"axis", "Axis index", ValueType::U8},
+        {"speed", "Optional speed", ValueType::U32, true, true, {10, 0, 0, 0}}};
+    function.callback = [](const std::vector<FunctionArgument>&) {
+        FunctionCallResult result;
+        result.success = true;
+        return result;
+    };
+    ASSERT_TRUE(reg.addFunction(std::move(function)));
+    EXPECT_EQ(reg.functionCount(), 1u);
+    ASSERT_TRUE(reg.findFunction(100));
+    EXPECT_EQ(reg.findFunction(100).requiredParameterCount(), 1u);
+
+    SignalEntry duplicate;
+    duplicate.id = 100;
+    duplicate.name = "duplicate";
+    duplicate.valueType = ValueType::U8;
+    duplicate.readFn = [](void*) {};
+    EXPECT_FALSE(reg.addSignal(std::move(duplicate)));
+}
+
+TEST(IORegistryExtra, FunctionRejectsRequiredAfterOptional) {
+    Registry reg;
+    FunctionEntry function;
+    function.id = 101;
+    function.name = "invalid";
+    function.parameters = {
+        {"optional", "", ValueType::U8, true, true, {1}},
+        {"required", "", ValueType::U8, false, false, {}}};
+    function.callback = [](const std::vector<FunctionArgument>&) { return FunctionCallResult{}; };
+    EXPECT_FALSE(reg.addFunction(std::move(function)));
+}
+
 // ===========================================================================
 // EntryView edge cases
 // ===========================================================================
