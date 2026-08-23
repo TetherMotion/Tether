@@ -1,6 +1,11 @@
-# Tether IO Protocol — Wire Format Specification
+# Tether IO Protocol — Wire Contract
 
-**Protocol Version:** 1
+**Protocol Version:** 5
+
+Version 5 is the direct merged Tether/ParameterStream contract. It adopts
+ParameterStream message IDs `0x01`–`0x13`, retains Tether extensions
+`0x20`–`0x34`, and intentionally widens protocol counts to `uint32_t`.
+Compatibility with the unused Tether v1 wire ABI is not required.
 
 ## Transport & Framing
 
@@ -13,6 +18,9 @@ All messages are framed using [SLIP (RFC 1055)](https://tools.ietf.org/html/rfc1
 | `0xDB 0xDD` | Escaped ESC byte (data byte 0xDB) |
 
 Each SLIP packet contains exactly **one** protocol message. The first byte of the decoded payload is the `MessageType` discriminator.
+
+Malformed escape sequences and packets larger than the implementation maximum
+are discarded. Literal `0xC0` and `0xDB` are escaped as shown above.
 
 ## Byte order
 
@@ -35,8 +43,13 @@ All multi-byte integers are **little-endian**.
 | 11 | Bool | 1 | 0 = false, nonzero = true |
 | 12 | String | variable | Length-prefixed UTF-8 string (varint length + bytes) |
 | 13 | Binary | variable | Length-prefixed raw bytes (varint length + bytes) |
-| 14 | Struct | variable | Composite binary struct (layout from DescribeStructResp) |
-| 15 | Enum | 4 | Integer with named labels |
+| 14 | IPv4 | 4 | IPv4 address bytes |
+| 15 | IPv6 | 16 | IPv6 address bytes |
+| 16 | MAC | 6 | MAC address bytes |
+| 17 | Enum | variable | Named enum value, varint encoded |
+| 18 | UVarint | variable | Unsigned varint |
+| 19 | IVarint | variable | Zigzag signed varint |
+| 20 | Struct | variable | Composite binary struct |
 
 ### Variable-length encoding
 
@@ -51,6 +64,10 @@ Protobuf-style variable-length unsigned 32-bit integer:
 - 7 bits per byte, MSB set if more bytes follow
 - LSB first (little-endian byte order)
 - Maximum 5 bytes (for values up to 2^32 - 1)
+- A fifth byte may contain only payload bit 0x0f; other encodings are rejected.
+
+The implementation limits messages and variable values to 1 MiB and catalog,
+stream, metadata, and filter counts to 1,000,000.
 
 ```
 Value 0-127:    [0xxxxxxx]
@@ -125,482 +142,77 @@ Offset  Size  Field
 
 Same format as ListParamsReq with MessageType = 0x03.
 
-### 0x04 — ListSignalsResp
+### 0x03 — ConfigureStream
 
-Same format as ListParamsResp with MessageType = 0x04.
+`0x03` is the ParameterStream ConfigureStream request. Tether's stream layout
+uses `[trigger U8][interval_ms U32][chunk U32][skip U32][trigger_id U64]`
+`[entry_count U32][entry IDs U64...][filter_count U32]`, followed by filter
+properties. Each filter property is `[name length U8][name bytes][value type U8]`
+`[value]`. Filters are schema-validated and applied to rows; unknown,
+unsupported, wrong-type, malformed, out-of-range, or trailing properties are
+rejected.
 
-### 0x05 — GetParamReq
+### 0x04 — ConfigureAck
 
-Client reads a single parameter value.
+The response is `[type][spec_id U32][resolved_count U32][row_size U32]`,
+followed by resolved `[entry_id U64][value type U8][value size U8]` descriptors.
 
-```
-Offset  Size  Field
-0       1     MessageType = 0x05
-1       8     paramId (U64)
-```
+### 0x05 — StartStream
 
-### 0x06 — GetParamResp
+### 0x06 — StopStream
 
-Server responds with the parameter value.
+### 0x07 — StreamData
 
-For fixed-size types:
-```
-Offset  Size  Field
-0       1     MessageType = 0x06
-1       8     paramId (U64)
-9       1     valueSize (U8) — byte size of the value
-10      N     value (N = valueSize bytes, little-endian)
-```
+The response is `[type][spec_id U32][row_count U32]`, followed by timestamped
+rows. Timestamps are U64 microseconds and variable values are length-prefixed.
 
-For variable-length types:
-```
-Offset  Size  Field
-0       1     MessageType = 0x06
-1       8     paramId (U64)
-9       V     varintSize — varint-encoded byte count
-9+V     N     value (N bytes)
-```
+### 0x09 — GetMetadataReq
 
-### 0x07 — SetParamReq
+### 0x0A — GetMetadataResp
 
-Client writes a parameter value.
+### 0x0B — SetParameterReq
 
-```
-Offset  Size  Field
-0       1     MessageType = 0x07
-1       8     paramId (U64)
-9       N     value (N = valueTypeSize for fixed types, or varint-prefixed for variable)
-```
+### 0x0C — SetParameterResp
 
-### 0x08 — SetParamResp
+### 0x0D — PingReq / 0x0E — PongResp
 
-Server acknowledges the write.
+### 0x0F — SubscribeLogReq / 0x10 — SubscribeLogResp
 
-```
-Offset  Size  Field
-0       1     MessageType = 0x08
-1       8     paramId (U64)
-```
+### 0x11 — UnsubscribeLogReq / 0x12 — UnsubscribeLogResp
 
-### 0x09 — GetSignalReq
+### 0x13 — LogData
 
-Same format as GetParamReq with MessageType = 0x09.
+Log subscriptions use minimum severity plus component, message, and location
+U16 string filters. LogData contains timestamp, severity, and those same three
+strings. Platform logger levels map Error/Warn/Info/Debug/Verbose to
+Error/Warn/Info/Debug/Trace. Delivery is asynchronous and does not replace the
+application's primary logger handler.
 
-### 0x0A — GetSignalResp
+### 0x20–0x34 — Tether extensions
 
-Same format as GetParamResp with MessageType = 0x0A.
+Tether extensions provide separate signal catalog operations, direct parameter
+and signal reads, snapshots, feature exchange, catalog notifications,
+datalogging, threshold configuration, and struct descriptions. `ListParams`
+always contains parameters only; signals are never merged into that response.
 
-### 0x0B — ConfigureStreamReq
+Function RPC extensions are `0x35` ListFunctionsReq, `0x36` ListFunctionsResp,
+`0x37` CallFunctionReq, and `0x38` CallFunctionResp.
 
-Client configures a stream specification.
+## Function RPC
 
-```
-Offset  Size  Field
-0       1     MessageType = 0x0B
-1       1     triggerMode (TriggerMode enum)
-2       4     intervalUs (U32) — sample interval in microseconds
-6       4     chunkSize (U32) — rows per StreamData packet
-10      4     skipCount (U32) — rows to skip between transmissions
-14      4     entryCount (U32) — number of entry IDs following
-18      8×N   entryIds[0..N-1] (U64 each)
-```
+`ListFunctionsReq` is `[type][offset U32][max_count U32]`. Its response is
+`[type][total U32][offset U32][count U32]`, followed by function descriptors.
+Each descriptor contains an ID, name, description, group, ordered parameter
+annotations, an optional return annotation, and function metadata. Each
+parameter annotation contains its name, description, type, flags, optional enum
+and struct references, maximum value size, optional default value, and metadata.
 
-### 0x0C — ConfigureStreamAck
+`CallFunctionReq` is `[type][function_id U64][argument_count U32]` followed by
+bounded TLV tuples. Every tuple is `[position U32][value_type U8][length U32]`
+`[value bytes]`. Names are descriptive; calls use positions. The server validates
+position, type, length, uniqueness, and maximum size before invoking a callback.
+Missing optional arguments are filled with their annotated defaults. Optional
+arguments must be a suffix of the parameter list.
 
-Server acknowledges stream configuration.
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x0C
-1       4     specId (U32) — unique identifier for this stream spec
-5       4     rowSize (U32) — bytes per data row (excluding timestamp)
-```
-
-### 0x0D — StartStream
-
-Client starts the configured stream.
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x0D
-```
-
-### 0x0E — StopStream
-
-Client stops the active stream.
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x0E
-```
-
-### 0x0F — StreamData
-
-Server sends a batch of timestamped data rows.
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x0F
-1       4     specId (U32) — stream spec identifier
-5       4     rowCount (U32) — number of rows in this packet
-9       ...   row[0..rowCount-1]
-```
-
-Each row:
-```
-Offset  Size  Field
-0       8     timestamp (U64) — microseconds
-8       N     values — concatenated entry values in spec order (N = rowSize)
-```
-
-For entries with variable-length values, each value is varint-prefixed within the row.
-
-### 0x10 — Error
-
-Server reports an error.
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x10
-1       4     errorCode (ErrorCode enum, U32)
-5       2     msgLen (U16)
-7       N     message (UTF-8 string, N = msgLen)
-```
-
-Error codes:
-
-| Code | Name | Description |
-|---|---|---|
-| 0 | None | No error |
-| 1 | InvalidMessage | Malformed message |
-| 2 | UnknownMessageType | Unrecognized message type byte |
-| 3 | InvalidId | Parameter/signal ID not found |
-| 4 | StreamNotConfigured | Start/stop without prior configure |
-| 5 | AlreadyStreaming | StartStream while already streaming |
-| 6 | NotStreaming | StopStream while not streaming |
-| 7 | TooManyEntries | Entry count exceeds limit |
-| 8 | InternalError | Server internal error |
-| 9 | NotWritable | Attempted write to read-only entry |
-| 10 | FeatureNotSupported | Requested feature not available |
-| 11 | DatalogError | Datalogging configuration error |
-| 12 | ThresholdError | Threshold configuration error |
-
-### 0x11 — GetMetadataReq
-
-Client requests metadata for a parameter or signal.
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x11
-1       8     entryId (U64)
-```
-
-### 0x12 — GetMetadataResp
-
-Server responds with key/value metadata pairs.
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x12
-1       8     entryId (U64)
-9       4     pairCount (U32)
-13      ...   pair[0..pairCount-1]
-```
-
-Each pair:
-```
-Offset  Size  Field
-0       2     keyLen (U16)
-2       K     key (UTF-8)
-2+K     2     valueLen (U16)
-4+K     V     value (UTF-8)
-```
-
-### 0x13 — SnapshotParamsReq
-
-Client requests a bulk snapshot of parameter values.
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x13
-1       4     count (U32) — number of IDs (0 = all params)
-5       8×N   paramIds[0..N-1] (U64 each, absent if count = 0)
-```
-
-### 0x14 — SnapshotParamsResp
-
-Server responds with all requested parameter values.
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x14
-1       4     count (U32)
-5       ...   entry[0..count-1]
-```
-
-Each entry:
-```
-Offset  Size  Field
-0       8     paramId (U64)
-8       1     valueSize (U8 for fixed; or varint for variable)
-9       N     value bytes
-```
-
-### 0x15 — SnapshotSignalsReq
-
-Same format as SnapshotParamsReq with MessageType = 0x15.
-
-### 0x16 — SnapshotSignalsResp
-
-Same format as SnapshotParamsResp with MessageType = 0x16.
-
-### 0x17 — FeatureExchangeReq
-
-Client sends its feature set.
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x17
-1       ...   FeatureSet (see below)
-```
-
-### 0x18 — FeatureExchangeResp
-
-Server responds with its feature set. Always includes `protocol_version`.
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x18
-1       ...   FeatureSet (see below)
-```
-
-#### FeatureSet encoding
-
-```
-Offset  Size  Field
-0       4     featureCount (U32)
-4       ...   feature[0..featureCount-1]
-```
-
-Each feature:
-```
-Offset  Size  Field
-0       2     nameLen (U16)
-2       N     name (UTF-8)
-2+N     1     type (0 = Bool, 1 = U32, 2 = String)
-3+N     ...   value (depends on type)
-```
-
-Value encoding by type:
-- **Bool (0):** 1 byte, 0x00 or 0x01
-- **U32 (1):** 4 bytes, little-endian
-- **String (2):** [U16 len] [len bytes of UTF-8]
-
-### 0x19 — CatalogChanged
-
-Server pushes this when the parameter/signal catalog has been modified (new entries added, entries removed).
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x19
-1       4     revision (U32) — new catalog revision number
-```
-
-### 0x1A — ConfigureDatalogReq
-
-Client configures the datalogging subsystem.
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x1A
-1       ...   DatalogConfig (see below)
-```
-
-#### DatalogConfig encoding
-
-```
-Offset  Size  Field
-0       2     nameLen (U16)
-2       N     logName (UTF-8)
-2+N     4     sampleRateHz (U32)
-6+N     1     enabled (Bool)
-7+N     4     entryCount (U32)
-11+N    8×C   entryIds[0..C-1] (U64 each)
-```
-
-### 0x1B — ConfigureDatalogResp
-
-Server acknowledges datalog configuration.
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x1B
-1       1     success (Bool)
-```
-
-### 0x1C — DatalogStatusReq
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x1C
-```
-
-### 0x1D — DatalogStatusResp
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x1D
-1       ...   DatalogStatus (see below)
-```
-
-#### DatalogStatus encoding
-
-```
-Offset  Size  Field
-0       1     state (DatalogState enum)
-1       8     recordsWritten (U64)
-9       8     bytesWritten (U64)
-17      ...   DatalogMetadata
-```
-
-#### DatalogMetadata encoding
-
-```
-Offset  Size  Field
-0       2     nameLen (U16)
-2       N     logName (UTF-8)
-2+N     4     recordSize (U32)
-6+N     4     sampleRateHz (U32)
-10+N    4     fieldCount (U32)
-14+N    ...   field[0..fieldCount-1]
-```
-
-Each field:
-```
-Offset  Size  Field
-0       8     entryId (U64)
-8       2     nameLen (U16)
-10      N     name (UTF-8)
-10+N    1     valueType (ValueType enum)
-11+N    4     offset (U32) — byte offset within record
-15+N    4     size (U32) — byte size of field
-19+N    1     kind (EntryKind enum)
-```
-
-### 0x1E — ConfigureThresholdReq
-
-Client configures the threshold filter for streaming.
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x1E
-1       ...   ThresholdConfig (see below)
-```
-
-#### ThresholdConfig encoding
-
-```
-Offset  Size  Field
-0       2     nameLen (U16)
-2       N     name (UTF-8)
-2+N     1     isWhitelist (Bool)
-3+N     4     ruleCount (U32)
-7+N     ...   rule[0..ruleCount-1]
-```
-
-#### ThresholdRule encoding
-
-```
-Offset  Size  Field
-0       8     entryId (U64)
-8       1     type (ThresholdType enum)
-9       8     threshold (F64)
-17      2     customNameLen (U16)
-19      C     customName (UTF-8, C = customNameLen)
-19+C    4     customConfigCount (U32)
-23+C    ...   configPrimitive[0..count-1]
-```
-
-#### ConfigPrimitive encoding
-
-```
-Offset  Size  Field
-0       1     tag (0 = Float, 1 = String)
-```
-
-If tag = 0 (Float):
-```
-1       8     value (F64)
-```
-
-If tag = 1 (String):
-```
-1       2     len (U16)
-3       N     value (UTF-8, N = len)
-```
-
-### 0x1F — ConfigureThresholdResp
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x1F
-1       1     success (Bool)
-```
-
-### 0x20 — DescribeStructReq
-
-Client requests the field layout of a struct-typed entry.
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x20
-1       8     entryId (U64)
-```
-
-### 0x21 — DescribeStructResp
-
-Server responds with the struct descriptor.
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x21
-1       ...   StructDescriptor (see below)
-```
-
-#### StructDescriptor encoding
-
-```
-Offset  Size  Field
-0       8     entryId (U64)
-8       2     nameLen (U16)
-10      N     name (UTF-8)
-10+N    4     totalSize (U32)
-14+N    4     fieldCount (U32)
-18+N    ...   field[0..fieldCount-1]
-```
-
-Each struct field:
-```
-Offset  Size  Field
-0       2     nameLen (U16)
-2       N     name (UTF-8)
-2+N     1     valueType (ValueType enum)
-3+N     4     offset (U32) — byte offset within struct
-7+N     4     size (U32) — byte size
-11+N    2     unitLen (U16)
-13+N    U     unit (UTF-8, U = unitLen)
-```
-
----
-
-## Datalog binary record format
-
-Each binary record written by the datalogging subsystem:
-
-```
-Offset  Size  Field
-0       8     timestamp (U64) — microseconds
-8       ...   field values in configured order (fixed-size, no length prefixes)
-```
-
-Total record size = 8 + sum of field sizes (from DatalogMetadata).
+`CallFunctionResp` contains the function ID, status, error code and error string;
+successful responses additionally carry a return-value TLV tuple at position 0.
