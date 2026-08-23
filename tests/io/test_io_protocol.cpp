@@ -24,7 +24,10 @@ TEST(IOProtocol, ValueTypeSizes) {
     EXPECT_EQ(valueTypeSize(ValueType::F32),  4);
     EXPECT_EQ(valueTypeSize(ValueType::F64),  8);
     EXPECT_EQ(valueTypeSize(ValueType::Bool), 1);
-    EXPECT_EQ(valueTypeSize(ValueType::Enum), 4);
+    EXPECT_EQ(valueTypeSize(ValueType::IPv4), 4);
+    EXPECT_EQ(valueTypeSize(ValueType::IPv6), 16);
+    EXPECT_EQ(valueTypeSize(ValueType::MAC), 6);
+    EXPECT_EQ(valueTypeSize(ValueType::Enum), 0);
     EXPECT_EQ(valueTypeSize(ValueType::String), 0);
     EXPECT_EQ(valueTypeSize(ValueType::Binary), 0);
     EXPECT_EQ(valueTypeSize(ValueType::Struct), 0);
@@ -35,7 +38,10 @@ TEST(IOProtocol, IsVariableLength) {
     EXPECT_FALSE(isVariableLength(ValueType::F64));
     EXPECT_TRUE(isVariableLength(ValueType::String));
     EXPECT_TRUE(isVariableLength(ValueType::Binary));
-    EXPECT_FALSE(isVariableLength(ValueType::Struct));  // Struct is not variable-length per se
+    EXPECT_TRUE(isVariableLength(ValueType::Enum));
+    EXPECT_TRUE(isVariableLength(ValueType::UVarint));
+    EXPECT_TRUE(isVariableLength(ValueType::IVarint));
+    EXPECT_TRUE(isVariableLength(ValueType::Struct));
 }
 
 TEST(IOProtocol, ValueTypeName) {

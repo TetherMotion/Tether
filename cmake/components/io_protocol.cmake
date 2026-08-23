@@ -51,6 +51,7 @@ endif()
 # Core IO protocol sources
 # ---------------------------------------------------------------------------
 set(TETHER_IO_PROTOCOL_SOURCES
+    ${TETHER_ROOT}/src/io/Protocol.cpp
     ${TETHER_ROOT}/src/io/Registry.cpp
     ${TETHER_ROOT}/src/io/ThresholdFilter.cpp
     ${TETHER_ROOT}/src/io/Datalogging.cpp

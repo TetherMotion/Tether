@@ -53,7 +53,7 @@ struct Feature {
         f.name = name;
         f.type = ValueType::U32;
         f.value.resize(4);
-        std::memcpy(f.value.data(), &v, 4);
+        for (unsigned i = 0; i < 4; ++i) f.value[i] = static_cast<uint8_t>(v >> (8 * i));
         return f;
     }
     static Feature makeString(const std::string& name, const std::string& v) {
@@ -70,9 +70,10 @@ struct Feature {
     }
     uint32_t getU32() const {
         if (value.size() < 4) return 0;
-        uint32_t v;
-        std::memcpy(&v, value.data(), 4);
-        return v;
+        return static_cast<uint32_t>(value[0]) |
+               (static_cast<uint32_t>(value[1]) << 8) |
+               (static_cast<uint32_t>(value[2]) << 16) |
+               (static_cast<uint32_t>(value[3]) << 24);
     }
     std::string getString() const {
         return std::string(value.begin(), value.end());
@@ -111,7 +112,7 @@ struct FeatureSet {
     /// Decode a feature set from a buffer. Returns true on success.
     static bool decode(BufReader& r, FeatureSet& out) {
         uint32_t count = r.getU32();
-        if (!r.ok()) return false;
+        if (!r.ok() || count > 1024) return false;
         out.features.resize(count);
         for (uint32_t i = 0; i < count; ++i) {
             uint16_t nl = r.getU16();
@@ -120,6 +121,7 @@ struct FeatureSet {
             out.features[i].name.assign(reinterpret_cast<const char*>(nb), nl);
             out.features[i].type = static_cast<ValueType>(r.getU8());
             uint32_t vl = r.getU32();
+            if (vl > r.remaining()) return false;
             auto* vb = r.getBytes(vl);
             if (!r.ok()) return false;
             out.features[i].value.assign(vb, vb + vl);
