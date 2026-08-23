@@ -143,7 +143,9 @@ void Server::acceptLoop() {
         auto session = std::make_shared<Session>(
             std::move(transport), registry_,
             config_.timestampFn, config_.logFn,
-            &config_.serverFeatures, &datalogRecorder_);
+            &config_.serverFeatures, &datalogRecorder_,
+            config_.inputStreamCreateFn, config_.inputStreamDataFn,
+            config_.encodedBufferFactory, config_.decodedBufferFactory);
 
         std::shared_ptr<Session> sessionPtr = session;
 

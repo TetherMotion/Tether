@@ -32,6 +32,10 @@ struct ServerConfig {
     TimestampFn timestampFn  = nullptr; ///< Required: µs timestamp
     LogFn       logFn        = nullptr; ///< Optional logging callback
     FeatureSet  serverFeatures;         ///< Features to advertise
+    InputStreamCreateFn inputStreamCreateFn;
+    InputStreamDataFn inputStreamDataFn;
+    ReceiveBufferFactory encodedBufferFactory;
+    ReceiveBufferFactory decodedBufferFactory;
 };
 
 /**

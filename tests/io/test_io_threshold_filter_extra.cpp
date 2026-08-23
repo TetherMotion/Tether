@@ -134,6 +134,26 @@ TEST(IOThresholdExtra, AbsoluteIntegerTypeChanged) {
     EXPECT_TRUE(filter.passes(1, &old_, &new_, sizeof(uint16_t)));
 }
 
+TEST(IOThresholdExtra, AbsoluteBoundaryIsStrictlyGreater) {
+    ThresholdFilter filter;
+    ThresholdConfig cfg;
+    cfg.rules.push_back({1, ThresholdType::Absolute, 1.0, {}, {}});
+    filter.setConfig(cfg);
+    float oldValue = 1.0f;
+    float equal = 2.0f;
+    float larger = 2.0001f;
+    EXPECT_FALSE(filter.passes(1, &oldValue, &equal, sizeof(equal)));
+    EXPECT_TRUE(filter.passes(1, &oldValue, &larger, sizeof(larger)));
+}
+
+TEST(IOThresholdExtra, NullRuleValuesWithZeroSizeAreSafe) {
+    ThresholdFilter filter;
+    ThresholdConfig cfg;
+    cfg.rules.push_back({1, ThresholdType::Absolute, 0.0, {}, {}});
+    filter.setConfig(cfg);
+    EXPECT_FALSE(filter.passes(1, nullptr, nullptr, 0));
+}
+
 TEST(IOThresholdExtra, AbsoluteIntegerTypeUnchanged) {
     ThresholdFilter filter;
     ThresholdConfig cfg;

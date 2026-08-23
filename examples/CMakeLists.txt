@@ -20,6 +20,20 @@ target_link_libraries(tether_examples_common PRIVATE
 if(TARGET tether_esi)
     target_link_libraries(tether_examples_common PUBLIC tether_esi)
 endif()
+
+# --- Tether IO binary WebSocket example ---
+# Drogon delivers arbitrary binary WebSocket chunks to a queue-backed
+# ITransport, while Session remains the single protocol implementation.
+if(Drogon_FOUND AND TARGET tether_io_protocol AND TARGET Drogon::Drogon)
+    add_executable(tether_io_drogon_websocket
+        tether_io_drogon_websocket.cpp
+        TetherIoWebSocketController.cpp)
+    target_link_libraries(tether_io_drogon_websocket PRIVATE
+        tether_io_protocol Drogon::Drogon)
+    target_include_directories(tether_io_drogon_websocket PRIVATE
+        ${PROJECT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_features(tether_io_drogon_websocket PRIVATE cxx_std_20)
+endif()
 target_include_directories(tether_examples_common PUBLIC
     ${PROJECT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR})

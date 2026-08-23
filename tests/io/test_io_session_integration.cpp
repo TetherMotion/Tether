@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cstring>
 #include <atomic>
+#include <limits>
 
 using namespace tether::io;
 using namespace tether::io::testing;
@@ -260,14 +261,18 @@ protected:
     /// Create a Session on the server end, return the client end.
     std::unique_ptr<SessionContext> createSession(
         const FeatureSet* features = nullptr,
-        DatalogRecorder* recorder = nullptr)
+        DatalogRecorder* recorder = nullptr,
+        ReceiveBufferFactory encodedBufferFactory = nullptr,
+        ReceiveBufferFactory decodedBufferFactory = nullptr)
     {
         auto [client, server] = PipeTransport::create();
         auto ctx = std::make_unique<SessionContext>();
         ctx->client = std::move(client);
 
         auto sess = std::make_unique<Session>(
-            std::move(server), registry_, tsFn_, logFn_, features, recorder);
+            std::move(server), registry_, tsFn_, logFn_, features, recorder,
+            nullptr, nullptr, std::move(encodedBufferFactory),
+            std::move(decodedBufferFactory));
         ctx->session = sess.get();
 
         ctx->thread = std::thread([s = std::move(sess)]() mutable {
@@ -1411,6 +1416,24 @@ TEST_F(SessionIntegrationTest, UnknownMessageType) {
     EXPECT_EQ(r.getU32(), static_cast<uint32_t>(ErrorCode::UnknownMessageType));
 }
 
+TEST_F(SessionIntegrationTest, ErrorMessageLengthIsCappedByWireField) {
+    auto ctx = createSession();
+    std::vector<uint8_t> oversized(70000, 0x42);
+    std::vector<uint8_t> message(1 + oversized.size());
+    message[0] = 0xFF;
+    std::memcpy(message.data() + 1, oversized.data(), oversized.size());
+
+    auto response = roundtrip(*ctx, message.data(), message.size());
+    ASSERT_FALSE(response.empty());
+    BufReader reader(response.data(), response.size());
+    EXPECT_EQ(reader.getU8(), static_cast<uint8_t>(MessageType::Error));
+    EXPECT_EQ(reader.getU32(), static_cast<uint32_t>(ErrorCode::UnknownMessageType));
+    const uint16_t length = reader.getU16();
+    EXPECT_LE(length, std::numeric_limits<uint16_t>::max());
+    EXPECT_EQ(reader.remaining(), length);
+    EXPECT_TRUE(reader.ok());
+}
+
 // ===========================================================================
 // CatalogChanged notification
 // ===========================================================================
@@ -1547,7 +1570,9 @@ TEST_F(SessionIntegrationTest, ClientDisconnectStopsSession) {
 // ===========================================================================
 
 TEST_F(SessionIntegrationTest, SlipBufferOverflowRecovery) {
-    auto ctx = createSession();
+    auto ctx = createSession(nullptr, nullptr, [] {
+        return std::make_unique<StaticReceiveBuffer<8192>>();
+    });
 
     // Send a huge non-SLIP payload to overflow the buffer
     std::vector<uint8_t> junk(9000, 0x42);

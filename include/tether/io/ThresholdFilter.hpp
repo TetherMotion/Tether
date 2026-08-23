@@ -89,7 +89,7 @@ struct ThresholdRule {
         if (!r.ok()) return false;
         out.customName.assign(reinterpret_cast<const char*>(nb), nl);
         uint32_t cc = r.getU32();
-        if (!r.ok()) return false;
+        if (!r.ok() || cc > MAX_COLLECTION_COUNT) return false;
         out.customConfig.resize(cc);
         for (uint32_t i = 0; i < cc; ++i) {
             uint16_t pnl = r.getU16();
@@ -98,6 +98,7 @@ struct ThresholdRule {
             out.customConfig[i].name.assign(reinterpret_cast<const char*>(pnb), pnl);
             out.customConfig[i].type = static_cast<ValueType>(r.getU8());
             uint32_t vl = r.getU32();
+            if (!r.ok() || vl > MAX_VARIABLE_VALUE_SIZE || vl > r.remaining()) return false;
             auto* vb = r.getBytes(vl);
             if (!r.ok()) return false;
             out.customConfig[i].value.assign(vb, vb + vl);
@@ -131,7 +132,7 @@ struct ThresholdConfig {
         out.name.assign(reinterpret_cast<const char*>(nb), nl);
         out.isWhitelist = (r.getU8() != 0);
         uint32_t rc = r.getU32();
-        if (!r.ok()) return false;
+        if (!r.ok() || rc > MAX_COLLECTION_COUNT) return false;
         out.rules.resize(rc);
         for (uint32_t i = 0; i < rc; ++i) {
             if (!ThresholdRule::decode(r, out.rules[i])) return false;
