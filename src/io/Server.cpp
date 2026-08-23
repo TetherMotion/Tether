@@ -18,6 +18,10 @@ Server::Server(Registry& registry,
 
 Server::~Server() {
     stop();
+    if (loggerHandlerId_ != 0) {
+        Tether::Platform::Logger::instance().removeHandler(loggerHandlerId_);
+        loggerHandlerId_ = 0;
+    }
 }
 
 bool Server::start() {
@@ -27,6 +31,22 @@ bool Server::start() {
     if (!transportServer_->start()) return false;
 
     running_ = true;
+
+    if (loggerHandlerId_ == 0) {
+        loggerHandlerId_ = Tether::Platform::Logger::instance().addHandler(
+            [this](Tether::Platform::LogLevel level, const char* tag, const char* message) {
+                LogSeverity severity = LogSeverity::Info;
+                switch (level) {
+                    case Tether::Platform::LogLevel::Error: severity = LogSeverity::Error; break;
+                    case Tether::Platform::LogLevel::Warn: severity = LogSeverity::Warn; break;
+                    case Tether::Platform::LogLevel::Info: severity = LogSeverity::Info; break;
+                    case Tether::Platform::LogLevel::Debug: severity = LogSeverity::Debug; break;
+                    case Tether::Platform::LogLevel::Verbose: severity = LogSeverity::Trace; break;
+                    default: return;
+                }
+                publishLog(severity, tag ? tag : "", message ? message : "");
+            });
+    }
 
     acceptThread_ = std::thread([this]() { acceptLoop(); });
 
@@ -40,6 +60,11 @@ bool Server::start() {
 void Server::stop() {
     if (!running_) return;
     running_ = false;
+
+    if (loggerHandlerId_ != 0) {
+        Tether::Platform::Logger::instance().removeHandler(loggerHandlerId_);
+        loggerHandlerId_ = 0;
+    }
 
     transportServer_->stop();
 
@@ -78,6 +103,21 @@ size_t Server::activeSessionCount() const {
     return count;
 }
 
+void Server::publishLog(LogSeverity severity, std::string_view component,
+                        std::string_view message, std::string_view location) {
+    std::vector<std::shared_ptr<Session>> sessions;
+    {
+        std::lock_guard<std::mutex> lock(sessionsMutex_);
+        sessions.reserve(sessions_.size());
+        for (const auto& info : sessions_) {
+            if (info.session->isRunning()) sessions.push_back(info.session);
+        }
+    }
+    for (const auto& session : sessions) {
+        session->publishLog(severity, component, message, location);
+    }
+}
+
 void Server::acceptLoop() {
     while (running_.load(std::memory_order_relaxed)) {
         cleanupFinishedSessions();
@@ -100,12 +140,12 @@ void Server::acceptLoop() {
             }
         }
 
-        auto session = std::make_unique<Session>(
+        auto session = std::make_shared<Session>(
             std::move(transport), registry_,
             config_.timestampFn, config_.logFn,
             &config_.serverFeatures, &datalogRecorder_);
 
-        Session* sessionPtr = session.get();
+        std::shared_ptr<Session> sessionPtr = session;
 
         SessionInfo si;
         si.session = std::move(session);

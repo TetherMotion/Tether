@@ -5,6 +5,8 @@
 #include <ctime>
 #include <chrono>
 #include <mutex>
+#include <algorithm>
+#include <vector>
 #include <unistd.h>
 
 // Determine whether to use ANSI color codes for console output. Colors are
@@ -35,7 +37,17 @@ void Logger::log(LogLevel level, const char* tag, const char* format, ...) {
 }
 
 void Logger::logv(LogLevel level, const char* tag, const char* format, va_list args) {
-    if (level > level_) return;
+    LogHandler primaryHandler;
+    std::vector<LogHandler> handlers;
+    bool timestampEnabled;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (level > level_) return;
+        primaryHandler = handler_;
+        timestampEnabled = timestampEnabled_;
+        handlers.reserve(handlers_.size());
+        for (const auto& [id, registered] : handlers_) handlers.push_back(registered);
+    }
 
     // Format the message into a string (handle arbitrarily long messages)
     va_list args_copy;
@@ -72,12 +84,17 @@ void Logger::logv(LogLevel level, const char* tag, const char* format, va_list a
         if (!lines.empty() && lines.back().empty()) lines.pop_back();
     }
 
-    if (handler_) {
+    if (primaryHandler) {
         for (const auto& line : lines) {
-            handler_(level, tag, line.c_str());
+            primaryHandler(level, tag, line.c_str());
         }
-        return;
     }
+    for (const auto& registered : handlers) {
+        for (const auto& line : lines) {
+            registered(level, tag, line.c_str());
+        }
+    }
+    if (primaryHandler || !handlers.empty()) return;
 
     // Default printf-based output with optional ANSI color support; print prefix per line
     const char* levelStr = "?";
@@ -107,7 +124,7 @@ void Logger::logv(LogLevel level, const char* tag, const char* format, va_list a
     for (const auto& line : lines) {
         // Optional ISO8601-like UTC timestamp with millisecond precision
         char timebuf[64] = "";
-        if (timestampEnabled_) {
+        if (timestampEnabled) {
             using namespace std::chrono;
             auto now = system_clock::now();
             auto ms = duration_cast<milliseconds>(now.time_since_epoch()) % 1000;
@@ -135,6 +152,20 @@ void Logger::logv(LogLevel level, const char* tag, const char* format, va_list a
             }
         }
     }
+}
+
+Logger::HandlerId Logger::addHandler(LogHandler handler) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const HandlerId id = nextHandlerId_++;
+    handlers_.emplace_back(id, std::move(handler));
+    return id;
+}
+
+void Logger::removeHandler(HandlerId id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    handlers_.erase(std::remove_if(handlers_.begin(), handlers_.end(),
+                                   [id](const auto& item) { return item.first == id; }),
+                    handlers_.end());
 }
 
 }  // namespace Platform
