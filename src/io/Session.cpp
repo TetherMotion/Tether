@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include <limits>
 
 namespace tether { namespace io {
 
@@ -43,13 +44,13 @@ Session::~Session() {
 // --------------------------------------------------------------------------
 
 void Session::log(const char* fmt, ...) {
-    if (!logFn_) return;
     char buf[256];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
-    logFn_("TetherIOSession", "%s", buf);
+    if (logFn_) logFn_("TetherIOSession", "%s", buf);
+    publishLog(LogSeverity::Info, "TetherIOSession", buf);
 }
 
 // --------------------------------------------------------------------------
@@ -168,6 +169,9 @@ void Session::onSlipMessage(const uint8_t* data, size_t len) {
         case MessageType::StartStream:         handleStartStream(); break;
         case MessageType::StopStream:          handleStopStream(); break;
         case MessageType::GetMetadataReq:      handleGetMetadataReq(body, bodyLen); break;
+        case MessageType::PingReq:              handlePingReq(body, bodyLen); break;
+        case MessageType::SubscribeLogReq:      handleSubscribeLogReq(body, bodyLen); break;
+        case MessageType::UnsubscribeLogReq:    handleUnsubscribeLogReq(body, bodyLen); break;
         case MessageType::SnapshotParamsReq:   handleSnapshotParamsReq(body, bodyLen); break;
         case MessageType::SnapshotSignalsReq:  handleSnapshotSignalsReq(body, bodyLen); break;
         case MessageType::FeatureExchangeReq:  handleFeatureExchangeReq(body, bodyLen); break;
@@ -175,6 +179,8 @@ void Session::onSlipMessage(const uint8_t* data, size_t len) {
         case MessageType::DatalogStatusReq:    handleDatalogStatusReq(); break;
         case MessageType::ConfigureThresholdReq: handleConfigureThresholdReq(body, bodyLen); break;
         case MessageType::DescribeStructReq:   handleDescribeStructReq(body, bodyLen); break;
+        case MessageType::ListFunctionsReq:    handleListFunctionsReq(body, bodyLen); break;
+        case MessageType::CallFunctionReq:     handleCallFunctionReq(body, bodyLen); break;
         default:
             sendError(ErrorCode::UnknownMessageType, "Unknown message type");
             break;
@@ -361,19 +367,28 @@ void Session::handleConfigureStreamReq(const uint8_t* body, size_t len) {
         rowsInChunk_ = 0;
     }
 
-    if (len < 17) { sendError(ErrorCode::InvalidMessage, "ConfigureStreamReq too short"); return; }
+    // ParameterStream field order, with Tether's 32-bit count fields:
+    // trigger, interval_ms, chunk_size, skip_count, trigger_id, entry_count,
+    // entry IDs, filter_count, filters.
+    if (len < 29) { sendError(ErrorCode::InvalidMessage, "ConfigureStream too short"); return; }
 
     BufReader r(body, len);
     uint8_t trigMode   = r.getU8();
-    uint32_t interval  = r.getU32();
+    uint32_t intervalMs = r.getU32();
     uint32_t chunk     = r.getU32();
     uint32_t skip      = r.getU32();
+    uint64_t triggerEntryId = r.getU64();
     uint32_t entryCount = r.getU32();
     if (!r.ok()) { sendError(ErrorCode::InvalidMessage, "parse error"); return; }
 
     if (trigMode > 1) { sendError(ErrorCode::InvalidMessage, "Invalid trigger mode"); return; }
     if (chunk == 0) chunk = 1;
-    if (interval == 0) interval = 1;
+    if (intervalMs == 0) intervalMs = 1;
+    constexpr uint32_t MAX_STREAM_ENTRIES = 65536;
+    if (entryCount > MAX_STREAM_ENTRIES) {
+        sendError(ErrorCode::TooManyEntries, "Too many stream entries");
+        return;
+    }
 
     std::vector<uint64_t> entryIds;
     entryIds.reserve(entryCount);
@@ -383,11 +398,78 @@ void Session::handleConfigureStreamReq(const uint8_t* body, size_t len) {
         entryIds.push_back(eid);
     }
 
+    std::vector<FilterProperty> streamFilters;
+    uint32_t filterCount = r.getU32();
+    if (!r.ok()) { sendError(ErrorCode::InvalidMessage, "Truncated filter count"); return; }
+    if (filterCount > MAX_STREAM_ENTRIES) {
+        sendError(ErrorCode::TooManyEntries, "Too many stream filters");
+        return;
+    }
+    if (filterCount != 0 && !registry_.supportsStreamFilters()) {
+        sendError(ErrorCode::FeatureNotSupported, "Stream filters are not supported");
+        return;
+    }
+    streamFilters.reserve(filterCount);
+    for (uint32_t i = 0; i < filterCount; ++i) {
+        uint8_t nameLen = r.getU8();
+        const uint8_t* name = r.getBytes(nameLen);
+        if (!r.ok() || nameLen == 0) {
+            sendError(ErrorCode::InvalidMessage, "Invalid stream filter name");
+            return;
+        }
+        ValueType filterType = static_cast<ValueType>(r.getU8());
+        if (!r.ok()) {
+            sendError(ErrorCode::InvalidMessage, "Truncated stream filter type");
+            return;
+        }
+        const uint8_t fixedSize = valueTypeSize(filterType);
+        FilterProperty property;
+        property.name.assign(reinterpret_cast<const char*>(name), nameLen);
+        property.value.type = filterType;
+        if (fixedSize != 0) {
+            const uint8_t* value = r.getBytes(fixedSize);
+            if (!r.ok()) {
+                sendError(ErrorCode::InvalidMessage, "Truncated stream filter value");
+                return;
+            }
+            property.value.data.assign(value, value + fixedSize);
+        } else if (!isVariableLength(filterType)) {
+            sendError(ErrorCode::InvalidMessage, "Unknown stream filter type");
+            return;
+        } else {
+            const uint32_t valueLen = r.getVarint();
+            if (!r.ok() || valueLen > MAX_VARIABLE_VALUE_SIZE) {
+                sendError(ErrorCode::InvalidMessage, "Invalid stream filter value length");
+                return;
+            }
+            const uint8_t* value = r.getBytes(valueLen);
+            if (!r.ok()) {
+                sendError(ErrorCode::InvalidMessage, "Truncated stream filter value");
+                return;
+            }
+            property.value.data.assign(value, value + valueLen);
+        }
+        const auto validation = registry_.validateStreamFilter(property);
+        if (!validation.ok) {
+            sendError(ErrorCode::InvalidMessage, validation.message.c_str());
+            return;
+        }
+        streamFilters.push_back(std::move(property));
+    }
+    if (!r.ok() || r.remaining() != 0) {
+        sendError(ErrorCode::InvalidMessage, "Trailing ConfigureStream data");
+        return;
+    }
+
     triggerMode_      = static_cast<TriggerMode>(trigMode);
-    intervalUs_       = interval;
+    const uint64_t intervalUs = static_cast<uint64_t>(intervalMs) * 1000ULL;
+    intervalUs_       = static_cast<uint32_t>(std::min<uint64_t>(
+        std::max<uint64_t>(1, intervalUs), std::numeric_limits<uint32_t>::max()));
     chunkSize_        = chunk;
     skipCount_        = skip;
+    triggerEntryId_   = triggerEntryId;
     configuredEntryIds_ = std::move(entryIds);
+    streamFilters_ = std::move(streamFilters);
     specId_++;
 
     buildCollectPlan();
@@ -397,7 +479,8 @@ void Session::handleConfigureStreamReq(const uint8_t* body, size_t len) {
     chunkWritePos_ = 0;
     lastTriggerValue_.clear();
 
-    // Send ConfigureStreamAck
+    // Send ParameterStream ConfigureAck. Tether deliberately retains 32-bit
+    // resolved-count and row-size fields to support larger catalogs/chunks.
     size_t sz = 1 + 4 + 4 + 4 + collectPlan_.size() * 10;
     if (txRawBuf_.size() < sz) txRawBuf_.resize(sz);
 
@@ -431,6 +514,76 @@ void Session::handleStopStream() {
     if (!streaming_) { sendError(ErrorCode::NotStreaming, "Not streaming"); return; }
     if (rowsInChunk_ > 0) sendStreamData();
     streaming_ = false;
+}
+
+void Session::handlePingReq(const uint8_t* body, size_t len) {
+    BufReader r(body, len);
+    const uint32_t nonce = r.getVarint();
+    if (!r.ok() || r.remaining() != 0) {
+        sendError(ErrorCode::InvalidMessage, "Invalid ping");
+        return;
+    }
+    sendPongResp(nonce);
+}
+
+void Session::handleSubscribeLogReq(const uint8_t* body, size_t len) {
+    BufReader r(body, len);
+    const auto severity = static_cast<LogSeverity>(r.getU8());
+    auto readFilter = [&r](std::string& out) {
+        const uint16_t length = r.getU16();
+        const uint8_t* bytes = r.getBytes(length);
+        if (!r.ok()) return false;
+        out.assign(reinterpret_cast<const char*>(bytes), length);
+        return true;
+    };
+
+    LogSubscription subscription;
+    subscription.minSeverity = severity;
+    if (static_cast<uint8_t>(severity) > static_cast<uint8_t>(LogSeverity::Critical) ||
+        !readFilter(subscription.componentFilter) ||
+        !readFilter(subscription.messageFilter) ||
+        !readFilter(subscription.locationFilter) || r.remaining() != 0) {
+        sendError(ErrorCode::InvalidMessage, "Invalid log subscription");
+        return;
+    }
+
+    uint32_t subscriptionId;
+    bool capacityExceeded = false;
+    {
+        std::lock_guard<std::mutex> lock(sendMutex_);
+        if (logSubscriptions_.size() >= 16) {
+            capacityExceeded = true;
+        } else {
+            subscription.id = nextLogSubscriptionId_++;
+            if (subscription.id == 0) subscription.id = nextLogSubscriptionId_++;
+            subscriptionId = subscription.id;
+            logSubscriptions_.push_back(std::move(subscription));
+        }
+    }
+    if (capacityExceeded) {
+        sendSubscribeLogResp(0, false, "Too many log subscriptions");
+        return;
+    }
+    sendSubscribeLogResp(subscriptionId, true);
+}
+
+void Session::handleUnsubscribeLogReq(const uint8_t* body, size_t len) {
+    BufReader r(body, len);
+    const uint32_t id = r.getVarint();
+    if (!r.ok() || r.remaining() != 0) {
+        sendError(ErrorCode::InvalidMessage, "Invalid log subscription ID");
+        return;
+    }
+
+    bool found = false;
+    {
+        std::lock_guard<std::mutex> lock(sendMutex_);
+        const auto it = std::find_if(logSubscriptions_.begin(), logSubscriptions_.end(),
+                                     [id](const LogSubscription& item) { return item.id == id; });
+        found = it != logSubscriptions_.end();
+        if (found) logSubscriptions_.erase(it);
+    }
+    sendUnsubscribeLogResp(id, found);
 }
 
 void Session::handleGetMetadataReq(const uint8_t* body, size_t len) {
@@ -592,7 +745,10 @@ void Session::handleSnapshotSignalsReq(const uint8_t* body, size_t len) {
 
 void Session::handleFeatureExchangeReq(const uint8_t* body, size_t len) {
     BufReader r(body, len);
-    FeatureSet::decode(r, clientFeatures_);
+    if (!FeatureSet::decode(r, clientFeatures_) || r.remaining() != 0) {
+        sendError(ErrorCode::InvalidMessage, "Invalid feature exchange");
+        return;
+    }
 
     // Build response with server features
     FeatureSet response;
@@ -607,6 +763,18 @@ void Session::handleFeatureExchangeReq(const uint8_t* body, size_t len) {
     if (!hasVersion) {
         response.features.push_back(Feature::makeU32("protocol_version", PROTOCOL_VERSION));
     }
+    const auto advertise = [&response](std::string_view name) {
+        if (!response.find(std::string(name))) {
+            response.features.push_back(Feature::makeBool(std::string(name), true));
+        }
+    };
+    advertise("supports_ping");
+    advertise("supports_log_subscriptions");
+    advertise("supports_extended_value_types");
+    advertise("supports_large_counts");
+    advertise("supports_signals");
+    advertise("supports_functions");
+    if (registry_.supportsStreamFilters()) advertise("supports_stream_filters");
 
     size_t sz = 1 + 4 + response.features.size() * 64;
     if (txRawBuf_.size() < sz) txRawBuf_.resize(sz);
@@ -705,11 +873,257 @@ void Session::handleDescribeStructReq(const uint8_t* body, size_t len) {
     if (w.ok()) sendRaw(txRawBuf_.data(), w.pos);
 }
 
+void Session::handleListFunctionsReq(const uint8_t* body, size_t len) {
+    if (len != 8) {
+        sendError(ErrorCode::InvalidMessage, "Invalid ListFunctions request");
+        return;
+    }
+    BufReader r(body, len);
+    const uint32_t offset = r.getU32();
+    const uint32_t maxCount = r.getU32();
+    if (!r.ok()) {
+        sendError(ErrorCode::InvalidMessage, "Invalid ListFunctions request");
+        return;
+    }
+
+    const auto functions = registry_.functionPage(offset, maxCount);
+    const uint32_t total = registry_.functionCount();
+    size_t size = 1 + 4 + 4 + 4;
+    const auto addStringSize = [&size](std::string_view value) {
+        if (value.size() > MAX_STRING_SIZE || size > MAX_MESSAGE_SIZE - 2 - value.size()) {
+            return false;
+        }
+        size += 2 + value.size();
+        return true;
+    };
+    for (const auto& function : functions) {
+        if (size > MAX_MESSAGE_SIZE - (8 + 4)) {
+            sendError(ErrorCode::TooManyEntries, "Function catalog response too large");
+            return;
+        }
+        size += 8;
+        if (!addStringSize(function.name()) || !addStringSize(function.description()) ||
+            !addStringSize(function.group()) || function.parameterCount() > MAX_COLLECTION_COUNT) {
+            sendError(ErrorCode::TooManyEntries, "Function catalog response too large");
+            return;
+        }
+        size += 4;
+        for (const auto& parameter : function.parameters()) {
+            if (!addStringSize(parameter.name) || !addStringSize(parameter.description) ||
+                size > MAX_MESSAGE_SIZE - 1 - 1 - 8 - 8 - 4 - 4) {
+                sendError(ErrorCode::TooManyEntries, "Function catalog response too large");
+                return;
+            }
+            size += 1 + 1 + 8 + 8 + 4;
+            if (parameter.hasDefault) {
+                if (parameter.defaultValue.size() > MAX_VARIABLE_VALUE_SIZE ||
+                    size > MAX_MESSAGE_SIZE - MAX_VARINT_SIZE - parameter.defaultValue.size()) {
+                    sendError(ErrorCode::TooManyEntries, "Function catalog response too large");
+                    return;
+                }
+                size += MAX_VARINT_SIZE + parameter.defaultValue.size();
+            }
+            if (parameter.metadata.size() > MAX_COLLECTION_COUNT) {
+                sendError(ErrorCode::TooManyEntries, "Function metadata too large");
+                return;
+            }
+            size += 4;
+            for (const auto& [key, value] : parameter.metadata) {
+                if (!addStringSize(key) || !addStringSize(value)) {
+                    sendError(ErrorCode::TooManyEntries, "Function metadata too large");
+                    return;
+                }
+            }
+        }
+        if (size > MAX_MESSAGE_SIZE - 1) {
+            sendError(ErrorCode::TooManyEntries, "Function catalog response too large");
+            return;
+        }
+        size += 1;
+        if (function.returnValue().present) {
+            const auto& result = function.returnValue();
+            if (!addStringSize(result.name) || !addStringSize(result.description) ||
+                size > MAX_MESSAGE_SIZE - 1 - 1 - 8 - 8 - 4) {
+                sendError(ErrorCode::TooManyEntries, "Function catalog response too large");
+                return;
+            }
+            size += 1 + 1 + 8 + 8 + 4;
+            if (result.metadata.size() > MAX_COLLECTION_COUNT) {
+                sendError(ErrorCode::TooManyEntries, "Function metadata too large");
+                return;
+            }
+            size += 4;
+            for (const auto& [key, value] : result.metadata) {
+                if (!addStringSize(key) || !addStringSize(value)) {
+                    sendError(ErrorCode::TooManyEntries, "Function metadata too large");
+                    return;
+                }
+            }
+        }
+        if (function.metadata().size() > MAX_COLLECTION_COUNT) {
+            sendError(ErrorCode::TooManyEntries, "Function metadata too large");
+            return;
+        }
+        size += 4;
+        for (const auto& [key, value] : function.metadata()) {
+            if (!addStringSize(key) || !addStringSize(value)) {
+                sendError(ErrorCode::TooManyEntries, "Function metadata too large");
+                return;
+            }
+        }
+    }
+
+    txRawBuf_.resize(size);
+    BufWriter w(txRawBuf_.data(), txRawBuf_.size());
+    w.putU8(static_cast<uint8_t>(MessageType::ListFunctionsResp));
+    w.putU32(total);
+    w.putU32(offset);
+    w.putU32(static_cast<uint32_t>(functions.size()));
+    for (const auto& function : functions) {
+        const auto writeString = [&w](std::string_view value) {
+            w.putStr16(value.data(), value.size());
+        };
+        w.putU64(function.id());
+        writeString(function.name());
+        writeString(function.description());
+        writeString(function.group());
+        w.putU32(static_cast<uint32_t>(function.parameterCount()));
+        for (const auto& parameter : function.parameters()) {
+            writeString(parameter.name);
+            writeString(parameter.description);
+            w.putU8(static_cast<uint8_t>(parameter.type));
+            w.putU8(parameter.flags());
+            w.putU64(parameter.enumReference);
+            w.putU64(parameter.structReference);
+            w.putU32(parameter.maxValueSize);
+            if (parameter.hasDefault) {
+                w.putVarint(static_cast<uint32_t>(parameter.defaultValue.size()));
+                w.putBytes(parameter.defaultValue.data(), parameter.defaultValue.size());
+            }
+            w.putU32(static_cast<uint32_t>(parameter.metadata.size()));
+            for (const auto& [key, value] : parameter.metadata) {
+                writeString(key);
+                writeString(value);
+            }
+        }
+        const auto& result = function.returnValue();
+        w.putU8(result.present ? 1 : 0);
+        if (result.present) {
+            writeString(result.name);
+            writeString(result.description);
+            w.putU8(static_cast<uint8_t>(result.type));
+            w.putU8((result.enumReference != 0 ? FunctionParameterFlags::HasEnum : 0) |
+                    (result.structReference != 0 ? FunctionParameterFlags::HasStruct : 0));
+            w.putU64(result.enumReference);
+            w.putU64(result.structReference);
+            w.putU32(result.maxValueSize);
+            w.putU32(static_cast<uint32_t>(result.metadata.size()));
+            for (const auto& [key, value] : result.metadata) {
+                writeString(key);
+                writeString(value);
+            }
+        }
+        w.putU32(static_cast<uint32_t>(function.metadata().size()));
+        for (const auto& [key, value] : function.metadata()) {
+            writeString(key);
+            writeString(value);
+        }
+    }
+    if (w.ok()) sendRaw(txRawBuf_.data(), w.pos);
+}
+
+void Session::handleCallFunctionReq(const uint8_t* body, size_t len) {
+    if (len < 12) {
+        sendError(ErrorCode::InvalidMessage, "Invalid CallFunction request");
+        return;
+    }
+    BufReader r(body, len);
+    const uint64_t functionId = r.getU64();
+    const uint32_t argumentCount = r.getU32();
+    if (!r.ok() || argumentCount > MAX_COLLECTION_COUNT) {
+        sendError(ErrorCode::InvalidMessage, "Invalid function argument count");
+        return;
+    }
+    const FunctionView function = registry_.findFunction(functionId);
+    if (!function) {
+        sendError(ErrorCode::InvalidId, "Function not found");
+        return;
+    }
+    if (argumentCount > function.parameterCount()) {
+        sendError(ErrorCode::FunctionInvocationError, "Too many function arguments");
+        return;
+    }
+
+    std::vector<FunctionArgument> supplied(function.parameterCount());
+    std::vector<bool> seen(function.parameterCount(), false);
+    for (uint32_t index = 0; index < argumentCount; ++index) {
+        FunctionArgument argument;
+        if (!decodeFunctionTlv(r, argument) || argument.position >= function.parameterCount()) {
+            sendError(ErrorCode::FunctionInvocationError, "Invalid function argument TLV");
+            return;
+        }
+        const auto position = static_cast<size_t>(argument.position);
+        const auto& parameter = function.parameters()[position];
+        if (seen[position] || argument.type != parameter.type) {
+            sendError(ErrorCode::FunctionInvocationError, "Wrong or duplicate function argument");
+            return;
+        }
+        const auto fixedSize = valueTypeSize(parameter.type);
+        if ((fixedSize != 0 && argument.value.size() != fixedSize) ||
+            argument.value.size() > parameter.maxValueSize && parameter.maxValueSize != 0) {
+            sendError(ErrorCode::FunctionInvocationError, "Invalid function argument size");
+            return;
+        }
+        supplied[position] = std::move(argument);
+        seen[position] = true;
+    }
+    if (!r.ok() || r.remaining() != 0) {
+        sendError(ErrorCode::FunctionInvocationError, "Trailing function call data");
+        return;
+    }
+
+    for (size_t position = 0; position < function.parameterCount(); ++position) {
+        const auto& parameter = function.parameters()[position];
+        if (!seen[position]) {
+            if (!parameter.optional || !parameter.hasDefault) {
+                sendError(ErrorCode::FunctionInvocationError, "Missing required function argument");
+                return;
+            }
+            supplied[position].position = static_cast<uint32_t>(position);
+            supplied[position].type = parameter.type;
+            supplied[position].value = parameter.defaultValue;
+            supplied[position].provided = false;
+        }
+    }
+
+    FunctionCallResult result = function.invoke(supplied);
+    const auto& returnValue = function.returnValue();
+    if (result.success) {
+        const size_t fixedSize = returnValue.present ? valueTypeSize(returnValue.type) : 0;
+        const bool validReturn =
+            (returnValue.present && fixedSize != 0 &&
+             result.returnValue.size() == fixedSize) ||
+            (returnValue.present && fixedSize == 0 &&
+             result.returnValue.size() <=
+                 (returnValue.maxValueSize != 0 ? returnValue.maxValueSize
+                                                : MAX_VARIABLE_VALUE_SIZE)) ||
+            (!returnValue.present && result.returnValue.empty());
+        if (!validReturn) {
+            result.success = false;
+            result.error = ErrorCode::FunctionInvocationError;
+            result.errorMessage = "Invalid function return value";
+            result.returnValue.clear();
+        }
+    }
+    sendFunctionCallResponse(functionId, returnValue, result);
+}
+
 // --------------------------------------------------------------------------
 // Response senders
 // --------------------------------------------------------------------------
 
 bool Session::sendRaw(const uint8_t* data, size_t len) {
+    std::lock_guard<std::mutex> lock(sendMutex_);
     size_t encLen = SLIPStream::encoded_length(data, len);
     if (encLen == SLIPStream::ENCODE_ERROR) return false;
 
@@ -720,6 +1134,124 @@ bool Session::sendRaw(const uint8_t* data, size_t len) {
     if (written == SLIPStream::ENCODE_ERROR) return false;
 
     return transport_->send(txEncBuf_.data(), written);
+}
+
+void Session::sendPongResp(uint32_t nonce) {
+    uint8_t buf[1 + MAX_VARINT_SIZE];
+    BufWriter w(buf, sizeof(buf));
+    w.putU8(static_cast<uint8_t>(MessageType::PongResp));
+    w.putVarint(nonce);
+    if (w.ok()) sendRaw(buf, w.pos);
+}
+
+void Session::sendSubscribeLogResp(uint32_t subscriptionId, bool success,
+                                   std::string_view error) {
+    const size_t errorLength = std::min(error.size(), static_cast<size_t>(UINT16_MAX));
+    const size_t totalLength = 1 + MAX_VARINT_SIZE + 1 + (success ? 0 : 2 + errorLength);
+    if (txRawBuf_.size() < totalLength) txRawBuf_.resize(totalLength);
+
+    BufWriter w(txRawBuf_.data(), totalLength);
+    w.putU8(static_cast<uint8_t>(MessageType::SubscribeLogResp));
+    w.putVarint(subscriptionId);
+    w.putU8(success ? 0 : 1);
+    if (!success) {
+        w.putStr16(error.data(), errorLength);
+    }
+    if (w.ok()) sendRaw(txRawBuf_.data(), w.pos);
+}
+
+void Session::sendUnsubscribeLogResp(uint32_t subscriptionId, bool found) {
+    uint8_t buf[1 + MAX_VARINT_SIZE + 1];
+    BufWriter w(buf, sizeof(buf));
+    w.putU8(static_cast<uint8_t>(MessageType::UnsubscribeLogResp));
+    w.putVarint(subscriptionId);
+    w.putU8(found ? 0 : 1);
+    if (w.ok()) sendRaw(buf, w.pos);
+}
+
+bool Session::matchesLog(const LogSubscription& subscription,
+                         const LogRecord& record) const {
+    if (static_cast<uint8_t>(record.severity) < static_cast<uint8_t>(subscription.minSeverity)) {
+        return false;
+    }
+    const auto contains = [](const std::string& filter, const std::string& value) {
+        return filter.empty() || value.find(filter) != std::string::npos;
+    };
+    return contains(subscription.componentFilter, record.component) &&
+           contains(subscription.messageFilter, record.message) &&
+           contains(subscription.locationFilter, record.location);
+}
+
+void Session::sendLogData(const LogRecord& record) {
+    const size_t componentLength = std::min(record.component.size(), static_cast<size_t>(UINT16_MAX));
+    const size_t messageLength = std::min(record.message.size(), static_cast<size_t>(UINT16_MAX));
+    const size_t locationLength = std::min(record.location.size(), static_cast<size_t>(UINT16_MAX));
+    const size_t totalLength = 1 + 8 + 1 + 2 + componentLength +
+                               2 + messageLength + 2 + locationLength;
+    std::vector<uint8_t> raw(totalLength);
+    BufWriter w(raw.data(), raw.size());
+    w.putU8(static_cast<uint8_t>(MessageType::LogData));
+    w.putU64(record.timestampUs);
+    w.putU8(static_cast<uint8_t>(record.severity));
+    w.putStr16(record.component.data(), componentLength);
+    w.putStr16(record.message.data(), messageLength);
+    w.putStr16(record.location.data(), locationLength);
+    if (w.ok()) sendRaw(raw.data(), w.pos);
+}
+
+void Session::sendFunctionCallResponse(uint64_t functionId,
+                                       const FunctionReturn& returnValue,
+                                       const FunctionCallResult& result) {
+    const size_t messageSize = std::min(result.errorMessage.size(), MAX_STRING_SIZE);
+    const size_t valueSize = std::min(result.returnValue.size(), MAX_VARIABLE_VALUE_SIZE);
+    const bool hasReturnValue = result.success && returnValue.present;
+    const size_t totalSize = 1 + 8 + 1 + 4 + 2 + messageSize +
+                             (hasReturnValue ? FUNCTION_TLV_HEADER_SIZE + valueSize : 0);
+    if (totalSize > MAX_MESSAGE_SIZE) {
+        sendError(ErrorCode::InternalError, "Function response too large");
+        return;
+    }
+    std::vector<uint8_t> raw(totalSize);
+    BufWriter writer(raw.data(), raw.size());
+    writer.putU8(static_cast<uint8_t>(MessageType::CallFunctionResp));
+    writer.putU64(functionId);
+    writer.putU8(result.success ? 0 : 1);
+    if (!result.success) {
+        writer.putU32(static_cast<uint32_t>(result.error));
+        writer.putStr16(result.errorMessage.data(), messageSize);
+    } else {
+        writer.putU32(0);
+        writer.putU16(0);
+        if (hasReturnValue) {
+            encodeFunctionTlv(writer, 0, returnValue.type,
+                              result.returnValue.data(), valueSize);
+        }
+    }
+    if (writer.ok()) sendRaw(raw.data(), writer.pos);
+}
+
+void Session::publishLog(LogSeverity severity, std::string_view component,
+                         std::string_view message, std::string_view location) {
+    LogRecord record;
+    record.timestampUs = getTimestampUs_ ? getTimestampUs_() : 0;
+    record.severity = severity;
+    record.component.assign(component);
+    record.message.assign(message);
+    record.location.assign(location);
+
+    // The worker owns subscription mutation. Copy the matching decision before
+    // sending so an asynchronous logger never races with subscribe/unsubscribe.
+    bool matched = false;
+    {
+        std::lock_guard<std::mutex> lock(sendMutex_);
+        for (const auto& subscription : logSubscriptions_) {
+            if (matchesLog(subscription, record)) {
+                matched = true;
+                break;
+            }
+        }
+    }
+    if (matched) sendLogData(record);
 }
 
 void Session::sendError(ErrorCode code, const char* msg) {
@@ -783,6 +1315,8 @@ void Session::buildCollectPlan() {
 }
 
 void Session::collectOneRow() {
+    std::vector<std::vector<uint8_t>> currentValues;
+    if (!streamFilters_.empty()) currentValues.resize(collectPlan_.size());
     if (hasVariableEntries_) {
         // Ensure buffer has room
         if (chunkWritePos_ + fullRowSize_ > chunkBuf_.size()) {
@@ -790,6 +1324,7 @@ void Session::collectOneRow() {
         }
 
         uint8_t* row = chunkBuf_.data() + chunkWritePos_;
+        uint8_t* rowStart = row;
 
         uint64_t ts = getTimestampUs_();
         std::memcpy(row, &ts, 8);
@@ -798,16 +1333,28 @@ void Session::collectOneRow() {
         for (size_t i = 0; i < collectPlan_.size(); ++i) {
             const auto& slot = collectPlan_[i];
             if (slot.isVariable) {
-                uint8_t tmp[1024];
-                size_t vlen = slot.entry.readVar(tmp, sizeof(tmp));
+                std::vector<uint8_t> tmp(slot.maxValueSize);
+                size_t vlen = slot.entry.readVar(tmp.data(), tmp.size());
+                vlen = std::min(vlen, tmp.size());
+                if (!currentValues.empty()) {
+                    currentValues[i].assign(tmp.begin(), tmp.begin() + vlen);
+                }
                 size_t vBytes = encodeVarint(row, MAX_VARINT_SIZE, static_cast<uint32_t>(vlen));
                 row += vBytes;
-                std::memcpy(row, tmp, vlen);
+                std::memcpy(row, tmp.data(), vlen);
                 row += vlen;
             } else {
                 slot.entry.read(row);
+                if (!currentValues.empty()) {
+                    currentValues[i].assign(row, row + slot.valueSize);
+                }
                 row += slot.valueSize;
             }
+        }
+
+        if (!passesStreamFilters(currentValues)) {
+            chunkWritePos_ = static_cast<size_t>(rowStart - chunkBuf_.data());
+            return;
         }
 
         chunkWritePos_ = static_cast<size_t>(row - chunkBuf_.data());
@@ -817,6 +1364,7 @@ void Session::collectOneRow() {
 
     size_t offset = static_cast<size_t>(rowsInChunk_) * fullRowSize_;
     uint8_t* row = chunkBuf_.data() + offset;
+    uint8_t* rowStart = row;
 
     uint64_t ts = getTimestampUs_();
     std::memcpy(row, &ts, 8);
@@ -825,6 +1373,9 @@ void Session::collectOneRow() {
     for (size_t i = 0; i < collectPlan_.size(); ++i) {
         const auto& slot = collectPlan_[i];
         slot.entry.read(row);
+        if (!currentValues.empty()) {
+            currentValues[i].assign(row, row + slot.valueSize);
+        }
 
         // Threshold check
         if (!lastValues_[i].empty()) {
@@ -842,7 +1393,28 @@ void Session::collectOneRow() {
         row += slot.valueSize;
     }
 
+    if (!passesStreamFilters(currentValues)) {
+        std::memset(rowStart, 0, fullRowSize_);
+        return;
+    }
+
     rowsInChunk_++;
+}
+
+bool Session::passesStreamFilters(const std::vector<std::vector<uint8_t>>& values) const {
+    if (streamFilters_.empty()) return true;
+    for (const auto& filter : streamFilters_) {
+        bool matched = false;
+        for (size_t i = 0; i < collectPlan_.size(); ++i) {
+            if (collectPlan_[i].entry.name() == filter.name &&
+                values.size() > i && values[i] == filter.value.data) {
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) return false;
+    }
+    return true;
 }
 
 bool Session::shouldTrigger() {

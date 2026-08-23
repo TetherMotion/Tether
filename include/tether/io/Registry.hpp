@@ -23,11 +23,13 @@
 
 #include "tether/io/Protocol.hpp"
 #include "tether/io/BinaryStruct.hpp"
+#include "tether/io/Function.hpp"
 #include <cstdint>
 #include <cstddef>
 #include <string>
 #include <string_view>
 #include <vector>
+#include <deque>
 #include <map>
 #include <functional>
 #include <mutex>
@@ -233,6 +235,18 @@ public:
     /// Find a signal by ID.
     EntryView findSignal(uint64_t id) const;
 
+    /// Register a fully annotated function. IDs are unique across all catalogs.
+    bool addFunction(FunctionEntry entry);
+
+    /// Total registered function count.
+    uint32_t functionCount() const;
+
+    /// Get a page of function descriptors.
+    std::vector<FunctionView> functionPage(uint32_t offset, uint32_t maxCount) const;
+
+    /// Find a function by ID.
+    FunctionView findFunction(uint64_t id) const;
+
     /// Register a catalog change listener. Returns a handle for removal.
     size_t addChangeListener(CatalogChangeListener listener);
 
@@ -242,13 +256,22 @@ public:
     /// Get a monotonically increasing revision counter (incremented on each add).
     uint32_t revision() const { return revision_; }
 
+    /// Configure the declarative stream-filter properties supported by this registry.
+    void defineStreamFilterProperty(FilterPropertyDef definition);
+    StreamFilterSchema::Result validateStreamFilter(const FilterProperty& property) const;
+    bool supportsStreamFilters() const;
+
 private:
     void notifyChange();
 
     mutable std::mutex mutex_;
-    std::vector<ParamEntry>  params_;
-    std::vector<SignalEntry> signals_;
+    // EntryView intentionally contains non-owning pointers. Deque storage
+    // keeps those pointers valid when entries are appended dynamically.
+    std::deque<ParamEntry>  params_;
+    std::deque<SignalEntry> signals_;
+    std::deque<FunctionEntry> functions_;
     std::map<uint64_t, EntryKind> idMap_;  ///< id → kind for fast lookup
+    StreamFilterSchema filterSchema_;
     uint32_t revision_ = 0;
 
     std::map<size_t, CatalogChangeListener> listeners_;

@@ -28,6 +28,7 @@
 #include <vector>
 #include <atomic>
 #include <memory>
+#include <mutex>
 
 namespace tether { namespace io {
 
@@ -77,6 +78,11 @@ public:
     /// True while run() is executing.
     bool isRunning() const { return running_.load(std::memory_order_relaxed); }
 
+    /// Publish a log record to all matching subscriptions on this session.
+    /// Safe to call from a thread other than the session worker.
+    void publishLog(LogSeverity severity, std::string_view component,
+                    std::string_view message, std::string_view location = {});
+
 private:
     // ---- SLIP deframing ----
     void feedSlipData(const uint8_t* data, size_t len);
@@ -91,6 +97,9 @@ private:
     void handleConfigureStreamReq(const uint8_t* body, size_t len);
     void handleStartStream();
     void handleStopStream();
+    void handlePingReq(const uint8_t* body, size_t len);
+    void handleSubscribeLogReq(const uint8_t* body, size_t len);
+    void handleUnsubscribeLogReq(const uint8_t* body, size_t len);
     void handleGetMetadataReq(const uint8_t* body, size_t len);
     void handleSnapshotParamsReq(const uint8_t* body, size_t len);
     void handleSnapshotSignalsReq(const uint8_t* body, size_t len);
@@ -99,16 +108,28 @@ private:
     void handleDatalogStatusReq();
     void handleConfigureThresholdReq(const uint8_t* body, size_t len);
     void handleDescribeStructReq(const uint8_t* body, size_t len);
+    void handleListFunctionsReq(const uint8_t* body, size_t len);
+    void handleCallFunctionReq(const uint8_t* body, size_t len);
 
     // ---- Response senders ----
     bool sendRaw(const uint8_t* data, size_t len);
     void sendError(ErrorCode code, const char* msg);
     void sendCatalogChanged();
+    void sendPongResp(uint32_t nonce);
+    void sendSubscribeLogResp(uint32_t subscriptionId, bool success,
+                              std::string_view error = {});
+    void sendUnsubscribeLogResp(uint32_t subscriptionId, bool found);
+    bool matchesLog(const LogSubscription& subscription,
+                    const LogRecord& record) const;
+    void sendLogData(const LogRecord& record);
+    void sendFunctionCallResponse(uint64_t functionId, const FunctionReturn& returnValue,
+                                  const FunctionCallResult& result);
 
     // ---- Streaming internals ----
     void buildCollectPlan();
     void collectOneRow();
     bool shouldTrigger();
+    bool passesStreamFilters(const std::vector<std::vector<uint8_t>>& values) const;
     void handleStreamingCycle();
     void sendStreamData();
 
@@ -131,11 +152,13 @@ private:
     bool         configured_      = false;
     bool         streaming_       = false;
     TriggerMode  triggerMode_     = TriggerMode::Time;
-    uint32_t     intervalUs_      = 100000;     ///< Microseconds between samples
+    uint32_t     intervalUs_      = 100000;     ///< Internal microseconds between samples
     uint32_t     chunkSize_       = 1;
     uint32_t     skipCount_       = 0;
+    uint64_t     triggerEntryId_  = 0;
     uint32_t     specId_          = 0;
     std::vector<uint64_t> configuredEntryIds_;
+    std::vector<FilterProperty> streamFilters_;
 
     // ==== Collection plan ====
     std::vector<CollectSlot> collectPlan_;
@@ -163,6 +186,11 @@ private:
 
     // ==== Client features (received via FeatureExchangeReq) ====
     FeatureSet clientFeatures_;
+
+    // ==== Log subscriptions ====
+    std::vector<LogSubscription> logSubscriptions_;
+    uint32_t nextLogSubscriptionId_ = 1;
+    mutable std::mutex sendMutex_;
 
     // ==== SLIP receive buffers ====
     static constexpr size_t SLIP_RX_BUF_SIZE = 8192;
