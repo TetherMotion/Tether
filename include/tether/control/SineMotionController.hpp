@@ -81,7 +81,7 @@ public:
      * @brief Start oscillation
      * @param initialPhase Starting phase (radians)
      */
-    void start(double initialPhase = 0.0);
+    void start(double initialPhase);
 
     /**
      * @brief Stop oscillation with smooth envelope
