@@ -6,6 +6,9 @@
 #include <functional>
 #include <string>
 #include <algorithm>
+#include <mutex>
+#include <utility>
+#include <vector>
 
 namespace Tether {
 namespace Platform {
@@ -36,26 +39,47 @@ class Logger {
 public:
     static Logger& instance();
 
-    void setLevel(LogLevel level) { level_ = level; }
-    LogLevel getLevel() const { return level_; }
+    void setLevel(LogLevel level) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        level_ = level;
+    }
+    LogLevel getLevel() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return level_;
+    }
 
     void log(LogLevel level, const char* tag, const char* format, ...);
     void logv(LogLevel level, const char* tag, const char* format, va_list args);
 
     using LogHandler = std::function<void(LogLevel, const char*, const char*)>;
-    void setHandler(LogHandler handler) { handler_ = handler; }
+    void setHandler(LogHandler handler) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        handler_ = std::move(handler);
+    }
+    using HandlerId = size_t;
+    HandlerId addHandler(LogHandler handler);
+    void removeHandler(HandlerId id);
 
     // Enable or disable printing ISO8601-like timestamps on console output
     // (default: enabled). This affects the default printf-based output only
     // and does not modify messages delivered to a custom handler.
-    void setTimestampEnabled(bool enabled) { timestampEnabled_ = enabled; }
-    bool isTimestampEnabled() const { return timestampEnabled_; }
+    void setTimestampEnabled(bool enabled) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        timestampEnabled_ = enabled;
+    }
+    bool isTimestampEnabled() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return timestampEnabled_;
+    }
 
 private:
     Logger() = default;
     LogLevel level_ = LogLevel::Info;
     LogHandler handler_;
+    std::vector<std::pair<HandlerId, LogHandler>> handlers_;
+    HandlerId nextHandlerId_ = 1;
     bool timestampEnabled_ = true;
+    mutable std::mutex mutex_;
 };
 
 // Convenience macros matching ESP-IDF style

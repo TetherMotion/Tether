@@ -14,8 +14,10 @@
 #include "tether/io/Transport.hpp"
 #include "tether/io/FeatureExchange.hpp"
 #include "tether/io/Datalogging.hpp"
+#include "logging/Logger.hpp"
 #include <cstdint>
 #include <cstddef>
+#include <string_view>
 #include <vector>
 #include <memory>
 #include <mutex>
@@ -63,6 +65,10 @@ public:
     /// Access the server's datalogging recorder (may be null).
     DatalogRecorder* datalogRecorder() { return &datalogRecorder_; }
 
+    /// Publish a log record to all matching client subscriptions.
+    void publishLog(LogSeverity severity, std::string_view component,
+                    std::string_view message, std::string_view location = {});
+
 private:
     void acceptLoop();
     void cleanupFinishedSessions();
@@ -73,7 +79,7 @@ private:
     std::atomic<bool> running_{false};
 
     struct SessionInfo {
-        std::unique_ptr<Session> session;
+        std::shared_ptr<Session> session;
         std::thread thread;
     };
     mutable std::mutex sessionsMutex_;
@@ -81,6 +87,7 @@ private:
     std::thread acceptThread_;
 
     DatalogRecorder datalogRecorder_;
+    Tether::Platform::Logger::HandlerId loggerHandlerId_ = 0;
 };
 
 }} // namespace tether::io
