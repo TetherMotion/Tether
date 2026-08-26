@@ -14,7 +14,6 @@
 #include "tether/profiles/cia402/DS402Master.hpp"
 
 #include "tether/hal/IEthernet.hpp"
-#include "tether/hal/NetworkInterfaceEnumerator.hpp"
 #include "common/ExampleHelpers.hpp"
 
 namespace Tether::Examples {
@@ -185,13 +184,14 @@ struct MotionNativeArgs {
 
 /// Parse the standard motion-native arguments (`-i`/`--interface`,
 /// `-d`/`--duration`).  Prints usage to stderr and returns `false` on failure.
-/// If no interface is given, auto-selects the sole physical Ethernet interface.
+/// If no interface is given, auto-selects the sole physical Ethernet interface
+/// via the shared resolveInterface() helper.
 inline bool parseMotionNativeArgs(int argc, char** argv,
                                   const char* program_name,
                                   MotionNativeArgs& out)
 {
     argparse::ArgumentParser program(program_name);
-    program.add_argument("-i", "--interface").default_value(std::string(""));
+    Tether::Examples::addInterfaceArg(program);
     program.add_argument("-d", "--duration").scan<'g', double>().default_value(10.0);
 
     try {
@@ -201,33 +201,12 @@ inline bool parseMotionNativeArgs(int argc, char** argv,
         return false;
     }
 
-    std::string raw_iface = program.get<std::string>("--interface");
-    if (raw_iface.empty()) {
-        auto physIfaces = EtherCAT::HAL::getPhysicalEthernetInterfaces();
-        if (physIfaces.size() == 1) {
-            TETHER_LOGI(program_name, "No --interface given; auto-selected '%s'",
-                        physIfaces[0].name.c_str());
-            out.interface = physIfaces[0].name;
-        } else if (physIfaces.empty()) {
-            TETHER_LOGE(program_name, "No --interface given and no physical "
-                                      "Ethernet interfaces found on this system");
-            return false;
-        } else {
-            std::string names;
-            for (const auto& iface : physIfaces) {
-                if (!names.empty()) names += ", ";
-                names += iface.name;
-            }
-            TETHER_LOGE(program_name, "No --interface given and %zu physical "
-                                      "Ethernet interfaces found; please specify "
-                                      "one with -i: %s",
-                        physIfaces.size(), names.c_str());
-            return false;
-        }
-    } else {
-        out.interface = raw_iface;
+    out.interface = Tether::Examples::resolveInterface(
+        program.get<std::string>("--interface"), program_name);
+    if (out.interface.empty()) {
+        return false;
     }
-    out.duration  = program.get<double>("--duration");
+    out.duration = program.get<double>("--duration");
     return true;
 }
 

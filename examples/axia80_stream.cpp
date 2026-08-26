@@ -6,7 +6,7 @@
  * reads calibration data via SDO, and streams 6-DOF force/torque data.
  *
  * Usage (Linux, requires root or CAP_NET_RAW):
- *   ./axia80_stream              # uses eth0, streams engineering units
+ *   ./axia80_stream              # auto-select iface, streams engineering units
  *   ./axia80_stream -i enp3s0  # specify interface
  *   ./axia80_stream --raw      # stream raw sensor counts
  *   ./axia80_stream --dc off   # disable DC/Sync0
@@ -354,8 +354,9 @@ int main(int argc, char** argv) {
     // ---- Argument parsing ----
     argparse::ArgumentParser program("axia80_stream");
     program.add_argument("-i", "--interface")
-        .default_value(std::string("eth0"))
-        .help("Network interface name (e.g. eth0, enp3s0)");
+        .default_value(std::string(""))
+        .help("Network interface name (e.g. eth0, enp3s0). "
+              "If omitted, auto-selects the sole physical Ethernet interface.");
     program.add_argument("--raw")
         .default_value<bool>(false)
         .implicit_value(true)
