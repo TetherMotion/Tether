@@ -46,7 +46,7 @@ bool initHostEthernet(HostEtherNetSession& session,
                 TETHER_LOGI(tag, "No physical Ethernet interfaces found on this system");
             }
         } else if (err == EtherCAT::HAL::Error::PermissionDenied) {
-            TETHER_LOGE(tag, "Permission denied -- run as root or with CAP_NET_RAW");
+            logPermissionDeniedError(tag);
         } else {
             TETHER_LOGE(tag, "Failed to init '%s' (%s)", interfaceName.c_str(),
                         "unknown"); // magic_enum may not be available here
