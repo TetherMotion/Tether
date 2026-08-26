@@ -883,11 +883,11 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
                     rx_queue_sent_.fetch_add(1, std::memory_order_relaxed);
 #endif
                 } else {
-                    if (rx_drop_log_count_ < 10 || (rx_drop_log_count_ % 500 == 0)) {
+                    rx_drop_log_count_++;
+                    if (rx_drop_log_count_ <= 10 || (rx_drop_log_count_ % 500 == 0)) {
                         TETHER_LOGW("ec_rx", "RX queue full! Dropped dg=%u idx=0x%02X cmd=0x%02X ado=0x%04X adp=0x%04X wkc=%u (total dropped: %u)",
                                  dg_idx, dg->idx, (unsigned)dg->cmd, ado, adp, wkc, rx_drop_log_count_);
                     }
-                    rx_drop_log_count_++;
                 }
             }
         }
