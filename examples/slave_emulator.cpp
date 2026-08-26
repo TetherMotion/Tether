@@ -17,7 +17,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <csignal>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -34,6 +33,7 @@
 #include "tether/ethercat/ALRegisters.hpp"
 #include "tether/hal/IEthernet.hpp"
 #include "tether/platform/Platform.hpp"
+#include "tether/utils/SignalHandler.hpp"
 
 #include "common/ExampleHelpers.hpp"
 #include "common/EtherCATHostSetup.hpp"
@@ -42,10 +42,6 @@ namespace slave = EtherCAT::slave;
 namespace AL = EtherCAT::AL;
 
 static std::atomic<bool> g_running{true};
-
-static void signalHandler(int) {
-    g_running.store(false);
-}
 
 static std::string slaveStateString(AL::SlaveState state) {
     return AL::slaveStateToString(state);
@@ -63,8 +59,7 @@ static uint16_t parseHex16(const std::string& s) {
 }
 
 int main(int argc, char* argv[]) {
-    std::signal(SIGINT, signalHandler);
-    std::signal(SIGTERM, signalHandler);
+    Tether::Utils::SignalHandler sig_handler(g_running, false);
 
     constexpr const char* kTag = "slave_emu";
 

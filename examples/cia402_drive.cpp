@@ -11,20 +11,16 @@
 #include "slave/profiles/CiA402Slave.hpp"
 #include "slave/mailbox/CoEHandler.hpp"
 #include "pcap/PcapLogger.hpp"
+#include "tether/utils/SignalHandler.hpp"
 
 #include <iostream>
 #include <thread>
 #include <chrono>
-#include <csignal>
 #include <atomic>
 #include <cmath>
 #include <iomanip>
 
 std::atomic<bool> g_running{true};
-
-void signalHandler(int) {
-    g_running.store(false);
-}
 
 class DriveSimulator {
 public:
@@ -149,8 +145,7 @@ int main(int argc, char* argv[]) {
     std::cout << "EtherCAT CiA 402 Drive Example\n";
     std::cout << "==============================\n\n";
     
-    std::signal(SIGINT, signalHandler);
-    std::signal(SIGTERM, signalHandler);
+    Tether::Utils::SignalHandler sig_handler(g_running, false);
     
     // Create drive
     auto drive = std::make_unique<EtherCAT::Slave::CiA402Slave>(1);

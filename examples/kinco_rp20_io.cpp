@@ -20,7 +20,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <csignal>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
@@ -51,12 +50,14 @@
 #include "tether/drives/RP20/RP20ModuleConfig.hpp"
 #include "tether/drives/RP20/RP20PDO.hpp"
 #include "tether/drives/RP20/RP20Registers.hpp"
+#include "tether/utils/SignalHandler.hpp"
 
 #include "common/ExampleHelpers.hpp"
 #include "common/EtherCATHostSetup.hpp"
 
 static const char* TAG = "kinco_rp20_io";
 static EtherCAT::Master* g_master = nullptr;
+static std::atomic<bool> g_running{true};
 
 namespace RP20Mod = ::EtherCAT::Drives::RP20Module;
 namespace RP20Cfg = ::EtherCAT::Drives::RP20Config;
@@ -76,19 +77,6 @@ struct DiscoveredModule {
     int tx_pdo_entry = -1;
     int rx_pdo_entry = -1;
 };
-
-// ============================================================================
-// Signal handler
-// ============================================================================
-
-static std::atomic<bool> g_running{true};
-
-void signalHandler(int) {
-    g_running.store(false);
-    if (g_master) {
-        g_master->requestCancel();
-    }
-}
 
 // ============================================================================
 // Slot scanning
@@ -1091,8 +1079,7 @@ int main(int argc, char** argv) {
     Tether::Examples::logMailboxConfig(mbSize, mbAddr, TAG);
 
     // ---- Signal handlers ----
-    std::signal(SIGINT, signalHandler);
-    std::signal(SIGTERM, signalHandler);
+    Tether::Utils::SignalHandler sig_handler(g_running, false);
 
     // ---- Host Ethernet setup ----
     Tether::Examples::HostEtherNetSession session;
@@ -1102,6 +1089,7 @@ int main(int argc, char** argv) {
 
     EtherCAT::Master master;
     g_master = &master;
+    sig_handler.setCancelCallback([&master]() { master.requestCancel(); });
     Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
 
     if (!Tether::Examples::setupVlanAndRxCallback(session, master, vlan, TAG)) {

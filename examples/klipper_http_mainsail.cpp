@@ -32,9 +32,9 @@
 #include "tether/klipper/klippy/KlippyServer.hpp"
 #include "tether/klipper/klippy/KlippyUdsServer.hpp"
 #include "tether/klipper/http/KlippyHttpServer.hpp"
+#include "tether/utils/SignalHandler.hpp"
 
 #include <atomic>
-#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -47,11 +47,6 @@ using namespace tether::klipper::klippy;
 using namespace tether::klipper::http;
 
 static std::atomic<bool> g_running{true};
-
-static void signalHandler(int sig) {
-    (void)sig;
-    g_running = false;
-}
 
 static void printUsage(const char* prog) {
     std::printf(
@@ -124,8 +119,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Install signal handlers
-    std::signal(SIGINT, signalHandler);
-    std::signal(SIGTERM, signalHandler);
+    Tether::Utils::SignalHandler sig_handler(g_running, false);
 
     // Ensure the G-code directory exists
     std::filesystem::create_directories(gcodesRoot);

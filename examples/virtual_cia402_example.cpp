@@ -16,7 +16,9 @@
 #include <thread>
 #include <memory>
 #include <cmath>
-#include <signal.h>
+#include <atomic>
+
+#include "tether/utils/SignalHandler.hpp"
 
 // Our library includes (adjust paths as needed)
 // #include "slave/profile/CiA402Slave.hpp"
@@ -173,12 +175,7 @@ enum class ControlMode {
 // Global State
 // =============================================================================
 
-volatile bool g_running = true;
-
-void signalHandler(int sig) {
-    std::cout << "\nShutdown requested..." << std::endl;
-    g_running = false;
-}
+std::atomic<bool> g_running{true};
 
 // =============================================================================
 // Virtual CiA 402 Slave Implementation
@@ -520,7 +517,7 @@ private:
 int main(int argc, char* argv[]) {
     std::cout << "=== Virtual CiA 402 Slave Example ===" << std::endl;
     
-    signal(SIGINT, signalHandler);
+    Tether::Utils::SignalHandler sig_handler(g_running, false);
     
     // Create virtual slave
     VirtualCiA402Slave slave;
