@@ -14,6 +14,7 @@ if(TETHER_PLATFORM_LINUX OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
         ${TETHER_ROOT}/src/hal/LinuxClock.cpp
         ${TETHER_ROOT}/src/hal/LinuxEthernet.cpp
         ${TETHER_ROOT}/src/hal/LinuxThreading.cpp
+        ${TETHER_ROOT}/src/hal/LinuxNetworkInterfaceEnumerator.cpp
     )
     set(TETHER_HAL_PLATFORM_LIBS pthread)
 elseif(TETHER_PLATFORM_ESP32)
