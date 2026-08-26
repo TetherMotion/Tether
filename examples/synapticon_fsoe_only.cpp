@@ -19,7 +19,7 @@
  * firmware handles the slave side of the FSoE protocol.
  *
  * Usage (Linux, requires root or CAP_NET_RAW):
- *   ./synapticon_fsoe_only                       # eth0, slave 0, 10 s
+ *   ./synapticon_fsoe_only                       # auto-select iface, slave 0, 10 s
  *   ./synapticon_fsoe_only -i enx34298f762c4e    # specify interface
  *   ./synapticon_fsoe_only -s 1 -d 30            # slave 1, 30 s
  *   ./synapticon_fsoe_only --connection-id 0x4321 --watchdog-ms 15
@@ -488,7 +488,7 @@ private:
 // ============================================================================
 
 struct Args {
-    std::string interface = "eth0";
+    std::string interface;
     int slave_index = 0;
     double duration = 10.0;
     bool enable_dc_sync = false;
@@ -501,7 +501,9 @@ struct Args {
 bool parseArgs(int argc, char** argv, Args& out) {
     argparse::ArgumentParser program("synapticon_fsoe_only");
     program.add_argument("-i", "--interface")
-        .default_value(std::string("eth0"));
+        .default_value(std::string(""))
+        .help("Network interface (e.g. eth0, enx34298f762c4e). "
+              "If omitted, auto-selects the sole physical Ethernet interface.");
     program.add_argument("-s", "--slave")
         .scan<'i', int>().default_value(0);
     program.add_argument("-d", "--duration")

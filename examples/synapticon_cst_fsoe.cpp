@@ -31,7 +31,7 @@
  *   - Safe-motion status (STO, SS1, SS2, SOS, motion-allowed)
  *
  * Usage (Linux, requires root or CAP_NET_RAW):
- *   ./synapticon_cst_fsoe                       # eth0, slave 0, 10 s
+ *   ./synapticon_cst_fsoe                       # auto-select iface, slave 0, 10 s
  *   ./synapticon_cst_fsoe -i enx34298f762c4e    # specify interface
  *   ./synapticon_cst_fsoe -s 1 -d 30            # slave 1, 30 s
  *   ./synapticon_cst_fsoe --no-fsoe             # CST only, no FSoE
@@ -708,7 +708,7 @@ private:
 // ============================================================================
 
 struct Args {
-    std::string interface = "eth0";
+    std::string interface;
     int slave_index = 0;
     double duration = 10.0;
     bool enable_fsoe = true;
@@ -725,8 +725,9 @@ struct Args {
 bool parseArgs(int argc, char** argv, Args& out) {
     argparse::ArgumentParser program("synapticon_cst_fsoe");
     program.add_argument("-i", "--interface")
-        .default_value(std::string("eth0"))
-        .help("Network interface (e.g. eth0, enx34298f762c4e)");
+        .default_value(std::string(""))
+        .help("Network interface (e.g. eth0, enx34298f762c4e). "
+              "If omitted, auto-selects the sole physical Ethernet interface.");
     program.add_argument("-s", "--slave")
         .scan<'i', int>()
         .default_value(0)

@@ -107,7 +107,10 @@ bool configureDrive(EtherCAT::DS402Master& master)
 int main(int argc, char** argv)
 {
     argparse::ArgumentParser program("as715n_sine_motion_fsoe_native");
-    program.add_argument("-i", "--interface").default_value(std::string("eth0"));
+    program.add_argument("-i", "--interface")
+        .default_value(std::string(""))
+        .help("Network interface (e.g. eth0, enp3s0). "
+              "If omitted, auto-selects the sole physical Ethernet interface.");
     program.add_argument("-d", "--duration").scan<'g', double>().default_value(10.0);
     program.add_argument("--enable-fsoe").default_value(false).implicit_value(true);
 
