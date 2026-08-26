@@ -57,7 +57,7 @@
 #include <string>
 
 #include "DS402ExampleSupport.hpp"
-#include "ExampleHelpers.hpp"
+#include "common/ExampleHelpers.hpp"
 #include "tether/drives/Synapticon.hpp"
 #include "tether/drives/Synapticon/SynapticonPDO.hpp"
 #include "tether/drives/Synapticon/SafetyDiagnostics.hpp"

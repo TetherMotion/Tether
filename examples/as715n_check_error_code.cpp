@@ -32,7 +32,7 @@ static const char* TAG = "AS715N_CheckError";
 
 using namespace EtherCAT::Drives;
 
-static void printAS715NErrorDetails(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx, uint16_t mfr_error, uint16_t cia402_error) {
+static void printAS715NErrorDetails(EtherCAT::Master& master, EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx, uint16_t mfr_error, uint16_t cia402_error) {
     if (mfr_error == 0 && cia402_error == 0) {
         TETHER_LOGI(TAG, "%s: no manufacturer or CiA402 error reported", master.slaveLogPrefix(slave_idx).c_str());
         return;
@@ -103,7 +103,7 @@ static int inspectAndMaybeReset(EtherCAT::Master& master, bool do_reset, bool do
         EtherCAT::Diagnostics::logSlaveApplicationLayerDiagnostics(master, slave_idx, TAG);
     }
 
-    printAS715NErrorDetails(sdo, slave_idx, mfr_error, cia402_error);
+    printAS715NErrorDetails(master, sdo, slave_idx, mfr_error, cia402_error);
 
     if (!do_reset && !do_sw_reset) return 0;
 
@@ -186,7 +186,7 @@ static int inspectAndMaybeReset(EtherCAT::Master& master, bool do_reset, bool do
                 }
 
                 TETHER_LOGW(TAG, "Fault still present after register-reset (0x203F=0x%03X, 0x603F=0x%04X)", new_mfr, new_cia);
-                printAS715NErrorDetails(sdo, slave_idx, new_mfr, new_cia);
+                printAS715NErrorDetails(master, sdo, slave_idx, new_mfr, new_cia);
                 return 4;
             }
         }
