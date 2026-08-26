@@ -23,7 +23,7 @@ int main() {
     // Schedule: set high at clock=1000, low at clock=5000
     dout.scheduleValue(1, 1000);
     dout.scheduleValue(0, 5000);
-    std::printf("Pending scheduled changes: %zu\n", dout.pending());
+    std::printf("Pending scheduled changes: %u\n", dout.pending());
 
     // Tick through the schedule
     for (uint32_t clock = 0; clock <= 6000; clock += 1000) {
