@@ -213,8 +213,10 @@ TEST(FSoESequenceConformance, MasterResetFrameUsesSeqZero) {
 }
 
 TEST(FSoESequenceConformance, SlaveResetResponseUsesSeqZero) {
-    // When the slave receives a Reset, it stays in Reset state and sends
-    // a Reset response with seq=initialSeqNo+1 (ETG.5100 §8.2.2.2).
+    // When the slave receives a Reset, it transitions to Session state and
+    // sends a Session response (0x4E) with seq=initialSeqNo+1.  This matches
+    // the physical Synapticon slave behavior, which acknowledges a Reset by
+    // transitioning to Session and responding with a Session frame.
     FSoESlave slave(makeSlaveCfg(4, 4));
     slave.initialize();
 
@@ -226,31 +228,35 @@ TEST(FSoESequenceConformance, SlaveResetResponseUsesSeqZero) {
     ASSERT_GT(frame_len, 0u);
     ASSERT_TRUE(slave.processRxFrame(frame, frame_len));
 
-    // Slave should still be in Reset state (it sends a Reset response first,
-    // then transitions to Session when it receives a Session command)
-    EXPECT_EQ(slave.getState(), ConnectionState::Reset);
+    // Slave transitions to Session state on Reset command (matching the
+    // physical Synapticon slave behavior).
+    EXPECT_EQ(slave.getState(), ConnectionState::Session);
 
-    // Build the slave's TX frame — should be a Reset response with
-    // seq=initialSeqNo+1 = 1 (ETG.5100 §8.2.2.2).
+    // Build the slave's TX frame — should be a Session response.
+    // The slave echoes the master's last TX seq (0 for the Reset frame),
+    // so seq=0 (or 1 if collision avoidance incremented it).
     uint8_t tx[64];
     size_t tx_len = slave.prepareTxFrame(tx, sizeof(tx));
     ASSERT_GT(tx_len, 0u);
 
-    // Parse with start_crc=0 (CRC chain was reset), seq=1
-    // (or seq=2 if collision avoidance incremented it)
+    // Parse with start_crc=0 (CRC chain was reset).
+    // Try seq=0, seq=1, and seq=2 (collision avoidance may increment).
     uint8_t cmd = 0;
     uint8_t data[16] = {0};
     size_t data_len = 0;
     uint16_t conn_id = 0;
-    // Try seq=1 first, then seq=2 (collision avoidance may have incremented)
     bool parsed = CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id,
-                                      0, 1);
+                                      0, 0);
+    if (!parsed) {
+        parsed = CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id,
+                                     0, 1);
+    }
     if (!parsed) {
         parsed = CRC::parseFSoEFrame(tx, tx_len, cmd, data, data_len, conn_id,
                                      0, 2);
     }
-    EXPECT_TRUE(parsed) << "Failed to parse with seq=1 or seq=2";
-    EXPECT_EQ(cmd, Command::Reset);
+    EXPECT_TRUE(parsed) << "Failed to parse with seq=0, seq=1, or seq=2";
+    EXPECT_EQ(cmd, Command::Session);
 }
 
 TEST(FSoESequenceConformance, SeqAdvancesAfterResetFrame) {

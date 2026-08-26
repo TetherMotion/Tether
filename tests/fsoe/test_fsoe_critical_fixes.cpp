@@ -832,19 +832,20 @@ TEST_F(FSoEResetFirstTest, ResetRecoversSlaveFromDataState) {
     EXPECT_EQ(conn->getState(), ConnectionState::Reset);
 
     // The slave is still in Data state. The master sends Reset, the slave
-    // (in Data state) accepts it and transitions back to Reset state,
-    // sending a Reset response.  The master receives the Reset response
-    // and transitions to Session.
+    // (in Data state) accepts it and transitions to Session state,
+    // sending a Session response.  The master receives the Session
+    // response and transitions to Session.
     now += 15;
     ASSERT_TRUE(conn->exchangeWith(*slave, now));
 
     // Master should have transitioned to Session (slave acknowledged reset)
     EXPECT_EQ(conn->getState(), ConnectionState::Session);
 
-    // Slave should be in Reset state (waiting for Session command)
-    EXPECT_EQ(slave->getStateName(), std::string("RESET"));
+    // Slave transitions to Session on Reset command (matching the physical
+    // Synapticon slave behavior).
+    EXPECT_EQ(slave->getStateName(), std::string("SESSION"));
 
-    // Next exchange: master sends Session, slave transitions to Session
+    // Next exchange: master sends Session, slave stays in Session
     now += 15;
     ASSERT_TRUE(conn->exchangeWith(*slave, now));
     EXPECT_EQ(slave->getStateName(), std::string("SESSION"));
@@ -877,13 +878,13 @@ TEST_F(FSoEResetFirstTest, ResetRecoversSlaveFromConnectionState) {
     conn->resetConnection();
     EXPECT_EQ(conn->getState(), ConnectionState::Reset);
 
-    // Master sends Reset → slave in Connection state transitions to Reset,
-    // sends Reset response.  Master transitions to Session.
+    // Master sends Reset → slave in Connection state transitions to Session,
+    // sends Session response.  Master transitions to Session.
     now += 15;
     ASSERT_TRUE(conn->exchangeWith(*slave, now));
 
     EXPECT_EQ(conn->getState(), ConnectionState::Session);
-    EXPECT_EQ(slave->getStateName(), std::string("RESET"));
+    EXPECT_EQ(slave->getStateName(), std::string("SESSION"));
 }
 
 TEST_F(FSoEResetFirstTest, ResetFrameHasCorrectConnectionID) {

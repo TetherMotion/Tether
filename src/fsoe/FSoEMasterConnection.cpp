@@ -965,9 +965,6 @@ void FSoEMasterConnection::attemptAutoRecovery(uint64_t current_time_ms)
 
 void FSoEMasterConnection::handleResetState(uint8_t cmd, const uint8_t* data, size_t data_len)
 {
-    (void)data;
-    (void)data_len;
-
     // The master sent a Reset command (0x2A) to force the slave back to its
     // initial state.  The slave acknowledges by transitioning to Session and
     // responding with a Session frame (0x4E).  When we see that response,
@@ -986,6 +983,19 @@ void FSoEMasterConnection::handleResetState(uint8_t cmd, const uint8_t* data, si
         }
         // CRC chain is already at 0 — Reset frames don't update it.
         requestSessionReset();
+        // With 1-octet safety data, the slave's Session response carries
+        // the low byte of its Session ID.  requestSessionReset() reset
+        // session_octet_idx_ to 0, so restore the low byte and advance
+        // the index.  The high byte will be received in handleSessionState.
+        // Without this, the low byte is lost and the bytes get swapped.
+        if (cmd == Command::Session && config_.input_size < 2 &&
+            data && data_len >= 1) {
+            status_.slave_session_id =
+                static_cast<uint16_t>(data[0]);
+            session_octet_idx_ = 1;
+            trace("RX Session(0x4E) in Reset: slave session_id low byte=0x%02X, "
+                  "waiting for high byte", data[0]);
+        }
     } else if (cmd == Command::FailSafeData) {
         // Slave is aborting by sending FailSafeData.
         trace("RX FailSafeData(0x08): slave aborting in Reset state");
