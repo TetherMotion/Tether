@@ -174,6 +174,14 @@ struct FSoESlaveConfig {
     bool treatTimeoutAsCritical = true;
     bool treatConnIdErrorAsCritical = true;
 
+    // CRC model for state-transition responses (Session, Connection,
+    // Parameter).  When true, the slave resets the CRC chain (start_crc=0,
+    // seq=initialSeqNo) at each state transition, matching the ESC211
+    // master's behavior.  When false (default), the slave uses
+    // cross-direction CRC inheritance (start_crc=last_rx_crc0_), matching
+    // the Synapticon master's behavior.
+    bool resetCrcOnStateTransition = false;
+
     // Parameter CRC verification (0 = skip verification)
     uint16_t expectedParameterCRC = 0;
     
