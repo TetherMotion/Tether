@@ -188,7 +188,7 @@ endif()
 #   drives           → ethercat_master, common
 #   ethercat_master  → ethercat_common, hal, common
 #   ethercat_common  → hal, common
-#   motion_control   → controls, kinematics, common
+#   motion_control   → controls, common
 #   identification   → common
 #   controls         → common
 #   autotuning       → common
@@ -315,7 +315,7 @@ if(DEFINED TETHER_COMPONENTS)
     set(_tether_component_deps_controls        "common")
     set(_tether_component_deps_autotuning      "common")
     set(_tether_component_deps_kinematics       "common")
-    set(_tether_component_deps_motion_control  "common")
+    set(_tether_component_deps_motion_control  "controls;common")
     set(_tether_component_deps_identification  "common")
     set(_tether_component_deps_ethercat_common "hal;common")
     set(_tether_component_deps_ethercat_master "ethercat_common;hal;common")

@@ -11,9 +11,13 @@
  *   4. Evaluate velocity and acceleration analytically at sampled times
  *   5. Export two SVG plots: velocity(t) and acceleration(t)
  *
- * The WSS arcs are evaluated in closed form:
- *   BANG:     v(τ) = v0 + a0·τ + ½·η·τ²,  a(τ) = a0 + η·τ
- *   SINGULAR: v(τ) = v0 + a*·τ,           a(τ) = a*
+ * The WSS arcs are evaluated in closed form (snapspace, 4th-order dynamics):
+ *   SNAP:     j(τ) = j0 + σ·τ,
+ *             a(τ) = a0 + j0·τ + ½σ·τ²,
+ *             v(τ) = v0 + a0·τ + ½j0·τ² + (1/6)σ·τ³
+ *   SINGULAR: j(τ) = j*,
+ *             a(τ) = a0 + j*·τ,
+ *             v(τ) = v0 + a0·τ + ½j*·τ²
  *   WALL:     v(τ) = v0 (constant),        a(τ) = 0
  *   DWELL:    v = 0, a = 0
  *
@@ -138,19 +142,20 @@ std::string filterKlipperCommands(const std::string& gcodeText) {
     return result;
 }
 
-/// Evaluate path velocity at time t from WSS arcs (closed-form).
-/// BANG:     v(τ) = v0 + a0·τ + ½·η·τ²
-/// SINGULAR: v(τ) = v0 + a*·τ
+/// Evaluate path velocity at time t from WSS arcs (closed-form, snapspace).
+/// SNAP:     v(τ) = v0 + a0·τ + ½j0·τ² + (1/6)σ·τ³
+/// SINGULAR: v(τ) = v0 + a0·τ + ½j*·τ²
 /// WALL:     v(τ) = v0
 /// DWELL:    v = 0
 double evalVelocity(const WeightedArc& arc, double tau) {
     tau = std::clamp(tau, 0.0, arc.duration);
     switch (arc.type) {
-        case WeightedArcType::BANG_PLUS:
-        case WeightedArcType::BANG_MINUS:
-            return arc.v0 + arc.a0 * tau + 0.5 * arc.eta * tau * tau;
+        case WeightedArcType::SNAP_PLUS:
+        case WeightedArcType::SNAP_MINUS:
+            return arc.v0 + arc.a0 * tau + 0.5 * arc.j0 * tau * tau
+                 + (1.0 / 6.0) * arc.sigma * tau * tau * tau;
         case WeightedArcType::SINGULAR:
-            return arc.v0 + arc.a_star * tau;
+            return arc.v0 + arc.a0 * tau + 0.5 * arc.j_star * tau * tau;
         case WeightedArcType::WALL:
             return arc.v0;
         case WeightedArcType::DWELL:
@@ -159,19 +164,19 @@ double evalVelocity(const WeightedArc& arc, double tau) {
     return 0.0;
 }
 
-/// Evaluate path acceleration at time t from WSS arcs (closed-form).
-/// BANG:     a(τ) = a0 + η·τ
-/// SINGULAR: a(τ) = a*
+/// Evaluate path acceleration at time t from WSS arcs (closed-form, snapspace).
+/// SNAP:     a(τ) = a0 + j0·τ + ½σ·τ²
+/// SINGULAR: a(τ) = a0 + j*·τ
 /// WALL:     a(τ) = 0
 /// DWELL:    a = 0
 double evalAcceleration(const WeightedArc& arc, double tau) {
     tau = std::clamp(tau, 0.0, arc.duration);
     switch (arc.type) {
-        case WeightedArcType::BANG_PLUS:
-        case WeightedArcType::BANG_MINUS:
-            return arc.a0 + arc.eta * tau;
+        case WeightedArcType::SNAP_PLUS:
+        case WeightedArcType::SNAP_MINUS:
+            return arc.a0 + arc.j0 * tau + 0.5 * arc.sigma * tau * tau;
         case WeightedArcType::SINGULAR:
-            return arc.a_star;
+            return arc.a0 + arc.j_star * tau;
         case WeightedArcType::WALL:
             return 0.0;
         case WeightedArcType::DWELL:
