@@ -244,6 +244,11 @@ MainInstance::MainInstance(const MainConfig& config)
         // Use a generous budget (25) to tolerate jitter and multiple
         // FSoE task periods before the stale-exhaustion fail-safe fires.
         cfg.slave_response_delay_cycles = 25;
+        // Match the slave's initialSeqNo (set to 1 in SafeMotionServoEmulator).
+        // The FSoE CRC calculation includes the sequence number, so a mismatch
+        // between master and slave initial seq causes a CRC failure on the
+        // very first Reset frame, preventing the handshake from completing.
+        cfg.initial_seq_no = 1;
         return cfg;
     }())
     , connection_(connection_config_)
