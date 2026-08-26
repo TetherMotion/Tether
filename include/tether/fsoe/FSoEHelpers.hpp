@@ -56,4 +56,28 @@ inline const char* fsoeErrorName(uint16_t code) {
     }
 }
 
+/// Decode the FSoE Reset PDU error code (SafeData[0] in a Reset frame,
+/// ETG.5100) to a human-readable name.
+/// A value of 0x00 means local reset or acknowledgement.
+/// Values 0x80–0xFF are device-specific (Invalid SafePara).
+inline const char* fsoeResetErrorCodeName(uint8_t code) {
+    switch (code) {
+        case FSoE::ResetErrorCode::None:               return "None (local reset/ack)";
+        case FSoE::ResetErrorCode::InvalidCommand:     return "InvalidCommand (INVALID_CMD)";
+        case FSoE::ResetErrorCode::UnknownCommand:     return "UnknownCommand (UNKNOWN_CMD)";
+        case FSoE::ResetErrorCode::InvalidConnID:      return "InvalidConnID (INVALID_CONNID)";
+        case FSoE::ResetErrorCode::InvalidCRC:         return "InvalidCRC (INVALID_CRC)";
+        case FSoE::ResetErrorCode::WatchdogExpired:    return "WatchdogExpired (WD_EXPIRED)";
+        case FSoE::ResetErrorCode::InvalidAddress:     return "InvalidAddress (INVALID_ADDRESS)";
+        case FSoE::ResetErrorCode::InvalidData:        return "InvalidData (INVALID_DATA)";
+        case FSoE::ResetErrorCode::InvalidCommParaLen: return "InvalidCommParaLen (INVALID_COMPARALEN)";
+        case FSoE::ResetErrorCode::InvalidCommPara:    return "InvalidCommPara (INVALID_COMPARA)";
+        case FSoE::ResetErrorCode::InvalidUserParaLen: return "InvalidUserParaLen (INVALID_USERPARALEN)";
+        case FSoE::ResetErrorCode::InvalidUserPara:    return "InvalidUserPara (INVALID_USERPARA)";
+        default:
+            if (code >= 0x80) return "InvalidSafePara (device-specific)";
+            return "Unknown";
+    }
+}
+
 } // namespace FSoE
