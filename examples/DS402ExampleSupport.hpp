@@ -51,8 +51,12 @@ inline bool startHostMasterSession(const std::string& interface_name,
 
     const auto init_result = session.ethernet->init(config);
     if (init_result != EtherCAT::HAL::Error::OK) {
-        TETHER_LOGE(tag, "Failed to init '%s' (%s)", interface_name.c_str(),
-                    magic_enum::enum_name(init_result).data());
+        if (init_result == EtherCAT::HAL::Error::PermissionDenied) {
+            logPermissionDeniedError(tag);
+        } else {
+            TETHER_LOGE(tag, "Failed to init '%s' (%s)", interface_name.c_str(),
+                        magic_enum::enum_name(init_result).data());
+        }
         session.ethernet.reset();
         return false;
     }

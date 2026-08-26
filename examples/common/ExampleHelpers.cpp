@@ -54,6 +54,17 @@ std::string resolveInterface(const std::string& requested, const char* tag) {
     return "";
 }
 
+void logPermissionDeniedError(const char* tag) {
+    TETHER_LOGE(tag, "Permission denied — run via `runec <executable>` or "
+                     "`sudo <executable>` (requires CAP_NET_RAW)");
+    std::fprintf(stderr,
+                 "ERROR: Permission denied opening network interface.\n"
+                 "  Run via `runec <executable>` or `sudo <executable>`.\n"
+                 "  runec grants CAP_NET_RAW/CAP_NET_ADMIN/CAP_SYS_NICE;\n"
+                 "  install: sudo chown root:root runec && sudo chmod 4755 runec\n");
+    std::fflush(stderr);
+}
+
 void addDebugArg(argparse::ArgumentParser& program) {
     program.add_argument("--debug")
         .default_value(std::string(""))

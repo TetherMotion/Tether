@@ -542,7 +542,7 @@ int main(int argc, char** argv) {
             if (err == EtherCAT::HAL::Error::InterfaceNotFound)
                 TETHER_LOGE(TAG, "Interface '%s' not found", iface.c_str());
             else if (err == EtherCAT::HAL::Error::PermissionDenied)
-                TETHER_LOGE(TAG, "Permission denied — run as root or with CAP_NET_RAW");
+                Tether::Examples::logPermissionDeniedError(TAG);
             else
                 TETHER_LOGE(TAG, "Failed to init '%s' (%s)", iface.c_str(),
                             magic_enum::enum_name(err).data());

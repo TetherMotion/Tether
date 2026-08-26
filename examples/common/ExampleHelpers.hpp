@@ -37,6 +37,11 @@ void addInterfaceArg(argparse::ArgumentParser& program,
 /// @return           Interface name, or empty string on failure.
 std::string resolveInterface(const std::string& requested, const char* tag);
 
+/// Log a consistent "permission denied" error message advising the user to
+/// run via `runec` or `sudo`.  Call this when the Ethernet HAL returns
+/// Error::PermissionDenied.
+void logPermissionDeniedError(const char* tag);
+
 /// Add `--debug` to an ArgumentParser.
 void addDebugArg(argparse::ArgumentParser& program);
 
