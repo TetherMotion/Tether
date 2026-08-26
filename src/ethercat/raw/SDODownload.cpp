@@ -169,8 +169,8 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
 
         mbx_write_count_++;
         if ((mbx_write_count_ % 1000) == 1) {
-            TETHER_LOGI(TAG, "SDO download (write) request to adp=0x%04X: index=0x%04X:%u [mailbox #%lu -> 0x%04X, len=%u, SM0=0x%02X, AL=0x%04X]",
-                     adp, index, sub, (unsigned long)mbx_write_count_, mbxWriteAddr, mbxWriteLen, sm0_status, al_status);
+            TETHER_LOGI(TAG, "Slave %u: SDO download (write) request: index=0x%04X:%u [mailbox #%lu -> 0x%04X, len=%u, SM0=0x%02X, AL=0x%04X]",
+                     slaveIndexFromADP(adp), index, sub, (unsigned long)mbx_write_count_, mbxWriteAddr, mbxWriteLen, sm0_status, al_status);
         }
 
 #ifdef TETHER_DIAG_SDO_IO
@@ -187,8 +187,8 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
                                           mbxWriteAddr, mbxReadAddr,
                                           mbxbuf, static_cast<uint16_t>(mbxWriteLen),
                                           500, &used_alt)) {
-            TETHER_LOGE(TAG, "SDO download: Mailbox write failed (adp=0x%04X wr=0x%04X rd=0x%04X)",
-                        adp, mbxWriteAddr, mbxReadAddr);
+            TETHER_LOGE(TAG, "Slave %u: SDO download: Mailbox write failed (wr=0x%04X rd=0x%04X)",
+                        slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr);
             return false;
         }
         if (used_alt) {
@@ -198,8 +198,8 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
     }
 
     if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
-        TETHER_LOGE(TAG, "SDO download: SM1 mailbox never became full (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%02x timeout=%ums)",
-                    adp, mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
+        TETHER_LOGE(TAG, "Slave %u: SDO download: SM1 mailbox never became full (wr=0x%04X rd=0x%04X index=0x%04X:%02x timeout=%ums)",
+                    slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
         diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
         return false;
     }
@@ -224,8 +224,8 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
 
         if (hdr.type == EC_MBXT_ERR) {
             if (isCounterMismatchError(mbxbuf, hdr) && stale_retry_count < MAX_STALE_RETRIES) {
-                TETHER_LOGW(TAG, "Mailbox counter mismatch error (download): syncing counter %u -> %u and retrying",
-                            expected_mbx_cnt, SDOMailboxIO::nextMbxCnt(hdr.cnt));
+                TETHER_LOGW(TAG, "Slave %u: Mailbox counter mismatch error (download): syncing counter %u -> %u and retrying",
+                            slaveIndexFromADP(adp), expected_mbx_cnt, SDOMailboxIO::nextMbxCnt(hdr.cnt));
                 SDOMailboxIO::syncMbxCounter(hdr.cnt, inoutMbxCnt, mbxbuf);
                 expected_mbx_cnt = SDOMailboxIO::nextMbxCnt(hdr.cnt);
                 ++stale_retry_count;
@@ -340,8 +340,8 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
         break;
     }
 
-    TETHER_LOGE(TAG, "SDO download timeout: index=0x%04x:%02x (adp=0x%04X wr=0x%04X rd=0x%04X)",
-                index, sub, adp, mbxWriteAddr, mbxReadAddr);
+    TETHER_LOGE(TAG, "Slave %u: SDO download timeout: index=0x%04x:%02x (wr=0x%04X rd=0x%04X)",
+                slaveIndexFromADP(adp), index, sub, mbxWriteAddr, mbxReadAddr);
     diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
     return false;
 }
@@ -427,8 +427,8 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
                                      mbxWriteAddr, mbxReadAddr,
                                      mbxbuf, static_cast<uint16_t>(mbxWriteLen),
                                      500, &used_alt)) {
-        TETHER_LOGE(TAG, "SDO normal download: Mailbox write failed (adp=0x%04X wr=0x%04X rd=0x%04X)",
-                    adp, mbxWriteAddr, mbxReadAddr);
+        TETHER_LOGE(TAG, "Slave %u: SDO normal download: Mailbox write failed (wr=0x%04X rd=0x%04X)",
+                    slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr);
         return false;
     }
     if (used_alt) {
@@ -437,8 +437,8 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
     }
 
     if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
-        TETHER_LOGE(TAG, "SDO normal download: SM1 never became full (adp=0x%04X index=0x%04X:%u timeout=%ums)",
-                    adp, index, sub, transactionTimeoutMs);
+        TETHER_LOGE(TAG, "Slave %u: SDO normal download: SM1 never became full (index=0x%04X:%u timeout=%ums)",
+                    slaveIndexFromADP(adp), index, sub, transactionTimeoutMs);
         diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
         return false;
     }
@@ -463,8 +463,8 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
 
         if (hdr.type == EC_MBXT_ERR) {
             if (isCounterMismatchError(mbxbuf, hdr) && stale_retry_count < MAX_STALE_RETRIES) {
-                TETHER_LOGW(TAG, "Mailbox counter mismatch error (normal download): syncing counter %u -> %u and retrying",
-                            expected_mbx_cnt, SDOMailboxIO::nextMbxCnt(hdr.cnt));
+                TETHER_LOGW(TAG, "Slave %u: Mailbox counter mismatch error (normal download): syncing counter %u -> %u and retrying",
+                            slaveIndexFromADP(adp), expected_mbx_cnt, SDOMailboxIO::nextMbxCnt(hdr.cnt));
                 SDOMailboxIO::syncMbxCounter(hdr.cnt, inoutMbxCnt, mbxbuf);
                 expected_mbx_cnt = SDOMailboxIO::nextMbxCnt(hdr.cnt);
                 ++stale_retry_count;
@@ -561,8 +561,8 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
         break;
     }
 
-    TETHER_LOGE(TAG, "SDO normal download timeout: index=0x%04x:%02x (adp=0x%04X wr=0x%04X rd=0x%04X)",
-                index, sub, adp, mbxWriteAddr, mbxReadAddr);
+    TETHER_LOGE(TAG, "Slave %u: SDO normal download timeout: index=0x%04x:%02x (wr=0x%04X rd=0x%04X)",
+                slaveIndexFromADP(adp), index, sub, mbxWriteAddr, mbxReadAddr);
     diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
     return false;
 }
@@ -668,8 +668,8 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                                           mbxWriteAddr, mbxReadAddr,
                                           mbxbuf, static_cast<uint16_t>(mbxWriteLen),
                                           500, &used_alt)) {
-            TETHER_LOGE(TAG, "SDO segmented download init: Mailbox write failed (adp=0x%04X wr=0x%04X rd=0x%04X)",
-                        adp, mbxWriteAddr, mbxReadAddr);
+            TETHER_LOGE(TAG, "Slave %u: SDO segmented download init: Mailbox write failed (wr=0x%04X rd=0x%04X)",
+                        slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr);
             return false;
         }
         if (used_alt) {
@@ -678,8 +678,8 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
         }
 
         if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
-            TETHER_LOGE(TAG, "SDO segmented download init: SM1 never became full (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%02x timeout=%ums)",
-                        adp, mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
+            TETHER_LOGE(TAG, "Slave %u: SDO segmented download init: SM1 never became full (wr=0x%04X rd=0x%04X index=0x%04X:%02x timeout=%ums)",
+                        slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
             diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
             return false;
         }
@@ -704,8 +704,8 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
 
             if (hdr.type == EC_MBXT_ERR) {
                 if (isCounterMismatchError(mbxbuf, hdr) && stale_retry_count < MAX_STALE_RETRIES) {
-                    TETHER_LOGW(TAG, "Mailbox counter mismatch error (seg download init): syncing counter %u -> %u and retrying",
-                                expected_mbx_cnt, SDOMailboxIO::nextMbxCnt(hdr.cnt));
+                    TETHER_LOGW(TAG, "Slave %u: Mailbox counter mismatch error (seg download init): syncing counter %u -> %u and retrying",
+                                slaveIndexFromADP(adp), expected_mbx_cnt, SDOMailboxIO::nextMbxCnt(hdr.cnt));
                     SDOMailboxIO::syncMbxCounter(hdr.cnt, inoutMbxCnt, mbxbuf);
                     expected_mbx_cnt = SDOMailboxIO::nextMbxCnt(hdr.cnt);
                     ++stale_retry_count;
@@ -911,8 +911,8 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
 
             if (hdr.type == EC_MBXT_ERR) {
                 if (isCounterMismatchError(mbxbuf, hdr) && stale_retry_count < MAX_STALE_RETRIES) {
-                    TETHER_LOGW(TAG, "Mailbox counter mismatch error (seg download seg %d): syncing counter %u -> %u and retrying",
-                                seg, expected_mbx_cnt, SDOMailboxIO::nextMbxCnt(hdr.cnt));
+                    TETHER_LOGW(TAG, "Slave %u: Mailbox counter mismatch error (seg download seg %d): syncing counter %u -> %u and retrying",
+                                slaveIndexFromADP(adp), seg, expected_mbx_cnt, SDOMailboxIO::nextMbxCnt(hdr.cnt));
                     SDOMailboxIO::syncMbxCounter(hdr.cnt, inoutMbxCnt, mbxbuf);
                     expected_mbx_cnt = SDOMailboxIO::nextMbxCnt(hdr.cnt);
                     ++stale_retry_count;

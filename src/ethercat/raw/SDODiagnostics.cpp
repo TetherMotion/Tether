@@ -12,6 +12,10 @@ namespace Raw {
 
 static const char* TAG = "ethercat";
 
+static uint16_t slaveIndexFromADP(uint16_t adp) {
+    return Master::slaveAddressFromADP(adp).slavePosition();
+}
+
 void SDODiagnostics::smControlStr(uint8_t ctrlByte, char* buf, size_t bufLen) const {
     const auto ctrl = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(ctrlByte);
     size_t pos = 0;
@@ -90,7 +94,8 @@ void SDODiagnostics::dumpSlaveState(Master& master, uint16_t adp,
     char sm0_sa_act_desc[16];  smActivateStr(sm0_stat_act[1], sm0_sa_act_desc, sizeof(sm0_sa_act_desc));
     char sm1_sa_act_desc[16];  smActivateStr(sm1_stat_act[1], sm1_sa_act_desc, sizeof(sm1_sa_act_desc));
 
-    TETHER_LOGE(TAG, "[SDO_DIAG] AL_STATUS=0x%04X state=%s%s | AL status code: %s (0x%04X)\n[SDO_DIAG] MBX cfg: wr=0x%04X rd=0x%04X | SM0(start=0x%04X len=%u ctrl=0x%02X [%s] stat=0x%02X act=0x%02X) SM1(start=0x%04X len=%u ctrl=0x%02X [%s] stat=0x%02X act=0x%02X)\n[SDO_DIAG] SM0 status=0x%02X [%s] act=0x%02X [%s] | SM1 status=0x%02X [%s] act=0x%02X [%s]",
+    TETHER_LOGE(TAG, "[SDO_DIAG] Slave %u: AL_STATUS=0x%04X state=%s%s | AL status code: %s (0x%04X)\n[SDO_DIAG] MBX cfg: wr=0x%04X rd=0x%04X | SM0(start=0x%04X len=%u ctrl=0x%02X [%s] stat=0x%02X act=0x%02X) SM1(start=0x%04X len=%u ctrl=0x%02X [%s] stat=0x%02X act=0x%02X)\n[SDO_DIAG] SM0 status=0x%02X [%s] act=0x%02X [%s] | SM1 status=0x%02X [%s] act=0x%02X [%s]",
+               slaveIndexFromADP(adp),
                al_s,
                EtherCAT::al_status_get_state_name(al_s),
                EtherCAT::al_status_has_error(al_s) ? " ERROR" : "",
@@ -108,8 +113,8 @@ void SDODiagnostics::logCoeMbxPacket(const char* dir, uint16_t adp,
                                       const uint8_t* data, size_t len, bool enabled) {
     if (!enabled) return;
 
-    TETHER_LOGI(TAG, "[CoE-%s] adp=0x%04X index=0x%04X:%u len=%zu",
-                dir, adp, index, sub, len);
+    TETHER_LOGI(TAG, "[CoE-%s] Slave %u: index=0x%04X:%u len=%zu",
+                dir, slaveIndexFromADP(adp), index, sub, len);
 
     if (len == 0) return;
 

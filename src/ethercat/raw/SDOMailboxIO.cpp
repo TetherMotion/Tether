@@ -12,6 +12,10 @@ namespace Raw {
 
 static const char* TAG = "ethercat";
 
+static uint16_t slaveIndexFromADP(uint16_t adp) {
+    return Master::slaveAddressFromADP(adp).slavePosition();
+}
+
 SDOMailboxIO::SDOMailboxIO(SDODiagnostics& diag)
     : diag_(diag) {}
 
@@ -74,8 +78,8 @@ bool SDOMailboxIO::waitSm0NotFull(Master& master, uint16_t adp,
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
     }
-    TETHER_LOGE(TAG, "SM0 mailbox stayed full (adp=0x%04X) after %ums timeout — slave PDI not draining mailbox",
-                adp, timeoutMs);
+    TETHER_LOGE(TAG, "Slave %u: SM0 mailbox stayed full after %ums timeout — slave PDI not draining mailbox",
+                slaveIndexFromADP(adp), timeoutMs);
 
     // Last-resort recovery: cycle SM0 activate register to flush the stuck
     // write buffer.  This clears the mailbox-full flag so the next SDO attempt
@@ -83,7 +87,7 @@ bool SDOMailboxIO::waitSm0NotFull(Master& master, uint16_t adp,
     // no valid response is lost.
     const uint16_t slave_index = Master::slaveAddressFromADP(adp).slavePosition();
     if (master.resetSlaveMailboxSM0(slave_index)) {
-        TETHER_LOGI(TAG, "SM0 reset succeeded (adp=0x%04X) — mailbox ready for next write", adp);
+        TETHER_LOGI(TAG, "Slave %u: SM0 reset succeeded — mailbox ready for next write", slave_index);
         return true;
     }
     return false;
@@ -105,7 +109,7 @@ bool SDOMailboxIO::apwrWithWkcProbe(Master& master, uint16_t adp,
     }
 
     if (master.lastWkc() == 0) {
-        TETHER_LOGE(TAG, "mailbox transaction failed: Working counter is 0 (adp=0x%04X addr=0x%04X)", adp, primaryAddr);
+        TETHER_LOGE(TAG, "Slave %u: mailbox transaction failed: Working counter is 0 (addr=0x%04X)", slaveIndexFromADP(adp), primaryAddr);
         return false;
     }
 

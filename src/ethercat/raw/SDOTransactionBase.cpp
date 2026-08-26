@@ -15,6 +15,10 @@ namespace Raw {
 
 static const char* TAG = "ethercat";
 
+static uint16_t slaveIndexFromADP(uint16_t adp) {
+    return Master::slaveAddressFromADP(adp).slavePosition();
+}
+
 SDOTransactionBase::SDOTransactionBase(SDOErrorDecoder& errorDecoder,
                                        SDOMailboxIO& mailboxIO,
                                        SDODiagnostics& diagnostics)
@@ -86,12 +90,12 @@ bool SDOTransactionBase::handleMailboxError(const uint8_t* mbxbuf, const MbxResp
     if (hdr.len >= 4) {
         const uint16_t err = le16_to_host(*reinterpret_cast<const uint16_t*>(mbxbuf + sizeof(MbxHeader) + 0));
         const uint16_t detail = le16_to_host(*reinterpret_cast<const uint16_t*>(mbxbuf + sizeof(MbxHeader) + 2));
-        TETHER_LOGE(TAG, "Mailbox error response: cnt=%u err=0x%04X (%s) detail=0x%04X (%s) (adp=0x%04X index=0x%04X:%u)",
-                    hdr.cnt, err, errorDecoder_.mbxErrorCodeStr(err),
-                    detail, errorDecoder_.mbxErrorDetailStr(err, detail), adp, index, sub);
+        TETHER_LOGE(TAG, "Slave %u: Mailbox error response: cnt=%u err=0x%04X (%s) detail=0x%04X (%s) (index=0x%04X:%u)",
+                    slaveIndexFromADP(adp), hdr.cnt, err, errorDecoder_.mbxErrorCodeStr(err),
+                    detail, errorDecoder_.mbxErrorDetailStr(err, detail), index, sub);
     } else {
-        TETHER_LOGE(TAG, "Mailbox error response (truncated): cnt=%u len=%u (adp=0x%04X index=0x%04X:%u)",
-                    hdr.cnt, hdr.len, adp, index, sub);
+        TETHER_LOGE(TAG, "Slave %u: Mailbox error response (truncated): cnt=%u len=%u (index=0x%04X:%u)",
+                    slaveIndexFromADP(adp), hdr.cnt, hdr.len, index, sub);
     }
     return false;
 }
@@ -119,8 +123,8 @@ bool SDOTransactionBase::checkStaleCounter(Master& master, uint16_t adp,
                                            int& staleRetryCount,
                                            uint16_t index_, uint8_t sub_,
                                            const char* phaseLabel) {
-    TETHER_LOGW(TAG, "Stale mailbox response (%s): cnt=%u expected=%u (adp=0x%04X index=0x%04X:%u) — syncing counter and re-sending",
-                phaseLabel, hdr.cnt, inOutExpectedCnt, adp, index_, sub_);
+    TETHER_LOGW(TAG, "Slave %u: Stale mailbox response (%s): cnt=%u expected=%u (index=0x%04X:%u) — syncing counter and re-sending",
+                slaveIndexFromADP(adp), phaseLabel, hdr.cnt, inOutExpectedCnt, index_, sub_);
     // Sync the master's counter to the slave's counter.  The slave increments
     // its counter after each response, so the next value it expects is one
     // past the cnt we just saw.  This updates both the persistent counter
