@@ -148,6 +148,19 @@ public:
         prefix_provider_ = std::move(provider);
     }
 
+    // ----- Base Logical Address -----
+
+    /// @brief Set the base logical address for this manager's address space.
+    ///
+    /// Default is 0x10000.  When using multiple independent PDOManager /
+    /// LogicalAddressManager instances (e.g. one per slave), each manager
+    /// should use a non-overlapping base address so that LRW datagrams
+    /// from different managers don't conflict on the same slave's FMMU.
+    ///
+    /// Must be called before buildAddressMap() / buildAddressMapFromMultiPDO().
+    void setBaseLogicalAddress(uint32_t base) { base_logical_addr_ = base; }
+    uint32_t getBaseLogicalAddress() const { return base_logical_addr_; }
+
 private:
     IPDOTransport& transport_;
 
@@ -176,6 +189,7 @@ private:
     uint16_t slave_count_{0};
     uint32_t total_rxpdo_bytes_{0};
     uint32_t total_txpdo_bytes_{0};
+    uint32_t base_logical_addr_{0x10000};  ///< Base logical address (default 0x10000)
     Stats    stats_{};
     bool     initialized_{false};
     std::function<std::string(uint16_t)> prefix_provider_;

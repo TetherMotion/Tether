@@ -452,7 +452,7 @@ bool DS402Master::DS402RecoveryHandler::reinitializeSlave(uint16_t slave_index)
     if (drive != nullptr) {
         drive->resetPDORegistration();
     }
-    master_.ethercatMaster().pdo().mapping().remove_entries_for_slave(slave_index);
+    master_.ethercatMaster().pdoForSlave(slave_index).mapping().remove_entries_for_slave(slave_index);
 
     // Re-configure the drive (this re-does mailbox, PDO, SM, and OP transition)
     DriveConfiguration reinit_cfg = *cfg;

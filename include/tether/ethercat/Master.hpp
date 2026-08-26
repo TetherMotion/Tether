@@ -35,6 +35,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <array>
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
@@ -826,6 +827,48 @@ public:
     FaultDetector&     faults();
     SlaveStatusPoller&  statusPoller();
     SlaveSupervisor&    slaveSupervisor();
+
+    // ---- Per-slave PDO manager routing -----------------------------------
+    //
+    // When using multiple PDOManager / LogicalAddressManager instances
+    // (e.g. one per slave or group of slaves), these functions return
+    // the manager that covers a given slave.  By default all slaves
+    // are covered by the default pdo() / logicalAddressManager().
+    //
+    // Use createPdoGroup() to create an additional PDOManager + LAM
+    // pair with its own logical address space and assign specific
+    // slaves to it.
+
+    /// Returns the PDOManager that covers the given slave.
+    /// By default this is the default pdo(); after createPdoGroup() it
+    /// may be a group-specific manager.
+    PDOManager&     pdoForSlave(uint16_t slave_index);
+
+    /// Returns the LogicalAddressManager that covers the given slave.
+    /// By default this is the default logicalAddressManager(); after
+    /// createPdoGroup() it may be a group-specific LAM.
+    LogicalAddressManager& logicalAddressManagerForSlave(uint16_t slave_index);
+
+    /// Create a new PDOManager + LogicalAddressManager pair with its
+    /// own logical address space, and assign the given slaves to it.
+    ///
+    /// @param slave_indices  Slaves to assign to this group
+    /// @param base_logical_addr  Base logical address for this group's
+    ///                           LRW datagrams (must not overlap with
+    ///                           other groups; default 0x10000)
+    /// @return Reference to the new PDOManager
+    PDOManager&     createPdoGroup(const std::vector<uint16_t>& slave_indices,
+                                   uint32_t base_logical_addr = 0x10000);
+
+    /// Access the list of additional PDO groups (for iteration by the
+    /// DC real-time loop or custom exchange loops).
+    struct PdoGroup {
+        std::unique_ptr<IPDOTransport>         transport;
+        std::unique_ptr<PDOManager>            pdo;
+        std::unique_ptr<LogicalAddressManager> lam;
+    };
+    const std::vector<PdoGroup>& pdoGroups() const { return pdo_groups_; }
+    std::vector<PdoGroup>&       pdoGroups()       { return pdo_groups_; }
 private:
     // Mailbox override storage — guarded by a mutex and sized to kMaxPDOSlaves
     struct MailboxOverrideInternal {
@@ -1029,6 +1072,13 @@ private:
     std::unique_ptr<FaultDetector>      faults_;
     std::unique_ptr<SlaveStatusPoller>  status_poller_;
     std::unique_ptr<SlaveSupervisor>    slave_supervisor_;
+
+    // Additional PDO groups (for multi-PDOManager setups).
+    // Each group owns its own PDOManager + LAM + transport, and covers
+    // a set of slaves.  The default group (pdo_ / logical_addr_mgr_)
+    // covers all slaves not assigned to a specific group.
+    std::vector<PdoGroup>          pdo_groups_;
+    std::array<int, ECAT_PDO_MAX_SLAVES> pdo_group_idx_for_slave_;  ///< -1 = default group, else index into pdo_groups_
 
     // Per-slave state machines
     std::vector<std::unique_ptr<Slave>> slaves_;

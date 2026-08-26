@@ -95,7 +95,7 @@ bool CiA402Drive::registerPDOBuffers() {
         return true;
     }
 
-    PDO::PDOMapping* mapping = &m_master->pdo().mapping();
+    PDO::PDOMapping* mapping = &m_master->pdoForSlave(m_slave_index).mapping();
 
     if (m_rxpdo_size > 0) {
         m_rxpdo_entry_index = mapping->add_rxpdo(

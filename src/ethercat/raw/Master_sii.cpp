@@ -125,11 +125,11 @@ bool Master::autoConfigureMailbox(SlaveAddress slave_address, Tether::Platform::
     
     // Step 4: Write mailbox SM registers to slave ESC
     if (slave_index < PDO::kMaxPDOSlaves) {
-        auto* slave_configs = pdo_->slaveConfigs();
+        auto* slave_configs = pdoForSlave(slave_index).slaveConfigs();
         slave_configs[slave_index].sm[0] = PDO::SyncManagerConfig::mailbox_write(wr_addr, wr_len);
         slave_configs[slave_index].sm[1] = PDO::SyncManagerConfig::mailbox_read(rd_addr, rd_len);
 
-        if (pdo_->configureSlavesSMs(slave_index)) {
+        if (pdoForSlave(slave_index).configureSlavesSMs(slave_index)) {
             // SM1 may contain stale/junk data left over from slave firmware boot.
             // Drain it now so the slave has a free outbound mailbox before the
             // first SDO exchange.
@@ -301,11 +301,11 @@ bool Master::autoConfigureMailbox(const ESIFile& esi, SlaveAddress slave_address
 
     // Write mailbox SM registers to slave ESC
     if (slave_index < PDO::kMaxPDOSlaves) {
-        auto* slave_configs = pdo_->slaveConfigs();
+        auto* slave_configs = pdoForSlave(slave_index).slaveConfigs();
         slave_configs[slave_index].sm[0] = PDO::SyncManagerConfig::mailbox_write(wr_addr, wr_len);
         slave_configs[slave_index].sm[1] = PDO::SyncManagerConfig::mailbox_read(rd_addr, rd_len);
 
-        if (pdo_->configureSlavesSMs(slave_index)) {
+        if (pdoForSlave(slave_index).configureSlavesSMs(slave_index)) {
             (void)drainSlaveMailbox(slave_index);
         } else {
             TETHER_LOGE(local_tag, "Failed to write mailbox SM registers to slave %u", (unsigned)slave_index);
@@ -351,7 +351,7 @@ bool Master::configureProcessDataSyncManagersFromESI(const ESIFile& esi,
         return false;
     }
 
-    auto* slave_configs = pdo_->slaveConfigs();
+    auto* slave_configs = pdoForSlave(slave_index).slaveConfigs();
 
     // SM2 — Outputs (process data output)
     slave_configs[slave_index].sm[2].phys_start_addr = smOut->startAddress;
@@ -367,7 +367,7 @@ bool Master::configureProcessDataSyncManagersFromESI(const ESIFile& esi,
     slave_configs[slave_index].sm[3].enable = 1;
     slave_configs[slave_index].sm[3].type = PDO::SyncManagerType::ProcessInput;
 
-    if (!pdo_->configureSlavesSMs(slave_index)) {
+    if (!pdoForSlave(slave_index).configureSlavesSMs(slave_index)) {
         TETHER_LOGE(TAG, "%s: Failed to write PDO SM registers from ESI", slaveLogPrefix(slave_index).c_str());
         return false;
     }
