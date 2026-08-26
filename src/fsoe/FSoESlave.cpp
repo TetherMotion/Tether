@@ -34,10 +34,12 @@ bool FSoESlave::initialize() {
         return false;
     }
 
-    // ETG.5100 §8.2.2.4: Connection ID 0x0000 is not permitted.
-    if (config_.connectionId == 0) {
-        return false;
-    }
+    // ETG.5100 §8.2.2.4: Connection ID 0x0000 is not permitted by the
+    // standard, but some safety controllers (e.g. Nexcobot ESC211 with a
+    // default/unconfigured FNI) send connection ID 0x0000.  Allow it so
+    // the slave emulation can interoperate with these devices.
+    // The connection ID is still validated in the Connection state and
+    // beyond — this only relaxes the initialization check.
 
     // Validate watchdog timeout range (ETG.5100 / Object 0x6791: 50-60000 ms)
     if (config_.watchdogTimeoutMs < Limits::WatchdogTimeoutMin ||
@@ -736,10 +738,14 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
     const uint16_t parse_seq_no = is_reset_frame ? config_.initialSeqNo : rx_seq_no_;
     uint16_t seq_used = 0;
 
+    // For Reset frames, we still need to capture the master's CRC0 so that
+    // buildResetResponse can use it for collision avoidance.  The ESC211
+    // sends Reset frames with safe data (11 bytes, not 3), so they have
+    // CRCs that must be captured.
     if (!CRC::parseFSoEFrameWithCollisionAvoidance(
             data, len, cmd, nullptr, data_len, conn_id,
             parse_start_crc, parse_seq_no,
-            is_reset_frame ? nullptr : &last_rx_crc0_,
+            &last_rx_crc0_,  // always capture CRC0 for collision avoidance
             &seq_used, &crc_error_detail)) {
         // ESC211 CRC model fallback for Session frames:
         //
@@ -787,7 +793,20 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
                      "Slave received malformed FSoE frame from master "
                      "(unparseable)");
         }
-        handleError(ErrorCode::CRCError, config_.treatCrcErrorAsCritical, detail);
+        // In Reset/Session state, CRC errors are NOT critical — the CRC
+        // chains may be out of sync because the master advanced through
+        // states without receiving valid responses (e.g. the slave wasn't
+        // running yet).  Going to fail-safe would prevent resync.  Instead,
+        // just log the error and return false; the slave stays in its
+        // current state and keeps sending its current response (e.g. Reset
+        // response), which will eventually cause the master to restart the
+        // connection from Reset state.
+        const uint8_t cur_state = state_.load();
+        const bool is_critical =
+            (cur_state != ConnectionState::Reset &&
+             cur_state != ConnectionState::Session) &&
+            config_.treatCrcErrorAsCritical;
+        handleError(ErrorCode::CRCError, is_critical, detail);
         statistics_.onCrcError();
         return false;
     }
@@ -923,15 +942,15 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
         expectedSequence_ = 0;
         txSequence_ = 0;
         last_tx_crc0_ = 0;
+        // Reset last_rx_crc0_ to 0 on Reset.  The ESC211 master resets
+        // its CRC chain at each state transition (ETG.5100 §8.1.3.4).
+        // The slave's Session response should use start_crc=0 (not the
+        // master's Reset CRC0) to match the ESC211's RX validation model.
         last_rx_crc0_ = 0;
         last_tx_seq_no_ = 0;
-        last_rx_seq_no_ = 0;
-        tx_seq_no_ = config_.initialSeqNo;
-        // Reset rx_seq_no_ to initialSeqNo.  The ESC211 master uses
-        // seq=initialSeqNo for the first frame of each state (Reset,
-        // Session, Connection, etc.), NOT seq=initialSeqNo+1 after the
-        // Reset.  This matches the ETG.5100 §8.1.3.4 provision that the
-        // sequence counter is reset at each state transition.
+        // Reset rx_seq_no_ to initialSeqNo for the next frame (Session).
+        // The ESC211 master uses seq=initialSeqNo for the first frame of
+        // each state (Reset, Session, Connection, etc.).
         rx_seq_no_ = config_.initialSeqNo;
         // NOTE: last_rx_frame_bytes_ is NOT cleared here.  It was already
         // updated by processRxFrame (line ~369) with the current Reset
@@ -980,14 +999,17 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
     }
 
     // State transition:
-    // - On Reset command: transition to Reset state.  The slave sends a
-    //   Reset response (buildResetResponse) with seq=initialSeqNo+1, then
-    //   waits for a Session command from the master.
+    // - On Reset command: transition directly to Session state.  The slave
+    //   sends a Session response (buildSessionResponse) with its own Session
+    //   ID.  This matches the physical Synapticon slave behavior, which
+    //   acknowledges a Reset by transitioning to Session and responding with
+    //   a Session frame (0x4E).  The FSoEMasterConnection's handleResetState
+    //   accepts both Reset (0x2A) and Session (0x4E) responses, but the
+    //   ESC211 firmware appears to only accept Session (0x4E).
     // - On Session command: transition to Session state.  The slave sends
     //   a Session response (buildSessionResponse) with its own Session ID.
-    // This matches the physical Synapticon slave behavior.
     if (cmd == Command::Reset) {
-        transitionTo(ConnectionState::Reset);
+        transitionTo(ConnectionState::Session);
     } else if (cmd == Command::Session) {
         transitionTo(ConnectionState::Session);
     }
@@ -1345,6 +1367,9 @@ void FSoESlave::processData(const uint8_t* data, size_t len) {
             // Fall through to the Data-state FailSafeData handling below.
         } else if (state_ != ConnectionState::Data) {
             // In Session/Connection states, FailSafeData is an abort.
+            // Log the unexpected transition for debugging.
+            logDiagnostic(ErrorCode::ApplicationError,
+                          "FailSafeData received in non-Data state — aborting to fail-safe");
             triggerFailSafe(lastError_ != ErrorCode::NoError ? lastError_
                                                              : ErrorCode::ApplicationError);
             return;
@@ -1415,11 +1440,14 @@ size_t FSoESlave::buildResetResponse(uint8_t* data, size_t maxLen) {
     // established yet — there is no Connection ID to check).
     // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
     //
-    // The slave's Reset response uses seq = initialSeqNo + 1 (the slave
-    // increments the seq after receiving the master's Reset which used
-    // seq = initialSeqNo).  The CRC chain is reset (start_crc = 0).
-    // After the Reset response, the next frame uses seq+1 again.
-    // last_tx_crc0_ is NOT updated (stays at 0 for the next frame).
+    // CRC model (matching FSoEMasterConnection's RX validation):
+    //   - start_crc = 0 (master's RX chain starts at 0 for Reset)
+    //   - seq = incrementSeqNo(initialSeqNo) (shared counter: master
+    //     used initialSeqNo for its Reset TX, slave uses initialSeqNo+1
+    //     for its Reset response)
+    //
+    // This is the self-inheriting RX model: the master validates the
+    // slave's Reset response with start_crc=0 (not the master's TX CRC0).
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
@@ -1428,9 +1456,9 @@ size_t FSoESlave::buildResetResponse(uint8_t* data, size_t maxLen) {
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Reset, payload, config_.safeInputSize,
         0,  // Conn_Id = 0 in Reset state (ETG.5100 §8.2.2.2)
-        0,  // start_crc = 0 (Reset resets CRC chain)
+        0,  // start_crc = 0 (master RX chain starts at 0 for Reset)
         reset_resp_seq,
-        nullptr,  // don't update CRC chain (Reset resets it)
+        &last_tx_crc0_,  // update CRC chain for next frame
         &seq_used);
     // Set tx_seq_no_ to the seq used.  prepareTxFrame will increment it
     // for the next frame.
@@ -1466,6 +1494,9 @@ size_t FSoESlave::buildSessionResponse(uint8_t* data, size_t maxLen) {
     size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
     uint16_t seq_used = 0;
+    // Use standard cross-direction CRC inheritance: start_crc = last_rx_crc0_
+    // (the master's most recent frame CRC0).  This ensures collision avoidance
+    // (slave's CRC0 ≠ master's CRC0) and continuous CRC chain.
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Session, payload, config_.safeInputSize,
         0,  // Conn_Id = 0 in Session state (ETG.5100 §8.2.2.3)
