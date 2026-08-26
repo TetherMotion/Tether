@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::string iface = program.get<std::string>("--interface");
+    std::string iface = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
     int slave_idx = program.get<int>("--slave");
 
     if (slave_idx < 0 || slave_idx > 65535) {

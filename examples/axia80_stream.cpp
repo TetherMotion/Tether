@@ -397,7 +397,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::string iface = program.get<std::string>("--interface");
+    std::string iface = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
     bool raw_mode = program.get<bool>("--raw");
     int slave_idx = program.get<int>("--slave");
     double duration_sec = program.get<double>("--time");

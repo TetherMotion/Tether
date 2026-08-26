@@ -1314,7 +1314,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    const std::string iface = program.get<std::string>("--interface");
+    const std::string iface = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
     int pdo_size = program.get<int>("--pdo-size");
     if (pdo_size < 1) pdo_size = 1;
     if (pdo_size > 1486) pdo_size = 1486;
