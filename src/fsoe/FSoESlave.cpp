@@ -948,10 +948,14 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
         // master's Reset CRC0) to match the ESC211's RX validation model.
         last_rx_crc0_ = 0;
         last_tx_seq_no_ = 0;
-        // Reset rx_seq_no_ to initialSeqNo for the next frame (Session).
-        // The ESC211 master uses seq=initialSeqNo for the first frame of
-        // each state (Reset, Session, Connection, etc.).
-        rx_seq_no_ = config_.initialSeqNo;
+        // rx_seq_no_ is NOT reset here.  validateFrame() already advanced
+        // it to incrementSeqNo(seq_used) after validating the Reset frame,
+        // which matches the Tether master's next frame (Session with
+        // seq = incrementSeqNo(reset_seq)).  Resetting rx_seq_no_ to
+        // initialSeqNo would break the Tether master, which increments
+        // tx_seq_no_ after every frame.  The ESC211 master (which uses
+        // seq=initialSeqNo for the first frame of each state) is handled
+        // by the ESC211 Session fallback in validateFrame().
         // NOTE: last_rx_frame_bytes_ is NOT cleared here.  It was already
         // updated by processRxFrame (line ~369) with the current Reset
         // frame bytes.  Keeping it allows duplicate detection to work in

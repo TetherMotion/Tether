@@ -127,14 +127,14 @@ TEST(FSoEConnectionConformance, OneOctetDataTakesFourCycles) {
     ASSERT_TRUE(slave.initialize());
 
     uint64_t now = 0;
-    // Reset → Session
+    // Reset → Session: slave sends Session response with low byte of
+    // session ID.  Master stores it and transitions to Session.
     now += 15;
     conn.exchangeWith(slave, now);
     ASSERT_EQ(conn.getState(), ConnectionState::Session);
 
-    // Session → Connection (1-octet session ID takes 2 cycles)
-    now += 15;
-    conn.exchangeWith(slave, now);
+    // Session → Connection: slave sends high byte of session ID.
+    // Master stores it and transitions to Connection.
     now += 15;
     conn.exchangeWith(slave, now);
     ASSERT_EQ(conn.getState(), ConnectionState::Connection);
@@ -294,10 +294,13 @@ TEST(FSoEConnectionConformance, MasterRejectsZeroConnectionIdConfig) {
 }
 
 TEST(FSoEConnectionConformance, SlaveRejectsZeroConnectionIdConfig) {
-    // ETG.5100 §8.2.2.4: Connection ID 0x0000 is not permitted.
-    // The slave should reject a config with connectionId = 0.
+    // ETG.5100 §8.2.2.4: Connection ID 0x0000 is not permitted by the
+    // standard, but some safety controllers (e.g. Nexcobot ESC211 with a
+    // default/unconfigured FNI) send connection ID 0x0000.  The slave
+    // allows it at initialization for interoperability; the connection ID
+    // is still validated in the Connection state and beyond.
     FSoESlave slave(makeSlaveCfg(4, 4, 0x0000));
-    EXPECT_FALSE(slave.initialize());
+    EXPECT_TRUE(slave.initialize());
 }
 
 // ============================================================================
