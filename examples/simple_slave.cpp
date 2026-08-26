@@ -10,26 +10,20 @@
 #include "slave/hal/LoopbackHAL.hpp"
 #include "slave/profiles/CiA401Slave.hpp"
 #include "packetloggers/pcap/PCAPWriter.hpp"
+#include "tether/utils/SignalHandler.hpp"
 
 #include <iostream>
 #include <thread>
 #include <chrono>
-#include <csignal>
 #include <atomic>
 
 std::atomic<bool> g_running{true};
-
-void signalHandler(int) {
-    g_running.store(false);
-}
 
 int main(int argc, char* argv[]) {
     std::cout << "EtherCAT Slave Example - Simple Digital I/O\n";
     std::cout << "============================================\n\n";
     
-    // Set up signal handler
-    std::signal(SIGINT, signalHandler);
-    std::signal(SIGTERM, signalHandler);
+    Tether::Utils::SignalHandler sig_handler(g_running, false);
     
     // Optional: Create PCAP logger
     std::unique_ptr<Tether::PacketLoggers::PCAP::IPCAPWriter> writer;

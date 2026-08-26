@@ -482,8 +482,7 @@ void Master::start(const NetworkInterface& iface, const uint8_t src_mac[6])
 
 void Master::stop()
 {
-    requestCancel();
-    packet_router_.cancel();
+    requestCancel();  // sets cancel flag + wakes packet router waiters
     stopMotionControlLoop();
     if (slave_supervisor_) {
         slave_supervisor_->stop();
@@ -502,6 +501,12 @@ void Master::stop()
 void Master::requestCancel()
 {
     cancel_requested_.store(true, std::memory_order_release);
+    // Wake all threads currently blocked in the packet router so they
+    // see the cancellation immediately instead of waiting for their
+    // timeout to expire.  This is essential for prompt shutdown when
+    // a signal handler calls requestCancel() while SDO/mailbox
+    // operations are in flight.
+    packet_router_.cancel();
 }
 
 bool Master::isCancelRequested() const

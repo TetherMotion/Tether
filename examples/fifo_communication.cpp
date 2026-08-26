@@ -14,11 +14,11 @@
 #include "slave/hal/LoopbackHAL.hpp"
 #include "slave/profiles/CiA401Slave.hpp"
 #include "pcap/PcapLogger.hpp"
+#include "tether/utils/SignalHandler.hpp"
 
 #include <iostream>
 #include <thread>
 #include <chrono>
-#include <csignal>
 #include <atomic>
 #include <cstring>
 #include <fcntl.h>
@@ -27,10 +27,6 @@
 #include <sys/select.h>
 
 std::atomic<bool> g_running{true};
-
-void signalHandler(int) {
-    g_running.store(false);
-}
 
 // EtherCAT frame utilities
 class SimpleFrameBuilder {
@@ -270,8 +266,7 @@ void printUsage(const char* progName) {
 }
 
 int main(int argc, char* argv[]) {
-    std::signal(SIGINT, signalHandler);
-    std::signal(SIGTERM, signalHandler);
+    Tether::Utils::SignalHandler sig_handler(g_running, false);
     
     bool isMaster = false;
     bool isSlave = false;

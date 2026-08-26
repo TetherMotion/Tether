@@ -17,7 +17,6 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
-#include <csignal>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
@@ -37,6 +36,7 @@
 #include "tether/platform/Platform.hpp"
 #include "tether/sensors/Axia80.hpp"
 #include "tether/fmmu/FMMUConfiguration.hpp"
+#include "tether/utils/SignalHandler.hpp"
 
 #include <argparse/argparse.hpp>
 
@@ -44,12 +44,6 @@
 
 static const char* TAG = "axia80_stream";
 static EtherCAT::Master* g_master = nullptr;
-
-void signalHandler(int) {
-    if (g_master) {
-        g_master->requestCancel();
-    }
-}
 
 
 // ============================================================================
@@ -530,8 +524,7 @@ int main(int argc, char** argv) {
     }
 
     // ---- Install signal handler ----
-    std::signal(SIGINT, signalHandler);
-    std::signal(SIGTERM, signalHandler);
+    Tether::Utils::SignalHandler sig_handler;
 
     // ---- Open raw socket ----
     auto eth = EtherCAT::HAL::createDefaultEthernet();
@@ -580,6 +573,7 @@ int main(int argc, char** argv) {
     // ---- Create master ----
     EtherCAT::Master master;
     g_master = &master;
+    sig_handler.setCancelCallback([&master]() { master.requestCancel(); });
     Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
 
     // ---- Optional VLAN router ----

@@ -21,11 +21,11 @@
 #include "hal/HAL.hpp"
 #include "packetloggers/pcap/PCAPLogger.hpp"
 #include "tether/platform/Platform.hpp"
+#include "tether/utils/SignalHandler.hpp"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <csignal>
 #include <atomic>
 #include <memory>
 #include <magic_enum/magic_enum.hpp>
@@ -47,15 +47,6 @@ static std::atomic<uint64_t> g_cycleCount{0};
 static std::atomic<uint64_t> g_txCount{0};
 static std::atomic<uint64_t> g_rxCount{0};
 static std::atomic<uint64_t> g_maxLatencyUs{0};
-
-// ============================================================================
-// Signal Handler
-// ============================================================================
-
-static void signalHandler(int sig) {
-    (void)sig;
-    g_running = false;
-}
 
 // ============================================================================
 // Real-Time Setup
@@ -310,8 +301,7 @@ int main(int argc, char* argv[]) {
     std::printf("Cycle frequency: %u Hz\n", opts.cycleFrequencyHz);
     
     // Setup signal handlers
-    std::signal(SIGINT, signalHandler);
-    std::signal(SIGTERM, signalHandler);
+    Tether::Utils::SignalHandler sig_handler(g_running, false);
 
     // Ensure kernel supports realtime (warns if low-latency desktop, exits if below)
     Tether::Platform::ensureRealtimeKernelOrExit();

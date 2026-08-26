@@ -14,11 +14,12 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
-#include <signal.h>
+#include <atomic>
 #include <cstring>
 #include <cmath>
 
 #include "tether/platform/Platform.hpp"
+#include "tether/utils/SignalHandler.hpp"
 
 // EtherCAT master includes (using SOEM or similar)
 // #include "ethercat.h"
@@ -45,12 +46,7 @@ constexpr int32_t PROFILE_ACCEL = 500000;
 // Global State
 // =============================================================================
 
-volatile bool g_running = true;
-
-void signalHandler(int sig) {
-    std::cout << "\nShutdown requested..." << std::endl;
-    g_running = false;
-}
+std::atomic<bool> g_running{true};
 
 // =============================================================================
 // CiA 402 Object Dictionary Addresses
@@ -520,7 +516,7 @@ int main(int argc, char* argv[]) {
     Tether::Platform::ensureRealtimeKernelOrExit();
     
     // Set up signal handler
-    signal(SIGINT, signalHandler);
+    Tether::Utils::SignalHandler sig_handler(g_running, false);
     
     // Initialize EtherCAT
     if (!EtherCAT::init(NETWORK_INTERFACE)) {
