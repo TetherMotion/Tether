@@ -4,6 +4,7 @@
  */
 #include <gtest/gtest.h>
 #include "tether/profiles/cia402/MotionProfile.hpp"
+#include "tether/profiles/cia402/CiA402Config.hpp"
 #include <cmath>
 
 using namespace CiA402;

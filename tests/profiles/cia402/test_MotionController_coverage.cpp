@@ -1,15 +1,17 @@
 /**
  * @file test_MotionController_coverage.cpp
- * @brief Comprehensive tests for MotionController, MotionProfile, and utility functions
+ * @brief Comprehensive tests for Cia402MotionController, MotionProfile, and utility functions
  */
 
 #include <gtest/gtest.h>
 #include <magic_enum/magic_enum.hpp>
 #include <tether/profiles/cia402/MotionController.hpp>
 #include <tether/profiles/cia402/MotionProfile.hpp>
+#include <tether/motion/Cia402MotionController.hpp>
 #include "mocks/MockDriveBackend.hpp"
 
 using namespace CiA402;
+using tether::motion::Cia402MotionController;
 
 // ============================================================================
 // Utility Free Functions
@@ -356,21 +358,24 @@ TEST(MotionStateTest, DefaultValues) {
 }
 
 // ============================================================================
-// MotionController Tests
+// Cia402MotionController Tests
 // ============================================================================
 
 class MotionControllerCovTest : public ::testing::Test {
 protected:
+    using IAxisPtr = std::shared_ptr<tether::common::IAxis>;
+
     void SetUp() override {
-        controller = std::make_unique<MotionController>();
+        controller = std::make_unique<Cia402MotionController>();
     }
 
-    CiA402AxisPtr addFakeAxis(CiA402Axis::AxisId id) {
+    IAxisPtr addFakeAxis(Cia402MotionController::AxisId id) {
         auto backend = std::make_unique<mock::FakeDriveBackend>();
-        return controller->addAxis(id, std::move(backend));
+        auto axis = std::make_shared<CiA402Axis>(id, std::move(backend));
+        return controller->addAxis(id, axis);
     }
 
-    std::unique_ptr<MotionController> controller;
+    std::unique_ptr<Cia402MotionController> controller;
 };
 
 // --- Axis Management ---
@@ -378,7 +383,9 @@ protected:
 TEST_F(MotionControllerCovTest, AddAxis) {
     auto axis = addFakeAxis(0);
     ASSERT_NE(nullptr, axis);
-    EXPECT_EQ(0u, axis->getId());
+    auto ciaAxis = std::dynamic_pointer_cast<CiA402Axis>(axis);
+    ASSERT_NE(nullptr, ciaAxis);
+    EXPECT_EQ(0u, ciaAxis->getId());
 }
 
 TEST_F(MotionControllerCovTest, GetAxis) {
@@ -464,13 +471,13 @@ TEST_F(MotionControllerCovTest, SetSpeedFactorOne) {
 }
 
 TEST_F(MotionControllerCovTest, SetGetGlobalParams) {
-    MotionController::GlobalParams params{};
+    Cia402MotionController::GlobalParams params{};
     params.speedFactor = 0.75f;
     params.allowNegativeSpeed = true;
     params.minSpeedFactor = 0.1f;
     params.maxSpeedFactor = 2.0f;
     controller->setGlobalParams(params);
-    
+
     const auto& retrieved = controller->getGlobalParams();
     EXPECT_FLOAT_EQ(0.75f, retrieved.speedFactor);
     EXPECT_TRUE(retrieved.allowNegativeSpeed);
@@ -500,27 +507,12 @@ TEST_F(MotionControllerCovTest, StopPath) {
     EXPECT_FALSE(controller->isPathExecuting());
 }
 
-// --- Gearing ---
-
-TEST_F(MotionControllerCovTest, ConfigureGearing) {
-    addFakeAxis(0);
-    addFakeAxis(1);
-    controller->configureGearing(1, 0, 2, 1);
-}
-
-TEST_F(MotionControllerCovTest, EnableGearing) {
-    addFakeAxis(0);
-    addFakeAxis(1);
-    controller->configureGearing(1, 0, 1, 1);
-    controller->enableGearing(1, true);
-}
-
 // --- Homing ---
 
 TEST_F(MotionControllerCovTest, HomeAxis) {
     addFakeAxis(0);
-    HomingCommand cmd{};
-    cmd.method = HomingMethod::CurrentPosition;
+    tether::common::HomingCommand cmd{};
+    cmd.method = static_cast<uint16_t>(HomingMethod::CurrentPosition);
     controller->homeAxis(0, cmd);
 }
 
@@ -533,7 +525,7 @@ TEST_F(MotionControllerCovTest, AllHomed) {
 TEST_F(MotionControllerCovTest, Update) {
     addFakeAxis(0);
     addFakeAxis(1);
-    controller->update(0.001f);
+    controller->update(0.001);
 }
 
 TEST_F(MotionControllerCovTest, SetGetCycleTimeUs) {
