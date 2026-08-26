@@ -181,7 +181,7 @@ TEST_F(CiA402AxisTest, StartHomingWithMethod) {
 
 TEST_F(CiA402AxisTest, StartHomingWithCommand) {
     HomingCommand cmd{};
-    cmd.method = HomingMethod::NegLimitIndex;
+    cmd.method = static_cast<uint16_t>(HomingMethod::NegLimitIndex);
     cmd.speedSwitch = 500;
     cmd.speedZero = 50;
     cmd.acceleration = 2000;
@@ -350,5 +350,5 @@ TEST(TorqueCommandTest, Defaults) {
 
 TEST(HomingCommandTest, Defaults) {
     HomingCommand cmd{};
-    EXPECT_EQ(HomingMethod::CurrentPosition, cmd.method);
+    EXPECT_EQ(0u, cmd.method);
 }
