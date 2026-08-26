@@ -3,6 +3,7 @@
 #include <cstring>
 #include <iostream>
 
+#include "tether/hal/NetworkInterfaceEnumerator.hpp"
 #include "tether/platform/Platform.hpp"
 
 namespace Tether::Examples {
@@ -30,7 +31,20 @@ bool initHostEthernet(HostEtherNetSession& session,
     auto err = session.eth->init(cfg);
     if (err != EtherCAT::HAL::Error::OK) {
         if (err == EtherCAT::HAL::Error::InterfaceNotFound) {
-            TETHER_LOGE(tag, "Interface '%s' not found -- check `ip link`", interfaceName.c_str());
+            TETHER_LOGE(tag, "Interface '%s' not found", interfaceName.c_str());
+            // List physical Ethernet interfaces to guide the user
+            auto physIfaces = EtherCAT::HAL::getPhysicalEthernetInterfaces();
+            if (!physIfaces.empty()) {
+                std::string names;
+                for (const auto& iface : physIfaces) {
+                    if (!names.empty()) names += ", ";
+                    names += iface.name;
+                }
+                TETHER_LOGI(tag, "Available physical Ethernet interfaces: %s",
+                            names.c_str());
+            } else {
+                TETHER_LOGI(tag, "No physical Ethernet interfaces found on this system");
+            }
         } else if (err == EtherCAT::HAL::Error::PermissionDenied) {
             TETHER_LOGE(tag, "Permission denied -- run as root or with CAP_NET_RAW");
         } else {
