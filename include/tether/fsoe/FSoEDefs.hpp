@@ -63,6 +63,7 @@ namespace ResetErrorCode {
     constexpr uint8_t InvalidCommParaLen = 0x08;  // Invalid comm parameter length (INVALID_COMPARALEN)
     constexpr uint8_t InvalidCommPara    = 0x09;  // Invalid comm parameter data (INVALID_COMPARA)
     constexpr uint8_t InvalidUserParaLen = 0x0A;  // Invalid app parameter length (INVALID_USERPARALEN)
+    constexpr uint8_t InvalidUserPara    = 0x0B;  // Invalid app parameter data (INVALID_USERPARA)
 }
 
 // ============================================================================
