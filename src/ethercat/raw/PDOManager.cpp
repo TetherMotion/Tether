@@ -376,7 +376,8 @@ IPDOTransport& PDOManager::transport() { return transport_; }
 // ============================================================================
 
 bool PDOManager::writeSMConfig(uint16_t adp, uint8_t sm_index,
-                               const PDO::SyncManagerConfig& config)
+                               const PDO::SyncManagerConfig& config,
+                               uint16_t slave_index)
 {
     const uint16_t base = sm_base_address(sm_index);
 
@@ -419,8 +420,8 @@ bool PDOManager::writeSMConfig(uint16_t adp, uint8_t sm_index,
         return false;
     }
 
-    TETHER_LOGI(TAG, "SM%u: configured addr=0x%04x len=%u ctrl=0x%02x act=0x%02x",
-                sm_index, config.phys_start_addr, config.length, ctrl_byte, activate);
+    TETHER_LOGI(TAG, "Slave %u: SM%u: configured addr=0x%04x len=%u ctrl=0x%02x act=0x%02x",
+                slave_index, sm_index, config.phys_start_addr, config.length, ctrl_byte, activate);
 
     if ((rxPDODebug() && config.type == PDO::SyncManagerType::ProcessOutput) ||
         (txPDODebug() && config.type == PDO::SyncManagerType::ProcessInput)) {
@@ -490,7 +491,7 @@ bool PDOManager::configureSlavesSMs(uint16_t slave_index) {
 
     for (int sm = 0; sm < 4; sm++) {
         if (cfg.sm[sm].type != PDO::SyncManagerType::Unused) {
-            if (!writeSMConfig(adp, static_cast<uint8_t>(sm), cfg.sm[sm])) {
+            if (!writeSMConfig(adp, static_cast<uint8_t>(sm), cfg.sm[sm], slave_index)) {
                 TETHER_LOGE(TAG, "Failed to configure SM%d for slave %u", sm, slave_index);
                 return false;
             }

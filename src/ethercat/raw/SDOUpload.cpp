@@ -114,8 +114,8 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
 
         mbx_write_count_++;
         if ((mbx_write_count_ % 1000) == 1) {
-            TETHER_LOGI(TAG, "SDO upload (read) request to adp=0x%04X: index=0x%04X:%u [mailbox #%lu -> 0x%04X, len=%u, SM0=0x%02X, AL=0x%04X]",
-                     adp, index, sub, (unsigned long)mbx_write_count_, mbxWriteAddr, mbxWriteLen, sm0_status, al_status);
+            TETHER_LOGI(TAG, "Slave %u: SDO upload (read) request: index=0x%04X:%u [mailbox #%lu -> 0x%04X, len=%u, SM0=0x%02X, AL=0x%04X]",
+                     slaveIndexFromADP(adp), index, sub, (unsigned long)mbx_write_count_, mbxWriteAddr, mbxWriteLen, sm0_status, al_status);
         }
 
 #ifdef TETHER_DIAG_SDO_IO
@@ -147,8 +147,8 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
         }
 
         if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
-            TETHER_LOGE(TAG, "SDO upload: SM1 mailbox never became full (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%u timeout=%ums)",
-                        adp, mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
+            TETHER_LOGE(TAG, "Slave %u: SDO upload: SM1 mailbox never became full (wr=0x%04X rd=0x%04X index=0x%04X:%u timeout=%ums)",
+                        slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
             diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
             return false;
         }
@@ -191,8 +191,8 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
             }
             if (hdr.type == EC_MBXT_ERR) {
                 if (isCounterMismatchError(mbxbuf, hdr) && stale_retry_count < MAX_STALE_RETRIES) {
-                    TETHER_LOGW(TAG, "Mailbox counter mismatch error (upload): syncing counter %u -> %u and retrying",
-                                expected_mbx_cnt, SDOMailboxIO::nextMbxCnt(hdr.cnt));
+                    TETHER_LOGW(TAG, "Slave %u: Mailbox counter mismatch error (upload): syncing counter %u -> %u and retrying",
+                                slaveIndexFromADP(adp), expected_mbx_cnt, SDOMailboxIO::nextMbxCnt(hdr.cnt));
                     SDOMailboxIO::syncMbxCounter(hdr.cnt, inoutMbxCnt, mbxbuf);
                     expected_mbx_cnt = SDOMailboxIO::nextMbxCnt(hdr.cnt);
                     ++stale_retry_count;
@@ -497,8 +497,8 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
             }
 
             if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
-                TETHER_LOGE(TAG, "SDO upload segment: SM1 mailbox never became full (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%u timeout=%ums)",
-                            adp, mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
+                TETHER_LOGE(TAG, "Slave %u: SDO upload segment: SM1 mailbox never became full (wr=0x%04X rd=0x%04X index=0x%04X:%u timeout=%ums)",
+                            slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
                 diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
                 return false;
             }
