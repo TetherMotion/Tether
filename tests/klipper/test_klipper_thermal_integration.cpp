@@ -36,7 +36,7 @@
 
 using namespace tether::klipper;
 using namespace Simulation;
-namespace ctrl = ::Control;
+namespace ctrl = ::tether::control;
 
 // ============================================================================
 // Adapter: PIDController -> SimController

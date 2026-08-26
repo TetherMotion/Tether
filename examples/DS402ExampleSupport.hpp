@@ -15,6 +15,7 @@
 
 #include "tether/hal/IEthernet.hpp"
 #include "tether/hal/NetworkInterfaceEnumerator.hpp"
+#include "common/ExampleHelpers.hpp"
 
 namespace Tether::Examples {
 
