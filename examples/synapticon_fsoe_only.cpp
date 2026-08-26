@@ -527,7 +527,7 @@ bool parseArgs(int argc, char** argv, Args& out) {
         return false;
     }
 
-    out.interface = program.get<std::string>("--interface");
+    out.interface = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
     out.slave_index = program.get<int>("--slave");
     out.duration = program.get<double>("--duration");
     out.enable_dc_sync = program.get<bool>("--dc-sync");

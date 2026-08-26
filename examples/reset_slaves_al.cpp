@@ -99,7 +99,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::string iface       = program.get<std::string>("--interface");
+    std::string iface       = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
     std::string debug_str   = program.get<std::string>("--debug");
     std::string esi_xml     = program.get<std::string>("--esi-xml");
 #if !TETHER_HAVE_ESI

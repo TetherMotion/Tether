@@ -219,7 +219,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::string iface = program.get<std::string>("--interface");
+    std::string iface = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
     bool do_reset = program.get<bool>("--reset");
     bool do_sw_reset = program.get<bool>("--software-reset");
     std::string esi_xml = program.get<std::string>("--esi-xml");

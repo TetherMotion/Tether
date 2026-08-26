@@ -9,6 +9,7 @@
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/SDOErrorDecoder.hpp"
 #include "tether/ethercat/Slave.hpp"
+#include "tether/hal/NetworkInterfaceEnumerator.hpp"
 #include "tether/platform/Platform.hpp"
 
 namespace Tether::Examples {
@@ -21,7 +22,36 @@ void addInterfaceArg(argparse::ArgumentParser& program,
                      const std::string& defaultValue) {
     program.add_argument("-i", "--interface")
         .default_value(defaultValue)
-        .help("Network interface name (e.g. eth0, enp3s0)");
+        .help("Network interface name (e.g. eth0, enp3s0). "
+              "If omitted, auto-selects the sole physical Ethernet interface.");
+}
+
+std::string resolveInterface(const std::string& requested, const char* tag) {
+    if (!requested.empty()) {
+        return requested;
+    }
+
+    auto physIfaces = EtherCAT::HAL::getPhysicalEthernetInterfaces();
+    if (physIfaces.size() == 1) {
+        TETHER_LOGI(tag, "No --interface given; auto-selected '%s'",
+                    physIfaces[0].name.c_str());
+        return physIfaces[0].name;
+    }
+
+    if (physIfaces.empty()) {
+        TETHER_LOGE(tag, "No --interface given and no physical Ethernet "
+                         "interfaces found on this system");
+    } else {
+        std::string names;
+        for (const auto& iface : physIfaces) {
+            if (!names.empty()) names += ", ";
+            names += iface.name;
+        }
+        TETHER_LOGE(tag, "No --interface given and %zu physical Ethernet "
+                         "interfaces found; please specify one with -i: %s",
+                    physIfaces.size(), names.c_str());
+    }
+    return "";
 }
 
 void addDebugArg(argparse::ArgumentParser& program) {

@@ -123,7 +123,7 @@ int main(int argc, char** argv)
     EtherCAT::DS402Master master;
     Tether::Examples::HostMasterSession session;
     if (!Tether::Examples::startHostMasterSession(
-            program.get<std::string>("--interface"), master, session, TAG)) {
+            Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG), master, session, TAG)) {
         return 2;
     }
 

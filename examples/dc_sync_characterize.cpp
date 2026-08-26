@@ -250,7 +250,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    const std::string iface     = program.get<std::string>("--interface");
+    const std::string iface     = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
     const int slave_idx_signed  = program.get<int>("--slave");
     const std::string debug_str = program.get<std::string>("--debug");
 

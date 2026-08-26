@@ -17,8 +17,25 @@ namespace Tether::Examples {
 // ============================================================================
 
 /// Add `-i` / `--interface` to an ArgumentParser.
+/// Default is empty — use resolveInterface() to auto-select when not given.
 void addInterfaceArg(argparse::ArgumentParser& program,
-                     const std::string& defaultValue = "eth0");
+                     const std::string& defaultValue = "");
+
+/// Resolve the interface name after argument parsing.
+///
+/// If @p requested is non-empty, it is returned as-is (user explicitly
+/// specified -i/--interface).
+///
+/// If empty, the system is queried for physical Ethernet interfaces via
+/// getPhysicalEthernetInterfaces():
+///   - Exactly one found: auto-selected, logged, and returned.
+///   - Zero found: error logged, empty string returned.
+///   - More than one: error logged with the list, empty string returned.
+///
+/// @param requested  The raw value from program.get<std::string>("--interface")
+/// @param tag        Log tag for diagnostics
+/// @return           Interface name, or empty string on failure.
+std::string resolveInterface(const std::string& requested, const char* tag);
 
 /// Add `--debug` to an ArgumentParser.
 void addDebugArg(argparse::ArgumentParser& program);

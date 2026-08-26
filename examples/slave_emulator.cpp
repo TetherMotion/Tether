@@ -126,7 +126,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    const auto interfaceName = program.get<std::string>("--interface");
+    const auto interfaceName = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), kTag);
     const auto durationSec = program.get<double>("--time");
     const auto debugStr = program.get<std::string>("--debug");
     const auto rxVlanStr = program.get<std::string>("--rx-vlan");
