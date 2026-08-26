@@ -1197,6 +1197,9 @@ SlaveError Slave::configureCustomTxPDO(
     }
 
     uint8_t sub = 1;
+    const bool dbg_pdo = (direction == PDO::PDODirection::RxPDO)
+                             ? slave_debug_flags_.rxPDO
+                             : slave_debug_flags_.txPDO;
     for (const auto& e : entries) {
         uint8_t sz = e.resolvedSize();
         uint32_t val = encodePDOMappingValue(e.entry, sz);
@@ -1205,8 +1208,10 @@ SlaveError Slave::configureCustomTxPDO(
             TETHER_LOGE(TAG, "Failed to write PDO mapping entry %u for 0x%04X", sub, pdo_index);
             return err;
         }
-        TETHER_LOGI(TAG, "  %s 0x%04X sub %u: 0x%08X (idx=0x%04X sub=0x%02X %u bytes)",
-                    dir_str, pdo_index, sub, val, e.entry->index, e.entry->subindex, sz);
+        if (dbg_pdo) {
+            TETHER_LOGI(TAG, "  %s 0x%04X sub %u: 0x%08X (idx=0x%04X sub=0x%02X %u bytes)",
+                        dir_str, pdo_index, sub, val, e.entry->index, e.entry->subindex, sz);
+        }
         ++sub;
     }
 
