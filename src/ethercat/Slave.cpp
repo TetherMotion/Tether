@@ -89,7 +89,7 @@ SlaveError Slave::configureMailbox(
         mbox_out.address, mbox_out.length);
 
     // Write mailbox SM registers to slave ESC (same as autoConfigureMailbox)
-    auto& pdo = master_.pdo();
+    auto& pdo = master_.pdoForSlave(index_);
     auto* slave_configs = pdo.slaveConfigs();
     if (index_ < PDO::kMaxPDOSlaves) {
         slave_configs[index_].sm[0] = PDO::SyncManagerConfig::mailbox_write(
@@ -255,7 +255,7 @@ SlaveError Slave::configurePDOSyncManagers(
     uint16_t sm2_addr, uint16_t sm2_len, uint8_t sm2_ctrl,
     uint16_t sm3_addr, uint16_t sm3_len, uint8_t sm3_ctrl)
 {
-    auto& pdo = master_.pdo();
+    auto& pdo = master_.pdoForSlave(index_);
     auto* cfgs = pdo.slaveConfigs();
     if (index_ >= PDO::kMaxPDOSlaves) {
         TETHER_LOGE( TAG,
@@ -556,7 +556,7 @@ SlaveError Slave::transitionToOp() {
     bool pdo_reply_ok = false;
     bool has_pdo_entries = false;
     {
-        auto& pdo_mgr = master_.pdo();
+        auto& pdo_mgr = master_.pdoForSlave(index_);
         has_pdo_entries = pdo_mgr.hasSlavePDOEntries(index_);
         if (has_pdo_entries) {
             for (int wait_ms = 0; wait_ms < 100; wait_ms++) {
@@ -607,7 +607,7 @@ SlaveError Slave::transitionToOp() {
     }
 
     if (has_pdo_entries && (!pdo_req_ok || !pdo_reply_ok)) {
-        auto& pdo_mgr = master_.pdo();
+        auto& pdo_mgr = master_.pdoForSlave(index_);
         const uint32_t req   = pdo_mgr.getSlavePDORequestCount(index_);
         const uint32_t reply = pdo_mgr.getSlavePDOReplyCount(index_);
         TETHER_LOGE(TAG,
@@ -918,7 +918,7 @@ SlaveError Slave::registerPDOsFromSII(SIIPDOConfig& out_config) {
     }
 
     // Remove any existing entries for this slave to avoid duplicates
-    PDO::PDOMapping& mapping = master_.pdo().mapping();
+    PDO::PDOMapping& mapping = master_.pdoForSlave(index_).mapping();
     mapping.remove_entries_for_slave(index_);
 
     // Allocate buffers and register entries
@@ -957,7 +957,7 @@ SlaveError Slave::registerPDOsFromSII(SIIPDOConfig& out_config) {
     }
 
     // Finalize so SlaveConfig rxpdo_size / txpdo_size are updated
-    master_.pdo().finalizeMapping(index_);
+    master_.pdoForSlave(index_).finalizeMapping(index_);
 
     return SlaveError::Ok;
 }
@@ -1005,7 +1005,7 @@ SlaveError Slave::registerPDOsFromESI(const ESIFile& esi, SIIPDOConfig& out_conf
     };
 
     // Remove any existing entries for this slave to avoid duplicates
-    PDO::PDOMapping& mapping = master_.pdo().mapping();
+    PDO::PDOMapping& mapping = master_.pdoForSlave(index_).mapping();
     mapping.remove_entries_for_slave(index_);
 
     out_config = SIIPDOConfig{};
@@ -1042,7 +1042,7 @@ SlaveError Slave::registerPDOsFromESI(const ESIFile& esi, SIIPDOConfig& out_conf
                     txpdo->index, size);
     }
 
-    master_.pdo().finalizeMapping(index_);
+    master_.pdoForSlave(index_).finalizeMapping(index_);
 
     return SlaveError::Ok;
 }
@@ -1100,7 +1100,7 @@ SlaveError Slave::registerFixedPDOs(const SIIPDOConfig& config) {
     }
 
     // Remove any existing entries for this slave to avoid duplicates
-    PDO::PDOMapping& mapping = master_.pdo().mapping();
+    PDO::PDOMapping& mapping = master_.pdoForSlave(index_).mapping();
     mapping.remove_entries_for_slave(index_);
 
     if (config.has_rxpdo) {
@@ -1127,7 +1127,7 @@ SlaveError Slave::registerFixedPDOs(const SIIPDOConfig& config) {
                     config.txpdo_index, config.txpdo_size);
     }
 
-    master_.pdo().finalizeMapping(index_);
+    master_.pdoForSlave(index_).finalizeMapping(index_);
     return SlaveError::Ok;
 }
 
@@ -1255,7 +1255,7 @@ SlaveError Slave::applyCustomPDOs() {
     }
 
     // Remove existing PDO mapping entries for this slave
-    PDO::PDOMapping& mapping = master_.pdo().mapping();
+    PDO::PDOMapping& mapping = master_.pdoForSlave(index_).mapping();
     mapping.remove_entries_for_slave(index_);
 
     // Register each custom PDO
@@ -1324,7 +1324,7 @@ SlaveError Slave::applyCustomPDOs() {
     }
 
     // Finalize mapping to update SM lengths
-    master_.pdo().finalizeMapping(index_);
+    master_.pdoForSlave(index_).finalizeMapping(index_);
 
     return SlaveError::Ok;
 }
@@ -1339,7 +1339,7 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         return SlaveError::Ok;
     }
 
-    auto& pdo = master_.pdo();
+    auto& pdo = master_.pdoForSlave(index_);
     auto* cfgs = pdo.slaveConfigs();
     if (index_ >= PDO::kMaxPDOSlaves) {
         TETHER_LOGE(TAG, "%s: index exceeds max PDO slaves (%zu)", logPrefix().c_str(), PDO::kMaxPDOSlaves);

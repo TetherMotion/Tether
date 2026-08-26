@@ -398,6 +398,9 @@ Master::Master()
 Master::Master(const Config& config)
     : config_(config)
 {
+    // Initialize PDO group routing: all slaves default to the default group (-1)
+    pdo_group_idx_for_slave_.fill(-1);
+
     ensureRxQueues();
 
     // Initialize per-master packet router (required for waiters used by this master)
@@ -709,6 +712,55 @@ bool Master::wasFaultDiagnosed(uint16_t slave_index) const
 
 PDOManager&    Master::pdo()    { return *pdo_; }
 LogicalAddressManager& Master::logicalAddressManager() { return *logical_addr_mgr_; }
+
+PDOManager& Master::pdoForSlave(uint16_t slave_index) {
+    if (slave_index < PDO::kMaxPDOSlaves) {
+        const int idx = pdo_group_idx_for_slave_[slave_index];
+        if (idx >= 0 && static_cast<size_t>(idx) < pdo_groups_.size()) {
+            return *pdo_groups_[idx].pdo;
+        }
+    }
+    return *pdo_;
+}
+
+LogicalAddressManager& Master::logicalAddressManagerForSlave(uint16_t slave_index) {
+    if (slave_index < PDO::kMaxPDOSlaves) {
+        const int idx = pdo_group_idx_for_slave_[slave_index];
+        if (idx >= 0 && static_cast<size_t>(idx) < pdo_groups_.size()) {
+            return *pdo_groups_[idx].lam;
+        }
+    }
+    return *logical_addr_mgr_;
+}
+
+PDOManager& Master::createPdoGroup(const std::vector<uint16_t>& slave_indices,
+                                    uint32_t base_logical_addr) {
+    auto& group = pdo_groups_.emplace_back();
+    group.transport = std::make_unique<MasterPDOTransport>(*this);
+    group.pdo = std::make_unique<PDOManager>(*group.transport);
+    group.lam = std::make_unique<LogicalAddressManager>(*group.transport);
+    group.lam->setBaseLogicalAddress(base_logical_addr);
+    group.pdo->init();
+    group.lam->init();
+    group.pdo->setLogicalAddressManager(group.lam.get());
+
+    // Copy prefix provider for logging
+    group.lam->setPrefixProvider([this](uint16_t idx) {
+        return slaveLogPrefix(idx);
+    });
+
+    // Assign slaves to this group
+    const int group_idx = static_cast<int>(pdo_groups_.size() - 1);
+    for (uint16_t idx : slave_indices) {
+        if (idx < PDO::kMaxPDOSlaves) {
+            pdo_group_idx_for_slave_[idx] = group_idx;
+            TETHER_LOGI("ec_master", "Slave %u assigned to PDO group %d (base_log=0x%08X)",
+                        idx, group_idx, base_logical_addr);
+        }
+    }
+
+    return *group.pdo;
+}
 ::EtherCAT::CoE::CoEManager& Master::sdoManager(uint16_t slave_index) {
     std::lock_guard<std::mutex> lock(sdo_managers_mutex_);
     if (slave_index >= sdo_managers_.size()) {

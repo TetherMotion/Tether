@@ -104,9 +104,16 @@ bool DCManager::start()
         return false;
     }
     // Automatically wire in the master's PDO physical exchange so the
-    // realtime loop drives actual process data, not a noop.
+    // realtime loop drives actual process data, not a noop.  Exchange
+    // the default group plus any additional PDO groups.
     auto pdo_fn = [this]() -> bool {
-        return master_.pdo().exchangePhysical(1);
+        bool ok = master_.pdo().exchangePhysical(1);
+        for (auto& group : master_.pdoGroups()) {
+            if (group.pdo) {
+                ok = group.pdo->exchangeAll() && ok;
+            }
+        }
+        return ok;
     };
     return dc_instance_->start(std::move(pdo_fn));
 }

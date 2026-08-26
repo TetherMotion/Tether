@@ -346,7 +346,7 @@ bool Master::forceMailboxDefaults(SlaveAddress slave_address)
     uint16_t rd_addr = kHardcodedRdAddr;
     uint16_t rd_len = kHardcodedRdLen;
 
-    auto* slave_configs = pdo_->slaveConfigs();
+    auto* slave_configs = pdoForSlave(slave_index).slaveConfigs();
     // Standard EtherCAT mailbox SM convention:
     // SM0 = Receive/MbxIn (MASTER→SLAVE, control=0x26)
     // SM1 = Send/MbxOut    (SLAVE→MASTER, control=0x22)
@@ -362,7 +362,7 @@ bool Master::forceMailboxDefaults(SlaveAddress slave_address)
         return false;
     }
 
-    bool applied = pdo_->configureSlavesSMs(slave_index);
+    bool applied = pdoForSlave(slave_index).configureSlavesSMs(slave_index);
     if (mailbox_fallback_cb_) mailbox_fallback_cb_(slave_index);
     return applied;
 }

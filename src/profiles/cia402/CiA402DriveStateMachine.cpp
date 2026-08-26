@@ -136,7 +136,7 @@ bool CiA402Drive::gotoOp() {
                 uint8_t sm2_event = 0;
                 m_master->readRegister(SlaveAddress(m_slave_index), 0x0820, sm2_event, 200);
                 // PDO exchange stats
-                auto pstats = m_master->pdo().getPhysicalStats();
+                auto pstats = m_master->pdoForSlave(m_slave_index).getPhysicalStats();
                 TETHER_LOGI(TAG, "%s: Still waiting for OP, AL_STATUS=0x%04X AL status code: %s (0x%04X) DC_SYNC_ACT=0x%02X DC_SysTime_lo=0x%08lX (%d ms)\n  PDO: fpwr_ok=%u fpwr_err=%u fprd_ok=%u fprd_err=%u  SYNC_LATCH=0x%02X SM2_EVT=0x%02X",
                          logPrefix().c_str(), al_raw, getALStatusCodeName(al_code), al_code, dc_sync_act, (unsigned long)sys_time_lo, (attempt+1)*100,
                          pstats.fpwr_success, pstats.fpwr_wkc_errors, pstats.fprd_success, pstats.fprd_wkc_errors, sync_latch, sm2_event);
@@ -156,7 +156,7 @@ bool CiA402Drive::gotoOp() {
     m_master->readRegister(SlaveAddress(m_slave_index), 0x0130, al_status, 200);
     
     // Read PDO exchange stats to diagnose if PDO was ever active
-    auto pstats = m_master->pdo().getPhysicalStats();
+    auto pstats = m_master->pdoForSlave(m_slave_index).getPhysicalStats();
     
     TETHER_LOGW(TAG, "%s: OP not confirmed after 5s, current state=0x%02X (AL status code: %s (0x%04X))\n"
              "  AL_STATUS=0x%04X%s\n"
@@ -221,7 +221,7 @@ bool CiA402Drive::transitionToOp(bool apply_pdo_mapping) {
     // reconfigured the PDOs via SDO to use different sizes. The slave validates that
     // SM2/SM3 lengths match the actual PDO mapping during SAFE_OP transition.
     if (m_pdo_configured) {
-        auto* slave_configs = m_master->pdo().slaveConfigs();
+        auto* slave_configs = m_master->pdoForSlave(m_slave_index).slaveConfigs();
         const uint16_t rxpdo_size = m_rxpdo_size;
         const uint16_t txpdo_size = m_txpdo_size;
         
@@ -306,7 +306,7 @@ bool CiA402Drive::transitionSafeOpToOp() {
     // We must start sending PDO data now to prevent watchdog timeout.
     TETHER_LOGI(TAG, "%s: Enabling PDO exchange in SAFE_OP (pre-OP)", logPrefix().c_str());
     if (m_master) {
-        m_master->pdo().resetStats();
+        m_master->pdoForSlave(m_slave_index).resetStats();
         m_master->dc().setPDOEnabled(true);
     }
 

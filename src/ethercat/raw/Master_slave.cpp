@@ -304,6 +304,9 @@ void Master::updateDebugFlags()
     if (pdo_) {
         pdo_->setDebugFlags(&debug_flags_);
     }
+    for (auto& group : pdo_groups_) {
+        if (group.pdo) group.pdo->setDebugFlags(&debug_flags_);
+    }
 }
 
 Slave& Master::slave(uint16_t slave_index)
@@ -454,7 +457,8 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
         TETHER_LOGW(TAG, "configureProcessDataSyncManagersFromSii: SII read failed for slave %u, using fallback", slave_index);
     }
 
-    auto* slave_configs = pdo_->slaveConfigs();
+    auto& pdo = pdoForSlave(slave_index);
+    auto* slave_configs = pdo.slaveConfigs();
     bool configured_any = false;
 
     for (size_t i = 2; sii_valid && i < 4 && i < sii.sm_count; i++) {
@@ -517,7 +521,7 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
         TETHER_LOGW(TAG, "SM3 (TxPDO) using DEFAULT: Addr=0x%04X Ctrl=0x%02X", sm3.phys_start_addr, std::bit_cast<uint8_t>(sm3.control));
     }
 
-    pdo_->finalizeMapping(slave_index);
+    pdo.finalizeMapping(slave_index);
 
     // Phase 1: Write SM2/SM3 registers with activation DISABLED.
     // The ESC must see valid Sync Manager state before FMMUs reference them,
@@ -549,17 +553,18 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
     // Build/rebuild the logical address map from all configured slaves.
     // Use discovered slave count since this is called per-slave during discovery
     // before pdo_->slaveCount() has been set.
-    logical_addr_mgr_->buildAddressMap(pdo_->slaveConfigs(),
-                                        getDiscoveredSlaveCount());
+    auto& lam = logicalAddressManagerForSlave(slave_index);
+    lam.buildAddressMap(pdo.slaveConfigs(),
+                        getDiscoveredSlaveCount());
 
     // Phase 2: Configure FMMUs while SMs are still disabled.
     auto& fmmu_mgr = slave(slave_index).fmmuManager();
     const bool fmmu_dbg = debug_flags_.fmmu && debug_flags_.fmmuFilt.allows(slave_index);
-    if (sii_valid && logical_addr_mgr_->hasSlavePDOs(slave_index)) {
-        uint32_t rx_log = logical_addr_mgr_->getRxPDOLogicalAddr(slave_index);
-        uint16_t rx_len = logical_addr_mgr_->getRxPDOLength(slave_index);
-        uint32_t tx_log = logical_addr_mgr_->getTxPDOLogicalAddr(slave_index);
-        uint16_t tx_len = logical_addr_mgr_->getTxPDOLength(slave_index);
+    if (sii_valid && lam.hasSlavePDOs(slave_index)) {
+        uint32_t rx_log = lam.getRxPDOLogicalAddr(slave_index);
+        uint16_t rx_len = lam.getRxPDOLength(slave_index);
+        uint32_t tx_log = lam.getTxPDOLogicalAddr(slave_index);
+        uint16_t tx_len = lam.getTxPDOLength(slave_index);
 
         fmmu_mgr.configureManual(
             slave_configs[slave_index].sm[2].phys_start_addr, rx_len, rx_log,

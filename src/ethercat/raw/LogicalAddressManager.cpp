@@ -12,7 +12,6 @@
 namespace EtherCAT {
 
 static const char* TAG = "ec_logaddr";
-static constexpr uint32_t kBaseLogicalAddress = 0x10000;
 
 // ============================================================================
 // Constructor / Lifecycle
@@ -83,8 +82,8 @@ bool LogicalAddressManager::buildAddressMap(const PDO::SlaveConfig* configs,
     }
 
     // Pass 2: assign logical addresses
-    uint32_t rxpdo_offset = kBaseLogicalAddress;
-    uint32_t txpdo_offset = kBaseLogicalAddress + total_rxpdo_bytes_;
+    uint32_t rxpdo_offset = base_logical_addr_;
+    uint32_t txpdo_offset = base_logical_addr_ + total_rxpdo_bytes_;
 
     for (uint16_t i = 0; i < slave_count; i++) {
         const auto& cfg = configs[i];
@@ -160,8 +159,8 @@ bool LogicalAddressManager::buildAddressMapFromMultiPDO(
     }
 
     // Pass 2: assign logical addresses and per-PDO entries
-    uint32_t rxpdo_offset = kBaseLogicalAddress;
-    uint32_t txpdo_offset = kBaseLogicalAddress + total_rxpdo_bytes_;
+    uint32_t rxpdo_offset = base_logical_addr_;
+    uint32_t txpdo_offset = base_logical_addr_ + total_rxpdo_bytes_;
 
     for (uint16_t s = 0; s < slave_count; s++) {
         const auto& configs = sm_configs[s];
@@ -333,7 +332,7 @@ bool LogicalAddressManager::exchangeAllLRW(const PDO::PDOMapping& mapping) {
         if (!addr_map_[e->slave_index].active) continue;
 
         const auto& addr = addr_map_[e->slave_index];
-        const uint32_t offset = addr.rxpdo_logical_addr - kBaseLogicalAddress
+        const uint32_t offset = addr.rxpdo_logical_addr - base_logical_addr_
                               + rx_running[e->slave_index];
         rx_running[e->slave_index] += e->data_size;
         if (e->app_buffer && e->data_size > 0 &&
@@ -344,7 +343,7 @@ bool LogicalAddressManager::exchangeAllLRW(const PDO::PDOMapping& mapping) {
 
     // Send LRW datagram
     const uint8_t idx = transport_.allocIdx();
-    const uint32_t logical_addr = kBaseLogicalAddress; // RxPDO region starts at base
+    const uint32_t logical_addr = base_logical_addr_; // RxPDO region starts at base
     const uint16_t adp = static_cast<uint16_t>(logical_addr & 0xFFFF);
     const uint16_t ado = static_cast<uint16_t>((logical_addr >> 16) & 0xFFFF);
 
@@ -383,7 +382,7 @@ bool LogicalAddressManager::exchangeAllLRW(const PDO::PDOMapping& mapping) {
             if (!addr_map_[e->slave_index].active) continue;
 
             const auto& addr = addr_map_[e->slave_index];
-            const uint32_t offset = addr.txpdo_logical_addr - kBaseLogicalAddress
+            const uint32_t offset = addr.txpdo_logical_addr - base_logical_addr_
                                   - total_rxpdo_bytes_
                                   + tx_running[e->slave_index];
             tx_running[e->slave_index] += e->data_size;
@@ -451,7 +450,7 @@ bool LogicalAddressManager::exchangeLRWForSlaves(const PDO::PDOMapping& mapping,
 
     // Send LRW datagram
     const uint8_t idx = transport_.allocIdx();
-    const uint32_t logical_addr = kBaseLogicalAddress;
+    const uint32_t logical_addr = base_logical_addr_;
     const uint16_t adp = static_cast<uint16_t>(logical_addr & 0xFFFF);
     const uint16_t ado = static_cast<uint16_t>((logical_addr >> 16) & 0xFFFF);
 
