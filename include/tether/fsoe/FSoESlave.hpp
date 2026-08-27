@@ -405,7 +405,7 @@ public:
     /// its own TX frames (cross-direction: slave TX inherits from the
     /// master's last TX CRC0 = last_rx_crc0_).
     /// startCrc = last_rx_crc0_, seqNo = last_rx_seq_no_ (echoes master's
-    /// last TX seq; Reset response is special: seq=initialSeqNo+1)
+    /// last TX seq; Reset response uses seq=initialSeqNo, same as master)
     uint16_t getTxLastCrc0() const { return last_rx_crc0_; }
     uint16_t getTxSeqNo() const { return last_rx_seq_no_; }
 
@@ -552,7 +552,8 @@ private:
     // CRC inheritance model (verified on real Synapticon hardware):
     //   - Slave TX: start_crc = last_rx_crc0_ (master's last TX CRC0, cross-direction)
     //     seq = last_rx_seq_no_ (echoes master's last TX seq, cross-direction)
-    //     Exception: Reset response uses seq = initialSeqNo+1 (ETG.5100 §8.2.2.2)
+    //     Exception: Reset response uses seq = initialSeqNo (slave's own
+    //     initial seq, same value as master's initial_seq_no)
     //   - Slave RX: start_crc = last_tx_crc0_ (own last TX CRC0, cross-direction)
     //     seq = rx_seq_no_ (expected next master TX seq)
     //   - Reset breaks the chain: both sides reset to start_crc=0

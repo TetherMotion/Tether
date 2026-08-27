@@ -684,19 +684,19 @@ private:
     std::array<uint8_t, sizeof(FSoERxPDO)> last_rx_{};
 
     void dumpWire(const uint8_t* tx_buffer, const uint8_t* rx_buffer) {
-        char hex[128];
+        char hex[256];
         size_t pos;
 
-        // TxPDO (slave-to-master) -- FSoE region
+        // TxPDO (slave-to-master) -- full PDO buffer (FSoE + CST)
         pos = 0;
-        for (size_t b = 0; b < sizeof(FSoETxPDO) && pos + 3 < sizeof(hex); b++) {
+        for (size_t b = 0; b < 44 && pos + 3 < sizeof(hex); b++) {
             pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", tx_buffer[b]));
         }
-        TETHER_LOGI("fsoe-wire", "[TxPDO] cycle %u: %s", cycle_count_, hex);
+        TETHER_LOGI("fsoe-wire", "[TxPDO full 44B] cycle %u: %s", cycle_count_, hex);
 
-        // RxPDO (master-to-slave) -- FSoE region
+        // RxPDO (master-to-slave) -- full PDO buffer (FSoE + CST)
         pos = 0;
-        for (size_t b = 0; b < sizeof(FSoERxPDO) && pos + 3 < sizeof(hex); b++) {
+        for (size_t b = 0; b < 30 && pos + 3 < sizeof(hex); b++) {
             pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", rx_buffer[b]));
         }
         TETHER_LOGI("fsoe-wire", "[RxPDO] cycle %u: %s", cycle_count_, hex);
@@ -769,12 +769,7 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .help("Diagnostics print interval in ms");
     program.add_argument("--debug")
         .default_value(std::string(""))
-        .help("Comma-separated debug flags: 'fsoe' for high-level protocol trace, "
-              "'fsoe-frame' for decoded PDO struct fields (on change), "
-              "'fsoe-raw' for raw frame hex dumps (on change), "
-              "'fsoe-wire' for every-cycle PDO wire dumps, "
-              "'fsoe-sequence' for per-cycle frame accept/reject + state change summary, "
-              "'fsoe-crc' for CRC parameters used in TX build and RX check");
+        .help("Comma-separated debug flags. Use '--debug help' for a list.");
     program.add_argument("--torque-nm")
         .scan<'g', double>()
         .default_value(0.5)
@@ -822,6 +817,17 @@ bool parseArgs(int argc, char** argv, Args& out) {
 int main(int argc, char** argv) {
     Args args;
     if (!parseArgs(argc, argv, args)) return 1;
+
+    if (args.debug == "help") {
+        std::cout << "Available --debug flags (comma-separated):\n"
+                  << "  fsoe           High-level FSoE protocol trace\n"
+                  << "  fsoe-frame     Decoded FSoE PDO struct fields (on change)\n"
+                  << "  fsoe-raw       FSoE protocol trace + raw frame hex dumps (on change)\n"
+                  << "  fsoe-wire      Every-cycle PDO wire dumps (firehose)\n"
+                  << "  fsoe-sequence  Per-cycle frame accept/reject + state change summary\n"
+                  << "  fsoe-crc       CRC parameters used for TX build and RX check\n";
+        return 0;
+    }
 
     if (args.slave_index < 0 || args.slave_index > 65535) {
         std::cerr << "Invalid slave index\n";
@@ -1314,6 +1320,34 @@ int main(int argc, char** argv) {
         // Enable PDO exchange so the data actually gets sent
         master.ethercatMaster().pdo().resetStats();
         master.ethercatMaster().dc().setPDOEnabled(true);
+
+        // Read the slave's configured station address (register 0x0010)
+        // and set it in the PDOManager so exchangePhysical() uses the
+        // correct FPWR/FPRD address.  Without this, exchangePhysical()
+        // falls back to adp=0x0000 (physical position) which fails with
+        // WKC=0 because the slave's configured address is different.
+        {
+            uint16_t cfg_addr = 0;
+            if (master.ethercatMaster().readRegister(
+                    EtherCAT::Master::slaveAddressFromADP(
+                        EtherCAT::Master::adpForSlaveIndex(slave_idx)),
+                    0x0010, cfg_addr, 200)) {
+                TETHER_LOGI(TAG, "Slave %u configured station address (reg 0x0010) = 0x%04X",
+                    slave_idx, cfg_addr);
+                // Set the configured address in the PDO mapping so
+                // exchangePhysical() uses FPWR/FPRD with the correct adp.
+                master.ethercatMaster().pdo().mapping().set_slave_configured_address(
+                    slave_idx, cfg_addr);
+                // Also set it in the SlaveConfig so exchangePhysical()'s
+                // cfg->configured_address check uses the right value.
+                auto* sc = master.ethercatMaster().pdo().slaveConfigs();
+                if (sc && slave_idx < EtherCAT::PDO::kMaxPDOSlaves) {
+                    sc[slave_idx].configured_address = cfg_addr;
+                }
+            } else {
+                TETHER_LOGW(TAG, "Failed to read configured station address (reg 0x0010)");
+            }
+        }
 
         // First, verify that SDO readback of PDO-mapped objects works at all.
         // Write a known value to the Controlword (0x6040) via PDO, then read
@@ -2014,6 +2048,24 @@ int main(int argc, char** argv) {
     if (fsoe_main) {
         TETHER_LOGI(TAG, "=== Final FSoE Diagnostics ===");
         TETHER_LOGI(TAG, "%s", fsoe_main->rawConnection().getDiagnostics().c_str());
+    }
+
+    // PDO transfer statistics — reveals WKC errors (slave not ack'ing frames)
+    {
+        const auto& pdo = master.ethercatMaster().pdo();
+        const auto& st = pdo.getStats();
+        TETHER_LOGI(TAG, "=== PDO Transfer Statistics ===");
+        TETHER_LOGI(TAG, "  [FMMU] total_cycles=%llu rx_sent=%llu tx_recv=%llu",
+            (unsigned long long)st.total_cycles,
+            (unsigned long long)st.rxpdo_frames_sent,
+            (unsigned long long)st.txpdo_frames_recv);
+        TETHER_LOGI(TAG, "  [FMMU] rx_errors=%u tx_errors=%u wkc_errors=%u",
+            st.rxpdo_errors, st.txpdo_errors, st.wkc_errors);
+        const auto& ps = pdo.getPhysicalStats();
+        TETHER_LOGI(TAG, "  [PHYS] fpwr_ok=%u fpwr_wkc_err=%u fprd_ok=%u fprd_wkc_err=%u",
+            ps.fpwr_success, ps.fpwr_wkc_errors, ps.fprd_success, ps.fprd_wkc_errors);
+        TETHER_LOGI(TAG, "  [PHYS] send_err=%u timeout_err=%u",
+            ps.send_errors, ps.timeout_errors);
     }
 
     Tether::Examples::shutdownSingleDrive(master, slave_idx);

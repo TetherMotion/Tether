@@ -518,9 +518,7 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .scan<'i', int>().default_value(500);
     program.add_argument("--debug")
         .default_value(std::string(""))
-        .help("Comma-separated debug flags: 'fsoe' for high-level protocol trace, "
-              "'fsoe-frame' for decoded PDO struct fields, "
-              "'fsoe-raw' for protocol trace + raw frame hex dumps");
+        .help("Comma-separated debug flags. Use '--debug help' for a list.");
 
     try {
         program.parse_args(argc, argv);
@@ -549,6 +547,15 @@ bool parseArgs(int argc, char** argv, Args& out) {
 int main(int argc, char** argv) {
     Args args;
     if (!parseArgs(argc, argv, args)) return 1;
+
+    if (args.debug == "help") {
+        std::cout << "Available --debug flags (comma-separated):\n"
+                  << "  fsoe          High-level FSoE protocol trace\n"
+                  << "  fsoe-frame    Decoded FSoE PDO struct fields (on change)\n"
+                  << "  fsoe-raw      Protocol trace + raw frame hex dumps (on change)\n"
+                  << "  fsoe-wire     Every-cycle PDO wire dumps (firehose)\n";
+        return 0;
+    }
 
     if (args.slave_index < 0 || args.slave_index > 65535) {
         std::cerr << "Invalid slave index\n";

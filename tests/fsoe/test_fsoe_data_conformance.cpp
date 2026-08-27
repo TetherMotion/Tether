@@ -562,13 +562,14 @@ TEST(FSoEDataConformance, ResetCommandInDataStateTriggersReset) {
     EXPECT_EQ(conn.getState(), ConnectionState::Data);
 
     // Send a Reset command to the master (simulating slave-initiated reset)
+    // The slave's Reset uses seq=initial_seq_no (same as master's initial).
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     payload[0] = 0x01;  // error code
     uint8_t frame[64];
     size_t frame_len = CRC::buildFSoEFrame(frame, Command::Reset,
                                             payload, 4u, 0x1234,
                                             0,  // start_crc = 0 (Reset)
-                                            1); // seq = 1
+                                            0); // seq = 0 (initial_seq_no)
     conn.processRxFrame(frame, frame_len);
 
     EXPECT_EQ(conn.getState(), ConnectionState::Reset);
