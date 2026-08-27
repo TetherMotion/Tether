@@ -9,7 +9,6 @@
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/ethercat/SDOManager.hpp"
-#include "tether/ethercat/SDOMailboxIO.hpp"
 #include "tether/ethercat/CoEManager.hpp"
 #include "tether/ethercat/FoE.hpp"
 #include "tether/ethercat/VoE.hpp"
@@ -129,8 +128,6 @@ bool Master::drainSlaveMailbox(uint16_t slave_index, unsigned int max_drain)
     std::vector<uint8_t> drain_buf(mbx_rd_len, 0);
 
     bool drained_any = false;
-    uint8_t last_slave_cnt = 0;
-    bool got_slave_cnt = false;
     for (unsigned int i = 0; i < max_drain; ++i) {
         uint8_t sm1_status = 0;
         if (!readRegister(SlaveAddress(slave_index), Raw::sm_status_address(1), sm1_status, 100)) {
@@ -173,34 +170,14 @@ bool Master::drainSlaveMailbox(uint16_t slave_index, unsigned int max_drain)
         TETHER_LOGW(local_tag, "%s: drained stale mailbox data #%u (len=%u)",
                     slaveLogPrefix(slave_index).c_str(), i + 1, static_cast<unsigned>(drain_buf.size()));
         drained_any = true;
-
-        // Extract the slave's mailbox counter from the drained response.
-        // MbxHeader.mbxtype is at byte offset 5; counter is the high nibble.
-        // We track the last seen counter so we can sync the master's counter
-        // to match the slave's, preventing permanent counter desync after
-        // master restarts (some slaves, e.g. ESC211, persist their counter
-        // and reject requests with a mismatched counter).
-        if (drain_buf.size() >= 6) {
-            last_slave_cnt = static_cast<uint8_t>((drain_buf[5] >> 4) & 0x0Fu);
-            got_slave_cnt = true;
-        }
-    }
-
-    if (drained_any && got_slave_cnt) {
-        // Sync the master's mailbox counter to the slave's counter.
-        // The slave increments its counter after each response, so the next
-        // value it expects is one past the last cnt we saw.
-        const uint8_t synced_cnt = Raw::SDOMailboxIO::nextMbxCnt(last_slave_cnt);
-        uint8_t* mbx_counter_ptr = sdoManager(slave_index).mbxCounterPtr();
-        if (mbx_counter_ptr != nullptr && *mbx_counter_ptr != synced_cnt) {
-            TETHER_LOGI(local_tag, "%s: syncing mailbox counter %u -> %u (slave's last response cnt=%u)",
-                        slaveLogPrefix(slave_index).c_str(), *mbx_counter_ptr, synced_cnt, last_slave_cnt);
-            *mbx_counter_ptr = synced_cnt;
-        }
+        // Do NOT extract/sync the mailbox counter from drained stale responses.
+        // Stale responses are from a previous session; the slave's counter has
+        // been reset on INIT transition.  Syncing to the stale counter causes
+        // all subsequent requests to fail with counter mismatch errors.
     }
 
     if (!drained_any) {
-        // SM1 was never full — nothing to drain, no counter to sync.
+        // SM1 was never full — nothing to drain.
         return true;
     }
 

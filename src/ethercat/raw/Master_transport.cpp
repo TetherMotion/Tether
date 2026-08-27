@@ -73,12 +73,19 @@ bool Master::writeRegister(SlaveAddress slave_address, RegisterAddress register_
     if (slot >= TransactionRouter::kNumSlots) return false;
 
     if (!sendDatagram(Command::APWR, idx, slave_address, register_address, data, len, true)) {
+        if (debug_flags_.eeprom && (ado == 0x0502 || ado == 0x0508)) {
+            TETHER_LOGW(TAG, "EEPROM: APWR sendDatagram FAILED adp=0x%04X ado=0x%04X len=%u", adp, ado, len);
+        }
         packet_router_.cancelPreRegistered(slot);
         return false;
     }
 
     WaitResult result = waitForPreRegistered(slot, timeout_ms);
     last_wkc_.store(result.wkc, std::memory_order_relaxed);
+    if (debug_flags_.eeprom && (ado == 0x0502 || ado == 0x0508)) {
+        TETHER_LOGI(TAG, "EEPROM: APWR adp=0x%04X ado=0x%04X len=%u success=%d wkc=%u",
+                    adp, ado, len, result.success, result.wkc);
+    }
     return result.success && result.wkc > 0;
 }
 
@@ -139,10 +146,19 @@ bool Master::readRegister(SlaveAddress slave_address, RegisterAddress register_a
 
     WaitResult result = waitForPreRegistered(slot, timeout_ms);
     last_wkc_.store(result.wkc, std::memory_order_relaxed);
+    if (debug_flags_.eeprom && (ado == 0x0502 || ado == 0x0508)) {
+        TETHER_LOGI(TAG, "EEPROM: APRD adp=0x%04X ado=0x%04X len=%u success=%d wkc=%u datalen=%u",
+                    adp, ado, len, result.success, result.wkc, result.data_length);
+    }
     if (!result.success) return false;
 
     resp.datalen = static_cast<uint16_t>(result.data_length);
-    if (resp.datalen < len) return false;
+    if (resp.datalen < len) {
+        if (debug_flags_.eeprom && (ado == 0x0502 || ado == 0x0508)) {
+            TETHER_LOGW(TAG, "EEPROM: APRD adp=0x%04X ado=0x%04X datalen=%u < len=%u", adp, ado, resp.datalen, len);
+        }
+        return false;
+    }
     if (out && len > 0) std::memcpy(out, resp.data, len);
 
     // Debug gate intercept: notify conditions of this register read

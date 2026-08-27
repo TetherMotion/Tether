@@ -223,19 +223,6 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
         }
 
         if (hdr.type == EC_MBXT_ERR) {
-            if (isCounterMismatchError(mbxbuf, hdr) && stale_retry_count < MAX_STALE_RETRIES) {
-                TETHER_LOGW(TAG, "Slave %u: Mailbox counter mismatch error (download): syncing counter %u -> %u and retrying",
-                            slaveIndexFromADP(adp), expected_mbx_cnt, SDOMailboxIO::nextMbxCnt(hdr.cnt));
-                SDOMailboxIO::syncMbxCounter(hdr.cnt, inoutMbxCnt, mbxbuf);
-                expected_mbx_cnt = SDOMailboxIO::nextMbxCnt(hdr.cnt);
-                ++stale_retry_count;
-                if (!sendAndWait(master, adp, mbxWriteAddr, mbxWriteLen,
-                                 mbxReadAddr, mbxReadLen, mbxbuf, 500,
-                                 pollIntervalMs, transactionTimeoutMs, "download")) {
-                    return false;
-                }
-                continue;
-            }
             handleMailboxError(mbxbuf, hdr, adp, index, sub);
             return false;
         }
@@ -315,13 +302,10 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
                             master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
                     return true;
                 }
-                TETHER_LOGW(TAG, "Stale SDO download response: idx=0x%04X:%u expected=0x%04X:%u (adp=0x%04X) — syncing counter and re-sending",
+                TETHER_LOGW(TAG, "Stale SDO download response: idx=0x%04X:%u expected=0x%04X:%u (adp=0x%04X) — clearing and re-sending",
                             res_index, res.sub, index, sub, adp);
-                // Counter matched but index/subindex didn't — this is a stale
-                // response from a previous operation.  Sync the counter so the
-                // re-sent request uses the slave's next expected counter.
-                SDOMailboxIO::syncMbxCounter(hdr.cnt, inoutMbxCnt, mbxbuf);
-                expected_mbx_cnt = SDOMailboxIO::nextMbxCnt(hdr.cnt);
+                // Stale response from a previous operation — just drain and
+                // retry with the same counter.  Do NOT sync the counter.
                 if (++stale_retry_count <= MAX_STALE_RETRIES) {
                     if (!sendAndWait(master, adp, mbxWriteAddr, mbxWriteLen,
                                      mbxReadAddr, mbxReadLen, mbxbuf, 500,
@@ -462,19 +446,6 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
         }
 
         if (hdr.type == EC_MBXT_ERR) {
-            if (isCounterMismatchError(mbxbuf, hdr) && stale_retry_count < MAX_STALE_RETRIES) {
-                TETHER_LOGW(TAG, "Slave %u: Mailbox counter mismatch error (normal download): syncing counter %u -> %u and retrying",
-                            slaveIndexFromADP(adp), expected_mbx_cnt, SDOMailboxIO::nextMbxCnt(hdr.cnt));
-                SDOMailboxIO::syncMbxCounter(hdr.cnt, inoutMbxCnt, mbxbuf);
-                expected_mbx_cnt = SDOMailboxIO::nextMbxCnt(hdr.cnt);
-                ++stale_retry_count;
-                if (!sendAndWait(master, adp, mbxWriteAddr, mbxWriteLen,
-                                 mbxReadAddr, mbxReadLen, mbxbuf, 500,
-                                 pollIntervalMs, transactionTimeoutMs, "normal download")) {
-                    return false;
-                }
-                continue;
-            }
             handleMailboxError(mbxbuf, hdr, adp, index, sub);
             return false;
         }
@@ -539,10 +510,9 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
                             master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
                     return true;
                 }
-                TETHER_LOGW(TAG, "Stale SDO normal download response: idx=0x%04X:%u expected=0x%04X:%u (adp=0x%04X) — syncing counter and re-sending",
+                TETHER_LOGW(TAG, "Stale SDO normal download response: idx=0x%04X:%u expected=0x%04X:%u (adp=0x%04X) — clearing and re-sending",
                             res_index, res.sub, index, sub, adp);
-                SDOMailboxIO::syncMbxCounter(hdr.cnt, inoutMbxCnt, mbxbuf);
-                expected_mbx_cnt = SDOMailboxIO::nextMbxCnt(hdr.cnt);
+                // Do NOT sync counter — just drain and retry.
                 if (++stale_retry_count <= MAX_STALE_RETRIES) {
                     if (!sendAndWait(master, adp, mbxWriteAddr, mbxWriteLen,
                                      mbxReadAddr, mbxReadLen, mbxbuf, 500,
@@ -703,19 +673,6 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
             }
 
             if (hdr.type == EC_MBXT_ERR) {
-                if (isCounterMismatchError(mbxbuf, hdr) && stale_retry_count < MAX_STALE_RETRIES) {
-                    TETHER_LOGW(TAG, "Slave %u: Mailbox counter mismatch error (seg download init): syncing counter %u -> %u and retrying",
-                                slaveIndexFromADP(adp), expected_mbx_cnt, SDOMailboxIO::nextMbxCnt(hdr.cnt));
-                    SDOMailboxIO::syncMbxCounter(hdr.cnt, inoutMbxCnt, mbxbuf);
-                    expected_mbx_cnt = SDOMailboxIO::nextMbxCnt(hdr.cnt);
-                    ++stale_retry_count;
-                    if (!sendAndWait(master, adp, mbxWriteAddr, mbxWriteLen,
-                                     mbxReadAddr, mbxReadLen, mbxbuf, 500,
-                                     pollIntervalMs, transactionTimeoutMs, "seg download init")) {
-                        return false;
-                    }
-                    continue;
-                }
                 handleMailboxError(mbxbuf, hdr, adp, index, sub);
                 return false;
             }
@@ -800,10 +757,9 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                     break;
                 }
 
-                TETHER_LOGW(TAG, "Stale SDO segmented download init response: idx=0x%04X:%u expected=0x%04X:%u (adp=0x%04X) — syncing counter and re-sending",
+                TETHER_LOGW(TAG, "Stale SDO segmented download init response: idx=0x%04X:%u expected=0x%04X:%u (adp=0x%04X) — clearing and re-sending",
                             res_index, res.sub, index, sub, adp);
-                SDOMailboxIO::syncMbxCounter(hdr.cnt, inoutMbxCnt, mbxbuf);
-                expected_mbx_cnt = SDOMailboxIO::nextMbxCnt(hdr.cnt);
+                // Do NOT sync counter — just drain and retry.
                 if (++stale_retry_count <= MAX_STALE_RETRIES) {
                     if (!sendAndWait(master, adp, mbxWriteAddr, mbxWriteLen,
                                      mbxReadAddr, mbxReadLen, mbxbuf, 500,
@@ -910,19 +866,6 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
             }
 
             if (hdr.type == EC_MBXT_ERR) {
-                if (isCounterMismatchError(mbxbuf, hdr) && stale_retry_count < MAX_STALE_RETRIES) {
-                    TETHER_LOGW(TAG, "Slave %u: Mailbox counter mismatch error (seg download seg %d): syncing counter %u -> %u and retrying",
-                                slaveIndexFromADP(adp), seg, expected_mbx_cnt, SDOMailboxIO::nextMbxCnt(hdr.cnt));
-                    SDOMailboxIO::syncMbxCounter(hdr.cnt, inoutMbxCnt, mbxbuf);
-                    expected_mbx_cnt = SDOMailboxIO::nextMbxCnt(hdr.cnt);
-                    ++stale_retry_count;
-                    if (!sendAndWait(master, adp, mbxWriteAddr, mbxWriteLen,
-                                     mbxReadAddr, mbxReadLen, mbxbuf, 500,
-                                     pollIntervalMs, transactionTimeoutMs, "seg download segment")) {
-                        return false;
-                    }
-                    continue;
-                }
                 handleMailboxError(mbxbuf, hdr, adp, index, sub);
                 return false;
             }
@@ -981,10 +924,9 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
 
             const bool seg_toggle = (seg_res_cmd & 0x10u) != 0;
             if (seg_toggle != toggle) {
-                TETHER_LOGW(TAG, "SDO segmented download segment %d toggle mismatch: got=%u expected=%u (adp=0x%04X index=0x%04X:%u) — syncing counter and re-sending",
+                TETHER_LOGW(TAG, "SDO segmented download segment %d toggle mismatch: got=%u expected=%u (adp=0x%04X index=0x%04X:%u) — clearing and re-sending",
                             seg, seg_toggle, toggle, adp, index, sub);
-                SDOMailboxIO::syncMbxCounter(hdr.cnt, inoutMbxCnt, mbxbuf);
-                expected_mbx_cnt = SDOMailboxIO::nextMbxCnt(hdr.cnt);
+                // Do NOT sync counter — just drain and retry.
                 if (++stale_retry_count <= MAX_STALE_RETRIES) {
                     if (!sendAndWait(master, adp, mbxWriteAddr, mbxWriteLen,
                                      mbxReadAddr, mbxReadLen, mbxbuf, 500,

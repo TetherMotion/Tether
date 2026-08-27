@@ -78,6 +78,7 @@ struct EtherCATSlaveDebugFlags {
     bool rxPackets = false;
     bool fmmu = false;
     bool siiEeprom = false;
+    bool eeprom = false;
     bool coeReads = false;
     bool coeWrites = false;
     bool coeRxPackets = false;
@@ -104,6 +105,7 @@ public:
     bool rxPackets = false;
     bool fmmu = false;
     bool siiEeprom = false;
+    bool eeprom = false;
     bool coeReads = false;
     bool coeWrites = false;
     bool coeRxPackets = false;
@@ -120,6 +122,7 @@ public:
     SlaveFilter rxPacketsFilt;
     SlaveFilter fmmuFilt;
     SlaveFilter siiEepromFilt;
+    SlaveFilter eepromFilt;
     SlaveFilter coeReadsFilt;
     SlaveFilter coeWritesFilt;
     SlaveFilter coeRxPacketsFilt;
@@ -139,7 +142,7 @@ public:
      */
     bool isAnyFlagEnabled() const {
         return rxPDO || txPDO || stateMachine || txPackets || rxPackets ||
-               fmmu || siiEeprom || coeReads || coeWrites || coeRxPackets ||
+               fmmu || siiEeprom || eeprom || coeReads || coeWrites || coeRxPackets ||
                coeTxPackets || verifyPreOp || verifySafeOp || pdoSm || dc;
     }
 
@@ -160,6 +163,7 @@ public:
         s.rxPackets    = rxPackets && rxPacketsFilt.allows(slave_index);
         s.fmmu         = fmmu && fmmuFilt.allows(slave_index);
         s.siiEeprom    = siiEeprom && siiEepromFilt.allows(slave_index);
+        s.eeprom       = eeprom && eepromFilt.allows(slave_index);
         s.coeReads     = coeReads && coeReadsFilt.allows(slave_index);
         s.coeWrites    = coeWrites && coeWritesFilt.allows(slave_index);
         s.coeRxPackets = coeRxPackets && coeRxPacketsFilt.allows(slave_index);

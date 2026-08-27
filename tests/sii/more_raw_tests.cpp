@@ -56,11 +56,12 @@ TEST(MoreRaw, ApwrTriggersAprdResponse_ReadDWordSucceeds) {
     // APWR hook: when SIIReader writes read command to EEPCTL, push an APRD response with the data
     master.setApwrTestCallback([&](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms;
-        if (ado == EC_REG_EEPCTL && data && len >= 4) {
-            struct __attribute__((packed)) EepromCmd { uint16_t comm_le; uint16_t addr_le; uint16_t d2_le; };
-            const EepromCmd* cmd = reinterpret_cast<const EepromCmd*>(data);
-            uint16_t comm = cmd->comm_le; // host is little-endian in tests
-            uint16_t addr = cmd->addr_le;
+        // 2-byte EEPCTL: low byte = word address, high byte = command (0x01 = READ)
+        if (ado == EC_REG_EEPCTL && data && len >= 2) {
+            uint16_t eepctl_le = 0;
+            std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
+            uint16_t comm = static_cast<uint16_t>(eepctl_le & 0xFF00u); // command in high byte
+            uint16_t addr = static_cast<uint16_t>(eepctl_le & 0x00FFu);  // address in low byte
             if (comm == EC_ECMD_READ) {
                 // Construct value with lower 16 bits equal to the requested address for easy verification
                 uint32_t val = (0xCAFEBABE & 0xFFFF0000u) | (static_cast<uint32_t>(addr) & 0xFFFFu);
