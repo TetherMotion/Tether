@@ -127,13 +127,18 @@ TEST(FSoEConnectionConformance, OneOctetDataTakesFourCycles) {
     ASSERT_TRUE(slave.initialize());
 
     uint64_t now = 0;
-    // Reset → Session: slave sends Session response with low byte of
-    // session ID.  Master stores it and transitions to Session.
+    // Reset: slave stays in Reset, sends Reset response.  Master → Session.
     now += 15;
     conn.exchangeWith(slave, now);
     ASSERT_EQ(conn.getState(), ConnectionState::Session);
 
-    // Session → Connection: slave sends high byte of session ID.
+    // Session (low byte): slave → Session, sends Session response (low byte).
+    // Master stores it and stays in Session (needs high byte too).
+    now += 15;
+    conn.exchangeWith(slave, now);
+    ASSERT_EQ(conn.getState(), ConnectionState::Session);
+
+    // Session (high byte): slave sends Session response (high byte).
     // Master stores it and transitions to Connection.
     now += 15;
     conn.exchangeWith(slave, now);

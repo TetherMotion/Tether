@@ -290,36 +290,25 @@ TEST(FSoESequenceConformance, SeqAdvancesAfterResetFrame) {
     // RX doesn't change last_tx_seq_no_, so getRxSeqNo() = 0
     EXPECT_EQ(conn.getRxSeqNo(), 0u);
 
-    // Second TX: Session frame — should use seq=1
+    // Second TX: Session frame — uses state-transition reset
+    // (start_crc=0, seq=initial_seq_no=0).  The Synapticon slave resets
+    // the CRC chain AND seq at the Session state transition.
     uint8_t buf2[64] = {};
     size_t len2 = conn.prepareTxFrame(buf2, sizeof(buf2));
     ASSERT_GT(len2, 0u);
-    // After TX, tx_seq_no_ = 2
-    EXPECT_EQ(conn.getTxSeqNo(), 2u);
-    // getRxSeqNo() = last_tx_seq_no_ = 1 (the seq just used)
-    EXPECT_EQ(conn.getRxSeqNo(), 1u);
+    // After TX, tx_seq_no_ = 1 (initial=0, set by buildSessionResetFrame,
+    // then incremented by prepareTxFrame)
+    EXPECT_EQ(conn.getTxSeqNo(), 1u);
+    // getRxSeqNo() = last_tx_seq_no_ = 0 (the seq just used, before increment)
+    EXPECT_EQ(conn.getRxSeqNo(), 0u);
 
     uint8_t cmd = 0;
     uint8_t data[16] = {0};
     size_t data_len = 0;
     uint16_t conn_id = 0;
-    // Parse with start_crc = slave's Reset response CRC0 (cross-direction
-    // inheritance: the master's Session TX chains from the slave's last TX).
-    // The slave's Reset response was built with start_crc=0, so its CRC0
-    // is the value we need.  Extract it from the RX frame.
-    // Layout for 4-byte data: [CMD][D0][D1][D2][D3][CRC0(2)][CRC1(2)][ConnID(2)]
-    //                         = 11 bytes total, CRC0 at offset 5
-    // But with buildFSoEFrame (no collision avoidance), the layout is:
-    // [CMD][D0..D3][CRC0(2)][CRC1(2)][ConnID(2)] for data_len=4
-    // Actually the frame layout depends on data_len parity.  For 4 bytes:
-    // [CMD][D0][D1][CRC0(2)][D2][D3][CRC1(2)][ConnID(2)] = 11 bytes
-    // CRC0 is at offset 3.
-    const size_t crc0_off = (rx_len <= 6) ? 2 : 3;
-    const uint16_t session_start_crc =
-        static_cast<uint16_t>(rx_frame[crc0_off]) |
-        (static_cast<uint16_t>(rx_frame[crc0_off + 1]) << 8);
+    // Parse with start_crc=0, seq=0 (state-transition reset for Session TX)
     EXPECT_TRUE(CRC::parseFSoEFrame(buf2, len2, cmd, data, data_len, conn_id,
-                                    session_start_crc, 1));
+                                    0, 0));
     EXPECT_EQ(cmd, Command::Session);
 }
 
@@ -346,21 +335,39 @@ TEST(FSoESequenceConformance, FullHandshakeSeqProgression) {
     EXPECT_EQ(slave.getTxSeqNo(), 0u);  // last_rx_seq_no_ = 0 (no RX yet)
     EXPECT_EQ(slave.getRxSeqNo(), 0u);
 
-    // Exchange 1: Master sends Reset (seq=0), slave sends Reset response (seq=0)
+    // Exchange 1: Master sends Reset (seq=0), slave stays in Reset and
+    // sends Reset response (seq=0).  Master transitions to Session.
     // (master and slave have independent counters, both starting at initial_seq_no=0)
     uint64_t now = 15;
     ASSERT_TRUE(conn.exchangeWith(slave, now));
 
     // After exchange 1:
     // Master: tx_seq=1 (incremented), rx_seq=0 (last_tx_seq_no_=0)
-    // Slave: tx_seq=0 (last_rx_seq_no_=0, reset in processSessionReset),
-    //        rx_seq=1 (incremented by validateFrame)
+    // Slave: tx_seq=0 (last_rx_seq_no_=0), rx_seq=1 (incremented by validateFrame)
+    // Slave is still in Reset state (stays on Reset command)
+    EXPECT_EQ(conn.getTxSeqNo(), 1u);
+    EXPECT_EQ(conn.getRxSeqNo(), 0u);
+    EXPECT_EQ(slave.getTxSeqNo(), 0u);
+    EXPECT_EQ(slave.getRxSeqNo(), 1u);
+    EXPECT_EQ(slave.getState(), ConnectionState::Reset);
+
+    // Exchange 2: Master sends Session (seq=0, start_crc=0 — state-transition
+    // reset).  Slave transitions to Session, sends Session response (seq=0,
+    // cross-direction inheritance from master's Session TX).
+    now += 15;
+    ASSERT_TRUE(conn.exchangeWith(slave, now));
+    // Master: tx_seq=1 (initial=0, set by buildSessionResetFrame, then
+    //         incremented), rx_seq=0 (last_tx_seq_no_=0)
+    // Slave: tx_seq=0 (last_rx_seq_no_=0), rx_seq=1 (state-transition reset
+    //        for Session RX: seq=initial=0, then incremented)
+    // Same seq values as after exchange 1 (Session TX resets seq to initial)
     EXPECT_EQ(conn.getTxSeqNo(), 1u);
     EXPECT_EQ(conn.getRxSeqNo(), 0u);
     EXPECT_EQ(slave.getTxSeqNo(), 0u);
     EXPECT_EQ(slave.getRxSeqNo(), 1u);
 
-    // Exchange 2: Master sends Session (seq=1), slave sends Session response (seq=1)
+    // Exchange 3: Master sends Connection (seq=1, cross-direction inheritance).
+    // Slave transitions to Connection.
     now += 15;
     ASSERT_TRUE(conn.exchangeWith(slave, now));
     // Master: tx_seq=2, rx_seq=1 (last_tx_seq_no_=1)
