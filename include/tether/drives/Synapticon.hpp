@@ -6,6 +6,7 @@
  *   Vendor ID:    0x000022D2  (Synapticon GmbH)
  *   Product Code: 0x00000201  (SOMANET Node)
  *   Product Code: 0x00000301  (SOMANET Circulo)
+ *   Product Code: 0x00000302  (SOMANET Circulo 7 SafeMotion)
  *
  * This header provides:
  *   - Identity constants (vendor ID, product codes)
@@ -19,6 +20,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 #include "tether/drives/Synapticon/SynapticonPDO.hpp"
@@ -44,6 +46,22 @@ namespace Synapticon {
 static constexpr uint32_t kVendorId    = 0x000022D2;  // Synapticon GmbH
 static constexpr uint32_t kProductCodeNode    = 0x00000201;  // SOMANET Node
 static constexpr uint32_t kProductCodeCirculo = 0x00000301;  // SOMANET Circulo
+static constexpr uint32_t kProductCodeCirculo7SafeMotion = 0x00000302;  // SOMANET Circulo 7 SafeMotion
+
+// All known SOMANET product codes (used for identity verification).
+inline constexpr std::array<uint32_t, 3> kKnownProductCodes = {
+    kProductCodeNode,
+    kProductCodeCirculo,
+    kProductCodeCirculo7SafeMotion,
+};
+
+// @brief Check whether a product code is a known SOMANET device.
+inline constexpr bool isKnownProductCode(uint32_t product_code) {
+    for (const auto pc : kKnownProductCodes) {
+        if (pc == product_code) return true;
+    }
+    return false;
+}
 
 // Mailbox configuration (from ESI Sm elements)
 static constexpr uint16_t kMailboxWriteAddr = 0x1000;
