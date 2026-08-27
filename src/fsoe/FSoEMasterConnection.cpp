@@ -242,15 +242,32 @@ void FSoEMasterConnection::triggerFailSafe(uint16_t error_code)
     }
 
     // ETG.5100 S (D) V1.2.0, §8.2.2.6: FailSafeData is a command used
-    // within the Data state, NOT a separate state.  The master stays in
-    // Data state and uses the fail_safe_active flag to select the
-    // FailSafeData command (all-zero SafeData) instead of ProcessData.
-    // If triggerFailSafe is called from a non-Data state (e.g. an error
-    // during handshake), transition to Data so the FailSafeData command
-    // can be sent.  This matches the slave's behavior.
-    // See: https://techoverflow.net/2026/08/12/fsoe-data-pdu-master-and-slave-structure/
+    // WITHIN the Data state, NOT a separate state.  The master can only
+    // send FailSafeData when it is already in Data state.
+    //
+    // FSoE state machine (ETG.5100, see
+    // https://techoverflow.net/2026/08/12/all-the-states-of-the-fsoe-state-machine/):
+    //   Reset → Session → Connection → Parameter → Data
+    //
+    // A NOT_OK transition (error/CRC failure) from ANY state returns to
+    // Reset — it does NOT skip to Data.  Jumping from Reset to Data
+    // violates the protocol: the slave would never see the Session,
+    // Connection, and Parameter handshakes, and the CRC chains would
+    // never be established.
+    //
+    // If triggerFailSafe is called from a non-Data state (e.g. a CRC
+    // error during handshake), go back to Reset (NOT_OK transition).
+    // Only stay in Data if already there.
     if (status_.state != ConnectionState::Data) {
-        transitionTo(ConnectionState::Data);
+        trace("triggerFailSafe: in %s state, going back to Reset (NOT_OK)",
+              stateName(status_.state));
+        resetConnection();
+        // Preserve error code after reset (resetConnection clears it).
+        // The master includes this as the reset reason in its Reset PDU.
+        if (error_code != ErrorCode::NoError) {
+            status_.error_code = error_code;
+        }
+        return;
     }
     fail_safe_entered_ms_ = current_time_ms_;
 
@@ -1805,9 +1822,25 @@ void FSoEMasterConnection::handleError(uint16_t error_code,
 {
     status_.error_code = error_code;
 
+    // FSoE state machine: a NOT_OK transition (error/CRC/watchdog failure)
+    // from ANY state returns to Reset.  Only when already in Data state
+    // does an error trigger fail-safe (FailSafeData command within Data).
+    //
+    // See: https://techoverflow.net/2026/08/12/all-the-states-of-the-fsoe-state-machine/
+    //   Reset → Session → Connection → Parameter → Data
+    //   NOT_OK from any state → Reset
     if (config_.auto_fail_safe_on_error) {
-        // Go directly to fail-safe (skip Error state)
-        triggerFailSafe(error_code);
+        if (status_.state == ConnectionState::Data) {
+            // Already in Data — enter fail-safe (send FailSafeData)
+            triggerFailSafe(error_code);
+        } else {
+            // In handshake state — NOT_OK transition back to Reset
+            trace("handleError: in %s state, going back to Reset (NOT_OK)",
+                  stateName(status_.state));
+            resetConnection();
+            // Preserve error code after reset (resetConnection clears it).
+            status_.error_code = error_code;
+        }
     } else {
         // Stay in Error state (persistent until explicitly cleared)
         transitionTo(ConnectionState::Error);

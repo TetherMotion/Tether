@@ -392,7 +392,9 @@ TEST(FSoEParameterConformance, MasterRejectsEchoMismatch) {
                                                 conn.getRxSeqNo());
     conn.processRxFrame(corrupted, corrupted_len);
 
-    EXPECT_TRUE(conn.isFailSafe());
+    // Error during Parameter state goes back to Reset (NOT_OK transition)
+    EXPECT_FALSE(conn.isFailSafe());
+    EXPECT_EQ(conn.getState(), ConnectionState::Reset);
     EXPECT_EQ(conn.getErrorCode(), ErrorCode::ParameterError);
 }
 

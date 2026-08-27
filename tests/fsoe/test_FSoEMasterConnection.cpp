@@ -27,13 +27,19 @@ TEST(FSoEMasterConnection, Smoke) {
     EXPECT_TRUE(conn.setSafeOutputs(outs, 2));
     EXPECT_FALSE(conn.setSafeOutputs(outs, 1));
 
-    // trigger fail-safe and verify behavior
+    // trigger fail-safe from Reset state — goes back to Reset (NOT_OK transition)
+    // Error code is preserved after resetConnection
     conn.triggerFailSafe(ErrorCode::ApplicationError);
-    EXPECT_TRUE(conn.isFailSafe());
-    EXPECT_FALSE(conn.setSafeOutputs(outs, 2));  // writes rejected in fail-safe
+    EXPECT_FALSE(conn.isFailSafe());
+    EXPECT_EQ(conn.getState(), ConnectionState::Reset);
+    EXPECT_NE(conn.getErrorCode(), ErrorCode::NoError);
 
-    // clear error should recover to Reset
-    EXPECT_TRUE(conn.clearError());
+    // setSafeOutputs is NOT blocked (isFailSafe is false after NOT_OK→Reset)
+    EXPECT_TRUE(conn.setSafeOutputs(outs, 2));
+
+    // clearError only works from Error state or Data+fail_safe
+    // After NOT_OK→Reset, we're in Reset, so clearError returns false
+    EXPECT_FALSE(conn.clearError());
     EXPECT_FALSE(conn.isFailSafe());
 
     // request session reset -> session id assigned and state updated

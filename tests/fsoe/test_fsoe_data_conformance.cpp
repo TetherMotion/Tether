@@ -175,12 +175,20 @@ TEST(FSoEDataConformance, ProcessDataSlavePDU_CarriesSafeInputsNotEcho) {
 TEST(FSoEDataConformance, FailSafeDataMasterPDU_AllZeroSafeData) {
     // ETG.5100 Table 25: All SafeData octets are set to 0 in FailSafeData.
     // The fail-safe data carries no useful payload.
+    // triggerFailSafe only works in Data state; from other states it
+    // goes back to Reset (NOT_OK transition).
     MasterConnectionConfig cfg = makeMasterCfg(4, 4);
     cfg.fail_safe_values = {0xDE, 0xAD, 0xBE, 0xEF, 0, 0, 0, 0,
                              0, 0, 0, 0, 0, 0, 0, 0};
     FSoEMasterConnection conn(cfg);
+    FSoESlave slave(makeSlaveCfg(4, 4));
     conn.initialize();
     conn.startConnection();
+    slave.initialize();
+
+    // Advance to Data state first — triggerFailSafe only works in Data
+    uint64_t now = 0;
+    advanceToData(conn, slave, now);
 
     conn.triggerFailSafe(ErrorCode::ApplicationError);
     ASSERT_TRUE(conn.isFailSafe());
@@ -594,8 +602,10 @@ TEST(FSoEDataConformance, FailSafeDataInSessionStateTriggersFailSafe) {
                                             conn.getRxSeqNo());
     conn.processRxFrame(frame, frame_len);
 
-    // Master should enter fail-safe (handshake abort)
-    EXPECT_TRUE(conn.isFailSafe());
+    // FailSafeData in Session state triggers NOT_OK → Reset (not fail-safe)
+    EXPECT_FALSE(conn.isFailSafe());
+    EXPECT_EQ(conn.getState(), ConnectionState::Reset);
+    EXPECT_NE(conn.getErrorCode(), ErrorCode::NoError);
 }
 
 TEST(FSoEDataConformance, FailSafeDataInConnectionStateTriggersFailSafe) {
@@ -623,7 +633,10 @@ TEST(FSoEDataConformance, FailSafeDataInConnectionStateTriggersFailSafe) {
                                             conn.getRxSeqNo());
     conn.processRxFrame(frame, frame_len);
 
-    EXPECT_TRUE(conn.isFailSafe());
+    // FailSafeData in Connection state triggers NOT_OK → Reset (not fail-safe)
+    EXPECT_FALSE(conn.isFailSafe());
+    EXPECT_EQ(conn.getState(), ConnectionState::Reset);
+    EXPECT_NE(conn.getErrorCode(), ErrorCode::NoError);
 }
 
 // ============================================================================
@@ -675,8 +688,14 @@ TEST_P(FSoEFailSafeDataMasterSizeTest, AllSafeDataIsZero) {
     // Set non-zero fail_safe_values to verify they are NOT used
     for (int i = 0; i < 16; ++i) cfg.fail_safe_values[i] = 0xFF;
     FSoEMasterConnection conn(cfg);
+    FSoESlave slave(makeSlaveCfg(size, size));
     conn.initialize();
     conn.startConnection();
+    slave.initialize();
+
+    // Advance to Data state first — triggerFailSafe only works in Data
+    uint64_t now = 0;
+    advanceToData(conn, slave, now);
 
     conn.triggerFailSafe(ErrorCode::ApplicationError);
 
