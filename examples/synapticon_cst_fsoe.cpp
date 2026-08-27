@@ -45,6 +45,8 @@
  *   ./synapticon_cst_fsoe --debug fsoe-crc      # CRC parameters used for TX build and RX check
  *   ./synapticon_cst_fsoe --torque-nm 10 --freq-hz 1.0  # 10 Nm P-P at 1 Hz
  *   ./synapticon_cst_fsoe --rated-torque-mnm 4200       # override rated torque
+ *   ./synapticon_cst_fsoe --sto 0 --sbc 0               # raw STO bit=0, SBC bit=0
+ *   ./synapticon_cst_fsoe --sto 1 --sbc 1               # raw STO bit=1, SBC bit=1
  *   ./synapticon_cst_fsoe --skip-vendor-verification    # skip SII vendor ID check
  */
 
@@ -563,6 +565,125 @@ private:
 };
 
 // ============================================================================
+// Safety state confirmation monitor
+// ============================================================================
+//
+// Monitors the drive's FSoE status feedback to confirm that commanded STO/SBC
+// state changes have been acknowledged by the drive.  When the operator uses
+// --sto / --sbc overrides, this task logs:
+//   - When the command is first applied (commanded state)
+//   - When the drive confirms the state (status matches command)
+//   - A warning if the drive does NOT confirm within a timeout
+//
+// The monitor tracks the expected state from the Command struct and compares
+// it against the Status struct each cycle once FSoE reaches the Data state.
+
+class SafetyStateMonitor final : public EtherCAT::DS402Master::ICyclicTask {
+public:
+    SafetyStateMonitor(FSoEMain& fsoe_main,
+                       bool track_sto, bool track_sbc,
+                       bool expected_sto, bool expected_sbc,
+                       uint32_t confirm_timeout_ms = 3000)
+        : fsoe_main_(fsoe_main)
+        , track_sto_(track_sto)
+        , track_sbc_(track_sbc)
+        , expected_sto_(expected_sto)
+        , expected_sbc_(expected_sbc)
+        , confirm_timeout_ms_(confirm_timeout_ms)
+    {
+    }
+
+    bool update(EtherCAT::DS402Master& /*master*/, double dt_seconds) override {
+        if (!track_sto_ && !track_sbc_) return true;
+
+        elapsed_ms_ += static_cast<uint64_t>(dt_seconds * 1000.0);
+
+        // Only check once FSoE has reached Data state and we have status.
+        if (!fsoe_main_.hasStatus()) return true;
+        const auto& conn_status = fsoe_main_.rawConnection().getStatus();
+        if (!conn_status.isOperational()) return true;
+
+        // Record the timestamp when we first see Data state.
+        if (data_state_entered_ms_ == 0) {
+            data_state_entered_ms_ = elapsed_ms_;
+        }
+
+        const auto& sm = fsoe_main_.status();
+
+        // --- STO confirmation ---
+        if (track_sto_ && !sto_confirmed_) {
+            // STO is "active" in the status when torque is inhibited.
+            // We expect sto_active == expected_sto_.
+            if (sm.sto_active == expected_sto_) {
+                sto_confirmed_ = true;
+                TETHER_LOGI(TAG,
+                    "[safety-confirm] STO %s confirmed by drive after %llu ms "
+                    "(sto_active=%d)",
+                    expected_sto_ ? "ON (torque inhibited)" : "OFF (torque allowed)",
+                    static_cast<unsigned long long>(
+                        elapsed_ms_ - data_state_entered_ms_),
+                    sm.sto_active ? 1 : 0);
+            } else if (!sto_warned_ &&
+                       (elapsed_ms_ - data_state_entered_ms_) > confirm_timeout_ms_) {
+                sto_warned_ = true;
+                TETHER_LOGW(TAG,
+                    "[safety-confirm] STO NOT confirmed after %u ms! "
+                    "Commanded STO=%s but drive reports sto_active=%d "
+                    "(expected %d). The drive may be ignoring the command "
+                    "bit or using a different polarity/position.",
+                    confirm_timeout_ms_,
+                    expected_sto_ ? "ON" : "OFF",
+                    sm.sto_active ? 1 : 0,
+                    expected_sto_ ? 1 : 0);
+            }
+        }
+
+        // --- SBC confirmation ---
+        if (track_sbc_ && !sbc_confirmed_) {
+            // brake_engaged in status reflects the SBC state.
+            if (sm.brake_engaged == expected_sbc_) {
+                sbc_confirmed_ = true;
+                TETHER_LOGI(TAG,
+                    "[safety-confirm] SBC %s confirmed by drive after %llu ms "
+                    "(brake_engaged=%d)",
+                    expected_sbc_ ? "ENGAGED" : "RELEASED",
+                    static_cast<unsigned long long>(
+                        elapsed_ms_ - data_state_entered_ms_),
+                    sm.brake_engaged ? 1 : 0);
+            } else if (!sbc_warned_ &&
+                       (elapsed_ms_ - data_state_entered_ms_) > confirm_timeout_ms_) {
+                sbc_warned_ = true;
+                TETHER_LOGW(TAG,
+                    "[safety-confirm] SBC NOT confirmed after %u ms! "
+                    "Commanded SBC=%s but drive reports brake_engaged=%d "
+                    "(expected %d). The brake may not be responding or the "
+                    "drive uses a different bit polarity/position.",
+                    confirm_timeout_ms_,
+                    expected_sbc_ ? "ENGAGED" : "RELEASED",
+                    sm.brake_engaged ? 1 : 0,
+                    expected_sbc_ ? 1 : 0);
+            }
+        }
+
+        return true;
+    }
+
+private:
+    FSoEMain& fsoe_main_;
+    bool track_sto_;
+    bool track_sbc_;
+    bool expected_sto_;
+    bool expected_sbc_;
+    uint32_t confirm_timeout_ms_;
+    uint64_t elapsed_ms_ = 0;
+    uint64_t data_state_entered_ms_ = 0;
+    bool sto_confirmed_ = false;
+    bool sbc_confirmed_ = false;
+    bool sto_warned_ = false;
+    bool sbc_warned_ = false;
+};
+
+// ============================================================================
 // FSoE PDO exchange cyclic task (real drive via PDOs)
 // ============================================================================
 //
@@ -724,6 +845,10 @@ struct Args {
     double freq_hz = 0.5;            ///< Sine wave frequency in Hz
     uint32_t rated_torque_mnm = 0;   ///< Motor rated torque in mNm (0 = auto-detect from 0x6076)
     bool skip_vendor_verification = false;  ///< Skip SII vendor ID check
+    ///< STO override: -1 = not set (use motionEnabled default), 0 = force STO off, 1 = force STO on
+    int sto_override = -1;
+    ///< SBC override: -1 = not set (use motionEnabled default), 0 = force brake released, 1 = force brake engaged
+    int sbc_override = -1;
 };
 
 bool parseArgs(int argc, char** argv, Args& out) {
@@ -787,6 +912,20 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .implicit_value(true)
         .help("Skip SII vendor ID check (use when SII reads return garbage, "
               "e.g. on ESCs with broken EEPROM access)");
+    program.add_argument("--sto")
+        .scan<'i', int>()
+        .default_value(-1)
+        .help("Set raw STO bit value in the FSoE PDO: 0 = bit cleared, 1 = bit set. "
+              "Default (-1) uses motionEnabled() default. "
+              "NOTE: the codec uses 0-active encoding, so bit=0 means STO active "
+              "(torque off) and bit=1 means STO inactive (torque allowed).");
+    program.add_argument("--sbc")
+        .scan<'i', int>()
+        .default_value(-1)
+        .help("Set raw SBC bit value in the FSoE PDO: 0 = bit cleared, 1 = bit set. "
+              "Default (-1) uses motionEnabled() default. "
+              "NOTE: the codec uses 0-active encoding, so bit=0 means SBC active "
+              "(brake engaged) and bit=1 means SBC inactive (brake released).");
 
     try {
         program.parse_args(argc, argv);
@@ -809,6 +948,8 @@ bool parseArgs(int argc, char** argv, Args& out) {
     out.freq_hz = program.get<double>("--freq-hz");
     out.rated_torque_mnm = static_cast<uint32_t>(program.get<int>("--rated-torque-mnm"));
     out.skip_vendor_verification = program.get<bool>("--skip-vendor-verification");
+    out.sto_override = program.get<int>("--sto");
+    out.sbc_override = program.get<int>("--sbc");
     return true;
 }
 
@@ -840,13 +981,16 @@ int main(int argc, char** argv) {
     TETHER_LOGI(TAG,
         "synapticon_cst_fsoe — interface=%s slave=%u duration=%.1f fsoe=%s dc_sync=%s debug='%s' "
         "torque_pp=%.3fNm freq=%.3fHz rated_torque_mnm=%u "
-        "conn_id=0x%04X safety_addr=0x%04X",
+        "conn_id=0x%04X safety_addr=0x%04X "
+        "sto_override=%s sbc_override=%s",
         args.interface.c_str(), slave_idx, args.duration,
         args.enable_fsoe ? "on" : "off",
         args.enable_dc_sync ? "on" : "off",
         args.debug.c_str(),
         args.torque_pp_nm, args.freq_hz, args.rated_torque_mnm,
-        args.connection_id, args.safety_address);
+        args.connection_id, args.safety_address,
+        args.sto_override < 0 ? "default" : std::to_string(args.sto_override).c_str(),
+        args.sbc_override < 0 ? "default" : std::to_string(args.sbc_override).c_str());
 
     // --- Start EtherCAT master ---
     EtherCAT::DS402Master master;
@@ -1697,6 +1841,36 @@ int main(int argc, char** argv) {
 
         fsoe_main->requestMotionEnabled();
 
+        // Apply STO/SBC overrides from command-line flags.
+        // The flags control RAW bit values in the PDO (0=bit cleared, 1=bit set).
+        // The codec uses setZeroActive for STO and SBC, which inverts:
+        //   setZeroActive(true)  → bit=0
+        //   setZeroActive(false) → bit=1
+        // So to get raw bit=0, we set the Command field to true (active),
+        // and to get raw bit=1, we set it to false (inactive).
+        if (args.sto_override >= 0 || args.sbc_override >= 0) {
+            auto cmd = fsoe_main->command();
+            if (args.sto_override >= 0) {
+                // setZeroActive: bit=0 when active=true, bit=1 when active=false
+                cmd.sto = (args.sto_override == 0);  // 0→true(bit=0), 1→false(bit=1)
+                TETHER_LOGI(TAG,
+                    "[safety-command] Setting raw STO bit=%d (cmd.sto=%s → 0-active: %s)",
+                    args.sto_override,
+                    cmd.sto ? "true" : "false",
+                    args.sto_override == 0 ? "STO active (torque off)" : "STO inactive (torque allowed)");
+            }
+            if (args.sbc_override >= 0) {
+                // setZeroActive: bit=0 when active=true, bit=1 when active=false
+                cmd.brake_engage = (args.sbc_override == 0);  // 0→true(bit=0), 1→false(bit=1)
+                TETHER_LOGI(TAG,
+                    "[safety-command] Setting raw SBC bit=%d (cmd.brake_engage=%s → 0-active: %s)",
+                    args.sbc_override,
+                    cmd.brake_engage ? "true" : "false",
+                    args.sbc_override == 0 ? "SBC active (brake engaged)" : "SBC inactive (brake released)");
+            }
+            fsoe_main->setCommand(cmd);
+        }
+
         // Install FSoE callbacks for real-time state tracking
         fsoe_main->rawConnection().setStateChangeCallback(
             [](uint8_t old_s, uint8_t new_s) {
@@ -1899,6 +2073,22 @@ int main(int argc, char** argv) {
                 std::make_unique<FSoEDiagnosticsTask>(
                     slave_idx, *fsoe_main, args.diag_interval_ms))) {
             TETHER_LOGW(TAG, "Failed to add FSoE diagnostics task (non-fatal)");
+        }
+
+        // Add safety state confirmation monitor (only if overrides are set)
+        if (args.sto_override >= 0 || args.sbc_override >= 0) {
+            const auto& cmd = fsoe_main->command();
+            // The monitor expects the drive's status to match the Command's
+            // semantic fields (sto_active should match cmd.sto, brake_engaged
+            // should match cmd.brake_engage).
+            if (!master.addCyclicTask(
+                    std::make_unique<SafetyStateMonitor>(
+                        *fsoe_main,
+                        args.sto_override >= 0, args.sbc_override >= 0,
+                        args.sto_override >= 0 ? cmd.sto : false,
+                        args.sbc_override >= 0 ? cmd.brake_engage : false))) {
+                TETHER_LOGW(TAG, "Failed to add safety state monitor (non-fatal)");
+            }
         }
 
         TETHER_LOGI(TAG,
