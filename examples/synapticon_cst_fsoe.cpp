@@ -70,6 +70,7 @@
 #include "tether/profiles/cia301/CiA402Defs.hpp"
 #include "tether/profiles/cia402/DS402Master.hpp"
 #include "tether/ethercat/CoEManager.hpp"
+#include "tether/sii/SIIReader.hpp"
 
 #include <argparse/argparse.hpp>
 
@@ -846,6 +847,59 @@ int main(int argc, char** argv) {
             TETHER_LOGE(TAG, "Timed out waiting for slave %u", slave_idx);
             Tether::Examples::stopHostMasterSession(master, session);
             return 2;
+        }
+
+        // --- Verify slave identity (manufacturer + device) before init ---
+        // The slave's SII EEPROM identity (vendor/product) is read directly
+        // via the ESC — no mailbox or AL state required — so it works even in
+        // INIT.  A vendor mismatch is fatal (this example only targets
+        // Synapticon SOMANET drives).  An unknown product code is a non-fatal
+        // warning: the drive may still be a compatible SOMANET variant not yet
+        // listed in the known-product-code table.
+        {
+            EtherCAT::SII::SIIIdentity sii_id;
+            if (!EtherCAT::SII::readSIIIdentity(
+                    master.ethercatMaster(), slave_idx, sii_id)) {
+                TETHER_LOGE(TAG,
+                    "Slave %u: SII identity read failed — cannot verify "
+                    "manufacturer/device, aborting", slave_idx);
+                Tether::Examples::stopHostMasterSession(master, session);
+                return 2;
+            }
+
+            TETHER_LOGI(TAG,
+                "Slave %u identity: vendor=0x%08X product=0x%08X "
+                "revision=0x%08X serial=0x%08X",
+                slave_idx,
+                sii_id.vendor_id, sii_id.product_code,
+                sii_id.revision_number, sii_id.serial_number);
+
+            if (sii_id.vendor_id != EtherCAT::Drives::Synapticon::kVendorId) {
+                TETHER_LOGE(TAG,
+                    "Slave %u: VENDOR MISMATCH — expected 0x%08X "
+                    "(Synapticon), got 0x%08X.  This example only supports "
+                    "Synapticon SOMANET drives, aborting.",
+                    slave_idx,
+                    EtherCAT::Drives::Synapticon::kVendorId,
+                    sii_id.vendor_id);
+                Tether::Examples::stopHostMasterSession(master, session);
+                return 2;
+            }
+
+            if (!EtherCAT::Drives::Synapticon::isKnownProductCode(
+                    sii_id.product_code)) {
+                TETHER_LOGW(TAG,
+                    "Slave %u: UNKNOWN product code 0x%08X (vendor matches "
+                    "Synapticon).  Not in known-product list "
+                    "{0x0201 Node, 0x0301 Circulo, 0x0302 Circulo 7 "
+                    "SafeMotion} — continuing, but PDO/safety layout may not "
+                    "match this device.",
+                    slave_idx, sii_id.product_code);
+            } else {
+                TETHER_LOGI(TAG,
+                    "Slave %u: product code 0x%08X is a known SOMANET device",
+                    slave_idx, sii_id.product_code);
+            }
         }
 
         // --- Reset slave to INIT if currently in a higher state ---

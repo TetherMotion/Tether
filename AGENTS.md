@@ -9,6 +9,10 @@ and Moonraker-compatible UDS API.
 
 ## Build Commands
 
+> **Parallelism limit:** Always use `-j4` max when invoking `cmake --build`
+> (or any other build tool).  Do NOT use `-j$(nproc)` — the build machine
+> has limited RAM and higher parallelism causes OOM kills.
+
 ```bash
 # Configure (with Klipper support)
 cmake -B build -DTETHER_ENABLE_KLIPPER=1
@@ -18,16 +22,16 @@ cmake -B build -DTETHER_ENABLE_KLIPPER=1
 cmake -B build -DTETHER_ENABLE_KLIPPER=1 -DTETHER_ENABLE_PRESSURE_ADVANCE=ON
 
 # Build all
-cmake --build build -j$(nproc)
+cmake --build build -j4
 
 # Build only klipper tests
-cmake --build build --target tether_klipper_tests -j$(nproc)
+cmake --build build --target tether_klipper_tests -j4
 
 # Build klipper HTTP server (requires Drogon)
-cmake --build build --target tether_klipper_http_shared -j$(nproc)
+cmake --build build --target tether_klipper_http_shared -j4
 
 # Build klipper HTTP tests
-cmake --build build --target tether_klipper_http_tests -j$(nproc)
+cmake --build build --target tether_klipper_http_tests -j4
 
 # Run klipper tests (excluding slow thermal simulation)
 ./build/bin/tests/tether_klipper_tests --gtest_filter='-ThermalIntegrationTest.*'
@@ -152,11 +156,11 @@ the real thermistor reading. See `docs/extrusion/` for full documentation.
 
 ```bash
 # Build control-level extrusion tests
-cmake --build build --target tether_control_extrusion_tests -j$(nproc)
+cmake --build build --target tether_control_extrusion_tests -j4
 ./build/bin/tests/tether_control_extrusion_tests
 
 # Build klipper-level extrusion compensation tests (requires TETHER_ENABLE_KLIPPER=1)
-cmake --build build --target tether_klipper_tests -j$(nproc)
+cmake --build build --target tether_klipper_tests -j4
 ./build/bin/tests/tether_klipper_tests --gtest_filter='*ExtrusionCompensation*:*ExtrusionFlowTracker*:*ExtrusionInstance*'
 ```
 
@@ -262,7 +266,7 @@ if (sup.isSlaveSuspended(slave_index)) {
 
 ```bash
 # Build the supervisor test
-cmake --build build --target tether_ethercat_supervisor_tests -j$(nproc)
+cmake --build build --target tether_ethercat_supervisor_tests -j4
 
 # Run tests
 ./build/bin/tests/tether_ethercat_supervisor_tests
