@@ -734,8 +734,18 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
 
     const bool is_reset_frame = (data[0] == Command::Reset);
     const bool is_session_frame = (data[0] == Command::Session);
-    const uint16_t parse_start_crc = is_reset_frame ? 0 : last_tx_crc0_;
-    const uint16_t parse_seq_no = is_reset_frame ? config_.initialSeqNo : rx_seq_no_;
+    // Reset AND Session frames reset the CRC chain on the RX side:
+    // start_crc=0, seq=initial.  The master's Session TX uses state-
+    // transition reset (start_crc=0, seq=initial), so the slave's RX must
+    // match.  Connection, Parameter, and Data frames use cross-direction
+    // inheritance (start_crc=last_tx_crc0_, seq=rx_seq_no_).
+    // NOTE: The slave's TX (buildSessionResponse) uses cross-direction
+    // inheritance, NOT state-transition reset — the master's RX validates
+    // the slave's Session response using cross-direction inheritance.
+    const bool is_rx_state_transition = is_reset_frame || is_session_frame;
+    const uint16_t parse_start_crc = is_rx_state_transition ? 0 : last_tx_crc0_;
+    const uint16_t parse_seq_no = is_rx_state_transition
+        ? config_.initialSeqNo : rx_seq_no_;
     uint16_t seq_used = 0;
 
     // For Reset frames, we still need to capture the master's CRC0 so that
@@ -747,34 +757,6 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
             parse_start_crc, parse_seq_no,
             &last_rx_crc0_,  // always capture CRC0 for collision avoidance
             &seq_used, &crc_error_detail)) {
-        // ESC211 CRC model fallback for Session frames:
-        //
-        // The Synapticon master uses cross-direction CRC inheritance for
-        // Session TX (start_crc = slave's Reset response CRC0).  The ESC211
-        // master resets the CRC chain for Session TX (start_crc=0,
-        // seq=initialSeqNo), matching the ETG.5100 §8.1.3.4 provision that
-        // the CRC chain is reset at each state transition.
-        //
-        // If cross-direction validation fails for a Session frame, retry
-        // with start_crc=0 and seq=initialSeqNo (ESC211 model).
-        if (is_session_frame) {
-            const uint16_t fb_start_crc = 0;
-            const uint16_t fb_seq_no = config_.initialSeqNo;
-            uint16_t fb_seq_used = 0;
-            CRC::CrcErrorDetail fb_error{};
-            const uint16_t saved_last_rx_crc0 = last_rx_crc0_;
-
-            if (CRC::parseFSoEFrameWithCollisionAvoidance(
-                    data, len, cmd, nullptr, data_len, conn_id,
-                    fb_start_crc, fb_seq_no,
-                    &last_rx_crc0_, &fb_seq_used, &fb_error)) {
-                // ESC211 Session fallback succeeded.
-                seq_used = fb_seq_used;
-                goto session_fallback_succeeded;
-            }
-            last_rx_crc0_ = saved_last_rx_crc0;  // restore on failure
-        }
-
         FSoEErrorDetail detail;
         if (crc_error_detail.valid) {
             detail.crc_valid = true;
@@ -811,7 +793,7 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
         return false;
     }
 
-session_fallback_succeeded:
+
 
     // Validate connection ID (after connection is established).
     // ETG.5100 §8.2.2.2: Reset frames ALWAYS have Conn_Id=0 — the
@@ -1003,17 +985,17 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
     }
 
     // State transition:
-    // - On Reset command: transition directly to Session state.  The slave
-    //   sends a Session response (buildSessionResponse) with its own Session
-    //   ID.  This matches the physical Synapticon slave behavior, which
-    //   acknowledges a Reset by transitioning to Session and responding with
-    //   a Session frame (0x4E).  The FSoEMasterConnection's handleResetState
-    //   accepts both Reset (0x2A) and Session (0x4E) responses, but the
-    //   ESC211 firmware appears to only accept Session (0x4E).
+    // - On Reset command: stay in Reset state.  The slave sends a Reset
+    //   response (cmd=0x2A) via buildResetResponse.  The transition to
+    //   Session happens when the slave receives the master's Session TX.
+    //   This matches the real Synapticon slave behavior (the physical
+    //   device sends cmd=0x2A for the Reset response) and ensures the
+    //   command byte changes (0x2A → 0x4E) for PDO change-detection.
     // - On Session command: transition to Session state.  The slave sends
     //   a Session response (buildSessionResponse) with its own Session ID.
     if (cmd == Command::Reset) {
-        transitionTo(ConnectionState::Session);
+        // Stay in Reset — buildResetResponse will send cmd=0x2A.
+        // Do NOT transition to Session here.
     } else if (cmd == Command::Session) {
         transitionTo(ConnectionState::Session);
     }
@@ -1446,22 +1428,22 @@ size_t FSoESlave::buildResetResponse(uint8_t* data, size_t maxLen) {
     //
     // CRC model (matching FSoEMasterConnection's RX validation):
     //   - start_crc = 0 (master's RX chain starts at 0 for Reset)
-    //   - seq = incrementSeqNo(initialSeqNo) (shared counter: master
-    //     used initialSeqNo for its Reset TX, slave uses initialSeqNo+1
-    //     for its Reset response)
+    //   - seq = initialSeqNo (the slave uses its OWN initial seq, which
+    //     is the SAME value as the master's initial_seq_no — master and
+    //     slave have independent counters that both start at the
+    //     configured initial value)
     //
     // This is the self-inheriting RX model: the master validates the
     // slave's Reset response with start_crc=0 (not the master's TX CRC0).
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
-    const uint16_t reset_resp_seq = CRC::incrementSeqNo(config_.initialSeqNo);
     uint16_t seq_used = 0;
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Reset, payload, config_.safeInputSize,
         0,  // Conn_Id = 0 in Reset state (ETG.5100 §8.2.2.2)
         0,  // start_crc = 0 (master RX chain starts at 0 for Reset)
-        reset_resp_seq,
+        config_.initialSeqNo,
         &last_tx_crc0_,  // update CRC chain for next frame
         &seq_used);
     // Set tx_seq_no_ to the seq used.  prepareTxFrame will increment it
@@ -1498,9 +1480,10 @@ size_t FSoESlave::buildSessionResponse(uint8_t* data, size_t maxLen) {
     size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
     uint16_t seq_used = 0;
-    // Use standard cross-direction CRC inheritance: start_crc = last_rx_crc0_
-    // (the master's most recent frame CRC0).  This ensures collision avoidance
-    // (slave's CRC0 ≠ master's CRC0) and continuous CRC chain.
+    // Cross-direction CRC inheritance: the slave's TX chains from the
+    // master's last TX CRC0 (last_rx_crc0_).  The master validates the
+    // slave's Session response using its own last TX CRC0 (last_tx_crc0_),
+    // which equals the slave's last_rx_crc0_ (the master's Session TX CRC0).
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Session, payload, config_.safeInputSize,
         0,  // Conn_Id = 0 in Session state (ETG.5100 §8.2.2.3)

@@ -394,8 +394,8 @@ TEST(FSoEMasterFailSafeResetRegression, ResetCommandInFailSafeWithAutoRecovery) 
     EXPECT_EQ(conn.getState(), ConnectionState::Data);
 
     // Send Reset command — the slave's Reset response uses start_crc=0
-    // and seq_no=1 (initial_seq_no + 1, since the slave increments the seq
-    // after receiving the master's Reset which used seq=0).
+    // and seq_no=0 (same as initial_seq_no — master and slave have
+    // independent counters that both start at the configured initial value).
     // The frame is the full fixed size with data_len = output_size.
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     payload[0] = 0x01;  // error code
@@ -404,7 +404,7 @@ TEST(FSoEMasterFailSafeResetRegression, ResetCommandInFailSafeWithAutoRecovery) 
                                             payload, 4u,
                                             0x1234,
                                             0,  // start_crc = 0 (Reset resets CRC chain)
-                                            1);  // seq_no = 1 (slave increments after Reset)
+                                            0);  // seq_no = 0 (initial_seq_no, same as master)
     conn.processRxFrame(frame, frame_len);
 
     // Reset in Data state triggers resetConnection() — master goes to Reset

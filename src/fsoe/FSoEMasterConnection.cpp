@@ -348,8 +348,10 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
     // buildFailSafeResponse sends safeInputSize + 2 bytes (inputs + error code),
     // which can be up to 18 bytes when safeInputSize = 16.
     //
-    // CRC inheritance for RX parsing (self-inheriting):
-    //   - Reset frames: start_crc=0, seq=initial_seq_no+1 (Reset resets chain)
+    // CRC inheritance for RX parsing:
+    //   - Reset frames: start_crc=0, seq=initial_seq_no (Reset resets chain)
+    //     BUT we still capture last_rx_crc0_ so the next TX (Session) can
+    //     chain from the slave's Reset response CRC0 (cross-direction).
     //   - Non-Reset frames: start_crc=last_tx_crc0_, seq=last_tx_seq_no_
     //     (the slave's TX inherits from the master's last TX CRC0 and seq,
     //      so the master verifies using its own last TX CRC0 and seq)
@@ -360,16 +362,17 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
     CRC::CrcErrorDetail crc_error_detail{};
 
     const bool is_reset_frame = (data[0] == Command::Reset);
+    // Reset frames reset the CRC chain: start_crc=0, seq=initial.
+    // The slave's Reset response uses its OWN initial seq, which is the
+    // SAME value as the master's initial_seq_no (master and slave have
+    // independent counters that both start at the configured initial value).
+    // All other frames (Session, Connection, Parameter, Data) use
+    // cross-direction inheritance: start_crc=last_tx_crc0_, seq=last_tx_seq_no_
+    // (the slave's TX inherits from the master's last TX CRC0 and seq,
+    //  so the master verifies using its own last TX CRC0 and seq).
     const uint16_t parse_start_crc = is_reset_frame ? 0 : last_tx_crc0_;
-    // The slave echoes the master's last TX seq in its responses (no
-    // independent increment).  So for non-Reset frames, the expected
-    // slave TX seq = last_tx_seq_no_ (the seq the master just used in
-    // its last TX, before the increment in prepareTxFrame).
-    // The slave's Reset response is special: it uses seq = initialSeqNo+1
-    // (ETG.5100 §8.2.2.2), so we use incrementSeqNo(initial_seq_no) for
-    // Reset frames.
     const uint16_t parse_seq_no = is_reset_frame
-        ? CRC::incrementSeqNo(config_.initial_seq_no)
+        ? config_.initial_seq_no
         : last_tx_seq_no_;
     uint16_t seq_used = 0;
 
@@ -382,7 +385,7 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
     if (!CRC::parseFSoEFrameWithCollisionAvoidance(
             data, len, cmd, frame_data, data_len, conn_id,
             parse_start_crc, parse_seq_no,
-            is_reset_frame ? nullptr : &last_rx_crc0_,
+            &last_rx_crc0_,  // always capture CRC0 for cross-direction chaining
             &seq_used, &crc_error_detail)) {
         // --- Diagnostic seq±1 fallback ---
         // The CRC didn't verify with the expected seq.  As a diagnostic
@@ -532,10 +535,10 @@ crc_fallback_succeeded:
         if (data_len > 0 && data_len <= sizeof(info.data)) {
             std::memcpy(info.data, frame_data, data_len);
         }
-        // Extract actual CRC0 from the frame bytes.
-        // For Reset frames, last_rx_crc0_ is not updated (nullptr passed
-        // for out_crc0), so crc_trace_crc0 is 0.  Read the real CRC0 from
-        // the frame to show what the slave actually sent.
+        // Extract actual CRC0 from the frame bytes for the trace.
+        // crc_trace_crc0 already holds last_rx_crc0_ (now updated for all
+        // frames including Reset), but reading from the frame bytes gives
+        // the true value even for 3-byte Reset frames (no CRC).
         // Layout: [CMD][D0][CRC0(2)]... (pduSize <= 6)
         //         [CMD][D0][D1][CRC0(2)]... (pduSize > 6)
         // 3-byte Reset frames (len == MIN_FSOE_FRAME_SIZE) have no CRC.
@@ -1572,13 +1575,15 @@ size_t FSoEMasterConnection::buildSessionResetFrame(uint8_t* data, size_t max_le
     size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
     uint16_t seq_used = 0;
-    // Cross-direction CRC inheritance: the master's TX chains from the
-    // slave's last TX CRC0 (last_rx_crc0_), not from the master's own
-    // last TX CRC0.  See buildConnectionFrame for full documentation.
+    // CRC inheritance for the Session frame: the Synapticon slave resets
+    // the CRC chain AND the seq number at the Session state transition.
+    // start_crc=0, seq=initial_seq_no.
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Session, payload, config_.output_size,
         0,  // Conn_Id = 0 in Session state (ETG.5100 §8.2.2.3)
-        last_rx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+        0,  // start_crc = 0 (state transition resets CRC chain)
+        config_.initial_seq_no,  // seq = initial (state transition resets seq)
+        &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
     return result;
