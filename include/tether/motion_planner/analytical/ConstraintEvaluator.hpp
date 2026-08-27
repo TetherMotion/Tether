@@ -117,7 +117,8 @@ public:
 
         // Curvature (centripetal) limit
         T kappa = path.curvatureAtArcLength(s);
-        if (kappa > MathConstants::EPSILON) {
+        if (kappa > MathConstants::EPSILON &&
+            limits_.path.maxCentripetalAcceleration > T(0)) {
             T curvatureLimit = std::sqrt(
                 limits_.path.maxCentripetalAcceleration / kappa);
             limit = std::min(limit, curvatureLimit);

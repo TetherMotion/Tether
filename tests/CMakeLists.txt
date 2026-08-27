@@ -264,6 +264,7 @@ set(MOTION_PLANNER_INTEGRATION_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/ToppraAuditTest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/ParetoTimeEnergyTest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/ForwardPassTest.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/SnapSpaceContractTest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/DiagTest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/VelocityProfileTest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/RoundedSquareGCodeTest.cpp"

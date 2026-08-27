@@ -750,8 +750,11 @@ public:
             }
         }
 
-        if (!crossingFound) {
-            // Fallback: binary search for max v1 with a = 0.
+        const auto fallbackToZeroAcceleration = [&]() {
+            // There may be spare distance after reaching the returned state;
+            // it is traversed as a zero-acceleration coast. This is slower
+            // than an ideal boundary solution but preserves a realizable
+            // state instead of returning a velocity-clamped acceleration.
             T vLow = v0, vHigh = vMax;
             for (int iter = 0; iter < 60; ++iter) {
                 T vMid = (vLow + vHigh) / T(2);
@@ -760,15 +763,19 @@ public:
                 else vHigh = vMid;
             }
             return {vLow, T(0)};
+        };
+
+        if (!crossingFound) {
+            // The analytical branch could not establish a valid intersection
+            // with the shed boundary; preserve the ceiling contract.
+            return fallbackToZeroAcceleration();
         }
 
         if (dCross >= distance) {
-            // Crossing happens after distance d — the uncapped trajectory
-            // at distance d hasn't reached the boundary yet. But the
-            // uncapped result violated the shed constraint, which means
-            // d < dCross is impossible. Use the uncapped result clamped
-            // to vMax (shouldn't normally reach here).
-            return {std::min(v1_uncapped, vMax), a1_uncapped};
+            // Never return the old velocity-clamped uncapped state here:
+            // it can violate v + a²/(2j) ≤ vMax. The conservative fallback
+            // is a physically realizable coast-compatible state.
+            return fallbackToZeroAcceleration();
         }
 
         // Follow the shed boundary (j = −jMax) for the remaining distance.

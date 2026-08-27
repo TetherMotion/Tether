@@ -54,7 +54,7 @@
  * j > i give zero contribution since c_k = 0 for k < 0). Once b is known,
  * a is computed from the first set.
  *
- * @see AnalyticalTOPPRA.hpp for the profiler that uses these utilities.
+ * @see AnalyticalJerkLimitedTOPPRA.hpp for the profiler that uses these utilities.
  */
 
 #pragma once

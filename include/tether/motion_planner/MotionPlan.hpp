@@ -212,7 +212,7 @@ public:
      * preserving the constraints verified by the profiler.
      *
      * If an analytical trajectory source is available (from the
-     * AnalyticalTOPPRA profiler), it is used for exact/certified sampling
+     * AnalyticalJerkLimitedTOPPRA profiler), it is used for exact/certified sampling
      * of position, velocity, and acceleration. Otherwise, the tabulated
      * velocity profile is used (backward-compatible behavior).
      */
@@ -470,7 +470,7 @@ public:
      * @brief Access the analytical trajectory source, if any.
      *
      * Returns the underlying AnalyticalTrajectorySource when the velocity
-     * profile is an AnalyticalSSRVelocityProfile (e.g. from AnalyticalTOPPRA
+     * profile is an AnalyticalSSRVelocityProfile (e.g. from AnalyticalJerkLimitedTOPPRA
      * or ParetoTimeEnergyOptimalVelocityPlanner). Returns nullptr for
      * sampled/tabulated profiles.
      */
@@ -564,7 +564,12 @@ private:
 
         // Get acceleration and jerk directly from the profile.
         state.pathAcceleration = profile_->accelerationAt(state.arcLength) * currentFeedOverride_;
-        state.pathJerk = profile_->jerkAt(state.arcLength) * currentFeedOverride_;
+        // Second-order profiles intentionally do not define jerk at their
+        // acceleration switches. Keep the legacy state field at zero, but do
+        // not manufacture it by querying the sampled compatibility value.
+        state.pathJerk = profile_->hasJerk()
+            ? profile_->jerkAt(state.arcLength) * currentFeedOverride_
+            : T(0);
 
         // Tangential acceleration
         Point tangentialAccel = pathEval.tangent * state.pathAcceleration;
@@ -722,7 +727,7 @@ public:
         Plan plan = Plan(std::move(pathResult.path), std::move(profilePtr),
                          limits_, config_);
 
-        // Fix: The AnalyticalTOPPRA profiler's SSR stores a raw pointer to
+        // Fix: The AnalyticalJerkLimitedTOPPRA profiler's SSR stores a raw pointer to
         // the path. When pathResult.path was moved into the plan above, that
         // pointer became dangling. Update it to point to the plan's path.
         auto source = plan.analyticalSource();
@@ -797,6 +802,8 @@ private:
                 return std::make_unique<SCurveVelocityProfiler<Dim, T>>(limits_);
             case ProfilerType::AnalyticalTOPPRA:
                 return std::make_unique<analytical::AnalyticalTOPPRA<Dim, T>>(limits_);
+            case ProfilerType::AnalyticalJerkLimitedTOPPRA:
+                return std::make_unique<analytical::AnalyticalJerkLimitedTOPPRA<Dim, T>>(limits_);
             case ProfilerType::ParetoTimeEnergy:
             default:
                 return std::make_unique<analytical::ParetoTimeEnergyOptimalVelocityPlanner<Dim, T>>(limits_);

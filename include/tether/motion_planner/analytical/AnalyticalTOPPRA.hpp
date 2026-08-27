@@ -1,5 +1,5 @@
 /**
- * @file AnalyticalTOPPRA.hpp
+ * @file AnalyticalJerkLimitedTOPPRA.hpp
  * @brief Analytical TOPPRA-equivalent velocity profiler for NURBS chain inputs.
  *
  * @details
@@ -53,7 +53,7 @@
  *
  * ## Mathematical Foundation
  *
- * See docs/motion/AnalyticalTOPPRA.md for the complete mathematical
+ * See docs/motion/AnalyticalJerkLimitedTOPPRA.md for the complete mathematical
  * derivation, including:
  * - Arc-length parameterization and dynamics
  * - Constraint transformation (per-axis → eta bounds)
@@ -78,6 +78,7 @@
 #include "HybridMonotoneRepresentation.hpp"
 #include "TrajectorySampler.hpp"
 #include "AnalyticalSSRVelocityProfile.hpp"
+#include "../BasicTOPPRA.hpp"
 #include "../VelocityProfile.hpp"
 #include "../VelocityProfiler.hpp"
 #include "../PathAdapter.hpp"
@@ -95,6 +96,32 @@ namespace MotionPlanner {
 /// analytical profiler type identification.
 namespace analytical {
 
+/**
+ * @brief Analytical 2nd-order TOPP-RA without a jerk constraint.
+ *
+ * This is deliberately separate from `AnalyticalJerkLimitedTOPPRA`: it uses
+ * ordinary second-order TOPP-RA and never invents a finite pseudo-jerk.
+ * Its acceleration is discontinuous at switches, so its profile advertises
+ * acceleration, not jerk, as its highest meaningful derivative.
+ */
+template<size_t Dim, typename T = double>
+class AnalyticalTOPPRA : public BasicTOPPRA<Dim, T> {
+public:
+    using Base = BasicTOPPRA<Dim, T>;
+    using Limits = KinematicLimits<Dim, T>;
+
+    explicit AnalyticalTOPPRA(Limits limits = {})
+        : Base(std::move(limits)) {}
+
+    ProfilerType type() const override {
+        return ProfilerType::AnalyticalTOPPRA;
+    }
+
+    const char* name() const override {
+        return "AnalyticalTOPPRA (2nd-order, no jerk limit)";
+    }
+};
+
 } // namespace analytical
 
 namespace analytical {
@@ -111,7 +138,7 @@ namespace analytical {
  * @tparam T   Numeric type (default: double)
  */
 template<size_t Dim, typename T = double>
-class AnalyticalTOPPRA : public VelocityProfiler<Dim, T> {
+class AnalyticalJerkLimitedTOPPRA : public VelocityProfiler<Dim, T> {
 public:
     using Path = PathAdapter<Dim, T>;
     using Limits = KinematicLimits<Dim, T>;
@@ -127,7 +154,7 @@ public:
      * @param buildHybrid Whether to also build the Hybrid representation.
      * @param hybridTolerance Target tolerance for Hybrid representation.
      */
-    explicit AnalyticalTOPPRA(
+    explicit AnalyticalJerkLimitedTOPPRA(
         Limits limits = {},
         bool buildHybrid = true,
         double hybridTolerance = 1e-10)
@@ -163,6 +190,16 @@ public:
 
         T pathLength = path.totalLength();
         if (pathLength <= T(0)) {
+            return std::make_unique<SampledVelocityProfile>();
+        }
+        if (numSamples < 2 || feedRate <= T(0) ||
+            !limits_.path.jerkLimitEnabled ||
+            limits_.path.maxPathJerk <= T(0) ||
+            std::abs(startJerk) > T(1e-12)) {
+            // This is the explicitly third-order implementation. A disabled
+            // jerk limit belongs to AnalyticalTOPPRA; a nonzero initial jerk
+            // cannot be satisfied because the interface has no terminal jerk
+            // boundary condition, so it is rejected rather than reset.
             return std::make_unique<SampledVelocityProfile>();
         }
 
@@ -228,11 +265,15 @@ public:
     Limits limits() const override { return limits_; }
 
     ProfilerType type() const override {
-        return ProfilerType::AnalyticalTOPPRA;
+        return ProfilerType::AnalyticalJerkLimitedTOPPRA;
     }
 
     const char* name() const override {
-        return "AnalyticalTOPPRA (analytical TOPPRA-equivalent)";
+        return "AnalyticalJerkLimitedTOPPRA (analytical TOPPRA-equivalent)";
+    }
+
+    ProfileDerivativeOrder derivativeOrder() const override {
+        return ProfileDerivativeOrder::Jerk;
     }
 
 private:

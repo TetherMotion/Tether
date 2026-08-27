@@ -312,6 +312,11 @@ public:
 
     /// Representation type name (for logging/debugging)
     virtual const char* representationName() const = 0;
+
+    /// Highest path derivative represented by this analytical source.
+    virtual ProfileDerivativeOrder derivativeOrder() const {
+        return ProfileDerivativeOrder::Jerk;
+    }
 };
 
 // ============================================================================

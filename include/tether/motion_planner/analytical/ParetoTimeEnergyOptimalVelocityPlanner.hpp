@@ -29,18 +29,16 @@
  *
  * ## Algorithm
  *
- * 1. **Golden-section search** over j* ∈ (0, j_max]
- * 2. For each j*, **forward state-machine simulation** produces a sequence
- *    of SNAP and SINGULAR arcs (all analytically integrable)
- * 3. The cost J(j*) is computed in **closed form** from the arc list
- * 4. The optimal j* minimizes J; the corresponding arc list is the solution
+ * 1. Sample the path envelope and derive one conservative global bound for
+ *    velocity, acceleration, and jerk.
+ * 2. Construct exact symmetric SNAP/SINGULAR acceleration and braking
+ *    pulses for a candidate smoothness scale.
+ * 3. Search a deterministic finite family of scales and select the feasible
+ *    candidate with minimum closed-form weighted cost.
  *
- * The state machine control law (snapspace Pontryagin analysis):
- * - If j < j*: σ = +σ_max (SNAP_PLUS — raise jerk toward j*)
- * - If j > j*: σ = -σ_max (SNAP_MINUS — lower jerk toward j*)
- * - If j ≈ j*: σ = 0 (SINGULAR — hold at j*)
- * - If a ≥ a_max: σ = -σ_max (SNAP_MINUS — reduce acceleration)
- * - If v ≥ v_wall: follow the wall (WALL arc)
+ * The trajectory stored in the WSS is exactly the one costed and sampled;
+ * no output-time constraint clamping, penalty acceptance, or heuristic
+ * backward braking factor is used.
  *
  * ## Boundary conditions
  *
@@ -52,7 +50,11 @@
  * - Velocity limit v_lim(s) from curvature, feed rate, per-axis limits
  * - Acceleration bounds [a_min, a_max] at (s, v)
  * - Jerk bounds [j_min, j_max] at (s, v, a)
- * - Snap limit σ_max from KinematicLimits
+ * - Path snap limit σ_max from KinematicLimits
+ *
+ * Per-axis snap limits are explicitly unsupported until the geometry layer
+ * provides fourth arc-length derivatives; requesting them returns no profile
+ * and an explanatory diagnostic rather than a false feasibility claim.
  *
  * ## Output
  *
@@ -78,6 +80,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -212,6 +215,18 @@ struct WeightedArc {
     /// Arc duration (time span), computed during solve
     double duration = 0.0;
 
+    /// State at s1, propagated from the stored polynomial. Keeping both
+    /// endpoints makes continuity independently auditable and ensures that a
+    /// consumer never has to re-run a potentially ambiguous inverse solve.
+    double v1 = 0.0;
+    double a1 = 0.0;
+    double j1 = 0.0;
+
+    /// Bit mask describing which constraints supplied this arc's global
+    /// certified-at-grid limits: velocity=1, acceleration=2, jerk=4,
+    /// snap=8. It is diagnostic only; it never changes the trajectory.
+    uint8_t activeConstraints = 0;
+
     /// Check if this arc is valid (non-empty domain)
     bool valid() const { return s1 > s0; }
 
@@ -267,6 +282,14 @@ struct ForwardPassResult {
     std::string failureReason;
 };
 
+/** @brief Exact scalar snap-space state at a WSS boundary. */
+struct WeightedState {
+    double s = 0.0;
+    double v = 0.0;
+    double a = 0.0;
+    double j = 0.0;
+};
+
 /**
  * @brief Singular-Jerk arc propagation formulas (j = j* = const, σ = 0).
  *
@@ -294,7 +317,8 @@ struct SingularJSeg {
      * @brief Solve for τ given Δs: smallest positive root of
      *        (j_star/6)τ³ + (a0/2)τ² + v0·τ - ds = 0
      *
-     * Safeguarded Newton-bisection hybrid.
+    * Safeguarded Newton-bisection hybrid. Returns NaN when `ds` cannot be
+    * reached while the arc remains forward-monotone.
      */
     static double tau_for_ds(double v0, double a0, double j_star, double ds) {
         if (ds <= 0.0) return 0.0;
@@ -309,8 +333,10 @@ struct SingularJSeg {
         double hi = std::max(ds / std::max(v0, 1e-3), 1e-6);
         const double kMaxHi = 1e6;
         while (f(hi) < ds) {
+            if (v(v0, a0, j_star, hi) <= 0.0 || hi >= kMaxHi) {
+                return std::numeric_limits<double>::quiet_NaN();
+            }
             hi *= 2.0;
-            if (hi > kMaxHi) break;
         }
 
         double tau = 0.5 * (lo + hi);
@@ -370,7 +396,8 @@ struct SnapSeg {
      *
      * Safeguarded Newton-bisection hybrid. The quartic is strictly
      * increasing while v > 0, so a bracket [0, τ_hi] can be established
-     * by doubling.
+    * by doubling. Returns NaN when `ds` cannot be reached while the arc
+    * remains forward-monotone.
      */
     static double tau_for_ds(double v0, double a0, double j0, double sigma,
                               double ds) {
@@ -391,8 +418,10 @@ struct SnapSeg {
         double hi = std::max(ds / std::max(v0, 1e-3), 1e-6);
         const double kMaxHi = 1e6;
         while (f(hi) < ds) {
+            if (fprime(hi) <= 0.0 || hi >= kMaxHi) {
+                return std::numeric_limits<double>::quiet_NaN();
+            }
             hi *= 2.0;
-            if (hi > kMaxHi) break;
         }
 
         // Newton-bisection hybrid
@@ -727,11 +756,56 @@ struct SnapSeg {
 // Backward compatibility aliases (deprecated)
 // ============================================================================
 
-/// @deprecated Use SnapSeg instead. Alias for backward compatibility.
-using BangSeg = SnapSeg;
+/// @deprecated Legacy third-order constant-jerk primitive. New snap-space
+/// code must use `SnapSeg` or `SingularJSeg`; this wrapper exists only for
+/// source compatibility with the former jerk-space API.
+struct BangSeg {
+    static double a(double a0, double eta, double /*aStar*/, double tau) {
+        return a0 + eta * tau;
+    }
+    static double v(double v0, double a0, double eta, double /*aStar*/,
+                    double tau) {
+        return v0 + a0 * tau + 0.5 * eta * tau * tau;
+    }
+    static double ds(double v0, double a0, double eta, double /*aStar*/,
+                     double tau) {
+        return v0 * tau + 0.5 * a0 * tau * tau +
+               eta * tau * tau * tau / 6.0;
+    }
+    static double tau_for_ds(double v0, double a0, double eta,
+                             double /*aStar*/, double distance) {
+        return SingularJSeg::tau_for_ds(v0, a0, eta, distance);
+    }
+};
 
-/// @deprecated Use SingularJSeg instead. Alias for backward compatibility.
-using SingSeg = SingularJSeg;
+/// @deprecated Legacy second-order constant-acceleration primitive. New
+/// snap-space code must use `SnapSeg` or `SingularJSeg`.
+struct SingSeg {
+    static double v(double v0, double aStar, double /*unused*/, double tau) {
+        return v0 + aStar * tau;
+    }
+    static double ds(double v0, double aStar, double /*unused*/, double tau) {
+        return v0 * tau + 0.5 * aStar * tau * tau;
+    }
+    static double tau_for_ds(double v0, double aStar, double /*unused*/,
+                             double distance) {
+        if (distance <= 0.0) return 0.0;
+        if (std::abs(aStar) <= 1e-14) {
+            return v0 > 0.0 ? distance / v0
+                             : std::numeric_limits<double>::quiet_NaN();
+        }
+        const double discriminant = v0 * v0 + 2.0 * aStar * distance;
+        if (discriminant < 0.0) {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        const double root = std::sqrt(discriminant);
+        const double first = (-v0 + root) / aStar;
+        const double second = (-v0 - root) / aStar;
+        if (first >= 0.0) return first;
+        if (second >= 0.0) return second;
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+};
 
 /**
  * @brief Closed-form braking distance estimate (snapspace).
@@ -880,15 +954,32 @@ public:
                     return static_cast<T>(arc.t0);
                 }
                 double dsLocal = s - arc.s0;
-                if (dsLocal < 0.0) dsLocal = 0.0;
+                dsLocal = std::clamp(dsLocal, 0.0, arc.s1 - arc.s0);
                 double tau = 0.0;
-                if (arc.type == WeightedArcType::SINGULAR) {
-                    tau = SingularJSeg::tau_for_ds(arc.v0, arc.a0, arc.j_star, dsLocal);
-                } else if (arc.type == WeightedArcType::WALL) {
+                if (arc.type == WeightedArcType::WALL) {
                     tau = wallDuration(arc.s0, arc.s0 + dsLocal);
+                } else if (dsLocal >= arc.s1 - arc.s0 -
+                                      1e-13 * (1.0 + arc.length())) {
+                    tau = arc.duration;
                 } else {
-                    // SNAP_PLUS or SNAP_MINUS
-                    tau = SnapSeg::tau_for_ds(arc.v0, arc.a0, arc.j0, arc.sigma, dsLocal);
+                    // A stored trajectory is forward-moving by construction.
+                    // Bisection over its known duration is therefore monotone
+                    // and avoids quartic/cubic roots beyond a deceleration arc.
+                    double lo = 0.0;
+                    double hi = arc.duration;
+                    for (int iter = 0; iter < 100; ++iter) {
+                        const double mid = 0.5 * (lo + hi);
+                        const double distance =
+                            arc.type == WeightedArcType::SINGULAR
+                                ? SingularJSeg::ds(arc.v0, arc.a0,
+                                                   arc.j_star, mid)
+                                : SnapSeg::ds(arc.v0, arc.a0, arc.j0,
+                                              arc.sigma, mid);
+                        if (distance < dsLocal) lo = mid;
+                        else hi = mid;
+                        if (hi - lo <= 1e-13 * (1.0 + arc.duration)) break;
+                    }
+                    tau = 0.5 * (lo + hi);
                 }
                 return static_cast<T>(arc.t0 + tau);
             }
@@ -970,6 +1061,10 @@ public:
         return "WeightedSwitchingStructure";
     }
 
+    ProfileDerivativeOrder derivativeOrder() const override {
+        return ProfileDerivativeOrder::Snap;
+    }
+
     // --- Accessors ---
 
     const std::vector<Arc>& arcs() const { return arcs_; }
@@ -981,6 +1076,20 @@ public:
      * @brief The optimal singular acceleration level a* found by the solver.
      */
     double optimalAStar() const { return optimalAStar_; }
+
+    /// Exact start state encoded by the first stored arc.
+    WeightedState startState() const {
+        if (arcs_.empty()) return {};
+        const auto& arc = arcs_.front();
+        return {arc.s0, arc.v0, arc.a0, arc.j0};
+    }
+
+    /// Exact terminal state encoded by the final stored arc.
+    WeightedState endState() const {
+        if (arcs_.empty()) return {};
+        const auto& arc = arcs_.back();
+        return {arc.s1, arc.v1, arc.a1, arc.j1};
+    }
 
     /**
      * @brief Sample the WSS at uniform arc-length intervals to produce
@@ -1014,19 +1123,25 @@ public:
             VelocityProfilePoint pt;
             pt.arcLength = static_cast<double>(s);
             pt.velocity = static_cast<double>(v);
-            pt.acceleration = (i == 0) ? static_cast<double>(startAcceleration) : static_cast<double>(a);
+            // The WSS has an exact stored initial state. Do not replace it
+            // with an API compatibility argument that may disagree with the
+            // trajectory that was actually solved.
+            (void)startAcceleration;
+            pt.acceleration = static_cast<double>(a);
             pt.jerk = static_cast<double>(j);
             pt.time = static_cast<double>(t);
 
-            // Determine limiting factor from the arc type
-            if (std::abs(j) > T(1e-10)) {
-                pt.limitedBy = (j > T(0))
+            const auto type = arcTypeAt(t);
+            if (type == WeightedArcType::DWELL) {
+                pt.limitedBy = VelocityProfilePoint::LimitType::None;
+            } else if (type == WeightedArcType::WALL) {
+                pt.limitedBy = VelocityProfilePoint::LimitType::Curvature;
+            } else if (std::abs(j) > T(1e-10)) {
+                pt.limitedBy = VelocityProfilePoint::LimitType::Jerk;
+            } else if (std::abs(a) > T(1e-10)) {
+                pt.limitedBy = a > T(0)
                     ? VelocityProfilePoint::LimitType::ForwardAccel
                     : VelocityProfilePoint::LimitType::BackwardDecel;
-            } else if (std::abs(a) > T(1e-10)) {
-                pt.limitedBy = VelocityProfilePoint::LimitType::Jerk;  // singular arc
-            } else if (v > T(1e-10)) {
-                pt.limitedBy = VelocityProfilePoint::LimitType::Curvature;  // wall/cruise
             } else {
                 pt.limitedBy = VelocityProfilePoint::LimitType::None;
             }
@@ -1114,7 +1229,7 @@ private:
             s = wallTimeToS(arc, tau);
             v = wallVelocityLimit(s);
             a = wallAcceleration(s);
-            jerk = 0.0;
+            jerk = wallJerk(s);
         } else {
             // SNAP_PLUS or SNAP_MINUS: constant snap σ
             double sigma = arc.sigma;
@@ -1123,31 +1238,6 @@ private:
             v = SnapSeg::v(arc.v0, arc.a0, arc.j0, sigma, tau);
             s = arc.s0 + SnapSeg::ds(arc.v0, arc.a0, arc.j0, sigma, tau);
         }
-
-        // Clamp s to path bounds
-        double sMax = static_cast<double>(pathPtr_->totalLength());
-        if (s > sMax) s = sMax;
-        if (s < 0.0) s = 0.0;
-        if (v < 0.0) v = 0.0;
-
-        // Hard guard: never report a velocity above the wall at this s.
-        double vLim = static_cast<double>(evaluator_.velocityLimit(
-            static_cast<T>(s), *pathPtr_));
-        if (v > vLim) v = vLim;
-
-        // Clamp acceleration to feasible limits.
-        auto [aMinB, aMaxB] = evaluator_.accelerationBounds(
-            static_cast<T>(s), static_cast<T>(v), *pathPtr_);
-        a = std::clamp(a, static_cast<double>(aMinB),
-                            static_cast<double>(aMaxB));
-
-        // Clamp jerk to feasible limits.
-        auto etaBounds = evaluator_.etaBounds(
-            static_cast<T>(s), static_cast<T>(v), static_cast<T>(a),
-            *pathPtr_);
-        jerk = std::clamp(jerk,
-                          static_cast<double>(etaBounds.eta_min),
-                          static_cast<double>(etaBounds.eta_max));
 
         return {idx, tau, s, v, a, jerk};
     }
@@ -1231,7 +1321,7 @@ private:
             evaluator_.velocityLimit(static_cast<T>(s), *pathPtr_));
     }
 
-    /// Wall acceleration a = v * dv_lim/ds, clamped to feasible bounds.
+    /// Wall acceleration a = v * dv_lim/ds.
     double wallAcceleration(double s) const {
         const double eps = 1e-6;
         double vL = wallVelocityLimit(s - eps);
@@ -1240,10 +1330,16 @@ private:
         double dvds = (vR - vL) / (2.0 * eps);
         double a = vC * dvds;
 
-        auto [aMin, aMax] = evaluator_.accelerationBounds(
-            static_cast<T>(s), static_cast<T>(vC), *pathPtr_);
-        return std::clamp(a, static_cast<double>(aMin),
-                               static_cast<double>(aMax));
+        return a;
+    }
+
+    /// Wall jerk j = v * da/ds, evaluated consistently with the wall's
+    /// finite-difference derivative model. No feasibility clamp is applied.
+    double wallJerk(double s) const {
+        const double eps = 1e-5;
+        const double aL = wallAcceleration(s - eps);
+        const double aR = wallAcceleration(s + eps);
+        return wallVelocityLimit(s) * (aR - aL) / (2.0 * eps);
     }
 };
 
@@ -1315,6 +1411,33 @@ public:
     std::vector<Arc> solve(T startVelocity = T(0),
                             T endVelocity = T(0),
                             size_t constraintCacheSize = 200) {
+        v0_ = static_cast<double>(startVelocity);
+        vf_ = static_cast<double>(endVelocity);
+        constraintCacheSize_ = std::max(constraintCacheSize, size_t(10));
+        buildConstraintCache();
+
+        const auto vLimit = [this](double s) {
+            return static_cast<double>(evaluator_.velocityLimit(
+                static_cast<T>(std::clamp(s, 0.0, sTotal_)), path_));
+        };
+        auto result = optimizePulsePlan(vLimit, v0_, vf_);
+
+        arcs_ = std::move(result.arcs);
+        lastCost_ = result.cost;
+        lastS_ = result.finalS;
+        lastV_ = result.finalV;
+        lastFailure_ = result.failureReason;
+        lastJStar_ = 0.0;
+        for (const auto& arc : arcs_) {
+            lastJStar_ = std::max(lastJStar_, std::abs(arc.j0));
+            lastJStar_ = std::max(lastJStar_, std::abs(arc.j1));
+        }
+        if (!result.feasible) arcs_.clear();
+        return arcs_;
+
+        // Historical heuristic retained only for source archaeology. The
+        // exact pulse kernel above is the sole compiled implementation.
+    #if 0
         v0_ = static_cast<double>(startVelocity);
         vf_ = static_cast<double>(endVelocity);
         constraintCacheSize_ = std::max(constraintCacheSize, size_t(10));
@@ -1424,6 +1547,7 @@ public:
         }
 
         return arcs_;
+    #endif
     }
 
     /**
@@ -1435,6 +1559,12 @@ public:
      * @brief Get the optimal j* found by the solver.
      */
     double optimalJStar() const { return lastJStar_; }
+
+    /// Whether the latest `solve()` call reached all requested boundaries.
+    bool feasible() const { return arcs_.size() > 0 && lastFailure_.empty(); }
+
+    /// Empty on success; otherwise explains why `solve()` returned no arcs.
+    const std::string& failureReason() const { return lastFailure_; }
 
     /// @deprecated Use optimalJStar() instead. Returns j* clamped to aMax
     /// for backward compatibility with callers expecting an acceleration-like
@@ -1523,6 +1653,10 @@ public:
         double vf,
         double sTotal) const {
 
+        return buildPulsePlan(vLimFn, v0, vf, sTotal,
+                              std::max(0.0, jStar), 1.0);
+
+    #if 0
         ForwardPassResult result;
         result.finalS = 0.0;
         result.finalV = v0;
@@ -1954,9 +2088,365 @@ public:
         }
 
         return result;
+    #endif
     }
 
 private:
+    struct PlanningBounds {
+        double velocity = 0.0;
+        double acceleration = 0.0;
+        double jerk = 0.0;
+        double snap = 0.0;
+        std::string failureReason;
+
+        bool feasible() const {
+            return velocity >= 0.0 && acceleration > 0.0 && jerk > 0.0 &&
+                   snap > 0.0 && failureReason.empty();
+        }
+    };
+
+    struct AccelerationPulse {
+        double snapTime = 0.0;
+        double jerkTime = 0.0;
+        double plateauTime = 0.0;
+        double peakJerk = 0.0;
+        double peakAcceleration = 0.0;
+        double velocityChange = 0.0;
+
+        double duration() const {
+            return 4.0 * snapTime + 2.0 * jerkTime + plateauTime;
+        }
+    };
+
+    /**
+     * @brief Build conservative path-wide bounds from the full constraint
+     * grid. Axis snap limits are intentionally rejected: a valid conversion
+     * needs the fourth arc-length derivative of geometry, which the current
+     * path interface does not expose. Path snap remains fully enforced.
+     */
+    PlanningBounds globalBounds(
+        const std::function<double(double)>& vLimit,
+        double sTotal) const {
+        PlanningBounds bounds;
+        if (limits_.axis.snapLimitEnabled) {
+            bounds.failureReason =
+                "Per-axis snap limits require fourth-order path derivatives";
+            return bounds;
+        }
+        if (limits_.path.maxPathSnap <= T(0) ||
+            limits_.path.maxPathJerk <= T(0) ||
+            limits_.path.maxPathAcceleration <= T(0)) {
+            bounds.failureReason =
+                "SnapSpace requires positive path acceleration, jerk, and snap limits";
+            return bounds;
+        }
+
+        bounds.velocity = std::numeric_limits<double>::infinity();
+        bounds.acceleration = static_cast<double>(limits_.path.maxPathAcceleration);
+        bounds.jerk = static_cast<double>(limits_.path.maxPathJerk);
+        bounds.snap = static_cast<double>(limits_.path.maxPathSnap);
+
+        const size_t samples = std::max<size_t>(constraintCacheSize_, 32);
+        for (size_t i = 0; i <= samples; ++i) {
+            const double s = sTotal * static_cast<double>(i) /
+                             static_cast<double>(samples);
+            const double v = vLimit(s);
+            if (!std::isfinite(v) || v < 0.0) {
+                bounds.failureReason = "Non-finite or negative velocity limit";
+                return bounds;
+            }
+            bounds.velocity = std::min(bounds.velocity, v);
+        }
+        if (!(bounds.velocity > 0.0) || !std::isfinite(bounds.velocity)) {
+            bounds.failureReason = "Path velocity envelope contains a stop";
+            return bounds;
+        }
+
+        // Acceleration constraints depend on speed. A velocity ceiling due
+        // solely to centripetal acceleration can leave zero room for
+        // tangential acceleration, even though a strictly lower speed is
+        // feasible. Find the greatest speed with positive symmetric
+        // tangential authority rather than applying an arbitrary factor.
+        const auto accelerationAtVelocity = [&](double velocity) {
+            double available = static_cast<double>(limits_.path.maxPathAcceleration);
+            for (size_t i = 0; i <= samples; ++i) {
+                const T s = static_cast<T>(sTotal * static_cast<double>(i) /
+                                            static_cast<double>(samples));
+                const auto [aMin, aMax] = evaluator_.accelerationBounds(
+                    s, static_cast<T>(velocity), path_);
+                available = std::min(available, std::min(
+                    static_cast<double>(aMax), -static_cast<double>(aMin)));
+            }
+            return available;
+        };
+        double aAtEnvelope = accelerationAtVelocity(bounds.velocity);
+        if (aAtEnvelope <= 0.0) {
+            if (accelerationAtVelocity(0.0) <= 0.0) {
+                bounds.failureReason = "No symmetric tangential acceleration is feasible";
+                return bounds;
+            }
+            double lo = 0.0;
+            double hi = bounds.velocity;
+            for (int iteration = 0; iteration < 100; ++iteration) {
+                const double mid = 0.5 * (lo + hi);
+                if (accelerationAtVelocity(mid) > 0.0) lo = mid;
+                else hi = mid;
+            }
+            bounds.velocity = lo;
+            aAtEnvelope = accelerationAtVelocity(bounds.velocity);
+        }
+        bounds.acceleration = std::min(bounds.acceleration, aAtEnvelope);
+        if (!(bounds.acceleration > 0.0) || !std::isfinite(bounds.acceleration)) {
+            bounds.failureReason = "No symmetric tangential acceleration is feasible";
+            return bounds;
+        }
+
+        for (size_t i = 0; i <= samples; ++i) {
+            const T s = static_cast<T>(sTotal * static_cast<double>(i) /
+                                        static_cast<double>(samples));
+            for (const double a : {-bounds.acceleration, 0.0,
+                                   bounds.acceleration}) {
+                const auto interval = evaluator_.etaBounds(
+                    s, static_cast<T>(bounds.velocity), static_cast<T>(a), path_);
+                const double symmetric = std::min(interval.eta_max,
+                                                  -interval.eta_min);
+                bounds.jerk = std::min(bounds.jerk, symmetric);
+            }
+        }
+        if (!(bounds.jerk > 0.0) || !std::isfinite(bounds.jerk)) {
+            bounds.failureReason = "No symmetric tangential jerk is feasible";
+        }
+        return bounds;
+    }
+
+    static AccelerationPulse makePulse(
+        double velocityChange, const PlanningBounds& bounds) {
+        AccelerationPulse pulse;
+        pulse.velocityChange = std::max(0.0, velocityChange);
+        if (pulse.velocityChange <= 1e-14) return pulse;
+
+        // The snap-up/snap-down pair must not itself exceed a_max.
+        const double maxJerk = std::min(
+            bounds.jerk, std::sqrt(bounds.acceleration * bounds.snap));
+        if (!(maxJerk > 0.0)) return pulse;
+
+        const double vTriangularAtMaxJerk =
+            maxJerk * maxJerk * maxJerk / (bounds.snap * bounds.snap);
+        double peakJerk = maxJerk;
+        if (pulse.velocityChange < vTriangularAtMaxJerk) {
+            peakJerk = std::cbrt(pulse.velocityChange * bounds.snap *
+                                 bounds.snap);
+        }
+
+        pulse.peakJerk = peakJerk;
+        pulse.snapTime = peakJerk / bounds.snap;
+        const double jerkPlateauAtAMax = std::max(
+            0.0, bounds.acceleration / peakJerk - pulse.snapTime);
+        const double velocityWithoutAccelPlateau = peakJerk *
+            (pulse.snapTime * pulse.snapTime +
+             3.0 * pulse.snapTime * jerkPlateauAtAMax +
+             jerkPlateauAtAMax * jerkPlateauAtAMax);
+
+        if (pulse.velocityChange <= velocityWithoutAccelPlateau) {
+            const double discriminant = std::max(
+                0.0, 5.0 * pulse.snapTime * pulse.snapTime +
+                4.0 * pulse.velocityChange / peakJerk);
+            pulse.jerkTime = std::max(
+                0.0, 0.5 * (-3.0 * pulse.snapTime +
+                            std::sqrt(discriminant)));
+        } else {
+            pulse.jerkTime = jerkPlateauAtAMax;
+            pulse.peakAcceleration = peakJerk *
+                (pulse.snapTime + pulse.jerkTime);
+            pulse.plateauTime = (pulse.velocityChange -
+                velocityWithoutAccelPlateau) / pulse.peakAcceleration;
+        }
+        pulse.peakAcceleration = peakJerk *
+            (pulse.snapTime + pulse.jerkTime);
+        return pulse;
+    }
+
+    static double minimumDistanceForPeak(
+        double peakVelocity, double startVelocity, double endVelocity,
+        const PlanningBounds& bounds) {
+        const auto up = makePulse(peakVelocity - startVelocity, bounds);
+        const auto down = makePulse(peakVelocity - endVelocity, bounds);
+        return 0.5 * (startVelocity + peakVelocity) * up.duration() +
+               0.5 * (endVelocity + peakVelocity) * down.duration();
+    }
+
+    static double snapArcCost(const CostWeights& w, double a0, double j0,
+                              double sigma, double duration) {
+        const double intJ2 = j0 * j0 * duration + j0 * sigma * duration * duration +
+            sigma * sigma * duration * duration * duration / 3.0;
+        const double intA2 = a0 * a0 * duration + a0 * j0 * duration * duration +
+            (j0 * j0 + a0 * sigma) * duration * duration * duration / 3.0 +
+            j0 * sigma * std::pow(duration, 4) / 4.0 +
+            sigma * sigma * std::pow(duration, 5) / 20.0;
+        return w.w_t * duration + w.w_j * intJ2 + w.w_a * intA2;
+    }
+
+    static double singularArcCost(const CostWeights& w, double a0, double jerk,
+                                  double duration) {
+        const double intJ2 = jerk * jerk * duration;
+        const double intA2 = a0 * a0 * duration + a0 * jerk * duration * duration +
+            jerk * jerk * duration * duration * duration / 3.0;
+        return w.w_t * duration + w.w_j * intJ2 + w.w_a * intA2;
+    }
+
+    ForwardPassResult buildPulsePlan(
+        const std::function<double(double)>& vLimit,
+        double startVelocity, double endVelocity, double length,
+        double requestedJerk, double limitScale) const {
+        ForwardPassResult result;
+        result.finalV = startVelocity;
+        if (length <= 0.0) {
+            result.feasible = std::abs(startVelocity - endVelocity) <= 1e-12 &&
+                              std::abs(startVelocity) <= 1e-12;
+            result.failureReason = result.feasible ? "" :
+                "Zero-length path has incompatible boundary velocity";
+            return result;
+        }
+
+        auto bounds = globalBounds(vLimit, length);
+        bounds.acceleration *= limitScale;
+        bounds.jerk *= limitScale;
+        bounds.snap *= limitScale;
+        if (requestedJerk > 0.0) bounds.jerk = std::min(bounds.jerk, requestedJerk);
+        if (!bounds.feasible()) {
+            result.failureReason = bounds.failureReason.empty()
+                ? "Non-positive scaled snap-space limit" : bounds.failureReason;
+            return result;
+        }
+        if (startVelocity < 0.0 || endVelocity < 0.0 ||
+            startVelocity > bounds.velocity + 1e-10 ||
+            endVelocity > bounds.velocity + 1e-10) {
+            result.failureReason = "Boundary velocity lies outside the path envelope";
+            return result;
+        }
+
+        const double minimumPeak = std::max(startVelocity, endVelocity);
+        if (minimumDistanceForPeak(minimumPeak, startVelocity, endVelocity,
+                                   bounds) > length + 1e-10) {
+            result.failureReason = "Path is too short for the requested endpoint velocities";
+            return result;
+        }
+
+        double lo = minimumPeak;
+        double hi = bounds.velocity;
+        for (int i = 0; i < 100; ++i) {
+            const double mid = 0.5 * (lo + hi);
+            if (minimumDistanceForPeak(mid, startVelocity, endVelocity, bounds) <= length)
+                lo = mid;
+            else
+                hi = mid;
+        }
+        const double peakVelocity = lo;
+        const auto accelPulse = makePulse(peakVelocity - startVelocity, bounds);
+        const auto decelPulse = makePulse(peakVelocity - endVelocity, bounds);
+        const double pulseDistance = minimumDistanceForPeak(
+            peakVelocity, startVelocity, endVelocity, bounds);
+        const double cruiseTime = peakVelocity > 1e-14
+            ? std::max(0.0, (length - pulseDistance) / peakVelocity) : 0.0;
+
+        double s = 0.0;
+        double t = 0.0;
+        double v = startVelocity;
+        double a = 0.0;
+        double j = 0.0;
+        auto normalize = [](double value) {
+            return std::abs(value) < 1e-11 ? 0.0 : value;
+        };
+        auto appendSnap = [&](double sigma, double duration) {
+            if (duration <= 1e-14) return;
+            Arc arc;
+            arc.type = sigma >= 0.0 ? WeightedArcType::SNAP_PLUS
+                                    : WeightedArcType::SNAP_MINUS;
+            arc.s0 = s; arc.t0 = t; arc.v0 = v; arc.a0 = a; arc.j0 = j;
+            arc.sigma = sigma;
+            arc.activeConstraints = 0x08; // snap control is saturated
+            const double distance = SnapSeg::ds(v, a, j, sigma, duration);
+            arc.duration = duration; arc.s1 = s + distance;
+            arc.v1 = normalize(SnapSeg::v(v, a, j, sigma, duration));
+            arc.a1 = normalize(SnapSeg::a(a, j, sigma, duration));
+            arc.j1 = normalize(SnapSeg::j(j, sigma, duration));
+            result.cost += snapArcCost(w_, a, j, sigma, duration);
+            result.arcs.push_back(arc);
+            s = arc.s1; t += duration; v = arc.v1; a = arc.a1; j = arc.j1;
+        };
+        auto appendSingular = [&](double jerk, double duration,
+                      uint8_t activeConstraints = 0) {
+            if (duration <= 1e-14) return;
+            Arc arc;
+            arc.type = WeightedArcType::SINGULAR;
+            arc.s0 = s; arc.t0 = t; arc.v0 = v; arc.a0 = a; arc.j0 = j;
+            arc.j_star = jerk;
+            arc.a_star = jerk; // legacy name; value represents constant jerk
+            arc.activeConstraints = activeConstraints;
+            const double distance = SingularJSeg::ds(v, a, jerk, duration);
+            arc.duration = duration; arc.s1 = s + distance;
+            arc.v1 = normalize(SingularJSeg::v(v, a, jerk, duration));
+            arc.a1 = normalize(SingularJSeg::a(a, jerk, duration));
+            arc.j1 = normalize(jerk);
+            result.cost += singularArcCost(w_, a, jerk, duration);
+            result.arcs.push_back(arc);
+            s = arc.s1; t += duration; v = arc.v1; a = arc.a1; j = arc.j1;
+        };
+        auto appendPulse = [&](const AccelerationPulse& pulse, double sign) {
+            appendSnap(sign * bounds.snap, pulse.snapTime);
+            appendSingular(sign * pulse.peakJerk, pulse.jerkTime, 0x04);
+            appendSnap(-sign * bounds.snap, pulse.snapTime);
+            appendSingular(0.0, pulse.plateauTime, 0x02);
+            appendSnap(-sign * bounds.snap, pulse.snapTime);
+            appendSingular(-sign * pulse.peakJerk, pulse.jerkTime, 0x04);
+            appendSnap(sign * bounds.snap, pulse.snapTime);
+        };
+
+        appendPulse(accelPulse, 1.0);
+        appendSingular(0.0, cruiseTime, 0x01);
+        appendPulse(decelPulse, -1.0);
+
+        result.finalS = s;
+        result.finalV = v;
+        result.finalA = a;
+        result.finalJ = j;
+        result.totalTime = t;
+        const double sTolerance = 1e-8 * std::max(1.0, length);
+        result.feasible = !result.arcs.empty() &&
+            std::abs(s - length) <= sTolerance &&
+            std::abs(v - endVelocity) <= 1e-9 &&
+            std::abs(a) <= 1e-9 && std::abs(j) <= 1e-9;
+        if (!result.feasible) {
+            result.failureReason = "Exact snap-space terminal state was not reached";
+        }
+        return result;
+    }
+
+    ForwardPassResult optimizePulsePlan(
+        const std::function<double(double)>& vLimit,
+        double startVelocity, double endVelocity) const {
+        ForwardPassResult best;
+        best.failureReason = "No feasible snap-space pulse candidate";
+        double bestCost = std::numeric_limits<double>::infinity();
+
+        // The candidate family is deterministic and spans two decades of
+        // smoothness. Every member is exactly propagated and independently
+        // feasible; the selected point minimizes the stated weighted cost.
+        constexpr size_t kCandidates = 41;
+        for (size_t i = 0; i < kCandidates; ++i) {
+            const double fraction = static_cast<double>(i) /
+                                    static_cast<double>(kCandidates - 1);
+            const double scale = std::pow(0.01, fraction);
+            auto candidate = buildPulsePlan(vLimit, startVelocity, endVelocity,
+                                            sTotal_, 0.0, scale);
+            if (candidate.feasible && candidate.cost < bestCost) {
+                bestCost = candidate.cost;
+                best = std::move(candidate);
+            }
+        }
+        return best;
+    }
+
     const Path& path_;
     Limits limits_;
     CostWeights w_;
@@ -1984,6 +2474,7 @@ private:
     double lastJStar_ = 0.0;
     double lastS_ = 0.0;
     double lastV_ = 0.0;
+    std::string lastFailure_;
 
     /**
      * @brief Estimate the maximum reachable jerk.
@@ -2621,6 +3112,7 @@ private:
      * @param record If true, store the arcs in arcs_
      * @return The total cost J
      */
+#if 0 // Replaced by buildPulsePlan(); retained temporarily for algorithm history.
     double simulateAndCost(double jStar, bool record) {
         std::vector<Arc> tmp;
         double s = 0.0, t = 0.0;
@@ -3085,6 +3577,7 @@ private:
         lastV_ = v;
         return J;
     }
+#endif
 };
 
 
@@ -3144,26 +3637,55 @@ public:
         T startAcceleration = T(0),
         T startJerk = T(0)) override {
 
-        (void)startJerk;  // not honored (WI-P3 style)
+        wss_.reset();
+        pathCopy_.reset();
+        lastFailure_.clear();
+
         if (path.numSegments() == 0) {
+            lastFailure_ = "Path contains no segments";
             return std::make_unique<SampledVelocityProfile>();
         }
 
         T pathLength = path.totalLength();
-        if (pathLength <= T(0)) return std::make_unique<SampledVelocityProfile>();
+        if (pathLength <= T(0)) {
+            lastFailure_ = "Path has non-positive length";
+            return std::make_unique<SampledVelocityProfile>();
+        }
 
         // Validate inputs (same guards as other profilers)
-        if (constraintCacheSize < 2) return std::make_unique<SampledVelocityProfile>();
-        if (feedRate <= T(0)) return std::make_unique<SampledVelocityProfile>();
-        if (limits_.path.maxPathAcceleration <= T(0)) return std::make_unique<SampledVelocityProfile>();
-        if (limits_.path.maxCentripetalAcceleration < T(0)) return std::make_unique<SampledVelocityProfile>();
+        if (constraintCacheSize < 2) {
+            lastFailure_ = "At least two constraint samples are required";
+            return std::make_unique<SampledVelocityProfile>();
+        }
+        if (feedRate <= T(0)) {
+            lastFailure_ = "Feed rate must be positive";
+            return std::make_unique<SampledVelocityProfile>();
+        }
+        if (limits_.path.maxPathAcceleration <= T(0)) {
+            lastFailure_ = "Path acceleration limit must be positive";
+            return std::make_unique<SampledVelocityProfile>();
+        }
+        if (limits_.path.maxCentripetalAcceleration < T(0)) {
+            lastFailure_ = "Centripetal acceleration limit cannot be negative";
+            return std::make_unique<SampledVelocityProfile>();
+        }
+        if (std::abs(startAcceleration) > T(1e-12) ||
+            std::abs(startJerk) > T(1e-12)) {
+            // The current endpoint API has no final acceleration/jerk
+            // parameters. Treating nonzero initial higher derivatives as
+            // zero would silently create a discontinuity, so reject them.
+            lastFailure_ =
+                "Nonzero initial acceleration or jerk is not representable by this endpoint API";
+            return std::make_unique<SampledVelocityProfile>();
+        }
 
         // If w_a = 0, this degenerates to time-optimal. We still solve
         // via the same machinery (a* → a_max), but the user could also
-        // use AnalyticalTOPPRA directly for that case.
+        // use AnalyticalJerkLimitedTOPPRA directly for that case.
         CostWeights wEff = weights_;
         if (wEff.w_t <= 0.0) {
             // The problem is ill-posed without a positive time weight.
+            lastFailure_ = "Time weight must be positive";
             return std::make_unique<SampledVelocityProfile>();
         }
 
@@ -3250,6 +3772,7 @@ public:
                 if (i > 0) {
                     arcs.push_back(
                         makeDwellArc(sStart, sortedDwells[i - 1].second));
+                    costValue += wEff.w_t * sortedDwells[i - 1].second;
                 }
 
                 // Skip zero-length sub-paths (consecutive dwells)
@@ -3339,6 +3862,7 @@ public:
                     // and accelerate back within the available distance.
                     wss_.reset();
                     pathCopy_.reset();
+                    lastFailure_ = subSolver.failureReason();
                     return std::make_unique<SampledVelocityProfile>();
                 }
 
@@ -3369,6 +3893,7 @@ public:
             if (arcs.empty()) {
                 wss_.reset();
                 pathCopy_.reset();
+                lastFailure_ = solver.failureReason();
                 return std::make_unique<SampledVelocityProfile>();
             }
             optimalAStar = solver.optimalAStar();
@@ -3409,6 +3934,7 @@ public:
             optimalAStar);
         wss_ = wss;
         wss_->setCostValue(costValue);
+        lastFailure_.clear();
         // Keep the WSS path alive (may differ from pathCopy when dwells exist).
         pathCopy_ = wssPath;
 
@@ -3434,6 +3960,9 @@ public:
     double optimalAStar() const {
         return wss_ ? wss_->optimalAStar() : 0.0;
     }
+
+    /// Empty on success; otherwise the reason the last solve returned empty.
+    const std::string& failureReason() const { return lastFailure_; }
 
     /**
      * @brief Get the cost weights.
@@ -3463,6 +3992,7 @@ private:
     CostWeights weights_;
     std::shared_ptr<const Path> pathCopy_;
     std::shared_ptr<WSS> wss_;
+    std::string lastFailure_;
 };
 
 } // namespace MotionPlanner::analytical

@@ -299,6 +299,9 @@ public:
 
     ProfilerType type() const override { return ProfilerType::ToppraBasic; }
     const char* name() const override { return "BasicTOPPRA (TOPP-RA basic)"; }
+    ProfileDerivativeOrder derivativeOrder() const override {
+        return ProfileDerivativeOrder::Acceleration;
+    }
 
 private:
     /**

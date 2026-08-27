@@ -41,8 +41,8 @@ system.
 ┌──────────────────────────────────────────────────────────────────────┐
 │  4. Velocity Profiling                                      (host)   │
 │  VelocityProfiler::computeProfile() → VelocityProfile               │
-│  Output: time-parameterized v(s) profile with accel + jerk           │
-│  Choice: ToppraBasic | ToppraJerkConstrained | SCurve | AnalyticalTOPPRA │
+│  Output: time-parameterized profile with declared derivative order   │
+│  Choice: Basic | Jerk TOPPRA | S-curve | Analytical 2nd/3rd | Snap   │
 └──────────────────────────┬──────────────────────────────────────────┘
                            │
                            ▼
@@ -227,8 +227,9 @@ spec.curveType = tether::motion::BlendCurveType::BezierGk;
 **Input:** `PathAdapter<Dim, T>` (the blended path) + `KinematicLimits`
 + feed rate.
 
-**Output:** `VelocityProfile<T>` — a tabulated v(s) profile with
-per-point velocity, acceleration, jerk, and time.
+**Output:** `VelocityProfile<T>` — a time-parameterized profile. Its
+`derivativeOrder()` declares whether jerk or snap samples are physical; do not
+interpret compatibility zeroes from second-order profiles as derivatives.
 
 **Key Classes:**
 
@@ -238,7 +239,9 @@ per-point velocity, acceleration, jerk, and time.
 | `BasicTOPPRA<Dim,T>` | `include/tether/motion_planner/BasicTOPPRA.hpp` | Standard TOPP-RA (no jerk limit) |
 | `JerkConstrainedTOPPRA<Dim,T>` | `include/tether/motion_planner/JerkConstrainedTOPPRA.hpp` | Jerk-integrated TOPP-RA |
 | `SCurveVelocityProfiler<Dim,T>` | `include/tether/motion_planner/SCurveVelocityProfiler.hpp` | Basic per-piece S-curve |
-| `analytical::AnalyticalTOPPRA<Dim,T>` | `include/tether/motion_planner/analytical/AnalyticalTOPPRA.hpp` | Analytical TOPPRA with SSR/Hybrid representations |
+| `analytical::AnalyticalTOPPRA<Dim,T>` | `include/tether/motion_planner/analytical/AnalyticalTOPPRA.hpp` | Explicit second-order, no-jerk analytical selection |
+| `analytical::AnalyticalJerkLimitedTOPPRA<Dim,T>` | `include/tether/motion_planner/analytical/AnalyticalJerkLimitedTOPPRA.hpp` | Third-order SSR/Hybrid jerk-limited profile |
+| `analytical::ParetoTimeEnergyOptimalVelocityPlanner<Dim,T>` | `include/tether/motion_planner/analytical/ParetoTimeEnergyOptimalVelocityPlanner.hpp` | Fourth-order SnapSpace feasible-family profile |
 | `VelocityProfile<T>` | `include/tether/motion_planner/VelocityProfile.hpp` | Profile data structure + queries |
 
 **What Happens:**
@@ -273,10 +276,12 @@ three profilers and when to choose each.
 | `ToppraBasic` | Maximum speed, stiff machine, jerk handled downstream |
 | `ToppraJerkConstrained` | **Default for 3D printing** — smooth + time-optimal |
 | `SCurve` | Simplicity, testing, when time-optimality doesn't matter |
-| `AnalyticalTOPPRA` | Certified trajectory with SSR/Hybrid representations, exact sampling |
+| `AnalyticalTOPPRA` | Explicit no-jerk, second-order profile |
+| `AnalyticalJerkLimitedTOPPRA` | Third-order SSR/Hybrid jerk-limited profile |
+| `ParetoTimeEnergy` | Fourth-order SnapSpace trajectory; conservative feasible-family cost search |
 
 See [Analytical TOPPRA](AnalyticalTOPPRA.md) for details on the
-analytical profiler and its Switching Structure Representation (SSR)
+analytical jerk-limited profiler and its Switching Structure Representation (SSR)
 and Hybrid Monotone + Exact Composition representations.
 
 ---
