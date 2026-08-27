@@ -251,7 +251,9 @@ TEST(FSoEConnectionConformance, MasterRejectsZeroConnIdInEcho) {
     bool ok = conn.processRxFrame(frame, frame_len);
 
     EXPECT_TRUE(ok);  // Frame was parsed
-    EXPECT_TRUE(conn.isFailSafe());
+    // Error during Connection state goes back to Reset (NOT_OK transition)
+    EXPECT_FALSE(conn.isFailSafe());
+    EXPECT_EQ(conn.getState(), ConnectionState::Reset);
     EXPECT_EQ(conn.getErrorCode(), ErrorCode::ConnectionIDError);
 }
 
@@ -384,7 +386,9 @@ TEST(FSoEConnectionConformance, MasterRejectsWrongSlaveAddress) {
                                             conn.getRxSeqNo());
     conn.processRxFrame(frame, frame_len);
 
-    EXPECT_TRUE(conn.isFailSafe());
+    // Error during Connection state goes back to Reset (NOT_OK transition)
+    EXPECT_FALSE(conn.isFailSafe());
+    EXPECT_EQ(conn.getState(), ConnectionState::Reset);
     EXPECT_EQ(conn.getErrorCode(), ErrorCode::ConnectionIDError);
 }
 

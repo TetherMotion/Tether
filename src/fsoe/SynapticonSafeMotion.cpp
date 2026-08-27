@@ -238,6 +238,12 @@ MainInstance::MainInstance(const MainConfig& config)
         cfg.safety_level = ::FSoE::SIL::SIL2;
         cfg.input_size = static_cast<uint8_t>(Codec::kSlaveToMainSize);
         cfg.output_size = static_cast<uint8_t>(Codec::kMainToSlaveSize);
+        // The master MUST stay in Reset state, sending Reset(0x2A) frames
+        // until the slave actually responds with a valid FSoE frame.
+        // Do NOT fall back to Session on a timeout — that would advance
+        // the state machine without a slave response, which is wrong.
+        // 0 = wait forever (keep sending Reset frames).
+        cfg.reset_timeout_ms = 0;
         // Synapticon SOMANET drives run FSoE at a lower internal rate
         // than the EtherCAT bus cycle, resulting in ~8 cycles of delay
         // between the master's TX command and the slave's TX response.

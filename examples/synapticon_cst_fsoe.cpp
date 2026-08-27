@@ -36,7 +36,7 @@
  *   ./synapticon_cst_fsoe -s 1 -d 30            # slave 1, 30 s
  *   ./synapticon_cst_fsoe --no-fsoe             # CST only, no FSoE
  *   ./synapticon_cst_fsoe --dc-sync             # enable DC synchronization
- *   ./synapticon_cst_fsoe --connection-id 0x4321 --watchdog-ms 15
+ *   ./synapticon_cst_fsoe --connection-id 0x0006 --safety-address 0x0006 --watchdog-ms 15
  *   ./synapticon_cst_fsoe --debug fsoe          # high-level FSoE protocol trace
  *   ./synapticon_cst_fsoe --debug fsoe-frame    # decoded FSoE PDO struct fields (on change)
  *   ./synapticon_cst_fsoe --debug fsoe-raw      # FSoE protocol trace + raw frame hex dumps (on change)
@@ -45,6 +45,7 @@
  *   ./synapticon_cst_fsoe --debug fsoe-crc      # CRC parameters used for TX build and RX check
  *   ./synapticon_cst_fsoe --torque-nm 10 --freq-hz 1.0  # 10 Nm P-P at 1 Hz
  *   ./synapticon_cst_fsoe --rated-torque-mnm 4200       # override rated torque
+ *   ./synapticon_cst_fsoe --skip-vendor-verification    # skip SII vendor ID check
  */
 
 #include <array>
@@ -714,13 +715,15 @@ struct Args {
     double duration = 10.0;
     bool enable_fsoe = true;
     bool enable_dc_sync = false;
-    uint16_t connection_id = 0x1234;
+    uint16_t connection_id = 0x0006;  ///< Must match drive's Device Safety Address (0xF980:1)
+    uint16_t safety_address = 0x0006; ///< FSoE slave safety address (0x2620:3)
     uint16_t watchdog_ms = EtherCAT::Drives::Synapticon::SafeMotion::Timing::kMinimumWatchdogTimeMs;
     uint32_t diag_interval_ms = 1000;
     std::string debug;
     double torque_pp_nm = 0.5;       ///< Peak-to-peak torque amplitude in Nm
     double freq_hz = 0.5;            ///< Sine wave frequency in Hz
     uint32_t rated_torque_mnm = 0;   ///< Motor rated torque in mNm (0 = auto-detect from 0x6076)
+    bool skip_vendor_verification = false;  ///< Skip SII vendor ID check
 };
 
 bool parseArgs(int argc, char** argv, Args& out) {
@@ -747,8 +750,14 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .help("Enable EtherCAT distributed-clock synchronization (off by default)");
     program.add_argument("--connection-id")
         .scan<'x', unsigned int>()
-        .default_value(static_cast<unsigned int>(0x1234))
-        .help("FSoE connection ID (hex)");
+        .default_value(static_cast<unsigned int>(0x0006))
+        .help("FSoE connection ID (hex, default 0x0006 — must match drive's "
+              "Device Safety Address 0xF980:1)");
+    program.add_argument("--safety-address")
+        .scan<'x', unsigned int>()
+        .default_value(static_cast<unsigned int>(0x0006))
+        .help("FSoE slave safety address (hex, default 0x0006 — from drive's "
+              "0x2620:3)");
     program.add_argument("--watchdog-ms")
         .scan<'i', int>()
         .default_value(static_cast<int>(
@@ -778,6 +787,11 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .scan<'i', int>()
         .default_value(static_cast<int>(0))
         .help("Motor rated torque in mNm (0 = auto-detect from object 0x6076)");
+    program.add_argument("--skip-vendor-verification")
+        .default_value(false)
+        .implicit_value(true)
+        .help("Skip SII vendor ID check (use when SII reads return garbage, "
+              "e.g. on ESCs with broken EEPROM access)");
 
     try {
         program.parse_args(argc, argv);
@@ -792,12 +806,14 @@ bool parseArgs(int argc, char** argv, Args& out) {
     out.enable_fsoe = !program.get<bool>("--no-fsoe");
     out.enable_dc_sync = program.get<bool>("--dc-sync");
     out.connection_id = static_cast<uint16_t>(program.get<unsigned int>("--connection-id"));
+    out.safety_address = static_cast<uint16_t>(program.get<unsigned int>("--safety-address"));
     out.watchdog_ms = static_cast<uint16_t>(program.get<int>("--watchdog-ms"));
     out.diag_interval_ms = static_cast<uint32_t>(program.get<int>("--diag-interval-ms"));
     out.debug = program.get<std::string>("--debug");
     out.torque_pp_nm = program.get<double>("--torque-nm");
     out.freq_hz = program.get<double>("--freq-hz");
     out.rated_torque_mnm = static_cast<uint32_t>(program.get<int>("--rated-torque-mnm"));
+    out.skip_vendor_verification = program.get<bool>("--skip-vendor-verification");
     return true;
 }
 
@@ -817,12 +833,14 @@ int main(int argc, char** argv) {
 
     TETHER_LOGI(TAG,
         "synapticon_cst_fsoe — interface=%s slave=%u duration=%.1f fsoe=%s dc_sync=%s debug='%s' "
-        "torque_pp=%.3fNm freq=%.3fHz rated_torque_mnm=%u",
+        "torque_pp=%.3fNm freq=%.3fHz rated_torque_mnm=%u "
+        "conn_id=0x%04X safety_addr=0x%04X",
         args.interface.c_str(), slave_idx, args.duration,
         args.enable_fsoe ? "on" : "off",
         args.enable_dc_sync ? "on" : "off",
         args.debug.c_str(),
-        args.torque_pp_nm, args.freq_hz, args.rated_torque_mnm);
+        args.torque_pp_nm, args.freq_hz, args.rated_torque_mnm,
+        args.connection_id, args.safety_address);
 
     // --- Start EtherCAT master ---
     EtherCAT::DS402Master master;
@@ -884,11 +902,21 @@ int main(int argc, char** argv) {
                     sii_id.vendor_id, sii_id.product_code,
                     sii_id.revision_number, sii_id.serial_number);
 
-                if (sii_id.vendor_id != EtherCAT::Drives::Synapticon::kVendorId) {
+                if (args.skip_vendor_verification) {
+                    TETHER_LOGW(TAG,
+                        "Slave %u: --skip-vendor-verification set, skipping "
+                        "vendor ID check (SII vendor=0x%08X, expected "
+                        "0x%08X for Synapticon).  Continuing at operator's "
+                        "own risk.",
+                        slave_idx,
+                        sii_id.vendor_id,
+                        EtherCAT::Drives::Synapticon::kVendorId);
+                } else if (sii_id.vendor_id != EtherCAT::Drives::Synapticon::kVendorId) {
                     TETHER_LOGE(TAG,
                         "Slave %u: VENDOR MISMATCH — expected 0x%08X "
                         "(Synapticon), got 0x%08X.  This example only supports "
-                        "Synapticon SOMANET drives, aborting.",
+                        "Synapticon SOMANET drives, aborting.  Use "
+                        "--skip-vendor-verification to override.",
                         slave_idx,
                         EtherCAT::Drives::Synapticon::kVendorId,
                         sii_id.vendor_id);
@@ -1094,13 +1122,12 @@ int main(int argc, char** argv) {
         }
     }
 
-    // --- Read FSoE safety address (0xF980:1) and use as connection ID ---
+    // --- Read FSoE safety address (0xF980:1) for verification ---
     // Object 0xF980:1 contains the safety address configured on the drive.
-    // The master must use this value as the FSoE connection ID so that
-    // master and slave agree on the connection identifier.  Reading it
-    // before starting the FSoE handshake avoids ConnectionIDError
-    // failures caused by a mismatch between the --connection-id default
-    // and the drive's configured value.
+    // For Synapticon SOMANET drives, the FSoE connection ID must match this
+    // value (default 0x0006).  Reading it before starting the FSoE handshake
+    // lets us warn the operator if --connection-id doesn't match the drive's
+    // configured safety address, which would cause ConnectionIDError failures.
     //
     // When FSoE is disabled (--no-fsoe), this read is skipped.
     if (args.enable_fsoe) {
@@ -1111,15 +1138,20 @@ int main(int argc, char** argv) {
                 slave, drive_safety_address);
         if (addr_err == EtherCAT::SlaveError::Ok) {
             TETHER_LOGI(TAG,
-                "FSoE safety address (0xF980:1): 0x%04X — using as "
-                "slave_safety_addr (NOT connection_id; "
-                "--connection-id=0x%04X is kept)",
+                "FSoE safety address (0xF980:1): 0x%04X — "
+                "--connection-id=0x%04X --safety-address=0x%04X",
                 drive_safety_address,
-                args.connection_id);
-            // Use the drive's safety address as the slave_safety_addr
-            // (already set to 0x0006 in main_config below), but do NOT
-            // override the connection_id — they are separate FSoE concepts.
-            // The connection_id comes from --connection-id (default 0x1234).
+                args.connection_id,
+                args.safety_address);
+            if (drive_safety_address != args.connection_id) {
+                TETHER_LOGW(TAG,
+                    "WARNING: --connection-id (0x%04X) does NOT match the "
+                    "drive's Device Safety Address 0xF980:1 (0x%04X).  "
+                    "This will likely cause FSoE ConnectionIDError.  "
+                    "Use --connection-id 0x%04X to match the drive.",
+                    args.connection_id, drive_safety_address,
+                    drive_safety_address);
+            }
         } else {
             TETHER_LOGW(TAG,
                 "Failed to read FSoE safety address (0xF980:1) via SDO "
@@ -1385,6 +1417,10 @@ int main(int argc, char** argv) {
         read_u8 (0x1700, 0, "RxPDO 0x1700 mapping count (expect 18)");
         read_u8 (0x1B00, 0, "TxPDO 0x1B00 mapping count (expect 18)");
 
+        // Full PDO mapping readout and module identification are not needed
+        // for normal operation — commented out to reduce SDO traffic and
+        // log noise.  Uncomment for low-level PDO layout debugging.
+#if 0
         // Read the full PDO mapping to understand the actual byte layout
         TETHER_LOGI(TAG, "Reading full RxPDO 0x1700 mapping:");
         {
@@ -1438,6 +1474,7 @@ int main(int argc, char** argv) {
                 }
             }
         }
+#endif
 
         // Check 0x2620 (General safety object) subindices
         TETHER_LOGI(TAG, "Checking safety general object (0x2620):");
@@ -1607,8 +1644,8 @@ int main(int argc, char** argv) {
         EtherCAT::Drives::Synapticon::SafeMotion::MainConfig main_config;
         main_config.feature_enabled = true;
         main_config.slave_address = slave_idx;
-        main_config.safety_address = 0x0006;  // FSoE slave safety address
-        main_config.connection_id = args.connection_id;  // FSoE connection ID
+        main_config.safety_address = args.safety_address;  // FSoE slave safety address
+        main_config.connection_id = args.connection_id;    // FSoE connection ID
         main_config.master_address = 0x0001;
         main_config.watchdog_time_ms = args.watchdog_ms;
 
@@ -1831,8 +1868,8 @@ int main(int argc, char** argv) {
         }
 
         TETHER_LOGI(TAG,
-            "FSoE enabled: conn_id=0x%04X watchdog=%u ms debug=%s%s%s%s%s%s",
-            args.connection_id, args.watchdog_ms,
+            "FSoE enabled: conn_id=0x%04X safety_addr=0x%04X watchdog=%u ms debug=%s%s%s%s%s%s",
+            args.connection_id, args.safety_address, args.watchdog_ms,
             debug_fsoe ? "fsoe" : "off",
             debug_fsoe_frame ? "+frame" : "",
             debug_fsoe_raw ? "+raw" : "",

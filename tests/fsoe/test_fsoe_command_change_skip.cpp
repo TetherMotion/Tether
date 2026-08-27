@@ -753,20 +753,22 @@ TEST(FSoECommandChangeSkip, StaleBudgetExhaustionTriggersFailSafe) {
         conn.exchangeViaPDO(rx_pdo_out, sizeof(rx_pdo_out),
                            frozen_rx.data(), frozen_rx.size(), now);
 
-        if (conn.isFailSafe()) {
+        // Error from handshake state goes back to Reset (NOT_OK transition)
+        // with error code preserved, not fail-safe
+        if (conn.getErrorCode() != ErrorCode::NoError) {
             reached_fail_safe = true;
             fail_safe_cycle = cycle;
             break;
         }
     }
 
-    EXPECT_TRUE(reached_fail_safe) << "Master should have entered fail-safe";
+    EXPECT_TRUE(reached_fail_safe) << "Master should have triggered an error";
     // The master processes the Reset response and transitions to Session.
     // In Session state, it builds a Session TX (frame_rebuilt) and enters
     // change-detection.  The frozen RX (Reset response) is the baseline.
     // Subsequent cycles: the RX is still the same Reset response → stale.
-    // After 3 stale frames, the master enters fail-safe.
-    EXPECT_LE(fail_safe_cycle, 10) << "Fail-safe should happen quickly";
+    // After 3 stale frames, the master triggers an error → Reset (NOT_OK).
+    EXPECT_LE(fail_safe_cycle, 10) << "Error should happen quickly";
 }
 
 TEST(FSoECommandChangeSkip, StaleBudgetExactlyAtLimitDoesNotFail) {
@@ -849,7 +851,9 @@ TEST(FSoECommandChangeSkip, TimeoutIsTheUltimateBackstop) {
         conn.exchangeViaPDO(rx_pdo_out, sizeof(rx_pdo_out),
                            frozen_rx.data(), frozen_rx.size(), now);
 
-        if (conn.isFailSafe()) {
+        // Error from handshake state goes back to Reset (NOT_OK transition)
+        // with error code preserved, not fail-safe
+        if (conn.getErrorCode() != ErrorCode::NoError) {
             reached_fail_safe = true;
             break;
         }
@@ -1040,7 +1044,9 @@ TEST(FSoECommandChangeSkip, ZeroStaleBudgetMeansImmediateFailSafeOnStale) {
         uint8_t rx_pdo_out[64] = {};
         conn.exchangeViaPDO(rx_pdo_out, sizeof(rx_pdo_out),
                            frozen_rx.data(), frozen_rx.size(), now);
-        if (conn.isFailSafe()) {
+        // Error from handshake state goes back to Reset (NOT_OK transition)
+        // with error code preserved, not fail-safe
+        if (conn.getErrorCode() != ErrorCode::NoError) {
             fail_safe = true;
             break;
         }
@@ -1049,7 +1055,7 @@ TEST(FSoECommandChangeSkip, ZeroStaleBudgetMeansImmediateFailSafeOnStale) {
     // The master processes the Session response and transitions to Session.
     // It builds a Session TX (frame_rebuilt) and enters change-detection
     // with delay=0.  The next cycle's RX is still the same → stale 1 > 0
-    // → fail-safe.
+    // → error → Reset (NOT_OK transition).
     EXPECT_TRUE(fail_safe) << "Delay=0 should not tolerate stale frames";
 }
 

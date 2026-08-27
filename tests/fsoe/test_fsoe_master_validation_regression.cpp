@@ -200,7 +200,9 @@ TEST(FSoEMasterConnectionValidationRegression, ShortConnectionResponseRejected) 
 
     // Should be rejected with DataLengthError
     EXPECT_TRUE(ok);  // processRxFrame returns true (frame was parsed)
-    EXPECT_TRUE(conn.isFailSafe());
+    // Error during Connection state goes back to Reset (NOT_OK transition)
+    EXPECT_FALSE(conn.isFailSafe());
+    EXPECT_EQ(conn.getState(), ConnectionState::Reset);
     EXPECT_EQ(conn.getErrorCode(), ErrorCode::DataLengthError);
 }
 
@@ -419,7 +421,15 @@ TEST(FSoEMasterFailSafeFrameRegression, FailSafeFrameUsesFailSafeDataCommand) {
     conn.initialize();
     conn.startConnection();
 
+    FSoESlave slave(makeSlaveCfg(4, 4));
+    slave.initialize();
+
+    // Advance to Data state — triggerFailSafe only works in Data
+    uint64_t now = 0;
+    advanceToData(conn, slave, now);
+
     conn.triggerFailSafe(ErrorCode::ApplicationError);
+    ASSERT_TRUE(conn.isFailSafe());
 
     uint8_t tx[64];
     size_t tx_len = conn.prepareTxFrame(tx, sizeof(tx));
@@ -439,7 +449,15 @@ TEST(FSoEMasterFailSafeFrameRegression, FailSafeFrameContainsFailSafeValues) {
     conn.initialize();
     conn.startConnection();
 
+    FSoESlave slave(makeSlaveCfg(4, 4));
+    slave.initialize();
+
+    // Advance to Data state — triggerFailSafe only works in Data
+    uint64_t now = 0;
+    advanceToData(conn, slave, now);
+
     conn.triggerFailSafe(ErrorCode::ApplicationError);
+    ASSERT_TRUE(conn.isFailSafe());
 
     // Capture TX CRC state before prepareTxFrame updates it
     const uint16_t saved_tx_crc0 = conn.getTxLastCrc0();
