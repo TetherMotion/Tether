@@ -69,6 +69,11 @@ public:
         return static_cast<double>(source_->totalLength());
     }
 
+    ProfileDerivativeOrder derivativeOrder() const override {
+        return source_ ? source_->derivativeOrder()
+                       : ProfileDerivativeOrder::Velocity;
+    }
+
     /// Access the underlying analytical source.
     const std::shared_ptr<Source>& source() const { return source_; }
 

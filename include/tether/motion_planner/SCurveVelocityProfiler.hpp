@@ -88,6 +88,11 @@ public:
 
         auto profile = std::make_unique<SampledVelocityProfile>();
         if (path.numSegments() == 0) return profile;
+        if (numSamples < 2 || feedRate <= T(0) ||
+            std::abs(startAcceleration) > T(1e-12) ||
+            std::abs(startJerk) > T(1e-12)) {
+            return profile;
+        }
 
         T pathLength = path.totalLength();
         if (pathLength <= T(0)) return profile;
@@ -133,11 +138,14 @@ public:
         // Build S-curve sequence with velocity continuity
         std::vector<SCurve> scurves;
         std::vector<T> scurveStartArc;  // arc length at start of each S-curve
+        std::vector<T> scurveStartTime; // exact accumulated phase time
         scurves.reserve(pieceLengths.size());
         scurveStartArc.reserve(pieceLengths.size());
+        scurveStartTime.reserve(pieceLengths.size());
 
         T currentVel = startVelocity;
         T cumulativeArc = T(0);
+        T accumulatedTime = T(0);
 
         size_t pieceIdx = 0;
         for (size_t i = 0; i < pieceLengths.size(); ++i) {
@@ -149,6 +157,7 @@ public:
             if (pieceIdx >= segments.size()) break;
 
             scurveStartArc.push_back(segments[pieceIdx].cumulativeArcLength);
+            scurveStartTime.push_back(accumulatedTime);
 
             T targetVel = std::min(cruiseVelocities[i], vMax);
             T nextVel = (i + 1 < pieceLengths.size())
@@ -171,6 +180,7 @@ public:
             scurves.push_back(std::move(sc));
             currentVel = scurves.back().evaluateAt(
                 scurves.back().totalDuration()).velocity;
+            accumulatedTime += scurves.back().totalDuration();
             cumulativeArc += pieceLengths[i];
             pieceIdx++;
         }
@@ -180,9 +190,6 @@ public:
         // Sample the S-curve profiles at uniform arc length intervals
         // to produce a VelocityProfile.
         T ds = pathLength / T(numSamples - 1);
-        T currentTime = T(0);
-        T prevVel = startVelocity;
-
         for (size_t i = 0; i < numSamples; ++i) {
             T s = std::min(i * ds, pathLength);
             VelocityProfilePoint pt;
@@ -208,26 +215,19 @@ public:
                 // Find time at position within this S-curve
                 auto tOpt = sc.findTimeAtPosition(localS);
                 if (tOpt) {
-                    pt.velocity = sc.evaluateAt(*tOpt).velocity;
-                    pt.acceleration = sc.evaluateAt(*tOpt).acceleration;
-                    pt.jerk = sc.evaluateAt(*tOpt).jerk;
+                    const auto state = sc.evaluateAt(*tOpt);
+                    pt.velocity = state.velocity;
+                    pt.acceleration = state.acceleration;
+                    pt.jerk = state.jerk;
+                    pt.time = scurveStartTime[scIdx] + *tOpt;
                 } else {
                     pt.velocity = T(0);
+                    pt.time = scurveStartTime[scIdx];
                 }
             } else {
                 pt.velocity = T(0);
+                pt.time = scurveStartTime[scIdx];
             }
-
-            // Compute time from arc length and velocity
-            if (i > 0) {
-                T avgVel = (prevVel + pt.velocity) / T(2);
-                T deltaS = pt.arcLength - profile->points()[i - 1].arcLength;
-                if (avgVel > MathConstants::EPSILON) {
-                    currentTime += deltaS / avgVel;
-                }
-            }
-            pt.time = currentTime;
-            prevVel = pt.velocity;
 
             // Store the velocity and acceleration limits used by the
             // profiler, so downstream consumers (ReNURBS) can check
@@ -247,6 +247,9 @@ public:
     ProfilerType type() const override { return ProfilerType::SCurve; }
     const char* name() const override {
         return "SCurveVelocityProfiler (basic S-curve)";
+    }
+    ProfileDerivativeOrder derivativeOrder() const override {
+        return ProfileDerivativeOrder::Jerk;
     }
 
 private:

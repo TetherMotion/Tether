@@ -154,12 +154,12 @@ public:
 
     T arcLength(T t) const override {
         auto [arcIdx, s, v, a] = locateAndIntegrate(t);
-        return static_cast<T>(std::max(0.0, s));
+        return static_cast<T>(s);
     }
 
     T pathVelocity(T t) const override {
         auto [arcIdx, s, v, a] = locateAndIntegrate(t);
-        return static_cast<T>(std::max(0.0, v));
+        return static_cast<T>(v);
     }
 
     T pathAcceleration(T t) const override {
@@ -200,6 +200,10 @@ public:
         return "SwitchingStructureRepresentation (SSR)";
     }
 
+    ProfileDerivativeOrder derivativeOrder() const override {
+        return ProfileDerivativeOrder::Jerk;
+    }
+
     // ========================================================================
     // Access to internal data
     // ========================================================================
@@ -230,13 +234,19 @@ public:
     double pathVelocityAtArcLength(T s) const {
         for (const auto& arc : arcs_) {
             if (s >= arc.s_begin - T(1e-10) && s <= arc.s_end + T(1e-10)) {
-                // Linear interpolation of velocity within arc
-                double frac = static_cast<double>(
-                    (s - arc.s_begin) / std::max(arc.s_end - arc.s_begin, T(1e-12)));
-                double vEnd = std::sqrt(std::max(
-                    arc.v0 * arc.v0 + 2.0 * arc.a0 * static_cast<double>(arc.s_end - arc.s_begin),
-                    0.0));
-                return arc.v0 + frac * (vEnd - arc.v0);
+                if (s <= arc.s_begin + T(1e-10)) return arc.v0;
+                if (s >= arc.s_end - T(1e-10)) {
+                    return std::get<1>(integrateArcToTime(arc, arc.duration));
+                }
+                double lo = 0.0;
+                double hi = arc.duration;
+                for (int i = 0; i < 100; ++i) {
+                    const double mid = 0.5 * (lo + hi);
+                    const double sMid = std::get<0>(integrateArcToTime(arc, mid));
+                    if (sMid < static_cast<double>(s)) lo = mid;
+                    else hi = mid;
+                }
+                return std::get<1>(integrateArcToTime(arc, 0.5 * (lo + hi)));
             }
         }
         return 0.0;
@@ -248,9 +258,19 @@ public:
     T timeAtArcLength(T s) const override {
         for (const auto& arc : arcs_) {
             if (s >= arc.s_begin - T(1e-10) && s <= arc.s_end + T(1e-10)) {
-                double frac = static_cast<double>(
-                    (s - arc.s_begin) / std::max(arc.s_end - arc.s_begin, T(1e-12)));
-                return static_cast<T>(arc.t0 + frac * arc.duration);
+                if (s <= arc.s_begin + T(1e-10)) return static_cast<T>(arc.t0);
+                if (s >= arc.s_end - T(1e-10)) {
+                    return static_cast<T>(arc.t0 + arc.duration);
+                }
+                double lo = 0.0;
+                double hi = arc.duration;
+                for (int i = 0; i < 100; ++i) {
+                    const double mid = 0.5 * (lo + hi);
+                    const double sMid = std::get<0>(integrateArcToTime(arc, mid));
+                    if (sMid < static_cast<double>(s)) lo = mid;
+                    else hi = mid;
+                }
+                return static_cast<T>(arc.t0 + 0.5 * (lo + hi));
             }
         }
         return T(0);
@@ -311,7 +331,8 @@ private:
         }
         if (tD >= totalT) {
             const auto& arc = arcs_.back();
-            return {arcs_.size() - 1, arc.s_end, arc.v0, arc.a0};
+            const auto [s, v, a] = integrateArcToTime(arc, arc.duration);
+            return {arcs_.size() - 1, s, v, a};
         }
 
         // Binary search for the arc containing t
@@ -391,34 +412,8 @@ private:
             // Use simple RK4 (fixed step) for speed; adaptive for accuracy
             auto yNew = rk4Step(rhs, t, y, h);
 
-            // Check feasibility: clamp to physical limits.
-            if (yNew.v < 1e-12) {
-                yNew.v = 1e-12;
-            }
-
-            // Enforce the velocity limit at this arc length.
-            double vLim = static_cast<double>(
-                evaluator_.velocityLimit(static_cast<T>(yNew.s), *path_));
-            if (vLim < 1e-12) vLim = 1e-12;
-            yNew.v = std::min(yNew.v, vLim);
-
-            // Enforce the acceleration bounds.
-            auto [aMin, aMax] = evaluator_.accelerationBounds(
-                static_cast<T>(yNew.s),
-                static_cast<T>(yNew.v),
-                *path_);
-            yNew.a = std::clamp(yNew.a,
-                                static_cast<double>(aMin),
-                                static_cast<double>(aMax));
-
             y = yNew;
             t += h;
-
-            // Check if we've passed the arc end
-            if (y.s >= arc.s_end) {
-                y.s = arc.s_end;
-                break;
-            }
         }
 
         return {y.s, y.v, y.a};

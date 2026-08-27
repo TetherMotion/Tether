@@ -23,7 +23,7 @@
  *   a time-optimal profile but is well-understood and easy to reason about.
  *   Useful for applications where simplicity matters more than optimality.
  *
- * - **AnalyticalTOPPRA** and **ParetoTimeEnergyOptimalVelocityPlanner**:
+ * - **AnalyticalJerkLimitedTOPPRA** and **ParetoTimeEnergyOptimalVelocityPlanner**:
  *   Analytical profilers that return a `VelocityProfile` abstract pointer.
  *   Downstream consumers call the query API and do not need to know the
  *   concrete representation.
@@ -81,9 +81,11 @@ enum class ProfilerType : uint8_t {
     ToppraJerkConstrained,
     /// Basic per-piece S-curve (jerk-limited but not time-optimal)
     SCurve,
-    /// Analytical TOPPRA-equivalent operating in arc-length space with
-    /// exact SSR and certifiable Hybrid representations (see analytical/)
+    /// Analytical 2nd-order TOPP-RA without a jerk constraint.
     AnalyticalTOPPRA,
+    /// Analytical 3rd-order TOPP-RA with a jerk constraint, SSR, and
+    /// certifiable Hybrid representations (see analytical/).
+    AnalyticalJerkLimitedTOPPRA,
 };
 
 /**

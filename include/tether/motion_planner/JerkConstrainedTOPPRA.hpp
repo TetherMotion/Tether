@@ -140,10 +140,13 @@ public:
         T startAcceleration = T(0),
         T startJerk = T(0)) override {
 
-        (void)startJerk; // WI-P3: stored on first point only; not honored
-                         // in the optimization (assumes a(0) = 0).
         auto profile = std::make_unique<SampledVelocityProfile>();
         if (path.numSegments() == 0) return profile;
+
+        // This solver carries velocity and acceleration, not the initial
+        // jerk state. Reporting a trajectory after silently resetting jerk
+        // would create a discontinuity at t=0, so reject that request.
+        if (std::abs(startJerk) > T(1e-12)) return profile;
 
         // WI-1: Validate inputs — degenerate configs must return an empty
         // (or all-rest) profile, never NaN or a velocity jump.
@@ -545,6 +548,9 @@ public:
     ProfilerType type() const override { return ProfilerType::ToppraJerkConstrained; }
     const char* name() const override {
         return "JerkConstrainedTOPPRA (TOPP-RA + jerk constraint, 3rd-order)";
+    }
+    ProfileDerivativeOrder derivativeOrder() const override {
+        return ProfileDerivativeOrder::Jerk;
     }
 
 private:

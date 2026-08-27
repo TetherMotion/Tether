@@ -146,6 +146,8 @@ struct ValidationConfig {
     double sigmaMax = 50000.0;
     double vfTolerance = 0.5;  // terminal velocity tolerance
     double sTolerance = 1e-6;  // terminal s tolerance
+    double expectedFinalS = std::numeric_limits<double>::quiet_NaN();
+    double expectedFinalV = std::numeric_limits<double>::quiet_NaN();
     size_t maxArcs = 50000;
     bool requireFeasible = false;  // Single pass may not be feasible
     bool requireFinalState = true;
@@ -286,8 +288,19 @@ ValidationResult validateForwardPass(
     }
 
     // 6. Final state
-    if (cfg.requireFinalState) {
-        if (std::abs(r.finalS - r.finalS) > 1e-6) {  // placeholder
+    if (cfg.requireFinalState && std::isfinite(cfg.expectedFinalS)) {
+        if (std::abs(r.finalS - cfg.expectedFinalS) > cfg.sTolerance) {
+            vr.ok = false;
+            vr.message = "Terminal arc length mismatch: got " +
+                         std::to_string(r.finalS) + ", expected " +
+                         std::to_string(cfg.expectedFinalS);
+            return vr;
+        }
+        if (std::isfinite(cfg.expectedFinalV) &&
+            std::abs(r.finalV - cfg.expectedFinalV) > cfg.vfTolerance) {
+            vr.ok = false;
+            vr.message = "Terminal velocity is outside the requested tolerance";
+            return vr;
         }
     }
 
@@ -351,6 +364,8 @@ void runAndValidate(
 
     // Optional: full validation (only if requireFeasible is set)
     if (vcfg.requireFeasible) {
+        vcfg.expectedFinalS = solver->pathLength();
+        vcfg.expectedFinalV = vf;
         auto vr = validateForwardPass(result, vcfg, vLimFn);
         EXPECT_TRUE(vr.ok) << "Validation failed: " << vr.message
                            << " (jStar=" << jStar << " v0=" << v0

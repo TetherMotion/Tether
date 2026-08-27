@@ -9,7 +9,7 @@
  * 3. Switching Structure Representation (SSR) — Class A
  * 4. Hybrid Monotone Representation — Class B
  * 5. Trajectory Sampler (unified interface)
- * 6. AnalyticalTOPPRA profiler (VelocityProfiler interface, solver, sampling)
+ * 6. AnalyticalJerkLimitedTOPPRA profiler (VelocityProfiler interface, solver, sampling)
  * 7. MotionPlan integration (analytical source, backward compatibility)
  * 8. Constraint satisfaction (velocity, acceleration, jerk limits)
  * 9. SSR vs Hybrid consistency
@@ -302,15 +302,15 @@ TEST(AnalyticalConstraintEvaluator, AccelerationBounds_Feasible) {
 }
 
 // ============================================================================
-// 3. AnalyticalTOPPRA Profiler Tests
+// 3. AnalyticalJerkLimitedTOPPRA Profiler Tests
 // ============================================================================
 
-TEST(AnalyticalTOPPRA, ComputesProfile_Line) {
+TEST(AnalyticalJerkLimitedTOPPRA, ComputesProfile_Line) {
     auto path = makeShortLinePath2D();
     ASSERT_GT(path.numSegments(), 0u);
 
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
     ASSERT_GT(profile->points().size(), 0u);
@@ -318,30 +318,30 @@ TEST(AnalyticalTOPPRA, ComputesProfile_Line) {
     EXPECT_NEAR(profile->totalLength(), 10.0, 1e-6);
 }
 
-TEST(AnalyticalTOPPRA, ProfileStartsAtRest) {
+TEST(AnalyticalJerkLimitedTOPPRA, ProfileStartsAtRest) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
     ASSERT_GT(profile->points().size(), 0u);
     EXPECT_NEAR(profile->points().front().velocity, 0.0, 1e-6);
 }
 
-TEST(AnalyticalTOPPRA, ProfileEndsAtRest) {
+TEST(AnalyticalJerkLimitedTOPPRA, ProfileEndsAtRest) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
     ASSERT_GT(profile->points().size(), 0u);
     EXPECT_NEAR(profile->points().back().velocity, 0.0, 1e-3);
 }
 
-TEST(AnalyticalTOPPRA, ProfileRespectsFeedRate) {
+TEST(AnalyticalJerkLimitedTOPPRA, ProfileRespectsFeedRate) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits);
 
     double feedRate = 15.0;
     auto profile = profiler.computeProfile(path, feedRate, 0.0, 0.0, 200);
@@ -352,10 +352,10 @@ TEST(AnalyticalTOPPRA, ProfileRespectsFeedRate) {
     }
 }
 
-TEST(AnalyticalTOPPRA, ProfileRespectsAccelerationLimit) {
+TEST(AnalyticalJerkLimitedTOPPRA, ProfileRespectsAccelerationLimit) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
     ASSERT_GT(profile->points().size(), 0u);
@@ -365,10 +365,10 @@ TEST(AnalyticalTOPPRA, ProfileRespectsAccelerationLimit) {
     }
 }
 
-TEST(AnalyticalTOPPRA, ProfileRespectsJerkLimit) {
+TEST(AnalyticalJerkLimitedTOPPRA, ProfileRespectsJerkLimit) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits);
 
     auto profile = profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
     ASSERT_GT(profile->points().size(), 0u);
@@ -378,10 +378,10 @@ TEST(AnalyticalTOPPRA, ProfileRespectsJerkLimit) {
     }
 }
 
-TEST(AnalyticalTOPPRA, ProvidesAnalyticalSource) {
+TEST(AnalyticalJerkLimitedTOPPRA, ProvidesAnalyticalSource) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits);
 
     profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
 
@@ -391,10 +391,10 @@ TEST(AnalyticalTOPPRA, ProvidesAnalyticalSource) {
     EXPECT_NEAR(source->totalLength(), 10.0, 1e-6);
 }
 
-TEST(AnalyticalTOPPRA, ProvidesSSRSource) {
+TEST(AnalyticalJerkLimitedTOPPRA, ProvidesSSRSource) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits);
 
     profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
 
@@ -403,10 +403,10 @@ TEST(AnalyticalTOPPRA, ProvidesSSRSource) {
     EXPECT_GT(ssr->numArcs(), 0u);
 }
 
-TEST(AnalyticalTOPPRA, ProvidesHybridSource) {
+TEST(AnalyticalJerkLimitedTOPPRA, ProvidesHybridSource) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits, true, 1e-8);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits, true, 1e-8);
 
     profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
 
@@ -415,15 +415,15 @@ TEST(AnalyticalTOPPRA, ProvidesHybridSource) {
     EXPECT_GT(hybrid->numElements(), 0u);
 }
 
-TEST(AnalyticalTOPPRA, ProfilerType) {
+TEST(AnalyticalJerkLimitedTOPPRA, ProfilerType) {
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits);
-    EXPECT_EQ(profiler.type(), ProfilerType::AnalyticalTOPPRA);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits);
+    EXPECT_EQ(profiler.type(), ProfilerType::AnalyticalJerkLimitedTOPPRA);
 }
 
-TEST(AnalyticalTOPPRA, NameIsSet) {
+TEST(AnalyticalJerkLimitedTOPPRA, NameIsSet) {
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits);
     EXPECT_NE(profiler.name(), nullptr);
     EXPECT_STRNE(profiler.name(), "");
 }
@@ -435,7 +435,7 @@ TEST(AnalyticalTOPPRA, NameIsSet) {
 TEST(AnalyticalSSR, PositionAtStartAndEnd) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits);
     profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
 
     auto ssr = profiler.ssrSource();
@@ -453,7 +453,7 @@ TEST(AnalyticalSSR, PositionAtStartAndEnd) {
 TEST(AnalyticalSSR, VelocityAtStartIsZero) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits);
     profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
 
     auto ssr = profiler.ssrSource();
@@ -466,7 +466,7 @@ TEST(AnalyticalSSR, VelocityAtStartIsZero) {
 TEST(AnalyticalSSR, PositionContinuity) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits);
     profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
 
     auto ssr = profiler.ssrSource();
@@ -497,7 +497,7 @@ TEST(AnalyticalSSR, PositionContinuity) {
 TEST(AnalyticalHybrid, PositionAtStartAndEnd) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits, true, 1e-6);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits, true, 1e-6);
     profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
 
     auto hybrid = profiler.hybridSource();
@@ -515,7 +515,7 @@ TEST(AnalyticalHybrid, PositionAtStartAndEnd) {
 TEST(AnalyticalHybrid, CertificationProvided) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits, true, 1e-8);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits, true, 1e-8);
     profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
 
     auto hybrid = profiler.hybridSource();
@@ -532,7 +532,7 @@ TEST(AnalyticalHybrid, CertificationProvided) {
 TEST(AnalyticalHybrid, PositionContinuity) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits, true, 1e-6);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits, true, 1e-6);
     profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
 
     auto hybrid = profiler.hybridSource();
@@ -562,7 +562,7 @@ TEST(AnalyticalHybrid, PositionContinuity) {
 TEST(AnalyticalTrajectorySampler, WrapsSSR) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits, false);  // No hybrid
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits, false);  // No hybrid
     profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
 
     auto source = profiler.analyticalSource();
@@ -579,7 +579,7 @@ TEST(AnalyticalTrajectorySampler, WrapsSSR) {
 TEST(AnalyticalTrajectorySampler, WrapsHybrid) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits, true, 1e-6);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits, true, 1e-6);
     profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
 
     auto source = profiler.analyticalSource();
@@ -603,7 +603,7 @@ TEST(AnalyticalMotionPlan, BuildsWithAnalyticalProfiler) {
         Vec<2, double>{0.0, 0.0}, Vec<2, double>{10.0, 0.0}, 100.0));
 
     auto limits = makeLimits2D();
-    MotionPlanBuilder<2, double> builder(limits, {}, ProfilerType::AnalyticalTOPPRA);
+    MotionPlanBuilder<2, double> builder(limits, {}, ProfilerType::AnalyticalJerkLimitedTOPPRA);
     auto plan = builder.build(segments, 50.0);
 
     EXPECT_GT(plan.totalLength(), 0.0);
@@ -616,7 +616,7 @@ TEST(AnalyticalMotionPlan, EvaluatesPosition) {
         Vec<2, double>{0.0, 0.0}, Vec<2, double>{10.0, 0.0}, 100.0));
 
     auto limits = makeLimits2D();
-    MotionPlanBuilder<2, double> builder(limits, {}, ProfilerType::AnalyticalTOPPRA);
+    MotionPlanBuilder<2, double> builder(limits, {}, ProfilerType::AnalyticalJerkLimitedTOPPRA);
     auto plan = builder.build(segments, 50.0);
 
     auto p0 = plan.positionAt(0.0);
@@ -634,7 +634,7 @@ TEST(AnalyticalMotionPlan, EvaluateAtProvidesState) {
         Vec<2, double>{0.0, 0.0}, Vec<2, double>{10.0, 0.0}, 100.0));
 
     auto limits = makeLimits2D();
-    MotionPlanBuilder<2, double> builder(limits, {}, ProfilerType::AnalyticalTOPPRA);
+    MotionPlanBuilder<2, double> builder(limits, {}, ProfilerType::AnalyticalJerkLimitedTOPPRA);
     auto plan = builder.build(segments, 50.0);
 
     auto state = plan.evaluateAt(plan.totalDuration() * 0.5);
@@ -650,7 +650,7 @@ TEST(AnalyticalMotionPlan, AnalyticalSourceAvailable) {
         Vec<2, double>{0.0, 0.0}, Vec<2, double>{10.0, 0.0}, 100.0));
 
     auto limits = makeLimits2D();
-    MotionPlanBuilder<2, double> builder(limits, {}, ProfilerType::AnalyticalTOPPRA);
+    MotionPlanBuilder<2, double> builder(limits, {}, ProfilerType::AnalyticalJerkLimitedTOPPRA);
     auto plan = builder.build(segments, 50.0);
 
     // The profile should wrap an analytical source.
@@ -685,7 +685,7 @@ TEST(AnalyticalMotionPlan, BackwardCompatibleWithoutAnalyticalSource) {
 TEST(AnalyticalConstraintSatisfaction, VelocityWithinLimits) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits);
     profiler.computeProfile(path, 15.0, 0.0, 0.0, 30);
 
     auto source = profiler.analyticalSource();
@@ -704,7 +704,7 @@ TEST(AnalyticalConstraintSatisfaction, VelocityWithinLimits) {
 TEST(AnalyticalConstraintSatisfaction, AccelerationWithinLimits) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits);
     profiler.computeProfile(path, 15.0, 0.0, 0.0, 30);
 
     auto source = profiler.analyticalSource();
@@ -728,7 +728,7 @@ TEST(AnalyticalConstraintSatisfaction, AccelerationWithinLimits) {
 TEST(AnalyticalConsistency, SSRHybridPositionAgree) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits, true, 1e-6);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits, true, 1e-6);
     profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
 
     auto ssr = profiler.ssrSource();
@@ -751,7 +751,7 @@ TEST(AnalyticalConsistency, SSRHybridPositionAgree) {
 TEST(AnalyticalConsistency, SSRHybridVelocityAgree) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits, true, 1e-6);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits, true, 1e-6);
     profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
 
     auto ssr = profiler.ssrSource();
@@ -781,7 +781,7 @@ TEST(AnalyticalCornerPath, BuildsAndEvaluates) {
     ASSERT_GT(path.numSegments(), 0u);
 
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits);
     auto profile = profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
 
     ASSERT_GT(profile->points().size(), 0u);
@@ -791,7 +791,7 @@ TEST(AnalyticalCornerPath, BuildsAndEvaluates) {
 TEST(AnalyticalCornerPath, PositionContinuity) {
     auto path = makeCornerPath2D();
     auto limits = makeLimits2D();
-    AnalyticalTOPPRA<2, double> profiler(limits);
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits);
     profiler.computeProfile(path, 20.0, 0.0, 0.0, 30);
 
     auto source = profiler.analyticalSource();
@@ -876,7 +876,7 @@ TEST(AnalyticalCustomProfiler, BuilderAcceptsCustomProfiler) {
         Vec<2, double>{0.0, 0.0}, Vec<2, double>{10.0, 0.0}, 100.0));
 
     auto limits = makeLimits2D();
-    auto profiler = std::make_unique<AnalyticalTOPPRA<2, double>>(
+    auto profiler = std::make_unique<AnalyticalJerkLimitedTOPPRA<2, double>>(
         limits, true, 1e-8);
 
     MotionPlanBuilder<2, double> builder(std::move(profiler), limits);

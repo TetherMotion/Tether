@@ -7,21 +7,24 @@ their trade-offs, and when to choose each one.
 
 ## Overview
 
-Tether provides four velocity profilers, all implementing the
+Tether provides six velocity profilers, all implementing the
 `VelocityProfiler<Dim, T>` interface:
 
-| Profiler | `ProfilerType` | Jerk-limited | Time-optimal | Accel continuity |
-|---|---|---|---|---|
-| `ParetoTimeEnergyOptimalVelocityPlanner` | `ParetoTimeEnergy` (default) | Yes | Configurable | Yes |
-| `BasicTOPPRA` | `ToppraBasic` | No | Yes | No (bang-bang) |
-| `JerkConstrainedTOPPRA` | `ToppraJerkConstrained` | Yes | Approx. (subject to jerk + grid) | Yes |
-| `SCurveVelocityProfiler` | `SCurve` | Yes | No | Yes |
+| Profiler | `ProfilerType` | Highest represented derivative | Optimisation contract |
+|---|---|---|---|
+| `ParetoTimeEnergyOptimalVelocityPlanner` | `ParetoTimeEnergy` | Snap | Deterministic feasible-family time/energy search |
+| `BasicTOPPRA` | `ToppraBasic` | Acceleration | Discrete second-order TOPP-RA |
+| `AnalyticalTOPPRA` | `AnalyticalTOPPRA` | Acceleration | Explicit no-jerk second-order profile |
+| `JerkConstrainedTOPPRA` | `ToppraJerkConstrained` | Jerk | Sampled third-order TOPP-RA approximation |
+| `AnalyticalJerkLimitedTOPPRA` | `AnalyticalJerkLimitedTOPPRA` | Jerk | Analytical/SSR third-order profile |
+| `SCurveVelocityProfiler` | `SCurve` | Jerk | Per-piece S-curve |
 
 > **Default:** `ParetoTimeEnergy` is the default profiler used by
 > `MotionPlanBuilder` and `MotionDispatcher` when no profiler type is
-> specified. It recovers time-optimal behavior when `w_a = 0` and smoothly
-> trades time for energy as `w_a` increases. See
-> `docs/motion/ParetoTimeEnergyOptimal.md` for the full derivation.
+> specified. It constructs an exact fourth-order trajectory from a
+> deterministic conservative candidate family. It is not a proof of global
+> Pareto optimality on arbitrary varying constraint walls. See
+> `docs/motion/ParetoTimeEnergyOptimal.md` for its precise contract.
 
 > **Note (WI-8):** `JerkConstrainedTOPPRA` was rewritten to carry
 > acceleration as state in both passes (Option B). The total time is now
@@ -30,10 +33,11 @@ Tether provides four velocity profilers, all implementing the
 > cost). See `docs/motion/ToppraDerivation.md` (T.5b, T.6) for the
 > derivation.
 
-All three produce a `VelocityProfile<T>` — a tabulated v(s) profile with
-per-point velocity, acceleration, jerk, and time. `MotionPlan` consumes
-this profile directly; it does not perform post-hoc smoothing or
-finite-difference estimation.
+All profilers produce a `VelocityProfile`. The optional jerk/snap fields must
+only be consumed when `hasJerk()`/`hasSnap()` says they are represented.
+Second-order profiles deliberately have no physical jerk at acceleration
+switches, even though the compatibility point structure stores a numeric field.
+`MotionPlan` consumes only represented derivatives.
 
 ---
 

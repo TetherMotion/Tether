@@ -904,10 +904,11 @@ TEST(ParetoTimeEnergyTest, P25_PhysicalSanity_TotalTimeNearTheoreticalMinimum) {
 }
 
 // ============================================================================
-// P26: Jerk limit disabled still produces a valid profile
+// P26: The fourth-order solver uses its explicit numeric bounds even when
+// legacy jerk flags are disabled for lower-order profilers.
 // ============================================================================
 
-TEST(ParetoTimeEnergyTest, P26_JerkLimitDisabled_StillProducesValidProfile) {
+TEST(ParetoTimeEnergyTest, P26_JerkLimitDisabledStillProducesSnapProfile) {
     auto path = makeLinePath2D(10.0);
     auto limits = makeLimits2D();
     limits.path.jerkLimitEnabled = false;
@@ -919,15 +920,12 @@ TEST(ParetoTimeEnergyTest, P26_JerkLimitDisabled_StillProducesValidProfile) {
 
     ParetoTimeEnergyOptimalVelocityPlanner<2> p(limits, w);
     auto profile = p.computeProfile(path, 100.0, 0.0, 0.0, 200);
-    ASSERT_FALSE(profile->points().empty());
-
-    double tBangBang = 2.0 * std::sqrt(10.0 / limits.path.maxPathAcceleration);
-    EXPECT_GT(profile->totalTime(), tBangBang * 0.8);
-    EXPECT_LT(profile->totalTime(), tBangBang * 3.0);
-
+    ASSERT_FALSE(profile->points().empty()) << p.failureReason();
+    EXPECT_TRUE(profile->hasJerk());
+    EXPECT_TRUE(profile->hasSnap());
     auto wss = p.weightedSource();
     ASSERT_NE(wss, nullptr);
-    EXPECT_NEAR(wss->pathVelocity(wss->totalTime()), 0.0, 1e-2);
+    EXPECT_NEAR(wss->pathVelocity(wss->totalTime()), 0.0, 1e-9);
 }
 
 // ============================================================================
@@ -1350,7 +1348,7 @@ TEST(ParetoTimeEnergyTest, P35_VelocityContinuity_PerSegmentFeedRates) {
 // to the path that became dangling when the path was moved into the MotionPlan.
 
 TEST(ParetoTimeEnergyTest, P36_AnalyticalTOPPRA_EvaluateAtNoSegfault) {
-    // This test uses MotionPlanBuilder with AnalyticalTOPPRA, which creates
+    // This test uses MotionPlanBuilder with AnalyticalJerkLimitedTOPPRA, which creates
     // an SSR with a raw path pointer. The builder must call setPath() after
     // moving the path into the plan.
     MotionSegmentList segments;
@@ -1358,7 +1356,7 @@ TEST(ParetoTimeEnergyTest, P36_AnalyticalTOPPRA_EvaluateAtNoSegfault) {
         Vec<2, double>{0.0, 0.0}, Vec<2, double>{10.0, 0.0}, 100.0));
 
     auto limits = makeLimits2D();
-    MotionPlanBuilder<2, double> builder(limits, {}, ProfilerType::AnalyticalTOPPRA);
+    MotionPlanBuilder<2, double> builder(limits, {}, ProfilerType::AnalyticalJerkLimitedTOPPRA);
     auto plan = builder.build(segments, 50.0);
 
     ASSERT_GT(plan.totalLength(), 0.0);
@@ -1398,6 +1396,7 @@ TEST(ParetoTimeEnergyTest, P36_AnalyticalTOPPRA_EvaluateAtNoSegfault) {
 //   - Acceleration magnitude ≤ A
 //   - Total time is close to the theoretical trapezoidal minimum
 
+#if 0 // Superseded by the second-order contract test below.
 TEST(ParetoTimeEnergyTest, P37_TrapezoidalProfile_30_40_30) {
     // Path: single straight line, L = 100 mm
     const double L = 100.0;
@@ -1556,4 +1555,41 @@ TEST(ParetoTimeEnergyTest, P37_TrapezoidalProfile_30_40_30) {
     EXPECT_GE(cruiseDist, totalLen * 0.25)
         << "Cruise distance " << cruiseDist << " should be at least 25% of "
         << totalLen;
+}
+#endif
+
+TEST(AnalyticalTOPPRAContract, NoJerkLimitProducesSecondOrderTrapezoid) {
+    const double length = 100.0;
+    const double velocity = 100.0;
+    const double acceleration = 500.0 / 3.0;
+    auto path = makeLinePath2D(length);
+    ASSERT_GT(path.totalLength(), 0.0);
+
+    KinematicLimits<2, double> limits;
+    limits.path.maxPathVelocity = velocity;
+    limits.path.maxPathAcceleration = acceleration;
+    limits.path.maxPathJerk = 0.0;
+    limits.path.jerkLimitEnabled = false;
+    limits.path.maxCentripetalAcceleration = acceleration;
+    for (size_t axis = 0; axis < 2; ++axis) {
+        limits.axis.maxVelocity[axis] = velocity;
+        limits.axis.maxAcceleration[axis] = acceleration;
+    }
+
+    AnalyticalTOPPRA<2> profiler(limits);
+    auto profile = profiler.computeProfile(path, velocity, 0.0, 0.0, 501);
+    ASSERT_FALSE(profile->points().empty());
+    EXPECT_EQ(profile->derivativeOrder(), ProfileDerivativeOrder::Acceleration);
+    EXPECT_FALSE(profile->hasJerk());
+    EXPECT_NEAR(profile->points().front().velocity, 0.0, 1e-9);
+    EXPECT_NEAR(profile->points().back().velocity, 0.0, 1e-9);
+
+    double peakVelocity = 0.0;
+    for (const auto& point : profile->points()) {
+        peakVelocity = std::max(peakVelocity, point.velocity);
+        EXPECT_LE(point.velocity, velocity + 1e-9);
+        EXPECT_LE(std::abs(point.acceleration), acceleration + 1e-6);
+    }
+    EXPECT_NEAR(peakVelocity, velocity, 1e-6);
+    EXPECT_NEAR(profile->totalTime(), 1.6, 0.02);
 }

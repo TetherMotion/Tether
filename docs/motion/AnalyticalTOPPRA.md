@@ -1,5 +1,20 @@
 # Analytical TOPPRA-Equivalent for NURBS Chain Inputs
 
+> **Profiler selection contract.** The public API deliberately separates two
+> different orders of motion model:
+>
+> - `AnalyticalTOPPRA` is the no-jerk-limit, second-order profile. It exposes
+>   velocity and acceleration only; a value in a compatibility `jerk` field
+>   must not be interpreted as a physical jerk (`hasJerk()` is false).
+> - `AnalyticalJerkLimitedTOPPRA` is the third-order, jerk-constrained
+>   implementation described by the SSR material below. It requires a
+>   positive enabled path jerk limit and exposes meaningful jerk samples.
+>
+> The historical filename `AnalyticalTOPPRA.hpp` remains as a compatibility
+> include for the jerk-limited implementation; new code should include the
+> explicit `AnalyticalJerkLimitedTOPPRA.hpp` header when requesting that
+> model.
+
 This document provides the complete mathematical specification, algorithmic
 description, and design rationale for the analytical time-optimal
 path-following controller with jerk constraints, operating on NURBS curve
@@ -560,7 +575,7 @@ v_{\text{lim}}\}$ is the minimum at each sample.
 
 ### 7.1 VelocityProfiler Interface
 
-The `AnalyticalTOPPRA` class implements the standard
+The `AnalyticalJerkLimitedTOPPRA` class implements the standard
 `VelocityProfiler<Dim, T>` interface. Its `computeProfile()` method:
 
 1. Solves the time-optimal problem → produces SSR (switching arcs)
@@ -581,7 +596,7 @@ This means **all existing downstream consumers** that expect a sampled
 - When absent, it falls back to the tabulated profile (original behavior).
 
 The `MotionPlanBuilder` automatically extracts the analytical source from
-an `AnalyticalTOPPRA` profiler and passes it to the `MotionPlan`.
+an `AnalyticalJerkLimitedTOPPRA` profiler and passes it to the `MotionPlan`.
 
 ### 7.3 Sampling Old vs New Data Structures
 
@@ -590,24 +605,25 @@ unchanged — the analytical profiler produces a compatible tabulated profile
 by sampling the SSR.
 
 Consumers that want exact sampling can access the `TrajectorySampler` via
-`AnalyticalTOPPRA::analyticalSource()`, which wraps either the SSR or
+`AnalyticalJerkLimitedTOPPRA::analyticalSource()`, which wraps either the SSR or
 Hybrid representation and provides `position(t)`, `velocity(t)`,
 `acceleration(t)`.
 
 ### 7.4 ProfilerType Enum
 
-The `ProfilerType` enum has been extended with `AnalyticalTOPPRA`. The
+The `ProfilerType` enum provides `AnalyticalJerkLimitedTOPPRA`. The
 `MotionPlanBuilder` can be configured to use the analytical profiler:
 
 ```cpp
-MotionPlanBuilder3D builder(limits, config, ProfilerType::AnalyticalTOPPRA);
+MotionPlanBuilder3D builder(limits, config,
+                            ProfilerType::AnalyticalJerkLimitedTOPPRA);
 auto plan = builder.build(segments, feedRate);
 ```
 
 Or with a custom-configured instance:
 
 ```cpp
-auto profiler = std::make_unique<analytical::AnalyticalTOPPRA<3, double>>(
+auto profiler = std::make_unique<analytical::AnalyticalJerkLimitedTOPPRA<3, double>>(
     limits, /*buildHybrid=*/true, /*hybridTolerance=*/1e-10);
 MotionPlanBuilder3D builder(std::move(profiler), limits);
 auto plan = builder.build(segments, feedRate);
@@ -627,7 +643,8 @@ include/tether/motion_planner/analytical/
 ├── SwitchingStructureRepresentation.hpp  # Class A (SSR) — exact, procedural
 ├── HybridMonotoneRepresentation.hpp      # Class B (Hybrid) — LGL + Padé + cert
 ├── TrajectorySampler.hpp                 # Unified interface (wraps SSR or Hybrid)
-└── AnalyticalTOPPRA.hpp                  # Profiler + solver (implements VelocityProfiler)
+├── AnalyticalTOPPRA.hpp                  # Compatibility header + no-jerk wrapper
+└── AnalyticalJerkLimitedTOPPRA.hpp       # Explicit third-order public include
 ```
 
 ### Class Relationships
@@ -636,7 +653,7 @@ include/tether/motion_planner/analytical/
 VelocityProfiler<Dim,T>  (abstract interface)
        ▲
        │
-AnalyticalTOPPRA<Dim,T>  (solver + sampler)
+AnalyticalJerkLimitedTOPPRA<Dim,T>  (solver + sampler)
        │
        ├──► SwitchingStructureRepresentation<Dim,T>  (Class A, SSR)
        │         │
@@ -678,7 +695,8 @@ for (int i = 0; i < 3; ++i) {
 limits.axis.jerkLimitEnabled = true;
 
 // 2. Build motion plan with analytical profiler
-MotionPlanBuilder3D builder(limits, {}, ProfilerType::AnalyticalTOPPRA);
+MotionPlanBuilder3D builder(limits, {},
+                            ProfilerType::AnalyticalJerkLimitedTOPPRA);
 auto plan = builder.build(segments, 50.0);
 
 // 3. Evaluate at any time (uses analytical source automatically)
@@ -699,20 +717,15 @@ if (source) {
 
 ## Part X: Comparison with Existing Profilers
 
-| Feature | BasicTOPPRA | JerkConstrainedTOPPRA | AnalyticalTOPPRA |
-|---------|------------|----------------------|-----------------|
-| Order | 2nd (bang-bang) | 3rd (jerk-limited) | 3rd (jerk-optimal) |
-| Time-optimal | Yes | Yes (subject to jerk) | Yes (subject to jerk) |
-| Jerk bounded | No | Yes | Yes |
-| Accel continuous | No | Yes | Yes |
-| Representation | Tabulated | Tabulated | SSR (exact) + Hybrid (certified) |
-| Sampling | Linear interp | Linear interp | ODE integration / spectral |
-| Error bounds | No | No | Yes (Hybrid) |
-| Arc-length dynamics | Simplified | Simplified | Full ODE integration |
-| Constraint eval | Per-sample | Per-sample | Per-step (recomputed) |
-| NURBS derivatives | Order 2 | Order 2 | Order 3 (jounce) |
+| Feature | BasicTOPPRA / AnalyticalTOPPRA | JerkConstrainedTOPPRA | AnalyticalJerkLimitedTOPPRA |
+|---------|---------------------------------|----------------------|--------------------------------|
+| Order | 2nd (no physical jerk) | 3rd sampled approximation | 3rd SSR/Hybrid representation |
+| Jerk bounded | Not represented | Intended path jerk bound | Positive enabled path jerk limit required |
+| Representation | Tabulated | Tabulated | SSR + Hybrid |
+| Sampling | Linear interpolation | Linear interpolation | ODE integration / spectral |
+| Geometry derivatives | Order 2 | Order 2 | Order 3 (jounce) |
 
-The AnalyticalTOPPRA profiler is the most accurate and complete
+The AnalyticalJerkLimitedTOPPRA profiler is the third-order analytical
 implementation, at the cost of higher computational complexity. It is
 recommended for applications requiring:
 - Certified error bounds
