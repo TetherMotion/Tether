@@ -19,10 +19,10 @@ TEST(EdgeRaw, BusyThenSuccess_ReadDWordSucceedsAfterRetries) {
 
     master.setApwrTestCallback([=](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms; (void)len;
-        if (ado == EC_REG_EEPCTL && data && len >= 4) {
-            uint16_t addr_le = 0;
-            std::memcpy(&addr_le, reinterpret_cast<const uint8_t*>(data) + 2, sizeof(addr_le));
-            *last_cmd_addr = addr_le;
+        if (ado == EC_REG_EEPCTL && data && len >= 2) {
+            uint16_t eepctl_le = 0;
+            std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
+            *last_cmd_addr = static_cast<uint16_t>(eepctl_le & 0x00FFu);
         }
         return true;
     });
@@ -143,9 +143,9 @@ TEST(EdgeRaw, MisalignedReadBytes_CrossesDWordBoundaryCorrectly) {
 
     master.setApwrTestCallback([=](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms; (void)len;
-        if (ado == EC_REG_EEPCTL && data && len >= 4) {
-            uint16_t addr_le = 0; std::memcpy(&addr_le, reinterpret_cast<const uint8_t*>(data) + 2, sizeof(addr_le));
-            *last_cmd_addr = addr_le;
+        if (ado == EC_REG_EEPCTL && data && len >= 2) {
+            uint16_t eepctl_le = 0; std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
+            *last_cmd_addr = static_cast<uint16_t>(eepctl_le & 0x00FFu);
         }
         return true;
     });
@@ -183,9 +183,9 @@ TEST(EdgeRaw, ReadWordsMultiple_ReadsMultipleWordsCorrectly) {
 
     master.setApwrTestCallback([=](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms; (void)len;
-        if (ado == EC_REG_EEPCTL && data && len >= 4) {
-            uint16_t addr_le = 0; std::memcpy(&addr_le, reinterpret_cast<const uint8_t*>(data) + 2, sizeof(addr_le));
-            *last_cmd_addr = addr_le;
+        if (ado == EC_REG_EEPCTL && data && len >= 2) {
+            uint16_t eepctl_le = 0; std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
+            *last_cmd_addr = static_cast<uint16_t>(eepctl_le & 0x00FFu);
         }
         return true;
     });

@@ -123,14 +123,17 @@ bool SDOTransactionBase::checkStaleCounter(Master& master, uint16_t adp,
                                            int& staleRetryCount,
                                            uint16_t index_, uint8_t sub_,
                                            const char* phaseLabel) {
-    TETHER_LOGW(TAG, "Slave %u: Stale mailbox response (%s): cnt=%u expected=%u (index=0x%04X:%u) — syncing counter and re-sending",
+    TETHER_LOGW(TAG, "Slave %u: Stale mailbox response (%s): cnt=%u expected=%u (index=0x%04X:%u) — clearing and re-sending",
                 slaveIndexFromADP(adp), phaseLabel, hdr.cnt, inOutExpectedCnt, index_, sub_);
-    // Sync the master's counter to the slave's counter.  The slave increments
-    // its counter after each response, so the next value it expects is one
-    // past the cnt we just saw.  This updates both the persistent counter
-    // (*inoutMbxCnt) and the counter byte embedded in the mbxbuf.
-    SDOMailboxIO::syncMbxCounter(hdr.cnt, inoutMbxCnt, mbxbuf);
-    inOutExpectedCnt = SDOMailboxIO::nextMbxCnt(hdr.cnt);
+    // Do NOT sync the counter here.  A stale response (wrong cnt or wrong
+    // index/sub) is typically a leftover from a previous session that was
+    // not drained.  The slave's counter has been reset on INIT transition,
+    // so the master's counter is correct — we just need to drain the stale
+    // response and retry with the SAME counter.
+    // Counter syncing on stale responses causes regressions on slaves that
+    // DO reset their counter (e.g. Synapticon ESC211): the master syncs to
+    // the stale counter, which is wrong, and all subsequent requests fail.
+    (void)inoutMbxCnt;  // Unused — no counter sync
     if (++staleRetryCount <= MAX_STALE_RETRIES) {
         if (!sendAndWait(master, adp, mbxWriteAddr, mbxWriteLen,
                          mbxReadAddr, mbxReadLen, mbxbuf, 500,

@@ -15,12 +15,13 @@ TEST(SIIReaderTests, ReadRaw32AndReadWordEvenOdd) {
     EtherCAT::Master master;
 
     master.setApwrTestCallback([&](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms){
-        // If writing to EEPCTL (0x0502), extract the address from the command struct
-        if (ado == 0x0502 && data && len >= 4) {
-            // EepromCmd: uint16_t comm_le; uint16_t addr_le; uint16_t d2_le;
-            uint16_t addr_le = 0;
-            std::memcpy(&addr_le, reinterpret_cast<const uint8_t*>(data) + 2, sizeof(addr_le));
-            last_cmd_addr = addr_le; // little-endian on test host is identity
+        // EEPCTL (0x0502) is a 2-byte register: bits 0-7 = word address, bits 8-15 = command.
+        // The read command is 0x0100 | word_address.
+        if (ado == 0x0502 && data && len >= 2) {
+            uint16_t eepctl_le = 0;
+            std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
+            // Extract the word address from the low byte (little-endian on test host)
+            last_cmd_addr = static_cast<uint16_t>(eepctl_le & 0x00FFu);
             return true;
         }
         return true;
@@ -74,10 +75,11 @@ TEST(SIIParserTests, ParseIdentity) {
     EtherCAT::Master master;
 
     master.setApwrTestCallback([&](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms){
-        if (ado == 0x0502 && data && len >= 4) {
-            uint16_t addr_le = 0;
-            std::memcpy(&addr_le, reinterpret_cast<const uint8_t*>(data) + 2, sizeof(addr_le));
-            last_cmd_addr = addr_le;
+        // EEPCTL 2-byte protocol: low byte = word address, high byte = command
+        if (ado == 0x0502 && data && len >= 2) {
+            uint16_t eepctl_le = 0;
+            std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
+            last_cmd_addr = static_cast<uint16_t>(eepctl_le & 0x00FFu);
             return true;
         }
         return true;
@@ -146,10 +148,11 @@ TEST(SIIReaderTests, ReadWordsAndBytes) {
     EtherCAT::Master master;
 
     master.setApwrTestCallback([&](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms){
-        if (ado == 0x0502 && data && len >= 4) {
-            uint16_t addr_le = 0;
-            std::memcpy(&addr_le, reinterpret_cast<const uint8_t*>(data) + 2, sizeof(addr_le));
-            last_cmd_addr = addr_le;
+        // EEPCTL 2-byte protocol: low byte = word address, high byte = command
+        if (ado == 0x0502 && data && len >= 2) {
+            uint16_t eepctl_le = 0;
+            std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
+            last_cmd_addr = static_cast<uint16_t>(eepctl_le & 0x00FFu);
             return true;
         }
         return true;

@@ -42,11 +42,11 @@ public:
                            const void* data, uint16_t len, unsigned int ms) {
             (void)adp; (void)ms;
             // EEPCTL write command sets address for following EEPDAT reads
-            if (ado == EC_REG_EEPCTL && data && len >= 4) {
-                // The command word contains addr_le at offset 2 in tests
-                uint16_t addr_le = 0;
-                std::memcpy(&addr_le, reinterpret_cast<const uint8_t*>(data) + 2, sizeof(addr_le));
-                last_cmd_addr_ = addr_le;
+            if (ado == EC_REG_EEPCTL && data && len >= 2) {
+                // 2-byte EEPCTL: low byte = word address, high byte = command
+                uint16_t eepctl_le = 0;
+                std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
+                last_cmd_addr_ = static_cast<uint16_t>(eepctl_le & 0x00FFu);
             }
             return !simulate_failure_;
         });

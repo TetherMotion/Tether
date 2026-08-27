@@ -60,14 +60,28 @@ bool SIIReader::waitNotBusy(uint16_t slave_index, uint16_t* out_status, uint32_t
     uint32_t iters = 0;
     const int64_t deadline_us = Tether::Platform::Clock::instance().getMicroseconds() + static_cast<int64_t>(m_timeout_ms) * 1000LL;
 
+    const bool dbg = m_master.debugFlags().eeprom &&
+                     m_master.debugFlags().eepromFilt.allows(slave_index);
+
     while (true) {
         if (Tether::Platform::Clock::instance().getMicroseconds() >= deadline_us) {
             if (out_poll_iters) *out_poll_iters = iters;
+            if (dbg) {
+                TETHER_LOGW(TAG, "EEPROM [slave %u]: waitNotBusy TIMEOUT after %u iters",
+                            slave_index, iters);
+            }
             return false;
         }
 
         uint16_t estat_le = 0;
-        if (m_master.readRegister(Master::slaveAddressFromADP(adpForSlave(slave_index)), EC_REG_EEPSTAT, estat_le, 100)) {
+        bool rd_ok = m_master.readRegister(
+            Master::slaveAddressFromADP(adpForSlave(slave_index)),
+            EC_REG_EEPSTAT, estat_le, 100);
+        if (iters == 0 && dbg) {
+            TETHER_LOGI(TAG, "EEPROM [slave %u]: waitNotBusy first readRegister(0x0502) ok=%d estat=0x%04X",
+                        slave_index, rd_ok, Raw::le16_to_host(estat_le));
+        }
+        if (rd_ok) {
             uint16_t estat = Raw::le16_to_host(estat_le);
             if (out_status) {
                 *out_status = estat;
@@ -85,50 +99,70 @@ bool SIIReader::waitNotBusy(uint16_t slave_index, uint16_t* out_status, uint32_t
 bool SIIReader::readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t* out) {
     if (out) *out = 0;
 
+    const bool dbg = m_master.debugFlags().eeprom &&
+                     m_master.debugFlags().eepromFilt.allows(slave_index);
+
     // Check the master-level per-slave cache before touching the bus.
     uint16_t lo = 0, hi = 0;
     const uint16_t wa = static_cast<uint16_t>(word_address & 0xFFFEu);
     if (m_master.getSIICachedWord(slave_index, wa, lo) &&
         m_master.getSIICachedWord(slave_index, static_cast<uint16_t>(wa + 1), hi)) {
         if (out) *out = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 16);
-        if (m_master.debugFlags().siiEeprom && m_master.debugFlags().siiEepromFilt.allows(slave_index)) {
-            TETHER_LOGD(TAG, "SII EEPROM [slave %u]: readRaw32 addr=0x%04X cache hit", slave_index, word_address);
+        if (dbg) {
+            TETHER_LOGD(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X cache hit", slave_index, word_address);
         }
         return true;
+    }
+
+    if (dbg) {
+        TETHER_LOGI(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X cache MISS — reading from bus", slave_index, word_address);
     }
 
     uint16_t estat = 0;
     uint32_t pre_iters = 0;
     if (!waitNotBusy(slave_index, &estat, &pre_iters)) {
-        if (m_master.debugFlags().siiEeprom && m_master.debugFlags().siiEepromFilt.allows(slave_index)) {
-            TETHER_LOGW(TAG, "SII EEPROM [slave %u]: readRaw32 addr=0x%04X pre-wait timed out (%u iters)",
+        if (dbg) {
+            TETHER_LOGW(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X pre-wait timed out (%u iters)",
                         slave_index, word_address, pre_iters);
         }
         return false;
     }
 
+    if (dbg) {
+        TETHER_LOGI(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X pre-wait OK estat=0x%04X iters=%u",
+                    slave_index, word_address, estat, pre_iters);
+    }
+
     // Clear errors if present
     if ((estat & EC_ESTAT_EMASK) != 0) {
+        if (dbg) {
+            TETHER_LOGI(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X clearing error flags estat=0x%04X",
+                        slave_index, word_address, estat);
+        }
         uint16_t nop_le = Raw::host_to_le16(EC_ECMD_NOP);
         m_master.writeRegister(Master::slaveAddressFromADP(adpForSlave(slave_index)), EC_REG_EEPCTL, nop_le, 200);
     }
 
     int nack_count = 0;
     do {
-        // EEPROM read command structure
-        struct __attribute__((packed)) EepromCmd {
-            uint16_t comm_le;
-            uint16_t addr_le;
-            uint16_t d2_le;
-        } cmd{};
+        // EEPROM read command: the ESC EEPCTL register (0x0502) is a single
+        // 2-byte register that combines the command (high byte) and the
+        // EEPROM word address (low byte).  Writing more than 2 bytes is
+        // rejected by some ESCs (e.g. Synapticon ESC211) with WKC=0.
+        //   Bits 0-7:  EEPROM word address (low byte)
+        //   Bits 8-15: EEPROM command (0x01 = READ)
+        const uint16_t eepctl_val = static_cast<uint16_t>(
+            EC_ECMD_READ | (word_address & 0x00FFu));
+        const uint16_t eepctl_le = Raw::host_to_le16(eepctl_val);
 
-        cmd.comm_le = Raw::host_to_le16(EC_ECMD_READ);
-        cmd.addr_le = Raw::host_to_le16(word_address);
-        cmd.d2_le = 0;
-
-        if (!m_master.writeRegister(Master::slaveAddressFromADP(adpForSlave(slave_index)), EC_REG_EEPCTL, cmd, 200)) {
-            if (m_master.debugFlags().siiEeprom && m_master.debugFlags().siiEepromFilt.allows(slave_index)) {
-                TETHER_LOGW(TAG, "SII EEPROM [slave %u]: readRaw32 addr=0x%04X writeRegister(EEPCTL) failed (nack=%d)",
+        if (dbg) {
+            TETHER_LOGI(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X writing EEPCTL=0x%04X (2 bytes)",
+                        slave_index, word_address, eepctl_val);
+        }
+        if (!m_master.writeRegister(Master::slaveAddressFromADP(adpForSlave(slave_index)),
+                                    EC_REG_EEPCTL, &eepctl_le, sizeof(eepctl_le), 200)) {
+            if (dbg) {
+                TETHER_LOGW(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X writeRegister(EEPCTL) FAILED (nack=%d)",
                             slave_index, word_address, nack_count);
             }
             return false;
@@ -137,25 +171,31 @@ bool SIIReader::readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t*
         estat = 0;
         uint32_t post_iters = 0;
         if (!waitNotBusy(slave_index, &estat, &post_iters)) {
-            if (m_master.debugFlags().siiEeprom && m_master.debugFlags().siiEepromFilt.allows(slave_index)) {
-                TETHER_LOGW(TAG, "SII EEPROM [slave %u]: readRaw32 addr=0x%04X post-wait timed out (%u iters, nack=%d)",
+            if (dbg) {
+                TETHER_LOGW(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X post-wait timed out (%u iters, nack=%d)",
                             slave_index, word_address, post_iters, nack_count);
             }
             return false;
         }
 
+        if (dbg) {
+            TETHER_LOGI(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X post-wait OK estat=0x%04X iters=%u",
+                        slave_index, word_address, estat, post_iters);
+        }
+
         if ((estat & EC_ESTAT_EMASK) != 0) {
             if ((estat & EC_ESTAT_NACK) != 0) {
                 nack_count++;
-                if (m_master.debugFlags().siiEeprom && m_master.debugFlags().siiEepromFilt.allows(slave_index)) {
-                    TETHER_LOGD(TAG, "SII EEPROM [slave %u]: readRaw32 addr=0x%04X NACK retry %d/3", slave_index, word_address, nack_count);
+                if (dbg) {
+                    TETHER_LOGD(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X NACK retry %d/3 estat=0x%04X",
+                                slave_index, word_address, nack_count, estat);
                 }
                 Tether::Platform::Clock::instance().delayMicroseconds(1000);
                 continue;
             }
             // Non-NACK error (CRC, loading, write error): log and fail
-            if (m_master.debugFlags().siiEeprom && m_master.debugFlags().siiEepromFilt.allows(slave_index)) {
-                TETHER_LOGW(TAG, "SII EEPROM [slave %u]: readRaw32 addr=0x%04X error status=0x%04X (crc=%d load=%d write=%d)",
+            if (dbg) {
+                TETHER_LOGW(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X error status=0x%04X (crc=%d load=%d write=%d)",
                             slave_index, word_address, estat,
                             (estat & EC_ESTAT_CRC_ERR) ? 1 : 0,
                             (estat & EC_ESTAT_LOAD_ERR) ? 1 : 0,
@@ -168,9 +208,12 @@ bool SIIReader::readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t*
         }
 
         uint32_t edat_le = 0;
+        if (dbg) {
+            TETHER_LOGI(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X reading EEPDAT", slave_index, word_address);
+        }
         if (!m_master.readRegister(Master::slaveAddressFromADP(adpForSlave(slave_index)), EC_REG_EEPDAT, edat_le, 200)) {
-            if (m_master.debugFlags().siiEeprom && m_master.debugFlags().siiEepromFilt.allows(slave_index)) {
-                TETHER_LOGW(TAG, "SII EEPROM [slave %u]: readRaw32 addr=0x%04X readRegister(EEPDAT) failed (nack=%d)",
+            if (dbg) {
+                TETHER_LOGW(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X readRegister(EEPDAT) FAILED (nack=%d)",
                             slave_index, word_address, nack_count);
             }
             return false;
@@ -182,16 +225,17 @@ bool SIIReader::readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t*
         // Populate the master-level cache so future readers hit it.
         m_master.setSIICachedWord(slave_index, wa, static_cast<uint16_t>(edat_le & 0xFFFF));
         m_master.setSIICachedWord(slave_index, static_cast<uint16_t>(wa + 1), static_cast<uint16_t>((edat_le >> 16) & 0xFFFF));
-        if (m_master.debugFlags().siiEeprom && m_master.debugFlags().siiEepromFilt.allows(slave_index)) {
-            TETHER_LOGD(TAG, "SII EEPROM [slave %u]: readRaw32 addr=0x%04X success pre=%u post=%u nack=%d",
-                        slave_index, word_address, pre_iters, post_iters, nack_count);
+        if (dbg) {
+            TETHER_LOGI(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X SUCCESS edat=0x%08X pre=%u post=%u nack=%d",
+                        slave_index, word_address, Raw::le32_to_host(edat_le), pre_iters, post_iters, nack_count);
         }
         return true;
 
     } while (nack_count > 0 && nack_count < 3);
 
-    if (m_master.debugFlags().siiEeprom && m_master.debugFlags().siiEepromFilt.allows(slave_index)) {
-        TETHER_LOGW(TAG, "SII EEPROM [slave %u]: readRaw32 addr=0x%04X failed after %d NACK retries", slave_index, word_address, nack_count);
+    if (dbg) {
+        TETHER_LOGW(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X failed after %d NACK retries",
+                    slave_index, word_address, nack_count);
     }
     return false;
 }

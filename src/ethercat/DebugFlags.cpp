@@ -59,6 +59,7 @@ bool EtherCATMasterDebugFlags::isEnabled(const std::string& name, uint16_t slave
     if (name == "rx-ethercat-packets") return rxPackets && rxPacketsFilt.allows(slave_index);
     if (name == "fmmu")              return fmmu && fmmuFilt.allows(slave_index);
     if (name == "sii-eeprom")        return siiEeprom && siiEepromFilt.allows(slave_index);
+    if (name == "eeprom")            return eeprom && eepromFilt.allows(slave_index);
     if (name == "coe-reads")         return coeReads && coeReadsFilt.allows(slave_index);
     if (name == "coe-writes")        return coeWrites && coeWritesFilt.allows(slave_index);
     if (name == "coe-rx-packets")    return coeRxPackets && coeRxPacketsFilt.allows(slave_index);
@@ -78,6 +79,7 @@ void EtherCATMasterDebugFlags::setFlag(const std::string& name, bool enabled) {
     else if (name == "rx-ethercat-packets") rxPackets = enabled;
     else if (name == "fmmu")         fmmu = enabled;
     else if (name == "sii-eeprom")   siiEeprom = enabled;
+    else if (name == "eeprom")       eeprom = enabled;
     else if (name == "coe-reads")    coeReads = enabled;
     else if (name == "coe-writes")   coeWrites = enabled;
     else if (name == "coe-rx-packets") coeRxPackets = enabled;
@@ -96,6 +98,7 @@ void EtherCATMasterDebugFlags::setFilter(const std::string& name, const SlaveFil
     else if (name == "rx-ethercat-packets") rxPacketsFilt = filter;
     else if (name == "fmmu")         fmmuFilt = filter;
     else if (name == "sii-eeprom")   siiEepromFilt = filter;
+    else if (name == "eeprom")       eepromFilt = filter;
     else if (name == "coe-reads")    coeReadsFilt = filter;
     else if (name == "coe-writes")   coeWritesFilt = filter;
     else if (name == "coe-rx-packets") coeRxPacketsFilt = filter;
@@ -169,6 +172,7 @@ void EtherCATMasterDebugFlags::resizeFilters(uint16_t slave_count) {
     rxPacketsFilt.resize(slave_count);
     fmmuFilt.resize(slave_count);
     siiEepromFilt.resize(slave_count);
+    eepromFilt.resize(slave_count);
     coeReadsFilt.resize(slave_count);
     coeWritesFilt.resize(slave_count);
     coeRxPacketsFilt.resize(slave_count);
@@ -203,6 +207,8 @@ const std::vector<DebugFlagInfo>& allDebugFlags() {
          "Log FMMU register writes during configuration"},
         {"sii-eeprom",
          "Log SII / EEPROM access details"},
+        {"eeprom",
+         "Log low-level EEPROM register reads/writes (EEPCTL/EEPSTAT/EEPDAT)"},
         {"coe-reads",
          "Log CoE (SDO) read operations"},
         {"coe-writes",

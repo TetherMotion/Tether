@@ -45,16 +45,13 @@ bool ec_aprd(void* eth_handle, const uint8_t* src_mac, uint16_t adp, uint16_t re
 
 bool ec_apwr(void* eth_handle, const uint8_t* src_mac, uint16_t adp, uint16_t reg, const void* data, uint16_t len, unsigned int timeout) {
     (void)eth_handle; (void)src_mac; (void)adp; (void)timeout;
-    // Writing EEPCTL with EepromCmd or NOP - capture requested addr
+    // Writing EEPCTL (2-byte protocol: low byte = word address, high byte = command)
     if (reg == EC_REG_EEPCTL) {
         if (len >= sizeof(uint16_t)) {
-            // EepromCmd layout: uint16_t comm_le; uint16_t addr_le; uint16_t d2_le;
-            if (len >= 6) {
-                uint16_t addr_le = 0;
-                std::memcpy(&addr_le, reinterpret_cast<const uint8_t*>(data) + sizeof(uint16_t), sizeof(uint16_t));
-                s_last_requested_word = addr_le; // little-endian
-                return true;
-            }
+            uint16_t eepctl_le = 0;
+            std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
+            // Extract word address from low byte (little-endian on test host)
+            s_last_requested_word = static_cast<uint16_t>(eepctl_le & 0x00FFu);
             return true;
         }
         return false;

@@ -22,14 +22,13 @@ TEST(RawEeprom, ReadRaw32_SendsReadCommandAndReturnsData) {
     master.setApwrTestCallback([&](uint16_t adp, uint16_t ado,
                     const void* data, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms; (void)len;
-        if (ado == EC_REG_EEPCTL && data != nullptr && len >= 4) {
-            // EepromCmd { uint16_t comm_le; uint16_t addr_le; uint16_t d2_le; }
-            const uint8_t* b = reinterpret_cast<const uint8_t*>(data);
-            uint16_t comm_le = *reinterpret_cast<const uint16_t*>(b);
-            uint16_t addr_le = *reinterpret_cast<const uint16_t*>(b + 2);
-            // Host is little-endian on tests, so little-endian fields are direct
-            captured_comm = comm_le;
-            captured_addr = addr_le;
+        // 2-byte EEPCTL: low byte = word address, high byte = command
+        if (ado == EC_REG_EEPCTL && data != nullptr && len >= 2) {
+            uint16_t eepctl_le = 0;
+            std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
+            // Host is little-endian on tests, so eepctl_le is the raw value
+            captured_comm = static_cast<uint16_t>(eepctl_le & 0xFF00u); // command in high byte
+            captured_addr = static_cast<uint16_t>(eepctl_le & 0x00FFu); // address in low byte
             apwr_called = true;
         }
         return true;
