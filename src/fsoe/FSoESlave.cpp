@@ -734,15 +734,15 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
 
     const bool is_reset_frame = (data[0] == Command::Reset);
     const bool is_session_frame = (data[0] == Command::Session);
-    // Reset AND Session frames reset the CRC chain on the RX side:
-    // start_crc=0, seq=initial.  The master's Session TX uses state-
-    // transition reset (start_crc=0, seq=initial), so the slave's RX must
-    // match.  Connection, Parameter, and Data frames use cross-direction
-    // inheritance (start_crc=last_tx_crc0_, seq=rx_seq_no_).
-    // NOTE: The slave's TX (buildSessionResponse) uses cross-direction
-    // inheritance, NOT state-transition reset — the master's RX validates
-    // the slave's Session response using cross-direction inheritance.
-    const bool is_rx_state_transition = is_reset_frame || is_session_frame;
+    // Reset frames always reset the CRC chain on RX: start_crc=0, seq=initial.
+    // Session frames: only the FIRST Session RX uses state-transition reset
+    // (start_crc=0, seq=initial).  Subsequent Session RXs (1-octet safety
+    // data, high byte) use cross-direction inheritance (start_crc=last_tx_crc0_,
+    // seq=rx_seq_no_), chaining from the slave's last TX CRC0.
+    // Connection, Parameter, and Data frames always use cross-direction.
+    const bool session_state_transition =
+        is_session_frame && !sessionFirstRxDone_;
+    const bool is_rx_state_transition = is_reset_frame || session_state_transition;
     const uint16_t parse_start_crc = is_rx_state_transition ? 0 : last_tx_crc0_;
     const uint16_t parse_seq_no = is_rx_state_transition
         ? config_.initialSeqNo : rx_seq_no_;
@@ -956,6 +956,7 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
         if (sessionId_ == 0) sessionId_ = 1;
         sessionOctetIdx_ = 0;
         sessionOctetAdvancePending_ = false;
+        sessionFirstRxDone_ = false;
         // Reset Connection state multi-cycle transfer.
         connectionRxIdx_ = 0;
         connectionTxIdx_ = 0;
@@ -985,19 +986,20 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
     }
 
     // State transition:
-    // - On Reset command: stay in Reset state.  The slave sends a Reset
-    //   response (cmd=0x2A) via buildResetResponse.  The transition to
-    //   Session happens when the slave receives the master's Session TX.
-    //   This matches the real Synapticon slave behavior (the physical
-    //   device sends cmd=0x2A for the Reset response) and ensures the
-    //   command byte changes (0x2A → 0x4E) for PDO change-detection.
+    // - On Reset command: transition to Reset state (if not already there).
+    //   The slave sends a Reset response (cmd=0x2A) via buildResetResponse.
+    //   The transition to Session happens when the slave receives the
+    //   master's Session TX.  This matches the real Synapticon slave
+    //   behavior (the physical device sends cmd=0x2A for the Reset
+    //   response) and ensures the command byte changes (0x2A → 0x4E)
+    //   for PDO change-detection.
     // - On Session command: transition to Session state.  The slave sends
     //   a Session response (buildSessionResponse) with its own Session ID.
     if (cmd == Command::Reset) {
-        // Stay in Reset — buildResetResponse will send cmd=0x2A.
-        // Do NOT transition to Session here.
+        transitionTo(ConnectionState::Reset);
     } else if (cmd == Command::Session) {
         transitionTo(ConnectionState::Session);
+        sessionFirstRxDone_ = true;
     }
 
     statistics_.onSessionReset();

@@ -517,6 +517,7 @@ private:
     // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
     uint8_t sessionOctetIdx_ = 0;
     bool sessionOctetAdvancePending_ = false;  ///< Advance sessionOctetIdx_ after next buildSessionResponse
+    bool sessionFirstRxDone_ = false;  ///< True after first Session RX (state-transition reset only on first)
 
     // Connection state multi-cycle transfer.
     // ETG.5100 S (D) V1.2.0, §8.2.2.4, Table 15:

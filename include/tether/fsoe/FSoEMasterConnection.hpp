@@ -424,6 +424,13 @@ private:
     // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
     uint8_t session_octet_idx_ = 0;
 
+    // True after the first Session TX frame has been built.  The first
+    // Session TX uses state-transition CRC reset (start_crc=0, seq=initial);
+    // subsequent Session TXs use cross-direction inheritance (chaining from
+    // the slave's last TX CRC0).  This is needed for 1-octet safety data,
+    // where the Session ID is transferred in two successive PDUs.
+    bool session_first_tx_done_ = false;
+
     // Connection state multi-cycle transfer.
     // ETG.5100 S (D) V1.2.0, §8.2.2.4, Table 15:
     // The Connection state transfers 4 bytes (2-byte Connection ID +

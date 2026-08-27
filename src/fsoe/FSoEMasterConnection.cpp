@@ -178,6 +178,7 @@ bool FSoEMasterConnection::resetConnection()
     status_.fail_safe_active = false;
     status_.slave_session_id = 0;
     session_octet_idx_ = 0;
+    session_first_tx_done_ = false;
     connection_tx_idx_ = 0;
     connection_rx_idx_ = 0;
     memset(connection_tx_buf_, 0, sizeof(connection_tx_buf_));
@@ -224,6 +225,7 @@ bool FSoEMasterConnection::requestSessionReset()
         status_.session_id = 1;
     }
     session_octet_idx_ = 0;
+    session_first_tx_done_ = false;
 
     transitionTo(ConnectionState::Session);
     return true;
@@ -1575,17 +1577,26 @@ size_t FSoEMasterConnection::buildSessionResetFrame(uint8_t* data, size_t max_le
     size_t needed = CRC::fsoeFrameSize(config_.output_size);
     if (max_len < needed) return 0;
     uint16_t seq_used = 0;
-    // CRC inheritance for the Session frame: the Synapticon slave resets
-    // the CRC chain AND the seq number at the Session state transition.
-    // start_crc=0, seq=initial_seq_no.
+    // CRC inheritance for the Session frame:
+    // - First Session TX: state-transition reset (start_crc=0, seq=initial).
+    //   The Synapticon slave resets the CRC chain AND seq at the Session
+    //   state transition.
+    // - Subsequent Session TXs (1-octet safety data, high byte): cross-
+    //   direction inheritance (start_crc=last_rx_crc0_, seq=tx_seq_no_).
+    //   The CRC chain continues from the slave's last TX (which the master
+    //   received and validated).  The seq continues from the master's own
+    //   tx_seq_no_ counter (which was incremented after the first TX).
+    const bool first_tx = !session_first_tx_done_;
+    const uint16_t start_crc = first_tx ? 0 : last_rx_crc0_;
+    const uint16_t seq_no = first_tx ? config_.initial_seq_no : tx_seq_no_;
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Session, payload, config_.output_size,
         0,  // Conn_Id = 0 in Session state (ETG.5100 §8.2.2.3)
-        0,  // start_crc = 0 (state transition resets CRC chain)
-        config_.initial_seq_no,  // seq = initial (state transition resets seq)
+        start_crc, seq_no,
         &last_tx_crc0_, &seq_used);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
+    session_first_tx_done_ = true;
     return result;
 }
 
