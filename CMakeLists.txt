@@ -363,7 +363,7 @@ if(DEFINED TETHER_COMPONENTS)
         COMMON HAL PCAP CONTROLS AUTOTUNING GCODE EXPORT MOTION_PLANNER
         KINEMATICS MOTION_CONTROL IDENTIFICATION ETHERCAT_COMMON
         ETHERCAT_MASTER CIA_PROFILES DRIVES FSOE ETHERCAT_SLAVE SIMULATION
-        DESTABILIZER IO_PROTOCOL)
+        DESTABILIZER IO_PROTOCOL KLIPPER)
     foreach(_var ${_tether_build_vars})
         set(TETHER_BUILD_${_var} OFF CACHE BOOL "" FORCE)
     endforeach()
@@ -380,6 +380,17 @@ if(DEFINED TETHER_COMPONENTS)
     set(TETHER_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
     set(TETHER_BUILD_EXTRACT_ESI OFF CACHE BOOL "" FORCE)
     set(TETHER_BUILD_PYTHON_BINDINGS OFF CACHE BOOL "" FORCE)
+
+    # Disable Klipper-dependent feature toggles unless klipper was
+    # explicitly requested.  These default ON (or ON-when-Drogon-found)
+    # but are meaningless without the klipper component and would trip
+    # the validation checks below.
+    if(NOT klipper IN_LIST _tether_enabled)
+        set(TETHER_BUILD_KLIPPER OFF CACHE BOOL "" FORCE)
+        set(TETHER_ENABLE_KLIPPER_HTTP OFF CACHE BOOL "" FORCE)
+        set(TETHER_ENABLE_KLIPPER_CAN OFF CACHE BOOL "" FORCE)
+        set(TETHER_ENABLE_PRESSURE_ADVANCE OFF CACHE BOOL "" FORCE)
+    endif()
 
     message(STATUS "Tether: TETHER_COMPONENTS=${TETHER_COMPONENTS}")
     message(STATUS "Tether: resolved components (with deps): ${_tether_enabled}")
