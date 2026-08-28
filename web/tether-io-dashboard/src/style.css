@@ -410,9 +410,11 @@ h2 {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  padding: 0.7rem 0.35rem;
+  padding: 0.7rem 0.5rem;
   border-bottom: 1px solid var(--row-border);
   cursor: pointer;
+  color: var(--text); /* ensure children inherit a readable color */
+  background: transparent;
   transition: background 0.15s ease;
 }
 
@@ -434,18 +436,24 @@ h2 {
 }
 
 .catalog-row strong {
-  font-size: 0.82rem;
+  font-size: 0.85rem;
+  font-weight: 600;
   color: var(--text);
 }
 
 .catalog-row small {
   margin-top: 0.2rem;
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   color: var(--text-muted);
+}
+
+.catalog-row input[type='checkbox'] {
+  accent-color: var(--mint);
 }
 
 .catalog-row button {
   padding: 0.25rem 0.5rem;
+  color: var(--text);
 }
 
 /* ===========================================================================
