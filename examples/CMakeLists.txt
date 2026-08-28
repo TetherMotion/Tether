@@ -33,6 +33,22 @@ if(Drogon_FOUND AND TARGET tether_io_protocol AND TARGET Drogon::Drogon)
     target_include_directories(tether_io_drogon_websocket PRIVATE
         ${PROJECT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_features(tether_io_drogon_websocket PRIVATE cxx_std_20)
+
+    # --- Web dashboard example ---
+    # Serves the pre-built Tether IO dashboard (web/tether-io-dashboard/dist/)
+    # as static files alongside the binary WebSocket endpoint, so a single
+    # process provides both the UI and the data backend.
+    set(WEB_DASHBOARD_DIST_DIR "${PROJECT_SOURCE_DIR}/web/tether-io-dashboard/dist")
+    add_executable(web_dashboard_example
+        web_dashboard_example.cpp
+        TetherIoWebSocketController.cpp)
+    target_link_libraries(web_dashboard_example PRIVATE
+        tether_io_protocol Drogon::Drogon)
+    target_include_directories(web_dashboard_example PRIVATE
+        ${PROJECT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(web_dashboard_example PRIVATE
+        WEB_DASHBOARD_DIST_DIR="${WEB_DASHBOARD_DIST_DIR}")
+    target_compile_features(web_dashboard_example PRIVATE cxx_std_20)
 endif()
 target_include_directories(tether_examples_common PUBLIC
     ${PROJECT_SOURCE_DIR}/include
