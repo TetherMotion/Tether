@@ -2,7 +2,7 @@
  * @file tether_io_drogon_websocket.cpp
  * @brief Minimal Drogon binary WebSocket endpoint for the Tether IO protocol.
  */
-#include "TetherIoWebSocketController.hpp"
+#include "TetherIOWebSocketController.hpp"
 #include <drogon/drogon.h>
 #include <cstring>
 #include <chrono>
@@ -10,7 +10,7 @@
 #include <atomic>
 
 using namespace tether::io;
-using tether::io::example::TetherIoWebSocketController;
+using tether::io::example::TetherIOWebSocketController;
 
 int main() {
     Registry registry;
@@ -69,9 +69,9 @@ int main() {
     registry.addFunction(std::move(function));
 
     drogon::app().registerWebSocketController(
-        "/tether-io", "tether::io::example::TetherIoWebSocketController", {});
+        "/tether-io", "tether::io::example::TetherIOWebSocketController", {});
     drogon::DrClassMap::setSingleInstance(
-        std::make_shared<TetherIoWebSocketController>(registry));
+        std::make_shared<TetherIOWebSocketController>(registry));
 
     drogon::app().addListener("0.0.0.0", 8080);
     drogon::app().run();

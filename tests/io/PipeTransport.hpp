@@ -13,6 +13,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <vector>
+#include <deque>
 #include <memory>
 #include <cstring>
 #include <chrono>
@@ -147,6 +148,102 @@ private:
     std::mutex mutex_;
     std::condition_variable cv_;
     std::vector<std::unique_ptr<ITransport>> pending_;
+};
+
+/// Message-oriented pipe transport — preserves message boundaries.
+/// Each send() produces exactly one receiveMessage() result.
+/// This mirrors WebSocket behavior (Framing::None) for in-process testing.
+class MessagePipeBuffer {
+public:
+    void push(const uint8_t* data, size_t len) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        messages_.emplace_back(data, data + len);
+        cv_.notify_one();
+    }
+
+    bool pop(std::vector<uint8_t>& out, uint32_t timeoutMs) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (messages_.empty() && timeoutMs > 0) {
+            cv_.wait_for(lock, std::chrono::milliseconds(timeoutMs),
+                         [this]() { return !messages_.empty() || closed_; });
+        }
+        if (messages_.empty()) return false;
+        out = std::move(messages_.front());
+        messages_.pop_front();
+        return true;
+    }
+
+    void close() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        closed_ = true;
+        cv_.notify_all();
+    }
+
+    bool isClosed() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return closed_;
+    }
+
+private:
+    mutable std::mutex mutex_;
+    std::condition_variable cv_;
+    std::deque<std::vector<uint8_t>> messages_;
+    bool closed_ = false;
+};
+
+/// Message-oriented pipe transport pair. Each send() = one receiveMessage().
+class MessagePipeTransport : public ITransport {
+public:
+    MessagePipeTransport(std::shared_ptr<MessagePipeBuffer> rxBuf,
+                         std::shared_ptr<MessagePipeBuffer> txBuf)
+        : rxBuf_(std::move(rxBuf)), txBuf_(std::move(txBuf)) {}
+
+    ~MessagePipeTransport() override { close(); }
+
+    bool send(const uint8_t* data, size_t len) override {
+        if (closed_) return false;
+        txBuf_->push(data, len);
+        return true;
+    }
+
+    size_t receive(uint8_t* buf, size_t maxLen, uint32_t timeoutMs) override {
+        if (closed_) return 0;
+        // Fall back to message-based receive, truncated to maxLen
+        std::vector<uint8_t> msg;
+        if (!rxBuf_->pop(msg, timeoutMs)) return 0;
+        size_t n = std::min(maxLen, msg.size());
+        std::memcpy(buf, msg.data(), n);
+        return n;
+    }
+
+    bool receiveMessage(std::vector<uint8_t>& out, uint32_t timeoutMs) override {
+        if (closed_) return false;
+        return rxBuf_->pop(out, timeoutMs);
+    }
+
+    void close() override {
+        closed_ = true;
+        rxBuf_->close();
+        txBuf_->close();
+    }
+
+    bool isConnected() const override {
+        return !closed_ && !rxBuf_->isClosed();
+    }
+
+    static std::pair<std::unique_ptr<MessagePipeTransport>,
+                     std::unique_ptr<MessagePipeTransport>> create() {
+        auto bufAtoB = std::make_shared<MessagePipeBuffer>();
+        auto bufBtoA = std::make_shared<MessagePipeBuffer>();
+        auto a = std::make_unique<MessagePipeTransport>(bufBtoA, bufAtoB);
+        auto b = std::make_unique<MessagePipeTransport>(bufAtoB, bufBtoA);
+        return {std::move(a), std::move(b)};
+    }
+
+private:
+    std::shared_ptr<MessagePipeBuffer> rxBuf_;
+    std::shared_ptr<MessagePipeBuffer> txBuf_;
+    std::atomic<bool> closed_{false};
 };
 
 }}} // namespace tether::io::testing

@@ -1,4 +1,4 @@
-#include "TetherIoWebSocketController.hpp"
+#include "TetherIOWebSocketController.hpp"
 
 #include "tether/gcode/GCodeInterpreter.hpp"
 #include "tether/gcode/GCodeParser.hpp"
@@ -696,9 +696,9 @@ int runBackend(uint16_t port) {
     demo.start();
 
     drogon::app().registerWebSocketController(
-        "/tether-io", "tether::io::example::TetherIoWebSocketController", {});
+        "/tether-io", "tether::io::example::TetherIOWebSocketController", {});
     drogon::DrClassMap::setSingleInstance(
-        std::make_shared<tether::io::example::TetherIoWebSocketController>(registry));
+        std::make_shared<tether::io::example::TetherIOWebSocketController>(registry));
 
     std::cout << "tether_ui backend listening on ws://0.0.0.0:" << port << "/tether-io\n";
 

@@ -36,7 +36,7 @@ foreach(_tgt IN LISTS _slip_variants)
     )
     set_target_properties(${_tgt} PROPERTIES
         POSITION_INDEPENDENT_CODE ON
-        CXX_STANDARD 20
+        CXX_STANDARD 23
         CXX_STANDARD_REQUIRED ON
     )
 endforeach()
@@ -57,6 +57,7 @@ set(TETHER_IO_PROTOCOL_SOURCES
     ${TETHER_ROOT}/src/io/Datalogging.cpp
     ${TETHER_ROOT}/src/io/Session.cpp
     ${TETHER_ROOT}/src/io/Server.cpp
+    ${TETHER_ROOT}/src/io/TetherIOClient.cpp
 )
 
 # Transport: TCP is always available; serial only on non-ESP (or with own
@@ -103,7 +104,7 @@ foreach(_tgt IN LISTS _variants)
     target_link_libraries(${_tgt} PUBLIC Threads::Threads)
     set_target_properties(${_tgt} PROPERTIES
         POSITION_INDEPENDENT_CODE ON
-        CXX_STANDARD 20
+        CXX_STANDARD 23
         CXX_STANDARD_REQUIRED ON
     )
 endforeach()

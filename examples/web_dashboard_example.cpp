@@ -33,24 +33,26 @@
  * Then open http://127.0.0.1:8080/ in a browser.
  */
 
-#include "TetherIoWebSocketController.hpp"
+#include "TetherIOWebSocketController.hpp"
 
 #include <drogon/drogon.h>
 
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <csignal>
 #include <iostream>
 #include <string>
 
 using namespace tether::io;
-using tether::io::example::TetherIoWebSocketController;
+using tether::io::example::TetherIOWebSocketController;
 
 namespace {
 
 std::atomic<bool> g_stopRequested{false};
+bool g_verbose = false;
 
 void installSignalHandlers() {
     std::signal(SIGINT,  [](int) { g_stopRequested.store(true); });
@@ -61,6 +63,24 @@ uint64_t nowUs() {
     return static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+/// LogFn callback — prints to stderr when --verbose is enabled.
+void verboseLog(const char* tag, const char* fmt, ...) {
+    if (!g_verbose) return;
+    const auto now = std::chrono::steady_clock::now();
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()).count() % 1000;
+    const auto t = std::time(nullptr);
+    std::tm tm{};
+    localtime_r(&t, &tm);
+    std::fprintf(stderr, "[%02d:%02d:%02d.%03lld] [%s] ",
+                 tm.tm_hour, tm.tm_min, tm.tm_sec, (long long)ms, tag);
+    va_list ap;
+    va_start(ap, fmt);
+    std::vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    std::fputc('\n', stderr);
 }
 
 } // namespace
@@ -76,6 +96,8 @@ int main(int argc, char** argv) {
             port = static_cast<uint16_t>(std::stoi(argv[++i]));
         } else if ((arg == "--web-root" || arg == "-w") && i + 1 < argc) {
             webRoot = argv[++i];
+        } else if (arg == "--verbose" || arg == "-v") {
+            g_verbose = true;
         } else if (arg == "--help" || arg == "-h") {
             std::cout <<
                 "web_dashboard_example — Tether IO web dashboard\n\n"
@@ -84,6 +106,7 @@ int main(int argc, char** argv) {
                 "  --port <N>, -p <N>       HTTP/WebSocket port (default 8080)\n"
                 "  --web-root <PATH>, -w <PATH>  Dashboard static file directory\n"
                 "                             (default: built-in dist)\n"
+                "  --verbose, -v            Enable verbose protocol logging\n"
                 "  --help, -h               Show this help\n\n"
                 "Open http://127.0.0.1:<port>/ in a browser to view the dashboard.\n";
             return 0;
@@ -91,6 +114,9 @@ int main(int argc, char** argv) {
     }
 
     installSignalHandlers();
+    if (g_verbose) {
+        std::cerr << "Verbose logging enabled (stderr)" << std::endl;
+    }
 
     // -----------------------------------------------------------------------
     // Registry: parameters and signals
@@ -205,9 +231,9 @@ int main(int argc, char** argv) {
 
     // Register the binary WebSocket controller for the Tether IO protocol
     drogon::app().registerWebSocketController(
-        "/tether-io", "tether::io::example::TetherIoWebSocketController", {});
+        "/tether-io", "tether::io::example::TetherIOWebSocketController", {});
     drogon::DrClassMap::setSingleInstance(
-        std::make_shared<TetherIoWebSocketController>(registry));
+        std::make_shared<TetherIOWebSocketController>(registry, g_verbose ? verboseLog : nullptr));
 
     // Serve the pre-built dashboard from the web root directory
     drogon::app().setDocumentRoot(webRoot);
