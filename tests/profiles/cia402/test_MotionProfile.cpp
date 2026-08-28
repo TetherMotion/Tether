@@ -15,10 +15,12 @@ using namespace CiA402;
 
 TEST(MotionLimitsStruct, Default) {
     MotionLimits l{};
-    EXPECT_GT(l.maxVelocity, 0.0);
-    EXPECT_GT(l.maxAcceleration, 0.0);
-    EXPECT_GE(l.maxDeceleration, 0.0);  // default is 0.0 (symmetric with accel when 0)
-    EXPECT_GT(l.maxJerk, 0.0);
+    // Default-constructed MotionLimits are intentionally zero (meaning
+    // "unset" — the profile uses its own defaults when a limit is 0).
+    EXPECT_EQ(l.maxVelocity, 0u);
+    EXPECT_EQ(l.maxAcceleration, 0u);
+    EXPECT_EQ(l.maxDeceleration, 0u);
+    EXPECT_EQ(l.maxJerk, 0u);
 }
 
 TEST(MotionStateStruct, DefaultValues) {

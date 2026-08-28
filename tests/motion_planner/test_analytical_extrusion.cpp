@@ -672,8 +672,10 @@ TEST(AnalyticalExtrusionTest, LTIDeconv_IdentitySystem) {
     double t = totalT * 0.5;
     double x = deconv.inputAtTime(t, false);
     double y = traj.extruderVelocityAtTime(t);
-    // With regularization, it won't be exact, but should be close
-    EXPECT_GT(x, 0.0);
+    // With regularization, it won't be exact, but should be close.
+    // The deconvolved input may have small negative excursions due to
+    // regularization artifacts at arc boundaries.
+    EXPECT_NEAR(x, y, std::max(0.01, std::abs(y) * 0.1));
 }
 
 // ============================================================================

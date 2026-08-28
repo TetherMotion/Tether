@@ -3,7 +3,7 @@
  * @brief Analytical flow-adaptive heater controller with no explicit sampling.
  *
  * @details
- * Detects the first flow onset and last flow stop by solving the quadratic
+ * Detects the first flow onset and last flow stop by solving the cubic
  * threshold-crossing equation in closed form on each WSS arc.  This avoids
  * the per-arc dense sampling used by `SamplingFlowAdaptiveHeater`.
  *
@@ -48,22 +48,66 @@ private:
     friend Base;
 
     /// Find the first and last local times [s] within an arc where
-    /// v(τ) > vThresh, by solving the quadratic roots analytically.
+    /// v(τ) > vThresh, by solving the polynomial roots analytically.
     static std::pair<double, double> flowInterval(
         const ExtrusionArc& a, double vThresh) {
 
-        // p(τ) = (c2) τ² + (c1) τ + (c0 - vThresh)
+        // p(τ) = c3·τ³ + c2·τ² + c1·τ + (c0 - vThresh)
         double c0 = a.c0 - vThresh;
         double c1 = a.c1;
         double c2 = a.c2;
+        double c3 = a.c3;
         double d = a.duration;
 
         std::vector<double> roots;
-        roots.reserve(4);
+        roots.reserve(6);
         roots.push_back(0.0);
         roots.push_back(d);
 
-        if (std::abs(c2) > 1e-15) {
+        if (std::abs(c3) > 1e-15) {
+            // Cubic: c3·τ³ + c2·τ² + c1·τ + c0 = 0
+            // Normalize: τ³ + p·τ² + q·τ + r = 0
+            double p = c2 / c3;
+            double q = c1 / c3;
+            double r = c0 / c3;
+            // Depressed cubic: y³ + py' + q' = 0, τ = y - p/3
+            double pp = q - p * p / 3.0;
+            double qq = 2.0 * p * p * p / 27.0 - p * q / 3.0 + r;
+            double disc = (qq * qq) / 4.0 + (pp * pp * pp) / 27.0;
+            double shift = -p / 3.0;
+
+            if (disc > 1e-15) {
+                // One real root (Cardano)
+                double sq = std::sqrt(disc);
+                double u = std::cbrt(-qq / 2.0 + sq);
+                double v_root = std::cbrt(-qq / 2.0 - sq);
+                double root = u + v_root + shift;
+                if (root >= 0.0 && root <= d) roots.push_back(root);
+            } else if (disc < -1e-15) {
+                // Three distinct real roots (trigonometric)
+                double m = 2.0 * std::sqrt(-pp / 3.0);
+                double theta = std::acos(3.0 * qq / (pp * m)) / 3.0;
+                for (int k = 0; k < 3; ++k) {
+                    double root = m * std::cos(theta + 2.0 * k * M_PI / 3.0)
+                                  + shift;
+                    if (root >= 0.0 && root <= d) roots.push_back(root);
+                }
+            } else {
+                // disc ≈ 0: three real roots, at least two equal
+                if (std::abs(pp) < 1e-15) {
+                    // Triple root
+                    double root = shift;
+                    if (root >= 0.0 && root <= d) roots.push_back(root);
+                } else {
+                    double root1 = 3.0 * qq / pp + shift;
+                    double root2 = -3.0 * qq / (2.0 * pp) + shift;
+                    if (root1 >= 0.0 && root1 <= d) roots.push_back(root1);
+                    if (root2 >= 0.0 && root2 <= d
+                        && std::abs(root2 - root1) > 1e-15)
+                        roots.push_back(root2);
+                }
+            }
+        } else if (std::abs(c2) > 1e-15) {
             double disc = c1 * c1 - 4.0 * c2 * c0;
             if (disc >= 0.0) {
                 double s = std::sqrt(disc);
@@ -84,7 +128,8 @@ private:
         double last = -std::numeric_limits<double>::infinity();
         for (size_t i = 0; i + 1 < roots.size(); ++i) {
             double tmid = 0.5 * (roots[i] + roots[i + 1]);
-            double v = c0 + c1 * tmid + c2 * tmid * tmid;
+            double v = c0 + c1 * tmid + c2 * tmid * tmid
+                       + c3 * tmid * tmid * tmid;
             if (v > 0.0) {
                 first = std::min(first, roots[i]);
                 last = std::max(last, roots[i + 1]);

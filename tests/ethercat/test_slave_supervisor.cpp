@@ -85,19 +85,19 @@ protected:
         master_.siiReader().setTimeout(1);
 
         // Track AL state for test callbacks (same pattern as test_ethercat_slave.cpp)
-        al_state_ = 0x01; // INIT
+        al_state_.store(0x01, std::memory_order_relaxed); // INIT
 
         master_.setApwrTestCallback([this](uint16_t, uint16_t ado, const void* data, uint16_t len, unsigned int) {
             if (ado == 0x0120 && data && len >= 2) {
                 uint16_t val = *static_cast<const uint16_t*>(data);
-                al_state_ = val & 0x0F;
+                al_state_.store(val & 0x0F, std::memory_order_relaxed);
             }
             return true;
         });
         master_.setAprdTestCallback([this](uint16_t, uint16_t ado, void* out, uint16_t len, unsigned int) {
             if (out && len >= 2 && (ado == 0x0130 || ado == 0x0134)) {
                 uint8_t* p = static_cast<uint8_t*>(out);
-                p[0] = static_cast<uint8_t>(al_state_ & 0xFF);
+                p[0] = static_cast<uint8_t>(al_state_.load(std::memory_order_relaxed) & 0xFF);
                 p[1] = 0;
             }
             return true;
@@ -112,7 +112,7 @@ protected:
     }
 
     Master master_;
-    uint16_t al_state_ = 0x01;
+    std::atomic<uint16_t> al_state_{0x01};
 
     RecoveryConfig defaultConfig() {
         RecoveryConfig cfg;

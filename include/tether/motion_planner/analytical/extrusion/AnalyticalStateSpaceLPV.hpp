@@ -236,8 +236,8 @@ private:
             if (dt <= 0.0) continue;
 
             // Forcing: ẏ(τ) = α_e · d/dτ[v(τ)]
-            // For y = velocity: ẏ = α_e · a(τ) = α_e · (c1 + 2·c2·τ)
-            // For y = position: ẏ = α_e · v(τ) = α_e · (c0 + c1·τ + c2·τ²)
+            // For y = velocity: ẏ = α_e · a(τ) = α_e · (c1 + 2·c2·τ + 3·c3·τ²)
+            // For y = position: ẏ = α_e · v(τ) = α_e · (c0 + c1·τ + c2·τ² + c3·τ³)
             double alphaE = a.extrusionRatio;
 
             // v(dt) = exp(F·dt)·v0 + ∫₀^dt exp(F·(dt-s))·G·ẏ(s) ds
@@ -251,14 +251,15 @@ private:
             // J_k = ∫₀^dt exp(Fu)·u^k du
             // J_0 = F⁻¹·(exp(F·dt) - I)
             // J_k = F⁻¹·(exp(F·dt)·dt^k - k·J_{k-1})
-            std::vector<Eigen::MatrixXd> J(3);
+            std::vector<Eigen::MatrixXd> J(4);
             J[0] = Finv * (expFdt - I);
             J[1] = Finv * (expFdt * dt - J[0]);
             J[2] = Finv * (expFdt * dt * dt - 2.0 * J[1]);
+            J[3] = Finv * (expFdt * dt * dt * dt - 3.0 * J[2]);
 
             // I_k = ∫₀^dt exp(F·(dt-s))·s^k ds = Σ C(k,j) dt^{k-j} (-1)^j J_j
-            std::vector<Eigen::MatrixXd> Iint(3);
-            for (int k = 0; k <= 2; ++k) {
+            std::vector<Eigen::MatrixXd> Iint(4);
+            for (int k = 0; k <= 3; ++k) {
                 Iint[k] = Eigen::MatrixXd::Zero(n, n);
                 for (int j = 0; j <= k; ++j) {
                     double binom = 1.0;
@@ -270,20 +271,22 @@ private:
             }
 
             // Forcing integral: ∫ exp(F·(dt-s))·G·ẏ(s) ds
-            // ẏ(s) = α_e · (f0 + f1·s + f2·s²)
+            // ẏ(s) = α_e · (f0 + f1·s + f2·s² + f3·s³)
             Eigen::VectorXd forcing = Eigen::VectorXd::Zero(n);
             if (params_.usePosition) {
-                // ẏ = α_e · v(s) = α_e · (c0 + c1·s + c2·s²)
+                // ẏ = α_e · v(s) = α_e · (c0 + c1·s + c2·s² + c3·s³)
                 forcing = alphaE * (
                     a.c0 * (Iint[0] * G)
                     + a.c1 * (Iint[1] * G)
                     + a.c2 * (Iint[2] * G)
+                    + a.c3 * (Iint[3] * G)
                 );
             } else {
-                // ẏ = α_e · a(s) = α_e · (c1 + 2·c2·s)
+                // ẏ = α_e · a(s) = α_e · (c1 + 2·c2·s + 3·c3·s²)
                 forcing = alphaE * (
                     a.c1 * (Iint[0] * G)
                     + 2.0 * a.c2 * (Iint[1] * G)
+                    + 3.0 * a.c3 * (Iint[2] * G)
                 );
             }
 

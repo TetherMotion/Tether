@@ -129,30 +129,36 @@ public:
         // Compute polynomial coefficients of y(t-τ) as a function of τ
         if (usePosition) {
             double eAtT = traj_->extruderPositionAtTime(tEff);
-            std::vector<double> coeffs(4, 0.0);
+            std::vector<double> coeffs(5, 0.0);
             coeffs[0] = eAtT;
             coeffs[1] = -a.extrusionRatio * a.c0;
             coeffs[2] = a.extrusionRatio * 0.5 * a.c1;
             coeffs[3] = -a.extrusionRatio * (1.0 / 3.0) * a.c2;
+            coeffs[4] = a.extrusionRatio * 0.25 * a.c3;
+
+            double x = 0.0;
+            for (int k = 0; k <= 4 && k < static_cast<int>(moments.size()); ++k)
+                x += coeffs[k] * moments[k];
+            return x;
+        } else {
+            // y(t) = extruder velocity = piecewise polynomial of degree 3
+            // v_e(t-τ) = α_e · v_local(tau - τ)  where tau = local time
+            double tau2 = tau * tau;
+            std::vector<double> coeffs(4, 0.0);
+            coeffs[0] = a.extrusionRatio * (a.c0 + a.c1 * tau
+                         + a.c2 * tau2 + a.c3 * tau2 * tau);
+            coeffs[1] = a.extrusionRatio * (-a.c1 - 2.0 * a.c2 * tau
+                         - 3.0 * a.c3 * tau2);
+            coeffs[2] = a.extrusionRatio * (a.c2 + 3.0 * a.c3 * tau);
+            coeffs[3] = a.extrusionRatio * (-a.c3);
 
             double x = 0.0;
             for (int k = 0; k <= 3 && k < static_cast<int>(moments.size()); ++k)
                 x += coeffs[k] * moments[k];
-            return x;
-        } else {
-            double tAbs = a.t0 + tau;
-            std::vector<double> coeffs(3, 0.0);
-            coeffs[0] = a.extrusionRatio * (a.c0 + a.c1 * tAbs + a.c2 * tAbs * tAbs);
-            coeffs[1] = a.extrusionRatio * (-a.c1 - 2.0 * a.c2 * tAbs);
-            coeffs[2] = a.extrusionRatio * a.c2;
-
-            double x = 0.0;
-            for (int k = 0; k <= 2 && k < static_cast<int>(moments.size()); ++k)
-                x += coeffs[k] * moments[k];
 
             // First-order correction (optional)
             if (params_.firstOrderCorrection && momentLut_.size() >= 2) {
-                x += firstOrderCorrectionTerm(a, tau, tAbs, moments, usePosition);
+                x += firstOrderCorrectionTerm(a, tau, moments, usePosition);
             }
             return x;
         }
@@ -226,12 +232,11 @@ private:
     }
 
     double firstOrderCorrectionTerm(const ExtrusionArc& a, double tau,
-                                     double tAbs,
                                      const std::vector<double>& moments,
                                      bool usePosition) const {
         // ∂M_k/∂p ≈ (M_k(p1) - M_k(p0)) / (p1 - p0)
         // Correction: Σ c_k · ∂M_k/∂p · (p(t) - p̄)
-        // p(t) - p̄ = v(τ) - ṽ = (c0 + c1·τ + c2·τ²) - ṽ
+        // p(t) - p̄ = v(τ) - ṽ = (c0 + c1·τ + c2·τ² + c3·τ³) - ṽ
         double pBar = a.avgPathVelocity();
         double pDev = a.pathVelocity(tau) - pBar;
 
@@ -246,21 +251,26 @@ private:
         const auto& m1 = upper->second;
 
         if (usePosition) {
-            std::vector<double> coeffs(4, 0.0);
+            std::vector<double> coeffs(5, 0.0);
             coeffs[1] = -a.extrusionRatio * a.c0;
             coeffs[2] = a.extrusionRatio * 0.5 * a.c1;
             coeffs[3] = -a.extrusionRatio * (1.0 / 3.0) * a.c2;
+            coeffs[4] = a.extrusionRatio * 0.25 * a.c3;
             double corr = 0.0;
-            for (int k = 0; k <= 3 && k < static_cast<int>(m0.size()); ++k)
+            for (int k = 0; k <= 4 && k < static_cast<int>(m0.size()); ++k)
                 corr += coeffs[k] * (m1[k] - m0[k]) / dp * pDev;
             return corr;
         } else {
-            std::vector<double> coeffs(3, 0.0);
-            coeffs[0] = a.extrusionRatio * (a.c0 + a.c1 * tAbs + a.c2 * tAbs * tAbs);
-            coeffs[1] = a.extrusionRatio * (-a.c1 - 2.0 * a.c2 * tAbs);
-            coeffs[2] = a.extrusionRatio * a.c2;
+            double tau2 = tau * tau;
+            std::vector<double> coeffs(4, 0.0);
+            coeffs[0] = a.extrusionRatio * (a.c0 + a.c1 * tau
+                         + a.c2 * tau2 + a.c3 * tau2 * tau);
+            coeffs[1] = a.extrusionRatio * (-a.c1 - 2.0 * a.c2 * tau
+                         - 3.0 * a.c3 * tau2);
+            coeffs[2] = a.extrusionRatio * (a.c2 + 3.0 * a.c3 * tau);
+            coeffs[3] = a.extrusionRatio * (-a.c3);
             double corr = 0.0;
-            for (int k = 0; k <= 2 && k < static_cast<int>(m0.size()); ++k)
+            for (int k = 0; k <= 3 && k < static_cast<int>(m0.size()); ++k)
                 corr += coeffs[k] * (m1[k] - m0[k]) / dp * pDev;
             return corr;
         }

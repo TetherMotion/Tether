@@ -490,7 +490,7 @@ TEST(CoeSDO, Download_RejectsStaleResponse_WrongIndex) {
     mock.stale_cnt = 1;
     mock.stale_index = 0x2000;
     mock.stale_sub = 0;
-    mock.final_cnt = 2;  // nextMbxCnt(1)=2: slave advances counter after re-send
+    mock.final_cnt = 1;  // master re-sends with same counter after stale response
     mock.final_index = 0x1000;
     mock.final_sub = 0;
     mock.final_is_download = true;

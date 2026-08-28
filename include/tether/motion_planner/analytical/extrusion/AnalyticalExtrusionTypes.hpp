@@ -43,10 +43,12 @@ namespace MotionPlanner::analytical::extrusion {
  * Extends WeightedArc with the extrusion ratio and the polynomial
  * coefficients of v_e(τ) expressed in a normalized form:
  *
- *   v_e(τ) = α_e · (c0 + c1·τ + c2·τ²)
+ *   v_e(τ) = α_e · (c0 + c1·τ + c2·τ² + c3·τ³)
  *
  * where:
- *   c0 = v0, c1 = a0 (or a*), c2 = ½·η (or 0)
+ *   SNAP:     c0 = v0, c1 = a0, c2 = ½·j0, c3 = (1/6)·σ
+ *   SINGULAR: c0 = v0, c1 = a0, c2 = ½·j*, c3 = 0
+ *   WALL:     c0 = v0, c1 = c2 = c3 = 0 (non-polynomial, sampled)
  */
 struct ExtrusionArc {
     /// The underlying WSS arc
@@ -55,11 +57,12 @@ struct ExtrusionArc {
     /// Extrusion ratio (E per unit path distance). 0 for travel moves.
     double extrusionRatio = 0.0;
 
-    /// Polynomial coefficients of v(τ) = c0 + c1·τ + c2·τ²
-    /// (c2 = 0 for SINGULAR and WALL arcs)
+    /// Polynomial coefficients of v(τ) = c0 + c1·τ + c2·τ² + c3·τ³
+    /// (c2 = c3 = 0 for WALL arcs; c3 = 0 for SINGULAR arcs)
     double c0 = 0.0;  ///< v at arc start
     double c1 = 0.0;  ///< acceleration at arc start
-    double c2 = 0.0;  ///< ½·jerk (0 for SINGULAR/WALL)
+    double c2 = 0.0;  ///< ½·jerk at arc start (0 for SINGULAR/WALL)
+    double c3 = 0.0;  ///< (1/6)·snap (0 for SINGULAR/WALL)
 
     /// Arc duration [s]
     double duration = 0.0;
@@ -71,7 +74,7 @@ struct ExtrusionArc {
      * @brief Evaluate the path velocity v(τ) at local time τ.
      */
     double pathVelocity(double tau) const {
-        return c0 + c1 * tau + c2 * tau * tau;
+        return c0 + c1 * tau + c2 * tau * tau + c3 * tau * tau * tau;
     }
 
     /**
@@ -85,22 +88,27 @@ struct ExtrusionArc {
      * @brief Evaluate the path acceleration a(τ) at local time τ.
      */
     double pathAcceleration(double tau) const {
-        return c1 + 2.0 * c2 * tau;
+        return c1 + 2.0 * c2 * tau + 3.0 * c3 * tau * tau;
     }
 
     /**
-     * @brief Evaluate the path jerk η(τ) at local time τ (constant per arc).
+     * @brief Evaluate the path jerk η(τ) at local time τ.
+     *
+     * jerk = d²v/dτ² = 2·c2 + 6·c3·τ
+     * (constant 2·c2 when c3 = 0, i.e. for SINGULAR/WALL arcs)
      */
-    double pathJerk() const {
-        return 2.0 * c2;
+    double pathJerk(double tau = 0.0) const {
+        return 2.0 * c2 + 6.0 * c3 * tau;
     }
 
     /**
-     * @brief Antiderivative of v(τ): ∫₀^τ v(s) ds = c0·τ + ½·c1·τ² + ⅓·c2·τ³
+     * @brief Antiderivative of v(τ): ∫₀^τ v(s) ds
+     *   = c0·τ + ½·c1·τ² + ⅓·c2·τ³ + ¼·c3·τ⁴
      */
     double pathVelocityIntegral(double tau) const {
         return c0 * tau + 0.5 * c1 * tau * tau
-               + (1.0 / 3.0) * c2 * tau * tau * tau;
+               + (1.0 / 3.0) * c2 * tau * tau * tau
+               + 0.25 * c3 * tau * tau * tau * tau;
     }
 
     /**
@@ -255,7 +263,9 @@ public:
     double pathJerkAtTime(double t) const {
         if (arcs_.empty()) return 0.0;
         size_t idx = findArc(t);
-        return arcs_[idx].pathJerk();
+        const auto& a = arcs_[idx];
+        double tau = std::clamp(t - a.t0, 0.0, a.duration);
+        return a.pathJerk(tau);
     }
 
     /**
@@ -304,15 +314,20 @@ private:
             ea.duration = wa.duration;
             ea.c0 = wa.v0;
             if (wa.type == WeightedArcType::SINGULAR) {
-                ea.c1 = wa.a_star;
-                ea.c2 = 0.0;
+                // v(τ) = v0 + a0·τ + ½·j*·τ²
+                ea.c1 = wa.a0;
+                ea.c2 = 0.5 * wa.j_star;
+                ea.c3 = 0.0;
             } else if (wa.type == WeightedArcType::WALL) {
                 ea.c1 = 0.0;
                 ea.c2 = 0.0;
+                ea.c3 = 0.0;
             } else {
-                // BANG_PLUS or BANG_MINUS
+                // BANG_PLUS or BANG_MINUS (SNAP arc)
+                // v(τ) = v0 + a0·τ + ½·j0·τ² + (1/6)·σ·τ³
                 ea.c1 = wa.a0;
-                ea.c2 = 0.5 * wa.eta;
+                ea.c2 = 0.5 * wa.j0;
+                ea.c3 = (1.0 / 6.0) * wa.sigma;
             }
             arcs_.push_back(ea);
         }
@@ -329,14 +344,17 @@ private:
             ea.duration = wa.duration;
             ea.c0 = wa.v0;
             if (wa.type == WeightedArcType::SINGULAR) {
-                ea.c1 = wa.a_star;
-                ea.c2 = 0.0;
+                ea.c1 = wa.a0;
+                ea.c2 = 0.5 * wa.j_star;
+                ea.c3 = 0.0;
             } else if (wa.type == WeightedArcType::WALL) {
                 ea.c1 = 0.0;
                 ea.c2 = 0.0;
+                ea.c3 = 0.0;
             } else {
                 ea.c1 = wa.a0;
-                ea.c2 = 0.5 * wa.eta;
+                ea.c2 = 0.5 * wa.j0;
+                ea.c3 = (1.0 / 6.0) * wa.sigma;
             }
             // Determine the segment index at the arc midpoint
             double tMid = wa.t0 + wa.duration * 0.5;
@@ -393,11 +411,13 @@ double smoothedPathVelocity(const ExtrusionTrajectory<Dim, T>& traj,
         double tauEnd = overlapEnd - a.t0;
 
         // ∫_{tauStart}^{tauEnd} v(τ) dτ = V(tauEnd) - V(tauStart)
-        // where V(τ) = c0·τ + ½·c1·τ² + ⅓·c2·τ³
+        // where V(τ) = c0·τ + ½·c1·τ² + ⅓·c2·τ³ + ¼·c3·τ⁴
         double intEnd = a.c0 * tauEnd + 0.5 * a.c1 * tauEnd * tauEnd
-                        + (1.0 / 3.0) * a.c2 * tauEnd * tauEnd * tauEnd;
+                        + (1.0 / 3.0) * a.c2 * tauEnd * tauEnd * tauEnd
+                        + 0.25 * a.c3 * tauEnd * tauEnd * tauEnd * tauEnd;
         double intStart = a.c0 * tauStart + 0.5 * a.c1 * tauStart * tauStart
-                          + (1.0 / 3.0) * a.c2 * tauStart * tauStart * tauStart;
+                          + (1.0 / 3.0) * a.c2 * tauStart * tauStart * tauStart
+                          + 0.25 * a.c3 * tauStart * tauStart * tauStart * tauStart;
         integral += intEnd - intStart;
         coveredTime += overlapEnd - overlapStart;
     }
@@ -442,10 +462,12 @@ double smoothedExtruderVelocity(const ExtrusionTrajectory<Dim, T>& traj,
         // ∫ v_e(τ) dτ = α_e · ∫ v(τ) dτ
         double intEnd = a.extrusionRatio * (a.c0 * tauEnd
                         + 0.5 * a.c1 * tauEnd * tauEnd
-                        + (1.0 / 3.0) * a.c2 * tauEnd * tauEnd * tauEnd);
+                        + (1.0 / 3.0) * a.c2 * tauEnd * tauEnd * tauEnd
+                        + 0.25 * a.c3 * tauEnd * tauEnd * tauEnd * tauEnd);
         double intStart = a.extrusionRatio * (a.c0 * tauStart
                           + 0.5 * a.c1 * tauStart * tauStart
-                          + (1.0 / 3.0) * a.c2 * tauStart * tauStart * tauStart);
+                          + (1.0 / 3.0) * a.c2 * tauStart * tauStart * tauStart
+                          + 0.25 * a.c3 * tauStart * tauStart * tauStart * tauStart);
         integral += intEnd - intStart;
         coveredTime += overlapEnd - overlapStart;
     }
@@ -459,36 +481,38 @@ double smoothedExtruderVelocity(const ExtrusionTrajectory<Dim, T>& traj,
 // ============================================================================
 
 /**
- * @brief Antiderivative of (c0 + c1·τ + c2·τ²)^n dτ for integer n.
+ * @brief Antiderivative of (c0 + c1·τ + c2·τ² + c3·τ³)^n dτ for integer n.
  *
- * For integer n, the integrand is a polynomial of degree 2n, and the
- * antiderivative is a polynomial of degree 2n+1.  This function expands
+ * For integer n, the integrand is a polynomial of degree 3n, and the
+ * antiderivative is a polynomial of degree 3n+1.  This function expands
  * the polynomial and integrates term by term.
  *
- * @param c0, c1, c2 Polynomial coefficients of v(τ)
+ * @param c0, c1, c2, c3 Polynomial coefficients of v(τ)
  * @param n Power (must be a non-negative integer)
  * @param tau Upper limit of integration
- * @return ∫₀^τ (c0 + c1·s + c2·s²)^n ds
+ * @return ∫₀^τ (c0 + c1·s + c2·s² + c3·s³)^n ds
  */
 inline double polynomialPowerIntegral(double c0, double c1, double c2,
-                                       int n, double tau) {
+                                       double c3, int n, double tau) {
     if (n == 0) return tau;
     if (n == 1) {
         return c0 * tau + 0.5 * c1 * tau * tau
-               + (1.0 / 3.0) * c2 * tau * tau * tau;
+               + (1.0 / 3.0) * c2 * tau * tau * tau
+               + 0.25 * c3 * tau * tau * tau * tau;
     }
-    // For n >= 2, expand (c0 + c1·τ + c2·τ²)^n by binomial/multinomial
+    // For n >= 2, expand (c0 + c1·τ + c2·τ² + c3·τ³)^n by multinomial
     // and integrate term by term.
     // We use a simple recursive multiplication approach.
-    // Start with [c0, c1, c2] (coefficients of v), multiply n times.
-    // Result is a polynomial of degree 2n with 2n+1 coefficients.
-    std::vector<double> poly = {c0, c1, c2};
+    // Start with [c0, c1, c2, c3] (coefficients of v), multiply n times.
+    // Result is a polynomial of degree 3n with 3n+1 coefficients.
+    std::vector<double> poly = {c0, c1, c2, c3};
     for (int p = 1; p < n; ++p) {
-        std::vector<double> next(poly.size() + 2, 0.0);
+        std::vector<double> next(poly.size() + 3, 0.0);
         for (size_t i = 0; i < poly.size(); ++i) {
-            for (size_t j = 0; j < 3; ++j) {
-                next[i + j] += poly[i] * (j == 0 ? c0 : (j == 1 ? c1 : c2));
-            }
+            next[i]     += poly[i] * c0;
+            next[i + 1] += poly[i] * c1;
+            next[i + 2] += poly[i] * c2;
+            next[i + 3] += poly[i] * c3;
         }
         poly = std::move(next);
     }
@@ -499,6 +523,14 @@ inline double polynomialPowerIntegral(double c0, double c1, double c2,
                   / static_cast<double>(k + 1);
     }
     return result;
+}
+
+/**
+ * @brief Backward-compatible overload (c3 = 0).
+ */
+inline double polynomialPowerIntegral(double c0, double c1, double c2,
+                                       int n, double tau) {
+    return polynomialPowerIntegral(c0, c1, c2, 0.0, n, tau);
 }
 
 /**
@@ -532,13 +564,13 @@ inline double linearPowerIntegral(double c0, double c1, double n, double tau) {
  * up to degree 15 — more than sufficient since the integrand is smooth
  * (v > 0 on each arc) and the arc duration is short.
  *
- * @param c0, c1, c2 Polynomial coefficients of v(τ)
+ * @param c0, c1, c2, c3 Polynomial coefficients of v(τ)
  * @param n Power (real, n > -1)
  * @param tau Upper limit
- * @return ∫₀^τ (c0 + c1·s + c2·s²)^n ds (to quadrature precision)
+ * @return ∫₀^τ (c0 + c1·s + c2·s² + c3·s³)^n ds (to quadrature precision)
  */
 inline double quadraticPowerIntegralGL(double c0, double c1, double c2,
-                                        double n, double tau) {
+                                        double c3, double n, double tau) {
     if (tau <= 0.0) return 0.0;
     // 8-point Gauss-Legendre on [0, tau]
     // Nodes and weights for [-1, 1]:
@@ -556,7 +588,7 @@ inline double quadraticPowerIntegralGL(double c0, double c1, double c2,
     double sum = 0.0;
     for (int i = 0; i < 8; ++i) {
         double s = halfTau * (nodes[i] + 1.0);  // map [-1,1] → [0, tau]
-        double v = c0 + c1 * s + c2 * s * s;
+        double v = c0 + c1 * s + c2 * s * s + c3 * s * s * s;
         if (v > 0.0) {
             sum += weights[i] * std::pow(v, n);
         }
@@ -570,32 +602,41 @@ inline double quadraticPowerIntegralGL(double c0, double c1, double c2,
  * Dispatches to the appropriate closed-form or quadrature based on the
  * arc type (c2 = 0 → linear, c2 ≠ 0 → quadratic) and n (integer vs real).
  *
- * @param c0, c1, c2 Polynomial coefficients of v(τ)
+ * @param c0, c1, c2, c3 Polynomial coefficients of v(τ)
  * @param n Power
  * @param tau Upper limit
  * @return ∫₀^τ v(s)^n ds
  */
 inline double velocityPowerIntegral(double c0, double c1, double c2,
-                                     double n, double tau) {
+                                     double c3, double n, double tau) {
     if (tau <= 0.0) return 0.0;
 
-    // Constant velocity (c1 = c2 = 0)
-    if (std::abs(c1) < 1e-15 && std::abs(c2) < 1e-15) {
+    // Constant velocity (c1 = c2 = c3 = 0)
+    if (std::abs(c1) < 1e-15 && std::abs(c2) < 1e-15
+        && std::abs(c3) < 1e-15) {
         return std::pow(std::abs(c0), n) * tau;
     }
 
-    // Linear velocity (c2 = 0) — closed form for any real n
-    if (std::abs(c2) < 1e-15) {
+    // n = 1: integral is just the antiderivative of v(τ)
+    if (std::abs(n - 1.0) < 1e-10) {
+        return c0 * tau + 0.5 * c1 * tau * tau
+               + (1.0 / 3.0) * c2 * tau * tau * tau
+               + 0.25 * c3 * tau * tau * tau * tau;
+    }
+
+    // Linear velocity (c2 = c3 = 0) — closed form for any real n
+    if (std::abs(c2) < 1e-15 && std::abs(c3) < 1e-15) {
         return linearPowerIntegral(c0, c1, n, tau);
     }
 
-    // Quadratic velocity (c2 ≠ 0)
-    bool nIsInteger = (std::abs(n - std::round(n)) < 1e-10);
-    if (nIsInteger) {
-        return polynomialPowerIntegral(c0, c1, c2,
-                                       static_cast<int>(std::round(n)), tau);
-    }
-    return quadraticPowerIntegralGL(c0, c1, c2, n, tau);
+    // Quadratic or cubic velocity — use Gauss-Legendre quadrature
+    return quadraticPowerIntegralGL(c0, c1, c2, c3, n, tau);
+}
+
+/// @brief Backwards-compatible overload (c3 = 0).
+inline double velocityPowerIntegral(double c0, double c1, double c2,
+                                     double n, double tau) {
+    return velocityPowerIntegral(c0, c1, c2, 0.0, n, tau);
 }
 
 } // namespace MotionPlanner::analytical::extrusion

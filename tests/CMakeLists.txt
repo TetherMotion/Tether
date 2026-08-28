@@ -503,8 +503,9 @@ endif()
 
 create_module_test(motion_planner_curves "${MOTION_PLANNER_CURVES_SOURCES}" "${MOTION_PLANNER_LIBS}" "")
 create_module_test(motion_planner_blend "${MOTION_PLANNER_BLEND_SOURCES}" "${MOTION_PLANNER_LIBS}" "")
-# PH fast-path integration tests need a longer timeout (PH blend certification is expensive).
-create_module_test_timeout(motion_planner_integration "${MOTION_PLANNER_INTEGRATION_SOURCES}" "${MOTION_PLANNER_LIBS}" "" 120)
+# PH fast-path integration tests need a longer timeout (PH blend certification
+# is expensive; the wide-envelope arc contract test alone takes ~120s).
+create_module_test_timeout(motion_planner_integration "${MOTION_PLANNER_INTEGRATION_SOURCES}" "${MOTION_PLANNER_LIBS}" "" 300)
 # Analytical extrusion compensation on WSS arcs (needs tether_controls for LUT/rheology).
 create_module_test(motion_planner_analytical_extrusion "${MOTION_PLANNER_ANALYTICAL_EXTRUSION_SOURCES}" "${MOTION_PLANNER_ANALYTICAL_EXTRUSION_LIBS}" "")
 

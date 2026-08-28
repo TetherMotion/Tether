@@ -62,8 +62,8 @@ struct AnalyticalLTIDeconvParams {
     double lambda = 1e-6;
 
     /// Maximum polynomial degree K of the target trajectory y(t).
-    /// K=2 for velocity, K=3 for position.
-    int maxPolyDegree = 3;
+    /// K=3 for velocity (SNAP arcs have cubic velocity), K=4 for position.
+    int maxPolyDegree = 4;
 
     /// Group delay [s] — the output is shifted by this amount for causal
     /// alignment (0 = no shift).
@@ -284,9 +284,10 @@ private:
     }
 
     /**
-     * @brief Compute moments M_k = ∫₀^∞ h_inv(τ) τ^k dτ for k = 0..K.
+     * @brief Compute moments M_k = Σ h_inv[n] · (n·dt)^k for k = 0..K.
      *
-     * Uses trapezoidal integration on the sampled h_inv.
+     * Uses discrete-time summation on the sampled h_inv (no dt scaling),
+     * matching the discrete convolution x[n] = Σ h_inv[m] · y[n-m].
      */
     void computeMoments() {
         if (hInv_.empty() || sampleRate_ <= 0.0) {
@@ -299,14 +300,14 @@ private:
         int K = params_.maxPolyDegree;
         moments_.assign(K + 1, 0.0);
 
+        // Moments M_k = Σ hInv_[n] · (n·dt)^k
+        // This is the discrete-time moment (no dt scaling), matching the
+        // discrete convolution x[n] = Σ hInv_[m] · y[n-m].
         for (size_t i = 0; i < hInv_.size(); ++i) {
             double tau = static_cast<double>(i) * dt;
             double hVal = hInv_[i];
-            // Trapezoidal weight
-            double w = dt;
-            if (i == 0 || i == hInv_.size() - 1) w *= 0.5;
             for (int k = 0; k <= K; ++k) {
-                moments_[k] += hVal * std::pow(tau, k) * w;
+                moments_[k] += hVal * std::pow(tau, k);
             }
         }
     }
@@ -342,35 +343,43 @@ private:
         double tau_local = std::clamp(tEff - a.t0, 0.0, a.duration);
 
         if (usePosition) {
-            // y(t) = extruder position = piecewise polynomial of degree 3
-            // Within arc: e(τ) = e0 + α_e·(c0·τ + ½·c1·τ² + ⅓·c2·τ³)
+            // y(t) = extruder position = piecewise polynomial of degree 4
+            // Within arc: e(τ) = e0 + α_e·(c0·τ + ½·c1·τ² + ⅓·c2·τ³ + ¼·c3·τ⁴)
             // e(t-τ) as polynomial in τ:
-            //   e(t-τ) = e(t) - α_e·[c0·τ - ½·c1·τ² + ⅓·c2·τ³]
-            //          = e(t) - α_e·c0·τ + α_e·½·c1·τ² - α_e·⅓·c2·τ³
+            //   e(t-τ) = e(t) - α_e·[c0·τ - ½·c1·τ² + ⅓·c2·τ³ - ¼·c3·τ⁴]
             double eAtT = traj_->extruderPositionAtTime(tEff);
-            std::vector<double> coeffs(4, 0.0);
+            std::vector<double> coeffs(5, 0.0);
             coeffs[0] = eAtT;
             coeffs[1] = -a.extrusionRatio * a.c0;
             coeffs[2] = a.extrusionRatio * 0.5 * a.c1;
             coeffs[3] = -a.extrusionRatio * (1.0 / 3.0) * a.c2;
+            coeffs[4] = a.extrusionRatio * 0.25 * a.c3;
 
             double x = 0.0;
-            for (int k = 0; k <= 3 && k < static_cast<int>(moments_.size()); ++k) {
+            for (int k = 0; k <= 4 && k < static_cast<int>(moments_.size()); ++k) {
                 x += coeffs[k] * moments_[k];
             }
             return x;
         } else {
-            // y(t) = extruder velocity = piecewise polynomial of degree 2
-            // v_e(t-τ) = α_e · (c0 + c1·(t-τ) + c2·(t-τ)²)
-            //   = α_e·(c0 + c1·t + c2·t²) + α_e·(-c1 - 2·c2·t)·τ + α_e·c2·τ²
-            double tAbs = a.t0 + tau_local;
-            std::vector<double> coeffs(3, 0.0);
-            coeffs[0] = a.extrusionRatio * (a.c0 + a.c1 * tAbs + a.c2 * tAbs * tAbs);
-            coeffs[1] = a.extrusionRatio * (-a.c1 - 2.0 * a.c2 * tAbs);
-            coeffs[2] = a.extrusionRatio * a.c2;
+            // y(t) = extruder velocity = piecewise polynomial of degree 3
+            // v_e(t-τ) = α_e · v_local(tau_local - τ)
+            //   = α_e·(c0 + c1·tau + c2·tau² + c3·tau³)
+            //     + α_e·(-c1 - 2·c2·tau - 3·c3·tau²)·τ
+            //     + α_e·(c2 + 3·c3·tau)·τ²
+            //     + α_e·(-c3)·τ³
+            // where tau = tau_local (local time within the arc)
+            double tau = tau_local;
+            double tau2 = tau * tau;
+            std::vector<double> coeffs(4, 0.0);
+            coeffs[0] = a.extrusionRatio * (a.c0 + a.c1 * tau
+                         + a.c2 * tau2 + a.c3 * tau2 * tau);
+            coeffs[1] = a.extrusionRatio * (-a.c1 - 2.0 * a.c2 * tau
+                         - 3.0 * a.c3 * tau2);
+            coeffs[2] = a.extrusionRatio * (a.c2 + 3.0 * a.c3 * tau);
+            coeffs[3] = a.extrusionRatio * (-a.c3);
 
             double x = 0.0;
-            for (int k = 0; k <= 2 && k < static_cast<int>(moments_.size()); ++k) {
+            for (int k = 0; k <= 3 && k < static_cast<int>(moments_.size()); ++k) {
                 x += coeffs[k] * moments_[k];
             }
             return x;
@@ -432,7 +441,7 @@ private:
                 .solve(Eigen::MatrixXd::Identity(n, n));
             Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n, n);
 
-            std::vector<Eigen::VectorXd> forcingIntegrals(3);
+            std::vector<Eigen::VectorXd> forcingIntegrals(4);
             // I_0 = F⁻¹·(expF - I)
             Eigen::MatrixXd I0 = Finv * (sol.expF - I);
             // I_1 = F⁻¹·(I_0 - dt·I)  -- wait, the recursion is:
@@ -447,13 +456,14 @@ private:
             // ∫₀^T exp(Fu)·u^j du = F⁻¹·[exp(FT)·T^j - j·∫₀^T exp(Fu)·u^{j-1} du]
             //   J_j = F⁻¹·(exp(FT)·T^j - j·J_{j-1})
 
-            std::vector<Eigen::MatrixXd> J(3);
+            std::vector<Eigen::MatrixXd> J(4);
             J[0] = Finv * (sol.expF - I);
             J[1] = Finv * (sol.expF * dt - J[0]);
             J[2] = Finv * (sol.expF * dt * dt - 2.0 * J[1]);
+            J[3] = Finv * (sol.expF * dt * dt * dt - 3.0 * J[2]);
 
             // Now I_k = ∫₀^T exp(F(T-s)) s^k ds = Σ C(k,j) T^{k-j} (-1)^j J_j
-            for (int k = 0; k <= 2; ++k) {
+            for (int k = 0; k <= 3; ++k) {
                 Eigen::MatrixXd Ik = Eigen::MatrixXd::Zero(n, n);
                 for (int j = 0; j <= k; ++j) {
                     // C(k,j) = k! / (j! (k-j)!)
@@ -473,11 +483,12 @@ private:
             double Dreg = ssD_ / (ssD_ * ssD_ + params_.lambda);
             double alphaE = a.extrusionRatio;
             Eigen::VectorXd vEnd = sol.expF * currentState;
-            // y(τ) = α_e · (c0 + c1·τ + c2·τ²)
+            // y(τ) = α_e · (c0 + c1·τ + c2·τ² + c3·τ³)
             vEnd += Dreg * alphaE * (
                 a.c0 * forcingIntegrals[0]
                 + a.c1 * forcingIntegrals[1]
                 + a.c2 * forcingIntegrals[2]
+                + a.c3 * forcingIntegrals[3]
             );
             currentState = vEnd;
         }
@@ -511,11 +522,12 @@ private:
         // Scale the precomputed forcing integrals
         // (exact would require recomputing I_k for τ, but this is a
         // good approximation for short arcs)
-        for (int k = 0; k <= 2; ++k) {
+        for (int k = 0; k <= 3; ++k) {
             v += Dreg * alphaE * std::pow(frac, k + 1) * (
                 a.c0 * sol.forcingIntegrals[0]
                 + a.c1 * sol.forcingIntegrals[1]
                 + a.c2 * sol.forcingIntegrals[2]
+                + a.c3 * sol.forcingIntegrals[3]
             ) / (k + 1.0);  // crude scaling
         }
         // Actually, let's use a simpler approach: just compute v at τ
@@ -526,6 +538,7 @@ private:
                 a.c0 * sol.forcingIntegrals[0]
                 + a.c1 * sol.forcingIntegrals[1]
                 + a.c2 * sol.forcingIntegrals[2]
+                + a.c3 * sol.forcingIntegrals[3]
             )
         );
 
