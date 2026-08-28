@@ -410,10 +410,10 @@ h2 {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  padding: 0.7rem 0.5rem;
+  padding: 0.65rem 0.5rem;
   border-bottom: 1px solid var(--row-border);
   cursor: pointer;
-  color: var(--text); /* ensure children inherit a readable color */
+  color: var(--text);
   background: transparent;
   transition: background 0.15s ease;
 }
@@ -422,9 +422,20 @@ h2 {
   background: var(--row-hover);
 }
 
+.catalog-row input[type='checkbox'] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--mint);
+}
+
 .catalog-row span {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .catalog-row strong,
@@ -433,6 +444,7 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .catalog-row strong {
@@ -442,18 +454,15 @@ h2 {
 }
 
 .catalog-row small {
-  margin-top: 0.2rem;
+  margin-top: 0.15rem;
   font-size: 0.72rem;
   color: var(--text-muted);
-}
-
-.catalog-row input[type='checkbox'] {
-  accent-color: var(--mint);
 }
 
 .catalog-row button {
   padding: 0.25rem 0.5rem;
   color: var(--text);
+  flex-shrink: 0;
 }
 
 /* ===========================================================================
