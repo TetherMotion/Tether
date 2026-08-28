@@ -2,26 +2,24 @@
  * @file components.ts
  * @brief Custom HTML elements (web components) for the Tether IO dashboard.
  *
- * Defines four custom elements:
+ * Defines three custom elements:
  *
  *   - `<tether-catalog>`       — Filterable, selectable list of params/signals.
  *   - `<tether-value-card>`    — Read-once value display for a single entry.
  *   - `<tether-function-list>` — Read-only list of RPC functions.
- *   - `<tether-scope>`         — Canvas-based oscilloscope for live streams.
+ *
+ * The WebGPU-based oscilloscope (`<tether-webgpu-scope>`) is defined in
+ * {@link ./webgpu-scope} and re-exported here for convenience.
  *
  * These components are framework-agnostic (no React/Vue) and communicate
  * with the parent `<tether-app>` via properties and `CustomEvent`s.
  */
 
-import {
-  CatalogEntry,
-  FunctionEntry,
-  StreamRow,
-  ValueType,
-  decodeValueBytes,
-  formatValue,
-} from './protocol';
+import { CatalogEntry, FunctionEntry, ValueType, decodeValueBytes, formatValue } from './protocol';
 import { TetherIOClient } from './client';
+
+// Re-export the WebGPU oscilloscope so importing 'components' registers it.
+export { WebGPUScope } from './webgpu-scope';
 
 /** Human-readable name for a ValueType enum value (e.g. `F64` → `"F64"`). */
 const typeName = (type: number): string => ValueType[type] ?? `type ${type}`;
@@ -209,125 +207,3 @@ export class TetherFunctionList extends HTMLElement {
   }
 }
 customElements.define('tether-function-list', TetherFunctionList);
-
-// ===========================================================================
-// TetherScope — canvas-based oscilloscope
-// ===========================================================================
-
-/**
- * Canvas-based oscilloscope that plots streamed values as a scrolling line.
- *
- * Call `push(row, type)` for each `StreamRow` received.  The scope keeps a
- * ring buffer of up to 1200 points and auto-scales to the min/max of the
- * visible window.
- */
-export class TetherScope extends HTMLElement {
-  /** Ring buffer of numeric sample points (max 1200). */
-  private points: number[] = [];
-  /** Cached 2D rendering context (lazily acquired on connect). */
-  private context?: CanvasRenderingContext2D | null;
-  /** ResizeObserver for high-DPI canvas resizing. */
-  private resizeObserver?: ResizeObserver;
-
-  /** Lifecycle: element inserted into the DOM. */
-  connectedCallback(): void {
-    this.innerHTML = '<canvas aria-label="Live signal plot"></canvas>';
-    const canvas = this.querySelector('canvas')!;
-    this.context = canvas.getContext('2d');
-    if (typeof ResizeObserver !== 'undefined') {
-      this.resizeObserver = new ResizeObserver(() => this.resize());
-      this.resizeObserver.observe(this);
-    }
-    this.resize();
-  }
-
-  /** Lifecycle: element removed from the DOM. */
-  disconnectedCallback(): void {
-    this.resizeObserver?.disconnect();
-  }
-
-  /**
-   * Push one stream row into the ring buffer and redraw.
-   *
-   * Only the first value of the row is plotted (single-channel scope).
-   * Non-numeric values are silently dropped.
-   *
-   * @param row  The StreamRow from a StreamData message.
-   * @param type Value type for decoding the raw bytes.
-   */
-  push(row: StreamRow, type: ValueType): void {
-    const bytes = row.values[0];
-    if (!bytes) return;
-    const value = decodeValueBytes(bytes, type);
-    const numeric =
-      typeof value === 'bigint'
-        ? Number(value)
-        : typeof value === 'boolean'
-          ? value
-            ? 1
-            : 0
-          : typeof value === 'number'
-            ? value
-            : Number(value);
-    if (!Number.isFinite(numeric)) return;
-    this.points.push(numeric);
-    if (this.points.length > 1200) this.points.splice(0, this.points.length - 1200);
-    this.draw();
-  }
-
-  /** Resize the canvas to match the element's CSS size (high-DPI aware). */
-  private resize(): void {
-    const canvas = this.querySelector('canvas') as HTMLCanvasElement | null;
-    if (!canvas) return;
-    const rect = this.getBoundingClientRect();
-    const scale = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
-    canvas.width = Math.max(1, rect.width * scale);
-    canvas.height = Math.max(1, rect.height * scale);
-    this.draw();
-  }
-
-  /** Redraw the oscilloscope: grid lines + the value trace. */
-  private draw(): void {
-    if (!this.context || !this.canvas) return;
-    const canvas = this.canvas;
-    const ctx = this.context;
-    const width = canvas.width;
-    const height = canvas.height;
-
-    // Clear and draw horizontal grid lines.
-    ctx.clearRect(0, 0, width, height);
-    ctx.strokeStyle = 'rgba(130,180,220,.15)';
-    for (let y = height / 4; y < height; y += height / 4) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(width, y);
-      ctx.stroke();
-    }
-
-    if (this.points.length < 2) return;
-
-    // Auto-scale to the current min/max.
-    const min = Math.min(...this.points);
-    const max = Math.max(...this.points);
-    const range = max - min || 1;
-
-    // Draw the trace.
-    ctx.strokeStyle = '#80f4d0';
-    ctx.lineWidth = 2 * devicePixelRatio;
-    ctx.beginPath();
-    this.points.forEach((point, index) => {
-      const x = (index / (this.points.length - 1)) * width;
-      const y =
-        height - ((point - min) / range) * (height - 20 * devicePixelRatio) - 10 * devicePixelRatio;
-      if (index === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-  }
-
-  /** The inner <canvas> element (lazily queried). */
-  private get canvas(): HTMLCanvasElement | null {
-    return this.querySelector('canvas');
-  }
-}
-customElements.define('tether-scope', TetherScope);

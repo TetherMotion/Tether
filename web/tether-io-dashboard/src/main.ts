@@ -14,16 +14,37 @@
 
 import './components';
 import { TetherIOClient } from './client';
-import { CatalogEntry, FunctionEntry, ValueType } from './protocol';
+import {
+  CatalogEntry,
+  FunctionEntry,
+  StreamLayoutEntry,
+  StreamRow,
+  ValueType,
+  decodeValueBytes,
+} from './protocol';
 import './style.css';
 
-/** Type alias for the `<tether-scope>` element's public interface. */
+/** Type alias for the `<tether-webgpu-scope>` element's public interface. */
 type TetherScope = HTMLElement & {
-  push: (row: unknown, type: ValueType) => void;
+  setChannels: (channels: { name: string; color: [number, number, number] }[]) => void;
+  push: (timestampUs: bigint, values: number[]) => void;
+  clear: () => void;
 };
 
 /** Tab identifiers for the catalog navigation. */
 type Tab = 'all' | 'signals' | 'params' | 'functions';
+
+/** Default color palette for stream channels (ggplot-like). */
+const STREAM_COLORS: [number, number, number][] = [
+  [0.0, 0.45, 0.75], // blue
+  [0.85, 0.33, 0.1], // orange
+  [0.0, 0.62, 0.45], // green
+  [0.8, 0.1, 0.2], // red
+  [0.58, 0.4, 0.74], // purple
+  [0.91, 0.59, 0.09], // brown
+  [0.75, 0.31, 0.5], // pink
+  [0.4, 0.4, 0.4], // gray
+];
 
 /**
  * Root dashboard component.
@@ -43,6 +64,8 @@ class TetherApp extends HTMLElement {
   private activeKind: 'param' | 'signal' = 'signal';
   /** Cached function catalog entries. */
   private functions: FunctionEntry[] = [];
+  /** Layout of the currently configured stream (set by configureStream). */
+  private streamLayout: StreamLayoutEntry[] = [];
 
   // ---- Lifecycle --------------------------------------------------------
 
@@ -155,7 +178,7 @@ class TetherApp extends HTMLElement {
                 </div>
                 <span class="live-dot">● LIVE</span>
               </div>
-              <tether-scope id="scope"></tether-scope>
+              <tether-webgpu-scope id="scope"></tether-webgpu-scope>
             </section>
 
             <section class="value-grid" id="value-grid"></section>
@@ -226,13 +249,22 @@ class TetherApp extends HTMLElement {
       ),
     );
 
-    // Stream data → push into the oscilloscope
+    // Stream data → decode all channels and push into the WebGPU oscilloscope
     this.client.addEventListener('stream', (event: Event) => {
-      const row = (event as CustomEvent).detail;
-      this.querySelector<TetherScope>('tether-scope')?.push(
-        row,
-        this.active?.type ?? ValueType.F32,
-      );
+      const row = (event as CustomEvent<StreamRow>).detail;
+      const scope = this.querySelector<TetherScope>('tether-webgpu-scope');
+      if (scope && this.streamLayout.length > 0) {
+        // Decode each channel's value from the raw bytes.
+        const values = row.values.map((bytes, i) => {
+          const type = this.streamLayout[i]?.type ?? ValueType.F32;
+          const decoded = decodeValueBytes(bytes, type);
+          if (typeof decoded === 'number') return decoded;
+          if (typeof decoded === 'bigint') return Number(decoded);
+          if (typeof decoded === 'boolean') return decoded ? 1 : 0;
+          return 0;
+        });
+        scope.push(row.timestampUs, values);
+      }
       this.querySelector('#metric-points')!.textContent = String(row.values.length);
     });
   }
@@ -391,6 +423,23 @@ class TetherApp extends HTMLElement {
         this.querySelector('tether-catalog') as HTMLElement & { selectedIds: bigint[] }
       ).selectedIds;
       await this.client.configureStream(selectedIds, 10, 1);
+
+      // Store the stream layout and configure the WebGPU scope's channels.
+      this.streamLayout = this.client.currentStreamLayout;
+      const scope = this.querySelector<TetherScope>('tether-webgpu-scope');
+      if (scope) {
+        // Build channel info from the stream layout + catalog entries.
+        const allEntries = [...this.signals, ...this.params];
+        const channels = this.streamLayout.map((entry, i) => {
+          const catalogEntry = allEntries.find((e) => e.id === entry.id);
+          const name = catalogEntry?.name ?? `ch${i}`;
+          const color = STREAM_COLORS[i % STREAM_COLORS.length] ?? ([0.5, 0.5, 0.5] as const);
+          return { name, color };
+        });
+        scope.setChannels(channels);
+        scope.clear();
+      }
+
       await this.client.startStream();
       button.dataset.running = '1';
       button.textContent = 'Stop stream';
