@@ -37,26 +37,37 @@
 
 #include <drogon/drogon.h>
 
-#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
-#include <csignal>
 #include <iostream>
+#include <mutex>
+#include <stop_token>
 #include <string>
+#include <thread>
 
 using namespace tether::io;
 using tether::io::example::TetherIOWebSocketController;
 
 namespace {
 
-std::atomic<bool> g_stopRequested{false};
 bool g_verbose = false;
 
+std::stop_source g_stopSource;
+std::condition_variable_any g_stopCv;
+std::mutex g_stopMutex;
+
+/// Called by Drogon's SIGINT/SIGTERM dispatch (from a safe context).
+void onStopSignal() {
+    g_stopSource.request_stop();
+    g_stopCv.notify_all();
+}
+
 void installSignalHandlers() {
-    std::signal(SIGINT,  [](int) { g_stopRequested.store(true); });
-    std::signal(SIGTERM, [](int) { g_stopRequested.store(true); });
+    drogon::app().setIntSignalHandler(onStopSignal);
+    drogon::app().setTermSignalHandler(onStopSignal);
 }
 
 uint64_t nowUs() {
@@ -269,19 +280,21 @@ int main(int argc, char** argv) {
 
     drogon::app().addListener("0.0.0.0", port);
 
-    // Run Drogon in a separate thread so we can check for Ctrl+C
-    std::thread drogonThread([] {
+    // Run Drogon in a jthread so the destructor will join automatically.
+    std::jthread drogonThread([](std::stop_token) {
         drogon::app().run();
     });
 
-    // Wait for Ctrl+C / SIGTERM
-    while (!g_stopRequested.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
+    // Wait for SIGINT/SIGTERM using std::stop_token — no polling.
+    std::unique_lock lock(g_stopMutex);
+    g_stopCv.wait(
+        lock,
+        g_stopSource.get_token(),
+        [] { return g_stopSource.stop_requested(); });
 
     std::cout << "\nShutting down..." << std::endl;
     drogon::app().quit();
-    drogonThread.join();
+    // jthread destructor will request stop and join once run() returns.
 
     return 0;
 }
