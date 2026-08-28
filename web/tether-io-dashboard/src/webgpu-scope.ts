@@ -514,7 +514,7 @@ export class WebGPUScope extends HTMLElement {
 
     // Render uniforms (56 bytes: 12 × f32 + 2 × u32).
     this.renderUniforms = device.createBuffer({
-      size: 120, // 56 bytes (12 f32 + 2 u32) + 64 bytes (4 vec4 theme colors)
+      size: 128, // 56 bytes (12 f32 + 2 u32) + 64 bytes (4 vec4 theme colors) padded to 16
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
