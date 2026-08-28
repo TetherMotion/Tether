@@ -24,6 +24,7 @@
 #include <gtest/gtest.h>
 #include <cstring>
 #include <memory>
+#include <span>
 #include <vector>
 #include "fsoe/FSoEMasterConnection.hpp"
 #include "fsoe/FSoESlave.hpp"
@@ -125,7 +126,7 @@ static uint16_t extractConnId(const uint8_t* frame, size_t len) {
 
 /// Extract SafeData from an FSoE frame using the proper CRC-aware parser.
 static bool extractSafeData(const uint8_t* frame, size_t frameLen,
-                            uint8_t* data, size_t dataLen) {
+                            std::span<uint8_t> data, size_t dataLen) {
     uint8_t cmd = 0;
     size_t extracted_len = 0;
     uint16_t conn_id = 0;
@@ -375,7 +376,7 @@ TEST(FSoEParameterConformance, MasterRejectsEchoMismatch) {
     }
     // Recalculate CRC for the corrupted frame.
     uint8_t corrupted[64];
-    uint8_t safe_data[8] = {0};
+    uint8_t safe_data[CRC::MAX_PARSE_DATA_SIZE] = {0};
     uint8_t cmd = 0;
     size_t data_len = 0;
     uint16_t conn_id = 0;
