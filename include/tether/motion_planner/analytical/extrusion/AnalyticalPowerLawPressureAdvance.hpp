@@ -219,7 +219,7 @@ private:
             // ∫₀^{tauEnd} (α_e · v(τ))^n dτ = α_e^n · ∫ v(τ)^n dτ
             double alphaN = std::pow(a.extrusionRatio, n);
             double integral = velocityPowerIntegral(a.c0, a.c1, a.c2,
-                                                     n, tauEnd);
+                                                     a.c3, n, tauEnd);
             total += Keff * alphaN * integral;
         }
         return total;

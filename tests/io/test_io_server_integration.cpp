@@ -9,6 +9,7 @@
 #include <thread>
 #include <chrono>
 #include <cstring>
+#include <atomic>
 
 using namespace tether::io;
 using namespace tether::io::testing;
@@ -134,7 +135,7 @@ protected:
 
     Registry registry_;
     uint32_t paramVal_ = 100;
-    uint64_t fakeTs_ = 1000;
+    std::atomic<uint64_t> fakeTs_{1000};
 };
 
 // ===========================================================================

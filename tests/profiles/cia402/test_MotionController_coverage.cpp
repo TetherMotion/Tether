@@ -341,8 +341,10 @@ TEST(MotionProfileBaseTest, SelectOptimalProfile) {
 
 TEST(MotionLimitsTest, DefaultValues) {
     MotionLimits limits{};
-    EXPECT_GT(limits.maxVelocity, 0);
-    EXPECT_GT(limits.maxAcceleration, 0);
+    // Default-constructed MotionLimits are intentionally zero (meaning
+    // "unset" — the profile uses its own defaults when a limit is 0).
+    EXPECT_EQ(limits.maxVelocity, 0u);
+    EXPECT_EQ(limits.maxAcceleration, 0u);
 }
 
 // ============================================================================

@@ -140,16 +140,26 @@ TEST(KlipperExtrusionCompensation, PowerLawChangesEStepsVsLinear) {
     //
     // Compare the E-axis step sequences: if they are identical, the PA
     // models are not being applied differently.
-    const auto& linSeq = seqsLin[3]; // E-axis (oid=3)
-    const auto& plSeq = seqsPl[3];
+    // Find the E-axis (oid=3) by OID, since translate() skips axes
+    // with no steps, so the index may not be 3.
+    const motion::AxisStepSequence* linSeq = nullptr;
+    const motion::AxisStepSequence* plSeq = nullptr;
+    for (const auto& s : seqsLin) {
+        if (s.oid == 3) { linSeq = &s; break; }
+    }
+    for (const auto& s : seqsPl) {
+        if (s.oid == 3) { plSeq = &s; break; }
+    }
+    ASSERT_NE(linSeq, nullptr) << "E-axis not found in linear PA result";
+    ASSERT_NE(plSeq, nullptr) << "E-axis not found in power-law PA result";
     bool sequencesDiffer = false;
-    if (linSeq.steps.size() != plSeq.steps.size()) {
+    if (linSeq->steps.size() != plSeq->steps.size()) {
         sequencesDiffer = true;
     } else {
-        for (size_t i = 0; i < linSeq.steps.size(); ++i) {
-            if (linSeq.steps[i].interval != plSeq.steps[i].interval ||
-                linSeq.steps[i].count != plSeq.steps[i].count ||
-                linSeq.steps[i].add != plSeq.steps[i].add) {
+        for (size_t i = 0; i < linSeq->steps.size(); ++i) {
+            if (linSeq->steps[i].interval != plSeq->steps[i].interval ||
+                linSeq->steps[i].count != plSeq->steps[i].count ||
+                linSeq->steps[i].add != plSeq->steps[i].add) {
                 sequencesDiffer = true;
                 break;
             }
