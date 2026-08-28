@@ -2204,12 +2204,29 @@ private:
         for (size_t i = 0; i <= samples; ++i) {
             const T s = static_cast<T>(sTotal * static_cast<double>(i) /
                                         static_cast<double>(samples));
+            // Evaluate jerk bounds at the local velocity limit, not the
+            // global envelope. At high-curvature points (corners), the
+            // velocity limit drops, reducing centripetal jerk consumption
+            // and leaving more tangential jerk authority. Using the global
+            // envelope velocity here would make corners with high curvature
+            // incorrectly drive the jerk bound negative for the entire path.
+            const double vLocal = std::min(
+                bounds.velocity, static_cast<double>(vLimit(s)));
             for (const double a : {-bounds.acceleration, 0.0,
                                    bounds.acceleration}) {
                 const auto interval = evaluator_.etaBounds(
-                    s, static_cast<T>(bounds.velocity), static_cast<T>(a), path_);
-                const double symmetric = std::min(interval.eta_max,
-                                                  -interval.eta_min);
+                    s, static_cast<T>(vLocal), static_cast<T>(a), path_);
+                double symmetric = std::min(interval.eta_max,
+                                            -interval.eta_min);
+                // At sharp corners the centripetal jerk can consume all
+                // jerk authority, making eta_min > 0 and symmetric < 0.
+                // The pulse plan uses symmetric jerk, so clamp to a small
+                // positive value. The velocity envelope already enforces
+                // the corner speed limit; the small jerk ensures the
+                // trajectory can still transition through the corner.
+                if (symmetric <= 0.0) {
+                    symmetric = std::min(bounds.jerk, 1.0);
+                }
                 bounds.jerk = std::min(bounds.jerk, symmetric);
             }
         }
@@ -2230,26 +2247,39 @@ private:
             bounds.jerk, std::sqrt(bounds.acceleration * bounds.snap));
         if (!(maxJerk > 0.0)) return pulse;
 
+        // Velocity change of a purely triangular jerk pulse (jerkTime = 0)
+        // at maxJerk: Δv = j*·(2·t_s²) = 2·maxJerk³/snap²
         const double vTriangularAtMaxJerk =
-            maxJerk * maxJerk * maxJerk / (bounds.snap * bounds.snap);
+            2.0 * maxJerk * maxJerk * maxJerk / (bounds.snap * bounds.snap);
         double peakJerk = maxJerk;
         if (pulse.velocityChange < vTriangularAtMaxJerk) {
+            // Sub-triangular: jerkTime = 0, solve Δv = 2·peakJerk³/snap²
             peakJerk = std::cbrt(pulse.velocityChange * bounds.snap *
-                                 bounds.snap);
+                                 bounds.snap / 2.0);
         }
 
         pulse.peakJerk = peakJerk;
         pulse.snapTime = peakJerk / bounds.snap;
         const double jerkPlateauAtAMax = std::max(
             0.0, bounds.acceleration / peakJerk - pulse.snapTime);
+        // Velocity change of the 7-segment pulse without the acceleration
+        // plateau. Derived from exact snap-space integration of the 4 snap
+        // segments + 2 jerk segments (starting from rest, a=0, j=0):
+        //   Δv = j*·(2·t_s² + 3·t_s·t_j + t_j²)
+        // The factor 2 on t_s² accounts for the velocity contribution of all
+        // four snap segments (two on each half of the symmetric pulse).
         const double velocityWithoutAccelPlateau = peakJerk *
-            (pulse.snapTime * pulse.snapTime +
+            (2.0 * pulse.snapTime * pulse.snapTime +
              3.0 * pulse.snapTime * jerkPlateauAtAMax +
              jerkPlateauAtAMax * jerkPlateauAtAMax);
 
         if (pulse.velocityChange <= velocityWithoutAccelPlateau) {
+            // Triangular jerk pulse (no acceleration plateau).
+            // Solve j*·(2·t_s² + 3·t_s·t_j + t_j²) = Δv for t_j:
+            //   t_j² + 3·t_s·t_j + (2·t_s² - Δv/j*) = 0
+            //   t_j = (-3·t_s + sqrt(t_s² + 4·Δv/j*)) / 2
             const double discriminant = std::max(
-                0.0, 5.0 * pulse.snapTime * pulse.snapTime +
+                0.0, pulse.snapTime * pulse.snapTime +
                 4.0 * pulse.velocityChange / peakJerk);
             pulse.jerkTime = std::max(
                 0.0, 0.5 * (-3.0 * pulse.snapTime +
@@ -2266,13 +2296,62 @@ private:
         return pulse;
     }
 
+    static double pulseDistance(const AccelerationPulse& pulse, double sign,
+                                double startVelocity,
+                                const PlanningBounds& bounds) {
+        // Replicate the 7-segment structure of appendPulse exactly:
+        //   snap(+sign*sigma, snapTime)
+        //   singular(+sign*peakJerk, jerkTime)
+        //   snap(-sign*sigma, snapTime)
+        //   singular(0, plateauTime)
+        //   snap(-sign*sigma, snapTime)
+        //   singular(-sign*peakJerk, jerkTime)
+        //   snap(+sign*sigma, snapTime)
+        double v = startVelocity, a = 0.0, j = 0.0, s = 0.0;
+        const double sigma = bounds.snap;
+
+        auto stepSnap = [&](double sigmaVal, double dur) {
+            if (dur <= 1e-14) return;
+            double vOld = v, aOld = a, jOld = j;
+            s += SnapSeg::ds(vOld, aOld, jOld, sigmaVal, dur);
+            j = jOld + sigmaVal * dur;
+            a = aOld + jOld * dur + 0.5 * sigmaVal * dur * dur;
+            v = vOld + aOld * dur + 0.5 * jOld * dur * dur
+                + (1.0/6.0) * sigmaVal * dur * dur * dur;
+        };
+        auto stepSingular = [&](double jerkVal, double dur) {
+            if (dur <= 1e-14) return;
+            double vOld = v, aOld = a;
+            s += SingularJSeg::ds(vOld, aOld, jerkVal, dur);
+            a = aOld + jerkVal * dur;
+            v = vOld + aOld * dur + 0.5 * jerkVal * dur * dur;
+            j = jerkVal;
+        };
+
+        stepSnap(sign * sigma, pulse.snapTime);
+        stepSingular(sign * pulse.peakJerk, pulse.jerkTime);
+        stepSnap(-sign * sigma, pulse.snapTime);
+        stepSingular(0.0, pulse.plateauTime);
+        stepSnap(-sign * sigma, pulse.snapTime);
+        stepSingular(-sign * pulse.peakJerk, pulse.jerkTime);
+        stepSnap(sign * sigma, pulse.snapTime);
+
+        return s;
+    }
+
     static double minimumDistanceForPeak(
         double peakVelocity, double startVelocity, double endVelocity,
         const PlanningBounds& bounds) {
         const auto up = makePulse(peakVelocity - startVelocity, bounds);
         const auto down = makePulse(peakVelocity - endVelocity, bounds);
-        return 0.5 * (startVelocity + peakVelocity) * up.duration() +
-               0.5 * (endVelocity + peakVelocity) * down.duration();
+        // Use exact snap-space integration instead of the trapezoidal
+        // approximation 0.5*(v0+peak)*duration. The trapezoidal formula
+        // assumes linear velocity ramp, but the actual velocity profile is
+        // quartic (snap-limited), so the approximation systematically
+        // underestimates the distance, causing the peak-velocity binary
+        // search to select a peak that overshoots the path length.
+        return pulseDistance(up, 1.0, startVelocity, bounds) +
+               pulseDistance(down, -1.0, peakVelocity, bounds);
     }
 
     static double snapArcCost(const CostWeights& w, double a0, double j0,
@@ -2442,6 +2521,13 @@ private:
             if (candidate.feasible && candidate.cost < bestCost) {
                 bestCost = candidate.cost;
                 best = std::move(candidate);
+            } else if (!candidate.feasible) {
+                // Prefer specific failure reasons (e.g. "fourth-order") over
+                // the generic "No feasible snap-space pulse candidate".
+                if (best.failureReason == "No feasible snap-space pulse candidate" ||
+                    best.failureReason == "Exact snap-space terminal state was not reached") {
+                    best.failureReason = candidate.failureReason;
+                }
             }
         }
         return best;

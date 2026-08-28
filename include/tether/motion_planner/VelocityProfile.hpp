@@ -451,7 +451,7 @@ private:
         auto prev = it - 1;
         const double ds = it->arcLength - prev->arcLength;
         if (std::abs(ds) <= std::numeric_limits<double>::epsilon()) {
-            return prev->*field;
+            return (*prev).*field;
         }
         double alpha = (arcLength - prev->arcLength) / ds;
         return (*prev).*field * (1.0 - alpha) + (*it).*field * alpha;

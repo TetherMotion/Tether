@@ -153,6 +153,17 @@ public:
      * @brief Human-readable name of the profiler.
      */
     virtual const char* name() const = 0;
+
+    /**
+     * @brief Highest path derivative this profiler can represent.
+     *
+     * Mirrors `VelocityProfile::derivativeOrder()` but is queryable on the
+     * profiler itself (before a profile has been computed). Defaults to
+     * Acceleration (2nd-order); jerk-aware profilers override to return Jerk.
+     */
+    virtual ProfileDerivativeOrder derivativeOrder() const {
+        return ProfileDerivativeOrder::Acceleration;
+    }
 };
 
 } // namespace MotionPlanner
