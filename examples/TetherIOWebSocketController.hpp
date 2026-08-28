@@ -11,12 +11,12 @@
 
 namespace tether::io::example {
 
-class TetherIoWebSocketController
-    : public drogon::WebSocketController<TetherIoWebSocketController, false> {
+class TetherIOWebSocketController
+    : public drogon::WebSocketController<TetherIOWebSocketController, false> {
 public:
     static void initPathRouting() {}
 
-    explicit TetherIoWebSocketController(Registry& registry);
+    explicit TetherIOWebSocketController(Registry& registry, tether::io::LogFn logFn = nullptr);
 
     void handleNewMessage(const drogon::WebSocketConnectionPtr& connection,
                           std::string&& message,
@@ -28,6 +28,7 @@ public:
 private:
     struct Client;
     Registry& registry_;
+    tether::io::LogFn logFn_;
     std::mutex mutex_;
     std::unordered_map<const drogon::WebSocketConnection*, std::shared_ptr<Client>> clients_;
 };

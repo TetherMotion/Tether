@@ -22,13 +22,13 @@ if(TARGET tether_esi)
 endif()
 
 # --- Tether IO binary WebSocket example ---
-# Drogon delivers complete WebSocket frames to the TetherIoWebSocketController,
+# Drogon delivers complete WebSocket frames to the TetherIOWebSocketController,
 # which feeds them to Session with Framing::None (no SLIP — WebSocket already
 # provides message boundaries).
 if(Drogon_FOUND AND TARGET tether_io_protocol AND TARGET Drogon::Drogon)
     add_executable(tether_io_drogon_websocket
         tether_io_drogon_websocket.cpp
-        TetherIoWebSocketController.cpp)
+        TetherIOWebSocketController.cpp)
     target_link_libraries(tether_io_drogon_websocket PRIVATE
         tether_io_protocol Drogon::Drogon)
     target_include_directories(tether_io_drogon_websocket PRIVATE
@@ -42,7 +42,7 @@ if(Drogon_FOUND AND TARGET tether_io_protocol AND TARGET Drogon::Drogon)
     set(WEB_DASHBOARD_DIST_DIR "${PROJECT_SOURCE_DIR}/web/tether-io-dashboard/dist")
     add_executable(web_dashboard_example
         web_dashboard_example.cpp
-        TetherIoWebSocketController.cpp)
+        TetherIOWebSocketController.cpp)
     target_link_libraries(web_dashboard_example PRIVATE
         tether_io_protocol Drogon::Drogon)
     target_include_directories(web_dashboard_example PRIVATE
@@ -227,7 +227,7 @@ add_tether_example(interpret_pcapng
 if(Drogon_FOUND AND TARGET Drogon::Drogon)
     add_executable(tether_ui_backend
         tether_ui_backend.cpp
-        TetherIoWebSocketController.cpp)
+        TetherIOWebSocketController.cpp)
     target_link_libraries(tether_ui_backend PRIVATE
         tether_io_protocol
         tether_gcode
@@ -242,7 +242,7 @@ if(Drogon_FOUND AND TARGET Drogon::Drogon)
 
     add_executable(controlme_ui_backend
         controlme_ui_backend.cpp
-        TetherIoWebSocketController.cpp)
+        TetherIOWebSocketController.cpp)
     target_link_libraries(controlme_ui_backend PRIVATE
         tether_io_protocol
         tether_simulation

@@ -193,6 +193,35 @@ void Session::onMessage(const uint8_t* data, size_t len) {
     const uint8_t* body = data + 1;
     size_t bodyLen = len - 1;
 
+    if (logFn_) {
+        const char* name = "Unknown";
+        switch (static_cast<uint8_t>(type)) {
+            case 0x01: name = "ListParamsReq"; break;
+            case 0x02: name = "ListParamsResp"; break;
+            case 0x03: name = "ConfigureStreamReq"; break;
+            case 0x04: name = "ConfigureStreamAck"; break;
+            case 0x05: name = "StartStream"; break;
+            case 0x06: name = "StopStream"; break;
+            case 0x07: name = "StreamData"; break;
+            case 0x08: name = "Error"; break;
+            case 0x0B: name = "SetParamReq"; break;
+            case 0x0C: name = "SetParamResp"; break;
+            case 0x0D: name = "PingReq"; break;
+            case 0x0E: name = "PongResp"; break;
+            case 0x20: name = "ListSignalsReq"; break;
+            case 0x21: name = "ListSignalsResp"; break;
+            case 0x22: name = "GetParamReq"; break;
+            case 0x23: name = "GetParamResp"; break;
+            case 0x24: name = "GetSignalReq"; break;
+            case 0x25: name = "GetSignalResp"; break;
+            case 0x35: name = "ListFunctionsReq"; break;
+            case 0x36: name = "ListFunctionsResp"; break;
+            case 0x37: name = "CallFunctionReq"; break;
+            default: break;
+        }
+        logFn_("TetherIO", "dispatch %s (bodyLen=%zu)", name, bodyLen);
+    }
+
     switch (type) {
         case MessageType::ListParamsReq:       handleListParamsReq(body, bodyLen); break;
         case MessageType::ListSignalsReq:      handleListSignalsReq(body, bodyLen); break;
@@ -399,6 +428,8 @@ void Session::handleGetSignalReq(const uint8_t* body, size_t len) {
 }
 
 void Session::handleConfigureStreamReq(const uint8_t* body, size_t len) {
+    if (logFn_) logFn_("TetherIO", "handleConfigureStreamReq (bodyLen=%zu, streaming=%d)",
+                        len, streaming_);
     if (streaming_) {
         streaming_ = false;
         rowsInChunk_ = 0;
@@ -532,6 +563,9 @@ void Session::handleConfigureStreamReq(const uint8_t* body, size_t len) {
         w.putU8(slot.valueSize);
     }
     if (w.ok()) sendRaw(txRawBuf_.data(), w.pos);
+    if (logFn_) logFn_("TetherIO", "ConfigureStream OK: specId=%u, %zu entries, rowSize=%u, intervalMs=%u, chunk=%u, skip=%u, trigger=%s",
+                        specId_, collectPlan_.size(), rowSize_, intervalMs, chunk, skip,
+                        trigMode == 0 ? "Time" : "OnChange");
 }
 
 void Session::handleStartStream() {
@@ -545,12 +579,15 @@ void Session::handleStartStream() {
     lastTriggerValue_.clear();
     lastValues_.clear();
     lastValues_.resize(collectPlan_.size());
+    if (logFn_) logFn_("TetherIO", "StartStream: streaming started (interval=%uus, chunk=%u, %zu entries)",
+                        intervalUs_, chunkSize_, collectPlan_.size());
 }
 
 void Session::handleStopStream() {
     if (!streaming_) { sendError(ErrorCode::NotStreaming, "Not streaming"); return; }
     if (rowsInChunk_ > 0) sendStreamData();
     streaming_ = false;
+    if (logFn_) logFn_("TetherIO", "StopStream: streaming stopped");
 }
 
 void Session::handlePingReq(const uint8_t* body, size_t len) {
@@ -1468,6 +1505,8 @@ void Session::publishLog(LogSeverity severity, std::string_view component,
 }
 
 void Session::sendError(ErrorCode code, const char* msg) {
+    if (logFn_) logFn_("TetherIO", "← TX Error: code=%u msg=%s",
+                        static_cast<unsigned>(code), msg ? msg : "(null)");
     size_t msgLen = std::min(msg ? std::strlen(msg) : 0,
                              static_cast<size_t>(UINT16_MAX));
     size_t totalLen = 1 + 4 + 2 + msgLen;
@@ -1695,9 +1734,14 @@ void Session::sendStreamData() {
     w.putBytes(chunkBuf_.data(), payloadLen);
 
     if (w.ok()) {
+        if (logFn_) logFn_("TetherIO", "← TX StreamData: specId=%u, %u rows, %zu bytes",
+                            specId_, rowsInChunk_, w.pos);
         if (!sendRaw(txRawBuf_.data(), w.pos)) {
+            if (logFn_) logFn_("TetherIO", "sendStreamData: sendRaw failed, stopping stream");
             streaming_ = false;
         }
+    } else {
+        if (logFn_) logFn_("TetherIO", "sendStreamData: BufWriter failed (totalLen=%zu)", totalLen);
     }
     rowsInChunk_ = 0;
     chunkWritePos_ = 0;
