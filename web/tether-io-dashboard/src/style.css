@@ -106,7 +106,9 @@ body {
     radial-gradient(circle at 80% 0%, var(--bg-glow-1) 0, transparent 34rem),
     radial-gradient(circle at 10% 80%, var(--bg-glow-2) 0, transparent 32rem);
   background-attachment: fixed;
-  transition: background-color 0.4s ease, color 0.4s ease;
+  transition:
+    background-color 0.4s ease,
+    color 0.4s ease;
 }
 
 button,
@@ -121,7 +123,10 @@ button {
   background: var(--glass-1);
   padding: 0.65rem 0.9rem;
   cursor: pointer;
-  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
   backdrop-filter: blur(12px);
 }
 
@@ -187,7 +192,9 @@ footer {
   color: var(--accent-text-on);
   font: 700 1.25rem 'Space Grotesk';
   background: linear-gradient(135deg, var(--mint), var(--blue));
-  box-shadow: 0 0 30px var(--accent-glow), inset 0 1px rgba(255, 255, 255, 0.3);
+  box-shadow:
+    0 0 30px var(--accent-glow),
+    inset 0 1px rgba(255, 255, 255, 0.3);
 }
 
 strong,
@@ -330,7 +337,10 @@ h2 {
     0 18px 60px var(--glass-shadow),
     0 2px 8px var(--glass-shadow-deep);
   backdrop-filter: blur(24px);
-  transition: background 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease;
+  transition:
+    background 0.4s ease,
+    border-color 0.4s ease,
+    box-shadow 0.4s ease;
 }
 
 .catalog-panel {
@@ -425,6 +435,7 @@ h2 {
 
 .catalog-row strong {
   font-size: 0.82rem;
+  color: var(--text);
 }
 
 .catalog-row small {
