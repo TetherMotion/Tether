@@ -82,13 +82,17 @@ ArcState stateAt(const WeightedArc& arc, double tau) {
             SnapSeg::j(arc.j0, arc.sigma, tau)};
 }
 
-double simpson(const std::function<double(double)>& f, double end, int n = 2048) {
-    if (end == 0.0) return 0.0;
+double simpson(const std::function<double(double)>& f, double start, double dur, int n = 2048) {
+    if (dur == 0.0) return 0.0;
     if (n % 2 != 0) ++n;
-    const double h = end / n;
-    double sum = f(0.0) + f(end);
-    for (int i = 1; i < n; ++i) sum += (i % 2 == 0 ? 2.0 : 4.0) * f(i * h);
+    const double h = dur / n;
+    double sum = f(start) + f(start + dur);
+    for (int i = 1; i < n; ++i) sum += (i % 2 == 0 ? 2.0 : 4.0) * f(start + i * h);
     return sum * h / 3.0;
+}
+
+double simpson(const std::function<double(double)>& f, double end, int n = 2048) {
+    return simpson(f, 0.0, end, n);
 }
 
 void expectWssContract(const WeightedSwitchingStructure<2>& wss,
@@ -269,11 +273,18 @@ TEST(SnapSpaceTrajectoryContract, ClosedFormCostMatchesNumericalQuadrature) {
     planner.computeProfile(path, 80.0, 0.0, 0.0, 301);
     auto wss = planner.weightedSource();
     ASSERT_NE(wss, nullptr) << planner.failureReason();
-    const double numericalCost = simpson([&](double t) {
-        const double a = wss->pathAcceleration(t);
-        const double j = wss->pathJerk(t);
-        return weights.w_t + weights.w_a * a * a + weights.w_j * j * j;
-    }, wss->totalTime());
+    // Per-arc Simpson quadrature: the jerk is discontinuous at arc
+    // boundaries, so a global Simpson rule loses its O(h^4) convergence.
+    // Integrating each arc separately preserves the high-order accuracy.
+    const auto& arcs = wss->arcs();
+    double numericalCost = 0.0;
+    for (const auto& arc : arcs) {
+        numericalCost += simpson([&](double t) {
+            const double a = wss->pathAcceleration(t);
+            const double j = wss->pathJerk(t);
+            return weights.w_t + weights.w_a * a * a + weights.w_j * j * j;
+        }, arc.t0, arc.duration);
+    }
     EXPECT_NEAR(wss->costValue(), numericalCost,
                 2e-6 * (1.0 + std::abs(numericalCost)));
 }
