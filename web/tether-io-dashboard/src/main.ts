@@ -71,6 +71,13 @@ class TetherApp extends HTMLElement {
 
   /** Lifecycle: element inserted into the DOM — render, bind, auto-connect. */
   connectedCallback(): void {
+    // Default to light mode unless the user previously chose dark.
+    const saved = localStorage.getItem('tether-theme');
+    if (saved === 'dark' || saved === 'light') {
+      document.documentElement.dataset.theme = saved;
+    } else {
+      document.documentElement.dataset.theme = 'light';
+    }
     this.render();
     this.bind();
     void this.connect();
@@ -101,6 +108,9 @@ class TetherApp extends HTMLElement {
           <div class="connection">
             <input id="url" value="${wsUrl}" aria-label="WebSocket URL">
             <button id="connect">Connect</button>
+            <button id="theme-toggle" class="theme-toggle" aria-label="Toggle theme" title="Toggle light/dark">
+              ${document.documentElement.dataset.theme === 'dark' ? '\u2600\ufe0f' : '\u{1F319}'}
+            </button>
             <span id="status" class="status">Offline</span>
           </div>
         </header>
@@ -214,6 +224,11 @@ class TetherApp extends HTMLElement {
     this.querySelector<HTMLButtonElement>('#connect')!.addEventListener(
       'click',
       () => void this.connect(),
+    );
+
+    // Theme toggle (light/dark)
+    this.querySelector<HTMLButtonElement>('#theme-toggle')!.addEventListener('click', () =>
+      this.toggleTheme(),
     );
 
     // Read / Stream buttons
@@ -444,6 +459,24 @@ class TetherApp extends HTMLElement {
       button.dataset.running = '1';
       button.textContent = 'Stop stream';
     }
+  }
+
+  // ---- Theme ---------------------------------------------------------------
+
+  /**
+   * Toggle between light and dark themes.
+   *
+   * Persists the choice to `localStorage` and updates the toggle button icon.
+   * The WebGPU oscilloscope reads CSS variables on its next frame, so no
+   * explicit re-render is needed.
+   */
+  private toggleTheme(): void {
+    const current = document.documentElement.dataset.theme ?? 'light';
+    const next = current === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem('tether-theme', next);
+    const btn = this.querySelector<HTMLButtonElement>('#theme-toggle');
+    if (btn) btn.textContent = next === 'dark' ? '\u2600\ufe0f' : '\u{1F319}';
   }
 
   // ---- Status display ---------------------------------------------------

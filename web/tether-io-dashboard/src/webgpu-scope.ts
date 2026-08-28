@@ -125,6 +125,11 @@ const SHADER = /* wgsl */ `
     yMajorStep    : f32,
     writeIndex    : u32,
     bufferSamples : u32,
+    // Theme colors (packed as vec4s for 16-byte alignment).
+    marginColor   : vec4<f32>,  // offset 56
+    plotBgColor   : vec4<f32>,  // offset 72
+    minorColor    : vec4<f32>,  // offset 88
+    majorColor    : vec4<f32>,  // offset 104
   };
 
   @group(0) @binding(0) var<uniform> ru : RenderUniforms;
@@ -208,8 +213,8 @@ const SHADER = /* wgsl */ `
 
   @fragment
   fn fs_grid(in : GridVSOut) -> @location(0) vec4<f32> {
-    let marginColor = vec3<f32>(0.94, 0.94, 0.94);
-    let plotBg = vec3<f32>(0.97, 0.97, 0.97);
+    let marginColor = ru.marginColor.rgb;
+    let plotBg = ru.plotBgColor.rgb;
 
     let px = in.canvasPx.x;
     let py = in.canvasPx.y;
@@ -235,12 +240,9 @@ const SHADER = /* wgsl */ `
     let xMinor = gridLineIntensity(minorD, 1.0);
     let xMajor = gridLineIntensity(majorD, 1.0);
 
-    let minorColor = vec3<f32>(0.88, 0.88, 0.88);
-    let majorColor = vec3<f32>(0.75, 0.75, 0.78);
-
     var color = plotBg;
-    color = mix(color, minorColor, xMinor * 0.5);
-    color = mix(color, majorColor, xMajor * 0.7);
+    color = mix(color, ru.minorColor.rgb, xMinor * 0.5);
+    color = mix(color, ru.majorColor.rgb, xMajor * 0.7);
 
     return vec4<f32>(color, 1.0);
   }
@@ -512,7 +514,7 @@ export class WebGPUScope extends HTMLElement {
 
     // Render uniforms (56 bytes: 12 × f32 + 2 × u32).
     this.renderUniforms = device.createBuffer({
-      size: 56,
+      size: 120, // 56 bytes (12 f32 + 2 u32) + 64 bytes (4 vec4 theme colors)
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
@@ -759,6 +761,16 @@ export class WebGPUScope extends HTMLElement {
     bufInfo[1] = BUFFER_SAMPLES;
     this.device.queue.writeBuffer(this.renderUniforms, 48, bufInfo);
 
+    // Write theme colors as 4 × vec4<f32> at offset 56 (bytes).
+    // Colors are read from CSS variables so the plot matches the active theme.
+    const theme = this.readThemeColors();
+    const colorData = new Float32Array(new ArrayBuffer(16 * 4));
+    colorData.set(theme.margin, 0);
+    colorData.set(theme.plotBg, 4);
+    colorData.set(theme.minor, 8);
+    colorData.set(theme.major, 12);
+    this.device.queue.writeBuffer(this.renderUniforms, 56, colorData);
+
     this.ensureMsaa(cw, ch, sc);
 
     const encoder = this.device.createCommandEncoder();
@@ -805,6 +817,56 @@ export class WebGPUScope extends HTMLElement {
   }
 
   // =========================================================================
+  // Theme color reading
+  // =========================================================================
+
+  /**
+   * Read theme colors from CSS custom properties.
+   *
+   * Returns 4 RGBA tuples (as `[r, g, b, a]` arrays) for the plot margin,
+   * plot background, minor grid lines, and major grid lines.  The colors
+   * adapt to the active light/dark theme automatically.
+   *
+   * @returns Object with `margin`, `plotBg`, `minor`, `major` — each a
+   *          4-element array of floats in [0, 1].
+   */
+  private readThemeColors(): {
+    margin: [number, number, number, number];
+    plotBg: [number, number, number, number];
+    minor: [number, number, number, number];
+    major: [number, number, number, number];
+  } {
+    const styles = getComputedStyle(this);
+    const isDark = styles.colorScheme === 'dark';
+
+    // Parse a hex color (#rrggbb) to [r, g, b] floats in [0, 1].
+    const hex = (h: string): [number, number, number] => {
+      const m = h.match(/#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i);
+      if (!m) return [0.5, 0.5, 0.5];
+      return [parseInt(m[1]!, 16) / 255, parseInt(m[2]!, 16) / 255, parseInt(m[3]!, 16) / 255];
+    };
+
+    // Read CSS variables; fall back to sensible defaults.
+    const cssVar = (name: string) => styles.getPropertyValue(name).trim();
+    const marginHex = cssVar('--plot-margin') || (isDark ? '#07101c' : '#e8eef5');
+    const plotBgHex = cssVar('--plot-bg') || (isDark ? '#0d1a28' : '#f5f8fc');
+
+    const [mr, mg, mb] = hex(marginHex);
+    const [pr, pg, pb] = hex(plotBgHex);
+
+    // Grid line colors: subtle in both themes.
+    const minor: [number, number, number] = isDark ? [0.35, 0.35, 0.38] : [0.82, 0.85, 0.88];
+    const major: [number, number, number] = isDark ? [0.45, 0.45, 0.5] : [0.65, 0.68, 0.72];
+
+    return {
+      margin: [mr, mg, mb, 1],
+      plotBg: [pr, pg, pb, 1],
+      minor: [minor[0]!, minor[1]!, minor[2]!, 1],
+      major: [major[0]!, major[1]!, major[2]!, 1],
+    };
+  }
+
+  // =========================================================================
   // Axis labels & legend (2D canvas overlay)
   // =========================================================================
 
@@ -824,6 +886,11 @@ export class WebGPUScope extends HTMLElement {
     octx.save();
     octx.scale(dpr, dpr);
 
+    // Read theme-aware text/axis colors from CSS variables.
+    const styles = getComputedStyle(this);
+    const textColor = styles.getPropertyValue('--text').trim() || '#1a2a3a';
+    const textMuted = styles.getPropertyValue('--text-muted').trim() || '#5a7088';
+
     const ml = MARGIN_LEFT;
     const mr = MARGIN_RIGHT;
     const mt = MARGIN_TOP;
@@ -834,7 +901,7 @@ export class WebGPUScope extends HTMLElement {
     const ph = cssH - mt - mb;
 
     // Plot axes (ggplot style: only bottom and left axis lines).
-    octx.strokeStyle = '#333';
+    octx.strokeStyle = textColor;
     octx.lineWidth = 1;
     octx.beginPath();
     octx.moveTo(px, py);
@@ -843,7 +910,7 @@ export class WebGPUScope extends HTMLElement {
     octx.stroke();
 
     octx.font = '11px sans-serif';
-    octx.fillStyle = '#333';
+    octx.fillStyle = textMuted;
 
     // X axis: relative time labels.
     const xStep = niceStep(WINDOW_SEC, 8);
@@ -878,7 +945,7 @@ export class WebGPUScope extends HTMLElement {
 
     // Axis titles.
     octx.font = '13px sans-serif';
-    octx.fillStyle = '#222';
+    octx.fillStyle = textColor;
     octx.textAlign = 'center';
     octx.textBaseline = 'bottom';
     octx.fillText('t (s, relative)', ml + pw / 2, cssH - 4);
@@ -901,7 +968,7 @@ export class WebGPUScope extends HTMLElement {
       const ly = legendY + i * 18;
       octx.fillStyle = `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
       octx.fillRect(legendX, ly - 5, 12, 10);
-      octx.fillStyle = '#333';
+      octx.fillStyle = textMuted;
       const name = this.channels[i]!.name;
       octx.fillText(name, legendX + 16, ly);
     }
