@@ -1,4 +1,4 @@
-#include "WebSocketTransport.hpp"
+#include "TetherIoWebSocketController.hpp"
 
 #include "tether/gcode/GCodeInterpreter.hpp"
 #include "tether/gcode/GCodeParser.hpp"
@@ -6,15 +6,14 @@
 #include "tether/gcode/GCodeVariables.hpp"
 #include "tether/io/ParameterExposer.hpp"
 #include "tether/io/Registry.hpp"
-#include "tether/io/Server.hpp"
 #include "tether/slave/core/SlaveTypes.hpp"
 #include "tether/slave/profiles/CiA402Slave.hpp"
+
+#include <drogon/drogon.h>
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <cstdarg>
-#include <csignal>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -27,8 +26,6 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 using namespace tether::io;
-
-std::atomic<bool> gStopRequested{false};
 
 template <size_t N>
 std::string arrayToString(const std::array<char, N>& value) {
@@ -119,24 +116,6 @@ SignalEntry makeStringSignal(
     entry.maxValueSize = maxValueSize;
     entry.metadata = std::move(metadata);
     return entry;
-}
-
-uint64_t nowUs() {
-    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-        Clock::now().time_since_epoch()).count());
-}
-
-void logFn(const char* tag, const char* fmt, ...) {
-    char buffer[512];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buffer, sizeof(buffer), fmt, args);
-    va_end(args);
-    std::cerr << "[" << tag << "] " << buffer << '\n';
-}
-
-void onSignal(int) {
-    gStopRequested.store(true, std::memory_order_relaxed);
 }
 
 constexpr size_t kRxPDOControlwordOffset = 0;
@@ -716,28 +695,18 @@ int runBackend(uint16_t port) {
     demo.expose(registry);
     demo.start();
 
-    ServerConfig config;
-    config.maxClients = 8;
-    config.timestampFn = nowUs;
-    config.logFn = logFn;
+    drogon::app().registerWebSocketController(
+        "/tether-io", "tether::io::example::TetherIoWebSocketController", {});
+    drogon::DrClassMap::setSingleInstance(
+        std::make_shared<tether::io::example::TetherIoWebSocketController>(registry));
 
-    Server server(
-        registry,
-        std::make_unique<tether::examples::WebSocketTransportServer>(port, "/"),
-        config);
+    std::cout << "tether_ui backend listening on ws://0.0.0.0:" << port << "/tether-io\n";
 
-    if (!server.start()) {
-        std::cerr << "Failed to start tether_ui backend on port " << port << '\n';
-        demo.stop();
-        return 1;
-    }
+    // Run Drogon's event loop (blocks until Ctrl+C — Drogon handles
+    // SIGINT/SIGTERM internally and exits its event loop on its own).
+    drogon::app().addListener("0.0.0.0", port);
+    drogon::app().run();
 
-    std::cout << "tether_ui backend listening on ws://0.0.0.0:" << port << "/\n";
-    while (!gStopRequested.load(std::memory_order_relaxed)) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    server.stop();
     demo.stop();
     return 0;
 }
@@ -745,9 +714,6 @@ int runBackend(uint16_t port) {
 } // namespace
 
 int main(int argc, char** argv) {
-    std::signal(SIGINT, onSignal);
-    std::signal(SIGTERM, onSignal);
-
     uint16_t port = 4001;
     if (argc >= 3 && std::string(argv[1]) == "--port") {
         port = static_cast<uint16_t>(std::stoi(argv[2]));

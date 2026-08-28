@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <memory>
 #include <functional>
+#include <vector>
 
 namespace tether { namespace io {
 
@@ -36,6 +37,20 @@ public:
     /// Returns the number of bytes received, or 0 on disconnect/error.
     /// May block for up to `timeoutMs` milliseconds (0 = non-blocking poll).
     virtual size_t receive(uint8_t* buf, size_t maxLen, uint32_t timeoutMs) = 0;
+
+    /// Receive a complete message into `out`.
+    ///
+    /// For message-oriented transports (e.g. WebSocket), this returns one
+    /// complete transport-level message (one WS frame).  For byte-stream
+    /// transports, this is not supported and returns false — the caller
+    /// should use `receive()` with an external framing layer (e.g. SLIP).
+    ///
+    /// Returns true if a message was received, false on timeout or disconnect.
+    /// The default implementation returns false (not supported).
+    virtual bool receiveMessage(std::vector<uint8_t>& out, uint32_t timeoutMs) {
+        (void)out; (void)timeoutMs;
+        return false;
+    }
 
     /// Close the connection.
     virtual void close() = 0;

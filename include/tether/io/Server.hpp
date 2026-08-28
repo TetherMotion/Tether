@@ -36,6 +36,7 @@ struct ServerConfig {
     InputStreamDataFn inputStreamDataFn;
     ReceiveBufferFactory encodedBufferFactory;
     ReceiveBufferFactory decodedBufferFactory;
+    Framing     framing      = Framing::Slip; ///< Message framing mode
 };
 
 /**
