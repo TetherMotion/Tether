@@ -180,6 +180,40 @@ public:
 
     MotionPlan() = default;
 
+    // Custom move constructor: when a MotionPlan is moved, the underlying
+    // analytical trajectory source (SSR) may hold a raw pointer to the
+    // path. Update that pointer to the new location after the move.
+    MotionPlan(MotionPlan&& other) noexcept
+        : path_(std::move(other.path_))
+        , profile_(std::move(other.profile_))
+        , limits_(std::move(other.limits_))
+        , config_(std::move(other.config_))
+        , renurbsProfile_(std::move(other.renurbsProfile_))
+        , currentFeedOverride_(other.currentFeedOverride_)
+        , timeOffset_(other.timeOffset_)
+        , isReverse_(other.isReverse_)
+        , lastState_(std::move(other.lastState_))
+        , sourceRef_(std::move(other.sourceRef_)) {
+        updateAnalyticalPathPointer();
+    }
+
+    MotionPlan& operator=(MotionPlan&& other) noexcept {
+        if (this != &other) {
+            path_ = std::move(other.path_);
+            profile_ = std::move(other.profile_);
+            limits_ = std::move(other.limits_);
+            config_ = std::move(other.config_);
+            renurbsProfile_ = std::move(other.renurbsProfile_);
+            currentFeedOverride_ = other.currentFeedOverride_;
+            timeOffset_ = other.timeOffset_;
+            isReverse_ = other.isReverse_;
+            lastState_ = std::move(other.lastState_);
+            sourceRef_ = std::move(other.sourceRef_);
+            updateAnalyticalPathPointer();
+        }
+        return *this;
+    }
+
     /**
      * @brief Construct from path and velocity profile
      */
@@ -522,6 +556,22 @@ public:
     }
 
 private:
+    /**
+     * @brief Update the analytical trajectory source's path pointer after a
+     * move. The SSR stores a raw pointer to the path; when the MotionPlan is
+     * moved, the path's address changes, so the pointer must be refreshed.
+     */
+    void updateAnalyticalPathPointer() {
+        auto source = analyticalSource();
+        if (source) {
+            auto sampler = std::dynamic_pointer_cast<
+                analytical::TrajectorySampler<Dim, T>>(source);
+            if (sampler) {
+                sampler->setPath(path_);
+            }
+        }
+    }
+
     /**
      * @brief Compute effective time accounting for feed override
      */

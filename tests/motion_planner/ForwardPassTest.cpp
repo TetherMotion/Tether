@@ -364,9 +364,10 @@ void runAndValidate(
 
     // Optional: full validation (only if requireFeasible is set)
     if (vcfg.requireFeasible) {
-        vcfg.expectedFinalS = solver->pathLength();
-        vcfg.expectedFinalV = vf;
-        auto vr = validateForwardPass(result, vcfg, vLimFn);
+        ValidationConfig vcfgMut = vcfg;
+        vcfgMut.expectedFinalS = solver->pathLength();
+        vcfgMut.expectedFinalV = vf;
+        auto vr = validateForwardPass(result, vcfgMut, vLimFn);
         EXPECT_TRUE(vr.ok) << "Validation failed: " << vr.message
                            << " (jStar=" << jStar << " v0=" << v0
                            << " vf=" << vf << " arcs=" << result.arcs.size()

@@ -439,9 +439,40 @@ private:
         double dsTotal = static_cast<double>(sCurr - sPrev);
         int nSteps = std::max(1, static_cast<int>(std::abs(dsTotal) / 1e-2));
         double ds = dsTotal / nSteps;
+        double aCap = static_cast<double>(limits_.path.maxPathAcceleration);
+
+        // When starting from rest (v ≈ 0, a ≈ 0), the arc-length formulation
+        // dv/ds = a/v has a singularity. Use the time-domain closed-form
+        // solution for the initial steps: a(t) = eta*t, v(t) = 0.5*eta*t²,
+        // s(t) = eta*t³/6. Given ds, t = (6*|ds|/|eta|)^(1/3).
+        auto advanceFromRest = [&](double sCur, double dsStep) -> State {
+            double eta;
+            if (jerkEnabled) {
+                auto bounds = evaluator.etaBounds(
+                    static_cast<T>(sCur), T(0), T(0), path);
+                eta = bounds.eta_max;
+            } else {
+                eta = 1e4;  // Large jerk to reach aMax quickly
+            }
+            if (std::abs(eta) < 1e-12) return {0.0, 0.0};
+            double t = std::cbrt(6.0 * std::abs(dsStep) / std::abs(eta));
+            double a = eta * t;
+            double v = 0.5 * eta * t * t;
+            if (dsStep < 0) v = -v;  // Backward integration
+            a = std::clamp(a, -aCap, aCap);
+            return {v, a};
+        };
+
+        // If starting from rest, use closed-form for the first step
+        if (std::abs(y.v) < 1e-6 && std::abs(y.a) < 1e-6) {
+            auto [v, a] = advanceFromRest(s, ds);
+            y.v = v;
+            y.a = a;
+            s += ds;
+        }
 
         auto rhs = [&](double s, const State& y) -> State {
-            double vSafe = std::max(y.v, 1e-12);
+            double vSafe = std::max(std::abs(y.v), 1e-6);
             double eta;
             if (jerkEnabled) {
                 auto bounds = evaluator.etaBounds(
@@ -467,9 +498,7 @@ private:
         for (int i = 0; i < nSteps; ++i) {
             y = rk4Step(rhs, s, y, ds);
             s += ds;
-            if (y.v < 1e-12) y.v = 1e-12;
-            // Cap acceleration to prevent blow-up
-            double aCap = static_cast<double>(limits_.path.maxPathAcceleration);
+            if (std::abs(y.v) < 1e-12) y.v = (y.v < 0) ? -1e-12 : 1e-12;
             y.a = std::clamp(y.a, -aCap, aCap);
         }
 
@@ -499,20 +528,57 @@ private:
         const T jMax = limits_.path.maxPathJerk;
         const bool jerkEnabled = limits_.path.jerkLimitEnabled && jMax > T(0);
 
+        State y{static_cast<double>(vCurr), static_cast<double>(aCurr)};
+        double s = static_cast<double>(sCurr);
+        double dsTotal = static_cast<double>(sPrev - sCurr);  // Negative
+        int nSteps = std::max(1, static_cast<int>(std::abs(dsTotal) / 1e-2));
+        double ds = dsTotal / nSteps;
+        double aCap = static_cast<double>(limits_.path.maxPathAcceleration);
+
+        // If starting from rest, use closed-form for the first step.
+        // For backward integration from rest at s_end, the arc decelerates
+        // to v=0, a=0 at s_end. Going backward by |ds|:
+        //   eta = eta_max > 0 (for backward integration dynamics)
+        //   T = cbrt(6*|ds|/eta) (time from s to s_end)
+        //   v = 0.5 * eta * T² > 0 (forward velocity at s)
+        //   a = -eta * T < 0 (decelerating at s)
+        if (std::abs(y.v) < 1e-6 && std::abs(y.a) < 1e-6) {
+            double eta;
+            if (jerkEnabled) {
+                auto bounds = evaluator.etaBounds(
+                    static_cast<T>(s), T(0), T(0), path);
+                eta = bounds.eta_max;  // Backward integration uses eta_max
+            } else {
+                eta = 1e4;
+            }
+            if (std::abs(eta) > 1e-12) {
+                double tStep = std::cbrt(6.0 * std::abs(ds) / eta);
+                y.v = 0.5 * eta * tStep * tStep;  // Positive (forward velocity)
+                y.a = std::clamp(-eta * tStep, -aCap, aCap);  // Negative (decelerating)
+            }
+            s += ds;
+        }
+
         auto rhs = [&](double s, const State& y) -> State {
-            double vSafe = std::max(y.v, 1e-12);
+            double vSafe = std::max(std::abs(y.v), 1e-6);
             double eta;
             if (jerkEnabled) {
                 auto bounds = evaluator.etaBounds(
                     static_cast<T>(s), static_cast<T>(y.v),
                     static_cast<T>(y.a), path);
-                eta = bounds.eta_min;  // Decelerate: use lower bound
+                // Backward integration: ds < 0. To decelerate in the
+                // forward direction (a < 0), we need da < 0. Since
+                // da = (eta/v) * ds and ds < 0, we need eta > 0.
+                // Use eta_max (positive jerk) for backward integration.
+                eta = bounds.eta_max;
             } else {
                 auto [aMin, aMax] = evaluator.accelerationBounds(
                     static_cast<T>(s), static_cast<T>(y.v), path);
-                double aTarget = static_cast<double>(aMin);  // Decelerate at max
-                if (y.a > aTarget) {
-                    eta = std::max(-1e4, (aTarget - y.a) * vSafe / std::max(std::abs(static_cast<double>(sCurr - sPrev)), 1e-12));
+                // Backward integration: use aMax as target (forward
+                // deceleration = backward acceleration).
+                double aTarget = static_cast<double>(aMax);
+                if (y.a < aTarget) {
+                    eta = std::min(1e4, (aTarget - y.a) * vSafe / std::max(std::abs(static_cast<double>(sCurr - sPrev)), 1e-12));
                 } else {
                     eta = 0;
                 }
@@ -520,18 +586,10 @@ private:
             return {y.a / vSafe, eta / vSafe};
         };
 
-        State y{static_cast<double>(vCurr), static_cast<double>(aCurr)};
-        double s = static_cast<double>(sCurr);
-        double dsTotal = static_cast<double>(sPrev - sCurr);  // Negative
-        int nSteps = std::max(1, static_cast<int>(std::abs(dsTotal) / 1e-2));
-        double ds = dsTotal / nSteps;
-
         for (int i = 0; i < nSteps; ++i) {
             y = rk4Step(rhs, s, y, ds);
             s += ds;
-            if (y.v < 1e-12) y.v = 1e-12;
-            // Cap acceleration to prevent blow-up
-            double aCap = static_cast<double>(limits_.path.maxPathAcceleration);
+            if (std::abs(y.v) < 1e-12) y.v = (y.v < 0) ? -1e-12 : 1e-12;
             y.a = std::clamp(y.a, -aCap, aCap);
         }
 
@@ -586,34 +644,80 @@ private:
         }
 
         // Last arc
-        SwitchingArc arc;
-        arc.s_begin = std::min(T(arcStart) * ds, pathLength);
-        arc.s_end = pathLength;
-        arc.mode = currentMode;
-        arc.v0 = vel[arcStart];
-        arc.a0 = acc[arcStart];
-        arc.t0 = 0.0;
-        arc.eta = computeEtaForMode(currentMode, evaluator, path,
-                                   arc.s_begin, arc.v0, arc.a0);
-        if (arc.valid()) arcs.push_back(arc);
+        {
+            SwitchingArc arc;
+            T lastS = std::min(T(numSamples - 1) * ds, pathLength);
+            T lastVel = vel[numSamples - 1];
+            T lastAcc = acc[numSamples - 1];
+            // Add a final decel/accel arc if the last sample's velocity
+            // doesn't match the end velocity. Use a generous distance
+            // threshold to handle floating-point rounding in lastS.
+            double dRemaining = static_cast<double>(pathLength - lastS);
+            bool needsFinalDecel =
+                std::abs(lastVel - endVelocity) > T(1e-6) &&
+                dRemaining > 1e-14;
 
-        // Compute times for each arc by integrating dt/ds = 1/v
+            if (needsFinalDecel) {
+                // Trim the last arc to end at the last sample, then add
+                // a final decel/accel arc from lastS to pathLength.
+                arc.s_begin = std::min(T(arcStart) * ds, pathLength);
+                arc.s_end = lastS;
+            } else {
+                arc.s_begin = std::min(T(arcStart) * ds, pathLength);
+                arc.s_end = pathLength;
+            }
+            arc.mode = currentMode;
+            arc.v0 = vel[arcStart];
+            arc.a0 = acc[arcStart];
+            arc.t0 = 0.0;
+            arc.eta = computeEtaForMode(currentMode, evaluator, path,
+                                       arc.s_begin, arc.v0, arc.a0);
+            if (arc.valid() && arc.s_end > arc.s_begin) arcs.push_back(arc);
+
+            // Add final decel/accel arc if needed
+            if (needsFinalDecel) {
+                SwitchingArc finalArc;
+                finalArc.s_begin = lastS;
+                finalArc.s_end = pathLength;
+                double dArc = static_cast<double>(pathLength - lastS);
+                if (endVelocity < lastVel) {
+                    finalArc.mode = ControlMode::DECEL_MAX;
+                } else {
+                    finalArc.mode = ControlMode::ACCEL_MAX;
+                }
+                // First compute eta using the last sample's state
+                double etaFinal = computeEtaForMode(
+                    finalArc.mode, evaluator, path,
+                    finalArc.s_begin, lastVel, lastAcc);
+                finalArc.eta = etaFinal;
+                // Compute the correct v0 for this arc so that the
+                // trajectory exactly reaches s_end with v=endVelocity.
+                // For constant-jerk from v0 to 0 with a0=0:
+                //   d = (2/3)*v0*T, T = sqrt(2*v0/|eta|)
+                //   => v0 = cbrt((9/8)*d²*|eta|)
+                if (std::abs(etaFinal) > 1e-12 && std::abs(endVelocity) < 1e-9) {
+                    double v0Corrected = std::cbrt(
+                        (9.0 / 8.0) * dArc * dArc * std::abs(etaFinal));
+                    finalArc.v0 = static_cast<T>(v0Corrected);
+                    finalArc.a0 = T(0);
+                } else {
+                    finalArc.v0 = lastVel;
+                    finalArc.a0 = lastAcc;
+                }
+                finalArc.t0 = 0.0;
+                if (finalArc.valid()) arcs.push_back(finalArc);
+            }
+        }
+
+        // Compute times for each arc by integrating the actual jerk dynamics
+        // in arc-length space: dt/ds = 1/v, dv/ds = a/v, da/ds = eta/v.
+        // The old constant-acceleration formula (v² = v0² + 2·a·ds) is wrong
+        // for arcs with nonzero jerk (ACCEL_MAX/DECEL_MAX), leading to
+        // duration mismatches that corrupt SSR time-domain queries.
         double currentTime = 0.0;
         for (auto& a : arcs) {
             a.t0 = currentTime;
-            // Estimate arc duration using kinematic formula
-            double ds = a.s_end - a.s_begin;
-            double v0 = a.v0;
-            double acc = a.a0;
-            double vEnd;
-            if (std::abs(acc) > 1e-10) {
-                vEnd = std::sqrt(std::max(v0 * v0 + 2.0 * acc * ds, 0.0));
-            } else {
-                vEnd = v0;
-            }
-            double vAvg = 0.5 * (v0 + vEnd);
-            if (vAvg < 1e-6) vAvg = 1e-6;  // Prevent infinite duration
-            a.duration = ds / vAvg;
+            a.duration = computeArcDuration(a, evaluator, path);
             currentTime += a.duration;
         }
 
@@ -646,6 +750,15 @@ private:
             }
             case ControlMode::DECEL_MAX: {
                 auto bounds = evaluator.etaBounds(s, v, a, path);
+                // For deceleration arcs, the jerk direction depends on the
+                // current acceleration sign:
+                // - If a < 0 (already decelerating): use eta_max > 0 to
+                //   bring acceleration back toward 0 as velocity reaches 0.
+                // - If a >= 0 (not yet decelerating): use eta_min < 0 to
+                //   drive acceleration negative and start decelerating.
+                if (static_cast<double>(a) < -1e-9) {
+                    return bounds.eta_max;
+                }
                 return bounds.eta_min;
             }
             case ControlMode::ZERO_JERK:
@@ -656,6 +769,129 @@ private:
                 return 0.0;
         }
         return 0.0;
+    }
+
+    /**
+     * @brief Compute the time duration of a switching arc by integrating
+     *        the jerk dynamics in arc-length space.
+     *
+     * Integrates: dt/ds = 1/v, dv/ds = a/v, da/ds = eta/v
+     * from s_begin to s_end, accumulating the elapsed time.
+     *
+     * This replaces the old constant-acceleration formula which is wrong
+     * for arcs with nonzero jerk (ACCEL_MAX/DECEL_MAX).
+     */
+    double computeArcDuration(
+        const SwitchingArc& arc,
+        const Evaluator& evaluator,
+        const Path& path) const {
+
+        const double sBegin = static_cast<double>(arc.s_begin);
+        const double sEnd = static_cast<double>(arc.s_end);
+        const double dsTotal = sEnd - sBegin;
+        if (std::abs(dsTotal) < 1e-14) return 0.0;
+
+        // Special case: DECEL_MAX arc with a0 < 0 and eta > 0
+        // (decelerating, jerk bringing acceleration back to 0).
+        // Closed-form: a(T) = a0 + eta*T = 0 => T = -a0/eta
+        // v(T) = v0 + a0*T + 0.5*eta*T² = v0 - a0²/(2*eta)
+        // For v(T) = 0: v0 = a0²/(2*eta)
+        // d = v0*T + 0.5*a0*T² + (1/6)*eta*T³
+        if (arc.mode == ControlMode::DECEL_MAX &&
+            static_cast<double>(arc.a0) < -1e-6 &&
+            static_cast<double>(arc.eta) > 1e-12 &&
+            arc.v0 > T(1e-6)) {
+            double v0 = static_cast<double>(arc.v0);
+            double a0 = static_cast<double>(arc.a0);
+            double eta = static_cast<double>(arc.eta);
+            double tDur = -a0 / eta;  // Time for acceleration to reach 0
+            double vEnd = v0 + a0 * tDur + 0.5 * eta * tDur * tDur;
+            if (std::abs(vEnd) < 1e-3) {
+                // Velocity reaches ~0 at the same time as acceleration
+                double dExpected = v0 * tDur + 0.5 * a0 * tDur * tDur +
+                                   eta * tDur * tDur * tDur / 6.0;
+                if (std::abs(dExpected - dsTotal) < 0.05 * std::abs(dsTotal)) {
+                    return tDur;
+                }
+            }
+        }
+
+        // Special case: DECEL_MAX arc with a0 ≈ 0 decelerating to v=0.
+        // Use the closed-form time-domain solution:
+        //   v(t) = v0 + 0.5*eta*t², v(T) = 0 => T = sqrt(2*v0/|eta|)
+        //   d = (2/3)*v0*T
+        // This avoids the arc-length singularity at v=0.
+        if (arc.mode == ControlMode::DECEL_MAX &&
+            std::abs(static_cast<double>(arc.a0)) < 1e-6 &&
+            arc.v0 > T(1e-6) && std::abs(arc.eta) > 1e-12) {
+            double v0 = static_cast<double>(arc.v0);
+            double eta = static_cast<double>(arc.eta);
+            double tDuration = std::sqrt(2.0 * v0 / std::abs(eta));
+            // Verify the distance matches
+            double dExpected = (2.0 / 3.0) * v0 * tDuration;
+            if (std::abs(dExpected - dsTotal) < 0.01 * std::abs(dsTotal)) {
+                return tDuration;
+            }
+        }
+
+        // Special case: arc starts from rest (v ≈ 0, a ≈ 0) with nonzero
+        // jerk. The arc-length formulation dt/ds = 1/v diverges because
+        // v = 0. Use the time-domain closed-form solution instead:
+        //   a(t) = eta * t,  v(t) = 0.5 * eta * t²,  s(t) = eta * t³ / 6
+        //   => t = (6 * ds / eta)^(1/3)
+        const double v0 = static_cast<double>(arc.v0);
+        const double a0 = static_cast<double>(arc.a0);
+        if (std::abs(v0) < 1e-9 && std::abs(a0) < 1e-9) {
+            double eta = computeEtaForMode(
+                arc.mode, evaluator, path,
+                static_cast<T>(sBegin), arc.v0, arc.a0);
+            if (std::abs(eta) > 1e-12) {
+                return std::cbrt(6.0 * dsTotal / eta);
+            }
+            // Both v=0, a=0, eta=0: the arc is degenerate (no motion).
+            return 0.0;
+        }
+
+        // State: [t, v, a]  (independent variable: s)
+        struct State {
+            double t, v, a;
+            State operator+(const State& o) const { return {t+o.t, v+o.v, a+o.a}; }
+            State operator*(double k) const { return {t*k, v*k, a*k}; }
+            std::array<double, 3> components() const { return {t, v, a}; }
+            double norm() const { return std::sqrt(t*t + v*v + a*a); }
+        };
+
+        State y{0.0, static_cast<double>(arc.v0), static_cast<double>(arc.a0)};
+        double s = sBegin;
+        int nSteps = std::max(1, static_cast<int>(std::abs(dsTotal) / 1e-2));
+        double ds = dsTotal / nSteps;
+        double aCap = static_cast<double>(limits_.path.maxPathAcceleration);
+
+        auto rhs = [&](double s, const State& y) -> State {
+            // When v is near zero (starting from rest), 1/v diverges.
+            // Use a physics-aware floor: over a step ds, constant
+            // acceleration a produces v ≈ sqrt(2*|a|*|ds|). This gives
+            // a finite, accurate dt/ds for arcs starting from rest.
+            double vFloor = std::sqrt(2.0 * std::abs(y.a) * std::abs(ds));
+            double vSafe = std::max(y.v, std::max(vFloor, 1e-6));
+            double eta = computeEtaForMode(
+                arc.mode, evaluator, path,
+                static_cast<T>(s), static_cast<T>(y.v), static_cast<T>(y.a));
+            return {1.0 / vSafe, y.a / vSafe, eta / vSafe};
+        };
+
+        for (int i = 0; i < nSteps; ++i) {
+            y = rk4Step(rhs, s, y, ds);
+            s += ds;
+            // Stop if velocity reaches zero (end of deceleration)
+            if (y.v <= 1e-12) {
+                y.v = 0.0;
+                break;
+            }
+            y.a = std::clamp(y.a, -aCap, aCap);
+        }
+
+        return y.t;
     }
 
     /**

@@ -146,6 +146,16 @@ public:
     KinematicCoefficients computeCoefficients(T s, T v, T a, const Path& path) const {
         KinematicCoefficients coeffs;
 
+        // Guard against NaN/infinity from numerical drift in time-domain
+        // re-integration. The path geometry evaluation requires finite s
+        // within [0, totalLength]; out-of-range values cause segfaults in
+        // the NURBS curve length/inversion code.
+        if (!std::isfinite(static_cast<double>(s)) || s < T(0)) {
+            s = T(0);
+        }
+        const T pathLen = path.totalLength();
+        if (s > pathLen) s = pathLen;
+
         // Get arc-length derivatives from the geometry core
         // We need order 3 for jounce (j⃗ = d³p/ds³)
         if (!path.hasInner()) {

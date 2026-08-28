@@ -750,7 +750,7 @@ public:
             }
         }
 
-        const auto fallbackToZeroAcceleration = [&]() {
+        const auto fallbackToZeroAcceleration = [&]() -> std::pair<T, T> {
             // There may be spare distance after reaching the returned state;
             // it is traversed as a zero-acceleration coast. This is slower
             // than an ideal boundary solution but preserves a realizable

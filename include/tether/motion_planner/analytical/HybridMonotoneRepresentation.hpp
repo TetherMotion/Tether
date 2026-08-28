@@ -650,19 +650,19 @@ private:
         const ConstraintEvaluator<Dim, T>& ce = evaluator_;
         const Path& path = *path_;
 
-        auto rhs = [&](double /*s*/, const SState& y) -> SState {
+        auto rhs = [&](double sCur, const SState& y) -> SState {
             double vSafe = std::max(y.v, 1e-12);
             // Compute eta for this arc
             double eta = 0.0;
             switch (arc.mode) {
                 case ControlMode::ACCEL_MAX: {
-                    auto b = ce.etaBounds(static_cast<T>(sStart + (sTarget - sStart) * 0.0),
+                    auto b = ce.etaBounds(static_cast<T>(sCur),
                                            static_cast<T>(y.v), static_cast<T>(y.a), path);
                     eta = b.eta_max;
                     break;
                 }
                 case ControlMode::DECEL_MAX: {
-                    auto b = ce.etaBounds(static_cast<T>(sStart),
+                    auto b = ce.etaBounds(static_cast<T>(sCur),
                                            static_cast<T>(y.v), static_cast<T>(y.a), path);
                     eta = b.eta_min;
                     break;
@@ -683,7 +683,38 @@ private:
         int nSteps = std::max(1, std::min(100, static_cast<int>(std::abs(dsTotal) / 1e-2)));
         double ds = dsTotal / nSteps;
 
-        for (int i = 0; i < nSteps; ++i) {
+        // If starting from rest (v ≈ 0, a ≈ 0), use closed-form for first step.
+        // a(t) = eta*t, v(t) = 0.5*eta*t², s(t) = eta*t³/6
+        // => t = (6*|ds|/|eta|)^(1/3)
+        int startStep = 0;
+        if (std::abs(vStart) < 1e-9 && std::abs(aStart) < 1e-9) {
+            double eta = 0.0;
+            switch (arc.mode) {
+                case ControlMode::ACCEL_MAX: {
+                    auto b = ce.etaBounds(static_cast<T>(sStart), T(0), T(0), path);
+                    eta = b.eta_max;
+                    break;
+                }
+                case ControlMode::DECEL_MAX: {
+                    auto b = ce.etaBounds(static_cast<T>(sStart), T(0), T(0), path);
+                    eta = b.eta_min;
+                    break;
+                }
+                default:
+                    eta = arc.eta;
+                    break;
+            }
+            if (std::abs(eta) > 1e-12 && nSteps > 0) {
+                double tStep = std::cbrt(6.0 * std::abs(ds) / std::abs(eta));
+                y.t = tStart + tStep;
+                y.v = 0.5 * eta * tStep * tStep;
+                y.a = eta * tStep;
+                s += ds;
+                startStep = 1;  // Already did one step
+            }
+        }
+
+        for (int i = startStep; i < nSteps; ++i) {
             y = rk4Step(rhs, s, y, ds);
             s += ds;
             if (y.v < 1e-12) y.v = 1e-12;

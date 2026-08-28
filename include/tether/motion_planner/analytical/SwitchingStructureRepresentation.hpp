@@ -240,7 +240,7 @@ public:
                 }
                 double lo = 0.0;
                 double hi = arc.duration;
-                for (int i = 0; i < 100; ++i) {
+                for (int i = 0; i < 50; ++i) {
                     const double mid = 0.5 * (lo + hi);
                     const double sMid = std::get<0>(integrateArcToTime(arc, mid));
                     if (sMid < static_cast<double>(s)) lo = mid;
@@ -264,7 +264,11 @@ public:
                 }
                 double lo = 0.0;
                 double hi = arc.duration;
-                for (int i = 0; i < 100; ++i) {
+                // 50 iterations of bisection gives ~1e-15 relative precision
+                // on the time, which is more than sufficient for trajectory
+                // sampling. Each iteration calls integrateArcToTime, so
+                // keeping this low is critical for performance.
+                for (int i = 0; i < 50; ++i) {
                     const double mid = 0.5 * (lo + hi);
                     const double sMid = std::get<0>(integrateArcToTime(arc, mid));
                     if (sMid < static_cast<double>(s)) lo = mid;
@@ -380,6 +384,70 @@ private:
         if (tLocal <= 0.0) {
             return {arc.s_begin, arc.v0, arc.a0};
         }
+        // Clamp tLocal to the arc duration to prevent enormous integration
+        // times from WALL arcs with near-zero velocity (duration diverges
+        // as ∫ ds/v). The caller (locateAndIntegrate) should not exceed
+        // arc.duration, but defensive clamping prevents runaway loops and
+        // path evaluation crashes when durations are numerically huge.
+        if (tLocal > arc.duration) tLocal = arc.duration;
+
+        // Special case: DECEL_MAX arc with a0 ≈ 0 decelerating to v=0.
+        // Use closed-form with the arc's pre-computed eta:
+        // v(t) = v0 + 0.5*eta*t², a(t) = eta*t
+        // s(t) = s_begin + v0*t + eta*t³/6
+        // This handles both eta < 0 (a0=0, starting to decelerate) and
+        // eta > 0 (a0<0, bringing acceleration back to 0).
+        if (arc.mode == ControlMode::DECEL_MAX &&
+            std::abs(arc.a0) < 1e-6 && arc.v0 > 1e-6 &&
+            std::abs(arc.eta) > 1e-12) {
+            double eta = static_cast<double>(arc.eta);
+            double v = arc.v0 + 0.5 * eta * tLocal * tLocal;
+            if (v <= 0.0) {
+                // Reached v=0: clamp to end state
+                return {arc.s_end, 0.0, 0.0};
+            }
+            double s = arc.s_begin + arc.v0 * tLocal +
+                       eta * tLocal * tLocal * tLocal / 6.0;
+            double a = eta * tLocal;
+            return {s, v, a};
+        }
+        // Special case: DECEL_MAX arc with a0 < 0 and eta > 0
+        // (decelerating, jerk bringing acceleration back to 0).
+        // Closed-form: a(t) = a0 + eta*t, v(t) = v0 + a0*t + 0.5*eta*t²
+        // s(t) = s_begin + v0*t + 0.5*a0*t² + (1/6)*eta*t³
+        if (arc.mode == ControlMode::DECEL_MAX &&
+            arc.a0 < -1e-6 && arc.v0 > 1e-6 &&
+            static_cast<double>(arc.eta) > 1e-12) {
+            double eta = static_cast<double>(arc.eta);
+            double a0 = static_cast<double>(arc.a0);
+            double v0 = static_cast<double>(arc.v0);
+            double a = a0 + eta * tLocal;
+            double v = v0 + a0 * tLocal + 0.5 * eta * tLocal * tLocal;
+            if (v <= 0.0) {
+                return {arc.s_end, 0.0, 0.0};
+            }
+            double s = static_cast<double>(arc.s_begin) +
+                       v0 * tLocal + 0.5 * a0 * tLocal * tLocal +
+                       eta * tLocal * tLocal * tLocal / 6.0;
+            return {s, v, a};
+        }
+
+        // Special case: arc starts from rest (v ≈ 0, a ≈ 0) with nonzero
+        // jerk. The time-domain dynamics have a closed-form solution:
+        //   a(t) = eta * t,  v(t) = 0.5 * eta * t²,  s(t) = eta * t³ / 6
+        // This avoids the arc-length singularity (ds/dt = v = 0).
+        if (std::abs(arc.v0) < 1e-9 && std::abs(arc.a0) < 1e-9) {
+            double eta = computeEta(arc, arc.s_begin, arc.v0, arc.a0);
+            if (std::abs(eta) > 1e-12) {
+                double t3 = eta * tLocal * tLocal * tLocal;
+                double s = arc.s_begin + t3 / 6.0;
+                double v = 0.5 * eta * tLocal * tLocal;
+                double a = eta * tLocal;
+                return {s, v, a};
+            }
+            // Degenerate: no motion.
+            return {arc.s_begin, arc.v0, arc.a0};
+        }
 
         // State: [s, v, a]
         struct State {
@@ -392,15 +460,20 @@ private:
 
         // RHS: ds/dt = v, dv/dt = a, da/dt = eta
         auto rhs = [&](double /*t*/, const State& y) -> State {
-            double eta = computeEta(arc, y.s, y.v, y.a);
+            double sClamped = std::clamp(y.s, 0.0,
+                static_cast<double>(path_->totalLength()));
+            double eta = computeEta(arc, sClamped, y.v, y.a);
             return {y.v, y.a, eta};
         };
 
         // Integrate with adaptive RK4
         State y{arc.s_begin, arc.v0, arc.a0};
         double t = 0.0;
-        double h = std::min(tLocal, 0.01);  // Initial step
-        int maxIter = 100000;  // Safety limit
+        // Use at most 100 steps for any arc. The dynamics are smooth
+        // (piecewise constant jerk), so 100 RK4 steps give good accuracy.
+        double h = std::min(tLocal, tLocal / 100.0);
+        if (h < 1e-12) h = 1e-12;
+        int maxIter = 100;  // Safety limit
 
         while (t < tLocal && maxIter-- > 0) {
             double remaining = tLocal - t;
@@ -412,8 +485,41 @@ private:
             // Use simple RK4 (fixed step) for speed; adaptive for accuracy
             auto yNew = rk4Step(rhs, t, y, h);
 
+            // Clamp velocity and acceleration to physical limits to prevent
+            // numerical drift from producing infeasible states. The arcs are
+            // feasible by construction (from the optimizer's forward/backward
+            // passes which clamp to vLim), but time-domain re-integration
+            // accumulates round-off that can push v/a past their bounds.
+            if (yNew.v < 0.0) yNew.v = 0.0;
+            if (!path_ || !path_->hasInner()) {
+                y = yNew;
+                t += h;
+                if (y.s >= arc.s_end) { y.s = arc.s_end; break; }
+                continue;
+            }
+            double sClamped = std::clamp(yNew.s, 0.0,
+                static_cast<double>(path_->totalLength()));
+            double vLim = static_cast<double>(
+                evaluator_.velocityLimit(static_cast<T>(sClamped), *path_));
+            if (yNew.v > vLim) yNew.v = vLim;
+            auto [aMin, aMax] = evaluator_.accelerationBounds(
+                static_cast<T>(sClamped),
+                static_cast<T>(yNew.v),
+                *path_);
+            yNew.a = std::clamp(yNew.a,
+                                static_cast<double>(aMin),
+                                static_cast<double>(aMax));
+
             y = yNew;
             t += h;
+
+            // Stop if we've reached or passed the arc end — the duration is
+            // computed from arc-length integration and may not perfectly
+            // match the time-domain integration due to numerical differences.
+            if (y.s >= arc.s_end) {
+                y.s = arc.s_end;
+                break;
+            }
         }
 
         return {y.s, y.v, y.a};
@@ -437,6 +543,11 @@ private:
             case ControlMode::DECEL_MAX: {
                 auto bounds = evaluator_.etaBounds(
                     static_cast<T>(s), static_cast<T>(v), static_cast<T>(a), *path_);
+                // Match computeEtaForMode: if already decelerating (a < 0),
+                // use eta_max to bring acceleration back to 0.
+                if (a < -1e-9) {
+                    return bounds.eta_max;
+                }
                 return bounds.eta_min;
             }
             case ControlMode::ZERO_JERK:
