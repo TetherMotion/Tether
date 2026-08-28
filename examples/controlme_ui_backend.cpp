@@ -1,18 +1,17 @@
-#include "WebSocketTransport.hpp"
+#include "TetherIoWebSocketController.hpp"
 
 #include "tether/control/ControllerBase.hpp"
 #include "tether/control/PIDControllers.hpp"
 #include "tether/io/ParameterExposer.hpp"
 #include "tether/io/Registry.hpp"
-#include "tether/io/Server.hpp"
 #include "tether/simulation/AllSystems.hpp"
 #include "tether/simulation/SimulationEngine.hpp"
+
+#include <drogon/drogon.h>
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <csignal>
-#include <cstdarg>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -28,26 +27,6 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 using namespace tether::io;
-
-std::atomic<bool> gStopRequested{false};
-
-uint64_t nowUs() {
-    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-        Clock::now().time_since_epoch()).count());
-}
-
-void logFn(const char* tag, const char* fmt, ...) {
-    char buffer[512];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buffer, sizeof(buffer), fmt, args);
-    va_end(args);
-    std::cerr << "[" << tag << "] " << buffer << '\n';
-}
-
-void onSignal(int) {
-    gStopRequested.store(true, std::memory_order_relaxed);
-}
 
 template <typename ReadFn>
 SignalEntry makeFixedSignal(
@@ -677,28 +656,18 @@ int runBackend(uint16_t port) {
     backend.expose(registry);
     backend.start();
 
-    ServerConfig config;
-    config.maxClients = 8;
-    config.timestampFn = nowUs;
-    config.logFn = logFn;
+    drogon::app().registerWebSocketController(
+        "/tether-io", "tether::io::example::TetherIoWebSocketController", {});
+    drogon::DrClassMap::setSingleInstance(
+        std::make_shared<tether::io::example::TetherIoWebSocketController>(registry));
 
-    Server server(
-        registry,
-        std::make_unique<tether::examples::WebSocketTransportServer>(port, "/"),
-        config);
+    std::cout << "controlme_ui backend listening on ws://0.0.0.0:" << port << "/tether-io\n";
 
-    if (!server.start()) {
-        std::cerr << "Failed to start controlme_ui backend on port " << port << '\n';
-        backend.stop();
-        return 1;
-    }
+    // Run Drogon's event loop (blocks until Ctrl+C — Drogon handles
+    // SIGINT/SIGTERM internally and exits its event loop on its own).
+    drogon::app().addListener("0.0.0.0", port);
+    drogon::app().run();
 
-    std::cout << "controlme_ui backend listening on ws://0.0.0.0:" << port << "/\n";
-    while (!gStopRequested.load(std::memory_order_relaxed)) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    server.stop();
     backend.stop();
     return 0;
 }
@@ -706,9 +675,6 @@ int runBackend(uint16_t port) {
 } // namespace
 
 int main(int argc, char** argv) {
-    std::signal(SIGINT, onSignal);
-    std::signal(SIGTERM, onSignal);
-
     uint16_t port = 4002;
     if (argc >= 3 && std::string(argv[1]) == "--port") {
         port = static_cast<uint16_t>(std::stoi(argv[2]));

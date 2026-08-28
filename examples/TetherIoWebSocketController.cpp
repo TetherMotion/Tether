@@ -25,21 +25,39 @@ public:
 
     size_t receive(uint8_t* data, size_t maxLen, uint32_t timeoutMs) override {
         std::unique_lock<std::mutex> lock(mutex_);
-        if (input_.empty() && connected_) {
+        if (messages_.empty() && connected_) {
             inputReady_.wait_for(lock, std::chrono::milliseconds(timeoutMs),
-                                 [this] { return !input_.empty() || !connected_; });
+                                 [this] { return !messages_.empty() || !connected_; });
         }
-        if (input_.empty()) return 0;
-        const size_t count = std::min(maxLen, input_.size());
-        std::copy_n(input_.begin(), count, data);
-        input_.erase(input_.begin(), input_.begin() + count);
+        if (messages_.empty()) return 0;
+        auto& msg = messages_.front();
+        const size_t count = std::min(maxLen, msg.size() - msgOffset_);
+        std::copy_n(msg.data() + msgOffset_, count, data);
+        msgOffset_ += count;
+        if (msgOffset_ >= msg.size()) {
+            messages_.pop_front();
+            msgOffset_ = 0;
+        }
         return count;
+    }
+
+    bool receiveMessage(std::vector<uint8_t>& out, uint32_t timeoutMs) override {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (messages_.empty() && connected_) {
+            inputReady_.wait_for(lock, std::chrono::milliseconds(timeoutMs),
+                                 [this] { return !messages_.empty() || !connected_; });
+        }
+        if (messages_.empty()) return false;
+        out = std::move(messages_.front());
+        messages_.pop_front();
+        msgOffset_ = 0;
+        return true;
     }
 
     void push(std::string_view bytes) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!connected_) return;
-        input_.insert(input_.end(), bytes.begin(), bytes.end());
+        messages_.emplace_back(bytes.begin(), bytes.end());
         inputReady_.notify_one();
     }
 
@@ -58,7 +76,8 @@ private:
     drogon::WebSocketConnectionPtr connection_;
     mutable std::mutex mutex_;
     std::condition_variable inputReady_;
-    std::deque<uint8_t> input_;
+    std::deque<std::vector<uint8_t>> messages_;
+    size_t msgOffset_ = 0;
     bool connected_ = true;
 };
 
@@ -79,7 +98,10 @@ struct TetherIoWebSocketController::Client {
                 return static_cast<uint64_t>(
                     std::chrono::duration_cast<std::chrono::microseconds>(
                         std::chrono::steady_clock::now().time_since_epoch()).count());
-            });
+            },
+            nullptr, nullptr, nullptr, nullptr, nullptr,
+            nullptr, nullptr,
+            Framing::None);
         worker = std::thread([this] { session->run(); });
     }
 

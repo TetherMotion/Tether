@@ -145,7 +145,8 @@ void Server::acceptLoop() {
             config_.timestampFn, config_.logFn,
             &config_.serverFeatures, &datalogRecorder_,
             config_.inputStreamCreateFn, config_.inputStreamDataFn,
-            config_.encodedBufferFactory, config_.decodedBufferFactory);
+            config_.encodedBufferFactory, config_.decodedBufferFactory,
+            config_.framing);
 
         std::shared_ptr<Session> sessionPtr = session;
 

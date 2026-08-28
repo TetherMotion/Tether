@@ -1,6 +1,7 @@
 /**
  * @file Session.cpp
- * @brief Per-client session: SLIP deframing, protocol handling, streaming.
+ * @brief Per-client session: message deframing (SLIP or transport-native),
+ *        protocol handling, streaming.
  * @copyright Copyright (C) 2025-2026 Tether Authors
  */
 #include "tether/io/Session.hpp"
@@ -27,7 +28,8 @@ Session::Session(std::unique_ptr<ITransport> transport,
                  InputStreamCreateFn inputStreamCreateFn,
                  InputStreamDataFn inputStreamDataFn,
                  ReceiveBufferFactory encodedBufferFactory,
-                 ReceiveBufferFactory decodedBufferFactory)
+                 ReceiveBufferFactory decodedBufferFactory,
+                 Framing framing)
     : transport_(std::move(transport))
     , registry_(registry)
     , getTimestampUs_(tsFn)
@@ -36,6 +38,7 @@ Session::Session(std::unique_ptr<ITransport> transport,
     , datalogRecorder_(datalogRecorder)
     , inputStreamCreateFn_(std::move(inputStreamCreateFn))
     , inputStreamDataFn_(std::move(inputStreamDataFn))
+    , framing_(framing)
     , slipRxBuf_(encodedBufferFactory ? encodedBufferFactory()
                                       : std::make_unique<DynamicReceiveBuffer>(
                                             DEFAULT_RECEIVE_BUFFER_CAPACITY,
@@ -106,14 +109,29 @@ void Session::run() {
             timeoutMs = 500;
         }
 
-        uint8_t rxBuf[1024];
-        size_t r = transport_->receive(rxBuf, sizeof(rxBuf), timeoutMs);
-        if (r == 0 && !transport_->isConnected()) {
-            log("Client disconnected");
-            break;
-        }
-        if (r > 0) {
-            feedSlipData(rxBuf, r);
+        if (framing_ == Framing::None) {
+            // Message-oriented transport (e.g. WebSocket): each receiveMessage()
+            // call returns one complete protocol message — no SLIP deframing.
+            rxMsgBuf_.clear();
+            if (transport_->receiveMessage(rxMsgBuf_, timeoutMs)) {
+                if (!rxMsgBuf_.empty()) {
+                    onMessage(rxMsgBuf_.data(), rxMsgBuf_.size());
+                }
+            } else if (!transport_->isConnected()) {
+                log("Client disconnected");
+                break;
+            }
+        } else {
+            // Byte-stream transport: SLIP deframing.
+            uint8_t rxBuf[1024];
+            size_t r = transport_->receive(rxBuf, sizeof(rxBuf), timeoutMs);
+            if (r == 0 && !transport_->isConnected()) {
+                log("Client disconnected");
+                break;
+            }
+            if (r > 0) {
+                feedSlipData(rxBuf, r);
+            }
         }
     }
 
@@ -155,7 +173,7 @@ void Session::feedSlipData(const uint8_t* data, size_t len) {
                 size_t wrote = SLIPStream::decode_packet(
                     slipRxBuf_->data(), slipRxPos_, decodeBuf_->data(), decodeBuf_->capacity());
                 if (wrote != SLIPStream::DECODE_ERROR && wrote > 0) {
-                    onSlipMessage(decodeBuf_->data(), wrote);
+                    onMessage(decodeBuf_->data(), wrote);
                 }
             }
             slipRxPos_ = 0;
@@ -169,7 +187,7 @@ void Session::feedSlipData(const uint8_t* data, size_t len) {
 // Protocol dispatch
 // --------------------------------------------------------------------------
 
-void Session::onSlipMessage(const uint8_t* data, size_t len) {
+void Session::onMessage(const uint8_t* data, size_t len) {
     if (len < 1) return;
     auto type = static_cast<MessageType>(data[0]);
     const uint8_t* body = data + 1;
@@ -1303,6 +1321,13 @@ void Session::handleCloseInputStreamReq(const uint8_t* body, size_t len) {
 
 bool Session::sendRaw(const uint8_t* data, size_t len) {
     std::lock_guard<std::mutex> lock(sendMutex_);
+
+    if (framing_ == Framing::None) {
+        // Message-oriented transport: send raw protocol message directly.
+        return transport_->send(data, len);
+    }
+
+    // Byte-stream transport: SLIP-encode before sending.
     size_t encLen = SLIPStream::encoded_length(data, len);
     if (encLen == SLIPStream::ENCODE_ERROR) return false;
 

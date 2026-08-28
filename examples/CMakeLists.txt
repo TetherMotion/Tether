@@ -22,8 +22,9 @@ if(TARGET tether_esi)
 endif()
 
 # --- Tether IO binary WebSocket example ---
-# Drogon delivers arbitrary binary WebSocket chunks to a queue-backed
-# ITransport, while Session remains the single protocol implementation.
+# Drogon delivers complete WebSocket frames to the TetherIoWebSocketController,
+# which feeds them to Session with Framing::None (no SLIP — WebSocket already
+# provides message boundaries).
 if(Drogon_FOUND AND TARGET tether_io_protocol AND TARGET Drogon::Drogon)
     add_executable(tether_io_drogon_websocket
         tether_io_drogon_websocket.cpp
@@ -220,19 +221,19 @@ add_tether_example(interpret_pcapng
     LIBRARIES tether_pcap tether_ethercat_common tether_common)
 
 # --- WebSocket UI backends ---
-# These examples use Boost.Beast/Boost.Asio (header-only). They are only built
-# when Boost is available so the rest of the examples build without it.
-find_package(Boost QUIET)
-if(Boost_FOUND AND TARGET Boost::headers)
+# These examples use Drogon for the WebSocket transport (same as the
+# tether_io_drogon_websocket example). They are only built when Drogon is
+# available so the rest of the examples build without it.
+if(Drogon_FOUND AND TARGET Drogon::Drogon)
     add_executable(tether_ui_backend
         tether_ui_backend.cpp
-        WebSocketTransport.cpp)
+        TetherIoWebSocketController.cpp)
     target_link_libraries(tether_ui_backend PRIVATE
         tether_io_protocol
         tether_gcode
         tether_ethercat_slave
         tether_common
-        Boost::headers)
+        Drogon::Drogon)
     target_include_directories(tether_ui_backend PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/include/tether
@@ -241,20 +242,20 @@ if(Boost_FOUND AND TARGET Boost::headers)
 
     add_executable(controlme_ui_backend
         controlme_ui_backend.cpp
-        WebSocketTransport.cpp)
+        TetherIoWebSocketController.cpp)
     target_link_libraries(controlme_ui_backend PRIVATE
         tether_io_protocol
         tether_simulation
         tether_controls
         tether_common
-        Boost::headers)
+        Drogon::Drogon)
     target_include_directories(controlme_ui_backend PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/include/tether
         ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_features(controlme_ui_backend PRIVATE cxx_std_20)
 else()
-    message(STATUS "Boost not found; skipping WebSocket UI backend examples "
+    message(STATUS "Drogon not found; skipping WebSocket UI backend examples "
                    "(tether_ui_backend, controlme_ui_backend)")
 endif()
 

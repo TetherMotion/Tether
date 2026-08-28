@@ -3,7 +3,8 @@
  * @brief Per-client session for the Tether IO protocol.
  *
  * Each Session handles one transport connection.  It owns:
- *  - SLIP deframing/framing of transport bytes
+ *  - Message deframing (SLIP for byte-stream transports, or transport-native
+ *    framing for message-oriented transports like WebSocket)
  *  - Protocol message dispatch and response generation
  *  - Stream configuration, collection plan, and data transmission
  *  - Threshold filtering for change-based streaming
@@ -66,6 +67,13 @@ using InputStreamDataFn = std::function<void(
  *  1. Construct with a transport, registry reference, and config.
  *  2. Call run() from the session's dedicated thread.
  *  3. run() blocks until the transport disconnects or requestStop() is called.
+ *
+ * The `framing` parameter controls how message boundaries are established:
+ *  - `Framing::Slip` (default): SLIP deframing is applied on top of the
+ *    byte-stream transport.  Used for serial/TCP transports.
+ *  - `Framing::None`: The transport provides native message boundaries
+ *    (e.g. WebSocket).  No SLIP framing is applied — each transport message
+ *    is treated as one protocol message.
  */
 class Session {
 public:
@@ -78,7 +86,8 @@ public:
             InputStreamCreateFn inputStreamCreateFn = nullptr,
             InputStreamDataFn inputStreamDataFn = nullptr,
             ReceiveBufferFactory encodedBufferFactory = nullptr,
-            ReceiveBufferFactory decodedBufferFactory = nullptr);
+            ReceiveBufferFactory decodedBufferFactory = nullptr,
+            Framing framing = Framing::Slip);
     ~Session();
 
     /// Run event loop (blocking).
@@ -99,9 +108,9 @@ public:
                     std::string_view message, std::string_view location = {});
 
 private:
-    // ---- SLIP deframing ----
+    // ---- Message deframing ----
     void feedSlipData(const uint8_t* data, size_t len);
-    void onSlipMessage(const uint8_t* data, size_t len);
+    void onMessage(const uint8_t* data, size_t len);
 
     // ---- Protocol message handlers ----
     void handleListParamsReq(const uint8_t* body, size_t len);
@@ -164,6 +173,7 @@ private:
     DatalogRecorder* datalogRecorder_;
     InputStreamCreateFn inputStreamCreateFn_;
     InputStreamDataFn inputStreamDataFn_;
+    Framing          framing_ = Framing::Slip;
 
     // ==== Run state ====
     std::atomic<bool> running_{false};
@@ -228,6 +238,9 @@ private:
     bool    slipDiscardUntilEnd_ = false;
 
     std::unique_ptr<IReceiveBuffer> decodeBuf_;
+
+    // ==== Message-mode receive buffer (Framing::None) ====
+    std::vector<uint8_t> rxMsgBuf_;
 
     // ==== TX buffers ====
     std::vector<uint8_t> txRawBuf_;

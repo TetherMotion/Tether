@@ -39,6 +39,22 @@
 namespace tether { namespace io {
 
 // ---------------------------------------------------------------------------
+// Framing mode
+// ---------------------------------------------------------------------------
+/// Determines how message boundaries are established on the transport.
+///
+/// - `Slip`: SLIP framing (0xC0 END delimiter) is applied on top of the
+///   byte-stream transport.  Used for serial lines, raw TCP, and other
+///   byte-stream transports that do not provide native message boundaries.
+/// - `None`: No framing — the transport itself provides message boundaries
+///   (e.g. WebSocket, where each frame is a complete message).  The protocol
+///   message is sent/received directly as the transport payload.
+enum class Framing : uint8_t {
+    Slip = 0,  ///< SLIP framing (default, for byte-stream transports)
+    None = 1,  ///< No framing (for message-oriented transports like WebSocket)
+};
+
+// ---------------------------------------------------------------------------
 // Protocol version
 // ---------------------------------------------------------------------------
 // Version 5 is the Tether merge revision. It uses ParameterStreamProtocol's
