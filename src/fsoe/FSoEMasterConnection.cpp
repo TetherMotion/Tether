@@ -1730,7 +1730,7 @@ bool FSoEMasterConnection::validateCRC(const uint8_t* data, size_t len) const
     // (the incremented value, matching the slave's rx_seq_no_ after RX).
     const bool is_reset_frame = (!data || len == 0) ? false : (data[0] == Command::Reset);
     return CRC::parseFSoEFrameWithCollisionAvoidance(
-        data, len, cmd, nullptr, data_len, conn_id,
+        data, len, cmd, {}, data_len, conn_id,
         is_reset_frame ? 0 : last_tx_crc0_,
         is_reset_frame ? CRC::incrementSeqNo(config_.initial_seq_no) : tx_seq_no_);
 }

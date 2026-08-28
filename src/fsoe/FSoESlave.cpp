@@ -753,7 +753,7 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
     // sends Reset frames with safe data (11 bytes, not 3), so they have
     // CRCs that must be captured.
     if (!CRC::parseFSoEFrameWithCollisionAvoidance(
-            data, len, cmd, nullptr, data_len, conn_id,
+            data, len, cmd, {}, data_len, conn_id,
             parse_start_crc, parse_seq_no,
             &last_rx_crc0_,  // always capture CRC0 for collision avoidance
             &seq_used, &crc_error_detail)) {
@@ -840,7 +840,7 @@ bool FSoESlave::validateCRC(const uint8_t* data, size_t len) {
     // (the master's TX chains from the slave's last TX CRC0).
     const bool is_reset_frame = (!data || len == 0) ? false : (data[0] == Command::Reset);
     return CRC::parseFSoEFrameWithCollisionAvoidance(
-        data, len, cmd, nullptr, data_len, conn_id,
+        data, len, cmd, {}, data_len, conn_id,
         is_reset_frame ? 0 : last_tx_crc0_,
         is_reset_frame ? config_.initialSeqNo : rx_seq_no_);
 }

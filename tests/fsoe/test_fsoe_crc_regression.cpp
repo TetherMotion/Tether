@@ -250,7 +250,7 @@ TEST(FSoEFrameMaxSizeRegression, ParseAcceptsMaxPayload) {
 }
 
 TEST(FSoEFrameMaxSizeRegression, ParseNullOutDataDoesntCrash) {
-    // parseFSoEFrame with out_data=nullptr should not crash
+    // parseFSoEFrame with empty out_data span should not crash
     uint8_t data[] = {0x01, 0x02};
     uint8_t frame[64];
     size_t frame_size = CRC::buildFSoEFrame(frame, Command::Session,
@@ -260,7 +260,7 @@ TEST(FSoEFrameMaxSizeRegression, ParseNullOutDataDoesntCrash) {
     size_t out_data_len = 0;
     uint16_t out_conn_id = 0;
 
-    EXPECT_TRUE(CRC::parseFSoEFrame(frame, frame_size, out_cmd, nullptr,
+    EXPECT_TRUE(CRC::parseFSoEFrame(frame, frame_size, out_cmd, {},
                                      out_data_len, out_conn_id));
     EXPECT_EQ(out_data_len, 2u);
 }

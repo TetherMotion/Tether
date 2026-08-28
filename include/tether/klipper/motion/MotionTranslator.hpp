@@ -40,6 +40,7 @@
 #include <cstdint>
 #include <vector>
 #include <array>
+#include <span>
 #include <functional>
 #include <cmath>
 #include <algorithm>
@@ -114,6 +115,26 @@ struct AxisStepSequence {
     uint32_t startClock = 0;
     std::vector<objects::StepCommand> steps;
 };
+
+/// @brief Safely look up an axis step sequence by OID in a translation result.
+///
+/// `MotionTranslator::translate()` skips axes that produce no steps, so the
+/// returned vector's indices do NOT correspond to axis numbers.  Direct
+/// indexing (e.g. `seqs[3]`) is an unchecked out-of-bounds hazard and has
+/// caused ASAN heap-use-after-free failures.  Use this helper instead — it
+/// performs an OID-based lookup and returns nullptr when the axis is absent,
+/// forcing the caller to handle the not-found case explicitly.
+///
+/// @param seqs The translation result (from `MotionTranslator::translate()`).
+/// @param oid  The axis OID to find.
+/// @return Pointer to the matching sequence, or nullptr if not found.
+inline const AxisStepSequence* findAxisByOid(
+    std::span<const AxisStepSequence> seqs, uint8_t oid) noexcept {
+    for (const auto& seq : seqs) {
+        if (seq.oid == oid) return &seq;
+    }
+    return nullptr;
+}
 
 // KinematicsTransform has been extracted to
 // tether/kinematics/KinematicsTransform.hpp (in the tether_kinematics module).

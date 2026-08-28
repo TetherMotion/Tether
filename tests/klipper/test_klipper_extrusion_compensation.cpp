@@ -32,6 +32,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <algorithm>
 
 using namespace tether::klipper;
 
@@ -140,31 +141,21 @@ TEST(KlipperExtrusionCompensation, PowerLawChangesEStepsVsLinear) {
     //
     // Compare the E-axis step sequences: if they are identical, the PA
     // models are not being applied differently.
-    // Find the E-axis (oid=3) by OID, since translate() skips axes
-    // with no steps, so the index may not be 3.
-    const motion::AxisStepSequence* linSeq = nullptr;
-    const motion::AxisStepSequence* plSeq = nullptr;
-    for (const auto& s : seqsLin) {
-        if (s.oid == 3) { linSeq = &s; break; }
-    }
-    for (const auto& s : seqsPl) {
-        if (s.oid == 3) { plSeq = &s; break; }
-    }
+    // Use findAxisByOid() for safe lookup — translate() skips axes with no
+    // steps, so the vector index does not correspond to the axis number.
+    const auto* linSeq = motion::findAxisByOid(seqsLin, 3);
+    const auto* plSeq = motion::findAxisByOid(seqsPl, 3);
     ASSERT_NE(linSeq, nullptr) << "E-axis not found in linear PA result";
     ASSERT_NE(plSeq, nullptr) << "E-axis not found in power-law PA result";
-    bool sequencesDiffer = false;
-    if (linSeq->steps.size() != plSeq->steps.size()) {
-        sequencesDiffer = true;
-    } else {
-        for (size_t i = 0; i < linSeq->steps.size(); ++i) {
-            if (linSeq->steps[i].interval != plSeq->steps[i].interval ||
-                linSeq->steps[i].count != plSeq->steps[i].count ||
-                linSeq->steps[i].add != plSeq->steps[i].add) {
-                sequencesDiffer = true;
-                break;
-            }
-        }
-    }
+    // std::ranges::equal handles size mismatch and element comparison
+    // without raw indexing — inherently bounds-safe.
+    const bool sequencesDiffer = !std::ranges::equal(
+        linSeq->steps, plSeq->steps,
+        [](const objects::StepCommand& a, const objects::StepCommand& b) {
+            return a.interval == b.interval &&
+                   a.count == b.count &&
+                   a.add == b.add;
+        });
     EXPECT_TRUE(sequencesDiffer)
         << "Linear and PowerLaw PA produced identical E-axis step sequences";
 }

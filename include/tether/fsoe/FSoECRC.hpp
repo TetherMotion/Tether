@@ -45,6 +45,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <array>
+#include <span>
 
 namespace FSoE::CRC {
 
@@ -400,13 +401,13 @@ inline constexpr size_t fsoePduSize(size_t data_len) {
 /// @param frame      Input frame bytes.
 /// @param frame_len  Frame length in bytes.
 /// @param out_cmd    Receives the command byte.
-/// @param out_data   Receives the data bytes (may be nullptr to skip extraction).
+/// @param out_data   Receives the data bytes (empty span to skip extraction).
 /// @param out_data_len  Receives the data length.
 /// @param out_conn_id   Receives the connection ID.
 /// @return true if the frame format is valid (CRCs are NOT checked).
 inline bool extractFSoEFrame(const uint8_t* frame, size_t frame_len,
                               uint8_t& out_cmd,
-                              uint8_t* out_data, size_t& out_data_len,
+                              std::span<uint8_t> out_data, size_t& out_data_len,
                               uint16_t& out_conn_id) {
     if (frame_len < MIN_FSOE_FRAME_SIZE) return false;
 
@@ -425,7 +426,9 @@ inline bool extractFSoEFrame(const uint8_t* frame, size_t frame_len,
 
     int pduSize = static_cast<int>(frame_len);
 
-    if (out_data) {
+    if (!out_data.empty()) {
+        // Bounds check: refuse to write more than the caller's buffer can hold.
+        if (data_len > out_data.size()) return false;
         if (pduSize <= 6) {
             out_data[0] = frame[1];
         } else {
@@ -559,7 +562,7 @@ inline size_t buildFSoEFrame(uint8_t* out, uint8_t cmd,
 /// @param frame      Input frame bytes.
 /// @param frame_len  Frame length in bytes.
 /// @param out_cmd    Receives the command byte.
-/// @param out_data   Receives the data bytes (may be nullptr to skip extraction).
+/// @param out_data   Receives the data bytes (empty span to skip extraction).
 /// @param out_data_len  Receives the data length.
 /// @param out_conn_id   Receives the connection ID.
 /// @param start_crc  Previous frame's CRC0 (for CRC inheritance).  Use 0 for
@@ -574,7 +577,7 @@ inline size_t buildFSoEFrame(uint8_t* out, uint8_t cmd,
 /// @return true if all CRCs verify, false otherwise.
 inline bool parseFSoEFrame(const uint8_t* frame, size_t frame_len,
                             uint8_t& out_cmd,
-                            uint8_t* out_data, size_t& out_data_len,
+                            std::span<uint8_t> out_data, size_t& out_data_len,
                             uint16_t& out_conn_id,
                             uint16_t start_crc = 0,
                             uint16_t seq_no = 0,
@@ -603,7 +606,9 @@ inline bool parseFSoEFrame(const uint8_t* frame, size_t frame_len,
     int pduSize = static_cast<int>(frame_len);
 
     // Extract data bytes from the frame
-    if (out_data) {
+    if (!out_data.empty()) {
+        // Bounds check: refuse to write more than the caller's buffer can hold.
+        if (data_len > out_data.size()) return false;
         if (pduSize <= 6) {
             // 1 data byte: [CMD] [Data0] [CRC0(2)] [ConnID(2)]
             out_data[0] = frame[1];
@@ -637,10 +642,10 @@ inline bool parseFSoEFrame(const uint8_t* frame, size_t frame_len,
                   (static_cast<uint16_t>(frame[frame_len - 1]) << 8);
 
     // Compute expected CRCs
-    const uint8_t* data_ptr = out_data ? out_data : nullptr;
-    // If out_data is null, we need a temporary buffer to extract data for CRC
+    const uint8_t* data_ptr = out_data.data();
+    // If out_data is empty, we need a temporary buffer to extract data for CRC
     uint8_t temp_data[MAX_PARSE_DATA_SIZE] = {0};
-    if (!out_data) {
+    if (out_data.empty()) {
         if (pduSize <= 6) {
             temp_data[0] = frame[1];
         } else {
@@ -890,7 +895,7 @@ inline size_t buildFSoEFrameWithCollisionAvoidance(
 /// @param frame          Input frame bytes.
 /// @param frame_len      Frame length in bytes.
 /// @param out_cmd        Receives the command byte.
-/// @param out_data       Receives the data bytes (may be nullptr).
+/// @param out_data       Receives the data bytes (empty span to skip).
 /// @param out_data_len   Receives the data length.
 /// @param out_conn_id    Receives the connection ID.
 /// @param start_crc      Previous frame's CRC0 (for CRC inheritance).
@@ -903,7 +908,7 @@ inline size_t buildFSoEFrameWithCollisionAvoidance(
 inline bool parseFSoEFrameWithCollisionAvoidance(
     const uint8_t* frame, size_t frame_len,
     uint8_t& out_cmd,
-    uint8_t* out_data, size_t& out_data_len,
+    std::span<uint8_t> out_data, size_t& out_data_len,
     uint16_t& out_conn_id,
     uint16_t start_crc,
     uint16_t initial_seq,
