@@ -2133,8 +2133,18 @@ private:
                 "Per-axis snap limits require fourth-order path derivatives";
             return bounds;
         }
-        if (limits_.path.maxPathSnap <= T(0) ||
-            limits_.path.maxPathJerk <= T(0) ||
+        // The snap-space planner requires positive jerk and snap limits.
+        // When the user disables jerk limiting (maxPathJerk = 0), use
+        // a large default so the planner degenerates to a trapezoidal-like
+        // profile (jerk ramps are negligible). This matches the fallback
+        // already used in estimateMaxReachableJerk and brakeDistance.
+        T effectiveJerk = limits_.path.maxPathJerk;
+        if (effectiveJerk <= T(0)) effectiveJerk = T(5000);
+        T effectiveSnap = limits_.path.maxPathSnap;
+        if (effectiveSnap <= T(0)) effectiveSnap = T(50000);
+
+        if (effectiveSnap <= T(0) ||
+            effectiveJerk <= T(0) ||
             limits_.path.maxPathAcceleration <= T(0)) {
             bounds.failureReason =
                 "SnapSpace requires positive path acceleration, jerk, and snap limits";
@@ -2143,8 +2153,8 @@ private:
 
         bounds.velocity = std::numeric_limits<double>::infinity();
         bounds.acceleration = static_cast<double>(limits_.path.maxPathAcceleration);
-        bounds.jerk = static_cast<double>(limits_.path.maxPathJerk);
-        bounds.snap = static_cast<double>(limits_.path.maxPathSnap);
+        bounds.jerk = static_cast<double>(effectiveJerk);
+        bounds.snap = static_cast<double>(effectiveSnap);
 
         const size_t samples = std::max<size_t>(constraintCacheSize_, 32);
         for (size_t i = 0; i <= samples; ++i) {
