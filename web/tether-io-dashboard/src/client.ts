@@ -106,6 +106,11 @@ export class TetherIOClient extends EventTarget {
   private pending: Pending[] = [];
   /** Layout of the currently configured stream (set by configureStream). */
   private streamLayout: StreamLayoutEntry[] = [];
+
+  /** Current stream layout (one entry per channel, set by configureStream). */
+  get currentStreamLayout(): StreamLayoutEntry[] {
+    return this.streamLayout;
+  }
   /** Whether a stream is currently active (set by startStream/stopStream). */
   private streamActive = false;
   /** Monotonic counter for log correlation. */
