@@ -126,6 +126,7 @@ const SHADER = /* wgsl */ `
     writeIndex    : u32,
     bufferSamples : u32,
     numChannels   : u32,
+    _pad0         : u32,
   };
 
   @group(0) @binding(0) var<uniform> ru : RenderUniforms;
@@ -755,9 +756,9 @@ export class WebGPUScope extends HTMLElement {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
     });
 
-    // Render uniforms (60 bytes: 12 × f32 + 3 × u32).
+    // Render uniforms (64 bytes: 12 × f32 + 4 × u32, 16-byte aligned).
     this.renderUniforms = device.createBuffer({
-      size: 60,
+      size: 64,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
@@ -1195,11 +1196,12 @@ export class WebGPUScope extends HTMLElement {
     ruData[11] = yMajorStep;
     this.device.queue.writeBuffer(this.renderUniforms, 0, ruData);
 
-    // Write writeIndex, bufferSamples, numChannels as u32 at offset 48.
-    const bufInfo = new Uint32Array(new ArrayBuffer(3 * 4));
+    // Write writeIndex, bufferSamples, numChannels, pad as u32 at offset 48.
+    const bufInfo = new Uint32Array(new ArrayBuffer(4 * 4));
     bufInfo[0] = activeWriteIndex;
     bufInfo[1] = BUFFER_SAMPLES;
     bufInfo[2] = this.numChannels;
+    bufInfo[3] = 0; // padding
     this.device.queue.writeBuffer(this.renderUniforms, 48, bufInfo);
 
     this.ensureMsaa(cw, ch, sc);
@@ -1244,13 +1246,13 @@ export class WebGPUScope extends HTMLElement {
       rp.draw(vertexCount, this.numChannels, firstVertex, 0);
 
       // 3) Points — render dots at every sample when the visible sample
-      //    count is low enough (< 100 per channel).  This is done
+      //    count is low enough (< 2000 per channel).  This is done
       //    entirely on the GPU: the point vertex shader reads each
       //    sample from the ring buffer and emits a small circle.
       // Estimate visible samples: sample rate × visible time span.
       const sampleRate = WINDOW_SAMPLES / WINDOW_SEC; // ~1000 Hz
       const estVisible = Math.min(validSamples, Math.ceil(sampleRate * viewSpan));
-      if (estVisible < 100) {
+      if (estVisible < 2000) {
         const POINT_SEGMENTS = 12;
         const vertsPerCircle = POINT_SEGMENTS * 3;
         const pointInstances = validSamples * this.numChannels;
