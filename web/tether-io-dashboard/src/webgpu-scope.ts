@@ -263,7 +263,7 @@ const SHADER = /* wgsl */ `
     let centerPx = worldToPx(t, v);
 
     // Circle radius in pixels.
-    let RADIUS_PX = 3.0;
+    let RADIUS_PX = 4.0;
     var outPx = centerPx;
     if (!isCenter) {
       let ringIdx = local - 1u;
@@ -416,9 +416,13 @@ export class WebGPUScope extends HTMLElement {
   private ctx?: GPUCanvasContext;
   private format?: GPUTextureFormat;
   private ringBuffer?: GPUBuffer;
+  /** Frozen copy of the ring buffer, used for rendering while paused. */
+  private frozenBuffer?: GPUBuffer;
   private renderUniforms?: GPUBuffer;
   private colorBuffer?: GPUBuffer;
   private bindGroup?: GPUBindGroup;
+  /** Bind group using the frozen buffer (active while paused). */
+  private frozenBindGroup?: GPUBindGroup;
   private linePipeline?: GPURenderPipeline;
   private gridPipeline?: GPURenderPipeline;
   private pointPipeline?: GPURenderPipeline;
@@ -483,6 +487,10 @@ export class WebGPUScope extends HTMLElement {
   /** Frozen Y range when zoomed. */
   private zoomYMin: number | null = null;
   private zoomYMax: number | null = null;
+  /** Frozen copies of ring buffer state, captured at pause time. */
+  private frozenWriteIndex = 0;
+  private frozenSampleCounter = 0;
+  private frozenCurrentTime = 0.0;
   /** Drag-rectangle zoom state (in CSS pixels relative to canvas). */
   private dragActive = false;
   private dragStartX = 0;
@@ -536,19 +544,37 @@ export class WebGPUScope extends HTMLElement {
   togglePause(): boolean {
     this.paused = !this.paused;
     if (this.paused) {
+      // Snapshot the live ring buffer into the frozen buffer so the
+      // paused view is unaffected by continued data uploads.
+      this.copyToFrozen();
+      this.frozenWriteIndex = this.writeIndex;
+      this.frozenSampleCounter = this.sampleCounter;
+      this.frozenCurrentTime = this.currentTime;
       // Freeze the view at the current position.
       this.viewTimeMin = this.currentTime - WINDOW_SEC;
       this.viewTimeSpan = WINDOW_SEC;
       this.zoomYMin = null;
       this.zoomYMax = null;
     } else {
-      // Resume auto-scroll.
+      // Resume auto-scroll — the live buffer has been recording
+      // continuously, so just switch the view back.
       this.viewTimeMin = null;
       this.viewTimeSpan = WINDOW_SEC;
       this.zoomYMin = null;
       this.zoomYMax = null;
     }
     return this.paused;
+  }
+
+  /**
+   * Copy the live ring buffer into the frozen buffer via the GPU
+   * copy queue.  This is a GPU-side memcpy — no CPU readback.
+   */
+  private copyToFrozen(): void {
+    if (!this.device || !this.ringBuffer || !this.frozenBuffer) return;
+    const encoder = this.device.createCommandEncoder();
+    encoder.copyBufferToBuffer(this.ringBuffer, 0, this.frozenBuffer, 0, this.ringBuffer.size);
+    this.device.queue.submit([encoder.finish()]);
   }
 
   /** Reset zoom and pause — return to auto-scrolling live view. */
@@ -738,6 +764,14 @@ export class WebGPUScope extends HTMLElement {
     }
     device.queue.writeBuffer(this.ringBuffer, 0, initBuf);
 
+    // Frozen buffer: same size as ring buffer, used as a snapshot
+    // while paused.  Needs COPY_DST for the copyBufferToBuffer call.
+    this.frozenBuffer = device.createBuffer({
+      size: bufferBytes,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(this.frozenBuffer, 0, initBuf);
+
     // Write channel colors (defaults if setChannels not yet called).
     this.writeColors();
 
@@ -746,6 +780,15 @@ export class WebGPUScope extends HTMLElement {
       entries: [
         { binding: 0, resource: { buffer: this.renderUniforms } },
         { binding: 1, resource: { buffer: this.ringBuffer } },
+        { binding: 2, resource: { buffer: this.colorBuffer } },
+      ],
+    });
+
+    this.frozenBindGroup = device.createBindGroup({
+      layout: renderLayout,
+      entries: [
+        { binding: 0, resource: { buffer: this.renderUniforms } },
+        { binding: 1, resource: { buffer: this.frozenBuffer } },
         { binding: 2, resource: { buffer: this.colorBuffer } },
       ],
     });
@@ -858,7 +901,14 @@ export class WebGPUScope extends HTMLElement {
     this.viewTimeSpan = newTimeMax - newTimeMin;
     this.zoomYMin = newYMin;
     this.zoomYMax = newYMax;
-    this.paused = true; // zooming implies paused
+    // Zooming implies paused — snapshot the buffer if not already paused.
+    if (!this.paused) {
+      this.paused = true;
+      this.copyToFrozen();
+      this.frozenWriteIndex = this.writeIndex;
+      this.frozenSampleCounter = this.sampleCounter;
+      this.frozenCurrentTime = this.currentTime;
+    }
   }
 
   /**
@@ -1030,6 +1080,7 @@ export class WebGPUScope extends HTMLElement {
       !this.canvasEl ||
       !this.renderUniforms ||
       !this.bindGroup ||
+      !this.frozenBindGroup ||
       !this.linePipeline ||
       !this.gridPipeline ||
       !this.pointPipeline
@@ -1054,8 +1105,15 @@ export class WebGPUScope extends HTMLElement {
     const plotW = Math.max(1, cw - ml - mr);
     const plotH = Math.max(1, ch - mt - mb);
 
+    // When paused, render from the frozen snapshot.  The live buffer
+    // keeps recording new data in the background.
+    const activeBindGroup = this.paused ? this.frozenBindGroup : this.bindGroup;
+    const activeWriteIndex = this.paused ? this.frozenWriteIndex : this.writeIndex;
+    const activeSampleCounter = this.paused ? this.frozenSampleCounter : this.sampleCounter;
+    const activeCurrentTime = this.paused ? this.frozenCurrentTime : this.currentTime;
+
     // Determine the effective view bounds.
-    const viewMin = this.viewTimeMin ?? this.currentTime - WINDOW_SEC;
+    const viewMin = this.viewTimeMin ?? activeCurrentTime - WINDOW_SEC;
     const viewSpan = this.viewTimeSpan;
     const effYMin = this.zoomYMin ?? this.yMin;
     const effYMax = this.zoomYMax ?? this.yMax;
@@ -1082,7 +1140,7 @@ export class WebGPUScope extends HTMLElement {
 
     // Write writeIndex and bufferSamples as u32 at offset 48 (bytes).
     const bufInfo = new Uint32Array(new ArrayBuffer(2 * 4));
-    bufInfo[0] = this.writeIndex;
+    bufInfo[0] = activeWriteIndex;
     bufInfo[1] = BUFFER_SAMPLES;
     this.device.queue.writeBuffer(this.renderUniforms, 48, bufInfo);
 
@@ -1112,7 +1170,7 @@ export class WebGPUScope extends HTMLElement {
 
     // 1) Grid background.
     rp.setPipeline(this.gridPipeline);
-    rp.setBindGroup(0, this.bindGroup);
+    rp.setBindGroup(0, activeBindGroup);
     rp.draw(6);
 
     // 2) Line strips — single instanced draw, one instance per channel.
@@ -1120,8 +1178,8 @@ export class WebGPUScope extends HTMLElement {
     if (this.numChannels > 0) {
       rp.setScissorRect(plotX, plotY, plotW, plotH);
       rp.setPipeline(this.linePipeline);
-      rp.setBindGroup(0, this.bindGroup);
-      const validSamples = Math.min(this.sampleCounter, WINDOW_SAMPLES);
+      rp.setBindGroup(0, activeBindGroup);
+      const validSamples = Math.min(activeSampleCounter, WINDOW_SAMPLES);
       // Each sample generates 2 vertices (one per side of the thick line).
       const vertexCount = Math.max(0, validSamples * 2 - 2);
       const firstVertex = (WINDOW_SAMPLES - validSamples) * 2;
@@ -1141,7 +1199,7 @@ export class WebGPUScope extends HTMLElement {
         const vertsPerCircle = POINT_SEGMENTS + 2;
         const pointInstances = validSamples * this.numChannels;
         rp.setPipeline(this.pointPipeline);
-        rp.setBindGroup(0, this.bindGroup);
+        rp.setBindGroup(0, activeBindGroup);
         rp.draw(vertsPerCircle, pointInstances, 0, 0);
       }
     }
@@ -1150,7 +1208,7 @@ export class WebGPUScope extends HTMLElement {
     this.device.queue.submit([encoder.finish()]);
 
     // Draw axis labels + legend + drag rectangle on the 2D overlay.
-    this.drawAxes(canvas.clientWidth, canvas.clientHeight, dpr);
+    this.drawAxes(canvas.clientWidth, canvas.clientHeight, dpr, activeCurrentTime);
   }
 
   // =========================================================================
@@ -1158,7 +1216,7 @@ export class WebGPUScope extends HTMLElement {
   // =========================================================================
 
   /** Draw axis tick labels, axis titles, and channel legend on the overlay. */
-  private drawAxes(cssW: number, cssH: number, dpr: number): void {
+  private drawAxes(cssW: number, cssH: number, dpr: number, activeCurrentTime: number): void {
     if (!this.overlayEl || !this.octx || !this.canvasEl) return;
     const canvas = this.canvasEl;
     const overlay = this.overlayEl;
@@ -1188,7 +1246,7 @@ export class WebGPUScope extends HTMLElement {
     const ph = cssH - mt - mb;
 
     // Effective view bounds (may be zoomed or paused).
-    const viewMin = this.viewTimeMin ?? this.currentTime - WINDOW_SEC;
+    const viewMin = this.viewTimeMin ?? activeCurrentTime - WINDOW_SEC;
     const viewSpan = this.viewTimeSpan;
     const effYMin = this.zoomYMin ?? this.yMin;
     const effYMax = this.zoomYMax ?? this.yMax;
