@@ -315,12 +315,23 @@ export class WebGPUScope extends HTMLElement {
   // ---- Ring buffer state ----
   /** Next sample slot to write (0..BUFFER_SAMPLES-1). */
   private writeIndex = 0;
-  /** Timestamp of the most recent sample (seconds). */
+  /** Timestamp of the most recent sample (seconds, relative to reference). */
   private currentTime = 0.0;
   /** Total samples written so far (for firstVertex calculation). */
   private sampleCounter = 0;
   /** Pending samples not yet uploaded to the GPU. */
   private pendingRows: ScopeRow[] = [];
+  /**
+   * Reference timestamp (µs) subtracted from all incoming timestamps.
+   *
+   * The WGSL shader uses f32 for timestamps.  Absolute microsecond
+   * timestamps (~6×10⁵ seconds) far exceed f32 mantissa precision
+   * (~7 digits), so consecutive 1 ms samples would all collapse to the
+   * same f32 value and render as vertical bars.  Storing timestamps
+   * relative to the first sample keeps them in the 0–5 s range where
+   * f32 has sub-microsecond precision.
+   */
+  private referenceTimeUs: bigint | null = null;
 
   // ---- Channel configuration ----
   /** Number of active channels (set by setChannels). */
@@ -386,7 +397,11 @@ export class WebGPUScope extends HTMLElement {
    */
   push(timestampUs: bigint, values: number[]): void {
     if (this.numChannels === 0) return;
-    const t = Number(timestampUs) / 1e6; // convert µs → seconds
+    // Use relative timestamps to stay within f32 precision range.
+    // Absolute timestamps (~6×10⁵ s) overflow f32 mantissa and cause
+    // consecutive 1 ms samples to collapse to the same X position.
+    if (this.referenceTimeUs === null) this.referenceTimeUs = timestampUs;
+    const t = Number(timestampUs - this.referenceTimeUs) / 1e6;
     this.pendingRows.push({ t, values });
     this.currentTime = t;
   }
@@ -399,6 +414,7 @@ export class WebGPUScope extends HTMLElement {
     this.sampleCounter = 0;
     this.yMin = -1.2;
     this.yMax = 1.2;
+    this.referenceTimeUs = null;
     if (this.device && this.ringBuffer) {
       // Re-initialize ring buffer with sentinel timestamps.
       const initBuf = new Float32Array(new ArrayBuffer(BUFFER_SAMPLES * MAX_CHANNELS * 2 * 4));
