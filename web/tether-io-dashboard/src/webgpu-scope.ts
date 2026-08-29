@@ -839,30 +839,66 @@ export class WebGPUScope extends HTMLElement {
     const styles = getComputedStyle(this);
     const isDark = styles.colorScheme === 'dark';
 
-    // Parse a hex color (#rrggbb) to [r, g, b] floats in [0, 1].
-    const hex = (h: string): [number, number, number] => {
-      const m = h.match(/#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i);
-      if (!m) return [0.5, 0.5, 0.5];
-      return [parseInt(m[1]!, 16) / 255, parseInt(m[2]!, 16) / 255, parseInt(m[3]!, 16) / 255];
+    // Parse rgb(...), rgba(...), #rrggbb, #rgb, or #rrggbbaa to [r, g, b].
+    const parseColor = (h: string): [number, number, number] => {
+      const s = h.trim();
+      const rgbMatch = s.match(
+        /^rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)/,
+      );
+      if (rgbMatch) {
+        return [
+          Math.min(1, Math.max(0, Number(rgbMatch[1]) / 255)),
+          Math.min(1, Math.max(0, Number(rgbMatch[2]) / 255)),
+          Math.min(1, Math.max(0, Number(rgbMatch[3]) / 255)),
+        ];
+      }
+      const hexMatch = s.match(/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i);
+      if (hexMatch) {
+        const hex = hexMatch[1]!;
+        if (hex.length === 3) {
+          return [
+            parseInt(hex[0]! + hex[0]!, 16) / 255,
+            parseInt(hex[1]! + hex[1]!, 16) / 255,
+            parseInt(hex[2]! + hex[2]!, 16) / 255,
+          ];
+        }
+        if (hex.length === 4) {
+          return [
+            parseInt(hex[0]! + hex[0]!, 16) / 255,
+            parseInt(hex[1]! + hex[1]!, 16) / 255,
+            parseInt(hex[2]! + hex[2]!, 16) / 255,
+          ];
+        }
+        if (hex.length === 6 || hex.length === 8) {
+          return [
+            parseInt(hex.slice(0, 2), 16) / 255,
+            parseInt(hex.slice(2, 4), 16) / 255,
+            parseInt(hex.slice(4, 6), 16) / 255,
+          ];
+        }
+      }
+      return [0.92, 0.92, 0.93];
     };
 
     // Read CSS variables; fall back to sensible defaults.
     const cssVar = (name: string) => styles.getPropertyValue(name).trim();
-    const marginHex = cssVar('--plot-margin') || (isDark ? '#07101c' : '#e8eef5');
-    const plotBgHex = cssVar('--plot-bg') || (isDark ? '#0d1a28' : '#f5f8fc');
+    const marginRaw = cssVar('--plot-margin') || (isDark ? '#0a1420' : '#e8eef5');
+    const plotBgRaw = cssVar('--plot-bg') || (isDark ? '#0d1a28' : '#ffffff');
 
-    const [mr, mg, mb] = hex(marginHex);
-    const [pr, pg, pb] = hex(plotBgHex);
+    const [mr, mg, mb] = parseColor(marginRaw);
+    const [pr, pg, pb] = parseColor(plotBgRaw);
 
-    // Grid line colors: subtle in both themes.
-    const minor: [number, number, number] = isDark ? [0.35, 0.35, 0.38] : [0.82, 0.85, 0.88];
-    const major: [number, number, number] = isDark ? [0.45, 0.45, 0.5] : [0.65, 0.68, 0.72];
+    // Grid line colors from CSS, or subtle defaults.
+    const minorRaw = cssVar('--plot-grid-minor') || (isDark ? '#162636' : '#e2e8f0');
+    const majorRaw = cssVar('--plot-grid-major') || (isDark ? '#253b52' : '#cbd5e1');
+    const [mir, mig, mib] = parseColor(minorRaw);
+    const [mar, mag, mab] = parseColor(majorRaw);
 
     return {
       margin: [mr, mg, mb, 1],
       plotBg: [pr, pg, pb, 1],
-      minor: [minor[0]!, minor[1]!, minor[2]!, 1],
-      major: [major[0]!, major[1]!, major[2]!, 1],
+      minor: [mir, mig, mib, 1],
+      major: [mar, mag, mab, 1],
     };
   }
 
