@@ -575,6 +575,10 @@ h2 {
   letter-spacing: 0.1em;
 }
 
+.live-dot.paused {
+  color: #a06010;
+}
+
 tether-webgpu-scope {
   display: block;
   height: 320px;
