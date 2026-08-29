@@ -738,7 +738,7 @@ export class WebGPUScope extends HTMLElement {
     const bufferBytes = bufferFloats * 4;
     this.ringBuffer = device.createBuffer({
       size: bufferBytes,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
     });
 
     // Render uniforms (56 bytes: 12 × f32 + 2 × u32).
