@@ -401,6 +401,12 @@ export class WebGPUScope extends HTMLElement {
   private numChannels = 0;
   /** Per-channel info (name + color). */
   private channels: ChannelInfo[] = [];
+  /**
+   * Index of the channel highlighted by legend hover, or `null` if none.
+   * When set, non-highlighted channels are desaturated and lightened
+   * towards the plot background color.
+   */
+  private highlightedChannel: number | null = null;
 
   // ---- Y auto-scale ----
   /** Rolling min/max of visible samples for Y auto-scaling. */
@@ -635,7 +641,39 @@ export class WebGPUScope extends HTMLElement {
     this.appendChild(this.overlayEl);
     this.octx = this.overlayEl.getContext('2d');
 
+    // Legend hover detection: the overlay itself has pointerEvents:none,
+    // so attach mouse listeners to the scope container.  We compute
+    // whether the mouse is over a legend item in the render loop's
+    // coordinate space.
+    this.addEventListener('mousemove', (e: MouseEvent) => {
+      const rect = this.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      this.updateLegendHover(x, y);
+    });
+    this.addEventListener('mouseleave', () => {
+      if (this.highlightedChannel !== null) {
+        this.highlightedChannel = null;
+        this.writeColors();
+      }
+    });
+
     this.initialized = true;
+  }
+
+  /**
+   * Desaturate and lighten a color towards the plot background (0.97 gray).
+   * `factor` = 0 → original color, 1 → fully background color.
+   */
+  private dimColor(c: [number, number, number], factor: number): [number, number, number] {
+    const bg = 0.97;
+    // Convert to grayscale (luminance), then lerp towards background.
+    const gray = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+    const desat = 0.5 * c[0] + 0.5 * gray;
+    const r = desat + (bg - desat) * factor;
+    const g = 0.5 * c[1] + 0.5 * gray + (bg - (0.5 * c[1] + 0.5 * gray)) * factor;
+    const b = 0.5 * c[2] + 0.5 * gray + (bg - (0.5 * c[2] + 0.5 * gray)) * factor;
+    return [r, g, b];
   }
 
   /** Write channel colors to the GPU color buffer. */
@@ -643,8 +681,12 @@ export class WebGPUScope extends HTMLElement {
     if (!this.device || !this.colorBuffer) return;
     const colorData = new Float32Array(new ArrayBuffer(MAX_CHANNELS * 4 * 4));
     for (let ch = 0; ch < MAX_CHANNELS; ch++) {
-      const color: [number, number, number] =
+      let color: [number, number, number] =
         ch < this.channels.length ? this.channels[ch]!.color : [0.5, 0.5, 0.5];
+      // Dim non-highlighted channels when one is highlighted.
+      if (this.highlightedChannel !== null && ch !== this.highlightedChannel) {
+        color = this.dimColor(color, 0.7);
+      }
       colorData[ch * 4] = color[0]!;
       colorData[ch * 4 + 1] = color[1]!;
       colorData[ch * 4 + 2] = color[2]!;
@@ -977,23 +1019,70 @@ export class WebGPUScope extends HTMLElement {
     octx.fillText('value', 0, 0);
     octx.restore();
 
-    // Legend (right margin).
+    // Legend (right margin).  Highlighted channel is drawn at full
+    // saturation; others are dimmed to match the GPU-side dimming.
     const legendX = ml + pw + 8;
     const legendY = mt + 4;
     octx.font = '11px sans-serif';
     octx.textAlign = 'left';
     octx.textBaseline = 'middle';
     for (let i = 0; i < this.numChannels; i++) {
-      const [r, g, b] = this.channels[i]!.color;
+      let [r, g, b] = this.channels[i]!.color;
+      const isHighlighted = this.highlightedChannel === i;
+      const isDimmed = this.highlightedChannel !== null && !isHighlighted;
+      if (isDimmed) {
+        const dimmed = this.dimColor([r, g, b], 0.7);
+        [r, g, b] = dimmed;
+      }
       const ly = legendY + i * 18;
+      // Highlighted legend row gets a subtle background.
+      if (isHighlighted) {
+        octx.fillStyle = 'rgba(0,0,0,0.06)';
+        octx.fillRect(legendX - 4, ly - 9, pw + 12 - (legendX - ml), 18);
+      }
       octx.fillStyle = `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
       octx.fillRect(legendX, ly - 5, 12, 10);
-      octx.fillStyle = textMuted;
+      octx.fillStyle = isDimmed ? textMuted : textColor;
+      octx.font = isHighlighted ? 'bold 11px sans-serif' : '11px sans-serif';
       const name = this.channels[i]!.name;
       octx.fillText(name, legendX + 16, ly);
     }
 
     octx.restore();
+  }
+
+  /**
+   * Check whether the given CSS-pixel coordinates are over a legend item
+   * and update `highlightedChannel` accordingly.  Called on mousemove.
+   */
+  private updateLegendHover(mouseX: number, mouseY: number): void {
+    if (!this.canvasEl || !this.overlayEl) return;
+    const cssW = this.canvasEl.clientWidth;
+    const cssH = this.canvasEl.clientHeight;
+    const ml = MARGIN_LEFT;
+    const pw = cssW - MARGIN_LEFT - MARGIN_RIGHT;
+    const mt = MARGIN_TOP;
+    const legendX = ml + pw + 8;
+    const legendY = mt + 4;
+    // Legend item width: swatch (12) + gap (4) + text (~80) = ~96px.
+    const itemWidth = 96;
+    let newHighlight: number | null = null;
+    for (let i = 0; i < this.numChannels; i++) {
+      const ly = legendY + i * 18;
+      if (
+        mouseX >= legendX - 4 &&
+        mouseX <= legendX + itemWidth &&
+        mouseY >= ly - 9 &&
+        mouseY <= ly + 9
+      ) {
+        newHighlight = i;
+        break;
+      }
+    }
+    if (newHighlight !== this.highlightedChannel) {
+      this.highlightedChannel = newHighlight;
+      this.writeColors();
+    }
   }
 }
 
