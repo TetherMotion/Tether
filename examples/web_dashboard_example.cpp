@@ -137,7 +137,7 @@ int main(int argc, char** argv) {
     // Mutable state (atomic so the UI writer thread and signal reader are safe)
     std::atomic<double> amplitude{1.0};
     std::atomic<double> frequency{0.5};
-    std::atomic<double> sampleRate{100.0};
+    std::atomic<double> sampleRate{1000.0};
     std::atomic<double> phaseOffset{0.0};
     std::atomic<double> dcOffset{0.0};
 
@@ -229,7 +229,7 @@ int main(int argc, char** argv) {
             const std::vector<FunctionArgument>&) {
         amplitude.store(1.0);
         frequency.store(0.5);
-        sampleRate.store(100.0);
+        sampleRate.store(1000.0);
         phaseOffset.store(0.0);
         dcOffset.store(0.0);
         return FunctionCallResult{true, ErrorCode::None, {}, {}};

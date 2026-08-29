@@ -193,6 +193,10 @@ class TetherApp extends HTMLElement {
 
             <section class="value-grid" id="value-grid"></section>
 
+            <section class="panel param-panel" id="param-panel">
+              <tether-param-panel id="params-editor"></tether-param-panel>
+            </section>
+
             <section class="panel function-panel">
               <div class="panel-title">
                 <div>
@@ -247,6 +251,11 @@ class TetherApp extends HTMLElement {
     this.querySelectorAll<HTMLButtonElement>('.tab').forEach((tab) =>
       tab.addEventListener('click', () => void this.switchTab(tab.dataset.tab as Tab)),
     );
+
+    // Catalog selection changes → active entry + optional stream reload.
+    this.querySelector('tether-catalog')?.addEventListener('selection-change', () => {
+      void this.onSelectionChange();
+    });
 
     // Catalog "read-entry" event (from the ↗ button on each row)
     this.querySelector('tether-catalog')?.addEventListener('read-entry', (event) => {
@@ -317,6 +326,7 @@ class TetherApp extends HTMLElement {
       this.params = params;
       this.signals = signals;
       this.renderCatalog([...params, ...signals]);
+      this.renderParamPanel();
     } catch (error) {
       this.setStatus(error instanceof Error ? error.message : 'Catalog failed', false);
     }
@@ -356,6 +366,7 @@ class TetherApp extends HTMLElement {
     // All tab: show cached data (no refetch)
     if (tab === 'all') {
       this.renderCatalog([...this.params, ...this.signals]);
+      this.renderParamPanel();
       return;
     }
 
@@ -366,6 +377,7 @@ class TetherApp extends HTMLElement {
       if (tab === 'signals') this.signals = entries;
       else this.params = entries;
       this.renderCatalog(entries);
+      this.renderParamPanel();
     } catch (error) {
       this.setStatus(error instanceof Error ? error.message : 'Catalog failed', false);
     }
@@ -387,14 +399,54 @@ class TetherApp extends HTMLElement {
     };
     catalog.items = entries;
     this.querySelector('#catalog-count')!.textContent = String(entries.length);
+  }
 
-    catalog.addEventListener('selection-change', () => {
-      const selected = catalog.selectedIds;
-      this.active = entries.find((entry) => entry.id === selected[0]);
-      if (this.active) this.activeKind = this.active.kind;
-      this.querySelector('#selection-title')!.textContent =
-        this.active?.name ?? 'Select a signal to inspect';
-    });
+  /**
+   * Render the editable parameter panel below the value card.
+   */
+  private renderParamPanel(): void {
+    const panel = this.querySelector('tether-param-panel') as HTMLElement & {
+      model: { params: CatalogEntry[]; client: TetherIOClient };
+    };
+    panel.model = { params: this.params, client: this.client };
+  }
+
+  /**
+   * Handle catalog selection changes: update the active entry, title, and
+   * automatically restart the stream if it is currently running.
+   */
+  private async onSelectionChange(): Promise<void> {
+    const catalog = this.querySelector('tether-catalog') as HTMLElement & {
+      selectedIds: bigint[];
+    };
+    const selected = catalog.selectedIds;
+    const all = [...this.signals, ...this.params];
+    this.active = all.find((entry) => entry.id === selected[0]);
+    if (this.active) this.activeKind = this.active.kind;
+    this.querySelector('#selection-title')!.textContent =
+      this.active?.name ?? 'Select a signal to inspect';
+
+    // If streaming, reconfigure the stream with the new selection.
+    const button = this.querySelector<HTMLButtonElement>('#stream')!;
+    if (button.dataset.running) {
+      await this.restartStream();
+    }
+  }
+
+  /**
+   * Stop the current stream and immediately restart it with the latest
+   * catalog selection.
+   */
+  private async restartStream(): Promise<void> {
+    const button = this.querySelector<HTMLButtonElement>('#stream')!;
+    if (!button.dataset.running) return;
+
+    // Stop without changing the button text.
+    await this.client.stopStream();
+    delete button.dataset.running;
+
+    // Re-start using toggleStream's logic.
+    await this.toggleStream();
   }
 
   // ---- Read / Stream actions -------------------------------------------
@@ -458,7 +510,8 @@ class TetherApp extends HTMLElement {
     }
 
     // Start a new stream over all checked entries
-    await this.client.configureStream(selectedIds, 10, 1);
+    // 1 kHz (1 ms interval), chunks of 20 rows for smooth throughput.
+    await this.client.configureStream(selectedIds, 1, 20);
 
     // Store the stream layout and configure the WebGPU scope's channels.
     this.streamLayout = this.client.currentStreamLayout;
