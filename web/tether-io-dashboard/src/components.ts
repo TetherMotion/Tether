@@ -168,6 +168,90 @@ export class TetherValueCard extends HTMLElement {
 customElements.define('tether-value-card', TetherValueCard);
 
 // ===========================================================================
+// TetherParamPanel — editable parameter grid
+// ===========================================================================
+
+/**
+ * Editable grid of F64 parameters.
+ *
+ * Set the `model` property to `{ params, client }` to render one row per
+ * parameter.  Changes to a numeric input are encoded as F64 and sent to
+ * the server via `TetherIOClient.setParameter()`.
+ */
+export class TetherParamPanel extends HTMLElement {
+  private params: CatalogEntry[] = [];
+  private client?: TetherIOClient;
+
+  /** Provide the parameter list and client, then trigger an initial render. */
+  set model(value: { params: CatalogEntry[]; client: TetherIOClient }) {
+    this.params = value.params;
+    this.client = value.client;
+    this.render();
+  }
+
+  /** Lifecycle: element inserted into the DOM. */
+  connectedCallback(): void {
+    this.render();
+  }
+
+  /** Encode a JavaScript number as an 8-byte little-endian F64. */
+  private encodeF64(value: number): Uint8Array {
+    const out = new Uint8Array(8);
+    new DataView(out.buffer).setFloat64(0, value, true);
+    return out;
+  }
+
+  /** Render the parameter rows and wire up input → setParameter(). */
+  private render(): void {
+    if (this.params.length === 0) {
+      this.innerHTML = '<p class="empty">No parameters available.</p>';
+      return;
+    }
+    this.innerHTML =
+      `<div class="param-panel-head"><span class="eyebrow">Parameters</span>` +
+      `<h2>Live tuning</h2></div>` +
+      this.params
+        .map(
+          (p) =>
+            `<label class="param-row" data-id="${p.id}">` +
+            `<span><strong>${p.name}</strong><small>${p.group} · ${typeName(p.type)}</small></span>` +
+            `<input type="number" step="any" value="" ${p.type === ValueType.F64 ? '' : 'disabled'}>` +
+            `</label>`,
+        )
+        .join('');
+
+    // Read current values to populate the inputs.
+    for (const p of this.params) {
+      void this.loadValue(p);
+    }
+
+    // Wire up change events.
+    this.querySelectorAll<HTMLInputElement>('input[type="number"]').forEach((input) =>
+      input.addEventListener('change', () => {
+        const id = BigInt(input.closest('.param-row')?.getAttribute('data-id') ?? '0');
+        const value = parseFloat(input.value);
+        if (Number.isNaN(value) || !this.client) return;
+        void this.client.setParameter(id, this.encodeF64(value));
+      }),
+    );
+  }
+
+  /** Fetch the current value of a parameter and display it in the input. */
+  private async loadValue(entry: CatalogEntry): Promise<void> {
+    if (!this.client) return;
+    try {
+      const bytes = await this.client.get('param', entry.id);
+      const decoded = decodeValueBytes(bytes, entry.type);
+      const input = this.querySelector<HTMLInputElement>(`.param-row[data-id="${entry.id}"] input`);
+      if (input && typeof decoded === 'number') input.value = String(decoded);
+    } catch {
+      // Leave the input empty; the user can still type a new value.
+    }
+  }
+}
+customElements.define('tether-param-panel', TetherParamPanel);
+
+// ===========================================================================
 // TetherFunctionList — read-only function catalog display
 // ===========================================================================
 

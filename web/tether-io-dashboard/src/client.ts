@@ -274,7 +274,7 @@ export class TetherIOClient extends EventTarget {
    * @param chunkSize  Number of rows per StreamData message.
    * @returns          The stream spec ID assigned by the server.
    */
-  configureStream(ids: bigint[], intervalMs = 100, chunkSize = 1): Promise<number> {
+  configureStream(ids: bigint[], intervalMs = 1, chunkSize = 20): Promise<number> {
     console.log(
       `[TetherIO] configureStream(ids=[${ids.map((id) => id.toString()).join(', ')}], intervalMs=${intervalMs}, chunkSize=${chunkSize})`,
     );
