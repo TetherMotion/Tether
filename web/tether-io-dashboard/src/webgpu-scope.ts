@@ -264,8 +264,8 @@ const SHADER = /* wgsl */ `
 
     let centerPx = worldToPx(t, v);
 
-    // Circle radius in pixels (2× line width).
-    let RADIUS_PX = 4.0;
+    // Circle radius in pixels (3× line width).
+    let RADIUS_PX = 6.0;
 
     var outPx = centerPx;
     if (vertInTri == 1u) {
@@ -1256,9 +1256,12 @@ export class WebGPUScope extends HTMLElement {
         const POINT_SEGMENTS = 12;
         const vertsPerCircle = POINT_SEGMENTS * 3;
         const pointInstances = validSamples * this.numChannels;
+        // Offset instances to start at the first valid sample, matching
+        // the line shader's firstVertex = (WINDOW_SAMPLES - validSamples) * 2.
+        const firstInstance = (WINDOW_SAMPLES - validSamples) * this.numChannels;
         rp.setPipeline(this.pointPipeline);
         rp.setBindGroup(0, activeBindGroup);
-        rp.draw(vertsPerCircle, pointInstances, 0, 0);
+        rp.draw(vertsPerCircle, pointInstances, 0, firstInstance);
       }
     }
 
