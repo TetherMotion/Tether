@@ -339,11 +339,11 @@ const SHADER = /* wgsl */ `
       return vec4<f32>(marginColor, 1.0);
     }
 
-    let xMin = ru.currentTime - ru.windowSec;
-    let worldX = xMin + (px - ru.plotX) / ru.plotW * ru.windowSec;
+    let xMin = ru.viewTimeMin;
+    let worldX = xMin + (px - ru.plotX) / ru.plotW * ru.viewTimeSpan;
     let worldY = ru.yMax - (py - ru.plotY) / ru.plotH * (ru.yMax - ru.yMin);
 
-    let pxPerWorldX = ru.plotW / ru.windowSec;
+    let pxPerWorldX = ru.plotW / ru.viewTimeSpan;
     let pxPerWorldY = ru.plotH / (ru.yMax - ru.yMin);
 
     let minorD = min(gridLineDistPx(worldX, ru.xMajorStep * 0.5, pxPerWorldX),
