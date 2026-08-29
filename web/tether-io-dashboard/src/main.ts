@@ -209,6 +209,8 @@ class TetherApp extends HTMLElement {
           <span>Static TypeScript web components</span>
           <span>Designed for loss-tolerant realtime telemetry</span>
         </footer>
+
+        <div id="toast-host" class="toast-host" aria-live="polite"></div>
       </main>
     `;
   }
@@ -257,12 +259,12 @@ class TetherApp extends HTMLElement {
     // Client lifecycle events
     this.client.addEventListener('connected', () => this.setStatus('Online', true));
     this.client.addEventListener('disconnected', () => this.setStatus('Offline', false));
-    this.client.addEventListener('error-message', (event: Event) =>
-      this.setStatus(
-        (event as CustomEvent<{ message?: string }>).detail.message ?? 'Protocol error',
-        false,
-      ),
-    );
+    this.client.addEventListener('error-message', (event: Event) => {
+      const message =
+        (event as CustomEvent<{ message?: string }>).detail.message ?? 'Protocol error';
+      this.setStatus(message, false);
+      this.showToast(message, 'error');
+    });
 
     // Stream data → decode all channels and push into the WebGPU oscilloscope
     this.client.addEventListener('stream', (event: Event) => {
@@ -419,12 +421,11 @@ class TetherApp extends HTMLElement {
   /**
    * Toggle the stream on or off for the currently selected signal(s).
    *
-   * Only works when the active entry is a signal (parameters cannot be
-   * streamed).  Uses the checked entries from the catalog as the stream
-   * configuration.
+   * Only signals can be streamed — parameters are read-only and have no
+   * time history.  If the current selection contains no signals, an error
+   * toast is shown instead of failing silently.
    */
   private async toggleStream(): Promise<void> {
-    if (!this.active || this.activeKind !== 'signal') return;
     const button = this.querySelector<HTMLButtonElement>('#stream')!;
 
     if (button.dataset.running) {
@@ -432,33 +433,52 @@ class TetherApp extends HTMLElement {
       await this.client.stopStream();
       delete button.dataset.running;
       button.textContent = 'Start stream';
-    } else {
-      // Start a new stream over all checked entries
-      const selectedIds = (
-        this.querySelector('tether-catalog') as HTMLElement & { selectedIds: bigint[] }
-      ).selectedIds;
-      await this.client.configureStream(selectedIds, 10, 1);
-
-      // Store the stream layout and configure the WebGPU scope's channels.
-      this.streamLayout = this.client.currentStreamLayout;
-      const scope = this.querySelector<TetherScope>('tether-webgpu-scope');
-      if (scope) {
-        // Build channel info from the stream layout + catalog entries.
-        const allEntries = [...this.signals, ...this.params];
-        const channels = this.streamLayout.map((entry, i) => {
-          const catalogEntry = allEntries.find((e) => e.id === entry.id);
-          const name = catalogEntry?.name ?? `ch${i}`;
-          const color = STREAM_COLORS[i % STREAM_COLORS.length] ?? ([0.5, 0.5, 0.5] as const);
-          return { name, color };
-        });
-        scope.setChannels(channels);
-        scope.clear();
-      }
-
-      await this.client.startStream();
-      button.dataset.running = '1';
-      button.textContent = 'Stop stream';
+      return;
     }
+
+    // Gather the checked entries from the catalog.
+    const catalog = this.querySelector('tether-catalog') as HTMLElement & {
+      selectedIds: bigint[];
+    };
+    const selectedIds = catalog.selectedIds;
+
+    // Streaming requires at least one signal — parameters cannot be streamed.
+    const signalIds = new Set(this.signals.map((s) => s.id));
+    const hasSignal = selectedIds.some((id) => signalIds.has(id));
+    if (selectedIds.length === 0) {
+      this.showToast('Select at least one signal to start a stream.', 'error');
+      return;
+    }
+    if (!hasSignal) {
+      this.showToast(
+        'Only signals can be streamed — select at least one signal (parameters are read-only).',
+        'error',
+      );
+      return;
+    }
+
+    // Start a new stream over all checked entries
+    await this.client.configureStream(selectedIds, 10, 1);
+
+    // Store the stream layout and configure the WebGPU scope's channels.
+    this.streamLayout = this.client.currentStreamLayout;
+    const scope = this.querySelector<TetherScope>('tether-webgpu-scope');
+    if (scope) {
+      // Build channel info from the stream layout + catalog entries.
+      const allEntries = [...this.signals, ...this.params];
+      const channels = this.streamLayout.map((entry, i) => {
+        const catalogEntry = allEntries.find((e) => e.id === entry.id);
+        const name = catalogEntry?.name ?? `ch${i}`;
+        const color = STREAM_COLORS[i % STREAM_COLORS.length] ?? ([0.5, 0.5, 0.5] as const);
+        return { name, color };
+      });
+      scope.setChannels(channels);
+      scope.clear();
+    }
+
+    await this.client.startStream();
+    button.dataset.running = '1';
+    button.textContent = 'Stop stream';
   }
 
   // ---- Theme ---------------------------------------------------------------
@@ -489,6 +509,31 @@ class TetherApp extends HTMLElement {
     this.querySelector('#status')!.textContent = text;
     this.querySelector('#metric-connection')!.textContent = text;
     this.querySelector('#status')!.classList.toggle('online', online);
+  }
+
+  // ---- Toast notifications ---------------------------------------------
+
+  /**
+   * Show a transient toast notification in the bottom-right corner.
+   *
+   * @param message  Text to display.
+   * @param kind     `'error'` (red) or `'info'` (neutral).  Errors stay
+   *                 visible longer than info toasts.
+   */
+  private showToast(message: string, kind: 'error' | 'info' = 'info'): void {
+    const host = this.querySelector<HTMLElement>('#toast-host');
+    if (!host) return;
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${kind}`;
+    toast.textContent = message;
+    host.appendChild(toast);
+    // Animate in on the next frame.
+    requestAnimationFrame(() => toast.classList.add('toast-visible'));
+    const ttl = kind === 'error' ? 6000 : 3000;
+    window.setTimeout(() => {
+      toast.classList.remove('toast-visible');
+      window.setTimeout(() => toast.remove(), 300);
+    }, ttl);
   }
 }
 
