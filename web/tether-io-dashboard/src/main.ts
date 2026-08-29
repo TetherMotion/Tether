@@ -237,18 +237,15 @@ class TetherApp extends HTMLElement {
       btn.textContent = paused ? 'Resume' : 'Pause';
       const dot = this.querySelector('#live-dot')!;
       dot.textContent = paused ? '⏸ PAUSED' : '● LIVE';
-      const resetBtn = this.querySelector<HTMLButtonElement>('#reset-zoom-btn')!;
-      resetBtn.hidden = !paused;
+      // Reset zoom button is only relevant while paused.
+      this.querySelector<HTMLButtonElement>('#reset-zoom-btn')!.hidden = !paused;
     });
     this.querySelector<HTMLButtonElement>('#reset-zoom-btn')!.addEventListener('click', () => {
       const scope = this.querySelector<TetherScope>('tether-webgpu-scope');
       if (!scope) return;
+      // Only reset zoom — do NOT resume.  The view stays paused at the
+      // full 5-second window.
       scope.resetView();
-      const pauseBtn = this.querySelector<HTMLButtonElement>('#pause-btn')!;
-      pauseBtn.textContent = 'Pause';
-      const dot = this.querySelector('#live-dot')!;
-      dot.textContent = '● LIVE';
-      this.querySelector<HTMLButtonElement>('#reset-zoom-btn')!.hidden = true;
     });
 
     // Tab buttons
