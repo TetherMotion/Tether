@@ -58,14 +58,12 @@ class TetherApp extends HTMLElement {
   private signals: CatalogEntry[] = [];
   /** Cached parameter catalog entries. */
   private params: CatalogEntry[] = [];
-  /** Currently selected entry (for Read / Stream actions). */
-  private active?: CatalogEntry;
-  /** Kind of the currently active entry (determines get vs getSignal). */
-  private activeKind: 'param' | 'signal' = 'signal';
   /** Cached function catalog entries. */
   private functions: FunctionEntry[] = [];
   /** Layout of the currently configured stream (set by configureStream). */
   private streamLayout: StreamLayoutEntry[] = [];
+  /** Whether a stream is currently active. */
+  private streamActive = false;
 
   // ---- Lifecycle --------------------------------------------------------
 
@@ -149,19 +147,8 @@ class TetherApp extends HTMLElement {
             <tether-catalog id="catalog"></tether-catalog>
           </aside>
 
-          <!-- Right panel: monitor + scope + functions -->
+          <!-- Right panel: scope + params + functions -->
           <section class="content">
-            <div class="toolbar panel">
-              <div>
-                <span class="eyebrow">Live monitor</span>
-                <h2 id="selection-title">Select a signal to inspect</h2>
-              </div>
-              <div class="actions">
-                <button id="read">Read once</button>
-                <button id="stream" class="primary">Start stream</button>
-              </div>
-            </div>
-
             <div class="metrics">
               <article class="metric panel">
                 <small>Connection</small>
@@ -190,8 +177,6 @@ class TetherApp extends HTMLElement {
               </div>
               <tether-webgpu-scope id="scope"></tether-webgpu-scope>
             </section>
-
-            <section class="value-grid" id="value-grid"></section>
 
             <section class="panel param-panel" id="param-panel">
               <tether-param-panel id="params-editor"></tether-param-panel>
@@ -237,32 +222,15 @@ class TetherApp extends HTMLElement {
       this.toggleTheme(),
     );
 
-    // Read / Stream buttons
-    this.querySelector<HTMLButtonElement>('#read')!.addEventListener(
-      'click',
-      () => void this.readActive(),
-    );
-    this.querySelector<HTMLButtonElement>('#stream')!.addEventListener(
-      'click',
-      () => void this.toggleStream(),
-    );
-
     // Tab buttons
     this.querySelectorAll<HTMLButtonElement>('.tab').forEach((tab) =>
       tab.addEventListener('click', () => void this.switchTab(tab.dataset.tab as Tab)),
     );
 
-    // Catalog selection changes → active entry + optional stream reload.
+    // Catalog selection changes → auto-(re)start stream with the new
+    // selection of signals.  No manual start/stop buttons.
     this.querySelector('tether-catalog')?.addEventListener('selection-change', () => {
       void this.onSelectionChange();
-    });
-
-    // Catalog "read-entry" event (from the ↗ button on each row)
-    this.querySelector('tether-catalog')?.addEventListener('read-entry', (event) => {
-      const id = (event as CustomEvent<bigint>).detail;
-      this.active = [...this.signals, ...this.params].find((entry) => entry.id === id);
-      if (this.active) this.activeKind = this.active.kind;
-      void this.readActive();
     });
 
     // Client lifecycle events
@@ -371,7 +339,6 @@ class TetherApp extends HTMLElement {
     }
 
     // Signals / Params tab: fetch (or refetch) and display
-    this.activeKind = tab === 'params' ? 'param' : 'signal';
     try {
       const entries = await this.client.list(tab);
       if (tab === 'signals') this.signals = entries;
@@ -388,9 +355,6 @@ class TetherApp extends HTMLElement {
   /**
    * Render the given entries into the `<tether-catalog>` element and
    * update the count badge.
-   *
-   * Also wires up the `selection-change` event to update `this.active`
-   * and `this.activeKind` when the user checks an entry.
    */
   private renderCatalog(entries: CatalogEntry[]): void {
     const catalog = this.querySelector('tether-catalog') as HTMLElement & {
@@ -412,112 +376,39 @@ class TetherApp extends HTMLElement {
   }
 
   /**
-   * Handle catalog selection changes: update the active entry, title, and
-   * automatically restart the stream if it is currently running.
+   * Handle catalog selection changes: automatically (re)start the stream
+   * with the currently selected signals.  If no signals are selected, any
+   * active stream is stopped.
    */
   private async onSelectionChange(): Promise<void> {
     const catalog = this.querySelector('tether-catalog') as HTMLElement & {
       selectedIds: bigint[];
     };
-    const selected = catalog.selectedIds;
-    const all = [...this.signals, ...this.params];
-    this.active = all.find((entry) => entry.id === selected[0]);
-    if (this.active) this.activeKind = this.active.kind;
-    this.querySelector('#selection-title')!.textContent =
-      this.active?.name ?? 'Select a signal to inspect';
-
-    // If streaming, reconfigure the stream with the new selection.
-    const button = this.querySelector<HTMLButtonElement>('#stream')!;
-    if (button.dataset.running) {
-      await this.restartStream();
-    }
-  }
-
-  /**
-   * Stop the current stream and immediately restart it with the latest
-   * catalog selection.
-   */
-  private async restartStream(): Promise<void> {
-    const button = this.querySelector<HTMLButtonElement>('#stream')!;
-    if (!button.dataset.running) return;
-
-    // Stop without changing the button text.
-    await this.client.stopStream();
-    delete button.dataset.running;
-
-    // Re-start using toggleStream's logic.
-    await this.toggleStream();
-  }
-
-  // ---- Read / Stream actions -------------------------------------------
-
-  /**
-   * Read the current value of the active entry and display it in a
-   * `<tether-value-card>`.
-   */
-  private async readActive(): Promise<void> {
-    if (!this.active) return;
-    try {
-      const card = document.createElement('tether-value-card') as HTMLElement & {
-        model: { entry: CatalogEntry; client: TetherIOClient };
-        read: () => Promise<void>;
-      };
-      card.model = { entry: this.active, client: this.client };
-      this.querySelector('#value-grid')!.replaceChildren(card);
-      await card.read();
-    } catch {
-      this.setStatus('Read failed', false);
-    }
-  }
-
-  /**
-   * Toggle the stream on or off for the currently selected signal(s).
-   *
-   * Only signals can be streamed — parameters are read-only and have no
-   * time history.  If the current selection contains no signals, an error
-   * toast is shown instead of failing silently.
-   */
-  private async toggleStream(): Promise<void> {
-    const button = this.querySelector<HTMLButtonElement>('#stream')!;
-
-    if (button.dataset.running) {
-      // Stop the active stream
-      await this.client.stopStream();
-      delete button.dataset.running;
-      button.textContent = 'Start stream';
-      return;
-    }
-
-    // Gather the checked entries from the catalog.
-    const catalog = this.querySelector('tether-catalog') as HTMLElement & {
-      selectedIds: bigint[];
-    };
     const selectedIds = catalog.selectedIds;
 
-    // Streaming requires at least one signal — parameters cannot be streamed.
+    // Filter to just signal IDs — parameters cannot be streamed.
     const signalIds = new Set(this.signals.map((s) => s.id));
-    const hasSignal = selectedIds.some((id) => signalIds.has(id));
-    if (selectedIds.length === 0) {
-      this.showToast('Select at least one signal to start a stream.', 'error');
-      return;
+    const selectedSignalIds = selectedIds.filter((id) => signalIds.has(id));
+
+    // Stop any active stream first.
+    if (this.streamActive) {
+      await this.client.stopStream();
+      this.streamActive = false;
     }
-    if (!hasSignal) {
-      this.showToast(
-        'Only signals can be streamed — select at least one signal (parameters are read-only).',
-        'error',
-      );
+
+    if (selectedSignalIds.length === 0) {
+      // Nothing to stream — clear the scope.
+      const scope = this.querySelector<TetherScope>('tether-webgpu-scope');
+      if (scope) scope.setChannels([]);
       return;
     }
 
-    // Start a new stream over all checked entries
+    // Configure + start a new stream over the selected signals.
     // 1 kHz (1 ms interval), chunks of 20 rows for smooth throughput.
-    await this.client.configureStream(selectedIds, 1, 20);
-
-    // Store the stream layout and configure the WebGPU scope's channels.
+    await this.client.configureStream(selectedSignalIds, 1, 20);
     this.streamLayout = this.client.currentStreamLayout;
     const scope = this.querySelector<TetherScope>('tether-webgpu-scope');
     if (scope) {
-      // Build channel info from the stream layout + catalog entries.
       const allEntries = [...this.signals, ...this.params];
       const channels = this.streamLayout.map((entry, i) => {
         const catalogEntry = allEntries.find((e) => e.id === entry.id);
@@ -528,10 +419,8 @@ class TetherApp extends HTMLElement {
       scope.setChannels(channels);
       scope.clear();
     }
-
     await this.client.startStream();
-    button.dataset.running = '1';
-    button.textContent = 'Stop stream';
+    this.streamActive = true;
   }
 
   // ---- Theme ---------------------------------------------------------------
