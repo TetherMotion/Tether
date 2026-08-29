@@ -577,9 +577,8 @@ export class WebGPUScope extends HTMLElement {
     this.device.queue.submit([encoder.finish()]);
   }
 
-  /** Reset zoom and pause — return to auto-scrolling live view. */
+  /** Reset zoom only — keeps paused state.  Returns to the full 5s window. */
   resetView(): void {
-    this.paused = false;
     this.viewTimeMin = null;
     this.viewTimeSpan = WINDOW_SEC;
     this.zoomYMin = null;
@@ -1189,11 +1188,9 @@ export class WebGPUScope extends HTMLElement {
       //    count is low enough (< 100 per channel).  This is done
       //    entirely on the GPU: the point vertex shader reads each
       //    sample from the ring buffer and emits a small circle.
-      const samplesPerSec =
-        viewSpan > 0 ? WINDOW_SAMPLES / WINDOW_SEC / (viewSpan / WINDOW_SEC) : 0;
-      // Estimate visible samples: total valid samples scaled by the
-      // fraction of the buffer that falls within the view window.
-      const estVisible = Math.min(validSamples, Math.ceil(samplesPerSec));
+      // Estimate visible samples: sample rate × visible time span.
+      const sampleRate = WINDOW_SAMPLES / WINDOW_SEC; // ~1000 Hz
+      const estVisible = Math.min(validSamples, Math.ceil(sampleRate * viewSpan));
       if (estVisible < 100) {
         const POINT_SEGMENTS = 12;
         const vertsPerCircle = POINT_SEGMENTS + 2;
