@@ -203,7 +203,9 @@ const SHADER = /* wgsl */ `
   fn gridLineDistPx(coord : f32, step : f32, pxPerWorld : f32) -> f32 {
     let p = coord / step;
     let frac_p = fract(p);
-    let dWorld = min(frac_p, 1.0 - frac_p);
+    // dWorld is in step fractions; multiply by step to get back to world units,
+    // then convert to pixels.
+    let dWorld = min(frac_p, 1.0 - frac_p) * step;
     return dWorld * pxPerWorld;
   }
 
@@ -241,8 +243,8 @@ const SHADER = /* wgsl */ `
     let xMajor = gridLineIntensity(majorD, 1.0);
 
     var color = plotBg;
-    color = mix(color, ru.minorColor.rgb, xMinor * 0.5);
-    color = mix(color, ru.majorColor.rgb, xMajor * 0.7);
+    color = mix(color, ru.minorColor.rgb, xMinor * 0.35);
+    color = mix(color, ru.majorColor.rgb, xMajor * 0.45);
 
     return vec4<f32>(color, 1.0);
   }
@@ -836,8 +838,9 @@ export class WebGPUScope extends HTMLElement {
     minor: [number, number, number, number];
     major: [number, number, number, number];
   } {
-    const styles = getComputedStyle(this);
-    const isDark = styles.colorScheme === 'dark';
+    const root = document.documentElement;
+    const styles = getComputedStyle(root);
+    const isDark = root.getAttribute('data-theme') === 'dark' || styles.colorScheme === 'dark';
 
     // Parse rgb(...), rgba(...), #rrggbb, #rgb, or #rrggbbaa to [r, g, b].
     const parseColor = (h: string): [number, number, number] => {
