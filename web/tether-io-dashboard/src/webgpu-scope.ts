@@ -111,8 +111,8 @@ const DEFAULT_COLORS: [number, number, number][] = [
  */
 const SHADER = /* wgsl */ `
   struct RenderUniforms {
-    currentTime   : f32,
-    windowSec     : f32,
+    viewTimeMin   : f32,   // left edge of the visible time window
+    viewTimeSpan  : f32,   // width of the visible time window
     yMin          : f32,
     yMax          : f32,
     plotX         : f32,
@@ -132,8 +132,8 @@ const SHADER = /* wgsl */ `
   @group(0) @binding(2) var<storage, read> channelColors : array<vec4<f32>>;
 
   fn worldToClip(t : f32, v : f32) -> vec4<f32> {
-    let xMin = ru.currentTime - ru.windowSec;
-    let xMax = ru.currentTime;
+    let xMin = ru.viewTimeMin;
+    let xMax = ru.viewTimeMin + ru.viewTimeSpan;
     let plotPx = (t - xMin) / (xMax - xMin) * ru.plotW;
     let plotPy = (ru.yMax - v) / (ru.yMax - ru.yMin) * ru.plotH;
     let canvasPx = ru.plotX + plotPx;
@@ -230,6 +230,62 @@ const SHADER = /* wgsl */ `
 
   @fragment
   fn fs_line(in : LineVSOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(in.color, 1.0);
+  }
+
+  // ── Point pipeline (circles at sample positions) ───────────────────
+  // Renders a filled circle per sample per channel.  Each circle is
+  // a triangle fan of POINT_SEGMENTS+2 vertices (center + ring).
+  // The vertex shader computes the circle vertex position in screen
+  // space and converts back to clip space.
+  struct PointVSOut {
+    @builtin(position) clipPos : vec4<f32>,
+    @location(0)       color   : vec3<f32>,
+  };
+
+  @vertex
+  fn vs_point(@builtin(vertex_index) vi : u32,
+              @builtin(instance_index) ii : u32) -> PointVSOut {
+    let POINT_SEGMENTS = 12u;
+    let sampleI = ii / ${MAX_CHANNELS}u;
+    let ch      = ii % ${MAX_CHANNELS}u;
+
+    // First vertex of each circle is the center; subsequent vertices
+    // trace the ring.
+    let local = vi % (POINT_SEGMENTS + 2u);
+    let isCenter = local == 0u;
+
+    let sampleIdx = (ru.writeIndex + ru.bufferSamples - ${WINDOW_SAMPLES}u + sampleI) % ru.bufferSamples;
+    let base = (sampleIdx * ${MAX_CHANNELS}u + ch) * 2u;
+    let t = ringBuffer[base];
+    let v = ringBuffer[base + 1u];
+
+    let centerPx = worldToPx(t, v);
+
+    // Circle radius in pixels.
+    let RADIUS_PX = 3.0;
+    var outPx = centerPx;
+    if (!isCenter) {
+      let ringIdx = local - 1u;
+      let angle = f32(ringIdx) * (2.0 * 3.14159265 / f32(POINT_SEGMENTS));
+      outPx = vec2<f32>(
+        centerPx.x + cos(angle) * RADIUS_PX,
+        centerPx.y + sin(angle) * RADIUS_PX,
+      );
+    }
+
+    var out : PointVSOut;
+    out.clipPos = vec4<f32>(
+      (outPx.x / ru.canvasW) * 2.0 - 1.0,
+      1.0 - (outPx.y / ru.canvasH) * 2.0,
+      0.0, 1.0,
+    );
+    out.color = channelColors[ch].rgb;
+    return out;
+  }
+
+  @fragment
+  fn fs_point(in : PointVSOut) -> @location(0) vec4<f32> {
     return vec4<f32>(in.color, 1.0);
   }
 
@@ -365,6 +421,7 @@ export class WebGPUScope extends HTMLElement {
   private bindGroup?: GPUBindGroup;
   private linePipeline?: GPURenderPipeline;
   private gridPipeline?: GPURenderPipeline;
+  private pointPipeline?: GPURenderPipeline;
   private msaaTexture?: GPUTexture | null;
   private msaaSC = 0;
   private msaaW = 0;
@@ -413,6 +470,26 @@ export class WebGPUScope extends HTMLElement {
   private yMin = -1.2;
   private yMax = 1.2;
 
+  // ---- Pause / zoom state ----
+  /** When true, the view is frozen — currentTime stops advancing. */
+  private paused = false;
+  /**
+   * Frozen time-window left edge (seconds) when paused or zoomed.
+   * When null, the view auto-scrolls to follow currentTime.
+   */
+  private viewTimeMin: number | null = null;
+  /** Frozen time-window span (seconds) when zoomed. */
+  private viewTimeSpan = WINDOW_SEC;
+  /** Frozen Y range when zoomed. */
+  private zoomYMin: number | null = null;
+  private zoomYMax: number | null = null;
+  /** Drag-rectangle zoom state (in CSS pixels relative to canvas). */
+  private dragActive = false;
+  private dragStartX = 0;
+  private dragStartY = 0;
+  private dragCurX = 0;
+  private dragCurY = 0;
+
   // =========================================================================
   // Lifecycle
   // =========================================================================
@@ -455,6 +532,39 @@ export class WebGPUScope extends HTMLElement {
     }
   }
 
+  /** Toggle pause.  When paused, the view freezes at the current time. */
+  togglePause(): boolean {
+    this.paused = !this.paused;
+    if (this.paused) {
+      // Freeze the view at the current position.
+      this.viewTimeMin = this.currentTime - WINDOW_SEC;
+      this.viewTimeSpan = WINDOW_SEC;
+      this.zoomYMin = null;
+      this.zoomYMax = null;
+    } else {
+      // Resume auto-scroll.
+      this.viewTimeMin = null;
+      this.viewTimeSpan = WINDOW_SEC;
+      this.zoomYMin = null;
+      this.zoomYMax = null;
+    }
+    return this.paused;
+  }
+
+  /** Reset zoom and pause — return to auto-scrolling live view. */
+  resetView(): void {
+    this.paused = false;
+    this.viewTimeMin = null;
+    this.viewTimeSpan = WINDOW_SEC;
+    this.zoomYMin = null;
+    this.zoomYMax = null;
+  }
+
+  /** Returns true if the view is currently zoomed or paused. */
+  isViewFrozen(): boolean {
+    return this.paused || this.viewTimeMin !== null;
+  }
+
   /**
    * Push a stream row into the oscilloscope.
    *
@@ -484,6 +594,11 @@ export class WebGPUScope extends HTMLElement {
     this.yMin = -1.2;
     this.yMax = 1.2;
     this.referenceTimeUs = null;
+    this.paused = false;
+    this.viewTimeMin = null;
+    this.viewTimeSpan = WINDOW_SEC;
+    this.zoomYMin = null;
+    this.zoomYMax = null;
     if (this.device && this.ringBuffer) {
       // Re-initialize ring buffer with sentinel timestamps.
       const initBuf = new Float32Array(new ArrayBuffer(BUFFER_SAMPLES * MAX_CHANNELS * 2 * 4));
@@ -550,11 +665,12 @@ export class WebGPUScope extends HTMLElement {
     const supportedSC: number[] = [];
     const linePipelines: GPURenderPipeline[] = [];
     const gridPipelines: GPURenderPipeline[] = [];
+    const pointPipelines: GPURenderPipeline[] = [];
     const layout = device.createPipelineLayout({ bindGroupLayouts: [renderLayout] });
 
     for (const sc of MSAA_SAMPLE_COUNTS) {
       try {
-        const [linePipe, gridPipe] = await Promise.all([
+        const [linePipe, gridPipe, pointPipe] = await Promise.all([
           device.createRenderPipelineAsync({
             layout,
             vertex: { module, entryPoint: 'vs_line' },
@@ -569,10 +685,18 @@ export class WebGPUScope extends HTMLElement {
             primitive: { topology: 'triangle-list' },
             multisample: { count: sc },
           }),
+          device.createRenderPipelineAsync({
+            layout,
+            vertex: { module, entryPoint: 'vs_point' },
+            fragment: { module, entryPoint: 'fs_point', targets: [{ format: this.format }] },
+            primitive: { topology: 'triangle-list' },
+            multisample: { count: sc },
+          }),
         ]);
         supportedSC.push(sc);
         linePipelines.push(linePipe);
         gridPipelines.push(gridPipe);
+        pointPipelines.push(pointPipe);
       } catch {
         // Unsupported sample count — skip.
       }
@@ -628,6 +752,7 @@ export class WebGPUScope extends HTMLElement {
 
     this.linePipeline = linePipelines[msaaIndex]!;
     this.gridPipeline = gridPipelines[msaaIndex]!;
+    this.pointPipeline = pointPipelines[msaaIndex]!;
     this.msaaSC = supportedSC[msaaIndex] ?? 1;
 
     // 2D canvas overlay for axis labels + legend.
@@ -641,17 +766,50 @@ export class WebGPUScope extends HTMLElement {
     this.appendChild(this.overlayEl);
     this.octx = this.overlayEl.getContext('2d');
 
-    // Legend hover detection: the overlay itself has pointerEvents:none,
-    // so attach mouse listeners to the scope container.  We compute
-    // whether the mouse is over a legend item in the render loop's
-    // coordinate space.
+    // Legend hover detection + drag-zoom: the overlay itself has
+    // pointerEvents:none, so attach mouse listeners to the scope
+    // container.
+    this.addEventListener('mousedown', (e: MouseEvent) => {
+      const rect = this.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      // Only start drag inside the plot area.
+      const ml = MARGIN_LEFT;
+      const mr = MARGIN_RIGHT;
+      const mt = MARGIN_TOP;
+      const mb = MARGIN_BOTTOM;
+      const pw = rect.width - ml - mr;
+      const ph = rect.height - mt - mb;
+      if (x >= ml && x < ml + pw && y >= mt && y < mt + ph) {
+        this.dragActive = true;
+        this.dragStartX = x;
+        this.dragStartY = y;
+        this.dragCurX = x;
+        this.dragCurY = y;
+        e.preventDefault();
+      }
+    });
     this.addEventListener('mousemove', (e: MouseEvent) => {
       const rect = this.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-      this.updateLegendHover(x, y);
+      if (this.dragActive) {
+        this.dragCurX = x;
+        this.dragCurY = y;
+      } else {
+        this.updateLegendHover(x, y);
+      }
+    });
+    this.addEventListener('mouseup', () => {
+      if (this.dragActive) {
+        this.dragActive = false;
+        this.applyDragZoom();
+      }
     });
     this.addEventListener('mouseleave', () => {
+      if (this.dragActive) {
+        this.dragActive = false;
+      }
       if (this.highlightedChannel !== null) {
         this.highlightedChannel = null;
         this.writeColors();
@@ -659,6 +817,48 @@ export class WebGPUScope extends HTMLElement {
     });
 
     this.initialized = true;
+  }
+
+  /**
+   * Apply zoom from the drag rectangle.  Converts the drag rectangle
+   * (in CSS pixels) to world coordinates and sets the frozen view.
+   */
+  private applyDragZoom(): void {
+    if (!this.canvasEl) return;
+    const cssW = this.canvasEl.clientWidth;
+    const ml = MARGIN_LEFT;
+    const mr = MARGIN_RIGHT;
+    const mt = MARGIN_TOP;
+    const mb = MARGIN_BOTTOM;
+    const pw = cssW - ml - mr;
+    const ph = this.canvasEl.clientHeight - mt - mb;
+
+    // Normalise the rectangle.
+    const x0 = Math.min(this.dragStartX, this.dragCurX);
+    const x1 = Math.max(this.dragStartX, this.dragCurX);
+    const y0 = Math.min(this.dragStartY, this.dragCurY);
+    const y1 = Math.max(this.dragStartY, this.dragCurY);
+
+    // Ignore tiny drags (clicks).
+    if (x1 - x0 < 4 || y1 - y0 < 4) return;
+
+    // Current view bounds.
+    const curMin = this.viewTimeMin ?? this.currentTime - WINDOW_SEC;
+    const curSpan = this.viewTimeSpan;
+    const curYMin = this.zoomYMin ?? this.yMin;
+    const curYMax = this.zoomYMax ?? this.yMax;
+
+    // Convert pixel rect to world coordinates.
+    const newTimeMin = curMin + ((x0 - ml) / pw) * curSpan;
+    const newTimeMax = curMin + ((x1 - ml) / pw) * curSpan;
+    const newYMax = curYMax - ((y0 - mt) / ph) * (curYMax - curYMin);
+    const newYMin = curYMax - ((y1 - mt) / ph) * (curYMax - curYMin);
+
+    this.viewTimeMin = newTimeMin;
+    this.viewTimeSpan = newTimeMax - newTimeMin;
+    this.zoomYMin = newYMin;
+    this.zoomYMax = newYMax;
+    this.paused = true; // zooming implies paused
   }
 
   /**
@@ -822,7 +1022,7 @@ export class WebGPUScope extends HTMLElement {
     this.rafId = requestAnimationFrame(frame);
   }
 
-  /** Render one frame: grid + line strips + axis overlay. */
+  /** Render one frame: grid + line strips + points + axis overlay. */
   private render(): void {
     if (
       !this.device ||
@@ -831,7 +1031,8 @@ export class WebGPUScope extends HTMLElement {
       !this.renderUniforms ||
       !this.bindGroup ||
       !this.linePipeline ||
-      !this.gridPipeline
+      !this.gridPipeline ||
+      !this.pointPipeline
     )
       return;
 
@@ -853,16 +1054,22 @@ export class WebGPUScope extends HTMLElement {
     const plotW = Math.max(1, cw - ml - mr);
     const plotH = Math.max(1, ch - mt - mb);
 
+    // Determine the effective view bounds.
+    const viewMin = this.viewTimeMin ?? this.currentTime - WINDOW_SEC;
+    const viewSpan = this.viewTimeSpan;
+    const effYMin = this.zoomYMin ?? this.yMin;
+    const effYMax = this.zoomYMax ?? this.yMax;
+
     const sc = this.msaaSC;
-    const xMajorStep = niceStep(WINDOW_SEC, 8);
-    const yMajorStep = niceStep(this.yMax - this.yMin, 6);
+    const xMajorStep = niceStep(viewSpan, 8);
+    const yMajorStep = niceStep(effYMax - effYMin, 6);
 
     // Write render uniforms (12 × f32).
     const ruData = new Float32Array(new ArrayBuffer(12 * 4));
-    ruData[0] = this.currentTime;
-    ruData[1] = WINDOW_SEC;
-    ruData[2] = this.yMin;
-    ruData[3] = this.yMax;
+    ruData[0] = viewMin;
+    ruData[1] = viewSpan;
+    ruData[2] = effYMin;
+    ruData[3] = effYMax;
     ruData[4] = plotX;
     ruData[5] = plotY;
     ruData[6] = plotW;
@@ -919,12 +1126,30 @@ export class WebGPUScope extends HTMLElement {
       const vertexCount = Math.max(0, validSamples * 2 - 2);
       const firstVertex = (WINDOW_SAMPLES - validSamples) * 2;
       rp.draw(vertexCount, this.numChannels, firstVertex, 0);
+
+      // 3) Points — render dots at every sample when the visible sample
+      //    count is low enough (< 100 per channel).  This is done
+      //    entirely on the GPU: the point vertex shader reads each
+      //    sample from the ring buffer and emits a small circle.
+      const samplesPerSec =
+        viewSpan > 0 ? WINDOW_SAMPLES / WINDOW_SEC / (viewSpan / WINDOW_SEC) : 0;
+      // Estimate visible samples: total valid samples scaled by the
+      // fraction of the buffer that falls within the view window.
+      const estVisible = Math.min(validSamples, Math.ceil(samplesPerSec));
+      if (estVisible < 100) {
+        const POINT_SEGMENTS = 12;
+        const vertsPerCircle = POINT_SEGMENTS + 2;
+        const pointInstances = validSamples * this.numChannels;
+        rp.setPipeline(this.pointPipeline);
+        rp.setBindGroup(0, this.bindGroup);
+        rp.draw(vertsPerCircle, pointInstances, 0, 0);
+      }
     }
 
     rp.end();
     this.device.queue.submit([encoder.finish()]);
 
-    // Draw axis labels + legend on the 2D overlay.
+    // Draw axis labels + legend + drag rectangle on the 2D overlay.
     this.drawAxes(canvas.clientWidth, canvas.clientHeight, dpr);
   }
 
@@ -962,6 +1187,12 @@ export class WebGPUScope extends HTMLElement {
     const pw = cssW - ml - mr;
     const ph = cssH - mt - mb;
 
+    // Effective view bounds (may be zoomed or paused).
+    const viewMin = this.viewTimeMin ?? this.currentTime - WINDOW_SEC;
+    const viewSpan = this.viewTimeSpan;
+    const effYMin = this.zoomYMin ?? this.yMin;
+    const effYMax = this.zoomYMax ?? this.yMax;
+
     // Plot axes (ggplot style: only bottom and left axis lines).
     octx.strokeStyle = textColor;
     octx.lineWidth = 1;
@@ -974,29 +1205,29 @@ export class WebGPUScope extends HTMLElement {
     octx.font = '11px sans-serif';
     octx.fillStyle = textMuted;
 
-    // X axis: relative time labels.
-    const xStep = niceStep(WINDOW_SEC, 8);
-    const xStart = Math.ceil((this.currentTime - WINDOW_SEC) / xStep) * xStep;
+    // X axis: relative time labels (relative to viewMin).
+    const xStep = niceStep(viewSpan, 8);
+    const xStart = Math.ceil(viewMin / xStep) * xStep;
     octx.textAlign = 'center';
     octx.textBaseline = 'top';
-    for (let x = xStart; x <= this.currentTime + xStep * 0.001; x += xStep) {
-      const sx = px + ((x - (this.currentTime - WINDOW_SEC)) / WINDOW_SEC) * pw;
+    for (let x = xStart; x <= viewMin + viewSpan + xStep * 0.001; x += xStep) {
+      const sx = px + ((x - viewMin) / viewSpan) * pw;
       if (sx < px - 1 || sx > px + pw + 1) continue;
       octx.beginPath();
       octx.moveTo(sx, py + ph);
       octx.lineTo(sx, py + ph + 4);
       octx.stroke();
-      const label = x === this.currentTime ? '0s' : (x - this.currentTime).toFixed(1) + 's';
+      const label = (x - viewMin).toFixed(2) + 's';
       octx.fillText(label, sx, py + ph + 8);
     }
 
     // Y axis.
-    const yStep = niceStep(this.yMax - this.yMin, 6);
-    const yStart = Math.ceil(this.yMin / yStep) * yStep;
+    const yStep = niceStep(effYMax - effYMin, 6);
+    const yStart = Math.ceil(effYMin / yStep) * yStep;
     octx.textAlign = 'right';
     octx.textBaseline = 'middle';
-    for (let y = yStart; y <= this.yMax + yStep * 0.001; y += yStep) {
-      const sy = py + ((this.yMax - y) / (this.yMax - this.yMin)) * ph;
+    for (let y = yStart; y <= effYMax + yStep * 0.001; y += yStep) {
+      const sy = py + ((effYMax - y) / (effYMax - effYMin)) * ph;
       if (sy < py - 1 || sy > py + ph + 1) continue;
       octx.beginPath();
       octx.moveTo(px, sy);
@@ -1046,6 +1277,19 @@ export class WebGPUScope extends HTMLElement {
       octx.font = isHighlighted ? 'bold 11px sans-serif' : '11px sans-serif';
       const name = this.channels[i]!.name;
       octx.fillText(name, legendX + 16, ly);
+    }
+
+    // Drag-rectangle zoom selection.
+    if (this.dragActive) {
+      const x0 = Math.min(this.dragStartX, this.dragCurX);
+      const x1 = Math.max(this.dragStartX, this.dragCurX);
+      const y0 = Math.min(this.dragStartY, this.dragCurY);
+      const y1 = Math.max(this.dragStartY, this.dragCurY);
+      octx.fillStyle = 'rgba(0, 100, 200, 0.15)';
+      octx.fillRect(x0, y0, x1 - x0, y1 - y0);
+      octx.strokeStyle = 'rgba(0, 100, 200, 0.8)';
+      octx.lineWidth = 1;
+      octx.strokeRect(x0, y0, x1 - x0, y1 - y0);
     }
 
     octx.restore();

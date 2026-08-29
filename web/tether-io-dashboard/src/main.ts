@@ -29,6 +29,8 @@ type TetherScope = HTMLElement & {
   setChannels: (channels: { name: string; color: [number, number, number] }[]) => void;
   push: (timestampUs: bigint, values: number[]) => void;
   clear: () => void;
+  togglePause: () => boolean;
+  resetView: () => void;
 };
 
 /** Tab identifiers for the catalog navigation. */
@@ -173,7 +175,11 @@ class TetherApp extends HTMLElement {
                   <span class="eyebrow">Oscilloscope</span>
                   <h2>Signal trace</h2>
                 </div>
-                <span class="live-dot">● LIVE</span>
+                <div class="scope-actions">
+                  <span class="live-dot" id="live-dot">● LIVE</span>
+                  <button id="pause-btn" class="secondary">Pause</button>
+                  <button id="reset-zoom-btn" class="secondary" hidden>Reset zoom</button>
+                </div>
               </div>
               <tether-webgpu-scope id="scope"></tether-webgpu-scope>
             </section>
@@ -221,6 +227,29 @@ class TetherApp extends HTMLElement {
     this.querySelector<HTMLButtonElement>('#theme-toggle')!.addEventListener('click', () =>
       this.toggleTheme(),
     );
+
+    // Pause / Reset zoom buttons.
+    this.querySelector<HTMLButtonElement>('#pause-btn')!.addEventListener('click', () => {
+      const scope = this.querySelector<TetherScope>('tether-webgpu-scope');
+      if (!scope) return;
+      const paused = scope.togglePause();
+      const btn = this.querySelector<HTMLButtonElement>('#pause-btn')!;
+      btn.textContent = paused ? 'Resume' : 'Pause';
+      const dot = this.querySelector('#live-dot')!;
+      dot.textContent = paused ? '⏸ PAUSED' : '● LIVE';
+      const resetBtn = this.querySelector<HTMLButtonElement>('#reset-zoom-btn')!;
+      resetBtn.hidden = !paused;
+    });
+    this.querySelector<HTMLButtonElement>('#reset-zoom-btn')!.addEventListener('click', () => {
+      const scope = this.querySelector<TetherScope>('tether-webgpu-scope');
+      if (!scope) return;
+      scope.resetView();
+      const pauseBtn = this.querySelector<HTMLButtonElement>('#pause-btn')!;
+      pauseBtn.textContent = 'Pause';
+      const dot = this.querySelector('#live-dot')!;
+      dot.textContent = '● LIVE';
+      this.querySelector<HTMLButtonElement>('#reset-zoom-btn')!.hidden = true;
+    });
 
     // Tab buttons
     this.querySelectorAll<HTMLButtonElement>('.tab').forEach((tab) =>
