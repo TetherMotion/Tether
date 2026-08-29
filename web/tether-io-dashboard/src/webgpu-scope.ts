@@ -333,10 +333,6 @@ export class WebGPUScope extends HTMLElement {
   private yMin = -1.2;
   private yMax = 1.2;
 
-  // ---- Pre-allocated upload buffer ----
-  /** Reused Float32Array for batch uploads (avoids GC pressure). */
-  private chunkData?: Float32Array;
-
   // =========================================================================
   // Lifecycle
   // =========================================================================
@@ -549,9 +545,6 @@ export class WebGPUScope extends HTMLElement {
     this.gridPipeline = gridPipelines[msaaIndex]!;
     this.msaaSC = supportedSC[msaaIndex] ?? 1;
 
-    // Pre-allocate chunk upload buffer (explicit ArrayBuffer for WebGPU compat).
-    this.chunkData = new Float32Array(new ArrayBuffer(MAX_CHANNELS * 2 * 4));
-
     // 2D canvas overlay for axis labels + legend.
     this.overlayEl = document.createElement('canvas');
     this.overlayEl.style.position = 'absolute';
@@ -590,34 +583,40 @@ export class WebGPUScope extends HTMLElement {
    * Called once per animation frame (batches multiple push() calls).
    */
   private flushPending(): void {
-    if (!this.device || !this.ringBuffer || !this.chunkData) return;
-    if (this.pendingRows.length === 0) return;
+    if (!this.device || !this.ringBuffer) return;
+    const count = this.pendingRows.length;
+    if (count === 0) return;
 
-    const sampleStride = MAX_CHANNELS * 2 * 4; // bytes per sample
-
-    for (const row of this.pendingRows) {
-      // Fill chunkData with this sample's (t, v) for all MAX_CHANNELS slots.
+    // Build one contiguous upload buffer for all pending rows, then write it
+    // in at most two pieces (before/after the ring wraparound).  This avoids
+    // the per-sample race from reusing the same typed-array view.
+    const floatsPerSample = MAX_CHANNELS * 2;
+    const data = new Float32Array(count * floatsPerSample);
+    for (let i = 0; i < count; i++) {
+      const row = this.pendingRows[i]!;
       for (let ch = 0; ch < MAX_CHANNELS; ch++) {
-        const idx = ch * 2;
         const hasValue = ch < row.values.length;
-        this.chunkData[idx] = hasValue ? row.t : -1e30;
-        this.chunkData[idx + 1] = hasValue ? (row.values[ch] ?? 0.0) : 0.0;
+        const idx = i * floatsPerSample + ch * 2;
+        data[idx] = hasValue ? row.t : -1e30;
+        data[idx + 1] = hasValue ? (row.values[ch] ?? 0.0) : 0.0;
       }
-
-      // Write to ring buffer at writeIndex (handle wraparound).
-      if (this.writeIndex < BUFFER_SAMPLES) {
-        const offset = this.writeIndex * sampleStride;
-        this.device.queue.writeBuffer(
-          this.ringBuffer,
-          offset,
-          this.chunkData as Float32Array<ArrayBuffer>,
-        );
-      }
-      // Note: since we write one sample at a time, wraparound is simple.
-      this.writeIndex = (this.writeIndex + 1) % BUFFER_SAMPLES;
-      this.sampleCounter++;
     }
 
+    const start = this.writeIndex;
+    const fits = Math.min(count, BUFFER_SAMPLES - start);
+    if (fits > 0) {
+      this.device.queue.writeBuffer(
+        this.ringBuffer,
+        start * floatsPerSample * 4,
+        data.subarray(0, fits * floatsPerSample),
+      );
+    }
+    if (count > fits) {
+      this.device.queue.writeBuffer(this.ringBuffer, 0, data.subarray(fits * floatsPerSample));
+    }
+
+    this.writeIndex = (this.writeIndex + count) % BUFFER_SAMPLES;
+    this.sampleCounter += count;
     this.pendingRows = [];
   }
 
