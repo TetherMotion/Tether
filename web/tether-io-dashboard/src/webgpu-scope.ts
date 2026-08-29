@@ -111,25 +111,25 @@ const DEFAULT_COLORS: [number, number, number][] = [
  */
 const SHADER = /* wgsl */ `
   struct RenderUniforms {
-    currentTime   : f32,
-    windowSec     : f32,
-    yMin          : f32,
-    yMax          : f32,
-    plotX         : f32,
-    plotY         : f32,
-    plotW         : f32,
-    plotH         : f32,
-    canvasW       : f32,
-    canvasH       : f32,
-    xMajorStep    : f32,
-    yMajorStep    : f32,
-    writeIndex    : u32,
-    bufferSamples : u32,
-    // Theme colors (packed as vec4s for 16-byte alignment).
-    marginColor   : vec4<f32>,  // offset 56
-    plotBgColor   : vec4<f32>,  // offset 72
-    minorColor    : vec4<f32>,  // offset 88
-    majorColor    : vec4<f32>,  // offset 104
+    currentTime   : f32,       // 0
+    windowSec     : f32,       // 4
+    yMin          : f32,       // 8
+    yMax          : f32,       // 12
+    plotX         : f32,       // 16
+    plotY         : f32,       // 20
+    plotW         : f32,       // 24
+    plotH         : f32,       // 28
+    canvasW       : f32,       // 32
+    canvasH       : f32,       // 36
+    xMajorStep    : f32,       // 40
+    yMajorStep    : f32,       // 44
+    writeIndex    : u32,       // 48
+    bufferSamples : u32,       // 52
+    _padding      : vec2<u32>, // 56 (pad to align next vec4 to 64)
+    marginColor   : vec4<f32>, // 64
+    plotBgColor   : vec4<f32>, // 80
+    minorColor    : vec4<f32>, // 96
+    majorColor    : vec4<f32>, // 112
   };
 
   @group(0) @binding(0) var<uniform> ru : RenderUniforms;
@@ -763,15 +763,14 @@ export class WebGPUScope extends HTMLElement {
     bufInfo[1] = BUFFER_SAMPLES;
     this.device.queue.writeBuffer(this.renderUniforms, 48, bufInfo);
 
-    // Write theme colors as 4 × vec4<f32> at offset 56 (bytes).
-    // Colors are read from CSS variables so the plot matches the active theme.
+    // Write theme colors as 4 × vec4<f32> at offset 64 (bytes).
     const theme = this.readThemeColors();
     const colorData = new Float32Array(new ArrayBuffer(16 * 4));
     colorData.set(theme.margin, 0);
     colorData.set(theme.plotBg, 4);
     colorData.set(theme.minor, 8);
     colorData.set(theme.major, 12);
-    this.device.queue.writeBuffer(this.renderUniforms, 56, colorData);
+    this.device.queue.writeBuffer(this.renderUniforms, 64, colorData);
 
     this.ensureMsaa(cw, ch, sc);
 
