@@ -1246,13 +1246,13 @@ export class WebGPUScope extends HTMLElement {
       rp.draw(vertexCount, this.numChannels, firstVertex, 0);
 
       // 3) Points — render dots at every sample when the visible sample
-      //    count is low enough (< 2000 per channel).  This is done
+      //    count is low enough (< 250 per channel).  This is done
       //    entirely on the GPU: the point vertex shader reads each
       //    sample from the ring buffer and emits a small circle.
       // Estimate visible samples: sample rate × visible time span.
       const sampleRate = WINDOW_SAMPLES / WINDOW_SEC; // ~1000 Hz
       const estVisible = Math.min(validSamples, Math.ceil(sampleRate * viewSpan));
-      if (estVisible < 2000) {
+      if (estVisible < 250) {
         const POINT_SEGMENTS = 12;
         const vertsPerCircle = POINT_SEGMENTS * 3;
         const pointInstances = validSamples * this.numChannels;
