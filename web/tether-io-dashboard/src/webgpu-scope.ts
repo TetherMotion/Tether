@@ -145,22 +145,85 @@ const SHADER = /* wgsl */ `
     );
   }
 
-  // ── Line strip pipeline ─────────────────────────────────────────────
+  // ── Thick line pipeline (triangle-strip expansion) ──────────────────
+  // WebGPU line-strip topology is always 1px wide.  To get wider lines
+  // we render each sample as two vertices (one per side), expanding
+  // perpendicular to the line direction in screen space.  The result
+  // is a triangle strip that forms a thick ribbon.
   struct LineVSOut {
     @builtin(position) clipPos : vec4<f32>,
     @location(0)       color   : vec3<f32>,
   };
 
+  // Convert a world-space (t, v) to pixel coordinates on the canvas.
+  fn worldToPx(t : f32, v : f32) -> vec2<f32> {
+    let clip = worldToClip(t, v);
+    return vec2<f32>(
+      (clip.x * 0.5 + 0.5) * ru.canvasW,
+      (1.0 - clip.y * 0.5 - 0.5) * ru.canvasH,
+    );
+  }
+
   @vertex
   fn vs_line(@builtin(vertex_index) vi : u32,
              @builtin(instance_index) ch : u32) -> LineVSOut {
-    let sampleIdx = (ru.writeIndex + ru.bufferSamples - ${WINDOW_SAMPLES}u + vi) % ru.bufferSamples;
+    let sampleI = vi >> 1u;       // which sample
+    let side    = vi & 1u;        // 0 = one side, 1 = other side
+
+    let sampleIdx = (ru.writeIndex + ru.bufferSamples - ${WINDOW_SAMPLES}u + sampleI) % ru.bufferSamples;
     let base = (sampleIdx * ${MAX_CHANNELS}u + ch) * 2u;
     let t = ringBuffer[base];
     let v = ringBuffer[base + 1u];
 
+    // Neighbouring samples for direction estimation.
+    let prevIdx = (sampleIdx + ru.bufferSamples - 1u) % ru.bufferSamples;
+    let nextIdx = (sampleIdx + 1u) % ru.bufferSamples;
+    let prevBase = (prevIdx * ${MAX_CHANNELS}u + ch) * 2u;
+    let nextBase = (nextIdx * ${MAX_CHANNELS}u + ch) * 2u;
+    let prevT = ringBuffer[prevBase];
+    let prevV = ringBuffer[prevBase + 1u];
+    let nextT = ringBuffer[nextBase];
+    let nextV = ringBuffer[nextBase + 1u];
+
+    let px  = worldToPx(t, v);
+    let prevPx = worldToPx(prevT, prevV);
+    let nextPx = worldToPx(nextT, nextV);
+
+    // Direction: centered difference, falling back to one-sided
+    // when a neighbour is a sentinel (t < -1e20).
+    var dx = 1.0;
+    var dy = 0.0;
+    let hasPrev = prevT > -1e20;
+    let hasNext = nextT > -1e20;
+    if (hasPrev && hasNext) {
+      dx = nextPx.x - prevPx.x;
+      dy = nextPx.y - prevPx.y;
+    } else if (hasPrev) {
+      dx = px.x - prevPx.x;
+      dy = px.y - prevPx.y;
+    } else if (hasNext) {
+      dx = nextPx.x - px.x;
+      dy = nextPx.y - px.y;
+    }
+    let len = max(length(vec2<f32>(dx, dy)), 0.0001);
+    let dirX = dx / len;
+    let dirY = dy / len;
+
+    // Perpendicular (rotate 90°).
+    let perpX = -dirY;
+    let perpY = dirX;
+
+    // Offset by ±half line width (in pixels).
+    let LINE_WIDTH_PX = 2.0;
+    let offset = (f32(side) * 2.0 - 1.0) * LINE_WIDTH_PX * 0.5;
+    let outPx = vec2<f32>(px.x + perpX * offset, px.y + perpY * offset);
+
     var out : LineVSOut;
-    out.clipPos = worldToClip(t, v);
+    out.clipPos = vec4<f32>(
+      (outPx.x / ru.canvasW) * 2.0 - 1.0,
+      1.0 - (outPx.y / ru.canvasH) * 2.0,
+      0.0, 1.0,
+    );
     out.color = channelColors[ch].rgb;
     return out;
   }
@@ -490,7 +553,7 @@ export class WebGPUScope extends HTMLElement {
             layout,
             vertex: { module, entryPoint: 'vs_line' },
             fragment: { module, entryPoint: 'fs_line', targets: [{ format: this.format }] },
-            primitive: { topology: 'line-strip' },
+            primitive: { topology: 'triangle-strip' },
             multisample: { count: sc },
           }),
           device.createRenderPipelineAsync({
@@ -810,8 +873,10 @@ export class WebGPUScope extends HTMLElement {
       rp.setPipeline(this.linePipeline);
       rp.setBindGroup(0, this.bindGroup);
       const validSamples = Math.min(this.sampleCounter, WINDOW_SAMPLES);
-      const firstVertex = WINDOW_SAMPLES - validSamples;
-      rp.draw(validSamples, this.numChannels, firstVertex, 0);
+      // Each sample generates 2 vertices (one per side of the thick line).
+      const vertexCount = Math.max(0, validSamples * 2 - 2);
+      const firstVertex = (WINDOW_SAMPLES - validSamples) * 2;
+      rp.draw(vertexCount, this.numChannels, firstVertex, 0);
     }
 
     rp.end();
