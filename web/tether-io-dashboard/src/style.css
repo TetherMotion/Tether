@@ -647,6 +647,61 @@ tether-value-card .value {
 }
 
 /* ===========================================================================
+   Toast notifications
+   ===========================================================================*/
+
+.toast-host {
+  position: fixed;
+  bottom: 1.25rem;
+  right: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  max-width: min(420px, 90vw);
+  padding: 0.8rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: linear-gradient(135deg, var(--glass-1), var(--glass-2));
+  backdrop-filter: blur(24px);
+  box-shadow:
+    0 12px 40px var(--glass-shadow),
+    0 2px 8px var(--glass-shadow-deep);
+  color: var(--text);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity 0.25s ease,
+    transform 0.25s ease;
+}
+
+.toast-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast-error {
+  border-color: var(--status-offline);
+  box-shadow:
+    0 12px 40px rgba(214, 85, 85, 0.25),
+    0 2px 8px var(--glass-shadow-deep);
+}
+
+[data-theme='dark'] .toast-error {
+  border-color: var(--status-offline);
+  box-shadow:
+    0 12px 40px rgba(255, 183, 183, 0.18),
+    0 2px 8px var(--glass-shadow-deep);
+}
+
+/* ===========================================================================
    Footer
    ===========================================================================*/
 
