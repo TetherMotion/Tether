@@ -50,8 +50,10 @@
   --row-hover: rgba(120, 169, 255, 0.06);
 
   /* Scope / plot background */
-  --plot-bg: rgba(255, 255, 255, 0.5);
+  --plot-bg: #ffffff;
   --plot-margin: #e8eef5;
+  --plot-grid-minor: #e2e8f0;
+  --plot-grid-major: #cbd5e1;
 }
 
 [data-theme='dark'] {
@@ -85,8 +87,10 @@
   --row-border: rgba(255, 255, 255, 0.06);
   --row-hover: rgba(130, 244, 208, 0.04);
 
-  --plot-bg: rgba(9, 22, 36, 0.4);
+  --plot-bg: #0d1a28;
   --plot-margin: #07101c;
+  --plot-grid-minor: #162636;
+  --plot-grid-major: #253b52;
 }
 
 /* ===========================================================================
