@@ -125,6 +125,7 @@ const SHADER = /* wgsl */ `
     yMajorStep    : f32,
     writeIndex    : u32,
     bufferSamples : u32,
+    numChannels   : u32,
   };
 
   @group(0) @binding(0) var<uniform> ru : RenderUniforms;
@@ -247,8 +248,8 @@ const SHADER = /* wgsl */ `
   fn vs_point(@builtin(vertex_index) vi : u32,
               @builtin(instance_index) ii : u32) -> PointVSOut {
     let POINT_SEGMENTS = 12u;
-    let sampleI = ii / ${MAX_CHANNELS}u;
-    let ch      = ii % ${MAX_CHANNELS}u;
+    let sampleI = ii / ru.numChannels;
+    let ch      = ii % ru.numChannels;
 
     // Each triangle uses 3 vertices: vi=0 → center, vi=1 → ring[i],
     // vi=2 → ring[i+1].  triangle_index = vi / 3, vertex_in_tri = vi % 3.
@@ -754,9 +755,9 @@ export class WebGPUScope extends HTMLElement {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
     });
 
-    // Render uniforms (56 bytes: 12 × f32 + 2 × u32).
+    // Render uniforms (60 bytes: 12 × f32 + 3 × u32).
     this.renderUniforms = device.createBuffer({
-      size: 56,
+      size: 60,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
@@ -1194,10 +1195,11 @@ export class WebGPUScope extends HTMLElement {
     ruData[11] = yMajorStep;
     this.device.queue.writeBuffer(this.renderUniforms, 0, ruData);
 
-    // Write writeIndex and bufferSamples as u32 at offset 48 (bytes).
-    const bufInfo = new Uint32Array(new ArrayBuffer(2 * 4));
+    // Write writeIndex, bufferSamples, numChannels as u32 at offset 48.
+    const bufInfo = new Uint32Array(new ArrayBuffer(3 * 4));
     bufInfo[0] = activeWriteIndex;
     bufInfo[1] = BUFFER_SAMPLES;
+    bufInfo[2] = this.numChannels;
     this.device.queue.writeBuffer(this.renderUniforms, 48, bufInfo);
 
     this.ensureMsaa(cw, ch, sc);
