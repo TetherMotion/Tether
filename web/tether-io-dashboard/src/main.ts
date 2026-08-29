@@ -237,6 +237,7 @@ class TetherApp extends HTMLElement {
       btn.textContent = paused ? 'Resume' : 'Pause';
       const dot = this.querySelector('#live-dot')!;
       dot.textContent = paused ? '⏸ PAUSED' : '● LIVE';
+      dot.classList.toggle('paused', paused);
       // Reset zoom button is only relevant while paused.
       this.querySelector<HTMLButtonElement>('#reset-zoom-btn')!.hidden = !paused;
     });
