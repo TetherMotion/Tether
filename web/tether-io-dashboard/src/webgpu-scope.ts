@@ -235,9 +235,9 @@ const SHADER = /* wgsl */ `
 
   // ── Point pipeline (circles at sample positions) ───────────────────
   // Renders a filled circle per sample per channel.  Each circle is
-  // a triangle fan of POINT_SEGMENTS+2 vertices (center + ring).
-  // The vertex shader computes the circle vertex position in screen
-  // space and converts back to clip space.
+  // made of POINT_SEGMENTS triangles, each triangle being (center,
+  // ring[i], ring[i+1]).  With triangle-list topology we need
+  // POINT_SEGMENTS * 3 vertices per circle.
   struct PointVSOut {
     @builtin(position) clipPos : vec4<f32>,
     @location(0)       color   : vec3<f32>,
@@ -250,10 +250,10 @@ const SHADER = /* wgsl */ `
     let sampleI = ii / ${MAX_CHANNELS}u;
     let ch      = ii % ${MAX_CHANNELS}u;
 
-    // First vertex of each circle is the center; subsequent vertices
-    // trace the ring.
-    let local = vi % (POINT_SEGMENTS + 2u);
-    let isCenter = local == 0u;
+    // Each triangle uses 3 vertices: vi=0 → center, vi=1 → ring[i],
+    // vi=2 → ring[i+1].  triangle_index = vi / 3, vertex_in_tri = vi % 3.
+    let triIdx  = vi / 3u;
+    let vertInTri = vi % 3u;
 
     let sampleIdx = (ru.writeIndex + ru.bufferSamples - ${WINDOW_SAMPLES}u + sampleI) % ru.bufferSamples;
     let base = (sampleIdx * ${MAX_CHANNELS}u + ch) * 2u;
@@ -262,12 +262,18 @@ const SHADER = /* wgsl */ `
 
     let centerPx = worldToPx(t, v);
 
-    // Circle radius in pixels.
+    // Circle radius in pixels (2× line width).
     let RADIUS_PX = 4.0;
+
     var outPx = centerPx;
-    if (!isCenter) {
-      let ringIdx = local - 1u;
-      let angle = f32(ringIdx) * (2.0 * 3.14159265 / f32(POINT_SEGMENTS));
+    if (vertInTri == 1u) {
+      let angle = f32(triIdx) * (2.0 * 3.14159265 / f32(POINT_SEGMENTS));
+      outPx = vec2<f32>(
+        centerPx.x + cos(angle) * RADIUS_PX,
+        centerPx.y + sin(angle) * RADIUS_PX,
+      );
+    } else if (vertInTri == 2u) {
+      let angle = f32(triIdx + 1u) * (2.0 * 3.14159265 / f32(POINT_SEGMENTS));
       outPx = vec2<f32>(
         centerPx.x + cos(angle) * RADIUS_PX,
         centerPx.y + sin(angle) * RADIUS_PX,
@@ -497,6 +503,14 @@ export class WebGPUScope extends HTMLElement {
   private dragStartY = 0;
   private dragCurX = 0;
   private dragCurY = 0;
+  /** Right-click pan state. */
+  private panActive = false;
+  private panStartX = 0;
+  private panStartY = 0;
+  /** View state at the start of a pan (for delta computation). */
+  private panStartTimeMin = 0;
+  private panStartYMin = 0;
+  private panStartYMax = 0;
 
   // =========================================================================
   // Lifecycle
@@ -808,21 +822,42 @@ export class WebGPUScope extends HTMLElement {
     this.appendChild(this.overlayEl);
     this.octx = this.overlayEl.getContext('2d');
 
-    // Legend hover detection + drag-zoom: the overlay itself has
-    // pointerEvents:none, so attach mouse listeners to the scope
-    // container.
+    // Legend hover detection + drag-zoom + right-click pan: the overlay
+    // itself has pointerEvents:none, so attach mouse listeners to the
+    // scope container.
     this.addEventListener('mousedown', (e: MouseEvent) => {
       const rect = this.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-      // Only start drag inside the plot area.
+      // Only start inside the plot area.
       const ml = MARGIN_LEFT;
       const mr = MARGIN_RIGHT;
       const mt = MARGIN_TOP;
       const mb = MARGIN_BOTTOM;
       const pw = rect.width - ml - mr;
       const ph = rect.height - mt - mb;
-      if (x >= ml && x < ml + pw && y >= mt && y < mt + ph) {
+      if (x < ml || x >= ml + pw || y < mt || y >= mt + ph) return;
+
+      if (e.button === 2) {
+        // Right-click: start panning.  Freeze the view if not already.
+        if (!this.paused) {
+          this.paused = true;
+          this.copyToFrozen();
+          this.frozenWriteIndex = this.writeIndex;
+          this.frozenSampleCounter = this.sampleCounter;
+          this.frozenCurrentTime = this.currentTime;
+          this.viewTimeMin = this.currentTime - WINDOW_SEC;
+          this.viewTimeSpan = WINDOW_SEC;
+        }
+        this.panActive = true;
+        this.panStartX = x;
+        this.panStartY = y;
+        this.panStartTimeMin = this.viewTimeMin ?? 0;
+        this.panStartYMin = this.zoomYMin ?? this.yMin;
+        this.panStartYMax = this.zoomYMax ?? this.yMax;
+        e.preventDefault();
+      } else if (e.button === 0) {
+        // Left-click: start drag-zoom rectangle.
         this.dragActive = true;
         this.dragStartX = x;
         this.dragStartY = y;
@@ -831,19 +866,38 @@ export class WebGPUScope extends HTMLElement {
         e.preventDefault();
       }
     });
+    this.addEventListener('contextmenu', (e: MouseEvent) => e.preventDefault());
     this.addEventListener('mousemove', (e: MouseEvent) => {
       const rect = this.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-      if (this.dragActive) {
+      if (this.panActive) {
+        // Pan: convert pixel delta to world delta.
+        const ml = MARGIN_LEFT;
+        const mr = MARGIN_RIGHT;
+        const mt = MARGIN_TOP;
+        const mb = MARGIN_BOTTOM;
+        const pw = rect.width - ml - mr;
+        const ph = rect.height - mt - mb;
+        const dxPx = x - this.panStartX;
+        const dyPx = y - this.panStartY;
+        const timeDelta = (dxPx / pw) * this.viewTimeSpan;
+        const yDelta = (dyPx / ph) * (this.panStartYMax - this.panStartYMin);
+        this.viewTimeMin = this.panStartTimeMin - timeDelta;
+        this.zoomYMin = this.panStartYMin + yDelta;
+        this.zoomYMax = this.panStartYMax + yDelta;
+      } else if (this.dragActive) {
         this.dragCurX = x;
         this.dragCurY = y;
       } else {
         this.updateLegendHover(x, y);
       }
     });
-    this.addEventListener('mouseup', () => {
-      if (this.dragActive) {
+    this.addEventListener('mouseup', (e: MouseEvent) => {
+      if (e.button === 2 && this.panActive) {
+        this.panActive = false;
+      }
+      if (e.button === 0 && this.dragActive) {
         this.dragActive = false;
         this.applyDragZoom();
       }
@@ -851,6 +905,9 @@ export class WebGPUScope extends HTMLElement {
     this.addEventListener('mouseleave', () => {
       if (this.dragActive) {
         this.dragActive = false;
+      }
+      if (this.panActive) {
+        this.panActive = false;
       }
       if (this.highlightedChannel !== null) {
         this.highlightedChannel = null;
@@ -1193,7 +1250,7 @@ export class WebGPUScope extends HTMLElement {
       const estVisible = Math.min(validSamples, Math.ceil(sampleRate * viewSpan));
       if (estVisible < 100) {
         const POINT_SEGMENTS = 12;
-        const vertsPerCircle = POINT_SEGMENTS + 2;
+        const vertsPerCircle = POINT_SEGMENTS * 3;
         const pointInstances = validSamples * this.numChannels;
         rp.setPipeline(this.pointPipeline);
         rp.setBindGroup(0, activeBindGroup);
