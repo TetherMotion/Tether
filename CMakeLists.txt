@@ -35,14 +35,14 @@ if(NOT EXISTS "${MAGIC_ENUM_PATH}")
     message(FATAL_ERROR
         "Git submodule 'magic_enum' is not initialized.\n"
         "Please run the following command in the repository root:\n"
-        "  git submodule update --init\n"
+        "  git submodule update --init --recursive\n"
         "Then re-run CMake."
     )
 elseif(NOT EXISTS "${MAGIC_ENUM_PATH}/include/magic_enum/magic_enum.hpp")
     message(FATAL_ERROR
         "Git submodule 'magic_enum' appears to be initialized but is empty or incomplete.\n"
         "Please run the following command in the repository root:\n"
-        "  git submodule update --init\n"
+        "  git submodule update --init --recursive\n"
         "Then re-run CMake."
     )
 endif()
@@ -55,14 +55,14 @@ if(NOT EXISTS "${ARGPARSE_PATH}")
     message(FATAL_ERROR
         "Git submodule 'argparse' is not initialized.\n"
         "Please run the following command in the repository root:\n"
-        "  git submodule update --init\n"
+        "  git submodule update --init --recursive\n"
         "Then re-run CMake."
     )
 elseif(NOT EXISTS "${ARGPARSE_PATH}/include/argparse/argparse.hpp")
     message(FATAL_ERROR
         "Git submodule 'argparse' appears to be initialized but is empty or incomplete.\n"
         "Please run the following command in the repository root:\n"
-        "  git submodule update --init\n"
+        "  git submodule update --init --recursive\n"
         "Then re-run CMake."
     )
 endif()
@@ -76,14 +76,14 @@ if(NOT EXISTS "${ATOMIC_QUEUE_PATH}")
     message(FATAL_ERROR
         "Git submodule 'atomic_queue' is not initialized.\n"
         "Please run the following command in the repository root:\n"
-        "  git submodule update --init\n"
+        "  git submodule update --init --recursive\n"
         "Then re-run CMake."
     )
 elseif(NOT EXISTS "${ATOMIC_QUEUE_PATH}/include/atomic_queue/atomic_queue.h")
     message(FATAL_ERROR
         "Git submodule 'atomic_queue' appears to be initialized but is empty or incomplete.\n"
         "Please run the following command in the repository root:\n"
-        "  git submodule update --init\n"
+        "  git submodule update --init --recursive\n"
         "Then re-run CMake."
     )
 endif()
@@ -95,14 +95,14 @@ if(NOT EXISTS "${GLAZE_PATH}")
     message(FATAL_ERROR
         "Git submodule 'glaze' is not initialized.\n"
         "Please run the following command in the repository root:\n"
-        "  git submodule update --init\n"
+        "  git submodule update --init --recursive\n"
         "Then re-run CMake."
     )
 elseif(NOT EXISTS "${GLAZE_PATH}/include/glaze/glaze.hpp")
     message(FATAL_ERROR
         "Git submodule 'glaze' appears to be initialized but is empty or incomplete.\n"
         "Please run the following command in the repository root:\n"
-        "  git submodule update --init\n"
+        "  git submodule update --init --recursive\n"
         "Then re-run CMake."
     )
 endif()
@@ -116,14 +116,14 @@ if(NOT EXISTS "${EIGEN_PATH}")
     message(FATAL_ERROR
         "Git submodule 'eigen' is not initialized.\n"
         "Please run the following command in the repository root:\n"
-        "  git submodule update --init\n"
+        "  git submodule update --init --recursive\n"
         "Then re-run CMake."
     )
 elseif(NOT EXISTS "${EIGEN_PATH}/Eigen/src/Core/util/Meta.h")
     message(FATAL_ERROR
         "Git submodule 'eigen' appears to be initialized but is empty or incomplete.\n"
         "Please run the following command in the repository root:\n"
-        "  git submodule update --init\n"
+        "  git submodule update --init --recursive\n"
         "Then re-run CMake."
     )
 endif()
@@ -135,14 +135,14 @@ if(NOT EXISTS "${LIBSLIPSPEED_PATH}")
     message(FATAL_ERROR
         "Git submodule 'libSLIPspeed' is not initialized.\n"
         "Please run the following command in the repository root:\n"
-        "  git submodule update --init\n"
+        "  git submodule update --init --recursive\n"
         "Then re-run CMake."
     )
 elseif(NOT EXISTS "${LIBSLIPSPEED_PATH}/include/SLIPStream/Buffer.hpp")
     message(FATAL_ERROR
         "Git submodule 'libSLIPspeed' appears to be initialized but is empty or incomplete.\n"
         "Please run the following command in the repository root:\n"
-        "  git submodule update --init\n"
+        "  git submodule update --init --recursive\n"
         "Then re-run CMake."
     )
 endif()
