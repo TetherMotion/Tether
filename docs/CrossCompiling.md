@@ -200,7 +200,7 @@ executable; it has no runtime library dependencies beyond glibc/libstdc++.
 | Dependency | Cross-compile notes |
 |------------|---------------------|
 | `pthread` | Part of glibc — already in the sysroot, no extra step. |
-| `magic_enum`, `argparse`, `atomic_queue`, `glaze`, `eigen`, `libSLIPspeed` | All git submodules, header-only or self-contained. They build from source with the cross toolchain automatically. Run `git submodule update --init` first. |
+| `magic_enum`, `argparse`, `atomic_queue`, `glaze`, `eigen`, `libSLIPspeed` | All git submodules, header-only or self-contained. They build from source with the cross toolchain automatically. Run `git submodule update --init --recursive` first. |
 | `jsoncpp` | Auto-fetched via `FetchContent` if missing. Builds cleanly with the cross compiler. |
 | `tinyxml2` (extract_esi) | Auto-fetched. Disable with `-DTETHER_BUILD_EXTRACT_ESI=OFF` (recommended for target builds). |
 | `Drogon` (Klipper HTTP) | Heavy dependency tree (trantor, jsoncpp, optionally pg/sqlite/mysql). Strongly recommended to leave `-DTETHER_ENABLE_KLIPPER_HTTP=OFF` for Pi targets. If you need it, build Drogon separately with the same toolchain and point `CMAKE_PREFIX_PATH` at the install prefix. |
@@ -260,7 +260,7 @@ If the stock Ubuntu cross-compiler is too old for C++23:
 - **Hard-float vs soft-float mismatch** — Pi 2/3/4 use `gnueabihf`
   (hard-float). Pi Zero/W also use `gnueabihf`. Only original Pi 1 with a
   soft-float distro needs `gnueabi`.
-- **Submodule headers missing** — `git submodule update --init` must be run
+- **Submodule headers missing** — `git submodule update --init --recursive` must be run
   on the host before configuring; the CMakeLists aborts otherwise.
 - **`std::format` not found** — your cross-compiler is older than GCC 13.
   Upgrade via Linaro/crosstool-NG, or fall back to a newer Ubuntu.
