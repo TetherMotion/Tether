@@ -113,11 +113,22 @@ public:
 
         const auto& segments = path.segments();
 
-        // Compute per-piece cruise velocities from curvature
+        // Compute per-piece cruise velocities from curvature and per-segment
+        // feed rate limits (set via PathAdapter::setSegmentVelocityLimits).
         std::vector<T> pieceLengths;
         std::vector<T> cruiseVelocities;
         pieceLengths.reserve(segments.size());
         cruiseVelocities.reserve(segments.size());
+
+        // Per-segment feed rates and corner velocities from the PathAdapter.
+        // These are set by the caller via setSegmentVelocityLimits() (G-code
+        // F-values) and computeCornerVelocities() (junction deviation model).
+        // Without corner velocities, straight-line G-code would have zero
+        // curvature and the profiler would cruise at vMax through every
+        // junction — ignoring the deceleration required at corners.
+        const bool hasPerSegLimits = path.hasPerSegmentVelocityLimits();
+        const auto& segMaxVelocities = path.segmentMaxVelocities();
+        const auto& cornerVelocities = path.cornerVelocities();
 
         for (const auto& seg : segments) {
             if (seg.arcLength <= MathConstants::EPSILON) continue;
@@ -129,11 +140,73 @@ public:
                     limits_.path.maxCentripetalAcceleration / kappa);
                 vCruise = std::min(vCruise, vCurv);
             }
+            // Apply per-segment feed rate limit (G-code F-values)
+            if (hasPerSegLimits) {
+                T vSeg = path.maxVelocityAtArcLength(midArc);
+                if (vSeg < vCruise) vCruise = vSeg;
+            }
             pieceLengths.push_back(seg.arcLength);
             cruiseVelocities.push_back(vCruise);
         }
 
         if (pieceLengths.empty()) return profile;
+
+        // Compute per-junction exit velocities, limited by corner velocities.
+        // exitVel[i] = min(cruise[i], cruise[i+1], cornerVel at junction i+1)
+        // For the last segment, exitVel = endVelocity.
+        std::vector<T> exitVelocities(pieceLengths.size(), vMax);
+        for (size_t i = 0; i < pieceLengths.size(); ++i) {
+            T targetVel = std::min(cruiseVelocities[i], vMax);
+            T nextVel = (i + 1 < pieceLengths.size())
+                            ? std::min(cruiseVelocities[i + 1], vMax)
+                            : endVelocity;
+            T exitVel = std::min(targetVel, nextVel);
+            exitVelocities[i] = exitVel;
+        }
+
+        // Backward pass: propagate corner velocity limits backward so that
+        // preceding segments can decelerate in time. If a sharp corner
+        // forces a low exit velocity, the segment before it must also limit
+        // its exit velocity (and so on, cascading backward).
+        //
+        // This is a conservative pass: it assumes each segment is long
+        // enough to decelerate from its cruise to the next segment's exit
+        // velocity. If a segment is too short, the S-curve compute will
+        // fail and fall back to constant velocity — imperfect but safe.
+        if (hasPerSegLimits && cornerVelocities.size() > 1) {
+            // First, stamp corner velocities onto exit velocities
+            size_t segIdx = 0;
+            for (size_t i = 0; i < pieceLengths.size(); ++i) {
+                while (segIdx < segments.size() &&
+                       segments[segIdx].arcLength <= MathConstants::EPSILON) {
+                    segIdx++;
+                }
+                if (segIdx + 1 < cornerVelocities.size()) {
+                    T vCorner = static_cast<T>(cornerVelocities[segIdx + 1]);
+                    if (vCorner < exitVelocities[i]) {
+                        exitVelocities[i] = vCorner;
+                    }
+                }
+                segIdx++;
+            }
+            // Backward propagation: limit each exit by the next exit
+            for (size_t i = pieceLengths.size() - 1; i > 0; --i) {
+                if (exitVelocities[i] < exitVelocities[i - 1]) {
+                    // The next segment's exit is lower — we may need to
+                    // decelerate through this segment. Limit our exit to
+                    // the next exit (conservative: assumes we can decelerate
+                    // within this segment's length).
+                    T vMaxEntry = SCurve::computeDecelDistance(
+                        exitVelocities[i - 1], exitVelocities[i],
+                        aMax, jMax) > pieceLengths[i - 1]
+                        ? exitVelocities[i]
+                        : exitVelocities[i - 1];
+                    if (vMaxEntry < exitVelocities[i - 1]) {
+                        exitVelocities[i - 1] = vMaxEntry;
+                    }
+                }
+            }
+        }
 
         // Build S-curve sequence with velocity continuity
         std::vector<SCurve> scurves;
@@ -159,11 +232,9 @@ public:
             scurveStartArc.push_back(segments[pieceIdx].cumulativeArcLength);
             scurveStartTime.push_back(accumulatedTime);
 
-            T targetVel = std::min(cruiseVelocities[i], vMax);
-            T nextVel = (i + 1 < pieceLengths.size())
-                            ? std::min(cruiseVelocities[i + 1], vMax)
-                            : endVelocity;
-            T exitVel = std::min(targetVel, nextVel);
+            // Use the precomputed exit velocity (includes corner velocity
+            // limits and backward-pass propagation).
+            T exitVel = exitVelocities[i];
 
             SCurve sc;
             bool ok = sc.compute(pieceLengths[i], currentVel, exitVel, constraints);
