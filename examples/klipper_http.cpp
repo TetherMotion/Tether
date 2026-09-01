@@ -292,9 +292,54 @@ static std::string ensureWebUi(const std::string& uiDir,
     }
 
     // Case 3: directory already exists but is NOT the source.
-    //         Ask to create a subdirectory inside it.
+    //         Check if a subdirectory with the UI name already exists
+    //         and is either built or a source checkout.  If so, use it.
+    //         Otherwise, ask to create the subdirectory and clone there.
     if (fs::exists(dir)) {
         fs::path subDir = dir / subdirName;
+        fs::path subDist = subDir / "dist";
+
+        // Subdirectory already has a built dist — reuse it.
+        if (isBuiltDist(subDist)) {
+            std::printf("%s already built at %s\n", uiName.c_str(),
+                        subDist.string().c_str());
+            writeWebUiConfig(subDist, port);
+            return subDist.string();
+        }
+
+        // Subdirectory exists and looks like the source — build it.
+        if (fs::exists(subDir / "package.json")) {
+            dir = subDir;
+            distDir = subDist;
+            std::printf("%s source found at %s but not built.\n\n",
+                        uiName.c_str(), dir.string().c_str());
+            std::printf("I will run the following commands to build it:\n");
+            std::printf("  cd %s\n", dir.string().c_str());
+            std::printf("  npm install\n");
+            std::printf("  npm run build\n\n");
+            if (!askYesNo("Proceed?")) {
+                std::printf("Skipped. Continuing without %s.\n", uiName.c_str());
+                return "";
+            }
+            std::printf("\n");
+            std::string cd = "cd " + dir.string();
+            if (!runCommand(cd + " && npm install")) {
+                std::fprintf(stderr, "npm install failed.\n");
+                return "";
+            }
+            if (!runCommand(cd + " && npm run build")) {
+                std::fprintf(stderr, "npm run build failed.\n");
+                return "";
+            }
+            if (!isBuiltDist(distDir)) {
+                std::fprintf(stderr, "Build completed but dist/index.html not found.\n");
+                return "";
+            }
+            writeWebUiConfig(distDir, port);
+            return distDir.string();
+        }
+
+        // Subdirectory doesn't exist — ask to create it and clone.
         std::printf("Directory %s already exists but does not contain %s.\n\n",
                     dir.string().c_str(), uiName.c_str());
         std::printf("Create a '%s' subdirectory and clone there?\n",
@@ -305,7 +350,7 @@ static std::string ensureWebUi(const std::string& uiDir,
             return "";
         }
         dir = subDir;
-        distDir = dir / "dist";
+        distDir = subDist;
         std::printf("\n");
         // Fall through to clone + build below.
     } else {
@@ -449,9 +494,10 @@ int main(int argc, char* argv[]) {
         if (!dist.empty()) webRoot = dist;
     }
 
-    // Install signal handlers
+    // Signal handling: the 'running' flag is shared with the sim thread.
+    // The SignalHandler itself is installed AFTER Drogon starts, because
+    // Drogon installs its own SIGINT handler that would override ours.
     std::atomic<bool> running{true};
-    Tether::Utils::SignalHandler sig_handler(running, false);
 
     // Ensure directories exist (use error_code overload so we don't throw)
     auto ensureDir = [](const std::string& path, const char* label) {
@@ -676,6 +722,10 @@ int main(int argc, char* argv[]) {
     }
     std::printf("\nPress Ctrl+C to stop.\n\n");
     std::fflush(stdout);
+
+    // Install signal handlers NOW (after Drogon has started and installed
+    // its own), so our handler overrides Drogon's and Ctrl+C actually works.
+    Tether::Utils::SignalHandler sig_handler(running, true);
 
     // ------------------------------------------------------------------
     // Step 8: Simulation thread
