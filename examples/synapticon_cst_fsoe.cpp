@@ -43,6 +43,10 @@
  *   ./synapticon_cst_fsoe --debug fsoe-wire     # every-cycle PDO wire dumps (firehose)
  *   ./synapticon_cst_fsoe --debug fsoe-sequence # per-cycle frame accept/reject + state change summary
  *   ./synapticon_cst_fsoe --debug fsoe-crc      # CRC parameters used for TX build and RX check
+ *   ./synapticon_cst_fsoe --debug rx-pdo,tx-pdo # EtherCAT PDO data logging
+ *   ./synapticon_cst_fsoe --debug coe-reads,coe-writes  # SDO access logging
+ *   ./synapticon_cst_fsoe --debug al-state,pdo-sm       # state machine + SM config
+ *   ./synapticon_cst_fsoe --debug help         # list all available debug flags
  *   ./synapticon_cst_fsoe --torque-nm 10 --freq-hz 1.0  # 10 Nm P-P at 1 Hz
  *   ./synapticon_cst_fsoe --rated-torque-mnm 4200       # override rated torque
  *   ./synapticon_cst_fsoe --sto 0 --sbc 0               # raw STO bit=0, SBC bit=0
@@ -113,11 +117,17 @@ constexpr const char* TAG = "synapticon_cst_fsoe";
 
 // SM0 — master→slave write mailbox (ESI "MBoxOut", ControlByte 0x26)
 constexpr uint16_t kMailboxWriteAddr = EtherCAT::Drives::Synapticon::kMailboxWriteAddr;
-constexpr uint16_t kMailboxWriteSize = EtherCAT::Drives::Synapticon::kMailboxWriteSize;
+// NOTE: SOMANET_CiA_402_v5.1.9.xml ESI advertises 1024-byte mailbox buffers,
+// but the firmware (v5.1.7 and observed on current Synapticon drives) only
+// accepts 512 bytes.  Configuring 1024 causes the slave to reject the
+// mailbox configuration in PRE_OP with AL_STATUS_CODE 0x0016
+// ("Invalid mailbox configuration (PRE_OP)").  Use 512 — the value the
+// drive actually accepts.
+constexpr uint16_t kMailboxWriteSize = 512;
 
 // SM1 — slave→master read mailbox (ESI "MBoxIn", ControlByte 0x22)
 constexpr uint16_t kMailboxReadAddr = EtherCAT::Drives::Synapticon::kMailboxReadAddr;
-constexpr uint16_t kMailboxReadSize = EtherCAT::Drives::Synapticon::kMailboxReadSize;
+constexpr uint16_t kMailboxReadSize = 512;
 
 // CoE | FoE
 constexpr uint16_t kMailboxProtocols = EtherCAT::Drives::Synapticon::kMailboxProtocols;
@@ -147,19 +157,14 @@ using TxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_TxPDO_1A00;
 using FSoERxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_RxPDO_1700;
 using FSoETxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_TxPDO_1B00;
 
-// FSoE PDO offsets within the combined PDO buffer.
-// The FSoE PDO (0x1700/0x1B00) comes FIRST; the motion PDO (0x1600/0x1A00)
-// follows at the offset equal to the FSoE PDO size.
-// This ordering is critical: the Synapticon Circulo EtherCAT chip has a bug
-// where the last word in the SM buffer is zeroed.  If the FSoE PDO were last,
-// the ConnectionID (the final word of the FSoE frame) would be zeroed and the
-// slave would reject every frame.  By placing the motion PDO last, the zeroed
-// word falls on motion data, not the FSoE ConnectionID.
-// See: https://doc.synapticon.com/circulo_safe_motion/smm/ecat_fsoe_issues.htm
-constexpr size_t kFSoERxPDOOffset = 0;                    // FSoE first
-constexpr size_t kMotionRxPDOOffset = sizeof(FSoERxPDO);  // 11 bytes
-constexpr size_t kFSoETxPDOOffset = 0;                    // FSoE first
-constexpr size_t kMotionTxPDOOffset = sizeof(FSoETxPDO);  // 31 bytes
+// PDO offsets within the combined PDO buffer.
+// The motion PDO (0x1600/0x1A00) comes FIRST; the FSoE PDO (0x1700/0x1B00)
+// follows at the offset equal to the motion PDO size.
+// This matches the ESI-defined PDO order (motion PDOs before FSoE PDOs).
+constexpr size_t kMotionRxPDOOffset = 0;               // Motion first
+constexpr size_t kFSoERxPDOOffset   = sizeof(RxPDO);   // 19 bytes
+constexpr size_t kMotionTxPDOOffset = 0;               // Motion first
+constexpr size_t kFSoETxPDOOffset   = sizeof(TxPDO);   // 13 bytes
 
 using FSoEMain = EtherCAT::Drives::Synapticon::SafeMotion::MainInstance;
 
@@ -412,7 +417,7 @@ public:
     void stop(EtherCAT::CiA402Drive&) override {}
 
     bool update(EtherCAT::CiA402Drive& drive, double dt_seconds) override {
-        // Motion PDO is at offset kMotionRxPDOOffset (FSoE PDO comes first)
+        // Motion PDO is at offset kMotionRxPDOOffset (motion PDO comes first)
         auto* rx = reinterpret_cast<PDO*>(
             static_cast<uint8_t*>(drive.getRxPDOBuffer()) + kMotionRxPDOOffset);
         if (rx == nullptr) return false;
@@ -484,7 +489,7 @@ public:
         auto* drive = master.driveBySlaveIndex(slave_index_);
         if (drive == nullptr) return true;
 
-        // Motion PDO is at offset kMotionTxPDOOffset (FSoE PDO comes first)
+        // Motion PDO is at offset kMotionTxPDOOffset (motion PDO comes first)
         auto* tx = reinterpret_cast<const TxPDO*>(
             static_cast<const uint8_t*>(drive->getTxPDOBuffer()) + kMotionTxPDOOffset);
         // Also read the commanded target_torque from the RxPDO for comparison
@@ -944,6 +949,93 @@ bool parseArgs(int argc, char** argv, Args& out) {
     return true;
 }
 
+// ----------------------------------------------------------------------------
+// Pre-activation safety check (currently disabled — see call site in main)
+// ----------------------------------------------------------------------------
+// Reads 0x2611 (Safety Module input diagnostics) and 0x2620:2 ("Safe fieldbus"
+// FSoE active indicator) from the drive via SDO, then decides whether to
+// proceed with activation.
+//
+// When FSoE is enabled, the drive *starts* in safe state (STO active by
+// default) and the FSoE master brings it out of safe state once the safety
+// protocol reaches the Data state.  Aborting here would prevent the FSoE
+// connection from ever establishing, so we only abort on safe state when
+// FSoE is disabled (--no-fsoe) — in that case there is no mechanism to
+// clear the safe state and enabling the drive would be futile.
+//
+// Returns 0 on success (proceed with activation), non-zero on failure
+// (caller should abort and shut down).
+int preActivationSafetyCheck(EtherCAT::DS402Master& master,
+                             Tether::Examples::HostMasterSession& session,
+                             uint16_t slave_idx,
+                             bool enable_fsoe) {
+    auto& slave = master.ethercatMaster().slave(slave_idx);
+    const auto safety = EtherCAT::Drives::Synapticon::readSafetyModuleState(slave);
+
+    TETHER_LOGI(TAG,
+        "Safety module diagnostics (0x2611): input1=%u input2=%u -> %s",
+        static_cast<unsigned>(safety.input1),
+        static_cast<unsigned>(safety.input2),
+        safety.stateSummary());
+
+    // 0x2620:2 "Safe fieldbus" reports whether the FSoE connection is
+    // active on the drive.  Logged up front so the operator can see the
+    // FSoE state regardless of the safety verdict below.
+    TETHER_LOGI(TAG,
+        "FSoE active indicator (0x2620:2 \"Safe fieldbus\"): raw=%u -> %s",
+        static_cast<unsigned>(safety.safe_fieldbus),
+        safety.fsoeStateSummary());
+
+    if (!safety.ok) {
+        if (enable_fsoe) {
+            // SDO read failed, but FSoE is enabled — the safety module
+            // might be in a state where SDO access is temporarily
+            // unavailable.  Continue anyway; the FSoE protocol will
+            // handle the safety state via PDOs.
+            TETHER_LOGW(TAG,
+                "Failed to read safety module diagnostics (0x2611) via SDO — "
+                "continuing with FSoE enabled (PDO-based safety handling)");
+        } else {
+            TETHER_LOGE(TAG,
+                "Failed to read safety module diagnostics (0x2611) via SDO — "
+                "cannot verify safety state, aborting activation");
+            Tether::Examples::stopHostMasterSession(master, session);
+            return 2;
+        }
+    }
+
+    if (safety.isInSafeState()) {
+        if (enable_fsoe) {
+            // FSoE is enabled — the drive is expected to start in safe
+            // state.  The FSoE master will bring it out of safe state
+            // once the safety protocol reaches the Data state.  Log the
+            // state and continue; do NOT abort.
+            TETHER_LOGI(TAG,
+                "Drive is in SAFE STATE (safety function active, motion "
+                "inhibited) — FSoE is %s (0x2620:2=%u) — continuing; "
+                "the FSoE master will clear the safe state once the "
+                "safety protocol reaches the Data state",
+                safety.fsoeStateSummary(),
+                static_cast<unsigned>(safety.safe_fieldbus));
+        } else {
+            // FSoE is disabled — there is no mechanism to clear the safe
+            // state, so enabling the drive would be futile.  Abort.
+            TETHER_LOGE(TAG,
+                "Drive is in SAFE STATE (safety function active, motion "
+                "inhibited) and FSoE is disabled (--no-fsoe) — there is "
+                "no mechanism to clear the safe state, refusing to "
+                "activate drive, triggering shutdown");
+            Tether::Examples::stopHostMasterSession(master, session);
+            return 2;
+        }
+    } else {
+        TETHER_LOGI(TAG,
+            "Safety check passed: safety module reports motion allowed");
+    }
+
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -951,13 +1043,13 @@ int main(int argc, char** argv) {
     if (!parseArgs(argc, argv, args)) return 1;
 
     if (args.debug == "help") {
-        std::cout << "Available --debug flags (comma-separated):\n"
-                  << "  fsoe           High-level FSoE protocol trace\n"
-                  << "  fsoe-frame     Decoded FSoE PDO struct fields (on change)\n"
-                  << "  fsoe-raw       FSoE protocol trace + raw frame hex dumps (on change)\n"
-                  << "  fsoe-wire      Every-cycle PDO wire dumps (firehose)\n"
-                  << "  fsoe-sequence  Per-cycle frame accept/reject + state change summary\n"
-                  << "  fsoe-crc       CRC parameters used for TX build and RX check\n";
+        std::cout << "Available --debug flags (comma-separated):\n";
+        for (const auto& info : EtherCAT::debug::allDebugFlags()) {
+            std::cout << "  " << info.name << "\n      " << info.description << "\n";
+        }
+        std::cout << "\nFilter syntax:\n"
+                  << "  --debug flagname:(slaves:0,2,5),otherflag:(slaves:1-3)\n"
+                  << "  (default: pass-all for every flag)\n";
         return 0;
     }
 
@@ -993,10 +1085,11 @@ int main(int argc, char** argv) {
     // --- Configure mailbox with SOMANET ESI values ---
     // The SOMANET_CiA_402_v5.1.9.xml ESI defines the mailbox sync managers
     // with 1024-byte buffers at 0x1000 (SM0, M→S write) and 0x1400 (SM1,
-    // S→M read), supporting CoE + FoE.  These values are provided by the
-    // Synapticon driver header (tether/drives/Synapticon.hpp) and are used
-    // here instead of relying on SII EEPROM auto-configuration so the
-    // correct mailbox geometry is always used for SOMANET drives.
+    // S→M read), supporting CoE + FoE.  In practice the drive firmware only
+    // accepts 512-byte buffers, so kMailboxWriteSize/kMailboxReadSize are
+    // overridden to 512 above.  These values are used instead of relying on
+    // SII EEPROM auto-configuration so the correct mailbox geometry is
+    // always used for SOMANET drives.
     {
         if (!master.ethercatMaster().discoverSlaves()) {
             TETHER_LOGW(TAG, "No slaves discovered during pre-config scan");
@@ -1006,6 +1099,19 @@ int main(int argc, char** argv) {
             TETHER_LOGE(TAG, "Timed out waiting for slave %u", slave_idx);
             Tether::Examples::stopHostMasterSession(master, session);
             return 2;
+        }
+
+        // --- Apply EtherCAT framework debug flags ---
+        // The --debug string may contain both FSoE-specific flags (fsoe,
+        // fsoe-frame, etc.) and EtherCAT framework flags (rx-pdo, coe-reads,
+        // al-state, etc.).  The FSoE flags are parsed separately below via
+        // string search; the framework flags are applied here via the shared
+        // ExampleHelpers parser, which supports per-slave filter syntax.
+        {
+            const auto debug_flags =
+                Tether::Examples::parseDebugFlags(args.debug);
+            Tether::Examples::applyDebugFlags(
+                debug_flags, master.ethercatMaster(), TAG);
         }
 
         // --- Slave identity verification is intentionally skipped ---
@@ -1120,82 +1226,16 @@ int main(int argc, char** argv) {
         TETHER_LOGI(TAG, "Slave %u transitioned to PRE_OP", slave_idx);
     }
 
-    // --- Pre-activation safety check: read 0x2611 Safety Module input diagnostics ---
-    // Object 0x2611 (per Synapticon documentation) reports the state of the
-    // safety module: 0 = safe state (safety function active, torque inhibited),
-    // 1 = not safe state (motion allowed).
-    //
-    // When FSoE is enabled, the drive *starts* in safe state (STO active by
-    // default) and the FSoE master brings it out of safe state once the safety
-    // protocol reaches the Data state.  Aborting here would prevent the FSoE
-    // connection from ever establishing, so we only abort on safe state when
-    // FSoE is disabled (--no-fsoe) — in that case there is no mechanism to
-    // clear the safe state and enabling the drive would be futile.
-    {
-        auto& slave = master.ethercatMaster().slave(slave_idx);
-        const auto safety = EtherCAT::Drives::Synapticon::readSafetyModuleState(slave);
-
-        TETHER_LOGI(TAG,
-            "Safety module diagnostics (0x2611): input1=%u input2=%u -> %s",
-            static_cast<unsigned>(safety.input1),
-            static_cast<unsigned>(safety.input2),
-            safety.stateSummary());
-
-        // 0x2620:2 "Safe fieldbus" reports whether the FSoE connection is
-        // active on the drive.  Logged up front so the operator can see the
-        // FSoE state regardless of the safety verdict below.
-        TETHER_LOGI(TAG,
-            "FSoE active indicator (0x2620:2 \"Safe fieldbus\"): raw=%u -> %s",
-            static_cast<unsigned>(safety.safe_fieldbus),
-            safety.fsoeStateSummary());
-
-        if (!safety.ok) {
-            if (args.enable_fsoe) {
-                // SDO read failed, but FSoE is enabled — the safety module
-                // might be in a state where SDO access is temporarily
-                // unavailable.  Continue anyway; the FSoE protocol will
-                // handle the safety state via PDOs.
-                TETHER_LOGW(TAG,
-                    "Failed to read safety module diagnostics (0x2611) via SDO — "
-                    "continuing with FSoE enabled (PDO-based safety handling)");
-            } else {
-                TETHER_LOGE(TAG,
-                    "Failed to read safety module diagnostics (0x2611) via SDO — "
-                    "cannot verify safety state, aborting activation");
-                Tether::Examples::stopHostMasterSession(master, session);
-                return 2;
-            }
-        }
-
-        if (safety.isInSafeState()) {
-            if (args.enable_fsoe) {
-                // FSoE is enabled — the drive is expected to start in safe
-                // state.  The FSoE master will bring it out of safe state
-                // once the safety protocol reaches the Data state.  Log the
-                // state and continue; do NOT abort.
-                TETHER_LOGI(TAG,
-                    "Drive is in SAFE STATE (safety function active, motion "
-                    "inhibited) — FSoE is %s (0x2620:2=%u) — continuing; "
-                    "the FSoE master will clear the safe state once the "
-                    "safety protocol reaches the Data state",
-                    safety.fsoeStateSummary(),
-                    static_cast<unsigned>(safety.safe_fieldbus));
-            } else {
-                // FSoE is disabled — there is no mechanism to clear the safe
-                // state, so enabling the drive would be futile.  Abort.
-                TETHER_LOGE(TAG,
-                    "Drive is in SAFE STATE (safety function active, motion "
-                    "inhibited) and FSoE is disabled (--no-fsoe) — there is "
-                    "no mechanism to clear the safe state, refusing to "
-                    "activate drive, triggering shutdown");
-                Tether::Examples::stopHostMasterSession(master, session);
-                return 2;
-            }
-        } else {
-            TETHER_LOGI(TAG,
-                "Safety check passed: safety module reports motion allowed");
-        }
-    }
+    // --- Pre-activation safety check (disabled) ---
+    // The Synapticon drive does not expose 0x2611 / 0x2620:2 via SDO on this
+    // firmware, causing "Object does not exist" aborts.  The FSoE protocol
+    // handles safety state via PDOs, so this SDO-based pre-check is not
+    // required.  Re-enable by uncommenting the call below.
+    // {
+    //     const int safety_rc = preActivationSafetyCheck(
+    //         master, session, slave_idx, args.enable_fsoe);
+    //     if (safety_rc != 0) return safety_rc;
+    // }
 
     // --- Read FSoE safety address (0xF980:1) for verification ---
     // Object 0xF980:1 contains the safety address configured on the drive.
@@ -1286,41 +1326,39 @@ int main(int argc, char** argv) {
     auto& drive = master.ensureDrive(slave_idx);
     drive.setSDOTimeout(kSdoTimeoutMs);
 
-    // Set operating mode via SDO while in PRE_OP (before PDO mapping)
-    if (!drive.setOperatingMode(CiA402::OperatingMode::CyclicSyncTorque)) {
-        TETHER_LOGE(TAG, "Failed to set operating mode to CST");
-        master.stopDistributedClocks();
-        Tether::Examples::stopHostMasterSession(master, session);
-        return 3;
-    }
+    // Operating mode (CST) is set via the PDO buffer in the cyclic callback
+    // (SineTorqueController::update writes rx->modes_of_operation).  The
+    // Synapticon drive does not expose 0x6060 via SDO, so we skip the SDO
+    // write entirely and rely on PDO-based mode setting.
+    //
+    // The PDO offset for modes_of_operation is configured below, after PDO
+    // buffer sizes are known (FSoE vs. non-FSoE paths differ).
 
     if (args.enable_fsoe) {
         // Combined FSoE + motion PDO mapping via multi-PDO assignment.
-        // IMPORTANT: FSoE PDOs (0x1700/0x1B00) are placed FIRST, motion PDOs
-        // (0x1600/0x1A00) SECOND.  This is a workaround for a Synapticon
-        // Circulo EtherCAT chip bug that zeros the last word of the SM
-        // buffer.  If the FSoE PDO were last, the ConnectionID (final word
-        // of the FSoE frame) would be zeroed and the slave would reject
-        // every frame.
+        // Motion PDOs (0x1600/0x1A00) are placed FIRST, FSoE PDOs
+        // (0x1700/0x1B00) SECOND — matching the ESI-defined PDO order.
+        // The drive rejects mappings where FSoE PDOs come before motion PDOs
+        // with AL_STATUS_CODE 0x0025 (Invalid output mapping).
         const auto assignment =
             EtherCAT::Drives::Synapticon_pdo::makePDOAssignment(
-                {EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.index,
-                 EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.index},
-                {EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.index,
-                 EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.index});
+                {EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.index,
+                 EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.index},
+                {EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.index,
+                 EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.index});
 
         TETHER_LOGI(TAG,
-            "Transitioning to OP with combined FSoE+CST PDO mapping: "
-            "SM2=RxPDO 0x1700+0x1600 (%u+%u=%u bytes), "
-            "SM3=TxPDO 0x1B00+0x1A00 (%u+%u=%u bytes)",
-            EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.size,
+            "Transitioning to OP with combined CST+FSoE PDO mapping: "
+            "SM2=RxPDO 0x1600+0x1700 (%u+%u=%u bytes), "
+            "SM3=TxPDO 0x1A00+0x1B00 (%u+%u=%u bytes)",
             EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.size,
-            static_cast<uint16_t>(EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.size +
-                                  EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.size),
-            EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.size,
+            EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.size,
+            static_cast<uint16_t>(EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.size +
+                                  EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.size),
             EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.size,
-            static_cast<uint16_t>(EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.size +
-                                  EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.size));
+            EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.size,
+            static_cast<uint16_t>(EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.size +
+                                  EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.size));
 
         // Note: Safety parameters (0x2620, 0x2641, etc.) are configured on the
         // drive via OBLAC Drives and cannot be written via SDO (error 0x08000021
@@ -1425,7 +1463,7 @@ int main(int argc, char** argv) {
         {
             uint8_t* rx_buf = static_cast<uint8_t*>(drive.getRxPDOBuffer());
             // Controlword is at offset kMotionRxPDOOffset in the combined PDO
-            // (FSoE PDO comes first, motion PDO second)
+            // (motion PDO comes first, FSoE PDO second)
             rx_buf[kMotionRxPDOOffset + 0] = 0x0F;  // Controlword low byte
             rx_buf[kMotionRxPDOOffset + 1] = 0x00;  // Controlword high byte
             TETHER_LOGI(TAG, "Wrote Controlword=0x000F to RxPDO offset %zu",
@@ -1455,7 +1493,7 @@ int main(int argc, char** argv) {
         //   bytes 9-10: ConnectionID = 0x0006
         {
             uint8_t* rx_buf = static_cast<uint8_t*>(drive.getRxPDOBuffer());
-            // FSoE PDO is at offset 0 (FSoE comes first, motion second)
+            // FSoE PDO is at offset kFSoERxPDOOffset (motion PDO comes first, FSoE second)
             uint8_t* fsoe_buf = rx_buf + kFSoERxPDOOffset;
 
             // Fill FSoE region with known pattern
@@ -1651,7 +1689,7 @@ int main(int argc, char** argv) {
         config.drive.txpdo_index = EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.index;
         config.drive.rxpdo_size = EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.size;
         config.drive.txpdo_size = EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.size;
-        // Operating mode already set above; set to 0 to skip redundant SDO write
+        // Operating mode is set via PDO, not SDO — skip configureDrive's SDO write
         config.drive.operating_mode = 0;
         config.drive.sdo_timeout_ms = kSdoTimeoutMs;
         config.drive.auto_configure_mailbox = false;
@@ -1663,6 +1701,22 @@ int main(int argc, char** argv) {
             Tether::Examples::stopHostMasterSession(master, session);
             return 3;
         }
+    }
+
+    // --- Configure PDO-based operating mode offset ---
+    // The modes_of_operation (0x6060) field is in the motion RxPDO (0x1600)
+    // at offset 2 (after uint16_t controlword).  The motion PDO is at
+    // kMotionRxPDOOffset in the combined buffer (0 in both paths).
+    {
+        const size_t motion_rx_offset =
+            args.enable_fsoe ? kMotionRxPDOOffset : 0;
+        const size_t opmode_offset = motion_rx_offset +
+            offsetof(EtherCAT::Drives::Synapticon_pdo::SOMANET_RxPDO_1600,
+                    modes_of_operation);
+        drive.setOpmodePDOOffset(static_cast<int>(opmode_offset));
+        TETHER_LOGI(TAG,
+            "Operating mode PDO offset: %zu (motion_rx=%zu, opmode=%zu)",
+            opmode_offset, motion_rx_offset, opmode_offset);
     }
 
     // --- Read motor rated torque (0x6076) for Nm→per-mille conversion ---
@@ -1719,30 +1773,17 @@ int main(int argc, char** argv) {
     std::unique_ptr<FSoEMain> fsoe_main;
 
     if (args.enable_fsoe) {
-        // Debug flags:
-        //   fsoe        — high-level protocol trace ("TX Reset(0x2A): ...",
-        //                 "RX Session(0x4E): slave accepted session, ...")
-        //   fsoe-frame  — decode device-specific FSoE PDO structs into named
-        //                 fields (cmd, conn_id, CRCs, safety flags, safe I/O)
-        //   fsoe-raw    — protocol trace + raw frame hex dumps via the
-        //                 txFrameEvents/rxFrameEvents listeners
-        //   fsoe-master — deprecated alias for fsoe-raw (backward compat)
-        //   fsoe-sequence — per-cycle frame accept/reject + state change summary
-        //   fsoe-crc     — CRC parameters used for TX build and RX check
-        //                 (start_crc, seq, CRC0, fallback info)
-        const bool debug_fsoe =
-            (args.debug.find("fsoe") != std::string::npos);
-        const bool debug_fsoe_frame =
-            (args.debug.find("fsoe-frame") != std::string::npos);
-        const bool debug_fsoe_raw =
-            (args.debug.find("fsoe-raw") != std::string::npos ||
-             args.debug.find("fsoe-master") != std::string::npos);
-        const bool debug_fsoe_wire =
-            (args.debug.find("fsoe-wire") != std::string::npos);
-        const bool debug_fsoe_sequence =
-            (args.debug.find("fsoe-sequence") != std::string::npos);
-        const bool debug_fsoe_crc =
-            (args.debug.find("fsoe-crc") != std::string::npos);
+        // FSoE debug flags are now part of the Tether debug framework and
+        // support per-slave filtering.  They are applied via applyDebugFlags()
+        // above (same call as the EtherCAT framework flags).  Query them here
+        // for the target slave.
+        const auto& dbg = master.ethercatMaster().debugFlags();
+        const bool debug_fsoe         = dbg.isEnabled("fsoe",         slave_idx);
+        const bool debug_fsoe_frame   = dbg.isEnabled("fsoe-frame",   slave_idx);
+        const bool debug_fsoe_raw     = dbg.isEnabled("fsoe-raw",     slave_idx);
+        const bool debug_fsoe_wire    = dbg.isEnabled("fsoe-wire",    slave_idx);
+        const bool debug_fsoe_sequence= dbg.isEnabled("fsoe-sequence",slave_idx);
+        const bool debug_fsoe_crc     = dbg.isEnabled("fsoe-crc",     slave_idx);
 
         EtherCAT::Drives::Synapticon::SafeMotion::MainConfig main_config;
         main_config.feature_enabled = true;

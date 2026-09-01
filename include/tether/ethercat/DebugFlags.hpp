@@ -87,6 +87,14 @@ struct EtherCATSlaveDebugFlags {
     bool verifySafeOp = false;
     bool pdoSm = false;
     bool dc = false;
+#ifdef TETHER_ENABLE_FSOE
+    bool fsoe = false;
+    bool fsoeFrame = false;
+    bool fsoeRaw = false;
+    bool fsoeWire = false;
+    bool fsoeSequence = false;
+    bool fsoeCrc = false;
+#endif
 };
 
 /**
@@ -115,6 +123,16 @@ public:
     bool pdoSm = false;
     bool dc = false;
 
+#ifdef TETHER_ENABLE_FSOE
+    // FSoE-specific debug flags (per-slave filterable)
+    bool fsoe = false;
+    bool fsoeFrame = false;
+    bool fsoeRaw = false;
+    bool fsoeWire = false;
+    bool fsoeSequence = false;
+    bool fsoeCrc = false;
+#endif
+
     SlaveFilter rxPDOFilt;
     SlaveFilter txPDOFilt;
     SlaveFilter stateMachineFilt;
@@ -131,6 +149,14 @@ public:
     SlaveFilter verifySafeOpFilt;
     SlaveFilter pdoSmFilt;
     SlaveFilter dcFilt;
+#ifdef TETHER_ENABLE_FSOE
+    SlaveFilter fsoeFilt;
+    SlaveFilter fsoeFrameFilt;
+    SlaveFilter fsoeRawFilt;
+    SlaveFilter fsoeWireFilt;
+    SlaveFilter fsoeSequenceFilt;
+    SlaveFilter fsoeCrcFilt;
+#endif
 
     // Gate for conditional debugging (nullptr = always active, current behavior)
     DebugGate* gate_ = nullptr;
@@ -143,7 +169,11 @@ public:
     bool isAnyFlagEnabled() const {
         return rxPDO || txPDO || stateMachine || txPackets || rxPackets ||
                fmmu || siiEeprom || eeprom || coeReads || coeWrites || coeRxPackets ||
-               coeTxPackets || verifyPreOp || verifySafeOp || pdoSm || dc;
+               coeTxPackets || verifyPreOp || verifySafeOp || pdoSm || dc
+#ifdef TETHER_ENABLE_FSOE
+               || fsoe || fsoeFrame || fsoeRaw || fsoeWire || fsoeSequence || fsoeCrc
+#endif
+               ;
     }
 
     /**
@@ -172,6 +202,14 @@ public:
         s.verifySafeOp  = verifySafeOp && verifySafeOpFilt.allows(slave_index);
         s.pdoSm         = pdoSm && pdoSmFilt.allows(slave_index);
         s.dc            = dc && dcFilt.allows(slave_index);
+#ifdef TETHER_ENABLE_FSOE
+        s.fsoe          = fsoe && fsoeFilt.allows(slave_index);
+        s.fsoeFrame     = fsoeFrame && fsoeFrameFilt.allows(slave_index);
+        s.fsoeRaw       = fsoeRaw && fsoeRawFilt.allows(slave_index);
+        s.fsoeWire      = fsoeWire && fsoeWireFilt.allows(slave_index);
+        s.fsoeSequence  = fsoeSequence && fsoeSequenceFilt.allows(slave_index);
+        s.fsoeCrc       = fsoeCrc && fsoeCrcFilt.allows(slave_index);
+#endif
         return s;
     }
 
