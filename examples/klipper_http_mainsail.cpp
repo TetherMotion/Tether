@@ -1,52 +1,148 @@
 /**
  * @file klipper_http_mainsail.cpp
- * @brief Example: Run Tether as a Moonraker replacement for Mainsail/Fluidd.
+ * @brief Example: Simulated 3D printer with HTTP/WebSocket server for Mainsail/Fluidd.
  *
  * @details
- * This example demonstrates the new transport-agnostic architecture:
+ * This example runs a fully simulated 3D printer that can be controlled from
+ * Mainsail or Fluidd via the Moonraker HTTP/WebSocket API. It combines:
  *
- *   KlippyServer (business logic)
- *     |
- *     +-- KlippyUdsServer  (UDS transport, for Klipper companion processes)
- *     +-- KlippyHttpServer (HTTP/WebSocket transport, for Mainsail/Fluidd)
+ *   - KlippyInstance: full G-code execution, printer object model, print control
+ *   - SingleZoneOven thermal models (from tether_simulation) for extruder and
+ *     bed heaters, with PID control and realistic warm-up / cool-down dynamics
+ *   - G-code print playback from the virtual SD card with live toolhead
+ *     position updates and progress tracking
+ *   - KlippyHttpServer: native HTTP/WebSocket transport for Mainsail/Fluidd
  *
- * The example:
- *   1. Creates a single KlippyServer instance with all business logic.
- *   2. Wraps it in a KlippyUdsServer for Klipper companion compatibility.
- *   3. Creates a KlippyHttpServer that shares the same KlippyServer.
- *   4. Starts both transports.
- *   5. Optionally serves Mainsail static assets from a web root directory.
+ * The printer simulates:
+ *   - PID-controlled heaters with realistic thermal dynamics (warm-up/cool-down)
+ *   - G-code print playback with live toolhead position updates
+ *   - Print progress, duration, and filament usage tracking
+ *   - Fan, probe, and endstop peripherals
  *
  * Usage:
  *   klipper_http_mainsail [--port PORT] [--uds-path PATH] [--web-root DIR]
- *                         [--gcodes-root DIR] [--api-key KEY]
+ *                         [--gcodes-root DIR] [--api-key KEY] [--no-auth]
+ *                         [--sim-tick-ms MS]
  *
- * Once running, point Mainsail at http://localhost:PORT/ and it will
- * connect via WebSocket as if talking to a real Moonraker instance.
+ * Once running, point Mainsail at http://localhost:PORT/ and it will connect
+ * via WebSocket as if talking to a real Moonraker instance. You can:
+ *   - Set heater targets and watch temperatures rise/fall
+ *   - Start prints from the G-code browser (a sample file is generated)
+ *   - Send G-code commands from the console
+ *   - Monitor toolhead position, print progress, and fan speed
  *
  * Docker deployment:
  *   See docs/MainsailDocker.md for a complete Docker Compose setup that
  *   runs this example alongside a Mainsail container.
  */
 
-#include "tether/klipper/klippy/KlippyServer.hpp"
-#include "tether/klipper/klippy/KlippyUdsServer.hpp"
+#include "tether/klipper/klippy/KlippyInstance.hpp"
 #include "tether/klipper/http/KlippyHttpServer.hpp"
+#include "tether/simulation/systems/thermal/SingleZoneOven.hpp"
 #include "tether/utils/SignalHandler.hpp"
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 
 using namespace tether::klipper::klippy;
 using namespace tether::klipper::http;
+using namespace tether::klipper::objects;
 
-static std::atomic<bool> g_running{true};
+// ============================================================================
+// Thermal simulation
+// ============================================================================
+
+/// @brief Thermal plant for one heater, backed by a SingleZoneOven model.
+///
+/// The oven dynamics are:
+///   C_th * dT/dt = eta * Q - (T - T_amb) / R_th
+/// where Q is the heater power in Watts.  The PID controller in the Heater
+/// class produces a PWM duty cycle in [0, 1]; we scale it by maxPowerW to
+/// obtain Q.
+struct ThermalPlant {
+    Simulation::SingleZoneOven oven;
+    double maxPowerW;
+    double pwm = 0.0;   ///< Last applied PWM duty cycle (0..1)
+    double temp = 25.0; ///< Current plant temperature [°C]
+    double dt;          ///< Simulation time step [s]
+
+    ThermalPlant(double C_th, double R_th, double eta, double T_amb,
+                 double maxPower, double step)
+        : maxPowerW(maxPower), temp(T_amb), dt(step) {
+        oven.setParameter("C_th", C_th);
+        oven.setParameter("R_th", R_th);
+        oven.setParameter("eta", eta);
+        oven.setParameter("T_amb", T_amb);
+    }
+
+    /// Advance the plant by one dt using forward Euler.
+    void step() {
+        double Q = pwm * maxPowerW;
+        auto d = oven.dynamics(0.0, {temp}, {Q});
+        temp += d[0] * dt;
+    }
+};
+
+// ============================================================================
+// G-code sample file generation
+// ============================================================================
+
+/// @brief Generate a sample G-code file that prints a small calibration square.
+/// @param path Full path to the output file.
+/// @param layers Number of print layers to generate.
+static void generateSampleGcode(const std::string& path, int layers) {
+    std::ofstream f(path);
+    if (!f.is_open()) return;
+
+    f << "; Tether simulated print - calibration square\n";
+    f << "; Generated by klipper_http_mainsail example\n\n";
+    f << "G28 ; home all axes\n";
+    f << "M140 S60 ; set bed temperature\n";
+    f << "M104 S210 ; set hotend temperature\n";
+    f << "G1 Z5 F3000 ; lift Z before moving\n";
+    f << "G1 X10 Y10 F3000 ; move to start position\n\n";
+
+    const double layerHeight = 0.2;
+    const double squareSize = 80.0;
+    const double extrudePerSide = 35.0;
+
+    for (int layer = 0; layer < layers; ++layer) {
+        double z = layerHeight * (layer + 1);
+        f << "; --- Layer " << (layer + 1) << " (Z=" << z << ") ---\n";
+        f << std::format("G1 Z{:.2f} F300\n", z);
+        f << std::format("G1 X{:.1f} Y10.0 E{:.1f} F600\n",
+                         10.0 + squareSize, extrudePerSide);
+        f << std::format("G1 X{:.1f} Y{:.1f} E{:.1f}\n",
+                         10.0 + squareSize, 10.0 + squareSize, extrudePerSide);
+        f << std::format("G1 X10.0 Y{:.1f} E{:.1f}\n",
+                         10.0 + squareSize, extrudePerSide);
+        f << std::format("G1 X10.0 Y10.0 E{:.1f}\n", extrudePerSide);
+        f << std::format("; M73 P{}\n",
+                         static_cast<int>(100.0 * (layer + 1) / layers));
+    }
+
+    f << "\n; --- Print complete ---\n";
+    f << "G1 Z10 F3000 ; lift Z\n";
+    f << "G1 X0 Y0 F3000 ; return home\n";
+    f << "M104 S0 ; turn off hotend\n";
+    f << "M140 S0 ; turn off bed\n";
+    f << "M107 ; turn off fan\n";
+}
+
+// ============================================================================
+// Main
+// ============================================================================
 
 static void printUsage(const char* prog) {
     std::printf(
@@ -61,6 +157,7 @@ static void printUsage(const char* prog) {
         "  --logs-root DIR     Log file root (default: /var/log)\n"
         "  --api-key KEY       API key for authentication (default: tether_default_api_key)\n"
         "  --no-auth           Disable authentication\n"
+        "  --sim-tick-ms MS    Simulation tick interval in ms (default: 100)\n"
         "  --help              Show this help message\n"
         "\n"
         "Example:\n"
@@ -80,6 +177,7 @@ int main(int argc, char* argv[]) {
     std::string logsRoot = "/var/log";
     std::string apiKey = "tether_default_api_key";
     bool requireAuth = true;
+    int simTickMs = 100;
 
     // Parse arguments
     for (int i = 1; i < argc; ++i) {
@@ -111,6 +209,9 @@ int main(int argc, char* argv[]) {
             apiKey = nextArg();
         } else if (arg == "--no-auth") {
             requireAuth = false;
+        } else if (arg == "--sim-tick-ms") {
+            simTickMs = std::atoi(nextArg().c_str());
+            if (simTickMs < 10) simTickMs = 10;
         } else {
             std::fprintf(stderr, "Unknown option: %s\n", arg.c_str());
             printUsage(argv[0]);
@@ -119,12 +220,22 @@ int main(int argc, char* argv[]) {
     }
 
     // Install signal handlers
-    Tether::Utils::SignalHandler sig_handler(g_running, false);
+    std::atomic<bool> running{true};
+    Tether::Utils::SignalHandler sig_handler(running, false);
 
-    // Ensure the G-code directory exists
+    // Ensure directories exist
     std::filesystem::create_directories(gcodesRoot);
+    std::filesystem::create_directories(configRoot);
 
-    std::printf("=== Tether Moonraker Replacement ===\n\n");
+    // Generate a sample G-code file so the user can test printing immediately
+    const std::string sampleFile = "tether_calibration_square.gcode";
+    const std::string samplePath =
+        (std::filesystem::path(gcodesRoot) / sampleFile).string();
+    generateSampleGcode(samplePath, 100);
+
+    const double simDt = simTickMs / 1000.0;
+
+    std::printf("=== Tether Simulated 3D Printer (Moonraker Replacement) ===\n\n");
     std::printf("Configuration:\n");
     std::printf("  HTTP port:       %u\n", port);
     std::printf("  UDS path:        %s\n", udsPath.c_str());
@@ -134,49 +245,146 @@ int main(int argc, char* argv[]) {
     std::printf("  Config root:     %s\n", configRoot.c_str());
     std::printf("  Logs root:       %s\n", logsRoot.c_str());
     std::printf("  Auth required:   %s\n", requireAuth ? "yes" : "no");
-    std::printf("  API key:         %s\n\n", apiKey.c_str());
+    std::printf("  API key:         %s\n", apiKey.c_str());
+    std::printf("  Sim tick:        %d ms\n", simTickMs);
+    std::printf("  Sample G-code:   %s\n\n", sampleFile.c_str());
     std::fflush(stdout);
 
     // ------------------------------------------------------------------
-    // Step 1: Create the shared KlippyServer (business logic)
+    // Step 1: Create the KlippyInstance (full G-code + object model + UDS)
     // ------------------------------------------------------------------
-    UdsServerConfig serverCfg;
-    serverCfg.socketPath = udsPath;
-    serverCfg.configFile = configRoot + "/printer.cfg";
+    KlippyInstanceConfig instCfg;
+    instCfg.udsConfig.socketPath = udsPath;
+    instCfg.udsConfig.configFile = configRoot + "/printer.cfg";
+    instCfg.sdcardDir = gcodesRoot;
+    instCfg.configPath = configRoot + "/printer.cfg";
+    instCfg.firmwareVersion = "tether-sim-1.0.0";
 
-    auto server = std::make_unique<KlippyServer>(serverCfg);
-    server->setFileRoot(gcodesRoot);
+    KlippyInstance inst(instCfg);
+    auto& server = inst.server();
 
-    // Set the printer to ready state
-    server->setState(PrinterState::Ready, "Tether printer is ready");
+    // ------------------------------------------------------------------
+    // Step 2: Wire simulated thermal plants (extruder + bed)
+    // ------------------------------------------------------------------
+    // Extruder hotend: small thermal mass, ~50W heater, reaches 250°C.
+    //   Time constant ≈ R_th * C_th = 5.0 * 10 = 50 s
+    //   Steady-state at full power: T_amb + eta * P * R = 25 + 0.9*50*5 = 250°C
+    auto extruderPlant = std::make_shared<ThermalPlant>(
+        10.0, 5.0, 0.9, 25.0, 50.0, simDt);
 
-    // Register some sample data so Mainsail has something to display
-    server->registerWebcam("webcam1", "http://localhost:8080/?action=stream");
-    server->registerPowerDevice("printer", "on");
-    server->registerPowerDevice("lights", "off");
-    server->recordTemperature("extruder", 25.0, 0.0);
-    server->recordTemperature("heater_bed", 22.0, 0.0);
-    server->emitGcodeResponse("// Tether Moonraker replacement started");
+    // Heater bed: larger thermal mass, ~150W heater, reaches ~90°C.
+    //   Time constant ≈ 0.5 * 200 = 100 s
+    //   Steady-state at full power: 25 + 0.9*150*0.5 = 92.5°C
+    auto bedPlant = std::make_shared<ThermalPlant>(
+        200.0, 0.5, 0.9, 25.0, 150.0, simDt);
+
+    // Create Heater objects.  The sensor reads from the plant temperature;
+    // the PWM write stores the duty cycle for the next plant step.
+    auto extruderHeater = std::make_shared<Heater>(
+        0,
+        [extruderPlant](double pwm) { extruderPlant->pwm = pwm; },
+        [extruderPlant]() { return extruderPlant->temp; });
+    extruderHeater->setPIDParams({14.0, 0.1, 50.0, 100.0, 0.0, 1.0});
+    extruderHeater->setControlInterval(simDt);
+
+    auto bedHeater = std::make_shared<Heater>(
+        1,
+        [bedPlant](double pwm) { bedPlant->pwm = pwm; },
+        [bedPlant]() { return bedPlant->temp; });
+    bedHeater->setPIDParams({10.0, 0.05, 30.0, 100.0, 0.0, 1.0});
+    bedHeater->setControlInterval(simDt);
+
+    // Wire heaters into the instance.  setExtruderHeater refreshes the
+    // extruder printer object automatically; setHeaterBed does NOT, so we
+    // recreate the heater_bed object manually.
+    inst.setExtruderHeater(extruderHeater);
+    inst.setHeaterBed(bedHeater);
+    auto newBedObj = std::make_shared<HeaterBedObject>(bedHeater);
+    server.unregisterObject("heater_bed");
+    server.registerObject(newBedObj);
+
+    // ------------------------------------------------------------------
+    // Step 3: Wire fan, probe, and endstops
+    // ------------------------------------------------------------------
+    auto fan = std::make_shared<Fan>(2, [](double) {});
+    inst.setFan(fan);
+
+    auto probe = std::make_shared<Probe>(3, []() { return false; });
+    inst.setProbe(probe);
+
+    auto xEndstop = std::make_shared<Endstop>(4, []() { return false; });
+    auto yEndstop = std::make_shared<Endstop>(5, []() { return false; });
+    auto zEndstop = std::make_shared<Endstop>(6, []() { return false; });
+    inst.setEndstop("x", xEndstop);
+    inst.setEndstop("y", yEndstop);
+    inst.setEndstop("z", zEndstop);
+
+    // ------------------------------------------------------------------
+    // Step 4: Set initial printer state
+    // ------------------------------------------------------------------
+    server.setState(PrinterState::Ready, "Tether simulated printer is ready");
+    inst.toolheadObject()->setHomedAxes("xyz");
+    inst.toolheadObject()->setStatus("Idle");
+    inst.toolheadObject()->setMaxVelocity(3000.0);
+    inst.toolheadObject()->setMaxAccel(3000.0);
+    inst.toolheadObject()->setMaxAccelToDecel(1500.0);
+    inst.mcuObject()->setMcuVersion("tether-sim-mcu-1.0.0");
+    inst.mcuObject()->setFreq(180000000);
+
+    // Register a webcam and power devices for Mainsail display
+    server.registerWebcam("webcam1", "http://localhost:8080/?action=stream");
+    server.registerPowerDevice("printer", "on");
+    server.registerPowerDevice("lights", "off");
+
+    server.emitGcodeResponse("// Tether simulated printer started");
+    server.emitGcodeResponse("// Send G-code from Mainsail console or start a print from the file browser.");
 
     std::printf("KlippyServer created with %zu endpoints and %zu objects\n",
-                server->listEndpoints().size(),
-                server->listObjects().size());
+                server.listEndpoints().size(),
+                server.listObjects().size());
     std::fflush(stdout);
 
     // ------------------------------------------------------------------
-    // Step 2: Create the UDS transport (for Klipper companion processes)
+    // Step 5: Override print-start endpoints to select the file first.
+    //
+    // The default print-start handler calls sdcard_->startPrint() but does
+    // not select the file (the handler signature has no filename parameter).
+    // Mainsail sends the filename via POST /printer/print/start?filename=...
+    // so we override the endpoint to extract it, call selectFile(), then
+    // startPrint().
     // ------------------------------------------------------------------
-    KlippyUdsServer udsTransport(*server, serverCfg);
+    auto& sdcard = inst.sdcard();
+    auto printStats = inst.printStatsObject();
+    auto idleTimeout = inst.idleTimeoutObject();
+    auto toolhead = inst.toolheadObject();
+    auto displayStatus = inst.displayStatusObject();
 
-    if (!udsTransport.start()) {
-        std::fprintf(stderr, "Failed to start UDS transport at %s\n",
-                     udsPath.c_str());
-        return 1;
-    }
-    std::printf("UDS transport listening at %s\n", udsPath.c_str());
+    auto handlePrintStartWithFile = [&server, &sdcard, printStats,
+                                     idleTimeout](const JsonValue& params) {
+        std::string filename;
+        if (params.isObject()) {
+            auto* fn = params.find("filename");
+            if (fn && fn->isString()) filename = fn->asString();
+        }
+        if (!filename.empty()) {
+            sdcard.selectFile(filename);
+            printStats->setFilename(filename);
+        }
+        sdcard.startPrint();
+        printStats->setState("printing");
+        idleTimeout->setState("Printing");
+        server.setState(PrinterState::Printing,
+                        filename.empty() ? "Print started"
+                                         : "Printing: " + filename);
+        std::map<std::string, JsonValue> result;
+        result["result"] = JsonValue("ok");
+        return JsonValue(result);
+    };
+    server.registerEndpoint("printer/start", handlePrintStartWithFile);
+    server.registerEndpoint("printer/print/start", handlePrintStartWithFile);
 
     // ------------------------------------------------------------------
-    // Step 3: Create the HTTP/WebSocket transport (for Mainsail/Fluidd)
+    // Step 6: Create the HTTP/WebSocket transport (shares KlippyServer)
     // ------------------------------------------------------------------
     HttpServerConfig httpCfg;
     httpCfg.port = port;
@@ -186,14 +394,24 @@ int main(int argc, char* argv[]) {
     httpCfg.configRoot = configRoot;
     httpCfg.logsRoot = logsRoot;
     httpCfg.webRoot = webRoot;
-    // Trust localhost for development
-    httpCfg.trustedClients = {"127.0.0.1", "::1", "172.16.0.0/12", "192.168.0.0/16"};
+    httpCfg.trustedClients = {"127.0.0.1", "::1",
+                              "172.16.0.0/12", "192.168.0.0/16"};
 
-    auto httpServer = std::make_shared<KlippyHttpServer>(*server, httpCfg);
+    auto httpServer = std::make_shared<KlippyHttpServer>(server, httpCfg);
+
+    // ------------------------------------------------------------------
+    // Step 7: Start UDS (via instance) + HTTP
+    // ------------------------------------------------------------------
+    if (!inst.start()) {
+        std::fprintf(stderr, "Failed to start UDS transport at %s\n",
+                     udsPath.c_str());
+        return 1;
+    }
+    std::printf("UDS transport listening at %s\n", udsPath.c_str());
 
     if (!httpServer->start()) {
         std::fprintf(stderr, "Failed to start HTTP server on port %u\n", port);
-        udsTransport.stop();
+        inst.stop();
         return 1;
     }
     std::printf("HTTP/WebSocket server listening on port %u\n", port);
@@ -206,15 +424,139 @@ int main(int argc, char* argv[]) {
     std::fflush(stdout);
 
     // ------------------------------------------------------------------
-    // Step 4: Run until interrupted
+    // Step 8: Simulation thread
+    //
+    // Runs two loops at the configured tick rate:
+    //   - Thermal: step the oven plants and run heater PID control
+    //   - Print: stream G-code lines from the virtual SD card and execute
+    //             them, updating print stats and toolhead position
     // ------------------------------------------------------------------
-    while (g_running.load()) {
+    std::thread simThread([&]() {
+        const auto tickDur = std::chrono::milliseconds(simTickMs);
+        auto lastTick = std::chrono::steady_clock::now();
+        auto printStartTime = std::chrono::steady_clock::now();
+        bool wasPrinting = false;
+        int tickCount = 0;
+
+        // Print streaming: execute a few G-code lines per tick so the
+        // toolhead position animates smoothly in the Mainsail dashboard.
+        const int linesPerTick = 2;
+
+        while (running.load()) {
+            std::this_thread::sleep_for(tickDur);
+            auto now = std::chrono::steady_clock::now();
+            double elapsed = std::chrono::duration<double>(now - lastTick).count();
+            lastTick = now;
+            tickCount++;
+
+            // --- Thermal simulation ---
+            {
+                std::lock_guard<std::recursive_mutex> lock(inst.mutex());
+                extruderHeater->control();  // PID reads temp, writes PWM
+                extruderPlant->step();      // Advance plant by dt
+
+                bedHeater->control();
+                bedPlant->step();
+
+                // Record temperatures for the Mainsail temperature graph
+                // (server/temperature_store endpoint).
+                server.recordTemperature("extruder",
+                                         extruderHeater->currentTemp(),
+                                         extruderHeater->target());
+                server.recordTemperature("heater_bed",
+                                         bedHeater->currentTemp(),
+                                         bedHeater->target());
+            }
+
+            // --- Print simulation ---
+            {
+                std::lock_guard<std::recursive_mutex> lock(inst.mutex());
+
+                bool isActive = sdcard.isActive();
+                bool isPaused = sdcard.isPaused();
+
+                if (isActive && !isPaused) {
+                    if (!wasPrinting) {
+                        printStartTime = std::chrono::steady_clock::now();
+                        wasPrinting = true;
+                        toolhead->setStatus("Printing");
+                    }
+
+                    // Stream a few G-code lines from the file
+                    auto lines = sdcard.readChunk(linesPerTick);
+                    for (const auto& line : lines) {
+                        if (line.empty() || line[0] == ';') continue;
+                        inst.executeGcode(line);
+                    }
+
+                    // Update print statistics
+                    double printDur =
+                        std::chrono::duration<double>(
+                            now - printStartTime).count();
+                    printStats->setPrintDuration(printDur);
+                    printStats->setTotalDuration(printDur);
+                    double progress = sdcard.progress();
+                    printStats->setProgress(progress);
+                    displayStatus->setProgress(progress);
+
+                    // Estimate filament used from progress
+                    // (sample file extrudes ~35 mm per side × 4 × 100 layers)
+                    const double nominalFilamentMm = 14000.0;
+                    printStats->setFilamentUsed(progress * nominalFilamentMm);
+
+                    // Update layer info
+                    int currentLayer = static_cast<int>(progress * 100.0);
+                    printStats->setInfoTotalLayer(100);
+                    printStats->setInfoCurrentLayer(
+                        std::min(currentLayer + 1, 100));
+
+                    // Check for print completion (sdcard went inactive
+                    // after being active — EOF reached).
+                    if (!sdcard.isActive()) {
+                        printStats->setState("complete");
+                        printStats->setProgress(1.0);
+                        displayStatus->setProgress(1.0);
+                        toolhead->setStatus("Idle");
+                        idleTimeout->setState("Ready");
+                        server.setState(PrinterState::Ready,
+                                        "Print complete");
+                        server.emitGcodeResponse(
+                            "// Print complete: " + sdcard.filePath());
+                        wasPrinting = false;
+                    }
+                } else if (wasPrinting && !isActive) {
+                    // Print was cancelled or completed externally
+                    wasPrinting = false;
+                    toolhead->setStatus("Idle");
+                }
+            }
+
+            // --- System stats (every 5 ticks = ~0.5 s) ---
+            if (tickCount % 5 == 0) {
+                std::lock_guard<std::recursive_mutex> lock(inst.mutex());
+                inst.updateSystemStats();
+                // Simulate MCU byte counters
+                inst.updateMcuStats(
+                    1000 + tickCount * 10,
+                    500 + tickCount * 5,
+                    0,
+                    0.002);
+            }
+        }
+    });
+
+    // ------------------------------------------------------------------
+    // Step 9: Run until interrupted
+    // ------------------------------------------------------------------
+    while (running.load()) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
     std::printf("\nShutting down...\n");
+    running.store(false);
+    simThread.join();
     httpServer->stop();
-    udsTransport.stop();
+    inst.stop();
     std::printf("Done.\n");
 
     return 0;
