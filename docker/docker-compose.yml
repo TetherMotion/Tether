@@ -1,0 +1,29 @@
+# docker-compose.yml — Mainsail UI pointing at a host-side Tether instance.
+#
+# Usage:
+#   1. Start Tether on the host:
+#        ./build/bin/klipper_http_mainsail --no-auth --port 7125
+#
+#   2. Start Mainsail:
+#        docker compose -f docker/docker-compose.yml up -d
+#
+#   3. Open http://localhost:8080 in a browser.
+#
+# To change the Tether port, edit mainsail/mainsail-proxy.conf and replace
+# all occurrences of 7125 with your port, then restart the container:
+#   docker compose -f docker/docker-compose.yml restart mainsail
+
+services:
+  mainsail:
+    image: ghcr.io/mainsail-crew/mainsail:latest
+    container_name: tether_mainsail
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./mainsail/mainsail-config.json:/usr/share/nginx/html/config.json
+      - ./mainsail/mainsail-proxy.conf:/etc/nginx/extra-conf.d/proxy.conf
+    extra_hosts:
+      # On Linux, this maps host.docker.internal to the Docker bridge gateway
+      # (typically 172.17.0.1) so the container can reach the host's port 7125.
+      - "host.docker.internal:host-gateway"
