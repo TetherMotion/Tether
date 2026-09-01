@@ -530,6 +530,23 @@ int main(int argc, char* argv[]) {
         (std::filesystem::path(gcodesRoot) / sampleFile).string();
     generateSampleGcode(samplePath, 100);
 
+    // Create empty Mainsail theme files so it doesn't get 404s on startup.
+    // Mainsail probes /server/files/config/.theme/default.json and
+    // maintenance.json as optional theme overrides.
+    {
+        namespace fs = std::filesystem;
+        fs::path themeDir = fs::path(configRoot) / ".theme";
+        std::error_code ec;
+        fs::create_directories(themeDir, ec);
+        for (const char* name : {"default.json", "maintenance.json"}) {
+            fs::path p = themeDir / name;
+            if (!fs::exists(p)) {
+                std::ofstream f(p);
+                if (f.is_open()) f << "{}\n";
+            }
+        }
+    }
+
     const double simDt = simTickMs / 1000.0;
 
     std::printf("=== Tether Simulated 3D Printer (Moonraker Replacement) ===\n\n");
