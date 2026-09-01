@@ -20,7 +20,7 @@
  *   - Fan, probe, and endstop peripherals
  *
  * Usage:
- *   klipper_http_mainsail [--port PORT] [--uds-path PATH]
+ *   klipper_http_mainsail [--port PORT] [--with-moonraker] [--uds-path PATH]
  *                         [--mainsail DIR] [--fluidd DIR] [--web-root DIR]
  *                         [--gcodes-root DIR] [--api-key KEY] [--no-auth]
  *                         [--sim-tick-ms MS]
@@ -336,9 +336,15 @@ int main(int argc, char* argv[]) {
         .default_value(7125)
         .help("HTTP listen port (default: 7125)");
 
+    program.add_argument("--with-moonraker")
+        .implicit_value(true)
+        .default_value(false)
+        .help("Enable UDS transport for a separate Moonraker process "
+              "(disabled by default; the built-in HTTP server replaces Moonraker)");
+
     program.add_argument("--uds-path")
         .default_value(std::string("/tmp/klippy_uds"))
-        .help("UDS socket path (default: /tmp/klippy_uds)");
+        .help("UDS socket path (only used with --with-moonraker)");
 
     program.add_argument("--web-root")
         .default_value(std::string(""))
@@ -388,6 +394,7 @@ int main(int argc, char* argv[]) {
     }
 
     const auto port = static_cast<uint16_t>(program.get<int>("--port"));
+    const bool withMoonraker = program.get<bool>("--with-moonraker");
     const auto udsPath = program.get<std::string>("--uds-path");
     auto webRoot = program.get<std::string>("--web-root");
     const auto mainsailDir = program.get<std::string>("--mainsail");
@@ -454,7 +461,9 @@ int main(int argc, char* argv[]) {
     std::printf("=== Tether Simulated 3D Printer (Moonraker Replacement) ===\n\n");
     std::printf("Configuration:\n");
     std::printf("  HTTP port:       %u\n", port);
-    std::printf("  UDS path:        %s\n", udsPath.c_str());
+    std::printf("  UDS (Moonraker): %s", withMoonraker ? "enabled" : "disabled");
+    if (withMoonraker) std::printf("  (%s)", udsPath.c_str());
+    std::printf("\n");
     std::printf("  Web root:        %s\n",
                 webRoot.empty() ? "(disabled)" : webRoot.c_str());
     std::printf("  G-code root:     %s\n", gcodesRoot.c_str());
@@ -616,18 +625,20 @@ int main(int argc, char* argv[]) {
     auto httpServer = std::make_shared<KlippyHttpServer>(server, httpCfg);
 
     // ------------------------------------------------------------------
-    // Step 7: Start UDS (via instance) + HTTP
+    // Step 7: Start UDS (if --with-moonraker) + HTTP
     // ------------------------------------------------------------------
-    if (!inst.start()) {
-        std::fprintf(stderr, "Failed to start UDS transport at %s\n",
-                     udsPath.c_str());
-        return 1;
+    if (withMoonraker) {
+        if (!inst.start()) {
+            std::fprintf(stderr, "Failed to start UDS transport at %s\n",
+                         udsPath.c_str());
+            return 1;
+        }
+        std::printf("UDS transport listening at %s\n", udsPath.c_str());
     }
-    std::printf("UDS transport listening at %s\n", udsPath.c_str());
 
     if (!httpServer->start()) {
         std::fprintf(stderr, "Failed to start HTTP server on port %u\n", port);
-        inst.stop();
+        if (withMoonraker) inst.stop();
         return 1;
     }
     std::printf("HTTP/WebSocket server listening on port %u\n", port);
@@ -776,7 +787,7 @@ int main(int argc, char* argv[]) {
     running.store(false);
     simThread.join();
     httpServer->stop();
-    inst.stop();
+    if (withMoonraker) inst.stop();
     std::printf("Done.\n");
 
     return 0;

@@ -71,8 +71,8 @@ unzip mainsail.zip -d /opt/mainsail
 ## All Options
 
 ```
-Usage: klipper_http_mainsail [--help] [--port VAR] [--uds-path VAR]
-       [--mainsail DIR] [--fluidd DIR] [--web-root DIR]
+Usage: klipper_http_mainsail [--help] [--port VAR] [--with-moonraker]
+       [--uds-path VAR] [--mainsail DIR] [--fluidd DIR] [--web-root DIR]
        [--gcodes-root VAR] [--config-root VAR] [--logs-root VAR]
        [--api-key VAR] [--no-auth] [--sim-tick-ms VAR]
 
@@ -81,6 +81,10 @@ Usage: klipper_http_mainsail [--help] [--port VAR] [--uds-path VAR]
   --fluidd DIR       Same for Fluidd.
   --web-root DIR     Serve pre-built static assets from DIR as-is.
   --port PORT        HTTP listen port (default: 7125).
+  --with-moonraker   Enable UDS transport for a separate Moonraker process
+                     (disabled by default; the built-in HTTP server replaces
+                     Moonraker).
+  --uds-path PATH    UDS socket path (only used with --with-moonraker).
   --no-auth          Disable API authentication.
   --sim-tick-ms MS   Simulation tick interval (default: 100, min: 10).
 ```
