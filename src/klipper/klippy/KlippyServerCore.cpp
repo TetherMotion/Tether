@@ -167,6 +167,14 @@ KlippyServer::KlippyServer(UdsServerConfig cfg)
     registerEndpoint("machine/update/client", [this](const JsonValue& p) { return handleMachineUpdateClient(p); });
     registerEndpoint("machine/update/rollback", [this](const JsonValue& p) { return handleMachineUpdateRollback(p); });
 
+    // Aliases: Mainsail/Moonraker use slightly different names for some
+    // endpoints.  Register both forms so the frontend doesn't get 404s.
+    registerEndpoint("machine/proc_stats", [this](const JsonValue& p) { return handleMachineProcstats(p); });
+    registerEndpoint("server/database/list", [this](const JsonValue& p) { return handleDatabaseList(p); });
+    registerEndpoint("server/database/get", [this](const JsonValue& p) { return handleDatabaseGet(p); });
+    registerEndpoint("server/database/put", [this](const JsonValue& p) { return handleDatabasePut(p); });
+    registerEndpoint("server/database/delete", [this](const JsonValue& p) { return handleDatabaseDelete(p); });
+
     // Printer alias endpoints (Moonraker uses printer/ prefix for some)
     registerEndpoint("printer/emergency_stop", [this](const JsonValue& p) { return handleEmergencyStop(p); });
     registerEndpoint("printer/restart", [this](const JsonValue& p) { return handleGcodeRestart(p); });

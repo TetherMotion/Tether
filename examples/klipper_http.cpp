@@ -20,10 +20,8 @@
  *   - Fan, probe, and endstop peripherals
  *
  * Usage:
- *   klipper_http [--port PORT] [--with-moonraker] [--uds-path PATH]
- *                         [--mainsail DIR] [--fluidd DIR] [--web-root DIR]
- *                         [--gcodes-root DIR] [--api-key KEY] [--no-auth]
- *                         [--sim-tick-ms MS]
+ *   klipper_http [-p PORT] [-M] [-u PATH] [-m DIR] [-f DIR] [-w DIR]
+ *                [-g DIR] [-c DIR] [-l DIR] [-k KEY] [-A] [-t MS]
  *
  * Web UI options:
  *   --mainsail DIR   Clone and build Mainsail into DIR (asks y/N first).
@@ -356,57 +354,57 @@ int main(int argc, char* argv[]) {
     argparse::ArgumentParser program("klipper_http", "1.0",
         argparse::default_arguments::help);
 
-    program.add_argument("--port")
+    program.add_argument("-p", "--port")
         .scan<'i', int>()
         .default_value(7125)
         .help("HTTP listen port (default: 7125)");
 
-    program.add_argument("--with-moonraker")
+    program.add_argument("-M", "--with-moonraker")
         .implicit_value(true)
         .default_value(false)
         .help("Enable UDS transport for a separate Moonraker process "
               "(disabled by default; the built-in HTTP server replaces Moonraker)");
 
-    program.add_argument("--uds-path")
+    program.add_argument("-u", "--uds-path")
         .default_value(std::string("/tmp/klippy_uds"))
         .help("UDS socket path (only used with --with-moonraker)");
 
-    program.add_argument("--web-root")
+    program.add_argument("-w", "--web-root")
         .default_value(std::string(""))
         .help("Directory with pre-built Mainsail/Fluidd static assets (served as-is)");
 
-    program.add_argument("--mainsail")
+    program.add_argument("-m", "--mainsail")
         .default_value(std::string(""))
         .help("Path to Mainsail source directory. If not built yet, will clone "
               "and build automatically (asks for confirmation first).");
 
-    program.add_argument("--fluidd")
+    program.add_argument("-f", "--fluidd")
         .default_value(std::string(""))
         .help("Path to Fluidd source directory. If not built yet, will clone "
               "and build automatically (asks for confirmation first).");
 
-    program.add_argument("--gcodes-root")
+    program.add_argument("-g", "--gcodes-root")
         .default_value(defaultDataDir("gcodes"))
         .help("G-code file root");
 
-    program.add_argument("--config-root")
+    program.add_argument("-c", "--config-root")
         .default_value(defaultConfigDir())
         .help("Config file root");
 
-    program.add_argument("--logs-root")
+    program.add_argument("-l", "--logs-root")
         .default_value(defaultDataDir("logs"))
         .help("Log file root");
 
-    program.add_argument("--api-key")
+    program.add_argument("-k", "--api-key")
         .default_value(std::string("tether_default_api_key"))
         .help("API key for authentication");
 
-    program.add_argument("--no-auth")
+    program.add_argument("-A", "--no-auth")
         .implicit_value(true)
         .default_value(false)
         .help("Disable authentication");
 
-    program.add_argument("--sim-tick-ms")
+    program.add_argument("-t", "--sim-tick-ms")
         .scan<'i', int>()
         .default_value(100)
         .help("Simulation tick interval in ms (default: 100, min: 10)");
