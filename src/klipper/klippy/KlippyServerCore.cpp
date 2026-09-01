@@ -174,6 +174,12 @@ KlippyServer::KlippyServer(UdsServerConfig cfg)
     registerEndpoint("server/database/get", [this](const JsonValue& p) { return handleDatabaseGet(p); });
     registerEndpoint("server/database/put", [this](const JsonValue& p) { return handleDatabasePut(p); });
     registerEndpoint("server/database/delete", [this](const JsonValue& p) { return handleDatabaseDelete(p); });
+    registerEndpoint("server/database/post_item", [this](const JsonValue& p) { return handleDatabasePut(p); });
+    registerEndpoint("server/webcams/list", [this](const JsonValue& p) { return handleWebcamsList(p); });
+    registerEndpoint("server/webcams/get", [this](const JsonValue& p) { return handleWebcamsGet(p); });
+    registerEndpoint("server/webcams/test", [this](const JsonValue& p) { return handleWebcamsTest(p); });
+    registerEndpoint("server/webcams/update", [this](const JsonValue& p) { return handleWebcamsUpdate(p); });
+    registerEndpoint("server/webcams/delete", [this](const JsonValue& p) { return handleWebcamsDelete(p); });
 
     // Printer alias endpoints (Moonraker uses printer/ prefix for some)
     registerEndpoint("printer/emergency_stop", [this](const JsonValue& p) { return handleEmergencyStop(p); });
