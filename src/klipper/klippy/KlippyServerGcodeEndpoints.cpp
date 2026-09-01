@@ -90,6 +90,11 @@ JsonValue KlippyServer::handleGcodeScript(const JsonValue& params) {
     }
     {
         std::lock_guard<std::recursive_mutex> lock(mutex_);
+        // Record the command in the gcode store
+        gcodeStore_.push_back({script, std::chrono::steady_clock::now(), "command"});
+        if (gcodeStore_.size() > kMaxGcodeStoreEntries) {
+            gcodeStore_.erase(gcodeStore_.begin());
+        }
         if (gcodeScriptHandler_) gcodeScriptHandler_(script);
     }
     return JsonValue(std::map<std::string, JsonValue>{});

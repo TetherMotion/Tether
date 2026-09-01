@@ -486,6 +486,7 @@ private:
     struct GcodeStoreEntry {
         std::string message;
         std::chrono::steady_clock::time_point timestamp;
+        std::string type = "response";  // "command" or "response"
     };
     std::vector<GcodeStoreEntry> gcodeStore_;
     static constexpr size_t kMaxGcodeStoreEntries = 1000;
