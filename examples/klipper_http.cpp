@@ -1006,6 +1006,15 @@ int main(int argc, char* argv[]) {
         bool wasPrinting = false;
         int tickCount = 0;
 
+        // Seed the temperature store immediately so Mainsail/Fluidd can
+        // render the thermal chart and hover handlers before the first tick.
+        server.recordTemperature("extruder",
+                                 extruderHeater->currentTemp(),
+                                 extruderHeater->target());
+        server.recordTemperature("heater_bed",
+                                 bedHeater->currentTemp(),
+                                 bedHeater->target());
+
         // Print streaming: execute a few G-code lines per tick so the
         // toolhead position animates smoothly in the Mainsail dashboard.
         const int linesPerTick = 2;
