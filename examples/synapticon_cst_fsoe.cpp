@@ -47,7 +47,6 @@
  *   ./synapticon_cst_fsoe --rated-torque-mnm 4200       # override rated torque
  *   ./synapticon_cst_fsoe --sto 0 --sbc 0               # raw STO bit=0, SBC bit=0
  *   ./synapticon_cst_fsoe --sto 1 --sbc 1               # raw STO bit=1, SBC bit=1
- *   ./synapticon_cst_fsoe --skip-vendor-verification    # skip SII vendor ID check
  */
 
 #include <array>
@@ -73,7 +72,6 @@
 #include "tether/profiles/cia301/CiA402Defs.hpp"
 #include "tether/profiles/cia402/DS402Master.hpp"
 #include "tether/ethercat/CoEManager.hpp"
-#include "tether/sii/SIIReader.hpp"
 
 #include <argparse/argparse.hpp>
 
@@ -844,7 +842,6 @@ struct Args {
     double torque_pp_nm = 0.5;       ///< Peak-to-peak torque amplitude in Nm
     double freq_hz = 0.5;            ///< Sine wave frequency in Hz
     uint32_t rated_torque_mnm = 0;   ///< Motor rated torque in mNm (0 = auto-detect from 0x6076)
-    bool skip_vendor_verification = false;  ///< Skip SII vendor ID check
     ///< STO override: -1 = not set (use motionEnabled default), 0 = force STO off, 1 = force STO on
     int sto_override = -1;
     ///< SBC override: -1 = not set (use motionEnabled default), 0 = force brake released, 1 = force brake engaged
@@ -907,11 +904,6 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .scan<'i', int>()
         .default_value(static_cast<int>(0))
         .help("Motor rated torque in mNm (0 = auto-detect from object 0x6076)");
-    program.add_argument("--skip-vendor-verification")
-        .default_value(false)
-        .implicit_value(true)
-        .help("Skip SII vendor ID check (use when SII reads return garbage, "
-              "e.g. on ESCs with broken EEPROM access)");
     program.add_argument("--sto")
         .scan<'i', int>()
         .default_value(-1)
@@ -947,7 +939,6 @@ bool parseArgs(int argc, char** argv, Args& out) {
     out.torque_pp_nm = program.get<double>("--torque-nm");
     out.freq_hz = program.get<double>("--freq-hz");
     out.rated_torque_mnm = static_cast<uint32_t>(program.get<int>("--rated-torque-mnm"));
-    out.skip_vendor_verification = program.get<bool>("--skip-vendor-verification");
     out.sto_override = program.get<int>("--sto");
     out.sbc_override = program.get<int>("--sbc");
     return true;
@@ -1017,79 +1008,13 @@ int main(int argc, char** argv) {
             return 2;
         }
 
-        // --- Verify slave identity (manufacturer + device) before init ---
-        // The slave's SII EEPROM identity (vendor/product) is read directly
-        // via the ESC — no mailbox or AL state required — so it works even in
-        // INIT.  A vendor mismatch is fatal (this example only targets
-        // Synapticon SOMANET drives).  An unknown product code is a non-fatal
-        // warning: the drive may still be a compatible SOMANET variant not yet
-        // listed in the known-product-code table.
-        //
-        // SII read failure is NON-FATAL: some ESCs (e.g. Synapticon ESC211)
-        // do not support APWR to the EEPROM control register, making SII
-        // reads impossible via the standard register interface.  In that case
-        // we warn and continue — the mailbox/PDO configuration uses hardcoded
-        // ESI values, not SII, so the drive can still be operated.
-        {
-            EtherCAT::SII::SIIIdentity sii_id;
-            if (!EtherCAT::SII::readSIIIdentity(
-                    master.ethercatMaster(), slave_idx, sii_id)) {
-                TETHER_LOGW(TAG,
-                    "Slave %u: SII identity read failed — cannot verify "
-                    "manufacturer/device via EEPROM.  This is expected on "
-                    "ESCs that do not support APWR to EEPCTL (e.g. "
-                    "Synapticon ESC211).  Continuing without identity "
-                    "verification; mailbox/PDO config uses hardcoded ESI "
-                    "values.  Use --debug eeprom for low-level EEPROM "
-                    "register diagnostics.",
-                    slave_idx);
-                // Non-fatal: continue without identity verification.
-            } else {
-                TETHER_LOGI(TAG,
-                    "Slave %u identity: vendor=0x%08X product=0x%08X "
-                    "revision=0x%08X serial=0x%08X",
-                    slave_idx,
-                    sii_id.vendor_id, sii_id.product_code,
-                    sii_id.revision_number, sii_id.serial_number);
-
-                if (args.skip_vendor_verification) {
-                    TETHER_LOGW(TAG,
-                        "Slave %u: --skip-vendor-verification set, skipping "
-                        "vendor ID check (SII vendor=0x%08X, expected "
-                        "0x%08X for Synapticon).  Continuing at operator's "
-                        "own risk.",
-                        slave_idx,
-                        sii_id.vendor_id,
-                        EtherCAT::Drives::Synapticon::kVendorId);
-                } else if (sii_id.vendor_id != EtherCAT::Drives::Synapticon::kVendorId) {
-                    TETHER_LOGE(TAG,
-                        "Slave %u: VENDOR MISMATCH — expected 0x%08X "
-                        "(Synapticon), got 0x%08X.  This example only supports "
-                        "Synapticon SOMANET drives, aborting.  Use "
-                        "--skip-vendor-verification to override.",
-                        slave_idx,
-                        EtherCAT::Drives::Synapticon::kVendorId,
-                        sii_id.vendor_id);
-                    Tether::Examples::stopHostMasterSession(master, session);
-                    return 2;
-                }
-
-                if (!EtherCAT::Drives::Synapticon::isKnownProductCode(
-                        sii_id.product_code)) {
-                    TETHER_LOGW(TAG,
-                        "Slave %u: UNKNOWN product code 0x%08X (vendor matches "
-                        "Synapticon).  Not in known-product list "
-                        "{0x0201 Node, 0x0301 Circulo, 0x0302 Circulo 7 "
-                        "SafeMotion} — continuing, but PDO/safety layout may not "
-                        "match this device.",
-                        slave_idx, sii_id.product_code);
-                } else {
-                    TETHER_LOGI(TAG,
-                        "Slave %u: product code 0x%08X is a known SOMANET device",
-                        slave_idx, sii_id.product_code);
-                }
-            }
-        }
+        // --- Slave identity verification is intentionally skipped ---
+        // The Synapticon drive does not support APWR to the EEPCTL register,
+        // so SII/EEPROM reads are impossible via the standard register
+        // interface.  This example targets SOMANET drives only and relies on
+        // the hardcoded ESI values from tether/drives/Synapticon.hpp for all
+        // mailbox/PDO configuration — no SII read or vendor/product
+        // verification is performed.
 
         // --- Reset slave to INIT if currently in a higher state ---
         // If the slave is already in PRE_OP, SAFE_OP, or OP (e.g. from a
