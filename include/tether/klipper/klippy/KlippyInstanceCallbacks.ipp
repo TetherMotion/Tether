@@ -73,10 +73,13 @@
                 }
             }
 
-            // Home each axis sequentially using the kinematic simulator.
-            // The current position is the physical starting point — the
-            // simulator moves the axis from there toward the endstop at
-            // homing_speed, producing realistic position updates over time.
+            // Home each axis using the kinematic simulator.
+            // The simulators are started asynchronously and stepped on
+            // each tick() so the toolhead moves gradually toward the
+            // endstop positions at homing_speed, just like a real printer.
+            activeHomingAxes_.clear();
+            pendingHomedAxes_ = axes;
+
             for (char c : axes) {
                 std::string axisName(1, c);
                 int idx = (c == 'x') ? 0 : (c == 'y') ? 1 : (c == 'z') ? 2 : -1;
@@ -100,25 +103,23 @@
                 simCfg.acceleration = settings_.acceleration;
                 simCfg.positiveDirection = hcfg.positiveDirection;
 
-                // Run the homing simulation from the current physical position
-                Simulation::HomingAxisSimulator sim(simCfg);
+                // Start the homing simulation from the current physical position
                 double initPos = motionState_.position[idx];
                 if (std::isnan(initPos)) initPos = hcfg.positiveDirection ? -100.0 : 100.0;
-                double finalPos = sim.run(initPos, 0.001);
 
-                // Update position to the endstop position
-                motionState_.position[idx] = finalPos;
+                ActiveHomingAxis ah;
+                ah.sim = std::make_unique<Simulation::HomingAxisSimulator>(simCfg);
+                ah.sim->start(initPos);
+                ah.axisIndex = idx;
+                ah.axisChar = c;
+                activeHomingAxes_.push_back(std::move(ah));
             }
 
-            // Update printer objects with final positions
-            {
-                std::array<double, 4> pos = motionState_.position;
-                toolheadObj_->setPosition(pos);
-                motionReportObj_->setPosition(pos);
-                gcodeMoveObj_->setGcodePosition(pos);
+            // If no axes need simulation (all had no config), mark homed now
+            if (activeHomingAxes_.empty()) {
+                toolheadObj_->setHomedAxes(axes);
             }
 
-            toolheadObj_->setHomedAxes(axes);
             // Track activity for idle timeout
             lastActivityTime_ = std::chrono::steady_clock::now();
         };

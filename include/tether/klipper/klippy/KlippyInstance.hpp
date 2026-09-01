@@ -757,6 +757,40 @@ public:
         }
     }
 
+    /// @brief Set the simulation tick dt (seconds) used for homing steps.
+    void setSimTickDt(double dt) { simTickDt_ = dt; }
+
+    /// @brief Step all active homing axis simulators by simTickDt_.
+    /// Updates toolhead/motion positions in real-time. When all axes
+    /// complete, marks them as homed and clears the active homing state.
+    void stepActiveHoming() {
+        bool allComplete = true;
+        for (auto& ah : activeHomingAxes_) {
+            if (!ah.sim || ah.sim->isComplete()) continue;
+            // Step the simulator — use a small dt for smooth motion
+            auto result = ah.sim->step(simTickDt_);
+            motionState_.position[ah.axisIndex] = result.position;
+            if (!result.complete) allComplete = false;
+        }
+
+        // Update printer objects with current positions
+        {
+            std::array<double, 4> pos = motionState_.position;
+            if (toolheadObj_) toolheadObj_->setPosition(pos);
+            if (motionReportObj_) motionReportObj_->setPosition(pos);
+            if (gcodeMoveObj_) gcodeMoveObj_->setGcodePosition(pos);
+        }
+
+        if (allComplete) {
+            // Mark axes as homed
+            if (toolheadObj_) toolheadObj_->setHomedAxes(pendingHomedAxes_);
+            activeHomingAxes_.clear();
+            pendingHomedAxes_.clear();
+            // Track activity for idle timeout
+            lastActivityTime_ = std::chrono::steady_clock::now();
+        }
+    }
+
     /// @brief Process due delayed G-codes (call periodically).
     /// Executes any delayed G-codes whose scheduled time has passed.
     /// Also checks idle timeout and executes timeout G-code if expired.
@@ -766,6 +800,11 @@ public:
 
         // Pump the motion backend so protocol messages flow.
         pumpMotionBackend();
+
+        // Step active homing simulators (asynchronous homing)
+        if (!activeHomingAxes_.empty()) {
+            stepActiveHoming();
+        }
 
         // Process delayed G-codes
         std::vector<std::string> toExecute;
@@ -1120,6 +1159,18 @@ private:
     PrinterMotionState motionState_;
     GCodeExecutor gcode_ = GCodeExecutor(GcodeCallbacks{});
     KlippySettings settings_;
+
+    // Asynchronous homing state — when active, the homing simulators are
+    // stepped on each tick() so the toolhead moves gradually toward the
+    // endstop positions instead of jumping instantly.
+    struct ActiveHomingAxis {
+        std::unique_ptr<Simulation::HomingAxisSimulator> sim;
+        int axisIndex = -1;
+        char axisChar = '\0';
+    };
+    std::vector<ActiveHomingAxis> activeHomingAxes_;
+    std::string pendingHomedAxes_; ///< axes to mark homed when all sims complete
+    double simTickDt_ = 0.1; ///< dt for homing simulation steps (seconds)
 
     // Autotuning bridges (delegate to Tether autotuning framework)
     std::unique_ptr<HeaterAutotuneBridge> extruderAutotuneBridge_;

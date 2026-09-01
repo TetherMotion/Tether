@@ -804,7 +804,10 @@ int main(int argc, char* argv[]) {
 
     KlippyInstance inst(instCfg);
     auto& server = inst.server();
-    server.loadConfigFile(printerCfgPath);
+    inst.loadConfig(printerCfgPath);
+
+    // Set the simulation tick dt so homing simulators step at the right rate
+    inst.setSimTickDt(simDt);
 
     // Update file roots to match the actual directories (the server
     // defaults to /etc/tether for config, but we want the user's dir).
@@ -1013,6 +1016,12 @@ int main(int argc, char* argv[]) {
             double elapsed = std::chrono::duration<double>(now - lastTick).count();
             lastTick = now;
             tickCount++;
+
+            // --- KlippyInstance tick (homing sim, delayed G-codes, etc.) ---
+            {
+                std::lock_guard<std::recursive_mutex> lock(inst.mutex());
+                inst.tick();
+            }
 
             // --- Thermal simulation ---
             {
