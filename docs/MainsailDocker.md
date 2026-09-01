@@ -34,7 +34,7 @@ implements the full Moonraker HTTP + WebSocket API natively.
 
 ## Prerequisites
 
-- **Docker** and **Docker Compose** (v2+)
+- **Docker** (Docker Engine 20.10+)
 - **Tether** built with HTTP support:
 
   ```bash
@@ -70,7 +70,13 @@ Leave this running in a terminal.
 From the Tether repo root:
 
 ```bash
-docker compose -f docker/docker-compose.yml up -d
+docker run -d \
+  --name tether_mainsail \
+  -p 8080:8080 \
+  --add-host host.docker.internal:host-gateway \
+  -v "$(pwd)/docker/mainsail/mainsail-config.json:/usr/share/nginx/html/config.json" \
+  -v "$(pwd)/docker/mainsail/mainsail-proxy.conf:/etc/nginx/extra-conf.d/proxy.conf" \
+  ghcr.io/mainsail-crew/mainsail:latest
 ```
 
 This pulls the official Mainsail image and starts it on port **8080**.
@@ -103,9 +109,9 @@ The setup uses two files in `docker/mainsail/`:
 | `mainsail-config.json` | Tells the Mainsail SPA to connect to `localhost:8080` (itself, via the nginx proxy) |
 | `mainsail-proxy.conf` | Nginx config that proxies `/server`, `/api`, `/machine`, `/access`, `/client`, and `/websocket` to `host.docker.internal:7125` |
 
-The `docker-compose.yml` mounts these into the Mainsail container and adds
-`host.docker.internal:host-gateway` so the container can reach the host
-(this is needed on Linux; Docker Desktop handles it automatically).
+The `docker run` command mounts these into the Mainsail container and adds
+`--add-host host.docker.internal:host-gateway` so the container can reach
+the host (this is needed on Linux; Docker Desktop handles it automatically).
 
 ## Changing the Tether Port
 
@@ -121,14 +127,15 @@ If you want Tether on a different port (e.g. 7130):
 
 3. Restart the container:
    ```bash
-   docker compose -f docker/docker-compose.yml restart mainsail
+   docker rm -f tether_mainsail
+   # re-run the docker run command from step 2 above
    ```
 
 ## Stopping
 
 ```bash
-# Stop Mainsail
-docker compose -f docker/docker-compose.yml down
+# Stop and remove the Mainsail container
+docker rm -f tether_mainsail
 
 # Stop Tether (Ctrl+C in its terminal)
 ```
@@ -178,11 +185,22 @@ Another process is using the port. Either stop it or use a different port:
 
 ### Port 8080 already in use
 
-Change the host-side mapping in `docker/docker-compose.yml`:
+Change the host-side port mapping in the `docker run` command:
 
-```yaml
-    ports:
-      - "8081:8080"   # map host 8081 → container 8080
+```bash
+docker run -d \
+  --name tether_mainsail \
+  -p 8081:8080 \
+  ...
 ```
 
 Then open `http://localhost:8081` instead.
+
+### Container already exists
+
+If `docker run` fails with "container name already in use":
+
+```bash
+docker rm -f tether_mainsail
+# then re-run the docker run command
+```
