@@ -263,7 +263,7 @@ int main() {
     printStatus("menu", menuObj.status({}));
 
     GcodeObject gcodeObj;
-    gcodeObj.setCommands(100);
+    gcodeObj.setCommands({{"G28", JsonValue(std::string("Home all axes"))}});
     gcodeObj.setInfo("Running print job");
     printStatus("gcode", gcodeObj.status({}));
 

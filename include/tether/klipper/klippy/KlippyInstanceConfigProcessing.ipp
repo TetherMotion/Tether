@@ -406,6 +406,41 @@
                 if (section.has("position_endstop")) {
                     try {
                         settings_.homeOffset[key] = section.getDouble("position_endstop");
+                        settings_.stepperHoming[key].positionEndstop =
+                            section.getDouble("position_endstop");
+                    } catch (...) {}
+                }
+                if (section.has("homing_speed")) {
+                    try {
+                        settings_.stepperHoming[key].homingSpeed =
+                            section.getDouble("homing_speed");
+                    } catch (...) {}
+                }
+                if (section.has("second_homing_speed")) {
+                    try {
+                        settings_.stepperHoming[key].secondHomingSpeed =
+                            section.getDouble("second_homing_speed");
+                    } catch (...) {}
+                }
+                if (section.has("position_min")) {
+                    try {
+                        settings_.stepperHoming[key].positionMin =
+                            section.getDouble("position_min");
+                    } catch (...) {}
+                }
+                if (section.has("position_max")) {
+                    try {
+                        settings_.stepperHoming[key].positionMax =
+                            section.getDouble("position_max");
+                    } catch (...) {}
+                }
+                // Determine direction: if position_endstop is at max, positive direction
+                if (section.has("position_endstop") && section.has("position_max")) {
+                    try {
+                        double endstop = section.getDouble("position_endstop");
+                        double maxPos = section.getDouble("position_max");
+                        settings_.stepperHoming[key].positiveDirection =
+                            (endstop >= maxPos / 2.0);
                     } catch (...) {}
                 }
             }

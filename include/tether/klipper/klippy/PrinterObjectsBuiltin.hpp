@@ -120,7 +120,8 @@ public:
         const std::vector<std::string>& fields) const override;
 
     std::vector<std::string> availableFields() const override {
-        return {"path", "save_config_pending", "save_config_pending_items"};
+        return {"path", "save_config_pending", "save_config_pending_items",
+                "settings", "config"};
     }
 
     void setPath(const std::string& p) { path_ = p; }
@@ -129,10 +130,18 @@ public:
         saveConfigPendingItems_ = items;
     }
 
+    /// Set the parsed config settings (section name -> key -> value).
+    /// Keys should be lowercase as Mainsail expects.
+    void setSettings(std::map<std::string, JsonValue> s) { settings_ = std::move(s); }
+    void setConfig(std::map<std::string, JsonValue> c) { config_ = std::move(c); }
+
 private:
     std::string path_ = "/etc/tether/printer.cfg";
     bool saveConfigPending_ = false;
     std::map<std::string, std::string> saveConfigPendingItems_;
+    // Parsed config: section name (lowercase) -> { key -> value }
+    std::map<std::string, JsonValue> settings_;
+    std::map<std::string, JsonValue> config_;
 };
 
 /// @brief The pause_resume printer object.

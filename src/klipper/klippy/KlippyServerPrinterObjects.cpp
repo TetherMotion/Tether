@@ -99,6 +99,8 @@ std::map<std::string, JsonValue> ConfigfileObject::status(
         pendingItems[section] = JsonValue(value);
     }
     addField("save_config_pending_items", JsonValue(pendingItems));
+    addField("settings", JsonValue(settings_));
+    addField("config", JsonValue(config_));
     return result;
 }
 

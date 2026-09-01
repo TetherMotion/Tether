@@ -72,6 +72,64 @@
                                   settings_.safeZHomeXYHomeSpeed, 0);
                 }
             }
+
+            // Set position to NaN (unknown) for axes being homed.
+            // In real Klipper, unhomed axes have no known position.
+            {
+                std::array<double, 4> pos = motionState_.position;
+                for (char c : axes) {
+                    int idx = (c == 'x') ? 0 : (c == 'y') ? 1 : (c == 'z') ? 2 : -1;
+                    if (idx >= 0) pos[idx] = std::numeric_limits<double>::quiet_NaN();
+                }
+                motionState_.position = pos;
+                toolheadObj_->setPosition(pos);
+                motionReportObj_->setPosition(pos);
+            }
+
+            // Home each axis sequentially using the kinematic simulator.
+            // This moves the axis toward its endstop position at homing_speed,
+            // producing realistic position updates over time.
+            for (char c : axes) {
+                std::string axisName(1, c);
+                int idx = (c == 'x') ? 0 : (c == 'y') ? 1 : (c == 'z') ? 2 : -1;
+                if (idx < 0) continue;
+
+                // Get homing config for this axis
+                auto homingIt = settings_.stepperHoming.find(axisName);
+                if (homingIt == settings_.stepperHoming.end()) {
+                    // No config — just mark as homed at current position (0)
+                    motionState_.position[idx] = 0.0;
+                    continue;
+                }
+                const auto& hcfg = homingIt->second;
+
+                // Build simulator config
+                Simulation::HomingAxisConfig simCfg;
+                simCfg.name = axisName;
+                simCfg.endstopPosition = hcfg.positionEndstop;
+                simCfg.homingSpeed = hcfg.homingSpeed;
+                simCfg.secondHomingSpeed = hcfg.secondHomingSpeed;
+                simCfg.acceleration = settings_.acceleration;
+                simCfg.positiveDirection = hcfg.positiveDirection;
+
+                // Run the homing simulation
+                Simulation::HomingAxisSimulator sim(simCfg);
+                double initPos = motionState_.position[idx];
+                if (std::isnan(initPos)) initPos = hcfg.positiveDirection ? -100.0 : 100.0;
+                double finalPos = sim.run(initPos, 0.001);
+
+                // Update position
+                motionState_.position[idx] = finalPos;
+            }
+
+            // Update printer objects with final positions
+            {
+                std::array<double, 4> pos = motionState_.position;
+                toolheadObj_->setPosition(pos);
+                motionReportObj_->setPosition(pos);
+                gcodeMoveObj_->setGcodePosition(pos);
+            }
+
             toolheadObj_->setHomedAxes(axes);
             // Track activity for idle timeout
             lastActivityTime_ = std::chrono::steady_clock::now();

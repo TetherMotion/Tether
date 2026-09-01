@@ -49,6 +49,7 @@
 #include "tether/klipper/klippy/KlippyState.hpp"
 #include "tether/klipper/klippy/SystemStatsProvider.hpp"
 #include "tether/io/SpiDriver.hpp"
+#include "tether/simulation/systems/mechanical/HomingAxisSimulator.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -207,6 +208,7 @@ public:
     std::shared_ptr<QueryEndstopsObject>& queryEndstopsObject() { return queryEndstopsObj_; }
     std::shared_ptr<McuObject>& mcuObject() { return mcuObj_; }
     std::shared_ptr<SystemStatsObject>& systemStatsObject() { return systemStatsObj_; }
+    std::shared_ptr<class GcodeObject>& gcodeObject() { return gcodeObj_; }
     std::shared_ptr<IdleTimeoutObject>& idleTimeoutObject() { return idleTimeoutObj_; }
     std::shared_ptr<StepperEnableObject>& stepperEnableObject() { return stepperEnableObj_; }
 

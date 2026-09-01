@@ -232,11 +232,62 @@ bool KlippyServer::loadConfigFile(const std::string& path) {
         stateMessage_ = "Failed to load config: " + path;
         return false;
     }
-    // Update configfile object with the path
+    // Update configfile object with the path and parsed settings
     auto it = objects_.find("configfile");
     if (it != objects_.end()) {
         auto* cfg = dynamic_cast<ConfigfileObject*>(it->second.get());
-        if (cfg) cfg->setPath(path);
+        if (cfg) {
+            cfg->setPath(path);
+            // Build settings/config maps from parsed sections.
+            // Mainsail expects: settings["section_name"] = { key: value, ... }
+            // Keys are lowercase section names, values are typed (numbers as
+            // doubles, booleans as bools, everything else as strings).
+            std::map<std::string, JsonValue> settings;
+            std::map<std::string, JsonValue> config;
+            for (const auto& section : configParser_.sections()) {
+                std::string sectionName = section.name;
+                // Lowercase the section name for settings
+                std::string lowerName = sectionName;
+                std::transform(lowerName.begin(), lowerName.end(),
+                              lowerName.begin(), ::tolower);
+
+                std::map<std::string, JsonValue> sectionSettings;
+                std::map<std::string, JsonValue> sectionConfig;
+                for (const auto& [key, rawValue] : section.values) {
+                    // Try to parse as number
+                    std::string lowerKey = key;
+                    std::transform(lowerKey.begin(), lowerKey.end(),
+                                  lowerKey.begin(), ::tolower);
+
+                    // Try double
+                    try {
+                        size_t pos;
+                        double d = std::stod(rawValue, &pos);
+                        if (pos == rawValue.size()) {
+                            sectionSettings[lowerKey] = JsonValue(d);
+                            sectionConfig[lowerKey] = JsonValue(rawValue);
+                            continue;
+                        }
+                    } catch (...) {}
+
+                    // Try bool
+                    if (rawValue == "true" || rawValue == "True") {
+                        sectionSettings[lowerKey] = JsonValue(true);
+                        sectionConfig[lowerKey] = JsonValue(rawValue);
+                    } else if (rawValue == "false" || rawValue == "False") {
+                        sectionSettings[lowerKey] = JsonValue(false);
+                        sectionConfig[lowerKey] = JsonValue(rawValue);
+                    } else {
+                        sectionSettings[lowerKey] = JsonValue(rawValue);
+                        sectionConfig[lowerKey] = JsonValue(rawValue);
+                    }
+                }
+                settings[lowerName] = JsonValue(sectionSettings);
+                config[lowerName] = JsonValue(sectionConfig);
+            }
+            cfg->setSettings(std::move(settings));
+            cfg->setConfig(std::move(config));
+        }
     }
     return true;
 }

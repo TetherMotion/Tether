@@ -363,7 +363,9 @@ public:
     std::map<std::string, JsonValue> status(
         const std::vector<std::string>& fields) const override {
         auto s = buildStatus(fields);
-        s.add("commands", JsonValue(static_cast<int64_t>(commands_)));
+        // Mainsail expects commands to be an object mapping command names
+        // to their help text (e.g. { "G28": "Home all axes", ... }).
+        s.add("commands", JsonValue(commands_));
         s.add("info", JsonValue(info_));
         s.add("config_commands", JsonValue(static_cast<int64_t>(configCommands_)));
         std::vector<JsonValue> posArr;
@@ -376,11 +378,11 @@ public:
         return {"commands", "info", "config_commands", "move_gcode_position"};
     }
 
-    void setCommands(uint64_t c) { commands_ = c; }
+    void setCommands(std::map<std::string, JsonValue> c) { commands_ = std::move(c); }
     void setInfo(const std::string& i) { info_ = i; }
 
 private:
-    uint64_t commands_ = 0;
+    std::map<std::string, JsonValue> commands_;
     std::string info_;
     uint64_t configCommands_ = 0;
     std::array<double, 4> moveGcodePosition_ = {0, 0, 0, 0};

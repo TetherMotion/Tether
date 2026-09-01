@@ -559,11 +559,11 @@ TEST(TierD2PrinterObjects, GcodeObject) {
     auto fields = obj.availableFields();
     EXPECT_EQ(fields.size(), 4u);
 
-    obj.setCommands(100);
+    obj.setCommands({{"G28", JsonValue(std::string("Home all axes"))}});
     obj.setInfo("Test info");
 
     auto status = obj.status({});
-    EXPECT_EQ(status["commands"].asInt(), 100);
+    EXPECT_TRUE(status["commands"].isObject());
     EXPECT_EQ(status["info"].asString(), "Test info");
 }
 
