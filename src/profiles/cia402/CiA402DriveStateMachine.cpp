@@ -714,6 +714,34 @@ bool CiA402Drive::readStatusword(uint16_t& statusword) {
 // ============================================================================
 
 bool CiA402Drive::setOperatingMode(int8_t mode) {
+    // Use PDO by default if the offset has been configured; otherwise SDO.
+    if (m_opmode_pdo_offset >= 0) {
+        return setOperatingModePDO(mode);
+    }
+    return setOperatingModeSDO(mode);
+}
+
+bool CiA402Drive::setOperatingModePDO(int8_t mode) {
+    if (m_opmode_pdo_offset < 0) {
+        TETHER_LOGE(TAG, "%s: setOperatingModePDO called but PDO offset not configured",
+                    logPrefix().c_str());
+        return false;
+    }
+    const size_t offset = static_cast<size_t>(m_opmode_pdo_offset);
+    if (offset + 1 > kMaxPDOBufferSize) {
+        TETHER_LOGE(TAG, "%s: setOperatingModePDO offset %zu out of bounds",
+                    logPrefix().c_str(), offset);
+        return false;
+    }
+    m_rxpdo_buffer[offset] = static_cast<uint8_t>(mode);
+    TETHER_LOGI(TAG, "%s: Operating mode set to %s (%d) via PDO (offset=%zu)",
+                logPrefix().c_str(),
+                CiA402::getOperatingModeName(mode),
+                static_cast<int>(mode), offset);
+    return true;
+}
+
+bool CiA402Drive::setOperatingModeSDO(int8_t mode) {
     uint8_t umode = static_cast<uint8_t>(mode);
     auto write_res = m_master->sdoManager(m_slave_index).writeU8(
         static_cast<uint16_t>(CiA402::Register::ModesOfOperation), 0, umode,
