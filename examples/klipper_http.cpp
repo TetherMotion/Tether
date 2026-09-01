@@ -178,7 +178,7 @@ static void generateDefaultPrinterCfg(const std::string& path) {
     f << "rotation_distance: 40\n";
     f << "endstop_pin: ^PC5\n";
     f << "position_endstop: 0\n";
-    f << "position_max: 220\n";
+    f << "position_max: 300\n";
     f << "homing_speed: 50\n";
     f << "second_homing_speed: 10\n\n";
 
@@ -190,7 +190,7 @@ static void generateDefaultPrinterCfg(const std::string& path) {
     f << "rotation_distance: 40\n";
     f << "endstop_pin: ^PC9\n";
     f << "position_endstop: 0\n";
-    f << "position_max: 220\n";
+    f << "position_max: 300\n";
     f << "homing_speed: 50\n";
     f << "second_homing_speed: 10\n\n";
 
@@ -202,7 +202,7 @@ static void generateDefaultPrinterCfg(const std::string& path) {
     f << "rotation_distance: 8\n";
     f << "endstop_pin: ^PD3\n";
     f << "position_endstop: 0\n";
-    f << "position_max: 250\n";
+    f << "position_max: 400\n";
     f << "homing_speed: 10\n";
     f << "second_homing_speed: 2\n\n";
 
@@ -344,18 +344,57 @@ static bool isBuiltDist(const std::filesystem::path& dir) {
            fs::exists(dir / "config.json");
 }
 
+/// @brief Check if a file contains a given substring (used to detect whether
+///        an existing config.json is already in the Fluidd schema).
+static bool fileContains(const std::filesystem::path& path, const std::string& needle) {
+    std::ifstream f(path);
+    if (!f.is_open()) return false;
+    std::string content((std::istreambuf_iterator<char>(f)),
+                         std::istreambuf_iterator<char>());
+    return content.find(needle) != std::string::npos;
+}
+
 /// @brief Write a Mainsail/Fluidd config.json that points to the given port.
-/// Both SPAs read config.json at load time to know which Moonraker instance
-/// to connect to.  When Tether serves both the SPA and the API on the same
-/// port, the config just points to localhost:PORT.
-static void writeWebUiConfig(const std::filesystem::path& distDir, uint16_t port) {
+///
+/// Mainsail and Fluidd use **different config.json schemas**:
+/// - Mainsail: `{ "instances": [{ "hostname": "localhost", "port": PORT }] }`
+/// - Fluidd:   `{ "endpoints": [], "blacklist": [...], "hosted": false, "themePresets": [...] }`
+///
+/// When Tether serves both the SPA and the API on the same port, Fluidd's
+/// default `endpoints: []` makes it fall back to the browser URL, which is
+/// already correct.  So for Fluidd we only write a config if one is missing
+/// or is in the wrong (Mainsail) schema — we never overwrite a valid Fluidd
+/// config because it contains themePresets we don't want to clobber.
+static void writeWebUiConfig(const std::filesystem::path& distDir,
+                              const std::string& uiName, uint16_t port) {
     namespace fs = std::filesystem;
     std::error_code ec;
     fs::create_directories(distDir, ec);
-    std::ofstream f(distDir / "config.json");
-    if (!f.is_open()) return;
-    // Mainsail format (Fluidd is compatible with the same schema):
+    auto configPath = distDir / "config.json";
+
+    // Fluidd: preserve existing valid config; only write if missing or wrong schema.
+    if (uiName == "Fluidd") {
+        if (fs::exists(configPath) && fileContains(configPath, "\"endpoints\"")) {
+            // Existing Fluidd config.json is valid — don't clobber themePresets etc.
+            return;
+        }
+        // Write a minimal Fluidd config.json.  endpoints: [] makes Fluidd fall
+        // back to the browser URL (which is where Tether is serving).
+        std::ofstream f(configPath);
+        if (!f.is_open()) return;
+        f << "{\n"
+          << "  \"blacklist\": [\"fluidd.xyz\", \"fluidd.net\"],\n"
+          << "  \"endpoints\": [],\n"
+          << "  \"hosted\": false,\n"
+          << "  \"themePresets\": []\n"
+          << "}\n";
+        return;
+    }
+
+    // Mainsail format:
     //   { "instances": [{ "hostname": "localhost", "port": <port> }] }
+    std::ofstream f(configPath);
+    if (!f.is_open()) return;
     f << "{\n"
       << "  \"instances\": [\n"
       << "    {\n"
@@ -452,7 +491,7 @@ static std::string ensureWebUi(const std::string& uiDir,
     if (isBuiltDist(distDir)) {
         std::printf("%s already built at %s\n", uiName.c_str(),
                     distDir.string().c_str());
-        writeWebUiConfig(distDir, port);
+        writeWebUiConfig(distDir, uiName, port);
         return distDir.string();
     }
 
@@ -476,7 +515,7 @@ static std::string ensureWebUi(const std::string& uiDir,
             std::fprintf(stderr, "Build completed but dist/index.html not found.\n");
             return "";
         }
-        writeWebUiConfig(distDir, port);
+        writeWebUiConfig(distDir, uiName, port);
         return distDir.string();
     }
 
@@ -492,7 +531,7 @@ static std::string ensureWebUi(const std::string& uiDir,
         if (isBuiltDist(subDist)) {
             std::printf("%s already built at %s\n", uiName.c_str(),
                         subDist.string().c_str());
-            writeWebUiConfig(subDist, port);
+            writeWebUiConfig(subDist, uiName, port);
             return subDist.string();
         }
 
@@ -517,7 +556,7 @@ static std::string ensureWebUi(const std::string& uiDir,
                 std::fprintf(stderr, "Build completed but dist/index.html not found.\n");
                 return "";
             }
-            writeWebUiConfig(distDir, port);
+            writeWebUiConfig(distDir, uiName, port);
             return distDir.string();
         }
 
@@ -565,7 +604,7 @@ static std::string ensureWebUi(const std::string& uiDir,
         std::fprintf(stderr, "Build completed but dist/index.html not found.\n");
         return "";
     }
-    writeWebUiConfig(distDir, port);
+    writeWebUiConfig(distDir, uiName, port);
     std::printf("\n%s built successfully at %s\n",
                 uiName.c_str(), distDir.string().c_str());
     return distDir.string();
@@ -833,7 +872,10 @@ int main(int argc, char* argv[]) {
     // ------------------------------------------------------------------
     server.setState(PrinterState::Ready, "Tether simulated printer is ready");
     // Axes start unhomed — user must run G28 to home them.
+    // The toolhead is physically at the centre of the bed (150, 150) and
+    // 25 mm above the bed (Z=0).  G28 will move from here to the endstops.
     inst.toolheadObject()->setHomedAxes("");
+    inst.setToolheadPosition({150.0, 150.0, 25.0, 0.0});
     inst.toolheadObject()->setStatus("Idle");
     inst.toolheadObject()->setMaxVelocity(3000.0);
     inst.toolheadObject()->setMaxAccel(3000.0);

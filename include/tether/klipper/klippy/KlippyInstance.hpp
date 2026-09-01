@@ -212,6 +212,17 @@ public:
     std::shared_ptr<IdleTimeoutObject>& idleTimeoutObject() { return idleTimeoutObj_; }
     std::shared_ptr<StepperEnableObject>& stepperEnableObject() { return stepperEnableObj_; }
 
+    /// @brief Set the initial toolhead position (machine coordinates).
+    /// Updates motionState_, toolhead, motion_report, and gcode_move objects.
+    /// Use this to place the toolhead at a specific physical position before
+    /// homing (G28 will move from this position to the endstop).
+    void setToolheadPosition(const std::array<double, 4>& pos) {
+        motionState_.position = pos;
+        if (toolheadObj_) toolheadObj_->setPosition(pos);
+        if (motionReportObj_) motionReportObj_->setPosition(pos);
+        if (gcodeMoveObj_) gcodeMoveObj_->setGcodePosition(pos);
+    }
+
     // Heater/Fan/Probe backends
     /// @brief Set the heater for extruder index 0 (single-extruder convenience).
     void setExtruderHeater(std::shared_ptr<objects::Heater> h) {

@@ -65,6 +65,7 @@ KlippyServer::KlippyServer(UdsServerConfig cfg)
     registerEndpoint("server/temperature_store", [this](const JsonValue& p) { return handleServerTemperatureStore(p); });
     registerEndpoint("server/gcode_store", [this](const JsonValue& p) { return handleServerGcodeStore(p); });
     registerEndpoint("server/files/directory", [this](const JsonValue& p) { return handleServerFilesDirectory(p); });
+    registerEndpoint("server/files/get_directory", [this](const JsonValue& p) { return handleServerFilesDirectory(p); });
     registerEndpoint("server/files/move", [this](const JsonValue& p) { return handleServerFilesMove(p); });
     registerEndpoint("server/files/copy", [this](const JsonValue& p) { return handleServerFilesCopy(p); });
     registerEndpoint("server/files/delete", [this](const JsonValue& p) { return handleServerFilesDelete(p); });

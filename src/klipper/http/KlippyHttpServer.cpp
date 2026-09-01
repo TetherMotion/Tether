@@ -516,6 +516,16 @@ void KlippyHttpServer::registerRestRoutes() {
             }
         }, withAuth(config_.requireAuth, {drogon::Get, drogon::Post, drogon::Delete}));
 
+    // Moonraker alias: server/files/get_directory (GET only)
+    app.registerHandler("/server/files/get_directory",
+        [this](const drogon::HttpRequestPtr& req,
+               std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
+            auto resp = callEndpointAndBuildResponse("server/files/get_directory",
+                paramsFromRequest(req));
+            addCorsHeaders(resp, req);
+            cb(resp);
+        }, withAuth(config_.requireAuth, {drogon::Get}));
+
     app.registerHandler("/server/files/move",
         [this](const drogon::HttpRequestPtr& req,
                std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
@@ -1375,6 +1385,17 @@ drogon::HttpResponsePtr KlippyHttpServer::callEndpointAndBuildResponse(
 
     try {
         klippy::JsonValue result = server_.callEndpoint(method, params);
+
+        // KlippyServer endpoints return UDS-style responses: { "result": ... }
+        // or { "error": ... }.  For HTTP REST, buildSuccessResponse adds its
+        // own { "result": ... } envelope, so unwrap the inner "result" key
+        // to avoid double-wrapping: { "result": { "result": ... } }.
+        // Make a copy before assigning, since find() returns a pointer into
+        // result's own internal map which would be destroyed on assignment.
+        if (result.isObject() && result.has("result")) {
+            klippy::JsonValue inner = *result.find("result");
+            result = std::move(inner);
+        }
 
         // Check if the result is an error
         if (result.isObject() && result.has("error")) {

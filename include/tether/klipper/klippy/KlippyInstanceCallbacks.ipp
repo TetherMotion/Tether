@@ -73,22 +73,10 @@
                 }
             }
 
-            // Set position to NaN (unknown) for axes being homed.
-            // In real Klipper, unhomed axes have no known position.
-            {
-                std::array<double, 4> pos = motionState_.position;
-                for (char c : axes) {
-                    int idx = (c == 'x') ? 0 : (c == 'y') ? 1 : (c == 'z') ? 2 : -1;
-                    if (idx >= 0) pos[idx] = std::numeric_limits<double>::quiet_NaN();
-                }
-                motionState_.position = pos;
-                toolheadObj_->setPosition(pos);
-                motionReportObj_->setPosition(pos);
-            }
-
             // Home each axis sequentially using the kinematic simulator.
-            // This moves the axis toward its endstop position at homing_speed,
-            // producing realistic position updates over time.
+            // The current position is the physical starting point — the
+            // simulator moves the axis from there toward the endstop at
+            // homing_speed, producing realistic position updates over time.
             for (char c : axes) {
                 std::string axisName(1, c);
                 int idx = (c == 'x') ? 0 : (c == 'y') ? 1 : (c == 'z') ? 2 : -1;
@@ -112,13 +100,13 @@
                 simCfg.acceleration = settings_.acceleration;
                 simCfg.positiveDirection = hcfg.positiveDirection;
 
-                // Run the homing simulation
+                // Run the homing simulation from the current physical position
                 Simulation::HomingAxisSimulator sim(simCfg);
                 double initPos = motionState_.position[idx];
                 if (std::isnan(initPos)) initPos = hcfg.positiveDirection ? -100.0 : 100.0;
                 double finalPos = sim.run(initPos, 0.001);
 
-                // Update position
+                // Update position to the endstop position
                 motionState_.position[idx] = finalPos;
             }
 
