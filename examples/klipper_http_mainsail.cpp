@@ -454,10 +454,43 @@ int main(int argc, char* argv[]) {
     std::printf("HTTP/WebSocket server listening on port %u\n", port);
     if (!webRoot.empty()) {
         std::printf("Serving Mainsail static assets from %s\n", webRoot.c_str());
+        std::printf("\nOpen http://localhost:%u/ in a browser to access Mainsail.\n",
+                    port);
+    } else {
+        // No static assets served — print the exact docker command to start
+        // Mainsail in a container, pointing at this process via the nginx
+        // proxy config under docker/mainsail/ in the repo root.
+        namespace fs = std::filesystem;
+        // Resolve the repo root from the executable location:
+        //   build/bin/klipper_http_mainsail  ->  repo root is three levels up
+        fs::path exePath = fs::read_symlink("/proc/self/exe");
+        fs::path repoRoot = exePath.parent_path().parent_path().parent_path();
+        fs::path cfgJson  = repoRoot / "docker/mainsail/mainsail-config.json";
+        fs::path proxyConf = repoRoot / "docker/mainsail/mainsail-proxy.conf";
+
+        std::printf("\n--- Mainsail UI ---\n");
+        if (fs::exists(cfgJson) && fs::exists(proxyConf)) {
+            std::printf("Run this in another terminal to start Mainsail:\n\n");
+            std::printf("  docker run -d \\\n");
+            std::printf("    --name tether_mainsail \\\n");
+            std::printf("    -p 8080:8080 \\\n");
+            std::printf("    --add-host host.docker.internal:host-gateway \\\n");
+            std::printf("    -v \"%s:/usr/share/nginx/html/config.json\" \\\n",
+                        cfgJson.string().c_str());
+            std::printf("    -v \"%s:/etc/nginx/extra-conf.d/proxy.conf\" \\\n",
+                        proxyConf.string().c_str());
+            std::printf("    ghcr.io/mainsail-crew/mainsail:latest\n\n");
+            std::printf("Then open http://localhost:8080\n");
+        } else {
+            std::printf("No Mainsail static assets (--web-root not set) and\n");
+            std::printf("docker/mainsail/ config not found next to the build.\n");
+            std::printf("Either:\n");
+            std::printf("  • Run with --web-root /path/to/mainsail/dist, or\n");
+            std::printf("  • See docs/MainsailDocker.md for the Docker setup.\n");
+            std::printf("\nOpen http://localhost:%u/ for the raw API.\n", port);
+        }
     }
-    std::printf("\nOpen http://localhost:%u/ in a browser to access the web UI.\n",
-                port);
-    std::printf("Press Ctrl+C to stop.\n\n");
+    std::printf("\nPress Ctrl+C to stop.\n\n");
     std::fflush(stdout);
 
     // ------------------------------------------------------------------
