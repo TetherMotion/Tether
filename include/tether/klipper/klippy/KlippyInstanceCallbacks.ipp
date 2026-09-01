@@ -27,33 +27,34 @@
             // Animate the toolhead with an S-curve profile instead of
             // jumping instantly to the target.
             std::array<double, 4> target = {m[0], m[1], m[2], e + gcodeOffset_[3]};
-            activeMove_ = std::make_unique<Simulation::LinearMoveSimulator>();
-            double v = std::min(speed, settings_.maxVelocity);
-            double a = settings_.maxAccel;
-            double j = settings_.jerk > 100.0 ? settings_.jerk : a * 10.0;
-            activeMove_->start(motionState_.position, target, v, a, j);
+            startLinearMove(target, speed);
 
             moveQueueDepth_++;
-            noteActivity();
         };
         // Stored move callback (applies transform) — for canned cycles.
         moveCallback_ = [this](double x, double y, double z, double e, double speed) {
-            double px = x + gcodeOffset_[0];
-            double py = y + gcodeOffset_[1];
-            double pz = z + gcodeOffset_[2];
-            auto m = motionState_.coordTransform.toMachineXYZ(px, py, pz);
-            std::array<double, 4> pos = {m[0], m[1], m[2], e + gcodeOffset_[3]};
-            toolheadObj_->setPosition(pos);
-            motionReportObj_->setPosition(pos);
-            motionReportObj_->setVelocity(speed);
+            std::array<double, 4> target = motionState_.position;
+            if (!std::isnan(x) && !std::isnan(y) && !std::isnan(z)) {
+                double px = x + gcodeOffset_[0];
+                double py = y + gcodeOffset_[1];
+                double pz = z + gcodeOffset_[2];
+                auto m = motionState_.coordTransform.toMachineXYZ(px, py, pz);
+                target[0] = m[0];
+                target[1] = m[1];
+                target[2] = m[2];
+            }
+            if (!std::isnan(e)) target[3] = e + gcodeOffset_[3];
+            startLinearMove(target, speed);
             moveQueueDepth_++;
         };
         // Raw move callback (bypasses transform) — for G53 machine coords.
         moveCallbackRaw_ = [this](double x, double y, double z, double e, double speed) {
-            std::array<double, 4> pos = {x, y, z, e};
-            toolheadObj_->setPosition(pos);
-            motionReportObj_->setPosition(pos);
-            motionReportObj_->setVelocity(speed);
+            std::array<double, 4> target = motionState_.position;
+            if (!std::isnan(x)) target[0] = x;
+            if (!std::isnan(y)) target[1] = y;
+            if (!std::isnan(z)) target[2] = z;
+            if (!std::isnan(e)) target[3] = e;
+            startLinearMove(target, speed);
             moveQueueDepth_++;
         };
 
@@ -319,7 +320,9 @@
 
         // Nozzle clean — execute a cleaning pattern
         cb.cleanNozzle = [this](double iterations, double radius, double speed) {
-            // Execute a circular cleaning pattern via the move callback
+            // Execute a circular cleaning pattern via the raw move callback.
+            // Each point starts a new S-curve move; the final one becomes
+            // the active move and is stepped by tick().
             double centerX = motionState_.position[0];
             double centerY = motionState_.position[1];
             int iters = static_cast<int>(iterations);
@@ -332,11 +335,10 @@
                     double angle = 2.0 * M_PI * i / steps;
                     double x = centerX + radius * std::cos(angle);
                     double y = centerY + radius * std::sin(angle);
-                    // Update position and notify via toolhead/motion report
-                    std::array<double, 4> pos = {x, y, motionState_.position[2], motionState_.position[3]};
-                    toolheadObj_->setPosition(pos);
-                    motionReportObj_->setPosition(pos);
-                    motionReportObj_->setVelocity(rps * radius);
+                    if (moveCallbackRaw_) {
+                        moveCallbackRaw_(x, y, motionState_.position[2],
+                                         motionState_.position[3], rps * radius);
+                    }
                 }
             }
         };
@@ -788,16 +790,9 @@
         // --- Machine coordinates (G53) ---
         cb.moveMachine = [this](double x, double y, double z, double speed) {
             // Move in machine coordinates (bypassing coordinate transforms).
-            // We set the position directly in machine space and call the
-            // raw move callback without applying coordTransform.
-            if (!std::isnan(x)) motionState_.position[0] = x;
-            if (!std::isnan(y)) motionState_.position[1] = y;
-            if (!std::isnan(z)) motionState_.position[2] = z;
+            // The raw move callback starts an S-curve to the target.
             if (moveCallbackRaw_) {
-                moveCallbackRaw_(motionState_.position[0],
-                                 motionState_.position[1],
-                                 motionState_.position[2],
-                                 motionState_.position[3], speed);
+                moveCallbackRaw_(x, y, z, motionState_.position[3], speed);
             }
         };
 
