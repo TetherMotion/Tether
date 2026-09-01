@@ -30,7 +30,6 @@ JsonValue KlippyServer::handleServerInfo(const JsonValue& params) {
     // Fluidd reads klippy_state (not state) from server.info.
     info["klippy_state"] = JsonValue(stateToString(state_));
     info["state"] = JsonValue(stateToString(state_));
-    info["state_message"] = JsonValue(stateMessage_);
     info["klippy_connected"] = JsonValue(state_ != PrinterState::Shutdown);
     info["cpu_info"] = JsonValue("tether-klipper");
     // Moonraker's server.info includes these array fields; Fluidd accesses
