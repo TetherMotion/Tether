@@ -870,7 +870,7 @@ int main(int argc, char* argv[]) {
     // ------------------------------------------------------------------
     // Step 4: Set initial printer state
     // ------------------------------------------------------------------
-    server.setState(PrinterState::Ready, "Tether simulated printer is ready");
+    server.setState(PrinterState::Ready, "Printer is ready");
     // Axes start unhomed — user must run G28 to home them.
     // The toolhead is physically at the centre of the bed (150, 150) and
     // 25 mm above the bed (Z=0).  G28 will move from here to the endstops.
