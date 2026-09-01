@@ -4,18 +4,21 @@
 /// @brief Kinematic simulator for single-axis homing motion.
 ///
 /// Simulates the physical motion of a single printer axis during G28 homing.
-/// The axis accelerates from rest to homing speed, cruises toward the endstop
-/// position, and stops when the endstop is reached. An optional second-pass
-/// (bounce) moves back and re-approaches at a slower speed for precision.
+/// The axis uses a jerk-limited S-curve velocity profile for each phase:
+/// acceleration, cruise, and deceleration to the endstop. An optional
+/// second-pass (bounce) moves back and re-approaches at a slower speed for
+/// precision.
 ///
 /// This is a kinematic (velocity-profile) simulation, not a dynamical system
 /// in the control-theory sense — it models position vs. time under a
-/// trapezoidal velocity profile with constant acceleration, which is how
-/// real stepper-driven axes behave during homing.
+/// 7-phase S-curve, which is how real stepper-driven axes behave during
+/// controlled homing moves.
 ///
 /// Used by the Klipper G28 handler to produce realistic position updates
 /// during homing so that Mainsail/Fluidd see the toolhead move to the
 /// endstop position over time, just like a real printer.
+
+#include "tether/motion_planner/SCurveProfile.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -51,14 +54,14 @@ struct HomingStepResult {
 
 /// @brief Kinematic simulator for single-axis homing.
 ///
-/// Models the trapezoidal velocity profile motion of a stepper-driven axis
+/// Models the S-curve velocity profile motion of a stepper-driven axis
 /// during G28 homing. The simulation proceeds in phases:
 ///
-/// 1. **Seek**: Accelerate from current position toward the endstop at
-///    `homingSpeed`. Stop when position reaches `endstopPosition`.
-/// 2. **Bounce** (if `secondHomingSpeed > 0`): Move back by `bounceDistance`,
-///    then re-approach at `secondHomingSpeed`.
-/// 3. **Settle**: Set final position to `endstopPosition`.
+/// 1. **Seek**: S-curve from current position to the endstop, starting and
+///    ending at rest.
+/// 2. **Bounce** (if `secondHomingSpeed > 0`): S-curve back by
+///    `bounceDistance`, then S-curve re-approach at `secondHomingSpeed`.
+/// 3. **Settle**: Final position is `endstopPosition`.
 ///
 /// The simulator is stepped forward in time with `step(dt)`. Each step
 /// returns the current position, velocity, and whether the endstop has
@@ -84,37 +87,29 @@ public:
         phase_ = Phase::Seeking;
         endstopTriggered_ = false;
         complete_ = false;
-        // Compute direction toward endstop
-        direction_ = (config_.endstopPosition >= initialPosition) ? 1.0 : -1.0;
-        // If positiveDirection is false, we home toward min (endstop at min)
-        if (!config_.positiveDirection) {
-            direction_ = -1.0;
-        }
+        startPhase(config_.endstopPosition, config_.homingSpeed);
     }
 
     /// @brief Advance the simulation by dt seconds.
     /// @param dt Time step in seconds.
     /// @return Step result with current position, velocity, and flags.
     HomingStepResult step(double dt) {
-        if (complete_ || phase_ == Phase::Idle) {
+        if (complete_ || phase_ == Phase::Idle || phase_ == Phase::Settled) {
             return {currentPosition_, currentVelocity_, elapsedTime_,
                     endstopTriggered_, complete_};
         }
 
         elapsedTime_ += dt;
+        phaseElapsed_ += dt;
 
-        switch (phase_) {
-            case Phase::Seeking:
-                stepSeeking(dt);
-                break;
-            case Phase::Bouncing:
-                stepBouncing(dt);
-                break;
-            case Phase::ReApproaching:
-                stepReApproaching(dt);
-                break;
-            default:
-                break;
+        if (phaseElapsed_ >= profile_.totalDuration()) {
+            currentPosition_ = phaseTarget_;
+            currentVelocity_ = 0.0;
+            finishPhase();
+        } else {
+            auto state = profile_.evaluateAt(phaseElapsed_);
+            currentPosition_ = phaseStartPos_ + state.position * phaseDirection_;
+            currentVelocity_ = state.velocity * phaseDirection_;
         }
 
         return {currentPosition_, currentVelocity_, elapsedTime_,
@@ -169,88 +164,71 @@ private:
     double currentPosition_ = 0.0;
     double currentVelocity_ = 0.0;
     double elapsedTime_ = 0.0;
-    double direction_ = 1.0;
+    double phaseStartPos_ = 0.0;
+    double phaseTarget_ = 0.0;
+    double phaseDirection_ = 1.0;
+    double phaseElapsed_ = 0.0;
     Phase phase_ = Phase::Idle;
     bool endstopTriggered_ = false;
     bool complete_ = false;
+    MotionPlanner::SCurveProfile<double> profile_;
 
-    void stepSeeking(double dt) {
-        // Accelerate toward target speed
-        double targetSpeed = config_.homingSpeed * direction_;
-        double dv = config_.acceleration * dt;
-        if (std::abs(currentVelocity_) < std::abs(targetSpeed)) {
-            currentVelocity_ += direction_ * dv;
-            if (std::abs(currentVelocity_) > std::abs(targetSpeed)) {
-                currentVelocity_ = targetSpeed;
-            }
+    /// @brief Set up an S-curve profile for the current phase.
+    /// @param target Position to reach in this phase.
+    /// @param maxVelocity Maximum cruise velocity for this phase.
+    void startPhase(double target, double maxVelocity) {
+        phaseStartPos_ = currentPosition_;
+        phaseTarget_ = target;
+        phaseDirection_ = (target >= currentPosition_) ? 1.0 : -1.0;
+        double distance = std::abs(target - currentPosition_);
+        phaseElapsed_ = 0.0;
+
+        if (distance < 1e-12 || maxVelocity <= 0.0) {
+            // Trivial move — finish this phase immediately.
+            currentPosition_ = target;
+            currentVelocity_ = 0.0;
+            finishPhase();
+            return;
         }
 
-        // Move
-        currentPosition_ += currentVelocity_ * dt;
+        MotionPlanner::SCurveConstraints<double> constraints;
+        constraints.maxVelocity = maxVelocity;
+        constraints.maxAcceleration = config_.acceleration;
+        constraints.maxJerk = config_.acceleration * 10.0;
 
-        // Check if we've reached the endstop position
-        double distToEndstop = (config_.endstopPosition - currentPosition_) * direction_;
-        if (distToEndstop <= 0.0) {
-            currentPosition_ = config_.endstopPosition;
+        bool ok = profile_.compute(distance, 0.0, 0.0, constraints);
+        if (!ok) {
+            // Fall back to an instant jump if the profile cannot be computed.
+            currentPosition_ = target;
             currentVelocity_ = 0.0;
-            endstopTriggered_ = true;
+            finishPhase();
+        }
+    }
 
-            if (config_.secondHomingSpeed > 0.0 && config_.bounceDistance > 0.0) {
-                // Start bounce phase
-                phase_ = Phase::Bouncing;
-            } else {
-                // Single pass — done
+    /// @brief Advance to the next phase or mark homing complete.
+    void finishPhase() {
+        switch (phase_) {
+            case Phase::Seeking:
+                endstopTriggered_ = true;
+                if (config_.secondHomingSpeed > 0.0 && config_.bounceDistance > 0.0) {
+                    phase_ = Phase::Bouncing;
+                    startPhase(config_.endstopPosition - phaseDirection_ * config_.bounceDistance,
+                               config_.homingSpeed);
+                } else {
+                    phase_ = Phase::Settled;
+                    complete_ = true;
+                }
+                break;
+            case Phase::Bouncing:
+                phase_ = Phase::ReApproaching;
+                startPhase(config_.endstopPosition, config_.secondHomingSpeed);
+                break;
+            case Phase::ReApproaching:
                 phase_ = Phase::Settled;
                 complete_ = true;
-            }
-        }
-    }
-
-    void stepBouncing(double dt) {
-        // Move away from endstop by bounceDistance
-        double bounceTarget = config_.endstopPosition - direction_ * config_.bounceDistance;
-        double targetSpeed = config_.homingSpeed * (-direction_); // reverse direction
-
-        // Accelerate to reverse speed
-        double dv = config_.acceleration * dt;
-        if (std::abs(currentVelocity_) < std::abs(targetSpeed)) {
-            currentVelocity_ += (-direction_) * dv;
-            if (std::abs(currentVelocity_) > std::abs(targetSpeed)) {
-                currentVelocity_ = targetSpeed;
-            }
-        }
-
-        currentPosition_ += currentVelocity_ * dt;
-
-        // Check if we've moved far enough
-        double distBounced = (currentPosition_ - config_.endstopPosition) * (-direction_);
-        if (distBounced >= config_.bounceDistance) {
-            currentPosition_ = bounceTarget;
-            currentVelocity_ = 0.0;
-            phase_ = Phase::ReApproaching;
-        }
-    }
-
-    void stepReApproaching(double dt) {
-        // Re-approach endstop at second homing speed
-        double targetSpeed = config_.secondHomingSpeed * direction_;
-        double dv = config_.acceleration * dt;
-        if (std::abs(currentVelocity_) < std::abs(targetSpeed)) {
-            currentVelocity_ += direction_ * dv;
-            if (std::abs(currentVelocity_) > std::abs(targetSpeed)) {
-                currentVelocity_ = targetSpeed;
-            }
-        }
-
-        currentPosition_ += currentVelocity_ * dt;
-
-        // Check if we've reached the endstop
-        double distToEndstop = (config_.endstopPosition - currentPosition_) * direction_;
-        if (distToEndstop <= 0.0) {
-            currentPosition_ = config_.endstopPosition;
-            currentVelocity_ = 0.0;
-            phase_ = Phase::Settled;
-            complete_ = true;
+                break;
+            default:
+                break;
         }
     }
 };
@@ -258,7 +236,7 @@ private:
 /// @brief Multi-axis homing coordinator.
 ///
 /// Homes axes sequentially (X, then Y, then Z) using HomingAxisSimulator
-/// instances. This mirrors how Klipper homes axes one at a time by default
+/// instances. This mirrors how Klipper homes axes one time by default
 /// (unless multi-axis homing is configured).
 class HomingCoordinator {
 public:
