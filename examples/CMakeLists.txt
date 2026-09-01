@@ -342,6 +342,6 @@ if(TETHER_BUILD_KLIPPER)
     if(TARGET Tether::KlipperHttp)
         add_tether_example(klipper_http_mainsail
             SOURCE klipper_http_mainsail.cpp
-            LIBRARIES Tether::KlipperHttp Tether::Klipper tether_common)
+            LIBRARIES Tether::KlipperHttp Tether::Klipper tether_common tether_simulation)
     endif()
 endif()
