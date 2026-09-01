@@ -146,23 +146,34 @@ JsonValue KlippyServer::handleWebcamsUpdate(const JsonValue& params) {
         return JsonValue(result);
     }
     // Update fields if present
-    const JsonValue* urlVal = params.find("url");
-    if (urlVal && urlVal->isString()) it->second.url = urlVal->asString();
+    const JsonValue* streamVal = params.find("stream_url");
+    if (streamVal && streamVal->isString()) it->second.streamUrl = streamVal->asString();
+    const JsonValue* snapshotVal = params.find("snapshot_url");
+    if (snapshotVal && snapshotVal->isString()) it->second.snapshotUrl = snapshotVal->asString();
     const JsonValue* serviceVal = params.find("service");
     if (serviceVal && serviceVal->isString()) it->second.service = serviceVal->asString();
     const JsonValue* enabledVal = params.find("enabled");
     if (enabledVal && enabledVal->isBool()) it->second.enabled = enabledVal->asBool();
     const JsonValue* rotationVal = params.find("rotation");
     if (rotationVal && rotationVal->isInt()) it->second.rotation = rotationVal->asInt();
-    // Return updated webcam
+    // Return updated webcam (Moonraker format)
     std::map<std::string, JsonValue> webcam;
     webcam["name"] = JsonValue(it->second.name);
-    webcam["url"] = JsonValue(it->second.url);
+    webcam["location"] = JsonValue(it->second.location);
     webcam["service"] = JsonValue(it->second.service);
     webcam["enabled"] = JsonValue(it->second.enabled);
-    webcam["rotation"] = JsonValue(it->second.rotation);
+    webcam["icon"] = JsonValue(it->second.icon);
+    webcam["target_fps"] = JsonValue(static_cast<int64_t>(it->second.targetFps));
+    webcam["target_fps_idle"] = JsonValue(static_cast<int64_t>(it->second.targetFpsIdle));
+    webcam["stream_url"] = JsonValue(it->second.streamUrl);
+    webcam["snapshot_url"] = JsonValue(it->second.snapshotUrl);
+    webcam["flip_horizontal"] = JsonValue(it->second.flipHorizontal);
+    webcam["flip_vertical"] = JsonValue(it->second.flipVertical);
+    webcam["rotation"] = JsonValue(static_cast<int64_t>(it->second.rotation));
     webcam["aspect_ratio"] = JsonValue(it->second.aspectRatio);
+    webcam["extra_data"] = JsonValue(std::map<std::string, JsonValue>{});
     webcam["source"] = JsonValue(it->second.source);
+    webcam["uid"] = JsonValue(it->second.uid);
     result["result"] = JsonValue(webcam);
     return JsonValue(result);
 }

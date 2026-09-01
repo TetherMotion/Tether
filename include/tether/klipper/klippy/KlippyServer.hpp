@@ -525,15 +525,23 @@ private:
     };
     std::vector<Announcement> announcements_;
 
-    // Webcams
+    // Webcams — matches Moonraker's webcam entry spec
     struct Webcam {
         std::string name;
-        std::string url;
+        std::string location = "printer";
         std::string service = "mjpegstreamer";
         bool enabled = true;
+        std::string icon = "mdiWebcam";
+        int targetFps = 15;
+        int targetFpsIdle = 5;
+        std::string streamUrl;
+        std::string snapshotUrl;
+        bool flipHorizontal = false;
+        bool flipVertical = false;
         int rotation = 0;
-        double aspectRatio = 4.0 / 3.0;
+        std::string aspectRatio = "4:3";
         std::string source = "database";
+        std::string uid;
     };
     std::map<std::string, Webcam> webcams_;
 
