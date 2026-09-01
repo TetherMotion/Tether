@@ -275,18 +275,23 @@ JsonValue KlippyServer::handleDatabaseList(const JsonValue& params) {
 
 JsonValue KlippyServer::handleDatabaseGet(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    std::map<std::string, JsonValue> result;
     std::string ns = params.has("namespace") && params.find("namespace")->isString()
         ? params.find("namespace")->asString() : "";
     std::string key = params.has("key") && params.find("key")->isString()
         ? params.find("key")->asString() : "";
 
     auto val = databaseGet(ns, key);
+    // Moonraker returns { namespace, key, value } for get_item.
+    // For missing keys, return value: null so Mainsail initializes defaults
+    // instead of logging an error.
+    std::map<std::string, JsonValue> result;
     if (val) {
-        result["result"] = *val;
+        result["value"] = *val;
     } else {
-        result["error"] = JsonValue("Key not found");
+        result["value"] = JsonValue();  // null
     }
+    result["namespace"] = JsonValue(ns);
+    result["key"] = JsonValue(key);
     return JsonValue(result);
 }
 
