@@ -217,8 +217,8 @@ KlippyServer::KlippyServer(UdsServerConfig cfg)
     registerService("webcamd", "active", "running");
     registerService("klipper-mcu", "active", "running");
 
-    // Initialize default webcams
-    registerWebcam("default", "http://localhost:8080/?action=stream");
+    // No default webcams — Mainsail handles an empty webcam list gracefully.
+    // Registering a fake URL causes "Failed to fetch" errors in the browser.
 
     // Initialize emulated server config
     initServerConfig();

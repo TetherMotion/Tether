@@ -647,8 +647,9 @@ int main(int argc, char* argv[]) {
     inst.mcuObject()->setMcuVersion("tether-sim-mcu-1.0.0");
     inst.mcuObject()->setFreq(180000000);
 
-    // Register a webcam and power devices for Mainsail display
-    server.registerWebcam("webcam1", "http://localhost:8080/?action=stream");
+    // Register power devices for Mainsail display.
+    // No webcam registered — there's no actual camera stream, and a fake URL
+    // causes "Failed to fetch" errors in the browser.
     server.registerPowerDevice("printer", "on");
     server.registerPowerDevice("lights", "off");
 
