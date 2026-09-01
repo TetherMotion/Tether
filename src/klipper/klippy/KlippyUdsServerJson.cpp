@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <ctime>
 #include <fcntl.h>
@@ -39,7 +40,11 @@ std::string JsonValue::dump() const {
         case Type::Bool:   os << (bool_ ? "true" : "false"); break;
         case Type::Int:    os << int_; break;
         case Type::Double:
-            os << std::setprecision(17) << double_;
+            if (std::isnan(double_) || std::isinf(double_)) {
+                os << "null";
+            } else {
+                os << std::setprecision(17) << double_;
+            }
             break;
         case Type::String: {
             os << '"';
