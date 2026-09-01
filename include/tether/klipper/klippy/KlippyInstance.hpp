@@ -50,6 +50,7 @@
 #include "tether/klipper/klippy/SystemStatsProvider.hpp"
 #include "tether/io/SpiDriver.hpp"
 #include "tether/simulation/systems/mechanical/HomingAxisSimulator.hpp"
+#include "tether/simulation/systems/mechanical/LinearMoveSimulator.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -593,14 +594,19 @@ public:
                 motionDispatcher_->move(m[0], m[1], m[2],
                                         e + gcodeOffset_[3], speed);
             }
-            // Update the printer object model (machine coordinates).
-            std::array<double, 4> pos = {m[0], m[1], m[2], e + gcodeOffset_[3]};
-            toolheadObj_->setPosition(pos);
-            motionReportObj_->setPosition(pos);
             // Report program coordinates for gcode_move.gcode_position.
             std::array<double, 4> gpos = {px, py, pz, e + gcodeOffset_[3]};
             gcodeMoveObj_->setGcodePosition(gpos);
-            motionReportObj_->setVelocity(speed);
+
+            // Animate the toolhead with an S-curve profile instead of
+            // jumping instantly to the target.
+            std::array<double, 4> target = {m[0], m[1], m[2], e + gcodeOffset_[3]};
+            activeMove_ = std::make_unique<Simulation::LinearMoveSimulator>();
+            double v = std::min(speed, settings_.maxVelocity);
+            double a = settings_.maxAccel;
+            double j = settings_.jerk > 100.0 ? settings_.jerk : a * 10.0;
+            activeMove_->start(motionState_.position, target, v, a, j);
+
             moveQueueDepth_++;
             noteActivity();
         };
@@ -764,6 +770,11 @@ public:
     /// Updates toolhead/motion positions in real-time. When all axes
     /// complete, marks them as homed and clears the active homing state.
     void stepActiveHoming() {
+        // Prevent an in-progress S-curve move from overriding homing positions
+        // while axes are still seeking their endstops.
+        if (!activeHomingAxes_.empty() && activeMove_) {
+            activeMove_->finish();
+        }
         bool allComplete = true;
         for (auto& ah : activeHomingAxes_) {
             if (!ah.sim || ah.sim->isComplete()) continue;
@@ -791,6 +802,26 @@ public:
         }
     }
 
+    /// @brief Step the active S-curve linear move by simTickDt_.
+    /// Updates toolhead/motion positions in real-time so the simulated
+    /// printer reaches the target with a smooth S-curve instead of jumping.
+    void stepActiveMove() {
+        if (!activeMove_) return;
+
+        auto result = activeMove_->step(simTickDt_);
+        motionState_.position = result.position;
+
+        if (toolheadObj_) toolheadObj_->setPosition(result.position);
+        if (motionReportObj_) {
+            motionReportObj_->setPosition(result.position);
+            motionReportObj_->setVelocity(result.velocity);
+        }
+
+        if (result.complete) {
+            activeMove_.reset();
+        }
+    }
+
     /// @brief Process due delayed G-codes (call periodically).
     /// Executes any delayed G-codes whose scheduled time has passed.
     /// Also checks idle timeout and executes timeout G-code if expired.
@@ -804,6 +835,11 @@ public:
         // Step active homing simulators (asynchronous homing)
         if (!activeHomingAxes_.empty()) {
             stepActiveHoming();
+        }
+
+        // Step active S-curve linear move
+        if (activeMove_) {
+            stepActiveMove();
         }
 
         // Process delayed G-codes
@@ -1171,6 +1207,10 @@ private:
     std::vector<ActiveHomingAxis> activeHomingAxes_;
     std::string pendingHomedAxes_; ///< axes to mark homed when all sims complete
     double simTickDt_ = 0.1; ///< dt for homing simulation steps (seconds)
+
+    // Active S-curve linear move — when present, stepActiveMove() animates
+    // the toolhead toward a target coordinate instead of jumping there.
+    std::unique_ptr<Simulation::LinearMoveSimulator> activeMove_;
 
     // Autotuning bridges (delegate to Tether autotuning framework)
     std::unique_ptr<HeaterAutotuneBridge> extruderAutotuneBridge_;

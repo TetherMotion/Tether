@@ -19,10 +19,20 @@
             double py = y + gcodeOffset_[1];
             double pz = z + gcodeOffset_[2];
             auto m = motionState_.coordTransform.toMachineXYZ(px, py, pz);
-            std::array<double, 4> pos = {m[0], m[1], m[2], e + gcodeOffset_[3]};
-            toolheadObj_->setPosition(pos);
-            motionReportObj_->setPosition(pos);
-            motionReportObj_->setVelocity(speed);
+
+            // Report program coordinates for gcode_move.gcode_position.
+            std::array<double, 4> gpos = {px, py, pz, e + gcodeOffset_[3]};
+            if (gcodeMoveObj_) gcodeMoveObj_->setGcodePosition(gpos);
+
+            // Animate the toolhead with an S-curve profile instead of
+            // jumping instantly to the target.
+            std::array<double, 4> target = {m[0], m[1], m[2], e + gcodeOffset_[3]};
+            activeMove_ = std::make_unique<Simulation::LinearMoveSimulator>();
+            double v = std::min(speed, settings_.maxVelocity);
+            double a = settings_.maxAccel;
+            double j = settings_.jerk > 100.0 ? settings_.jerk : a * 10.0;
+            activeMove_->start(motionState_.position, target, v, a, j);
+
             moveQueueDepth_++;
             noteActivity();
         };
