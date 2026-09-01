@@ -140,6 +140,17 @@ public:
                 return "";
             }
 
+            // Unwrap UDS-style { "result": ... } envelope.  The endpoint
+            // callable returns UDS format, but JSON-RPC wraps the inner
+            // value directly in its own "result" field.  Without unwrapping,
+            // the client gets result.result.X (double-wrapped).
+            // Copy first to avoid self-assignment (find returns a pointer
+            // into result's own map, which would be destroyed mid-copy).
+            if (result.isObject() && result.has("result")) {
+                klippy::JsonValue inner = *result.find("result");
+                result = std::move(inner);
+            }
+
             if (hasId) {
                 return buildJsonRpcSuccess(id, result);
             }
