@@ -232,19 +232,29 @@ JsonValue KlippyServer::handleServerTemperatureStore(const JsonValue& params) {
 }
 
 JsonValue KlippyServer::handleServerGcodeStore(const JsonValue& params) {
-    std::map<std::string, JsonValue> result;
+    // Moonraker returns { "gcode_store": [ { "message": ..., "time": ..., "type": ... }, ... ] }
     std::vector<JsonValue> gcodes;
 
-    for (const auto& entry : gcodeStore_) {
-        std::map<std::string, JsonValue> gc;
-        gc["message"] = JsonValue(entry.message);
-        auto secs = std::chrono::duration_cast<std::chrono::seconds>(
-            entry.timestamp.time_since_epoch()).count();
-        gc["time"] = JsonValue(static_cast<double>(secs));
-        gcodes.push_back(JsonValue(gc));
+    int count = -1;
+    if (params.has("count") && params.find("count")->isInt()) {
+        count = static_cast<int>(params.find("count")->asInt());
     }
 
-    result["result"] = JsonValue(gcodes);
+    int n = 0;
+    for (const auto& entry : gcodeStore_) {
+        if (count >= 0 && n >= count) break;
+        std::map<std::string, JsonValue> gc;
+        gc["message"] = JsonValue(entry.message);
+        auto secs = std::chrono::duration<double>(
+            entry.timestamp.time_since_epoch()).count();
+        gc["time"] = JsonValue(secs);
+        gc["type"] = JsonValue(entry.type);
+        gcodes.push_back(JsonValue(gc));
+        n++;
+    }
+
+    std::map<std::string, JsonValue> result;
+    result["gcode_store"] = JsonValue(gcodes);
     return JsonValue(result);
 }
 
