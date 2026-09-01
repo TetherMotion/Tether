@@ -423,8 +423,30 @@ JsonValue KlippyServer::handleServerFilesDirectory(const JsonValue& params) {
         ? params.find("path")->asString() : "/";
     std::string action = params.has("action") && params.find("action")->isString()
         ? params.find("action")->asString() : "list";
-    std::string rootName = params.has("root") && params.find("root")->isString()
-        ? params.find("root")->asString() : "gcodes";
+
+    // Mainsail/Fluidd call get_directory with { path: "config" } or
+    // { path: "config/subdir" } — the first path segment is the root name.
+    // The explicit "root" param is used by the HTTP REST route
+    // /server/files/directory?root=config&path=/.
+    std::string rootName = "gcodes";
+    std::string subPath;
+
+    if (params.has("root") && params.find("root")->isString()) {
+        // Explicit root parameter (HTTP REST style)
+        rootName = params.find("root")->asString();
+        subPath = path;
+    } else {
+        // Moonraker style: path = "rootname[/subpath]"
+        while (!path.empty() && path.front() == '/') path.erase(0, 1);
+        auto slashPos = path.find('/');
+        if (slashPos == std::string::npos) {
+            rootName = path;
+            subPath = "";
+        } else {
+            rootName = path.substr(0, slashPos);
+            subPath = path.substr(slashPos + 1);
+        }
+    }
 
     // Resolve the root path from the registered file roots
     std::string rootPath = fileRoot_;
@@ -434,28 +456,41 @@ JsonValue KlippyServer::handleServerFilesDirectory(const JsonValue& params) {
     }
 
     // Normalise the sub-path (strip leading slashes)
-    while (!path.empty() && path.front() == '/') path.erase(0, 1);
+    while (!subPath.empty() && subPath.front() == '/') subPath.erase(0, 1);
 
-    std::string fullPath = path.empty() ? rootPath : (rootPath + "/" + path);
+    std::string fullPath = subPath.empty() ? rootPath : (rootPath + "/" + subPath);
     namespace fs = std::filesystem;
+
+    // Determine permissions for this root
+    std::string perms = "r";
+    if (rootIt != fileRoots_.end() && rootIt->second.writable) {
+        perms = "rw";
+    }
 
     if (action == "list") {
         std::vector<JsonValue> dirs, files;
         if (fs::exists(fullPath) && fs::is_directory(fullPath)) {
             try {
                 for (const auto& entry : fs::directory_iterator(fullPath)) {
-                    std::map<std::string, JsonValue> info;
-                    info["path"] = JsonValue(entry.path().filename().string());
+                    std::string name = entry.path().filename().string();
+                    // Skip hidden files/dirs (Mainsail filters these too)
+                    if (!name.empty() && name.front() == '.') continue;
                     if (entry.is_directory()) {
+                        std::map<std::string, JsonValue> info;
+                        info["dirname"] = JsonValue(name);
                         info["size"] = JsonValue(static_cast<int64_t>(0));
                         info["modified"] = JsonValue(0.0);
+                        info["permissions"] = JsonValue(perms);
                         dirs.push_back(JsonValue(info));
                     } else {
+                        std::map<std::string, JsonValue> info;
+                        info["filename"] = JsonValue(name);
                         info["size"] = JsonValue(static_cast<int64_t>(entry.file_size()));
                         auto ftime = entry.last_write_time();
                         auto sctp = std::chrono::time_point_cast<std::chrono::seconds>(ftime);
                         info["modified"] = JsonValue(static_cast<double>(
                             sctp.time_since_epoch().count()));
+                        info["permissions"] = JsonValue(perms);
                         files.push_back(JsonValue(info));
                     }
                 }
@@ -463,12 +498,27 @@ JsonValue KlippyServer::handleServerFilesDirectory(const JsonValue& params) {
         }
         dirInfo["dirs"] = JsonValue(dirs);
         dirInfo["files"] = JsonValue(files);
+
+        // disk_usage (Mainsail expects this field)
+        std::map<std::string, JsonValue> diskUsage;
+        diskUsage["total"] = JsonValue(static_cast<int64_t>(0));
+        diskUsage["used"] = JsonValue(static_cast<int64_t>(0));
+        diskUsage["free"] = JsonValue(static_cast<int64_t>(0));
+        dirInfo["disk_usage"] = JsonValue(diskUsage);
+
+        // root_info (optional, Mainsail reads it if present)
+        std::map<std::string, JsonValue> rootInfo;
+        rootInfo["name"] = JsonValue(rootName);
+        rootInfo["path"] = JsonValue(rootPath);
+        rootInfo["permissions"] = JsonValue(perms);
+        dirInfo["root_info"] = JsonValue(rootInfo);
+
         result["result"] = JsonValue(dirInfo);
     } else if (action == "create_dir") {
         try {
             fs::create_directories(fullPath);
             result["result"] = JsonValue(true);
-            notifyFilelistChanged("create_dir", path, "gcodes");
+            notifyFilelistChanged("create_dir", subPath, rootName);
         } catch (const std::exception& e) {
             result["error"] = JsonValue(std::string("Create directory failed: ") + e.what());
         }
@@ -476,7 +526,7 @@ JsonValue KlippyServer::handleServerFilesDirectory(const JsonValue& params) {
         try {
             fs::remove_all(fullPath);
             result["result"] = JsonValue(true);
-            notifyFilelistChanged("delete_dir", path, "gcodes");
+            notifyFilelistChanged("delete_dir", subPath, rootName);
         } catch (const std::exception& e) {
             result["error"] = JsonValue(std::string("Delete directory failed: ") + e.what());
         }
