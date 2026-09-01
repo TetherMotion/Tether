@@ -41,6 +41,8 @@
 #include "tether/simulation/systems/thermal/SingleZoneOven.hpp"
 #include "tether/utils/SignalHandler.hpp"
 
+#include <argparse/argparse.hpp>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -50,6 +52,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -144,88 +147,122 @@ static void generateSampleGcode(const std::string& path, int layers) {
 // Main
 // ============================================================================
 
-static void printUsage(const char* prog) {
-    std::printf(
-        "Usage: %s [OPTIONS]\n"
-        "\n"
-        "Options:\n"
-        "  --port PORT         HTTP listen port (default: 7125)\n"
-        "  --uds-path PATH     UDS socket path (default: /tmp/klippy_uds)\n"
-        "  --web-root DIR      Directory containing Mainsail static assets\n"
-        "  --gcodes-root DIR   G-code file root (default: /tmp/tether_sdcard)\n"
-        "  --config-root DIR   Config file root (default: /etc/tether)\n"
-        "  --logs-root DIR     Log file root (default: /var/log)\n"
-        "  --api-key KEY       API key for authentication (default: tether_default_api_key)\n"
-        "  --no-auth           Disable authentication\n"
-        "  --sim-tick-ms MS    Simulation tick interval in ms (default: 100)\n"
-        "  --help              Show this help message\n"
-        "\n"
-        "Example:\n"
-        "  %s --port 7125 --web-root /opt/mainsail --gcodes-root /home/pi/gcodes\n"
-        "\n"
-        "Then open http://localhost:7125/ in a browser to access Mainsail.\n",
-        prog, prog);
+/// @brief Resolve a writable default data directory.
+/// Uses $XDG_DATA_HOME/tether, $HOME/.local/share/tether, or /tmp/tether
+/// (in that order) so the example never tries to write to /etc or /var.
+static std::string defaultDataDir(const std::string& subdir) {
+    namespace fs = std::filesystem;
+    // 1. XDG_DATA_HOME
+    if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg && *xdg) {
+        return (fs::path(xdg) / "tether" / subdir).string();
+    }
+    // 2. $HOME/.local/share/tether
+    if (const char* home = std::getenv("HOME"); home && *home) {
+        return (fs::path(home) / ".local" / "share" / "tether" / subdir).string();
+    }
+    // 3. /tmp/tether (always writable)
+    return (fs::path("/tmp/tether") / subdir).string();
+}
+
+/// @brief Resolve a writable default config directory.
+static std::string defaultConfigDir() {
+    namespace fs = std::filesystem;
+    if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg) {
+        return (fs::path(xdg) / "tether").string();
+    }
+    if (const char* home = std::getenv("HOME"); home && *home) {
+        return (fs::path(home) / ".config" / "tether").string();
+    }
+    return "/tmp/tether/config";
 }
 
 int main(int argc, char* argv[]) {
-    // Defaults
-    uint16_t port = 7125;
-    std::string udsPath = "/tmp/klippy_uds";
-    std::string webRoot;
-    std::string gcodesRoot = "/tmp/tether_sdcard";
-    std::string configRoot = "/etc/tether";
-    std::string logsRoot = "/var/log";
-    std::string apiKey = "tether_default_api_key";
-    bool requireAuth = true;
-    int simTickMs = 100;
+    // ------------------------------------------------------------------
+    // Argument parsing (argparse)
+    // ------------------------------------------------------------------
+    argparse::ArgumentParser program("klipper_http_mainsail", "1.0",
+        argparse::default_arguments::help);
 
-    // Parse arguments
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        auto nextArg = [&]() -> std::string {
-            if (i + 1 >= argc) {
-                std::fprintf(stderr, "Error: %s requires a value\n", argv[i]);
-                std::exit(1);
-            }
-            return argv[++i];
-        };
+    program.add_argument("--port")
+        .scan<'i', int>()
+        .default_value(7125)
+        .help("HTTP listen port (default: 7125)");
 
-        if (arg == "--help" || arg == "-h") {
-            printUsage(argv[0]);
-            return 0;
-        } else if (arg == "--port") {
-            port = static_cast<uint16_t>(std::atoi(nextArg().c_str()));
-        } else if (arg == "--uds-path") {
-            udsPath = nextArg();
-        } else if (arg == "--web-root") {
-            webRoot = nextArg();
-        } else if (arg == "--gcodes-root") {
-            gcodesRoot = nextArg();
-        } else if (arg == "--config-root") {
-            configRoot = nextArg();
-        } else if (arg == "--logs-root") {
-            logsRoot = nextArg();
-        } else if (arg == "--api-key") {
-            apiKey = nextArg();
-        } else if (arg == "--no-auth") {
-            requireAuth = false;
-        } else if (arg == "--sim-tick-ms") {
-            simTickMs = std::atoi(nextArg().c_str());
-            if (simTickMs < 10) simTickMs = 10;
-        } else {
-            std::fprintf(stderr, "Unknown option: %s\n", arg.c_str());
-            printUsage(argv[0]);
-            return 1;
-        }
+    program.add_argument("--uds-path")
+        .default_value(std::string("/tmp/klippy_uds"))
+        .help("UDS socket path (default: /tmp/klippy_uds)");
+
+    program.add_argument("--web-root")
+        .default_value(std::string(""))
+        .help("Directory containing Mainsail static assets (default: disabled)");
+
+    program.add_argument("--gcodes-root")
+        .default_value(defaultDataDir("gcodes"))
+        .help("G-code file root");
+
+    program.add_argument("--config-root")
+        .default_value(defaultConfigDir())
+        .help("Config file root");
+
+    program.add_argument("--logs-root")
+        .default_value(defaultDataDir("logs"))
+        .help("Log file root");
+
+    program.add_argument("--api-key")
+        .default_value(std::string("tether_default_api_key"))
+        .help("API key for authentication");
+
+    program.add_argument("--no-auth")
+        .implicit_value(true)
+        .default_value(false)
+        .help("Disable authentication");
+
+    program.add_argument("--sim-tick-ms")
+        .scan<'i', int>()
+        .default_value(100)
+        .help("Simulation tick interval in ms (default: 100, min: 10)");
+
+    try {
+        program.parse_args(argc, argv);
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << "\n" << program;
+        return 1;
     }
+
+    const auto port = static_cast<uint16_t>(program.get<int>("--port"));
+    const auto udsPath = program.get<std::string>("--uds-path");
+    const auto webRoot = program.get<std::string>("--web-root");
+    const auto gcodesRoot = program.get<std::string>("--gcodes-root");
+    const auto configRoot = program.get<std::string>("--config-root");
+    const auto logsRoot = program.get<std::string>("--logs-root");
+    const auto apiKey = program.get<std::string>("--api-key");
+    const bool requireAuth = !program.get<bool>("--no-auth");
+    int simTickMs = program.get<int>("--sim-tick-ms");
+    if (simTickMs < 10) simTickMs = 10;
 
     // Install signal handlers
     std::atomic<bool> running{true};
     Tether::Utils::SignalHandler sig_handler(running, false);
 
-    // Ensure directories exist
-    std::filesystem::create_directories(gcodesRoot);
-    std::filesystem::create_directories(configRoot);
+    // Ensure directories exist (use error_code overload so we don't throw)
+    auto ensureDir = [](const std::string& path, const char* label) {
+        std::error_code ec;
+        std::filesystem::create_directories(path, ec);
+        if (ec) {
+            std::fprintf(stderr,
+                         "Warning: cannot create %s directory '%s': %s\n",
+                         label, path.c_str(), ec.message().c_str());
+            std::fprintf(stderr,
+                         "Use --%s DIR to specify a writable path.\n", label);
+            return false;
+        }
+        return true;
+    };
+    if (!ensureDir(gcodesRoot, "gcodes-root") ||
+        !ensureDir(configRoot, "config-root") ||
+        !ensureDir(logsRoot, "logs-root")) {
+        return 1;
+    }
 
     // Generate a sample G-code file so the user can test printing immediately
     const std::string sampleFile = "tether_calibration_square.gcode";
