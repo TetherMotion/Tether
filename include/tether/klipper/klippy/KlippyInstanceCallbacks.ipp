@@ -29,6 +29,14 @@
             std::array<double, 4> target = {m[0], m[1], m[2], e + gcodeOffset_[3]};
             startLinearMove(target, speed);
 
+            // Provide an immediate preview of the target position for UIs
+            // and tests, then tick()/pumpMotionBackend() will smooth/sync it.
+            if (toolheadObj_) toolheadObj_->setPosition(target);
+            if (motionReportObj_) {
+                motionReportObj_->setPosition(target);
+                motionReportObj_->setVelocity(speed);
+            }
+
             moveQueueDepth_++;
         };
         // Stored move callback (applies transform) — for canned cycles.
@@ -44,8 +52,13 @@
                 target[2] = m[2];
             }
             if (!std::isnan(e)) target[3] = e + gcodeOffset_[3];
-            startLinearMove(target, speed);
+            if (motionDispatcher_) {
+                motionDispatcher_->move(target[0], target[1], target[2], target[3], speed);
+            } else {
+                startLinearMove(target, speed);
+            }
             moveQueueDepth_++;
+            noteActivity();
         };
         // Raw move callback (bypasses transform) — for G53 machine coords.
         moveCallbackRaw_ = [this](double x, double y, double z, double e, double speed) {
@@ -54,8 +67,13 @@
             if (!std::isnan(y)) target[1] = y;
             if (!std::isnan(z)) target[2] = z;
             if (!std::isnan(e)) target[3] = e;
-            startLinearMove(target, speed);
+            if (motionDispatcher_) {
+                motionDispatcher_->move(target[0], target[1], target[2], target[3], speed);
+            } else {
+                startLinearMove(target, speed);
+            }
             moveQueueDepth_++;
+            noteActivity();
         };
 
         // Homing
@@ -188,6 +206,9 @@
             if (!std::isnan(y)) motionState_.position[1] = y;
             if (!std::isnan(z)) motionState_.position[2] = z;
             if (!std::isnan(e)) motionState_.position[3] = e;
+            if (motionDispatcher_) {
+                motionDispatcher_->setPosition(motionState_.position);
+            }
         };
 
         // Dwell — blocks the G-code executor for the specified duration.

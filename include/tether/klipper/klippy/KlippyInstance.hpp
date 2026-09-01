@@ -459,9 +459,74 @@ public:
     /// @brief Pump the motion backend: pump the device (if in-process) and
     ///        the host so protocol messages flow. Call this periodically
     ///        (e.g. from tick()) when using the motion backend.
+    ///        Also ticks the StepScheduler so queued steps can fire.
     void pumpMotionBackend() {
-        if (motionDevice_) motionDevice_->pump();
+        if (motionDevice_) {
+            motionDevice_->pump();
+            motionDevice_->tickStepScheduler();
+        }
         if (motionHost_) motionHost_->pump();
+    }
+
+    /// @brief Update motionState_/toolhead from the virtual stepper positions.
+    /// Converts step counts back to machine coordinates using the configured
+    /// steps-per-mm and the active kinematics transform.
+    void updateToolheadFromSteppers() {
+        if (!motionDevice_ || !motionBackendCfg_) return;
+        const auto& spm = motionBackendCfg_->stepsPerMm;
+
+        std::array<double, 4> motorMm{};
+        for (size_t i = 0; i < 4; ++i) {
+            int32_t steps = deviceSteppers_[i]->position();
+            motorMm[i] = (spm[i] != 0.0)
+                ? static_cast<double>(steps) / spm[i]
+                : 0.0;
+        }
+
+        auto cart = kinematicsTransform_.inverseActuatorKinematics(
+            motorMm[0], motorMm[1], motorMm[2]);
+        std::array<double, 4> pos = {cart[0], cart[1], cart[2], motorMm[3]};
+
+        // Simple velocity estimate from the last tick.
+        std::array<double, 4> velocity{};
+        for (size_t i = 0; i < 4; ++i) {
+            double dt = simTickDt_;
+            if (dt > 0.0) velocity[i] = (pos[i] - lastStepperPosition_[i]) / dt;
+        }
+        lastStepperPosition_ = pos;
+
+        motionState_.position = pos;
+        if (toolheadObj_) toolheadObj_->setPosition(pos);
+        if (motionReportObj_) {
+            motionReportObj_->setPosition(pos);
+            motionReportObj_->setVelocity(
+                std::sqrt(velocity[0]*velocity[0] +
+                          velocity[1]*velocity[1] +
+                          velocity[2]*velocity[2]));
+        }
+    }
+
+    /// @brief Set virtual stepper counters and motion-dispatcher position
+    ///        to the current logical position (used after homing/G92).
+    void syncSteppersAndDispatcher() {
+        if (!motionDevice_ || !motionBackendCfg_) return;
+        const auto& spm = motionBackendCfg_->stepsPerMm;
+
+        auto motorMm = kinematicsTransform_.forwardActuatorKinematics(
+            motionState_.position[0], motionState_.position[1],
+            motionState_.position[2]);
+
+        for (size_t i = 0; i < 3; ++i) {
+            int32_t steps = static_cast<int32_t>(std::llround(motorMm[i] * spm[i]));
+            deviceSteppers_[i]->setPosition(steps);
+        }
+        deviceSteppers_[3]->setPosition(
+            static_cast<int32_t>(std::llround(motionState_.position[3] * spm[3])));
+
+        if (motionDispatcher_) {
+            motionDispatcher_->setPosition(motionState_.position);
+        }
+        lastStepperPosition_ = motionState_.position;
     }
 
     /// @brief Execute a G-code script.
@@ -501,6 +566,7 @@ public:
         if (mb.deviceTransport) {
             device::KlipperDeviceConfig dcfg;
             dcfg.clockFreqHz = mb.clockFreqHz;
+            dcfg.useStepScheduler = mb.useStepScheduler;
             motionDevice_ = std::make_unique<device::KlipperDevice>(
                 mb.deviceTransport, dict, dcfg);
             motionDevice_->start();
@@ -533,6 +599,28 @@ public:
         dcfg.axisOids = mb.axisOids;
         dcfg.clockFreqHz = mb.clockFreqHz;
         dcfg.sampleIntervalSec = mb.sampleIntervalSec;
+        if (settings_.maxVelocity > 0.0) {
+            dcfg.limits.axis.maxVelocity = {
+                settings_.maxVelocity, settings_.maxVelocity,
+                settings_.maxVelocity, settings_.maxVelocity};
+            dcfg.limits.path.maxPathVelocity = settings_.maxVelocity;
+        }
+        if (settings_.maxAccel > 0.0) {
+            dcfg.limits.axis.maxAcceleration = {
+                settings_.maxAccel, settings_.maxAccel,
+                settings_.maxAccel, settings_.maxAccel};
+            dcfg.limits.path.maxPathAcceleration = settings_.maxAccel;
+        }
+        if (settings_.jerk > 0.0) {
+            dcfg.limits.axis.maxJerk = {
+                settings_.jerk, settings_.jerk,
+                settings_.jerk, settings_.jerk};
+            dcfg.limits.path.maxPathJerk = settings_.jerk;
+        }
+        // Use the fast jerk-limited S-curve profiler instead of the more
+        // expensive Pareto time-energy planner, matching Klipper's trapezoidal
+        // step queues and keeping step generation latency low.
+        dcfg.profilerType = MotionPlanner::ProfilerType::SCurve;
 #if TETHER_ENABLE_PRESSURE_ADVANCE
         dcfg.pressureAdvance.enabled = mb.pressureAdvanceEnabled;
         dcfg.pressureAdvance.pressureAdvance = mb.pressureAdvance;
@@ -553,6 +641,7 @@ public:
 #endif
         motionDispatcher_ = std::make_unique<motion::MotionDispatcher>(dcfg);
         motionDispatcher_->setKinematicsTransform(kinematicsTransform_);
+        motionDispatcher_->setPosition(motionState_.position);
 
 #if TETHER_ENABLE_PRESSURE_ADVANCE
         // Create the shared extrusion-flow tracker and wire it to the
@@ -598,10 +687,15 @@ public:
             std::array<double, 4> gpos = {px, py, pz, e + gcodeOffset_[3]};
             gcodeMoveObj_->setGcodePosition(gpos);
 
-            // Animate the toolhead with an S-curve profile instead of
-            // jumping instantly to the target.
+            // The real stepper backend will execute the move; tick() will
+            // update the toolhead from the actual stepper counters. Show an
+            // immediate target preview for UIs/tests.
             std::array<double, 4> target = {m[0], m[1], m[2], e + gcodeOffset_[3]};
-            startLinearMove(target, speed);
+            if (toolheadObj_) toolheadObj_->setPosition(target);
+            if (motionReportObj_) {
+                motionReportObj_->setPosition(target);
+                motionReportObj_->setVelocity(speed);
+            }
 
             moveQueueDepth_++;
         };
@@ -792,6 +886,9 @@ public:
             if (toolheadObj_) toolheadObj_->setHomedAxes(pendingHomedAxes_);
             activeHomingAxes_.clear();
             pendingHomedAxes_.clear();
+            // Keep the virtual stepper counters and motion-dispatcher origin
+            // in sync with the newly homed logical position.
+            syncSteppersAndDispatcher();
             // Track activity for idle timeout
             lastActivityTime_ = std::chrono::steady_clock::now();
         }
@@ -820,9 +917,11 @@ public:
     /// @brief Start a new S-curve linear move to the given machine target.
     void startLinearMove(const std::array<double, 4>& target, double speed) {
         activeMove_ = std::make_unique<Simulation::LinearMoveSimulator>();
-        double v = std::min(speed, settings_.maxVelocity);
-        double a = settings_.maxAccel;
-        double j = settings_.jerk > 100.0 ? settings_.jerk : a * 10.0;
+        double maxV = (settings_.maxVelocity > 0.0) ? settings_.maxVelocity : 300.0;
+        double maxA = (settings_.maxAccel > 0.0) ? settings_.maxAccel : 3000.0;
+        double v = std::min(speed, maxV);
+        double a = maxA;
+        double j = (settings_.jerk > 100.0) ? settings_.jerk : maxA * 10.0;
         activeMove_->start(motionState_.position, target, v, a, j);
         noteActivity();
     }
@@ -845,6 +944,13 @@ public:
         // Step active S-curve linear move
         if (activeMove_) {
             stepActiveMove();
+        }
+
+        // When the real stepper backend is active, the toolhead position is
+        // derived from the virtual stepper counters (updated asynchronously
+        // by the StepScheduler thread) instead of the software simulator.
+        if (motionDevice_) {
+            updateToolheadFromSteppers();
         }
 
         // Process delayed G-codes
@@ -1142,6 +1248,8 @@ private:
     std::unique_ptr<device::IKlipperDevice> motionDevice_;
     std::unique_ptr<motion::MotionDispatcher> motionDispatcher_;
     std::vector<std::shared_ptr<objects::Stepper>> deviceSteppers_;
+    std::array<double, 4> lastStepperPosition_{0, 0, 0, 0};
+    bool steppersNeedSync_ = false;
 #if TETHER_ENABLE_PRESSURE_ADVANCE
     /// @brief Shared extrusion-flow tap between the dispatcher and the
     /// flow-adaptive heater compensation.

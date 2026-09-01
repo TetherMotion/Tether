@@ -460,6 +460,9 @@ struct MotionBackendConfig {
     /// If true and deviceTransport is set, register 4 steppers on the
     /// device and enable default queue_step motion handlers.
     bool registerDeviceSteppers = true;
+    /// If true and deviceTransport is set, enable the real-time StepScheduler
+    /// in the in-process KlipperDevice.
+    bool useStepScheduler = true;
 #if TETHER_ENABLE_PRESSURE_ADVANCE
     /// Runtime enable flag for pressure advance (default: off).
     /// Must be true for PA to be applied in the motion pipeline.
