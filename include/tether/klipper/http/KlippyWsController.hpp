@@ -7,6 +7,9 @@
 /// WebSocketController<T, false> with static path routing. This controller
 /// delegates all WebSocket events to the parent KlippyHttpServer.
 
+#ifndef TETHER_KLIPPER_HTTP_INTERNAL
+#define TETHER_KLIPPER_HTTP_INTERNAL
+#endif
 #include "tether/klipper/http/KlippyHttpServer.hpp"
 
 #include <drogon/WebSocketController.h>

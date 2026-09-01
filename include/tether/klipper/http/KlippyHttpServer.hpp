@@ -22,24 +22,40 @@
 #include "tether/klipper/klippy/KlippyServer.hpp"
 #include "tether/klipper/http/HttpServerConfig.hpp"
 #include "tether/klipper/http/JsonRpcDispatcher.hpp"
-#include "tether/klipper/http/WsSessionManager.hpp"
 #include "tether/klipper/http/NotificationSink.hpp"
 
+#ifdef TETHER_KLIPPER_HTTP_INTERNAL
+#include "tether/klipper/http/WsSessionManager.hpp"
 #include <drogon/drogon.h>
+#include <functional>
+#else
+// Forward-declare internal types so the public API doesn't pull in Drogon.
+#endif
+
+namespace tether::klipper::http {
+class WsSessionManager;
+class AuthFilter;
+}
 
 #include <atomic>
+#include <chrono>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
+#include <vector>
 
 namespace tether::klipper::http {
-
-class AuthFilter;
 
 /// @brief Native HTTP/WebSocket server implementing the Moonraker API.
 ///
 /// Wraps Drogon's HttpAppFramework and registers all routes, controllers,
 /// and filters needed to serve Mainsail/Fluidd directly.
+///
+/// The public interface (this header) does NOT include Drogon headers.
+/// Define TETHER_KLIPPER_HTTP_INTERNAL before including this header to
+/// access the Drogon-dependent methods (used by internal controllers).
 class KlippyHttpServer : public std::enable_shared_from_this<KlippyHttpServer> {
 public:
     /// @brief Construct with a reference to the shared server and config.
@@ -72,7 +88,6 @@ public:
     // ------------------------------------------------------------------
 
     const HttpServerConfig& config() const { return config_; }
-    WsSessionManager& wsSessions() { return wsSessions_; }
 
     /// @brief Get the JSON-RPC dispatcher (for testing).
     JsonRpcDispatcher& dispatcher() { return dispatcher_; }
@@ -80,8 +95,15 @@ public:
     /// @brief Get the NotificationSink for this server (for registering with UDS server).
     NotificationSink* notificationSink() { return notificationBridge_.get(); }
 
+#ifdef TETHER_KLIPPER_HTTP_INTERNAL
     // ------------------------------------------------------------------
-    // Auth (public for AuthFilter access)
+    // Accessors (internal — require Drogon)
+    // ------------------------------------------------------------------
+
+    WsSessionManager& wsSessions() { return *wsSessions_; }
+
+    // ------------------------------------------------------------------
+    // Auth (public for AuthFilter access — internal)
     // ------------------------------------------------------------------
 
     bool checkAuth(const drogon::HttpRequestPtr& req) const;
@@ -89,7 +111,7 @@ public:
                         const drogon::HttpRequestPtr& req) const;
 
     // ------------------------------------------------------------------
-    // WebSocket handling (public for KlippyWsController access)
+    // WebSocket handling (public for KlippyWsController access — internal)
     // ------------------------------------------------------------------
 
     void handleWsMessage(const drogon::WebSocketConnectionPtr& conn,
@@ -126,10 +148,6 @@ private:
 
     /// Build params from both query and body (body takes precedence).
     klippy::JsonValue paramsFromRequest(const drogon::HttpRequestPtr& req);
-
-    // ------------------------------------------------------------------
-    // REST endpoint handler factories
-    // ------------------------------------------------------------------
 
     // ------------------------------------------------------------------
     // File handlers
@@ -223,15 +241,10 @@ private:
 
     void handleJsonRpc(const drogon::HttpRequestPtr& req,
                        std::function<void(const drogon::HttpResponsePtr&)>&& callback);
+#endif // TETHER_KLIPPER_HTTP_INTERNAL
 
     // ------------------------------------------------------------------
-    // Subscription refresh
-    // ------------------------------------------------------------------
-
-    void subscriptionRefreshTick();
-
-    // ------------------------------------------------------------------
-    // Auth helpers
+    // Auth helpers (no Drogon types — safe for public header)
     // ------------------------------------------------------------------
 
     bool isTrustedClient(const std::string& ip) const;
@@ -249,6 +262,13 @@ private:
     bool isCorsAllowed(const std::string& origin) const;
 
     // ------------------------------------------------------------------
+    // Subscription refresh
+    // ------------------------------------------------------------------
+
+    void subscriptionRefreshTick();
+
+private:
+    // ------------------------------------------------------------------
     // Internal state
     // ------------------------------------------------------------------
 
@@ -257,7 +277,7 @@ private:
     std::atomic<bool> running_{false};
 
     JsonRpcDispatcher dispatcher_;
-    WsSessionManager wsSessions_;
+    std::unique_ptr<WsSessionManager> wsSessions_;
     std::unique_ptr<NotificationSink> notificationBridge_;
     std::shared_ptr<AuthFilter> authFilter_;
 

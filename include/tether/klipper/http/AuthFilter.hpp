@@ -3,6 +3,9 @@
 /// @file AuthFilter.hpp
 /// @brief Drogon HttpFilter that enforces authentication on all routes.
 
+#ifndef TETHER_KLIPPER_HTTP_INTERNAL
+#define TETHER_KLIPPER_HTTP_INTERNAL
+#endif
 #include "tether/klipper/http/KlippyHttpServer.hpp"
 
 #include <drogon/HttpFilter.h>
