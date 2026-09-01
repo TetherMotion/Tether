@@ -214,9 +214,11 @@ void KlipperDevice::enableStepperMotion() {
             cmd.add      = protocol::clampCast<int16_t>(params[3].integer);
             cmd.dir      = it->second->direction();
             uint32_t start = stepperBaseClocks_.count(oid) ? stepperBaseClocks_[oid] : 0;
-            it->second->enqueueStep(cmd, start);
-            // Also forward to the real-time StepScheduler (if enabled).
-            if (stepScheduler_) {
+            // In passthrough mode without a StepScheduler the Stepper queue
+            // is used; otherwise the real-time scheduler owns execution.
+            if (!stepScheduler_) {
+                it->second->enqueueStep(cmd, start);
+            } else {
                 stepScheduler_->schedule(oid, cmd, start);
             }
             // Advance the base clock by the total duration of this command so

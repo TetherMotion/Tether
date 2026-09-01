@@ -42,6 +42,7 @@
 #include "tether/klipper/klippy/KlippyInstance.hpp"
 #include "tether/klipper/klippy/KlippyUdsHelpText.hpp"
 #include "tether/klipper/http/KlippyHttpServer.hpp"
+#include "tether/klipper/transport/LoopbackTransport.hpp"
 #include "tether/simulation/systems/thermal/SingleZoneOven.hpp"
 
 #include <argparse/argparse.hpp>
@@ -802,6 +803,27 @@ int main(int argc, char* argv[]) {
     instCfg.configPath = printerCfgPath;
     instCfg.firmwareVersion = "tether-sim-1.0.0";
 
+    // Wire the in-process Klipper motion backend so G-code moves produce
+    // real queue_step commands and the StepScheduler drives the virtual
+    // steppers at real-time rates.
+    auto mb = std::make_shared<MotionBackendConfig>();
+    auto h2d = std::make_shared<tether::klipper::transport::LoopbackTransport::SharedBuffer>();
+    auto d2h = std::make_shared<tether::klipper::transport::LoopbackTransport::SharedBuffer>();
+    auto hostT = std::make_shared<tether::klipper::transport::LoopbackTransport>();
+    auto devT  = std::make_shared<tether::klipper::transport::LoopbackTransport>();
+    hostT->wire(h2d, d2h);
+    devT->wire(d2h, h2d);
+    hostT->open();
+    devT->open();
+    mb->hostTransport = hostT;
+    mb->deviceTransport = devT;
+    mb->clockFreqHz = 180000000;
+    mb->stepsPerMm = {80.0, 80.0, 400.0, 500.0};
+    mb->axisOids = {0, 1, 2, 3};
+    mb->sampleIntervalSec = 0.0001;  // 10 kHz step discretisation
+    mb->useStepScheduler = true;
+    instCfg.motionBackend = mb;
+
     KlippyInstance inst(instCfg);
     auto& server = inst.server();
     inst.loadConfig(printerCfgPath);
@@ -990,6 +1012,18 @@ int main(int argc, char* argv[]) {
     }
     std::printf("\nPress Ctrl+C to stop.\n\n");
     std::fflush(stdout);
+
+    // ------------------------------------------------------------------
+    // Real-time stepper thread: tick the StepScheduler at ~10 kHz so the
+    // virtual steppers fire on real wall time, independent of the main sim.
+    // ------------------------------------------------------------------
+    std::jthread stepThread([&](std::stop_token st) {
+        auto* dev = inst.motionDevice();
+        while (!st.stop_requested()) {
+            if (dev) dev->tickStepScheduler();
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
+    });
 
     // ------------------------------------------------------------------
     // Step 8: Simulation thread (std::jthread for cooperative cancellation)

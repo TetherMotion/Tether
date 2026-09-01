@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <vector>
 #include <deque>
@@ -50,7 +51,10 @@ public:
     uint8_t oid() const { return oid_; }
 
     /// @return Current step position (signed).
-    int32_t position() const { return position_; }
+    int32_t position() const { return position_.load(std::memory_order_relaxed); }
+
+    /// @brief Set the current step position (signed).
+    void setPosition(int32_t p) { position_.store(p, std::memory_order_relaxed); }
 
     /// @brief Set the step direction invert mask.
     void setStepInvert(uint8_t invert) { stepInvert_ = invert; }
@@ -64,7 +68,7 @@ public:
 
     /// @brief Reset the stepper (clear queue, reset position).
     void reset() {
-        position_ = 0;
+        position_.store(0, std::memory_order_relaxed);
         queue_.clear();
         nextStepClock_ = 0;
     }
@@ -73,7 +77,7 @@ public:
     /// Advances the position counter by +1 or -1. Used by the StepScheduler
     /// to fire individual steps without going through the queue.
     void step(int8_t dir) {
-        position_ += (dir < 0) ? -1 : 1;
+        position_.fetch_add((dir < 0) ? -1 : 1, std::memory_order_relaxed);
     }
 
     /**
@@ -105,7 +109,7 @@ private:
         uint32_t startClock;
     };
     uint8_t oid_;
-    int32_t position_ = 0;
+    std::atomic<int32_t> position_{0};
     uint8_t stepInvert_ = 0;
     int8_t dir_ = 1;
     std::deque<QueuedStep> queue_;

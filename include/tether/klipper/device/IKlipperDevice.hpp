@@ -46,6 +46,10 @@ public:
     ///        (queue_step, set_next_step_dir, reset_step_clock) for every
     ///        Stepper currently registered.
     virtual void enableStepperMotion() = 0;
+
+    /// @brief Tick the real-time StepScheduler (if enabled).
+    /// @return Number of steps fired, or 0 if the scheduler is not enabled.
+    virtual size_t tickStepScheduler() = 0;
 };
 
 } // namespace tether::klipper::device

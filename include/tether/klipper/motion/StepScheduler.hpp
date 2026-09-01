@@ -30,8 +30,10 @@
  *   sched.wait();                    // blocks until all steps done
  * @endcode
  *
- * The scheduler is single-threaded and not thread-safe by default. For
- * multi-threaded use, wrap calls with a mutex externally.
+ * The scheduler is thread-safe: `schedule()` may be called from one thread
+ * (e.g. the protocol pump) while `tick()` is called from another (e.g. a
+ * real-time stepper thread). A single mutex serialises access to the
+ * internal state while the per-step callback runs under the lock.
  */
 
 #pragma once
@@ -43,6 +45,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -63,12 +66,16 @@ public:
         : clockFreqHz_(clockFreqHz) {}
 
     /// @brief Set the per-step callback.
-    void setStepCallback(StepCallback cb) { stepCb_ = std::move(cb); }
+    void setStepCallback(StepCallback cb) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        stepCb_ = std::move(cb);
+    }
 
     /// @brief Set the clock anchor: (wallTime, mcuTick). Allows aligning
     ///        the scheduler's clock to an externally-synchronised reference.
     void setClockAnchor(std::chrono::steady_clock::time_point wallTime,
                         uint32_t mcuTick) {
+        std::lock_guard<std::mutex> lock(mutex_);
         anchorWall_ = wallTime;
         anchorTick_ = mcuTick;
         anchored_ = true;
@@ -77,6 +84,7 @@ public:
     /// @brief Anchor the clock to the current wall time and MCU tick 0.
     ///        Subsequent schedule() calls use MCU ticks relative to this anchor.
     void start() {
+        std::lock_guard<std::mutex> lock(mutex_);
         anchorWall_ = std::chrono::steady_clock::now();
         anchorTick_ = 0;
         anchored_ = true;
@@ -84,8 +92,11 @@ public:
 
     /// @brief Reset the scheduler: clear all pending steps and re-anchor.
     void reset() {
+        std::lock_guard<std::mutex> lock(mutex_);
         entries_.clear();
-        start();
+        anchorWall_ = std::chrono::steady_clock::now();
+        anchorTick_ = 0;
+        anchored_ = true;
     }
 
     /// @brief Schedule a step sequence for a given stepper OID.
@@ -95,6 +106,7 @@ public:
     void schedule(uint8_t oid, const objects::StepCommand& cmd,
                   uint32_t startClock) {
         if (cmd.count == 0) return;
+        std::lock_guard<std::mutex> lock(mutex_);
         Entry e;
         e.oid = oid;
         e.cmd = cmd;
@@ -131,6 +143,7 @@ public:
     ///        ISR or RTOS thread at a high rate).
     /// @return Number of steps fired in this call.
     size_t tick() {
+        std::lock_guard<std::mutex> lock(mutex_);
         if (!anchored_ || !stepCb_) return 0;
         auto now = std::chrono::steady_clock::now();
         uint32_t mcuNow = wallToMcu(now);
@@ -167,9 +180,9 @@ public:
     bool wait(uint32_t maxWaitMs = 0) {
         auto deadline = std::chrono::steady_clock::now()
             + std::chrono::milliseconds(maxWaitMs);
-        while (!entries_.empty()) {
+        while (!idle()) {
             tick();
-            if (entries_.empty()) return true;
+            if (idle()) return true;
             if (maxWaitMs > 0 && std::chrono::steady_clock::now() > deadline)
                 return false;
             // Brief sleep to avoid busy-looping.
@@ -180,13 +193,20 @@ public:
     }
 
     /// @return True if there are no pending steps.
-    bool idle() const { return entries_.empty(); }
+    bool idle() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return entries_.empty();
+    }
 
     /// @return Number of pending step commands (not individual steps).
-    size_t pendingCommands() const { return entries_.size(); }
+    size_t pendingCommands() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return entries_.size();
+    }
 
     /// @return Number of individual steps still pending across all commands.
     size_t pendingSteps() const {
+        std::lock_guard<std::mutex> lock(mutex_);
         size_t total = 0;
         for (const auto& e : entries_) {
             total += (e.cmd.count - e.stepsExecuted);
@@ -220,6 +240,7 @@ private:
     std::chrono::steady_clock::time_point anchorWall_;
     uint32_t anchorTick_ = 0;
     bool anchored_ = false;
+    mutable std::mutex mutex_;
     std::deque<Entry> entries_;
 };
 
