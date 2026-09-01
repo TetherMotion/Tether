@@ -601,14 +601,9 @@ public:
             // Animate the toolhead with an S-curve profile instead of
             // jumping instantly to the target.
             std::array<double, 4> target = {m[0], m[1], m[2], e + gcodeOffset_[3]};
-            activeMove_ = std::make_unique<Simulation::LinearMoveSimulator>();
-            double v = std::min(speed, settings_.maxVelocity);
-            double a = settings_.maxAccel;
-            double j = settings_.jerk > 100.0 ? settings_.jerk : a * 10.0;
-            activeMove_->start(motionState_.position, target, v, a, j);
+            startLinearMove(target, speed);
 
             moveQueueDepth_++;
-            noteActivity();
         };
     }
 
@@ -820,6 +815,16 @@ public:
         if (result.complete) {
             activeMove_.reset();
         }
+    }
+
+    /// @brief Start a new S-curve linear move to the given machine target.
+    void startLinearMove(const std::array<double, 4>& target, double speed) {
+        activeMove_ = std::make_unique<Simulation::LinearMoveSimulator>();
+        double v = std::min(speed, settings_.maxVelocity);
+        double a = settings_.maxAccel;
+        double j = settings_.jerk > 100.0 ? settings_.jerk : a * 10.0;
+        activeMove_->start(motionState_.position, target, v, a, j);
+        noteActivity();
     }
 
     /// @brief Process due delayed G-codes (call periodically).
