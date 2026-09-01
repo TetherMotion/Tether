@@ -7,6 +7,7 @@
  * API surface consumed by Mainsail and Fluidd.
  */
 
+#define TETHER_KLIPPER_HTTP_INTERNAL
 #include "tether/klipper/http/KlippyHttpServer.hpp"
 #include "tether/klipper/http/KlippyWsController.hpp"
 #include "tether/klipper/http/NotificationBridge.hpp"
@@ -59,7 +60,8 @@ KlippyHttpServer::KlippyHttpServer(klippy::KlippyServer& server,
     , dispatcher_([this](const std::string& method, const klippy::JsonValue& params) {
         return server_.callEndpoint(method, params);
     })
-    , notificationBridge_(std::make_unique<NotificationBridge>(wsSessions_))
+    , wsSessions_(std::make_unique<WsSessionManager>())
+    , notificationBridge_(std::make_unique<NotificationBridge>(*wsSessions_))
 {
     // Initialize file roots
     fileRoots_["gcodes"] = config_.gcodesRoot;
@@ -2422,7 +2424,7 @@ void KlippyHttpServer::handleWebSocketConnect(
 }
 
 void KlippyHttpServer::handleWsNewConnection(const drogon::WebSocketConnectionPtr& conn) {
-    int64_t id = wsSessions_.createSession(conn);
+    int64_t id = wsSessions_->createSession(conn);
     // Store the session ID on the connection for later cleanup
     // Message and close events are handled by KlippyWsController
 }
@@ -2441,7 +2443,7 @@ void KlippyHttpServer::handleWsMessage(const drogon::WebSocketConnectionPtr& con
 
         if (method == "server.connection.identify") {
             // Find session by connection and mark as identified
-            auto sessions = wsSessions_.getAllSessions();
+            auto sessions = wsSessions_->getAllSessions();
             for (const auto& session : sessions) {
                 if (session->conn == conn) {
                     std::string clientType = "other";
@@ -2459,24 +2461,24 @@ void KlippyHttpServer::handleWsMessage(const drogon::WebSocketConnectionPtr& con
                             params.at("version").isString())
                             version = params.at("version").asString();
                     }
-                    wsSessions_.setIdentified(session->id, clientType, clientName, version);
+                    wsSessions_->setIdentified(session->id, clientType, clientName, version);
                     break;
                 }
             }
         }
 
         if (method == "gcode/subscribe_output" || method == "printer.gcode.subscribe_output") {
-            auto sessions = wsSessions_.getAllSessions();
+            auto sessions = wsSessions_->getAllSessions();
             for (const auto& session : sessions) {
                 if (session->conn == conn) {
-                    wsSessions_.setGcodeSubscribed(session->id, true);
+                    wsSessions_->setGcodeSubscribed(session->id, true);
                     break;
                 }
             }
         }
 
         if (method == "objects/subscribe" || method == "printer.objects.subscribe") {
-            auto sessions = wsSessions_.getAllSessions();
+            auto sessions = wsSessions_->getAllSessions();
             for (const auto& session : sessions) {
                 if (session->conn == conn) {
                     std::map<std::string, std::vector<std::string>> subs;
@@ -2497,7 +2499,7 @@ void KlippyHttpServer::handleWsMessage(const drogon::WebSocketConnectionPtr& con
                             }
                         }
                     }
-                    wsSessions_.setSubscriptions(session->id, subs);
+                    wsSessions_->setSubscriptions(session->id, subs);
 
                     // Get initial snapshot
                     auto status = server_.queryObjects(subs);
@@ -2512,7 +2514,7 @@ void KlippyHttpServer::handleWsMessage(const drogon::WebSocketConnectionPtr& con
 
                     // Update baseline
                     for (const auto& [objName, fields] : status) {
-                        wsSessions_.updateBaseline(session->id, objName, fields);
+                        wsSessions_->updateBaseline(session->id, objName, fields);
                     }
                     break;
                 }
@@ -2527,10 +2529,10 @@ void KlippyHttpServer::handleWsMessage(const drogon::WebSocketConnectionPtr& con
 
 void KlippyHttpServer::handleWsDisconnect(const drogon::WebSocketConnectionPtr& conn) {
     // Find and remove the session associated with this connection
-    auto sessions = wsSessions_.getAllSessions();
+    auto sessions = wsSessions_->getAllSessions();
     for (const auto& session : sessions) {
         if (session->conn == conn) {
-            wsSessions_.removeSession(session->id);
+            wsSessions_->removeSession(session->id);
             break;
         }
     }
@@ -2568,7 +2570,7 @@ void KlippyHttpServer::handleJsonRpc(
 // ============================================================================
 
 void KlippyHttpServer::subscriptionRefreshTick() {
-    auto sessions = wsSessions_.getSubscribedSessions();
+    auto sessions = wsSessions_->getSubscribedSessions();
     if (sessions.empty()) return;
 
     double eventtime = std::chrono::duration<double>(
@@ -2577,8 +2579,8 @@ void KlippyHttpServer::subscriptionRefreshTick() {
     for (const auto& session : sessions) {
         if (!session->conn) continue;
 
-        auto subs = wsSessions_.getSubscriptions(session->id);
-        auto baseline = wsSessions_.getBaseline(session->id);
+        auto subs = wsSessions_->getSubscriptions(session->id);
+        auto baseline = wsSessions_->getBaseline(session->id);
 
         // Compute current status
         auto current = server_.queryObjects(subs);
@@ -2612,7 +2614,7 @@ void KlippyHttpServer::subscriptionRefreshTick() {
 
         // Update baseline
         for (const auto& [objName, fields] : current) {
-            wsSessions_.updateBaseline(session->id, objName, fields);
+            wsSessions_->updateBaseline(session->id, objName, fields);
         }
     }
 }
