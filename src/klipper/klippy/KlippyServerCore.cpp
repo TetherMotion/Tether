@@ -243,6 +243,8 @@ bool KlippyServer::loadConfigFile(const std::string& path) {
             // Mainsail expects: settings["section_name"] = { key: value, ... }
             // Keys are lowercase section names, values are typed (numbers as
             // doubles, booleans as bools, everything else as strings).
+            // config uses original section names so frontends like Fluidd can
+            // find e.g. "gcode_macro CANCEL_PRINT".
             std::map<std::string, JsonValue> settings;
             std::map<std::string, JsonValue> config;
             for (const auto& section : configParser_.sections()) {
@@ -284,7 +286,7 @@ bool KlippyServer::loadConfigFile(const std::string& path) {
                     }
                 }
                 settings[lowerName] = JsonValue(sectionSettings);
-                config[lowerName] = JsonValue(sectionConfig);
+                config[sectionName] = JsonValue(sectionConfig);
             }
             cfg->setSettings(std::move(settings));
             cfg->setConfig(std::move(config));
