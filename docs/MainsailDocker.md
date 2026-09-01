@@ -1,211 +1,142 @@
-# Running Tether with Mainsail (Docker)
+# Running the Simulated Printer with Mainsail (Docker)
 
-This guide explains how to run Tether as a Moonraker replacement and connect
-it to [Mainsail](https://docs.mainsail.xyz/) using Docker Compose.
+This guide walks you through starting the Tether simulated 3D printer on
+your host and connecting [Mainsail](https://docs.mainsail.xyz/) to it via a
+Docker container. No Moonraker or Klipper process is needed — Tether
+implements the full Moonraker HTTP + WebSocket API natively.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│                  Tether Process                  │
-│                                                  │
-│  ┌──────────────┐    ┌───────────────────────┐  │
-│  │  KlippyServer │    │  KlippyUdsServer      │  │
-│  │ (business     │◄───┤  (UDS transport)      │  │
-│  │  logic)       │    │  /tmp/klippy_uds      │  │
-│  │               │    └───────────────────────┘  │
-│  │               │    ┌───────────────────────┐  │
-│  │               │◄───┤  KlippyHttpServer     │  │
-│  │               │    │  (HTTP/WS transport)  │  │
-│  │               │    │  Port 7125            │  │
-│  └──────────────┘    └───────────────────────┘  │
-└────────────────────────┬────────────────────────┘
-                         │
-                    Port 7125
-                         │
-┌────────────────────────┴────────────────────────┐
-│              Mainsail Container                  │
-│                                                  │
-│  Nginx serves Mainsail static assets             │
-│  Proxies /server, /printer, /machine, /api       │
-│  to Tether on port 7125                          │
-└──────────────────────────────────────────────────┘
+  Your browser (http://localhost:8080)
+        │
+        ▼
+┌──────────────────────────────────┐
+│  Mainsail Docker Container        │
+│  (ghcr.io/mainsail-crew/mainsail) │
+│                                   │
+│  Nginx serves the SPA on :8080    │
+│  Proxies /server, /api, /machine, │
+│  /access, /client, /websocket     │
+│  → host.docker.internal:7125      │
+└───────────────┬───────────────────┘
+                │  (host bridge, port 7125)
+                ▼
+┌──────────────────────────────────┐
+│  Tether (host process)            │
+│  ./build/bin/klipper_http_mainsail│
+│                                   │
+│  KlippyHttpServer on :7125        │
+│  + simulated heaters, motion,     │
+│    print playback, G-code exec    │
+└───────────────────────────────────┘
 ```
-
-Tether's `KlippyServer` holds all business logic (endpoints, state, data
-stores). The `KlippyHttpServer` is a thin HTTP/WebSocket transport that
-exposes the full Moonraker HTTP + WebSocket API. Mainsail connects to it
-as if it were a real Moonraker instance — no Moonraker process needed.
 
 ## Prerequisites
 
-- Docker and Docker Compose
-- Tether built with HTTP support:
+- **Docker** and **Docker Compose** (v2+)
+- **Tether** built with HTTP support:
+
   ```bash
   cmake -B build \
     -DTETHER_ENABLE_KLIPPER=1 \
     -DTETHER_ENABLE_KLIPPER_HTTP=1
-  cmake --build build --target klipper_http_mainsail -j$(nproc)
+  cmake --build build --target klipper_http_mainsail -j4
   ```
 
-## Quick Start
+## Quick Start (3 steps)
 
-### 1. Create the Dockerfile
+### 1. Start the Tether simulated printer
 
-Create `docker/Dockerfile.tether`:
-
-```dockerfile
-FROM ubuntu:24.04
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    cmake g++ ninja-build git \
-    libjsoncpp-dev libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /opt/tether
-COPY . .
-
-RUN cmake -B build \
-    -DTETHER_ENABLE_KLIPPER=1 \
-    -DTETHER_ENABLE_KLIPPER_HTTP=1 \
-    -DTETHER_BUILD_TESTS=OFF \
-    -DTETHER_BUILD_EXAMPLES=ON \
-    && cmake --build build --target klipper_http_mainsail -j$(nproc)
-
-EXPOSE 7125
-
-CMD ["/opt/tether/build/bin/klipper_http_mainsail", \
-     "--port", "7125", \
-     "--no-auth", \
-     "--gcodes-root", "/data/gcodes", \
-     "--config-root", "/data/config", \
-     "--logs-root", "/data/logs"]
-```
-
-### 2. Create the Docker Compose file
-
-Create `docker-compose.yml`:
-
-```yaml
-version: "3.8"
-
-services:
-  tether:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.tether
-    ports:
-      - "7125:7125"
-    volumes:
-      - tether-data:/data
-    restart: unless-stopped
-
-  mainsail:
-    image: ghcr.io/mainsail-crew/mainsail:latest
-    ports:
-      - "80:80"
-    environment:
-      - TZ=UTC
-    volumes:
-      - mainsail-config:/etc/nginx/conf.d
-    depends_on:
-      - tether
-    restart: unless-stopped
-
-volumes:
-  tether-data:
-  mainsail-config:
-```
-
-### 3. Configure Mainsail to connect to Tether
-
-Create `docker/mainsail/default.conf`:
-
-```nginx
-server {
-    listen 80;
-    server_name _;
-
-    root /usr/share/nginx/html;
-    index index.html;
-
-    # Serve Mainsail SPA
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    # Proxy Moonraker API to Tether
-    location /server/ {
-        proxy_pass http://tether:7125/server/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    location /printer/ {
-        proxy_pass http://tether:7125/printer/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    location /machine/ {
-        proxy_pass http://tether:7125/machine/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    location /api/ {
-        proxy_pass http://tether:7125/api/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    location /access/ {
-        proxy_pass http://tether:7125/access/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    # WebSocket proxy
-    location /websocket {
-        proxy_pass http://tether:7125/websocket;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_read_timeout 86400;
-    }
-}
-```
-
-Update `docker-compose.yml` to mount the config:
-
-```yaml
-  mainsail:
-    image: ghcr.io/mainsail-crew/mainsail:latest
-    ports:
-      - "80:80"
-    volumes:
-      - ./docker/mainsail/default.conf:/etc/nginx/conf.d/default.conf:ro
-    depends_on:
-      - tether
-    restart: unless-stopped
-```
-
-### 4. Start the stack
+From the Tether repo root:
 
 ```bash
-docker compose up -d
+./build/bin/klipper_http_mainsail --no-auth --port 7125
 ```
 
-### 5. Access Mainsail
+You should see:
 
-Open `http://localhost/` in your browser. Mainsail will connect to Tether
-via the WebSocket proxy and display the printer dashboard.
+```
+=== Tether Simulated 3D Printer (Moonraker Replacement) ===
+...
+HTTP/WebSocket server listening on port 7125
+Open http://localhost:8080/ in a browser to access the web UI.
+```
 
-## Running Without Docker
+Leave this running in a terminal.
 
-You can also run Tether directly and serve Mainsail's static assets from
-the same process:
+### 2. Start the Mainsail container
+
+From the Tether repo root:
+
+```bash
+docker compose -f docker/docker-compose.yml up -d
+```
+
+This pulls the official Mainsail image and starts it on port **8080**.
+The container's nginx is configured (via `docker/mainsail/mainsail-proxy.conf`)
+to proxy all API calls to `host.docker.internal:7125`, which reaches the
+Tether process on your host.
+
+### 3. Open Mainsail
+
+Open **http://localhost:8080** in a browser.
+
+Mainsail will load and automatically connect to Tether via the WebSocket
+proxy. You should see:
+
+- **Dashboard** with extruder and bed temperatures (starting at ~25°C)
+- **Temperature** panel — set targets and watch them rise/fall with the
+  simulated thermal model
+- **G-code Files** panel — a sample file
+  (`tether_calibration_square.gcode`) is pre-generated; click it and press
+  **Print** to start a simulated print
+- **Console** — send G-code commands (e.g. `G28`, `M104 S210`, `G1 X50 Y50`)
+- **Toolhead** panel — position updates live during prints
+
+## How It Works
+
+The setup uses two files in `docker/mainsail/`:
+
+| File | Purpose |
+|------|---------|
+| `mainsail-config.json` | Tells the Mainsail SPA to connect to `localhost:8080` (itself, via the nginx proxy) |
+| `mainsail-proxy.conf` | Nginx config that proxies `/server`, `/api`, `/machine`, `/access`, `/client`, and `/websocket` to `host.docker.internal:7125` |
+
+The `docker-compose.yml` mounts these into the Mainsail container and adds
+`host.docker.internal:host-gateway` so the container can reach the host
+(this is needed on Linux; Docker Desktop handles it automatically).
+
+## Changing the Tether Port
+
+If you want Tether on a different port (e.g. 7130):
+
+1. Start Tether on the new port:
+   ```bash
+   ./build/bin/klipper_http_mainsail --no-auth --port 7130
+   ```
+
+2. Edit `docker/mainsail/mainsail-proxy.conf` and replace all `7125`
+   with `7130`.
+
+3. Restart the container:
+   ```bash
+   docker compose -f docker/docker-compose.yml restart mainsail
+   ```
+
+## Stopping
+
+```bash
+# Stop Mainsail
+docker compose -f docker/docker-compose.yml down
+
+# Stop Tether (Ctrl+C in its terminal)
+```
+
+## Running Without Docker (Built-in Static Assets)
+
+If you prefer not to use Docker at all, you can download the Mainsail
+static assets and serve them directly from Tether:
 
 ```bash
 # Download Mainsail release
@@ -216,71 +147,42 @@ unzip mainsail.zip -d /opt/mainsail
 ./build/bin/klipper_http_mainsail \
     --port 7125 \
     --web-root /opt/mainsail \
-    --gcodes-root /home/pi/gcodes \
     --no-auth
 ```
 
-Then open `http://localhost:7125/` — Tether serves both the API and the
-Mainsail SPA from the same port.
+Then open **http://localhost:7125/** — Tether serves both the API and the
+Mainsail SPA from the same port. No nginx proxy needed.
 
-## Configuration Options
+## Troubleshooting
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--port` | 7125 | HTTP listen port |
-| `--uds-path` | /tmp/klippy_uds | UDS socket path |
-| `--web-root` | (disabled) | Directory for Mainsail static assets |
-| `--gcodes-root` | /tmp/tether_sdcard | G-code file root |
-| `--config-root` | /etc/tether | Config file root |
-| `--logs-root` | /var/log | Log file root |
-| `--api-key` | tether_default_api_key | API key for auth |
-| `--no-auth` | (auth enabled) | Disable authentication |
+### "Address already in use" on port 7125
 
-## Transport-Agnostic Architecture
+Another process is using the port. Either stop it or use a different port:
 
-The refactored architecture separates business logic from transport:
-
-- **KlippyServer** — All endpoint handlers, state management, data stores
-  (job history, users, database, power devices, webcams, etc.)
-- **KlippyUdsServer** — Thin UDS transport (socket lifecycle, frame
-  parsing, UDS-specific subscriptions). Delegates to KlippyServer.
-- **KlippyHttpServer** — Thin HTTP/WebSocket transport (Drogon routes,
-  JSON-RPC, WebSocket sessions). Delegates to the same KlippyServer.
-
-Both transports share a single KlippyServer instance, so there is zero
-business-logic duplication. Adding a new transport (e.g., a raw TCP
-JSON-RPC protocol) only requires implementing the transport layer and
-delegating to KlippyServer.
-
-### Using KlippyServer in Your Application
-
-```cpp
-#include "tether/klipper/klippy/KlippyServer.hpp"
-#include "tether/klipper/klippy/KlippyUdsServer.hpp"
-#include "tether/klipper/http/KlippyHttpServer.hpp"
-
-using namespace tether::klipper::klippy;
-using namespace tether::klipper::http;
-
-// 1. Create the shared server
-UdsServerConfig cfg;
-cfg.socketPath = "/tmp/klippy_uds";
-KlippyServer server(cfg);
-server.setState(PrinterState::Ready, "Ready");
-
-// 2. Create UDS transport (shares the server)
-KlippyUdsServer uds(server, cfg);
-uds.start();
-
-// 3. Create HTTP transport (shares the same server)
-HttpServerConfig httpCfg;
-httpCfg.port = 7125;
-httpCfg.requireAuth = false;
-auto http = std::make_shared<KlippyHttpServer>(server, httpCfg);
-http->start();
-
-// ... run your application ...
-
-http->stop();
-uds.stop();
+```bash
+./build/bin/klipper_http_mainsail --no-auth --port 7130
 ```
+
+(And update `mainsail-proxy.conf` as described above.)
+
+### Mainsail shows "Moonraker not connected"
+
+1. Verify Tether is running: `curl http://localhost:7125/server/info`
+2. Verify the container can reach the host:
+   ```bash
+   docker exec tether_mainsail \
+     curl -s http://host.docker.internal:7125/server/info
+   ```
+3. Check the proxy config in `docker/mainsail/mainsail-proxy.conf` —
+   the port must match the Tether `--port` argument.
+
+### Port 8080 already in use
+
+Change the host-side mapping in `docker/docker-compose.yml`:
+
+```yaml
+    ports:
+      - "8081:8080"   # map host 8081 → container 8080
+```
+
+Then open `http://localhost:8081` instead.
