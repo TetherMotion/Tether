@@ -806,6 +806,12 @@ int main(int argc, char* argv[]) {
     auto& server = inst.server();
     server.loadConfigFile(printerCfgPath);
 
+    // Update file roots to match the actual directories (the server
+    // defaults to /etc/tether for config, but we want the user's dir).
+    server.registerFileRoot("gcodes", gcodesRoot, true);
+    server.registerFileRoot("config", configRoot, true);
+    server.registerFileRoot("logs", logsRoot, false);
+
     // Populate gcode.commands with help text for Mainsail's macro/gcode UI.
     if (auto gcodeObj = inst.gcodeObject()) {
         gcodeObj->setCommands(getGcodeHelpJson().asObject());

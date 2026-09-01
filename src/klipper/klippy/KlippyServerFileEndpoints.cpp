@@ -55,14 +55,27 @@ JsonValue KlippyServer::handleServerFilesList(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     std::vector<JsonValue> files;
 
-    // List files from the file root directory
+    // Determine which root to list from.  Default to "gcodes" for backward
+    // compatibility, but honour the "root" parameter (e.g. "config", "logs").
+    std::string rootName = "gcodes";
+    if (params.isObject() && params.has("root") &&
+        params.find("root")->isString()) {
+        rootName = params.find("root")->asString();
+    }
+
+    std::string rootPath = fileRoot_;
+    auto rootIt = fileRoots_.find(rootName);
+    if (rootIt != fileRoots_.end()) {
+        rootPath = rootIt->second.path;
+    }
+
     namespace fs = std::filesystem;
-    if (fs::exists(fileRoot_)) {
+    if (fs::exists(rootPath)) {
         try {
-            for (const auto& entry : fs::recursive_directory_iterator(fileRoot_)) {
+            for (const auto& entry : fs::recursive_directory_iterator(rootPath)) {
                 if (!entry.is_regular_file()) continue;
                 std::map<std::string, JsonValue> fileInfo;
-                std::string relPath = fs::relative(entry.path(), fileRoot_).string();
+                std::string relPath = fs::relative(entry.path(), rootPath).string();
                 fileInfo["path"] = JsonValue(relPath);
                 fileInfo["size"] = JsonValue(static_cast<int64_t>(entry.file_size()));
                 auto ftime = entry.last_write_time();
@@ -138,43 +151,147 @@ JsonValue KlippyServer::handleMachineSystemInfo(const JsonValue& params) {
 
     // Read CPU info from /proc/cpuinfo
     std::string cpuModel = "unknown";
-    std::ifstream cpuinfo("/proc/cpuinfo");
-    if (cpuinfo) {
-        std::string line;
-        while (std::getline(cpuinfo, line)) {
-            if (line.size() >= 10 && line.compare(0, 10, "model name") == 0) {
-                auto pos = line.find(':');
-                if (pos != std::string::npos) {
-                    cpuModel = line.substr(pos + 2);
-                    break;
+    std::string processor = "unknown";
+    std::string hardwareDesc = "unknown";
+    std::string serialNumber = "unknown";
+    int cpuCount = 1;
+    {
+        std::ifstream cpuinfo("/proc/cpuinfo");
+        if (cpuinfo) {
+            std::string line;
+            int procCount = 0;
+            while (std::getline(cpuinfo, line)) {
+                if (line.size() >= 10 && line.compare(0, 10, "model name") == 0) {
+                    auto pos = line.find(':');
+                    if (pos != std::string::npos) {
+                        cpuModel = line.substr(pos + 2);
+                    }
+                } else if (line.size() >= 9 && line.compare(0, 9, "processor") == 0) {
+                    procCount++;
+                } else if (line.size() >= 9 && line.compare(0, 9, "Processor") == 0) {
+                    auto pos = line.find(':');
+                    if (pos != std::string::npos) processor = line.substr(pos + 2);
+                } else if (line.size() >= 8 && line.compare(0, 8, "Hardware") == 0) {
+                    auto pos = line.find(':');
+                    if (pos != std::string::npos) hardwareDesc = line.substr(pos + 2);
+                } else if (line.size() >= 6 && line.compare(0, 6, "Serial") == 0) {
+                    auto pos = line.find(':');
+                    if (pos != std::string::npos) serialNumber = line.substr(pos + 2);
                 }
             }
+            cpuCount = std::max(1, procCount);
         }
     }
 
     // Read OS info from /etc/os-release
     std::string osName = "Linux";
-    std::ifstream osrelease("/etc/os-release");
-    if (osrelease) {
-        std::string line;
-        while (std::getline(osrelease, line)) {
-            if (line.size() >= 11 && line.compare(0, 11, "PRETTY_NAME") == 0) {
-                auto pos = line.find('=');
-                if (pos != std::string::npos) {
-                    osName = line.substr(pos + 1);
-                    // Strip quotes
-                    if (!osName.empty() && osName.front() == '"') osName.erase(0, 1);
-                    if (!osName.empty() && osName.back() == '"') osName.pop_back();
-                    break;
+    std::string osId = "linux";
+    std::string osVersion = "";
+    std::string osCodename = "";
+    {
+        std::ifstream osrelease("/etc/os-release");
+        if (osrelease) {
+            std::string line;
+            while (std::getline(osrelease, line)) {
+                if (line.size() >= 11 && line.compare(0, 11, "PRETTY_NAME") == 0) {
+                    auto pos = line.find('=');
+                    if (pos != std::string::npos) {
+                        osName = line.substr(pos + 1);
+                        if (!osName.empty() && osName.front() == '"') osName.erase(0, 1);
+                        if (!osName.empty() && osName.back() == '"') osName.pop_back();
+                    }
+                } else if (line.size() >= 3 && line.compare(0, 3, "ID=") == 0) {
+                    osId = line.substr(3);
+                    if (!osId.empty() && osId.front() == '"') osId.erase(0, 1);
+                    if (!osId.empty() && osId.back() == '"') osId.pop_back();
+                } else if (line.size() >= 8 && line.compare(0, 8, "VERSION=") == 0) {
+                    osVersion = line.substr(8);
+                    if (!osVersion.empty() && osVersion.front() == '"') osVersion.erase(0, 1);
+                    if (!osVersion.empty() && osVersion.back() == '"') osVersion.pop_back();
+                } else if (line.size() >= 9 && line.compare(0, 9, "CODENAME=") == 0) {
+                    osCodename = line.substr(9);
+                    if (!osCodename.empty() && osCodename.front() == '"') osCodename.erase(0, 1);
+                    if (!osCodename.empty() && osCodename.back() == '"') osCodename.pop_back();
                 }
             }
         }
     }
 
-    info["cpu_info"] = JsonValue(cpuModel);
-    info["python_version"] = JsonValue("3.x");
-    info["system_os"] = JsonValue(osName);
-    info["hostname"] = JsonValue("tether-klipper");
+    // Build cpu_info object (Mainsail expects an object, not a string)
+    std::map<std::string, JsonValue> cpuInfo;
+    cpuInfo["bits"] = JsonValue("64bit");
+    cpuInfo["cpu_count"] = JsonValue(static_cast<int64_t>(cpuCount));
+    cpuInfo["cpu_desc"] = JsonValue("");
+    cpuInfo["serial_number"] = JsonValue(serialNumber);
+    cpuInfo["hardware_desc"] = JsonValue(hardwareDesc);
+    cpuInfo["memory_units"] = JsonValue("kB");
+    cpuInfo["model"] = JsonValue(cpuModel);
+    cpuInfo["processor"] = JsonValue(processor);
+    cpuInfo["total_memory"] = JsonValue(static_cast<int64_t>(0));
+
+    // Build distribution object
+    std::map<std::string, JsonValue> distribution;
+    distribution["codename"] = JsonValue(osCodename);
+    distribution["id"] = JsonValue(osId);
+    distribution["like"] = JsonValue("");
+    distribution["name"] = JsonValue(osName);
+    distribution["version"] = JsonValue(osVersion);
+    std::map<std::string, JsonValue> versionParts;
+    versionParts["build_number"] = JsonValue("0");
+    versionParts["major"] = JsonValue("0");
+    versionParts["minor"] = JsonValue("0");
+    distribution["version_parts"] = JsonValue(versionParts);
+
+    // Build sd_info object
+    std::map<std::string, JsonValue> sdInfo;
+    sdInfo["capacity"] = JsonValue("");
+    sdInfo["manufacturer"] = JsonValue("");
+    sdInfo["manufacturer_date"] = JsonValue("");
+    sdInfo["manufacturer_id"] = JsonValue("");
+    sdInfo["oem_id"] = JsonValue("");
+    sdInfo["product_name"] = JsonValue("");
+    sdInfo["product_revision"] = JsonValue("");
+    sdInfo["serial_number"] = JsonValue("");
+    sdInfo["total_bytes"] = JsonValue(static_cast<int64_t>(0));
+
+    // Build python object
+    std::map<std::string, JsonValue> python;
+    python["version"] = JsonValue(std::vector<JsonValue>{});
+    python["version_string"] = JsonValue("3.x");
+
+    // Build service_state object
+    std::map<std::string, JsonValue> serviceState;
+    for (const auto& [name, svc] : services_) {
+        std::map<std::string, JsonValue> svcState;
+        svcState["active_state"] = JsonValue(svc.activeState);
+        svcState["sub_state"] = JsonValue(svc.subState);
+        serviceState[name] = JsonValue(svcState);
+    }
+
+    // System uptime
+    double uptime = 0.0;
+    {
+        std::ifstream uptimeFile("/proc/uptime");
+        if (uptimeFile) {
+            uptimeFile >> uptime;
+        }
+    }
+
+    // Instance IDs
+    std::map<std::string, JsonValue> instanceIds;
+    instanceIds["moonraker"] = JsonValue("");
+    instanceIds["klipper"] = JsonValue("");
+
+    info["available_services"] = JsonValue(std::vector<JsonValue>{});
+    info["cpu_info"] = JsonValue(cpuInfo);
+    info["distribution"] = JsonValue(distribution);
+    info["sd_info"] = JsonValue(sdInfo);
+    info["service_state"] = JsonValue(serviceState);
+    info["python"] = JsonValue(python);
+    info["network"] = JsonValue(std::map<std::string, JsonValue>{});
+    info["system_uptime"] = JsonValue(uptime);
+    info["instance_ids"] = JsonValue(instanceIds);
+
     result["result"] = JsonValue(info);
     return JsonValue(result);
 }
@@ -216,9 +333,33 @@ JsonValue KlippyServer::handleMachineProcstats(const JsonValue& params) {
         }
     }
 
+    // Read CPU temperature from thermal zone
+    double cpuTemp = 0.0;
+    std::ifstream tempFile("/sys/class/thermal/thermal_zone0/temp");
+    if (tempFile) {
+        tempFile >> cpuTemp;
+        cpuTemp /= 1000.0;
+    }
+
+    // System CPU usage breakdown (Mainsail expects system_cpu_usage as an object)
+    std::map<std::string, JsonValue> systemCpuUsage;
+    systemCpuUsage["cpu"] = JsonValue(cpuUsage);
+
+    // Moonraker stats (Mainsail expects moonraker_stats with time field)
+    std::map<std::string, JsonValue> moonrakerStats;
+    moonrakerStats["cpu_usage"] = JsonValue(cpuUsage);
+    moonrakerStats["mem_units"] = JsonValue("kB");
+    moonrakerStats["memory"] = JsonValue(static_cast<int64_t>(memUsage));
+    auto now = std::chrono::duration<double>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    moonrakerStats["time"] = JsonValue(now);
+
     stats["cpu_usage"] = JsonValue(cpuUsage);
     stats["memory_usage"] = JsonValue(memUsage);
     stats["webhooks_connections"] = JsonValue(static_cast<int64_t>(0));
+    stats["cpu_temp"] = JsonValue(cpuTemp);
+    stats["system_cpu_usage"] = JsonValue(systemCpuUsage);
+    stats["moonraker_stats"] = JsonValue(moonrakerStats);
     result["result"] = JsonValue(stats);
     return JsonValue(result);
 }
@@ -282,8 +423,20 @@ JsonValue KlippyServer::handleServerFilesDirectory(const JsonValue& params) {
         ? params.find("path")->asString() : "/";
     std::string action = params.has("action") && params.find("action")->isString()
         ? params.find("action")->asString() : "list";
+    std::string rootName = params.has("root") && params.find("root")->isString()
+        ? params.find("root")->asString() : "gcodes";
 
-    std::string fullPath = fileRoot_ + "/" + path;
+    // Resolve the root path from the registered file roots
+    std::string rootPath = fileRoot_;
+    auto rootIt = fileRoots_.find(rootName);
+    if (rootIt != fileRoots_.end()) {
+        rootPath = rootIt->second.path;
+    }
+
+    // Normalise the sub-path (strip leading slashes)
+    while (!path.empty() && path.front() == '/') path.erase(0, 1);
+
+    std::string fullPath = path.empty() ? rootPath : (rootPath + "/" + path);
     namespace fs = std::filesystem;
 
     if (action == "list") {
