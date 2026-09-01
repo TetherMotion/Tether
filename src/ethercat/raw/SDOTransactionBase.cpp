@@ -131,7 +131,7 @@ bool SDOTransactionBase::checkStaleCounter(Master& master, uint16_t adp,
     // so the master's counter is correct — we just need to drain the stale
     // response and retry with the SAME counter.
     // Counter syncing on stale responses causes regressions on slaves that
-    // DO reset their counter (e.g. Synapticon ESC211): the master syncs to
+    // DO reset their counter (e.g. Synapticon drive): the master syncs to
     // the stale counter, which is wrong, and all subsequent requests fail.
     (void)inoutMbxCnt;  // Unused — no counter sync
     if (++staleRetryCount <= MAX_STALE_RETRIES) {
