@@ -1145,8 +1145,10 @@ void KlippyHttpServer::registerRestRoutes() {
 void KlippyHttpServer::registerFileRoutes() {
     auto& app = drogon::app();
 
-    // File download: GET /server/files/{root}/{path}
-    // This is a catch-all route for file downloads
+    // File download: GET /server/files/{root}          (list root)
+    //                GET /server/files/{root}/{path}   (download file)
+    // The {path} portion can contain subdirectories (e.g. config/.theme/foo.json),
+    // so we use a regex handler to capture the full remaining path.
     app.registerHandler("/server/files/{root}",
         [this](const drogon::HttpRequestPtr& req,
                std::function<void(const drogon::HttpResponsePtr&)>&& cb,
@@ -1160,11 +1162,17 @@ void KlippyHttpServer::registerFileRoutes() {
             cb(resp);
         }, withAuth(config_.requireAuth, {drogon::Get}));
 
-    app.registerHandler("/server/files/{root}/{path}",
+    // Regex: /server/files/<root>/<anything-not-containing-?>
+    // Captures root (group 1) and the full nested path (group 2).
+    app.registerHandlerViaRegex(
+        "^/server/files/([^/]+)/(.+)$",
         [this](const drogon::HttpRequestPtr& req,
                std::function<void(const drogon::HttpResponsePtr&)>&& cb,
                const std::string& root, const std::string& path) {
-            handleFileDownload(req, std::move(cb), root, path);
+            // Strip query string if present (shouldn't be needed — Drogon
+            // separates it — but be safe).
+            auto pathNoQuery = path.substr(0, path.find('?'));
+            handleFileDownload(req, std::move(cb), root, pathNoQuery);
         }, withAuth(config_.requireAuth, {drogon::Get}));
 }
 

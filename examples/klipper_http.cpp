@@ -42,14 +42,13 @@
 #include "tether/klipper/klippy/KlippyInstance.hpp"
 #include "tether/klipper/http/KlippyHttpServer.hpp"
 #include "tether/simulation/systems/thermal/SingleZoneOven.hpp"
-#include "tether/utils/SignalHandler.hpp"
 
 #include <argparse/argparse.hpp>
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -58,6 +57,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <stop_token>
 #include <string>
 #include <thread>
 
@@ -494,10 +494,15 @@ int main(int argc, char* argv[]) {
         if (!dist.empty()) webRoot = dist;
     }
 
-    // Signal handling: the 'running' flag is shared with the sim thread.
-    // The SignalHandler itself is installed AFTER Drogon starts, because
-    // Drogon installs its own SIGINT handler that would override ours.
-    std::atomic<bool> running{true};
+    // Signal handling: block SIGINT/SIGTERM in this thread BEFORE starting
+    // any other threads.  All threads created after this inherit the blocked
+    // mask, so Drogon's signal handler (if it installs one) will never fire.
+    // The main thread uses sigwait() to synchronously wait for the signal.
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
+    sigaddset(&mask, SIGTERM);
+    pthread_sigmask(SIG_BLOCK, &mask, nullptr);
 
     // Ensure directories exist (use error_code overload so we don't throw)
     auto ensureDir = [](const std::string& path, const char* label) {
@@ -723,19 +728,15 @@ int main(int argc, char* argv[]) {
     std::printf("\nPress Ctrl+C to stop.\n\n");
     std::fflush(stdout);
 
-    // Install signal handlers NOW (after Drogon has started and installed
-    // its own), so our handler overrides Drogon's and Ctrl+C actually works.
-    Tether::Utils::SignalHandler sig_handler(running, true);
-
     // ------------------------------------------------------------------
-    // Step 8: Simulation thread
+    // Step 8: Simulation thread (std::jthread for cooperative cancellation)
     //
     // Runs two loops at the configured tick rate:
     //   - Thermal: step the oven plants and run heater PID control
     //   - Print: stream G-code lines from the virtual SD card and execute
     //             them, updating print stats and toolhead position
     // ------------------------------------------------------------------
-    std::thread simThread([&]() {
+    std::jthread simThread([&](std::stop_token st) {
         const auto tickDur = std::chrono::milliseconds(simTickMs);
         auto lastTick = std::chrono::steady_clock::now();
         auto printStartTime = std::chrono::steady_clock::now();
@@ -746,7 +747,7 @@ int main(int argc, char* argv[]) {
         // toolhead position animates smoothly in the Mainsail dashboard.
         const int linesPerTick = 2;
 
-        while (running.load()) {
+        while (!st.stop_requested()) {
             std::this_thread::sleep_for(tickDur);
             auto now = std::chrono::steady_clock::now();
             double elapsed = std::chrono::duration<double>(now - lastTick).count();
@@ -850,14 +851,16 @@ int main(int argc, char* argv[]) {
     });
 
     // ------------------------------------------------------------------
-    // Step 9: Run until interrupted
+    // Step 9: Wait for SIGINT/SIGTERM via sigwait (synchronous, no handler).
+    // SIGINT/SIGTERM are blocked in all threads, so Drogon's handler never
+    // fires.  sigwait blocks the main thread until a signal arrives, then
+    // we shut down cleanly.
     // ------------------------------------------------------------------
-    while (running.load()) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
+    int sig = 0;
+    sigwait(&mask, &sig);
 
-    std::printf("\nShutting down...\n");
-    running.store(false);
+    std::printf("\nShutting down (received signal %d)...\n", sig);
+    simThread.request_stop();
     simThread.join();
     httpServer->stop();
     if (withMoonraker) inst.stop();
