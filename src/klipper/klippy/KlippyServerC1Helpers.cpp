@@ -27,8 +27,11 @@ void KlippyServer::registerWebcam(const std::string& name, const std::string& ur
                                        const std::string& service) {
     Webcam cam;
     cam.name = name;
-    cam.url = url;
+    cam.streamUrl = url;
+    cam.snapshotUrl = url;
     cam.service = service;
+    // Generate a simple deterministic UID from the name
+    cam.uid = name + "-0000-0000-0000-000000000001";
     webcams_[name] = cam;
 }
 

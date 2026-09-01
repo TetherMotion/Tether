@@ -175,6 +175,7 @@ KlippyServer::KlippyServer(UdsServerConfig cfg)
     registerEndpoint("server/database/put", [this](const JsonValue& p) { return handleDatabasePut(p); });
     registerEndpoint("server/database/delete", [this](const JsonValue& p) { return handleDatabaseDelete(p); });
     registerEndpoint("server/database/post_item", [this](const JsonValue& p) { return handleDatabasePut(p); });
+    registerEndpoint("server/database/get_item", [this](const JsonValue& p) { return handleDatabaseGet(p); });
     registerEndpoint("server/webcams/list", [this](const JsonValue& p) { return handleWebcamsList(p); });
     registerEndpoint("server/webcams/get", [this](const JsonValue& p) { return handleWebcamsGet(p); });
     registerEndpoint("server/webcams/test", [this](const JsonValue& p) { return handleWebcamsTest(p); });

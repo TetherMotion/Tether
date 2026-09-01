@@ -478,41 +478,65 @@ JsonValue KlippyServer::handleAnnouncementsDismiss(const JsonValue& params) {
 
 JsonValue KlippyServer::handleWebcamsList(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    std::map<std::string, JsonValue> result;
-    std::map<std::string, JsonValue> webcams;
+    // Moonraker returns { "webcams": [ { ... }, ... ] }
+    std::vector<JsonValue> webcamArray;
     for (const auto& [name, cam] : webcams_) {
         std::map<std::string, JsonValue> camInfo;
-        camInfo["url"] = JsonValue(cam.url);
+        camInfo["name"] = JsonValue(cam.name);
+        camInfo["location"] = JsonValue(cam.location);
         camInfo["service"] = JsonValue(cam.service);
         camInfo["enabled"] = JsonValue(cam.enabled);
-        camInfo["rotation"] = JsonValue(cam.rotation);
+        camInfo["icon"] = JsonValue(cam.icon);
+        camInfo["target_fps"] = JsonValue(static_cast<int64_t>(cam.targetFps));
+        camInfo["target_fps_idle"] = JsonValue(static_cast<int64_t>(cam.targetFpsIdle));
+        camInfo["stream_url"] = JsonValue(cam.streamUrl);
+        camInfo["snapshot_url"] = JsonValue(cam.snapshotUrl);
+        camInfo["flip_horizontal"] = JsonValue(cam.flipHorizontal);
+        camInfo["flip_vertical"] = JsonValue(cam.flipVertical);
+        camInfo["rotation"] = JsonValue(static_cast<int64_t>(cam.rotation));
         camInfo["aspect_ratio"] = JsonValue(cam.aspectRatio);
+        camInfo["extra_data"] = JsonValue(std::map<std::string, JsonValue>{});
         camInfo["source"] = JsonValue(cam.source);
-        webcams[name] = JsonValue(camInfo);
+        camInfo["uid"] = JsonValue(cam.uid);
+        webcamArray.push_back(JsonValue(camInfo));
     }
-    result["result"] = JsonValue(webcams);
+    std::map<std::string, JsonValue> result;
+    result["webcams"] = JsonValue(webcamArray);
     return JsonValue(result);
 }
 
 JsonValue KlippyServer::handleWebcamsGet(const JsonValue& params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    std::map<std::string, JsonValue> result;
     std::string name = params.has("name") && params.find("name")->isString()
         ? params.find("name")->asString() : "";
     auto it = webcams_.find(name);
     if (it != webcams_.end()) {
+        const auto& cam = it->second;
         std::map<std::string, JsonValue> camInfo;
-        camInfo["url"] = JsonValue(it->second.url);
-        camInfo["service"] = JsonValue(it->second.service);
-        camInfo["enabled"] = JsonValue(it->second.enabled);
-        camInfo["rotation"] = JsonValue(it->second.rotation);
-        camInfo["aspect_ratio"] = JsonValue(it->second.aspectRatio);
-        camInfo["source"] = JsonValue(it->second.source);
-        result["result"] = JsonValue(camInfo);
+        camInfo["name"] = JsonValue(cam.name);
+        camInfo["location"] = JsonValue(cam.location);
+        camInfo["service"] = JsonValue(cam.service);
+        camInfo["enabled"] = JsonValue(cam.enabled);
+        camInfo["icon"] = JsonValue(cam.icon);
+        camInfo["target_fps"] = JsonValue(static_cast<int64_t>(cam.targetFps));
+        camInfo["target_fps_idle"] = JsonValue(static_cast<int64_t>(cam.targetFpsIdle));
+        camInfo["stream_url"] = JsonValue(cam.streamUrl);
+        camInfo["snapshot_url"] = JsonValue(cam.snapshotUrl);
+        camInfo["flip_horizontal"] = JsonValue(cam.flipHorizontal);
+        camInfo["flip_vertical"] = JsonValue(cam.flipVertical);
+        camInfo["rotation"] = JsonValue(static_cast<int64_t>(cam.rotation));
+        camInfo["aspect_ratio"] = JsonValue(cam.aspectRatio);
+        camInfo["extra_data"] = JsonValue(std::map<std::string, JsonValue>{});
+        camInfo["source"] = JsonValue(cam.source);
+        camInfo["uid"] = JsonValue(cam.uid);
+        std::map<std::string, JsonValue> result;
+        result["webcam"] = JsonValue(camInfo);
+        return JsonValue(result);
     } else {
+        std::map<std::string, JsonValue> result;
         result["error"] = JsonValue("Webcam not found");
+        return JsonValue(result);
     }
-    return JsonValue(result);
 }
 
 JsonValue KlippyServer::handleWebcamsTest(const JsonValue& params) {
@@ -524,7 +548,7 @@ JsonValue KlippyServer::handleWebcamsTest(const JsonValue& params) {
         // Return a test result
         std::map<std::string, JsonValue> testResult;
         testResult["status"] = JsonValue("ok");
-        testResult["url"] = JsonValue(it->second.url);
+        testResult["url"] = JsonValue(it->second.streamUrl);
         result["result"] = JsonValue(testResult);
     } else {
         result["error"] = JsonValue("Webcam not found");
