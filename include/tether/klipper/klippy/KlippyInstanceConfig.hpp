@@ -13,6 +13,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <string>
@@ -87,6 +88,18 @@ struct KlippySettings {
     std::map<std::string, double> homeOffset = {
         {"x", 0.0}, {"y", 0.0}, {"z", 0.0}
     };
+
+    // Homing configuration (per-axis, from [stepper_*] sections)
+    struct StepperHomingConfig {
+        double homingSpeed = 50.0;       ///< mm/s (homing_speed)
+        double secondHomingSpeed = 0.0;  ///< mm/s (second_homing_speed, 0 = single pass)
+        double positionEndstop = 0.0;    ///< mm (position_endstop)
+        double positionMin = -std::numeric_limits<double>::infinity();
+        double positionMax = std::numeric_limits<double>::infinity();
+        bool positiveDirection = true;   ///< True = endstop at max
+    };
+    std::map<std::string, StepperHomingConfig> stepperHoming;
+
     std::map<std::string, double> toolOffset[8]; // per-tool offsets
     double probeOffset = 0.0;
 
