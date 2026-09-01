@@ -109,7 +109,7 @@ data stores). Transport layers are thin wrappers:
 - `KlippyHttpServer` — HTTP/WebSocket transport (Drogon routes, JSON-RPC, WS sessions)
 
 Both transports share a single `KlippyServer` instance. See
-`examples/klipper_http_mainsail.cpp` for a complete example running both
+`examples/klipper_http.cpp` for a complete example running both
 transports, and `docs/MainsailDocker.md` for Docker deployment with Mainsail.
 
 ## Code Conventions

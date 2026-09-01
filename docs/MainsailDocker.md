@@ -1,6 +1,6 @@
 # Running the Simulated Printer with Mainsail or Fluidd
 
-The `klipper_http_mainsail` example runs a fully simulated 3D printer
+The `klipper_http` example runs a fully simulated 3D printer
 (thermal models, motion, G-code execution, print playback) and exposes
 the complete Moonraker HTTP + WebSocket API. You can connect
 [Mainsail](https://docs.mainsail.xyz/) or [Fluidd](https://docs.fluidd.xyz/)
@@ -12,7 +12,7 @@ directly — no Moonraker or Klipper process needed.
 cmake -B build \
   -DTETHER_ENABLE_KLIPPER=1 \
   -DTETHER_ENABLE_KLIPPER_HTTP=1
-cmake --build build --target klipper_http_mainsail -j4
+cmake --build build --target klipper_http -j4
 ```
 
 ## Quick Start
@@ -20,7 +20,7 @@ cmake --build build --target klipper_http_mainsail -j4
 ### With Mainsail
 
 ```bash
-./build/bin/klipper_http_mainsail --no-auth --mainsail ~/mainsail
+./build/bin/klipper_http --no-auth --mainsail ~/mainsail
 ```
 
 On first run, the example detects that `~/mainsail` doesn't have a built
@@ -48,7 +48,7 @@ prompt, no rebuild.
 ### With Fluidd
 
 ```bash
-./build/bin/klipper_http_mainsail --no-auth --fluidd ~/fluidd
+./build/bin/klipper_http --no-auth --fluidd ~/fluidd
 ```
 
 Same flow: clones `https://github.com/fluidd-core/fluidd.git`, runs
@@ -65,13 +65,13 @@ wget https://github.com/mainsail-crew/mainsail/releases/latest/download/mainsail
 unzip mainsail.zip -d /opt/mainsail
 
 # Serve it directly
-./build/bin/klipper_http_mainsail --no-auth --web-root /opt/mainsail
+./build/bin/klipper_http --no-auth --web-root /opt/mainsail
 ```
 
 ## All Options
 
 ```
-Usage: klipper_http_mainsail [--help] [--port VAR] [--with-moonraker]
+Usage: klipper_http [--help] [--port VAR] [--with-moonraker]
        [--uds-path VAR] [--mainsail DIR] [--fluidd DIR] [--web-root DIR]
        [--gcodes-root VAR] [--config-root VAR] [--logs-root VAR]
        [--api-key VAR] [--no-auth] [--sim-tick-ms VAR]
@@ -150,7 +150,7 @@ server), see the Docker setup below.
 ### 1. Start Tether
 
 ```bash
-./build/bin/klipper_http_mainsail --no-auth --port 7125
+./build/bin/klipper_http --no-auth --port 7125
 ```
 
 ### 2. Start Mainsail container
@@ -184,7 +184,7 @@ docker rm -f tether_mainsail
 Another process is using the port. Use a different one:
 
 ```bash
-./build/bin/klipper_http_mainsail --no-auth --port 7130 --mainsail ~/mainsail
+./build/bin/klipper_http --no-auth --port 7130 --mainsail ~/mainsail
 ```
 
 ### Mainsail shows "Moonraker not connected"
