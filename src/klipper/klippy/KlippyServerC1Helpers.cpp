@@ -195,6 +195,21 @@ void KlippyServer::initServerConfig() {
         std::map<std::string, JsonValue> virtualSdcard;
         virtualSdcard["path"] = JsonValue(fileRoot_);
         printerConfig["virtual_sdcard"] = JsonValue(virtualSdcard);
+
+        // [gcode_macro PAUSE/RESUME/CANCEL_PRINT] — Fluidd checks for these
+        // in server.config to determine if the printer is properly configured.
+        // The key format is "gcode_macro <NAME>" (with a space).
+        std::map<std::string, JsonValue> pauseMacro;
+        pauseMacro["gcode"] = JsonValue("PAUSE\n");
+        printerConfig["gcode_macro PAUSE"] = JsonValue(pauseMacro);
+
+        std::map<std::string, JsonValue> resumeMacro;
+        resumeMacro["gcode"] = JsonValue("RESUME\n");
+        printerConfig["gcode_macro RESUME"] = JsonValue(resumeMacro);
+
+        std::map<std::string, JsonValue> cancelMacro;
+        cancelMacro["gcode"] = JsonValue("CANCEL_PRINT\n");
+        printerConfig["gcode_macro CANCEL_PRINT"] = JsonValue(cancelMacro);
     }
 
     serverConfig_ = printerConfig;

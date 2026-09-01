@@ -93,13 +93,15 @@ inline klippy::JsonValue fromJsonGeneric(const glz::generic& val) {
     return JsonValue{};
 }
 
-/// @brief Serialize a JsonValue to a JSON string using Glaze.
+/// @brief Serialize a JsonValue to a JSON string.
+///
+/// Uses JsonValue::dump() directly rather than going through glz::generic,
+/// which avoids a known corruption issue when converting int64_t values
+/// inside nested arrays/objects through the Glaze intermediate representation.
 /// @param val The JsonValue to serialize.
 /// @return The JSON string.
 inline std::string dumpJson(const klippy::JsonValue& val) {
-    auto gen = toJsonGeneric(val);
-    auto result = glz::write_json(gen);
-    return result.value_or(std::string{"null"});
+    return val.dump();
 }
 
 /// @brief Parse a JSON string into a JsonValue using Glaze.

@@ -151,6 +151,18 @@ public:
                 result = std::move(inner);
             }
 
+            // Fluidd's WebSocketClient calls Object.defineProperty(result, ...)
+            // on every response, which throws "Object.defineProperty called
+            // on non-object" if result is null, a boolean, or a number.
+            // Strings are handled (wrapped in { result: ... }) by the client,
+            // but other primitives are not.  Wrap them in an object so the
+            // client always receives an object or string.
+            if (!result.isObject() && !result.isArray() && !result.isString()) {
+                std::map<std::string, klippy::JsonValue> wrapper;
+                wrapper["result"] = result;
+                result = klippy::JsonValue(wrapper);
+            }
+
             if (hasId) {
                 return buildJsonRpcSuccess(id, result);
             }

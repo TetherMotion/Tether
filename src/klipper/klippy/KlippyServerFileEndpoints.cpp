@@ -27,10 +27,27 @@ JsonValue KlippyServer::handleServerInfo(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
     std::map<std::string, JsonValue> info;
     info["version"] = JsonValue(config_.softwareVersion);
+    // Fluidd reads klippy_state (not state) from server.info.
+    info["klippy_state"] = JsonValue(stateToString(state_));
     info["state"] = JsonValue(stateToString(state_));
     info["state_message"] = JsonValue(stateMessage_);
     info["klippy_connected"] = JsonValue(state_ != PrinterState::Shutdown);
     info["cpu_info"] = JsonValue("tether-klipper");
+    // Moonraker's server.info includes these array fields; Fluidd accesses
+    // payload.components.length unconditionally, so they must always be arrays.
+    info["components"] = JsonValue(std::vector<JsonValue>{});
+    info["failed_components"] = JsonValue(std::vector<JsonValue>{});
+    info["registered_directories"] = JsonValue(std::vector<JsonValue>{
+        JsonValue("config"), JsonValue("logs"), JsonValue("gcodes")
+    });
+    info["warnings"] = JsonValue(std::vector<JsonValue>{});
+    info["moonraker_version"] = JsonValue("tether-1.0.0");
+    std::vector<JsonValue> apiVersion;
+    apiVersion.push_back(JsonValue(static_cast<int64_t>(1)));
+    apiVersion.push_back(JsonValue(static_cast<int64_t>(0)));
+    apiVersion.push_back(JsonValue(static_cast<int64_t>(0)));
+    info["api_version"] = JsonValue(apiVersion);
+    info["api_version_string"] = JsonValue("1.0.0");
     result["result"] = JsonValue(info);
     return JsonValue(result);
 }
