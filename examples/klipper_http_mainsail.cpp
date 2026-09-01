@@ -20,20 +20,25 @@
  *   - Fan, probe, and endstop peripherals
  *
  * Usage:
- *   klipper_http_mainsail [--port PORT] [--uds-path PATH] [--web-root DIR]
+ *   klipper_http_mainsail [--port PORT] [--uds-path PATH]
+ *                         [--mainsail DIR] [--fluidd DIR] [--web-root DIR]
  *                         [--gcodes-root DIR] [--api-key KEY] [--no-auth]
  *                         [--sim-tick-ms MS]
  *
- * Once running, point Mainsail at http://localhost:PORT/ and it will connect
- * via WebSocket as if talking to a real Moonraker instance. You can:
+ * Web UI options:
+ *   --mainsail DIR   Clone and build Mainsail into DIR (asks y/N first).
+ *                     If DIR already contains a built dist/, reuses it.
+ *   --fluidd DIR     Same for Fluidd.
+ *   --web-root DIR   Serve pre-built static assets from DIR as-is.
+ *
+ * Once running, open http://localhost:PORT/ in a browser. You can:
  *   - Set heater targets and watch temperatures rise/fall
  *   - Start prints from the G-code browser (a sample file is generated)
  *   - Send G-code commands from the console
  *   - Monitor toolhead position, print progress, and fan speed
  *
- * Docker deployment:
- *   See docs/MainsailDocker.md for a complete Docker Compose setup that
- *   runs this example alongside a Mainsail container.
+ * Docker deployment (alternative):
+ *   See docs/MainsailDocker.md for running Mainsail in a Docker container.
  */
 
 #include "tether/klipper/klippy/KlippyInstance.hpp"
@@ -176,6 +181,149 @@ static std::string defaultConfigDir() {
     return "/tmp/tether/config";
 }
 
+// ============================================================================
+// Web UI (Mainsail / Fluidd) setup
+// ============================================================================
+
+/// @brief Ask the user a yes/no question on stdin.
+/// @return true if the user answered 'y' or 'Y', false otherwise.
+static bool askYesNo(const std::string& question) {
+    std::printf("%s [y/N] ", question.c_str());
+    std::fflush(stdout);
+    std::string line;
+    if (!std::getline(std::cin, line)) return false;  // EOF / no stdin
+    return !line.empty() && (line[0] == 'y' || line[0] == 'Y');
+}
+
+/// @brief Run a shell command, streaming its output to stdout/stderr.
+/// @return true if the command exited with status 0.
+static bool runCommand(const std::string& cmd) {
+    std::printf("  $ %s\n", cmd.c_str());
+    std::fflush(stdout);
+    int rc = std::system(cmd.c_str());
+    if (rc != 0) {
+        std::fprintf(stderr, "  (exit status %d)\n", rc);
+    }
+    return rc == 0;
+}
+
+/// @brief Check if a directory looks like a built Mainsail/Fluidd dist.
+static bool isBuiltDist(const std::filesystem::path& dir) {
+    namespace fs = std::filesystem;
+    return fs::exists(dir / "index.html") &&
+           fs::exists(dir / "config.json");
+}
+
+/// @brief Write a Mainsail/Fluidd config.json that points to the given port.
+/// Both SPAs read config.json at load time to know which Moonraker instance
+/// to connect to.  When Tether serves both the SPA and the API on the same
+/// port, the config just points to localhost:PORT.
+static void writeWebUiConfig(const std::filesystem::path& distDir, uint16_t port) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::create_directories(distDir, ec);
+    std::ofstream f(distDir / "config.json");
+    if (!f.is_open()) return;
+    // Mainsail format (Fluidd is compatible with the same schema):
+    //   { "instances": [{ "hostname": "localhost", "port": <port> }] }
+    f << "{\n"
+      << "  \"instances\": [\n"
+      << "    {\n"
+      << "      \"hostname\": \"localhost\",\n"
+      << "      \"port\": " << port << "\n"
+      << "    }\n"
+      << "  ]\n"
+      << "}\n";
+}
+
+/// @brief Ensure a web UI (Mainsail or Fluidd) is built and return the dist path.
+///
+/// @param uiDir     Directory passed via --mainsail or --fluidd.
+/// @param repoUrl   Git URL to clone from if the directory doesn't exist.
+/// @param uiName    Human-readable name ("Mainsail" or "Fluidd").
+/// @param port      Port for the config.json.
+/// @return Path to the dist/ directory containing index.html, or empty on failure.
+static std::string ensureWebUi(const std::string& uiDir,
+                                const std::string& repoUrl,
+                                const std::string& uiName,
+                                uint16_t port) {
+    namespace fs = std::filesystem;
+    fs::path dir(uiDir);
+    fs::path distDir = dir / "dist";
+
+    // Case 1: dist/ already has index.html — already built, just use it.
+    if (isBuiltDist(distDir)) {
+        std::printf("%s already built at %s\n", uiName.c_str(),
+                    distDir.string().c_str());
+        writeWebUiConfig(distDir, port);
+        return distDir.string();
+    }
+
+    // Case 2: directory exists but no dist/ — cloned but not built.
+    if (fs::exists(dir) && !fs::is_empty(dir)) {
+        std::printf("%s source found at %s but not built.\n\n",
+                    uiName.c_str(), dir.string().c_str());
+        std::printf("I will run the following commands to build it:\n");
+        std::printf("  cd %s\n", dir.string().c_str());
+        std::printf("  npm install\n");
+        std::printf("  npm run build\n\n");
+        if (!askYesNo("Proceed?")) {
+            std::printf("Skipped. Continuing without %s.\n", uiName.c_str());
+            return "";
+        }
+        std::printf("\n");
+        std::string cd = "cd " + dir.string();
+        if (!runCommand(cd + " && npm install")) {
+            std::fprintf(stderr, "npm install failed.\n");
+            return "";
+        }
+        if (!runCommand(cd + " && npm run build")) {
+            std::fprintf(stderr, "npm run build failed.\n");
+            return "";
+        }
+        if (!isBuiltDist(distDir)) {
+            std::fprintf(stderr, "Build completed but dist/index.html not found.\n");
+            return "";
+        }
+        writeWebUiConfig(distDir, port);
+        return distDir.string();
+    }
+
+    // Case 3: directory doesn't exist — need to clone + build.
+    std::printf("%s not found at %s.\n\n", uiName.c_str(), dir.string().c_str());
+    std::printf("I will run the following commands:\n");
+    std::printf("  git clone %s %s\n", repoUrl.c_str(), dir.string().c_str());
+    std::printf("  cd %s\n", dir.string().c_str());
+    std::printf("  npm install\n");
+    std::printf("  npm run build\n\n");
+    if (!askYesNo("Proceed?")) {
+        std::printf("Skipped. Continuing without %s.\n", uiName.c_str());
+        return "";
+    }
+    std::printf("\n");
+    if (!runCommand("git clone " + repoUrl + " " + dir.string())) {
+        std::fprintf(stderr, "git clone failed.\n");
+        return "";
+    }
+    std::string cd = "cd " + dir.string();
+    if (!runCommand(cd + " && npm install")) {
+        std::fprintf(stderr, "npm install failed.\n");
+        return "";
+    }
+    if (!runCommand(cd + " && npm run build")) {
+        std::fprintf(stderr, "npm run build failed.\n");
+        return "";
+    }
+    if (!isBuiltDist(distDir)) {
+        std::fprintf(stderr, "Build completed but dist/index.html not found.\n");
+        return "";
+    }
+    writeWebUiConfig(distDir, port);
+    std::printf("\n%s built successfully at %s\n",
+                uiName.c_str(), distDir.string().c_str());
+    return distDir.string();
+}
+
 int main(int argc, char* argv[]) {
     // ------------------------------------------------------------------
     // Argument parsing (argparse)
@@ -194,7 +342,17 @@ int main(int argc, char* argv[]) {
 
     program.add_argument("--web-root")
         .default_value(std::string(""))
-        .help("Directory containing Mainsail static assets (default: disabled)");
+        .help("Directory with pre-built Mainsail/Fluidd static assets (served as-is)");
+
+    program.add_argument("--mainsail")
+        .default_value(std::string(""))
+        .help("Path to Mainsail source directory. If not built yet, will clone "
+              "and build automatically (asks for confirmation first).");
+
+    program.add_argument("--fluidd")
+        .default_value(std::string(""))
+        .help("Path to Fluidd source directory. If not built yet, will clone "
+              "and build automatically (asks for confirmation first).");
 
     program.add_argument("--gcodes-root")
         .default_value(defaultDataDir("gcodes"))
@@ -231,7 +389,9 @@ int main(int argc, char* argv[]) {
 
     const auto port = static_cast<uint16_t>(program.get<int>("--port"));
     const auto udsPath = program.get<std::string>("--uds-path");
-    const auto webRoot = program.get<std::string>("--web-root");
+    auto webRoot = program.get<std::string>("--web-root");
+    const auto mainsailDir = program.get<std::string>("--mainsail");
+    const auto fluiddDir = program.get<std::string>("--fluidd");
     const auto gcodesRoot = program.get<std::string>("--gcodes-root");
     const auto configRoot = program.get<std::string>("--config-root");
     const auto logsRoot = program.get<std::string>("--logs-root");
@@ -239,6 +399,25 @@ int main(int argc, char* argv[]) {
     const bool requireAuth = !program.get<bool>("--no-auth");
     int simTickMs = program.get<int>("--sim-tick-ms");
     if (simTickMs < 10) simTickMs = 10;
+
+    // ------------------------------------------------------------------
+    // Resolve web UI directory (--mainsail or --fluidd take priority
+    // over --web-root).  If the source isn't built yet, ask permission
+    // and clone + build automatically.
+    // ------------------------------------------------------------------
+    if (!mainsailDir.empty()) {
+        std::string dist = ensureWebUi(
+            mainsailDir,
+            "https://github.com/mainsail-crew/mainsail.git",
+            "Mainsail", port);
+        if (!dist.empty()) webRoot = dist;
+    } else if (!fluiddDir.empty()) {
+        std::string dist = ensureWebUi(
+            fluiddDir,
+            "https://github.com/fluidd-core/fluidd.git",
+            "Fluidd", port);
+        if (!dist.empty()) webRoot = dist;
+    }
 
     // Install signal handlers
     std::atomic<bool> running{true};
@@ -453,42 +632,13 @@ int main(int argc, char* argv[]) {
     }
     std::printf("HTTP/WebSocket server listening on port %u\n", port);
     if (!webRoot.empty()) {
-        std::printf("Serving Mainsail static assets from %s\n", webRoot.c_str());
-        std::printf("\nOpen http://localhost:%u/ in a browser to access Mainsail.\n",
-                    port);
+        std::printf("Serving web UI static assets from %s\n", webRoot.c_str());
+        std::printf("\nOpen http://localhost:%u/ in a browser.\n", port);
     } else {
-        // No static assets served — print the exact docker command to start
-        // Mainsail in a container, pointing at this process via the nginx
-        // proxy config under docker/mainsail/ in the repo root.
-        namespace fs = std::filesystem;
-        // Resolve the repo root from the executable location:
-        //   build/bin/klipper_http_mainsail  ->  repo root is three levels up
-        fs::path exePath = fs::read_symlink("/proc/self/exe");
-        fs::path repoRoot = exePath.parent_path().parent_path().parent_path();
-        fs::path cfgJson  = repoRoot / "docker/mainsail/mainsail-config.json";
-        fs::path proxyConf = repoRoot / "docker/mainsail/mainsail-proxy.conf";
-
-        std::printf("\n--- Mainsail UI ---\n");
-        if (fs::exists(cfgJson) && fs::exists(proxyConf)) {
-            std::printf("Run this in another terminal to start Mainsail:\n\n");
-            std::printf("  docker run -d \\\n");
-            std::printf("    --name tether_mainsail \\\n");
-            std::printf("    -p 8080:8080 \\\n");
-            std::printf("    --add-host host.docker.internal:host-gateway \\\n");
-            std::printf("    -v \"%s:/usr/share/nginx/html/config.json\" \\\n",
-                        cfgJson.string().c_str());
-            std::printf("    -v \"%s:/etc/nginx/extra-conf.d/proxy.conf\" \\\n",
-                        proxyConf.string().c_str());
-            std::printf("    ghcr.io/mainsail-crew/mainsail:latest\n\n");
-            std::printf("Then open http://localhost:8080\n");
-        } else {
-            std::printf("No Mainsail static assets (--web-root not set) and\n");
-            std::printf("docker/mainsail/ config not found next to the build.\n");
-            std::printf("Either:\n");
-            std::printf("  • Run with --web-root /path/to/mainsail/dist, or\n");
-            std::printf("  • See docs/MainsailDocker.md for the Docker setup.\n");
-            std::printf("\nOpen http://localhost:%u/ for the raw API.\n", port);
-        }
+        std::printf("\nNo web UI configured. Use --mainsail DIR or --fluidd DIR\n");
+        std::printf("to auto-clone and build a web UI, or --web-root DIR to\n");
+        std::printf("serve pre-built static assets.\n");
+        std::printf("\nRaw API available at http://localhost:%u/\n", port);
     }
     std::printf("\nPress Ctrl+C to stop.\n\n");
     std::fflush(stdout);

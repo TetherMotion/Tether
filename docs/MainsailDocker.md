@@ -1,73 +1,155 @@
-# Running the Simulated Printer with Mainsail (Docker)
+# Running the Simulated Printer with Mainsail or Fluidd
 
-This guide walks you through starting the Tether simulated 3D printer on
-your host and connecting [Mainsail](https://docs.mainsail.xyz/) to it via a
-Docker container. No Moonraker or Klipper process is needed — Tether
-implements the full Moonraker HTTP + WebSocket API natively.
+The `klipper_http_mainsail` example runs a fully simulated 3D printer
+(thermal models, motion, G-code execution, print playback) and exposes
+the complete Moonraker HTTP + WebSocket API. You can connect
+[Mainsail](https://docs.mainsail.xyz/) or [Fluidd](https://docs.fluidd.xyz/)
+directly — no Moonraker or Klipper process needed.
 
-## Architecture
+## Build
+
+```bash
+cmake -B build \
+  -DTETHER_ENABLE_KLIPPER=1 \
+  -DTETHER_ENABLE_KLIPPER_HTTP=1
+cmake --build build --target klipper_http_mainsail -j4
+```
+
+## Quick Start
+
+### With Mainsail
+
+```bash
+./build/bin/klipper_http_mainsail --no-auth --mainsail ~/mainsail
+```
+
+On first run, the example detects that `~/mainsail` doesn't have a built
+`dist/` directory and asks for permission to clone and build:
 
 ```
-  Your browser (http://localhost:8080)
+Mainsail not found at /home/user/mainsail.
+
+I will run the following commands:
+  git clone https://github.com/mainsail-crew/mainsail.git /home/user/mainsail
+  cd /home/user/mainsail
+  npm install
+  npm run build
+
+Proceed? [y/N]
+```
+
+Type `y` and press Enter. After the build completes, Tether starts serving
+Mainsail and the simulated printer API on the same port. Open
+**http://localhost:7125** in a browser.
+
+On subsequent runs, the existing build is reused automatically — no
+prompt, no rebuild.
+
+### With Fluidd
+
+```bash
+./build/bin/klipper_http_mainsail --no-auth --fluidd ~/fluidd
+```
+
+Same flow: clones `https://github.com/fluidd-core/fluidd.git`, runs
+`npm install && npm run build`, then serves the result.
+
+### With pre-built static assets
+
+If you already have a built Mainsail or Fluidd `dist/` directory (e.g.
+downloaded from the releases page), use `--web-root`:
+
+```bash
+# Download pre-built Mainsail
+wget https://github.com/mainsail-crew/mainsail/releases/latest/download/mainsail.zip
+unzip mainsail.zip -d /opt/mainsail
+
+# Serve it directly
+./build/bin/klipper_http_mainsail --no-auth --web-root /opt/mainsail
+```
+
+## All Options
+
+```
+Usage: klipper_http_mainsail [--help] [--port VAR] [--uds-path VAR]
+       [--mainsail DIR] [--fluidd DIR] [--web-root DIR]
+       [--gcodes-root VAR] [--config-root VAR] [--logs-root VAR]
+       [--api-key VAR] [--no-auth] [--sim-tick-ms VAR]
+
+  --mainsail DIR     Clone+build Mainsail into DIR (asks y/N first).
+                     Reuses existing build if dist/ is present.
+  --fluidd DIR       Same for Fluidd.
+  --web-root DIR     Serve pre-built static assets from DIR as-is.
+  --port PORT        HTTP listen port (default: 7125).
+  --no-auth          Disable API authentication.
+  --sim-tick-ms MS   Simulation tick interval (default: 100, min: 10).
+```
+
+Run `--help` to see all options.
+
+## What You Can Do
+
+Once Mainsail/Fluidd is loaded in the browser:
+
+- **Dashboard** — extruder and bed temperatures (start at ~25°C, rise/fall
+  with the simulated thermal model when you set targets)
+- **Temperature panel** — set heater targets and watch the PID controller
+  drive the simulated thermal model
+- **G-code Files** — a sample file (`tether_calibration_square.gcode`) is
+  auto-generated; click it and press **Print** to start a simulated print
+- **Console** — send G-code commands (`G28`, `M104 S210`, `G1 X50 Y50`)
+- **Toolhead** — position updates live as G-code executes during prints
+- **Print progress** — layer count, filament used, duration
+
+## How It Works
+
+```
+  Browser (http://localhost:7125)
         │
         ▼
 ┌──────────────────────────────────┐
-│  Mainsail Docker Container        │
-│  (ghcr.io/mainsail-crew/mainsail) │
-│                                   │
-│  Nginx serves the SPA on :8080    │
-│  Proxies /server, /api, /machine, │
-│  /access, /client, /websocket     │
-│  → host.docker.internal:7125      │
-└───────────────┬───────────────────┘
-                │  (host bridge, port 7125)
-                ▼
-┌──────────────────────────────────┐
-│  Tether (host process)            │
-│  ./build/bin/klipper_http_mainsail│
+│  Tether (single process)          │
 │                                   │
 │  KlippyHttpServer on :7125        │
-│  + simulated heaters, motion,     │
-│    print playback, G-code exec    │
+│  ├── Serves Mainsail/Fluidd SPA   │
+│  ├── HTTP REST API (120+ endpoints)│
+│  └── WebSocket JSON-RPC           │
+│                                   │
+│  KlippyInstance (simulated)       │
+│  ├── PID heaters (thermal model)  │
+│  ├── G-code executor              │
+│  ├── Virtual SD card + print      │
+│  └── 68 printer objects           │
 └───────────────────────────────────┘
 ```
 
-## Prerequisites
+Tether serves both the web UI static files and the Moonraker API from the
+same port. The SPA's `config.json` points to `localhost:7125`, so the
+browser connects back to the same server for WebSocket and REST calls.
+No nginx proxy or Docker needed.
 
-- **Docker** (Docker Engine 20.10+)
-- **Tether** built with HTTP support:
+## Prerequisites for --mainsail / --fluidd
 
-  ```bash
-  cmake -B build \
-    -DTETHER_ENABLE_KLIPPER=1 \
-    -DTETHER_ENABLE_KLIPPER_HTTP=1
-  cmake --build build --target klipper_http_mainsail -j4
-  ```
+The auto-clone-and-build feature requires:
 
-## Quick Start (3 steps)
+- **git** — to clone the repository
+- **Node.js 20+** and **npm** — to build the SPA
 
-### 1. Start the Tether simulated printer
+If these aren't available, use `--web-root` with pre-built static assets
+instead.
 
-From the Tether repo root:
+## Alternative: Docker
+
+If you prefer to run Mainsail in a Docker container (e.g. on a headless
+server), see the Docker setup below.
+
+### 1. Start Tether
 
 ```bash
 ./build/bin/klipper_http_mainsail --no-auth --port 7125
 ```
 
-You should see:
-
-```
-=== Tether Simulated 3D Printer (Moonraker Replacement) ===
-...
-HTTP/WebSocket server listening on port 7125
-Open http://localhost:8080/ in a browser to access the web UI.
-```
-
-Leave this running in a terminal.
-
-### 2. Start the Mainsail container
-
-From the Tether repo root:
+### 2. Start Mainsail container
 
 ```bash
 docker run -d \
@@ -79,128 +161,43 @@ docker run -d \
   ghcr.io/mainsail-crew/mainsail:latest
 ```
 
-This pulls the official Mainsail image and starts it on port **8080**.
-The container's nginx is configured (via `docker/mainsail/mainsail-proxy.conf`)
-to proxy all API calls to `host.docker.internal:7125`, which reaches the
-Tether process on your host.
+### 3. Open http://localhost:8080
 
-### 3. Open Mainsail
+The Mainsail container's nginx proxies `/server`, `/api`, `/machine`,
+`/access`, `/client`, and `/websocket` to `host.docker.internal:7125`,
+which reaches Tether on the host.
 
-Open **http://localhost:8080** in a browser.
-
-Mainsail will load and automatically connect to Tether via the WebSocket
-proxy. You should see:
-
-- **Dashboard** with extruder and bed temperatures (starting at ~25°C)
-- **Temperature** panel — set targets and watch them rise/fall with the
-  simulated thermal model
-- **G-code Files** panel — a sample file
-  (`tether_calibration_square.gcode`) is pre-generated; click it and press
-  **Print** to start a simulated print
-- **Console** — send G-code commands (e.g. `G28`, `M104 S210`, `G1 X50 Y50`)
-- **Toolhead** panel — position updates live during prints
-
-## How It Works
-
-The setup uses two files in `docker/mainsail/`:
-
-| File | Purpose |
-|------|---------|
-| `mainsail-config.json` | Tells the Mainsail SPA to connect to `localhost:8080` (itself, via the nginx proxy) |
-| `mainsail-proxy.conf` | Nginx config that proxies `/server`, `/api`, `/machine`, `/access`, `/client`, and `/websocket` to `host.docker.internal:7125` |
-
-The `docker run` command mounts these into the Mainsail container and adds
-`--add-host host.docker.internal:host-gateway` so the container can reach
-the host (this is needed on Linux; Docker Desktop handles it automatically).
-
-## Changing the Tether Port
-
-If you want Tether on a different port (e.g. 7130):
-
-1. Start Tether on the new port:
-   ```bash
-   ./build/bin/klipper_http_mainsail --no-auth --port 7130
-   ```
-
-2. Edit `docker/mainsail/mainsail-proxy.conf` and replace all `7125`
-   with `7130`.
-
-3. Restart the container:
-   ```bash
-   docker rm -f tether_mainsail
-   # re-run the docker run command from step 2 above
-   ```
-
-## Stopping
+### Stop
 
 ```bash
-# Stop and remove the Mainsail container
 docker rm -f tether_mainsail
-
-# Stop Tether (Ctrl+C in its terminal)
 ```
-
-## Running Without Docker (Built-in Static Assets)
-
-If you prefer not to use Docker at all, you can download the Mainsail
-static assets and serve them directly from Tether:
-
-```bash
-# Download Mainsail release
-wget https://github.com/mainsail-crew/mainsail/releases/latest/download/mainsail.zip
-unzip mainsail.zip -d /opt/mainsail
-
-# Run Tether with Mainsail static assets
-./build/bin/klipper_http_mainsail \
-    --port 7125 \
-    --web-root /opt/mainsail \
-    --no-auth
-```
-
-Then open **http://localhost:7125/** — Tether serves both the API and the
-Mainsail SPA from the same port. No nginx proxy needed.
 
 ## Troubleshooting
 
 ### "Address already in use" on port 7125
 
-Another process is using the port. Either stop it or use a different port:
+Another process is using the port. Use a different one:
 
 ```bash
-./build/bin/klipper_http_mainsail --no-auth --port 7130
+./build/bin/klipper_http_mainsail --no-auth --port 7130 --mainsail ~/mainsail
 ```
-
-(And update `mainsail-proxy.conf` as described above.)
 
 ### Mainsail shows "Moonraker not connected"
 
 1. Verify Tether is running: `curl http://localhost:7125/server/info`
-2. Verify the container can reach the host:
+2. Check that `config.json` in the dist directory points to the correct
+   port. The example writes this automatically; verify with:
    ```bash
-   docker exec tether_mainsail \
-     curl -s http://host.docker.internal:7125/server/info
+   cat ~/mainsail/dist/config.json
    ```
-3. Check the proxy config in `docker/mainsail/mainsail-proxy.conf` —
-   the port must match the Tether `--port` argument.
 
-### Port 8080 already in use
+### npm build fails
 
-Change the host-side port mapping in the `docker run` command:
-
+Ensure Node.js 20+ is installed:
 ```bash
-docker run -d \
-  --name tether_mainsail \
-  -p 8081:8080 \
-  ...
+node --version  # should be v20 or higher
 ```
 
-Then open `http://localhost:8081` instead.
-
-### Container already exists
-
-If `docker run` fails with "container name already in use":
-
-```bash
-docker rm -f tether_mainsail
-# then re-run the docker run command
-```
+If the build still fails, use `--web-root` with a pre-built release
+instead (see Quick Start above).

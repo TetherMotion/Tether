@@ -1318,6 +1318,15 @@ void KlippyHttpServer::registerStaticAssets() {
     app.setDocumentRoot(config_.webRoot);
     app.setHomePage("index.html");
 
+    // Drogon only serves files with extensions listed in setFileTypes().
+    // Mainsail and Fluidd use these extensions in their built dist/:
+    app.setFileTypes({
+        "html", "htm", "css", "js", "json", "map", "webmanifest",
+        "png", "jpg", "jpeg", "gif", "svg", "ico", "webp",
+        "woff", "woff2", "ttf", "eot", "otf",
+        "txt", "xml", "wasm"
+    });
+
     // SPA fallback: serve index.html for any unmatched GET route
     app.registerHandler("/",
         [this](const drogon::HttpRequestPtr& req,
