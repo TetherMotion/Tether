@@ -338,10 +338,10 @@ if(TETHER_BUILD_KLIPPER)
         SOURCE klipper_config_macros.cpp
         LIBRARIES Tether::Klipper tether_common)
 
-    # HTTP/Mainsail example requires the optional HTTP component
+    # HTTP example requires the optional HTTP component
     if(TARGET Tether::KlipperHttp)
-        add_tether_example(klipper_http_mainsail
-            SOURCE klipper_http_mainsail.cpp
+        add_tether_example(klipper_http
+            SOURCE klipper_http.cpp
             LIBRARIES Tether::KlipperHttp Tether::Klipper tether_common tether_simulation)
     endif()
 endif()
