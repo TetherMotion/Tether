@@ -282,13 +282,13 @@ JsonValue KlippyServer::handleDatabaseGet(const JsonValue& params) {
 
     auto val = databaseGet(ns, key);
     // Moonraker returns { namespace, key, value } for get_item.
-    // For missing keys, return value: null so Mainsail initializes defaults
-    // instead of logging an error.
+    // For missing keys, return an empty object so Mainsail can use the
+    // 'in' operator on it (returning null causes a TypeError).
     std::map<std::string, JsonValue> result;
     if (val) {
         result["value"] = *val;
     } else {
-        result["value"] = JsonValue();  // null
+        result["value"] = JsonValue(std::map<std::string, JsonValue>{});
     }
     result["namespace"] = JsonValue(ns);
     result["key"] = JsonValue(key);
