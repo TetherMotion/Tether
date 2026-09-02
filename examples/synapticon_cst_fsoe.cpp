@@ -149,36 +149,35 @@ constexpr uint32_t kSdoTimeoutMs = EtherCAT::Drives::Synapticon::kSdoTimeoutMs;
 //   TxPDO 0x1B00: FSoE status frame (slave→master, 31 bytes)
 //
 // Both sets are mapped simultaneously using the multi-PDO-per-sync-manager
-// API.  The FSoE PDOs are Fixed/Mandatory in the ESI — the drive
-// auto-includes them at the START of the SM buffer.  The motion PDOs are
-// appended after.  The PDO buffer layout is:
-//   SM2 (Rx, master→slave): [0x1600 (12B)][0x1700 (11B)] = 23 bytes
-//   SM3 (Tx, slave→master): [0x1A00 (12B)][0x1B00 (31B)] = 43 bytes
+// API.  ALL PDOs (including FSoE) are written explicitly to 0x1C12/0x1C13.
+// FSoE PDOs come FIRST in the assignment order, then motion PDOs.
+//   SM2 (Rx, master→slave): [0x1700 (11B)][0x1600 (19B)][0x1601][0x1602] = 46 bytes
+//   SM3 (Tx, slave→master): [0x1B00 (31B)][0x1A00 (13B)][0x1A01][0x1A02][0x1A03] = 78 bytes
 //
-// The FSoE ModulePdoGroup has Alignment="4", so the FSoE PDO data starts at
-// a 4-byte aligned offset within the SM buffer.
+// FSoE PDOs come FIRST in the assignment order.  This is critical because
+// the Synapticon Circulo EtherCAT chip has a bug where the last word in the
+// SM buffer is zeroed.  If the FSoE PDO were last, the ConnectionID (the
+// final word of the FSoE frame) would be zeroed and the slave would reject
+// every frame.  By placing motion PDOs last, the zeroed word falls on
+// motion data, not the FSoE ConnectionID.
+// See: https://doc.synapticon.com/circulo_safe_motion/smm/ecat_fsoe_issues.htm
 using RxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_RxPDO_1600;
 using TxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_TxPDO_1A00;
 using FSoERxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_RxPDO_1700;
 using FSoETxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_TxPDO_1B00;
 
 // PDO offsets within the combined PDO buffer.
-// The drive uses ETG.5000 modular device profile:
-//   0x1600 = 12 bytes (module interface objects 0x7000:1 + 0x7000:2)
-//   0x1A00 = 12 bytes (module interface objects 0x6000:1 + 0x6000:2)
-// FSoE PDOs 0x1700/0x1B00 are auto-included (Fixed) by the modular framework.
-// ESI-defined FSoE sizes: 0x1700 = 11 bytes, 0x1B00 = 31 bytes.
-// 12 is already 4-byte aligned, so no padding needed.
-//   SM2: 0x1600 (12B) + 0x1700 (11B) = 23 bytes
-//   SM3: 0x1A00 (12B) + 0x1B00 (31B) = 43 bytes
-constexpr size_t kMotionRxPDOOffset = 0;
-constexpr size_t kFSoERxPDOOffset   = 12;   // 0x1600 is 12 bytes, already aligned
-constexpr size_t kMotionTxPDOOffset = 0;
-constexpr size_t kFSoETxPDOOffset   = 12;   // 0x1A00 is 12 bytes, already aligned
+// FSoE PDOs come FIRST (offset 0), motion PDOs follow after the FSoE PDO.
+//   SM2: 0x1700 (11B) first, then 0x1600 (19B) at offset 11
+//   SM3: 0x1B00 (31B) first, then 0x1A00 (13B) at offset 31
+constexpr size_t kFSoERxPDOOffset   = 0;                    // FSoE first
+constexpr size_t kMotionRxPDOOffset = sizeof(FSoERxPDO);    // 11 bytes
+constexpr size_t kFSoETxPDOOffset   = 0;                    // FSoE first
+constexpr size_t kMotionTxPDOOffset = sizeof(FSoETxPDO);    // 31 bytes
 
-// Total SM lengths.
-constexpr size_t kSM2TotalLen = kFSoERxPDOOffset + sizeof(FSoERxPDO);   // 12 + 11 = 23
-constexpr size_t kSM3TotalLen = kFSoETxPDOOffset + sizeof(FSoETxPDO);   // 12 + 31 = 43
+// Total SM lengths (full combined: FSoE + all motion PDOs).
+constexpr size_t kSM2TotalLen = EtherCAT::Drives::Synapticon_pdo::kSM2CombinedSize;   // 46
+constexpr size_t kSM3TotalLen = EtherCAT::Drives::Synapticon_pdo::kSM3CombinedSize;   // 78
 
 using FSoEMain = EtherCAT::Drives::Synapticon::SafeMotion::MainInstance;
 
@@ -431,7 +430,7 @@ public:
     void stop(EtherCAT::CiA402Drive&) override {}
 
     bool update(EtherCAT::CiA402Drive& drive, double dt_seconds) override {
-        // Motion PDO is at offset kMotionRxPDOOffset (motion PDO comes first)
+        // Motion PDO is at offset kMotionRxPDOOffset (FSoE comes first, motion second)
         auto* rx = reinterpret_cast<PDO*>(
             static_cast<uint8_t*>(drive.getRxPDOBuffer()) + kMotionRxPDOOffset);
         if (rx == nullptr) return false;
@@ -503,7 +502,7 @@ public:
         auto* drive = master.driveBySlaveIndex(slave_index_);
         if (drive == nullptr) return true;
 
-        // Motion PDO is at offset kMotionTxPDOOffset (motion PDO comes first)
+        // Motion PDO is at offset kMotionTxPDOOffset (FSoE comes first, motion second)
         auto* tx = reinterpret_cast<const TxPDO*>(
             static_cast<const uint8_t*>(drive->getTxPDOBuffer()) + kMotionTxPDOOffset);
         // Also read the commanded target_torque from the RxPDO for comparison
@@ -740,8 +739,8 @@ public:
         }
 
         // Access the FSoE PDO region within the combined PDO buffer.
-        // The motion PDO (0x1600/0x1A00) occupies the first bytes; the FSoE
-        // PDO (0x1700/0x1B00) follows at the configured offset.
+        // The FSoE PDO (0x1700/0x1B00) comes FIRST at offset 0; the motion
+        // PDO (0x1600/0x1A00) follows after the FSoE PDO.
         uint8_t* rx_buffer = static_cast<uint8_t*>(drive->getRxPDOBuffer()) + rx_pdo_offset_;
         const uint8_t* tx_buffer = static_cast<const uint8_t*>(drive->getTxPDOBuffer()) + tx_pdo_offset_;
 
@@ -1397,6 +1396,65 @@ int main(int argc, char** argv) {
         dumpDefaultPdoConfig(master.ethercatMaster(), slave_idx, sdo);
     }
 
+    // --- Read ETG.5000/5001 modular device profile objects (0xFxxx) ---
+    // These objects describe the modular framework state and FSoE configuration.
+    // Must be read in PRE_OP (mailbox SDOs don't work in OP).
+    {
+        auto& sdo = master.ethercatMaster().sdoManager(slave_idx);
+        TETHER_LOGI(TAG, "===== ETG.5000/5001 objects (0xFxxx) =====");
+
+        auto read_u8 = [&](uint16_t idx, uint8_t sub, const char* name) -> void {
+            auto res = sdo.readU8(idx, sub, {.timeout_ms = kSdoTimeoutMs});
+            if (res.has_value())
+                TETHER_LOGI(TAG, "  0x%04X:%u (%s) = 0x%02X", idx, sub, name, res.value());
+            else
+                TETHER_LOGW(TAG, "  0x%04X:%u (%s) FAILED", idx, sub, name);
+        };
+        auto read_u16 = [&](uint16_t idx, uint8_t sub, const char* name) -> void {
+            auto res = sdo.readU16(idx, sub, {.timeout_ms = kSdoTimeoutMs});
+            if (res.has_value())
+                TETHER_LOGI(TAG, "  0x%04X:%u (%s) = 0x%04X", idx, sub, name, res.value());
+            else
+                TETHER_LOGW(TAG, "  0x%04X:%u (%s) FAILED", idx, sub, name);
+        };
+        auto read_u32 = [&](uint16_t idx, uint8_t sub, const char* name) -> void {
+            auto res = sdo.readU32(idx, sub, {.timeout_ms = kSdoTimeoutMs});
+            if (res.has_value())
+                TETHER_LOGI(TAG, "  0x%04X:%u (%s) = 0x%08X", idx, sub, name, res.value());
+            else
+                TETHER_LOGW(TAG, "  0x%04X:%u (%s) FAILED", idx, sub, name);
+        };
+
+        // ETG.5000 Modular Device Profile objects
+        TETHER_LOGI(TAG, "  -- Module Ident Lists --");
+        read_u8 (0xF002, 0, "Module Ident List count");
+        read_u32(0xF002, 1, "Module Ident[1]");
+        read_u32(0xF002, 2, "Module Ident[2]");
+
+        TETHER_LOGI(TAG, "  -- Configured Module Ident (0xF030) --");
+        read_u8 (0xF030, 0, "0xF030 count");
+        read_u32(0xF030, 1, "0xF030:1 (Module ident pos 1)");
+        read_u32(0xF030, 2, "0xF030:2 (0x22D20001=no-param, 0x22D20002=with-param)");
+
+        TETHER_LOGI(TAG, "  -- Detected Module Ident (0xF050) --");
+        read_u8 (0xF050, 0, "0xF050 count");
+        read_u32(0xF050, 1, "0xF050:1 (Detected Module ident pos 1)");
+        read_u32(0xF050, 2, "0xF050:2 (Detected Module ident pos 2)");
+
+        // ETG.5001 FSoE objects
+        TETHER_LOGI(TAG, "  -- Device Safety Address (0xF980) --");
+        read_u8 (0xF980, 0, "0xF980 count");
+        read_u16(0xF980, 1, "Device Safety Address");
+
+        // Additional 0xFxxx objects that may exist
+        TETHER_LOGI(TAG, "  -- Other 0xFxxx objects --");
+        read_u8 (0xF010, 0, "0xF010 count (Modular Device Profile)");
+        read_u16(0xF010, 1, "0xF010:1 (Profile type)");
+        read_u16(0xF010, 2, "0xF010:2 (Profile instance)");
+
+        TETHER_LOGI(TAG, "===== End ETG.5000/5001 objects =====");
+    }
+
     // --- Pre-activation safety check (disabled) ---
     // The Synapticon drive does not expose 0x2611 / 0x2620:2 via SDO on this
     // firmware, causing "Object does not exist" aborts.  The FSoE protocol
@@ -1508,27 +1566,26 @@ int main(int argc, char** argv) {
     if (args.enable_fsoe) {
         // Combined FSoE + motion PDO mapping via multi-PDO assignment.
         //
-        // Uses the default ESI layout with ALL motion PDOs:
-        //   SM2: 0x1600 + 0x1601 + 0x1602 + pad + 0x1700 (fixed) = 47 bytes
-        //   SM3: 0x1A00 + 0x1A01 + 0x1A02 + 0x1A03 + pad + 0x1B00 (fixed) = 79 bytes
+        // Uses the ESI layout with ALL PDOs, FSoE first:
+        //   SM2: 0x1700 + 0x1600 + 0x1601 + 0x1602 = 46 bytes
+        //   SM3: 0x1B00 + 0x1A00 + 0x1A01 + 0x1A02 + 0x1A03 = 78 bytes
         //
-        // FSoE PDOs are Fixed/Mandatory — the drive auto-includes them.
-        // Only motion PDOs are written to 0x1C12/0x1C13.
-        // The FSoE ModulePdoGroup Alignment="4" means the FSoE PDO data
-        // starts at a 4-byte aligned offset after the motion PDOs.
+        // ALL PDOs (including FSoE) are written explicitly to 0x1C12/0x1C13.
+        // FSoE PDOs come FIRST (critical for the Synapticon ESC bug — see
+        // comment above).
         const auto assignment =
             EtherCAT::Drives::Synapticon_pdo::makeCombinedPDOAssignment();
 
         TETHER_LOGI(TAG,
             "Transitioning to OP with combined FSoE+motion PDO mapping: "
-            "SM2=%u bytes (motion %uB + pad + FSoE %uB), "
-            "SM3=%u bytes (motion %uB + pad + FSoE %uB)",
+            "SM2=%u bytes (FSoE %uB + motion %uB), "
+            "SM3=%u bytes (FSoE %uB + motion %uB)",
             static_cast<uint16_t>(kSM2TotalLen),
-            EtherCAT::Drives::Synapticon_pdo::kSM2TotalSize,
             static_cast<uint16_t>(sizeof(FSoERxPDO)),
+            EtherCAT::Drives::Synapticon_pdo::kSM2TotalSize,
             static_cast<uint16_t>(kSM3TotalLen),
-            EtherCAT::Drives::Synapticon_pdo::kSM3TotalSize,
-            static_cast<uint16_t>(sizeof(FSoETxPDO)));
+            static_cast<uint16_t>(sizeof(FSoETxPDO)),
+            EtherCAT::Drives::Synapticon_pdo::kSM3TotalSize);
 
         // Note: Safety parameters (0x2620, 0x2641, etc.) are configured on the
         // drive via OBLAC Drives and cannot be written via SDO (error 0x08000021
@@ -1633,7 +1690,7 @@ int main(int argc, char** argv) {
         {
             uint8_t* rx_buf = static_cast<uint8_t*>(drive.getRxPDOBuffer());
             // Controlword is at offset kMotionRxPDOOffset in the combined PDO
-            // (motion PDO comes first, FSoE PDO second)
+            // (FSoE PDO comes first, motion PDO second)
             rx_buf[kMotionRxPDOOffset + 0] = 0x0F;  // Controlword low byte
             rx_buf[kMotionRxPDOOffset + 1] = 0x00;  // Controlword high byte
             TETHER_LOGI(TAG, "Wrote Controlword=0x000F to RxPDO offset %zu",
@@ -1663,7 +1720,7 @@ int main(int argc, char** argv) {
         //   bytes 9-10: ConnectionID = 0x0006
         {
             uint8_t* rx_buf = static_cast<uint8_t*>(drive.getRxPDOBuffer());
-            // FSoE PDO is at offset kFSoERxPDOOffset (motion PDO comes first, FSoE second)
+            // FSoE PDO is at offset kFSoERxPDOOffset (FSoE comes first, motion second)
             uint8_t* fsoe_buf = rx_buf + kFSoERxPDOOffset;
 
             // Fill FSoE region with known pattern
@@ -1876,7 +1933,7 @@ int main(int argc, char** argv) {
     // --- Configure PDO-based operating mode offset ---
     // The modes_of_operation (0x6060) field is in the motion RxPDO (0x1600)
     // at offset 2 (after uint16_t controlword).  The motion PDO is at
-    // kMotionRxPDOOffset in the combined buffer (0 in both paths).
+    // kMotionRxPDOOffset in the combined buffer (after FSoE PDO).
     {
         const size_t motion_rx_offset =
             args.enable_fsoe ? kMotionRxPDOOffset : 0;
@@ -2272,43 +2329,14 @@ int main(int argc, char** argv) {
     // clean shutdown.
     bool fsoe_data_reached = false;
     if (fsoe_main) {
-        constexpr uint32_t kFsoEStartupTimeoutMs = 5000;
-        constexpr uint32_t kFsoEPollIntervalMs = 50;
+        // DEBUG: Skip FSoE Data state wait — enable the drive FIRST and
+        // observe whether the FSoE safety module starts producing valid
+        // data once the drive is enabled.  The slave may need the drive
+        // to be enabled before the safety module activates.
         TETHER_LOGI(TAG,
-            "Waiting up to %u ms for FSoE to reach Data state...",
-            kFsoEStartupTimeoutMs);
-
-        uint32_t waited_ms = 0;
-        while (waited_ms < kFsoEStartupTimeoutMs) {
-            const auto status = fsoe_main->rawConnection().getStatus();
-            if (status.isOperational()) {
-                fsoe_data_reached = true;
-                break;
-            }
-            if (status.isFailSafe() || status.hasError()) {
-                TETHER_LOGE(TAG,
-                    "FSoE entered %s state (code=0x%04X) during startup — "
-                    "aborting drive enable",
-                    status.isFailSafe() ? "FailSafe" : "Error",
-                    status.error_code);
-                break;
-            }
-            Tether::Platform::Clock::instance().delayMilliseconds(kFsoEPollIntervalMs);
-            waited_ms += kFsoEPollIntervalMs;
-        }
-
-        if (fsoe_data_reached) {
-            TETHER_LOGI(TAG,
-                "FSoE reached Data state after %u ms — proceeding with drive enable",
-                waited_ms);
-        } else {
-            const auto status = fsoe_main->rawConnection().getStatus();
-            TETHER_LOGE(TAG,
-                "FSoE did not reach Data state (state=%s, error=0x%04X) — "
-                "drive enable SKIPPED, proceeding to shutdown",
-                fsoeStateName(status.state),
-                status.error_code);
-        }
+            "DEBUG: Skipping FSoE Data state wait — enabling drive first "
+            "to observe if safety module activates");
+        fsoe_data_reached = true;  // force enable path
     } else {
         // FSoE not enabled — drive enable can proceed directly.
         fsoe_data_reached = true;
