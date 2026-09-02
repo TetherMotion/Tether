@@ -59,14 +59,24 @@ constexpr size_t kMaxPDOsPerSM = 16;
  * Each region describes one PDO mapping object (e.g. 0x1600, 0x1A01) and
  * its total byte size.  The PDOs are laid out contiguously within the SM's
  * physical address range, in the order they are added.
+ *
+ * If @p fixed is true, the PDO is "fixed/mandatory" per the ESI
+ * (Fixed="1" Mandatory="1").  Such PDOs are included in the SM length
+ * and FMMU configuration but are NOT written to the PDO assignment
+ * objects (0x1C12/0x1C13) — the slave firmware includes them
+ * automatically.  This is required for FSoE safety PDOs on drives
+ * like the Synapticon SOMANET, where the FSoE PDO (0x1700/0x1B00) is
+ * hardcoded by the firmware and writing it to 0x1C12 causes an
+ * AL_STATUS_CODE 0x0025 (Invalid output mapping) error.
  */
 struct PDOMappingRegion {
     uint16_t pdo_index{0};      ///< OD index (0x1600-0x17FF RxPDO, 0x1A00-0x1BFF TxPDO)
     uint16_t size_bytes{0};     ///< Total size of this PDO mapping in bytes
+    bool     fixed{false};      ///< If true, don't write to 0x1C1n (drive auto-includes)
 
     PDOMappingRegion() = default;
-    PDOMappingRegion(uint16_t index, uint16_t size)
-        : pdo_index(index), size_bytes(size) {}
+    PDOMappingRegion(uint16_t index, uint16_t size, bool is_fixed = false)
+        : pdo_index(index), size_bytes(size), fixed(is_fixed) {}
 };
 
 // ---------------------------------------------------------------------------
@@ -102,11 +112,23 @@ struct MultiPDOSyncManagerConfig {
         return total;
     }
 
+    /// Sum of writable (non-fixed) PDO mapping sizes only.
+    /// This is the SM length that the master should write to the SM
+    /// length register — the drive firmware adds fixed PDOs itself.
+    uint16_t writableLength() const {
+        uint16_t total = 0;
+        for (const auto& p : pdo_mappings) {
+            if (!p.fixed) total += p.size_bytes;
+        }
+        return total;
+    }
+
     /// Add a PDO mapping to this SM.
     /// @param pdo_index  OD index of the PDO mapping object
     /// @param size_bytes Total size of this PDO in bytes
-    void addPDOMapping(uint16_t pdo_index, uint16_t size_bytes) {
-        pdo_mappings.push_back(PDOMappingRegion(pdo_index, size_bytes));
+    /// @param is_fixed   If true, don't write to 0x1C1n (drive auto-includes)
+    void addPDOMapping(uint16_t pdo_index, uint16_t size_bytes, bool is_fixed = false) {
+        pdo_mappings.push_back(PDOMappingRegion(pdo_index, size_bytes, is_fixed));
     }
 
     /// Create a ProcessOutput (RxPDO) SM config with multiple PDO mappings.

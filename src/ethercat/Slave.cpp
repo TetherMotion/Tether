@@ -1348,6 +1348,8 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
 
     TETHER_LOGI(TAG, "%s: Configuring multi-PDO SMs (%zu SM configs)", logPrefix().c_str(), config.sm_configs.size());
 
+    const bool dbg_pdo_cfg = slave_debug_flags_.pdoConfiguration;
+
     // Build MultiPDOSyncManagerConfig vector for FMMU and LogicalAddressManager
     std::vector<PDO::MultiPDOSyncManagerConfig> multi_configs;
     std::vector<uint16_t> rx_pdo_indices, tx_pdo_indices;
@@ -1370,7 +1372,7 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         mc.type = is_write ? PDO::SyncManagerType::ProcessOutput : PDO::SyncManagerType::ProcessInput;
 
         for (const auto& pdo_region : sm_cfg.pdo_mappings) {
-            mc.addPDOMapping(pdo_region.pdo_index, pdo_region.size_bytes);
+            mc.addPDOMapping(pdo_region.pdo_index, pdo_region.size_bytes, pdo_region.fixed);
             if (is_write) {
                 rx_pdo_indices.push_back(pdo_region.pdo_index);
                 output_sm_index = sm_cfg.sm_index;
@@ -1383,18 +1385,50 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         multi_configs.push_back(std::move(mc));
     }
 
+    if (dbg_pdo_cfg) {
+        TETHER_LOGI(TAG, "%s: [pdo-cfg] Multi-PDO configuration plan (%zu SMs):",
+                    logPrefix().c_str(), multi_configs.size());
+        for (const auto& mc : multi_configs) {
+            const char* dir = (mc.type == PDO::SyncManagerType::ProcessOutput)
+                              ? "RxPDO (master->slave)" : "TxPDO (slave->master)";
+            TETHER_LOGI(TAG, "%s: [pdo-cfg]   SM%u: phys=0x%04X len=%u ctrl=0x%02X %s, %zu PDO(s):",
+                        logPrefix().c_str(), mc.sm_index, mc.phys_start_addr,
+                        mc.totalLength(), std::bit_cast<uint8_t>(mc.control),
+                        dir, mc.pdo_mappings.size());
+            uint16_t offset = 0;
+            for (const auto& p : mc.pdo_mappings) {
+                TETHER_LOGI(TAG, "%s: [pdo-cfg]     0x%04X: off=%u size=%u bytes%s",
+                            logPrefix().c_str(), p.pdo_index, offset, p.size_bytes,
+                            p.fixed ? " [FIXED — not written to 0x1C1n]" : "");
+                offset += p.size_bytes;
+            }
+        }
+    }
+
     // Step 1: Update SlaveConfig SM entries
+    //
+    // SM register length = writable PDOs only (excludes Fixed PDOs).
+    //
+    // Drives with ETG.5000 modular device profiles (e.g. Synapticon SOMANET)
+    // auto-include Fixed/Mandatory PDOs (like FSoE safety PDOs) and compute
+    // the full SM length internally.  Writing the total length (including
+    // fixed PDOs) to the SM register causes AL_STATUS 0x001E
+    // (Invalid input configuration) on the SAFE_OP transition.
+    //
+    // The FMMU (configured later) must use the TOTAL length so the master's
+    // process data image covers the full buffer including fixed PDOs.
     for (const auto& mc : multi_configs) {
         if (mc.sm_index >= 4) continue;  // SlaveConfig only has sm[4]
         auto& sm = cfgs[index_].sm[mc.sm_index];
         sm.phys_start_addr = mc.phys_start_addr;
-        sm.length = mc.totalLength();
+        sm.length = mc.writableLength();
         sm.control = mc.control;
         sm.enable = false;  // Will be enabled after FMMU config
         sm.type = mc.type;
     }
 
     // Update rxpdo/txpdo sizes for LogicalAddressManager compatibility
+    // Use totalLength (including fixed PDOs) for FMMU/logical address mapping
     for (const auto& mc : multi_configs) {
         if (mc.type == PDO::SyncManagerType::ProcessOutput) {
             cfgs[index_].rxpdo_size = mc.totalLength();
@@ -1422,8 +1456,8 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         uint16_t addr_le = mc.phys_start_addr;
         master_.writeRegister(EtherCAT::SlaveAddress(index_), base, &addr_le, 2, 200);
 
-        // Length
-        uint16_t len_le = mc.totalLength();
+        // Length — writable PDOs only (drive adds fixed PDOs itself)
+        uint16_t len_le = mc.writableLength();
         master_.writeRegister(EtherCAT::SlaveAddress(index_),
                               static_cast<uint16_t>(base + 2), &len_le, 2, 200);
 
@@ -1432,8 +1466,19 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         master_.writeRegister(EtherCAT::SlaveAddress(index_),
                               static_cast<uint16_t>(base + 4), &ctrl_byte, 1, 200);
 
-        TETHER_LOGI(TAG, "%s: Wrote SM%u (disabled): addr=0x%04X len=%u ctrl=0x%02X",
-                    logPrefix().c_str(), mc.sm_index, mc.phys_start_addr, mc.totalLength(), ctrl_byte);
+        TETHER_LOGI(TAG, "%s: Wrote SM%u (disabled): addr=0x%04X len=%u (writable) ctrl=0x%02X",
+                    logPrefix().c_str(), mc.sm_index, mc.phys_start_addr, mc.writableLength(), ctrl_byte);
+
+        if (dbg_pdo_cfg) {
+            TETHER_LOGI(TAG, "%s: [pdo-cfg]   SM%u register writes: "
+                        "0x%04X=0x%04X (start_addr), 0x%04X=0x%04X (writable_len=%u, total_len=%u), "
+                        "0x%04X=0x%02X (control), 0x%04X=0x00 (disable)",
+                        logPrefix().c_str(), mc.sm_index,
+                        base, mc.phys_start_addr,
+                        static_cast<uint16_t>(base + 2), mc.writableLength(), mc.writableLength(), mc.totalLength(),
+                        static_cast<uint16_t>(base + 4), ctrl_byte,
+                        static_cast<uint16_t>(base + 6));
+        }
     }
 
     // Step 3: Write PDO assignments to OD (0x1C10+n) via SyncManagerAccessor
@@ -1442,9 +1487,32 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
 
         std::vector<uint16_t> pdo_indices;
         pdo_indices.reserve(mc.pdo_mappings.size());
+        std::vector<uint16_t> fixed_indices;  // for logging
         for (const auto& p : mc.pdo_mappings) {
+            if (p.fixed) {
+                fixed_indices.push_back(p.pdo_index);
+                continue;  // fixed PDOs are auto-included by the slave
+            }
             pdo_indices.push_back(p.pdo_index);
         }
+
+        if (dbg_pdo_cfg) {
+            const uint16_t od_idx = static_cast<uint16_t>(0x1C10 + mc.sm_index);
+            TETHER_LOGI(TAG, "%s: [pdo-cfg] SM%u PDO assignment (0x%04X): %zu writable + %zu fixed",
+                        logPrefix().c_str(), mc.sm_index, od_idx,
+                        pdo_indices.size(), fixed_indices.size());
+            for (size_t i = 0; i < pdo_indices.size(); ++i) {
+                TETHER_LOGI(TAG, "%s: [pdo-cfg]   0x%04X subindex %zu = 0x%04X",
+                            logPrefix().c_str(), od_idx, i + 1, pdo_indices[i]);
+            }
+            for (uint16_t idx : fixed_indices) {
+                TETHER_LOGI(TAG, "%s: [pdo-cfg]   0x%04X [FIXED, skipped] 0x%04X "
+                            "(drive auto-includes)",
+                            logPrefix().c_str(), od_idx, idx);
+            }
+        }
+
+        if (pdo_indices.empty()) continue;  // nothing to write
 
         auto sm_accessor = this->sm(mc.sm_index);
         SlaveError err = sm_accessor.writePDOAssignments(pdo_indices);
@@ -1498,6 +1566,51 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
 
     cfgs[index_].configured = true;
     pdo_configured_ = true;
+
+    // Step 6 (pdo-configuration only): Read back 0x1C12/0x1C13 and SM
+    // registers to verify the slave accepted the configuration.
+    if (dbg_pdo_cfg) {
+        for (const auto& mc : multi_configs) {
+            if (mc.pdo_mappings.empty()) continue;
+
+            // Read back PDO assignment
+            auto sm_accessor = this->sm(mc.sm_index);
+            std::vector<uint16_t> readback;
+            SlaveError rb_err = sm_accessor.readAllPDOAssignments(readback);
+            if (rb_err != SlaveError::Ok) {
+                TETHER_LOGI(TAG, "%s: [pdo-cfg] SM%u 0x1C1%X readback: FAILED (err=%d)",
+                            logPrefix().c_str(), mc.sm_index, mc.sm_index,
+                            static_cast<int>(rb_err));
+            } else {
+                TETHER_LOGI(TAG, "%s: [pdo-cfg] SM%u 0x1C1%X readback: %zu entries",
+                            logPrefix().c_str(), mc.sm_index, mc.sm_index,
+                            readback.size());
+                for (size_t i = 0; i < readback.size(); ++i) {
+                    TETHER_LOGI(TAG, "%s: [pdo-cfg]   readback sub%zu = 0x%04X",
+                                logPrefix().c_str(), i + 1, readback[i]);
+                }
+            }
+
+            // Read back SM registers
+            uint16_t base = static_cast<uint16_t>(0x0800 + mc.sm_index * 8);
+            uint16_t rb_addr = 0, rb_len = 0;
+            uint8_t rb_ctrl = 0, rb_act = 0;
+            master_.readRegister(EtherCAT::SlaveAddress(index_), base, &rb_addr, 2, 200);
+            master_.readRegister(EtherCAT::SlaveAddress(index_),
+                                 static_cast<uint16_t>(base + 2), &rb_len, 2, 200);
+            master_.readRegister(EtherCAT::SlaveAddress(index_),
+                                 static_cast<uint16_t>(base + 4), &rb_ctrl, 1, 200);
+            master_.readRegister(EtherCAT::SlaveAddress(index_),
+                                 static_cast<uint16_t>(base + 6), &rb_act, 1, 200);
+            TETHER_LOGI(TAG, "%s: [pdo-cfg] SM%u register readback: "
+                        "addr=0x%04X len=%u ctrl=0x%02X act=0x%02X "
+                        "(expected: addr=0x%04X len=%u ctrl=0x%02X act=0x01)",
+                        logPrefix().c_str(), mc.sm_index,
+                        rb_addr, rb_len, rb_ctrl, rb_act,
+                        mc.phys_start_addr, mc.totalLength(),
+                        std::bit_cast<uint8_t>(mc.control));
+        }
+    }
 
     TETHER_LOGI(TAG, "%s: Multi-PDO configuration complete (%zu SMs, %zu RxPDOs, %zu TxPDOs)",
                 logPrefix().c_str(), multi_configs.size(), rx_pdo_indices.size(), tx_pdo_indices.size());
