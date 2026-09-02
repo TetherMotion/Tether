@@ -193,6 +193,39 @@ else()
     message(STATUS "Native <format> available; not using {fmt} shim.")
 endif()
 
+# =============================================================================
+# <expected> availability check & tl::expected fallback shim
+# =============================================================================
+# GCC < 12 (e.g. Ubuntu 22.04's GCC 11.4) ships no <expected> header at all.
+# When the native header is missing we fall back to the tl::expected submodule
+# via a thin shim header that re-exports tl::expected / tl::unexpected into
+# namespace std, so all existing `#include <expected>` / `std::expected(...)`
+# call sites compile unchanged. On toolchains that do provide a real
+# <expected> (GCC >= 12, recent clang/MSVC) the shim is not put on the include
+# path and the standard header is used directly.
+check_include_file_cxx("expected" TETHER_HAVE_NATIVE_STD_EXPECTED)
+
+if(NOT TETHER_HAVE_NATIVE_STD_EXPECTED)
+    message(STATUS "Native <expected> not available; using tl::expected submodule shim as std::expected polyfill.")
+    set(EXPECTED_PATH "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/expected")
+    if(NOT EXISTS "${EXPECTED_PATH}/include/tl/expected.hpp")
+        message(FATAL_ERROR
+            "Git submodule 'expected' is not initialized or is incomplete.\n"
+            "Please run the following command in the repository root:\n"
+            "  git submodule update --init --recursive\n"
+            "Then re-run CMake."
+        )
+    endif()
+
+    # The shim directory contains a header literally named `expected` so that
+    # `#include <expected>` resolves to it. BEFORE ensures it is searched
+    # ahead of any system include path.
+    include_directories(BEFORE "${CMAKE_CURRENT_SOURCE_DIR}/include/tether/expected_shim")
+    include_directories("${EXPECTED_PATH}/include")
+else()
+    message(STATUS "Native <expected> available; not using tl::expected shim.")
+endif()
+
 # Build type defaults to Release
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)

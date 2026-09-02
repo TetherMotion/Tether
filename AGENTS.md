@@ -7,20 +7,26 @@ and CNC machines. It includes a Klipper-compatible firmware emulation layer
 (`tether_klipper`) that implements the Klipper wire protocol, G-code execution,
 and Moonraker-compatible UDS API.
 
-## Toolchain / `<format>` support
+## Toolchain / `<format>` and `<expected>` support
 
-Tether uses `std::format` (C++20/23) throughout. GCC < 13 (e.g. Ubuntu 22.04's
-GCC 11.4) ships **no** `<format>` header at all — not even experimental.
-CMake auto-detects this via `check_include_file_cxx("format", ...)` and, when
-native `<format>` is absent, falls back to the `{fmt}` submodule
-(`dependencies/fmt`, pinned to 11.1.4) through a shim header at
-`include/tether/fmt_shim/format` that re-exports `fmt::` APIs into `namespace
-std`. The shim is put on the include path with `BEFORE` so `#include <format>`
-resolves to it. `{fmt}` is used in header-only mode (`FMT_HEADER_ONLY`), so no
-extra link step is needed.
+Tether uses `std::format` and `std::expected` (C++20/23) throughout. Older
+toolchains ship neither header — notably GCC 11.x (Ubuntu 22.04's GCC 11.4)
+has **no** `<format>` (added in GCC 13) and **no** `<expected>` (added in
+GCC 12), not even as experimental.
 
-On GCC >= 13 / recent clang / MSVC the shim is **not** activated and the
-standard `<format>` is used directly. No source changes are required either way.
+CMake auto-detects each via `check_include_file_cxx(...)` and, when the native
+header is absent, falls back to a submodule through a thin shim header that
+re-exports the library APIs into `namespace std`. The shim directory is put on
+the include path with `BEFORE` so `#include <...>` resolves to it. No extra
+link step is needed (both fallback libs are header-only).
+
+| Header       | Fallback submodule              | Shim header                              | Pinned | Native since        |
+|--------------|---------------------------------|------------------------------------------|--------|---------------------|
+| `<format>`   | `dependencies/fmt` ({fmt})      | `include/tether/fmt_shim/format`         | 11.1.4 | GCC 13              |
+| `<expected>` | `dependencies/expected` (tl::)  | `include/tether/expected_shim/expected`  | v1.3.1 | GCC 12              |
+
+On GCC >= 13 / recent clang / MSVC the shims are **not** activated and the
+standard headers are used directly. No source changes are required either way.
 
 ## Build Commands
 

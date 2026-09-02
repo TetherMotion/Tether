@@ -1,0 +1,27 @@
+// Tether <expected> polyfill shim.
+//
+// This header is ONLY put on the include path when the compiler's standard
+// library does not ship a native <expected> header (e.g. GCC < 12 on Ubuntu
+// 22.04). It is found via CMake's `include_directories(BEFORE ...)` so that
+// `#include <expected>` resolves here instead of the (missing) system header.
+//
+// It re-exports the tl::expected library (https://github.com/TartanLlama/expected)
+// APIs into namespace std, so existing code using std::expected / std::unexpected
+// compiles unchanged. tl::expected is the reference implementation that
+// std::expected (P0323) was based on, so the behaviour is equivalent for the
+// subset used by Tether (expected<T,E>, expected<void,E>, unexpected, value,
+// error, operator bool, operator*, operator->).
+//
+// When the toolchain provides a real <expected> (GCC >= 12, clang >= 14 with
+// libc++ >= 17, MSVC >= 19.33), CMake does NOT add this directory to the
+// include path and the standard <expected> is used directly.
+#pragma once
+
+#include <tl/expected.hpp>
+
+namespace std {
+
+using tl::expected;
+using tl::unexpected;
+
+} // namespace std
