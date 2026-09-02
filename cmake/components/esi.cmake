@@ -16,6 +16,9 @@ if(NOT TinyXML2_FOUND)
         GIT_REPOSITORY https://github.com/leethomason/tinyxml2.git
         GIT_TAG 9.0.0)
     FetchContent_MakeAvailable(tinyxml2)
+    if(TARGET tinyxml2)
+        set_target_properties(tinyxml2 PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    endif()
 endif()
 
 set(_esi_variants "")
