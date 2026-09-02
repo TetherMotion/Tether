@@ -48,7 +48,7 @@ bool initHostEthernet(HostEtherNetSession& session,
         } else if (err == EtherCAT::HAL::Error::PermissionDenied) {
             logPermissionDeniedError(tag);
         } else {
-            TETHER_LOGE(tag, "Failed to init '%s' (%s)", interfaceName.c_str(),
+            TETHER_LOGE(tag, "Critical error: Prerequisites for operation not fulfilled (%s)",
                         "unknown"); // magic_enum may not be available here
         }
         session.eth.reset();
