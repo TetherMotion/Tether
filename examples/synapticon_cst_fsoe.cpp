@@ -51,6 +51,8 @@
  *   ./synapticon_cst_fsoe --rated-torque-mnm 4200       # override rated torque
  *   ./synapticon_cst_fsoe --sto 0 --sbc 0               # raw STO bit=0, SBC bit=0
  *   ./synapticon_cst_fsoe --sto 1 --sbc 1               # raw STO bit=1, SBC bit=1
+ *   ./synapticon_cst_fsoe --no-drive                     # FSoE only, no CiA 402 enable
+ *   ./synapticon_cst_fsoe --no-drive --diagnostics-after 5  # FSoE 5s, then CoE diagnostics + exit
  */
 
 #include <array>
@@ -796,6 +798,13 @@ public:
         , debug_wire_(debug_wire)
     {}
 
+    /// Suppress all FSoE debug output from this task (for diagnostics mode).
+    void suppressDebug() {
+        debug_raw_ = false;
+        debug_frame_ = false;
+        debug_wire_ = false;
+    }
+
     bool update(EtherCAT::DS402Master& master, double dt_seconds) override {
         if (!main_instance_.featureEnabled()) {
             return true;
@@ -1122,6 +1131,8 @@ struct Args {
     int sto_override = -1;
     ///< SBC override: -1 = not set (use motionEnabled default), 0 = force brake released, 1 = force brake engaged
     int sbc_override = -1;
+    ///< After N seconds, run full safety diagnostics via CoE then exit. 0 = disabled.
+    double diagnostics_after = 0.0;
 };
 
 bool parseArgs(int argc, char** argv, Args& out) {
@@ -1200,6 +1211,13 @@ bool parseArgs(int argc, char** argv, Args& out) {
               "Default (-1) uses motionEnabled() default. "
               "NOTE: the codec uses 0-active encoding, so bit=0 means SBC active "
               "(brake engaged) and bit=1 means SBC inactive (brake released).");
+    program.add_argument("--diagnostics-after")
+        .scan<'g', double>()
+        .default_value(0.0)
+        .help("After N seconds of FSoE operation, run full safety diagnostics "
+              "via CoE (SDO reads of safety objects), then exit. "
+              "FSoE output is suppressed during diagnostics to keep the "
+              "output clean. 0 = disabled (default).");
 
     try {
         program.parse_args(argc, argv);
@@ -1224,6 +1242,7 @@ bool parseArgs(int argc, char** argv, Args& out) {
     out.rated_torque_mnm = static_cast<uint32_t>(program.get<int>("--rated-torque-mnm"));
     out.sto_override = program.get<int>("--sto");
     out.sbc_override = program.get<int>("--sbc");
+    out.diagnostics_after = program.get<double>("--diagnostics-after");
     return true;
 }
 
@@ -1343,7 +1362,7 @@ int main(int argc, char** argv) {
         "synapticon_cst_fsoe — interface=%s slave=%u duration=%.1f fsoe=%s dc_sync=%s drive=%s debug='%s' "
         "torque_pp=%.3fNm freq=%.3fHz rated_torque_mnm=%u "
         "conn_id=0x%04X safety_addr=0x%04X "
-        "sto_override=%s sbc_override=%s",
+        "sto_override=%s sbc_override=%s diagnostics_after=%.1f",
         args.interface.c_str(), slave_idx, args.duration,
         args.enable_fsoe ? "on" : "off",
         args.enable_dc_sync ? "on" : "off",
@@ -1352,7 +1371,8 @@ int main(int argc, char** argv) {
         args.torque_pp_nm, args.freq_hz, args.rated_torque_mnm,
         args.connection_id, args.safety_address,
         args.sto_override < 0 ? "default" : std::to_string(args.sto_override).c_str(),
-        args.sbc_override < 0 ? "default" : std::to_string(args.sbc_override).c_str());
+        args.sbc_override < 0 ? "default" : std::to_string(args.sbc_override).c_str(),
+        args.diagnostics_after);
 
     // --- Start EtherCAT master ---
     EtherCAT::DS402Master master;
@@ -2115,6 +2135,7 @@ int main(int argc, char** argv) {
 
     // --- Set up FSoE safe-motion (real drive via PDOs) ---
     std::unique_ptr<FSoEMain> fsoe_main;
+    FSoEPDOExchangeTask* fsoe_task_ptr = nullptr;  // raw ptr for suppressDebug()
 
     // --- Thread synchronization for FSoE → CiA 402 enable ---
     //
@@ -2413,11 +2434,12 @@ int main(int argc, char** argv) {
         // This exchanges FSoE frames with the REAL drive via the FSoE safety
         // PDOs (0x1700/0x1B00) mapped in the combined PDO buffer.  The FSoE
         // PDOs are at a fixed offset after the motion PDO data.
-        if (!master.addCyclicTask(
-                std::make_unique<FSoEPDOExchangeTask>(
-                    slave_idx, *fsoe_main,
-                    kFSoERxPDOOffset, kFSoETxPDOOffset,
-                    debug_fsoe_raw, debug_fsoe_frame, debug_fsoe_wire))) {
+        auto fsoe_task = std::make_unique<FSoEPDOExchangeTask>(
+            slave_idx, *fsoe_main,
+            kFSoERxPDOOffset, kFSoETxPDOOffset,
+            debug_fsoe_raw, debug_fsoe_frame, debug_fsoe_wire);
+        fsoe_task_ptr = fsoe_task.get();
+        if (!master.addCyclicTask(std::move(fsoe_task))) {
             TETHER_LOGE(TAG, "Failed to add FSoE PDO exchange task");
             rc = 6;
             master.clearCyclicTasks();
@@ -2548,6 +2570,10 @@ int main(int argc, char** argv) {
     // If FSoE is enabled, monitor it during the run: if the slave enters
     // FailSafe or Error (e.g. sends a Reset due to a CRC error), shut down
     // cleanly immediately rather than continuing to run in an unsafe state.
+    //
+    // If --diagnostics-after is set, after that many seconds of FSoE
+    // operation, suppress all FSoE debug output, run full safety
+    // diagnostics via CoE (SDO reads), then exit immediately.
     if (rc == 0) {
         if (args.enable_drive) {
             TETHER_LOGI(TAG,
@@ -2562,10 +2588,51 @@ int main(int argc, char** argv) {
         const auto run_start_ms = Tether::Platform::Clock::instance().getMilliseconds();
         const uint32_t run_duration_ms =
             static_cast<uint32_t>(args.duration * 1000.0);
+        const uint32_t diag_after_ms =
+            static_cast<uint32_t>(args.diagnostics_after * 1000.0);
+        bool diag_done = false;
 
         while (true) {
             const auto elapsed_ms =
                 Tether::Platform::Clock::instance().getMilliseconds() - run_start_ms;
+
+            // --- Diagnostics trigger ---
+            if (!diag_done && diag_after_ms > 0 && elapsed_ms >= diag_after_ms) {
+                diag_done = true;
+                TETHER_LOGI(TAG,
+                    "=== --diagnostics-after=%.1fs reached — "
+                    "suppressing FSoE output and running CoE diagnostics ===",
+                    args.diagnostics_after);
+
+                // Suppress all FSoE-related debug output so the diagnostics
+                // output is clean (no interleaved FSoE frame dumps).
+                // The debug flags on the master are checked by the FSoE
+                // trace callback; the cyclic task has its own local copies
+                // that must be suppressed separately.
+                auto& dbg = master.ethercatMaster().debugFlags();
+                dbg.setFlag("fsoe", false);
+                dbg.setFlag("fsoe-frame", false);
+                dbg.setFlag("fsoe-raw", false);
+                dbg.setFlag("fsoe-wire", false);
+                dbg.setFlag("fsoe-sequence", false);
+                dbg.setFlag("fsoe-crc", false);
+                if (fsoe_task_ptr) {
+                    fsoe_task_ptr->suppressDebug();
+                }
+
+                // Run full safety diagnostics via CoE SDO reads.
+                // FSoE is still running in the realtime loop — we're just
+                // reading safety objects via SDO in parallel.
+                auto& slave_ref = master.ethercatMaster().slave(slave_idx);
+                [[maybe_unused]] auto diag_report =
+                    EtherCAT::Drives::Synapticon::runFullSafetyDiagnostics(
+                        slave_ref);
+
+                TETHER_LOGI(TAG,
+                    "=== CoE diagnostics complete — exiting ===");
+                break;
+            }
+
             if (elapsed_ms >= run_duration_ms) break;
 
             // If FSoE is enabled, check that it's still operational.
