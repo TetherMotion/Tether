@@ -392,6 +392,11 @@ if(TETHER_DRIVE_AS715N)
         "${CMAKE_CURRENT_SOURCE_DIR}/profiles/test_as715n_errc11_integration.cpp"
     )
 endif()
+if(TETHER_DRIVE_SYNAPTICON)
+    list(APPEND CIA402_COVERAGE_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/profiles/test_synapticon_brake_control.cpp"
+    )
+endif()
 file(GLOB CIA404_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia404/*.cpp")
 file(GLOB CIA405_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia405/*.cpp")
 list(APPEND CIA405_TEST_SOURCES
