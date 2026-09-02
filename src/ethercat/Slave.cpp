@@ -1429,19 +1429,15 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
 
     // Step 1: Update SlaveConfig SM entries
     //
-    // SlaveConfig SM length = TOTAL (writable + fixed PDOs).
+    // SlaveConfig SM length = TOTAL (all PDOs, including FSoE).
     // This is used by PDOManager::exchangePhysical() for FPWR/FPRD size
-    // and must cover the full buffer including auto-included fixed PDOs
-    // (e.g. FSoE safety PDOs), so the master can write/read FSoE data.
+    // and must cover the full buffer so the master can write/read all PDO data.
     //
-    // The SM REGISTER (0x0810+2/0x0818+2) is written separately in Step 2
-    // with the WRITABLE-ONLY length.  Drives with ETG.5000 modular device
-    // profiles (e.g. Synapticon SOMANET) auto-include Fixed/Mandatory PDOs
-    // and compute the full SM length internally.  Writing the total length
-    // to the SM register causes AL_STATUS 0x001E (Invalid input config).
+    // The SM REGISTER (0x0810+2/0x0818+2) is also written with the TOTAL
+    // length in Step 2 — the drive accepts the full ESI PDO assignment.
     //
     // The FMMU (configured later) also uses the TOTAL length so the master's
-    // process data image covers the full buffer including fixed PDOs.
+    // process data image covers the full buffer.
     for (const auto& mc : multi_configs) {
         if (mc.sm_index >= 4) continue;  // SlaveConfig only has sm[4]
         auto& sm = cfgs[index_].sm[mc.sm_index];
@@ -1481,8 +1477,8 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         uint16_t addr_le = mc.phys_start_addr;
         master_.writeRegister(EtherCAT::SlaveAddress(index_), base, &addr_le, 2, 200);
 
-        // Length — writable PDOs only (drive adds fixed PDOs itself)
-        uint16_t len_le = mc.writableLength();
+        // Length — total (all PDOs, including FSoE)
+        uint16_t len_le = mc.totalLength();
         master_.writeRegister(EtherCAT::SlaveAddress(index_),
                               static_cast<uint16_t>(base + 2), &len_le, 2, 200);
 
@@ -1491,53 +1487,43 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         master_.writeRegister(EtherCAT::SlaveAddress(index_),
                               static_cast<uint16_t>(base + 4), &ctrl_byte, 1, 200);
 
-        TETHER_LOGI(TAG, "%s: Wrote SM%u (disabled): addr=0x%04X len=%u (writable) ctrl=0x%02X",
-                    logPrefix().c_str(), mc.sm_index, mc.phys_start_addr, mc.writableLength(), ctrl_byte);
+        TETHER_LOGI(TAG, "%s: Wrote SM%u (disabled): addr=0x%04X len=%u (total) ctrl=0x%02X",
+                    logPrefix().c_str(), mc.sm_index, mc.phys_start_addr, mc.totalLength(), ctrl_byte);
 
         if (dbg_pdo_cfg) {
             TETHER_LOGI(TAG, "%s: [pdo-cfg]   SM%u register writes: "
-                        "0x%04X=0x%04X (start_addr), 0x%04X=0x%04X (writable_len=%u, total_len=%u), "
+                        "0x%04X=0x%04X (start_addr), 0x%04X=0x%04X (total_len=%u), "
                         "0x%04X=0x%02X (control), 0x%04X=0x00 (disable)",
                         logPrefix().c_str(), mc.sm_index,
                         base, mc.phys_start_addr,
-                        static_cast<uint16_t>(base + 2), mc.writableLength(), mc.writableLength(), mc.totalLength(),
+                        static_cast<uint16_t>(base + 2), mc.totalLength(), mc.totalLength(),
                         static_cast<uint16_t>(base + 4), ctrl_byte,
                         static_cast<uint16_t>(base + 6));
         }
     }
 
     // Step 3: Write PDO assignments to OD (0x1C10+n) via SyncManagerAccessor
+    // ALL PDOs (including FSoE) are written explicitly — the `fixed` flag
+    // is always false.  The drive accepts the full ESI PDO assignment.
     for (const auto& mc : multi_configs) {
         if (mc.pdo_mappings.empty()) continue;
 
         std::vector<uint16_t> pdo_indices;
         pdo_indices.reserve(mc.pdo_mappings.size());
-        std::vector<uint16_t> fixed_indices;  // for logging
         for (const auto& p : mc.pdo_mappings) {
-            if (p.fixed) {
-                fixed_indices.push_back(p.pdo_index);
-                continue;  // fixed PDOs are auto-included by the slave
-            }
             pdo_indices.push_back(p.pdo_index);
         }
 
         if (dbg_pdo_cfg) {
             const uint16_t od_idx = static_cast<uint16_t>(0x1C10 + mc.sm_index);
-            TETHER_LOGI(TAG, "%s: [pdo-cfg] SM%u PDO assignment (0x%04X): %zu writable + %zu fixed",
+            TETHER_LOGI(TAG, "%s: [pdo-cfg] SM%u PDO assignment (0x%04X): %zu PDO(s)",
                         logPrefix().c_str(), mc.sm_index, od_idx,
-                        pdo_indices.size(), fixed_indices.size());
+                        pdo_indices.size());
             for (size_t i = 0; i < pdo_indices.size(); ++i) {
                 TETHER_LOGI(TAG, "%s: [pdo-cfg]   0x%04X subindex %zu = 0x%04X",
                             logPrefix().c_str(), od_idx, i + 1, pdo_indices[i]);
             }
-            for (uint16_t idx : fixed_indices) {
-                TETHER_LOGI(TAG, "%s: [pdo-cfg]   0x%04X [FIXED, skipped] 0x%04X "
-                            "(drive auto-includes)",
-                            logPrefix().c_str(), od_idx, idx);
-            }
         }
-
-        if (pdo_indices.empty()) continue;  // nothing to write
 
         auto sm_accessor = this->sm(mc.sm_index);
         SlaveError err = sm_accessor.writePDOAssignments(pdo_indices);
@@ -1629,13 +1615,11 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
                                  static_cast<uint16_t>(base + 6), &rb_act, 1, 200);
             TETHER_LOGI(TAG, "%s: [pdo-cfg] SM%u register readback: "
                         "addr=0x%04X len=%u ctrl=0x%02X act=0x%02X "
-                        "(expected: addr=0x%04X len=%u ctrl=0x%02X act=0x01) "
-                        "[SM reg uses writable len=%u, SlaveConfig uses total len=%u]",
+                        "(expected: addr=0x%04X len=%u ctrl=0x%02X act=0x01)",
                         logPrefix().c_str(), mc.sm_index,
                         rb_addr, rb_len, rb_ctrl, rb_act,
-                        mc.phys_start_addr, mc.writableLength(),
-                        std::bit_cast<uint8_t>(mc.control),
-                        mc.writableLength(), mc.totalLength());
+                        mc.phys_start_addr, mc.totalLength(),
+                        std::bit_cast<uint8_t>(mc.control));
         }
     }
 
