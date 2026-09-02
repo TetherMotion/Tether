@@ -7,6 +7,21 @@ and CNC machines. It includes a Klipper-compatible firmware emulation layer
 (`tether_klipper`) that implements the Klipper wire protocol, G-code execution,
 and Moonraker-compatible UDS API.
 
+## Toolchain / `<format>` support
+
+Tether uses `std::format` (C++20/23) throughout. GCC < 13 (e.g. Ubuntu 22.04's
+GCC 11.4) ships **no** `<format>` header at all — not even experimental.
+CMake auto-detects this via `check_include_file_cxx("format", ...)` and, when
+native `<format>` is absent, falls back to the `{fmt}` submodule
+(`dependencies/fmt`, pinned to 11.1.4) through a shim header at
+`include/tether/fmt_shim/format` that re-exports `fmt::` APIs into `namespace
+std`. The shim is put on the include path with `BEFORE` so `#include <format>`
+resolves to it. `{fmt}` is used in header-only mode (`FMT_HEADER_ONLY`), so no
+extra link step is needed.
+
+On GCC >= 13 / recent clang / MSVC the shim is **not** activated and the
+standard `<format>` is used directly. No source changes are required either way.
+
 ## Build Commands
 
 > **Parallelism limit:** Always use `-j4` max when invoking `cmake --build`

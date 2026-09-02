@@ -152,6 +152,47 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
 set(CMAKE_C_STANDARD 99)
 
+# =============================================================================
+# <format> availability check & {fmt} fallback shim
+# =============================================================================
+# GCC < 13 (e.g. Ubuntu 22.04's GCC 11.4) ships no <format> header at all,
+# not even as <experimental/format>. When the native header is missing we
+# fall back to the {fmt} submodule via a thin shim header that re-exports
+# the fmt:: APIs into namespace std, so all existing `#include <format>`
+# / `std::format(...)` call sites compile unchanged. On toolchains that do
+# provide a real <format> (GCC >= 13, recent clang/MSVC) the shim is not
+# put on the include path and the standard header is used directly.
+include(CheckIncludeFileCXX)
+set(_tether_format_check_flags_backup "${CMAKE_REQUIRED_FLAGS}")
+set(CMAKE_REQUIRED_FLAGS "-std=c++23")
+check_include_file_cxx("format" TETHER_HAVE_NATIVE_STD_FORMAT)
+set(CMAKE_REQUIRED_FLAGS "${_tether_format_check_flags_backup}")
+unset(_tether_format_check_flags_backup)
+
+if(NOT TETHER_HAVE_NATIVE_STD_FORMAT)
+    message(STATUS "Native <format> not available; using {fmt} submodule shim as std::format polyfill.")
+    set(FMT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/fmt")
+    if(NOT EXISTS "${FMT_PATH}/include/fmt/format.h")
+        message(FATAL_ERROR
+            "Git submodule 'fmt' is not initialized or is incomplete.\n"
+            "Please run the following command in the repository root:\n"
+            "  git submodule update --init --recursive\n"
+            "Then re-run CMake."
+        )
+    endif()
+
+    # Use {fmt} in header-only mode so no extra link step is required.
+    add_compile_definitions(FMT_HEADER_ONLY)
+
+    # The shim directory contains a header literally named `format` so that
+    # `#include <format>` resolves to it. BEFORE ensures it is searched
+    # ahead of any system include path.
+    include_directories(BEFORE "${CMAKE_CURRENT_SOURCE_DIR}/include/tether/fmt_shim")
+    include_directories("${FMT_PATH}/include")
+else()
+    message(STATUS "Native <format> available; not using {fmt} shim.")
+endif()
+
 # Build type defaults to Release
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
