@@ -51,6 +51,7 @@
  *   ./synapticon_cst_fsoe --rated-torque-mnm 4200       # override rated torque
  *   ./synapticon_cst_fsoe --sto 0 --sbc 0               # raw STO bit=0, SBC bit=0
  *   ./synapticon_cst_fsoe --sto 1 --sbc 1               # raw STO bit=1, SBC bit=1
+ *   ./synapticon_cst_fsoe --sto 1 --sos 1 --sbc 1       # raw STO/SOS/SBC bit=1
  *   ./synapticon_cst_fsoe --no-drive                     # FSoE only, no CiA 402 enable
  *   ./synapticon_cst_fsoe --no-drive --diagnostics-after 5  # FSoE 5s, then CoE diagnostics + exit
  */
@@ -811,6 +812,8 @@ struct Args {
     uint32_t rated_torque_mnm = 0;   ///< Motor rated torque in mNm (0 = auto-detect from 0x6076)
     ///< STO override: -1 = not set (use motionEnabled default), 0 = force STO off, 1 = force STO on
     int sto_override = -1;
+    ///< SOS override: -1 = not set (defaults to STO value), 0 = force SOS off, 1 = force SOS on
+    int sos_override = -1;
     ///< SBC override: -1 = not set (use motionEnabled default), 0 = force brake released, 1 = force brake engaged
     int sbc_override = -1;
     ///< After N seconds, run full safety diagnostics via CoE then exit. 0 = disabled.
@@ -886,6 +889,13 @@ bool parseArgs(int argc, char** argv, Args& out) {
               "Default (-1) uses motionEnabled() default. "
               "NOTE: the codec uses 0-active encoding, so bit=0 means STO active "
               "(torque off) and bit=1 means STO inactive (torque allowed).");
+    program.add_argument("--sos")
+        .scan<'i', int>()
+        .default_value(-1)
+        .help("Set raw SOS bit value in the FSoE PDO: 0 = bit cleared, 1 = bit set. "
+              "Default (-1) follows the STO override value (or motionEnabled() default). "
+              "NOTE: the codec uses 0-active encoding, so bit=0 means SOS active "
+              "(safe operating stop) and bit=1 means SOS inactive.");
     program.add_argument("--sbc")
         .scan<'i', int>()
         .default_value(-1)
@@ -923,6 +933,7 @@ bool parseArgs(int argc, char** argv, Args& out) {
     out.freq_hz = program.get<double>("--freq-hz");
     out.rated_torque_mnm = static_cast<uint32_t>(program.get<int>("--rated-torque-mnm"));
     out.sto_override = program.get<int>("--sto");
+    out.sos_override = program.get<int>("--sos");
     out.sbc_override = program.get<int>("--sbc");
     out.diagnostics_after = program.get<double>("--diagnostics-after");
     return true;
@@ -1044,7 +1055,7 @@ int main(int argc, char** argv) {
         "synapticon_cst_fsoe — interface={} slave={} duration={:.1f} fsoe={} dc_sync={} drive={} debug='{}' "
         "torque_pp={:.3f}Nm freq={:.3f}Hz rated_torque_mnm={} "
         "conn_id=0x{:04X} safety_addr=0x{:04X} "
-        "sto_override={} sbc_override={} diagnostics_after={:.1f}",
+        "sto_override={} sos_override={} sbc_override={} diagnostics_after={:.1f}",
         args.interface.c_str(), slave_idx, args.duration,
         args.enable_fsoe ? "on" : "off",
         args.enable_dc_sync ? "on" : "off",
@@ -1053,6 +1064,7 @@ int main(int argc, char** argv) {
         args.torque_pp_nm, args.freq_hz, args.rated_torque_mnm,
         args.connection_id, args.safety_address,
         args.sto_override < 0 ? "default" : std::to_string(args.sto_override).c_str(),
+        args.sos_override < 0 ? "default" : std::to_string(args.sos_override).c_str(),
         args.sbc_override < 0 ? "default" : std::to_string(args.sbc_override).c_str(),
         args.diagnostics_after);
 
@@ -1815,21 +1827,14 @@ int main(int argc, char** argv) {
         return rc;
     }
 
-    // --- Disengage the brake before starting FSoE communication ---
+    // --- Brake release ---
     // The Synapticon brake is spring-activated (engages when powered off).
-    // FSoE safe-motion communication requires the brake to be released
-    // beforehand so the drive can move freely once motion is enabled.
-    // Object 0x2004:7 (Brake status) controls the brake in automatic mode.
+    // It is released via CoE SDO write to 0x2004:7 (Brake status) exactly
+    // 1 second after FSoE reaches the Data state — see the run loop below.
+    // Object 0x2004:7 controls the brake in automatic mode.
     // See: https://doc.synapticon.com/node/sw5.1/objects_html/2xxx/2004.html
-    if (args.enable_fsoe) {
-        auto& brake_sdo = master.ethercatMaster().sdoManager(slave_idx);
-        if (!EtherCAT::Drives::Synapticon::BrakeControl::disengageBrake(
-                brake_sdo, kSdoTimeoutMs)) {
-            TETHER_LOGW(TAG,
-                "Brake disengage failed or unverified — continuing with FSoE "
-                "(the safety layer will gate motion regardless)");
-        }
-    }
+    uint64_t fsoe_data_time_ms = 0;  // timestamp when FSoE Data state was reached
+    bool brake_released = false;
 
     // --- Set up FSoE safe-motion (real drive via PDOs) ---
     std::unique_ptr<FSoEMain> fsoe_main;
@@ -1892,20 +1897,24 @@ int main(int argc, char** argv) {
 
         fsoe_main->requestMotionEnabled();
 
-        // Apply STO/SBC overrides from command-line flags.
+        // Apply STO/SOS/SBC overrides from command-line flags.
         // The flags control RAW bit values in the PDO (0=bit cleared, 1=bit set).
-        // The codec uses setZeroActive for STO and SBC, which inverts:
+        // The codec uses setZeroActive for STO, SOS, and SBC, which inverts:
         //   setZeroActive(true)  → bit=0
         //   setZeroActive(false) → bit=1
         // So to get raw bit=0, we set the Command field to true (active),
         // and to get raw bit=1, we set it to false (inactive).
-        if (args.sto_override >= 0 || args.sbc_override >= 0) {
+        //
+        // SOS defaults to the STO override value when --sos is not given,
+        // so SOS always tracks STO unless explicitly overridden.
+        if (args.sto_override >= 0 || args.sos_override >= 0 ||
+            args.sbc_override >= 0) {
             auto cmd = fsoe_main->command();
 
             // Determine the raw bit value to apply to ALL zero-active safety
             // bits.  STO and SBC must agree; if only one is given, the other
-            // defaults to the same value.  All other zero-active fields
-            // (SS1, SS2, SOS, SLS1-4) are set to the same raw bit value.
+            // defaults to the same value.  SOS defaults to STO's value.
+            // All other zero-active fields (SS1, SS2, SLS1-4) follow suit.
             int raw_bit;
             if (args.sto_override >= 0 && args.sbc_override >= 0) {
                 raw_bit = args.sto_override;  // both must match anyway
@@ -1915,21 +1924,26 @@ int main(int argc, char** argv) {
                 raw_bit = args.sbc_override;
             }
 
+            // SOS can be overridden independently; defaults to raw_bit (STO).
+            const int sos_raw_bit =
+                (args.sos_override >= 0) ? args.sos_override : raw_bit;
+
             // setZeroActive: bit=0 when active=true, bit=1 when active=false
             const bool active = (raw_bit == 0);
+            const bool sos_active = (sos_raw_bit == 0);
 
             cmd.sto           = active;
             cmd.ss1           = active;
             cmd.ss2           = active;
-            cmd.sos           = active;
+            cmd.sos           = sos_active;
             cmd.sls           = {{active, active, active, active}};
             cmd.brake_engage  = active;
 
             TETHER_LOGI(TAG,
-                "[safety-command] Setting ALL zero-active safety bits to raw bit={} "
-                "(active={} → {})",
-                raw_bit,
-                active ? "true" : "false",
+                "[safety-command] STO raw_bit={} SOS raw_bit={} SBC raw_bit={} "
+                "(active={}/{}/{} → {})",
+                raw_bit, sos_raw_bit, raw_bit,
+                active, sos_active, active,
                 active ? "ALL safety functions ACTIVE (safe state)"
                        : "ALL safety functions INACTIVE (motion enabled)");
 
@@ -2240,6 +2254,7 @@ int main(int argc, char** argv) {
                 "FSoE Data state reached{}.",
                 args.enable_drive ? " — enabling CiA 402 drive" : " (drive enable suppressed by --no-drive)");
             fsoe_data_reached = true;
+            fsoe_data_time_ms = Tether::Platform::Clock::instance().getMilliseconds();
         }
     } else {
         // FSoE not enabled — drive enable can proceed directly.
@@ -2332,6 +2347,30 @@ int main(int argc, char** argv) {
             }
 
             if (elapsed_ms >= run_duration_ms) break;
+
+            // --- Release the brake 1 second after FSoE Data state ---
+            // The brake is spring-activated and must be disengaged via CoE
+            // (0x2004:7) before the drive can move.  We do this exactly 1 s
+            // after FSoE reaches the Data state, giving the safety channel
+            // time to stabilize before releasing the mechanical brake.
+            if (args.enable_fsoe && !brake_released && fsoe_data_time_ms > 0) {
+                const auto since_data_ms =
+                    Tether::Platform::Clock::instance().getMilliseconds() -
+                    fsoe_data_time_ms;
+                if (since_data_ms >= 1000) {
+                    brake_released = true;
+                    TETHER_LOGI(TAG,
+                        "Releasing brake {} ms after FSoE Data state",
+                        since_data_ms);
+                    auto& brake_sdo = master.ethercatMaster().sdoManager(slave_idx);
+                    if (!EtherCAT::Drives::Synapticon::BrakeControl::disengageBrake(
+                            brake_sdo, kSdoTimeoutMs)) {
+                        TETHER_LOGW(TAG,
+                            "Brake disengage failed or unverified — "
+                            "the safety layer will gate motion regardless");
+                    }
+                }
+            }
 
             // If FSoE is enabled, check that it's still operational.
             // If the slave enters FailSafe or Error, stop immediately.
