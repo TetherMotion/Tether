@@ -67,7 +67,7 @@ void RealtimeJitterMonitor::recordCycle(uint64_t now_ns) {
         if (stats_.warning_count <= 3 ||
             (config_.log_interval_cycles > 0 &&
              stats_.cycle_count % config_.log_interval_cycles == 0)) {
-            TETHER_LOGW(TAG, "[%s] Jitter WARNING: %u us (threshold %u us, cycle #%llu)",
+            TETHER_LOGW(TAG, "[{}] Jitter WARNING: {} us (threshold {} us, cycle #{})",
                         name_, jitter_us, config_.warning_threshold_us,
                         static_cast<unsigned long long>(stats_.cycle_count));
         }
@@ -79,7 +79,7 @@ void RealtimeJitterMonitor::recordCycle(uint64_t now_ns) {
         stats_.realtime_ok = false;
 
         // Always log critical overruns (they should be rare)
-        TETHER_LOGE(TAG, "[%s] Jitter CRITICAL: %u us (threshold %u us, cycle #%llu, period %u us)",
+        TETHER_LOGE(TAG, "[{}] Jitter CRITICAL: {} us (threshold {} us, cycle #{}, period {} us)",
                     name_, jitter_us, config_.critical_threshold_us,
                     static_cast<unsigned long long>(stats_.cycle_count),
                     delta_us);
@@ -89,7 +89,7 @@ void RealtimeJitterMonitor::recordCycle(uint64_t now_ns) {
     if (config_.log_interval_cycles > 0 &&
         stats_.cycle_count > 1 &&
         stats_.cycle_count % config_.log_interval_cycles == 0) {
-        TETHER_LOGI(TAG, "[%s] Jitter report: cycles=%llu avg=%u us max=%u us warn=%llu crit=%llu rt_ok=%s",
+        TETHER_LOGI(TAG, "[{}] Jitter report: cycles={} avg={} us max={} us warn={} crit={} rt_ok={}",
                     name_,
                     static_cast<unsigned long long>(stats_.cycle_count),
                     stats_.avg_jitter_us,

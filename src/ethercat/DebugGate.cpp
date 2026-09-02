@@ -359,7 +359,7 @@ static std::unique_ptr<DebugCondition> parseStateCondition(const std::string& sp
     } else if (state_str == "op" || state_str == "OP") {
         state = SlaveState::OP;
     } else {
-        TETHER_LOGE(TAG, "Unknown state in condition: '%s'", state_str.c_str());
+        TETHER_LOGE(TAG, "Unknown state in condition: '{}'", state_str.c_str());
         return nullptr;
     }
 
@@ -505,7 +505,7 @@ std::unique_ptr<DebugCondition> DebugGate::parseCondition(const std::string& spe
     } else if (spec.substr(0, 4) == "coe:") {
         return parseCoECondition(spec);
     } else {
-        TETHER_LOGE(TAG, "Unknown condition type: '%s'", spec.c_str());
+        TETHER_LOGE(TAG, "Unknown condition type: '{}'", spec.c_str());
         TETHER_LOGI(TAG, "Valid prefixes: state:, checkpoint:, reg:, coe:");
         return nullptr;
     }

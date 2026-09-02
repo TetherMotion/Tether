@@ -100,7 +100,7 @@ void printEtherCATFrame(const uint8_t* frame, size_t length, bool is_tx, bool pr
 
     if (print_ethernet && length >= sizeof(EtherCAT::EthernetHeader)) {
         const auto* eth = reinterpret_cast<const EtherCAT::EthernetHeader*>(frame);
-        TETHER_LOGI("ec_pkt", "[%s] Ethernet: dst=%02X:%02X:%02X:%02X:%02X:%02X src=%02X:%02X:%02X:%02X:%02X:%02X etherType=0x%04X",
+        TETHER_LOGI("ec_pkt", "[{}] Ethernet: dst={:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X} src={:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X} etherType=0x{:04X}",
                     dir,
                     eth->dst[0], eth->dst[1], eth->dst[2], eth->dst[3], eth->dst[4], eth->dst[5],
                     eth->src[0], eth->src[1], eth->src[2], eth->src[3], eth->src[4], eth->src[5],
@@ -108,7 +108,7 @@ void printEtherCATFrame(const uint8_t* frame, size_t length, bool is_tx, bool pr
     }
 
     if (length < sizeof(EtherCAT::EthernetHeader) + sizeof(EtherCAT::FrameHeader)) {
-        TETHER_LOGI("ec_pkt", "[%s] Frame too short for EtherCAT header (%u bytes)",
+        TETHER_LOGI("ec_pkt", "[{}] Frame too short for EtherCAT header ({} bytes)",
                     dir, static_cast<unsigned>(length));
         return;
     }
@@ -127,7 +127,7 @@ void printEtherCATFrame(const uint8_t* frame, size_t length, bool is_tx, bool pr
             const uint8_t ihl = (ip->version_ihl & 0x0F) * 4;
             if (ip_off + ihl + sizeof(UDPHeader) > length) return;
             const auto* udp = reinterpret_cast<const UDPHeader*>(frame + ip_off + ihl);
-            TETHER_LOGI("ec_pkt", "[%s] EtherCAT-over-UDP: src_port=%u dst_port=%u",
+            TETHER_LOGI("ec_pkt", "[{}] EtherCAT-over-UDP: src_port={} dst_port={}",
                         dir, bswap16(udp->src_port_be), bswap16(udp->dst_port_be));
             ecat_offset = ip_off + ihl + sizeof(UDPHeader);
         }
@@ -135,7 +135,7 @@ void printEtherCATFrame(const uint8_t* frame, size_t length, bool is_tx, bool pr
     }
 
     if (length < ecat_offset + sizeof(EtherCAT::FrameHeader)) {
-        TETHER_LOGI("ec_pkt", "[%s] Frame too short for EtherCAT header after encap (%u bytes)",
+        TETHER_LOGI("ec_pkt", "[{}] Frame too short for EtherCAT header after encap ({} bytes)",
                     dir, static_cast<unsigned>(length));
         return;
     }
@@ -302,9 +302,9 @@ void printEtherCATFrame(const uint8_t* frame, size_t length, bool is_tx, bool pr
                 }
             }
         }
-        TETHER_LOGI("ec_pkt", "%s", line.c_str());
+        TETHER_LOGI("ec_pkt", "{}", line.c_str());
     } else {
-        TETHER_LOGI("ec_pkt", "[%s] EtherCAT Frame: length=%u type=%u", dir, ec_len, ec_type);
+        TETHER_LOGI("ec_pkt", "[{}] EtherCAT Frame: length={} type={}", dir, ec_len, ec_type);
         for (size_t i = 0; i < dgs.size(); ++i) {
             const auto& dg = dgs[i];
             std::string dgram_line;
@@ -331,12 +331,12 @@ void printEtherCATFrame(const uint8_t* frame, size_t length, bool is_tx, bool pr
                     dgram_line += dg.data;
                 }
             }
-            TETHER_LOGI("ec_pkt", "%s", dgram_line.c_str());
+            TETHER_LOGI("ec_pkt", "{}", dgram_line.c_str());
             if (dg.has_data && !inline_data) {
-                TETHER_LOGI("ec_pkt", "[%s]     Data (%u/%u bytes): %s",
+                TETHER_LOGI("ec_pkt", "[{}]     Data ({}/{} bytes): {}",
                             dir, static_cast<unsigned>(dg.dump_len), static_cast<unsigned>(dg.datalen), dg.hex.c_str());
                 for (const auto& coe_line : dg.coe_lines) {
-                    TETHER_LOGI("ec_pkt", "[%s]     CoE: %s", dir, coe_line.c_str());
+                    TETHER_LOGI("ec_pkt", "[{}]     CoE: {}", dir, coe_line.c_str());
                 }
             }
         }

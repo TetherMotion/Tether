@@ -66,9 +66,9 @@ bool configure_mailbox_from_sii(
     if (!sii_ok) {
         const char* err = sii_parser.lastError();
         if (err && err[0]) {
-            TETHER_LOGW(TAG, "%s: SII mailbox read failed: %s — using defaults", master.slaveLogPrefix(slave_index).c_str(), err);
+            TETHER_LOGW(TAG, "{}: SII mailbox read failed: {} — using defaults", master.slaveLogPrefix(slave_index).c_str(), err);
         } else {
-            TETHER_LOGW(TAG, "%s: SII mailbox read failed — using defaults", master.slaveLogPrefix(slave_index).c_str());
+            TETHER_LOGW(TAG, "{}: SII mailbox read failed — using defaults", master.slaveLogPrefix(slave_index).c_str());
         }
     }
     
@@ -79,18 +79,18 @@ bool configure_mailbox_from_sii(
     if (valid_mailbox) {
         // Check for obviously invalid configurations
         if (mailbox.std_rx_size == 0 || mailbox.std_tx_size == 0) {
-            TETHER_LOGW(TAG, "SII mailbox has zero size (Receive=%u Send=%u), using defaults",
+            TETHER_LOGW(TAG, "SII mailbox has zero size (Receive={} Send={}), using defaults",
                      mailbox.std_rx_size, mailbox.std_tx_size);
             valid_mailbox = false;
         }
         // Check for suspiciously small mailboxes (< 32 bytes is unusual)
         else if (mailbox.std_rx_size < 32 || mailbox.std_tx_size < 32) {
-            TETHER_LOGW(TAG, "SII mailbox unusually small (Receive=%u Send=%u), but accepting",
+            TETHER_LOGW(TAG, "SII mailbox unusually small (Receive={} Send={}), but accepting",
                      mailbox.std_rx_size, mailbox.std_tx_size);
         }
         // Check for overlapping mailboxes
         else if (mailbox.std_rx_offset == mailbox.std_tx_offset) {
-            TETHER_LOGW(TAG, "SII mailbox Receive and Send have same address (0x%04X), using defaults",
+            TETHER_LOGW(TAG, "SII mailbox Receive and Send have same address (0x{:04X}), using defaults",
                      mailbox.std_rx_offset);
             valid_mailbox = false;
         }
@@ -110,7 +110,7 @@ bool configure_mailbox_from_sii(
         mbx_send_len = mailbox.std_tx_size;
         proto = mailbox.protocols;
         
-        TETHER_LOGI(TAG, "Mailbox from SII: Receive(SM0/M→S)=0x%04X/%u Send(SM1/S→M)=0x%04X/%u proto=0x%04X",
+        TETHER_LOGI(TAG, "Mailbox from SII: Receive(SM0/M→S)=0x{:04X}/{} Send(SM1/S→M)=0x{:04X}/{} proto=0x{:04X}",
                  mbx_receive_addr, (unsigned)mbx_receive_len, mbx_send_addr, (unsigned)mbx_send_len, proto);
     } else {
         // Use defaults
@@ -121,17 +121,17 @@ bool configure_mailbox_from_sii(
         proto = kDefaultProto;
         
         if (!sii_ok) {
-            TETHER_LOGW(TAG, "Failed to read SII, using defaults: Receive(SM0)=0x%04X/%u Send(SM1)=0x%04X/%u proto=0x%04X",
+            TETHER_LOGW(TAG, "Failed to read SII, using defaults: Receive(SM0)=0x{:04X}/{} Send(SM1)=0x{:04X}/{} proto=0x{:04X}",
                      mbx_receive_addr, (unsigned)mbx_receive_len, mbx_send_addr, (unsigned)mbx_send_len, proto);
         } else {
-            TETHER_LOGW(TAG, "No mailbox in SII, using defaults: Receive(SM0)=0x%04X/%u Send(SM1)=0x%04X/%u proto=0x%04X",
+            TETHER_LOGW(TAG, "No mailbox in SII, using defaults: Receive(SM0)=0x{:04X}/{} Send(SM1)=0x{:04X}/{} proto=0x{:04X}",
                      mbx_receive_addr, (unsigned)mbx_receive_len, mbx_send_addr, (unsigned)mbx_send_len, proto);
         }
     }
 
     // Validate address ordering: SM0 (Receive) should typically be at lower address than SM1 (Send)
     if (mbx_receive_addr >= mbx_send_addr) {
-        TETHER_LOGW(TAG, "Mailbox addresses non-standard: Receive(SM0)=0x%04X >= Send(SM1)=0x%04X; typical is SM0 < SM1",
+        TETHER_LOGW(TAG, "Mailbox addresses non-standard: Receive(SM0)=0x{:04X} >= Send(SM1)=0x{:04X}; typical is SM0 < SM1",
                     mbx_receive_addr, mbx_send_addr);
     }
 
@@ -167,7 +167,7 @@ bool configure_mailbox_from_sii(
         SmRegs r;
         uint8_t buf[8] = {0};
         if (!master.readRegister(EtherCAT::SlaveAddress(slave_index), sm_base, buf, sizeof(buf), 200)) {
-            TETHER_LOGD(TAG, "[MBOXTRACE] SM%u reg read failed (slave=%u base=0x%04X)", sm_index, (unsigned)slave_index, (unsigned)sm_base);
+            TETHER_LOGD(TAG, "[MBOXTRACE] SM{} reg read failed (slave={} base=0x{:04X})", sm_index, (unsigned)slave_index, (unsigned)sm_base);
             return r;
         }
 
@@ -192,7 +192,7 @@ bool configure_mailbox_from_sii(
     const SmRegs sm1 = read_sm(EC_REG_SM1, 1);
 
     if (sm0.ok && sm1.ok) {
-        TETHER_LOGD(TAG, "[MBOXTRACE] SII-derived mailbox: Receive(SM0/M→S)=0x%04X/%u Send(SM1/S→M)=0x%04X/%u proto=0x%04X valid_sii=%s\n[MBOXTRACE] SM0(Receive/MbxIn): start=0x%04X len=%u ctrl=0x%02X dir=%s act=0x%02X stat=0x%02X pdi=0x%02X\n[MBOXTRACE] SM1(Send/MbxOut): start=0x%04X len=%u ctrl=0x%02X dir=%s act=0x%02X stat=0x%02X pdi=0x%02X",
+        TETHER_LOGD(TAG, "[MBOXTRACE] SII-derived mailbox: Receive(SM0/M→S)=0x{:04X}/{} Send(SM1/S→M)=0x{:04X}/{} proto=0x{:04X} valid_sii={}\n[MBOXTRACE] SM0(Receive/MbxIn): start=0x{:04X} len={} ctrl=0x{:02X} dir={} act=0x{:02X} stat=0x{:02X} pdi=0x{:02X}\n[MBOXTRACE] SM1(Send/MbxOut): start=0x{:04X} len={} ctrl=0x{:02X} dir={} act=0x{:02X} stat=0x{:02X} pdi=0x{:02X}",
                     mbx_receive_addr, (unsigned)mbx_receive_len, mbx_send_addr, (unsigned)mbx_send_len, proto, valid_mailbox ? "yes" : "no",
                     sm0.start, (unsigned)sm0.len, std::bit_cast<uint8_t>(sm0.control), fmt_dir(sm0.control), std::bit_cast<uint8_t>(sm0.activate), std::bit_cast<uint8_t>(sm0.status), std::bit_cast<uint8_t>(sm0.pdi_ctrl),
                     sm1.start, (unsigned)sm1.len, std::bit_cast<uint8_t>(sm1.control), fmt_dir(sm1.control), std::bit_cast<uint8_t>(sm1.activate), std::bit_cast<uint8_t>(sm1.status), std::bit_cast<uint8_t>(sm1.pdi_ctrl));
@@ -209,11 +209,11 @@ bool configure_mailbox_from_sii(
             }
         };
         if (sm0.ok && !sm0_mbx) {
-            TETHER_LOGW(TAG, "SM0 control byte 0x%02X does not indicate an active mailbox (mode=%s, dir=%s)",
+            TETHER_LOGW(TAG, "SM0 control byte 0x{:02X} does not indicate an active mailbox (mode={}, dir={})",
                         std::bit_cast<uint8_t>(sm0.control), ctrl_mode_name(sm0.control), fmt_dir(sm0.control));
         }
         if (sm1.ok && !sm1_mbx) {
-            TETHER_LOGW(TAG, "SM1 control byte 0x%02X does not indicate an active mailbox (mode=%s, dir=%s)",
+            TETHER_LOGW(TAG, "SM1 control byte 0x{:02X} does not indicate an active mailbox (mode={}, dir={})",
                         std::bit_cast<uint8_t>(sm1.control), ctrl_mode_name(sm1.control), fmt_dir(sm1.control));
         }
 
@@ -234,12 +234,12 @@ bool configure_mailbox_from_sii(
                 hw_send_addr == mbx_send_addr && hw_send_len == mbx_send_len) {
                 TETHER_LOGD(TAG, "[MBOXTRACE] Hardware SM registers match SII mailbox config ✓");
             } else {
-                TETHER_LOGW(TAG, "[MBOXTRACE] Hardware SM differs from SII (hw: Receive=0x%04X/%u Send=0x%04X/%u vs sii: Receive=0x%04X/%u Send=0x%04X/%u)",
+                TETHER_LOGW(TAG, "[MBOXTRACE] Hardware SM differs from SII (hw: Receive=0x{:04X}/{} Send=0x{:04X}/{} vs sii: Receive=0x{:04X}/{} Send=0x{:04X}/{})",
                            hw_receive_addr, (unsigned)hw_receive_len, hw_send_addr, (unsigned)hw_send_len,
                            mbx_receive_addr, (unsigned)mbx_receive_len, mbx_send_addr, (unsigned)mbx_send_len);
             }
         } else {
-            TETHER_LOGD(TAG, "[MBOXTRACE] SM0/SM1 not both active mailbox SMs (sm0_mbx=%s sm1_mbx=%s); trusting SII",
+            TETHER_LOGD(TAG, "[MBOXTRACE] SM0/SM1 not both active mailbox SMs (sm0_mbx={} sm1_mbx={}); trusting SII",
                         sm0_mbx ? "yes" : "no", sm1_mbx ? "yes" : "no");
         }
     }

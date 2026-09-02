@@ -74,7 +74,7 @@ bool Master::writeRegister(SlaveAddress slave_address, RegisterAddress register_
 
     if (!sendDatagram(Command::APWR, idx, slave_address, register_address, data, len, true)) {
         if (debug_flags_.eeprom && (ado == 0x0502 || ado == 0x0508)) {
-            TETHER_LOGW(TAG, "EEPROM: APWR sendDatagram FAILED adp=0x%04X ado=0x%04X len=%u", adp, ado, len);
+            TETHER_LOGW(TAG, "EEPROM: APWR sendDatagram FAILED adp=0x{:04X} ado=0x{:04X} len={}", adp, ado, len);
         }
         packet_router_.cancelPreRegistered(slot);
         return false;
@@ -83,7 +83,7 @@ bool Master::writeRegister(SlaveAddress slave_address, RegisterAddress register_
     WaitResult result = waitForPreRegistered(slot, timeout_ms);
     last_wkc_.store(result.wkc, std::memory_order_relaxed);
     if (debug_flags_.eeprom && (ado == 0x0502 || ado == 0x0508)) {
-        TETHER_LOGI(TAG, "EEPROM: APWR adp=0x%04X ado=0x%04X len=%u success=%d wkc=%u",
+        TETHER_LOGI(TAG, "EEPROM: APWR adp=0x{:04X} ado=0x{:04X} len={} success={} wkc={}",
                     adp, ado, len, result.success, result.wkc);
     }
     return result.success && result.wkc > 0;
@@ -147,7 +147,7 @@ bool Master::readRegister(SlaveAddress slave_address, RegisterAddress register_a
     WaitResult result = waitForPreRegistered(slot, timeout_ms);
     last_wkc_.store(result.wkc, std::memory_order_relaxed);
     if (debug_flags_.eeprom && (ado == 0x0502 || ado == 0x0508)) {
-        TETHER_LOGI(TAG, "EEPROM: APRD adp=0x%04X ado=0x%04X len=%u success=%d wkc=%u datalen=%u",
+        TETHER_LOGI(TAG, "EEPROM: APRD adp=0x{:04X} ado=0x{:04X} len={} success={} wkc={} datalen={}",
                     adp, ado, len, result.success, result.wkc, result.data_length);
     }
     if (!result.success) return false;
@@ -155,7 +155,7 @@ bool Master::readRegister(SlaveAddress slave_address, RegisterAddress register_a
     resp.datalen = static_cast<uint16_t>(result.data_length);
     if (resp.datalen < len) {
         if (debug_flags_.eeprom && (ado == 0x0502 || ado == 0x0508)) {
-            TETHER_LOGW(TAG, "EEPROM: APRD adp=0x%04X ado=0x%04X datalen=%u < len=%u", adp, ado, resp.datalen, len);
+            TETHER_LOGW(TAG, "EEPROM: APRD adp=0x{:04X} ado=0x{:04X} datalen={} < len={}", adp, ado, resp.datalen, len);
         }
         return false;
     }
@@ -346,8 +346,8 @@ bool Master::sendSingleDatagram(Command cmd, uint8_t idx,
 #endif
     if (required_len + encap_overhead > kMaxEthFrameNoFcs) {
         TETHER_LOGE(TAG,
-            "Datagram exceeds max Ethernet frame size (datalen=%u required=%u encap=%u, "
-            "max_frame=%zu). This is a physical Ethernet frame size limit, not a Tether buffer.",
+            "Datagram exceeds max Ethernet frame size (datalen={} required={} encap={}, "
+            "max_frame={}). This is a physical Ethernet frame size limit, not a Tether buffer.",
             datalen, static_cast<unsigned>(required_len),
             static_cast<unsigned>(encap_overhead), kMaxEthFrameNoFcs);
         return false;
@@ -392,7 +392,7 @@ bool Master::sendSingleDatagram(Command cmd, uint8_t idx,
         int last_errno = 0;
         for (int retry = 0; retry <= kMaxTxRetries; retry++) {
             if (cancel_requested_.load(std::memory_order_acquire)) {
-                TETHER_LOGW(TAG, "sendSingleDatagram cancelled (cmd=%s idx=%u)",
+                TETHER_LOGW(TAG, "sendSingleDatagram cancelled (cmd={} idx={})",
                             commandToString(cmd), static_cast<unsigned>(idx));
                 return false;
             }
@@ -521,8 +521,8 @@ size_t Master::sendMultiDatagram(const MultiDatagramSpec* specs, size_t count)
         if (dg_count_in_frame == 0) {
             // Single datagram too big for one frame
             TETHER_LOGE(TAG,
-                "sendMultiDatagram: datagram %zu exceeds max Ethernet frame size (datalen=%u, "
-                "max_payload=%zu). This is a physical Ethernet frame size limit, not a Tether buffer.",
+                "sendMultiDatagram: datagram {} exceeds max Ethernet frame size (datalen={}, "
+                "max_payload={}). This is a physical Ethernet frame size limit, not a Tether buffer.",
                 i, specs[i].datalen, max_payload);
             return frames_sent > 0 ? frames_sent : 0;
         }
@@ -834,10 +834,10 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
         if (debug_flags_.rxPackets) {
             const char* name = PacketDebugger::etherTypeToString(ether_type);
             if (name) {
-                TETHER_LOGI("ec_pkt", "[RX] Non-EtherCAT frame: %s (0x%04X, len=%u)",
+                TETHER_LOGI("ec_pkt", "[RX] Non-EtherCAT frame: {} (0x{:04X}, len={})",
                             name, ether_type, static_cast<unsigned>(length));
             } else {
-                TETHER_LOGI("ec_pkt", "[RX] Non-EtherCAT frame: unknown (0x%04X, len=%u)",
+                TETHER_LOGI("ec_pkt", "[RX] Non-EtherCAT frame: unknown (0x{:04X}, len={})",
                             ether_type, static_cast<unsigned>(length));
             }
         }
@@ -890,7 +890,7 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
             size_t routed = packet_router_.routePacket(msg);
             if (routed == 0) {
                 if (unrouted_log_count_ < 10) {
-                    TETHER_LOGW("ec_rx", "Unrouted pkt dg=%u idx=0x%02X cmd=0x%02X ado=0x%04X adp=0x%04X wkc=%u",
+                    TETHER_LOGW("ec_rx", "Unrouted pkt dg={} idx=0x{:02X} cmd=0x{:02X} ado=0x{:04X} adp=0x{:04X} wkc={}",
                              dg_idx, dg->idx, (unsigned)dg->cmd, ado, adp, wkc);
                 }
                 unrouted_log_count_++;
@@ -901,7 +901,7 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
                 } else {
                     rx_drop_log_count_++;
                     if (rx_drop_log_count_ <= 10 || (rx_drop_log_count_ % 500 == 0)) {
-                        TETHER_LOGW("ec_rx", "RX queue full! Dropped dg=%u idx=0x%02X cmd=0x%02X ado=0x%04X adp=0x%04X wkc=%u (total dropped: %u)",
+                        TETHER_LOGW("ec_rx", "RX queue full! Dropped dg={} idx=0x{:02X} cmd=0x{:02X} ado=0x{:04X} adp=0x{:04X} wkc={} (total dropped: {})",
                                  dg_idx, dg->idx, (unsigned)dg->cmd, ado, adp, wkc, rx_drop_log_count_);
                     }
                 }

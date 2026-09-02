@@ -47,7 +47,7 @@ void dumpSlaveSyncAndMailboxInfo(const CiA402Drive& drive,
     (void)master->readRegister(SlaveAddress(slave_idx), static_cast<uint16_t>(0x0134), acd, sizeof(acd), 200);
     const uint16_t al_status = static_cast<uint16_t>(ast[0] | (ast[1] << 8));
     const uint16_t al_code   = static_cast<uint16_t>(acd[0] | (acd[1] << 8));
-    TETHER_LOGI(tag, "AL_STATUS=0x%04X (%s)%s | AL status code: %s (0x%04X)",
+    TETHER_LOGI(tag, "AL_STATUS=0x{:04X} ({}){} | AL status code: {} (0x{:04X})",
              al_status, al_status_get_state_name(al_status),
              (al_status_has_error(al_status) ? ", ERROR" : ""),
              getALStatusCodeName(static_cast<ALStatusCode>(al_code)), al_code);

@@ -471,11 +471,11 @@ void Master::start(const NetworkInterface& iface, const uint8_t src_mac[6])
     // Initialize per-slave CoEManagers
     for (size_t i = 0; i < sdo_managers_.size(); ++i) {
         if (!sdo_managers_[i]->init()) {
-            TETHER_LOGW(TAG, "SDO subsystem failed to initialize for slave %zu", i);
+            TETHER_LOGW(TAG, "SDO subsystem failed to initialize for slave {}", i);
         }
     }
     if (!sdo_managers_.empty()) {
-        TETHER_LOGI(TAG, "SDO subsystem initialized for %zu slave(s)", sdo_managers_.size());
+        TETHER_LOGI(TAG, "SDO subsystem initialized for {} slave(s)", sdo_managers_.size());
     }
 
     running_.store(true, std::memory_order_release);
@@ -754,7 +754,7 @@ PDOManager& Master::createPdoGroup(const std::vector<uint16_t>& slave_indices,
     for (uint16_t idx : slave_indices) {
         if (idx < PDO::kMaxPDOSlaves) {
             pdo_group_idx_for_slave_[idx] = group_idx;
-            TETHER_LOGI("ec_master", "Slave %u assigned to PDO group %d (base_log=0x%08X)",
+            TETHER_LOGI("ec_master", "Slave {} assigned to PDO group {} (base_log=0x{:08X})",
                         idx, group_idx, base_logical_addr);
         }
     }

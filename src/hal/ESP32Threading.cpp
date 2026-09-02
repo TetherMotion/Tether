@@ -61,7 +61,7 @@ public:
         pthread_attr_destroy(&attr);
 
         if (ret != 0) {
-            TETHER_LOGE(TAG, "pthread_create failed: %d", ret);
+            TETHER_LOGE(TAG, "pthread_create failed: {}", ret);
             return Error::InternalError;
         }
 

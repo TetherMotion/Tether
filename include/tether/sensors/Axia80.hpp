@@ -293,12 +293,12 @@ inline bool Axia80Sensor::isAxia80Device()
 {
     EtherCAT::SII::SIIIdentity id;
     if (!EtherCAT::SII::readSIIIdentity(master_, slave_index_, id)) {
-        TETHER_LOGW("Axia80", "%s: SII identity read failed — cannot verify device type", master_.slaveLogPrefix(slave_index_).c_str());
+        TETHER_LOGW("Axia80", "{}: SII identity read failed — cannot verify device type", master_.slaveLogPrefix(slave_index_).c_str());
         return false;
     }
     bool match = (id.vendor_id == Axia80::kVendorId) && (id.product_code == Axia80::kProductCode);
     if (!match) {
-        TETHER_LOGW("Axia80", "%s: VID/PID mismatch — expected 0x%08X/0x%08X, got 0x%08X/0x%08X",
+        TETHER_LOGW("Axia80", "{}: VID/PID mismatch — expected 0x{:08X}/0x{:08X}, got 0x{:08X}/0x{:08X}",
                     master_.slaveLogPrefix(slave_index_).c_str(), Axia80::kVendorId, Axia80::kProductCode,
                     id.vendor_id, id.product_code);
     }
@@ -317,13 +317,13 @@ inline bool Axia80Sensor::init(Tether::Platform::LogLevel log_level,
 
     // 1. Mailbox
     if (sl.configureMailbox(log_level) != SlaveError::Ok) {
-        TETHER_LOGE("Axia80", "%s: mailbox config failed", master_.slaveLogPrefix(slave_index_).c_str());
+        TETHER_LOGE("Axia80", "{}: mailbox config failed", master_.slaveLogPrefix(slave_index_).c_str());
         return false;
     }
 
     // 2. PRE_OP
     if (sl.transitionToPreOp() != SlaveError::Ok) {
-        TETHER_LOGE("Axia80", "%s: PRE_OP failed", master_.slaveLogPrefix(slave_index_).c_str());
+        TETHER_LOGE("Axia80", "{}: PRE_OP failed", master_.slaveLogPrefix(slave_index_).c_str());
         return false;
     }
 
@@ -341,29 +341,29 @@ inline bool Axia80Sensor::init(Tether::Platform::LogLevel log_level,
                                  PDO::PDOAddressMode::Position);
 
     if (!pdo_mgr.finalizeMapping(slave_index_)) {
-        TETHER_LOGE("Axia80", "%s: PDO finalize failed", master_.slaveLogPrefix(slave_index_).c_str());
+        TETHER_LOGE("Axia80", "{}: PDO finalize failed", master_.slaveLogPrefix(slave_index_).c_str());
         return false;
     }
 
     // 4. Configure SM2/SM3
     if (sl.configurePDOSyncManagers() != SlaveError::Ok) {
-        TETHER_LOGE("Axia80", "%s: PDO SM config failed", master_.slaveLogPrefix(slave_index_).c_str());
+        TETHER_LOGE("Axia80", "{}: PDO SM config failed", master_.slaveLogPrefix(slave_index_).c_str());
         return false;
     }
 
     // 5. SAFE_OP → OP
     if (sl.transitionToSafeOp() != SlaveError::Ok) {
-        TETHER_LOGE("Axia80", "%s: SAFE_OP failed", master_.slaveLogPrefix(slave_index_).c_str());
+        TETHER_LOGE("Axia80", "{}: SAFE_OP failed", master_.slaveLogPrefix(slave_index_).c_str());
         return false;
     }
     if (transition_to_op) {
         if (sl.transitionToOp() != SlaveError::Ok) {
-            TETHER_LOGE("Axia80", "%s: OP failed", master_.slaveLogPrefix(slave_index_).c_str());
+            TETHER_LOGE("Axia80", "{}: OP failed", master_.slaveLogPrefix(slave_index_).c_str());
             return false;
         }
     }
 
-    TETHER_LOGI("Axia80", "Slave %u initialised successfully%s", slave_index_,
+    TETHER_LOGI("Axia80", "Slave {} initialised successfully{}", slave_index_,
                 transition_to_op ? "" : " (SAFE-OP only)");
     return true;
 }
@@ -514,7 +514,7 @@ inline void Axia80Sensor::printPDOLayout()
 {
     TETHER_LOGI("Axia80", "=== Axia80 PDO Layout ===");
     TETHER_LOGI("Axia80", "");
-    TETHER_LOGI("Axia80", "TxPDO (0x1A00) — Slave → Master, %u bytes:", Axia80_pdo::TxPDO_1A00.size);
+    TETHER_LOGI("Axia80", "TxPDO (0x1A00) — Slave → Master, {} bytes:", Axia80_pdo::TxPDO_1A00.size);
     TETHER_LOGI("Axia80", "  Offset  Size  Field          Description");
     TETHER_LOGI("Axia80", "  ------  ----  -------------  ----------------------------------------");
     TETHER_LOGI("Axia80", "  0x00    4     fx             Force X (counts, int32_t)");
@@ -526,7 +526,7 @@ inline void Axia80Sensor::printPDOLayout()
     TETHER_LOGI("Axia80", "  0x18    4     status         Status code (0x6010, uint32_t)");
     TETHER_LOGI("Axia80", "  0x1C    4     counter        Sample counter (0x6020, uint32_t)");
     TETHER_LOGI("Axia80", "");
-    TETHER_LOGI("Axia80", "RxPDO (0x1601) — Master → Slave, %u bytes:", Axia80_pdo::RxPDO_1601.size);
+    TETHER_LOGI("Axia80", "RxPDO (0x1601) — Master → Slave, {} bytes:", Axia80_pdo::RxPDO_1601.size);
     TETHER_LOGI("Axia80", "  Offset  Size  Field          Description");
     TETHER_LOGI("Axia80", "  ------  ----  -------------  ----------------------------------------");
     TETHER_LOGI("Axia80", "  0x00    4     control1       Control register 1 (0x7010.1, uint32_t)");
@@ -546,11 +546,11 @@ inline void Axia80Sensor::printTxPDOData() const
     const auto* tx = txPDO();
     if (!tx) return;
     TETHER_LOGI("Axia80", "[TxPDO-DEBUG] Axia80 TxPDO (0x1A00) contents:");
-    TETHER_LOGI("Axia80", "  fx=%ld  fy=%ld  fz=%ld  tx=%ld  ty=%ld  tz=%ld",
+    TETHER_LOGI("Axia80", "  fx={}  fy={}  fz={}  tx={}  ty={}  tz={}",
                 static_cast<long>(tx->fx), static_cast<long>(tx->fy),
                 static_cast<long>(tx->fz), static_cast<long>(tx->tx),
                 static_cast<long>(tx->ty), static_cast<long>(tx->tz));
-    TETHER_LOGI("Axia80", "  status=0x%08X  counter=%u", tx->status, tx->counter);
+    TETHER_LOGI("Axia80", "  status=0x{:08X}  counter={}", tx->status, tx->counter);
 }
 
 inline void Axia80Sensor::printRxPDOData() const
@@ -558,9 +558,9 @@ inline void Axia80Sensor::printRxPDOData() const
     const auto* rx = rxPDO();
     if (!rx) return;
     TETHER_LOGI("Axia80", "[RxPDO-DEBUG] Axia80 RxPDO (0x1601) contents:");
-    TETHER_LOGI("Axia80", "  control1=0x%08X  control2=0x%08X", rx->control1, rx->control2);
+    TETHER_LOGI("Axia80", "  control1=0x{:08X}  control2=0x{:08X}", rx->control1, rx->control2);
     TETHER_LOGI("Axia80", "  control1 breakdown:");
-    TETHER_LOGI("Axia80", "    BIAS=%s  CLEAR_BIAS=%s  FILTER=%u  SLOT=%u  RATE=%u",
+    TETHER_LOGI("Axia80", "    BIAS={}  CLEAR_BIAS={}  FILTER={}  SLOT={}  RATE={}",
                 (rx->control1 & Axia80::CTRL_BIAS_BIT) ? "1" : "0",
                 (rx->control1 & Axia80::CTRL_CLEAR_BIAS_BIT) ? "1" : "0",
                 (rx->control1 & Axia80::CTRL_FILTER_MASK) >> Axia80::CTRL_FILTER_SHIFT,

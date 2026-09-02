@@ -53,7 +53,7 @@ bool SDODownload::execute(Master& master, uint16_t adp,
                           SDOUpload* uploadForDiag) {
     if (outAbortCode) *outAbortCode = 0;
     if (data == nullptr || dataLen == 0) {
-        TETHER_LOGE(TAG, "Invalid SDO download parameters (len=%u)", static_cast<unsigned>(dataLen));
+        TETHER_LOGE(TAG, "Invalid SDO download parameters (len={})", static_cast<unsigned>(dataLen));
         return false;
     }
 
@@ -103,8 +103,8 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
     if (buf_size > kRawSDOMbxBufferSize) {
         TETHER_LOGE(TAG,
             "Slave mailbox size exceeds Tether safety ceiling "
-            "(wr=%u rd=%u, needed=%zu, ceiling=%u bytes). "
-            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= %zu.",
+            "(wr={} rd={}, needed={}, ceiling={} bytes). "
+            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= {}.",
             mbxWriteLen, mbxReadLen, buf_size,
             static_cast<unsigned>(kRawSDOMbxBufferSize), buf_size);
         return false;
@@ -145,7 +145,7 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
 
     const size_t msg_len = sizeof(mbx) + sizeof(coe) + sizeof(sdo);
     if (msg_len > mbxWriteLen) {
-        TETHER_LOGE(TAG, "Mailbox write len too small (%u < %u)", mbxWriteLen, static_cast<unsigned>(msg_len));
+        TETHER_LOGE(TAG, "Mailbox write len too small ({} < {})", mbxWriteLen, static_cast<unsigned>(msg_len));
         return false;
     }
 
@@ -169,13 +169,13 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
 
         mbx_write_count_++;
         if ((mbx_write_count_ % 1000) == 1) {
-            TETHER_LOGI(TAG, "Slave %u: SDO download (write) request: index=0x%04X:%u [mailbox #%lu -> 0x%04X, len=%u, SM0=0x%02X, AL=0x%04X]",
+            TETHER_LOGI(TAG, "Slave {}: SDO download (write) request: index=0x{:04X}:{} [mailbox #{} -> 0x{:04X}, len={}, SM0=0x{:02X}, AL=0x{:04X}]",
                      slaveIndexFromADP(adp), index, sub, (unsigned long)mbx_write_count_, mbxWriteAddr, mbxWriteLen, sm0_status, al_status);
         }
 
 #ifdef TETHER_DIAG_SDO_IO
         if (diagEnabled) {
-            TETHER_LOGI(TAG, "SDO Download INIT: adp=0x%04x index=0x%04x sub=%u mbx_wr=0x%04x/%u mbx_rd=0x%04x/%u",
+            TETHER_LOGI(TAG, "SDO Download INIT: adp=0x{:04x} index=0x{:04x} sub={} mbx_wr=0x{:04x}/{} mbx_rd=0x{:04x}/{}",
                      adp, index, sub, mbxWriteAddr, mbxWriteLen, mbxReadAddr, mbxReadLen);
             diagnostics_.diagHexdump(mbxbuf, msg_len, 64);
         }
@@ -187,7 +187,7 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
                                           mbxWriteAddr, mbxReadAddr,
                                           mbxbuf, static_cast<uint16_t>(mbxWriteLen),
                                           500, &used_alt)) {
-            TETHER_LOGE(TAG, "Slave %u: SDO download: Mailbox write failed (wr=0x%04X rd=0x%04X)",
+            TETHER_LOGE(TAG, "Slave {}: SDO download: Mailbox write failed (wr=0x{:04X} rd=0x{:04X})",
                         slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr);
             return false;
         }
@@ -198,7 +198,7 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
     }
 
     if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
-        TETHER_LOGE(TAG, "Slave %u: SDO download: SM1 mailbox never became full (wr=0x%04X rd=0x%04X index=0x%04X:%02x timeout=%ums)",
+        TETHER_LOGE(TAG, "Slave {}: SDO download: SM1 mailbox never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{:02x} timeout={}ms)",
                     slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
         diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
         return false;
@@ -217,7 +217,7 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
         }
         if (outcome == MbxPollOutcome::Sm1Empty || outcome == MbxPollOutcome::ReadFailed) {
             if (outcome == MbxPollOutcome::ReadFailed) {
-                TETHER_LOGW(TAG, "SDO download: mailbox data read WKC=0 despite SM1 full — backing off (adp=0x%04X)", adp);
+                TETHER_LOGW(TAG, "SDO download: mailbox data read WKC=0 despite SM1 full — backing off (adp=0x{:04X})", adp);
             }
             continue;
         }
@@ -227,7 +227,7 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
             return false;
         }
         if (hdr.type != EC_MBXT_COE) {
-            TETHER_LOGW(TAG, "Non-CoE mailbox response (download): type=%u cnt=%u (adp=0x%04X index=0x%04X:%u) — aborting",
+            TETHER_LOGW(TAG, "Non-CoE mailbox response (download): type={} cnt={} (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
                         hdr.type, hdr.cnt, adp, index, sub);
             break;
         }
@@ -259,7 +259,7 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
                 SdoAbort abort{};
                 std::memcpy(&abort, mbxbuf + sdo_offset, sizeof(abort));
                 const uint32_t abort_code = le32_to_host(abort.abortCode_le);
-                TETHER_LOGE(TAG, "SDO download abort: index=0x%04x:%02x code=0x%08" PRIx32 " (%s)",
+                TETHER_LOGE(TAG, "SDO download abort: index=0x{:04x}:{:02x} code=0x{:08x} ({})",
                          index, sub, abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
                 if (outAbortCode) *outAbortCode = abort_code;
                 if (abort_code == 0x06090011 && diagnostics_.isPdoMappingIndex(index)) {
@@ -276,7 +276,7 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
             }
 #ifdef TETHER_DIAG_SDO_IO
             if (diagEnabled) {
-                TETHER_LOGI(TAG, "SDO download abort raw response (mbx_read_len=%u)", (unsigned)mbxReadLen);
+                TETHER_LOGI(TAG, "SDO download abort raw response (mbx_read_len={})", (unsigned)mbxReadLen);
                 diagnostics_.diagHexdump(mbxbuf + sdo_offset, mbxReadLen - sdo_offset, 256);
             }
 #endif
@@ -287,7 +287,7 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
         std::memcpy(&resp_coe, mbxbuf + sizeof(MbxHeader), sizeof(resp_coe));
         const uint8_t resp_service = (le16_to_host(resp_coe.raw_le) >> 12) & 0x0Fu;
         if (resp_service != EC_COES_SDORES) {
-            TETHER_LOGW(TAG, "Unexpected CoE service (download): 0x%X (expected 0x3) (adp=0x%04X index=0x%04X:%u) — aborting",
+            TETHER_LOGW(TAG, "Unexpected CoE service (download): 0x{:X} (expected 0x3) (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
                         resp_service, adp, index, sub);
             break;
         }
@@ -302,7 +302,7 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
                             master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
                     return true;
                 }
-                TETHER_LOGW(TAG, "Stale SDO download response: idx=0x%04X:%u expected=0x%04X:%u (adp=0x%04X) — clearing and re-sending",
+                TETHER_LOGW(TAG, "Stale SDO download response: idx=0x{:04X}:{} expected=0x{:04X}:{} (adp=0x{:04X}) — clearing and re-sending",
                             res_index, res.sub, index, sub, adp);
                 // Stale response from a previous operation — just drain and
                 // retry with the same counter.  Do NOT sync the counter.
@@ -319,12 +319,12 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
             }
         }
 
-        TETHER_LOGW(TAG, "Unexpected SDO command (download): cmd=0x%02X (adp=0x%04X index=0x%04X:%u) — aborting",
+        TETHER_LOGW(TAG, "Unexpected SDO command (download): cmd=0x{:02X} (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
                     sdo_cmd, adp, index, sub);
         break;
     }
 
-    TETHER_LOGE(TAG, "Slave %u: SDO download timeout: index=0x%04x:%02x (wr=0x%04X rd=0x%04X)",
+    TETHER_LOGE(TAG, "Slave {}: SDO download timeout: index=0x{:04x}:{:02x} (wr=0x{:04X} rd=0x{:04X})",
                 slaveIndexFromADP(adp), index, sub, mbxWriteAddr, mbxReadAddr);
     diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
     return false;
@@ -345,8 +345,8 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
     if (buf_size > kRawSDOMbxBufferSize) {
         TETHER_LOGE(TAG,
             "Slave mailbox size exceeds Tether safety ceiling "
-            "(wr=%u rd=%u, needed=%zu, ceiling=%u bytes). "
-            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= %zu.",
+            "(wr={} rd={}, needed={}, ceiling={} bytes). "
+            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= {}.",
             mbxWriteLen, mbxReadLen, buf_size,
             static_cast<unsigned>(kRawSDOMbxBufferSize), buf_size);
         return false;
@@ -357,8 +357,8 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
     const size_t sdo_header_size = sizeof(MbxHeader) + sizeof(CoeHeader) + sizeof(SdoInitDownloadReq);
     const size_t msg_len = sdo_header_size + dataLen;
     if (msg_len > mbxWriteLen) {
-        TETHER_LOGE(TAG, "Normal download: data_len=%zu exceeds slave mailbox write capacity "
-                    "(msg=%zu > slave mailbox wr=%u). The slave mailbox is too small for this data; "
+        TETHER_LOGE(TAG, "Normal download: data_len={} exceeds slave mailbox write capacity "
+                    "(msg={} > slave mailbox wr={}). The slave mailbox is too small for this data; "
                     "use segmented download or increase the slave's mailbox size.",
                     dataLen, msg_len, mbxWriteLen);
         return false;
@@ -411,7 +411,7 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
                                      mbxWriteAddr, mbxReadAddr,
                                      mbxbuf, static_cast<uint16_t>(mbxWriteLen),
                                      500, &used_alt)) {
-        TETHER_LOGE(TAG, "Slave %u: SDO normal download: Mailbox write failed (wr=0x%04X rd=0x%04X)",
+        TETHER_LOGE(TAG, "Slave {}: SDO normal download: Mailbox write failed (wr=0x{:04X} rd=0x{:04X})",
                     slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr);
         return false;
     }
@@ -421,7 +421,7 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
     }
 
     if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
-        TETHER_LOGE(TAG, "Slave %u: SDO normal download: SM1 never became full (index=0x%04X:%u timeout=%ums)",
+        TETHER_LOGE(TAG, "Slave {}: SDO normal download: SM1 never became full (index=0x{:04X}:{} timeout={}ms)",
                     slaveIndexFromADP(adp), index, sub, transactionTimeoutMs);
         diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
         return false;
@@ -440,7 +440,7 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
         }
         if (outcome == MbxPollOutcome::Sm1Empty || outcome == MbxPollOutcome::ReadFailed) {
             if (outcome == MbxPollOutcome::ReadFailed) {
-                TETHER_LOGW(TAG, "SDO normal download: mailbox data read WKC=0 despite SM1 full (adp=0x%04X)", adp);
+                TETHER_LOGW(TAG, "SDO normal download: mailbox data read WKC=0 despite SM1 full (adp=0x{:04X})", adp);
             }
             continue;
         }
@@ -450,7 +450,7 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
             return false;
         }
         if (hdr.type != EC_MBXT_COE) {
-            TETHER_LOGW(TAG, "Non-CoE mailbox response (normal download): type=%u cnt=%u (adp=0x%04X index=0x%04X:%u) — aborting",
+            TETHER_LOGW(TAG, "Non-CoE mailbox response (normal download): type={} cnt={} (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
                         hdr.type, hdr.cnt, adp, index, sub);
             break;
         }
@@ -482,7 +482,7 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
                 SdoAbort abort{};
                 std::memcpy(&abort, mbxbuf + sdo_offset, sizeof(abort));
                 const uint32_t abort_code = le32_to_host(abort.abortCode_le);
-                TETHER_LOGE(TAG, "SDO normal download abort: index=0x%04x:%02x code=0x%08" PRIx32 " (%s)",
+                TETHER_LOGE(TAG, "SDO normal download abort: index=0x{:04x}:{:02x} code=0x{:08x} ({})",
                          index, sub, abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
                 if (outAbortCode) *outAbortCode = abort_code;
             } else {
@@ -495,7 +495,7 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
         std::memcpy(&resp_coe, mbxbuf + sizeof(MbxHeader), sizeof(resp_coe));
         const uint8_t resp_service = (le16_to_host(resp_coe.raw_le) >> 12) & 0x0Fu;
         if (resp_service != EC_COES_SDORES) {
-            TETHER_LOGW(TAG, "Unexpected CoE service (normal download): 0x%X (expected 0x3) (adp=0x%04X index=0x%04X:%u) — aborting",
+            TETHER_LOGW(TAG, "Unexpected CoE service (normal download): 0x{:X} (expected 0x3) (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
                         resp_service, adp, index, sub);
             break;
         }
@@ -510,7 +510,7 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
                             master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
                     return true;
                 }
-                TETHER_LOGW(TAG, "Stale SDO normal download response: idx=0x%04X:%u expected=0x%04X:%u (adp=0x%04X) — clearing and re-sending",
+                TETHER_LOGW(TAG, "Stale SDO normal download response: idx=0x{:04X}:{} expected=0x{:04X}:{} (adp=0x{:04X}) — clearing and re-sending",
                             res_index, res.sub, index, sub, adp);
                 // Do NOT sync counter — just drain and retry.
                 if (++stale_retry_count <= MAX_STALE_RETRIES) {
@@ -526,12 +526,12 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
             }
         }
 
-        TETHER_LOGW(TAG, "Unexpected SDO command (normal download): cmd=0x%02X (adp=0x%04X index=0x%04X:%u) — aborting",
+        TETHER_LOGW(TAG, "Unexpected SDO command (normal download): cmd=0x{:02X} (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
                     sdo_cmd, adp, index, sub);
         break;
     }
 
-    TETHER_LOGE(TAG, "Slave %u: SDO normal download timeout: index=0x%04x:%02x (wr=0x%04X rd=0x%04X)",
+    TETHER_LOGE(TAG, "Slave {}: SDO normal download timeout: index=0x{:04x}:{:02x} (wr=0x{:04X} rd=0x{:04X})",
                 slaveIndexFromADP(adp), index, sub, mbxWriteAddr, mbxReadAddr);
     diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
     return false;
@@ -553,8 +553,8 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
     if (buf_size > kRawSDOMbxBufferSize) {
         TETHER_LOGE(TAG,
             "Slave mailbox size exceeds Tether safety ceiling "
-            "(wr=%u rd=%u, needed=%zu, ceiling=%u bytes). "
-            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= %zu.",
+            "(wr={} rd={}, needed={}, ceiling={} bytes). "
+            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= {}.",
             mbxWriteLen, mbxReadLen, buf_size,
             static_cast<unsigned>(kRawSDOMbxBufferSize), buf_size);
         return false;
@@ -567,8 +567,8 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
     if (buf_size < min_buf_size) {
         TETHER_LOGE(TAG,
             "Mailbox too small for SDO segmented download header "
-            "(wr=%u rd=%u, needed=%zu bytes). "
-            "The slave mailbox must be at least %zu bytes.",
+            "(wr={} rd={}, needed={} bytes). "
+            "The slave mailbox must be at least {} bytes.",
             mbxWriteLen, mbxReadLen, min_buf_size, min_buf_size);
         return false;
     }
@@ -618,7 +618,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
 
         const size_t init_msg_len = sdo_hdr_size + inline_bytes;
         if (init_msg_len > mbxWriteLen) {
-            TETHER_LOGE(TAG, "Mailbox write len too small for segmented init (%u < %u)",
+            TETHER_LOGE(TAG, "Mailbox write len too small for segmented init ({} < {})",
                         mbxWriteLen, static_cast<unsigned>(init_msg_len));
             return false;
         }
@@ -638,7 +638,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                                           mbxWriteAddr, mbxReadAddr,
                                           mbxbuf, static_cast<uint16_t>(mbxWriteLen),
                                           500, &used_alt)) {
-            TETHER_LOGE(TAG, "Slave %u: SDO segmented download init: Mailbox write failed (wr=0x%04X rd=0x%04X)",
+            TETHER_LOGE(TAG, "Slave {}: SDO segmented download init: Mailbox write failed (wr=0x{:04X} rd=0x{:04X})",
                         slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr);
             return false;
         }
@@ -648,7 +648,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
         }
 
         if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
-            TETHER_LOGE(TAG, "Slave %u: SDO segmented download init: SM1 never became full (wr=0x%04X rd=0x%04X index=0x%04X:%02x timeout=%ums)",
+            TETHER_LOGE(TAG, "Slave {}: SDO segmented download init: SM1 never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{:02x} timeout={}ms)",
                         slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
             diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
             return false;
@@ -667,7 +667,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
             }
             if (outcome == MbxPollOutcome::Sm1Empty || outcome == MbxPollOutcome::ReadFailed) {
                 if (outcome == MbxPollOutcome::ReadFailed) {
-                    TETHER_LOGW(TAG, "SDO segmented download init: mailbox data read WKC=0 despite SM1 full — backing off (adp=0x%04X)", adp);
+                    TETHER_LOGW(TAG, "SDO segmented download init: mailbox data read WKC=0 despite SM1 full — backing off (adp=0x{:04X})", adp);
                 }
                 continue;
             }
@@ -677,7 +677,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                 return false;
             }
             if (hdr.type != EC_MBXT_COE) {
-                TETHER_LOGW(TAG, "Non-CoE mailbox response (seg download init): type=%u cnt=%u (adp=0x%04X index=0x%04X:%u) — aborting",
+                TETHER_LOGW(TAG, "Non-CoE mailbox response (seg download init): type={} cnt={} (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
                             hdr.type, hdr.cnt, adp, index, sub);
                 break;
             }
@@ -709,7 +709,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                     SdoAbort abort{};
                     std::memcpy(&abort, mbxbuf + sdo_offset, sizeof(abort));
                     const uint32_t abort_code = le32_to_host(abort.abortCode_le);
-                    TETHER_LOGE(TAG, "SDO segmented download abort: index=0x%04x:%02x code=0x%08" PRIx32 " (%s)",
+                    TETHER_LOGE(TAG, "SDO segmented download abort: index=0x{:04x}:{:02x} code=0x{:08x} ({})",
                              index, sub, abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
                     if (outAbortCode) *outAbortCode = abort_code;
                     if (abort_code == 0x06090011 && diagnostics_.isPdoMappingIndex(index)) {
@@ -726,7 +726,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                 }
 #ifdef TETHER_DIAG_SDO_IO
                 if (diagEnabled) {
-                    TETHER_LOGI(TAG, "SDO segmented download abort raw response (mbx_read_len=%u)", (unsigned)mbxReadLen);
+                    TETHER_LOGI(TAG, "SDO segmented download abort raw response (mbx_read_len={})", (unsigned)mbxReadLen);
                     diagnostics_.diagHexdump(mbxbuf + sdo_offset, mbxReadLen - sdo_offset, 256);
                 }
 #endif
@@ -742,7 +742,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
             std::memcpy(&resp_coe, mbxbuf + sizeof(MbxHeader), sizeof(resp_coe));
             const uint8_t resp_service = (le16_to_host(resp_coe.raw_le) >> 12) & 0x0Fu;
             if (resp_service != EC_COES_SDORES) {
-                TETHER_LOGW(TAG, "Unexpected CoE service (seg download init): 0x%X (expected 0x3) (adp=0x%04X index=0x%04X:%u) — aborting",
+                TETHER_LOGW(TAG, "Unexpected CoE service (seg download init): 0x{:X} (expected 0x3) (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
                             resp_service, adp, index, sub);
                 break;
             }
@@ -757,7 +757,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                     break;
                 }
 
-                TETHER_LOGW(TAG, "Stale SDO segmented download init response: idx=0x%04X:%u expected=0x%04X:%u (adp=0x%04X) — clearing and re-sending",
+                TETHER_LOGW(TAG, "Stale SDO segmented download init response: idx=0x{:04X}:{} expected=0x{:04X}:{} (adp=0x{:04X}) — clearing and re-sending",
                             res_index, res.sub, index, sub, adp);
                 // Do NOT sync counter — just drain and retry.
                 if (++stale_retry_count <= MAX_STALE_RETRIES) {
@@ -772,13 +772,13 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                 continue;
             }
 
-            TETHER_LOGW(TAG, "Unexpected SDO command (seg download init): cmd=0x%02X (adp=0x%04X index=0x%04X:%u) — aborting",
+            TETHER_LOGW(TAG, "Unexpected SDO command (seg download init): cmd=0x{:02X} (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
                         sdo_cmd, adp, index, sub);
             break;
         }
 
         if (!got_init) {
-            TETHER_LOGE(TAG, "SDO segmented download init timeout: index=0x%04x:%02x (adp=0x%04X wr=0x%04X rd=0x%04X)",
+            TETHER_LOGE(TAG, "SDO segmented download init timeout: index=0x{:04x}:{:02x} (adp=0x{:04X} wr=0x{:04X} rd=0x{:04X})",
                         index, sub, adp, mbxWriteAddr, mbxReadAddr);
             diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
             return false;
@@ -790,7 +790,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
     size_t remaining = dataLen - inline_bytes;
 
     if (remaining == 0) {
-        TETHER_LOGI(TAG, "SDO segmented download: all %zu bytes sent inline in init packet (no segments needed)",
+        TETHER_LOGI(TAG, "SDO segmented download: all {} bytes sent inline in init packet (no segments needed)",
                     dataLen);
         return true;
     }
@@ -831,7 +831,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                                           mbxWriteAddr, mbxReadAddr,
                                           mbxbuf, static_cast<uint16_t>(mbxWriteLen),
                                           500, &used_alt)) {
-            TETHER_LOGE(TAG, "SDO segmented download segment %d: Mailbox write failed (adp=0x%04X wr=0x%04X rd=0x%04X)",
+            TETHER_LOGE(TAG, "SDO segmented download segment {}: Mailbox write failed (adp=0x{:04X} wr=0x{:04X} rd=0x{:04X})",
                         seg, adp, mbxWriteAddr, mbxReadAddr);
             return false;
         }
@@ -841,7 +841,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
         }
 
         if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
-            TETHER_LOGE(TAG, "SDO segmented download segment %d: SM1 never became full (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%02x timeout=%ums)",
+            TETHER_LOGE(TAG, "SDO segmented download segment {}: SM1 never became full (adp=0x{:04X} wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{:02x} timeout={}ms)",
                         seg, adp, mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
             diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
             return false;
@@ -860,7 +860,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
             }
             if (outcome == MbxPollOutcome::Sm1Empty || outcome == MbxPollOutcome::ReadFailed) {
                 if (outcome == MbxPollOutcome::ReadFailed) {
-                    TETHER_LOGW(TAG, "SDO segmented download segment %d: mailbox data read WKC=0 despite SM1 full — backing off (adp=0x%04X)", seg, adp);
+                    TETHER_LOGW(TAG, "SDO segmented download segment {}: mailbox data read WKC=0 despite SM1 full — backing off (adp=0x{:04X})", seg, adp);
                 }
                 continue;
             }
@@ -870,7 +870,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                 return false;
             }
             if (hdr.type != EC_MBXT_COE) {
-                TETHER_LOGW(TAG, "Non-CoE mailbox response (seg download seg %d): type=%u cnt=%u (adp=0x%04X index=0x%04X:%u) — aborting",
+                TETHER_LOGW(TAG, "Non-CoE mailbox response (seg download seg {}): type={} cnt={} (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
                             seg, hdr.type, hdr.cnt, adp, index, sub);
                 break;
             }
@@ -892,11 +892,11 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                     SdoAbort abort{};
                     std::memcpy(&abort, seg_res, sizeof(abort));
                     const uint32_t abort_code = le32_to_host(abort.abortCode_le);
-                    TETHER_LOGE(TAG, "SDO segmented download segment %d abort: index=0x%04x:%02x code=0x%08" PRIx32 " (%s)",
+                    TETHER_LOGE(TAG, "SDO segmented download segment {} abort: index=0x{:04x}:{:02x} code=0x{:08x} ({})",
                                 seg, index, sub, abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
                     if (outAbortCode) *outAbortCode = abort_code;
                 } else {
-                    TETHER_LOGE(TAG, "SDO segmented download segment %d abort (malformed response)", seg);
+                    TETHER_LOGE(TAG, "SDO segmented download segment {} abort (malformed response)", seg);
                 }
                 return false;
             }
@@ -910,21 +910,21 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
             const uint16_t r2_coe_raw = le16_to_host(r2_coe->raw_le);
             const uint8_t r2_service = (r2_coe_raw >> 12) & 0x0Fu;
             if (r2_service != EC_COES_SDORES) {
-                TETHER_LOGW(TAG, "Unexpected CoE service (seg download seg %d): 0x%X (expected 0x3) (adp=0x%04X index=0x%04X:%u) — aborting",
+                TETHER_LOGW(TAG, "Unexpected CoE service (seg download seg {}): 0x{:X} (expected 0x3) (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
                             seg, r2_service, adp, index, sub);
                 break;
             }
 
             const uint8_t seg_ccs = (seg_res_cmd >> 5) & 0x07u;
             if (seg_ccs != 1) {
-                TETHER_LOGW(TAG, "Unexpected SDO command (seg download seg %d): cmd=0x%02X ccs=%u (adp=0x%04X index=0x%04X:%u) — aborting",
+                TETHER_LOGW(TAG, "Unexpected SDO command (seg download seg {}): cmd=0x{:02X} ccs={} (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
                             seg, seg_res_cmd, seg_ccs, adp, index, sub);
                 break;
             }
 
             const bool seg_toggle = (seg_res_cmd & 0x10u) != 0;
             if (seg_toggle != toggle) {
-                TETHER_LOGW(TAG, "SDO segmented download segment %d toggle mismatch: got=%u expected=%u (adp=0x%04X index=0x%04X:%u) — clearing and re-sending",
+                TETHER_LOGW(TAG, "SDO segmented download segment {} toggle mismatch: got={} expected={} (adp=0x{:04X} index=0x{:04X}:{}) — clearing and re-sending",
                             seg, seg_toggle, toggle, adp, index, sub);
                 // Do NOT sync counter — just drain and retry.
                 if (++stale_retry_count <= MAX_STALE_RETRIES) {
@@ -964,14 +964,14 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
         }
 
         if (!got_seg) {
-            TETHER_LOGE(TAG, "SDO segmented download segment %d timeout (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%u)",
+            TETHER_LOGE(TAG, "SDO segmented download segment {} timeout (adp=0x{:04X} wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{})",
                         seg, adp, mbxWriteAddr, mbxReadAddr, index, sub);
             diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
             return false;
         }
     }
 
-    TETHER_LOGE(TAG, "SDO segmented download exceeded max segments (%d) for index=0x%04X:%u (len=%zu)",
+    TETHER_LOGE(TAG, "SDO segmented download exceeded max segments ({}) for index=0x{:04X}:{} (len={})",
                 ECAT_SDO_DOWNLOAD_MAX_SEGMENTS, index, sub, dataLen);
     return false;
 }

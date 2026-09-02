@@ -28,7 +28,7 @@ static const char* TAG = "ethercat_dump_sii";
 static int dumpSiiForSlave(EtherCAT::Master& master, uint16_t slave_idx) {
     uint16_t slaves = master.getDiscoveredSlaveCount();
     if (slave_idx >= slaves) {
-        TETHER_LOGE(TAG, "Requested slave index %u >= discovered slaves (%u)", slave_idx, slaves);
+        TETHER_LOGE(TAG, "Requested slave index {} >= discovered slaves ({})", slave_idx, slaves);
         return 2;
     }
 
@@ -67,11 +67,11 @@ int main(int argc, char** argv) {
     if (!esi_xml.empty()) {
         esi.emplace(esi_xml);
         if (esi->empty()) {
-            TETHER_LOGE(TAG, "Failed to parse ESI XML '%s': %s",
+            TETHER_LOGE(TAG, "Failed to parse ESI XML '{}': {}",
                         esi_xml.c_str(), esi->errorMessage().c_str());
             return 1;
         }
-        TETHER_LOGI(TAG, "Loaded ESI XML '%s' (%zu device(s)) for cross-reference",
+        TETHER_LOGI(TAG, "Loaded ESI XML '{}' ({} device(s)) for cross-reference",
                     esi_xml.c_str(), esi->devices().size());
     }
 #endif
@@ -87,9 +87,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    TETHER_LOGI(TAG, "ethercat_dump_sii (host)\nNetwork interface: %s", iface.c_str());
+    TETHER_LOGI(TAG, "ethercat_dump_sii (host)\nNetwork interface: {}", iface.c_str());
     if (!debug_flags.empty()) {
-        TETHER_LOGI(TAG, "Debug flags: %s", debug_str.c_str());
+        TETHER_LOGI(TAG, "Debug flags: {}", debug_str.c_str());
     }
     Tether::Examples::logVlanConfig(vlan, TAG);
 
@@ -120,7 +120,7 @@ int main(int argc, char** argv) {
     }
 
     uint16_t slaves = master.getDiscoveredSlaveCount();
-    TETHER_LOGI(TAG, "Discovered %u slave(s)", slaves);
+    TETHER_LOGI(TAG, "Discovered {} slave(s)", slaves);
     if (slaves == 0) {
         Tether::Examples::shutdownHostEthernet(session);
         return 5;
@@ -131,9 +131,9 @@ int main(int argc, char** argv) {
     // Print ESI device info for cross-reference if --esi-xml was provided
 #if TETHER_HAVE_ESI
     if (esi && !esi->empty()) {
-        TETHER_LOGI(TAG, "\n=== ESI XML Cross-Reference (%s) ===", esi_xml.c_str());
+        TETHER_LOGI(TAG, "\n=== ESI XML Cross-Reference ({}) ===", esi_xml.c_str());
         for (const auto& dev : esi->devices()) {
-            TETHER_LOGI(TAG, "%s",
+            TETHER_LOGI(TAG, "{}",
                         EtherCAT::ESI::formatDeviceHumanReadable(dev, true).c_str());
         }
     }

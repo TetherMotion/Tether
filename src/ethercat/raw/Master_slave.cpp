@@ -86,7 +86,7 @@ void Master::initSlaves(uint16_t count)
 
 void Master::setSlaveName(uint16_t idx, std::string name) {
     if (idx >= slave_names_.size()) {
-        TETHER_LOGW("master", "setSlaveName: index %u out of range (slaves=%zu)",
+        TETHER_LOGW("master", "setSlaveName: index {} out of range (slaves={})",
                     idx, slave_names_.size());
         return;
     }
@@ -113,12 +113,12 @@ bool Master::drainSlaveMailbox(uint16_t slave_index, unsigned int max_drain)
     uint16_t mbx_rd_addr = 0, mbx_rd_len = 0;
     if (!sdoManager(slave_index).getMailbox(&mbx_wr_addr, &mbx_wr_len,
                                             &mbx_rd_addr, &mbx_rd_len)) {
-        TETHER_LOGW(local_tag, "%s: cannot drain mailbox, no mailbox configured", slaveLogPrefix(slave_index).c_str());
+        TETHER_LOGW(local_tag, "{}: cannot drain mailbox, no mailbox configured", slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
     if (mbx_rd_len == 0) {
-        TETHER_LOGW(local_tag, "%s: cannot drain mailbox, read length is zero", slaveLogPrefix(slave_index).c_str());
+        TETHER_LOGW(local_tag, "{}: cannot drain mailbox, read length is zero", slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
@@ -131,7 +131,7 @@ bool Master::drainSlaveMailbox(uint16_t slave_index, unsigned int max_drain)
     for (unsigned int i = 0; i < max_drain; ++i) {
         uint8_t sm1_status = 0;
         if (!readRegister(SlaveAddress(slave_index), Raw::sm_status_address(1), sm1_status, 100)) {
-            TETHER_LOGW(local_tag, "%s: failed to read SM1 status while draining", slaveLogPrefix(slave_index).c_str());
+            TETHER_LOGW(local_tag, "{}: failed to read SM1 status while draining", slaveLogPrefix(slave_index).c_str());
             return false;
         }
 
@@ -142,32 +142,32 @@ bool Master::drainSlaveMailbox(uint16_t slave_index, unsigned int max_drain)
         // transiently set bit 7 before writing the response.
         if ((sm1_status & Raw::EC_SM_STATUS_MBXFULL) == 0) {
             if (drained_any) {
-                TETHER_LOGI(local_tag, "%s: SM1 drained successfully", slaveLogPrefix(slave_index).c_str());
+                TETHER_LOGI(local_tag, "{}: SM1 drained successfully", slaveLogPrefix(slave_index).c_str());
             }
             break;
         }
 
         if (!drained_any) {
-            TETHER_LOGW(local_tag, "%s: SM1 full at startup (status=0x%02X). Draining stale mailbox data...",
+            TETHER_LOGW(local_tag, "{}: SM1 full at startup (status=0x{:02X}). Draining stale mailbox data...",
                         slaveLogPrefix(slave_index).c_str(), sm1_status);
         }
 
         if (!readRegister(SlaveAddress(slave_index), mbx_rd_addr,
                           drain_buf.data(), static_cast<uint16_t>(drain_buf.size()), 200)) {
-            TETHER_LOGW(local_tag, "%s: SM1 drain read failed, attempting SM1 activate reset", slaveLogPrefix(slave_index).c_str());
+            TETHER_LOGW(local_tag, "{}: SM1 drain read failed, attempting SM1 activate reset", slaveLogPrefix(slave_index).c_str());
             if (resetSlaveMailboxSM1(slave_index)) {
                 // After a successful reset the buffer should be empty; re-check
                 // before continuing so we don't loop on stale status.
                 uint8_t sm1_status = 0;
                 if (readRegister(SlaveAddress(slave_index), Raw::sm_status_address(1), sm1_status, 100) &&
                     (sm1_status & Raw::EC_SM_STATUS_MBXFULL) == 0) {
-                    TETHER_LOGI(local_tag, "%s: SM1 empty after reset", slaveLogPrefix(slave_index).c_str());
+                    TETHER_LOGI(local_tag, "{}: SM1 empty after reset", slaveLogPrefix(slave_index).c_str());
                     return true;
                 }
             }
             return false;
         }
-        TETHER_LOGW(local_tag, "%s: drained stale mailbox data #%u (len=%u)",
+        TETHER_LOGW(local_tag, "{}: drained stale mailbox data #{} (len={})",
                     slaveLogPrefix(slave_index).c_str(), i + 1, static_cast<unsigned>(drain_buf.size()));
         drained_any = true;
         // Do NOT extract/sync the mailbox counter from drained stale responses.
@@ -184,7 +184,7 @@ bool Master::drainSlaveMailbox(uint16_t slave_index, unsigned int max_drain)
     // After max_drain reads, SM1 is still reporting full. The slave may be
     // continuously refilling the buffer or the ESC is not acknowledging the
     // reads; do not pretend the drain succeeded.
-    TETHER_LOGE(local_tag, "%s: SM1 still full after %u drain attempts", slaveLogPrefix(slave_index).c_str(), max_drain);
+    TETHER_LOGE(local_tag, "{}: SM1 still full after {} drain attempts", slaveLogPrefix(slave_index).c_str(), max_drain);
     return false;
 }
 
@@ -194,33 +194,33 @@ bool Master::resetSlaveMailboxSM1(uint16_t slave_index)
     const uint16_t sm1_activate_addr = static_cast<uint16_t>(Raw::EC_REG_SM1 + 0x06u);
     const uint16_t sm1_status_addr = Raw::sm_status_address(1);
 
-    TETHER_LOGW(local_tag, "%s: cycling SM1 activate register (0x%04X) to clear stuck WRITE_BUF_FULL",
+    TETHER_LOGW(local_tag, "{}: cycling SM1 activate register (0x{:04X}) to clear stuck WRITE_BUF_FULL",
                 slaveLogPrefix(slave_index).c_str(), sm1_activate_addr);
 
     uint8_t disable = 0x00;
     uint8_t enable = 0x01;
     if (!writeRegister(SlaveAddress(slave_index), RegisterAddress(sm1_activate_addr), &disable, sizeof(disable), 200)) {
-        TETHER_LOGE(local_tag, "%s: failed to disable SM1", slaveLogPrefix(slave_index).c_str());
+        TETHER_LOGE(local_tag, "{}: failed to disable SM1", slaveLogPrefix(slave_index).c_str());
         return false;
     }
     if (!writeRegister(SlaveAddress(slave_index), RegisterAddress(sm1_activate_addr), &enable, sizeof(enable), 200)) {
-        TETHER_LOGE(local_tag, "%s: failed to re-enable SM1", slaveLogPrefix(slave_index).c_str());
+        TETHER_LOGE(local_tag, "{}: failed to re-enable SM1", slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
     uint8_t sm1_status = 0;
     if (!readRegister(SlaveAddress(slave_index), RegisterAddress(sm1_status_addr), sm1_status, 100)) {
-        TETHER_LOGE(local_tag, "%s: failed to read SM1 status after reset", slaveLogPrefix(slave_index).c_str());
+        TETHER_LOGE(local_tag, "{}: failed to read SM1 status after reset", slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
     if ((sm1_status & Raw::EC_SM_STATUS_MBXFULL) != 0) {
-        TETHER_LOGE(local_tag, "%s: SM1 still full after activate reset (status=0x%02X)",
+        TETHER_LOGE(local_tag, "{}: SM1 still full after activate reset (status=0x{:02X})",
                     slaveLogPrefix(slave_index).c_str(), sm1_status);
         return false;
     }
 
-    TETHER_LOGI(local_tag, "%s: SM1 reset successful", slaveLogPrefix(slave_index).c_str());
+    TETHER_LOGI(local_tag, "{}: SM1 reset successful", slaveLogPrefix(slave_index).c_str());
     return true;
 }
 
@@ -230,33 +230,33 @@ bool Master::resetSlaveMailboxSM0(uint16_t slave_index)
     const uint16_t sm0_activate_addr = static_cast<uint16_t>(Raw::EC_REG_SM0 + 0x06u);
     const uint16_t sm0_status_addr = Raw::sm_status_address(0);
 
-    TETHER_LOGW(local_tag, "%s: cycling SM0 activate register (0x%04X) to clear stuck mailbox-full",
+    TETHER_LOGW(local_tag, "{}: cycling SM0 activate register (0x{:04X}) to clear stuck mailbox-full",
                 slaveLogPrefix(slave_index).c_str(), sm0_activate_addr);
 
     uint8_t disable = 0x00;
     uint8_t enable = 0x01;
     if (!writeRegister(SlaveAddress(slave_index), RegisterAddress(sm0_activate_addr), &disable, sizeof(disable), 200)) {
-        TETHER_LOGE(local_tag, "%s: failed to disable SM0", slaveLogPrefix(slave_index).c_str());
+        TETHER_LOGE(local_tag, "{}: failed to disable SM0", slaveLogPrefix(slave_index).c_str());
         return false;
     }
     if (!writeRegister(SlaveAddress(slave_index), RegisterAddress(sm0_activate_addr), &enable, sizeof(enable), 200)) {
-        TETHER_LOGE(local_tag, "%s: failed to re-enable SM0", slaveLogPrefix(slave_index).c_str());
+        TETHER_LOGE(local_tag, "{}: failed to re-enable SM0", slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
     uint8_t sm0_status = 0;
     if (!readRegister(SlaveAddress(slave_index), RegisterAddress(sm0_status_addr), sm0_status, 100)) {
-        TETHER_LOGE(local_tag, "%s: failed to read SM0 status after reset", slaveLogPrefix(slave_index).c_str());
+        TETHER_LOGE(local_tag, "{}: failed to read SM0 status after reset", slaveLogPrefix(slave_index).c_str());
         return false;
     }
 
     if ((sm0_status & Raw::EC_SM_STATUS_MBXFULL) != 0) {
-        TETHER_LOGE(local_tag, "%s: SM0 still full after activate reset (status=0x%02X)",
+        TETHER_LOGE(local_tag, "{}: SM0 still full after activate reset (status=0x{:02X})",
                     slaveLogPrefix(slave_index).c_str(), sm0_status);
         return false;
     }
 
-    TETHER_LOGI(local_tag, "%s: SM0 reset successful", slaveLogPrefix(slave_index).c_str());
+    TETHER_LOGI(local_tag, "{}: SM0 reset successful", slaveLogPrefix(slave_index).c_str());
     return true;
 }
 
@@ -380,10 +380,10 @@ bool Master::requestSlaveApplicationLayerState(SlaveAddress slave_address, uint8
         const char* target_state_name = getECStateName(state_code);
         
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  AL State Request: Slave %u                                  ║", slave_address.slavePosition());
+        TETHER_LOGI(TAG, "║  AL State Request: Slave {}                                  ║", slave_address.slavePosition());
         TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
-        TETHER_LOGI(TAG, "║  Current State: %s (0x%02X)", current_state_name, current_state_code);
-        TETHER_LOGI(TAG, "║  Target State:  %s (0x%02X)", target_state_name, state_code);
+        TETHER_LOGI(TAG, "║  Current State: {} (0x{:02X})", current_state_name, current_state_code);
+        TETHER_LOGI(TAG, "║  Target State:  {} (0x{:02X})", target_state_name, state_code);
         TETHER_LOGI(TAG, "║  Action:        Writing AL_CONTROL register");
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
     }
@@ -392,7 +392,7 @@ bool Master::requestSlaveApplicationLayerState(SlaveAddress slave_address, uint8
     
     if (debug_flags_.stateMachine && debug_flags_.stateMachineFilt.allows(slave_index)) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  AL State Request Result: %s                                 ║", result ? "SUCCESS" : "FAILED");
+        TETHER_LOGI(TAG, "║  AL State Request Result: {}                                 ║", result ? "SUCCESS" : "FAILED");
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
     }
     
@@ -423,7 +423,7 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
     }
 
     if (slave_index >= PDO::kMaxPDOSlaves) {
-        TETHER_LOGE(TAG, "configureProcessDataSyncManagersFromSii: invalid slave index %u", slave_index);
+        TETHER_LOGE(TAG, "configureProcessDataSyncManagersFromSii: invalid slave index {}", slave_index);
         return false;
     }
 
@@ -431,7 +431,7 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
     EtherCAT::SII::SIIData sii;
     bool sii_valid = EtherCAT::SII::readSII(*this, slave_index, sii);
     if (!sii_valid) {
-        TETHER_LOGW(TAG, "configureProcessDataSyncManagersFromSii: SII read failed for slave %u, using fallback", slave_index);
+        TETHER_LOGW(TAG, "configureProcessDataSyncManagersFromSii: SII read failed for slave {}, using fallback", slave_index);
     }
 
     auto& pdo = pdoForSlave(slave_index);
@@ -443,7 +443,7 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
         auto& dst = slave_configs[slave_index].sm[i];
 
         if (src.phys_start_address == 0 && src.length == 0) {
-            TETHER_LOGD(TAG, "SM%zu: SII has no data (addr=0 len=0), skipping", i);
+            TETHER_LOGD(TAG, "SM{}: SII has no data (addr=0 len=0), skipping", i);
             continue;
         }
 
@@ -453,14 +453,14 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
         dst.enable = src.isEnabled();
         dst.type = static_cast<PDO::SyncManagerType>(src.sm_type);
 
-        TETHER_LOGI(TAG, "SM%zu from SII: Addr=0x%04X Len=%u Ctrl=0x%02X Type=%s Enable=%s",
+        TETHER_LOGI(TAG, "SM{} from SII: Addr=0x{:04X} Len={} Ctrl=0x{:02X} Type={} Enable={}",
                  i, dst.phys_start_addr, dst.length, std::bit_cast<uint8_t>(dst.control),
                  src.getTypeName(), dst.enable ? "yes" : "no");
         configured_any = true;
     }
 
     if (!configured_any) {
-        TETHER_LOGW(TAG, "SII has no SM2/SM3 data for slave %u, trying HW registers", slave_index);
+        TETHER_LOGW(TAG, "SII has no SM2/SM3 data for slave {}, trying HW registers", slave_index);
 
         for (uint8_t sm = 2; sm < 4; sm++) {
             uint16_t base = static_cast<uint16_t>(0x0800 + sm * 8);
@@ -479,7 +479,7 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
                     dst.enable = (act & 0x01) != 0;
                     dst.type = (sm == 2) ? PDO::SyncManagerType::ProcessOutput
                                          : PDO::SyncManagerType::ProcessInput;
-                    TETHER_LOGI(TAG, "SM%u from HW regs: Addr=0x%04X Len=%u Ctrl=0x%02X Act=0x%02X",
+                    TETHER_LOGI(TAG, "SM{} from HW regs: Addr=0x{:04X} Len={} Ctrl=0x{:02X} Act=0x{:02X}",
                              sm, addr, len, ctrl, act);
                     // configured_any = true; // Not used
                 }
@@ -490,12 +490,12 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
     if (slave_configs[slave_index].sm[2].phys_start_addr == 0) {
         auto& sm2 = slave_configs[slave_index].sm[2];
         sm2 = PDO::SyncManagerConfig::process_output(0x1800, 0);
-        TETHER_LOGW(TAG, "SM2 (RxPDO) using DEFAULT: Addr=0x%04X Ctrl=0x%02X", sm2.phys_start_addr, std::bit_cast<uint8_t>(sm2.control));
+        TETHER_LOGW(TAG, "SM2 (RxPDO) using DEFAULT: Addr=0x{:04X} Ctrl=0x{:02X}", sm2.phys_start_addr, std::bit_cast<uint8_t>(sm2.control));
     }
     if (slave_configs[slave_index].sm[3].phys_start_addr == 0) {
         auto& sm3 = slave_configs[slave_index].sm[3];
         sm3 = PDO::SyncManagerConfig::process_input(0x1C00, 0);
-        TETHER_LOGW(TAG, "SM3 (TxPDO) using DEFAULT: Addr=0x%04X Ctrl=0x%02X", sm3.phys_start_addr, std::bit_cast<uint8_t>(sm3.control));
+        TETHER_LOGW(TAG, "SM3 (TxPDO) using DEFAULT: Addr=0x{:04X} Ctrl=0x{:02X}", sm3.phys_start_addr, std::bit_cast<uint8_t>(sm3.control));
     }
 
     pdo.finalizeMapping(slave_index);
@@ -522,7 +522,7 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
             uint8_t ctrl_byte = std::bit_cast<uint8_t>(cfg.control);
             writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 4), &ctrl_byte, 1, 200);
 
-            TETHER_LOGI(TAG, "Wrote SM%u to slave %u: Addr=0x%04X Len=%u Ctrl=0x%02X Act=0x00 (disabled)",
+            TETHER_LOGI(TAG, "Wrote SM{} to slave {}: Addr=0x{:04X} Len={} Ctrl=0x{:02X} Act=0x00 (disabled)",
                      sm, slave_index, cfg.phys_start_addr, cfg.length, ctrl_byte);
         }
     }
@@ -548,17 +548,17 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
             slave_configs[slave_index].sm[3].phys_start_addr, tx_len, tx_log,
             fmmu_dbg);
         if (!fmmu_mgr.writeToSlave(fmmu_dbg)) {
-            TETHER_LOGE(TAG, "%s: FMMU write (manual) failed", slaveLogPrefix(slave_index).c_str());
+            TETHER_LOGE(TAG, "{}: FMMU write (manual) failed", slaveLogPrefix(slave_index).c_str());
             return false;
         }
     } else if (sii_valid) {
         fmmu_mgr.configureFromSii(&sii, &slave_configs[slave_index], 0, fmmu_dbg);
         if (!fmmu_mgr.writeToSlave(fmmu_dbg)) {
-            TETHER_LOGE(TAG, "%s: FMMU write (from SII) failed", slaveLogPrefix(slave_index).c_str());
+            TETHER_LOGE(TAG, "{}: FMMU write (from SII) failed", slaveLogPrefix(slave_index).c_str());
             return false;
         }
     } else {
-        TETHER_LOGW(TAG, "%s: SII unavailable — FMMU not configured", slaveLogPrefix(slave_index).c_str());
+        TETHER_LOGW(TAG, "{}: SII unavailable — FMMU not configured", slaveLogPrefix(slave_index).c_str());
     }
 
     // Phase 3: Enable SM2/SM3 NOW that FMMUs are configured.
@@ -569,7 +569,7 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
             uint16_t base = static_cast<uint16_t>(0x0800 + sm * 8);
             uint8_t activate = 0x01;
             writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 6), &activate, 1, 200);
-            TETHER_LOGI(TAG, "Enabled SM%u on slave %u: Act=0x%01X",
+            TETHER_LOGI(TAG, "Enabled SM{} on slave {}: Act=0x{:01X}",
                      sm, slave_index, activate);
         }
     }

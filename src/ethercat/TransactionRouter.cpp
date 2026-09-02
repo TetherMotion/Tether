@@ -41,7 +41,7 @@ bool TransactionRouter::init()
     resetStats();
     initialized_.store(true, std::memory_order_release);
 
-    TETHER_LOGI(TAG, "TransactionRouter initialized (%zu slots)", kNumSlots);
+    TETHER_LOGI(TAG, "TransactionRouter initialized ({} slots)", kNumSlots);
     return true;
 }
 

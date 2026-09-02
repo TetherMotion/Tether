@@ -138,7 +138,7 @@ double TrapezoidalProfile::plan(double startPos, double endPos,
     m_accel = accel;
     m_decel = decel;
     
-    TETHER_LOGD(TAG, "Trapezoidal: d=%.2f, v_peak=%.2f, t1=%.3f, t2=%.3f, T=%.3f, tri=%d",
+    TETHER_LOGD(TAG, "Trapezoidal: d={:.2f}, v_peak={:.2f}, t1={:.3f}, t2={:.3f}, T={:.3f}, tri={}",
              distance, m_peakVelocity, m_t1, m_t2, m_duration, m_isTriangular);
     
     return m_duration;
@@ -335,7 +335,7 @@ double SCurveProfile::plan(double startPos, double endPos,
         m_a0[i] = s.acceleration;
     }
     
-    TETHER_LOGD(TAG, "S-Curve: d=%.2f, phases=%d, T=%.3f", distance, m_phaseCount, m_duration);
+    TETHER_LOGD(TAG, "S-Curve: d={:.2f}, phases={}, T={:.3f}", distance, m_phaseCount, m_duration);
     
     return m_duration;
 }

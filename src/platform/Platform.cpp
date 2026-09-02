@@ -124,12 +124,12 @@ bool setCurrentThreadRealtime(int priority) {
         if (ret == EPERM) {
             TETHER_LOGW("Platform", "setCurrentThreadRealtime: insufficient permissions to set SCHED_FIFO (CAP_SYS_NICE required)");
         } else {
-            TETHER_LOGW("Platform", "setCurrentThreadRealtime: pthread_setschedparam failed (%d)", ret);
+            TETHER_LOGW("Platform", "setCurrentThreadRealtime: pthread_setschedparam failed ({})", ret);
         }
         return false;
     }
 
-    TETHER_LOGI("Platform", "setCurrentThreadRealtime: SCHED_FIFO priority=%d applied", param.sched_priority);
+    TETHER_LOGI("Platform", "setCurrentThreadRealtime: SCHED_FIFO priority={} applied", param.sched_priority);
     return true;
 #else
     // Non-Linux platforms: best-effort no-op (ESP32 FreeRTOS scheduling handled elsewhere)
@@ -322,13 +322,13 @@ RealtimeKernelInfo ensureRealtimeKernelOrExit(RealtimeRequirement req) {
     RealtimeKernelInfo info = detectRealtimeKernel();
 
     // Log detection results
-    TETHER_LOGI("Platform", "Kernel: %s %s", info.sysname.c_str(), info.kernel_release.c_str());
-    TETHER_LOGI("Platform", "  Build model: %s", preemptModelStr(info.build_model));
+    TETHER_LOGI("Platform", "Kernel: {} {}", info.sysname.c_str(), info.kernel_release.c_str());
+    TETHER_LOGI("Platform", "  Build model: {}", preemptModelStr(info.build_model));
     if (info.build_model == PreemptModel::PreemptDynamic) {
-        TETHER_LOGI("Platform", "  Active dynamic mode: %s (source: %s)",
+        TETHER_LOGI("Platform", "  Active dynamic mode: {} (source: {})",
                     info.active_preempt_mode.c_str(), info.detection_source.c_str());
     }
-    TETHER_LOGI("Platform", "  Realtime class: %s (is_realtime=%d, is_low_latency=%d)",
+    TETHER_LOGI("Platform", "  Realtime class: {} (is_realtime={}, is_low_latency={})",
                 realtimeClassStr(info.realtime_class),
                 info.is_realtime, info.is_low_latency);
 
@@ -345,7 +345,7 @@ RealtimeKernelInfo ensureRealtimeKernelOrExit(RealtimeRequirement req) {
         if (info.realtime_class == RealtimeClass::LowLatency) {
             TETHER_LOGW("Platform",
                 "Hard realtime requirement NOT met: kernel is low-latency desktop "
-                "(build=%s, active=%s), not PREEMPT_RT. Continuing with degraded "
+                "(build={}, active={}), not PREEMPT_RT. Continuing with degraded "
                 "realtime guarantees. For hard realtime, install a PREEMPT_RT kernel.",
                 preemptModelStr(info.build_model), info.active_preempt_mode.c_str());
             return info;
@@ -356,8 +356,8 @@ RealtimeKernelInfo ensureRealtimeKernelOrExit(RealtimeRequirement req) {
         // the kernel for low latency (e.g. via boot param or runtime knob).
         if (info.active_preempt_mode == "unknown") {
             TETHER_LOGW("Platform",
-                "Hard realtime requirement: kernel realtime class is '%s' "
-                "(build=%s, active=%s). The active preempt mode could not be "
+                "Hard realtime requirement: kernel realtime class is '{}' "
+                "(build={}, active={}). The active preempt mode could not be "
                 "determined — this is unknowable without root/sudo access to "
                 "read debugfs (/sys/kernel/debug/sched/preempt). Assuming the "
                 "kernel has been configured for low latency. Continuing with "
@@ -371,8 +371,8 @@ RealtimeKernelInfo ensureRealtimeKernelOrExit(RealtimeRequirement req) {
 
         // Below low-latency → error
         TETHER_LOGE("Platform",
-            "Hard realtime requirement NOT met: kernel realtime class is '%s' "
-            "(build=%s, active=%s). A PREEMPT_RT (or at minimum full-preempt) kernel "
+            "Hard realtime requirement NOT met: kernel realtime class is '{}' "
+            "(build={}, active={}). A PREEMPT_RT (or at minimum full-preempt) kernel "
             "is required for realtime PDO exchange. Aborting.",
             realtimeClassStr(info.realtime_class),
             preemptModelStr(info.build_model), info.active_preempt_mode.c_str());
@@ -385,8 +385,8 @@ RealtimeKernelInfo ensureRealtimeKernelOrExit(RealtimeRequirement req) {
             return info;
         }
         TETHER_LOGE("Platform",
-            "Low-latency requirement NOT met: kernel realtime class is '%s' "
-            "(build=%s, active=%s). At least full preempt is required. Aborting.",
+            "Low-latency requirement NOT met: kernel realtime class is '{}' "
+            "(build={}, active={}). At least full preempt is required. Aborting.",
             realtimeClassStr(info.realtime_class),
             preemptModelStr(info.build_model), info.active_preempt_mode.c_str());
         std::exit(EXIT_FAILURE);

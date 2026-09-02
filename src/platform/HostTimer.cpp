@@ -73,14 +73,14 @@ public:
         
         int ret = pthread_setschedparam(native_handle, policy, &param);
         if (ret == 0) {
-            TETHER_LOGI(TAG, "Timer thread set to SCHED_FIFO priority %d", param.sched_priority);
+            TETHER_LOGI(TAG, "Timer thread set to SCHED_FIFO priority {}", param.sched_priority);
         } else {
-            TETHER_LOGW(TAG, "Failed to set thread priority (requires CAP_SYS_NICE or root): %s", 
+            TETHER_LOGW(TAG, "Failed to set thread priority (requires CAP_SYS_NICE or root): {}", 
                      strerror(ret));
         }
 #endif
         
-        TETHER_LOGI(TAG, "Timer started at %lu Hz", 1000000UL / config_.period_us);
+        TETHER_LOGI(TAG, "Timer started at {} Hz", 1000000UL / config_.period_us);
         return true;
     }
     
@@ -95,7 +95,7 @@ public:
             timer_thread_.join();
         }
         
-        TETHER_LOGI(TAG, "Timer stopped after %llu cycles", (unsigned long long)cycle_count_.load());
+        TETHER_LOGI(TAG, "Timer stopped after {} cycles", (unsigned long long)cycle_count_.load());
     }
     
     bool isRunning() const override {
@@ -164,7 +164,7 @@ private:
                     static std::atomic<uint32_t> behind_count{0};
                     const uint32_t count = behind_count.fetch_add(1, std::memory_order_relaxed) + 1;
                     if (count <= 3 || (count % 1000) == 0) {
-                        TETHER_LOGW(TAG, "Timer fell behind by %lld us, resyncing (count=%u)",
+                        TETHER_LOGW(TAG, "Timer fell behind by {} us, resyncing (count={})",
                                  (long long)duration_cast<microseconds>(now - next_wakeup).count(),
                                  count);
                     }

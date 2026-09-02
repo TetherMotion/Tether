@@ -62,12 +62,12 @@ size_t dc_format_time(uint64_t time_ns, char* buffer, size_t buffer_size) {
         uint32_t secs = offset_seconds % 60;
 
         return snprintf(buffer, buffer_size,
-                        "2026-01-01 + %" PRIu64 "h%02" PRIu32 "m%02" PRIu32 ".%09" PRIu32 "s",
+                        "2026-01-01 + {}h%02" PRIu32 "m%02" PRIu32 ".%09" PRIu32 "s",
                         hours, mins, secs, offset_nanos);
     } else {
         // Raw time display
         return snprintf(buffer, buffer_size,
-                        "%" PRIu64 ".%09" PRIu32 " s",
+                        "{}.%09" PRIu32 " s",
                         total_seconds, nanos);
     }
 }
@@ -334,7 +334,7 @@ bool dc_check_sync_cycle_times(uint16_t slave_index) {
 // ============================================================================
 
 void dc_log_sync_activation(uint8_t sync_activation) {
-    TETHER_LOGI(TAG, "SYNC Activation (0x0981): 0x%02X\n  Bit 0 - Cyclic Operation:    %s\n  Bit 1 - SYNC0 Generation:    %s\n  Bit 2 - SYNC1 Generation:    %s\n  Bit 3 - Auto Activation:     %s\n  Bit 4 - Ext SYNC0 to SYNC0:  %s\n  Bit 5 - Ext SYNC0 to LATCH0: %s\n  Bit 6 - Ext SYNC1 to SYNC1:  %s\n  Bit 7 - Ext SYNC1 to LATCH1: %s",
+    TETHER_LOGI(TAG, "SYNC Activation (0x0981): 0x{:02X}\n  Bit 0 - Cyclic Operation:    {}\n  Bit 1 - SYNC0 Generation:    {}\n  Bit 2 - SYNC1 Generation:    {}\n  Bit 3 - Auto Activation:     {}\n  Bit 4 - Ext SYNC0 to SYNC0:  {}\n  Bit 5 - Ext SYNC0 to LATCH0: {}\n  Bit 6 - Ext SYNC1 to SYNC1:  {}\n  Bit 7 - Ext SYNC1 to LATCH1: {}",
                sync_activation,
                (sync_activation & 0x01) ? "ENABLED" : "disabled",
                (sync_activation & 0x02) ? "ENABLED" : "disabled",
@@ -347,7 +347,7 @@ void dc_log_sync_activation(uint8_t sync_activation) {
 } 
 
 void dc_log_cyclic_unit_control(uint8_t cuc) {
-    TETHER_LOGI(TAG, "Cyclic Unit Control (0x0980): 0x%02X\n  Bit 0 - SYNC Out Unit:       %s\n  Bit 1-3 - Reserved\n  Bit 4 - Latch In Unit:       %s",
+    TETHER_LOGI(TAG, "Cyclic Unit Control (0x0980): 0x{:02X}\n  Bit 0 - SYNC Out Unit:       {}\n  Bit 1-3 - Reserved\n  Bit 4 - Latch In Unit:       {}",
                cuc,
                (cuc & 0x01) ? "ENABLED" : "disabled",
                (cuc & 0x10) ? "ENABLED" : "disabled");
@@ -356,17 +356,17 @@ void dc_log_cyclic_unit_control(uint8_t cuc) {
 void dc_log_slave_state(uint16_t slave_index) {
     SlaveDCState state;
     if (!dc_read_slave_state(slave_index, state)) {
-        TETHER_LOGE(TAG, "Failed to read DC state for slave %u", slave_index);
+        TETHER_LOGE(TAG, "Failed to read DC state for slave {}", slave_index);
         return;
     }
 
     char time_str[64];
 
-    TETHER_LOGI(TAG, "╔═══════════════════════════════════════════════════════════════╗\n║         DC STATE - Slave %u                                    ║\n╚═══════════════════════════════════════════════════════════════╝\nDC Support: %s",
+    TETHER_LOGI(TAG, "╔═══════════════════════════════════════════════════════════════╗\n║         DC STATE - Slave {}                                    ║\n╚═══════════════════════════════════════════════════════════════╝\nDC Support: {}",
                slave_index, state.dc_supported ? "YES" : "NO");
 
     dc_format_time(state.system_time, time_str, sizeof(time_str));
-    TETHER_LOGI(TAG, "System Time (0x0910):     %" PRIu64 " ns (%s)\nSystem Time Offset (0x0920): %" PRIu64 " ns\nSystem Time Diff (0x092C):   %d ns (signed: %d)\nSpeed Counter (0x0930):   %u\nTime Loop Filter (0x0934): %u\n\nReceive Times (for propagation delay calculation):\n  Port 0: %u ns\n  Port 1: %u ns\n  Port 2: %u ns\n  Port 3: %u ns\n  Calculated propagation delay: %u ns",
+    TETHER_LOGI(TAG, "System Time (0x0910):     {} ns ({})\nSystem Time Offset (0x0920): {} ns\nSystem Time Diff (0x092C):   {} ns (signed: {})\nSpeed Counter (0x0930):   {}\nTime Loop Filter (0x0934): {}\n\nReceive Times (for propagation delay calculation):\n  Port 0: {} ns\n  Port 1: {} ns\n  Port 2: {} ns\n  Port 3: {} ns\n  Calculated propagation delay: {} ns",
                state.system_time, time_str,
                state.system_time_offset,
                state.system_time_diff, static_cast<int32_t>(state.system_time_diff),
@@ -379,7 +379,7 @@ void dc_log_slave_state(uint16_t slave_index) {
     dc_log_sync_activation(state.sync_activation);
 
     dc_format_time(state.sync0_start_time, time_str, sizeof(time_str));
-    TETHER_LOGI(TAG, "\nSYNC0 Start Time (0x0990): %" PRIu64 " ns (%s)\nSYNC0 Cycle Time (0x09A0): %u ns (%.3f ms)\nSYNC1 Cycle Time (0x09A4): %u ns (%.3f ms)",
+    TETHER_LOGI(TAG, "\nSYNC0 Start Time (0x0990): {} ns ({})\nSYNC0 Cycle Time (0x09A0): {} ns ({:.3f} ms)\nSYNC1 Cycle Time (0x09A4): {} ns ({:.3f} ms)",
              state.sync0_start_time, time_str,
              state.sync0_cycle_time, state.sync0_cycle_time / 1000000.0f,
              state.sync1_cycle_time, state.sync1_cycle_time / 1000000.0f);
@@ -387,25 +387,25 @@ void dc_log_slave_state(uint16_t slave_index) {
     // Check if SYNC0 start is in future
     if (state.sync0_start_time > state.system_time) {
         int64_t delta = static_cast<int64_t>(state.sync0_start_time - state.system_time);
-        TETHER_LOGI(TAG, "SYNC0 Start: %" PRId64 " ns IN FUTURE (OK)", delta);
+        TETHER_LOGI(TAG, "SYNC0 Start: {} ns IN FUTURE (OK)", delta);
     } else {
         int64_t delta = static_cast<int64_t>(state.system_time - state.sync0_start_time);
-        TETHER_LOGE(TAG, "SYNC0 Start: %" PRId64 " ns IN PAST (PROBLEM!)", delta);
+        TETHER_LOGE(TAG, "SYNC0 Start: {} ns IN PAST (PROBLEM!)", delta);
     }
 
     TETHER_LOGI(TAG, "═══════════════════════════════════════════════════════════════");
 }
 
 void dc_log_consistency_report(const DCConsistencyReport& report) {
-    TETHER_LOGI(TAG, "DC Consistency Report: %zu/%zu checks passed",
+    TETHER_LOGI(TAG, "DC Consistency Report: {}/{} checks passed",
              report.passed_count, report.check_count);
 
     for (size_t i = 0; i < report.check_count; i++) {
         const auto& c = report.checks[i];
         if (c.passed) {
-            TETHER_LOGI(TAG, "  ✓ %s: %s", c.check_name, c.description);
+            TETHER_LOGI(TAG, "  ✓ {}: {}", c.check_name, c.description);
         } else {
-            TETHER_LOGE(TAG, "  ✗ %s: %s (expected=%" PRId64 ", actual=%" PRId64 ")",
+            TETHER_LOGE(TAG, "  ✗ {}: {} (expected={}, actual={})",
                      c.check_name, c.description, c.expected_value, c.actual_value);
         }
     }
@@ -417,17 +417,17 @@ void dc_log_sync0_timing(uint16_t slave_index, uint64_t current_master_time) {
         return;
     }
 
-    TETHER_LOGI(TAG, "SYNC0 Timing Analysis (Slave %u):\n  Master time:       %" PRIu64 " ns\n  Slave system time: %" PRIu64 " ns\n  SYNC0 start time:  %" PRIu64 " ns\n  SYNC0 cycle:       %u ns",
+    TETHER_LOGI(TAG, "SYNC0 Timing Analysis (Slave {}):\n  Master time:       {} ns\n  Slave system time: {} ns\n  SYNC0 start time:  {} ns\n  SYNC0 cycle:       {} ns",
                slave_index, current_master_time, state.system_time, state.sync0_start_time, state.sync0_cycle_time);
 
     if (state.sync0_start_time > state.system_time) {
         uint64_t ns_until_start = state.sync0_start_time - state.system_time;
-        TETHER_LOGI(TAG, "  Time until SYNC0:  %" PRIu64 " ns (%.3f ms)",
+        TETHER_LOGI(TAG, "  Time until SYNC0:  {} ns ({:.3f} ms)",
                  ns_until_start, ns_until_start / 1000000.0f);
     } else {
         uint64_t ns_since_start = state.system_time - state.sync0_start_time;
         uint64_t cycles_elapsed = ns_since_start / state.sync0_cycle_time;
-        TETHER_LOGI(TAG, "  SYNC0 started:     %" PRIu64 " ns ago (%" PRIu64 " cycles)",
+        TETHER_LOGI(TAG, "  SYNC0 started:     {} ns ago ({} cycles)",
                  ns_since_start, cycles_elapsed);
     }
 }
@@ -440,7 +440,7 @@ void dc_full_diagnostic(uint16_t slave_index) {
         return;
     }
 
-    TETHER_LOGI(TAG, "\n╔═══════════════════════════════════════════════════════════════╗\n║           FULL DC DIAGNOSTIC - Slave %u                       ║\n╚═══════════════════════════════════════════════════════════════╝",
+    TETHER_LOGI(TAG, "\n╔═══════════════════════════════════════════════════════════════╗\n║           FULL DC DIAGNOSTIC - Slave {}                       ║\n╚═══════════════════════════════════════════════════════════════╝",
                slave_index);
 
     // Log current state

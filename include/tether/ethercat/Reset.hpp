@@ -341,7 +341,7 @@ using ResetProgressCallback = std::function<void(const char* stage, uint8_t prog
  * // Simple fault reset for CiA 402 drive
  * auto result = reset.faultReset();
  * if (!result.success) {
- *     TETHER_LOGE("RESET", "Fault reset failed: %s", result.error_message.c_str());
+ *     TETHER_LOGE("RESET", "Fault reset failed: {}", result.error_message.c_str());
  * }
  * 
  * // Full state machine reset

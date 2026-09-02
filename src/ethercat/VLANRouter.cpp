@@ -80,14 +80,14 @@ void VLANRouter::addMaster(std::shared_ptr<Master> master,
 
     // Reject the undefined sentinel in the regular registry
     if (rx_range.start == kUndefinedVlanId || rx_range.end == kUndefinedVlanId) {
-        TETHER_LOGW("VLANRouter", "addMaster: kUndefinedVlanId (%u) is not allowed in regular entries. Use setUndefinedTarget() instead.",
+        TETHER_LOGW("VLANRouter", "addMaster: kUndefinedVlanId ({}) is not allowed in regular entries. Use setUndefinedTarget() instead.",
                     kUndefinedVlanId);
         return;
     }
 
     // Reject inverted ranges
     if (rx_range.start > rx_range.end) {
-        TETHER_LOGW("VLANRouter", "addMaster: inverted range (%u > %u) rejected",
+        TETHER_LOGW("VLANRouter", "addMaster: inverted range ({} > {}) rejected",
                     rx_range.start, rx_range.end);
         return;
     }
@@ -331,7 +331,7 @@ void VLANRouter::processRxFrame(const uint8_t* data, size_t len)
             const uint16_t inner_et = be16_from_raw(data + 16);
             const char* et_name = etherTypeName(inner_et);
             TETHER_LOGW("VLANRouter",
-                        "Received tagged frame with VID %u, inner EtherType 0x%04X (%s) — no matching master or undefined target",
+                        "Received tagged frame with VID {}, inner EtherType 0x{:04X} ({}) — no matching master or undefined target",
                         be16_from_raw(data + 14) & 0x0FFFu,
                         inner_et,
                         et_name ? et_name : "unknown");

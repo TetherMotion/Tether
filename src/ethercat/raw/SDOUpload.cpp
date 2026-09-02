@@ -54,8 +54,8 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
     if (buf_size > kRawSDOMbxBufferSize) {
         TETHER_LOGE(TAG,
             "Slave mailbox size exceeds Tether safety ceiling "
-            "(wr=%u rd=%u, needed=%zu, ceiling=%u bytes). "
-            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= %zu.",
+            "(wr={} rd={}, needed={}, ceiling={} bytes). "
+            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= {}.",
             mbxWriteLen, mbxReadLen, buf_size,
             static_cast<unsigned>(kRawSDOMbxBufferSize), buf_size);
         return false;
@@ -89,7 +89,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
 
     const size_t msg_len = sizeof(mbx) + sizeof(coe) + sizeof(sdo);
     if (msg_len > mbxWriteLen) {
-        TETHER_LOGE(TAG, "Mailbox write len too small (%u < %u)", mbxWriteLen, static_cast<unsigned>(msg_len));
+        TETHER_LOGE(TAG, "Mailbox write len too small ({} < {})", mbxWriteLen, static_cast<unsigned>(msg_len));
         return false;
     }
 
@@ -114,13 +114,13 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
 
         mbx_write_count_++;
         if ((mbx_write_count_ % 1000) == 1) {
-            TETHER_LOGI(TAG, "Slave %u: SDO upload (read) request: index=0x%04X:%u [mailbox #%lu -> 0x%04X, len=%u, SM0=0x%02X, AL=0x%04X]",
+            TETHER_LOGI(TAG, "Slave {}: SDO upload (read) request: index=0x{:04X}:{} [mailbox #{} -> 0x{:04X}, len={}, SM0=0x{:02X}, AL=0x{:04X}]",
                      slaveIndexFromADP(adp), index, sub, (unsigned long)mbx_write_count_, mbxWriteAddr, mbxWriteLen, sm0_status, al_status);
         }
 
 #ifdef TETHER_DIAG_SDO_IO
         if (diagEnabled) {
-            TETHER_LOGI(TAG, "SDO Upload INIT: adp=0x%04x index=0x%04x sub=%u coe_num=%u mbx_wr=0x%04x/%u mbx_rd=0x%04x/%u SM0=0x%02x AL=0x%04x",
+            TETHER_LOGI(TAG, "SDO Upload INIT: adp=0x{:04x} index=0x{:04x} sub={} coe_num={} mbx_wr=0x{:04x}/{} mbx_rd=0x{:04x}/{} SM0=0x{:02x} AL=0x{:04x}",
                      adp, index, sub, coe_number, mbxWriteAddr, mbxWriteLen, mbxReadAddr, mbxReadLen, sm0_status, al_status);
             diagnostics_.diagHexdump(mbxbuf, msg_len, 64);
         }
@@ -147,7 +147,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
         }
 
         if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
-            TETHER_LOGE(TAG, "Slave %u: SDO upload: SM1 mailbox never became full (wr=0x%04X rd=0x%04X index=0x%04X:%u timeout=%ums)",
+            TETHER_LOGE(TAG, "Slave {}: SDO upload: SM1 mailbox never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{} timeout={}ms)",
                         slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
             diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
             return false;
@@ -172,7 +172,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
             }
             if (outcome == MbxPollOutcome::Sm1Empty || outcome == MbxPollOutcome::ReadFailed) {
                 if (outcome == MbxPollOutcome::ReadFailed) {
-                    TETHER_LOGW(TAG, "SDO upload: mailbox data read WKC=0 despite SM1 full — backing off (adp=0x%04X)", adp);
+                    TETHER_LOGW(TAG, "SDO upload: mailbox data read WKC=0 despite SM1 full — backing off (adp=0x{:04X})", adp);
                 }
                 continue;
             }
@@ -183,7 +183,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
 #ifdef TETHER_DIAG_SDO_IO
                 if (diagEnabled) {
                     const uint8_t *p = mbxbuf;
-                    TETHER_LOGI(TAG, "MBX poll: len=%u type=0x%02x cnt=%u rawType=0x%02x bytes=%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+                    TETHER_LOGI(TAG, "MBX poll: len={} type=0x{:02x} cnt={} rawType=0x{:02x} bytes={:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
                              r_len, hdr.type, hdr.cnt, hdr.rawMbxType, p[0], p[1], p[2], p[3], p[4], p[5], p[6],
                              p[7], p[8], p[9], p[10], p[11], p[12], p[13], p[14], p[15]);
                 }
@@ -199,7 +199,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                     char tmp[96];
                     snprintf(tmp, sizeof(tmp), "MBX mismatch: len=%u type=0x%02x cnt=%u prio=0x%02x rawType=0x%02x",
                              r_len, hdr.type, hdr.cnt, hdr.priority, hdr.rawMbxType);
-                    TETHER_LOGI(TAG, "%s", tmp);
+                    TETHER_LOGI(TAG, "{}", tmp);
                 }
                 break;
             }
@@ -224,14 +224,14 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                 if (r_len >= sizeof(CoeHeader) + sizeof(SdoAbort)) {
                     const auto *ab = reinterpret_cast<const SdoAbort *>(r_sdo_bytes);
                     const uint32_t abort_code = le32_to_host(ab->abortCode_le);
-                    TETHER_LOGE(TAG, "SDO abort 0x%04x:%u code=0x%08" PRIx32 " (%s)",
+                    TETHER_LOGE(TAG, "SDO abort 0x{:04x}:{} code=0x{:08x} ({})",
                              le16_to_host(ab->index_le), ab->sub,
                              abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
                     if (outAbortCode) *outAbortCode = abort_code;
                 }
 #ifdef TETHER_DIAG_SDO_IO
                 if (diagEnabled) {
-                    TETHER_LOGI(TAG, "SDO abort raw response (len=%u)", r_len);
+                    TETHER_LOGI(TAG, "SDO abort raw response (len={})", r_len);
                     diagnostics_.diagHexdump(mbxbuf, r_len, 256);
                 }
 #endif
@@ -263,10 +263,10 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                              "Expected SDO Response (CoE service 0x3) but received %s "
                              "[ CoE header=0x%04X service=0x%X number=%u ]",
                              svc_name, r_coe_raw, r_service, r_number);
-                    TETHER_LOGI(TAG, "%s", tmp);
+                    TETHER_LOGI(TAG, "{}", tmp);
 #ifdef TETHER_DIAG_SDO_IO
                     if (diagEnabled) {
-                        TETHER_LOGI(TAG, "CoE mismatch raw mbx (len=%u)", r_len);
+                        TETHER_LOGI(TAG, "CoE mismatch raw mbx (len={})", r_len);
                         diagnostics_.diagHexdump(mbxbuf, r_len, 256);
                     }
 #endif
@@ -293,7 +293,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                 const uint16_t r_index = le16_to_host(res->index_le);
                 const uint8_t r_sub = res->sub;
                 if (r_index != index || r_sub != sub) {
-                    TETHER_LOGW(TAG, "Stale SDO response: idx=0x%04X:%u expected=0x%04X:%u (adp=0x%04X) — clearing and re-sending",
+                    TETHER_LOGW(TAG, "Stale SDO response: idx=0x{:04X}:{} expected=0x{:04X}:{} (adp=0x{:04X}) — clearing and re-sending",
                                 r_index, r_sub, index, sub, adp);
                     // Do NOT sync counter — stale response is from a previous
                     // session.  Just drain and retry with the same counter.
@@ -313,7 +313,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
         }
 
         if (!got_init_response) {
-            TETHER_LOGE(TAG, "SDO upload timeout: no mailbox response (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%u)",
+            TETHER_LOGE(TAG, "SDO upload timeout: no mailbox response (adp=0x{:04X} wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{})",
                         adp, mbxWriteAddr, mbxReadAddr, index, sub);
             diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
             return false;
@@ -334,7 +334,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
             const uint32_t v = le32_to_host(res->data_or_size_le);
 #ifdef TETHER_DIAG_SDO_IO
             if (diagEnabled) {
-                TETHER_LOGI(TAG, "SDO Upload MATCH: idx=0x%04x:%u cmd=0x%02x n=%u data_bytes=%zu v=0x%08x raw=%02x %02x %02x %02x",
+                TETHER_LOGI(TAG, "SDO Upload MATCH: idx=0x{:04x}:{} cmd=0x{:02x} n={} data_bytes={} v=0x{:08x} raw={:02x} {:02x} {:02x} {:02x}",
                          le16_to_host(res->index_le), res->sub, sdo_cmd, n, data_bytes, v,
                          r_sdo_bytes[4], r_sdo_bytes[5], r_sdo_bytes[6], r_sdo_bytes[7]);
             }
@@ -409,8 +409,8 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
 #ifdef TETHER_DIAG_SDO_IO
             if (diagEnabled) {
                 TETHER_LOGI(TAG,
-                    "SDO upload inline: idx=0x%04x:%u cmd=0x%02x total_size=%u "
-                    "inline=%zu r_len=%u — complete, skipping segments",
+                    "SDO upload inline: idx=0x{:04x}:{} cmd=0x{:02x} total_size={} "
+                    "inline={} r_len={} — complete, skipping segments",
                     index, sub, sdo_cmd, total_size, inline_data_len, r_len);
             }
 #endif
@@ -437,8 +437,8 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
             // fall through to the segment loop and let the slave re-send the
             // full data via segments. Log a warning so this is visible.
             TETHER_LOGW(TAG,
-                "SDO upload partial inline: idx=0x%04x:%u total_size=%u "
-                "inline=%zu — falling through to segmented transfer",
+                "SDO upload partial inline: idx=0x{:04x}:{} total_size={} "
+                "inline={} — falling through to segmented transfer",
                 index, sub, total_size, inline_data_len);
         }
 
@@ -484,7 +484,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
             }
 
             if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
-                TETHER_LOGE(TAG, "Slave %u: SDO upload segment: SM1 mailbox never became full (wr=0x%04X rd=0x%04X index=0x%04X:%u timeout=%ums)",
+                TETHER_LOGE(TAG, "Slave {}: SDO upload segment: SM1 mailbox never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{} timeout={}ms)",
                             slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
                 diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
                 return false;
@@ -521,7 +521,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                         SdoAbort abort{};
                         std::memcpy(&abort, seg_res, sizeof(abort));
                         const uint32_t abort_code = le32_to_host(abort.abortCode_le);
-                        TETHER_LOGE(TAG, "SDO upload segment abort: index=0x%04x:%02x code=0x%08" PRIx32 " (%s)",
+                        TETHER_LOGE(TAG, "SDO upload segment abort: index=0x{:04x}:{:02x} code=0x{:08x} ({})",
                                  index, sub, abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
                         if (outAbortCode) *outAbortCode = abort_code;
                     } else {
@@ -575,7 +575,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                 break;
             }
             if (!got) {
-                TETHER_LOGE(TAG, "SDO upload segment timeout (adp=0x%04X wr=0x%04X rd=0x%04X index=0x%04X:%u)",
+                TETHER_LOGE(TAG, "SDO upload segment timeout (adp=0x{:04X} wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{})",
                             adp, mbxWriteAddr, mbxReadAddr, index, sub);
                 diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
                 return false;

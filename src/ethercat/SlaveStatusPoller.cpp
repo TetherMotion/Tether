@@ -64,7 +64,7 @@ bool SlaveStatusPoller::init(uint16_t slave_count) {
     }
 
     initialized_.store(true, std::memory_order_release);
-    TETHER_LOGI(TAG, "Status poller initialized for %u slaves", slave_count_.load(std::memory_order_relaxed));
+    TETHER_LOGI(TAG, "Status poller initialized for {} slaves", slave_count_.load(std::memory_order_relaxed));
     return true;
 }
 
@@ -128,7 +128,7 @@ bool SlaveStatusPoller::start() {
     running_.store(true, std::memory_order_release);
     thread_ = std::thread([this]() { pollLoop(); });
 
-    TETHER_LOGI(TAG, "Status poller started (interval=%u ms, slaves=%u)",
+    TETHER_LOGI(TAG, "Status poller started (interval={} ms, slaves={})",
                 poll_interval_ms_, slave_count_.load(std::memory_order_relaxed));
     return true;
 }

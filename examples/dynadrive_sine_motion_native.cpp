@@ -109,7 +109,7 @@ bool configureDrive(EtherCAT::DS402Master& master)
 
     const uint16_t minimum_drive_count = static_cast<uint16_t>(kSlaveIndex + 1);
     if (!master.waitForDriveCount(minimum_drive_count, 2000)) {
-        TETHER_LOGE(TAG, "Timed out waiting for %u drive(s)", minimum_drive_count);
+        TETHER_LOGE(TAG, "Timed out waiting for {} drive(s)", minimum_drive_count);
         return false;
     }
 
@@ -126,12 +126,12 @@ bool configureDrive(EtherCAT::DS402Master& master)
     config.sdo_timeout_ms = 3000;
 
     if (!master.configureDrive(config)) {
-        TETHER_LOGE(TAG, "Failed to configure slave %u", kSlaveIndex);
+        TETHER_LOGE(TAG, "Failed to configure slave {}", kSlaveIndex);
         return false;
     }
 
     if (!master.enableDrive(kSlaveIndex, 10000)) {
-        TETHER_LOGE(TAG, "Failed to enable slave %u", kSlaveIndex);
+        TETHER_LOGE(TAG, "Failed to enable slave {}", kSlaveIndex);
         return false;
     }
 

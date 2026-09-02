@@ -23,7 +23,7 @@ void logSyncManagerRegister(EtherCAT::Master& master,
     if (master.readRegister(slave_index, base_register, buffer, sizeof(buffer), 200)) {
         const uint16_t start = static_cast<uint16_t>(buffer[0] | (buffer[1] << 8));
         const uint16_t length = static_cast<uint16_t>(buffer[2] | (buffer[3] << 8));
-        TETHER_LOGI(tag, "[PREINIT] ESC %s: start=0x%04X len=%u ctrl=0x%02X act=0x%02X",
+        TETHER_LOGI(tag, "[PREINIT] ESC {}: start=0x{:04X} len={} ctrl=0x{:02X} act=0x{:02X}",
                     sync_manager_name,
                     start,
                     static_cast<unsigned>(length),
@@ -32,7 +32,7 @@ void logSyncManagerRegister(EtherCAT::Master& master,
         return;
     }
 
-    TETHER_LOGD(tag, "[PREINIT] ESC %s read failed (may be empty in INIT)", sync_manager_name);
+    TETHER_LOGD(tag, "[PREINIT] ESC {} read failed (may be empty in INIT)", sync_manager_name);
 }
 
 } // namespace
@@ -46,11 +46,11 @@ void logPreOperationalMailboxDiagnostics(
     const PreOperationalMailboxDiagnosticsOptions& options)
 {
     if (options.attempt_auto_configure) {
-        TETHER_LOGI(tag, "[PREINIT] Attempting mailbox auto-configuration from SII for slave %u (before PRE_OP)", slave_index);
+        TETHER_LOGI(tag, "[PREINIT] Attempting mailbox auto-configuration from SII for slave {} (before PRE_OP)", slave_index);
         if (master.autoConfigureMailbox(slave_index, options.auto_configure_log_level)) {
-            TETHER_LOGI(tag, "[PREINIT] autoConfigureMailbox: SUCCESS for slave %u", slave_index);
+            TETHER_LOGI(tag, "[PREINIT] autoConfigureMailbox: SUCCESS for slave {}", slave_index);
         } else {
-            TETHER_LOGW(tag, "[PREINIT] autoConfigureMailbox: FAILED or partial for slave %u - will continue and allow fallback at PRE_OP", slave_index);
+            TETHER_LOGW(tag, "[PREINIT] autoConfigureMailbox: FAILED or partial for slave {} - will continue and allow fallback at PRE_OP", slave_index);
         }
     }
 
@@ -64,7 +64,7 @@ void logPreOperationalMailboxDiagnostics(
                                                 &write_length,
                                                 &read_address,
                                                 &read_length)) {
-            TETHER_LOGI(tag, "[PREINIT] SDO mailbox (post-auto-config): Receive(MbxIn/SM0, M->S)=0x%04X/%u   Send(MbxOut/SM1, S->M)=0x%04X/%u",
+            TETHER_LOGI(tag, "[PREINIT] SDO mailbox (post-auto-config): Receive(MbxIn/SM0, M->S)=0x{:04X}/{}   Send(MbxOut/SM1, S->M)=0x{:04X}/{}",
                         write_address,
                         static_cast<unsigned>(write_length),
                         read_address,
@@ -80,7 +80,7 @@ void logPreOperationalMailboxDiagnostics(
     if (options.log_sii_mailbox) {
         EtherCAT::SII::SIIMailboxConfig mailbox{};
         if (EtherCAT::SII::readSIIMailbox(master, slave_index, mailbox)) {
-            TETHER_LOGI(tag, "[PREINIT] SII Mailbox (parsed): RX(off=0x%04X size=%u)  TX(off=0x%04X size=%u)  proto=0x%04X",
+            TETHER_LOGI(tag, "[PREINIT] SII Mailbox (parsed): RX(off=0x{:04X} size={})  TX(off=0x{:04X} size={})  proto=0x{:04X}",
                         mailbox.std_rx_offset,
                         static_cast<unsigned>(mailbox.std_rx_size),
                         mailbox.std_tx_offset,
@@ -104,11 +104,11 @@ bool logParsedSlaveSII(
 {
     EtherCAT::SII::SIIData sii{};
     if (!EtherCAT::SII::readSII(master, slave_index, sii)) {
-        TETHER_LOGW(tag, "Failed to read/parse SII for slave %u", slave_index);
+        TETHER_LOGW(tag, "Failed to read/parse SII for slave {}", slave_index);
         return false;
     }
 
-    TETHER_LOGI(tag, "--- Parsed SII for slave %u (checksum: %s) ---",
+    TETHER_LOGI(tag, "--- Parsed SII for slave {} (checksum: {}) ---",
                 slave_index,
                 sii.checksum_ok ? "OK" : "INVALID");
     EtherCAT::SII::logSIIData(sii, tag);
@@ -122,12 +122,12 @@ void logSlaveApplicationLayerDiagnostics(
 {
     uint8_t state = 0;
     if (master.readSlaveApplicationLayerState(slave_index, state)) {
-        TETHER_LOGW(tag, "Slave %u current EC state: 0x%02X (%s)",
+        TETHER_LOGW(tag, "Slave {} current EC state: 0x{:02X} ({})",
                     slave_index,
                     state,
                     EtherCAT::Master::getECStateName(state));
     } else {
-        TETHER_LOGW(tag, "%s: failed to read EC state (possible WKC=0 / transport issue)", master.slaveLogPrefix(slave_index).c_str());
+        TETHER_LOGW(tag, "{}: failed to read EC state (possible WKC=0 / transport issue)", master.slaveLogPrefix(slave_index).c_str());
     }
 
     uint16_t al_status = 0;
@@ -136,22 +136,22 @@ void logSlaveApplicationLayerDiagnostics(
     const bool have_al_code = master.readRegister(slave_index, kAlStatusCodeRegister, al_code, 200);
 
     if (have_al_status) {
-        TETHER_LOGW(tag, "Slave %u AL_STATUS: 0x%04X (%s)%s",
+        TETHER_LOGW(tag, "Slave {} AL_STATUS: 0x{:04X} ({}){}",
                     slave_index,
                     al_status,
                     al_status_get_state_name(al_status),
                     al_status_has_error(al_status) ? ", ERROR" : "");
     } else {
-        TETHER_LOGW(tag, "Slave %u AL_STATUS read FAILED (APRD) - likely WKC=0 or no response", slave_index);
+        TETHER_LOGW(tag, "Slave {} AL_STATUS read FAILED (APRD) - likely WKC=0 or no response", slave_index);
     }
 
     if (have_al_code) {
-        TETHER_LOGW(tag, "Slave %u AL status code: %s (0x%04X)",
+        TETHER_LOGW(tag, "Slave {} AL status code: {} (0x{:04X})",
                     slave_index,
                     getALStatusCodeName(al_code),
                     al_code);
     } else {
-        TETHER_LOGW(tag, "Slave %u AL status code read FAILED (APRD)", slave_index);
+        TETHER_LOGW(tag, "Slave {} AL status code read FAILED (APRD)", slave_index);
     }
 }
 

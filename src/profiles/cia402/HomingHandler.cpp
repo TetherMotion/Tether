@@ -37,7 +37,7 @@ bool HomingHandler::start() {
         return false;
     }
     
-    TETHER_LOGI(TAG, "Starting homing method %d", static_cast<int>(m_method));
+    TETHER_LOGI(TAG, "Starting homing method {}", static_cast<int>(m_method));
     
     m_state = HomingState::SearchingSwitch;
     m_error = HomingError::None;
@@ -120,7 +120,7 @@ bool HomingHandler::update(int32_t currentPosition) {
         processIndexOnly(currentPosition, status);
     }
     else {
-        TETHER_LOGE(TAG, "Invalid homing method: %d", methodNum);
+        TETHER_LOGE(TAG, "Invalid homing method: {}", methodNum);
         complete(false, HomingError::InvalidMethod);
         return false;
     }
@@ -146,7 +146,7 @@ void HomingHandler::processMethod1(int32_t position, const HomingSwitchStatus& s
             
         case HomingState::SearchingIndex:
             if (status.indexPulseDetected) {
-                TETHER_LOGD(TAG, "Index found at %ld", (long)position);
+                TETHER_LOGD(TAG, "Index found at {}", (long)position);
                 stop();
                 m_homePosition = position + m_params.offset;
                 complete(true);
@@ -174,7 +174,7 @@ void HomingHandler::processMethod2(int32_t position, const HomingSwitchStatus& s
             
         case HomingState::SearchingIndex:
             if (status.indexPulseDetected) {
-                TETHER_LOGD(TAG, "Index found at %ld", (long)position);
+                TETHER_LOGD(TAG, "Index found at {}", (long)position);
                 stop();
                 m_homePosition = position + m_params.offset;
                 complete(true);
@@ -211,7 +211,7 @@ void HomingHandler::processHomeSwitchWithIndex(int32_t position,
             
         case HomingState::SearchingIndex:
             if (status.indexPulseDetected) {
-                TETHER_LOGD(TAG, "Index found at %ld", (long)position);
+                TETHER_LOGD(TAG, "Index found at {}", (long)position);
                 stop();
                 m_homePosition = position + m_params.offset;
                 complete(true);
@@ -237,7 +237,7 @@ void HomingHandler::processHomeSwitchOnly(int32_t position,
             if (status.homeSwitchActive) {
                 if (stopOnRising) {
                     // Found rising edge - this is home
-                    TETHER_LOGD(TAG, "Home switch rising edge at %ld", (long)position);
+                    TETHER_LOGD(TAG, "Home switch rising edge at {}", (long)position);
                     stop();
                     m_homePosition = position + m_params.offset;
                     complete(true);
@@ -253,7 +253,7 @@ void HomingHandler::processHomeSwitchOnly(int32_t position,
         case HomingState::Reversing:
             if (!status.homeSwitchActive) {
                 // Found falling edge - this is home
-                TETHER_LOGD(TAG, "Home switch falling edge at %ld", (long)position);
+                TETHER_LOGD(TAG, "Home switch falling edge at {}", (long)position);
                 stop();
                 m_homePosition = position + m_params.offset;
                 complete(true);
@@ -272,7 +272,7 @@ void HomingHandler::processBlockHoming(int32_t position,
     
     // Simplified implementation - check for stall or limit
     if (status.negativeLimitActive || status.positiveLimitActive) {
-        TETHER_LOGD(TAG, "Block/limit detected at %ld", (long)position);
+        TETHER_LOGD(TAG, "Block/limit detected at {}", (long)position);
         stop();
         m_homePosition = position + m_params.offset;
         complete(true);
@@ -284,7 +284,7 @@ void HomingHandler::processIndexOnly(int32_t position,
     // Methods 33-34: Index pulse only
     
     if (status.indexPulseDetected) {
-        TETHER_LOGD(TAG, "Index pulse at %ld", (long)position);
+        TETHER_LOGD(TAG, "Index pulse at {}", (long)position);
         stop();
         m_homePosition = position + m_params.offset;
         complete(true);
@@ -293,7 +293,7 @@ void HomingHandler::processIndexOnly(int32_t position,
 
 void HomingHandler::processCurrentPosition(int32_t position) {
     // Methods 35/37: Set current position as home
-    TETHER_LOGI(TAG, "Setting current position %ld as home", (long)position);
+    TETHER_LOGI(TAG, "Setting current position {} as home", (long)position);
     m_homePosition = position + m_params.offset;
     complete(true);
 }
@@ -315,9 +315,9 @@ void HomingHandler::complete(bool success, HomingError error) {
     m_error = error;
     
     if (success) {
-        TETHER_LOGI(TAG, "Homing complete, home position: %ld", (long)m_homePosition);
+        TETHER_LOGI(TAG, "Homing complete, home position: {}", (long)m_homePosition);
     } else {
-        TETHER_LOGE(TAG, "Homing failed, error: %d", static_cast<int>(error));
+        TETHER_LOGE(TAG, "Homing failed, error: {}", static_cast<int>(error));
     }
     
     if (m_completeCallback) {

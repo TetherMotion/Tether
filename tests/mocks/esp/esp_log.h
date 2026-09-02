@@ -7,7 +7,9 @@
 
 #include <stdio.h>
 #ifdef __cplusplus
+#include <format>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <algorithm>
 #include <stdarg.h>
@@ -47,23 +49,20 @@ static inline int tether_log_use_color(void) {
 #define TETHER_COLOR_VERB  "\x1b[1;35m"
 #define TETHER_COLOR_RESET "\x1b[0m"
 
-static inline void tether_log_printf(int level, const char* tag, const char* format, va_list ap) {
-    char buf[1024];
-    int needed = vsnprintf(buf, sizeof(buf), format, ap);
-    if (needed < 0) return;
+static inline void tether_log_formatted(int level, const char* tag, std::string_view message) {
+    std::string msg(message);
 
     // Split lines and drop a trailing empty segment caused by trailing '\n'
     size_t start = 0;
-    std::string s(buf, (size_t)std::min(needed, (int)sizeof(buf)-1));
     std::vector<std::string> lines;
-    while (start <= s.size()) {
-        size_t pos = s.find('\n', start);
-        if (pos == std::string::npos) pos = s.size();
-        lines.emplace_back(s.substr(start, pos - start));
-        if (pos == s.size()) break;
+    while (start <= msg.size()) {
+        size_t pos = msg.find('\n', start);
+        if (pos == std::string::npos) pos = msg.size();
+        lines.emplace_back(msg.substr(start, pos - start));
+        if (pos == msg.size()) break;
         start = pos + 1;
     }
-    if (!lines.empty() && !s.empty() && s.back() == '\n' && lines.back().empty()) lines.pop_back();
+    if (!lines.empty() && !msg.empty() && msg.back() == '\n' && lines.back().empty()) lines.pop_back();
 
     const char* color = "";
     const char* levelChar = "?";
@@ -82,25 +81,16 @@ static inline void tether_log_printf(int level, const char* tag, const char* for
     }
 }
 
-#define TETHER_LOGE(tag, format, ...) do { \
-    va_list ap; va_start(ap, format); tether_log_printf(ESP_LOG_ERROR, tag, format, ap); va_end(ap); \
-} while(0)
+template <typename... Args>
+static inline std::string tether_log_format(const char* fmt, Args... args) {
+    return std::vformat(fmt, std::make_format_args(args...));
+}
 
-#define TETHER_LOGW(tag, format, ...) do { \
-    va_list ap; va_start(ap, format); tether_log_printf(ESP_LOG_WARN, tag, format, ap); va_end(ap); \
-} while(0)
-
-#define TETHER_LOGI(tag, format, ...) do { \
-    va_list ap; va_start(ap, format); tether_log_printf(ESP_LOG_INFO, tag, format, ap); va_end(ap); \
-} while(0)
-
-#define TETHER_LOGD(tag, format, ...) do { \
-    va_list ap; va_start(ap, format); tether_log_printf(ESP_LOG_DEBUG, tag, format, ap); va_end(ap); \
-} while(0)
-
-#define TETHER_LOGV(tag, format, ...) do { \
-    va_list ap; va_start(ap, format); tether_log_printf(ESP_LOG_VERBOSE, tag, format, ap); va_end(ap); \
-} while(0)
+#define TETHER_LOGE(tag, fmt, ...) tether_log_formatted(ESP_LOG_ERROR, tag, tether_log_format(fmt __VA_OPT__(,) __VA_ARGS__))
+#define TETHER_LOGW(tag, fmt, ...) tether_log_formatted(ESP_LOG_WARN, tag, tether_log_format(fmt __VA_OPT__(,) __VA_ARGS__))
+#define TETHER_LOGI(tag, fmt, ...) tether_log_formatted(ESP_LOG_INFO, tag, tether_log_format(fmt __VA_OPT__(,) __VA_ARGS__))
+#define TETHER_LOGD(tag, fmt, ...) tether_log_formatted(ESP_LOG_DEBUG, tag, tether_log_format(fmt __VA_OPT__(,) __VA_ARGS__))
+#define TETHER_LOGV(tag, fmt, ...) tether_log_formatted(ESP_LOG_VERBOSE, tag, tether_log_format(fmt __VA_OPT__(,) __VA_ARGS__))
 
 #define ESP_LOG_BUFFER_HEX_LEVEL(tag, buffer, buff_len, level) ((void)0)
 #define ESP_LOG_BUFFER_CHAR_LEVEL(tag, buffer, buff_len, level) ((void)0)

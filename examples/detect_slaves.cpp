@@ -59,11 +59,11 @@ int main(int argc, char** argv) {
     if (!esi_xml.empty()) {
         esi.emplace(esi_xml);
         if (esi->empty()) {
-            TETHER_LOGE(TAG, "Failed to parse ESI XML '%s': %s",
+            TETHER_LOGE(TAG, "Failed to parse ESI XML '{}': {}",
                         esi_xml.c_str(), esi->errorMessage().c_str());
             return 1;
         }
-        TETHER_LOGI(TAG, "Loaded ESI XML '%s' (%zu device(s)) for cross-reference",
+        TETHER_LOGI(TAG, "Loaded ESI XML '{}' ({} device(s)) for cross-reference",
                     esi_xml.c_str(), esi->devices().size());
     }
 #endif
@@ -79,9 +79,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    TETHER_LOGI(TAG, "detect_slaves (host) — interface: %s", iface.c_str());
+    TETHER_LOGI(TAG, "detect_slaves (host) — interface: {}", iface.c_str());
     if (!debug_flags.empty()) {
-        TETHER_LOGI(TAG, "Debug flags: %s", debug_str.c_str());
+        TETHER_LOGI(TAG, "Debug flags: {}", debug_str.c_str());
     }
     Tether::Examples::logVlanConfig(vlan, TAG);
 
@@ -109,7 +109,7 @@ int main(int argc, char** argv) {
     }
 
     uint16_t slaves = master.getDiscoveredSlaveCount();
-    TETHER_LOGI(TAG, "=== Discovered %u slave(s) ===", slaves);
+    TETHER_LOGI(TAG, "=== Discovered {} slave(s) ===", slaves);
     master.logDiscoveredSlavesSummary(TAG);
 
     if (debug_flags.count("sii-derivation") && slaves > 0) {
@@ -140,9 +140,9 @@ int main(int argc, char** argv) {
     // Print ESI device info for cross-reference if --esi-xml was provided
 #if TETHER_HAVE_ESI
     if (esi && !esi->empty()) {
-        TETHER_LOGI(TAG, "\n=== ESI XML Cross-Reference (%s) ===", esi_xml.c_str());
+        TETHER_LOGI(TAG, "\n=== ESI XML Cross-Reference ({}) ===", esi_xml.c_str());
         for (const auto& dev : esi->devices()) {
-            TETHER_LOGI(TAG, "%s",
+            TETHER_LOGI(TAG, "{}",
                         EtherCAT::ESI::formatDeviceHumanReadable(dev, true).c_str());
         }
     }

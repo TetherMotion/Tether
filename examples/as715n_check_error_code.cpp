@@ -34,28 +34,28 @@ using namespace EtherCAT::Drives;
 
 static void printAS715NErrorDetails(EtherCAT::Master& master, EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx, uint16_t mfr_error, uint16_t cia402_error) {
     if (mfr_error == 0 && cia402_error == 0) {
-        TETHER_LOGI(TAG, "%s: no manufacturer or CiA402 error reported", master.slaveLogPrefix(slave_idx).c_str());
+        TETHER_LOGI(TAG, "{}: no manufacturer or CiA402 error reported", master.slaveLogPrefix(slave_idx).c_str());
         return;
     }
 
     auto mfr_ext = AS715NFaultHandler::readManufacturerFaultExtended(sdo, slave_idx);
-    TETHER_LOGI(TAG, "%s: Manufacturer fault 0x203F (external=0x%04X internal=0x%04X)",
+    TETHER_LOGI(TAG, "{}: Manufacturer fault 0x203F (external=0x{:04X} internal=0x{:04X})",
                master.slaveLogPrefix(slave_idx).c_str(), mfr_ext.external_code, mfr_ext.internal_code);
     if (mfr_error != 0) {
         AS715NError err = AS715NError::parse(mfr_error);
         char name[32] = {0};
         AS715NError::format(name, sizeof(name), err.class_code, err.sub_code);
 
-        TETHER_LOGI(TAG, "  - Raw:        0x%04X\n  - Name:       %s\n  - Class/Sub:  0x%X / 0x%X\n  - Desc:       %s\n  - Recoverable:%s\n  - DC SyncErr: %s",
+        TETHER_LOGI(TAG, "  - Raw:        0x{:04X}\n  - Name:       {}\n  - Class/Sub:  0x{:X} / 0x{:X}\n  - Desc:       {}\n  - Recoverable:{}\n  - DC SyncErr: {}",
                    err.raw_code, name, err.class_code, err.sub_code,
                    err.description ? err.description : "(none)",
                    err.is_recoverable ? " YES" : " NO",
                    err.isDCSyncError() ? " YES" : " NO");
     }
 
-    TETHER_LOGI(TAG, "%s: CiA402 error (0x%04X / %u)", master.slaveLogPrefix(slave_idx).c_str(), cia402_error, cia402_error);
+    TETHER_LOGI(TAG, "{}: CiA402 error (0x{:04X} / {})", master.slaveLogPrefix(slave_idx).c_str(), cia402_error, cia402_error);
     if (cia402_error != 0) {
-        TETHER_LOGI(TAG, "  - Raw CiA402 error: 0x%04X (%u)\n  - Note: CiA402 manufacturer-specific faults are reported with high-byte 0x87 (see device documentation)", cia402_error, cia402_error);
+        TETHER_LOGI(TAG, "  - Raw CiA402 error: 0x{:04X} ({})\n  - Note: CiA402 manufacturer-specific faults are reported with high-byte 0x87 (see device documentation)", cia402_error, cia402_error);
     }
 }
 
@@ -78,12 +78,12 @@ static int inspectAndMaybeReset(EtherCAT::Master& master, bool do_reset, bool do
     mailbox_diagnostics_options.auto_configure_log_level = Tether::Platform::LogLevel::Debug;
     EtherCAT::Diagnostics::logPreOperationalMailboxDiagnostics(master, slave_idx, TAG, mailbox_diagnostics_options);
 
-    TETHER_LOGI(TAG, "Requesting PREOP state for slave %u...", slave_idx);
+    TETHER_LOGI(TAG, "Requesting PREOP state for slave {}...", slave_idx);
     if (!master.transitionSlaveToPreOperational(slave_idx)) {
-        TETHER_LOGE(TAG, "Failed to bring %s to PREOP state", master.slaveLogPrefix(slave_idx).c_str());
+        TETHER_LOGE(TAG, "Failed to bring {} to PREOP state", master.slaveLogPrefix(slave_idx).c_str());
         return 7;
     }
-    TETHER_LOGI(TAG, "%s is now in PREOP state", master.slaveLogPrefix(slave_idx).c_str());
+    TETHER_LOGI(TAG, "{} is now in PREOP state", master.slaveLogPrefix(slave_idx).c_str());
 
     // Print full parsed SII (human-readable) for diagnostics
     (void)EtherCAT::Diagnostics::logParsedSlaveSII(master, slave_idx, TAG);
@@ -93,7 +93,7 @@ static int inspectAndMaybeReset(EtherCAT::Master& master, bool do_reset, bool do
     bool has_fault = AS715NFaultHandler::checkFault(sdo, slave_idx, &mfr_error, &cia402_error);
 
     if (!has_fault) {
-        TETHER_LOGI(TAG, "%s reports no fault (0x203F=0, 0x603F=0)", master.slaveLogPrefix(slave_idx).c_str());
+        TETHER_LOGI(TAG, "{} reports no fault (0x203F=0, 0x603F=0)", master.slaveLogPrefix(slave_idx).c_str());
         return 0;
     }
 
@@ -110,14 +110,14 @@ static int inspectAndMaybeReset(EtherCAT::Master& master, bool do_reset, bool do
     // Software reset: write 1 to F31.02 (0x2031:02) and return immediately
     if (do_sw_reset) {
         constexpr auto& SwReg = ::EtherCAT::Drives::Registers::AS715N::F31::SoftwareReset;
-        TETHER_LOGI(TAG, "Performing software reset via %04X:%02X (%s)...",
+        TETHER_LOGI(TAG, "Performing software reset via {:04X}:{:02X} ({})...",
                    SwReg.index, SwReg.subindex, SwReg.name);
         if (!sdo.writeU16(SwReg.index, SwReg.subindex, 1, {.timeout_ms = 3000}).has_value()) {
-            TETHER_LOGE(TAG, "%s: Failed to write %04X:%02X = 1 (software reset)",
+            TETHER_LOGE(TAG, "{}: Failed to write {:04X}:{:02X} = 1 (software reset)",
                        master.slaveLogPrefix(slave_idx).c_str(), SwReg.index, SwReg.subindex);
             return 3;
         }
-        TETHER_LOGI(TAG, "Software reset command sent to slave %u", slave_idx);
+        TETHER_LOGI(TAG, "Software reset command sent to slave {}", slave_idx);
         return 0;
     }
 
@@ -125,20 +125,20 @@ static int inspectAndMaybeReset(EtherCAT::Master& master, bool do_reset, bool do
     if (do_reset) {
         auto cw_result = sdo.readU16(0x6040, 0x00, {.timeout_ms = 3000});
         if (!cw_result.has_value()) {
-            TETHER_LOGE(TAG, "%s: failed to read Controlword (0x6040) — cannot proceed with -r reset", master.slaveLogPrefix(slave_idx).c_str());
+            TETHER_LOGE(TAG, "{}: failed to read Controlword (0x6040) — cannot proceed with -r reset", master.slaveLogPrefix(slave_idx).c_str());
             return 3;
         }
         uint16_t cw = cw_result.value();
         uint16_t new_cw = static_cast<uint16_t>(cw & ~static_cast<uint16_t>(0x0001)); // clear Switch-On bit (bit 0)
         if (new_cw != cw) {
-            TETHER_LOGI(TAG, "%s: clearing Switch-On bit in Controlword (0x6040): 0x%04X -> 0x%04X", master.slaveLogPrefix(slave_idx).c_str(), cw, new_cw);
+            TETHER_LOGI(TAG, "{}: clearing Switch-On bit in Controlword (0x6040): 0x{:04X} -> 0x{:04X}", master.slaveLogPrefix(slave_idx).c_str(), cw, new_cw);
             if (!sdo.writeU16(0x6040, 0x00, new_cw, {.timeout_ms = 3000}).has_value()) {
-                TETHER_LOGE(TAG, "%s: failed to write Controlword (0x6040) to clear Switch-On bit", master.slaveLogPrefix(slave_idx).c_str());
+                TETHER_LOGE(TAG, "{}: failed to write Controlword (0x6040) to clear Switch-On bit", master.slaveLogPrefix(slave_idx).c_str());
                 return 3;
             }
             Tether::Platform::Clock::instance().delayMilliseconds(50);
         } else {
-            TETHER_LOGD(TAG, "%s: Switch-On bit already cleared (Controlword=0x%04X)", master.slaveLogPrefix(slave_idx).c_str(), cw);
+            TETHER_LOGD(TAG, "{}: Switch-On bit already cleared (Controlword=0x{:04X})", master.slaveLogPrefix(slave_idx).c_str(), cw);
         }
         (void)cw; // used in log above
     }
@@ -146,12 +146,12 @@ static int inspectAndMaybeReset(EtherCAT::Master& master, bool do_reset, bool do
     // Decide which reset method to use based on error semantics
     AS715NError err = AS715NError::parse(mfr_error);
 
-    TETHER_LOGI(TAG, "Attempting reset for slave %u...", slave_idx);
+    TETHER_LOGI(TAG, "Attempting reset for slave {}...", slave_idx);
 
     bool reset_ok = false;
     if (err.isDCSyncError()) {
         // Use specialized handler for DC sync errors — usually successful
-        TETHER_LOGI(TAG, "Detected DC-sync error (%s) — using handleNoSyncError()",
+        TETHER_LOGI(TAG, "Detected DC-sync error ({}) — using handleNoSyncError()",
                     err.name);
         reset_ok = AS715NFaultHandler::handleNoSyncError(sdo, slave_idx, 3);
     } else if (!err.is_recoverable) {
@@ -160,17 +160,17 @@ static int inspectAndMaybeReset(EtherCAT::Master& master, bool do_reset, bool do
     } else {
         // Generic reset: use the published `FaultReset` register entry (0x2031:01)
         constexpr auto& Reg = ::EtherCAT::Drives::Registers::AS715N::F31::FaultReset;
-        TETHER_LOGI(TAG, "Using register %04X:%02X (%s) to request fault-reset...",
+        TETHER_LOGI(TAG, "Using register {:04X}:{:02X} ({}) to request fault-reset...",
                    Reg.index, Reg.subindex, Reg.name);
 
         // Follow the 0 -> 1 -> 0 sequence the device expects.
         if (!sdo.writeU16(Reg.index, Reg.subindex, 0, {.timeout_ms = 3000}).has_value()) {
-            TETHER_LOGE(TAG, "%s: Failed to write %04X:%02X = 0", master.slaveLogPrefix(slave_idx).c_str(), Reg.index, Reg.subindex);
+            TETHER_LOGE(TAG, "{}: Failed to write {:04X}:{:02X} = 0", master.slaveLogPrefix(slave_idx).c_str(), Reg.index, Reg.subindex);
             reset_ok = false;
         } else {
             Tether::Platform::Clock::instance().delayMilliseconds(50);
             if (!sdo.writeU16(Reg.index, Reg.subindex, 1, {.timeout_ms = 3000}).has_value()) {
-                TETHER_LOGE(TAG, "%s: Failed to write %04X:%02X = 1", master.slaveLogPrefix(slave_idx).c_str(), Reg.index, Reg.subindex);
+                TETHER_LOGE(TAG, "{}: Failed to write {:04X}:{:02X} = 1", master.slaveLogPrefix(slave_idx).c_str(), Reg.index, Reg.subindex);
                 reset_ok = false;
             } else {
                 Tether::Platform::Clock::instance().delayMilliseconds(200);
@@ -181,11 +181,11 @@ static int inspectAndMaybeReset(EtherCAT::Master& master, bool do_reset, bool do
                 uint16_t new_mfr = AS715NFaultHandler::readManufacturerFault(sdo, slave_idx);
                 uint16_t new_cia = AS715NFaultHandler::readCiA402Error(sdo, slave_idx);
                 if (new_mfr == 0 && new_cia == 0) {
-                    TETHER_LOGI(TAG, "Fault cleared for slave %u", slave_idx);
+                    TETHER_LOGI(TAG, "Fault cleared for slave {}", slave_idx);
                     return 0;
                 }
 
-                TETHER_LOGW(TAG, "Fault still present after register-reset (0x203F=0x%03X, 0x603F=0x%04X)", new_mfr, new_cia);
+                TETHER_LOGW(TAG, "Fault still present after register-reset (0x203F=0x{:03X}, 0x603F=0x{:04X})", new_mfr, new_cia);
                 printAS715NErrorDetails(master, sdo, slave_idx, new_mfr, new_cia);
                 return 4;
             }
@@ -234,16 +234,16 @@ int main(int argc, char** argv) {
     if (!esi_xml.empty()) {
         esi.emplace(esi_xml);
         if (esi->empty()) {
-            TETHER_LOGE(TAG, "Failed to parse ESI XML '%s': %s",
+            TETHER_LOGE(TAG, "Failed to parse ESI XML '{}': {}",
                         esi_xml.c_str(), esi->errorMessage().c_str());
             return 1;
         }
-        TETHER_LOGI(TAG, "Loaded ESI XML '%s' (%zu device(s)) for cross-reference",
+        TETHER_LOGI(TAG, "Loaded ESI XML '{}' ({} device(s)) for cross-reference",
                     esi_xml.c_str(), esi->devices().size());
     }
 #endif
 
-    TETHER_LOGI(TAG, "AS715N error-code inspector (host)\nNetwork interface: %s", iface.c_str());
+    TETHER_LOGI(TAG, "AS715N error-code inspector (host)\nNetwork interface: {}", iface.c_str());
 
     Tether::Examples::HostEtherNetSession session;
     if (!Tether::Examples::initHostEthernet(session, iface, TAG)) {
@@ -268,7 +268,7 @@ int main(int argc, char** argv) {
     }
 
     uint16_t slaves = master.getDiscoveredSlaveCount();
-    TETHER_LOGI(TAG, "Discovered %u slave(s)", slaves);
+    TETHER_LOGI(TAG, "Discovered {} slave(s)", slaves);
     if (slaves == 0) {
         Tether::Examples::shutdownHostEthernet(session);
         return 5;
@@ -279,9 +279,9 @@ int main(int argc, char** argv) {
     // Print ESI device info for cross-reference if --esi-xml was provided
 #if TETHER_HAVE_ESI
     if (esi && !esi->empty()) {
-        TETHER_LOGI(TAG, "\n=== ESI XML Cross-Reference (%s) ===", esi_xml.c_str());
+        TETHER_LOGI(TAG, "\n=== ESI XML Cross-Reference ({}) ===", esi_xml.c_str());
         for (const auto& dev : esi->devices()) {
-            TETHER_LOGI(TAG, "%s",
+            TETHER_LOGI(TAG, "{}",
                         EtherCAT::ESI::formatDeviceHumanReadable(dev, true).c_str());
         }
     }

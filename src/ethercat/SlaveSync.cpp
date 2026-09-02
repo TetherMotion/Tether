@@ -113,7 +113,7 @@ bool SlaveSyncCoordinator::transitionAllTo(ECState target,
 
         const char* name = slot->name.empty() ? "?" : slot->name.c_str();
         TETHER_LOGI(TAG,
-                    "Transitioning %s (slave %u) to %s%s...",
+                    "Transitioning {} (slave {}) to {}{}...",
                     name, slot->slave_index,
                     getECStateName(target),
                     ctx.is_recovery ? " [recovery]" : "");
@@ -126,14 +126,14 @@ bool SlaveSyncCoordinator::transitionAllTo(ECState target,
                 slot->on_reached();
             }
             TETHER_LOGI(TAG,
-                        "%s (slave %u) reached %s",
+                        "{} (slave {}) reached {}",
                         name, slot->slave_index, getECStateName(target));
         } else {
             slot->failed.store(true, std::memory_order_release);
             slot->in_target_state.store(false, std::memory_order_release);
             all_ok = false;
             TETHER_LOGE(TAG,
-                        "%s (slave %u) FAILED to reach %s",
+                        "{} (slave {}) FAILED to reach {}",
                         name, slot->slave_index, getECStateName(target));
         }
     }
@@ -147,14 +147,14 @@ bool SlaveSyncCoordinator::transitionOne(uint16_t slave_index,
     auto* slot = findSlot(slave_index);
     if (!slot || !slot->handler) {
         TETHER_LOGE(TAG,
-                    "Cannot transition slave %u — not registered",
+                    "Cannot transition slave {} — not registered",
                     slave_index);
         return false;
     }
 
     const char* name = slot->name.empty() ? "?" : slot->name.c_str();
     TETHER_LOGI(TAG,
-                "Transitioning %s (slave %u) to %s%s...",
+                "Transitioning {} (slave {}) to {}{}...",
                 name, slot->slave_index,
                 getECStateName(target),
                 ctx.is_recovery ? " [recovery]" : "");
@@ -167,13 +167,13 @@ bool SlaveSyncCoordinator::transitionOne(uint16_t slave_index,
             slot->on_reached();
         }
         TETHER_LOGI(TAG,
-                    "%s (slave %u) reached %s",
+                    "{} (slave {}) reached {}",
                     name, slot->slave_index, getECStateName(target));
     } else {
         slot->failed.store(true, std::memory_order_release);
         slot->in_target_state.store(false, std::memory_order_release);
         TETHER_LOGE(TAG,
-                    "%s (slave %u) FAILED to reach %s",
+                    "{} (slave {}) FAILED to reach {}",
                     name, slot->slave_index, getECStateName(target));
     }
     return ok;
@@ -208,14 +208,14 @@ bool SyncRecoveryHandler::reinitializeSlave(uint16_t slave_index) {
     auto* slot = coord_.findSlot(slave_index);
     if (!slot || !slot->handler) {
         TETHER_LOGE(TAG,
-                    "Recovery: slave %u not registered — cannot recover",
+                    "Recovery: slave {} not registered — cannot recover",
                     slave_index);
         return false;
     }
 
     const char* name = slot->name.empty() ? "?" : slot->name.c_str();
     TETHER_LOGI(TAG,
-                "Recovery: reinitializing %s (slave %u)...",
+                "Recovery: reinitializing {} (slave {})...",
                 name, slave_index);
 
     // Clear ready flag so the exchange thread stops cycling this group
@@ -230,12 +230,12 @@ bool SyncRecoveryHandler::reinitializeSlave(uint16_t slave_index) {
             slot->on_reached();
         }
         TETHER_LOGI(TAG,
-                    "Recovery: %s (slave %u) reinitialized successfully",
+                    "Recovery: {} (slave {}) reinitialized successfully",
                     name, slave_index);
     } else {
         slot->failed.store(true, std::memory_order_release);
         TETHER_LOGE(TAG,
-                    "Recovery: %s (slave %u) reinitialization FAILED",
+                    "Recovery: {} (slave {}) reinitialization FAILED",
                     name, slave_index);
     }
     return ok;

@@ -300,9 +300,9 @@ void SyncManagerAccessor::dump(const char* tag) const {
     const auto hw = readHardwareConfig();
     const std::string fmt = formatConfig(hw);
     if (hw.read_ok) {
-        TETHER_LOGI(tag, "%s", fmt.c_str());
+        TETHER_LOGI(tag, "{}", fmt.c_str());
     } else {
-        TETHER_LOGW(tag, "%s", fmt.c_str());
+        TETHER_LOGW(tag, "{}", fmt.c_str());
     }
 }
 
@@ -313,12 +313,12 @@ void SyncManagerAccessor::dumpMailboxStatus(const char* tag) const {
     uint8_t st[2] = {0};
     const bool ok = slave_.master().readRegister(EtherCAT::SlaveAddress(slave_.index()), statusOff, st, sizeof(st), 200);
     if (ok) {
-        TETHER_LOGI(tag, "SM%u: status=0x%02X activate=0x%02X (%s)",
+        TETHER_LOGI(tag, "SM{}: status=0x{:02X} activate=0x{:02X} ({})",
                     static_cast<unsigned>(index_),
                     st[0], st[1],
                     (st[1] & 0x01U) ? "ENABLED" : "disabled");
     } else {
-        TETHER_LOGW(tag, "SM%u: status register read failed", static_cast<unsigned>(index_));
+        TETHER_LOGW(tag, "SM{}: status register read failed", static_cast<unsigned>(index_));
     }
 
     // Also read the SM watchdog status register for mailbox SMs (SM0/SM1)
@@ -326,7 +326,7 @@ void SyncManagerAccessor::dumpMailboxStatus(const char* tag) const {
         uint8_t wd[2] = {0};
         if (slave_.master().readRegister(EtherCAT::SlaveAddress(slave_.index()), EtherCAT::SyncManager::kWatchdogStatusReg, wd, sizeof(wd), 200)) {
             const uint16_t wdStatus = static_cast<uint16_t>(wd[0] | (static_cast<uint16_t>(wd[1]) << 8));
-            TETHER_LOGI(tag, "SM watchdog status=0x%04X %s",
+            TETHER_LOGI(tag, "SM watchdog status=0x{:04X} {}",
                         static_cast<unsigned>(wdStatus),
                         (wdStatus == 0) ? "(OK)" : "(EXPIRED!)");
         }
@@ -337,21 +337,21 @@ void SyncManagerAccessor::dumpPDOAssignments(const char* tag) const {
     uint8_t count = 0;
     SlaveError err = readPDOAssignCount(count);
     if (err != SlaveError::Ok) {
-        TETHER_LOGW(tag, "SM%u: PDO assign count read failed (SDO error)", static_cast<unsigned>(index_));
+        TETHER_LOGW(tag, "SM{}: PDO assign count read failed (SDO error)", static_cast<unsigned>(index_));
         return;
     }
-    TETHER_LOGI(tag, "SM%u: %u PDO(s) assigned (OD 0x%04X)",
+    TETHER_LOGI(tag, "SM{}: {} PDO(s) assigned (OD 0x{:04X})",
                 static_cast<unsigned>(index_), static_cast<unsigned>(count),
                 static_cast<unsigned>(EtherCAT::SyncManager::pdoAssignIndex(index_)));
     for (uint8_t sub = 1; sub <= count; ++sub) {
         uint16_t pdoIdx = 0;
         err = readPDOAssignment(sub, pdoIdx);
         if (err == SlaveError::Ok) {
-            TETHER_LOGI(tag, "  SM%u PDO[%u] = 0x%04X",
+            TETHER_LOGI(tag, "  SM{} PDO[{}] = 0x{:04X}",
                         static_cast<unsigned>(index_), static_cast<unsigned>(sub),
                         static_cast<unsigned>(pdoIdx));
         } else {
-            TETHER_LOGW(tag, "  SM%u PDO[%u]: read failed", static_cast<unsigned>(index_), static_cast<unsigned>(sub));
+            TETHER_LOGW(tag, "  SM{} PDO[{}]: read failed", static_cast<unsigned>(index_), static_cast<unsigned>(sub));
         }
     }
 }
@@ -361,7 +361,7 @@ void SyncManagerAccessor::dumpPDOAssignments(const char* tag) const {
 // ============================================================================
 
 void debugMailboxConfiguration(Master& master, uint16_t slave_index, const char* tag) {
-    TETHER_LOGI(tag, "\n╔══════════════════════════════════════════════════════════════╗\n║  Mailbox Hardware Configuration Debug (Slave %u)            ║\n╚══════════════════════════════════════════════════════════════╝\n", (unsigned)slave_index);
+    TETHER_LOGI(tag, "\n╔══════════════════════════════════════════════════════════════╗\n║  Mailbox Hardware Configuration Debug (Slave {})            ║\n╚══════════════════════════════════════════════════════════════╝\n", (unsigned)slave_index);
 
     auto& slave = master.slave(slave_index);
 
@@ -390,13 +390,13 @@ void debugMailboxConfiguration(Master& master, uint16_t slave_index, const char*
     auto sm0 = slave.sm(0);
     auto hw0 = sm0.readHardwareConfig();
     if (hw0.read_ok) {
-        TETHER_LOGI(tag, "  Physical Register Base: 0x%04X", (unsigned)sm0.physRegisterBase());
-        TETHER_LOGI(tag, "  Start Address:          0x%04X", (unsigned)hw0.start_addr);
-        TETHER_LOGI(tag, "  Length:                 %u bytes", (unsigned)hw0.length);
-        TETHER_LOGI(tag, "  Control Register (0x%02X): %s", (unsigned)std::bit_cast<uint8_t>(hw0.control), decode_control(hw0.control).c_str());
-        TETHER_LOGI(tag, "  Status Register:        0x%02X", (unsigned)std::bit_cast<uint8_t>(hw0.status));
-        TETHER_LOGI(tag, "  Activate Register:      0x%02X (%s)", (unsigned)std::bit_cast<uint8_t>(hw0.activate), hw0.isEnabled() ? "ENABLED" : "disabled");
-        TETHER_LOGI(tag, "  PDI Control:            0x%02X", (unsigned)std::bit_cast<uint8_t>(hw0.pdi_ctrl));
+        TETHER_LOGI(tag, "  Physical Register Base: 0x{:04X}", (unsigned)sm0.physRegisterBase());
+        TETHER_LOGI(tag, "  Start Address:          0x{:04X}", (unsigned)hw0.start_addr);
+        TETHER_LOGI(tag, "  Length:                 {} bytes", (unsigned)hw0.length);
+        TETHER_LOGI(tag, "  Control Register (0x{:02X}): {}", (unsigned)std::bit_cast<uint8_t>(hw0.control), decode_control(hw0.control).c_str());
+        TETHER_LOGI(tag, "  Status Register:        0x{:02X}", (unsigned)std::bit_cast<uint8_t>(hw0.status));
+        TETHER_LOGI(tag, "  Activate Register:      0x{:02X} ({})", (unsigned)std::bit_cast<uint8_t>(hw0.activate), hw0.isEnabled() ? "ENABLED" : "disabled");
+        TETHER_LOGI(tag, "  PDI Control:            0x{:02X}", (unsigned)std::bit_cast<uint8_t>(hw0.pdi_ctrl));
     } else {
         TETHER_LOGE(tag, "  ❌ Failed to read SM0 hardware registers");
     }
@@ -406,13 +406,13 @@ void debugMailboxConfiguration(Master& master, uint16_t slave_index, const char*
     auto sm1 = slave.sm(1);
     auto hw1 = sm1.readHardwareConfig();
     if (hw1.read_ok) {
-        TETHER_LOGI(tag, "  Physical Register Base: 0x%04X", (unsigned)sm1.physRegisterBase());
-        TETHER_LOGI(tag, "  Start Address:          0x%04X", (unsigned)hw1.start_addr);
-        TETHER_LOGI(tag, "  Length:                 %u bytes", (unsigned)hw1.length);
-        TETHER_LOGI(tag, "  Control Register (0x%02X): %s", (unsigned)std::bit_cast<uint8_t>(hw1.control), decode_control(hw1.control).c_str());
-        TETHER_LOGI(tag, "  Status Register:        0x%02X", (unsigned)std::bit_cast<uint8_t>(hw1.status));
-        TETHER_LOGI(tag, "  Activate Register:      0x%02X (%s)", (unsigned)std::bit_cast<uint8_t>(hw1.activate), hw1.isEnabled() ? "ENABLED" : "disabled");
-        TETHER_LOGI(tag, "  PDI Control:            0x%02X", (unsigned)std::bit_cast<uint8_t>(hw1.pdi_ctrl));
+        TETHER_LOGI(tag, "  Physical Register Base: 0x{:04X}", (unsigned)sm1.physRegisterBase());
+        TETHER_LOGI(tag, "  Start Address:          0x{:04X}", (unsigned)hw1.start_addr);
+        TETHER_LOGI(tag, "  Length:                 {} bytes", (unsigned)hw1.length);
+        TETHER_LOGI(tag, "  Control Register (0x{:02X}): {}", (unsigned)std::bit_cast<uint8_t>(hw1.control), decode_control(hw1.control).c_str());
+        TETHER_LOGI(tag, "  Status Register:        0x{:02X}", (unsigned)std::bit_cast<uint8_t>(hw1.status));
+        TETHER_LOGI(tag, "  Activate Register:      0x{:02X} ({})", (unsigned)std::bit_cast<uint8_t>(hw1.activate), hw1.isEnabled() ? "ENABLED" : "disabled");
+        TETHER_LOGI(tag, "  PDI Control:            0x{:02X}", (unsigned)std::bit_cast<uint8_t>(hw1.pdi_ctrl));
     } else {
         TETHER_LOGE(tag, "  ❌ Failed to read SM1 hardware registers");
     }
@@ -422,7 +422,7 @@ void debugMailboxConfiguration(Master& master, uint16_t slave_index, const char*
     uint8_t wd[2] = {0};
     if (master.readRegister(EtherCAT::SlaveAddress(slave_index), EtherCAT::SyncManager::kWatchdogStatusReg, wd, sizeof(wd), 200)) {
         const uint16_t wdStatus = static_cast<uint16_t>(wd[0] | (static_cast<uint16_t>(wd[1]) << 8));
-        TETHER_LOGI(tag, "  Watchdog Status: 0x%04X %s", (unsigned)wdStatus, (wdStatus == 0) ? "(OK)" : "(EXPIRED!)");
+        TETHER_LOGI(tag, "  Watchdog Status: 0x{:04X} {}", (unsigned)wdStatus, (wdStatus == 0) ? "(OK)" : "(EXPIRED!)");
     } else {
         TETHER_LOGW(tag, "  ⚠ Failed to read SM watchdog status register");
     }
@@ -439,7 +439,7 @@ void debugMailboxConfiguration(Master& master, uint16_t slave_index, const char*
                            (commType0 == 0x03) ? "ProcessOutput" :
                            (commType0 == 0x04) ? "ProcessInput" :
                            (commType0 == 0x00) ? "NotUsed" : "Unknown";
-        TETHER_LOGI(tag, "  SM0 CommType: 0x%02X (%s)", (unsigned)commType0, type0);
+        TETHER_LOGI(tag, "  SM0 CommType: 0x{:02X} ({})", (unsigned)commType0, type0);
     } else {
         TETHER_LOGW(tag, "  ⚠ SM0 CommType read failed (SDO error)");
     }
@@ -450,7 +450,7 @@ void debugMailboxConfiguration(Master& master, uint16_t slave_index, const char*
                            (commType1 == 0x03) ? "ProcessOutput" :
                            (commType1 == 0x04) ? "ProcessInput" :
                            (commType1 == 0x00) ? "NotUsed" : "Unknown";
-        TETHER_LOGI(tag, "  SM1 CommType: 0x%02X (%s)", (unsigned)commType1, type1);
+        TETHER_LOGI(tag, "  SM1 CommType: 0x{:02X} ({})", (unsigned)commType1, type1);
     } else {
         TETHER_LOGW(tag, "  ⚠ SM1 CommType read failed (SDO error)");
     }
@@ -461,7 +461,7 @@ void debugMailboxConfiguration(Master& master, uint16_t slave_index, const char*
 // ============================================================================
 
 void debugPDOSyncManagerConfiguration(Master& master, uint16_t slave_index, const char* tag) {
-    TETHER_LOGI(tag, "\n╔══════════════════════════════════════════════════════════════╗\n║  PDO Sync Manager Configuration Debug (Slave %u)             ║\n╚══════════════════════════════════════════════════════════════╝\n", (unsigned)slave_index);
+    TETHER_LOGI(tag, "\n╔══════════════════════════════════════════════════════════════╗\n║  PDO Sync Manager Configuration Debug (Slave {})             ║\n╚══════════════════════════════════════════════════════════════╝\n", (unsigned)slave_index);
 
     auto& slave = master.slave(slave_index);
 
@@ -490,13 +490,13 @@ void debugPDOSyncManagerConfiguration(Master& master, uint16_t slave_index, cons
     auto sm2 = slave.sm(2);
     auto hw2 = sm2.readHardwareConfig();
     if (hw2.read_ok) {
-        TETHER_LOGI(tag, "  Physical Register Base: 0x%04X", (unsigned)sm2.physRegisterBase());
-        TETHER_LOGI(tag, "  Start Address:          0x%04X", (unsigned)hw2.start_addr);
-        TETHER_LOGI(tag, "  Length:                 %u bytes", (unsigned)hw2.length);
-        TETHER_LOGI(tag, "  Control Register (0x%02X): %s", (unsigned)std::bit_cast<uint8_t>(hw2.control), decode_control(hw2.control).c_str());
-        TETHER_LOGI(tag, "  Status Register:        0x%02X", (unsigned)std::bit_cast<uint8_t>(hw2.status));
-        TETHER_LOGI(tag, "  Activate Register:      0x%02X (%s)", (unsigned)std::bit_cast<uint8_t>(hw2.activate), hw2.isEnabled() ? "ENABLED" : "disabled");
-        TETHER_LOGI(tag, "  PDI Control:            0x%02X", (unsigned)std::bit_cast<uint8_t>(hw2.pdi_ctrl));
+        TETHER_LOGI(tag, "  Physical Register Base: 0x{:04X}", (unsigned)sm2.physRegisterBase());
+        TETHER_LOGI(tag, "  Start Address:          0x{:04X}", (unsigned)hw2.start_addr);
+        TETHER_LOGI(tag, "  Length:                 {} bytes", (unsigned)hw2.length);
+        TETHER_LOGI(tag, "  Control Register (0x{:02X}): {}", (unsigned)std::bit_cast<uint8_t>(hw2.control), decode_control(hw2.control).c_str());
+        TETHER_LOGI(tag, "  Status Register:        0x{:02X}", (unsigned)std::bit_cast<uint8_t>(hw2.status));
+        TETHER_LOGI(tag, "  Activate Register:      0x{:02X} ({})", (unsigned)std::bit_cast<uint8_t>(hw2.activate), hw2.isEnabled() ? "ENABLED" : "disabled");
+        TETHER_LOGI(tag, "  PDI Control:            0x{:02X}", (unsigned)std::bit_cast<uint8_t>(hw2.pdi_ctrl));
     } else {
         TETHER_LOGE(tag, "  ❌ Failed to read SM2 hardware registers");
     }
@@ -506,13 +506,13 @@ void debugPDOSyncManagerConfiguration(Master& master, uint16_t slave_index, cons
     auto sm3 = slave.sm(3);
     auto hw3 = sm3.readHardwareConfig();
     if (hw3.read_ok) {
-        TETHER_LOGI(tag, "  Physical Register Base: 0x%04X", (unsigned)sm3.physRegisterBase());
-        TETHER_LOGI(tag, "  Start Address:          0x%04X", (unsigned)hw3.start_addr);
-        TETHER_LOGI(tag, "  Length:                 %u bytes", (unsigned)hw3.length);
-        TETHER_LOGI(tag, "  Control Register (0x%02X): %s", (unsigned)std::bit_cast<uint8_t>(hw3.control), decode_control(hw3.control).c_str());
-        TETHER_LOGI(tag, "  Status Register:        0x%02X", (unsigned)std::bit_cast<uint8_t>(hw3.status));
-        TETHER_LOGI(tag, "  Activate Register:      0x%02X (%s)", (unsigned)std::bit_cast<uint8_t>(hw3.activate), hw3.isEnabled() ? "ENABLED" : "disabled");
-        TETHER_LOGI(tag, "  PDI Control:            0x%02X", (unsigned)std::bit_cast<uint8_t>(hw3.pdi_ctrl));
+        TETHER_LOGI(tag, "  Physical Register Base: 0x{:04X}", (unsigned)sm3.physRegisterBase());
+        TETHER_LOGI(tag, "  Start Address:          0x{:04X}", (unsigned)hw3.start_addr);
+        TETHER_LOGI(tag, "  Length:                 {} bytes", (unsigned)hw3.length);
+        TETHER_LOGI(tag, "  Control Register (0x{:02X}): {}", (unsigned)std::bit_cast<uint8_t>(hw3.control), decode_control(hw3.control).c_str());
+        TETHER_LOGI(tag, "  Status Register:        0x{:02X}", (unsigned)std::bit_cast<uint8_t>(hw3.status));
+        TETHER_LOGI(tag, "  Activate Register:      0x{:02X} ({})", (unsigned)std::bit_cast<uint8_t>(hw3.activate), hw3.isEnabled() ? "ENABLED" : "disabled");
+        TETHER_LOGI(tag, "  PDI Control:            0x{:02X}", (unsigned)std::bit_cast<uint8_t>(hw3.pdi_ctrl));
     } else {
         TETHER_LOGE(tag, "  ❌ Failed to read SM3 hardware registers");
     }
@@ -522,7 +522,7 @@ void debugPDOSyncManagerConfiguration(Master& master, uint16_t slave_index, cons
     uint8_t wd[2] = {0};
     if (master.readRegister(EtherCAT::SlaveAddress(slave_index), EtherCAT::SyncManager::kWatchdogStatusReg, wd, sizeof(wd), 200)) {
         const uint16_t wdStatus = static_cast<uint16_t>(wd[0] | (static_cast<uint16_t>(wd[1]) << 8));
-        TETHER_LOGI(tag, "  Watchdog Status: 0x%04X %s", (unsigned)wdStatus, (wdStatus == 0) ? "(OK)" : "(EXPIRED!)");
+        TETHER_LOGI(tag, "  Watchdog Status: 0x{:04X} {}", (unsigned)wdStatus, (wdStatus == 0) ? "(OK)" : "(EXPIRED!)");
     } else {
         TETHER_LOGW(tag, "  ⚠ Failed to read SM watchdog status register");
     }
@@ -539,7 +539,7 @@ void debugPDOSyncManagerConfiguration(Master& master, uint16_t slave_index, cons
                            (commType2 == 0x03) ? "ProcessOutput" :
                            (commType2 == 0x04) ? "ProcessInput" :
                            (commType2 == 0x00) ? "NotUsed" : "Unknown";
-        TETHER_LOGI(tag, "  SM2 CommType: 0x%02X (%s)", (unsigned)commType2, type2);
+        TETHER_LOGI(tag, "  SM2 CommType: 0x{:02X} ({})", (unsigned)commType2, type2);
     } else {
         TETHER_LOGW(tag, "  ⚠ SM2 CommType read failed (SDO error)");
     }
@@ -550,7 +550,7 @@ void debugPDOSyncManagerConfiguration(Master& master, uint16_t slave_index, cons
                            (commType3 == 0x03) ? "ProcessOutput" :
                            (commType3 == 0x04) ? "ProcessInput" :
                            (commType3 == 0x00) ? "NotUsed" : "Unknown";
-        TETHER_LOGI(tag, "  SM3 CommType: 0x%02X (%s)", (unsigned)commType3, type3);
+        TETHER_LOGI(tag, "  SM3 CommType: 0x{:02X} ({})", (unsigned)commType3, type3);
     } else {
         TETHER_LOGW(tag, "  ⚠ SM3 CommType read failed (SDO error)");
     }

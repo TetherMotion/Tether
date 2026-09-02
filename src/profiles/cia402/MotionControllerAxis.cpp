@@ -41,12 +41,12 @@ CiA402Axis::CiA402Axis(AxisId id, DriveBackendUPtr backend)
     // Set up callbacks from backend
     if (m_backend) {
         m_backend->setStateChangeCallback([this](State from, State to) {
-            TETHER_LOGD(TAG, "Axis %lu: State %d -> %d", 
+            TETHER_LOGD(TAG, "Axis {}: State {} -> {}", 
                     (unsigned long)m_id, (int)from, (int)to);
         });
         
         m_backend->setErrorCallback([this](uint16_t code, const std::string& msg) {
-            TETHER_LOGE(TAG, "Axis %lu fault: 0x%04X - %s",
+            TETHER_LOGE(TAG, "Axis {} fault: 0x{:04X} - {}",
                     (unsigned long)m_id, code, msg.c_str());
             if (m_faultCallback) {
                 m_faultCallback(code, msg);
@@ -132,7 +132,7 @@ bool CiA402Axis::requestState(State target, uint32_t timeoutMs) {
         Tether::Platform::Clock::instance().delayMilliseconds(1);
     }
     
-    TETHER_LOGW(TAG, "Axis %lu: State transition to %d timed out",
+    TETHER_LOGW(TAG, "Axis {}: State transition to {} timed out",
             (unsigned long)m_id, (int)target);
     return false;
 }

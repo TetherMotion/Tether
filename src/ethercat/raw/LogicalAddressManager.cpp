@@ -56,7 +56,7 @@ bool LogicalAddressManager::buildAddressMap(const PDO::SlaveConfig* configs,
     }
     if (slave_count > PDO::kMaxPDOSlaves) {
         TETHER_LOGE(TAG,
-            "buildAddressMap: slave_count %u exceeds Tether internal max %zu. "
+            "buildAddressMap: slave_count {} exceeds Tether internal max {}. "
             "This is a Tether limit, not a slave limit. "
             "Increase ECAT_PDO_MAX_SLAVES in TetherConfig.hpp.",
             slave_count, PDO::kMaxPDOSlaves);
@@ -107,13 +107,13 @@ bool LogicalAddressManager::buildAddressMap(const PDO::SlaveConfig* configs,
             txpdo_offset += cfg.txpdo_size;
         }
 
-        TETHER_LOGI(TAG, "%s: RxPDO log=0x%08lX len=%u  TxPDO log=0x%08lX len=%u",
+        TETHER_LOGI(TAG, "{}: RxPDO log=0x{:08X} len={}  TxPDO log=0x{:08X} len={}",
                     slavePrefix(i).c_str(),
                     static_cast<unsigned long>(entry.rxpdo_logical_addr), entry.rxpdo_length,
                     static_cast<unsigned long>(entry.txpdo_logical_addr), entry.txpdo_length);
     }
 
-    TETHER_LOGI(TAG, "Address map built: %u slaves, RxPDO=%u bytes, TxPDO=%u bytes, total=%u",
+    TETHER_LOGI(TAG, "Address map built: {} slaves, RxPDO={} bytes, TxPDO={} bytes, total={}",
                 slave_count, total_rxpdo_bytes_, total_txpdo_bytes_,
                 total_rxpdo_bytes_ + total_txpdo_bytes_);
 
@@ -134,7 +134,7 @@ bool LogicalAddressManager::buildAddressMapFromMultiPDO(
     }
     if (slave_count > PDO::kMaxPDOSlaves) {
         TETHER_LOGE(TAG,
-            "buildAddressMapFromMultiPDO: slave_count %u exceeds max %zu",
+            "buildAddressMapFromMultiPDO: slave_count {} exceeds max {}",
             slave_count, PDO::kMaxPDOSlaves);
         return false;
     }
@@ -199,7 +199,7 @@ bool LogicalAddressManager::buildAddressMapFromMultiPDO(
                 pdo_offset += pdo.size_bytes;
                 entry.pdo_entry_count++;
 
-                TETHER_LOGI(TAG, "Slave %u PDO 0x%04X: log=0x%08lX len=%u SM%u (%s)",
+                TETHER_LOGI(TAG, "Slave {} PDO 0x{:04X}: log=0x{:08X} len={} SM{} ({})",
                             s, pdo.pdo_index, (unsigned long)pe.logical_addr,
                             pe.length, pe.sm_index, is_output ? "RxPDO" : "TxPDO");
             }
@@ -214,7 +214,7 @@ bool LogicalAddressManager::buildAddressMapFromMultiPDO(
         entry.active = has_any;
     }
 
-    TETHER_LOGI(TAG, "Multi-PDO address map: %u slaves, RxPDO=%u, TxPDO=%u, total=%u, %zu PDO entries",
+    TETHER_LOGI(TAG, "Multi-PDO address map: {} slaves, RxPDO={}, TxPDO={}, total={}, {} PDO entries",
                 slave_count, total_rxpdo_bytes_, total_txpdo_bytes_,
                 total_rxpdo_bytes_ + total_txpdo_bytes_,
                 [&] {
@@ -306,8 +306,8 @@ bool LogicalAddressManager::exchangeAllLRW(const PDO::PDOMapping& mapping) {
     if (total_data == 0) return true;
     if (total_data > PDO::kMaxPDOSize * PDO::kMaxPDOSlaves) {
         TETHER_LOGE(TAG,
-            "exchangeAllLRW: total data %u exceeds Tether internal buffer capacity "
-            "(max=%zu = %zu bytes/slave * %zu slaves). This is a Tether limit, not a slave limit. "
+            "exchangeAllLRW: total data {} exceeds Tether internal buffer capacity "
+            "(max={} = {} bytes/slave * {} slaves). This is a Tether limit, not a slave limit. "
             "Increase ECAT_PDO_MAX_BUFFER_SIZE or ECAT_PDO_MAX_SLAVES in TetherConfig.hpp.",
             total_data, PDO::kMaxPDOSize * PDO::kMaxPDOSlaves,
             PDO::kMaxPDOSize, PDO::kMaxPDOSlaves);
@@ -457,7 +457,7 @@ bool LogicalAddressManager::exchangeLRWForSlaves(const PDO::PDOMapping& mapping,
     if (!transport_.sendSingleDatagram(Command::LRW, idx, adp, ado,
                                         payload, static_cast<uint16_t>(total_data),
                                         true)) {
-        TETHER_LOGE(TAG, "exchangeLRWForSlaves: send failed (mask=0x%08lX)",
+        TETHER_LOGE(TAG, "exchangeLRWForSlaves: send failed (mask=0x{:08X})",
                     static_cast<unsigned long>(slave_mask));
         stats_.send_errors++;
         return false;

@@ -93,7 +93,7 @@ ResetResult SlaveResetController::resetToLevel(ResetLevel level, uint32_t timeou
     
     last_result_ = {false, level, ResetLevel::SoftReset, 0, 0, 0, ""};
     
-    TETHER_LOGI(TAG, "Resetting slave %u to level %s", slave_index_, getResetLevelName(level));
+    TETHER_LOGI(TAG, "Resetting slave {} to level {}", slave_index_, getResetLevelName(level));
     reportProgress("Starting reset", 0);
     
     bool success = false;
@@ -156,7 +156,7 @@ ResetResult SlaveResetController::resetToLevel(ResetLevel level, uint32_t timeou
             
         case ResetLevel::HardwareReset:
             last_result_.error_message = "Hardware reset requires external power management";
-            TETHER_LOGW(TAG, "%s", last_result_.error_message.c_str());
+            TETHER_LOGW(TAG, "{}", last_result_.error_message.c_str());
             success = false;
             break;
     }
@@ -169,12 +169,12 @@ ResetResult SlaveResetController::resetToLevel(ResetLevel level, uint32_t timeou
     if (success) {
         successful_reset_count_++;
         reportProgress("Reset complete", 100);
-        TETHER_LOGI(TAG, "Reset to %s succeeded in %u us", 
+        TETHER_LOGI(TAG, "Reset to {} succeeded in {} us", 
                  getResetLevelName(last_result_.achieved_level),
                  last_result_.duration_us);
     } else {
         reportProgress("Reset failed", 100);
-        TETHER_LOGE(TAG, "Reset to %s failed: %s", 
+        TETHER_LOGE(TAG, "Reset to {} failed: {}", 
                  getResetLevelName(level),
                  last_result_.error_message.c_str());
     }
@@ -183,7 +183,7 @@ ResetResult SlaveResetController::resetToLevel(ResetLevel level, uint32_t timeou
 }
 
 ResetResult SlaveResetController::progressiveReset(ResetLevel max_level, uint32_t timeout_per_level_ms) {
-    TETHER_LOGI(TAG, "Starting progressive reset (max level: %s)", getResetLevelName(max_level));
+    TETHER_LOGI(TAG, "Starting progressive reset (max level: {})", getResetLevelName(max_level));
     
     ResetResult result;
     
@@ -192,7 +192,7 @@ ResetResult SlaveResetController::progressiveReset(ResetLevel max_level, uint32_
          level++) {
         
         ResetLevel current_level = static_cast<ResetLevel>(level);
-        TETHER_LOGI(TAG, "Trying reset level: %s", getResetLevelName(current_level));
+        TETHER_LOGI(TAG, "Trying reset level: {}", getResetLevelName(current_level));
         
         result = resetToLevel(current_level, timeout_per_level_ms);
         
@@ -200,7 +200,7 @@ ResetResult SlaveResetController::progressiveReset(ResetLevel max_level, uint32_
             uint16_t status, code;
             if (readALStatus(status, code)) {
                 if (!(status & static_cast<uint16_t>(ALState::ErrorFlag))) {
-                    TETHER_LOGI(TAG, "Progressive reset succeeded at level: %s", 
+                    TETHER_LOGI(TAG, "Progressive reset succeeded at level: {}", 
                              getResetLevelName(current_level));
                     return result;
                 }
@@ -216,7 +216,7 @@ ResetResult SlaveResetController::progressiveReset(ResetLevel max_level, uint32_
 }
 
 ResetResult SlaveResetController::emergencyStopAndReset() {
-    TETHER_LOGW(TAG, "Emergency stop and reset for slave %u", slave_index_);
+    TETHER_LOGW(TAG, "Emergency stop and reset for slave {}", slave_index_);
     
     ResetResult result;
     result.requested_level = ResetLevel::ApplicationReset;

@@ -39,13 +39,11 @@ void DeduplicatingLogger::emitSummaryLocked(const char* tag)
     const uint32_t window_ms = config_.window_ms;
     const uint32_t suppressed = suppressed_in_window_;
 
-    Tether::Platform::Logger::instance().log(
+    Tether::Platform::Logger::instance().logFormatted(
         config_.summary_level,
         tag,
-        "(%s suppressed %u messages in last %u ms)",
-        group_key_,
-        suppressed,
-        window_ms);
+        std::format("({} suppressed {} messages in last {} ms)",
+                    group_key_, suppressed, window_ms));
 }
 
 bool DeduplicatingLogger::log(Tether::Platform::LogLevel level, const char* tag, const char* msg)
@@ -58,7 +56,7 @@ bool DeduplicatingLogger::log(Tether::Platform::LogLevel level, const char* tag,
 
     if (!shouldLogLocked(now_ms, tag)) return false;
 
-    Tether::Platform::Logger::instance().log(level, tag, "%s", msg);
+    Tether::Platform::Logger::instance().logFormatted(level, tag, msg);
     return true;
 }
 

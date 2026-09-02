@@ -163,7 +163,7 @@ bool SlaveIdentifier::identify(uint16_t slave_index, SlaveIdentity& identity) {
         identity.setIdentityRecord(record);
         any_success = true;
     } else {
-        TETHER_LOGW(TAG, "%s: Failed to read identity record", m_master.slaveLogPrefix(slave_index).c_str());
+        TETHER_LOGW(TAG, "{}: Failed to read identity record", m_master.slaveLogPrefix(slave_index).c_str());
     }
     
     // Read device type (0x1000)
@@ -424,14 +424,14 @@ const char* getProductName(uint32_t product_code) {
 
 void logSlaveIdentity(const SlaveIdentity& identity, const char* tag) {
     if (!identity.isValid()) {
-        TETHER_LOGW(tag, "Slave %u: Invalid/not identified", identity.slaveIndex());
+        TETHER_LOGW(tag, "Slave {}: Invalid/not identified", identity.slaveIndex());
         return;
     }
     
-    TETHER_LOGI(tag, "========================================\nSlave %u Identity:\n----------------------------------------", identity.slaveIndex());
+    TETHER_LOGI(tag, "========================================\nSlave {} Identity:\n----------------------------------------", identity.slaveIndex());
     
     // Identity record
-    TETHER_LOGI(tag, "  Vendor ID:    0x%08lX (%s)\n  Product Code: 0x%08lX\n  Revision:     %u.%u\n  Serial:       %lu",
+    TETHER_LOGI(tag, "  Vendor ID:    0x{:08X} ({})\n  Product Code: 0x{:08X}\n  Revision:     {}.{}\n  Serial:       {}",
              (unsigned long)identity.vendorId(), getVendorName(identity.vendorId()),
              (unsigned long)identity.productCode(),
              identity.identityRecord().revisionMajor(),
@@ -439,19 +439,19 @@ void logSlaveIdentity(const SlaveIdentity& identity, const char* tag) {
              (unsigned long)identity.serialNumber());
     
     // Device type
-    TETHER_LOGI(tag, "  Profile:      %u (CiA %u)",
+    TETHER_LOGI(tag, "  Profile:      {} (CiA {})",
              identity.deviceType().profileNumber(),
              identity.deviceType().profileNumber());
     
     // Strings
     if (identity.hasDeviceName()) {
-        TETHER_LOGI(tag, "  Device Name:  %s", identity.deviceName());
+        TETHER_LOGI(tag, "  Device Name:  {}", identity.deviceName());
     }
     if (identity.hasHardwareVersion()) {
-        TETHER_LOGI(tag, "  HW Version:   %s", identity.hardwareVersion());
+        TETHER_LOGI(tag, "  HW Version:   {}", identity.hardwareVersion());
     }
     if (identity.hasSoftwareVersion()) {
-        TETHER_LOGI(tag, "  SW Version:   %s", identity.softwareVersion());
+        TETHER_LOGI(tag, "  SW Version:   {}", identity.softwareVersion());
     }
     
     // CiA 402 specific
@@ -459,7 +459,7 @@ void logSlaveIdentity(const SlaveIdentity& identity, const char* tag) {
         TETHER_LOGI(tag, "  Drive Type:   CiA 402 Servo/Stepper");
         uint32_t modes = identity.supportedDriveModes();
         if (modes != 0) {
-            TETHER_LOGI(tag, "  Modes:        0x%08lX", (unsigned long)modes);
+            TETHER_LOGI(tag, "  Modes:        0x{:08X}", (unsigned long)modes);
             if (modes & (1 << 0)) TETHER_LOGI(tag, "                - Profile Position (PP)");
             if (modes & (1 << 2)) TETHER_LOGI(tag, "                - Profile Velocity (PV)");
             if (modes & (1 << 3)) TETHER_LOGI(tag, "                - Profile Torque (TQ)");
@@ -473,7 +473,7 @@ void logSlaveIdentity(const SlaveIdentity& identity, const char* tag) {
     
     // Error register
     if (identity.errorRegister() != 0) {
-        TETHER_LOGW(tag, "  Error Reg:    0x%02X", identity.errorRegister());
+        TETHER_LOGW(tag, "  Error Reg:    0x{:02X}", identity.errorRegister());
     }
     
     TETHER_LOGI(tag, "========================================");
@@ -507,10 +507,10 @@ void logSlaveIdentityTable(const SlaveIdentity* identities, size_t count,
         std::strncpy(vendor_buf, vendor, sizeof(vendor_buf) - 1);
         
         if (id.isValid()) {
-            TETHER_LOGI(tag, "║ %2zu ║ %-32s ║ %-12s ║ %-8s ║",
+            TETHER_LOGI(tag, "║ {:2} ║ {:<32} ║ {:<12} ║ {:<8} ║",
                      i, name_buf, vendor_buf, type);
         } else {
-            TETHER_LOGI(tag, "║ %2zu ║ %-32s ║ %-12s ║ %-8s ║",
+            TETHER_LOGI(tag, "║ {:2} ║ {:<32} ║ {:<12} ║ {:<8} ║",
                      i, "(not found)", "-", "-");
         }
     }

@@ -1375,7 +1375,7 @@ int main(int argc, char** argv) {
 
     const ColorTags color = makeColors();
 
-    TETHER_LOGI(TAG, "realtime_diagnostics — interface: %s, pdo-size: %d",
+    TETHER_LOGI(TAG, "realtime_diagnostics — interface: {}, pdo-size: {}",
                 iface.c_str(), pdo_size);
 
     const auto kernel_info = Tether::Platform::ensureRealtimeKernelOrExit(
@@ -1401,7 +1401,7 @@ int main(int argc, char** argv) {
     // Interface index for sendto.
     const unsigned int ifindex = if_nametoindex(iface.c_str());
     if (ifindex == 0) {
-        TETHER_LOGE(TAG, "Failed to resolve interface index for %s",
+        TETHER_LOGE(TAG, "Failed to resolve interface index for {}",
                     iface.c_str());
         Tether::Examples::shutdownHostEthernet(session);
         return 2;

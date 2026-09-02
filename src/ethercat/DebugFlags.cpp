@@ -185,7 +185,7 @@ void EtherCATMasterDebugFlags::applyFromString(const std::string& spec,
         }
 
         if (tag) {
-            TETHER_LOGI(tag, "Debug flag '%s' enabled%s", flagname.c_str(),
+            TETHER_LOGI(tag, "Debug flag '{}' enabled{}", flagname.c_str(),
                         filter_str.empty() ? " (all slaves)" : " with filter");
         }
     }

@@ -72,30 +72,30 @@ inline void printSyncEntry(CoE::CoEManager& coe,
 {
     char buf[8] = {0};
     if (!readSyncEntry(coe, entry, buf, sizeof(buf), timeout_ms)) {
-        TETHER_LOGW(tag, "0x%04X:%02X (%s) read FAILED", entry.index, entry.subindex, entry.name);
+        TETHER_LOGW(tag, "0x{:04X}:{:02X} ({}) read FAILED", entry.index, entry.subindex, entry.name);
         return;
     }
 
     switch (entry.data_type) {
     case ::EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Integer8:
     case ::EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8:
-        TETHER_LOGI(tag, "0x%04X:%02X (%s) = %u", entry.index, entry.subindex, entry.name, static_cast<unsigned>(buf[0]));
+        TETHER_LOGI(tag, "0x{:04X}:{:02X} ({}) = {}", entry.index, entry.subindex, entry.name, static_cast<unsigned>(buf[0]));
         break;
     case ::EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Integer16:
     case ::EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned16: {
         uint16_t v = buf[0] | (buf[1] << 8);
-        TETHER_LOGI(tag, "0x%04X:%02X (%s) = 0x%04X", entry.index, entry.subindex, entry.name, v);
+        TETHER_LOGI(tag, "0x{:04X}:{:02X} ({}) = 0x{:04X}", entry.index, entry.subindex, entry.name, v);
         break;
     }
     case ::EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Integer32:
     case ::EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned32: {
         uint32_t v = buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24);
-        TETHER_LOGI(tag, "0x%04X:%02X (%s) = %u", entry.index, entry.subindex, entry.name, v);
+        TETHER_LOGI(tag, "0x{:04X}:{:02X} ({}) = {}", entry.index, entry.subindex, entry.name, v);
         break;
     }
     default:
         // fallback: hex dump first four bytes
-        TETHER_LOGI(tag, "0x%04X:%02X (%s) = [%02X %02X %02X %02X]",
+        TETHER_LOGI(tag, "0x{:04X}:{:02X} ({}) = [{:02X} {:02X} {:02X} {:02X}]",
                  entry.index, entry.subindex, entry.name,
                  static_cast<unsigned>(buf[0]), static_cast<unsigned>(buf[1]),
                  static_cast<unsigned>(buf[2]), static_cast<unsigned>(buf[3]));
@@ -187,10 +187,10 @@ inline void printSMEscRegisters(EtherCAT::Master& master,
     if (master.readRegister(adp, base, regs, sizeof(regs), 200)) {
         uint16_t addr = regs[0] | (regs[1] << 8);
         uint16_t len  = regs[2] | (regs[3] << 8);
-        TETHER_LOGI(tag, "SM%u ESC: Addr=0x%04X Len=%u Ctrl=0x%02X Status=0x%02X Act=0x%02X",
+        TETHER_LOGI(tag, "SM{} ESC: Addr=0x{:04X} Len={} Ctrl=0x{:02X} Status=0x{:02X} Act=0x{:02X}",
                  sm, addr, len, regs[4], regs[5], regs[6]);
     } else {
-        TETHER_LOGW(tag, "SM%u ESC read FAILED", sm);
+        TETHER_LOGW(tag, "SM{} ESC read FAILED", sm);
     }
 }
 
@@ -250,7 +250,7 @@ inline void printSyncDiagnostics(EtherCAT::Master& master,
     using namespace CiA301::Parameters1Cxx;
     auto& coe = master.sdoManager(slave_idx);
 
-    TETHER_LOGI(tag, "  ----- SM Sync Mode (0x%04X / 0x%04X) -----",
+    TETHER_LOGI(tag, "  ----- SM Sync Mode (0x{:04X} / 0x{:04X}) -----",
              kIdxSM2Sync, kIdxSM3Sync);
 
     printSyncMode(coe, 2, tag);

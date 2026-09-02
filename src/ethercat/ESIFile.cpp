@@ -22,13 +22,13 @@ ESIFile::ESIFile(const std::string& path) {
         devices_ = std::move(devices);
         if (devices_.empty()) {
             error_ = "ESI XML parsed but no <Device> entries found: " + path;
-            TETHER_LOGW("ESIFile", "%s", error_.c_str());
+            TETHER_LOGW("ESIFile", "{}", error_.c_str());
         } else {
-            TETHER_LOGI("ESIFile", "Parsed ESI XML '%s': %zu device(s)", path.c_str(), devices_.size());
+            TETHER_LOGI("ESIFile", "Parsed ESI XML '{}': {} device(s)", path.c_str(), devices_.size());
         }
     } else {
         error_ = "Failed to parse ESI XML '" + path + "': " + err;
-        TETHER_LOGE("ESIFile", "%s", error_.c_str());
+        TETHER_LOGE("ESIFile", "{}", error_.c_str());
     }
 }
 

@@ -68,7 +68,7 @@ bool RealtimeLoop::start() {
     }
 
     const uint32_t dc_period_us = config_.cycle_period_us * config_.sync_interval_cycles;
-    TETHER_LOGI(TAG, "Realtime loop started: PDO thread @ %u us, DC thread @ %u us",
+    TETHER_LOGI(TAG, "Realtime loop started: PDO thread @ {} us, DC thread @ {} us",
                 config_.cycle_period_us, dc_period_us);
     return true;
 }

@@ -66,14 +66,14 @@ int PDOMapping::add_rxpdo(uint16_t slave_index, void* buffer, uint16_t size,
                           uint16_t pdo_index, PDOAddressMode mode) {
     if (m_entry_count >= kMaxPDOEntries) {
         TETHER_LOGE(TAG,
-            "Tether internal PDO entry limit reached (%zu entries). This is a Tether limit, "
+            "Tether internal PDO entry limit reached ({} entries). This is a Tether limit, "
             "not a slave limit. Increase ECAT_PDO_MAX_ENTRIES in TetherConfig.hpp.",
             kMaxPDOEntries);
         return -1;
     }
     if (!buffer || size == 0 || size > kMaxPDOSize) {
         TETHER_LOGE(TAG,
-            "Invalid PDO buffer or size (size=%u). %s",
+            "Invalid PDO buffer or size (size={}). {}",
             size,
             (size > kMaxPDOSize)
                 ? "This is a Tether limit, not a slave limit. "
@@ -94,7 +94,7 @@ int PDOMapping::add_rxpdo(uint16_t slave_index, void* buffer, uint16_t size,
     e.physical_offset = 0;
     if (slave_index < kMaxPDOSlaves)
         e.configured_address = m_slave_configured_addrs[slave_index];
-    TETHER_LOGI(TAG, "Added RxPDO: slave=%u size=%u pdo=0x%04x mode=%d",
+    TETHER_LOGI(TAG, "Added RxPDO: slave={} size={} pdo=0x{:04x} mode={}",
                 slave_index, size, pdo_index, static_cast<int>(mode));
     return static_cast<int>(m_entry_count++);
 }
@@ -103,14 +103,14 @@ int PDOMapping::add_txpdo(uint16_t slave_index, void* buffer, uint16_t size,
                           uint16_t pdo_index, PDOAddressMode mode) {
     if (m_entry_count >= kMaxPDOEntries) {
         TETHER_LOGE(TAG,
-            "Tether internal PDO entry limit reached (%zu entries). This is a Tether limit, "
+            "Tether internal PDO entry limit reached ({} entries). This is a Tether limit, "
             "not a slave limit. Increase ECAT_PDO_MAX_ENTRIES in TetherConfig.hpp.",
             kMaxPDOEntries);
         return -1;
     }
     if (!buffer || size == 0 || size > kMaxPDOSize) {
         TETHER_LOGE(TAG,
-            "Invalid PDO buffer or size (size=%u). %s",
+            "Invalid PDO buffer or size (size={}). {}",
             size,
             (size > kMaxPDOSize)
                 ? "This is a Tether limit, not a slave limit. "
@@ -131,7 +131,7 @@ int PDOMapping::add_txpdo(uint16_t slave_index, void* buffer, uint16_t size,
     e.physical_offset = 0;
     if (slave_index < kMaxPDOSlaves)
         e.configured_address = m_slave_configured_addrs[slave_index];
-    TETHER_LOGI(TAG, "Added TxPDO: slave=%u size=%u pdo=0x%04x mode=%d",
+    TETHER_LOGI(TAG, "Added TxPDO: slave={} size={} pdo=0x{:04x} mode={}",
                 slave_index, size, pdo_index, static_cast<int>(mode));
     return static_cast<int>(m_entry_count++);
 }
@@ -148,7 +148,7 @@ int PDOMapping::add_broadcast_rxpdo(void* buffer, uint16_t size, uint16_t physic
     e.enabled         = true;
     e.error_count     = 0;
     e.success_count   = 0;
-    TETHER_LOGI(TAG, "Added broadcast RxPDO: offset=0x%04x size=%u", physical_offset, size);
+    TETHER_LOGI(TAG, "Added broadcast RxPDO: offset=0x{:04x} size={}", physical_offset, size);
     return static_cast<int>(m_entry_count++);
 }
 
@@ -164,7 +164,7 @@ int PDOMapping::add_broadcast_txpdo(void* buffer, uint16_t size, uint16_t physic
     e.enabled         = true;
     e.error_count     = 0;
     e.success_count   = 0;
-    TETHER_LOGI(TAG, "Added broadcast TxPDO: offset=0x%04x size=%u", physical_offset, size);
+    TETHER_LOGI(TAG, "Added broadcast TxPDO: offset=0x{:04x} size={}", physical_offset, size);
     return static_cast<int>(m_entry_count++);
 }
 
@@ -353,12 +353,12 @@ uint32_t PDOManager::getSlavePDOReplyCount(uint16_t slave_index) const {
 
 void PDOManager::setSeparateMode(bool v) {
     use_separate_commands_ = v;
-    TETHER_LOGI(TAG, "PDO mode set to: %s", v ? "SEPARATE (LRD+LWR)" : "COMBINED (LRW)");
+    TETHER_LOGI(TAG, "PDO mode set to: {}", v ? "SEPARATE (LRD+LWR)" : "COMBINED (LRW)");
 }
 bool PDOManager::getSeparateMode()  const { return use_separate_commands_; }
 void PDOManager::setPhysicalMode(bool v) {
     use_physical_mode_ = v;
-    TETHER_LOGI(TAG, "PDO mode set to: %s", v ? "PHYSICAL (FPWR+FPRD)" : "LOGICAL (FMMU-based)");
+    TETHER_LOGI(TAG, "PDO mode set to: {}", v ? "PHYSICAL (FPWR+FPRD)" : "LOGICAL (FMMU-based)");
 }
 bool PDOManager::getPhysicalMode()  const { return use_physical_mode_; }
 
@@ -385,14 +385,14 @@ bool PDOManager::writeSMConfig(uint16_t adp, uint8_t sm_index,
     uint8_t disable = 0x00;
     if (!transport_.writeRegister(adp, static_cast<uint16_t>(base + SM_OFF_ACTIVATE),
                                   &disable, sizeof(disable), 200)) {
-        TETHER_LOGW(TAG, "SM%u: failed to disable", sm_index);
+        TETHER_LOGW(TAG, "SM{}: failed to disable", sm_index);
     }
 
     // Step 2: Physical address
     uint16_t addr_le = host_to_le16(config.phys_start_addr);
     if (!transport_.writeRegister(adp, static_cast<uint16_t>(base + SM_OFF_PHYS_ADDR),
                                   &addr_le, sizeof(addr_le), 200)) {
-        TETHER_LOGE(TAG, "SM%u: failed to write phys_addr=0x%04x", sm_index, config.phys_start_addr);
+        TETHER_LOGE(TAG, "SM{}: failed to write phys_addr=0x{:04x}", sm_index, config.phys_start_addr);
         return false;
     }
 
@@ -400,7 +400,7 @@ bool PDOManager::writeSMConfig(uint16_t adp, uint8_t sm_index,
     uint16_t len_le = host_to_le16(config.length);
     if (!transport_.writeRegister(adp, static_cast<uint16_t>(base + SM_OFF_LENGTH),
                                   &len_le, sizeof(len_le), 200)) {
-        TETHER_LOGE(TAG, "SM%u: failed to write length=%u", sm_index, config.length);
+        TETHER_LOGE(TAG, "SM{}: failed to write length={}", sm_index, config.length);
         return false;
     }
 
@@ -408,7 +408,7 @@ bool PDOManager::writeSMConfig(uint16_t adp, uint8_t sm_index,
     uint8_t ctrl_byte = std::bit_cast<uint8_t>(config.control);
     if (!transport_.writeRegister(adp, static_cast<uint16_t>(base + SM_OFF_CONTROL),
                                   &ctrl_byte, sizeof(ctrl_byte), 200)) {
-        TETHER_LOGE(TAG, "SM%u: failed to write control=0x%02x", sm_index, ctrl_byte);
+        TETHER_LOGE(TAG, "SM{}: failed to write control=0x{:02x}", sm_index, ctrl_byte);
         return false;
     }
 
@@ -416,11 +416,11 @@ bool PDOManager::writeSMConfig(uint16_t adp, uint8_t sm_index,
     uint8_t activate = config.enable ? SM_ACT_ENABLE : 0x00;
     if (!transport_.writeRegister(adp, static_cast<uint16_t>(base + SM_OFF_ACTIVATE),
                                   &activate, sizeof(activate), 200)) {
-        TETHER_LOGE(TAG, "SM%u: failed to write activate=0x%02x", sm_index, activate);
+        TETHER_LOGE(TAG, "SM{}: failed to write activate=0x{:02x}", sm_index, activate);
         return false;
     }
 
-    TETHER_LOGI(TAG, "Slave %u: SM%u: configured addr=0x%04x len=%u ctrl=0x%02x act=0x%02x",
+    TETHER_LOGI(TAG, "Slave {}: SM{}: configured addr=0x{:04x} len={} ctrl=0x{:02x} act=0x{:02x}",
                 slave_index, sm_index, config.phys_start_addr, config.length, ctrl_byte, activate);
 
     if ((rxPDODebug() && config.type == PDO::SyncManagerType::ProcessOutput) ||
@@ -436,7 +436,7 @@ bool PDOManager::writeSMConfig(uint16_t adp, uint8_t sm_index,
         const char* mode_str = (config.control.mode == static_cast<uint8_t>(EtherCAT::SyncManager::SMMode::Mailbox)) ? "mailbox" :
                                (config.control.mode == static_cast<uint8_t>(EtherCAT::SyncManager::SMMode::Buffered)) ? "buffered" : "unknown";
         const char* dir_str  = config.control.direction ? "write (master→slave)" : "read (slave→master)";
-        TETHER_LOGI(TAG, "  [PDO-DEBUG] SM%u detail: type=%s mode=%s dir=%s enable=%s",
+        TETHER_LOGI(TAG, "  [PDO-DEBUG] SM{} detail: type={} mode={} dir={} enable={}",
                     sm_index, sm_type_str, mode_str, dir_str,
                     config.enable ? "yes" : "no");
         if (config.control.ecat_irq) TETHER_LOGI(TAG, "    IRQ eCAT enabled");
@@ -458,16 +458,16 @@ bool PDOManager::readSMStatus(uint16_t adp, uint8_t sm_index, uint8_t& status) {
 
 bool PDOManager::configureSlavesSMs(uint16_t slave_index) {
     if (slave_index >= PDO::kMaxPDOSlaves) {
-        TETHER_LOGE(TAG, "Invalid slave index %u", slave_index);
+        TETHER_LOGE(TAG, "Invalid slave index {}", slave_index);
         return false;
     }
     PDO::SlaveConfig& cfg = slave_configs_[slave_index];
     const uint16_t adp = transport_.adpForSlaveIndex(slave_index);
 
-    TETHER_LOGI(TAG, "Configuring SMs for slave %u (adp=0x%04x)", slave_index, adp);
+    TETHER_LOGI(TAG, "Configuring SMs for slave {} (adp=0x{:04x})", slave_index, adp);
 
     if (rxPDODebug(slave_index) || txPDODebug(slave_index)) {
-        TETHER_LOGI(TAG, "  [PDO-DEBUG] Slave %u config: vendor=0x%08x product=0x%08x",
+        TETHER_LOGI(TAG, "  [PDO-DEBUG] Slave {} config: vendor=0x{:08x} product=0x{:08x}",
                     slave_index, cfg.vendor_id, cfg.product_code);
         for (int sm = 0; sm < 4; sm++) {
             const char* sm_type_str = "unused";
@@ -479,12 +479,12 @@ bool PDOManager::configureSlavesSMs(uint16_t slave_index) {
                 default: break;
             }
             if (cfg.sm[sm].type != PDO::SyncManagerType::Unused) {
-                TETHER_LOGI(TAG, "  [PDO-DEBUG]   SM%d: addr=0x%04x len=%u ctrl=0x%02x type=%s enable=%s",
+                TETHER_LOGI(TAG, "  [PDO-DEBUG]   SM{}: addr=0x{:04x} len={} ctrl=0x{:02x} type={} enable={}",
                             sm, cfg.sm[sm].phys_start_addr, cfg.sm[sm].length,
-                            cfg.sm[sm].control, sm_type_str,
+                            std::bit_cast<uint8_t>(cfg.sm[sm].control), sm_type_str,
                             cfg.sm[sm].enable ? "yes" : "no");
             } else {
-                TETHER_LOGI(TAG, "  [PDO-DEBUG]   SM%d: unused", sm);
+                TETHER_LOGI(TAG, "  [PDO-DEBUG]   SM{}: unused", sm);
             }
         }
     }
@@ -492,7 +492,7 @@ bool PDOManager::configureSlavesSMs(uint16_t slave_index) {
     for (int sm = 0; sm < 4; sm++) {
         if (cfg.sm[sm].type != PDO::SyncManagerType::Unused) {
             if (!writeSMConfig(adp, static_cast<uint8_t>(sm), cfg.sm[sm], slave_index)) {
-                TETHER_LOGE(TAG, "Failed to configure SM%d for slave %u", sm, slave_index);
+                TETHER_LOGE(TAG, "Failed to configure SM{} for slave {}", sm, slave_index);
                 return false;
             }
         }
@@ -507,7 +507,7 @@ uint16_t PDOManager::configureAllSlaveSMs(uint16_t slave_count) {
         if (configureSlavesSMs(i)) configured++;
     }
     slave_count_ = slave_count;
-    TETHER_LOGI(TAG, "Configured %u/%u slaves", configured, slave_count);
+    TETHER_LOGI(TAG, "Configured {}/{} slaves", configured, slave_count);
     return configured;
 }
 
@@ -517,14 +517,14 @@ uint16_t PDOManager::configureAllSlaveSMs(uint16_t slave_count) {
 
 bool PDOManager::finalizeMapping(uint16_t slave_index) {
     if (slave_index >= PDO::kMaxPDOSlaves) {
-        TETHER_LOGE(TAG, "Invalid slave index %u", slave_index);
+        TETHER_LOGE(TAG, "Invalid slave index {}", slave_index);
         return false;
     }
     PDO::SlaveConfig& cfg = slave_configs_[slave_index];
     const uint16_t sm2_addr = cfg.sm[2].phys_start_addr;
     const uint16_t sm3_addr = cfg.sm[3].phys_start_addr;
 
-    TETHER_LOGI(TAG, "Finalizing PDO mapping for slave %u (SM2=0x%04X SM3=0x%04X)",
+    TETHER_LOGI(TAG, "Finalizing PDO mapping for slave {} (SM2=0x{:04X} SM3=0x{:04X})",
                 slave_index, sm2_addr, sm3_addr);
 
     uint16_t total_rxpdo_size = 0;
@@ -541,7 +541,7 @@ bool PDOManager::finalizeMapping(uint16_t slave_index) {
             total_rxpdo_size += entry->data_size;
             rxpdo_count++;
             if (rxPDODebug(slave_index)) {
-                TETHER_LOGI(TAG, "  [RxPDO-DEBUG] Entry %zu: slave=%u offset=0x%04x size=%u buf=%p pdo=0x%04x",
+                TETHER_LOGI(TAG, "  [RxPDO-DEBUG] Entry {}: slave={} offset=0x{:04x} size={} buf={:p} pdo=0x{:04x}",
                             i, slave_index, entry->physical_offset, entry->data_size,
                             entry->app_buffer, entry->pdo_index);
             }
@@ -550,7 +550,7 @@ bool PDOManager::finalizeMapping(uint16_t slave_index) {
             total_txpdo_size += entry->data_size;
             txpdo_count++;
             if (txPDODebug(slave_index)) {
-                TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Entry %zu: slave=%u offset=0x%04x size=%u buf=%p pdo=0x%04x",
+                TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Entry {}: slave={} offset=0x{:04x} size={} buf={:p} pdo=0x{:04x}",
                             i, slave_index, entry->physical_offset, entry->data_size,
                             entry->app_buffer, entry->pdo_index);
             }
@@ -558,7 +558,7 @@ bool PDOManager::finalizeMapping(uint16_t slave_index) {
     }
 
     if (rxPDODebug(slave_index) || txPDODebug(slave_index)) {
-        TETHER_LOGI(TAG, "  [PDO-DEBUG] Summary for slave %u: RxPDO entries=%zu total=%u bytes, TxPDO entries=%zu total=%u bytes",
+        TETHER_LOGI(TAG, "  [PDO-DEBUG] Summary for slave {}: RxPDO entries={} total={} bytes, TxPDO entries={} total={} bytes",
                     slave_index, rxpdo_count, total_rxpdo_size, txpdo_count, total_txpdo_size);
     }
 
@@ -684,7 +684,7 @@ bool PDOManager::sendRxPDO(size_t entry_index) {
         return false;
 
     if (rxPDODebug(entry->slave_index)) {
-        TETHER_LOGI(TAG, "[RxPDO-DEBUG] Sending entry %zu: slave=%u offset=0x%04x size=%u mode=%s",
+        TETHER_LOGI(TAG, "[RxPDO-DEBUG] Sending entry {}: slave={} offset=0x{:04x} size={} mode={}",
                     entry_index, entry->slave_index, entry->physical_offset, entry->data_size,
                     entry->address_mode == PDO::PDOAddressMode::Position ? "position" :
                     entry->address_mode == PDO::PDOAddressMode::ConfiguredAddress ? "configured" :
@@ -697,7 +697,7 @@ bool PDOManager::sendRxPDO(size_t entry_index) {
             for (uint16_t b = 0; b < entry->data_size && pos + 3 < sizeof(hex); b++) {
                 pos += static_cast<size_t>(std::snprintf(hex + pos, sizeof(hex) - pos, "%02X ", buf[b]));
             }
-            TETHER_LOGI(TAG, "  [RxPDO-DEBUG] Data: %s", hex);
+            TETHER_LOGI(TAG, "  [RxPDO-DEBUG] Data: {}", hex);
         }
     }
 
@@ -718,7 +718,7 @@ bool PDOManager::sendRxPDO(size_t entry_index) {
     }
 
     if (rxPDODebug(entry->slave_index)) {
-        TETHER_LOGI(TAG, "  [RxPDO-DEBUG] Result: %s (success_count=%u error_count=%u)",
+        TETHER_LOGI(TAG, "  [RxPDO-DEBUG] Result: {} (success_count={} error_count={})",
                     success ? "OK" : "FAIL",
                     static_cast<unsigned>(entry->success_count + (success ? 1 : 0)),
                     static_cast<unsigned>(entry->error_count + (success ? 0 : 1)));
@@ -743,7 +743,7 @@ bool PDOManager::receiveTxPDO(size_t entry_index) {
         return false;
 
     if (txPDODebug(entry->slave_index)) {
-        TETHER_LOGI(TAG, "[TxPDO-DEBUG] Receiving entry %zu: slave=%u offset=0x%04x size=%u mode=%s",
+        TETHER_LOGI(TAG, "[TxPDO-DEBUG] Receiving entry {}: slave={} offset=0x{:04x} size={} mode={}",
                     entry_index, entry->slave_index, entry->physical_offset, entry->data_size,
                     entry->address_mode == PDO::PDOAddressMode::Position ? "position" :
                     entry->address_mode == PDO::PDOAddressMode::ConfiguredAddress ? "configured" :
@@ -768,7 +768,7 @@ bool PDOManager::receiveTxPDO(size_t entry_index) {
     }
 
     if (txPDODebug(entry->slave_index)) {
-        TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Result: %s (success_count=%u error_count=%u)",
+        TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Result: {} (success_count={} error_count={})",
                     success ? "OK" : "FAIL",
                     static_cast<unsigned>(entry->success_count + (success ? 1 : 0)),
                     static_cast<unsigned>(entry->error_count + (success ? 0 : 1)));
@@ -779,7 +779,7 @@ bool PDOManager::receiveTxPDO(size_t entry_index) {
             for (uint16_t b = 0; b < entry->data_size && pos + 3 < sizeof(hex); b++) {
                 pos += static_cast<size_t>(std::snprintf(hex + pos, sizeof(hex) - pos, "%02X ", buf[b]));
             }
-            TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Data: %s", hex);
+            TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Data: {}", hex);
         }
     }
 
@@ -1029,7 +1029,7 @@ bool PDOManager::sendAll() {
     stats_.total_cycles++;
 
     if (rxPDODebug() || txPDODebug()) {
-        TETHER_LOGI(TAG, "[PDO-DEBUG] === Cycle %llu ===", static_cast<unsigned long long>(stats_.total_cycles));
+        TETHER_LOGI(TAG, "[PDO-DEBUG] === Cycle {} ===", static_cast<unsigned long long>(stats_.total_cycles));
     }
 
     // Phase 1: Batch all RxPDO writes into one frame
@@ -1345,7 +1345,7 @@ bool PDOManager::receiveAll() {
     }
 
     if (rxPDODebug() || txPDODebug()) {
-        TETHER_LOGI(TAG, "  [PDO-DEBUG] Cycle result: %s", all_ok ? "OK" : "ERRORS");
+        TETHER_LOGI(TAG, "  [PDO-DEBUG] Cycle result: {}", all_ok ? "OK" : "ERRORS");
     }
 
     // Debug gate checkpoint: first successful TxPDO receive
@@ -1426,13 +1426,13 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
                 pos += static_cast<size_t>(std::snprintf(hex + pos, sizeof(hex) - pos, "%02X ", out_buf[b]));
             }
             if (rxPDODebug()) {
-                TETHER_LOGI(TAG, "[RxPDO-DEBUG] Physical write SM2 (slave %u): addr=0x%04x len=%u data=%s",
+                TETHER_LOGI(TAG, "[RxPDO-DEBUG] Physical write SM2 (slave {}): addr=0x{:04x} len={} data={}",
                             si, sm2.phys_start_addr, sm2.length, hex);
             } else {
                 // Decode CW and TargetPos from the buffer for clarity
                 uint16_t cw_val = static_cast<uint16_t>(out_buf[0] | (out_buf[1] << 8));
                 int32_t tp_val = static_cast<int32_t>(out_buf[2] | (out_buf[3] << 8) | (out_buf[4] << 16) | (out_buf[5] << 24));
-                TETHER_LOGI(TAG, "[RxPDO-WIRE] Slave %u Cycle %u: CW=0x%04X TP=%ld | %s",
+                TETHER_LOGI(TAG, "[RxPDO-WIRE] Slave {} Cycle {}: CW=0x{:04X} TP={} | {}",
                          si, static_cast<unsigned>(physical_stats_.fpwr_success), cw_val, (long)tp_val, hex);
             }
         }
@@ -1515,7 +1515,7 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
                 for (size_t b = 0; b < dump_len && pos + 3 < sizeof(hex); b++) {
                     pos += static_cast<size_t>(std::snprintf(hex + pos, sizeof(hex) - pos, "%02X ", read_resp.data[b]));
                 }
-                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3 (slave %u): addr=0x%04x len=%u data=%s",
+                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3 (slave {}): addr=0x{:04x} len={} data={}",
                             si, sm3.phys_start_addr, sm3.length, hex);
             }
             for (size_t i = 0; i < mapping_.entry_count(); i++) {
@@ -1525,7 +1525,7 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
                     std::memcpy(e->app_buffer, read_resp.data, e->data_size);
                     e->success_count++;
                     if (txPDODebug(e->slave_index)) {
-                        TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Copied %u bytes to entry %zu buf=%p",
+                        TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Copied {} bytes to entry {} buf={:p}",
                                     e->data_size, i, e->app_buffer);
                     }
                 }
@@ -1534,7 +1534,7 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
             physical_stats_.fprd_wkc_errors++;
             fprd_ok = false;
             if (txPDODebug()) {
-                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3 FAILED (slave %u): addr=0x%04x len=%u",
+                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3 FAILED (slave {}): addr=0x{:04x} len={}",
                             si, sm3.phys_start_addr, sm3.length);
             }
         }
@@ -1560,7 +1560,7 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
                 for (size_t b = 0; b < dump_len && pos + 3 < sizeof(hex); b++) {
                     pos += static_cast<size_t>(std::snprintf(hex + pos, sizeof(hex) - pos, "%02X ", in_buf[b]));
                 }
-                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3 (slave %u): addr=0x%04x len=%u data=%s",
+                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3 (slave {}): addr=0x{:04x} len={} data={}",
                             si, sm3.phys_start_addr, sm3.length, hex);
             }
             for (size_t i = 0; i < mapping_.entry_count(); i++) {
@@ -1570,7 +1570,7 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
                     std::memcpy(e->app_buffer, in_buf, e->data_size);
                     e->success_count++;
                     if (txPDODebug(e->slave_index)) {
-                        TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Copied %u bytes to entry %zu buf=%p",
+                        TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Copied {} bytes to entry {} buf={:p}",
                                     e->data_size, i, e->app_buffer);
                     }
                 }
@@ -1579,7 +1579,7 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
             physical_stats_.fprd_wkc_errors++;
             fprd_ok = false;
             if (txPDODebug()) {
-                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3 FAILED (slave %u): addr=0x%04x len=%u",
+                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3 FAILED (slave {}): addr=0x{:04x} len={}",
                             si, sm3.phys_start_addr, sm3.length);
             }
         }

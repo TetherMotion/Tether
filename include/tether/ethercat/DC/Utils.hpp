@@ -104,7 +104,7 @@ inline void printSyncActivationStatus(EtherCAT::Master& master,
 {
     uint8_t status = 0;
     if (readSyncActivationStatus(master, slave_idx, status)) {
-        TETHER_LOGI(tag, "0x0981 (DC Activation Status) = 0x%02X %s",
+        TETHER_LOGI(tag, "0x0981 (DC Activation Status) = 0x{:02X} {}",
                  status,
                  (status & 0x01) ? "[SYNC0 active]" : "[SYNC0 NOT active]");
     } else {
@@ -118,7 +118,7 @@ inline void printSyncActivationMask(EtherCAT::Master& master,
 {
     uint16_t mask = 0;
     if (readSyncActivationMask(master, slave_idx, mask)) {
-        TETHER_LOGI(tag, "0x0981 (DC Sync Activation) = 0x%04X %s",
+        TETHER_LOGI(tag, "0x0981 (DC Sync Activation) = 0x{:04X} {}",
                  mask, syncActivationMaskToString(mask).c_str());
     } else {
         TETHER_LOGW(tag, "0x0981 read FAILED");
@@ -131,7 +131,7 @@ inline void printSync0CycleTime(EtherCAT::Master& master,
 {
     uint32_t ct = 0;
     if (readSync0CycleTime(master, slave_idx, ct)) {
-        TETHER_LOGI(tag, "0x09A0 (SYNC0 Cycle Time) = %u ns (%.1f us)", ct, ct / 1000.0);
+        TETHER_LOGI(tag, "0x09A0 (SYNC0 Cycle Time) = {} ns ({:.1f} us)", ct, ct / 1000.0);
     } else {
         TETHER_LOGW(tag, "0x09A0 read FAILED");
     }
@@ -143,7 +143,7 @@ inline void printSystemTimeDiff(EtherCAT::Master& master,
 {
     int32_t diff = 0;
     if (readSystemTimeDiff(master, slave_idx, diff)) {
-        TETHER_LOGI(tag, "0x092C (System Time Diff) = %ld ns", (long)diff);
+        TETHER_LOGI(tag, "0x092C (System Time Diff) = {} ns", (long)diff);
     } else {
         TETHER_LOGW(tag, "0x092C read FAILED");
     }
@@ -155,7 +155,7 @@ inline void printSyncImpulseCounter(EtherCAT::Master& master,
 {
     uint16_t wc = 0;
     if (readSyncImpulseCounter(master, slave_idx, wc)) {
-        TETHER_LOGI(tag, "0x0934 (SyncImpulse Counter) = %u", wc);
+        TETHER_LOGI(tag, "0x0934 (SyncImpulse Counter) = {}", wc);
     } else {
         TETHER_LOGW(tag, "0x0934 read FAILED");
     }

@@ -144,7 +144,7 @@ inline void dumpRxPDO(const char* tag, const Synapticon_pdo::SOMANET_RxPDO_1700&
     formatSafetyBit(sbc_str, sizeof(sbc_str), sbc_active, "SBC");
 
     TETHER_LOGI(tag, "[fsoe-frame] TX→slave RxPDO 0x1700 (11 bytes):  "
-                     "%s  %s  cmd=%s  conn_id=0x%04X",
+                     "{}  {}  cmd={}  conn_id=0x{:04X}",
                 sto_str, sbc_str,
                 FSoE::fsoeCommandName(rx.fsoe_command), rx.fsoe_connection_id);
 
@@ -172,7 +172,7 @@ inline void dumpRxPDO(const char* tag, const Synapticon_pdo::SOMANET_RxPDO_1700&
     appendFlag(flags, pos, sizeof(flags), rx.safety_flags & Rx::kRestartAck, "RestartAck");
     pos = strlen(flags);
     appendFlag(flags, pos, sizeof(flags), rx.safety_flags & Rx::kResetPosition, "ResetPos");
-    TETHER_LOGI(tag, "  other_flags=0x%04X [%s]  crc0=0x%04X  crc1=0x%04X",
+    TETHER_LOGI(tag, "  other_flags=0x{:04X} [{}]  crc0=0x{:04X}  crc1=0x{:04X}",
                 rx.safety_flags, flags[0] ? flags : "(none)",
                 rx.fsoe_crc_0, rx.fsoe_crc_1);
 
@@ -182,13 +182,13 @@ inline void dumpRxPDO(const char* tag, const Synapticon_pdo::SOMANET_RxPDO_1700&
     appendFlag(outs, pos, sizeof(outs), rx.safe_outputs & Rx::kSafeOutput1, "OUT1");
     pos = strlen(outs);
     appendFlag(outs, pos, sizeof(outs), rx.safe_outputs & Rx::kSafeOutput2, "OUT2");
-    TETHER_LOGI(tag, "  safe_outputs=0x%02X [%s]", rx.safe_outputs,
+    TETHER_LOGI(tag, "  safe_outputs=0x{:02X} [{}]", rx.safe_outputs,
                 outs[0] ? outs : "(none)");
 
     // --- Raw hex LAST ---
     char hex[64];
     formatHex(hex, sizeof(hex), reinterpret_cast<const uint8_t*>(&rx), sizeof(Rx));
-    TETHER_LOGI(tag, "  raw: %s", hex);
+    TETHER_LOGI(tag, "  raw: {}", hex);
 }
 
 /// Decode the slave→master FSoE frame from the Synapticon TxPDO 0x1B00 struct.
@@ -210,7 +210,7 @@ inline void dumpTxPDO(const char* tag, const Synapticon_pdo::SOMANET_TxPDO_1B00&
     formatSafetyBit(sbc_str, sizeof(sbc_str), sbc_active, "SBC");
 
     TETHER_LOGI(tag, "[fsoe-frame] RX←slave TxPDO 0x1B00 (31 bytes):  "
-                     "%s  %s  cmd=%s  conn_id=0x%04X",
+                     "{}  {}  cmd={}  conn_id=0x{:04X}",
                 sto_str, sbc_str,
                 FSoE::fsoeCommandName(tx.fsoe_command), tx.fsoe_connection_id);
 
@@ -232,7 +232,7 @@ inline void dumpTxPDO(const char* tag, const Synapticon_pdo::SOMANET_TxPDO_1B00&
     appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & Tx::kSLSInstance3, "SLS3");
     pos = strlen(sflags);
     appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & Tx::kSLSInstance4, "SLS4");
-    TETHER_LOGI(tag, "  safety_state=0x%04X [%s]", tx.safety_state_flags,
+    TETHER_LOGI(tag, "  safety_state=0x{:04X} [{}]", tx.safety_state_flags,
                 sflags[0] ? sflags : "(none)");
 
     // --- Diagnostic flags (secondary, excluding SBC which was shown above) ---
@@ -261,17 +261,17 @@ inline void dumpTxPDO(const char* tag, const Synapticon_pdo::SOMANET_TxPDO_1B00&
     appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & Tx::kAnalogDiagActive, "AnalogDiag");
     pos = strlen(dflags);
     appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & Tx::kAnalogValueValid, "AnalogValid");
-    TETHER_LOGI(tag, "  diag=0x%04X [%s]", tx.diagnostic_flags,
+    TETHER_LOGI(tag, "  diag=0x{:04X} [{}]", tx.diagnostic_flags,
                 dflags[0] ? dflags : "(none)");
 
     TETHER_LOGI(tag,
-        "  crc0=0x%04X crc1=0x%04X crc2=0x%04X crc3=0x%04X "
-        "crc4=0x%04X crc5=0x%04X crc6=0x%04X",
+        "  crc0=0x{:04X} crc1=0x{:04X} crc2=0x{:04X} crc3=0x{:04X} "
+        "crc4=0x{:04X} crc5=0x{:04X} crc6=0x{:04X}",
         tx.fsoe_crc_0, tx.fsoe_crc_1, tx.fsoe_crc_2, tx.fsoe_crc_3,
         tx.fsoe_crc_4, tx.fsoe_crc_5, tx.fsoe_crc_6);
     TETHER_LOGI(tag,
-        "  safe_pos=0x%04X  safe_pos_dup=0x%04X  "
-        "safe_vel=0x%04X  safe_vel_dup=0x%04X  safe_analog=0x%04X",
+        "  safe_pos=0x{:04X}  safe_pos_dup=0x{:04X}  "
+        "safe_vel=0x{:04X}  safe_vel_dup=0x{:04X}  safe_analog=0x{:04X}",
         tx.safe_position_actual, tx.safe_position_actual_dup,
         tx.safe_velocity_actual, tx.safe_velocity_actual_dup,
         tx.safe_analog_value);
@@ -279,7 +279,7 @@ inline void dumpTxPDO(const char* tag, const Synapticon_pdo::SOMANET_TxPDO_1B00&
     // --- Raw hex LAST ---
     char hex[96];
     formatHex(hex, sizeof(hex), reinterpret_cast<const uint8_t*>(&tx), sizeof(Tx));
-    TETHER_LOGI(tag, "  raw: %s", hex);
+    TETHER_LOGI(tag, "  raw: {}", hex);
 }
 
 // ============================================================================
@@ -302,7 +302,7 @@ inline void dumpTxPDOSummary(const char* tag,
     formatSafetyBit(sbc_str, sizeof(sbc_str), sbc, "SBC");
     char hex[128];
     formatHex(hex, sizeof(hex), reinterpret_cast<const uint8_t*>(&tx), sizeof(Tx));
-    TETHER_LOGI(tag, "[TxPDO-FSoE slave→master] changed: %s  %s  cmd=%s  | %s",
+    TETHER_LOGI(tag, "[TxPDO-FSoE slave→master] changed: {}  {}  cmd={}  | {}",
                 sto_str, sbc_str, FSoE::fsoeCommandName(tx.fsoe_command), hex);
 }
 
@@ -318,7 +318,7 @@ inline void dumpRxPDOSummary(const char* tag,
     formatSafetyBit(sbc_str, sizeof(sbc_str), sbc, "SBC");
     char hex[128];
     formatHex(hex, sizeof(hex), reinterpret_cast<const uint8_t*>(&rx), sizeof(Rx));
-    TETHER_LOGI(tag, "[RxPDO-FSoE master→slave] changed: %s  %s  cmd=%s  | %s",
+    TETHER_LOGI(tag, "[RxPDO-FSoE master→slave] changed: {}  {}  cmd={}  | {}",
                 sto_str, sbc_str, FSoE::fsoeCommandName(rx.fsoe_command), hex);
 }
 
@@ -373,7 +373,7 @@ inline void dumpWire(const char* tag,
     formatSafetyBit(rx_sto_str, sizeof(rx_sto_str), rx_sto, "STO");
     formatSafetyBit(rx_sbc_str, sizeof(rx_sbc_str), rx_sbc, "SBC");
 
-    TETHER_LOGI(tag, "cycle %u:  RX←slave %s  %s  cmd=%s  |  TX→slave %s  %s  cmd=%s",
+    TETHER_LOGI(tag, "cycle {}:  RX←slave {}  {}  cmd={}  |  TX→slave {}  {}  cmd={}",
                 cycle_count,
                 tx_sto_str, tx_sbc_str, FSoE::fsoeCommandName(tx_pdo->fsoe_command),
                 rx_sto_str, rx_sbc_str, FSoE::fsoeCommandName(rx_pdo->fsoe_command));
@@ -387,14 +387,14 @@ inline void dumpWire(const char* tag,
     for (size_t b = 0; b < sm3_total_len && pos + 3 < sizeof(hex); b++) {
         pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", tx_buffer[b]));
     }
-    TETHER_LOGI(tag, "  [TxPDO full %zuB] %s", sm3_total_len, hex);
+    TETHER_LOGI(tag, "  [TxPDO full {}B] {}", sm3_total_len, hex);
 
     // RxPDO (master-to-slave) -- full PDO buffer (FSoE + motion)
     pos = 0;
     for (size_t b = 0; b < sm2_total_len && pos + 3 < sizeof(hex); b++) {
         pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", rx_buffer[b]));
     }
-    TETHER_LOGI(tag, "  [RxPDO full %zuB] %s", sm2_total_len, hex);
+    TETHER_LOGI(tag, "  [RxPDO full {}B] {}", sm2_total_len, hex);
 }
 
 } // namespace FSoEDebug

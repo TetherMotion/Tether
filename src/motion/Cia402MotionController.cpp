@@ -37,7 +37,7 @@ std::shared_ptr<tether::common::IAxis> Cia402MotionController::addAxis(AxisId id
     
     m_axes[id] = axis;
     
-    TETHER_LOGI(TAG, "Added axis %lu", (unsigned long)id);
+    TETHER_LOGI(TAG, "Added axis {}", (unsigned long)id);
     return axis;
 }
 
@@ -60,7 +60,7 @@ bool Cia402MotionController::removeAxis(AxisId id) {
 bool Cia402MotionController::enableAll(uint32_t timeoutMs) {
     for (auto& [id, axis] : m_axes) {
         if (!axis->enable(timeoutMs)) {
-            TETHER_LOGE(TAG, "Failed to enable axis %lu", (unsigned long)id);
+            TETHER_LOGE(TAG, "Failed to enable axis {}", (unsigned long)id);
             return false;
         }
     }
