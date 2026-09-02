@@ -62,12 +62,12 @@ bool RP20Device::scanModules() {
 
             const ModuleDescriptor* desc = findByIdent(module_id);
             if (!desc) {
-                TETHER_LOGW(TAG, "Slave %u slot %u: unknown module ID 0x%02X, skipping",
+                TETHER_LOGW(TAG, "Slave {} slot {}: unknown module ID 0x{:02X}, skipping",
                             s, slot, module_id);
                 continue;
             }
 
-            TETHER_LOGI(TAG, "Slave %u slot %u: found %s (%s, ident=0x%02X)",
+            TETHER_LOGI(TAG, "Slave {} slot {}: found {} ({}, ident=0x{:02X})",
                         s, slot, desc->name, desc->module_class, module_id);
 
             ModuleInstance mod;
@@ -115,17 +115,17 @@ bool RP20Device::sendInitCommands(size_t module_index) {
         } else if (cmd.data_size == 4) {
             cmd_ok = sdo.writeU32(idx, cmd.subindex, cmd.data).has_value();
         } else {
-            TETHER_LOGW(TAG, "Slave %u slot %u: init cmd %zu has unsupported size %u",
+            TETHER_LOGW(TAG, "Slave {} slot {}: init cmd {} has unsupported size {}",
                         mod.slave_index, mod.slot, i, cmd.data_size);
             continue;
         }
 
         if (!cmd_ok) {
-            TETHER_LOGW(TAG, "Slave %u slot %u: init cmd 0x%04X:0x%02X failed (%s)",
+            TETHER_LOGW(TAG, "Slave {} slot {}: init cmd 0x{:04X}:0x{:02X} failed ({})",
                         mod.slave_index, mod.slot, idx, cmd.subindex, cmd.comment);
             ok = false;
         } else {
-            TETHER_LOGI(TAG, "Slave %u slot %u: init 0x%04X:0x%02X = 0x%X (%s)",
+            TETHER_LOGI(TAG, "Slave {} slot {}: init 0x{:04X}:0x{:02X} = 0x{:X} ({})",
                         mod.slave_index, mod.slot, idx, cmd.subindex,
                         cmd.data, cmd.comment);
         }
@@ -170,14 +170,14 @@ bool RP20Device::configureModule(size_t module_index, const ModuleConfig& config
         for (uint8_t ch = 0; ch < ch_count; ++ch) {
             uint8_t sub = static_cast<uint8_t>(start_sub + ch);
             if (!sdo.writeU8(cfg_idx, sub, val).has_value()) {
-                TETHER_LOGW(TAG, "Slave %u slot %u: failed to set %s CH%u=%.*s",
+                TETHER_LOGW(TAG, "Slave {} slot {}: failed to set {} CH{}={}",
                             mod.slave_index, mod.slot, what, ch,
-                            static_cast<int>(name_sv.size()), name_sv.data());
+                            name_sv);
                 ok = false;
             } else {
-                TETHER_LOGI(TAG, "Slave %u slot %u: %s CH%u=%.*s",
+                TETHER_LOGI(TAG, "Slave {} slot {}: {} CH{}={}",
                             mod.slave_index, mod.slot, what, ch,
-                            static_cast<int>(name_sv.size()), name_sv.data());
+                            name_sv);
             }
         }
     };
@@ -252,11 +252,11 @@ bool RP20Device::registerPDOs() {
                 desc->txpdo->size, txpdo_idx,
                 PDO::PDOAddressMode::Position);
             if (mod.tx_pdo_entry < 0) {
-                TETHER_LOGE(TAG, "Slave %u slot %u: failed to register TxPDO 0x%04X",
+                TETHER_LOGE(TAG, "Slave {} slot {}: failed to register TxPDO 0x{:04X}",
                             mod.slave_index, mod.slot, txpdo_idx);
                 return false;
             }
-            TETHER_LOGI(TAG, "Slave %u slot %u: registered TxPDO 0x%04X (%u bytes, entry %d)",
+            TETHER_LOGI(TAG, "Slave {} slot {}: registered TxPDO 0x{:04X} ({} bytes, entry {})",
                         mod.slave_index, mod.slot, txpdo_idx,
                         desc->txpdo->size, mod.tx_pdo_entry);
         }
@@ -267,11 +267,11 @@ bool RP20Device::registerPDOs() {
                 desc->rxpdo->size, rxpdo_idx,
                 PDO::PDOAddressMode::Position);
             if (mod.rx_pdo_entry < 0) {
-                TETHER_LOGE(TAG, "Slave %u slot %u: failed to register RxPDO 0x%04X",
+                TETHER_LOGE(TAG, "Slave {} slot {}: failed to register RxPDO 0x{:04X}",
                             mod.slave_index, mod.slot, rxpdo_idx);
                 return false;
             }
-            TETHER_LOGI(TAG, "Slave %u slot %u: registered RxPDO 0x%04X (%u bytes, entry %d)",
+            TETHER_LOGI(TAG, "Slave {} slot {}: registered RxPDO 0x{:04X} ({} bytes, entry {})",
                         mod.slave_index, mod.slot, rxpdo_idx,
                         desc->rxpdo->size, mod.rx_pdo_entry);
         }
@@ -300,38 +300,38 @@ bool RP20Device::assignPDOs(uint16_t slave_index) {
 
     if (!rxpdos.empty()) {
         if (!sdo.writeU8(CiA301::SyncManager2PDOAssign, 0, 0).has_value()) {
-            TETHER_LOGW(TAG, "%s: failed to clear SM2 PDO count", master_.slaveLogPrefix(slave_index).c_str());
+            TETHER_LOGW(TAG, "{}: failed to clear SM2 PDO count", master_.slaveLogPrefix(slave_index).c_str());
         }
         for (size_t i = 0; i < rxpdos.size(); ++i) {
             if (!sdo.writeU16(CiA301::SyncManager2PDOAssign,
                               static_cast<uint8_t>(i + 1), rxpdos[i]).has_value()) {
-                TETHER_LOGW(TAG, "%s: failed to assign RxPDO 0x%04X to SM2",
+                TETHER_LOGW(TAG, "{}: failed to assign RxPDO 0x{:04X} to SM2",
                             master_.slaveLogPrefix(slave_index).c_str(), rxpdos[i]);
             }
         }
         if (!sdo.writeU8(CiA301::SyncManager2PDOAssign, 0,
                          static_cast<uint8_t>(rxpdos.size())).has_value()) {
-            TETHER_LOGW(TAG, "%s: failed to set SM2 PDO count", master_.slaveLogPrefix(slave_index).c_str());
+            TETHER_LOGW(TAG, "{}: failed to set SM2 PDO count", master_.slaveLogPrefix(slave_index).c_str());
         }
-        TETHER_LOGI(TAG, "%s: assigned %zu RxPDO(s) to SM2", master_.slaveLogPrefix(slave_index).c_str(), rxpdos.size());
+        TETHER_LOGI(TAG, "{}: assigned {} RxPDO(s) to SM2", master_.slaveLogPrefix(slave_index).c_str(), rxpdos.size());
     }
 
     if (!txpdos.empty()) {
         if (!sdo.writeU8(CiA301::SyncManager3PDOAssign, 0, 0).has_value()) {
-            TETHER_LOGW(TAG, "%s: failed to clear SM3 PDO count", master_.slaveLogPrefix(slave_index).c_str());
+            TETHER_LOGW(TAG, "{}: failed to clear SM3 PDO count", master_.slaveLogPrefix(slave_index).c_str());
         }
         for (size_t i = 0; i < txpdos.size(); ++i) {
             if (!sdo.writeU16(CiA301::SyncManager3PDOAssign,
                               static_cast<uint8_t>(i + 1), txpdos[i]).has_value()) {
-                TETHER_LOGW(TAG, "%s: failed to assign TxPDO 0x%04X to SM3",
+                TETHER_LOGW(TAG, "{}: failed to assign TxPDO 0x{:04X} to SM3",
                             master_.slaveLogPrefix(slave_index).c_str(), txpdos[i]);
             }
         }
         if (!sdo.writeU8(CiA301::SyncManager3PDOAssign, 0,
                          static_cast<uint8_t>(txpdos.size())).has_value()) {
-            TETHER_LOGW(TAG, "%s: failed to set SM3 PDO count", master_.slaveLogPrefix(slave_index).c_str());
+            TETHER_LOGW(TAG, "{}: failed to set SM3 PDO count", master_.slaveLogPrefix(slave_index).c_str());
         }
-        TETHER_LOGI(TAG, "%s: assigned %zu TxPDO(s) to SM3", master_.slaveLogPrefix(slave_index).c_str(), txpdos.size());
+        TETHER_LOGI(TAG, "{}: assigned {} TxPDO(s) to SM3", master_.slaveLogPrefix(slave_index).c_str(), txpdos.size());
     }
 
     return true;
@@ -371,13 +371,13 @@ void RP20Device::updateSyncManagerLengths(uint16_t slave_index) {
     if (!cfgs) return;
 
     if (total_rx > 0) {
-        TETHER_LOGI(TAG, "%s: SM2 length: %u -> %u",
+        TETHER_LOGI(TAG, "{}: SM2 length: {} -> {}",
                     master_.slaveLogPrefix(slave_index).c_str(), cfgs[slave_index].sm[2].length, total_rx);
         cfgs[slave_index].sm[2].length = total_rx;
         cfgs[slave_index].rxpdo_size = total_rx;
     }
     if (total_tx > 0) {
-        TETHER_LOGI(TAG, "%s: SM3 length: %u -> %u",
+        TETHER_LOGI(TAG, "{}: SM3 length: {} -> {}",
                     master_.slaveLogPrefix(slave_index).c_str(), cfgs[slave_index].sm[3].length, total_tx);
         cfgs[slave_index].sm[3].length = total_tx;
         cfgs[slave_index].txpdo_size = total_tx;
@@ -425,7 +425,7 @@ bool RP20Device::bringToSafeOp(const ModuleConfig& config) {
         assignPDOs(s);
 
         if (!master_.configureProcessDataSyncManagersFromSii(s)) {
-            TETHER_LOGW(TAG, "bringToSafeOp: slave %u SM2/SM3 config from SII failed", s);
+            TETHER_LOGW(TAG, "bringToSafeOp: slave {} SM2/SM3 config from SII failed", s);
         }
 
         updateSyncManagerLengths(s);
@@ -436,11 +436,11 @@ bool RP20Device::bringToSafeOp(const ModuleConfig& config) {
 
         auto err = sl.transitionToSafeOp();
         if (err != SlaveError::Ok) {
-            TETHER_LOGE(TAG, "bringToSafeOp: slave %u SAFE-OP failed: %s",
+            TETHER_LOGE(TAG, "bringToSafeOp: slave {} SAFE-OP failed: {}",
                         s, slaveErrorToString(err));
             return false;
         }
-        TETHER_LOGI(TAG, "bringToSafeOp: slave %u in SAFE-OP", s);
+        TETHER_LOGI(TAG, "bringToSafeOp: slave {} in SAFE-OP", s);
     }
 
     return true;
@@ -462,11 +462,11 @@ bool RP20Device::bringToOp() {
         auto& sl = master_.slave(s);
         auto err = sl.transitionToOp();
         if (err != SlaveError::Ok) {
-            TETHER_LOGE(TAG, "bringToOp: slave %u OP failed: %s",
+            TETHER_LOGE(TAG, "bringToOp: slave {} OP failed: {}",
                         s, slaveErrorToString(err));
             return false;
         }
-        TETHER_LOGI(TAG, "bringToOp: slave %u in OP", s);
+        TETHER_LOGI(TAG, "bringToOp: slave {} in OP", s);
     }
     return true;
 }

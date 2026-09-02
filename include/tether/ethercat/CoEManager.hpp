@@ -321,7 +321,7 @@ template<typename T>
 std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
                                             CoETransactionOptions options) {
     if (debug_flags_.coeReads) {
-        TETHER_LOGI("coe_mgr", "%s: CoE read START index=0x%04X:%u", log_prefix_.c_str(), index, subindex);
+        TETHER_LOGI("coe_mgr", "{}: CoE read START index=0x{:04X}:{}", log_prefix_.c_str(), index, subindex);
     }
 
     CoEReadTransaction<T> txn;
@@ -349,7 +349,7 @@ std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
         }
         if (state_.read_queue.size() >= kMaxQueueDepth) {
             if (debug_flags_.coeReads) {
-                TETHER_LOGI("coe_mgr", "%s: CoE read QUEUE FULL index=0x%04X:%u", log_prefix_.c_str(), index, subindex);
+                TETHER_LOGI("coe_mgr", "{}: CoE read QUEUE FULL index=0x{:04X}:{}", log_prefix_.c_str(), index, subindex);
             }
             CoEReadTransaction<T> fail_txn;
             fail_txn.promise.set_value(std::unexpected(CoEError::QueueFull));
@@ -360,7 +360,7 @@ std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
     state_.work_cv.notify_one();
 
     if (debug_flags_.coeReads) {
-        TETHER_LOGI("coe_mgr", "%s: CoE read ENQUEUED index=0x%04X:%u", log_prefix_.c_str(), index, subindex);
+        TETHER_LOGI("coe_mgr", "{}: CoE read ENQUEUED index=0x{:04X}:{}", log_prefix_.c_str(), index, subindex);
     }
     return future;
 }

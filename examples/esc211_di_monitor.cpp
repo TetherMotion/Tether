@@ -245,16 +245,16 @@ int main(int argc, char** argv) {
     if (use_esi) {
         esi.emplace(esi_xml);
         if (esi->empty()) {
-            TETHER_LOGE(TAG, "Failed to parse ESI XML '%s': %s",
+            TETHER_LOGE(TAG, "Failed to parse ESI XML '{}': {}",
                         esi_xml.c_str(), esi->errorMessage().c_str());
             return 1;
         }
-        TETHER_LOGI(TAG, "Loaded ESI XML '%s' (%zu device(s))",
+        TETHER_LOGI(TAG, "Loaded ESI XML '{}' ({} device(s))",
                     esi_xml.c_str(), esi->devices().size());
     }
 #endif
 
-    TETHER_LOGI(TAG, "esc211_di_monitor — interface: %s, slave: %d",
+    TETHER_LOGI(TAG, "esc211_di_monitor — interface: {}, slave: {}",
                 iface.c_str(), slave_idx);
     Tether::Examples::logMailboxConfig(mbSize, mbAddr, TAG);
 
@@ -284,7 +284,7 @@ int main(int argc, char** argv) {
     }
 
     uint16_t slaves = master.getDiscoveredSlaveCount();
-    TETHER_LOGI(TAG, "Discovered %u slave(s)", slaves);
+    TETHER_LOGI(TAG, "Discovered {} slave(s)", slaves);
     master.logDiscoveredSlavesSummary(TAG);
 
     if (debug_flags.count("sii-derivation") && slaves > 0) {
@@ -316,7 +316,7 @@ int main(int argc, char** argv) {
     }
 
     if (slave_idx < 0 || static_cast<uint16_t>(slave_idx) >= slaves) {
-        TETHER_LOGE(TAG, "Slave index %d out of range (0..%u)", slave_idx, slaves - 1);
+        TETHER_LOGE(TAG, "Slave index {} out of range (0..{})", slave_idx, slaves - 1);
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 4;
@@ -329,7 +329,7 @@ int main(int argc, char** argv) {
     expected_id.product_code = EtherCAT::Drives::NexcobotESC211::kProductCode;
     master.verifySlaveIdentity(static_cast<uint16_t>(slave_idx), expected_id, false, TAG);
 
-    TETHER_LOGI(TAG, "Configuring mailbox for slave %d...", slave_idx);
+    TETHER_LOGI(TAG, "Configuring mailbox for slave {}...", slave_idx);
     EtherCAT::SlaveError mb_err;
 #if TETHER_HAVE_ESI
     if (use_esi) {
@@ -343,7 +343,7 @@ int main(int argc, char** argv) {
             0x0004);
     }
     if (mb_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "Mailbox config failed: %s", EtherCAT::slaveErrorToString(mb_err));
+        TETHER_LOGE(TAG, "Mailbox config failed: {}", EtherCAT::slaveErrorToString(mb_err));
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 7;
@@ -351,13 +351,13 @@ int main(int argc, char** argv) {
 
     auto pre_err = sl.transitionToPreOp();
     if (pre_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "PRE-OP transition failed: %s", EtherCAT::slaveErrorToString(pre_err));
+        TETHER_LOGE(TAG, "PRE-OP transition failed: {}", EtherCAT::slaveErrorToString(pre_err));
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 7;
     }
 
-    TETHER_LOGI(TAG, "Slave %d in PRE-OP", slave_idx);
+    TETHER_LOGI(TAG, "Slave {} in PRE-OP", slave_idx);
 
     // ---- AL status monitoring via SlaveStatusPoller ----
     auto& poller = master.statusPoller();
@@ -367,7 +367,7 @@ int main(int argc, char** argv) {
     poller.registerCallback(
         EtherCAT::StatusFilter(EtherCAT::StatusTransitionFlags::ToLowerState),
         [](const EtherCAT::SlaveStatusEvent& ev) {
-            TETHER_LOGW(TAG, "Slave %u AL state dropped: %s -> %s (raw 0x%04X -> 0x%04X)",
+            TETHER_LOGW(TAG, "Slave {} AL state dropped: {} -> {} (raw 0x{:04X} -> 0x{:04X})",
                         ev.slave_index,
                         EtherCAT::slaveStateToString(ev.old_state),
                         EtherCAT::slaveStateToString(ev.new_state),
@@ -378,8 +378,8 @@ int main(int argc, char** argv) {
     poller.registerCallback(
         EtherCAT::StatusFilter(EtherCAT::StatusTransitionFlags::ErrorSet),
         [](const EtherCAT::SlaveStatusEvent& ev) {
-            TETHER_LOGE(TAG, "Slave %u AL error flag SET (AL_STATUS=0x%04X, "
-                             "AL_STATUS_CODE=0x%04X, state=%s)",
+            TETHER_LOGE(TAG, "Slave {} AL error flag SET (AL_STATUS=0x{:04X}, "
+                             "AL_STATUS_CODE=0x{:04X}, state={})",
                         ev.slave_index, ev.new_al_status,
                         ev.al_status_code,
                         EtherCAT::slaveStateToString(ev.new_state));
@@ -389,13 +389,13 @@ int main(int argc, char** argv) {
     poller.registerCallback(
         EtherCAT::StatusFilter(EtherCAT::StatusTransitionFlags::ErrorCleared),
         [](const EtherCAT::SlaveStatusEvent& ev) {
-            TETHER_LOGI(TAG, "Slave %u AL error flag CLEARED (state=%s)",
+            TETHER_LOGI(TAG, "Slave {} AL error flag CLEARED (state={})",
                         ev.slave_index,
                         EtherCAT::slaveStateToString(ev.new_state));
         });
 
     poller.start();
-    TETHER_LOGI(TAG, "AL status poller started (interval=%u ms)", poller.pollIntervalMs());
+    TETHER_LOGI(TAG, "AL status poller started (interval={} ms)", poller.pollIntervalMs());
 
     // readIdentityObject(sl);
 
@@ -405,7 +405,7 @@ int main(int argc, char** argv) {
         {&Reg::FSOETx::SAFE_DO},         // 0x7020, 4 bytes (Unsigned32)
     });
     if (rx_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "Custom RxPDO config failed: %s", EtherCAT::slaveErrorToString(rx_err));
+        TETHER_LOGE(TAG, "Custom RxPDO config failed: {}", EtherCAT::slaveErrorToString(rx_err));
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 7;
@@ -421,7 +421,7 @@ int main(int argc, char** argv) {
         {&Reg::FSOERx::DIValue},         // 0x6051, 4 bytes
     });
     if (tx_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "Custom TxPDO config failed: %s", EtherCAT::slaveErrorToString(tx_err));
+        TETHER_LOGE(TAG, "Custom TxPDO config failed: {}", EtherCAT::slaveErrorToString(tx_err));
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 7;
@@ -430,7 +430,7 @@ int main(int argc, char** argv) {
     // Register PDO buffers and assign PDOs to sync managers
     auto apply_err = sl.applyCustomPDOs();
     if (apply_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "Apply custom PDOs failed: %s", EtherCAT::slaveErrorToString(apply_err));
+        TETHER_LOGE(TAG, "Apply custom PDOs failed: {}", EtherCAT::slaveErrorToString(apply_err));
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 7;
@@ -438,7 +438,7 @@ int main(int argc, char** argv) {
 
     auto pdo_err = sl.configurePDOSyncManagers();
     if (pdo_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "PDO sync-manager config failed: %s", EtherCAT::slaveErrorToString(pdo_err));
+        TETHER_LOGE(TAG, "PDO sync-manager config failed: {}", EtherCAT::slaveErrorToString(pdo_err));
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 7;
@@ -446,13 +446,13 @@ int main(int argc, char** argv) {
 
     auto safe_err = sl.transitionToSafeOp();
     if (safe_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "SAFE-OP transition failed: %s", EtherCAT::slaveErrorToString(safe_err));
+        TETHER_LOGE(TAG, "SAFE-OP transition failed: {}", EtherCAT::slaveErrorToString(safe_err));
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 7;
     }
 
-    TETHER_LOGI(TAG, "Slave %d in SAFE-OP", slave_idx);
+    TETHER_LOGI(TAG, "Slave {} in SAFE-OP", slave_idx);
 
     // ---- PDO exchange + display loop ----
     using namespace std::chrono;
@@ -487,7 +487,7 @@ int main(int argc, char** argv) {
                           << std::dec << "\n";
                 std::cout.flush();
             } else {
-                TETHER_LOGW(TAG, "PDO exchange failed (cycle %llu)",
+                TETHER_LOGW(TAG, "PDO exchange failed (cycle {})",
                             static_cast<unsigned long long>(cycle));
             }
             ++cycle;

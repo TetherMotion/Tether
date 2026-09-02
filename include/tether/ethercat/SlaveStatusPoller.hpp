@@ -20,7 +20,7 @@
  *   StatusFilter drop_filter;
  *   drop_filter.transition_flags = static_cast<uint8_t>(StatusTransitionFlags::ToLowerState);
  *   poller.registerCallback(drop_filter, [](const SlaveStatusEvent& ev) {
- *       TETHER_LOGE("monitor", "Slave %u dropped: %s -> %s",
+ *       TETHER_LOGE("monitor", "Slave {} dropped: {} -> {}",
  *                   ev.slave_index,
  *                   slaveStateToString(ev.old_state),
  *                   slaveStateToString(ev.new_state));

@@ -63,12 +63,12 @@ bool Slave::aprd(uint16_t ado, void* out, uint16_t len, unsigned int timeout_ms)
 SlaveError Slave::configureMailbox(Tether::Platform::LogLevel log_level) {
     if (!master_.autoConfigureMailbox(index_, log_level)) {
         TETHER_LOGE( TAG,
-            "%s: Failed to auto-configure mailbox from SII", logPrefix().c_str());
+            "{}: Failed to auto-configure mailbox from SII", logPrefix().c_str());
         return SlaveError::MailboxConfigFailed;
     }
     mailbox_configured_ = true;
     TETHER_LOGI( TAG,
-        "%s: Mailbox configured from SII", logPrefix().c_str());
+        "{}: Mailbox configured from SII", logPrefix().c_str());
     // Debug gate checkpoint: mailbox configured
     master_.debugGate().notifyCheckpoint("mailbox-configured", index_);
     return SlaveError::Ok;
@@ -97,7 +97,7 @@ SlaveError Slave::configureMailbox(
         slave_configs[index_].sm[1] = PDO::SyncManagerConfig::mailbox_read(
             mbox_out.address, mbox_out.length);
         if (!pdo.configureSlavesSMs(index_)) {
-            TETHER_LOGE(TAG, "%s: Failed to write mailbox SM registers", logPrefix().c_str());
+            TETHER_LOGE(TAG, "{}: Failed to write mailbox SM registers", logPrefix().c_str());
             return SlaveError::MailboxConfigFailed;
         }
 
@@ -109,7 +109,7 @@ SlaveError Slave::configureMailbox(
 
     mailbox_configured_ = true;
     TETHER_LOGI( TAG,
-        "%s: Mailbox configured (wr=0x%04X/%u, rd=0x%04X/%u, proto=0x%04X)",
+        "{}: Mailbox configured (wr=0x{:04X}/{}, rd=0x{:04X}/{}, proto=0x{:04X})",
         logPrefix().c_str(), mbox_in.address, mbox_in.length,
         mbox_out.address, mbox_out.length, protocols);
     // Debug gate checkpoint: mailbox configured
@@ -153,7 +153,7 @@ SlaveError Slave::configureMailbox(
     Tether::Platform::LogLevel log_level)
 {
     if (esi.empty()) {
-        TETHER_LOGE(TAG, "%s: ESI file is empty — cannot configure mailbox from ESI", logPrefix().c_str());
+        TETHER_LOGE(TAG, "{}: ESI file is empty — cannot configure mailbox from ESI", logPrefix().c_str());
         return SlaveError::MailboxConfigFailed;
     }
 
@@ -161,12 +161,12 @@ SlaveError Slave::configureMailbox(
     auto id = readIdentityForESIMatch(master_, index_);
     const ESI::DeviceInfo* dev = esi.findDevice(id.vendorId, id.productCode);
     if (!dev) {
-        TETHER_LOGE(TAG, "%s: ESI file has no devices", logPrefix().c_str());
+        TETHER_LOGE(TAG, "{}: ESI file has no devices", logPrefix().c_str());
         return SlaveError::MailboxConfigFailed;
     }
 
     if (log_level >= Tether::Platform::LogLevel::Debug) {
-        TETHER_LOGD(TAG, "%s: ESI device '%s' matched (vendor=0x%08X product=0x%08X)",
+        TETHER_LOGD(TAG, "{}: ESI device '{}' matched (vendor=0x{:08X} product=0x{:08X})",
                     logPrefix().c_str(), dev->name.c_str(), dev->vendorId, dev->productCode);
     }
 
@@ -181,7 +181,7 @@ SlaveError Slave::configureMailbox(
         mbox_out.address = mbxOut->startAddress;
         mbox_out.length  = mbxOut->defaultSize;
     } else {
-        TETHER_LOGW(TAG, "%s: ESI has no MBoxOut sync manager — using defaults", logPrefix().c_str());
+        TETHER_LOGW(TAG, "{}: ESI has no MBoxOut sync manager — using defaults", logPrefix().c_str());
         mbox_out.address = 0x1000;
         mbox_out.length  = 256;
     }
@@ -190,7 +190,7 @@ SlaveError Slave::configureMailbox(
         mbox_in.address = mbxIn->startAddress;
         mbox_in.length  = mbxIn->defaultSize;
     } else {
-        TETHER_LOGW(TAG, "%s: ESI has no MBoxIn sync manager — using defaults", logPrefix().c_str());
+        TETHER_LOGW(TAG, "{}: ESI has no MBoxIn sync manager — using defaults", logPrefix().c_str());
         mbox_in.address = 0x1200;
         mbox_in.length  = 256;
     }
@@ -201,7 +201,7 @@ SlaveError Slave::configureMailbox(
         protocols = *dev->mailbox.protocols;
     }
 
-    TETHER_LOGI(TAG, "%s: Configuring mailbox from ESI (out=0x%04X/%u, in=0x%04X/%u, proto=0x%04X)",
+    TETHER_LOGI(TAG, "{}: Configuring mailbox from ESI (out=0x{:04X}/{}, in=0x{:04X}/{}, proto=0x{:04X})",
                 logPrefix().c_str(), mbox_out.address, mbox_out.length,
                 mbox_in.address, mbox_in.length, protocols);
 
@@ -211,7 +211,7 @@ SlaveError Slave::configureMailbox(
 void Slave::assumeMailboxAlreadyConfigured() {
     mailbox_configured_ = true;
     TETHER_LOGI( TAG,
-        "%s: Assuming mailbox already configured", logPrefix().c_str());
+        "{}: Assuming mailbox already configured", logPrefix().c_str());
 
     // Best-effort drain: the slave firmware may have left stale data in SM1
     // from boot or a previous session.  If the CoE subsystem doesn't have
@@ -219,7 +219,7 @@ void Slave::assumeMailboxAlreadyConfigured() {
     // everything), the drain simply logs a warning and continues.
     if (!drainMailbox()) {
         TETHER_LOGW(TAG,
-            "%s: Mailbox drain after assumeMailboxAlreadyConfigured() "
+            "{}: Mailbox drain after assumeMailboxAlreadyConfigured() "
             "did not complete — stale responses may occur on first SDO exchange",
             logPrefix().c_str());
     }
@@ -237,12 +237,12 @@ bool Slave::drainMailbox(unsigned int max_drain) {
 SlaveError Slave::configurePDOSyncManagers() {
     if (!master_.configureProcessDataSyncManagersFromSii(index_)) {
         TETHER_LOGE( TAG,
-            "%s: Failed to configure PDO sync-managers from SII", logPrefix().c_str());
+            "{}: Failed to configure PDO sync-managers from SII", logPrefix().c_str());
         return SlaveError::PDOConfigFailed;
     }
     pdo_configured_ = true;
     TETHER_LOGI( TAG,
-        "%s: PDO sync-managers configured from SII", logPrefix().c_str());
+        "{}: PDO sync-managers configured from SII", logPrefix().c_str());
 
     if (slave_debug_flags_.pdoSm) {
         EtherCAT::debugPDOSyncManagerConfiguration(master_, index_, TAG);
@@ -259,7 +259,7 @@ SlaveError Slave::configurePDOSyncManagers(
     auto* cfgs = pdo.slaveConfigs();
     if (index_ >= PDO::kMaxPDOSlaves) {
         TETHER_LOGE( TAG,
-            "%s: Index exceeds Tether internal max PDO slaves (%zu). "
+            "{}: Index exceeds Tether internal max PDO slaves ({}). "
             "This is a Tether limit, not a slave limit. "
             "Increase ECAT_PDO_MAX_SLAVES in TetherConfig.hpp.",
             logPrefix().c_str(), PDO::kMaxPDOSlaves);
@@ -279,7 +279,7 @@ SlaveError Slave::configurePDOSyncManagers(
 
     if (!pdo.configureSlavesSMs(index_)) {
         TETHER_LOGE( TAG,
-            "%s: Failed to write PDO SM registers", logPrefix().c_str());
+            "{}: Failed to write PDO SM registers", logPrefix().c_str());
         return SlaveError::PDOConfigFailed;
     }
 
@@ -289,14 +289,14 @@ SlaveError Slave::configurePDOSyncManagers(
 
 SlaveError Slave::configurePDOSyncManagers(const ESIFile& esi) {
     if (esi.empty()) {
-        TETHER_LOGE(TAG, "%s: ESI file is empty — cannot configure PDO SMs from ESI", logPrefix().c_str());
+        TETHER_LOGE(TAG, "{}: ESI file is empty — cannot configure PDO SMs from ESI", logPrefix().c_str());
         return SlaveError::PDOConfigFailed;
     }
 
     auto id = readIdentityForESIMatch(master_, index_);
     const ESI::DeviceInfo* dev = esi.findDevice(id.vendorId, id.productCode);
     if (!dev) {
-        TETHER_LOGE(TAG, "%s: ESI file has no devices", logPrefix().c_str());
+        TETHER_LOGE(TAG, "{}: ESI file has no devices", logPrefix().c_str());
         return SlaveError::PDOConfigFailed;
     }
 
@@ -305,14 +305,14 @@ SlaveError Slave::configurePDOSyncManagers(const ESIFile& esi) {
     const ESI::SyncManagerEntry* smIn  = findSmByName(*dev, "Inputs");
 
     if (!smOut || !smIn) {
-        TETHER_LOGE(TAG, "%s: ESI missing Outputs/Inputs sync managers", logPrefix().c_str());
+        TETHER_LOGE(TAG, "{}: ESI missing Outputs/Inputs sync managers", logPrefix().c_str());
         return SlaveError::PDOConfigFailed;
     }
 
     uint8_t sm2_ctrl = std::bit_cast<uint8_t>(smOut->control);
     uint8_t sm3_ctrl = std::bit_cast<uint8_t>(smIn->control);
 
-    TETHER_LOGI(TAG, "%s: Configuring PDO SMs from ESI (SM2=0x%04X/%u ctrl=0x%02X, SM3=0x%04X/%u ctrl=0x%02X)",
+    TETHER_LOGI(TAG, "{}: Configuring PDO SMs from ESI (SM2=0x{:04X}/{} ctrl=0x{:02X}, SM3=0x{:04X}/{} ctrl=0x{:02X})",
                 logPrefix().c_str(), smOut->startAddress, smOut->defaultSize, sm2_ctrl,
                 smIn->startAddress, smIn->defaultSize, sm3_ctrl);
 
@@ -324,7 +324,7 @@ SlaveError Slave::configurePDOSyncManagers(const ESIFile& esi) {
 void Slave::assumePDOAlreadyConfigured() {
     pdo_configured_ = true;
     TETHER_LOGI( TAG,
-        "%s: Assuming PDO sync-managers already configured", logPrefix().c_str());
+        "{}: Assuming PDO sync-managers already configured", logPrefix().c_str());
 }
 
 // -- State transitions -------------------------------------------------------
@@ -354,7 +354,7 @@ void verifySyncManagers(EtherCAT::Slave& slave,
     auto& pdo = slave.master().pdo();
     auto* cfgs = pdo.slaveConfigs();
     if (idx >= kMaxPDOSlaves) {
-        TETHER_LOGE(tag, "%s: Cannot verify SMs — index out of range", idx);
+        TETHER_LOGE(tag, "{}: Cannot verify SMs — index out of range", idx);
         return;
     }
     const auto& expected = cfgs[idx].sm;
@@ -363,7 +363,7 @@ void verifySyncManagers(EtherCAT::Slave& slave,
         TETHER_LOGI(tag,
             "╔══════════════════════════════════════════════════════════════╗");
         TETHER_LOGI(tag,
-            "║  SM Verification: Slave %u  SM%u–SM%u                           ║",
+            "║  SM Verification: Slave {}  SM{}–SM{}                           ║",
             idx, static_cast<unsigned>(sm_start), static_cast<unsigned>(sm_end));
         TETHER_LOGI(tag,
             "╚══════════════════════════════════════════════════════════════╝");
@@ -373,17 +373,17 @@ void verifySyncManagers(EtherCAT::Slave& slave,
     for (uint8_t i = sm_start; i <= sm_end; ++i) {
         if (!expected[i].enable) {
             if (debug_flag) {
-                TETHER_LOGI(tag, "SM%u: expected disabled — skipped", static_cast<unsigned>(i));
+                TETHER_LOGI(tag, "SM{}: expected disabled — skipped", static_cast<unsigned>(i));
             }
             continue;
         }
         auto result = slave.sm(i).validate(expected[i]);
         if (!result.valid) {
-            TETHER_LOGE(tag, "%s: SM%u verification FAILED — %s",
+            TETHER_LOGE(tag, "{}: SM{} verification FAILED — {}",
                         idx, static_cast<unsigned>(i), result.message.c_str());
             any_mismatch = true;
         } else if (debug_flag) {
-            TETHER_LOGI(tag, "%s: SM%u verification PASSED", idx, static_cast<unsigned>(i));
+            TETHER_LOGI(tag, "{}: SM{} verification PASSED", idx, static_cast<unsigned>(i));
         }
         if (debug_flag) {
             slave.sm(i).dump(tag);
@@ -392,7 +392,7 @@ void verifySyncManagers(EtherCAT::Slave& slave,
 
     if (debug_flag) {
         TETHER_LOGI(tag,
-            "%s: SM verification summary — %s",
+            "{}: SM verification summary — {}",
             idx, any_mismatch ? "MISMATCHES DETECTED (see errors above)" : "ALL OK");
     }
 }
@@ -408,7 +408,7 @@ SlaveError Slave::transitionTo(SlaveState target) {
         case SlaveState::BOOT:    return transitionToBoot();
         default:
             TETHER_LOGE( TAG,
-                "%s: Unknown target state 0x%02X", logPrefix().c_str(), static_cast<uint8_t>(target));
+                "{}: Unknown target state 0x{:02X}", logPrefix().c_str(), static_cast<uint8_t>(target));
             return SlaveError::InvalidStateTransition;
     }
 }
@@ -418,9 +418,9 @@ SlaveError Slave::transitionToInit() {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  State Machine Transition: Slave %u                          ║", index_);
+        TETHER_LOGI(TAG, "║  State Machine Transition: Slave {}                          ║", index_);
         TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
-        TETHER_LOGI(TAG, "║  Transition: %s => INIT", slaveStateToString(current_state));
+        TETHER_LOGI(TAG, "║  Transition: {} => INIT", slaveStateToString(current_state));
         TETHER_LOGI(TAG, "║  Reason:    Requested by user/application");
         TETHER_LOGI(TAG, "║  Requirements: None (INIT is the base state)");
         TETHER_LOGI(TAG, "║  Status:     Fulfilled - proceeding with transition");
@@ -429,7 +429,7 @@ SlaveError Slave::transitionToInit() {
     
     if (!master_.requestSlaveApplicationLayerState(index_, static_cast<uint8_t>(SlaveState::INIT))) {
         TETHER_LOGE( TAG,
-            "%s: Failed to transition to INIT", logPrefix().c_str());
+            "{}: Failed to transition to INIT", logPrefix().c_str());
         return SlaveError::TransportError;
     }
     // Reset configuration flags when going back to INIT
@@ -438,7 +438,7 @@ SlaveError Slave::transitionToInit() {
     
     if (slave_debug_flags_.stateMachine) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  Transition Result: Slave %u => INIT SUCCESS                  ║", index_);
+        TETHER_LOGI(TAG, "║  Transition Result: Slave {} => INIT SUCCESS                  ║", index_);
         TETHER_LOGI(TAG, "║  Configuration flags reset: mailbox=false, pdo=false          ║");
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
     }
@@ -451,21 +451,21 @@ SlaveError Slave::transitionToPreOp() {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  State Machine Transition: Slave %u                          ║", index_);
+        TETHER_LOGI(TAG, "║  State Machine Transition: Slave {}                          ║", index_);
         TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
-        TETHER_LOGI(TAG, "║  Transition: %s => PRE_OP", slaveStateToString(current_state));
+        TETHER_LOGI(TAG, "║  Transition: {} => PRE_OP", slaveStateToString(current_state));
         TETHER_LOGI(TAG, "║  Reason:    Mailbox operations (SDO, FoE, etc.) require PRE_OP");
         TETHER_LOGI(TAG, "║  Requirements:");
-        TETHER_LOGI(TAG, "║    - Mailbox (SM0/SM1) must be configured: %s", 
+        TETHER_LOGI(TAG, "║    - Mailbox (SM0/SM1) must be configured: {}", 
                     mailbox_configured_ ? "✓ FULFILLED" : "✗ NOT FULFILLED");
-        TETHER_LOGI(TAG, "║  Status:     %s", 
+        TETHER_LOGI(TAG, "║  Status:     {}", 
                     mailbox_configured_ ? "Fulfilled - proceeding with transition" : "NOT Fulfilled - transition blocked");
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
     }
     
     if (!mailbox_configured_) {
         TETHER_LOGE( TAG,
-            "%s: Cannot transition to PRE_OP — mailbox (SM0/SM1) "
+            "{}: Cannot transition to PRE_OP — mailbox (SM0/SM1) "
             "not configured. Call configureMailbox() or "
             "assumeMailboxAlreadyConfigured() first.", logPrefix().c_str());
         return SlaveError::MailboxNotConfigured;
@@ -473,7 +473,7 @@ SlaveError Slave::transitionToPreOp() {
     verifySyncManagers(*this, 0, 1, slave_debug_flags_.verifyPreOp, TAG);
     if (!master_.transitionSlaveToPreOperational(index_)) {
         TETHER_LOGE( TAG,
-            "%s: Failed to transition to PRE_OP", logPrefix().c_str());
+            "{}: Failed to transition to PRE_OP", logPrefix().c_str());
         return SlaveError::TransportError;
     }
 
@@ -488,7 +488,7 @@ SlaveError Slave::transitionToPreOp() {
 
     if (slave_debug_flags_.stateMachine) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  Transition Result: Slave %u => PRE_OP SUCCESS                ║", index_);
+        TETHER_LOGI(TAG, "║  Transition Result: Slave {} => PRE_OP SUCCESS                ║", index_);
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
     }
 
@@ -500,21 +500,21 @@ SlaveError Slave::transitionToSafeOp() {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  State Machine Transition: Slave %u                          ║", index_);
+        TETHER_LOGI(TAG, "║  State Machine Transition: Slave {}                          ║", index_);
         TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
-        TETHER_LOGI(TAG, "║  Transition: %s => SAFE_OP", slaveStateToString(current_state));
+        TETHER_LOGI(TAG, "║  Transition: {} => SAFE_OP", slaveStateToString(current_state));
         TETHER_LOGI(TAG, "║  Reason:    Process data exchange requires SAFE_OP");
         TETHER_LOGI(TAG, "║  Requirements:");
-        TETHER_LOGI(TAG, "║    - PDO sync-managers (SM2/SM3) must be configured: %s", 
+        TETHER_LOGI(TAG, "║    - PDO sync-managers (SM2/SM3) must be configured: {}", 
                     pdo_configured_ ? "✓ FULFILLED" : "✗ NOT FULFILLED");
-        TETHER_LOGI(TAG, "║  Status:     %s", 
+        TETHER_LOGI(TAG, "║  Status:     {}", 
                     pdo_configured_ ? "Fulfilled - proceeding with transition" : "NOT Fulfilled - transition blocked");
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
     }
     
     if (!pdo_configured_) {
         TETHER_LOGE( TAG,
-            "%s: Cannot transition to SAFE_OP — PDO sync-managers "
+            "{}: Cannot transition to SAFE_OP — PDO sync-managers "
             "(SM2/SM3) not configured. Call configurePDOSyncManagers() or "
             "assumePDOAlreadyConfigured() first.", logPrefix().c_str());
         return SlaveError::PDONotConfigured;
@@ -522,7 +522,7 @@ SlaveError Slave::transitionToSafeOp() {
     verifySyncManagers(*this, 0, 3, slave_debug_flags_.verifySafeOp, TAG);
     if (!master_.requestSlaveApplicationLayerState(index_, static_cast<uint8_t>(SlaveState::SAFE_OP))) {
         TETHER_LOGE( TAG,
-            "%s: Failed to transition to SAFE_OP (transport error)", logPrefix().c_str());
+            "{}: Failed to transition to SAFE_OP (transport error)", logPrefix().c_str());
         return SlaveError::TransportError;
     }
 
@@ -534,7 +534,7 @@ SlaveError Slave::transitionToSafeOp() {
             if (state == static_cast<uint8_t>(SlaveState::SAFE_OP)) {
                 if (slave_debug_flags_.stateMachine) {
                     TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-                    TETHER_LOGI(TAG, "║  Transition Result: Slave %u => SAFE_OP SUCCESS               ║", index_);
+                    TETHER_LOGI(TAG, "║  Transition Result: Slave {} => SAFE_OP SUCCESS               ║", index_);
                     TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
                 }
                 // Debug gate checkpoint: SAFE_OP confirmed
@@ -546,7 +546,7 @@ SlaveError Slave::transitionToSafeOp() {
 
     uint16_t al_code = 0;
     readALStatusCode(al_code);
-    TETHER_LOGE(TAG, "%s: SAFE_OP not confirmed after 2s (AL status code: %s (0x%04X))", logPrefix().c_str(), getALStatusCodeName(al_code), al_code);
+    TETHER_LOGE(TAG, "{}: SAFE_OP not confirmed after 2s (AL status code: {} (0x{:04X}))", logPrefix().c_str(), getALStatusCodeName(al_code), al_code);
     return SlaveError::TransportError;
 }
 
@@ -577,24 +577,24 @@ SlaveError Slave::transitionToOp() {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  State Machine Transition: Slave %u                          ║", index_);
+        TETHER_LOGI(TAG, "║  State Machine Transition: Slave {}                          ║", index_);
         TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
-        TETHER_LOGI(TAG, "║  Transition: %s => OP", slaveStateToString(current_state));
+        TETHER_LOGI(TAG, "║  Transition: {} => OP", slaveStateToString(current_state));
         TETHER_LOGI(TAG, "║  Reason:    Full operational mode for process data exchange");
         TETHER_LOGI(TAG, "║  Requirements:");
-        TETHER_LOGI(TAG, "║    - PDO sync-managers (SM2/SM3) should be configured: %s",
+        TETHER_LOGI(TAG, "║    - PDO sync-managers (SM2/SM3) should be configured: {}",
                     pdo_configured_ ? "✓ FULFILLED" : "⚠ NOT FULFILLED (warning only)");
         if (has_pdo_entries) {
-            TETHER_LOGI(TAG, "║    - PDO request counter  > 0: %s",
+            TETHER_LOGI(TAG, "║    - PDO request counter  > 0: {}",
                         pdo_req_ok ? "✓ FULFILLED" : "✗ NOT FULFILLED");
-            TETHER_LOGI(TAG, "║    - PDO reply counter    > 0: %s",
+            TETHER_LOGI(TAG, "║    - PDO reply counter    > 0: {}",
                         pdo_reply_ok ? "✓ FULFILLED" : "✗ NOT FULFILLED");
         } else {
             TETHER_LOGI(TAG, "║    - PDO exchange check:     N/A (no PDO entries for this slave)");
         }
-        TETHER_LOGI(TAG, "║    - FMMU configuration matches slave hardware: %s",
+        TETHER_LOGI(TAG, "║    - FMMU configuration matches slave hardware: {}",
                     fmmu_ok ? "✓ FULFILLED" : "✗ NOT FULFILLED");
-        TETHER_LOGI(TAG, "║  Status:     %s", (pdo_req_ok && pdo_reply_ok && fmmu_ok)
+        TETHER_LOGI(TAG, "║  Status:     {}", (pdo_req_ok && pdo_reply_ok && fmmu_ok)
                     ? "Proceeding with transition"
                     : "HALTED — requirements not met");
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
@@ -602,7 +602,7 @@ SlaveError Slave::transitionToOp() {
 
     if (!pdo_configured_) {
         TETHER_LOGW( TAG,
-            "%s: Transitioning to OP without PDO sync-managers configured. "
+            "{}: Transitioning to OP without PDO sync-managers configured. "
             "This may cause issues with process data exchange.", logPrefix().c_str());
     }
 
@@ -611,8 +611,8 @@ SlaveError Slave::transitionToOp() {
         const uint32_t req   = pdo_mgr.getSlavePDORequestCount(index_);
         const uint32_t reply = pdo_mgr.getSlavePDOReplyCount(index_);
         TETHER_LOGE(TAG,
-            "%s: OP transition rejected — no PDO exchange after 100 ms "
-            "(req=%u reply=%u). Start the motion loop or call exchangeAll() "
+            "{}: OP transition rejected — no PDO exchange after 100 ms "
+            "(req={} reply={}). Start the motion loop or call exchangeAll() "
             "before requesting OP.",
             logPrefix().c_str(), req, reply);
         return SlaveError::TransportError;
@@ -620,7 +620,7 @@ SlaveError Slave::transitionToOp() {
 
     if (!fmmu_ok) {
         TETHER_LOGE(TAG,
-            "%s: OP transition rejected — FMMU configuration mismatch "
+            "{}: OP transition rejected — FMMU configuration mismatch "
             "(read from slave hardware does not match expected values)",
             logPrefix().c_str());
         return SlaveError::TransportError;
@@ -630,7 +630,7 @@ SlaveError Slave::transitionToOp() {
     // Some slaves require the ACK bit to clear internal error latches.
     if (!master_.requestSlaveApplicationLayerState(index_, static_cast<uint8_t>(SlaveState::OP) | 0x10)) {
         TETHER_LOGE( TAG,
-            "%s: Failed to transition to OP (transport error)", logPrefix().c_str());
+            "{}: Failed to transition to OP (transport error)", logPrefix().c_str());
         return SlaveError::TransportError;
     }
 
@@ -642,7 +642,7 @@ SlaveError Slave::transitionToOp() {
             if (state == static_cast<uint8_t>(SlaveState::OP)) {
                 if (slave_debug_flags_.stateMachine) {
                     TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-                    TETHER_LOGI(TAG, "║  Transition Result: Slave %u => OP SUCCESS                    ║", index_);
+                    TETHER_LOGI(TAG, "║  Transition Result: Slave {} => OP SUCCESS                    ║", index_);
                     TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
                 }
                 // Debug gate checkpoint: OP confirmed
@@ -654,7 +654,7 @@ SlaveError Slave::transitionToOp() {
                 state == static_cast<uint8_t>(SlaveState::PRE_OP)) {
                 uint16_t al_code = 0;
                 readALStatusCode(al_code);
-                TETHER_LOGE(TAG, "%s: Unexpected state 0x%02X during OP transition (AL status code: %s (0x%04X))",
+                TETHER_LOGE(TAG, "{}: Unexpected state 0x{:02X} during OP transition (AL status code: {} (0x{:04X}))",
                          logPrefix().c_str(), state, getALStatusCodeName(al_code), al_code);
                 return SlaveError::TransportError;
             }
@@ -663,7 +663,7 @@ SlaveError Slave::transitionToOp() {
 
     uint16_t al_code = 0;
     readALStatusCode(al_code);
-    TETHER_LOGE(TAG, "%s: OP not confirmed after 5s (AL status code: %s (0x%04X))", logPrefix().c_str(), getALStatusCodeName(al_code), al_code);
+    TETHER_LOGE(TAG, "{}: OP not confirmed after 5s (AL status code: {} (0x{:04X}))", logPrefix().c_str(), getALStatusCodeName(al_code), al_code);
     return SlaveError::TransportError;
 }
 
@@ -672,9 +672,9 @@ SlaveError Slave::transitionToBoot() {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  State Machine Transition: Slave %u                          ║", index_);
+        TETHER_LOGI(TAG, "║  State Machine Transition: Slave {}                          ║", index_);
         TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
-        TETHER_LOGI(TAG, "║  Transition: %s => BOOT", slaveStateToString(current_state));
+        TETHER_LOGI(TAG, "║  Transition: {} => BOOT", slaveStateToString(current_state));
         TETHER_LOGI(TAG, "║  Reason:    Firmware update or bootstrap mode");
         TETHER_LOGI(TAG, "║  Requirements: None (BOOT is a special state)");
         TETHER_LOGI(TAG, "║  Status:     Fulfilled - proceeding with transition");
@@ -683,13 +683,13 @@ SlaveError Slave::transitionToBoot() {
     
     if (!master_.requestSlaveApplicationLayerState(index_, static_cast<uint8_t>(SlaveState::BOOT))) {
         TETHER_LOGE( TAG,
-            "%s: Failed to transition to BOOT (transport error)", logPrefix().c_str());
+            "{}: Failed to transition to BOOT (transport error)", logPrefix().c_str());
         return SlaveError::TransportError;
     }
     
     if (slave_debug_flags_.stateMachine) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  Transition Result: Slave %u => BOOT SUCCESS                  ║", index_);
+        TETHER_LOGI(TAG, "║  Transition Result: Slave {} => BOOT SUCCESS                  ║", index_);
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
     }
     
@@ -862,7 +862,7 @@ SlaveError Slave::readSII(SII::SIIData& data) {
         // Lazy-init the SII cache through the master's SII reader
         // The SIIReader is created on-demand
         TETHER_LOGW( TAG,
-            "%s: SII cache not initialized — using direct read", logPrefix().c_str());
+            "{}: SII cache not initialized — using direct read", logPrefix().c_str());
         if (!SII::readSII(master_, index_, data)) {
             return SlaveError::SIIReadError;
         }
@@ -880,7 +880,7 @@ void Slave::logSIISummary(const char* tag) {
         SII::logSIISummary(data, logPrefix(), tag);
     } else {
         TETHER_LOGW( tag,
-            "%s: Failed to read SII for summary", logPrefix().c_str());
+            "{}: Failed to read SII for summary", logPrefix().c_str());
     }
 }
 
@@ -891,7 +891,7 @@ void Slave::logSIISummary(const char* tag) {
 SlaveError Slave::registerPDOsFromSII(SIIPDOConfig& out_config) {
     SII::SIIData sii;
     if (readSII(sii) != SlaveError::Ok) {
-        TETHER_LOGE(TAG, "%s: Failed to read SII for PDO auto-config", logPrefix().c_str());
+        TETHER_LOGE(TAG, "{}: Failed to read SII for PDO auto-config", logPrefix().c_str());
         return SlaveError::SIIReadError;
     }
 
@@ -913,7 +913,7 @@ SlaveError Slave::registerPDOsFromSII(SIIPDOConfig& out_config) {
     }
 
     if (!rxpdo && !txpdo) {
-        TETHER_LOGE(TAG, "%s: No PDO data found in SII", logPrefix().c_str());
+        TETHER_LOGE(TAG, "{}: No PDO data found in SII", logPrefix().c_str());
         return SlaveError::PDOConfigFailed;
     }
 
@@ -930,13 +930,13 @@ SlaveError Slave::registerPDOsFromSII(SIIPDOConfig& out_config) {
         int idx = mapping.add_rxpdo(index_, pdo_rx_buffer_.data(), size,
                                     rxpdo->pdo_index, PDO::PDOAddressMode::Position);
         if (idx < 0) {
-            TETHER_LOGE(TAG, "%s: Failed to register RxPDO mapping entry", logPrefix().c_str());
+            TETHER_LOGE(TAG, "{}: Failed to register RxPDO mapping entry", logPrefix().c_str());
             return SlaveError::PDOMappingFailed;
         }
         out_config.rxpdo_index = rxpdo->pdo_index;
         out_config.rxpdo_size  = size;
         out_config.has_rxpdo   = true;
-        TETHER_LOGI(TAG, "%s: Registered RxPDO 0x%04X (%u bytes) from SII", logPrefix().c_str(),
+        TETHER_LOGI(TAG, "{}: Registered RxPDO 0x{:04X} ({} bytes) from SII", logPrefix().c_str(),
                     rxpdo->pdo_index, size);
     }
 
@@ -946,13 +946,13 @@ SlaveError Slave::registerPDOsFromSII(SIIPDOConfig& out_config) {
         int idx = mapping.add_txpdo(index_, pdo_tx_buffer_.data(), size,
                                     txpdo->pdo_index, PDO::PDOAddressMode::Position);
         if (idx < 0) {
-            TETHER_LOGE(TAG, "%s: Failed to register TxPDO mapping entry", logPrefix().c_str());
+            TETHER_LOGE(TAG, "{}: Failed to register TxPDO mapping entry", logPrefix().c_str());
             return SlaveError::PDOMappingFailed;
         }
         out_config.txpdo_index = txpdo->pdo_index;
         out_config.txpdo_size  = size;
         out_config.has_txpdo   = true;
-        TETHER_LOGI(TAG, "%s: Registered TxPDO 0x%04X (%u bytes) from SII", logPrefix().c_str(),
+        TETHER_LOGI(TAG, "{}: Registered TxPDO 0x{:04X} ({} bytes) from SII", logPrefix().c_str(),
                     txpdo->pdo_index, size);
     }
 
@@ -964,14 +964,14 @@ SlaveError Slave::registerPDOsFromSII(SIIPDOConfig& out_config) {
 
 SlaveError Slave::registerPDOsFromESI(const ESIFile& esi, SIIPDOConfig& out_config) {
     if (esi.empty()) {
-        TETHER_LOGE(TAG, "%s: ESI file is empty — cannot register PDOs from ESI", logPrefix().c_str());
+        TETHER_LOGE(TAG, "{}: ESI file is empty — cannot register PDOs from ESI", logPrefix().c_str());
         return SlaveError::PDOConfigFailed;
     }
 
     auto id = readIdentityForESIMatch(master_, index_);
     const ESI::DeviceInfo* dev = esi.findDevice(id.vendorId, id.productCode);
     if (!dev) {
-        TETHER_LOGE(TAG, "%s: ESI file has no devices", logPrefix().c_str());
+        TETHER_LOGE(TAG, "{}: ESI file has no devices", logPrefix().c_str());
         return SlaveError::PDOConfigFailed;
     }
 
@@ -993,7 +993,7 @@ SlaveError Slave::registerPDOsFromESI(const ESIFile& esi, SIIPDOConfig& out_conf
     }
 
     if (!rxpdo && !txpdo) {
-        TETHER_LOGE(TAG, "%s: No PDO data found in ESI", logPrefix().c_str());
+        TETHER_LOGE(TAG, "{}: No PDO data found in ESI", logPrefix().c_str());
         return SlaveError::PDOConfigFailed;
     }
 
@@ -1016,13 +1016,13 @@ SlaveError Slave::registerPDOsFromESI(const ESIFile& esi, SIIPDOConfig& out_conf
         int idx = mapping.add_rxpdo(index_, pdo_rx_buffer_.data(), size,
                                     rxpdo->index, PDO::PDOAddressMode::Position);
         if (idx < 0) {
-            TETHER_LOGE(TAG, "%s: Failed to register RxPDO mapping entry from ESI", logPrefix().c_str());
+            TETHER_LOGE(TAG, "{}: Failed to register RxPDO mapping entry from ESI", logPrefix().c_str());
             return SlaveError::PDOMappingFailed;
         }
         out_config.rxpdo_index = rxpdo->index;
         out_config.rxpdo_size  = size;
         out_config.has_rxpdo   = true;
-        TETHER_LOGI(TAG, "%s: Registered RxPDO 0x%04X (%u bytes) from ESI", logPrefix().c_str(),
+        TETHER_LOGI(TAG, "{}: Registered RxPDO 0x{:04X} ({} bytes) from ESI", logPrefix().c_str(),
                     rxpdo->index, size);
     }
 
@@ -1032,13 +1032,13 @@ SlaveError Slave::registerPDOsFromESI(const ESIFile& esi, SIIPDOConfig& out_conf
         int idx = mapping.add_txpdo(index_, pdo_tx_buffer_.data(), size,
                                     txpdo->index, PDO::PDOAddressMode::Position);
         if (idx < 0) {
-            TETHER_LOGE(TAG, "%s: Failed to register TxPDO mapping entry from ESI", logPrefix().c_str());
+            TETHER_LOGE(TAG, "{}: Failed to register TxPDO mapping entry from ESI", logPrefix().c_str());
             return SlaveError::PDOMappingFailed;
         }
         out_config.txpdo_index = txpdo->index;
         out_config.txpdo_size  = size;
         out_config.has_txpdo   = true;
-        TETHER_LOGI(TAG, "%s: Registered TxPDO 0x%04X (%u bytes) from ESI", logPrefix().c_str(),
+        TETHER_LOGI(TAG, "{}: Registered TxPDO 0x{:04X} ({} bytes) from ESI", logPrefix().c_str(),
                     txpdo->index, size);
     }
 
@@ -1049,7 +1049,7 @@ SlaveError Slave::registerPDOsFromESI(const ESIFile& esi, SIIPDOConfig& out_conf
 
 SlaveError Slave::assignPDOs(const SIIPDOConfig& config) {
     if (!config.has_rxpdo && !config.has_txpdo) {
-        TETHER_LOGE(TAG, "%s: assignPDOs called with empty config (zero PDOs available), skipping", logPrefix().c_str());
+        TETHER_LOGE(TAG, "{}: assignPDOs called with empty config (zero PDOs available), skipping", logPrefix().c_str());
         return SlaveError::Ok;
     }
 
@@ -1060,34 +1060,34 @@ SlaveError Slave::assignPDOs(const SIIPDOConfig& config) {
 
     if (config.has_rxpdo) {
         if (!sdo.writeU8(CiA301::SyncManager2PDOAssign, 0, zero).has_value()) {
-            TETHER_LOGW(TAG, "%s: Failed to clear SM2 PDO count (may be fixed)", logPrefix().c_str());
+            TETHER_LOGW(TAG, "{}: Failed to clear SM2 PDO count (may be fixed)", logPrefix().c_str());
         }
         if (!sdo.writeU16(CiA301::SyncManager2PDOAssign, 1, config.rxpdo_index).has_value()) {
-            TETHER_LOGW(TAG, "%s: Failed to assign RxPDO 0x%04X to SM2", logPrefix().c_str(), config.rxpdo_index);
+            TETHER_LOGW(TAG, "{}: Failed to assign RxPDO 0x{:04X} to SM2", logPrefix().c_str(), config.rxpdo_index);
             sdo_ok = false;
         }
         if (!sdo.writeU8(CiA301::SyncManager2PDOAssign, 0, one).has_value()) {
-            TETHER_LOGW(TAG, "%s: Failed to set SM2 PDO count", logPrefix().c_str());
+            TETHER_LOGW(TAG, "{}: Failed to set SM2 PDO count", logPrefix().c_str());
         }
-        TETHER_LOGI(TAG, "%s: Assigned RxPDO 0x%04X to SM2 (0x1C12)", logPrefix().c_str(), config.rxpdo_index);
+        TETHER_LOGI(TAG, "{}: Assigned RxPDO 0x{:04X} to SM2 (0x1C12)", logPrefix().c_str(), config.rxpdo_index);
     }
 
     if (config.has_txpdo) {
         if (!sdo.writeU8(CiA301::SyncManager3PDOAssign, 0, zero).has_value()) {
-            TETHER_LOGW(TAG, "%s: Failed to clear SM3 PDO count (may be fixed)", logPrefix().c_str());
+            TETHER_LOGW(TAG, "{}: Failed to clear SM3 PDO count (may be fixed)", logPrefix().c_str());
         }
         if (!sdo.writeU16(CiA301::SyncManager3PDOAssign, 1, config.txpdo_index).has_value()) {
-            TETHER_LOGW(TAG, "%s: Failed to assign TxPDO 0x%04X to SM3", logPrefix().c_str(), config.txpdo_index);
+            TETHER_LOGW(TAG, "{}: Failed to assign TxPDO 0x{:04X} to SM3", logPrefix().c_str(), config.txpdo_index);
             sdo_ok = false;
         }
         if (!sdo.writeU8(CiA301::SyncManager3PDOAssign, 0, one).has_value()) {
-            TETHER_LOGW(TAG, "%s: Failed to set SM3 PDO count", logPrefix().c_str());
+            TETHER_LOGW(TAG, "{}: Failed to set SM3 PDO count", logPrefix().c_str());
         }
-        TETHER_LOGI(TAG, "%s: Assigned TxPDO 0x%04X to SM3 (0x1C13)", logPrefix().c_str(), config.txpdo_index);
+        TETHER_LOGI(TAG, "{}: Assigned TxPDO 0x{:04X} to SM3 (0x1C13)", logPrefix().c_str(), config.txpdo_index);
     }
 
     if (!sdo_ok) {
-        TETHER_LOGW(TAG, "%s: PDO assignment had SDO failures; continuing anyway", logPrefix().c_str());
+        TETHER_LOGW(TAG, "{}: PDO assignment had SDO failures; continuing anyway", logPrefix().c_str());
     }
 
     return SlaveError::Ok;
@@ -1095,7 +1095,7 @@ SlaveError Slave::assignPDOs(const SIIPDOConfig& config) {
 
 SlaveError Slave::registerFixedPDOs(const SIIPDOConfig& config) {
     if (!config.has_rxpdo && !config.has_txpdo) {
-        TETHER_LOGW(TAG, "%s: registerFixedPDOs called with empty config, skipping", logPrefix().c_str());
+        TETHER_LOGW(TAG, "{}: registerFixedPDOs called with empty config, skipping", logPrefix().c_str());
         return SlaveError::Ok;
     }
 
@@ -1108,10 +1108,10 @@ SlaveError Slave::registerFixedPDOs(const SIIPDOConfig& config) {
         int idx = mapping.add_rxpdo(index_, pdo_rx_buffer_.data(), config.rxpdo_size,
                                     config.rxpdo_index, PDO::PDOAddressMode::Position);
         if (idx < 0) {
-            TETHER_LOGE(TAG, "%s: Failed to register fixed RxPDO 0x%04X mapping entry", logPrefix().c_str(), config.rxpdo_index);
+            TETHER_LOGE(TAG, "{}: Failed to register fixed RxPDO 0x{:04X} mapping entry", logPrefix().c_str(), config.rxpdo_index);
             return SlaveError::PDOMappingFailed;
         }
-        TETHER_LOGI(TAG, "%s: Registered fixed RxPDO 0x%04X (%u bytes)", logPrefix().c_str(),
+        TETHER_LOGI(TAG, "{}: Registered fixed RxPDO 0x{:04X} ({} bytes)", logPrefix().c_str(),
                     config.rxpdo_index, config.rxpdo_size);
     }
 
@@ -1120,10 +1120,10 @@ SlaveError Slave::registerFixedPDOs(const SIIPDOConfig& config) {
         int idx = mapping.add_txpdo(index_, pdo_tx_buffer_.data(), config.txpdo_size,
                                     config.txpdo_index, PDO::PDOAddressMode::Position);
         if (idx < 0) {
-            TETHER_LOGE(TAG, "%s: Failed to register fixed TxPDO 0x%04X mapping entry", logPrefix().c_str(), config.txpdo_index);
+            TETHER_LOGE(TAG, "{}: Failed to register fixed TxPDO 0x{:04X} mapping entry", logPrefix().c_str(), config.txpdo_index);
             return SlaveError::PDOMappingFailed;
         }
-        TETHER_LOGI(TAG, "%s: Registered fixed TxPDO 0x%04X (%u bytes)", logPrefix().c_str(),
+        TETHER_LOGI(TAG, "{}: Registered fixed TxPDO 0x{:04X} ({} bytes)", logPrefix().c_str(),
                     config.txpdo_index, config.txpdo_size);
     }
 
@@ -1155,11 +1155,11 @@ SlaveError Slave::configureCustomTxPDO(
     PDO::PDODirection direction)
 {
     if (entries.size() == 0) {
-        TETHER_LOGE(TAG, "configureCustomPDO: empty entry list for PDO 0x%04X", pdo_index);
+        TETHER_LOGE(TAG, "configureCustomPDO: empty entry list for PDO 0x{:04X}", pdo_index);
         return SlaveError::PDOMappingFailed;
     }
     if (entries.size() > 255) {
-        TETHER_LOGE(TAG, "configureCustomPDO: too many entries (%zu) for PDO 0x%04X",
+        TETHER_LOGE(TAG, "configureCustomPDO: too many entries ({}) for PDO 0x{:04X}",
                     entries.size(), pdo_index);
         return SlaveError::PDOMappingFailed;
     }
@@ -1173,7 +1173,7 @@ SlaveError Slave::configureCustomTxPDO(
     for (const auto& e : entries) {
         uint8_t sz = e.resolvedSize();
         if (sz == 0) {
-            TETHER_LOGE(TAG, "configureCustomPDO: cannot infer size for entry 0x%04X:0x%02X (%s) — specify explicit byte size",
+            TETHER_LOGE(TAG, "configureCustomPDO: cannot infer size for entry 0x{:04X}:0x{:02X} ({}) — specify explicit byte size",
                         e.entry->index, e.entry->subindex, e.entry->name ? e.entry->name : "?");
             any_unresolved = true;
         }
@@ -1186,13 +1186,13 @@ SlaveError Slave::configureCustomTxPDO(
 
     uint16_t total_size = offset;
     const char* dir_str = (direction == PDO::PDODirection::RxPDO) ? "RxPDO" : "TxPDO";
-    TETHER_LOGI(TAG, "%s: Configuring custom %s 0x%04X: %zu entries, %u bytes",
+    TETHER_LOGI(TAG, "{}: Configuring custom {} 0x{:04X}: {} entries, {} bytes",
                 logPrefix().c_str(), dir_str, pdo_index, entries.size(), total_size);
 
     // Write SDO mapping to slave
     auto err = sdoWriteU8(pdo_index, 0x00, 0);  // clear count
     if (err != SlaveError::Ok) {
-        TETHER_LOGE(TAG, "Failed to clear PDO mapping count for 0x%04X", pdo_index);
+        TETHER_LOGE(TAG, "Failed to clear PDO mapping count for 0x{:04X}", pdo_index);
         return err;
     }
 
@@ -1205,11 +1205,11 @@ SlaveError Slave::configureCustomTxPDO(
         uint32_t val = encodePDOMappingValue(e.entry, sz);
         err = sdoWriteU32(pdo_index, sub, val);
         if (err != SlaveError::Ok) {
-            TETHER_LOGE(TAG, "Failed to write PDO mapping entry %u for 0x%04X", sub, pdo_index);
+            TETHER_LOGE(TAG, "Failed to write PDO mapping entry {} for 0x{:04X}", sub, pdo_index);
             return err;
         }
         if (dbg_pdo) {
-            TETHER_LOGI(TAG, "  %s 0x%04X sub %u: 0x%08X (idx=0x%04X sub=0x%02X %u bytes)",
+            TETHER_LOGI(TAG, "  {} 0x{:04X} sub {}: 0x{:08X} (idx=0x{:04X} sub=0x{:02X} {} bytes)",
                         dir_str, pdo_index, sub, val, e.entry->index, e.entry->subindex, sz);
         }
         ++sub;
@@ -1217,7 +1217,7 @@ SlaveError Slave::configureCustomTxPDO(
 
     err = sdoWriteU8(pdo_index, 0x00, static_cast<uint8_t>(entries.size()));
     if (err != SlaveError::Ok) {
-        TETHER_LOGE(TAG, "Failed to set PDO mapping count for 0x%04X", pdo_index);
+        TETHER_LOGE(TAG, "Failed to set PDO mapping count for 0x{:04X}", pdo_index);
         return err;
     }
 
@@ -1250,7 +1250,7 @@ void Slave::storeCustomPDOInfo(
 
 SlaveError Slave::applyCustomPDOs() {
     if (custom_pdo_infos_.empty()) {
-        TETHER_LOGW(TAG, "%s: applyCustomPDOs called with no custom PDOs configured", logPrefix().c_str());
+        TETHER_LOGW(TAG, "{}: applyCustomPDOs called with no custom PDOs configured", logPrefix().c_str());
         return SlaveError::Ok;
     }
 
@@ -1273,11 +1273,11 @@ SlaveError Slave::applyCustomPDOs() {
             tx_indices.push_back(info.pdo_index);
         }
         if (idx < 0) {
-            TETHER_LOGE(TAG, "%s: Failed to register custom PDO 0x%04X", logPrefix().c_str(), info.pdo_index);
+            TETHER_LOGE(TAG, "{}: Failed to register custom PDO 0x{:04X}", logPrefix().c_str(), info.pdo_index);
             return SlaveError::PDOMappingFailed;
         }
         info.mapping_entry_index = idx;
-        TETHER_LOGI(TAG, "%s: Registered custom PDO 0x%04X (%u bytes, entry %d)",
+        TETHER_LOGI(TAG, "{}: Registered custom PDO 0x{:04X} ({} bytes, entry {})",
                     logPrefix().c_str(), info.pdo_index, info.total_size, idx);
     }
 
@@ -1287,40 +1287,40 @@ SlaveError Slave::applyCustomPDOs() {
 
     if (!rx_indices.empty()) {
         if (!sdo.writeU8(CiA301::SyncManager2PDOAssign, 0, 0).has_value()) {
-            TETHER_LOGW(TAG, "%s: Failed to clear SM2 PDO count", logPrefix().c_str());
+            TETHER_LOGW(TAG, "{}: Failed to clear SM2 PDO count", logPrefix().c_str());
         }
         for (size_t i = 0; i < rx_indices.size(); i++) {
             if (!sdo.writeU16(CiA301::SyncManager2PDOAssign, static_cast<uint8_t>(i + 1),
                               rx_indices[i]).has_value()) {
-                TETHER_LOGE(TAG, "%s: Failed to assign RxPDO 0x%04X to SM2", logPrefix().c_str(), rx_indices[i]);
+                TETHER_LOGE(TAG, "{}: Failed to assign RxPDO 0x{:04X} to SM2", logPrefix().c_str(), rx_indices[i]);
                 sdo_ok = false;
             }
         }
         if (!sdo.writeU8(CiA301::SyncManager2PDOAssign, 0, static_cast<uint8_t>(rx_indices.size())).has_value()) {
-            TETHER_LOGW(TAG, "%s: Failed to set SM2 PDO count", logPrefix().c_str());
+            TETHER_LOGW(TAG, "{}: Failed to set SM2 PDO count", logPrefix().c_str());
         }
-        TETHER_LOGI(TAG, "%s: Assigned %zu RxPDO(s) to SM2 (0x1C12)", logPrefix().c_str(), rx_indices.size());
+        TETHER_LOGI(TAG, "{}: Assigned {} RxPDO(s) to SM2 (0x1C12)", logPrefix().c_str(), rx_indices.size());
     }
 
     if (!tx_indices.empty()) {
         if (!sdo.writeU8(CiA301::SyncManager3PDOAssign, 0, 0).has_value()) {
-            TETHER_LOGW(TAG, "%s: Failed to clear SM3 PDO count", logPrefix().c_str());
+            TETHER_LOGW(TAG, "{}: Failed to clear SM3 PDO count", logPrefix().c_str());
         }
         for (size_t i = 0; i < tx_indices.size(); i++) {
             if (!sdo.writeU16(CiA301::SyncManager3PDOAssign, static_cast<uint8_t>(i + 1),
                               tx_indices[i]).has_value()) {
-                TETHER_LOGE(TAG, "%s: Failed to assign TxPDO 0x%04X to SM3", logPrefix().c_str(), tx_indices[i]);
+                TETHER_LOGE(TAG, "{}: Failed to assign TxPDO 0x{:04X} to SM3", logPrefix().c_str(), tx_indices[i]);
                 sdo_ok = false;
             }
         }
         if (!sdo.writeU8(CiA301::SyncManager3PDOAssign, 0, static_cast<uint8_t>(tx_indices.size())).has_value()) {
-            TETHER_LOGW(TAG, "%s: Failed to set SM3 PDO count", logPrefix().c_str());
+            TETHER_LOGW(TAG, "{}: Failed to set SM3 PDO count", logPrefix().c_str());
         }
-        TETHER_LOGI(TAG, "%s: Assigned %zu TxPDO(s) to SM3 (0x1C13)", logPrefix().c_str(), tx_indices.size());
+        TETHER_LOGI(TAG, "{}: Assigned {} TxPDO(s) to SM3 (0x1C13)", logPrefix().c_str(), tx_indices.size());
     }
 
     if (!sdo_ok) {
-        TETHER_LOGW(TAG, "%s: Custom PDO assignment had SDO failures; continuing anyway", logPrefix().c_str());
+        TETHER_LOGW(TAG, "{}: Custom PDO assignment had SDO failures; continuing anyway", logPrefix().c_str());
     }
 
     // Finalize mapping to update SM lengths
@@ -1335,18 +1335,18 @@ SlaveError Slave::applyCustomPDOs() {
 
 SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
     if (config.sm_configs.empty()) {
-        TETHER_LOGW(TAG, "%s: configureMultiPDOs called with empty config", logPrefix().c_str());
+        TETHER_LOGW(TAG, "{}: configureMultiPDOs called with empty config", logPrefix().c_str());
         return SlaveError::Ok;
     }
 
     auto& pdo = master_.pdoForSlave(index_);
     auto* cfgs = pdo.slaveConfigs();
     if (index_ >= PDO::kMaxPDOSlaves) {
-        TETHER_LOGE(TAG, "%s: index exceeds max PDO slaves (%zu)", logPrefix().c_str(), PDO::kMaxPDOSlaves);
+        TETHER_LOGE(TAG, "{}: index exceeds max PDO slaves ({})", logPrefix().c_str(), PDO::kMaxPDOSlaves);
         return SlaveError::PDOConfigFailed;
     }
 
-    TETHER_LOGI(TAG, "%s: Configuring multi-PDO SMs (%zu SM configs)", logPrefix().c_str(), config.sm_configs.size());
+    TETHER_LOGI(TAG, "{}: Configuring multi-PDO SMs ({} SM configs)", logPrefix().c_str(), config.sm_configs.size());
 
     const bool dbg_pdo_cfg = slave_debug_flags_.pdoConfiguration;
 
@@ -1364,10 +1364,10 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
             cfgs[index_].configured_address = cfg_addr;
             // Also set it in the PDO mapping entries
             pdo.mapping().set_slave_configured_address(index_, cfg_addr);
-            TETHER_LOGI(TAG, "%s: Configured station address (reg 0x0010) = 0x%04X",
+            TETHER_LOGI(TAG, "{}: Configured station address (reg 0x0010) = 0x{:04X}",
                         logPrefix().c_str(), cfg_addr);
         } else {
-            TETHER_LOGW(TAG, "%s: Failed to read configured station address (reg 0x0010), "
+            TETHER_LOGW(TAG, "{}: Failed to read configured station address (reg 0x0010), "
                         "FPWR/FPRD will use auto-increment fallback", logPrefix().c_str());
         }
     }
@@ -1379,7 +1379,7 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
 
     for (const auto& sm_cfg : config.sm_configs) {
         if (sm_cfg.sm_index <= 1) {
-            TETHER_LOGW(TAG, "%s: SM%u is a mailbox SM — assigning PDOs is unusual",
+            TETHER_LOGW(TAG, "{}: SM{} is a mailbox SM — assigning PDOs is unusual",
                         logPrefix().c_str(), sm_cfg.sm_index);
         }
 
@@ -1408,18 +1408,18 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
     }
 
     if (dbg_pdo_cfg) {
-        TETHER_LOGI(TAG, "%s: [pdo-cfg] Multi-PDO configuration plan (%zu SMs):",
+        TETHER_LOGI(TAG, "{}: [pdo-cfg] Multi-PDO configuration plan ({} SMs):",
                     logPrefix().c_str(), multi_configs.size());
         for (const auto& mc : multi_configs) {
             const char* dir = (mc.type == PDO::SyncManagerType::ProcessOutput)
                               ? "RxPDO (master->slave)" : "TxPDO (slave->master)";
-            TETHER_LOGI(TAG, "%s: [pdo-cfg]   SM%u: phys=0x%04X len=%u ctrl=0x%02X %s, %zu PDO(s):",
+            TETHER_LOGI(TAG, "{}: [pdo-cfg]   SM{}: phys=0x{:04X} len={} ctrl=0x{:02X} {}, {} PDO(s):",
                         logPrefix().c_str(), mc.sm_index, mc.phys_start_addr,
                         mc.totalLength(), std::bit_cast<uint8_t>(mc.control),
                         dir, mc.pdo_mappings.size());
             uint16_t offset = 0;
             for (const auto& p : mc.pdo_mappings) {
-                TETHER_LOGI(TAG, "%s: [pdo-cfg]     0x%04X: off=%u size=%u bytes%s",
+                TETHER_LOGI(TAG, "{}: [pdo-cfg]     0x{:04X}: off={} size={} bytes{}",
                             logPrefix().c_str(), p.pdo_index, offset, p.size_bytes,
                             p.fixed ? " [FIXED — not written to 0x1C1n]" : "");
                 offset += p.size_bytes;
@@ -1487,13 +1487,13 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         master_.writeRegister(EtherCAT::SlaveAddress(index_),
                               static_cast<uint16_t>(base + 4), &ctrl_byte, 1, 200);
 
-        TETHER_LOGI(TAG, "%s: Wrote SM%u (disabled): addr=0x%04X len=%u (total) ctrl=0x%02X",
+        TETHER_LOGI(TAG, "{}: Wrote SM{} (disabled): addr=0x{:04X} len={} (total) ctrl=0x{:02X}",
                     logPrefix().c_str(), mc.sm_index, mc.phys_start_addr, mc.totalLength(), ctrl_byte);
 
         if (dbg_pdo_cfg) {
-            TETHER_LOGI(TAG, "%s: [pdo-cfg]   SM%u register writes: "
-                        "0x%04X=0x%04X (start_addr), 0x%04X=0x%04X (total_len=%u), "
-                        "0x%04X=0x%02X (control), 0x%04X=0x00 (disable)",
+            TETHER_LOGI(TAG, "{}: [pdo-cfg]   SM{} register writes: "
+                        "0x{:04X}=0x{:04X} (start_addr), 0x{:04X}=0x{:04X} (total_len={}), "
+                        "0x{:04X}=0x{:02X} (control), 0x{:04X}=0x00 (disable)",
                         logPrefix().c_str(), mc.sm_index,
                         base, mc.phys_start_addr,
                         static_cast<uint16_t>(base + 2), mc.totalLength(), mc.totalLength(),
@@ -1516,11 +1516,11 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
 
         if (dbg_pdo_cfg) {
             const uint16_t od_idx = static_cast<uint16_t>(0x1C10 + mc.sm_index);
-            TETHER_LOGI(TAG, "%s: [pdo-cfg] SM%u PDO assignment (0x%04X): %zu PDO(s)",
+            TETHER_LOGI(TAG, "{}: [pdo-cfg] SM{} PDO assignment (0x{:04X}): {} PDO(s)",
                         logPrefix().c_str(), mc.sm_index, od_idx,
                         pdo_indices.size());
             for (size_t i = 0; i < pdo_indices.size(); ++i) {
-                TETHER_LOGI(TAG, "%s: [pdo-cfg]   0x%04X subindex %zu = 0x%04X",
+                TETHER_LOGI(TAG, "{}: [pdo-cfg]   0x{:04X} subindex {} = 0x{:04X}",
                             logPrefix().c_str(), od_idx, i + 1, pdo_indices[i]);
             }
         }
@@ -1528,11 +1528,11 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         auto sm_accessor = this->sm(mc.sm_index);
         SlaveError err = sm_accessor.writePDOAssignments(pdo_indices);
         if (err != SlaveError::Ok) {
-            TETHER_LOGE(TAG, "%s: Failed to write PDO assignments for SM%u",
+            TETHER_LOGE(TAG, "{}: Failed to write PDO assignments for SM{}",
                         logPrefix().c_str(), mc.sm_index);
             // Don't return error — some slaves may not support PDO assignment writes
         } else {
-            TETHER_LOGI(TAG, "%s: Wrote %zu PDO assignment(s) to SM%u (0x1C1%X)",
+            TETHER_LOGI(TAG, "{}: Wrote {} PDO assignment(s) to SM{} (0x1C1{:X})",
                         logPrefix().c_str(), pdo_indices.size(), mc.sm_index, mc.sm_index);
         }
     }
@@ -1550,12 +1550,12 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
     }
 
     if (!fmmu_mgr_.configureFromMultiPDO(multi_configs, base_log, slave_debug_flags_.fmmu)) {
-        TETHER_LOGE(TAG, "%s: FMMU configuration from multi-PDO failed", logPrefix().c_str());
+        TETHER_LOGE(TAG, "{}: FMMU configuration from multi-PDO failed", logPrefix().c_str());
         return SlaveError::PDOConfigFailed;
     }
 
     if (!fmmu_mgr_.writeToSlave(slave_debug_flags_.fmmu)) {
-        TETHER_LOGE(TAG, "%s: FMMU write failed", logPrefix().c_str());
+        TETHER_LOGE(TAG, "{}: FMMU write failed", logPrefix().c_str());
         return SlaveError::PDOConfigFailed;
     }
 
@@ -1567,7 +1567,7 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         uint8_t activate = 0x01;
         master_.writeRegister(EtherCAT::SlaveAddress(index_),
                               static_cast<uint16_t>(base + 6), &activate, 1, 200);
-        TETHER_LOGI(TAG, "%s: Enabled SM%u", logPrefix().c_str(), mc.sm_index);
+        TETHER_LOGI(TAG, "{}: Enabled SM{}", logPrefix().c_str(), mc.sm_index);
 
         // Update SlaveConfig to reflect enabled state
         if (mc.sm_index < 4) {
@@ -1589,15 +1589,15 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
             std::vector<uint16_t> readback;
             SlaveError rb_err = sm_accessor.readAllPDOAssignments(readback);
             if (rb_err != SlaveError::Ok) {
-                TETHER_LOGI(TAG, "%s: [pdo-cfg] SM%u 0x1C1%X readback: FAILED (err=%d)",
+                TETHER_LOGI(TAG, "{}: [pdo-cfg] SM{} 0x1C1{:X} readback: FAILED (err={})",
                             logPrefix().c_str(), mc.sm_index, mc.sm_index,
                             static_cast<int>(rb_err));
             } else {
-                TETHER_LOGI(TAG, "%s: [pdo-cfg] SM%u 0x1C1%X readback: %zu entries",
+                TETHER_LOGI(TAG, "{}: [pdo-cfg] SM{} 0x1C1{:X} readback: {} entries",
                             logPrefix().c_str(), mc.sm_index, mc.sm_index,
                             readback.size());
                 for (size_t i = 0; i < readback.size(); ++i) {
-                    TETHER_LOGI(TAG, "%s: [pdo-cfg]   readback sub%zu = 0x%04X",
+                    TETHER_LOGI(TAG, "{}: [pdo-cfg]   readback sub{} = 0x{:04X}",
                                 logPrefix().c_str(), i + 1, readback[i]);
                 }
             }
@@ -1613,9 +1613,9 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
                                  static_cast<uint16_t>(base + 4), &rb_ctrl, 1, 200);
             master_.readRegister(EtherCAT::SlaveAddress(index_),
                                  static_cast<uint16_t>(base + 6), &rb_act, 1, 200);
-            TETHER_LOGI(TAG, "%s: [pdo-cfg] SM%u register readback: "
-                        "addr=0x%04X len=%u ctrl=0x%02X act=0x%02X "
-                        "(expected: addr=0x%04X len=%u ctrl=0x%02X act=0x01)",
+            TETHER_LOGI(TAG, "{}: [pdo-cfg] SM{} register readback: "
+                        "addr=0x{:04X} len={} ctrl=0x{:02X} act=0x{:02X} "
+                        "(expected: addr=0x{:04X} len={} ctrl=0x{:02X} act=0x01)",
                         logPrefix().c_str(), mc.sm_index,
                         rb_addr, rb_len, rb_ctrl, rb_act,
                         mc.phys_start_addr, mc.totalLength(),
@@ -1623,7 +1623,7 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         }
     }
 
-    TETHER_LOGI(TAG, "%s: Multi-PDO configuration complete (%zu SMs, %zu RxPDOs, %zu TxPDOs)",
+    TETHER_LOGI(TAG, "{}: Multi-PDO configuration complete ({} SMs, {} RxPDOs, {} TxPDOs)",
                 logPrefix().c_str(), multi_configs.size(), rx_pdo_indices.size(), tx_pdo_indices.size());
 
     return SlaveError::Ok;
@@ -1674,9 +1674,9 @@ NonExistingSlave::NonExistingSlave(Master& master, uint16_t index)
 
 void NonExistingSlave::logCritical(const char* method) const {
     TETHER_LOGE( TAG,
-        "CRITICAL: %s() called on non-existing slave %u. "
+        "CRITICAL: {}() called on non-existing slave {}. "
         "Check getDiscoveredSlaveCount() before accessing slaves. "
-        "Valid range: 0 to %u.",
+        "Valid range: 0 to {}.",
         method, index_, master_.getDiscoveredSlaveCount() > 0
             ? static_cast<unsigned>(master_.getDiscoveredSlaveCount() - 1) : 0u);
 }

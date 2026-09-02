@@ -31,7 +31,7 @@ bool initHostEthernet(HostEtherNetSession& session,
     auto err = session.eth->init(cfg);
     if (err != EtherCAT::HAL::Error::OK) {
         if (err == EtherCAT::HAL::Error::InterfaceNotFound) {
-            TETHER_LOGE(tag, "Interface '%s' not found", interfaceName.c_str());
+            TETHER_LOGE(tag, "Interface '{}' not found", interfaceName.c_str());
             // List physical Ethernet interfaces to guide the user
             auto physIfaces = EtherCAT::HAL::getPhysicalEthernetInterfaces();
             if (!physIfaces.empty()) {
@@ -40,7 +40,7 @@ bool initHostEthernet(HostEtherNetSession& session,
                     if (!names.empty()) names += ", ";
                     names += iface.name;
                 }
-                TETHER_LOGI(tag, "Available physical Ethernet interfaces: %s",
+                TETHER_LOGI(tag, "Available physical Ethernet interfaces: {}",
                             names.c_str());
             } else {
                 TETHER_LOGI(tag, "No physical Ethernet interfaces found on this system");
@@ -48,7 +48,7 @@ bool initHostEthernet(HostEtherNetSession& session,
         } else if (err == EtherCAT::HAL::Error::PermissionDenied) {
             logPermissionDeniedError(tag);
         } else {
-            TETHER_LOGE(tag, "Critical error: Prerequisites for operation not fulfilled (%s)",
+            TETHER_LOGE(tag, "Critical error: Prerequisites for operation not fulfilled ({})",
                         "unknown"); // magic_enum may not be available here
         }
         session.eth.reset();
@@ -57,7 +57,7 @@ bool initHostEthernet(HostEtherNetSession& session,
 
     auto ls = session.eth->getLinkStatus();
     if (!ls.up) {
-        TETHER_LOGE(tag, "Link DOWN on '%s' -- check cable", interfaceName.c_str());
+        TETHER_LOGE(tag, "Link DOWN on '{}' -- check cable", interfaceName.c_str());
         session.eth->shutdown();
         session.eth.reset();
         return false;
@@ -170,7 +170,7 @@ bool startHostMasterAndDiscover(HostEtherNetSession& session,
         TETHER_LOGW(tag, "No slaves discovered");
     }
     uint16_t slaves = master.getDiscoveredSlaveCount();
-    TETHER_LOGI(tag, "Discovered %u slave(s)", slaves);
+    TETHER_LOGI(tag, "Discovered {} slave(s)", slaves);
     if (slaves == 0) {
         TETHER_LOGE(tag, "No slaves found -- check wiring, power, and interface name");
         master.stop();

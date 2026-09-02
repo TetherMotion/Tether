@@ -297,8 +297,8 @@ int main(int argc, char** argv) {
     if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
     auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
 
-    TETHER_LOGI(TAG, "dc_sync_characterize — interface: %s, slave: %u", iface.c_str(), slave_idx);
-    TETHER_LOGI(TAG, "Sweep: start=%u ns, stop=%u ns, steps=%d, dwell=%u ms",
+    TETHER_LOGI(TAG, "dc_sync_characterize — interface: {}, slave: {}", iface.c_str(), slave_idx);
+    TETHER_LOGI(TAG, "Sweep: start={} ns, stop={} ns, steps={}, dwell={} ms",
                 start_ns, stop_ns, steps, dwell_ms);
 
     // ---- Host Ethernet + Master startup ----
@@ -329,10 +329,10 @@ int main(int argc, char** argv) {
     }
 
     const uint16_t slaves = master.getDiscoveredSlaveCount();
-    TETHER_LOGI(TAG, "Discovered %u slave(s)", slaves);
+    TETHER_LOGI(TAG, "Discovered {} slave(s)", slaves);
 
     if (slave_idx >= slaves) {
-        TETHER_LOGE(TAG, "Slave index %u out of range (only %u slave(s) found)",
+        TETHER_LOGE(TAG, "Slave index {} out of range (only {} slave(s) found)",
                     slave_idx, slaves);
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
@@ -342,13 +342,13 @@ int main(int argc, char** argv) {
     auto& sl = master.slave(slave_idx);
 
     // ---- Configure mailbox + PRE-OP ----
-    TETHER_LOGI(TAG, "Configuring mailbox for slave %u ...", slave_idx);
+    TETHER_LOGI(TAG, "Configuring mailbox for slave {} ...", slave_idx);
     EtherCAT::SlaveError mb_err = sl.configureMailbox(
         {.address = mbAddr.outAddress, .length = mbSize.outSize},
         {.address = mbAddr.inAddress,  .length = mbSize.inSize},
         0x0004);
     if (mb_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "Mailbox configuration failed: %s",
+        TETHER_LOGE(TAG, "Mailbox configuration failed: {}",
                     EtherCAT::slaveErrorToString(mb_err));
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
@@ -357,13 +357,13 @@ int main(int argc, char** argv) {
 
     auto pre_err = sl.transitionToPreOp();
     if (pre_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "PRE-OP transition failed: %s",
+        TETHER_LOGE(TAG, "PRE-OP transition failed: {}",
                     EtherCAT::slaveErrorToString(pre_err));
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 8;
     }
-    TETHER_LOGI(TAG, "Slave %u is in PRE-OP", slave_idx);
+    TETHER_LOGI(TAG, "Slave {} is in PRE-OP", slave_idx);
 
     // ---- Read SII for DC config + ESC features ----
     EtherCAT::SII::SIIData sii_data;
@@ -376,7 +376,7 @@ int main(int argc, char** argv) {
             if (dc.sync0Enabled()) sii_sync0 = true;
             if (dc.sync1Enabled()) sii_sync1 = true;
         }
-        TETHER_LOGI(TAG, "SII DC category: %zu config(s), SYNC0=%s, SYNC1=%s",
+        TETHER_LOGI(TAG, "SII DC category: {} config(s), SYNC0={}, SYNC1={}",
                     sii_data.dc_configs.size(),
                     sii_sync0 ? "advertised" : "no",
                     sii_sync1 ? "advertised" : "no");
@@ -390,7 +390,7 @@ int main(int argc, char** argv) {
     if (readRegU16(master, slave_idx, EtherCAT::ESCReg::Features, features_raw)) {
         auto feat = std::bit_cast<EtherCAT::ESC::ESCFeatureReg>(features_raw);
         dc_hardware = feat.dc;
-        TETHER_LOGI(TAG, "ESC Features (0x0008) = 0x%04X  DC=%s  DC64=%s  DC_enhanced=%s",
+        TETHER_LOGI(TAG, "ESC Features (0x0008) = 0x{:04X}  DC={}  DC64={}  DC_enhanced={}",
                     features_raw,
                     feat.dc ? "yes" : "no",
                     feat.dc_width64 ? "yes" : "no",
@@ -400,7 +400,7 @@ int main(int argc, char** argv) {
     }
 
     if (!dc_hardware) {
-        TETHER_LOGW(TAG, "Slave %u does not advertise DC hardware support "
+        TETHER_LOGW(TAG, "Slave {} does not advertise DC hardware support "
                          "(ESC Features DC bit = 0). SYNC0/SYNC1 unavailable.",
                     slave_idx);
         // Still continue to probe — some slaves have the bit cleared but
@@ -411,7 +411,7 @@ int main(int argc, char** argv) {
     TETHER_LOGI(TAG, "Configuring PDO sync managers from SII ...");
     auto pdo_err = sl.configurePDOSyncManagers();
     if (pdo_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "PDO sync-manager configuration from SII failed: %s — "
+        TETHER_LOGE(TAG, "PDO sync-manager configuration from SII failed: {} — "
                          "cannot proceed to SAFE-OP.",
                     EtherCAT::slaveErrorToString(pdo_err));
         master.stop();
@@ -454,7 +454,7 @@ int main(int argc, char** argv) {
     // Verify the DC realtime loop is actually running
     auto dc_state = master.dc().getState();
     if (dc_state != EtherCAT::DC::DCState::Running) {
-        TETHER_LOGE(TAG, "DC realtime loop is not running (state=%s) — aborting",
+        TETHER_LOGE(TAG, "DC realtime loop is not running (state={}) — aborting",
                     EtherCAT::DC::dc_state_name(dc_state));
         master.dc().stop();
         master.stop();
@@ -466,14 +466,14 @@ int main(int argc, char** argv) {
     // ---- Transition to SAFE-OP ----
     auto safe_err = sl.transitionToSafeOp();
     if (safe_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "SAFE-OP transition failed: %s",
+        TETHER_LOGE(TAG, "SAFE-OP transition failed: {}",
                     EtherCAT::slaveErrorToString(safe_err));
         master.dc().stop();
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 11;
     }
-    TETHER_LOGI(TAG, "Slave %u is in SAFE-OP", slave_idx);
+    TETHER_LOGI(TAG, "Slave {} is in SAFE-OP", slave_idx);
 
     // Give the DC loop a moment to stabilize
     Tether::Platform::Clock::instance().delayMilliseconds(200);
@@ -487,7 +487,7 @@ int main(int argc, char** argv) {
         Tether::Examples::shutdownHostEthernet(session);
         return 12;
     }
-    TETHER_LOGI(TAG, "Baseline AL_STATUS=0x%04X (%s), AL_STATUS_CODE=0x%04X (%s)",
+    TETHER_LOGI(TAG, "Baseline AL_STATUS=0x{:04X} ({}), AL_STATUS_CODE=0x{:04X} ({})",
                 baseline.al_status,
                 EtherCAT::al_status_get_state_name(baseline.al_status),
                 baseline.al_status_code,
@@ -509,7 +509,7 @@ int main(int argc, char** argv) {
 
     // Use a conservative initial cycle time (10 ms) for the support probe
     const uint32_t probe_cycle_ns = 10000000;
-    TETHER_LOGI(TAG, "  Writing SYNC0 cycle time = %u ns", probe_cycle_ns);
+    TETHER_LOGI(TAG, "  Writing SYNC0 cycle time = {} ns", probe_cycle_ns);
     writeRegU32(master, slave_idx, REG_DC_CYCLE0, probe_cycle_ns);
 
     TETHER_LOGI(TAG, "  Activating SYNC0 (DCSyncAct = ENA | SYNC0_ENA | AUTO_ACT)");
@@ -522,14 +522,14 @@ int main(int argc, char** argv) {
     if (!s0_status.read_ok) {
         TETHER_LOGW(TAG, "  Failed to read AL_STATUS after SYNC0 activation");
     } else {
-        TETHER_LOGI(TAG, "  AL_STATUS=0x%04X (%s), AL_STATUS_CODE=0x%04X (%s)",
+        TETHER_LOGI(TAG, "  AL_STATUS=0x{:04X} ({}), AL_STATUS_CODE=0x{:04X} ({})",
                     s0_status.al_status,
                     EtherCAT::al_status_get_state_name(s0_status.al_status),
                     s0_status.al_status_code,
                     EtherCAT::getALStatusCodeName(s0_status.al_status_code));
         sync0_supported = !alHasError(s0_status);
     }
-    TETHER_LOGI(TAG, "  => SYNC0 %s", sync0_supported ? "SUPPORTED" : "NOT SUPPORTED");
+    TETHER_LOGI(TAG, "  => SYNC0 {}", sync0_supported ? "SUPPORTED" : "NOT SUPPORTED");
 
     // Deactivate SYNC0 before probing SYNC1
     writeSyncActivation(master, slave_idx, true, false, false, true);
@@ -542,7 +542,7 @@ int main(int argc, char** argv) {
     TETHER_LOGI(TAG, "=== Phase 2: Probe SYNC1 support ===");
 
     if (sync1_cycle_ns > 0) {
-        TETHER_LOGI(TAG, "  Writing SYNC1 cycle time = %u ns", sync1_cycle_ns);
+        TETHER_LOGI(TAG, "  Writing SYNC1 cycle time = {} ns", sync1_cycle_ns);
         writeRegU32(master, slave_idx, REG_DC_CYCLE1, sync1_cycle_ns);
     }
     TETHER_LOGI(TAG, "  Activating SYNC1 (DCSyncAct = ENA | SYNC1_ENA | AUTO_ACT)");
@@ -555,14 +555,14 @@ int main(int argc, char** argv) {
     if (!s1_status.read_ok) {
         TETHER_LOGW(TAG, "  Failed to read AL_STATUS after SYNC1 activation");
     } else {
-        TETHER_LOGI(TAG, "  AL_STATUS=0x%04X (%s), AL_STATUS_CODE=0x%04X (%s)",
+        TETHER_LOGI(TAG, "  AL_STATUS=0x{:04X} ({}), AL_STATUS_CODE=0x{:04X} ({})",
                     s1_status.al_status,
                     EtherCAT::al_status_get_state_name(s1_status.al_status),
                     s1_status.al_status_code,
                     EtherCAT::getALStatusCodeName(s1_status.al_status_code));
         sync1_supported = !alHasError(s1_status);
     }
-    TETHER_LOGI(TAG, "  => SYNC1 %s", sync1_supported ? "SUPPORTED" : "NOT SUPPORTED");
+    TETHER_LOGI(TAG, "  => SYNC1 {}", sync1_supported ? "SUPPORTED" : "NOT SUPPORTED");
 
     // Deactivate SYNC1
     writeSyncActivation(master, slave_idx, true, false, false, true);
@@ -579,7 +579,7 @@ int main(int argc, char** argv) {
     }
 
     const auto sweep = generateSweep(start_ns, stop_ns, steps);
-    TETHER_LOGI(TAG, "  Sweep has %zu steps: %u ns -> %u ns",
+    TETHER_LOGI(TAG, "  Sweep has {} steps: {} ns -> {} ns",
                 sweep.size(), sweep.front(), sweep.back());
 
     struct SweepResult {
@@ -624,7 +624,7 @@ int main(int argc, char** argv) {
         auto st = readALStatus(master, slave_idx);
         SweepResult r{cycle_ns, st.al_status, st.al_status_code, false};
         if (!st.read_ok) {
-            TETHER_LOGW(TAG, "  %7u ns: AL_STATUS read FAILED", cycle_ns);
+            TETHER_LOGW(TAG, "  {:7} ns: AL_STATUS read FAILED", cycle_ns);
             r.error = true;
             results.push_back(r);
             // Treat read failure as a hard error — stop the sweep
@@ -636,7 +636,7 @@ int main(int argc, char** argv) {
 
         r.error = alHasError(st);
         const char* verdict = r.error ? "ERROR" : "ok";
-        TETHER_LOGI(TAG, "  %7u ns (%7.1f us): AL_STATUS=0x%04X %-8s  code=0x%04X (%s)  [%s]",
+        TETHER_LOGI(TAG, "  {:7} ns ({:7.1f} us): AL_STATUS=0x{:04X} {:<8}  code=0x{:04X} ({})  [{}]",
                     cycle_ns, cycle_ns / 1000.0,
                     st.al_status,
                     EtherCAT::al_status_get_state_name(st.al_status),
@@ -665,25 +665,25 @@ int main(int argc, char** argv) {
     // Summary
     // ====================================================================
     TETHER_LOGI(TAG, "");
-    TETHER_LOGI(TAG, "=== Characterization Summary (slave %u) ===", slave_idx);
-    TETHER_LOGI(TAG, "  DC hardware (ESC Features): %s", dc_hardware ? "yes" : "no");
-    TETHER_LOGI(TAG, "  SII SYNC0 advertised:       %s", sii_sync0 ? "yes" : "no");
-    TETHER_LOGI(TAG, "  SII SYNC1 advertised:       %s", sii_sync1 ? "yes" : "no");
-    TETHER_LOGI(TAG, "  SYNC0 probe result:         %s", sync0_supported ? "SUPPORTED" : "NOT SUPPORTED");
-    TETHER_LOGI(TAG, "  SYNC1 probe result:         %s", sync1_supported ? "SUPPORTED" : "NOT SUPPORTED");
+    TETHER_LOGI(TAG, "=== Characterization Summary (slave {}) ===", slave_idx);
+    TETHER_LOGI(TAG, "  DC hardware (ESC Features): {}", dc_hardware ? "yes" : "no");
+    TETHER_LOGI(TAG, "  SII SYNC0 advertised:       {}", sii_sync0 ? "yes" : "no");
+    TETHER_LOGI(TAG, "  SII SYNC1 advertised:       {}", sii_sync1 ? "yes" : "no");
+    TETHER_LOGI(TAG, "  SYNC0 probe result:         {}", sync0_supported ? "SUPPORTED" : "NOT SUPPORTED");
+    TETHER_LOGI(TAG, "  SYNC1 probe result:         {}", sync1_supported ? "SUPPORTED" : "NOT SUPPORTED");
 
     if (sync0_supported && !results.empty()) {
         if (hit_error) {
-            TETHER_LOGI(TAG, "  SYNC0 sweep: first AL error at %u ns (%.1f us)",
+            TETHER_LOGI(TAG, "  SYNC0 sweep: first AL error at {} ns ({:.1f} us)",
                         first_error_ns, first_error_ns / 1000.0);
-            TETHER_LOGI(TAG, "    AL_STATUS_CODE = 0x%04X (%s)",
+            TETHER_LOGI(TAG, "    AL_STATUS_CODE = 0x{:04X} ({})",
                         first_error_code, EtherCAT::getALStatusCodeName(first_error_code));
             if (last_ok_ns > 0) {
-                TETHER_LOGI(TAG, "  Last OK SYNC0 cycle time:   %u ns (%.1f us)",
+                TETHER_LOGI(TAG, "  Last OK SYNC0 cycle time:   {} ns ({:.1f} us)",
                             last_ok_ns, last_ok_ns / 1000.0);
             }
         } else {
-            TETHER_LOGI(TAG, "  SYNC0 sweep: no AL error encountered down to %u ns (%.1f us)",
+            TETHER_LOGI(TAG, "  SYNC0 sweep: no AL error encountered down to {} ns ({:.1f} us)",
                         sweep.back(), sweep.back() / 1000.0);
         }
     }
@@ -692,10 +692,10 @@ int main(int argc, char** argv) {
     if (!results.empty()) {
         TETHER_LOGI(TAG, "");
         TETHER_LOGI(TAG, "  SYNC0 cycle-time sweep results:");
-        TETHER_LOGI(TAG, "    %10s  %10s  %-10s  %s",
+        TETHER_LOGI(TAG, "    {:10}  {:10}  {:<10}  {}",
                     "ns", "us", "AL state", "AL_STATUS_CODE");
         for (const auto& r : results) {
-            TETHER_LOGI(TAG, "    %10u  %10.1f  %-10s  0x%04X (%s) %s",
+            TETHER_LOGI(TAG, "    {:10}  {:10.1f}  {:<10}  0x{:04X} ({}) {}",
                         r.cycle_ns, r.cycle_ns / 1000.0,
                         EtherCAT::al_status_get_state_name(r.al_status),
                         r.al_status_code,
@@ -710,18 +710,18 @@ int main(int argc, char** argv) {
     auto dc_stats = master.dc().getStats();
     TETHER_LOGI(TAG, "");
     TETHER_LOGI(TAG, "=== DC Realtime Loop Statistics ===");
-    TETHER_LOGI(TAG, "  DC state:          %s",
+    TETHER_LOGI(TAG, "  DC state:          {}",
                 EtherCAT::DC::dc_state_name(master.dc().getState()));
-    TETHER_LOGI(TAG, "  Total cycles:      %llu  (%.1f s at 1 ms)",
+    TETHER_LOGI(TAG, "  Total cycles:      {}  ({:.1f} s at 1 ms)",
                 (unsigned long long)dc_stats.cycle_count,
                 dc_stats.cycle_count / 1000.0);
-    TETHER_LOGI(TAG, "  Sync frames sent:  %llu",
+    TETHER_LOGI(TAG, "  Sync frames sent:  {}",
                 (unsigned long long)dc_stats.sync_count);
-    TETHER_LOGI(TAG, "  PDO errors:        %llu",
+    TETHER_LOGI(TAG, "  PDO errors:        {}",
                 (unsigned long long)dc_stats.pdo_error_count);
-    TETHER_LOGI(TAG, "  Max jitter:        %u us", dc_stats.max_jitter_us);
-    TETHER_LOGI(TAG, "  Avg jitter:        %u us", dc_stats.avg_jitter_us);
-    TETHER_LOGI(TAG, "  Last drift:        %ld ns", (long)dc_stats.last_drift_ns);
+    TETHER_LOGI(TAG, "  Max jitter:        {} us", dc_stats.max_jitter_us);
+    TETHER_LOGI(TAG, "  Avg jitter:        {} us", dc_stats.avg_jitter_us);
+    TETHER_LOGI(TAG, "  Last drift:        {} ns", (long)dc_stats.last_drift_ns);
 
     // ---- Shutdown ----
     master.dc().stop();

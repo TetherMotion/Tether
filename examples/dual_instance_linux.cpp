@@ -117,7 +117,7 @@ struct InstanceContext {
 };
 
 static void instanceWorker(InstanceContext* ctx) {
-    TETHER_LOGI(TAG, "[%s] Starting master instance", ctx->name);
+    TETHER_LOGI(TAG, "[{}] Starting master instance", ctx->name);
 
     const uint8_t mac[6] = {0x02, 0x00, 0x00, 0x00, 0x00,
                             static_cast<uint8_t>(ctx->name[0])};
@@ -132,11 +132,11 @@ static void instanceWorker(InstanceContext* ctx) {
     }
 
     uint16_t slaves = ctx->master->getDiscoveredSlaveCount();
-    TETHER_LOGI(TAG, "[%s] Discovered %u slave(s), adapter TX count: %u",
+    TETHER_LOGI(TAG, "[{}] Discovered {} slave(s), adapter TX count: {}",
              ctx->name, slaves, ctx->adapter->txCount());
 
     ctx->master->stop();
-    TETHER_LOGI(TAG, "[%s] Master stopped", ctx->name);
+    TETHER_LOGI(TAG, "[{}] Master stopped", ctx->name);
     ctx->done.store(true);
 }
 

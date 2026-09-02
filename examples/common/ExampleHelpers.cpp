@@ -34,7 +34,7 @@ std::string resolveInterface(const std::string& requested, const char* tag) {
 
     auto physIfaces = EtherCAT::HAL::getPhysicalEthernetInterfaces();
     if (physIfaces.size() == 1) {
-        TETHER_LOGI(tag, "No --interface given; auto-selected '%s'",
+        TETHER_LOGI(tag, "No --interface given; auto-selected '{}'",
                     physIfaces[0].name.c_str());
         return physIfaces[0].name;
     }
@@ -48,8 +48,8 @@ std::string resolveInterface(const std::string& requested, const char* tag) {
             if (!names.empty()) names += ", ";
             names += iface.name;
         }
-        TETHER_LOGE(tag, "No --interface given and %zu physical Ethernet "
-                         "interfaces found; please specify one with -i: %s",
+        TETHER_LOGE(tag, "No --interface given and {} physical Ethernet "
+                         "interfaces found; please specify one with -i: {}",
                     physIfaces.size(), names.c_str());
     }
     std::fflush(stderr);
@@ -123,20 +123,20 @@ bool applyDebugGateConditions(const std::string& startCond,
     if (!startCond.empty()) {
         auto cond = EtherCAT::DebugGate::parseCondition(startCond);
         if (!cond) {
-            TETHER_LOGE(tag, "Failed to parse --debug-start condition: '%s'", startCond.c_str());
+            TETHER_LOGE(tag, "Failed to parse --debug-start condition: '{}'", startCond.c_str());
             return false;
         }
-        TETHER_LOGI(tag, "Debug gate: global start condition = '%s'", startCond.c_str());
+        TETHER_LOGI(tag, "Debug gate: global start condition = '{}'", startCond.c_str());
         master.debugGate().addGlobalStart(std::move(cond));
     }
 
     if (!stopCond.empty()) {
         auto cond = EtherCAT::DebugGate::parseCondition(stopCond);
         if (!cond) {
-            TETHER_LOGE(tag, "Failed to parse --debug-stop condition: '%s'", stopCond.c_str());
+            TETHER_LOGE(tag, "Failed to parse --debug-stop condition: '{}'", stopCond.c_str());
             return false;
         }
-        TETHER_LOGI(tag, "Debug gate: global stop condition = '%s'", stopCond.c_str());
+        TETHER_LOGI(tag, "Debug gate: global stop condition = '{}'", stopCond.c_str());
         master.debugGate().addGlobalStop(std::move(cond));
     }
 
@@ -223,11 +223,11 @@ void applyDebugFlags(const std::set<std::string>& flags,
     if (!unknown.empty()) {
         TETHER_LOGW(tag, "Unknown debug flags:");
         for (const auto& f : unknown) {
-            TETHER_LOGW(tag, "  - %s", f.c_str());
+            TETHER_LOGW(tag, "  - {}", f.c_str());
         }
         TETHER_LOGI(tag, "Known debug flags:");
         for (const auto& f : knownNames) {
-            TETHER_LOGI(tag, "  - %s", f.c_str());
+            TETHER_LOGI(tag, "  - {}", f.c_str());
         }
     }
 }
@@ -299,14 +299,14 @@ void logVlanConfig(const VlanConfig& config, const char* tag) {
     if (!config.enabled) return;
 
     if (config.rxAny) {
-        TETHER_LOGI(tag, "VLAN mode: RX=any (undefined target), TX=%s",
+        TETHER_LOGI(tag, "VLAN mode: RX=any (undefined target), TX={}",
                     config.txVlan ? std::to_string(*config.txVlan).c_str() : "none");
     } else if (config.rxRange) {
-        TETHER_LOGI(tag, "VLAN mode: RX=%u-%u, TX=%s",
+        TETHER_LOGI(tag, "VLAN mode: RX={}-{}, TX={}",
                     config.rxRange->start, config.rxRange->end,
                     config.txVlan ? std::to_string(*config.txVlan).c_str() : "none");
     } else {
-        TETHER_LOGI(tag, "VLAN mode: RX=untagged, TX=%s",
+        TETHER_LOGI(tag, "VLAN mode: RX=untagged, TX={}",
                     config.txVlan ? std::to_string(*config.txVlan).c_str() : "none");
     }
 }
@@ -424,7 +424,7 @@ bool parseMailboxAddress(const std::string& str, MailboxAddressConfig& out) {
 void logMailboxConfig(const MailboxSizeConfig& size,
                       const MailboxAddressConfig& addr,
                       const char* tag) {
-    TETHER_LOGI(tag, "Mailbox config: MbxOut addr=0x%04X len=%u, MbxIn addr=0x%04X len=%u",
+    TETHER_LOGI(tag, "Mailbox config: MbxOut addr=0x{:04X} len={}, MbxIn addr=0x{:04X} len={}",
                 addr.outAddress, size.outSize,
                 addr.inAddress, size.inSize);
 }
@@ -461,8 +461,8 @@ uint32_t reportSdoAbort(const EtherCAT::Slave& slave, const char* tag) {
                               ? "payload length sent to slave"
                               : "read buffer capacity offered";
 
-    TETHER_LOGE(tag, "Slave rejected the SDO request: CoE abort code 0x%08X (%s). "
-                     "Operation: %s, attempted %s: %zu bytes.",
+    TETHER_LOGE(tag, "Slave rejected the SDO request: CoE abort code 0x{:08X} ({}). "
+                     "Operation: {}, attempted {}: {} bytes.",
                 abort_code, meaning, op_str, len_str, attempted_len);
 
     // Always echo to stderr so the user sees it on the console even when log

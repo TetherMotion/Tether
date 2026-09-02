@@ -31,7 +31,7 @@ bool CiA402Drive::assignFixedPDOs(uint16_t rxpdo_index, uint16_t txpdo_index,
     m_txpdo_size  = txpdo_size;
     m_pdo_configured = true;
 
-    TETHER_LOGI(TAG, "%s: assignFixedPDOs RxPDO=0x%04X/%u bytes, TxPDO=0x%04X/%u bytes",
+    TETHER_LOGI(TAG, "{}: assignFixedPDOs RxPDO=0x{:04X}/{} bytes, TxPDO=0x{:04X}/{} bytes",
              logPrefix().c_str(), rxpdo_index, rxpdo_size, txpdo_index, txpdo_size);
 
     uint8_t zero = 0;
@@ -40,30 +40,30 @@ bool CiA402Drive::assignFixedPDOs(uint16_t rxpdo_index, uint16_t txpdo_index,
 
     // SM2 (RxPDO) assignment — best effort
     if (!m_master->sdoManager(m_slave_index).writeU8( CiA301::SyncManager2PDOAssign, 0, zero, {.timeout_ms = m_sdo_timeout_ms}).has_value()) {
-        TETHER_LOGW(TAG, "%s: Failed to clear SM2 PDO count (may be fixed)", logPrefix().c_str());
+        TETHER_LOGW(TAG, "{}: Failed to clear SM2 PDO count (may be fixed)", logPrefix().c_str());
     }
     if (!m_master->sdoManager(m_slave_index).writeU16( CiA301::SyncManager2PDOAssign, 1, rxpdo_index, {.timeout_ms = m_sdo_timeout_ms}).has_value()) {
-        TETHER_LOGW(TAG, "%s: Failed to assign RxPDO 0x%04X to SM2", logPrefix().c_str(), rxpdo_index);
+        TETHER_LOGW(TAG, "{}: Failed to assign RxPDO 0x{:04X} to SM2", logPrefix().c_str(), rxpdo_index);
         sdo_ok = false;
     }
     if (!m_master->sdoManager(m_slave_index).writeU8( CiA301::SyncManager2PDOAssign, 0, one, {.timeout_ms = m_sdo_timeout_ms}).has_value()) {
-        TETHER_LOGW(TAG, "%s: Failed to set SM2 PDO count", logPrefix().c_str());
+        TETHER_LOGW(TAG, "{}: Failed to set SM2 PDO count", logPrefix().c_str());
     }
 
     // SM3 (TxPDO) assignment — best effort
     if (!m_master->sdoManager(m_slave_index).writeU8( CiA301::SyncManager3PDOAssign, 0, zero, {.timeout_ms = m_sdo_timeout_ms}).has_value()) {
-        TETHER_LOGW(TAG, "%s: Failed to clear SM3 PDO count (may be fixed)", logPrefix().c_str());
+        TETHER_LOGW(TAG, "{}: Failed to clear SM3 PDO count (may be fixed)", logPrefix().c_str());
     }
     if (!m_master->sdoManager(m_slave_index).writeU16( CiA301::SyncManager3PDOAssign, 1, txpdo_index, {.timeout_ms = m_sdo_timeout_ms}).has_value()) {
-        TETHER_LOGW(TAG, "%s: Failed to assign TxPDO 0x%04X to SM3", logPrefix().c_str(), txpdo_index);
+        TETHER_LOGW(TAG, "{}: Failed to assign TxPDO 0x{:04X} to SM3", logPrefix().c_str(), txpdo_index);
         sdo_ok = false;
     }
     if (!m_master->sdoManager(m_slave_index).writeU8( CiA301::SyncManager3PDOAssign, 0, one, {.timeout_ms = m_sdo_timeout_ms}).has_value()) {
-        TETHER_LOGW(TAG, "%s: Failed to set SM3 PDO count", logPrefix().c_str());
+        TETHER_LOGW(TAG, "{}: Failed to set SM3 PDO count", logPrefix().c_str());
     }
 
     if (!sdo_ok) {
-        TETHER_LOGW(TAG, "%s: PDO SDO assignment had failures; using configured sizes anyway", logPrefix().c_str());
+        TETHER_LOGW(TAG, "{}: PDO SDO assignment had failures; using configured sizes anyway", logPrefix().c_str());
     }
 
     return true;
@@ -81,7 +81,7 @@ void CiA402Drive::setPDOBufferSizes(uint16_t rxpdo_index, uint16_t txpdo_index,
     m_txpdo_size  = txpdo_size;
     m_pdo_configured = true;
 
-    TETHER_LOGI(TAG, "%s: setPDOBufferSizes RxPDO=0x%04X/%u bytes, TxPDO=0x%04X/%u bytes",
+    TETHER_LOGI(TAG, "{}: setPDOBufferSizes RxPDO=0x{:04X}/{} bytes, TxPDO=0x{:04X}/{} bytes",
              logPrefix().c_str(), rxpdo_index, rxpdo_size, txpdo_index, txpdo_size);
 }
 
@@ -91,7 +91,7 @@ void CiA402Drive::setPDOBufferSizes(uint16_t rxpdo_index, uint16_t txpdo_index,
 
 bool CiA402Drive::registerPDOBuffers() {
     if (m_pdo_registered) {
-        TETHER_LOGW(TAG, "%s: PDO buffers already registered", logPrefix().c_str());
+        TETHER_LOGW(TAG, "{}: PDO buffers already registered", logPrefix().c_str());
         return true;
     }
 
@@ -106,10 +106,10 @@ bool CiA402Drive::registerPDOBuffers() {
             PDO::PDOAddressMode::Position
         );
         if (m_rxpdo_entry_index < 0) {
-            TETHER_LOGE(TAG, "%s: Failed to register RxPDO buffer!", logPrefix().c_str());
+            TETHER_LOGE(TAG, "{}: Failed to register RxPDO buffer!", logPrefix().c_str());
             return false;
         }
-        TETHER_LOGI(TAG, "%s: Registered RxPDO %u bytes (entry %d)",
+        TETHER_LOGI(TAG, "{}: Registered RxPDO {} bytes (entry {})",
                  logPrefix().c_str(), m_rxpdo_size, m_rxpdo_entry_index);
     }
 
@@ -122,10 +122,10 @@ bool CiA402Drive::registerPDOBuffers() {
             PDO::PDOAddressMode::Position
         );
         if (m_txpdo_entry_index < 0) {
-            TETHER_LOGE(TAG, "%s: Failed to register TxPDO buffer!", logPrefix().c_str());
+            TETHER_LOGE(TAG, "{}: Failed to register TxPDO buffer!", logPrefix().c_str());
             return false;
         }
-        TETHER_LOGI(TAG, "%s: Registered TxPDO %u bytes (entry %d)",
+        TETHER_LOGI(TAG, "{}: Registered TxPDO {} bytes (entry {})",
                  logPrefix().c_str(), m_txpdo_size, m_txpdo_entry_index);
     }
 

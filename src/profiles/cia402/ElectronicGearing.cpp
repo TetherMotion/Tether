@@ -31,7 +31,7 @@ size_t GearingController::addSlave(DriveBackendPtr backend,
     
     m_slaves.push_back(slave);
     
-    TETHER_LOGI(TAG, "Added slave %d with ratio %ld:%ld", 
+    TETHER_LOGI(TAG, "Added slave {} with ratio {}:{}", 
              (int)(m_slaves.size() - 1),
              (long)numerator, (long)denominator);
     
@@ -97,7 +97,7 @@ bool GearingController::engageSlave(size_t slaveIndex, bool softStart) {
     }
     
     if (!slave.backend) {
-        TETHER_LOGE(TAG, "Slave %d has no backend", (int)slaveIndex);
+        TETHER_LOGE(TAG, "Slave {} has no backend", (int)slaveIndex);
         return false;
     }
     
@@ -109,12 +109,12 @@ bool GearingController::engageSlave(size_t slaveIndex, bool softStart) {
     if (softStart && m_softStartEnabled && m_rampTimeMs > 0) {
         slave.state = GearingState::Engaging;
         slave.currentRatio = 0.0;
-        TETHER_LOGI(TAG, "Slave %d engaging with soft start", (int)slaveIndex);
+        TETHER_LOGI(TAG, "Slave {} engaging with soft start", (int)slaveIndex);
     } else {
         slave.state = GearingState::Engaged;
         slave.currentRatio = static_cast<double>(slave.config.numerator) / 
                             slave.config.denominator;
-        TETHER_LOGI(TAG, "Slave %d engaged immediately", (int)slaveIndex);
+        TETHER_LOGI(TAG, "Slave {} engaged immediately", (int)slaveIndex);
     }
     
     notifyStateChange(slaveIndex, slave.state);
@@ -141,11 +141,11 @@ void GearingController::disengageSlave(size_t slaveIndex, bool softStop) {
     if (softStop && m_rampTimeMs > 0) {
         slave.state = GearingState::Disengaging;
         slave.engageStartTime = esp_timer_get_time();
-        TETHER_LOGI(TAG, "Slave %d disengaging with soft stop", (int)slaveIndex);
+        TETHER_LOGI(TAG, "Slave {} disengaging with soft stop", (int)slaveIndex);
     } else {
         slave.state = GearingState::Disengaged;
         slave.currentRatio = 0.0;
-        TETHER_LOGI(TAG, "Slave %d disengaged immediately", (int)slaveIndex);
+        TETHER_LOGI(TAG, "Slave {} disengaged immediately", (int)slaveIndex);
     }
     
     notifyStateChange(slaveIndex, slave.state);
@@ -299,7 +299,7 @@ void GearingController::setGearRatio(size_t slaveIndex,
     slave.config.numerator = numerator;
     slave.config.denominator = denominator;
     
-    TETHER_LOGI(TAG, "Slave %d ratio changed to %ld:%ld", 
+    TETHER_LOGI(TAG, "Slave {} ratio changed to {}:{}", 
              (int)slaveIndex, (long)numerator, (long)denominator);
 }
 

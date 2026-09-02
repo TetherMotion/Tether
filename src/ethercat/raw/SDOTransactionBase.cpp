@@ -38,12 +38,12 @@ bool SDOTransactionBase::sendAndWait(Master& master, uint16_t adp,
                                      mbxbuf,
                                      static_cast<uint16_t>(mbxWriteLen),
                                      timeoutMs, nullptr)) {
-        TETHER_LOGE(TAG, "SDO %s: re-send failed after stale response (adp=0x%04X)",
+        TETHER_LOGE(TAG, "SDO {}: re-send failed after stale response (adp=0x{:04X})",
                     phaseLabel, adp);
         return false;
     }
     if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
-        TETHER_LOGE(TAG, "SDO %s: SM1 never full after re-send (adp=0x%04X timeout=%ums)",
+        TETHER_LOGE(TAG, "SDO {}: SM1 never full after re-send (adp=0x{:04X} timeout={}ms)",
                     phaseLabel, adp, transactionTimeoutMs);
         diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
         return false;
@@ -90,11 +90,11 @@ bool SDOTransactionBase::handleMailboxError(const uint8_t* mbxbuf, const MbxResp
     if (hdr.len >= 4) {
         const uint16_t err = le16_to_host(*reinterpret_cast<const uint16_t*>(mbxbuf + sizeof(MbxHeader) + 0));
         const uint16_t detail = le16_to_host(*reinterpret_cast<const uint16_t*>(mbxbuf + sizeof(MbxHeader) + 2));
-        TETHER_LOGE(TAG, "Slave %u: Mailbox error response: cnt=%u err=0x%04X (%s) detail=0x%04X (%s) (index=0x%04X:%u)",
+        TETHER_LOGE(TAG, "Slave {}: Mailbox error response: cnt={} err=0x{:04X} ({}) detail=0x{:04X} ({}) (index=0x{:04X}:{})",
                     slaveIndexFromADP(adp), hdr.cnt, err, errorDecoder_.mbxErrorCodeStr(err),
                     detail, errorDecoder_.mbxErrorDetailStr(err, detail), index, sub);
     } else {
-        TETHER_LOGE(TAG, "Slave %u: Mailbox error response (truncated): cnt=%u len=%u (index=0x%04X:%u)",
+        TETHER_LOGE(TAG, "Slave {}: Mailbox error response (truncated): cnt={} len={} (index=0x{:04X}:{})",
                     slaveIndexFromADP(adp), hdr.cnt, hdr.len, index, sub);
     }
     return false;
@@ -123,7 +123,7 @@ bool SDOTransactionBase::checkStaleCounter(Master& master, uint16_t adp,
                                            int& staleRetryCount,
                                            uint16_t index_, uint8_t sub_,
                                            const char* phaseLabel) {
-    TETHER_LOGW(TAG, "Slave %u: Stale mailbox response (%s): cnt=%u expected=%u (index=0x%04X:%u) — clearing and re-sending",
+    TETHER_LOGW(TAG, "Slave {}: Stale mailbox response ({}): cnt={} expected={} (index=0x{:04X}:{}) — clearing and re-sending",
                 slaveIndexFromADP(adp), phaseLabel, hdr.cnt, inOutExpectedCnt, index_, sub_);
     // Do NOT sync the counter here.  A stale response (wrong cnt or wrong
     // index/sub) is typically a leftover from a previous session that was

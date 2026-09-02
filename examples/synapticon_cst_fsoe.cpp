@@ -200,7 +200,7 @@ void hexDump(const char* tag, const char* label, const uint8_t* data, size_t len
         for (size_t j = i; j < i + kBytesPerLine && j < len; j++) {
             pos += snprintf(hex + pos, sizeof(hex) - pos, "%02X ", data[j]);
         }
-        TETHER_LOGI(tag, "  %s [%3zu/%3zu]: %s", label, i, len, hex);
+        TETHER_LOGI(tag, "  {} [{:3}/{:3}]: {}", label, i, len, hex);
     }
 }
 
@@ -325,12 +325,12 @@ public:
             static_cast<const uint8_t*>(drive->getRxPDOBuffer()) + kMotionRxPDOOffset);
         if (tx) {
             TETHER_LOGI(TAG,
-                "--- Drive @ %llu ms ---",
+                "--- Drive @ {} ms ---",
                 static_cast<unsigned long long>(elapsed_ms_));
             TETHER_LOGI(TAG,
-                "  statusword=0x%04X mode_display=%d "
-                "target_torque=%d torque_actual=%d "
-                "position_actual=%lld",
+                "  statusword=0x{:04X} mode_display={} "
+                "target_torque={} torque_actual={} "
+                "position_actual={}",
                 tx->statusword,
                 static_cast<int>(tx->modes_of_operation_display),
                 rx ? static_cast<int>(rx->target_torque) : 0,
@@ -343,39 +343,39 @@ public:
         const auto stats = conn.getStats();
 
         TETHER_LOGI(TAG,
-            "--- FSoE @ %llu ms ---",
+            "--- FSoE @ {} ms ---",
             static_cast<unsigned long long>(elapsed_ms_));
         TETHER_LOGI(TAG,
-            "  state=%s(%u) operational=%d fail_safe=%d data_valid=%d",
+            "  state={}({}) operational={} fail_safe={} data_valid={}",
             FSoE::fsoeStateName(status.state), status.state,
             status.isOperational() ? 1 : 0,
             status.isFailSafe() ? 1 : 0,
             status.data_valid ? 1 : 0);
         TETHER_LOGI(TAG,
-            "  session_id=0x%04X rx_seq=%u watchdog=%u ms",
+            "  session_id=0x{:04X} rx_seq={} watchdog={} ms",
             status.session_id, status.sequence_number,
             status.watchdog_counter);
         if (status.hasError()) {
             TETHER_LOGW(TAG,
-                "  ERROR: 0x%04X (%s)",
+                "  ERROR: 0x{:04X} ({})",
                 status.error_code, FSoE::fsoeErrorName(status.error_code));
         }
         TETHER_LOGI(TAG,
-            "  frames: tx=%u rx=%u | crc_err=%u seq_err=%u watchdog_evt=%u "
-            "reset_evt=%u timeout_evt=%u dup=%u invalid=%u",
+            "  frames: tx={} rx={} | crc_err={} seq_err={} watchdog_evt={} "
+            "reset_evt={} timeout_evt={} dup={} invalid={}",
             stats.frames_sent, stats.frames_received,
             stats.crc_errors, stats.sequence_errors, stats.watchdog_events,
             stats.reset_events, stats.timeout_events,
             stats.duplicate_frames, stats.invalid_frames);
         TETHER_LOGI(TAG,
-            "  recovery: attempts=%u successful=%u",
+            "  recovery: attempts={} successful={}",
             stats.recovery_attempts, stats.successful_recoveries);
 
         if (fsoe_main_.hasStatus()) {
             const auto& sm = fsoe_main_.status();
             TETHER_LOGI(TAG,
-                "  safe-motion: motion_allowed=%d sto=%d ss1=%d ss2=%d "
-                "sos=%d error=%d",
+                "  safe-motion: motion_allowed={} sto={} ss1={} ss2={} "
+                "sos={} error={}",
                 sm.motionAllowed() ? 1 : 0,
                 sm.sto_active ? 1 : 0,
                 sm.ss1_active ? 1 : 0,
@@ -448,8 +448,8 @@ public:
             if (sm.sto_active == expected_sto_) {
                 sto_confirmed_ = true;
                 TETHER_LOGI(TAG,
-                    "[safety-confirm] STO %s confirmed by drive after %llu ms "
-                    "(sto_active=%d)",
+                    "[safety-confirm] STO {} confirmed by drive after {} ms "
+                    "(sto_active={})",
                     expected_sto_ ? "ON (torque inhibited)" : "OFF (torque allowed)",
                     static_cast<unsigned long long>(
                         elapsed_ms_ - data_state_entered_ms_),
@@ -458,9 +458,9 @@ public:
                        (elapsed_ms_ - data_state_entered_ms_) > confirm_timeout_ms_) {
                 sto_warned_ = true;
                 TETHER_LOGW(TAG,
-                    "[safety-confirm] STO NOT confirmed after %u ms! "
-                    "Commanded STO=%s but drive reports sto_active=%d "
-                    "(expected %d). The drive may be ignoring the command "
+                    "[safety-confirm] STO NOT confirmed after {} ms! "
+                    "Commanded STO={} but drive reports sto_active={} "
+                    "(expected {}). The drive may be ignoring the command "
                     "bit or using a different polarity/position.",
                     confirm_timeout_ms_,
                     expected_sto_ ? "ON" : "OFF",
@@ -475,8 +475,8 @@ public:
             if (sm.brake_engaged == expected_sbc_) {
                 sbc_confirmed_ = true;
                 TETHER_LOGI(TAG,
-                    "[safety-confirm] SBC %s confirmed by drive after %llu ms "
-                    "(brake_engaged=%d)",
+                    "[safety-confirm] SBC {} confirmed by drive after {} ms "
+                    "(brake_engaged={})",
                     expected_sbc_ ? "ENGAGED" : "RELEASED",
                     static_cast<unsigned long long>(
                         elapsed_ms_ - data_state_entered_ms_),
@@ -485,9 +485,9 @@ public:
                        (elapsed_ms_ - data_state_entered_ms_) > confirm_timeout_ms_) {
                 sbc_warned_ = true;
                 TETHER_LOGW(TAG,
-                    "[safety-confirm] SBC NOT confirmed after %u ms! "
-                    "Commanded SBC=%s but drive reports brake_engaged=%d "
-                    "(expected %d). The brake may not be responding or the "
+                    "[safety-confirm] SBC NOT confirmed after {} ms! "
+                    "Commanded SBC={} but drive reports brake_engaged={} "
+                    "(expected {}). The brake may not be responding or the "
                     "drive uses a different bit polarity/position.",
                     confirm_timeout_ms_,
                     expected_sbc_ ? "ENGAGED" : "RELEASED",
@@ -660,19 +660,19 @@ static void dumpDefaultPdoConfig(EtherCAT::Master& ec_master,
     const auto slave_addr = EtherCAT::Master::slaveAddressFromADP(
         EtherCAT::Master::adpForSlaveIndex(slave_idx));
 
-    TETHER_LOGI(TAG, "===== Default PDO/SM/FMMU dump (slave %u) =====", slave_idx);
+    TETHER_LOGI(TAG, "===== Default PDO/SM/FMMU dump (slave {}) =====", slave_idx);
 
     // --- 0x1C12 (SM2 RxPDO assignment) ---
     {
         auto cnt = sdo.readU8(0x1C12, 0, {.timeout_ms = kSdoTimeoutMs});
         if (cnt.has_value()) {
-            TETHER_LOGI(TAG, "  0x1C12 (SM2 RxPDO assign): %u entries", cnt.value());
+            TETHER_LOGI(TAG, "  0x1C12 (SM2 RxPDO assign): {} entries", cnt.value());
             for (uint8_t i = 1; i <= cnt.value() && i <= 16; i++) {
                 auto entry = sdo.readU16(0x1C12, i, {.timeout_ms = kSdoTimeoutMs});
                 if (entry.has_value())
-                    TETHER_LOGI(TAG, "    0x1C12:%u = 0x%04X", i, entry.value());
+                    TETHER_LOGI(TAG, "    0x1C12:{} = 0x{:04X}", i, entry.value());
                 else
-                    TETHER_LOGW(TAG, "    0x1C12:%u FAILED", i);
+                    TETHER_LOGW(TAG, "    0x1C12:{} FAILED", i);
             }
         } else {
             TETHER_LOGW(TAG, "  0x1C12:0 FAILED (no default RxPDO assignment)");
@@ -683,13 +683,13 @@ static void dumpDefaultPdoConfig(EtherCAT::Master& ec_master,
     {
         auto cnt = sdo.readU8(0x1C13, 0, {.timeout_ms = kSdoTimeoutMs});
         if (cnt.has_value()) {
-            TETHER_LOGI(TAG, "  0x1C13 (SM3 TxPDO assign): %u entries", cnt.value());
+            TETHER_LOGI(TAG, "  0x1C13 (SM3 TxPDO assign): {} entries", cnt.value());
             for (uint8_t i = 1; i <= cnt.value() && i <= 16; i++) {
                 auto entry = sdo.readU16(0x1C13, i, {.timeout_ms = kSdoTimeoutMs});
                 if (entry.has_value())
-                    TETHER_LOGI(TAG, "    0x1C13:%u = 0x%04X", i, entry.value());
+                    TETHER_LOGI(TAG, "    0x1C13:{} = 0x{:04X}", i, entry.value());
                 else
-                    TETHER_LOGW(TAG, "    0x1C13:%u FAILED", i);
+                    TETHER_LOGW(TAG, "    0x1C13:{} FAILED", i);
             }
         } else {
             TETHER_LOGW(TAG, "  0x1C13:0 FAILED (no default TxPDO assignment)");
@@ -715,7 +715,7 @@ static void dumpDefaultPdoConfig(EtherCAT::Master& ec_master,
         ec_master.readRegister(slave_addr, base + 6, &activate, 1, 200);
         ec_master.readRegister(slave_addr, base + 7, &pdi_control, 1, 200);
 
-        TETHER_LOGI(TAG, "  %s: start=0x%04X len=%u ctrl=0x%02X status=0x%02X act=0x%02X pdi=0x%02X",
+        TETHER_LOGI(TAG, "  {}: start=0x{:04X} len={} ctrl=0x{:02X} status=0x{:02X} act=0x{:02X} pdi=0x{:02X}",
                     sm_names[sm], start_addr, length, control, status, activate, pdi_control);
     }
 
@@ -740,11 +740,11 @@ static void dumpDefaultPdoConfig(EtherCAT::Master& ec_master,
         if (enabled || log_addr != 0 || length != 0) {
             const char* dir = (read_access && write_access) ? "RW" :
                               read_access ? "R" : write_access ? "W" : "--";
-            TETHER_LOGI(TAG, "  FMMU%d: log=0x%08X phys=0x%04X len=%u type=0x%02X [%s %s]",
+            TETHER_LOGI(TAG, "  FMMU{}: log=0x{:08X} phys=0x{:04X} len={} type=0x{:02X} [{} {}]",
                         fmmu, log_addr, phys_addr, length, fmmu_type,
                         enabled ? "EN" : "DIS", dir);
         } else {
-            TETHER_LOGI(TAG, "  FMMU%d: (unused)", fmmu);
+            TETHER_LOGI(TAG, "  FMMU{}: (unused)", fmmu);
         }
     }
 
@@ -754,11 +754,11 @@ static void dumpDefaultPdoConfig(EtherCAT::Master& ec_master,
     auto dump_pdo_mapping = [&](uint16_t pdo_idx, const char* label) {
         auto cnt = sdo.readU8(pdo_idx, 0, {.timeout_ms = kSdoTimeoutMs});
         if (!cnt.has_value()) {
-            TETHER_LOGW(TAG, "  %s (0x%04X): FAILED to read count", label, pdo_idx);
+            TETHER_LOGW(TAG, "  {} (0x{:04X}): FAILED to read count", label, pdo_idx);
             return;
         }
         uint16_t total_bits = 0;
-        TETHER_LOGI(TAG, "  %s (0x%04X): %u entries", label, pdo_idx, cnt.value());
+        TETHER_LOGI(TAG, "  {} (0x{:04X}): {} entries", label, pdo_idx, cnt.value());
         for (uint8_t i = 1; i <= cnt.value() && i <= 32; i++) {
             auto entry = sdo.readU32(pdo_idx, i, {.timeout_ms = kSdoTimeoutMs});
             if (entry.has_value()) {
@@ -767,13 +767,13 @@ static void dumpDefaultPdoConfig(EtherCAT::Master& ec_master,
                 uint8_t sub = (v >> 8) & 0xFF;
                 uint8_t bits = v & 0xFF;
                 total_bits += bits;
-                TETHER_LOGI(TAG, "    %s:%u = 0x%08X (idx=0x%04X sub=%u bits=%u)",
+                TETHER_LOGI(TAG, "    {}:{} = 0x{:08X} (idx=0x{:04X} sub={} bits={})",
                             label, i, v, idx, sub, bits);
             } else {
-                TETHER_LOGW(TAG, "    %s:%u FAILED", label, i);
+                TETHER_LOGW(TAG, "    {}:{} FAILED", label, i);
             }
         }
-        TETHER_LOGI(TAG, "    → total: %u bits = %u bytes", total_bits, total_bits / 8);
+        TETHER_LOGI(TAG, "    → total: {} bits = {} bytes", total_bits, total_bits / 8);
     };
 
     // Read mappings for all relevant PDOs
@@ -952,7 +952,7 @@ int preActivationSafetyCheck(EtherCAT::DS402Master& master,
     const auto safety = EtherCAT::Drives::Synapticon::readSafetyModuleState(slave);
 
     TETHER_LOGI(TAG,
-        "Safety module diagnostics (0x2611): input1=%u input2=%u -> %s",
+        "Safety module diagnostics (0x2611): input1={} input2={} -> {}",
         static_cast<unsigned>(safety.input1),
         static_cast<unsigned>(safety.input2),
         safety.stateSummary());
@@ -961,7 +961,7 @@ int preActivationSafetyCheck(EtherCAT::DS402Master& master,
     // active on the drive.  Logged up front so the operator can see the
     // FSoE state regardless of the safety verdict below.
     TETHER_LOGI(TAG,
-        "FSoE active indicator (0x2620:2 \"Safe fieldbus\"): raw=%u -> %s",
+        "FSoE active indicator (0x2620:2 \"Safe fieldbus\"): raw={} -> {}",
         static_cast<unsigned>(safety.safe_fieldbus),
         safety.fsoeStateSummary());
 
@@ -991,7 +991,7 @@ int preActivationSafetyCheck(EtherCAT::DS402Master& master,
             // state and continue; do NOT abort.
             TETHER_LOGI(TAG,
                 "Drive is in SAFE STATE (safety function active, motion "
-                "inhibited) — FSoE is %s (0x2620:2=%u) — continuing; "
+                "inhibited) — FSoE is {} (0x2620:2={}) — continuing; "
                 "the FSoE master will clear the safe state once the "
                 "safety protocol reaches the Data state",
                 safety.fsoeStateSummary(),
@@ -1041,10 +1041,10 @@ int main(int argc, char** argv) {
     Tether::Platform::ensureRealtimeKernelOrExit();
 
     TETHER_LOGI(TAG,
-        "synapticon_cst_fsoe — interface=%s slave=%u duration=%.1f fsoe=%s dc_sync=%s drive=%s debug='%s' "
-        "torque_pp=%.3fNm freq=%.3fHz rated_torque_mnm=%u "
-        "conn_id=0x%04X safety_addr=0x%04X "
-        "sto_override=%s sbc_override=%s diagnostics_after=%.1f",
+        "synapticon_cst_fsoe — interface={} slave={} duration={:.1f} fsoe={} dc_sync={} drive={} debug='{}' "
+        "torque_pp={:.3f}Nm freq={:.3f}Hz rated_torque_mnm={} "
+        "conn_id=0x{:04X} safety_addr=0x{:04X} "
+        "sto_override={} sbc_override={} diagnostics_after={:.1f}",
         args.interface.c_str(), slave_idx, args.duration,
         args.enable_fsoe ? "on" : "off",
         args.enable_dc_sync ? "on" : "off",
@@ -1077,7 +1077,7 @@ int main(int argc, char** argv) {
         }
         if (!master.waitForDriveCount(
                 static_cast<uint16_t>(slave_idx + 1), 2000)) {
-            TETHER_LOGE(TAG, "Timed out waiting for slave %u", slave_idx);
+            TETHER_LOGE(TAG, "Timed out waiting for slave {}", slave_idx);
             Tether::Examples::stopHostMasterSession(master, session);
             return 2;
         }
@@ -1113,13 +1113,13 @@ int main(int argc, char** argv) {
             if (master.ethercatMaster().readSlaveApplicationLayerState(
                     slave_idx, current_state)) {
                 TETHER_LOGI(TAG,
-                    "Slave %u current AL state: 0x%02X (%s)",
+                    "Slave {} current AL state: 0x{:02X} ({})",
                     slave_idx, current_state,
                     EtherCAT::getECStateName(static_cast<EtherCAT::ECState>(current_state)));
 
                 if (current_state != static_cast<uint8_t>(EtherCAT::ECState::Init)) {
                     TETHER_LOGI(TAG,
-                        "Slave %u is not in INIT (0x%02X) — resetting to INIT "
+                        "Slave {} is not in INIT (0x{:02X}) — resetting to INIT "
                         "before configuration",
                         slave_idx, current_state);
 
@@ -1132,13 +1132,13 @@ int main(int argc, char** argv) {
                                     EtherCAT::al_status_get_state_name(al);
                                 const bool has_err = EtherCAT::al_status_has_error(al);
                                 TETHER_LOGI(TAG,
-                                    "  Slave %u reset iter %d/%d: "
-                                    "AL_STATUS=0x%04X (state=%s, error=%s)",
+                                    "  Slave {} reset iter {}/{}: "
+                                    "AL_STATUS=0x{:04X} (state={}, error={})",
                                     si, iter, max_iter, al,
                                     state_name, has_err ? "true" : "false");
                                 if (code != 0) {
                                     TETHER_LOGI(TAG,
-                                        "    AL_STATUS_CODE=0x%04X (%s)",
+                                        "    AL_STATUS_CODE=0x{:04X} ({})",
                                         code, EtherCAT::getALStatusCodeName(code));
                                 }
                             }
@@ -1149,13 +1149,13 @@ int main(int argc, char** argv) {
 
                     if (result.success) {
                         TETHER_LOGI(TAG,
-                            "Slave %u reset to INIT OK (%s, %d iterations)",
+                            "Slave {} reset to INIT OK ({}, {} iterations)",
                             slave_idx, result.message.c_str(),
                             result.iterations_used);
                     } else {
                         TETHER_LOGE(TAG,
-                            "Slave %u reset to INIT FAILED (%s, %d iterations, "
-                            "final AL_STATUS=0x%04X, AL_STATUS_CODE=0x%04X)",
+                            "Slave {} reset to INIT FAILED ({}, {} iterations, "
+                            "final AL_STATUS=0x{:04X}, AL_STATUS_CODE=0x{:04X})",
                             slave_idx, result.message.c_str(),
                             result.iterations_used,
                             result.final_al_status,
@@ -1169,7 +1169,7 @@ int main(int argc, char** argv) {
                 }
             } else {
                 TETHER_LOGW(TAG,
-                    "Could not read AL state for slave %u — continuing anyway",
+                    "Could not read AL state for slave {} — continuing anyway",
                     slave_idx);
             }
         }
@@ -1183,14 +1183,14 @@ int main(int argc, char** argv) {
             {.address = kMailboxWriteAddr, .length = kMailboxWriteSize}, // mbox_in  → SM0
             kMailboxProtocols);
         if (mb_err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGE(TAG, "Failed to configure mailbox: %s",
+            TETHER_LOGE(TAG, "Failed to configure mailbox: {}",
                         EtherCAT::slaveErrorToString(mb_err));
             Tether::Examples::stopHostMasterSession(master, session);
             return 2;
         }
         TETHER_LOGI(TAG,
             "Mailbox configured from SOMANET ESI: "
-            "SM0(M->S)=0x%04X/%u SM1(S->M)=0x%04X/%u proto=0x%04X",
+            "SM0(M->S)=0x{:04X}/{} SM1(S->M)=0x{:04X}/{} proto=0x{:04X}",
             kMailboxWriteAddr, kMailboxWriteSize,
             kMailboxReadAddr, kMailboxReadSize, kMailboxProtocols);
 
@@ -1199,12 +1199,12 @@ int main(int argc, char** argv) {
         // not service the mailbox in INIT, leaving SM0 full and SM1 empty.
         const auto pre_err = slave.transitionToPreOp();
         if (pre_err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGE(TAG, "Failed to transition to PRE_OP: %s",
+            TETHER_LOGE(TAG, "Failed to transition to PRE_OP: {}",
                         EtherCAT::slaveErrorToString(pre_err));
             Tether::Examples::stopHostMasterSession(master, session);
             return 2;
         }
-        TETHER_LOGI(TAG, "Slave %u transitioned to PRE_OP", slave_idx);
+        TETHER_LOGI(TAG, "Slave {} transitioned to PRE_OP", slave_idx);
     }
 
     // --- Dump default PDO/SM/FMMU configuration ---
@@ -1225,23 +1225,23 @@ int main(int argc, char** argv) {
         auto read_u8 = [&](uint16_t idx, uint8_t sub, const char* name) -> void {
             auto res = sdo.readU8(idx, sub, {.timeout_ms = kSdoTimeoutMs});
             if (res.has_value())
-                TETHER_LOGI(TAG, "  0x%04X:%u (%s) = 0x%02X", idx, sub, name, res.value());
+                TETHER_LOGI(TAG, "  0x{:04X}:{} ({}) = 0x{:02X}", idx, sub, name, res.value());
             else
-                TETHER_LOGW(TAG, "  0x%04X:%u (%s) FAILED", idx, sub, name);
+                TETHER_LOGW(TAG, "  0x{:04X}:{} ({}) FAILED", idx, sub, name);
         };
         auto read_u16 = [&](uint16_t idx, uint8_t sub, const char* name) -> void {
             auto res = sdo.readU16(idx, sub, {.timeout_ms = kSdoTimeoutMs});
             if (res.has_value())
-                TETHER_LOGI(TAG, "  0x%04X:%u (%s) = 0x%04X", idx, sub, name, res.value());
+                TETHER_LOGI(TAG, "  0x{:04X}:{} ({}) = 0x{:04X}", idx, sub, name, res.value());
             else
-                TETHER_LOGW(TAG, "  0x%04X:%u (%s) FAILED", idx, sub, name);
+                TETHER_LOGW(TAG, "  0x{:04X}:{} ({}) FAILED", idx, sub, name);
         };
         auto read_u32 = [&](uint16_t idx, uint8_t sub, const char* name) -> void {
             auto res = sdo.readU32(idx, sub, {.timeout_ms = kSdoTimeoutMs});
             if (res.has_value())
-                TETHER_LOGI(TAG, "  0x%04X:%u (%s) = 0x%08X", idx, sub, name, res.value());
+                TETHER_LOGI(TAG, "  0x{:04X}:{} ({}) = 0x{:08X}", idx, sub, name, res.value());
             else
-                TETHER_LOGW(TAG, "  0x%04X:%u (%s) FAILED", idx, sub, name);
+                TETHER_LOGW(TAG, "  0x{:04X}:{} ({}) FAILED", idx, sub, name);
         };
 
         // ETG.5000 Modular Device Profile objects
@@ -1301,24 +1301,24 @@ int main(int argc, char** argv) {
                 slave, drive_safety_address);
         if (addr_err == EtherCAT::SlaveError::Ok) {
             TETHER_LOGI(TAG,
-                "FSoE safety address (0xF980:1): 0x%04X — "
-                "--connection-id=0x%04X --safety-address=0x%04X",
+                "FSoE safety address (0xF980:1): 0x{:04X} — "
+                "--connection-id=0x{:04X} --safety-address=0x{:04X}",
                 drive_safety_address,
                 args.connection_id,
                 args.safety_address);
             if (drive_safety_address != args.connection_id) {
                 TETHER_LOGW(TAG,
-                    "WARNING: --connection-id (0x%04X) does NOT match the "
-                    "drive's Device Safety Address 0xF980:1 (0x%04X).  "
+                    "WARNING: --connection-id (0x{:04X}) does NOT match the "
+                    "drive's Device Safety Address 0xF980:1 (0x{:04X}).  "
                     "This will likely cause FSoE ConnectionIDError.  "
-                    "Use --connection-id 0x%04X to match the drive.",
+                    "Use --connection-id 0x{:04X} to match the drive.",
                     args.connection_id, drive_safety_address,
                     drive_safety_address);
             }
         } else {
             TETHER_LOGW(TAG,
                 "Failed to read FSoE safety address (0xF980:1) via SDO "
-                "(err=%u) — falling back to --connection-id=0x%04X",
+                "(err={}) — falling back to --connection-id=0x{:04X}",
                 static_cast<unsigned>(addr_err),
                 args.connection_id);
         }
@@ -1345,7 +1345,7 @@ int main(int argc, char** argv) {
     }
     const uint16_t minimum_drive_count = static_cast<uint16_t>(slave_idx + 1);
     if (!master.waitForDriveCount(minimum_drive_count, 2000)) {
-        TETHER_LOGE(TAG, "Timed out waiting for %u drive(s)", minimum_drive_count);
+        TETHER_LOGE(TAG, "Timed out waiting for {} drive(s)", minimum_drive_count);
         Tether::Examples::stopHostMasterSession(master, session);
         return 3;
     }
@@ -1397,8 +1397,8 @@ int main(int argc, char** argv) {
 
         TETHER_LOGI(TAG,
             "Transitioning to OP with combined FSoE+motion PDO mapping: "
-            "SM2=%u bytes (FSoE %uB + motion %uB), "
-            "SM3=%u bytes (FSoE %uB + motion %uB)",
+            "SM2={} bytes (FSoE {}B + motion {}B), "
+            "SM3={} bytes (FSoE {}B + motion {}B)",
             static_cast<uint16_t>(kSM2TotalLen),
             static_cast<uint16_t>(sizeof(FSoERxPDO)),
             EtherCAT::Drives::Synapticon_pdo::kSM2TotalSize,
@@ -1420,7 +1420,7 @@ int main(int argc, char** argv) {
             Tether::Examples::stopHostMasterSession(master, session);
             return 3;
         }
-        TETHER_LOGI(TAG, "Slave %u transitioned to OP with combined CST+FSoE PDOs", slave_idx);
+        TETHER_LOGI(TAG, "Slave {} transitioned to OP with combined CST+FSoE PDOs", slave_idx);
 
         // --- Comprehensive safety diagnostics ---
         // Query all safety-related objects via SDO before starting the PDO
@@ -1435,7 +1435,7 @@ int main(int argc, char** argv) {
             // Log actionable warnings based on the diagnostic report
             if (diag_report.hasFault()) {
                 TETHER_LOGE(TAG,
-                    "SAFETY FAULT detected before starting PDO loop: '%s' — "
+                    "SAFETY FAULT detected before starting PDO loop: '{}' — "
                     "FSoE communication may fail.  Check OBLAC Drives parameter "
                     "validation and safety configuration.",
                     diag_report.error_report);
@@ -1456,7 +1456,7 @@ int main(int argc, char** argv) {
             }
             if (diag_report.connIdMismatch()) {
                 TETHER_LOGE(TAG,
-                    "Connection ID mismatch: 0xF980 (0x%04X) != 0x2620:3 (0x%04X).  "
+                    "Connection ID mismatch: 0xF980 (0x{:04X}) != 0x2620:3 (0x{:04X}).  "
                     "The master --connection-id must match the device safety address.",
                     diag_report.device_safety_address,
                     diag_report.safe_address);
@@ -1485,7 +1485,7 @@ int main(int argc, char** argv) {
                     EtherCAT::Master::slaveAddressFromADP(
                         EtherCAT::Master::adpForSlaveIndex(slave_idx)),
                     0x0010, cfg_addr, 200)) {
-                TETHER_LOGI(TAG, "Slave %u configured station address (reg 0x0010) = 0x%04X",
+                TETHER_LOGI(TAG, "Slave {} configured station address (reg 0x0010) = 0x{:04X}",
                     slave_idx, cfg_addr);
                 // Set the configured address in the PDO mapping so
                 // exchangePhysical() uses FPWR/FPRD with the correct adp.
@@ -1512,7 +1512,7 @@ int main(int argc, char** argv) {
             // (FSoE PDO comes first, motion PDO second)
             rx_buf[kMotionRxPDOOffset + 0] = 0x0F;  // Controlword low byte
             rx_buf[kMotionRxPDOOffset + 1] = 0x00;  // Controlword high byte
-            TETHER_LOGI(TAG, "Wrote Controlword=0x000F to RxPDO offset %zu",
+            TETHER_LOGI(TAG, "Wrote Controlword=0x000F to RxPDO offset {}",
                 kMotionRxPDOOffset);
         }
 
@@ -1524,7 +1524,7 @@ int main(int argc, char** argv) {
         {
             auto cw = sdo.readU16(0x6040, 0, {.timeout_ms = kSdoTimeoutMs});
             if (cw.has_value())
-                TETHER_LOGI(TAG, "  SDO read 0x6040:0 (Controlword) = 0x%04X (expect 0x000F if PDO readback works)",
+                TETHER_LOGI(TAG, "  SDO read 0x6040:0 (Controlword) = 0x{:04X} (expect 0x000F if PDO readback works)",
                     cw.value());
             else
                 TETHER_LOGW(TAG, "  SDO read 0x6040:0 (Controlword) FAILED");
@@ -1555,7 +1555,7 @@ int main(int argc, char** argv) {
             fsoe_buf[9] = 0x06;  // ConnectionID low
             fsoe_buf[10] = 0x00; // ConnectionID high
 
-            TETHER_LOGI(TAG, "Wrote FSoE pattern to RxPDO offset %zu: "
+            TETHER_LOGI(TAG, "Wrote FSoE pattern to RxPDO offset {}: "
                 "2A 00 00 00 00 00 00 00 00 06 00", kFSoERxPDOOffset);
         }
 
@@ -1566,23 +1566,23 @@ int main(int argc, char** argv) {
         auto read_u8 = [&](uint16_t idx, uint8_t sub, const char* name) -> void {
             auto res = sdo.readU8(idx, sub, {.timeout_ms = kSdoTimeoutMs});
             if (res.has_value())
-                TETHER_LOGI(TAG, "  SDO read 0x%04X:%u (%s) = 0x%02X", idx, sub, name, res.value());
+                TETHER_LOGI(TAG, "  SDO read 0x{:04X}:{} ({}) = 0x{:02X}", idx, sub, name, res.value());
             else
-                TETHER_LOGW(TAG, "  SDO read 0x%04X:%u (%s) FAILED", idx, sub, name);
+                TETHER_LOGW(TAG, "  SDO read 0x{:04X}:{} ({}) FAILED", idx, sub, name);
         };
         auto read_u16 = [&](uint16_t idx, uint8_t sub, const char* name) -> void {
             auto res = sdo.readU16(idx, sub, {.timeout_ms = kSdoTimeoutMs});
             if (res.has_value())
-                TETHER_LOGI(TAG, "  SDO read 0x%04X:%u (%s) = 0x%04X", idx, sub, name, res.value());
+                TETHER_LOGI(TAG, "  SDO read 0x{:04X}:{} ({}) = 0x{:04X}", idx, sub, name, res.value());
             else
-                TETHER_LOGW(TAG, "  SDO read 0x%04X:%u (%s) FAILED", idx, sub, name);
+                TETHER_LOGW(TAG, "  SDO read 0x{:04X}:{} ({}) FAILED", idx, sub, name);
         };
         auto read_u32 = [&](uint16_t idx, uint8_t sub, const char* name) -> void {
             auto res = sdo.readU32(idx, sub, {.timeout_ms = kSdoTimeoutMs});
             if (res.has_value())
-                TETHER_LOGI(TAG, "  SDO read 0x%04X:%u (%s) = 0x%08X", idx, sub, name, res.value());
+                TETHER_LOGI(TAG, "  SDO read 0x{:04X}:{} ({}) = 0x{:08X}", idx, sub, name, res.value());
             else
-                TETHER_LOGW(TAG, "  SDO read 0x%04X:%u (%s) FAILED", idx, sub, name);
+                TETHER_LOGW(TAG, "  SDO read 0x{:04X}:{} ({}) FAILED", idx, sub, name);
         };
 
         TETHER_LOGI(TAG, "Reading back FSoE objects via SDO:");
@@ -1620,10 +1620,10 @@ int main(int argc, char** argv) {
                         uint16_t idx = (v >> 16) & 0xFFFF;
                         uint8_t sub = (v >> 8) & 0xFF;
                         uint8_t bits = v & 0xFF;
-                        TETHER_LOGI(TAG, "  0x1700:%u = 0x%08X (idx=0x%04X sub=%u bits=%u)",
+                        TETHER_LOGI(TAG, "  0x1700:{} = 0x{:08X} (idx=0x{:04X} sub={} bits={})",
                             i, v, idx, sub, bits);
                     } else {
-                        TETHER_LOGW(TAG, "  0x1700:%u FAILED", i);
+                        TETHER_LOGW(TAG, "  0x1700:{} FAILED", i);
                     }
                 }
             }
@@ -1639,10 +1639,10 @@ int main(int argc, char** argv) {
                         uint16_t idx = (v >> 16) & 0xFFFF;
                         uint8_t sub = (v >> 8) & 0xFF;
                         uint8_t bits = v & 0xFF;
-                        TETHER_LOGI(TAG, "  0x1B00:%u = 0x%08X (idx=0x%04X sub=%u bits=%u)",
+                        TETHER_LOGI(TAG, "  0x1B00:{} = 0x{:08X} (idx=0x{:04X} sub={} bits={})",
                             i, v, idx, sub, bits);
                     } else {
-                        TETHER_LOGW(TAG, "  0x1B00:%u FAILED", i);
+                        TETHER_LOGW(TAG, "  0x1B00:{} FAILED", i);
                     }
                 }
             }
@@ -1715,7 +1715,7 @@ int main(int argc, char** argv) {
                     err_str[i] = (err_buf[i] >= 0x20 && err_buf[i] < 0x7F) ? static_cast<char>(err_buf[i]) : '.';
                 }
                 err_str[copy_len] = '\0';
-                TETHER_LOGI(TAG, "  SDO read 0x203F:1 (Error report) = '%s' (len=%zu, hex: %02X %02X %02X %02X %02X %02X %02X %02X)",
+                TETHER_LOGI(TAG, "  SDO read 0x203F:1 (Error report) = '{}' (len={}, hex: {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X})",
                     err_str, err_len,
                     err_buf[0], err_buf[1], err_buf[2], err_buf[3],
                     err_buf[4], err_buf[5], err_buf[6], err_buf[7]);
@@ -1742,7 +1742,7 @@ int main(int argc, char** argv) {
         config.drive.transition_to_operational = true;
 
         if (!master.configureDrive(config.drive)) {
-            TETHER_LOGE(TAG, "Failed to configure slave %u", slave_idx);
+            TETHER_LOGE(TAG, "Failed to configure slave {}", slave_idx);
             master.stopDistributedClocks();
             Tether::Examples::stopHostMasterSession(master, session);
             return 3;
@@ -1761,7 +1761,7 @@ int main(int argc, char** argv) {
                     modes_of_operation);
         drive.setOpmodePDOOffset(static_cast<int>(opmode_offset));
         TETHER_LOGI(TAG,
-            "Operating mode PDO offset: %zu (motion_rx=%zu, opmode=%zu)",
+            "Operating mode PDO offset: {} (motion_rx={}, opmode={})",
             opmode_offset, motion_rx_offset, opmode_offset);
     }
 
@@ -1777,7 +1777,7 @@ int main(int argc, char** argv) {
         if (rated.has_value() && rated.value() > 0) {
             rated_torque_mnm = rated.value();
             TETHER_LOGI(TAG,
-                "Motor rated torque (0x6076) = %u mNm (%.3f Nm)",
+                "Motor rated torque (0x6076) = {} mNm ({:.3f} Nm)",
                 rated_torque_mnm, rated_torque_mnm / 1000.0);
         } else {
             TETHER_LOGE(TAG,
@@ -1790,7 +1790,7 @@ int main(int argc, char** argv) {
         }
     } else {
         TETHER_LOGI(TAG,
-            "Using --rated-torque-mnm = %u mNm (%.3f Nm)",
+            "Using --rated-torque-mnm = {} mNm ({:.3f} Nm)",
             rated_torque_mnm, rated_torque_mnm / 1000.0);
     }
 
@@ -1798,8 +1798,8 @@ int main(int argc, char** argv) {
     // Amplitude is half the peak-to-peak value (±torque_pp_nm/2).
     const double amplitude_nm = args.torque_pp_nm / 2.0;
     TETHER_LOGI(TAG,
-        "Sine torque: %.3f Nm P-P (%.3f Nm amplitude) at %.3f Hz, "
-        "rated torque %u mNm -> %.1f per-mille peak",
+        "Sine torque: {:.3f} Nm P-P ({:.3f} Nm amplitude) at {:.3f} Hz, "
+        "rated torque {} mNm -> {:.1f} per-mille peak",
         args.torque_pp_nm, amplitude_nm, args.freq_hz,
         rated_torque_mnm,
         amplitude_nm * 1'000'000.0 / static_cast<double>(rated_torque_mnm));
@@ -1926,8 +1926,8 @@ int main(int argc, char** argv) {
             cmd.brake_engage  = active;
 
             TETHER_LOGI(TAG,
-                "[safety-command] Setting ALL zero-active safety bits to raw bit=%d "
-                "(active=%s → %s)",
+                "[safety-command] Setting ALL zero-active safety bits to raw bit={} "
+                "(active={} → {})",
                 raw_bit,
                 active ? "true" : "false",
                 active ? "ALL safety functions ACTIVE (safe state)"
@@ -1942,7 +1942,7 @@ int main(int argc, char** argv) {
         fsoe_main->rawConnection().setStateChangeCallback(
             [&signal_fsoe](uint8_t old_s, uint8_t new_s) {
                 TETHER_LOGI(TAG,
-                    "[FSoE] state: %s -> %s",
+                    "[FSoE] state: {} -> {}",
                     FSoE::fsoeStateName(old_s), FSoE::fsoeStateName(new_s));
                 if (new_s == FSoE::ConnectionState::Data) {
                     signal_fsoe(true);
@@ -1954,11 +1954,11 @@ int main(int argc, char** argv) {
             [&signal_fsoe](uint16_t code, const FSoE::FSoEErrorDetail& detail) {
                 if (detail.message[0] != '\0') {
                     TETHER_LOGE(TAG,
-                        "[FSoE] error: 0x%04X (%s): %s",
+                        "[FSoE] error: 0x{:04X} ({}): {}",
                         code, FSoE::fsoeErrorName(code), detail.message);
                 } else {
                     TETHER_LOGE(TAG,
-                        "[FSoE] error: 0x%04X (%s)",
+                        "[FSoE] error: 0x{:04X} ({})",
                         code, FSoE::fsoeErrorName(code));
                 }
                 // Signal failure on critical errors (non-zero error code).
@@ -1980,7 +1980,7 @@ int main(int argc, char** argv) {
         if (debug_fsoe || debug_fsoe_raw) {
             fsoe_main->rawConnection().setTraceCallback(
                 [](const char* message) {
-                    TETHER_LOGI(TAG, "[fsoe] %s", message);
+                    TETHER_LOGI(TAG, "[fsoe] {}", message);
                 });
         }
 
@@ -1992,7 +1992,7 @@ int main(int argc, char** argv) {
                 [](const FSoE::SequenceTraceInfo& info) {
                     const char* arrow = info.state_changed ? " -> " : " == ";
                     TETHER_LOGI(TAG,
-                        "[fsoe-seq] cycle %u: %s%s%s  cmd=0x%02X  %s%s  reason=%s",
+                        "[fsoe-seq] cycle {}: {}{}{}  cmd=0x{:02X}  {}{}  reason={}",
                         info.cycle,
                         FSoE::fsoeStateName(info.state_before),
                         arrow,
@@ -2030,11 +2030,11 @@ int main(int argc, char** argv) {
                         //   start_crc(Lo,Hi), conn_id(Lo,Hi),
                         //   seq(Lo,Hi), command, data[0..n-1]
                         TETHER_LOGI(TAG,
-                            "[fsoe-crc] TX %s cmd=0x%02X: "
-                            "start_crc=0x%04X seq=%u -> "
-                            "CRC0=0x%04X | "
-                            "CRC inputs: oldCRC=0x%04X conn_id=0x%04X "
-                            "seq=%u cmd=0x%02X data[%zu]={%s}",
+                            "[fsoe-crc] TX {} cmd=0x{:02X}: "
+                            "start_crc=0x{:04X} seq={} -> "
+                            "CRC0=0x{:04X} | "
+                            "CRC inputs: oldCRC=0x{:04X} conn_id=0x{:04X} "
+                            "seq={} cmd=0x{:02X} data[{}]={{}}",
                             FSoE::fsoeStateName(info.state),
                             info.command,
                             info.start_crc, info.seq_used,
@@ -2068,11 +2068,11 @@ int main(int argc, char** argv) {
                                 fb = fb_buf;
                             }
                             TETHER_LOGI(TAG,
-                                "[fsoe-crc] RX %s cmd=0x%02X: "
-                                "start_crc=0x%04X seq=%u -> "
-                                "CRC0=0x%04X OK (expected=0x%04X) | "
-                                "CRC inputs: oldCRC=0x%04X conn_id=0x%04X "
-                                "seq=%u cmd=0x%02X data[%zu]={%s}%s",
+                                "[fsoe-crc] RX {} cmd=0x{:02X}: "
+                                "start_crc=0x{:04X} seq={} -> "
+                                "CRC0=0x{:04X} OK (expected=0x{:04X}) | "
+                                "CRC inputs: oldCRC=0x{:04X} conn_id=0x{:04X} "
+                                "seq={} cmd=0x{:02X} data[{}]={{}}{}",
                                 FSoE::fsoeStateName(info.state),
                                 info.command,
                                 info.start_crc, info.seq_used,
@@ -2082,11 +2082,11 @@ int main(int argc, char** argv) {
                                 info.data_len, data_hex, fb);
                         } else {
                             TETHER_LOGE(TAG,
-                                "[fsoe-crc] RX %s cmd=0x%02X: "
-                                "start_crc=0x%04X seq=%u -> "
-                                "CRC FAIL: received=0x%04X expected=0x%04X | "
-                                "CRC inputs: oldCRC=0x%04X conn_id=0x%04X "
-                                "seq=%u cmd=0x%02X data[%zu]={%s}",
+                                "[fsoe-crc] RX {} cmd=0x{:02X}: "
+                                "start_crc=0x{:04X} seq={} -> "
+                                "CRC FAIL: received=0x{:04X} expected=0x{:04X} | "
+                                "CRC inputs: oldCRC=0x{:04X} conn_id=0x{:04X} "
+                                "seq={} cmd=0x{:02X} data[{}]={{}}",
                                 FSoE::fsoeStateName(info.state),
                                 info.command,
                                 info.start_crc, info.seq_expected,
@@ -2113,7 +2113,7 @@ int main(int argc, char** argv) {
                     if (*data == *last_tx) return;  // skip unchanged
                     *last_tx = *data;
                     const uint8_t cmd = (!data->empty()) ? (*data)[0] : 0;
-                    TETHER_LOGI(TAG, "[fsoe-raw] TX (master->slave) len=%zu cmd=%s",
+                    TETHER_LOGI(TAG, "[fsoe-raw] TX (master->slave) len={} cmd={}",
                                 data->size(), FSoE::fsoeCommandName(cmd));
                     hexDump(TAG, "TX (master->slave)", data->data(), data->size());
                 });
@@ -2122,7 +2122,7 @@ int main(int argc, char** argv) {
                     if (*data == *last_rx) return;  // skip unchanged
                     *last_rx = *data;
                     const uint8_t cmd = (!data->empty()) ? (*data)[0] : 0;
-                    TETHER_LOGI(TAG, "[fsoe-raw] RX (slave->master) len=%zu cmd=%s",
+                    TETHER_LOGI(TAG, "[fsoe-raw] RX (slave->master) len={} cmd={}",
                                 data->size(), FSoE::fsoeCommandName(cmd));
                     hexDump(TAG, "RX (slave->master)", data->data(), data->size());
                 });
@@ -2171,7 +2171,7 @@ int main(int argc, char** argv) {
         }
 
         TETHER_LOGI(TAG,
-            "FSoE enabled: conn_id=0x%04X safety_addr=0x%04X watchdog=%u ms debug=%s%s%s%s%s%s",
+            "FSoE enabled: conn_id=0x{:04X} safety_addr=0x{:04X} watchdog={} ms debug={}{}{}{}{}{}",
             args.connection_id, args.safety_address, args.watchdog_ms,
             debug_fsoe ? "fsoe" : "off",
             debug_fsoe_frame ? "+frame" : "",
@@ -2227,7 +2227,7 @@ int main(int argc, char** argv) {
         if (fsoe_status == std::future_status::timeout) {
             TETHER_LOGE(TAG,
                 "FSoE did not reach Data state within 5 s — "
-                "current state: %s.  Aborting drive enable.",
+                "current state: {}.  Aborting drive enable.",
                 FSoE::fsoeStateName(fsoe_main->rawConnection().getState()));
             rc = 9;
         } else if (!fsoe_ready_future.get()) {
@@ -2237,7 +2237,7 @@ int main(int argc, char** argv) {
             rc = 9;
         } else {
             TETHER_LOGI(TAG,
-                "FSoE Data state reached%s.",
+                "FSoE Data state reached{}.",
                 args.enable_drive ? " — enabling CiA 402 drive" : " (drive enable suppressed by --no-drive)");
             fsoe_data_reached = true;
         }
@@ -2253,10 +2253,10 @@ int main(int argc, char** argv) {
             "FSoE-only mode — safety PDOs are exchanged but no motion.");
     } else if (fsoe_data_reached) {
         if (!master.enableDrive(slave_idx, 5000)) {
-            TETHER_LOGE(TAG, "Failed to enable slave %u", slave_idx);
+            TETHER_LOGE(TAG, "Failed to enable slave {}", slave_idx);
             rc = 8;
         } else {
-            TETHER_LOGI(TAG, "Slave %u drive enabled", slave_idx);
+            TETHER_LOGI(TAG, "Slave {} drive enabled", slave_idx);
         }
     } else {
         // FSoE failed — skip drive enable, set error code.
@@ -2275,11 +2275,11 @@ int main(int argc, char** argv) {
     if (rc == 0) {
         if (args.enable_drive) {
             TETHER_LOGI(TAG,
-                "CST mode active, sine torque %.3f Nm P-P at %.3f Hz for %.1f s",
+                "CST mode active, sine torque {:.3f} Nm P-P at {:.3f} Hz for {:.1f} s",
                 args.torque_pp_nm, args.freq_hz, args.duration);
         } else {
             TETHER_LOGI(TAG,
-                "FSoE-only mode: monitoring safety state for %.1f s (no motion)",
+                "FSoE-only mode: monitoring safety state for {:.1f} s (no motion)",
                 args.duration);
         }
 
@@ -2298,7 +2298,7 @@ int main(int argc, char** argv) {
             if (!diag_done && diag_after_ms > 0 && elapsed_ms >= diag_after_ms) {
                 diag_done = true;
                 TETHER_LOGI(TAG,
-                    "=== --diagnostics-after=%.1fs reached — "
+                    "=== --diagnostics-after={:.1f}s reached — "
                     "suppressing FSoE output and running CoE diagnostics ===",
                     args.diagnostics_after);
 
@@ -2339,7 +2339,7 @@ int main(int argc, char** argv) {
                 const auto status = fsoe_main->rawConnection().getStatus();
                 if (status.isFailSafe() || status.hasError()) {
                     TETHER_LOGE(TAG,
-                        "FSoE entered %s state during run (code=0x%04X) — "
+                        "FSoE entered {} state during run (code=0x{:04X}) — "
                         "shutting down cleanly",
                         status.isFailSafe() ? "FailSafe" : "Error",
                         status.error_code);
@@ -2360,7 +2360,7 @@ int main(int argc, char** argv) {
     // Final FSoE diagnostics dump
     if (fsoe_main) {
         TETHER_LOGI(TAG, "=== Final FSoE Diagnostics ===");
-        TETHER_LOGI(TAG, "%s", fsoe_main->rawConnection().getDiagnostics().c_str());
+        TETHER_LOGI(TAG, "{}", fsoe_main->rawConnection().getDiagnostics().c_str());
     }
 
     // PDO transfer statistics — reveals WKC errors (slave not ack'ing frames)
@@ -2368,16 +2368,16 @@ int main(int argc, char** argv) {
         const auto& pdo = master.ethercatMaster().pdo();
         const auto& st = pdo.getStats();
         TETHER_LOGI(TAG, "=== PDO Transfer Statistics ===");
-        TETHER_LOGI(TAG, "  [FMMU] total_cycles=%llu rx_sent=%llu tx_recv=%llu",
+        TETHER_LOGI(TAG, "  [FMMU] total_cycles={} rx_sent={} tx_recv={}",
             (unsigned long long)st.total_cycles,
             (unsigned long long)st.rxpdo_frames_sent,
             (unsigned long long)st.txpdo_frames_recv);
-        TETHER_LOGI(TAG, "  [FMMU] rx_errors=%u tx_errors=%u wkc_errors=%u",
+        TETHER_LOGI(TAG, "  [FMMU] rx_errors={} tx_errors={} wkc_errors={}",
             st.rxpdo_errors, st.txpdo_errors, st.wkc_errors);
         const auto& ps = pdo.getPhysicalStats();
-        TETHER_LOGI(TAG, "  [PHYS] fpwr_ok=%u fpwr_wkc_err=%u fprd_ok=%u fprd_wkc_err=%u",
+        TETHER_LOGI(TAG, "  [PHYS] fpwr_ok={} fpwr_wkc_err={} fprd_ok={} fprd_wkc_err={}",
             ps.fpwr_success, ps.fpwr_wkc_errors, ps.fprd_success, ps.fprd_wkc_errors);
-        TETHER_LOGI(TAG, "  [PHYS] send_err=%u timeout_err=%u",
+        TETHER_LOGI(TAG, "  [PHYS] send_err={} timeout_err={}",
             ps.send_errors, ps.timeout_errors);
     }
 

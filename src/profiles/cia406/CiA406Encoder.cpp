@@ -161,7 +161,7 @@ bool Encoder::initialize() {
     // Check for CiA 406 profile (406 = 0x196)
     uint16_t profile = device_type & 0xFFFF;
     if (profile != 406) {
-        TETHER_LOGW(TAG, "Device profile is %u, expected 406", profile);
+        TETHER_LOGW(TAG, "Device profile is {}, expected 406", profile);
         // Continue anyway as some encoders may report differently
     }
     
@@ -180,7 +180,7 @@ bool Encoder::initialize() {
     // Read diagnostic info
     readDiagnostics();
     
-    TETHER_LOGI(TAG, "Encoder initialized: %s\n  Interface: %s\n  Resolution: %u bits (ST), %u revolutions (MT)",
+    TETHER_LOGI(TAG, "Encoder initialized: {}\n  Interface: {}\n  Resolution: {} bits (ST), {} revolutions (MT)",
              getEncoderClassName(capabilities_.encoder_class),
              getInterfaceTypeName(capabilities_.interface_type),
              capabilities_.single_turn_resolution,
@@ -282,7 +282,7 @@ bool Encoder::readCapabilities() {
 }
 
 bool Encoder::applyPDOMapping(PDOMappingPreset preset) {
-    TETHER_LOGI(TAG, "Applying PDO mapping preset for slave %u", m_coe.slaveIndex());
+    TETHER_LOGI(TAG, "Applying PDO mapping preset for slave {}", m_coe.slaveIndex());
     
     current_mapping_ = preset;
     
@@ -363,7 +363,7 @@ bool Encoder::applyCustomPDOMapping(const PDOMappingEntry* entries, size_t count
     for (size_t i = 0; i < count; i++) {
         uint32_t mapping_value = entries[i].toMappingValue();
         if (!writeObject(0x1A00, i + 1, &mapping_value, sizeof(mapping_value))) {
-            TETHER_LOGE(TAG, "Failed to write PDO mapping entry %zu", i);
+            TETHER_LOGE(TAG, "Failed to write PDO mapping entry {}", i);
             return false;
         }
     }
@@ -588,7 +588,7 @@ void Encoder::setOffset(int32_t offset) {
 // ============================================================================
 
 bool Encoder::presetPosition(int32_t position) {
-    TETHER_LOGI(TAG, "Presetting encoder %u position to %d", m_coe.slaveIndex(), position);
+    TETHER_LOGI(TAG, "Presetting encoder {} position to {}", m_coe.slaveIndex(), position);
     
     // Write preset value
     if (!writeObject(PresetValue, 0, &position, sizeof(position))) {
@@ -611,7 +611,7 @@ bool Encoder::presetPosition(int32_t position) {
 }
 
 bool Encoder::startReference(const ReferenceConfig& config) {
-    TETHER_LOGI(TAG, "Starting reference procedure for encoder %u", m_coe.slaveIndex());
+    TETHER_LOGI(TAG, "Starting reference procedure for encoder {}", m_coe.slaveIndex());
     
     // Write reference position
     writeObject(ReferencePosition, 0, &config.reference_position, 

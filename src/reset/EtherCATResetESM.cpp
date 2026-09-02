@@ -44,7 +44,7 @@ bool SlaveResetController::acknowledgeError() {
     
     if (!error_cleared) {
         last_result_.error_message = "Error acknowledge failed - error flag still set";
-        TETHER_LOGW(TAG, "Error still present after acknowledge. Status code: 0x%04X (%s)",
+        TETHER_LOGW(TAG, "Error still present after acknowledge. Status code: 0x{:04X} ({})",
                  current_code, getALStatusCodeName(current_code));
     }
     
@@ -134,7 +134,7 @@ ResetResult SlaveResetController::fullReinitialize(bool to_op) {
     result.requested_level = ResetLevel::StateMachineReset;
     int64_t start_time = esp_timer_get_time();
     
-    TETHER_LOGI(TAG, "Full re-initialization of slave %u", slave_index_);
+    TETHER_LOGI(TAG, "Full re-initialization of slave {}", slave_index_);
     
     reportProgress("Forcing to INIT", 10);
     if (!forceToInit(1000)) {
@@ -181,7 +181,7 @@ ResetResult SlaveResetController::fullReinitialize(bool to_op) {
     readALStatus(result.al_status, result.al_status_code);
     result.duration_us = static_cast<uint32_t>(esp_timer_get_time() - start_time);
     
-    TETHER_LOGI(TAG, "Full re-initialization completed in %u us", result.duration_us);
+    TETHER_LOGI(TAG, "Full re-initialization completed in {} us", result.duration_us);
     
     last_result_ = result;
     return result;
@@ -192,7 +192,7 @@ ResetResult SlaveResetController::fullReinitialize(bool to_op) {
 // ============================================================================
 
 bool SlaveResetController::resetSyncManagerWatchdog() {
-    TETHER_LOGI(TAG, "Resetting Sync Manager watchdog on slave %u", slave_index_);
+    TETHER_LOGI(TAG, "Resetting Sync Manager watchdog on slave {}", slave_index_);
     
     uint8_t disable = 0x00;
     if (!sdoWrite(0x0806, 0, &disable, 1) ||
@@ -217,7 +217,7 @@ bool SlaveResetController::clearPDIWatchdog() {
 }
 
 bool SlaveResetController::reconfigureSyncManagers() {
-    TETHER_LOGI(TAG, "Reconfiguring Sync Managers on slave %u", slave_index_);
+    TETHER_LOGI(TAG, "Reconfiguring Sync Managers on slave {}", slave_index_);
     return true;
 }
 
@@ -226,7 +226,7 @@ bool SlaveResetController::reconfigureSyncManagers() {
 // ============================================================================
 
 bool SlaveResetController::resetDistributedClock() {
-    TETHER_LOGI(TAG, "Resetting Distributed Clock on slave %u", slave_index_);
+    TETHER_LOGI(TAG, "Resetting Distributed Clock on slave {}", slave_index_);
     
     uint8_t dc_disable = 0x00;
     if (!sdoWrite(toUInt16(DCRegisters::DCSyncAct), 0, &dc_disable, 1)) {

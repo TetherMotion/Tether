@@ -33,7 +33,7 @@ ResetResult applyResetPolicy(SlaveResetController& controller, const ResetPolicy
     
     while (attempt < policy.max_auto_attempts) {
         attempt++;
-        TETHER_LOGI(TAG, "Reset attempt %u/%u at level %s",
+        TETHER_LOGI(TAG, "Reset attempt {}/{} at level {}",
                  attempt, policy.max_auto_attempts, getResetLevelName(current_level));
         
         result = controller.resetToLevel(current_level);
@@ -52,7 +52,7 @@ ResetResult applyResetPolicy(SlaveResetController& controller, const ResetPolicy
         if (policy.escalate_on_failure && 
             static_cast<int>(current_level) < static_cast<int>(policy.max_level)) {
             current_level = static_cast<ResetLevel>(static_cast<int>(current_level) + 1);
-            TETHER_LOGI(TAG, "Escalating to level %s", getResetLevelName(current_level));
+            TETHER_LOGI(TAG, "Escalating to level {}", getResetLevelName(current_level));
         }
         
         Tether::Platform::Clock::instance().delayMilliseconds(policy.retry_delay_ms);

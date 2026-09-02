@@ -52,7 +52,7 @@ size_t DriveManager::initializeDrives(Master& master, size_t slave_count) {
         m_drive_count++;
     }
     
-    TETHER_LOGI(TAG, "DriveManager: Initialized %zu drives", m_drive_count);
+    TETHER_LOGI(TAG, "DriveManager: Initialized {} drives", m_drive_count);
     return m_drive_count;
 }
 

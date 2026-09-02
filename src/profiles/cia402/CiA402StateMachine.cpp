@@ -49,7 +49,7 @@ State StateMachine::update() {
         m_previousState = m_currentState;
         m_currentState = newState;
         
-        TETHER_LOGD(TAG, "State transition: %d -> %d", 
+        TETHER_LOGD(TAG, "State transition: {} -> {}", 
                  static_cast<int>(m_previousState), 
                  static_cast<int>(m_currentState));
         
@@ -368,7 +368,7 @@ bool StateMachine::setOperatingMode(OperatingMode mode) {
         m_modeCallback(mode);
     }
     
-    TETHER_LOGI(TAG, "Operating mode set to %s (%d)",
+    TETHER_LOGI(TAG, "Operating mode set to {} ({})",
              CiA402::getOperatingModeName(static_cast<int8_t>(mode)),
              static_cast<int>(mode));
     return true;

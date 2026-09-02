@@ -57,7 +57,7 @@ public:
         
         esp_err_t err = gptimer_new_timer(&timer_config, &timer_);
         if (err != ESP_OK) {
-            TETHER_LOGE(TAG, "gptimer_new_timer failed: %s", esp_err_to_name(err));
+            TETHER_LOGE(TAG, "gptimer_new_timer failed: {}", esp_err_to_name(err));
             return false;
         }
         
@@ -72,7 +72,7 @@ public:
         
         err = gptimer_set_alarm_action(timer_, &alarm_config);
         if (err != ESP_OK) {
-            TETHER_LOGE(TAG, "gptimer_set_alarm_action failed: %s", esp_err_to_name(err));
+            TETHER_LOGE(TAG, "gptimer_set_alarm_action failed: {}", esp_err_to_name(err));
             gptimer_del_timer(timer_);
             timer_ = nullptr;
             return false;
@@ -85,7 +85,7 @@ public:
         
         err = gptimer_register_event_callbacks(timer_, &cbs, this);
         if (err != ESP_OK) {
-            TETHER_LOGE(TAG, "gptimer_register_event_callbacks failed: %s", esp_err_to_name(err));
+            TETHER_LOGE(TAG, "gptimer_register_event_callbacks failed: {}", esp_err_to_name(err));
             gptimer_del_timer(timer_);
             timer_ = nullptr;
             return false;
@@ -107,13 +107,13 @@ public:
         
         esp_err_t err = gptimer_enable(timer_);
         if (err != ESP_OK) {
-            TETHER_LOGE(TAG, "gptimer_enable failed: %s", esp_err_to_name(err));
+            TETHER_LOGE(TAG, "gptimer_enable failed: {}", esp_err_to_name(err));
             return false;
         }
         
         err = gptimer_start(timer_);
         if (err != ESP_OK) {
-            TETHER_LOGE(TAG, "gptimer_start failed: %s", esp_err_to_name(err));
+            TETHER_LOGE(TAG, "gptimer_start failed: {}", esp_err_to_name(err));
             gptimer_disable(timer_);
             return false;
         }
@@ -122,7 +122,7 @@ public:
         start_time_us_ = esp_timer_get_time();
         cycle_count_ = 0;
         
-        TETHER_LOGI(TAG, "Timer started at %lu Hz", 1000000UL / config_.period_us);
+        TETHER_LOGI(TAG, "Timer started at {} Hz", 1000000UL / config_.period_us);
         return true;
     }
     
@@ -135,7 +135,7 @@ public:
         gptimer_disable(timer_);
         running_ = false;
         
-        TETHER_LOGI(TAG, "Timer stopped after %llu cycles", (unsigned long long)cycle_count_);
+        TETHER_LOGI(TAG, "Timer stopped after {} cycles", (unsigned long long)cycle_count_);
     }
     
     bool isRunning() const override {

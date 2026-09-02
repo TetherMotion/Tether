@@ -113,11 +113,11 @@ int main(int argc, char** argv) {
     if (!esi_xml.empty()) {
         esi.emplace(esi_xml);
         if (esi->empty()) {
-            TETHER_LOGE(TAG, "Failed to parse ESI XML '%s': %s",
+            TETHER_LOGE(TAG, "Failed to parse ESI XML '{}': {}",
                         esi_xml.c_str(), esi->errorMessage().c_str());
             return 1;
         }
-        TETHER_LOGI(TAG, "Loaded ESI XML '%s' (%zu device(s)) for cross-reference",
+        TETHER_LOGI(TAG, "Loaded ESI XML '{}' ({} device(s)) for cross-reference",
                     esi_xml.c_str(), esi->devices().size());
     }
 #endif
@@ -181,8 +181,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    TETHER_LOGI(TAG, "reset_slaves_al (host) — interface: %s", iface.c_str());
-    TETHER_LOGI(TAG, "Parameters: target-state=0x%02X, max-iterations=%d, sleep=%d ms",
+    TETHER_LOGI(TAG, "reset_slaves_al (host) — interface: {}", iface.c_str());
+    TETHER_LOGI(TAG, "Parameters: target-state=0x{:02X}, max-iterations={}, sleep={} ms",
                 target_state, max_iterations, sleep_ms);
     if (!selected_slaves.empty()) {
         std::string list;
@@ -190,7 +190,7 @@ int main(int argc, char** argv) {
             if (i) list += ",";
             list += std::to_string(selected_slaves[i]);
         }
-        TETHER_LOGI(TAG, "Selected slaves: %s", list.c_str());
+        TETHER_LOGI(TAG, "Selected slaves: {}", list.c_str());
     } else {
         TETHER_LOGI(TAG, "Selected slaves: all");
     }
@@ -224,7 +224,7 @@ int main(int argc, char** argv) {
     }
 
     uint16_t slaves = master.getDiscoveredSlaveCount();
-    TETHER_LOGI(TAG, "=== Discovered %u slave(s) ===", slaves);
+    TETHER_LOGI(TAG, "=== Discovered {} slave(s) ===", slaves);
     master.logDiscoveredSlavesSummary(TAG);
 
     if (slaves == 0) {
@@ -240,7 +240,7 @@ int main(int argc, char** argv) {
     } else {
         for (uint16_t si : selected_slaves) {
             if (si >= slaves) {
-                TETHER_LOGW(TAG, "Slave %u not discovered (only %u slave(s) on bus), skipping", si, slaves);
+                TETHER_LOGW(TAG, "Slave {} not discovered (only {} slave(s) on bus), skipping", si, slaves);
                 continue;
             }
             targets.push_back(si);
@@ -260,11 +260,11 @@ int main(int argc, char** argv) {
             if (!reached) {
                 const char* state_name = EtherCAT::al_status_get_state_name(al);
                 const bool has_err = EtherCAT::al_status_has_error(al);
-                TETHER_LOGI(TAG, "  Slave %u iter %d/%d: AL_STATUS=0x%04X (state=%s, error=%s)",
+                TETHER_LOGI(TAG, "  Slave {} iter {}/{}: AL_STATUS=0x{:04X} (state={}, error={})",
                             si, iter, max_iter, al,
                             state_name, has_err ? "true" : "false");
                 if (code != 0) {
-                    TETHER_LOGI(TAG, "    AL_STATUS_CODE=0x%04X (%s)",
+                    TETHER_LOGI(TAG, "    AL_STATUS_CODE=0x{:04X} ({})",
                                 code, EtherCAT::getALStatusCodeName(code));
                 }
             }
@@ -274,30 +274,30 @@ int main(int argc, char** argv) {
     uint16_t fail_count    = 0;
 
     for (uint16_t si : targets) {
-        TETHER_LOGI(TAG, "Resetting slave %u to state 0x%02X (max %d iterations, %d ms sleep) ...",
+        TETHER_LOGI(TAG, "Resetting slave {} to state 0x{:02X} (max {} iterations, {} ms sleep) ...",
                     si, target_state, max_iterations, sleep_ms);
 
         auto result = ctrl.resetSlave(si, target_state, max_iterations, sleep_ms);
 
         if (result.success) {
-            TETHER_LOGI(TAG, "  Slave %u => target state 0x%02X OK (%s)",
+            TETHER_LOGI(TAG, "  Slave {} => target state 0x{:02X} OK ({})",
                         si, target_state, result.message.c_str());
             ++success_count;
         } else {
-            TETHER_LOGE(TAG, "  Slave %u => target state 0x%02X FAILED (%s)",
+            TETHER_LOGE(TAG, "  Slave {} => target state 0x{:02X} FAILED ({})",
                         si, target_state, result.message.c_str());
             ++fail_count;
         }
     }
 
-    TETHER_LOGI(TAG, "=== Reset Summary: %u succeeded, %u failed ===", success_count, fail_count);
+    TETHER_LOGI(TAG, "=== Reset Summary: {} succeeded, {} failed ===", success_count, fail_count);
 
     // Print ESI device info for cross-reference if --esi-xml was provided
 #if TETHER_HAVE_ESI
     if (esi && !esi->empty()) {
-        TETHER_LOGI(TAG, "\n=== ESI XML Cross-Reference (%s) ===", esi_xml.c_str());
+        TETHER_LOGI(TAG, "\n=== ESI XML Cross-Reference ({}) ===", esi_xml.c_str());
         for (const auto& dev : esi->devices()) {
-            TETHER_LOGI(TAG, "%s",
+            TETHER_LOGI(TAG, "{}",
                         EtherCAT::ESI::formatDeviceHumanReadable(dev, true).c_str());
         }
     }

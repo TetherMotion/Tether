@@ -54,7 +54,7 @@ inline bool startHostMasterSession(const std::string& interface_name,
         if (init_result == EtherCAT::HAL::Error::PermissionDenied) {
             logPermissionDeniedError(tag);
         } else {
-            TETHER_LOGE(tag, "Critical error: Prerequisites for operation not fulfilled (%s)",
+            TETHER_LOGE(tag, "Critical error: Prerequisites for operation not fulfilled ({})",
                         magic_enum::enum_name(init_result).data());
         }
         session.ethernet.reset();
@@ -64,7 +64,7 @@ inline bool startHostMasterSession(const std::string& interface_name,
     const auto link_status = session.ethernet->getLinkStatus();
     if (!link_status.up) {
         TETHER_LOGE(tag,
-                    "Link DOWN on '%s' - please check if the Ethernet cable is "
+                    "Link DOWN on '{}' - please check if the Ethernet cable is "
                     "plugged in correctly, if this is the wrong interface or "
                     "the first EtherCAT slave is powered down",
                     interface_name.c_str());
@@ -131,7 +131,7 @@ inline bool configureSingleDrive(EtherCAT::DS402Master& master,
 
     const uint16_t minimum_drive_count = static_cast<uint16_t>(config.drive.slave_index + 1);
     if (!master.waitForDriveCount(minimum_drive_count, config.discovery_timeout_ms)) {
-        TETHER_LOGE(tag, "Timed out waiting for %u drive(s)", minimum_drive_count);
+        TETHER_LOGE(tag, "Timed out waiting for {} drive(s)", minimum_drive_count);
         return false;
     }
 
@@ -146,7 +146,7 @@ inline bool configureSingleDrive(EtherCAT::DS402Master& master,
     }
 
     if (!master.configureDrive(config.drive)) {
-        TETHER_LOGE(tag, "Failed to configure slave %u", config.drive.slave_index);
+        TETHER_LOGE(tag, "Failed to configure slave {}", config.drive.slave_index);
         master.stopDistributedClocks();
         return false;
     }
@@ -163,7 +163,7 @@ inline bool configureAndEnableSingleDrive(EtherCAT::DS402Master& master,
     }
 
     if (!master.enableDrive(config.drive.slave_index, config.enable_timeout_ms)) {
-        TETHER_LOGE(tag, "Failed to enable slave %u", config.drive.slave_index);
+        TETHER_LOGE(tag, "Failed to enable slave {}", config.drive.slave_index);
         master.stopDistributedClocks();
         return false;
     }

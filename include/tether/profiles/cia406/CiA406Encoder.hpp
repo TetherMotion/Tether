@@ -62,7 +62,7 @@
  *     int32_t velocity = encoder.getVelocity();
  *     
  *     if (encoder.hasAlarm()) {
- *         TETHER_LOGW("ENCODER", "Alarm: 0x%04X", encoder.getAlarms());
+ *         TETHER_LOGW("ENCODER", "Alarm: 0x{:04X}", encoder.getAlarms());
  *     }
  * }
  * ```

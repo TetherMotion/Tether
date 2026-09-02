@@ -87,16 +87,16 @@ int main(int argc, char** argv) {
     if (use_esi) {
         esi.emplace(esi_xml);
         if (esi->empty()) {
-            TETHER_LOGE(TAG, "Failed to parse ESI XML '%s': %s",
+            TETHER_LOGE(TAG, "Failed to parse ESI XML '{}': {}",
                         esi_xml.c_str(), esi->errorMessage().c_str());
             return 1;
         }
-        TETHER_LOGI(TAG, "Loaded ESI XML '%s' (%zu device(s))",
+        TETHER_LOGI(TAG, "Loaded ESI XML '{}' ({} device(s))",
                     esi_xml.c_str(), esi->devices().size());
     }
 #endif
 
-    TETHER_LOGI(TAG, "slave_read_identity — interface: %s, target slave: %d",
+    TETHER_LOGI(TAG, "slave_read_identity — interface: {}, target slave: {}",
                 iface.c_str(), slave_idx);
     if (!use_esi) {
         Tether::Examples::logMailboxConfig(mbSize, mbAddr, TAG);
@@ -128,10 +128,10 @@ int main(int argc, char** argv) {
     }
 
     uint16_t slaves = master.getDiscoveredSlaveCount();
-    TETHER_LOGI(TAG, "Discovered %u slave(s)", slaves);
+    TETHER_LOGI(TAG, "Discovered {} slave(s)", slaves);
 
     if (static_cast<uint16_t>(slave_idx) >= slaves) {
-        TETHER_LOGE(TAG, "Slave index %d out of range (only %u slave(s) found)",
+        TETHER_LOGE(TAG, "Slave index {} out of range (only {} slave(s) found)",
                     slave_idx, slaves);
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
@@ -140,7 +140,7 @@ int main(int argc, char** argv) {
 
     auto& sl = master.slave(static_cast<uint16_t>(slave_idx));
 
-    TETHER_LOGI(TAG, "Configuring mailbox for slave %d...", slave_idx);
+    TETHER_LOGI(TAG, "Configuring mailbox for slave {}...", slave_idx);
     EtherCAT::SlaveError mb_err;
 #if TETHER_HAVE_ESI
     if (use_esi) {
@@ -154,7 +154,7 @@ int main(int argc, char** argv) {
             0x0004);
     }
     if (mb_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "Mailbox configuration failed: %s",
+        TETHER_LOGE(TAG, "Mailbox configuration failed: {}",
                     EtherCAT::slaveErrorToString(mb_err));
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
@@ -163,20 +163,20 @@ int main(int argc, char** argv) {
 
     auto pre_err = sl.transitionToPreOp();
     if (pre_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "PRE-OP transition failed: %s",
+        TETHER_LOGE(TAG, "PRE-OP transition failed: {}",
                     EtherCAT::slaveErrorToString(pre_err));
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 8;
     }
-    TETHER_LOGI(TAG, "Slave %d is in PRE-OP", slave_idx);
+    TETHER_LOGI(TAG, "Slave {} is in PRE-OP", slave_idx);
 
     constexpr uint16_t kIdentityIndex = 0x1018;
 
     uint8_t num_entries = 0;
     auto err = sl.sdoReadU8(kIdentityIndex, 0, num_entries);
     if (err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "Failed to read subindex 0 of 0x%04X", kIdentityIndex);
+        TETHER_LOGE(TAG, "Failed to read subindex 0 of 0x{:04X}", kIdentityIndex);
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 9;
@@ -191,7 +191,7 @@ int main(int argc, char** argv) {
         uint32_t value = 0;
         err = sl.sdoReadU32(kIdentityIndex, sub, value);
         if (err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGE(TAG, "Failed to read subindex %u of 0x%04X", sub, kIdentityIndex);
+            TETHER_LOGE(TAG, "Failed to read subindex {} of 0x{:04X}", sub, kIdentityIndex);
             identity_ok = false;
             std::cout << "Subindex " << static_cast<int>(sub) << ": [READ FAILED]\n";
             continue;

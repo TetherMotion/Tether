@@ -94,7 +94,7 @@ void SDODiagnostics::dumpSlaveState(Master& master, uint16_t adp,
     char sm0_sa_act_desc[16];  smActivateStr(sm0_stat_act[1], sm0_sa_act_desc, sizeof(sm0_sa_act_desc));
     char sm1_sa_act_desc[16];  smActivateStr(sm1_stat_act[1], sm1_sa_act_desc, sizeof(sm1_sa_act_desc));
 
-    TETHER_LOGE(TAG, "[SDO_DIAG] Slave %u: AL_STATUS=0x%04X state=%s%s | AL status code: %s (0x%04X)\n[SDO_DIAG] MBX cfg: wr=0x%04X rd=0x%04X | SM0(start=0x%04X len=%u ctrl=0x%02X [%s] stat=0x%02X act=0x%02X) SM1(start=0x%04X len=%u ctrl=0x%02X [%s] stat=0x%02X act=0x%02X)\n[SDO_DIAG] SM0 status=0x%02X [%s] act=0x%02X [%s] | SM1 status=0x%02X [%s] act=0x%02X [%s]",
+    TETHER_LOGE(TAG, "[SDO_DIAG] Slave {}: AL_STATUS=0x{:04X} state={}{} | AL status code: {} (0x{:04X})\n[SDO_DIAG] MBX cfg: wr=0x{:04X} rd=0x{:04X} | SM0(start=0x{:04X} len={} ctrl=0x{:02X} [{}] stat=0x{:02X} act=0x{:02X}) SM1(start=0x{:04X} len={} ctrl=0x{:02X} [{}] stat=0x{:02X} act=0x{:02X})\n[SDO_DIAG] SM0 status=0x{:02X} [{}] act=0x{:02X} [{}] | SM1 status=0x{:02X} [{}] act=0x{:02X} [{}]",
                slaveIndexFromADP(adp),
                al_s,
                EtherCAT::al_status_get_state_name(al_s),
@@ -113,7 +113,7 @@ void SDODiagnostics::logCoeMbxPacket(const char* dir, uint16_t adp,
                                       const uint8_t* data, size_t len, bool enabled) {
     if (!enabled) return;
 
-    TETHER_LOGI(TAG, "[CoE-%s] Slave %u: index=0x%04X:%u len=%zu",
+    TETHER_LOGI(TAG, "[CoE-{}] Slave {}: index=0x{:04X}:{} len={}",
                 dir, slaveIndexFromADP(adp), index, sub, len);
 
     if (len == 0) return;
@@ -123,7 +123,7 @@ void SDODiagnostics::logCoeMbxPacket(const char* dir, uint16_t adp,
         if (data[i] != 0) { all_zero = false; break; }
     }
     if (all_zero) {
-        TETHER_LOGI(TAG, "[CoE-%s] Data (%zu bytes): All zeroes", dir, len);
+        TETHER_LOGI(TAG, "[CoE-{}] Data ({} bytes): All zeroes", dir, len);
         return;
     }
 
@@ -137,7 +137,7 @@ void SDODiagnostics::logCoeMbxPacket(const char* dir, uint16_t adp,
     if (len > kMaxHexDump) {
         pos += snprintf(hexbuf + pos, sizeof(hexbuf) - pos, "...");
     }
-    TETHER_LOGI(TAG, "[CoE-%s] Data (%zu/%zu bytes): %s", dir, dump_len, len, hexbuf);
+    TETHER_LOGI(TAG, "[CoE-{}] Data ({}/{} bytes): {}", dir, dump_len, len, hexbuf);
 }
 
 bool SDODiagnostics::isPdoMappingIndex(uint16_t idx) const {
@@ -165,12 +165,12 @@ void SDODiagnostics::logPdoMappingSubindexDiagnostic(Master& master, uint16_t ad
                        count_buf, sizeof(count_buf), &count_len,
                        diagEnabled, pollIntervalMs, transactionTimeoutMs);
     if (ok && count_len >= 1) {
-        TETHER_LOGE(TAG, "  -> PDO mapping object 0x%04X supports max %u entries (subindices 1-%u), but subindex %u was accessed",
+        TETHER_LOGE(TAG, "  -> PDO mapping object 0x{:04X} supports max {} entries (subindices 1-{}), but subindex {} was accessed",
                     index, static_cast<unsigned>(count_buf[0]),
                     static_cast<unsigned>(count_buf[0]),
                     static_cast<unsigned>(sub));
     } else {
-        TETHER_LOGE(TAG, "  -> PDO mapping object 0x%04X: subindex %u does not exist (failed to read max entry count from subindex 0)",
+        TETHER_LOGE(TAG, "  -> PDO mapping object 0x{:04X}: subindex {} does not exist (failed to read max entry count from subindex 0)",
                     index, static_cast<unsigned>(sub));
     }
 }
@@ -187,7 +187,7 @@ void SDODiagnostics::diagHexdump(const uint8_t* data, size_t len, size_t maxPrin
         strncat(buf, tmp, sizeof(buf) - strlen(buf) - 1);
     }
     if (len > to_print) strncat(buf, " ...", sizeof(buf) - strlen(buf) - 1);
-    TETHER_LOGI(TAG, "MBX data (%zu bytes): %s", len, buf);
+    TETHER_LOGI(TAG, "MBX data ({} bytes): {}", len, buf);
 }
 #endif
 

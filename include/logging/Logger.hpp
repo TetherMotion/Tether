@@ -3,8 +3,10 @@
 #include <cstdint>
 #include <cstdarg>
 #include <cstdio>
+#include <format>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <algorithm>
 #include <mutex>
 #include <utility>
@@ -50,6 +52,7 @@ public:
 
     void log(LogLevel level, const char* tag, const char* format, ...);
     void logv(LogLevel level, const char* tag, const char* format, va_list args);
+    void logFormatted(LogLevel level, const char* tag, std::string_view message);
 
     using LogHandler = std::function<void(LogLevel, const char*, const char*)>;
     void setHandler(LogHandler handler) {
@@ -82,26 +85,44 @@ private:
     mutable std::mutex mutex_;
 };
 
-// Convenience macros matching ESP-IDF style
+// Helper that wraps std::vformat so the TETHER_LOGx macros can accept
+// runtime format strings. Arguments are taken by value (to support packed
+// bitfields and rvalues) and referenced by std::make_format_args.
+template <typename... Args>
+inline std::string logFormat(const char* fmt, Args... args) {
+    return std::vformat(fmt, std::make_format_args(args...));
+}
+
+// Convenience macros matching ESP-IDF style (std::format-style, runtime vformat)
 #ifndef TETHER_LOGE
-#define TETHER_LOGE(tag, format, ...) \
-    Tether::Platform::Logger::instance().log(Tether::Platform::LogLevel::Error, tag, format, ##__VA_ARGS__)
+#define TETHER_LOGE(tag, fmt, ...) \
+    Tether::Platform::Logger::instance().logFormatted( \
+        Tether::Platform::LogLevel::Error, tag, \
+        Tether::Platform::logFormat(fmt __VA_OPT__(,) __VA_ARGS__))
 #endif
 #ifndef TETHER_LOGW
-#define TETHER_LOGW(tag, format, ...) \
-    Tether::Platform::Logger::instance().log(Tether::Platform::LogLevel::Warn, tag, format, ##__VA_ARGS__)
+#define TETHER_LOGW(tag, fmt, ...) \
+    Tether::Platform::Logger::instance().logFormatted( \
+        Tether::Platform::LogLevel::Warn, tag, \
+        Tether::Platform::logFormat(fmt __VA_OPT__(,) __VA_ARGS__))
 #endif
 #ifndef TETHER_LOGI
-#define TETHER_LOGI(tag, format, ...) \
-    Tether::Platform::Logger::instance().log(Tether::Platform::LogLevel::Info, tag, format, ##__VA_ARGS__)
+#define TETHER_LOGI(tag, fmt, ...) \
+    Tether::Platform::Logger::instance().logFormatted( \
+        Tether::Platform::LogLevel::Info, tag, \
+        Tether::Platform::logFormat(fmt __VA_OPT__(,) __VA_ARGS__))
 #endif
 #ifndef TETHER_LOGD
-#define TETHER_LOGD(tag, format, ...) \
-    Tether::Platform::Logger::instance().log(Tether::Platform::LogLevel::Debug, tag, format, ##__VA_ARGS__)
+#define TETHER_LOGD(tag, fmt, ...) \
+    Tether::Platform::Logger::instance().logFormatted( \
+        Tether::Platform::LogLevel::Debug, tag, \
+        Tether::Platform::logFormat(fmt __VA_OPT__(,) __VA_ARGS__))
 #endif
 #ifndef TETHER_LOGV
-#define TETHER_LOGV(tag, format, ...) \
-    Tether::Platform::Logger::instance().log(Tether::Platform::LogLevel::Verbose, tag, format, ##__VA_ARGS__)
+#define TETHER_LOGV(tag, fmt, ...) \
+    Tether::Platform::Logger::instance().logFormatted( \
+        Tether::Platform::LogLevel::Verbose, tag, \
+        Tether::Platform::logFormat(fmt __VA_OPT__(,) __VA_ARGS__))
 #endif
 
 static inline void log_buffer_hex(const char* tag, const void* buffer, size_t len, LogLevel lvl) {
@@ -117,12 +138,12 @@ static inline void log_buffer_hex(const char* tag, const void* buffer, size_t le
             s += tmp;
         }
         switch (lvl) {
-            case LogLevel::Error: TETHER_LOGE(tag, "%s", s.c_str()); break;
-            case LogLevel::Warn:  TETHER_LOGW(tag, "%s", s.c_str()); break;
-            case LogLevel::Info:  TETHER_LOGI(tag, "%s", s.c_str()); break;
-            case LogLevel::Debug: TETHER_LOGD(tag, "%s", s.c_str()); break;
-            case LogLevel::Verbose: TETHER_LOGV(tag, "%s", s.c_str()); break;
-            default: TETHER_LOGD(tag, "%s", s.c_str()); break;
+            case LogLevel::Error: TETHER_LOGE(tag, "{}", s); break;
+            case LogLevel::Warn:  TETHER_LOGW(tag, "{}", s); break;
+            case LogLevel::Info:  TETHER_LOGI(tag, "{}", s); break;
+            case LogLevel::Debug: TETHER_LOGD(tag, "{}", s); break;
+            case LogLevel::Verbose: TETHER_LOGV(tag, "{}", s); break;
+            default: TETHER_LOGD(tag, "{}", s); break;
         }
     }
 }

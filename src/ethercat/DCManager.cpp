@@ -79,10 +79,10 @@ bool DCManager::init(const DC::DCConfig& config, uint16_t slave_count)
         if (!init_ok) {
             TETHER_LOGW(TAG, "DCManager: DC initialization incomplete after init() call");
         }
-        TETHER_LOGI(TAG, "DCManager: created EtherCATDC instance (slaves=%u)", (unsigned)slave_count);
+        TETHER_LOGI(TAG, "DCManager: created EtherCATDC instance (slaves={})", (unsigned)slave_count);
         return true;
     } catch (const std::exception& ex) {
-        TETHER_LOGW(TAG, "DCManager: failed to create EtherCATDC: %s", ex.what());
+        TETHER_LOGW(TAG, "DCManager: failed to create EtherCATDC: {}", ex.what());
         dc_instance_.reset();
         return false;
     }

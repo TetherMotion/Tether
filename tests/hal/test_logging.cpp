@@ -74,8 +74,8 @@ TEST(LoggerTest, NoneLevel) {
 }
 
 TEST(LoggerTest, LogMacros) {
-    TETHER_LOGE("MacroTest", "Error message %d", 42);
-    TETHER_LOGW("MacroTest", "Warning message %s", "test");
+    TETHER_LOGE("MacroTest", "Error message {}", 42);
+    TETHER_LOGW("MacroTest", "Warning message {}", "test");
     TETHER_LOGI("MacroTest", "Info message");
     TETHER_LOGD("MacroTest", "Debug message");
 }

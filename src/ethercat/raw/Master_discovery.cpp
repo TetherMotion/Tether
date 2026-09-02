@@ -97,7 +97,7 @@ bool Master::discoverSlaves()
             // thousands of phantom Slave objects and trigger cascading errors.
             // Reject any WKC that exceeds the status-poller/supervisor maximum.
             if (result.wkc > ECAT_STATUS_POLLER_MAX_SLAVES) {
-                TETHER_LOGW(TAG, "discoverSlaves: WKC=%u exceeds max %d — "
+                TETHER_LOGW(TAG, "discoverSlaves: WKC={} exceeds max {} — "
                              "likely corrupted frame, retrying",
                              result.wkc, ECAT_STATUS_POLLER_MAX_SLAVES);
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -143,7 +143,7 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
 
     if (debug_flags_.stateMachine && debug_flags_.stateMachineFilt.allows(slave_index)) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  State Machine Transition: Slave %u (INIT => PRE_OP)          ║", slave_index);
+        TETHER_LOGI(TAG, "║  State Machine Transition: Slave {} (INIT => PRE_OP)          ║", slave_index);
         TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
         TETHER_LOGI(TAG, "║  Transition: INIT => PRE_OP");
         TETHER_LOGI(TAG, "║  Reason:    Automatism - enabling mailbox operations");
@@ -164,7 +164,7 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
     for (int attempt = 1; attempt <= max_attempts; ++attempt) {
         if (debug_flags_.stateMachine && debug_flags_.stateMachineFilt.allows(slave_index)) {
             TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-            TETHER_LOGI(TAG, "║  Attempt %d/%d for Slave %u                                    ║", attempt, max_attempts, slave_index);
+            TETHER_LOGI(TAG, "║  Attempt {}/{} for Slave {}                                    ║", attempt, max_attempts, slave_index);
             TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
         }
         
@@ -176,17 +176,17 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
 
         if (debug_flags_.stateMachine && debug_flags_.stateMachineFilt.allows(slave_index)) {
             const char* state_name = al_status_get_state_name(al0);
-            TETHER_LOGI(TAG, "  Current AL_STATUS: 0x%04X (State=%s, Error=%s)", 
+            TETHER_LOGI(TAG, "  Current AL_STATUS: 0x{:04X} (State={}, Error={})", 
                        al0, state_name, has_error ? "true" : "false");
-            TETHER_LOGI(TAG, "  Requesting PRE_OP with error bit: %s", has_error ? "SET" : "CLEAR");
+            TETHER_LOGI(TAG, "  Requesting PRE_OP with error bit: {}", has_error ? "SET" : "CLEAR");
         }
 
         const uint16_t req = static_cast<uint16_t>(0x0002u | (has_error ? 0x0010u : 0));
         (void)writeRegister(SlaveAddress(slave_index), EC_REG_AL_CONTROL, req);
 
         if (debug_flags_.stateMachine && debug_flags_.stateMachineFilt.allows(slave_index)) {
-            TETHER_LOGI(TAG, "  Wrote AL_CONTROL: 0x%04X", req);
-            TETHER_LOGI(TAG, "  Waiting for PRE_OP to become active (max %d checks, %dms each)...", 
+            TETHER_LOGI(TAG, "  Wrote AL_CONTROL: 0x{:04X}", req);
+            TETHER_LOGI(TAG, "  Waiting for PRE_OP to become active (max {} checks, {}ms each)...", 
                        inner_tries, inner_sleep_ms);
         }
 
@@ -196,12 +196,12 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
             if (readRegister(SlaveAddress(slave_index), EC_REG_AL_STATUS, s_le, 200)) {
                 if ((le16_to_host(s_le) & 0x000Fu) == 0x0002u) {
                     if (attempt > 1) {
-                        TETHER_LOGI(TAG, "setPreop: succeeded on attempt %d", attempt);
+                        TETHER_LOGI(TAG, "setPreop: succeeded on attempt {}", attempt);
                     }
                     if (debug_flags_.stateMachine && debug_flags_.stateMachineFilt.allows(slave_index)) {
                         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-                        TETHER_LOGI(TAG, "║  Transition Result: Slave %u => PRE_OP SUCCESS                ║", slave_index);
-                        TETHER_LOGI(TAG, "║  Confirmed after %d checks on attempt %d/%d                   ║", i+1, attempt, max_attempts);
+                        TETHER_LOGI(TAG, "║  Transition Result: Slave {} => PRE_OP SUCCESS                ║", slave_index);
+                        TETHER_LOGI(TAG, "║  Confirmed after {} checks on attempt {}/{}                   ║", i+1, attempt, max_attempts);
                         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
                     }
 
@@ -212,7 +212,7 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
                     if (has_error) {
                         std::lock_guard<std::mutex> _lg(m_diag_mutex_);
                         if (m_diagnosed_slaves_.find(slave_index) == m_diagnosed_slaves_.end()) {
-                            TETHER_LOGI(TAG, "setPreop: issuing one-time fault_diagnose() for slave %u (error bit was set in initial AL_STATUS)", slave_index);
+                            TETHER_LOGI(TAG, "setPreop: issuing one-time fault_diagnose() for slave {} (error bit was set in initial AL_STATUS)", slave_index);
                             if (faults_) {
                                 faults_->diagnose(slave_index);
                             }
@@ -225,7 +225,7 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
                     (void)readRegister(SlaveAddress(slave_index), static_cast<uint16_t>(EC_REG_SM0 + 0x04), sm0_ctrl, 200);
                     (void)readRegister(SlaveAddress(slave_index), static_cast<uint16_t>(EC_REG_SM1 + 0x04), sm1_ctrl, 200);
                     if (sm0_ctrl != 0x26 || sm1_ctrl != 0x22) {
-                        TETHER_LOGW(TAG, "setPreop: SM0=0x%02X SM1=0x%02X (expected 0x26/0x22) — slave may have rejected mailbox config", sm0_ctrl, sm1_ctrl);
+                        TETHER_LOGW(TAG, "setPreop: SM0=0x{:02X} SM1=0x{:02X} (expected 0x26/0x22) — slave may have rejected mailbox config", sm0_ctrl, sm1_ctrl);
                     }
 
                     // Debug gate checkpoint: PRE_OP confirmed
@@ -252,15 +252,15 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
             uint16_t al_code = have_code ? le16_to_host(al_code_le) : 0;
 
             if (is_error) {
-                TETHER_LOGW(TAG, "setPreop: attempt %d failed, AL_STATUS=0x%04X (State=%s, ERROR=true)",
+                TETHER_LOGW(TAG, "setPreop: attempt {} failed, AL_STATUS=0x{:04X} (State={}, ERROR=true)",
                          attempt, al_raw, state_name);
             } else {
-                TETHER_LOGW(TAG, "setPreop: attempt %d failed, AL_STATUS=0x%04X (State=%s)",
+                TETHER_LOGW(TAG, "setPreop: attempt {} failed, AL_STATUS=0x{:04X} (State={})",
                          attempt, al_raw, state_name);
             }
 
             if (have_code) {
-                TETHER_LOGW(TAG, "setPreop: AL status code: %s (0x%04X)", EtherCAT::getALStatusCodeName(static_cast<EtherCAT::ALStatusCode>(al_code)), al_code);
+                TETHER_LOGW(TAG, "setPreop: AL status code: {} (0x{:04X})", EtherCAT::getALStatusCodeName(static_cast<EtherCAT::ALStatusCode>(al_code)), al_code);
 
                 // Fallback: If the slave reports Invalid Mailbox Configuration on the
                 // first attempt to enter PRE_OP, optionally try forcing conservative mailbox
@@ -270,16 +270,16 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
                      al_code == static_cast<uint16_t>(ALStatusCode::InvalidMailboxConfigPreOp)) &&
                     attempt == 1) {
                     if (config_.enable_mailbox_fallback) {
-                        TETHER_LOGW(TAG, "setPreop: AL status code indicates invalid mailbox for slave %u — applying mailbox defaults (enable_mailbox_fallback=true)", slave_index);
+                        TETHER_LOGW(TAG, "setPreop: AL status code indicates invalid mailbox for slave {} — applying mailbox defaults (enable_mailbox_fallback=true)", slave_index);
                         if (forceMailboxDefaults(slave_index)) {
-                            TETHER_LOGI(TAG, "setPreop: mailbox defaults applied for slave %u; retrying PRE_OP", slave_index);
+                            TETHER_LOGI(TAG, "setPreop: mailbox defaults applied for slave {}; retrying PRE_OP", slave_index);
                         } else {
-                            TETHER_LOGW(TAG, "setPreop: forceMailboxDefaults failed for slave %u", slave_index);
+                            TETHER_LOGW(TAG, "setPreop: forceMailboxDefaults failed for slave {}", slave_index);
                         }
                         // Wait for slave to process new SM config
                         std::this_thread::sleep_for(std::chrono::milliseconds(200));
                     } else {
-                        TETHER_LOGW(TAG, "setPreop: AL status code indicates invalid mailbox for slave %u — set enable_mailbox_fallback=true to auto-fix", slave_index);
+                        TETHER_LOGW(TAG, "setPreop: AL status code indicates invalid mailbox for slave {} — set enable_mailbox_fallback=true to auto-fix", slave_index);
                     }
                 }
             }
@@ -289,20 +289,20 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
             if (is_error) {
                 std::lock_guard<std::mutex> _lg(m_diag_mutex_);
                 if (m_diagnosed_slaves_.find(slave_index) == m_diagnosed_slaves_.end()) {
-                    TETHER_LOGI(TAG, "setPreop: issuing one-time fault_diagnose() for slave %u", slave_index);
+                    TETHER_LOGI(TAG, "setPreop: issuing one-time fault_diagnose() for slave {}", slave_index);
                     faults_->diagnose(slave_index);
                     m_diagnosed_slaves_.insert(slave_index);
                 }
             }
         } else {
-            TETHER_LOGW(TAG, "setPreop: attempt %d failed, AL_STATUS read failed", attempt);
+            TETHER_LOGW(TAG, "setPreop: attempt {} failed, AL_STATUS read failed", attempt);
         }
 
         // Read SM0 (mailbox status) for additional context
         uint8_t sm0 = 0;
         const uint16_t sm0_ado = 0x0805; // SM0 status register
         if (readRegister(SlaveAddress(slave_index), sm0_ado, sm0, 200)) {
-            TETHER_LOGW(TAG, "setPreop: SM0=0x%02X (mailbox status)", sm0);
+            TETHER_LOGW(TAG, "setPreop: SM0=0x{:02X} (mailbox status)", sm0);
         } else {
             TETHER_LOGW(TAG, "setPreop: SM0 read failed");
         }
@@ -312,7 +312,7 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
         std::this_thread::sleep_for(std::chrono::milliseconds(backoff_ms));
     }
 
-    TETHER_LOGE(TAG, "setPreopAndConfirm: all %d attempts failed", max_attempts);
+    TETHER_LOGE(TAG, "setPreopAndConfirm: all {} attempts failed", max_attempts);
     return false;
 }
 
@@ -358,7 +358,7 @@ bool Master::forceMailboxDefaults(SlaveAddress slave_address)
     
     auto val_res = SyncManagerValidation::validate(sm_vec);
     if (!val_res.valid) {
-        TETHER_LOGE(TAG, "SyncManager Validation Failed for slave %u: %s", slave_index, val_res.error_message.c_str());
+        TETHER_LOGE(TAG, "SyncManager Validation Failed for slave {}: {}", slave_index, val_res.error_message.c_str());
         return false;
     }
 

@@ -64,7 +64,7 @@ void WriteVerifier::resetStats() {
 }
 
 void WriteVerifier::logStats() const {
-    TETHER_LOGI(TAG, "Write-Verify Statistics:\n  Total writes:       %llu\n  First-try success:  %llu\n  Verify failures:    %llu\n  Write failures:     %llu\n  Total retries:      %llu\n  Eventual success:   %llu\n  Permanent failures: %llu",
+    TETHER_LOGI(TAG, "Write-Verify Statistics:\n  Total writes:       {}\n  First-try success:  {}\n  Verify failures:    {}\n  Write failures:     {}\n  Total retries:      {}\n  Eventual success:   {}\n  Permanent failures: {}",
                (unsigned long long)stats_.total_writes,
                (unsigned long long)stats_.successful_writes,
                (unsigned long long)stats_.verify_failures,
@@ -123,7 +123,7 @@ WriteVerifyResult WriteVerifier::apwrVerify(uint16_t adp, uint16_t ado,
     if (len > kMaxDataLen) {
         if (config_.log_failures) {
             TETHER_LOGE(TAG,
-                "Data too large for Tether internal verify buffer: %u bytes (max=%u). "
+                "Data too large for Tether internal verify buffer: {} bytes (max={}). "
                 "This is a Tether limit, not a slave limit. "
                 "Increase ECAT_WRITE_VERIFY_MAX_DATA_LEN in TetherConfig.hpp.",
                 len, kMaxDataLen);
@@ -145,7 +145,7 @@ WriteVerifyResult WriteVerifier::apwrVerify(uint16_t adp, uint16_t ado,
                                           data, len, true);
         if (!ok) {
             if (config_.log_failures) {
-                TETHER_LOGW(TAG, "APWR send failed at 0x%04X:0x%04X (attempt %u)",
+                TETHER_LOGW(TAG, "APWR send failed at 0x{:04X}:0x{:04X} (attempt {})",
                             adp, ado, attempt + 1);
             }
             continue;
@@ -155,7 +155,7 @@ WriteVerifyResult WriteVerifier::apwrVerify(uint16_t adp, uint16_t ado,
         DatagramResponse resp = {};
         if (!transport_.waitForResponse(idx, timeout_ms, resp)) {
             if (config_.log_failures) {
-                TETHER_LOGW(TAG, "APWR timeout at 0x%04X:0x%04X (attempt %u)",
+                TETHER_LOGW(TAG, "APWR timeout at 0x{:04X}:0x{:04X} (attempt {})",
                             adp, ado, attempt + 1);
             }
             continue;
@@ -164,7 +164,7 @@ WriteVerifyResult WriteVerifier::apwrVerify(uint16_t adp, uint16_t ado,
         if (resp.wkc == 0) {
             stats_.write_failures++;
             if (config_.log_failures) {
-                TETHER_LOGW(TAG, "APWR WKC=0 at 0x%04X:0x%04X (attempt %u)",
+                TETHER_LOGW(TAG, "APWR WKC=0 at 0x{:04X}:0x{:04X} (attempt {})",
                             adp, ado, attempt + 1);
             }
             continue;
@@ -184,8 +184,8 @@ WriteVerifyResult WriteVerifier::apwrVerify(uint16_t adp, uint16_t ado,
             if (!compareBuffers(write_data, read_buffer, len, mismatch_offset)) {
                 stats_.verify_failures++;
                 if (config_.log_failures) {
-                    TETHER_LOGW(TAG, "Verify mismatch at 0x%04X:0x%04X[%zu]: "
-                                "wrote 0x%02X, read 0x%02X",
+                    TETHER_LOGW(TAG, "Verify mismatch at 0x{:04X}:0x{:04X}[{}]: "
+                                "wrote 0x{:02X}, read 0x{:02X}",
                                 adp, ado, mismatch_offset,
                                 write_data[mismatch_offset],
                                 read_buffer[mismatch_offset]);
@@ -210,7 +210,7 @@ WriteVerifyResult WriteVerifier::apwrVerify(uint16_t adp, uint16_t ado,
         } else {
             // Read failed
             if (config_.log_failures) {
-                TETHER_LOGW(TAG, "Verify read failed at 0x%04X:0x%04X",
+                TETHER_LOGW(TAG, "Verify read failed at 0x{:04X}:0x{:04X}",
                             adp, ado);
             }
             continue;
@@ -270,7 +270,7 @@ WriteVerifyResult WriteVerifier::bwrVerify(uint16_t slave_to_verify,
     if (len > kMaxDataLen) {
         if (config_.log_failures) {
             TETHER_LOGE(TAG,
-                "Data too large for Tether internal BWR verify buffer: %u bytes (max=%u). "
+                "Data too large for Tether internal BWR verify buffer: {} bytes (max={}). "
                 "This is a Tether limit, not a slave limit. "
                 "Increase ECAT_WRITE_VERIFY_MAX_DATA_LEN in TetherConfig.hpp.",
                 len, kMaxDataLen);
@@ -295,7 +295,7 @@ WriteVerifyResult WriteVerifier::bwrVerify(uint16_t slave_to_verify,
                                           data, len, true);
         if (!ok) {
             if (config_.log_failures) {
-                TETHER_LOGW(TAG, "BWR send failed at ado=0x%04X (attempt %u)",
+                TETHER_LOGW(TAG, "BWR send failed at ado=0x{:04X} (attempt {})",
                             ado, attempt + 1);
             }
             continue;
@@ -305,7 +305,7 @@ WriteVerifyResult WriteVerifier::bwrVerify(uint16_t slave_to_verify,
         DatagramResponse resp = {};
         if (!transport_.waitForResponse(idx, timeout_ms, resp)) {
             if (config_.log_failures) {
-                TETHER_LOGW(TAG, "BWR timeout at ado=0x%04X (attempt %u)",
+                TETHER_LOGW(TAG, "BWR timeout at ado=0x{:04X} (attempt {})",
                             ado, attempt + 1);
             }
             continue;
@@ -314,7 +314,7 @@ WriteVerifyResult WriteVerifier::bwrVerify(uint16_t slave_to_verify,
         if (resp.wkc == 0) {
             stats_.write_failures++;
             if (config_.log_failures) {
-                TETHER_LOGW(TAG, "BWR WKC=0 at ado=0x%04X (attempt %u)",
+                TETHER_LOGW(TAG, "BWR WKC=0 at ado=0x{:04X} (attempt {})",
                             ado, attempt + 1);
             }
             continue;
@@ -342,8 +342,8 @@ WriteVerifyResult WriteVerifier::bwrVerify(uint16_t slave_to_verify,
             if (!compareBuffers(write_data, read_buffer, len, mismatch_offset)) {
                 stats_.verify_failures++;
                 if (config_.log_failures) {
-                    TETHER_LOGW(TAG, "BWR verify mismatch at slave 0x%04X "
-                                "ado=0x%04X[%zu]: wrote 0x%02X, read 0x%02X",
+                    TETHER_LOGW(TAG, "BWR verify mismatch at slave 0x{:04X} "
+                                "ado=0x{:04X}[{}]: wrote 0x{:02X}, read 0x{:02X}",
                                 slave_to_verify, ado, mismatch_offset,
                                 write_data[mismatch_offset],
                                 read_buffer[mismatch_offset]);
@@ -363,8 +363,8 @@ WriteVerifyResult WriteVerifier::bwrVerify(uint16_t slave_to_verify,
             return WriteVerifyResult::Success(write_wkc, attempt + 1);
         } else {
             if (config_.log_failures) {
-                TETHER_LOGW(TAG, "BWR verify read failed at slave 0x%04X "
-                            "ado=0x%04X", slave_to_verify, ado);
+                TETHER_LOGW(TAG, "BWR verify read failed at slave 0x{:04X} "
+                            "ado=0x{:04X}", slave_to_verify, ado);
             }
             continue;
         }

@@ -37,18 +37,6 @@ void Logger::log(LogLevel level, const char* tag, const char* format, ...) {
 }
 
 void Logger::logv(LogLevel level, const char* tag, const char* format, va_list args) {
-    LogHandler primaryHandler;
-    std::vector<LogHandler> handlers;
-    bool timestampEnabled;
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (level > level_) return;
-        primaryHandler = handler_;
-        timestampEnabled = timestampEnabled_;
-        handlers.reserve(handlers_.size());
-        for (const auto& [id, registered] : handlers_) handlers.push_back(registered);
-    }
-
     // Format the message into a string (handle arbitrarily long messages)
     va_list args_copy;
     va_copy(args_copy, args);
@@ -68,6 +56,24 @@ void Logger::logv(LogLevel level, const char* tag, const char* format, va_list a
         vsnprintf(&msg[0], msg.size() + 1, format, args_copy2);
         va_end(args_copy2);
     }
+
+    logFormatted(level, tag, msg);
+}
+
+void Logger::logFormatted(LogLevel level, const char* tag, std::string_view message) {
+    LogHandler primaryHandler;
+    std::vector<LogHandler> handlers;
+    bool timestampEnabled;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (level > level_) return;
+        primaryHandler = handler_;
+        timestampEnabled = timestampEnabled_;
+        handlers.reserve(handlers_.size());
+        for (const auto& [id, registered] : handlers_) handlers.push_back(registered);
+    }
+
+    std::string msg(message);
 
     // Split on '\n' and remove a trailing empty line if the message ends with a newline
     std::vector<std::string> lines;

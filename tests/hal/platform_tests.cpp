@@ -24,7 +24,7 @@ TEST(PlatformLogger, HandlerAndLevelFiltering) {
 
     logger.setLevel(LogLevel::Info);
     called = false;
-    TETHER_LOGI("TestTag", "hello %s", "world");
+    TETHER_LOGI("TestTag", "hello {}", "world");
     EXPECT_TRUE(called);
     EXPECT_EQ(cap.lvl, LogLevel::Info);
     EXPECT_EQ(cap.tag, "TestTag");
@@ -38,7 +38,7 @@ TEST(PlatformLogger, HandlerAndLevelFiltering) {
 
     // Error should still be delivered
     called = false;
-    TETHER_LOGE("ErrTag", "bad %d", 42);
+    TETHER_LOGE("ErrTag", "bad {}", 42);
     EXPECT_TRUE(called);
     EXPECT_EQ(cap.lvl, LogLevel::Error);
     EXPECT_EQ(cap.tag, "ErrTag");

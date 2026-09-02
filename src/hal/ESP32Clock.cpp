@@ -98,11 +98,11 @@ public:
 
         esp_err_t err = esp_timer_create(&timer_args, &m_timerHandle);
         if (err != ESP_OK) {
-            TETHER_LOGE(TAG, "Failed to create timer: %s", esp_err_to_name(err));
+            TETHER_LOGE(TAG, "Failed to create timer: {}", esp_err_to_name(err));
             return false;
         }
 
-        TETHER_LOGI(TAG, "Timer initialized: %lu Hz (%lu us period)", 
+        TETHER_LOGI(TAG, "Timer initialized: {} Hz ({} us period)", 
                  (unsigned long)frequencyHz, (unsigned long)m_periodUs);
         return true;
     }
@@ -136,7 +136,7 @@ public:
         // Capture task handle on first call
         if (m_taskHandle == nullptr) {
             m_taskHandle = xTaskGetCurrentTaskHandle();
-            TETHER_LOGI(TAG, "Task registered: %s", pcTaskGetName(m_taskHandle));
+            TETHER_LOGI(TAG, "Task registered: {}", pcTaskGetName(m_taskHandle));
         }
 
         // Wait for notification from timer callback

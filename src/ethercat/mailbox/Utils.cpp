@@ -25,23 +25,23 @@ void logStatuswordDiagnostics(uint16_t statusword,
     if (warning_now && !warning_active) {
         warning_active = true;
         warning_first_cycle = cycle;
-        TETHER_LOGW(tag, "[WARN] StatusWord Warning active (bit 7) at cycle %lu, StatusWord=0x%04X",
+        TETHER_LOGW(tag, "[WARN] StatusWord Warning active (bit 7) at cycle {}, StatusWord=0x{:04X}",
                  (unsigned long)cycle, statusword);
     } else if (!warning_now && warning_active) {
         warning_active = false;
-        TETHER_LOGI(tag, "[WARN] StatusWord Warning cleared after %lu cycles",
+        TETHER_LOGI(tag, "[WARN] StatusWord Warning cleared after {} cycles",
                  (unsigned long)(cycle - warning_first_cycle));
     }
 
     if (statusword & (1u << 13)) {
         if (cycle % 500 == 0) {
-            TETHER_LOGW(tag, "[ERR] Following error active (StatusWord bit 13), StatusWord=0x%04X", statusword);
+            TETHER_LOGW(tag, "[ERR] Following error active (StatusWord bit 13), StatusWord=0x{:04X}", statusword);
         }
     }
 
     if (statusword & (1u << 11)) {
         if (cycle % 1000 == 0) {
-            TETHER_LOGW(tag, "[ERR] Internal limit active (StatusWord bit 11), StatusWord=0x%04X", statusword);
+            TETHER_LOGW(tag, "[ERR] Internal limit active (StatusWord bit 11), StatusWord=0x{:04X}", statusword);
         }
     }
 }
@@ -67,10 +67,10 @@ void dumpHeaderAndStatus(Master& master,
             uint8_t  channel  = mbx_header[4];
             uint8_t  priority = mbx_header[5] >> 6;
             uint8_t  type     = mbx_header[5] & 0x0F;
-            TETHER_LOGI(tag, "[DEBUG] Mailbox WR (0x%04X) header: len=%u addr=0x%04X ch=%u prio=%u type=0x%X",
+            TETHER_LOGI(tag, "[DEBUG] Mailbox WR (0x{:04X}) header: len={} addr=0x{:04X} ch={} prio={} type=0x{:X}",
                      mbx_wr_addr, length, address, channel, priority, type);
         } else {
-            TETHER_LOGW(tag, "[DEBUG] Mailbox WR read FAILED (addr=0x%04X)", mbx_wr_addr);
+            TETHER_LOGW(tag, "[DEBUG] Mailbox WR read FAILED (addr=0x{:04X})", mbx_wr_addr);
         }
 
         if (master.readRegister(SlaveAddress(slave_idx), mbx_rd_addr, mbx_header, sizeof(mbx_header), 200)) {
@@ -79,13 +79,13 @@ void dumpHeaderAndStatus(Master& master,
             uint8_t  channel  = mbx_header[4];
             uint8_t  priority = mbx_header[5] >> 6;
             uint8_t  type     = mbx_header[5] & 0x0F;
-            TETHER_LOGI(tag, "[DEBUG] Mailbox RD (0x%04X) header: len=%u addr=0x%04X ch=%u prio=%u type=0x%X",
+            TETHER_LOGI(tag, "[DEBUG] Mailbox RD (0x{:04X}) header: len={} addr=0x{:04X} ch={} prio={} type=0x{:X}",
                      mbx_rd_addr, length, address, channel, priority, type);
         } else {
-            TETHER_LOGW(tag, "[DEBUG] Mailbox RD read FAILED (addr=0x%04X)", mbx_rd_addr);
+            TETHER_LOGW(tag, "[DEBUG] Mailbox RD read FAILED (addr=0x{:04X})", mbx_rd_addr);
         }
     } else {
-        TETHER_LOGW(tag, "SDO mailbox configuration unavailable for slave %u", slave_idx);
+        TETHER_LOGW(tag, "SDO mailbox configuration unavailable for slave {}", slave_idx);
     }
 }
 

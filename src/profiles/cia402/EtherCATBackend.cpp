@@ -66,7 +66,7 @@ bool EtherCATBackend::initialize() {
         return false;
     }
     
-    TETHER_LOGI(TAG, "Initializing EtherCAT backend for slave %lu", 
+    TETHER_LOGI(TAG, "Initializing EtherCAT backend for slave {}", 
              (unsigned long)m_config.slaveId);
     
     m_initialized = true;
@@ -479,7 +479,7 @@ void EtherCATBackend::checkStateChange() {
     State currentState = decodeState();
     
     if (currentState != m_lastState) {
-        TETHER_LOGD(TAG, "Slave %lu state: %d -> %d",
+        TETHER_LOGD(TAG, "Slave {} state: {} -> {}",
                 (unsigned long)m_config.slaveId,
                 static_cast<int>(m_lastState),
                 static_cast<int>(currentState));

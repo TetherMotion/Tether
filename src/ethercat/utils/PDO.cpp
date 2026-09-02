@@ -121,7 +121,7 @@ std::string pdoToString(bool is_tx,
 
         if (f.size == 1 || f.size == 2 || f.size == 4 || f.size == 8) {
             const int64_t sval = signExtend(raw, f.size);
-            appendf(out, "    %s (0x%04X:%u, off=%u, sz=%u): 0x%0*" PRIX64 " (%" PRId64 ")\n",
+            appendf(out, "    %s (0x%04X:%u, off=%u, sz=%u): 0x%0*" PRIX64 " ({})\n",
                     desc, f.index, static_cast<unsigned>(f.subindex),
                     static_cast<unsigned>(f.offset), static_cast<unsigned>(f.size),
                     width, raw, sval);
@@ -219,9 +219,9 @@ void printPDOMapping(CoE::CoEManager& coe,
 {
     std::vector<PDOMappingEntry> entries;
     if (readPDOMapping(coe, pdo_index, entries, timeout_ms)) {
-        TETHER_LOGI(tag, "%s", pdoMappingToString(is_tx, pdo_index, entries).c_str());
+        TETHER_LOGI(tag, "{}", pdoMappingToString(is_tx, pdo_index, entries).c_str());
     } else {
-        TETHER_LOGW(tag, "PDO 0x%04X mapping read FAILED", pdo_index);
+        TETHER_LOGW(tag, "PDO 0x{:04X} mapping read FAILED", pdo_index);
     }
 }
 

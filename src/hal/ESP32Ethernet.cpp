@@ -67,7 +67,7 @@ public:
         
         esp_err_t err = esp_eth_driver_install(&eth_config, &m_ethHandle);
         if (err != ESP_OK) {
-            TETHER_LOGE(TAG, "Failed to install Ethernet driver: %s", esp_err_to_name(err));
+            TETHER_LOGE(TAG, "Failed to install Ethernet driver: {}", esp_err_to_name(err));
             return Error::InternalError;
         }
 
@@ -75,13 +75,13 @@ public:
         err = esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, 
                                          &ESP32Ethernet::ethEventHandler, this);
         if (err != ESP_OK) {
-            TETHER_LOGW(TAG, "Failed to register ETH event handler: %s", esp_err_to_name(err));
+            TETHER_LOGW(TAG, "Failed to register ETH event handler: {}", esp_err_to_name(err));
         }
 
         // Set RX callback
         err = esp_eth_update_input_path(m_ethHandle, &ESP32Ethernet::rxCallback, this);
         if (err != ESP_OK) {
-            TETHER_LOGE(TAG, "Failed to set RX callback: %s", esp_err_to_name(err));
+            TETHER_LOGE(TAG, "Failed to set RX callback: {}", esp_err_to_name(err));
             esp_eth_driver_uninstall(m_ethHandle);
             return Error::InternalError;
         }
@@ -89,7 +89,7 @@ public:
         // Start Ethernet
         err = esp_eth_start(m_ethHandle);
         if (err != ESP_OK) {
-            TETHER_LOGE(TAG, "Failed to start Ethernet: %s", esp_err_to_name(err));
+            TETHER_LOGE(TAG, "Failed to start Ethernet: {}", esp_err_to_name(err));
             esp_eth_driver_uninstall(m_ethHandle);
             return Error::InternalError;
         }
@@ -102,7 +102,7 @@ public:
 
         // Get MAC address
         esp_eth_ioctl(m_ethHandle, ETH_CMD_G_MAC_ADDR, m_mac.bytes);
-        TETHER_LOGI(TAG, "MAC: %02x:%02x:%02x:%02x:%02x:%02x",
+        TETHER_LOGI(TAG, "MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
                  m_mac.bytes[0], m_mac.bytes[1], m_mac.bytes[2],
                  m_mac.bytes[3], m_mac.bytes[4], m_mac.bytes[5]);
 
@@ -259,7 +259,7 @@ public:
         
         esp_err_t err = esp_eth_ioctl(m_ethHandle, ETH_CMD_S_ALL_MULTICAST, &enable);
         if (err != ESP_OK) {
-            TETHER_LOGW(TAG, "ETH_CMD_S_ALL_MULTICAST failed: %s", esp_err_to_name(err));
+            TETHER_LOGW(TAG, "ETH_CMD_S_ALL_MULTICAST failed: {}", esp_err_to_name(err));
             return Error::NotSupported;
         }
         return Error::OK;

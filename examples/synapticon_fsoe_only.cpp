@@ -87,7 +87,7 @@ void hexDump(const char* tag, const char* label, const uint8_t* data, size_t len
         for (size_t j = i; j < i + kBytesPerLine && j < len; j++) {
             pos += snprintf(hex + pos, sizeof(hex) - pos, "%02X ", data[j]);
         }
-        TETHER_LOGI(tag, "  %s [%3zu/%3zu]: %s", label, i, len, hex);
+        TETHER_LOGI(tag, "  {} [{:3}/{:3}]: {}", label, i, len, hex);
     }
 }
 
@@ -114,20 +114,20 @@ public:
         const auto& status = conn.getStatus();
         const auto& stats = conn.getStats();
 
-        TETHER_LOGI(TAG, "=== FSoE Diagnostics (slave %u) ===", slave_index_);
+        TETHER_LOGI(TAG, "=== FSoE Diagnostics (slave {}) ===", slave_index_);
         TETHER_LOGI(TAG,
-            "  state: %s (0x%02X)  error: 0x%04X (%s)  watchdog: %u",
+            "  state: {} (0x{:02X})  error: 0x{:04X} ({})  watchdog: {}",
             FSoE::fsoeStateName(status.state), status.state,
             status.error_code, FSoE::fsoeErrorName(status.error_code),
             status.watchdog_counter);
         if (status.hasError()) {
             TETHER_LOGW(TAG,
-                "  ERROR: 0x%04X (%s)",
+                "  ERROR: 0x{:04X} ({})",
                 status.error_code, FSoE::fsoeErrorName(status.error_code));
         }
         TETHER_LOGI(TAG,
-            "  frames: tx=%u rx=%u | crc_err=%u seq_err=%u watchdog_evt=%u "
-            "reset_evt=%u timeout_evt=%u",
+            "  frames: tx={} rx={} | crc_err={} seq_err={} watchdog_evt={} "
+            "reset_evt={} timeout_evt={}",
             stats.frames_sent, stats.frames_received,
             stats.crc_errors, stats.sequence_errors, stats.watchdog_events,
             stats.reset_events, stats.timeout_events);
@@ -135,8 +135,8 @@ public:
         if (fsoe_main_.hasStatus()) {
             const auto& sm = fsoe_main_.status();
             TETHER_LOGI(TAG,
-                "  safe-motion: motion_allowed=%d sto=%d ss1=%d ss2=%d "
-                "sos=%d error=%d",
+                "  safe-motion: motion_allowed={} sto={} ss1={} ss2={} "
+                "sos={} error={}",
                 sm.motionAllowed() ? 1 : 0,
                 sm.sto_active ? 1 : 0,
                 sm.ss1_active ? 1 : 0,
@@ -193,7 +193,7 @@ public:
 
         auto* drive = master.driveBySlaveIndex(slave_index_);
         if (drive == nullptr) {
-            TETHER_LOGW(TAG, "Drive %u not found — skipping FSoE exchange",
+            TETHER_LOGW(TAG, "Drive {} not found — skipping FSoE exchange",
                         slave_index_);
             return true;  // don't stop the process
         }
@@ -217,13 +217,13 @@ public:
             for (size_t b = 0; b < sizeof(FSoERxPDO) && pos + 3 < sizeof(hex); b++) {
                 pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", rx_bytes[b]));
             }
-            TETHER_LOGI("fsoe-wire", "[RxPDO] cycle %u: %s", cycle_count_, hex);
+            TETHER_LOGI("fsoe-wire", "[RxPDO] cycle {}: {}", cycle_count_, hex);
 
             pos = 0;
             for (size_t b = 0; b < sizeof(FSoETxPDO) && pos + 3 < sizeof(hex); b++) {
                 pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", tx_bytes[b]));
             }
-            TETHER_LOGI("fsoe-wire", "[TxPDO] cycle %u: %s", cycle_count_, hex);
+            TETHER_LOGI("fsoe-wire", "[TxPDO] cycle {}: {}", cycle_count_, hex);
             cycle_count_++;
         }
 
@@ -258,14 +258,14 @@ public:
 
         if (debug_raw_ && (tx_changed || rx_changed)) {
             const auto status = main_instance_.rawConnection().getStatus();
-            TETHER_LOGI(TAG, "[fsoe-raw] t=%lu ms  state=%s(0x%02X)  ok=%d",
+            TETHER_LOGI(TAG, "[fsoe-raw] t={} ms  state={}(0x{:02X})  ok={}",
                         static_cast<unsigned long>(elapsed_time_ms_),
                         FSoE::fsoeStateName(status.state), status.state,
                         ok ? 1 : 0);
             if (rx_changed) {
                 hexDump(TAG, "TX->RxPDO 0x1700",
                         reinterpret_cast<const uint8_t*>(rx), sizeof(FSoERxPDO));
-                TETHER_LOGI(TAG, "  TX cmd=%s conn_id=0x%04X crc0=0x%04X crc1=0x%04X",
+                TETHER_LOGI(TAG, "  TX cmd={} conn_id=0x{:04X} crc0=0x{:04X} crc1=0x{:04X}",
                             FSoE::fsoeCommandName(rx->fsoe_command),
                             rx->fsoe_connection_id,
                             rx->fsoe_crc_0, rx->fsoe_crc_1);
@@ -273,7 +273,7 @@ public:
             if (tx_changed) {
                 hexDump(TAG, "RX<-TxPDO 0x1B00",
                         reinterpret_cast<const uint8_t*>(tx), sizeof(FSoETxPDO));
-                TETHER_LOGI(TAG, "  RX cmd=%s conn_id=0x%04X crc0=0x%04X",
+                TETHER_LOGI(TAG, "  RX cmd={} conn_id=0x{:04X} crc0=0x{:04X}",
                             FSoE::fsoeCommandName(tx->fsoe_command),
                             tx->fsoe_connection_id,
                             tx->fsoe_crc_0);
@@ -281,7 +281,7 @@ public:
         }
 
         if (!ok) {
-            TETHER_LOGW(TAG, "FSoE exchange failed at t=%lu ms (state=%s) -- continuing",
+            TETHER_LOGW(TAG, "FSoE exchange failed at t={} ms (state={}) -- continuing",
                         static_cast<unsigned long>(elapsed_time_ms_),
                         FSoE::fsoeStateName(main_instance_.rawConnection().getState()));
         }
@@ -384,8 +384,8 @@ int main(int argc, char** argv) {
     Tether::Platform::ensureRealtimeKernelOrExit();
 
     TETHER_LOGI(TAG,
-        "synapticon_fsoe_only — interface=%s slave=%u duration=%.1f "
-        "dc_sync=%s conn_id=0x%04X watchdog=%u ms debug='%s'",
+        "synapticon_fsoe_only — interface={} slave={} duration={:.1f} "
+        "dc_sync={} conn_id=0x{:04X} watchdog={} ms debug='{}'",
         args.interface.c_str(), slave_idx, args.duration,
         args.enable_dc_sync ? "on" : "off",
         args.connection_id, args.watchdog_ms,
@@ -405,7 +405,7 @@ int main(int argc, char** argv) {
         }
         if (!master.waitForDriveCount(
                 static_cast<uint16_t>(slave_idx + 1), 2000)) {
-            TETHER_LOGE(TAG, "Timed out waiting for slave %u", slave_idx);
+            TETHER_LOGE(TAG, "Timed out waiting for slave {}", slave_idx);
             Tether::Examples::stopHostMasterSession(master, session);
             return 2;
         }
@@ -416,25 +416,25 @@ int main(int argc, char** argv) {
             {.address = kMailboxWriteAddr, .length = kMailboxWriteSize},
             kMailboxProtocols);
         if (mb_err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGE(TAG, "Failed to configure mailbox: %s",
+            TETHER_LOGE(TAG, "Failed to configure mailbox: {}",
                         EtherCAT::slaveErrorToString(mb_err));
             Tether::Examples::stopHostMasterSession(master, session);
             return 2;
         }
         TETHER_LOGI(TAG,
-            "Mailbox configured: SM0(M->S)=0x%04X/%u SM1(S->M)=0x%04X/%u proto=0x%04X",
+            "Mailbox configured: SM0(M->S)=0x{:04X}/{} SM1(S->M)=0x{:04X}/{} proto=0x{:04X}",
             kMailboxWriteAddr, kMailboxWriteSize,
             kMailboxReadAddr, kMailboxReadSize, kMailboxProtocols);
 
         // Transition to PRE_OP before any SDO exchange
         const auto pre_err = slave.transitionToPreOp();
         if (pre_err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGE(TAG, "Failed to transition to PRE_OP: %s",
+            TETHER_LOGE(TAG, "Failed to transition to PRE_OP: {}",
                         EtherCAT::slaveErrorToString(pre_err));
             Tether::Examples::stopHostMasterSession(master, session);
             return 2;
         }
-        TETHER_LOGI(TAG, "Slave %u transitioned to PRE_OP", slave_idx);
+        TETHER_LOGI(TAG, "Slave {} transitioned to PRE_OP", slave_idx);
     }
 
     // --- Pre-activation safety check: read 0x2611 Safety Module input diagnostics ---
@@ -448,13 +448,13 @@ int main(int argc, char** argv) {
         const auto safety = EtherCAT::Drives::Synapticon::readSafetyModuleState(slave);
 
         TETHER_LOGI(TAG,
-            "Safety module diagnostics (0x2611): input1=%u input2=%u -> %s",
+            "Safety module diagnostics (0x2611): input1={} input2={} -> {}",
             static_cast<unsigned>(safety.input1),
             static_cast<unsigned>(safety.input2),
             safety.stateSummary());
 
         TETHER_LOGI(TAG,
-            "FSoE active indicator (0x2620:2 \"Safe fieldbus\"): raw=%u -> %s",
+            "FSoE active indicator (0x2620:2 \"Safe fieldbus\"): raw={} -> {}",
             static_cast<unsigned>(safety.safe_fieldbus),
             safety.fsoeStateSummary());
 
@@ -473,7 +473,7 @@ int main(int argc, char** argv) {
         // if (safety.isInSafeState()) {
         //     TETHER_LOGE(TAG,
         //         "Drive is in SAFE STATE (safety function active, motion "
-        //         "inhibited) — FSoE is %s (0x2620:2=%u) — refusing to "
+        //         "inhibited) — FSoE is {} (0x2620:2={}) — refusing to "
         //         "activate drive, triggering shutdown",
         //         safety.fsoeStateSummary(),
         //         static_cast<unsigned>(safety.safe_fieldbus));
@@ -497,15 +497,15 @@ int main(int argc, char** argv) {
                 slave, drive_safety_address);
         if (addr_err == EtherCAT::SlaveError::Ok) {
             TETHER_LOGI(TAG,
-                "FSoE safety address (0xF980:1): 0x%04X — using as "
-                "connection ID (overrides --connection-id=0x%04X)",
+                "FSoE safety address (0xF980:1): 0x{:04X} — using as "
+                "connection ID (overrides --connection-id=0x{:04X})",
                 drive_safety_address,
                 args.connection_id);
             args.connection_id = drive_safety_address;
         } else {
             TETHER_LOGW(TAG,
                 "Failed to read FSoE safety address (0xF980:1) via SDO "
-                "(err=%u) — falling back to --connection-id=0x%04X",
+                "(err={}) — falling back to --connection-id=0x{:04X}",
                 static_cast<unsigned>(addr_err),
                 args.connection_id);
         }
@@ -542,7 +542,7 @@ int main(int argc, char** argv) {
 
         TETHER_LOGI(TAG,
             "Transitioning to OP with FSoE-only PDO mapping: "
-            "SM2=RxPDO 0x1700 (%u bytes), SM3=TxPDO 0x1B00 (%u bytes)",
+            "SM2=RxPDO 0x1700 ({} bytes), SM3=TxPDO 0x1B00 ({} bytes)",
             EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.size,
             EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.size);
 
@@ -551,7 +551,7 @@ int main(int argc, char** argv) {
             Tether::Examples::stopHostMasterSession(master, session);
             return 4;
         }
-        TETHER_LOGI(TAG, "Slave %u transitioned to OP with FSoE-only PDOs", slave_idx);
+        TETHER_LOGI(TAG, "Slave {} transitioned to OP with FSoE-only PDOs", slave_idx);
     }
 
     // --- Set up FSoE safe-motion (master side only — no emulator) ---
@@ -594,18 +594,18 @@ int main(int argc, char** argv) {
         fsoe_main->rawConnection().setStateChangeCallback(
             [](uint8_t old_s, uint8_t new_s) {
                 TETHER_LOGI(TAG,
-                    "[FSoE] state: %s -> %s",
+                    "[FSoE] state: {} -> {}",
                     FSoE::fsoeStateName(old_s), FSoE::fsoeStateName(new_s));
             });
         fsoe_main->rawConnection().setErrorCallback(
             [](uint16_t code, const FSoE::FSoEErrorDetail& detail) {
                 if (detail.message[0] != '\0') {
                     TETHER_LOGE(TAG,
-                        "[FSoE] error: 0x%04X (%s): %s",
+                        "[FSoE] error: 0x{:04X} ({}): {}",
                         code, FSoE::fsoeErrorName(code), detail.message);
                 } else {
                     TETHER_LOGE(TAG,
-                        "[FSoE] error: 0x%04X (%s)",
+                        "[FSoE] error: 0x{:04X} ({})",
                         code, FSoE::fsoeErrorName(code));
                 }
             });
@@ -618,12 +618,12 @@ int main(int argc, char** argv) {
         if (debug_fsoe || debug_fsoe_raw) {
             fsoe_main->rawConnection().setTraceCallback(
                 [](const char* message) {
-                    TETHER_LOGI(TAG, "[fsoe] %s", message);
+                    TETHER_LOGI(TAG, "[fsoe] {}", message);
                 });
         }
 
         TETHER_LOGI(TAG,
-            "FSoE initialized: conn_id=0x%04X watchdog=%u ms debug=%s%s%s",
+            "FSoE initialized: conn_id=0x{:04X} watchdog={} ms debug={}{}{}",
             args.connection_id, args.watchdog_ms,
             debug_fsoe ? "fsoe" : "off",
             debug_fsoe_frame ? "+frame" : "",
@@ -665,7 +665,7 @@ int main(int argc, char** argv) {
 
     TETHER_LOGI(TAG,
         "FSoE-only mode active: exchanging safety PDOs (0x1700/0x1B00) "
-        "for %.1f s", args.duration);
+        "for {:.1f} s", args.duration);
 
     Tether::Platform::Clock::instance().delayMilliseconds(
         static_cast<uint32_t>(args.duration * 1000.0));
@@ -677,7 +677,7 @@ int main(int argc, char** argv) {
     // Final FSoE diagnostics dump
     if (fsoe_main) {
         TETHER_LOGI(TAG, "=== Final FSoE Diagnostics ===");
-        TETHER_LOGI(TAG, "%s", fsoe_main->rawConnection().getDiagnostics().c_str());
+        TETHER_LOGI(TAG, "{}", fsoe_main->rawConnection().getDiagnostics().c_str());
     }
 
     // Print final FSoE PDO buffer contents
@@ -688,8 +688,8 @@ int main(int argc, char** argv) {
             const auto* rx = drive->rxPDO<FSoERxPDO>();
             if (tx != nullptr) {
                 TETHER_LOGI(TAG,
-                    "Final TxPDO 0x1B00: cmd=0x%02X sto_state=%d sos_state=%d "
-                    "error_state=%d safe_pos=%d safe_vel=%d conn_id=0x%04X",
+                    "Final TxPDO 0x1B00: cmd=0x{:02X} sto_state={} sos_state={} "
+                    "error_state={} safe_pos={} safe_vel={} conn_id=0x{:04X}",
                     tx->fsoe_command,
                     (tx->safety_state_flags & FSoETxPDO::kSTOState) ? 1 : 0,
                     (tx->safety_state_flags & FSoETxPDO::kSOSState) ? 1 : 0,
@@ -700,8 +700,8 @@ int main(int argc, char** argv) {
             }
             if (rx != nullptr) {
                 TETHER_LOGI(TAG,
-                    "Final RxPDO 0x1700: cmd=0x%02X sto=%d ss1=%d ss2=%d "
-                    "sos=%d conn_id=0x%04X",
+                    "Final RxPDO 0x1700: cmd=0x{:02X} sto={} ss1={} ss2={} "
+                    "sos={} conn_id=0x{:04X}",
                     rx->fsoe_command,
                     (rx->safety_flags & FSoERxPDO::kSTO) ? 1 : 0,
                     (rx->safety_flags & FSoERxPDO::kSS1) ? 1 : 0,

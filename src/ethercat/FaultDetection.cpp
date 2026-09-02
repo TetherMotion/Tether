@@ -232,7 +232,7 @@ bool FaultDetector::init(uint16_t slave_count) {
     }
 
     if (slave_count > kMaxSlaves) {
-        TETHER_LOGW("fault", "Slave count %u exceeds Tether fault detection max %zu — clamping. "
+        TETHER_LOGW("fault", "Slave count {} exceeds Tether fault detection max {} — clamping. "
                      "This is a Tether limit, not a slave limit. "
                      "Increase ECAT_FAULT_DETECTION_MAX_SLAVES in TetherConfig.hpp.",
                      static_cast<unsigned>(slave_count), kMaxSlaves);
@@ -249,7 +249,7 @@ bool FaultDetector::init(uint16_t slave_count) {
     }
 
     initialized_ = true;
-    TETHER_LOGI(TAG, "Fault detection initialized for %u slaves", slave_count_);
+    TETHER_LOGI(TAG, "Fault detection initialized for {} slaves", slave_count_);
     return true;
 }
 
@@ -368,11 +368,11 @@ bool FaultDetector::clear(uint16_t slave_index) {
 
     if (!state.has_fault) {
         slave_faults_[slave_index].clear();
-        TETHER_LOGI(TAG, "%s: Fault cleared", slavePrefix(slave_index).c_str());
+        TETHER_LOGI(TAG, "{}: Fault cleared", slavePrefix(slave_index).c_str());
         return true;
     }
 
-    TETHER_LOGW(TAG, "%s: Fault still active after clear attempt", slavePrefix(slave_index).c_str());
+    TETHER_LOGW(TAG, "{}: Fault still active after clear attempt", slavePrefix(slave_index).c_str());
     return false;
 }
 
@@ -382,7 +382,7 @@ void FaultDetector::setCallback(FaultCallback callback) {
 
 void FaultDetector::diagnose(uint16_t slave_index) const {
     if (!initialized_ || slave_index >= slave_count_) {
-        TETHER_LOGE(TAG, "Invalid slave index %u", slave_index);
+        TETHER_LOGE(TAG, "Invalid slave index {}", slave_index);
         return;
     }
 
@@ -433,11 +433,11 @@ void FaultDetector::diagnose(uint16_t slave_index) const {
     }
 
     if (state.has_fault) {
-        TETHER_LOGE(TAG, "%s", buf);
+        TETHER_LOGE(TAG, "{}", buf);
     } else if (has_stats) {
-        TETHER_LOGW(TAG, "%s", buf);
+        TETHER_LOGW(TAG, "{}", buf);
     } else {
-        TETHER_LOGI(TAG, "%s", buf);
+        TETHER_LOGI(TAG, "{}", buf);
     }
 
     // Check for specific error types and provide guidance
@@ -448,7 +448,7 @@ void FaultDetector::diagnose(uint16_t slave_index) const {
 }
 
 void FaultDetector::diagnoseNoSync(uint16_t slave_index) const {
-    TETHER_LOGE(TAG, "\n>>> NO SYNC ERROR (Err74.1) DIAGNOSIS <<<\n\nThis error indicates the slave's DC synchronization is failing.\nCommon causes:\n  1. SYNC0 start time is in the past\n  2. DC cycle time mismatch\n  3. Master not sending ARMW/FRMW frames\n  4. Propagation delay not properly compensated\n  5. PDO data not being exchanged at DC rate\n\nRecommended actions:\n  - Call dc_read_sync_config(%u) to check DC state\n  - Verify SYNC0 start time is in the future\n  - Ensure PDO exchange is enabled before SAFE_OP\n  - Check DC cycle time matches slave expectations",
+    TETHER_LOGE(TAG, "\n>>> NO SYNC ERROR (Err74.1) DIAGNOSIS <<<\n\nThis error indicates the slave's DC synchronization is failing.\nCommon causes:\n  1. SYNC0 start time is in the past\n  2. DC cycle time mismatch\n  3. Master not sending ARMW/FRMW frames\n  4. Propagation delay not properly compensated\n  5. PDO data not being exchanged at DC rate\n\nRecommended actions:\n  - Call dc_read_sync_config({}) to check DC state\n  - Verify SYNC0 start time is in the future\n  - Ensure PDO exchange is enabled before SAFE_OP\n  - Check DC cycle time matches slave expectations",
                slave_index);
 } 
 

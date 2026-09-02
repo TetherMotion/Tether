@@ -77,12 +77,12 @@ static std::vector<DiscoveredModule> scanSlots(EtherCAT::Master& master,
 
             const RP20Mod::ModuleDescriptor* desc = RP20Mod::findByIdent(module_id);
             if (!desc) {
-                TETHER_LOGW(TAG, "%s slot %u: unknown module ID 0x%02X, skipping",
+                TETHER_LOGW(TAG, "{} slot {}: unknown module ID 0x{:02X}, skipping",
                             master.slaveLogPrefix(s).c_str(), slot, module_id);
                 continue;
             }
 
-            TETHER_LOGI(TAG, "%s slot %u: found %s (%s, ident=0x%02X)",
+            TETHER_LOGI(TAG, "{} slot {}: found {} ({}, ident=0x{:02X})",
                         master.slaveLogPrefix(s).c_str(), slot, desc->name, desc->module_class, module_id);
 
             DiscoveredModule mod;
@@ -190,16 +190,16 @@ int main(int argc, char** argv) {
     if (use_esi) {
         esi.emplace(esi_xml);
         if (esi->empty()) {
-            TETHER_LOGE(TAG, "Failed to parse ESI XML '%s': %s",
+            TETHER_LOGE(TAG, "Failed to parse ESI XML '{}': {}",
                         esi_xml.c_str(), esi->errorMessage().c_str());
             return 1;
         }
-        TETHER_LOGI(TAG, "Loaded ESI XML '%s' (%zu device(s))",
+        TETHER_LOGI(TAG, "Loaded ESI XML '{}' ({} device(s))",
                     esi_xml.c_str(), esi->devices().size());
     }
 #endif
 
-    TETHER_LOGI(TAG, "kinco_rp20_list_modules — interface: %s", iface.c_str());
+    TETHER_LOGI(TAG, "kinco_rp20_list_modules — interface: {}", iface.c_str());
     Tether::Examples::logVlanConfig(vlan, TAG);
     Tether::Examples::logMailboxConfig(mbSize, mbAddr, TAG);
 
@@ -238,14 +238,14 @@ int main(int argc, char** argv) {
     }
 
     uint16_t slave_count = master.getDiscoveredSlaveCount();
-    TETHER_LOGI(TAG, "Discovered %u slave(s)", slave_count);
+    TETHER_LOGI(TAG, "Discovered {} slave(s)", slave_count);
     master.logDiscoveredSlavesSummary(TAG);
 
     // ---- Per-slave: configure mailbox, transition to PRE-OP ----
     for (uint16_t s = 0; s < slave_count; ++s) {
         auto& sl = master.slave(s);
 
-        TETHER_LOGI(TAG, "%master.slaveLogPrefix(s).c_str(): configuring mailbox...", s);
+        TETHER_LOGI(TAG, "{}: configuring mailbox...", s);
         EtherCAT::SlaveError mb_err;
 #if TETHER_HAVE_ESI
         if (use_esi) {
@@ -259,10 +259,10 @@ int main(int argc, char** argv) {
                 0x0004);
         }
         if (mb_err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGW(TAG, "%master.slaveLogPrefix(s).c_str(): explicit mailbox config failed (%s), trying SII auto-config",
+            TETHER_LOGW(TAG, "{}: explicit mailbox config failed ({}), trying SII auto-config",
                         s, EtherCAT::slaveErrorToString(mb_err));
             if (!master.autoConfigureMailbox(s, Tether::Platform::LogLevel::Info)) {
-                TETHER_LOGE(TAG, "%master.slaveLogPrefix(s).c_str(): autoConfigureMailbox also failed", s);
+                TETHER_LOGE(TAG, "{}: autoConfigureMailbox also failed", s);
                 master.stop();
                 Tether::Examples::shutdownHostEthernet(session);
                 return 7;
@@ -272,13 +272,13 @@ int main(int argc, char** argv) {
 
         auto pre_err = sl.transitionToPreOp();
         if (pre_err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGE(TAG, "%master.slaveLogPrefix(s).c_str(): PRE-OP transition failed: %s",
+            TETHER_LOGE(TAG, "{}: PRE-OP transition failed: {}",
                         s, EtherCAT::slaveErrorToString(pre_err));
             master.stop();
             Tether::Examples::shutdownHostEthernet(session);
             return 8;
         }
-        TETHER_LOGI(TAG, "%master.slaveLogPrefix(s).c_str(): in PRE-OP", s);
+        TETHER_LOGI(TAG, "{}: in PRE-OP", s);
     }
 
     // ---- Delay for slaves to settle ----
@@ -298,7 +298,7 @@ int main(int argc, char** argv) {
         return 6;
     }
 
-    TETHER_LOGI(TAG, "Found %zu RP20 module(s)", modules.size());
+    TETHER_LOGI(TAG, "Found {} RP20 module(s)", modules.size());
 
     // ---- Print the list of discovered modules ----
     printModuleList(modules);

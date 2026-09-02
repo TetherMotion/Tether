@@ -88,9 +88,8 @@ public:
     void log(DebugFlag flag, std::string_view message) {
         if (!isEnabled(flag)) return;
         // Forward to the platform Logger.
-        Tether::Platform::Logger::instance().log(
-            Tether::Platform::LogLevel::Debug, "klipper", "%.*s",
-            static_cast<int>(message.size()), message.data());
+        Tether::Platform::Logger::instance().logFormatted(
+            Tether::Platform::LogLevel::Debug, "klipper", message);
         // Also deliver to legacy callback if set.
         if (logCb_) logCb_(message);
     }

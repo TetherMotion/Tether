@@ -318,7 +318,7 @@ inline bool readU8(::EtherCAT::Slave& slave, uint16_t idx, uint8_t sub,
                    uint8_t& out, const char* tag = "SafetyDiag") {
     auto err = slave.sdoReadU8(idx, sub, out);
     if (err != ::EtherCAT::SlaveError::Ok) {
-        TETHER_LOGW(tag, "  SDO read 0x%04X:%u FAILED (%s)",
+        TETHER_LOGW(tag, "  SDO read 0x{:04X}:{} FAILED ({})",
                     idx, sub, ::EtherCAT::slaveErrorToString(err));
         return false;
     }
@@ -329,7 +329,7 @@ inline bool readU16(::EtherCAT::Slave& slave, uint16_t idx, uint8_t sub,
                     uint16_t& out, const char* tag = "SafetyDiag") {
     auto err = slave.sdoReadU16(idx, sub, out);
     if (err != ::EtherCAT::SlaveError::Ok) {
-        TETHER_LOGW(tag, "  SDO read 0x%04X:%u FAILED (%s)",
+        TETHER_LOGW(tag, "  SDO read 0x{:04X}:{} FAILED ({})",
                     idx, sub, ::EtherCAT::slaveErrorToString(err));
         return false;
     }
@@ -340,7 +340,7 @@ inline bool readU32(::EtherCAT::Slave& slave, uint16_t idx, uint8_t sub,
                     uint32_t& out, const char* tag = "SafetyDiag") {
     auto err = slave.sdoReadU32(idx, sub, out);
     if (err != ::EtherCAT::SlaveError::Ok) {
-        TETHER_LOGW(tag, "  SDO read 0x%04X:%u FAILED (%s)",
+        TETHER_LOGW(tag, "  SDO read 0x{:04X}:{} FAILED ({})",
                     idx, sub, ::EtherCAT::slaveErrorToString(err));
         return false;
     }
@@ -361,13 +361,13 @@ inline bool readErrorReport(::EtherCAT::Slave& slave, char* out_buf,
     auto err = slave.sdoRead(kErrorReportIndex, kErrorReportDescSub,
                              raw, raw_len);
     if (err != ::EtherCAT::SlaveError::Ok) {
-        TETHER_LOGW(tag, "  SDO read 0x203F:1 (Error report) FAILED (%s)",
+        TETHER_LOGW(tag, "  SDO read 0x203F:1 (Error report) FAILED ({})",
                     ::EtherCAT::slaveErrorToString(err));
         return false;
     }
 
     // Log raw hex for debugging
-    TETHER_LOGI(tag, "  0x203F:1 raw bytes (len=%zu): %02X %02X %02X %02X %02X %02X %02X %02X",
+    TETHER_LOGI(tag, "  0x203F:1 raw bytes (len={}): {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}",
                 raw_len,
                 raw_len > 0 ? raw[0] : 0, raw_len > 1 ? raw[1] : 0,
                 raw_len > 2 ? raw[2] : 0, raw_len > 3 ? raw[3] : 0,
@@ -470,9 +470,9 @@ inline SafetyDiagnosticReport runFullSafetyDiagnostics(
         rpt.input1 = v1;
         rpt.input2 = v2;
         if (rpt.inputs_ok) {
-            TETHER_LOGI(TAG, "  Input 1 = %u (%s)", v1,
+            TETHER_LOGI(TAG, "  Input 1 = {} ({})", v1,
                         v1 ? "NOT safe state" : "SAFE STATE");
-            TETHER_LOGI(TAG, "  Input 2 = %u (%s)", v2,
+            TETHER_LOGI(TAG, "  Input 2 = {} ({})", v2,
                         v2 ? "NOT safe state" : "SAFE STATE");
             if (rpt.isInSafeState()) {
                 TETHER_LOGW(TAG, "  >> Drive is in SAFE STATE — motion inhibited!");
@@ -497,11 +497,11 @@ inline SafetyDiagnosticReport runFullSafetyDiagnostics(
         rpt.safe_fieldbus = fieldbus;
         rpt.safe_address = addr;
         if (ok1) {
-            TETHER_LOGI(TAG, "  0x2620:2 Safe fieldbus = 0x%02X (%s)",
+            TETHER_LOGI(TAG, "  0x2620:2 Safe fieldbus = 0x{:02X} ({})",
                         fieldbus, fieldbus ? "FSoE ACTIVE" : "FSoE INACTIVE");
         }
         if (ok2) {
-            TETHER_LOGI(TAG, "  0x2620:3 Safe address = 0x%04X", addr);
+            TETHER_LOGI(TAG, "  0x2620:3 Safe address = 0x{:04X}", addr);
         }
         if (rpt.general_safety_ok && !rpt.fsoeActive()) {
             TETHER_LOGW(TAG, "  >> FSoE is NOT active on the drive!");
@@ -525,8 +525,8 @@ inline SafetyDiagnosticReport runFullSafetyDiagnostics(
             char dec1[80], dec2[80];
             decodeSafetyStatusByte1(b1, dec1, sizeof(dec1));
             decodeSafetyStatusByte2(b2, dec2, sizeof(dec2));
-            TETHER_LOGI(TAG, "  0x6621:1 Status byte 1 = 0x%02X  [%s]", b1, dec1);
-            TETHER_LOGI(TAG, "  0x6621:2 Status byte 2 = 0x%02X  [%s]", b2, dec2);
+            TETHER_LOGI(TAG, "  0x6621:1 Status byte 1 = 0x{:02X}  [{}]", b1, dec1);
+            TETHER_LOGI(TAG, "  0x6621:2 Status byte 2 = 0x{:02X}  [{}]", b2, dec2);
             // Highlight active safety functions
             if (b1 & 0x01) TETHER_LOGW(TAG, "  >> STO (Safe Torque Off) is ACTIVE");
             if (b1 & 0x02) TETHER_LOGI(TAG, "  >> SS1 (Safe Stop 1) is active");
@@ -542,17 +542,17 @@ inline SafetyDiagnosticReport runFullSafetyDiagnostics(
         rpt.error_report_ok = detail::readErrorReport(
             slave, rpt.error_report, sizeof(rpt.error_report), TAG);
         if (rpt.error_report_ok) {
-            TETHER_LOGI(TAG, "  0x203F:1 Error report = '%s'",
+            TETHER_LOGI(TAG, "  0x203F:1 Error report = '{}'",
                         rpt.error_report);
             const char* desc = knownErrorReport(rpt.error_report);
             if (desc) {
                 if (rpt.hasFault()) {
-                    TETHER_LOGE(TAG, "  >> FAULT: %s", desc);
+                    TETHER_LOGE(TAG, "  >> FAULT: {}", desc);
                 } else {
-                    TETHER_LOGI(TAG, "  >> %s", desc);
+                    TETHER_LOGI(TAG, "  >> {}", desc);
                 }
             } else if (rpt.hasFault()) {
-                TETHER_LOGE(TAG, "  >> UNKNOWN FAULT CODE: '%s'", rpt.error_report);
+                TETHER_LOGE(TAG, "  >> UNKNOWN FAULT CODE: '{}'", rpt.error_report);
                 TETHER_LOGE(TAG, "     Check Synapticon documentation for this error code.");
             }
         } else {
@@ -576,11 +576,11 @@ inline SafetyDiagnosticReport runFullSafetyDiagnostics(
             if (err_code == 0) {
                 TETHER_LOGI(TAG, "  0x603F Error code = 0x0000 (no error)");
             } else {
-                TETHER_LOGE(TAG, "  0x603F Error code = 0x%04X (drive fault!)", err_code);
+                TETHER_LOGE(TAG, "  0x603F Error code = 0x{:04X} (drive fault!)", err_code);
             }
         }
         if (ok2) {
-            TETHER_LOGI(TAG, "  0x6041 Statusword = 0x%04X (%s)",
+            TETHER_LOGI(TAG, "  0x6041 Statusword = 0x{:04X} ({})",
                         statusword, cia402StateName(statusword));
         }
     }
@@ -604,11 +604,11 @@ inline SafetyDiagnosticReport runFullSafetyDiagnostics(
         rpt.master_crc0 = crc0;
         rpt.master_crc1 = crc1;
         if (rpt.master_frame_ok) {
-            TETHER_LOGI(TAG, "  0x6770:1 Command    = 0x%02X (%s)",
+            TETHER_LOGI(TAG, "  0x6770:1 Command    = 0x{:02X} ({})",
                         cmd, fsoeCommandName(cmd));
-            TETHER_LOGI(TAG, "  0x6770:2 ConnID     = 0x%04X", conn_id);
-            TETHER_LOGI(TAG, "  0x6770:3 CRC_0      = 0x%04X", crc0);
-            TETHER_LOGI(TAG, "  0x6770:4 CRC_1      = 0x%04X", crc1);
+            TETHER_LOGI(TAG, "  0x6770:2 ConnID     = 0x{:04X}", conn_id);
+            TETHER_LOGI(TAG, "  0x6770:3 CRC_0      = 0x{:04X}", crc0);
+            TETHER_LOGI(TAG, "  0x6770:4 CRC_1      = 0x{:04X}", crc1);
             if (cmd == 0) {
                 TETHER_LOGW(TAG, "  >> Master command is 0x00 — slave is NOT receiving FSoE frames!");
                 TETHER_LOGW(TAG, "     This indicates the FSoE PDO data is not reaching the safety module.");
@@ -630,9 +630,9 @@ inline SafetyDiagnosticReport runFullSafetyDiagnostics(
         rpt.slave_cmd = cmd;
         rpt.slave_conn_id = conn_id;
         if (rpt.slave_frame_ok) {
-            TETHER_LOGI(TAG, "  0x6760:1 Command    = 0x%02X (%s)",
+            TETHER_LOGI(TAG, "  0x6760:1 Command    = 0x{:02X} ({})",
                         cmd, fsoeCommandName(cmd));
-            TETHER_LOGI(TAG, "  0x6760:2 ConnID     = 0x%04X", conn_id);
+            TETHER_LOGI(TAG, "  0x6760:2 ConnID     = 0x{:04X}", conn_id);
             if (cmd == 0 && conn_id == 0) {
                 TETHER_LOGW(TAG, "  >> Slave FSoE frame is all zeros — safety module is not producing FSoE output!");
             }
@@ -651,9 +651,9 @@ inline SafetyDiagnosticReport runFullSafetyDiagnostics(
         rpt.configured_ident_pos2 = cfg_pos2;
         rpt.detected_ident_pos2 = det_pos2;
         if (rpt.module_ident_ok) {
-            TETHER_LOGI(TAG, "  0xF030:2 Configured = 0x%08X (%s)",
+            TETHER_LOGI(TAG, "  0xF030:2 Configured = 0x{:08X} ({})",
                         cfg_pos2, moduleIdentDesc(cfg_pos2));
-            TETHER_LOGI(TAG, "  0xF050:2 Detected   = 0x%08X (%s)",
+            TETHER_LOGI(TAG, "  0xF050:2 Detected   = 0x{:08X} ({})",
                         det_pos2, moduleIdentDesc(det_pos2));
             if (rpt.moduleIdentMismatch()) {
                 TETHER_LOGE(TAG, "  >> Module ident MISMATCH! Configured != Detected");
@@ -671,12 +671,12 @@ inline SafetyDiagnosticReport runFullSafetyDiagnostics(
         rpt.safety_addr_ok = ok;
         rpt.device_safety_address = addr;
         if (ok) {
-            TETHER_LOGI(TAG, "  0xF980:1 Safety address = 0x%04X", addr);
+            TETHER_LOGI(TAG, "  0xF980:1 Safety address = 0x{:04X}", addr);
             if (rpt.general_safety_ok && rpt.connIdMismatch()) {
                 TETHER_LOGE(TAG, "  >> Connection ID MISMATCH!");
-                TETHER_LOGE(TAG, "     Device safety address (0xF980) = 0x%04X",
+                TETHER_LOGE(TAG, "     Device safety address (0xF980) = 0x{:04X}",
                             rpt.device_safety_address);
-                TETHER_LOGE(TAG, "     General safety address (0x2620:3) = 0x%04X",
+                TETHER_LOGE(TAG, "     General safety address (0x2620:3) = 0x{:04X}",
                             rpt.safe_address);
                 TETHER_LOGE(TAG, "     The master must use the device safety address as the FSoE connection ID.");
             }
@@ -692,7 +692,7 @@ inline SafetyDiagnosticReport runFullSafetyDiagnostics(
         rpt.error_reg_ok = ok;
         rpt.error_register = reg;
         if (ok) {
-            TETHER_LOGI(TAG, "  0x1001:0 Error register = 0x%02X", reg);
+            TETHER_LOGI(TAG, "  0x1001:0 Error register = 0x{:02X}", reg);
             if (reg & 0x01) TETHER_LOGW(TAG, "  >> Generic error bit set");
             if (reg & 0x02) TETHER_LOGW(TAG, "  >> Device profile error bit set");
             if (reg & 0x04) TETHER_LOGW(TAG, "  >> Communication error bit set");
@@ -706,9 +706,9 @@ inline SafetyDiagnosticReport runFullSafetyDiagnostics(
     TETHER_LOGI(TAG, "========================================");
 
     if (rpt.hasFault()) {
-        TETHER_LOGE(TAG, "  FAULT: '%s'", rpt.error_report);
+        TETHER_LOGE(TAG, "  FAULT: '{}'", rpt.error_report);
         const char* desc = knownErrorReport(rpt.error_report);
-        if (desc) TETHER_LOGE(TAG, "         %s", desc);
+        if (desc) TETHER_LOGE(TAG, "         {}", desc);
     } else if (rpt.error_report_ok) {
         TETHER_LOGI(TAG, "  No fault reported (NoFault)");
     } else {
