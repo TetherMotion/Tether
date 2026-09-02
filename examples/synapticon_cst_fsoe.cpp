@@ -1815,6 +1815,22 @@ int main(int argc, char** argv) {
         return rc;
     }
 
+    // --- Disengage the brake before starting FSoE communication ---
+    // The Synapticon brake is spring-activated (engages when powered off).
+    // FSoE safe-motion communication requires the brake to be released
+    // beforehand so the drive can move freely once motion is enabled.
+    // Object 0x2004:7 (Brake status) controls the brake in automatic mode.
+    // See: https://doc.synapticon.com/node/sw5.1/objects_html/2xxx/2004.html
+    if (args.enable_fsoe) {
+        auto& brake_sdo = master.ethercatMaster().sdoManager(slave_idx);
+        if (!EtherCAT::Drives::Synapticon::BrakeControl::disengageBrake(
+                brake_sdo, kSdoTimeoutMs)) {
+            TETHER_LOGW(TAG,
+                "Brake disengage failed or unverified — continuing with FSoE "
+                "(the safety layer will gate motion regardless)");
+        }
+    }
+
     // --- Set up FSoE safe-motion (real drive via PDOs) ---
     std::unique_ptr<FSoEMain> fsoe_main;
     FSoEPDOExchangeTask* fsoe_task_ptr = nullptr;  // raw ptr for suppressDebug()

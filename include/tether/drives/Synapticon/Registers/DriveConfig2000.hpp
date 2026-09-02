@@ -194,14 +194,54 @@ inline const RegisterList kRegisterList = {
 
 // ============================================================================
 // 0x2004 Brake options — DT2004, rw
+//
+// Per Synapticon documentation (0x2004 Brake options):
+//   https://doc.synapticon.com/node/sw5.1/objects_html/2xxx/2004.html
+//
+// The brake is spring-activated (engages when powered off).  It is disengaged
+// by applying current to a solenoid.  A Pull voltage is applied for the Pull
+// time to release the brake quickly, then a lower Hold voltage keeps it
+// retracted.
+//
+// 0x2004:7 (Brake status) is readwrite: it reports the brake state AND
+// controls the brake in automatic mode (Pin brake / Clutch brake).  Writing
+//   0 = Not configured (no action)
+//   1 = Engaged   (brake prevents motion)
+//   2 = Disengaged (brake released)
+// disengages the brake.  See BrakeControl::disengageBrake() for a convenience
+// wrapper.
 // ============================================================================
 namespace Obj2004 {
 
 static constexpr uint16_t ObjectIndex = 0x2004;
 
+// Subindices
+static constexpr uint8_t kSubPullVoltage            = 0x01;
+static constexpr uint8_t kSubHoldVoltage            = 0x02;
+static constexpr uint8_t kSubPullTime               = 0x03;
+static constexpr uint8_t kSubReleaseStrategy        = 0x04;
+static constexpr uint8_t kSubControllerDisableDelay = 0x05;
+static constexpr uint8_t kSubBrakeStatus            = 0x07;
+static constexpr uint8_t kSubOutputVoltage          = 0x0A;
+static constexpr uint8_t kSubSwitchingFrequency     = 0x0B;
+
+// 0x2004:4 Release strategy options
+enum class ReleaseStrategyOptions : uint8_t {
+    ManualOutputVoltage   = 0,  // Manually control brake with output voltage
+    ClutchStyleBrake      = 1,  // Disengages even under load
+    PinBrake              = 2,  // Requires extra motion handling to release
+};
+
+// 0x2004:7 Brake status / control options
+enum class BrakeStatusOptions : uint8_t {
+    NotConfigured = 0,  // No action taken for the brake
+    Engaged       = 1,  // Brake prevents motion (output disabled in manual mode)
+    Disengaged    = 2,  // Brake released (output applied in manual mode)
+};
+
 constexpr RegisterEntry PullVoltage = {
     .index = ObjectIndex,
-    .subindex = 0x01,
+    .subindex = kSubPullVoltage,
     .name = "Pull voltage",
     .data_type = ODDataType::Unsigned32,
     .default_value = 0,
@@ -215,7 +255,7 @@ constexpr RegisterEntry PullVoltage = {
 
 constexpr RegisterEntry HoldVoltage = {
     .index = ObjectIndex,
-    .subindex = 0x02,
+    .subindex = kSubHoldVoltage,
     .name = "Hold voltage",
     .data_type = ODDataType::Unsigned32,
     .default_value = 0,
@@ -229,7 +269,7 @@ constexpr RegisterEntry HoldVoltage = {
 
 constexpr RegisterEntry PullTime = {
     .index = ObjectIndex,
-    .subindex = 0x03,
+    .subindex = kSubPullTime,
     .name = "Pull time",
     .data_type = ODDataType::Unsigned16,
     .default_value = 0,
@@ -243,12 +283,12 @@ constexpr RegisterEntry PullTime = {
 
 constexpr RegisterEntry ReleaseStrategy = {
     .index = ObjectIndex,
-    .subindex = 0x04,
+    .subindex = kSubReleaseStrategy,
     .name = "Release strategy",
     .data_type = ODDataType::Unsigned8,
     .default_value = 0,
     .unit = Unit_None,
-    .options_enum = nullptr,
+    .options_enum = std::type_identity<ReleaseStrategyOptions>{},
     .min_value = 0,
     .max_value = 2,
     .modification_mode = ModificationMode::AtStop,
@@ -257,7 +297,7 @@ constexpr RegisterEntry ReleaseStrategy = {
 
 constexpr RegisterEntry ControllerDisableDelay = {
     .index = ObjectIndex,
-    .subindex = 0x05,
+    .subindex = kSubControllerDisableDelay,
     .name = "Controller disable delay",
     .data_type = ODDataType::Unsigned16,
     .default_value = 100,
@@ -269,23 +309,25 @@ constexpr RegisterEntry ControllerDisableDelay = {
     .effective_time = EffectiveTime::Immediately,
 };
 
+// 0x2004:7 Brake status — readwrite per the Synapticon documentation.
+// Reports the brake state and controls it in automatic mode (Pin/Clutch).
 constexpr RegisterEntry BrakeStatus = {
     .index = ObjectIndex,
-    .subindex = 0x07,
+    .subindex = kSubBrakeStatus,
     .name = "Brake status",
     .data_type = ODDataType::Unsigned8,
     .default_value = 0,
     .unit = Unit_None,
-    .options_enum = nullptr,
+    .options_enum = std::type_identity<BrakeStatusOptions>{},
     .min_value = 0,
     .max_value = 2,
-    .modification_mode = ModificationMode::ReadOnly,
+    .modification_mode = ModificationMode::DuringOperation,
     .effective_time = EffectiveTime::Immediately,
 };
 
 constexpr RegisterEntry OutputVoltage = {
     .index = ObjectIndex,
-    .subindex = 0x0A,
+    .subindex = kSubOutputVoltage,
     .name = "Output voltage",
     .data_type = ODDataType::Unsigned16,
     .default_value = 0,
@@ -299,7 +341,7 @@ constexpr RegisterEntry OutputVoltage = {
 
 constexpr RegisterEntry SwitchingFrequency = {
     .index = ObjectIndex,
-    .subindex = 0x0B,
+    .subindex = kSubSwitchingFrequency,
     .name = "Switching frequency",
     .data_type = ODDataType::Unsigned8,
     .default_value = 0,
