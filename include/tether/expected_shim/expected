@@ -18,10 +18,25 @@
 #pragma once
 
 #include <tl/expected.hpp>
+#include <type_traits>
+#include <utility>
 
 namespace std {
 
 using tl::expected;
-using tl::unexpected;
+
+// NOTE: We cannot simply do `using tl::unexpected;` because GCC < 12's
+// <exception> header already declares `void std::unexpected()` — the
+// deprecated C++03 unexpected-handler function. A using-declaration cannot
+// override an existing function declaration in the same namespace, so
+// `std::unexpected(arg)` would resolve to the no-arg function and fail.
+//
+// Instead we define a function template that overloads it. When called with
+// an argument (the only way C++23 code uses std::unexpected), overload
+// resolution picks this template over the deprecated void unexpected().
+template <class E>
+auto unexpected(E&& e) {
+    return tl::unexpected<std::decay_t<E>>(std::forward<E>(e));
+}
 
 } // namespace std
