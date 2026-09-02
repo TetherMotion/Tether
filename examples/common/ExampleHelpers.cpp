@@ -1,6 +1,7 @@
 #include "ExampleHelpers.hpp"
 
 #include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <sstream>
 
@@ -51,7 +52,8 @@ std::string resolveInterface(const std::string& requested, const char* tag) {
                          "interfaces found; please specify one with -i: %s",
                     physIfaces.size(), names.c_str());
     }
-    return "";
+    std::fflush(stderr);
+    std::exit(1);
 }
 
 void logPermissionDeniedError(const char* tag) {
