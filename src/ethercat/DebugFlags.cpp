@@ -68,6 +68,7 @@ bool EtherCATMasterDebugFlags::isEnabled(const std::string& name, uint16_t slave
     if (name == "verify-safeop")     return verifySafeOp && verifySafeOpFilt.allows(slave_index);
     if (name == "pdo-sm")            return pdoSm && pdoSmFilt.allows(slave_index);
     if (name == "dc")                return dc && dcFilt.allows(slave_index);
+    if (name == "pdo-configuration") return pdoConfiguration && pdoConfigurationFilt.allows(slave_index);
 #ifdef TETHER_ENABLE_FSOE
     if (name == "fsoe")              return fsoe && fsoeFilt.allows(slave_index);
     if (name == "fsoe-frame")        return fsoeFrame && fsoeFrameFilt.allows(slave_index);
@@ -96,6 +97,7 @@ void EtherCATMasterDebugFlags::setFlag(const std::string& name, bool enabled) {
     else if (name == "verify-safeop")  verifySafeOp = enabled;
     else if (name == "pdo-sm")         pdoSm = enabled;
     else if (name == "dc")             dc = enabled;
+    else if (name == "pdo-configuration") pdoConfiguration = enabled;
 #ifdef TETHER_ENABLE_FSOE
     else if (name == "fsoe")           fsoe = enabled;
     else if (name == "fsoe-frame")     fsoeFrame = enabled;
@@ -123,6 +125,7 @@ void EtherCATMasterDebugFlags::setFilter(const std::string& name, const SlaveFil
     else if (name == "verify-safeop")  verifySafeOpFilt = filter;
     else if (name == "pdo-sm")         pdoSmFilt = filter;
     else if (name == "dc")             dcFilt = filter;
+    else if (name == "pdo-configuration") pdoConfigurationFilt = filter;
 #ifdef TETHER_ENABLE_FSOE
     else if (name == "fsoe")           fsoeFilt = filter;
     else if (name == "fsoe-frame")     fsoeFrameFilt = filter;
@@ -205,6 +208,7 @@ void EtherCATMasterDebugFlags::resizeFilters(uint16_t slave_count) {
     verifySafeOpFilt.resize(slave_count);
     pdoSmFilt.resize(slave_count);
     dcFilt.resize(slave_count);
+    pdoConfigurationFilt.resize(slave_count);
 #ifdef TETHER_ENABLE_FSOE
     fsoeFilt.resize(slave_count);
     fsoeFrameFilt.resize(slave_count);
@@ -255,6 +259,10 @@ const std::vector<DebugFlagInfo>& allDebugFlags() {
          "Dump detailed SM register verification before SAFE_OP transition"},
         {"pdo-sm",
          "Print detailed configuration of non-mailbox sync managers (SM2/SM3)"},
+        {"pdo-configuration",
+         "Detailed PDO assignment logging: SM register writes, 0x1C12/0x1C13 "
+         "PDO index lists (including which are fixed/skipped), FMMU mapping, "
+         "and readback verification"},
 #ifdef TETHER_ENABLE_FSOE
         {"fsoe",
          "High-level FSoE protocol trace (state machine decisions)"},

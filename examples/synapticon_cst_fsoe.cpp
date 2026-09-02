@@ -149,22 +149,36 @@ constexpr uint32_t kSdoTimeoutMs = EtherCAT::Drives::Synapticon::kSdoTimeoutMs;
 //   TxPDO 0x1B00: FSoE status frame (slave→master, 31 bytes)
 //
 // Both sets are mapped simultaneously using the multi-PDO-per-sync-manager
-// API.  The PDO buffer layout is:
-//   SM2 (Rx, master→slave): [0x1600 (19B)][0x1700 (11B)] = 30 bytes
-//   SM3 (Tx, slave→master): [0x1A00 (13B)][0x1B00 (31B)] = 44 bytes
+// API.  The FSoE PDOs are Fixed/Mandatory in the ESI — the drive
+// auto-includes them at the START of the SM buffer.  The motion PDOs are
+// appended after.  The PDO buffer layout is:
+//   SM2 (Rx, master→slave): [0x1600 (12B)][0x1700 (11B)] = 23 bytes
+//   SM3 (Tx, slave→master): [0x1A00 (12B)][0x1B00 (31B)] = 43 bytes
+//
+// The FSoE ModulePdoGroup has Alignment="4", so the FSoE PDO data starts at
+// a 4-byte aligned offset within the SM buffer.
 using RxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_RxPDO_1600;
 using TxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_TxPDO_1A00;
 using FSoERxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_RxPDO_1700;
 using FSoETxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_TxPDO_1B00;
 
 // PDO offsets within the combined PDO buffer.
-// The motion PDO (0x1600/0x1A00) comes FIRST; the FSoE PDO (0x1700/0x1B00)
-// follows at the offset equal to the motion PDO size.
-// This matches the ESI-defined PDO order (motion PDOs before FSoE PDOs).
-constexpr size_t kMotionRxPDOOffset = 0;               // Motion first
-constexpr size_t kFSoERxPDOOffset   = sizeof(RxPDO);   // 19 bytes
-constexpr size_t kMotionTxPDOOffset = 0;               // Motion first
-constexpr size_t kFSoETxPDOOffset   = sizeof(TxPDO);   // 13 bytes
+// The drive uses ETG.5000 modular device profile:
+//   0x1600 = 12 bytes (module interface objects 0x7000:1 + 0x7000:2)
+//   0x1A00 = 12 bytes (module interface objects 0x6000:1 + 0x6000:2)
+// FSoE PDOs 0x1700/0x1B00 are auto-included (Fixed) by the modular framework.
+// ESI-defined FSoE sizes: 0x1700 = 11 bytes, 0x1B00 = 31 bytes.
+// 12 is already 4-byte aligned, so no padding needed.
+//   SM2: 0x1600 (12B) + 0x1700 (11B) = 23 bytes
+//   SM3: 0x1A00 (12B) + 0x1B00 (31B) = 43 bytes
+constexpr size_t kMotionRxPDOOffset = 0;
+constexpr size_t kFSoERxPDOOffset   = 12;   // 0x1600 is 12 bytes, already aligned
+constexpr size_t kMotionTxPDOOffset = 0;
+constexpr size_t kFSoETxPDOOffset   = 12;   // 0x1A00 is 12 bytes, already aligned
+
+// Total SM lengths.
+constexpr size_t kSM2TotalLen = kFSoERxPDOOffset + sizeof(FSoERxPDO);   // 12 + 11 = 23
+constexpr size_t kSM3TotalLen = kFSoETxPDOOffset + sizeof(FSoETxPDO);   // 12 + 31 = 43
 
 using FSoEMain = EtherCAT::Drives::Synapticon::SafeMotion::MainInstance;
 
@@ -813,14 +827,14 @@ private:
 
         // TxPDO (slave-to-master) -- full PDO buffer (FSoE + CST)
         pos = 0;
-        for (size_t b = 0; b < 44 && pos + 3 < sizeof(hex); b++) {
+        for (size_t b = 0; b < kSM3TotalLen && pos + 3 < sizeof(hex); b++) {
             pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", tx_buffer[b]));
         }
-        TETHER_LOGI("fsoe-wire", "[TxPDO full 44B] cycle %u: %s", cycle_count_, hex);
+        TETHER_LOGI("fsoe-wire", "[TxPDO full %zuB] cycle %u: %s", kSM3TotalLen, cycle_count_, hex);
 
         // RxPDO (master-to-slave) -- full PDO buffer (FSoE + CST)
         pos = 0;
-        for (size_t b = 0; b < 30 && pos + 3 < sizeof(hex); b++) {
+        for (size_t b = 0; b < kSM2TotalLen && pos + 3 < sizeof(hex); b++) {
             pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", rx_buffer[b]));
         }
         TETHER_LOGI("fsoe-wire", "[RxPDO] cycle %u: %s", cycle_count_, hex);
@@ -828,6 +842,155 @@ private:
         cycle_count_++;
     }
 };
+
+// ============================================================================
+// Default PDO / SM / FMMU diagnostic dump
+// ============================================================================
+//
+// Reads the drive's default PDO assignment (0x1C12/0x1C13), SyncManager
+// registers (0x0810–0x081F), and FMMU registers (0x0600–0x063F) via SDO
+// and register access.  This shows the drive's power-on defaults before
+// the master overwrites them — useful for understanding what the drive
+// expects for FSoE + motion PDO configuration.
+//
+// Call this right after PRE_OP transition, before any PDO configuration.
+
+static void dumpDefaultPdoConfig(EtherCAT::Master& ec_master,
+                                  uint16_t slave_idx,
+                                  EtherCAT::CoE::CoEManager& sdo) {
+    constexpr uint32_t kSdoTimeoutMs = 1000;
+    const auto slave_addr = EtherCAT::Master::slaveAddressFromADP(
+        EtherCAT::Master::adpForSlaveIndex(slave_idx));
+
+    TETHER_LOGI(TAG, "===== Default PDO/SM/FMMU dump (slave %u) =====", slave_idx);
+
+    // --- 0x1C12 (SM2 RxPDO assignment) ---
+    {
+        auto cnt = sdo.readU8(0x1C12, 0, {.timeout_ms = kSdoTimeoutMs});
+        if (cnt.has_value()) {
+            TETHER_LOGI(TAG, "  0x1C12 (SM2 RxPDO assign): %u entries", cnt.value());
+            for (uint8_t i = 1; i <= cnt.value() && i <= 16; i++) {
+                auto entry = sdo.readU16(0x1C12, i, {.timeout_ms = kSdoTimeoutMs});
+                if (entry.has_value())
+                    TETHER_LOGI(TAG, "    0x1C12:%u = 0x%04X", i, entry.value());
+                else
+                    TETHER_LOGW(TAG, "    0x1C12:%u FAILED", i);
+            }
+        } else {
+            TETHER_LOGW(TAG, "  0x1C12:0 FAILED (no default RxPDO assignment)");
+        }
+    }
+
+    // --- 0x1C13 (SM3 TxPDO assignment) ---
+    {
+        auto cnt = sdo.readU8(0x1C13, 0, {.timeout_ms = kSdoTimeoutMs});
+        if (cnt.has_value()) {
+            TETHER_LOGI(TAG, "  0x1C13 (SM3 TxPDO assign): %u entries", cnt.value());
+            for (uint8_t i = 1; i <= cnt.value() && i <= 16; i++) {
+                auto entry = sdo.readU16(0x1C13, i, {.timeout_ms = kSdoTimeoutMs});
+                if (entry.has_value())
+                    TETHER_LOGI(TAG, "    0x1C13:%u = 0x%04X", i, entry.value());
+                else
+                    TETHER_LOGW(TAG, "    0x1C13:%u FAILED", i);
+            }
+        } else {
+            TETHER_LOGW(TAG, "  0x1C13:0 FAILED (no default TxPDO assignment)");
+        }
+    }
+
+    // --- SyncManager registers ---
+    // SM0: 0x0800-0x0807, SM1: 0x0808-0x080F, SM2: 0x0810-0x0817, SM3: 0x0818-0x081F
+    const char* sm_names[] = {"SM0 (MBoxOut)", "SM1 (MBoxIn)", "SM2 (Outputs)", "SM3 (Inputs)"};
+    for (int sm = 0; sm < 4; sm++) {
+        uint16_t base = 0x0800 + static_cast<uint16_t>(sm) * 8;
+        uint16_t start_addr = 0;
+        uint16_t length = 0;
+        uint8_t control = 0;
+        uint8_t status = 0;
+        uint8_t activate = 0;
+        uint8_t pdi_control = 0;
+
+        ec_master.readRegister(slave_addr, base,     &start_addr, 2, 200);
+        ec_master.readRegister(slave_addr, base + 2, &length, 2, 200);
+        ec_master.readRegister(slave_addr, base + 4, &control, 1, 200);
+        ec_master.readRegister(slave_addr, base + 5, &status, 1, 200);
+        ec_master.readRegister(slave_addr, base + 6, &activate, 1, 200);
+        ec_master.readRegister(slave_addr, base + 7, &pdi_control, 1, 200);
+
+        TETHER_LOGI(TAG, "  %s: start=0x%04X len=%u ctrl=0x%02X status=0x%02X act=0x%02X pdi=0x%02X",
+                    sm_names[sm], start_addr, length, control, status, activate, pdi_control);
+    }
+
+    // --- FMMU registers ---
+    // FMMU0: 0x0600-0x060F, FMMU1: 0x0610-0x061F, FMMU2: 0x0620-0x062F, FMMU3: 0x0630-0x063F
+    for (int fmmu = 0; fmmu < 4; fmmu++) {
+        uint16_t base = 0x0600 + static_cast<uint16_t>(fmmu) * 16;
+        uint32_t log_addr = 0;
+        uint16_t length = 0;
+        uint16_t phys_addr = 0;
+        uint8_t fmmu_type = 0;  // bit0=read, bit1=write, bit3=enable
+
+        ec_master.readRegister(slave_addr, base,     &log_addr, 4, 200);
+        ec_master.readRegister(slave_addr, base + 4, &length, 2, 200);
+        ec_master.readRegister(slave_addr, base + 6, &phys_addr, 2, 200);
+        ec_master.readRegister(slave_addr, base + 8, &fmmu_type, 1, 200);
+
+        bool enabled = fmmu_type & 0x08;
+        bool read_access = fmmu_type & 0x01;
+        bool write_access = fmmu_type & 0x02;
+
+        if (enabled || log_addr != 0 || length != 0) {
+            const char* dir = (read_access && write_access) ? "RW" :
+                              read_access ? "R" : write_access ? "W" : "--";
+            TETHER_LOGI(TAG, "  FMMU%d: log=0x%08X phys=0x%04X len=%u type=0x%02X [%s %s]",
+                        fmmu, log_addr, phys_addr, length, fmmu_type,
+                        enabled ? "EN" : "DIS", dir);
+        } else {
+            TETHER_LOGI(TAG, "  FMMU%d: (unused)", fmmu);
+        }
+    }
+
+    // --- Read individual PDO mapping objects for the assigned PDOs ---
+    // For each PDO index in 0x1C12/0x1C13, read 0x1A00:0 etc. to get the
+    // mapping entry count and total size.
+    auto dump_pdo_mapping = [&](uint16_t pdo_idx, const char* label) {
+        auto cnt = sdo.readU8(pdo_idx, 0, {.timeout_ms = kSdoTimeoutMs});
+        if (!cnt.has_value()) {
+            TETHER_LOGW(TAG, "  %s (0x%04X): FAILED to read count", label, pdo_idx);
+            return;
+        }
+        uint16_t total_bits = 0;
+        TETHER_LOGI(TAG, "  %s (0x%04X): %u entries", label, pdo_idx, cnt.value());
+        for (uint8_t i = 1; i <= cnt.value() && i <= 32; i++) {
+            auto entry = sdo.readU32(pdo_idx, i, {.timeout_ms = kSdoTimeoutMs});
+            if (entry.has_value()) {
+                uint32_t v = entry.value();
+                uint16_t idx = (v >> 16) & 0xFFFF;
+                uint8_t sub = (v >> 8) & 0xFF;
+                uint8_t bits = v & 0xFF;
+                total_bits += bits;
+                TETHER_LOGI(TAG, "    %s:%u = 0x%08X (idx=0x%04X sub=%u bits=%u)",
+                            label, i, v, idx, sub, bits);
+            } else {
+                TETHER_LOGW(TAG, "    %s:%u FAILED", label, i);
+            }
+        }
+        TETHER_LOGI(TAG, "    → total: %u bits = %u bytes", total_bits, total_bits / 8);
+    };
+
+    // Read mappings for all relevant PDOs
+    dump_pdo_mapping(0x1600, "RxPDO_1600");
+    dump_pdo_mapping(0x1601, "RxPDO_1601");
+    dump_pdo_mapping(0x1602, "RxPDO_1602");
+    dump_pdo_mapping(0x1700, "FSoE_RxPDO_1700");
+    dump_pdo_mapping(0x1A00, "TxPDO_1A00");
+    dump_pdo_mapping(0x1A01, "TxPDO_1A01");
+    dump_pdo_mapping(0x1A02, "TxPDO_1A02");
+    dump_pdo_mapping(0x1A03, "TxPDO_1A03");
+    dump_pdo_mapping(0x1B00, "FSoE_TxPDO_1B00");
+
+    TETHER_LOGI(TAG, "===== End default PDO/SM/FMMU dump =====");
+}
 
 // ============================================================================
 // Main
@@ -1226,6 +1389,14 @@ int main(int argc, char** argv) {
         TETHER_LOGI(TAG, "Slave %u transitioned to PRE_OP", slave_idx);
     }
 
+    // --- Dump default PDO/SM/FMMU configuration ---
+    // Read the drive's power-on defaults before we overwrite anything.
+    // This shows what the drive expects for FSoE + motion PDO layout.
+    {
+        auto& sdo = master.ethercatMaster().sdoManager(slave_idx);
+        dumpDefaultPdoConfig(master.ethercatMaster(), slave_idx, sdo);
+    }
+
     // --- Pre-activation safety check (disabled) ---
     // The Synapticon drive does not expose 0x2611 / 0x2620:2 via SDO on this
     // firmware, causing "Object does not exist" aborts.  The FSoE protocol
@@ -1284,8 +1455,8 @@ int main(int argc, char** argv) {
     // (CiA402Drive::transitionToOp(const Slave::MultiPDOAssignment&)).
     //
     // PDO buffer layout (combined):
-    //   SM2 (Rx, master→slave): [0x1600 (19B)][0x1700 (11B)] = 30 bytes
-    //   SM3 (Tx, slave→master): [0x1A00 (13B)][0x1B00 (31B)] = 44 bytes
+    //   SM2 (Rx): [0x1600 (12B)][0x1700 (11B)] = 23 bytes
+    //   SM3 (Tx): [0x1A00 (12B)][0x1B00 (31B)] = 43 bytes
     //
     // When FSoE is disabled (--no-fsoe), only the motion PDOs are mapped
     // using the standard single-PDO configuration path.
@@ -1336,29 +1507,28 @@ int main(int argc, char** argv) {
 
     if (args.enable_fsoe) {
         // Combined FSoE + motion PDO mapping via multi-PDO assignment.
-        // Motion PDOs (0x1600/0x1A00) are placed FIRST, FSoE PDOs
-        // (0x1700/0x1B00) SECOND — matching the ESI-defined PDO order.
-        // The drive rejects mappings where FSoE PDOs come before motion PDOs
-        // with AL_STATUS_CODE 0x0025 (Invalid output mapping).
+        //
+        // Uses the default ESI layout with ALL motion PDOs:
+        //   SM2: 0x1600 + 0x1601 + 0x1602 + pad + 0x1700 (fixed) = 47 bytes
+        //   SM3: 0x1A00 + 0x1A01 + 0x1A02 + 0x1A03 + pad + 0x1B00 (fixed) = 79 bytes
+        //
+        // FSoE PDOs are Fixed/Mandatory — the drive auto-includes them.
+        // Only motion PDOs are written to 0x1C12/0x1C13.
+        // The FSoE ModulePdoGroup Alignment="4" means the FSoE PDO data
+        // starts at a 4-byte aligned offset after the motion PDOs.
         const auto assignment =
-            EtherCAT::Drives::Synapticon_pdo::makePDOAssignment(
-                {EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.index,
-                 EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.index},
-                {EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.index,
-                 EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.index});
+            EtherCAT::Drives::Synapticon_pdo::makeCombinedPDOAssignment();
 
         TETHER_LOGI(TAG,
-            "Transitioning to OP with combined CST+FSoE PDO mapping: "
-            "SM2=RxPDO 0x1600+0x1700 (%u+%u=%u bytes), "
-            "SM3=TxPDO 0x1A00+0x1B00 (%u+%u=%u bytes)",
-            EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.size,
-            EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.size,
-            static_cast<uint16_t>(EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.size +
-                                  EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.size),
-            EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.size,
-            EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.size,
-            static_cast<uint16_t>(EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.size +
-                                  EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.size));
+            "Transitioning to OP with combined FSoE+motion PDO mapping: "
+            "SM2=%u bytes (motion %uB + pad + FSoE %uB), "
+            "SM3=%u bytes (motion %uB + pad + FSoE %uB)",
+            static_cast<uint16_t>(kSM2TotalLen),
+            EtherCAT::Drives::Synapticon_pdo::kSM2TotalSize,
+            static_cast<uint16_t>(sizeof(FSoERxPDO)),
+            static_cast<uint16_t>(kSM3TotalLen),
+            EtherCAT::Drives::Synapticon_pdo::kSM3TotalSize,
+            static_cast<uint16_t>(sizeof(FSoETxPDO)));
 
         // Note: Safety parameters (0x2620, 0x2641, etc.) are configured on the
         // drive via OBLAC Drives and cannot be written via SDO (error 0x08000021
