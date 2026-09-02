@@ -544,7 +544,7 @@ int main(int argc, char** argv) {
             else if (err == EtherCAT::HAL::Error::PermissionDenied)
                 Tether::Examples::logPermissionDeniedError(TAG);
             else
-                TETHER_LOGE(TAG, "Failed to init '%s' (%s)", iface.c_str(),
+                TETHER_LOGE(TAG, "Critical error: Prerequisites for operation not fulfilled (%s)",
                             magic_enum::enum_name(err).data());
             return 2;
         }

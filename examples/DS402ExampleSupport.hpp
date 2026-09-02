@@ -54,7 +54,7 @@ inline bool startHostMasterSession(const std::string& interface_name,
         if (init_result == EtherCAT::HAL::Error::PermissionDenied) {
             logPermissionDeniedError(tag);
         } else {
-            TETHER_LOGE(tag, "Failed to init '%s' (%s)", interface_name.c_str(),
+            TETHER_LOGE(tag, "Critical error: Prerequisites for operation not fulfilled (%s)",
                         magic_enum::enum_name(init_result).data());
         }
         session.ethernet.reset();
