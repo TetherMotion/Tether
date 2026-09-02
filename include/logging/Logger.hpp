@@ -125,6 +125,42 @@ inline std::string logFormat(const char* fmt, Args... args) {
         Tether::Platform::logFormat(fmt __VA_OPT__(,) __VA_ARGS__))
 #endif
 
+// Compile-time validated std::format variants. These give compile-time
+// format checking and better optimization for simple call sites, but they
+// cannot be used inside lambdas that are stored in std::function (because
+// std::format's format_string constructor is consteval and would cause
+// immediate-escalation of the lambda's operator()).
+#ifndef TETHER_LOGE_FMT
+#define TETHER_LOGE_FMT(tag, fmt, ...) \
+    Tether::Platform::Logger::instance().logFormatted( \
+        Tether::Platform::LogLevel::Error, tag, \
+        std::format(fmt __VA_OPT__(,) __VA_ARGS__))
+#endif
+#ifndef TETHER_LOGW_FMT
+#define TETHER_LOGW_FMT(tag, fmt, ...) \
+    Tether::Platform::Logger::instance().logFormatted( \
+        Tether::Platform::LogLevel::Warn, tag, \
+        std::format(fmt __VA_OPT__(,) __VA_ARGS__))
+#endif
+#ifndef TETHER_LOGI_FMT
+#define TETHER_LOGI_FMT(tag, fmt, ...) \
+    Tether::Platform::Logger::instance().logFormatted( \
+        Tether::Platform::LogLevel::Info, tag, \
+        std::format(fmt __VA_OPT__(,) __VA_ARGS__))
+#endif
+#ifndef TETHER_LOGD_FMT
+#define TETHER_LOGD_FMT(tag, fmt, ...) \
+    Tether::Platform::Logger::instance().logFormatted( \
+        Tether::Platform::LogLevel::Debug, tag, \
+        std::format(fmt __VA_OPT__(,) __VA_ARGS__))
+#endif
+#ifndef TETHER_LOGV_FMT
+#define TETHER_LOGV_FMT(tag, fmt, ...) \
+    Tether::Platform::Logger::instance().logFormatted( \
+        Tether::Platform::LogLevel::Verbose, tag, \
+        std::format(fmt __VA_OPT__(,) __VA_ARGS__))
+#endif
+
 static inline void log_buffer_hex(const char* tag, const void* buffer, size_t len, LogLevel lvl) {
     const uint8_t* b = static_cast<const uint8_t*>(buffer);
     const size_t per_line = 16;

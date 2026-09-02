@@ -92,6 +92,13 @@ static inline std::string tether_log_format(const char* fmt, Args... args) {
 #define TETHER_LOGD(tag, fmt, ...) tether_log_formatted(ESP_LOG_DEBUG, tag, tether_log_format(fmt __VA_OPT__(,) __VA_ARGS__))
 #define TETHER_LOGV(tag, fmt, ...) tether_log_formatted(ESP_LOG_VERBOSE, tag, tether_log_format(fmt __VA_OPT__(,) __VA_ARGS__))
 
+// Compile-time validated std::format variants (see Logger.hpp).
+#define TETHER_LOGE_FMT(tag, fmt, ...) tether_log_formatted(ESP_LOG_ERROR, tag, std::format(fmt __VA_OPT__(,) __VA_ARGS__))
+#define TETHER_LOGW_FMT(tag, fmt, ...) tether_log_formatted(ESP_LOG_WARN, tag, std::format(fmt __VA_OPT__(,) __VA_ARGS__))
+#define TETHER_LOGI_FMT(tag, fmt, ...) tether_log_formatted(ESP_LOG_INFO, tag, std::format(fmt __VA_OPT__(,) __VA_ARGS__))
+#define TETHER_LOGD_FMT(tag, fmt, ...) tether_log_formatted(ESP_LOG_DEBUG, tag, std::format(fmt __VA_OPT__(,) __VA_ARGS__))
+#define TETHER_LOGV_FMT(tag, fmt, ...) tether_log_formatted(ESP_LOG_VERBOSE, tag, std::format(fmt __VA_OPT__(,) __VA_ARGS__))
+
 #define ESP_LOG_BUFFER_HEX_LEVEL(tag, buffer, buff_len, level) ((void)0)
 #define ESP_LOG_BUFFER_CHAR_LEVEL(tag, buffer, buff_len, level) ((void)0)
 #define ESP_LOG_BUFFER_HEXDUMP(tag, buffer, buff_len, level) ((void)0)
