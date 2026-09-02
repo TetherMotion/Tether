@@ -54,10 +54,13 @@
  */
 
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -2104,6 +2107,28 @@ int main(int argc, char** argv) {
     // --- Set up FSoE safe-motion (real drive via PDOs) ---
     std::unique_ptr<FSoEMain> fsoe_main;
 
+    // --- Thread synchronization for FSoE → CiA 402 enable ---
+    //
+    // The FSoE state machine runs in the realtime motion loop thread, while
+    // the CiA 402 enable sequence is driven from this (main) thread.  We use
+    // a std::promise<bool> as a one-shot signaling mechanism:
+    //   true  → FSoE reached Data state (safe to enable the drive)
+    //   false → FSoE entered Error state (abort enable)
+    //
+    // The promise is fulfilled from the state change callback (realtime
+    // thread).  The main thread blocks on the shared_future with a timeout.
+    // An atomic<bool> guard ensures set_value() is called exactly once,
+    // even if the state machine transitions through multiple terminal states.
+    auto fsoe_ready_promise = std::make_unique<std::promise<bool>>();
+    std::shared_future<bool> fsoe_ready_future = fsoe_ready_promise->get_future();
+    std::atomic<bool> fsoe_signaled{false};
+
+    auto signal_fsoe = [&fsoe_ready_promise, &fsoe_signaled](bool success) {
+        if (!fsoe_signaled.exchange(true)) {
+            fsoe_ready_promise->set_value(success);
+        }
+    };
+
     if (args.enable_fsoe) {
         // FSoE debug flags are now part of the Tether debug framework and
         // support per-slave filtering.  They are applied via applyDebugFlags()
@@ -2169,15 +2194,22 @@ int main(int argc, char** argv) {
             fsoe_main->setCommand(cmd);
         }
 
-        // Install FSoE callbacks for real-time state tracking
+        // Install FSoE callbacks for real-time state tracking.
+        // The state change and error callbacks also signal the main thread
+        // via the promise/future pair declared above the FSoE block.
         fsoe_main->rawConnection().setStateChangeCallback(
-            [](uint8_t old_s, uint8_t new_s) {
+            [&signal_fsoe](uint8_t old_s, uint8_t new_s) {
                 TETHER_LOGI(TAG,
                     "[FSoE] state: %s -> %s",
                     fsoeStateName(old_s), fsoeStateName(new_s));
+                if (new_s == FSoE::ConnectionState::Data) {
+                    signal_fsoe(true);
+                } else if (new_s == FSoE::ConnectionState::Error) {
+                    signal_fsoe(false);
+                }
             });
         fsoe_main->rawConnection().setErrorCallback(
-            [](uint16_t code, const FSoE::FSoEErrorDetail& detail) {
+            [&signal_fsoe](uint16_t code, const FSoE::FSoEErrorDetail& detail) {
                 if (detail.message[0] != '\0') {
                     TETHER_LOGE(TAG,
                         "[FSoE] error: 0x%04X (%s): %s",
@@ -2186,6 +2218,12 @@ int main(int argc, char** argv) {
                     TETHER_LOGE(TAG,
                         "[FSoE] error: 0x%04X (%s)",
                         code, fsoeErrorName(code));
+                }
+                // Signal failure on critical errors (non-zero error code).
+                // Non-critical errors (NoError = 0x0000) are just diagnostic
+                // events and don't prevent the handshake from completing.
+                if (code != FSoE::ErrorCode::NoError) {
+                    signal_fsoe(false);
                 }
             });
         fsoe_main->rawConnection().setFailSafeCallback(
@@ -2424,8 +2462,14 @@ int main(int argc, char** argv) {
     // --- Wait for FSoE to reach Data state (if enabled) ---
     // The drive starts in SAFE STATE when FSoE safety is active.  The FSoE
     // master must reach the Data state to clear the safe state and allow the
-    // CiA 402 enable sequence to proceed.  We poll the FSoE connection state
-    // for up to 5 seconds.
+    // CiA 402 enable sequence to proceed.
+    //
+    // The FSoE state machine runs in the realtime motion loop thread.  We
+    // block here on the std::shared_future that is fulfilled by the state
+    // change callback (see above) when Data state is reached or an Error
+    // occurs.  This is the idiomatic C++ one-shot cross-thread signaling
+    // pattern: no polling, no sleep loops, no shared mutable state beyond
+    // the promise/future pair.
     //
     // If FSoE does NOT reach Data state (handshake fails, slave sends Reset,
     // CRC error, watchdog timeout, etc.), we do NOT attempt to enable the
@@ -2434,14 +2478,25 @@ int main(int argc, char** argv) {
     // clean shutdown.
     bool fsoe_data_reached = false;
     if (fsoe_main) {
-        // DEBUG: Skip FSoE Data state wait — enable the drive FIRST and
-        // observe whether the FSoE safety module starts producing valid
-        // data once the drive is enabled.  The slave may need the drive
-        // to be enabled before the safety module activates.
-        TETHER_LOGI(TAG,
-            "DEBUG: Skipping FSoE Data state wait — enabling drive first "
-            "to observe if safety module activates");
-        fsoe_data_reached = true;  // force enable path
+        TETHER_LOGI(TAG, "Waiting for FSoE Data state (timeout 5 s)...");
+        using namespace std::chrono_literals;
+        const auto fsoe_status = fsoe_ready_future.wait_for(5s);
+        if (fsoe_status == std::future_status::timeout) {
+            TETHER_LOGE(TAG,
+                "FSoE did not reach Data state within 5 s — "
+                "current state: %s.  Aborting drive enable.",
+                fsoeStateName(fsoe_main->rawConnection().getState()));
+            rc = 9;
+        } else if (!fsoe_ready_future.get()) {
+            TETHER_LOGE(TAG,
+                "FSoE entered Error state before reaching Data — "
+                "aborting drive enable.");
+            rc = 9;
+        } else {
+            TETHER_LOGI(TAG,
+                "FSoE Data state reached — enabling CiA 402 drive.");
+            fsoe_data_reached = true;
+        }
     } else {
         // FSoE not enabled — drive enable can proceed directly.
         fsoe_data_reached = true;
