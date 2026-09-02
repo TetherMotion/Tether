@@ -74,7 +74,12 @@ bool RealtimeLoop::start() {
 }
 
 void RealtimeLoop::stop() {
-    running_.store(false, std::memory_order_release);
+    // Only log and tear down if the loop was actually running.
+    // This makes stop() idempotent — the destructor calls stop() too,
+    // and EtherCATDC::stop() calls realtime_loop_->stop() before
+    // resetting the unique_ptr, which triggers ~RealtimeLoop() → stop().
+    const bool was_running = running_.exchange(false, std::memory_order_acq_rel);
+    if (!was_running) return;
 
     stopPDOThread();
     stopDCThread();

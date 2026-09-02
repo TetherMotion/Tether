@@ -3,7 +3,7 @@
  * @brief Regression tests for the EEPCTL 2-byte write protocol fix.
  *
  * These tests verify the bugs discovered during debugging of the
- * synapticon_cst_fsoe example on Synapticon ESC211 hardware:
+ * synapticon_cst_fsoe example on Synapticon drive hardware:
  *
  * Bug 1: SIIReader::readRaw32() originally wrote a 6-byte EepromCmd struct
  *        to the EEPCTL register (0x0502), but the ESC EEPROM control register
@@ -12,7 +12,7 @@
  *        2-byte write: (EC_ECMD_READ << 8) | word_address.
  *
  * Bug 2: The example aborted on SII identity read failure, but SII reads
- *        have always been failing on ESC211 hardware because APWR to EEPCTL
+ *        have always been failing on Synapticon drive hardware because APWR to EEPCTL
  *        returns WKC=0.  The fix makes the identity check non-fatal.
  *
  * Bug 3: Existing tests encoded the buggy 6-byte protocol in their mock
@@ -258,7 +258,7 @@ TEST_F(EepctlProtocolRegression, ReadDataMatchesEepctlAddress) {
 // ============================================================================
 
 /// Verify that readRaw32 returns false when APWR to EEPCTL fails (WKC=0).
-/// This simulates the Synapticon ESC211 behavior where APWR to EEPCTL
+/// This simulates the Synapticon drive behavior where APWR to EEPCTL
 /// returns WKC=0 (no slave processed the write).
 TEST(EepctlWkcZeroRegression, ReadRaw32ReturnsFalseWhenApwrFails) {
     EtherCAT::Master master;

@@ -595,6 +595,10 @@ endif()
 # FSoE — Fail-Safe over EtherCAT (depends on ethercat_master and cia_profiles)
 if(TETHER_BUILD_FSOE AND TETHER_BUILD_ETHERCAT_MASTER AND TETHER_BUILD_CIA_PROFILES)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/fsoe.cmake)
+    # Propagate TETHER_ENABLE_FSOE to all targets so non-FSoE components
+    # (e.g. ethercat_common/DebugFlags) can conditionally compile FSoE
+    # debug-flag support.
+    add_compile_definitions(TETHER_ENABLE_FSOE=1)
 endif()
 
 # EtherCAT Slave

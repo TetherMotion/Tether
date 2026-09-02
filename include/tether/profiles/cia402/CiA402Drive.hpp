@@ -254,10 +254,34 @@ public:
     bool isDynaDriveControlOp();
 
     // ========================================================================
-    // Operating Mode (SDO-based)
+    // Operating Mode
+    //
+    // By default the operating mode is set via the PDO buffer (RxPDO
+    // modes_of_operation field at 0x6060).  The PDO offset must be
+    // configured via setOpmodePDOOffset() before calling setOperatingMode().
+    // If the PDO offset is not set (or set to -1), setOperatingMode() falls
+    // back to the SDO-based path (setOperatingModeSDO).
     // ========================================================================
 
+    /// Set the RxPDO byte offset of the modes_of_operation (0x6060) field.
+    /// Call this after PDO buffer sizes are known (e.g. after
+    /// assignFixedPDOs / setPDOBufferSizes).  Use -1 to disable PDO-based
+    /// mode setting and force SDO.
+    void setOpmodePDOOffset(int offset) { m_opmode_pdo_offset = offset; }
+    int  opmodePDOOffset() const { return m_opmode_pdo_offset; }
+
+    /// Set operating mode.  Uses PDO by default (if offset configured),
+    /// otherwise falls back to SDO.
     bool setOperatingMode(int8_t mode);
+
+    /// Set operating mode via SDO (0x6060).  Use when PDO-based mode
+    /// setting is not available or explicit SDO verification is needed.
+    bool setOperatingModeSDO(int8_t mode);
+
+    /// Set operating mode via PDO buffer.  Returns false if the PDO
+    /// offset has not been configured.
+    bool setOperatingModePDO(int8_t mode);
+
     int8_t getOperatingMode();
     bool setModeCSP() { return setOperatingMode(CiA402::OperatingMode::CyclicSyncPosition); }
     bool setModeCSV() { return setOperatingMode(CiA402::OperatingMode::CyclicSyncVelocity); }
@@ -307,6 +331,9 @@ private:
     // SDO-based state (used by enable / disable helpers)
     uint16_t m_controlword{0};
     uint16_t m_statusword{0};
+
+    // PDO-based operating mode offset (-1 = not configured, use SDO)
+    int m_opmode_pdo_offset{-1};
 };
 
 // ============================================================================

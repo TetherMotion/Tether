@@ -148,7 +148,7 @@ bool SIIReader::readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t*
         // EEPROM read command: the ESC EEPCTL register (0x0502) is a single
         // 2-byte register that combines the command (high byte) and the
         // EEPROM word address (low byte).  Writing more than 2 bytes is
-        // rejected by some ESCs (e.g. Synapticon ESC211) with WKC=0.
+        // rejected by some ESCs (e.g. Synapticon drive) with WKC=0.
         //   Bits 0-7:  EEPROM word address (low byte)
         //   Bits 8-15: EEPROM command (0x01 = READ)
         const uint16_t eepctl_val = static_cast<uint16_t>(

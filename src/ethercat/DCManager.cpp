@@ -106,8 +106,10 @@ bool DCManager::start()
     // Automatically wire in the master's PDO physical exchange so the
     // realtime loop drives actual process data, not a noop.  Exchange
     // the default group plus any additional PDO groups.
+    // Pass kMaxPDOSlaves so exchangePhysical scans all configured slaves
+    // (not just index 0 — needed for slaves at index > 0).
     auto pdo_fn = [this]() -> bool {
-        bool ok = master_.pdo().exchangePhysical(1);
+        bool ok = master_.pdo().exchangePhysical(EtherCAT::PDO::kMaxPDOSlaves);
         for (auto& group : master_.pdoGroups()) {
             if (group.pdo) {
                 ok = group.pdo->exchangeAll() && ok;
