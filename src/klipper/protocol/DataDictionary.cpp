@@ -6,6 +6,7 @@
 #include "tether/klipper/protocol/DataDictionary.hpp"
 #include "tether/klipper/KlipperLog.hpp"
 
+#include <charconv>
 #include <format>
 
 #ifdef TETHER_KLIPPER_HAS_ZLIB
