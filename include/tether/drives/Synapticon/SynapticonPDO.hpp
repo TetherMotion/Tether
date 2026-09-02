@@ -5,6 +5,42 @@
  * Packed structs and constexpr descriptors matching the PDO mappings defined
  * in the SOMANET_CiA_402_v5.1.9.xml ESI file.
  *
+ * ┌──────────────────────────────────────────────────────────────────────┐
+ * │  PDO LAYOUT — CRITICAL INFORMATION                                   │
+ * ├──────────────────────────────────────────────────────────────────────┤
+ * │                                                                      │
+ * │  The SOMANET drive uses ESI-defined PDO sizes:                       │
+ * │    0x1600 = 19 bytes, 0x1601 = 8 bytes, 0x1602 = 8 bytes            │
+ * │    0x1A00 = 13 bytes, 0x1A01 = 12 bytes, 0x1A02 = 4 bytes,         │
+ * │    0x1A03 = 18 bytes                                                │
+ * │    0x1700 = 11 bytes (FSoE RxPDO), 0x1B00 = 31 bytes (FSoE TxPDO)  │
+ * │                                                                      │
+ * │  COMBINED PDO CONFIGURATION (FSoE + motion):                         │
+ * │  ┌─────────────────────────────────────────────────────────────┐    │
+ * │  │ SM2 (Rx): [0x1700 (11B)][0x1600 (19B)][0x1601][0x1602]    │    │
+ * │  │ SM3 (Tx): [0x1B00 (31B)][0x1A00 (13B)][0x1A01][0x1A02]    │    │
+ * │  │                       [0x1A03]                             │    │
+ * │  └─────────────────────────────────────────────────────────────┘    │
+ * │                                                                      │
+ * │  FSoE PDOs COME FIRST in the assignment order.  This is critical     │
+ * │  because the Synapticon Circulo EtherCAT chip has a bug where the    │
+ * │  last word in the SM buffer is zeroed.  If the FSoE PDO were last,   │
+ * │  the ConnectionID (the final word of the FSoE frame) would be        │
+ * │  zeroed and the slave would reject every frame.  By placing the      │
+ * │  motion PDO last, the zeroed word falls on motion data, not the      │
+ * │  FSoE ConnectionID.                                                  │
+ * │  See: https://doc.synapticon.com/circulo_safe_motion/smm/            │
+ * │       ecat_fsoe_issues.htm                                           │
+ * │                                                                      │
+ * │  ALL PDOs (including 0x1700/0x1B00) are written explicitly to        │
+ * │  0x1C12/0x1C13.  The `fixed` flag is always false.                  │
+ * │                                                                      │
+ * │  SM REGISTER LENGTH = totalLength() (all PDOs).                      │
+ * │  FMMU LENGTH = totalLength() (all PDOs).                             │
+ * └──────────────────────────────────────────────────────────────────────┘
+ *
+ * ESI-defined PDO layouts (for application struct compatibility):
+ *
  * RxPDOs (master -> slave, SM2, ControlByte 0x64):
  *   0x1600  RxPDO Mapping 1  (19 bytes) — controlword, mode, torque, position, velocity, torque offset, tuning cmd
  *   0x1601  RxPDO Mapping 2  (8 bytes)  — physical outputs, bit mask
@@ -322,6 +358,26 @@ constexpr uint16_t kSM3TotalSize = TxPDO_1A00.size + TxPDO_1A01.size + TxPDO_1A0
 static_assert(kSM2TotalSize == 35, "SM2 total size must match ESI DefaultSize");
 static_assert(kSM3TotalSize == 47, "SM3 total size must match ESI DefaultSize");
 
+/// FSoE PDO offset within SM2 — FSoE comes FIRST (offset 0).
+/// This is critical: the Synapticon Circulo ESC has a bug where the last
+/// word in the SM buffer is zeroed.  If FSoE were last, the ConnectionID
+/// (final word of the FSoE frame) would be zeroed and the slave would
+/// reject every frame.  Motion PDOs come after FSoE so the zeroed word
+/// falls on motion data.
+/// See: https://doc.synapticon.com/circulo_safe_motion/smm/ecat_fsoe_issues.htm
+constexpr uint16_t kFSoERxPDOOffset = 0;
+/// Motion PDO offset within SM2 (after FSoE RxPDO)
+constexpr uint16_t kMotionRxPDOOffset = RxPDO_1700.size;   // 11
+/// FSoE PDO offset within SM3 — FSoE comes FIRST (offset 0).
+constexpr uint16_t kFSoETxPDOOffset = 0;
+/// Motion PDO offset within SM3 (after FSoE TxPDO)
+constexpr uint16_t kMotionTxPDOOffset = TxPDO_1B00.size;   // 31
+
+/// Combined SM2 length: FSoE + motion PDOs
+constexpr uint16_t kSM2CombinedSize = RxPDO_1700.size + kSM2TotalSize;   // 11 + 35 = 46
+/// Combined SM3 length: FSoE + motion PDOs
+constexpr uint16_t kSM3CombinedSize = TxPDO_1B00.size + kSM3TotalSize;   // 31 + 47 = 78
+
 // ============================================================================
 // Multi-PDO Assignment Builders
 // ============================================================================
@@ -338,9 +394,10 @@ static_assert(kSM3TotalSize == 47, "SM3 total size must match ESI DefaultSize");
 //   SM2 (11 bytes): 0x1700
 //   SM3 (31 bytes): 0x1B00
 //
-// The combined configuration assigns both standard and FSoE PDOs:
-//   SM2 (46 bytes): 0x1600 + 0x1601 + 0x1602 + 0x1700
-//   SM3 (78 bytes): 0x1A00 + 0x1A01 + 0x1A02 + 0x1A03 + 0x1B00
+// The combined configuration assigns both FSoE and standard PDOs, with
+// FSoE PDOs FIRST (critical for the Synapticon ESC bug — see comment above):
+//   SM2 (46 bytes): 0x1700 + 0x1600 + 0x1601 + 0x1602
+//   SM3 (78 bytes): 0x1B00 + 0x1A00 + 0x1A01 + 0x1A02 + 0x1A03
 
 /// Build a MultiPDOAssignment with all standard CiA 402 PDOs (no FSoE).
 /// SM2: 0x1600 + 0x1601 + 0x1602 (35 bytes)
@@ -379,6 +436,8 @@ inline Slave::MultiPDOAssignment makeStandardPDOAssignment() {
 /// Build a MultiPDOAssignment with only FSoE safety PDOs.
 /// SM2: 0x1700 (11 bytes)
 /// SM3: 0x1B00 (31 bytes)
+///
+/// FSoE PDOs are written explicitly to 0x1C12/0x1C13 (fixed=false).
 inline Slave::MultiPDOAssignment makeFSoEPDOAssignment() {
     Slave::MultiPDOAssignment assignment;
 
@@ -388,7 +447,7 @@ inline Slave::MultiPDOAssignment makeFSoEPDOAssignment() {
     sm2.phys_start_addr = kSM2PhysAddr;
     sm2.control_byte = kSM2ControlByte;
     sm2.pdo_mappings = {
-        {RxPDO_1700.index, RxPDO_1700.size},
+        {RxPDO_1700.index, RxPDO_1700.size, false},   // not fixed — written explicitly
     };
     assignment.sm_configs.push_back(std::move(sm2));
 
@@ -398,43 +457,58 @@ inline Slave::MultiPDOAssignment makeFSoEPDOAssignment() {
     sm3.phys_start_addr = kSM3PhysAddr;
     sm3.control_byte = kSM3ControlByte;
     sm3.pdo_mappings = {
-        {TxPDO_1B00.index, TxPDO_1B00.size},
+        {TxPDO_1B00.index, TxPDO_1B00.size, false},   // not fixed — written explicitly
     };
     assignment.sm_configs.push_back(std::move(sm3));
 
     return assignment;
 }
 
-/// Build a MultiPDOAssignment with standard CiA 402 + FSoE safety PDOs.
-/// SM2: 0x1600 + 0x1601 + 0x1602 + 0x1700 (46 bytes)
-/// SM3: 0x1A00 + 0x1A01 + 0x1A02 + 0x1A03 + 0x1B00 (78 bytes)
+/// Build a MultiPDOAssignment with FSoE + motion PDOs.
+///
+/// FSoE PDOs come FIRST, then motion PDOs.  This ordering is critical
+/// because the Synapticon Circulo EtherCAT chip has a bug where the last
+/// word in the SM buffer is zeroed.  If the FSoE PDO were last, the
+/// ConnectionID (the final word of the FSoE frame) would be zeroed and
+/// the slave would reject every frame.  By placing motion PDOs last, the
+/// zeroed word falls on motion data, not the FSoE ConnectionID.
+/// See: https://doc.synapticon.com/circulo_safe_motion/smm/ecat_fsoe_issues.htm
+///
+/// SM2 (Rx): [0x1700 (11B)][0x1600 (19B)][0x1601 (8B)][0x1602 (8B)] = 46 bytes
+/// SM3 (Tx): [0x1B00 (31B)][0x1A00 (13B)][0x1A01 (12B)][0x1A02 (4B)][0x1A03 (18B)] = 78 bytes
+///
+/// ALL PDOs (including FSoE) are written explicitly to 0x1C12/0x1C13.
+/// SM register length = totalLength() (all PDOs).
+/// FMMU length = totalLength() (all PDOs).
 inline Slave::MultiPDOAssignment makeCombinedPDOAssignment() {
     Slave::MultiPDOAssignment assignment;
 
-    // SM2 — Outputs + FSoE Control (master -> slave)
+    // SM2 — FSoE Control + Outputs (master -> slave)
+    // FSoE PDO first, then motion PDOs
     Slave::MultiPDOAssignment::SMConfig sm2;
     sm2.sm_index = 2;
     sm2.phys_start_addr = kSM2PhysAddr;
     sm2.control_byte = kSM2ControlByte;
     sm2.pdo_mappings = {
-        {RxPDO_1600.index, RxPDO_1600.size},
-        {RxPDO_1601.index, RxPDO_1601.size},
-        {RxPDO_1602.index, RxPDO_1602.size},
-        {RxPDO_1700.index, RxPDO_1700.size},
+        {RxPDO_1700.index, RxPDO_1700.size, false},   // FSoE first (11B)
+        {RxPDO_1600.index, RxPDO_1600.size, false},   // 19B
+        {RxPDO_1601.index, RxPDO_1601.size, false},   // 8B
+        {RxPDO_1602.index, RxPDO_1602.size, false},   // 8B
     };
     assignment.sm_configs.push_back(std::move(sm2));
 
-    // SM3 — Inputs + FSoE Status (slave -> master)
+    // SM3 — FSoE Status + Inputs (slave -> master)
+    // FSoE PDO first, then motion PDOs
     Slave::MultiPDOAssignment::SMConfig sm3;
     sm3.sm_index = 3;
     sm3.phys_start_addr = kSM3PhysAddr;
     sm3.control_byte = kSM3ControlByte;
     sm3.pdo_mappings = {
-        {TxPDO_1A00.index, TxPDO_1A00.size},
-        {TxPDO_1A01.index, TxPDO_1A01.size},
-        {TxPDO_1A02.index, TxPDO_1A02.size},
-        {TxPDO_1A03.index, TxPDO_1A03.size},
-        {TxPDO_1B00.index, TxPDO_1B00.size},
+        {TxPDO_1B00.index, TxPDO_1B00.size, false},   // FSoE first (31B)
+        {TxPDO_1A00.index, TxPDO_1A00.size, false},   // 13B
+        {TxPDO_1A01.index, TxPDO_1A01.size, false},   // 12B
+        {TxPDO_1A02.index, TxPDO_1A02.size, false},   // 4B
+        {TxPDO_1A03.index, TxPDO_1A03.size, false},   // 18B
     };
     assignment.sm_configs.push_back(std::move(sm3));
 
@@ -471,6 +545,10 @@ inline Slave::MultiPDOAssignment makeCSTModePDOAssignment() {
 
 /// Build a MultiPDOAssignment from an explicit list of RxPDO and TxPDO indices.
 /// Only known PDO indices (from the ESI) are included; unknown indices are skipped.
+///
+/// ALL PDOs (including 0x1700/0x1B00) are written explicitly to 0x1C12/0x1C13
+/// with fixed=false.  The drive accepts the full ESI PDO assignment.
+///
 /// @param rxpdo_indices  PDO indices to assign to SM2 (outputs)
 /// @param txpdo_indices  PDO indices to assign to SM3 (inputs)
 inline Slave::MultiPDOAssignment makePDOAssignment(
@@ -494,7 +572,7 @@ inline Slave::MultiPDOAssignment makePDOAssignment(
                 case 0x1700: sz = RxPDO_1700.size; break;
                 default: continue;  // skip unknown
             }
-            sm2.pdo_mappings.push_back({idx, sz});
+            sm2.pdo_mappings.push_back({idx, sz, false});  // fixed=false
         }
         if (!sm2.pdo_mappings.empty()) {
             assignment.sm_configs.push_back(std::move(sm2));
@@ -517,7 +595,7 @@ inline Slave::MultiPDOAssignment makePDOAssignment(
                 case 0x1B00: sz = TxPDO_1B00.size; break;
                 default: continue;  // skip unknown
             }
-            sm3.pdo_mappings.push_back({idx, sz});
+            sm3.pdo_mappings.push_back({idx, sz, false});  // fixed=false
         }
         if (!sm3.pdo_mappings.empty()) {
             assignment.sm_configs.push_back(std::move(sm3));

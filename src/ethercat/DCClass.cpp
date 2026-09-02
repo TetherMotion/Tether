@@ -155,6 +155,14 @@ bool EtherCATDC::start(std::function<bool()> pdo_exchange_fn) {
 }
 
 void EtherCATDC::stop() {
+    // Only log if we actually had a loop to stop.  This makes stop()
+    // idempotent — it's called from:
+    //   1. Explicit stopDistributedClocks() in the application
+    //   2. DCManager::~DCManager() destructor
+    //   3. EtherCATDC::~EtherCATDC() destructor
+    // Without this guard, each call logs "DC realtime loop stopped".
+    const bool had_loop = (realtime_loop_ != nullptr);
+
     if (realtime_loop_) {
         // Snapshot loop stats before destroying the loop
         auto loop_stats = realtime_loop_->getStats();
@@ -175,7 +183,9 @@ void EtherCATDC::stop() {
     // callers can call start() again without re-initializing.
     state_.store(DCState::Disabled, std::memory_order_release);
 
-    TETHER_LOGI(TAG, "DC realtime loop stopped");
+    if (had_loop) {
+        TETHER_LOGI(TAG, "DC realtime loop stopped");
+    }
 }
 
 DCLoopStats EtherCATDC::getStats() const {

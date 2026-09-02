@@ -1388,12 +1388,19 @@ bool PDOManager::exchangeSeparate(uint16_t slave_count) {
 
 bool PDOManager::exchangePhysical(uint16_t slave_count) {
     if (slave_count == 0) return true;
-    PDO::SlaveConfig* cfg = &slave_configs_[0];
-    if (!cfg || !cfg->configured) return false;
-
-    const auto& sm2 = cfg->sm[2];
-    const auto& sm3 = cfg->sm[3];
     bool fpwr_ok = true, fprd_ok = true;
+
+    // Iterate over all configured slaves (not just index 0).
+    // slave_count limits the range of indices to scan.
+    const uint16_t max_scan = (slave_count < PDO::kMaxPDOSlaves)
+                                  ? slave_count : PDO::kMaxPDOSlaves;
+
+    for (uint16_t si = 0; si < max_scan; si++) {
+        PDO::SlaveConfig* cfg = &slave_configs_[si];
+        if (!cfg || !cfg->configured) continue;
+
+        const auto& sm2 = cfg->sm[2];
+        const auto& sm3 = cfg->sm[3];
 
     // Build the RxPDO output buffer
     uint8_t out_buf[PDO::kMaxPDOSize] = {0};
@@ -1419,14 +1426,14 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
                 pos += static_cast<size_t>(std::snprintf(hex + pos, sizeof(hex) - pos, "%02X ", out_buf[b]));
             }
             if (rxPDODebug()) {
-                TETHER_LOGI(TAG, "[RxPDO-DEBUG] Physical write SM2: addr=0x%04x len=%u data=%s",
-                            sm2.phys_start_addr, sm2.length, hex);
+                TETHER_LOGI(TAG, "[RxPDO-DEBUG] Physical write SM2 (slave %u): addr=0x%04x len=%u data=%s",
+                            si, sm2.phys_start_addr, sm2.length, hex);
             } else {
                 // Decode CW and TargetPos from the buffer for clarity
                 uint16_t cw_val = static_cast<uint16_t>(out_buf[0] | (out_buf[1] << 8));
                 int32_t tp_val = static_cast<int32_t>(out_buf[2] | (out_buf[3] << 8) | (out_buf[4] << 16) | (out_buf[5] << 24));
-                TETHER_LOGI(TAG, "[RxPDO-WIRE] Cycle %u: CW=0x%04X TP=%ld | %s",
-                         static_cast<unsigned>(physical_stats_.fpwr_success), cw_val, (long)tp_val, hex);
+                TETHER_LOGI(TAG, "[RxPDO-WIRE] Slave %u Cycle %u: CW=0x%04X TP=%ld | %s",
+                         si, static_cast<unsigned>(physical_stats_.fpwr_success), cw_val, (long)tp_val, hex);
             }
         }
     }
@@ -1437,11 +1444,13 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
     if (have_write && have_read) {
         // Batch both write and read into a single frame.
         // Use the slave's configured station address for FPWR/FPRD (not the
-        // auto-increment position).  Fall back to adpForSlaveIndex if no
-        // configured address was set.
-        const uint16_t adp = (cfg->configured_address != 0)
+        // auto-increment position).  The configured station address is read
+        // from register 0x0010 during configureMultiPDOs().
+        // Note: 0x0000 is a valid configured station address — only fall back
+        // to auto-increment if the slave was not configured at all.
+        const uint16_t adp = cfg->configured
                                  ? cfg->configured_address
-                                 : transport_.adpForSlaveIndex(0);
+                                 : transport_.adpForSlaveIndex(si);
         const uint8_t write_idx = transport_.allocIdx();
         const uint8_t read_idx = transport_.allocIdx();
 
@@ -1471,7 +1480,9 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
                 transport_.waitForPreRegistered(read_slot, 0, read_resp);  // cancel
             physical_stats_.fpwr_wkc_errors++;
             physical_stats_.fprd_wkc_errors++;
-            return false;
+            fpwr_ok = false;
+            fprd_ok = false;
+            continue;
         }
 
         // Wait for write response
@@ -1504,8 +1515,8 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
                 for (size_t b = 0; b < dump_len && pos + 3 < sizeof(hex); b++) {
                     pos += static_cast<size_t>(std::snprintf(hex + pos, sizeof(hex) - pos, "%02X ", read_resp.data[b]));
                 }
-                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3: addr=0x%04x len=%u data=%s",
-                            sm3.phys_start_addr, sm3.length, hex);
+                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3 (slave %u): addr=0x%04x len=%u data=%s",
+                            si, sm3.phys_start_addr, sm3.length, hex);
             }
             for (size_t i = 0; i < mapping_.entry_count(); i++) {
                 PDO::PDOEntry* e = mapping_.get_entry_mut(i);
@@ -1523,13 +1534,13 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
             physical_stats_.fprd_wkc_errors++;
             fprd_ok = false;
             if (txPDODebug()) {
-                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3 FAILED: addr=0x%04x len=%u",
-                            sm3.phys_start_addr, sm3.length);
+                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3 FAILED (slave %u): addr=0x%04x len=%u",
+                            si, sm3.phys_start_addr, sm3.length);
             }
         }
     } else if (have_write) {
         // Write only — uses APWR via writeRegister (position-based addressing)
-        if (transport_.writeRegister(transport_.adpForSlaveIndex(0),
+        if (transport_.writeRegister(transport_.adpForSlaveIndex(si),
                          sm2.phys_start_addr, out_buf, sm2.length, 50)) {
             physical_stats_.fpwr_success++;
         } else {
@@ -1539,7 +1550,7 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
     } else if (have_read) {
         // Read only — uses APRD via readRegister (position-based addressing)
         uint8_t in_buf[PDO::kMaxPDOSize] = {0};
-        if (transport_.readRegister(transport_.adpForSlaveIndex(0),
+        if (transport_.readRegister(transport_.adpForSlaveIndex(si),
                         sm3.phys_start_addr, in_buf, sm3.length, 50)) {
             physical_stats_.fprd_success++;
             if (txPDODebug()) {
@@ -1549,8 +1560,8 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
                 for (size_t b = 0; b < dump_len && pos + 3 < sizeof(hex); b++) {
                     pos += static_cast<size_t>(std::snprintf(hex + pos, sizeof(hex) - pos, "%02X ", in_buf[b]));
                 }
-                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3: addr=0x%04x len=%u data=%s",
-                            sm3.phys_start_addr, sm3.length, hex);
+                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3 (slave %u): addr=0x%04x len=%u data=%s",
+                            si, sm3.phys_start_addr, sm3.length, hex);
             }
             for (size_t i = 0; i < mapping_.entry_count(); i++) {
                 PDO::PDOEntry* e = mapping_.get_entry_mut(i);
@@ -1568,11 +1579,12 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
             physical_stats_.fprd_wkc_errors++;
             fprd_ok = false;
             if (txPDODebug()) {
-                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3 FAILED: addr=0x%04x len=%u",
-                            sm3.phys_start_addr, sm3.length);
+                TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3 FAILED (slave %u): addr=0x%04x len=%u",
+                            si, sm3.phys_start_addr, sm3.length);
             }
         }
     }
+    }  // end for each slave
     stats_.total_cycles++;
     return fpwr_ok && fprd_ok;
 }

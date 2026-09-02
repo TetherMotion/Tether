@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <cstring>
 #include "tether/ethercat/Slave.hpp"
+#include "tether/fsoe/FSoEHelpers.hpp"
 #include "logging/Logger.hpp"
 
 namespace EtherCAT {
@@ -231,18 +232,12 @@ struct SafetyDiagnosticReport {
 // Decoding helpers
 // ---------------------------------------------------------------------------
 
-/// Decode the FSoE command byte to a human-readable name.
-inline const char* fsoeCommandName(uint8_t cmd) {
-    switch (cmd) {
-        case kFSoECmdReset:      return "Reset(0x2A)";
-        case kFSoECmdSession:    return "Session(0x4E)";
-        case kFSoECmdConnection: return "Connection(0x36)";
-        case kFSoECmdParameter:  return "Parameter(0x08)";
-        case kFSoECmdData:       return "Data(0x14)";
-        case 0x00:               return "FailSafe(0x00)";
-        default:                 return "Unknown";
-    }
-}
+/// Re-use the generic FSoE command name decoder from the FSoE driver.
+/// (The kFSoECmd* constants above are kept for SDO diagnostic reference,
+///  but the name decoder uses the canonical ETG.5100 values from
+///  FSoE::Command in FSoEDefs.hpp, which are verified by the protocol
+///  implementation in FSoESlave.cpp / FSoEMasterConnection.cpp.)
+using FSoE::fsoeCommandName;
 
 /// Decode safety status byte 1 (0x6621:1) bit flags.
 /// Bit layout per Synapticon SMM documentation:
