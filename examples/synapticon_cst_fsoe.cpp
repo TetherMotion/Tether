@@ -2173,24 +2173,38 @@ int main(int argc, char** argv) {
         // and to get raw bit=1, we set it to false (inactive).
         if (args.sto_override >= 0 || args.sbc_override >= 0) {
             auto cmd = fsoe_main->command();
-            if (args.sto_override >= 0) {
-                // setZeroActive: bit=0 when active=true, bit=1 when active=false
-                cmd.sto = (args.sto_override == 0);  // 0→true(bit=0), 1→false(bit=1)
-                TETHER_LOGI(TAG,
-                    "[safety-command] Setting raw STO bit=%d (cmd.sto=%s → 0-active: %s)",
-                    args.sto_override,
-                    cmd.sto ? "true" : "false",
-                    args.sto_override == 0 ? "STO active (torque off)" : "STO inactive (torque allowed)");
+
+            // Determine the raw bit value to apply to ALL zero-active safety
+            // bits.  STO and SBC must agree; if only one is given, the other
+            // defaults to the same value.  All other zero-active fields
+            // (SS1, SS2, SOS, SLS1-4) are set to the same raw bit value.
+            int raw_bit;
+            if (args.sto_override >= 0 && args.sbc_override >= 0) {
+                raw_bit = args.sto_override;  // both must match anyway
+            } else if (args.sto_override >= 0) {
+                raw_bit = args.sto_override;
+            } else {
+                raw_bit = args.sbc_override;
             }
-            if (args.sbc_override >= 0) {
-                // setZeroActive: bit=0 when active=true, bit=1 when active=false
-                cmd.brake_engage = (args.sbc_override == 0);  // 0→true(bit=0), 1→false(bit=1)
-                TETHER_LOGI(TAG,
-                    "[safety-command] Setting raw SBC bit=%d (cmd.brake_engage=%s → 0-active: %s)",
-                    args.sbc_override,
-                    cmd.brake_engage ? "true" : "false",
-                    args.sbc_override == 0 ? "SBC active (brake engaged)" : "SBC inactive (brake released)");
-            }
+
+            // setZeroActive: bit=0 when active=true, bit=1 when active=false
+            const bool active = (raw_bit == 0);
+
+            cmd.sto           = active;
+            cmd.ss1           = active;
+            cmd.ss2           = active;
+            cmd.sos           = active;
+            cmd.sls           = {{active, active, active, active}};
+            cmd.brake_engage  = active;
+
+            TETHER_LOGI(TAG,
+                "[safety-command] Setting ALL zero-active safety bits to raw bit=%d "
+                "(active=%s → %s)",
+                raw_bit,
+                active ? "true" : "false",
+                active ? "ALL safety functions ACTIVE (safe state)"
+                       : "ALL safety functions INACTIVE (motion enabled)");
+
             fsoe_main->setCommand(cmd);
         }
 
