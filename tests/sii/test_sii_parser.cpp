@@ -103,19 +103,30 @@ public:
                           const void* data, uint16_t len, unsigned int ms) {
             if (simulate_failure_) return false;
             
-            // Capture EEPROM read command address (2-byte EEPCTL protocol)
-            if (ado == 0x0502 && data && len >= 2) {
-                uint16_t eepctl_le = 0;
-                std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
-                last_cmd_addr_ = static_cast<uint16_t>(eepctl_le & 0x00FFu);
+            // Capture EEPROM address from EEPADDR write (0x0504)
+            if (ado == 0x0504 && data && len >= 2) {
+                uint16_t addr_le = 0;
+                std::memcpy(&addr_le, data, sizeof(addr_le));
+                last_cmd_addr_ = le16_to_host(addr_le);
                 return true;
             }
+            // EEPCTL write (0x0502) — just acknowledge
+            // EEPConfig write (0x0500) — just acknowledge
             return true;
         });
         
         master.setAprdTestCallback([this](uint16_t adp, uint16_t ado,
                           void* out, uint16_t len, unsigned int ms) {
             if (simulate_failure_) return false;
+            
+            // EEPConfig (0x0500): ECAT has control (bit 0 = 0)
+            if (ado == 0x0500) {
+                if (out && len >= 1) {
+                    uint8_t cfg = 0x00;  // ECAT control
+                    std::memcpy(out, &cfg, 1);
+                }
+                return true;
+            }
             
             // EEPSTAT: indicate not busy
             if (ado == 0x0502) {

@@ -5,6 +5,7 @@
 #include "tether/ethercat/SIIRegisters.hpp"
 #include "tether/slave/core/SIIStateSlave.hpp"
 #include <cstring>
+#include "ethercat/raw/internal.hpp"
 
 using namespace EtherCAT::SII;
 
@@ -13,8 +14,8 @@ static constexpr uint16_t EC_REG_EEPCTL   = 0x0502;
 static constexpr uint16_t EC_REG_EEPSTAT  = 0x0502;
 static constexpr uint16_t EC_REG_EEPDAT   = 0x0508;
 static constexpr uint16_t EC_ECMD_READ    = 0x0100;
-static constexpr uint16_t EC_ESTAT_BUSY   = 0x8000;
-static constexpr uint16_t EC_ESTAT_EMASK  = 0x7800;
+static constexpr uint16_t EC_ESTAT_BUSY   = 0x8000;  // Bit 15 (per ETG.1000.4)
+static constexpr uint16_t EC_ESTAT_EMASK  = 0x7800;  // Bits 14-11
 static constexpr uint16_t EC_ESTAT_CRC_ERR = 0x0800;
 static constexpr uint16_t EC_ESTAT_NACK   = 0x2000;
 
@@ -32,6 +33,13 @@ TEST(SiiErrorHandling, CrcErrorAfterBusyClear_ReadRaw32Fails) {
     int poll_count = 0;
     master.setAprdTestCallback([&](uint16_t adp, uint16_t ado, void* out, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)len; (void)ms;
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
         if (ado == EC_REG_EEPSTAT && out != nullptr) {
             // First poll (pre-wait): not busy, no errors
             // Subsequent polls (post-wait): not busy, but CRC error set
@@ -73,6 +81,13 @@ TEST(SiiErrorHandling, NackError_RetriesAndFails) {
 
     master.setAprdTestCallback([&](uint16_t adp, uint16_t ado, void* out, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)len; (void)ms;
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
         if (ado == EC_REG_EEPSTAT && out != nullptr) {
             uint16_t estat = EC_ESTAT_NACK;
             memcpy(out, &estat, sizeof(estat));
@@ -105,6 +120,13 @@ TEST(SiiErrorHandling, NoBlindDelay_ReadSucceedsOnFirstPoll) {
 
     master.setAprdTestCallback([&](uint16_t adp, uint16_t ado, void* out, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)len; (void)ms;
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
         if (ado == EC_REG_EEPSTAT && out != nullptr) {
             uint16_t estat = 0; // not busy, no errors — immediate success
             memcpy(out, &estat, sizeof(estat));
@@ -181,16 +203,23 @@ TEST(SiiErrorHandling, ZeroCategoryHeader_TreatedAsEnd) {
 
     master.setApwrTestCallback([&](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms; (void)len;
-        if (ado == EC_REG_EEPCTL && data && len >= 2) {
-            uint16_t eepctl_le = 0;
-            std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
-            *last_cmd_addr = static_cast<uint16_t>(eepctl_le & 0x00FFu);
+        if (ado == 0x0504 && data && len >= 2) {
+            uint16_t addr_le = 0;
+            std::memcpy(&addr_le, data, sizeof(addr_le));
+            *last_cmd_addr = EtherCAT::Raw::le16_to_host(addr_le);
         }
         return true;
     });
 
     master.setAprdTestCallback([&](uint16_t adp, uint16_t ado, void* out, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms;
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
         if (ado == EC_REG_EEPSTAT && out && len >= 2) {
             uint16_t ok = 0;
             memcpy(out, &ok, 2);
@@ -238,16 +267,23 @@ TEST(SiiErrorHandling, EepromSizeBoundary_LimitsCategoryParsing) {
 
     master.setApwrTestCallback([&](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms; (void)len;
-        if (ado == EC_REG_EEPCTL && data && len >= 2) {
-            uint16_t eepctl_le = 0;
-            std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
-            *last_cmd_addr = static_cast<uint16_t>(eepctl_le & 0x00FFu);
+        if (ado == 0x0504 && data && len >= 2) {
+            uint16_t addr_le = 0;
+            std::memcpy(&addr_le, data, sizeof(addr_le));
+            *last_cmd_addr = EtherCAT::Raw::le16_to_host(addr_le);
         }
         return true;
     });
 
     master.setAprdTestCallback([&](uint16_t adp, uint16_t ado, void* out, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms;
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
         if (ado == EC_REG_EEPSTAT && out && len >= 2) {
             uint16_t ok = 0;
             memcpy(out, &ok, 2);

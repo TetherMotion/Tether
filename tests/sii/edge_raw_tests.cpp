@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "sii/SIIReader.hpp"
 #include "tether/ethercat/Master.hpp"
+#include "ethercat/raw/internal.hpp"
 
 using namespace EtherCAT::SII;
 
@@ -19,18 +20,25 @@ TEST(EdgeRaw, BusyThenSuccess_ReadDWordSucceedsAfterRetries) {
 
     master.setApwrTestCallback([=](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms; (void)len;
-        if (ado == EC_REG_EEPCTL && data && len >= 2) {
-            uint16_t eepctl_le = 0;
-            std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
-            *last_cmd_addr = static_cast<uint16_t>(eepctl_le & 0x00FFu);
+        if (ado == 0x0504 && data && len >= 2) {
+            uint16_t addr_le = 0;
+            std::memcpy(&addr_le, data, sizeof(addr_le));
+            *last_cmd_addr = EtherCAT::Raw::le16_to_host(addr_le);
         }
         return true;
     });
 
     master.setAprdTestCallback([=](uint16_t adp, uint16_t ado, void* out, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms;
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
         if (ado == EC_REG_EEPSTAT && out && len >= 2) {
-            // return BUSY flag (EC_ESTAT_BUSY) for two polls, then clear
+            // return BUSY flag (EC_ESTAT_BUSY = bit 15 per ETG.1000.4) for two polls, then clear
             if (*busy_calls < 2) {
                 uint16_t busy = static_cast<uint16_t>(0x8000); memcpy(out, &busy, 2); (*busy_calls)++; return true;
             }
@@ -68,6 +76,13 @@ TEST(EdgeRaw, BusyThenNack_ReadDWordFailsWhenNackObserved) {
 
     master.setAprdTestCallback([=](uint16_t adp, uint16_t ado, void* out, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms;
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
         if (ado == EC_REG_EEPSTAT && out && len >= 2) {
             if (*busy_calls < 2) { uint16_t busy = static_cast<uint16_t>(0x8000); memcpy(out, &busy, 2); (*busy_calls)++; return true; }
             uint16_t nack = EC_ESTAT_NACK; memcpy(out, &nack, 2); return true;
@@ -95,6 +110,13 @@ TEST(EdgeRaw, PartialEepdat_ReadDWordFailsOnShortData) {
 
     master.setAprdTestCallback([=](uint16_t adp, uint16_t ado, void* out, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms;
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
         if (ado == EC_REG_EEPSTAT && out && len >= 2) { uint16_t ok = 0; memcpy(out, &ok, 2); return true; }
         if (ado == EC_REG_EEPDAT && out && len >= 2) {
             // provide only 2 bytes (partial), rest left unchanged
@@ -122,8 +144,16 @@ TEST(EdgeRaw, AprdTransportFailure_ReadDWordFailsWhenAprdReturnsFalse) {
     });
 
     master.setAprdTestCallback([=](uint16_t adp, uint16_t ado, void* out, uint16_t len, unsigned int ms)->bool {
-        (void)adp; (void)out; (void)len; (void)ms; (void)ado;
-        // Simulate a transport failure
+        (void)adp; (void)out; (void)len; (void)ms;
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
+        // Simulate a transport failure for all other registers
+        (void)ado;
         return false;
     });
 
@@ -143,15 +173,22 @@ TEST(EdgeRaw, MisalignedReadBytes_CrossesDWordBoundaryCorrectly) {
 
     master.setApwrTestCallback([=](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms; (void)len;
-        if (ado == EC_REG_EEPCTL && data && len >= 2) {
-            uint16_t eepctl_le = 0; std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
-            *last_cmd_addr = static_cast<uint16_t>(eepctl_le & 0x00FFu);
+        if (ado == 0x0504 && data && len >= 2) {
+            uint16_t addr_le = 0; std::memcpy(&addr_le, data, sizeof(addr_le));
+            *last_cmd_addr = EtherCAT::Raw::le16_to_host(addr_le);
         }
         return true;
     });
 
     master.setAprdTestCallback([=](uint16_t adp, uint16_t ado, void* out, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms;
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
         if (ado == EC_REG_EEPSTAT && out && len >= 2) { uint16_t ok = 0; memcpy(out, &ok, 2); return true; }
         if (ado == EC_REG_EEPDAT && out && len >= 4) {
             // return specific dwords for addresses 0 and 2 (aligned reads use even addresses)
@@ -183,15 +220,22 @@ TEST(EdgeRaw, ReadWordsMultiple_ReadsMultipleWordsCorrectly) {
 
     master.setApwrTestCallback([=](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms; (void)len;
-        if (ado == EC_REG_EEPCTL && data && len >= 2) {
-            uint16_t eepctl_le = 0; std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
-            *last_cmd_addr = static_cast<uint16_t>(eepctl_le & 0x00FFu);
+        if (ado == 0x0504 && data && len >= 2) {
+            uint16_t addr_le = 0; std::memcpy(&addr_le, data, sizeof(addr_le));
+            *last_cmd_addr = EtherCAT::Raw::le16_to_host(addr_le);
         }
         return true;
     });
 
     master.setAprdTestCallback([=](uint16_t adp, uint16_t ado, void* out, uint16_t len, unsigned int ms)->bool {
         (void)adp; (void)ms;
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
         if (ado == EC_REG_EEPSTAT && out && len >= 2) { uint16_t ok = 0; memcpy(out, &ok, 2); return true; }
         if (ado == EC_REG_EEPDAT && out && len >= 4) {
             // produce deterministic dword based on last_cmd_addr
