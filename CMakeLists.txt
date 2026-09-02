@@ -241,10 +241,12 @@ option(TETHER_ENABLE_KLIPPER_CAN "Enable Klipper CAN transport (requires SocketC
 option(TETHER_ENABLE_PRESSURE_ADVANCE "Enable pressure advance for extruders (compile-time; runtime opt-in)" ON)
 
 # Native HTTP/WebSocket server for Mainsail/Fluidd (requires Drogon).
-# Default: ON if Drogon is found, OFF if not.
+# Default: ON only if both Drogon and jsoncpp are found on the system.
 # Hard error if user forces ON but Drogon is unavailable.
-# Note: Drogon depends on jsoncpp; if jsoncpp dev headers are missing,
-# we FetchContent jsoncpp so Drogon's CMake config can find it.
+# Note: Drogon depends on jsoncpp. We do NOT vendor/fetch jsoncpp — if it
+# isn't installed system-wide, the Drogon-dependent features (klipper HTTP
+# server, Drogon-based examples) are simply disabled. Install jsoncpp-dev
+# (and libdrogon-dev) to enable them.
 find_package(Jsoncpp QUIET)
 if(NOT Jsoncpp_FOUND)
     # Try pkg-config or manual detection as a fallback
@@ -254,32 +256,20 @@ if(NOT Jsoncpp_FOUND)
         set(Jsoncpp_FOUND TRUE)
     endif()
 endif()
-if(NOT Jsoncpp_FOUND AND NOT JSONCPP_INCLUDE_DIRS)
-    # FetchContent jsoncpp so Drogon's find_dependency(Jsoncpp) succeeds.
-    include(FetchContent)
-    FetchContent_Declare(jsoncpp
-        GIT_REPOSITORY https://github.com/open-source-parsers/jsoncpp.git
-        GIT_TAG 1.9.5)
-    FetchContent_MakeAvailable(jsoncpp)
-    # jsoncpp's CMake config exports target jsoncpp_lib
-    # Provide variables that Drogon's FindJsoncpp.cmake expects
-    set(JSONCPP_INCLUDE_DIRS ${jsoncpp_SOURCE_DIR}/include)
-    set(JSONCPP_LIBRARIES jsoncpp_lib)
-    set(Jsoncpp_FOUND TRUE)
-    # jsoncpp's CMake references ${PROJECT_BINARY_DIR}/include/json in its
-    # BUILD_INTERFACE include dirs, but that directory may not be created
-    # automatically. Create it to avoid CMake configuration errors.
-    file(MAKE_DIRECTORY ${jsoncpp_BINARY_DIR}/include/json)
+
+# Only attempt Drogon detection if jsoncpp is available — Drogon's CMake
+# config calls find_dependency(Jsoncpp) and will hard-fail otherwise.
+if(Jsoncpp_FOUND)
+    # Provide stub find modules for Drogon's optional DB dependencies (pg,
+    # SQLite3, MySQL) that may not be installed. The Debian Drogon package
+    # was built with these enabled, so its CMake config requires them.
+    # Tether's HTTP server does not use any database — these stubs satisfy
+    # find_dependency() so the config completes. They provide empty
+    # INTERFACE targets with no actual linkage.
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/drogon_compat")
+
+    find_package(Drogon QUIET)
 endif()
-
-# Provide stub find modules for Drogon's optional DB dependencies (pg, SQLite3,
-# MySQL) that may not be installed. The Debian Drogon package was built with
-# these enabled, so its CMake config requires them. Tether's HTTP server does
-# not use any database — these stubs satisfy find_dependency() so the config
-# completes. They provide empty INTERFACE targets with no actual linkage.
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/drogon_compat")
-
-find_package(Drogon QUIET)
 if(Drogon_FOUND)
     set(TETHER_ENABLE_KLIPPER_HTTP_DEFAULT ON)
 else()

@@ -88,11 +88,13 @@ Tether and Mainsail/Fluidd frontends.
 - `NotificationBridge` implements `NotificationSink` to fan out events to WS clients
 - `KlippyWsController` is a Drogon WebSocketController for the `/websocket` endpoint
 
-**Build:** Requires Drogon. Enabled automatically when Drogon is found, or
-explicitly with `-DTETHER_ENABLE_KLIPPER_HTTP=ON`. If jsoncpp dev headers are
-missing, the build system FetchContent's jsoncpp automatically. Stub CMake
-find modules for Drogon's optional DB dependencies (pg, SQLite3, MySQL, etc.)
-are provided in `cmake/drogon_compat/`.
+**Build:** Requires Drogon **and** jsoncpp, both installed system-wide
+(e.g. `apt install libdrogon-dev libjsoncpp-dev`). Enabled automatically
+when both are found, or explicitly with `-DTETHER_ENABLE_KLIPPER_HTTP=ON`.
+If either is missing, the klipper HTTP server and Drogon-based examples are
+silently disabled — they are NOT vendored/fetched by the build system.
+Stub CMake find modules for Drogon's optional DB dependencies (pg, SQLite3,
+MySQL, etc.) are provided in `cmake/drogon_compat/`.
 
 ### Interface Boundaries
 
