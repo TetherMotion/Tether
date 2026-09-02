@@ -76,7 +76,9 @@
 #include "tether/ethercat/FaultDetection.hpp"
 #include "tether/ethercat/Slave.hpp"
 #include "tether/fsoe/FSoEDefs.hpp"
+#include "tether/fsoe/FSoEHelpers.hpp"
 #include "tether/fsoe/Synapticon/SafeMotionFSoE.hpp"
+#include "tether/fsoe/Synapticon/FSoEPDODecoder.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include "tether/profiles/cia301/CiA402Defs.hpp"
 #include "tether/profiles/cia402/DS402Master.hpp"
@@ -186,56 +188,12 @@ constexpr size_t kSM3TotalLen = EtherCAT::Drives::Synapticon_pdo::kSM3CombinedSi
 
 using FSoEMain = EtherCAT::Drives::Synapticon::SafeMotion::MainInstance;
 
+// Reusable FSoE PDO decoding/logging helpers (from the Synapticon FSoE driver).
+namespace fsoe_dbg = EtherCAT::Drives::Synapticon::FSoEDebug;
+
 // ============================================================================
-// Decoded name helpers
+// General hex dump helper (used by the FSoE trace callback)
 // ============================================================================
-
-const char* fsoeStateName(uint8_t state) {
-    switch (state) {
-        case FSoE::ConnectionState::Reset:      return "RESET";
-        case FSoE::ConnectionState::Session:    return "SESSION";
-        case FSoE::ConnectionState::Connection: return "CONNECTION";
-        case FSoE::ConnectionState::Parameter:  return "PARAMETER";
-        case FSoE::ConnectionState::Data:       return "DATA";
-        case FSoE::ConnectionState::FailSafe:   return "FAILSAFE";
-        case FSoE::ConnectionState::Error:      return "ERROR";
-        default:                                return "UNKNOWN";
-    }
-}
-
-const char* fsoeErrorName(uint16_t code) {
-    switch (code) {
-        case FSoE::ErrorCode::NoError:           return "NoError";
-        case FSoE::ErrorCode::CommandError:      return "CommandError";
-        case FSoE::ErrorCode::CRCError:          return "CRCError";
-        case FSoE::ErrorCode::WatchdogError:     return "WatchdogError";
-        case FSoE::ErrorCode::SequenceError:     return "SequenceError";
-        case FSoE::ErrorCode::ConnectionIDError: return "ConnectionIDError";
-        case FSoE::ErrorCode::DataLengthError:   return "DataLengthError";
-        case FSoE::ErrorCode::ParameterError:    return "ParameterError";
-        case FSoE::ErrorCode::ApplicationError:  return "ApplicationError";
-        case FSoE::ErrorCode::TimeoutError:      return "TimeoutError";
-        case FSoE::ErrorCode::UnexpectedData:    return "UnexpectedData";
-        case FSoE::ErrorCode::SessionError:      return "SessionError";
-        case FSoE::ErrorCode::MasterTimeout:     return "MasterTimeout";
-        case FSoE::ErrorCode::SlaveTimeout:      return "SlaveTimeout";
-        case FSoE::ErrorCode::StartupError:      return "StartupError";
-        case FSoE::ErrorCode::CommChannelError:  return "CommChannelError";
-        default:                                 return "Unknown";
-    }
-}
-
-const char* fsoeCommandName(uint8_t cmd) {
-    switch (cmd) {
-        case FSoE::Command::ProcessData:    return "ProcessData(0x36)";
-        case FSoE::Command::Reset:          return "Reset(0x2A)";
-        case FSoE::Command::Session:        return "Session(0x4E)";
-        case FSoE::Command::Connection:     return "Connection(0x64)";
-        case FSoE::Command::Parameter:      return "Parameter(0x52)";
-        case FSoE::Command::FailSafeData:   return "FailSafeData(0x08)";
-        default:                            return "Unknown";
-    }
-}
 
 void hexDump(const char* tag, const char* label, const uint8_t* data, size_t len) {
     constexpr size_t kBytesPerLine = 16;
@@ -247,218 +205,6 @@ void hexDump(const char* tag, const char* label, const uint8_t* data, size_t len
         }
         TETHER_LOGI(tag, "  %s [%3zu/%3zu]: %s", label, i, len, hex);
     }
-}
-
-// ============================================================================
-// FSoE frame decoder (--debug fsoe-frame)
-// ============================================================================
-//
-// Decodes the device-specific Synapticon FSoE PDO structs into named fields,
-// showing the FSoE protocol data as the drive sees it (not raw hex).
-//
-// The most important safety signals — STO (Safe Torque Off) and SBC (Safe
-// Brake Control) — are shown FIRST with ANSI color coding:
-//   green = safe (bit set / enabled)
-//   red   = unsafe (bit clear / disabled)
-// Raw hex bytes are shown AFTER the decoded meaning.
-
-// ANSI color codes for terminal output
-static constexpr const char* kAnsGreen  = "\033[32m";
-static constexpr const char* kAnsRed    = "\033[31m";
-static constexpr const char* kAnsYellow = "\033[33m";
-static constexpr const char* kAnsBold   = "\033[1m";
-static constexpr const char* kAnsReset  = "\033[0m";
-
-/// Format a safety bit as green (set=safe) or red (clear=unsafe).
-/// Returns a string like "ON" or "OFF" with ANSI color prefix.
-static void formatSafetyBit(char* buf, size_t bufsize, bool set, const char* name) {
-    if (set) {
-        snprintf(buf, bufsize, "%s%s=%sON%s", kAnsGreen, name, kAnsBold, kAnsReset);
-    } else {
-        snprintf(buf, bufsize, "%s%s=%sOFF%s", kAnsRed, name, kAnsBold, kAnsReset);
-    }
-}
-
-/// Append a flag name to buf if the bit is set.
-static void appendFlag(char* buf, size_t bufpos, size_t bufsize,
-                       bool set, const char* name) {
-    if (!set) return;
-    // Prepend a space if buf is non-empty (not the first flag)
-    if (bufpos > 0 && bufpos + 1 < bufsize) {
-        buf[bufpos++] = ' ';
-        buf[bufpos] = '\0';
-    }
-    size_t len = strlen(name);
-    if (bufpos + len < bufsize) {
-        memcpy(buf + bufpos, name, len);
-        bufpos += len;
-        buf[bufpos] = '\0';
-    }
-}
-
-/// Format raw hex bytes from a buffer into a string.
-static void formatHex(char* buf, size_t bufsize, const uint8_t* data, size_t len) {
-    size_t pos = 0;
-    for (size_t b = 0; b < len && pos + 3 < bufsize; b++) {
-        pos += static_cast<size_t>(snprintf(buf + pos, bufsize - pos, "%02X ", data[b]));
-    }
-    if (pos > 0 && pos < bufsize) buf[pos - 1] = '\0';  // trim trailing space
-}
-
-/// Decode the master→slave FSoE frame from the Synapticon RxPDO 0x1700 struct.
-/// Shows STO/SBC command status FIRST (green=safe, red=unsafe), then raw hex.
-///
-/// IMPORTANT: In the master→slave direction, STO/SS1/SS2/SOS/SLS/SBC use
-/// **zero-active** encoding (bit=0 → active/safe, bit=1 → inactive/unsafe).
-/// ErrorAck, RestartAck, ResetPosition use one-active encoding (bit=1 → active).
-/// The display inverts zero-active bits so that "ON" (green) always means
-/// the safety function is active (safe).
-void dumpFSoERxPDO(const char* tag, const FSoERxPDO& rx) {
-    // --- STO and SBC are what we care about most — show them FIRST ---
-    // Zero-active: bit=0 → active (safe), bit=1 → inactive (unsafe)
-    const bool sto_active = (rx.safety_flags & FSoERxPDO::kSTO) == 0;
-    const bool sbc_active = (rx.safety_flags & FSoERxPDO::kSBCCommand) == 0;
-
-    char sto_str[64], sbc_str[64];
-    formatSafetyBit(sto_str, sizeof(sto_str), sto_active, "STO");
-    formatSafetyBit(sbc_str, sizeof(sbc_str), sbc_active, "SBC");
-
-    TETHER_LOGI(tag, "[fsoe-frame] TX→slave RxPDO 0x1700 (11 bytes):  "
-                     "%s  %s  cmd=%s  conn_id=0x%04X",
-                sto_str, sbc_str,
-                fsoeCommandName(rx.fsoe_command), rx.fsoe_connection_id);
-
-    // --- Other safety flags (secondary) ---
-    // Zero-active bits: SS1, SS2, SOS, SLS1-4 (bit=0 → active)
-    // One-active bits: ErrorAck, RestartAck, ResetPosition (bit=1 → active)
-    char flags[128] = {};
-    size_t pos = 0;
-    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & FSoERxPDO::kSS1) == 0, "SS1");
-    pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & FSoERxPDO::kSS2) == 0, "SS2");
-    pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & FSoERxPDO::kSOS) == 0, "SOS");
-    pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & FSoERxPDO::kSLS_Instance1) == 0, "SLS1");
-    pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & FSoERxPDO::kSLS_Instance2) == 0, "SLS2");
-    pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & FSoERxPDO::kSLS_Instance3) == 0, "SLS3");
-    pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & FSoERxPDO::kSLS_Instance4) == 0, "SLS4");
-    pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kErrorAck, "ErrorAck");
-    pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kRestartAck, "RestartAck");
-    pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kResetPosition, "ResetPos");
-    TETHER_LOGI(tag, "  other_flags=0x%04X [%s]  crc0=0x%04X  crc1=0x%04X",
-                rx.safety_flags, flags[0] ? flags : "(none)",
-                rx.fsoe_crc_0, rx.fsoe_crc_1);
-
-    // --- Safe outputs ---
-    char outs[32] = {};
-    pos = 0;
-    appendFlag(outs, pos, sizeof(outs), rx.safe_outputs & FSoERxPDO::kSafeOutput1, "OUT1");
-    pos = strlen(outs);
-    appendFlag(outs, pos, sizeof(outs), rx.safe_outputs & FSoERxPDO::kSafeOutput2, "OUT2");
-    TETHER_LOGI(tag, "  safe_outputs=0x%02X [%s]", rx.safe_outputs,
-                outs[0] ? outs : "(none)");
-
-    // --- Raw hex LAST ---
-    char hex[64];
-    formatHex(hex, sizeof(hex), reinterpret_cast<const uint8_t*>(&rx), sizeof(FSoERxPDO));
-    TETHER_LOGI(tag, "  raw: %s", hex);
-}
-
-/// Decode the slave→master FSoE frame from the Synapticon TxPDO 0x1B00 struct.
-/// Shows STO/SBC feedback status FIRST (green=safe, red=unsafe), then raw hex.
-///
-/// In the slave→master direction, all flags use **one-active** encoding
-/// (bit=1 → active, bit=0 → inactive).  No inversion needed.
-void dumpFSoETxPDO(const char* tag, const FSoETxPDO& tx) {
-    // --- STO and SBC are what we care about most — show them FIRST ---
-    // One-active: bit=1 → active (safe), bit=0 → inactive (unsafe)
-    // STO state is in safety_state_flags bit 0
-    // SBC state is in diagnostic_flags bit 1
-    const bool sto_active = (tx.safety_state_flags & FSoETxPDO::kSTOState) != 0;
-    const bool sbc_active = (tx.diagnostic_flags & FSoETxPDO::kSBCState) != 0;
-
-    char sto_str[64], sbc_str[64];
-    formatSafetyBit(sto_str, sizeof(sto_str), sto_active, "STO");
-    formatSafetyBit(sbc_str, sizeof(sbc_str), sbc_active, "SBC");
-
-    TETHER_LOGI(tag, "[fsoe-frame] RX←slave TxPDO 0x1B00 (31 bytes):  "
-                     "%s  %s  cmd=%s  conn_id=0x%04X",
-                sto_str, sbc_str,
-                fsoeCommandName(tx.fsoe_command), tx.fsoe_connection_id);
-
-    // --- Safety state flags (secondary) ---
-    char sflags[128] = {};
-    size_t pos = 0;
-    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & FSoETxPDO::kSOSState, "SOS");
-    pos = strlen(sflags);
-    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & FSoETxPDO::kSS1State, "SS1");
-    pos = strlen(sflags);
-    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & FSoETxPDO::kSS2State, "SS2");
-    pos = strlen(sflags);
-    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & FSoETxPDO::kErrorState, "ERR");
-    pos = strlen(sflags);
-    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & FSoETxPDO::kSLSInstance1, "SLS1");
-    pos = strlen(sflags);
-    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & FSoETxPDO::kSLSInstance2, "SLS2");
-    pos = strlen(sflags);
-    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & FSoETxPDO::kSLSInstance3, "SLS3");
-    pos = strlen(sflags);
-    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & FSoETxPDO::kSLSInstance4, "SLS4");
-    TETHER_LOGI(tag, "  safety_state=0x%04X [%s]", tx.safety_state_flags,
-                sflags[0] ? sflags : "(none)");
-
-    // --- Diagnostic flags (secondary, excluding SBC which was shown above) ---
-    char dflags[160] = {};
-    pos = 0;
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kRestartAckReq, "RestartAckReq");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kTemperatureWarning, "TempWarn");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kSafePositionValid, "SafePosValid");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kSafeSpeedValid, "SafeSpdValid");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kSafeInput1, "In1");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kSafeInput2, "In2");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kSafeInput3, "In3");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kSafeInput4, "In4");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kSafeOutputMonitor1, "OutMon1");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kSafeOutputMonitor2, "OutMon2");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kAnalogDiagActive, "AnalogDiag");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & FSoETxPDO::kAnalogValueValid, "AnalogValid");
-    TETHER_LOGI(tag, "  diag=0x%04X [%s]", tx.diagnostic_flags,
-                dflags[0] ? dflags : "(none)");
-
-    TETHER_LOGI(tag,
-        "  crc0=0x%04X crc1=0x%04X crc2=0x%04X crc3=0x%04X "
-        "crc4=0x%04X crc5=0x%04X crc6=0x%04X",
-        tx.fsoe_crc_0, tx.fsoe_crc_1, tx.fsoe_crc_2, tx.fsoe_crc_3,
-        tx.fsoe_crc_4, tx.fsoe_crc_5, tx.fsoe_crc_6);
-    TETHER_LOGI(tag,
-        "  safe_pos=0x%04X  safe_pos_dup=0x%04X  "
-        "safe_vel=0x%04X  safe_vel_dup=0x%04X  safe_analog=0x%04X",
-        tx.safe_position_actual, tx.safe_position_actual_dup,
-        tx.safe_velocity_actual, tx.safe_velocity_actual_dup,
-        tx.safe_analog_value);
-
-    // --- Raw hex LAST ---
-    char hex[96];
-    formatHex(hex, sizeof(hex), reinterpret_cast<const uint8_t*>(&tx), sizeof(FSoETxPDO));
-    TETHER_LOGI(tag, "  raw: %s", hex);
 }
 
 // ============================================================================
@@ -604,7 +350,7 @@ public:
             static_cast<unsigned long long>(elapsed_ms_));
         TETHER_LOGI(TAG,
             "  state=%s(%u) operational=%d fail_safe=%d data_valid=%d",
-            fsoeStateName(status.state), status.state,
+            FSoE::fsoeStateName(status.state), status.state,
             status.isOperational() ? 1 : 0,
             status.isFailSafe() ? 1 : 0,
             status.data_valid ? 1 : 0);
@@ -615,7 +361,7 @@ public:
         if (status.hasError()) {
             TETHER_LOGW(TAG,
                 "  ERROR: 0x%04X (%s)",
-                status.error_code, fsoeErrorName(status.error_code));
+                status.error_code, FSoE::fsoeErrorName(status.error_code));
         }
         TETHER_LOGI(TAG,
             "  frames: tx=%u rx=%u | crc_err=%u seq_err=%u watchdog_evt=%u "
@@ -842,21 +588,13 @@ public:
         // --debug fsoe-raw: STO/SBC meaning first, then hex dump on change
         if (debug_raw_ && tx_changed) {
             const auto* tx_pdo = reinterpret_cast<const FSoETxPDO*>(tx_buffer);
-            const bool tx_sto = (tx_pdo->safety_state_flags & FSoETxPDO::kSTOState) != 0;
-            const bool tx_sbc = (tx_pdo->diagnostic_flags & FSoETxPDO::kSBCState) != 0;
-            char sto_str[64], sbc_str[64];
-            formatSafetyBit(sto_str, sizeof(sto_str), tx_sto, "STO");
-            formatSafetyBit(sbc_str, sizeof(sbc_str), tx_sbc, "SBC");
-            char hex[128];
-            formatHex(hex, sizeof(hex), tx_buffer, sizeof(FSoETxPDO));
-            TETHER_LOGI("fsoe-cyclic", "[TxPDO-FSoE slave→master] changed: %s  %s  cmd=%s  | %s",
-                        sto_str, sbc_str, fsoeCommandName(tx_pdo->fsoe_command), hex);
+            fsoe_dbg::dumpTxPDOSummary("fsoe-cyclic", *tx_pdo);
         }
 
         // --debug fsoe-frame: decoded struct dump on change
         if (debug_frame_ && tx_changed) {
             const auto* tx_pdo = reinterpret_cast<const FSoETxPDO*>(tx_buffer);
-            dumpFSoETxPDO(TAG, *tx_pdo);
+            fsoe_dbg::dumpTxPDO(TAG, *tx_pdo);
         }
 
         const bool ok = main_instance_.exchangeViaPDO(
@@ -874,21 +612,12 @@ public:
 
         if (debug_frame_ && rx_changed) {
             const auto* rx_pdo = reinterpret_cast<const FSoERxPDO*>(rx_buffer);
-            dumpFSoERxPDO(TAG, *rx_pdo);
+            fsoe_dbg::dumpRxPDO(TAG, *rx_pdo);
         }
 
         if (debug_raw_ && rx_changed) {
             const auto* rx_pdo = reinterpret_cast<const FSoERxPDO*>(rx_buffer);
-            // Zero-active: bit=0 → active (safe)
-            const bool rx_sto = (rx_pdo->safety_flags & FSoERxPDO::kSTO) == 0;
-            const bool rx_sbc = (rx_pdo->safety_flags & FSoERxPDO::kSBCCommand) == 0;
-            char sto_str[64], sbc_str[64];
-            formatSafetyBit(sto_str, sizeof(sto_str), rx_sto, "STO");
-            formatSafetyBit(sbc_str, sizeof(sbc_str), rx_sbc, "SBC");
-            char hex[128];
-            formatHex(hex, sizeof(hex), rx_buffer, sizeof(FSoERxPDO));
-            TETHER_LOGI("fsoe-cyclic", "[RxPDO-FSoE master→slave] changed: %s  %s  cmd=%s  | %s",
-                        sto_str, sbc_str, fsoeCommandName(rx_pdo->fsoe_command), hex);
+            fsoe_dbg::dumpRxPDOSummary("fsoe-cyclic", *rx_pdo);
         }
 
         return ok;
@@ -909,52 +638,8 @@ private:
     std::array<uint8_t, sizeof(FSoERxPDO)> last_rx_{};
 
     void dumpWire(const uint8_t* tx_buffer, const uint8_t* rx_buffer) {
-        // --- Show MEANING first: STO/SBC from both directions ---
-        const auto* tx_pdo = reinterpret_cast<const FSoETxPDO*>(tx_buffer);
-        const auto* rx_pdo = reinterpret_cast<const FSoERxPDO*>(rx_buffer);
-
-        // Slave feedback (TxPDO): one-active encoding
-        //   STO state in safety_state_flags bit 0 (bit=1 → active/safe)
-        //   SBC state in diagnostic_flags bit 1 (bit=1 → active/safe)
-        const bool tx_sto = (tx_pdo->safety_state_flags & FSoETxPDO::kSTOState) != 0;
-        const bool tx_sbc = (tx_pdo->diagnostic_flags & FSoETxPDO::kSBCState) != 0;
-
-        // Master command (RxPDO): zero-active encoding
-        //   STO in safety_flags bit 0 (bit=0 → active/safe)
-        //   SBC command in safety_flags bit 13 (bit=0 → active/safe)
-        const bool rx_sto = (rx_pdo->safety_flags & FSoERxPDO::kSTO) == 0;
-        const bool rx_sbc = (rx_pdo->safety_flags & FSoERxPDO::kSBCCommand) == 0;
-
-        // Format with color: green=safe(ON), red=unsafe(OFF)
-        char tx_sto_str[64], tx_sbc_str[64], rx_sto_str[64], rx_sbc_str[64];
-        formatSafetyBit(tx_sto_str, sizeof(tx_sto_str), tx_sto, "STO");
-        formatSafetyBit(tx_sbc_str, sizeof(tx_sbc_str), tx_sbc, "SBC");
-        formatSafetyBit(rx_sto_str, sizeof(rx_sto_str), rx_sto, "STO");
-        formatSafetyBit(rx_sbc_str, sizeof(rx_sbc_str), rx_sbc, "SBC");
-
-        TETHER_LOGI("fsoe-wire", "cycle %u:  RX←slave %s  %s  cmd=%s  |  TX→slave %s  %s  cmd=%s",
-                    cycle_count_,
-                    tx_sto_str, tx_sbc_str, fsoeCommandName(tx_pdo->fsoe_command),
-                    rx_sto_str, rx_sbc_str, fsoeCommandName(rx_pdo->fsoe_command));
-
-        // --- Raw hex LAST ---
-        char hex[256];
-        size_t pos;
-
-        // TxPDO (slave-to-master) -- full PDO buffer (FSoE + CST)
-        pos = 0;
-        for (size_t b = 0; b < kSM3TotalLen && pos + 3 < sizeof(hex); b++) {
-            pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", tx_buffer[b]));
-        }
-        TETHER_LOGI("fsoe-wire", "  [TxPDO full %zuB] %s", kSM3TotalLen, hex);
-
-        // RxPDO (master-to-slave) -- full PDO buffer (FSoE + CST)
-        pos = 0;
-        for (size_t b = 0; b < kSM2TotalLen && pos + 3 < sizeof(hex); b++) {
-            pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X ", rx_buffer[b]));
-        }
-        TETHER_LOGI("fsoe-wire", "  [RxPDO full %zuB] %s", kSM2TotalLen, hex);
-
+        fsoe_dbg::dumpWire("fsoe-wire", tx_buffer, rx_buffer,
+                           kSM2TotalLen, kSM3TotalLen, cycle_count_);
         cycle_count_++;
     }
 };
@@ -2245,7 +1930,7 @@ int main(int argc, char** argv) {
             [&signal_fsoe](uint8_t old_s, uint8_t new_s) {
                 TETHER_LOGI(TAG,
                     "[FSoE] state: %s -> %s",
-                    fsoeStateName(old_s), fsoeStateName(new_s));
+                    FSoE::fsoeStateName(old_s), FSoE::fsoeStateName(new_s));
                 if (new_s == FSoE::ConnectionState::Data) {
                     signal_fsoe(true);
                 } else if (new_s == FSoE::ConnectionState::Error) {
@@ -2257,11 +1942,11 @@ int main(int argc, char** argv) {
                 if (detail.message[0] != '\0') {
                     TETHER_LOGE(TAG,
                         "[FSoE] error: 0x%04X (%s): %s",
-                        code, fsoeErrorName(code), detail.message);
+                        code, FSoE::fsoeErrorName(code), detail.message);
                 } else {
                     TETHER_LOGE(TAG,
                         "[FSoE] error: 0x%04X (%s)",
-                        code, fsoeErrorName(code));
+                        code, FSoE::fsoeErrorName(code));
                 }
                 // Signal failure on critical errors (non-zero error code).
                 // Non-critical errors (NoError = 0x0000) are just diagnostic
@@ -2296,9 +1981,9 @@ int main(int argc, char** argv) {
                     TETHER_LOGI(TAG,
                         "[fsoe-seq] cycle %u: %s%s%s  cmd=0x%02X  %s%s  reason=%s",
                         info.cycle,
-                        fsoeStateName(info.state_before),
+                        FSoE::fsoeStateName(info.state_before),
                         arrow,
-                        fsoeStateName(info.state_after),
+                        FSoE::fsoeStateName(info.state_after),
                         info.rx_cmd,
                         info.frame_accepted ? "ACCEPTED" : "REJECTED",
                         info.tx_rebuilt ? " (tx rebuilt)" : "",
@@ -2337,7 +2022,7 @@ int main(int argc, char** argv) {
                             "CRC0=0x%04X | "
                             "CRC inputs: oldCRC=0x%04X conn_id=0x%04X "
                             "seq=%u cmd=0x%02X data[%zu]={%s}",
-                            fsoeStateName(info.state),
+                            FSoE::fsoeStateName(info.state),
                             info.command,
                             info.start_crc, info.seq_used,
                             info.crc0,
@@ -2375,7 +2060,7 @@ int main(int argc, char** argv) {
                                 "CRC0=0x%04X OK (expected=0x%04X) | "
                                 "CRC inputs: oldCRC=0x%04X conn_id=0x%04X "
                                 "seq=%u cmd=0x%02X data[%zu]={%s}%s",
-                                fsoeStateName(info.state),
+                                FSoE::fsoeStateName(info.state),
                                 info.command,
                                 info.start_crc, info.seq_used,
                                 info.crc0, expected_crc0,
@@ -2389,7 +2074,7 @@ int main(int argc, char** argv) {
                                 "CRC FAIL: received=0x%04X expected=0x%04X | "
                                 "CRC inputs: oldCRC=0x%04X conn_id=0x%04X "
                                 "seq=%u cmd=0x%02X data[%zu]={%s}",
-                                fsoeStateName(info.state),
+                                FSoE::fsoeStateName(info.state),
                                 info.command,
                                 info.start_crc, info.seq_expected,
                                 info.crc0, expected_crc0,
@@ -2416,7 +2101,7 @@ int main(int argc, char** argv) {
                     *last_tx = *data;
                     const uint8_t cmd = (!data->empty()) ? (*data)[0] : 0;
                     TETHER_LOGI(TAG, "[fsoe-raw] TX (master->slave) len=%zu cmd=%s",
-                                data->size(), fsoeCommandName(cmd));
+                                data->size(), FSoE::fsoeCommandName(cmd));
                     hexDump(TAG, "TX (master->slave)", data->data(), data->size());
                 });
             fsoe_main->rawConnection().rxFrameEvents().addListener(
@@ -2425,7 +2110,7 @@ int main(int argc, char** argv) {
                     *last_rx = *data;
                     const uint8_t cmd = (!data->empty()) ? (*data)[0] : 0;
                     TETHER_LOGI(TAG, "[fsoe-raw] RX (slave->master) len=%zu cmd=%s",
-                                data->size(), fsoeCommandName(cmd));
+                                data->size(), FSoE::fsoeCommandName(cmd));
                     hexDump(TAG, "RX (slave->master)", data->data(), data->size());
                 });
         }
@@ -2530,7 +2215,7 @@ int main(int argc, char** argv) {
             TETHER_LOGE(TAG,
                 "FSoE did not reach Data state within 5 s — "
                 "current state: %s.  Aborting drive enable.",
-                fsoeStateName(fsoe_main->rawConnection().getState()));
+                FSoE::fsoeStateName(fsoe_main->rawConnection().getState()));
             rc = 9;
         } else if (!fsoe_ready_future.get()) {
             TETHER_LOGE(TAG,

@@ -6,15 +6,15 @@
 
 namespace FSoE {
 
-/// Decode the FSoE command byte to a human-readable name.
+/// Decode the FSoE command byte to a human-readable name (with hex code).
 inline const char* fsoeCommandName(uint8_t cmd) {
     switch (cmd) {
-        case FSoE::Command::ProcessData:   return "ProcessData";
-        case FSoE::Command::Reset:         return "Reset";
-        case FSoE::Command::Session:       return "Session";
-        case FSoE::Command::Connection:    return "Connection";
-        case FSoE::Command::Parameter:     return "Parameter";
-        case FSoE::Command::FailSafeData:  return "FailSafeData";
+        case FSoE::Command::ProcessData:   return "ProcessData(0x36)";
+        case FSoE::Command::Reset:         return "Reset(0x2A)";
+        case FSoE::Command::Session:       return "Session(0x4E)";
+        case FSoE::Command::Connection:    return "Connection(0x64)";
+        case FSoE::Command::Parameter:     return "Parameter(0x52)";
+        case FSoE::Command::FailSafeData:  return "FailSafeData(0x08)";
         default:                            return "Unknown";
     }
 }
