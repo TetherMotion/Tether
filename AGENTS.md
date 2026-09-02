@@ -127,7 +127,7 @@ data stores). Transport layers are thin wrappers:
 
 Both transports share a single `KlippyServer` instance. See
 `examples/klipper_http.cpp` for a complete example running both
-transports, and `docs/MainsailDocker.md` for Docker deployment with Mainsail.
+transports and serving Mainsail/Fluidd static assets directly.
 
 ## Code Conventions
 

@@ -34,9 +34,6 @@
  *   - Start prints from the G-code browser (a sample file is generated)
  *   - Send G-code commands from the console
  *   - Monitor toolhead position, print progress, and fan speed
- *
- * Docker deployment (alternative):
- *   See docs/MainsailDocker.md for running Mainsail in a Docker container.
  */
 
 #include "tether/klipper/klippy/KlippyInstance.hpp"
