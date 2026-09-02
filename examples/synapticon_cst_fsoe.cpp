@@ -124,17 +124,14 @@ constexpr const char* TAG = "synapticon_cst_fsoe";
 
 // SM0 — master→slave write mailbox (ESI "MBoxOut", ControlByte 0x26)
 constexpr uint16_t kMailboxWriteAddr = EtherCAT::Drives::Synapticon::kMailboxWriteAddr;
-// NOTE: SOMANET_CiA_402_v5.1.9.xml ESI advertises 1024-byte mailbox buffers,
-// but the firmware (v5.1.7 and observed on current Synapticon drives) only
-// accepts 512 bytes.  Configuring 1024 causes the slave to reject the
-// mailbox configuration in PRE_OP with AL_STATUS_CODE 0x0016
-// ("Invalid mailbox configuration (PRE_OP)").  Use 512 — the value the
-// drive actually accepts.
-constexpr uint16_t kMailboxWriteSize = 512;
+// NOTE: The SOMANET ESI advertises 1024-byte mailbox buffers, but the
+// firmware only accepts 512 bytes.  The driver header now defines
+// kMailboxWriteSize/kMailboxReadSize as 512 to match the firmware.
+constexpr uint16_t kMailboxWriteSize = EtherCAT::Drives::Synapticon::kMailboxWriteSize;
 
 // SM1 — slave→master read mailbox (ESI "MBoxIn", ControlByte 0x22)
 constexpr uint16_t kMailboxReadAddr = EtherCAT::Drives::Synapticon::kMailboxReadAddr;
-constexpr uint16_t kMailboxReadSize = 512;
+constexpr uint16_t kMailboxReadSize = EtherCAT::Drives::Synapticon::kMailboxReadSize;
 
 // CoE | FoE
 constexpr uint16_t kMailboxProtocols = EtherCAT::Drives::Synapticon::kMailboxProtocols;

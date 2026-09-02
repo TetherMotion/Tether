@@ -64,10 +64,14 @@ inline constexpr bool isKnownProductCode(uint32_t product_code) {
 }
 
 // Mailbox configuration (from ESI Sm elements)
+// The SOMANET ESI advertises 1024-byte mailbox buffers, but the firmware
+// only accepts 512 bytes.  Configuring 1024 causes AL_STATUS_CODE 0x0016
+// ("Invalid mailbox configuration (PRE_OP)").  Use 512 — the value the
+// drive actually accepts.
 static constexpr uint16_t kMailboxWriteAddr = 0x1000;
-static constexpr uint16_t kMailboxWriteSize = 1024;
+static constexpr uint16_t kMailboxWriteSize = 512;
 static constexpr uint16_t kMailboxReadAddr  = 0x1400;
-static constexpr uint16_t kMailboxReadSize  = 1024;
+static constexpr uint16_t kMailboxReadSize  = 512;
 static constexpr uint16_t kMailboxProtocols = 0x000C;  // CoE | FoE
 static constexpr uint32_t kSdoTimeoutMs     = 6000;    // ESI ResponseTimeout
 
