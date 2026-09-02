@@ -25,21 +25,36 @@ static const char* TAG = "sii_reader";
 // ============================================================================
 
 // EEPROM control/status register
-static constexpr uint16_t EC_REG_EEPCTL   = 0x0502;
+static constexpr uint16_t EC_REG_EEPCFG   = 0x0500;  // EEPROM configuration
+static constexpr uint16_t EC_REG_EEPCTL   = 0x0502;  // EEPROM control/status
 static constexpr uint16_t EC_REG_EEPSTAT  = 0x0502;  // Same as EEPCTL
-static constexpr uint16_t EC_REG_EEPDAT   = 0x0508;
+static constexpr uint16_t EC_REG_EEPADDR  = 0x0504;  // EEPROM address
+static constexpr uint16_t EC_REG_EEPDAT   = 0x0508;  // EEPROM data
+
+// EEPROM configuration bits (0x0500)
+// Bit 0 (read-only): 1 = PDI has EEPROM control, 0 = ECAT has control
+// Bit 1 (write):     1 = force PDI to release EEPROM to ECAT
+static constexpr uint8_t  EC_EEPCFG_FORCE_RELEASE = 0x02;
+static constexpr uint8_t  EC_EEPCFG_ECAT_MASTER   = 0x00;
 
 // EEPROM commands
 static constexpr uint16_t EC_ECMD_NOP  = 0x0000;
 static constexpr uint16_t EC_ECMD_READ = 0x0100;
 
-// EEPROM status flags
-static constexpr uint16_t EC_ESTAT_BUSY     = 0x8000;
-static constexpr uint16_t EC_ESTAT_EMASK    = 0x7800;
-static constexpr uint16_t EC_ESTAT_CRC_ERR  = 0x0800;
-static constexpr uint16_t EC_ESTAT_LOAD_ERR = 0x1000;
-static constexpr uint16_t EC_ESTAT_NACK     = 0x2000;
-static constexpr uint16_t EC_ESTAT_WRITE_ERR = 0x4000;
+// EEPROM status flags (per ETG.1000.4 EEPSTAT register at 0x0502)
+// Bit 15: EEBP     - EEPROM busy (ECAT-side command in progress)
+// Bit 14: LOADEE   - EEPROM loading error
+// Bit 13: NACK     - EEPROM not acknowledged
+// Bit 12: WRERR    - EEPROM write error
+// Bit 11: CRCERR   - EEPROM CRC error
+// Bit  7: EEPSIZE  - EEPROM size indicator (always 1 if EEPROM present)
+// Bits 6-0: EEADR  - Current EEPROM address
+static constexpr uint16_t EC_ESTAT_BUSY      = 0x8000;  // Bit 15: EEPROM busy
+static constexpr uint16_t EC_ESTAT_EMASK     = 0x7800;  // Bits 14-11: error flags
+static constexpr uint16_t EC_ESTAT_CRC_ERR   = 0x0800;  // Bit 11: CRC error
+static constexpr uint16_t EC_ESTAT_LOAD_ERR  = 0x1000;  // Bit 12: loading error
+static constexpr uint16_t EC_ESTAT_NACK      = 0x2000;  // Bit 13: not acknowledged
+static constexpr uint16_t EC_ESTAT_WRITE_ERR = 0x4000;  // Bit 14: write error
 
 // ============================================================================
 // SIIReader Implementation
@@ -54,6 +69,193 @@ uint16_t SIIReader::adpForSlave(uint16_t slave_index) {
     // ADP for auto-increment addressing
     // Slave 0 = 0x0000, Slave 1 = 0xFFFF (-1), etc.
     return (slave_index == 0) ? 0x0000 : static_cast<uint16_t>(0 - slave_index);
+}
+
+bool SIIReader::getConfiguredStationAddr(uint16_t slave_index, uint16_t& addr,
+                                         bool force_assign) {
+    // Check cache first (skip cache if force_assign is true)
+    if (!force_assign) {
+        auto it = configured_addr_cache_.find(slave_index);
+        if (it != configured_addr_cache_.end()) {
+            addr = it->second;
+            return true;
+        }
+    }
+
+    const auto ap_addr = Master::slaveAddressFromADP(adpForSlave(slave_index));
+
+    // Read configured station address from ESC register 0x0010 via APRD.
+    // APRD works even on ESCs that reject APWR to EEPCTL.
+    uint16_t addr_le = 0;
+    if (!m_master.readRegister(ap_addr, 0x0010, addr_le, 200)) {
+        return false;
+    }
+    addr = Raw::le16_to_host(addr_le);
+
+    const bool dbg = m_master.debugFlags().eeprom &&
+                     m_master.debugFlags().eepromFilt.allows(slave_index);
+
+    // If the configured station address is 0x0000 (unassigned) or force_assign
+    // is set, write a unique address so FPWR targets only this slave.
+    // APWR to register 0x0010 works on ESCs that reject APWR to EEPCTL
+    // (the rejection is specific to the EEPROM control register, not APWR).
+    if (addr == 0x0000 || force_assign) {
+        uint16_t new_addr = static_cast<uint16_t>(0x0001u + slave_index);
+        uint16_t new_addr_le = Raw::host_to_le16(new_addr);
+        if (dbg) {
+            TETHER_LOGI(TAG, "EEPROM [slave %u]: writing configured station addr 0x%04X "
+                        "to reg 0x0010 (force=%d, old=0x%04X)",
+                        slave_index, new_addr, force_assign ? 1 : 0, addr);
+        }
+        if (!m_master.writeRegister(ap_addr, 0x0010,
+                                    &new_addr_le, sizeof(new_addr_le), 200)) {
+            return false;
+        }
+        addr = new_addr;
+    }
+
+    configured_addr_cache_[slave_index] = addr;
+    return true;
+}
+
+bool SIIReader::writeEepromReg(uint16_t slave_index, uint16_t reg_addr,
+                               const void* data, uint16_t len) {
+    const auto ap_addr = Master::slaveAddressFromADP(adpForSlave(slave_index));
+
+    const bool dbg = m_master.debugFlags().eeprom &&
+                     m_master.debugFlags().eepromFilt.allows(slave_index);
+
+    // If we already know APWR fails for this slave, use FPWR directly.
+    if (use_fpwr_slaves_.count(slave_index)) {
+        uint16_t cfg_addr = 0;
+        if (!getConfiguredStationAddr(slave_index, cfg_addr)) {
+            return false;
+        }
+        if (m_master.writeRegister(EtherCAT::LogicalAddress(cfg_addr),
+                                   reg_addr, data, len, 200)) {
+            return true;
+        }
+        // FPWR with cached address failed — try force-assigning a fresh address.
+        if (dbg) {
+            TETHER_LOGW(TAG, "EEPROM [slave %u]: FPWR to 0x%04X with addr 0x%04X failed, "
+                        "force-assigning fresh address", slave_index, reg_addr, cfg_addr);
+        }
+        if (!getConfiguredStationAddr(slave_index, cfg_addr, /*force_assign=*/true)) {
+            return false;
+        }
+        return m_master.writeRegister(EtherCAT::LogicalAddress(cfg_addr),
+                                      reg_addr, data, len, 200);
+    }
+
+    // Try APWR first (standard path, works on most ESCs).
+    if (m_master.writeRegister(ap_addr, reg_addr, data, len, 200)) {
+        return true;
+    }
+
+    // APWR failed (likely WKC=0) — fall back to FPWR using the
+    // configured station address.
+    if (dbg) {
+        TETHER_LOGI(TAG, "EEPROM [slave %u]: APWR to 0x%04X failed, trying FPWR fallback",
+                    slave_index, reg_addr);
+    }
+    uint16_t cfg_addr = 0;
+    if (!getConfiguredStationAddr(slave_index, cfg_addr)) {
+        return false;
+    }
+    if (m_master.writeRegister(EtherCAT::LogicalAddress(cfg_addr),
+                               reg_addr, data, len, 200)) {
+        use_fpwr_slaves_.insert(slave_index);
+        return true;
+    }
+
+    // FPWR with the existing configured address also failed.
+    // Force-assign a fresh unique address via APWR to 0x0010, then retry FPWR.
+    if (dbg) {
+        TETHER_LOGW(TAG, "EEPROM [slave %u]: FPWR to 0x%04X with addr 0x%04X failed, "
+                    "force-assigning fresh address", slave_index, reg_addr, cfg_addr);
+    }
+    if (!getConfiguredStationAddr(slave_index, cfg_addr, /*force_assign=*/true)) {
+        return false;
+    }
+    use_fpwr_slaves_.insert(slave_index);
+    return m_master.writeRegister(EtherCAT::LogicalAddress(cfg_addr),
+                                  reg_addr, data, len, 200);
+}
+
+bool SIIReader::writeEEPCTL(uint16_t slave_index, uint16_t eepctl_val) {
+    const uint16_t eepctl_le = Raw::host_to_le16(eepctl_val);
+    return writeEepromReg(slave_index, EC_REG_EEPCTL, &eepctl_le, sizeof(eepctl_le));
+}
+
+bool SIIReader::forceEepromToEcat(uint16_t slave_index) {
+    if (eeprom_forced_to_ecat_.count(slave_index)) {
+        return true;  // Already forced
+    }
+
+    const bool dbg = m_master.debugFlags().eeprom &&
+                     m_master.debugFlags().eepromFilt.allows(slave_index);
+
+    // Read current EEPConfig to check if PDI has control
+    uint8_t eep_cfg = 0;
+    const auto ap_addr = Master::slaveAddressFromADP(adpForSlave(slave_index));
+    if (m_master.readRegister(ap_addr, EC_REG_EEPCFG, eep_cfg, 200)) {
+        if (dbg) {
+            TETHER_LOGI(TAG, "EEPROM [slave %u]: EEPConfig=0x%02X (bit0=%d, PDI=%s)",
+                        slave_index, eep_cfg, eep_cfg & 1,
+                        (eep_cfg & 1) ? "control" : "no control");
+        }
+        if ((eep_cfg & 0x01) == 0) {
+            // ECAT already has control — no need to force
+            eeprom_forced_to_ecat_.insert(slave_index);
+            return true;
+        }
+    }
+
+    // Force PDI to release EEPROM to ECAT (write 0x02 to EEPConfig)
+    if (dbg) {
+        TETHER_LOGI(TAG, "EEPROM [slave %u]: forcing EEPROM from PDI to ECAT control",
+                    slave_index);
+    }
+    uint8_t force_val = EC_EEPCFG_FORCE_RELEASE;
+    if (!writeEepromReg(slave_index, EC_REG_EEPCFG, &force_val, sizeof(force_val))) {
+        if (dbg) {
+            TETHER_LOGW(TAG, "EEPROM [slave %u]: failed to write FORCE_RELEASE to EEPConfig",
+                        slave_index);
+        }
+        return false;
+    }
+
+    // Small delay for control transfer
+    Tether::Platform::Clock::instance().delayMicroseconds(10000);
+
+    // Set ECAT as master (write 0x00 to EEPConfig)
+    uint8_t master_val = EC_EEPCFG_ECAT_MASTER;
+    if (!writeEepromReg(slave_index, EC_REG_EEPCFG, &master_val, sizeof(master_val))) {
+        if (dbg) {
+            TETHER_LOGW(TAG, "EEPROM [slave %u]: failed to write ECAT_MASTER to EEPConfig",
+                        slave_index);
+        }
+        return false;
+    }
+
+    // Verify control transfer
+    eep_cfg = 0xFF;
+    if (m_master.readRegister(ap_addr, EC_REG_EEPCFG, eep_cfg, 200)) {
+        if (dbg) {
+            TETHER_LOGI(TAG, "EEPROM [slave %u]: EEPConfig after force = 0x%02X",
+                        slave_index, eep_cfg);
+        }
+        if ((eep_cfg & 0x01) != 0) {
+            if (dbg) {
+                TETHER_LOGW(TAG, "EEPROM [slave %u]: PDI still has EEPROM control after force!",
+                            slave_index);
+            }
+            // Don't return false — try anyway, some ESCs report stale values
+        }
+    }
+
+    eeprom_forced_to_ecat_.insert(slave_index);
+    return true;
 }
 
 bool SIIReader::waitNotBusy(uint16_t slave_index, uint16_t* out_status, uint32_t* out_poll_iters) {
@@ -118,6 +320,17 @@ bool SIIReader::readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t*
         TETHER_LOGI(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X cache MISS — reading from bus", slave_index, word_address);
     }
 
+    // Ensure the EEPROM interface is under ECAT control (not PDI).
+    // Some ESCs boot with PDI having EEPROM control; writes to EEPCTL
+    // are silently ignored in that state.
+    if (!forceEepromToEcat(slave_index)) {
+        if (dbg) {
+            TETHER_LOGW(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X failed to force ECAT control",
+                        slave_index, word_address);
+        }
+        return false;
+    }
+
     uint16_t estat = 0;
     uint32_t pre_iters = 0;
     if (!waitNotBusy(slave_index, &estat, &pre_iters)) {
@@ -139,30 +352,41 @@ bool SIIReader::readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t*
             TETHER_LOGI(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X clearing error flags estat=0x%04X",
                         slave_index, word_address, estat);
         }
-        uint16_t nop_le = Raw::host_to_le16(EC_ECMD_NOP);
-        m_master.writeRegister(Master::slaveAddressFromADP(adpForSlave(slave_index)), EC_REG_EEPCTL, nop_le, 200);
+        writeEEPCTL(slave_index, EC_ECMD_NOP);
     }
 
     int nack_count = 0;
     do {
-        // EEPROM read command: the ESC EEPCTL register (0x0502) is a single
-        // 2-byte register that combines the command (high byte) and the
-        // EEPROM word address (low byte).  Writing more than 2 bytes is
-        // rejected by some ESCs (e.g. Synapticon drive) with WKC=0.
-        //   Bits 0-7:  EEPROM word address (low byte)
-        //   Bits 8-15: EEPROM command (0x01 = READ)
-        const uint16_t eepctl_val = static_cast<uint16_t>(
-            EC_ECMD_READ | (word_address & 0x00FFu));
-        const uint16_t eepctl_le = Raw::host_to_le16(eepctl_val);
+        // Standard EEPROM read sequence (per ETG.1000.4 / SOEM reference):
+        // 1. Write EEPROM word address to EEPADDR (0x0504)
+        // 2. Write READ command to EEPCTL (0x0502)
+        // 3. Wait for busy to clear
+        // 4. Read data from EEPDAT (0x0508)
+        //
+        // The EEPROM address must be written to the separate EEPADDR
+        // register (0x0504), NOT combined into the low byte of EEPCTL.
+        // Some ESCs (e.g. ET1100) accept the address in EEPCTL's low byte,
+        // but others (e.g. IP cores, ET1200) require the separate write.
+        const uint16_t eepaddr_le = Raw::host_to_le16(word_address);
+        if (dbg) {
+            TETHER_LOGI(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X writing EEPADDR=0x%04X",
+                        slave_index, word_address, word_address);
+        }
+        if (!writeEepromReg(slave_index, EC_REG_EEPADDR, &eepaddr_le, sizeof(eepaddr_le))) {
+            if (dbg) {
+                TETHER_LOGW(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X writeEepromReg(EEPADDR) FAILED",
+                            slave_index, word_address);
+            }
+            return false;
+        }
 
         if (dbg) {
-            TETHER_LOGI(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X writing EEPCTL=0x%04X (2 bytes)",
-                        slave_index, word_address, eepctl_val);
+            TETHER_LOGI(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X writing EEPCTL=0x%04X (READ cmd)",
+                        slave_index, word_address, EC_ECMD_READ);
         }
-        if (!m_master.writeRegister(Master::slaveAddressFromADP(adpForSlave(slave_index)),
-                                    EC_REG_EEPCTL, &eepctl_le, sizeof(eepctl_le), 200)) {
+        if (!writeEEPCTL(slave_index, EC_ECMD_READ)) {
             if (dbg) {
-                TETHER_LOGW(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X writeRegister(EEPCTL) FAILED (nack=%d)",
+                TETHER_LOGW(TAG, "EEPROM [slave %u]: readRaw32 addr=0x%04X writeEEPCTL FAILED (nack=%d)",
                             slave_index, word_address, nack_count);
             }
             return false;
@@ -202,8 +426,7 @@ bool SIIReader::readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t*
                             (estat & EC_ESTAT_WRITE_ERR) ? 1 : 0);
             }
             // Clear error by writing NOP
-            uint16_t nop_le = Raw::host_to_le16(EC_ECMD_NOP);
-            m_master.writeRegister(Master::slaveAddressFromADP(adpForSlave(slave_index)), EC_REG_EEPCTL, nop_le, 200);
+            writeEEPCTL(slave_index, EC_ECMD_NOP);
             return false;
         }
 

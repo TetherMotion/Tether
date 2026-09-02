@@ -40,7 +40,7 @@ static constexpr uint16_t EC_REG_EEPCTL  = 0x0502;
 static constexpr uint16_t EC_REG_EEPDAT  = 0x0508;
 static constexpr uint16_t EC_ECMD_READ   = 0x0100;
 static constexpr uint16_t EC_ECMD_NOP    = 0x0000;
-static constexpr uint16_t EC_ESTAT_BUSY  = 0x8000;
+static constexpr uint16_t EC_ESTAT_BUSY  = 0x8000;  // Bit 15 (per ETG.1000.4)
 static constexpr uint16_t EC_ESTAT_NACK  = 0x2000;
 
 // ============================================================================
@@ -77,21 +77,29 @@ protected:
                                 reinterpret_cast<const uint8_t*>(data) + len);
                 apwr_writes.push_back(cap);
 
-                // Extract word address from 2-byte EEPCTL
-                if (ado == EC_REG_EEPCTL && len >= 2) {
-                    uint16_t eepctl_le = 0;
-                    std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
-                    last_cmd_addr = static_cast<uint16_t>(eepctl_le & 0x00FFu);
+                // Extract word address from EEPADDR (0x0504)
+                if (ado == 0x0504 && len >= 2) {
+                    uint16_t addr_le = 0;
+                    std::memcpy(&addr_le, data, sizeof(addr_le));
+                    last_cmd_addr = EtherCAT::Raw::le16_to_host(addr_le);
                 }
             }
             return true;
         });
 
-        // Standard APRD mock: EEPSTAT=not busy, EEPDAT=deterministic
+        // Standard APRD mock: EEPConfig=ECAT control, EEPSTAT=not busy, EEPDAT=deterministic
         master.setAprdTestCallback([this](uint16_t adp, uint16_t ado,
                                           void* out, uint16_t len,
                                           unsigned int ms) -> bool {
             (void)adp; (void)ms;
+            if (ado == 0x0500) {
+                // EEPConfig: ECAT has control (bit 0 = 0)
+                if (out && len >= 1) {
+                    uint8_t cfg = 0x00;
+                    std::memcpy(out, &cfg, 1);
+                }
+                return true;
+            }
             if (ado == 0x0502) {
                 // EEPSTAT: not busy, no errors
                 if (out && len >= 2) {
@@ -133,6 +141,23 @@ protected:
         }
         return nullptr;
     }
+
+    /// Count APWR writes to EEPADDR (0x0504)
+    size_t countEepaddrWrites() const {
+        size_t n = 0;
+        for (const auto& w : apwr_writes) {
+            if (w.ado == 0x0504) ++n;
+        }
+        return n;
+    }
+
+    /// Get the first EEPADDR write
+    const ApwrCapture* firstEepaddrWrite() const {
+        for (const auto& w : apwr_writes) {
+            if (w.ado == 0x0504) return &w;
+        }
+        return nullptr;
+    }
 };
 
 // ============================================================================
@@ -153,25 +178,31 @@ TEST_F(EepctlProtocolRegression, EepctlWriteIsExactly2Bytes) {
         << "EEPCTL write must be exactly 2 bytes (was 6 before the fix)";
 }
 
-/// Verify that the 2-byte EEPCTL value correctly encodes command + address.
-/// Bits 0-7: word address, Bits 8-15: command (0x01 = READ)
+/// Verify that the EEPCTL write contains only the READ command (0x0100)
+/// and the word address is written separately to EEPADDR (0x0504).
 TEST_F(EepctlProtocolRegression, EepctlValueEncodesCommandAndAddress) {
     SIIReader reader(master);
     uint32_t out = 0;
     ASSERT_TRUE(reader.readDWord(0, 0x0042, out));
 
+    // EEPCTL should contain only the command (0x0100), no address in low byte
     const ApwrCapture* eepctl_write = firstEepctlWrite();
     ASSERT_NE(eepctl_write, nullptr);
     ASSERT_EQ(eepctl_write->len, 2u);
 
     uint16_t eepctl_le = 0;
     std::memcpy(&eepctl_le, eepctl_write->data.data(), 2);
-    // On little-endian test host, eepctl_le is the raw value
-    uint16_t cmd = static_cast<uint16_t>(eepctl_le & 0xFF00u);
-    uint16_t addr = static_cast<uint16_t>(eepctl_le & 0x00FFu);
+    EXPECT_EQ(eepctl_le, EC_ECMD_READ) << "EEPCTL should be READ command only (0x0100)";
 
-    EXPECT_EQ(cmd, EC_ECMD_READ) << "High byte should be READ command (0x01)";
-    EXPECT_EQ(addr, 0x0042u) << "Low byte should be the word address";
+    // EEPADDR should contain the word address
+    const ApwrCapture* eepaddr_write = firstEepaddrWrite();
+    ASSERT_NE(eepaddr_write, nullptr);
+    ASSERT_EQ(eepaddr_write->len, 2u);
+
+    uint16_t addr_le = 0;
+    std::memcpy(&addr_le, eepaddr_write->data.data(), 2);
+    uint16_t addr = EtherCAT::Raw::le16_to_host(addr_le);
+    EXPECT_EQ(addr, 0x0042u) << "EEPADDR should contain the word address";
 }
 
 /// Verify that the old 6-byte EepromCmd struct is NOT used.
@@ -191,23 +222,23 @@ TEST_F(EepctlProtocolRegression, NoSixByteEepromCmdStruct) {
 }
 
 /// Verify that readWord at an odd address still uses the correct aligned
-/// word address in the EEPCTL write.
+/// word address in the EEPADDR write.
 TEST_F(EepctlProtocolRegression, OddAddressUsesAlignedEepctlAddress) {
     SIIReader reader(master);
     uint16_t word = 0;
     ASSERT_TRUE(reader.readWord(0, 0x0003, word));
 
     // readWord(0, 3) aligns to address 2 (readRaw32 aligns to even)
-    // The EEPCTL should contain address 2, not 3
-    const ApwrCapture* eepctl_write = firstEepctlWrite();
-    ASSERT_NE(eepctl_write, nullptr);
-    uint16_t eepctl_le = 0;
-    std::memcpy(&eepctl_le, eepctl_write->data.data(), 2);
-    uint16_t addr = static_cast<uint16_t>(eepctl_le & 0x00FFu);
-    EXPECT_EQ(addr, 0x0002u) << "readWord(3) should align to EEPCTL address 2";
+    // The EEPADDR should contain address 2, not 3
+    const ApwrCapture* eepaddr_write = firstEepaddrWrite();
+    ASSERT_NE(eepaddr_write, nullptr);
+    uint16_t addr_le = 0;
+    std::memcpy(&addr_le, eepaddr_write->data.data(), 2);
+    uint16_t addr = EtherCAT::Raw::le16_to_host(addr_le);
+    EXPECT_EQ(addr, 0x0002u) << "readWord(3) should align to EEPADDR address 2";
 }
 
-/// Verify that multiple reads produce multiple EEPCTL writes,
+/// Verify that multiple reads produce multiple EEPADDR writes,
 /// each with the correct address.
 TEST_F(EepctlProtocolRegression, MultipleReadsProduceCorrectEepctlWrites) {
     SIIReader reader(master);
@@ -217,29 +248,29 @@ TEST_F(EepctlProtocolRegression, MultipleReadsProduceCorrectEepctlWrites) {
     ASSERT_TRUE(reader.readDWord(0, 0x0020, out2));
     ASSERT_TRUE(reader.readDWord(0, 0x0030, out3));
 
-    // Should have at least 3 EEPCTL writes (one per read, assuming no cache)
-    size_t eepctl_count = countEepctlWrites();
-    EXPECT_GE(eepctl_count, 3u);
+    // Should have at least 3 EEPADDR writes (one per read, assuming no cache)
+    size_t eepaddr_count = countEepaddrWrites();
+    EXPECT_GE(eepaddr_count, 3u);
 
-    // Verify each EEPCTL write has the correct address
-    std::vector<uint16_t> eepctl_addrs;
+    // Verify each EEPADDR write has the correct address
+    std::vector<uint16_t> eepaddr_vals;
     for (const auto& w : apwr_writes) {
-        if (w.ado == EC_REG_EEPCTL && w.len >= 2) {
-            uint16_t eepctl_le = 0;
-            std::memcpy(&eepctl_le, w.data.data(), 2);
-            eepctl_addrs.push_back(static_cast<uint16_t>(eepctl_le & 0x00FFu));
+        if (w.ado == 0x0504 && w.len >= 2) {
+            uint16_t addr_le = 0;
+            std::memcpy(&addr_le, w.data.data(), 2);
+            eepaddr_vals.push_back(EtherCAT::Raw::le16_to_host(addr_le));
         }
     }
 
-    // The first three READ commands should target 0x10, 0x20, 0x30
-    ASSERT_GE(eepctl_addrs.size(), 3u);
-    EXPECT_EQ(eepctl_addrs[0], 0x0010u);
-    EXPECT_EQ(eepctl_addrs[1], 0x0020u);
-    EXPECT_EQ(eepctl_addrs[2], 0x0030u);
+    // The first three EEPADDR writes should target 0x10, 0x20, 0x30
+    ASSERT_GE(eepaddr_vals.size(), 3u);
+    EXPECT_EQ(eepaddr_vals[0], 0x0010u);
+    EXPECT_EQ(eepaddr_vals[1], 0x0020u);
+    EXPECT_EQ(eepaddr_vals[2], 0x0030u);
 }
 
-/// Verify that the data returned matches the address sent in EEPCTL.
-/// This is an end-to-end test of the 2-byte protocol.
+/// Verify that the data returned matches the address sent in EEPADDR.
+/// This is an end-to-end test of the EEPROM read protocol.
 TEST_F(EepctlProtocolRegression, ReadDataMatchesEepctlAddress) {
     SIIReader reader(master);
 
@@ -248,9 +279,9 @@ TEST_F(EepctlProtocolRegression, ReadDataMatchesEepctlAddress) {
     ASSERT_TRUE(reader.readDWord(0, 0x005A, out));
 
     // The mock returns 0xA0000000 | last_cmd_addr
-    // last_cmd_addr is extracted from the 2-byte EEPCTL
+    // last_cmd_addr is extracted from the EEPADDR (0x0504) write
     EXPECT_EQ(out, 0xA000005Au)
-        << "Data should match the address encoded in EEPCTL";
+        << "Data should match the address written to EEPADDR";
 }
 
 // ============================================================================
@@ -272,6 +303,13 @@ TEST(EepctlWkcZeroRegression, ReadRaw32ReturnsFalseWhenApwrFails) {
     // APRD for EEPSTAT succeeds (not busy)
     master.setAprdTestCallback([](uint16_t, uint16_t ado, void* out, uint16_t len,
                                   unsigned int) -> bool {
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
         if (ado == 0x0502 && out && len >= 2) {
             uint16_t estat_le = 0;
             std::memcpy(out, &estat_le, 2);
@@ -303,6 +341,13 @@ TEST(EepctlWkcZeroRegression, ReadSIIIdentityReturnsFalseWhenEepctlFails) {
     // APRD for EEPSTAT succeeds
     master.setAprdTestCallback([](uint16_t, uint16_t ado, void* out, uint16_t len,
                                   unsigned int) -> bool {
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
         if (ado == 0x0502 && out && len >= 2) {
             uint16_t estat_le = 0;
             std::memcpy(out, &estat_le, 2);
@@ -328,6 +373,13 @@ TEST(EepctlWkcZeroRegression, ReadSIIReturnsFalseWhenEepctlFails) {
 
     master.setAprdTestCallback([](uint16_t, uint16_t ado, void* out, uint16_t len,
                                   unsigned int) -> bool {
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
         if (ado == 0x0502 && out && len >= 2) {
             uint16_t estat_le = 0;
             std::memcpy(out, &estat_le, 2);
@@ -344,6 +396,169 @@ TEST(EepctlWkcZeroRegression, ReadSIIReturnsFalseWhenEepctlFails) {
 }
 
 // ============================================================================
+// FPWR fallback: when APWR to EEPCTL returns WKC=0, SIIReader should fall
+// back to FPWR using the configured station address (register 0x0010).
+// This is the fix for ESCs (e.g. Synapticon SOMANET drive) that reject
+// APWR to EEPCTL but accept FPWR.
+// ============================================================================
+
+/// Verify that readRaw32 succeeds when APWR to EEPCTL fails but FPWR works.
+/// APWR is identified by adp=0x0000 (auto-increment for slave 0).
+/// FPWR is identified by adp=configured station address (non-zero).
+TEST(EepctlWkcZeroRegression, ReadRaw32SucceedsWithFpwrFallback) {
+    EtherCAT::Master master;
+    constexpr uint16_t kConfiguredAddr = 0x0001;
+    uint16_t last_eepctl_addr = 0xFFFF;
+
+    // APWR to EEPCTL (adp=0x0000, ado=0x0502) fails — simulates WKC=0.
+    // APWR to 0x0010 (to assign a configured station address) succeeds.
+    // FPWR to EEPCTL (adp=kConfiguredAddr, ado=0x0502) succeeds.
+    master.setApwrTestCallback([&last_eepctl_addr](uint16_t adp, uint16_t ado,
+                                                   const void* data, uint16_t len,
+                                                   unsigned int) -> bool {
+        // EEPConfig write — just acknowledge
+        if (ado == 0x0500) {
+            return true;
+        }
+        // EEPADDR write — capture address (works for both APWR and FPWR)
+        if (ado == 0x0504 && data && len >= 2) {
+            uint16_t addr_le = 0;
+            std::memcpy(&addr_le, data, sizeof(addr_le));
+            last_eepctl_addr = EtherCAT::Raw::le16_to_host(addr_le);
+            return true;
+        }
+        if (ado == EC_REG_EEPCTL && adp == 0x0000) {
+            return false;  // APWR to EEPCTL fails (WKC=0)
+        }
+        if (ado == EC_REG_EEPCTL && adp == kConfiguredAddr) {
+            return true;  // FPWR to EEPCTL succeeds
+        }
+        if (ado == 0x0010 && adp == 0x0000 && data && len >= 2) {
+            return true;  // APWR to station addr register succeeds
+        }
+        return false;
+    });
+
+    // APRD: EEPConfig=ECAT control, EEPSTAT not busy, EEPDAT returns deterministic data,
+    //       station address register returns 0x0000 (unassigned).
+    master.setAprdTestCallback([&last_eepctl_addr](uint16_t, uint16_t ado,
+                                          void* out, uint16_t len,
+                                          unsigned int) -> bool {
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
+        if (ado == 0x0502 && out && len >= 2) {
+            uint16_t estat_le = 0;  // not busy, no errors
+            std::memcpy(out, &estat_le, 2);
+            return true;
+        }
+        if (ado == 0x0508 && out && len >= 4) {
+            uint32_t val = 0xA0000000u | static_cast<uint32_t>(last_eepctl_addr);
+            std::memcpy(out, &val, 4);
+            return true;
+        }
+        if (ado == 0x0010 && out && len >= 2) {
+            uint16_t addr_le = 0;  // unassigned
+            std::memcpy(out, &addr_le, 2);
+            return true;
+        }
+        return false;
+    });
+
+    SIIReader reader(master);
+    uint32_t out = 0;
+    bool ok = reader.readDWord(0, 0x0000, out);
+
+    EXPECT_TRUE(ok) << "readRaw32 should succeed via FPWR fallback when APWR fails";
+    EXPECT_EQ(out, 0xA0000000u) << "EEPDAT should match the word address 0x00";
+}
+
+/// Verify that readSIIIdentity succeeds with FPWR fallback.
+TEST(EepctlWkcZeroRegression, ReadSIIIdentitySucceedsWithFpwrFallback) {
+    EtherCAT::Master master;
+    constexpr uint16_t kConfiguredAddr = 0x0001;
+
+    // Track the last EEPCTL word address for deterministic EEPDAT responses
+    uint16_t last_eepctl_addr = 0xFFFF;
+
+    master.setApwrTestCallback([&last_eepctl_addr](uint16_t adp, uint16_t ado,
+                                                   const void* data, uint16_t len,
+                                                   unsigned int) -> bool {
+        // EEPConfig write — just acknowledge
+        if (ado == 0x0500) {
+            return true;
+        }
+        // EEPADDR write — capture address (works for both APWR and FPWR)
+        if (ado == 0x0504 && data && len >= 2) {
+            uint16_t addr_le = 0;
+            std::memcpy(&addr_le, data, sizeof(addr_le));
+            last_eepctl_addr = EtherCAT::Raw::le16_to_host(addr_le);
+            return true;
+        }
+        if (ado == EC_REG_EEPCTL && adp == 0x0000) {
+            return false;  // APWR to EEPCTL fails
+        }
+        if (ado == EC_REG_EEPCTL && adp == kConfiguredAddr) {
+            return true;  // FPWR to EEPCTL succeeds
+        }
+        if (ado == 0x0010 && adp == 0x0000) {
+            return true;  // APWR to station addr register succeeds
+        }
+        return false;
+    });
+
+    master.setAprdTestCallback([&last_eepctl_addr](uint16_t, uint16_t ado,
+                                          void* out, uint16_t len,
+                                          unsigned int) -> bool {
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
+        if (ado == 0x0502 && out && len >= 2) {
+            uint16_t estat_le = 0;
+            std::memcpy(out, &estat_le, 2);
+            return true;
+        }
+        if (ado == 0x0508 && out && len >= 4) {
+            // Return a valid SII config area word
+            uint32_t val = 0;
+            switch (last_eepctl_addr) {
+                case 0x00: val = 0x00020001; break; // PDI control/config
+                case 0x02: val = 0x00040003; break; // sync impulse/pdi config2
+                case 0x04: val = 0x00060005; break; // alias/checksum
+                case 0x06: val = 0x00080007; break; // reserved
+                case 0x08: val = 0x000022D2; break; // vendor ID
+                case 0x0A: val = 0x00000001; break; // product code
+                case 0x0C: val = 0x00010000; break; // revision
+                case 0x0E: val = 0x00000001; break; // serial
+                default: val = 0; break;
+            }
+            std::memcpy(out, &val, 4);
+            return true;
+        }
+        if (ado == 0x0010 && out && len >= 2) {
+            uint16_t addr_le = 0;
+            std::memcpy(out, &addr_le, 2);
+            return true;
+        }
+        return false;
+    });
+
+    SIIIdentity identity;
+    bool ok = readSIIIdentity(master, 0, identity);
+
+    EXPECT_TRUE(ok) << "readSIIIdentity should succeed via FPWR fallback";
+    EXPECT_EQ(identity.vendor_id, 0x000022D2u);
+}
+
+// ============================================================================
 // Bug 3: EEPCTL NOP (error clear) also uses 2-byte write
 // ============================================================================
 
@@ -355,6 +570,13 @@ TEST_F(EepctlProtocolRegression, ErrorClearNopIs2ByteWrite) {
     master.setAprdTestCallback([this, &poll_count](uint16_t, uint16_t ado,
                                           void* out, uint16_t len,
                                           unsigned int) -> bool {
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
         if (ado == 0x0502 && out && len >= 2) {
             if (poll_count == 0) {
                 // First poll: return NACK error to trigger error-clear path
@@ -393,21 +615,19 @@ TEST_F(EepctlProtocolRegression, ErrorClearNopIs2ByteWrite) {
 // Edge cases: address wrapping, high addresses, zero address
 // ============================================================================
 
-/// Verify that address 0x00FF (max for low byte) works correctly.
-/// The 2-byte protocol only encodes the low 8 bits of the address.
-/// Addresses above 0xFF require special handling (the ESC auto-increments
-/// the high byte via successive reads).
+/// Verify that address 0x00FF works correctly.
+/// With the new protocol, the full 16-bit word address is written to EEPADDR.
 TEST_F(EepctlProtocolRegression, HighByteAddressEncoding) {
     SIIReader reader(master);
     uint32_t out = 0;
 
-    // Address 0x00FF — should fit in the low byte
+    // Address 0x00FF
     ASSERT_TRUE(reader.readDWord(0, 0x00FF, out));
-    const ApwrCapture* w = firstEepctlWrite();
+    const ApwrCapture* w = firstEepaddrWrite();
     ASSERT_NE(w, nullptr);
-    uint16_t eepctl_le = 0;
-    std::memcpy(&eepctl_le, w->data.data(), 2);
-    EXPECT_EQ(static_cast<uint16_t>(eepctl_le & 0x00FFu), 0x00FFu);
+    uint16_t addr_le = 0;
+    std::memcpy(&addr_le, w->data.data(), 2);
+    EXPECT_EQ(EtherCAT::Raw::le16_to_host(addr_le), 0x00FFu);
 }
 
 /// Verify that address 0x0000 works correctly.
@@ -416,12 +636,20 @@ TEST_F(EepctlProtocolRegression, ZeroAddressEncoding) {
     uint32_t out = 0;
 
     ASSERT_TRUE(reader.readDWord(0, 0x0000, out));
-    const ApwrCapture* w = firstEepctlWrite();
-    ASSERT_NE(w, nullptr);
+
+    // EEPADDR should contain 0x0000
+    const ApwrCapture* addr_write = firstEepaddrWrite();
+    ASSERT_NE(addr_write, nullptr);
+    uint16_t addr_le = 0;
+    std::memcpy(&addr_le, addr_write->data.data(), 2);
+    EXPECT_EQ(EtherCAT::Raw::le16_to_host(addr_le), 0x0000u);
+
+    // EEPCTL should contain only the READ command (0x0100)
+    const ApwrCapture* ctl_write = firstEepctlWrite();
+    ASSERT_NE(ctl_write, nullptr);
     uint16_t eepctl_le = 0;
-    std::memcpy(&eepctl_le, w->data.data(), 2);
-    EXPECT_EQ(static_cast<uint16_t>(eepctl_le & 0x00FFu), 0x0000u);
-    EXPECT_EQ(static_cast<uint16_t>(eepctl_le & 0xFF00u), EC_ECMD_READ);
+    std::memcpy(&eepctl_le, ctl_write->data.data(), 2);
+    EXPECT_EQ(eepctl_le, EC_ECMD_READ);
 }
 
 // ============================================================================
@@ -539,16 +767,23 @@ TEST(EepctlProtocolE2E, ParseIdentityWorksWith2ByteProtocol) {
 
     master.setApwrTestCallback([&](uint16_t, uint16_t ado, const void* data,
                                    uint16_t len, unsigned int) -> bool {
-        if (ado == 0x0502 && data && len >= 2) {
-            uint16_t eepctl_le = 0;
-            std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
-            last_cmd_addr = static_cast<uint16_t>(eepctl_le & 0x00FFu);
+        if (ado == 0x0504 && data && len >= 2) {
+            uint16_t addr_le = 0;
+            std::memcpy(&addr_le, data, sizeof(addr_le));
+            last_cmd_addr = EtherCAT::Raw::le16_to_host(addr_le);
         }
         return true;
     });
 
     master.setAprdTestCallback([&](uint16_t, uint16_t ado, void* out, uint16_t len,
                                    unsigned int) -> bool {
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
         if (ado == 0x0502) {
             uint16_t estat_le = 0;
             std::memcpy(out, &estat_le, 2);
@@ -597,16 +832,23 @@ TEST(EepctlProtocolE2E, ReadSIIIdentityWorksWith2ByteProtocol) {
 
     master.setApwrTestCallback([&](uint16_t, uint16_t ado, const void* data,
                                    uint16_t len, unsigned int) -> bool {
-        if (ado == 0x0502 && data && len >= 2) {
-            uint16_t eepctl_le = 0;
-            std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
-            last_cmd_addr = static_cast<uint16_t>(eepctl_le & 0x00FFu);
+        if (ado == 0x0504 && data && len >= 2) {
+            uint16_t addr_le = 0;
+            std::memcpy(&addr_le, data, sizeof(addr_le));
+            last_cmd_addr = EtherCAT::Raw::le16_to_host(addr_le);
         }
         return true;
     });
 
     master.setAprdTestCallback([&](uint16_t, uint16_t ado, void* out, uint16_t len,
                                    unsigned int) -> bool {
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
         if (ado == 0x0502) {
             uint16_t estat_le = 0;
             if (out && len >= 2) std::memcpy(out, &estat_le, 2);
@@ -654,6 +896,13 @@ TEST_F(EepctlProtocolRegression, NackRetryUses2ByteEepctl) {
     master.setAprdTestCallback([this, &estat_poll_count](uint16_t, uint16_t ado,
                                           void* out, uint16_t len,
                                           unsigned int) -> bool {
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
         if (ado == 0x0502 && out && len >= 2) {
             estat_poll_count++;
             if (estat_poll_count <= 2) {
@@ -705,6 +954,13 @@ TEST(EepctlTimeoutRegression, WaitNotBusyTimeoutReturnsFalse) {
     // EEPSTAT always returns BUSY
     master.setAprdTestCallback([](uint16_t, uint16_t ado, void* out, uint16_t len,
                                   unsigned int) -> bool {
+        if (ado == 0x0500) {
+            if (out && len >= 1) {
+                uint8_t cfg = 0x00;  // ECAT control
+                std::memcpy(out, &cfg, 1);
+            }
+            return true;
+        }
         if (ado == 0x0502 && out && len >= 2) {
             uint16_t estat = EC_ESTAT_BUSY;
             std::memcpy(out, &estat, 2);

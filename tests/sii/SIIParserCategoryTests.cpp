@@ -2,6 +2,7 @@
 #include "sii/SIIReader.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "sii/SIIParser.hpp"
+#include "ethercat/raw/internal.hpp"
 
 #include <cstdint>
 #include <cstring>
@@ -33,16 +34,20 @@ static inline void install_byte_level_handlers(const std::unordered_map<uint16_t
     auto last_cmd_addr = std::make_shared<uint16_t>(0xFFFF);
 
     master.setApwrTestCallback([last_cmd_addr](uint16_t adp, uint16_t ado, const void* data, uint16_t len, unsigned int ms){
-        if (ado == 0x0502 && data && len >= 2) {
-            uint16_t eepctl_le = 0;
-            std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
-            *last_cmd_addr = static_cast<uint16_t>(eepctl_le & 0x00FFu);
+        if (ado == 0x0504 && data && len >= 2) {
+            uint16_t addr_le = 0;
+            std::memcpy(&addr_le, data, sizeof(addr_le));
+            *last_cmd_addr = EtherCAT::Raw::le16_to_host(addr_le);
             return true;
         }
-        return true;
+        return true;  // EEPCTL, EEPConfig writes — just acknowledge
     });
 
     master.setAprdTestCallback([byte_map, last_cmd_addr](uint16_t adp, uint16_t ado, void* out, uint16_t len, unsigned int ms){
+        if (ado == 0x0500) {
+            if (out && len >= 1) { uint8_t cfg = 0x00; std::memcpy(out, &cfg, 1); }
+            return true;
+        }
         if (ado == 0x0502) {
             uint16_t estat_le = 0;
             std::memcpy(out, &estat_le, 2);

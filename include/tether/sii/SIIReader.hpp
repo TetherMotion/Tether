@@ -32,6 +32,8 @@
 #include <cstdint>
 #include <cstddef>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace EtherCAT {
 
@@ -133,11 +135,50 @@ public:
 private:
     Master& m_master;
     uint32_t m_timeout_ms{500};
-    
+
     // Internal helpers
     bool waitNotBusy(uint16_t slave_index, uint16_t* out_status, uint32_t* out_poll_iters = nullptr);
     bool readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t* out);
     uint16_t adpForSlave(uint16_t slave_index);
+
+    // --- FPWR fallback for ESCs that reject APWR to EEPCTL (0x0502) ---
+    // Some ESCs (e.g. Synapticon SOMANET drive) return WKC=0 for APWR to
+    // the EEPROM control register, while APRD to the same register works
+    // fine.  As a fallback, we read the slave's configured station address
+    // (ESC register 0x0010, via APRD) and retry the write with FPWR.
+    // If the configured station address is 0x0000 (unassigned), a unique
+    // address (slave_index + 1) is written via APWR to 0x0010 first.
+
+    /// Per-slave cache of configured station addresses (slave_index → addr).
+    std::unordered_map<uint16_t, uint16_t> configured_addr_cache_;
+
+    /// Slaves for which APWR to EEPCTL already failed — use FPWR directly.
+    std::unordered_set<uint16_t> use_fpwr_slaves_;
+
+    /// Read (and cache) the configured station address for a slave.
+    /// If the address is 0x0000, assigns a unique one via APWR to 0x0010.
+    /// If force_assign is true, always writes a fresh address (used when
+    /// the existing configured address is stale and FPWR to it fails).
+    bool getConfiguredStationAddr(uint16_t slave_index, uint16_t& addr,
+                                  bool force_assign = false);
+
+    /// Write the EEPCTL register (0x0502).  Tries APWR first; on WKC=0
+    /// falls back to FPWR using the configured station address.
+    bool writeEEPCTL(uint16_t slave_index, uint16_t eepctl_val);
+
+    /// Write an EEPROM register (any of 0x0500–0x050F) using the same
+    /// APWR→FPWR fallback as writeEEPCTL.
+    bool writeEepromReg(uint16_t slave_index, uint16_t reg_addr,
+                        const void* data, uint16_t len);
+
+    /// Force EEPROM interface from PDI to ECAT control.
+    /// Writes 0x02 then 0x00 to EEPConfig (0x0500) via APWR.
+    /// Called automatically before the first EEPROM access for each slave.
+    /// Tracks which slaves have already been forced.
+    bool forceEepromToEcat(uint16_t slave_index);
+
+    /// Per-slave set: EEPROM has been forced to ECAT control.
+    std::unordered_set<uint16_t> eeprom_forced_to_ecat_;
 };
 
 // ============================================================================

@@ -37,21 +37,20 @@ public:
 
     void installMocks(EtherCAT::Master& master) {
         master_ = &master;
-        // APWR: capture last_cmd_addr for EEPCTL write
+        // APWR: capture last_cmd_addr for EEPADDR write
         master.setApwrTestCallback([this](uint16_t adp, uint16_t ado,
                            const void* data, uint16_t len, unsigned int ms) {
             (void)adp; (void)ms;
-            // EEPCTL write command sets address for following EEPDAT reads
-            if (ado == EC_REG_EEPCTL && data && len >= 2) {
-                // 2-byte EEPCTL: low byte = word address, high byte = command
-                uint16_t eepctl_le = 0;
-                std::memcpy(&eepctl_le, data, sizeof(eepctl_le));
-                last_cmd_addr_ = static_cast<uint16_t>(eepctl_le & 0x00FFu);
+            // EEPADDR write sets address for following EEPDAT reads
+            if (ado == 0x0504 && data && len >= 2) {
+                uint16_t addr_le = 0;
+                std::memcpy(&addr_le, data, sizeof(addr_le));
+                last_cmd_addr_ = le16_to_host(addr_le);
             }
             return !simulate_failure_;
         });
 
-        // APRD: handle EEPSTAT/EEPDAT and SM register reads
+        // APRD: handle EEPConfig/EEPSTAT/EEPDAT and SM register reads
         master.setAprdTestCallback([this](uint16_t adp, uint16_t ado,
                            void* out, uint16_t len, unsigned int ms) {
             (void)adp; (void)ms;
@@ -84,6 +83,15 @@ public:
                     std::memcpy(out, &val, 1);
                     return true;
                 }
+            }
+
+            // EEPConfig: ECAT has control
+            if (ado == 0x0500) {
+                if (out && len >= 1) {
+                    uint8_t cfg = 0x00;
+                    std::memcpy(out, &cfg, 1);
+                }
+                return true;
             }
 
             // EEPROM status read
