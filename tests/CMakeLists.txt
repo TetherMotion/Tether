@@ -1161,6 +1161,9 @@ if(TETHER_BUILD_KLIPPER)
     file(GLOB KLIPPER_TEST_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/klipper/*.cpp"
     )
+    if(NOT TETHER_ENABLE_KLIPPER_JSON)
+        list(FILTER KLIPPER_TEST_SOURCES EXCLUDE REGEX "test_klipper_(dict|config_ext|error_paths)\\.cpp$")
+    endif()
     set(_klipper_test_defs "TETHER_ENABLE_KLIPPER=1")
     if(TETHER_ENABLE_PRESSURE_ADVANCE)
         list(APPEND _klipper_test_defs "TETHER_ENABLE_PRESSURE_ADVANCE=1")
