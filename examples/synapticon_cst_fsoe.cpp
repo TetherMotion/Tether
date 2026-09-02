@@ -1109,6 +1109,7 @@ struct Args {
     double duration = 10.0;
     bool enable_fsoe = true;
     bool enable_dc_sync = false;
+    bool enable_drive = true;       ///< If false, skip CiA 402 enable (FSoE only)
     uint16_t connection_id = 0x0006;  ///< Must match drive's Device Safety Address (0xF980:1)
     uint16_t safety_address = 0x0006; ///< FSoE slave safety address (0x2620:3)
     uint16_t watchdog_ms = EtherCAT::Drives::Synapticon::SafeMotion::Timing::kMinimumWatchdogTimeMs;
@@ -1145,6 +1146,12 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .default_value(false)
         .implicit_value(true)
         .help("Enable EtherCAT distributed-clock synchronization (off by default)");
+    program.add_argument("--no-drive")
+        .default_value(false)
+        .implicit_value(true)
+        .help("Do not enable the CiA 402 drive (FSoE-only mode). "
+              "All FSoE functionality still runs: handshake, PDO exchange, "
+              "safety monitoring.  Useful for testing FSoE without motion.");
     program.add_argument("--connection-id")
         .scan<'x', unsigned int>()
         .default_value(static_cast<unsigned int>(0x0006))
@@ -1206,6 +1213,7 @@ bool parseArgs(int argc, char** argv, Args& out) {
     out.duration = program.get<double>("--duration");
     out.enable_fsoe = !program.get<bool>("--no-fsoe");
     out.enable_dc_sync = program.get<bool>("--dc-sync");
+    out.enable_drive = !program.get<bool>("--no-drive");
     out.connection_id = static_cast<uint16_t>(program.get<unsigned int>("--connection-id"));
     out.safety_address = static_cast<uint16_t>(program.get<unsigned int>("--safety-address"));
     out.watchdog_ms = static_cast<uint16_t>(program.get<int>("--watchdog-ms"));
@@ -1332,13 +1340,14 @@ int main(int argc, char** argv) {
     Tether::Platform::ensureRealtimeKernelOrExit();
 
     TETHER_LOGI(TAG,
-        "synapticon_cst_fsoe — interface=%s slave=%u duration=%.1f fsoe=%s dc_sync=%s debug='%s' "
+        "synapticon_cst_fsoe — interface=%s slave=%u duration=%.1f fsoe=%s dc_sync=%s drive=%s debug='%s' "
         "torque_pp=%.3fNm freq=%.3fHz rated_torque_mnm=%u "
         "conn_id=0x%04X safety_addr=0x%04X "
         "sto_override=%s sbc_override=%s",
         args.interface.c_str(), slave_idx, args.duration,
         args.enable_fsoe ? "on" : "off",
         args.enable_dc_sync ? "on" : "off",
+        args.enable_drive ? "on" : "off",
         args.debug.c_str(),
         args.torque_pp_nm, args.freq_hz, args.rated_torque_mnm,
         args.connection_id, args.safety_address,
@@ -2508,7 +2517,8 @@ int main(int argc, char** argv) {
             rc = 9;
         } else {
             TETHER_LOGI(TAG,
-                "FSoE Data state reached — enabling CiA 402 drive.");
+                "FSoE Data state reached%s.",
+                args.enable_drive ? " — enabling CiA 402 drive" : " (drive enable suppressed by --no-drive)");
             fsoe_data_reached = true;
         }
     } else {
@@ -2517,7 +2527,11 @@ int main(int argc, char** argv) {
     }
 
     // --- Enable the drive (only if FSoE is operational or not enabled) ---
-    if (fsoe_data_reached) {
+    if (!args.enable_drive) {
+        TETHER_LOGI(TAG,
+            "Drive enable skipped (--no-drive).  FSoE is running in "
+            "FSoE-only mode — safety PDOs are exchanged but no motion.");
+    } else if (fsoe_data_reached) {
         if (!master.enableDrive(slave_idx, 5000)) {
             TETHER_LOGE(TAG, "Failed to enable slave %u", slave_idx);
             rc = 8;
@@ -2535,9 +2549,15 @@ int main(int argc, char** argv) {
     // FailSafe or Error (e.g. sends a Reset due to a CRC error), shut down
     // cleanly immediately rather than continuing to run in an unsafe state.
     if (rc == 0) {
-        TETHER_LOGI(TAG,
-            "CST mode active, sine torque %.3f Nm P-P at %.3f Hz for %.1f s",
-            args.torque_pp_nm, args.freq_hz, args.duration);
+        if (args.enable_drive) {
+            TETHER_LOGI(TAG,
+                "CST mode active, sine torque %.3f Nm P-P at %.3f Hz for %.1f s",
+                args.torque_pp_nm, args.freq_hz, args.duration);
+        } else {
+            TETHER_LOGI(TAG,
+                "FSoE-only mode: monitoring safety state for %.1f s (no motion)",
+                args.duration);
+        }
 
         const auto run_start_ms = Tether::Platform::Clock::instance().getMilliseconds();
         const uint32_t run_duration_ms =
