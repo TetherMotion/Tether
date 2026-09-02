@@ -3,6 +3,8 @@
 # This file builds examples that demonstrate Tether library functionality.
 # Each example links against the appropriate component libraries.
 
+set(TETHER_EXAMPLE_TARGETS "")
+
 # Shared example utilities (argument parsing, debug flags, VLAN, host setup)
 add_library(tether_examples_common STATIC
     common/ExampleHelpers.cpp
@@ -29,6 +31,7 @@ if(Drogon_FOUND AND TARGET tether_io_protocol AND TARGET Drogon::Drogon)
     add_executable(tether_io_drogon_websocket
         tether_io_drogon_websocket.cpp
         TetherIOWebSocketController.cpp)
+    list(APPEND TETHER_EXAMPLE_TARGETS tether_io_drogon_websocket)
     target_link_libraries(tether_io_drogon_websocket PRIVATE
         tether_io_protocol Drogon::Drogon)
     target_include_directories(tether_io_drogon_websocket PRIVATE
@@ -43,6 +46,7 @@ if(Drogon_FOUND AND TARGET tether_io_protocol AND TARGET Drogon::Drogon)
     add_executable(web_dashboard_example
         web_dashboard_example.cpp
         TetherIOWebSocketController.cpp)
+    list(APPEND TETHER_EXAMPLE_TARGETS web_dashboard_example)
     target_link_libraries(web_dashboard_example PRIVATE
         tether_io_protocol Drogon::Drogon)
     target_include_directories(web_dashboard_example PRIVATE
@@ -72,6 +76,7 @@ function(add_tether_example name)
     endif()
 
     add_executable(${name} ${EX_SOURCE})
+    set(TETHER_EXAMPLE_TARGETS ${TETHER_EXAMPLE_TARGETS} ${name} PARENT_SCOPE)
     target_link_libraries(${name} PRIVATE ${EX_LIBRARIES})
     target_include_directories(${name} PRIVATE ${PROJECT_SOURCE_DIR}/include)
     target_compile_features(${name} PRIVATE cxx_std_20)
@@ -228,6 +233,7 @@ if(Drogon_FOUND AND TARGET Drogon::Drogon)
     add_executable(tether_ui_backend
         tether_ui_backend.cpp
         TetherIOWebSocketController.cpp)
+    list(APPEND TETHER_EXAMPLE_TARGETS tether_ui_backend)
     target_link_libraries(tether_ui_backend PRIVATE
         tether_io_protocol
         tether_gcode
@@ -243,6 +249,7 @@ if(Drogon_FOUND AND TARGET Drogon::Drogon)
     add_executable(controlme_ui_backend
         controlme_ui_backend.cpp
         TetherIOWebSocketController.cpp)
+    list(APPEND TETHER_EXAMPLE_TARGETS controlme_ui_backend)
     target_link_libraries(controlme_ui_backend PRIVATE
         tether_io_protocol
         tether_simulation
@@ -339,9 +346,13 @@ if(TETHER_BUILD_KLIPPER)
         LIBRARIES Tether::Klipper tether_common)
 
     # HTTP example requires the optional HTTP component
-    if(TARGET Tether::KlipperHttp)
+    if(TETHER_ENABLE_KLIPPER_HTTP AND TARGET Tether::KlipperHttp)
         add_tether_example(klipper_http
             SOURCE klipper_http.cpp
             LIBRARIES Tether::KlipperHttp Tether::Klipper tether_common tether_simulation)
+    else()
+        message(STATUS "TETHER_ENABLE_KLIPPER_HTTP is OFF; skipping klipper_http example")
     endif()
 endif()
+
+add_custom_target(examples DEPENDS ${TETHER_EXAMPLE_TARGETS})

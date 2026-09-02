@@ -314,6 +314,41 @@ option(TETHER_BUILD_KLIPPER "Build Klipper protocol implementation" ON)
 option(TETHER_ENABLE_KLIPPER_CAN "Enable Klipper CAN transport (requires SocketCAN)" OFF)
 option(TETHER_ENABLE_PRESSURE_ADVANCE "Enable pressure advance for extruders (compile-time; runtime opt-in)" ON)
 
+# Glaze-based JSON I/O for the Klipper data dictionary.  This is auto-detected
+# below; if Glaze cannot be compiled with the active C++23 toolchain it is
+# forced OFF, which in turn disables the optional Klipper HTTP server.
+option(TETHER_ENABLE_KLIPPER_JSON "Enable Glaze-based JSON I/O for tether_klipper (requires a C++23 capable Glaze)" ON)
+
+# Auto-detect usable Glaze support.  GCC 11 and other older toolchains cannot
+# compile glaze/glaze.hpp, so the JSON layer is disabled gracefully.
+include(CheckCXXSourceCompiles)
+set(_tether_glaze_check_flags_backup "${CMAKE_REQUIRED_FLAGS}")
+set(_tether_glaze_check_includes_backup "${CMAKE_REQUIRED_INCLUDES}")
+set(CMAKE_REQUIRED_FLAGS "-std=c++23")
+set(CMAKE_REQUIRED_INCLUDES "${GLAZE_PATH}/include")
+check_cxx_source_compiles("
+#include <glaze/glaze.hpp>
+int main() {
+    glz::generic g;
+    g[\"key\"] = 1.0;
+    auto s = glz::write_json(g);
+    auto r = glz::read_json<glz::generic>(\"{}\");
+    (void)s;
+    (void)r;
+    return 0;
+}
+" TETHER_KLIPPER_HAS_GLAZE)
+set(CMAKE_REQUIRED_FLAGS "${_tether_glaze_check_flags_backup}")
+set(CMAKE_REQUIRED_INCLUDES "${_tether_glaze_check_includes_backup}")
+unset(_tether_glaze_check_flags_backup)
+unset(_tether_glaze_check_includes_backup)
+
+if(NOT TETHER_KLIPPER_HAS_GLAZE)
+    message(STATUS "Glaze not usable with this toolchain; disabling Klipper JSON and HTTP layers.")
+    set(TETHER_ENABLE_KLIPPER_JSON OFF CACHE BOOL "Enable Glaze-based JSON I/O for tether_klipper" FORCE)
+    set(TETHER_ENABLE_KLIPPER_HTTP OFF CACHE BOOL "Build native HTTP/WebSocket server for Mainsail/Fluidd" FORCE)
+endif()
+
 # Native HTTP/WebSocket server for Mainsail/Fluidd (requires Drogon).
 # Default: ON only if both Drogon and jsoncpp are found on the system.
 # Hard error if user forces ON but Drogon is unavailable.
@@ -603,6 +638,9 @@ if(TETHER_ENABLE_KLIPPER_HTTP)
     endif()
     if(NOT TETHER_BUILD_KLIPPER)
         message(FATAL_ERROR "TETHER_ENABLE_KLIPPER_HTTP requires TETHER_BUILD_KLIPPER=ON.")
+    endif()
+    if(NOT TETHER_ENABLE_KLIPPER_JSON)
+        message(FATAL_ERROR "TETHER_ENABLE_KLIPPER_HTTP requires TETHER_ENABLE_KLIPPER_JSON=ON.")
     endif()
     add_compile_definitions(TETHER_ENABLE_KLIPPER_HTTP=1)
 endif()

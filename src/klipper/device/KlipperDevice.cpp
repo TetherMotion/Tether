@@ -23,14 +23,22 @@ KlipperDevice::KlipperDevice(std::shared_ptr<transport::IByteStreamTransport> tr
     , blockReader_(*transport_) {
     commandTable_ = std::make_unique<protocol::CommandTable>(dict_);
     // Build the identify server from the dictionary's wire blob.
+#ifdef TETHER_ENABLE_KLIPPER_JSON
     identifyServer_ = std::make_unique<protocol::IdentifyServer>(dict_.toWire());
+#else
+    identifyServer_ = nullptr;
+#endif
     // Create the real-time step scheduler if enabled.
     if (config_.useStepScheduler) {
         stepScheduler_ = std::make_unique<motion::StepScheduler>(config_.clockFreqHz);
     }
     // Compute config CRC from the dictionary wire bytes.
+#ifdef TETHER_ENABLE_KLIPPER_JSON
     auto wire = dict_.toWire();
     configCrc_ = protocol::crc16Ccitt(wire);
+#else
+    configCrc_ = 0;
+#endif
     // Register default handlers for core commands.
     enableDefaultCommands();
 }
