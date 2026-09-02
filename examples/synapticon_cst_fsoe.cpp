@@ -302,14 +302,21 @@ static void formatHex(char* buf, size_t bufsize, const uint8_t* data, size_t len
 
 /// Decode the master→slave FSoE frame from the Synapticon RxPDO 0x1700 struct.
 /// Shows STO/SBC command status FIRST (green=safe, red=unsafe), then raw hex.
+///
+/// IMPORTANT: In the master→slave direction, STO/SS1/SS2/SOS/SLS/SBC use
+/// **zero-active** encoding (bit=0 → active/safe, bit=1 → inactive/unsafe).
+/// ErrorAck, RestartAck, ResetPosition use one-active encoding (bit=1 → active).
+/// The display inverts zero-active bits so that "ON" (green) always means
+/// the safety function is active (safe).
 void dumpFSoERxPDO(const char* tag, const FSoERxPDO& rx) {
     // --- STO and SBC are what we care about most — show them FIRST ---
-    const bool sto_set = (rx.safety_flags & FSoERxPDO::kSTO) != 0;
-    const bool sbc_set = (rx.safety_flags & FSoERxPDO::kSBCCommand) != 0;
+    // Zero-active: bit=0 → active (safe), bit=1 → inactive (unsafe)
+    const bool sto_active = (rx.safety_flags & FSoERxPDO::kSTO) == 0;
+    const bool sbc_active = (rx.safety_flags & FSoERxPDO::kSBCCommand) == 0;
 
     char sto_str[64], sbc_str[64];
-    formatSafetyBit(sto_str, sizeof(sto_str), sto_set, "STO");
-    formatSafetyBit(sbc_str, sizeof(sbc_str), sbc_set, "SBC");
+    formatSafetyBit(sto_str, sizeof(sto_str), sto_active, "STO");
+    formatSafetyBit(sbc_str, sizeof(sbc_str), sbc_active, "SBC");
 
     TETHER_LOGI(tag, "[fsoe-frame] TX→slave RxPDO 0x1700 (11 bytes):  "
                      "%s  %s  cmd=%s  conn_id=0x%04X",
@@ -317,27 +324,29 @@ void dumpFSoERxPDO(const char* tag, const FSoERxPDO& rx) {
                 fsoeCommandName(rx.fsoe_command), rx.fsoe_connection_id);
 
     // --- Other safety flags (secondary) ---
+    // Zero-active bits: SS1, SS2, SOS, SLS1-4 (bit=0 → active)
+    // One-active bits: ErrorAck, RestartAck, ResetPosition (bit=1 → active)
     char flags[128] = {};
     size_t pos = 0;
-    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kSS1, "SS1");
+    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & FSoERxPDO::kSS1) == 0, "SS1");
     pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kSS2, "SS2");
+    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & FSoERxPDO::kSS2) == 0, "SS2");
     pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kSOS, "SOS");
+    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & FSoERxPDO::kSOS) == 0, "SOS");
     pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kSLS_Instance1, "SLS1");
+    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & FSoERxPDO::kSLS_Instance1) == 0, "SLS1");
     pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kSLS_Instance2, "SLS2");
+    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & FSoERxPDO::kSLS_Instance2) == 0, "SLS2");
     pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kSLS_Instance3, "SLS3");
+    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & FSoERxPDO::kSLS_Instance3) == 0, "SLS3");
     pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kSLS_Instance4, "SLS4");
-    pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kResetPosition, "ResetPos");
+    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & FSoERxPDO::kSLS_Instance4) == 0, "SLS4");
     pos = strlen(flags);
     appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kErrorAck, "ErrorAck");
     pos = strlen(flags);
     appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kRestartAck, "RestartAck");
+    pos = strlen(flags);
+    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & FSoERxPDO::kResetPosition, "ResetPos");
     TETHER_LOGI(tag, "  other_flags=0x%04X [%s]  crc0=0x%04X  crc1=0x%04X",
                 rx.safety_flags, flags[0] ? flags : "(none)",
                 rx.fsoe_crc_0, rx.fsoe_crc_1);
@@ -359,16 +368,20 @@ void dumpFSoERxPDO(const char* tag, const FSoERxPDO& rx) {
 
 /// Decode the slave→master FSoE frame from the Synapticon TxPDO 0x1B00 struct.
 /// Shows STO/SBC feedback status FIRST (green=safe, red=unsafe), then raw hex.
+///
+/// In the slave→master direction, all flags use **one-active** encoding
+/// (bit=1 → active, bit=0 → inactive).  No inversion needed.
 void dumpFSoETxPDO(const char* tag, const FSoETxPDO& tx) {
     // --- STO and SBC are what we care about most — show them FIRST ---
+    // One-active: bit=1 → active (safe), bit=0 → inactive (unsafe)
     // STO state is in safety_state_flags bit 0
     // SBC state is in diagnostic_flags bit 1
-    const bool sto_set = (tx.safety_state_flags & FSoETxPDO::kSTOState) != 0;
-    const bool sbc_set = (tx.diagnostic_flags & FSoETxPDO::kSBCState) != 0;
+    const bool sto_active = (tx.safety_state_flags & FSoETxPDO::kSTOState) != 0;
+    const bool sbc_active = (tx.diagnostic_flags & FSoETxPDO::kSBCState) != 0;
 
     char sto_str[64], sbc_str[64];
-    formatSafetyBit(sto_str, sizeof(sto_str), sto_set, "STO");
-    formatSafetyBit(sbc_str, sizeof(sbc_str), sbc_set, "SBC");
+    formatSafetyBit(sto_str, sizeof(sto_str), sto_active, "STO");
+    formatSafetyBit(sbc_str, sizeof(sbc_str), sbc_active, "SBC");
 
     TETHER_LOGI(tag, "[fsoe-frame] RX←slave TxPDO 0x1B00 (31 bytes):  "
                      "%s  %s  cmd=%s  conn_id=0x%04X",
@@ -854,8 +867,9 @@ public:
 
         if (debug_raw_ && rx_changed) {
             const auto* rx_pdo = reinterpret_cast<const FSoERxPDO*>(rx_buffer);
-            const bool rx_sto = (rx_pdo->safety_flags & FSoERxPDO::kSTO) != 0;
-            const bool rx_sbc = (rx_pdo->safety_flags & FSoERxPDO::kSBCCommand) != 0;
+            // Zero-active: bit=0 → active (safe)
+            const bool rx_sto = (rx_pdo->safety_flags & FSoERxPDO::kSTO) == 0;
+            const bool rx_sbc = (rx_pdo->safety_flags & FSoERxPDO::kSBCCommand) == 0;
             char sto_str[64], sbc_str[64];
             formatSafetyBit(sto_str, sizeof(sto_str), rx_sto, "STO");
             formatSafetyBit(sbc_str, sizeof(sbc_str), rx_sbc, "SBC");
@@ -887,15 +901,17 @@ private:
         const auto* tx_pdo = reinterpret_cast<const FSoETxPDO*>(tx_buffer);
         const auto* rx_pdo = reinterpret_cast<const FSoERxPDO*>(rx_buffer);
 
-        // Slave feedback (TxPDO): STO state in safety_state_flags bit 0,
-        // SBC state in diagnostic_flags bit 1
+        // Slave feedback (TxPDO): one-active encoding
+        //   STO state in safety_state_flags bit 0 (bit=1 → active/safe)
+        //   SBC state in diagnostic_flags bit 1 (bit=1 → active/safe)
         const bool tx_sto = (tx_pdo->safety_state_flags & FSoETxPDO::kSTOState) != 0;
         const bool tx_sbc = (tx_pdo->diagnostic_flags & FSoETxPDO::kSBCState) != 0;
 
-        // Master command (RxPDO): STO in safety_flags bit 0,
-        // SBC command in safety_flags bit 13
-        const bool rx_sto = (rx_pdo->safety_flags & FSoERxPDO::kSTO) != 0;
-        const bool rx_sbc = (rx_pdo->safety_flags & FSoERxPDO::kSBCCommand) != 0;
+        // Master command (RxPDO): zero-active encoding
+        //   STO in safety_flags bit 0 (bit=0 → active/safe)
+        //   SBC command in safety_flags bit 13 (bit=0 → active/safe)
+        const bool rx_sto = (rx_pdo->safety_flags & FSoERxPDO::kSTO) == 0;
+        const bool rx_sbc = (rx_pdo->safety_flags & FSoERxPDO::kSBCCommand) == 0;
 
         // Format with color: green=safe(ON), red=unsafe(OFF)
         char tx_sto_str[64], tx_sbc_str[64], rx_sto_str[64], rx_sbc_str[64];
