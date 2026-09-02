@@ -41,6 +41,9 @@ if(NOT TETHER_ENABLE_KLIPPER_CAN)
     list(FILTER TETHER_KLIPPER_SOURCES EXCLUDE REGEX "LinuxCan\\.cpp")
 endif()
 
+# The JSON serialisation source is built as an optional object library below.
+list(FILTER TETHER_KLIPPER_SOURCES EXCLUDE REGEX "DataDictionaryJson\\.cpp$")
+
 # Filter to only existing files
 set(TETHER_KLIPPER_SOURCES_FILTERED "")
 foreach(src ${TETHER_KLIPPER_SOURCES})
@@ -60,17 +63,38 @@ if(TETHER_BUILD_STATIC_LIBS)
     list(APPEND _variants tether_klipper_static)
 endif()
 
+# Optional Glaze-based JSON object library.
+if(TETHER_ENABLE_KLIPPER_JSON)
+    add_library(tether_klipper_json OBJECT
+        ${TETHER_ROOT}/src/klipper/protocol/DataDictionaryJson.cpp
+    )
+    target_compile_features(tether_klipper_json PRIVATE cxx_std_23)
+    set_target_properties(tether_klipper_json PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(tether_klipper_json
+        PUBLIC
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
+        PRIVATE
+            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/klipper>
+            $<BUILD_INTERFACE:${GLAZE_PATH}/include>
+    )
+endif()
+
 foreach(_tgt IN LISTS _variants)
     target_include_directories(${_tgt}
         PUBLIC
             $<BUILD_INTERFACE:${TETHER_ROOT}/include>
             $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
-            $<BUILD_INTERFACE:${GLAZE_PATH}/include>
         PRIVATE
             $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/klipper>
     )
 
     target_compile_features(${_tgt} PRIVATE cxx_std_23)
+
+    if(TETHER_ENABLE_KLIPPER_JSON)
+        target_sources(${_tgt} PRIVATE $<TARGET_OBJECTS:tether_klipper_json>)
+        target_compile_definitions(${_tgt} PRIVATE TETHER_ENABLE_KLIPPER_JSON=1)
+    endif()
 
     # Link against dependencies
     if(TARGET tether_common_static)

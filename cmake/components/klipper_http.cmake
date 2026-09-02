@@ -1,5 +1,9 @@
 # Component: tether_klipper_http
 # Native HTTP/WebSocket server for Mainsail/Fluidd frontends.
+
+if(NOT TETHER_ENABLE_KLIPPER_HTTP)
+    return()
+endif()
 #
 # Implements the full Moonraker HTTP + WebSocket API directly in C++,
 # using Drogon as the web server backend and Glaze for JSON serialization.

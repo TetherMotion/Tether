@@ -82,10 +82,15 @@ bool IdentifyClient::consumeResponseContent(std::span<const uint8_t> content) {
 
 std::optional<DataDictionary> IdentifyClient::decodeDictionary() const {
     if (!complete_) return std::nullopt;
+#ifdef TETHER_ENABLE_KLIPPER_JSON
     std::string json = DataDictionary::fromWire(received_);
     DataDictionary dict;
     if (!dict.fromJson(json)) return std::nullopt;
     return dict;
+#else
+    (void)received_;
+    return std::nullopt;
+#endif
 }
 
 } // namespace tether::klipper::protocol
