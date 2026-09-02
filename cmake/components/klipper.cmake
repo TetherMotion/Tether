@@ -52,6 +52,12 @@ foreach(src ${TETHER_KLIPPER_SOURCES})
     endif()
 endforeach()
 
+if(TETHER_ENABLE_KLIPPER_JSON)
+    list(APPEND TETHER_KLIPPER_SOURCES_FILTERED
+        "${TETHER_ROOT}/src/klipper/protocol/DataDictionaryJson.cpp"
+    )
+endif()
+
 # Create variant targets
 set(_variants "")
 if(TETHER_BUILD_SHARED_LIBS)
@@ -61,23 +67,6 @@ endif()
 if(TETHER_BUILD_STATIC_LIBS)
     add_library(tether_klipper_static STATIC ${TETHER_KLIPPER_SOURCES_FILTERED})
     list(APPEND _variants tether_klipper_static)
-endif()
-
-# Optional Glaze-based JSON object library.
-if(TETHER_ENABLE_KLIPPER_JSON)
-    add_library(tether_klipper_json OBJECT
-        ${TETHER_ROOT}/src/klipper/protocol/DataDictionaryJson.cpp
-    )
-    target_compile_features(tether_klipper_json PRIVATE cxx_std_23)
-    set_target_properties(tether_klipper_json PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    target_include_directories(tether_klipper_json
-        PUBLIC
-            $<BUILD_INTERFACE:${TETHER_ROOT}/include>
-            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
-        PRIVATE
-            $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether/klipper>
-            $<BUILD_INTERFACE:${GLAZE_PATH}/include>
-    )
 endif()
 
 foreach(_tgt IN LISTS _variants)
@@ -92,7 +81,7 @@ foreach(_tgt IN LISTS _variants)
     target_compile_features(${_tgt} PRIVATE cxx_std_23)
 
     if(TETHER_ENABLE_KLIPPER_JSON)
-        target_sources(${_tgt} PRIVATE $<TARGET_OBJECTS:tether_klipper_json>)
+        target_include_directories(${_tgt} PRIVATE ${GLAZE_PATH}/include)
         target_compile_definitions(${_tgt} PRIVATE TETHER_ENABLE_KLIPPER_JSON=1)
     endif()
 
