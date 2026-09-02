@@ -134,30 +134,30 @@ inline void formatHex(char* buf, size_t bufsize, const uint8_t* data, size_t len
 inline void dumpRxPDO(const char* tag, const Synapticon_pdo::SOMANET_RxPDO_1700& rx) {
     using Rx = Synapticon_pdo::SOMANET_RxPDO_1700;
 
-    // --- STO and SBC are what we care about most — show them FIRST ---
+    // --- STO, SOS, and SBC are what we care about most — show them FIRST ---
     // Zero-active: bit=0 → active (safe), bit=1 → inactive (unsafe)
     const bool sto_active = (rx.safety_flags & Rx::kSTO) == 0;
+    const bool sos_active = (rx.safety_flags & Rx::kSOS) == 0;
     const bool sbc_active = (rx.safety_flags & Rx::kSBCCommand) == 0;
 
-    char sto_str[64], sbc_str[64];
+    char sto_str[64], sos_str[64], sbc_str[64];
     formatSafetyBit(sto_str, sizeof(sto_str), sto_active, "STO");
+    formatSafetyBit(sos_str, sizeof(sos_str), sos_active, "SOS");
     formatSafetyBit(sbc_str, sizeof(sbc_str), sbc_active, "SBC");
 
     TETHER_LOGI(tag, "[fsoe-frame] TX→slave RxPDO 0x1700 (11 bytes):  "
-                     "{}  {}  cmd={}  conn_id=0x{:04X}",
-                sto_str, sbc_str,
+                     "{}  {}  {}  cmd={}  conn_id=0x{:04X}",
+                sto_str, sos_str, sbc_str,
                 FSoE::fsoeCommandName(rx.fsoe_command), rx.fsoe_connection_id);
 
     // --- Other safety flags (secondary) ---
-    // Zero-active bits: SS1, SS2, SOS, SLS1-4 (bit=0 → active)
+    // Zero-active bits: SS1, SS2, SLS1-4 (bit=0 → active)
     // One-active bits: ErrorAck, RestartAck, ResetPosition (bit=1 → active)
     char flags[128] = {};
     size_t pos = 0;
     appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & Rx::kSS1) == 0, "SS1");
     pos = strlen(flags);
     appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & Rx::kSS2) == 0, "SS2");
-    pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & Rx::kSOS) == 0, "SOS");
     pos = strlen(flags);
     appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & Rx::kSLS_Instance1) == 0, "SLS1");
     pos = strlen(flags);
@@ -198,27 +198,28 @@ inline void dumpRxPDO(const char* tag, const Synapticon_pdo::SOMANET_RxPDO_1700&
 inline void dumpTxPDO(const char* tag, const Synapticon_pdo::SOMANET_TxPDO_1B00& tx) {
     using Tx = Synapticon_pdo::SOMANET_TxPDO_1B00;
 
-    // --- STO and SBC are what we care about most — show them FIRST ---
+    // --- STO, SOS, and SBC are what we care about most — show them FIRST ---
     // One-active: bit=1 → active (safe), bit=0 → inactive (unsafe)
     // STO state is in safety_state_flags bit 0
+    // SOS state is in safety_state_flags bit 1
     // SBC state is in diagnostic_flags bit 1
     const bool sto_active = (tx.safety_state_flags & Tx::kSTOState) != 0;
+    const bool sos_active = (tx.safety_state_flags & Tx::kSOSState) != 0;
     const bool sbc_active = (tx.diagnostic_flags & Tx::kSBCState) != 0;
 
-    char sto_str[64], sbc_str[64];
+    char sto_str[64], sos_str[64], sbc_str[64];
     formatSafetyBit(sto_str, sizeof(sto_str), sto_active, "STO");
+    formatSafetyBit(sos_str, sizeof(sos_str), sos_active, "SOS");
     formatSafetyBit(sbc_str, sizeof(sbc_str), sbc_active, "SBC");
 
     TETHER_LOGI(tag, "[fsoe-frame] RX←slave TxPDO 0x1B00 (31 bytes):  "
-                     "{}  {}  cmd={}  conn_id=0x{:04X}",
-                sto_str, sbc_str,
+                     "{}  {}  {}  cmd={}  conn_id=0x{:04X}",
+                sto_str, sos_str, sbc_str,
                 FSoE::fsoeCommandName(tx.fsoe_command), tx.fsoe_connection_id);
 
     // --- Safety state flags (secondary) ---
     char sflags[128] = {};
     size_t pos = 0;
-    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & Tx::kSOSState, "SOS");
-    pos = strlen(sflags);
     appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & Tx::kSS1State, "SS1");
     pos = strlen(sflags);
     appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & Tx::kSS2State, "SS2");
@@ -296,14 +297,16 @@ inline void dumpTxPDOSummary(const char* tag,
                              const Synapticon_pdo::SOMANET_TxPDO_1B00& tx) {
     using Tx = Synapticon_pdo::SOMANET_TxPDO_1B00;
     const bool sto = (tx.safety_state_flags & Tx::kSTOState) != 0;
+    const bool sos = (tx.safety_state_flags & Tx::kSOSState) != 0;
     const bool sbc = (tx.diagnostic_flags & Tx::kSBCState) != 0;
-    char sto_str[64], sbc_str[64];
+    char sto_str[64], sos_str[64], sbc_str[64];
     formatSafetyBit(sto_str, sizeof(sto_str), sto, "STO");
+    formatSafetyBit(sos_str, sizeof(sos_str), sos, "SOS");
     formatSafetyBit(sbc_str, sizeof(sbc_str), sbc, "SBC");
     char hex[128];
     formatHex(hex, sizeof(hex), reinterpret_cast<const uint8_t*>(&tx), sizeof(Tx));
-    TETHER_LOGI(tag, "[TxPDO-FSoE slave→master] changed: {}  {}  cmd={}  | {}",
-                sto_str, sbc_str, FSoE::fsoeCommandName(tx.fsoe_command), hex);
+    TETHER_LOGI(tag, "[TxPDO-FSoE slave→master] changed: {}  {}  {}  cmd={}  | {}",
+                sto_str, sos_str, sbc_str, FSoE::fsoeCommandName(tx.fsoe_command), hex);
 }
 
 /// One-line summary of the master→slave RxPDO (0x1700).
@@ -312,14 +315,16 @@ inline void dumpRxPDOSummary(const char* tag,
                              const Synapticon_pdo::SOMANET_RxPDO_1700& rx) {
     using Rx = Synapticon_pdo::SOMANET_RxPDO_1700;
     const bool sto = (rx.safety_flags & Rx::kSTO) == 0;
+    const bool sos = (rx.safety_flags & Rx::kSOS) == 0;
     const bool sbc = (rx.safety_flags & Rx::kSBCCommand) == 0;
-    char sto_str[64], sbc_str[64];
+    char sto_str[64], sos_str[64], sbc_str[64];
     formatSafetyBit(sto_str, sizeof(sto_str), sto, "STO");
+    formatSafetyBit(sos_str, sizeof(sos_str), sos, "SOS");
     formatSafetyBit(sbc_str, sizeof(sbc_str), sbc, "SBC");
     char hex[128];
     formatHex(hex, sizeof(hex), reinterpret_cast<const uint8_t*>(&rx), sizeof(Rx));
-    TETHER_LOGI(tag, "[RxPDO-FSoE master→slave] changed: {}  {}  cmd={}  | {}",
-                sto_str, sbc_str, FSoE::fsoeCommandName(rx.fsoe_command), hex);
+    TETHER_LOGI(tag, "[RxPDO-FSoE master→slave] changed: {}  {}  {}  cmd={}  | {}",
+                sto_str, sos_str, sbc_str, FSoE::fsoeCommandName(rx.fsoe_command), hex);
 }
 
 // ============================================================================
@@ -356,27 +361,36 @@ inline void dumpWire(const char* tag,
 
     // Slave feedback (TxPDO): one-active encoding
     //   STO state in safety_state_flags bit 0 (bit=1 → active/safe)
+    //   SOS state in safety_state_flags bit 1 (bit=1 → active/safe)
     //   SBC state in diagnostic_flags bit 1 (bit=1 → active/safe)
     const bool tx_sto = (tx_pdo->safety_state_flags & Tx::kSTOState) != 0;
+    const bool tx_sos = (tx_pdo->safety_state_flags & Tx::kSOSState) != 0;
     const bool tx_sbc = (tx_pdo->diagnostic_flags & Tx::kSBCState) != 0;
 
     // Master command (RxPDO): zero-active encoding
     //   STO in safety_flags bit 0 (bit=0 → active/safe)
+    //   SOS in safety_flags bit 3 (bit=0 → active/safe)
     //   SBC command in safety_flags bit 13 (bit=0 → active/safe)
     const bool rx_sto = (rx_pdo->safety_flags & Rx::kSTO) == 0;
+    const bool rx_sos = (rx_pdo->safety_flags & Rx::kSOS) == 0;
     const bool rx_sbc = (rx_pdo->safety_flags & Rx::kSBCCommand) == 0;
 
     // Format with color: green=safe(ON), red=unsafe(OFF)
-    char tx_sto_str[64], tx_sbc_str[64], rx_sto_str[64], rx_sbc_str[64];
+    char tx_sto_str[64], tx_sos_str[64], tx_sbc_str[64];
+    char rx_sto_str[64], rx_sos_str[64], rx_sbc_str[64];
     formatSafetyBit(tx_sto_str, sizeof(tx_sto_str), tx_sto, "STO");
+    formatSafetyBit(tx_sos_str, sizeof(tx_sos_str), tx_sos, "SOS");
     formatSafetyBit(tx_sbc_str, sizeof(tx_sbc_str), tx_sbc, "SBC");
     formatSafetyBit(rx_sto_str, sizeof(rx_sto_str), rx_sto, "STO");
+    formatSafetyBit(rx_sos_str, sizeof(rx_sos_str), rx_sos, "SOS");
     formatSafetyBit(rx_sbc_str, sizeof(rx_sbc_str), rx_sbc, "SBC");
 
-    TETHER_LOGI(tag, "cycle {}:  RX←slave {}  {}  cmd={}  |  TX→slave {}  {}  cmd={}",
+    TETHER_LOGI(tag, "cycle {}:  RX←slave {}  {}  {}  cmd={}  |  TX→slave {}  {}  {}  cmd={}",
                 cycle_count,
-                tx_sto_str, tx_sbc_str, FSoE::fsoeCommandName(tx_pdo->fsoe_command),
-                rx_sto_str, rx_sbc_str, FSoE::fsoeCommandName(rx_pdo->fsoe_command));
+                tx_sto_str, tx_sos_str, tx_sbc_str,
+                FSoE::fsoeCommandName(tx_pdo->fsoe_command),
+                rx_sto_str, rx_sos_str, rx_sbc_str,
+                FSoE::fsoeCommandName(rx_pdo->fsoe_command));
 
     // --- Raw hex LAST ---
     char hex[256];
