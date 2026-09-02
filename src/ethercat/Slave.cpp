@@ -1350,6 +1350,28 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
 
     const bool dbg_pdo_cfg = slave_debug_flags_.pdoConfiguration;
 
+    // Read the slave's configured station address (register 0x0010) so
+    // FPWR/FPRD in exchangePhysical() uses the correct address.
+    // The slave's configured station address is assigned during INIT (from
+    // SII/EEPROM or by the master).  Without this, exchangePhysical() falls
+    // back to the auto-increment position address, which FPWR/FPRD don't
+    // respond to after INIT.
+    {
+        uint16_t cfg_addr = 0;
+        const auto slave_addr = EtherCAT::Master::slaveAddressFromADP(
+            EtherCAT::Master::adpForSlaveIndex(index_));
+        if (master_.readRegister(slave_addr, 0x0010, &cfg_addr, 2, 200)) {
+            cfgs[index_].configured_address = cfg_addr;
+            // Also set it in the PDO mapping entries
+            pdo.mapping().set_slave_configured_address(index_, cfg_addr);
+            TETHER_LOGI(TAG, "%s: Configured station address (reg 0x0010) = 0x%04X",
+                        logPrefix().c_str(), cfg_addr);
+        } else {
+            TETHER_LOGW(TAG, "%s: Failed to read configured station address (reg 0x0010), "
+                        "FPWR/FPRD will use auto-increment fallback", logPrefix().c_str());
+        }
+    }
+
     // Build MultiPDOSyncManagerConfig vector for FMMU and LogicalAddressManager
     std::vector<PDO::MultiPDOSyncManagerConfig> multi_configs;
     std::vector<uint16_t> rx_pdo_indices, tx_pdo_indices;
@@ -1407,21 +1429,24 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
 
     // Step 1: Update SlaveConfig SM entries
     //
-    // SM register length = writable PDOs only (excludes Fixed PDOs).
+    // SlaveConfig SM length = TOTAL (writable + fixed PDOs).
+    // This is used by PDOManager::exchangePhysical() for FPWR/FPRD size
+    // and must cover the full buffer including auto-included fixed PDOs
+    // (e.g. FSoE safety PDOs), so the master can write/read FSoE data.
     //
-    // Drives with ETG.5000 modular device profiles (e.g. Synapticon SOMANET)
-    // auto-include Fixed/Mandatory PDOs (like FSoE safety PDOs) and compute
-    // the full SM length internally.  Writing the total length (including
-    // fixed PDOs) to the SM register causes AL_STATUS 0x001E
-    // (Invalid input configuration) on the SAFE_OP transition.
+    // The SM REGISTER (0x0810+2/0x0818+2) is written separately in Step 2
+    // with the WRITABLE-ONLY length.  Drives with ETG.5000 modular device
+    // profiles (e.g. Synapticon SOMANET) auto-include Fixed/Mandatory PDOs
+    // and compute the full SM length internally.  Writing the total length
+    // to the SM register causes AL_STATUS 0x001E (Invalid input config).
     //
-    // The FMMU (configured later) must use the TOTAL length so the master's
+    // The FMMU (configured later) also uses the TOTAL length so the master's
     // process data image covers the full buffer including fixed PDOs.
     for (const auto& mc : multi_configs) {
         if (mc.sm_index >= 4) continue;  // SlaveConfig only has sm[4]
         auto& sm = cfgs[index_].sm[mc.sm_index];
         sm.phys_start_addr = mc.phys_start_addr;
-        sm.length = mc.writableLength();
+        sm.length = mc.totalLength();
         sm.control = mc.control;
         sm.enable = false;  // Will be enabled after FMMU config
         sm.type = mc.type;
@@ -1604,11 +1629,13 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
                                  static_cast<uint16_t>(base + 6), &rb_act, 1, 200);
             TETHER_LOGI(TAG, "%s: [pdo-cfg] SM%u register readback: "
                         "addr=0x%04X len=%u ctrl=0x%02X act=0x%02X "
-                        "(expected: addr=0x%04X len=%u ctrl=0x%02X act=0x01)",
+                        "(expected: addr=0x%04X len=%u ctrl=0x%02X act=0x01) "
+                        "[SM reg uses writable len=%u, SlaveConfig uses total len=%u]",
                         logPrefix().c_str(), mc.sm_index,
                         rb_addr, rb_len, rb_ctrl, rb_act,
-                        mc.phys_start_addr, mc.totalLength(),
-                        std::bit_cast<uint8_t>(mc.control));
+                        mc.phys_start_addr, mc.writableLength(),
+                        std::bit_cast<uint8_t>(mc.control),
+                        mc.writableLength(), mc.totalLength());
         }
     }
 
