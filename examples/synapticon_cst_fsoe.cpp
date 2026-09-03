@@ -583,16 +583,16 @@ public:
             std::memcpy(last_tx_.data(), tx_buffer, sizeof(FSoETxPDO));
         }
 
-        // --debug fsoe-raw: STO/SBC meaning first, then hex dump on change
+        // --debug fsoe-raw: verbose multi-line struct dump (CRCs, raw hex, etc.)
         if (debug_raw_ && tx_changed) {
             const auto* tx_pdo = reinterpret_cast<const FSoETxPDO*>(tx_buffer);
-            fsoe_dbg::dumpTxPDOSummary("fsoe-cyclic", *tx_pdo);
+            fsoe_dbg::dumpTxPDO(TAG, *tx_pdo);
         }
 
-        // --debug fsoe-frame: decoded struct dump on change
+        // --debug fsoe-frame: compact one-line interpretation on change
         if (debug_frame_ && tx_changed) {
             const auto* tx_pdo = reinterpret_cast<const FSoETxPDO*>(tx_buffer);
-            fsoe_dbg::dumpTxPDO(TAG, *tx_pdo);
+            fsoe_dbg::dumpTxPDOFrame(TAG, *tx_pdo);
         }
 
         const bool ok = main_instance_.exchangeViaPDO(
@@ -610,15 +610,23 @@ public:
 
         if (debug_frame_ && rx_changed) {
             const auto* rx_pdo = reinterpret_cast<const FSoERxPDO*>(rx_buffer);
-            fsoe_dbg::dumpRxPDO(TAG, *rx_pdo);
+            fsoe_dbg::dumpRxPDOFrame(TAG, *rx_pdo);
         }
 
         if (debug_raw_ && rx_changed) {
             const auto* rx_pdo = reinterpret_cast<const FSoERxPDO*>(rx_buffer);
-            fsoe_dbg::dumpRxPDOSummary("fsoe-cyclic", *rx_pdo);
+            fsoe_dbg::dumpRxPDO(TAG, *rx_pdo);
         }
 
-        return ok;
+        // Always return true — exchangeViaPDO() returns false for duplicate
+        // frames in Data state, which is normal (the slave re-sends the same
+        // response while the master's TX is cached).  Returning false would
+        // halt the CyclicTaskScheduler::executeAll() chain and prevent
+        // subsequent cyclic tasks (e.g. FSoEDiagnosticsTask) from running.
+        // FSoE errors are handled internally via the state machine's
+        // error/fail-safe callbacks, not via the return value here.
+        (void)ok;
+        return true;
     }
 
 private:
@@ -1768,13 +1776,24 @@ int main(int argc, char** argv) {
     {
         const size_t motion_rx_offset =
             args.enable_fsoe ? kMotionRxPDOOffset : 0;
+        const size_t motion_tx_offset =
+            args.enable_fsoe ? kMotionTxPDOOffset : 0;
+
+        // Controlword (0x6040) is at the start of the motion RxPDO
+        drive.setControlwordPDOOffset(static_cast<int>(motion_rx_offset));
+
+        // Statusword (0x6041) is at the start of the motion TxPDO
+        drive.setStatuswordPDOOffset(static_cast<int>(motion_tx_offset));
+
         const size_t opmode_offset = motion_rx_offset +
             offsetof(EtherCAT::Drives::Synapticon_pdo::SOMANET_RxPDO_1600,
                     modes_of_operation);
         drive.setOpmodePDOOffset(static_cast<int>(opmode_offset));
         TETHER_LOGI(TAG,
-            "Operating mode PDO offset: {} (motion_rx={}, opmode={})",
-            opmode_offset, motion_rx_offset, opmode_offset);
+            "PDO offsets: controlword={} statusword={} opmode={} "
+            "(motion_rx={} motion_tx={})",
+            motion_rx_offset, motion_tx_offset, opmode_offset,
+            motion_rx_offset, motion_tx_offset);
     }
 
     // --- Read motor rated torque (0x6076) for Nm→per-mille conversion ---
@@ -2348,19 +2367,23 @@ int main(int argc, char** argv) {
 
             if (elapsed_ms >= run_duration_ms) break;
 
-            // --- Release the brake 1 second after FSoE Data state ---
+            // --- Release the brake once STO=off and SBC=off are confirmed ---
             // The brake is spring-activated and must be disengaged via CoE
-            // (0x2004:7) before the drive can move.  We do this exactly 1 s
-            // after FSoE reaches the Data state, giving the safety channel
-            // time to stabilize before releasing the mechanical brake.
-            if (args.enable_fsoe && !brake_released && fsoe_data_time_ms > 0) {
-                const auto since_data_ms =
-                    Tether::Platform::Clock::instance().getMilliseconds() -
-                    fsoe_data_time_ms;
-                if (since_data_ms >= 1000) {
+            // (0x2004:7) before the drive can move.  We wait for the slave to
+            // confirm STO=off (torque allowed) and SBC=off (brake released at
+            // the safety level) in its FSoE status feedback, then immediately
+            // disengage the physical brake via CoE.
+            if (args.enable_fsoe && !brake_released && fsoe_data_time_ms > 0 &&
+                fsoe_main && fsoe_main->hasStatus()) {
+                const auto& sm = fsoe_main->status();
+                if (!sm.sto_active && !sm.brake_engaged) {
                     brake_released = true;
+                    const auto since_data_ms =
+                        Tether::Platform::Clock::instance().getMilliseconds() -
+                        fsoe_data_time_ms;
                     TETHER_LOGI(TAG,
-                        "Releasing brake {} ms after FSoE Data state",
+                        "STO=off and SBC=off confirmed by drive after {} ms — "
+                        "releasing brake via CoE",
                         since_data_ms);
                     auto& brake_sdo = master.ethercatMaster().sdoManager(slave_idx);
                     if (!EtherCAT::Drives::Synapticon::BrakeControl::disengageBrake(

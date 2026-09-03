@@ -536,36 +536,43 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
         Tether::Platform::Clock::instance().delayMilliseconds(100);
         state = getDriveState();
     }
-    
+
+    // Use SDO writes for the state transition sequence, not PDO.
+    // When a motion controller is running cyclically, it writes ENABLE_OPERATION
+    // (0x000F) to the PDO controlword every cycle.  PDO writes from enable()
+    // would be immediately overwritten by the motion controller before the
+    // drive can process them.  SDO writes go directly to the drive's object
+    // dictionary (0x6040) and are not affected by PDO buffer contents.
+
     // Shutdown (Ready to Switch On)
     if (state == DriveState::SwitchOnDisabled) {
         m_controlword = 0x0006;  // Shutdown
-        writeControlword(m_controlword);
+        sendControlwordSDO(m_controlword);
         if (!waitForDriveState(DriveState::ReadyToSwitchOn, timeout_ms)) {
             return false;
         }
         state = getDriveState();
     }
-    
+
     // Switch On
     if (state == DriveState::ReadyToSwitchOn) {
         m_controlword = 0x0007;  // Switch On
-        writeControlword(m_controlword);
+        sendControlwordSDO(m_controlword);
         if (!waitForDriveState(DriveState::SwitchedOn, timeout_ms)) {
             return false;
         }
         state = getDriveState();
     }
-    
+
     // Enable Operation
     if (state == DriveState::SwitchedOn) {
         m_controlword = 0x000F;  // Enable Operation
-        writeControlword(m_controlword);
+        sendControlwordSDO(m_controlword);
         if (!waitForDriveState(DriveState::OperationEnabled, timeout_ms)) {
             return false;
         }
     }
-    
+
     TETHER_LOGI(TAG, "{}: Drive enabled successfully", logPrefix().c_str());
     return true;
 }
@@ -670,9 +677,11 @@ bool CiA402Drive::writeControlword(uint16_t controlword) {
     // Fast path: when the drive is in OP with RxPDOs registered, write the
     // controlword directly into the PDO buffer instead of issuing a slow SDO
     // transaction.  The cyclic PDO exchange picks up the buffer contents.
+    // In a combined multi-PDO buffer (e.g. FSoE + motion), the controlword
+    // is at m_controlword_pdo_offset within the buffer, not at offset 0.
     if (m_pdo_registered && getECState() == ECState::Op &&
-        m_rxpdo_size >= sizeof(controlword)) {
-        std::memcpy(m_rxpdo_buffer, &controlword, sizeof(controlword));
+        m_rxpdo_size >= static_cast<uint16_t>(m_controlword_pdo_offset) + sizeof(controlword)) {
+        std::memcpy(m_rxpdo_buffer + m_controlword_pdo_offset, &controlword, sizeof(controlword));
         return true;
     }
     auto result = m_master->sdoManager(m_slave_index).writeU16(
@@ -694,9 +703,11 @@ bool CiA402Drive::readStatusword(uint16_t& statusword) {
     // Fast path: when the drive is in OP with TxPDOs registered, read the
     // statusword directly from the PDO buffer (populated by the cyclic PDO
     // exchange) instead of issuing a slow SDO transaction.
+    // In a combined multi-PDO buffer (e.g. FSoE + motion), the statusword
+    // is at m_statusword_pdo_offset within the buffer, not at offset 0.
     if (m_pdo_registered && getECState() == ECState::Op &&
-        m_txpdo_size >= sizeof(statusword)) {
-        std::memcpy(&statusword, m_txpdo_buffer, sizeof(statusword));
+        m_txpdo_size >= static_cast<uint16_t>(m_statusword_pdo_offset) + sizeof(statusword)) {
+        std::memcpy(&statusword, m_txpdo_buffer + m_statusword_pdo_offset, sizeof(statusword));
         m_statusword = statusword;
         return true;
     }
