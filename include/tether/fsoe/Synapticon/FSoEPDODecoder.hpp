@@ -284,6 +284,54 @@ inline void dumpTxPDO(const char* tag, const Synapticon_pdo::SOMANET_TxPDO_1B00&
 }
 
 // ============================================================================
+// Compact frame dumpers (--debug fsoe-frame)
+// ============================================================================
+//
+// Single-line decoded interpretation showing the safety bits, FSoE command,
+// and safe motion data (position/velocity).  No raw hex or CRC details —
+// use --debug fsoe-raw for the full verbose dump.
+
+/// Compact one-line decode of the slave→master TxPDO (0x1B00).
+/// Shows STO/SOS/SBC + command + safe_pos + safe_vel.
+inline void dumpTxPDOFrame(const char* tag,
+                           const Synapticon_pdo::SOMANET_TxPDO_1B00& tx) {
+    using Tx = Synapticon_pdo::SOMANET_TxPDO_1B00;
+    const bool sto = (tx.safety_state_flags & Tx::kSTOState) != 0;
+    const bool sos = (tx.safety_state_flags & Tx::kSOSState) != 0;
+    const bool sbc = (tx.diagnostic_flags & Tx::kSBCState) != 0;
+    char sto_str[64], sos_str[64], sbc_str[64];
+    formatSafetyBit(sto_str, sizeof(sto_str), sto, "STO");
+    formatSafetyBit(sos_str, sizeof(sos_str), sos, "SOS");
+    formatSafetyBit(sbc_str, sizeof(sbc_str), sbc, "SBC");
+    TETHER_LOGI(tag,
+        "[fsoe-frame] RX←slave TxPDO 0x1B00 (31 bytes):  "
+        "{}  {}  {}  cmd={}  conn_id=0x{:04X}  "
+        "safe_pos=0x{:04X}  safe_vel=0x{:04X}",
+        sto_str, sos_str, sbc_str,
+        FSoE::fsoeCommandName(tx.fsoe_command), tx.fsoe_connection_id,
+        tx.safe_position_actual, tx.safe_velocity_actual);
+}
+
+/// Compact one-line decode of the master→slave RxPDO (0x1700).
+/// Shows STO/SOS/SBC + command (no safe data in this direction).
+inline void dumpRxPDOFrame(const char* tag,
+                           const Synapticon_pdo::SOMANET_RxPDO_1700& rx) {
+    using Rx = Synapticon_pdo::SOMANET_RxPDO_1700;
+    const bool sto = (rx.safety_flags & Rx::kSTO) == 0;
+    const bool sos = (rx.safety_flags & Rx::kSOS) == 0;
+    const bool sbc = (rx.safety_flags & Rx::kSBCCommand) == 0;
+    char sto_str[64], sos_str[64], sbc_str[64];
+    formatSafetyBit(sto_str, sizeof(sto_str), sto, "STO");
+    formatSafetyBit(sos_str, sizeof(sos_str), sos, "SOS");
+    formatSafetyBit(sbc_str, sizeof(sbc_str), sbc, "SBC");
+    TETHER_LOGI(tag,
+        "[fsoe-frame] TX→slave RxPDO 0x1700 (11 bytes):  "
+        "{}  {}  {}  cmd={}  conn_id=0x{:04X}",
+        sto_str, sos_str, sbc_str,
+        FSoE::fsoeCommandName(rx.fsoe_command), rx.fsoe_connection_id);
+}
+
+// ============================================================================
 // Compact summary dumpers (--debug fsoe-raw)
 // ============================================================================
 //

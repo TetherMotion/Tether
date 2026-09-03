@@ -270,6 +270,20 @@ public:
     void setOpmodePDOOffset(int offset) { m_opmode_pdo_offset = offset; }
     int  opmodePDOOffset() const { return m_opmode_pdo_offset; }
 
+    /// Set the RxPDO byte offset of the controlword (0x6040) field.
+    /// In a combined multi-PDO buffer (e.g. FSoE + motion), the controlword
+    /// is not at offset 0 — it's at the start of the motion PDO region.
+    /// Default 0 = controlword is at the start of the RxPDO buffer.
+    void setControlwordPDOOffset(int offset) { m_controlword_pdo_offset = offset; }
+    int  controlwordPDOOffset() const { return m_controlword_pdo_offset; }
+
+    /// Set the TxPDO byte offset of the statusword (0x6041) field.
+    /// In a combined multi-PDO buffer (e.g. FSoE + motion), the statusword
+    /// is not at offset 0 — it's at the start of the motion PDO region.
+    /// Default 0 = statusword is at the start of the TxPDO buffer.
+    void setStatuswordPDOOffset(int offset) { m_statusword_pdo_offset = offset; }
+    int  statuswordPDOOffset() const { return m_statusword_pdo_offset; }
+
     /// Set operating mode.  Uses PDO by default (if offset configured),
     /// otherwise falls back to SDO.
     bool setOperatingMode(int8_t mode);
@@ -334,6 +348,13 @@ private:
 
     // PDO-based operating mode offset (-1 = not configured, use SDO)
     int m_opmode_pdo_offset{-1};
+
+    // PDO-based controlword/statusword offsets.
+    // In a single-PDO layout these default to 0 (start of buffer).
+    // In a combined multi-PDO layout (e.g. FSoE + motion), they must be set
+    // to the start of the motion PDO region within the combined buffer.
+    int m_controlword_pdo_offset{0};
+    int m_statusword_pdo_offset{0};
 };
 
 // ============================================================================
