@@ -153,24 +153,26 @@ set(CMAKE_CXX_EXTENSIONS ON)
 set(CMAKE_C_STANDARD 99)
 
 # =============================================================================
-# <format> availability check & {fmt} fallback shim
+# <format> and <print> availability check & {fmt} fallback shim
 # =============================================================================
 # GCC < 13 (e.g. Ubuntu 22.04's GCC 11.4) ships no <format> header at all,
-# not even as <experimental/format>. When the native header is missing we
-# fall back to the {fmt} submodule via a thin shim header that re-exports
-# the fmt:: APIs into namespace std, so all existing `#include <format>`
-# / `std::format(...)` call sites compile unchanged. On toolchains that do
-# provide a real <format> (GCC >= 13, recent clang/MSVC) the shim is not
-# put on the include path and the standard header is used directly.
+# not even as <experimental/format>. GCC 13/14 has <format> but not <print>
+# (added in GCC 15). When either native header is missing we fall back to
+# the {fmt} submodule via thin shim headers that re-export the fmt:: APIs
+# into namespace std, so all existing `#include <format>` / `std::format(...)`
+# / `#include <print>` / `std::print(...)` call sites compile unchanged.
+# On toolchains that provide both real headers (GCC >= 15, recent clang/MSVC)
+# the shims are not put on the include path and the standard headers are used
+# directly.
 include(CheckIncludeFileCXX)
 set(_tether_format_check_flags_backup "${CMAKE_REQUIRED_FLAGS}")
 set(CMAKE_REQUIRED_FLAGS "-std=c++23")
 check_include_file_cxx("format" TETHER_HAVE_NATIVE_STD_FORMAT)
+check_include_file_cxx("print" TETHER_HAVE_NATIVE_STD_PRINT)
 set(CMAKE_REQUIRED_FLAGS "${_tether_format_check_flags_backup}")
 unset(_tether_format_check_flags_backup)
 
-if(NOT TETHER_HAVE_NATIVE_STD_FORMAT)
-    message(STATUS "Native <format> not available; using {fmt} submodule shim as std::format polyfill.")
+if(NOT TETHER_HAVE_NATIVE_STD_FORMAT OR NOT TETHER_HAVE_NATIVE_STD_PRINT)
     set(FMT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/fmt")
     if(NOT EXISTS "${FMT_PATH}/include/fmt/format.h")
         message(FATAL_ERROR
@@ -184,13 +186,25 @@ if(NOT TETHER_HAVE_NATIVE_STD_FORMAT)
     # Use {fmt} in header-only mode so no extra link step is required.
     add_compile_definitions(FMT_HEADER_ONLY)
 
-    # The shim directory contains a header literally named `format` so that
-    # `#include <format>` resolves to it. BEFORE ensures it is searched
-    # ahead of any system include path.
+    # The shim directory contains headers literally named `format` and `print`
+    # so that `#include <format>` / `#include <print>` resolve to them.
+    # BEFORE ensures they are searched ahead of any system include path.
     include_directories(BEFORE "${CMAKE_CURRENT_SOURCE_DIR}/include/tether/fmt_shim")
     include_directories("${FMT_PATH}/include")
+
+    if(NOT TETHER_HAVE_NATIVE_STD_FORMAT)
+        message(STATUS "Native <format> not available; using {fmt} submodule shim as std::format polyfill.")
+    else()
+        message(STATUS "Native <format> available; not using {fmt} shim for <format>.")
+    endif()
+
+    if(NOT TETHER_HAVE_NATIVE_STD_PRINT)
+        message(STATUS "Native <print> not available; using {fmt} submodule shim as std::print polyfill.")
+    else()
+        message(STATUS "Native <print> available; not using {fmt} shim for <print>.")
+    endif()
 else()
-    message(STATUS "Native <format> available; not using {fmt} shim.")
+    message(STATUS "Native <format> and <print> available; not using {fmt} shim.")
 endif()
 
 # =============================================================================
