@@ -7,12 +7,13 @@ and CNC machines. It includes a Klipper-compatible firmware emulation layer
 (`tether_klipper`) that implements the Klipper wire protocol, G-code execution,
 and Moonraker-compatible UDS API.
 
-## Toolchain / `<format>` and `<expected>` support
+## Toolchain / `<format>`, `<print>`, and `<expected>` support
 
-Tether uses `std::format` and `std::expected` (C++20/23) throughout. Older
-toolchains ship neither header — notably GCC 11.x (Ubuntu 22.04's GCC 11.4)
-has **no** `<format>` (added in GCC 13) and **no** `<expected>` (added in
-GCC 12), not even as experimental.
+Tether uses `std::format`, `std::print`, and `std::expected` (C++20/23)
+throughout. Older toolchains ship some or all of these headers — notably
+GCC 11.x (Ubuntu 22.04's GCC 11.4) has **no** `<format>` (added in GCC 13),
+**no** `<print>` (added in GCC 15), and **no** `<expected>` (added in
+GCC 12), not even as experimental. GCC 13/14 has `<format>` but not `<print>`.
 
 CMake auto-detects each via `check_include_file_cxx(...)` and, when the native
 header is absent, falls back to a submodule through a thin shim header that
@@ -23,10 +24,28 @@ link step is needed (both fallback libs are header-only).
 | Header       | Fallback submodule              | Shim header                              | Pinned | Native since        |
 |--------------|---------------------------------|------------------------------------------|--------|---------------------|
 | `<format>`   | `dependencies/fmt` ({fmt})      | `include/tether/fmt_shim/format`         | 11.1.4 | GCC 13              |
+| `<print>`    | `dependencies/fmt` ({fmt})      | `include/tether/fmt_shim/print`          | 11.1.4 | GCC 15              |
 | `<expected>` | `dependencies/expected` (tl::)  | `include/tether/expected_shim/expected`  | v1.3.1 | GCC 12              |
 
-On GCC >= 13 / recent clang / MSVC the shims are **not** activated and the
-standard headers are used directly. No source changes are required either way.
+When either `<format>` or `<print>` is missing, the {fmt} submodule is
+activated and both shim headers are put on the include path. This means
+on GCC 13/14 (native `<format>` but no `<print>`), the `<format>` shim
+replaces the native header — this is intentional and correct (the shim
+re-exports {fmt} which is the basis for `std::format`, and `std::print`
+uses `fmt::print` which shares the same `fmt::format_string` type).
+
+On GCC >= 15 / recent clang / MSVC (all three headers native), the shims
+are **not** activated and the standard headers are used directly. No
+source changes are required either way.
+
+### ESC211 outer repo propagation
+
+The ESC211 outer `CMakeLists.txt` replicates the shim setup for targets
+defined outside the `Tether/` subdirectory (the `include_directories(BEFORE)`
+in Tether's CMakeLists.txt is directory-scoped and does not propagate).
+The `esc211_apply_tether_config()` helper function applies both the
+Tether compile definitions and the {fmt} shim include paths/defines to
+each outer target.
 
 ## Build Commands
 
