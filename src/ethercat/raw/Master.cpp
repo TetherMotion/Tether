@@ -287,6 +287,10 @@ public:
         return Master::adpForSlaveIndex(slave_index);
     }
 
+    bool isCancelRequested() const override {
+        return master_.isCancelRequested();
+    }
+
 private:
     Master& master_;
 };
@@ -520,6 +524,7 @@ bool Master::isCancelRequested() const
 void Master::clearCancel()
 {
     cancel_requested_.store(false, std::memory_order_release);
+    cancel_warn_logged_.store(false, std::memory_order_release);
     packet_router_.clearCancel();
 }
 
