@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 
+#include "tether/fsoe/FSoESlaveEmulator.hpp"
 #include "tether/fsoe/TypedProcessData.hpp"
 #include "tether/profiles/cia402/DS402Master.hpp"
 
@@ -80,6 +81,9 @@ struct ServoEmulatorConfig {
     bool analog_input_diagnostic_active = true;
     bool analog_input_value_valid = true;
     int16_t analog_input_value = 0;
+    bool accept_any_connection_id = false;
+
+    ::FSoE::FSoESlaveConfig toSlaveConfig() const;
 };
 
 struct Codec {
@@ -156,15 +160,16 @@ private:
     bool has_status_ = false;
 };
 
-class SafeMotionServoEmulator {
+class SafeMotionServoEmulator
+    : public ::FSoE::FSoESlaveEmulator<Codec, Command, Status, ServoEmulatorConfig> {
+    using Base = ::FSoE::FSoESlaveEmulator<Codec, Command, Status, ServoEmulatorConfig>;
+
 public:
     explicit SafeMotionServoEmulator(const ServoEmulatorConfig& config = {});
 
-    bool initialize();
     void step(double requested_velocity_counts_per_second, double dt_seconds);
     void injectError(bool require_restart_acknowledge = true);
     void clearError();
-    void synchronizeCommandAndStatus();
 
     /// Reset the emulator to the safe state (STO active, SBC active / brakes
     /// engaged).  Resets last_command_ to safeStop(), clears error state,
@@ -173,24 +178,15 @@ public:
     /// sends any new command.
     void resetToSafeState();
 
-    const Status& status() const { return published_status_; }
-    const Command& lastCommand() const { return last_command_; }
     bool motionAllowed() const { return published_status_.motionAllowed(); }
 
-    ::FSoE::FSoESlave& rawSlave() { return slave_; }
-    const ::FSoE::FSoESlave& rawSlave() const { return slave_; }
+protected:
+    void onInitialize() override;
+    void onCommandConsumed(const Command& cmd) override;
+    void buildStatus(Status& out) override;
+    void onReset() override;
 
 private:
-    void consumeLatestCommand();
-    void refreshPublishedStatus();
-
-    ServoEmulatorConfig config_;
-    ::FSoE::FSoESlaveConfig slave_config_{};
-    ::FSoE::FSoESlave slave_;
-    ::FSoE::TypedSlaveProcessDataView<Command, Status, Codec> typed_view_;
-    Command last_command_ = Command::safeStop();
-    Status published_status_{};
-    bool initialized_ = false;
     bool error_active_ = false;
     bool restart_required_ = false;
     bool previous_error_acknowledge_ = false;
