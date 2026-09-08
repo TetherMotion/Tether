@@ -392,8 +392,11 @@ bool Master::sendSingleDatagram(Command cmd, uint8_t idx,
         int last_errno = 0;
         for (int retry = 0; retry <= kMaxTxRetries; retry++) {
             if (cancel_requested_.load(std::memory_order_acquire)) {
-                TETHER_LOGW(TAG, "sendSingleDatagram cancelled (cmd={} idx={})",
-                            commandToString(cmd), static_cast<unsigned>(idx));
+                if (!cancel_warn_logged_.exchange(true, std::memory_order_acq_rel)) {
+                    TETHER_LOGW(TAG, "sendSingleDatagram cancelled (cmd={} idx={}) — "
+                                      "further cancellation warnings suppressed",
+                                commandToString(cmd), static_cast<unsigned>(idx));
+                }
                 return false;
             }
             errno = 0;
@@ -562,7 +565,10 @@ size_t Master::sendMultiDatagram(const MultiDatagramSpec* specs, size_t count)
             bool sent = false;
             for (int retry = 0; retry <= kMaxTxRetries; retry++) {
                 if (cancel_requested_.load(std::memory_order_acquire)) {
-                    TETHER_LOGW(TAG, "sendMultiDatagram cancelled");
+                    if (!cancel_warn_logged_.exchange(true, std::memory_order_acq_rel)) {
+                        TETHER_LOGW(TAG, "sendMultiDatagram cancelled — "
+                                          "further cancellation warnings suppressed");
+                    }
                     return frames_sent;
                 }
                 if (sendWithEncapsulation(txbuf, frame_len)) { sent = true; break; }

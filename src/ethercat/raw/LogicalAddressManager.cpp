@@ -350,7 +350,9 @@ bool LogicalAddressManager::exchangeAllLRW(const PDO::PDOMapping& mapping) {
     if (!transport_.sendSingleDatagram(Command::LRW, idx, adp, ado,
                                         payload, static_cast<uint16_t>(total_data),
                                         true)) {
-        TETHER_LOGE(TAG, "exchangeAllLRW: send failed");
+        if (!transport_.isCancelRequested()) {
+            TETHER_LOGE(TAG, "exchangeAllLRW: send failed");
+        }
         stats_.send_errors++;
         return false;
     }

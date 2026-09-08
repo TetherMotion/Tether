@@ -328,6 +328,10 @@ public:
 
     virtual uint8_t  allocIdx() = 0;
     virtual uint16_t adpForSlaveIndex(uint16_t slave_index) = 0;
+
+    /// @return true if cancellation has been requested (e.g. during shutdown).
+    /// Used by callers to suppress error logging when failures are expected.
+    virtual bool isCancelRequested() const { return false; }
 };
 
 // ============================================================================
