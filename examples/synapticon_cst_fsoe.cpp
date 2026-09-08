@@ -166,10 +166,10 @@ constexpr uint32_t kSdoTimeoutMs = EtherCAT::Drives::Synapticon::kSdoTimeoutMs;
 // every frame.  By placing motion PDOs last, the zeroed word falls on
 // motion data, not the FSoE ConnectionID.
 // See: https://doc.synapticon.com/circulo_safe_motion/smm/ecat_fsoe_issues.htm
-using RxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_RxPDO_1600;
-using TxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_TxPDO_1A00;
-using FSoERxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_RxPDO_1700;
-using FSoETxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_TxPDO_1B00;
+using RxPDO = EtherCAT::Drives::SynapticonPDO::SOMANET_RxPDO_1600;
+using TxPDO = EtherCAT::Drives::SynapticonPDO::SOMANET_TxPDO_1A00;
+using FSoERxPDO = EtherCAT::Drives::SynapticonPDO::SOMANET_RxPDO_1700;
+using FSoETxPDO = EtherCAT::Drives::SynapticonPDO::SOMANET_TxPDO_1B00;
 
 // PDO offsets within the combined PDO buffer.
 // FSoE PDOs come FIRST (offset 0), motion PDOs follow after the FSoE PDO.
@@ -181,8 +181,8 @@ constexpr size_t kFSoETxPDOOffset   = 0;                    // FSoE first
 constexpr size_t kMotionTxPDOOffset = sizeof(FSoETxPDO);    // 31 bytes
 
 // Total SM lengths (full combined: FSoE + all motion PDOs).
-constexpr size_t kSM2TotalLen = EtherCAT::Drives::Synapticon_pdo::kSM2CombinedSize;   // 46
-constexpr size_t kSM3TotalLen = EtherCAT::Drives::Synapticon_pdo::kSM3CombinedSize;   // 78
+constexpr size_t kSM2TotalLen = EtherCAT::Drives::SynapticonPDO::kSM2CombinedSize;   // 46
+constexpr size_t kSM3TotalLen = EtherCAT::Drives::SynapticonPDO::kSM3CombinedSize;   // 78
 
 using FSoEMain = EtherCAT::Drives::Synapticon::SafeMotion::MainInstance;
 
@@ -1413,7 +1413,7 @@ int main(int argc, char** argv) {
         // FSoE PDOs come FIRST (critical for the Synapticon ESC bug — see
         // comment above).
         const auto assignment =
-            EtherCAT::Drives::Synapticon_pdo::makeCombinedPDOAssignment();
+            EtherCAT::Drives::SynapticonPDO::makeCombinedPDOAssignment();
 
         TETHER_LOGI(TAG,
             "Transitioning to OP with combined FSoE+motion PDO mapping: "
@@ -1421,10 +1421,10 @@ int main(int argc, char** argv) {
             "SM3={} bytes (FSoE {}B + motion {}B)",
             static_cast<uint16_t>(kSM2TotalLen),
             static_cast<uint16_t>(sizeof(FSoERxPDO)),
-            EtherCAT::Drives::Synapticon_pdo::kSM2TotalSize,
+            EtherCAT::Drives::SynapticonPDO::kSM2TotalSize,
             static_cast<uint16_t>(kSM3TotalLen),
             static_cast<uint16_t>(sizeof(FSoETxPDO)),
-            EtherCAT::Drives::Synapticon_pdo::kSM3TotalSize);
+            EtherCAT::Drives::SynapticonPDO::kSM3TotalSize);
 
         // Note: Safety parameters (0x2620, 0x2641, etc.) are configured on the
         // drive via OBLAC Drives and cannot be written via SDO (error 0x08000021
@@ -1751,10 +1751,10 @@ int main(int argc, char** argv) {
         // FSoE disabled — motion-only single-PDO configuration
         Tether::Examples::SingleDriveExampleConfig config;
         config.drive.slave_index = slave_idx;
-        config.drive.rxpdo_index = EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.index;
-        config.drive.txpdo_index = EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.index;
-        config.drive.rxpdo_size = EtherCAT::Drives::Synapticon_pdo::RxPDO_1600.size;
-        config.drive.txpdo_size = EtherCAT::Drives::Synapticon_pdo::TxPDO_1A00.size;
+        config.drive.rxpdo_index = EtherCAT::Drives::SynapticonPDO::RxPDO_1600.index;
+        config.drive.txpdo_index = EtherCAT::Drives::SynapticonPDO::TxPDO_1A00.index;
+        config.drive.rxpdo_size = EtherCAT::Drives::SynapticonPDO::RxPDO_1600.size;
+        config.drive.txpdo_size = EtherCAT::Drives::SynapticonPDO::TxPDO_1A00.size;
         // Operating mode is set via PDO, not SDO — skip configureDrive's SDO write
         config.drive.operating_mode = 0;
         config.drive.sdo_timeout_ms = kSdoTimeoutMs;
@@ -1786,7 +1786,7 @@ int main(int argc, char** argv) {
         drive.setStatuswordPDOOffset(static_cast<int>(motion_tx_offset));
 
         const size_t opmode_offset = motion_rx_offset +
-            offsetof(EtherCAT::Drives::Synapticon_pdo::SOMANET_RxPDO_1600,
+            offsetof(EtherCAT::Drives::SynapticonPDO::SOMANET_RxPDO_1600,
                     modes_of_operation);
         drive.setOpmodePDOOffset(static_cast<int>(opmode_offset));
         TETHER_LOGI(TAG,

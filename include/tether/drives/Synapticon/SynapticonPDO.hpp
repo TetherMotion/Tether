@@ -70,7 +70,7 @@
 
 namespace EtherCAT {
 namespace Drives {
-namespace Synapticon_pdo {
+namespace SynapticonPDO {
 
 // ============================================================================
 // RxPDO 0x1600 — Master -> Slave, 14 bytes
@@ -605,6 +605,6 @@ inline Slave::MultiPDOAssignment makePDOAssignment(
     return assignment;
 }
 
-} // namespace Synapticon_pdo
+} // namespace SynapticonPDO
 } // namespace Drives
 } // namespace EtherCAT

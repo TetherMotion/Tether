@@ -67,8 +67,8 @@ constexpr uint16_t kMailboxProtocols = EtherCAT::Drives::Synapticon::kMailboxPro
 constexpr uint32_t kSdoTimeoutMs     = EtherCAT::Drives::Synapticon::kSdoTimeoutMs;
 
 // FSoE PDO types — only safety PDOs, no CiA 402 process data
-using FSoERxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_RxPDO_1700;
-using FSoETxPDO = EtherCAT::Drives::Synapticon_pdo::SOMANET_TxPDO_1B00;
+using FSoERxPDO = EtherCAT::Drives::SynapticonPDO::SOMANET_RxPDO_1700;
+using FSoETxPDO = EtherCAT::Drives::SynapticonPDO::SOMANET_TxPDO_1B00;
 
 using FSoEMain  = EtherCAT::Drives::Synapticon::SafeMotion::MainInstance;
 
@@ -538,13 +538,13 @@ int main(int argc, char** argv) {
         drive.setSDOTimeout(kSdoTimeoutMs);
 
         // Build the FSoE-only PDO assignment
-        const auto assignment = EtherCAT::Drives::Synapticon_pdo::makeFSoEPDOAssignment();
+        const auto assignment = EtherCAT::Drives::SynapticonPDO::makeFSoEPDOAssignment();
 
         TETHER_LOGI(TAG,
             "Transitioning to OP with FSoE-only PDO mapping: "
             "SM2=RxPDO 0x1700 ({} bytes), SM3=TxPDO 0x1B00 ({} bytes)",
-            EtherCAT::Drives::Synapticon_pdo::RxPDO_1700.size,
-            EtherCAT::Drives::Synapticon_pdo::TxPDO_1B00.size);
+            EtherCAT::Drives::SynapticonPDO::RxPDO_1700.size,
+            EtherCAT::Drives::SynapticonPDO::TxPDO_1B00.size);
 
         if (!drive.transitionToOp(assignment)) {
             TETHER_LOGE(TAG, "Failed to transition to OP with multi-PDO assignment");

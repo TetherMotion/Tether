@@ -131,8 +131,8 @@ inline void formatHex(char* buf, size_t bufsize, const uint8_t* data, size_t len
 /// ErrorAck, RestartAck, ResetPosition use one-active encoding (bit=1 → active).
 /// The display inverts zero-active bits so that "ON" (green) always means
 /// the safety function is active (safe).
-inline void dumpRxPDO(const char* tag, const Synapticon_pdo::SOMANET_RxPDO_1700& rx) {
-    using Rx = Synapticon_pdo::SOMANET_RxPDO_1700;
+inline void dumpRxPDO(const char* tag, const SynapticonPDO::SOMANET_RxPDO_1700& rx) {
+    using Rx = SynapticonPDO::SOMANET_RxPDO_1700;
 
     // --- STO, SOS, and SBC are what we care about most — show them FIRST ---
     // Zero-active: bit=0 → active (safe), bit=1 → inactive (unsafe)
@@ -195,8 +195,8 @@ inline void dumpRxPDO(const char* tag, const Synapticon_pdo::SOMANET_RxPDO_1700&
 ///
 /// In the slave→master direction, all flags use **one-active** encoding
 /// (bit=1 → active, bit=0 → inactive).  No inversion needed.
-inline void dumpTxPDO(const char* tag, const Synapticon_pdo::SOMANET_TxPDO_1B00& tx) {
-    using Tx = Synapticon_pdo::SOMANET_TxPDO_1B00;
+inline void dumpTxPDO(const char* tag, const SynapticonPDO::SOMANET_TxPDO_1B00& tx) {
+    using Tx = SynapticonPDO::SOMANET_TxPDO_1B00;
 
     // --- STO, SOS, and SBC are what we care about most — show them FIRST ---
     // One-active: bit=1 → active (safe), bit=0 → inactive (unsafe)
@@ -294,8 +294,8 @@ inline void dumpTxPDO(const char* tag, const Synapticon_pdo::SOMANET_TxPDO_1B00&
 /// Compact one-line decode of the slave→master TxPDO (0x1B00).
 /// Shows STO/SOS/SBC + command + safe_pos + safe_vel.
 inline void dumpTxPDOFrame(const char* tag,
-                           const Synapticon_pdo::SOMANET_TxPDO_1B00& tx) {
-    using Tx = Synapticon_pdo::SOMANET_TxPDO_1B00;
+                           const SynapticonPDO::SOMANET_TxPDO_1B00& tx) {
+    using Tx = SynapticonPDO::SOMANET_TxPDO_1B00;
     const bool sto = (tx.safety_state_flags & Tx::kSTOState) != 0;
     const bool sos = (tx.safety_state_flags & Tx::kSOSState) != 0;
     const bool sbc = (tx.diagnostic_flags & Tx::kSBCState) != 0;
@@ -315,8 +315,8 @@ inline void dumpTxPDOFrame(const char* tag,
 /// Compact one-line decode of the master→slave RxPDO (0x1700).
 /// Shows STO/SOS/SBC + command (no safe data in this direction).
 inline void dumpRxPDOFrame(const char* tag,
-                           const Synapticon_pdo::SOMANET_RxPDO_1700& rx) {
-    using Rx = Synapticon_pdo::SOMANET_RxPDO_1700;
+                           const SynapticonPDO::SOMANET_RxPDO_1700& rx) {
+    using Rx = SynapticonPDO::SOMANET_RxPDO_1700;
     const bool sto = (rx.safety_flags & Rx::kSTO) == 0;
     const bool sos = (rx.safety_flags & Rx::kSOS) == 0;
     const bool sbc = (rx.safety_flags & Rx::kSBCCommand) == 0;
@@ -342,8 +342,8 @@ inline void dumpRxPDOFrame(const char* tag,
 /// One-line summary of the slave→master TxPDO (0x1B00).
 /// STO/SBC use one-active encoding (bit=1 → active/safe).
 inline void dumpTxPDOSummary(const char* tag,
-                             const Synapticon_pdo::SOMANET_TxPDO_1B00& tx) {
-    using Tx = Synapticon_pdo::SOMANET_TxPDO_1B00;
+                             const SynapticonPDO::SOMANET_TxPDO_1B00& tx) {
+    using Tx = SynapticonPDO::SOMANET_TxPDO_1B00;
     const bool sto = (tx.safety_state_flags & Tx::kSTOState) != 0;
     const bool sos = (tx.safety_state_flags & Tx::kSOSState) != 0;
     const bool sbc = (tx.diagnostic_flags & Tx::kSBCState) != 0;
@@ -360,8 +360,8 @@ inline void dumpTxPDOSummary(const char* tag,
 /// One-line summary of the master→slave RxPDO (0x1700).
 /// STO/SBC use zero-active encoding (bit=0 → active/safe).
 inline void dumpRxPDOSummary(const char* tag,
-                             const Synapticon_pdo::SOMANET_RxPDO_1700& rx) {
-    using Rx = Synapticon_pdo::SOMANET_RxPDO_1700;
+                             const SynapticonPDO::SOMANET_RxPDO_1700& rx) {
+    using Rx = SynapticonPDO::SOMANET_RxPDO_1700;
     const bool sto = (rx.safety_flags & Rx::kSTO) == 0;
     const bool sos = (rx.safety_flags & Rx::kSOS) == 0;
     const bool sbc = (rx.safety_flags & Rx::kSBCCommand) == 0;
@@ -401,8 +401,8 @@ inline void dumpWire(const char* tag,
                      size_t sm2_total_len,
                      size_t sm3_total_len,
                      uint32_t cycle_count) {
-    using Tx = Synapticon_pdo::SOMANET_TxPDO_1B00;
-    using Rx = Synapticon_pdo::SOMANET_RxPDO_1700;
+    using Tx = SynapticonPDO::SOMANET_TxPDO_1B00;
+    using Rx = SynapticonPDO::SOMANET_RxPDO_1700;
 
     const auto* tx_pdo = reinterpret_cast<const Tx*>(tx_buffer);
     const auto* rx_pdo = reinterpret_cast<const Rx*>(rx_buffer);
