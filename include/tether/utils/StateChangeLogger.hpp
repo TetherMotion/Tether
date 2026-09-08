@@ -10,6 +10,9 @@
  *   - the state **stays the same** for the Nth consecutive time
  *     (every `repeat_interval` updates, default 10).
  *
+ * If `repeat_interval` is `std::nullopt`, the callback fires **only** on
+ * state change — repeated unchanged values never fire.
+ *
  * This is useful for polling loops (e.g. CRC verification, AL status
  * monitoring) where the value is usually unchanged on every poll and
  * logging every iteration would flood the output.
@@ -55,12 +58,14 @@ public:
      * @brief Construct the logger.
      *
      * @param log_func        Called when a log entry should fire.
-     * @param repeat_interval Log every N-th consecutive unchanged update
-     *                        (default 10).  Must be >= 1.
+     * @param repeat_interval Log every N-th consecutive unchanged update.
+     *                        Default 10.  Pass `std::nullopt` to log ONLY
+     *                        on state change (never on repeated values).
      */
-    explicit StateChangeLogger(LogFunc log_func, int repeat_interval = 10)
+    explicit StateChangeLogger(LogFunc log_func,
+                              std::optional<int> repeat_interval = 10)
         : log_func_(std::move(log_func)),
-          repeat_interval_(repeat_interval < 1 ? 1 : repeat_interval) {}
+          repeat_interval_(repeat_interval) {}
 
     /**
      * @brief Record a new state observation.
@@ -68,6 +73,8 @@ public:
      * Fires the callback immediately if there is no previous state (first
      * call) or the state differs from the last logged value.  Otherwise
      * fires every `repeat_interval`-th consecutive unchanged update.
+     * If `repeat_interval` is `std::nullopt`, repeated unchanged values
+     * never fire.
      *
      * @param state    The current state value.
      * @param attempt  Caller-supplied attempt counter (e.g. poll number).
@@ -77,9 +84,9 @@ public:
             log_func_(state, attempt, true);
             last_state_ = state;
             repeat_count_ = 0;
-        } else {
+        } else if (repeat_interval_.has_value()) {
             ++repeat_count_;
-            if (repeat_count_ >= repeat_interval_) {
+            if (repeat_count_ >= *repeat_interval_) {
                 log_func_(state, attempt, false);
                 repeat_count_ = 0;
             }
@@ -101,7 +108,7 @@ public:
 
 private:
     LogFunc log_func_;
-    int repeat_interval_;
+    std::optional<int> repeat_interval_;
     std::optional<State> last_state_;
     int repeat_count_ = 0;
 };
