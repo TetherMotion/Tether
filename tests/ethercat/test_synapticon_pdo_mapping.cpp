@@ -14,7 +14,7 @@
 
 using namespace EtherCAT;
 using namespace EtherCAT::Drives;
-using namespace EtherCAT::Drives::Synapticon_pdo;
+using namespace EtherCAT::Drives::SynapticonPDO;
 
 // ============================================================================
 // Part 1: Standard PDO struct sizes (from ESI)
