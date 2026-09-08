@@ -17,6 +17,7 @@
 #include "tether/ethercat/SyncManagerValidation.hpp"
 #include "tether/ethercat/ESITypes.hpp"
 #include "tether/sii/SIIParser.hpp"
+#include "tether/sii/SIILogger.hpp"
 #include "tether/fmmu/FMMUConfiguration.hpp"
 #include "raw/internal.hpp"
 #include "tether/platform/Platform.hpp"
@@ -383,29 +384,30 @@ void Master::logDiscoveredSlavesSummary(const char* tag)
     const uint16_t n = getDiscoveredSlaveCount();
     TETHER_LOGI(tag, "Discovered {} slave(s)", n);
 
+    // Fast path: use identity + mailbox (both in the first 64 words of SII,
+    // which are prefetched in initSlaves()).  This avoids the full SII
+    // category parse (words 64+) which can take 2-3 seconds for slaves
+    // with large PDO mappings.  The full SII info (SM/PDO counts, device
+    // name) is logged later during the init sequence when the SII is
+    // read for PDO/SM configuration.
     for (uint16_t i = 0; i < n; ++i) {
-        EtherCAT::SII::SIIData sii_data;
-        if (EtherCAT::SII::readSII(*this, i, sii_data)) {
-            // Detailed summary handled by SII module
-            EtherCAT::SII::logSIISummary(sii_data, slaveLogPrefix(i), tag);
-        }
-        else {
-            // Fallback: try reading identity only
-            EtherCAT::SII::SIIIdentity id;
-            if (EtherCAT::SII::readSIIIdentity(*this, i, id)) {
-                char name_buf[64] = {0};
-                if (!siiReadString(i, 1, name_buf, sizeof(name_buf)) &&
-                    !siiReadString(i, 2, name_buf, sizeof(name_buf)) &&
-                    !siiReadString(i, 3, name_buf, sizeof(name_buf))) {
-                    strncpy(name_buf, "<unknown>", sizeof(name_buf));
-                }
+        EtherCAT::SII::SIIIdentity id;
+        EtherCAT::SII::SIIMailboxConfig mbx;
 
-                TETHER_LOGI(tag, "Slave {} @ ADP=0x{:04X} Vendor=0x{:08x} Product=0x{:08x} Name='{}'",
-                         i, adpForSlaveIndex(i), id.vendor_id, id.product_code, name_buf);
+        if (EtherCAT::SII::readSIIIdentity(*this, i, id)) {
+            // Mailbox protocol info (within 64-word prefetch)
+            const char* proto_name = "";
+            if (EtherCAT::SII::readSIIMailbox(*this, i, mbx)) {
+                proto_name = EtherCAT::SII::getMailboxProtocolName(mbx.protocols);
             }
-            else {
-                TETHER_LOGW(tag, "Slave {} @ ADP=0x{:04X}: unable to read SII/identity", i, adpForSlaveIndex(i));
-            }
+
+            TETHER_LOGI(tag, "{}: Vendor=0x{:08x} Product=0x{:08x} {}",
+                        slaveLogPrefix(i),
+                        id.vendor_id, id.product_code,
+                        proto_name);
+        } else {
+            TETHER_LOGW(tag, "Slave {} @ ADP=0x{:04X}: unable to read SII/identity",
+                        i, adpForSlaveIndex(i));
         }
     }
 }

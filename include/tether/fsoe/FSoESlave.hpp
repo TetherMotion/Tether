@@ -174,6 +174,13 @@ struct FSoESlaveConfig {
     bool treatTimeoutAsCritical = true;
     bool treatConnIdErrorAsCritical = true;
 
+    /// When true, the slave adopts whatever Connection ID and Safety Address
+    /// the master sends during the Connection phase, instead of validating
+    /// them against config_.connectionId / config_.safetyAddress.  This is
+    /// useful for emulator/test setups that must interoperate with any
+    /// safety controller without knowing its FNI configuration in advance.
+    bool acceptAnyConnectionId = false;
+
     // CRC model for state-transition responses (Session, Connection,
     // Parameter).  When true, the slave resets the CRC chain (start_crc=0,
     // seq=initialSeqNo) at each state transition, matching the ESC211

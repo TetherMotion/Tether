@@ -860,7 +860,13 @@ bool FSoESlave::validateConnectionId(uint16_t connId) {
     if (errorInjection_.enabled && errorInjection_.injectConnIdError) {
         connId = errorInjection_.fakeConnId;
     }
-    
+
+    // Accept any connection ID — adopt the master's value.
+    if (config_.acceptAnyConnectionId) {
+        currentConnectionId_ = connId;
+        return true;
+    }
+
     if (connId != currentConnectionId_) {
         FSoEErrorDetail detail;
         detail.conn_id_valid = true;
@@ -1027,7 +1033,7 @@ void FSoESlave::processConnection(const uint8_t* data, size_t len) {
 
     // Validate Conn_Id field (always strict — the Connection ID is now active).
     // ETG.5100 §8.2.2.4: Connection ID 0x0000 is not permitted.
-    if (conn_id != config_.connectionId) {
+    if (!config_.acceptAnyConnectionId && conn_id != config_.connectionId) {
         FSoEErrorDetail detail;
         detail.conn_id_valid = true;
         detail.expected_conn_id = config_.connectionId;
@@ -1102,27 +1108,32 @@ void FSoESlave::processConnection(const uint8_t* data, size_t len) {
         uint16_t safetyAddr = static_cast<uint16_t>(connectionBuf_[2]) |
                               (static_cast<uint16_t>(connectionBuf_[3]) << 8);
 
-        // ETG.5100 §8.2.2.4: Connection ID 0x0000 is not permitted.
-        if (frame_conn_id != config_.connectionId) {
-            FSoEErrorDetail detail;
-            detail.conn_id_valid = true;
-            detail.expected_conn_id = config_.connectionId;
-            detail.received_conn_id = frame_conn_id;
-            snprintf(detail.message, sizeof(detail.message),
-                     "Slave Connection ID mismatch in SafeData: "
-                     "expected 0x%04X got 0x%04X",
-                     detail.expected_conn_id, detail.received_conn_id);
-            handleError(ErrorCode::ConnectionIDError, true, detail);
-            return;
-        }
-        if (safetyAddr != config_.safetyAddress) {
-            FSoEErrorDetail detail;
-            snprintf(detail.message, sizeof(detail.message),
-                     "Slave safety address mismatch in Connection phase: "
-                     "expected 0x%04X got 0x%04X",
-                     config_.safetyAddress, safetyAddr);
-            handleError(ErrorCode::ConnectionIDError, true, detail);
-            return;
+        if (config_.acceptAnyConnectionId) {
+            // Adopt the master's Connection ID and Safety Address.
+            currentConnectionId_ = frame_conn_id;
+        } else {
+            // ETG.5100 §8.2.2.4: Connection ID 0x0000 is not permitted.
+            if (frame_conn_id != config_.connectionId) {
+                FSoEErrorDetail detail;
+                detail.conn_id_valid = true;
+                detail.expected_conn_id = config_.connectionId;
+                detail.received_conn_id = frame_conn_id;
+                snprintf(detail.message, sizeof(detail.message),
+                         "Slave Connection ID mismatch in SafeData: "
+                         "expected 0x%04X got 0x%04X",
+                         detail.expected_conn_id, detail.received_conn_id);
+                handleError(ErrorCode::ConnectionIDError, true, detail);
+                return;
+            }
+            if (safetyAddr != config_.safetyAddress) {
+                FSoEErrorDetail detail;
+                snprintf(detail.message, sizeof(detail.message),
+                         "Slave safety address mismatch in Connection phase: "
+                         "expected 0x%04X got 0x%04X",
+                         config_.safetyAddress, safetyAddr);
+                handleError(ErrorCode::ConnectionIDError, true, detail);
+                return;
+            }
         }
     }
 

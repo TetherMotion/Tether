@@ -379,55 +379,131 @@ void MainInstance::clearPulseBits()
     command_.reset_position = false;
 }
 
+::FSoE::FSoESlaveConfig ServoEmulatorConfig::toSlaveConfig() const
+{
+    ::FSoE::FSoESlaveConfig slave_config{};
+    slave_config.slaveAddress = slave_address;
+    slave_config.connectionId = connection_id;
+    slave_config.safetyAddress = safety_address;
+    slave_config.safetyLevel = ::FSoE::SIL::SIL2;
+    slave_config.watchdogTimeoutMs = watchdog_time_ms;
+    slave_config.connectionTimeoutMs = 1000;
+    slave_config.sessionTimeoutMs = 5000;
+    slave_config.safeInputSize = static_cast<uint8_t>(Codec::kSlaveToMainSize);
+    slave_config.safeOutputSize = static_cast<uint8_t>(Codec::kMainToSlaveSize);
+    slave_config.autoRecoveryEnabled = true;
+    slave_config.recoveryDelayMs = 1000;
+    slave_config.strictCrcCheck = true;
+    slave_config.strictSequenceCheck = true;
+    slave_config.treatCrcErrorAsCritical = true;
+    slave_config.treatSequenceErrorAsCritical = true;
+    slave_config.treatTimeoutAsCritical = true;
+    slave_config.treatConnIdErrorAsCritical = true;
+    slave_config.acceptAnyConnectionId = accept_any_connection_id;
+    slave_config.enableDiagnostics = true;
+    slave_config.maxErrorLogEntries = 100;
+    // ETG.5100 §8.1.3.4: sequence numbers start at 1 (0 is never used).
+    // The ESC211 firmware uses seq=1 for the initial Reset frame.
+    slave_config.initialSeqNo = 1;
+    return slave_config;
+}
+
 SafeMotionServoEmulator::SafeMotionServoEmulator(const ServoEmulatorConfig& config)
-    : config_(config)
-    , slave_config_([&config]() {
-        ::FSoE::FSoESlaveConfig slave_config{};
-        slave_config.slaveAddress = config.slave_address;
-        slave_config.connectionId = config.connection_id;
-        slave_config.safetyAddress = config.safety_address;
-        slave_config.safetyLevel = ::FSoE::SIL::SIL2;
-        slave_config.watchdogTimeoutMs = config.watchdog_time_ms;
-        slave_config.connectionTimeoutMs = 1000;
-        slave_config.sessionTimeoutMs = 5000;
-        slave_config.safeInputSize = static_cast<uint8_t>(Codec::kSlaveToMainSize);
-        slave_config.safeOutputSize = static_cast<uint8_t>(Codec::kMainToSlaveSize);
-        slave_config.autoRecoveryEnabled = true;
-        slave_config.recoveryDelayMs = 1000;
-        slave_config.strictCrcCheck = true;
-        slave_config.strictSequenceCheck = true;
-        slave_config.treatCrcErrorAsCritical = true;
-        slave_config.treatSequenceErrorAsCritical = true;
-        slave_config.treatTimeoutAsCritical = true;
-        slave_config.treatConnIdErrorAsCritical = true;
-        slave_config.enableDiagnostics = true;
-        slave_config.maxErrorLogEntries = 100;
-        // ETG.5100 §8.1.3.4: sequence numbers start at 1 (0 is never used).
-        // The ESC211 firmware uses seq=1 for the initial Reset frame.
-        slave_config.initialSeqNo = 1;
-        return slave_config;
-    }())
-    , slave_(slave_config_)
-    , typed_view_(slave_)
+    : Base(config)
 {
 }
 
-bool SafeMotionServoEmulator::initialize()
+void SafeMotionServoEmulator::onInitialize()
 {
-    initialized_ = slave_.initialize();
-    if (!initialized_) {
-        return false;
-    }
-
-    published_status_ = {};
     published_status_.temperature_ok = config_.temperature_ok;
     published_status_.safe_input_1_high = config_.safe_input_1_high;
     published_status_.safe_input_2_high = config_.safe_input_2_high;
     published_status_.analog_input_diagnostic_active = config_.analog_input_diagnostic_active;
     published_status_.analog_input_value_valid = config_.analog_input_value_valid;
     published_status_.safe_analog_input = config_.analog_input_value;
-    refreshPublishedStatus();
-    return true;
+}
+
+void SafeMotionServoEmulator::onCommandConsumed(const Command& cmd)
+{
+    const bool error_ack_edge = cmd.error_acknowledge && !previous_error_acknowledge_;
+    const bool restart_ack_edge = cmd.restart_acknowledge && !previous_restart_acknowledge_;
+    const bool reset_position_edge = cmd.reset_position && !previous_reset_position_;
+
+    previous_error_acknowledge_ = cmd.error_acknowledge;
+    previous_restart_acknowledge_ = cmd.restart_acknowledge;
+    previous_reset_position_ = cmd.reset_position;
+
+    if (error_ack_edge) {
+        error_active_ = false;
+        restart_required_ = config_.require_restart_acknowledge_after_error && restart_required_;
+    }
+    if (restart_ack_edge) {
+        restart_required_ = false;
+    }
+    if (reset_position_edge) {
+        position_counts_ = 0.0;
+    }
+}
+
+void SafeMotionServoEmulator::buildStatus(Status& out)
+{
+    // STO (Safe Torque Off) — follows the master's command.
+    //   sto_active = true  → torque removed (safe state)
+    //   sto_active = false → motion allowed (master commanded STO=off)
+    // Error forces STO active regardless of the master's command.
+    out.sto_active = error_active_ || last_command_.sto;
+
+    // SS1 (Safe Stop 1) — follows the master's command, error forces active.
+    out.ss1_active = error_active_ || last_command_.ss1;
+
+    // SS2, SOS — follow the master's command when monitoring is enabled.
+    out.ss2_active = config_.position_monitoring_enabled ? last_command_.ss2 : false;
+    out.sos_active = config_.position_monitoring_enabled ? last_command_.sos : false;
+    out.sls_active = {
+        config_.velocity_monitoring_enabled ? last_command_.sls[0] : false,
+        config_.velocity_monitoring_enabled ? last_command_.sls[1] : false,
+        config_.velocity_monitoring_enabled ? last_command_.sls[2] : false,
+        config_.velocity_monitoring_enabled ? last_command_.sls[3] : false,
+    };
+    out.error_active = error_active_;
+    out.restart_acknowledge_required = restart_required_;
+
+    // SBC (Safe Brake Control) — follows the master's brake_engage command.
+    //   brake_engaged = true  → brakes engaged (safe state)
+    //   brake_engaged = false → brakes released (master commanded SBC=off)
+    // Safety interlock: brakes are also engaged when STO or SS1 is active,
+    // even if the master commands SBC=off, to prevent the load from moving
+    // when torque is removed.  Error forces brakes engaged.
+    out.brake_engaged = error_active_ || last_command_.brake_engage ||
+                        out.sto_active || out.ss1_active;
+    out.temperature_ok = config_.temperature_ok;
+    out.safe_position_valid = config_.position_monitoring_enabled;
+    out.safe_velocity_valid = config_.velocity_monitoring_enabled;
+    out.safe_input_1_high = config_.safe_input_1_high;
+    out.safe_input_2_high = config_.safe_input_2_high;
+    out.safe_output_1_high = last_command_.safe_output_1_high;
+    out.analog_input_diagnostic_active = config_.analog_input_diagnostic_active;
+    out.analog_input_value_valid = config_.analog_input_value_valid;
+    out.safe_analog_input = config_.analog_input_value;
+
+    out.safe_velocity = static_cast<int32_t>(std::lround(velocity_counts_per_second_));
+    out.safe_position = static_cast<int32_t>(std::lround(position_counts_));
+}
+
+void SafeMotionServoEmulator::onReset()
+{
+    // Reset the command to safeStop() — STO active, SBC active (brakes engaged).
+    // This ensures the slave reports the safe state immediately after a reset,
+    // before the master sends any new command.  Without this, last_command_
+    // would retain the previous command (e.g. motionEnabled with STO=off) and
+    // the slave would report STO=off after reset, causing the ESC211 to report
+    // "Drive does not switch to STO status within the specified time."
+    last_command_ = Command::safeStop();
+    previous_error_acknowledge_ = false;
+    previous_restart_acknowledge_ = false;
+    previous_reset_position_ = false;
+    error_active_ = false;
+    restart_required_ = false;
 }
 
 void SafeMotionServoEmulator::step(double requested_velocity_counts_per_second, double dt_seconds)
@@ -442,8 +518,6 @@ void SafeMotionServoEmulator::step(double requested_velocity_counts_per_second, 
     velocity_counts_per_second_ = can_move ? requested_velocity_counts_per_second : 0.0;
     position_counts_ += velocity_counts_per_second_ * dt_seconds;
 
-    published_status_.safe_velocity = static_cast<int32_t>(std::lround(velocity_counts_per_second_));
-    published_status_.safe_position = static_cast<int32_t>(std::lround(position_counts_));
     refreshPublishedStatus();
 }
 
@@ -463,98 +537,8 @@ void SafeMotionServoEmulator::clearError()
 
 void SafeMotionServoEmulator::resetToSafeState()
 {
-    // Reset the command to safeStop() — STO active, SBC active (brakes engaged).
-    // This ensures the slave reports the safe state immediately after a reset,
-    // before the master sends any new command.  Without this, last_command_
-    // would retain the previous command (e.g. motionEnabled with STO=off) and
-    // the slave would report STO=off after reset, causing the ESC211 to report
-    // "Drive does not switch to STO status within the specified time."
-    last_command_ = Command::safeStop();
-    previous_error_acknowledge_ = false;
-    previous_restart_acknowledge_ = false;
-    previous_reset_position_ = false;
-    error_active_ = false;
-    restart_required_ = false;
+    onReset();
     refreshPublishedStatus();
-}
-
-void SafeMotionServoEmulator::synchronizeCommandAndStatus()
-{
-    consumeLatestCommand();
-    refreshPublishedStatus();
-}
-
-void SafeMotionServoEmulator::consumeLatestCommand()
-{
-    const auto decoded = typed_view_.consume();
-    if (!decoded) {
-        return;
-    }
-
-    last_command_ = *decoded;
-
-    const bool error_ack_edge = last_command_.error_acknowledge && !previous_error_acknowledge_;
-    const bool restart_ack_edge = last_command_.restart_acknowledge && !previous_restart_acknowledge_;
-    const bool reset_position_edge = last_command_.reset_position && !previous_reset_position_;
-
-    previous_error_acknowledge_ = last_command_.error_acknowledge;
-    previous_restart_acknowledge_ = last_command_.restart_acknowledge;
-    previous_reset_position_ = last_command_.reset_position;
-
-    if (error_ack_edge) {
-        error_active_ = false;
-        restart_required_ = config_.require_restart_acknowledge_after_error && restart_required_;
-    }
-    if (restart_ack_edge) {
-        restart_required_ = false;
-    }
-    if (reset_position_edge) {
-        position_counts_ = 0.0;
-    }
-}
-
-void SafeMotionServoEmulator::refreshPublishedStatus()
-{
-    // STO (Safe Torque Off) — follows the master's command.
-    //   sto_active = true  → torque removed (safe state)
-    //   sto_active = false → motion allowed (master commanded STO=off)
-    // Error forces STO active regardless of the master's command.
-    published_status_.sto_active = error_active_ || last_command_.sto;
-
-    // SS1 (Safe Stop 1) — follows the master's command, error forces active.
-    published_status_.ss1_active = error_active_ || last_command_.ss1;
-
-    // SS2, SOS — follow the master's command when monitoring is enabled.
-    published_status_.ss2_active = config_.position_monitoring_enabled ? last_command_.ss2 : false;
-    published_status_.sos_active = config_.position_monitoring_enabled ? last_command_.sos : false;
-    published_status_.sls_active = {
-        config_.velocity_monitoring_enabled ? last_command_.sls[0] : false,
-        config_.velocity_monitoring_enabled ? last_command_.sls[1] : false,
-        config_.velocity_monitoring_enabled ? last_command_.sls[2] : false,
-        config_.velocity_monitoring_enabled ? last_command_.sls[3] : false,
-    };
-    published_status_.error_active = error_active_;
-    published_status_.restart_acknowledge_required = restart_required_;
-
-    // SBC (Safe Brake Control) — follows the master's brake_engage command.
-    //   brake_engaged = true  → brakes engaged (safe state)
-    //   brake_engaged = false → brakes released (master commanded SBC=off)
-    // Safety interlock: brakes are also engaged when STO or SS1 is active,
-    // even if the master commands SBC=off, to prevent the load from moving
-    // when torque is removed.  Error forces brakes engaged.
-    published_status_.brake_engaged = error_active_ || last_command_.brake_engage ||
-                                      published_status_.sto_active || published_status_.ss1_active;
-    published_status_.temperature_ok = config_.temperature_ok;
-    published_status_.safe_position_valid = config_.position_monitoring_enabled;
-    published_status_.safe_velocity_valid = config_.velocity_monitoring_enabled;
-    published_status_.safe_input_1_high = config_.safe_input_1_high;
-    published_status_.safe_input_2_high = config_.safe_input_2_high;
-    published_status_.safe_output_1_high = last_command_.safe_output_1_high;
-    published_status_.analog_input_diagnostic_active = config_.analog_input_diagnostic_active;
-    published_status_.analog_input_value_valid = config_.analog_input_value_valid;
-    published_status_.safe_analog_input = config_.analog_input_value;
-
-    (void)typed_view_.publish(published_status_);
 }
 
 } // namespace EtherCAT::Drives::Synapticon::SafeMotion

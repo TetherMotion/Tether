@@ -73,11 +73,15 @@ void Master::initSlaves(uint16_t count)
         s->siiCache().init(siiReader(), i);
         slaves_.push_back(std::move(s));
     }
-    // Bulk-prefetch the first 256 words of SII EEPROM for each slave.
-    // This turns all subsequent SII reads (mailbox config, identity,
-    // categories) into cache hits, eliminating repeated EEPSTAT polling.
+    // Bulk-prefetch the first 128 words of SII EEPROM for each slave.
+    // This covers the fixed area (identity, mailbox config, EEPROM size)
+    // plus the beginning of the category area (strings, general, FMMU,
+    // sync manager) which is needed for PDO/SM configuration during init.
+    // 128 words is a compromise between 64 (too few — SM config causes
+    // cache misses) and 256 (the original value — unnecessarily slow
+    // for slaves with large PDO mappings in the category area).
     for (uint16_t i = 0; i < count; ++i) {
-        (void)sii_reader_->prefetchWords(i, 0, 256);
+        (void)sii_reader_->prefetchWords(i, 0, 128);
     }
     // Resize filters to current slave count and push per-slave flags.
     debug_flags_.resizeFilters(count);
