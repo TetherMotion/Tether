@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 
 #include "tether/fsoe/FSoEDefs.hpp"
 
@@ -78,6 +79,38 @@ inline const char* fsoeResetErrorCodeName(uint8_t code) {
             if (code >= 0x80) return "InvalidSafePara (device-specific)";
             return "Unknown";
     }
+}
+
+// ============================================================================
+// PDO priming helpers
+// ============================================================================
+
+/// Build an FSoE Reset PDU that fills a PDO buffer.
+///
+/// Writes the FSoE Reset command (0x2A) at byte 0, zero-fills all data/CRC
+/// bytes, and writes the connection ID at the last two bytes of the buffer.
+/// This is intended for pre-priming the PDO buffer before the FSoE master
+/// cyclic task takes over — the slave's safety module sees a valid FSoE
+/// command on the wire immediately rather than an uninitialized buffer.
+///
+/// For a PDO buffer sized to a full FSoE frame (e.g. 11 bytes for the
+/// Synapticon 0x1700 RxPDO), the layout is:
+///   [CMD(0x2A)] [zeros(data+CRCs)] [ConnID_lo] [ConnID_hi]
+///
+/// For a minimal 3-byte buffer (no data bytes), the layout is:
+///   [CMD(0x2A)] [ConnID_lo] [ConnID_hi]
+///
+/// @param buf      Output buffer (PDO region to fill).
+/// @param buf_size Total size of the PDO region in bytes.
+/// @param conn_id  FSoE Connection ID.
+/// @return Number of bytes written (equal to buf_size).
+inline size_t buildResetPdu(uint8_t* buf, size_t buf_size, uint16_t conn_id) {
+    if (!buf || buf_size < 3) return 0;
+    std::memset(buf, 0, buf_size);
+    buf[0] = FSoE::Command::Reset;
+    buf[buf_size - 2] = static_cast<uint8_t>(conn_id & 0xFF);
+    buf[buf_size - 1] = static_cast<uint8_t>((conn_id >> 8) & 0xFF);
+    return buf_size;
 }
 
 } // namespace FSoE

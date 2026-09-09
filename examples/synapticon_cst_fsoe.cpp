@@ -1555,33 +1555,15 @@ int main(int argc, char** argv) {
                 TETHER_LOGW(TAG, "  SDO read 0x6040:0 (Controlword) FAILED");
         }
 
-        // Now write a known FSoE Reset frame to the FSoE PDO region:
-        //   byte 0:     FSoE Command = 0x2A (Reset)
-        //   bytes 1-2:  safety_flags = 0x0000
-        //   bytes 3-4:  CRC_0 = 0x0000 (CRC of {0,0} = 0x0000)
-        //   bytes 5-6:  reserved + safe_outputs = 0x0000
-        //   bytes 7-8:  CRC_1 = 0x0000
-        //   bytes 9-10: ConnectionID = 0x0006
+        // Now write a known FSoE Reset frame to the FSoE PDO region
+        // using the FSoE::buildResetPdu helper (zero-fills data/CRC bytes
+        // and writes the Connection ID at the end of the buffer).
         {
             uint8_t* rx_buf = static_cast<uint8_t*>(drive.getRxPDOBuffer());
-            // FSoE PDO is at offset kFSoERxPDOOffset (FSoE comes first, motion second)
-            uint8_t* fsoe_buf = rx_buf + kFSoERxPDOOffset;
-
-            // Fill FSoE region with known pattern
-            fsoe_buf[0] = 0x2A;  // FSoE Command (Reset)
-            fsoe_buf[1] = 0x00;  // safety_flags low
-            fsoe_buf[2] = 0x00;  // safety_flags high
-            fsoe_buf[3] = 0x00;  // CRC_0 low
-            fsoe_buf[4] = 0x00;  // CRC_0 high
-            fsoe_buf[5] = 0x00;  // reserved
-            fsoe_buf[6] = 0x00;  // safe_outputs
-            fsoe_buf[7] = 0x00;  // CRC_1 low
-            fsoe_buf[8] = 0x00;  // CRC_1 high
-            fsoe_buf[9] = 0x06;  // ConnectionID low
-            fsoe_buf[10] = 0x00; // ConnectionID high
-
-            TETHER_LOGI(TAG, "Wrote FSoE pattern to RxPDO offset {}: "
-                "2A 00 00 00 00 00 00 00 00 06 00", kFSoERxPDOOffset);
+            FSoE::buildResetPdu(rx_buf + kFSoERxPDOOffset,
+                                sizeof(FSoERxPDO), args.connection_id);
+            TETHER_LOGI(TAG, "Wrote FSoE Reset pattern to RxPDO offset {}",
+                kFSoERxPDOOffset);
         }
 
         // Wait for the cyclic task to send the PDO data a few times
@@ -1989,7 +1971,7 @@ int main(int argc, char** argv) {
                 }
             });
         fsoe_main->rawConnection().setErrorCallback(
-            [&signal_fsoe](uint16_t code, const FSoE::FSoEErrorDetail& detail) {
+            [&signal_fsoe, &fsoe_main](uint16_t code, const FSoE::FSoEErrorDetail& detail) {
                 if (detail.message[0] != '\0') {
                     TETHER_LOGE(TAG,
                         "[FSoE] error: 0x{:04X} ({}): {}",
@@ -1999,10 +1981,18 @@ int main(int argc, char** argv) {
                         "[FSoE] error: 0x{:04X} ({})",
                         code, FSoE::fsoeErrorName(code));
                 }
-                // Signal failure on critical errors (non-zero error code).
-                // Non-critical errors (NoError = 0x0000) are just diagnostic
-                // events and don't prevent the handshake from completing.
-                if (code != FSoE::ErrorCode::NoError) {
+                // Only signal failure if the master is NOT auto-recovering.
+                // With auto_fail_safe_on_error=true (default), handshake errors
+                // trigger resetConnection() — the master goes back to Reset
+                // and retries.  The error callback fires AFTER the state
+                // transition, so the state is already Reset (recovering),
+                // Error (gave up), or Data+fail_safe.  Signalling failure on
+                // every error would abort before the retry happens.
+                const auto state = fsoe_main->rawConnection().getState();
+                if (state == FSoE::ConnectionState::Error) {
+                    signal_fsoe(false);
+                } else if (state == FSoE::ConnectionState::Data &&
+                           fsoe_main->rawConnection().getStatus().isFailSafe()) {
                     signal_fsoe(false);
                 }
             });
