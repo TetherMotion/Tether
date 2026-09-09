@@ -40,3 +40,6 @@ build-tsan/
 .ninja*
 build.ninja
 test_output/
+
+# Devin local config (machine-specific, not for commit)
+.devin/config.local.json
