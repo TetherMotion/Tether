@@ -66,6 +66,10 @@ bool Master::discoverSlaves()
 {
     for (int attempt = 0; attempt < 200; attempt++) {
         if (!running_.load(std::memory_order_acquire)) return false;
+        if (cancel_requested_.load(std::memory_order_acquire)) {
+            TETHER_LOGI(TAG, "discoverSlaves: cancelled");
+            return false;
+        }
 
         const uint8_t idx = allocIdx();
         auto frame = buildScanFrame(src_mac_);
@@ -162,6 +166,10 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
     const int inner_sleep_ms  = config_.preop_inner_sleep_ms; // Delay between checks
 
     for (int attempt = 1; attempt <= max_attempts; ++attempt) {
+        if (cancel_requested_.load(std::memory_order_acquire)) {
+            TETHER_LOGI(TAG, "setPreopAndConfirm: cancelled");
+            return false;
+        }
         if (debug_flags_.stateMachine && debug_flags_.stateMachineFilt.allows(slave_index)) {
             TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
             TETHER_LOGI(TAG, "║  Attempt {}/{} for Slave {}                                    ║", attempt, max_attempts, slave_index);
@@ -192,6 +200,10 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
 
         // Wait for PRE_OP to become active
         for (int i = 0; i < inner_tries; i++) {
+            if (cancel_requested_.load(std::memory_order_acquire)) {
+                TETHER_LOGI(TAG, "setPreopAndConfirm: cancelled during wait");
+                return false;
+            }
             uint16_t s_le = 0;
             if (readRegister(SlaveAddress(slave_index), EC_REG_AL_STATUS, s_le, 200)) {
                 if ((le16_to_host(s_le) & 0x000Fu) == 0x0002u) {

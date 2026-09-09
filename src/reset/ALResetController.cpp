@@ -60,6 +60,11 @@ ALResetResult ALResetController::resetSlave(uint16_t slave_index,
     uint16_t last_code = 0;
 
     for (int iter = 0; iter < max_iterations; ++iter) {
+        if (master_.isCancelRequested()) {
+            result.message = "cancelled by requestCancel()";
+            return result;
+        }
+
         // Read AL_STATUS
         uint16_t al_le = 0;
         bool read_ok = master_.readRegister(SlaveAddress(slave_index),
