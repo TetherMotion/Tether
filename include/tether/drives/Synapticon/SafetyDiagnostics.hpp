@@ -33,11 +33,15 @@
 #include <cstring>
 #include "tether/ethercat/Slave.hpp"
 #include "tether/fsoe/FSoEHelpers.hpp"
+#include "tether/utils/ColoredBitsetFormatter.hpp"
 #include "logging/Logger.hpp"
 
 namespace EtherCAT {
 namespace Drives {
 namespace Synapticon {
+
+using Utils::BitLabel;
+using Utils::ColoredBitsetFormatter;
 
 // ---------------------------------------------------------------------------
 // Object dictionary constants
@@ -239,34 +243,53 @@ struct SafetyDiagnosticReport {
 ///  implementation in FSoESlave.cpp / FSoEMasterConnection.cpp.)
 using FSoE::fsoeCommandName;
 
-/// Decode safety status byte 1 (0x6621:1) bit flags.
-/// Bit layout per Synapticon SMM documentation:
-///   bit 0: STO (Safe Torque Off) — 1 = active (torque inhibited)
-///   bit 1: SS1 (Safe Stop 1)
-///   bit 2: SS2 (Safe Stop 2)
-///   bit 3: SOS (Safe Operating Stop)
-///   bit 4: SLS1 (Safely Limited Speed 1)
-///   bit 5: SLS2 (Safely Limited Speed 2)
-///   bit 6: SLS3 (Safely Limited Speed 3)
-///   bit 7: SLS4 (Safely Limited Speed 4)
-inline void decodeSafetyStatusByte1(uint8_t val, char* buf, size_t buf_size) {
-    if (!buf || buf_size < 80) { if (buf) buf[0] = '\0'; return; }
-    snprintf(buf, buf_size, "STO=%d SS1=%d SS2=%d SOS=%d SLS1=%d SLS2=%d SLS3=%d SLS4=%d",
-             (val >> 0) & 1, (val >> 1) & 1, (val >> 2) & 1, (val >> 3) & 1,
-             (val >> 4) & 1, (val >> 5) & 1, (val >> 6) & 1, (val >> 7) & 1);
-}
+// ---------------------------------------------------------------------------
+// Label tables for ColoredBitsetFormatter
+// ---------------------------------------------------------------------------
 
-/// Decode safety status byte 2 (0x6621:2) bit flags.
-///   bit 0: SBC (Safe Brake Control)
-///   bit 1-3: Safe output bits
-///   bit 4-7: Safety parameter validation bits
-inline void decodeSafetyStatusByte2(uint8_t val, char* buf, size_t buf_size) {
-    if (!buf || buf_size < 80) { if (buf) buf[0] = '\0'; return; }
-    snprintf(buf, buf_size, "SBC=%d SafeOut=[%d%d%d%d] ParamValid=[%d%d%d]",
-             (val >> 0) & 1,
-             (val >> 1) & 1, (val >> 2) & 1, (val >> 3) & 1, (val >> 4) & 1,
-             (val >> 5) & 1, (val >> 6) & 1, (val >> 7) & 1);
-}
+/// Safety status byte 1 (0x6621:1) bit labels.
+/// All one-active: bit set = function active.
+/// Bit layout per Synapticon SMM documentation:
+///   bit 0: STO, bit 1: SS1, bit 2: SS2, bit 3: SOS,
+///   bit 4-7: SLS1-4
+inline BitLabel kSafetyStatusByte1Labels[] = {
+    BitLabel::bit("STO",  1u << 0),
+    BitLabel::bit("SS1",  1u << 1),
+    BitLabel::bit("SS2",  1u << 2),
+    BitLabel::bit("SOS",  1u << 3),
+    BitLabel::bit("SLS1", 1u << 4),
+    BitLabel::bit("SLS2", 1u << 5),
+    BitLabel::bit("SLS3", 1u << 6),
+    BitLabel::bit("SLS4", 1u << 7),
+};
+
+/// Safety status byte 2 (0x6621:2) bit labels.
+/// All one-active: bit set = function active.
+///   bit 0: SBC, bit 1-4: Safe outputs, bit 5-7: Parameter validation
+inline BitLabel kSafetyStatusByte2Labels[] = {
+    BitLabel::bit("SBC",         1u << 0),
+    BitLabel::bit("SafeOut1",    1u << 1),
+    BitLabel::bit("SafeOut2",    1u << 2),
+    BitLabel::bit("SafeOut3",    1u << 3),
+    BitLabel::bit("SafeOut4",    1u << 4),
+    BitLabel::bit("ParamValid1", 1u << 5),
+    BitLabel::bit("ParamValid2", 1u << 6),
+    BitLabel::bit("ParamValid3", 1u << 7),
+};
+
+/// Error register (0x1001) bit labels.
+/// All one-active: bit set = error condition present.
+inline BitLabel kErrorRegisterLabels[] = {
+    BitLabel::bit("Generic",     1u << 0),
+    BitLabel::bit("Profile",     1u << 1),
+    BitLabel::bit("Comm",        1u << 2),
+    BitLabel::bit("DeviceSpec",  1u << 3),
+};
+
+/// Formatters for the above label tables.
+inline const ColoredBitsetFormatter kSafetyStatusByte1Formatter{kSafetyStatusByte1Labels};
+inline const ColoredBitsetFormatter kSafetyStatusByte2Formatter{kSafetyStatusByte2Labels};
+inline const ColoredBitsetFormatter kErrorRegisterFormatter{kErrorRegisterLabels};
 
 /// Decode the CiA 402 statusword (0x6041) to a state name.
 inline const char* cia402StateName(uint16_t sw) {
@@ -522,17 +545,19 @@ inline SafetyDiagnosticReport runFullSafetyDiagnostics(
         rpt.status_byte1 = b1;
         rpt.status_byte2 = b2;
         if (rpt.statusword_ok) {
-            char dec1[80], dec2[80];
-            decodeSafetyStatusByte1(b1, dec1, sizeof(dec1));
-            decodeSafetyStatusByte2(b2, dec2, sizeof(dec2));
-            TETHER_LOGI(TAG, "  0x6621:1 Status byte 1 = 0x{:02X}  [{}]", b1, dec1);
-            TETHER_LOGI(TAG, "  0x6621:2 Status byte 2 = 0x{:02X}  [{}]", b2, dec2);
-            // Highlight active safety functions
-            if (b1 & 0x01) TETHER_LOGW(TAG, "  >> STO (Safe Torque Off) is ACTIVE");
-            if (b1 & 0x02) TETHER_LOGI(TAG, "  >> SS1 (Safe Stop 1) is active");
-            if (b1 & 0x04) TETHER_LOGI(TAG, "  >> SS2 (Safe Stop 2) is active");
-            if (b1 & 0x08) TETHER_LOGI(TAG, "  >> SOS (Safe Operating Stop) is active");
-            if (b2 & 0x01) TETHER_LOGW(TAG, "  >> SBC (Safe Brake Control) is ACTIVE");
+            TETHER_LOGI(TAG, "  0x6621:1 Status byte 1 = 0x{:02X}  [{}]",
+                        b1, kSafetyStatusByte1Formatter.format(b1));
+            TETHER_LOGI(TAG, "  0x6621:2 Status byte 2 = 0x{:02X}  [{}]",
+                        b2, kSafetyStatusByte2Formatter.format(b2));
+            // Show active safety functions (uniform treatment — no pre-selection)
+            const auto active1 = kSafetyStatusByte1Formatter.formatActive(b1);
+            if (active1 != "(none)") {
+                TETHER_LOGW(TAG, "  >> Active safety functions: {}", active1);
+            }
+            const auto active2 = kSafetyStatusByte2Formatter.formatActive(b2);
+            if (active2 != "(none)") {
+                TETHER_LOGI(TAG, "  >> Active diagnostics: {}", active2);
+            }
         }
     }
 
@@ -692,11 +717,12 @@ inline SafetyDiagnosticReport runFullSafetyDiagnostics(
         rpt.error_reg_ok = ok;
         rpt.error_register = reg;
         if (ok) {
-            TETHER_LOGI(TAG, "  0x1001:0 Error register = 0x{:02X}", reg);
-            if (reg & 0x01) TETHER_LOGW(TAG, "  >> Generic error bit set");
-            if (reg & 0x02) TETHER_LOGW(TAG, "  >> Device profile error bit set");
-            if (reg & 0x04) TETHER_LOGW(TAG, "  >> Communication error bit set");
-            if (reg & 0x08) TETHER_LOGW(TAG, "  >> Device-specific error bit set");
+            TETHER_LOGI(TAG, "  0x1001:0 Error register = 0x{:02X}  [{}]",
+                        reg, kErrorRegisterFormatter.format(reg));
+            const auto active = kErrorRegisterFormatter.formatActive(reg);
+            if (active != "(none)") {
+                TETHER_LOGW(TAG, "  >> Error bits set: {}", active);
+            }
         }
     }
 
