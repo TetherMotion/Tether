@@ -185,6 +185,8 @@ void FSoESlave::reset() {
     sessionId_ = 0;
     sessionOctetIdx_ = 0;
     sessionOctetAdvancePending_ = false;
+    sessionFirstRxDone_ = false;
+    resetResponsePending_ = false;
     connectionRxIdx_ = 0;
     connectionTxIdx_ = 0;
     connectionTxAdvancePending_ = false;
@@ -576,6 +578,16 @@ size_t FSoESlave::prepareTxFrame(uint8_t* data, size_t maxLen) {
             cached_tx_fail_safe_ = current_fail_safe;
             tx_cache_valid_ = true;
         }
+
+        // After sending the ONE Reset response, transition to Session
+        // immediately (per FSoE handshake: acknowledge Reset once, then
+        // proceed to Session without waiting for the master's Session
+        // command).  transitionTo clears the TX cache, so the next
+        // prepareTxFrame builds a fresh Session response.
+        if (resetResponsePending_ && current_state == ConnectionState::Reset) {
+            resetResponsePending_ = false;
+            transitionTo(ConnectionState::Session);
+        }
     }
 
     return frameSize;
@@ -963,6 +975,7 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
         sessionOctetIdx_ = 0;
         sessionOctetAdvancePending_ = false;
         sessionFirstRxDone_ = false;
+        resetResponsePending_ = false;
         // Reset Connection state multi-cycle transfer.
         connectionRxIdx_ = 0;
         connectionTxIdx_ = 0;
@@ -986,25 +999,31 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
     // NEXT buildSessionResponse call sends the high byte (index 1).
     // ETG.5100 §8.2.2.3.
     // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
+    //
+    // The sessionFirstRxDone_ guard ensures the advance flag is NOT set on
+    // the first Session command (which would skip the low byte).  When the
+    // slave transitions to Session via the Reset-response path, the first
+    // Session command arrives while the slave is already in Session state;
+    // without this guard, sessionOctetAdvancePending_ would be set
+    // immediately, causing buildSessionResponse to advance to the high byte
+    // before the low byte was ever sent.
     if (cmd == Command::Session && config_.safeInputSize < 2 &&
-        state_.load() == ConnectionState::Session) {
+        state_.load() == ConnectionState::Session && sessionFirstRxDone_) {
         sessionOctetAdvancePending_ = true;
     }
 
     // State transition:
-    // - On Reset command: transition IMMEDIATELY to Session state and
-    //   respond with a Session frame (cmd=0x4E) carrying the slave's own
-    //   Session ID.  The ESC211 master expects the slave to acknowledge a
-    //   Reset by switching to Session — sending a Reset (0x2A) response
-    //   would just echo the master's frame (same CRC) and the master would
-    //   never advance.  This matches the FSoE master's handleResetState
-    //   which accepts either a Session or Reset response but transitions
-    //   to Session on either.
+    // - On Reset command: stay in Reset state so prepareTxFrame builds a
+    //   Reset response (cmd=0x2A).  Set resetResponsePending_ so that
+    //   after the ONE Reset response is sent, prepareTxFrame transitions
+    //   to Session immediately — the slave does NOT wait for the master's
+    //   Session command (0x4E).  This matches the FSoE handshake: the
+    //   slave acknowledges the Reset once, then proceeds to Session.
     // - On Session command: transition to Session state.  The slave sends
     //   a Session response (buildSessionResponse) with its own Session ID.
     if (cmd == Command::Reset) {
-        transitionTo(ConnectionState::Session);
-        sessionFirstRxDone_ = true;
+        transitionTo(ConnectionState::Reset);
+        resetResponsePending_ = true;
     } else if (cmd == Command::Session) {
         transitionTo(ConnectionState::Session);
         sessionFirstRxDone_ = true;
@@ -1451,6 +1470,10 @@ size_t FSoESlave::buildResetResponse(uint8_t* data, size_t maxLen) {
     // This is the self-inheriting RX model: the master validates the
     // slave's Reset response with start_crc=0 (not the master's TX CRC0).
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
+    // The slave reports its OWN reset reason (None = 0), not the master's.
+    // Mirroring the master's reason byte would make the frame byte-identical
+    // to the master's TX — the resulting identical CRC looks like a loopback
+    // echo rather than a freshly computed response.
     size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
     uint16_t seq_used = 0;
@@ -1461,8 +1484,6 @@ size_t FSoESlave::buildResetResponse(uint8_t* data, size_t maxLen) {
         config_.initialSeqNo,
         nullptr,  // don't update CRC chain — Reset resets it (matches master)
         &seq_used);
-    // Set tx_seq_no_ to the seq used.  prepareTxFrame will increment it
-    // for the next frame.
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
     return result;
@@ -1495,10 +1516,12 @@ size_t FSoESlave::buildSessionResponse(uint8_t* data, size_t maxLen) {
     size_t needed = CRC::fsoeFrameSize(config_.safeInputSize);
     if (maxLen < needed) return 0;
     uint16_t seq_used = 0;
-    // Cross-direction CRC inheritance: the slave's TX chains from the
-    // master's last TX CRC0 (last_rx_crc0_).  The master validates the
-    // slave's Session response using its own last TX CRC0 (last_tx_crc0_),
-    // which equals the slave's last_rx_crc0_ (the master's Session TX CRC0).
+    // Cross-direction CRC inheritance: the slave's Session response chains
+    // from the master's last TX CRC0 (last_rx_crc0_ — the CRC0 of the
+    // master's Session frame).  Verified against ESC211 wire captures:
+    // the master validates the slave's Session response with
+    // start_crc = master's Session TX CRC0, seq = 1, and then builds its
+    // Connection frame chained from the resulting slave CRC0.
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Session, payload, config_.safeInputSize,
         0,  // Conn_Id = 0 in Session state (ETG.5100 §8.2.2.3)
