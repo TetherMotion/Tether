@@ -528,6 +528,10 @@ SlaveError Slave::transitionToSafeOp() {
 
     // Confirm SAFE_OP (up to 2 s).  Some slaves need time to validate SM2/SM3.
     for (int attempt = 0; attempt < 200; attempt++) {
+        if (master_.isCancelRequested()) {
+            TETHER_LOGI(TAG, "{}: SAFE_OP confirmation cancelled", logPrefix().c_str());
+            return SlaveError::Cancelled;
+        }
         Tether::Platform::Clock::instance().delayMilliseconds(10);
         uint8_t state = 0;
         if (master_.readSlaveApplicationLayerState(index_, state)) {
@@ -560,6 +564,10 @@ SlaveError Slave::transitionToOp() {
         has_pdo_entries = pdo_mgr.hasSlavePDOEntries(index_);
         if (has_pdo_entries) {
             for (int wait_ms = 0; wait_ms < 100; wait_ms++) {
+                if (master_.isCancelRequested()) {
+                    TETHER_LOGI(TAG, "{}: OP transition cancelled during PDO counter wait", logPrefix().c_str());
+                    return SlaveError::Cancelled;
+                }
                 const uint32_t req   = pdo_mgr.getSlavePDORequestCount(index_);
                 const uint32_t reply = pdo_mgr.getSlavePDOReplyCount(index_);
                 pdo_req_ok   = (req > 0);
@@ -636,6 +644,10 @@ SlaveError Slave::transitionToOp() {
 
     // Confirm OP (up to 5 s).  The slave may need continuous process data.
     for (int attempt = 0; attempt < 500; attempt++) {
+        if (master_.isCancelRequested()) {
+            TETHER_LOGI(TAG, "{}: OP confirmation cancelled", logPrefix().c_str());
+            return SlaveError::Cancelled;
+        }
         Tether::Platform::Clock::instance().delayMilliseconds(10);
         uint8_t state = 0;
         if (master_.readSlaveApplicationLayerState(index_, state)) {

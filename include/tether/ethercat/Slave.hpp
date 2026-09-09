@@ -95,6 +95,7 @@ enum class SlaveError : uint8_t {
     // -- Generic --
     NotInitialized,                 ///< Master not started
     InternalError,                  ///< Unexpected internal error
+    Cancelled,                      ///< Operation cancelled by requestCancel() / signal
 };
 
 /**
@@ -119,6 +120,7 @@ inline const char* slaveErrorToString(SlaveError e) {
         case SlaveError::PDOMappingFailed:        return "PDO mapping finalization failed";
         case SlaveError::NotInitialized:          return "Master not initialized";
         case SlaveError::InternalError:           return "Internal error";
+        case SlaveError::Cancelled:               return "Operation cancelled";
         default:                                  return "Unknown error";
     }
 }
