@@ -5,8 +5,7 @@
  * Reusable presentation layer for the Synapticon FSoE safety PDOs
  * (RxPDO 0x1700 / TxPDO 0x1B00).  Decodes the device-specific PDO structs
  * defined in tether/drives/Synapticon/SynapticonPDO.hpp into named fields
- * and logs them with ANSI color coding for the most safety-critical
- * signals (STO, SBC).
+ * and logs them with ANSI color coding via ColoredBitsetFormatter.
  *
  * This code is used by the `--debug fsoe-frame`, `--debug fsoe-raw`, and
  * `--debug fsoe-wire` debug flags.  It is device-specific (it knows about
@@ -28,11 +27,9 @@
  *     All flags use **one-active** encoding
  *       (bit = 1 → active, bit = 0 → inactive).  No inversion needed.
  *
- * The most important safety signals — STO (Safe Torque Off) and SBC (Safe
- * Brake Control) — are shown FIRST with ANSI color coding:
- *   green = safe (bit set / enabled)
- *   red   = unsafe (bit clear / disabled)
- * Raw hex bytes are shown AFTER the decoded meaning.
+ * All safety flags are shown uniformly with ANSI color coding via
+ * ColoredBitsetFormatter — no opinionated pre-selection of which flags
+ * are "important".  Raw hex bytes are shown AFTER the decoded meaning.
  */
 
 #pragma once
@@ -44,6 +41,7 @@
 #include "tether/drives/Synapticon/SynapticonPDO.hpp"
 #include "tether/fsoe/FSoEDefs.hpp"
 #include "tether/fsoe/FSoEHelpers.hpp"
+#include "tether/utils/ColoredBitsetFormatter.hpp"
 #include "logging/Logger.hpp"
 
 namespace EtherCAT {
@@ -63,47 +61,79 @@ namespace FSoEDebug {
 //
 // This header only adds the Synapticon-specific PDO struct decoding on top.
 
-// ============================================================================
-// ANSI color codes for terminal output
-// ============================================================================
+using Utils::BitLabel;
+using Utils::ColoredBitsetFormatter;
 
-static constexpr const char* kAnsGreen  = "\033[32m";
-static constexpr const char* kAnsRed    = "\033[31m";
-static constexpr const char* kAnsYellow = "\033[33m";
-static constexpr const char* kAnsBold   = "\033[1m";
-static constexpr const char* kAnsReset  = "\033[0m";
+// ============================================================================
+// Label tables
+// ============================================================================
+//
+// Data-driven label definitions for each flag field in the FSoE PDOs.
+// All labels in a table are treated uniformly by ColoredBitsetFormatter —
+// no hardcoded "primary" vs "secondary" pre-selection.  The caller picks
+// which table to use and how to render it (format() for colored ON/OFF,
+// formatActive() for a compact active-only list).
+
+/// Safety flags in the master→slave RxPDO 0x1700 (safety_flags field).
+/// STO/SS1/SS2/SOS/SLS/SBC are zero-active; ErrorAck/RestartAck/ResetPos
+/// are one-active.
+inline BitLabel kRxSafetyLabels[] = {
+    BitLabel::bitInv("STO",        SynapticonPDO::SOMANET_RxPDO_1700::kSTO),
+    BitLabel::bitInv("SS1",        SynapticonPDO::SOMANET_RxPDO_1700::kSS1),
+    BitLabel::bitInv("SS2",        SynapticonPDO::SOMANET_RxPDO_1700::kSS2),
+    BitLabel::bitInv("SOS",        SynapticonPDO::SOMANET_RxPDO_1700::kSOS),
+    BitLabel::bitInv("SLS1",       SynapticonPDO::SOMANET_RxPDO_1700::kSLS_Instance1),
+    BitLabel::bitInv("SLS2",       SynapticonPDO::SOMANET_RxPDO_1700::kSLS_Instance2),
+    BitLabel::bitInv("SLS3",       SynapticonPDO::SOMANET_RxPDO_1700::kSLS_Instance3),
+    BitLabel::bitInv("SLS4",       SynapticonPDO::SOMANET_RxPDO_1700::kSLS_Instance4),
+    BitLabel::bitInv("SBC",        SynapticonPDO::SOMANET_RxPDO_1700::kSBCCommand),
+    BitLabel::bit(   "ErrorAck",   SynapticonPDO::SOMANET_RxPDO_1700::kErrorAck),
+    BitLabel::bit(   "RestartAck", SynapticonPDO::SOMANET_RxPDO_1700::kRestartAck),
+    BitLabel::bit(   "ResetPos",   SynapticonPDO::SOMANET_RxPDO_1700::kResetPosition),
+};
+
+/// Safe outputs in the master→slave RxPDO 0x1700 (safe_outputs field).
+/// One-active: bit=1 → output ON.
+inline BitLabel kRxSafeOutputLabels[] = {
+    BitLabel::bit("OUT1", SynapticonPDO::SOMANET_RxPDO_1700::kSafeOutput1),
+    BitLabel::bit("OUT2", SynapticonPDO::SOMANET_RxPDO_1700::kSafeOutput2),
+};
+
+/// Safety state flags in the slave→master TxPDO 0x1B00 (safety_state_flags
+/// field).  All one-active.
+inline BitLabel kTxSafetyStateLabels[] = {
+    BitLabel::bit("STO",  SynapticonPDO::SOMANET_TxPDO_1B00::kSTOState),
+    BitLabel::bit("SS1",  SynapticonPDO::SOMANET_TxPDO_1B00::kSS1State),
+    BitLabel::bit("SS2",  SynapticonPDO::SOMANET_TxPDO_1B00::kSS2State),
+    BitLabel::bit("SOS",  SynapticonPDO::SOMANET_TxPDO_1B00::kSOSState),
+    BitLabel::bit("ERR",  SynapticonPDO::SOMANET_TxPDO_1B00::kErrorState),
+    BitLabel::bit("SLS1", SynapticonPDO::SOMANET_TxPDO_1B00::kSLSInstance1),
+    BitLabel::bit("SLS2", SynapticonPDO::SOMANET_TxPDO_1B00::kSLSInstance2),
+    BitLabel::bit("SLS3", SynapticonPDO::SOMANET_TxPDO_1B00::kSLSInstance3),
+    BitLabel::bit("SLS4", SynapticonPDO::SOMANET_TxPDO_1B00::kSLSInstance4),
+};
+
+/// Diagnostic flags in the slave→master TxPDO 0x1B00 (diagnostic_flags
+/// field).  All one-active.
+inline BitLabel kTxDiagnosticLabels[] = {
+    BitLabel::bit("SBC",         SynapticonPDO::SOMANET_TxPDO_1B00::kSBCState),
+    BitLabel::bit("RestartAckReq", SynapticonPDO::SOMANET_TxPDO_1B00::kRestartAckReq),
+    BitLabel::bit("TempWarn",    SynapticonPDO::SOMANET_TxPDO_1B00::kTemperatureWarning),
+    BitLabel::bit("SafePosValid", SynapticonPDO::SOMANET_TxPDO_1B00::kSafePositionValid),
+    BitLabel::bit("SafeSpdValid", SynapticonPDO::SOMANET_TxPDO_1B00::kSafeSpeedValid),
+    BitLabel::bit("In1",         SynapticonPDO::SOMANET_TxPDO_1B00::kSafeInput1),
+    BitLabel::bit("In2",         SynapticonPDO::SOMANET_TxPDO_1B00::kSafeInput2),
+    BitLabel::bit("In3",         SynapticonPDO::SOMANET_TxPDO_1B00::kSafeInput3),
+    BitLabel::bit("In4",         SynapticonPDO::SOMANET_TxPDO_1B00::kSafeInput4),
+    BitLabel::bit("OutMon1",     SynapticonPDO::SOMANET_TxPDO_1B00::kSafeOutputMonitor1),
+    BitLabel::bit("OutMon2",     SynapticonPDO::SOMANET_TxPDO_1B00::kSafeOutputMonitor2),
+    BitLabel::bit("AnalogDiag",  SynapticonPDO::SOMANET_TxPDO_1B00::kAnalogDiagActive),
+    BitLabel::bit("AnalogValid", SynapticonPDO::SOMANET_TxPDO_1B00::kAnalogValueValid),
+};
 
 // ============================================================================
 // Low-level formatting helpers
 // ============================================================================
-
-/// Format a safety bit as green (set=safe) or red (clear=unsafe).
-/// Returns a string like "STO=ON" or "STO=OFF" with ANSI color prefix.
-inline void formatSafetyBit(char* buf, size_t bufsize, bool set, const char* name) {
-    if (set) {
-        snprintf(buf, bufsize, "%s%s=%sON%s", kAnsGreen, name, kAnsBold, kAnsReset);
-    } else {
-        snprintf(buf, bufsize, "%s%s=%sOFF%s", kAnsRed, name, kAnsBold, kAnsReset);
-    }
-}
-
-/// Append a flag name to buf if the bit is set.
-/// @param bufpos  current write position in buf (updated by caller via strlen).
-inline void appendFlag(char* buf, size_t bufpos, size_t bufsize,
-                       bool set, const char* name) {
-    if (!set) return;
-    // Prepend a space if buf is non-empty (not the first flag)
-    if (bufpos > 0 && bufpos + 1 < bufsize) {
-        buf[bufpos++] = ' ';
-        buf[bufpos] = '\0';
-    }
-    size_t len = strlen(name);
-    if (bufpos + len < bufsize) {
-        memcpy(buf + bufpos, name, len);
-        bufpos += len;
-        buf[bufpos] = '\0';
-    }
-}
 
 /// Format raw hex bytes from a buffer into a string.
 inline void formatHex(char* buf, size_t bufsize, const uint8_t* data, size_t len) {
@@ -121,8 +151,9 @@ inline void formatHex(char* buf, size_t bufsize, const uint8_t* data, size_t len
 // Decodes the device-specific Synapticon FSoE PDO structs into named fields,
 // showing the FSoE protocol data as the drive sees it (not raw hex).
 //
-// STO and SBC are shown FIRST with ANSI color coding, then the remaining
-// safety flags, then CRCs / safe data values, and finally the raw hex bytes.
+// All safety flags are shown uniformly with ANSI color coding via
+// ColoredBitsetFormatter, then CRCs / safe data values, and finally the
+// raw hex bytes.
 
 /// Decode the master→slave FSoE frame from the Synapticon RxPDO 0x1700 struct.
 ///
@@ -132,62 +163,23 @@ inline void formatHex(char* buf, size_t bufsize, const uint8_t* data, size_t len
 /// The display inverts zero-active bits so that "ON" (green) always means
 /// the safety function is active (safe).
 inline void dumpRxPDO(const char* tag, const SynapticonPDO::SOMANET_RxPDO_1700& rx) {
-    using Rx = SynapticonPDO::SOMANET_RxPDO_1700;
-
-    // --- STO, SOS, and SBC are what we care about most — show them FIRST ---
-    // Zero-active: bit=0 → active (safe), bit=1 → inactive (unsafe)
-    const bool sto_active = (rx.safety_flags & Rx::kSTO) == 0;
-    const bool sos_active = (rx.safety_flags & Rx::kSOS) == 0;
-    const bool sbc_active = (rx.safety_flags & Rx::kSBCCommand) == 0;
-
-    char sto_str[64], sos_str[64], sbc_str[64];
-    formatSafetyBit(sto_str, sizeof(sto_str), sto_active, "STO");
-    formatSafetyBit(sos_str, sizeof(sos_str), sos_active, "SOS");
-    formatSafetyBit(sbc_str, sizeof(sbc_str), sbc_active, "SBC");
+    ColoredBitsetFormatter safety_fmt{kRxSafetyLabels};
+    ColoredBitsetFormatter out_fmt{kRxSafeOutputLabels};
 
     TETHER_LOGI(tag, "[fsoe-frame] TX→slave RxPDO 0x1700 (11 bytes):  "
-                     "{}  {}  {}  cmd={}  conn_id=0x{:04X}",
-                sto_str, sos_str, sbc_str,
+                     "{}  cmd={}  conn_id=0x{:04X}",
+                safety_fmt.format(rx.safety_flags),
                 FSoE::fsoeCommandName(rx.fsoe_command), rx.fsoe_connection_id);
 
-    // --- Other safety flags (secondary) ---
-    // Zero-active bits: SS1, SS2, SLS1-4 (bit=0 → active)
-    // One-active bits: ErrorAck, RestartAck, ResetPosition (bit=1 → active)
-    char flags[128] = {};
-    size_t pos = 0;
-    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & Rx::kSS1) == 0, "SS1");
-    pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & Rx::kSS2) == 0, "SS2");
-    pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & Rx::kSLS_Instance1) == 0, "SLS1");
-    pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & Rx::kSLS_Instance2) == 0, "SLS2");
-    pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & Rx::kSLS_Instance3) == 0, "SLS3");
-    pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), (rx.safety_flags & Rx::kSLS_Instance4) == 0, "SLS4");
-    pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & Rx::kErrorAck, "ErrorAck");
-    pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & Rx::kRestartAck, "RestartAck");
-    pos = strlen(flags);
-    appendFlag(flags, pos, sizeof(flags), rx.safety_flags & Rx::kResetPosition, "ResetPos");
-    TETHER_LOGI(tag, "  other_flags=0x{:04X} [{}]  crc0=0x{:04X}  crc1=0x{:04X}",
-                rx.safety_flags, flags[0] ? flags : "(none)",
-                rx.fsoe_crc_0, rx.fsoe_crc_1);
+    TETHER_LOGI(tag, "  safety_flags=0x{:04X}  crc0=0x{:04X}  crc1=0x{:04X}",
+                rx.safety_flags, rx.fsoe_crc_0, rx.fsoe_crc_1);
 
-    // --- Safe outputs ---
-    char outs[32] = {};
-    pos = 0;
-    appendFlag(outs, pos, sizeof(outs), rx.safe_outputs & Rx::kSafeOutput1, "OUT1");
-    pos = strlen(outs);
-    appendFlag(outs, pos, sizeof(outs), rx.safe_outputs & Rx::kSafeOutput2, "OUT2");
-    TETHER_LOGI(tag, "  safe_outputs=0x{:02X} [{}]", rx.safe_outputs,
-                outs[0] ? outs : "(none)");
+    TETHER_LOGI(tag, "  safe_outputs=0x{:02X}  {}",
+                rx.safe_outputs, out_fmt.format(rx.safe_outputs));
 
     // --- Raw hex LAST ---
     char hex[64];
-    formatHex(hex, sizeof(hex), reinterpret_cast<const uint8_t*>(&rx), sizeof(Rx));
+    formatHex(hex, sizeof(hex), reinterpret_cast<const uint8_t*>(&rx), sizeof(rx));
     TETHER_LOGI(tag, "  raw: {}", hex);
 }
 
@@ -196,74 +188,19 @@ inline void dumpRxPDO(const char* tag, const SynapticonPDO::SOMANET_RxPDO_1700& 
 /// In the slave→master direction, all flags use **one-active** encoding
 /// (bit=1 → active, bit=0 → inactive).  No inversion needed.
 inline void dumpTxPDO(const char* tag, const SynapticonPDO::SOMANET_TxPDO_1B00& tx) {
-    using Tx = SynapticonPDO::SOMANET_TxPDO_1B00;
-
-    // --- STO, SOS, and SBC are what we care about most — show them FIRST ---
-    // One-active: bit=1 → active (safe), bit=0 → inactive (unsafe)
-    // STO state is in safety_state_flags bit 0
-    // SOS state is in safety_state_flags bit 1
-    // SBC state is in diagnostic_flags bit 1
-    const bool sto_active = (tx.safety_state_flags & Tx::kSTOState) != 0;
-    const bool sos_active = (tx.safety_state_flags & Tx::kSOSState) != 0;
-    const bool sbc_active = (tx.diagnostic_flags & Tx::kSBCState) != 0;
-
-    char sto_str[64], sos_str[64], sbc_str[64];
-    formatSafetyBit(sto_str, sizeof(sto_str), sto_active, "STO");
-    formatSafetyBit(sos_str, sizeof(sos_str), sos_active, "SOS");
-    formatSafetyBit(sbc_str, sizeof(sbc_str), sbc_active, "SBC");
+    ColoredBitsetFormatter sflags_fmt{kTxSafetyStateLabels};
+    ColoredBitsetFormatter dflags_fmt{kTxDiagnosticLabels};
 
     TETHER_LOGI(tag, "[fsoe-frame] RX←slave TxPDO 0x1B00 (31 bytes):  "
-                     "{}  {}  {}  cmd={}  conn_id=0x{:04X}",
-                sto_str, sos_str, sbc_str,
+                     "{}  cmd={}  conn_id=0x{:04X}",
+                sflags_fmt.format(tx.safety_state_flags),
                 FSoE::fsoeCommandName(tx.fsoe_command), tx.fsoe_connection_id);
 
-    // --- Safety state flags (secondary) ---
-    char sflags[128] = {};
-    size_t pos = 0;
-    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & Tx::kSS1State, "SS1");
-    pos = strlen(sflags);
-    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & Tx::kSS2State, "SS2");
-    pos = strlen(sflags);
-    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & Tx::kErrorState, "ERR");
-    pos = strlen(sflags);
-    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & Tx::kSLSInstance1, "SLS1");
-    pos = strlen(sflags);
-    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & Tx::kSLSInstance2, "SLS2");
-    pos = strlen(sflags);
-    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & Tx::kSLSInstance3, "SLS3");
-    pos = strlen(sflags);
-    appendFlag(sflags, pos, sizeof(sflags), tx.safety_state_flags & Tx::kSLSInstance4, "SLS4");
-    TETHER_LOGI(tag, "  safety_state=0x{:04X} [{}]", tx.safety_state_flags,
-                sflags[0] ? sflags : "(none)");
+    TETHER_LOGI(tag, "  safety_state=0x{:04X}  {}",
+                tx.safety_state_flags, sflags_fmt.formatActive(tx.safety_state_flags));
 
-    // --- Diagnostic flags (secondary, excluding SBC which was shown above) ---
-    char dflags[160] = {};
-    pos = 0;
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & Tx::kRestartAckReq, "RestartAckReq");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & Tx::kTemperatureWarning, "TempWarn");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & Tx::kSafePositionValid, "SafePosValid");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & Tx::kSafeSpeedValid, "SafeSpdValid");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & Tx::kSafeInput1, "In1");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & Tx::kSafeInput2, "In2");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & Tx::kSafeInput3, "In3");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & Tx::kSafeInput4, "In4");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & Tx::kSafeOutputMonitor1, "OutMon1");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & Tx::kSafeOutputMonitor2, "OutMon2");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & Tx::kAnalogDiagActive, "AnalogDiag");
-    pos = strlen(dflags);
-    appendFlag(dflags, pos, sizeof(dflags), tx.diagnostic_flags & Tx::kAnalogValueValid, "AnalogValid");
-    TETHER_LOGI(tag, "  diag=0x{:04X} [{}]", tx.diagnostic_flags,
-                dflags[0] ? dflags : "(none)");
+    TETHER_LOGI(tag, "  diag=0x{:04X}  {}",
+                tx.diagnostic_flags, dflags_fmt.format(tx.diagnostic_flags));
 
     TETHER_LOGI(tag,
         "  crc0=0x{:04X} crc1=0x{:04X} crc2=0x{:04X} crc3=0x{:04X} "
@@ -279,7 +216,7 @@ inline void dumpTxPDO(const char* tag, const SynapticonPDO::SOMANET_TxPDO_1B00& 
 
     // --- Raw hex LAST ---
     char hex[96];
-    formatHex(hex, sizeof(hex), reinterpret_cast<const uint8_t*>(&tx), sizeof(Tx));
+    formatHex(hex, sizeof(hex), reinterpret_cast<const uint8_t*>(&tx), sizeof(tx));
     TETHER_LOGI(tag, "  raw: {}", hex);
 }
 
@@ -292,42 +229,32 @@ inline void dumpTxPDO(const char* tag, const SynapticonPDO::SOMANET_TxPDO_1B00& 
 // use --debug fsoe-raw for the full verbose dump.
 
 /// Compact one-line decode of the slave→master TxPDO (0x1B00).
-/// Shows STO/SOS/SBC + command + safe_pos + safe_vel.
+/// Shows all safety state flags + diagnostic flags + command + safe_pos + safe_vel.
 inline void dumpTxPDOFrame(const char* tag,
                            const SynapticonPDO::SOMANET_TxPDO_1B00& tx) {
-    using Tx = SynapticonPDO::SOMANET_TxPDO_1B00;
-    const bool sto = (tx.safety_state_flags & Tx::kSTOState) != 0;
-    const bool sos = (tx.safety_state_flags & Tx::kSOSState) != 0;
-    const bool sbc = (tx.diagnostic_flags & Tx::kSBCState) != 0;
-    char sto_str[64], sos_str[64], sbc_str[64];
-    formatSafetyBit(sto_str, sizeof(sto_str), sto, "STO");
-    formatSafetyBit(sos_str, sizeof(sos_str), sos, "SOS");
-    formatSafetyBit(sbc_str, sizeof(sbc_str), sbc, "SBC");
+    ColoredBitsetFormatter sflags_fmt{kTxSafetyStateLabels};
+    ColoredBitsetFormatter dflags_fmt{kTxDiagnosticLabels};
     TETHER_LOGI(tag,
         "[fsoe-frame] RX←slave TxPDO 0x1B00 (31 bytes):  "
-        "{}  {}  {}  cmd={}  conn_id=0x{:04X}  "
+        "{}  {}  cmd={}  conn_id=0x{:04X}  "
         "safe_pos=0x{:04X}  safe_vel=0x{:04X}",
-        sto_str, sos_str, sbc_str,
+        sflags_fmt.format(tx.safety_state_flags),
+        dflags_fmt.format(tx.diagnostic_flags),
         FSoE::fsoeCommandName(tx.fsoe_command), tx.fsoe_connection_id,
         tx.safe_position_actual, tx.safe_velocity_actual);
 }
 
 /// Compact one-line decode of the master→slave RxPDO (0x1700).
-/// Shows STO/SOS/SBC + command (no safe data in this direction).
+/// Shows all safety flags + safe outputs + command (no safe data in this direction).
 inline void dumpRxPDOFrame(const char* tag,
                            const SynapticonPDO::SOMANET_RxPDO_1700& rx) {
-    using Rx = SynapticonPDO::SOMANET_RxPDO_1700;
-    const bool sto = (rx.safety_flags & Rx::kSTO) == 0;
-    const bool sos = (rx.safety_flags & Rx::kSOS) == 0;
-    const bool sbc = (rx.safety_flags & Rx::kSBCCommand) == 0;
-    char sto_str[64], sos_str[64], sbc_str[64];
-    formatSafetyBit(sto_str, sizeof(sto_str), sto, "STO");
-    formatSafetyBit(sos_str, sizeof(sos_str), sos, "SOS");
-    formatSafetyBit(sbc_str, sizeof(sbc_str), sbc, "SBC");
+    ColoredBitsetFormatter safety_fmt{kRxSafetyLabels};
+    ColoredBitsetFormatter out_fmt{kRxSafeOutputLabels};
     TETHER_LOGI(tag,
         "[fsoe-frame] TX→slave RxPDO 0x1700 (11 bytes):  "
-        "{}  {}  {}  cmd={}  conn_id=0x{:04X}",
-        sto_str, sos_str, sbc_str,
+        "{}  {}  cmd={}  conn_id=0x{:04X}",
+        safety_fmt.format(rx.safety_flags),
+        out_fmt.format(rx.safe_outputs),
         FSoE::fsoeCommandName(rx.fsoe_command), rx.fsoe_connection_id);
 }
 
@@ -335,44 +262,34 @@ inline void dumpRxPDOFrame(const char* tag,
 // Compact summary dumpers (--debug fsoe-raw)
 // ============================================================================
 //
-// Single-line summaries that show the STO/SBC meaning FIRST (with color),
-// then the FSoE command, then the raw hex bytes.  Used for the "on change"
-// raw frame dumps.
+// Single-line summaries that show the safety flags (with color), then the
+// FSoE command, then the raw hex bytes.  Used for the "on change" raw frame
+// dumps.
 
 /// One-line summary of the slave→master TxPDO (0x1B00).
-/// STO/SBC use one-active encoding (bit=1 → active/safe).
+/// All flags use one-active encoding (bit=1 → active/safe).
 inline void dumpTxPDOSummary(const char* tag,
                              const SynapticonPDO::SOMANET_TxPDO_1B00& tx) {
-    using Tx = SynapticonPDO::SOMANET_TxPDO_1B00;
-    const bool sto = (tx.safety_state_flags & Tx::kSTOState) != 0;
-    const bool sos = (tx.safety_state_flags & Tx::kSOSState) != 0;
-    const bool sbc = (tx.diagnostic_flags & Tx::kSBCState) != 0;
-    char sto_str[64], sos_str[64], sbc_str[64];
-    formatSafetyBit(sto_str, sizeof(sto_str), sto, "STO");
-    formatSafetyBit(sos_str, sizeof(sos_str), sos, "SOS");
-    formatSafetyBit(sbc_str, sizeof(sbc_str), sbc, "SBC");
+    ColoredBitsetFormatter sflags_fmt{kTxSafetyStateLabels};
+    ColoredBitsetFormatter dflags_fmt{kTxDiagnosticLabels};
     char hex[128];
-    formatHex(hex, sizeof(hex), reinterpret_cast<const uint8_t*>(&tx), sizeof(Tx));
-    TETHER_LOGI(tag, "[TxPDO-FSoE slave→master] changed: {}  {}  {}  cmd={}  | {}",
-                sto_str, sos_str, sbc_str, FSoE::fsoeCommandName(tx.fsoe_command), hex);
+    formatHex(hex, sizeof(hex), reinterpret_cast<const uint8_t*>(&tx), sizeof(tx));
+    TETHER_LOGI(tag, "[TxPDO-FSoE slave→master] changed: {}  {}  cmd={}  | {}",
+                sflags_fmt.format(tx.safety_state_flags),
+                dflags_fmt.format(tx.diagnostic_flags),
+                FSoE::fsoeCommandName(tx.fsoe_command), hex);
 }
 
 /// One-line summary of the master→slave RxPDO (0x1700).
-/// STO/SBC use zero-active encoding (bit=0 → active/safe).
+/// Safety flags use zero-active encoding (bit=0 → active/safe).
 inline void dumpRxPDOSummary(const char* tag,
                              const SynapticonPDO::SOMANET_RxPDO_1700& rx) {
-    using Rx = SynapticonPDO::SOMANET_RxPDO_1700;
-    const bool sto = (rx.safety_flags & Rx::kSTO) == 0;
-    const bool sos = (rx.safety_flags & Rx::kSOS) == 0;
-    const bool sbc = (rx.safety_flags & Rx::kSBCCommand) == 0;
-    char sto_str[64], sos_str[64], sbc_str[64];
-    formatSafetyBit(sto_str, sizeof(sto_str), sto, "STO");
-    formatSafetyBit(sos_str, sizeof(sos_str), sos, "SOS");
-    formatSafetyBit(sbc_str, sizeof(sbc_str), sbc, "SBC");
+    ColoredBitsetFormatter safety_fmt{kRxSafetyLabels};
     char hex[128];
-    formatHex(hex, sizeof(hex), reinterpret_cast<const uint8_t*>(&rx), sizeof(Rx));
-    TETHER_LOGI(tag, "[RxPDO-FSoE master→slave] changed: {}  {}  {}  cmd={}  | {}",
-                sto_str, sos_str, sbc_str, FSoE::fsoeCommandName(rx.fsoe_command), hex);
+    formatHex(hex, sizeof(hex), reinterpret_cast<const uint8_t*>(&rx), sizeof(rx));
+    TETHER_LOGI(tag, "[RxPDO-FSoE master→slave] changed: {}  cmd={}  | {}",
+                safety_fmt.format(rx.safety_flags),
+                FSoE::fsoeCommandName(rx.fsoe_command), hex);
 }
 
 // ============================================================================
@@ -382,8 +299,8 @@ inline void dumpRxPDOSummary(const char* tag,
 // Shows both directions in a single log line (meaning first), followed by
 // the full PDO buffer hex (FSoE + motion) for each direction.
 
-/// Per-cycle wire dump showing both directions' STO/SBC + command, then the
-/// full combined PDO buffer hex for each direction.
+/// Per-cycle wire dump showing both directions' safety flags + command, then
+/// the full combined PDO buffer hex for each direction.
 ///
 /// @param tag           Log tag.
 /// @param tx_buffer     Pointer to the slave→master FSoE PDO (0x1B00) within
@@ -407,37 +324,16 @@ inline void dumpWire(const char* tag,
     const auto* tx_pdo = reinterpret_cast<const Tx*>(tx_buffer);
     const auto* rx_pdo = reinterpret_cast<const Rx*>(rx_buffer);
 
-    // Slave feedback (TxPDO): one-active encoding
-    //   STO state in safety_state_flags bit 0 (bit=1 → active/safe)
-    //   SOS state in safety_state_flags bit 1 (bit=1 → active/safe)
-    //   SBC state in diagnostic_flags bit 1 (bit=1 → active/safe)
-    const bool tx_sto = (tx_pdo->safety_state_flags & Tx::kSTOState) != 0;
-    const bool tx_sos = (tx_pdo->safety_state_flags & Tx::kSOSState) != 0;
-    const bool tx_sbc = (tx_pdo->diagnostic_flags & Tx::kSBCState) != 0;
+    ColoredBitsetFormatter tx_sflags_fmt{kTxSafetyStateLabels};
+    ColoredBitsetFormatter tx_dflags_fmt{kTxDiagnosticLabels};
+    ColoredBitsetFormatter rx_safety_fmt{kRxSafetyLabels};
 
-    // Master command (RxPDO): zero-active encoding
-    //   STO in safety_flags bit 0 (bit=0 → active/safe)
-    //   SOS in safety_flags bit 3 (bit=0 → active/safe)
-    //   SBC command in safety_flags bit 13 (bit=0 → active/safe)
-    const bool rx_sto = (rx_pdo->safety_flags & Rx::kSTO) == 0;
-    const bool rx_sos = (rx_pdo->safety_flags & Rx::kSOS) == 0;
-    const bool rx_sbc = (rx_pdo->safety_flags & Rx::kSBCCommand) == 0;
-
-    // Format with color: green=safe(ON), red=unsafe(OFF)
-    char tx_sto_str[64], tx_sos_str[64], tx_sbc_str[64];
-    char rx_sto_str[64], rx_sos_str[64], rx_sbc_str[64];
-    formatSafetyBit(tx_sto_str, sizeof(tx_sto_str), tx_sto, "STO");
-    formatSafetyBit(tx_sos_str, sizeof(tx_sos_str), tx_sos, "SOS");
-    formatSafetyBit(tx_sbc_str, sizeof(tx_sbc_str), tx_sbc, "SBC");
-    formatSafetyBit(rx_sto_str, sizeof(rx_sto_str), rx_sto, "STO");
-    formatSafetyBit(rx_sos_str, sizeof(rx_sos_str), rx_sos, "SOS");
-    formatSafetyBit(rx_sbc_str, sizeof(rx_sbc_str), rx_sbc, "SBC");
-
-    TETHER_LOGI(tag, "cycle {}:  RX←slave {}  {}  {}  cmd={}  |  TX→slave {}  {}  {}  cmd={}",
+    TETHER_LOGI(tag, "cycle {}:  RX←slave {}  {}  cmd={}  |  TX→slave {}  cmd={}",
                 cycle_count,
-                tx_sto_str, tx_sos_str, tx_sbc_str,
+                tx_sflags_fmt.format(tx_pdo->safety_state_flags),
+                tx_dflags_fmt.format(tx_pdo->diagnostic_flags),
                 FSoE::fsoeCommandName(tx_pdo->fsoe_command),
-                rx_sto_str, rx_sos_str, rx_sbc_str,
+                rx_safety_fmt.format(rx_pdo->safety_flags),
                 FSoE::fsoeCommandName(rx_pdo->fsoe_command));
 
     // --- Raw hex LAST ---
