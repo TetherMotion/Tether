@@ -992,17 +992,19 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
     }
 
     // State transition:
-    // - On Reset command: transition to Reset state (if not already there).
-    //   The slave sends a Reset response (cmd=0x2A) via buildResetResponse.
-    //   The transition to Session happens when the slave receives the
-    //   master's Session TX.  This matches the real Synapticon slave
-    //   behavior (the physical device sends cmd=0x2A for the Reset
-    //   response) and ensures the command byte changes (0x2A → 0x4E)
-    //   for PDO change-detection.
+    // - On Reset command: transition IMMEDIATELY to Session state and
+    //   respond with a Session frame (cmd=0x4E) carrying the slave's own
+    //   Session ID.  The ESC211 master expects the slave to acknowledge a
+    //   Reset by switching to Session — sending a Reset (0x2A) response
+    //   would just echo the master's frame (same CRC) and the master would
+    //   never advance.  This matches the FSoE master's handleResetState
+    //   which accepts either a Session or Reset response but transitions
+    //   to Session on either.
     // - On Session command: transition to Session state.  The slave sends
     //   a Session response (buildSessionResponse) with its own Session ID.
     if (cmd == Command::Reset) {
-        transitionTo(ConnectionState::Reset);
+        transitionTo(ConnectionState::Session);
+        sessionFirstRxDone_ = true;
     } else if (cmd == Command::Session) {
         transitionTo(ConnectionState::Session);
         sessionFirstRxDone_ = true;
@@ -1457,7 +1459,7 @@ size_t FSoESlave::buildResetResponse(uint8_t* data, size_t maxLen) {
         0,  // Conn_Id = 0 in Reset state (ETG.5100 §8.2.2.2)
         0,  // start_crc = 0 (master RX chain starts at 0 for Reset)
         config_.initialSeqNo,
-        &last_tx_crc0_,  // update CRC chain for next frame
+        nullptr,  // don't update CRC chain — Reset resets it (matches master)
         &seq_used);
     // Set tx_seq_no_ to the seq used.  prepareTxFrame will increment it
     // for the next frame.
