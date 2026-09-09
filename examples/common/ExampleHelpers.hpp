@@ -55,6 +55,10 @@ bool printDebugHelpIfRequested(const std::string& debugStr);
 bool printDebugConditionHelpIfRequested(const std::string& startStr);
 
 /// Add `--rx-vlan` and `--tx-vlan` to an ArgumentParser.
+///
+/// @deprecated These args are now added automatically by addInterfaceArg().
+/// This function is retained as a no-op for source compatibility; calling it
+/// has no effect.
 void addVlanArgs(argparse::ArgumentParser& program);
 
 /// Add `-s` / `--slave` to an ArgumentParser.

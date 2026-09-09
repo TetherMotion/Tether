@@ -25,6 +25,14 @@ void addInterfaceArg(argparse::ArgumentParser& program,
         .default_value(defaultValue)
         .help("Network interface name (e.g. eth0, enp3s0). "
               "If omitted, auto-selects the sole physical Ethernet interface.");
+    // VLAN args are folded in here so every example that uses addInterfaceArg()
+    // automatically gets --rx-vlan / --tx-vlan without a separate call.
+    program.add_argument("--rx-vlan")
+        .default_value(std::string(""))
+        .help("RX VLAN filter: single VID, range, or 'any'");
+    program.add_argument("--tx-vlan")
+        .default_value(std::string(""))
+        .help("TX VLAN encapsulation: single VID");
 }
 
 std::string resolveInterface(const std::string& requested, const char* tag) {
@@ -144,13 +152,10 @@ bool applyDebugGateConditions(const std::string& startCond,
 #endif
 }
 
-void addVlanArgs(argparse::ArgumentParser& program) {
-    program.add_argument("--rx-vlan")
-        .default_value(std::string(""))
-        .help("RX VLAN filter: single VID, range, or 'any'");
-    program.add_argument("--tx-vlan")
-        .default_value(std::string(""))
-        .help("TX VLAN encapsulation: single VID");
+void addVlanArgs(argparse::ArgumentParser& /*program*/) {
+    // Deprecated: --rx-vlan / --tx-vlan are now added by addInterfaceArg() so
+    // every example gets them automatically.  Kept as a no-op for source
+    // compatibility with examples that still call it explicitly.
 }
 
 void addSlaveArg(argparse::ArgumentParser& program, int defaultValue) {

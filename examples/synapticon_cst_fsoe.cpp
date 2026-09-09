@@ -818,6 +818,7 @@ struct Args {
     double torque_pp_nm = 0.5;       ///< Peak-to-peak torque amplitude in Nm
     double freq_hz = 0.5;            ///< Sine wave frequency in Hz
     uint32_t rated_torque_mnm = 0;   ///< Motor rated torque in mNm (0 = auto-detect from 0x6076)
+    Tether::Examples::VlanConfig vlan;
     ///< STO override: -1 = not set (use motionEnabled default), 0 = force STO off, 1 = force STO on
     int sto_override = -1;
     ///< SOS override: -1 = not set (defaults to STO value), 0 = force SOS off, 1 = force SOS on
@@ -830,10 +831,7 @@ struct Args {
 
 bool parseArgs(int argc, char** argv, Args& out) {
     argparse::ArgumentParser program("synapticon_cst_fsoe");
-    program.add_argument("-i", "--interface")
-        .default_value(std::string(""))
-        .help("Network interface (e.g. eth0, enx34298f762c4e). "
-              "If omitted, auto-selects the sole physical Ethernet interface.");
+    Tether::Examples::addInterfaceArg(program);
     program.add_argument("-s", "--slave")
         .scan<'i', int>()
         .default_value(0)
@@ -944,6 +942,13 @@ bool parseArgs(int argc, char** argv, Args& out) {
     out.sos_override = program.get<int>("--sos");
     out.sbc_override = program.get<int>("--sbc");
     out.diagnostics_after = program.get<double>("--diagnostics-after");
+    if (!Tether::Examples::parseVlanArgs(
+            program.get<std::string>("--rx-vlan"),
+            program.get<std::string>("--tx-vlan"),
+            out.vlan, TAG)) {
+        return false;
+    }
+    Tether::Examples::logVlanConfig(out.vlan, TAG);
     return true;
 }
 
@@ -1079,7 +1084,7 @@ int main(int argc, char** argv) {
     // --- Start EtherCAT master ---
     EtherCAT::DS402Master master;
     Tether::Examples::HostMasterSession session;
-    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG)) {
+    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG, args.vlan)) {
         return 2;
     }
 

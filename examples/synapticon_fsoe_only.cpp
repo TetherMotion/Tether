@@ -314,14 +314,12 @@ struct Args {
     int watchdog_ms = 15;
     int diag_interval_ms = 500;
     std::string debug;
+    Tether::Examples::VlanConfig vlan;
 };
 
 bool parseArgs(int argc, char** argv, Args& out) {
     argparse::ArgumentParser program("synapticon_fsoe_only");
-    program.add_argument("-i", "--interface")
-        .default_value(std::string(""))
-        .help("Network interface (e.g. eth0, enx34298f762c4e). "
-              "If omitted, auto-selects the sole physical Ethernet interface.");
+    Tether::Examples::addInterfaceArg(program);
     program.add_argument("-s", "--slave")
         .scan<'i', int>().default_value(0);
     program.add_argument("-d", "--duration")
@@ -353,6 +351,13 @@ bool parseArgs(int argc, char** argv, Args& out) {
     out.watchdog_ms = program.get<int>("--watchdog-ms");
     out.diag_interval_ms = program.get<int>("--diag-interval-ms");
     out.debug = program.get<std::string>("--debug");
+    if (!Tether::Examples::parseVlanArgs(
+            program.get<std::string>("--rx-vlan"),
+            program.get<std::string>("--tx-vlan"),
+            out.vlan, TAG)) {
+        return false;
+    }
+    Tether::Examples::logVlanConfig(out.vlan, TAG);
     return true;
 }
 
@@ -394,7 +399,7 @@ int main(int argc, char** argv) {
     // --- Start EtherCAT master ---
     EtherCAT::DS402Master master;
     Tether::Examples::HostMasterSession session;
-    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG)) {
+    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG, args.vlan)) {
         return 2;
     }
 
