@@ -21,18 +21,26 @@ re-exports the library APIs into `namespace std`. The shim directory is put on
 the include path with `BEFORE` so `#include <...>` resolves to it. No extra
 link step is needed (both fallback libs are header-only).
 
-| Header       | Fallback submodule              | Shim header                              | Pinned | Native since        |
-|--------------|---------------------------------|------------------------------------------|--------|---------------------|
-| `<format>`   | `dependencies/fmt` ({fmt})      | `include/tether/fmt_shim/format`         | 11.1.4 | GCC 13              |
-| `<print>`    | `dependencies/fmt` ({fmt})      | `include/tether/fmt_shim/print`          | 11.1.4 | GCC 15              |
-| `<expected>` | `dependencies/expected` (tl::)  | `include/tether/expected_shim/expected`  | v1.3.1 | GCC 12              |
+| Header       | Fallback submodule              | Shim header                                       | Pinned | Native since        |
+|--------------|---------------------------------|---------------------------------------------------|--------|---------------------|
+| `<format>`   | `dependencies/fmt` ({fmt})      | `include/tether/fmt_shim/format_shim/format`      | 11.1.4 | GCC 13              |
+| `<print>`    | `dependencies/fmt` ({fmt})      | `include/tether/fmt_shim/print_shim/print`         | 11.1.4 | GCC 15              |
+| `<expected>` | `dependencies/expected` (tl::)  | `include/tether/expected_shim/expected`            | v1.3.1 | GCC 12              |
 
-When either `<format>` or `<print>` is missing, the {fmt} submodule is
-activated and both shim headers are put on the include path. This means
-on GCC 13/14 (native `<format>` but no `<print>`), the `<format>` shim
-replaces the native header — this is intentional and correct (the shim
-re-exports {fmt} which is the basis for `std::format`, and `std::print`
-uses `fmt::print` which shares the same `fmt::format_string` type).
+The `<format>` and `<print>` shims live in **separate** directories
+(`fmt_shim/format_shim` and `fmt_shim/print_shim`) and are activated
+**independently** — only the shim for a *missing* native header is put on
+the include path. This is critical on GCC 13/14 (native `<format>`, no
+`<print>`): the `<format>` shim must NOT shadow the native header, because
+libstdc++ internal headers (e.g. `bits/chrono_io.h` pulled in by `<chrono>`)
+do `#include <format>` and depend on libstdc++-internal symbols
+(`std::__format::__write`, `__is_specialization_of`, `wformat_context`,
+`make_format_args<_Ctx>`, ...) that the {fmt} shim does not provide.
+Shadowing native `<format>` there breaks `<chrono>`. So on GCC 13/14 only
+the `<print>` shim is activated; native `<format>` is left in place.
+`fmt::print` constructs its own `fmt::format_string` from the literal, so
+`std::print("literal", x)` → `fmt::print("literal", x)` works without
+needing the `<format>` shim.
 
 On GCC >= 15 / recent clang / MSVC (all three headers native), the shims
 are **not** activated and the standard headers are used directly. No
@@ -45,7 +53,10 @@ defined outside the `Tether/` subdirectory (the `include_directories(BEFORE)`
 in Tether's CMakeLists.txt is directory-scoped and does not propagate).
 The `esc211_apply_tether_config()` helper function applies both the
 Tether compile definitions and the {fmt} shim include paths/defines to
-each outer target.
+each outer target. It activates the `<format>` and `<print>` shims
+independently (only the shim for a missing native header is added BEFORE),
+matching Tether's own logic — so on GCC 13/14 only the `<print>` shim is
+propagated to outer targets.
 
 ## Build Commands
 

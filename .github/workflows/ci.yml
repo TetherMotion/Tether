@@ -90,6 +90,50 @@ jobs:
         name: static-build
         path: build-static/
 
+  compile-matrix:
+    name: Compile (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+      with:
+        submodules: recursive
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake \
+          g++ \
+          gcc \
+          libc6-dev \
+          libboost-dev \
+          make
+
+    - name: Show toolchain versions
+      run: |
+        echo "=== g++ ==="
+        g++ --version | head -1
+        echo "=== cmake ==="
+        cmake --version | head -1
+
+    - name: Configure and build
+      run: |
+        cmake -S . -B build \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DTETHER_BUILD_TESTS=ON \
+          -DTETHER_BUILD_SIMULATION=ON \
+          -DTETHER_BUILD_ETHERCAT_MASTER=ON \
+          -DTETHER_BUILD_DESTABILIZER=ON \
+          -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
+          -DTETHER_BUILD_EXTRACT_ESI=OFF
+        cmake --build build --parallel $(nproc)
+
   integration-tests:
     name: Run Integration Tests
     runs-on: ubuntu-latest

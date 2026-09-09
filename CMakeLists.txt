@@ -157,13 +157,26 @@ set(CMAKE_C_STANDARD 99)
 # =============================================================================
 # GCC < 13 (e.g. Ubuntu 22.04's GCC 11.4) ships no <format> header at all,
 # not even as <experimental/format>. GCC 13/14 has <format> but not <print>
-# (added in GCC 15). When either native header is missing we fall back to
-# the {fmt} submodule via thin shim headers that re-export the fmt:: APIs
+# (added in GCC 15). When a native header is missing we fall back to the
+# {fmt} submodule via a thin shim header that re-exports the fmt:: APIs
 # into namespace std, so all existing `#include <format>` / `std::format(...)`
 # / `#include <print>` / `std::print(...)` call sites compile unchanged.
 # On toolchains that provide both real headers (GCC >= 15, recent clang/MSVC)
 # the shims are not put on the include path and the standard headers are used
 # directly.
+#
+# The <format> and <print> shims live in SEPARATE directories
+# (include/tether/fmt_shim/format_shim and .../print_shim) so that each can
+# be activated independently. This is critical: on GCC 13/14 (native
+# <format>, no <print>) we must NOT activate the <format> shim, because
+# libstdc++ internal headers (e.g. bits/chrono_io.h pulled in by <chrono>)
+# do `#include <format>` and depend on libstdc++-internal symbols
+# (std::__format::__write, __is_specialization_of, wformat_context, ...)
+# that the {fmt} shim does not provide. Shadowing native <format> there
+# breaks <chrono>. So on GCC 13/14 only the <print> shim is activated;
+# native <format> is left in place. fmt::print constructs its own
+# fmt::format_string from the literal, so std::print works without needing
+# the <format> shim.
 include(CheckIncludeFileCXX)
 set(_tether_format_check_flags_backup "${CMAKE_REQUIRED_FLAGS}")
 set(CMAKE_REQUIRED_FLAGS "-std=c++23")
@@ -171,6 +184,10 @@ check_include_file_cxx("format" TETHER_HAVE_NATIVE_STD_FORMAT)
 check_include_file_cxx("print" TETHER_HAVE_NATIVE_STD_PRINT)
 set(CMAKE_REQUIRED_FLAGS "${_tether_format_check_flags_backup}")
 unset(_tether_format_check_flags_backup)
+
+set(TETHER_FMT_SHIM_BASE "${CMAKE_CURRENT_SOURCE_DIR}/include/tether/fmt_shim")
+set(TETHER_FMT_SHIM_FORMAT_DIR "${TETHER_FMT_SHIM_BASE}/format_shim")
+set(TETHER_FMT_SHIM_PRINT_DIR "${TETHER_FMT_SHIM_BASE}/print_shim")
 
 if(NOT TETHER_HAVE_NATIVE_STD_FORMAT OR NOT TETHER_HAVE_NATIVE_STD_PRINT)
     set(FMT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/fmt")
@@ -186,19 +203,21 @@ if(NOT TETHER_HAVE_NATIVE_STD_FORMAT OR NOT TETHER_HAVE_NATIVE_STD_PRINT)
     # Use {fmt} in header-only mode so no extra link step is required.
     add_compile_definitions(FMT_HEADER_ONLY)
 
-    # The shim directory contains headers literally named `format` and `print`
-    # so that `#include <format>` / `#include <print>` resolve to them.
-    # BEFORE ensures they are searched ahead of any system include path.
-    include_directories(BEFORE "${CMAKE_CURRENT_SOURCE_DIR}/include/tether/fmt_shim")
+    # {fmt} headers are needed by whichever shim(s) are active below.
     include_directories("${FMT_PATH}/include")
 
+    # Activate each shim independently. The shim directory contains a header
+    # literally named `format` or `print` so `#include <format>` / `print`
+    # resolves to it. BEFORE ensures it is searched ahead of system includes.
     if(NOT TETHER_HAVE_NATIVE_STD_FORMAT)
+        include_directories(BEFORE "${TETHER_FMT_SHIM_FORMAT_DIR}")
         message(STATUS "Native <format> not available; using {fmt} submodule shim as std::format polyfill.")
     else()
         message(STATUS "Native <format> available; not using {fmt} shim for <format>.")
     endif()
 
     if(NOT TETHER_HAVE_NATIVE_STD_PRINT)
+        include_directories(BEFORE "${TETHER_FMT_SHIM_PRINT_DIR}")
         message(STATUS "Native <print> not available; using {fmt} submodule shim as std::print polyfill.")
     else()
         message(STATUS "Native <print> available; not using {fmt} shim for <print>.")
