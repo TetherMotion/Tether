@@ -77,6 +77,7 @@
 #include "tether/ethercat/FaultDetection.hpp"
 #include "tether/ethercat/Slave.hpp"
 #include "tether/fsoe/FSoEDefs.hpp"
+#include "tether/profiles/cia402/CiA402BitLabels.hpp"
 #include "tether/fsoe/FSoEHelpers.hpp"
 #include "tether/fsoe/Synapticon/SafeMotionFSoE.hpp"
 #include "tether/fsoe/Synapticon/FSoEPDODecoder.hpp"
@@ -329,10 +330,11 @@ public:
                 "--- Drive @ {} ms ---",
                 static_cast<unsigned long long>(elapsed_ms_));
             TETHER_LOGI(TAG,
-                "  statusword=0x{:04X} mode_display={} "
+                "  statusword=0x{:04X} [{}] mode_display={} "
                 "target_torque={} torque_actual={} "
                 "position_actual={}",
                 tx->statusword,
+                CiA402::kStatuswordFormatter.formatActive(tx->statusword),
                 static_cast<int>(tx->modes_of_operation_display),
                 rx ? static_cast<int>(rx->target_torque) : 0,
                 static_cast<int>(tx->torque_actual),

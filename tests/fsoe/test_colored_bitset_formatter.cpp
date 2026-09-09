@@ -13,6 +13,7 @@
 using EtherCAT::Utils::ActiveWhen;
 using EtherCAT::Utils::BitLabel;
 using EtherCAT::Utils::ColoredBitsetFormatter;
+using EtherCAT::Utils::ShowWhen;
 
 // ============================================================================
 // ANSI escape sequences used by the formatter
@@ -425,4 +426,301 @@ TEST(IntegrationTest, MixedEncodings) {
     const uint32_t val2 = 0x0003;
     EXPECT_EQ(stripAnsi(fmt.format(val2)), "STO=OFF  SS1=OFF  ErrorAck=OFF");
     EXPECT_EQ(fmt.formatActive(val2), "(none)");
+}
+
+// ============================================================================
+// ShowWhen: visibility control (show only when ON / OFF)
+// ============================================================================
+
+TEST(ShowWhenTest, FactorySetsShowWhenActive) {
+    const BitLabel label = BitLabel::bitIfOn("FAULT", 0x01);
+    EXPECT_EQ(label.show_when, ShowWhen::WhenActive);
+    EXPECT_EQ(label.active_when, ActiveWhen::AllSet);
+}
+
+TEST(ShowWhenTest, FactorySetsShowWhenInactive) {
+    const BitLabel label = BitLabel::bitIfOff("READY", 0x02);
+    EXPECT_EQ(label.show_when, ShowWhen::WhenInactive);
+    EXPECT_EQ(label.active_when, ActiveWhen::AllSet);
+}
+
+TEST(ShowWhenTest, BitInvIfOnFactory) {
+    const BitLabel label = BitLabel::bitInvIfOn("SAFE", 0x04);
+    EXPECT_EQ(label.show_when, ShowWhen::WhenActive);
+    EXPECT_EQ(label.active_when, ActiveWhen::AllClear);
+}
+
+TEST(ShowWhenTest, BitInvIfOffFactory) {
+    const BitLabel label = BitLabel::bitInvIfOff("UNSAFE", 0x08);
+    EXPECT_EQ(label.show_when, ShowWhen::WhenInactive);
+    EXPECT_EQ(label.active_when, ActiveWhen::AllClear);
+}
+
+TEST(ShowWhenTest, DefaultShowWhenIsAlways) {
+    const BitLabel label = BitLabel::bit("X", 0x01);
+    EXPECT_EQ(label.show_when, ShowWhen::Always);
+}
+
+// --- shouldShow() default implementation ---
+
+TEST(ShowWhenTest, ShouldShowAlwaysReturnsTrue) {
+    const auto label = BitLabel::bit("X", 0x01);
+    EXPECT_TRUE(label.shouldShow(0x01));  // active
+    EXPECT_TRUE(label.shouldShow(0x00));  // inactive
+}
+
+TEST(ShowWhenTest, ShouldShowWhenActive) {
+    const auto label = BitLabel::bitIfOn("X", 0x01);
+    EXPECT_TRUE(label.shouldShow(0x01));   // active → show
+    EXPECT_FALSE(label.shouldShow(0x00));  // inactive → hide
+}
+
+TEST(ShowWhenTest, ShouldShowWhenInactive) {
+    const auto label = BitLabel::bitIfOff("X", 0x01);
+    EXPECT_FALSE(label.shouldShow(0x01));  // active → hide
+    EXPECT_TRUE(label.shouldShow(0x00));   // inactive → show
+}
+
+TEST(ShowWhenTest, ShouldShowWhenActiveZeroActive) {
+    const auto label = BitLabel::bitInvIfOn("SAFE", 0x01);
+    // zero-active: active when bit=0
+    EXPECT_TRUE(label.shouldShow(0x00));   // active (bit clear) → show
+    EXPECT_FALSE(label.shouldShow(0x01));  // inactive (bit set) → hide
+}
+
+TEST(ShowWhenTest, ShouldShowWhenInactiveZeroActive) {
+    const auto label = BitLabel::bitInvIfOff("UNSAFE", 0x01);
+    // zero-active: active when bit=0
+    EXPECT_FALSE(label.shouldShow(0x00));  // active (bit clear) → hide
+    EXPECT_TRUE(label.shouldShow(0x01));   // inactive (bit set) → show
+}
+
+// --- format() respects shouldShow() ---
+
+TEST(ShowWhenFormatTest, BitIfOnHidesWhenInactive) {
+    static BitLabel labels[] = {
+        BitLabel::bitIfOn("FAULT", 0x01),
+        BitLabel::bit("STO", 0x02),
+    };
+    const ColoredBitsetFormatter fmt{labels};
+
+    // value=0x01: FAULT active (shown), STO inactive (shown)
+    EXPECT_EQ(stripAnsi(fmt.format(0x01)), "FAULT=ON  STO=OFF");
+    // value=0x02: FAULT inactive (hidden), STO active (shown)
+    EXPECT_EQ(stripAnsi(fmt.format(0x02)), "STO=ON");
+    // value=0x00: FAULT inactive (hidden), STO inactive (shown)
+    EXPECT_EQ(stripAnsi(fmt.format(0x00)), "STO=OFF");
+}
+
+TEST(ShowWhenFormatTest, BitIfOffHidesWhenActive) {
+    static BitLabel labels[] = {
+        BitLabel::bitIfOff("READY", 0x01),
+        BitLabel::bit("STO", 0x02),
+    };
+    const ColoredBitsetFormatter fmt{labels};
+
+    // value=0x01: READY active (hidden), STO inactive (shown)
+    EXPECT_EQ(stripAnsi(fmt.format(0x01)), "STO=OFF");
+    // value=0x02: READY inactive (shown), STO active (shown)
+    EXPECT_EQ(stripAnsi(fmt.format(0x02)), "READY=OFF  STO=ON");
+    // value=0x00: READY inactive (shown), STO inactive (shown)
+    EXPECT_EQ(stripAnsi(fmt.format(0x00)), "READY=OFF  STO=OFF");
+}
+
+TEST(ShowWhenFormatTest, BitInvIfOnHidesWhenInactive) {
+    static BitLabel labels[] = {
+        BitLabel::bitInvIfOn("SAFE", 0x01),  // zero-active, show when ON
+        BitLabel::bit("X", 0x02),
+    };
+    const ColoredBitsetFormatter fmt{labels};
+
+    // value=0x00: SAFE active (bit clear, shown as ON), X inactive (shown)
+    EXPECT_EQ(stripAnsi(fmt.format(0x00)), "SAFE=ON  X=OFF");
+    // value=0x01: SAFE inactive (bit set, hidden), X inactive (shown)
+    EXPECT_EQ(stripAnsi(fmt.format(0x01)), "X=OFF");
+    // value=0x03: SAFE inactive (hidden), X active (shown)
+    EXPECT_EQ(stripAnsi(fmt.format(0x03)), "X=ON");
+}
+
+TEST(ShowWhenFormatTest, BitInvIfOffHidesWhenActive) {
+    static BitLabel labels[] = {
+        BitLabel::bitInvIfOff("UNSAFE", 0x01),  // zero-active, show when OFF
+        BitLabel::bit("X", 0x02),
+    };
+    const ColoredBitsetFormatter fmt{labels};
+
+    // value=0x00: UNSAFE active (bit clear, hidden), X inactive (shown)
+    EXPECT_EQ(stripAnsi(fmt.format(0x00)), "X=OFF");
+    // value=0x01: UNSAFE inactive (bit set, shown as OFF), X inactive (shown)
+    EXPECT_EQ(stripAnsi(fmt.format(0x01)), "UNSAFE=OFF  X=OFF");
+    // value=0x03: UNSAFE inactive (shown), X active (shown)
+    EXPECT_EQ(stripAnsi(fmt.format(0x03)), "UNSAFE=OFF  X=ON");
+}
+
+TEST(ShowWhenFormatTest, AllLabelsHiddenReturnsEmptyString) {
+    static BitLabel labels[] = {
+        BitLabel::bitIfOn("A", 0x01),
+        BitLabel::bitIfOn("B", 0x02),
+    };
+    const ColoredBitsetFormatter fmt{labels};
+    // value=0x00: both inactive → both hidden
+    EXPECT_EQ(fmt.format(0x00), "");
+}
+
+TEST(ShowWhenFormatTest, MixedVisibilityAndAlways) {
+    static BitLabel labels[] = {
+        BitLabel::bitIfOn("FAULT", 0x01),    // show only when ON
+        BitLabel::bit("RUN", 0x02),          // always show
+        BitLabel::bitIfOff("IDLE", 0x04),    // show only when OFF
+    };
+    const ColoredBitsetFormatter fmt{labels};
+
+    // value=0x02: FAULT hidden (inactive), RUN shown (ON), IDLE shown (OFF)
+    EXPECT_EQ(stripAnsi(fmt.format(0x02)), "RUN=ON  IDLE=OFF");
+    // value=0x07: FAULT shown (ON), RUN shown (ON), IDLE hidden (active)
+    EXPECT_EQ(stripAnsi(fmt.format(0x07)), "FAULT=ON  RUN=ON");
+    // value=0x00: FAULT hidden, RUN shown (OFF), IDLE shown (OFF)
+    EXPECT_EQ(stripAnsi(fmt.format(0x00)), "RUN=OFF  IDLE=OFF");
+}
+
+// --- formatActive() respects shouldShow() ---
+
+TEST(ShowWhenFormatActiveTest, WhenActiveLabelsAppearInFormatActive) {
+    static BitLabel labels[] = {
+        BitLabel::bitIfOn("FAULT", 0x01),  // show when ON
+        BitLabel::bit("RUN", 0x02),        // always show
+    };
+    const ColoredBitsetFormatter fmt{labels};
+
+    // value=0x03: both active, both visible
+    EXPECT_EQ(fmt.formatActive(0x03), "FAULT RUN");
+    // value=0x02: RUN active, FAULT inactive (hidden anyway)
+    EXPECT_EQ(fmt.formatActive(0x02), "RUN");
+    // value=0x00: nothing active
+    EXPECT_EQ(fmt.formatActive(0x00), "(none)");
+}
+
+TEST(ShowWhenFormatActiveTest, WhenInactiveLabelsNeverInFormatActive) {
+    static BitLabel labels[] = {
+        BitLabel::bitIfOff("IDLE", 0x01),  // show when OFF (inactive)
+        BitLabel::bit("RUN", 0x02),        // always show
+    };
+    const ColoredBitsetFormatter fmt{labels};
+
+    // value=0x02: RUN active, IDLE inactive
+    // IDLE has ShowWhen::WhenInactive, so shouldShow(0x02) = !isActive(0x02) = true
+    // But isActive(0x02) for IDLE is false, so formatActive skips it (not active)
+    EXPECT_EQ(fmt.formatActive(0x02), "RUN");
+    // value=0x03: both active, but IDLE has WhenInactive → shouldShow=false → skipped
+    EXPECT_EQ(fmt.formatActive(0x03), "RUN");
+    // value=0x00: nothing active
+    EXPECT_EQ(fmt.formatActive(0x00), "(none)");
+}
+
+TEST(ShowWhenFormatActiveTest, AllHiddenReturnsEmptyText) {
+    static BitLabel labels[] = {
+        BitLabel::bitIfOff("IDLE", 0x01),  // never visible when active
+    };
+    const ColoredBitsetFormatter fmt{labels};
+    // value=0x01: IDLE active but WhenInactive → shouldShow=false → skipped
+    EXPECT_EQ(fmt.formatActive(0x01), "(none)");
+}
+
+// --- Multi-bit visibility factories ---
+
+TEST(ShowWhenMultiBitTest, BitsIfOnFactory) {
+    const BitLabel label = BitLabel::bitsIfOn("GROUP", 0x0F);
+    EXPECT_EQ(label.active_when, ActiveWhen::AllSet);
+    EXPECT_EQ(label.show_when, ShowWhen::WhenActive);
+}
+
+TEST(ShowWhenMultiBitTest, BitsInvIfOffFactory) {
+    const BitLabel label = BitLabel::bitsInvIfOff("CLEAR", 0x0F);
+    EXPECT_EQ(label.active_when, ActiveWhen::AllClear);
+    EXPECT_EQ(label.show_when, ShowWhen::WhenInactive);
+}
+
+TEST(ShowWhenMultiBitTest, AnyBitIfOnInFormat) {
+    static BitLabel labels[] = {
+        BitLabel::anyBitIfOn("WARN", 0x03),  // active if any of bits 0,1 set; show when active
+        BitLabel::bit("X", 0x04),            // always show
+    };
+    const ColoredBitsetFormatter fmt{labels};
+
+    // value=0x01: WARN active (shown), X inactive (shown)
+    EXPECT_EQ(stripAnsi(fmt.format(0x01)), "WARN=ON  X=OFF");
+    // value=0x04: WARN inactive (hidden), X active (shown)
+    EXPECT_EQ(stripAnsi(fmt.format(0x04)), "X=ON");
+}
+
+// --- Custom shouldShow() via subclassing ---
+
+/// Custom label that is shown only on even cycles (simulated).
+class EvenCycleLabel : public BitLabel {
+public:
+    explicit EvenCycleLabel(const char* name, uint32_t mask)
+        : BitLabel(name, mask, ActiveWhen::AllSet) {}
+
+    bool shouldShow(uint32_t value) const override {
+        // Show only when bit 7 (parity bit) is set, regardless of activity
+        return (value & 0x80) != 0;
+    }
+};
+
+TEST(ShowWhenSubclassTest, CustomShouldShowInFormat) {
+    static EvenCycleLabel custom("CUSTOM", 0x01);
+    static BitLabel normal = BitLabel::bit("NORMAL", 0x02);
+    static const BitLabel* labels[] = {&custom, &normal};
+    const ColoredBitsetFormatter fmt{std::span<const BitLabel* const>{labels}};
+
+    // value=0x80: bit 7 set → custom shown (OFF, since bit 0 not set), normal shown (OFF)
+    EXPECT_EQ(stripAnsi(fmt.format(0x80)), "CUSTOM=OFF  NORMAL=OFF");
+    // value=0x81: bit 7 set → custom shown (ON), normal shown (OFF)
+    EXPECT_EQ(stripAnsi(fmt.format(0x81)), "CUSTOM=ON  NORMAL=OFF");
+    // value=0x01: bit 7 clear → custom hidden, normal shown (OFF)
+    EXPECT_EQ(stripAnsi(fmt.format(0x01)), "NORMAL=OFF");
+    // value=0x03: bit 7 clear → custom hidden, normal shown (ON)
+    EXPECT_EQ(stripAnsi(fmt.format(0x03)), "NORMAL=ON");
+}
+
+TEST(ShowWhenSubclassTest, CustomShouldShowInFormatActive) {
+    static EvenCycleLabel custom("CUSTOM", 0x01);
+    static const BitLabel* labels[] = {&custom};
+    const ColoredBitsetFormatter fmt{std::span<const BitLabel* const>{labels}};
+
+    // value=0x81: bit 7 set (visible), bit 0 set (active) → shown
+    EXPECT_EQ(fmt.formatActive(0x81), "CUSTOM");
+    // value=0x80: bit 7 set (visible), bit 0 clear (inactive) → not active
+    EXPECT_EQ(fmt.formatActive(0x80), "(none)");
+    // value=0x01: bit 7 clear (hidden) → skipped even though active
+    EXPECT_EQ(fmt.formatActive(0x01), "(none)");
+}
+
+/// Custom label that overrides both isActive() and shouldShow().
+class FaultOnlyLabel : public BitLabel {
+public:
+    explicit FaultOnlyLabel(const char* name, uint32_t mask)
+        : BitLabel(name, mask, ActiveWhen::AllSet, ShowWhen::WhenActive) {}
+
+    bool isActive(uint32_t value) const override {
+        // Active when the bit is set AND bit 15 (valid bit) is set
+        return (value & mask) != 0 && (value & 0x8000) != 0;
+    }
+};
+
+TEST(ShowWhenSubclassTest, CustomIsActiveAndShouldShow) {
+    static FaultOnlyLabel fault("FAULT", 0x01);
+    static const BitLabel* labels[] = {&fault};
+    const ColoredBitsetFormatter fmt{std::span<const BitLabel* const>{labels}};
+
+    // value=0x8001: valid bit set, fault bit set → active, shouldShow=true (WhenActive)
+    EXPECT_EQ(stripAnsi(fmt.format(0x8001)), "FAULT=ON");
+    // value=0x0001: valid bit clear → inactive, shouldShow=false → hidden
+    EXPECT_EQ(fmt.format(0x0001), "");
+    // value=0x8000: valid bit set, fault bit clear → inactive, shouldShow=false → hidden
+    EXPECT_EQ(fmt.format(0x8000), "");
+    // formatActive: only shows when both visible and active
+    EXPECT_EQ(fmt.formatActive(0x8001), "FAULT");
+    EXPECT_EQ(fmt.formatActive(0x0001), "(none)");
+    EXPECT_EQ(fmt.formatActive(0x8000), "(none)");
 }
