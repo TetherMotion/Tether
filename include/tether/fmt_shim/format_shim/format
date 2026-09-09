@@ -2,8 +2,10 @@
 //
 // This header is ONLY put on the include path when the compiler's standard
 // library does not ship a native <format> header (e.g. GCC < 13 on Ubuntu
-// 22.04). It is found via CMake's `include_directories(BEFORE ...)` so that
-// `#include <format>` resolves here instead of the (missing) system header.
+// 22.04). It lives in its own directory (fmt_shim/format_shim/) so CMake can
+// add it to the include path independently of the <print> shim. It is found
+// via CMake's `include_directories(BEFORE ...)` so that `#include <format>`
+// resolves here instead of the (missing) system header.
 //
 // It re-exports the {fmt} library (https://github.com/fmtlib/fmt) APIs into
 // namespace std, so existing code using std::format / std::format_to /
@@ -14,6 +16,15 @@
 // When the toolchain provides a real <format> (GCC >= 13, clang >= 18 with
 // libc++ >= 17, MSVC >= 19.29), CMake does NOT add this directory to the
 // include path and the standard <format> is used directly.
+//
+// IMPORTANT: This shim must NOT shadow a native <format>. libstdc++ internal
+// headers (e.g. bits/chrono_io.h pulled in by <chrono>) do `#include <format>`
+// and depend on libstdc++-internal symbols (std::__format::__write,
+// __is_specialization_of, wformat_context, make_format_args<_Ctx>, ...) that
+// this shim does not provide. Replacing native <format> on GCC 13/14 (which
+// has <format> but not <print>) breaks <chrono>. Hence the <format> and
+// <print> shims now live in separate directories and are activated
+// independently — on GCC 13/14 only the <print> shim is activated.
 #pragma once
 
 #include <fmt/format.h>

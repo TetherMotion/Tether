@@ -1,0 +1,48 @@
+// Tether <print> polyfill shim.
+//
+// This header is ONLY put on the include path when the compiler's standard
+// library does not ship a native <print> header (e.g. GCC < 15, which has
+// <format> since GCC 13 but not <print>). It lives in its own directory
+// (fmt_shim/print_shim/) so CMake can add it to the include path
+// independently of the <format> shim. It is found via CMake's
+// `include_directories(BEFORE ...)` so that `#include <print>` resolves
+// here instead of the (missing) system header.
+//
+// It re-exports the {fmt} library's print/println APIs into namespace std,
+// so existing code using std::print / std::println compiles unchanged.
+// {fmt} is the library that std::format/std::print was based on, so the
+// behaviour is equivalent for the subset used by Tether and ESC211.
+//
+// When the toolchain provides a real <print> (GCC >= 15, recent clang/MSVC),
+// CMake does NOT add this directory to the include path and the standard
+// <print> is used directly.
+//
+// NOTE: This shim depends on {fmt} being on the include path (for
+// <fmt/base.h>), which CMake adds whenever either shim is needed. It does
+// NOT require the <format> shim: when native <format> is available but
+// <print> is not (e.g. GCC 13/14), the native <format> is left in place and
+// only this <print> shim is activated. fmt::print constructs its own
+// fmt::format_string from the literal, so std::print("literal", x) expands
+// to fmt::print("literal", x) and works correctly regardless of whether
+// std::format_string is the native or {fmt} type. Keeping native <format>
+// is required because libstdc++ internal headers (e.g. bits/chrono_io.h
+// pulled in by <chrono>) `#include <format>` and depend on libstdc++-internal
+// symbols that the {fmt} <format> shim does not provide.
+#pragma once
+
+#include <fmt/base.h>    // fmt::print, fmt::println
+
+// fmt::print constructs its own fmt::format_string from the compile-time
+// literal, so std::print("literal", args...) expands to
+// fmt::print("literal", args...) via the using-declaration below and does
+// NOT require a std::format_string. This is why the <print> shim works
+// alongside a native <format> (GCC 13/14) without needing the <format>
+// shim — the two format_string types are never exchanged across the
+// boundary.
+
+namespace std {
+
+using fmt::print;
+using fmt::println;
+
+} // namespace std
