@@ -71,7 +71,7 @@ int main(int argc, char** argv)
 
     EtherCAT::DS402Master master;
     Tether::Examples::HostMasterSession session;
-    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG)) {
+    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG, args.vlan)) {
         return 2;
     }
 

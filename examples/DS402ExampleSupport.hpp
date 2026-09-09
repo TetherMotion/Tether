@@ -14,6 +14,7 @@
 #include "tether/profiles/cia402/DS402Master.hpp"
 
 #include "tether/hal/IEthernet.hpp"
+#include "tether/ethercat/VLANRouter.hpp"
 #include "common/ExampleHelpers.hpp"
 
 namespace Tether::Examples {
@@ -28,6 +29,7 @@ struct SingleDriveExampleConfig {
 struct HostMasterSession {
     std::unique_ptr<EtherCAT::HAL::IEthernet> ethernet;
     std::unique_ptr<EtherCAT::NetworkInterface> network_interface;
+    std::unique_ptr<EtherCAT::VLANRouter> router;
     std::atomic<bool> poll_running{false};
     std::thread poll_thread;
     uint8_t src_mac[6]{};
@@ -36,7 +38,8 @@ struct HostMasterSession {
 inline bool startHostMasterSession(const std::string& interface_name,
                                    EtherCAT::DS402Master& master,
                                    HostMasterSession& session,
-                                   const char* tag)
+                                   const char* tag,
+                                   const VlanConfig& vlan = VlanConfig{})
 {
     session.ethernet = EtherCAT::HAL::createDefaultEthernet();
     if (!session.ethernet) {
@@ -87,11 +90,36 @@ inline bool startHostMasterSession(const std::string& interface_name,
         return eth->transmit(data, length) == EtherCAT::HAL::Error::OK;
     };
 
-    session.ethernet->setRxCallback(
-        [&master](const uint8_t* frame, size_t len, const EtherCAT::HAL::RxFrameInfo&, void*) {
-            master.ethercatMaster().handleRxFrame(frame, len);
-        },
-        nullptr);
+    EtherCAT::Master& ecat = master.ethercatMaster();
+
+    if (vlan.enabled) {
+        session.router = std::make_unique<EtherCAT::VLANRouter>();
+        session.router->setBackend(session.network_interface.get());
+        // Alias shared_ptr: the DS402Master owns the EtherCAT::Master for the
+        // session lifetime, so a no-op deleter is safe.
+        auto master_sp = std::shared_ptr<EtherCAT::Master>(&ecat, [](auto*) {});
+        if (vlan.rxAny) {
+            session.router->setUndefinedTarget(master_sp, vlan.txVlan, true);
+        } else if (vlan.rxRange) {
+            session.router->addMaster(master_sp, *vlan.rxRange, vlan.txVlan);
+        } else {
+            session.router->addMaster(master_sp, std::nullopt, vlan.txVlan);
+        }
+
+        session.ethernet->setRxCallback(
+            [&router = session.router](const uint8_t* frame, size_t len,
+                                        const EtherCAT::HAL::RxFrameInfo&, void*) {
+                router->processRxFrame(frame, len);
+            },
+            nullptr);
+    } else {
+        session.ethernet->setRxCallback(
+            [&ecat](const uint8_t* frame, size_t len,
+                    const EtherCAT::HAL::RxFrameInfo&, void*) {
+                ecat.handleRxFrame(frame, len);
+            },
+            nullptr);
+    }
 
     session.poll_running.store(true);
     session.poll_thread = std::thread([&session, tag]() {
@@ -103,7 +131,18 @@ inline bool startHostMasterSession(const std::string& interface_name,
         }
     });
 
-    master.start(*session.network_interface, session.src_mac);
+    if (vlan.enabled && session.router) {
+        EtherCAT::NetworkInterface* master_iface = vlan.rxAny
+            ? session.router->undefinedNetworkInterface()
+            : session.router->networkInterfaceFor(&ecat);
+        if (!master_iface) {
+            TETHER_LOGE(tag, "Failed to obtain per-master NetworkInterface from VLAN router");
+            return false;
+        }
+        master.start(*master_iface, session.src_mac);
+    } else {
+        master.start(*session.network_interface, session.src_mac);
+    }
     return true;
 }
 
@@ -184,12 +223,14 @@ inline void shutdownSingleDrive(EtherCAT::DS402Master& master, uint16_t slave_in
 struct MotionNativeArgs {
     std::string interface;
     double duration = 10.0;
+    VlanConfig vlan;
 };
 
 /// Parse the standard motion-native arguments (`-i`/`--interface`,
-/// `-d`/`--duration`).  Prints usage to stderr and returns `false` on failure.
-/// If no interface is given, auto-selects the sole physical Ethernet interface
-/// via the shared resolveInterface() helper.
+/// `-d`/`--duration`, and the `--rx-vlan`/`--tx-vlan` flags added
+/// automatically by addInterfaceArg()).  Prints usage to stderr and returns
+/// `false` on failure.  If no interface is given, auto-selects the sole
+/// physical Ethernet interface via the shared resolveInterface() helper.
 inline bool parseMotionNativeArgs(int argc, char** argv,
                                   const char* program_name,
                                   MotionNativeArgs& out)
@@ -211,6 +252,13 @@ inline bool parseMotionNativeArgs(int argc, char** argv,
         return false;
     }
     out.duration = program.get<double>("--duration");
+    if (!Tether::Examples::parseVlanArgs(
+            program.get<std::string>("--rx-vlan"),
+            program.get<std::string>("--tx-vlan"),
+            out.vlan, program_name)) {
+        return false;
+    }
+    Tether::Examples::logVlanConfig(out.vlan, program_name);
     return true;
 }
 

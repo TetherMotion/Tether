@@ -107,10 +107,7 @@ bool configureDrive(EtherCAT::DS402Master& master)
 int main(int argc, char** argv)
 {
     argparse::ArgumentParser program("as715n_sine_motion_fsoe_native");
-    program.add_argument("-i", "--interface")
-        .default_value(std::string(""))
-        .help("Network interface (e.g. eth0, enp3s0). "
-              "If omitted, auto-selects the sole physical Ethernet interface.");
+    Tether::Examples::addInterfaceArg(program);
     program.add_argument("-d", "--duration").scan<'g', double>().default_value(10.0);
     program.add_argument("--enable-fsoe").default_value(false).implicit_value(true);
 
@@ -121,12 +118,22 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    Tether::Examples::VlanConfig vlan;
+    if (!Tether::Examples::parseVlanArgs(
+            program.get<std::string>("--rx-vlan"),
+            program.get<std::string>("--tx-vlan"),
+            vlan, TAG)) {
+        return 1;
+    }
+    Tether::Examples::logVlanConfig(vlan, TAG);
+
     Tether::Platform::ensureRealtimeKernelOrExit();
 
     EtherCAT::DS402Master master;
     Tether::Examples::HostMasterSession session;
     if (!Tether::Examples::startHostMasterSession(
-            Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG), master, session, TAG)) {
+            Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG),
+            master, session, TAG, vlan)) {
         return 2;
     }
 
