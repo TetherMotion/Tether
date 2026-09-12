@@ -26,6 +26,17 @@ endif()
 # Include GoogleTest for gtest_discover_tests
 include(GoogleTest)
 
+# Test executables are not part of the default `all` target.  They are built
+# only when the `tests` custom target is requested (e.g. `make tests`, `ninja tests`).
+set_property(GLOBAL PROPERTY TETHER_ALL_TEST_TARGETS "")
+
+# Wrapper around add_executable that excludes tests from the default build and
+# records the target so the `tests` target can build all of them together.
+function(tether_add_test_executable name)
+    add_executable(${name} EXCLUDE_FROM_ALL ${ARGN})
+    set_property(GLOBAL APPEND PROPERTY TETHER_ALL_TEST_TARGETS ${name})
+endfunction()
+
 # Tests are split into one executable per library/module (see create_module_test
 # below). The core per-module executables (those that made up the former
 # monolithic "tether_tests" binary) are always built. This option additionally
@@ -56,7 +67,7 @@ function(create_module_test MODULE_NAME SOURCES LIBS DEFINITIONS)
     list(FILTER SOURCES EXCLUDE REGEX ".*main\\.cpp$")
     list(FILTER SOURCES EXCLUDE REGEX ".*mocks_private/.*")
 
-    add_executable(tether_${MODULE_NAME}_tests
+    tether_add_test_executable(tether_${MODULE_NAME}_tests
         main.cpp
         ${SOURCES}
     )
@@ -97,7 +108,7 @@ function(create_module_test_timeout MODULE_NAME SOURCES LIBS DEFINITIONS TEST_TI
     list(FILTER SOURCES EXCLUDE REGEX ".*main\\.cpp$")
     list(FILTER SOURCES EXCLUDE REGEX ".*mocks_private/.*")
 
-    add_executable(tether_${MODULE_NAME}_tests
+    tether_add_test_executable(tether_${MODULE_NAME}_tests
         main.cpp
         ${SOURCES}
     )
@@ -527,7 +538,7 @@ set(MOTION_GEOMETRY_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/geometry/CertifiedCurvatureSamplerTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/geometry/PlanningSegmentConverterTests.cpp"
 )
-add_executable(tether_motion_geometry_tests
+tether_add_test_executable(tether_motion_geometry_tests
     main.cpp
     ${MOTION_GEOMETRY_SOURCES}
 )
@@ -577,7 +588,7 @@ set(MOTION_BLEND_NEW_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/blend/ToleranceFuzzTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/blend/SegmentConverterTests.cpp"
 )
-add_executable(tether_motion_blend_new_tests
+tether_add_test_executable(tether_motion_blend_new_tests
     main.cpp
     ${MOTION_BLEND_NEW_SOURCES}
 )
@@ -620,7 +631,7 @@ set(MOTION_RENURBS_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/profile_renurbs/test_ReNURBSEdgeCases.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/profile_renurbs/test_GenericReNURBS.cpp"
 )
-add_executable(tether_motion_planner_renurbs_tests
+tether_add_test_executable(tether_motion_planner_renurbs_tests
     main.cpp
     ${MOTION_RENURBS_SOURCES}
 )
@@ -825,7 +836,7 @@ if(MOCKS_TEST_SOURCES)
     )
 endif()
 
-add_executable(tether_fsoe_integration_tests
+tether_add_test_executable(tether_fsoe_integration_tests
     fsoe/test_synapticon_safe_motion.cpp
 )
 
@@ -856,7 +867,7 @@ target_compile_definitions(tether_fsoe_integration_tests PRIVATE
 
 gtest_discover_tests(tether_fsoe_integration_tests PROPERTIES TIMEOUT 30)
 
-add_executable(tether_header_tests
+tether_add_test_executable(tether_header_tests
     sii/zero_coverage_header_tests.cpp
     sii/zero_coverage_headers_more.cpp
 )
@@ -880,7 +891,7 @@ gtest_discover_tests(tether_header_tests PROPERTIES TIMEOUT 30)
 # Helper to create ethercat test executables with common settings
 function(create_ethercat_test NAME)
     cmake_parse_arguments(ET "" "" "SOURCES;LIBS;DEFS" ${ARGN})
-    add_executable(tether_ethercat_${NAME}_tests
+    tether_add_test_executable(tether_ethercat_${NAME}_tests
         ${ET_SOURCES}
     )
     target_include_directories(tether_ethercat_${NAME}_tests PRIVATE
@@ -1024,7 +1035,7 @@ create_ethercat_test(coverage
 # EtherCAT integration tests (master ↔ slave communication via paired
 # loopback interfaces).  Separated from unit tests because they exercise
 # full end-to-end communication paths and may require more time/resources.
-add_executable(tether_ethercat_integration_tests
+tether_add_test_executable(tether_ethercat_integration_tests
     ethercat/test_integration_paired.cpp
     ${ETHERCAT_COMMON_STUBS}
     ../src/ethercat/SlaveEmulator.cpp
@@ -1053,7 +1064,7 @@ target_compile_definitions(tether_ethercat_integration_tests PRIVATE
 gtest_discover_tests(tether_ethercat_integration_tests PROPERTIES TIMEOUT 30)
 
 # EtherCAT master + slave state-machine tests (needs full Master/Slave linkage)
-add_executable(tether_ethercat_master_tests
+tether_add_test_executable(tether_ethercat_master_tests
     ethercat/test_ethercat_slave.cpp
     ethercat/test_slave_names.cpp
 )
@@ -1080,7 +1091,7 @@ gtest_discover_tests(tether_ethercat_master_tests PROPERTIES TIMEOUT 30)
 
 # EtherCAT slave supervisor tests (needs full Master linkage for ALResetController,
 # SlaveStatusPoller, and Slave access)
-add_executable(tether_ethercat_supervisor_tests
+tether_add_test_executable(tether_ethercat_supervisor_tests
     ethercat/test_slave_supervisor.cpp
 )
 
@@ -1105,7 +1116,7 @@ target_compile_definitions(tether_ethercat_supervisor_tests PRIVATE
 
 gtest_discover_tests(tether_ethercat_supervisor_tests PROPERTIES TIMEOUT 30)
 
-add_executable(tether_model_identification_tests
+tether_add_test_executable(tether_model_identification_tests
     identification/test_ModelIdentification.cpp
 )
 
@@ -1129,7 +1140,7 @@ target_compile_definitions(tether_model_identification_tests PRIVATE
 
 gtest_discover_tests(tether_model_identification_tests PROPERTIES TIMEOUT 30)
 
-add_executable(tether_simulation_identification_tests
+tether_add_test_executable(tether_simulation_identification_tests
     identification/test_SimulationIdentificationIntegration.cpp
 )
 
@@ -1202,3 +1213,7 @@ if(TETHER_ENABLE_COVERAGE)
         message(WARNING "gcovr not found; install 'gcovr' to enable 'coverage' target")
     endif()
 endif()
+
+# Build all configured test executables with `make tests` (or `ninja tests` / `cmake --build . --target tests`)
+get_property(TETHER_ALL_TEST_TARGETS GLOBAL PROPERTY TETHER_ALL_TEST_TARGETS)
+add_custom_target(tests DEPENDS ${TETHER_ALL_TEST_TARGETS})

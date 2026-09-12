@@ -64,6 +64,41 @@ std::string resolveInterface(const std::string& requested, const char* tag) {
     std::exit(1);
 }
 
+void addListInterfacesArg(argparse::ArgumentParser& program) {
+    program.add_argument("--list-interfaces")
+        .default_value(false)
+        .implicit_value(true)
+        .help("List available physical Ethernet interfaces and exit");
+}
+
+void listPhysicalInterfaces(const char* tag) {
+    auto ifaces = EtherCAT::HAL::getPhysicalEthernetInterfaces();
+    if (ifaces.empty()) {
+        TETHER_LOGW(tag, "No physical Ethernet interfaces found");
+        return;
+    }
+
+    TETHER_LOGI(tag, "Available physical Ethernet interfaces:");
+    for (const auto& iface : ifaces) {
+        std::string mac_str = "n/a";
+        if (iface.mac) {
+            const auto& b = iface.mac->bytes;
+            mac_str = std::format("{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+                                  b[0], b[1], b[2], b[3], b[4], b[5]);
+        }
+
+        const char* state = iface.isUp
+            ? (iface.isRunning ? "up/running" : "up")
+            : (iface.isRunning ? "running" : "down");
+
+        TETHER_LOGI(tag, "  {:<15} type={:<9} state={:<12} mac={}",
+                    iface.name.c_str(),
+                    EtherCAT::HAL::interfaceTypeToString(iface.type),
+                    state,
+                    mac_str.c_str());
+    }
+}
+
 void logPermissionDeniedError(const char* tag) {
     TETHER_LOGE(tag, "Permission denied — run via `runec <executable>` or "
                      "`sudo <executable>` (requires CAP_NET_RAW)");

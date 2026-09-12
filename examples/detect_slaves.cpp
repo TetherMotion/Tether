@@ -33,6 +33,7 @@ static const char* TAG = "detect_slaves";
 int main(int argc, char** argv) {
     argparse::ArgumentParser program("detect_slaves");
     Tether::Examples::addInterfaceArg(program);
+    Tether::Examples::addListInterfacesArg(program);
     Tether::Examples::addDebugArg(program);
     Tether::Examples::addVlanArgs(program);
     Tether::Examples::addMailboxSizeArg(program);
@@ -43,6 +44,11 @@ int main(int argc, char** argv) {
     catch (const std::runtime_error& err) {
         std::cerr << err.what() << "\n" << program;
         return 1;
+    }
+
+    if (program.get<bool>("--list-interfaces")) {
+        Tether::Examples::listPhysicalInterfaces(TAG);
+        return 0;
     }
 
     std::string iface = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
