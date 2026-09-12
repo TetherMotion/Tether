@@ -37,6 +37,16 @@ void addInterfaceArg(argparse::ArgumentParser& program,
 /// @return           Interface name, or empty string on failure.
 std::string resolveInterface(const std::string& requested, const char* tag);
 
+/// Add `--list-interfaces` to an ArgumentParser.
+void addListInterfacesArg(argparse::ArgumentParser& program);
+
+/// Enumerate and log all network interfaces to help the user pick `-i`.
+///
+/// Prints one line per physical Ethernet interface (name, type, state,
+/// MAC).  Designed to be called when an example is invoked with
+/// `--list-interfaces`.
+void listPhysicalInterfaces(const char* tag);
+
 /// Log a consistent "permission denied" error message advising the user to
 /// run via `runec` or `sudo`.  Call this when the Ethernet HAL returns
 /// Error::PermissionDenied.
