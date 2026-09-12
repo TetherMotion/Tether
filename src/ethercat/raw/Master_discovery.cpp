@@ -116,6 +116,7 @@ bool Master::discoverSlaves()
             resp.wkc = result.wkc;
 
             discovered_slave_count_.store(resp.wkc, std::memory_order_release);
+            TETHER_LOGI(TAG, "discovered {} slave(s)", resp.wkc);
             initSlaves(resp.wkc);
             if (faults_) {
                 faults_->init(resp.wkc);
