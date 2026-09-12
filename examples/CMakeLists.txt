@@ -169,9 +169,9 @@ add_tether_example(dynadrive_sine_motion_native
     LIBRARIES tether_ethercat_master tether_cia_profiles tether_drives tether_ethercat_common tether_hal tether_common tether_examples_common)
 endif()
 
-# ---EtherCAT slave detection example ---
+# ---EtherCAT slave listing example ---
 # Scans the bus, reports discovered slaves with SII summary
-add_tether_example(detect_slaves
+add_tether_example(list_slaves
     LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common tether_examples_common)
 
 # --- EtherCAT AL reset example ---

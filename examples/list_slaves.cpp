@@ -1,13 +1,13 @@
 /**
- * @file detect_slaves.cpp
+ * @file list_slaves.cpp
  * @brief Minimal EtherCAT slave detection example
  *
  * Scans the bus, reports the number of slaves found,
  * and prints a brief identity / SII summary for each.
  *
  * Usage (Linux, requires root or CAP_NET_RAW):
- *   ./detect_slaves              # uses eth0
- *   ./detect_slaves -i enp3s0    # or: ./detect_slaves --interface enp3s0
+ *   ./list_slaves              # uses eth0
+ *   ./list_slaves -i enp3s0    # or: ./list_slaves --interface enp3s0
  */
 
 #include <memory>
@@ -28,10 +28,10 @@
 #include "common/ExampleHelpers.hpp"
 #include "common/EtherCATHostSetup.hpp"
 
-static const char* TAG = "detect_slaves";
+static const char* TAG = "list_slaves";
 
 int main(int argc, char** argv) {
-    argparse::ArgumentParser program("detect_slaves");
+    argparse::ArgumentParser program("list_slaves");
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addListInterfacesArg(program);
     Tether::Examples::addDebugArg(program);
@@ -85,7 +85,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    TETHER_LOGI(TAG, "detect_slaves (host) — interface: {}", iface.c_str());
+    TETHER_LOGI(TAG, "list_slaves (host) — interface: {}", iface.c_str());
     if (!debug_flags.empty()) {
         TETHER_LOGI(TAG, "Debug flags: {}", debug_str.c_str());
     }
