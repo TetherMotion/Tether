@@ -1,16 +1,16 @@
 /**
- * @file ChainableInput.hpp
+ * @file IInputTerminal.hpp
  * @brief Contract for bit-oriented digital-input terminals that can be
  *        chained into one shared logical address space
  *
- * Mirror of ChainableOutput.hpp for the input direction.  Any device
- * implementing IChainableInput can join a MultiInput chain: the chain
+ * Mirror of IOutputTerminal.hpp for the input direction.  Any device
+ * implementing IInputTerminal can join a MultiInputTerminal chain: the chain
  * assigns every device a contiguous logical address range inside a single
  * PDO group's logical address space, so one LRW datagram per cycle
  * delivers the inputs of the whole chain.
  *
  * Bring-up uses the same two-phase split as the output side (see
- * ChainableOutput.hpp): prepareForLogicalExchange() per device, then the
+ * IOutputTerminal.hpp): prepareForLogicalExchange() per device, then the
  * chain builds the shared logical map, then mapLogicalAndEnterSafeOp()
  * programs each input FMMU, then requestOp().
  *
@@ -26,26 +26,26 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "tether/Beckhoff/ChainableOutput.hpp"   // Error, Result, DeviceIdentity, StartOptions
+#include "tether/Beckhoff/TerminalTypes.hpp"   // Error, Result, DeviceIdentity, StartOptions
 
 namespace EtherCAT {
 namespace Beckhoff {
 
 // ============================================================================
-// IChainableInput — the contract a device must implement to join a chain
+// IInputTerminal — the contract a device must implement to join a chain
 // ============================================================================
 
 /**
  * @brief A single input field — one contiguous block of bits read from
  *        one device within a shared logical address space.
  *
- * Implement this interface for devices that are not PackedInput-shaped
+ * Implement this interface for devices that are not InputTerminal-shaped
  * (e.g. devices with a mailbox or multiple process-data SMs) and register
- * them with MultiInput via a DeviceMatcher factory or attach().
+ * them with MultiInputTerminal via a DeviceMatcher factory or attach().
  */
-class IChainableInput {
+class IInputTerminal {
 public:
-    virtual ~IChainableInput() = default;
+    virtual ~IInputTerminal() = default;
 
     // -- Topology / identity -------------------------------------------------
 
@@ -68,7 +68,7 @@ public:
     /// Current input bits (bit N = input N).
     virtual uint64_t bits() const = 0;
 
-    // -- Chained bring-up (called by MultiInput) -----------------------------
+    // -- Chained bring-up (called by MultiInputTerminal) -----------------------------
 
     /**
      * @brief Everything up to (but excluding) the SAFE-OP transition:

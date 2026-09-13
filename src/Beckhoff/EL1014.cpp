@@ -1,7 +1,7 @@
 /**
  * @file EL1014.cpp
- * @brief EL1014 factories.  All device logic lives in PackedInput.cpp —
- *        the EL1014 is just a PackedInput with a bound identity.
+ * @brief EL1014 factories.  All device logic lives in InputTerminal.cpp —
+ *        the EL1014 is just a InputTerminal with a bound identity.
  */
 
 #include "tether/Beckhoff/EL1014.hpp"

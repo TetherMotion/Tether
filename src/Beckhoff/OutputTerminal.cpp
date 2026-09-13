@@ -1,8 +1,8 @@
 /**
- * @file PackedOutput.cpp
+ * @file OutputTerminal.cpp
  * @brief Implementation of the generic packed-bit output terminal driver.
  *
- * See PackedOutput.hpp for the API documentation.  The bring-up sequence
+ * See OutputTerminal.hpp for the API documentation.  The bring-up sequence
  * works around three framework assumptions which do not hold for this
  * terminal family (single "Outputs" SM — usually channel 0 — no mailbox,
  * no TxPDO):
@@ -28,7 +28,7 @@
  * for the EL2407, ...).
  */
 
-#include "tether/Beckhoff/PackedOutput.hpp"
+#include "tether/Beckhoff/OutputTerminal.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -50,7 +50,7 @@
 namespace EtherCAT {
 namespace Beckhoff {
 
-static const char* TAG = "PackedOutput";
+static const char* TAG = "OutputTerminal";
 
 // ESI fallbacks (Beckhoff EL2xxx.xml), used when SII data is unavailable.
 constexpr uint8_t  kFallbackSmCtrl = 0x44;  // buffered, ECAT-write, no watchdog
@@ -82,50 +82,50 @@ const char* errorToString(Error e) {
 // Construction / factories
 // ---------------------------------------------------------------------------
 
-PackedOutput::PackedOutput(Master& master, uint16_t slave_index,
+OutputTerminal::OutputTerminal(Master& master, uint16_t slave_index,
                            const DeviceIdentity& identity)
     : master_(&master), slave_index_(slave_index), identity_(identity),
       state_(std::make_unique<std::atomic<uint64_t>>(0)) {
     num_outputs_ = identity.num_bits;
 }
 
-PackedOutput::PackedOutput(Master& master, const DiscoveredSlave& slave,
+OutputTerminal::OutputTerminal(Master& master, const DiscoveredSlave& slave,
                            const DeviceIdentity& identity)
-    : PackedOutput(master, slave.index, identity) {
+    : OutputTerminal(master, slave.index, identity) {
     info_ = slave;
 }
 
-PackedOutput::~PackedOutput() {
+OutputTerminal::~OutputTerminal() {
     stop();
 }
 
-Result<PackedOutput> PackedOutput::findFirst(Master& master,
+Result<OutputTerminal> OutputTerminal::findFirst(Master& master,
                                              const DeviceIdentity& identity) {
     auto scan = master.discovery().discover(
         {DiscoveryOption::VendorId, DiscoveryOption::ProductCode});
     return findFirst(master, identity, scan);
 }
 
-Result<PackedOutput> PackedOutput::findFirst(
+Result<OutputTerminal> OutputTerminal::findFirst(
     Master& master, const DeviceIdentity& identity,
     std::span<const DiscoveredSlave> scan) {
     for (const auto& s : scan) {
-        if (matches(s, identity)) return PackedOutput(master, s, identity);
+        if (matches(s, identity)) return OutputTerminal(master, s, identity);
     }
     return std::unexpected(Error::NoDeviceFound);
 }
 
-const char* PackedOutput::deviceName() const {
+const char* OutputTerminal::deviceName() const {
     if (info_ && info_->device_name) return info_->device_name->c_str();
     if (identity_.name) return identity_.name;
-    return "PackedOutput";
+    return "OutputTerminal";
 }
 
 // ---------------------------------------------------------------------------
 // Bring-up
 // ---------------------------------------------------------------------------
 
-void PackedOutput::resolveOutputSm() {
+void OutputTerminal::resolveOutputSm() {
 #if TETHER_ENABLE_SII
     // The SII SM category is positional: entry index == SM channel.
     // This terminal family has exactly one SM (channel 0, process outputs
@@ -167,7 +167,7 @@ void PackedOutput::resolveOutputSm() {
     if (num_outputs_ > kMaxBits) num_outputs_ = kMaxBits;
 }
 
-Result<> PackedOutput::prepare(PDO::PDOAddressMode mode) {
+Result<> OutputTerminal::prepare(PDO::PDOAddressMode mode) {
     if (prepared_) return {};
 
     if (slave_index_ >= PDO::kMaxPDOSlaves) {
@@ -276,7 +276,7 @@ Result<> PackedOutput::prepare(PDO::PDOAddressMode mode) {
     return {};
 }
 
-Result<> PackedOutput::enterSafeOp() {
+Result<> OutputTerminal::enterSafeOp() {
     auto& sl = master_->slave(slave_index_);
     sl.assumePDOAlreadyConfigured();
     if (sl.transitionToSafeOp() != SlaveError::Ok) {
@@ -286,18 +286,18 @@ Result<> PackedOutput::enterSafeOp() {
     return {};
 }
 
-Result<> PackedOutput::configure() {
+Result<> OutputTerminal::configure() {
     // Standalone: position addressing (APWR straight into the SM buffer)
     // needs no FMMU and no logical map.
     if (auto r = prepare(PDO::PDOAddressMode::Position); !r) return r;
     return enterSafeOp();
 }
 
-Result<> PackedOutput::prepareForLogicalExchange() {
+Result<> OutputTerminal::prepareForLogicalExchange() {
     return prepare(PDO::PDOAddressMode::Logical);
 }
 
-Result<> PackedOutput::mapLogicalAndEnterSafeOp() {
+Result<> OutputTerminal::mapLogicalAndEnterSafeOp() {
     if (configured_) return {};
     if (!prepared_) {
         if (auto r = prepare(PDO::PDOAddressMode::Logical); !r) return r;
@@ -337,7 +337,7 @@ Result<> PackedOutput::mapLogicalAndEnterSafeOp() {
     return enterSafeOp();
 }
 
-Result<> PackedOutput::requestOp(int timeout_ms) {
+Result<> OutputTerminal::requestOp(int timeout_ms) {
     if (!master_->requestSlaveApplicationLayerState(
             SlaveAddress(slave_index_),
             static_cast<uint8_t>(SlaveState::OP) | 0x10)) {
@@ -361,7 +361,7 @@ Result<> PackedOutput::requestOp(int timeout_ms) {
     return {};
 }
 
-Result<> PackedOutput::start(const StartOptions& opts) {
+Result<> OutputTerminal::start(const StartOptions& opts) {
     if (auto r = configure(); !r) return r;
 
     if (opts.manage_realtime_loop && !master_->isMotionControlLoopRunning()) {
@@ -387,7 +387,7 @@ Result<> PackedOutput::start(const StartOptions& opts) {
     return {};
 }
 
-void PackedOutput::stop() {
+void OutputTerminal::stop() {
     allOff();
     if (loop_started_) {
         // Let a few cycles push the zeroed field to the terminal.
@@ -401,19 +401,19 @@ void PackedOutput::stop() {
 // Outputs
 // ---------------------------------------------------------------------------
 
-void PackedOutput::setBit(size_t bit, bool on) {
+void OutputTerminal::setBit(size_t bit, bool on) {
     if (bit >= num_outputs_) return;
     const uint64_t mask = uint64_t{1} << bit;
     if (on) state_->fetch_or(mask, std::memory_order_relaxed);
     else    state_->fetch_and(~mask, std::memory_order_relaxed);
 }
 
-bool PackedOutput::bit(size_t bit) const {
+bool OutputTerminal::bit(size_t bit) const {
     if (bit >= num_outputs_) return false;
     return (bits() >> bit) & 1u;
 }
 
-void PackedOutput::setBits(uint64_t value) {
+void OutputTerminal::setBits(uint64_t value) {
     state_->store(value & mask(), std::memory_order_relaxed);
 }
 
@@ -421,7 +421,7 @@ void PackedOutput::setBits(uint64_t value) {
 // Status
 // ---------------------------------------------------------------------------
 
-SlaveState PackedOutput::alState() {
+SlaveState OutputTerminal::alState() {
     uint8_t state = 0;
     if (!master_->readSlaveApplicationLayerState(SlaveAddress(slave_index_),
                                                 state)) {
@@ -430,7 +430,7 @@ SlaveState PackedOutput::alState() {
     return static_cast<SlaveState>(state & 0x0F);
 }
 
-bool PackedOutput::waitAlState(SlaveState target, int timeout_ms) {
+bool OutputTerminal::waitAlState(SlaveState target, int timeout_ms) {
     for (int t = 0; t < timeout_ms; t += 10) {
         if (master_->isCancelRequested()) return false;
         if (alState() == target) return true;

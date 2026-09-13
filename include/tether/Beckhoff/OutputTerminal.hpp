@@ -1,8 +1,8 @@
 /**
- * @file PackedOutput.hpp
+ * @file OutputTerminal.hpp
  * @brief Generic driver for Beckhoff-style packed-bit output terminals
  *
- * PackedOutput drives any terminal whose process outputs are N one-bit
+ * OutputTerminal drives any terminal whose process outputs are N one-bit
  * channels packed into a single sync manager — the whole "SM0 = Outputs,
  * one output FMMU, no mailbox" family of the Beckhoff EL2xxx ESI (see the
  * Devices registry below).  The channel count comes from the
@@ -11,12 +11,12 @@
  *
  * @code
  *   // Standalone — position addressing, one frame per terminal:
- *   auto el = PackedOutput::findFirst(master, Devices::EL2008);
+ *   auto el = OutputTerminal::findFirst(master, Devices::EL2008);
  *   el->start();
  *   el->setBit(0, true);
  *
  *   // Chained — one shared logical address space, one LRW frame per cycle:
- *   MultiOutput<> outs(master);            // see MultiOutput.hpp
+ *   MultiOutputTerminal<> outs(master);            // see MultiOutputTerminal.hpp
  *   outs.detect();                         // every known output terminal
  *   outs.start();
  * @endcode
@@ -36,7 +36,7 @@
 #include <optional>
 #include <span>
 
-#include "tether/Beckhoff/ChainableOutput.hpp"
+#include "tether/Beckhoff/IOutputTerminal.hpp"
 #include "tether/ethercat/PDOManager.hpp"             // PDOAddressMode, kMaxPDOSlaves
 #include "tether/ethercat/SlaveDiscoveryManager.hpp"  // DiscoveredSlave
 #include "tether/ethercat/Types.hpp"                  // SlaveState
@@ -51,9 +51,28 @@ namespace Beckhoff {
 // ============================================================================
 // Known packed-output terminals (from the Beckhoff EL2xxx ESI)
 // ============================================================================
-// Every entry below has exactly one "Outputs" sync manager, one "Outputs"
-// FMMU, N x 1-bit RxPDOs and no mailbox — i.e. the PackedOutput shape.
-// Product codes verified against Beckhoff EL2xxx.xml.
+// Every entry below was verified against Beckhoff EL2xxx.xml to share the
+// EL2004's exact shape: exactly one "Outputs" sync manager, one "Outputs"
+// FMMU, N x 1-bit RxPDOs, no mailbox, no inputs.
+//
+//   verified on hardware        : EL2004 (5 modules, examples/beckhoff_output_toggle)
+//   supported, not verified yet : all other entries
+//
+// Caveats:
+//   - EL2602 / EL2622: the -0010 variants (same product code) add an
+//     "Inputs" SM carrying diagnostic data — outputs still work, the
+//     input SM is simply unused.
+//   - EL2262: only the base revision has this exact shape; newer
+//     revisions add a second "Outputs" SM and would only be driven on the
+//     first SM.
+//   - EL2202 is DC-capable — works without DC configuration (free-run).
+//
+// Same family, different shape (not supported by this driver):
+//   EL2014/EL2044/EL2212/EL2258/EL2819/EL2869 (mailbox + inputs),
+//   EL2032/EL2034/EL2838/EL2878-0005 (extra diagnostic-input SM),
+//   EL2252 (adds status TxPDOs), EL2409/EL2489/EL2809/EL2872/EL2889
+//   (two output SMs), EL2602-0010/EL2622-0010 are covered by the caveat
+//   above.
 
 namespace Devices {
 
@@ -86,7 +105,7 @@ inline constexpr DeviceIdentity EL2808{0x00000002, 0x0AF83052, 8,  "EL2808"};
 inline constexpr DeviceIdentity EL2828{0x00000002, 0x0B0C3052, 8,  "EL2828"};
 
 /// Every known packed-output terminal — the default detection set used by
-/// MultiOutput::detect().
+/// MultiOutputTerminal::detect().
 inline constexpr std::array kOutputTerminals{
     EL2002, EL2004, EL2008, EL2022, EL2024, EL2042, EL2084, EL2088,
     EL2124, EL2202, EL2262, EL2407, EL2602, EL2612, EL2622, EL2624,
@@ -97,10 +116,10 @@ inline constexpr std::array kOutputTerminals{
 } // namespace Devices
 
 // ============================================================================
-// PackedOutput — generic single-field output terminal driver
+// OutputTerminal — generic single-field output terminal driver
 // ============================================================================
 
-class PackedOutput : public IChainableOutput {
+class OutputTerminal : public IOutputTerminal {
 public:
     /// Maximum output bits supported per device (one 64-bit field).
     static constexpr size_t kMaxBits = 64;
@@ -116,7 +135,7 @@ public:
      * The slave's identity and SII data are read lazily in configure()
      * (via discovery().discoverOne()), so construction never performs bus I/O.
      */
-    PackedOutput(Master& master, uint16_t slave_index,
+    OutputTerminal(Master& master, uint16_t slave_index,
                  const DeviceIdentity& identity);
 
     /**
@@ -127,15 +146,15 @@ public:
      * in configure() — a vendor/product mismatch fails with
      * Error::WrongDevice.
      */
-    PackedOutput(Master& master, const DiscoveredSlave& slave,
+    OutputTerminal(Master& master, const DiscoveredSlave& slave,
                  const DeviceIdentity& identity);
 
-    ~PackedOutput() override;
+    ~OutputTerminal() override;
 
-    PackedOutput(PackedOutput&&) noexcept            = default;
-    PackedOutput& operator=(PackedOutput&&) noexcept = default;
-    PackedOutput(const PackedOutput&)                = delete;
-    PackedOutput& operator=(const PackedOutput&)     = delete;
+    OutputTerminal(OutputTerminal&&) noexcept            = default;
+    OutputTerminal& operator=(OutputTerminal&&) noexcept = default;
+    OutputTerminal(const OutputTerminal&)                = delete;
+    OutputTerminal& operator=(const OutputTerminal&)     = delete;
 
     // -- Factories ---------------------------------------------------------------
 
@@ -149,11 +168,11 @@ public:
      *        matching `identity`.  Runs a shallow vendor/product discovery.
      * @return The driver, or Error::NoDeviceFound.
      */
-    static Result<PackedOutput> findFirst(Master& master,
+    static Result<OutputTerminal> findFirst(Master& master,
                                           const DeviceIdentity& identity);
 
     /// Like findFirst(master, identity) but reuses an existing scan.
-    static Result<PackedOutput> findFirst(
+    static Result<OutputTerminal> findFirst(
         Master& master, const DeviceIdentity& identity,
         std::span<const DiscoveredSlave> scan);
 
@@ -186,7 +205,7 @@ public:
      */
     void stop();
 
-    // -- IChainableOutput -------------------------------------------------------
+    // -- IOutputTerminal -------------------------------------------------------
 
     uint16_t slaveIndex() const override { return slave_index_; }
     size_t   bitCount() const override   { return num_outputs_; }
