@@ -553,7 +553,7 @@ protected:
             if (master_) master_->handleRxFrame(data, len);
         });
         master_->start(pair_->ifaceA(), kDummyMac);
-        master_->discoverSlaves();
+        (void)master_->discovery().discover(DiscoveryOptions());
         return *master_;
     }
 

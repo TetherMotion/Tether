@@ -634,7 +634,7 @@ int main(int argc, char** argv) {
     }
 
     // ---- Discover slaves ----
-    if (!master.discoverSlaves()) {
+    if (master.discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
         TETHER_LOGE(TAG, "No slaves found — check wiring and power");
         master.stop();
         master.requestCancel();
@@ -645,7 +645,6 @@ int main(int argc, char** argv) {
 
     uint16_t slaves = master.getDiscoveredSlaveCount();
     TETHER_LOGI(TAG, "Discovered {} slave(s)", slaves);
-    master.logDiscoveredSlavesSummary(TAG);
 
     if (static_cast<uint16_t>(slave_idx) >= slaves) {
         TETHER_LOGE(TAG, "Slave index {} out of range (max {})", slave_idx, slaves - 1);

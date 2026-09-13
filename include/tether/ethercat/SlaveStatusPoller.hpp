@@ -155,7 +155,7 @@ public:
 
     /**
      * @brief Initialize for the given number of slaves.
-     * Called automatically by Master during discoverSlaves().
+     * Called automatically by Master during discovery.
      */
     bool init(uint16_t slave_count);
 

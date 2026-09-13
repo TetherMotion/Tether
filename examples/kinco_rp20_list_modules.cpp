@@ -230,7 +230,7 @@ int main(int argc, char** argv) {
     }
 
     // ---- Discover slaves ----
-    if (!master.discoverSlaves()) {
+    if (master.discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
         TETHER_LOGE(TAG, "No slaves discovered");
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
@@ -239,7 +239,6 @@ int main(int argc, char** argv) {
 
     uint16_t slave_count = master.getDiscoveredSlaveCount();
     TETHER_LOGI(TAG, "Discovered {} slave(s)", slave_count);
-    master.logDiscoveredSlavesSummary(TAG);
 
     // ---- Per-slave: configure mailbox, transition to PRE-OP ----
     for (uint16_t s = 0; s < slave_count; ++s) {

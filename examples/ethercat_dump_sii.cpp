@@ -115,7 +115,7 @@ int main(int argc, char** argv) {
         return 5;
     }
 
-    if (!master.discoverSlaves()) {
+    if (master.discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
         TETHER_LOGW(TAG, "No slaves discovered");
     }
 

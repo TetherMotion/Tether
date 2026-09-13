@@ -405,7 +405,7 @@ int main(int argc, char** argv) {
 
     // --- Configure mailbox with SOMANET ESI values ---
     {
-        if (!master.ethercatMaster().discoverSlaves()) {
+        if (master.ethercatMaster().discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
             TETHER_LOGW(TAG, "No slaves discovered during pre-config scan");
         }
         if (!master.waitForDriveCount(

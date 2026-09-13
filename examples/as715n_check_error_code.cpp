@@ -263,7 +263,7 @@ int main(int argc, char** argv) {
 
     master.start(*session.ni, session.srcMac);
 
-    if (!master.discoverSlaves()) {
+    if (master.discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
         TETHER_LOGW(TAG, "No slaves discovered");
     }
 

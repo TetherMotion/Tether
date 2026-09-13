@@ -105,7 +105,7 @@ protected:
 
         // Discover 2 slaves
         master_.initSlaves(2);
-        // Initialize the status poller (normally done by discoverSlaves())
+        // Initialize the status poller (normally done by discovery)
         master_.statusPoller().init(2);
         auto& sup = master_.slaveSupervisor();
         sup.init(2);

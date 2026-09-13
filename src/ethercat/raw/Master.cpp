@@ -7,6 +7,7 @@
 
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
+#include "tether/ethercat/SlaveDiscoveryManager.hpp"
 #include "tether/ethercat/DC.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/LogicalAddressManager.hpp"

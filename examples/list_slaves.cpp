@@ -17,6 +17,7 @@
 
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
+#include "tether/ethercat/SlaveDiscoveryManager.hpp"
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/SyncManager.hpp"
 #include "tether/ethercat/ESIFile.hpp"
@@ -110,36 +111,45 @@ int main(int argc, char** argv) {
         return 5;
     }
 
-    if (!master.discoverSlaves()) {
+    // Synchronous blocking discovery of all slave information.
+    auto slaves = master.discovery().discover();
+    if (slaves.empty()) {
         TETHER_LOGW(TAG, "No slaves discovered");
     }
 
-    uint16_t slaves = master.getDiscoveredSlaveCount();
-    TETHER_LOGI(TAG, "=== Discovered {} slave(s) ===", slaves);
-    master.logDiscoveredSlavesSummary(TAG);
+    uint16_t slave_count = master.getDiscoveredSlaveCount();
+    TETHER_LOGI(TAG, "=== Discovered {} slave(s) ===", slave_count);
+    for (const auto& s : slaves) {
+        const char* name = s.device_name ? s.device_name->c_str() : "Unknown";
+        TETHER_LOGI(TAG, "Slave {}: Vendor=0x{:08X} Product=0x{:08X} {}",
+                    s.index,
+                    s.vendor_id ? *s.vendor_id : 0,
+                    s.product_code ? *s.product_code : 0,
+                    name);
+    }
 
-    if (debug_flags.count("sii-derivation") && slaves > 0) {
+    if (debug_flags.count("sii-derivation") && slave_count > 0) {
         TETHER_LOGI(TAG, "\n=== SII Mailbox Derivation Debug ===");
-        for (uint16_t i = 0; i < slaves; i++) {
+        for (uint16_t i = 0; i < slave_count; i++) {
             EtherCAT::SII::debugSIIMailboxDerivation(master, i, TAG);
         }
     }
 
-    if (debug_flags.count("mailbox-configuration") && slaves > 0) {
+    if (debug_flags.count("mailbox-configuration") && slave_count > 0) {
         TETHER_LOGI(TAG, "\n=== Mailbox Hardware Configuration Debug ===");
-        for (uint16_t i = 0; i < slaves; i++) {
+        for (uint16_t i = 0; i < slave_count; i++) {
             EtherCAT::debugMailboxConfiguration(master, i, TAG);
         }
     }
 
-    if (debug_flags.count("pdo-sm") && slaves > 0) {
+    if (debug_flags.count("pdo-sm") && slave_count > 0) {
         TETHER_LOGI(TAG, "\n=== PDO Sync Manager Configuration Debug ===");
-        for (uint16_t i = 0; i < slaves; i++) {
+        for (uint16_t i = 0; i < slave_count; i++) {
             EtherCAT::debugPDOSyncManagerConfiguration(master, i, TAG);
         }
     }
 
-    if (slaves == 0) {
+    if (slave_count == 0) {
         TETHER_LOGW(TAG, "No slaves found — check wiring, power, and interface name");
     }
 
@@ -157,5 +167,5 @@ int main(int argc, char** argv) {
     master.stop();
     Tether::Examples::shutdownHostEthernet(session);
 
-    return (slaves > 0) ? 0 : 4;
+    return (slave_count > 0) ? 0 : 4;
 }

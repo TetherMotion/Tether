@@ -50,6 +50,7 @@
 #if TETHER_ENABLE_SII
 #include "tether/sii/SIIManager.hpp"
 #endif
+#include "tether/ethercat/SlaveDiscoveryManager.hpp"
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/TransactionRouter.hpp"
 #include "tether/ethercat/ESIFile.hpp"
@@ -57,6 +58,8 @@
 #include "tether/platform/EspCompat.hpp"
 
 namespace EtherCAT {
+
+class SlaveDiscoveryManager;  // forward declaration (see SlaveDiscoveryManager.hpp)
 
 struct PhysicalAddress {
     constexpr explicit PhysicalAddress(unsigned int slave_position_in)
@@ -294,14 +297,35 @@ public:
 
     // ---- Discovery ---------------------------------------------------------
 
-    uint16_t getDiscoveredSlaveCount() const;
-
     /**
-     * @brief Discover slaves on the bus and initialise internal state.
+     * @brief Access the slave discovery manager.
      *
-     * This is normally called by the application after start().
+     * The manager is owned by the master and created lazily on first access.
+     * It provides synchronous and asynchronous discovery of slaves on the
+     * bus, with selectable options for what information to read per slave.
+     *
+     * @code
+     *   // Discover everything (blocking)
+     *   auto slaves = master.discovery().discover();
+     *
+     *   // Discover only vendor and product IDs
+     *   auto slaves = master.discovery().discover({
+     *       DiscoveryOption::VendorId, DiscoveryOption::ProductCode});
+     *
+     *   // Discover one slave
+     *   auto slave = master.discovery().discoverOne(3);
+     *
+     *   // Async discovery
+     *   auto future = master.discovery().discoverAsync();
+     *   auto slaves = future.get();
+     * @endcode
+     *
+     * @return Reference to the master's SlaveDiscoveryManager
      */
-    bool discoverSlaves();
+    SlaveDiscoveryManager& discovery();
+
+    /** @brief Number of slaves discovered by the last BRD scan. */
+    uint16_t getDiscoveredSlaveCount() const;
 
     // ---- Slave access -------------------------------------------------------
 
@@ -948,8 +972,22 @@ public:
     WaitResult waitForPreRegistered(size_t slot, uint32_t timeout_ms);
 
 private:
+    friend class SlaveDiscoveryManager;
+
     // ---- Internal helpers --------------------------------------------------
     bool setPreopAndConfirm(uint16_t slave_index);
+
+    /**
+     * @brief Perform a BRD scan to discover slaves and initialise internal state.
+     *
+     * Called by SlaveDiscoveryManager::discover(). Not part of the public API.
+     * Performs the broadcast read scan, calls initSlaves(), and initialises
+     * fault detection, status poller, and supervisor.
+     *
+     * @return true if at least one slave was discovered
+     */
+    bool discoverSlaves();
+
     void ensureRxQueues();
     void flushRxQueue();
     void parseEtherCATFrame(const uint8_t* frame, size_t length);
@@ -1069,6 +1107,9 @@ private:
 
     // CoE SDO mailbox channel (refactored from free functions)
     std::unique_ptr<::EtherCAT::Raw::CoeSDOChannel> coe_sdo_channel_;
+
+    // Slave discovery manager (created lazily by discovery())
+    std::unique_ptr<SlaveDiscoveryManager> discovery_manager_;
 
     // Sub-managers (legacy wrappers)
     std::unique_ptr<IPDOTransport> pdo_transport_;

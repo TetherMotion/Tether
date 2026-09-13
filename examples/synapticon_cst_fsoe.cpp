@@ -1099,7 +1099,7 @@ int main(int argc, char** argv) {
     // SII EEPROM auto-configuration so the correct mailbox geometry is
     // always used for SOMANET drives.
     {
-        if (!master.ethercatMaster().discoverSlaves()) {
+        if (master.ethercatMaster().discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
             TETHER_LOGW(TAG, "No slaves discovered during pre-config scan");
         }
         if (!master.waitForDriveCount(
@@ -1367,7 +1367,7 @@ int main(int argc, char** argv) {
     int rc = 0;
 
     // Discover slaves and initialize distributed clocks (common to both paths)
-    if (!master.ethercatMaster().discoverSlaves()) {
+    if (master.ethercatMaster().discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
         TETHER_LOGW(TAG, "No slaves discovered");
     }
     const uint16_t minimum_drive_count = static_cast<uint16_t>(slave_idx + 1);
