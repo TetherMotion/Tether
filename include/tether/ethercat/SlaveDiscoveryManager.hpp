@@ -371,20 +371,6 @@ private:
     /// Read SII data for one slave into a DiscoveredSlave.
     void readSlaveSii(DiscoveredSlave& out, DiscoveryOptions opts);
 
-#if TETHER_ENABLE_SII
-    /// Concurrently prefetch SII EEPROM words from multiple slaves using
-    /// the batch register API.  Issues EEPROM read commands to all slaves
-    /// in parallel (one frame per protocol step), then caches the results
-    /// in each slave's per-slave SII cache.  This is the single-worker
-    /// concurrent-router pattern: one thread, multiple datagrams in flight.
-    ///
-    /// @param slave_indices  Slaves to read from.
-    /// @param start_word     First EEPROM word address to read.
-    /// @param word_count     Number of words to read (rounded up to even).
-    void concurrentPrefetchSii(const std::vector<uint16_t>& slave_indices,
-                                uint16_t start_word, uint16_t word_count);
-#endif
-
     Master* master_;
     uint16_t max_threads_ = 1;
 };

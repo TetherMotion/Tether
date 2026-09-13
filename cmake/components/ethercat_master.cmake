@@ -48,6 +48,7 @@ set(TETHER_ETHERCAT_MASTER_SOURCES
     ${TETHER_ROOT}/src/sii/SIIManager.cpp
     ${TETHER_ROOT}/src/sii/SIIReader.cpp
     ${TETHER_ROOT}/src/sii/SIILogger.cpp
+    ${TETHER_ROOT}/src/sii/EEPROMReactor.cpp
     ${TETHER_ROOT}/src/profiles/cia402/CiA402StateUtils.cpp
     ${RESET_SOURCES}
 )
