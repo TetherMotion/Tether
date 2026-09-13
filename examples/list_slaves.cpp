@@ -144,7 +144,7 @@ int main(int argc, char** argv) {
         }
 
         // Mailbox protocols
-        if (s.mailbox_protocols) {
+        if (s.mailbox_protocols && *s.mailbox_protocols != 0) {
             uint16_t prot = *s.mailbox_protocols;
             std::string prot_str;
             if (prot & EtherCAT::SII::MBX_PROTO_AOE) prot_str += "AoE ";
@@ -153,13 +153,14 @@ int main(int argc, char** argv) {
             if (prot & EtherCAT::SII::MBX_PROTO_FOE) prot_str += "FoE ";
             if (prot & EtherCAT::SII::MBX_PROTO_SOE) prot_str += "SoE ";
             if (prot & EtherCAT::SII::MBX_PROTO_VOE) prot_str += "VoE ";
-            if (prot_str.empty()) prot_str = "(none)";
+            if (!prot_str.empty() && prot_str.back() == ' ') prot_str.pop_back();
             TETHER_LOGI(TAG, "  Mailbox protocols: {}", prot_str.c_str());
         }
 
 #if TETHER_ENABLE_SII
-        // Mailbox configuration
-        if (s.mailbox_config) {
+        // Mailbox configuration (only if mailbox is actually supported)
+        if (s.mailbox_config &&
+            (s.mailbox_config->std_rx_size > 0 || s.mailbox_config->std_tx_size > 0)) {
             const auto& mb = *s.mailbox_config;
             TETHER_LOGI(TAG, "  Mailbox: std RX@0x{:04X} ({}B), TX@0x{:04X} ({}B)",
                         mb.std_rx_offset, mb.std_rx_size,
