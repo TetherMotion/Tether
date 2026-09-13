@@ -191,25 +191,45 @@ void SlaveDiscoveryManager::readSlaveSii(DiscoveredSlave& out,
     const uint16_t idx = out.index;
     auto& sii = master_->slave(idx).sii();
 
-    // Determine whether any "deep" option (requiring full SII parse) is set.
-    const bool needs_deep =
-        opts.has(DiscoveryOption::DeviceNames) ||
-        opts.has(DiscoveryOption::SyncManagers) ||
-        opts.has(DiscoveryOption::FMMUs) ||
-        opts.has(DiscoveryOption::TxPDOs) ||
-        opts.has(DiscoveryOption::RxPDOs) ||
-        opts.has(DiscoveryOption::DistributedClocks) ||
-        opts.has(DiscoveryOption::DeviceProfile) ||
-        opts.has(DiscoveryOption::GeneralInfo) ||
-        opts.has(DiscoveryOption::PhysicalPorts);
-
     // "All" implies everything including deep options.
     const bool all = opts.has(DiscoveryOption::All);
 
-    if (needs_deep || all) {
-        // Full SII parse — reads categories (words 64+).
+    // Map DiscoveryOptions to SII category mask. Only the categories
+    // actually requested will be read from the EEPROM.
+    uint32_t cat_mask = SII::CAT_MASK_NONE;
+    if (all || opts.has(DiscoveryOption::DeviceNames)) {
+        cat_mask |= SII::CAT_MASK_STRINGS | SII::CAT_MASK_GENERAL;
+    }
+    if (all || opts.has(DiscoveryOption::SyncManagers)) {
+        cat_mask |= SII::CAT_MASK_SYNC_MGR;
+    }
+    if (all || opts.has(DiscoveryOption::FMMUs)) {
+        cat_mask |= SII::CAT_MASK_FMMU;
+    }
+    if (all || opts.has(DiscoveryOption::TxPDOs)) {
+        cat_mask |= SII::CAT_MASK_TXPDO;
+    }
+    if (all || opts.has(DiscoveryOption::RxPDOs)) {
+        cat_mask |= SII::CAT_MASK_RXPDO;
+    }
+    if (all || opts.has(DiscoveryOption::DistributedClocks)) {
+        cat_mask |= SII::CAT_MASK_DC;
+    }
+    if (all || opts.has(DiscoveryOption::DeviceProfile) ||
+        opts.has(DiscoveryOption::GeneralInfo) ||
+        opts.has(DiscoveryOption::PhysicalPorts)) {
+        cat_mask |= SII::CAT_MASK_GENERAL;
+    }
+    if (all) {
+        cat_mask = SII::CAT_MASK_ALL;
+    }
+
+    const bool needs_deep = (cat_mask != SII::CAT_MASK_NONE);
+
+    if (needs_deep) {
+        // Selective SII parse — only reads the requested categories.
         SII::SIIData data;
-        if (sii.parseFull(data)) {
+        if (sii.parseCategories(data, cat_mask)) {
             // Identity
             if (all || opts.has(DiscoveryOption::VendorId))
                 out.vendor_id = data.identity.vendor_id;
@@ -306,7 +326,7 @@ void SlaveDiscoveryManager::readSlaveSii(DiscoveredSlave& out,
 
             return;
         }
-        // parseFull failed — fall through to shallow reads
+        // parseCategories failed — fall through to shallow reads
     }
 
     // ---- Shallow reads (first 64 words, already prefetched by initSlaves) ----

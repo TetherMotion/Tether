@@ -45,6 +45,7 @@ void SIIManager::init(Master& master, uint16_t slave_index)
     cache_.clear();
     cached_data_ = SIIData{};
     full_parse_done_ = false;
+    cached_cat_mask_ = 0;
 }
 
 // ============================================================================
@@ -154,22 +155,36 @@ bool SIIManager::readString(uint8_t string_index, char* buffer, size_t buffer_si
 
 bool SIIManager::parseFull(SIIData& data)
 {
+    return parseCategories(data, SII::CAT_MASK_ALL);
+}
+
+bool SIIManager::parseCategories(SIIData& data, uint32_t cat_mask)
+{
     if (!reader_ || !master_) return false;
 
     std::lock_guard<std::mutex> lock(bus_mutex_);
+    // Return cached result if the mask matches (or a full parse was done
+    // and the requested mask is a subset of CAT_MASK_ALL).
     if (full_parse_done_) {
+        data = cached_data_;
+        return true;
+    }
+    if (cached_cat_mask_ == cat_mask && cached_cat_mask_ != 0) {
         data = cached_data_;
         return true;
     }
 
     SIIParser parser(*reader_);
-    if (!parser.parse(slave_index_, data)) {
+    if (!parser.parseCategories(slave_index_, data, cat_mask)) {
         TETHER_LOGW(TAG, "SII parse failed for slave {}", slave_index_);
         return false;
     }
 
     cached_data_ = data;
-    full_parse_done_ = true;
+    cached_cat_mask_ = cat_mask;
+    if (cat_mask == SII::CAT_MASK_ALL) {
+        full_parse_done_ = true;
+    }
     return true;
 }
 
@@ -179,6 +194,7 @@ void SIIManager::invalidateCache()
     std::lock_guard<std::mutex> lock(bus_mutex_);
     cached_data_ = SIIData{};
     full_parse_done_ = false;
+    cached_cat_mask_ = 0;
 }
 
 } // namespace SII
