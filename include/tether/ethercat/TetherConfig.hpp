@@ -71,6 +71,16 @@
 #endif
 
 // ============================================================================
+// SII EEPROM SUPPORT (compile-time switch)
+// ============================================================================
+// Set via CMake option TETHER_ENABLE_SII (ON/OFF).
+// When disabled, the SII manager and all SII parsing is compiled out.
+
+#ifndef TETHER_ENABLE_SII
+#define TETHER_ENABLE_SII 1
+#endif
+
+// ============================================================================
 // UDP ENCAPSULATION (compile-time switch)
 // ============================================================================
 // Set to 1 to enable EtherCAT-over-UDP encapsulation (Ethernet/IPv4/UDP port

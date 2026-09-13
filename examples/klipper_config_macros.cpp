@@ -311,7 +311,7 @@ initial_BLUE: 1.0
 
     // ── 9. Delayed G-code ──────────────────────────────────────────────
     printSection("9. Delayed G-code");
-    execAndPrint(inst, "SET_DELAYED_GCODE ID=delayed_print_start GCODE=M117\ Starting...");
+    execAndPrint(inst, "SET_DELAYED_GCODE ID=delayed_print_start GCODE=M117 Starting...");
 
     // ── 10. Output pin ─────────────────────────────────────────────────
     printSection("10. Output Pin (beeper)");

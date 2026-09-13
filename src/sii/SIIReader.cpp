@@ -75,9 +75,9 @@ bool SIIReader::getConfiguredStationAddr(uint16_t slave_index, uint16_t& addr,
                                          bool force_assign) {
     // Check cache first (skip cache if force_assign is true)
     if (!force_assign) {
-        auto it = configured_addr_cache_.find(slave_index);
-        if (it != configured_addr_cache_.end()) {
-            addr = it->second;
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        if (configured_addr_set_) {
+            addr = configured_addr_;
             return true;
         }
     }
@@ -114,7 +114,11 @@ bool SIIReader::getConfiguredStationAddr(uint16_t slave_index, uint16_t& addr,
         addr = new_addr;
     }
 
-    configured_addr_cache_[slave_index] = addr;
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        configured_addr_ = addr;
+        configured_addr_set_ = true;
+    }
     return true;
 }
 
@@ -126,7 +130,12 @@ bool SIIReader::writeEepromReg(uint16_t slave_index, uint16_t reg_addr,
                      m_master.debugFlags().eepromFilt.allows(slave_index);
 
     // If we already know APWR fails for this slave, use FPWR directly.
-    if (use_fpwr_slaves_.count(slave_index)) {
+    bool fpwr_known = false;
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        fpwr_known = use_fpwr_;
+    }
+    if (fpwr_known) {
         uint16_t cfg_addr = 0;
         if (!getConfiguredStationAddr(slave_index, cfg_addr)) {
             return false;
@@ -164,7 +173,8 @@ bool SIIReader::writeEepromReg(uint16_t slave_index, uint16_t reg_addr,
     }
     if (m_master.writeRegister(EtherCAT::LogicalAddress(cfg_addr),
                                reg_addr, data, len, 200)) {
-        use_fpwr_slaves_.insert(slave_index);
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        use_fpwr_ = true;
         return true;
     }
 
@@ -177,7 +187,10 @@ bool SIIReader::writeEepromReg(uint16_t slave_index, uint16_t reg_addr,
     if (!getConfiguredStationAddr(slave_index, cfg_addr, /*force_assign=*/true)) {
         return false;
     }
-    use_fpwr_slaves_.insert(slave_index);
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        use_fpwr_ = true;
+    }
     return m_master.writeRegister(EtherCAT::LogicalAddress(cfg_addr),
                                   reg_addr, data, len, 200);
 }
@@ -188,8 +201,11 @@ bool SIIReader::writeEEPCTL(uint16_t slave_index, uint16_t eepctl_val) {
 }
 
 bool SIIReader::forceEepromToEcat(uint16_t slave_index) {
-    if (eeprom_forced_to_ecat_.count(slave_index)) {
-        return true;  // Already forced
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        if (eeprom_forced_) {
+            return true;  // Already forced
+        }
     }
 
     const bool dbg = m_master.debugFlags().eeprom &&
@@ -206,7 +222,8 @@ bool SIIReader::forceEepromToEcat(uint16_t slave_index) {
         }
         if ((eep_cfg & 0x01) == 0) {
             // ECAT already has control — no need to force
-            eeprom_forced_to_ecat_.insert(slave_index);
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            eeprom_forced_ = true;
             return true;
         }
     }
@@ -254,7 +271,8 @@ bool SIIReader::forceEepromToEcat(uint16_t slave_index) {
         }
     }
 
-    eeprom_forced_to_ecat_.insert(slave_index);
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    eeprom_forced_ = true;
     return true;
 }
 

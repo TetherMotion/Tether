@@ -23,7 +23,7 @@ class SlaveNamesTest : public ::testing::Test {
 protected:
     void SetUp() override {
         master_.setPreopRetryConfig(1, 3, 1, 1);
-        master_.siiReader().setTimeout(1);
+        master_.setSiiTimeoutMs(1);
         master_.initSlaves(3);
     }
 

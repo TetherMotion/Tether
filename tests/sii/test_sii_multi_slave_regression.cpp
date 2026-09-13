@@ -299,9 +299,12 @@ TEST_F(SiiMultiSlaveRegression, BothSlavesFallbackToFpwr) {
     slaves[0].apwr_eepctl_fails = true;
     slaves[1].apwr_eepctl_fails = true;
 
-    SIIReader reader(master);
+    // One SIIReader per slave — each reader's FPWR/addr state is per-slave.
+    SIIReader reader0(master);
+    SIIReader reader1(master);
 
     for (uint16_t si = 0; si <= 1; ++si) {
+        SIIReader& reader = (si == 0) ? reader0 : reader1;
         uint32_t out = 0;
         ASSERT_TRUE(reader.readDWord(si, 0x0000, out))
             << "Slave " << si << ": readDWord should succeed via FPWR fallback";
@@ -364,12 +367,13 @@ TEST_F(SiiMultiSlaveRegression, MixedModeSlave0ApwrSlave1Fpwr) {
     slaves[0].apwr_eepctl_fails = false;  // APWR works
     slaves[1].apwr_eepctl_fails = true;   // APWR fails, needs FPWR
 
-    SIIReader reader(master);
+    SIIReader reader0(master);
+    SIIReader reader1(master);
 
     // Slave 0: APWR path
     {
         uint32_t out = 0;
-        ASSERT_TRUE(reader.readDWord(0, 0x0000, out));
+        ASSERT_TRUE(reader0.readDWord(0, 0x0000, out));
         EXPECT_EQ(out, slaves[0].eepdat[0x00]);
         EXPECT_GE(slaves[0].apwr_eepctl_count, 1);
         EXPECT_EQ(slaves[0].fpwr_eepctl_count, 0);
@@ -378,7 +382,7 @@ TEST_F(SiiMultiSlaveRegression, MixedModeSlave0ApwrSlave1Fpwr) {
     // Slave 1: FPWR fallback
     {
         uint32_t out = 0;
-        ASSERT_TRUE(reader.readDWord(1, 0x0000, out));
+        ASSERT_TRUE(reader1.readDWord(1, 0x0000, out));
         EXPECT_EQ(out, slaves[1].eepdat[0x00]);
         EXPECT_GE(slaves[1].apwr_eepctl_count, 1);
         EXPECT_GE(slaves[1].fpwr_eepctl_count, 1);
@@ -390,12 +394,13 @@ TEST_F(SiiMultiSlaveRegression, MixedModeSlave0FpwrSlave1Apwr) {
     slaves[0].apwr_eepctl_fails = true;   // APWR fails, needs FPWR
     slaves[1].apwr_eepctl_fails = false;  // APWR works
 
-    SIIReader reader(master);
+    SIIReader reader0(master);
+    SIIReader reader1(master);
 
     // Slave 0: FPWR fallback
     {
         uint32_t out = 0;
-        ASSERT_TRUE(reader.readDWord(0, 0x0000, out));
+        ASSERT_TRUE(reader0.readDWord(0, 0x0000, out));
         EXPECT_EQ(out, slaves[0].eepdat[0x00]);
         EXPECT_GE(slaves[0].fpwr_eepctl_count, 1);
     }
@@ -403,7 +408,7 @@ TEST_F(SiiMultiSlaveRegression, MixedModeSlave0FpwrSlave1Apwr) {
     // Slave 1: APWR path
     {
         uint32_t out = 0;
-        ASSERT_TRUE(reader.readDWord(1, 0x0000, out));
+        ASSERT_TRUE(reader1.readDWord(1, 0x0000, out));
         EXPECT_EQ(out, slaves[1].eepdat[0x00]);
         EXPECT_EQ(slaves[1].fpwr_eepctl_count, 0);
         EXPECT_GE(slaves[1].apwr_eepctl_count, 1);
@@ -419,12 +424,13 @@ TEST_F(SiiMultiSlaveRegression, UnassignedAddressGetsUniqueValue) {
     slaves[0].apwr_eepctl_fails = true;
     slaves[1].apwr_eepctl_fails = true;
 
-    SIIReader reader(master);
+    SIIReader reader0(master);
+    SIIReader reader1(master);
 
     // Trigger FPWR fallback for both slaves
     uint32_t out0 = 0, out1 = 0;
-    ASSERT_TRUE(reader.readDWord(0, 0x0000, out0));
-    ASSERT_TRUE(reader.readDWord(1, 0x0000, out1));
+    ASSERT_TRUE(reader0.readDWord(0, 0x0000, out0));
+    ASSERT_TRUE(reader1.readDWord(1, 0x0000, out1));
 
     // Slave 0 should get address 0x0001, slave 1 should get 0x0002
     EXPECT_EQ(slaves[0].configured_addr, 0x0001u);
@@ -492,12 +498,13 @@ TEST_F(SiiMultiSlaveRegression, SequentialReadsNoInterference) {
     slaves[0].apwr_eepctl_fails = true;
     slaves[1].apwr_eepctl_fails = true;
 
-    SIIReader reader(master);
+    SIIReader reader0(master);
+    SIIReader reader1(master);
 
     // Read multiple words from slave 0
     for (uint16_t addr = 0x00; addr <= 0x08; addr += 2) {
         uint32_t out = 0;
-        ASSERT_TRUE(reader.readDWord(0, addr, out))
+        ASSERT_TRUE(reader0.readDWord(0, addr, out))
             << "Slave 0 addr 0x" << std::hex << addr;
         EXPECT_EQ(out, slaves[0].eepdat[addr]);
     }
@@ -505,7 +512,7 @@ TEST_F(SiiMultiSlaveRegression, SequentialReadsNoInterference) {
     // Read multiple words from slave 1
     for (uint16_t addr = 0x00; addr <= 0x08; addr += 2) {
         uint32_t out = 0;
-        ASSERT_TRUE(reader.readDWord(1, addr, out))
+        ASSERT_TRUE(reader1.readDWord(1, addr, out))
             << "Slave 1 addr 0x" << std::hex << addr;
         EXPECT_EQ(out, slaves[1].eepdat[addr]);
     }
@@ -513,7 +520,7 @@ TEST_F(SiiMultiSlaveRegression, SequentialReadsNoInterference) {
     // Go back to slave 0 — should still work
     {
         uint32_t out = 0;
-        ASSERT_TRUE(reader.readDWord(0, 0x00, out));
+        ASSERT_TRUE(reader0.readDWord(0, 0x00, out));
         EXPECT_EQ(out, slaves[0].eepdat[0x00]);
     }
 }
@@ -523,14 +530,15 @@ TEST_F(SiiMultiSlaveRegression, InterleavedReads) {
     slaves[0].apwr_eepctl_fails = true;
     slaves[1].apwr_eepctl_fails = true;
 
-    SIIReader reader(master);
+    SIIReader reader0(master);
+    SIIReader reader1(master);
 
     // Interleave: slave 0 word 0, slave 1 word 0, slave 0 word 2, slave 1 word 2
     uint32_t out0a = 0, out1a = 0, out0b = 0, out1b = 0;
-    ASSERT_TRUE(reader.readDWord(0, 0x00, out0a));
-    ASSERT_TRUE(reader.readDWord(1, 0x00, out1a));
-    ASSERT_TRUE(reader.readDWord(0, 0x02, out0b));
-    ASSERT_TRUE(reader.readDWord(1, 0x02, out1b));
+    ASSERT_TRUE(reader0.readDWord(0, 0x00, out0a));
+    ASSERT_TRUE(reader1.readDWord(1, 0x00, out1a));
+    ASSERT_TRUE(reader0.readDWord(0, 0x02, out0b));
+    ASSERT_TRUE(reader1.readDWord(1, 0x02, out1b));
 
     EXPECT_EQ(out0a, slaves[0].eepdat[0x00]);
     EXPECT_EQ(out1a, slaves[1].eepdat[0x00]);
@@ -737,9 +745,12 @@ TEST_F(SiiMultiSlaveRegression, ThreeSlavesUniqueAddresses) {
     slaves[1].apwr_eepctl_fails = true;
     slaves[2].apwr_eepctl_fails = true;
 
-    SIIReader reader(master);
+    SIIReader reader0(master);
+    SIIReader reader1(master);
+    SIIReader reader2(master);
 
     for (uint16_t si = 0; si <= 2; ++si) {
+        SIIReader& reader = (si == 0) ? reader0 : (si == 1) ? reader1 : reader2;
         uint32_t out = 0;
         ASSERT_TRUE(reader.readDWord(si, 0x0000, out))
             << "Slave " << si << " should read via FPWR";

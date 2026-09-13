@@ -62,27 +62,33 @@ void Master::initSlaves(uint16_t count)
     slaves_.reserve(count);
     slave_names_.clear();
     slave_names_.resize(count);
-    {
-        std::lock_guard<std::mutex> lock(sii_cache_mutex_);
-        sii_word_caches_.clear();
-        sii_word_caches_.resize(count);
-    }
+
+    // Create Slave objects first. Each Slave owns a per-slave SIIManager;
+    // binding it to this master and the correct slave index happens here.
     for (uint16_t i = 0; i < count; ++i) {
         auto s = std::make_unique<Slave>(*this, i);
-        // Initialize SII cache for each slave
-        s->siiCache().init(siiReader(), i);
+#if TETHER_ENABLE_SII
+        s->sii().init(*this, i);
+#endif
         slaves_.push_back(std::move(s));
     }
-    // Bulk-prefetch the first 128 words of SII EEPROM for each slave.
-    // This covers the fixed area (identity, mailbox config, EEPROM size)
-    // plus the beginning of the category area (strings, general, FMMU,
-    // sync manager) which is needed for PDO/SM configuration during init.
-    // 128 words is a compromise between 64 (too few — SM config causes
-    // cache misses) and 256 (the original value — unnecessarily slow
-    // for slaves with large PDO mappings in the category area).
+
+#if TETHER_ENABLE_SII
+    // Bulk-prefetch the first 128 words of SII EEPROM for each slave in
+    // parallel. Each SIIManager is per-slave and accesses the bus through
+    // Master::sendRawFrame, which is protected by send_mutex_.
+    std::vector<std::jthread> threads;
+    threads.reserve(count);
     for (uint16_t i = 0; i < count; ++i) {
-        (void)sii_reader_->prefetchWords(i, 0, 128);
+        threads.emplace_back([this, i] {
+            if (i < slaves_.size()) {
+                (void)slaves_[i]->sii().prefetchWords(0, 128);
+            }
+        });
     }
+    threads.clear();  // join all
+#endif
+
     // Resize filters to current slave count and push per-slave flags.
     debug_flags_.resizeFilters(count);
     updateDebugFlags();
@@ -306,38 +312,45 @@ Slave& Master::slave(uint16_t slave_index)
     return *non_existing_slave_;
 }
 
-SII::SIIReader& Master::siiReader()
+#if TETHER_ENABLE_SII
+
+SII::SIIManager& Master::sii(uint16_t slave_index)
 {
-    if (!sii_reader_) {
-        sii_reader_ = std::make_unique<SII::SIIReader>(*this);
+    if (slave_index < slaves_.size()) {
+        return slaves_[slave_index]->sii();
     }
-    return *sii_reader_;
+    // Out-of-range fallback: return the manager owned by the non-existing slave.
+    // Recreate with the requested index so log messages and the slave index match.
+    non_existing_slave_ = std::make_unique<NonExistingSlave>(*this, slave_index);
+    return non_existing_slave_->sii();
 }
 
 bool Master::getSIICachedWord(uint16_t slave_index, uint16_t word_addr, uint16_t& out) const
 {
-    std::lock_guard<std::mutex> lock(sii_cache_mutex_);
-    if (slave_index >= sii_word_caches_.size()) return false;
-    const auto& cache = sii_word_caches_[slave_index];
-    auto it = cache.find(word_addr);
-    if (it == cache.end()) return false;
-    out = it->second;
-    return true;
+    if (slave_index >= slaves_.size()) return false;
+    return slaves_[slave_index]->sii().cache().get(word_addr, out);
 }
+
 
 void Master::setSIICachedWord(uint16_t slave_index, uint16_t word_addr, uint16_t value)
 {
-    std::lock_guard<std::mutex> lock(sii_cache_mutex_);
-    if (slave_index >= sii_word_caches_.size()) return;
-    sii_word_caches_[slave_index][word_addr] = value;
+    if (slave_index >= slaves_.size()) return;
+    slaves_[slave_index]->sii().cache().set(word_addr, value);
 }
 
 void Master::clearSIICache(uint16_t slave_index)
 {
-    std::lock_guard<std::mutex> lock(sii_cache_mutex_);
-    if (slave_index >= sii_word_caches_.size()) return;
-    sii_word_caches_[slave_index].clear();
+    if (slave_index >= slaves_.size()) return;
+    if (slave_index == static_cast<uint16_t>(-1)) {
+        for (auto& s : slaves_) {
+            s->sii().invalidateCache();
+        }
+    } else {
+        slaves_[slave_index]->sii().invalidateCache();
+    }
 }
+
+#endif // TETHER_ENABLE_SII
 
 bool Master::resolvePhysicalSlaveIndex(SlaveAddress slave_address, uint16_t& slave_index_out)
 {
