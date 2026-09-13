@@ -53,7 +53,7 @@ public:
 
     static constexpr uint32_t kVendorId    = Devices::EL2004.vendor_id;
     static constexpr uint32_t kProductCode = Devices::EL2004.product_code;
-    static constexpr size_t   kNumChannels = Devices::EL2004.num_outputs;
+    static constexpr size_t   kNumChannels = Devices::EL2004.num_bits;
     static constexpr uint16_t kRxPdoIndex  = 0x1600;  ///< first of 0x1600-0x1603
 
     static constexpr DeviceIdentity kIdentity = Devices::EL2004;

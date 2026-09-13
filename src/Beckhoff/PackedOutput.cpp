@@ -86,7 +86,7 @@ PackedOutput::PackedOutput(Master& master, uint16_t slave_index,
                            const DeviceIdentity& identity)
     : master_(&master), slave_index_(slave_index), identity_(identity),
       state_(std::make_unique<std::atomic<uint64_t>>(0)) {
-    num_outputs_ = identity.num_outputs;
+    num_outputs_ = identity.num_bits;
 }
 
 PackedOutput::PackedOutput(Master& master, const DiscoveredSlave& slave,
