@@ -179,6 +179,12 @@ add_tether_example(list_slaves
 add_tether_example(reset_slaves_al
     LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common tether_examples_common)
 
+# --- Beckhoff EL2004 digital output demo ---
+# Auto-selects the first EL2004, brings it to OP, and steps a single active
+# output channel on each Enter keypress.
+add_tether_example(el2004_toggle
+    LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common tether_examples_common)
+
 # --- EtherCAT slave identity reader example ---
 # Configures mailbox from SII, transitions to PRE-OP, and reads identity object 0x1018
 add_tether_example(slave_read_identity
