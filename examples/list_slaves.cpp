@@ -124,8 +124,8 @@ int main(int argc, char** argv) {
     for (const auto& s : slaves) {
         const char* name = s.device_name ? s.device_name->c_str() : "Unknown";
 
-        // First line: identity
-        TETHER_LOGI(TAG, "Slave {}: {} (Vendor=0x{:08X} Product=0x{:08X})",
+        // First line: identity (ANSI bold for slave index and device name)
+        TETHER_LOGI(TAG, "\033[1mSlave {}\033[0m: \033[1m{}\033[0m (Vendor=0x{:08X} Product=0x{:08X})",
                     s.index,
                     name,
                     s.vendor_id ? *s.vendor_id : 0,
