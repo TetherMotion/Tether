@@ -14,6 +14,7 @@
 #include <optional>
 #include <set>
 #include <sstream>
+#include <string>
 
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
@@ -121,11 +122,96 @@ int main(int argc, char** argv) {
     TETHER_LOGI(TAG, "=== Discovered {} slave(s) ===", slave_count);
     for (const auto& s : slaves) {
         const char* name = s.device_name ? s.device_name->c_str() : "Unknown";
+
+        // First line: identity
         TETHER_LOGI(TAG, "Slave {}: Vendor=0x{:08X} Product=0x{:08X} {}",
                     s.index,
                     s.vendor_id ? *s.vendor_id : 0,
                     s.product_code ? *s.product_code : 0,
                     name);
+
+        // Revision / serial
+        if (s.revision_number || s.serial_number) {
+            TETHER_LOGI(TAG, "  Rev=0x{:08X} Serial=0x{:08X}",
+                        s.revision_number ? *s.revision_number : 0,
+                        s.serial_number ? *s.serial_number : 0);
+        }
+
+        // Configured address
+        if (s.configured_address) {
+            TETHER_LOGI(TAG, "  Configured address: 0x{:04X}", *s.configured_address);
+        }
+
+        // Mailbox protocols
+        if (s.mailbox_protocols) {
+            uint16_t prot = *s.mailbox_protocols;
+            std::string prot_str;
+            if (prot & EtherCAT::SII::MBX_PROTO_AOE) prot_str += "AoE ";
+            if (prot & EtherCAT::SII::MBX_PROTO_EOE) prot_str += "EoE ";
+            if (prot & EtherCAT::SII::MBX_PROTO_COE) prot_str += "CoE ";
+            if (prot & EtherCAT::SII::MBX_PROTO_FOE) prot_str += "FoE ";
+            if (prot & EtherCAT::SII::MBX_PROTO_SOE) prot_str += "SoE ";
+            if (prot & EtherCAT::SII::MBX_PROTO_VOE) prot_str += "VoE ";
+            if (prot_str.empty()) prot_str = "(none)";
+            TETHER_LOGI(TAG, "  Mailbox protocols: {}", prot_str.c_str());
+        }
+
+#if TETHER_ENABLE_SII
+        // Mailbox configuration
+        if (s.mailbox_config) {
+            const auto& mb = *s.mailbox_config;
+            TETHER_LOGI(TAG, "  Mailbox: std RX@0x{:04X} ({}B), TX@0x{:04X} ({}B)",
+                        mb.std_rx_offset, mb.std_rx_size,
+                        mb.std_tx_offset, mb.std_tx_size);
+        }
+
+        // Sync managers
+        if (s.sync_managers && !s.sync_managers->empty()) {
+            TETHER_LOGI(TAG, "  Sync managers: {}", s.sync_managers->size());
+            for (const auto& sm : *s.sync_managers) {
+                TETHER_LOGI(TAG, "    SM{}: {} start=0x{:04X} len={}",
+                            sm.sm_type, sm.getTypeName(),
+                            sm.phys_start_address, sm.length);
+            }
+        }
+
+        // FMMUs
+        if (s.fmmus && !s.fmmus->empty()) {
+            TETHER_LOGI(TAG, "  FMMUs: {}", s.fmmus->size());
+        }
+
+        // PDOs
+        if ((s.tx_pdos && !s.tx_pdos->empty()) ||
+            (s.rx_pdos && !s.rx_pdos->empty())) {
+            size_t tx_count = s.tx_pdos ? s.tx_pdos->size() : 0;
+            size_t rx_count = s.rx_pdos ? s.rx_pdos->size() : 0;
+            TETHER_LOGI(TAG, "  PDOs: TxPDO={} RxPDO={}", tx_count, rx_count);
+        }
+
+        // Distributed clocks
+        if (s.dc_configs && !s.dc_configs->empty()) {
+            TETHER_LOGI(TAG, "  Distributed clocks: {} config(s)", s.dc_configs->size());
+        }
+
+        // General info
+        if (s.general_info) {
+            const auto& gi = *s.general_info;
+            TETHER_LOGI(TAG, "  Physical ports: 0x{:04X}", gi.phys_port);
+            if (gi.current_ebus != 0) {
+                TETHER_LOGI(TAG, "  E-Bus current: {} mA", gi.current_ebus);
+            }
+        }
+#endif
+
+        // Physical ports (from EtherCAT registers, not SII)
+        if (s.physical_ports) {
+            TETHER_LOGI(TAG, "  Physical ports (reg): 0x{:04X}", *s.physical_ports);
+        }
+
+        // EEPROM size
+        if (s.eeprom_size_kbits) {
+            TETHER_LOGI(TAG, "  EEPROM size: {} kbits", *s.eeprom_size_kbits);
+        }
     }
 
     if (debug_flags.count("sii-derivation") && slave_count > 0) {
