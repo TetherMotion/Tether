@@ -86,7 +86,7 @@ TEST(MasterFrameCoverage, SendRawFrameNoInterface) {
 }
 
 // NOTE: sendRawFrame with a real interface requires master.start() which spawns
-// a blocking master thread (discoverSlaves with retries). Instead, we test the
+// a blocking master thread (discovery with retries). Instead, we test the
 // send path indirectly via sendSingleDatagram (which also calls iface_.send).
 // The test callback paths for ecApwr/ecAprd bypass sendSingleDatagram entirely.
 

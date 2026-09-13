@@ -164,7 +164,7 @@ inline bool configureSingleDrive(EtherCAT::DS402Master& master,
                                   const SingleDriveExampleConfig& config,
                                   const char* tag)
 {
-    if (!master.ethercatMaster().discoverSlaves()) {
+    if (master.ethercatMaster().discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
         TETHER_LOGW(tag, "No slaves discovered");
     }
 

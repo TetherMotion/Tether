@@ -5,6 +5,7 @@
 
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
+#include "tether/ethercat/SlaveDiscoveryManager.hpp"
 #include "tether/ethercat/DC.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/SDOManager.hpp"
@@ -378,6 +379,19 @@ bool Master::forceMailboxDefaults(SlaveAddress slave_address)
     bool applied = pdoForSlave(slave_index).configureSlavesSMs(slave_index);
     if (mailbox_fallback_cb_) mailbox_fallback_cb_(slave_index);
     return applied;
+}
+
+// ============================================================================
+// SlaveDiscoveryManager accessor
+// ============================================================================
+
+SlaveDiscoveryManager& Master::discovery() {
+    if (!discovery_manager_) {
+        // Use new directly (not make_unique) because the constructor is
+        // private and only accessible to Master via friendship.
+        discovery_manager_.reset(new SlaveDiscoveryManager(*this));
+    }
+    return *discovery_manager_;
 }
 
 } // namespace EtherCAT

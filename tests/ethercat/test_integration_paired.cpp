@@ -213,7 +213,7 @@ protected:
 
     void TearDown() override {
         // Stop the master and join the discovery thread BEFORE destroying
-        // the responder.  discoverSlaves() calls initSlaves() which sends
+        // the responder.  discovery calls initSlaves() which sends
         // SII read frames; those frames are handled by the responder's RX
         // callback.  If the responder (a local in each test) is destroyed
         // first, the discovery thread calls handleFrame on a dead object —
@@ -234,7 +234,7 @@ protected:
     }
 
     /// Create & start a master on side-A with an inline RX callback.
-    /// Launches discoverSlaves() in a background thread (since masterTask
+    /// Launches discovery in a background thread (since masterTask
     /// was removed, discovery is no longer automatic).
     Master& startMaster() {
         master_ = std::make_unique<Master>();
@@ -243,7 +243,7 @@ protected:
         });
         master_->start(pair_->ifaceA(), dummy_mac_);
         discovery_thread_ = std::thread([this]() {
-            if (master_) master_->discoverSlaves();
+            if (master_) (void)master_->discovery().discover(DiscoveryOptions());
         });
         return *master_;
     }
@@ -285,7 +285,7 @@ TEST_F(IntegrationPairedTest, DiscoverZeroSlaves) {
     auto& master = startMaster();
 
     // The master will try repeatedly; give it a shorter window.
-    // Because discoverSlaves() retries up to 200 times with 100ms+300ms
+    // Because discovery retries up to 200 times with 100ms+300ms
     // per attempt, we stop the master early to avoid a long wait.
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
@@ -324,7 +324,7 @@ TEST_F(IntegrationPairedTest, TransitionToPreOp) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     ASSERT_GE(master.getDiscoveredSlaveCount(), 1u);
 
-    // The master's discoverSlaves already pushes to PRE_OP internally.
+    // The master's discovery already pushes to PRE_OP internally.
     // Verify we can explicitly request PRE_OP:
     bool ok = master.requestSlaveApplicationLayerState(0, 0x02);
     EXPECT_TRUE(ok);

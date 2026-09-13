@@ -103,7 +103,7 @@ int runSineMotion(EtherCAT::DS402Master& master, double duration_seconds)
 
 bool configureDrive(EtherCAT::DS402Master& master)
 {
-    if (!master.ethercatMaster().discoverSlaves()) {
+    if (master.ethercatMaster().discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
         TETHER_LOGW(TAG, "No slaves discovered");
     }
 

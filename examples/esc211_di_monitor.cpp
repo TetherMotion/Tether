@@ -279,13 +279,12 @@ int main(int argc, char** argv) {
         return 5;
     }
 
-    if (!master.discoverSlaves()) {
+    if (master.discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
         TETHER_LOGW(TAG, "No slaves discovered");
     }
 
     uint16_t slaves = master.getDiscoveredSlaveCount();
     TETHER_LOGI(TAG, "Discovered {} slave(s)", slaves);
-    master.logDiscoveredSlavesSummary(TAG);
 
     if (debug_flags.count("sii-derivation") && slaves > 0) {
         TETHER_LOGI(TAG, "\n=== SII Mailbox Derivation Debug ===");

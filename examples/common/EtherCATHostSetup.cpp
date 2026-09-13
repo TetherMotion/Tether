@@ -5,6 +5,7 @@
 
 #include "tether/hal/NetworkInterfaceEnumerator.hpp"
 #include "tether/platform/Platform.hpp"
+#include "tether/ethercat/SlaveDiscoveryManager.hpp"
 
 namespace Tether::Examples {
 
@@ -166,18 +167,26 @@ bool startHostMasterAndDiscover(HostEtherNetSession& session,
     if (!startHostMaster(session, master, vlan, tag)) {
         return false;
     }
-    if (!master.discoverSlaves()) {
+    auto slaves = master.discovery().discover();
+    if (slaves.empty()) {
         TETHER_LOGW(tag, "No slaves discovered");
     }
-    uint16_t slaves = master.getDiscoveredSlaveCount();
-    TETHER_LOGI(tag, "Discovered {} slave(s)", slaves);
-    if (slaves == 0) {
+    uint16_t slave_count = master.getDiscoveredSlaveCount();
+    TETHER_LOGI(tag, "Discovered {} slave(s)", slave_count);
+    if (slave_count == 0) {
         TETHER_LOGE(tag, "No slaves found -- check wiring, power, and interface name");
         master.stop();
         shutdownHostEthernet(session);
         return false;
     }
-    master.logDiscoveredSlavesSummary(tag);
+    for (const auto& s : slaves) {
+        const char* name = s.device_name ? s.device_name->c_str() : "Unknown";
+        TETHER_LOGI(tag, "Slave {}: Vendor=0x{:08X} Product=0x{:08X} {}",
+                    s.index,
+                    s.vendor_id ? *s.vendor_id : 0,
+                    s.product_code ? *s.product_code : 0,
+                    name);
+    }
     return true;
 }
 

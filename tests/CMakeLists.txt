@@ -1067,6 +1067,7 @@ gtest_discover_tests(tether_ethercat_integration_tests PROPERTIES TIMEOUT 30)
 tether_add_test_executable(tether_ethercat_master_tests
     ethercat/test_ethercat_slave.cpp
     ethercat/test_slave_names.cpp
+    ethercat/test_slave_discovery_manager.cpp
 )
 
 target_include_directories(tether_ethercat_master_tests PRIVATE
