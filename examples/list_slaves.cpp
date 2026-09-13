@@ -10,6 +10,7 @@
  *   ./list_slaves -i enp3s0    # or: ./list_slaves --interface enp3s0
  */
 
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <set>
@@ -34,7 +35,7 @@
 static const char* TAG = "list_slaves";
 
 int main(int argc, char** argv) {
-    argparse::ArgumentParser program("list_slaves");
+    argparse::ArgumentParser program("list_slaves", "1.0", argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addListInterfacesArg(program);
     Tether::Examples::addDebugArg(program);
@@ -42,6 +43,10 @@ int main(int argc, char** argv) {
     Tether::Examples::addMailboxSizeArg(program);
     Tether::Examples::addMailboxAddressArg(program);
     Tether::Examples::addEsiXmlArg(program);
+    program.add_argument("-v", "--verbose")
+        .default_value(false)
+        .implicit_value(true)
+        .help("Print detailed slave information");
 
     try { program.parse_args(argc, argv); }
     catch (const std::runtime_error& err) {
@@ -93,6 +98,7 @@ int main(int argc, char** argv) {
         TETHER_LOGI(TAG, "Debug flags: {}", debug_str.c_str());
     }
     Tether::Examples::logVlanConfig(vlan, TAG);
+    const bool verbose = program.get<bool>("--verbose");
 
     Tether::Examples::HostEtherNetSession session;
     if (!Tether::Examples::initHostEthernet(session, iface, TAG)) {
@@ -124,10 +130,17 @@ int main(int argc, char** argv) {
     for (const auto& s : slaves) {
         const char* name = s.device_name ? s.device_name->c_str() : "Unknown";
 
-        // First line: identity (ANSI bold for slave index and device name)
-        TETHER_LOGI(TAG, "\033[1mSlave {}\033[0m: \033[1m{}\033[0m (Vendor=0x{:08X} Product=0x{:08X})",
-                    s.index,
-                    name,
+        if (!verbose) {
+            TETHER_LOGI(TAG, "Slave {}: {}", s.index, name);
+            continue;
+        }
+
+        // First line: device name (ANSI bold)
+        TETHER_LOGI(TAG, "\033[1mSlave {}\033[0m: \033[1m{}\033[0m",
+                    s.index, name);
+
+        // Second line: vendor / product
+        TETHER_LOGI(TAG, "  Vendor=0x{:08X} Product=0x{:08X}",
                     s.vendor_id ? *s.vendor_id : 0,
                     s.product_code ? *s.product_code : 0);
 
@@ -224,7 +237,7 @@ int main(int argc, char** argv) {
                 profiles += std::format("DS402({}ch) ", gi.ds402_channels);
             }
             if (!profiles.empty()) {
-                TETHER_LOGI(TAG, "  Profile support: {}", profiles.c_str());
+                TETHER_LOGI(TAG, "  \033[32mProfile support: {}\033[0m", profiles.c_str());
             }
 
             // General flags
