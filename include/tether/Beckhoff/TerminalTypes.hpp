@@ -2,12 +2,14 @@
  * @file TerminalTypes.hpp
  * @brief Shared types for the Beckhoff terminal drivers
  *
- * Common vocabulary used by the output-terminal drivers
- * (IOutputTerminal / OutputTerminal / MultiOutputTerminal) and the
- * input-terminal drivers (IInputTerminal / InputTerminal /
- * MultiInputTerminal): the Error/Result pair, the DeviceIdentity used
- * for discovery matching, and the StartOptions shared by single-device
- * and chained bring-up.
+ * Common vocabulary used by the digital terminal drivers
+ * (IOutputTerminal / OutputTerminal / MultiOutputTerminal,
+ * IInputTerminal / InputTerminal / MultiInputTerminal) and the analog
+ * terminal drivers (IAnalogInputTerminal / AnalogInputTerminal /
+ * MultiAnalogInputTerminal, IAnalogOutputTerminal / AnalogOutputTerminal /
+ * MultiAnalogOutputTerminal): the Error/Result pair, the DeviceIdentity
+ * used for discovery matching, and the StartOptions shared by
+ * single-device and chained bring-up.
  */
 
 #pragma once
@@ -60,10 +62,11 @@ using Result = std::expected<T, Error>;
  *        (input or output direction).
  *
  * `vendor_id`/`product_code` are matched against discovery results.
- * `num_bits` declares the packed bit width; when it is 0 the width is
- * derived from the SII PDO bit sum during bring-up (MultiOutputTerminal/
- * MultiInputTerminal need a non-zero declared width to lay out the flat
- * bit space before start()).
+ * `num_bits` declares the packed bit width for digital terminals and the
+ * channel count for analog terminals; when it is 0 the count is derived
+ * from the SII PDO data during bring-up (the Multi* chains need a
+ * non-zero declared count to lay out the flat channel space before
+ * start()).
  */
 struct DeviceIdentity {
     uint32_t    vendor_id;

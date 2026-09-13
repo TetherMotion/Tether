@@ -197,9 +197,25 @@ add_tether_example(beckhoff_output_toggle
 add_tether_example(beckhoff_input_monitor
     LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
 
-# Both examples get the interactive TUI when tether_terminal_ui exists.
+# --- Beckhoff analog input terminal monitor ---
+# Auto-detects all EL3xxx analog-input terminals via the
+# MultiAnalogInputTerminal driver (mailbox + SM3 process inputs, per-channel
+# layout resolved from SII), brings them to OP, and shows every channel's
+# live value + status word — same device-tree TUI.
+add_tether_example(beckhoff_analog_input_monitor
+    LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# --- Beckhoff analog output terminal sweep demo ---
+# Auto-detects all EL4xxx analog-output terminals via the
+# MultiAnalogOutputTerminal driver (mailbox + SM2 process outputs) and
+# sweeps one channel at a time with a triangle ramp.
+add_tether_example(beckhoff_analog_output_sweep
+    LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# All Beckhoff examples get the interactive TUI when tether_terminal_ui exists.
 if(TARGET tether_terminal_ui)
-    foreach(_tui_ex beckhoff_output_toggle beckhoff_input_monitor)
+    foreach(_tui_ex beckhoff_output_toggle beckhoff_input_monitor
+                    beckhoff_analog_input_monitor beckhoff_analog_output_sweep)
         target_link_libraries(${_tui_ex} PRIVATE tether_terminal_ui ${CURSES_LIBRARIES})
         target_include_directories(${_tui_ex} PRIVATE ${CURSES_INCLUDE_DIRS})
     endforeach()
