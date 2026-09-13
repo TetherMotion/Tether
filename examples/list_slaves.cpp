@@ -15,6 +15,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <format>
 
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
@@ -199,6 +200,39 @@ int main(int argc, char** argv) {
             TETHER_LOGI(TAG, "  Physical ports: 0x{:04X}", gi.phys_port);
             if (gi.current_ebus != 0) {
                 TETHER_LOGI(TAG, "  E-Bus current: {} mA", gi.current_ebus);
+            }
+
+            // Profile / protocol details from SII general category
+            std::string profiles;
+            if (gi.coe_details) {
+                profiles += "CoE";
+                if (gi.coeEnableSdo())        profiles += "(SDO)";
+                if (gi.coeEnableSdoInfo())   profiles += "(SDOinfo)";
+                if (gi.coeEnablePdoAssign()) profiles += "(PDOassign)";
+                if (gi.coeEnablePdoConfig()) profiles += "(PDOconfig)";
+                if (gi.coeEnableUploadStartup()) profiles += "(Upload)";
+                if (gi.coeEnableSdoComplete())  profiles += "(SDOcomplete)";
+                profiles += " ";
+            }
+            if (gi.foe_details) profiles += "FoE ";
+            if (gi.eoe_details) profiles += "EoE ";
+            if (gi.soe_channels) {
+                profiles += std::format("SoE({}ch) ", gi.soe_channels);
+            }
+            if (gi.ds402_channels) {
+                profiles += std::format("DS402({}ch) ", gi.ds402_channels);
+            }
+            if (!profiles.empty()) {
+                TETHER_LOGI(TAG, "  Profile support: {}", profiles.c_str());
+            }
+
+            // General flags
+            std::string flags_str;
+            if (gi.enableNotLRW()) flags_str += "noLRW ";
+            if (gi.enableSafeOp()) flags_str += "SafeOp ";
+            if (gi.enableLRW())    flags_str += "LRW ";
+            if (!flags_str.empty()) {
+                TETHER_LOGI(TAG, "  Flags: {}", flags_str.c_str());
             }
         }
 #endif
