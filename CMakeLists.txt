@@ -336,6 +336,7 @@ option(TETHER_DRIVE_AS715N           "Build AS715N servo drive helper"          
 option(TETHER_DRIVE_DYNADRIVE        "Build DynaDrive (ANYdrive) helper"        ON)
 option(TETHER_DRIVE_NEXCOBOT_ESC211  "Build Nexcobot ESC211 helper"             ON)
 option(TETHER_DRIVE_RP20             "Build Kinco RP20 I/O module helper"       ON)
+option(TETHER_BUILD_BECKHOFF         "Build Beckhoff terminal drivers (EL2004)" ON)
 option(TETHER_DRIVE_PBLR81FGF        "Build PBLR81FGF drive helper"             ON)
 option(TETHER_DRIVE_SYNAPTICON       "Build Synapticon SOMANET drive helper"    ON)
 option(TETHER_BUILD_FSOE "Build Fail-Safe over EtherCAT (FSoE)" ON)
@@ -454,6 +455,7 @@ if(DEFINED TETHER_COMPONENTS)
     set(_tether_component_deps_ethercat_master "ethercat_common;hal;common")
     set(_tether_component_deps_cia_profiles    "ethercat_master;common")
     set(_tether_component_deps_drives          "ethercat_master;common")
+    set(_tether_component_deps_beckhoff        "ethercat_master;common")
     set(_tether_component_deps_fsoe            "cia_profiles;ethercat_master;common")
     set(_tether_component_deps_ethercat_slave  "ethercat_common;hal;common")
     set(_tether_component_deps_pcap            "common")
@@ -469,8 +471,8 @@ if(DEFINED TETHER_COMPONENTS)
     set(_tether_all_components
         common hal pcap controls autotuning gcode export motion_planner
         kinematics motion_control identification ethercat_common
-        ethercat_master cia_profiles drives fsoe ethercat_slave simulation
-        destabilizer io_protocol klipper)
+        ethercat_master cia_profiles drives beckhoff fsoe ethercat_slave
+        simulation destabilizer io_protocol klipper)
 
     # Resolve transitive closure of requested components
     set(_tether_enabled ${TETHER_COMPONENTS})
@@ -495,8 +497,8 @@ if(DEFINED TETHER_COMPONENTS)
     set(_tether_build_vars
         COMMON HAL PCAP CONTROLS AUTOTUNING GCODE EXPORT MOTION_PLANNER
         KINEMATICS MOTION_CONTROL IDENTIFICATION ETHERCAT_COMMON
-        ETHERCAT_MASTER CIA_PROFILES DRIVES FSOE ETHERCAT_SLAVE SIMULATION
-        DESTABILIZER IO_PROTOCOL KLIPPER)
+        ETHERCAT_MASTER CIA_PROFILES DRIVES BECKHOFF FSOE ETHERCAT_SLAVE
+        SIMULATION DESTABILIZER IO_PROTOCOL KLIPPER)
     foreach(_var ${_tether_build_vars})
         set(TETHER_BUILD_${_var} OFF CACHE BOOL "" FORCE)
     endforeach()
@@ -728,6 +730,11 @@ if(TETHER_BUILD_DRIVES AND TETHER_BUILD_ETHERCAT_MASTER)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/drives.cmake)
 endif()
 
+# Beckhoff terminal drivers (depends on ethercat_master)
+if(TETHER_BUILD_BECKHOFF AND TETHER_BUILD_ETHERCAT_MASTER)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/beckhoff.cmake)
+endif()
+
 # FSoE — Fail-Safe over EtherCAT (depends on ethercat_master and cia_profiles)
 if(TETHER_BUILD_FSOE AND TETHER_BUILD_ETHERCAT_MASTER AND TETHER_BUILD_CIA_PROFILES)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/fsoe.cmake)
@@ -803,6 +810,7 @@ tether_collect_targets(TETHER_ETHERCAT_COMMON)
 tether_collect_targets(TETHER_ETHERCAT_MASTER)
 tether_collect_targets(TETHER_CIA_PROFILES)
 tether_collect_targets(TETHER_DRIVES)
+tether_collect_targets(TETHER_BECKHOFF)
 tether_collect_targets(TETHER_FSOE)
 tether_collect_targets(TETHER_ETHERCAT_SLAVE)
 tether_collect_targets(TETHER_SIMULATION)
@@ -856,6 +864,9 @@ if(TARGET tether_cia_profiles)
 endif()
 if(TARGET tether_drives)
     list(APPEND TETHER_ALL_COMPONENTS tether_drives)
+endif()
+if(TARGET tether_beckhoff)
+    list(APPEND TETHER_ALL_COMPONENTS tether_beckhoff)
 endif()
 if(TARGET tether_fsoe)
     list(APPEND TETHER_ALL_COMPONENTS tether_fsoe)
@@ -1036,6 +1047,7 @@ message(STATUS "    tether_ethercat_common: ${TETHER_BUILD_ETHERCAT_COMMON}")
 message(STATUS "    tether_ethercat_master: ${TETHER_BUILD_ETHERCAT_MASTER}")
 message(STATUS "    tether_cia_profiles:   ${TETHER_BUILD_CIA_PROFILES}")
 message(STATUS "    tether_drives:         ${TETHER_BUILD_DRIVES}")
+message(STATUS "    tether_beckhoff:       ${TETHER_BUILD_BECKHOFF}")
 message(STATUS "    tether_fsoe:           ${TETHER_BUILD_FSOE}")
 message(STATUS "    tether_ethercat_slave: ${TETHER_BUILD_ETHERCAT_SLAVE}")
 message(STATUS "    tether_simulation:    ${TETHER_BUILD_SIMULATION}")
