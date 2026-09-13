@@ -467,6 +467,24 @@ set(ANALYSIS_TEST_SOURCES
 )
 create_module_test(analysis "${ANALYSIS_TEST_SOURCES}" "tether_common;tether_analysis;tether_io_protocol" "")
 
+# Beckhoff terminal driver tests (PdoChannelLayout, registries, chains,
+# POS/DRV/PTO/PWM field offsets, FSoE exchange path)
+file(GLOB BECKHOFF_TEST_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/beckhoff/*.cpp"
+)
+if(BECKHOFF_TEST_SOURCES)
+    set(BECKHOFF_TEST_LIBS
+        "tether_common;tether_ethercat_common;tether_ethercat_master;tether_device_drivers"
+    )
+    set(BECKHOFF_TEST_DEFS "")
+    if(TARGET tether_fsoe)
+        list(APPEND BECKHOFF_TEST_LIBS tether_fsoe)
+        list(APPEND BECKHOFF_TEST_DEFS "TETHER_BECKHOFF_TEST_FSOE=1")
+    endif()
+    create_module_test(beckhoff "${BECKHOFF_TEST_SOURCES}"
+                       "${BECKHOFF_TEST_LIBS}" "${BECKHOFF_TEST_DEFS}")
+endif()
+
 if(DC_TEST_SOURCES)
     create_module_test(dc
         "${DC_TEST_SOURCES}"

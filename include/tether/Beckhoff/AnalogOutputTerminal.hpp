@@ -49,6 +49,7 @@
 #include <vector>
 
 #include "tether/Beckhoff/IAnalogOutputTerminal.hpp"
+#include "tether/Beckhoff/TerminalBase.hpp"
 #include "tether/ethercat/PDOManager.hpp"             // PDOAddressMode
 #include "tether/ethercat/SlaveDiscoveryManager.hpp"  // DiscoveredSlave
 #include "tether/ethercat/Types.hpp"                  // SlaveState
@@ -109,6 +110,21 @@ inline constexpr DeviceIdentity EL4134{0x00000002, 0x10263052, 4, "EL4134"};
 // -- EL43xx — combined 2×AI + 2×AO ---------------------------------------------
 inline constexpr DeviceIdentity EL4374{0x00000002, 0x11163052, 2, "EL4374"};
 
+// -- EP/ER/EJ variants — same electronics, value-only SM2 images ----------------
+// All ESI-verified for shape; none verified on hardware yet.
+inline constexpr DeviceIdentity EJ4002{0x00000002, 0x0FA22852, 2, "EJ4002"};
+inline constexpr DeviceIdentity EJ4004{0x00000002, 0x0FA42852, 4, "EJ4004"};
+inline constexpr DeviceIdentity EJ4008{0x00000002, 0x0FA82852, 8, "EJ4008"};
+inline constexpr DeviceIdentity EJ4018{0x00000002, 0x0FB22852, 8, "EJ4018"};
+inline constexpr DeviceIdentity EJ4024{0x00000002, 0x0FB82852, 4, "EJ4024"};
+inline constexpr DeviceIdentity EJ4132{0x00000002, 0x10242852, 2, "EJ4132"};
+inline constexpr DeviceIdentity EJ4134{0x00000002, 0x10262852, 4, "EJ4134"};
+
+inline constexpr DeviceIdentity EP4174{0x00000002, 0x104E4052, 4, "EP4174"};
+inline constexpr DeviceIdentity EP4374{0x00000002, 0x11164052, 4, "EP4374"};
+inline constexpr DeviceIdentity ER4174{0x00000002, 0x104E4852, 4, "ER4174"};
+inline constexpr DeviceIdentity ER4374{0x00000002, 0x11164852, 4, "ER4374"};
+
 /// Every known analog-output terminal — the default detection set used by
 /// MultiAnalogOutputTerminal::detect().  All entries verified against the
 /// ESI for shape (mailbox + SM2 outputs + one ≤32-bit value entry per
@@ -119,6 +135,8 @@ inline constexpr std::array kAnalogOutputTerminals{
     EL4072, EL4074, EL4078,
     EL4102, EL4104, EL4112, EL4114, EL4122, EL4124, EL4132, EL4134,
     EL4374,
+    EJ4002, EJ4004, EJ4008, EJ4018, EJ4024, EJ4132, EJ4134,
+    EP4174, EP4374, ER4174, ER4374,
 };
 
 } // namespace Devices
@@ -127,7 +145,8 @@ inline constexpr std::array kAnalogOutputTerminals{
 // AnalogOutputTerminal — generic SII-driven analog output driver
 // ============================================================================
 
-class AnalogOutputTerminal : public IAnalogOutputTerminal {
+class AnalogOutputTerminal : public TerminalBase,
+                             public IAnalogOutputTerminal {
 public:
     /// Maximum channels supported per device.
     static constexpr size_t kMaxChannels = 64;
@@ -199,14 +218,15 @@ public:
     Result<> start() { return start(StartOptions()); }
     Result<> start(const StartOptions& opts);
 
-    /// Stop the master's realtime loop if this driver started it.
-    void stop();
-
     // -- IAnalogOutputTerminal ----------------------------------------------------
 
-    uint16_t slaveIndex() const override { return slave_index_; }
+    uint16_t slaveIndex() const override {
+        return TerminalBase::slaveIndex();
+    }
     size_t   channelCount() const override { return channels_.size(); }
-    const char* deviceName() const override;
+    const char* deviceName() const override {
+        return TerminalBase::deviceName();
+    }
 
     void    setValue(size_t channel, int32_t value) override;
     int32_t value(size_t channel) const override;
@@ -218,37 +238,9 @@ public:
 
     // -- Status --------------------------------------------------------------------
 
-    /// True after configure()/mapLogicalAndEnterSafeOp() succeeded.
-    bool configured() const { return configured_; }
-
-    /// Live-read the application-layer (ESM) state register.
-    SlaveState alState();
-
-    /// True when the terminal is in OP.
-    bool operational() { return alState() == SlaveState::OP; }
-
-    /// AL status code captured by the last failed state transition (0 = none).
-    uint16_t lastAlStatusCode() const { return last_al_status_code_; }
-
-    /// The declared/resolved device identity.
-    const DeviceIdentity& identity() const { return identity_; }
-
-    /// Logical address assigned to this device's output field (chained
-    /// operation only; 0 when unmapped).
-    uint32_t logicalAddress() const { return logical_addr_; }
-
     /// Bit width of channel `ch`'s value field (16 or 32; 0 when the
     /// layout is not resolved yet or `ch` is out of range).
     size_t channelBits(size_t ch) const;
-
-    /// Raw output process image (SM2 region) — the bytes that will be
-    /// transmitted next cycle.
-    std::span<const uint8_t> rawOutput() const { return out_buf_; }
-
-    /// Raw input process image for terminals with an enabled SM3
-    /// (EL407x status words, EL4374 analog inputs).  Not interpreted —
-    /// empty for pure output terminals.
-    std::span<const uint8_t> rawInput() const { return in_buf_; }
 
 private:
     /// Per-channel layout resolved from the SII RxPDO list.
@@ -257,50 +249,16 @@ private:
         uint8_t  value_bits;  ///< value width: 16 or 32
     };
 
-    /// Poll AL status until `target` or timeout; honours master cancellation.
-    bool waitAlState(SlaveState target, int timeout_ms);
-
-    /// Resolve process-data SM addresses/lengths/ctrl and per-channel
-    /// offsets from the bound discovery data / SII.
+    /// Resolve the per-channel value offsets from the bound discovery
+    /// data / SII (SM regions themselves come from the base).
     bool resolveLayout();
 
     /// Shared bring-up: SII, identity check, mailbox config, SM registers,
-    /// PRE-OP, PDO buffer registration in the given address mode,
-    /// finalizeMapping().  Ends before SAFE-OP.
+    /// PRE-OP, PDO buffer registration in the given address mode.
+    /// Ends before SAFE-OP.
     Result<> prepare(PDO::PDOAddressMode mode);
 
-    /// assumePDOAlreadyConfigured() + SAFE-OP transition.
-    Result<> enterSafeOp();
-
-    Master*                        master_;
-    uint16_t                       slave_index_;
-    DeviceIdentity                 identity_;
-    std::optional<DiscoveredSlave> info_;
-
-    /// Registered PDO buffers — the cyclic exchange reads/writes them.
-    /// Heap-allocated so the pointers stay valid when the driver is moved.
-    std::vector<uint8_t> out_buf_;   ///< SM2 process image
-    std::vector<uint8_t> in_buf_;    ///< SM3 scratch (only when SM3 enabled)
-
     std::vector<ChannelLayout> channels_;
-
-    // Sync-manager resolution (SII)
-    uint8_t  sm_out_channel_  = 2;
-    uint16_t sm_out_addr_     = 0x1100;
-    uint16_t sm_out_len_      = 0;
-    uint8_t  sm_out_ctrl_     = 0x24;
-    bool     sm_in_enabled_   = false;
-    uint16_t sm_in_addr_      = 0x1180;
-    uint16_t sm_in_len_       = 0;
-    uint8_t  sm_in_ctrl_      = 0x20;
-    uint16_t first_rxpdo_     = 0x1600;
-    uint16_t first_txpdo_     = 0x1A00;
-
-    bool     prepared_      = false;
-    bool     configured_    = false;
-    bool     loop_started_  = false;
-    uint32_t logical_addr_  = 0;
-    uint16_t last_al_status_code_ = 0;
 };
 
 } // namespace Beckhoff

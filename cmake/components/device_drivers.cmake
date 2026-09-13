@@ -52,6 +52,11 @@ endif()
 if(TETHER_DRIVER_BECKHOFF)
     file(GLOB_RECURSE BECKHOFF_SOURCES CONFIGURE_DEPENDS
         "${TETHER_ROOT}/src/Beckhoff/*.cpp")
+    # The TwinSAFE (FSoE) driver needs the tether_fsoe component — leave
+    # it out when that component isn't part of the build.
+    if(NOT TETHER_BUILD_FSOE)
+        list(FILTER BECKHOFF_SOURCES EXCLUDE REGEX "SafetyTerminal\\.cpp$")
+    endif()
     list(APPEND TETHER_DEVICE_DRIVERS_SOURCES ${BECKHOFF_SOURCES})
 endif()
 
@@ -136,6 +141,12 @@ foreach(_tgt IN LISTS _variants)
                     ${TETHER_ROOT}/src
             )
             target_link_libraries(${_tgt} PUBLIC tether_common tether_ethercat_master)
+            # TwinSAFE terminal driver links the FSoE stack when present
+            # (resolved at generate time — the target may be created by a
+            # later component include).
+            if(TETHER_BUILD_FSOE)
+                target_link_libraries(${_tgt} PUBLIC tether_fsoe)
+            endif()
             if(TETHER_DEVICE_DRIVERS_COMPILE_DEFS)
                 target_compile_definitions(${_tgt} PUBLIC ${TETHER_DEVICE_DRIVERS_COMPILE_DEFS})
             endif()

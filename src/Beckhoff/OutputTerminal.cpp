@@ -73,6 +73,7 @@ const char* errorToString(Error e) {
         case Error::OpTimeout:             return "Slave did not reach OP in time";
         case Error::LoopStartFailed:       return "Master realtime loop failed to start";
         case Error::TooManyBits:           return "Chain exceeds the MaxBits capacity";
+        case Error::FsoeInitFailed:        return "FSoE connection initialization failed";
         case Error::Cancelled:             return "Operation cancelled";
         default:                           return "Unknown error";
     }
