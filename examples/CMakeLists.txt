@@ -186,6 +186,23 @@ add_tether_example(reset_slaves_al
 if(TETHER_BUILD_BECKHOFF)
 add_tether_example(el2004_toggle
     LIBRARIES tether_ethercat_master tether_beckhoff tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# --- Beckhoff EL1014 digital input monitor ---
+# Auto-detects all EL1014 terminals via the MultiEL1014 driver, brings them
+# to OP, and shows the live input state of every channel.  Default UI is an
+# ncurses panel; --stream switches to plain line output.  Without ncurses
+# the example still builds (stream mode only).
+find_package(Curses)
+if(CURSES_FOUND)
+    add_tether_example(el1014_monitor
+        LIBRARIES tether_ethercat_master tether_beckhoff tether_ethercat_common tether_hal tether_common tether_examples_common ${CURSES_LIBRARIES})
+    target_include_directories(el1014_monitor PRIVATE ${CURSES_INCLUDE_DIRS})
+    target_compile_definitions(el1014_monitor PRIVATE HAVE_NCURSES)
+else()
+    add_tether_example(el1014_monitor
+        LIBRARIES tether_ethercat_master tether_beckhoff tether_ethercat_common tether_hal tether_common tether_examples_common)
+    message(STATUS "ncurses not found; el1014_monitor built without TUI (--stream only)")
+endif()
 endif()
 
 # --- EtherCAT slave identity reader example ---

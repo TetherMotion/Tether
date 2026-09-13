@@ -74,17 +74,19 @@ using Result = std::expected<T, Error>;
 // ============================================================================
 
 /**
- * @brief Static description of a supported packed-output terminal.
+ * @brief Static description of a supported packed-bit terminal
+ *        (input or output direction).
  *
  * `vendor_id`/`product_code` are matched against discovery results.
- * `num_outputs` declares the output bit width; when it is 0 the width is
- * derived from the SII RxPDO bit sum during bring-up (MultiOutput needs a
- * non-zero declared width to lay out the flat bit space before start()).
+ * `num_bits` declares the packed bit width; when it is 0 the width is
+ * derived from the SII PDO bit sum during bring-up (MultiOutput/
+ * MultiInput need a non-zero declared width to lay out the flat bit
+ * space before start()).
  */
 struct DeviceIdentity {
     uint32_t    vendor_id;
     uint32_t    product_code;
-    uint16_t    num_outputs = 0;
+    uint16_t    num_bits    = 0;
     const char* name        = nullptr;
 };
 
