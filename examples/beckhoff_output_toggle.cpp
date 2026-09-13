@@ -1,17 +1,30 @@
 /**
- * @file el2004_toggle.cpp
- * @brief Beckhoff EL2004 (4ch digital output, 24V/0.5A) channel stepper demo
+ * @file beckhoff_output_toggle.cpp
+ * @brief Beckhoff EL200x digital output channel stepper demo
  *
- * Finds every EL2004 in the EtherCAT chain via the MultiEL2004 driver,
- * brings all of them to OP, and lights exactly one output at a time across
- * the combined channel space (module 0 = bits 0-3, module 1 = bits 4-7, ...).
- * Pressing Enter advances the lit output; after the last channel of the last
- * terminal it wraps back to the very first one.
+ * Finds every EL200x terminal in the EtherCAT chain via the MultiOutputTerminal
+ * driver, brings all of them to OP, and lights exactly one output at a
+ * time across the combined channel space (the module at the lowest bus
+ * position occupies bits [0, w0), the next one [w0, w0+w1), ... where wN
+ * is that terminal's channel count — 2 for EL2002, 4 for EL2004, 8 for
+ * EL2008).  Pressing Enter advances the lit output; after the last channel
+ * of the last terminal it wraps back to the very first one.
+ *
+ * Detected by this example (the "EL200x" series, x = channel count):
+ *   EL2002 (2ch, 24V/0.5A), EL2004 (4ch), EL2008 (8ch).
+ *   Verified on hardware: EL2004.  EL2002/EL2008 share the identical ESI
+ *   shape — supported, not verified yet.
+ *
+ * The same OutputTerminal driver also supports every other terminal in
+ * Devices::kOutputTerminals — all verified against the ESI to share the
+ * EL2004's shape (single "Outputs" SM + FMMU, N x 1-bit RxPDOs, no
+ * mailbox), none verified on hardware yet.  Swap kEl200x for
+ * Devices::kOutputTerminals in detect() to accept them all.
  *
  * Usage (Linux, requires root or CAP_NET_RAW):
- *   ./el2004_toggle                # auto-detect interface
- *   ./el2004_toggle -i enp3s0      # specify interface
- *   ./el2004_toggle -t 30          # run for 30 s, then exit
+ *   ./beckhoff_output_toggle                # auto-detect interface
+ *   ./beckhoff_output_toggle -i enp3s0      # specify interface
+ *   ./beckhoff_output_toggle -t 30          # run for 30 s, then exit
  */
 
 #include <atomic>
@@ -23,7 +36,7 @@
 #include <poll.h>
 #include <unistd.h>
 
-#include "tether/Beckhoff/MultiEL2004.hpp"
+#include "tether/Beckhoff/MultiOutputTerminal.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/SlaveDiscoveryManager.hpp"
 #include "tether/platform/EspCompat.hpp"
@@ -33,32 +46,44 @@
 #include "common/ExampleHelpers.hpp"
 #include "common/EtherCATHostSetup.hpp"
 
-static const char* TAG = "el2004_toggle";
+static const char* TAG = "beckhoff_output_toggle";
 
 namespace Beckhoff = EtherCAT::Beckhoff;
+
+/// The "EL200x" detection set — x = channel count.
+constexpr Beckhoff::DeviceIdentity kEl200x[] = {
+    Beckhoff::Devices::EL2002,
+    Beckhoff::Devices::EL2004,
+    Beckhoff::Devices::EL2008,
+};
 
 static std::atomic<bool> g_cancel{false};
 // SignalHandler sets this to true on SIGINT/SIGTERM.
 
 /// Print one line per module: "s3: 0100" means slave 3 has channel 3 lit.
-static void printOutputState(const Beckhoff::MultiEL2004<>& outs,
+static void printOutputState(const Beckhoff::MultiOutputTerminal<>& outs,
                              size_t active) {
     std::cout << "Outputs:";
     for (size_t m = 0; m < outs.moduleCount(); ++m) {
-        const auto ch = outs.module(m).channels();
+        const auto& mod = outs.module(m);
         std::cout << "  s" << outs.slaveIndex(m) << ":";
-        for (size_t k = 0; k < Beckhoff::EL2004::kNumChannels; ++k) {
-            std::cout << (ch[k] ? '1' : '0');
+        for (size_t k = 0; k < mod.bitCount(); ++k) {
+            std::cout << (mod.bit(k) ? '1' : '0');
         }
     }
-    const size_t mod = active / Beckhoff::EL2004::kNumChannels;
+    // Locate the module + channel the active bit belongs to.
+    size_t mod = 0, off = 0;
+    for (; mod + 1 < outs.moduleCount(); ++mod) {
+        if (outs.bitOffset(mod + 1) > active) break;
+    }
+    off = active - outs.bitOffset(mod);
     std::cout << "   (bit " << active << " = slave " << outs.slaveIndex(mod)
-              << " CH" << (active % Beckhoff::EL2004::kNumChannels) + 1
+              << " CH" << off + 1
               << " — press Enter for next)" << std::endl;
 }
 
 int main(int argc, char** argv) {
-    argparse::ArgumentParser program("el2004_toggle", "1.0",
+    argparse::ArgumentParser program("beckhoff_output_toggle", "1.0",
                                      argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addListInterfacesArg(program);
@@ -117,7 +142,7 @@ int main(int argc, char** argv) {
         return 5;
     }
 
-    // ---- Discover the chain and pick out every EL2004 ----
+    // ---- Discover the chain and pick out every EL200x ----
     // A full discovery gives us the slave names for logging and lets the
     // driver reuse the SII data instead of re-reading each terminal's EEPROM.
     auto slaves = master.discovery().discover(EtherCAT::DiscoveryOption::All);
@@ -137,29 +162,35 @@ int main(int argc, char** argv) {
                     s.product_code ? *s.product_code : 0);
     }
 
-    Beckhoff::MultiEL2004<> outs(master);
-    auto found = outs.detect(slaves);
+    Beckhoff::MultiOutputTerminal<> outs(master);
+    auto found = outs.detect(std::span<const Beckhoff::DeviceIdentity>(kEl200x),
+                           slaves);
     if (!found || *found == 0) {
-        TETHER_LOGE(TAG, "No EL2004 found in the chain");
+        TETHER_LOGE(TAG, "No EL200x terminal found in the chain");
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 6;
     }
-    TETHER_LOGI(TAG, "{} EL2004 terminal(s), {} output bits total",
+    TETHER_LOGI(TAG, "{} EL200x terminal(s), {} output bits total",
                 outs.moduleCount(), outs.channelCount());
+    for (size_t m = 0; m < outs.moduleCount(); ++m) {
+        TETHER_LOGI(TAG, "  module {}: slave {} = {} ({} ch)",
+                    m, outs.slaveIndex(m), outs.module(m).deviceName(),
+                    outs.module(m).bitCount());
+    }
 
     // ---- Configure all modules, start the RT loop, enter OP ----
     if (auto r = outs.start(); !r) {
-        TETHER_LOGE(TAG, "EL2004 bring-up failed on module {}: {}",
+        TETHER_LOGE(TAG, "EL200x bring-up failed on module {}: {}",
                     outs.lastErrorModule(),
-                    Beckhoff::EL2004::errorToString(r.error()));
+                    Beckhoff::errorToString(r.error()));
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 7;
     }
 
     // ---- UI loop: Enter steps the single lit output across all bits ----
-    std::cout << "\n" << outs.moduleCount() << " EL2004 terminal(s), "
+    std::cout << "\n" << outs.moduleCount() << " EL200x terminal(s), "
               << outs.channelCount() << " channels — exactly one output is ON.\n";
     size_t active = 0;
     outs.setOnly(active);

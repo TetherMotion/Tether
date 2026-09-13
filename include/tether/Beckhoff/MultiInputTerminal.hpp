@@ -1,9 +1,9 @@
 /**
- * @file MultiInput.hpp
+ * @file MultiInputTerminal.hpp
  * @brief Flat bit-level interface across a heterogeneous chain of input
  *        terminals sharing one logical address space
  *
- * MultiInput collects devices implementing IChainableInput (any width —
+ * MultiInputTerminal collects devices implementing IInputTerminal (any width —
  * 1, 2, 4, 8, ... bits) and presents their inputs as one contiguous set of
  * bits: the device at the lowest bus position occupies bits [0, w0), the
  * next device bits [w0, w0+w1), and so on (within a device, bit N = input
@@ -17,7 +17,7 @@
  * the chain keep using the default pdo() manager and are unaffected.
  *
  * @code
- *   MultiInput<> ins(master);
+ *   MultiInputTerminal<> ins(master);
  *   ins.detect();                  // every known packed-input terminal
  *   ins.start();                   // shared LRW map + SAFE-OP + OP + RT loop
  *
@@ -26,10 +26,10 @@
  * @endcode
  *
  * Custom devices: pass a DeviceMatcher list to detect(), or attach() an
- * IChainableInput implementation directly:
+ * IInputTerminal implementation directly:
  *
  * @code
- *   MultiInput<>::DeviceMatcher myDevice{
+ *   MultiInputTerminal<>::DeviceMatcher myDevice{
  *       {0x00000002, 0x03F63052, 4, "EL1014"},
  *       [](Master& m, const DiscoveredSlave& s) {
  *           return std::make_unique<MyDevice>(m, s);
@@ -53,8 +53,8 @@
 #include <stdexcept>
 #include <vector>
 
-#include "tether/Beckhoff/ChainableInput.hpp"
-#include "tether/Beckhoff/PackedInput.hpp"
+#include "tether/Beckhoff/IInputTerminal.hpp"
+#include "tether/Beckhoff/InputTerminal.hpp"
 #include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/PDOManager.hpp"
@@ -65,7 +65,7 @@ namespace EtherCAT {
 namespace Beckhoff {
 
 template <size_t MaxBits = 256>
-class MultiInput {
+class MultiInputTerminal {
 public:
     /// Flat input bitset type — bit i = global channel i.
     using Bitset       = std::bitset<MaxBits>;
@@ -78,12 +78,12 @@ public:
      * @brief How to recognize and construct a chained device.
      *
      * `identity` is matched against the discovered vendor/product IDs.
-     * `create` constructs the IChainableInput; when empty, a generic
-     * PackedInput is constructed for the identity.
+     * `create` constructs the IInputTerminal; when empty, a generic
+     * InputTerminal is constructed for the identity.
      */
     struct DeviceMatcher {
         DeviceIdentity identity;
-        std::function<std::unique_ptr<IChainableInput>(
+        std::function<std::unique_ptr<IInputTerminal>(
             Master&, const DiscoveredSlave&)> create;
 
         /*implicit*/ DeviceMatcher(const DeviceIdentity& id)
@@ -96,13 +96,13 @@ public:
      * @brief Construct bound to a started master.  Performs no bus I/O —
      *        call detect()/attach() to populate the chain.
      */
-    explicit MultiInput(Master& master) : master_(master) {}
+    explicit MultiInputTerminal(Master& master) : master_(master) {}
 
-    ~MultiInput() { stop(); }
+    ~MultiInputTerminal() { stop(); }
 
-    MultiInput(MultiInput&&)                 = delete;
-    MultiInput(const MultiInput&)            = delete;
-    MultiInput& operator=(const MultiInput&) = delete;
+    MultiInputTerminal(MultiInputTerminal&&)                 = delete;
+    MultiInputTerminal(const MultiInputTerminal&)            = delete;
+    MultiInputTerminal& operator=(const MultiInputTerminal&) = delete;
 
     /// All packed-input terminals known to this driver (ESI-verified).
     static std::span<const DeviceIdentity> knownDevices() {
@@ -159,10 +159,10 @@ public:
         group_lam_    = nullptr;
         for (const auto& s : scan) {
             for (const auto& m : matchers) {
-                if (!PackedInput::matches(s, m.identity)) continue;
+                if (!InputTerminal::matches(s, m.identity)) continue;
                 if (m.create) modules_.push_back(m.create(master_, s));
                 else modules_.push_back(
-                    std::make_unique<PackedInput>(master_, s, m.identity));
+                    std::make_unique<InputTerminal>(master_, s, m.identity));
                 break;
             }
         }
@@ -172,12 +172,12 @@ public:
 
     /**
      * @brief Append a pre-constructed chained device (any
-     *        IChainableInput implementation).
+     *        IInputTerminal implementation).
      *
      * The flat bit layout is always sorted by bus position, so call order
      * does not matter.  Mixing attach() with detect() is allowed.
      */
-    Result<> attach(std::unique_ptr<IChainableInput> device) {
+    Result<> attach(std::unique_ptr<IInputTerminal> device) {
         if (!device) return std::unexpected(Error::NoDeviceFound);
         modules_.push_back(std::move(device));
         rebuildLayout();
@@ -193,8 +193,8 @@ public:
     size_t channelCount() const { return total_bits_; }
 
     /// Access one chain device (throws std::out_of_range).
-    IChainableInput&       module(size_t i)       { return *modules_.at(i); }
-    const IChainableInput& module(size_t i) const { return *modules_.at(i); }
+    IInputTerminal&       module(size_t i)       { return *modules_.at(i); }
+    const IInputTerminal& module(size_t i) const { return *modules_.at(i); }
 
     /// Bus position of chain device `i`.
     uint16_t slaveIndex(size_t i) const { return modules_.at(i)->slaveIndex(); }
@@ -346,7 +346,7 @@ private:
     /// Find the device covering flat bit `channel` (throws std::out_of_range).
     size_t locate(size_t channel) const {
         if (channel >= total_bits_) {
-            throw std::out_of_range("MultiInput bit index");
+            throw std::out_of_range("MultiInputTerminal bit index");
         }
         auto it = std::upper_bound(bit_offsets_.begin(), bit_offsets_.end(),
                                    channel);
@@ -409,7 +409,7 @@ private:
     }
 
     Master&                                          master_;
-    std::vector<std::unique_ptr<IChainableInput>>    modules_;
+    std::vector<std::unique_ptr<IInputTerminal>>    modules_;
     std::vector<size_t>                              bit_offsets_;
     size_t                                           total_bits_        = 0;
     PDOManager*                                      group_pdo_         = nullptr;

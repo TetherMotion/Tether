@@ -179,29 +179,29 @@ add_tether_example(list_slaves
 add_tether_example(reset_slaves_al
     LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common tether_examples_common)
 
-# --- Beckhoff EL2004 digital output demo ---
-# Auto-detects all EL2004 terminals via the MultiEL2004 driver, brings them
-# to OP, and steps a single active output bit across all modules on each
-# Enter keypress.
+# --- Beckhoff digital output terminal demo ---
+# Auto-detects all EL200x terminals (EL2002/2004/2008 — x = channel count)
+# via the MultiOutputTerminal driver, brings them to OP, and steps a single
+# active output bit across all modules on each Enter keypress.
 if(TETHER_BUILD_BECKHOFF)
-add_tether_example(el2004_toggle
+add_tether_example(beckhoff_output_toggle
     LIBRARIES tether_ethercat_master tether_beckhoff tether_ethercat_common tether_hal tether_common tether_examples_common)
 
-# --- Beckhoff EL1014 digital input monitor ---
+# --- Beckhoff digital input terminal monitor ---
 # Auto-detects all EL1014 terminals via the MultiEL1014 driver, brings them
 # to OP, and shows the live input state of every channel.  Default UI is an
 # ncurses panel; --stream switches to plain line output.  Without ncurses
 # the example still builds (stream mode only).
 find_package(Curses)
 if(CURSES_FOUND)
-    add_tether_example(el1014_monitor
+    add_tether_example(beckhoff_input_monitor
         LIBRARIES tether_ethercat_master tether_beckhoff tether_ethercat_common tether_hal tether_common tether_examples_common ${CURSES_LIBRARIES})
-    target_include_directories(el1014_monitor PRIVATE ${CURSES_INCLUDE_DIRS})
-    target_compile_definitions(el1014_monitor PRIVATE HAVE_NCURSES)
+    target_include_directories(beckhoff_input_monitor PRIVATE ${CURSES_INCLUDE_DIRS})
+    target_compile_definitions(beckhoff_input_monitor PRIVATE HAVE_NCURSES)
 else()
-    add_tether_example(el1014_monitor
+    add_tether_example(beckhoff_input_monitor
         LIBRARIES tether_ethercat_master tether_beckhoff tether_ethercat_common tether_hal tether_common tether_examples_common)
-    message(STATUS "ncurses not found; el1014_monitor built without TUI (--stream only)")
+    message(STATUS "ncurses not found; beckhoff_input_monitor built without TUI (--stream only)")
 endif()
 endif()
 

@@ -1,8 +1,8 @@
 /**
- * @file PackedInput.cpp
+ * @file InputTerminal.cpp
  * @brief Implementation of the generic packed-bit input terminal driver.
  *
- * Input-direction mirror of PackedOutput.cpp — see PackedInput.hpp for
+ * Input-direction mirror of OutputTerminal.cpp — see InputTerminal.hpp for
  * the API documentation.  The bring-up sequence works around three
  * framework assumptions which do not hold for this terminal family
  * (single "Inputs" SM — usually channel 0 — no mailbox, no RxPDO):
@@ -29,7 +29,7 @@
  * 1 byte for the EL1014, 8 x 1 bit -> 1 byte for the EL1008, ...).
  */
 
-#include "tether/Beckhoff/PackedInput.hpp"
+#include "tether/Beckhoff/InputTerminal.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -51,7 +51,7 @@
 namespace EtherCAT {
 namespace Beckhoff {
 
-static const char* TAG = "PackedInput";
+static const char* TAG = "InputTerminal";
 
 // ESI fallbacks (Beckhoff EL1xxx.xml), used when SII data is unavailable.
 constexpr uint8_t  kFallbackSmCtrl = 0x00;  // buffered, ECAT-read, no watchdog
@@ -62,50 +62,50 @@ constexpr uint16_t kFallbackSmLen  = 1;
 // Construction / factories
 // ---------------------------------------------------------------------------
 
-PackedInput::PackedInput(Master& master, uint16_t slave_index,
+InputTerminal::InputTerminal(Master& master, uint16_t slave_index,
                          const DeviceIdentity& identity)
     : master_(&master), slave_index_(slave_index), identity_(identity),
       state_(std::make_unique<std::atomic<uint64_t>>(0)) {
     num_inputs_ = identity.num_bits;
 }
 
-PackedInput::PackedInput(Master& master, const DiscoveredSlave& slave,
+InputTerminal::InputTerminal(Master& master, const DiscoveredSlave& slave,
                          const DeviceIdentity& identity)
-    : PackedInput(master, slave.index, identity) {
+    : InputTerminal(master, slave.index, identity) {
     info_ = slave;
 }
 
-PackedInput::~PackedInput() {
+InputTerminal::~InputTerminal() {
     stop();
 }
 
-Result<PackedInput> PackedInput::findFirst(Master& master,
+Result<InputTerminal> InputTerminal::findFirst(Master& master,
                                            const DeviceIdentity& identity) {
     auto scan = master.discovery().discover(
         {DiscoveryOption::VendorId, DiscoveryOption::ProductCode});
     return findFirst(master, identity, scan);
 }
 
-Result<PackedInput> PackedInput::findFirst(
+Result<InputTerminal> InputTerminal::findFirst(
     Master& master, const DeviceIdentity& identity,
     std::span<const DiscoveredSlave> scan) {
     for (const auto& s : scan) {
-        if (matches(s, identity)) return PackedInput(master, s, identity);
+        if (matches(s, identity)) return InputTerminal(master, s, identity);
     }
     return std::unexpected(Error::NoDeviceFound);
 }
 
-const char* PackedInput::deviceName() const {
+const char* InputTerminal::deviceName() const {
     if (info_ && info_->device_name) return info_->device_name->c_str();
     if (identity_.name) return identity_.name;
-    return "PackedInput";
+    return "InputTerminal";
 }
 
 // ---------------------------------------------------------------------------
 // Bring-up
 // ---------------------------------------------------------------------------
 
-void PackedInput::resolveInputSm() {
+void InputTerminal::resolveInputSm() {
 #if TETHER_ENABLE_SII
     // The SII SM category is positional: entry index == SM channel.
     // This terminal family has exactly one SM (channel 0, process inputs
@@ -147,7 +147,7 @@ void PackedInput::resolveInputSm() {
     if (num_inputs_ > kMaxBits) num_inputs_ = kMaxBits;
 }
 
-Result<> PackedInput::prepare(PDO::PDOAddressMode mode) {
+Result<> InputTerminal::prepare(PDO::PDOAddressMode mode) {
     if (prepared_) return {};
 
     if (slave_index_ >= PDO::kMaxPDOSlaves) {
@@ -256,7 +256,7 @@ Result<> PackedInput::prepare(PDO::PDOAddressMode mode) {
     return {};
 }
 
-Result<> PackedInput::enterSafeOp() {
+Result<> InputTerminal::enterSafeOp() {
     auto& sl = master_->slave(slave_index_);
     sl.assumePDOAlreadyConfigured();
     if (sl.transitionToSafeOp() != SlaveError::Ok) {
@@ -266,18 +266,18 @@ Result<> PackedInput::enterSafeOp() {
     return {};
 }
 
-Result<> PackedInput::configure() {
+Result<> InputTerminal::configure() {
     // Standalone: position addressing (APRD straight from the SM buffer)
     // needs no FMMU and no logical map.
     if (auto r = prepare(PDO::PDOAddressMode::Position); !r) return r;
     return enterSafeOp();
 }
 
-Result<> PackedInput::prepareForLogicalExchange() {
+Result<> InputTerminal::prepareForLogicalExchange() {
     return prepare(PDO::PDOAddressMode::Logical);
 }
 
-Result<> PackedInput::mapLogicalAndEnterSafeOp() {
+Result<> InputTerminal::mapLogicalAndEnterSafeOp() {
     if (configured_) return {};
     if (!prepared_) {
         if (auto r = prepare(PDO::PDOAddressMode::Logical); !r) return r;
@@ -317,7 +317,7 @@ Result<> PackedInput::mapLogicalAndEnterSafeOp() {
     return enterSafeOp();
 }
 
-Result<> PackedInput::requestOp(int timeout_ms) {
+Result<> InputTerminal::requestOp(int timeout_ms) {
     if (!master_->requestSlaveApplicationLayerState(
             SlaveAddress(slave_index_),
             static_cast<uint8_t>(SlaveState::OP) | 0x10)) {
@@ -341,7 +341,7 @@ Result<> PackedInput::requestOp(int timeout_ms) {
     return {};
 }
 
-Result<> PackedInput::start(const StartOptions& opts) {
+Result<> InputTerminal::start(const StartOptions& opts) {
     if (auto r = configure(); !r) return r;
 
     if (opts.manage_realtime_loop && !master_->isMotionControlLoopRunning()) {
@@ -367,7 +367,7 @@ Result<> PackedInput::start(const StartOptions& opts) {
     return {};
 }
 
-void PackedInput::stop() {
+void InputTerminal::stop() {
     if (loop_started_) {
         master_->stopMotionControlLoop();
         loop_started_ = false;
@@ -378,7 +378,7 @@ void PackedInput::stop() {
 // Inputs
 // ---------------------------------------------------------------------------
 
-bool PackedInput::bit(size_t bit) const {
+bool InputTerminal::bit(size_t bit) const {
     if (bit >= num_inputs_) return false;
     return (bits() >> bit) & 1u;
 }
@@ -387,7 +387,7 @@ bool PackedInput::bit(size_t bit) const {
 // Status
 // ---------------------------------------------------------------------------
 
-SlaveState PackedInput::alState() {
+SlaveState InputTerminal::alState() {
     uint8_t state = 0;
     if (!master_->readSlaveApplicationLayerState(SlaveAddress(slave_index_),
                                                 state)) {
@@ -396,7 +396,7 @@ SlaveState PackedInput::alState() {
     return static_cast<SlaveState>(state & 0x0F);
 }
 
-bool PackedInput::waitAlState(SlaveState target, int timeout_ms) {
+bool InputTerminal::waitAlState(SlaveState target, int timeout_ms) {
     for (int t = 0; t < timeout_ms; t += 10) {
         if (master_->isCancelRequested()) return false;
         if (alState() == target) return true;

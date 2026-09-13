@@ -2,10 +2,10 @@
  * @file MultiEL2004.hpp
  * @brief Flat bit-level interface across all Beckhoff EL2004 terminals on a bus
  *
- * MultiEL2004 is the EL2004-only specialization of the generic MultiOutput
+ * MultiEL2004 is the EL2004-only specialization of the generic MultiOutputTerminal
  * chain: detection is restricted to the EL2004 vendor/product identity and
  * module() returns a typed EL2004&.  All modules share one logical address
- * space (see MultiOutput.hpp) — the cyclic exchange is a single LRW
+ * space (see MultiOutputTerminal.hpp) — the cyclic exchange is a single LRW
  * datagram for the whole chain.
  *
  * Module 0 occupies bits 0-3, module 1 bits 4-7, and so on (within a
@@ -30,14 +30,14 @@
 #include <vector>
 
 #include "tether/Beckhoff/EL2004.hpp"
-#include "tether/Beckhoff/MultiOutput.hpp"
+#include "tether/Beckhoff/MultiOutputTerminal.hpp"
 
 namespace EtherCAT {
 namespace Beckhoff {
 
 template <size_t MaxChannels = 256>
-class MultiEL2004 : public MultiOutput<MaxChannels> {
-    using Base = MultiOutput<MaxChannels>;
+class MultiEL2004 : public MultiOutputTerminal<MaxChannels> {
+    using Base = MultiOutputTerminal<MaxChannels>;
 
 public:
     using Bitset       = typename Base::Bitset;
@@ -85,7 +85,7 @@ private:
             typename Base::DeviceMatcher{
                 EL2004::kIdentity,
                 [](Master& master, const DiscoveredSlave& s)
-                    -> std::unique_ptr<IChainableOutput> {
+                    -> std::unique_ptr<IOutputTerminal> {
                     return std::make_unique<EL2004>(master, s);
                 }}};
         return std::span<const typename Base::DeviceMatcher>(m, 1);

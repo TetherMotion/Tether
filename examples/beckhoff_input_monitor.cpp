@@ -1,5 +1,5 @@
 /**
- * @file el1014_monitor.cpp
+ * @file beckhoff_input_monitor.cpp
  * @brief Beckhoff EL1014 (4ch digital input, 24V/10us) live monitor demo
  *
  * Finds every EL1014 in the EtherCAT chain via the MultiEL1014 driver,
@@ -15,10 +15,10 @@
  *     is unavailable or stdout is not a terminal.
  *
  * Usage (Linux, requires root or CAP_NET_RAW):
- *   ./el1014_monitor                # TUI on auto-detected interface
- *   ./el1014_monitor -i enp3s0      # specify interface
- *   ./el1014_monitor --stream       # line mode for pipes/scripts
- *   ./el1014_monitor -t 30          # run for 30 s, then exit
+ *   ./beckhoff_input_monitor                # TUI on auto-detected interface
+ *   ./beckhoff_input_monitor -i enp3s0      # specify interface
+ *   ./beckhoff_input_monitor --stream       # line mode for pipes/scripts
+ *   ./beckhoff_input_monitor -t 30          # run for 30 s, then exit
  */
 
 #include <atomic>
@@ -51,7 +51,7 @@
 #include <ncurses.h>
 #endif
 
-static const char* TAG = "el1014_monitor";
+static const char* TAG = "beckhoff_input_monitor";
 
 namespace Beckhoff = EtherCAT::Beckhoff;
 namespace Platform = Tether::Platform;
@@ -240,7 +240,7 @@ static void runStream(Beckhoff::MultiEL1014<>& ins, double duration_sec) {
 // ---------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
-    argparse::ArgumentParser program("el1014_monitor", "1.0",
+    argparse::ArgumentParser program("beckhoff_input_monitor", "1.0",
                                      argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addListInterfacesArg(program);

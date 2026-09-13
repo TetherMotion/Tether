@@ -2,10 +2,10 @@
  * @file MultiEL1014.hpp
  * @brief Flat bit-level interface across all Beckhoff EL1014 terminals on a bus
  *
- * MultiEL1014 is the EL1014-only specialization of the generic MultiInput
+ * MultiEL1014 is the EL1014-only specialization of the generic MultiInputTerminal
  * chain: detection is restricted to the EL1014 vendor/product identity and
  * module() returns a typed EL1014&.  All modules share one logical address
- * space (see MultiInput.hpp) — the cyclic exchange is a single LRW
+ * space (see MultiInputTerminal.hpp) — the cyclic exchange is a single LRW
  * datagram for the whole chain.
  *
  * Module 0 occupies bits 0-3, module 1 bits 4-7, and so on (within a
@@ -27,14 +27,14 @@
 #include <vector>
 
 #include "tether/Beckhoff/EL1014.hpp"
-#include "tether/Beckhoff/MultiInput.hpp"
+#include "tether/Beckhoff/MultiInputTerminal.hpp"
 
 namespace EtherCAT {
 namespace Beckhoff {
 
 template <size_t MaxChannels = 256>
-class MultiEL1014 : public MultiInput<MaxChannels> {
-    using Base = MultiInput<MaxChannels>;
+class MultiEL1014 : public MultiInputTerminal<MaxChannels> {
+    using Base = MultiInputTerminal<MaxChannels>;
 
 public:
     using Bitset       = typename Base::Bitset;
@@ -82,7 +82,7 @@ private:
             typename Base::DeviceMatcher{
                 EL1014::kIdentity,
                 [](Master& master, const DiscoveredSlave& s)
-                    -> std::unique_ptr<IChainableInput> {
+                    -> std::unique_ptr<IInputTerminal> {
                     return std::make_unique<EL1014>(master, s);
                 }}};
         return std::span<const typename Base::DeviceMatcher>(m, 1);

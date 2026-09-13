@@ -1,8 +1,8 @@
 /**
- * @file PackedInput.hpp
+ * @file InputTerminal.hpp
  * @brief Generic driver for Beckhoff-style packed-bit input terminals
  *
- * PackedInput reads any terminal whose process inputs are N one-bit
+ * InputTerminal reads any terminal whose process inputs are N one-bit
  * channels packed into a single sync manager — the whole "SM0 = Inputs,
  * one input FMMU, no mailbox" family of the Beckhoff EL1xxx ESI (see the
  * Devices registry below).  The channel count comes from the
@@ -11,12 +11,12 @@
  *
  * @code
  *   // Standalone — position addressing, one frame per terminal:
- *   auto el = PackedInput::findFirst(master, Devices::EL1008);
+ *   auto el = InputTerminal::findFirst(master, Devices::EL1008);
  *   el->start();
  *   bool on = el->bit(0);
  *
  *   // Chained — one shared logical address space, one LRW frame per cycle:
- *   MultiInput<> ins(master);              // see MultiInput.hpp
+ *   MultiInputTerminal<> ins(master);              // see MultiInputTerminal.hpp
  *   ins.detect();                          // every known input terminal
  *   ins.start();
  *   auto field = ins.bits();               // flat std::bitset
@@ -37,7 +37,7 @@
 #include <optional>
 #include <span>
 
-#include "tether/Beckhoff/ChainableInput.hpp"
+#include "tether/Beckhoff/IInputTerminal.hpp"
 #include "tether/ethercat/PDOManager.hpp"             // PDOAddressMode, kMaxPDOSlaves
 #include "tether/ethercat/SlaveDiscoveryManager.hpp"  // DiscoveredSlave
 #include "tether/ethercat/Types.hpp"                  // SlaveState
@@ -53,7 +53,7 @@ namespace Beckhoff {
 // Known packed-input terminals (from the Beckhoff EL1xxx ESI)
 // ============================================================================
 // Every entry below has exactly one "Inputs" sync manager, one "Inputs"
-// FMMU, N x 1-bit TxPDOs and no mailbox — i.e. the PackedInput shape.
+// FMMU, N x 1-bit TxPDOs and no mailbox — i.e. the InputTerminal shape.
 // Product codes verified against Beckhoff EL1xxx.xml.
 
 namespace Devices {
@@ -96,7 +96,7 @@ inline constexpr DeviceIdentity EL1889{0x00000002, 0x07613052, 16, "EL1889"};
 inline constexpr DeviceIdentity EL1899{0x00000002, 0x076B3052, 16, "EL1899"};
 
 /// Every known packed-input terminal — the default detection set used by
-/// MultiInput::detect().
+/// MultiInputTerminal::detect().
 inline constexpr std::array kInputTerminals{
     EL1002, EL1004, EL1008, EL1012, EL1014, EL1018, EL1024, EL1034,
     EL1052, EL1054, EL1084, EL1088, EL1094, EL1098, EL1104, EL1114,
@@ -108,10 +108,10 @@ inline constexpr std::array kInputTerminals{
 } // namespace Devices
 
 // ============================================================================
-// PackedInput — generic single-field input terminal driver
+// InputTerminal — generic single-field input terminal driver
 // ============================================================================
 
-class PackedInput : public IChainableInput {
+class InputTerminal : public IInputTerminal {
 public:
     /// Maximum input bits supported per device (one 64-bit field).
     static constexpr size_t kMaxBits = 64;
@@ -127,7 +127,7 @@ public:
      * The slave's identity and SII data are read lazily in configure()
      * (via discovery().discoverOne()), so construction never performs bus I/O.
      */
-    PackedInput(Master& master, uint16_t slave_index,
+    InputTerminal(Master& master, uint16_t slave_index,
                 const DeviceIdentity& identity);
 
     /**
@@ -138,15 +138,15 @@ public:
      * in configure() — a vendor/product mismatch fails with
      * Error::WrongDevice.
      */
-    PackedInput(Master& master, const DiscoveredSlave& slave,
+    InputTerminal(Master& master, const DiscoveredSlave& slave,
                 const DeviceIdentity& identity);
 
-    ~PackedInput() override;
+    ~InputTerminal() override;
 
-    PackedInput(PackedInput&&) noexcept            = default;
-    PackedInput& operator=(PackedInput&&) noexcept = default;
-    PackedInput(const PackedInput&)                = delete;
-    PackedInput& operator=(const PackedInput&)     = delete;
+    InputTerminal(InputTerminal&&) noexcept            = default;
+    InputTerminal& operator=(InputTerminal&&) noexcept = default;
+    InputTerminal(const InputTerminal&)                = delete;
+    InputTerminal& operator=(const InputTerminal&)     = delete;
 
     // -- Factories ---------------------------------------------------------------
 
@@ -160,11 +160,11 @@ public:
      *        matching `identity`.  Runs a shallow vendor/product discovery.
      * @return The driver, or Error::NoDeviceFound.
      */
-    static Result<PackedInput> findFirst(Master& master,
+    static Result<InputTerminal> findFirst(Master& master,
                                          const DeviceIdentity& identity);
 
     /// Like findFirst(master, identity) but reuses an existing scan.
-    static Result<PackedInput> findFirst(
+    static Result<InputTerminal> findFirst(
         Master& master, const DeviceIdentity& identity,
         std::span<const DiscoveredSlave> scan);
 
@@ -197,7 +197,7 @@ public:
      */
     void stop();
 
-    // -- IChainableInput --------------------------------------------------------
+    // -- IInputTerminal --------------------------------------------------------
 
     uint16_t slaveIndex() const override { return slave_index_; }
     size_t   bitCount() const override   { return num_inputs_; }

@@ -5,7 +5,7 @@
  * The EL2004 (vendor 0x00000002, product 0x07D43052) is a mailbox-less,
  * output-only EtherCAT terminal: four 24V/0.5A channels packed as four bits
  * into a single process-data byte on sync-manager channel 0.  It is one
- * member of the generic packed-output family implemented by PackedOutput —
+ * member of the generic packed-output family implemented by OutputTerminal —
  * this class just binds the EL2004 identity and adds a std::bitset-flavoured
  * channel API.
  *
@@ -27,7 +27,7 @@
  * Channel numbering is 0-based throughout (0 = terminal marking "1").
  *
  * For chains mixing different output terminals (EL2002, EL2008, relays, ...)
- * over one shared logical address space see MultiOutput.hpp.  MultiEL2004
+ * over one shared logical address space see MultiOutputTerminal.hpp.  MultiEL2004
  * provides the EL2004-only variant.
  */
 
@@ -38,16 +38,16 @@
 #include <cstdint>
 #include <span>
 
-#include "tether/Beckhoff/PackedOutput.hpp"
+#include "tether/Beckhoff/OutputTerminal.hpp"
 
 namespace EtherCAT {
 namespace Beckhoff {
 
 // ============================================================================
-// EL2004 — PackedOutput specialization
+// EL2004 — OutputTerminal specialization
 // ============================================================================
 
-class EL2004 : public PackedOutput {
+class EL2004 : public OutputTerminal {
 public:
     // -- Device identity (from the Beckhoff EL2xxx ESI) ----------------------
 
@@ -72,16 +72,16 @@ public:
     // -- Construction ----------------------------------------------------------
 
     EL2004(Master& master, uint16_t slave_index)
-        : PackedOutput(master, slave_index, kIdentity) {}
+        : OutputTerminal(master, slave_index, kIdentity) {}
 
     EL2004(Master& master, const DiscoveredSlave& slave)
-        : PackedOutput(master, slave, kIdentity) {}
+        : OutputTerminal(master, slave, kIdentity) {}
 
     // -- Factories ---------------------------------------------------------------
 
     /// True when `s` carries the EL2004 vendor/product identity.
     static bool matches(const DiscoveredSlave& s) {
-        return PackedOutput::matches(s, kIdentity);
+        return OutputTerminal::matches(s, kIdentity);
     }
 
     /**
@@ -102,7 +102,7 @@ public:
 
     // -- std::bitset channel API -------------------------------------------------
     // Generic bit access (setBit/bit/setBits/bits/setOnly/allOn/allOff) is
-    // inherited from PackedOutput.
+    // inherited from OutputTerminal.
 
     /// Set a single channel (0-3).  Out-of-range indices are ignored.
     void set(size_t channel, bool on) { setBit(channel, on); }

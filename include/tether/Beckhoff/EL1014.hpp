@@ -5,7 +5,7 @@
  * The EL1014 (vendor 0x00000002, product 0x03F63052) is a mailbox-less,
  * input-only EtherCAT terminal: four 24V/10µs channels packed as four bits
  * into a single process-data byte on sync-manager channel 0.  It is one
- * member of the generic packed-input family implemented by PackedInput —
+ * member of the generic packed-input family implemented by InputTerminal —
  * this class just binds the EL1014 identity and adds a std::bitset-flavoured
  * channel API.
  *
@@ -25,7 +25,7 @@
  * Channel numbering is 0-based throughout (0 = terminal marking "1").
  *
  * For chains mixing different input terminals (EL1002, EL1008, ...) over
- * one shared logical address space see MultiInput.hpp.  MultiEL1014
+ * one shared logical address space see MultiInputTerminal.hpp.  MultiEL1014
  * provides the EL1014-only variant.
  */
 
@@ -36,16 +36,16 @@
 #include <cstdint>
 #include <span>
 
-#include "tether/Beckhoff/PackedInput.hpp"
+#include "tether/Beckhoff/InputTerminal.hpp"
 
 namespace EtherCAT {
 namespace Beckhoff {
 
 // ============================================================================
-// EL1014 — PackedInput specialization
+// EL1014 — InputTerminal specialization
 // ============================================================================
 
-class EL1014 : public PackedInput {
+class EL1014 : public InputTerminal {
 public:
     // -- Device identity (from the Beckhoff EL1xxx ESI) ----------------------
 
@@ -69,16 +69,16 @@ public:
     // -- Construction ----------------------------------------------------------
 
     EL1014(Master& master, uint16_t slave_index)
-        : PackedInput(master, slave_index, kIdentity) {}
+        : InputTerminal(master, slave_index, kIdentity) {}
 
     EL1014(Master& master, const DiscoveredSlave& slave)
-        : PackedInput(master, slave, kIdentity) {}
+        : InputTerminal(master, slave, kIdentity) {}
 
     // -- Factories ---------------------------------------------------------------
 
     /// True when `s` carries the EL1014 vendor/product identity.
     static bool matches(const DiscoveredSlave& s) {
-        return PackedInput::matches(s, kIdentity);
+        return InputTerminal::matches(s, kIdentity);
     }
 
     /**
@@ -98,7 +98,7 @@ public:
                                     std::span<const DiscoveredSlave> scan);
 
     // -- std::bitset channel API -------------------------------------------------
-    // Generic bit access (bit/bits) is inherited from PackedInput.
+    // Generic bit access (bit/bits) is inherited from InputTerminal.
 
     /// Current state of a channel (0-3); false if out of range.
     bool get(size_t channel) const { return bit(channel); }

@@ -1,7 +1,7 @@
 /**
  * @file EL2004.cpp
- * @brief EL2004 factories.  All device logic lives in PackedOutput.cpp —
- *        the EL2004 is just a PackedOutput with a bound identity.
+ * @brief EL2004 factories.  All device logic lives in OutputTerminal.cpp —
+ *        the EL2004 is just a OutputTerminal with a bound identity.
  */
 
 #include "tether/Beckhoff/EL2004.hpp"

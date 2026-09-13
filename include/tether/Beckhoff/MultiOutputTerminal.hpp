@@ -1,9 +1,9 @@
 /**
- * @file MultiOutput.hpp
+ * @file MultiOutputTerminal.hpp
  * @brief Flat bit-level interface across a heterogeneous chain of output
  *        terminals sharing one logical address space
  *
- * MultiOutput collects devices implementing IChainableOutput (any width —
+ * MultiOutputTerminal collects devices implementing IOutputTerminal (any width —
  * 1, 2, 4, 8, ... bits) and presents their outputs as one contiguous set of
  * bits: the device at the lowest bus position occupies bits [0, w0), the
  * next device bits [w0, w0+w1), and so on (within a device, bit N = output
@@ -17,7 +17,7 @@
  * the chain keep using the default pdo() manager and are unaffected.
  *
  * @code
- *   MultiOutput<> outs(master);
+ *   MultiOutputTerminal<> outs(master);
  *   outs.detect();                 // every known packed-output terminal
  *   outs.start();                  // shared LRW map + SAFE-OP + OP + RT loop
  *
@@ -29,10 +29,10 @@
  * @endcode
  *
  * Custom devices: pass a DeviceMatcher list to detect(), or attach() an
- * IChainableOutput implementation directly:
+ * IOutputTerminal implementation directly:
  *
  * @code
- *   MultiOutput<>::DeviceMatcher myDevice{
+ *   MultiOutputTerminal<>::DeviceMatcher myDevice{
  *       {0x00000002, 0x07D43052, 4, "EL2004"},
  *       [](Master& m, const DiscoveredSlave& s) {
  *           return std::make_unique<MyDevice>(m, s);
@@ -56,8 +56,8 @@
 #include <stdexcept>
 #include <vector>
 
-#include "tether/Beckhoff/ChainableOutput.hpp"
-#include "tether/Beckhoff/PackedOutput.hpp"
+#include "tether/Beckhoff/IOutputTerminal.hpp"
+#include "tether/Beckhoff/OutputTerminal.hpp"
 #include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/PDOManager.hpp"
@@ -68,7 +68,7 @@ namespace EtherCAT {
 namespace Beckhoff {
 
 template <size_t MaxBits = 256>
-class MultiOutput {
+class MultiOutputTerminal {
 public:
     /// Flat output bitset type — bit i = global channel i.
     using Bitset       = std::bitset<MaxBits>;
@@ -81,12 +81,12 @@ public:
      * @brief How to recognize and construct a chained device.
      *
      * `identity` is matched against the discovered vendor/product IDs.
-     * `create` constructs the IChainableOutput; when empty, a generic
-     * PackedOutput is constructed for the identity.
+     * `create` constructs the IOutputTerminal; when empty, a generic
+     * OutputTerminal is constructed for the identity.
      */
     struct DeviceMatcher {
         DeviceIdentity identity;
-        std::function<std::unique_ptr<IChainableOutput>(
+        std::function<std::unique_ptr<IOutputTerminal>(
             Master&, const DiscoveredSlave&)> create;
 
         /*implicit*/ DeviceMatcher(const DeviceIdentity& id)
@@ -99,13 +99,13 @@ public:
      * @brief Construct bound to a started master.  Performs no bus I/O —
      *        call detect()/attach() to populate the chain.
      */
-    explicit MultiOutput(Master& master) : master_(master) {}
+    explicit MultiOutputTerminal(Master& master) : master_(master) {}
 
-    ~MultiOutput() { stop(); }
+    ~MultiOutputTerminal() { stop(); }
 
-    MultiOutput(MultiOutput&&)                 = delete;
-    MultiOutput(const MultiOutput&)            = delete;
-    MultiOutput& operator=(const MultiOutput&) = delete;
+    MultiOutputTerminal(MultiOutputTerminal&&)                 = delete;
+    MultiOutputTerminal(const MultiOutputTerminal&)            = delete;
+    MultiOutputTerminal& operator=(const MultiOutputTerminal&) = delete;
 
     /// All packed-output terminals known to this driver (ESI-verified).
     static std::span<const DeviceIdentity> knownDevices() {
@@ -162,10 +162,10 @@ public:
         group_lam_    = nullptr;
         for (const auto& s : scan) {
             for (const auto& m : matchers) {
-                if (!PackedOutput::matches(s, m.identity)) continue;
+                if (!OutputTerminal::matches(s, m.identity)) continue;
                 if (m.create) modules_.push_back(m.create(master_, s));
                 else modules_.push_back(
-                    std::make_unique<PackedOutput>(master_, s, m.identity));
+                    std::make_unique<OutputTerminal>(master_, s, m.identity));
                 break;
             }
         }
@@ -175,12 +175,12 @@ public:
 
     /**
      * @brief Append a pre-constructed chained device (any
-     *        IChainableOutput implementation).
+     *        IOutputTerminal implementation).
      *
      * The flat bit layout is always sorted by bus position, so call order
      * does not matter.  Mixing attach() with detect() is allowed.
      */
-    Result<> attach(std::unique_ptr<IChainableOutput> device) {
+    Result<> attach(std::unique_ptr<IOutputTerminal> device) {
         if (!device) return std::unexpected(Error::NoDeviceFound);
         modules_.push_back(std::move(device));
         rebuildLayout();
@@ -196,8 +196,8 @@ public:
     size_t channelCount() const { return total_bits_; }
 
     /// Access one chain device (throws std::out_of_range).
-    IChainableOutput&       module(size_t i)       { return *modules_.at(i); }
-    const IChainableOutput& module(size_t i) const { return *modules_.at(i); }
+    IOutputTerminal&       module(size_t i)       { return *modules_.at(i); }
+    const IOutputTerminal& module(size_t i) const { return *modules_.at(i); }
 
     /// Bus position of chain device `i`.
     uint16_t slaveIndex(size_t i) const { return modules_.at(i)->slaveIndex(); }
@@ -384,7 +384,7 @@ private:
     /// Find the device covering flat bit `channel` (throws std::out_of_range).
     size_t locate(size_t channel) const {
         if (channel >= total_bits_) {
-            throw std::out_of_range("MultiOutput bit index");
+            throw std::out_of_range("MultiOutputTerminal bit index");
         }
         auto it = std::upper_bound(bit_offsets_.begin(), bit_offsets_.end(),
                                    channel);
@@ -447,7 +447,7 @@ private:
     }
 
     Master&                                          master_;
-    std::vector<std::unique_ptr<IChainableOutput>>   modules_;
+    std::vector<std::unique_ptr<IOutputTerminal>>   modules_;
     std::vector<size_t>                              bit_offsets_;
     size_t                                           total_bits_        = 0;
     PDOManager*                                      group_pdo_         = nullptr;
