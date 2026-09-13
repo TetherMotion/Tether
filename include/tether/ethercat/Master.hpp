@@ -408,17 +408,6 @@ public:
 
     /** @brief Set the default timeout for per-slave SII bus reads. */
     void setSiiTimeoutMs(uint32_t timeout_ms) { sii_timeout_ms_ = timeout_ms; }
-
-    /**
-     * @brief Internal per-slave SII word cache access.
-     *
-     * These are used by the per-slave SIIManager's low-level SIIReader.
-     * They delegate to the slave's SIIManager cache and are not intended for
-     * application code.
-     */
-    bool getSIICachedWord(uint16_t slave_index, uint16_t word_addr, uint16_t& out) const;
-    void setSIICachedWord(uint16_t slave_index, uint16_t word_addr, uint16_t value);
-    void clearSIICache(uint16_t slave_index);
 #endif
 
     // ---- AL state management -----------------------------------------------
