@@ -5,6 +5,8 @@
 
 #include "sii/SIIReader.hpp"
 #include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/Slave.hpp"
+#include "tether/sii/SIIManager.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
 #include "tether/platform/Platform.hpp"
 #include "ethercat/raw/internal.hpp"
@@ -322,11 +324,12 @@ bool SIIReader::readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t*
     const bool dbg = m_master.debugFlags().eeprom &&
                      m_master.debugFlags().eepromFilt.allows(slave_index);
 
-    // Check the master-level per-slave cache before touching the bus.
+    // Check the per-slave SII cache before touching the bus.
     uint16_t lo = 0, hi = 0;
     const uint16_t wa = static_cast<uint16_t>(word_address & 0xFFFEu);
-    if (m_master.getSIICachedWord(slave_index, wa, lo) &&
-        m_master.getSIICachedWord(slave_index, static_cast<uint16_t>(wa + 1), hi)) {
+    auto& cache = m_master.slave(slave_index).sii().cache();
+    if (cache.get(wa, lo) &&
+        cache.get(static_cast<uint16_t>(wa + 1), hi)) {
         if (out) *out = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 16);
         if (dbg) {
             TETHER_LOGD(TAG, "EEPROM [slave {}]: readRaw32 addr=0x{:04X} cache hit", slave_index, word_address);
@@ -463,9 +466,9 @@ bool SIIReader::readRaw32(uint16_t slave_index, uint16_t word_address, uint32_t*
         if (out) {
             *out = Raw::le32_to_host(edat_le);
         }
-        // Populate the master-level cache so future readers hit it.
-        m_master.setSIICachedWord(slave_index, wa, static_cast<uint16_t>(edat_le & 0xFFFF));
-        m_master.setSIICachedWord(slave_index, static_cast<uint16_t>(wa + 1), static_cast<uint16_t>((edat_le >> 16) & 0xFFFF));
+        // Populate the per-slave cache so future readers hit it.
+        cache.set(wa, static_cast<uint16_t>(edat_le & 0xFFFF));
+        cache.set(static_cast<uint16_t>(wa + 1), static_cast<uint16_t>((edat_le >> 16) & 0xFFFF));
         if (dbg) {
             TETHER_LOGI(TAG, "EEPROM [slave {}]: readRaw32 addr=0x{:04X} SUCCESS edat=0x{:08X} pre={} post={} nack={}",
                         slave_index, word_address, Raw::le32_to_host(edat_le), pre_iters, post_iters, nack_count);

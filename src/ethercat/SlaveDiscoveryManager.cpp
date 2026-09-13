@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -27,6 +28,27 @@
 namespace EtherCAT {
 
 static const char* TAG = "discovery";
+
+#if TETHER_ENABLE_SII
+/// Convert a Latin-1 (ISO 8859-1) string to UTF-8.
+/// SII EEPROM strings from Beckhoff use Latin-1 encoding (e.g. µ = 0xB5).
+/// UTF-8 requires 2 bytes for characters 0x80-0xFF.
+static std::string latin1ToUtf8(const char* str) {
+    if (!str) return {};
+    std::string out;
+    out.reserve(std::strlen(str) * 2);
+    for (const unsigned char* p = reinterpret_cast<const unsigned char*>(str);
+         *p; ++p) {
+        if (*p < 0x80) {
+            out.push_back(static_cast<char>(*p));
+        } else {
+            out.push_back(static_cast<char>(0xC0 | (*p >> 6)));
+            out.push_back(static_cast<char>(0x80 | (*p & 0x3F)));
+        }
+    }
+    return out;
+}
+#endif
 
 // ============================================================================
 // Construction
@@ -281,19 +303,19 @@ void SlaveDiscoveryManager::readSlaveSii(DiscoveredSlave& out,
                     if (data.general.name_idx > 0) {
                         char buf[256] = {};
                         if (sii.readString(data.general.name_idx, buf, sizeof(buf))) {
-                            out.device_name = std::string(buf);
+                            out.device_name = latin1ToUtf8(buf);
                         }
                     }
                     if (data.general.group_idx > 0) {
                         char buf[256] = {};
                         if (sii.readString(data.general.group_idx, buf, sizeof(buf))) {
-                            out.group_name = std::string(buf);
+                            out.group_name = latin1ToUtf8(buf);
                         }
                     }
                     if (data.general.order_idx > 0) {
                         char buf[256] = {};
                         if (sii.readString(data.general.order_idx, buf, sizeof(buf))) {
-                            out.order_code = std::string(buf);
+                            out.order_code = latin1ToUtf8(buf);
                         }
                     }
                 }

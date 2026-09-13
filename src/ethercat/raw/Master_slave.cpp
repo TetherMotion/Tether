@@ -325,31 +325,6 @@ SII::SIIManager& Master::sii(uint16_t slave_index)
     return non_existing_slave_->sii();
 }
 
-bool Master::getSIICachedWord(uint16_t slave_index, uint16_t word_addr, uint16_t& out) const
-{
-    if (slave_index >= slaves_.size()) return false;
-    return slaves_[slave_index]->sii().cache().get(word_addr, out);
-}
-
-
-void Master::setSIICachedWord(uint16_t slave_index, uint16_t word_addr, uint16_t value)
-{
-    if (slave_index >= slaves_.size()) return;
-    slaves_[slave_index]->sii().cache().set(word_addr, value);
-}
-
-void Master::clearSIICache(uint16_t slave_index)
-{
-    if (slave_index >= slaves_.size()) return;
-    if (slave_index == static_cast<uint16_t>(-1)) {
-        for (auto& s : slaves_) {
-            s->sii().invalidateCache();
-        }
-    } else {
-        slaves_[slave_index]->sii().invalidateCache();
-    }
-}
-
 #endif // TETHER_ENABLE_SII
 
 bool Master::resolvePhysicalSlaveIndex(SlaveAddress slave_address, uint16_t& slave_index_out)
