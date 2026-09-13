@@ -8,6 +8,7 @@
 #if TETHER_ENABLE_SII
 
 #include "tether/ethercat/Master.hpp"
+#include "tether/sii/SIIDemandParser.hpp"
 #include "ethercat/raw/internal.hpp"
 #include "tether/platform/Platform.hpp"
 
@@ -174,18 +175,55 @@ bool SIIManager::parseCategories(SIIData& data, uint32_t cat_mask)
         return true;
     }
 
-    SIIParser parser(*reader_);
-    if (!parser.parseCategories(slave_index_, data, cat_mask)) {
-        TETHER_LOGW(TAG, "SII parse failed for slave {}", slave_index_);
-        return false;
+    // Use the demand-driven parser, fetching missing word-pairs via the
+    // blocking SII reader. This shares the same parsing logic as the
+    // EEPROMReactor (which uses SIIDemandParser directly against the
+    // cache with concurrent bus reads).
+    //
+    // The loop iterates:
+    //   1. Call the demand parser against the cache.
+    //   2. If COMPLETE, we're done.
+    //   3. If NEED_WORDS, fetch each missing word-pair via readDWord
+    //      (which populates the cache), then loop.
+    //   4. If FAILED, report error.
+    SIIDemandParser parser;
+    parser.init(cat_mask);
+
+    constexpr int max_iterations = 4096;  // Safety valve
+    for (int i = 0; i < max_iterations; ++i) {
+        auto result = parser.parse(cache_, data);
+
+        if (result.isComplete()) {
+            cached_data_ = data;
+            cached_cat_mask_ = cat_mask;
+            if (cat_mask == SII::CAT_MASK_ALL) {
+                full_parse_done_ = true;
+            }
+            return true;
+        }
+
+        if (result.isFailed()) {
+            TETHER_LOGW(TAG, "SII demand parse failed for slave {}: {}",
+                        slave_index_, parser.lastError());
+            return false;
+        }
+
+        // NEED_WORDS — fetch each missing word-pair via the blocking reader.
+        // readDWord() populates the cache, so the next parse() call will
+        // find the words present and advance.
+        for (uint16_t addr : result.needed_word_pairs) {
+            uint32_t dword = 0;
+            if (!reader_->readDWord(slave_index_, addr, dword)) {
+                TETHER_LOGW(TAG, "SII readDWord failed at 0x{:04X} for slave {}",
+                            addr, slave_index_);
+                return false;
+            }
+        }
     }
 
-    cached_data_ = data;
-    cached_cat_mask_ = cat_mask;
-    if (cat_mask == SII::CAT_MASK_ALL) {
-        full_parse_done_ = true;
-    }
-    return true;
+    TETHER_LOGW(TAG, "SII demand parse exceeded {} iterations for slave {}",
+                max_iterations, slave_index_);
+    return false;
 }
 
 void SIIManager::invalidateCache()

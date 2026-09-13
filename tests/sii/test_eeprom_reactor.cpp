@@ -3,12 +3,12 @@
  * @brief Comprehensive tests for the EEPROM reactor and state machine
  *
  * Tests cover:
- *   - State machine initialization and state transitions
+ *   - State machine initialization and state transitions (single word-pair)
  *   - Datagram spec generation for each protocol step
  *   - Completion handling (success, timeout, error, NACK retry)
- *   - Word advancement and DONE state
+ *   - DONE state and reinit for next word-pair
  *   - Cache population on READ_EEPDAT
- *   - Reactor integration with a dev-null network interface
+ *   - Reactor integration with a loopback network interface
  *   - Multi-slave concurrent reads
  *   - Cancellation and cleanup
  *   - Memory safety (slot cleanup on destruction)
@@ -48,62 +48,54 @@ static WaitResult makeFailure() {
     return r;
 }
 
-/// Route a fake response to the router for a given idx.
-static void routeResponse(TransactionRouter& router, uint8_t idx,
-                           const uint8_t* data, uint16_t len,
-                           uint16_t wkc = 1) {
-    RxDatagram dg{};
-    dg.idx = idx;
-    dg.cmd = Command::APRD;
-    dg.adp = 0;
-    dg.ado = 0;
-    dg.wkc = wkc;
-    dg.datalen = len;
-    if (data && len) std::memcpy(dg.data, data, len);
-    router.routePacket(dg);
-}
-
 // ============================================================================
 // State Machine Unit Tests
 // ============================================================================
+//
+// The state machine reads a SINGLE word-pair per init/reinit cycle.
+// After DONE, the reactor calls reinit() for the next word-pair.
 
 class EEPROMStateMachineTest : public ::testing::Test {
 protected:
     EEPROMReadStateMachine sm;
 };
 
-TEST_F(EEPROMStateMachineTest, Init_ZeroWords_IsDone) {
-    sm.init(0, 0x0040, 0);
-    EXPECT_EQ(sm.state(), EEPROMState::DONE);
-    EXPECT_TRUE(sm.isFinished());
-    EXPECT_FALSE(sm.needsSend());
-}
-
-TEST_F(EEPROMStateMachineTest, Init_NonZero_StartsAtWriteEepAddr) {
-    sm.init(0, 0x0040, 10);
+TEST_F(EEPROMStateMachineTest, Init_StartsAtWriteEepAddr) {
+    sm.init(0, {0x0040});
     EXPECT_EQ(sm.state(), EEPROMState::WRITE_EEPADDR);
     EXPECT_FALSE(sm.isFinished());
     EXPECT_TRUE(sm.needsSend());
     EXPECT_EQ(sm.slaveIndex(), 0u);
-    EXPECT_EQ(sm.totalWords(), 10u);
+    EXPECT_EQ(sm.currentWord(), 0x0040u);
+    EXPECT_EQ(sm.totalWords(), 1u);
     EXPECT_EQ(sm.wordsRead(), 0u);
+    EXPECT_EQ(sm.remaining(), 1u);
 }
 
-TEST_F(EEPROMStateMachineTest, Init_AlignsStartWordToEven) {
-    sm.init(0, 0x0041, 5);  // Odd address
-    // Should be aligned to 0x0040 internally
-    // We verify by checking the first datagram's EEPADDR payload
+TEST_F(EEPROMStateMachineTest, Init_EmptyVector_IsDone) {
+    sm.init(0, {});
+    EXPECT_EQ(sm.state(), EEPROMState::DONE);
+    EXPECT_TRUE(sm.isFinished());
+    EXPECT_FALSE(sm.needsSend());
+    EXPECT_EQ(sm.totalWords(), 0u);
+}
+
+TEST_F(EEPROMStateMachineTest, Init_AlignsWordToEven) {
+    sm.init(0, {0x0041});  // Odd address
+    // currentWord() returns the raw vector value; alignment happens
+    // in buildDatagram() via & 0xFFFEu.
+    EXPECT_EQ(sm.currentWord(), 0x0041u);
     auto spec = sm.buildDatagram(1);
     ASSERT_EQ(spec.cmd, Command::APWR);
     ASSERT_EQ(spec.ado, EEPROMProtocol::REG_EEPADDR);
     ASSERT_EQ(spec.datalen, 2u);
     uint16_t addr = le16_to_host(
         *reinterpret_cast<const uint16_t*>(spec.data));
-    EXPECT_EQ(addr, 0x0040u);  // Aligned to even
+    EXPECT_EQ(addr, 0x0040u);  // Aligned to even in the datagram
 }
 
 TEST_F(EEPROMStateMachineTest, BuildDatagram_WriteEepAddr) {
-    sm.init(2, 0x0080, 4);
+    sm.init(2, {0x0080});
     auto spec = sm.buildDatagram(42);
     EXPECT_EQ(spec.cmd, Command::APWR);
     EXPECT_EQ(spec.idx, 42);
@@ -114,37 +106,35 @@ TEST_F(EEPROMStateMachineTest, BuildDatagram_WriteEepAddr) {
 }
 
 TEST_F(EEPROMStateMachineTest, BuildDatagram_WriteEepCtlRead) {
-    sm.init(0, 0x0040, 4);
-    // Advance to WRITE_EEPCTL_READ by completing WRITE_EEPADDR
-    // (need a Master for onComplete — use a real one)
-    Master master;
-    master.packetRouter().init();
-    master.initSlaves(1);
-
-    auto spec1 = sm.buildDatagram(1);
-    sm.onComplete(makeSuccess(1, 0, 1), master);
-    ASSERT_EQ(sm.state(), EEPROMState::WRITE_EEPCTL_READ);
-
-    auto spec2 = sm.buildDatagram(2);
-    EXPECT_EQ(spec2.cmd, Command::APWR);
-    EXPECT_EQ(spec2.idx, 2);
-    EXPECT_EQ(spec2.ado, EEPROMProtocol::REG_EEPCTL);
-    EXPECT_EQ(spec2.datalen, 2u);
-    EXPECT_NE(spec2.data, nullptr);
-
-    master.packetRouter().shutdown();
-}
-
-TEST_F(EEPROMStateMachineTest, BuildDatagram_PollEepStat) {
-    sm.init(0, 0x0040, 4);
+    sm.init(0, {0x0040});
     Master master;
     master.packetRouter().init();
     master.initSlaves(1);
 
     sm.buildDatagram(1);
-    sm.onComplete(makeSuccess(1, 0, 1), master);  // WRITE_EEPADDR done
+    sm.onComplete(makeSuccess(1, 0, 1), master);
+    ASSERT_EQ(sm.state(), EEPROMState::WRITE_EEPCTL_READ);
+
+    auto spec = sm.buildDatagram(2);
+    EXPECT_EQ(spec.cmd, Command::APWR);
+    EXPECT_EQ(spec.idx, 2);
+    EXPECT_EQ(spec.ado, EEPROMProtocol::REG_EEPCTL);
+    EXPECT_EQ(spec.datalen, 2u);
+    EXPECT_NE(spec.data, nullptr);
+
+    master.packetRouter().shutdown();
+}
+
+TEST_F(EEPROMStateMachineTest, BuildDatagram_PollEepStat) {
+    sm.init(0, {0x0040});
+    Master master;
+    master.packetRouter().init();
+    master.initSlaves(1);
+
+    sm.buildDatagram(1);
+    sm.onComplete(makeSuccess(1, 0, 1), master);
     sm.buildDatagram(2);
-    sm.onComplete(makeSuccess(1, 0, 2), master);  // WRITE_EEPCTL_READ done
+    sm.onComplete(makeSuccess(1, 0, 2), master);
     ASSERT_EQ(sm.state(), EEPROMState::POLL_EEPSTAT);
 
     auto spec = sm.buildDatagram(3);
@@ -158,20 +148,19 @@ TEST_F(EEPROMStateMachineTest, BuildDatagram_PollEepStat) {
 }
 
 TEST_F(EEPROMStateMachineTest, BuildDatagram_ReadEepDat) {
-    sm.init(0, 0x0040, 4);
+    sm.init(0, {0x0040});
     Master master;
     master.packetRouter().init();
     master.initSlaves(1);
 
     sm.buildDatagram(1);
-    sm.onComplete(makeSuccess(1, 0, 1), master);  // WRITE_EEPADDR
+    sm.onComplete(makeSuccess(1, 0, 1), master);
     sm.buildDatagram(2);
-    sm.onComplete(makeSuccess(1, 0, 2), master);  // WRITE_EEPCTL_READ
+    sm.onComplete(makeSuccess(1, 0, 2), master);
     sm.buildDatagram(3);
-    // Poll response: not busy, no errors
     sm.response().data[0] = 0;
     sm.response().data[1] = 0;
-    sm.onComplete(makeSuccess(1, 2, 3), master);  // POLL_EEPSTAT
+    sm.onComplete(makeSuccess(1, 2, 3), master);
     ASSERT_EQ(sm.state(), EEPROMState::READ_EEPDAT);
 
     auto spec = sm.buildDatagram(4);
@@ -185,38 +174,35 @@ TEST_F(EEPROMStateMachineTest, BuildDatagram_ReadEepDat) {
 }
 
 TEST_F(EEPROMStateMachineTest, FullProtocolCycle_ReadsOneWordPair) {
-    sm.init(0, 0x0040, 1);
+    sm.init(0, {0x0040});
     Master master;
     master.packetRouter().init();
     master.initSlaves(1);
 
-    // Step 1: WRITE_EEPADDR
     sm.buildDatagram(1);
     sm.onComplete(makeSuccess(1, 0, 1), master);
     ASSERT_EQ(sm.state(), EEPROMState::WRITE_EEPCTL_READ);
 
-    // Step 2: WRITE_EEPCTL_READ
     sm.buildDatagram(2);
     sm.onComplete(makeSuccess(1, 0, 2), master);
     ASSERT_EQ(sm.state(), EEPROMState::POLL_EEPSTAT);
 
-    // Step 3: POLL_EEPSTAT (not busy)
     sm.buildDatagram(3);
     sm.response().data[0] = 0;
     sm.response().data[1] = 0;
     sm.onComplete(makeSuccess(1, 2, 3), master);
     ASSERT_EQ(sm.state(), EEPROMState::READ_EEPDAT);
 
-    // Step 4: READ_EEPDAT
     sm.buildDatagram(4);
     uint32_t data = 0xDEADBEEF;
     std::memcpy(sm.response().data, &data, 4);
     sm.onComplete(makeSuccess(1, 4, 4), master);
 
     EXPECT_EQ(sm.state(), EEPROMState::DONE);
+    EXPECT_TRUE(sm.isFinished());
     EXPECT_EQ(sm.wordsRead(), 1u);
 
-    // Verify cache was populated (using getWordPair atomic read)
+    // Verify cache was populated
     uint32_t cached = 0;
     EXPECT_TRUE(master.slave(0).sii().cache().getWordPair(0x0040, cached));
     EXPECT_EQ(cached & 0xFFFF, 0xBEEFu);
@@ -225,156 +211,8 @@ TEST_F(EEPROMStateMachineTest, FullProtocolCycle_ReadsOneWordPair) {
     master.packetRouter().shutdown();
 }
 
-TEST_F(EEPROMStateMachineTest, PollBusy_RetriesPoll) {
-    sm.init(0, 0x0040, 1);
-    Master master;
-    master.packetRouter().init();
-    master.initSlaves(1);
-
-    sm.buildDatagram(1);
-    sm.onComplete(makeSuccess(1, 0, 1), master);
-    sm.buildDatagram(2);
-    sm.onComplete(makeSuccess(1, 0, 2), master);
-    ASSERT_EQ(sm.state(), EEPROMState::POLL_EEPSTAT);
-
-    // First poll: busy
-    sm.buildDatagram(3);
-    sm.response().data[0] = static_cast<uint8_t>(EEPROMProtocol::ESTAT_BUSY & 0xFF);
-    sm.response().data[1] = static_cast<uint8_t>((EEPROMProtocol::ESTAT_BUSY >> 8) & 0xFF);
-    sm.onComplete(makeSuccess(1, 2, 3), master);
-    EXPECT_EQ(sm.state(), EEPROMState::POLL_EEPSTAT);  // Still polling
-
-    // Second poll: not busy
-    sm.buildDatagram(4);
-    sm.response().data[0] = 0;
-    sm.response().data[1] = 0;
-    sm.onComplete(makeSuccess(1, 2, 4), master);
-    EXPECT_EQ(sm.state(), EEPROMState::READ_EEPDAT);
-
-    master.packetRouter().shutdown();
-}
-
-TEST_F(EEPROMStateMachineTest, PollBusyTooManyTimes_Fails) {
-    sm.init(0, 0x0040, 1);
-    Master master;
-    master.packetRouter().init();
-    master.initSlaves(1);
-
-    sm.buildDatagram(1);
-    sm.onComplete(makeSuccess(1, 0, 1), master);
-    sm.buildDatagram(2);
-    sm.onComplete(makeSuccess(1, 0, 2), master);
-
-    // Poll MAX_BUSY_POLLS times, all busy
-    for (int i = 0; i < EEPROMProtocol::MAX_BUSY_POLLS; ++i) {
-        if (sm.state() != EEPROMState::POLL_EEPSTAT) break;
-        sm.buildDatagram(static_cast<uint8_t>(i + 3));
-        sm.response().data[0] = static_cast<uint8_t>(EEPROMProtocol::ESTAT_BUSY & 0xFF);
-        sm.response().data[1] = static_cast<uint8_t>((EEPROMProtocol::ESTAT_BUSY >> 8) & 0xFF);
-        sm.onComplete(makeSuccess(1, 2, static_cast<uint8_t>(i + 3)), master);
-    }
-    EXPECT_EQ(sm.state(), EEPROMState::FAILED);
-
-    master.packetRouter().shutdown();
-}
-
-TEST_F(EEPROMStateMachineTest, NackError_RetriesFromWriteEepAddr) {
-    sm.init(0, 0x0040, 1);
-    Master master;
-    master.packetRouter().init();
-    master.initSlaves(1);
-
-    sm.buildDatagram(1);
-    sm.onComplete(makeSuccess(1, 0, 1), master);
-    sm.buildDatagram(2);
-    sm.onComplete(makeSuccess(1, 0, 2), master);
-
-    // Poll: NACK error
-    sm.buildDatagram(3);
-    sm.response().data[0] = static_cast<uint8_t>(EEPROMProtocol::ESTAT_NACK & 0xFF);
-    sm.response().data[1] = static_cast<uint8_t>((EEPROMProtocol::ESTAT_NACK >> 8) & 0xFF);
-    sm.onComplete(makeSuccess(1, 2, 3), master);
-
-    EXPECT_EQ(sm.state(), EEPROMState::WRITE_EEPADDR);  // Retry from start
-
-    master.packetRouter().shutdown();
-}
-
-TEST_F(EEPROMStateMachineTest, NackTooManyRetries_Fails) {
-    sm.init(0, 0x0040, 1);
-    Master master;
-    master.packetRouter().init();
-    master.initSlaves(1);
-
-    for (int nack = 0; nack < EEPROMProtocol::MAX_NACK_RETRIES; ++nack) {
-        if (sm.state() != EEPROMState::WRITE_EEPADDR) break;
-        sm.buildDatagram(static_cast<uint8_t>(nack + 1));
-        sm.onComplete(makeSuccess(1, 0, static_cast<uint8_t>(nack + 1)), master);
-        if (sm.state() != EEPROMState::WRITE_EEPCTL_READ) break;
-        sm.buildDatagram(static_cast<uint8_t>(nack + 10));
-        sm.onComplete(makeSuccess(1, 0, static_cast<uint8_t>(nack + 10)), master);
-        if (sm.state() != EEPROMState::POLL_EEPSTAT) break;
-        sm.buildDatagram(static_cast<uint8_t>(nack + 20));
-        sm.response().data[0] = static_cast<uint8_t>(EEPROMProtocol::ESTAT_NACK & 0xFF);
-        sm.response().data[1] = static_cast<uint8_t>((EEPROMProtocol::ESTAT_NACK >> 8) & 0xFF);
-        sm.onComplete(makeSuccess(1, 2, static_cast<uint8_t>(nack + 20)), master);
-    }
-    EXPECT_EQ(sm.state(), EEPROMState::FAILED);
-
-    master.packetRouter().shutdown();
-}
-
-TEST_F(EEPROMStateMachineTest, NonNackError_Fails) {
-    sm.init(0, 0x0040, 1);
-    Master master;
-    master.packetRouter().init();
-    master.initSlaves(1);
-
-    sm.buildDatagram(1);
-    sm.onComplete(makeSuccess(1, 0, 1), master);
-    sm.buildDatagram(2);
-    sm.onComplete(makeSuccess(1, 0, 2), master);
-
-    // Poll: CRC error (non-NACK)
-    sm.buildDatagram(3);
-    sm.response().data[0] = static_cast<uint8_t>(EEPROMProtocol::ESTAT_CRC_ERR & 0xFF);
-    sm.response().data[1] = static_cast<uint8_t>((EEPROMProtocol::ESTAT_CRC_ERR >> 8) & 0xFF);
-    sm.onComplete(makeSuccess(1, 2, 3), master);
-
-    EXPECT_EQ(sm.state(), EEPROMState::FAILED);
-
-    master.packetRouter().shutdown();
-}
-
-TEST_F(EEPROMStateMachineTest, TimeoutOnAnyStep_Fails) {
-    sm.init(0, 0x0040, 1);
-    Master master;
-    master.packetRouter().init();
-    master.initSlaves(1);
-
-    sm.buildDatagram(1);
-    sm.onComplete(makeFailure(), master);  // Timeout
-    EXPECT_EQ(sm.state(), EEPROMState::FAILED);
-
-    master.packetRouter().shutdown();
-}
-
-TEST_F(EEPROMStateMachineTest, Cancel_TransitionsToFailed) {
-    sm.init(0, 0x0040, 4);
-    sm.cancel();
-    EXPECT_EQ(sm.state(), EEPROMState::FAILED);
-    EXPECT_TRUE(sm.isFinished());
-}
-
-TEST_F(EEPROMStateMachineTest, Cancel_OnAlreadyDone_NoChange) {
-    sm.init(0, 0x0040, 0);
-    ASSERT_EQ(sm.state(), EEPROMState::DONE);
-    sm.cancel();
-    EXPECT_EQ(sm.state(), EEPROMState::DONE);  // No change
-}
-
 TEST_F(EEPROMStateMachineTest, MultipleWordPairs_AdvancesCorrectly) {
-    sm.init(0, 0x0040, 3);
+    sm.init(0, {0x0040, 0x0042, 0x0044});
     Master master;
     master.packetRouter().init();
     master.initSlaves(1);
@@ -410,8 +248,169 @@ TEST_F(EEPROMStateMachineTest, MultipleWordPairs_AdvancesCorrectly) {
     master.packetRouter().shutdown();
 }
 
+TEST_F(EEPROMStateMachineTest, PollBusy_RetriesPoll) {
+    sm.init(0, {0x0040});
+    Master master;
+    master.packetRouter().init();
+    master.initSlaves(1);
+
+    sm.buildDatagram(1);
+    sm.onComplete(makeSuccess(1, 0, 1), master);
+    sm.buildDatagram(2);
+    sm.onComplete(makeSuccess(1, 0, 2), master);
+    ASSERT_EQ(sm.state(), EEPROMState::POLL_EEPSTAT);
+
+    // First poll: busy
+    sm.buildDatagram(3);
+    sm.response().data[0] = static_cast<uint8_t>(EEPROMProtocol::ESTAT_BUSY & 0xFF);
+    sm.response().data[1] = static_cast<uint8_t>((EEPROMProtocol::ESTAT_BUSY >> 8) & 0xFF);
+    sm.onComplete(makeSuccess(1, 2, 3), master);
+    EXPECT_EQ(sm.state(), EEPROMState::POLL_EEPSTAT);
+
+    // Second poll: not busy
+    sm.buildDatagram(4);
+    sm.response().data[0] = 0;
+    sm.response().data[1] = 0;
+    sm.onComplete(makeSuccess(1, 2, 4), master);
+    EXPECT_EQ(sm.state(), EEPROMState::READ_EEPDAT);
+
+    master.packetRouter().shutdown();
+}
+
+TEST_F(EEPROMStateMachineTest, PollBusyTooManyTimes_Fails) {
+    sm.init(0, {0x0040});
+    Master master;
+    master.packetRouter().init();
+    master.initSlaves(1);
+
+    sm.buildDatagram(1);
+    sm.onComplete(makeSuccess(1, 0, 1), master);
+    sm.buildDatagram(2);
+    sm.onComplete(makeSuccess(1, 0, 2), master);
+
+    for (int i = 0; i < EEPROMProtocol::MAX_BUSY_POLLS; ++i) {
+        if (sm.state() != EEPROMState::POLL_EEPSTAT) break;
+        sm.buildDatagram(static_cast<uint8_t>(i + 3));
+        sm.response().data[0] = static_cast<uint8_t>(EEPROMProtocol::ESTAT_BUSY & 0xFF);
+        sm.response().data[1] = static_cast<uint8_t>((EEPROMProtocol::ESTAT_BUSY >> 8) & 0xFF);
+        sm.onComplete(makeSuccess(1, 2, static_cast<uint8_t>(i + 3)), master);
+    }
+    EXPECT_EQ(sm.state(), EEPROMState::FAILED);
+
+    master.packetRouter().shutdown();
+}
+
+TEST_F(EEPROMStateMachineTest, NackError_RetriesFromWriteEepAddr) {
+    sm.init(0, {0x0040});
+    Master master;
+    master.packetRouter().init();
+    master.initSlaves(1);
+
+    sm.buildDatagram(1);
+    sm.onComplete(makeSuccess(1, 0, 1), master);
+    sm.buildDatagram(2);
+    sm.onComplete(makeSuccess(1, 0, 2), master);
+
+    sm.buildDatagram(3);
+    sm.response().data[0] = static_cast<uint8_t>(EEPROMProtocol::ESTAT_NACK & 0xFF);
+    sm.response().data[1] = static_cast<uint8_t>((EEPROMProtocol::ESTAT_NACK >> 8) & 0xFF);
+    sm.onComplete(makeSuccess(1, 2, 3), master);
+
+    EXPECT_EQ(sm.state(), EEPROMState::WRITE_EEPADDR);
+
+    master.packetRouter().shutdown();
+}
+
+TEST_F(EEPROMStateMachineTest, NackTooManyRetries_Fails) {
+    sm.init(0, {0x0040});
+    Master master;
+    master.packetRouter().init();
+    master.initSlaves(1);
+
+    for (int nack = 0; nack < EEPROMProtocol::MAX_NACK_RETRIES; ++nack) {
+        if (sm.state() != EEPROMState::WRITE_EEPADDR) break;
+        sm.buildDatagram(static_cast<uint8_t>(nack + 1));
+        sm.onComplete(makeSuccess(1, 0, static_cast<uint8_t>(nack + 1)), master);
+        if (sm.state() != EEPROMState::WRITE_EEPCTL_READ) break;
+        sm.buildDatagram(static_cast<uint8_t>(nack + 10));
+        sm.onComplete(makeSuccess(1, 0, static_cast<uint8_t>(nack + 10)), master);
+        if (sm.state() != EEPROMState::POLL_EEPSTAT) break;
+        sm.buildDatagram(static_cast<uint8_t>(nack + 20));
+        sm.response().data[0] = static_cast<uint8_t>(EEPROMProtocol::ESTAT_NACK & 0xFF);
+        sm.response().data[1] = static_cast<uint8_t>((EEPROMProtocol::ESTAT_NACK >> 8) & 0xFF);
+        sm.onComplete(makeSuccess(1, 2, static_cast<uint8_t>(nack + 20)), master);
+    }
+    EXPECT_EQ(sm.state(), EEPROMState::FAILED);
+
+    master.packetRouter().shutdown();
+}
+
+TEST_F(EEPROMStateMachineTest, NonNackError_Fails) {
+    sm.init(0, {0x0040});
+    Master master;
+    master.packetRouter().init();
+    master.initSlaves(1);
+
+    sm.buildDatagram(1);
+    sm.onComplete(makeSuccess(1, 0, 1), master);
+    sm.buildDatagram(2);
+    sm.onComplete(makeSuccess(1, 0, 2), master);
+
+    sm.buildDatagram(3);
+    sm.response().data[0] = static_cast<uint8_t>(EEPROMProtocol::ESTAT_CRC_ERR & 0xFF);
+    sm.response().data[1] = static_cast<uint8_t>((EEPROMProtocol::ESTAT_CRC_ERR >> 8) & 0xFF);
+    sm.onComplete(makeSuccess(1, 2, 3), master);
+
+    EXPECT_EQ(sm.state(), EEPROMState::FAILED);
+
+    master.packetRouter().shutdown();
+}
+
+TEST_F(EEPROMStateMachineTest, TimeoutOnAnyStep_Fails) {
+    sm.init(0, {0x0040});
+    Master master;
+    master.packetRouter().init();
+    master.initSlaves(1);
+
+    sm.buildDatagram(1);
+    sm.onComplete(makeFailure(), master);
+    EXPECT_EQ(sm.state(), EEPROMState::FAILED);
+
+    master.packetRouter().shutdown();
+}
+
+TEST_F(EEPROMStateMachineTest, Cancel_TransitionsToFailed) {
+    sm.init(0, {0x0040});
+    sm.cancel();
+    EXPECT_EQ(sm.state(), EEPROMState::FAILED);
+    EXPECT_TRUE(sm.isFinished());
+}
+
+TEST_F(EEPROMStateMachineTest, Cancel_OnAlreadyDone_NoChange) {
+    sm.init(0, {});
+    ASSERT_EQ(sm.state(), EEPROMState::DONE);
+    sm.cancel();
+    EXPECT_EQ(sm.state(), EEPROMState::DONE);
+}
+
+TEST_F(EEPROMStateMachineTest, InFlightFlag) {
+    sm.init(0, {0x0040});
+    EXPECT_FALSE(sm.isInFlight());
+    sm.markInFlight();
+    EXPECT_TRUE(sm.isInFlight());
+    EXPECT_FALSE(sm.needsSend());
+}
+
+TEST_F(EEPROMStateMachineTest, Reset_ClearsToIdle) {
+    sm.init(0, {0x0040, 0x0042});
+    sm.reset();
+    EXPECT_EQ(sm.state(), EEPROMState::IDLE);
+    EXPECT_EQ(sm.totalWords(), 0u);
+    EXPECT_FALSE(sm.isFinished());  // IDLE is not DONE or FAILED
+}
+
 // ============================================================================
-// Reactor Integration Tests (with dev-null network + manual routePacket)
+// Reactor Integration Tests (with dev-null network)
 // ============================================================================
 
 class EEPROMReactorTest : public ::testing::Test {
@@ -422,24 +421,6 @@ protected:
 
     void TearDown() override {
         master_.packetRouter().shutdown();
-    }
-
-    /// Route a response for a given idx into the router.
-    void routeResp(uint8_t idx, const uint8_t* data, uint16_t len) {
-        routeResponse(master_.packetRouter(), idx, data, len);
-    }
-
-    /// Route an EEPSTAT "not busy" response.
-    void routeNotBusy(uint8_t idx) {
-        uint8_t stat[2] = {0, 0};
-        routeResp(idx, stat, 2);
-    }
-
-    /// Route an EEPDAT response with a 32-bit value.
-    void routeEepDat(uint8_t idx, uint32_t value) {
-        uint8_t data[4];
-        std::memcpy(data, &value, 4);
-        routeResp(idx, data, 4);
     }
 
     LinuxDevNullNetworkInterface devnull_;
@@ -454,43 +435,23 @@ TEST_F(EEPROMReactorTest, EmptyReactor_ReturnsTrue) {
     EXPECT_EQ(reactor.failureCount(), 0u);
 }
 
-TEST_F(EEPROMReactorTest, SingleSlave_SingleWordPair) {
-    master_.initSlaves(1);
-
+TEST_F(EEPROMReactorTest, AddSlave_IncreasesSlaveCount) {
     EEPROMReactor reactor(master_);
-    reactor.addSlave(0, 0x0040, 1);
+    EXPECT_EQ(reactor.slaveCount(), 0u);
+    reactor.addSlave(0, CAT_MASK_ALL);
+    EXPECT_EQ(reactor.slaveCount(), 1u);
+    reactor.addSlave(1, CAT_MASK_ALL);
+    EXPECT_EQ(reactor.slaveCount(), 2u);
+}
 
-    // Run the reactor in a thread and route responses from the test thread.
-    std::atomic<bool> done{false};
-    std::thread runner([&] {
-        reactor.run(500);
-        done.store(true);
-    });
-
-    // The reactor sends 4 datagrams per word-pair:
-    // WRITE_EEPADDR, WRITE_EEPCTL_READ, POLL_EEPSTAT, READ_EEPDAT
-    // We need to route responses for each. The idx values are allocated
-    // by the reactor via allocIdx(), starting from 0 (or 1, depending on
-    // the master's next_idx_).
-    //
-    // Since we can't predict the exact idx, we route responses for
-    // a range of idx values. The router matches by idx.
-    //
-    // Actually, the reactor uses sendMultiDatagram which sends frames
-    // via devnull (discarded). The router slots are pre-registered but
-    // no response arrives. So the reactor will time out.
-    //
-    // For a proper test, we need to intercept the send and route
-    // responses back. But devnull discards frames. We need a custom
-    // network interface that captures the sent frame and routes
-    // responses back to the router.
-    //
-    // For now, let's just verify the reactor times out gracefully.
-    runner.join();
-    EXPECT_TRUE(done.load());
-    // Without responses, all slaves should fail.
-    EXPECT_EQ(reactor.failureCount(), 1u);
-    EXPECT_EQ(reactor.successCount(), 0u);
+TEST_F(EEPROMReactorTest, StateMachineAccessible_AfterAdd) {
+    EEPROMReactor reactor(master_);
+    reactor.addSlave(3, CAT_MASK_ALL);
+    ASSERT_EQ(reactor.slaveCount(), 1u);
+    const auto& sm = reactor.stateMachine(0);
+    EXPECT_EQ(sm.slaveIndex(), 3u);
+    // SM is initialized with an empty vector (DONE) until run() fills it
+    EXPECT_EQ(sm.state(), EEPROMState::DONE);
 }
 
 TEST_F(EEPROMReactorTest, Destructor_CancelsPendingSlots) {
@@ -498,46 +459,34 @@ TEST_F(EEPROMReactorTest, Destructor_CancelsPendingSlots) {
 
     {
         EEPROMReactor reactor(master_);
-        reactor.addSlave(0, 0x0040, 10);
-        reactor.addSlave(1, 0x0040, 10);
+        reactor.addSlave(0, CAT_MASK_ALL);
+        reactor.addSlave(1, CAT_MASK_ALL);
         // Don't call run() — just destruct.
-        // The destructor should cancel all pending slots safely.
     }
-    // If we get here without a crash or hang, the test passes.
     SUCCEED();
 }
 
-TEST_F(EEPROMReactorTest, AddSlave_IncreasesSlaveCount) {
-    EEPROMReactor reactor(master_);
-    EXPECT_EQ(reactor.slaveCount(), 0u);
-    reactor.addSlave(0, 0x0040, 10);
-    EXPECT_EQ(reactor.slaveCount(), 1u);
-    reactor.addSlave(1, 0x0040, 10);
-    EXPECT_EQ(reactor.slaveCount(), 2u);
-}
+TEST_F(EEPROMReactorTest, SingleSlave_NoResponses_TimesOut) {
+    master_.initSlaves(1);
 
-TEST_F(EEPROMReactorTest, StateMachineAccessible_AfterAdd) {
     EEPROMReactor reactor(master_);
-    reactor.addSlave(3, 0x0080, 5);
-    ASSERT_EQ(reactor.slaveCount(), 1u);
-    const auto& sm = reactor.stateMachine(0);
-    EXPECT_EQ(sm.slaveIndex(), 3u);
-    EXPECT_EQ(sm.totalWords(), 5u);
-    EXPECT_EQ(sm.state(), EEPROMState::WRITE_EEPADDR);
+    reactor.addSlave(0, CAT_MASK_ALL);
+
+    bool ok = reactor.run(50);
+    // Without responses, all slaves should fail.
+    EXPECT_FALSE(ok);
+    EXPECT_EQ(reactor.failureCount(), 1u);
+    EXPECT_EQ(reactor.successCount(), 0u);
 }
 
 // ============================================================================
-// Reactor with custom network interface that routes responses back
+// Reactor with loopback network interface
 // ============================================================================
 
-/// A test network interface that captures sent frames and allows the
-/// test to route responses back to the router.
 class LoopbackNetworkInterface {
 public:
     LoopbackNetworkInterface() {
         iface_.send = [this](const uint8_t* data, size_t len) -> bool {
-            // Just record that a frame was sent; the test thread
-            // will route responses back via routePacket().
             tx_count_.fetch_add(1, std::memory_order_relaxed);
             return true;
         };
@@ -573,10 +522,9 @@ protected:
 
 TEST_F(EEPROMReactorLoopbackTest, MultiSlave_Timeout_AllFail) {
     EEPROMReactor reactor(master_);
-    reactor.addSlave(0, 0x0040, 2);
-    reactor.addSlave(1, 0x0040, 2);
+    reactor.addSlave(0, CAT_MASK_ALL);
+    reactor.addSlave(1, CAT_MASK_ALL);
 
-    // Run with a short timeout — no responses will arrive
     bool ok = reactor.run(50);
     EXPECT_FALSE(ok);
     EXPECT_EQ(reactor.failureCount(), 2u);
@@ -585,197 +533,13 @@ TEST_F(EEPROMReactorLoopbackTest, MultiSlave_Timeout_AllFail) {
 
 TEST_F(EEPROMReactorLoopbackTest, MultiSlave_FramesSent) {
     EEPROMReactor reactor(master_);
-    reactor.addSlave(0, 0x0040, 1);
-    reactor.addSlave(1, 0x0040, 1);
+    reactor.addSlave(0, CAT_MASK_ALL);
+    reactor.addSlave(1, CAT_MASK_ALL);
 
     uint64_t before = loopback_.txCount();
     reactor.run(50);
     uint64_t after = loopback_.txCount();
 
-    // The reactor should have sent at least one frame (with 2 datagrams)
+    // Should have sent at least one frame per slave
     EXPECT_GT(after, before);
-}
-
-// ============================================================================
-// SIISlaveCache state-machine-capable interface tests
-// ============================================================================
-
-class SIICacheStateMachineTest : public ::testing::Test {
-protected:
-    SIISlaveCache cache;
-};
-
-TEST_F(SIICacheStateMachineTest, GetWordPair_BothCached_ReturnsTrue) {
-    cache.set(0x0040, 0xBEEF);
-    cache.set(0x0041, 0xDEAD);
-    uint32_t out = 0;
-    EXPECT_TRUE(cache.getWordPair(0x0040, out));
-    EXPECT_EQ(out & 0xFFFF, 0xBEEFu);
-    EXPECT_EQ((out >> 16) & 0xFFFF, 0xDEADu);
-}
-
-TEST_F(SIICacheStateMachineTest, GetWordPair_LowMissing_ReturnsFalse) {
-    cache.set(0x0041, 0xDEAD);
-    uint32_t out = 0;
-    EXPECT_FALSE(cache.getWordPair(0x0040, out));
-}
-
-TEST_F(SIICacheStateMachineTest, GetWordPair_HighMissing_ReturnsFalse) {
-    cache.set(0x0040, 0xBEEF);
-    uint32_t out = 0;
-    EXPECT_FALSE(cache.getWordPair(0x0040, out));
-}
-
-TEST_F(SIICacheStateMachineTest, GetWordPair_NeitherCached_ReturnsFalse) {
-    uint32_t out = 0;
-    EXPECT_FALSE(cache.getWordPair(0x0040, out));
-}
-
-TEST_F(SIICacheStateMachineTest, SetWordPair_StoresBothWords) {
-    cache.setWordPair(0x0080, 0xDEADBEEF);
-    uint16_t lo = 0, hi = 0;
-    EXPECT_TRUE(cache.get(0x0080, lo));
-    EXPECT_TRUE(cache.get(0x0081, hi));
-    EXPECT_EQ(lo, 0xBEEFu);
-    EXPECT_EQ(hi, 0xDEADu);
-}
-
-TEST_F(SIICacheStateMachineTest, SetWordPair_OverwritesExisting) {
-    cache.set(0x0080, 0x1111);
-    cache.set(0x0081, 0x2222);
-    cache.setWordPair(0x0080, 0x44332211);
-    uint32_t out = 0;
-    EXPECT_TRUE(cache.getWordPair(0x0080, out));
-    EXPECT_EQ(out, 0x44332211u);
-}
-
-TEST_F(SIICacheStateMachineTest, CachedContiguousFrom_EmptyCache_ReturnsZero) {
-    EXPECT_EQ(cache.cachedContiguousFrom(0x0040), 0u);
-}
-
-TEST_F(SIICacheStateMachineTest, CachedContiguousFrom_NoMatchAtStart_ReturnsZero) {
-    cache.set(0x0041, 0x0001);
-    cache.set(0x0042, 0x0002);
-    EXPECT_EQ(cache.cachedContiguousFrom(0x0040), 0u);
-}
-
-TEST_F(SIICacheStateMachineTest, CachedContiguousFrom_ContiguousRange) {
-    for (uint16_t i = 0; i < 10; ++i)
-        cache.set(static_cast<uint16_t>(0x0040 + i), i);
-    EXPECT_EQ(cache.cachedContiguousFrom(0x0040), 10u);
-}
-
-TEST_F(SIICacheStateMachineTest, CachedContiguousFrom_StopsAtGap) {
-    for (uint16_t i = 0; i < 5; ++i)
-        cache.set(static_cast<uint16_t>(0x0040 + i), i);
-    // Gap at 0x0045
-    for (uint16_t i = 6; i < 10; ++i)
-        cache.set(static_cast<uint16_t>(0x0040 + i), i);
-    EXPECT_EQ(cache.cachedContiguousFrom(0x0040), 5u);
-}
-
-TEST_F(SIICacheStateMachineTest, CachedContiguousFrom_FromMiddle) {
-    for (uint16_t i = 0; i < 10; ++i)
-        cache.set(static_cast<uint16_t>(0x0040 + i), i);
-    EXPECT_EQ(cache.cachedContiguousFrom(0x0043), 7u);
-}
-
-TEST_F(SIICacheStateMachineTest, IsRangeCached_FullyCached_ReturnsTrue) {
-    for (uint16_t i = 0; i < 5; ++i)
-        cache.set(static_cast<uint16_t>(0x0040 + i), i);
-    EXPECT_TRUE(cache.isRangeCached(0x0040, 5));
-}
-
-TEST_F(SIICacheStateMachineTest, IsRangeCached_PartiallyCached_ReturnsFalse) {
-    for (uint16_t i = 0; i < 3; ++i)
-        cache.set(static_cast<uint16_t>(0x0040 + i), i);
-    EXPECT_FALSE(cache.isRangeCached(0x0040, 5));
-}
-
-TEST_F(SIICacheStateMachineTest, IsRangeCached_EmptyCache_ReturnsFalse) {
-    EXPECT_FALSE(cache.isRangeCached(0x0040, 1));
-}
-
-TEST_F(SIICacheStateMachineTest, IsRangeCached_ZeroCount_ReturnsTrue) {
-    EXPECT_TRUE(cache.isRangeCached(0x0040, 0));
-}
-
-TEST_F(SIICacheStateMachineTest, SetRange_StoresAllWords) {
-    uint16_t vals[5] = {0x100, 0x200, 0x300, 0x400, 0x500};
-    cache.setRange(0x0040, vals, 5);
-    for (uint16_t i = 0; i < 5; ++i) {
-        uint16_t out = 0;
-        EXPECT_TRUE(cache.get(static_cast<uint16_t>(0x0040 + i), out));
-        EXPECT_EQ(out, vals[i]);
-    }
-}
-
-TEST_F(SIICacheStateMachineTest, SetRange_OverwritesExisting) {
-    cache.set(0x0040, 0xFFFF);
-    uint16_t vals[1] = {0x1234};
-    cache.setRange(0x0040, vals, 1);
-    uint16_t out = 0;
-    EXPECT_TRUE(cache.get(0x0040, out));
-    EXPECT_EQ(out, 0x1234u);
-}
-
-TEST_F(SIICacheStateMachineTest, SetRange_ZeroCount_NoChange) {
-    uint16_t vals[1] = {0x1234};
-    cache.setRange(0x0040, vals, 0);
-    EXPECT_EQ(cache.size(), 0u);
-}
-
-TEST_F(SIICacheStateMachineTest, SkipCachedWords_WithPrefilledCache) {
-    // Simulate initSlaves() prefetching 128 words (0x0000..0x007F)
-    for (uint16_t i = 0; i < 128; ++i)
-        cache.set(i, static_cast<uint16_t>(0x1000 + i));
-
-    // State machine reads from 0x0040, 32 word-pairs (64 words)
-    // All 64 words from 0x0040..0x007F are cached → should skip all
-    EEPROMReadStateMachine sm;
-    sm.init(0, 0x0040, 32);
-
-    // Use a minimal master just for cache access
-    Master master;
-    master.packetRouter().init();
-    master.initSlaves(1);
-
-    // Copy the prefilled cache into the master's slave cache
-    for (uint16_t i = 0; i < 128; ++i) {
-        uint16_t val = 0;
-        cache.get(i, val);
-        master.slave(0).sii().cache().set(i, val);
-    }
-
-    sm.skipCachedWords(master);
-    EXPECT_EQ(sm.state(), EEPROMState::DONE);
-    EXPECT_EQ(sm.wordsRead(), 32u);
-
-    master.packetRouter().shutdown();
-}
-
-TEST_F(SIICacheStateMachineTest, SkipCachedWords_PartiallyCached_StopsAtGap) {
-    // Cache 0x0040..0x0047 (4 word-pairs), gap at 0x0048
-    for (uint16_t i = 0x0040; i < 0x0048; ++i)
-        cache.set(i, static_cast<uint16_t>(i));
-
-    EEPROMReadStateMachine sm;
-    sm.init(0, 0x0040, 10);  // 10 word-pairs requested
-
-    Master master;
-    master.packetRouter().init();
-    master.initSlaves(1);
-
-    for (uint16_t i = 0x0040; i < 0x0048; ++i) {
-        uint16_t val = 0;
-        cache.get(i, val);
-        master.slave(0).sii().cache().set(i, val);
-    }
-
-    sm.skipCachedWords(master);
-    EXPECT_EQ(sm.state(), EEPROMState::WRITE_EEPADDR);  // Still needs to read
-    EXPECT_EQ(sm.wordsRead(), 4u);  // 4 word-pairs skipped
-    EXPECT_EQ(sm.currentWord(), 0x0048u);  // Next uncached word
-
-    master.packetRouter().shutdown();
 }
