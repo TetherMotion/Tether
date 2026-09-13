@@ -125,11 +125,11 @@ int main(int argc, char** argv) {
         const char* name = s.device_name ? s.device_name->c_str() : "Unknown";
 
         // First line: identity
-        TETHER_LOGI(TAG, "Slave {}: Vendor=0x{:08X} Product=0x{:08X} {}",
+        TETHER_LOGI(TAG, "Slave {}: {} (Vendor=0x{:08X} Product=0x{:08X})",
                     s.index,
+                    name,
                     s.vendor_id ? *s.vendor_id : 0,
-                    s.product_code ? *s.product_code : 0,
-                    name);
+                    s.product_code ? *s.product_code : 0);
 
         // Revision / serial
         if (s.revision_number || s.serial_number) {
