@@ -16,9 +16,8 @@
 #include "tether/sii/SIIManager.hpp"
 #include "logging/Logger.hpp"
 
-#include <cstdarg>
-#include <cstdio>
 #include <cstring>
+#include <format>
 #include <initializer_list>
 
 namespace EtherCAT {
@@ -274,11 +273,8 @@ void SIIDemandParser::init(uint32_t cat_mask) {
 // SIIDemandParser — error handling
 // ============================================================================
 
-void SIIDemandParser::fail(const char* fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(last_error_, sizeof(last_error_), fmt, args);
-    va_end(args);
+void SIIDemandParser::fail(const std::string& msg) {
+    std::snprintf(last_error_, sizeof(last_error_), "%s", msg.c_str());
     phase_ = Phase::FAILED;
     TETHER_LOGE(TAG, "{}", last_error_);
 }
@@ -487,8 +483,8 @@ SIIDemandResult SIIDemandParser::doCategoryScan(const SIISlaveCache& cache,
             size_t n = readBytes(cache, static_cast<uint16_t>(data_start * 2),
                                  buf.data(), data_bytes);
             if (n != data_bytes) {
-                fail("Failed to read category {} data ({} of {} bytes)",
-                     cat_type, n, data_bytes);
+                fail(std::format("Failed to read category {} data ({} of {} bytes)",
+                                 cat_type, n, data_bytes));
                 return {SIIDemandResult::FAILED, {}};
             }
 
@@ -550,7 +546,7 @@ SIIDemandResult SIIDemandParser::parse(const SIISlaveCache& cache, SIIData& out_
         case Phase::SIZE_INFO:      return doSizeInfo(cache, out_data);
         case Phase::CATEGORY_SCAN:  return doCategoryScan(cache, out_data);
         default:
-            fail("Invalid phase {}", static_cast<int>(phase_));
+            fail(std::format("Invalid phase {}", static_cast<int>(phase_)));
             return {SIIDemandResult::FAILED, {}};
     }
 }

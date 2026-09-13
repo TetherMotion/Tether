@@ -230,37 +230,40 @@ void EEPROMReactor::cancelAllPending() {
 
 bool EEPROMReactor::refillQueue(SlaveEntry& entry) {
     auto& cache = master_->slave(entry.slave_index).sii().cache();
-    auto result = entry.parser.parse(cache, entry.out_data);
 
-    if (result.isComplete()) {
-        entry.done = true;
-        return true;
-    }
-    if (result.isFailed()) {
-        entry.done = true;  // Mark as done (failed)
-        return false;
-    }
+    // Loop until the parser either completes/fails or reports words
+    // that are not yet cached (which become the next batch for the SM).
+    while (true) {
+        auto result = entry.parser.parse(cache, entry.out_data);
 
-    // NEED_WORDS — collect uncached word-pairs into a vector and
-    // initialize the state machine with it.
-    std::vector<uint16_t> pairs;
-    pairs.reserve(result.needed_word_pairs.size());
-    for (uint16_t addr : result.needed_word_pairs) {
-        uint32_t dummy;
-        if (!cache.getWordPair(addr, dummy)) {
-            pairs.push_back(addr);
+        if (result.isComplete()) {
+            entry.done = true;
+            return true;
         }
-    }
+        if (result.isFailed()) {
+            entry.done = true;
+            return false;
+        }
 
-    if (pairs.empty()) {
-        // All needed words are already cached — re-run the parser
-        // to advance to the next phase. This can happen if the parser
-        // requested words that were cached by a concurrent read.
-        return refillQueue(entry);
-    }
+        // NEED_WORDS — collect uncached word-pairs into a vector.
+        std::vector<uint16_t> pairs;
+        pairs.reserve(result.needed_word_pairs.size());
+        for (uint16_t addr : result.needed_word_pairs) {
+            uint32_t dummy;
+            if (!cache.getWordPair(addr, dummy)) {
+                pairs.push_back(addr);
+            }
+        }
 
-    entry.sm.init(entry.slave_index, std::move(pairs));
-    return true;
+        if (!pairs.empty()) {
+            // Initialize the state machine with this batch.
+            entry.sm.init(entry.slave_index, std::move(pairs));
+            return true;
+        }
+
+        // All needed words are already cached — loop to let the parser
+        // advance to the next phase.
+    }
 }
 
 bool EEPROMReactor::run(uint32_t timeout_ms) {

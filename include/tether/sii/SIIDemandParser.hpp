@@ -297,7 +297,7 @@ private:
                                std::initializer_list<uint16_t> pairs);
 
     /// Set error message and transition to FAILED.
-    void fail(const char* fmt, ...);
+    void fail(const std::string& msg);
 
     // Phase handlers — each returns NEED_WORDS, COMPLETE, or FAILED.
     SIIDemandResult doConfigArea(const SIISlaveCache& cache, SIIData& out);
