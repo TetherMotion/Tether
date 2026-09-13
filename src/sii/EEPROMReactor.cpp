@@ -30,6 +30,7 @@ void EEPROMReadStateMachine::init(uint16_t slave_index, uint16_t start_word,
     nack_count_   = 0;
     busy_polls_   = 0;
     state_        = EEPROMState::IDLE;
+    in_flight_    = false;
     slot_         = 0;
     response_     = RxDatagram{};
 
@@ -39,6 +40,40 @@ void EEPROMReadStateMachine::init(uint16_t slave_index, uint16_t start_word,
     if (word_pair_count > 0) {
         state_ = EEPROMState::WRITE_EEPADDR;
     } else {
+        state_ = EEPROMState::DONE;
+    }
+}
+
+void EEPROMReadStateMachine::skipCachedWords(Master& master) {
+    // Skip word-pairs that are already in the SII cache (e.g. from
+    // initSlaves()'s 128-word prefetch). This avoids re-reading words
+    // that are already available, reducing bus traffic significantly.
+    //
+    // Uses cachedContiguousFrom() to find the contiguous cached range
+    // from the current word in a single lock acquisition, then skips
+    // whole word-pairs at once.
+    if (state_ != EEPROMState::WRITE_EEPADDR) return;
+
+    auto& cache = master.slave(slave_index_).sii().cache();
+
+    while (words_read_ < total_words_) {
+        uint16_t cached = cache.cachedContiguousFrom(current_word_);
+        if (cached < 2) break;  // Not enough for a word-pair
+
+        // Skip whole word-pairs from the contiguous cached range.
+        // Each word-pair is 2 words.
+        uint16_t pairs_to_skip = cached / 2;
+        uint16_t pairs_remaining = static_cast<uint16_t>(
+            total_words_ - words_read_);
+        if (pairs_to_skip > pairs_remaining)
+            pairs_to_skip = pairs_remaining;
+
+        current_word_ = static_cast<uint16_t>(
+            current_word_ + pairs_to_skip * 2);
+        words_read_ = static_cast<uint16_t>(words_read_ + pairs_to_skip);
+    }
+
+    if (words_read_ >= total_words_) {
         state_ = EEPROMState::DONE;
     }
 }
@@ -103,6 +138,8 @@ MultiDatagramSpec EEPROMReadStateMachine::buildDatagram(uint8_t idx) {
 }
 
 void EEPROMReadStateMachine::onComplete(const WaitResult& result, Master& master) {
+    in_flight_ = false;  // Datagram completed — no longer in flight
+
     if (!result.success) {
         // Timeout or failure
         fail();
@@ -171,16 +208,15 @@ void EEPROMReadStateMachine::onComplete(const WaitResult& result, Master& master
             std::memcpy(&dword_le, response_.data, 4);
             uint32_t dword = Raw::le32_to_host(dword_le);
 
-            // Cache the two words in the slave's per-slave SII cache
-            auto& sii = master.slave(slave_index_).sii();
-            sii.cache().set(current_word_,
-                            static_cast<uint16_t>(dword & 0xFFFF));
-            sii.cache().set(static_cast<uint16_t>(current_word_ + 1),
-                            static_cast<uint16_t>((dword >> 16) & 0xFFFF));
+            // Cache the word-pair atomically (single lock acquisition)
+            master.slave(slave_index_).sii().cache().setWordPair(
+                current_word_, dword);
 
             words_read_++;
             nack_count_ = 0;
             advanceWord();
+            // After advancing, skip any subsequent cached word-pairs
+            skipCachedWords(master);
             break;
         }
 
@@ -201,6 +237,7 @@ void EEPROMReadStateMachine::advanceWord() {
 }
 
 void EEPROMReadStateMachine::cancel() {
+    in_flight_ = false;
     if (!isFinished()) {
         state_ = EEPROMState::FAILED;
     }
@@ -227,7 +264,7 @@ void EEPROMReactor::cancelAllPending() {
     if (!master_) return;
     auto& router = master_->packetRouter();
     for (auto& sm : state_machines_) {
-        if (sm.needsSend() || (!sm.isFinished() && sm.slot() < TransactionRouter::kNumSlots)) {
+        if (sm.isInFlight() || (!sm.isFinished() && sm.slot() < TransactionRouter::kNumSlots)) {
             router.cancelPreRegistered(sm.slot());
             sm.cancel();
         }
@@ -239,40 +276,40 @@ bool EEPROMReactor::run(uint32_t timeout_ms) {
 
     auto& router = master_->packetRouter();
 
-    // Reusable buffers for the issue phase
-    std::vector<MultiDatagramSpec> specs;
-    std::vector<uint8_t>           idxs;
-    std::vector<size_t>            slots;
-    std::vector<size_t>            active_slots;  // slots currently in flight
+    // Skip any already-cached word-pairs before starting.
+    for (auto& sm : state_machines_) {
+        sm.skipCachedWords(*master_);
+    }
 
+    // Track which slots are in flight, mapped to state machine indices.
+    // slot_to_sm_[slot] = index into state_machines_, or SIZE_MAX if unused.
+    std::vector<size_t> slot_to_sm_(TransactionRouter::kNumSlots, SIZE_MAX);
+    std::vector<size_t> active_slots;      // slots currently in flight
+    std::vector<MultiDatagramSpec> specs;  // batch of datagrams to send
+    std::vector<uint8_t>           idxs;   // transaction indices
+    std::vector<size_t>            slots;  // router slots for current batch
+
+    active_slots.reserve(state_machines_.size());
     specs.reserve(state_machines_.size());
     idxs.reserve(state_machines_.size());
     slots.reserve(state_machines_.size());
-    active_slots.reserve(state_machines_.size());
 
     int loop_count = 0;
-    const int max_loops = 100000;  // Safety valve
+    const int max_loops = 500000;  // Safety valve
 
     while (loop_count++ < max_loops) {
-        // Check if all state machines are finished
-        bool all_done = true;
-        for (const auto& sm : state_machines_) {
-            if (!sm.isFinished()) {
-                all_done = false;
-                break;
-            }
-        }
-        if (all_done) break;
-
         // ---- Issue phase ----
-        // For each state machine that needs to send, allocate an idx,
-        // pre-register a router slot, and build the datagram.
+        // For each state machine that needs a send and has no datagram
+        // in flight, allocate an idx, pre-register a router slot, and
+        // build the datagram. This runs every iteration so that a slave
+        // which just completed a step can immediately issue its next
+        // step without waiting for other slaves.
         specs.clear();
         idxs.clear();
         slots.clear();
-        active_slots.clear();
 
-        for (auto& sm : state_machines_) {
+        for (size_t i = 0; i < state_machines_.size(); ++i) {
+            auto& sm = state_machines_[i];
             if (!sm.needsSend()) continue;
 
             uint8_t idx = master_->allocIdx();
@@ -280,77 +317,85 @@ bool EEPROMReactor::run(uint32_t timeout_ms) {
                 idx, sm.response().data, sizeof(sm.response().data));
 
             if (slot >= TransactionRouter::kNumSlots) {
-                // Slot allocation failed — fail this state machine
                 sm.cancel();
                 continue;
             }
 
             sm.setSlot(slot);
-            slots.push_back(slot);
+            sm.markInFlight();
+            slot_to_sm_[slot] = i;
             active_slots.push_back(slot);
+            slots.push_back(slot);
             idxs.push_back(idx);
             specs.push_back(sm.buildDatagram(idx));
         }
 
-        if (specs.empty()) {
-            // No datagrams to send — all remaining state machines are
-            // either finished or failed.
-            continue;
-        }
-
         // ---- Send phase ----
-        size_t sent = master_->sendMultiDatagram(specs.data(), specs.size());
-        if (sent == 0) {
-            // Send failed — cancel all pre-registered slots and fail
-            // the corresponding state machines.
-            for (size_t i = 0; i < slots.size(); ++i) {
-                router.cancelPreRegistered(slots[i]);
+        if (!specs.empty()) {
+            size_t sent = master_->sendMultiDatagram(specs.data(), specs.size());
+            if (sent == 0) {
+                for (size_t s : slots) {
+                    router.cancelPreRegistered(s);
+                    slot_to_sm_[s] = SIZE_MAX;
+                }
+                for (auto& sm : state_machines_) {
+                    if (sm.isInFlight()) sm.cancel();
+                }
+                // Remove failed slots from active_slots
+                for (auto it = active_slots.begin(); it != active_slots.end(); ) {
+                    if (slot_to_sm_[*it] == SIZE_MAX)
+                        it = active_slots.erase(it);
+                    else
+                        ++it;
+                }
             }
-            for (auto& sm : state_machines_) {
-                if (sm.needsSend()) sm.cancel();
+        }
+
+        // ---- Check if all done ----
+        if (active_slots.empty()) {
+            bool all_done = true;
+            for (const auto& sm : state_machines_) {
+                if (!sm.isFinished()) { all_done = false; break; }
             }
+            if (all_done) break;
+            // No in-flight datagrams but not all done — shouldn't happen,
+            // but continue to let issue phase pick up any stragglers.
             continue;
         }
 
-        // ---- Wait + Dispatch phase ----
-        // Wait for all in-flight datagrams to complete, dispatching
-        // each completion to its state machine. We loop here because
-        // waitForAny() returns one completion at a time.
-        while (!active_slots.empty()) {
-            auto any = router.waitForAny(active_slots.data(),
-                                          active_slots.size(), timeout_ms);
-            if (any.timed_out) {
-                // Timeout — cancel all remaining in-flight slots
-                for (size_t s : active_slots) {
-                    router.cancelPreRegistered(s);
-                }
-                // Fail all state machines that still need to send
-                for (auto& sm : state_machines_) {
-                    if (sm.needsSend()) sm.cancel();
-                }
-                active_slots.clear();
-                break;
+        // ---- Wait for one completion ----
+        auto any = router.waitForAny(active_slots.data(),
+                                      active_slots.size(), timeout_ms);
+        if (any.timed_out) {
+            for (size_t s : active_slots) {
+                router.cancelPreRegistered(s);
+                slot_to_sm_[s] = SIZE_MAX;
             }
-
-            // Dispatch the completed slot to its state machine.
-            // any.slot_index is the index into active_slots, which
-            // corresponds to the state machine at the same position
-            // in the issue phase. We need to find which state machine
-            // owns this slot.
-            size_t completed_slot = active_slots[any.slot_index];
-
-            // Find the state machine that owns this slot
             for (auto& sm : state_machines_) {
-                if (sm.slot() == completed_slot && sm.needsSend()) {
-                    sm.onComplete(any.result, *master_);
-                    break;
-                }
+                if (!sm.isFinished()) sm.cancel();
             }
-
-            // Remove the completed slot from active_slots
-            active_slots[any.slot_index] = active_slots.back();
-            active_slots.pop_back();
+            active_slots.clear();
+            break;
         }
+
+        // ---- Dispatch the completed slot ----
+        size_t completed_slot = active_slots[any.slot_index];
+        size_t sm_idx = slot_to_sm_[completed_slot];
+        slot_to_sm_[completed_slot] = SIZE_MAX;
+
+        if (sm_idx < state_machines_.size()) {
+            state_machines_[sm_idx].onComplete(any.result, *master_);
+        }
+
+        // Remove the completed slot from active_slots (swap-and-pop)
+        active_slots[any.slot_index] = active_slots.back();
+        active_slots.pop_back();
+
+        // Loop back to issue phase — the completed slave may now
+        // needSend() for its next protocol step, and it will be
+        // issued in the next frame alongside any other slaves that
+        // are ready. This is the pipelining: different slaves can
+        // be at different protocol steps simultaneously.
     }
 
     // ---- Tally results ----

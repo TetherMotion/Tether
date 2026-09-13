@@ -191,11 +191,19 @@ public:
 
     /// True if the state machine needs a datagram to be sent.
     bool needsSend() const {
-        return state_ == EEPROMState::WRITE_EEPADDR ||
-               state_ == EEPROMState::WRITE_EEPCTL_READ ||
-               state_ == EEPROMState::POLL_EEPSTAT ||
-               state_ == EEPROMState::READ_EEPDAT;
+        return !in_flight_ &&
+               (state_ == EEPROMState::WRITE_EEPADDR ||
+                state_ == EEPROMState::WRITE_EEPCTL_READ ||
+                state_ == EEPROMState::POLL_EEPSTAT ||
+                state_ == EEPROMState::READ_EEPDAT);
     }
+
+    /// True if this state machine has a datagram currently in flight.
+    bool isInFlight() const { return in_flight_; }
+
+    /// Mark this state machine as having a datagram in flight.
+    /// Called by the reactor after issuing a datagram.
+    void markInFlight() { in_flight_ = true; }
 
     /// Slave index this state machine reads from.
     uint16_t slaveIndex() const { return slave_index_; }
@@ -253,6 +261,20 @@ public:
     /// Total number of word-pairs to read.
     uint16_t totalWords() const { return total_words_; }
 
+    /// Current EEPROM word address being read (even).
+    uint16_t currentWord() const { return current_word_; }
+
+    /**
+     * @brief Skip word-pairs that are already in the SII cache.
+     *
+     * Called by the reactor after init() and after each word-pair is
+     * read. Advances current_word_ past any cached word-pairs (e.g.
+     * those prefetched by initSlaves()), avoiding redundant bus reads.
+     *
+     * @param master  The master (for accessing the per-slave SII cache).
+     */
+    void skipCachedWords(Master& master);
+
 private:
     uint16_t     slave_index_{0};
     uint16_t     current_word_{0};    ///< Current EEPROM word address (even)
@@ -262,6 +284,7 @@ private:
     int          busy_polls_{0};      ///< Busy-poll iterations for current step
 
     EEPROMState  state_{EEPROMState::IDLE};
+    bool         in_flight_{false};   ///< True when a datagram is pending
     size_t       slot_{0};            ///< Router slot for current datagram
     RxDatagram   response_{};         ///< Response buffer (owned, stable address)
 
@@ -271,7 +294,7 @@ private:
     uint16_t     eepctl_payload_{0};
 
     /// Transition to FAILED state.
-    void fail() { state_ = EEPROMState::FAILED; }
+    void fail() { state_ = EEPROMState::FAILED; in_flight_ = false; }
 
     /// Advance to the next word-pair or DONE.
     void advanceWord();

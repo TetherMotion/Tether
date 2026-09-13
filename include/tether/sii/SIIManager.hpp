@@ -111,6 +111,105 @@ public:
         words_[word_addr] = value;
     }
 
+    // ----------------------------------------------------------------
+    // State-machine-capable interfaces
+    //
+    // These operations acquire the cache mutex at most once per call,
+    // making them suitable for driving per-slave EEPROM state machines
+    // that need to check or fill ranges without per-word lock overhead.
+    // ----------------------------------------------------------------
+
+    /**
+     * @brief Read a 32-bit word-pair from the cache atomically.
+     *
+     * Reads two consecutive 16-bit words at `word_addr` and
+     * `word_addr + 1` under a single lock acquisition. The low word
+     * is at `word_addr`, the high word at `word_addr + 1`.
+     *
+     * @param word_addr  Even SII word address
+     * @param[out] out   32-bit value (lo word in bits 0..15)
+     * @return true if both words were in the cache
+     */
+    bool getWordPair(uint16_t word_addr, uint32_t& out) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto lo = words_.find(word_addr);
+        if (lo == words_.end()) return false;
+        auto hi = words_.find(static_cast<uint16_t>(word_addr + 1));
+        if (hi == words_.end()) return false;
+        out = static_cast<uint32_t>(lo->second) |
+              (static_cast<uint32_t>(hi->second) << 16);
+        return true;
+    }
+
+    /**
+     * @brief Store a 32-bit word-pair into the cache atomically.
+     *
+     * Writes two consecutive 16-bit words at `word_addr` and
+     * `word_addr + 1` under a single lock acquisition.
+     *
+     * @param word_addr  Even SII word address
+     * @param value      32-bit value (lo word in bits 0..15)
+     */
+    void setWordPair(uint16_t word_addr, uint32_t value) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        words_[word_addr] = static_cast<uint16_t>(value & 0xFFFF);
+        words_[static_cast<uint16_t>(word_addr + 1)] =
+            static_cast<uint16_t>((value >> 16) & 0xFFFF);
+    }
+
+    /**
+     * @brief Count how many contiguous words are cached from `start`.
+     *
+     * Returns the number of consecutive word addresses starting at
+     * `start` that are present in the cache. Stops at the first gap.
+     * Used by the EEPROM state machine to skip already-prefetched
+     * ranges in O(1) lock acquisitions instead of O(n) per-word lookups.
+     *
+     * @param start  Starting SII word address
+     * @return Number of contiguous cached words (0 if `start` is missing)
+     */
+    uint16_t cachedContiguousFrom(uint16_t start) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        uint16_t count = 0;
+        uint16_t addr = start;
+        while (words_.find(addr) != words_.end()) {
+            ++count;
+            ++addr;
+        }
+        return count;
+    }
+
+    /**
+     * @brief Check whether a contiguous range of words is fully cached.
+     *
+     * @param start  Starting SII word address
+     * @param count  Number of words to check
+     * @return true if all words in [start, start+count) are cached
+     */
+    bool isRangeCached(uint16_t start, uint16_t count) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (uint16_t i = 0; i < count; ++i) {
+            if (words_.find(static_cast<uint16_t>(start + i)) ==
+                words_.end())
+                return false;
+        }
+        return true;
+    }
+
+    /**
+     * @brief Bulk-store a contiguous range of words under one lock.
+     *
+     * @param start    Starting SII word address
+     * @param values   Array of 16-bit word values
+     * @param count    Number of words to store
+     */
+    void setRange(uint16_t start, const uint16_t* values, uint16_t count) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (uint16_t i = 0; i < count; ++i) {
+            words_[static_cast<uint16_t>(start + i)] = values[i];
+        }
+    }
+
     /** @brief Remove all cached words. */
     void clear() {
         std::lock_guard<std::mutex> lock(mutex_);
