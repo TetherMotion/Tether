@@ -21,46 +21,43 @@
  * **sequentially per slave**, so the total time is N × (per-slave EEPROM
  * latency × word-pairs needed).
  *
- * ## Solution: reactor pattern
+ * ## Solution: demand-driven reactor
  *
- * The reactor decomposes the 4-step protocol into a per-slave state machine.
- * A single worker thread drives all state machines concurrently:
+ * The reactor uses a `SIIDemandParser` per slave to determine exactly which
+ * EEPROM word-pairs are needed. It then reads those word-pairs concurrently
+ * across all slaves using the packet router's `waitForAny()` primitive:
  *
- *   1. For each slave that is ready for its next protocol step, the reactor
- *      pre-registers a router slot, builds a datagram, and sends it.
- *   2. The reactor calls `TransactionRouter::waitForAny()` to block until
- *      any of the in-flight datagrams completes.
- *   3. The completed response is dispatched to the corresponding slave's
- *      state machine, which advances to its next step.
- *   4. Steps 1–3 repeat until all slaves have read all requested words.
+ *   1. For each slave, the demand parser is called to get the list of
+ *      needed word-pair addresses.
+ *   2. The reactor issues bus reads for those word-pairs across all slaves.
+ *   3. When a read completes, the result is cached in the slave's
+ *      `SIISlaveCache`, and the demand parser is called again to see
+ *      if more word-pairs are needed or if parsing is complete.
+ *   4. Steps 2–3 repeat until all slaves' parsers report COMPLETE.
  *
- * This overlaps the EEPROM latency across all slaves: the total time
- * approaches **one slave's EEPROM latency** (not N × one slave's latency).
+ * This approach fetches **only the words that are actually needed** — no
+ * fixed-size prefetch, no assumptions about "typical" EEPROM sizes. The
+ * demand parser drives the read set; the reactor drives the concurrency.
  *
  * ## Memory safety
  *
  * - Each slave's state machine owns its response buffer (a `RxDatagram`
  *   stored by value in the state machine, not on the caller's stack).
  * - Router slots are cancelled on timeout, error, or reactor shutdown.
- * - The reactor owns all state machines by value (no heap allocation
- *   per slave, no dangling pointers).
+ * - The reactor owns all state machines and parsers by value (no heap
+ *   allocation per slave, no dangling pointers).
  * - `waitForAny()` receives only slot indices (integers), never pointers.
  *
- * ## Reuse of existing SII code
+ * ## Reuse of SII parsing code
  *
- * The reactor reuses the existing `SIIReader` infrastructure by:
- *   - Exposing the EEPROM register constants and protocol steps through
- *     the `EEPROMProtocol` helper (shared with `SIIReader`).
- *   - Using the same `SIISlaveCache` for word-level caching, so the
- *     reactor's results are immediately visible to `SIIManager::readWord()`
- *     and `SIIParser::parseCategories()`.
- *   - Delegating the "force EEPROM to ECAT control" one-time setup to
- *     `SIIReader::forceEepromToEcat()` (called synchronously before the
- *     reactor loop starts, since it is a one-time per-slave operation).
+ * The reactor delegates all parsing to `SIIDemandParser`, which shares the
+ * same category-data parsing functions (`parseStringsFromBuffer`,
+ * `parseGeneralFromBuffer`, etc.) with the blocking `SIIParser`. Both the
+ * blocking and reactor paths use the same low-level parsing code.
  *
+ * @see SIIDemandParser
  * @see TransactionRouter::waitForAny()
  * @see SIIReader
- * @see SIIParser::parseCategories()
  */
 
 #pragma once
@@ -72,6 +69,7 @@
 #include "tether/ethercat/TransactionRouter.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/sii/SIIManager.hpp"
+#include "tether/sii/SIIDemandParser.hpp"
 #include <cstdint>
 #include <cstddef>
 #include <vector>
@@ -115,26 +113,27 @@ struct EEPROMProtocol {
 };
 
 // ============================================================================
-// EEPROMReadStateMachine — per-slave EEPROM read state machine
+// EEPROMReadStateMachine — per-slave single-word-pair EEPROM read
 // ============================================================================
 
 /**
  * @brief States of the per-slave EEPROM read protocol.
  *
- * The state machine reads a contiguous range of EEPROM word-pairs (32-bit
- * each) from a single slave. Each state corresponds to one EtherCAT
- * register transaction (one datagram in flight).
+ * The state machine reads a **single** 32-bit word-pair from one slave.
+ * After completion (DONE), the reactor provides the next word-pair address
+ * via `reinit()`. This allows the reactor to drive demand-driven reads
+ * where the next address depends on the parsing result.
  *
  * State transitions:
  *
  * @code
- *   IDLE → WRITE_EEPADDR → WRITE_EEPCTL_READ → POLL_EEPSTAT → READ_EEPDAT
+ *   IDLE → WRITE_EEPADDR → WRITE_EEPCTL_READ → POLL_EEPSTAT → READ_EEPDAT → DONE
  *                                                                 ↓
- *   (advance word address, loop back to WRITE_EEPADDR)
- *                                                                 ↓
- *   (all words read) → DONE
+ *   (NACK retry) → WRITE_EEPADDR
+ *   (busy)       → POLL_EEPSTAT (stay)
+ *   (error/timeout) → FAILED
  *
- *   Any state → FAILED (on timeout, error, or cancellation)
+ *   reinit(addr) from DONE → WRITE_EEPADDR
  * @endcode
  */
 enum class EEPROMState : uint8_t {
@@ -143,22 +142,29 @@ enum class EEPROMState : uint8_t {
     WRITE_EEPCTL_READ,  ///< Writing the READ command to 0x0502
     POLL_EEPSTAT,       ///< Reading EEPSTAT (0x0502) to check busy bit
     READ_EEPDAT,        ///< Reading 32-bit data from 0x0508
-    DONE,               ///< All words read successfully
+    DONE,               ///< Word-pair read successfully
     FAILED,             ///< Error or timeout
 };
 
 /**
- * @brief Per-slave EEPROM read state machine.
+ * @brief Per-slave EEPROM read state machine for a list of word-pairs.
  *
  * Each instance drives the 4-step EEPROM read protocol for one slave,
- * reading a contiguous range of word-pairs (32-bit values). The state
- * machine is advanced one step at a time by the reactor.
+ * reading a list of 32-bit word-pairs. The state machine is advanced
+ * one step at a time by the reactor. After each word-pair completes,
+ * the state machine automatically advances to the next address in
+ * its vector. When all word-pairs are read, it transitions to DONE.
+ *
+ * The list of word-pair addresses is stored in a `std::vector<uint16_t>`,
+ * provided at `init()` time. The reactor refills this vector by calling
+ * `setWordPairs()` when the demand parser reports more needed words.
  *
  * The state machine owns:
  *   - Its response buffer (`RxDatagram`, stored by value — no heap
  *     allocation, no stack-pointer lifetime issues).
  *   - Its router slot index (an integer, safe to pass to `waitForAny()`).
- *   - Its current word address and remaining word count.
+ *   - Its current word address.
+ *   - Its vector of pending word-pair addresses.
  *
  * Memory safety: the response buffer is a member of the state machine,
  * which is a member of the reactor. The reactor outlives all router
@@ -167,19 +173,22 @@ enum class EEPROMState : uint8_t {
  */
 class EEPROMReadStateMachine {
 public:
-    /**
-     * @brief Construct an idle state machine.
-     */
     EEPROMReadStateMachine() = default;
 
     /**
-     * @brief Initialize the state machine for a new read operation.
+     * @brief Initialize the state machine with a list of word-pair addresses.
      *
-     * @param slave_index   Slave position on the bus (0-based).
-     * @param start_word    First EEPROM word address (must be even).
-     * @param word_pair_count  Number of 32-bit word-pairs to read.
+     * @param slave_index  Slave position on the bus (0-based).
+     * @param word_pairs   Vector of even EEPROM word addresses to read.
+     *                     Each address starts a 2-word (32-bit) read.
+     *                     The vector is moved into the state machine.
      */
-    void init(uint16_t slave_index, uint16_t start_word, uint16_t word_pair_count);
+    void init(uint16_t slave_index, std::vector<uint16_t> word_pairs);
+
+    /**
+     * @brief Reset to IDLE with no pending word-pairs.
+     */
+    void reset();
 
     /// Current state.
     EEPROMState state() const { return state_; }
@@ -202,7 +211,6 @@ public:
     bool isInFlight() const { return in_flight_; }
 
     /// Mark this state machine as having a datagram in flight.
-    /// Called by the reactor after issuing a datagram.
     void markInFlight() { in_flight_ = true; }
 
     /// Slave index this state machine reads from.
@@ -215,13 +223,17 @@ public:
     RxDatagram& response() { return response_; }
     const RxDatagram& response() const { return response_; }
 
+    /// Number of word-pairs remaining to read.
+    size_t remaining() const { return word_pairs_.size() - current_index_; }
+
+    /// Number of word-pairs already read.
+    size_t wordsRead() const { return current_index_; }
+
+    /// Total number of word-pairs in the current batch.
+    size_t totalWords() const { return word_pairs_.size(); }
+
     /**
      * @brief Build the datagram spec for the current state.
-     *
-     * Called by the reactor when this state machine needs to send a
-     * datagram. The reactor allocates the transaction index, pre-registers
-     * the router slot, and stores the slot in `slot_`.
-     *
      * @param idx  Transaction index (allocated by the reactor).
      * @return MultiDatagramSpec for the current protocol step.
      */
@@ -229,9 +241,6 @@ public:
 
     /**
      * @brief Set the router slot for the current in-flight datagram.
-     *
-     * Called by the reactor after pre-registering the waiter and before
-     * sending the datagram.
      */
     void setSlot(size_t slot) { slot_ = slot; }
 
@@ -239,54 +248,38 @@ public:
      * @brief Process the completion of the current datagram.
      *
      * Called by the reactor when `waitForAny()` reports this state
-     * machine's slot has completed. Advances the state machine to its
-     * next state (or to FAILED on error).
+     * machine's slot has completed. On READ_EEPDAT, caches the result
+     * in the slave's SIISlaveCache and advances to the next word-pair
+     * (or DONE if all word-pairs have been read).
      *
      * @param result  The WaitResult from the router.
-     * @param master  The master (for cache writes on READ_EEPDAT).
+     * @param master  The master (for cache writes).
      */
     void onComplete(const WaitResult& result, Master& master);
 
     /**
      * @brief Cancel any pending operation.
-     *
-     * Called by the reactor on shutdown or cancellation. Transitions
-     * to FAILED if not already finished.
      */
     void cancel();
 
-    /// Number of word-pairs successfully read so far.
-    uint16_t wordsRead() const { return words_read_; }
-
-    /// Total number of word-pairs to read.
-    uint16_t totalWords() const { return total_words_; }
-
     /// Current EEPROM word address being read (even).
-    uint16_t currentWord() const { return current_word_; }
-
-    /**
-     * @brief Skip word-pairs that are already in the SII cache.
-     *
-     * Called by the reactor after init() and after each word-pair is
-     * read. Advances current_word_ past any cached word-pairs (e.g.
-     * those prefetched by initSlaves()), avoiding redundant bus reads.
-     *
-     * @param master  The master (for accessing the per-slave SII cache).
-     */
-    void skipCachedWords(Master& master);
+    uint16_t currentWord() const {
+        return current_index_ < word_pairs_.size()
+            ? word_pairs_[current_index_] : 0xFFFF;
+    }
 
 private:
     uint16_t     slave_index_{0};
-    uint16_t     current_word_{0};    ///< Current EEPROM word address (even)
-    uint16_t     total_words_{0};     ///< Total word-pairs to read
-    uint16_t     words_read_{0};      ///< Word-pairs completed
+    std::vector<uint16_t> word_pairs_{};  ///< Pending word-pair addresses
+    size_t       current_index_{0};       ///< Index into word_pairs_
+
     int          nack_count_{0};      ///< NACK retries for current word
-    int          busy_polls_{0};      ///< Busy-poll iterations for current step
+    int          busy_polls_{0};       ///< Busy-poll iterations for current step
 
     EEPROMState  state_{EEPROMState::IDLE};
     bool         in_flight_{false};   ///< True when a datagram is pending
     size_t       slot_{0};            ///< Router slot for current datagram
-    RxDatagram   response_{};         ///< Response buffer (owned, stable address)
+    RxDatagram   response_{};          ///< Response buffer (owned, stable address)
 
     /// Write payload for EEPADDR (kept as member to avoid stack-lifetime issues).
     uint16_t     eepaddr_payload_{0};
@@ -296,56 +289,55 @@ private:
     /// Transition to FAILED state.
     void fail() { state_ = EEPROMState::FAILED; in_flight_ = false; }
 
-    /// Advance to the next word-pair or DONE.
+    /// Advance to the next word-pair, or DONE if all read.
     void advanceWord();
 };
 
 // ============================================================================
-// EEPROMReactor — single-worker concurrent multi-slave EEPROM reader
+// EEPROMReactor — demand-driven concurrent multi-slave EEPROM reader
 // ============================================================================
 
 /**
  * @brief Single-worker reactor that reads EEPROM from multiple slaves
- *        concurrently using the packet router's `waitForAny()` primitive.
+ *        concurrently, driven by demand parsers.
  *
  * @details
- * The reactor owns one `EEPROMReadStateMachine` per slave. It runs a
- * single-threaded event loop:
+ * The reactor owns one `EEPROMReadStateMachine` and one `SIIDemandParser`
+ * per slave. It runs a single-threaded event loop:
  *
- * 1. **Issue phase**: For each state machine that `needsSend()`, allocate
- *    a transaction index, pre-register a router slot, build the datagram,
- *    and add it to a batch frame.
- * 2. **Send phase**: Send all pending datagrams in one frame via
- *    `Master::sendMultiDatagram()`.
- * 3. **Wait phase**: Call `TransactionRouter::waitForAny()` with all
- *    in-flight slot indices. This blocks until any datagram completes.
- * 4. **Dispatch phase**: Route the completed response to the corresponding
- *    state machine's `onComplete()`, which advances it to its next state.
- * 5. Repeat until all state machines are `isFinished()`.
+ * 1. **Demand phase**: For each slave that needs more words, call the
+ *    demand parser to get the list of needed word-pair addresses.
+ *    If the parser reports COMPLETE, mark the slave as done.
+ * 2. **Issue phase**: For each state machine that `needsSend()`, allocate
+ *    a transaction index, pre-register a router slot, build the datagram.
+ * 3. **Send phase**: Send all pending datagrams in one frame.
+ * 4. **Wait phase**: Call `TransactionRouter::waitForAny()` to block until
+ *    any datagram completes.
+ * 5. **Dispatch phase**: Route the completed response to the corresponding
+ *    state machine's `onComplete()`, which caches the result. Then call
+ *    the demand parser again to get the next word-pair for that slave.
+ * 6. Repeat until all slaves' parsers report COMPLETE.
  *
  * The reactor uses **one thread** (the caller's thread) and keeps
  * **multiple datagrams in flight** across different slaves. This
  * overlaps the per-slave EEPROM latency.
  *
- * ## Memory safety
- *
- * - All state machines (and their response buffers) are owned by value
- *   in a `std::vector` inside the reactor. No heap allocation per slave.
- * - Router slots are cancelled before the vector is destroyed.
- * - `waitForAny()` receives only slot indices (integers).
- * - The reactor does not hold any router lock during I/O.
- *
  * ## Usage
  *
  * @code
  *   EEPROMReactor reactor(master);
- *   reactor.addSlave(0, 0x0040, 256);  // slave 0, 256 word-pairs from 0x0040
- *   reactor.addSlave(1, 0x0040, 256);  // slave 1, same range
- *   reactor.run();                      // blocks until all done
+ *   reactor.addSlave(0, SII::CAT_MASK_ALL);
+ *   reactor.addSlave(1, SII::CAT_MASK_ALL);
+ *   reactor.run();  // blocks until all done
+ *
+ *   // Results are in each slave's SIISlaveCache:
+ *   SII::SIIData data;
+ *   master.slave(0).sii().parseCategories(data, SII::CAT_MASK_ALL);
  * @endcode
  *
  * After `run()` completes, the EEPROM words are in each slave's
- * `SIISlaveCache`, accessible via `master.slave(i).sii().cache()`.
+ * `SIISlaveCache`, and the parsed SII data is available via
+ * `reactor.result(i)`.
  */
 class EEPROMReactor {
 public:
@@ -357,9 +349,6 @@ public:
 
     /**
      * @brief Destructor: cancels all pending router slots.
-     *
-     * Safe to call even if `run()` was never called or is in progress
-     * (though `run()` should not be called concurrently with destruction).
      */
     ~EEPROMReactor();
 
@@ -371,15 +360,16 @@ public:
     /**
      * @brief Add a slave to the reactor's read set.
      *
-     * Must be called before `run()`. Each added slave will have its
-     * EEPROM read concurrently with all other added slaves.
+     * Must be called before `run()`. The slave's EEPROM will be read
+     * concurrently with all other added slaves, driven by the demand
+     * parser which fetches only the words needed for the requested
+     * category mask.
      *
-     * @param slave_index     Slave position on the bus (0-based).
-     * @param start_word      First EEPROM word address (will be aligned to even).
-     * @param word_pair_count Number of 32-bit word-pairs to read.
+     * @param slave_index  Slave position on the bus (0-based).
+     * @param cat_mask     Bitmask of SIICategoryMask values selecting
+     *                     which SII categories to parse.
      */
-    void addSlave(uint16_t slave_index, uint16_t start_word,
-                  uint16_t word_pair_count);
+    void addSlave(uint16_t slave_index, uint32_t cat_mask);
 
     /**
      * @brief Run the reactor event loop until all slaves are done.
@@ -394,35 +384,61 @@ public:
      */
     bool run(uint32_t timeout_ms = 500);
 
-    /**
-     * @brief Number of slaves that completed successfully.
-     */
+    /// Number of slaves that completed successfully.
     size_t successCount() const { return success_count_; }
 
-    /**
-     * @brief Number of slaves that failed.
-     */
+    /// Number of slaves that failed.
     size_t failureCount() const { return failure_count_; }
+
+    /**
+     * @brief Get the parsed SII data for a slave.
+     * @param i  Index in the add order (not slave_index).
+     * @return Parsed SII data (valid if run() succeeded for this slave).
+     */
+    const SIIData& result(size_t i) const { return slaves_[i].out_data; }
 
     /**
      * @brief Get the state machine for a slave (for diagnostics).
      * @param i  Index in the add order (not slave_index).
      */
     const EEPROMReadStateMachine& stateMachine(size_t i) const {
-        return state_machines_[i];
+        return slaves_[i].sm;
     }
 
-    /// Number of state machines (slaves) in the reactor.
-    size_t slaveCount() const { return state_machines_.size(); }
+    /// Number of slaves in the reactor.
+    size_t slaveCount() const { return slaves_.size(); }
 
 private:
+    /// Per-slave state: demand parser + state machine.
+    struct SlaveEntry {
+        uint16_t                  slave_index{0};
+        SIIDemandParser           parser{};
+        EEPROMReadStateMachine    sm{};
+        SIIData                   out_data{};
+        bool                      done{false};
+    };
+
     Master* master_{nullptr};
-    std::vector<EEPROMReadStateMachine> state_machines_;
+    std::vector<SlaveEntry> slaves_;
     size_t success_count_{0};
     size_t failure_count_{0};
 
     /// Cancel all pending router slots (called on destruction and error).
     void cancelAllPending();
+
+    /**
+     * @brief Refill a slave's word-pair queue from its demand parser.
+     *
+     * Calls the demand parser to get the next set of needed word-pairs.
+     * If the parser reports COMPLETE, marks the slave as done.
+     * If the parser reports NEED_WORDS, fills the word-pair queue.
+     * If the parser reports FAILED, marks the slave as failed.
+     *
+     * @param entry  The slave entry to refill.
+     * @return true if the queue was filled (or slave is done),
+     *         false on failure.
+     */
+    bool refillQueue(SlaveEntry& entry);
 };
 
 } // namespace SII

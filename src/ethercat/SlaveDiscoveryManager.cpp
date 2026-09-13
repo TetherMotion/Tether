@@ -149,26 +149,44 @@ std::vector<DiscoveredSlave> SlaveDiscoveryManager::discoverSync(
         }
     }
 
-    // ---- 3. Concurrent EEPROM prefetch via the reactor ----
-    // Use the single-worker EEPROM reactor to read SII words from all
-    // target slaves concurrently. The reactor pipelines per-slave state
-    // machines: after each completion, the next step for that slave is
-    // issued immediately, overlapping different protocol steps across
-    // slaves. Already-cached word-pairs (from initSlaves()'s 128-word
-    // prefetch) are skipped automatically.
+    // ---- 3. Concurrent EEPROM read via the demand-driven reactor ----
+    // The reactor uses a SIIDemandParser per slave to determine exactly
+    // which EEPROM word-pairs are needed for the requested categories.
+    // It then reads those word-pairs concurrently across all slaves,
+    // fetching ONLY what's needed — no fixed-size prefetch, no
+    // assumptions about typical EEPROM sizes.
     //
-    // We read from 0x0040 (category area start). The state machine
-    // skips word-pairs already in the cache (0x0040..0x007F from
-    // initSlaves), so only uncached words are read from the bus.
+    // After the reactor completes, the per-slave SII caches contain
+    // all needed words. The subsequent readSlaveSii() calls will hit
+    // the cache and return immediately.
 #if TETHER_ENABLE_SII
-    if (target_indices.size() > 1) {
+    // Compute the category mask from the discovery options (same logic
+    // as readSlaveSii below).
+    const bool all = opts.has(DiscoveryOption::All);
+    uint32_t cat_mask = SII::CAT_MASK_NONE;
+    if (all || opts.has(DiscoveryOption::DeviceNames))
+        cat_mask |= SII::CAT_MASK_STRINGS | SII::CAT_MASK_GENERAL;
+    if (all || opts.has(DiscoveryOption::SyncManagers))
+        cat_mask |= SII::CAT_MASK_SYNC_MGR;
+    if (all || opts.has(DiscoveryOption::FMMUs))
+        cat_mask |= SII::CAT_MASK_FMMU;
+    if (all || opts.has(DiscoveryOption::TxPDOs))
+        cat_mask |= SII::CAT_MASK_TXPDO;
+    if (all || opts.has(DiscoveryOption::RxPDOs))
+        cat_mask |= SII::CAT_MASK_RXPDO;
+    if (all || opts.has(DiscoveryOption::DistributedClocks))
+        cat_mask |= SII::CAT_MASK_DC;
+    if (all || opts.has(DiscoveryOption::DeviceProfile) ||
+        opts.has(DiscoveryOption::GeneralInfo) ||
+        opts.has(DiscoveryOption::PhysicalPorts))
+        cat_mask |= SII::CAT_MASK_GENERAL;
+    if (all)
+        cat_mask = SII::CAT_MASK_ALL;
+
+    if (target_indices.size() > 1 && cat_mask != SII::CAT_MASK_NONE) {
         SII::EEPROMReactor reactor(*master_);
         for (uint16_t idx : target_indices) {
-            // Read 128 word-pairs (256 words) from word 0x0040.
-            // Most slaves' category data fits within this range.
-            // The state machine skips already-cached words, so
-            // effectively only 0x0080..0x0140 is read from the bus.
-            reactor.addSlave(idx, 0x0040, 128);
+            reactor.addSlave(idx, cat_mask);
         }
         reactor.run(500);
     }
