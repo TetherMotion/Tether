@@ -217,6 +217,27 @@ public:
 // ============================================================================
 
 /**
+ * @brief Bitmask of SII categories to parse selectively.
+ *
+ * Used by SIIParser::parseCategories() to skip categories that are not
+ * needed, avoiding unnecessary EEPROM reads.
+ *
+ * CAT_STRINGS is automatically included when any category that references
+ * string indices (CAT_GENERAL, CAT_TXPDO, CAT_RXPDO) is requested.
+ */
+enum SIICategoryMask : uint32_t {
+    CAT_MASK_NONE        = 0x00000000,  ///< No categories (identity only)
+    CAT_MASK_STRINGS     = 0x00000001,  ///< CAT_STRINGS (10)
+    CAT_MASK_GENERAL     = 0x00000002,  ///< CAT_GENERAL (30)
+    CAT_MASK_FMMU        = 0x00000004,  ///< CAT_FMMU (40)
+    CAT_MASK_SYNC_MGR    = 0x00000008,  ///< CAT_SYNC_MANAGER (41)
+    CAT_MASK_TXPDO       = 0x00000010,  ///< CAT_TXPDO (50)
+    CAT_MASK_RXPDO       = 0x00000020,  ///< CAT_RXPDO (51)
+    CAT_MASK_DC          = 0x00000040,  ///< CAT_DC (60)
+    CAT_MASK_ALL         = 0xFFFFFFFF,  ///< All categories
+};
+
+/**
  * @brief High-level SII parser
  * 
  * Parses raw SII data into structured SIIData.
@@ -245,6 +266,25 @@ public:
      * @brief Parse only identity and mailbox (medium read)
      */
     bool parseIdentity(uint16_t slave_index, SIIData& out_data);
+
+    /**
+     * @brief Parse identity plus a selectable subset of SII categories.
+     *
+     * Scans the category area but only reads/parses categories whose bits
+     * are set in `cat_mask`. Categories that are skipped are not read from
+     * the EEPROM (only their 2-word headers are read to advance the scan).
+     *
+     * CAT_STRINGS is implicitly included if any of CAT_GENERAL, CAT_TXPDO,
+     * or CAT_RXPDO is requested, because those categories reference string
+     * indices that require the string table.
+     *
+     * @param slave_index  Slave index
+     * @param out_data     Output parsed data (identity always populated)
+     * @param cat_mask     Bitmask of SIICategoryMask values
+     * @return true on success
+     */
+    bool parseCategories(uint16_t slave_index, SIIData& out_data,
+                         uint32_t cat_mask);
     
     /**
      * @brief Get last parse error message

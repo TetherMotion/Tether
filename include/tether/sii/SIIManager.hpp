@@ -221,6 +221,27 @@ public:
      */
     bool parseFull(SIIData& data);
 
+    /**
+     * @brief Parse identity plus a selectable subset of SII categories.
+     *
+     * Only reads the EEPROM categories whose bits are set in `cat_mask`.
+     * Categories not requested are skipped (only their 2-word headers are
+     * read to advance the scan). This avoids unnecessary EEPROM bus
+     * traffic when only a subset of SII data is needed.
+     *
+     * CAT_STRINGS is implicitly included if any of CAT_GENERAL, CAT_TXPDO,
+     * or CAT_RXPDO is requested.
+     *
+     * The result is cached per category mask; a subsequent call with the
+     * same mask returns the cached result. A call with a different mask
+     * re-parses from scratch.
+     *
+     * @param[out] data   Parsed SII data (identity always populated)
+     * @param      cat_mask Bitmask of SIICategoryMask values
+     * @return true on success
+     */
+    bool parseCategories(SIIData& data, uint32_t cat_mask);
+
     /** @brief Invalidate the word cache and parsed SII cache. */
     void invalidateCache();
 
@@ -268,6 +289,7 @@ private:
     // Parsed SII cache (guarded by bus_mutex_).
     SIIData cached_data_{};
     bool full_parse_done_ = false;
+    uint32_t cached_cat_mask_ = 0;  ///< Category mask for cached_data_ (0 = full parse)
 
     // Low-level SII bus reader owned by this manager. One reader per manager
     // means the SIIReader's configured-address / FPWR / force-to-ECAT state

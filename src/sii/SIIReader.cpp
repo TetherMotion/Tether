@@ -991,9 +991,14 @@ bool SIIParser::parseDC(uint16_t slave_index, uint16_t byte_offset,
 }
 
 bool SIIParser::parse(uint16_t slave_index, SIIData& out_data) {
+    return parseCategories(slave_index, out_data, CAT_MASK_ALL);
+}
+
+bool SIIParser::parseCategories(uint16_t slave_index, SIIData& out_data,
+                                 uint32_t cat_mask) {
     out_data.clear();
     
-    // Parse identity first
+    // Parse identity first (words 0x08-0x1D — already prefetched by initSlaves)
     if (!parseIdentity(slave_index, out_data)) {
         return false;
     }
@@ -1002,6 +1007,12 @@ bool SIIParser::parse(uint16_t slave_index, SIIData& out_data) {
     uint16_t version = 0;
     if (m_reader.readWord(slave_index, SII_VERSION, version)) {
         out_data.version = version;
+    }
+
+    // Implicit dependency: categories that reference string indices need
+    // the strings table. Auto-include CAT_STRINGS if any of those are requested.
+    if ((cat_mask & (CAT_MASK_GENERAL | CAT_MASK_TXPDO | CAT_MASK_RXPDO)) != 0) {
+        cat_mask |= CAT_MASK_STRINGS;
     }
     
     // Parse category area
@@ -1052,28 +1063,35 @@ bool SIIParser::parse(uint16_t slave_index, SIIData& out_data) {
         TETHER_LOGD(TAG, "Category {}: type={} size={} words at 0x{:04X}",
                  category_count, cat_type, cat_size, word_addr);
         
-        // Parse category content
+        // Parse category content only if requested
         switch (cat_type) {
             case CAT_STRINGS:
-                parseStrings(slave_index, data_byte_offset, data_size_bytes, out_data);
+                if (cat_mask & CAT_MASK_STRINGS)
+                    parseStrings(slave_index, data_byte_offset, data_size_bytes, out_data);
                 break;
             case CAT_GENERAL:
-                parseGeneral(slave_index, data_byte_offset, data_size_bytes, out_data);
+                if (cat_mask & CAT_MASK_GENERAL)
+                    parseGeneral(slave_index, data_byte_offset, data_size_bytes, out_data);
                 break;
             case CAT_FMMU:
-                parseFMMU(slave_index, data_byte_offset, data_size_bytes, out_data);
+                if (cat_mask & CAT_MASK_FMMU)
+                    parseFMMU(slave_index, data_byte_offset, data_size_bytes, out_data);
                 break;
             case CAT_SYNC_MANAGER:
-                parseSyncManager(slave_index, data_byte_offset, data_size_bytes, out_data);
+                if (cat_mask & CAT_MASK_SYNC_MGR)
+                    parseSyncManager(slave_index, data_byte_offset, data_size_bytes, out_data);
                 break;
             case CAT_TXPDO:
-                parsePDO(slave_index, data_byte_offset, data_size_bytes, out_data, true);
+                if (cat_mask & CAT_MASK_TXPDO)
+                    parsePDO(slave_index, data_byte_offset, data_size_bytes, out_data, true);
                 break;
             case CAT_RXPDO:
-                parsePDO(slave_index, data_byte_offset, data_size_bytes, out_data, false);
+                if (cat_mask & CAT_MASK_RXPDO)
+                    parsePDO(slave_index, data_byte_offset, data_size_bytes, out_data, false);
                 break;
             case CAT_DC:
-                parseDC(slave_index, data_byte_offset, data_size_bytes, out_data);
+                if (cat_mask & CAT_MASK_DC)
+                    parseDC(slave_index, data_byte_offset, data_size_bytes, out_data);
                 break;
             case CAT_NOP:
                 // Skip NOP categories
@@ -1083,7 +1101,8 @@ bool SIIParser::parse(uint16_t slave_index, SIIData& out_data) {
                 break;
         }
         
-        // Move to next category
+        // Move to next category (skip data words without reading them
+        // for categories we didn't parse)
         word_addr += cat_size;
         category_count++;
     }
