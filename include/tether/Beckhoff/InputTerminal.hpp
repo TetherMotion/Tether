@@ -95,6 +95,17 @@ inline constexpr DeviceIdentity EL1872{0x00000002, 0x07503052, 16, "EL1872"};
 inline constexpr DeviceIdentity EL1889{0x00000002, 0x07613052, 16, "EL1889"};
 inline constexpr DeviceIdentity EL1899{0x00000002, 0x076B3052, 16, "EL1899"};
 
+// --- EP/ER/EJ field-box/plug-in variants with packed input images ---
+// ESI-verified packed-bit input images; supported, not verified on
+// hardware yet.  EP/ER/EJ 2339/2349 and EJ2819 are mixed I/O boxes —
+// their input half is mapped here, the output half via OutputTerminal.
+inline constexpr DeviceIdentity EP1819{0x00000002, 0x071B4052, 16, "EP1819"};
+inline constexpr DeviceIdentity EP2339I{0x00000002, 0x09234052, 8,  "EP2339"};
+inline constexpr DeviceIdentity EP2349I{0x00000002, 0x092D4052, 8,  "EP2349"};
+inline constexpr DeviceIdentity ER2339I{0x00000002, 0x09234852, 8,  "ER2339"};
+inline constexpr DeviceIdentity ER2349I{0x00000002, 0x092D4852, 8,  "ER2349"};
+inline constexpr DeviceIdentity EJ2819I{0x00000002, 0x0B032852, 16, "EJ2819"};
+
 /// Every known packed-input terminal — the default detection set used by
 /// MultiInputTerminal::detect().
 inline constexpr std::array kInputTerminals{
@@ -103,6 +114,7 @@ inline constexpr std::array kInputTerminals{
     EL1124, EL1134, EL1144, EL1202, EL1382, EL1409, EL1429, EL1489,
     EL1702, EL1712, EL1722, EL1804, EL1808, EL1809, EL1814, EL1819,
     EL1862, EL1872, EL1889, EL1899,
+    EP1819, EP2339I, EP2349I, ER2339I, ER2349I, EJ2819I,
 };
 
 } // namespace Devices

@@ -212,15 +212,59 @@ add_tether_example(beckhoff_analog_input_monitor
 add_tether_example(beckhoff_analog_output_sweep
     LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
 
+# --- Beckhoff position/encoder input terminal monitor ---
+# Auto-detects all EL5xxx position/encoder terminals via the
+# MultiPositionInputTerminal driver (SSI/SinCos/EnDat/BiSS/incremental),
+# brings them to OP, and shows every channel's live counter + latch values.
+add_tether_example(beckhoff_position_monitor
+    LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# --- Beckhoff stepper terminal jog demo ---
+# Finds the first POS-interface stepper (EL703x/EL704x), enables the
+# output stage and jogs back and forth with a velocity setpoint.
+add_tether_example(beckhoff_stepper_jog
+    LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# --- Beckhoff compact drive jog demo ---
+# Finds the first DRV-interface drive (EL7062/EL7411/EL72xx/ELM72xx),
+# walks the CiA402 FSA to OperationEnabled and jogs in profile velocity.
+add_tether_example(beckhoff_drive_move
+    LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# --- Beckhoff PWM terminal sweep demo ---
+# Finds the first PWM output terminal (EL2502/EL2535/EL2564) and sweeps
+# the duty cycle on every channel as a staggered triangle wave.
+add_tether_example(beckhoff_pwm_sweep
+    LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# --- Beckhoff pulse-train jog demo ---
+# Finds the first PTO terminal (EL2521/EL2522) and jogs the step/dir
+# pulse output with a frequency setpoint + direction bits.
+add_tether_example(beckhoff_pulse_jog
+    LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
 # All Beckhoff examples get the interactive TUI when tether_terminal_ui exists.
 if(TARGET tether_terminal_ui)
     foreach(_tui_ex beckhoff_output_toggle beckhoff_input_monitor
-                    beckhoff_analog_input_monitor beckhoff_analog_output_sweep)
+                    beckhoff_analog_input_monitor beckhoff_analog_output_sweep
+                    beckhoff_position_monitor beckhoff_stepper_jog
+                    beckhoff_drive_move beckhoff_pwm_sweep
+                    beckhoff_pulse_jog)
         target_link_libraries(${_tui_ex} PRIVATE tether_terminal_ui ${CURSES_LIBRARIES})
         target_include_directories(${_tui_ex} PRIVATE ${CURSES_INCLUDE_DIRS})
     endforeach()
 else()
     message(STATUS "tether_terminal_ui unavailable; beckhoff_* examples are stream-only")
+endif()
+endif()
+
+# --- Beckhoff TwinSAFE monitor (needs the FSoE stack too) ---
+if(TETHER_DRIVER_BECKHOFF AND TETHER_BUILD_FSOE AND TARGET tether_device_drivers)
+add_tether_example(beckhoff_safety_monitor
+    LIBRARIES tether_ethercat_master tether_device_drivers tether_fsoe tether_ethercat_common tether_hal tether_common tether_examples_common)
+if(TARGET tether_terminal_ui)
+    target_link_libraries(beckhoff_safety_monitor PRIVATE tether_terminal_ui ${CURSES_LIBRARIES})
+    target_include_directories(beckhoff_safety_monitor PRIVATE ${CURSES_INCLUDE_DIRS})
 endif()
 endif()
 

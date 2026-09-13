@@ -104,6 +104,18 @@ inline constexpr DeviceIdentity EL2798{0x00000002, 0x0AEE3052, 8,  "EL2798"};
 inline constexpr DeviceIdentity EL2808{0x00000002, 0x0AF83052, 8,  "EL2808"};
 inline constexpr DeviceIdentity EL2828{0x00000002, 0x0B0C3052, 8,  "EL2828"};
 
+// --- EP/ER/EJ field-box/plug-in variants with packed output images ---
+// Same electronics as the EL counterparts under different product-code
+// suffixes (0x4052=EP, 0x4852=ER, 0x2852=EJ).  ESI-verified packed-bit
+// output images; supported, not verified on hardware yet.
+inline constexpr DeviceIdentity EP2816{0x00000002, 0x0B004052, 16, "EP2816"};
+inline constexpr DeviceIdentity EP2339{0x00000002, 0x09234052, 8,  "EP2339"};
+inline constexpr DeviceIdentity EP2349{0x00000002, 0x092D4052, 8,  "EP2349"};
+inline constexpr DeviceIdentity ER2339{0x00000002, 0x09234852, 8,  "ER2339"};
+inline constexpr DeviceIdentity ER2349{0x00000002, 0x092D4852, 8,  "ER2349"};
+inline constexpr DeviceIdentity EJ2819{0x00000002, 0x0B032852, 16, "EJ2819"};
+inline constexpr DeviceIdentity EP6228{0x00000002, 0x18544052, 8,  "EP6228"};
+
 /// Every known packed-output terminal — the default detection set used by
 /// MultiOutputTerminal::detect().
 inline constexpr std::array kOutputTerminals{
@@ -111,6 +123,7 @@ inline constexpr std::array kOutputTerminals{
     EL2124, EL2202, EL2262, EL2407, EL2602, EL2612, EL2622, EL2624,
     EL2634, EL2652, EL2712, EL2722, EL2732, EL2784, EL2788, EL2794,
     EL2798, EL2808, EL2828,
+    EP2816, EP2339, EP2349, ER2339, ER2349, EJ2819, EP6228,
 };
 
 } // namespace Devices

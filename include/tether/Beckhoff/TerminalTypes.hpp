@@ -43,6 +43,7 @@ enum class Error : uint8_t {
     OpTimeout,              ///< slave did not reach OP in time
     LoopStartFailed,        ///< master realtime loop failed to start
     TooManyBits,            ///< chain exceeds the MaxBits capacity
+    FsoeInitFailed,         ///< FSoE master connection could not be initialized
     Cancelled,              ///< aborted via master.requestCancel()
 };
 
