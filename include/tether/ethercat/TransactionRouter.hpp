@@ -296,6 +296,43 @@ public:
      */
     void cancelPreRegistered(size_t slot);
 
+    // ----- Multi-slot wait (reactor pattern) -------------------------------
+
+    /**
+     * @brief Result of a waitForAny() call.
+     */
+    struct AnyWaitResult {
+        size_t   slot_index{0};  ///< Index of the completed slot (in the input array)
+        WaitResult result;        ///< The completion result
+        bool    timed_out{true};  ///< true if no slot completed before timeout
+    };
+
+    /**
+     * @brief Wait for any of N pre-registered slots to complete.
+     *
+     * This is the key primitive for the reactor pattern: a single worker
+     * thread issues datagrams for multiple slaves, pre-registers their
+     * slots, then calls waitForAny() to block until the first response
+     * arrives.  The caller processes that completion, may issue the next
+     * datagram for that slave, and calls waitForAny() again with the
+     * remaining pending slots.
+     *
+     * Slots that have already completed before the call returns
+     * immediately.  If multiple slots complete simultaneously, one is
+     * returned (unspecified which).
+     *
+     * Memory safety: the caller passes slot indices (integers), not
+     * pointers.  Completion is detected via per-slot atomic flags.  The
+     * shared condition variable is owned by the router and always valid.
+     *
+     * @param slots       Array of pre-registered slot indices.
+     * @param count       Number of slots.
+     * @param timeout_ms  Maximum time to wait.
+     * @return AnyWaitResult with the completed slot, or timed_out=true.
+     */
+    AnyWaitResult waitForAny(const size_t* slots, size_t count,
+                             uint32_t timeout_ms);
+
     // ----- Diagnostics ------------------------------------------------------
 
     bool   hasWaiters() const;
@@ -347,6 +384,12 @@ private:
     std::atomic<bool>           initialized_{false};
     std::atomic<bool>           shutdown_{false};
     std::atomic<bool>           cancelled_{false};
+
+    // Shared notification for waitForAny() — notified when any slot
+    // completes.  Owned by the router, always valid (memory-safe).
+    std::mutex                  any_wait_mtx_;
+    std::condition_variable     any_wait_cv_;
+    std::atomic<uint64_t>       any_completion_gen_{0};  // bumped on each completion
     // Atomic counters (accessed from RX thread and client threads concurrently)
     std::atomic<uint64_t>       stats_packets_routed_{0};
     std::atomic<uint64_t>       stats_packets_matched_{0};

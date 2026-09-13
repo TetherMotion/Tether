@@ -126,7 +126,20 @@ std::vector<DiscoveredSlave> SlaveDiscoveryManager::discoverSync(
         }
     }
 
-    // ---- 3. Read SII data for each target slave ----
+    // ---- 3. Concurrent SII prefetch ----
+    // Extend the 128-word prefetch from initSlaves() by reading the
+    // next 384 words (128..511) from ALL target slaves in parallel using
+    // the batch register API.  This is the single-worker concurrent-router
+    // pattern: one thread, multiple datagrams in flight per frame.
+    // The subsequent per-slave parseCategories() calls then hit the cache
+    // for most words, avoiding sequential per-slave EEPROM round-trips.
+#if TETHER_ENABLE_SII
+    if (target_indices.size() > 1) {
+        concurrentPrefetchSii(target_indices, 128, 384);
+    }
+#endif
+
+    // ---- 4. Read SII data for each target slave ----
     std::vector<DiscoveredSlave> results;
     results.reserve(target_indices.size());
 
@@ -398,5 +411,113 @@ void SlaveDiscoveryManager::readSlaveSii(DiscoveredSlave& out,
     // SII disabled — only slave count is available.
 #endif
 }
+
+#if TETHER_ENABLE_SII
+// ============================================================================
+// Concurrent EEPROM prefetch — single-worker, multi-slave parallel I/O
+// ============================================================================
+
+void SlaveDiscoveryManager::concurrentPrefetchSii(
+    const std::vector<uint16_t>& slave_indices,
+    uint16_t start_word, uint16_t word_count)
+{
+    if (slave_indices.empty() || word_count == 0 || !master_) return;
+
+    const size_t n = slave_indices.size();
+
+    // EEPROM register addresses (EtherCAT ESC, per ETG.1000.4)
+    constexpr uint16_t REG_EEPCTL  = 0x0502;  // Control/status (shared)
+    constexpr uint16_t REG_EEPADDR = 0x0504;  // EEPROM word address
+    constexpr uint16_t REG_EEPDAT  = 0x0508;  // EEPROM data (32-bit)
+    constexpr uint16_t ECMD_READ   = 0x0100;  // Read command
+    constexpr uint16_t ESTAT_BUSY  = 0x8000;  // Busy bit
+
+    // Reusable buffers for batch operations
+    std::vector<SlaveAddress> addrs;
+    addrs.reserve(n);
+    for (size_t i = 0; i < n; ++i)
+        addrs.push_back(SlaveAddress(slave_indices[i]));
+    std::vector<uint16_t>      regs(n);
+    std::vector<uint16_t>      lens(n);
+    std::vector<const void*>  wdata(n);
+    std::vector<BatchReadResult> results;
+
+    // readRaw32 reads 2 words (32 bits) at a time, so round up to even
+    const uint16_t end_word = start_word + (word_count + 1u) & ~1u;
+
+    for (uint16_t wa = start_word; wa < end_word; wa += 2) {
+        // --- Step 1: Write EEPADDR to all slaves (batch APWR) ---
+        uint16_t eepaddr_le = Raw::host_to_le16(wa);
+        for (size_t i = 0; i < n; ++i) {
+            regs[i]  = REG_EEPADDR;
+            wdata[i] = &eepaddr_le;
+            lens[i]  = 2;
+        }
+        auto bw = master_->writeRegistersBatch(
+            addrs.data(), regs.data(), wdata.data(), lens.data(), n);
+        if (bw.count() == 0) break;
+        bw.waitAll(200, results);
+
+        // --- Step 2: Write EEPCTL READ command to all slaves (batch APWR) ---
+        uint16_t eepctl_le = Raw::host_to_le16(ECMD_READ);
+        for (size_t i = 0; i < n; ++i) {
+            regs[i]  = REG_EEPCTL;
+            wdata[i] = &eepctl_le;
+            lens[i]  = 2;
+        }
+        bw = master_->writeRegistersBatch(
+            addrs.data(), regs.data(), wdata.data(), lens.data(), n);
+        if (bw.count() == 0) break;
+        bw.waitAll(200, results);
+
+        // --- Step 3: Poll EEPSTAT until not busy (all slaves) ---
+        bool any_busy = true;
+        int poll_iters = 0;
+        while (any_busy && poll_iters < 100) {
+            for (size_t i = 0; i < n; ++i) {
+                regs[i] = REG_EEPCTL;  // EEPSTAT is same register (0x0502)
+                lens[i] = 2;
+            }
+            auto br = master_->readRegistersBatch(
+                addrs.data(), regs.data(), lens.data(), n);
+            if (br.count() == 0) break;
+            br.waitAll(200, results);
+
+            any_busy = false;
+            for (size_t i = 0; i < n; ++i) {
+                if (results[i].success && results[i].datalen >= 2) {
+                    uint16_t estat = Raw::le16_to_host(
+                        *reinterpret_cast<const uint16_t*>(results[i].data));
+                    if (estat & ESTAT_BUSY) any_busy = true;
+                }
+            }
+            ++poll_iters;
+        }
+
+        // --- Step 4: Read EEPDAT from all slaves (batch APRD, 4 bytes) ---
+        for (size_t i = 0; i < n; ++i) {
+            regs[i] = REG_EEPDAT;
+            lens[i] = 4;
+        }
+        auto br = master_->readRegistersBatch(
+            addrs.data(), regs.data(), lens.data(), n);
+        if (br.count() == 0) continue;
+        br.waitAll(200, results);
+
+        // --- Cache the results in each slave's SII cache ---
+        for (size_t i = 0; i < n; ++i) {
+            if (!results[i].success || results[i].datalen < 4) continue;
+            uint32_t dword_le = 0;
+            std::memcpy(&dword_le, results[i].data, 4);
+            uint32_t dword = Raw::le32_to_host(dword_le);
+            uint16_t lo = static_cast<uint16_t>(dword & 0xFFFF);
+            uint16_t hi = static_cast<uint16_t>((dword >> 16) & 0xFFFF);
+            master_->slave(slave_indices[i]).sii().cache().set(wa, lo);
+            master_->slave(slave_indices[i]).sii().cache().set(
+                static_cast<uint16_t>(wa + 1), hi);
+        }
+    }
+}
+#endif
 
 } // namespace EtherCAT
