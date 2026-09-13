@@ -3,9 +3,9 @@
  * @brief Shared types for the Beckhoff terminal drivers
  *
  * Common vocabulary used by the output-terminal drivers
- * (IOutputTerminal / OutputTerminal / MultiOutputTerminalTerminal) and the
+ * (IOutputTerminal / OutputTerminal / MultiOutputTerminal) and the
  * input-terminal drivers (IInputTerminal / InputTerminal /
- * MultiInputTerminalTerminal): the Error/Result pair, the DeviceIdentity used
+ * MultiInputTerminal): the Error/Result pair, the DeviceIdentity used
  * for discovery matching, and the StartOptions shared by single-device
  * and chained bring-up.
  */
@@ -61,8 +61,8 @@ using Result = std::expected<T, Error>;
  *
  * `vendor_id`/`product_code` are matched against discovery results.
  * `num_bits` declares the packed bit width; when it is 0 the width is
- * derived from the SII PDO bit sum during bring-up (MultiOutputTerminalTerminal/
- * MultiInputTerminalTerminal need a non-zero declared width to lay out the flat
+ * derived from the SII PDO bit sum during bring-up (MultiOutputTerminal/
+ * MultiInputTerminal need a non-zero declared width to lay out the flat
  * bit space before start()).
  */
 struct DeviceIdentity {

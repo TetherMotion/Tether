@@ -1,14 +1,14 @@
 /**
  * @file beckhoff_output_toggle.cpp
- * @brief Beckhoff EL200x digital output channel stepper demo
+ * @brief Beckhoff digital-output terminal stepper demo (EL200x family)
  *
- * Finds every EL200x terminal in the EtherCAT chain via the MultiOutputTerminal
- * driver, brings all of them to OP, and lights exactly one output at a
- * time across the combined channel space (the module at the lowest bus
- * position occupies bits [0, w0), the next one [w0, w0+w1), ... where wN
- * is that terminal's channel count — 2 for EL2002, 4 for EL2004, 8 for
- * EL2008).  Pressing Enter advances the lit output; after the last channel
- * of the last terminal it wraps back to the very first one.
+ * Finds every EL200x terminal in the EtherCAT chain via the
+ * MultiOutputTerminal driver, brings all of them to OP, and lights exactly
+ * one output at a time across the combined channel space (the module at
+ * the lowest bus position occupies bits [0, w0), the next one
+ * [w0, w0+w1), ... where wN is that terminal's channel count — 2 for
+ * EL2002, 4 for EL2004, 8 for EL2008).  Advancing steps the lit output;
+ * after the last channel of the last terminal it wraps to the first.
  *
  * Detected by this example (the "EL200x" series, x = channel count):
  *   EL2002 (2ch, 24V/0.5A), EL2004 (4ch), EL2008 (8ch).
@@ -21,9 +21,19 @@
  * mailbox), none verified on hardware yet.  Swap kEl200x for
  * Devices::kOutputTerminals in detect() to accept them all.
  *
+ * Two display modes:
+ *   - interactive TUI (default on a terminal): navigable device tree —
+ *     level 1 = coupler(s) (EK1100 ...), level 2 = terminals — with the
+ *     selected node's live outputs in the right pane.  Arrows navigate,
+ *     Enter steps the lit output, q quits.
+ *   - --stream: plain stdout — auto-steps the lit output every 500 ms and
+ *     prints one state line per step.  Selected automatically when the
+ *     terminal can't do a TUI (non-TTY, TERM=dumb, curses-less build).
+ *
  * Usage (Linux, requires root or CAP_NET_RAW):
- *   ./beckhoff_output_toggle                # auto-detect interface
+ *   ./beckhoff_output_toggle                # TUI on auto-detected interface
  *   ./beckhoff_output_toggle -i enp3s0      # specify interface
+ *   ./beckhoff_output_toggle --stream       # line mode for pipes/scripts
  *   ./beckhoff_output_toggle -t 30          # run for 30 s, then exit
  */
 
@@ -33,7 +43,6 @@
 #include <iostream>
 #include <string>
 
-#include <poll.h>
 #include <unistd.h>
 
 #include "tether/Beckhoff/MultiOutputTerminal.hpp"
@@ -43,8 +52,21 @@
 #include "tether/platform/Platform.hpp"
 #include "tether/utils/SignalHandler.hpp"
 
+#ifdef TETHER_HAS_TERMINAL_UI
+#include "tether/terminal_ui/Session.hpp"
+#include "tether/terminal_ui/TreeScreen.hpp"
+#include "common/DeviceTree.hpp"
+#endif
+
 #include "common/ExampleHelpers.hpp"
 #include "common/EtherCATHostSetup.hpp"
+
+// ncurses last: it #defines OK/ERR/timeout/... which collide with
+// identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
+#ifdef TETHER_HAS_TERMINAL_UI
+#include <clocale>
+#include <ncurses.h>
+#endif
 
 static const char* TAG = "beckhoff_output_toggle";
 
@@ -60,27 +82,160 @@ constexpr Beckhoff::DeviceIdentity kEl200x[] = {
 static std::atomic<bool> g_cancel{false};
 // SignalHandler sets this to true on SIGINT/SIGTERM.
 
-/// Print one line per module: "s3: 0100" means slave 3 has channel 3 lit.
-static void printOutputState(const Beckhoff::MultiOutputTerminal<>& outs,
-                             size_t active) {
-    std::cout << "Outputs:";
+/// Compact per-module bit rendering: "s3:0100 s4:0000".
+static std::string moduleStates(const Beckhoff::MultiOutputTerminal<>& outs) {
+    std::string out;
     for (size_t m = 0; m < outs.moduleCount(); ++m) {
+        out += " s" + std::to_string(outs.slaveIndex(m)) + ":";
         const auto& mod = outs.module(m);
-        std::cout << "  s" << outs.slaveIndex(m) << ":";
         for (size_t k = 0; k < mod.bitCount(); ++k) {
-            std::cout << (mod.bit(k) ? '1' : '0');
+            out += mod.bit(k) ? '1' : '0';
         }
     }
-    // Locate the module + channel the active bit belongs to.
-    size_t mod = 0, off = 0;
-    for (; mod + 1 < outs.moduleCount(); ++mod) {
-        if (outs.bitOffset(mod + 1) > active) break;
-    }
-    off = active - outs.bitOffset(mod);
-    std::cout << "   (bit " << active << " = slave " << outs.slaveIndex(mod)
-              << " CH" << off + 1
-              << " — press Enter for next)" << std::endl;
+    return out;
 }
+
+/// Which module+channel a flat chain bit belongs to.
+static void locateBit(const Beckhoff::MultiOutputTerminal<>& outs,
+                      size_t bit, size_t& mod, size_t& ch) {
+    mod = 0;
+    for (; mod + 1 < outs.moduleCount(); ++mod) {
+        if (outs.bitOffset(mod + 1) > bit) break;
+    }
+    ch = bit - outs.bitOffset(mod);
+}
+
+#ifdef TETHER_HAS_TERMINAL_UI
+// ---------------------------------------------------------------------------
+// Interactive TUI — device tree left, selected node's live outputs right
+// ---------------------------------------------------------------------------
+
+namespace TUI = Tether::TUI;
+
+static void runTui(Beckhoff::MultiOutputTerminal<>& outs,
+                   std::span<const EtherCAT::DiscoveredSlave> slaves,
+                   double duration_sec, const std::string& iface) {
+    using namespace Tether::Examples;
+
+    size_t active = 0;
+    outs.setOnly(active);
+
+    auto managed = [&](uint16_t idx) {
+        for (size_t m = 0; m < outs.moduleCount(); ++m)
+            if (outs.slaveIndex(m) == idx) return true;
+        return false;
+    };
+
+    TUI::TreeScreenHooks hooks;
+    hooks.keyHints = "enter: next output";
+    hooks.onKey = [&](int key) {
+        if (key != '\n' && key != '\r' && key != KEY_ENTER) return false;
+        active = (active + 1) % outs.channelCount();
+        outs.setOnly(active);
+        return true;
+    };
+    hooks.renderDetail = [&](TUI::TermWindow* w, const TUI::TreeNode& node) {
+        WINDOW* win = static_cast<WINDOW*>(w);
+        int row = 1;
+
+        // Managed output terminal → live channels, lit one highlighted.
+        for (size_t m = 0; m < outs.moduleCount(); ++m) {
+            if (outs.slaveIndex(m) != static_cast<uint16_t>(node.tag)) continue;
+            const auto& mod = outs.module(m);
+            mvwprintw(win, row++, 1, "%s — slave %d", mod.deviceName(),
+                      node.tag);
+            ++row;
+            mvwprintw(win, row++, 1, "channel :");
+            for (size_t k = 0; k < mod.bitCount(); ++k) {
+                mvwprintw(win, row - 1, 12 + k * 4, "%zu", k + 1);
+            }
+            mvwprintw(win, row++, 1, "output  :");
+            const size_t base = outs.bitOffset(m);
+            for (size_t k = 0; k < mod.bitCount(); ++k) {
+                const bool on = mod.bit(k);
+                const bool activeBit = on && (base + k == active);
+                const int attrs = activeBit
+                    ? (COLOR_PAIR(TUI::PalSelected) | A_BOLD)
+                    : (on ? (COLOR_PAIR(TUI::PalValue) | A_BOLD) : A_DIM);
+                wattron(win, attrs);
+                mvwprintw(win, row - 1, 12 + k * 4, "%s", on ? "*" : ".");
+                wattroff(win, attrs);
+            }
+            ++row;
+            size_t am = 0, ac = 0;
+            locateBit(outs, active, am, ac);
+            mvwprintw(win, row++, 1,
+                      "active: bit %zu = slave %u CH%zu (enter: next)",
+                      active, outs.slaveIndex(am), ac + 1);
+            return;
+        }
+
+        // Coupler or unmanaged node → identity info.
+        const auto* s = slaveByIndex(slaves, node.tag);
+        if (s) {
+            mvwprintw(win, row++, 1, "%s",
+                      s->device_name ? s->device_name->c_str() : "?");
+            mvwprintw(win, row++, 1, "slave   : %u", s->index);
+            mvwprintw(win, row++, 1, "vendor  : 0x%08X",
+                      s->vendor_id ? *s->vendor_id : 0);
+            mvwprintw(win, row++, 1, "product : 0x%08X",
+                      s->product_code ? *s->product_code : 0);
+        }
+        if (!node.children.empty()) {
+            ++row;
+            mvwprintw(win, row++, 1, "%zu terminal(s) below",
+                      node.children.size());
+        } else {
+            ++row;
+            wattron(win, A_DIM);
+            mvwprintw(win, row++, 1,
+                      "(not an EL200x — not managed by this demo)");
+            wattroff(win, A_DIM);
+        }
+    };
+
+    TUI::TreeScreen screen(
+        std::string("Beckhoff output terminals — ") + iface,
+        buildDeviceTree(slaves, managed), std::move(hooks));
+    screen.run(g_cancel, duration_sec);
+}
+#endif // TETHER_HAS_TERMINAL_UI
+
+// ---------------------------------------------------------------------------
+// Stream mode — auto-step the lit output, one line per step (pipe-friendly)
+// ---------------------------------------------------------------------------
+
+static void runStream(Beckhoff::MultiOutputTerminal<>& outs,
+                    double duration_sec) {
+    const auto t0 = std::chrono::steady_clock::now();
+    auto stamp = [&]() {
+        return std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - t0).count();
+    };
+
+    size_t active = 0;
+    outs.setOnly(active);
+    std::cout << std::format("t={:7.3f} bit {:>3}{}\n",
+                             stamp(), active, moduleStates(outs));
+    std::cout.flush();
+
+    auto next_step = std::chrono::steady_clock::now();
+    while (!g_cancel.load()) {
+        if (duration_sec > 0.0 && stamp() >= duration_sec) break;
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= next_step) {
+            next_step = now + std::chrono::milliseconds(500);
+            active = (active + 1) % outs.channelCount();
+            outs.setOnly(active);
+            std::cout << std::format("t={:7.3f} bit {:>3}{}\n",
+                                     stamp(), active, moduleStates(outs));
+            std::cout.flush();
+        }
+        Tether::Platform::Clock::instance().delayMilliseconds(20);
+    }
+}
+
+// ---------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
     argparse::ArgumentParser program("beckhoff_output_toggle", "1.0",
@@ -90,6 +245,12 @@ int main(int argc, char** argv) {
     Tether::Examples::addDebugArg(program);
     Tether::Examples::addVlanArgs(program);
     Tether::Examples::addDurationArg(program, 0.0);
+    program.add_argument("--interactive")
+        .help("Force the interactive ncurses TUI")
+        .flag();
+    program.add_argument("--stream")
+        .help("Print output state lines instead of the TUI")
+        .flag();
 
     try { program.parse_args(argc, argv); }
     catch (const std::runtime_error& err) {
@@ -118,6 +279,25 @@ int main(int argc, char** argv) {
     }
 
     const double duration_sec = program.get<double>("--time");
+
+    // --stream wins when both are given; otherwise interactive is the
+    // default and falls back to stream when the terminal can't do a TUI.
+    bool interactive = !program.get<bool>("--stream");
+#ifdef TETHER_HAS_TERMINAL_UI
+    if (interactive && !Tether::TUI::Session::available()) {
+        if (program.get<bool>("--interactive")) {
+            TETHER_LOGW(TAG, "no usable terminal — falling back to --stream");
+        }
+        interactive = false;
+    }
+#else
+    if (interactive) {
+        if (program.get<bool>("--interactive")) {
+            TETHER_LOGW(TAG, "built without ncurses — using --stream mode");
+        }
+        interactive = false;
+    }
+#endif
 
     Tether::Platform::ensureRealtimeKernelOrExit();
     Tether::Utils::SignalHandler sig_handler(g_cancel);
@@ -189,43 +369,14 @@ int main(int argc, char** argv) {
         return 7;
     }
 
-    // ---- UI loop: Enter steps the single lit output across all bits ----
-    std::cout << "\n" << outs.moduleCount() << " EL200x terminal(s), "
-              << outs.channelCount() << " channels — exactly one output is ON.\n";
-    size_t active = 0;
-    outs.setOnly(active);
-    printOutputState(outs, active);
-
-    const auto start_time = std::chrono::steady_clock::now();
-    bool stdin_open = true;
-
-    while (!g_cancel.load()) {
-        if (duration_sec > 0.0) {
-            double elapsed = std::chrono::duration<double>(
-                std::chrono::steady_clock::now() - start_time).count();
-            if (elapsed >= duration_sec) break;
-        }
-
-        if (!stdin_open) {
-            Tether::Platform::Clock::instance().delayMilliseconds(100);
-            continue;
-        }
-
-        pollfd pfd{STDIN_FILENO, POLLIN, 0};
-        int pr = ::poll(&pfd, 1, 100);
-        if (pr <= 0) continue;
-        if (pfd.revents & POLLIN) {
-            std::string line;
-            if (!std::getline(std::cin, line)) {
-                stdin_open = false;  // piped/closed stdin — keep running
-                continue;
-            }
-            active = (active + 1) % outs.channelCount();
-            outs.setOnly(active);
-            printOutputState(outs, active);
-        } else if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
-            stdin_open = false;
-        }
+    // ---- Display loop ----
+#ifdef TETHER_HAS_TERMINAL_UI
+    if (interactive) {
+        runTui(outs, slaves, duration_sec, iface);
+    } else
+#endif
+    {
+        runStream(outs, duration_sec);
     }
 
     // ---- Shutdown: all outputs off, then stop ----

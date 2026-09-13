@@ -1,18 +1,20 @@
 /**
  * @file beckhoff_input_monitor.cpp
- * @brief Beckhoff EL1014 (4ch digital input, 24V/10us) live monitor demo
+ * @brief Beckhoff digital-input terminal monitor (EL1014 family)
  *
  * Finds every EL1014 in the EtherCAT chain via the MultiEL1014 driver,
  * brings all of them to OP, and displays the live state of every input
  * channel.  Module 0 occupies bits 0-3, module 1 bits 4-7, and so on.
  *
  * Two display modes:
- *   - ncurses panel (default on a terminal): per-module channel
- *     indicators, per-channel transition counters and a small log area.
- *     Press 'q' to quit.
- *   - --stream: plain stdout — one line whenever any input changes
- *     (plus the initial state).  Also used automatically when ncurses
- *     is unavailable or stdout is not a terminal.
+ *   - interactive TUI (default on a terminal): a navigable device tree —
+ *     level 1 = coupler(s) (EK1100 ...), level 2 = the terminals below
+ *     each coupler — with the selected node's live inputs in the right
+ *     pane.  Arrows navigate, left/right fold, q quits.
+ *   - --stream: plain stdout — one line whenever any input changes.
+ *     Selected automatically when ncurses/the terminal can't do a TUI
+ *     (non-TTY output, TERM=dumb, or a curses-less build), or when the
+ *     user passes --stream.  --interactive forces an interactive attempt.
  *
  * Usage (Linux, requires root or CAP_NET_RAW):
  *   ./beckhoff_input_monitor                # TUI on auto-detected interface
@@ -24,12 +26,10 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
-#include <deque>
 #include <iostream>
 #include <string>
 #include <vector>
 
-#include <poll.h>
 #include <unistd.h>
 
 #include "tether/Beckhoff/MultiEL1014.hpp"
@@ -40,14 +40,19 @@
 #include "tether/utils/SignalHandler.hpp"
 #include "logging/Logger.hpp"
 
+#ifdef TETHER_HAS_TERMINAL_UI
+#include "tether/terminal_ui/Session.hpp"
+#include "tether/terminal_ui/TreeScreen.hpp"
+#include "common/DeviceTree.hpp"
+#endif
+
 #include "common/ExampleHelpers.hpp"
 #include "common/EtherCATHostSetup.hpp"
 
 // ncurses last: it #defines OK/ERR/timeout/... which collide with
 // identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
-#ifdef HAVE_NCURSES
+#ifdef TETHER_HAS_TERMINAL_UI
 #include <clocale>
-#include <mutex>
 #include <ncurses.h>
 #endif
 
@@ -72,141 +77,98 @@ static std::string moduleStates(const Beckhoff::MultiEL1014<>& ins) {
     return out;
 }
 
-#ifdef HAVE_NCURSES
+#ifdef TETHER_HAS_TERMINAL_UI
 // ---------------------------------------------------------------------------
-// ncurses TUI
+// Interactive TUI — device tree left, selected node's live inputs right
 // ---------------------------------------------------------------------------
 
-/// Log lines captured while curses owns the screen.
-static std::deque<std::string> g_log_lines;
-static std::mutex              g_log_mutex;
-constexpr size_t kMaxLogLines = 4;
+namespace TUI = Tether::TUI;
 
-static void captureLogToTui() {
-    Platform::Logger::instance().setHandler(
-        [](Platform::LogLevel level, const char* tag, const char* msg) {
-            static const char* lv[] = {"", "E", "W", "I", "D", "V"};
-            const char* l = lv[std::min<int>(
-                static_cast<int>(level), 5)];
-            std::lock_guard<std::mutex> lock(g_log_mutex);
-            g_log_lines.emplace_back(
-                std::string(l) + " " + tag + ": " + msg);
-            while (g_log_lines.size() > kMaxLogLines) g_log_lines.pop_front();
-        });
-}
+static void runTui(Beckhoff::MultiEL1014<>& ins,
+                   std::span<const EtherCAT::DiscoveredSlave> slaves,
+                   double duration_sec, const std::string& iface) {
+    using namespace Tether::Examples;
 
-static void runTui(Beckhoff::MultiEL1014<>& ins, double duration_sec,
-                   const std::string& iface) {
-    setlocale(LC_ALL, "");
-    initscr();
-    noecho();
-    cbreak();
-    curs_set(0);
-    nodelay(stdscr, TRUE);
-    keypad(stdscr, TRUE);
-
-    const bool colors = has_colors();
-    if (colors) {
-        start_color();
-        use_default_colors();
-        init_pair(1, COLOR_GREEN,  -1);   // channel ON
-        init_pair(2, COLOR_CYAN,   -1);   // header
-        init_pair(3, COLOR_YELLOW, -1);   // footer/keys
-        init_pair(4, COLOR_RED,    -1);   // log lines
-    }
-
+    // Per-channel transition counters (updated in onTick).
     std::vector<uint32_t> transitions(ins.channelCount(), 0);
     auto prev = ins.bits();
-    const auto t0 = std::chrono::steady_clock::now();
 
-    while (!g_cancel.load()) {
-        const double elapsed = std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - t0).count();
-        if (duration_sec > 0.0 && elapsed >= duration_sec) break;
+    auto managed = [&](uint16_t idx) {
+        for (size_t m = 0; m < ins.moduleCount(); ++m)
+            if (ins.slaveIndex(m) == idx) return true;
+        return false;
+    };
 
+    TUI::TreeScreenHooks hooks;
+    hooks.keyHints = "";
+    hooks.onTick = [&]() {
         const auto now = ins.bits();
         for (size_t b = 0; b < ins.channelCount(); ++b) {
             if (now[b] != prev[b]) ++transitions[b];
         }
         prev = now;
+    };
+    hooks.renderDetail = [&](TUI::TermWindow* w, const TUI::TreeNode& node) {
+        WINDOW* win = static_cast<WINDOW*>(w);
+        int h = 0, cols = 0;
+        getmaxyx(win, h, cols);
+        int row = 1;
 
-        erase();
-        int row = 0;
-
-        attron(A_BOLD | (colors ? COLOR_PAIR(2) : 0));
-        mvprintw(row++, 0,
-                 "EL1014 Digital Input Monitor - %zu module(s), %zu channel(s) on %s",
-                 ins.moduleCount(), ins.channelCount(), iface.c_str());
-        attroff(A_BOLD | (colors ? COLOR_PAIR(2) : 0));
-        ++row;
-
-        mvprintw(row++, 0, " slave  device   channels                 trans");
-        mvchgat(row - 1, 0, -1, A_UNDERLINE, 0, nullptr);
-
+        // Managed input terminal → live channels + transition counts.
         for (size_t m = 0; m < ins.moduleCount(); ++m) {
+            if (ins.slaveIndex(m) != static_cast<uint16_t>(node.tag)) continue;
             const auto& mod = ins.module(m);
-            const size_t  w = mod.bitCount();
-            mvprintw(row, 0, " s%-6u %-8s  ",
-                     static_cast<unsigned>(ins.slaveIndex(m)),
-                     mod.deviceName());
-            int col = 22;
-            uint32_t mod_trans = 0;
-            for (size_t k = 0; k < w; ++k) {
-                const bool on = mod.bit(k);
-                mod_trans += transitions[ins.bitOffset(m) + k];
-                if (colors) {
-                    attron(on ? (COLOR_PAIR(1) | A_BOLD) : A_DIM);
-                }
-                mvprintw(row, col, "%zu", k + 1);
-                mvprintw(row, col + 1, on ? "*" : ".");
-                if (colors) {
-                    attroff(on ? (COLOR_PAIR(1) | A_BOLD) : A_DIM);
-                }
-                col += 4;
-            }
-            mvprintw(row, 42, "%8u", mod_trans);
+            mvwprintw(win, row++, 1, "%s — slave %d", mod.deviceName(),
+                      node.tag);
             ++row;
-        }
-        ++row;
-
-        // Flat bit field, grouped in nibbles.
-        mvprintw(row++, 0, " flat : ");
-        int col = 8;
-        for (size_t b = 0; b < ins.channelCount(); ++b) {
-            mvaddch(row - 1, col++, now[b] ? '1' : '0');
-            if ((b + 1) % 4 == 0) ++col;
-        }
-
-        mvprintw(row++, 0, " t=%.1fs", elapsed);
-
-        // Recent log lines (captured so they don't corrupt the screen).
-        {
-            std::lock_guard<std::mutex> lock(g_log_mutex);
-            for (const auto& line : g_log_lines) {
-                if (row < LINES - 2) {
-                    if (colors) attron(COLOR_PAIR(4));
-                    mvprintw(row++, 0, " %.*s", COLS - 2, line.c_str());
-                    if (colors) attroff(COLOR_PAIR(4));
-                }
+            mvwprintw(win, row++, 1, "channel :");
+            for (size_t k = 0; k < mod.bitCount(); ++k) {
+                mvwprintw(win, row - 1, 12 + k * 4, "%zu", k + 1);
             }
+            mvwprintw(win, row++, 1, "input   :");
+            for (size_t k = 0; k < mod.bitCount(); ++k) {
+                const bool on = mod.bit(k);
+                wattron(win, on ? (COLOR_PAIR(TUI::PalValue) | A_BOLD) : A_DIM);
+                mvwprintw(win, row - 1, 12 + k * 4, "%s", on ? "*" : ".");
+                wattroff(win, on ? (COLOR_PAIR(TUI::PalValue) | A_BOLD) : A_DIM);
+            }
+            mvwprintw(win, row++, 1, "transit.:");
+            for (size_t k = 0; k < mod.bitCount(); ++k) {
+                mvwprintw(win, row - 1, 12 + k * 4, "%u",
+                          transitions[ins.bitOffset(m) + k]);
+            }
+            return;
         }
 
-        attron(colors ? COLOR_PAIR(3) : 0);
-        mvprintw(LINES - 1, 0, " q: quit");
-        attroff(colors ? COLOR_PAIR(3) : 0);
+        // Coupler or unmanaged node → identity info.
+        const auto* s = slaveByIndex(slaves, node.tag);
+        if (s) {
+            mvwprintw(win, row++, 1, "%s",
+                      s->device_name ? s->device_name->c_str() : "?");
+            mvwprintw(win, row++, 1, "slave   : %u", s->index);
+            mvwprintw(win, row++, 1, "vendor  : 0x%08X",
+                      s->vendor_id ? *s->vendor_id : 0);
+            mvwprintw(win, row++, 1, "product : 0x%08X",
+                      s->product_code ? *s->product_code : 0);
+        }
+        if (!node.children.empty()) {
+            ++row;
+            mvwprintw(win, row++, 1, "%zu terminal(s) below",
+                      node.children.size());
+        } else if (row < h) {
+            ++row;
+            wattron(win, A_DIM);
+            mvwprintw(win, row++, 1, "(not an EL1014 — not managed by this demo)");
+            wattroff(win, A_DIM);
+        }
+    };
 
-        refresh();
-
-        const int ch = getch();
-        if (ch == 'q' || ch == 'Q' || ch == 27) break;
-
-        Tether::Platform::Clock::instance().delayMilliseconds(50);
-    }
-
-    endwin();
-    Platform::Logger::instance().setHandler(nullptr);   // restore console
+    TUI::TreeScreen screen(
+        std::string("Beckhoff input terminals — ") + iface,
+        buildDeviceTree(slaves, managed), std::move(hooks));
+    screen.run(g_cancel, duration_sec);
 }
-#endif // HAVE_NCURSES
+#endif // TETHER_HAS_TERMINAL_UI
 
 // ---------------------------------------------------------------------------
 // Stream mode — one line per input change (pipe-friendly)
@@ -247,6 +209,9 @@ int main(int argc, char** argv) {
     Tether::Examples::addDebugArg(program);
     Tether::Examples::addVlanArgs(program);
     Tether::Examples::addDurationArg(program, 0.0);
+    program.add_argument("--interactive")
+        .help("Force the interactive ncurses TUI")
+        .flag();
     program.add_argument("--stream")
         .help("Print input changes as plain lines instead of the TUI")
         .flag();
@@ -278,16 +243,23 @@ int main(int argc, char** argv) {
     }
 
     const double duration_sec = program.get<double>("--time");
-    bool stream_mode = program.get<bool>("--stream");
 
-#ifndef HAVE_NCURSES
-    if (!stream_mode) {
-        TETHER_LOGW(TAG, "built without ncurses — using --stream mode");
-        stream_mode = true;
+    // --stream wins when both are given; otherwise interactive is the
+    // default and falls back to stream when the terminal can't do a TUI.
+    bool interactive = !program.get<bool>("--stream");
+#ifdef TETHER_HAS_TERMINAL_UI
+    if (interactive && !Tether::TUI::Session::available()) {
+        if (program.get<bool>("--interactive")) {
+            TETHER_LOGW(TAG, "no usable terminal — falling back to --stream");
+        }
+        interactive = false;
     }
 #else
-    if (!stream_mode && !isatty(STDOUT_FILENO)) {
-        stream_mode = true;   // piped output — curses would emit escape codes
+    if (interactive) {
+        if (program.get<bool>("--interactive")) {
+            TETHER_LOGW(TAG, "built without ncurses — using --stream mode");
+        }
+        interactive = false;
     }
 #endif
 
@@ -349,17 +321,16 @@ int main(int argc, char** argv) {
     if (auto r = ins.start(); !r) {
         TETHER_LOGE(TAG, "EL1014 bring-up failed on module {}: {}",
                     ins.lastErrorModule(),
-                    Beckhoff::EL1014::errorToString(r.error()));
+                    Beckhoff::errorToString(r.error()));
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 7;
     }
 
     // ---- Display loop ----
-#ifdef HAVE_NCURSES
-    if (!stream_mode) {
-        captureLogToTui();
-        runTui(ins, duration_sec, iface);
+#ifdef TETHER_HAS_TERMINAL_UI
+    if (interactive) {
+        runTui(ins, slaves, duration_sec, iface);
     } else
 #endif
     {

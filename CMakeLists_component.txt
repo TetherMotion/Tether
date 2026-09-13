@@ -166,6 +166,10 @@ if(CONFIG_TETHER_DRIVE_NEXCOBOT_ESC211)
     list(APPEND DRIVES_SRCS ${NEXCOBOT_ESC211_DRIVE_SRCS})
 endif()
 # RP20 and PBLR81FGF are header-only — no .cpp sources to compile.
+if(CONFIG_TETHER_DRIVER_BECKHOFF)
+    file(GLOB_RECURSE BECKHOFF_DRIVE_SRCS "src/Beckhoff/*.cpp")
+    list(APPEND DRIVES_SRCS ${BECKHOFF_DRIVE_SRCS})
+endif()
 list(APPEND TETHER_SRCS ${DRIVES_SRCS})
 
 # Check if we have any sources
@@ -260,4 +264,7 @@ if(CONFIG_TETHER_DRIVE_PBLR81FGF)
 endif()
 if(CONFIG_TETHER_DRIVE_SYNAPTICON)
     target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_HAS_SYNAPTICON=1)
+endif()
+if(CONFIG_TETHER_DRIVER_BECKHOFF)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_HAS_BECKHOFF=1)
 endif()
