@@ -237,12 +237,16 @@ size_t SIIDemandParser::readBytes(const SIISlaveCache& cache, uint16_t byte_addr
 
 uint16_t SIIDemandParser::firstMissingWordPair(const SIISlaveCache& cache,
                                                 uint16_t start, uint16_t word_count) {
-    // Step through word-pairs (2 words each)
-    for (uint16_t i = 0; i < word_count; i += 2) {
-        uint16_t addr = static_cast<uint16_t>(start + i);
+    // Check each individual word in the range. The range may start at an
+    // odd word address (when the previous category had an odd word count),
+    // so we must check per-word, not per-word-pair. We return the aligned
+    // word-pair address that contains the first missing word.
+    for (uint16_t i = 0; i < word_count; i++) {
+        uint16_t word_addr = static_cast<uint16_t>(start + i);
+        uint16_t pair_addr  = static_cast<uint16_t>(word_addr & 0xFFFEu);
         uint32_t dummy;
-        if (!cache.getWordPair(addr, dummy)) {
-            return addr;
+        if (!cache.getWordPair(pair_addr, dummy)) {
+            return pair_addr;
         }
     }
     return 0xFFFF;  // All cached
@@ -431,14 +435,20 @@ SIIDemandResult SIIDemandParser::doCategoryScan(const SIISlaveCache& cache,
             break;
         }
 
-        // --- Read category header (2 words = 1 word-pair at cat_scan_addr_) ---
-        uint32_t header;
-        if (!readWordPair(cache, cat_scan_addr_, header)) {
-            return {SIIDemandResult::NEED_WORDS, {cat_scan_addr_}};
+        // --- Read category header (2 words: cat_type at cat_scan_addr_,
+        //     cat_size at cat_scan_addr_+1) ---
+        // Use readWord() instead of readWordPair() because cat_scan_addr_
+        // may be odd (when the previous category had an odd word count).
+        // readWord() correctly extracts the right half of a word-pair.
+        uint16_t cat_type = 0, cat_size = 0;
+        if (!readWord(cache, cat_scan_addr_, cat_type)) {
+            uint16_t pair = static_cast<uint16_t>(cat_scan_addr_ & 0xFFFEu);
+            return {SIIDemandResult::NEED_WORDS, {pair}};
         }
-
-        uint16_t cat_type = static_cast<uint16_t>(header & 0xFFFF);
-        uint16_t cat_size = static_cast<uint16_t>((header >> 16) & 0xFFFF);
+        if (!readWord(cache, static_cast<uint16_t>(cat_scan_addr_ + 1), cat_size)) {
+            uint16_t pair = static_cast<uint16_t>((cat_scan_addr_ + 1) & 0xFFFEu);
+            return {SIIDemandResult::NEED_WORDS, {pair}};
+        }
 
         // CAT_END or blank EEPROM → done
         if (cat_type == CAT_END || (cat_type == 0 && cat_size == 0)) {
