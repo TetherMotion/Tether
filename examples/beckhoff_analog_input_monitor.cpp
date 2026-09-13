@@ -1,0 +1,341 @@
+/**
+ * @file beckhoff_analog_input_monitor.cpp
+ * @brief Beckhoff analog-input terminal monitor (EL3xxx family)
+ *
+ * Finds every known analog-input terminal (EL30xx–EL37xx) in the EtherCAT
+ * chain via MultiAnalogInputTerminal, brings all of them to OP, and
+ * displays the live value (+ raw status word) of every channel.  Module 0
+ * occupies the first channels of the flat index space, module 1 the next
+ * ones, and so on.
+ *
+ * Two display modes:
+ *   - interactive TUI (default on a terminal): a navigable device tree —
+ *     level 1 = coupler(s) (EK1100 ...), level 2 = the terminals below
+ *     each coupler — with the selected node's live channels in the right
+ *     pane.  Arrows navigate, left/right fold, q quits.
+ *   - --stream: plain stdout — one line per poll with all raw values.
+ *     Selected automatically when ncurses/the terminal can't do a TUI
+ *     (non-TTY output, TERM=dumb, or a curses-less build), or when the
+ *     user passes --stream.  --interactive forces an interactive attempt.
+ *
+ * Values are raw field-bus integers — for a ±10 V terminal 32767 ≈ +10 V;
+ * RTD/TC terminals report scaled temperature (typically 0.1 °C/digit).
+ *
+ * Usage (Linux, requires root or CAP_NET_RAW):
+ *   ./beckhoff_analog_input_monitor                # TUI, auto-detected NIC
+ *   ./beckhoff_analog_input_monitor -i enp3s0      # specify interface
+ *   ./beckhoff_analog_input_monitor --stream       # line mode for pipes
+ *   ./beckhoff_analog_input_monitor -t 30          # run for 30 s
+ */
+
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <iostream>
+#include <string>
+#include <vector>
+
+#include <unistd.h>
+
+#include "tether/Beckhoff/MultiAnalogInputTerminal.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/SlaveDiscoveryManager.hpp"
+#include "tether/platform/EspCompat.hpp"
+#include "tether/platform/Platform.hpp"
+#include "tether/utils/SignalHandler.hpp"
+#include "logging/Logger.hpp"
+
+#ifdef TETHER_HAS_TERMINAL_UI
+#include "tether/terminal_ui/Session.hpp"
+#include "tether/terminal_ui/TreeScreen.hpp"
+#include "common/DeviceTree.hpp"
+#endif
+
+#include "common/ExampleHelpers.hpp"
+#include "common/EtherCATHostSetup.hpp"
+
+// ncurses last: it #defines OK/ERR/timeout/... which collide with
+// identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
+#ifdef TETHER_HAS_TERMINAL_UI
+#include <clocale>
+#include <ncurses.h>
+#endif
+
+static const char* TAG = "beckhoff_analog_input_monitor";
+
+namespace Beckhoff = EtherCAT::Beckhoff;
+namespace Platform = Tether::Platform;
+
+static std::atomic<bool> g_cancel{false};
+// SignalHandler sets this to true on SIGINT/SIGTERM.
+
+/// Compact per-module value rendering: "s1:+00123/-1024 s2:...".
+static std::string moduleStates(
+    const Beckhoff::MultiAnalogInputTerminal<>& ins) {
+    std::string out;
+    for (size_t m = 0; m < ins.moduleCount(); ++m) {
+        if (m) out += " ";
+        out += "s" + std::to_string(ins.slaveIndex(m)) + ":";
+        const auto& mod = ins.module(m);
+        for (size_t k = 0; k < mod.channelCount(); ++k) {
+            if (k) out += ",";
+            out += std::format("{:+d}", mod.value(k));
+        }
+    }
+    return out;
+}
+
+#ifdef TETHER_HAS_TERMINAL_UI
+// ---------------------------------------------------------------------------
+// Interactive TUI — device tree left, selected node's live channels right
+// ---------------------------------------------------------------------------
+
+namespace TUI = Tether::TUI;
+
+static void runTui(Beckhoff::MultiAnalogInputTerminal<>& ins,
+                   std::span<const EtherCAT::DiscoveredSlave> slaves,
+                   double duration_sec, const std::string& iface) {
+    using namespace Tether::Examples;
+
+    auto managed = [&](uint16_t idx) {
+        for (size_t m = 0; m < ins.moduleCount(); ++m)
+            if (ins.slaveIndex(m) == idx) return true;
+        return false;
+    };
+
+    TUI::TreeScreenHooks hooks;
+    hooks.keyHints = "";
+    hooks.renderDetail = [&](TUI::TermWindow* w, const TUI::TreeNode& node) {
+        WINDOW* win = static_cast<WINDOW*>(w);
+        int h = 0, cols = 0;
+        getmaxyx(win, h, cols);
+        int row = 1;
+
+        // Managed input terminal → live channel values + status words.
+        for (size_t m = 0; m < ins.moduleCount(); ++m) {
+            if (ins.slaveIndex(m) != static_cast<uint16_t>(node.tag)) continue;
+            const auto& mod = ins.module(m);
+            mvwprintw(win, row++, 1, "%s — slave %d", mod.deviceName(),
+                      node.tag);
+            ++row;
+            mvwprintw(win, row++, 1, "ch   value        status");
+            wattroff(win, A_BOLD);
+            for (size_t k = 0; k < mod.channelCount() && row < h - 1; ++k) {
+                const int32_t v = mod.value(k);
+                wattron(win, COLOR_PAIR(TUI::PalValue) | A_BOLD);
+                mvwprintw(win, row, 4, "%+d", v);
+                wattroff(win, COLOR_PAIR(TUI::PalValue) | A_BOLD);
+                mvwprintw(win, row, 1, "%zu", k + 1);
+                if (mod.hasStatus(k)) {
+                    const uint16_t st = mod.status(k);
+                    wattron(win, st ? COLOR_PAIR(TUI::PalError) : A_DIM);
+                    mvwprintw(win, row, 16, "0x%04X", st);
+                    wattroff(win, st ? COLOR_PAIR(TUI::PalError) : A_DIM);
+                } else {
+                    wattron(win, A_DIM);
+                    mvwprintw(win, row, 16, "-");
+                    wattroff(win, A_DIM);
+                }
+                ++row;
+            }
+            return;
+        }
+
+        // Coupler or unmanaged node → identity info.
+        const auto* s = slaveByIndex(slaves, node.tag);
+        if (s) {
+            mvwprintw(win, row++, 1, "%s",
+                      s->device_name ? s->device_name->c_str() : "?");
+            mvwprintw(win, row++, 1, "slave   : %u", s->index);
+            mvwprintw(win, row++, 1, "vendor  : 0x%08X",
+                      s->vendor_id ? *s->vendor_id : 0);
+            mvwprintw(win, row++, 1, "product : 0x%08X",
+                      s->product_code ? *s->product_code : 0);
+        }
+        if (!node.children.empty()) {
+            ++row;
+            mvwprintw(win, row++, 1, "%zu terminal(s) below",
+                      node.children.size());
+        } else if (row < h) {
+            ++row;
+            wattron(win, A_DIM);
+            mvwprintw(win, row++, 1,
+                      "(not an analog input — not managed by this demo)");
+            wattroff(win, A_DIM);
+        }
+    };
+
+    TUI::TreeScreen screen(
+        std::string("Beckhoff analog inputs — ") + iface,
+        buildDeviceTree(slaves, managed), std::move(hooks));
+    screen.run(g_cancel, duration_sec);
+}
+#endif // TETHER_HAS_TERMINAL_UI
+
+// ---------------------------------------------------------------------------
+// Stream mode — one line per poll (pipe-friendly)
+// ---------------------------------------------------------------------------
+
+static void runStream(Beckhoff::MultiAnalogInputTerminal<>& ins,
+                      double duration_sec) {
+    const auto t0 = std::chrono::steady_clock::now();
+
+    auto stamp = [&]() {
+        return std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - t0).count();
+    };
+
+    while (!g_cancel.load()) {
+        if (duration_sec > 0.0 && stamp() >= duration_sec) break;
+        std::cout << std::format("t={:7.3f}  {}\n", stamp(), moduleStates(ins));
+        std::cout.flush();
+        Tether::Platform::Clock::instance().delayMilliseconds(200);
+    }
+}
+
+// ---------------------------------------------------------------------------
+
+int main(int argc, char** argv) {
+    argparse::ArgumentParser program("beckhoff_analog_input_monitor", "1.0",
+                                     argparse::default_arguments::help);
+    Tether::Examples::addInterfaceArg(program);
+    Tether::Examples::addListInterfacesArg(program);
+    Tether::Examples::addDebugArg(program);
+    Tether::Examples::addVlanArgs(program);
+    Tether::Examples::addDurationArg(program, 0.0);
+    program.add_argument("--interactive")
+        .help("Force the interactive ncurses TUI")
+        .flag();
+    program.add_argument("--stream")
+        .help("Print channel values as plain lines instead of the TUI")
+        .flag();
+
+    try { program.parse_args(argc, argv); }
+    catch (const std::runtime_error& err) {
+        std::cerr << err.what() << "\n" << program;
+        return 1;
+    }
+
+    if (program.get<bool>("--list-interfaces")) {
+        Tether::Examples::listPhysicalInterfaces(TAG);
+        return 0;
+    }
+
+    std::string iface =
+        Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
+    if (iface.empty()) return 1;
+
+    std::string debug_str = program.get<std::string>("--debug");
+    if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
+    auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
+
+    Tether::Examples::VlanConfig vlan;
+    if (!Tether::Examples::parseVlanArgs(
+            program.get<std::string>("--rx-vlan"),
+            program.get<std::string>("--tx-vlan"), vlan, TAG)) {
+        return 1;
+    }
+
+    const double duration_sec = program.get<double>("--time");
+
+    // --stream wins when both are given; otherwise interactive is the
+    // default and falls back to stream when the terminal can't do a TUI.
+    bool interactive = !program.get<bool>("--stream");
+#ifdef TETHER_HAS_TERMINAL_UI
+    if (interactive && !Tether::TUI::Session::available()) {
+        if (program.get<bool>("--interactive")) {
+            TETHER_LOGW(TAG, "no usable terminal — falling back to --stream");
+        }
+        interactive = false;
+    }
+#else
+    if (interactive) {
+        if (program.get<bool>("--interactive")) {
+            TETHER_LOGW(TAG, "built without ncurses — using --stream mode");
+        }
+        interactive = false;
+    }
+#endif
+
+    Tether::Platform::ensureRealtimeKernelOrExit();
+    Tether::Utils::SignalHandler sig_handler(g_cancel);
+
+    // ---- Host Ethernet + master bring-up ----
+    Tether::Examples::HostEtherNetSession session;
+    if (!Tether::Examples::initHostEthernet(session, iface, TAG)) {
+        return 2;
+    }
+
+    EtherCAT::Master master;
+    sig_handler.setCancelCallback([&master]() { master.requestCancel(); });
+    Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
+
+    if (!Tether::Examples::setupVlanAndRxCallback(session, master, vlan, TAG)) {
+        Tether::Examples::shutdownHostEthernet(session);
+        return 5;
+    }
+    Tether::Examples::startHostPollThread(session, TAG);
+    if (!Tether::Examples::startHostMaster(session, master, vlan, TAG)) {
+        Tether::Examples::shutdownHostEthernet(session);
+        return 5;
+    }
+
+    // ---- Discover the chain and pick out every analog-input terminal ----
+    // A full discovery gives us the slave names for logging and lets the
+    // driver reuse the SII data instead of re-reading each terminal's EEPROM.
+    auto slaves = master.discovery().discover(EtherCAT::DiscoveryOption::All);
+    if (slaves.empty()) {
+        TETHER_LOGE(TAG, "No slaves discovered");
+        master.stop();
+        Tether::Examples::shutdownHostEthernet(session);
+        return 4;
+    }
+
+    TETHER_LOGI(TAG, "=== Discovered {} slave(s) ===", slaves.size());
+    for (const auto& s : slaves) {
+        TETHER_LOGI(TAG, "Slave {}: {} (vendor=0x{:08X} product=0x{:08X})",
+                    s.index,
+                    s.device_name ? s.device_name->c_str() : "?",
+                    s.vendor_id ? *s.vendor_id : 0,
+                    s.product_code ? *s.product_code : 0);
+    }
+
+    Beckhoff::MultiAnalogInputTerminal<> ins(master);
+    auto found = ins.detect(slaves);
+    if (!found || *found == 0) {
+        TETHER_LOGE(TAG, "No analog-input terminal found in the chain");
+        master.stop();
+        Tether::Examples::shutdownHostEthernet(session);
+        return 6;
+    }
+    TETHER_LOGI(TAG, "{} analog input terminal(s), {} channel(s) total",
+                ins.moduleCount(), ins.channelCount());
+
+    // ---- Configure all modules, start the RT loop, enter OP ----
+    if (auto r = ins.start(); !r) {
+        TETHER_LOGE(TAG, "Analog input bring-up failed on module {}: {}",
+                    ins.lastErrorModule(),
+                    Beckhoff::errorToString(r.error()));
+        master.stop();
+        Tether::Examples::shutdownHostEthernet(session);
+        return 7;
+    }
+
+    // ---- Display loop ----
+#ifdef TETHER_HAS_TERMINAL_UI
+    if (interactive) {
+        runTui(ins, slaves, duration_sec, iface);
+    } else
+#endif
+    {
+        runStream(ins, duration_sec);
+    }
+
+    // ---- Shutdown ----
+    ins.stop();
+    master.stop();
+    Tether::Examples::shutdownHostEthernet(session);
+
+    TETHER_LOGI(TAG, "Done.");
+    return 0;
+}
