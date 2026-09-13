@@ -55,10 +55,14 @@ void TransactionRouter::shutdown()
     for (auto& s : slots_) {
         std::lock_guard<std::mutex> lock(s.mtx);
         if (s.pending.load(std::memory_order_relaxed)) {
-            s.completed.store(true, std::memory_order_relaxed);  // let it see "completed" but result has success=false
+            s.completed.store(true, std::memory_order_relaxed);
             s.cv.notify_all();
         }
     }
+
+    // Wake any waitForAny() waiters
+    any_completion_gen_.fetch_add(1, std::memory_order_release);
+    any_wait_cv_.notify_all();
 
     initialized_.store(false, std::memory_order_release);
 }
@@ -72,6 +76,10 @@ void TransactionRouter::cancel()
         std::lock_guard<std::mutex> lock(s.mtx);
         s.cv.notify_all();
     }
+
+    // Wake any waitForAny() waiters
+    any_completion_gen_.fetch_add(1, std::memory_order_release);
+    any_wait_cv_.notify_all();
 }
 
 void TransactionRouter::clearCancel()
@@ -109,6 +117,10 @@ size_t TransactionRouter::routePacket(const RxDatagram& dgram)
     slot.completed.store(true, std::memory_order_relaxed);
     stats_packets_matched_.fetch_add(1, std::memory_order_relaxed);
     slot.cv.notify_one();
+
+    // Notify any waitForAny() waiters that a slot completed.
+    any_completion_gen_.fetch_add(1, std::memory_order_release);
+    any_wait_cv_.notify_all();
 
     return 1;
 }
@@ -313,6 +325,85 @@ void TransactionRouter::cancelPreRegistered(size_t slot_idx)
     slot.completed.store(false, std::memory_order_relaxed);
     slot.buffer     = nullptr;
     slot.buffer_size = 0;
+}
+
+// ============================================================================
+// Multi-slot wait (reactor pattern)
+// ============================================================================
+
+TransactionRouter::AnyWaitResult
+TransactionRouter::waitForAny(const size_t* slot_indices, size_t count,
+                               uint32_t timeout_ms)
+{
+    AnyWaitResult result;
+    if (count == 0 || slot_indices == nullptr) {
+        return result;  // timed_out = true
+    }
+    if (!initialized_.load(std::memory_order_acquire)) return result;
+    if (cancelled_.load(std::memory_order_acquire)) return result;
+
+    // First, check if any slot has already completed (fast path — no wait).
+    for (size_t i = 0; i < count; ++i) {
+        size_t si = slot_indices[i];
+        if (si >= kNumSlots) continue;
+        if (slots_[si].completed.load(std::memory_order_acquire)) {
+            // Found a completed slot — extract the result.
+            auto& slot = slots_[si];
+            std::lock_guard<std::mutex> lock(slot.mtx);
+            if (slot.completed.load(std::memory_order_relaxed)) {
+                auto& r = slot.response;
+                result.slot_index = i;
+                result.result = WaitResult::Success(
+                    r.wkc, r.datalen, r.cmd, r.adp, r.ado, r.idx);
+                result.timed_out = false;
+                // Clean up the slot (single-consumer semantics).
+                slot.pending.store(false, std::memory_order_relaxed);
+                slot.completed.store(false, std::memory_order_relaxed);
+                slot.buffer     = nullptr;
+                slot.buffer_size = 0;
+                return result;
+            }
+        }
+    }
+
+    // No slot has completed yet — wait on the shared CV.
+    uint64_t gen_before = any_completion_gen_.load(std::memory_order_acquire);
+    std::unique_lock<std::mutex> lock(any_wait_mtx_);
+    any_wait_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms),
+        [&] {
+            return any_completion_gen_.load(std::memory_order_acquire) != gen_before
+                || cancelled_.load(std::memory_order_acquire)
+                || shutdown_.load(std::memory_order_acquire);
+        });
+
+    if (cancelled_.load(std::memory_order_acquire) ||
+        shutdown_.load(std::memory_order_acquire)) {
+        return result;  // timed_out = true
+    }
+
+    // Check which slots have completed.
+    for (size_t i = 0; i < count; ++i) {
+        size_t si = slot_indices[i];
+        if (si >= kNumSlots) continue;
+        if (slots_[si].completed.load(std::memory_order_acquire)) {
+            auto& slot = slots_[si];
+            std::lock_guard<std::mutex> slock(slot.mtx);
+            if (slot.completed.load(std::memory_order_relaxed)) {
+                auto& r = slot.response;
+                result.slot_index = i;
+                result.result = WaitResult::Success(
+                    r.wkc, r.datalen, r.cmd, r.adp, r.ado, r.idx);
+                result.timed_out = false;
+                slot.pending.store(false, std::memory_order_relaxed);
+                slot.completed.store(false, std::memory_order_relaxed);
+                slot.buffer     = nullptr;
+                slot.buffer_size = 0;
+                return result;
+            }
+        }
+    }
+
+    return result;  // timed_out = true
 }
 
 // ============================================================================
