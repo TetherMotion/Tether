@@ -360,7 +360,7 @@ file(GLOB_RECURSE MOCKS_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/mocks/*.cpp")
 file(GLOB CIA301_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia301/*.cpp")
 file(GLOB CIA401_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia401/*.cpp")
 # CiA402 test sources split by sub-area
-set(CIA402_PROFILE_LIBS "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master;tether_cia_profiles;tether_motion_control;tether_drives")
+set(CIA402_PROFILE_LIBS "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master;tether_cia_profiles;tether_motion_control;tether_device_drivers")
 set(CIA402_STATE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/test_CiA402StateMachine.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/test_CiA402StateMachine_coverage.cpp"
@@ -444,7 +444,7 @@ set(TETHER_FULL_TEST_LIBS
     tether_ethercat_common
     tether_ethercat_master
     tether_cia_profiles
-    tether_drives
+    tether_device_drivers
     tether_fsoe
     tether_ethercat_slave
     tether_simulation

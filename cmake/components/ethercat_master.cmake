@@ -7,7 +7,7 @@
 # CiA device profile implementations, ETG5000, vendor drives, and FSoE now live
 # in separate opt-in components:
 #   - tether_cia_profiles : CiA 301/401/402/404/405/406/408/410/417/430 + ETG5000
-#   - tether_drives       : vendor-specific drive helpers (AS715N, DynaDrive, ...)
+#   - tether_device_drivers : vendor-specific device drivers (AS715N, DynaDrive, Beckhoff terminals, ...)
 #   - tether_fsoe         : Fail-Safe over EtherCAT (ETG 5100)
 #
 # The CiA 402 register/type-definition headers (60xx-Parameters.hpp,

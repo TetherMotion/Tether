@@ -114,12 +114,12 @@ add_tether_example(wss_velocity_plot
 # Demonstrates EtherCAT master with CiA 402 drive control
 if(TETHER_DRIVE_AS715N)
 add_tether_example(as715n_sine_motion_native
-    LIBRARIES tether_ethercat_master tether_cia_profiles tether_drives tether_ethercat_common tether_hal tether_common tether_examples_common)
+    LIBRARIES tether_ethercat_master tether_cia_profiles tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
 
 # ---AS715N Sine Motion + FSoE Native Example ---
 # Adds an optional Synapticon-style FSoE safe-motion main instance to the sine loop.
 add_tether_example(as715n_sine_motion_fsoe_native
-    LIBRARIES tether_ethercat_master tether_cia_profiles tether_drives tether_fsoe tether_ethercat_common tether_hal tether_common tether_examples_common)
+    LIBRARIES tether_ethercat_master tether_cia_profiles tether_device_drivers tether_fsoe tether_ethercat_common tether_hal tether_common tether_examples_common)
 endif()
 
 # ---Synapticon SOMANET CST + FSoE Example ---
@@ -128,33 +128,33 @@ endif()
 # safe-motion protocol with rich diagnostics.
 if(TETHER_DRIVE_SYNAPTICON)
 add_tether_example(synapticon_cst_fsoe
-    LIBRARIES tether_ethercat_master tether_cia_profiles tether_drives tether_fsoe tether_ethercat_common tether_hal tether_common tether_examples_common)
+    LIBRARIES tether_ethercat_master tether_cia_profiles tether_device_drivers tether_fsoe tether_ethercat_common tether_hal tether_common tether_examples_common)
 
 # ---Synapticon SOMANET FSoE-Only Example ---
 # Maps ONLY the FSoE safety PDOs (RxPDO 0x1700 / TxPDO 0x1B00) using the
 # multi-PDO-per-sync-manager API (Slave::configureMultiPDOs).  No CiA 402
 # process data PDOs are mapped — establishes FSoE safety communication only.
 add_tether_example(synapticon_fsoe_only
-    LIBRARIES tether_ethercat_master tether_cia_profiles tether_drives tether_fsoe tether_ethercat_common tether_hal tether_common tether_examples_common)
+    LIBRARIES tether_ethercat_master tether_cia_profiles tether_device_drivers tether_fsoe tether_ethercat_common tether_hal tether_common tether_examples_common)
 endif()
 
 # ---PBLR81FGF Sine Motion Native Example ---
 # Copy of AS715N example for the PBLR81FGF drive (see TODOs in source)
 if(TETHER_DRIVE_PBLR81FGF)
 add_tether_example(pblr81fgf_sine_motion_native
-    LIBRARIES tether_ethercat_master tether_cia_profiles tether_drives tether_ethercat_common tether_hal tether_common tether_examples_common)
+    LIBRARIES tether_ethercat_master tether_cia_profiles tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
 
 # ---PBLR81FGF Step Motion Native Example ---
 # CSP position steps with jerk-limited S-curve ramps
 add_tether_example(pblr81fgf_step_motion_native
-    LIBRARIES tether_ethercat_master tether_cia_profiles tether_drives tether_ethercat_common tether_hal tether_common tether_examples_common)
+    LIBRARIES tether_ethercat_master tether_cia_profiles tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
 endif()
 
 # ---AS715N Error-code inspector example ---
 # Reads manufacturer / CiA402 error codes and optionally resets them.
 if(TETHER_DRIVE_AS715N)
 add_tether_example(as715n_check_error_code
-    LIBRARIES tether_ethercat_master tether_drives tether_ethercat_common tether_hal tether_common tether_examples_common)
+    LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
 endif()
 
 # ---EtherCAT SII dump example ---
@@ -166,7 +166,7 @@ add_tether_example(ethercat_dump_sii
 # DynaDrive (ANYdrive / rsl_drive_sdk) position sine wave using Type-E PDOs
 if(TETHER_DRIVE_DYNADRIVE)
 add_tether_example(dynadrive_sine_motion_native
-    LIBRARIES tether_ethercat_master tether_cia_profiles tether_drives tether_ethercat_common tether_hal tether_common tether_examples_common)
+    LIBRARIES tether_ethercat_master tether_cia_profiles tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
 endif()
 
 # ---EtherCAT slave listing example ---
@@ -182,26 +182,29 @@ add_tether_example(reset_slaves_al
 # --- Beckhoff digital output terminal demo ---
 # Auto-detects all EL200x terminals (EL2002/2004/2008 — x = channel count)
 # via the MultiOutputTerminal driver, brings them to OP, and steps a single
-# active output bit across all modules on each Enter keypress.
-if(TETHER_BUILD_BECKHOFF)
+# active output bit across all modules on each Enter keypress.  Shows a
+# navigable coupler/terminal device tree when tether_terminal_ui is built
+# (ncurses); otherwise stream mode only.
+if(TETHER_DRIVER_BECKHOFF AND TARGET tether_device_drivers)
 add_tether_example(beckhoff_output_toggle
-    LIBRARIES tether_ethercat_master tether_beckhoff tether_ethercat_common tether_hal tether_common tether_examples_common)
+    LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
 
 # --- Beckhoff digital input terminal monitor ---
 # Auto-detects all EL1014 terminals via the MultiEL1014 driver, brings them
-# to OP, and shows the live input state of every channel.  Default UI is an
-# ncurses panel; --stream switches to plain line output.  Without ncurses
-# the example still builds (stream mode only).
-find_package(Curses)
-if(CURSES_FOUND)
-    add_tether_example(beckhoff_input_monitor
-        LIBRARIES tether_ethercat_master tether_beckhoff tether_ethercat_common tether_hal tether_common tether_examples_common ${CURSES_LIBRARIES})
-    target_include_directories(beckhoff_input_monitor PRIVATE ${CURSES_INCLUDE_DIRS})
-    target_compile_definitions(beckhoff_input_monitor PRIVATE HAVE_NCURSES)
+# to OP, and shows the live input state of every channel — same device-tree
+# TUI as the output demo.  Without tether_terminal_ui it still builds
+# (stream mode only).
+add_tether_example(beckhoff_input_monitor
+    LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# Both examples get the interactive TUI when tether_terminal_ui exists.
+if(TARGET tether_terminal_ui)
+    foreach(_tui_ex beckhoff_output_toggle beckhoff_input_monitor)
+        target_link_libraries(${_tui_ex} PRIVATE tether_terminal_ui ${CURSES_LIBRARIES})
+        target_include_directories(${_tui_ex} PRIVATE ${CURSES_INCLUDE_DIRS})
+    endforeach()
 else()
-    add_tether_example(beckhoff_input_monitor
-        LIBRARIES tether_ethercat_master tether_beckhoff tether_ethercat_common tether_hal tether_common tether_examples_common)
-    message(STATUS "ncurses not found; beckhoff_input_monitor built without TUI (--stream only)")
+    message(STATUS "tether_terminal_ui unavailable; beckhoff_* examples are stream-only")
 endif()
 endif()
 
@@ -240,7 +243,7 @@ if(TETHER_DRIVE_NEXCOBOT_ESC211)
 find_package(Curses)
 if(CURSES_FOUND)
     add_tether_example(esc211_di_monitor
-        LIBRARIES tether_ethercat_master tether_drives tether_ethercat_common tether_hal tether_common tether_examples_common ${CURSES_LIBRARIES})
+        LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common ${CURSES_LIBRARIES})
     target_include_directories(esc211_di_monitor PRIVATE ${CURSES_INCLUDE_DIRS})
 else()
     message(STATUS "ncurses not found; skipping esc211_di_monitor")
@@ -304,12 +307,12 @@ if(TETHER_DRIVE_RP20)
 find_package(Curses)
 if(CURSES_FOUND)
     add_tether_example(kinco_rp20_io
-        LIBRARIES tether_ethercat_master tether_drives tether_ethercat_common tether_hal tether_common tether_examples_common ${CURSES_LIBRARIES})
+        LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common ${CURSES_LIBRARIES})
     target_include_directories(kinco_rp20_io PRIVATE ${CURSES_INCLUDE_DIRS})
     target_compile_definitions(kinco_rp20_io PRIVATE HAVE_NCURSES)
 else()
     add_tether_example(kinco_rp20_io
-        LIBRARIES tether_ethercat_master tether_drives tether_ethercat_common tether_hal tether_common tether_examples_common)
+        LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
     message(STATUS "ncurses not found; kinco_rp20_io built without --interactive mode")
 endif()
 
@@ -317,7 +320,7 @@ endif()
 # Auto-discovers RP20 I/O modules across all slaves/slots and prints the list.
 # No PDO/cyclic I/O — just discovery and listing.
 add_tether_example(kinco_rp20_list_modules
-    LIBRARIES tether_ethercat_master tether_drives tether_ethercat_common tether_hal tether_common tether_examples_common)
+    LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
 endif()
 
 # --- Phase 5.4 PH fast-path benchmark ---

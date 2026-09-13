@@ -163,6 +163,14 @@ menu "Tether Library Configuration"
                 Build header-only helper for the Synapticon SOMANET
                 CiA 402 drive (PDO definitions, manufacturer object
                 dictionary 0x2000-0x2705, safety objects 0x26xx).
+
+        config TETHER_DRIVER_BECKHOFF
+            bool "Beckhoff terminal drivers"
+            default y
+            help
+                Build the Beckhoff E-Bus terminal drivers (EL200x digital
+                outputs, EL1xxx digital inputs, shared logical-address
+                chains).
     endmenu
 
     config TETHER_ENABLE_KINEMATICS

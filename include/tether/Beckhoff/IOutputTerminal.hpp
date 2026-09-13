@@ -3,7 +3,7 @@
  * @brief Contract for bit-oriented digital-output terminals that can be
  *        chained into one shared logical address space
  *
- * Any device implementing IOutputTerminal can join a MultiOutputTerminalTerminal
+ * Any device implementing IOutputTerminal can join a MultiOutputTerminal
  * chain: the chain assigns every device a contiguous logical address range
  * inside a single PDO group's logical address space, so one LRW datagram
  * per cycle exchanges the outputs of the whole chain.
@@ -48,7 +48,7 @@ namespace Beckhoff {
  *
  * Implement this interface for devices that are not OutputTerminal-shaped
  * (e.g. devices with a mailbox or multiple process-data SMs) and register
- * them with MultiOutputTerminalTerminal via a DeviceMatcher factory or attach().
+ * them with MultiOutputTerminal via a DeviceMatcher factory or attach().
  */
 class IOutputTerminal {
 public:
@@ -84,7 +84,7 @@ public:
     /// All output bits off.
     virtual void allOff() = 0;
 
-    // -- Chained bring-up (called by MultiOutputTerminalTerminal) --------------------
+    // -- Chained bring-up (called by MultiOutputTerminal) --------------------
 
     /**
      * @brief Everything up to (but excluding) the SAFE-OP transition:
