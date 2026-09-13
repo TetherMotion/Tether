@@ -68,6 +68,12 @@ bool Slave::aprd(uint16_t ado, void* out, uint16_t len, unsigned int timeout_ms)
 // -- Mailbox configuration ---------------------------------------------------
 
 SlaveError Slave::configureMailbox(Tether::Platform::LogLevel log_level) {
+    if (no_mailbox_) {
+        TETHER_LOGE( TAG,
+            "{}: slave was declared mailbox-less via markNoMailbox() — "
+            "refusing configureMailbox()", logPrefix().c_str());
+        return SlaveError::MailboxConfigFailed;
+    }
     if (!master_->autoConfigureMailbox(index_, log_level)) {
         TETHER_LOGE( TAG,
             "{}: Failed to auto-configure mailbox from SII", logPrefix().c_str());
@@ -86,6 +92,12 @@ SlaveError Slave::configureMailbox(
     const MailboxSyncManagerConfig& mbox_in,
     uint16_t protocols)
 {
+    if (no_mailbox_) {
+        TETHER_LOGE( TAG,
+            "{}: slave was declared mailbox-less via markNoMailbox() — "
+            "refusing configureMailbox()", logPrefix().c_str());
+        return SlaveError::MailboxConfigFailed;
+    }
     master_->setMailboxOverride(index_,
                                mbox_in.address, mbox_in.length,
                                mbox_out.address, mbox_out.length,
@@ -235,7 +247,19 @@ void Slave::assumeMailboxAlreadyConfigured() {
     master_->debugGate().notifyCheckpoint("mailbox-configured", index_);
 }
 
+void Slave::markNoMailbox() {
+    no_mailbox_ = true;
+    // The PRE_OP prerequisite is vacuously satisfied — there is no
+    // mailbox to configure or drain.
+    mailbox_configured_ = true;
+    TETHER_LOGI( TAG,
+        "{}: Declared mailbox-less — skipping all mailbox handling",
+        logPrefix().c_str());
+    master_->debugGate().notifyCheckpoint("mailbox-configured", index_);
+}
+
 bool Slave::drainMailbox(unsigned int max_drain) {
+    if (no_mailbox_) return true;   // nothing to drain
     return master_->drainSlaveMailbox(index_, max_drain);
 }
 
@@ -473,8 +497,9 @@ SlaveError Slave::transitionToPreOp() {
     if (!mailbox_configured_) {
         TETHER_LOGE( TAG,
             "{}: Cannot transition to PRE_OP — mailbox (SM0/SM1) "
-            "not configured. Call configureMailbox() or "
-            "assumeMailboxAlreadyConfigured() first.", logPrefix().c_str());
+            "not configured. Call configureMailbox(), "
+            "assumeMailboxAlreadyConfigured(), or markNoMailbox() "
+            "for mailbox-less slaves first.", logPrefix().c_str());
         return SlaveError::MailboxNotConfigured;
     }
     verifySyncManagers(*this, 0, 1, slave_debug_flags_.verifyPreOp, TAG);
@@ -1728,6 +1753,10 @@ SlaveError NonExistingSlave::configureMailbox(const ESIFile&,
 void NonExistingSlave::assumeMailboxAlreadyConfigured() {
     logCritical("assumeMailboxAlreadyConfigured");
 }
+void NonExistingSlave::markNoMailbox() {
+    logCritical("markNoMailbox");
+}
+
 bool NonExistingSlave::drainMailbox(unsigned int) {
     logCritical("drainMailbox"); return false;
 }

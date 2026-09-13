@@ -16,7 +16,9 @@
  * | SAFE_OP → OP        | (no additional guard — standard EtherCAT rule)  |
  *
  * `assumeMailboxAlreadyConfigured()` bypasses the mailbox guard when the
- * firmware is known to be pre-configured.
+ * firmware is known to be pre-configured.  `markNoMailbox()` declares
+ * that the slave has no mailbox at all — the guard is satisfied
+ * vacuously and every mailbox interaction is skipped.
  *
  * ## Detailed error reporting
  *
@@ -107,7 +109,7 @@ enum class SlaveError : uint8_t {
 inline const char* slaveErrorToString(SlaveError e) {
     switch (e) {
         case SlaveError::Ok:                     return "Ok";
-        case SlaveError::MailboxNotConfigured:    return "Mailbox (SM0/SM1) not configured — call configureMailbox() or assumeMailboxAlreadyConfigured() first";
+        case SlaveError::MailboxNotConfigured:    return "Mailbox (SM0/SM1) not configured — call configureMailbox(), assumeMailboxAlreadyConfigured(), or markNoMailbox() for mailbox-less slaves";
         case SlaveError::PDONotConfigured:        return "PDO sync-managers not configured — call configurePDOSyncManagers() first";
         case SlaveError::InvalidStateTransition:  return "Invalid EtherCAT state transition";
         case SlaveError::SlaveNotFound:           return "Slave index does not exist — check getDiscoveredSlaveCount()";
@@ -278,8 +280,25 @@ public:
      */
     virtual void assumeMailboxAlreadyConfigured();
 
+    /**
+     * @brief Declare that this slave has no mailbox interface at all.
+     *
+     * For slaves whose sync managers carry only process data — e.g.
+     * Beckhoff EL2xxx output terminals, where SM0 is the process-output
+     * channel and no SM0/SM1 mailbox pair exists.  Satisfies the PRE_OP
+     * guard like assumeMailboxAlreadyConfigured(), but additionally:
+     *   - no mailbox drain is attempted (there is nothing to drain),
+     *   - drainMailbox() becomes a silent no-op returning true,
+     *   - configureMailbox() fails fast instead of overwriting
+     *     process-data sync-manager registers.
+     */
+    virtual void markNoMailbox();
+
     /** @brief True if mailbox has been configured (or assumed configured). */
     bool isMailboxConfigured() const { return mailbox_configured_; }
+
+    /** @brief True after markNoMailbox(): the slave has no mailbox. */
+    bool mailboxAbsent() const { return no_mailbox_; }
 
     /**
      * @brief Drain any stale data from the slave-to-master mailbox (SM1).
@@ -293,6 +312,8 @@ public:
      * (configureMailbox, assumeMailboxAlreadyConfigured).  It is also safe to
      * call at any later point as a diagnostic recovery step — for example
      * when stale mailbox responses are observed during SDO transactions.
+     * For slaves declared mailbox-less via markNoMailbox() this is a
+     * no-op returning true.
      *
      * @param max_drain  Maximum back-to-back reads to perform (default 16)
      * @return true if SM1 is empty (or was successfully drained);
@@ -717,6 +738,7 @@ protected:
     uint16_t index_;
 
     bool mailbox_configured_ = false;
+    bool no_mailbox_ = false;
     bool pdo_configured_ = false;
 
     EtherCATSlaveDebugFlags slave_debug_flags_;
@@ -780,6 +802,7 @@ public:
     SlaveError configureMailbox(const ESIFile&,
                                  Tether::Platform::LogLevel) override;
     void assumeMailboxAlreadyConfigured() override;
+    void markNoMailbox() override;
     bool drainMailbox(unsigned int) override;
 
     SlaveError configurePDOSyncManagers() override;

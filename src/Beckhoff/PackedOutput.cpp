@@ -9,7 +9,9 @@
  *
  *   1. No mailbox.  The terminal's only sync manager carries process
  *      outputs — configureMailbox() would overwrite those registers.
- *      assumeMailboxAlreadyConfigured() is used to satisfy the PRE-OP gate.
+ *      markNoMailbox() declares the absence (detected from SII) so the
+ *      framework skips all mailbox handling while the PRE-OP gate is
+ *      satisfied vacuously.
  *   2. Process outputs on a non-SM2 channel.  The PDOManager bookkeeping
  *      expects RxPDO data at SM2.  The real config is registered under its
  *      actual channel index (so configureSlavesSMs() writes the correct
@@ -28,6 +30,7 @@
 
 #include "tether/Beckhoff/PackedOutput.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <chrono>
 
@@ -182,7 +185,7 @@ Result<> PackedOutput::prepare(PDO::PDOAddressMode mode) {
             slave_index_,
             {DiscoveryOption::VendorId, DiscoveryOption::ProductCode,
              DiscoveryOption::DeviceNames, DiscoveryOption::SyncManagers,
-             DiscoveryOption::RxPDOs});
+             DiscoveryOption::RxPDOs, DiscoveryOption::MailboxConfig});
     }
 
     auto& sl = master_->slave(slave_index_);
@@ -206,9 +209,31 @@ Result<> PackedOutput::prepare(PDO::PDOAddressMode mode) {
                 master_->slaveLogPrefix(slave_index_).c_str(), sm_channel_,
                 sm_addr_, sm_len_, sm_ctrl_, num_outputs_);
 
-    // These terminals have no mailbox — satisfy the PRE-OP gate without
-    // touching SM0/SM1 (SM0 carries the process outputs on this family).
-    sl.assumeMailboxAlreadyConfigured();
+    // Mailbox handling: this terminal family has no mailbox — its only
+    // sync manager carries process data.  Ask the SII when readable
+    // (the Mailbox category is authoritative; a mailbox-typed SM entry
+    // works as fallback); on SII failure the family property holds.
+    // markNoMailbox() satisfies the PRE-OP gate while suppressing every
+    // mailbox interaction (drain, SM0/SM1 validation, SDO setup).
+    bool has_mailbox = false;
+#if TETHER_ENABLE_SII
+    if (info_ && info_->mailbox_config) {
+        has_mailbox = info_->mailbox_config->hasMailbox();
+    } else if (info_ && info_->sync_managers) {
+        has_mailbox = std::ranges::any_of(*info_->sync_managers,
+            [](const SII::SIISyncManager& sm) {
+                return sm.sm_type == SII::SM_TYPE_MBX_WRITE ||
+                       sm.sm_type == SII::SM_TYPE_MBX_READ;
+            });
+    }
+#endif
+    if (has_mailbox) {
+        // Not expected for this family — satisfy the gate via the
+        // firmware-pre-configured assumption instead of declaring absence.
+        sl.assumeMailboxAlreadyConfigured();
+    } else {
+        sl.markNoMailbox();
+    }
 
     // Register the process-data SM under its actual channel index so
     // configureSlavesSMs() writes the right ESC register block
