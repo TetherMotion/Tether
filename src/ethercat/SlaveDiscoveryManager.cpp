@@ -129,19 +129,24 @@ std::vector<DiscoveredSlave> SlaveDiscoveryManager::discoverSync(
 
     // ---- 3. Concurrent EEPROM prefetch via the reactor ----
     // Use the single-worker EEPROM reactor to read SII words from all
-    // target slaves concurrently. The reactor issues datagrams for all
-    // slaves in one frame per protocol step, then waits for completions
-    // via waitForAny(). This overlaps the per-slave EEPROM latency.
+    // target slaves concurrently. The reactor pipelines per-slave state
+    // machines: after each completion, the next step for that slave is
+    // issued immediately, overlapping different protocol steps across
+    // slaves. Already-cached word-pairs (from initSlaves()'s 128-word
+    // prefetch) are skipped automatically.
     //
-    // We read words 0x0040..0x01FF (the category area) from all slaves.
-    // The first 128 words (0x0000..0x007F) are already prefetched by
-    // initSlaves(). The subsequent parseCategories() calls hit the cache.
+    // We read from 0x0040 (category area start). The state machine
+    // skips word-pairs already in the cache (0x0040..0x007F from
+    // initSlaves), so only uncached words are read from the bus.
 #if TETHER_ENABLE_SII
     if (target_indices.size() > 1) {
         SII::EEPROMReactor reactor(*master_);
         for (uint16_t idx : target_indices) {
-            // Read 256 word-pairs (512 words = 1024 bytes) from word 0x0040
-            reactor.addSlave(idx, 0x0040, 256);
+            // Read 128 word-pairs (256 words) from word 0x0040.
+            // Most slaves' category data fits within this range.
+            // The state machine skips already-cached words, so
+            // effectively only 0x0080..0x0140 is read from the bus.
+            reactor.addSlave(idx, 0x0040, 128);
         }
         reactor.run(500);
     }

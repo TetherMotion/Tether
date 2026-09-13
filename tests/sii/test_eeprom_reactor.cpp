@@ -216,12 +216,11 @@ TEST_F(EEPROMStateMachineTest, FullProtocolCycle_ReadsOneWordPair) {
     EXPECT_EQ(sm.state(), EEPROMState::DONE);
     EXPECT_EQ(sm.wordsRead(), 1u);
 
-    // Verify cache was populated
-    uint16_t lo = 0, hi = 0;
-    EXPECT_TRUE(master.slave(0).sii().cache().get(0x0040, lo));
-    EXPECT_TRUE(master.slave(0).sii().cache().get(0x0041, hi));
-    EXPECT_EQ(lo, 0xBEEFu);
-    EXPECT_EQ(hi, 0xDEADu);
+    // Verify cache was populated (using getWordPair atomic read)
+    uint32_t cached = 0;
+    EXPECT_TRUE(master.slave(0).sii().cache().getWordPair(0x0040, cached));
+    EXPECT_EQ(cached & 0xFFFF, 0xBEEFu);
+    EXPECT_EQ((cached >> 16) & 0xFFFF, 0xDEADu);
 
     master.packetRouter().shutdown();
 }
@@ -595,4 +594,188 @@ TEST_F(EEPROMReactorLoopbackTest, MultiSlave_FramesSent) {
 
     // The reactor should have sent at least one frame (with 2 datagrams)
     EXPECT_GT(after, before);
+}
+
+// ============================================================================
+// SIISlaveCache state-machine-capable interface tests
+// ============================================================================
+
+class SIICacheStateMachineTest : public ::testing::Test {
+protected:
+    SIISlaveCache cache;
+};
+
+TEST_F(SIICacheStateMachineTest, GetWordPair_BothCached_ReturnsTrue) {
+    cache.set(0x0040, 0xBEEF);
+    cache.set(0x0041, 0xDEAD);
+    uint32_t out = 0;
+    EXPECT_TRUE(cache.getWordPair(0x0040, out));
+    EXPECT_EQ(out & 0xFFFF, 0xBEEFu);
+    EXPECT_EQ((out >> 16) & 0xFFFF, 0xDEADu);
+}
+
+TEST_F(SIICacheStateMachineTest, GetWordPair_LowMissing_ReturnsFalse) {
+    cache.set(0x0041, 0xDEAD);
+    uint32_t out = 0;
+    EXPECT_FALSE(cache.getWordPair(0x0040, out));
+}
+
+TEST_F(SIICacheStateMachineTest, GetWordPair_HighMissing_ReturnsFalse) {
+    cache.set(0x0040, 0xBEEF);
+    uint32_t out = 0;
+    EXPECT_FALSE(cache.getWordPair(0x0040, out));
+}
+
+TEST_F(SIICacheStateMachineTest, GetWordPair_NeitherCached_ReturnsFalse) {
+    uint32_t out = 0;
+    EXPECT_FALSE(cache.getWordPair(0x0040, out));
+}
+
+TEST_F(SIICacheStateMachineTest, SetWordPair_StoresBothWords) {
+    cache.setWordPair(0x0080, 0xDEADBEEF);
+    uint16_t lo = 0, hi = 0;
+    EXPECT_TRUE(cache.get(0x0080, lo));
+    EXPECT_TRUE(cache.get(0x0081, hi));
+    EXPECT_EQ(lo, 0xBEEFu);
+    EXPECT_EQ(hi, 0xDEADu);
+}
+
+TEST_F(SIICacheStateMachineTest, SetWordPair_OverwritesExisting) {
+    cache.set(0x0080, 0x1111);
+    cache.set(0x0081, 0x2222);
+    cache.setWordPair(0x0080, 0x44332211);
+    uint32_t out = 0;
+    EXPECT_TRUE(cache.getWordPair(0x0080, out));
+    EXPECT_EQ(out, 0x44332211u);
+}
+
+TEST_F(SIICacheStateMachineTest, CachedContiguousFrom_EmptyCache_ReturnsZero) {
+    EXPECT_EQ(cache.cachedContiguousFrom(0x0040), 0u);
+}
+
+TEST_F(SIICacheStateMachineTest, CachedContiguousFrom_NoMatchAtStart_ReturnsZero) {
+    cache.set(0x0041, 0x0001);
+    cache.set(0x0042, 0x0002);
+    EXPECT_EQ(cache.cachedContiguousFrom(0x0040), 0u);
+}
+
+TEST_F(SIICacheStateMachineTest, CachedContiguousFrom_ContiguousRange) {
+    for (uint16_t i = 0; i < 10; ++i)
+        cache.set(static_cast<uint16_t>(0x0040 + i), i);
+    EXPECT_EQ(cache.cachedContiguousFrom(0x0040), 10u);
+}
+
+TEST_F(SIICacheStateMachineTest, CachedContiguousFrom_StopsAtGap) {
+    for (uint16_t i = 0; i < 5; ++i)
+        cache.set(static_cast<uint16_t>(0x0040 + i), i);
+    // Gap at 0x0045
+    for (uint16_t i = 6; i < 10; ++i)
+        cache.set(static_cast<uint16_t>(0x0040 + i), i);
+    EXPECT_EQ(cache.cachedContiguousFrom(0x0040), 5u);
+}
+
+TEST_F(SIICacheStateMachineTest, CachedContiguousFrom_FromMiddle) {
+    for (uint16_t i = 0; i < 10; ++i)
+        cache.set(static_cast<uint16_t>(0x0040 + i), i);
+    EXPECT_EQ(cache.cachedContiguousFrom(0x0043), 7u);
+}
+
+TEST_F(SIICacheStateMachineTest, IsRangeCached_FullyCached_ReturnsTrue) {
+    for (uint16_t i = 0; i < 5; ++i)
+        cache.set(static_cast<uint16_t>(0x0040 + i), i);
+    EXPECT_TRUE(cache.isRangeCached(0x0040, 5));
+}
+
+TEST_F(SIICacheStateMachineTest, IsRangeCached_PartiallyCached_ReturnsFalse) {
+    for (uint16_t i = 0; i < 3; ++i)
+        cache.set(static_cast<uint16_t>(0x0040 + i), i);
+    EXPECT_FALSE(cache.isRangeCached(0x0040, 5));
+}
+
+TEST_F(SIICacheStateMachineTest, IsRangeCached_EmptyCache_ReturnsFalse) {
+    EXPECT_FALSE(cache.isRangeCached(0x0040, 1));
+}
+
+TEST_F(SIICacheStateMachineTest, IsRangeCached_ZeroCount_ReturnsTrue) {
+    EXPECT_TRUE(cache.isRangeCached(0x0040, 0));
+}
+
+TEST_F(SIICacheStateMachineTest, SetRange_StoresAllWords) {
+    uint16_t vals[5] = {0x100, 0x200, 0x300, 0x400, 0x500};
+    cache.setRange(0x0040, vals, 5);
+    for (uint16_t i = 0; i < 5; ++i) {
+        uint16_t out = 0;
+        EXPECT_TRUE(cache.get(static_cast<uint16_t>(0x0040 + i), out));
+        EXPECT_EQ(out, vals[i]);
+    }
+}
+
+TEST_F(SIICacheStateMachineTest, SetRange_OverwritesExisting) {
+    cache.set(0x0040, 0xFFFF);
+    uint16_t vals[1] = {0x1234};
+    cache.setRange(0x0040, vals, 1);
+    uint16_t out = 0;
+    EXPECT_TRUE(cache.get(0x0040, out));
+    EXPECT_EQ(out, 0x1234u);
+}
+
+TEST_F(SIICacheStateMachineTest, SetRange_ZeroCount_NoChange) {
+    uint16_t vals[1] = {0x1234};
+    cache.setRange(0x0040, vals, 0);
+    EXPECT_EQ(cache.size(), 0u);
+}
+
+TEST_F(SIICacheStateMachineTest, SkipCachedWords_WithPrefilledCache) {
+    // Simulate initSlaves() prefetching 128 words (0x0000..0x007F)
+    for (uint16_t i = 0; i < 128; ++i)
+        cache.set(i, static_cast<uint16_t>(0x1000 + i));
+
+    // State machine reads from 0x0040, 32 word-pairs (64 words)
+    // All 64 words from 0x0040..0x007F are cached → should skip all
+    EEPROMReadStateMachine sm;
+    sm.init(0, 0x0040, 32);
+
+    // Use a minimal master just for cache access
+    Master master;
+    master.packetRouter().init();
+    master.initSlaves(1);
+
+    // Copy the prefilled cache into the master's slave cache
+    for (uint16_t i = 0; i < 128; ++i) {
+        uint16_t val = 0;
+        cache.get(i, val);
+        master.slave(0).sii().cache().set(i, val);
+    }
+
+    sm.skipCachedWords(master);
+    EXPECT_EQ(sm.state(), EEPROMState::DONE);
+    EXPECT_EQ(sm.wordsRead(), 32u);
+
+    master.packetRouter().shutdown();
+}
+
+TEST_F(SIICacheStateMachineTest, SkipCachedWords_PartiallyCached_StopsAtGap) {
+    // Cache 0x0040..0x0047 (4 word-pairs), gap at 0x0048
+    for (uint16_t i = 0x0040; i < 0x0048; ++i)
+        cache.set(i, static_cast<uint16_t>(i));
+
+    EEPROMReadStateMachine sm;
+    sm.init(0, 0x0040, 10);  // 10 word-pairs requested
+
+    Master master;
+    master.packetRouter().init();
+    master.initSlaves(1);
+
+    for (uint16_t i = 0x0040; i < 0x0048; ++i) {
+        uint16_t val = 0;
+        cache.get(i, val);
+        master.slave(0).sii().cache().set(i, val);
+    }
+
+    sm.skipCachedWords(master);
+    EXPECT_EQ(sm.state(), EEPROMState::WRITE_EEPADDR);  // Still needs to read
+    EXPECT_EQ(sm.wordsRead(), 4u);  // 4 word-pairs skipped
+    EXPECT_EQ(sm.currentWord(), 0x0048u);  // Next uncached word
+
+    master.packetRouter().shutdown();
 }
