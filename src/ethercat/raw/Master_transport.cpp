@@ -299,6 +299,7 @@ bool Master::encapsulateFrame(const uint8_t* in_frame, size_t in_len,
 
 bool Master::sendWithEncapsulation(const uint8_t* frame, size_t len)
 {
+    std::lock_guard<std::mutex> lock(send_mutex_);
     if (!transport_) {
         // Fallback before start() — direct send without encapsulation
         return iface_.send ? iface_.send(frame, len) : false;

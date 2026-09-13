@@ -31,9 +31,8 @@
 #include "tether/sii/SIILogger.hpp"
 #include <cstdint>
 #include <cstddef>
+#include <mutex>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
 
 namespace EtherCAT {
 
@@ -148,14 +147,28 @@ private:
     // (ESC register 0x0010, via APRD) and retry the write with FPWR.
     // If the configured station address is 0x0000 (unassigned), a unique
     // address (slave_index + 1) is written via APWR to 0x0010 first.
+    //
+    // Each SIIReader is owned by exactly one SIIManager (which is owned by
+    // one Slave), so this state is strictly per-slave — no slave_index-keyed
+    // containers are needed. A mutex protects concurrent same-slave access.
 
-    /// Per-slave cache of configured station addresses (slave_index → addr).
-    std::unordered_map<uint16_t, uint16_t> configured_addr_cache_;
+    /// Cached configured station address (0 = not yet determined).
+    /// Guarded by state_mutex_.
+    uint16_t configured_addr_ = 0;
+    bool configured_addr_set_ = false;
 
-    /// Slaves for which APWR to EEPCTL already failed — use FPWR directly.
-    std::unordered_set<uint16_t> use_fpwr_slaves_;
+    /// True if APWR to EEPCTL already failed for this slave — use FPWR.
+    /// Guarded by state_mutex_.
+    bool use_fpwr_ = false;
 
-    /// Read (and cache) the configured station address for a slave.
+    /// True if the EEPROM has already been forced to ECAT control.
+    /// Guarded by state_mutex_.
+    bool eeprom_forced_ = false;
+
+    /// Mutex protecting configured_addr_, use_fpwr_, eeprom_forced_.
+    mutable std::mutex state_mutex_;
+
+    /// Read (and cache) the configured station address for this reader's slave.
     /// If the address is 0x0000, assigns a unique one via APWR to 0x0010.
     /// If force_assign is true, always writes a fresh address (used when
     /// the existing configured address is stale and FPWR to it fails).
@@ -174,11 +187,29 @@ private:
     /// Force EEPROM interface from PDI to ECAT control.
     /// Writes 0x02 then 0x00 to EEPConfig (0x0500) via APWR.
     /// Called automatically before the first EEPROM access for each slave.
-    /// Tracks which slaves have already been forced.
+    /// Tracks whether the EEPROM has already been forced.
     bool forceEepromToEcat(uint16_t slave_index);
 
-    /// Per-slave set: EEPROM has been forced to ECAT control.
-    std::unordered_set<uint16_t> eeprom_forced_to_ecat_;
+public:
+    // --- Per-slave SII bus state introspection (used by SIIManager) ---
+
+    /// @brief Cached configured station address, or 0 if not yet determined.
+    uint16_t configuredStationAddr() const {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        return configured_addr_;
+    }
+
+    /// @brief True if this slave should use FPWR for EEPROM control writes.
+    bool useFpwr() const {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        return use_fpwr_;
+    }
+
+    /// @brief True if the EEPROM has already been forced to ECAT control.
+    bool eepromForcedToEcat() const {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        return eeprom_forced_;
+    }
 };
 
 // ============================================================================

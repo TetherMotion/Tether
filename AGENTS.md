@@ -60,7 +60,7 @@ propagated to outer targets.
 
 ## Build Commands
 
-> **Parallelism limit:** Always use `-j4` max when invoking `cmake --build`
+> **Parallelism limit:** Always use `-j8` max when invoking `cmake --build`
 > (or any other build tool).  Do NOT use `-j$(nproc)` — the build machine
 > has limited RAM and higher parallelism causes OOM kills.
 
@@ -73,16 +73,16 @@ cmake -B build -DTETHER_ENABLE_KLIPPER=1
 cmake -B build -DTETHER_ENABLE_KLIPPER=1 -DTETHER_ENABLE_PRESSURE_ADVANCE=ON
 
 # Build all
-cmake --build build -j4
+cmake --build build -j8
 
 # Build only klipper tests
-cmake --build build --target tether_klipper_tests -j4
+cmake --build build --target tether_klipper_tests -j8
 
 # Build klipper HTTP server (requires Drogon)
-cmake --build build --target tether_klipper_http_shared -j4
+cmake --build build --target tether_klipper_http_shared -j8
 
 # Build klipper HTTP tests
-cmake --build build --target tether_klipper_http_tests -j4
+cmake --build build --target tether_klipper_http_tests -j8
 
 # Run klipper tests (excluding slow thermal simulation)
 ./build/bin/tests/tether_klipper_tests --gtest_filter='-ThermalIntegrationTest.*'
@@ -209,11 +209,11 @@ the real thermistor reading. See `docs/extrusion/` for full documentation.
 
 ```bash
 # Build control-level extrusion tests
-cmake --build build --target tether_control_extrusion_tests -j4
+cmake --build build --target tether_control_extrusion_tests -j8
 ./build/bin/tests/tether_control_extrusion_tests
 
 # Build klipper-level extrusion compensation tests (requires TETHER_ENABLE_KLIPPER=1)
-cmake --build build --target tether_klipper_tests -j4
+cmake --build build --target tether_klipper_tests -j8
 ./build/bin/tests/tether_klipper_tests --gtest_filter='*ExtrusionCompensation*:*ExtrusionFlowTracker*:*ExtrusionInstance*'
 ```
 
@@ -319,7 +319,7 @@ if (sup.isSlaveSuspended(slave_index)) {
 
 ```bash
 # Build the supervisor test
-cmake --build build --target tether_ethercat_supervisor_tests -j4
+cmake --build build --target tether_ethercat_supervisor_tests -j8
 
 # Run tests
 ./build/bin/tests/tether_ethercat_supervisor_tests

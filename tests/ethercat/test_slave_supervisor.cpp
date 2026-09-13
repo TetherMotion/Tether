@@ -82,7 +82,7 @@ protected:
     void SetUp() override {
         // Shrink PRE_OP retry timing and SII timeout for fast tests
         master_.setPreopRetryConfig(1, 3, 1, 1);
-        master_.siiReader().setTimeout(1);
+        master_.setSiiTimeoutMs(1);
 
         // Track AL state for test callbacks (same pattern as test_ethercat_slave.cpp)
         al_state_.store(0x01, std::memory_order_relaxed); // INIT

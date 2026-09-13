@@ -346,6 +346,7 @@ option(TETHER_BUILD_IO_PROTOCOL "Build IO protocol (SLIP-based parameter streami
 option(TETHER_BUILD_KLIPPER "Build Klipper protocol implementation" ON)
 option(TETHER_ENABLE_KLIPPER_CAN "Enable Klipper CAN transport (requires SocketCAN)" OFF)
 option(TETHER_ENABLE_PRESSURE_ADVANCE "Enable pressure advance for extruders (compile-time; runtime opt-in)" ON)
+option(TETHER_ENABLE_SII "Enable EtherCAT SII EEPROM support (CachedSIIReader, SIIManager)" ON)
 
 # Glaze-based JSON I/O for the Klipper data dictionary.  This is auto-detected
 # below; if Glaze cannot be compiled with the active C++23 toolchain it is

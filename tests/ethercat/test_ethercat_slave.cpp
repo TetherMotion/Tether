@@ -33,7 +33,7 @@ protected:
         // that simulate slaves which never reach PRE_OP.
         master_.setPreopRetryConfig(1, 3, 1, 1);
         // Shrink SII read timeout so initSlaves prefetch doesn't block.
-        master_.siiReader().setTimeout(1);
+        master_.setSiiTimeoutMs(1);
 
         // Track AL state so APRD can return the correct AL_STATUS value.
         // This makes state-machine transitions fast and deterministic.
@@ -479,8 +479,8 @@ TEST_F(EtherCATSlaveTest, ReadWatchdogStatusTransportFailure) {
 
 TEST_F(EtherCATSlaveTest, SIICacheIsInitialized) {
     auto& s = master_.slave(0);
-    EXPECT_TRUE(s.siiCache().isInitialized());
-    EXPECT_EQ(s.siiCache().slaveIndex(), 0u);
+    EXPECT_TRUE(s.sii().isInitialized());
+    EXPECT_EQ(s.sii().slaveIndex(), 0u);
 }
 
 // ============================================================================
@@ -527,7 +527,7 @@ protected:
         // Shrink PRE_OP retry timing for fast tests.
         master_.setPreopRetryConfig(1, 3, 1, 1);
         // Shrink SII read timeout so initSlaves prefetch doesn't block.
-        master_.siiReader().setTimeout(1);
+        master_.setSiiTimeoutMs(1);
         // No slaves discovered
         master_.initSlaves(0);
     }
@@ -710,7 +710,7 @@ protected:
         master_.setPreopRetryConfig(1, 3, 1, 1);
         // Shrink SII read timeout so initSlaves prefetch doesn't block 500ms
         // per slave when there's no real bus.
-        master_.siiReader().setTimeout(1);
+        master_.setSiiTimeoutMs(1);
     }
 
     Master master_;
@@ -745,11 +745,12 @@ TEST_F(MasterSlaveManagementTest, ReinitSlavesReplacesOldSlaves) {
     EXPECT_EQ(master_.slave(1).transitionToInit(), SlaveError::SlaveNotFound);
 }
 
-TEST_F(MasterSlaveManagementTest, SIIReaderCreatedLazily) {
-    auto& reader = master_.siiReader();
-    // Second call returns same instance
-    auto& reader2 = master_.siiReader();
-    EXPECT_EQ(&reader, &reader2);
+TEST_F(MasterSlaveManagementTest, SIIManagerStableForExistingSlave) {
+    master_.initSlaves(1);
+    auto& sii = master_.sii(0);
+    // Second call returns the same per-slave SIIManager instance
+    auto& sii2 = master_.sii(0);
+    EXPECT_EQ(&sii, &sii2);
 }
 
 // ============================================================================
@@ -998,14 +999,14 @@ TEST_F(EtherCATSlaveTest, ReadSIIWithCacheInitialized) {
     EXPECT_TRUE(err == SlaveError::Ok || err == SlaveError::SIIReadError);
 }
 
-TEST_F(EtherCATSlaveTest, ReadSIIWithoutCacheInitialized) {
-    // Create a slave with uninitialized SII cache — exercises the fallback
-    // path where readSII logs a warning and does a direct SII::readSII().
-    Slave fresh(master_, 0); // cache not initialized
-    EXPECT_FALSE(fresh.siiCache().isInitialized());
+TEST_F(EtherCATSlaveTest, ReadSIIWithDefaultSiiManager) {
+    // Create a fresh slave; its per-slave SIIManager is bound to the master
+    // by default, so readSII goes through the manager (not the old
+    // uninitialised-cache fallback).
+    Slave fresh(master_, 0);
+    EXPECT_TRUE(fresh.sii().isInitialized());
     SII::SIIData data;
     auto err = fresh.readSII(data);
-    // Without cache init, falls back to direct SII read via master
     // Result depends on mock-bus data
     EXPECT_TRUE(err == SlaveError::Ok || err == SlaveError::SIIReadError);
 }

@@ -45,6 +45,7 @@ set(TETHER_ETHERCAT_MASTER_SOURCES
     ${ETHERCAT_CORE_SOURCES}
     ${ETHERCAT_RAW_SOURCES}
     ${TETHER_ROOT}/src/fmmu/FMMUConfiguration.cpp
+    ${TETHER_ROOT}/src/sii/SIIManager.cpp
     ${TETHER_ROOT}/src/sii/SIIReader.cpp
     ${TETHER_ROOT}/src/sii/SIILogger.cpp
     ${TETHER_ROOT}/src/profiles/cia402/CiA402StateUtils.cpp

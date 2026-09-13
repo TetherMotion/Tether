@@ -47,6 +47,9 @@
 #include "tether/ethercat/EtherCATTransport.hpp"
 #include "tether/ethercat/SlaveIdentity.hpp"
 #include "tether/ethercat/TetherConfig.hpp"
+#if TETHER_ENABLE_SII
+#include "tether/sii/SIIManager.hpp"
+#endif
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/TransactionRouter.hpp"
 #include "tether/ethercat/ESIFile.hpp"
@@ -357,36 +360,42 @@ public:
      */
     void initSlaves(uint16_t count);
 
+    // ---- SII EEPROM access -------------------------------------------------
+
+#if TETHER_ENABLE_SII
     /**
-     * @brief Access the SII reader (lazily created).
+     * @brief Access the per-slave SII manager for a discovered slave.
+     *
+     * The SII manager is created during `initSlaves()` and is owned by the
+     * `Slave` object. Accessing it before discovery is safe: it returns a
+     * manager that will fail reads until the slave has been discovered.
+     *
+     * @code
+     *   #if TETHER_ENABLE_SII
+     *   uint16_t vendor = 0;
+     *   if (master.slave(0).sii().readWord(0x0008, vendor)) { ... }
+     *   #endif
+     * @endcode
      */
-    SII::SIIReader& siiReader();
+    SII::SIIManager& sii(uint16_t slave_index);
 
-    // ---- SII EEPROM cache --------------------------------------------------
+    /** @brief Default timeout (ms) used for per-slave SII bus reads. */
+    uint32_t siiTimeoutMs() const { return sii_timeout_ms_; }
+
+    /** @brief Set the default timeout for per-slave SII bus reads. */
+    void setSiiTimeoutMs(uint32_t timeout_ms) { sii_timeout_ms_ = timeout_ms; }
 
     /**
-     * @brief Check the per-slave SII word cache.
+     * @brief Internal per-slave SII word cache access.
      *
-     * All SIIReader instances transparently hit this cache so ephemeral
-     * readers (created by readSII(), readSIIIdentity(), etc.) do not
-     * re-read already-fetched EEPROM words.
-     *
-     * @param slave_index  Slave index
-     * @param word_addr    EEPROM word address
-     * @param[out] out     Cached value (only valid on true return)
-     * @return true if the word is cached
+     * These are used by the per-slave SIIManager's low-level SIIReader.
+     * They delegate to the slave's SIIManager cache and are not intended for
+     * application code.
      */
     bool getSIICachedWord(uint16_t slave_index, uint16_t word_addr, uint16_t& out) const;
-
-    /**
-     * @brief Store a word in the per-slave SII word cache.
-     */
     void setSIICachedWord(uint16_t slave_index, uint16_t word_addr, uint16_t value);
-
-    /**
-     * @brief Clear the SII word cache for a given slave (or all slaves).
-     */
     void clearSIICache(uint16_t slave_index);
+#endif
 
     // ---- AL state management -----------------------------------------------
 
@@ -1094,14 +1103,15 @@ private:
     // Debug gate (conditional debug activation)
     std::unique_ptr<DebugGate> debug_gate_;
 
-    // SII reader (lazily created)
-    std::unique_ptr<SII::SIIReader> sii_reader_;
+    // Default timeout for per-slave SII bus operations (ms).
+    uint32_t sii_timeout_ms_ = 500;
 
-    // Per-slave EEPROM word cache (indexed by slave_index -> word_addr -> value)
-    // Protected by sii_cache_mutex_ since the discovery thread writes via
-    // setSIICachedWord while client threads read via getSIICachedWord.
-    std::vector<std::unordered_map<uint16_t, uint16_t>> sii_word_caches_;
-    mutable std::mutex sii_cache_mutex_;
+    // Mutex protecting the underlying network send. The TransactionRouter
+    // is already per-slot concurrent, but the raw Ethernet/UDP send path is
+    // not guaranteed to be thread-safe, so all sends are serialised here.
+    // The mutex is held only for the actual transmit; callers wait on their
+    // own slot condition variable in parallel after releasing it.
+    mutable std::mutex send_mutex_;
 };
 
 // ============================================================================

@@ -32,6 +32,9 @@
 #cmakedefine01 TETHER_ENABLE_FSOE
 #cmakedefine01 TETHER_ENABLE_HAL
 #cmakedefine01 TETHER_ENABLE_KINEMATICS
+#ifndef TETHER_ENABLE_SII
+#cmakedefine01 TETHER_ENABLE_SII
+#endif
 #ifndef TETHER_ENABLE_KLIPPER
 #cmakedefine01 TETHER_ENABLE_KLIPPER
 #endif

@@ -41,7 +41,10 @@
 
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
-#include "tether/ethercat/CachedSIIReader.hpp"
+#include "tether/ethercat/TetherConfig.hpp"
+#if TETHER_ENABLE_SII
+#include "tether/sii/SIIManager.hpp"
+#endif
 #include "tether/ethercat/Mailbox.hpp"
 #include "tether/ethercat/SyncManager.hpp"
 #include "tether/ethercat/ESIFile.hpp"
@@ -156,7 +159,7 @@ public:
      */
     Slave(Master& master, uint16_t index);
 
-    virtual ~Slave() = default;
+    virtual ~Slave();
 
     // -- Identification -----------------------------------------------------
 
@@ -199,14 +202,25 @@ public:
     bool apwr(uint16_t ado, const void* data, uint16_t len, unsigned int timeout_ms) override;
     bool aprd(uint16_t ado, void* out, uint16_t len, unsigned int timeout_ms) override;
 
-    // -- SII cache ----------------------------------------------------------
+    // -- SII access ---------------------------------------------------------
 
+#if TETHER_ENABLE_SII
     /**
-     * @brief Access the cached SII reader for this slave.
+     * @brief Access the per-slave SII manager.
      *
-     * The CachedSIIReader deduplicates EEPROM reads across multiple callers.
+     * The SIIManager provides cached and thread-safe SII EEPROM reads for this
+     * slave. Different slaves may be accessed concurrently.
+     *
+     * @code
+     *   #if TETHER_ENABLE_SII
+     *   uint16_t vendor = 0;
+     *   if (master.slave(0).sii().readWord(0x0008, vendor)) { ... }
+     *   #endif
+     * @endcode
      */
-    SII::CachedSIIReader& siiCache() { return sii_cache_; }
+    SII::SIIManager& sii() { return sii_; }
+    const SII::SIIManager& sii() const { return sii_; }
+#endif
 
     // -- Mailbox configuration -----------------------------------------------
 
@@ -657,6 +671,7 @@ public:
 
     // -- SII convenience -----------------------------------------------------
 
+#if TETHER_ENABLE_SII
     /**
      * @brief Read the full SII data (cached).
      *
@@ -667,6 +682,7 @@ public:
 
     /** @brief Log a one-line SII summary for this slave. */
     virtual void logSIISummary(const char* tag = "EtherCAT");
+#endif
 
     // -- Sync Manager access ------------------------------------------------------
 
@@ -692,12 +708,12 @@ public:
 
     // -- Link to master ------------------------------------------------------
 
-    /** @brief Access the owning master. */
-    Master& master() { return master_; }
-    const Master& master() const { return master_; }
+    /** @brief Access the owning master (must not be used after destruction begins). */
+    Master& master() { return *master_; }
+    const Master& master() const { return *master_; }
 
 protected:
-    Master& master_;
+    Master* master_ = nullptr;
     uint16_t index_;
 
     bool mailbox_configured_ = false;
@@ -705,7 +721,9 @@ protected:
 
     EtherCATSlaveDebugFlags slave_debug_flags_;
 
-    SII::CachedSIIReader sii_cache_;
+#if TETHER_ENABLE_SII
+    SII::SIIManager sii_{*master_, index_};
+#endif
     fmmu::FMMUManager fmmu_mgr_{*this};
 
     // -- Buffers for auto-configured PDO entries from SII ---------------------
@@ -803,8 +821,10 @@ public:
     SlaveError sdoWriteU16(uint16_t, uint8_t, uint16_t) override;
     SlaveError sdoWriteU32(uint16_t, uint8_t, uint32_t) override;
 
+#if TETHER_ENABLE_SII
     SlaveError readSII(SII::SIIData&) override;
     void logSIISummary(const char*) override;
+#endif
 
     SyncManagerAccessor sm(uint8_t smIndex) override;
 
