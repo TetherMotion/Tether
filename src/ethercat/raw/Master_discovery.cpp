@@ -234,12 +234,26 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
                         }
                     }
 
-                    // Post-PRE_OP SM validation safety net
-                    uint8_t sm0_ctrl = 0, sm1_ctrl = 0;
-                    (void)readRegister(SlaveAddress(slave_index), static_cast<uint16_t>(EC_REG_SM0 + 0x04), sm0_ctrl, 200);
-                    (void)readRegister(SlaveAddress(slave_index), static_cast<uint16_t>(EC_REG_SM1 + 0x04), sm1_ctrl, 200);
-                    if (sm0_ctrl != 0x26 || sm1_ctrl != 0x22) {
-                        TETHER_LOGW(TAG, "setPreop: SM0=0x{:02X} SM1=0x{:02X} (expected 0x26/0x22) — slave may have rejected mailbox config", sm0_ctrl, sm1_ctrl);
+                    // Post-PRE_OP SM validation safety net.  Only
+                    // meaningful when this slave's configuration actually
+                    // declares an SM0/SM1 mailbox — mailbox-less slaves
+                    // (e.g. Beckhoff EL2xxx terminals) legitimately carry
+                    // process data on SM0 and must not be held to
+                    // 0x26/0x22.
+                    bool mailbox_expected = false;
+                    if (slave_index < PDO::kMaxPDOSlaves) {
+                        const auto* cfgs = pdoForSlave(slave_index).slaveConfigs();
+                        mailbox_expected = cfgs &&
+                            (cfgs[slave_index].sm[0].type == PDO::SyncManagerType::MailboxWrite ||
+                             cfgs[slave_index].sm[1].type == PDO::SyncManagerType::MailboxRead);
+                    }
+                    if (mailbox_expected) {
+                        uint8_t sm0_ctrl = 0, sm1_ctrl = 0;
+                        (void)readRegister(SlaveAddress(slave_index), static_cast<uint16_t>(EC_REG_SM0 + 0x04), sm0_ctrl, 200);
+                        (void)readRegister(SlaveAddress(slave_index), static_cast<uint16_t>(EC_REG_SM1 + 0x04), sm1_ctrl, 200);
+                        if (sm0_ctrl != 0x26 || sm1_ctrl != 0x22) {
+                            TETHER_LOGW(TAG, "setPreop: SM0=0x{:02X} SM1=0x{:02X} (expected 0x26/0x22) — slave may have rejected mailbox config", sm0_ctrl, sm1_ctrl);
+                        }
                     }
 
                     // Debug gate checkpoint: PRE_OP confirmed
