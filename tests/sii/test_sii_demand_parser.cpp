@@ -315,6 +315,39 @@ TEST_F(SIIDemandParserTest, CategoryScan_UnrequestedCategory_SkipsData) {
     EXPECT_TRUE(result.isComplete());
 }
 
+TEST_F(SIIDemandParserTest, CategoryScan_OddSizeCategory_NextHeaderAtOddAddr) {
+    // Regression test: when a category has an odd word count, the next
+    // category header starts at an odd word address. The parser must
+    // correctly read the header using readWord() (which handles odd
+    // addresses) rather than readWordPair() (which aligns to even).
+    for (uint16_t a = 0x0000; a <= 0x0006; a += 2)
+        cache.setWordPair(a, makeDWord(0, 0));
+    cache.setWordPair(0x0008, makeDWord(0, 0));
+    cache.setWordPair(0x000A, makeDWord(0, 0));
+    cache.setWordPair(0x000C, makeDWord(0, 0));
+    cache.setWordPair(0x000E, makeDWord(0, 0));
+    for (uint16_t a = 0x0014; a <= 0x001C; a += 2)
+        cache.setWordPair(a, makeDWord(0, 0));
+    cache.setWordPair(0x002E, makeDWord(0, 0));
+
+    // Category at 0x0040: CAT_FMMU (type=40), size=3 (ODD) — not requested
+    // Header word-pair 0x0040: [40, 3]
+    cache.setWordPair(0x0040, makeDWord(40, 3));
+    // Data: 3 words at 0x0042, 0x0043, 0x0044 (not parsed, not requested)
+    cache.setWordPair(0x0042, makeDWord(0, 0));
+    // Word 0x0044 = 0 (3rd data word), word 0x0045 = 0xFFFF (CAT_END type)
+    // Next category header at ODD word address 0x0045!
+    cache.setWordPair(0x0044, makeDWord(0, 0xFFFF));
+    // Word 0x0046 = 0 (CAT_END size), word 0x0047 = 0
+    cache.setWordPair(0x0046, makeDWord(0, 0));
+
+    parser.init(CAT_MASK_NONE);
+    auto result = parser.parse(cache, data);
+
+    // Should skip the FMMU data and find CAT_END at the odd address
+    EXPECT_TRUE(result.isComplete());
+}
+
 // ============================================================================
 // Multi-Iteration Tests
 // ============================================================================
