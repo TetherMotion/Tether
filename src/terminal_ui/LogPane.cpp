@@ -6,6 +6,7 @@
 #include "tether/terminal_ui/LogPane.hpp"
 
 #include <algorithm>
+#include <cwchar>
 
 #include "logging/Logger.hpp"
 
@@ -13,6 +14,24 @@
 
 namespace Tether {
 namespace TUI {
+
+// Truncate a UTF-8 string to at most `maxCols` display columns without
+// splitting a multibyte codepoint.
+static std::string utf8Trunc(const std::string& s, int maxCols) {
+    if (maxCols <= 0) return {};
+    std::mbstate_t st{};
+    int    cols = 0;
+    size_t i    = 0;
+    while (i < s.size() && cols < maxCols) {
+        wchar_t      wc = 0;
+        const size_t n  = std::mbrtowc(&wc, s.data() + i, s.size() - i, &st);
+        if (n == (size_t)-1 || n == (size_t)-2) { ++i; ++cols; continue; }
+        if (n == 0) { ++i; continue; }
+        i += n;
+        ++cols;
+    }
+    return s.substr(0, i);
+}
 
 LogPane::LogPane(size_t maxLines) : maxLines_(maxLines) {}
 
@@ -61,7 +80,7 @@ void LogPane::render(TermWindow* w, short colorPair) {
     int row = 0;
     if (colorPair != PalNone) wattron(win, COLOR_PAIR(colorPair));
     for (size_t i = start; i < copy.size() && row < h; ++i, ++row) {
-        mvwprintw(win, row, 0, "%.*s", width - 1, copy[i].c_str());
+        mvwprintw(win, row, 0, "%s", utf8Trunc(copy[i], width - 1).c_str());
     }
     if (colorPair != PalNone) wattroff(win, COLOR_PAIR(colorPair));
 }
