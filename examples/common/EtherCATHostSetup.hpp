@@ -21,7 +21,7 @@ namespace Tether::Examples {
 // Linux host example:
 //   1. createDefaultEthernet() + init() + link-check + getMacAddress()
 //   2. NetworkInterface wrapper held in the session (no process-global
-//      registration — the iface/src MAC are passed directly to Master::start)
+//      registration  -  the iface/src MAC are passed directly to Master::start)
 //   3. Optional VLAN router + RX callback registration
 //   4. Poll thread with best-effort realtime scheduling
 //   5. Master.start() (via session NetworkInterface or VLAN router)

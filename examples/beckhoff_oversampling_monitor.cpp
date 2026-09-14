@@ -9,7 +9,7 @@
  *
  * Oversampling terminals transfer N samples per channel per EtherCAT
  * cycle (DC-synchronized).  The per-sample series for a full capture is
- * what an application would record — this demo summarizes one cycle.
+ * what an application would record  -  this demo summarizes one cycle.
  *
  * Detected set: Devices::kOversamplingTerminals (all ESI-verified for
  * shape, none verified on hardware yet).

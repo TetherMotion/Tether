@@ -199,7 +199,7 @@ int main(int argc, char** argv) {
     }
 #endif
 
-    TETHER_LOGI(TAG, "kinco_rp20_list_modules — interface: {}", iface.c_str());
+    TETHER_LOGI(TAG, "kinco_rp20_list_modules  -  interface: {}", iface.c_str());
     Tether::Examples::logVlanConfig(vlan, TAG);
     Tether::Examples::logMailboxConfig(mbSize, mbAddr, TAG);
 

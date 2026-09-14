@@ -3,7 +3,7 @@
  * @brief Build a navigable TUI tree from the discovered EtherCAT topology
  *
  * Produces a TUI::TreeNode hierarchy for the beckhoff_* examples:
- * level 1 = coupler devices (EK1100, EK1101, ... — everything matching
+ * level 1 = coupler devices (EK1100, EK1101, ...  -  everything matching
  * the Beckhoff coupler family), expanded by default; level 2 = the
  * terminals downstream of each coupler, in bus order.  Slaves appearing
  * before the first coupler (or when no coupler is present at all) hang
@@ -36,7 +36,7 @@ inline constexpr uint32_t kBeckhoffVendor = 0x00000002;
 
 /// Coupler detection: Beckhoff vendor, and either a name starting with "EK"
 /// ("EK1100 EtherCAT Coupler") or the EK-family product-code marker
-/// (low word 0x2C5x — e.g. EK1100 = 0x044C2C52).
+/// (low word 0x2C5x  -  e.g. EK1100 = 0x044C2C52).
 inline bool isCouplerDevice(const EtherCAT::DiscoveredSlave& s) {
     const uint32_t vendor  = s.vendor_id ? *s.vendor_id : 0;
     const uint32_t product = s.product_code ? *s.product_code : 0;
@@ -62,7 +62,7 @@ inline std::string slaveLabel(const EtherCAT::DiscoveredSlave& s) {
 inline TUI::TreeNode buildDeviceTree(
     std::span<const EtherCAT::DiscoveredSlave> slaves,
     const std::function<bool(uint16_t)>& managed) {
-    TUI::TreeNode root;   // invisible root — children are level 1
+    TUI::TreeNode root;   // invisible root  -  children are level 1
     root.label = "bus";
 
     TUI::TreeNode* coupler = nullptr;

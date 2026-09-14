@@ -100,7 +100,7 @@ static void runTui(Beckhoff::StepperTerminal& st,
         int row = 1;
 
         if (static_cast<uint16_t>(node.tag) == st.slaveIndex()) {
-            mvwprintw(win, row++, 1, "%s — slave %u",
+            mvwprintw(win, row++, 1, "%s  -  slave %u",
                       st.deviceName(), st.slaveIndex());
             ++row;
             mvwprintw(win, row++, 1, "enable   : %s",
@@ -150,14 +150,14 @@ static void runTui(Beckhoff::StepperTerminal& st,
             ++row;
             wattron(win, A_DIM);
             mvwprintw(win, row++, 1,
-                      "(not a stepper — not managed by this demo)");
+                      "(not a stepper  -  not managed by this demo)");
             wattroff(win, A_DIM);
         }
     };
 
     auto managed = [&](uint16_t idx) { return idx == st.slaveIndex(); };
     TUI::TreeScreen screen(
-        std::string("Beckhoff stepper jog — ") + iface,
+        std::string("Beckhoff stepper jog  -  ") + iface,
         buildDeviceTree(slaves, managed), std::move(hooks));
     screen.run(g_cancel, duration_sec);
 }
@@ -237,14 +237,14 @@ int main(int argc, char** argv) {
 #ifdef TETHER_HAS_TERMINAL_UI
     if (interactive && !Tether::TUI::Session::available()) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "no usable terminal — falling back to --stream");
+            TETHER_LOGW(TAG, "no usable terminal  -  falling back to --stream");
         }
         interactive = false;
     }
 #else
     if (interactive) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "built without ncurses — using --stream mode");
+            TETHER_LOGW(TAG, "built without ncurses  -  using --stream mode");
         }
         interactive = false;
     }

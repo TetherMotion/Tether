@@ -394,7 +394,7 @@ std::optional<SmRegInfo> smRegInfo(uint16_t addr) {
     if (sm > 3) return std::nullopt;
     switch (off) {
         case 0: return SmRegInfo{sm, 0, "StartAddr", true};
-        case 1: return SmRegInfo{sm, 1, "StartAddr+1", false};  // high byte — rarely accessed alone
+        case 1: return SmRegInfo{sm, 1, "StartAddr+1", false};  // high byte  -  rarely accessed alone
         case 2: return SmRegInfo{sm, 2, "Length", true};
         case 3: return SmRegInfo{sm, 3, "Length+1", false};
         case 4: return SmRegInfo{sm, 4, "Control", false};
@@ -668,7 +668,7 @@ void displayEthercatTransactions(const std::vector<PCP::InterpretedFrame>& frame
                     completed.push_back(txn);
                     pending.erase(it);
                 } else {
-                    // No matching request — create standalone. This happens
+                    // No matching request  -  create standalone. This happens
                     // when frame direction metadata is Unknown (e.g. captures
                     // where the EPB_FLAGS direction bits are not set), so the
                     // isTx-based request detection above never fires. Use the
@@ -771,7 +771,7 @@ struct MbxConfigTxn {
 void displayMailbox(const std::vector<PCP::InterpretedFrame>& frames, const Filters& f) {
     std::cout << Utf8Formatter::titledBox("Mailbox");
 
-    // Correlate request/response by idx — first occurrence is request,
+    // Correlate request/response by idx  -  first occurrence is request,
     // second occurrence is response. This works regardless of frame
     // direction metadata, which may be Unknown in some captures.
     std::map<uint8_t, MbxConfigTxn> pending;
@@ -912,7 +912,7 @@ void displayCoeTransactions(const std::vector<PCP::InterpretedFrame>& frames, co
                 // Request
                 pending[key] = coe;
             } else {
-                // Response — try to match with request
+                // Response  -  try to match with request
                 auto it = pending.find(key);
                 if (it != pending.end()) {
                     auto& req = it->second;
@@ -1337,7 +1337,7 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    // Collect all frames first — this also populates section/interfaces metadata.
+    // Collect all frames first  -  this also populates section/interfaces metadata.
     auto allFrames = reader.readAll();
     if (allFrames.empty()) {
         std::cerr << "No frames found in pcapng file\n";

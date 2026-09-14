@@ -34,8 +34,8 @@
  *                            (default: 0.5). 0 = G1 only.
  *
  * Outputs:
- *   <prefix>_velocity.svg     — velocity vs time plot (mm/s vs s)
- *   <prefix>_acceleration.svg — acceleration vs time plot (mm/s² vs s)
+ *   <prefix>_velocity.svg      -  velocity vs time plot (mm/s vs s)
+ *   <prefix>_acceleration.svg  -  acceleration vs time plot (mm/s² vs s)
  *
  * Defaults: v=200 mm/s, a=2000 mm/s², j=20000 mm/s³, samples=2000, exact stop
  */

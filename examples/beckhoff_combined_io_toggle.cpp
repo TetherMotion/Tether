@@ -1,13 +1,13 @@
 /**
  * @file beckhoff_combined_io_toggle.cpp
- * @brief Beckhoff combined I/O terminal demo — mixed input/output devices
+ * @brief Beckhoff combined I/O terminal demo  -  mixed input/output devices
  *
  * Finds every combined packed-bit device in the chain via the
- * MultiCombinedIoTerminal driver — mixed digital I/O (EL1852/EL1859,
+ * MultiCombinedIoTerminal driver  -  mixed digital I/O (EL1852/EL1859,
  * EP23xx), output terminals with diagnostics (EL2032/34/44/68, EL2212,
  * EL2819), relays with counters (ELM2642/2742), LED drivers
  * (EL2574/2595/2596), power-distribution terminals (EL922x, EP9214/
- * EP9224), and couplers with integrated I/O (EK1814/1818/1828) — brings
+ * EP9224), and couplers with integrated I/O (EK1814/1818/1828)  -  brings
  * them to OP in one shared logical address space (a single LRW datagram
  * per cycle for the whole chain), then walks one lit output across the
  * flat output channel space while showing live inputs.
@@ -113,7 +113,7 @@ static void runTui(Chain& io,
             if (io.slaveIndex(m) != static_cast<uint16_t>(node.tag))
                 continue;
             const auto& mod = io.module(m);
-            mvwprintw(win, row++, 1, "%s — slave %d", mod.deviceName(),
+            mvwprintw(win, row++, 1, "%s  -  slave %d", mod.deviceName(),
                       node.tag);
             ++row;
             mvwprintw(win, row++, 1, "inputs  :");
@@ -152,12 +152,12 @@ static void runTui(Chain& io,
         ++row;
         wattron(win, A_DIM);
         mvwprintw(win, row++, 1,
-                  "(not a combined I/O device — not managed by this demo)");
+                  "(not a combined I/O device  -  not managed by this demo)");
         wattroff(win, A_DIM);
     };
 
     TUI::TreeScreen screen(
-        std::string("Beckhoff combined I/O — ") + iface,
+        std::string("Beckhoff combined I/O  -  ") + iface,
         buildDeviceTree(slaves, managed), std::move(hooks));
     screen.run(g_cancel, duration_sec);
 }
@@ -243,14 +243,14 @@ int main(int argc, char** argv) {
 #ifdef TETHER_HAS_TERMINAL_UI
     if (interactive && !Tether::TUI::Session::available()) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "no usable terminal — falling back to --stream");
+            TETHER_LOGW(TAG, "no usable terminal  -  falling back to --stream");
         }
         interactive = false;
     }
 #else
     if (interactive) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "built without ncurses — using --stream mode");
+            TETHER_LOGW(TAG, "built without ncurses  -  using --stream mode");
         }
         interactive = false;
     }

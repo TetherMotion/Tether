@@ -361,7 +361,7 @@ static bool fileContains(const std::filesystem::path& path, const std::string& n
 /// When Tether serves both the SPA and the API on the same port, Fluidd's
 /// default `endpoints: []` makes it fall back to the browser URL, which is
 /// already correct.  So for Fluidd we only write a config if one is missing
-/// or is in the wrong (Mainsail) schema — we never overwrite a valid Fluidd
+/// or is in the wrong (Mainsail) schema  -  we never overwrite a valid Fluidd
 /// config because it contains themePresets we don't want to clobber.
 static void writeWebUiConfig(const std::filesystem::path& distDir,
                               const std::string& uiName, uint16_t port) {
@@ -373,7 +373,7 @@ static void writeWebUiConfig(const std::filesystem::path& distDir,
     // Fluidd: preserve existing valid config; only write if missing or wrong schema.
     if (uiName == "Fluidd") {
         if (fs::exists(configPath) && fileContains(configPath, "\"endpoints\"")) {
-            // Existing Fluidd config.json is valid — don't clobber themePresets etc.
+            // Existing Fluidd config.json is valid  -  don't clobber themePresets etc.
             return;
         }
         // Write a minimal Fluidd config.json.  endpoints: [] makes Fluidd fall
@@ -419,7 +419,7 @@ struct PackageManager {
 /// @brief Detect the package manager for a Node project from its lockfile.
 ///
 /// pnpm-lock.yaml  → pnpm  (Fluidd uses the `catalog:` protocol in package.json
-///                          overrides, which npm cannot resolve — EUNSUPPORTEDPROTOCOL.
+///                          overrides, which npm cannot resolve  -  EUNSUPPORTEDPROTOCOL.
 ///                          Node ≥16.9 ships corepack, so prefer `corepack pnpm`
 ///                          to avoid needing a global pnpm install.)
 /// yarn.lock       → yarn  (prefer corepack yarn, fall back to bare yarn)
@@ -440,7 +440,7 @@ static PackageManager detectPackageManager(const std::filesystem::path& dir) {
         std::fprintf(stderr,
             "Warning: pnpm-lock.yaml found but neither corepack nor pnpm is on PATH; "
             "falling back to npm (will fail with EUNSUPPORTEDPROTOCOL if package.json "
-            "uses the catalog: protocol — install pnpm or Node >=16.9 for corepack).\n");
+            "uses the catalog: protocol  -  install pnpm or Node >=16.9 for corepack).\n");
     } else if (fs::exists(dir / "yarn.lock")) {
         if (commandAvailable("corepack")) {
             return {"yarn", "corepack yarn install", "corepack yarn run build"};
@@ -485,7 +485,7 @@ static std::string ensureWebUi(const std::string& uiDir,
     fs::path dir(uiDir);
     fs::path distDir = dir / "dist";
 
-    // Case 1: dist/ already has index.html — already built, just use it.
+    // Case 1: dist/ already has index.html  -  already built, just use it.
     if (isBuiltDist(distDir)) {
         std::printf("%s already built at %s\n", uiName.c_str(),
                     distDir.string().c_str());
@@ -494,7 +494,7 @@ static std::string ensureWebUi(const std::string& uiDir,
     }
 
     // Case 2: directory exists and looks like the source (has package.json)
-    //         but not built yet — ask to build.
+    //         but not built yet  -  ask to build.
     if (fs::exists(dir / "package.json")) {
         auto pm = detectPackageManager(dir);
         std::printf("%s source found at %s but not built.\n\n",
@@ -525,7 +525,7 @@ static std::string ensureWebUi(const std::string& uiDir,
         fs::path subDir = dir / subdirName;
         fs::path subDist = subDir / "dist";
 
-        // Subdirectory already has a built dist — reuse it.
+        // Subdirectory already has a built dist  -  reuse it.
         if (isBuiltDist(subDist)) {
             std::printf("%s already built at %s\n", uiName.c_str(),
                         subDist.string().c_str());
@@ -533,7 +533,7 @@ static std::string ensureWebUi(const std::string& uiDir,
             return subDist.string();
         }
 
-        // Subdirectory exists and looks like the source — build it.
+        // Subdirectory exists and looks like the source  -  build it.
         if (fs::exists(subDir / "package.json")) {
             dir = subDir;
             distDir = subDist;
@@ -558,7 +558,7 @@ static std::string ensureWebUi(const std::string& uiDir,
             return distDir.string();
         }
 
-        // Subdirectory doesn't exist — ask to create it and clone.
+        // Subdirectory doesn't exist  -  ask to create it and clone.
         std::printf("Directory %s already exists but does not contain %s.\n\n",
                     dir.string().c_str(), uiName.c_str());
         std::printf("Create a '%s' subdirectory and clone there?\n",
@@ -899,7 +899,7 @@ int main(int argc, char* argv[]) {
     // Step 4: Set initial printer state
     // ------------------------------------------------------------------
     server.setState(PrinterState::Ready, "Printer is ready");
-    // Axes start unhomed — user must run G28 to home them.
+    // Axes start unhomed  -  user must run G28 to home them.
     // The toolhead is physically at the centre of the bed (150, 150) and
     // 25 mm above the bed (Z=0).  G28 will move from here to the endstops.
     inst.toolheadObject()->setHomedAxes("");
@@ -912,7 +912,7 @@ int main(int argc, char* argv[]) {
     inst.mcuObject()->setFreq(180000000);
 
     // Register power devices for Mainsail display.
-    // No webcam registered — there's no actual camera stream, and a fake URL
+    // No webcam registered  -  there's no actual camera stream, and a fake URL
     // causes "Failed to fetch" errors in the browser.
     server.registerPowerDevice("printer", "on");
     server.registerPowerDevice("lights", "off");
@@ -1125,7 +1125,7 @@ int main(int argc, char* argv[]) {
                         std::min(currentLayer + 1, 100));
 
                     // Check for print completion (sdcard went inactive
-                    // after being active — EOF reached).
+                    // after being active  -  EOF reached).
                     if (!sdcard.isActive()) {
                         printStats->setState("complete");
                         printStats->setProgress(1.0);

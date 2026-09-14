@@ -254,7 +254,7 @@ int main(int argc, char** argv) {
     }
 #endif
 
-    TETHER_LOGI(TAG, "esc211_di_monitor — interface: {}, slave: {}",
+    TETHER_LOGI(TAG, "esc211_di_monitor  -  interface: {}, slave: {}",
                 iface.c_str(), slave_idx);
     Tether::Examples::logMailboxConfig(mbSize, mbAddr, TAG);
 
@@ -308,7 +308,7 @@ int main(int argc, char** argv) {
     }
 
     if (slaves == 0) {
-        TETHER_LOGE(TAG, "No slaves found — check wiring, power, and interface name");
+        TETHER_LOGE(TAG, "No slaves found  -  check wiring, power, and interface name");
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 4;
@@ -410,7 +410,7 @@ int main(int argc, char** argv) {
         return 7;
     }
 
-    // Configure custom TxPDO 0x1A01 (6 entries, 24 B — DO_Command dropped)
+    // Configure custom TxPDO 0x1A01 (6 entries, 24 B  -  DO_Command dropped)
     auto tx_err = sl.configureCustomTxPDO(0x1A01, {
         {&Reg::FSOERx::InputCounter},    // 0x6010, 4 bytes
         {&Reg::FSOERx::SAFE_DI},         // 0x6020, 4 bytes

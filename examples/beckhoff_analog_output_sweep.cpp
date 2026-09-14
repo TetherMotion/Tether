@@ -9,16 +9,16 @@
  * next channel of the flat channel space and wraps after the last.
  *
  * Two display modes:
- *   - interactive TUI (default on a terminal): navigable device tree —
- *     level 1 = coupler(s) (EK1100 ...), level 2 = terminals — with the
+ *   - interactive TUI (default on a terminal): navigable device tree  - 
+ *     level 1 = coupler(s) (EK1100 ...), level 2 = terminals  -  with the
  *     selected node's live outputs in the right pane.  Arrows navigate,
  *     Enter skips to the next channel, space pauses the ramp, q quits.
- *   - --stream: plain stdout — auto-sweeps and prints one state line per
+ *   - --stream: plain stdout  -  auto-sweeps and prints one state line per
  *     channel change (plus periodic progress).  Selected automatically
  *     when the terminal can't do a TUI (non-TTY, TERM=dumb, curses-less
  *     build).
  *
- * CAUTION: this demo drives real outputs — a ±10 V terminal outputs
+ * CAUTION: this demo drives real outputs  -  a ±10 V terminal outputs
  * ±10 V.  Only run with safe loads attached.
  *
  * Usage (Linux, requires root or CAP_NET_RAW):
@@ -125,7 +125,7 @@ static void locateChannel(
 
 #ifdef TETHER_HAS_TERMINAL_UI
 // ---------------------------------------------------------------------------
-// Interactive TUI — device tree left, selected node's live outputs right
+// Interactive TUI  -  device tree left, selected node's live outputs right
 // ---------------------------------------------------------------------------
 
 namespace TUI = Tether::TUI;
@@ -167,7 +167,7 @@ static void runTui(Beckhoff::MultiAnalogOutputTerminal<>& outs,
         for (size_t m = 0; m < outs.moduleCount(); ++m) {
             if (outs.slaveIndex(m) != static_cast<uint16_t>(node.tag)) continue;
             const auto& mod = outs.module(m);
-            mvwprintw(win, row++, 1, "%s — slave %d", mod.deviceName(),
+            mvwprintw(win, row++, 1, "%s  -  slave %d", mod.deviceName(),
                       node.tag);
             ++row;
             mvwprintw(win, row++, 1, "ch   value");
@@ -216,20 +216,20 @@ static void runTui(Beckhoff::MultiAnalogOutputTerminal<>& outs,
             ++row;
             wattron(win, A_DIM);
             mvwprintw(win, row++, 1,
-                      "(not an analog output — not managed by this demo)");
+                      "(not an analog output  -  not managed by this demo)");
             wattroff(win, A_DIM);
         }
     };
 
     TUI::TreeScreen screen(
-        std::string("Beckhoff analog outputs — ") + iface,
+        std::string("Beckhoff analog outputs  -  ") + iface,
         buildDeviceTree(slaves, managed), std::move(hooks));
     screen.run(g_cancel, duration_sec);
 }
 #endif // TETHER_HAS_TERMINAL_UI
 
 // ---------------------------------------------------------------------------
-// Stream mode — auto-sweep, one line per channel change (pipe-friendly)
+// Stream mode  -  auto-sweep, one line per channel change (pipe-friendly)
 // ---------------------------------------------------------------------------
 
 static void runStream(Beckhoff::MultiAnalogOutputTerminal<>& outs,
@@ -314,14 +314,14 @@ int main(int argc, char** argv) {
 #ifdef TETHER_HAS_TERMINAL_UI
     if (interactive && !Tether::TUI::Session::available()) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "no usable terminal — falling back to --stream");
+            TETHER_LOGW(TAG, "no usable terminal  -  falling back to --stream");
         }
         interactive = false;
     }
 #else
     if (interactive) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "built without ncurses — using --stream mode");
+            TETHER_LOGW(TAG, "built without ncurses  -  using --stream mode");
         }
         interactive = false;
     }

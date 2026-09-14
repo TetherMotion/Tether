@@ -1,6 +1,6 @@
 /**
  * @file beckhoff_tui.cpp
- * @brief Beckhoff Device Explorer — unified interactive terminal UI
+ * @brief Beckhoff Device Explorer  -  unified interactive terminal UI
  *
  * Scans the EtherCAT chain once, classifies every Beckhoff terminal by
  * product code against all implemented driver families, brings every
@@ -24,7 +24,7 @@
  *   serial/IO-Link             : 't' transmit test bytes
  *   power meter                : '+'/'-' index selector 0
  *   inputs / analog in / position / oversampling / power : live view
- *   TwinSAFE                   : classified only — needs FSoE config
+ *   TwinSAFE                   : classified only  -  needs FSoE config
  *                                (run ./beckhoff_safety_monitor)
  *
  * Usage (Linux, requires root or CAP_NET_RAW):
@@ -97,7 +97,7 @@ using EtherCAT::DiscoveredSlave;
 static std::atomic<bool> g_cancel{false};
 
 // ============================================================================
-// Device classification — each slave is assigned to exactly one family
+// Device classification  -  each slave is assigned to exactly one family
 // ============================================================================
 
 enum class DeviceFamily : uint8_t {
@@ -113,7 +113,7 @@ struct DeviceFamilyEntry {
     const char*                           example;
 };
 
-// Precedence order — the first registry containing the product code wins.
+// Precedence order  -  the first registry containing the product code wins.
 // More specific/capable families precede generic digital I/O so devices
 // registered in both (e.g. EL2034 outputs + diagnostics, timestamped
 // EL125x inputs) land in CombinedIo.
@@ -170,11 +170,11 @@ static SlaveClass classify(const DiscoveredSlave& s) {
 }
 
 // ============================================================================
-// Drivers — every recognized slave brought to OP in one process
+// Drivers  -  every recognized slave brought to OP in one process
 // ============================================================================
 
 struct Drivers {
-    // Chained families — one shared logical address space each.
+    // Chained families  -  one shared logical address space each.
     std::optional<Beckhoff::MultiInputTerminal<>>         din;
     std::optional<Beckhoff::MultiOutputTerminal<>>        dout;
     std::optional<Beckhoff::MultiCombinedIoTerminal<>>    combo;
@@ -182,7 +182,7 @@ struct Drivers {
     std::optional<Beckhoff::MultiAnalogOutputTerminal<>>  aout;
     std::optional<Beckhoff::MultiPositionInputTerminal<>> pos;
 
-    // Single-terminal families — one driver per slave.
+    // Single-terminal families  -  one driver per slave.
     std::vector<std::unique_ptr<Beckhoff::StepperTerminal>>      steppers;
     std::vector<std::unique_ptr<Beckhoff::CompactDriveTerminal>> drives;
     std::vector<std::unique_ptr<Beckhoff::PwmTerminal>>          pwms;
@@ -294,7 +294,7 @@ static void bringUp(EtherCAT::Master& master,
                   || !drivers.pulses.empty() || !drivers.dcmotors.empty()
                   || !drivers.meters.empty() || !drivers.overs.empty() || !drivers.comms.empty();
     if (!any) {
-        TETHER_LOGW(TAG, "no recognized terminals — tree view only");
+        TETHER_LOGW(TAG, "no recognized terminals  -  tree view only");
         return;
     }
 
@@ -445,10 +445,14 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
         const size_t m = moduleOf(*drivers.dout, slave);
         if (m == SIZE_MAX) break;
         const auto& mod = drivers.dout->module(m);
-        put(w, row, "channels: %zu", mod.bitCount());
-        bitRow(w, row++, "out:", mod.bitCount(),
+        const size_t n = mod.bitCount();
+        put(w, row, "channels: %zu", n);
+        bitRow(w, row++, "out:", n,
                [&](size_t k) { return mod.bit(k); });
-        hint("1-9: toggle ch  a: all on  o: all off");
+        size_t& sel = uiState.sel[slave];
+        if (n > 0) sel = std::min(sel, n - 1);
+        mvwprintw(w, row++, 1, "selected: %zu", sel + 1);
+        hint("1-9: toggle  ,/.: choose  space: toggle  a: all on  o: all off");
         break;
     }
     case DeviceFamily::Combined: {
@@ -456,13 +460,17 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
         const size_t m = moduleOf(*drivers.combo, slave);
         if (m == SIZE_MAX) break;
         const auto& mod = drivers.combo->module(m);
+        const size_t n = mod.outputChannelCount();
         put(w, row, "in: %zu  out: %zu",
-            mod.inputChannelCount(), mod.outputChannelCount());
+            mod.inputChannelCount(), n);
         bitRow(w, row++, "in:", mod.inputChannelCount(),
                [&](size_t k) { return mod.input(k); });
-        bitRow(w, row++, "out:", mod.outputChannelCount(),
+        bitRow(w, row++, "out:", n,
                [&](size_t k) { return mod.output(k); });
-        hint("1-9: toggle out  o: all off");
+        size_t& sel = uiState.sel[slave];
+        if (n > 0) sel = std::min(sel, n - 1);
+        mvwprintw(w, row++, 1, "selected: %zu", sel + 1);
+        hint("1-9: toggle out  ,/.: choose  space: toggle  o: all off");
         break;
     }
     case DeviceFamily::AnalogIn: {
@@ -692,6 +700,20 @@ static bool handleKey(int key, uint16_t slave, DeviceFamily family,
         if (m == SIZE_MAX) return false;
         const size_t base = drivers.dout->bitOffset(m);
         const size_t n    = drivers.dout->module(m).bitCount();
+        if (n == 0) return false;
+        size_t& sel = uiState.sel[slave];
+        if (sel >= n) sel = 0;
+        if (key == ',' || key == '[') {
+            if (sel > 0) --sel; return true;
+        }
+        if (key == '.' || key == ']') {
+            if (sel + 1 < n) ++sel; return true;
+        }
+        if (key == ' ' || key == 't' || key == 'T') {
+            const size_t ch = base + sel;
+            drivers.dout->setBit(ch, !drivers.dout->bit(ch));
+            return true;
+        }
         if (key >= '1' && key <= '9' && size_t(key - '1') < n) {
             const size_t ch = base + size_t(key - '1');
             drivers.dout->setBit(ch, !drivers.dout->bit(ch));
@@ -707,6 +729,20 @@ static bool handleKey(int key, uint16_t slave, DeviceFamily family,
         if (m == SIZE_MAX) return false;
         const size_t base = drivers.combo->outputOffset(m);
         const size_t n    = drivers.combo->module(m).outputChannelCount();
+        if (n == 0) return false;
+        size_t& sel = uiState.sel[slave];
+        if (sel >= n) sel = 0;
+        if (key == ',' || key == '[') {
+            if (sel > 0) --sel; return true;
+        }
+        if (key == '.' || key == ']') {
+            if (sel + 1 < n) ++sel; return true;
+        }
+        if (key == ' ' || key == 't' || key == 'T') {
+            const size_t ch = base + sel;
+            drivers.combo->setOutput(ch, !drivers.combo->output(ch));
+            return true;
+        }
         if (key >= '1' && key <= '9' && size_t(key - '1') < n) {
             const size_t ch = base + size_t(key - '1');
             drivers.combo->setOutput(ch, !drivers.combo->output(ch));
@@ -967,7 +1003,7 @@ static void runTui(std::span<const DiscoveredSlave> slaves,
             ++row;
             wattron(win, A_DIM);
             if (isCouplerDevice(*s))
-                mvwprintw(win, row++, 1, "(coupler — %zu terminal(s))",
+                mvwprintw(win, row++, 1, "(coupler  -  %zu terminal(s))",
                           node.children.size());
             else
                 mvwprintw(win, row++, 1,
@@ -985,11 +1021,11 @@ static void runTui(std::span<const DiscoveredSlave> slaves,
         return handleKey(key, it->first, it->second.family, drivers, uiState);
     };
 
-    // The tree is built from the ALREADY-discovered slave list — no
+    // The tree is built from the ALREADY-discovered slave list  -  no
     // second bus scan here (a full DiscoveryOption::All re-read of every
     // slave's SII EEPROM takes seconds and previously looked like a hang).
     TUI::TreeScreen screen(
-        std::string("Beckhoff Device Explorer — ") + iface,
+        std::string("Beckhoff Device Explorer  -  ") + iface,
         buildDeviceTree(slaves, managed), std::move(hooks));
     screenPtr = &screen;
     screen.run(g_cancel, duration_sec);
@@ -1044,13 +1080,13 @@ int main(int argc, char** argv) {
 #ifdef TETHER_HAS_TERMINAL_UI
     if (interactive && !Tether::TUI::Session::available()) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "no usable terminal — TUI unavailable");
+            TETHER_LOGW(TAG, "no usable terminal  -  TUI unavailable");
         }
         interactive = false;
     }
 #else
     if (program.get<bool>("--interactive")) {
-        TETHER_LOGW(TAG, "built without ncurses — TUI unavailable");
+        TETHER_LOGW(TAG, "built without ncurses  -  TUI unavailable");
     }
     interactive = false;
 #endif

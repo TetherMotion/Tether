@@ -96,7 +96,7 @@ int main(int argc, char** argv) {
     }
 #endif
 
-    TETHER_LOGI(TAG, "slave_read_identity — interface: {}, target slave: {}",
+    TETHER_LOGI(TAG, "slave_read_identity  -  interface: {}, target slave: {}",
                 iface.c_str(), slave_idx);
     if (!use_esi) {
         Tether::Examples::logMailboxConfig(mbSize, mbAddr, TAG);
@@ -206,7 +206,7 @@ int main(int argc, char** argv) {
             default: label = "Reserved";         break;
         }
 
-        std::cout << "Subindex " << static_cast<int>(sub) << " — " << label << ":\n";
+        std::cout << "Subindex " << static_cast<int>(sub) << "  -  " << label << ":\n";
         std::cout << "  Decimal: " << value << "\n";
         std::cout << "  Hex:     0x" << std::hex << std::setw(8) << std::setfill('0')
                   << value << std::dec << "\n\n";

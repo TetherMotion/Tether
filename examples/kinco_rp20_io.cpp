@@ -701,7 +701,7 @@ static void runInteractiveUI(EtherCAT::Master& master,
 
     while (g_running.load()) {
         if (!pdo_ok.load()) {
-            // Keep trying — the RT loop keeps exchanging
+            // Keep trying  -  the RT loop keeps exchanging
         }
 
         uint64_t cyc = cycle_count.load();
@@ -710,7 +710,7 @@ static void runInteractiveUI(EtherCAT::Master& master,
 
         // Header
         attron(COLOR_PAIR(4) | A_BOLD);
-        mvprintw(0, 0, "Kinco RP20 Interactive I/O  —  Cycle %llu  (%zu outputs)",
+        mvprintw(0, 0, "Kinco RP20 Interactive I/O   -   Cycle %llu  (%zu outputs)",
                  static_cast<unsigned long long>(cyc), output_bits.size());
         attroff(COLOR_PAIR(4) | A_BOLD);
         mvprintw(1, 0, "UP/DOWN: select  SPACE: toggle  a: all on  n: all off  q: quit");
@@ -884,7 +884,7 @@ static void printModuleIO(DiscoveredModule& mod, uint64_t cycle,
         switch (desc->type) {
             case RP20Mod::ModuleType::DI_16:
             case RP20Mod::ModuleType::Multi_DIO_8: {
-                // Digital inputs — print as hex
+                // Digital inputs  -  print as hex
                 std::cout << "DI:";
                 for (size_t i = 0; i < desc->txpdo->field_count; ++i) {
                     const auto* f = RP20Mod::getFieldByChannel(*desc->txpdo, i);
@@ -898,7 +898,7 @@ static void printModuleIO(DiscoveredModule& mod, uint64_t cycle,
                 break;
             }
             case RP20Mod::ModuleType::TC_4: {
-                // Thermocouple inputs — value / 10 = °C
+                // Thermocouple inputs  -  value / 10 = °C
                 auto tc_label = formatTcConfigLabel(mod_config);
                 std::cout << tc_label << " TC:";
                 for (size_t i = 0; i < desc->txpdo->field_count; ++i) {
@@ -942,7 +942,7 @@ static void printModuleIO(DiscoveredModule& mod, uint64_t cycle,
             case RP20Mod::ModuleType::DO_16_NPN:
             case RP20Mod::ModuleType::Multi_DIO_8:
             case RP20Mod::ModuleType::DR_8: {
-                // Digital/relay outputs — display current state (no toggling)
+                // Digital/relay outputs  -  display current state (no toggling)
                 std::cout << " DO:";
                 for (size_t i = 0; i < desc->rxpdo->field_count; ++i) {
                     const auto* f = RP20Mod::getFieldByChannel(*desc->rxpdo, i);
@@ -957,7 +957,7 @@ static void printModuleIO(DiscoveredModule& mod, uint64_t cycle,
             }
             case RP20Mod::ModuleType::AO_4:
             case RP20Mod::ModuleType::Mixed_AIO: {
-                // Analog outputs — display current state (no sine wave)
+                // Analog outputs  -  display current state (no sine wave)
                 std::cout << " AO:";
                 for (size_t i = 0; i < desc->rxpdo->field_count; ++i) {
                     const auto* f = RP20Mod::getFieldByChannel(*desc->rxpdo, i);
@@ -1073,7 +1073,7 @@ int main(int argc, char** argv) {
     }
 #endif
 
-    TETHER_LOGI(TAG, "kinco_rp20_io — interface: {}, duration: {:.1f} s",
+    TETHER_LOGI(TAG, "kinco_rp20_io  -  interface: {}, duration: {:.1f} s",
                 iface.c_str(), duration_sec);
     Tether::Examples::logVlanConfig(vlan, TAG);
     Tether::Examples::logMailboxConfig(mbSize, mbAddr, TAG);
@@ -1274,7 +1274,7 @@ int main(int argc, char** argv) {
         TETHER_LOGI(TAG, "{}: in OP", master.slaveLogPrefix(s).c_str());
     }
 
-    TETHER_LOGI(TAG, "All slaves in OP — starting cyclic I/O");
+    TETHER_LOGI(TAG, "All slaves in OP  -  starting cyclic I/O");
 
 #ifdef HAVE_NCURSES
     if (interactive) {

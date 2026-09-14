@@ -178,7 +178,7 @@ int main(int argc, char** argv) {
 
     program.add_argument("--exact-stop")
         .flag()
-        .help("G61 exact stop mode — no corner blending");
+        .help("G61 exact stop mode  -  no corner blending");
 
     try {
         program.parse_args(argc, argv);
@@ -241,7 +241,7 @@ int main(int argc, char** argv) {
     std::vector<tether::motion::NurbsCurve> plannedPieces;
 
     if (exactStop) {
-        // No blending — use the raw pieces directly
+        // No blending  -  use the raw pieces directly
         for (std::size_t i = 0; i < nurbsResult.path.numPieces(); ++i) {
             plannedPieces.push_back(nurbsResult.path.piece(i));
         }

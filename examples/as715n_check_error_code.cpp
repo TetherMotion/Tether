@@ -1,6 +1,6 @@
 /**
  * @file as715n_check_error_code.cpp
- * @brief AS715N — Read & optionally reset manufacturer / CiA402 error codes
+ * @brief AS715N  -  Read & optionally reset manufacturer / CiA402 error codes
  *
  * Usage (host build):
  *   ./as715n_check_error_code -i eth0                    # just print codes
@@ -125,7 +125,7 @@ static int inspectAndMaybeReset(EtherCAT::Master& master, bool do_reset, bool do
     if (do_reset) {
         auto cw_result = sdo.readU16(0x6040, 0x00, {.timeout_ms = 3000});
         if (!cw_result.has_value()) {
-            TETHER_LOGE(TAG, "{}: failed to read Controlword (0x6040) — cannot proceed with -r reset", master.slaveLogPrefix(slave_idx).c_str());
+            TETHER_LOGE(TAG, "{}: failed to read Controlword (0x6040)  -  cannot proceed with -r reset", master.slaveLogPrefix(slave_idx).c_str());
             return 3;
         }
         uint16_t cw = cw_result.value();
@@ -150,12 +150,12 @@ static int inspectAndMaybeReset(EtherCAT::Master& master, bool do_reset, bool do
 
     bool reset_ok = false;
     if (err.isDCSyncError()) {
-        // Use specialized handler for DC sync errors — usually successful
-        TETHER_LOGI(TAG, "Detected DC-sync error ({}) — using handleNoSyncError()",
+        // Use specialized handler for DC sync errors  -  usually successful
+        TETHER_LOGI(TAG, "Detected DC-sync error ({})  -  using handleNoSyncError()",
                     err.name);
         reset_ok = AS715NFaultHandler::handleNoSyncError(sdo, slave_idx, 3);
     } else if (!err.is_recoverable) {
-        TETHER_LOGW(TAG, "Error is marked NOT recoverable by device — will not attempt control-word reset");
+        TETHER_LOGW(TAG, "Error is marked NOT recoverable by device  -  will not attempt control-word reset");
         reset_ok = false;
     } else {
         // Generic reset: use the published `FaultReset` register entry (0x2031:01)

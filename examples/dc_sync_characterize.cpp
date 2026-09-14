@@ -69,7 +69,7 @@ static constexpr uint16_t REG_DC_CYCLE1       = EtherCAT::toUInt16(EtherCAT::DCR
 static constexpr uint16_t REG_DC_START0       = EtherCAT::toUInt16(EtherCAT::DCRegisters::DCStart0);   // 0x0990
 
 // ---------------------------------------------------------------------------
-// Helpers — direct ESC register access via position-addressed datagrams
+// Helpers  -  direct ESC register access via position-addressed datagrams
 // ---------------------------------------------------------------------------
 
 /// Read a 1-byte ESC register from a slave by position.
@@ -297,7 +297,7 @@ int main(int argc, char** argv) {
     if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
     auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
 
-    TETHER_LOGI(TAG, "dc_sync_characterize — interface: {}, slave: {}", iface.c_str(), slave_idx);
+    TETHER_LOGI(TAG, "dc_sync_characterize  -  interface: {}, slave: {}", iface.c_str(), slave_idx);
     TETHER_LOGI(TAG, "Sweep: start={} ns, stop={} ns, steps={}, dwell={} ms",
                 start_ns, stop_ns, steps, dwell_ms);
 
@@ -381,7 +381,7 @@ int main(int argc, char** argv) {
                     sii_sync0 ? "advertised" : "no",
                     sii_sync1 ? "advertised" : "no");
     } else {
-        TETHER_LOGW(TAG, "SII read failed — SYNC0/SYNC1 support will be probed directly");
+        TETHER_LOGW(TAG, "SII read failed  -  SYNC0/SYNC1 support will be probed directly");
     }
 
     // Read ESC Features register (0x0008) to check DC capability
@@ -403,7 +403,7 @@ int main(int argc, char** argv) {
         TETHER_LOGW(TAG, "Slave {} does not advertise DC hardware support "
                          "(ESC Features DC bit = 0). SYNC0/SYNC1 unavailable.",
                     slave_idx);
-        // Still continue to probe — some slaves have the bit cleared but
+        // Still continue to probe  -  some slaves have the bit cleared but
         // still accept sync register writes.
     }
 
@@ -411,7 +411,7 @@ int main(int argc, char** argv) {
     TETHER_LOGI(TAG, "Configuring PDO sync managers from SII ...");
     auto pdo_err = sl.configurePDOSyncManagers();
     if (pdo_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "PDO sync-manager configuration from SII failed: {} — "
+        TETHER_LOGE(TAG, "PDO sync-manager configuration from SII failed: {}  -  "
                          "cannot proceed to SAFE-OP.",
                     EtherCAT::slaveErrorToString(pdo_err));
         master.stop();
@@ -454,14 +454,14 @@ int main(int argc, char** argv) {
     // Verify the DC realtime loop is actually running
     auto dc_state = master.dc().getState();
     if (dc_state != EtherCAT::DC::DCState::Running) {
-        TETHER_LOGE(TAG, "DC realtime loop is not running (state={}) — aborting",
+        TETHER_LOGE(TAG, "DC realtime loop is not running (state={})  -  aborting",
                     EtherCAT::DC::dc_state_name(dc_state));
         master.dc().stop();
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 10;
     }
-    TETHER_LOGI(TAG, "DC realtime loop RUNNING — 1 ms cycle (1 kHz), sync frames active");
+    TETHER_LOGI(TAG, "DC realtime loop RUNNING  -  1 ms cycle (1 kHz), sync frames active");
 
     // ---- Transition to SAFE-OP ----
     auto safe_err = sl.transitionToSafeOp();
@@ -494,7 +494,7 @@ int main(int argc, char** argv) {
                 EtherCAT::getALStatusCodeName(baseline.al_status_code));
 
     if (alHasError(baseline)) {
-        TETHER_LOGE(TAG, "Slave already in error state before SYNC probing — aborting");
+        TETHER_LOGE(TAG, "Slave already in error state before SYNC probing  -  aborting");
         master.dc().stop();
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
@@ -575,7 +575,7 @@ int main(int argc, char** argv) {
     TETHER_LOGI(TAG, "=== Phase 3: Sweep SYNC0 cycle times ===");
 
     if (!sync0_supported) {
-        TETHER_LOGW(TAG, "SYNC0 not supported — skipping cycle-time sweep.");
+        TETHER_LOGW(TAG, "SYNC0 not supported  -  skipping cycle-time sweep.");
     }
 
     const auto sweep = generateSweep(start_ns, stop_ns, steps);
@@ -627,7 +627,7 @@ int main(int argc, char** argv) {
             TETHER_LOGW(TAG, "  {:7} ns: AL_STATUS read FAILED", cycle_ns);
             r.error = true;
             results.push_back(r);
-            // Treat read failure as a hard error — stop the sweep
+            // Treat read failure as a hard error  -  stop the sweep
             hit_error = true;
             first_error_ns = cycle_ns;
             first_error_code = 0xFFFF;

@@ -6,27 +6,27 @@
  * MultiOutputTerminal driver, brings all of them to OP, and lights exactly
  * one output at a time across the combined channel space (the module at
  * the lowest bus position occupies bits [0, w0), the next one
- * [w0, w0+w1), ... where wN is that terminal's channel count — 2 for
+ * [w0, w0+w1), ... where wN is that terminal's channel count  -  2 for
  * EL2002, 4 for EL2004, 8 for EL2008).  Advancing steps the lit output;
  * after the last channel of the last terminal it wraps to the first.
  *
  * Detected by this example (the "EL200x" series, x = channel count):
  *   EL2002 (2ch, 24V/0.5A), EL2004 (4ch), EL2008 (8ch).
  *   Verified on hardware: EL2004.  EL2002/EL2008 share the identical ESI
- *   shape — supported, not verified yet.
+ *   shape  -  supported, not verified yet.
  *
  * The same OutputTerminal driver also supports every other terminal in
- * Devices::kOutputTerminals — all verified against the ESI to share the
+ * Devices::kOutputTerminals  -  all verified against the ESI to share the
  * EL2004's shape (single "Outputs" SM + FMMU, N x 1-bit RxPDOs, no
  * mailbox), none verified on hardware yet.  Swap kEl200x for
  * Devices::kOutputTerminals in detect() to accept them all.
  *
  * Two display modes:
- *   - interactive TUI (default on a terminal): navigable device tree —
- *     level 1 = coupler(s) (EK1100 ...), level 2 = terminals — with the
+ *   - interactive TUI (default on a terminal): navigable device tree  - 
+ *     level 1 = coupler(s) (EK1100 ...), level 2 = terminals  -  with the
  *     selected node's live outputs in the right pane.  Arrows navigate,
  *     Enter steps the lit output, q quits.
- *   - --stream: plain stdout — auto-steps the lit output every 500 ms and
+ *   - --stream: plain stdout  -  auto-steps the lit output every 500 ms and
  *     prints one state line per step.  Selected automatically when the
  *     terminal can't do a TUI (non-TTY, TERM=dumb, curses-less build).
  *
@@ -72,7 +72,7 @@ static const char* TAG = "beckhoff_output_toggle";
 
 namespace Beckhoff = EtherCAT::Beckhoff;
 
-/// The "EL200x" detection set — x = channel count.
+/// The "EL200x" detection set  -  x = channel count.
 constexpr Beckhoff::DeviceIdentity kEl200x[] = {
     Beckhoff::Devices::EL2002,
     Beckhoff::Devices::EL2004,
@@ -107,7 +107,7 @@ static void locateBit(const Beckhoff::MultiOutputTerminal<>& outs,
 
 #ifdef TETHER_HAS_TERMINAL_UI
 // ---------------------------------------------------------------------------
-// Interactive TUI — device tree left, selected node's live outputs right
+// Interactive TUI  -  device tree left, selected node's live outputs right
 // ---------------------------------------------------------------------------
 
 namespace TUI = Tether::TUI;
@@ -142,7 +142,7 @@ static void runTui(Beckhoff::MultiOutputTerminal<>& outs,
         for (size_t m = 0; m < outs.moduleCount(); ++m) {
             if (outs.slaveIndex(m) != static_cast<uint16_t>(node.tag)) continue;
             const auto& mod = outs.module(m);
-            mvwprintw(win, row++, 1, "%s — slave %d", mod.deviceName(),
+            mvwprintw(win, row++, 1, "%s  -  slave %d", mod.deviceName(),
                       node.tag);
             ++row;
             mvwprintw(win, row++, 1, "channel :");
@@ -189,20 +189,20 @@ static void runTui(Beckhoff::MultiOutputTerminal<>& outs,
             ++row;
             wattron(win, A_DIM);
             mvwprintw(win, row++, 1,
-                      "(not an EL200x — not managed by this demo)");
+                      "(not an EL200x  -  not managed by this demo)");
             wattroff(win, A_DIM);
         }
     };
 
     TUI::TreeScreen screen(
-        std::string("Beckhoff output terminals — ") + iface,
+        std::string("Beckhoff output terminals  -  ") + iface,
         buildDeviceTree(slaves, managed), std::move(hooks));
     screen.run(g_cancel, duration_sec);
 }
 #endif // TETHER_HAS_TERMINAL_UI
 
 // ---------------------------------------------------------------------------
-// Stream mode — auto-step the lit output, one line per step (pipe-friendly)
+// Stream mode  -  auto-step the lit output, one line per step (pipe-friendly)
 // ---------------------------------------------------------------------------
 
 static void runStream(Beckhoff::MultiOutputTerminal<>& outs,
@@ -286,14 +286,14 @@ int main(int argc, char** argv) {
 #ifdef TETHER_HAS_TERMINAL_UI
     if (interactive && !Tether::TUI::Session::available()) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "no usable terminal — falling back to --stream");
+            TETHER_LOGW(TAG, "no usable terminal  -  falling back to --stream");
         }
         interactive = false;
     }
 #else
     if (interactive) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "built without ncurses — using --stream mode");
+            TETHER_LOGW(TAG, "built without ncurses  -  using --stream mode");
         }
         interactive = false;
     }

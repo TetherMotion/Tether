@@ -1,10 +1,10 @@
 /**
  * @file synapticon_fsoe_only.cpp
- * @brief Synapticon SOMANET drive — FSoE-only PDO mapping example
+ * @brief Synapticon SOMANET drive  -  FSoE-only PDO mapping example
  *
  * Maps ONLY the FSoE safety PDOs (RxPDO 0x1700 / TxPDO 0x1B00) using the
  * multi-PDO-per-sync-manager API (Slave::configureMultiPDOs).  No CiA 402
- * process data PDOs (0x1600/0x1A00 etc.) are mapped — this example
+ * process data PDOs (0x1600/0x1A00 etc.) are mapped  -  this example
  * establishes the FSoE safety communication channel exclusively.
  *
  * PDO layout (from SOMANET_CiA_402_v5.1.9.xml ESI):
@@ -57,7 +57,7 @@ namespace {
 constexpr const char* TAG = "synapticon_fsoe_only";
 
 // ============================================================================
-// Mailbox settings — from SOMANET_CiA_402_v5.1.9.xml (ESI)
+// Mailbox settings  -  from SOMANET_CiA_402_v5.1.9.xml (ESI)
 // ============================================================================
 constexpr uint16_t kMailboxWriteAddr = EtherCAT::Drives::Synapticon::kMailboxWriteAddr;
 constexpr uint16_t kMailboxWriteSize = EtherCAT::Drives::Synapticon::kMailboxWriteSize;
@@ -66,7 +66,7 @@ constexpr uint16_t kMailboxReadSize  = EtherCAT::Drives::Synapticon::kMailboxRea
 constexpr uint16_t kMailboxProtocols = EtherCAT::Drives::Synapticon::kMailboxProtocols;
 constexpr uint32_t kSdoTimeoutMs     = EtherCAT::Drives::Synapticon::kSdoTimeoutMs;
 
-// FSoE PDO types — only safety PDOs, no CiA 402 process data
+// FSoE PDO types  -  only safety PDOs, no CiA 402 process data
 using FSoERxPDO = EtherCAT::Drives::SynapticonPDO::SOMANET_RxPDO_1700;
 using FSoETxPDO = EtherCAT::Drives::SynapticonPDO::SOMANET_TxPDO_1B00;
 
@@ -157,7 +157,7 @@ private:
 };
 
 // ============================================================================
-// FSoE cyclic exchange task — real PDO communication via 0x1700/0x1B00
+// FSoE cyclic exchange task  -  real PDO communication via 0x1700/0x1B00
 // ============================================================================
 //
 // This task runs the FSoE protocol exchange each cycle using the actual
@@ -167,7 +167,7 @@ private:
 // firmware handles the slave side of the FSoE state machine.
 //
 // On exchange failure the task logs a warning but does NOT stop the process
-// — this allows the operator to see the FSoE state machine diagnostics even
+//  -  this allows the operator to see the FSoE state machine diagnostics even
 // when the drive is in safe state or not yet responding correctly.
 
 class FSoEPDOExchangeTask final : public EtherCAT::DS402Master::ICyclicTask {
@@ -193,7 +193,7 @@ public:
 
         auto* drive = master.driveBySlaveIndex(slave_index_);
         if (drive == nullptr) {
-            TETHER_LOGW(TAG, "Drive {} not found — skipping FSoE exchange",
+            TETHER_LOGW(TAG, "Drive {} not found  -  skipping FSoE exchange",
                         slave_index_);
             return true;  // don't stop the process
         }
@@ -389,7 +389,7 @@ int main(int argc, char** argv) {
     Tether::Platform::ensureRealtimeKernelOrExit();
 
     TETHER_LOGI(TAG,
-        "synapticon_fsoe_only — interface={} slave={} duration={:.1f} "
+        "synapticon_fsoe_only  -  interface={} slave={} duration={:.1f} "
         "dc_sync={} conn_id=0x{:04X} watchdog={} ms debug='{}'",
         args.interface.c_str(), slave_idx, args.duration,
         args.enable_dc_sync ? "on" : "off",
@@ -446,7 +446,7 @@ int main(int argc, char** argv) {
     // Object 0x2611 reports the state of the safety module: 0 = safe state
     // (safety function active, torque inhibited), 1 = not safe state (motion
     // allowed).  We log this for diagnostics but do NOT abort if the drive
-    // is in safe state — the FSoE connection itself will bring the drive out
+    // is in safe state  -  the FSoE connection itself will bring the drive out
     // of safe state once the safety protocol reaches the Data state.
     {
         auto& slave = master.ethercatMaster().slave(slave_idx);
@@ -465,7 +465,7 @@ int main(int argc, char** argv) {
 
         if (!safety.ok) {
             TETHER_LOGW(TAG,
-                "Failed to read safety module diagnostics (0x2611) via SDO — "
+                "Failed to read safety module diagnostics (0x2611) via SDO  -  "
                 "continuing anyway (FSoE will attempt to establish connection)");
         }
 
@@ -478,7 +478,7 @@ int main(int argc, char** argv) {
         // if (safety.isInSafeState()) {
         //     TETHER_LOGE(TAG,
         //         "Drive is in SAFE STATE (safety function active, motion "
-        //         "inhibited) — FSoE is {} (0x2620:2={}) — refusing to "
+        //         "inhibited)  -  FSoE is {} (0x2620:2={})  -  refusing to "
         //         "activate drive, triggering shutdown",
         //         safety.fsoeStateSummary(),
         //         static_cast<unsigned>(safety.safe_fieldbus));
@@ -502,7 +502,7 @@ int main(int argc, char** argv) {
                 slave, drive_safety_address);
         if (addr_err == EtherCAT::SlaveError::Ok) {
             TETHER_LOGI(TAG,
-                "FSoE safety address (0xF980:1): 0x{:04X} — using as "
+                "FSoE safety address (0xF980:1): 0x{:04X}  -  using as "
                 "connection ID (overrides --connection-id=0x{:04X})",
                 drive_safety_address,
                 args.connection_id);
@@ -510,7 +510,7 @@ int main(int argc, char** argv) {
         } else {
             TETHER_LOGW(TAG,
                 "Failed to read FSoE safety address (0xF980:1) via SDO "
-                "(err={}) — falling back to --connection-id=0x{:04X}",
+                "(err={})  -  falling back to --connection-id=0x{:04X}",
                 static_cast<unsigned>(addr_err),
                 args.connection_id);
         }
@@ -518,11 +518,11 @@ int main(int argc, char** argv) {
 
     // --- Configure FSoE-only PDO mapping and transition to OP ---
     //
-    // Only FSoE safety PDOs are mapped — no CiA 402 process data PDOs.
+    // Only FSoE safety PDOs are mapped  -  no CiA 402 process data PDOs.
     // This uses CiA402Drive::transitionToOp(const Slave::MultiPDOAssignment&)
     // which internally:
     //   1. Ensures PRE_OP (skips if already there)
-    //   2. Calls Slave::configureMultiPDOs() — writes SM registers, PDO
+    //   2. Calls Slave::configureMultiPDOs()  -  writes SM registers, PDO
     //      assignments (0x1C12/0x1C13), and FMMU configuration
     //   3. Sets drive PDO buffer sizes from the assignment's total Rx/Tx sizes
     //   4. Registers PDO buffers with the process data transport
@@ -559,14 +559,14 @@ int main(int argc, char** argv) {
         TETHER_LOGI(TAG, "Slave {} transitioned to OP with FSoE-only PDOs", slave_idx);
     }
 
-    // --- Set up FSoE safe-motion (master side only — no emulator) ---
+    // --- Set up FSoE safe-motion (master side only  -  no emulator) ---
     std::unique_ptr<FSoEMain> fsoe_main;
 
     // Parse --debug flags:
-    //   fsoe        — high-level protocol trace
-    //   fsoe-frame  — decode device-specific FSoE PDO structs into named fields
-    //   fsoe-raw    — protocol trace + raw frame hex dumps
-    //   fsoe-master — deprecated alias for fsoe-raw
+    //   fsoe         -  high-level protocol trace
+    //   fsoe-frame   -  decode device-specific FSoE PDO structs into named fields
+    //   fsoe-raw     -  protocol trace + raw frame hex dumps
+    //   fsoe-master  -  deprecated alias for fsoe-raw
     const bool debug_fsoe = (args.debug.find("fsoe") != std::string::npos);
     const bool debug_fsoe_frame =
         (args.debug.find("fsoe-frame") != std::string::npos);
