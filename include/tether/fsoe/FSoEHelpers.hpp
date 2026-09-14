@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <string>
 
 #include "tether/fsoe/FSoEDefs.hpp"
 
@@ -16,6 +17,19 @@ inline const char* fsoeCommandName(uint8_t cmd) {
         case FSoE::Command::Connection:    return "Connection(0x64)";
         case FSoE::Command::Parameter:     return "Parameter(0x52)";
         case FSoE::Command::FailSafeData:  return "FailSafeData(0x08)";
+        default:                            return "Unknown";
+    }
+}
+
+/// Decode the FSoE command byte to a plain name (no hex suffix).
+inline const char* fsoeCommandShortName(uint8_t cmd) {
+    switch (cmd) {
+        case FSoE::Command::ProcessData:   return "ProcessData";
+        case FSoE::Command::Reset:         return "Reset";
+        case FSoE::Command::Session:       return "Session";
+        case FSoE::Command::Connection:    return "Connection";
+        case FSoE::Command::Parameter:     return "Parameter";
+        case FSoE::Command::FailSafeData:  return "FailSafeData";
         default:                            return "Unknown";
     }
 }
@@ -79,6 +93,39 @@ inline const char* fsoeResetErrorCodeName(uint8_t code) {
             if (code >= 0x80) return "InvalidSafePara (device-specific)";
             return "Unknown";
     }
+}
+
+/// Decode the FSoE Reset PDU error code to a plain short name
+/// (no parenthetical ETG.5100 code suffix).
+inline const char* fsoeResetReasonName(uint8_t code) {
+    switch (code) {
+        case FSoE::ResetErrorCode::None:               return "None";
+        case FSoE::ResetErrorCode::InvalidCommand:     return "InvalidCommand";
+        case FSoE::ResetErrorCode::UnknownCommand:     return "UnknownCommand";
+        case FSoE::ResetErrorCode::InvalidConnID:      return "InvalidConnID";
+        case FSoE::ResetErrorCode::InvalidCRC:         return "InvalidCRC";
+        case FSoE::ResetErrorCode::WatchdogExpired:    return "WatchdogExpired";
+        case FSoE::ResetErrorCode::InvalidAddress:     return "InvalidAddress";
+        case FSoE::ResetErrorCode::InvalidData:        return "InvalidData";
+        case FSoE::ResetErrorCode::InvalidCommParaLen: return "InvalidCommParaLen";
+        case FSoE::ResetErrorCode::InvalidCommPara:    return "InvalidCommPara";
+        case FSoE::ResetErrorCode::InvalidUserParaLen: return "InvalidUserParaLen";
+        case FSoE::ResetErrorCode::InvalidUserPara:    return "InvalidUserPara";
+        default:                                       return "Reserved";
+    }
+}
+
+/// Compact per-frame tag for stream lines: "cmd=<name>", plus
+/// " reason=<name>" when the frame is a Reset command.
+/// @param frame  Raw FSoE frame (byte 0 = command, byte 1 = reset reason).
+inline std::string fsoeCommandTag(const uint8_t* frame) {
+    std::string s = "cmd=";
+    s += fsoeCommandShortName(frame[0]);
+    if (frame[0] == FSoE::Command::Reset) {
+        s += " reason=";
+        s += fsoeResetReasonName(frame[1]);
+    }
+    return s;
 }
 
 // ============================================================================
