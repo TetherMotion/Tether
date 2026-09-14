@@ -243,13 +243,47 @@ add_tether_example(beckhoff_pwm_sweep
 add_tether_example(beckhoff_pulse_jog
     LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
 
+# --- Beckhoff combined I/O toggle demo ---
+# Auto-detects all packed-bit combined I/O devices (EL1852/EL1859,
+# EP23xx, EL922x, EL203x w/ diagnostics, EK18xx couplers, ...) via the
+# MultiCombinedIoTerminal driver and walks one lit output across the
+# flat channel space — same device-tree TUI as the digital demos.
+add_tether_example(beckhoff_combined_io_toggle
+    LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# --- Beckhoff DC-motor jog demo ---
+# Finds the first MOT-interface DC-motor terminal (EL7332/EL7342 +
+# EJ/EP/ER/EPP variants), enables the power stages and jogs back and
+# forth with a velocity setpoint.
+add_tether_example(beckhoff_dcmotor_jog
+    LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# --- Beckhoff power-measurement monitor ---
+# Finds the first EL34xx terminal and prints per-phase V/I/P/S/Q/PF
+# once per second.
+add_tether_example(beckhoff_power_meter
+    LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# --- Beckhoff serial/comm FIFO demo ---
+# Finds the first EL6xxx byte-FIFO terminal (RS232/485, IO-Link, ...)
+# and dumps the ctrl/status words + RX image while writing a rolling
+# pattern into TX.
+add_tether_example(beckhoff_serial_bridge
+    LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# --- Beckhoff oversampling monitor ---
+# Finds the first EL37xx/ELM3xxx oversampling terminal and summarizes
+# each channel's per-cycle sample block once per second.
+add_tether_example(beckhoff_oversampling_monitor
+    LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
 # All Beckhoff examples get the interactive TUI when tether_terminal_ui exists.
 if(TARGET tether_terminal_ui)
     foreach(_tui_ex beckhoff_output_toggle beckhoff_input_monitor
                     beckhoff_analog_input_monitor beckhoff_analog_output_sweep
                     beckhoff_position_monitor beckhoff_stepper_jog
                     beckhoff_drive_move beckhoff_pwm_sweep
-                    beckhoff_pulse_jog)
+                    beckhoff_pulse_jog beckhoff_combined_io_toggle)
         target_link_libraries(${_tui_ex} PRIVATE tether_terminal_ui ${CURSES_LIBRARIES})
         target_include_directories(${_tui_ex} PRIVATE ${CURSES_INCLUDE_DIRS})
     endforeach()

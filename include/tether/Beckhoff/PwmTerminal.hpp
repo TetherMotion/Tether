@@ -58,7 +58,7 @@ inline constexpr DeviceIdentity EL2564{0x00000002, 0x0A043052, 4, "EL2564"};
 // EJ/EP variants — same PWM electronics.
 inline constexpr DeviceIdentity EJ2502{0x00000002, 0x09C62852, 2, "EJ2502"};
 inline constexpr DeviceIdentity EJ2564{0x00000002, 0x0A042852, 4, "EJ2564"};
-inline constexpr DeviceIdentity EP2534{0x00000002, 0x09E64052, 2, "EP2534"};
+inline constexpr DeviceIdentity EP2534{0x00000002, 0x09E64052, 4, "EP2534"};
 
 /// Every known PWM output terminal.
 inline constexpr std::array kPwmTerminals{

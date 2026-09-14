@@ -158,7 +158,14 @@ inline constexpr DeviceIdentity EL3621{0x00000002, 0x0E253052, 1, "EL3621"};
 inline constexpr DeviceIdentity EL3681{0x00000002, 0x0E613052, 1, "EL3681"};
 inline constexpr DeviceIdentity EL3692{0x00000002, 0x0E6C3052, 2, "EL3692"};
 
-// -- EL37xx — multi-function measurement ----------------------------------------
+// -- EL36xx/EL37xx — high-resolution / timestamped analog inputs ------------------
+// EL3632 is the IEPE/vibration terminal; EL3702/EL3742 are the
+// DC-timestamped 2-channel inputs (value + cycle-count entries per
+// channel — channel 1 = measurement, extra values stay reachable via
+// value(ch,n)).
+inline constexpr DeviceIdentity EL3632{0x00000002, 0x0E303052, 2, "EL3632"};
+inline constexpr DeviceIdentity EL3702{0x00000002, 0x0E763052, 2, "EL3702"};
+inline constexpr DeviceIdentity EL3742{0x00000002, 0x0E9E3052, 2, "EL3742"};
 inline constexpr DeviceIdentity EL3751{0x00000002, 0x0EA73052, 1, "EL3751"};
 
 // -- EP/ER/EJ variants — same electronics, value+status SM3 images -------------
@@ -199,6 +206,46 @@ inline constexpr DeviceIdentity ER3184{0x00000002, 0x0C704852, 4, "ER3184"};
 inline constexpr DeviceIdentity ER3204{0x00000002, 0x0C844852, 4, "ER3204"};
 inline constexpr DeviceIdentity ER3314{0x00000002, 0x0CF24852, 4, "ER3314"};
 
+// -- EP/EPP/ERP/EPX remaining analog boxes ----------------------------------------
+// EPP/EPX entries have no explicit PDO lists in the ESI (module-style
+// devices); on hardware the SII resolves the same value+status layout.
+inline constexpr DeviceIdentity EP3754{0x00000002, 0x0EAA4052, 4, "EP3754"};
+inline constexpr DeviceIdentity ERP3504{0x00000002, 0x64F59509, 4, "ERP3504"};
+inline constexpr DeviceIdentity EPP3048{0x00000002, 0x64768489, 8, "EPP3048"};
+inline constexpr DeviceIdentity EPP3174{0x00000002, 0x64768C69, 4, "EPP3174"};
+inline constexpr DeviceIdentity EPP3184{0x00000002, 0x64768D09, 4, "EPP3184"};
+inline constexpr DeviceIdentity EPP3204{0x00000002, 0x64768E49, 4, "EPP3204"};
+inline constexpr DeviceIdentity EPP3314{0x00000002, 0x64769529, 4, "EPP3314"};
+inline constexpr DeviceIdentity EPP3356{0x00000002, 0x647697C9, 1, "EPP3356"};
+inline constexpr DeviceIdentity EPP3504{0x00000002, 0x6476A109, 4, "EPP3504"};
+inline constexpr DeviceIdentity EPP3632{0x00000002, 0x6476A909, 2, "EPP3632"};
+inline constexpr DeviceIdentity EPP3744{0x00000002, 0x6476B009, 4, "EPP3744"};
+inline constexpr DeviceIdentity EPP3752{0x00000002, 0x6476B089, 2, "EPP3752"};
+inline constexpr DeviceIdentity EPP3754{0x00000002, 0x6476B0A9, 4, "EPP3754"};
+
+// -- Ex-i intrinsically safe analog inputs ------------------------------------------
+inline constexpr DeviceIdentity ELX3152{0x00000002, 0x970BC309, 2, "ELX3152"};
+inline constexpr DeviceIdentity ELX3158{0x00000002, 0x970BC369, 8, "ELX3158"};
+inline constexpr DeviceIdentity ELX3181{0x00000002, 0x970BC4D9, 1, "ELX3181"};
+inline constexpr DeviceIdentity ELX3184{0x00000002, 0x970BC509, 4, "ELX3184"};
+inline constexpr DeviceIdentity ELX3202{0x00000002, 0x970BC629, 2, "ELX3202"};
+inline constexpr DeviceIdentity ELX3204{0x00000002, 0x970BC649, 4, "ELX3204"};
+inline constexpr DeviceIdentity ELX3252{0x00000002, 0x970BC949, 2, "ELX3252"};
+inline constexpr DeviceIdentity ELX3312{0x00000002, 0x970BCD09, 2, "ELX3312"};
+inline constexpr DeviceIdentity ELX3314{0x00000002, 0x970BCD29, 4, "ELX3314"};
+inline constexpr DeviceIdentity ELX3351{0x00000002, 0x970BCF79, 1, "ELX3351"};
+inline constexpr DeviceIdentity EPX3158{0x00000002, 0x9809AB69, 8, "EPX3158"};
+inline constexpr DeviceIdentity EPX3184{0x00000002, 0x9809AD09, 4, "EPX3184"};
+inline constexpr DeviceIdentity EPX3204{0x00000002, 0x9809AE49, 4, "EPX3204"};
+inline constexpr DeviceIdentity EPX3314{0x00000002, 0x9809B529, 4, "EPX3314"};
+
+// -- System terminals with measured values -------------------------------------------
+// EL9576-family: supply/RTC terminals reporting voltage/current/temp
+// value channels.
+inline constexpr DeviceIdentity EL9576{0x00000002, 0x25683052, 1, "EL9576"};
+inline constexpr DeviceIdentity EJ9576{0x00000002, 0x25682852, 1, "EJ9576"};
+inline constexpr DeviceIdentity EP9576{0x00000002, 0x25684052, 1, "EP9576"};
+
 /// Every known analog-input terminal — the default detection set used by
 /// MultiAnalogInputTerminal::detect().  All entries verified against the
 /// ESIs for shape (mailbox + SM3 inputs + per-channel ≤32-bit value
@@ -216,12 +263,19 @@ inline constexpr std::array kAnalogInputTerminals{
     EL3311, EL3312, EL3314, EL3318, EL3351, EL3356,
     EL3444, EL3446,
     EL3602, EL3611, EL3612, EL3621, EL3681, EL3692,
-    EL3751,
+    EL3632, EL3702, EL3742, EL3751,
     EJ3004, EJ3008, EJ3048, EJ3058, EJ3068, EJ3104, EJ3108,
     EJ3114, EJ3124, EJ3148, EJ3202, EJ3214, EJ3255, EJ3314, EJ3318,
     EP3048, EP3162, EP3174, EP3182, EP3184, EP3204, EP3314,
     EP3351, EP3356, EP3632, EP3744, EP3751, EP3752,
     ER3174, ER3184, ER3204, ER3314,
+    EP3754, ERP3504,
+    EPP3048, EPP3174, EPP3184, EPP3204, EPP3314, EPP3356, EPP3504,
+    EPP3632, EPP3744, EPP3752, EPP3754,
+    ELX3152, ELX3158, ELX3181, ELX3184, ELX3202, ELX3204, ELX3252,
+    ELX3312, ELX3314, ELX3351,
+    EPX3158, EPX3184, EPX3204, EPX3314,
+    EL9576, EJ9576, EP9576,
 };
 
 } // namespace Devices

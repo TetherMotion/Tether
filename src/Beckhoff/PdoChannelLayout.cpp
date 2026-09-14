@@ -80,6 +80,53 @@ bool resolveValueChannels(std::span<const SII::SIIPDO> pdos,
     return true;
 }
 
+void resolveBitChannels(std::span<const SII::SIIPDO> pdos,
+                        uint8_t sm_channel,
+                        std::vector<uint32_t>& bit_offs,
+                        uint32_t& image_bits) {
+    bit_offs.clear();
+    image_bits = 0;
+    uint32_t running_bit = 0;
+    for (const auto& pdo : pdos) {
+        if (pdo.sync_manager != sm_channel) continue;
+        for (const auto& e : pdo.entries) {
+            if (e.bit_length == 1 && e.index != 0) {
+                bit_offs.push_back(running_bit);
+            }
+            running_bit += e.bit_length;
+        }
+    }
+    image_bits = running_bit;
+}
+
+std::vector<ResolvedFifo> resolveFifoChannels(
+    std::span<const SII::SIIPDO> pdos, uint8_t sm_channel,
+    uint16_t max_data) {
+    std::vector<ResolvedFifo> out;
+    uint32_t bit_off = 0;
+    for (const auto& pdo : pdos) {
+        if (pdo.sync_manager != sm_channel) continue;
+        ResolvedFifo c;
+        bool first = true;
+        for (const auto& e : pdo.entries) {
+            if (e.index == 0) { bit_off += e.bit_length; continue; }
+            if (first && e.bit_length <= 16) {
+                c.ctrl_off  = static_cast<uint16_t>(bit_off / 8);
+                c.ctrl_bits = e.bit_length;
+                first = false;
+            } else if (e.bit_length == 8) {
+                if (c.data_len == 0) {
+                    c.data_off = static_cast<uint16_t>(bit_off / 8);
+                }
+                if (max_data == 0 || c.data_len < max_data) ++c.data_len;
+            }
+            bit_off += e.bit_length;
+        }
+        if (!first || c.data_len > 0) out.push_back(c);
+    }
+    return out;
+}
+
 uint16_t firstPdoIndex(std::span<const SII::SIIPDO> pdos,
                        uint8_t sm_channel) {
     for (const auto& pdo : pdos) {

@@ -205,18 +205,11 @@ Result<> PwmTerminal::start(const StartOptions& opts) {
 // ---------------------------------------------------------------------------
 
 bool PwmTerminal::inBit(uint32_t bit_off) const {
-    if (bit_off == kInvalid) return false;
-    const size_t byte = bit_off / 8;
-    if (byte >= in_buf_.size()) return false;
-    return (in_buf_[byte] >> (bit_off % 8)) & 1;
+    return bit_off != kInvalid && detail::imageBit(in_buf_, bit_off);
 }
 
 void PwmTerminal::setOutBit(uint32_t bit_off, bool v) {
-    if (bit_off == kInvalid) return;
-    const size_t byte = bit_off / 8;
-    if (byte >= out_buf_.size()) return;
-    if (v) out_buf_[byte] |=  static_cast<uint8_t>(1u << (bit_off % 8));
-    else   out_buf_[byte] &= ~static_cast<uint8_t>(1u << (bit_off % 8));
+    if (bit_off != kInvalid) detail::setImageBit(out_buf_, bit_off, v);
 }
 
 // ---------------------------------------------------------------------------

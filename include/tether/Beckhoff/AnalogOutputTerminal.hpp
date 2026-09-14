@@ -125,6 +125,24 @@ inline constexpr DeviceIdentity EP4374{0x00000002, 0x11164052, 4, "EP4374"};
 inline constexpr DeviceIdentity ER4174{0x00000002, 0x104E4852, 4, "ER4174"};
 inline constexpr DeviceIdentity ER4374{0x00000002, 0x11164852, 4, "ER4374"};
 
+// -- EL47xx — oversampling-capable analog outputs ------------------------------------
+// Default mapping is plain value-per-channel (no oversampling PDOs).
+inline constexpr DeviceIdentity EL4712{0x00000002, 0x12683052, 2, "EL4712"};
+inline constexpr DeviceIdentity EL4732{0x00000002, 0x127C3052, 2, "EL4732"};
+
+// -- EP/EPP analog output boxes --------------------------------------------------------
+// EPP entries are module-style devices (no explicit PDO list in the
+// ESI); the SII resolves the same value-per-channel layout.
+inline constexpr DeviceIdentity EP4304{0x00000002, 0x10D04052, 4, "EP4304"};
+inline constexpr DeviceIdentity EP4314{0x00000002, 0x10DA4052, 4, "EP4314"};
+inline constexpr DeviceIdentity EPP4304{0x00000002, 0x6476D309, 4, "EPP4304"};
+inline constexpr DeviceIdentity EPP4314{0x00000002, 0x6476D3A9, 4, "EPP4314"};
+inline constexpr DeviceIdentity EPP4374{0x00000002, 0x6476D769, 4, "EPP4374"};
+
+// -- Ex-i intrinsically safe analog outputs ---------------------------------------------
+inline constexpr DeviceIdentity ELX4154{0x00000002, 0x970C01A9, 4, "ELX4154"};
+inline constexpr DeviceIdentity ELX4181{0x00000002, 0x970C0359, 1, "ELX4181"};
+
 /// Every known analog-output terminal — the default detection set used by
 /// MultiAnalogOutputTerminal::detect().  All entries verified against the
 /// ESI for shape (mailbox + SM2 outputs + one ≤32-bit value entry per
@@ -137,6 +155,9 @@ inline constexpr std::array kAnalogOutputTerminals{
     EL4374,
     EJ4002, EJ4004, EJ4008, EJ4018, EJ4024, EJ4132, EJ4134,
     EP4174, EP4374, ER4174, ER4374,
+    EL4712, EL4732,
+    EP4304, EP4314, EPP4304, EPP4314, EPP4374,
+    ELX4154, ELX4181,
 };
 
 } // namespace Devices
