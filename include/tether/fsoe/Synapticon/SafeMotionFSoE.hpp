@@ -94,6 +94,12 @@ struct ServoEmulatorConfig {
     int16_t analog_input_value = 0;
     bool accept_any_connection_id = false;
 
+    // When true, the master→slave STO bit is interpreted as
+    // one-active (bit=1 → STO active) instead of the standard
+    // zero-active (bit=0 → STO active) semantics.  Only takes effect
+    // when the slave is in the Data/ProcessData state.
+    bool invert_sto = false;
+
     ::FSoE::FSoESlaveConfig toSlaveConfig() const;
 };
 
@@ -238,6 +244,11 @@ public:
     void resetToSafeState();
 
     bool motionAllowed() const { return published_status_.motionAllowed(); }
+
+    /// Toggle one-active (bit=1) vs. zero-active (bit=0) interpretation
+    /// of the master→slave STO bit.  Only affects the ProcessData state.
+    void setInvertSto(bool invert);
+    bool invertSto() const;
 
 protected:
     void onInitialize() override;
