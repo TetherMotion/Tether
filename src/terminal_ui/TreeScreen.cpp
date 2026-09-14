@@ -62,6 +62,14 @@ void TreeScreen::run(std::atomic<bool>& cancel, double durationSec) {
         attroff(A_BOLD | (session_.colors() ? COLOR_PAIR(PalHeader) : 0));
         mvprintw(0, session_.cols() - 12, "t=%6.1f s", elapsed);
 
+        // ---- Footer -----------------------------------------------------
+        if (session_.colors()) attron(COLOR_PAIR(PalHint));
+        mvprintw(footerY, 0,
+                 " arrows: navigate  left/right: fold  q: quit%s%s",
+                 hooks_.keyHints.empty() ? "" : "  ",
+                 hooks_.keyHints.c_str());
+        if (session_.colors()) attroff(COLOR_PAIR(PalHint));
+
         // ---- Panes -----------------------------------------------------
         const int leftW = std::max(24, session_.cols() * 2 / 5);
         for (int r = 1; r < footerY - static_cast<int>(log_.maxLines()); ++r) {
@@ -72,8 +80,13 @@ void TreeScreen::run(std::atomic<bool>& cancel, double durationSec) {
         mvhline(footerY - static_cast<int>(log_.maxLines()), 1, ACS_HLINE,
                 session_.cols() - 2);
 
+        // Push the stdscr frame first, then each subwindow over its own region,
+        // and update the physical screen once at the end.  The previous
+        // wrefresh(stdscr) at the end was repainting stdscr over the panes.
+        wnoutrefresh(stdscr);
+
         tree_.render(treeWin);
-        wrefresh(static_cast<WINDOW*>(treeWin));
+        wnoutrefresh(static_cast<WINDOW*>(treeWin));
 
         werase(static_cast<WINDOW*>(detailWin));
         if (const TreeNode* sel = tree_.selected()) {
@@ -81,20 +94,12 @@ void TreeScreen::run(std::atomic<bool>& cancel, double durationSec) {
                 hooks_.renderDetail(detailWin, *sel);
             }
         }
-        wrefresh(static_cast<WINDOW*>(detailWin));
+        wnoutrefresh(static_cast<WINDOW*>(detailWin));
 
         log_.render(logWin, PalError);
-        wrefresh(static_cast<WINDOW*>(logWin));
+        wnoutrefresh(static_cast<WINDOW*>(logWin));
 
-        // ---- Footer -----------------------------------------------------
-        if (session_.colors()) attron(COLOR_PAIR(PalHint));
-        mvprintw(footerY, 0,
-                 " arrows: navigate  left/right: fold  q: quit%s%s",
-                 hooks_.keyHints.empty() ? "" : "  ",
-                 hooks_.keyHints.c_str());
-        if (session_.colors()) attroff(COLOR_PAIR(PalHint));
-
-        refresh();
+        doupdate();
 
         // ---- Input ------------------------------------------------------
         const int key = session_.pollKey(50);
