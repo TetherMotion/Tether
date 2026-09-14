@@ -329,25 +329,25 @@ initial_BLUE: 1.0
     // ── Summary ────────────────────────────────────────────────────────
     printSection("Summary");
     std::printf("Config sections processed:\n");
-    std::printf("  [stepper_x/y/z]   —  stepper configuration\n");
-    std::printf("  [extruder]        —  extruder/heater config\n");
-    std::printf("  [heater_bed]      —  bed heater config\n");
-    std::printf("  [fan]             —  fan config\n");
-    std::printf("  [probe]           —  probe config\n");
-    std::printf("  [bed_mesh]        —  bed mesh config\n");
-    std::printf("  [gcode_macro *]   —  5 macros defined\n");
-    std::printf("  [delayed_gcode]   —  delayed G-code timer\n");
-    std::printf("  [firmware_retraction]  —  retraction params\n");
-    std::printf("  [exclude_object]  —  exclude object enabled\n");
-    std::printf("  [save_variables]  —  save variables enabled\n");
-    std::printf("  [force_move]      —  force move enabled\n");
-    std::printf("  [homing_override] —  homing override G-code\n");
-    std::printf("  [endstop_phase]   —  endstop phase config\n");
-    std::printf("  [menu]            —  menu definition\n");
-    std::printf("  [palette2]        —  Palette2 connected\n");
-    std::printf("  [display]         —  display config\n");
-    std::printf("  [output_pin]      —  output pin config\n");
-    std::printf("  [neopixel]        —  neopixel LED strip\n");
+    std::printf("  [stepper_x/y/z]   -  stepper configuration\n");
+    std::printf("  [extruder]        -  extruder/heater config\n");
+    std::printf("  [heater_bed]      -  bed heater config\n");
+    std::printf("  [fan]             -  fan config\n");
+    std::printf("  [probe]           -  probe config\n");
+    std::printf("  [bed_mesh]        -  bed mesh config\n");
+    std::printf("  [gcode_macro *]   -  5 macros defined\n");
+    std::printf("  [delayed_gcode]   -  delayed G-code timer\n");
+    std::printf("  [firmware_retraction]  -  retraction params\n");
+    std::printf("  [exclude_object]  -  exclude object enabled\n");
+    std::printf("  [save_variables]  -  save variables enabled\n");
+    std::printf("  [force_move]      -  force move enabled\n");
+    std::printf("  [homing_override] -  homing override G-code\n");
+    std::printf("  [endstop_phase]   -  endstop phase config\n");
+    std::printf("  [menu]            -  menu definition\n");
+    std::printf("  [palette2]        -  Palette2 connected\n");
+    std::printf("  [display]         -  display config\n");
+    std::printf("  [output_pin]      -  output pin config\n");
+    std::printf("  [neopixel]        -  neopixel LED strip\n");
 
     // Cleanup
     std::filesystem::remove_all(configDir);

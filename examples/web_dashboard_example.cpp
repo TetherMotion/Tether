@@ -111,7 +111,7 @@ int main(int argc, char** argv) {
             g_verbose = true;
         } else if (arg == "--help" || arg == "-h") {
             std::cout <<
-                "web_dashboard_example  —  Tether IO web dashboard\n\n"
+                "web_dashboard_example  -  Tether IO web dashboard\n\n"
                 "Usage: web_dashboard_example [OPTIONS]\n\n"
                 "Options:\n"
                 "  --port <N>, -p <N>       HTTP/WebSocket port (default 8080)\n"

@@ -20,7 +20,7 @@
 std::atomic<bool> g_running{true};
 
 int main(int argc, char* argv[]) {
-    std::cout << "EtherCAT Slave Example — Simple Digital I/O\n";
+    std::cout << "EtherCAT Slave Example - Simple Digital I/O\n";
     std::cout << "============================================\n\n";
     
     Tether::Utils::SignalHandler sig_handler(g_running, false);
