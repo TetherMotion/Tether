@@ -140,6 +140,73 @@ bool Master::discoverSlaves()
 }
 
 // ============================================================================
+// Public fast slave-count predicates
+// ============================================================================
+
+uint16_t Master::discoverSlaveCount()
+{
+    for (int attempt = 0; attempt < 200; attempt++) {
+        if (!running_.load(std::memory_order_acquire)) return 0;
+        if (cancel_requested_.load(std::memory_order_acquire)) {
+            TETHER_LOGI(TAG, "discoverSlaveCount: cancelled");
+            return 0;
+        }
+
+        const uint8_t idx = allocIdx();
+        auto frame = buildScanFrame(src_mac_);
+        frame.dg.idx = idx;
+
+        RxDatagram resp{};
+        size_t slot = preRegisterResponseWaiter(idx, resp.data, sizeof(resp.data));
+        if (slot >= TransactionRouter::kNumSlots) {
+            TETHER_LOGW(TAG, "discoverSlaveCount: failed to pre-register waiter");
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            continue;
+        }
+
+        uint8_t txbuf[60] = {0};
+        std::memcpy(txbuf, &frame, sizeof(frame));
+        if (!sendRawFrame(txbuf, sizeof(txbuf))) {
+            packet_router_.cancelPreRegistered(slot);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            continue;
+        }
+
+        WaitResult result = waitForPreRegistered(slot, 300);
+        if (result.success && result.wkc > 0) {
+            if (result.wkc > ECAT_STATUS_POLLER_MAX_SLAVES) {
+                TETHER_LOGW(TAG, "discoverSlaveCount: WKC={} exceeds max {} — "
+                             "likely corrupted frame, retrying",
+                             result.wkc, ECAT_STATUS_POLLER_MAX_SLAVES);
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                continue;
+            }
+
+            discovered_slave_count_.store(result.wkc, std::memory_order_release);
+            TETHER_LOGI(TAG, "discoverSlaveCount: discovered {} slave(s)", result.wkc);
+            return result.wkc;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    return 0;
+}
+
+bool Master::hasAnySlaves()
+{
+    return discoverSlaveCount() > 0;
+}
+
+bool Master::hasAtLeastNSlaves(uint16_t n)
+{
+    return discoverSlaveCount() >= n;
+}
+
+bool Master::hasExactlyNSlaves(uint16_t n)
+{
+    return discoverSlaveCount() == n;
+}
+
+// ============================================================================
 // Internal: set PRE_OP and confirm
 // ============================================================================
 

@@ -327,6 +327,25 @@ public:
     /** @brief Number of slaves discovered by the last BRD scan. */
     uint16_t getDiscoveredSlaveCount() const;
 
+    /**
+     * @brief Fast BRD scan returning the number of slaves on the bus.
+     *
+     * This only sends a broadcast-read AL_STATUS datagram and counts the
+     * working counter.  It does not read any slave attributes (vendor/product
+     * ID, SII, etc.) and does not create Slave objects, so it is much faster
+     * than discovery().discover() or discoverSlaves().
+     */
+    uint16_t discoverSlaveCount();
+
+    /** @brief Quick check: at least one slave is present on the bus. */
+    bool hasAnySlaves();
+
+    /** @brief Quick check: at least @p n slaves are present on the bus. */
+    bool hasAtLeastNSlaves(uint16_t n);
+
+    /** @brief Quick check: exactly @p n slaves are present on the bus. */
+    bool hasExactlyNSlaves(uint16_t n);
+
     // ---- Slave access -------------------------------------------------------
 
     /**
