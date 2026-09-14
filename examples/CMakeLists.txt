@@ -277,13 +277,21 @@ add_tether_example(beckhoff_serial_bridge
 add_tether_example(beckhoff_oversampling_monitor
     LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
 
+# --- Beckhoff universal TUI explorer ---
+# Discovers the whole chain, classifies every Beckhoff terminal by its
+# product code, and displays a navigable device tree with the family
+# name and the example binary to run for the selected device.
+add_tether_example(beckhoff_tui
+    LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
 # All Beckhoff examples get the interactive TUI when tether_terminal_ui exists.
 if(TARGET tether_terminal_ui)
     foreach(_tui_ex beckhoff_output_toggle beckhoff_input_monitor
                     beckhoff_analog_input_monitor beckhoff_analog_output_sweep
                     beckhoff_position_monitor beckhoff_stepper_jog
                     beckhoff_drive_move beckhoff_pwm_sweep
-                    beckhoff_pulse_jog beckhoff_combined_io_toggle)
+                    beckhoff_pulse_jog beckhoff_combined_io_toggle
+                    beckhoff_tui)
         target_link_libraries(${_tui_ex} PRIVATE tether_terminal_ui ${CURSES_LIBRARIES})
         target_include_directories(${_tui_ex} PRIVATE ${CURSES_INCLUDE_DIRS})
     endforeach()
