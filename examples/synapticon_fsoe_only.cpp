@@ -193,7 +193,7 @@ public:
 
         auto* drive = master.driveBySlaveIndex(slave_index_);
         if (drive == nullptr) {
-            TETHER_LOGW(TAG, "Drive {} not found  -  skipping FSoE exchange",
+            TETHER_LOGW(TAG, "Drive {} not found  —  skipping FSoE exchange",
                         slave_index_);
             return true;  // don't stop the process
         }
@@ -389,7 +389,7 @@ int main(int argc, char** argv) {
     Tether::Platform::ensureRealtimeKernelOrExit();
 
     TETHER_LOGI(TAG,
-        "synapticon_fsoe_only  -  interface={} slave={} duration={:.1f} "
+        "synapticon_fsoe_only  —  interface={} slave={} duration={:.1f} "
         "dc_sync={} conn_id=0x{:04X} watchdog={} ms debug='{}'",
         args.interface.c_str(), slave_idx, args.duration,
         args.enable_dc_sync ? "on" : "off",
@@ -465,7 +465,7 @@ int main(int argc, char** argv) {
 
         if (!safety.ok) {
             TETHER_LOGW(TAG,
-                "Failed to read safety module diagnostics (0x2611) via SDO  -  "
+                "Failed to read safety module diagnostics (0x2611) via SDO  —  "
                 "continuing anyway (FSoE will attempt to establish connection)");
         }
 
@@ -478,7 +478,7 @@ int main(int argc, char** argv) {
         // if (safety.isInSafeState()) {
         //     TETHER_LOGE(TAG,
         //         "Drive is in SAFE STATE (safety function active, motion "
-        //         "inhibited)  -  FSoE is {} (0x2620:2={})  -  refusing to "
+        //         "inhibited)  —  FSoE is {} (0x2620:2={})  —  refusing to "
         //         "activate drive, triggering shutdown",
         //         safety.fsoeStateSummary(),
         //         static_cast<unsigned>(safety.safe_fieldbus));
@@ -502,7 +502,7 @@ int main(int argc, char** argv) {
                 slave, drive_safety_address);
         if (addr_err == EtherCAT::SlaveError::Ok) {
             TETHER_LOGI(TAG,
-                "FSoE safety address (0xF980:1): 0x{:04X}  -  using as "
+                "FSoE safety address (0xF980:1): 0x{:04X}  —  using as "
                 "connection ID (overrides --connection-id=0x{:04X})",
                 drive_safety_address,
                 args.connection_id);
@@ -510,7 +510,7 @@ int main(int argc, char** argv) {
         } else {
             TETHER_LOGW(TAG,
                 "Failed to read FSoE safety address (0xF980:1) via SDO "
-                "(err={})  -  falling back to --connection-id=0x{:04X}",
+                "(err={})  —  falling back to --connection-id=0x{:04X}",
                 static_cast<unsigned>(addr_err),
                 args.connection_id);
         }

@@ -93,7 +93,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    TETHER_LOGI(TAG, "list_slaves (host)  -  interface: {}", iface.c_str());
+    TETHER_LOGI(TAG, "list_slaves (host)  —  interface: {}", iface.c_str());
     if (!debug_flags.empty()) {
         TETHER_LOGI(TAG, "Debug flags: {}", debug_str.c_str());
     }
@@ -284,7 +284,7 @@ int main(int argc, char** argv) {
     }
 
     if (slave_count == 0) {
-        TETHER_LOGW(TAG, "No slaves found  -  check wiring, power, and interface name");
+        TETHER_LOGW(TAG, "No slaves found  —  check wiring, power, and interface name");
     }
 
     // Print ESI device info for cross-reference if --esi-xml was provided

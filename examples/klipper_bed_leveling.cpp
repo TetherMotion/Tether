@@ -154,13 +154,13 @@ int main() {
     printSection("Summary");
     std::printf("Bed leveling workflow completed.\n");
     std::printf("Commands demonstrated:\n");
-    std::printf("  - BED_MESH_CALIBRATE/OUTPUT/MAP/CLEAR/PROFILE/OFFSET\n");
-    std::printf("  - SCREWS_TILT_ADJUST, Z_TILT_ADJUST, QUAD_GANTRY_LEVEL\n");
-    std::printf("  - BED_SCREWS_ADJUST, DELTA_CALIBRATE, DELTA_ANALYZE\n");
-    std::printf("  - PROBE, PROBE_ACCURACY, PROBE_CALIBRATE\n");
-    std::printf("  - Z_OFFSET_APPLY_PROBE/ENDSTOP\n");
-    std::printf("  - SET_GCODE_OFFSET, SAVE/RESTORE_GCODE_STATE\n");
-    std::printf("  - SAVE_CONFIG\n");
+    std::printf("  — BED_MESH_CALIBRATE/OUTPUT/MAP/CLEAR/PROFILE/OFFSET\n");
+    std::printf("  — SCREWS_TILT_ADJUST, Z_TILT_ADJUST, QUAD_GANTRY_LEVEL\n");
+    std::printf("  — BED_SCREWS_ADJUST, DELTA_CALIBRATE, DELTA_ANALYZE\n");
+    std::printf("  — PROBE, PROBE_ACCURACY, PROBE_CALIBRATE\n");
+    std::printf("  — Z_OFFSET_APPLY_PROBE/ENDSTOP\n");
+    std::printf("  — SET_GCODE_OFFSET, SAVE/RESTORE_GCODE_STATE\n");
+    std::printf("  — SAVE_CONFIG\n");
 
     std::printf("\nDone\n");
     return 0;

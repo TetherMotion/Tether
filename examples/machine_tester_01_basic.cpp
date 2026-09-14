@@ -51,8 +51,8 @@ int main() {
     exporter.exportSummary("machine_test_01_summary.txt", {result});
     
     std::cout << "\nData exported to:" << std::endl;
-    std::cout << "  - machine_test_01_data.csv" << std::endl;
-    std::cout << "  - machine_test_01_summary.txt" << std::endl;
+    std::cout << "  — machine_test_01_data.csv" << std::endl;
+    std::cout << "  — machine_test_01_summary.txt" << std::endl;
     
     return result.passed ? 0 : 1;
 }

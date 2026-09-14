@@ -294,7 +294,7 @@ static void bringUp(EtherCAT::Master& master,
                   || !drivers.pulses.empty() || !drivers.dcmotors.empty()
                   || !drivers.meters.empty() || !drivers.overs.empty() || !drivers.comms.empty();
     if (!any) {
-        TETHER_LOGW(TAG, "no recognized terminals  -  tree view only");
+        TETHER_LOGW(TAG, "no recognized terminals  —  tree view only");
         return;
     }
 
@@ -1003,7 +1003,7 @@ static void runTui(std::span<const DiscoveredSlave> slaves,
             ++row;
             wattron(win, A_DIM);
             if (isCouplerDevice(*s))
-                mvwprintw(win, row++, 1, "(coupler  -  %zu terminal(s))",
+                mvwprintw(win, row++, 1, "(coupler  —  %zu terminal(s))",
                           node.children.size());
             else
                 mvwprintw(win, row++, 1,
@@ -1025,7 +1025,7 @@ static void runTui(std::span<const DiscoveredSlave> slaves,
     // second bus scan here (a full DiscoveryOption::All re-read of every
     // slave's SII EEPROM takes seconds and previously looked like a hang).
     TUI::TreeScreen screen(
-        std::string("Beckhoff Device Explorer  -  ") + iface,
+        std::string("Beckhoff Device Explorer  —  ") + iface,
         buildDeviceTree(slaves, managed), std::move(hooks));
     screenPtr = &screen;
     screen.run(g_cancel, duration_sec);
@@ -1080,13 +1080,13 @@ int main(int argc, char** argv) {
 #ifdef TETHER_HAS_TERMINAL_UI
     if (interactive && !Tether::TUI::Session::available()) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "no usable terminal  -  TUI unavailable");
+            TETHER_LOGW(TAG, "no usable terminal  —  TUI unavailable");
         }
         interactive = false;
     }
 #else
     if (program.get<bool>("--interactive")) {
-        TETHER_LOGW(TAG, "built without ncurses  -  TUI unavailable");
+        TETHER_LOGW(TAG, "built without ncurses  —  TUI unavailable");
     }
     interactive = false;
 #endif

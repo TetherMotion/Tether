@@ -859,12 +859,12 @@ bool parseArgs(int argc, char** argv, Args& out) {
     program.add_argument("--connection-id")
         .scan<'x', unsigned int>()
         .default_value(static_cast<unsigned int>(0x0006))
-        .help("FSoE connection ID (hex, default 0x0006  -  must match drive's "
+        .help("FSoE connection ID (hex, default 0x0006  —  must match drive's "
               "Device Safety Address 0xF980:1)");
     program.add_argument("--safety-address")
         .scan<'x', unsigned int>()
         .default_value(static_cast<unsigned int>(0x0006))
-        .help("FSoE slave safety address (hex, default 0x0006  -  from drive's "
+        .help("FSoE slave safety address (hex, default 0x0006  —  from drive's "
               "0x2620:3)");
     program.add_argument("--watchdog-ms")
         .scan<'i', int>()
@@ -998,11 +998,11 @@ int preActivationSafetyCheck(EtherCAT::DS402Master& master,
             // unavailable.  Continue anyway; the FSoE protocol will
             // handle the safety state via PDOs.
             TETHER_LOGW(TAG,
-                "Failed to read safety module diagnostics (0x2611) via SDO  -  "
+                "Failed to read safety module diagnostics (0x2611) via SDO  —  "
                 "continuing with FSoE enabled (PDO-based safety handling)");
         } else {
             TETHER_LOGE(TAG,
-                "Failed to read safety module diagnostics (0x2611) via SDO  -  "
+                "Failed to read safety module diagnostics (0x2611) via SDO  —  "
                 "cannot verify safety state, aborting activation");
             Tether::Examples::stopHostMasterSession(master, session);
             return 2;
@@ -1017,7 +1017,7 @@ int preActivationSafetyCheck(EtherCAT::DS402Master& master,
             // state and continue; do NOT abort.
             TETHER_LOGI(TAG,
                 "Drive is in SAFE STATE (safety function active, motion "
-                "inhibited)  -  FSoE is {} (0x2620:2={})  -  continuing; "
+                "inhibited)  —  FSoE is {} (0x2620:2={})  —  continuing; "
                 "the FSoE master will clear the safe state once the "
                 "safety protocol reaches the Data state",
                 safety.fsoeStateSummary(),
@@ -1027,7 +1027,7 @@ int preActivationSafetyCheck(EtherCAT::DS402Master& master,
             // state, so enabling the drive would be futile.  Abort.
             TETHER_LOGE(TAG,
                 "Drive is in SAFE STATE (safety function active, motion "
-                "inhibited) and FSoE is disabled (--no-fsoe)  -  there is "
+                "inhibited) and FSoE is disabled (--no-fsoe)  —  there is "
                 "no mechanism to clear the safe state, refusing to "
                 "activate drive, triggering shutdown");
             Tether::Examples::stopHostMasterSession(master, session);
@@ -1067,7 +1067,7 @@ int main(int argc, char** argv) {
     Tether::Platform::ensureRealtimeKernelOrExit();
 
     TETHER_LOGI(TAG,
-        "synapticon_cst_fsoe  -  interface={} slave={} duration={:.1f} fsoe={} dc_sync={} drive={} debug='{}' "
+        "synapticon_cst_fsoe  —  interface={} slave={} duration={:.1f} fsoe={} dc_sync={} drive={} debug='{}' "
         "torque_pp={:.3f}Nm freq={:.3f}Hz rated_torque_mnm={} "
         "conn_id=0x{:04X} safety_addr=0x{:04X} "
         "sto_override={} sos_override={} sbc_override={} diagnostics_after={:.1f}",
@@ -1146,7 +1146,7 @@ int main(int argc, char** argv) {
 
                 if (current_state != static_cast<uint8_t>(EtherCAT::ECState::Init)) {
                     TETHER_LOGI(TAG,
-                        "Slave {} is not in INIT (0x{:02X})  -  resetting to INIT "
+                        "Slave {} is not in INIT (0x{:02X})  —  resetting to INIT "
                         "before configuration",
                         slave_idx, current_state);
 
@@ -1196,7 +1196,7 @@ int main(int argc, char** argv) {
                 }
             } else {
                 TETHER_LOGW(TAG,
-                    "Could not read AL state for slave {}  -  continuing anyway",
+                    "Could not read AL state for slave {}  —  continuing anyway",
                     slave_idx);
             }
         }
@@ -1328,7 +1328,7 @@ int main(int argc, char** argv) {
                 slave, drive_safety_address);
         if (addr_err == EtherCAT::SlaveError::Ok) {
             TETHER_LOGI(TAG,
-                "FSoE safety address (0xF980:1): 0x{:04X}  -  "
+                "FSoE safety address (0xF980:1): 0x{:04X}  —  "
                 "--connection-id=0x{:04X} --safety-address=0x{:04X}",
                 drive_safety_address,
                 args.connection_id,
@@ -1345,7 +1345,7 @@ int main(int argc, char** argv) {
         } else {
             TETHER_LOGW(TAG,
                 "Failed to read FSoE safety address (0xF980:1) via SDO "
-                "(err={})  -  falling back to --connection-id=0x{:04X}",
+                "(err={})  —  falling back to --connection-id=0x{:04X}",
                 static_cast<unsigned>(addr_err),
                 args.connection_id);
         }
@@ -1462,7 +1462,7 @@ int main(int argc, char** argv) {
             // Log actionable warnings based on the diagnostic report
             if (diag_report.hasFault()) {
                 TETHER_LOGE(TAG,
-                    "SAFETY FAULT detected before starting PDO loop: '{}'  -  "
+                    "SAFETY FAULT detected before starting PDO loop: '{}'  —  "
                     "FSoE communication may fail.  Check OBLAC Drives parameter "
                     "validation and safety configuration.",
                     diag_report.error_report);
@@ -1691,7 +1691,7 @@ int main(int argc, char** argv) {
         TETHER_LOGI(TAG, "Checking Module ID configuration (0xF030/0xF050):");
         read_u8 (0xF030, 0, "0xF030 count");
         read_u32(0xF030, 1, "0xF030:1 (Module ident pos 1)");
-        read_u32(0xF030, 2, "0xF030:2 (Module ident pos 2  -  0x22D20001=no-param, 0x22D20002=with-param)");
+        read_u32(0xF030, 2, "0xF030:2 (Module ident pos 2  —  0x22D20001=no-param, 0x22D20002=with-param)");
         read_u8 (0xF050, 0, "0xF050 count");
         read_u32(0xF050, 1, "0xF050:1 (Detected Module ident pos 1)");
         read_u32(0xF050, 2, "0xF050:2 (Detected Module ident pos 2)");
@@ -1801,7 +1801,7 @@ int main(int argc, char** argv) {
                 rated_torque_mnm, rated_torque_mnm / 1000.0);
         } else {
             TETHER_LOGE(TAG,
-                "Failed to read motor rated torque (0x6076) via SDO  -  "
+                "Failed to read motor rated torque (0x6076) via SDO  —  "
                 "cannot convert Nm to per-mille.  Use --rated-torque-mnm to "
                 "specify it manually.");
             master.stopDistributedClocks();
@@ -2256,19 +2256,19 @@ int main(int argc, char** argv) {
         const auto fsoe_status = fsoe_ready_future.wait_for(5s);
         if (fsoe_status == std::future_status::timeout) {
             TETHER_LOGE(TAG,
-                "FSoE did not reach Data state within 5 s  -  "
+                "FSoE did not reach Data state within 5 s  —  "
                 "current state: {}.  Aborting drive enable.",
                 FSoE::fsoeStateName(fsoe_main->rawConnection().getState()));
             rc = 9;
         } else if (!fsoe_ready_future.get()) {
             TETHER_LOGE(TAG,
-                "FSoE entered Error state before reaching Data  -  "
+                "FSoE entered Error state before reaching Data  —  "
                 "aborting drive enable.");
             rc = 9;
         } else {
             TETHER_LOGI(TAG,
                 "FSoE Data state reached{}.",
-                args.enable_drive ? "  -  enabling CiA 402 drive" : " (drive enable suppressed by --no-drive)");
+                args.enable_drive ? "  —  enabling CiA 402 drive" : " (drive enable suppressed by --no-drive)");
             fsoe_data_reached = true;
             fsoe_data_time_ms = Tether::Platform::Clock::instance().getMilliseconds();
         }
@@ -2281,7 +2281,7 @@ int main(int argc, char** argv) {
     if (!args.enable_drive) {
         TETHER_LOGI(TAG,
             "Drive enable skipped (--no-drive).  FSoE is running in "
-            "FSoE-only mode  -  safety PDOs are exchanged but no motion.");
+            "FSoE-only mode  —  safety PDOs are exchanged but no motion.");
     } else if (fsoe_data_reached) {
         if (!master.enableDrive(slave_idx, 5000)) {
             TETHER_LOGE(TAG, "Failed to enable slave {}", slave_idx);
@@ -2329,7 +2329,7 @@ int main(int argc, char** argv) {
             if (!diag_done && diag_after_ms > 0 && elapsed_ms >= diag_after_ms) {
                 diag_done = true;
                 TETHER_LOGI(TAG,
-                    "=== --diagnostics-after={:.1f}s reached  -  "
+                    "=== --diagnostics-after={:.1f}s reached  —  "
                     "suppressing FSoE output and running CoE diagnostics ===",
                     args.diagnostics_after);
 
@@ -2358,7 +2358,7 @@ int main(int argc, char** argv) {
                         slave_ref);
 
                 TETHER_LOGI(TAG,
-                    "=== CoE diagnostics complete  -  exiting ===");
+                    "=== CoE diagnostics complete  —  exiting ===");
                 break;
             }
 
@@ -2379,14 +2379,14 @@ int main(int argc, char** argv) {
                         Tether::Platform::Clock::instance().getMilliseconds() -
                         fsoe_data_time_ms;
                     TETHER_LOGI(TAG,
-                        "STO=off and SBC=off confirmed by drive after {} ms  -  "
+                        "STO=off and SBC=off confirmed by drive after {} ms  —  "
                         "releasing brake via CoE",
                         since_data_ms);
                     auto& brake_sdo = master.ethercatMaster().sdoManager(slave_idx);
                     if (!EtherCAT::Drives::Synapticon::BrakeControl::disengageBrake(
                             brake_sdo, kSdoTimeoutMs)) {
                         TETHER_LOGW(TAG,
-                            "Brake disengage failed or unverified  -  "
+                            "Brake disengage failed or unverified  —  "
                             "the safety layer will gate motion regardless");
                     }
                 }
@@ -2398,7 +2398,7 @@ int main(int argc, char** argv) {
                 const auto status = fsoe_main->rawConnection().getStatus();
                 if (status.isFailSafe() || status.hasError()) {
                     TETHER_LOGE(TAG,
-                        "FSoE entered {} state during run (code=0x{:04X})  -  "
+                        "FSoE entered {} state during run (code=0x{:04X})  —  "
                         "shutting down cleanly",
                         status.isFailSafe() ? "FailSafe" : "Error",
                         status.error_code);

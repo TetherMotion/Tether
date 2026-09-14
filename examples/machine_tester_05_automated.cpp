@@ -70,7 +70,7 @@ private:
             sequenceResults.push_back(result);
             allResults_.push_back(result);
             
-            std::cout << "  - " << result.testName << ": " 
+            std::cout << "  — " << result.testName << ": " 
                       << (result.passed ? "PASS" : "FAIL") << std::endl;
         }
         
@@ -105,12 +105,12 @@ private:
         generateStatisticalAnalysis();
         
         std::cout << "\nReports generated:" << std::endl;
-        std::cout << "  - automated_suite_full_data.csv" << std::endl;
-        std::cout << "  - automated_suite_summary.txt" << std::endl;
-        std::cout << "  - automated_suite_comparison.html" << std::endl;
-        std::cout << "  - automated_suite_heatmap.svg" << std::endl;
-        std::cout << "  - automated_suite_envelope.svg" << std::endl;
-        std::cout << "  - automated_suite_statistics.json" << std::endl;
+        std::cout << "  — automated_suite_full_data.csv" << std::endl;
+        std::cout << "  — automated_suite_summary.txt" << std::endl;
+        std::cout << "  — automated_suite_comparison.html" << std::endl;
+        std::cout << "  — automated_suite_heatmap.svg" << std::endl;
+        std::cout << "  — automated_suite_envelope.svg" << std::endl;
+        std::cout << "  — automated_suite_statistics.json" << std::endl;
     }
     
     void generateStatisticalAnalysis() {

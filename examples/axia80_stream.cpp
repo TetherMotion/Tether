@@ -488,7 +488,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    TETHER_LOGI(TAG, "axia80_stream (host)  -  interface: {}, raw: {}, slave: {}",
+    TETHER_LOGI(TAG, "axia80_stream (host)  —  interface: {}, raw: {}, slave: {}",
                 iface.c_str(), raw_mode ? "yes" : "no", slave_idx);
     if (!debug_flags.empty()) {
         TETHER_LOGI(TAG, "Debug flags: {}", debug_str.c_str());
@@ -635,7 +635,7 @@ int main(int argc, char** argv) {
 
     // ---- Discover slaves ----
     if (master.discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
-        TETHER_LOGE(TAG, "No slaves found  -  check wiring and power");
+        TETHER_LOGE(TAG, "No slaves found  —  check wiring and power");
         master.stop();
         master.requestCancel();
         poll_thread.join();
@@ -685,7 +685,7 @@ int main(int argc, char** argv) {
                     Axia80::torqueUnitsToString(cal.torque_units),
                     cal.counts_per_force, cal.counts_per_torque);
     } else {
-        TETHER_LOGW(TAG, "Could not read calibration data  -  using raw counts");
+        TETHER_LOGW(TAG, "Could not read calibration data  —  using raw counts");
         raw_mode = true;
     }
 

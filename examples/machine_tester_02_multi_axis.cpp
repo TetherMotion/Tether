@@ -71,9 +71,9 @@ int main() {
     heatmap.generateFromTests(results, "machine_test_02_heatmap.svg");
     
     std::cout << "\nData exported to:" << std::endl;
-    std::cout << "  - machine_test_02_data.csv" << std::endl;
-    std::cout << "  - machine_test_02_summary.txt" << std::endl;
-    std::cout << "  - machine_test_02_heatmap.svg" << std::endl;
+    std::cout << "  — machine_test_02_data.csv" << std::endl;
+    std::cout << "  — machine_test_02_summary.txt" << std::endl;
+    std::cout << "  — machine_test_02_heatmap.svg" << std::endl;
     
     return 0;
 }

@@ -100,7 +100,7 @@ void listPhysicalInterfaces(const char* tag) {
 }
 
 void logPermissionDeniedError(const char* tag) {
-    TETHER_LOGE(tag, "Permission denied  -  run via `runec <executable>` or "
+    TETHER_LOGE(tag, "Permission denied  —  run via `runec <executable>` or "
                      "`sudo <executable>` (requires CAP_NET_RAW)");
     std::fprintf(stderr,
                  "ERROR: Permission denied opening network interface.\n"
@@ -263,11 +263,11 @@ void applyDebugFlags(const std::set<std::string>& flags,
     if (!unknown.empty()) {
         TETHER_LOGW(tag, "Unknown debug flags:");
         for (const auto& f : unknown) {
-            TETHER_LOGW(tag, "  - {}", f.c_str());
+            TETHER_LOGW(tag, "  — {}", f.c_str());
         }
         TETHER_LOGI(tag, "Known debug flags:");
         for (const auto& f : knownNames) {
-            TETHER_LOGI(tag, "  - {}", f.c_str());
+            TETHER_LOGI(tag, "  — {}", f.c_str());
         }
     }
 }

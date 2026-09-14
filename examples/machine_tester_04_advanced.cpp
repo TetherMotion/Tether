@@ -153,11 +153,11 @@ int main() {
     exporter.exportComparison("machine_test_04_comparison.html", allResults);
     
     std::cout << "\nData exported to:" << std::endl;
-    std::cout << "  - machine_test_04_all_data.csv" << std::endl;
-    std::cout << "  - machine_test_04_summary.txt" << std::endl;
-    std::cout << "  - machine_test_04_comparison.html" << std::endl;
-    std::cout << "  - machine_test_04_heatmap.svg" << std::endl;
-    std::cout << "  - machine_test_04_accel_map.svg" << std::endl;
+    std::cout << "  — machine_test_04_all_data.csv" << std::endl;
+    std::cout << "  — machine_test_04_summary.txt" << std::endl;
+    std::cout << "  — machine_test_04_comparison.html" << std::endl;
+    std::cout << "  — machine_test_04_heatmap.svg" << std::endl;
+    std::cout << "  — machine_test_04_accel_map.svg" << std::endl;
     
     std::cout << "\nCompleted " << testNumber << " tests across " 
               << patterns.size() << " patterns" << std::endl;
