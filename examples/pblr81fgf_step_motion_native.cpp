@@ -128,7 +128,7 @@ bool configureDrive(EtherCAT::DS402Master& master)
 
 int main(int argc, char** argv)
 {
-    argparse::ArgumentParser program("pblr81fgf_step_motion_native");
+    argparse::ArgumentParser program("pblr81fgf_step_motion_native", "1.0", argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
     program.add_argument("--dwell").scan<'g', double>().default_value(0.5);
 

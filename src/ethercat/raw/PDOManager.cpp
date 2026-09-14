@@ -306,7 +306,10 @@ bool PDOManager::init() {
 void PDOManager::deinit() {
     mapping_.clear();
     initialized_ = false;
-    TETHER_LOGI(TAG, "PDO subsystem deinitialized");
+    const auto* df = debug_flags_.load(std::memory_order_relaxed);
+    if (df && df->shutdown) {
+        TETHER_LOGI(TAG, "PDO subsystem deinitialized");
+    }
 }
 
 bool PDOManager::isInitialized() const { return initialized_; }

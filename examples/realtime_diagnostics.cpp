@@ -1254,7 +1254,7 @@ void runThroughputTest(const ColorTags& c,
 // ============================================================================
 int main(int argc, char** argv) {
 #ifdef __linux__
-    argparse::ArgumentParser program("realtime_diagnostics");
+    argparse::ArgumentParser program("realtime_diagnostics", "1.0", argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
     program.add_argument("-s", "--pdo-size")
         .scan<'i', int>()

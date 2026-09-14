@@ -981,7 +981,7 @@ static void printModuleIO(DiscoveredModule& mod, uint64_t cycle,
 // ============================================================================
 
 int main(int argc, char** argv) {
-    argparse::ArgumentParser program("kinco_rp20_io");
+    argparse::ArgumentParser program("kinco_rp20_io", "1.0", argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addDebugArg(program);
     Tether::Examples::addVlanArgs(program);

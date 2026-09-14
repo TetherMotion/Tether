@@ -63,7 +63,7 @@ int main(int argc, char* argv[]) {
 
     constexpr const char* kTag = "slave_emu";
 
-    argparse::ArgumentParser program("slave_emulator", "1.0");
+    argparse::ArgumentParser program("slave_emulator", "1.0", argparse::default_arguments::help);
 
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addDurationArg(program, 0.0);

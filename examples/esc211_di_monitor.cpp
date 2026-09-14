@@ -184,7 +184,7 @@ static void readIdentityObject(EtherCAT::Slave& sl) {
 // ---------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
-    argparse::ArgumentParser program("esc211_di_monitor");
+    argparse::ArgumentParser program("esc211_di_monitor", "1.0", argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addSlaveArg(program);
     Tether::Examples::addDurationArg(program);

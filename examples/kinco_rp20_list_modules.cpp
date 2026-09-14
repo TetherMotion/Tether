@@ -133,7 +133,7 @@ static void printModuleList(const std::vector<DiscoveredModule>& modules) {
 // ============================================================================
 
 int main(int argc, char** argv) {
-    argparse::ArgumentParser program("kinco_rp20_list_modules");
+    argparse::ArgumentParser program("kinco_rp20_list_modules", "1.0", argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addDebugArg(program);
     Tether::Examples::addVlanArgs(program);

@@ -107,7 +107,7 @@ int main(int argc, char** argv) {
             port = static_cast<uint16_t>(std::stoi(argv[++i]));
         } else if ((arg == "--web-root" || arg == "-w") && i + 1 < argc) {
             webRoot = argv[++i];
-        } else if (arg == "--verbose" || arg == "-v") {
+        } else if (arg == "--verbose") {
             g_verbose = true;
         } else if (arg == "--help" || arg == "-h") {
             std::cout <<
@@ -117,7 +117,7 @@ int main(int argc, char** argv) {
                 "  --port <N>, -p <N>       HTTP/WebSocket port (default 8080)\n"
                 "  --web-root <PATH>, -w <PATH>  Dashboard static file directory\n"
                 "                             (default: built-in dist)\n"
-                "  --verbose, -v            Enable verbose protocol logging\n"
+                "  --verbose                Enable verbose protocol logging\n"
                 "  --help, -h               Show this help\n\n"
                 "Open http://127.0.0.1:<port>/ in a browser to view the dashboard.\n";
             return 0;

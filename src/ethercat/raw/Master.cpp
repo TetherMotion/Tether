@@ -432,6 +432,7 @@ Master::Master(const Config& config)
     logical_addr_mgr_ = std::make_unique<LogicalAddressManager>(*pdo_transport_);
     logical_addr_mgr_->setPrefixProvider(
         [this](uint16_t i) { return slaveLogPrefix(i); });
+    logical_addr_mgr_->setDebugFlags(&debug_flags_);
     pdo_->setLogicalAddressManager(logical_addr_mgr_.get());
     pdo_->setDebugGate(debug_gate_.get());
     dc_     = std::make_unique<DCManager>(*this);
@@ -746,6 +747,7 @@ PDOManager& Master::createPdoGroup(const std::vector<uint16_t>& slave_indices,
     group.pdo = std::make_unique<PDOManager>(*group.transport);
     group.lam = std::make_unique<LogicalAddressManager>(*group.transport);
     group.lam->setBaseLogicalAddress(base_logical_addr);
+    group.lam->setDebugFlags(&debug_flags_);
     group.pdo->init();
     group.lam->init();
     group.pdo->setLogicalAddressManager(group.lam.get());

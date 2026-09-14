@@ -88,6 +88,7 @@ struct EtherCATSlaveDebugFlags {
     bool pdoSm = false;
     bool dc = false;
     bool pdoConfiguration = false;
+    bool shutdown = false;
 #ifdef TETHER_ENABLE_FSOE
     bool fsoe = false;
     bool fsoeFrame = false;
@@ -124,6 +125,7 @@ public:
     bool pdoSm = false;
     bool dc = false;
     bool pdoConfiguration = false;
+    bool shutdown = false;
 
 #ifdef TETHER_ENABLE_FSOE
     // FSoE-specific debug flags (per-slave filterable)
@@ -152,6 +154,7 @@ public:
     SlaveFilter pdoSmFilt;
     SlaveFilter dcFilt;
     SlaveFilter pdoConfigurationFilt;
+    SlaveFilter shutdownFilt;
 #ifdef TETHER_ENABLE_FSOE
     SlaveFilter fsoeFilt;
     SlaveFilter fsoeFrameFilt;
@@ -173,7 +176,7 @@ public:
         return rxPDO || txPDO || stateMachine || txPackets || rxPackets ||
                fmmu || siiEeprom || eeprom || coeReads || coeWrites || coeRxPackets ||
                coeTxPackets || verifyPreOp || verifySafeOp || pdoSm || dc ||
-               pdoConfiguration
+               pdoConfiguration || shutdown
 #ifdef TETHER_ENABLE_FSOE
                || fsoe || fsoeFrame || fsoeRaw || fsoeWire || fsoeSequence || fsoeCrc
 #endif
@@ -207,6 +210,7 @@ public:
         s.pdoSm         = pdoSm && pdoSmFilt.allows(slave_index);
         s.dc            = dc && dcFilt.allows(slave_index);
         s.pdoConfiguration = pdoConfiguration && pdoConfigurationFilt.allows(slave_index);
+        s.shutdown      = shutdown && shutdownFilt.allows(slave_index);
 #ifdef TETHER_ENABLE_FSOE
         s.fsoe          = fsoe && fsoeFilt.allows(slave_index);
         s.fsoeFrame     = fsoeFrame && fsoeFrameFilt.allows(slave_index);

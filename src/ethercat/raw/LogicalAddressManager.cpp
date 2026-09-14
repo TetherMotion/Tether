@@ -41,7 +41,10 @@ void LogicalAddressManager::deinit() {
     total_rxpdo_bytes_ = 0;
     total_txpdo_bytes_ = 0;
     initialized_ = false;
-    TETHER_LOGI(TAG, "Logical address manager deinitialized");
+    const auto* df = debug_flags_.load(std::memory_order_relaxed);
+    if (df && df->shutdown) {
+        TETHER_LOGI(TAG, "Logical address manager deinitialized");
+    }
 }
 
 // ============================================================================

@@ -216,7 +216,7 @@ static std::vector<uint32_t> generateSweep(uint32_t start_ns, uint32_t stop_ns,
 // ---------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
-    argparse::ArgumentParser program("dc_sync_characterize");
+    argparse::ArgumentParser program("dc_sync_characterize", "1.0", argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addSlaveArg(program);
     Tether::Examples::addDebugArg(program);

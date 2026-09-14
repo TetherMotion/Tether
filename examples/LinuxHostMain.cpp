@@ -219,7 +219,7 @@ static void printUsage(const char* progName) {
     std::printf("  -i, --interface <if>  Network interface name (overrides positional <interface>)\n");
     std::printf("  -f, --freq <Hz>       Cycle frequency in Hz (default: 1000)\n");
     std::printf("  -p, --pcap <file>     Enable PcapNG logging to file\n");
-    std::printf("  -v, --vlan <id>       Use VLAN with specified ID\n");
+    std::printf("  --vlan <id>           Use VLAN with specified ID\n");
     std::printf("  -r, --rtprio <prio>   Real-time priority (default: 80)\n");
     std::printf("  -a, --affinity <cpu>  CPU affinity (default: none)\n");
     std::printf("  -V, --verbose         Verbose output\n");
@@ -243,7 +243,7 @@ static bool parseOptions(int argc, char* argv[], Options& opts) {
     };
     
     int opt;
-    while ((opt = getopt_long(argc, argv, "i:f:p:v:r:a:Vh", longOpts, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "i:f:p:r:a:Vh", longOpts, nullptr)) != -1) {
         switch (opt) {
             case 'i':
                 opts.interface = optarg;
