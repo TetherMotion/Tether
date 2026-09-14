@@ -37,6 +37,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <span>
+#include <string>
 
 #include "tether/drives/Synapticon/SynapticonPDO.hpp"
 #include "tether/fsoe/FSoEDefs.hpp"
@@ -130,6 +132,168 @@ inline BitLabel kTxDiagnosticLabels[] = {
     BitLabel::bit("AnalogDiag",  SynapticonPDO::SOMANET_TxPDO_1B00::kAnalogDiagActive),
     BitLabel::bit("AnalogValid", SynapticonPDO::SOMANET_TxPDO_1B00::kAnalogValueValid),
 };
+
+// ============================================================================
+// Safety-flag indicator label sets (packed 32-bit word)
+// ============================================================================
+//
+// The per-frame indicator packs the two 16-bit TxPDO flag fields into one
+// 32-bit word:  flags = safety_state_flags | (diagnostic_flags << 16).
+// Two label sets are provided for the slave→master direction:
+//
+//   kTxIndicatorLabels         — real SOMANET slave: all status bits are
+//                                one-active (bit=1 → active/reported).
+//   kTxMirroredIndicatorLabels — verbatim-mirroring slave (e.g. the
+//                                SafeMotion emulator): the function-state
+//                                bits are verbatim echoes of the zero-active
+//                                command bits, so they are displayed bitInv.
+//
+// The master→slave direction always uses kRxSafetyLabels.
+
+/// Slave→master indicator labels for a real SOMANET slave — all one-active.
+inline BitLabel kTxIndicatorLabels[] = {
+    // safety_state_flags (low 16 bits)
+    BitLabel::bit("STO",  SynapticonPDO::SOMANET_TxPDO_1B00::kSTOState),
+    BitLabel::bit("SS1",  SynapticonPDO::SOMANET_TxPDO_1B00::kSS1State),
+    BitLabel::bit("SS2",  SynapticonPDO::SOMANET_TxPDO_1B00::kSS2State),
+    BitLabel::bit("SOS",  SynapticonPDO::SOMANET_TxPDO_1B00::kSOSState),
+    BitLabel::bit("SLS1", SynapticonPDO::SOMANET_TxPDO_1B00::kSLSInstance1),
+    BitLabel::bit("SLS2", SynapticonPDO::SOMANET_TxPDO_1B00::kSLSInstance2),
+    BitLabel::bit("SLS3", SynapticonPDO::SOMANET_TxPDO_1B00::kSLSInstance3),
+    BitLabel::bit("SLS4", SynapticonPDO::SOMANET_TxPDO_1B00::kSLSInstance4),
+    BitLabel::bit("Err",  SynapticonPDO::SOMANET_TxPDO_1B00::kErrorState),
+    // diagnostic_flags (high 16 bits)
+    BitLabel::bit("SBC",          SynapticonPDO::SOMANET_TxPDO_1B00::kSBCState << 16),
+    BitLabel::bit("RestartAckReq", SynapticonPDO::SOMANET_TxPDO_1B00::kRestartAckReq << 16),
+    BitLabel::bit("TempWarn",     SynapticonPDO::SOMANET_TxPDO_1B00::kTemperatureWarning << 16),
+    BitLabel::bit("SafePosValid", SynapticonPDO::SOMANET_TxPDO_1B00::kSafePositionValid << 16),
+    BitLabel::bit("SafeSpdValid", SynapticonPDO::SOMANET_TxPDO_1B00::kSafeSpeedValid << 16),
+    BitLabel::bit("In1",      SynapticonPDO::SOMANET_TxPDO_1B00::kSafeInput1 << 16),
+    BitLabel::bit("In2",      SynapticonPDO::SOMANET_TxPDO_1B00::kSafeInput2 << 16),
+    BitLabel::bit("In3",      SynapticonPDO::SOMANET_TxPDO_1B00::kSafeInput3 << 16),
+    BitLabel::bit("In4",      SynapticonPDO::SOMANET_TxPDO_1B00::kSafeInput4 << 16),
+    BitLabel::bit("OutMon1",  SynapticonPDO::SOMANET_TxPDO_1B00::kSafeOutputMonitor1 << 16),
+    BitLabel::bit("OutMon2",  SynapticonPDO::SOMANET_TxPDO_1B00::kSafeOutputMonitor2 << 16),
+    BitLabel::bit("AnalogDiag",  SynapticonPDO::SOMANET_TxPDO_1B00::kAnalogDiagActive << 16),
+    BitLabel::bit("AnalogValid", SynapticonPDO::SOMANET_TxPDO_1B00::kAnalogValueValid << 16),
+};
+
+/// Slave→master indicator labels for a verbatim-mirroring slave (the
+/// SafeMotion emulator, which echoes the command bits via
+/// SafeMotion::Codec::kStatusBitMirrors).  The echoed function-state bits
+/// keep the command's zero-active convention — 0 means the function is
+/// active — so they are displayed bitInv.  Genuine slave status bits are
+/// one-active.
+inline BitLabel kTxMirroredIndicatorLabels[] = {
+    // Function-request echoes — zero-active (verbatim mirror of cmd bits)
+    BitLabel::bitInv("STO",  SynapticonPDO::SOMANET_TxPDO_1B00::kSTOState),
+    BitLabel::bitInv("SS1",  SynapticonPDO::SOMANET_TxPDO_1B00::kSS1State),
+    BitLabel::bitInv("SS2",  SynapticonPDO::SOMANET_TxPDO_1B00::kSS2State),
+    BitLabel::bitInv("SOS",  SynapticonPDO::SOMANET_TxPDO_1B00::kSOSState),
+    BitLabel::bitInv("SLS1", SynapticonPDO::SOMANET_TxPDO_1B00::kSLSInstance1),
+    BitLabel::bitInv("SLS2", SynapticonPDO::SOMANET_TxPDO_1B00::kSLSInstance2),
+    BitLabel::bitInv("SLS3", SynapticonPDO::SOMANET_TxPDO_1B00::kSLSInstance3),
+    BitLabel::bitInv("SLS4", SynapticonPDO::SOMANET_TxPDO_1B00::kSLSInstance4),
+    BitLabel::bitInv("SBC",  SynapticonPDO::SOMANET_TxPDO_1B00::kSBCState << 16),
+    // Genuine slave status — one-active
+    BitLabel::bit("Err",           SynapticonPDO::SOMANET_TxPDO_1B00::kErrorState),
+    BitLabel::bit("RestartAckReq", SynapticonPDO::SOMANET_TxPDO_1B00::kRestartAckReq << 16),
+    BitLabel::bit("TempWarn",      SynapticonPDO::SOMANET_TxPDO_1B00::kTemperatureWarning << 16),
+    BitLabel::bit("SafePosValid",  SynapticonPDO::SOMANET_TxPDO_1B00::kSafePositionValid << 16),
+    BitLabel::bit("SafeSpdValid",  SynapticonPDO::SOMANET_TxPDO_1B00::kSafeSpeedValid << 16),
+    BitLabel::bit("In1",      SynapticonPDO::SOMANET_TxPDO_1B00::kSafeInput1 << 16),
+    BitLabel::bit("In2",      SynapticonPDO::SOMANET_TxPDO_1B00::kSafeInput2 << 16),
+    BitLabel::bit("In3",      SynapticonPDO::SOMANET_TxPDO_1B00::kSafeInput3 << 16),
+    BitLabel::bit("In4",      SynapticonPDO::SOMANET_TxPDO_1B00::kSafeInput4 << 16),
+    BitLabel::bit("OutMon1",  SynapticonPDO::SOMANET_TxPDO_1B00::kSafeOutputMonitor1 << 16),
+    BitLabel::bit("OutMon2",  SynapticonPDO::SOMANET_TxPDO_1B00::kSafeOutputMonitor2 << 16),
+    BitLabel::bit("AnalogDiag",  SynapticonPDO::SOMANET_TxPDO_1B00::kAnalogDiagActive << 16),
+    BitLabel::bit("AnalogValid", SynapticonPDO::SOMANET_TxPDO_1B00::kAnalogValueValid << 16),
+};
+
+// ============================================================================
+// Indicator helpers
+// ============================================================================
+
+/// Extract the packed flags word for the indicator from a raw FSoE frame.
+/// The frame layout (both directions) starts with the FSoE command byte;
+/// the safe data follows with CRC words interleaved:
+///   command frame (11 B): [0]=cmd [1-2]=safety_flags [3-4]=crc0 ...
+///   status frame (31 B):  [0]=cmd [1-2]=safety_state [3-4]=crc0
+///                         [5-6]=diagnostic_flags ...
+/// @param data            Raw FSoE frame bytes.
+/// @param slave_to_master true for the slave→master (TxPDO 0x1B00) layout.
+inline uint32_t indicatorFlags(const uint8_t* data, bool slave_to_master) {
+    if (slave_to_master) {
+        const auto* f =
+            reinterpret_cast<const SynapticonPDO::SOMANET_TxPDO_1B00*>(data);
+        return f->safety_state_flags |
+               (static_cast<uint32_t>(f->diagnostic_flags) << 16);
+    }
+    const auto* f = reinterpret_cast<const SynapticonPDO::SOMANET_RxPDO_1700*>(data);
+    return f->safety_flags;
+}
+
+/// "Known" flag-bit coverage for the opt-in unknown-bits report: the FULL
+/// PDO flag definitions, so defined bits the indicator doesn't display are
+/// not reported as unknown.
+inline uint32_t indicatorKnownMask(bool slave_to_master) {
+    if (slave_to_master) {
+        return ColoredBitsetFormatter::labelCoverage(kTxSafetyStateLabels) |
+               (ColoredBitsetFormatter::labelCoverage(kTxDiagnosticLabels) << 16);
+    }
+    return ColoredBitsetFormatter::labelCoverage(kRxSafetyLabels);
+}
+
+/// Format the safety-flag indicator as a "[NAME=ON NAME=OFF ...]" string.
+/// Unknown set bits (outside the PDO flag definitions) are appended as
+/// "Unknown:i,j,...".  Returns an empty string for non-process-data
+/// frames — Session/Connection/Parameter/Reset carry protocol or
+/// parameter payloads in the safe-data area, not safety flags.
+///
+/// @param data            Raw FSoE frame bytes.
+/// @param slave_to_master Frame direction (selects the PDO layout).
+/// @param tx_labels       Label set for the slave→master direction —
+///                        kTxIndicatorLabels for a real slave,
+///                        kTxMirroredIndicatorLabels for a verbatim-
+///                        mirroring (emulated) slave.
+/// @param color           Emit ANSI colors via ColoredBitsetFormatter
+///                        (pass isatty(STDOUT_FILENO) for stream output).
+inline std::string formatSafetyIndicator(const uint8_t* data,
+                                         bool slave_to_master,
+                                         std::span<const BitLabel> tx_labels,
+                                         bool color) {
+    if (data[0] != FSoE::Command::ProcessData &&
+        data[0] != FSoE::Command::FailSafeData) {
+        return {};
+    }
+    const uint32_t flags = indicatorFlags(data, slave_to_master);
+    const uint32_t known = indicatorKnownMask(slave_to_master);
+    const std::span<const BitLabel> labels =
+        slave_to_master ? tx_labels
+                        : std::span<const BitLabel>{kRxSafetyLabels};
+
+    if (color) {
+        const ColoredBitsetFormatter fmt{labels};
+        return "[" + fmt.format(flags, " ", known) + "]";
+    }
+    std::string s = "[";
+    bool first = true;
+    for (const auto& label : labels) {
+        if (!first) s += ' ';
+        first = false;
+        s += label.name;
+        s += label.isActive(flags) ? "=ON" : "=OFF";
+    }
+    if (const std::string unk =
+            ColoredBitsetFormatter::formatUnknownBits(flags, known);
+        !unk.empty()) {
+        s += ' ';
+        s += unk;
+    }
+    s += "]";
+    return s;
+}
 
 // ============================================================================
 // Low-level formatting helpers
@@ -275,8 +439,10 @@ inline void dumpTxPDOSummary(const char* tag,
     char hex[128];
     formatHex(hex, sizeof(hex), reinterpret_cast<const uint8_t*>(&tx), sizeof(tx));
     TETHER_LOGI(tag, "[TxPDO-FSoE slave→master] changed: {}  {}  cmd={}  | {}",
-                sflags_fmt.format(tx.safety_state_flags),
-                dflags_fmt.format(tx.diagnostic_flags),
+                sflags_fmt.format(tx.safety_state_flags, " ",
+                    ColoredBitsetFormatter::labelCoverage(kTxSafetyStateLabels)),
+                dflags_fmt.format(tx.diagnostic_flags, " ",
+                    ColoredBitsetFormatter::labelCoverage(kTxDiagnosticLabels)),
                 FSoE::fsoeCommandName(tx.fsoe_command), hex);
 }
 
@@ -288,7 +454,8 @@ inline void dumpRxPDOSummary(const char* tag,
     char hex[128];
     formatHex(hex, sizeof(hex), reinterpret_cast<const uint8_t*>(&rx), sizeof(rx));
     TETHER_LOGI(tag, "[RxPDO-FSoE master→slave] changed: {}  cmd={}  | {}",
-                safety_fmt.format(rx.safety_flags),
+                safety_fmt.format(rx.safety_flags, " ",
+                    ColoredBitsetFormatter::labelCoverage(kRxSafetyLabels)),
                 FSoE::fsoeCommandName(rx.fsoe_command), hex);
 }
 
