@@ -100,14 +100,14 @@ static std::atomic<bool> g_cancel{false};
 // Device classification — each slave is assigned to exactly one family
 // ============================================================================
 
-enum class Fam : uint8_t {
+enum class DeviceFamily : uint8_t {
     None, Input, Output, Combined, AnalogIn, AnalogOut, Position,
     Stepper, Drive, Pwm, Pulse, DcMotor, PowerMeter, Oversampling,
     Comm, Safety,
 };
 
-struct FamDef {
-    Fam                                   fam;
+struct DeviceFamilyEntry {
+    DeviceFamily                                   family;
     std::span<const Beckhoff::DeviceIdentity> registry;
     const char*                           label;
     const char*                           example;
@@ -117,53 +117,53 @@ struct FamDef {
 // More specific/capable families precede generic digital I/O so devices
 // registered in both (e.g. EL2034 outputs + diagnostics, timestamped
 // EL125x inputs) land in CombinedIo.
-static const FamDef kFamilies[] = {
-    {Fam::Safety,       Beckhoff::Devices::kSafetyTerminals,
+static const DeviceFamilyEntry kDeviceFamilies[] = {
+    {DeviceFamily::Safety,       Beckhoff::Devices::kSafetyTerminals,
      "TwinSAFE FSoE",      "beckhoff_safety_monitor"},
-    {Fam::Comm,         Beckhoff::Devices::kCommTerminals,
+    {DeviceFamily::Comm,         Beckhoff::Devices::kCommTerminals,
      "serial/IO-Link",     "beckhoff_serial_bridge"},
-    {Fam::Oversampling, Beckhoff::Devices::kOversamplingTerminals,
+    {DeviceFamily::Oversampling, Beckhoff::Devices::kOversamplingTerminals,
      "oversampling",       "beckhoff_oversampling_monitor"},
-    {Fam::PowerMeter,   Beckhoff::Devices::kPowerMeterTerminals,
+    {DeviceFamily::PowerMeter,   Beckhoff::Devices::kPowerMeterTerminals,
      "power measurement",  "beckhoff_power_meter"},
-    {Fam::DcMotor,      Beckhoff::Devices::kDcMotorTerminals,
+    {DeviceFamily::DcMotor,      Beckhoff::Devices::kDcMotorTerminals,
      "DC motor",           "beckhoff_dcmotor_jog"},
-    {Fam::Drive,        Beckhoff::Devices::kCompactDriveTerminals,
+    {DeviceFamily::Drive,        Beckhoff::Devices::kCompactDriveTerminals,
      "CiA402 drive",       "beckhoff_drive_move"},
-    {Fam::Stepper,      Beckhoff::Devices::kStepperTerminals,
+    {DeviceFamily::Stepper,      Beckhoff::Devices::kStepperTerminals,
      "POS stepper",        "beckhoff_stepper_jog"},
-    {Fam::Pulse,        Beckhoff::Devices::kPulseTrainTerminals,
+    {DeviceFamily::Pulse,        Beckhoff::Devices::kPulseTrainTerminals,
      "pulse-train",        "beckhoff_pulse_jog"},
-    {Fam::Pwm,          Beckhoff::Devices::kPwmTerminals,
+    {DeviceFamily::Pwm,          Beckhoff::Devices::kPwmTerminals,
      "PWM",                "beckhoff_pwm_sweep"},
-    {Fam::Position,     Beckhoff::Devices::kPositionInputTerminals,
+    {DeviceFamily::Position,     Beckhoff::Devices::kPositionInputTerminals,
      "position/encoder",   "beckhoff_position_monitor"},
-    {Fam::AnalogOut,    Beckhoff::Devices::kAnalogOutputTerminals,
+    {DeviceFamily::AnalogOut,    Beckhoff::Devices::kAnalogOutputTerminals,
      "analog output",      "beckhoff_analog_output_sweep"},
-    {Fam::AnalogIn,     Beckhoff::Devices::kAnalogInputTerminals,
+    {DeviceFamily::AnalogIn,     Beckhoff::Devices::kAnalogInputTerminals,
      "analog input",       "beckhoff_analog_input_monitor"},
-    {Fam::Combined,     Beckhoff::Devices::kCombinedIoTerminals,
+    {DeviceFamily::Combined,     Beckhoff::Devices::kCombinedIoTerminals,
      "combined I/O",       "beckhoff_combined_io_toggle"},
-    {Fam::Output,       Beckhoff::Devices::kOutputTerminals,
+    {DeviceFamily::Output,       Beckhoff::Devices::kOutputTerminals,
      "digital output",     "beckhoff_output_toggle"},
-    {Fam::Input,        Beckhoff::Devices::kInputTerminals,
+    {DeviceFamily::Input,        Beckhoff::Devices::kInputTerminals,
      "digital input",      "beckhoff_input_monitor"},
 };
 
 struct SlaveClass {
-    Fam                              fam = Fam::None;
-    const Beckhoff::DeviceIdentity*  id  = nullptr;
-    const FamDef*                    def = nullptr;
+    DeviceFamily                              family = DeviceFamily::None;
+    const Beckhoff::DeviceIdentity*  identity  = nullptr;
+    const DeviceFamilyEntry*                    entry = nullptr;
 };
 
 static SlaveClass classify(const DiscoveredSlave& s) {
     const uint32_t vendor  = s.vendor_id ? *s.vendor_id : 0;
     const uint32_t product = s.product_code ? *s.product_code : 0;
     if (!product) return {};
-    for (const auto& f : kFamilies) {
-        for (const auto& id : f.registry) {
-            if (id.product_code == product && id.vendor_id == vendor)
-                return {f.fam, &id, &f};
+    for (const auto& f : kDeviceFamilies) {
+        for (const auto& identity : f.registry) {
+            if (identity.product_code == product && identity.vendor_id == vendor)
+                return {f.family, &identity, &f};
         }
     }
     return {};
@@ -221,31 +221,31 @@ static size_t moduleOf(const Chain& c, uint16_t slave) {
 /// dedicated group; phase C requests OP on all devices.
 static void bringUp(EtherCAT::Master& master,
                     std::span<const DiscoveredSlave> slaves,
-                    const std::map<uint16_t, SlaveClass>& cls,
-                    Drivers& d) {
+                    const std::map<uint16_t, SlaveClass>& assignments,
+                    Drivers& drivers) {
     using Beckhoff::StartOptions;
     namespace Dev = Beckhoff::Devices;
 
-    auto of = [&](Fam f) {
+    auto of = [&](DeviceFamily f) {
         std::vector<DiscoveredSlave> out;
         for (const auto& s : slaves) {
-            auto it = cls.find(s.index);
-            if (it != cls.end() && it->second.fam == f) out.push_back(s);
+            auto it = assignments.find(s.index);
+            if (it != assignments.end() && it->second.family == f) out.push_back(s);
         }
         return out;
     };
     auto idOf = [&](uint16_t idx) -> const Beckhoff::DeviceIdentity* {
-        auto it = cls.find(idx);
-        return it != cls.end() ? it->second.id : nullptr;
+        auto it = assignments.find(idx);
+        return it != assignments.end() ? it->second.identity : nullptr;
     };
     auto fail = [&](uint16_t idx, const char* what, Beckhoff::Error e) {
-        d.errors[idx] = std::string(what) + ": " + Beckhoff::errorToString(e);
+        drivers.errors[idx] = std::string(what) + ": " + Beckhoff::errorToString(e);
         TETHER_LOGW(TAG, "slave {}: {}: {}", idx, what,
                     Beckhoff::errorToString(e));
     };
 
     // ---- Phase A: configure -------------------------------------------------
-    auto chainCfg = [&](auto& opt, Fam f,
+    auto chainCfg = [&](auto& opt, DeviceFamily f,
                         std::span<const Beckhoff::DeviceIdentity> reg,
                         const char* name) {
         auto scan = of(f);
@@ -258,19 +258,19 @@ static void bringUp(EtherCAT::Master& master,
                  name, r.error());
             return;
         }
-        if (opt->pdoManager()) d.groups.push_back(opt->pdoManager());
+        if (opt->pdoManager()) drivers.groups.push_back(opt->pdoManager());
         TETHER_LOGI(TAG, "{}: {} device(s) configured", name,
                     opt->moduleCount());
     };
 
-    chainCfg(d.din,   Fam::Input,     Dev::kInputTerminals,         "inputs");
-    chainCfg(d.dout,  Fam::Output,    Dev::kOutputTerminals,        "outputs");
-    chainCfg(d.combo, Fam::Combined,  Dev::kCombinedIoTerminals,    "combo-io");
-    chainCfg(d.ain,   Fam::AnalogIn,  Dev::kAnalogInputTerminals,   "analog-in");
-    chainCfg(d.aout,  Fam::AnalogOut, Dev::kAnalogOutputTerminals,  "analog-out");
-    chainCfg(d.pos,   Fam::Position,  Dev::kPositionInputTerminals, "position");
+    chainCfg(drivers.din,   DeviceFamily::Input,     Dev::kInputTerminals,         "inputs");
+    chainCfg(drivers.dout,  DeviceFamily::Output,    Dev::kOutputTerminals,        "outputs");
+    chainCfg(drivers.combo, DeviceFamily::Combined,  Dev::kCombinedIoTerminals,    "combo-io");
+    chainCfg(drivers.ain,   DeviceFamily::AnalogIn,  Dev::kAnalogInputTerminals,   "analog-in");
+    chainCfg(drivers.aout,  DeviceFamily::AnalogOut, Dev::kAnalogOutputTerminals,  "analog-out");
+    chainCfg(drivers.pos,   DeviceFamily::Position,  Dev::kPositionInputTerminals, "position");
 
-    auto singleCfg = [&](auto& vec, Fam f, const char* name) {
+    auto singleCfg = [&](auto& vec, DeviceFamily f, const char* name) {
         for (const auto& s : of(f)) {
             vec.push_back(std::make_unique<typename
                 std::remove_reference_t<decltype(vec)>::value_type::element_type>(
@@ -280,26 +280,26 @@ static void bringUp(EtherCAT::Master& master,
         }
     };
 
-    singleCfg(d.steppers,  Fam::Stepper,      "stepper");
-    singleCfg(d.drives,    Fam::Drive,        "drive");
-    singleCfg(d.pwms,      Fam::Pwm,          "pwm");
-    singleCfg(d.pulses,    Fam::Pulse,        "pulse-train");
-    singleCfg(d.dcmotors,  Fam::DcMotor,      "dc-motor");
-    singleCfg(d.meters,    Fam::PowerMeter,   "power-meter");
-    singleCfg(d.overs,     Fam::Oversampling, "oversampling");
-    singleCfg(d.comms,     Fam::Comm,         "comm");
+    singleCfg(drivers.steppers,  DeviceFamily::Stepper,      "stepper");
+    singleCfg(drivers.drives,    DeviceFamily::Drive,        "drive");
+    singleCfg(drivers.pwms,      DeviceFamily::Pwm,          "pwm");
+    singleCfg(drivers.pulses,    DeviceFamily::Pulse,        "pulse-train");
+    singleCfg(drivers.dcmotors,  DeviceFamily::DcMotor,      "dc-motor");
+    singleCfg(drivers.meters,    DeviceFamily::PowerMeter,   "power-meter");
+    singleCfg(drivers.overs,     DeviceFamily::Oversampling, "oversampling");
+    singleCfg(drivers.comms,     DeviceFamily::Comm,         "comm");
 
-    const bool any = d.din || d.dout || d.combo || d.ain || d.aout || d.pos
-                  || !d.steppers.empty() || !d.drives.empty() || !d.pwms.empty()
-                  || !d.pulses.empty() || !d.dcmotors.empty()
-                  || !d.meters.empty() || !d.overs.empty() || !d.comms.empty();
+    const bool any = drivers.din || drivers.dout || drivers.combo || drivers.ain || drivers.aout || drivers.pos
+                  || !drivers.steppers.empty() || !drivers.drives.empty() || !drivers.pwms.empty()
+                  || !drivers.pulses.empty() || !drivers.dcmotors.empty()
+                  || !drivers.meters.empty() || !drivers.overs.empty() || !drivers.comms.empty();
     if (!any) {
         TETHER_LOGW(TAG, "no recognized terminals — tree view only");
         return;
     }
 
     // ---- Phase B: one RT loop exchanging every group ------------------------
-    auto* groups = &d.groups;
+    auto* groups = &drivers.groups;
     master.setMotionControlCallback(
         [&master, groups](double) {
             master.pdo().exchangeAll();
@@ -323,16 +323,16 @@ static void bringUp(EtherCAT::Master& master,
         // in the exchange list.  start() would otherwise retry configure
         // and, on late success, create a group nobody exchanges.
         if (!opt || !opt->pdoManager()
-            || std::find(d.groups.begin(), d.groups.end(),
-                         opt->pdoManager()) == d.groups.end()) return;
+            || std::find(drivers.groups.begin(), drivers.groups.end(),
+                         opt->pdoManager()) == drivers.groups.end()) return;
         if (auto r = opt->start(noLoop); !r)
             fail(opt->slaveIndex(opt->lastErrorModule() == SIZE_MAX
                      ? 0 : opt->lastErrorModule()),
                  name, r.error());
     };
-    chainOp(d.din, "inputs");   chainOp(d.dout, "outputs");
-    chainOp(d.combo, "combo");  chainOp(d.ain, "analog-in");
-    chainOp(d.aout, "analog-out"); chainOp(d.pos, "position");
+    chainOp(drivers.din, "inputs");   chainOp(drivers.dout, "outputs");
+    chainOp(drivers.combo, "combo");  chainOp(drivers.ain, "analog-in");
+    chainOp(drivers.aout, "analog-out"); chainOp(drivers.pos, "position");
 
     auto singleOp = [&](auto& vec, const char* name) {
         for (auto& t : vec) {
@@ -340,10 +340,10 @@ static void bringUp(EtherCAT::Master& master,
                 fail(t->slaveIndex(), name, r.error());
         }
     };
-    singleOp(d.steppers, "stepper");   singleOp(d.drives, "drive");
-    singleOp(d.pwms, "pwm");           singleOp(d.pulses, "pulse-train");
-    singleOp(d.dcmotors, "dc-motor");  singleOp(d.meters, "power-meter");
-    singleOp(d.overs, "oversampling"); singleOp(d.comms, "comm");
+    singleOp(drivers.steppers, "stepper");   singleOp(drivers.drives, "drive");
+    singleOp(drivers.pwms, "pwm");           singleOp(drivers.pulses, "pulse-train");
+    singleOp(drivers.dcmotors, "dc-motor");  singleOp(drivers.meters, "power-meter");
+    singleOp(drivers.overs, "oversampling"); singleOp(drivers.comms, "comm");
 }
 
 // ============================================================================
@@ -404,8 +404,8 @@ struct UiState {
     std::map<uint16_t, uint64_t>              prevBits;
 };
 
-static void renderLive(WINDOW* w, int& row, uint16_t slave, Fam fam,
-                       Drivers& d, UiState& ui, const std::string& iface) {
+static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
+                       Drivers& drivers, UiState& uiState, const std::string& iface) {
     using namespace Beckhoff;
 
     auto hint = [&](const char* s) {
@@ -415,23 +415,23 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, Fam fam,
         wattroff(w, COLOR_PAIR(TUI::PalHint));
     };
     auto errLine = [&]() {
-        auto it = d.errors.find(slave);
-        if (it == d.errors.end()) return;
+        auto it = drivers.errors.find(slave);
+        if (it == drivers.errors.end()) return;
         wattron(w, COLOR_PAIR(TUI::PalError));
         mvwprintw(w, row++, 1, "bring-up: %s", it->second.c_str());
         wattroff(w, COLOR_PAIR(TUI::PalError));
     };
 
-    switch (fam) {
-    case Fam::Input: {
-        if (!d.din) break;
-        const size_t m = moduleOf(*d.din, slave);
+    switch (family) {
+    case DeviceFamily::Input: {
+        if (!drivers.din) break;
+        const size_t m = moduleOf(*drivers.din, slave);
         if (m == SIZE_MAX) break;
-        const auto& mod = d.din->module(m);
+        const auto& mod = drivers.din->module(m);
         put(w, row, "channels: %zu", mod.bitCount());
         bitRow(w, row++, "in:", mod.bitCount(),
                [&](size_t k) { return mod.bit(k); });
-        auto& tr = ui.transitions[slave];
+        auto& tr = uiState.transitions[slave];
         if (tr.size() == mod.bitCount()) {
             mvwprintw(w, row, 1, "chg:");
             for (size_t k = 0; k < mod.bitCount() && k < 40; ++k)
@@ -440,22 +440,22 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, Fam fam,
         }
         break;
     }
-    case Fam::Output: {
-        if (!d.dout) break;
-        const size_t m = moduleOf(*d.dout, slave);
+    case DeviceFamily::Output: {
+        if (!drivers.dout) break;
+        const size_t m = moduleOf(*drivers.dout, slave);
         if (m == SIZE_MAX) break;
-        const auto& mod = d.dout->module(m);
+        const auto& mod = drivers.dout->module(m);
         put(w, row, "channels: %zu", mod.bitCount());
         bitRow(w, row++, "out:", mod.bitCount(),
                [&](size_t k) { return mod.bit(k); });
         hint("1-9: toggle ch  a: all on  o: all off");
         break;
     }
-    case Fam::Combined: {
-        if (!d.combo) break;
-        const size_t m = moduleOf(*d.combo, slave);
+    case DeviceFamily::Combined: {
+        if (!drivers.combo) break;
+        const size_t m = moduleOf(*drivers.combo, slave);
         if (m == SIZE_MAX) break;
-        const auto& mod = d.combo->module(m);
+        const auto& mod = drivers.combo->module(m);
         put(w, row, "in: %zu  out: %zu",
             mod.inputChannelCount(), mod.outputChannelCount());
         bitRow(w, row++, "in:", mod.inputChannelCount(),
@@ -465,11 +465,11 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, Fam fam,
         hint("1-9: toggle out  o: all off");
         break;
     }
-    case Fam::AnalogIn: {
-        if (!d.ain) break;
-        const size_t m = moduleOf(*d.ain, slave);
+    case DeviceFamily::AnalogIn: {
+        if (!drivers.ain) break;
+        const size_t m = moduleOf(*drivers.ain, slave);
         if (m == SIZE_MAX) break;
-        const auto& mod = d.ain->module(m);
+        const auto& mod = drivers.ain->module(m);
         for (size_t k = 0; k < mod.channelCount(); ++k) {
             if (mod.hasStatus(k))
                 put(w, row, "ch%zu: %11d   (status 0x%04X)",
@@ -479,12 +479,12 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, Fam fam,
         }
         break;
     }
-    case Fam::AnalogOut: {
-        if (!d.aout) break;
-        const size_t m = moduleOf(*d.aout, slave);
+    case DeviceFamily::AnalogOut: {
+        if (!drivers.aout) break;
+        const size_t m = moduleOf(*drivers.aout, slave);
         if (m == SIZE_MAX) break;
-        const auto& mod = d.aout->module(m);
-        size_t& sel = ui.sel[slave];
+        const auto& mod = drivers.aout->module(m);
+        size_t& sel = uiState.sel[slave];
         if (sel >= mod.channelCount()) sel = 0;
         for (size_t k = 0; k < mod.channelCount(); ++k) {
             if (k == sel) wattron(w, A_REVERSE);
@@ -495,11 +495,11 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, Fam fam,
         hint("[/]: channel  +/-: value  0: zero all");
         break;
     }
-    case Fam::Position: {
-        if (!d.pos) break;
-        const size_t m = moduleOf(*d.pos, slave);
+    case DeviceFamily::Position: {
+        if (!drivers.pos) break;
+        const size_t m = moduleOf(*drivers.pos, slave);
         if (m == SIZE_MAX) break;
-        const auto& mod = d.pos->module(m);
+        const auto& mod = drivers.pos->module(m);
         for (size_t k = 0; k < mod.channelCount(); ++k) {
             put(w, row, "ch%zu: pos %lld",
                 k, static_cast<long long>(mod.position(k)));
@@ -509,8 +509,8 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, Fam fam,
         }
         break;
     }
-    case Fam::Stepper: {
-        auto* t = findBySlave(d.steppers, slave);
+    case DeviceFamily::Stepper: {
+        auto* t = findBySlave(drivers.steppers, slave);
         if (!t) break;
         put(w, row, "status 0x%04X  enc 0x%04X",
             t->stmStatusWord(), t->encStatusWord());
@@ -527,11 +527,11 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, Fam fam,
         hint("e: enable  +/-: velocity  0: stop  x: reset");
         break;
     }
-    case Fam::Drive: {
-        auto* t = findBySlave(d.drives, slave);
+    case DeviceFamily::Drive: {
+        auto* t = findBySlave(drivers.drives, slave);
         if (!t) break;
         size_t sel = 0;
-        if (auto it = ui.sel.find(slave); it != ui.sel.end())
+        if (auto it = uiState.sel.find(slave); it != uiState.sel.end())
             sel = it->second;
         for (size_t a = 0; a < t->axisCount(); ++a) {
             put(w, row, "%s axis %zu  sw 0x%04X  %s",
@@ -546,11 +546,11 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, Fam fam,
         hint("e: enable step  d: disable  +/-: velocity  0: stop");
         break;
     }
-    case Fam::Pwm: {
-        auto* t = findBySlave(d.pwms, slave);
+    case DeviceFamily::Pwm: {
+        auto* t = findBySlave(drivers.pwms, slave);
         if (!t) break;
         size_t sel = 0;
-        if (auto it = ui.sel.find(slave); it != ui.sel.end())
+        if (auto it = uiState.sel.find(slave); it != uiState.sel.end())
             sel = it->second;
         for (size_t c = 0; c < t->channelCount(); ++c) {
             put(w, row, "%s ch%zu: duty %-5u%s%s%s",
@@ -563,11 +563,11 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, Fam fam,
         hint("[/]: channel  +/-: duty  e: enable  0: off");
         break;
     }
-    case Fam::Pulse: {
-        auto* t = findBySlave(d.pulses, slave);
+    case DeviceFamily::Pulse: {
+        auto* t = findBySlave(drivers.pulses, slave);
         if (!t) break;
         size_t sel = 0;
-        if (auto it = ui.sel.find(slave); it != ui.sel.end())
+        if (auto it = uiState.sel.find(slave); it != uiState.sel.end())
             sel = it->second;
         for (size_t c = 0; c < t->channelCount(); ++c) {
             put(w, row, "%s ch%zu: freq %-6u%s%s%s",
@@ -583,11 +583,11 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, Fam fam,
         hint("[/]: channel  +/-: freq  f/r: dir  0: stop");
         break;
     }
-    case Fam::DcMotor: {
-        auto* t = findBySlave(d.dcmotors, slave);
+    case DeviceFamily::DcMotor: {
+        auto* t = findBySlave(drivers.dcmotors, slave);
         if (!t) break;
         size_t sel = 0;
-        if (auto it = ui.sel.find(slave); it != ui.sel.end())
+        if (auto it = uiState.sel.find(slave); it != uiState.sel.end())
             sel = it->second;
         for (size_t a = 0; a < t->axisCount(); ++a) {
             put(w, row, "%s ax%zu: sw 0x%04X rdyE %d rdy %d warn %d err %d",
@@ -601,8 +601,8 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, Fam fam,
         hint("[/]: axis  e: enable  +/-: velocity  0: stop  x: reset");
         break;
     }
-    case Fam::PowerMeter: {
-        auto* t = findBySlave(d.meters, slave);
+    case DeviceFamily::PowerMeter: {
+        auto* t = findBySlave(drivers.meters, slave);
         if (!t) break;
         for (size_t p = 0; p < t->phaseCount(); ++p) {
             auto v = t->voltage(p), i = t->current(p),
@@ -617,8 +617,8 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, Fam fam,
             hint("+/-: index selector 0");
         break;
     }
-    case Fam::Oversampling: {
-        auto* t = findBySlave(d.overs, slave);
+    case DeviceFamily::Oversampling: {
+        auto* t = findBySlave(drivers.overs, slave);
         if (!t) break;
         for (size_t c = 0; c < t->channels(); ++c) {
             const size_t n = t->samplesPerCycle(c);
@@ -634,8 +634,8 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, Fam fam,
         }
         break;
     }
-    case Fam::Comm: {
-        auto* t = findBySlave(d.comms, slave);
+    case DeviceFamily::Comm: {
+        auto* t = findBySlave(drivers.comms, slave);
         if (!t) break;
         for (size_t c = 0; c < t->channels(); ++c) {
             put(w, row, "ch%zu: ctrl 0x%04X  stat 0x%04X  fifo %zu/%zu",
@@ -658,7 +658,7 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, Fam fam,
         hint("t: transmit test bytes");
         break;
     }
-    case Fam::Safety:
+    case DeviceFamily::Safety:
         ++row;
         put(w, row, "TwinSAFE needs FSoE master config");
         put(w, row, "run: ./beckhoff_safety_monitor -i %s "
@@ -681,66 +681,66 @@ static int& stepperVel(uint16_t s)   { return g_vel[s]; }
 static int& axisVel(uint16_t s)      { return g_vel[0x8000 | s]; }
 static int& meterIndexSel(uint16_t s){ return g_idx[s]; }
 
-static bool handleKey(int key, uint16_t slave, Fam fam,
-                      Drivers& d, UiState& ui) {
+static bool handleKey(int key, uint16_t slave, DeviceFamily family,
+                      Drivers& drivers, UiState& uiState) {
     using namespace Beckhoff;
 
-    switch (fam) {
-    case Fam::Output: {
-        if (!d.dout) return false;
-        const size_t m = moduleOf(*d.dout, slave);
+    switch (family) {
+    case DeviceFamily::Output: {
+        if (!drivers.dout) return false;
+        const size_t m = moduleOf(*drivers.dout, slave);
         if (m == SIZE_MAX) return false;
-        const size_t base = d.dout->bitOffset(m);
-        const size_t n    = d.dout->module(m).bitCount();
+        const size_t base = drivers.dout->bitOffset(m);
+        const size_t n    = drivers.dout->module(m).bitCount();
         if (key >= '1' && key <= '9' && size_t(key - '1') < n) {
             const size_t ch = base + size_t(key - '1');
-            d.dout->setBit(ch, !d.dout->bit(ch));
+            drivers.dout->setBit(ch, !drivers.dout->bit(ch));
             return true;
         }
-        if (key == 'a') { d.dout->allOn();  return true; }
-        if (key == 'o') { d.dout->allOff(); return true; }
+        if (key == 'a') { drivers.dout->allOn();  return true; }
+        if (key == 'o') { drivers.dout->allOff(); return true; }
         return false;
     }
-    case Fam::Combined: {
-        if (!d.combo) return false;
-        const size_t m = moduleOf(*d.combo, slave);
+    case DeviceFamily::Combined: {
+        if (!drivers.combo) return false;
+        const size_t m = moduleOf(*drivers.combo, slave);
         if (m == SIZE_MAX) return false;
-        const size_t base = d.combo->outputOffset(m);
-        const size_t n    = d.combo->module(m).outputChannelCount();
+        const size_t base = drivers.combo->outputOffset(m);
+        const size_t n    = drivers.combo->module(m).outputChannelCount();
         if (key >= '1' && key <= '9' && size_t(key - '1') < n) {
             const size_t ch = base + size_t(key - '1');
-            d.combo->setOutput(ch, !d.combo->output(ch));
+            drivers.combo->setOutput(ch, !drivers.combo->output(ch));
             return true;
         }
-        if (key == 'o') { d.combo->allOutputsOff(); return true; }
+        if (key == 'o') { drivers.combo->allOutputsOff(); return true; }
         return false;
     }
-    case Fam::AnalogOut: {
-        if (!d.aout) return false;
-        const size_t m = moduleOf(*d.aout, slave);
+    case DeviceFamily::AnalogOut: {
+        if (!drivers.aout) return false;
+        const size_t m = moduleOf(*drivers.aout, slave);
         if (m == SIZE_MAX) return false;
-        const size_t base = d.aout->channelOffset(m);
-        const size_t n    = d.aout->module(m).channelCount();
-        size_t& sel = ui.sel[slave];
+        const size_t base = drivers.aout->channelOffset(m);
+        const size_t n    = drivers.aout->module(m).channelCount();
+        size_t& sel = uiState.sel[slave];
         if (sel >= n) sel = 0;
         if (key == '[') { sel = (sel + n - 1) % n; return true; }
         if (key == ']') { sel = (sel + 1) % n;     return true; }
         if (key == '+' || key == '-') {
             const int32_t delta = key == '+' ? 256 : -256;
-            d.aout->setValue(base + sel,
-                             d.aout->value(base + sel) + delta);
+            drivers.aout->setValue(base + sel,
+                             drivers.aout->value(base + sel) + delta);
             return true;
         }
         if (key == '0') {
-            for (size_t k = 0; k < n; ++k) d.aout->setValue(base + k, 0);
+            for (size_t k = 0; k < n; ++k) drivers.aout->setValue(base + k, 0);
             return true;
         }
         return false;
     }
-    case Fam::Pwm: {
-        auto* t = findBySlave(d.pwms, slave);
+    case DeviceFamily::Pwm: {
+        auto* t = findBySlave(drivers.pwms, slave);
         if (!t || !t->channelCount()) return false;
-        size_t& sel = ui.sel[slave];
+        size_t& sel = uiState.sel[slave];
         if (sel >= t->channelCount()) sel = 0;
         if (key == '[') {
             sel = (sel + t->channelCount() - 1) % t->channelCount();
@@ -757,10 +757,10 @@ static bool handleKey(int key, uint16_t slave, Fam fam,
         if (key == '0') { t->allOff(); return true; }
         return false;
     }
-    case Fam::Pulse: {
-        auto* t = findBySlave(d.pulses, slave);
+    case DeviceFamily::Pulse: {
+        auto* t = findBySlave(drivers.pulses, slave);
         if (!t || !t->channelCount()) return false;
-        size_t& sel = ui.sel[slave];
+        size_t& sel = uiState.sel[slave];
         if (sel >= t->channelCount()) sel = 0;
         if (key == '[') {
             sel = (sel + t->channelCount() - 1) % t->channelCount();
@@ -779,8 +779,8 @@ static bool handleKey(int key, uint16_t slave, Fam fam,
         if (key == '0') { t->setFrequency(sel, 0); return true; }
         return false;
     }
-    case Fam::Stepper: {
-        auto* t = findBySlave(d.steppers, slave);
+    case DeviceFamily::Stepper: {
+        auto* t = findBySlave(drivers.steppers, slave);
         if (!t) return false;
         int& vel = stepperVel(slave);
         if (key == 'e') { t->setEnable(true);  return true; }
@@ -794,10 +794,10 @@ static bool handleKey(int key, uint16_t slave, Fam fam,
         if (key == '0') { vel = 0; t->setVelocity(0); return true; }
         return false;
     }
-    case Fam::DcMotor: {
-        auto* t = findBySlave(d.dcmotors, slave);
+    case DeviceFamily::DcMotor: {
+        auto* t = findBySlave(drivers.dcmotors, slave);
         if (!t || !t->axisCount()) return false;
-        size_t& sel = ui.sel[slave];
+        size_t& sel = uiState.sel[slave];
         if (sel >= t->axisCount()) sel = 0;
         int& vel = axisVel(slave);
         if (key == '[') {
@@ -816,10 +816,10 @@ static bool handleKey(int key, uint16_t slave, Fam fam,
         if (key == '0') { vel = 0; t->setVelocity(sel, 0); return true; }
         return false;
     }
-    case Fam::Drive: {
-        auto* t = findBySlave(d.drives, slave);
+    case DeviceFamily::Drive: {
+        auto* t = findBySlave(drivers.drives, slave);
         if (!t || !t->axisCount()) return false;
-        size_t& sel = ui.sel[slave];
+        size_t& sel = uiState.sel[slave];
         if (sel >= t->axisCount()) sel = 0;
         int& vel = axisVel(slave);
         if (key == '[') {
@@ -855,8 +855,8 @@ static bool handleKey(int key, uint16_t slave, Fam fam,
         }
         return false;
     }
-    case Fam::Comm: {
-        auto* t = findBySlave(d.comms, slave);
+    case DeviceFamily::Comm: {
+        auto* t = findBySlave(drivers.comms, slave);
         if (!t || !t->channels()) return false;
         if (key == 't') {
             const char* msg = "tether\r\n";
@@ -866,8 +866,8 @@ static bool handleKey(int key, uint16_t slave, Fam fam,
         }
         return false;
     }
-    case Fam::PowerMeter: {
-        auto* t = findBySlave(d.meters, slave);
+    case DeviceFamily::PowerMeter: {
+        auto* t = findBySlave(drivers.meters, slave);
         if (!t || !t->indexSelectors()) return false;
         if (key == '+' || key == '-') {
             int& idx = meterIndexSel(slave);
@@ -885,38 +885,38 @@ static bool handleKey(int key, uint16_t slave, Fam fam,
 
 
 static void runTui(std::span<const DiscoveredSlave> slaves,
-                   const std::map<uint16_t, SlaveClass>& cls,
-                   Drivers& d, double duration_sec,
+                   const std::map<uint16_t, SlaveClass>& assignments,
+                   Drivers& drivers, double duration_sec,
                    const std::string& iface) {
     using namespace Tether::Examples;
 
-    UiState ui;
+    UiState uiState;
 
     // Seed input transition counters.
-    if (d.din) {
-        for (size_t m = 0; m < d.din->moduleCount(); ++m) {
-            const uint16_t s = d.din->slaveIndex(m);
-            ui.transitions[s].assign(d.din->module(m).bitCount(), 0);
-            ui.prevBits[s] = d.din->module(m).bits();
+    if (drivers.din) {
+        for (size_t m = 0; m < drivers.din->moduleCount(); ++m) {
+            const uint16_t s = drivers.din->slaveIndex(m);
+            uiState.transitions[s].assign(drivers.din->module(m).bitCount(), 0);
+            uiState.prevBits[s] = drivers.din->module(m).bits();
         }
     }
 
     auto managed = [&](uint16_t idx) {
-        auto it = cls.find(idx);
-        return it != cls.end() && it->second.fam != Fam::None;
+        auto it = assignments.find(idx);
+        return it != assignments.end() && it->second.family != DeviceFamily::None;
     };
 
     TUI::TreeScreenHooks hooks;
     hooks.keyHints = "see right pane for device keys";
 
     hooks.onTick = [&]() {
-        if (!d.din) return;
-        for (size_t m = 0; m < d.din->moduleCount(); ++m) {
-            const uint16_t s  = d.din->slaveIndex(m);
-            const auto&    mod = d.din->module(m);
+        if (!drivers.din) return;
+        for (size_t m = 0; m < drivers.din->moduleCount(); ++m) {
+            const uint16_t s  = drivers.din->slaveIndex(m);
+            const auto&    mod = drivers.din->module(m);
             const uint64_t now = mod.bits();
-            uint64_t&      prv = ui.prevBits[s];
-            auto&          tr  = ui.transitions[s];
+            uint64_t&      prv = uiState.prevBits[s];
+            auto&          tr  = uiState.transitions[s];
             const uint64_t chg = now ^ prv;
             for (size_t k = 0; k < mod.bitCount() && k < 64; ++k)
                 if ((chg >> k) & 1u) ++tr[k];
@@ -948,20 +948,20 @@ static void runTui(std::span<const DiscoveredSlave> slaves,
         mvwprintw(win, row++, 1, "product : 0x%08X",
                   s->product_code ? *s->product_code : 0);
 
-        auto it = cls.find(s->index);
+        auto it = assignments.find(s->index);
         const SlaveClass empty{};
-        const SlaveClass& sc = it != cls.end() ? it->second : empty;
+        const SlaveClass& assigned = it != assignments.end() ? it->second : empty;
 
-        if (sc.fam != Fam::None && sc.def) {
+        if (assigned.family != DeviceFamily::None && assigned.entry) {
             ++row;
             wattron(win, A_BOLD);
-            mvwprintw(win, row++, 1, "family  : %s", sc.def->label);
+            mvwprintw(win, row++, 1, "family  : %s", assigned.entry->label);
             wattroff(win, A_BOLD);
-            renderLive(win, row, s->index, sc.fam, d, ui, iface);
+            renderLive(win, row, s->index, assigned.family, drivers, uiState, iface);
             ++row;
             wattron(win, A_DIM);
             mvwprintw(win, row++, 1, "also: ./%s -i %s",
-                      sc.def->example, iface.c_str());
+                      assigned.entry->example, iface.c_str());
             wattroff(win, A_DIM);
         } else {
             ++row;
@@ -980,9 +980,9 @@ static void runTui(std::span<const DiscoveredSlave> slaves,
         const TUI::TreeNode* sel = screenPtr ? screenPtr->selected()
                                              : nullptr;
         if (!sel || sel->tag < 0) return false;
-        auto it = cls.find(static_cast<uint16_t>(sel->tag));
-        if (it == cls.end()) return false;
-        return handleKey(key, it->first, it->second.fam, d, ui);
+        auto it = assignments.find(static_cast<uint16_t>(sel->tag));
+        if (it == assignments.end()) return false;
+        return handleKey(key, it->first, it->second.family, drivers, uiState);
     };
 
     // The tree is built from the ALREADY-discovered slave list — no
@@ -1098,23 +1098,23 @@ int main(int argc, char** argv) {
     }
 
     // Classify every slave into exactly one family.
-    std::map<uint16_t, SlaveClass> cls;
+    std::map<uint16_t, SlaveClass> assignments;
     for (const auto& s : slaves) {
-        auto sc = classify(s);
-        if (sc.fam != Fam::None) {
-            cls[s.index] = sc;
+        auto assigned = classify(s);
+        if (assigned.family != DeviceFamily::None) {
+            assignments[s.index] = assigned;
             TETHER_LOGI(TAG, "  s{} -> {} ({})", s.index,
-                        sc.def->label, sc.id->name);
+                        assigned.entry->label, assigned.identity->name);
         }
     }
 
     // Bring all recognized terminals to OP (chains in their own PDO
     // groups, singles on the default group, one shared RT loop).
     Drivers drivers;
-    bringUp(master, slaves, cls, drivers);
+    bringUp(master, slaves, assignments, drivers);
 
 #ifdef TETHER_HAS_TERMINAL_UI
-    runTui(slaves, cls, drivers, duration_sec, iface);
+    runTui(slaves, assignments, drivers, duration_sec, iface);
 #else
     (void)duration_sec;
 #endif
