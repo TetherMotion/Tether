@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <format>
 #include <iostream>
 #include <sstream>
 
@@ -355,10 +356,10 @@ void logVlanConfig(const VlanConfig& config, const char* tag) {
 // Mailbox helpers
 // ============================================================================
 
-void addMailboxSizeArg(argparse::ArgumentParser& program) {
+void addMailboxSizeArg(argparse::ArgumentParser& program, uint16_t default_size) {
     program.add_argument("-M", "--mailbox-size")
-        .default_value(std::string("256"))
-        .help("Mailbox buffer size in bytes. Short form: a single number sets both MbxIn and MbxOut (e.g. -M 256). Long form: in:<size>,out:<size> to set independently (e.g. --mailbox-size in:256,out:512). Range: 1-65535. Default: 256.");
+        .default_value(std::to_string(default_size))
+        .help(std::format("Mailbox buffer size in bytes. Short form: a single number sets both MbxIn and MbxOut (e.g. -M {0}). Long form: in:<size>,out:<size> to set independently (e.g. --mailbox-size in:256,out:512). Range: 1-65535. Default: {0}.", default_size));
 }
 
 void addMailboxAddressArg(argparse::ArgumentParser& program) {

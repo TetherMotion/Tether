@@ -77,6 +77,7 @@ bool EtherCATMasterDebugFlags::isEnabled(const std::string& name, uint16_t slave
     if (name == "fsoe-wire")         return fsoeWire && fsoeWireFilt.allows(slave_index);
     if (name == "fsoe-sequence")     return fsoeSequence && fsoeSequenceFilt.allows(slave_index);
     if (name == "fsoe-crc")          return fsoeCrc && fsoeCrcFilt.allows(slave_index);
+    if (name == "fsoe-slave-state")  return fsoeSlaveState && fsoeSlaveStateFilt.allows(slave_index);
 #endif
     return false;
 }
@@ -107,6 +108,7 @@ void EtherCATMasterDebugFlags::setFlag(const std::string& name, bool enabled) {
     else if (name == "fsoe-wire")      fsoeWire = enabled;
     else if (name == "fsoe-sequence")  fsoeSequence = enabled;
     else if (name == "fsoe-crc")       fsoeCrc = enabled;
+    else if (name == "fsoe-slave-state") fsoeSlaveState = enabled;
 #endif
 }
 
@@ -136,6 +138,7 @@ void EtherCATMasterDebugFlags::setFilter(const std::string& name, const SlaveFil
     else if (name == "fsoe-wire")      fsoeWireFilt = filter;
     else if (name == "fsoe-sequence")  fsoeSequenceFilt = filter;
     else if (name == "fsoe-crc")       fsoeCrcFilt = filter;
+    else if (name == "fsoe-slave-state") fsoeSlaveStateFilt = filter;
 #endif
 }
 
@@ -220,6 +223,7 @@ void EtherCATMasterDebugFlags::resizeFilters(uint16_t slave_count) {
     fsoeWireFilt.resize(slave_count);
     fsoeSequenceFilt.resize(slave_count);
     fsoeCrcFilt.resize(slave_count);
+    fsoeSlaveStateFilt.resize(slave_count);
 #endif
 }
 
@@ -282,6 +286,8 @@ const std::vector<DebugFlagInfo>& allDebugFlags() {
          "Per-cycle frame accept/reject + state change summary"},
         {"fsoe-crc",
          "CRC parameters used for TX build and RX check"},
+        {"fsoe-slave-state",
+         "Verbose FSoE slave-emulator state dump per snapshot"},
 #endif
     };
     return kFlags;

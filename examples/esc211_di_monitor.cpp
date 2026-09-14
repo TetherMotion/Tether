@@ -190,7 +190,7 @@ int main(int argc, char** argv) {
     Tether::Examples::addDurationArg(program);
     Tether::Examples::addDebugArg(program);
     Tether::Examples::addVlanArgs(program);
-    Tether::Examples::addMailboxSizeArg(program);
+    Tether::Examples::addMailboxSizeArg(program, 512);
     Tether::Examples::addMailboxAddressArg(program);
     Tether::Examples::addEsiXmlArg(program);
     program.add_argument("--stream")

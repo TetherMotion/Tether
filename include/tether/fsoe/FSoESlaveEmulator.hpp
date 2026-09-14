@@ -1,13 +1,41 @@
 #pragma once
 
+#include <bit>
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <ranges>
 
 #include "tether/fsoe/FSoESlave.hpp"
 #include "tether/fsoe/TypedProcessData.hpp"
 
 namespace FSoE {
+
+/// Declarative command→status bit mirror for FSoE slave emulators.
+///
+/// Each entry echoes the bit value at `command_bit` (index into the
+/// master→slave safe output data) verbatim into `status_bit` (index into
+/// the slave→master safe input data).  Corresponding functions sit at
+/// DIFFERENT bit positions in the two directions, so the table records
+/// both positions explicitly.
+struct BitMirror {
+    uint8_t command_bit;
+    uint8_t status_bit;
+};
+
+/// constexpr bit-index extraction from a single-bit mask — lets mirror
+/// tables be written in terms of PDO mask constants (e.g.
+/// `SOMANET_RxPDO_1700::kSTO`) instead of hardcoded bit numbers.
+constexpr uint8_t bitIndexOf(uint64_t mask)
+{
+    return static_cast<uint8_t>(std::countr_zero(mask));
+}
+
+/// Whether a codec declares a command→status bit-mirror table as a
+/// `kStatusBitMirrors` static member (any range of BitMirror).
+template<typename CodecT>
+concept HasStatusBitMirrors =
+    std::ranges::range<decltype(CodecT::kStatusBitMirrors)>;
 
 /// Generic, profile-parameterised FSoE slave emulator base.
 ///
@@ -116,6 +144,28 @@ protected:
     {
         buildStatus(published_status_);
         (void)typed_view_.publish(published_status_);
+        applyStatusBitMirrors();
+    }
+
+    /// Echo the codec-declared command bits (CodecT::kStatusBitMirrors)
+    /// into the corresponding status bits of the safe-input image.
+    /// Called automatically by refreshPublishedStatus(); a codec without
+    /// a mirror table mirrors nothing.
+    ///
+    /// Only in Data state does the slave→master payload carry live
+    /// status flags — earlier connection states use the safe-data area
+    /// for handshake/parameter exchange, so nothing is mirrored there.
+    void applyStatusBitMirrors()
+    {
+        if constexpr (HasStatusBitMirrors<CodecT>) {
+            if (!slave_.isOperational()) {
+                return;
+            }
+            for (const BitMirror& m : CodecT::kStatusBitMirrors) {
+                slave_.setSafeInputBit(
+                    m.status_bit, slave_.getSafeOutputBit(m.command_bit));
+            }
+        }
     }
 
     Config config_;
