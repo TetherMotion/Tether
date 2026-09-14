@@ -8,7 +8,7 @@
  * reactive power and power factor, plus the raw status word.
  *
  * For index-addressed devices (family C: EL3413/3433/3475) the RX index
- * selectors are left at 0 — the echoed per-selector value is shown when
+ * selectors are left at 0  -  the echoed per-selector value is shown when
  * mapped; per-phase accessors show whatever the device exposes directly.
  *
  * Detected set: Devices::kPowerMeterTerminals (all ESI-verified for

@@ -96,7 +96,7 @@ int main() {
     std::printf("\nFinal: temp=%.2f°C target=%.1f°C atTarget=%d\n",
                 simTemp, targetTemp, heater->atTarget(5.0));
 
-    // 5. Simulate PID tuning (M303) — measure heating response
+    // 5. Simulate PID tuning (M303)  -  measure heating response
     std::printf("\n--- PID Autotune (M303) simulation ---\n");
     heater->reset();
     simTemp = ambient;

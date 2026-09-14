@@ -44,7 +44,7 @@ int main() {
     std::printf("Forward: (%.1f, %.1f, %.1f) -> towers A=%.3f B=%.3f C=%.3f\n",
                 x, y, z, towers[0], towers[1], towers[2]);
 
-    // 3. Tower to Cartesian (inverse kinematics) — round-trip check
+    // 3. Tower to Cartesian (inverse kinematics)  -  round-trip check
     auto cart = delta.inverseActuatorKinematics(towers[0], towers[1], towers[2]);
     std::printf("Inverse: towers A=%.3f B=%.3f C=%.3f -> (%.4f, %.4f, %.4f)\n",
                 towers[0], towers[1], towers[2], cart[0], cart[1], cart[2]);

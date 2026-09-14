@@ -343,10 +343,10 @@ RunGrade classifyCycleJitter(uint32_t period_us, double max_delta_us) {
     const double p = static_cast<double>(period_us);
     const double deviation = std::abs(max_delta_us - p);
     // Thresholds as fractions of the nominal period P:
-    //   Good          < P/10  (10%)  — excellent, expected for RT
-    //   Warn          < P/5   (20%)  — noticeable, monitor
-    //   HighJitter    < P/3   (33%)  — significant, investigate
-    //   ExtremeJitter >= P/3  (33%)  — severe, RT budget compromised
+    //   Good          < P/10  (10%)   -  excellent, expected for RT
+    //   Warn          < P/5   (20%)   -  noticeable, monitor
+    //   HighJitter    < P/3   (33%)   -  significant, investigate
+    //   ExtremeJitter >= P/3  (33%)   -  severe, RT budget compromised
     // P/3 is the high->extreme boundary: at 33% jitter a third of the
     // cycle budget is consumed by timing uncertainty, leaving little
     // headroom before cycle loss begins (~50%).
@@ -384,7 +384,7 @@ RunGrade classifyRxDelay(uint32_t period_us, double mean_rx_us) {
 
 // Classify the jitter (stddev) of the receive delay independently of the
 // mean.  A low mean with high stddev means the system is mostly fast but
-// occasionally stalls — a classic realtime warning sign.
+// occasionally stalls  -  a classic realtime warning sign.
 RunGrade classifyRxJitter(uint32_t period_us, double stddev_rx_us) {
     const double p = static_cast<double>(period_us);
     if (stddev_rx_us < p / 20.0) return RunGrade::Good;   // 5%
@@ -563,7 +563,7 @@ void printRecommendations(const ColorTags& c,
         }
     }
 
-    // 2b. Round-trip (TX->RX) performance assessment — real-slave mode only.
+    // 2b. Round-trip (TX->RX) performance assessment  -  real-slave mode only.
     bool has_real_slave = false;
     for (const auto& r : results) {
         if (r.real_slave) { has_real_slave = true; break; }
@@ -608,7 +608,7 @@ void printRecommendations(const ColorTags& c,
         if (best_rx_mean != std::numeric_limits<double>::max()) {
             if (best_rx_mean < 50.0 && best_rx_stddev < 10.0) {
                 std::cout << c.green
-                          << "  * Round-trip performance is excellent — the slave "
+                          << "  * Round-trip performance is excellent  -  the slave "
                              "and network path are well-tuned."
                           << c.reset << "\n";
             } else if (best_rx_mean < 200.0) {
@@ -636,13 +636,13 @@ void printRecommendations(const ColorTags& c,
                 static_cast<double>(total_cycles_all);
             if (resp_loss_pct > 1.0) {
                 std::cout << c.red
-                          << "  * Frequent response loss (>1%) — the slave may not "
+                          << "  * Frequent response loss (>1%)  -  the slave may not "
                              "be responding in time, or frames are being dropped. "
                              "Check link quality and slave state."
                           << c.reset << "\n";
             } else {
                 std::cout << c.orange
-                          << "  * Occasional response loss (<1%) — may be caused by "
+                          << "  * Occasional response loss (<1%)  -  may be caused by "
                              "rare scheduling preemption during the receive window."
                           << c.reset << "\n";
             }
@@ -930,11 +930,11 @@ void printThroughputResults(const ColorTags& c,
     std::cout << "  Method: 1000 frames per delay step, delay halved from "
                  "2000 µs to 10 µs.\n";
     if (real_slave) {
-        std::cout << "  Mode: real slave — RX loss measured against threshold "
+        std::cout << "  Mode: real slave  -  RX loss measured against threshold "
                   << std::fixed << std::setprecision(5) << threshold_pct
                   << "%\n\n";
     } else {
-        std::cout << "  Mode: fake slave — no RX expected, measuring TX "
+        std::cout << "  Mode: fake slave  -  no RX expected, measuring TX "
                      "throughput only.\n\n";
     }
 
@@ -1207,7 +1207,7 @@ void runThroughputTest(const ColorTags& c,
                          "and/or network turnaround."
                       << c.reset << "\n";
         } else {
-            // All steps passed — find the minimum delay tested.
+            // All steps passed  -  find the minimum delay tested.
             uint64_t min_delay = UINT64_MAX;
             for (const auto& s : steps) {
                 if (s.delay_us < min_delay) min_delay = s.delay_us;
@@ -1216,7 +1216,7 @@ void runThroughputTest(const ColorTags& c,
                 const double max_fps =
                     1'000'000.0 / static_cast<double>(min_delay);
                 std::cout << c.green
-                          << "  All steps passed — no RX loss exceeded "
+                          << "  All steps passed  -  no RX loss exceeded "
                              "threshold down to "
                           << min_delay << "µs delay ("
                           << std::fixed << std::setprecision(0) << max_fps
@@ -1375,7 +1375,7 @@ int main(int argc, char** argv) {
 
     const ColorTags color = makeColors();
 
-    TETHER_LOGI(TAG, "realtime_diagnostics — interface: {}, pdo-size: {}",
+    TETHER_LOGI(TAG, "realtime_diagnostics  -  interface: {}, pdo-size: {}",
                 iface.c_str(), pdo_size);
 
     const auto kernel_info = Tether::Platform::ensureRealtimeKernelOrExit(
@@ -1411,7 +1411,7 @@ int main(int argc, char** argv) {
     //
     // Fake-slave mode (default): an LRW datagram with a configurable PDO
     // payload is sent to logical address 0.  No slave will ever respond, so
-    // no receive path is exercised — the measurement is purely TX-side
+    // no receive path is exercised  -  the measurement is purely TX-side
     // (sendto latency + cycle timing).
     //
     // Real-slave mode (--slave N): an APRD datagram reads 2 bytes from
@@ -1425,7 +1425,7 @@ int main(int argc, char** argv) {
         const size_t aprd_frame_size = 14 + 2 + 10 + 2 + 2;
         frame.resize(aprd_frame_size, 0);
 
-        // Ethernet header — destination is the slave's MAC, but EtherCAT
+        // Ethernet header  -  destination is the slave's MAC, but EtherCAT
         // slaves accept broadcast frames, so use the broadcast MAC.
         std::memcpy(frame.data(), EtherCAT::kEtherCATBroadcastMAC.data(), 6);
         std::memcpy(frame.data() + 6, session.srcMac, 6);
@@ -1472,7 +1472,7 @@ int main(int argc, char** argv) {
         ecat_hdr.set(static_cast<uint16_t>(10 + pdo_size + 2), 1);
         std::memcpy(frame.data() + 14, &ecat_hdr, sizeof(ecat_hdr));
 
-        // Datagram header — LRW to logical address 0 (no real slave).
+        // Datagram header  -  LRW to logical address 0 (no real slave).
         EtherCAT::DatagramHeader dgram_hdr{};
         dgram_hdr.cmd = EtherCAT::Command::LRW;
         dgram_hdr.idx = 0;
@@ -1525,7 +1525,7 @@ int main(int argc, char** argv) {
             << "-byte PDO payload to logical address 0 via sendto().\n"
             << "  The datagram targets a non-existent slave (index "
             << kFakeSlaveIndex << "), so no slave will ever process or\n"
-            << "  respond to the frame.  The receive path is NOT exercised —\n"
+            << "  respond to the frame.  The receive path is NOT exercised  - \n"
             << "  no recvfrom() is called and no response is expected.\n"
             << "  This isolates the transmit-side performance of the kernel\n"
             << "  network stack and the NIC driver: sendto() latency, cycle\n"
@@ -1554,7 +1554,7 @@ int main(int argc, char** argv) {
         table_oss
             << "  TxMean    Mean raw sendto() duration for the APRD frame (µs).\n"
             << "  TxMax     Maximum observed sendto() duration (µs).\n"
-            << "  RxMean    Mean transmit-to-receive delay (µs) — time from\n"
+            << "  RxMean    Mean transmit-to-receive delay (µs)  -  time from\n"
             << "            sendto() completion to recvfrom() completion.\n"
             << "  RxMax     Maximum observed transmit-to-receive delay (µs).\n"
             << "  RxStd     Standard deviation of receive delays (µs).\n"

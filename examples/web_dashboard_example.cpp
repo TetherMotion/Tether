@@ -14,18 +14,18 @@
  * real time.  This example registers:
  *
  *   Parameters (writable from the UI):
- *     - amplitude    — sine/cosine amplitude [V]
- *     - frequency    — wave frequency [Hz]
- *     - sampleRate   — display sample rate [Hz] (metadata only)
- *     - phaseOffset  — phase offset [rad]
- *     - offset       — DC offset added to both signals
+ *     - amplitude     -  sine/cosine amplitude [V]
+ *     - frequency     -  wave frequency [Hz]
+ *     - sampleRate    -  display sample rate [Hz] (metadata only)
+ *     - phaseOffset   -  phase offset [rad]
+ *     - offset        -  DC offset added to both signals
  *
  *   Signals (read-only, streamed):
- *     - sine_wave     — amplitude * sin(2π f t + phase) + offset
- *     - cosine_wave   — amplitude * cos(2π f t + phase) + offset
+ *     - sine_wave      -  amplitude * sin(2π f t + phase) + offset
+ *     - cosine_wave    -  amplitude * cos(2π f t + phase) + offset
  *
  *   Functions:
- *     - reset_params  — restore all parameters to defaults
+ *     - reset_params   -  restore all parameters to defaults
  *
  * Usage:
  *   web_dashboard_example [--port PORT] [--web-root PATH]
@@ -76,7 +76,7 @@ uint64_t nowUs() {
             std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
-/// LogFn callback — prints to stderr when --verbose is enabled.
+/// LogFn callback  -  prints to stderr when --verbose is enabled.
 void verboseLog(const char* tag, const char* fmt, ...) {
     if (!g_verbose) return;
     const auto now = std::chrono::steady_clock::now();
@@ -111,7 +111,7 @@ int main(int argc, char** argv) {
             g_verbose = true;
         } else if (arg == "--help" || arg == "-h") {
             std::cout <<
-                "web_dashboard_example — Tether IO web dashboard\n\n"
+                "web_dashboard_example  -  Tether IO web dashboard\n\n"
                 "Usage: web_dashboard_example [OPTIONS]\n\n"
                 "Options:\n"
                 "  --port <N>, -p <N>       HTTP/WebSocket port (default 8080)\n"
@@ -285,7 +285,7 @@ int main(int argc, char** argv) {
         drogon::app().run();
     });
 
-    // Wait for SIGINT/SIGTERM using std::stop_token — no polling.
+    // Wait for SIGINT/SIGTERM using std::stop_token  -  no polling.
     std::unique_lock lock(g_stopMutex);
     g_stopCv.wait(
         lock,

@@ -326,7 +326,7 @@ int main(int argc, char* argv[]) {
     });
 
     // -----------------------------------------------------------------------
-    // 6. Main loop — status display
+    // 6. Main loop  -  status display
     // -----------------------------------------------------------------------
     auto startTime = std::chrono::steady_clock::now();
     auto lastStatusTime = startTime;

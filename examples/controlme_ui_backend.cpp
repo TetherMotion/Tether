@@ -663,7 +663,7 @@ int runBackend(uint16_t port) {
 
     std::cout << "controlme_ui backend listening on ws://0.0.0.0:" << port << "/tether-io\n";
 
-    // Run Drogon's event loop (blocks until Ctrl+C — Drogon handles
+    // Run Drogon's event loop (blocks until Ctrl+C  -  Drogon handles
     // SIGINT/SIGTERM internally and exits its event loop on its own).
     drogon::app().addListener("0.0.0.0", port);
     drogon::app().run();

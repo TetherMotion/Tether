@@ -8,11 +8,11 @@
  * to OP, and displays the live counter/latch values of every channel.
  *
  * Two display modes:
- *   - interactive TUI (default on a terminal): a navigable device tree —
+ *   - interactive TUI (default on a terminal): a navigable device tree  - 
  *     level 1 = coupler(s) (EK1100 ...), level 2 = the terminals below
- *     each coupler — with the selected node's live channels in the right
+ *     each coupler  -  with the selected node's live channels in the right
  *     pane.  Arrows navigate, left/right fold, q quits.
- *   - --stream: plain stdout — one line per poll with all positions.
+ *   - --stream: plain stdout  -  one line per poll with all positions.
  *     Selected automatically when ncurses/the terminal can't do a TUI
  *     (non-TTY output, TERM=dumb, or a curses-less build), or when the
  *     user passes --stream.  --interactive forces an interactive attempt.
@@ -86,7 +86,7 @@ static std::string moduleStates(
 
 #ifdef TETHER_HAS_TERMINAL_UI
 // ---------------------------------------------------------------------------
-// Interactive TUI — device tree left, selected node's live channels right
+// Interactive TUI  -  device tree left, selected node's live channels right
 // ---------------------------------------------------------------------------
 
 namespace TUI = Tether::TUI;
@@ -115,7 +115,7 @@ static void runTui(Beckhoff::MultiPositionInputTerminal<>& encs,
             if (encs.slaveIndex(m) != static_cast<uint16_t>(node.tag))
                 continue;
             const auto& mod = encs.module(m);
-            mvwprintw(win, row++, 1, "%s — slave %d", mod.deviceName(),
+            mvwprintw(win, row++, 1, "%s  -  slave %d", mod.deviceName(),
                       node.tag);
             ++row;
             mvwprintw(win, row++, 1, "ch   position           status");
@@ -164,20 +164,20 @@ static void runTui(Beckhoff::MultiPositionInputTerminal<>& encs,
             ++row;
             wattron(win, A_DIM);
             mvwprintw(win, row++, 1,
-                      "(not a position input — not managed by this demo)");
+                      "(not a position input  -  not managed by this demo)");
             wattroff(win, A_DIM);
         }
     };
 
     TUI::TreeScreen screen(
-        std::string("Beckhoff position inputs — ") + iface,
+        std::string("Beckhoff position inputs  -  ") + iface,
         buildDeviceTree(slaves, managed), std::move(hooks));
     screen.run(g_cancel, duration_sec);
 }
 #endif // TETHER_HAS_TERMINAL_UI
 
 // ---------------------------------------------------------------------------
-// Stream mode — one line per poll (pipe-friendly)
+// Stream mode  -  one line per poll (pipe-friendly)
 // ---------------------------------------------------------------------------
 
 static void runStream(Beckhoff::MultiPositionInputTerminal<>& encs,
@@ -250,14 +250,14 @@ int main(int argc, char** argv) {
 #ifdef TETHER_HAS_TERMINAL_UI
     if (interactive && !Tether::TUI::Session::available()) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "no usable terminal — falling back to --stream");
+            TETHER_LOGW(TAG, "no usable terminal  -  falling back to --stream");
         }
         interactive = false;
     }
 #else
     if (interactive) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "built without ncurses — using --stream mode");
+            TETHER_LOGW(TAG, "built without ncurses  -  using --stream mode");
         }
         interactive = false;
     }

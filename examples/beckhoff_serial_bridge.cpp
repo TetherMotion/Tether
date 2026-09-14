@@ -10,7 +10,7 @@
  * image.  Ctrl/status words and individual handshake bits are shown so
  * the raw handshake is visible.
  *
- * This is a raw-FIFO demonstration — it does NOT implement the EL6001
+ * This is a raw-FIFO demonstration  -  it does NOT implement the EL6001
  * receive/transmit handshake (ctrl bit toggling) or any serial
  * protocol; on real hardware the terminal's UART must be configured via
  * CoE SDOs first (baud rate, data bits).

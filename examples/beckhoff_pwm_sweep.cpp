@@ -4,7 +4,7 @@
  *
  * Finds the first known PWM output terminal in the EtherCAT chain,
  * brings it to OP, enables every channel, and sweeps the duty cycle
- * up and down as a triangle wave — staggered per channel.
+ * up and down as a triangle wave  -  staggered per channel.
  *
  * Two display modes:
  *   - interactive TUI (default): device tree left, duty bars right.
@@ -114,7 +114,7 @@ static void runTui(Beckhoff::PwmTerminal& pwm,
         int row = 1;
 
         if (static_cast<uint16_t>(node.tag) == pwm.slaveIndex()) {
-            mvwprintw(win, row++, 1, "%s — slave %u, %zu ch",
+            mvwprintw(win, row++, 1, "%s  -  slave %u, %zu ch",
                       pwm.deviceName(), pwm.slaveIndex(),
                       pwm.channelCount());
             mvwprintw(win, row++, 1, "sweep period: %d ms%s",
@@ -158,14 +158,14 @@ static void runTui(Beckhoff::PwmTerminal& pwm,
             ++row;
             wattron(win, A_DIM);
             mvwprintw(win, row++, 1,
-                      "(not a PWM terminal — not managed by this demo)");
+                      "(not a PWM terminal  -  not managed by this demo)");
             wattroff(win, A_DIM);
         }
     };
 
     auto managed = [&](uint16_t idx) { return idx == pwm.slaveIndex(); };
     TUI::TreeScreen screen(
-        std::string("Beckhoff PWM sweep — ") + iface,
+        std::string("Beckhoff PWM sweep  -  ") + iface,
         buildDeviceTree(slaves, managed), std::move(hooks));
     screen.run(g_cancel, duration_sec);
 }
@@ -237,14 +237,14 @@ int main(int argc, char** argv) {
 #ifdef TETHER_HAS_TERMINAL_UI
     if (interactive && !Tether::TUI::Session::available()) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "no usable terminal — falling back to --stream");
+            TETHER_LOGW(TAG, "no usable terminal  -  falling back to --stream");
         }
         interactive = false;
     }
 #else
     if (interactive) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "built without ncurses — using --stream mode");
+            TETHER_LOGW(TAG, "built without ncurses  -  using --stream mode");
         }
         interactive = false;
     }

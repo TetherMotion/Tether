@@ -7,19 +7,19 @@
  * Tether's Klipper compatibility layer:
  *
  *   1. Set up a printer with probe and heaters
- *   2. BED_MESH_CALIBRATE — probe the bed and build a mesh
- *   3. BED_MESH_PROFILE — save and load mesh profiles
- *   4. BED_MESH_OFFSET — apply XY offsets to the mesh
- *   5. BED_MESH_MAP — output the mesh as a map
- *   6. BED_MESH_CLEAR — clear the mesh
- *   7. SCREWS_TILT_ADJUST — adjust bed screws using probe
- *   8. Z_TILT_ADJUST — adjust Z tilt on multi-Z-axis printers
- *   9. QUAD_GANTRY_LEVEL — level a gantry at 4 points
- *  10. BED_SCREWS_ADJUST — manually adjust bed screws
- *  11. PROBE_ACCURACY — test probe repeatability
- *  12. PROBE_CALIBRATE — calibrate the probe Z offset
- *  13. DELTA_CALIBRATE — calibrate delta printer geometry
- *  14. SET_GCODE_OFFSET — apply a temporary Z offset
+ *   2. BED_MESH_CALIBRATE  -  probe the bed and build a mesh
+ *   3. BED_MESH_PROFILE  -  save and load mesh profiles
+ *   4. BED_MESH_OFFSET  -  apply XY offsets to the mesh
+ *   5. BED_MESH_MAP  -  output the mesh as a map
+ *   6. BED_MESH_CLEAR  -  clear the mesh
+ *   7. SCREWS_TILT_ADJUST  -  adjust bed screws using probe
+ *   8. Z_TILT_ADJUST  -  adjust Z tilt on multi-Z-axis printers
+ *   9. QUAD_GANTRY_LEVEL  -  level a gantry at 4 points
+ *  10. BED_SCREWS_ADJUST  -  manually adjust bed screws
+ *  11. PROBE_ACCURACY  -  test probe repeatability
+ *  12. PROBE_CALIBRATE  -  calibrate the probe Z offset
+ *  13. DELTA_CALIBRATE  -  calibrate delta printer geometry
+ *  14. SET_GCODE_OFFSET  -  apply a temporary Z offset
  *  15. Save and restore state for pause/resume
  *
  * This example is particularly useful for understanding how the bed

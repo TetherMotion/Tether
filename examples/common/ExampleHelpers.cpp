@@ -100,7 +100,7 @@ void listPhysicalInterfaces(const char* tag) {
 }
 
 void logPermissionDeniedError(const char* tag) {
-    TETHER_LOGE(tag, "Permission denied — run via `runec <executable>` or "
+    TETHER_LOGE(tag, "Permission denied  -  run via `runec <executable>` or "
                      "`sudo <executable>` (requires CAP_NET_RAW)");
     std::fprintf(stderr,
                  "ERROR: Permission denied opening network interface.\n"
@@ -515,7 +515,7 @@ uint32_t reportSdoAbort(const EtherCAT::Slave& slave, const char* tag) {
                  abort_code, meaning,
                  op_str, len_str, attempted_len);
 
-    // The length-mismatch family — the signature of the original
+    // The length-mismatch family  -  the signature of the original
     // "slave rejects the write because the payload is the wrong size"
     // failure. Point the user at the object dictionary / ESI file.
     if (abort_code == 0x06070010 || abort_code == 0x06070012 ||
