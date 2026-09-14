@@ -326,7 +326,7 @@ bool writePlotSvg(const std::string& filename,
     out << "  <g fill=\"#9999bb\" font-size=\"11\" font-family=\"monospace\">\n";
     for (double y = std::ceil(yMin / yStep) * yStep; y <= yMax; y += yStep) {
         double py = sy(y);
-        out << "    <text x=\"" << (marginL — 8) << "\" y=\"" << (py + 4)
+        out << "    <text x=\"" << (marginL - 8) << "\" y=\"" << (py + 4)
             << "\" text-anchor=\"end\">" << y << "</text>\n";
     }
     for (double t = std::ceil(tMin / xStep) * xStep; t <= tMax; t += xStep) {
@@ -337,7 +337,7 @@ bool writePlotSvg(const std::string& filename,
     out << "  </g>\n";
 
     // Axis labels
-    out << "  <text x=\"" << (marginL — 50) << "\" y=\"" << (H / 2)
+    out << "  <text x=\"" << (marginL - 50) << "\" y=\"" << (H / 2)
         << "\" fill=\"#ccccdd\" font-size=\"13\" font-family=\"sans-serif\" "
         << "text-anchor=\"middle\" transform=\"rotate(-90 "
         << (marginL - 50) << " " << (H / 2) << ")\">" << yLabel << "</text>\n";

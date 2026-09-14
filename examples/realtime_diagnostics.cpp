@@ -1525,7 +1525,7 @@ int main(int argc, char** argv) {
             << "-byte PDO payload to logical address 0 via sendto().\n"
             << "  The datagram targets a non-existent slave (index "
             << kFakeSlaveIndex << "), so no slave will ever process or\n"
-            << "  respond to the frame.  The receive path is NOT exercised  — \n"
+            << "  respond to the frame.  The receive path is NOT exercised  - \n"
             << "  no recvfrom() is called and no response is expected.\n"
             << "  This isolates the transmit-side performance of the kernel\n"
             << "  network stack and the NIC driver: sendto() latency, cycle\n"
@@ -1554,7 +1554,7 @@ int main(int argc, char** argv) {
         table_oss
             << "  TxMean    Mean raw sendto() duration for the APRD frame (µs).\n"
             << "  TxMax     Maximum observed sendto() duration (µs).\n"
-            << "  RxMean    Mean transmit-to-receive delay (µs)  —  time from\n"
+            << "  RxMean    Mean transmit-to-receive delay (µs)  -  time from\n"
             << "            sendto() completion to recvfrom() completion.\n"
             << "  RxMax     Maximum observed transmit-to-receive delay (µs).\n"
             << "  RxStd     Standard deviation of receive delays (µs).\n"

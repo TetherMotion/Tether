@@ -46,7 +46,7 @@ static void printAS715NErrorDetails(EtherCAT::Master& master, EtherCAT::CoE::CoE
         char name[32] = {0};
         AS715NError::format(name, sizeof(name), err.class_code, err.sub_code);
 
-        TETHER_LOGI(TAG, "  — Raw:        0x{:04X}\n  — Name:       {}\n  — Class/Sub:  0x{:X} / 0x{:X}\n  — Desc:       {}\n  — Recoverable:{}\n  — DC SyncErr: {}",
+        TETHER_LOGI(TAG, "  - Raw:        0x{:04X}\n  - Name:       {}\n  - Class/Sub:  0x{:X} / 0x{:X}\n  - Desc:       {}\n  - Recoverable:{}\n  - DC SyncErr: {}",
                    err.raw_code, name, err.class_code, err.sub_code,
                    err.description ? err.description : "(none)",
                    err.is_recoverable ? " YES" : " NO",
@@ -55,7 +55,7 @@ static void printAS715NErrorDetails(EtherCAT::Master& master, EtherCAT::CoE::CoE
 
     TETHER_LOGI(TAG, "{}: CiA402 error (0x{:04X} / {})", master.slaveLogPrefix(slave_idx).c_str(), cia402_error, cia402_error);
     if (cia402_error != 0) {
-        TETHER_LOGI(TAG, "  — Raw CiA402 error: 0x{:04X} ({})\n  — Note: CiA402 manufacturer-specific faults are reported with high-byte 0x87 (see device documentation)", cia402_error, cia402_error);
+        TETHER_LOGI(TAG, "  - Raw CiA402 error: 0x{:04X} ({})\n  - Note: CiA402 manufacturer-specific faults are reported with high-byte 0x87 (see device documentation)", cia402_error, cia402_error);
     }
 }
 
