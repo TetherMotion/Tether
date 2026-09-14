@@ -98,7 +98,7 @@ void printHeatmap1DSummary(const Heatmap1D& heatmap) {
     }
     
     std::cout << std::fixed << std::setprecision(2);
-    std::cout << "  Velocity range: " << minVel << " - " << maxVel << " mm/s\n";
+    std::cout << "  Velocity range: " << minVel << " — " << maxVel << " mm/s\n";
 }
 
 void printHeatmap2DSummary(const Heatmap2D& heatmap) {
@@ -122,7 +122,7 @@ void printHeatmap2DSummary(const Heatmap2D& heatmap) {
               << (data.empty() ? 0 : data[0].size()) << "\n";
     std::cout << "  Filled cells: " << filledCells << "/" << totalCells << "\n";
     std::cout << std::fixed << std::setprecision(4);
-    std::cout << "  Error range: " << minError << " - " << maxError << " mm\n";
+    std::cout << "  Error range: " << minError << " — " << maxError << " mm\n";
 }
 
 int main() {

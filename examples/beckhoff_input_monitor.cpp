@@ -118,7 +118,7 @@ static void runTui(Beckhoff::MultiEL1014<>& ins,
         for (size_t m = 0; m < ins.moduleCount(); ++m) {
             if (ins.slaveIndex(m) != static_cast<uint16_t>(node.tag)) continue;
             const auto& mod = ins.module(m);
-            mvwprintw(win, row++, 1, "%s  -  slave %d", mod.deviceName(),
+            mvwprintw(win, row++, 1, "%s  —  slave %d", mod.deviceName(),
                       node.tag);
             ++row;
             mvwprintw(win, row++, 1, "channel :");
@@ -158,13 +158,13 @@ static void runTui(Beckhoff::MultiEL1014<>& ins,
         } else if (row < h) {
             ++row;
             wattron(win, A_DIM);
-            mvwprintw(win, row++, 1, "(not an EL1014  -  not managed by this demo)");
+            mvwprintw(win, row++, 1, "(not an EL1014  —  not managed by this demo)");
             wattroff(win, A_DIM);
         }
     };
 
     TUI::TreeScreen screen(
-        std::string("Beckhoff input terminals  -  ") + iface,
+        std::string("Beckhoff input terminals  —  ") + iface,
         buildDeviceTree(slaves, managed), std::move(hooks));
     screen.run(g_cancel, duration_sec);
 }
@@ -250,14 +250,14 @@ int main(int argc, char** argv) {
 #ifdef TETHER_HAS_TERMINAL_UI
     if (interactive && !Tether::TUI::Session::available()) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "no usable terminal  -  falling back to --stream");
+            TETHER_LOGW(TAG, "no usable terminal  —  falling back to --stream");
         }
         interactive = false;
     }
 #else
     if (interactive) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "built without ncurses  -  using --stream mode");
+            TETHER_LOGW(TAG, "built without ncurses  —  using --stream mode");
         }
         interactive = false;
     }

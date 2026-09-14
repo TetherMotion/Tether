@@ -608,7 +608,7 @@ void printRecommendations(const ColorTags& c,
         if (best_rx_mean != std::numeric_limits<double>::max()) {
             if (best_rx_mean < 50.0 && best_rx_stddev < 10.0) {
                 std::cout << c.green
-                          << "  * Round-trip performance is excellent  -  the slave "
+                          << "  * Round-trip performance is excellent  —  the slave "
                              "and network path are well-tuned."
                           << c.reset << "\n";
             } else if (best_rx_mean < 200.0) {
@@ -636,13 +636,13 @@ void printRecommendations(const ColorTags& c,
                 static_cast<double>(total_cycles_all);
             if (resp_loss_pct > 1.0) {
                 std::cout << c.red
-                          << "  * Frequent response loss (>1%)  -  the slave may not "
+                          << "  * Frequent response loss (>1%)  —  the slave may not "
                              "be responding in time, or frames are being dropped. "
                              "Check link quality and slave state."
                           << c.reset << "\n";
             } else {
                 std::cout << c.orange
-                          << "  * Occasional response loss (<1%)  -  may be caused by "
+                          << "  * Occasional response loss (<1%)  —  may be caused by "
                              "rare scheduling preemption during the receive window."
                           << c.reset << "\n";
             }
@@ -762,13 +762,13 @@ void printRecommendations(const ColorTags& c,
                      "to avoid core "
                   << affinity_core
                   << " for normal scheduling:\n"
-                  << "    - Add 'isolcpus=" << affinity_core
+                  << "    — Add 'isolcpus=" << affinity_core
                   << "' to the kernel command line.\n"
                   << "      Example in /etc/default/grub:\n"
                   << "        GRUB_CMDLINE_LINUX_DEFAULT=\"quiet isolcpus="
                   << affinity_core << "\"\n"
                   << "      Then run: sudo update-grub && sudo reboot\n"
-                  << "    - Alternatively, use 'cset shield --cpu=" << affinity_core
+                  << "    — Alternatively, use 'cset shield --cpu=" << affinity_core
                   << " --kthread=on' from the cpuset package\n"
                   << "      to reserve the core without rebooting."
                   << c.reset << "\n";
@@ -930,11 +930,11 @@ void printThroughputResults(const ColorTags& c,
     std::cout << "  Method: 1000 frames per delay step, delay halved from "
                  "2000 µs to 10 µs.\n";
     if (real_slave) {
-        std::cout << "  Mode: real slave  -  RX loss measured against threshold "
+        std::cout << "  Mode: real slave  —  RX loss measured against threshold "
                   << std::fixed << std::setprecision(5) << threshold_pct
                   << "%\n\n";
     } else {
-        std::cout << "  Mode: fake slave  -  no RX expected, measuring TX "
+        std::cout << "  Mode: fake slave  —  no RX expected, measuring TX "
                      "throughput only.\n\n";
     }
 
@@ -1216,7 +1216,7 @@ void runThroughputTest(const ColorTags& c,
                 const double max_fps =
                     1'000'000.0 / static_cast<double>(min_delay);
                 std::cout << c.green
-                          << "  All steps passed  -  no RX loss exceeded "
+                          << "  All steps passed  —  no RX loss exceeded "
                              "threshold down to "
                           << min_delay << "µs delay ("
                           << std::fixed << std::setprecision(0) << max_fps
@@ -1375,7 +1375,7 @@ int main(int argc, char** argv) {
 
     const ColorTags color = makeColors();
 
-    TETHER_LOGI(TAG, "realtime_diagnostics  -  interface: {}, pdo-size: {}",
+    TETHER_LOGI(TAG, "realtime_diagnostics  —  interface: {}, pdo-size: {}",
                 iface.c_str(), pdo_size);
 
     const auto kernel_info = Tether::Platform::ensureRealtimeKernelOrExit(
@@ -1525,7 +1525,7 @@ int main(int argc, char** argv) {
             << "-byte PDO payload to logical address 0 via sendto().\n"
             << "  The datagram targets a non-existent slave (index "
             << kFakeSlaveIndex << "), so no slave will ever process or\n"
-            << "  respond to the frame.  The receive path is NOT exercised  - \n"
+            << "  respond to the frame.  The receive path is NOT exercised  — \n"
             << "  no recvfrom() is called and no response is expected.\n"
             << "  This isolates the transmit-side performance of the kernel\n"
             << "  network stack and the NIC driver: sendto() latency, cycle\n"
@@ -1554,7 +1554,7 @@ int main(int argc, char** argv) {
         table_oss
             << "  TxMean    Mean raw sendto() duration for the APRD frame (µs).\n"
             << "  TxMax     Maximum observed sendto() duration (µs).\n"
-            << "  RxMean    Mean transmit-to-receive delay (µs)  -  time from\n"
+            << "  RxMean    Mean transmit-to-receive delay (µs)  —  time from\n"
             << "            sendto() completion to recvfrom() completion.\n"
             << "  RxMax     Maximum observed transmit-to-receive delay (µs).\n"
             << "  RxStd     Standard deviation of receive delays (µs).\n"

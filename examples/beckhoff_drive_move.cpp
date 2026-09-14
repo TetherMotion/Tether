@@ -166,7 +166,7 @@ static void runTui(Beckhoff::CompactDriveTerminal& d,
         int row = 1;
 
         if (static_cast<uint16_t>(node.tag) == d.slaveIndex()) {
-            mvwprintw(win, row++, 1, "%s  -  slave %u, %zu axis",
+            mvwprintw(win, row++, 1, "%s  —  slave %u, %zu axis",
                       d.deviceName(), d.slaveIndex(), d.axisCount());
             ++row;
             mvwprintw(win, row++, 1, "enable=%s  speed=%d  dir=%+d",
@@ -220,14 +220,14 @@ static void runTui(Beckhoff::CompactDriveTerminal& d,
             ++row;
             wattron(win, A_DIM);
             mvwprintw(win, row++, 1,
-                      "(not a compact drive  -  not managed by this demo)");
+                      "(not a compact drive  —  not managed by this demo)");
             wattroff(win, A_DIM);
         }
     };
 
     auto managed = [&](uint16_t idx) { return idx == d.slaveIndex(); };
     TUI::TreeScreen screen(
-        std::string("Beckhoff compact drive  -  ") + iface,
+        std::string("Beckhoff compact drive  —  ") + iface,
         buildDeviceTree(slaves, managed), std::move(hooks));
     screen.run(g_cancel, duration_sec);
 }
@@ -306,14 +306,14 @@ int main(int argc, char** argv) {
 #ifdef TETHER_HAS_TERMINAL_UI
     if (interactive && !Tether::TUI::Session::available()) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "no usable terminal  -  falling back to --stream");
+            TETHER_LOGW(TAG, "no usable terminal  —  falling back to --stream");
         }
         interactive = false;
     }
 #else
     if (interactive) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "built without ncurses  -  using --stream mode");
+            TETHER_LOGW(TAG, "built without ncurses  —  using --stream mode");
         }
         interactive = false;
     }

@@ -113,7 +113,7 @@ static void runTui(Chain& io,
             if (io.slaveIndex(m) != static_cast<uint16_t>(node.tag))
                 continue;
             const auto& mod = io.module(m);
-            mvwprintw(win, row++, 1, "%s  -  slave %d", mod.deviceName(),
+            mvwprintw(win, row++, 1, "%s  —  slave %d", mod.deviceName(),
                       node.tag);
             ++row;
             mvwprintw(win, row++, 1, "inputs  :");
@@ -152,12 +152,12 @@ static void runTui(Chain& io,
         ++row;
         wattron(win, A_DIM);
         mvwprintw(win, row++, 1,
-                  "(not a combined I/O device  -  not managed by this demo)");
+                  "(not a combined I/O device  —  not managed by this demo)");
         wattroff(win, A_DIM);
     };
 
     TUI::TreeScreen screen(
-        std::string("Beckhoff combined I/O  -  ") + iface,
+        std::string("Beckhoff combined I/O  —  ") + iface,
         buildDeviceTree(slaves, managed), std::move(hooks));
     screen.run(g_cancel, duration_sec);
 }
@@ -243,14 +243,14 @@ int main(int argc, char** argv) {
 #ifdef TETHER_HAS_TERMINAL_UI
     if (interactive && !Tether::TUI::Session::available()) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "no usable terminal  -  falling back to --stream");
+            TETHER_LOGW(TAG, "no usable terminal  —  falling back to --stream");
         }
         interactive = false;
     }
 #else
     if (interactive) {
         if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "built without ncurses  -  using --stream mode");
+            TETHER_LOGW(TAG, "built without ncurses  —  using --stream mode");
         }
         interactive = false;
     }

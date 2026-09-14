@@ -105,7 +105,7 @@ static void drawScreen(const DIState& state) {
     std::lock_guard<std::mutex> lock(state.mtx);
 
     clear();
-    mvprintw(0, 0, "Nexcobot ESC211 - Safety Digital Inputs (50 Hz)");
+    mvprintw(0, 0, "Nexcobot ESC211 — Safety Digital Inputs (50 Hz)");
     mvprintw(1, 0, "Press Ctrl-C to quit");
 
     if (state.stale) {
@@ -254,7 +254,7 @@ int main(int argc, char** argv) {
     }
 #endif
 
-    TETHER_LOGI(TAG, "esc211_di_monitor  -  interface: {}, slave: {}",
+    TETHER_LOGI(TAG, "esc211_di_monitor  —  interface: {}, slave: {}",
                 iface.c_str(), slave_idx);
     Tether::Examples::logMailboxConfig(mbSize, mbAddr, TAG);
 
@@ -308,7 +308,7 @@ int main(int argc, char** argv) {
     }
 
     if (slaves == 0) {
-        TETHER_LOGE(TAG, "No slaves found  -  check wiring, power, and interface name");
+        TETHER_LOGE(TAG, "No slaves found  —  check wiring, power, and interface name");
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 4;

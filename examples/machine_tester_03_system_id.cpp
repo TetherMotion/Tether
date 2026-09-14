@@ -88,11 +88,11 @@ int main() {
     sysId.exportReport(report, "machine_test_03_system_id.json");
     
     std::cout << "\nData exported to:" << std::endl;
-    std::cout << "  - machine_test_03_friction.csv" << std::endl;
-    std::cout << "  - machine_test_03_delay.csv" << std::endl;
-    std::cout << "  - machine_test_03_pid.csv" << std::endl;
-    std::cout << "  - machine_test_03_report.txt" << std::endl;
-    std::cout << "  - machine_test_03_system_id.json" << std::endl;
+    std::cout << "  — machine_test_03_friction.csv" << std::endl;
+    std::cout << "  — machine_test_03_delay.csv" << std::endl;
+    std::cout << "  — machine_test_03_pid.csv" << std::endl;
+    std::cout << "  — machine_test_03_report.txt" << std::endl;
+    std::cout << "  — machine_test_03_system_id.json" << std::endl;
     
     return 0;
 }

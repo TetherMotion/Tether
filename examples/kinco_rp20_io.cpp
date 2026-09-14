@@ -710,7 +710,7 @@ static void runInteractiveUI(EtherCAT::Master& master,
 
         // Header
         attron(COLOR_PAIR(4) | A_BOLD);
-        mvprintw(0, 0, "Kinco RP20 Interactive I/O   -   Cycle %llu  (%zu outputs)",
+        mvprintw(0, 0, "Kinco RP20 Interactive I/O   —   Cycle %llu  (%zu outputs)",
                  static_cast<unsigned long long>(cyc), output_bits.size());
         attroff(COLOR_PAIR(4) | A_BOLD);
         mvprintw(1, 0, "UP/DOWN: select  SPACE: toggle  a: all on  n: all off  q: quit");
@@ -1073,7 +1073,7 @@ int main(int argc, char** argv) {
     }
 #endif
 
-    TETHER_LOGI(TAG, "kinco_rp20_io  -  interface: {}, duration: {:.1f} s",
+    TETHER_LOGI(TAG, "kinco_rp20_io  —  interface: {}, duration: {:.1f} s",
                 iface.c_str(), duration_sec);
     Tether::Examples::logVlanConfig(vlan, TAG);
     Tether::Examples::logMailboxConfig(mbSize, mbAddr, TAG);
@@ -1274,7 +1274,7 @@ int main(int argc, char** argv) {
         TETHER_LOGI(TAG, "{}: in OP", master.slaveLogPrefix(s).c_str());
     }
 
-    TETHER_LOGI(TAG, "All slaves in OP  -  starting cyclic I/O");
+    TETHER_LOGI(TAG, "All slaves in OP  —  starting cyclic I/O");
 
 #ifdef HAVE_NCURSES
     if (interactive) {

@@ -67,7 +67,7 @@ inline bool startHostMasterSession(const std::string& interface_name,
     const auto link_status = session.ethernet->getLinkStatus();
     if (!link_status.up) {
         TETHER_LOGE(tag,
-                    "Link DOWN on '{}' - please check if the Ethernet cable is "
+                    "Link DOWN on '{}' — please check if the Ethernet cable is "
                     "plugged in correctly, if this is the wrong interface or "
                     "the first EtherCAT slave is powered down",
                     interface_name.c_str());

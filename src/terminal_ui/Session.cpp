@@ -16,7 +16,13 @@ namespace Tether {
 namespace TUI {
 
 Session::Session() {
-    setlocale(LC_ALL, "");
+    // Force a UTF-8 locale so wide/Unicode box-drawing and arrows render
+    // correctly even when the environment is not set (e.g. LANG=C).
+    if (!setlocale(LC_ALL, "C.UTF-8")) {
+        if (!setlocale(LC_ALL, "en_US.UTF-8")) {
+            setlocale(LC_ALL, "");
+        }
+    }
     initscr();
     noecho();
     cbreak();
