@@ -152,6 +152,12 @@ protected:
     /// Called automatically by refreshPublishedStatus(); a codec without
     /// a mirror table mirrors nothing.
     ///
+    /// Individual status bits may be declared as "inverted" mirrors at
+    /// runtime (see setStatusBitMirrorInvert()); their value is the
+    /// logical NOT of the corresponding command bit.  This is used by
+    /// profiles that support one-active vs. zero-active interpretation
+    /// toggles.
+    ///
     /// Only in Data state does the slave→master payload carry live
     /// status flags — earlier connection states use the safe-data area
     /// for handshake/parameter exchange, so nothing is mirrored there.
@@ -162,10 +168,32 @@ protected:
                 return;
             }
             for (const BitMirror& m : CodecT::kStatusBitMirrors) {
-                slave_.setSafeInputBit(
-                    m.status_bit, slave_.getSafeOutputBit(m.command_bit));
+                bool value = slave_.getSafeOutputBit(m.command_bit);
+                if ((status_mirror_invert_mask_ >> m.status_bit) & 1u) {
+                    value = !value;
+                }
+                slave_.setSafeInputBit(m.status_bit, value);
             }
         }
+    }
+
+    /// Mark a specific `status_bit` as an inverted mirror: the status
+    /// bit is set to the logical NOT of the corresponding command bit
+    /// instead of a verbatim echo.  Use this for runtime polarity toggles.
+    void setStatusBitMirrorInvert(uint8_t status_bit, bool invert)
+    {
+        const uint64_t bit = 1ull << status_bit;
+        if (invert) {
+            status_mirror_invert_mask_ |= bit;
+        } else {
+            status_mirror_invert_mask_ &= ~bit;
+        }
+    }
+
+    /// Query whether a specific `status_bit` is currently inverted.
+    bool getStatusBitMirrorInvert(uint8_t status_bit) const
+    {
+        return (status_mirror_invert_mask_ >> status_bit) & 1u;
     }
 
     Config config_;
@@ -175,6 +203,10 @@ protected:
     Command last_command_{};
     Status published_status_{};
     bool initialized_ = false;
+
+    /// Bitmap of status bit indices (0..63) whose command→status mirror
+    /// should be inverted at runtime.
+    uint64_t status_mirror_invert_mask_ = 0;
 };
 
 } // namespace FSoE

@@ -94,8 +94,23 @@
  * - `formatActive()` — only active (and visible) labels, as a
  *                     space-separated list of names (no color).  Compact
  *                     summary of what's set.
+ *
+ * ## Opt-in: reporting unknown bits
+ *
+ * `format()` accepts an optional `known_mask` declaring which bit
+ * positions are "known" for the value being displayed (often a superset
+ * of the display labels — e.g. all defined PDO flag bits while only a
+ * subset is shown).  Set bits of `value` outside `known_mask` are
+ * appended as a yellow "Unknown:i,j,..." tag listing their indices:
+ * @code
+ *   uint32_t known = ColoredBitsetFormatter::labelCoverage(all_labels);
+ *   fmt.format(value, "  ", known);   // "STO=ON  SS1=OFF  Unknown:5,8"
+ * @endcode
+ * `formatUnknownBits()` renders the same tag uncolored for non-TTY use.
+ * `known_mask == 0` disables the feature entirely.
  */
 
+#include <bit>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -301,7 +316,12 @@ public:
     /// Format visible labels as "NAME=ON" or "NAME=OFF" with ANSI color,
     /// joined by `sep` (default: two spaces).  Labels hidden by
     /// `shouldShow()` are skipped entirely.
-    std::string format(uint32_t value, std::string_view sep = "  ") const {
+    ///
+    /// Opt-in unknown-bits report: when `known_mask` is non-zero, set
+    /// bits of `value` outside it are appended as a yellow
+    /// "Unknown:i,j,..." tag listing their bit indices.
+    std::string format(uint32_t value, std::string_view sep = "  ",
+                       uint32_t known_mask = 0) const {
         std::string result;
         bool first = true;
         for (const auto* label : ptrs_) {
@@ -309,6 +329,11 @@ public:
             if (!first) result.append(sep);
             result += formatBit(label->isActive(value), label->name);
             first = false;
+        }
+        if (const std::string unk = formatUnknownBits(value, known_mask);
+            !unk.empty()) {
+            if (!first) result.append(sep);
+            result += std::format("\033[33m{}\033[0m", unk);
         }
         return result;
     }
@@ -328,6 +353,37 @@ public:
             first = false;
         }
         return first ? std::string(empty_text) : result;
+    }
+
+    /// Opt-in unknown-bits report (uncolored): indices of the set bits
+    /// in `value` that are not covered by `known_mask`, rendered as
+    /// "Unknown:i,j,...".  Returns an empty string when `known_mask` is
+    /// 0 (feature disabled) or when no unknown bits are set.
+    static std::string formatUnknownBits(uint32_t value, uint32_t known_mask) {
+        if (known_mask == 0) return {};
+        uint32_t unknown = value & ~known_mask;
+        if (unknown == 0) return {};
+        std::string s = "Unknown:";
+        bool first = true;
+        while (unknown != 0) {
+            if (!first) s += ',';
+            first = false;
+            s += std::format("{}", std::countr_zero(unknown));
+            unknown &= unknown - 1;
+        }
+        return s;
+    }
+
+    /// Union of all label masks in `labels` — every bit position covered
+    /// by a label.  Use it to build the `known_mask` for
+    /// `format()`/`formatUnknownBits()` when the displayed label set is a
+    /// subset of the defined bit positions.
+    static uint32_t labelCoverage(std::span<const BitLabel> labels) {
+        uint32_t m = 0;
+        for (const auto& label : labels) {
+            m |= label.mask;
+        }
+        return m;
     }
 
     /// Format a single bit as colored "NAME=ON" or "NAME=OFF".

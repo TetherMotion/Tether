@@ -421,6 +421,13 @@ void SafeMotionServoEmulator::onInitialize()
     published_status_.analog_input_diagnostic_active = config_.analog_input_diagnostic_active;
     published_status_.analog_input_value_valid = config_.analog_input_value_valid;
     published_status_.safe_analog_input = config_.analog_input_value;
+
+    // With --invert-sto the slave→master STO status bit is the logical
+    // NOT of the master→slave STO command bit (one-active echo of the
+    // zero-active command) when in the Data/ProcessData state.
+    const uint8_t sto_status_bit =
+        ::FSoE::bitIndexOf(PDO::SOMANET_TxPDO_1B00::kSTOState);
+    Base::setStatusBitMirrorInvert(sto_status_bit, config_.invert_sto);
 }
 
 void SafeMotionServoEmulator::onCommandConsumed(const Command& cmd)
@@ -533,6 +540,19 @@ void SafeMotionServoEmulator::clearError()
     error_active_ = false;
     restart_required_ = false;
     refreshPublishedStatus();
+}
+
+void SafeMotionServoEmulator::setInvertSto(bool invert)
+{
+    config_.invert_sto = invert;
+    const uint8_t sto_status_bit =
+        ::FSoE::bitIndexOf(PDO::SOMANET_TxPDO_1B00::kSTOState);
+    Base::setStatusBitMirrorInvert(sto_status_bit, invert);
+}
+
+bool SafeMotionServoEmulator::invertSto() const
+{
+    return config_.invert_sto;
 }
 
 void SafeMotionServoEmulator::resetToSafeState()
