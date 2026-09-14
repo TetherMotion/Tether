@@ -7,6 +7,8 @@
 # sight (opaque TermWindow*), so the ncurses macros never leak into
 # consumers.  Skipped silently when no curses library is present.
 
+set(CURSES_NEED_NCURSES TRUE CACHE BOOL "Require ncurses" FORCE)
+set(CURSES_NEED_WIDE TRUE CACHE BOOL "Require wide/Unicode ncurses" FORCE)
 find_package(Curses)
 
 if(NOT CURSES_FOUND)
