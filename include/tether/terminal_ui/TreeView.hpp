@@ -33,6 +33,7 @@ namespace TUI {
 
 struct TreeNode {
     std::string          label;              ///< Text shown in the tree
+    std::string          badge;              ///< Small right-aligned indicator
     std::vector<TreeNode> children;          ///< Sub-nodes (empty = leaf)
     bool                 expanded = true;    ///< Draw children when true
     int                  tag      = -1;      ///< User payload (e.g. slave index)
@@ -56,6 +57,10 @@ public:
 
     /// Move the selection to the node carrying `tag` (no-op if absent).
     void selectByTag(int tag);
+
+    /// Set the right-aligned badge of the node carrying `tag` (no-op if
+    /// absent).  Cheap: only the badge string changes, no re-flattening.
+    void setBadge(int tag, std::string badge);
 
     /// Handle one key; returns true when the key was consumed as tree
     /// navigation (arrows, Home/End, PageUp/PageDown).

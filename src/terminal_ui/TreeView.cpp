@@ -32,6 +32,23 @@ static std::string utf8Trunc(const std::string& s, int maxCols) {
     return s.substr(0, i);
 }
 
+// Display width in columns: our glyphs are all width-1, so this is just the
+// codepoint count (invalid bytes count as one column each).
+static int utf8Cols(const std::string& s) {
+    std::mbstate_t st{};
+    int    cols = 0;
+    size_t i    = 0;
+    while (i < s.size()) {
+        wchar_t      wc = 0;
+        const size_t n  = std::mbrtowc(&wc, s.data() + i, s.size() - i, &st);
+        if (n == (size_t)-1 || n == (size_t)-2) { ++i; ++cols; continue; }
+        if (n == 0) { ++i; continue; }
+        i += n;
+        ++cols;
+    }
+    return cols;
+}
+
 void TreeView::setRoot(TreeNode root) {
     root_   = std::move(root);
     cursor_ = 0;
@@ -51,6 +68,17 @@ int TreeView::selectedTag() const {
 void TreeView::selectByTag(int tag) {
     for (size_t i = 0; i < flat_.size(); ++i) {
         if (flat_[i]->tag == tag) { cursor_ = i; return; }
+    }
+}
+
+void TreeView::setBadge(int tag, std::string badge) {
+    std::vector<TreeNode*> stack;
+    for (auto& c : root_.children) stack.push_back(&c);
+    while (!stack.empty()) {
+        TreeNode* n = stack.back();
+        stack.pop_back();
+        if (n->tag == tag) { n->badge = std::move(badge); return; }
+        for (auto& c : n->children) stack.push_back(&c);
     }
 }
 
@@ -138,8 +166,20 @@ void TreeView::render(TermWindow* w) {
         if (n.color != PalNone) attrs |= COLOR_PAIR(n.color);
         if (!n.children.empty() && !sel) attrs |= A_BOLD;
 
+        // Right-aligned badge (e.g. live bit states) — reserves its column
+        // width so the label truncates without overlapping it.
+        int badgeX = -1;
+        if (!n.badge.empty()) {
+            const int bw = utf8Cols(n.badge);
+            badgeX = width - bw - 1;
+            if (badgeX <= x + 1) badgeX = -1;   // too narrow — drop it
+        }
+
         wattron(win, attrs);
-        mvwprintw(win, row, x, "%s", utf8Trunc(n.label, width - x - 1).c_str());
+        const int labelCols = badgeX > 0 ? badgeX - x - 1 : width - x - 1;
+        mvwprintw(win, row, x, "%s", utf8Trunc(n.label, labelCols).c_str());
+        if (badgeX > 0)
+            mvwprintw(win, row, badgeX, "%s", n.badge.c_str());
         wattroff(win, attrs);
     }
 }
