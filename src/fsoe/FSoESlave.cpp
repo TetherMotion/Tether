@@ -186,7 +186,6 @@ void FSoESlave::reset() {
     sessionOctetIdx_ = 0;
     sessionOctetAdvancePending_ = false;
     sessionFirstRxDone_ = false;
-    resetResponsePending_ = false;
     connectionRxIdx_ = 0;
     connectionTxIdx_ = 0;
     connectionTxAdvancePending_ = false;
@@ -578,16 +577,6 @@ size_t FSoESlave::prepareTxFrame(uint8_t* data, size_t maxLen) {
             cached_tx_fail_safe_ = current_fail_safe;
             tx_cache_valid_ = true;
         }
-
-        // After sending the ONE Reset response, transition to Session
-        // immediately (per FSoE handshake: acknowledge Reset once, then
-        // proceed to Session without waiting for the master's Session
-        // command).  transitionTo clears the TX cache, so the next
-        // prepareTxFrame builds a fresh Session response.
-        if (resetResponsePending_ && current_state == ConnectionState::Reset) {
-            resetResponsePending_ = false;
-            transitionTo(ConnectionState::Session);
-        }
     }
 
     return frameSize;
@@ -975,7 +964,6 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
         sessionOctetIdx_ = 0;
         sessionOctetAdvancePending_ = false;
         sessionFirstRxDone_ = false;
-        resetResponsePending_ = false;
         // Reset Connection state multi-cycle transfer.
         connectionRxIdx_ = 0;
         connectionTxIdx_ = 0;
@@ -1014,16 +1002,16 @@ void FSoESlave::processSessionReset(const uint8_t* data, size_t len) {
 
     // State transition:
     // - On Reset command: stay in Reset state so prepareTxFrame builds a
-    //   Reset response (cmd=0x2A).  Set resetResponsePending_ so that
-    //   after the ONE Reset response is sent, prepareTxFrame transitions
-    //   to Session immediately — the slave does NOT wait for the master's
-    //   Session command (0x4E).  This matches the FSoE handshake: the
-    //   slave acknowledges the Reset once, then proceeds to Session.
+    //   Reset response (cmd=0x2A).  The slave keeps answering Reset for as
+    //   long as the master keeps sending Reset (identical repeated Resets
+    //   are handled by duplicate-frame detection resending the cached
+    //   response) and only advances when the master sends a Session
+    //   command.  Answering Reset with a Session frame makes the ESC211
+    //   master reject it as an unexpected command in Reset state.
     // - On Session command: transition to Session state.  The slave sends
     //   a Session response (buildSessionResponse) with its own Session ID.
     if (cmd == Command::Reset) {
         transitionTo(ConnectionState::Reset);
-        resetResponsePending_ = true;
     } else if (cmd == Command::Session) {
         transitionTo(ConnectionState::Session);
         sessionFirstRxDone_ = true;

@@ -841,12 +841,11 @@ TEST_F(FSoEResetFirstTest, ResetRecoversSlaveFromDataState) {
     // Master should have transitioned to Session (slave acknowledged reset)
     EXPECT_EQ(conn->getState(), ConnectionState::Session);
 
-    // Slave responds with ONE Reset (0x2A) then proceeds to Session
-    // immediately (per FSoE handshake: acknowledge Reset once, then
-    // advance to Session without waiting for the master's Session cmd).
-    EXPECT_EQ(slave->getStateName(), std::string("SESSION"));
+    // Slave transitions to Reset on Reset command and stays there,
+    // answering Reset with Reset until the master sends Session.
+    EXPECT_EQ(slave->getStateName(), std::string("RESET"));
 
-    // Next exchange: master sends Session, slave stays in Session
+    // Next exchange: master sends Session, slave transitions to Session
     now += 15;
     ASSERT_TRUE(conn->exchangeWith(*slave, now));
     EXPECT_EQ(slave->getStateName(), std::string("SESSION"));
@@ -879,14 +878,13 @@ TEST_F(FSoEResetFirstTest, ResetRecoversSlaveFromConnectionState) {
     conn->resetConnection();
     EXPECT_EQ(conn->getState(), ConnectionState::Reset);
 
-    // Master sends Reset → slave in Connection state responds with ONE
-    // Reset (0x2A), then proceeds to Session immediately.  Master
-    // transitions to Session.
+    // Master sends Reset → slave in Connection state transitions to Reset
+    // and answers with a Reset response.  Master transitions to Session.
     now += 15;
     ASSERT_TRUE(conn->exchangeWith(*slave, now));
 
     EXPECT_EQ(conn->getState(), ConnectionState::Session);
-    EXPECT_EQ(slave->getStateName(), std::string("SESSION"));
+    EXPECT_EQ(slave->getStateName(), std::string("RESET"));
 }
 
 TEST_F(FSoEResetFirstTest, ResetFrameHasCorrectConnectionID) {

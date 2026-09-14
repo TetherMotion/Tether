@@ -335,9 +335,8 @@ TEST(FSoESequenceConformance, FullHandshakeSeqProgression) {
     EXPECT_EQ(slave.getTxSeqNo(), 0u);  // last_rx_seq_no_ = 0 (no RX yet)
     EXPECT_EQ(slave.getRxSeqNo(), 0u);
 
-    // Exchange 1: Master sends Reset (seq=0), slave responds with ONE
-    // Reset response (seq=0) then proceeds to Session immediately.
-    // Master transitions to Session.
+    // Exchange 1: Master sends Reset (seq=0), slave stays in Reset and
+    // answers with a Reset response (seq=0).  Master transitions to Session.
     // (master and slave have independent counters, both starting at initial_seq_no=0)
     uint64_t now = 15;
     ASSERT_TRUE(conn.exchangeWith(slave, now));
@@ -345,12 +344,12 @@ TEST(FSoESequenceConformance, FullHandshakeSeqProgression) {
     // After exchange 1:
     // Master: tx_seq=1 (incremented), rx_seq=0 (last_tx_seq_no_=0)
     // Slave: tx_seq=0 (last_rx_seq_no_=0), rx_seq=1 (incremented by validateFrame)
-    // Slave has transitioned to Session (after sending the one Reset response)
+    // Slave stays in Reset state until the master's Session command
     EXPECT_EQ(conn.getTxSeqNo(), 1u);
     EXPECT_EQ(conn.getRxSeqNo(), 0u);
     EXPECT_EQ(slave.getTxSeqNo(), 0u);
     EXPECT_EQ(slave.getRxSeqNo(), 1u);
-    EXPECT_EQ(slave.getState(), ConnectionState::Session);
+    EXPECT_EQ(slave.getState(), ConnectionState::Reset);
 
     // Exchange 2: Master sends Session (seq=0, start_crc=0 — state-transition
     // reset).  Slave transitions to Session, sends Session response (seq=0,
