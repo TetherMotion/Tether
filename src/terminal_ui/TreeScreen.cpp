@@ -72,13 +72,18 @@ void TreeScreen::run(std::atomic<bool>& cancel, double durationSec) {
 
         // ---- Panes -----------------------------------------------------
         const int leftW = std::max(24, session_.cols() * 2 / 5);
-        for (int r = 1; r < footerY - static_cast<int>(log_.maxLines()); ++r) {
-            mvaddch(r, leftW - 1, ACS_VLINE);
+        const int sepY = footerY - static_cast<int>(log_.maxLines());
+        for (int r = 1; r < sepY; ++r) {
+            mvprintw(r, leftW - 1, "%s", "\xE2\x94\x82"); // │
         }
-        mvaddch(footerY - static_cast<int>(log_.maxLines()), 0, ACS_LTEE);
-        mvaddch(footerY - static_cast<int>(log_.maxLines()), leftW - 1, ACS_PLUS);
-        mvhline(footerY - static_cast<int>(log_.maxLines()), 1, ACS_HLINE,
-                session_.cols() - 2);
+        mvprintw(sepY, 0, "%s", "\xE2\x94\x9C");            // ├
+        mvprintw(sepY, leftW - 1, "%s", "\xE2\x94\xBC");    // ┼
+
+        const int hlineW = std::max(0, session_.cols() - 2);
+        std::string hline;
+        hline.reserve(hlineW * 3);
+        for (int i = 0; i < hlineW; ++i) hline += "\xE2\x94\x80"; // ─
+        mvprintw(sepY, 1, "%s", hline.c_str());
 
         // Push the stdscr frame first, then each subwindow over its own region,
         // and update the physical screen once at the end.  The previous

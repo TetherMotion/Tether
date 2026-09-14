@@ -106,11 +106,12 @@ void TreeView::render(TermWindow* w) {
         const TreeNode& n = *flat_[i];
         const int  indent = depth_[i] * 2;
         const bool sel = (i == cursor_);
-        const char mark = n.children.empty() ? ' '
-                        : (n.expanded ? '-' : '+');
+        const char* mark = n.children.empty() ? " "
+                         : (n.expanded ? "\xE2\x96\xBC"   // ▼
+                                        : "\xE2\x96\xB6"); // ▶
 
         int x = indent;
-        if (x < width - 1) mvwaddch(win, row, x, mark);
+        if (x < width - 1) mvwprintw(win, row, x, "%s", mark);
         x += 2;
 
         int attrs = sel ? A_REVERSE : A_NORMAL;
