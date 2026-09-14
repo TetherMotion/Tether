@@ -151,7 +151,12 @@ struct MailboxAddressConfig {
 };
 
 /// Add `-M` / `--mailbox-size` to an ArgumentParser.
-void addMailboxSizeArg(argparse::ArgumentParser& program);
+/// `default_size` sets the default mailbox size (bytes) for both MbxIn and
+/// MbxOut.  ESC211 demos should pass 512: the 256-byte FNI/RSP/SDD sections
+/// plus the SDO header do not fit into a 256-byte mailbox, which forces
+/// segmented downloads that the slave rejects.
+void addMailboxSizeArg(argparse::ArgumentParser& program,
+                       uint16_t default_size = 256);
 
 /// Add `--mailbox-address` to an ArgumentParser.
 void addMailboxAddressArg(argparse::ArgumentParser& program);

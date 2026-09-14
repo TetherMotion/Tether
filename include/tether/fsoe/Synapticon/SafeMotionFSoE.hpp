@@ -4,11 +4,22 @@
 #include <cstdint>
 #include <optional>
 
+#include "tether/drives/Synapticon/SynapticonPDO.hpp"
 #include "tether/fsoe/FSoESlaveEmulator.hpp"
 #include "tether/fsoe/TypedProcessData.hpp"
 #include "tether/profiles/cia402/DS402Master.hpp"
 
 namespace EtherCAT::Drives::Synapticon::SafeMotion {
+
+namespace PDO = EtherCAT::Drives::SynapticonPDO;
+
+/// diagnostic_flags field mask → absolute bit index in the status safe
+/// data: the diagnostic word occupies status safe-data bits 16-31.
+constexpr uint8_t diagStatusBit(uint16_t diagnostic_flags_mask)
+{
+    return ::FSoE::bitIndexOf(
+        static_cast<uint32_t>(diagnostic_flags_mask) << 16);
+}
 
 struct Timing {
     static constexpr uint16_t kMinimumWatchdogTimeMs = 200;
@@ -99,6 +110,54 @@ struct Codec {
                                   std::array<uint8_t, kSlaveToMainSize>& bytes);
     static std::optional<Status> decodeSlaveToMain(
         const std::array<uint8_t, kSlaveToMainSize>& bytes);
+
+    /// Command→status bit-mirror table for the SOMANET SafeMotion wire
+    /// format.  The FSoE master (e.g. ESC211) expects each master→slave
+    /// command bit echoed VERBATIM into the corresponding slave→master
+    /// status bit — at a DIFFERENT position, since the two directions
+    /// use different field layouts:
+    ///
+    ///   master→slave cmd (safe data)      slave→master status
+    ///   safety_flags bit 0  STO            safety_state bit 0
+    ///   safety_flags bit 1  SS1            safety_state bit 8
+    ///   safety_flags bit 2  SS2            safety_state bit 9
+    ///   safety_flags bit 3  SOS            safety_state bit 3
+    ///   safety_flags bit 8-11 SLS 1-4      safety_state bits 12-15
+    ///   safety_flags bit 13 SBC            diagnostic_flags bit 1
+    ///   safe-data bits 28-29 safe outputs  diagnostic_flags bits 12-13
+    ///
+    /// Positions are extracted from the PDO mask definitions in
+    /// SynapticonPDO.hpp (via ::FSoE::bitIndexOf; diagStatusBit shifts
+    /// the diagnostic-field masks into the status safe-data space) —
+    /// no raw bit numbers are hardcoded here.
+    ///
+    /// Consumed automatically by FSoESlaveEmulator::refreshPublishedStatus().
+    static constexpr ::FSoE::BitMirror kStatusBitMirrors[] = {
+        {::FSoE::bitIndexOf(PDO::SOMANET_RxPDO_1700::kSTO),
+         ::FSoE::bitIndexOf(PDO::SOMANET_TxPDO_1B00::kSTOState)},
+        {::FSoE::bitIndexOf(PDO::SOMANET_RxPDO_1700::kSS1),
+         ::FSoE::bitIndexOf(PDO::SOMANET_TxPDO_1B00::kSS1State)},
+        {::FSoE::bitIndexOf(PDO::SOMANET_RxPDO_1700::kSS2),
+         ::FSoE::bitIndexOf(PDO::SOMANET_TxPDO_1B00::kSS2State)},
+        {::FSoE::bitIndexOf(PDO::SOMANET_RxPDO_1700::kSOS),
+         ::FSoE::bitIndexOf(PDO::SOMANET_TxPDO_1B00::kSOSState)},
+        {::FSoE::bitIndexOf(PDO::SOMANET_RxPDO_1700::kSLS_Instance1),
+         ::FSoE::bitIndexOf(PDO::SOMANET_TxPDO_1B00::kSLSInstance1)},
+        {::FSoE::bitIndexOf(PDO::SOMANET_RxPDO_1700::kSLS_Instance2),
+         ::FSoE::bitIndexOf(PDO::SOMANET_TxPDO_1B00::kSLSInstance2)},
+        {::FSoE::bitIndexOf(PDO::SOMANET_RxPDO_1700::kSLS_Instance3),
+         ::FSoE::bitIndexOf(PDO::SOMANET_TxPDO_1B00::kSLSInstance3)},
+        {::FSoE::bitIndexOf(PDO::SOMANET_RxPDO_1700::kSLS_Instance4),
+         ::FSoE::bitIndexOf(PDO::SOMANET_TxPDO_1B00::kSLSInstance4)},
+        {::FSoE::bitIndexOf(PDO::SOMANET_RxPDO_1700::kSBCCommand),
+         diagStatusBit(PDO::SOMANET_TxPDO_1B00::kSBCState)},
+        // Safe outputs: command safe-data bits 28-29 (FNI 0x26F0:1-2);
+        // the PDO header only defines the byte-local field bits (0-1),
+        // which do not match the wire layout, so the FNI positions are
+        // used directly.  Monitors are diagnostic_flags bits 12-13.
+        {28, diagStatusBit(PDO::SOMANET_TxPDO_1B00::kSafeOutputMonitor1)},
+        {29, diagStatusBit(PDO::SOMANET_TxPDO_1B00::kSafeOutputMonitor2)},
+    };
 };
 
 class SafeMotionServoEmulator;

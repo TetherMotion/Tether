@@ -96,6 +96,7 @@ struct EtherCATSlaveDebugFlags {
     bool fsoeWire = false;
     bool fsoeSequence = false;
     bool fsoeCrc = false;
+    bool fsoeSlaveState = false;
 #endif
 };
 
@@ -135,6 +136,7 @@ public:
     bool fsoeWire = false;
     bool fsoeSequence = false;
     bool fsoeCrc = false;
+    bool fsoeSlaveState = false;
 #endif
 
     SlaveFilter rxPDOFilt;
@@ -162,6 +164,7 @@ public:
     SlaveFilter fsoeWireFilt;
     SlaveFilter fsoeSequenceFilt;
     SlaveFilter fsoeCrcFilt;
+    SlaveFilter fsoeSlaveStateFilt;
 #endif
 
     // Gate for conditional debugging (nullptr = always active, current behavior)
@@ -179,6 +182,7 @@ public:
                pdoConfiguration || shutdown
 #ifdef TETHER_ENABLE_FSOE
                || fsoe || fsoeFrame || fsoeRaw || fsoeWire || fsoeSequence || fsoeCrc
+               || fsoeSlaveState
 #endif
                ;
     }
@@ -218,6 +222,7 @@ public:
         s.fsoeWire      = fsoeWire && fsoeWireFilt.allows(slave_index);
         s.fsoeSequence  = fsoeSequence && fsoeSequenceFilt.allows(slave_index);
         s.fsoeCrc       = fsoeCrc && fsoeCrcFilt.allows(slave_index);
+        s.fsoeSlaveState = fsoeSlaveState && fsoeSlaveStateFilt.allows(slave_index);
 #endif
         return s;
     }
