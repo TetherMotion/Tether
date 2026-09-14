@@ -65,6 +65,9 @@ public:
     /// Currently selected node (may be null when the tree is empty).
     const TreeNode* selected() const { return tree_.selected(); }
 
+    /// Access to the tree (e.g. to update node badges from onTick).
+    TreeView& tree() { return tree_; }
+
     /// Access to the captured log pane (add application lines).
     LogPane& log() { return log_; }
 
