@@ -318,7 +318,7 @@ struct Args {
 };
 
 bool parseArgs(int argc, char** argv, Args& out) {
-    argparse::ArgumentParser program("synapticon_fsoe_only");
+    argparse::ArgumentParser program("synapticon_fsoe_only", "1.0", argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
     program.add_argument("-s", "--slave")
         .scan<'i', int>().default_value(0);

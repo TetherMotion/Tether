@@ -33,7 +33,7 @@
 static const char* TAG = "slave_read_identity";
 
 int main(int argc, char** argv) {
-    argparse::ArgumentParser program("slave_read_identity");
+    argparse::ArgumentParser program("slave_read_identity", "1.0", argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addSlaveArg(program);
     Tether::Examples::addVlanArgs(program);

@@ -294,6 +294,12 @@ void Master::updateDebugFlags()
     for (auto& group : pdo_groups_) {
         if (group.pdo) group.pdo->setDebugFlags(&debug_flags_);
     }
+    if (logical_addr_mgr_) {
+        logical_addr_mgr_->setDebugFlags(&debug_flags_);
+    }
+    for (auto& group : pdo_groups_) {
+        if (group.lam) group.lam->setDebugFlags(&debug_flags_);
+    }
 }
 
 Slave& Master::slave(uint16_t slave_index)

@@ -201,7 +201,7 @@ static int inspectAndMaybeReset(EtherCAT::Master& master, bool do_reset, bool do
 }
 
 int main(int argc, char** argv) {
-    argparse::ArgumentParser program("as715n_check_error_code");
+    argparse::ArgumentParser program("as715n_check_error_code", "1.0", argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addMailboxSizeArg(program);
     Tether::Examples::addMailboxAddressArg(program);

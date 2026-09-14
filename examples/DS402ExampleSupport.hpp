@@ -235,7 +235,7 @@ inline bool parseMotionNativeArgs(int argc, char** argv,
                                   const char* program_name,
                                   MotionNativeArgs& out)
 {
-    argparse::ArgumentParser program(program_name);
+    argparse::ArgumentParser program(program_name, "1.0", argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
     program.add_argument("-d", "--duration").scan<'g', double>().default_value(10.0);
 

@@ -1177,7 +1177,7 @@ void displayStatistics(const std::vector<PCP::InterpretedFrame>& frames, const F
 } // anonymous namespace
 
 int main(int argc, char** argv) {
-    argparse::ArgumentParser program("interpret_pcapng");
+    argparse::ArgumentParser program("interpret_pcapng", "1.0", argparse::default_arguments::help);
     program.add_argument("input")
         .help("Path to the pcapng file to interpret");
 
@@ -1215,7 +1215,7 @@ int main(int argc, char** argv) {
         .help("Only show errors (wkc=0, SDO abort, etc.)");
 
     // Existing options
-    program.add_argument("-v", "--verbose")
+    program.add_argument("--verbose")
         .default_value(false)
         .implicit_value(true)
         .help("Print full payload hex dumps");

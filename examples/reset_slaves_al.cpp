@@ -73,7 +73,7 @@ static std::vector<uint16_t> parseSlaveIndices(const std::vector<std::string>& a
 // ============================================================================
 
 int main(int argc, char** argv) {
-    argparse::ArgumentParser program("reset_slaves_al");
+    argparse::ArgumentParser program("reset_slaves_al", "1.0", argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addDebugArg(program);
     Tether::Examples::addVlanArgs(program);

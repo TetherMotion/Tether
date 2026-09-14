@@ -36,7 +36,7 @@ static int dumpSiiForSlave(EtherCAT::Master& master, uint16_t slave_idx) {
 }
 
 int main(int argc, char** argv) {
-    argparse::ArgumentParser program("ethercat_dump_sii");
+    argparse::ArgumentParser program("ethercat_dump_sii", "1.0", argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addSlaveArg(program);
     Tether::Examples::addVlanArgs(program);

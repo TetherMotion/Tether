@@ -20,11 +20,14 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <format>
 #include <string>
 #include <vector>
+
+#include "tether/ethercat/DebugFlags.hpp"
 
 #include "tether/platform/EspCompat.hpp"
 #include "tether/ethercat/PDOManager.hpp"
@@ -161,6 +164,11 @@ public:
     void setBaseLogicalAddress(uint32_t base) { base_logical_addr_ = base; }
     uint32_t getBaseLogicalAddress() const { return base_logical_addr_; }
 
+    /// @brief Wire the manager to the master' s debug flags.
+    void setDebugFlags(const EtherCATMasterDebugFlags* flags) {
+        debug_flags_.store(flags, std::memory_order_relaxed);
+    }
+
 private:
     IPDOTransport& transport_;
 
@@ -193,6 +201,7 @@ private:
     Stats    stats_{};
     bool     initialized_{false};
     std::function<std::string(uint16_t)> prefix_provider_;
+    std::atomic<const EtherCATMasterDebugFlags*> debug_flags_{nullptr};
 
     /// Build the log prefix for a slave (uses prefix_provider_ if set, else default)
     std::string slavePrefix(uint16_t idx) const {

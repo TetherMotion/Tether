@@ -361,7 +361,7 @@ bool writePlotSvg(const std::string& filename,
 } // anonymous namespace
 
 int main(int argc, char* argv[]) {
-    argparse::ArgumentParser program("wss_velocity_plot");
+    argparse::ArgumentParser program("wss_velocity_plot", "1.0", argparse::default_arguments::help);
     program.add_description(
         "Parse a G-code file, run the Pareto time-energy optimal velocity "
         "planner, and export velocity(t) and acceleration(t) as SVG plots "

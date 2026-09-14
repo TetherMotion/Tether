@@ -285,7 +285,9 @@ void CoEManager::deinit() {
     next_request_id_.store(1);
     state_.shutdown_requested.store(false);
 
-    TETHER_LOGI(TAG, "{}: CoEManager deinitialized", log_prefix_.c_str());
+    if (debug_flags_.shutdown) {
+        TETHER_LOGI(TAG, "{}: CoEManager deinitialized", log_prefix_.c_str());
+    }
 }
 
 bool CoEManager::isInitialized() const {
@@ -886,7 +888,9 @@ void CoEManager::workerLoop() {
     }
 
     state_.worker_running.store(false);
-    TETHER_LOGI(TAG, "{}: CoE worker thread stopped", log_prefix_.c_str());
+    if (debug_flags_.shutdown) {
+        TETHER_LOGI(TAG, "{}: CoE worker thread stopped", log_prefix_.c_str());
+    }
 }
 
 // ============================================================================

@@ -106,7 +106,7 @@ bool configureDrive(EtherCAT::DS402Master& master)
 
 int main(int argc, char** argv)
 {
-    argparse::ArgumentParser program("as715n_sine_motion_fsoe_native");
+    argparse::ArgumentParser program("as715n_sine_motion_fsoe_native", "1.0", argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
     program.add_argument("-d", "--duration").scan<'g', double>().default_value(10.0);
     program.add_argument("--enable-fsoe").default_value(false).implicit_value(true);

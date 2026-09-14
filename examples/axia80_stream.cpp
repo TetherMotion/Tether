@@ -353,7 +353,7 @@ static std::condition_variable queue_cv;
 
 int main(int argc, char** argv) {
     // ---- Argument parsing ----
-    argparse::ArgumentParser program("axia80_stream");
+    argparse::ArgumentParser program("axia80_stream", "1.0", argparse::default_arguments::help);
     program.add_argument("-i", "--interface")
         .default_value(std::string(""))
         .help("Network interface name (e.g. eth0, enp3s0). "
