@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <clocale>
+#include <langinfo.h>
 
 #include <ncurses.h>
 #include <unistd.h>
@@ -18,10 +19,12 @@ namespace TUI {
 Session::Session() {
     // Force a UTF-8 locale so wide/Unicode box-drawing and arrows render
     // correctly even when the environment is not set (e.g. LANG=C).
-    if (!setlocale(LC_ALL, "C.UTF-8")) {
-        if (!setlocale(LC_ALL, "en_US.UTF-8")) {
-            setlocale(LC_ALL, "");
-        }
+    static const char* const locales[] = {
+        "C.UTF-8", "C.utf8", "en_US.UTF-8", "en_US.utf8", "",
+    };
+    for (const char* l : locales) {
+        if (setlocale(LC_ALL, l) && strcasestr(nl_langinfo(CODESET), "UTF-8"))
+            break;
     }
     initscr();
     noecho();

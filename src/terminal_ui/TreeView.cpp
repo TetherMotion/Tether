@@ -6,11 +6,31 @@
 #include "tether/terminal_ui/TreeView.hpp"
 
 #include <algorithm>
+#include <cwchar>
 
 #include <ncurses.h>
 
 namespace Tether {
 namespace TUI {
+
+// Truncate a UTF-8 string to at most `maxCols` display columns without
+// splitting a multibyte codepoint.  Our labels are Latin + box-drawing, all
+// width-1, so counting codepoints is sufficient.
+static std::string utf8Trunc(const std::string& s, int maxCols) {
+    if (maxCols <= 0) return {};
+    std::mbstate_t st{};
+    int    cols = 0;
+    size_t i    = 0;
+    while (i < s.size() && cols < maxCols) {
+        wchar_t      wc = 0;
+        const size_t n  = std::mbrtowc(&wc, s.data() + i, s.size() - i, &st);
+        if (n == (size_t)-1 || n == (size_t)-2) { ++i; ++cols; continue; }
+        if (n == 0) { ++i; continue; }
+        i += n;
+        ++cols;
+    }
+    return s.substr(0, i);
+}
 
 void TreeView::setRoot(TreeNode root) {
     root_   = std::move(root);
@@ -119,7 +139,7 @@ void TreeView::render(TermWindow* w) {
         if (!n.children.empty() && !sel) attrs |= A_BOLD;
 
         wattron(win, attrs);
-        mvwprintw(win, row, x, "%.*s", width - x - 1, n.label.c_str());
+        mvwprintw(win, row, x, "%s", utf8Trunc(n.label, width - x - 1).c_str());
         wattroff(win, attrs);
     }
 }
