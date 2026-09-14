@@ -116,6 +116,50 @@ inline constexpr DeviceIdentity ER2349{0x00000002, 0x092D4852, 8,  "ER2349"};
 inline constexpr DeviceIdentity EJ2819{0x00000002, 0x0B032852, 16, "EJ2819"};
 inline constexpr DeviceIdentity EP6228{0x00000002, 0x18544052, 8,  "EP6228"};
 
+// --- Extended EL2xxx outputs (16-bit wide, two-SM layouts resolved via SII) -----
+inline constexpr DeviceIdentity EL2409{0x00000002, 0x09693052, 16, "EL2409"};
+inline constexpr DeviceIdentity EL2489{0x00000002, 0x09B93052, 16, "EL2489"};
+inline constexpr DeviceIdentity EL2809{0x00000002, 0x0AF93052, 16, "EL2809"};
+inline constexpr DeviceIdentity EL2872{0x00000002, 0x0B383052, 16, "EL2872"};
+inline constexpr DeviceIdentity EL2889{0x00000002, 0x0B493052, 16, "EL2889"};
+
+// --- Timestamped / XFC digital outputs ------------------------------------------
+// Output bits lead the RxPDO image; start-time/cycle fields follow.
+inline constexpr DeviceIdentity EL2252{0x00000002, 0x08CC3052, 2,  "EL2252"};
+inline constexpr DeviceIdentity EL2258{0x00000002, 0x08D23052, 8,  "EL2258"};
+
+// --- EJ plug-in digital outputs (0x2852) ------------------------------------------
+inline constexpr DeviceIdentity EJ2008{0x00000002, 0x07D82852, 8,  "EJ2008"};
+inline constexpr DeviceIdentity EJ2128{0x00000002, 0x08502852, 8,  "EJ2128"};
+inline constexpr DeviceIdentity EJ2809{0x00000002, 0x0AF92852, 16, "EJ2809"};
+inline constexpr DeviceIdentity EJ2889{0x00000002, 0x0B492852, 16, "EJ2889"};
+
+// --- EP/ER digital output boxes ------------------------------------------------------
+inline constexpr DeviceIdentity EP2001{0x00000002, 0x07D14052, 8,  "EP2001"};
+inline constexpr DeviceIdentity EP2008{0x00000002, 0x07D84052, 8,  "EP2008"};
+inline constexpr DeviceIdentity EP2028{0x00000002, 0x07EC4052, 8,  "EP2028"};
+inline constexpr DeviceIdentity EP2624{0x00000002, 0x0A404052, 4,  "EP2624"};
+inline constexpr DeviceIdentity EP2809{0x00000002, 0x0AF94052, 16, "EP2809"};
+inline constexpr DeviceIdentity ER2008{0x00000002, 0x07D84852, 8,  "ER2008"};
+inline constexpr DeviceIdentity ER2028{0x00000002, 0x07EC4852, 8,  "ER2028"};
+inline constexpr DeviceIdentity ER2624{0x00000002, 0x0A404852, 4,  "ER2624"};
+inline constexpr DeviceIdentity ER2809{0x00000002, 0x0AF94852, 16, "ER2809"};
+
+// --- EtherCAT P (EPP) output boxes ----------------------------------------------------
+inline constexpr DeviceIdentity EPP2008{0x00000002, 0x64764389, 8,  "EPP2008"};
+inline constexpr DeviceIdentity EPP2028{0x00000002, 0x647644C9, 8,  "EPP2028"};
+inline constexpr DeviceIdentity EPP2304{0x00000002, 0x64765609, 4,  "EPP2304"};
+inline constexpr DeviceIdentity EPP2624{0x00000002, 0x64766A09, 4,  "EPP2624"};
+inline constexpr DeviceIdentity EPP2809{0x00000002, 0x64767599, 16, "EPP2809"};
+inline constexpr DeviceIdentity EPP2816{0x00000002, 0x64767609, 16, "EPP2816"};
+inline constexpr DeviceIdentity EPP2817{0x00000002, 0x64767619, 16, "EPP2817"};
+
+// --- Ex-i intrinsically safe outputs --------------------------------------------------
+inline constexpr DeviceIdentity ELX2002{0x00000002, 0x970B7B29, 2,  "ELX2002"};
+inline constexpr DeviceIdentity ELX2008{0x00000002, 0x970B7B89, 8,  "ELX2008"};
+inline constexpr DeviceIdentity ELX2792{0x00000002, 0x970BAC89, 2,  "ELX2792"};
+inline constexpr DeviceIdentity EPX2004{0x00000002, 0x98096349, 4,  "EPX2004"};
+
 /// Every known packed-output terminal — the default detection set used by
 /// MultiOutputTerminal::detect().
 inline constexpr std::array kOutputTerminals{
@@ -124,6 +168,12 @@ inline constexpr std::array kOutputTerminals{
     EL2634, EL2652, EL2712, EL2722, EL2732, EL2784, EL2788, EL2794,
     EL2798, EL2808, EL2828,
     EP2816, EP2339, EP2349, ER2339, ER2349, EJ2819, EP6228,
+    EL2409, EL2489, EL2809, EL2872, EL2889, EL2252, EL2258,
+    EJ2008, EJ2128, EJ2809, EJ2889,
+    EP2001, EP2008, EP2028, EP2624, EP2809,
+    ER2008, ER2028, ER2624, ER2809,
+    EPP2008, EPP2028, EPP2304, EPP2624, EPP2809, EPP2816, EPP2817,
+    ELX2002, ELX2008, ELX2792, EPX2004,
 };
 
 } // namespace Devices

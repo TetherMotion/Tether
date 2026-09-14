@@ -106,6 +106,82 @@ inline constexpr DeviceIdentity ER2339I{0x00000002, 0x09234852, 8,  "ER2339"};
 inline constexpr DeviceIdentity ER2349I{0x00000002, 0x092D4852, 8,  "ER2349"};
 inline constexpr DeviceIdentity EJ2819I{0x00000002, 0x0B032852, 16, "EJ2819"};
 
+// --- 32-channel and specialty inputs ------------------------------------------
+inline constexpr DeviceIdentity EL1417{0x00000002, 0x05893052, 32, "EL1417"};
+
+// --- EJ plug-in digital inputs (0x2852 suffix) ---------------------------------
+inline constexpr DeviceIdentity EJ1008{0x00000002, 0x03F02852, 8,  "EJ1008"};
+inline constexpr DeviceIdentity EJ1128{0x00000002, 0x04682852, 8,  "EJ1128"};
+inline constexpr DeviceIdentity EJ1809{0x00000002, 0x07112852, 16, "EJ1809"};
+inline constexpr DeviceIdentity EJ1819{0x00000002, 0x071B2852, 16, "EJ1819"};
+inline constexpr DeviceIdentity EJ1889{0x00000002, 0x07612852, 16, "EJ1889"};
+
+// --- EP/ER digital input boxes ---------------------------------------------------
+inline constexpr DeviceIdentity EP1008{0x00000002, 0x03F04052, 8,  "EP1008"};
+inline constexpr DeviceIdentity EP1018{0x00000002, 0x03FA4052, 8,  "EP1018"};
+inline constexpr DeviceIdentity EP1098{0x00000002, 0x044A4052, 8,  "EP1098"};
+inline constexpr DeviceIdentity EP1809{0x00000002, 0x07114052, 16, "EP1809"};
+inline constexpr DeviceIdentity EP1816{0x00000002, 0x07184052, 16, "EP1816"};
+inline constexpr DeviceIdentity ER1008{0x00000002, 0x03F04852, 8,  "ER1008"};
+inline constexpr DeviceIdentity ER1018{0x00000002, 0x03FA4852, 8,  "ER1018"};
+inline constexpr DeviceIdentity ER1098{0x00000002, 0x044A4852, 8,  "ER1098"};
+inline constexpr DeviceIdentity ER1809{0x00000002, 0x07114852, 16, "ER1809"};
+inline constexpr DeviceIdentity ER1819{0x00000002, 0x071B4852, 16, "ER1819"};
+
+// --- EtherCAT P (EPP) digital input boxes ---------------------------------------
+// The ESI defines these as module-style devices without explicit PDO
+// lists; on hardware the SII resolves the same packed-bit layout.
+inline constexpr DeviceIdentity EPP1004{0x00000002, 0x647604C9, 4,  "EPP1004"};
+inline constexpr DeviceIdentity EPP1008{0x00000002, 0x64760509, 8,  "EPP1008"};
+inline constexpr DeviceIdentity EPP1018{0x00000002, 0x647605A9, 8,  "EPP1018"};
+inline constexpr DeviceIdentity EPP1098{0x00000002, 0x64760AA9, 8,  "EPP1098"};
+inline constexpr DeviceIdentity EPP1111{0x00000002, 0x64760B79, 4,  "EPP1111"};
+inline constexpr DeviceIdentity EPP1809{0x00000002, 0x647637B9, 16, "EPP1809"};
+inline constexpr DeviceIdentity EPP1819{0x00000002, 0x647637B9, 16, "EPP1819"};
+
+// --- Timestamped / XFC digital inputs -------------------------------------------
+// The input bits lead the image; latch/event timestamps are extra fields
+// (readable via the image, used by DC applications).  num_bits is the
+// physical channel count.
+inline constexpr DeviceIdentity EL1252{0x00000002, 0x04E43052, 2,  "EL1252"};
+inline constexpr DeviceIdentity EL1254{0x00000002, 0x04E63052, 2,  "EL1254"};
+inline constexpr DeviceIdentity EL1258{0x00000002, 0x04EA3052, 8,  "EL1258"};
+inline constexpr DeviceIdentity EL1259{0x00000002, 0x04EB3052, 8,  "EL1259"};
+inline constexpr DeviceIdentity EL1262{0x00000002, 0x04EE3052, 2,  "EL1262"};
+inline constexpr DeviceIdentity EL1264{0x00000002, 0x04F03052, 4,  "EL1264"};
+inline constexpr DeviceIdentity EJ1254{0x00000002, 0x04E62852, 2,  "EJ1254"};
+inline constexpr DeviceIdentity EP1258{0x00000002, 0x04EA4052, 8,  "EP1258"};
+inline constexpr DeviceIdentity ER1258{0x00000002, 0x04EA4852, 8,  "ER1258"};
+inline constexpr DeviceIdentity EPP1258{0x00000002, 0x64761209, 8,  "EPP1258"};
+
+// --- Ex-i intrinsically safe inputs (NAMUR; error bits interleaved) -------------
+// num_bits counts every 1-bit entry — input and per-channel error/diag
+// bits alternate (ch1 in, ch1 err, ch2 in, ch2 err, ...).
+inline constexpr DeviceIdentity ELX1052{0x00000002, 0x970B3FC9, 4,  "ELX1052"};
+inline constexpr DeviceIdentity ELX1054{0x00000002, 0x970B3FE9, 12, "ELX1054"};
+inline constexpr DeviceIdentity ELX1058{0x00000002, 0x970B4029, 16, "ELX1058"};
+inline constexpr DeviceIdentity EPX1058{0x00000002, 0x98092829, 16, "EPX1058"};
+
+// --- Power supply / system status terminals -------------------------------------
+// One or two packed status bits (PowerOK, overload, undervoltage, fuse).
+inline constexpr DeviceIdentity EL9110{0x00000002, 0x23963052, 1,  "EL9110"};
+inline constexpr DeviceIdentity EL9160{0x00000002, 0x23C83052, 1,  "EL9160"};
+inline constexpr DeviceIdentity EL9210{0x00000002, 0x23FA3052, 2,  "EL9210"};
+inline constexpr DeviceIdentity EL9260{0x00000002, 0x242C3052, 2,  "EL9260"};
+inline constexpr DeviceIdentity EL9410{0x00000002, 0x24C23052, 2,  "EL9410"};
+inline constexpr DeviceIdentity EL9505{0x00000002, 0x25213052, 2,  "EL9505"};
+inline constexpr DeviceIdentity EL9508{0x00000002, 0x25243052, 2,  "EL9508"};
+inline constexpr DeviceIdentity EL9510{0x00000002, 0x25263052, 2,  "EL9510"};
+inline constexpr DeviceIdentity EL9512{0x00000002, 0x25283052, 2,  "EL9512"};
+inline constexpr DeviceIdentity EL9515{0x00000002, 0x252B3052, 2,  "EL9515"};
+inline constexpr DeviceIdentity EL9520{0x00000002, 0x25303052, 1,  "EL9520"};
+inline constexpr DeviceIdentity EL9540{0x00000002, 0x25443052, 2,  "EL9540"};
+inline constexpr DeviceIdentity EL9550{0x00000002, 0x254E3052, 4,  "EL9550"};
+inline constexpr DeviceIdentity EL9560{0x00000002, 0x25583052, 2,  "EL9560"};
+inline constexpr DeviceIdentity EJ9505{0x00000002, 0x25212852, 2,  "EJ9505"};
+inline constexpr DeviceIdentity ELX9410{0x00000002, 0x970D4A29, 2, "ELX9410"};
+inline constexpr DeviceIdentity ELX9560{0x00000002, 0x970D5389, 2, "ELX9560"};
+
 /// Every known packed-input terminal — the default detection set used by
 /// MultiInputTerminal::detect().
 inline constexpr std::array kInputTerminals{
@@ -115,6 +191,16 @@ inline constexpr std::array kInputTerminals{
     EL1702, EL1712, EL1722, EL1804, EL1808, EL1809, EL1814, EL1819,
     EL1862, EL1872, EL1889, EL1899,
     EP1819, EP2339I, EP2349I, ER2339I, ER2349I, EJ2819I,
+    EJ1008, EJ1128, EJ1809, EJ1819, EJ1889,
+    EP1008, EP1018, EP1098, EP1809, EP1816,
+    ER1008, ER1018, ER1098, ER1809, ER1819,
+    EPP1004, EPP1008, EPP1018, EPP1098, EPP1111, EPP1809, EPP1819,
+    EL1252, EL1254, EL1258, EL1259, EL1262, EL1264,
+    EJ1254, EP1258, ER1258, EPP1258,
+    ELX1052, ELX1054, ELX1058, EPX1058,
+    EL9110, EL9160, EL9210, EL9260, EL9410, EL9505, EL9508, EL9510,
+    EL9512, EL9515, EL9520, EL9540, EL9550, EL9560, EJ9505,
+    ELX9410, ELX9560, EL1417,
 };
 
 } // namespace Devices

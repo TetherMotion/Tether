@@ -42,10 +42,7 @@ inline uint64_t readRaw(const uint8_t* p, uint8_t bits) {
 
 /// readRaw + sign extension at `bits` width.
 inline int64_t readSigned(const uint8_t* p, uint8_t bits) {
-    const uint64_t raw = readRaw(p, bits);
-    if (bits >= 64) return static_cast<int64_t>(raw);
-    const uint64_t sign = uint64_t{1} << (bits - 1);
-    return static_cast<int64_t>((raw ^ sign) - sign);
+    return detail::signExtend64(readRaw(p, bits), bits);
 }
 
 } // anonymous namespace

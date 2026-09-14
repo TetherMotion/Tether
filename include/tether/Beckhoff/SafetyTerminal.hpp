@@ -63,23 +63,35 @@ namespace Beckhoff {
 // ============================================================================
 // Known TwinSAFE terminals (from Beckhoff EL19xx.xml / EL29xx.xml)
 // ============================================================================
-// num_bits holds the safe channel count.  EL1904/EL2904 are registered
-// unverified (not present in the available ESI catalog).
+// num_bits holds the safe channel count.  All product codes verified
+// against the ESIs (ELx9xx.xml carries EL1904/EL2904/EP1908/EK1914;
+// EJx9xx.xml / EPx9xx.xml the plug-in and box variants).
 // None verified on hardware yet — supported, not verified yet.
 
 namespace Devices {
 
+inline constexpr DeviceIdentity EL1904{0x00000002, 0x07703052, 4, "EL1904"};
 inline constexpr DeviceIdentity EL1918{0x00000002, 0x077E3052, 8, "EL1918"};
+inline constexpr DeviceIdentity EL2904{0x00000002, 0x0B583052, 4, "EL2904"};
 inline constexpr DeviceIdentity EL2911{0x00000002, 0x0B5F3052, 1, "EL2911"};
 inline constexpr DeviceIdentity EL2912{0x00000002, 0x0B603052, 2, "EL2912"};
 
-// Not in the ESI catalog at hand — registered unverified.
-inline constexpr DeviceIdentity EL1904{0x00000002, 0x076C3052, 4, "EL1904"};
-inline constexpr DeviceIdentity EL2904{0x00000002, 0x0B483052, 4, "EL2904"};
+// Field-box / plug-in / coupler variants (0x4052=EP, 0x2852=EJ, 0x2C52=EK).
+// EK1914 is a coupler with integrated safe I/O; the safe channel count is
+// the FSoE payload, its standard-I/O half is not mapped by this driver.
+inline constexpr DeviceIdentity EP1908{0x00000002, 0x07744052, 8, "EP1908"};
+inline constexpr DeviceIdentity EP1918{0x00000002, 0x077E4052, 8, "EP1918"};
+inline constexpr DeviceIdentity EP2918{0x00000002, 0x0B664052, 8, "EP2918"};
+inline constexpr DeviceIdentity EJ1914{0x00000002, 0x077A2852, 4, "EJ1914"};
+inline constexpr DeviceIdentity EJ1918{0x00000002, 0x077E2852, 8, "EJ1918"};
+inline constexpr DeviceIdentity EJ2914{0x00000002, 0x0B622852, 4, "EJ2914"};
+inline constexpr DeviceIdentity EJ2918{0x00000002, 0x0B662852, 8, "EJ2918"};
+inline constexpr DeviceIdentity EK1914{0x00000002, 0x077A2C52, 4, "EK1914"};
 
 /// Every known TwinSAFE terminal.
 inline constexpr std::array kSafetyTerminals{
-    EL1918, EL2911, EL2912, EL1904, EL2904,
+    EL1904, EL1918, EL2904, EL2911, EL2912,
+    EP1908, EP1918, EP2918, EJ1914, EJ1918, EJ2914, EJ2918, EK1914,
 };
 
 } // namespace Devices

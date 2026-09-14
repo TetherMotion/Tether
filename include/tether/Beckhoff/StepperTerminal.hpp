@@ -74,11 +74,16 @@ inline constexpr DeviceIdentity EJ7041{0x00000002, 0x1B812852, 1, "EJ7041"};
 inline constexpr DeviceIdentity EJ7047{0x00000002, 0x1B872852, 1, "EJ7047"};
 inline constexpr DeviceIdentity EP7041{0x00000002, 0x1B814052, 1, "EP7041"};
 inline constexpr DeviceIdentity ER7041{0x00000002, 0x1B814852, 1, "ER7041"};
+// EP7047-1032 (field-box stepper + encoder) — ESI-verified POS shape.
+inline constexpr DeviceIdentity EP7047{0x00000002, 0x1B874052, 1, "EP7047"};
+// EPP7041-1002 is a module-style ESI (no explicit PDO list); same POS
+// interface on hardware.
+inline constexpr DeviceIdentity EPP7041{0x00000002, 0x64777E19, 1, "EPP7041"};
 
 /// Every known POS-interface stepper terminal.
 inline constexpr std::array kStepperTerminals{
     EL7031, EL7037, EL7041, EL7047,
-    EJ7031, EJ7037, EJ7041, EJ7047, EP7041, ER7041,
+    EJ7031, EJ7037, EJ7041, EJ7047, EP7041, ER7041, EP7047, EPP7041,
 };
 
 } // namespace Devices

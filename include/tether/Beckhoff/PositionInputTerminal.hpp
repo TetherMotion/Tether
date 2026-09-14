@@ -110,11 +110,27 @@ inline constexpr DeviceIdentity EP5151{0x00000002, 0x141F4052, 1, "EP5151"};
 inline constexpr DeviceIdentity ER5101{0x00000002, 0x13ED4852, 1, "ER5101"};
 inline constexpr DeviceIdentity ER5151{0x00000002, 0x141F4852, 1, "ER5151"};
 
+// -- EL15xx up/down counters — counter value + status in, set-counter out --------
+// Same value-channel shape as the encoder terminals (32-bit counter +
+// latch); the RxPDO (set counter value + control bits) is mapped as the
+// output scratch buffer.
+inline constexpr DeviceIdentity EL1502{0x00000002, 0x05DE3052, 2, "EL1502"};
+inline constexpr DeviceIdentity EL1512{0x00000002, 0x05E83052, 2, "EL1512"};
+
+// -- EPP/ELX encoder boxes ----------------------------------------------------------
+// Module-style ESIs (no explicit PDO list); SII resolves the same
+// encoder layout on hardware.
+inline constexpr DeviceIdentity EPP5001{0x00000002, 0x6476FE99, 1, "EPP5001"};
+inline constexpr DeviceIdentity EPP5101{0x00000002, 0x647704D9, 1, "EPP5101"};
+inline constexpr DeviceIdentity EPP5151{0x00000002, 0x647707F9, 1, "EPP5151"};
+inline constexpr DeviceIdentity ELX5151{0x00000002, 0x970C3FF9, 1, "ELX5151"};
+
 inline constexpr std::array kPositionInputTerminals{
     EL5001, EL5002, EL5021, EL5031, EL5032, EL5042, EL5072,
     EL5101, EL5102, EL5112, EL5122, EL5131, EL5151, EL5152,
     EJ5002, EJ5021, EJ5042, EJ5101, EJ5112, EJ5151, EJ5152,
     EP5001, EP5101, EP5151, ER5101, ER5151,
+    EL1502, EL1512, EPP5001, EPP5101, EPP5151, ELX5151,
 };
 
 } // namespace Devices

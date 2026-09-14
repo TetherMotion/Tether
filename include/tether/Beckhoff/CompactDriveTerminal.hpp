@@ -80,19 +80,18 @@ inline constexpr DeviceIdentity ELM7231{0x00000002, 0x502275F9, 1, "ELM7231"};
 // EP/EJ variants — same DRV-interface electronics.
 inline constexpr DeviceIdentity EJ7062{0x00000002, 0x1B962852, 2, "EJ7062"};
 inline constexpr DeviceIdentity EJ7211{0x00000002, 0x1C2B2852, 1, "EJ7211"};
+inline constexpr DeviceIdentity EJ7411{0x00000002, 0x1CF32852, 1, "EJ7411"};
 inline constexpr DeviceIdentity EP7211{0x00000002, 0x1C2B4052, 1, "EP7211"};
 inline constexpr DeviceIdentity EP7412{0x00000002, 0x1CF44052, 2, "EP7412"};
-// DC-motor DRV boxes — resolve what the assignment maps; ch-2 objects on
-// these may live at a different index than the +0x70 convention.
-inline constexpr DeviceIdentity EP7342{0x00000002, 0x1CAE4052, 2, "EP7342"};
-inline constexpr DeviceIdentity ER7342{0x00000002, 0x1CAE4852, 2, "ER7342"};
 inline constexpr DeviceIdentity EP7402{0x00000002, 0x1CEA4052, 1, "EP7402"};
+// Note: EP7342/ER7342 are DC-motor boxes — they use the MOT interface,
+// not DRV, and are registered under DcMotorTerminal instead.
 
 /// Every known DRV-interface compact-drive terminal.
 inline constexpr std::array kCompactDriveTerminals{
     EL7062, EL7411, EL7201, EL7211, EL7221,
     ELM7211, ELM7212, ELM7221, ELM7222, ELM7231,
-    EJ7062, EJ7211, EP7211, EP7412, EP7342, ER7342, EP7402,
+    EJ7062, EJ7211, EJ7411, EP7211, EP7412, EP7402,
 };
 
 } // namespace Devices

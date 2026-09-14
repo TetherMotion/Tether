@@ -278,29 +278,18 @@ Result<> PulseTrainTerminal::start(const StartOptions& opts) {
 // ---------------------------------------------------------------------------
 
 bool PulseTrainTerminal::inBit(uint32_t bit_off) const {
-    if (bit_off == kInvalid) return false;
-    const size_t byte = bit_off / 8;
-    if (byte >= in_buf_.size()) return false;
-    return (in_buf_[byte] >> (bit_off % 8)) & 1;
+    return bit_off != kInvalid && detail::imageBit(in_buf_, bit_off);
 }
 
 void PulseTrainTerminal::setOutBit(uint32_t bit_off, bool v) {
-    if (bit_off == kInvalid) return;
-    const size_t byte = bit_off / 8;
-    if (byte >= out_buf_.size()) return;
-    if (v) out_buf_[byte] |=  static_cast<uint8_t>(1u << (bit_off % 8));
-    else   out_buf_[byte] &= ~static_cast<uint8_t>(1u << (bit_off % 8));
+    if (bit_off != kInvalid) detail::setImageBit(out_buf_, bit_off, v);
 }
 
 int64_t PulseTrainTerminal::inSigned(const Field& f) const {
     if (!f.present()) return 0;
     const size_t byte = f.bit_off / 8;
     if (byte + (f.bit_len + 7) / 8 > in_buf_.size()) return 0;
-    uint64_t raw = 0;
-    std::memcpy(&raw, in_buf_.data() + byte, (f.bit_len + 7) / 8);
-    if (f.bit_len < 64) raw &= (uint64_t{1} << f.bit_len) - 1;
-    const uint64_t sign = uint64_t{1} << (f.bit_len - 1);
-    return static_cast<int64_t>((raw ^ sign) - sign);
+    return detail::signExtendLE(in_buf_.data() + byte, f.bit_len);
 }
 
 void PulseTrainTerminal::outSigned(const Field& f, int32_t v) {
