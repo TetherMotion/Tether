@@ -72,18 +72,20 @@ void TreeScreen::run(std::atomic<bool>& cancel, double durationSec) {
 
         // ---- Panes -----------------------------------------------------
         const int leftW = std::max(24, session_.cols() * 2 / 5);
-        const int sepY = footerY - static_cast<int>(log_.maxLines());
+        // Separator sits one row above the log window (logWin starts at
+        // footerY - logH); without the -1 the log pane paints over it.
+        const int sepY = footerY - static_cast<int>(log_.maxLines()) - 1;
         for (int r = 1; r < sepY; ++r) {
             mvprintw(r, leftW - 1, "%s", "\xE2\x94\x82"); // │
         }
-        mvprintw(sepY, 0, "%s", "\xE2\x94\x9C");            // ├
-        mvprintw(sepY, leftW - 1, "%s", "\xE2\x94\xBC");    // ┼
-
         const int hlineW = std::max(0, session_.cols() - 2);
         std::string hline;
         hline.reserve(hlineW * 3);
         for (int i = 0; i < hlineW; ++i) hline += "\xE2\x94\x80"; // ─
         mvprintw(sepY, 1, "%s", hline.c_str());
+        // Tees drawn after the hline so they aren't overwritten by it.
+        mvprintw(sepY, 0, "%s", "\xE2\x94\x9C");            // ├
+        mvprintw(sepY, leftW - 1, "%s", "\xE2\x94\xBC");    // ┼
 
         // Push the stdscr frame first, then each subwindow over its own region,
         // and update the physical screen once at the end.  The previous
