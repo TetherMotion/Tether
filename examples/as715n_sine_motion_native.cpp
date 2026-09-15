@@ -62,17 +62,11 @@ int runSineMotion(EtherCAT::DS402Master& master, CyclicTarget target, double dur
     loop_config.cycle_period_us = 1000;
     loop_config.sync_interval_cycles = 10;
     loop_config.enable_dc_synchronization = true;
-    if (!master.startRealtimeMotionControlLoop(loop_config)) {
-        TETHER_LOGE(TAG, "Failed to start realtime motion control loop");
-        return 3;
-    }
-
     // For CSP, set the current position as home before moving.
     if (target == CyclicTarget::Position) {
         auto* drive = master.driveBySlaveIndex(kSlaveIndex);
         if (!drive || !drive->homeToCurrentPosition()) {
             TETHER_LOGE(TAG, "Failed to set current position as home");
-            master.stopMotionControlLoop();
             return 5;
         }
     }
@@ -84,8 +78,16 @@ int runSineMotion(EtherCAT::DS402Master& master, CyclicTarget target, double dur
         TETHER_LOGE(TAG, "Failed to add {} sine motion controller",
                     target == CyclicTarget::Position ? "CSP" :
                     (target == CyclicTarget::Velocity ? "CSV" : "CST"));
-        master.stopMotionControlLoop();
         return 4;
+    }
+
+    // Register the controller before starting the realtime loop.  The loop
+    // invokes updateMotionControllers() immediately and motion_controllers_
+    // is not safe to modify concurrently with that update.
+    if (!master.startRealtimeMotionControlLoop(loop_config)) {
+        TETHER_LOGE(TAG, "Failed to start realtime motion control loop");
+        (void)master.removeMotionController(kSlaveIndex);
+        return 3;
     }
 
     Tether::Platform::Clock::instance().delayMilliseconds(

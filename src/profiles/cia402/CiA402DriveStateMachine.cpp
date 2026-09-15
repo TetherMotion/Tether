@@ -693,6 +693,14 @@ bool CiA402Drive::writeControlword(uint16_t controlword) {
 // Public wrapper to allow immediate SDO write from other modules
 bool CiA402Drive::sendControlwordSDO(uint16_t controlword) {
     m_controlword = controlword;
+    // The cyclic PDO exchange is active while the drive is being enabled.
+    // Mirror the SDO command into the registered RxPDO buffer as well; a
+    // zero-filled PDO would otherwise overwrite the SDO controlword on the
+    // next cycle and keep the drive in Switch On Disabled.
+    if (m_pdo_registered && getECState() == ECState::Op &&
+        m_rxpdo_size >= static_cast<uint16_t>(m_controlword_pdo_offset) + sizeof(controlword)) {
+        std::memcpy(m_rxpdo_buffer + m_controlword_pdo_offset, &controlword, sizeof(controlword));
+    }
     auto result = m_master->sdoManager(m_slave_index).writeU16(
         static_cast<uint16_t>(CiA402::Register::Controlword), 0, controlword,
         {.timeout_ms = m_sdo_timeout_ms});

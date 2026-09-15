@@ -1563,8 +1563,9 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
             const int32_t tp = static_cast<int32_t>(out_buf[2] | (out_buf[3] << 8) | (out_buf[4] << 16) | (out_buf[5] << 24));
             const int32_t tv = static_cast<int32_t>(out_buf[6] | (out_buf[7] << 8) | (out_buf[8] << 16) | (out_buf[9] << 24));
 
-            TETHER_LOGI(TAG, "[RxPDO] Slave {} Cycle {}: {} | TP={:>10} TV={:>10}",
-                        si, wire_cycle, cw_state, tp, tv);
+            TETHER_LOGI(TAG, "[RxPDO] Slave {} Cycle {}:", si, wire_cycle);
+            TETHER_LOGI(TAG, "  Controlword: {} (0x{:04X})", cw_state, cw);
+            TETHER_LOGI(TAG, "  TargetPosition={:>10} TargetVelocity={:>10}", tp, tv);
 
             static const Utils::BitLabel kSwLabels[] = {
                 Utils::BitLabel::bit("Rdy",     0x0001),
@@ -1595,8 +1596,10 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
                 ? static_cast<int32_t>(read_resp.data[25] | (read_resp.data[26] << 8) | (read_resp.data[27] << 16) | (read_resp.data[28] << 24))
                 : static_cast<int32_t>(0);
 
-            TETHER_LOGI(TAG, "[TxPDO] Slave {} Cycle {}: {} | AP={:>10} AV={:>10} AT={:>6}",
-                        si, wire_cycle, sw_state, ap, av, at);
+            TETHER_LOGI(TAG, "[TxPDO] Slave {} Cycle {}:", si, wire_cycle);
+            TETHER_LOGI(TAG, "  Statusword: {} (0x{:04X})", sw_state, sw);
+            TETHER_LOGI(TAG, "  ActualPosition={:>10} ActualVelocity={:>10} ActualTorque={:>6}",
+                        ap, av, at);
         }
     } else if (have_write) {
         // Write only — uses APWR via writeRegister (position-based addressing)
