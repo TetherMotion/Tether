@@ -1575,8 +1575,11 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
                 Utils::BitLabel::bitIfOn("NoQS",    0x0020),
                 Utils::BitLabel::bitIfOn("SwOnDsbl",0x0040),
                 Utils::BitLabel::bitIfOn("Wrn",     0x0080),
+                Utils::BitLabel::bitIfOn("Rem",     0x0200),
                 Utils::BitLabel::bitIfOn("TgtRec",  0x0400),
                 Utils::BitLabel::bitIfOn("IntLim",  0x0800),
+                Utils::BitLabel::bitIfOn("SetAck",  0x1000),
+                Utils::BitLabel::bitIfOn("FolErr",  0x2000),
             };
             const std::span<const Utils::BitLabel> kSwSpan(kSwLabels);
             Utils::ColoredBitsetFormatter sw_fmt(kSwSpan);
