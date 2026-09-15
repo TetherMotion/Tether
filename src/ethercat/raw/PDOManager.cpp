@@ -1562,12 +1562,38 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
 
             const int32_t tp = static_cast<int32_t>(out_buf[2] | (out_buf[3] << 8) | (out_buf[4] << 16) | (out_buf[5] << 24));
             const int32_t tv = static_cast<int32_t>(out_buf[6] | (out_buf[7] << 8) | (out_buf[8] << 16) | (out_buf[9] << 24));
-            const int16_t tq = (sm3.length >= 10)
+
+            TETHER_LOGI(TAG, "[RxPDO] Slave {} Cycle {}: {} | TP={:>10} TV={:>10}",
+                        si, wire_cycle, cw_state, tp, tv);
+
+            static const Utils::BitLabel kSwLabels[] = {
+                Utils::BitLabel::bitIfOn("Rdy",     0x0001),
+                Utils::BitLabel::bitIfOn("SwOn",    0x0002),
+                Utils::BitLabel::bitIfOn("EnOp",    0x0004),
+                Utils::BitLabel::bitIfOn("Flt",     0x0008),
+                Utils::BitLabel::bitIfOn("EnV",     0x0010),
+                Utils::BitLabel::bitIfOn("NoQS",    0x0020),
+                Utils::BitLabel::bitIfOn("SwOnDsbl",0x0040),
+                Utils::BitLabel::bitIfOn("Wrn",     0x0080),
+                Utils::BitLabel::bitIfOn("TgtRec",  0x0400),
+                Utils::BitLabel::bitIfOn("IntLim",  0x0800),
+            };
+            const std::span<const Utils::BitLabel> kSwSpan(kSwLabels);
+            Utils::ColoredBitsetFormatter sw_fmt(kSwSpan);
+            const uint32_t known_sw = Utils::ColoredBitsetFormatter::labelCoverage(kSwSpan);
+            const uint16_t sw = static_cast<uint16_t>(read_resp.data[2] | (read_resp.data[3] << 8));
+            const std::string sw_state = sw_fmt.format(sw, " ", known_sw);
+
+            const int32_t ap = static_cast<int32_t>(read_resp.data[4] | (read_resp.data[5] << 8) | (read_resp.data[6] << 16) | (read_resp.data[7] << 24));
+            const int16_t at = (sm3.length >= 10)
                 ? static_cast<int16_t>(read_resp.data[8] | (read_resp.data[9] << 8))
                 : static_cast<int16_t>(0);
+            const int32_t av = (sm3.length >= 28)
+                ? static_cast<int32_t>(read_resp.data[25] | (read_resp.data[26] << 8) | (read_resp.data[27] << 16) | (read_resp.data[28] << 24))
+                : static_cast<int32_t>(0);
 
-            TETHER_LOGI(TAG, "[RxPDO-WIRE] Slave {} Cycle {}: {} | TP={:>10} TV={:>10} TQ={:>6}",
-                        si, wire_cycle, cw_state, tp, tv, tq);
+            TETHER_LOGI(TAG, "[TxPDO] Slave {} Cycle {}: {} | AP={:>10} AV={:>10} AT={:>6}",
+                        si, wire_cycle, sw_state, ap, av, at);
         }
     } else if (have_write) {
         // Write only — uses APWR via writeRegister (position-based addressing)
