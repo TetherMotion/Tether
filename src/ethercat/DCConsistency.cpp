@@ -15,7 +15,7 @@
 
 #include <cstring>
 #include <cstdlib>
-#include <cinttypes>
+#include <format>
 
 namespace EtherCAT {
 namespace DC {
@@ -41,11 +41,7 @@ uint64_t dc_get_master_time_with_epoch() {
 #endif
 }
 
-size_t dc_format_time(uint64_t time_ns, char* buffer, size_t buffer_size) {
-    if (buffer == nullptr || buffer_size == 0) {
-        return 0;
-    }
-
+std::string dc_format_time(uint64_t time_ns) {
     // Calculate seconds since epoch
     uint64_t total_seconds = time_ns / 1000000000ULL;
     uint32_t nanos = static_cast<uint32_t>(time_ns % 1000000000ULL);
@@ -61,15 +57,11 @@ size_t dc_format_time(uint64_t time_ns, char* buffer, size_t buffer_size) {
         uint32_t mins = (offset_seconds % 3600) / 60;
         uint32_t secs = offset_seconds % 60;
 
-        return snprintf(buffer, buffer_size,
-                        "2026-01-01 + {}h%02" PRIu32 "m%02" PRIu32 ".%09" PRIu32 "s",
-                        hours, mins, secs, offset_nanos);
-    } else {
-        // Raw time display
-        return snprintf(buffer, buffer_size,
-                        "{}.%09" PRIu32 " s",
-                        total_seconds, nanos);
+        return std::format("2026-01-01 + {}h{:02}m{:02}.{:09}s",
+                           hours, mins, secs, offset_nanos);
     }
+    // Raw time display
+    return std::format("{}.{:09} s", total_seconds, nanos);
 }
 
 // ============================================================================
@@ -360,12 +352,10 @@ void dc_log_slave_state(uint16_t slave_index) {
         return;
     }
 
-    char time_str[64];
-
     TETHER_LOGI(TAG, "╔═══════════════════════════════════════════════════════════════╗\n║         DC STATE - Slave {}                                    ║\n╚═══════════════════════════════════════════════════════════════╝\nDC Support: {}",
                slave_index, state.dc_supported ? "YES" : "NO");
 
-    dc_format_time(state.system_time, time_str, sizeof(time_str));
+    auto time_str = dc_format_time(state.system_time);
     TETHER_LOGI(TAG, "System Time (0x0910):     {} ns ({})\nSystem Time Offset (0x0920): {} ns\nSystem Time Diff (0x092C):   {} ns (signed: {})\nSpeed Counter (0x0930):   {}\nTime Loop Filter (0x0934): {}\n\nReceive Times (for propagation delay calculation):\n  Port 0: {} ns\n  Port 1: {} ns\n  Port 2: {} ns\n  Port 3: {} ns\n  Calculated propagation delay: {} ns",
                state.system_time, time_str,
                state.system_time_offset,
@@ -378,7 +368,7 @@ void dc_log_slave_state(uint16_t slave_index) {
     dc_log_cyclic_unit_control(state.cyclic_unit_control);
     dc_log_sync_activation(state.sync_activation);
 
-    dc_format_time(state.sync0_start_time, time_str, sizeof(time_str));
+    time_str = dc_format_time(state.sync0_start_time);
     TETHER_LOGI(TAG, "\nSYNC0 Start Time (0x0990): {} ns ({})\nSYNC0 Cycle Time (0x09A0): {} ns ({:.3f} ms)\nSYNC1 Cycle Time (0x09A4): {} ns ({:.3f} ms)",
              state.sync0_start_time, time_str,
              state.sync0_cycle_time, state.sync0_cycle_time / 1000000.0f,
