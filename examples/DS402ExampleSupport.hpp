@@ -224,6 +224,10 @@ struct MotionNativeArgs {
     std::string interface;
     double duration = 10.0;
     std::string mode = "csv";
+    double position_amplitude = 30000.0;   // encoder counts (CSP)
+    double velocity_amplitude = 30000.0;   // counts/s (CSV)
+    double torque_amplitude   = 1000.0;    // 0.1% of rated torque (CST)
+    double frequency_hz       = 0.25;      // sine frequency
     VlanConfig vlan;
 };
 
@@ -232,6 +236,12 @@ struct MotionNativeArgs {
 /// automatically by addInterfaceArg()).  Prints usage to stderr and returns
 /// `false` on failure.  If no interface is given, auto-selects the sole
 /// physical Ethernet interface via the shared resolveInterface() helper.
+///
+/// Motion-shape switches:
+///   -p/--position  CSP peak amplitude (encoder counts)
+///   -v/--velocity  CSV peak amplitude (counts/s)
+///   -t/--torque    CST peak amplitude (0.1% of rated torque)
+///   -f/--frequency Sine frequency in Hz
 inline bool parseMotionNativeArgs(int argc, char** argv,
                                   const char* program_name,
                                   MotionNativeArgs& out)
@@ -240,6 +250,22 @@ inline bool parseMotionNativeArgs(int argc, char** argv,
     Tether::Examples::addInterfaceArg(program);
     program.add_argument("-d", "--duration").scan<'g', double>().default_value(10.0);
     program.add_argument("-m", "--mode").default_value(std::string("csv"));
+    program.add_argument("-p", "--position")
+        .scan<'g', double>()
+        .default_value(30000.0)
+        .help("CSP peak amplitude (encoder counts)");
+    program.add_argument("-v", "--velocity")
+        .scan<'g', double>()
+        .default_value(30000.0)
+        .help("CSV peak amplitude (counts/s)");
+    program.add_argument("-t", "--torque")
+        .scan<'g', double>()
+        .default_value(1000.0)
+        .help("CST peak amplitude (0.1% of rated torque)");
+    program.add_argument("-f", "--frequency")
+        .scan<'g', double>()
+        .default_value(0.25)
+        .help("Sine frequency in Hz");
 
     try {
         program.parse_args(argc, argv);
@@ -255,6 +281,10 @@ inline bool parseMotionNativeArgs(int argc, char** argv,
     }
     out.duration = program.get<double>("--duration");
     out.mode = program.get<std::string>("--mode");
+    out.position_amplitude = program.get<double>("--position");
+    out.velocity_amplitude = program.get<double>("--velocity");
+    out.torque_amplitude = program.get<double>("--torque");
+    out.frequency_hz = program.get<double>("--frequency");
     if (!Tether::Examples::parseVlanArgs(
             program.get<std::string>("--rx-vlan"),
             program.get<std::string>("--tx-vlan"),
