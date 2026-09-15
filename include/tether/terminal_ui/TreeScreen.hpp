@@ -45,9 +45,19 @@ struct TreeScreenHooks {
     std::function<void()> onTick;
 
     /// Keys not consumed by tree navigation arrive here.
-    /// Return true when handled (suppresses the 'q' quit check? — no: the
-    /// quit keys are checked first; this only sees unclaimed keys).
+    /// Return true when handled.
     std::function<bool(int)> onKey;
+
+    /// Optional modal intercept: called for every key BEFORE tree
+    /// navigation sees it.  Return true to consume the key — e.g. while a
+    /// text-input prompt is active and Space/Enter/arrows must not fold
+    /// or move the tree.  Combine with quitGuard so q/Esc also reach it.
+    std::function<bool(int)> preKey;
+
+    /// Optional modal guard: when set and it returns true, the quit keys
+    /// (q/Q/Esc) are passed to onKey instead of ending run() — e.g. while
+    /// a search prompt is active and Esc should cancel the prompt.
+    std::function<bool()> quitGuard;
 
     /// Extra text appended to the footer key hints (e.g. "enter: next").
     std::string keyHints;
