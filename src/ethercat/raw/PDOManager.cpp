@@ -1562,10 +1562,32 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
 
             const int32_t tp = static_cast<int32_t>(out_buf[2] | (out_buf[3] << 8) | (out_buf[4] << 16) | (out_buf[5] << 24));
             const int32_t tv = static_cast<int32_t>(out_buf[6] | (out_buf[7] << 8) | (out_buf[8] << 16) | (out_buf[9] << 24));
+            const int16_t tq = (sm2.length >= 12)
+                ? static_cast<int16_t>(out_buf[10] | (out_buf[11] << 8))
+                : static_cast<int16_t>(0);
+            const int8_t opmode = (sm2.length >= 13)
+                ? static_cast<int8_t>(out_buf[12])
+                : static_cast<int8_t>(0);
 
             TETHER_LOGI(TAG, "[RxPDO] Slave {} Cycle {}:", si, wire_cycle);
             TETHER_LOGI(TAG, "  Controlword: {} (0x{:04X})", cw_state, cw);
-            TETHER_LOGI(TAG, "  TargetPosition={:>10} TargetVelocity={:>10}", tp, tv);
+
+            // AS715N 0x1704 RxPDO layout: target position/velocity/torque and
+            // mode-of-operation are at fixed offsets.  Print the demand value
+            // that matches the active operating mode, plus the raw setpoints.
+            if (opmode == 8) {
+                TETHER_LOGI(TAG, "  Mode=CSP(8) DemandPosition={:>10} | TargetPosition={:>10} TargetVelocity={:>10} TargetTorque={:>6}",
+                            tp, tp, tv, tq);
+            } else if (opmode == 9) {
+                TETHER_LOGI(TAG, "  Mode=CSV(9) DemandVelocity={:>10} | TargetPosition={:>10} TargetVelocity={:>10} TargetTorque={:>6}",
+                            tv, tp, tv, tq);
+            } else if (opmode == 10) {
+                TETHER_LOGI(TAG, "  Mode=CST(10) DemandTorque={:>6} | TargetPosition={:>10} TargetVelocity={:>10} TargetTorque={:>6}",
+                            tq, tp, tv, tq);
+            } else {
+                TETHER_LOGI(TAG, "  Mode={} | TargetPosition={:>10} TargetVelocity={:>10} TargetTorque={:>6}",
+                            opmode, tp, tv, tq);
+            }
 
             static const Utils::BitLabel kSwLabels[] = {
                 Utils::BitLabel::bit("Rdy",     0x0001),
