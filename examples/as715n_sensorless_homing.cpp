@@ -1,33 +1,34 @@
-#include <algorithm>
-#include <atomic>
-#include <cmath>
 #include <cstdint>
 #include <cstdlib>
-#include <limits>
+#include <memory>
 #include <string>
 
 #include "DS402ExampleSupport.hpp"
-#include "tether/control/PIDControllers.hpp"
 #include "tether/drives/AS715N/AS715NPDO.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include "tether/platform/Platform.hpp"
 #include "tether/profiles/cia301/CiA402Defs.hpp"
+#include "tether/profiles/cia402/SensorlessTorqueHomingController.hpp"
 
 namespace {
 
 constexpr const char* TAG = "as715n_homing";
 
+using HomingController = EtherCAT::SensorlessTorqueHomingController<
+    EtherCAT::Drives::AS715N_pdo::AS715N_RxPDO_1702,
+    EtherCAT::Drives::AS715N_pdo::AS715N_TxPDO_1B04>;
+
 struct SensorlessHomingArgs {
     std::string interface;
     int slave = 0;
-    double target_velocity = 2000.0;   // counts/s, magnitude
-    int direction = 1;                 // +1 or -1
-    double max_torque_percent = 1.0;   // % of rated
+    double target_velocity = 2000.0;
+    int direction = 1;
+    double max_torque_percent = 1.0;
     double kp = 0.05;
     double ki = 0.005;
-    double stall_velocity = 100.0;     // counts/s, below = not moving
-    double stall_time = 1.0;           // seconds below threshold before homing
-    double max_runtime = 60.0;         // seconds
+    double stall_velocity = 100.0;
+    double stall_time = 1.0;
+    double max_runtime = 60.0;
     uint32_t homing_timeout_ms = 10000;
     Tether::Examples::VlanConfig vlan;
 };
@@ -117,114 +118,6 @@ inline bool parseSensorlessHomingArgs(int argc, char** argv,
     return true;
 }
 
-class SensorlessHomingController : public EtherCAT::DS402Master::IDriveMotionController {
-public:
-    SensorlessHomingController(const SensorlessHomingArgs& args)
-        : args_(args)
-        , reference_velocity_(args.direction * args.target_velocity)
-        , max_permille_(std::min(1000.0, args.max_torque_percent * 10.0))
-    {
-    }
-
-    bool start(EtherCAT::CiA402Drive& drive) override
-    {
-        if (drive.rxPDO<EtherCAT::Drives::AS715N_pdo::AS715N_RxPDO_1702>() == nullptr) {
-            TETHER_LOGE(TAG, "RxPDO 0x1702 not mapped for slave {}", args_.slave);
-            return false;
-        }
-        if (drive.txPDO<EtherCAT::Drives::AS715N_pdo::AS715N_TxPDO_1B04>() == nullptr) {
-            TETHER_LOGE(TAG, "TxPDO 0x1B04 not mapped for slave {}", args_.slave);
-            return false;
-        }
-
-        if (!drive.setModeCST()) {
-            TETHER_LOGE(TAG, "Failed to set slave {} to CST mode", args_.slave);
-            return false;
-        }
-
-        pi_.setGains(args_.kp, args_.ki);
-        pi_.setIntegralLimits(-max_permille_, max_permille_);
-        pi_.setSaturationLimits({-max_permille_, max_permille_, -max_permille_, max_permille_,
-                                 -std::numeric_limits<double>::max(),
-                                 std::numeric_limits<double>::max(),
-                                 std::numeric_limits<double>::max()});
-        pi_.setAntiWindup(tether::control::AntiWindupMethod::Clamping, 0.0);
-        pi_.reset();
-
-        TETHER_LOGI(TAG,
-                    "Sensorless homing started on slave {}: reference={} counts/s, max_torque={}%",
-                    args_.slave, reference_velocity_, args_.max_torque_percent);
-        return true;
-    }
-
-    void stop(EtherCAT::CiA402Drive&) override
-    {
-    }
-
-    bool update(EtherCAT::CiA402Drive& drive, double dt_seconds) override
-    {
-        auto* rx = drive.rxPDO<EtherCAT::Drives::AS715N_pdo::AS715N_RxPDO_1702>();
-        auto* tx = drive.txPDO<EtherCAT::Drives::AS715N_pdo::AS715N_TxPDO_1B04>();
-        if (rx == nullptr || tx == nullptr) {
-            return false;
-        }
-
-        rx->controlword = static_cast<uint16_t>(CiA402::ControlWord::ENABLE_OPERATION);
-        rx->modes_of_operation = CiA402::OperatingMode::CyclicSyncTorque;
-        rx->max_profile_velocity = 100000u;
-        rx->target_position = 0;
-        rx->target_velocity = 0;
-        rx->touch_probe_function = 0;
-
-        if (homed_.load(std::memory_order_acquire)) {
-            rx->target_torque = 0;
-            return true;
-        }
-
-        const double speed = static_cast<double>(tx->speed_feedback);
-        if (!moved_ && std::abs(speed) > args_.stall_velocity) {
-            moved_ = true;
-            TETHER_LOGI(TAG, "Drive started moving: speed={} counts/s", speed);
-        }
-
-        if (moved_) {
-            if (std::abs(speed) <= args_.stall_velocity) {
-                stall_timer_ += dt_seconds;
-                if (stall_timer_ >= args_.stall_time) {
-                    TETHER_LOGI(TAG, "Stall detected (speed={} counts/s, time={} s); homing", speed, stall_timer_);
-                    homed_.store(true, std::memory_order_release);
-                    rx->target_torque = 0;
-                    return true;
-                }
-            } else {
-                stall_timer_ = 0.0;
-            }
-        }
-
-        tether::control::ControllerInput input;
-        input.reference = reference_velocity_;
-        input.measured = speed;
-        input.dt = dt_seconds;
-        input.enable = true;
-
-        const auto output = pi_.compute(input);
-        rx->target_torque = static_cast<int16_t>(std::llround(std::clamp(
-            output.control, -max_permille_, max_permille_)));
-        return true;
-    }
-
-    bool homed() const { return homed_.load(std::memory_order_acquire); }
-
-private:
-    SensorlessHomingArgs args_;
-    double reference_velocity_;
-    double max_permille_;
-    tether::control::PIController pi_;
-    std::atomic<bool> homed_{false};
-    bool moved_{false};
-    double stall_timer_{0.0};
-};
-
 bool configureAndEnableDrive(EtherCAT::DS402Master& master, const SensorlessHomingArgs& args)
 {
     Tether::Examples::SingleDriveExampleConfig config;
@@ -258,11 +151,19 @@ int main(int argc, char** argv)
     if (!configureAndEnableDrive(master, args)) {
         rc = 3;
     } else {
-        auto* controller = new SensorlessHomingController(args);
-        if (!master.addMotionController(static_cast<uint16_t>(args.slave),
-                                        std::unique_ptr<EtherCAT::DS402Master::IDriveMotionController>(controller))) {
+        HomingController::Config ctrl_cfg;
+        ctrl_cfg.target_velocity = args.target_velocity;
+        ctrl_cfg.direction = args.direction;
+        ctrl_cfg.max_torque_percent = args.max_torque_percent;
+        ctrl_cfg.kp = args.kp;
+        ctrl_cfg.ki = args.ki;
+        ctrl_cfg.stall_velocity = args.stall_velocity;
+        ctrl_cfg.stall_time = args.stall_time;
+
+        auto controller = std::make_unique<HomingController>(ctrl_cfg);
+        auto* raw = controller.get();
+        if (!master.addMotionController(static_cast<uint16_t>(args.slave), std::move(controller))) {
             TETHER_LOGE(TAG, "Failed to add sensorless homing controller");
-            delete controller;
             rc = 4;
         } else {
             EtherCAT::Master::RealtimeMotionLoopConfig loop_config;
@@ -271,27 +172,29 @@ int main(int argc, char** argv)
             loop_config.enable_dc_synchronization = true;
             if (!master.startRealtimeMotionControlLoop(loop_config)) {
                 TETHER_LOGE(TAG, "Failed to start realtime motion loop");
-                (void)master.removeMotionController(static_cast<uint16_t>(args.slave));
                 rc = 5;
             } else {
                 const auto start_ms = Tether::Platform::Clock::instance().getMilliseconds();
                 const auto timeout_ms = static_cast<uint32_t>(args.max_runtime * 1000.0);
-                while (!controller->homed() &&
+                while (!raw->isHomed() && !raw->hasFailed() &&
                        Tether::Platform::Clock::instance().getMilliseconds() - start_ms < timeout_ms) {
                     Tether::Platform::Clock::instance().delayMilliseconds(10);
                 }
 
                 master.stopMotionControlLoop();
 
-                if (!controller->homed()) {
-                    TETHER_LOGE(TAG, "Timeout waiting for stall");
+                if (raw->hasFailed()) {
+                    TETHER_LOGE(TAG, "Controller failed: {}", raw->failureMessage());
                     rc = 6;
+                } else if (!raw->isHomed()) {
+                    TETHER_LOGE(TAG, "Timeout waiting for stall");
+                    rc = 7;
                 } else {
-                    (void)master.removeMotionController(static_cast<uint16_t>(args.slave));
+                    master.removeMotionController(static_cast<uint16_t>(args.slave));
                     auto* drive = master.driveBySlaveIndex(static_cast<uint16_t>(args.slave));
                     if (drive == nullptr || !drive->homeToCurrentPosition(0)) {
                         TETHER_LOGE(TAG, "Failed to set current position as home");
-                        rc = 7;
+                        rc = 8;
                     } else {
                         TETHER_LOGI(TAG, "Sensorless homing complete");
                     }
