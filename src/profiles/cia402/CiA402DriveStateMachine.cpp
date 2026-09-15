@@ -526,15 +526,21 @@ uint16_t CiA402Drive::getStatusword() {
 }
 
 bool CiA402Drive::enable(uint32_t timeout_ms) {
-    // Reset any fault first
+    // Reset any fault first.  Covers both Fault and FaultReactionActive —
+    // the latter still requires a fault reset before the drive can be
+    // re-enabled.  Some drives need more than one reset edge, so retry
+    // until the state leaves the fault states or the timeout expires.
     DriveState state = getDriveState();
-    if (state == DriveState::Fault) {
-        TETHER_LOGI(TAG, "{}: Resetting fault", logPrefix().c_str());
+    while (state == DriveState::Fault || state == DriveState::FaultReactionActive) {
+        TETHER_LOGI(TAG, "{}: Resetting fault (state={})", logPrefix().c_str(),
+                    static_cast<int>(state));
         if (!resetFault()) {
             return false;
         }
         Tether::Platform::Clock::instance().delayMilliseconds(100);
         state = getDriveState();
+        if (timeout_ms <= 100) break;
+        timeout_ms -= 100;
     }
 
     // Use SDO writes for the state transition sequence, not PDO.
