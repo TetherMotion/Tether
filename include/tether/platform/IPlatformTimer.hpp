@@ -78,8 +78,10 @@ public:
      * @brief Stop the timer
      * 
      * Stops callback invocation. The timer can be restarted with start().
+     *
+     * @param verbose If true, emit a log message with the final cycle count.
      */
-    virtual void stop() = 0;
+    virtual void stop(bool verbose = false) = 0;
     
     /**
      * @brief Check if timer is currently running

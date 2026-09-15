@@ -71,8 +71,9 @@ bool DCManager::init(const DC::DCConfig& config, uint16_t slave_count)
 
         // Create EtherCATDC instance via transport
         dc_instance_ = std::make_unique<EtherCATDC>(*transport_, slave_count, &class_config);
-        // Propagate the master's --debug dc flag to the DC instance.
+        // Propagate the master's --debug dc and shutdown flags to the DC instance.
         dc_instance_->setDebugLogging(master_.debugFlags().dc);
+        dc_instance_->setShutdownDebug(master_.debugFlags().shutdown);
         // Perform explicit initialization step (reads capabilities). Return true
         // if instance created even if initialization was incomplete.
         bool init_ok = dc_instance_->init();
