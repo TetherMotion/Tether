@@ -116,10 +116,6 @@ if(TETHER_DRIVE_AS715N)
 add_tether_example(as715n_sine_motion_native
     LIBRARIES tether_ethercat_master tether_cia_profiles tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
 
-# ---AS715N Sine Motion + FSoE Native Example ---
-# Adds an optional Synapticon-style FSoE safe-motion main instance to the sine loop.
-add_tether_example(as715n_sine_motion_fsoe_native
-    LIBRARIES tether_ethercat_master tether_cia_profiles tether_device_drivers tether_fsoe tether_ethercat_common tether_hal tether_common tether_examples_common)
 endif()
 
 # ---Synapticon SOMANET CST + FSoE Example ---
