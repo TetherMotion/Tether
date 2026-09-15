@@ -9,6 +9,8 @@
 #include "tether/control/SineMotionController.hpp"
 #include "tether/drives/AS715N/AS715NDriveInitializer.hpp"
 #include "tether/drives/AS715N/AS715NPDO.hpp"
+#include "tether/ethercat/CoEManager.hpp"
+#include "tether/ethercat/CoETypes.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include "tether/profiles/cia301/CiA402Defs.hpp"
 
@@ -116,6 +118,36 @@ bool configureDrive(EtherCAT::DS402Master& master)
     return true;
 }
 
+void readAndPrint2006_08(EtherCAT::DS402Master& master)
+{
+    auto& coe = master.ethercatMaster().sdoManager(kSlaveIndex);
+    EtherCAT::CoE::CoETransactionOptions options;
+    options.timeout_ms = 1000;
+    options.max_retries = 3;
+
+    uint8_t buf[8] = {0};
+    size_t len = 0;
+    if (!coe.sdoUploadWithRetry(0x2006u, 0x08u, buf, sizeof(buf), &len, options)) {
+        TETHER_LOGE(TAG, "Failed to read 0x2006.08");
+        return;
+    }
+
+    if (len == 0) {
+        TETHER_LOGI(TAG, "0x2006.08 = <empty>");
+    } else if (len == 1) {
+        TETHER_LOGI(TAG, "0x2006.08 = 0x{:02X} ({})", buf[0], buf[0]);
+    } else if (len == 2) {
+        const uint16_t v = static_cast<uint16_t>(buf[0] | (buf[1] << 8));
+        TETHER_LOGI(TAG, "0x2006.08 = 0x{:04X} ({})", v, v);
+    } else if (len <= 4) {
+        const uint32_t v = static_cast<uint32_t>(buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24));
+        TETHER_LOGI(TAG, "0x2006.08 = 0x{:08X} ({})", v, v);
+    } else {
+        TETHER_LOGI(TAG, "0x2006.08 = {} bytes: {:02X}{:02X}{:02X}{:02X}...",
+                    len, buf[0], buf[1], buf[2], buf[3]);
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -164,6 +196,7 @@ int main(int argc, char** argv)
     if (!configureDrive(master)) {
         rc = 3;
     } else {
+        readAndPrint2006_08(master);
         rc = runSineMotion(master, target, args.duration);
         Tether::Examples::shutdownSingleDrive(master, kSlaveIndex);
     }
