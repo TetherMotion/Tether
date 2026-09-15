@@ -10,12 +10,14 @@
 #include "PDOManager.hpp"
 #include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
+#include "tether/utils/ColoredBitsetFormatter.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include "tether/platform/Platform.hpp"
 
 #include <cstring>
 #include <cstdio>
 #include <bit>
+#include <format>
 
 namespace EtherCAT {
 
@@ -1408,6 +1410,8 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
     // Build the RxPDO output buffer
     uint8_t out_buf[PDO::kMaxPDOSize] = {0};
     bool have_write = false;
+    bool should_log_wire = false;
+    uint32_t wire_cycle = 0;
     if (sm2.type == PDO::SyncManagerType::ProcessOutput && sm2.length > 0) {
         have_write = true;
         for (size_t i = 0; i < mapping_.entry_count(); i++) {
@@ -1417,27 +1421,23 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
                 std::memcpy(out_buf, e->app_buffer, e->data_size);
             }
         }
-        // Periodic hex dump: log RxPDO bytes every 1000 cycles
+        // Periodic wire log: log interpreted RxPDO output every 1000 cycles
         // (skip cycle 0 — fpwr_success==0 makes 0%1000==0 which would
         //  fire every cycle until the first successful write)
-        if ((physical_stats_.fpwr_success > 0 &&
-             (physical_stats_.fpwr_success % 1000) == 0) || rxPDODebug()) {
+        if (physical_stats_.fpwr_success > 0 &&
+            (physical_stats_.fpwr_success % 1000) == 0) {
+            should_log_wire = true;
+            wire_cycle = physical_stats_.fpwr_success;
+        }
+        if (rxPDODebug()) {
             char hex[128];
             size_t pos = 0;
             size_t dump_len = sm2.length < 32 ? sm2.length : 32;
             for (size_t b = 0; b < dump_len && pos + 3 < sizeof(hex); b++) {
                 pos += static_cast<size_t>(std::snprintf(hex + pos, sizeof(hex) - pos, "%02X ", out_buf[b]));
             }
-            if (rxPDODebug()) {
-                TETHER_LOGI(TAG, "[RxPDO-DEBUG] Physical write SM2 (slave {}): addr=0x{:04x} len={} data={}",
-                            si, sm2.phys_start_addr, sm2.length, hex);
-            } else {
-                // Decode CW and TargetPos from the buffer for clarity
-                uint16_t cw_val = static_cast<uint16_t>(out_buf[0] | (out_buf[1] << 8));
-                int32_t tp_val = static_cast<int32_t>(out_buf[2] | (out_buf[3] << 8) | (out_buf[4] << 16) | (out_buf[5] << 24));
-                TETHER_LOGI(TAG, "[RxPDO-WIRE] Slave {} Cycle {}: CW=0x{:04X} TP={} | {}",
-                         si, static_cast<unsigned>(physical_stats_.fpwr_success), cw_val, (long)tp_val, hex);
-            }
+            TETHER_LOGI(TAG, "[RxPDO-DEBUG] Physical write SM2 (slave {}): addr=0x{:04x} len={} data={}",
+                        si, sm2.phys_start_addr, sm2.length, hex);
         }
     }
 
@@ -1540,6 +1540,34 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
                 TETHER_LOGI(TAG, "[TxPDO-DEBUG] Physical read SM3 FAILED (slave {}): addr=0x{:04x} len={}",
                             si, sm3.phys_start_addr, sm3.length);
             }
+        }
+        // Periodic interpreted RxPDO/TxPDO wire log
+        if (should_log_wire && write_ok && (read_ok && read_resp.wkc > 0)) {
+            static const Utils::BitLabel kCwLabels[] = {
+                Utils::BitLabel::bitIfOn("SwOn",   0x0001),
+                Utils::BitLabel::bitIfOn("EnV",    0x0002),
+                Utils::BitLabel::bitIfOn("NoQS",   0x0004),
+                Utils::BitLabel::bitIfOn("EnOp",   0x0008),
+                Utils::BitLabel::bitIfOn("NewSP",  0x0010),
+                Utils::BitLabel::bitIfOn("ChgSI",  0x0020),
+                Utils::BitLabel::bitIfOn("AbsRel", 0x0040),
+                Utils::BitLabel::bitIfOn("FltR",   0x0080),
+                Utils::BitLabel::bitIfOn("Halt",   0x0100),
+            };
+            const std::span<const Utils::BitLabel> kCwSpan(kCwLabels);
+            Utils::ColoredBitsetFormatter cw_fmt(kCwSpan);
+            const uint32_t known_cw = Utils::ColoredBitsetFormatter::labelCoverage(kCwSpan);
+            const uint16_t cw = static_cast<uint16_t>(out_buf[0] | (out_buf[1] << 8));
+            const std::string cw_state = cw_fmt.format(cw, " ", known_cw);
+
+            const int32_t tp = static_cast<int32_t>(out_buf[2] | (out_buf[3] << 8) | (out_buf[4] << 16) | (out_buf[5] << 24));
+            const int32_t tv = static_cast<int32_t>(out_buf[6] | (out_buf[7] << 8) | (out_buf[8] << 16) | (out_buf[9] << 24));
+            const int16_t tq = (sm3.length >= 10)
+                ? static_cast<int16_t>(read_resp.data[8] | (read_resp.data[9] << 8))
+                : static_cast<int16_t>(0);
+
+            TETHER_LOGI(TAG, "[RxPDO-WIRE] Slave {} Cycle {}: {} | TP={:>10} TV={:>10} TQ={:>6}",
+                        si, wire_cycle, cw_state, tp, tv, tq);
         }
     } else if (have_write) {
         // Write only — uses APWR via writeRegister (position-based addressing)
