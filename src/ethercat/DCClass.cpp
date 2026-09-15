@@ -141,6 +141,7 @@ bool EtherCATDC::start(std::function<bool()> pdo_exchange_fn) {
     realtime_loop_ = std::make_unique<RealtimeLoop>(
         pdo_exchange_fn_ ? pdo_exchange_fn_ : RealtimeLoop::ExchangeFunc(ExchangeNoop_impl),
         sync_fn, time_fn, loop_cfg);
+    realtime_loop_->setShutdownDebug(shutdown_debug_);
 
     if (!realtime_loop_->start()) {
         TETHER_LOGE(TAG, "Failed to start realtime loop");
@@ -183,7 +184,7 @@ void EtherCATDC::stop() {
     // callers can call start() again without re-initializing.
     state_.store(DCState::Disabled, std::memory_order_release);
 
-    if (had_loop) {
+    if (had_loop && shutdown_debug_) {
         TETHER_LOGI(TAG, "DC realtime loop stopped");
     }
 }

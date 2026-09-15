@@ -49,6 +49,7 @@ public:
     virtual bool start() = 0;
     virtual void stop() = 0;
     virtual bool isRunning() const = 0;
+    virtual void setShutdownDebug(bool) {}
 };
 
 class RealtimeMotionControlLoop final : public IMotionControlLoop {
@@ -84,6 +85,10 @@ public:
 
     bool isRunning() const override {
         return loop_.isRunning();
+    }
+
+    void setShutdownDebug(bool enabled) override {
+        loop_.setShutdownDebug(enabled);
     }
 
 private:
@@ -202,6 +207,10 @@ public:
 
     bool isRunning() const override {
         return loop_.isRunning();
+    }
+
+    void setShutdownDebug(bool enabled) override {
+        loop_.setShutdownDebug(enabled);
     }
 
 private:
@@ -491,6 +500,7 @@ void Master::start(const NetworkInterface& iface, const uint8_t src_mac[6])
 
 void Master::stop()
 {
+    const bool was_running = running_.load(std::memory_order_acquire);
     requestCancel();  // sets cancel flag + wakes packet router waiters
     stopMotionControlLoop();
     if (slave_supervisor_) {
@@ -504,6 +514,10 @@ void Master::stop()
     // Shutdown per-slave CoEManagers
     for (auto& mgr : sdo_managers_) {
         if (mgr) mgr->deinit();
+    }
+
+    if (was_running) {
+        TETHER_LOGI(TAG, "Master stopped cleanly");
     }
 }
 
@@ -561,6 +575,7 @@ bool Master::startRealtimeMotionControlLoop(const RealtimeMotionLoopConfig& conf
         return motion_control_callback_ ? motion_control_callback_(dt) : true;
     };
     motion_control_loop_ = std::make_unique<RealtimeMotionControlLoop>(wrapped_callback, config, dc_.get());
+    motion_control_loop_->setShutdownDebug(debug_flags_.shutdown);
     return motion_control_loop_->start();
 }
 
@@ -585,6 +600,7 @@ bool Master::startPollingMotionControlLoop(const PollingMotionLoopConfig& config
         return motion_control_callback_ ? motion_control_callback_(dt) : true;
     };
     motion_control_loop_ = std::make_unique<PollingMotionControlLoop>(wrapped_callback, config, dc_.get());
+    motion_control_loop_->setShutdownDebug(debug_flags_.shutdown);
     return motion_control_loop_->start();
 }
 
@@ -620,6 +636,7 @@ bool Master::startQueueModeLoop(const RealtimeMotionLoopConfig& config)
     stopMotionControlLoop();  // Ensure no other loop is running
     clearCancel();
     motion_control_loop_ = std::make_unique<QueueMotionControlLoop>(pdo_.get(), config, dc_.get());
+    motion_control_loop_->setShutdownDebug(debug_flags_.shutdown);
     return motion_control_loop_->start();
 }
 
