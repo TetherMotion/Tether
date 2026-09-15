@@ -158,6 +158,12 @@ add_tether_example(as715n_check_error_code
 # stalls, it sets the current position as home (method 35) and exits.
 add_tether_example(as715n_sensorless_homing
     LIBRARIES tether_ethercat_master tether_cia_profiles tether_controls tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# ---AS715N Fault Reset Example ---
+# Dedicated fault-reset utility using the AS715N-specific mechanism
+# (0x2031:01 F31.00 after clearing S-ON, or 0x2031:02 software reset).
+add_tether_example(as715n_reset_errors
+    LIBRARIES tether_ethercat_master tether_cia_profiles tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
 endif()
 
 # ---EtherCAT SII dump example ---
