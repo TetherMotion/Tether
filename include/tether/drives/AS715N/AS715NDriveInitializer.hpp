@@ -154,6 +154,18 @@ public:
             return false;
         }
 
+        const int opmode_offset = AS715N_pdo::opmodeOffsetFor(drive.getRxPDOIndex());
+        if (opmode_offset >= 0) {
+            drive.setOpmodePDOOffset(opmode_offset);
+            TETHER_LOGI(tag_, "Slave {}: opmode offset set to {}", slave_idx_, opmode_offset);
+        }
+
+        const int statusword_offset = AS715N_pdo::statuswordOffsetFor(drive.getTxPDOIndex());
+        if (statusword_offset >= 0) {
+            drive.setStatuswordPDOOffset(statusword_offset);
+            TETHER_LOGI(tag_, "Slave {}: statusword offset set to {}", slave_idx_, statusword_offset);
+        }
+
         TETHER_LOGI(tag_, "Slave {} configured PDOs and transitioned to OP", slave_idx_);
         return true;
     }

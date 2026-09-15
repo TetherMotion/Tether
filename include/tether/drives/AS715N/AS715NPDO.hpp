@@ -561,6 +561,30 @@ inline ::EtherCAT::Slave::MultiPDOAssignment makeDefaultPDOAssignment()
     return makePDOAssignment(RxPDO_1705, TxPDO_1B04);
 }
 
+/// @brief Byte offset of the ModesOfOperation field in the given RxPDO.
+/// @return Byte offset, or -1 if the RxPDO has no mode field.
+constexpr int opmodeOffsetFor(uint16_t rxpdo_index) {
+    switch (rxpdo_index) {
+        case 0x1702u: return 12;
+        case 0x1703u: return 12;
+        case 0x1704u: return 12;
+        case 0x1705u: return 10;
+        default:      return -1;
+    }
+}
+
+/// @brief Byte offset of the Statusword field in the given TxPDO.
+/// @return Byte offset, or -1 if the TxPDO has no statusword.
+constexpr int statuswordOffsetFor(uint16_t txpdo_index) {
+    switch (txpdo_index) {
+        case 0x1B01u:
+        case 0x1B02u:
+        case 0x1B03u:
+        case 0x1B04u: return 2;
+        default:      return -1;
+    }
+}
+
 } // namespace AS715N_pdo
 } // namespace Drives
 } // namespace EtherCAT
