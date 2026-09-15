@@ -5,6 +5,7 @@
 
 #include "DS402ExampleSupport.hpp"
 #include "tether/control/SineMotionController.hpp"
+#include "tether/drives/AS715N/AS715NDriveInitializer.hpp"
 #include "tether/drives/AS715N/AS715NPDO.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include "tether/profiles/cia301/CiA402Defs.hpp"
@@ -48,14 +49,24 @@ int runSineMotion(EtherCAT::DS402Master& master, double duration_seconds)
 
 bool configureDrive(EtherCAT::DS402Master& master)
 {
-    Tether::Examples::SingleDriveExampleConfig config;
-    config.drive.slave_index = kSlaveIndex;
-    config.drive.rxpdo_index = EtherCAT::Drives::AS715N_pdo::RxPDO_1705.index;
-    config.drive.txpdo_index = EtherCAT::Drives::AS715N_pdo::TxPDO_1B04.index;
-    config.drive.rxpdo_size = EtherCAT::Drives::AS715N_pdo::RxPDO_1705.size;
-    config.drive.txpdo_size = EtherCAT::Drives::AS715N_pdo::TxPDO_1B04.size;
-    config.drive.operating_mode = CiA402::OperatingMode::CyclicSyncVelocity;
-    return Tether::Examples::configureAndEnableSingleDrive(master, config, TAG);
+    EtherCAT::Drives::AS715N::AS715NDriveInitializer init(master, kSlaveIndex, TAG);
+
+    if (!init.init()) {
+        TETHER_LOGE(TAG, "AS715N drive initialization failed");
+        return false;
+    }
+
+    if (!init.drive().setOperatingMode(CiA402::OperatingMode::CyclicSyncVelocity)) {
+        TETHER_LOGE(TAG, "Failed to set Cyclic Sync Velocity mode");
+        return false;
+    }
+
+    if (!init.enableDrive()) {
+        TETHER_LOGE(TAG, "Failed to enable drive");
+        return false;
+    }
+
+    return true;
 }
 
 } // namespace
@@ -73,6 +84,31 @@ int main(int argc, char** argv)
     Tether::Examples::HostMasterSession session;
     if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG, args.vlan)) {
         return 2;
+    }
+
+    if (master.ethercatMaster().discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
+        TETHER_LOGW(TAG, "No slaves discovered");
+    }
+
+    const uint16_t minimum_drive_count = static_cast<uint16_t>(kSlaveIndex + 1);
+    if (!master.waitForDriveCount(minimum_drive_count, 2000)) {
+        TETHER_LOGE(TAG, "Timed out waiting for {} drive(s)", minimum_drive_count);
+        Tether::Examples::stopHostMasterSession(master, session);
+        return 2;
+    }
+
+    {
+        EtherCAT::DC::DCConfig dc_config = EtherCAT::DC::DCConfig::defaults();
+        if (!master.initializeDistributedClocks(dc_config)) {
+            TETHER_LOGE(TAG, "Failed to initialize distributed clocks");
+            Tether::Examples::stopHostMasterSession(master, session);
+            return 2;
+        }
+        if (!master.startDistributedClocks()) {
+            TETHER_LOGE(TAG, "Failed to start distributed clocks");
+            Tether::Examples::stopHostMasterSession(master, session);
+            return 2;
+        }
     }
 
     int rc = 0;
