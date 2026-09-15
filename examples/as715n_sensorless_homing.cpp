@@ -3,6 +3,8 @@
 #include <memory>
 #include <string>
 
+#include <algorithm>
+
 #include "DS402ExampleSupport.hpp"
 #include "tether/drives/AS715N/AS715NDriveInitializer.hpp"
 #include "tether/drives/AS715N/AS715NPDO.hpp"
@@ -22,13 +24,19 @@ using HomingController = EtherCAT::SensorlessTorqueHomingController<
 struct SensorlessHomingArgs {
     std::string interface;
     int slave = 0;
-    double target_velocity = 2000.0;
+    double target_velocity = 30000.0;
     int direction = 1;
-    double max_torque_percent = 1.0;
+    double max_torque_percent = 10.0;
+    bool use_csv_mode = true;
     double kp = 0.05;
     double ki = 0.005;
+    std::string stall_detection = "position";
     double stall_velocity = 100.0;
+    double stall_window = 0.1;
+    double stall_position_counts = 20.0;
+    double stall_torque_permille = -1.0;
     double stall_time = 1.0;
+    int home_avg_samples = 250;
     double max_runtime = 60.0;
     uint32_t homing_timeout_ms = 10000;
     int fine_homing_passes = 1;
@@ -50,7 +58,7 @@ inline bool parseSensorlessHomingArgs(int argc, char** argv,
 
     program.add_argument("--target-velocity")
         .scan<'g', double>()
-        .default_value(2000.0)
+        .default_value(30000.0)
         .help("target velocity setpoint magnitude in counts/s");
     program.add_argument("--direction")
         .scan<'i', int>()
@@ -58,8 +66,14 @@ inline bool parseSensorlessHomingArgs(int argc, char** argv,
         .help("direction: +1 or -1");
     program.add_argument("--max-torque")
         .scan<'g', double>()
-        .default_value(1.0)
-        .help("maximum torque in percent of rated (e.g. 1.0 = 1 pct)");
+        .default_value(10.0)
+        .help("maximum torque in percent of rated (e.g. 10.0 = 10 pct)");
+    program.add_argument("--csv")
+        .default_value(true)
+        .implicit_value(true)
+        .help("use drive-internal velocity loop (CSV mode) with torque limits "
+              "0x60E0/0x60E1 instead of the host-side CST velocity PI "
+              "(default: true, pass 0/false to disable)");
     program.add_argument("--kp")
         .scan<'g', double>()
         .default_value(0.05)
@@ -68,10 +82,30 @@ inline bool parseSensorlessHomingArgs(int argc, char** argv,
         .scan<'g', double>()
         .default_value(0.005)
         .help("velocity loop integral gain");
+    program.add_argument("--stall-detection")
+        .default_value(std::string("position"))
+        .help("stall detection method: 'position' (default), 'speed' or 'torque'");
     program.add_argument("--stall-velocity")
         .scan<'g', double>()
         .default_value(100.0)
         .help("speed magnitude below which the drive is considered stalled (counts/s)");
+    program.add_argument("--stall-window")
+        .scan<'g', double>()
+        .default_value(0.1)
+        .help("position-delta window for 'position' stall detection (s)");
+    program.add_argument("--stall-position-counts")
+        .scan<'g', double>()
+        .default_value(20.0)
+        .help("max position change within --stall-window that still counts as stalled");
+    program.add_argument("--stall-torque")
+        .scan<'g', double>()
+        .default_value(-1.0)
+        .help("torque_actual magnitude (permille) that counts as stalled in "
+              "'torque' mode; <0 = 80%% of --max-torque");
+    program.add_argument("--home-avg-samples")
+        .scan<'i', int>()
+        .default_value(250)
+        .help("number of position samples averaged for each recorded pass position");
     program.add_argument("--stall-time")
         .scan<'g', double>()
         .default_value(1.0)
@@ -132,10 +166,29 @@ inline bool parseSensorlessHomingArgs(int argc, char** argv,
         std::cerr << "--max-torque must be positive\n";
         return false;
     }
+    out.use_csv_mode = program.get<bool>("--csv");
     out.kp = program.get<double>("--kp");
     out.ki = program.get<double>("--ki");
+    out.stall_detection = program.get<std::string>("--stall-detection");
+    if (out.stall_detection != "position" && out.stall_detection != "speed" &&
+        out.stall_detection != "torque") {
+        std::cerr << "--stall-detection must be 'position', 'speed' or 'torque'\n";
+        return false;
+    }
     out.stall_velocity = program.get<double>("--stall-velocity");
+    out.stall_window = program.get<double>("--stall-window");
+    if (out.stall_window <= 0.0) {
+        std::cerr << "--stall-window must be positive\n";
+        return false;
+    }
+    out.stall_position_counts = program.get<double>("--stall-position-counts");
+    out.stall_torque_permille = program.get<double>("--stall-torque");
     out.stall_time = program.get<double>("--stall-time");
+    out.home_avg_samples = program.get<int>("--home-avg-samples");
+    if (out.home_avg_samples < 1) {
+        std::cerr << "--home-avg-samples must be >= 1\n";
+        return false;
+    }
     out.max_runtime = program.get<double>("--max-runtime");
     out.homing_timeout_ms = static_cast<uint32_t>(program.get<int>("--homing-timeout"));
     out.fine_homing_passes = program.get<int>("--fine-passes");
@@ -177,9 +230,27 @@ bool configureAndEnableDrive(EtherCAT::DS402Master& master, const SensorlessHomi
         return false;
     }
 
-    if (!init.drive().setOperatingMode(CiA402::OperatingMode::CyclicSyncTorque)) {
-        TETHER_LOGE(TAG, "Failed to set Cyclic Sync Torque mode");
+    const int8_t op_mode = args.use_csv_mode
+        ? CiA402::OperatingMode::CyclicSyncVelocity
+        : CiA402::OperatingMode::CyclicSyncTorque;
+    if (!init.drive().setOperatingMode(op_mode)) {
+        TETHER_LOGE(TAG, "Failed to set operating mode {}", static_cast<int>(op_mode));
         return false;
+    }
+
+    if (args.use_csv_mode) {
+        // CSV: the drive closes the velocity loop internally.  The torque
+        // the drive may apply while approaching the stop is limited via
+        // the CiA402 positive/negative torque limit objects.
+        const uint16_t permille = static_cast<uint16_t>(
+            std::min(1000.0, args.max_torque_percent * 10.0));
+        auto& sdo = init.sdo();
+        if (!sdo.writeU16(0x60E0, 0x00, permille, {.timeout_ms = 3000}).has_value() ||
+            !sdo.writeU16(0x60E1, 0x00, permille, {.timeout_ms = 3000}).has_value()) {
+            TETHER_LOGE(TAG, "Failed to write torque limits 0x60E0/0x60E1");
+            return false;
+        }
+        TETHER_LOGI(TAG, "Torque limits 0x60E0/0x60E1 set to {} permille", permille);
     }
 
     if (!init.enableDrive()) {
@@ -240,10 +311,23 @@ int main(int argc, char** argv)
         ctrl_cfg.target_velocity = args.target_velocity;
         ctrl_cfg.direction = args.direction;
         ctrl_cfg.max_torque_percent = args.max_torque_percent;
+        ctrl_cfg.use_csv_mode = args.use_csv_mode;
         ctrl_cfg.kp = args.kp;
         ctrl_cfg.ki = args.ki;
+        if (args.stall_detection == "speed") {
+            ctrl_cfg.stall_detection = HomingController::StallDetection::Speed;
+        } else if (args.stall_detection == "torque") {
+            ctrl_cfg.stall_detection = HomingController::StallDetection::Torque;
+        } else {
+            ctrl_cfg.stall_detection = HomingController::StallDetection::Position;
+        }
         ctrl_cfg.stall_velocity = args.stall_velocity;
+        ctrl_cfg.stall_window = args.stall_window;
+        ctrl_cfg.stall_position_counts = args.stall_position_counts;
+        ctrl_cfg.stall_torque_permille = args.stall_torque_permille;
         ctrl_cfg.stall_time = args.stall_time;
+        ctrl_cfg.home_position_avg_samples =
+            static_cast<uint32_t>(args.home_avg_samples);
         ctrl_cfg.fine_homing_passes = args.fine_homing_passes;
         ctrl_cfg.backoff_distance = args.backoff_distance;
         ctrl_cfg.fine_velocity = args.fine_velocity;
