@@ -2,9 +2,11 @@
 
 #include <atomic>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <type_traits>
+#include <vector>
 
 #include "tether/control/PIDControllers.hpp"
 #include "tether/profiles/cia301/CiA402Defs.hpp"
@@ -20,13 +22,21 @@ namespace EtherCAT {
  * Drives the slave in Cyclic Sync Torque (CST) mode using a closed-loop
  * velocity PI controller. The torque command is clamped to a configurable
  * low percentage of rated torque. When the drive stops moving, isHomed()
- * becomes true and the application can call the drive's homing routine
- * (e.g. CiA402Drive::homeToCurrentPosition()).
+ * becomes true and the computed home position is available via
+ * homePosition(). The controller can therefore be used as a virtual homing
+ * switch: it reports the position at which the mechanical stop was found
+ * without itself touching the drive's 0-point.
+ *
+ * Optional multi-pass fine homing is available: after the first stall the
+ * drive backs off and re-approaches the stop the configured number of times,
+ * recording the position at each stall. The final home position can be the
+ * mean or the sum of these recorded positions.
  *
  * The class is templated on the drive-specific packed RxPDO/TxPDO structs.
  * The RxPDO must expose controlword, modes_of_operation and target_torque;
  * the TxPDO must expose statusword, modes_of_operation_display and
- * speed_feedback. This is verified at compile time with static_assert.
+ * speed_feedback. position_actual is optional, but required for multi-pass
+ * fine homing and for homePosition(). This is verified at compile time.
  *
  * Mode of operation is verified both at startup (after a short delay to let
  * the slave switch to CST) and continuously while the controller is running.
@@ -34,6 +44,9 @@ namespace EtherCAT {
 template<typename RxPDO, typename TxPDO>
 class SensorlessTorqueHomingController : public DS402Master::IDriveMotionController {
 public:
+    enum class PassAggregation { Mean, Sum };
+    enum class PassState { Approaching, BackingOff, Done };
+
     static_assert(requires(RxPDO& p) {
         p.controlword;
         p.modes_of_operation;
@@ -47,20 +60,29 @@ public:
     }, "TxPDO must provide statusword, modes_of_operation_display and speed_feedback");
 
     struct Config {
-        double target_velocity = 2000.0; // counts/s (magnitude)
-        int direction = 1;               // +1 or -1
-        double max_torque_percent = 1.0; // % of rated
+        double target_velocity = 2000.0;   // counts/s (magnitude)
+        int direction = 1;                 // +1 or -1
+        double max_torque_percent = 1.0;   // % of rated
         double kp = 0.05;
         double ki = 0.005;
-        double stall_velocity = 100.0;   // counts/s
-        double stall_time = 1.0;         // seconds below threshold
+        double stall_velocity = 100.0;     // counts/s
+        double stall_time = 1.0;           // seconds below threshold
+        int fine_homing_passes = 1;        // total stall recordings, >= 1
+        double backoff_distance = 5000.0;  // counts
+        double fine_velocity = 0.0;        // counts/s, 0 means use target_velocity
+        PassAggregation pass_aggregation = PassAggregation::Mean;
     };
 
     explicit SensorlessTorqueHomingController(const Config& config)
         : config_(config)
-        , reference_velocity_(static_cast<double>(config.direction) * config.target_velocity)
-        , max_permille_(std::min(1000.0, config.max_torque_percent * 10.0))
+        , velocity_magnitude_(config_.fine_velocity > 0.0 ? config_.fine_velocity : config_.target_velocity)
+        , reference_velocity_(static_cast<double>(config_.direction) * velocity_magnitude_)
+        , backoff_reference_(-static_cast<double>(config_.direction) * velocity_magnitude_)
+        , max_permille_(std::min(1000.0, config_.max_torque_percent * 10.0))
     {
+        if (config_.fine_homing_passes < 1) {
+            config_.fine_homing_passes = 1;
+        }
     }
 
     bool start(CiA402Drive& drive) override
@@ -71,6 +93,11 @@ public:
         }
         if (drive.txPDO<TxPDO>() == nullptr) {
             setFailure("TxPDO not mapped");
+            return false;
+        }
+
+        if (velocity_magnitude_ <= 0.0) {
+            setFailure("target velocity must be positive");
             return false;
         }
 
@@ -96,14 +123,26 @@ public:
         homed_.store(false, std::memory_order_release);
         failed_.store(false, std::memory_order_release);
         failure_message_.store("", std::memory_order_release);
+        home_position_.store(0, std::memory_order_release);
+        home_position_valid_.store(false, std::memory_order_release);
+        virtual_switch_position_valid_.store(false, std::memory_order_release);
+        virtual_switch_active_.store(false, std::memory_order_release);
+        virtual_switch_position_.store(0, std::memory_order_release);
+        pass_positions_.clear();
+        pass_positions_.reserve(static_cast<size_t>(config_.fine_homing_passes));
         started_moving_ = false;
         mode_ok_ = false;
         stall_timer_ = 0.0;
         startup_timer_ = 0.0;
+        state_ = PassState::Approaching;
+        backoff_has_position_ = false;
+        backoff_start_position_ = 0;
+        backoff_timer_ = 0.0;
 
         TETHER_LOGI("sensorless_homing",
-                    "Started on slave {}: reference={} counts/s, max_torque={}%",
-                    drive.slaveIndex(), reference_velocity_, config_.max_torque_percent);
+                    "Started on slave {}: reference={} counts/s, max_torque={}%, passes={}",
+                    drive.slaveIndex(), reference_velocity_, config_.max_torque_percent,
+                    config_.fine_homing_passes);
         return true;
     }
 
@@ -167,38 +206,40 @@ public:
             }
         }
 
-        if (homed_.load(std::memory_order_acquire)) {
+        if (state_ == PassState::Done) {
             rx->target_torque = 0;
             return true;
         }
 
         const double speed = static_cast<double>(tx->speed_feedback);
 
-        if (!started_moving_ && std::abs(speed) > config_.stall_velocity) {
-            started_moving_ = true;
-            TETHER_LOGI("sensorless_homing",
-                        "Slave {} started moving: speed={} counts/s",
-                        drive.slaveIndex(), speed);
-        }
+        if (state_ == PassState::Approaching) {
+            if (!started_moving_ && std::abs(speed) > config_.stall_velocity) {
+                started_moving_ = true;
+                TETHER_LOGI("sensorless_homing",
+                            "Slave {} started moving: speed={} counts/s",
+                            drive.slaveIndex(), speed);
+            }
 
-        if (started_moving_) {
-            if (std::abs(speed) <= config_.stall_velocity) {
-                stall_timer_ += dt_seconds;
-                if (stall_timer_ >= config_.stall_time) {
-                    TETHER_LOGI("sensorless_homing",
-                                "Slave {} stall detected (speed={} counts/s, time={} s); homed",
-                                drive.slaveIndex(), speed, stall_timer_);
-                    homed_.store(true, std::memory_order_release);
-                    rx->target_torque = 0;
-                    return true;
+            if (started_moving_) {
+                if (std::abs(speed) <= config_.stall_velocity) {
+                    stall_timer_ += dt_seconds;
+                    if (stall_timer_ >= config_.stall_time) {
+                        recordPass(drive, tx, rx);
+                        return true;
+                    }
+                } else {
+                    stall_timer_ = 0.0;
                 }
-            } else {
-                stall_timer_ = 0.0;
+            }
+        } else if (state_ == PassState::BackingOff) {
+            if (backoffDone(tx, dt_seconds)) {
+                enterApproach();
             }
         }
 
         tether::control::ControllerInput input;
-        input.reference = reference_velocity_;
+        input.reference = (state_ == PassState::BackingOff) ? backoff_reference_ : reference_velocity_;
         input.measured = speed;
         input.dt = dt_seconds;
         input.enable = true;
@@ -209,7 +250,24 @@ public:
         return true;
     }
 
+    /// True once the final pass is complete.
     bool isHomed() const { return homed_.load(std::memory_order_acquire); }
+
+    /// True if the virtual homing switch is active (same as isHomed()).
+    bool isVirtualSwitchActive() const { return virtual_switch_active_.load(std::memory_order_acquire); }
+
+    /// True if a computed home position is available.
+    bool hasHomePosition() const { return home_position_valid_.load(std::memory_order_acquire); }
+
+    /// True if a virtual switch position is available.
+    bool hasVirtualSwitchPosition() const { return virtual_switch_position_valid_.load(std::memory_order_acquire); }
+
+    /// The computed home position (mean or sum of the recorded pass positions).
+    int64_t homePosition() const { return home_position_.load(std::memory_order_acquire); }
+
+    /// Position reported by the virtual homing switch (same as homePosition()).
+    int64_t virtualSwitchPosition() const { return virtual_switch_position_.load(std::memory_order_acquire); }
+
     bool hasFailed() const { return failed_.load(std::memory_order_acquire); }
     const char* failureMessage() const { return failure_message_.load(std::memory_order_acquire); }
 
@@ -222,17 +280,135 @@ private:
         }
     }
 
+    bool hasPositionActual(const TxPDO*) const
+    {
+        return requires(TxPDO& p) { p.position_actual; };
+    }
+
+    void recordPass(CiA402Drive& drive, const TxPDO* tx, RxPDO* rx)
+    {
+        constexpr bool kHasPosition = requires(TxPDO& p) { p.position_actual; };
+        if (config_.fine_homing_passes > 1 && !kHasPosition) {
+            setFailure("position_actual is required for multi-pass fine homing");
+            rx->target_torque = 0;
+            return;
+        }
+
+        int64_t position = 0;
+        if constexpr (kHasPosition) {
+            position = static_cast<int64_t>(tx->position_actual);
+        }
+
+        pass_positions_.push_back(position);
+        TETHER_LOGI("sensorless_homing",
+                    "Slave {} pass {}/{} recorded at {}",
+                    drive.slaveIndex(), pass_positions_.size(),
+                    config_.fine_homing_passes, position);
+
+        stall_timer_ = 0.0;
+        started_moving_ = false;
+
+        if (pass_positions_.size() >= static_cast<size_t>(config_.fine_homing_passes)) {
+            finishHoming(drive, rx);
+        } else {
+            enterBackoff(drive, tx);
+        }
+    }
+
+    void enterBackoff(CiA402Drive& drive, const TxPDO* tx)
+    {
+        state_ = PassState::BackingOff;
+        started_moving_ = false;
+        stall_timer_ = 0.0;
+        pi_.reset();
+
+        if constexpr (requires(TxPDO& p) { p.position_actual; }) {
+            backoff_has_position_ = true;
+            backoff_start_position_ = tx->position_actual;
+        } else {
+            backoff_has_position_ = false;
+            backoff_timer_ = 0.0;
+        }
+
+        TETHER_LOGI("sensorless_homing",
+                    "Slave {} backing off for next pass",
+                    drive.slaveIndex());
+    }
+
+    bool backoffDone(const TxPDO* tx, double dt_seconds)
+    {
+        if constexpr (requires(TxPDO& p) { p.position_actual; }) {
+            if (backoff_has_position_) {
+                return std::abs(static_cast<double>(tx->position_actual - backoff_start_position_)) >=
+                       std::abs(config_.backoff_distance);
+            }
+        }
+
+        backoff_timer_ += dt_seconds;
+        const double needed_time = std::abs(config_.backoff_distance / velocity_magnitude_);
+        return backoff_timer_ >= needed_time;
+    }
+
+    void enterApproach()
+    {
+        state_ = PassState::Approaching;
+        started_moving_ = false;
+        stall_timer_ = 0.0;
+        pi_.reset();
+    }
+
+    void finishHoming(CiA402Drive& drive, RxPDO* rx)
+    {
+        int64_t total = 0;
+        for (int64_t p : pass_positions_) {
+            total += p;
+        }
+
+        int64_t result = 0;
+        if (config_.pass_aggregation == PassAggregation::Mean) {
+            result = total / static_cast<int64_t>(pass_positions_.size());
+        } else {
+            result = total;
+        }
+
+        home_position_.store(result, std::memory_order_release);
+        home_position_valid_.store(pass_positions_.size() > 0, std::memory_order_release);
+        virtual_switch_position_.store(result, std::memory_order_release);
+        virtual_switch_position_valid_.store(pass_positions_.size() > 0, std::memory_order_release);
+        virtual_switch_active_.store(true, std::memory_order_release);
+        homed_.store(true, std::memory_order_release);
+        state_ = PassState::Done;
+        rx->target_torque = 0;
+
+        TETHER_LOGI("sensorless_homing",
+                    "Slave {} homed at {} ({} passes, aggregation={})",
+                    drive.slaveIndex(), result, pass_positions_.size(),
+                    config_.pass_aggregation == PassAggregation::Mean ? "mean" : "sum");
+    }
+
     Config config_;
+    double velocity_magnitude_;
     double reference_velocity_;
+    double backoff_reference_;
     double max_permille_;
     tether::control::PIController pi_;
     std::atomic<bool> homed_{false};
     std::atomic<bool> failed_{false};
     std::atomic<const char*> failure_message_{""};
+    std::atomic<int64_t> home_position_{0};
+    std::atomic<bool> home_position_valid_{false};
+    std::atomic<int64_t> virtual_switch_position_{0};
+    std::atomic<bool> virtual_switch_position_valid_{false};
+    std::atomic<bool> virtual_switch_active_{false};
+    std::vector<int64_t> pass_positions_;
     bool started_moving_ = false;
     bool mode_ok_ = false;
     double stall_timer_ = 0.0;
     double startup_timer_ = 0.0;
+    PassState state_ = PassState::Approaching;
+    bool backoff_has_position_ = false;
+    int32_t backoff_start_position_ = 0;
+    double backoff_timer_ = 0.0;
     static constexpr double kModeVerifyDelaySeconds = 0.2;
 };
 

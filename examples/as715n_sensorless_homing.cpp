@@ -30,6 +30,11 @@ struct SensorlessHomingArgs {
     double stall_time = 1.0;
     double max_runtime = 60.0;
     uint32_t homing_timeout_ms = 10000;
+    int fine_homing_passes = 1;
+    double backoff_distance = 5000.0;
+    double fine_velocity = 0.0;
+    std::string pass_aggregation = "mean";
+    bool apply_drive_homing = false;
     Tether::Examples::VlanConfig vlan;
 };
 
@@ -77,6 +82,25 @@ inline bool parseSensorlessHomingArgs(int argc, char** argv,
         .scan<'i', int>()
         .default_value(10000)
         .help("timeout for the drive's current-position homing routine (ms)");
+    program.add_argument("--fine-passes")
+        .scan<'i', int>()
+        .default_value(1)
+        .help("number of fine homing passes (>=1)");
+    program.add_argument("--backoff-distance")
+        .scan<'g', double>()
+        .default_value(5000.0)
+        .help("counts to back off between fine passes");
+    program.add_argument("--fine-velocity")
+        .scan<'g', double>()
+        .default_value(0.0)
+        .help("velocity for fine passes; 0 means use --target-velocity");
+    program.add_argument("--pass-aggregation")
+        .default_value(std::string("mean"))
+        .help("'mean' or 'sum' of recorded pass positions");
+    program.add_argument("--apply-drive-homing")
+        .default_value(false)
+        .implicit_value(true)
+        .help("opt-in: call CiA402Drive::homeToCurrentPosition(0) after stalling");
 
     try {
         program.parse_args(argc, argv);
@@ -108,6 +132,19 @@ inline bool parseSensorlessHomingArgs(int argc, char** argv,
     out.stall_time = program.get<double>("--stall-time");
     out.max_runtime = program.get<double>("--max-runtime");
     out.homing_timeout_ms = static_cast<uint32_t>(program.get<int>("--homing-timeout"));
+    out.fine_homing_passes = program.get<int>("--fine-passes");
+    if (out.fine_homing_passes < 1) {
+        std::cerr << "--fine-passes must be >= 1\n";
+        return false;
+    }
+    out.backoff_distance = program.get<double>("--backoff-distance");
+    out.fine_velocity = program.get<double>("--fine-velocity");
+    out.pass_aggregation = program.get<std::string>("--pass-aggregation");
+    if (out.pass_aggregation != "mean" && out.pass_aggregation != "sum") {
+        std::cerr << "--pass-aggregation must be 'mean' or 'sum'\n";
+        return false;
+    }
+    out.apply_drive_homing = program.get<bool>("--apply-drive-homing");
     if (!Tether::Examples::parseVlanArgs(
             program.get<std::string>("--rx-vlan"),
             program.get<std::string>("--tx-vlan"),
@@ -159,6 +196,12 @@ int main(int argc, char** argv)
         ctrl_cfg.ki = args.ki;
         ctrl_cfg.stall_velocity = args.stall_velocity;
         ctrl_cfg.stall_time = args.stall_time;
+        ctrl_cfg.fine_homing_passes = args.fine_homing_passes;
+        ctrl_cfg.backoff_distance = args.backoff_distance;
+        ctrl_cfg.fine_velocity = args.fine_velocity;
+        ctrl_cfg.pass_aggregation = (args.pass_aggregation == "sum")
+            ? HomingController::PassAggregation::Sum
+            : HomingController::PassAggregation::Mean;
 
         auto controller = std::make_unique<HomingController>(ctrl_cfg);
         auto* raw = controller.get();
@@ -191,12 +234,21 @@ int main(int argc, char** argv)
                     rc = 7;
                 } else {
                     master.removeMotionController(static_cast<uint16_t>(args.slave));
-                    auto* drive = master.driveBySlaveIndex(static_cast<uint16_t>(args.slave));
-                    if (drive == nullptr || !drive->homeToCurrentPosition(0)) {
-                        TETHER_LOGE(TAG, "Failed to set current position as home");
-                        rc = 8;
+                    if (raw->hasHomePosition()) {
+                        TETHER_LOGI(TAG,
+                                    "Virtual homing switch active at {}",
+                                    raw->homePosition());
+                    }
+                    if (args.apply_drive_homing) {
+                        auto* drive = master.driveBySlaveIndex(static_cast<uint16_t>(args.slave));
+                        if (drive == nullptr || !drive->homeToCurrentPosition(0)) {
+                            TETHER_LOGE(TAG, "Failed to set current position as home");
+                            rc = 8;
+                        } else {
+                            TETHER_LOGI(TAG, "Sensorless homing complete; drive count set to 0");
+                        }
                     } else {
-                        TETHER_LOGI(TAG, "Sensorless homing complete");
+                        TETHER_LOGI(TAG, "Sensorless homing complete; drive count not modified");
                     }
                 }
             }
