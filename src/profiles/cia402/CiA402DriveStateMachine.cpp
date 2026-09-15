@@ -902,9 +902,9 @@ bool CiA402Drive::setHomingMethod(int8_t method) {
     return result.has_value();
 }
 
-bool CiA402Drive::homeToCurrentPosition(int32_t home_offset) {
-    TETHER_LOGI(TAG, "{}: Homing to current position (offset={})", 
-             logPrefix().c_str(), (long)home_offset);
+bool CiA402Drive::homeToCurrentPosition(int32_t home_offset, uint32_t timeout_ms) {
+    TETHER_LOGI(TAG, "{}: Homing to current position (offset={}, timeout={}ms)",
+             logPrefix().c_str(), (long)home_offset, (unsigned long)timeout_ms);
     
     // Set home offset
     if (home_offset != 0) {
@@ -926,7 +926,7 @@ bool CiA402Drive::homeToCurrentPosition(int32_t home_offset) {
     }
     
     // Execute homing
-    return executeHoming(5000);  // 5 second timeout for current position homing
+    return executeHoming(timeout_ms);
 }
 
 bool CiA402Drive::executeHoming(uint32_t timeout_ms) {
