@@ -73,6 +73,18 @@ int runSineMotion(EtherCAT::DS402Master& master,
         }
     }
 
+    // RxPDO 0x1704 carries torque limits and max profile velocity in the
+    // cyclic frame.  The motion controller only writes controlword, mode and
+    // the active setpoint, so these fields must be initialised once here —
+    // otherwise the drive clamps output torque (and profile speed) to zero.
+    if (auto* drive = master.driveBySlaveIndex(kSlaveIndex)) {
+        if (auto* rx = drive->rxPDO<EtherCAT::Drives::AS715N_pdo::AS715N_RxPDO_1704>()) {
+            rx->positive_torque_limit = 1000;  // 100.0% of rated torque
+            rx->negative_torque_limit = 1000;  // 100.0% of rated torque
+            rx->max_profile_velocity  = 100000;  // counts/s
+        }
+    }
+
     if (!master.addMotionController<EtherCAT::Drives::AS715N_pdo::AS715N_RxPDO_1704>(
             kSlaveIndex,
             target,
