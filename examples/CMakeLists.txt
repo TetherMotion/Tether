@@ -155,6 +155,13 @@ endif()
 if(TETHER_DRIVE_AS715N)
 add_tether_example(as715n_check_error_code
     LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# ---AS715N Sensorless Homing Example ---
+# Moves a single AS715N against a mechanical stop using a low, clamped
+# CST torque from a closed-loop velocity PI controller. Once the drive
+# stalls, it sets the current position as home (method 35) and exits.
+add_tether_example(as715n_sensorless_homing
+    LIBRARIES tether_ethercat_master tether_cia_profiles tether_controls tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
 endif()
 
 # ---EtherCAT SII dump example ---
