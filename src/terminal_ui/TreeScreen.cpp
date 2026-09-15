@@ -110,9 +110,16 @@ void TreeScreen::run(std::atomic<bool>& cancel, double durationSec) {
 
         // ---- Input ------------------------------------------------------
         const int key = session_.pollKey(50);
-        if (key == 'q' || key == 'Q' || key == 27) break;
+        if (key == 'q' || key == 'Q' || key == 27) {
+            if (hooks_.quitGuard && hooks_.quitGuard()) {
+                if (hooks_.onKey) hooks_.onKey(key);
+                continue;
+            }
+            break;
+        }
         if (key == KEY_RESIZE) { footerY = layout(); continue; }
         if (key < 0) continue;
+        if (hooks_.preKey && hooks_.preKey(key)) continue;
         if (tree_.handleKey(key)) continue;
         if (hooks_.onKey) hooks_.onKey(key);
     }

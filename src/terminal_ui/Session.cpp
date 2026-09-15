@@ -42,6 +42,7 @@ Session::Session() {
         init_pair(PalHint,     COLOR_YELLOW,  -1);
         init_pair(PalError,    COLOR_RED,     -1);
         init_pair(PalSelected, COLOR_MAGENTA, -1);
+        init_pair(PalMuted,    COLOR_WHITE,   -1);
     }
 }
 

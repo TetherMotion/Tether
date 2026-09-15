@@ -34,6 +34,7 @@ enum Palette : short {
     PalHint     = 3,   ///< yellow — key hints, footer
     PalError    = 4,   ///< red   — errors, captured log lines
     PalSelected = 5,   ///< magenta — emphasis inside detail panes
+    PalMuted    = 6,   ///< gray/white — inactive or invalid items
 };
 
 class Session {

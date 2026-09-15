@@ -34,6 +34,7 @@ namespace TUI {
 struct TreeNode {
     std::string          label;              ///< Text shown in the tree
     std::string          badge;              ///< Small right-aligned indicator
+    std::string          detail;             ///< Free-form text for detail panes
     std::vector<TreeNode> children;          ///< Sub-nodes (empty = leaf)
     bool                 expanded = true;    ///< Draw children when true
     int                  tag      = -1;      ///< User payload (e.g. slave index)
@@ -63,8 +64,14 @@ public:
     void setBadge(int tag, std::string badge);
 
     /// Handle one key; returns true when the key was consumed as tree
-    /// navigation (arrows, Home/End, PageUp/PageDown).
+    /// navigation (arrows, Home/End, PageUp/PageDown, Space/Enter fold).
     bool handleKey(int key);
+
+    /// Move the selection to the next node (in document order, wrapping
+    /// around) whose label, badge, or detail contains `needle`
+    /// (case-insensitive).  Ancestors of the match are expanded so the
+    /// match becomes visible.  Returns false when nothing matches.
+    bool searchNext(const std::string& needle);
 
     /// Draw the visible part of the tree into `win` (cleared first).
     void render(TermWindow* win);

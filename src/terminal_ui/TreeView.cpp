@@ -6,7 +6,9 @@
 #include "tether/terminal_ui/TreeView.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cwchar>
+#include <functional>
 
 #include <ncurses.h>
 
@@ -128,9 +130,70 @@ bool TreeView::handleKey(int key) {
             }
         }
         return true;
+    case ' ':
+    case '\n':
+    case '\r':
+    case KEY_ENTER:
+        if (!cur->children.empty()) {
+            cur->expanded = !cur->expanded;
+            rebuild();
+        }
+        return true;
     default:
         return false;
     }
+}
+
+static bool containsCI(const std::string& hay, const std::string& needle) {
+    if (hay.size() < needle.size()) return false;
+    return std::search(hay.begin(), hay.end(), needle.begin(), needle.end(),
+                       [](char a, char b) {
+                           return std::tolower((unsigned char)a)
+                               == std::tolower((unsigned char)b);
+                       }) != hay.end();
+}
+
+bool TreeView::searchNext(const std::string& needle) {
+    if (needle.empty()) return false;
+
+    // Document-order DFS over ALL nodes (including collapsed-away ones),
+    // recording each node's ancestor chain so we can expand it on a match.
+    struct Entry { TreeNode* node; std::vector<TreeNode*> ancestors; };
+    std::vector<Entry>     all;
+    std::vector<TreeNode*> path;
+    std::function<void(TreeNode&)> walk = [&](TreeNode& parent) {
+        for (auto& c : parent.children) {
+            all.push_back({&c, path});
+            path.push_back(&c);
+            walk(c);
+            path.pop_back();
+        }
+    };
+    walk(root_);
+    if (all.empty()) return false;
+
+    // Start searching just past the currently selected node.
+    size_t start = 0;
+    if (const TreeNode* sel = selected()) {
+        for (size_t i = 0; i < all.size(); ++i) {
+            if (all[i].node == sel) { start = i + 1; break; }
+        }
+    }
+
+    for (size_t k = 0; k < all.size(); ++k) {
+        Entry& e = all[(start + k) % all.size()];
+        if (!containsCI(e.node->label, needle)
+            && !containsCI(e.node->badge, needle)
+            && !containsCI(e.node->detail, needle)) continue;
+
+        for (auto* a : e.ancestors) a->expanded = true;
+        rebuild();
+        for (size_t i = 0; i < flat_.size(); ++i) {
+            if (flat_[i] == e.node) { cursor_ = i; break; }
+        }
+        return true;
+    }
+    return false;
 }
 
 void TreeView::render(TermWindow* w) {

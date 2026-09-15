@@ -9,6 +9,30 @@
 
 set(CURSES_NEED_NCURSES TRUE CACHE BOOL "Require ncurses" FORCE)
 set(CURSES_NEED_WIDE TRUE CACHE BOOL "Require wide/Unicode ncurses" FORCE)
+
+# FindCurses caches CURSES_*_LIBRARY paths.  If an earlier configure ran
+# without CURSES_NEED_WIDE (e.g. before this component was enabled, or in
+# a parent project that called find_package(Curses) first), the cache
+# still points at the narrow library — which cannot emit UTF-8 (every
+# multibyte char is rendered as M-b~T~@ escapes).  Detect the stale
+# result, drop it, and re-search once.
+if(CURSES_NCURSES_LIBRARY AND
+   NOT CURSES_NCURSES_LIBRARY MATCHES "(ncursesw|cursesw)" AND
+   NOT TETHER_CURSES_WIDE_RETRIED)
+    message(STATUS "tether_terminal_ui: cached CURSES_NCURSES_LIBRARY="
+                   "${CURSES_NCURSES_LIBRARY} is the narrow build — "
+                   "re-searching for the wide (UTF-8-capable) library")
+    set(TETHER_CURSES_WIDE_RETRIED TRUE CACHE INTERNAL
+        "curses re-search after CURSES_NEED_WIDE was enabled")
+    unset(CURSES_NCURSES_LIBRARY CACHE)
+    unset(CURSES_CURSES_LIBRARY CACHE)
+    unset(CURSES_FORM_LIBRARY CACHE)
+    unset(CURSES_INCLUDE_PATH CACHE)
+    unset(CURSES_HAVE_CURSES_H CACHE)
+    unset(CURSES_HAVE_NCURSES_H CACHE)
+    unset(CURSES_HAVE_NCURSES_NCURSES_H CACHE)
+    unset(CURSES_HAVE_NCURSES_CURSES_H CACHE)
+endif()
 find_package(Curses)
 
 if(NOT CURSES_FOUND)
