@@ -1544,15 +1544,15 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
         // Periodic interpreted RxPDO/TxPDO wire log
         if (should_log_wire && write_ok && (read_ok && read_resp.wkc > 0)) {
             static const Utils::BitLabel kCwLabels[] = {
-                Utils::BitLabel::bitIfOn("SwOn",   0x0001),
-                Utils::BitLabel::bitIfOn("EnV",    0x0002),
-                Utils::BitLabel::bitIfOn("NoQS",   0x0004),
-                Utils::BitLabel::bitIfOn("EnOp",   0x0008),
-                Utils::BitLabel::bitIfOn("NewSP",  0x0010),
-                Utils::BitLabel::bitIfOn("ChgSI",  0x0020),
-                Utils::BitLabel::bitIfOn("AbsRel", 0x0040),
-                Utils::BitLabel::bitIfOn("FltR",   0x0080),
-                Utils::BitLabel::bitIfOn("Halt",   0x0100),
+                Utils::BitLabel::bit("SwOn",   0x0001),
+                Utils::BitLabel::bit("EnV",    0x0002),
+                Utils::BitLabel::bit("NoQS",   0x0004),
+                Utils::BitLabel::bit("EnOp",   0x0008),
+                Utils::BitLabel::bit("NewSP",  0x0010),
+                Utils::BitLabel::bit("ChgSI",  0x0020),
+                Utils::BitLabel::bit("AbsRel", 0x0040),
+                Utils::BitLabel::bit("FltR",   0x0080),
+                Utils::BitLabel::bit("Halt",   0x0100),
             };
             const std::span<const Utils::BitLabel> kCwSpan(kCwLabels);
             Utils::ColoredBitsetFormatter cw_fmt(kCwSpan);
@@ -1567,19 +1567,19 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
                         si, wire_cycle, cw_state, tp, tv);
 
             static const Utils::BitLabel kSwLabels[] = {
-                Utils::BitLabel::bitIfOn("Rdy",     0x0001),
-                Utils::BitLabel::bitIfOn("SwOn",    0x0002),
-                Utils::BitLabel::bitIfOn("EnOp",    0x0004),
-                Utils::BitLabel::bitIfOn("Flt",     0x0008),
-                Utils::BitLabel::bitIfOn("EnV",     0x0010),
-                Utils::BitLabel::bitIfOn("NoQS",    0x0020),
-                Utils::BitLabel::bitIfOn("SwOnDsbl",0x0040),
-                Utils::BitLabel::bitIfOn("Wrn",     0x0080),
-                Utils::BitLabel::bitIfOn("Rem",     0x0200),
-                Utils::BitLabel::bitIfOn("TgtRec",  0x0400),
-                Utils::BitLabel::bitIfOn("IntLim",  0x0800),
-                Utils::BitLabel::bitIfOn("SetAck",  0x1000),
-                Utils::BitLabel::bitIfOn("FolErr",  0x2000),
+                Utils::BitLabel::bit("Rdy",     0x0001),
+                Utils::BitLabel::bit("SwOn",    0x0002),
+                Utils::BitLabel::bit("EnOp",    0x0004),
+                Utils::BitLabel::bit("Flt",     0x0008),
+                Utils::BitLabel::bit("EnV",     0x0010),
+                Utils::BitLabel::bit("NoQS",    0x0020),
+                Utils::BitLabel::bit("SwOnDsbl",0x0040),
+                Utils::BitLabel::bit("Wrn",     0x0080),
+                Utils::BitLabel::bit("Rem",     0x0200),
+                Utils::BitLabel::bit("TgtRec",  0x0400),
+                Utils::BitLabel::bit("IntLim",  0x0800),
+                Utils::BitLabel::bit("SetAck",  0x1000),
+                Utils::BitLabel::bit("FolErr",  0x2000),
             };
             const std::span<const Utils::BitLabel> kSwSpan(kSwLabels);
             Utils::ColoredBitsetFormatter sw_fmt(kSwSpan);
