@@ -308,7 +308,7 @@ public:
     // ========================================================================
 
     bool setHomingMethod(int8_t method);
-    bool homeToCurrentPosition(int32_t home_offset = 0);
+    bool homeToCurrentPosition(int32_t home_offset = 0, uint32_t timeout_ms = 5000);
     bool executeHoming(uint32_t timeout_ms = 30000);
     bool isHomingComplete();
     bool hasHomingError();
