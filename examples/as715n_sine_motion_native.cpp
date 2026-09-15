@@ -2,6 +2,9 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cctype>
+#include <cstdio>
+#include <chrono>
+#include <memory>
 #include <string>
 #include <algorithm>
 
@@ -27,6 +30,103 @@ constexpr double kVelocityAmplitude = 30000.0;   // counts/s
 constexpr double kTorqueAmplitude   = 1000.0;    // 0.1% of rated torque
 
 using CyclicTarget = EtherCAT::DS402Master::CyclicTarget;
+
+/// Wraps a motion controller and writes the full Rx/Tx PDO contents to a
+/// CSV file once per control cycle.  Uses a 1 MiB output buffer so the
+/// realtime loop is not blocked by the host filesystem.  This example
+/// targets the AS715N 0x1704 / 0x1B04 mapping, but the wrapper is generic.
+template<typename RxPDO, typename TxPDO>
+class CsvLogController : public EtherCAT::DS402Master::IDriveMotionController {
+public:
+    CsvLogController(std::unique_ptr<EtherCAT::DS402Master::IDriveMotionController> inner,
+                     std::string csv_path)
+        : inner_(std::move(inner))
+        , csv_path_(std::move(csv_path))
+    {
+    }
+
+    ~CsvLogController()
+    {
+        if (file_) {
+            std::fflush(file_);
+            std::fclose(file_);
+        }
+    }
+
+    bool start(EtherCAT::CiA402Drive& drive) override
+    {
+        file_ = std::fopen(csv_path_.c_str(), "w");
+        if (!file_) {
+            TETHER_LOGE(TAG, "Failed to open CSV file '{}'; continuing without trace",
+                        csv_path_);
+        } else {
+            std::setvbuf(file_, nullptr, _IOFBF, 1 << 20);  // 1 MiB buffer
+            start_time_ = std::chrono::steady_clock::now();
+            std::fprintf(file_,
+                         "t,"
+                         "rx_controlword,rx_target_position,rx_target_velocity,rx_target_torque,"
+                         "rx_modes_of_operation,rx_touch_probe_function,rx_max_profile_velocity,"
+                         "rx_positive_torque_limit,rx_negative_torque_limit,"
+                         "tx_error_code,tx_statusword,tx_position_actual,tx_torque_actual,"
+                         "tx_modes_of_operation_display,tx_position_deviation,tx_touch_probe_status,"
+                         "tx_touch_probe_pos1,tx_touch_probe_pos2,tx_speed_feedback\n");
+        }
+        return inner_->start(drive);
+    }
+
+    void stop(EtherCAT::CiA402Drive& drive) override
+    {
+        inner_->stop(drive);
+        if (file_) {
+            std::fflush(file_);
+            std::fclose(file_);
+            file_ = nullptr;
+        }
+    }
+
+    bool update(EtherCAT::CiA402Drive& drive, double dt_seconds) override
+    {
+        bool ok = inner_->update(drive, dt_seconds);
+        if (file_ && start_time_ != std::chrono::steady_clock::time_point{}) {
+            const double t = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - start_time_).count();
+            const auto* rx = drive.rxPDO<RxPDO>();
+            const auto* tx = drive.txPDO<TxPDO>();
+            if (rx && tx) {
+                std::fprintf(file_,
+                             "%.6f,%u,%ld,%ld,%d,%d,%u,%lu,%u,%u,"
+                             "%u,%u,%ld,%d,%d,%ld,%u,%ld,%ld,%ld\n",
+                             t,
+                             static_cast<unsigned>(rx->controlword),
+                             static_cast<long>(rx->target_position),
+                             static_cast<long>(rx->target_velocity),
+                             static_cast<int>(rx->target_torque),
+                             static_cast<int>(rx->modes_of_operation),
+                             static_cast<unsigned>(rx->touch_probe_function),
+                             static_cast<unsigned long>(rx->max_profile_velocity),
+                             static_cast<unsigned>(rx->positive_torque_limit),
+                             static_cast<unsigned>(rx->negative_torque_limit),
+                             static_cast<unsigned>(tx->error_code),
+                             static_cast<unsigned>(tx->statusword),
+                             static_cast<long>(tx->position_actual),
+                             static_cast<int>(tx->torque_actual),
+                             static_cast<int>(tx->modes_of_operation_display),
+                             static_cast<long>(tx->position_deviation),
+                             static_cast<unsigned>(tx->touch_probe_status),
+                             static_cast<long>(tx->touch_probe_pos1),
+                             static_cast<long>(tx->touch_probe_pos2),
+                             static_cast<long>(tx->speed_feedback));
+            }
+        }
+        return ok;
+    }
+
+private:
+    std::unique_ptr<EtherCAT::DS402Master::IDriveMotionController> inner_;
+    std::string csv_path_;
+    std::FILE* file_ = nullptr;
+    std::chrono::steady_clock::time_point start_time_;
+};
 
 CyclicTarget modeToTarget(const std::string& mode)
 {
@@ -85,10 +185,21 @@ int runSineMotion(EtherCAT::DS402Master& master,
         }
     }
 
-    if (!master.addMotionController<EtherCAT::Drives::AS715N_pdo::AS715N_RxPDO_1704>(
-            kSlaveIndex,
-            target,
-            std::make_unique<tether::control::SineMotionController>(config))) {
+    using RxPDO = EtherCAT::Drives::AS715N_pdo::AS715N_RxPDO_1704;
+    using TxPDO = EtherCAT::Drives::AS715N_pdo::AS715N_TxPDO_1B04;
+    auto sine = std::make_unique<tether::control::SineMotionController>(config);
+    auto inner = std::make_unique<EtherCAT::DS402Master::GenericDriveMotionController<RxPDO>>(
+        target, std::move(sine), 1.0);
+
+    std::unique_ptr<EtherCAT::DS402Master::IDriveMotionController> controller;
+    if (!args.csv_path.empty()) {
+        controller = std::make_unique<CsvLogController<RxPDO, TxPDO>>(
+            std::move(inner), args.csv_path);
+    } else {
+        controller = std::move(inner);
+    }
+
+    if (!master.addMotionController(kSlaveIndex, std::move(controller))) {
         TETHER_LOGE(TAG, "Failed to add {} sine motion controller",
                     target == CyclicTarget::Position ? "CSP" :
                     (target == CyclicTarget::Velocity ? "CSV" : "CST"));
