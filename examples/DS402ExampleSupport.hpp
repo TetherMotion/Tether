@@ -223,6 +223,7 @@ inline void shutdownSingleDrive(EtherCAT::DS402Master& master, uint16_t slave_in
 struct MotionNativeArgs {
     std::string interface;
     double duration = 10.0;
+    std::string mode = "csv";
     VlanConfig vlan;
 };
 
@@ -238,6 +239,7 @@ inline bool parseMotionNativeArgs(int argc, char** argv,
     argparse::ArgumentParser program(program_name, "1.0", argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
     program.add_argument("-d", "--duration").scan<'g', double>().default_value(10.0);
+    program.add_argument("-m", "--mode").default_value(std::string("csv"));
 
     try {
         program.parse_args(argc, argv);
@@ -252,6 +254,7 @@ inline bool parseMotionNativeArgs(int argc, char** argv,
         return false;
     }
     out.duration = program.get<double>("--duration");
+    out.mode = program.get<std::string>("--mode");
     if (!Tether::Examples::parseVlanArgs(
             program.get<std::string>("--rx-vlan"),
             program.get<std::string>("--tx-vlan"),

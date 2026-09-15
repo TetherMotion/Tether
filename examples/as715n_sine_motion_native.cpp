@@ -1,7 +1,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cctype>
 #include <string>
+#include <algorithm>
 
 #include "DS402ExampleSupport.hpp"
 #include "tether/control/SineMotionController.hpp"
@@ -15,20 +17,43 @@ namespace {
 constexpr const char* TAG = "as715n_sine";
 constexpr uint16_t kSlaveIndex = 0;
 constexpr double kTwoPi = 6.28318530717958647692;
+constexpr double kFrequencyHz = 0.25;
 
-int runSineMotion(EtherCAT::DS402Master& master, double duration_seconds)
+// Peak amplitudes for each cyclic mode (drive-specific units)
+constexpr double kPositionAmplitude = 30000.0;   // encoder counts
+constexpr double kVelocityAmplitude = 30000.0;   // counts/s
+constexpr double kTorqueAmplitude   = 1000.0;    // 0.1% of rated torque
+
+using CyclicTarget = EtherCAT::DS402Master::CyclicTarget;
+
+CyclicTarget modeToTarget(const std::string& mode)
 {
-    constexpr double kAmplitudeCountsPerSecond = 30000.0;
-    constexpr double kFrequencyHz = 0.25;
-    tether::control::SineMotionController::Config config = tether::control::SineMotionController::Config::getDefault();
-    config.frequency = kFrequencyHz;
-    config.amplitude = kAmplitudeCountsPerSecond / (kTwoPi * kFrequencyHz);
+    std::string m = mode;
+    std::transform(m.begin(), m.end(), m.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (m == "csp") return CyclicTarget::Position;
+    if (m == "csv") return CyclicTarget::Velocity;
+    if (m == "cst") return CyclicTarget::Torque;
+    TETHER_LOGW(TAG, "Unknown mode '{}'; defaulting to CSV", mode);
+    return CyclicTarget::Velocity;
+}
 
-    if (!master.addMotionController<EtherCAT::Drives::AS715N_pdo::AS715N_RxPDO_1705>(
-            kSlaveIndex,
-            EtherCAT::DS402Master::CyclicTarget::Velocity,
-            std::make_unique<tether::control::SineMotionController>(config))) {
-        return 2;
+int runSineMotion(EtherCAT::DS402Master& master, CyclicTarget target, double duration_seconds)
+{
+    tether::control::SineMotionController::Config config =
+        tether::control::SineMotionController::Config::getDefault();
+    config.frequency = kFrequencyHz;
+
+    switch (target) {
+        case CyclicTarget::Position:
+            config.amplitude = kPositionAmplitude;
+            break;
+        case CyclicTarget::Velocity:
+            config.amplitude = kVelocityAmplitude / (kTwoPi * kFrequencyHz);
+            break;
+        case CyclicTarget::Torque:
+            config.amplitude = kTorqueAmplitude;
+            break;
     }
 
     EtherCAT::Master::RealtimeMotionLoopConfig loop_config;
@@ -36,8 +61,29 @@ int runSineMotion(EtherCAT::DS402Master& master, double duration_seconds)
     loop_config.sync_interval_cycles = 10;
     loop_config.enable_dc_synchronization = true;
     if (!master.startRealtimeMotionControlLoop(loop_config)) {
-        (void)master.removeMotionController(kSlaveIndex);
+        TETHER_LOGE(TAG, "Failed to start realtime motion control loop");
         return 3;
+    }
+
+    // For CSP, set the current position as home before moving.
+    if (target == CyclicTarget::Position) {
+        auto* drive = master.driveBySlaveIndex(kSlaveIndex);
+        if (!drive || !drive->homeToCurrentPosition()) {
+            TETHER_LOGE(TAG, "Failed to set current position as home");
+            master.stopMotionControlLoop();
+            return 5;
+        }
+    }
+
+    if (!master.addMotionController<EtherCAT::Drives::AS715N_pdo::AS715N_RxPDO_1704>(
+            kSlaveIndex,
+            target,
+            std::make_unique<tether::control::SineMotionController>(config))) {
+        TETHER_LOGE(TAG, "Failed to add {} sine motion controller",
+                    target == CyclicTarget::Position ? "CSP" :
+                    (target == CyclicTarget::Velocity ? "CSV" : "CST"));
+        master.stopMotionControlLoop();
+        return 4;
     }
 
     Tether::Platform::Clock::instance().delayMilliseconds(
@@ -51,13 +97,14 @@ bool configureDrive(EtherCAT::DS402Master& master)
 {
     EtherCAT::Drives::AS715N::AS715NDriveInitializer init(master, kSlaveIndex, TAG);
 
-    if (!init.init()) {
-        TETHER_LOGE(TAG, "AS715N drive initialization failed");
-        return false;
-    }
+    // Use RxPDO 0x1704/TxPDO 0x1B04 because 0x1704 carries TargetTorque,
+    // TargetPosition and TargetVelocity, so one mapping serves CSP, CSV and CST.
+    const auto assignment = EtherCAT::Drives::AS715N_pdo::makePDOAssignment(
+        EtherCAT::Drives::AS715N_pdo::RxPDO_1704,
+        EtherCAT::Drives::AS715N_pdo::TxPDO_1B04);
 
-    if (!init.drive().setOperatingMode(CiA402::OperatingMode::CyclicSyncVelocity)) {
-        TETHER_LOGE(TAG, "Failed to set Cyclic Sync Velocity mode");
+    if (!init.init(assignment)) {
+        TETHER_LOGE(TAG, "AS715N drive initialization failed");
         return false;
     }
 
@@ -79,6 +126,8 @@ int main(int argc, char** argv)
     }
 
     Tether::Platform::ensureRealtimeKernelOrExit();
+
+    const auto target = modeToTarget(args.mode);
 
     EtherCAT::DS402Master master;
     Tether::Examples::HostMasterSession session;
@@ -115,7 +164,7 @@ int main(int argc, char** argv)
     if (!configureDrive(master)) {
         rc = 3;
     } else {
-        rc = runSineMotion(master, args.duration);
+        rc = runSineMotion(master, target, args.duration);
         Tether::Examples::shutdownSingleDrive(master, kSlaveIndex);
     }
 
