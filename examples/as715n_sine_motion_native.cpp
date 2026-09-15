@@ -40,21 +40,23 @@ CyclicTarget modeToTarget(const std::string& mode)
     return CyclicTarget::Velocity;
 }
 
-int runSineMotion(EtherCAT::DS402Master& master, CyclicTarget target, double duration_seconds)
+int runSineMotion(EtherCAT::DS402Master& master,
+                  const Tether::Examples::MotionNativeArgs& args,
+                  CyclicTarget target)
 {
     tether::control::SineMotionController::Config config =
         tether::control::SineMotionController::Config::getDefault();
-    config.frequency = kFrequencyHz;
+    config.frequency = args.frequency_hz;
 
     switch (target) {
         case CyclicTarget::Position:
-            config.amplitude = kPositionAmplitude;
+            config.amplitude = args.position_amplitude;
             break;
         case CyclicTarget::Velocity:
-            config.amplitude = kVelocityAmplitude / (kTwoPi * kFrequencyHz);
+            config.amplitude = args.velocity_amplitude / (kTwoPi * args.frequency_hz);
             break;
         case CyclicTarget::Torque:
-            config.amplitude = kTorqueAmplitude;
+            config.amplitude = args.torque_amplitude;
             break;
     }
 
@@ -91,7 +93,7 @@ int runSineMotion(EtherCAT::DS402Master& master, CyclicTarget target, double dur
     }
 
     Tether::Platform::Clock::instance().delayMilliseconds(
-        static_cast<uint32_t>(duration_seconds * 1000.0));
+        static_cast<uint32_t>(args.duration * 1000.0));
     master.stopMotionControlLoop();
     (void)master.removeMotionController(kSlaveIndex);
     return 0;
@@ -199,7 +201,7 @@ int main(int argc, char** argv)
         rc = 3;
     } else {
         readAndPrint2006_08(master);
-        rc = runSineMotion(master, target, args.duration);
+        rc = runSineMotion(master, args, target);
         Tether::Examples::shutdownSingleDrive(master, kSlaveIndex);
     }
 
