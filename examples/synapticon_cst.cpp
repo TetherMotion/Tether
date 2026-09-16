@@ -604,14 +604,87 @@ int main(int argc, char** argv) {
     // SII EEPROM auto-configuration so the correct mailbox geometry is
     // always used for SOMANET drives.
     {
-        if (master.ethercatMaster().discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
-            TETHER_LOGW(TAG, "No slaves discovered during pre-config scan");
+        // --- Verify the target slave is a Synapticon SOMANET drive ---
+        // The bus may carry other EtherCAT devices ahead of the drive (e.g.
+        // the ESC211 safety controller), so -s must point at the SOMANET.
+        // Configuring the wrong slave manifests as AL 0x001E/0x0025
+        // "Invalid input/output configuration" when the device rejects the
+        // SOMANET PDO assignment.
+        //
+        // A vendor-ID mismatch is fatal.  A product-code mismatch is only a
+        // warning because Synapticon ships several product codes on the same
+        // CiA 402 firmware family.  If the SII cannot be read at all (the
+        // SOMANET historically rejects APWR to EEPCTL), the check degrades
+        // to a warning so the run can continue on drives with unreadable
+        // EEPROMs.
+        constexpr uint32_t kSynapticonVendorId   = 0x000022D2;
+        constexpr uint32_t kSomanetProductCode  = 0x00000302;
+
+        const auto discovered =
+            master.ethercatMaster().discovery().discover(
+                {EtherCAT::DiscoveryOption::VendorId,
+                 EtherCAT::DiscoveryOption::ProductCode,
+                 EtherCAT::DiscoveryOption::DeviceNames});
+        if (discovered.empty()) {
+            TETHER_LOGE(TAG, "No slaves discovered");
+            Tether::Examples::stopHostMasterSession(master, session);
+            return 2;
+        }
+        for (const auto& s : discovered) {
+            const std::string name = s.device_name.value_or("<unreadable>");
+            TETHER_LOGI(TAG,
+                "  slave {}: vendor=0x{:08X} product=0x{:08X} name='{}'",
+                s.index,
+                s.vendor_id.value_or(0),
+                s.product_code.value_or(0),
+                name.c_str());
+        }
+        if (slave_idx >= discovered.size()) {
+            TETHER_LOGE(TAG,
+                "Slave index {} out of range  -  only {} slave(s) on the bus",
+                slave_idx, discovered.size());
+            Tether::Examples::stopHostMasterSession(master, session);
+            return 2;
         }
         if (!master.waitForDriveCount(
                 static_cast<uint16_t>(slave_idx + 1), 2000)) {
             TETHER_LOGE(TAG, "Timed out waiting for slave {}", slave_idx);
             Tether::Examples::stopHostMasterSession(master, session);
             return 2;
+        }
+
+        const auto& target = discovered[slave_idx];
+        const std::string target_name_str =
+            target.device_name.value_or("<unreadable>");
+        const char* target_name = target_name_str.c_str();
+        if (target.vendor_id.has_value() &&
+            !target.hasVendorId(kSynapticonVendorId)) {
+            TETHER_LOGE(TAG,
+                "Slave {} is not a Synapticon drive: vendor=0x{:08X} "
+                "(expected 0x{:08X}) product=0x{:08X} name='{}'.  "
+                "Pass -s with the correct bus position (see list above).",
+                slave_idx, *target.vendor_id, kSynapticonVendorId,
+                target.product_code.value_or(0), target_name);
+            Tether::Examples::stopHostMasterSession(master, session);
+            return 2;
+        }
+        if (!target.vendor_id.has_value()) {
+            TETHER_LOGW(TAG,
+                "Slave {}: could not read vendor ID from SII (name='{}')  -  "
+                "cannot verify this is a Synapticon drive, continuing anyway",
+                slave_idx, target_name);
+        } else if (!target.hasProductCode(kSomanetProductCode)) {
+            TETHER_LOGW(TAG,
+                "Slave {}: Synapticon vendor OK but product=0x{:08X} "
+                "(expected 0x{:08X}, name='{}')  -  continuing anyway",
+                slave_idx, target.product_code.value_or(0),
+                kSomanetProductCode, target_name);
+        } else {
+            TETHER_LOGI(TAG,
+                "Slave {}: verified Synapticon drive '{}' "
+                "(vendor=0x{:08X} product=0x{:08X})",
+                slave_idx, target_name,
+                *target.vendor_id, *target.product_code);
         }
 
         // --- Apply EtherCAT framework debug flags ---
@@ -623,14 +696,6 @@ int main(int argc, char** argv) {
             Tether::Examples::applyDebugFlags(
                 debug_flags, master.ethercatMaster(), TAG);
         }
-
-        // --- Slave identity verification is intentionally skipped ---
-        // The Synapticon drive does not support APWR to the EEPCTL register,
-        // so SII/EEPROM reads are impossible via the standard register
-        // interface.  This example targets SOMANET drives only and relies on
-        // the hardcoded ESI values from tether/drives/Synapticon.hpp for all
-        // mailbox/PDO configuration  -  no SII read or vendor/product
-        // verification is performed.
 
         // --- Reset slave to INIT if currently in a higher state ---
         // If the slave is already in PRE_OP, SAFE_OP, or OP (e.g. from a
@@ -783,6 +848,11 @@ int main(int argc, char** argv) {
     }
 
     // Get-or-create the drive and configure it for OP transition.
+    //
+    // ensureDrive() is used instead of driveBySlaveIndex() because the
+    // multi-PDO path below bypasses configureDrive() (which would otherwise
+    // create the drive).  Without this, driveBySlaveIndex() would return
+    // nullptr  -  no CiA402Drive object exists yet.
     auto& drive = master.ensureDrive(slave_idx);
     drive.setSDOTimeout(kSdoTimeoutMs);
 
@@ -791,26 +861,34 @@ int main(int argc, char** argv) {
     // Synapticon drive does not expose 0x6060 via SDO, so we skip the SDO
     // write entirely and rely on PDO-based mode setting.
 
-    // Motion-only single-PDO configuration (RxPDO 0x1600 / TxPDO 0x1A00).
+    // Motion-only PDO configuration via the multi-PDO API.  This writes the
+    // PDO assignment (0x1C12/0x1C13) and the SM2/SM3 registers explicitly
+    // using the ESI physical addresses (0x1800/0x1C00).  The single-PDO
+    // configureDrive() path cannot be used here: it derives SM2/SM3 from the
+    // SII, and this drive's SII reports SM2 at 0x1400  -  overlapping mailbox
+    // SM1 (0x1400-0x15FF)  -  which makes the slave reject PRE_OP->SAFE_OP
+    // with AL 0x001E "Invalid input configuration".
+    //
+    // We assign the full standard ESI motion set (0x1600+0x1601+0x1602 /
+    // 0x1A00+0x1A01+0x1A02+0x1A03): the SOMANET firmware rejects partial
+    // assignments such as {0x1600}/{0x1A00} with AL 0x001E.
     {
-        Tether::Examples::SingleDriveExampleConfig config;
-        config.drive.slave_index = slave_idx;
-        config.drive.rxpdo_index = EtherCAT::Drives::SynapticonPDO::RxPDO_1600.index;
-        config.drive.txpdo_index = EtherCAT::Drives::SynapticonPDO::TxPDO_1A00.index;
-        config.drive.rxpdo_size = EtherCAT::Drives::SynapticonPDO::RxPDO_1600.size;
-        config.drive.txpdo_size = EtherCAT::Drives::SynapticonPDO::TxPDO_1A00.size;
-        // Operating mode is set via PDO, not SDO  -  skip configureDrive's SDO write
-        config.drive.operating_mode = 0;
-        config.drive.sdo_timeout_ms = kSdoTimeoutMs;
-        config.drive.auto_configure_mailbox = false;
-        config.drive.transition_to_operational = true;
+        const auto assignment =
+            EtherCAT::Drives::SynapticonPDO::makeStandardPDOAssignment();
 
-        if (!master.configureDrive(config.drive)) {
-            TETHER_LOGE(TAG, "Failed to configure slave {}", slave_idx);
+        TETHER_LOGI(TAG,
+            "Transitioning to OP with standard motion PDOs: "
+            "SM2={} bytes (0x1600+0x1601+0x1602), "
+            "SM3={} bytes (0x1A00+0x1A01+0x1A02+0x1A03)",
+            35, 47);
+
+        if (!drive.transitionToOp(assignment)) {
+            TETHER_LOGE(TAG, "Failed to transition to OP with CST PDO assignment");
             master.stopDistributedClocks();
             Tether::Examples::stopHostMasterSession(master, session);
             return 3;
         }
+        TETHER_LOGI(TAG, "Slave {} transitioned to OP with CST PDOs", slave_idx);
     }
 
     // --- Configure PDO-based operating mode offset ---

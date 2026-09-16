@@ -27,6 +27,12 @@ enum class MbxPollOutcome {
     Cancelled,       // Cancel requested
 };
 
+enum class MbxResyncResult : uint8_t {
+    Recovered,       // Counter resynced; accepted response left in rspbuf/outHdr
+    Failed,          // No counter accepted (or unrecoverable transport error)
+    Cancelled,       // Cancel requested mid-resync
+};
+
 class SDOTransactionBase {
 public:
     virtual ~SDOTransactionBase() = default;
@@ -81,6 +87,67 @@ public:
                            int& staleRetryCount,
                            uint16_t index_, uint8_t sub_,
                            const char* phaseLabel);
+
+    // Decide whether a counter-mismatched response actually answers our
+    // request, and if so adopt the slave's counter sequence.
+    //
+    // Two different slave behaviours produce "hdr.cnt != expected":
+    //   a) A stale leftover response from a previous session — must be
+    //      drained and the request re-sent (checkStaleCounter()).
+    //   b) The slave runs its own persistent response-counter sequence
+    //      (e.g. Synapticon SOMANET, which keeps counting across master
+    //      restarts and even INIT transitions).  The response is valid;
+    //      re-sending the request is actively harmful because such slaves
+    //      also drop requests whose counter repeats the last one seen.
+    //
+    // Init-phase SDO responses (and SDO aborts) echo the request's
+    // index:sub at a fixed offset.  If the echo matches, the response is
+    // ours and we adopt the slave's numbering: expectedCnt = hdr.cnt and
+    // *inoutMbxCnt/curCnt = next counter AFTER hdr.cnt (skipping the
+    // request counter we just sent so duplicate-detecting slaves do not
+    // drop the next request).
+    //
+    // @return true if the response was adopted — the caller continues
+    //         processing it normally; false if it is stale (caller should
+    //         fall back to checkStaleCounter()).
+    bool adoptCounterOnEcho(uint16_t adp,
+                            const uint8_t* reqbuf, const uint8_t* rspbuf,
+                            uint16_t mbxReadLen, const MbxResponseHeader& hdr,
+                            uint8_t* inoutMbxCnt, uint8_t& curCnt,
+                            uint8_t& expectedCnt,
+                            uint16_t index, uint8_t sub,
+                            const char* phaseLabel);
+
+    // Recover from a mailbox counter desync detected via an explicit
+    // counter-mismatch mailbox error (isCounterMismatchError() == true) or
+    // a silent drop (request sent, no response).  Probes the 3-bit counter
+    // space: re-sends the request with each successive counter value
+    // (cycling 1-7) until the slave returns a valid CoE response for this
+    // request.
+    //
+    // On Recovered:
+    //   - rspbuf/outHdr hold the accepted response (caller parses normally)
+    //   - counters are adopted as in adoptCounterOnEcho()
+    //
+    // @param reqbuf  The request datagram buffer (mailbox write length
+    //                bytes).  Its counter nibble (byte 5) is patched per
+    //                probe and left at the accepted counter.
+    // @param rspbuf  Response buffer (mbxReadLen bytes).
+    // @param verifyIndexEcho  If true, a candidate response must echo the
+    //                request's index:sub (init-phase requests).  If false
+    //                (segment-phase requests, which carry no index echo),
+    //                any CoE response is accepted.
+    MbxResyncResult resyncMailboxCounter(
+        Master& master, uint16_t adp,
+        uint16_t mbxWriteAddr, uint16_t mbxWriteLen,
+        uint16_t mbxReadAddr, uint16_t mbxReadLen,
+        uint8_t* reqbuf, uint8_t* rspbuf,
+        uint8_t* inoutMbxCnt, uint8_t& curCnt, uint8_t& expectedCnt,
+        uint16_t index, uint8_t sub,
+        bool verifyIndexEcho,
+        unsigned int pollIntervalMs,
+        const char* phaseLabel,
+        MbxResponseHeader& outHdr);
 
     static constexpr int MAX_STALE_RETRIES = ECAT_SDO_MAX_STALE_RETRIES;
     static constexpr int MAX_POLL_ATTEMPTS = ECAT_SDO_MAX_POLL_ATTEMPTS;
