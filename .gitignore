@@ -1,6 +1,7 @@
 # Build directories
 build/
 build_*/
+build-tether/
 _deps/
 
 # CMake generated files

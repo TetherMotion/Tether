@@ -27,6 +27,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <string>
 
 namespace EtherCAT {
 namespace DC {
@@ -56,11 +57,9 @@ uint64_t dc_get_master_time_with_epoch();
  * @brief Convert master time to human-readable string
  *
  * @param time_ns Time in nanoseconds (relative to kMasterEpochNs)
- * @param buffer Output buffer
- * @param buffer_size Buffer size
- * @return Number of characters written
+ * @return Formatted string
  */
-size_t dc_format_time(uint64_t time_ns, char* buffer, size_t buffer_size);
+std::string dc_format_time(uint64_t time_ns);
 
 // ============================================================================
 // DC Slave State Structure

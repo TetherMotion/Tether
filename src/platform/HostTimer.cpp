@@ -27,7 +27,7 @@ public:
     HostTimer() = default;
     
     ~HostTimer() override {
-        stop();
+        stop(false);
     }
     
     bool configure(const TimerConfig& config) override {
@@ -84,7 +84,7 @@ public:
         return true;
     }
     
-    void stop() override {
+    void stop(bool verbose) override {
         if (!running_.load()) {
             return;
         }
@@ -95,7 +95,9 @@ public:
             timer_thread_.join();
         }
         
-        TETHER_LOGI(TAG, "Timer stopped after {} cycles", (unsigned long long)cycle_count_.load());
+        if (verbose) {
+            TETHER_LOGI(TAG, "Timer stopped after {} cycles", (unsigned long long)cycle_count_.load());
+        }
     }
     
     bool isRunning() const override {

@@ -24,6 +24,7 @@
 
 // generic PDO helpers
 #include "tether/utils/PDO.hpp"
+#include "tether/ethercat/Slave.hpp"
 
 // we reference constants by fully qualifying to avoid polluting namespace
 
@@ -480,6 +481,28 @@ static_assert(sizeof(AS715N_RxPDO_1702) == RxPDO_1702.size,
               "AS715N_RxPDO_1702 struct size must match PDO 0x1702 size");
 
 /**
+ * @brief RxPDO 0x1704 struct (master → slave, 23 bytes)
+ *
+ * Fields exactly match the slave-defined PDO 0x1704 layout.  Unlike 0x1705
+ * this PDO also carries TargetTorque, so the same mapping supports CSP
+ * position control and CST torque-mode operation (e.g. sensorless homing).
+ */
+struct AS715N_RxPDO_1704 {
+    uint16_t controlword;           ///< 0x6040 Controlword
+    int32_t  target_position;       ///< 0x607A Target Position (encoder counts)
+    int32_t  target_velocity;       ///< 0x60FF Target Velocity (counts/s)
+    int16_t  target_torque;         ///< 0x6071 Target Torque (‰ of rated)
+    int8_t   modes_of_operation;    ///< 0x6060 Modes of Operation
+    uint16_t touch_probe_function;  ///< 0x60B8 Touch Probe Function
+    uint32_t max_profile_velocity;  ///< 0x607F Max Profile Velocity
+    uint16_t positive_torque_limit; ///< 0x60E0 Positive Torque Limit (‰ of rated)
+    uint16_t negative_torque_limit; ///< 0x60E1 Negative Torque Limit (‰ of rated)
+} __attribute__((packed));
+
+static_assert(sizeof(AS715N_RxPDO_1704) == RxPDO_1704.size,
+              "AS715N_RxPDO_1704 struct size must match PDO 0x1704 size");
+
+/**
  * @brief TxPDO 0x1B02 struct (slave → master, 25 bytes)
  */
 struct AS715N_TxPDO_1B02 {
@@ -496,6 +519,71 @@ struct AS715N_TxPDO_1B02 {
 
 static_assert(sizeof(AS715N_TxPDO_1B02) == TxPDO_1B02.size,
               "AS715N_TxPDO_1B02 struct size must match PDO 0x1B02 size");
+
+// ---------------------------------------------------------------------------
+// Multi-PDO assignment helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief Build a single-RxPDO / single-TxPDO MultiPDOAssignment for the AS715N.
+ *
+ * The default SM2/SM3 addresses (0x1800 / 0x1C00) and control bytes
+ * (0x64 / 0x20) come from the AS715N SII.  They can be overridden when the
+ * drive is configured with non-standard sync-manager addresses.
+ */
+inline ::EtherCAT::Slave::MultiPDOAssignment makePDOAssignment(
+    const PDO& rx,
+    const PDO& tx,
+    uint16_t sm2_addr = 0x1800u,
+    uint16_t sm3_addr = 0x1C00u)
+{
+    ::EtherCAT::Slave::MultiPDOAssignment assignment;
+
+    auto& sm2 = assignment.sm_configs.emplace_back();
+    sm2.sm_index = 2;
+    sm2.phys_start_addr = sm2_addr;
+    sm2.control_byte = 0x64u;
+    sm2.pdo_mappings.push_back(::EtherCAT::PDO::PDOMappingRegion(rx.index, rx.size));
+
+    auto& sm3 = assignment.sm_configs.emplace_back();
+    sm3.sm_index = 3;
+    sm3.phys_start_addr = sm3_addr;
+    sm3.control_byte = 0x20u;
+    sm3.pdo_mappings.push_back(::EtherCAT::PDO::PDOMappingRegion(tx.index, tx.size));
+
+    return assignment;
+}
+
+/// @brief Default motion PDO assignment used by the native examples:
+///        RxPDO 0x1705 (19 bytes) and TxPDO 0x1B04 (29 bytes).
+inline ::EtherCAT::Slave::MultiPDOAssignment makeDefaultPDOAssignment()
+{
+    return makePDOAssignment(RxPDO_1705, TxPDO_1B04);
+}
+
+/// @brief Byte offset of the ModesOfOperation field in the given RxPDO.
+/// @return Byte offset, or -1 if the RxPDO has no mode field.
+constexpr int opmodeOffsetFor(uint16_t rxpdo_index) {
+    switch (rxpdo_index) {
+        case 0x1702u: return 12;
+        case 0x1703u: return 12;
+        case 0x1704u: return 12;
+        case 0x1705u: return 10;
+        default:      return -1;
+    }
+}
+
+/// @brief Byte offset of the Statusword field in the given TxPDO.
+/// @return Byte offset, or -1 if the TxPDO has no statusword.
+constexpr int statuswordOffsetFor(uint16_t txpdo_index) {
+    switch (txpdo_index) {
+        case 0x1B01u:
+        case 0x1B02u:
+        case 0x1B03u:
+        case 0x1B04u: return 2;
+        default:      return -1;
+    }
+}
 
 } // namespace AS715N_pdo
 } // namespace Drives

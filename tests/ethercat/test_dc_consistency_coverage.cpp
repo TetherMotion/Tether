@@ -8,7 +8,7 @@
  */
 #include <gtest/gtest.h>
 #include "tether/ethercat/DCConsistency.hpp"
-#include <cstring>
+#include <string>
 
 using namespace EtherCAT::DC;
 
@@ -16,37 +16,29 @@ using namespace EtherCAT::DC;
 // dc_format_time — pure function
 // ============================================================================
 
-TEST(DCFormatTime, NullBuffer) {
-    EXPECT_EQ(dc_format_time(0, nullptr, 0), 0u);
-    char buf[4];
-    EXPECT_EQ(dc_format_time(0, buf, 0), 0u);
-}
-
 TEST(DCFormatTime, TimeBelowEpoch) {
     // A small value < kMasterEpochNs should take the raw-display branch
-    char buf[128];
-    size_t n = dc_format_time(1234567890123ULL, buf, sizeof(buf));
-    EXPECT_GT(n, 0u);
+    std::string s = dc_format_time(1234567890123ULL);
+    EXPECT_GT(s.size(), 0u);
     // Should contain "s" (raw seconds display)
-    EXPECT_NE(strstr(buf, "s"), nullptr);
+    EXPECT_NE(s.find('s'), std::string::npos);
 }
 
 TEST(DCFormatTime, TimeAtOrAboveEpoch) {
     // kMasterEpochNs = 1767225600000000000ULL (2026-01-01 00:00:00 UTC)
     constexpr uint64_t kEpoch = 1767225600000000000ULL;
-    char buf[128];
     // Exactly at epoch (0 offset)
-    size_t n = dc_format_time(kEpoch, buf, sizeof(buf));
-    EXPECT_GT(n, 0u);
-    EXPECT_NE(strstr(buf, "2026-01-01"), nullptr);
+    std::string s = dc_format_time(kEpoch);
+    EXPECT_GT(s.size(), 0u);
+    EXPECT_NE(s.find("2026-01-01"), std::string::npos);
 
     // 1 hour + 30 minutes + 15 seconds + 123456789 ns after epoch
     uint64_t offset = 1ULL * 3600 * 1000000000ULL + 30ULL * 60 * 1000000000ULL +
                       15ULL * 1000000000ULL + 123456789ULL;
-    n = dc_format_time(kEpoch + offset, buf, sizeof(buf));
-    EXPECT_GT(n, 0u);
-    EXPECT_NE(strstr(buf, "2026-01-01"), nullptr);
-    EXPECT_NE(strstr(buf, "1h30m15"), nullptr);
+    s = dc_format_time(kEpoch + offset);
+    EXPECT_GT(s.size(), 0u);
+    EXPECT_NE(s.find("2026-01-01"), std::string::npos);
+    EXPECT_NE(s.find("1h30m15"), std::string::npos);
 }
 
 // ============================================================================
