@@ -446,7 +446,10 @@ struct Args {
     uint32_t stop_time_ms = 500;     ///< Ramp duration for fixed-time stop
     double   decel_limit = 0.0;      ///< |dv/dt| limit for decel-limit stop (units/s)
     uint32_t standstill_ms = 25;     ///< Zero-velocity hold before disabling
-    bool     brake_release = true;   ///< Release the brake after disabling
+    /// When true, release (disengage) the brake after the drive is
+    /// disabled.  Default keeps the brake engaged once stopped — the drive
+    /// auto-engages it on disable, and phase 3 only ensures that state.
+    bool     release_brake = false;
     Tether::Examples::VlanConfig vlan;
 };
 
@@ -504,10 +507,11 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .scan<'i', int>()
         .default_value(25)
         .help("Zero-velocity standstill hold before disabling, ms (default 25)");
-    program.add_argument("--no-brake-release")
+    program.add_argument("--release-brake")
         .default_value(false)
         .implicit_value(true)
-        .help("Do not release (disengage) the holding brake after disabling");
+        .help("Release (disengage) the holding brake after disabling — by "
+              "default phase 3 ensures the brake stays ENGAGED once stopped");
 
     try {
         program.parse_args(argc, argv);
@@ -537,7 +541,7 @@ bool parseArgs(int argc, char** argv, Args& out) {
     out.decel_limit   = program.get<double>("--decel-limit");
     out.standstill_ms =
         static_cast<uint32_t>(program.get<int>("--standstill-ms"));
-    out.brake_release = !program.get<bool>("--no-brake-release");
+    out.release_brake = program.get<bool>("--release-brake");
     if (out.stop_mode == StopMode::AccelerationLimited && out.decel_limit <= 0.0) {
         std::cerr << "--stop-mode=decel-limit requires --decel-limit > 0\n";
         return false;
@@ -1098,12 +1102,16 @@ int main(int argc, char** argv) {
         scfg.stop_time_ms = args.stop_time_ms;
         scfg.standstill_ms = args.standstill_ms;
         scfg.decel_limit  = args.decel_limit;
-        if (args.brake_release) {
-            scfg.brake_action = [&master, slave_idx] {
-                return EtherCAT::Drives::Synapticon::BrakeControl::disengageBrake(
-                    master.ethercatMaster().sdoManager(slave_idx));
-            };
-        }
+        // Phase 3: the SOMANET auto-engages its holding brake when the drive
+        // leaves Operation Enabled, so the default action only ensures the
+        // engaged state (no extra brake click).  --release-brake opts into
+        // disengaging it again, e.g. for manual shaft movement.
+        scfg.brake_action = [&master, slave_idx, &args] {
+            auto& sdo = master.ethercatMaster().sdoManager(slave_idx);
+            return args.release_brake
+                ? EtherCAT::Drives::Synapticon::BrakeControl::disengageBrake(sdo)
+                : EtherCAT::Drives::Synapticon::BrakeControl::engageBrake(sdo);
+        };
         if (!drive.controlledShutdown(scfg)) {
             TETHER_LOGW(TAG, "Controlled shutdown reported errors");
         }
