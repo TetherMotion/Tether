@@ -19,6 +19,7 @@
 
 #include <cinttypes>
 #include <cstring>
+#include <cmath>
 #include <bit>
 
 static const char* TAG = "CiA402StateMachine";
@@ -603,6 +604,163 @@ bool CiA402Drive::resetFault() {
     Tether::Platform::Clock::instance().delayMilliseconds(10);
     m_controlword &= ~0x0080;
     return writeControlword(m_controlword);
+}
+
+bool CiA402Drive::controlledShutdown(const ControlledShutdownConfig& cfg) {
+    bool ok = true;
+    auto& clock = Tether::Platform::Clock::instance();
+
+    // The PDO fast-path is usable only while the drive is in OP with
+    // registered buffers AND the cyclic PDO exchange is still running —
+    // the caller is responsible for ordering this before the loop stop.
+    const bool pdo_live =
+        m_pdo_registered && getECState() == ECState::Op;
+
+    auto& sdo = m_master->sdoManager(m_slave_index);
+    const CoE::CoETransactionOptions sdo_opts{.timeout_ms = m_sdo_timeout_ms};
+
+    // --- Phase 1: controlled stop ---
+    if (cfg.stop_mode != ShutdownStopMode::None) {
+        const bool vel_pdo_ok =
+            pdo_live && m_target_velocity_pdo_offset >= 0 &&
+            static_cast<size_t>(m_target_velocity_pdo_offset) +
+                    sizeof(int32_t) <=
+                static_cast<size_t>(m_rxpdo_size);
+
+        auto write_velocity = [&](int32_t v) -> bool {
+            if (vel_pdo_ok) {
+                std::memcpy(m_rxpdo_buffer + m_target_velocity_pdo_offset,
+                            &v, sizeof(v));
+                return true;
+            }
+            return sdo.writeU32(
+                static_cast<uint16_t>(CiA402::Register::TargetVelocity), 0,
+                static_cast<uint32_t>(v), sdo_opts).has_value();
+        };
+
+        // Current velocity — the ramp start.  Prefer the live TxPDO
+        // sample; fall back to an SDO read of 0x606C.
+        int32_t v0 = 0;
+        bool have_v0 = false;
+        if (pdo_live && m_actual_velocity_pdo_offset >= 0 &&
+            static_cast<size_t>(m_actual_velocity_pdo_offset) +
+                    sizeof(int32_t) <=
+                static_cast<size_t>(m_txpdo_size)) {
+            std::memcpy(&v0, m_txpdo_buffer + m_actual_velocity_pdo_offset,
+                        sizeof(v0));
+            have_v0 = true;
+        } else {
+            auto res = sdo.readU32(
+                static_cast<uint16_t>(CiA402::Register::VelocityActualValue),
+                0, sdo_opts);
+            if (res.has_value()) {
+                v0 = static_cast<int32_t>(*res);
+                have_v0 = true;
+            }
+        }
+
+        // Switch to CSV while keeping the drive enabled so the velocity
+        // loop actively holds the deceleration demand.
+        if (pdo_live) {
+            const uint16_t en =
+                static_cast<uint16_t>(ControlWord::ENABLE_OPERATION);
+            if (static_cast<size_t>(m_controlword_pdo_offset) + sizeof(en) <=
+                static_cast<size_t>(m_rxpdo_size)) {
+                std::memcpy(m_rxpdo_buffer + m_controlword_pdo_offset, &en,
+                            sizeof(en));
+                m_controlword = en;
+            }
+            setOperatingModePDO(CiA402::OperatingMode::CyclicSyncVelocity);
+        } else {
+            TETHER_LOGW(TAG,
+                "{}: PDO exchange not live — controlled stop via SDO",
+                logPrefix().c_str());
+            setOperatingModeSDO(CiA402::OperatingMode::CyclicSyncVelocity);
+        }
+
+        // Ramp duration per stop strategy.
+        uint32_t ramp_ms = 0;
+        switch (cfg.stop_mode) {
+        case ShutdownStopMode::InstantHardStop:
+            TETHER_LOGI(TAG,
+                "{}: Controlled shutdown phase 1: instant zero-velocity demand",
+                logPrefix().c_str());
+            break;
+        case ShutdownStopMode::FixedTimeVelocity:
+            ramp_ms = cfg.stop_time_ms;
+            break;
+        case ShutdownStopMode::AccelerationLimited:
+            if (cfg.decel_limit > 0.0 && have_v0) {
+                ramp_ms = static_cast<uint32_t>(
+                    std::abs(static_cast<double>(v0)) / cfg.decel_limit *
+                    1000.0);
+            }
+            break;
+        case ShutdownStopMode::None:
+            break;
+        }
+
+        // A velocity ramp is only meaningful through the PDO fast-path and
+        // with a known start velocity; otherwise collapse to the step.
+        if (!vel_pdo_ok || !have_v0 || v0 == 0) {
+            ramp_ms = 0;
+        }
+
+        if (ramp_ms == 0) {
+            if (!write_velocity(0)) {
+                TETHER_LOGW(TAG,
+                    "{}: zero-velocity write failed", logPrefix().c_str());
+                ok = false;
+            }
+        } else {
+            TETHER_LOGI(TAG,
+                "{}: Controlled shutdown phase 1: CSV ramp {} -> 0 over {} ms",
+                logPrefix().c_str(), v0, ramp_ms);
+            constexpr int64_t kStepMs = 10;
+            const int64_t t0 = clock.getMilliseconds();
+            for (int64_t el = 0; el < ramp_ms; ) {
+                const double frac =
+                    static_cast<double>(el) / static_cast<double>(ramp_ms);
+                if (!write_velocity(static_cast<int32_t>(
+                        static_cast<double>(v0) * (1.0 - frac)))) {
+                    ok = false;
+                    break;
+                }
+                clock.delayMilliseconds(kStepMs);
+                el = clock.getMilliseconds() - t0;
+            }
+            write_velocity(0);
+        }
+        clock.delayMilliseconds(cfg.standstill_ms);
+    }
+
+    // --- Phase 2: disable the drive ---
+    TETHER_LOGI(TAG,
+        "{}: Controlled shutdown phase 2: controlword=0x{:04X}",
+        logPrefix().c_str(), cfg.shutdown_controlword);
+    if (!writeControlword(cfg.shutdown_controlword)) {
+        TETHER_LOGW(TAG, "{}: Controlled shutdown: controlword write failed",
+                    logPrefix().c_str());
+        ok = false;
+    }
+    // Best-effort: confirm the drive leaves OperationEnabled.
+    if (pdo_live) {
+        (void)waitForDriveState(DriveState::SwitchOnDisabled, 1000);
+    }
+
+    // --- Phase 3: brake action after the configured delay ---
+    if (cfg.brake_action) {
+        clock.delayMilliseconds(cfg.brake_delay_ms);
+        TETHER_LOGI(TAG, "{}: Controlled shutdown phase 3: brake action",
+                    logPrefix().c_str());
+        if (!cfg.brake_action()) {
+            TETHER_LOGW(TAG, "{}: Controlled shutdown: brake action failed",
+                        logPrefix().c_str());
+            ok = false;
+        }
+    }
+
+    return ok;
 }
 
 bool CiA402Drive::isEnabled() {

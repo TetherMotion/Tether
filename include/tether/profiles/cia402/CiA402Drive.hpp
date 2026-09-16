@@ -238,6 +238,83 @@ public:
     bool isFaulted();
     bool isTargetReached();
 
+    /// Phase-1 stop strategy for controlledShutdown().
+    enum class ShutdownStopMode : uint8_t {
+        /// Skip phase 1 entirely — go straight to the disable phase.
+        None,
+        /// Demand zero velocity in CSV immediately (step input — the drive
+        /// decelerates at its maximum rate), then hold standstill_ms
+        /// before disabling.
+        InstantHardStop,
+        /// Linear CSV velocity ramp from the current velocity to zero over
+        /// stop_time_ms, then hold standstill_ms at zero velocity before
+        /// disabling.
+        FixedTimeVelocity,
+        /// CSV velocity ramp from the current velocity to zero at
+        /// decel_limit (velocity units per second) — the ramp duration
+        /// varies with the speed at shutdown entry.  Then hold
+        /// standstill_ms at zero velocity before disabling.
+        AccelerationLimited,
+    };
+
+    /**
+     * @brief Configuration for controlledShutdown().
+     *
+     * Three-phase CiA 402 shutdown performed through the RxPDO buffer
+     * while the cyclic PDO exchange is still running:
+     *
+     *   Phase 1 — controlled stop per stop_mode (see ShutdownStopMode):
+     *             switch to Cyclic Synchronous Velocity mode and drive
+     *             target_velocity (0x60FF) to zero.
+     *   Phase 2 — disable: write shutdown_controlword (default 0x0000 =
+     *             Disable Voltage) into the PDO controlword field.
+     *   Phase 3 — brake: after brake_delay_ms, run the optional
+     *             brake_action callback.  CiA 402 does not standardize
+     *             brake control; bind a drive-specific helper here (e.g.
+     *             the SOMANET BrakeControl engage/disengage helpers).
+     *
+     * IMPORTANT: call while the realtime PDO loop is still running (i.e.
+     * BEFORE DS402Master::stopMotionControlLoop()) and after any motion
+     * controller that writes the RxPDO buffer has been removed —
+     * otherwise the PDO writes are never transmitted to the drive or are
+     * immediately overwritten by the cyclic controller.  When the PDO
+     * exchange is not live, the mode/velocity/controlword writes fall
+     * back to SDO (ramp modes then collapse to a single zero-velocity
+     * write).
+     */
+    struct ControlledShutdownConfig {
+        /// Phase-1 stop strategy.
+        ShutdownStopMode stop_mode{ShutdownStopMode::InstantHardStop};
+        /// Ramp duration for FixedTimeVelocity.
+        uint32_t stop_time_ms{500};
+        /// Zero-velocity hold appended after the ramp / step (the
+        /// "complete standstill" reserve).  Applies to all stop modes
+        /// except None.
+        uint32_t standstill_ms{25};
+        /// Deceleration limit for AccelerationLimited, in velocity units
+        /// per second (|dv/dt|).  <= 0 collapses to InstantHardStop.
+        double   decel_limit{0.0};
+        /// Controlword written in phase 2 (0x0000 = Disable Voltage).
+        uint16_t shutdown_controlword{0x0000};
+        /// Delay between disabling the drive and the brake action.
+        uint32_t brake_delay_ms{250};
+        /// Optional brake action executed after brake_delay_ms while
+        /// PDO/mailbox are still alive (e.g. SOMANET 0x2004 release).
+        std::function<bool()> brake_action;
+    };
+
+    /**
+     * @brief Controlled drive shutdown: configurable stop strategy, then
+     *        disable, then an optional brake action after a delay.
+     *
+     * See ControlledShutdownConfig for the phase details and the required
+     * call ordering relative to the PDO loop.
+     *
+     * @return true when every configured phase completed; false when any
+     *         step failed (the remaining phases are still attempted).
+     */
+    bool controlledShutdown(const ControlledShutdownConfig& cfg);
+
     // ========================================================================
     // DynaDrive Custom FSM (rsl_drive_sdk / ANYdrive)
     // ========================================================================
@@ -283,6 +360,30 @@ public:
     /// Default 0 = statusword is at the start of the TxPDO buffer.
     void setStatuswordPDOOffset(int offset) { m_statusword_pdo_offset = offset; }
     int  statuswordPDOOffset() const { return m_statusword_pdo_offset; }
+
+    /// Set the RxPDO byte offset of the target_velocity (0x60FF) field and
+    /// the TxPDO byte offset of the velocity_actual (0x606C) field.
+    /// Used by controlledShutdown() for the velocity-stop phase.
+    /// -1 disables the PDO fast-path (SDO fallback is used instead).
+    void setTargetVelocityPDOOffset(int offset) { m_target_velocity_pdo_offset = offset; }
+    void setActualVelocityPDOOffset(int offset) { m_actual_velocity_pdo_offset = offset; }
+    int  targetVelocityPDOOffset() const { return m_target_velocity_pdo_offset; }
+    int  actualVelocityPDOOffset() const { return m_actual_velocity_pdo_offset; }
+
+    /// Idiomatic offset registration: pass member pointers into the PDO
+    /// structs and the byte offsets are computed automatically — no
+    /// hand-maintained offsetof numbers at the call site.
+    ///
+    /// @code
+    ///   drive.setVelocityPDOFields(&RxPDO::target_velocity,
+    ///                              &TxPDO::velocity_actual);
+    /// @endcode
+    template<typename RxPDO, typename TxPDO>
+    void setVelocityPDOFields(int32_t RxPDO::* target_velocity,
+                              int32_t TxPDO::* actual_velocity) {
+        m_target_velocity_pdo_offset = memberByteOffset(target_velocity);
+        m_actual_velocity_pdo_offset = memberByteOffset(actual_velocity);
+    }
 
     /// Set operating mode.  Uses PDO by default (if offset configured),
     /// otherwise falls back to SDO.
@@ -355,6 +456,22 @@ private:
     // to the start of the motion PDO region within the combined buffer.
     int m_controlword_pdo_offset{0};
     int m_statusword_pdo_offset{0};
+
+    // PDO-based target_velocity / velocity_actual offsets, used by
+    // controlledShutdown().  -1 = not configured (SDO fallback).
+    int m_target_velocity_pdo_offset{-1};
+    int m_actual_velocity_pdo_offset{-1};
+
+    /// Compute the byte offset of a member within its struct — the
+    /// offsetof()-equivalent expressed through a member pointer so call
+    /// sites can't mistype field names.
+    template<typename T, typename M>
+    static int memberByteOffset(M T::* member) {
+        alignas(T) unsigned char buf[sizeof(T)]{};
+        const T* obj = reinterpret_cast<const T*>(buf);
+        return static_cast<int>(
+            reinterpret_cast<const unsigned char*>(&(obj->*member)) - buf);
+    }
 };
 
 // ============================================================================
