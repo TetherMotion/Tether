@@ -13,6 +13,7 @@
 #include <vector>
 
 using namespace EtherCAT::slave;
+using EtherCAT::SDOAbortCode;
 
 // ============================================================================
 // Helper: build mailbox+CoE+SDO request

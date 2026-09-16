@@ -1,12 +1,12 @@
 /**
  * @file synapticon_cst_fsoe.cpp
- * @brief Synapticon SOMANET drive  -  CST mode + FSoE safe-motion example
+ * @brief Synapticon SOMANET drive  -  FSoE safe-motion example (no motion)
  *
  * Interfaces to a Synapticon SOMANET drive (Vendor 0x22D2, CiA 402 firmware
- * v5.1.x), puts it into Cyclic Sync Torque (CST) mode, maps the SOMANET
- * PDOs for that mode (RxPDO 0x1600 / TxPDO 0x1A00), sends a sinusoidal
- * torque command (default 0.5 Nm peak-to-peak at 0.5 Hz), and runs the FSoE
- * safe-motion protocol alongside the cyclic data exchange.
+ * v5.1.x) and runs the FSoE safe-motion protocol over the drive's safety
+ * PDOs (RxPDO 0x1700 / TxPDO 0x1B00).  No CiA 402 motion is performed  -
+ * the drive is never enabled and no torque/velocity/position commands are
+ * sent.  Use synapticon_cst for CST motion without FSoE.
  *
  * On startup the slave is automatically reset to INIT if it is currently
  * in a higher ESM state (e.g. left over from a previous run that didn't
@@ -14,16 +14,12 @@
  * configuration and PDO mapping.
  *
  * FSoE frames are exchanged each cycle with the REAL drive via the FSoE
- * safety PDOs (RxPDO 0x1700 / TxPDO 0x1B00), which are mapped alongside
- * the CiA 402 motion PDOs using the multi-PDO-per-sync-manager API.  The
- * FSoE master state machine (MainInstance) builds the command frame into
- * the RxPDO 0x1700 buffer and processes the drive's safety status frame
- * from the TxPDO 0x1B00 buffer each cycle.  The drive's safety firmware
- * handles the slave side of the FSoE protocol.
- *
- * The safety layer gates torque output: if the FSoE connection is not
- * operational or motion is not allowed, target_torque is forced to 0
- * regardless of the commanded value.
+ * safety PDOs, which are mapped alongside the CiA 402 motion PDOs using
+ * the multi-PDO-per-sync-manager API (the combined assignment is required
+ * by the drive firmware).  The FSoE master state machine (MainInstance)
+ * builds the command frame into the RxPDO 0x1700 buffer and processes the
+ * drive's safety status frame from the TxPDO 0x1B00 buffer each cycle.
+ * The drive's safety firmware handles the slave side of the FSoE protocol.
  *
  * Rich diagnostics are printed each cycle:
  *   - Drive statusword, mode display, actual torque/position
@@ -34,7 +30,6 @@
  *   ./synapticon_cst_fsoe                       # auto-select iface, slave 0, 10 s
  *   ./synapticon_cst_fsoe -i enx34298f762c4e    # specify interface
  *   ./synapticon_cst_fsoe -s 1 -d 30            # slave 1, 30 s
- *   ./synapticon_cst_fsoe --no-fsoe             # CST only, no FSoE
  *   ./synapticon_cst_fsoe --dc-sync             # enable DC synchronization
  *   ./synapticon_cst_fsoe --connection-id 0x0006 --safety-address 0x0006 --watchdog-ms 15
  *   ./synapticon_cst_fsoe --debug fsoe          # high-level FSoE protocol trace
@@ -47,19 +42,15 @@
  *   ./synapticon_cst_fsoe --debug coe-reads,coe-writes  # SDO access logging
  *   ./synapticon_cst_fsoe --debug al-state,pdo-sm       # state machine + SM config
  *   ./synapticon_cst_fsoe --debug help         # list all available debug flags
- *   ./synapticon_cst_fsoe --torque-nm 10 --freq-hz 1.0  # 10 Nm P-P at 1 Hz
- *   ./synapticon_cst_fsoe --rated-torque-mnm 4200       # override rated torque
  *   ./synapticon_cst_fsoe --sto 0 --sbc 0               # raw STO bit=0, SBC bit=0
  *   ./synapticon_cst_fsoe --sto 1 --sbc 1               # raw STO bit=1, SBC bit=1
  *   ./synapticon_cst_fsoe --sto 1 --sos 1 --sbc 1       # raw STO/SOS/SBC bit=1
- *   ./synapticon_cst_fsoe --no-drive                     # FSoE only, no CiA 402 enable
- *   ./synapticon_cst_fsoe --no-drive --diagnostics-after 5  # FSoE 5s, then CoE diagnostics + exit
+ *   ./synapticon_cst_fsoe --diagnostics-after 5         # FSoE 5s, then CoE diagnostics + exit
  */
 
 #include <array>
 #include <atomic>
 #include <chrono>
-#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -91,6 +82,21 @@
 namespace {
 
 constexpr const char* TAG = "synapticon_cst_fsoe";
+
+// Format a failed CoE transaction for a one-line log message:
+//   abort   -> "Object does not exist (0x06020000)"
+//   other   -> "Timeout" / "Transport error" / ...
+// coeErrorStr() already decodes the slave's SDO abort code, so the caller
+// only needs this to append the raw code for aborts.
+static std::string coeErrorDetail(const EtherCAT::CoE::CoEError& e) {
+    std::string s = EtherCAT::CoE::coeErrorStr(e);
+    if (e.code == EtherCAT::CoE::CoEErrorCode::Aborted && e.abort_code != 0) {
+        char buf[20];
+        std::snprintf(buf, sizeof(buf), " (0x%08X)", e.abort_code);
+        s += buf;
+    }
+    return s;
+}
 
 // ============================================================================
 // Mailbox settings  -  from SOMANET_CiA_402_v5.1.9.xml (ESI)
@@ -205,96 +211,6 @@ void hexDump(const char* tag, const char* label, const uint8_t* data, size_t len
         TETHER_LOGI(tag, "  {} [{:3}/{:3}]: {}", label, i, len, hex);
     }
 }
-
-// ============================================================================
-// Sine-wave torque motion controller for CST mode
-// ============================================================================
-//
-// Generates a sinusoidal torque command at the specified frequency and
-// peak-to-peak amplitude.  The torque is converted from Nm to CiA 402
-// per-mille units (0.1% of rated torque) using the motor's rated torque
-// (object 0x6076, in mNm):
-//
-//   target_torque_permille = (torque_Nm * 1'000'000) / rated_torque_mNm
-//
-// The safety layer (FSoE) gates the actual torque output at the drive
-// level  -  if the FSoE connection is not in the Data state, the drive's
-// safety firmware inhibits torque regardless of the commanded value.
-
-template <typename PDO>
-class SineTorqueController final : public EtherCAT::DS402Master::IDriveMotionController {
-public:
-    /// @param amplitude_nm   Peak torque amplitude in Nm (half of peak-to-peak)
-    /// @param frequency_hz   Sine frequency in Hz
-    /// @param rated_torque_mnm  Motor rated torque in mNm (from object 0x6076)
-    SineTorqueController(double amplitude_nm, double frequency_hz,
-                         uint32_t rated_torque_mnm)
-        : amplitude_nm_(amplitude_nm)
-        , frequency_hz_(frequency_hz)
-        , rated_torque_mnm_(rated_torque_mnm)
-    {
-        // Pre-compute the per-mille scaling factor:
-        //   permille = Nm * 1e6 / mNm
-        if (rated_torque_mnm > 0) {
-            nm_to_permille_ = 1'000'000.0 / static_cast<double>(rated_torque_mnm);
-        }
-    }
-
-    bool start(EtherCAT::CiA402Drive& drive) override {
-        return drive.setOperatingMode(CiA402::OperatingMode::CyclicSyncTorque);
-    }
-
-    void stop(EtherCAT::CiA402Drive&) override {}
-
-    bool update(EtherCAT::CiA402Drive& drive, double dt_seconds) override {
-        // Motion PDO is at offset kMotionRxPDOOffset (FSoE comes first, motion second)
-        auto* rx = reinterpret_cast<PDO*>(
-            static_cast<uint8_t*>(drive.getRxPDOBuffer()) + kMotionRxPDOOffset);
-        if (rx == nullptr) return false;
-
-        // Advance the phase accumulator
-        elapsed_s_ += dt_seconds;
-
-        // Compute the sine torque command in Nm, then convert to per-mille
-        const double torque_nm =
-            amplitude_nm_ * std::sin(2.0 * M_PI * frequency_hz_ * elapsed_s_);
-        const double torque_permille = torque_nm * nm_to_permille_;
-
-        // Clamp to INT16 range (-32768..32767 per-mille = ±3276.8% rated)
-        constexpr double kMaxPermille = 32767.0;
-        constexpr double kMinPermille = -32768.0;
-        const double clamped = (torque_permille > kMaxPermille) ? kMaxPermille :
-                               (torque_permille < kMinPermille) ? kMinPermille :
-                               torque_permille;
-
-        rx->controlword = static_cast<uint16_t>(CiA402::ControlWord::ENABLE_OPERATION);
-        rx->modes_of_operation = CiA402::OperatingMode::CyclicSyncTorque;
-
-        if constexpr (requires(PDO& pdo) { pdo.target_torque; }) {
-            rx->target_torque = static_cast<int16_t>(clamped);
-        }
-        if constexpr (requires(PDO& pdo) { pdo.target_velocity; }) {
-            rx->target_velocity = 0;
-        }
-        if constexpr (requires(PDO& pdo) { pdo.target_position; }) {
-            rx->target_position = 0;
-        }
-
-        last_torque_nm_ = torque_nm;
-        return true;
-    }
-
-    /// Returns the most recently commanded torque in Nm (for diagnostics)
-    double lastTorqueNm() const { return last_torque_nm_; }
-
-private:
-    double   amplitude_nm_      = 0.0;
-    double   frequency_hz_      = 0.0;
-    uint32_t rated_torque_mnm_  = 0;
-    double   nm_to_permille_    = 0.0;  // per-mille per Nm
-    double   elapsed_s_         = 0.0;
-    double   last_torque_nm_    = 0.0;
-};
 
 // ============================================================================
 // FSoE + drive diagnostics cyclic task
@@ -668,6 +584,11 @@ static void dumpDefaultPdoConfig(EtherCAT::Master& ec_master,
                                   uint16_t slave_idx,
                                   EtherCAT::CoE::CoEManager& sdo) {
     constexpr uint32_t kSdoTimeoutMs = 1000;
+
+    if (!ec_master.debugFlags().isEnabled("pdo-configuration", slave_idx)) {
+        return;
+    }
+
     const auto slave_addr = EtherCAT::Master::slaveAddressFromADP(
         EtherCAT::Master::adpForSlaveIndex(slave_idx));
 
@@ -683,10 +604,10 @@ static void dumpDefaultPdoConfig(EtherCAT::Master& ec_master,
                 if (entry.has_value())
                     TETHER_LOGI(TAG, "    0x1C12:{} = 0x{:04X}", i, entry.value());
                 else
-                    TETHER_LOGW(TAG, "    0x1C12:{} FAILED", i);
+                    TETHER_LOGW(TAG, "    0x1C12:{} FAILED ({})", i, coeErrorDetail(entry.error()));
             }
         } else {
-            TETHER_LOGW(TAG, "  0x1C12:0 FAILED (no default RxPDO assignment)");
+            TETHER_LOGW(TAG, "  0x1C12:0 FAILED ({}) — no default RxPDO assignment", coeErrorDetail(cnt.error()));
         }
     }
 
@@ -700,10 +621,10 @@ static void dumpDefaultPdoConfig(EtherCAT::Master& ec_master,
                 if (entry.has_value())
                     TETHER_LOGI(TAG, "    0x1C13:{} = 0x{:04X}", i, entry.value());
                 else
-                    TETHER_LOGW(TAG, "    0x1C13:{} FAILED", i);
+                    TETHER_LOGW(TAG, "    0x1C13:{} FAILED ({})", i, coeErrorDetail(entry.error()));
             }
         } else {
-            TETHER_LOGW(TAG, "  0x1C13:0 FAILED (no default TxPDO assignment)");
+            TETHER_LOGW(TAG, "  0x1C13:0 FAILED ({}) — no default TxPDO assignment", coeErrorDetail(cnt.error()));
         }
     }
 
@@ -765,7 +686,7 @@ static void dumpDefaultPdoConfig(EtherCAT::Master& ec_master,
     auto dump_pdo_mapping = [&](uint16_t pdo_idx, const char* label) {
         auto cnt = sdo.readU8(pdo_idx, 0, {.timeout_ms = kSdoTimeoutMs});
         if (!cnt.has_value()) {
-            TETHER_LOGW(TAG, "  {} (0x{:04X}): FAILED to read count", label, pdo_idx);
+            TETHER_LOGW(TAG, "  {} (0x{:04X}): FAILED to read count ({})", label, pdo_idx, coeErrorDetail(cnt.error()));
             return;
         }
         uint16_t total_bits = 0;
@@ -781,7 +702,7 @@ static void dumpDefaultPdoConfig(EtherCAT::Master& ec_master,
                 TETHER_LOGI(TAG, "    {}:{} = 0x{:08X} (idx=0x{:04X} sub={} bits={})",
                             label, i, v, idx, sub, bits);
             } else {
-                TETHER_LOGW(TAG, "    {}:{} FAILED", label, i);
+                TETHER_LOGW(TAG, "    {}:{} FAILED ({})", label, i, coeErrorDetail(entry.error()));
             }
         }
         TETHER_LOGI(TAG, "    → total: {} bits = {} bytes", total_bits, total_bits / 8);
@@ -809,17 +730,12 @@ struct Args {
     std::string interface;
     int slave_index = 0;
     double duration = 10.0;
-    bool enable_fsoe = true;
     bool enable_dc_sync = false;
-    bool enable_drive = true;       ///< If false, skip CiA 402 enable (FSoE only)
     uint16_t connection_id = 0x0006;  ///< Must match drive's Device Safety Address (0xF980:1)
     uint16_t safety_address = 0x0006; ///< FSoE slave safety address (0x2620:3)
     uint16_t watchdog_ms = EtherCAT::Drives::Synapticon::SafeMotion::Timing::kMinimumWatchdogTimeMs;
     uint32_t diag_interval_ms = 1000;
     std::string debug;
-    double torque_pp_nm = 0.5;       ///< Peak-to-peak torque amplitude in Nm
-    double freq_hz = 0.5;            ///< Sine wave frequency in Hz
-    uint32_t rated_torque_mnm = 0;   ///< Motor rated torque in mNm (0 = auto-detect from 0x6076)
     Tether::Examples::VlanConfig vlan;
     ///< STO override: -1 = not set (use motionEnabled default), 0 = force STO off, 1 = force STO on
     int sto_override = -1;
@@ -842,20 +758,10 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .scan<'g', double>()
         .default_value(10.0)
         .help("Duration in seconds");
-    program.add_argument("--no-fsoe")
-        .default_value(false)
-        .implicit_value(true)
-        .help("Disable FSoE safe-motion (CST-only mode)");
     program.add_argument("--dc-sync")
         .default_value(false)
         .implicit_value(true)
         .help("Enable EtherCAT distributed-clock synchronization (off by default)");
-    program.add_argument("--no-drive")
-        .default_value(false)
-        .implicit_value(true)
-        .help("Do not enable the CiA 402 drive (FSoE-only mode). "
-              "All FSoE functionality still runs: handshake, PDO exchange, "
-              "safety monitoring.  Useful for testing FSoE without motion.");
     program.add_argument("--connection-id")
         .scan<'x', unsigned int>()
         .default_value(static_cast<unsigned int>(0x0006))
@@ -878,18 +784,6 @@ bool parseArgs(int argc, char** argv, Args& out) {
     program.add_argument("--debug")
         .default_value(std::string(""))
         .help("Comma-separated debug flags. Use '--debug help' for a list.");
-    program.add_argument("--torque-nm")
-        .scan<'g', double>()
-        .default_value(0.5)
-        .help("Peak-to-peak sine torque amplitude in Nm (default 0.5 = ±0.25 Nm)");
-    program.add_argument("--freq-hz")
-        .scan<'g', double>()
-        .default_value(0.5)
-        .help("Sine torque frequency in Hz (default 0.5)");
-    program.add_argument("--rated-torque-mnm")
-        .scan<'i', int>()
-        .default_value(static_cast<int>(0))
-        .help("Motor rated torque in mNm (0 = auto-detect from object 0x6076)");
     program.add_argument("--sto")
         .scan<'i', int>()
         .default_value(-1)
@@ -929,17 +823,12 @@ bool parseArgs(int argc, char** argv, Args& out) {
     out.interface = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
     out.slave_index = program.get<int>("--slave");
     out.duration = program.get<double>("--duration");
-    out.enable_fsoe = !program.get<bool>("--no-fsoe");
     out.enable_dc_sync = program.get<bool>("--dc-sync");
-    out.enable_drive = !program.get<bool>("--no-drive");
     out.connection_id = static_cast<uint16_t>(program.get<unsigned int>("--connection-id"));
     out.safety_address = static_cast<uint16_t>(program.get<unsigned int>("--safety-address"));
     out.watchdog_ms = static_cast<uint16_t>(program.get<int>("--watchdog-ms"));
     out.diag_interval_ms = static_cast<uint32_t>(program.get<int>("--diag-interval-ms"));
     out.debug = program.get<std::string>("--debug");
-    out.torque_pp_nm = program.get<double>("--torque-nm");
-    out.freq_hz = program.get<double>("--freq-hz");
-    out.rated_torque_mnm = static_cast<uint32_t>(program.get<int>("--rated-torque-mnm"));
     out.sto_override = program.get<int>("--sto");
     out.sos_override = program.get<int>("--sos");
     out.sbc_override = program.get<int>("--sbc");
@@ -952,93 +841,6 @@ bool parseArgs(int argc, char** argv, Args& out) {
     }
     Tether::Examples::logVlanConfig(out.vlan, TAG);
     return true;
-}
-
-// ----------------------------------------------------------------------------
-// Pre-activation safety check (currently disabled  -  see call site in main)
-// ----------------------------------------------------------------------------
-// Reads 0x2611 (Safety Module input diagnostics) and 0x2620:2 ("Safe fieldbus"
-// FSoE active indicator) from the drive via SDO, then decides whether to
-// proceed with activation.
-//
-// When FSoE is enabled, the drive *starts* in safe state (STO active by
-// default) and the FSoE master brings it out of safe state once the safety
-// protocol reaches the Data state.  Aborting here would prevent the FSoE
-// connection from ever establishing, so we only abort on safe state when
-// FSoE is disabled (--no-fsoe)  -  in that case there is no mechanism to
-// clear the safe state and enabling the drive would be futile.
-//
-// Returns 0 on success (proceed with activation), non-zero on failure
-// (caller should abort and shut down).
-int preActivationSafetyCheck(EtherCAT::DS402Master& master,
-                             Tether::Examples::HostMasterSession& session,
-                             uint16_t slave_idx,
-                             bool enable_fsoe) {
-    auto& slave = master.ethercatMaster().slave(slave_idx);
-    const auto safety = EtherCAT::Drives::Synapticon::readSafetyModuleState(slave);
-
-    TETHER_LOGI(TAG,
-        "Safety module diagnostics (0x2611): input1={} input2={} -> {}",
-        static_cast<unsigned>(safety.input1),
-        static_cast<unsigned>(safety.input2),
-        safety.stateSummary());
-
-    // 0x2620:2 "Safe fieldbus" reports whether the FSoE connection is
-    // active on the drive.  Logged up front so the operator can see the
-    // FSoE state regardless of the safety verdict below.
-    TETHER_LOGI(TAG,
-        "FSoE active indicator (0x2620:2 \"Safe fieldbus\"): raw={} -> {}",
-        static_cast<unsigned>(safety.safe_fieldbus),
-        safety.fsoeStateSummary());
-
-    if (!safety.ok) {
-        if (enable_fsoe) {
-            // SDO read failed, but FSoE is enabled  -  the safety module
-            // might be in a state where SDO access is temporarily
-            // unavailable.  Continue anyway; the FSoE protocol will
-            // handle the safety state via PDOs.
-            TETHER_LOGW(TAG,
-                "Failed to read safety module diagnostics (0x2611) via SDO  —  "
-                "continuing with FSoE enabled (PDO-based safety handling)");
-        } else {
-            TETHER_LOGE(TAG,
-                "Failed to read safety module diagnostics (0x2611) via SDO  —  "
-                "cannot verify safety state, aborting activation");
-            Tether::Examples::stopHostMasterSession(master, session);
-            return 2;
-        }
-    }
-
-    if (safety.isInSafeState()) {
-        if (enable_fsoe) {
-            // FSoE is enabled  -  the drive is expected to start in safe
-            // state.  The FSoE master will bring it out of safe state
-            // once the safety protocol reaches the Data state.  Log the
-            // state and continue; do NOT abort.
-            TETHER_LOGI(TAG,
-                "Drive is in SAFE STATE (safety function active, motion "
-                "inhibited)  —  FSoE is {} (0x2620:2={})  —  continuing; "
-                "the FSoE master will clear the safe state once the "
-                "safety protocol reaches the Data state",
-                safety.fsoeStateSummary(),
-                static_cast<unsigned>(safety.safe_fieldbus));
-        } else {
-            // FSoE is disabled  -  there is no mechanism to clear the safe
-            // state, so enabling the drive would be futile.  Abort.
-            TETHER_LOGE(TAG,
-                "Drive is in SAFE STATE (safety function active, motion "
-                "inhibited) and FSoE is disabled (--no-fsoe)  —  there is "
-                "no mechanism to clear the safe state, refusing to "
-                "activate drive, triggering shutdown");
-            Tether::Examples::stopHostMasterSession(master, session);
-            return 2;
-        }
-    } else {
-        TETHER_LOGI(TAG,
-            "Safety check passed: safety module reports motion allowed");
-    }
-
-    return 0;
 }
 
 } // namespace
@@ -1067,16 +869,12 @@ int main(int argc, char** argv) {
     Tether::Platform::ensureRealtimeKernelOrExit();
 
     TETHER_LOGI(TAG,
-        "synapticon_cst_fsoe  —  interface={} slave={} duration={:.1f} fsoe={} dc_sync={} drive={} debug='{}' "
-        "torque_pp={:.3f}Nm freq={:.3f}Hz rated_torque_mnm={} "
+        "synapticon_cst_fsoe  —  interface={} slave={} duration={:.1f} dc_sync={} debug='{}' "
         "conn_id=0x{:04X} safety_addr=0x{:04X} "
         "sto_override={} sos_override={} sbc_override={} diagnostics_after={:.1f}",
         args.interface.c_str(), slave_idx, args.duration,
-        args.enable_fsoe ? "on" : "off",
         args.enable_dc_sync ? "on" : "off",
-        args.enable_drive ? "on" : "off",
         args.debug.c_str(),
-        args.torque_pp_nm, args.freq_hz, args.rated_torque_mnm,
         args.connection_id, args.safety_address,
         args.sto_override < 0 ? "default" : std::to_string(args.sto_override).c_str(),
         args.sos_override < 0 ? "default" : std::to_string(args.sos_override).c_str(),
@@ -1254,21 +1052,21 @@ int main(int argc, char** argv) {
             if (res.has_value())
                 TETHER_LOGI(TAG, "  0x{:04X}:{} ({}) = 0x{:02X}", idx, sub, name, res.value());
             else
-                TETHER_LOGW(TAG, "  0x{:04X}:{} ({}) FAILED", idx, sub, name);
+                TETHER_LOGW(TAG, "  0x{:04X}:{} ({}) error: {}", idx, sub, name, coeErrorDetail(res.error()));
         };
         auto read_u16 = [&](uint16_t idx, uint8_t sub, const char* name) -> void {
             auto res = sdo.readU16(idx, sub, {.timeout_ms = kSdoTimeoutMs});
             if (res.has_value())
                 TETHER_LOGI(TAG, "  0x{:04X}:{} ({}) = 0x{:04X}", idx, sub, name, res.value());
             else
-                TETHER_LOGW(TAG, "  0x{:04X}:{} ({}) FAILED", idx, sub, name);
+                TETHER_LOGW(TAG, "  0x{:04X}:{} ({}) error: {}", idx, sub, name, coeErrorDetail(res.error()));
         };
         auto read_u32 = [&](uint16_t idx, uint8_t sub, const char* name) -> void {
             auto res = sdo.readU32(idx, sub, {.timeout_ms = kSdoTimeoutMs});
             if (res.has_value())
                 TETHER_LOGI(TAG, "  0x{:04X}:{} ({}) = 0x{:08X}", idx, sub, name, res.value());
             else
-                TETHER_LOGW(TAG, "  0x{:04X}:{} ({}) FAILED", idx, sub, name);
+                TETHER_LOGW(TAG, "  0x{:04X}:{} ({}) error: {}", idx, sub, name, coeErrorDetail(res.error()));
         };
 
         // ETG.5000 Modular Device Profile objects
@@ -1301,26 +1099,13 @@ int main(int argc, char** argv) {
         TETHER_LOGI(TAG, "===== End ETG.5000/5001 objects =====");
     }
 
-    // --- Pre-activation safety check (disabled) ---
-    // The Synapticon drive does not expose 0x2611 / 0x2620:2 via SDO on this
-    // firmware, causing "Object does not exist" aborts.  The FSoE protocol
-    // handles safety state via PDOs, so this SDO-based pre-check is not
-    // required.  Re-enable by uncommenting the call below.
-    // {
-    //     const int safety_rc = preActivationSafetyCheck(
-    //         master, session, slave_idx, args.enable_fsoe);
-    //     if (safety_rc != 0) return safety_rc;
-    // }
-
     // --- Read FSoE safety address (0xF980:1) for verification ---
     // Object 0xF980:1 contains the safety address configured on the drive.
     // For Synapticon SOMANET drives, the FSoE connection ID must match this
     // value (default 0x0006).  Reading it before starting the FSoE handshake
     // lets us warn the operator if --connection-id doesn't match the drive's
     // configured safety address, which would cause ConnectionIDError failures.
-    //
-    // When FSoE is disabled (--no-fsoe), this read is skipped.
-    if (args.enable_fsoe) {
+    {
         auto& slave = master.ethercatMaster().slave(slave_idx);
         uint16_t drive_safety_address = 0;
         const auto addr_err =
@@ -1351,22 +1136,19 @@ int main(int argc, char** argv) {
         }
     }
 
-    // --- Configure drive: CST mode + FSoE, combined PDO mapping ---
+    // --- Configure drive: combined FSoE + motion PDO mapping ---
     //
-    // When FSoE is enabled, both the CiA 402 motion PDOs (0x1600/0x1A00) and
-    // the FSoE safety PDOs (0x1700/0x1B00) must be mapped simultaneously.
-    // This requires the multi-PDO-per-sync-manager API
+    // Both the CiA 402 motion PDOs (0x1600/0x1A00) and the FSoE safety PDOs
+    // (0x1700/0x1B00) must be mapped simultaneously.  This requires the
+    // multi-PDO-per-sync-manager API
     // (CiA402Drive::transitionToOp(const Slave::MultiPDOAssignment&)).
     //
     // PDO buffer layout (combined):
     //   SM2 (Rx): [0x1600 (12B)][0x1700 (11B)] = 23 bytes
     //   SM3 (Tx): [0x1A00 (12B)][0x1B00 (31B)] = 43 bytes
-    //
-    // When FSoE is disabled (--no-fsoe), only the motion PDOs are mapped
-    // using the standard single-PDO configuration path.
     int rc = 0;
 
-    // Discover slaves and initialize distributed clocks (common to both paths)
+    // Discover slaves and initialize distributed clocks
     if (master.ethercatMaster().discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
         TETHER_LOGW(TAG, "No slaves discovered");
     }
@@ -1401,15 +1183,7 @@ int main(int argc, char** argv) {
     auto& drive = master.ensureDrive(slave_idx);
     drive.setSDOTimeout(kSdoTimeoutMs);
 
-    // Operating mode (CST) is set via the PDO buffer in the cyclic callback
-    // (SineTorqueController::update writes rx->modes_of_operation).  The
-    // Synapticon drive does not expose 0x6060 via SDO, so we skip the SDO
-    // write entirely and rely on PDO-based mode setting.
-    //
-    // The PDO offset for modes_of_operation is configured below, after PDO
-    // buffer sizes are known (FSoE vs. non-FSoE paths differ).
-
-    if (args.enable_fsoe) {
+    {
         // Combined FSoE + motion PDO mapping via multi-PDO assignment.
         //
         // Uses the ESI layout with ALL PDOs, FSoE first:
@@ -1447,7 +1221,7 @@ int main(int argc, char** argv) {
             Tether::Examples::stopHostMasterSession(master, session);
             return 3;
         }
-        TETHER_LOGI(TAG, "Slave {} transitioned to OP with combined CST+FSoE PDOs", slave_idx);
+        TETHER_LOGI(TAG, "Slave {} transitioned to OP with combined FSoE+motion PDOs", slave_idx);
 
         // --- Comprehensive safety diagnostics ---
         // Query all safety-related objects via SDO before starting the PDO
@@ -1554,7 +1328,7 @@ int main(int argc, char** argv) {
                 TETHER_LOGI(TAG, "  SDO read 0x6040:0 (Controlword) = 0x{:04X} (expect 0x000F if PDO readback works)",
                     cw.value());
             else
-                TETHER_LOGW(TAG, "  SDO read 0x6040:0 (Controlword) FAILED");
+                TETHER_LOGW(TAG, "  SDO read 0x6040:0 (Controlword) FAILED ({})", coeErrorDetail(cw.error()));
         }
 
         // Now write a known FSoE Reset frame to the FSoE PDO region
@@ -1577,21 +1351,21 @@ int main(int argc, char** argv) {
             if (res.has_value())
                 TETHER_LOGI(TAG, "  SDO read 0x{:04X}:{} ({}) = 0x{:02X}", idx, sub, name, res.value());
             else
-                TETHER_LOGW(TAG, "  SDO read 0x{:04X}:{} ({}) FAILED", idx, sub, name);
+                TETHER_LOGW(TAG, "  SDO read 0x{:04X}:{} ({}) error: {}", idx, sub, name, coeErrorDetail(res.error()));
         };
         auto read_u16 = [&](uint16_t idx, uint8_t sub, const char* name) -> void {
             auto res = sdo.readU16(idx, sub, {.timeout_ms = kSdoTimeoutMs});
             if (res.has_value())
                 TETHER_LOGI(TAG, "  SDO read 0x{:04X}:{} ({}) = 0x{:04X}", idx, sub, name, res.value());
             else
-                TETHER_LOGW(TAG, "  SDO read 0x{:04X}:{} ({}) FAILED", idx, sub, name);
+                TETHER_LOGW(TAG, "  SDO read 0x{:04X}:{} ({}) error: {}", idx, sub, name, coeErrorDetail(res.error()));
         };
         auto read_u32 = [&](uint16_t idx, uint8_t sub, const char* name) -> void {
             auto res = sdo.readU32(idx, sub, {.timeout_ms = kSdoTimeoutMs});
             if (res.has_value())
                 TETHER_LOGI(TAG, "  SDO read 0x{:04X}:{} ({}) = 0x{:08X}", idx, sub, name, res.value());
             else
-                TETHER_LOGW(TAG, "  SDO read 0x{:04X}:{} ({}) FAILED", idx, sub, name);
+                TETHER_LOGW(TAG, "  SDO read 0x{:04X}:{} ({}) error: {}", idx, sub, name, coeErrorDetail(res.error()));
         };
 
         TETHER_LOGI(TAG, "Reading back FSoE objects via SDO:");
@@ -1632,7 +1406,7 @@ int main(int argc, char** argv) {
                         TETHER_LOGI(TAG, "  0x1700:{} = 0x{:08X} (idx=0x{:04X} sub={} bits={})",
                             i, v, idx, sub, bits);
                     } else {
-                        TETHER_LOGW(TAG, "  0x1700:{} FAILED", i);
+                        TETHER_LOGW(TAG, "  0x1700:{} FAILED ({})", i, coeErrorDetail(entry.error()));
                     }
                 }
             }
@@ -1651,7 +1425,7 @@ int main(int argc, char** argv) {
                         TETHER_LOGI(TAG, "  0x1B00:{} = 0x{:08X} (idx=0x{:04X} sub={} bits={})",
                             i, v, idx, sub, bits);
                     } else {
-                        TETHER_LOGW(TAG, "  0x1B00:{} FAILED", i);
+                        TETHER_LOGW(TAG, "  0x1B00:{} FAILED ({})", i, coeErrorDetail(entry.error()));
                     }
                 }
             }
@@ -1729,116 +1503,43 @@ int main(int argc, char** argv) {
                     err_buf[0], err_buf[1], err_buf[2], err_buf[3],
                     err_buf[4], err_buf[5], err_buf[6], err_buf[7]);
             } else {
-                TETHER_LOGW(TAG, "  SDO read 0x203F:1 (Error report) FAILED");
+                const uint32_t abort_code = sdo.lastSdoAbortCode();
+                TETHER_LOGW(TAG, "  SDO read 0x203F:1 (Error report) FAILED ({} 0x{:08X})",
+                            EtherCAT::sdoAbortCodeStr(abort_code), abort_code);
             }
         }
 
         TETHER_LOGI(TAG, "=== End PDO/SDO diagnostic ===");
 
         // Note: PDO exchange stays enabled  -  the FSoE cyclic task needs it
-    } else {
-        // FSoE disabled  -  motion-only single-PDO configuration
-        Tether::Examples::SingleDriveExampleConfig config;
-        config.drive.slave_index = slave_idx;
-        config.drive.rxpdo_index = EtherCAT::Drives::SynapticonPDO::RxPDO_1600.index;
-        config.drive.txpdo_index = EtherCAT::Drives::SynapticonPDO::TxPDO_1A00.index;
-        config.drive.rxpdo_size = EtherCAT::Drives::SynapticonPDO::RxPDO_1600.size;
-        config.drive.txpdo_size = EtherCAT::Drives::SynapticonPDO::TxPDO_1A00.size;
-        // Operating mode is set via PDO, not SDO  -  skip configureDrive's SDO write
-        config.drive.operating_mode = 0;
-        config.drive.sdo_timeout_ms = kSdoTimeoutMs;
-        config.drive.auto_configure_mailbox = false;
-        config.drive.transition_to_operational = true;
-
-        if (!master.configureDrive(config.drive)) {
-            TETHER_LOGE(TAG, "Failed to configure slave {}", slave_idx);
-            master.stopDistributedClocks();
-            Tether::Examples::stopHostMasterSession(master, session);
-            return 3;
-        }
     }
 
-    // --- Configure PDO-based operating mode offset ---
-    // The modes_of_operation (0x6060) field is in the motion RxPDO (0x1600)
-    // at offset 2 (after uint16_t controlword).  The motion PDO is at
-    // kMotionRxPDOOffset in the combined buffer (after FSoE PDO).
+    // --- Configure PDO-based field offsets ---
+    // The motion PDO is at kMotionRxPDOOffset / kMotionTxPDOOffset in the
+    // combined buffer (after the FSoE PDO).  These offsets keep the drive
+    // object's statusword/controlword decoding consistent with the buffer
+    // layout even though no motion commands are sent.
     {
-        const size_t motion_rx_offset =
-            args.enable_fsoe ? kMotionRxPDOOffset : 0;
-        const size_t motion_tx_offset =
-            args.enable_fsoe ? kMotionTxPDOOffset : 0;
-
         // Controlword (0x6040) is at the start of the motion RxPDO
-        drive.setControlwordPDOOffset(static_cast<int>(motion_rx_offset));
+        drive.setControlwordPDOOffset(static_cast<int>(kMotionRxPDOOffset));
 
         // Statusword (0x6041) is at the start of the motion TxPDO
-        drive.setStatuswordPDOOffset(static_cast<int>(motion_tx_offset));
+        drive.setStatuswordPDOOffset(static_cast<int>(kMotionTxPDOOffset));
 
-        const size_t opmode_offset = motion_rx_offset +
+        const size_t opmode_offset = kMotionRxPDOOffset +
             offsetof(EtherCAT::Drives::SynapticonPDO::SOMANET_RxPDO_1600,
                     modes_of_operation);
         drive.setOpmodePDOOffset(static_cast<int>(opmode_offset));
         TETHER_LOGI(TAG,
-            "PDO offsets: controlword={} statusword={} opmode={} "
-            "(motion_rx={} motion_tx={})",
-            motion_rx_offset, motion_tx_offset, opmode_offset,
-            motion_rx_offset, motion_tx_offset);
-    }
-
-    // --- Read motor rated torque (0x6076) for Nm→per-mille conversion ---
-    // CiA 402 target_torque (0x6071) is in per-mille (0.1%) of rated torque.
-    // Object 0x6076 (Motor Rated Torque) is in mNm.  We read it here so the
-    // sine torque controller can convert Nm commands to per-mille units.
-    // If --rated-torque-mnm was given non-zero, use that instead of SDO read.
-    uint32_t rated_torque_mnm = args.rated_torque_mnm;
-    if (rated_torque_mnm == 0) {
-        auto& sdo_mgr = master.ethercatMaster().sdoManager(slave_idx);
-        auto rated = sdo_mgr.readU32(0x6076, 0, {.timeout_ms = kSdoTimeoutMs});
-        if (rated.has_value() && rated.value() > 0) {
-            rated_torque_mnm = rated.value();
-            TETHER_LOGI(TAG,
-                "Motor rated torque (0x6076) = {} mNm ({:.3f} Nm)",
-                rated_torque_mnm, rated_torque_mnm / 1000.0);
-        } else {
-            TETHER_LOGE(TAG,
-                "Failed to read motor rated torque (0x6076) via SDO  —  "
-                "cannot convert Nm to per-mille.  Use --rated-torque-mnm to "
-                "specify it manually.");
-            master.stopDistributedClocks();
-            Tether::Examples::stopHostMasterSession(master, session);
-            return 3;
-        }
-    } else {
-        TETHER_LOGI(TAG,
-            "Using --rated-torque-mnm = {} mNm ({:.3f} Nm)",
-            rated_torque_mnm, rated_torque_mnm / 1000.0);
-    }
-
-    // --- Add sine torque motion controller ---
-    // Amplitude is half the peak-to-peak value (±torque_pp_nm/2).
-    const double amplitude_nm = args.torque_pp_nm / 2.0;
-    TETHER_LOGI(TAG,
-        "Sine torque: {:.3f} Nm P-P ({:.3f} Nm amplitude) at {:.3f} Hz, "
-        "rated torque {} mNm -> {:.1f} per-mille peak",
-        args.torque_pp_nm, amplitude_nm, args.freq_hz,
-        rated_torque_mnm,
-        amplitude_nm * 1'000'000.0 / static_cast<double>(rated_torque_mnm));
-
-    if (!master.addMotionController(
-            slave_idx,
-            std::make_unique<SineTorqueController<RxPDO>>(
-                amplitude_nm, args.freq_hz, rated_torque_mnm))) {
-        TETHER_LOGE(TAG, "Failed to add sine torque controller");
-        rc = 4;
-        Tether::Examples::shutdownSingleDrive(master, slave_idx);
-        Tether::Examples::stopHostMasterSession(master, session);
-        return rc;
+            "PDO offsets: controlword={} statusword={} opmode={}",
+            kMotionRxPDOOffset, kMotionTxPDOOffset, opmode_offset);
     }
 
     // --- Brake release ---
     // The Synapticon brake is spring-activated (engages when powered off).
-    // It is released via CoE SDO write to 0x2004:7 (Brake status) exactly
-    // 1 second after FSoE reaches the Data state  -  see the run loop below.
+    // It is released via CoE SDO write to 0x2004:7 (Brake status) once the
+    // drive confirms STO=off and SBC=off in its FSoE status feedback  -  see
+    // the run loop below.
     // Object 0x2004:7 controls the brake in automatic mode.
     // See: https://doc.synapticon.com/node/sw5.1/objects_html/2xxx/2004.html
     uint64_t fsoe_data_time_ms = 0;  // timestamp when FSoE Data state was reached
@@ -1848,13 +1549,13 @@ int main(int argc, char** argv) {
     std::unique_ptr<FSoEMain> fsoe_main;
     FSoEPDOExchangeTask* fsoe_task_ptr = nullptr;  // raw ptr for suppressDebug()
 
-    // --- Thread synchronization for FSoE → CiA 402 enable ---
+    // --- Thread synchronization for FSoE Data-state detection ---
     //
     // The FSoE state machine runs in the realtime motion loop thread, while
-    // the CiA 402 enable sequence is driven from this (main) thread.  We use
-    // a std::promise<bool> as a one-shot signaling mechanism:
-    //   true  → FSoE reached Data state (safe to enable the drive)
-    //   false → FSoE entered Error state (abort enable)
+    // the main thread monitors progress below.  We use a std::promise<bool>
+    // as a one-shot signaling mechanism:
+    //   true  → FSoE reached Data state
+    //   false → FSoE entered Error state
     //
     // The promise is fulfilled from the state change callback (realtime
     // thread).  The main thread blocks on the shared_future with a timeout.
@@ -1870,8 +1571,8 @@ int main(int argc, char** argv) {
         }
     };
 
-    if (args.enable_fsoe) {
-        // FSoE debug flags are now part of the Tether debug framework and
+    {
+        // FSoE debug flags are part of the Tether debug framework and
         // support per-slave filtering.  They are applied via applyDebugFlags()
         // above (same call as the EtherCAT framework flags).  Query them here
         // for the target slave.
@@ -1897,7 +1598,6 @@ int main(int argc, char** argv) {
             TETHER_LOGE(TAG, "FSoE initialization failed");
             rc = 5;
             master.clearCyclicTasks();
-            (void)master.removeMotionController(slave_idx);
             Tether::Examples::shutdownSingleDrive(master, slave_idx);
             Tether::Examples::stopHostMasterSession(master, session);
             return rc;
@@ -2171,7 +1871,6 @@ int main(int argc, char** argv) {
             TETHER_LOGE(TAG, "Failed to add FSoE PDO exchange task");
             rc = 6;
             master.clearCyclicTasks();
-            (void)master.removeMotionController(slave_idx);
             Tether::Examples::shutdownSingleDrive(master, slave_idx);
             Tether::Examples::stopHostMasterSession(master, session);
             return rc;
@@ -2209,15 +1908,12 @@ int main(int argc, char** argv) {
             debug_fsoe_wire ? "+wire" : "",
             debug_fsoe_sequence ? "+seq" : "",
             debug_fsoe_crc ? "+crc" : "");
-    } else {
-        TETHER_LOGI(TAG, "FSoE disabled (--no-fsoe)");
     }
 
     // --- Start realtime motion loop ---
-    // This must happen BEFORE enabling the drive so that the FSoE cyclic task
-    // can exchange frames and progress toward the Data state.  Once FSoE
-    // reaches Data, the drive's safe state is cleared and the CiA 402 enable
-    // sequence can succeed.
+    // The cyclic-task scheduler (which runs FSoEPDOExchangeTask) is driven
+    // by the realtime motion loop even though no motion controller is
+    // installed  -  the loop is what actually exchanges the FSoE PDOs.
     EtherCAT::Master::RealtimeMotionLoopConfig loop_config;
     loop_config.cycle_period_us = 1000;
     loop_config.sync_interval_cycles = 10;
@@ -2226,16 +1922,14 @@ int main(int argc, char** argv) {
         TETHER_LOGE(TAG, "Failed to start realtime motion loop");
         rc = 7;
         master.clearCyclicTasks();
-        (void)master.removeMotionController(slave_idx);
         Tether::Examples::shutdownSingleDrive(master, slave_idx);
         Tether::Examples::stopHostMasterSession(master, session);
         return rc;
     }
 
-    // --- Wait for FSoE to reach Data state (if enabled) ---
+    // --- Wait for FSoE to reach Data state ---
     // The drive starts in SAFE STATE when FSoE safety is active.  The FSoE
-    // master must reach the Data state to clear the safe state and allow the
-    // CiA 402 enable sequence to proceed.
+    // master must reach the Data state to exchange real safety data.
     //
     // The FSoE state machine runs in the realtime motion loop thread.  We
     // block here on the std::shared_future that is fulfilled by the state
@@ -2243,76 +1937,42 @@ int main(int argc, char** argv) {
     // occurs.  This is the idiomatic C++ one-shot cross-thread signaling
     // pattern: no polling, no sleep loops, no shared mutable state beyond
     // the promise/future pair.
-    //
-    // If FSoE does NOT reach Data state (handshake fails, slave sends Reset,
-    // CRC error, watchdog timeout, etc.), we do NOT attempt to enable the
-    // drive  -  the safe state is still active and the enable would fail or
-    // be unsafe.  Instead, we skip the run loop and proceed directly to
-    // clean shutdown.
     bool fsoe_data_reached = false;
-    if (fsoe_main) {
+    {
         TETHER_LOGI(TAG, "Waiting for FSoE Data state (timeout 5 s)...");
         using namespace std::chrono_literals;
         const auto fsoe_status = fsoe_ready_future.wait_for(5s);
         if (fsoe_status == std::future_status::timeout) {
             TETHER_LOGE(TAG,
                 "FSoE did not reach Data state within 5 s  —  "
-                "current state: {}.  Aborting drive enable.",
+                "current state: {}.  Aborting.",
                 FSoE::fsoeStateName(fsoe_main->rawConnection().getState()));
             rc = 9;
         } else if (!fsoe_ready_future.get()) {
             TETHER_LOGE(TAG,
                 "FSoE entered Error state before reaching Data  —  "
-                "aborting drive enable.");
+                "aborting.");
             rc = 9;
         } else {
-            TETHER_LOGI(TAG,
-                "FSoE Data state reached{}.",
-                args.enable_drive ? "  —  enabling CiA 402 drive" : " (drive enable suppressed by --no-drive)");
+            TETHER_LOGI(TAG, "FSoE Data state reached");
             fsoe_data_reached = true;
             fsoe_data_time_ms = Tether::Platform::Clock::instance().getMilliseconds();
         }
-    } else {
-        // FSoE not enabled  -  drive enable can proceed directly.
-        fsoe_data_reached = true;
-    }
-
-    // --- Enable the drive (only if FSoE is operational or not enabled) ---
-    if (!args.enable_drive) {
-        TETHER_LOGI(TAG,
-            "Drive enable skipped (--no-drive).  FSoE is running in "
-            "FSoE-only mode  —  safety PDOs are exchanged but no motion.");
-    } else if (fsoe_data_reached) {
-        if (!master.enableDrive(slave_idx, 5000)) {
-            TETHER_LOGE(TAG, "Failed to enable slave {}", slave_idx);
-            rc = 8;
-        } else {
-            TETHER_LOGI(TAG, "Slave {} drive enabled", slave_idx);
-        }
-    } else {
-        // FSoE failed  -  skip drive enable, set error code.
-        rc = 9;
     }
 
     // --- Run loop ---
-    // If the drive was enabled, run the CST loop for the requested duration.
-    // If FSoE is enabled, monitor it during the run: if the slave enters
-    // FailSafe or Error (e.g. sends a Reset due to a CRC error), shut down
-    // cleanly immediately rather than continuing to run in an unsafe state.
+    // Monitor the FSoE connection for the requested duration.  If the slave
+    // enters FailSafe or Error (e.g. sends a Reset due to a CRC error),
+    // shut down cleanly immediately rather than continuing to run in an
+    // unsafe state.
     //
     // If --diagnostics-after is set, after that many seconds of FSoE
     // operation, suppress all FSoE debug output, run full safety
     // diagnostics via CoE (SDO reads), then exit immediately.
     if (rc == 0) {
-        if (args.enable_drive) {
-            TETHER_LOGI(TAG,
-                "CST mode active, sine torque {:.3f} Nm P-P at {:.3f} Hz for {:.1f} s",
-                args.torque_pp_nm, args.freq_hz, args.duration);
-        } else {
-            TETHER_LOGI(TAG,
-                "FSoE-only mode: monitoring safety state for {:.1f} s (no motion)",
-                args.duration);
-        }
+        TETHER_LOGI(TAG,
+            "FSoE-only mode: monitoring safety state for {:.1f} s (no motion)",
+            args.duration);
 
         const auto run_start_ms = Tether::Platform::Clock::instance().getMilliseconds();
         const uint32_t run_duration_ms =
@@ -2366,12 +2026,12 @@ int main(int argc, char** argv) {
 
             // --- Release the brake once STO=off and SBC=off are confirmed ---
             // The brake is spring-activated and must be disengaged via CoE
-            // (0x2004:7) before the drive can move.  We wait for the slave to
-            // confirm STO=off (torque allowed) and SBC=off (brake released at
-            // the safety level) in its FSoE status feedback, then immediately
-            // disengage the physical brake via CoE.
-            if (args.enable_fsoe && !brake_released && fsoe_data_time_ms > 0 &&
-                fsoe_main && fsoe_main->hasStatus()) {
+            // (0x2004:7).  We wait for the slave to confirm STO=off (torque
+            // allowed) and SBC=off (brake released at the safety level) in
+            // its FSoE status feedback, then immediately disengage the
+            // physical brake via CoE.
+            if (!brake_released && fsoe_data_time_ms > 0 &&
+                fsoe_main->hasStatus()) {
                 const auto& sm = fsoe_main->status();
                 if (!sm.sto_active && !sm.brake_engaged) {
                     brake_released = true;
@@ -2386,15 +2046,13 @@ int main(int argc, char** argv) {
                     if (!EtherCAT::Drives::Synapticon::BrakeControl::disengageBrake(
                             brake_sdo, kSdoTimeoutMs)) {
                         TETHER_LOGW(TAG,
-                            "Brake disengage failed or unverified  —  "
-                            "the safety layer will gate motion regardless");
+                            "Brake disengage failed or unverified");
                     }
                 }
             }
 
-            // If FSoE is enabled, check that it's still operational.
             // If the slave enters FailSafe or Error, stop immediately.
-            if (fsoe_main) {
+            {
                 const auto status = fsoe_main->rawConnection().getStatus();
                 if (status.isFailSafe() || status.hasError()) {
                     TETHER_LOGE(TAG,
@@ -2414,7 +2072,6 @@ int main(int argc, char** argv) {
     // --- Stop and clean up ---
     master.stopMotionControlLoop();
     master.clearCyclicTasks();
-    (void)master.removeMotionController(slave_idx);
 
     // Final FSoE diagnostics dump
     if (fsoe_main) {

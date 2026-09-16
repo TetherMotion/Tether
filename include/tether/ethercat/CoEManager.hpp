@@ -336,7 +336,15 @@ std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
 
     if (!initialized_.load() || state_.shutdown_requested.load()) {
         CoEReadTransaction<T> fail_txn;
-        fail_txn.promise.set_value(std::unexpected(CoEError::NotConfigured));
+        fail_txn.promise.set_value(std::unexpected(CoEErrorCode::NotConfigured));
+        return fail_txn.promise.get_future();
+    }
+
+    // Master-level cancellation (Ctrl-C / Master::stop) — fail immediately
+    // instead of queueing an SDO that is guaranteed to fail.
+    if (transport_.isCancelRequested()) {
+        CoEReadTransaction<T> fail_txn;
+        fail_txn.promise.set_value(std::unexpected(CoEErrorCode::ShuttingDown));
         return fail_txn.promise.get_future();
     }
 
@@ -344,7 +352,7 @@ std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
         std::lock_guard<std::mutex> lock(state_.queue_mutex);
         if (state_.shutdown_requested.load()) {
             CoEReadTransaction<T> fail_txn;
-            fail_txn.promise.set_value(std::unexpected(CoEError::ShuttingDown));
+            fail_txn.promise.set_value(std::unexpected(CoEErrorCode::ShuttingDown));
             return fail_txn.promise.get_future();
         }
         if (state_.read_queue.size() >= kMaxQueueDepth) {
@@ -352,7 +360,7 @@ std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
                 TETHER_LOGI("coe_mgr", "{}: CoE read QUEUE FULL index=0x{:04X}:{}", log_prefix_.c_str(), index, subindex);
             }
             CoEReadTransaction<T> fail_txn;
-            fail_txn.promise.set_value(std::unexpected(CoEError::QueueFull));
+            fail_txn.promise.set_value(std::unexpected(CoEErrorCode::QueueFull));
             return fail_txn.promise.get_future();
         }
         state_.read_queue.push_back(std::move(impl));
@@ -371,7 +379,7 @@ CoEResult<T> CoEManager::readSync(uint16_t index, uint8_t subindex,
     auto future = read<T>(index, subindex, options);
     const uint32_t timeout_ms = (options.timeout_ms > 0) ? options.timeout_ms : kDefaultTimeoutMs;
     if (future.wait_for(std::chrono::milliseconds(timeout_ms)) != std::future_status::ready) {
-        return std::unexpected(CoEError::Timeout);
+        return std::unexpected(CoEErrorCode::Timeout);
     }
     return future.get();
 }

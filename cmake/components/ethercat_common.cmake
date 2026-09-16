@@ -5,6 +5,9 @@ set(TETHER_ETHERCAT_COMMON_SOURCES
     # Debug flags (must be in common so all EtherCAT libraries can link to it)
     ${TETHER_ROOT}/src/ethercat/DebugFlags.cpp
 
+    # SDO abort code table (shared by master and slave components)
+    ${TETHER_ROOT}/src/ethercat/common/SDOAbortCodes.cpp
+
     # Stubs for host builds (only include when we are NOT building the full master)
 )
 

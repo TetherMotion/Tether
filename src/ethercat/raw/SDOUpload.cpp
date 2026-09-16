@@ -37,6 +37,9 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
     if (outLen) {
         *outLen = 0;
     }
+    if (master.isCancelRequested()) {
+        return false;
+    }
 
     // Translate the internal Complete-Access signal (bit 7 set in the
     // subindex, as set by CoEManager when options.complete_access is true)
@@ -147,9 +150,11 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
         }
 
         if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
-            TETHER_LOGE(TAG, "Slave {}: SDO upload: SM1 mailbox never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{} timeout={}ms)",
-                        slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
-            diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
+            if (!master.isCancelRequested()) {
+                TETHER_LOGE(TAG, "Slave {}: SDO upload: SM1 mailbox never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{} timeout={}ms)",
+                            slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
+                diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
+            }
             return false;
         }
 
@@ -224,7 +229,10 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                 if (r_len >= sizeof(CoeHeader) + sizeof(SdoAbort)) {
                     const auto *ab = reinterpret_cast<const SdoAbort *>(r_sdo_bytes);
                     const uint32_t abort_code = le32_to_host(ab->abortCode_le);
-                    TETHER_LOGE(TAG, "SDO abort 0x{:04x}:{} code=0x{:08x} ({})",
+                    // The abort code travels to the caller via outAbortCode →
+                    // CoEError — keep this at debug level so the caller can
+                    // print a single decoded line.
+                    TETHER_LOGD(TAG, "SDO abort 0x{:04x}:{} code=0x{:08x} ({})",
                              le16_to_host(ab->index_le), ab->sub,
                              abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
                     if (outAbortCode) *outAbortCode = abort_code;
@@ -484,9 +492,11 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
             }
 
             if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
-                TETHER_LOGE(TAG, "Slave {}: SDO upload segment: SM1 mailbox never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{} timeout={}ms)",
-                            slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
-                diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
+                if (!master.isCancelRequested()) {
+                    TETHER_LOGE(TAG, "Slave {}: SDO upload segment: SM1 mailbox never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{} timeout={}ms)",
+                                slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
+                    diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
+                }
                 return false;
             }
 
@@ -521,7 +531,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                         SdoAbort abort{};
                         std::memcpy(&abort, seg_res, sizeof(abort));
                         const uint32_t abort_code = le32_to_host(abort.abortCode_le);
-                        TETHER_LOGE(TAG, "SDO upload segment abort: index=0x{:04x}:{:02x} code=0x{:08x} ({})",
+                        TETHER_LOGD(TAG, "SDO upload segment abort: index=0x{:04x}:{:02x} code=0x{:08x} ({})",
                                  index, sub, abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
                         if (outAbortCode) *outAbortCode = abort_code;
                     } else {

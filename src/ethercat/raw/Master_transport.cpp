@@ -896,7 +896,8 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
         } else {
             size_t routed = packet_router_.routePacket(msg);
             if (routed == 0) {
-                if (unrouted_log_count_ < 10) {
+                if (unrouted_log_count_ < 10 &&
+                    !cancel_requested_.load(std::memory_order_acquire)) {
                     TETHER_LOGW("ec_rx", "Unrouted pkt dg={} idx=0x{:02X} cmd=0x{:02X} ado=0x{:04X} adp=0x{:04X} wkc={}",
                              dg_idx, dg->idx, (unsigned)dg->cmd, ado, adp, wkc);
                 }
