@@ -810,6 +810,28 @@ public:
     DebugGate& debugGate() { return *debug_gate_; }
     const DebugGate& debugGate() const { return *debug_gate_; }
 
+    /**
+     * @brief Enable/disable automatic mailbox-counter resync on the raw SDO path.
+     *
+     * When a slave rejects an SDO request with the ETG.1000.6 "syntax error
+     * in mailbox message" counter-mismatch error, the raw layer probes the
+     * 1..7 counter space until the slave accepts a request, then continues
+     * the transaction transparently.  Slaves that reset their mailbox
+     * counters on INIT->PRE_OP never emit this error and are unaffected;
+     * slaves that retain counter state across restarts (e.g. Synapticon
+     * SOMANET) require it to recover without a power cycle.
+     *
+     * Default: enabled.  Disable to restore the previous behaviour (fail
+     * the transaction on counter mismatch; the SM0/SM1 reset fallbacks in
+     * waitSm0NotFull()/drainStale() still apply).
+     */
+    void setMailboxCounterResyncEnabled(bool en) {
+        mbx_counter_resync_enabled_.store(en, std::memory_order_relaxed);
+    }
+    bool mailboxCounterResyncEnabled() const {
+        return mbx_counter_resync_enabled_.load(std::memory_order_relaxed);
+    }
+
     // ---- CoE / SDO low-level -----------------------------------------------
 
     bool coeSdoUpload(uint16_t adp, uint8_t* inout_mbx_cnt,
@@ -1148,6 +1170,9 @@ private:
 
     // Debug flags (master-level with per-slave filtering)
     EtherCATMasterDebugFlags debug_flags_;
+
+    // Automatic mailbox-counter resync on the raw SDO path (default on).
+    std::atomic<bool> mbx_counter_resync_enabled_{true};
 
     // Debug gate (conditional debug activation)
     std::unique_ptr<DebugGate> debug_gate_;

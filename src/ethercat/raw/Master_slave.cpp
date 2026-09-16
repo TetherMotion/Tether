@@ -234,6 +234,26 @@ bool Master::resetSlaveMailboxSM1(uint16_t slave_index)
     return true;
 }
 
+// Write the SMx activate register with a few retries — on a lossy link a
+// single dropped frame must not abort the whole mailbox reset.
+static bool writeActivateWithRetry(Master& master, uint16_t slave_index,
+                                   uint16_t activate_addr, uint8_t value,
+                                   const char* what, const char* local_tag) {
+    for (int i = 0; i < 5; ++i) {
+        if (master.isCancelRequested()) {
+            return false;
+        }
+        if (master.writeRegister(SlaveAddress(slave_index),
+                                 RegisterAddress(activate_addr),
+                                 &value, sizeof(value), 200)) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    TETHER_LOGE(local_tag, "{}: failed to {}", master.slaveLogPrefix(slave_index).c_str(), what);
+    return false;
+}
+
 bool Master::resetSlaveMailboxSM0(uint16_t slave_index)
 {
     const char* local_tag = "mbox_reset";
@@ -243,14 +263,12 @@ bool Master::resetSlaveMailboxSM0(uint16_t slave_index)
     TETHER_LOGW(local_tag, "{}: cycling SM0 activate register (0x{:04X}) to clear stuck mailbox-full",
                 slaveLogPrefix(slave_index).c_str(), sm0_activate_addr);
 
-    uint8_t disable = 0x00;
-    uint8_t enable = 0x01;
-    if (!writeRegister(SlaveAddress(slave_index), RegisterAddress(sm0_activate_addr), &disable, sizeof(disable), 200)) {
-        TETHER_LOGE(local_tag, "{}: failed to disable SM0", slaveLogPrefix(slave_index).c_str());
+    if (!writeActivateWithRetry(*this, slave_index, sm0_activate_addr, 0x00,
+                                "disable SM0", local_tag)) {
         return false;
     }
-    if (!writeRegister(SlaveAddress(slave_index), RegisterAddress(sm0_activate_addr), &enable, sizeof(enable), 200)) {
-        TETHER_LOGE(local_tag, "{}: failed to re-enable SM0", slaveLogPrefix(slave_index).c_str());
+    if (!writeActivateWithRetry(*this, slave_index, sm0_activate_addr, 0x01,
+                                "re-enable SM0", local_tag)) {
         return false;
     }
 

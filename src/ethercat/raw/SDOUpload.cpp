@@ -63,8 +63,12 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
             static_cast<unsigned>(kRawSDOMbxBufferSize), buf_size);
         return false;
     }
+    // mbxbuf holds the REQUEST (re-sent intact on stale responses);
+    // rspbuf holds the RESPONSE.
     std::vector<uint8_t> mbxbuf_storage(buf_size, 0);
+    std::vector<uint8_t> rspbuf_storage(buf_size, 0);
     uint8_t* mbxbuf = mbxbuf_storage.data();
+    uint8_t* rspbuf = rspbuf_storage.data();
 
     uint16_t coe_number = static_cast<uint16_t>(master.allocIdx());
 
@@ -169,7 +173,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
         for (int attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
             MbxResponseHeader hdr;
             auto outcome = pollSm1AndRead(master, adp, mbxReadAddr, mbxReadLen,
-                                          mbxbuf, pollIntervalMs, hdr);
+                                          rspbuf, pollIntervalMs, hdr);
 
             if (outcome == MbxPollOutcome::Cancelled) {
                 TETHER_LOGW(TAG, "SDO upload cancelled");
@@ -187,7 +191,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                 logged_any_mbx = true;
 #ifdef TETHER_DIAG_SDO_IO
                 if (diagEnabled) {
-                    const uint8_t *p = mbxbuf;
+                    const uint8_t *p = rspbuf;
                     TETHER_LOGI(TAG, "MBX poll: len={} type=0x{:02x} cnt={} rawType=0x{:02x} bytes={:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
                              r_len, hdr.type, hdr.cnt, hdr.rawMbxType, p[0], p[1], p[2], p[3], p[4], p[5], p[6],
                              p[7], p[8], p[9], p[10], p[11], p[12], p[13], p[14], p[15]);
@@ -195,8 +199,26 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
 #endif
             }
             if (hdr.type == EC_MBXT_ERR) {
-                handleMailboxError(mbxbuf, hdr, adp, index, sub);
-                return false;
+                if (master.mailboxCounterResyncEnabled() &&
+                    isCounterMismatchError(rspbuf, hdr)) {
+                    const auto resync = resyncMailboxCounter(
+                        master, adp, mbxWriteAddr, mbxWriteLen,
+                        mbxReadAddr, mbxReadLen, mbxbuf, rspbuf,
+                        inoutMbxCnt, mbx_cnt, expected_mbx_cnt,
+                        index, sub, true, pollIntervalMs, "upload", hdr);
+                    if (resync == MbxResyncResult::Cancelled) {
+                        return false;
+                    }
+                    if (resync == MbxResyncResult::Failed) {
+                        handleMailboxError(rspbuf, hdr, adp, index, sub);
+                        return false;
+                    }
+                    // Recovered — rspbuf/hdr hold the accepted response.
+                    r_len = hdr.len;
+                } else {
+                    handleMailboxError(rspbuf, hdr, adp, index, sub);
+                    return false;
+                }
             }
             if (r_len == 0 || hdr.type != EC_MBXT_COE) {
                 if (!logged_mbx_mismatch) {
@@ -217,7 +239,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                 continue;
             }
 
-            r_sdo_bytes = mbxbuf + sizeof(MbxHeader) + sizeof(CoeHeader);
+            r_sdo_bytes = rspbuf + sizeof(MbxHeader) + sizeof(CoeHeader);
             sdo_cmd = r_sdo_bytes[0];
 
             // Check for SDO abort before the CoE service field — some slaves
@@ -240,14 +262,14 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
 #ifdef TETHER_DIAG_SDO_IO
                 if (diagEnabled) {
                     TETHER_LOGI(TAG, "SDO abort raw response (len={})", r_len);
-                    diagnostics_.diagHexdump(mbxbuf, r_len, 256);
+                    diagnostics_.diagHexdump(rspbuf, r_len, 256);
                 }
 #endif
                 return false;
             }
 
             CoeHeader r_coe;
-            std::memcpy(&r_coe, mbxbuf + sizeof(MbxHeader), sizeof(r_coe));
+            std::memcpy(&r_coe, rspbuf + sizeof(MbxHeader), sizeof(r_coe));
             const uint16_t r_coe_raw = le16_to_host(r_coe.raw_le);
             const uint16_t r_number = r_coe_raw & 0x01FFu;
             const uint8_t r_service = (r_coe_raw >> 12) & 0x0Fu;
@@ -275,23 +297,28 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
 #ifdef TETHER_DIAG_SDO_IO
                     if (diagEnabled) {
                         TETHER_LOGI(TAG, "CoE mismatch raw mbx (len={})", r_len);
-                        diagnostics_.diagHexdump(mbxbuf, r_len, 256);
+                        diagnostics_.diagHexdump(rspbuf, r_len, 256);
                     }
 #endif
                 }
                 break;
             }
             if (hdr.cnt != expected_mbx_cnt) {
-                if (!checkStaleCounter(master, adp, mbxWriteAddr, mbxWriteLen,
+                if (!adoptCounterOnEcho(adp, mbxbuf, rspbuf, mbxReadLen, hdr,
+                                      inoutMbxCnt, mbx_cnt, expected_mbx_cnt,
+                                      index, sub, "upload") &&
+                    !checkStaleCounter(master, adp, mbxWriteAddr, mbxWriteLen,
                                        mbxReadAddr, mbxReadLen, mbxbuf, pollIntervalMs,
                                        transactionTimeoutMs, hdr,
                                        inoutMbxCnt, expected_mbx_cnt,
                                        stale_retry_count, index, sub, "upload")) {
                     return false;
                 }
-                continue;
+                if (hdr.cnt != expected_mbx_cnt) {
+                    continue;
+                }
             }
-            r_len = le16_to_host(reinterpret_cast<const MbxHeader*>(mbxbuf)->length_le);
+            r_len = le16_to_host(reinterpret_cast<const MbxHeader*>(rspbuf)->length_le);
             got_init_response = true;
             if (r_len < (sizeof(CoeHeader) + sizeof(SdoInitUploadRes))) {
                 return false;
@@ -303,9 +330,19 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                 if (r_index != index || r_sub != sub) {
                     TETHER_LOGW(TAG, "Stale SDO response: idx=0x{:04X}:{} expected=0x{:04X}:{} (adp=0x{:04X}) — clearing and re-sending",
                                 r_index, r_sub, index, sub, adp);
-                    // Do NOT sync counter — stale response is from a previous
-                    // session.  Just drain and retry with the same counter.
+                    // Do NOT adopt the stale response counter — it is a
+                    // leftover from a previous session.  But the re-send
+                    // MUST use a fresh counter: duplicate-detecting slaves
+                    // (SOMANET) silently drop a repeated request counter.
                     if (++stale_retry_count <= MAX_STALE_RETRIES) {
+                        const uint8_t prev_req =
+                            static_cast<uint8_t>((mbxbuf[5] >> 4) & 0x07u);
+                        const uint8_t new_req = SDOMailboxIO::nextMbxCnt(prev_req);
+                        mbxbuf[5] = mbx_type_with_cnt(mbxbuf[5] & 0x0Fu, new_req);
+                        expected_mbx_cnt = new_req;
+                        if (inoutMbxCnt != nullptr) {
+                            *inoutMbxCnt = SDOMailboxIO::nextMbxCnt(new_req);
+                        }
                         if (!sendAndWait(master, adp, mbxWriteAddr, mbxWriteLen,
                                          mbxReadAddr, mbxReadLen, mbxbuf, 500,
                                          pollIntervalMs, transactionTimeoutMs, "upload")) {
@@ -354,7 +391,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                     *outLen = copy_n;
                 }
             }
-            diagnostics_.logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbxReadLen,
+            diagnostics_.logCoeMbxPacket("RX", adp, index, sub, rspbuf, mbxReadLen,
                                          master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
             if (master.debugGate().hasAnyConditions()) {
                 master.debugGate().onCoERead(slaveIndexFromADP(adp), index, sub,
@@ -397,7 +434,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
         // Empty response with size indicated as 0 — return immediately.
         if (has_total_size && total_size == 0) {
             if (outLen) *outLen = 0;
-            diagnostics_.logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbxReadLen,
+            diagnostics_.logCoeMbxPacket("RX", adp, index, sub, rspbuf, mbxReadLen,
                                          master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
             if (master.debugGate().hasAnyConditions()) {
                 master.debugGate().onCoERead(slaveIndexFromADP(adp), index, sub,
@@ -431,7 +468,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
             } else if (outLen) {
                 *outLen = copy_len;
             }
-            diagnostics_.logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbxReadLen,
+            diagnostics_.logCoeMbxPacket("RX", adp, index, sub, rspbuf, mbxReadLen,
                                          master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
             if (master.debugGate().hasAnyConditions()) {
                 master.debugGate().onCoERead(slaveIndexFromADP(adp), index, sub,
@@ -506,19 +543,51 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                     TETHER_LOGW(TAG, "SDO upload segment cancelled");
                     return false;
                 }
-                if (!master.readRegister(Master::slaveAddressFromADP(adp), mbxReadAddr, mbxbuf, static_cast<uint16_t>(mbxReadLen), 200)) {
+                if (!master.readRegister(Master::slaveAddressFromADP(adp), mbxReadAddr, rspbuf, static_cast<uint16_t>(mbxReadLen), 200)) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     continue;
                 }
                 MbxHeader r2_mbx;
-                std::memcpy(&r2_mbx, mbxbuf, sizeof(r2_mbx));
-                const uint16_t r2_len = le16_to_host(r2_mbx.length_le);
-                const uint8_t r2_type = static_cast<uint8_t>(r2_mbx.mbxtype & 0x0Fu);
+                std::memcpy(&r2_mbx, rspbuf, sizeof(r2_mbx));
+                uint16_t r2_len = le16_to_host(r2_mbx.length_le);
+                uint8_t r2_type = static_cast<uint8_t>(r2_mbx.mbxtype & 0x0Fu);
+                if (r2_type == EC_MBXT_ERR) {
+                    MbxResponseHeader err_hdr{};
+                    err_hdr.len = r2_len;
+                    err_hdr.type = r2_type;
+                    err_hdr.cnt = static_cast<uint8_t>((r2_mbx.mbxtype >> 4) & 0x0Fu);
+                    err_hdr.priority = r2_mbx.priority;
+                    err_hdr.rawMbxType = r2_mbx.mbxtype;
+                    if (master.mailboxCounterResyncEnabled() &&
+                        isCounterMismatchError(rspbuf, err_hdr)) {
+                        MbxResponseHeader acc_hdr{};
+                        const auto resync = resyncMailboxCounter(
+                            master, adp, mbxWriteAddr, mbxWriteLen,
+                            mbxReadAddr, mbxReadLen, mbxbuf, rspbuf,
+                            inoutMbxCnt, mbx_cnt, expected_mbx_cnt,
+                            index, sub, false, pollIntervalMs,
+                            "upload segment", acc_hdr);
+                        if (resync == MbxResyncResult::Cancelled) {
+                            return false;
+                        }
+                        if (resync == MbxResyncResult::Failed) {
+                            handleMailboxError(rspbuf, err_hdr, adp, index, sub);
+                            return false;
+                        }
+                        // Recovered — re-read the accepted response header.
+                        std::memcpy(&r2_mbx, rspbuf, sizeof(r2_mbx));
+                        r2_len = le16_to_host(r2_mbx.length_le);
+                        r2_type = static_cast<uint8_t>(r2_mbx.mbxtype & 0x0Fu);
+                    } else {
+                        handleMailboxError(rspbuf, err_hdr, adp, index, sub);
+                        return false;
+                    }
+                }
                 if (r2_len < sizeof(CoeHeader) + 8 || r2_type != EC_MBXT_COE) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     continue;
                 }
-                const uint8_t *seg_res = mbxbuf + sizeof(MbxHeader) + sizeof(CoeHeader);
+                const uint8_t *seg_res = rspbuf + sizeof(MbxHeader) + sizeof(CoeHeader);
                 const uint8_t seg_cmd = seg_res[0];
 
                 // Check for SDO abort before the CoE service field — some slaves
@@ -540,7 +609,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                     return false;
                 }
 
-                const auto *r2_coe = reinterpret_cast<const CoeHeader *>(mbxbuf + sizeof(MbxHeader));
+                const auto *r2_coe = reinterpret_cast<const CoeHeader *>(rspbuf + sizeof(MbxHeader));
                 const uint16_t r2_coe_raw = le16_to_host(r2_coe->raw_le);
                 const uint8_t r2_service = (r2_coe_raw >> 12) & 0x0Fu;
                 if (r2_service != EC_COES_SDORES) {
@@ -572,7 +641,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                     if (total_size != 0 && produced > total_size && outLen) {
                         *outLen = total_size;
                     }
-                    diagnostics_.logCoeMbxPacket("RX", adp, index, sub, mbxbuf, mbxReadLen,
+                    diagnostics_.logCoeMbxPacket("RX", adp, index, sub, rspbuf, mbxReadLen,
                             master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
                     if (master.debugGate().hasAnyConditions()) {
                         master.debugGate().onCoERead(slaveIndexFromADP(adp), index, sub,
