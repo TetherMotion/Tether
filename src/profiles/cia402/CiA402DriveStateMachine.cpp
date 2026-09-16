@@ -58,12 +58,12 @@ bool CiA402Drive::gotoSafeOp() {
         return false;
     
     // Wait for slave to reach SAFE_OP (up to 2 seconds)
-    for (int attempt = 0; attempt < 20; attempt++) {
-        Tether::Platform::Clock::instance().delayMilliseconds(100);
+    for (int attempt = 0; attempt < 200; attempt++) {
+        Tether::Platform::Clock::instance().delayMilliseconds(10);
         uint8_t state = 0;
         if (m_master->readSlaveApplicationLayerState(m_slave_index, state)) {
             if (state == static_cast<uint8_t>(ECState::SafeOp)) {
-                TETHER_LOGI(TAG, "{}: SAFE_OP confirmed after {} ms", logPrefix().c_str(), (attempt+1)*100);
+                TETHER_LOGI(TAG, "{}: SAFE_OP confirmed after {} ms", logPrefix().c_str(), (attempt+1)*10);
                 return true;
             }
         }
@@ -93,13 +93,13 @@ bool CiA402Drive::gotoOp() {
     // which was done by transitionToOp() before calling this method.
     // The slave needs continuous PDO data on SM2 to accept the OP transition.
     const uint8_t* src_mac = m_master->getSrcMac();
-    for (int attempt = 0; attempt < 50; attempt++) {
-        Tether::Platform::Clock::instance().delayMilliseconds(100);
+    for (int attempt = 0; attempt < 500; attempt++) {
+        Tether::Platform::Clock::instance().delayMilliseconds(10);
         
         uint8_t state = 0;
         if (m_master->readSlaveApplicationLayerState(m_slave_index, state)) {
             if (state == static_cast<uint8_t>(ECState::Op)) {
-                TETHER_LOGI(TAG, "{}: OP confirmed after {} ms", logPrefix().c_str(), (attempt+1)*100);
+                TETHER_LOGI(TAG, "{}: OP confirmed after {} ms", logPrefix().c_str(), (attempt+1)*10);
                 return true;
             }
             // Check for unexpected state (not SAFE_OP or OP)
@@ -113,7 +113,7 @@ bool CiA402Drive::gotoOp() {
                 return false;
             }
             // Re-request OP every second - some slaves need repeated requests
-            if ((attempt % 10) == 9) {
+            if ((attempt % 100) == 99) {
                 m_master->requestSlaveApplicationLayerState(m_slave_index, static_cast<uint8_t>(ECState::Op) | 0x10);
                 // Read raw AL_STATUS (16-bit, including error bit)
                 uint16_t al_raw = 0;
@@ -139,7 +139,7 @@ bool CiA402Drive::gotoOp() {
                 // PDO exchange stats
                 auto pstats = m_master->pdoForSlave(m_slave_index).getPhysicalStats();
                 TETHER_LOGI(TAG, "{}: Still waiting for OP, AL_STATUS=0x{:04X} AL status code: {} (0x{:04X}) DC_SYNC_ACT=0x{:02X} DC_SysTime_lo=0x{:08X} ({} ms)\n  PDO: fpwr_ok={} fpwr_err={} fprd_ok={} fprd_err={}  SYNC_LATCH=0x{:02X} SM2_EVT=0x{:02X}",
-                         logPrefix().c_str(), al_raw, getALStatusCodeName(al_code), al_code, dc_sync_act, (unsigned long)sys_time_lo, (attempt+1)*100,
+                         logPrefix().c_str(), al_raw, getALStatusCodeName(al_code), al_code, dc_sync_act, (unsigned long)sys_time_lo, (attempt+1)*10,
                          pstats.fpwr_success, pstats.fpwr_wkc_errors, pstats.fprd_success, pstats.fprd_wkc_errors, sync_latch, sm2_event);
             }
         }
@@ -538,11 +538,49 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
         if (!resetFault()) {
             return false;
         }
+        if (m_master->isCancelRequested()) {
+            return false;
+        }
         Tether::Platform::Clock::instance().delayMilliseconds(100);
         state = getDriveState();
         if (timeout_ms <= 100) break;
         timeout_ms -= 100;
     }
+
+    // Forward-aware wait: succeeds when the drive reaches the target or any
+    // later state on the enable sequence.  Some drives (e.g. SOMANET with
+    // automatic enabling) jump straight to OperationEnabled and never report
+    // the intermediate states, so an exact-match wait would time out even
+    // though the drive is already enabled.  Fault/QuickStop/Unknown never
+    // satisfy the predicate.  Also aborts promptly on cancellation (Ctrl-C).
+    auto waitAtLeast = [&](DriveState target, uint32_t tmo) -> bool {
+        const int tgt = static_cast<int>(target);
+        constexpr int kEnd = static_cast<int>(DriveState::OperationEnabled);
+        uint32_t elapsed = 0;
+        while (elapsed < tmo) {
+            DriveState cur = getDriveState();
+            const int c = static_cast<int>(cur);
+            if (c >= tgt && c <= kEnd) {
+                return true;
+            }
+            if (cur == DriveState::Fault ||
+                cur == DriveState::FaultReactionActive) {
+                TETHER_LOGE(TAG, "{}: Fault during state transition",
+                            logPrefix().c_str());
+                return false;
+            }
+            if (m_master->isCancelRequested()) {
+                TETHER_LOGI(TAG, "{}: State transition cancelled",
+                            logPrefix().c_str());
+                return false;
+            }
+            Tether::Platform::Clock::instance().delayMilliseconds(10);
+            elapsed += 10;
+        }
+        TETHER_LOGE(TAG, "{}: Timeout waiting for state {}",
+                    logPrefix().c_str(), getDriveStateName(target));
+        return false;
+    };
 
     // Use SDO writes for the state transition sequence, not PDO.
     // When a motion controller is running cyclically, it writes ENABLE_OPERATION
@@ -555,7 +593,7 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
     if (state == DriveState::SwitchOnDisabled) {
         m_controlword = 0x0006;  // Shutdown
         sendControlwordSDO(m_controlword);
-        if (!waitForDriveState(DriveState::ReadyToSwitchOn, timeout_ms)) {
+        if (!waitAtLeast(DriveState::ReadyToSwitchOn, timeout_ms)) {
             return false;
         }
         state = getDriveState();
@@ -565,7 +603,7 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
     if (state == DriveState::ReadyToSwitchOn) {
         m_controlword = 0x0007;  // Switch On
         sendControlwordSDO(m_controlword);
-        if (!waitForDriveState(DriveState::SwitchedOn, timeout_ms)) {
+        if (!waitAtLeast(DriveState::SwitchedOn, timeout_ms)) {
             return false;
         }
         state = getDriveState();
@@ -575,7 +613,7 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
     if (state == DriveState::SwitchedOn) {
         m_controlword = 0x000F;  // Enable Operation
         sendControlwordSDO(m_controlword);
-        if (!waitForDriveState(DriveState::OperationEnabled, timeout_ms)) {
+        if (!waitAtLeast(DriveState::OperationEnabled, timeout_ms)) {
             return false;
         }
     }
@@ -613,8 +651,16 @@ bool CiA402Drive::controlledShutdown(const ControlledShutdownConfig& cfg) {
     // The PDO fast-path is usable only while the drive is in OP with
     // registered buffers AND the cyclic PDO exchange is still running —
     // the caller is responsible for ordering this before the loop stop.
-    const bool pdo_live =
-        m_pdo_registered && getECState() == ECState::Op;
+    // Retry the AL-state read a few times: on a lossy link a single dropped
+    // FPRD would otherwise demote the whole shutdown to the slow SDO path.
+    ECState ec_state = ECState::Unknown;
+    for (int i = 0; i < 5 && ec_state != ECState::Op; ++i) {
+        ec_state = getECState();
+        if (ec_state != ECState::Op) {
+            clock.delayMilliseconds(10);
+        }
+    }
+    const bool pdo_live = m_pdo_registered && ec_state == ECState::Op;
 
     auto& sdo = m_master->sdoManager(m_slave_index);
     const CoE::CoETransactionOptions sdo_opts{.timeout_ms = m_sdo_timeout_ms};
@@ -825,6 +871,10 @@ bool CiA402Drive::waitForDriveState(DriveState target, uint32_t timeout_ms) {
         }
         if (current == DriveState::Fault) {
             TETHER_LOGE(TAG, "{}: Fault during state transition", logPrefix().c_str());
+            return false;
+        }
+        if (m_master->isCancelRequested()) {
+            TETHER_LOGI(TAG, "{}: State wait cancelled", logPrefix().c_str());
             return false;
         }
         Tether::Platform::Clock::instance().delayMilliseconds(poll_interval);
