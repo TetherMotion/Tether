@@ -824,12 +824,20 @@ SlaveError Slave::sdoWrite(uint16_t index, uint8_t subindex,
     return SlaveError::Ok;
 }
 
+// Map a failed CoE typed read/write to a SlaveError.  ShuttingDown (master
+// cancellation via requestCancel()) maps to Cancelled so callers can tell
+// an expected shutdown failure apart from a real SDO problem.
+static SlaveError sdoCoeErrorToSlaveError(CoE::CoEManager& sdo, CoE::CoEError err) {
+    if (err.code == CoE::CoEErrorCode::ShuttingDown) return SlaveError::Cancelled;
+    return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
+                                        : SlaveError::SDOError;
+}
+
 SlaveError Slave::sdoReadU8(uint16_t index, uint8_t sub, uint8_t& out) {
     auto& sdo = master_->sdoManager(index_);
     auto result = sdo.readU8(index, sub);
     if (!result.has_value()) {
-        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
-                                              : SlaveError::SDOError;
+        return sdoCoeErrorToSlaveError(sdo, result.error());
     }
     out = result.value();
     return SlaveError::Ok;
@@ -839,8 +847,7 @@ SlaveError Slave::sdoReadU16(uint16_t index, uint8_t sub, uint16_t& out) {
     auto& sdo = master_->sdoManager(index_);
     auto result = sdo.readU16(index, sub);
     if (!result.has_value()) {
-        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
-                                              : SlaveError::SDOError;
+        return sdoCoeErrorToSlaveError(sdo, result.error());
     }
     out = result.value();
     return SlaveError::Ok;
@@ -850,8 +857,7 @@ SlaveError Slave::sdoReadU32(uint16_t index, uint8_t sub, uint32_t& out) {
     auto& sdo = master_->sdoManager(index_);
     auto result = sdo.readU32(index, sub);
     if (!result.has_value()) {
-        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
-                                              : SlaveError::SDOError;
+        return sdoCoeErrorToSlaveError(sdo, result.error());
     }
     out = result.value();
     return SlaveError::Ok;
@@ -861,8 +867,7 @@ SlaveError Slave::sdoWriteU8(uint16_t index, uint8_t sub, uint8_t val) {
     auto& sdo = master_->sdoManager(index_);
     auto result = sdo.writeU8(index, sub, val);
     if (!result.has_value()) {
-        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
-                                              : SlaveError::SDOError;
+        return sdoCoeErrorToSlaveError(sdo, result.error());
     }
     return SlaveError::Ok;
 }
@@ -871,8 +876,7 @@ SlaveError Slave::sdoWriteU16(uint16_t index, uint8_t sub, uint16_t val) {
     auto& sdo = master_->sdoManager(index_);
     auto result = sdo.writeU16(index, sub, val);
     if (!result.has_value()) {
-        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
-                                              : SlaveError::SDOError;
+        return sdoCoeErrorToSlaveError(sdo, result.error());
     }
     return SlaveError::Ok;
 }
@@ -881,8 +885,7 @@ SlaveError Slave::sdoWriteU32(uint16_t index, uint8_t sub, uint32_t val) {
     auto& sdo = master_->sdoManager(index_);
     auto result = sdo.writeU32(index, sub, val);
     if (!result.has_value()) {
-        return (sdo.lastSdoAbortCode() != 0) ? SlaveError::SDOAborted
-                                              : SlaveError::SDOError;
+        return sdoCoeErrorToSlaveError(sdo, result.error());
     }
     return SlaveError::Ok;
 }

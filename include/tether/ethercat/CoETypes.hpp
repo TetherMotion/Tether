@@ -3,11 +3,13 @@
  * @brief CoE (CANopen over EtherCAT) mailbox transaction types
  *
  * Provides the core data types for the CoEManager async mailbox system:
- * - CoEError: transaction error codes
+ * - CoEError: transaction error payload (category + SDO abort detail)
  * - CoETransactionOptions: per-transaction timing and priority
  * - CoETransaction<T>: a single queued CoE read/write operation
  * - CoEResult<T>: std::expected<T, CoEError> alias
- * - SDOAbortCode: standard CoE SDO abort codes
+ *
+ * SDOAbortCode itself lives in tether/ethercat/SDOAbortCodes.hpp at
+ * EtherCAT scope (shared with the SDO layer and slave emulation).
  */
 
 #pragma once
@@ -20,58 +22,22 @@
 #include <vector>
 #include <chrono>
 
+#include "tether/ethercat/SDOAbortCodes.hpp"
+
 namespace EtherCAT {
 namespace CoE {
 
 // ============================================================================
-// SDO Abort Codes (CoE specification)
+// CoE Error
 // ============================================================================
 
-enum class SDOAbortCode : uint32_t {
-    Success                  = 0x00000000,
-    ToggleBitNotChanged      = 0x05030000,
-    Timeout                  = 0x05040000,
-    InvalidCommand           = 0x05040001,
-    InvalidBlockSize         = 0x05040002,
-    InvalidSequenceNumber    = 0x05040003,
-    CrcError                 = 0x05040004,
-    OutOfMemory              = 0x05040005,
-    UnsupportedAccess        = 0x06010000,
-    ReadOnlyObject           = 0x06010001,
-    WriteOnlyObject          = 0x06010002,
-    ObjectNotFound           = 0x06020000,
-    PdoMappingError          = 0x06040041,
-    PdoLengthExceeded        = 0x06040042,
-    ParameterIncompatible    = 0x06040043,
-    InternalError            = 0x06040047,
-    HardwareError            = 0x06060000,
-    DataTypeMismatch         = 0x06070010,
-    DataTypeTooLong          = 0x06070012,
-    DataTypeTooShort         = 0x06070013,
-    SubindexNotFound         = 0x06090011,
-    InvalidValue             = 0x06090030,
-    ValueTooHigh             = 0x06090031,
-    ValueTooLow              = 0x06090032,
-    MaxLessThanMin           = 0x06090036,
-    ResourceNotAvailable     = 0x060A0023,
-    GeneralError             = 0x08000000,
-    TransferAborted          = 0x08000020,
-    LocalControlError        = 0x08000021,
-    DeviceStateError         = 0x08000022,
-    DictionaryNotPresent     = 0x08000023,
-    NoDataAvailable          = 0x08000024,
-};
-
-const char* sdoAbortCodeStr(SDOAbortCode code);
-
-// ============================================================================
-// CoE Error Codes
-// ============================================================================
-
-enum class CoEError : uint8_t {
+/**
+ * @brief Broad failure category of a CoE transaction.
+ */
+enum class CoEErrorCode : uint8_t {
     Ok = 0,
     Timeout,
-    Aborted,
+    Aborted,          ///< Slave replied with an SDO abort — see abort/abort_code
     TransportError,
     QueueFull,
     NotConfigured,
@@ -80,6 +46,42 @@ enum class CoEError : uint8_t {
     InternalError,
 };
 
+/**
+ * @brief Error payload carried in CoEResult's unexpected value.
+ *
+ * `code` is the broad category.  When `code == CoEErrorCode::Aborted`,
+ * `abort`/`abort_code` carry the slave's SDO abort: `abort` is the
+ * classified enum (e.g. SDOAbortCode::ObjectNotFound — it may hold a
+ * vendor-specific value not in the standard table) and `abort_code` is
+ * the raw 32-bit wire value for logging.
+ */
+struct CoEError {
+    CoEErrorCode code      = CoEErrorCode::Ok;
+    SDOAbortCode abort     = SDOAbortCode::Success;
+    uint32_t     abort_code = 0;
+
+    constexpr CoEError() = default;
+    /// Implicit: a bare category means "no abort detail".
+    constexpr CoEError(CoEErrorCode c) : code(c) {}
+    constexpr CoEError(CoEErrorCode c, SDOAbortCode a, uint32_t raw)
+        : code(c), abort(a), abort_code(raw) {}
+
+    /// Build an Aborted error carrying the slave's raw abort code.
+    static constexpr CoEError aborted(uint32_t raw) {
+        return CoEError(CoEErrorCode::Aborted, static_cast<SDOAbortCode>(raw), raw);
+    }
+
+    /// Compare against a bare category: `err == CoEErrorCode::Timeout`.
+    constexpr bool operator==(CoEErrorCode c) const { return code == c; }
+    bool operator==(const CoEError&) const = default;
+};
+
+/**
+ * @brief Human-readable description of a CoE error.
+ *
+ * For aborts this returns the decoded abort string (e.g. "Object does not
+ * exist") so callers can print one informative line with abort_code.
+ */
 const char* coeErrorStr(CoEError error);
 
 // ============================================================================

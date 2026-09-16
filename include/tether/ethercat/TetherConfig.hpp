@@ -478,7 +478,7 @@
  *
  * Maximum number of pending CoE read/write requests per slave in the
  * CoEManager's async queue. This is a Tether-internal limit — if the
- * queue is full, new requests are rejected with CoEError::QueueFull.
+ * queue is full, new requests are rejected with CoEErrorCode::QueueFull.
  * Note: this is separate from ECAT_SDO_QUEUE_DEPTH which controls the
  * SDOManager queue.
  *

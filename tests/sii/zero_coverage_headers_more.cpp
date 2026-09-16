@@ -30,7 +30,7 @@ TEST(SDO_Header, ConstantsAndEnums) {
     EXPECT_EQ(SDO::kMaxSDODataSize, 256u);
     EXPECT_EQ(SDO::kDefaultSDOTimeoutMs, 1000u);
 
-    EXPECT_EQ(static_cast<uint32_t>(SDO::SDOAbortCode::Success), 0u);
+    EXPECT_EQ(static_cast<uint32_t>(EtherCAT::SDOAbortCode::Success), 0u);
     EXPECT_EQ(static_cast<uint8_t>(SDO::SDOOperation::Upload), 0u);
 }
 

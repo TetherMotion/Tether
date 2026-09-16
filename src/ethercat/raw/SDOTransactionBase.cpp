@@ -38,14 +38,18 @@ bool SDOTransactionBase::sendAndWait(Master& master, uint16_t adp,
                                      mbxbuf,
                                      static_cast<uint16_t>(mbxWriteLen),
                                      timeoutMs, nullptr)) {
-        TETHER_LOGE(TAG, "SDO {}: re-send failed after stale response (adp=0x{:04X})",
-                    phaseLabel, adp);
+        if (!master.isCancelRequested()) {
+            TETHER_LOGE(TAG, "SDO {}: re-send failed after stale response (adp=0x{:04X})",
+                        phaseLabel, adp);
+        }
         return false;
     }
     if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
-        TETHER_LOGE(TAG, "SDO {}: SM1 never full after re-send (adp=0x{:04X} timeout={}ms)",
-                    phaseLabel, adp, transactionTimeoutMs);
-        diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
+        if (!master.isCancelRequested()) {
+            TETHER_LOGE(TAG, "SDO {}: SM1 never full after re-send (adp=0x{:04X} timeout={}ms)",
+                        phaseLabel, adp, transactionTimeoutMs);
+            diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
+        }
         return false;
     }
     return true;

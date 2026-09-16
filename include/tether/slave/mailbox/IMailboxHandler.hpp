@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 #include "tether/ethercat/ObjectDictionary.hpp"
+#include "tether/ethercat/SDOAbortCodes.hpp"
 
 namespace EtherCAT {
 namespace slave {
@@ -210,30 +211,8 @@ struct ODEntryInfo {
     uint32_t defaultValue;
 };
 
-/**
- * @brief SDO abort codes (CoE)
- */
-enum class SDOAbortCode : uint32_t {
-    Success                  = 0x00000000,
-    ToggleBitNotChanged      = 0x05030000,
-    Timeout                  = 0x05040000,
-    InvalidCommand           = 0x05040001,
-    OutOfMemory              = 0x05040005,
-    UnsupportedAccess        = 0x06010000,
-    ReadOnlyObject           = 0x06010001,
-    WriteOnlyObject          = 0x06010002,
-    ObjectNotFound           = 0x06020000,
-    ParameterIncompatible    = 0x06040043,
-    InternalError            = 0x06040047,
-    DataTypeMismatch         = 0x06070010,
-    SubindexNotFound         = 0x06090011,
-    InvalidValue             = 0x06090030,
-    ValueTooHigh             = 0x06090031,
-    ValueTooLow              = 0x06090032,
-    GeneralError             = 0x08000000,
-    TransferAborted          = 0x08000020,
-    DeviceStateError         = 0x08000022,
-};
+// SDOAbortCode is the canonical EtherCAT::SDOAbortCode from
+// tether/ethercat/SDOAbortCodes.hpp (resolved via enclosing-namespace lookup).
 
 /**
  * @brief Interface for object dictionary

@@ -12,7 +12,7 @@
 #include "slave/mailbox/IMailboxHandler.hpp"
 
 using namespace EtherCAT::slave;
-using SDOAbortCode = EtherCAT::slave::SDOAbortCode;
+using SDOAbortCode = EtherCAT::SDOAbortCode;
 
 // ControlWord bits
 static constexpr uint16_t CW_SWITCH_ON        = 0x0001;

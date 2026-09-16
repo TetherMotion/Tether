@@ -395,6 +395,10 @@ public:
         return master_.lastCoeSdoAbortCode();
     }
 
+    bool isCancelRequested() const override {
+        return master_.isCancelRequested();
+    }
+
 private:
     Master& master_;
 };

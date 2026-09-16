@@ -118,11 +118,16 @@ add_tether_example(as715n_sine_motion_native
 
 endif()
 
-# ---Synapticon SOMANET CST + FSoE Example ---
-# Puts a Synapticon SOMANET (AS715N) drive into Cyclic Sync Torque mode,
-# maps RxPDO 0x1702 / TxPDO 0x1B02, sends 0 torque, and runs the FSoE
-# safe-motion protocol with rich diagnostics.
+# ---Synapticon SOMANET CST Example (no FSoE) ---
+# Puts a Synapticon SOMANET drive into Cyclic Sync Torque mode,
+# maps RxPDO 0x1600 / TxPDO 0x1A00, and sends a sinusoidal torque command.
 if(TETHER_DRIVE_SYNAPTICON)
+add_tether_example(synapticon_cst
+    LIBRARIES tether_ethercat_master tether_cia_profiles tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# ---Synapticon SOMANET FSoE Example (no motion) ---
+# Runs ONLY the FSoE safe-motion protocol over the drive's safety PDOs
+# (RxPDO 0x1700 / TxPDO 0x1B00).  The CiA 402 drive is never enabled.
 add_tether_example(synapticon_cst_fsoe
     LIBRARIES tether_ethercat_master tether_cia_profiles tether_device_drivers tether_fsoe tether_ethercat_common tether_hal tether_common tether_examples_common)
 

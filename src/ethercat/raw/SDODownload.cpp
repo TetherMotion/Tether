@@ -52,6 +52,9 @@ bool SDODownload::execute(Master& master, uint16_t adp,
                           uint32_t* outAbortCode,
                           SDOUpload* uploadForDiag) {
     if (outAbortCode) *outAbortCode = 0;
+    if (master.isCancelRequested()) {
+        return false;
+    }
     if (data == nullptr || dataLen == 0) {
         TETHER_LOGE(TAG, "Invalid SDO download parameters (len={})", static_cast<unsigned>(dataLen));
         return false;
@@ -187,8 +190,10 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
                                           mbxWriteAddr, mbxReadAddr,
                                           mbxbuf, static_cast<uint16_t>(mbxWriteLen),
                                           500, &used_alt)) {
-            TETHER_LOGE(TAG, "Slave {}: SDO download: Mailbox write failed (wr=0x{:04X} rd=0x{:04X})",
-                        slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr);
+            if (!master.isCancelRequested()) {
+                TETHER_LOGE(TAG, "Slave {}: SDO download: Mailbox write failed (wr=0x{:04X} rd=0x{:04X})",
+                            slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr);
+            }
             return false;
         }
         if (used_alt) {
@@ -198,9 +203,11 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
     }
 
     if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
-        TETHER_LOGE(TAG, "Slave {}: SDO download: SM1 mailbox never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{:02x} timeout={}ms)",
-                    slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
-        diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
+        if (!master.isCancelRequested()) {
+            TETHER_LOGE(TAG, "Slave {}: SDO download: SM1 mailbox never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{:02x} timeout={}ms)",
+                        slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
+            diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
+        }
         return false;
     }
 
@@ -259,7 +266,7 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
                 SdoAbort abort{};
                 std::memcpy(&abort, mbxbuf + sdo_offset, sizeof(abort));
                 const uint32_t abort_code = le32_to_host(abort.abortCode_le);
-                TETHER_LOGE(TAG, "SDO download abort: index=0x{:04x}:{:02x} code=0x{:08x} ({})",
+                TETHER_LOGD(TAG, "SDO download abort: index=0x{:04x}:{:02x} code=0x{:08x} ({})",
                          index, sub, abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
                 if (outAbortCode) *outAbortCode = abort_code;
                 if (abort_code == 0x06090011 && diagnostics_.isPdoMappingIndex(index)) {
@@ -411,8 +418,10 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
                                      mbxWriteAddr, mbxReadAddr,
                                      mbxbuf, static_cast<uint16_t>(mbxWriteLen),
                                      500, &used_alt)) {
-        TETHER_LOGE(TAG, "Slave {}: SDO normal download: Mailbox write failed (wr=0x{:04X} rd=0x{:04X})",
-                    slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr);
+        if (!master.isCancelRequested()) {
+            TETHER_LOGE(TAG, "Slave {}: SDO normal download: Mailbox write failed (wr=0x{:04X} rd=0x{:04X})",
+                        slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr);
+        }
         return false;
     }
     if (used_alt) {
@@ -421,9 +430,11 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
     }
 
     if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
-        TETHER_LOGE(TAG, "Slave {}: SDO normal download: SM1 never became full (index=0x{:04X}:{} timeout={}ms)",
-                    slaveIndexFromADP(adp), index, sub, transactionTimeoutMs);
-        diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
+        if (!master.isCancelRequested()) {
+            TETHER_LOGE(TAG, "Slave {}: SDO normal download: SM1 never became full (index=0x{:04X}:{} timeout={}ms)",
+                        slaveIndexFromADP(adp), index, sub, transactionTimeoutMs);
+            diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
+        }
         return false;
     }
 
@@ -482,7 +493,7 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
                 SdoAbort abort{};
                 std::memcpy(&abort, mbxbuf + sdo_offset, sizeof(abort));
                 const uint32_t abort_code = le32_to_host(abort.abortCode_le);
-                TETHER_LOGE(TAG, "SDO normal download abort: index=0x{:04x}:{:02x} code=0x{:08x} ({})",
+                TETHER_LOGD(TAG, "SDO normal download abort: index=0x{:04x}:{:02x} code=0x{:08x} ({})",
                          index, sub, abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
                 if (outAbortCode) *outAbortCode = abort_code;
             } else {
@@ -638,8 +649,10 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                                           mbxWriteAddr, mbxReadAddr,
                                           mbxbuf, static_cast<uint16_t>(mbxWriteLen),
                                           500, &used_alt)) {
-            TETHER_LOGE(TAG, "Slave {}: SDO segmented download init: Mailbox write failed (wr=0x{:04X} rd=0x{:04X})",
-                        slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr);
+            if (!master.isCancelRequested()) {
+                TETHER_LOGE(TAG, "Slave {}: SDO segmented download init: Mailbox write failed (wr=0x{:04X} rd=0x{:04X})",
+                            slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr);
+            }
             return false;
         }
         if (used_alt) {
@@ -648,9 +661,11 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
         }
 
         if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
-            TETHER_LOGE(TAG, "Slave {}: SDO segmented download init: SM1 never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{:02x} timeout={}ms)",
-                        slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
-            diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
+            if (!master.isCancelRequested()) {
+                TETHER_LOGE(TAG, "Slave {}: SDO segmented download init: SM1 never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{:02x} timeout={}ms)",
+                            slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
+                diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
+            }
             return false;
         }
 
@@ -709,7 +724,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                     SdoAbort abort{};
                     std::memcpy(&abort, mbxbuf + sdo_offset, sizeof(abort));
                     const uint32_t abort_code = le32_to_host(abort.abortCode_le);
-                    TETHER_LOGE(TAG, "SDO segmented download abort: index=0x{:04x}:{:02x} code=0x{:08x} ({})",
+                    TETHER_LOGD(TAG, "SDO segmented download abort: index=0x{:04x}:{:02x} code=0x{:08x} ({})",
                              index, sub, abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
                     if (outAbortCode) *outAbortCode = abort_code;
                     if (abort_code == 0x06090011 && diagnostics_.isPdoMappingIndex(index)) {
@@ -831,8 +846,10 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                                           mbxWriteAddr, mbxReadAddr,
                                           mbxbuf, static_cast<uint16_t>(mbxWriteLen),
                                           500, &used_alt)) {
-            TETHER_LOGE(TAG, "SDO segmented download segment {}: Mailbox write failed (adp=0x{:04X} wr=0x{:04X} rd=0x{:04X})",
-                        seg, adp, mbxWriteAddr, mbxReadAddr);
+            if (!master.isCancelRequested()) {
+                TETHER_LOGE(TAG, "SDO segmented download segment {}: Mailbox write failed (adp=0x{:04X} wr=0x{:04X} rd=0x{:04X})",
+                            seg, adp, mbxWriteAddr, mbxReadAddr);
+            }
             return false;
         }
         if (used_alt) {
@@ -841,9 +858,11 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
         }
 
         if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
-            TETHER_LOGE(TAG, "SDO segmented download segment {}: SM1 never became full (adp=0x{:04X} wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{:02x} timeout={}ms)",
-                        seg, adp, mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
-            diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
+            if (!master.isCancelRequested()) {
+                TETHER_LOGE(TAG, "SDO segmented download segment {}: SM1 never became full (adp=0x{:04X} wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{:02x} timeout={}ms)",
+                            seg, adp, mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
+                diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
+            }
             return false;
         }
 
@@ -892,7 +911,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                     SdoAbort abort{};
                     std::memcpy(&abort, seg_res, sizeof(abort));
                     const uint32_t abort_code = le32_to_host(abort.abortCode_le);
-                    TETHER_LOGE(TAG, "SDO segmented download segment {} abort: index=0x{:04x}:{:02x} code=0x{:08x} ({})",
+                    TETHER_LOGD(TAG, "SDO segmented download segment {} abort: index=0x{:04x}:{:02x} code=0x{:08x} ({})",
                                 seg, index, sub, abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
                     if (outAbortCode) *outAbortCode = abort_code;
                 } else {

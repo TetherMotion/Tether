@@ -29,38 +29,23 @@ static const char* TAG = "coe_mgr";
 // Error String Helpers
 // ============================================================================
 
-const char* sdoAbortCodeStr(SDO::SDOAbortCode code) {
-    switch (code) {
-        case SDO::SDOAbortCode::Success:              return "Success";
-        case SDO::SDOAbortCode::ToggleBitNotChanged:  return "Toggle bit not alternated";
-        case SDO::SDOAbortCode::Timeout:              return "SDO timeout";
-        case SDO::SDOAbortCode::InvalidCommand:       return "Invalid command";
-        case SDO::SDOAbortCode::OutOfMemory:          return "Out of memory";
-        case SDO::SDOAbortCode::UnsupportedAccess:    return "Unsupported access";
-        case SDO::SDOAbortCode::ReadOnlyObject:       return "Write to read-only object";
-        case SDO::SDOAbortCode::WriteOnlyObject:      return "Read from write-only object";
-        case SDO::SDOAbortCode::ObjectNotFound:       return "Object not found";
-        case SDO::SDOAbortCode::SubindexNotFound:     return "Subindex not found";
-        case SDO::SDOAbortCode::InvalidValue:         return "Invalid value";
-        case SDO::SDOAbortCode::GeneralError:         return "General error";
-        case SDO::SDOAbortCode::TransferAborted:      return "Transfer aborted";
-        case SDO::SDOAbortCode::DeviceStateError:     return "Wrong device state";
-        default:                                 return "Unknown error";
-    }
-}
-
 const char* coeErrorStr(CoEError error) {
-    switch (error) {
-        case CoEError::Ok:              return "Ok";
-        case CoEError::Timeout:         return "Timeout";
-        case CoEError::Aborted:         return "Aborted";
-        case CoEError::TransportError:  return "Transport error";
-        case CoEError::QueueFull:       return "Queue full";
-        case CoEError::NotConfigured:   return "Mailbox not configured";
-        case CoEError::ShuttingDown:    return "Shutting down";
-        case CoEError::SlaveNotFound:   return "Slave not found";
-        case CoEError::InternalError:   return "Internal error";
-        default:                        return "Unknown error";
+    // Aborts carry the slave's real SDO abort code — decode it so callers
+    // get e.g. "Object does not exist" instead of a bare "Aborted".
+    if (error.code == CoEErrorCode::Aborted && error.abort_code != 0) {
+        return sdoAbortCodeStr(error.abort_code);
+    }
+    switch (error.code) {
+        case CoEErrorCode::Ok:              return "Ok";
+        case CoEErrorCode::Timeout:         return "Timeout";
+        case CoEErrorCode::Aborted:         return "Aborted";
+        case CoEErrorCode::TransportError:  return "Transport error";
+        case CoEErrorCode::QueueFull:       return "Queue full";
+        case CoEErrorCode::NotConfigured:   return "Mailbox not configured";
+        case CoEErrorCode::ShuttingDown:    return "Shutting down";
+        case CoEErrorCode::SlaveNotFound:   return "Slave not found";
+        case CoEErrorCode::InternalError:   return "Internal error";
+        default:                            return "Unknown error";
     }
 }
 
@@ -68,19 +53,23 @@ const char* coeErrorStr(CoEError error) {
 // CoEError → SDOAbortCode mapping
 // ============================================================================
 
-static SDO::SDOAbortCode coeErrorToAbortCode(CoEError err) {
-    switch (err) {
-        case CoEError::Ok:             return SDO::SDOAbortCode::Success;
-        case CoEError::Timeout:        return SDO::SDOAbortCode::Timeout;
-        case CoEError::NotConfigured:  return SDO::SDOAbortCode::DeviceStateError;
-        case CoEError::TransportError: return SDO::SDOAbortCode::GeneralError;
-        case CoEError::QueueFull:      return SDO::SDOAbortCode::OutOfMemory;
-        case CoEError::Aborted:        return SDO::SDOAbortCode::TransferAborted;
-        case CoEError::ShuttingDown:   return SDO::SDOAbortCode::DeviceStateError;
-        case CoEError::SlaveNotFound:  return SDO::SDOAbortCode::ObjectNotFound;
-        case CoEError::InternalError:  return SDO::SDOAbortCode::InternalError;
+static SDOAbortCode coeErrorToAbortCode(CoEError err) {
+    switch (err.code) {
+        case CoEErrorCode::Ok:             return SDOAbortCode::Success;
+        case CoEErrorCode::Timeout:        return SDOAbortCode::Timeout;
+        case CoEErrorCode::NotConfigured:  return SDOAbortCode::DeviceStateError;
+        case CoEErrorCode::TransportError: return SDOAbortCode::GeneralError;
+        case CoEErrorCode::QueueFull:      return SDOAbortCode::OutOfMemory;
+        // Preserve the slave's actual abort code instead of a generic
+        // TransferAborted so legacy-queue callers see the real reason.
+        case CoEErrorCode::Aborted:        return err.abort_code != 0
+                                             ? err.abort
+                                             : SDOAbortCode::TransferAborted;
+        case CoEErrorCode::ShuttingDown:   return SDOAbortCode::DeviceStateError;
+        case CoEErrorCode::SlaveNotFound:  return SDOAbortCode::ObjectNotFound;
+        case CoEErrorCode::InternalError:  return SDOAbortCode::InternalError;
     }
-    return SDO::SDOAbortCode::GeneralError;
+    return SDOAbortCode::GeneralError;
 }
 
 // ============================================================================
@@ -115,7 +104,7 @@ public:
         auto result = fut_.get();
         if (result.has_value()) {
             resp.status = SDO::SDOStatus::Complete;
-            resp.abort_code = SDO::SDOAbortCode::Success;
+            resp.abort_code = SDOAbortCode::Success;
             auto& vec = result.value();
             resp.data_size = std::min(vec.size(), sizeof(resp.data));
             std::memcpy(resp.data, vec.data(), resp.data_size);
@@ -166,7 +155,7 @@ public:
         auto result = fut_.get();
         if (result.has_value()) {
             resp.status = SDO::SDOStatus::Complete;
-            resp.abort_code = SDO::SDOAbortCode::Success;
+            resp.abort_code = SDOAbortCode::Success;
         } else {
             resp.status = SDO::SDOStatus::Failed;
             resp.abort_code = coeErrorToAbortCode(result.error());
@@ -263,11 +252,11 @@ void CoEManager::deinit() {
     {
         std::lock_guard<std::mutex> qlock(state_.queue_mutex);
         for (auto& txn : state_.read_queue) {
-            txn->fail(CoEError::ShuttingDown);
+            txn->fail(CoEErrorCode::ShuttingDown);
         }
         state_.read_queue.clear();
         for (auto& entry : state_.write_queue) {
-            entry.txn.promise.set_value(std::unexpected(CoEError::ShuttingDown));
+            entry.txn.promise.set_value(std::unexpected(CoEErrorCode::ShuttingDown));
         }
         state_.write_queue.clear();
     }
@@ -351,6 +340,9 @@ bool CoEManager::resolveMailbox(uint16_t& wr_addr, uint16_t& wr_len,
 bool CoEManager::sdoUploadWithRetry(uint16_t index, uint8_t subindex,
                                     uint8_t* out, size_t out_cap, size_t* out_len,
                                     const CoETransactionOptions& options) {
+    if (transport_.isCancelRequested()) {
+        return false;
+    }
     uint16_t wr_addr = 0, wr_len = 0, rd_addr = 0, rd_len = 0;
     if (!resolveMailbox(wr_addr, wr_len, rd_addr, rd_len)) {
         TETHER_LOGE(TAG, "{}: sdoUploadWithRetry: mailbox not configured", log_prefix_.c_str());
@@ -392,17 +384,27 @@ bool CoEManager::sdoUploadWithRetry(uint16_t index, uint8_t subindex,
 
         if (ok) return true;
 
+        // Cancelled mid-operation (Ctrl-C / Master::stop): failures are
+        // expected — abort the retry loop without error spam.
+        if (transport_.isCancelRequested()) {
+            TETHER_LOGI(TAG, "{}: SDO upload 0x{:04X}:{} cancelled",
+                        log_prefix_.c_str(), index, subindex);
+            return false;
+        }
+
         // Definitive slave SDO abort: the slave explicitly rejected the
         // request (e.g. wrong payload size, read-only object, subindex does
         // not exist). Retrying the identical request cannot succeed, so do
-        // NOT retry — record the abort code and escalate immediately.
+        // NOT retry — record the abort code and escalate immediately. The
+        // abort detail travels to the caller inside the CoEError payload,
+        // so this stays at debug level to keep the log to a single line
+        // emitted by the caller.
         const uint32_t abort_code = transport_.lastAbortCode();
         if (abort_code != 0) {
             last_sdo_abort_code_.store(abort_code, std::memory_order_relaxed);
-            Raw::SDOErrorDecoder decoder;
-            TETHER_LOGE(TAG, "{}: SDO upload 0x{:04X}:{} aborted by slave — code 0x{:08X} ({}). Attempted read buffer capacity: {} bytes. Not retrying.",
+            TETHER_LOGD(TAG, "{}: SDO upload 0x{:04X}:{} aborted by slave — code 0x{:08X} ({}). Attempted read buffer capacity: {} bytes. Not retrying.",
                         log_prefix_.c_str(), index, subindex, abort_code,
-                        decoder.sdoAbortCodeStr(abort_code), out_cap);
+                        sdoAbortCodeStr(abort_code), out_cap);
             return false;
         }
 
@@ -420,6 +422,9 @@ bool CoEManager::sdoUploadWithRetry(uint16_t index, uint8_t subindex,
 bool CoEManager::sdoDownloadWithRetry(uint16_t index, uint8_t subindex,
                                       const uint8_t* data, size_t data_len,
                                       const CoETransactionOptions& options) {
+    if (transport_.isCancelRequested()) {
+        return false;
+    }
     uint16_t wr_addr = 0, wr_len = 0, rd_addr = 0, rd_len = 0;
     if (!resolveMailbox(wr_addr, wr_len, rd_addr, rd_len)) {
         TETHER_LOGE(TAG, "{}: sdoDownloadWithRetry: mailbox not configured", log_prefix_.c_str());
@@ -455,17 +460,27 @@ bool CoEManager::sdoDownloadWithRetry(uint16_t index, uint8_t subindex,
 
         if (ok) return true;
 
+        // Cancelled mid-operation (Ctrl-C / Master::stop): failures are
+        // expected — abort the retry loop without error spam.
+        if (transport_.isCancelRequested()) {
+            TETHER_LOGI(TAG, "{}: SDO download 0x{:04X}:{} cancelled",
+                        log_prefix_.c_str(), index, subindex);
+            return false;
+        }
+
         // Definitive slave SDO abort: the slave explicitly rejected the
         // request (e.g. wrong payload size, read-only object, subindex does
         // not exist). Retrying the identical request cannot succeed, so do
-        // NOT retry — record the abort code and escalate immediately.
+        // NOT retry — record the abort code and escalate immediately. The
+        // abort detail travels to the caller inside the CoEError payload,
+        // so this stays at debug level to keep the log to a single line
+        // emitted by the caller.
         const uint32_t abort_code = transport_.lastAbortCode();
         if (abort_code != 0) {
             last_sdo_abort_code_.store(abort_code, std::memory_order_relaxed);
-            Raw::SDOErrorDecoder decoder;
-            TETHER_LOGE(TAG, "{}: SDO download 0x{:04X}:{} aborted by slave — code 0x{:08X} ({}). Attempted payload length: {} bytes. Not retrying.",
+            TETHER_LOGD(TAG, "{}: SDO download 0x{:04X}:{} aborted by slave — code 0x{:08X} ({}). Attempted payload length: {} bytes. Not retrying.",
                         log_prefix_.c_str(), index, subindex, abort_code,
-                        decoder.sdoAbortCodeStr(abort_code), data_len);
+                        sdoAbortCodeStr(abort_code), data_len);
             return false;
         }
 
@@ -485,6 +500,9 @@ uint8_t* CoEManager::mbxCounterPtr() {
 }
 
 void CoEManager::logALStatusAfterRequest() {
+    if (transport_.isCancelRequested()) {
+        return;
+    }
     uint16_t al_status = 0;
     uint16_t al_code = 0;
 
@@ -529,7 +547,7 @@ uint32_t CoEManager::queueRequest(SDO::SDORequest& request) {
         // Check if future is immediately ready (queue full or not initialized)
         if (future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
             auto result = future.get();
-            if (!result.has_value() && result.error() == CoEError::QueueFull) {
+            if (!result.has_value() && result.error() == CoEErrorCode::QueueFull) {
                 return 0;
             }
 
@@ -543,7 +561,7 @@ uint32_t CoEManager::queueRequest(SDO::SDORequest& request) {
 
             if (result.has_value()) {
                 resp.status = SDO::SDOStatus::Complete;
-                resp.abort_code = SDO::SDOAbortCode::Success;
+                resp.abort_code = SDOAbortCode::Success;
                 auto& vec = result.value();
                 resp.data_size = std::min(vec.size(), sizeof(resp.data));
                 std::memcpy(resp.data, vec.data(), resp.data_size);
@@ -566,7 +584,7 @@ uint32_t CoEManager::queueRequest(SDO::SDORequest& request) {
         // Check if future is immediately ready (queue full or not initialized)
         if (future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
             auto result = future.get();
-            if (!result.has_value() && result.error() == CoEError::QueueFull) {
+            if (!result.has_value() && result.error() == CoEErrorCode::QueueFull) {
                 return 0;
             }
 
@@ -582,7 +600,7 @@ uint32_t CoEManager::queueRequest(SDO::SDORequest& request) {
 
             if (result.has_value()) {
                 resp.status = SDO::SDOStatus::Complete;
-                resp.abort_code = SDO::SDOAbortCode::Success;
+                resp.abort_code = SDOAbortCode::Success;
             } else {
                 resp.status = SDO::SDOStatus::Failed;
                 resp.abort_code = coeErrorToAbortCode(result.error());
@@ -662,7 +680,15 @@ std::future<CoEResult<void>> CoEManager::write(uint16_t index, uint8_t subindex,
 
     if (!initialized_.load() || state_.shutdown_requested.load()) {
         CoEWriteTransaction fail_txn;
-        fail_txn.promise.set_value(std::unexpected(CoEError::NotConfigured));
+        fail_txn.promise.set_value(std::unexpected(CoEErrorCode::NotConfigured));
+        return fail_txn.promise.get_future();
+    }
+
+    // Master-level cancellation (Ctrl-C / Master::stop) — fail immediately
+    // instead of queueing an SDO that is guaranteed to fail.
+    if (transport_.isCancelRequested()) {
+        CoEWriteTransaction fail_txn;
+        fail_txn.promise.set_value(std::unexpected(CoEErrorCode::ShuttingDown));
         return fail_txn.promise.get_future();
     }
 
@@ -670,7 +696,7 @@ std::future<CoEResult<void>> CoEManager::write(uint16_t index, uint8_t subindex,
         std::lock_guard<std::mutex> lock(state_.queue_mutex);
         if (state_.shutdown_requested.load()) {
             CoEWriteTransaction fail_txn;
-            fail_txn.promise.set_value(std::unexpected(CoEError::ShuttingDown));
+            fail_txn.promise.set_value(std::unexpected(CoEErrorCode::ShuttingDown));
             return fail_txn.promise.get_future();
         }
         if (state_.write_queue.size() >= kMaxQueueDepth) {
@@ -682,7 +708,7 @@ std::future<CoEResult<void>> CoEManager::write(uint16_t index, uint8_t subindex,
                     log_prefix_.c_str(), index, subindex, kMaxQueueDepth);
             }
             CoEWriteTransaction fail_txn;
-            fail_txn.promise.set_value(std::unexpected(CoEError::QueueFull));
+            fail_txn.promise.set_value(std::unexpected(CoEErrorCode::QueueFull));
             return fail_txn.promise.get_future();
         }
         state_.write_queue.push_back(std::move(entry));
@@ -856,7 +882,7 @@ void CoEManager::workerLoop() {
                 bool ok = false;
                 try {
                     if (!getMailbox(nullptr, nullptr, nullptr, nullptr)) {
-                        txn.promise.set_value(std::unexpected(CoEError::NotConfigured));
+                        txn.promise.set_value(std::unexpected(CoEErrorCode::NotConfigured));
                         request_in_flight_.store(false);
                         continue;
                     }
@@ -875,12 +901,14 @@ void CoEManager::workerLoop() {
                     txn.promise.set_value({});
                 } else if (last_sdo_abort_code_.load(std::memory_order_relaxed) != 0) {
                     // Slave explicitly aborted the SDO (definitive rejection,
-                    // e.g. 0x06070010 length mismatch). Surface as Aborted so
-                    // callers can distinguish it from a transport/timeout
-                    // failure and read lastSdoAbortCode() for the code.
-                    txn.promise.set_value(std::unexpected(CoEError::Aborted));
+                    // e.g. 0x06070010 length mismatch). Surface as Aborted with
+                    // the real abort code so callers can decode it directly.
+                    txn.promise.set_value(std::unexpected(
+                        CoEError::aborted(last_sdo_abort_code_.load(std::memory_order_relaxed))));
+                } else if (transport_.isCancelRequested()) {
+                    txn.promise.set_value(std::unexpected(CoEErrorCode::ShuttingDown));
                 } else {
-                    txn.promise.set_value(std::unexpected(CoEError::TransportError));
+                    txn.promise.set_value(std::unexpected(CoEErrorCode::TransportError));
                 }
                 continue;
             }
@@ -922,10 +950,10 @@ uint32_t CoEManager::nextRequestId() {
 template<typename T>
 void CoEReadTransactionImpl<T>::execute(CoEManager& mgr) {
     // Check mailbox configuration before attempting I/O so that the
-    // proper CoEError::NotConfigured is surfaced (maps to DeviceStateError
+    // proper CoEErrorCode::NotConfigured is surfaced (maps to DeviceStateError
     // abort code) rather than a generic TransportError.
     if (!mgr.getMailbox(nullptr, nullptr, nullptr, nullptr)) {
-        result_ = CoEResult<T>(std::unexpected(CoEError::NotConfigured));
+        result_ = CoEResult<T>(std::unexpected(CoEErrorCode::NotConfigured));
         return;
     }
 
@@ -939,9 +967,11 @@ void CoEReadTransactionImpl<T>::execute(CoEManager& mgr) {
 
     if (!ok) {
         if (mgr.lastSdoAbortCode() != 0) {
-            result_ = CoEResult<T>(std::unexpected(CoEError::Aborted));
+            result_ = CoEResult<T>(std::unexpected(CoEError::aborted(mgr.lastSdoAbortCode())));
+        } else if (mgr.transport().isCancelRequested()) {
+            result_ = CoEResult<T>(std::unexpected(CoEErrorCode::ShuttingDown));
         } else {
-            result_ = CoEResult<T>(std::unexpected(CoEError::TransportError));
+            result_ = CoEResult<T>(std::unexpected(CoEErrorCode::TransportError));
         }
         return;
     }
@@ -960,7 +990,7 @@ void CoEReadTransactionImpl<T>::execute(CoEManager& mgr) {
                     "or read as a raw byte vector.",
                     mgr.logPrefix().c_str(), txn_.index, txn_.subindex,
                     out_len, sizeof(T));
-        result_ = CoEResult<T>(std::unexpected(CoEError::InternalError));
+        result_ = CoEResult<T>(std::unexpected(CoEErrorCode::InternalError));
         return;
     }
 
@@ -991,7 +1021,7 @@ void CoEReadTransactionImpl<T>::execute(CoEManager& mgr) {
 template<>
 void CoEReadTransactionImpl<std::vector<uint8_t>>::execute(CoEManager& mgr) {
     if (!mgr.getMailbox(nullptr, nullptr, nullptr, nullptr)) {
-        result_ = CoEResult<std::vector<uint8_t>>(std::unexpected(CoEError::NotConfigured));
+        result_ = CoEResult<std::vector<uint8_t>>(std::unexpected(CoEErrorCode::NotConfigured));
         return;
     }
 
@@ -1005,9 +1035,11 @@ void CoEReadTransactionImpl<std::vector<uint8_t>>::execute(CoEManager& mgr) {
 
     if (!ok) {
         if (mgr.lastSdoAbortCode() != 0) {
-            result_ = CoEResult<std::vector<uint8_t>>(std::unexpected(CoEError::Aborted));
+            result_ = CoEResult<std::vector<uint8_t>>(std::unexpected(CoEError::aborted(mgr.lastSdoAbortCode())));
+        } else if (mgr.transport().isCancelRequested()) {
+            result_ = CoEResult<std::vector<uint8_t>>(std::unexpected(CoEErrorCode::ShuttingDown));
         } else {
-            result_ = CoEResult<std::vector<uint8_t>>(std::unexpected(CoEError::TransportError));
+            result_ = CoEResult<std::vector<uint8_t>>(std::unexpected(CoEErrorCode::TransportError));
         }
         return;
     }

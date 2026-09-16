@@ -22,7 +22,7 @@ SDOMailboxIO::SDOMailboxIO(SDODiagnostics& diag)
 void SDOMailboxIO::drainStale(Master& master, uint16_t adp,
                                uint16_t mbxReadAddr, uint16_t mbxReadLen,
                                unsigned int maxDrain) {
-    if (mbxReadLen == 0) {
+    if (mbxReadLen == 0 || master.isCancelRequested()) {
         return;
     }
 
@@ -99,13 +99,23 @@ bool SDOMailboxIO::apwrWithWkcProbe(Master& master, uint16_t adp,
                                      unsigned int timeoutMs, bool* outUsedAlt) {
     if (outUsedAlt) *outUsedAlt = false;
 
+    if (master.isCancelRequested()) {
+        return false;
+    }
+
     if (!waitSm0NotFull(master, adp, timeoutMs)) {
-        TETHER_LOGE(TAG, "mailbox write aborted: SM0 still full (adp=0x{:04X} addr=0x{:04X})", adp, primaryAddr);
+        if (!master.isCancelRequested()) {
+            TETHER_LOGE(TAG, "mailbox write aborted: SM0 still full (adp=0x{:04X} addr=0x{:04X})", adp, primaryAddr);
+        }
         return false;
     }
 
     if (master.writeRegister(Master::slaveAddressFromADP(adp), primaryAddr, payload, payloadLen, timeoutMs)) {
         return true;
+    }
+
+    if (master.isCancelRequested()) {
+        return false;
     }
 
     if (master.lastWkc() == 0) {
@@ -121,6 +131,10 @@ bool SDOMailboxIO::apwrWithWkcProbe(Master& master, uint16_t adp,
         TETHER_LOGW(TAG, "SDO mailbox APWR acknowledged on alt addr=0x{:04X}. Treating mailbox wr/rd as swapped for this SDO op.",
                     altAddr);
         return true;
+    }
+
+    if (master.isCancelRequested()) {
+        return false;
     }
 
     TETHER_LOGE(TAG, "SDO mailbox APWR not acknowledged on both addr=0x{:04X} and alt=0x{:04X} (adp=0x{:04X})",

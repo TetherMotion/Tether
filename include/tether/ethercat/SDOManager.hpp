@@ -59,6 +59,7 @@
 
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/SDOAbortCodes.hpp"
 #ifdef ESP_PLATFORM
 #include "esp_eth_driver.h"
 #endif
@@ -94,52 +95,10 @@ constexpr uint32_t kDefaultSDOTimeoutMs = ECAT_SDO_MANAGER_DEFAULT_TIMEOUT_MS;
 // ============================================================================
 // SDO Error Codes
 // ============================================================================
-
-/**
- * @brief SDO abort codes (CoE specification)
- * 
- * These are the standard abort codes returned by slaves when an SDO
- * operation fails. The code indicates what went wrong.
- */
-enum class SDOAbortCode : uint32_t {
-    Success                  = 0x00000000, ///< No error
-    ToggleBitNotChanged      = 0x05030000, ///< Toggle bit not alternated
-    Timeout                  = 0x05040000, ///< SDO protocol timeout
-    InvalidCommand           = 0x05040001, ///< Command specifier unknown
-    InvalidBlockSize         = 0x05040002, ///< Invalid block size
-    InvalidSequenceNumber    = 0x05040003, ///< Invalid sequence number
-    CrcError                 = 0x05040004, ///< CRC error
-    OutOfMemory              = 0x05040005, ///< Out of memory
-    UnsupportedAccess        = 0x06010000, ///< Unsupported access
-    ReadOnlyObject           = 0x06010001, ///< Write to read-only object
-    WriteOnlyObject          = 0x06010002, ///< Read from write-only object
-    ObjectNotFound           = 0x06020000, ///< Object does not exist
-    PdoMappingError          = 0x06040041, ///< Object cannot be mapped to PDO
-    PdoLengthExceeded        = 0x06040042, ///< Number/length would exceed PDO
-    ParameterIncompatible    = 0x06040043, ///< Parameter incompatibility
-    InternalError            = 0x06040047, ///< General internal incompatibility
-    HardwareError            = 0x06060000, ///< Hardware error
-    DataTypeMismatch         = 0x06070010, ///< Data type mismatch, length mismatch
-    DataTypeTooLong          = 0x06070012, ///< Data type mismatch, length too high
-    DataTypeTooShort         = 0x06070013, ///< Data type mismatch, length too low
-    SubindexNotFound         = 0x06090011, ///< Subindex does not exist
-    InvalidValue             = 0x06090030, ///< Invalid value for parameter
-    ValueTooHigh             = 0x06090031, ///< Value too high
-    ValueTooLow              = 0x06090032, ///< Value too low
-    MaxLessThanMin           = 0x06090036, ///< Maximum less than minimum
-    ResourceNotAvailable     = 0x060A0023, ///< Resource not available
-    GeneralError             = 0x08000000, ///< General error
-    TransferAborted          = 0x08000020, ///< Data transfer aborted
-    LocalControlError        = 0x08000021, ///< Local control error
-    DeviceStateError         = 0x08000022, ///< Wrong device state
-    DictionaryNotPresent     = 0x08000023, ///< Object dictionary not present
-    NoDataAvailable          = 0x08000024, ///< No data available
-};
-
-/**
- * @brief Convert SDO abort code to human-readable string
- */
-const char* sdo_abort_code_str(SDOAbortCode code);
+//
+// The canonical SDOAbortCode enum and sdoAbortCodeStr() now live in
+// tether/ethercat/SDOAbortCodes.hpp at EtherCAT scope, shared with the CoE
+// layer and the slave-emulation object dictionary.
 
 // ============================================================================
 // SDO Request/Response Structures
@@ -347,6 +306,20 @@ public:
      *       is safe to read immediately after a call returns false.
      */
     virtual uint32_t lastAbortCode() const { return 0; }
+
+    /**
+     * @brief Return true if master-level cancellation has been requested
+     *        (e.g. Master::requestCancel() from a signal handler or during
+     *        Master::stop()).
+     *
+     * CoEManager checks this to fail newly submitted SDO requests
+     * immediately and to abort in-flight retry loops quietly — failures
+     * during shutdown are expected and must not produce error log spam.
+     *
+     * The default implementation returns false, so mock transports used in
+     * unit tests do not need to override it.
+     */
+    virtual bool isCancelRequested() const { return false; }
 };
 
 // ============================================================================

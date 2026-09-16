@@ -54,6 +54,11 @@ void SDODiagnostics::smActivateStr(uint8_t actByte, char* buf, size_t bufLen) co
 
 void SDODiagnostics::dumpSlaveState(Master& master, uint16_t adp,
                                     uint16_t mbxWrAddr, uint16_t mbxRdAddr) {
+    // During shutdown every register read fails anyway — the dump would
+    // only produce a misleading all-zeroes error block.
+    if (master.isCancelRequested()) {
+        return;
+    }
     uint16_t al_status = 0;
     uint16_t al_code = 0;
     uint8_t sm0[8] = {0};

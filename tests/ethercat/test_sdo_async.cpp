@@ -614,7 +614,7 @@ TEST_F(SDOManagerSyncTest, WriteSyncEmptyData) {
 //
 // When the slave returns a definitive CoE SDO abort (e.g. 0x06070010 length
 // mismatch), the retry wrapper must NOT retry the identical payload — it
-// should call the transport exactly once, surface CoEError::Aborted, and
+// should call the transport exactly once, surface CoEErrorCode::Aborted, and
 // expose the abort code via CoEManager::lastSdoAbortCode().
 // ============================================================================
 
@@ -638,7 +638,10 @@ TEST_F(SDOManagerSyncTest, WriteSyncAbort_DoesNotRetry_AndReportsAbortCode) {
     auto result = mgr.writeSync(0x6040, 0, &controlword, sizeof(controlword),
                                 CoETransactionOptions{.timeout_ms = 100, .max_retries = 3});
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), CoEError::Aborted);
+    EXPECT_EQ(result.error(), CoEErrorCode::Aborted);
+    EXPECT_EQ(result.error().abort_code, kAbortCode);
+    EXPECT_EQ(result.error().abort, SDOAbortCode::DataTypeMismatch);
+    EXPECT_STREQ(coeErrorStr(result.error()), "Data type mismatch, length mismatch");
     EXPECT_EQ(mgr.lastSdoAbortCode(), kAbortCode);
 
     mgr.deinit();
@@ -664,7 +667,10 @@ TEST_F(SDOManagerSyncTest, ReadSyncAbort_DoesNotRetry_AndReportsAbortCode) {
     auto result = mgr.readSync<uint32_t>(0x6040, 0,
                                          CoETransactionOptions{.timeout_ms = 100, .max_retries = 3});
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), CoEError::Aborted);
+    EXPECT_EQ(result.error(), CoEErrorCode::Aborted);
+    EXPECT_EQ(result.error().abort_code, kAbortCode);
+    EXPECT_EQ(result.error().abort, SDOAbortCode::SubindexNotFound);
+    EXPECT_STREQ(coeErrorStr(result.error()), "Subindex does not exist");
     EXPECT_EQ(mgr.lastSdoAbortCode(), kAbortCode);
 
     mgr.deinit();
@@ -690,7 +696,7 @@ TEST_F(SDOManagerSyncTest, WriteSyncTransportFailure_StillRetries_WhenNoAbortCod
     auto result = mgr.writeSync(0x6040, 0, &controlword, sizeof(controlword),
                                 CoETransactionOptions{.timeout_ms = 100, .max_retries = 3});
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), CoEError::TransportError);
+    EXPECT_EQ(result.error(), CoEErrorCode::TransportError);
     EXPECT_EQ(mgr.lastSdoAbortCode(), 0u);
 
     mgr.deinit();
@@ -783,7 +789,7 @@ TEST_F(SDOManagerAsyncTest, AsyncRequestFailedSlave) {
     EXPECT_TRUE(waitForResponse(mgr, id, resp));
     EXPECT_FALSE(resp.success());
     EXPECT_EQ(resp.status, SDOStatus::Failed);
-    EXPECT_EQ(resp.abort_code, SDO::SDOAbortCode::DeviceStateError);
+    EXPECT_EQ(resp.abort_code, EtherCAT::SDOAbortCode::DeviceStateError);
 
     mgr.deinit();
 }
@@ -1070,7 +1076,15 @@ TEST_F(SDOManagerDiagTest, DiagEnableDisable) {
 // Abort Code String Tests
 // ============================================================================
 
-// Removed - function signature mismatch between declaration (CoE::SDOAbortCode) and implementation (SDO::SDOAbortCode)
+TEST(SDOAbortCodeStrTest, DecodesKnownAndUnknownCodes) {
+    EXPECT_STREQ(sdoAbortCodeStr(SDOAbortCode::ObjectNotFound), "Object does not exist");
+    EXPECT_STREQ(sdoAbortCodeStr(SDOAbortCode::SubindexNotFound), "Subindex does not exist");
+    EXPECT_STREQ(sdoAbortCodeStr(static_cast<uint32_t>(SDOAbortCode::ObjectNotFound)),
+                 "Object does not exist");
+    EXPECT_STREQ(sdoAbortCodeStr(0xDEADBEEFu), "Unknown abort code");
+    EXPECT_STREQ(coeErrorStr(CoEError::aborted(0x06020000)), "Object does not exist");
+    EXPECT_STREQ(coeErrorStr(CoEErrorCode::TransportError), "Transport error");
+}
 
 // ============================================================================
 // Response Fields Correctness
@@ -1110,7 +1124,7 @@ TEST_F(SDOManagerResponseFieldsTest, UploadResponseFields) {
     EXPECT_EQ(resp.subindex, 5);
     EXPECT_EQ(resp.operation, SDOOperation::Upload);
     EXPECT_EQ(resp.status, SDOStatus::Complete);
-    EXPECT_EQ(resp.abort_code, SDO::SDOAbortCode::Success);
+    EXPECT_EQ(resp.abort_code, EtherCAT::SDOAbortCode::Success);
     EXPECT_EQ(resp.data_size, 4u);
     EXPECT_EQ(resp.data[0], 0x11);
     EXPECT_EQ(resp.data[1], 0x22);
