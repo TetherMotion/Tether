@@ -10,7 +10,7 @@
  * PDO layout (from SOMANET_CiA_402_v5.1.9.xml ESI):
  *   SM2 (outputs, 0x1800, ctrl=0x64): RxPDO 0x1700 (11 bytes)
  *     FSoE Command, STO/SS1/SS2/SOS/SLS/SBC/ResetPos flags, CRCs, ConnectionID
- *   SM3 (inputs, 0x1C00, ctrl=0x20): TxPDO 0x1B00 (31 bytes)
+ *   SM3 (inputs, 0x1C00, ctrl=0x20): TxPDO 0x1B00 (35 bytes)
  *     FSoE Command, safety state flags, diagnostic flags, safe position/velocity, CRCs, ConnectionID
  *
  * The FSoE master state machine (MainInstance) runs each cycle, building the
@@ -163,7 +163,7 @@ private:
 // This task runs the FSoE protocol exchange each cycle using the actual
 // EtherCAT PDO buffers.  The FSoE MainInstance builds its master→slave frame
 // into the RxPDO 0x1700 buffer (11 bytes), and processes the slave→master
-// frame from the TxPDO 0x1B00 buffer (31 bytes).  The drive's safety
+// frame from the TxPDO 0x1B00 buffer (35 bytes).  The drive's safety
 // firmware handles the slave side of the FSoE state machine.
 //
 // On exchange failure the task logs a warning but does NOT stop the process
@@ -531,7 +531,7 @@ int main(int argc, char** argv) {
     // PDO layout:
     //   SM2 (outputs, 0x1800, ctrl=0x64): RxPDO 0x1700 (11 bytes)
     //     FSoE Command, STO/SS1/SS2/SOS/SLS/SBC/ResetPos flags, CRCs, ConnectionID
-    //   SM3 (inputs, 0x1C00, ctrl=0x20): TxPDO 0x1B00 (31 bytes)
+    //   SM3 (inputs, 0x1C00, ctrl=0x20): TxPDO 0x1B00 (35 bytes)
     //     FSoE Command, safety state flags, diagnostic flags, safe pos/vel, CRCs, ConnectionID
     {
         // ensureDrive() creates the CiA402Drive object and marks the slave
@@ -694,13 +694,17 @@ int main(int argc, char** argv) {
             if (tx != nullptr) {
                 TETHER_LOGI(TAG,
                     "Final TxPDO 0x1B00: cmd=0x{:02X} sto_state={} sos_state={} "
-                    "error_state={} safe_pos={} safe_vel={} conn_id=0x{:04X}",
+                    "error_state={} safe_pos_single={} safe_pos_multi={} "
+                    "safe_vel_low={} safe_vel_high={} safe_torque={} conn_id=0x{:04X}",
                     tx->fsoe_command,
                     (tx->safety_state_flags & FSoETxPDO::kSTOState) ? 1 : 0,
                     (tx->safety_state_flags & FSoETxPDO::kSOSState) ? 1 : 0,
                     (tx->safety_state_flags & FSoETxPDO::kErrorState) ? 1 : 0,
-                    static_cast<int16_t>(tx->safe_position_actual),
-                    static_cast<int16_t>(tx->safe_velocity_actual),
+                    static_cast<int16_t>(tx->safe_position_single_turn),
+                    static_cast<int16_t>(tx->safe_position_multi_turn),
+                    static_cast<int16_t>(tx->safe_velocity_low),
+                    static_cast<int16_t>(tx->safe_velocity_high),
+                    static_cast<int16_t>(tx->safe_torque_actual),
                     tx->fsoe_connection_id);
             }
             if (rx != nullptr) {

@@ -73,9 +73,9 @@ TEST(SynapticonFSoEPDOTest, RxPDO_1700_Size) {
 }
 
 TEST(SynapticonFSoEPDOTest, TxPDO_1B00_Size) {
-    EXPECT_EQ(sizeof(SOMANET_TxPDO_1B00), 31u);
+    EXPECT_EQ(sizeof(SOMANET_TxPDO_1B00), 35u);
     EXPECT_EQ(TxPDO_1B00.index, 0x1B00u);
-    EXPECT_EQ(TxPDO_1B00.size, 31u);
+    EXPECT_EQ(TxPDO_1B00.size, 35u);
 }
 
 // ============================================================================
@@ -182,7 +182,7 @@ TEST(SynapticonMultiPDOAssignmentTest, FSoEAssignmentSM3) {
     EXPECT_EQ(sm3.control_byte, 0x20u);
     ASSERT_EQ(sm3.pdo_mappings.size(), 1u);
     EXPECT_EQ(sm3.pdo_mappings[0].pdo_index, 0x1B00u);
-    EXPECT_EQ(sm3.pdo_mappings[0].size_bytes, 31u);
+    EXPECT_EQ(sm3.pdo_mappings[0].size_bytes, 35u);
 }
 
 // ============================================================================
@@ -200,14 +200,14 @@ TEST(SynapticonMultiPDOAssignmentTest, CombinedAssignmentSM2) {
     EXPECT_EQ(sm2.sm_index, 2u);
     ASSERT_EQ(sm2.pdo_mappings.size(), 4u);
 
-    EXPECT_EQ(sm2.pdo_mappings[0].pdo_index, 0x1600u);
-    EXPECT_EQ(sm2.pdo_mappings[1].pdo_index, 0x1601u);
-    EXPECT_EQ(sm2.pdo_mappings[2].pdo_index, 0x1602u);
-    EXPECT_EQ(sm2.pdo_mappings[3].pdo_index, 0x1700u);
+    EXPECT_EQ(sm2.pdo_mappings[0].pdo_index, 0x1700u);  // FSoE first
+    EXPECT_EQ(sm2.pdo_mappings[1].pdo_index, 0x1600u);
+    EXPECT_EQ(sm2.pdo_mappings[2].pdo_index, 0x1601u);
+    EXPECT_EQ(sm2.pdo_mappings[3].pdo_index, 0x1602u);
 
     uint16_t total = 0;
     for (const auto& p : sm2.pdo_mappings) total += p.size_bytes;
-    EXPECT_EQ(total, 46u);  // 35 + 11
+    EXPECT_EQ(total, 46u);  // 11 + 35
 }
 
 TEST(SynapticonMultiPDOAssignmentTest, CombinedAssignmentSM3) {
@@ -216,15 +216,15 @@ TEST(SynapticonMultiPDOAssignmentTest, CombinedAssignmentSM3) {
     EXPECT_EQ(sm3.sm_index, 3u);
     ASSERT_EQ(sm3.pdo_mappings.size(), 5u);
 
-    EXPECT_EQ(sm3.pdo_mappings[0].pdo_index, 0x1A00u);
-    EXPECT_EQ(sm3.pdo_mappings[1].pdo_index, 0x1A01u);
-    EXPECT_EQ(sm3.pdo_mappings[2].pdo_index, 0x1A02u);
-    EXPECT_EQ(sm3.pdo_mappings[3].pdo_index, 0x1A03u);
-    EXPECT_EQ(sm3.pdo_mappings[4].pdo_index, 0x1B00u);
+    EXPECT_EQ(sm3.pdo_mappings[0].pdo_index, 0x1B00u);  // FSoE first
+    EXPECT_EQ(sm3.pdo_mappings[1].pdo_index, 0x1A00u);
+    EXPECT_EQ(sm3.pdo_mappings[2].pdo_index, 0x1A01u);
+    EXPECT_EQ(sm3.pdo_mappings[3].pdo_index, 0x1A02u);
+    EXPECT_EQ(sm3.pdo_mappings[4].pdo_index, 0x1A03u);
 
     uint16_t total = 0;
     for (const auto& p : sm3.pdo_mappings) total += p.size_bytes;
-    EXPECT_EQ(total, 78u);  // 47 + 31
+    EXPECT_EQ(total, 82u);  // 35 + 47
 }
 
 // ============================================================================
@@ -285,7 +285,7 @@ TEST(SynapticonMultiPDOAssignmentTest, CustomAssignmentFSoEIndices) {
     EXPECT_EQ(assignment.sm_configs[0].pdo_mappings[0].pdo_index, 0x1700u);
     EXPECT_EQ(assignment.sm_configs[0].pdo_mappings[0].size_bytes, 11u);
     EXPECT_EQ(assignment.sm_configs[1].pdo_mappings[0].pdo_index, 0x1B00u);
-    EXPECT_EQ(assignment.sm_configs[1].pdo_mappings[0].size_bytes, 31u);
+    EXPECT_EQ(assignment.sm_configs[1].pdo_mappings[0].size_bytes, 35u);
 }
 
 TEST(SynapticonMultiPDOAssignmentTest, CustomAssignmentEmptyLists) {
@@ -321,8 +321,11 @@ TEST(SynapticonFSoEPDOTest, TxPDO_1B00_FieldAccess) {
     pdo.fsoe_command = 0x02;
     pdo.safety_state_flags = SOMANET_TxPDO_1B00::kSTOState | SOMANET_TxPDO_1B00::kSOSState;
     pdo.diagnostic_flags = SOMANET_TxPDO_1B00::kSafePositionValid | SOMANET_TxPDO_1B00::kSafeSpeedValid;
-    pdo.safe_position_actual = 0x1000;
-    pdo.safe_velocity_actual = 0x2000;
+    pdo.safe_position_single_turn = 0x1000;
+    pdo.safe_position_multi_turn = 0x2000;
+    pdo.safe_velocity_low = 0x3000;
+    pdo.safe_velocity_high = 0x4000;
+    pdo.safe_torque_actual = 0x5000;
     pdo.fsoe_connection_id = 0x4321;
 
     EXPECT_EQ(pdo.fsoe_command, 0x02u);
@@ -332,8 +335,11 @@ TEST(SynapticonFSoEPDOTest, TxPDO_1B00_FieldAccess) {
     EXPECT_TRUE(pdo.diagnostic_flags & SOMANET_TxPDO_1B00::kSafePositionValid);
     EXPECT_TRUE(pdo.diagnostic_flags & SOMANET_TxPDO_1B00::kSafeSpeedValid);
     EXPECT_FALSE(pdo.diagnostic_flags & SOMANET_TxPDO_1B00::kTemperatureWarning);
-    EXPECT_EQ(pdo.safe_position_actual, 0x1000u);
-    EXPECT_EQ(pdo.safe_velocity_actual, 0x2000u);
+    EXPECT_EQ(pdo.safe_position_single_turn, 0x1000u);
+    EXPECT_EQ(pdo.safe_position_multi_turn, 0x2000u);
+    EXPECT_EQ(pdo.safe_velocity_low, 0x3000u);
+    EXPECT_EQ(pdo.safe_velocity_high, 0x4000u);
+    EXPECT_EQ(pdo.safe_torque_actual, 0x5000u);
     EXPECT_EQ(pdo.fsoe_connection_id, 0x4321u);
 }
 

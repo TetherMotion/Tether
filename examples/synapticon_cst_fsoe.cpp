@@ -158,13 +158,13 @@ constexpr uint32_t kSdoTimeoutMs = EtherCAT::Drives::Synapticon::kSdoTimeoutMs;
 //
 // FSoE safety PDOs:
 //   RxPDO 0x1700: FSoE command frame (master→slave, 11 bytes)
-//   TxPDO 0x1B00: FSoE status frame (slave→master, 31 bytes)
+//   TxPDO 0x1B00: FSoE status frame (slave→master, 35 bytes)
 //
 // Both sets are mapped simultaneously using the multi-PDO-per-sync-manager
 // API.  ALL PDOs (including FSoE) are written explicitly to 0x1C12/0x1C13.
 // FSoE PDOs come FIRST in the assignment order, then motion PDOs.
 //   SM2 (Rx, master→slave): [0x1700 (11B)][0x1600 (19B)][0x1601][0x1602] = 46 bytes
-//   SM3 (Tx, slave→master): [0x1B00 (31B)][0x1A00 (13B)][0x1A01][0x1A02][0x1A03] = 78 bytes
+//   SM3 (Tx, slave→master): [0x1B00 (35B)][0x1A00 (13B)][0x1A01][0x1A02][0x1A03] = 82 bytes
 //
 // FSoE PDOs come FIRST in the assignment order.  This is critical because
 // the Synapticon Circulo EtherCAT chip has a bug where the last word in the
@@ -181,15 +181,15 @@ using FSoETxPDO = EtherCAT::Drives::SynapticonPDO::SOMANET_TxPDO_1B00;
 // PDO offsets within the combined PDO buffer.
 // FSoE PDOs come FIRST (offset 0), motion PDOs follow after the FSoE PDO.
 //   SM2: 0x1700 (11B) first, then 0x1600 (19B) at offset 11
-//   SM3: 0x1B00 (31B) first, then 0x1A00 (13B) at offset 31
+//   SM3: 0x1B00 (35B) first, then 0x1A00 (13B) at offset 35
 constexpr size_t kFSoERxPDOOffset   = 0;                    // FSoE first
 constexpr size_t kMotionRxPDOOffset = sizeof(FSoERxPDO);    // 11 bytes
 constexpr size_t kFSoETxPDOOffset   = 0;                    // FSoE first
-constexpr size_t kMotionTxPDOOffset = sizeof(FSoETxPDO);    // 31 bytes
+constexpr size_t kMotionTxPDOOffset = sizeof(FSoETxPDO);    // 35 bytes (LW2 with safe torque)
 
 // Total SM lengths (full combined: FSoE + all motion PDOs).
 constexpr size_t kSM2TotalLen = EtherCAT::Drives::SynapticonPDO::kSM2CombinedSize;   // 46
-constexpr size_t kSM3TotalLen = EtherCAT::Drives::SynapticonPDO::kSM3CombinedSize;   // 78
+constexpr size_t kSM3TotalLen = EtherCAT::Drives::SynapticonPDO::kSM3CombinedSize;   // 82
 
 using FSoEMain = EtherCAT::Drives::Synapticon::SafeMotion::MainInstance;
 
@@ -1145,7 +1145,7 @@ int main(int argc, char** argv) {
     //
     // PDO buffer layout (combined):
     //   SM2 (Rx): [0x1600 (12B)][0x1700 (11B)] = 23 bytes
-    //   SM3 (Tx): [0x1A00 (12B)][0x1B00 (31B)] = 43 bytes
+    //   SM3 (Tx): [0x1A00 (12B)][0x1B00 (35B)] = 47 bytes
     int rc = 0;
 
     // Discover slaves and initialize distributed clocks
