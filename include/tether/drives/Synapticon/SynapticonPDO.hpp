@@ -13,12 +13,12 @@
  * │    0x1600 = 19 bytes, 0x1601 = 8 bytes, 0x1602 = 8 bytes            │
  * │    0x1A00 = 13 bytes, 0x1A01 = 12 bytes, 0x1A02 = 4 bytes,         │
  * │    0x1A03 = 18 bytes                                                │
- * │    0x1700 = 11 bytes (FSoE RxPDO), 0x1B00 = 31 bytes (FSoE TxPDO)  │
+ * │    0x1700 = 11 bytes (FSoE RxPDO), 0x1B00 = 35 bytes (FSoE TxPDO)  │
  * │                                                                      │
  * │  COMBINED PDO CONFIGURATION (FSoE + motion):                         │
  * │  ┌─────────────────────────────────────────────────────────────┐    │
  * │  │ SM2 (Rx): [0x1700 (11B)][0x1600 (19B)][0x1601][0x1602]    │    │
- * │  │ SM3 (Tx): [0x1B00 (31B)][0x1A00 (13B)][0x1A01][0x1A02]    │    │
+ * │  │ SM3 (Tx): [0x1B00 (35B)][0x1A00 (13B)][0x1A01][0x1A02]    │    │
  * │  │                       [0x1A03]                             │    │
  * │  └─────────────────────────────────────────────────────────────┘    │
  * │                                                                      │
@@ -56,7 +56,7 @@
  *   0x1700  Control (PLC to Drive)  (11 bytes) — FSoE command, STO/SS1/SS2/SOS/SBC bits, SLS instances, CRCs, ConnectionID
  *
  * FSoE TxPDO (slave -> master, SM3):
- *   0x1B00  Status (Drive to PLC)   (31 bytes) — FSoE command, safety state bits, safe position/velocity, CRCs, ConnectionID
+ *   0x1B00  Status (Drive to PLC)   (35 bytes) — FSoE command, safety state bits, safe position/velocity/torque, CRCs, ConnectionID
  */
 
 #pragma once
@@ -242,12 +242,14 @@ struct SOMANET_RxPDO_1700 {
 static_assert(sizeof(SOMANET_RxPDO_1700) == 11, "SOMANET_RxPDO_1700 size mismatch");
 
 // ============================================================================
-// FSoE TxPDO 0x1B00 — Slave -> Master, 31 bytes
+// FSoE TxPDO 0x1B00 — Slave -> Master, 35 bytes (LW2 with safe torque)
 // Status (Drive to PLC) — FSoE safety status frame
 //
-// ESI layout (248 bits = 31 bytes):
+// Official source: https://doc.synapticon.com/circulo_safe_motion/smm/lw2/safe_data_via_fsoe.htm
+//
+// ESI layout (280 bits = 35 bytes):
 //   Byte 0:     FSoE Command (8 bits)
-//   Bytes 1-3:  Safety state flags (16 bits used + 8 padding)
+//   Bytes 1-2:  Safety state flags / Status Word 0 (16 bits)
 //     bit 0:  STO state        (0x6640:0)
 //     bit 3:  SOS state        (0x6668:1)
 //     bit 7:  Error state      (0x6632:0)
@@ -257,33 +259,38 @@ static_assert(sizeof(SOMANET_RxPDO_1700) == 11, "SOMANET_RxPDO_1700 size mismatc
 //     bit 13: SLS inst 2       (0x6690:2)
 //     bit 14: SLS inst 3       (0x6690:3)
 //     bit 15: SLS inst 4       (0x6690:4)
-//   Bytes 4-5:  FSoE CRC_0 (16 bits)
-//   Bytes 6-7:  Diagnostic flags (16 bits used)
+//   Bytes 3-4:  FSoE CRC_0 (16 bits)
+//   Bytes 5-6:  Diagnostic flags / Status Word 1 (16 bits)
 //     bit 0: Restart ack req   (0x6630:0)
 //     bit 1: SBC state         (0x6660:0)
-//     bit 2: Temp warning      (0x2600:0)
+//     bit 2: Temperature OK    (0x2600:0)
 //     bit 3: Safe pos valid    (0x2601:0)
 //     bit 4: Safe speed valid  (0x2602:0)
+//     bit 5: Safe torque valid (0x26B0:1)
+//     bit 6: Safe torque sign valid (0x26B0:2)
+//     bit 7: SLT state         (0x66B0:1)
 //     bit 8: Safe input 1      (0x2603:1)
 //     bit 9: Safe input 2      (0x2603:2)
 //     bit 10: Safe input 3     (0x2603:3)
 //     bit 11: Safe input 4     (0x2603:4)
-//     bit 12: Safe out mon 1   (0x2604:1)
-//     bit 13: Safe out mon 2   (0x2604:2)
+//     bit 12: Safe output 1    (0x2604:1)
+//     bit 13: reserved         (User Defined)
 //     bit 14: Analog diag      (0x2605:1)
 //     bit 15: Analog valid     (0x2605:2)
-//   Bytes 8-9:  FSoE CRC_1 (16 bits)
-//   Bytes 10-11: Safe position actual (16 bits)
-//   Bytes 12-13: FSoE CRC_2 (16 bits)
-//   Bytes 14-15: Safe position actual duplicate (16 bits)
-//   Bytes 16-17: FSoE CRC_3 (16 bits)
-//   Bytes 18-19: Safe velocity actual (16 bits)
-//   Bytes 20-21: FSoE CRC_4 (16 bits)
-//   Bytes 22-23: Safe velocity actual duplicate (16 bits)
-//   Bytes 24-25: FSoE CRC_5 (16 bits)
-//   Bytes 26-27: Safe analog value (16 bits)
-//   Bytes 28-29: FSoE CRC_6 (16 bits)
-//   Bytes 30-31: FSoE ConnectionID (16 bits)
+//   Bytes 7-8:  FSoE CRC_1 (16 bits)
+//   Bytes 9-10:   Safe position single turn (0x6611:11) / Status Word 2 (16 bits)
+//   Bytes 11-12:  FSoE CRC_2 (16 bits)
+//   Bytes 13-14:  Safe position multiturn (0x6611:00) / Status Word 3 (16 bits)
+//   Bytes 15-16:  FSoE CRC_3 (16 bits)
+//   Bytes 17-18:  Safe velocity part low (0x6613:00) / Status Word 4 (16 bits)
+//   Bytes 19-20:  FSoE CRC_4 (16 bits)
+//   Bytes 21-22:  Safe velocity part high (0x6613:00) / Status Word 5 (16 bits)
+//   Bytes 23-24:  FSoE CRC_5 (16 bits)
+//   Bytes 25-26:  Safe scaled analog input (0x2605:03) / Status Word 6 (16 bits)
+//   Bytes 27-28:  FSoE CRC_6 (16 bits)
+//   Bytes 29-30:  Safe torque actual value (0x6616:00) / Status Word 7 (16 bits)
+//   Bytes 31-32:  FSoE CRC_7 (16 bits)
+//   Bytes 33-34:  FSoE ConnectionID (16 bits)
 // ============================================================================
 
 struct SOMANET_TxPDO_1B00 {
@@ -292,16 +299,18 @@ struct SOMANET_TxPDO_1B00 {
     uint16_t fsoe_crc_0;                ///< 0x6760:3 FSoE CRC_0
     uint16_t diagnostic_flags;          ///< Bit-packed: diag/safe I/O status
     uint16_t fsoe_crc_1;                ///< 0x6760:4 FSoE CRC_1
-    uint16_t safe_position_actual;      ///< 0x6611:0 Safe position actual value
+    uint16_t safe_position_single_turn; ///< 0x6611:11 Safe position single-turn value (Status Word 2)
     uint16_t fsoe_crc_2;                ///< 0x6760:5 FSoE CRC_2
-    uint16_t safe_position_actual_dup;  ///< Safe position actual value (duplicate)
+    uint16_t safe_position_multi_turn;  ///< 0x6611:00 Safe position multiturn value (Status Word 3)
     uint16_t fsoe_crc_3;                ///< 0x6760:6 FSoE CRC_3
-    uint16_t safe_velocity_actual;      ///< 0x6613:0 Safe velocity actual value
+    uint16_t safe_velocity_low;         ///< 0x6613:00 Safe velocity part low (Status Word 4)
     uint16_t fsoe_crc_4;                ///< 0x6760:7 FSoE CRC_4
-    uint16_t safe_velocity_actual_dup;  ///< Safe velocity actual value (duplicate)
+    uint16_t safe_velocity_high;        ///< 0x6613:00 Safe velocity part high (Status Word 5)
     uint16_t fsoe_crc_5;                ///< 0x6760:8 FSoE CRC_5
-    uint16_t safe_analog_value;         ///< 0x2605:3 Safe analog value (scaled)
+    uint16_t safe_analog_value;         ///< 0x2605:03 Safe scaled analog input (Status Word 6)
     uint16_t fsoe_crc_6;                ///< 0x6760:9 FSoE CRC_6
+    uint16_t safe_torque_actual;        ///< 0x6616:00 Safe torque actual value (Status Word 7)
+    uint16_t fsoe_crc_7;                ///< FSoE CRC_7 (Safe torque)
     uint16_t fsoe_connection_id;        ///< 0x6760:2 FSoE ConnectionID
 
     // Safety state flag bit positions
@@ -321,6 +330,9 @@ struct SOMANET_TxPDO_1B00 {
     static constexpr uint16_t kTemperatureWarning  = 1u << 2;
     static constexpr uint16_t kSafePositionValid   = 1u << 3;
     static constexpr uint16_t kSafeSpeedValid      = 1u << 4;
+    static constexpr uint16_t kSafeTorqueValid     = 1u << 5;
+    static constexpr uint16_t kSafeTorqueSignValid = 1u << 6;
+    static constexpr uint16_t kSLTState            = 1u << 7;
     static constexpr uint16_t kSafeInput1          = 1u << 8;
     static constexpr uint16_t kSafeInput2          = 1u << 9;
     static constexpr uint16_t kSafeInput3          = 1u << 10;
@@ -331,7 +343,7 @@ struct SOMANET_TxPDO_1B00 {
     static constexpr uint16_t kAnalogValueValid    = 1u << 15;
 } __attribute__((packed));
 
-static_assert(sizeof(SOMANET_TxPDO_1B00) == 31, "SOMANET_TxPDO_1B00 size mismatch");
+static_assert(sizeof(SOMANET_TxPDO_1B00) == 35, "SOMANET_TxPDO_1B00 size mismatch");
 
 static constexpr PDODescriptor RxPDO_1700 = { 0x1700, sizeof(SOMANET_RxPDO_1700) };
 static constexpr PDODescriptor TxPDO_1B00 = { 0x1B00, sizeof(SOMANET_TxPDO_1B00) };
@@ -392,12 +404,12 @@ constexpr uint16_t kSM3CombinedSize = TxPDO_1B00.size + kSM3TotalSize;   // 31 +
 //
 // The FSoE configuration assigns the safety PDOs:
 //   SM2 (11 bytes): 0x1700
-//   SM3 (31 bytes): 0x1B00
+//   SM3 (35 bytes): 0x1B00
 //
 // The combined configuration assigns both FSoE and standard PDOs, with
 // FSoE PDOs FIRST (critical for the Synapticon ESC bug — see comment above):
 //   SM2 (46 bytes): 0x1700 + 0x1600 + 0x1601 + 0x1602
-//   SM3 (78 bytes): 0x1B00 + 0x1A00 + 0x1A01 + 0x1A02 + 0x1A03
+//   SM3 (82 bytes): 0x1B00 + 0x1A00 + 0x1A01 + 0x1A02 + 0x1A03
 
 /// Build a MultiPDOAssignment with all standard CiA 402 PDOs (no FSoE).
 /// SM2: 0x1600 + 0x1601 + 0x1602 (35 bytes)
@@ -435,7 +447,7 @@ inline Slave::MultiPDOAssignment makeStandardPDOAssignment() {
 
 /// Build a MultiPDOAssignment with only FSoE safety PDOs.
 /// SM2: 0x1700 (11 bytes)
-/// SM3: 0x1B00 (31 bytes)
+/// SM3: 0x1B00 (35 bytes)
 ///
 /// FSoE PDOs are written explicitly to 0x1C12/0x1C13 (fixed=false).
 inline Slave::MultiPDOAssignment makeFSoEPDOAssignment() {
@@ -475,7 +487,7 @@ inline Slave::MultiPDOAssignment makeFSoEPDOAssignment() {
 /// See: https://doc.synapticon.com/circulo_safe_motion/smm/ecat_fsoe_issues.htm
 ///
 /// SM2 (Rx): [0x1700 (11B)][0x1600 (19B)][0x1601 (8B)][0x1602 (8B)] = 46 bytes
-/// SM3 (Tx): [0x1B00 (31B)][0x1A00 (13B)][0x1A01 (12B)][0x1A02 (4B)][0x1A03 (18B)] = 78 bytes
+/// SM3 (Tx): [0x1B00 (35B)][0x1A00 (13B)][0x1A01 (12B)][0x1A02 (4B)][0x1A03 (18B)] = 82 bytes
 ///
 /// ALL PDOs (including FSoE) are written explicitly to 0x1C12/0x1C13.
 /// SM register length = totalLength() (all PDOs).
@@ -504,7 +516,7 @@ inline Slave::MultiPDOAssignment makeCombinedPDOAssignment() {
     sm3.phys_start_addr = kSM3PhysAddr;
     sm3.control_byte = kSM3ControlByte;
     sm3.pdo_mappings = {
-        {TxPDO_1B00.index, TxPDO_1B00.size, false},   // FSoE first (31B)
+        {TxPDO_1B00.index, TxPDO_1B00.size, false},   // FSoE first (35B)
         {TxPDO_1A00.index, TxPDO_1A00.size, false},   // 13B
         {TxPDO_1A01.index, TxPDO_1A01.size, false},   // 12B
         {TxPDO_1A02.index, TxPDO_1A02.size, false},   // 4B
