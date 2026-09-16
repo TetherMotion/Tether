@@ -5,7 +5,7 @@
  * Interfaces to a Synapticon SOMANET drive (Vendor 0x22D2, CiA 402 firmware
  * v5.1.x), puts it into Cyclic Sync Torque (CST) mode, maps the SOMANET
  * motion PDOs (RxPDO 0x1600 / TxPDO 0x1A00), and sends a sinusoidal torque
- * command (default 0.5 Nm peak-to-peak at 0.5 Hz).
+ * command (default 0.2 Nm peak-to-peak at 0.5 Hz).
  *
  * No FSoE safe-motion protocol is run.  If the drive's safety module is
  * holding STO, torque output is gated at the drive level regardless of the
@@ -43,6 +43,8 @@
 #include "tether/drives/Synapticon.hpp"
 #include "tether/drives/Synapticon/SynapticonPDO.hpp"
 #include "tether/drives/Synapticon/SafetyDiagnostics.hpp"
+#include "tether/drives/Synapticon/BrakeControl.hpp"
+#include "tether/utils/SignalHandler.hpp"
 #include "tether/ethercat/ALResetController.hpp"
 #include "tether/ethercat/FaultDetection.hpp"
 #include "tether/ethercat/Slave.hpp"
@@ -435,9 +437,16 @@ struct Args {
     bool enable_dc_sync = false;
     uint32_t diag_interval_ms = 1000;
     std::string debug;
-    double torque_pp_nm = 0.5;       ///< Peak-to-peak torque amplitude in Nm
+    double torque_pp_nm = 0.2;       ///< Peak-to-peak torque amplitude in Nm
     double freq_hz = 0.5;            ///< Sine wave frequency in Hz
     uint32_t rated_torque_mnm = 0;   ///< Motor rated torque in mNm (0 = auto-detect from 0x6076)
+    /// Phase-1 stop strategy for the controlled shutdown at exit.
+    EtherCAT::CiA402Drive::ShutdownStopMode stop_mode =
+        EtherCAT::CiA402Drive::ShutdownStopMode::FixedTimeVelocity;
+    uint32_t stop_time_ms = 500;     ///< Ramp duration for fixed-time stop
+    double   decel_limit = 0.0;      ///< |dv/dt| limit for decel-limit stop (units/s)
+    uint32_t standstill_ms = 25;     ///< Zero-velocity hold before disabling
+    bool     brake_release = true;   ///< Release the brake after disabling
     Tether::Examples::VlanConfig vlan;
 };
 
@@ -465,8 +474,8 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .help("Comma-separated debug flags. Use '--debug help' for a list.");
     program.add_argument("--torque-nm")
         .scan<'g', double>()
-        .default_value(0.5)
-        .help("Peak-to-peak sine torque amplitude in Nm (default 0.5 = ±0.25 Nm)");
+        .default_value(0.2)
+        .help("Peak-to-peak sine torque amplitude in Nm (default 0.2 = ±0.1 Nm)");
     program.add_argument("--freq-hz")
         .scan<'g', double>()
         .default_value(0.5)
@@ -475,6 +484,30 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .scan<'i', int>()
         .default_value(static_cast<int>(0))
         .help("Motor rated torque in mNm (0 = auto-detect from object 0x6076)");
+    program.add_argument("--stop-mode")
+        .choices("fixed-time", "instant", "decel-limit", "none")
+        .default_value(std::string("fixed-time"))
+        .help("Controlled-shutdown stop strategy: 'fixed-time' = linear CSV ramp "
+              "to 0 over --stop-time-ms; 'instant' = CSV zero-velocity step; "
+              "'decel-limit' = CSV ramp at --decel-limit units/s; "
+              "'none' = disable immediately (default fixed-time)");
+    program.add_argument("--stop-time-ms")
+        .scan<'i', int>()
+        .default_value(500)
+        .help("Fixed-time stop ramp duration in ms (default 500)");
+    program.add_argument("--decel-limit")
+        .scan<'g', double>()
+        .default_value(0.0)
+        .help("Deceleration limit for --stop-mode=decel-limit in velocity "
+              "units/s (must be > 0)");
+    program.add_argument("--standstill-ms")
+        .scan<'i', int>()
+        .default_value(25)
+        .help("Zero-velocity standstill hold before disabling, ms (default 25)");
+    program.add_argument("--no-brake-release")
+        .default_value(false)
+        .implicit_value(true)
+        .help("Do not release (disengage) the holding brake after disabling");
 
     try {
         program.parse_args(argc, argv);
@@ -492,6 +525,23 @@ bool parseArgs(int argc, char** argv, Args& out) {
     out.torque_pp_nm = program.get<double>("--torque-nm");
     out.freq_hz = program.get<double>("--freq-hz");
     out.rated_torque_mnm = static_cast<uint32_t>(program.get<int>("--rated-torque-mnm"));
+
+    const std::string stop_mode = program.get<std::string>("--stop-mode");
+    using StopMode = EtherCAT::CiA402Drive::ShutdownStopMode;
+    if (stop_mode == "instant")           out.stop_mode = StopMode::InstantHardStop;
+    else if (stop_mode == "decel-limit")  out.stop_mode = StopMode::AccelerationLimited;
+    else if (stop_mode == "none")         out.stop_mode = StopMode::None;
+    else                                  out.stop_mode = StopMode::FixedTimeVelocity;
+    out.stop_time_ms =
+        static_cast<uint32_t>(program.get<int>("--stop-time-ms"));
+    out.decel_limit   = program.get<double>("--decel-limit");
+    out.standstill_ms =
+        static_cast<uint32_t>(program.get<int>("--standstill-ms"));
+    out.brake_release = !program.get<bool>("--no-brake-release");
+    if (out.stop_mode == StopMode::AccelerationLimited && out.decel_limit <= 0.0) {
+        std::cerr << "--stop-mode=decel-limit requires --decel-limit > 0\n";
+        return false;
+    }
     if (!Tether::Examples::parseVlanArgs(
             program.get<std::string>("--rx-vlan"),
             program.get<std::string>("--tx-vlan"),
@@ -594,6 +644,13 @@ int main(int argc, char** argv) {
     if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG, args.vlan)) {
         return 2;
     }
+
+    // Ctrl-C / SIGTERM: request cancellation on the master (wakes SDO/mailbox
+    // waiters) and set the stop flag polled by the run loop below, so the
+    // program reaches the controlled-shutdown path instead of dying with the
+    // drive still enabled.
+    Tether::Utils::SignalHandler sig;
+    sig.setCancelCallback([&master] { master.ethercatMaster().requestCancel(); });
 
     // --- Configure mailbox with SOMANET ESI values ---
     // The SOMANET_CiA_402_v5.1.9.xml ESI defines the mailbox sync managers
@@ -906,8 +963,21 @@ int main(int argc, char** argv) {
             offsetof(EtherCAT::Drives::SynapticonPDO::SOMANET_RxPDO_1600,
                     modes_of_operation);
         drive.setOpmodePDOOffset(static_cast<int>(opmode_offset));
-        TETHER_LOGI(TAG, "PDO offsets: controlword=0 statusword=0 opmode={}",
-                    opmode_offset);
+
+        // Velocity field offsets for controlledShutdown()'s CSV stop phase —
+        // computed from the PDO structs via member pointers, no hand-counted
+        // offsets.  Both PDOs are first in their SM assignment, so the struct
+        // offsets equal the buffer offsets.
+        drive.setVelocityPDOFields(
+            &EtherCAT::Drives::SynapticonPDO::SOMANET_RxPDO_1600::target_velocity,
+            &EtherCAT::Drives::SynapticonPDO::SOMANET_TxPDO_1A00::velocity_actual);
+
+        TETHER_LOGI(TAG,
+            "PDO offsets: controlword=0 statusword=0 opmode={} "
+            "target_velocity={} velocity_actual={}",
+            opmode_offset,
+            drive.targetVelocityPDOOffset(),
+            drive.actualVelocityPDOOffset());
     }
 
     // --- Read motor rated torque (0x6076) for Nm→per-mille conversion ---
@@ -1004,14 +1074,42 @@ int main(int argc, char** argv) {
             const auto elapsed_ms =
                 Tether::Platform::Clock::instance().getMilliseconds() - run_start_ms;
             if (elapsed_ms >= run_duration_ms) break;
+            if (sig.stop_requested()) {
+                TETHER_LOGI(TAG, "Ctrl-C received  -  stopping early");
+                break;
+            }
             Tether::Platform::Clock::instance().delayMilliseconds(50);
         }
     }
 
-    // --- Stop and clean up ---
+    // --- Controlled shutdown (ordering is load-bearing) ---
+    //   1. Remove the motion controller so it stops overwriting the RxPDO
+    //      buffer every cycle.
+    //   2. Clear the Ctrl-C cancel flag so SDO/mailbox access (e.g. the
+    //      brake release) is not short-circuited.
+    //   3. controlledShutdown() runs the CSV stop -> disable -> brake
+    //      release phases through the still-live PDO exchange.
+    //   4. Only then stop the realtime loop.
+    (void)master.removeMotionController(slave_idx);
+    master.ethercatMaster().clearCancel();
+    {
+        EtherCAT::CiA402Drive::ControlledShutdownConfig scfg;
+        scfg.stop_mode    = args.stop_mode;
+        scfg.stop_time_ms = args.stop_time_ms;
+        scfg.standstill_ms = args.standstill_ms;
+        scfg.decel_limit  = args.decel_limit;
+        if (args.brake_release) {
+            scfg.brake_action = [&master, slave_idx] {
+                return EtherCAT::Drives::Synapticon::BrakeControl::disengageBrake(
+                    master.ethercatMaster().sdoManager(slave_idx));
+            };
+        }
+        if (!drive.controlledShutdown(scfg)) {
+            TETHER_LOGW(TAG, "Controlled shutdown reported errors");
+        }
+    }
     master.stopMotionControlLoop();
     master.clearCyclicTasks();
-    (void)master.removeMotionController(slave_idx);
 
     // PDO transfer statistics  -  reveals WKC errors (slave not ack'ing frames)
     {
