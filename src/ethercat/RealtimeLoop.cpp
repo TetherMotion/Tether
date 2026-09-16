@@ -84,7 +84,9 @@ void RealtimeLoop::stop() {
     stopPDOThread();
     stopDCThread();
 
-    TETHER_LOGI(TAG, "Realtime loop stopped");
+    if (shutdown_debug_.load(std::memory_order_relaxed)) {
+        TETHER_LOGI(TAG, "Realtime loop stopped");
+    }
 }
 
 RealtimeLoop::Stats RealtimeLoop::getStats() const {
@@ -186,7 +188,7 @@ bool RealtimeLoop::startPDOThread() {
 
 void RealtimeLoop::stopPDOThread() {
     if (pdo_timer_) {
-        pdo_timer_->stop();
+        pdo_timer_->stop(shutdown_debug_.load(std::memory_order_relaxed));
         pdo_timer_.reset();
     }
 
@@ -246,7 +248,9 @@ void RealtimeLoop::pdoTaskEntry(void* param) {
         loop->pdo_cycle_count_.fetch_add(1, std::memory_order_relaxed);
     }
 
-    TETHER_LOGI(TAG, "PDO realtime task exiting");
+    if (loop->shutdown_debug_.load(std::memory_order_relaxed)) {
+        TETHER_LOGI(TAG, "PDO realtime task exiting");
+    }
 }
 
 // ============================================================================
@@ -325,7 +329,7 @@ bool RealtimeLoop::startDCThread() {
 
 void RealtimeLoop::stopDCThread() {
     if (dc_timer_) {
-        dc_timer_->stop();
+        dc_timer_->stop(shutdown_debug_.load(std::memory_order_relaxed));
         dc_timer_.reset();
     }
 
@@ -380,7 +384,9 @@ void RealtimeLoop::dcTaskEntry(void* param) {
         }
     }
 
-    TETHER_LOGI(TAG, "DC realtime task exiting");
+    if (loop->shutdown_debug_.load(std::memory_order_relaxed)) {
+        TETHER_LOGI(TAG, "DC realtime task exiting");
+    }
 }
 
 } // namespace EtherCAT

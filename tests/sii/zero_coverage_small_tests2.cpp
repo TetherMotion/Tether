@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
+#include <string>
+
 // Headers & APIs under test
 #include "tether/ethercat/Reset.hpp"
 #include "tether/ethercat/PDOManager.hpp"
@@ -59,9 +61,8 @@ TEST(PDO_Header, SyncManagerConfigAndConsts) {
 }
 
 TEST(DCConsistency_Header, BasicHelpers) {
-    char buf[64] = {0};
-    size_t n = DC::dc_format_time(0, buf, sizeof(buf));
-    EXPECT_GT(n, 0u);
+    std::string s = DC::dc_format_time(0);
+    EXPECT_GT(s.size(), 0u);
 
     DC::DCConsistencyReport r;
     r.check_count = 0;

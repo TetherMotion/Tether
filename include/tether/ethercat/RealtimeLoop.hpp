@@ -142,6 +142,9 @@ public:
     /// Enable / disable PDO exchange in the PDO thread
     void setPDOEnabled(bool enable) { pdo_enabled_.store(enable, std::memory_order_release); }
 
+    /// Enable / disable verbose shutdown logging for this loop
+    void setShutdownDebug(bool enable) { shutdown_debug_ = enable; }
+
     /// Check if PDO exchange is enabled
     bool isPDOEnabled() const { return pdo_enabled_.load(std::memory_order_acquire); }
 
@@ -185,6 +188,7 @@ private:
 
     std::atomic<bool> running_{false};
     std::atomic<bool> pdo_enabled_{false};
+    std::atomic<bool> shutdown_debug_{false};
 
     // Legacy stats (combined view for backward compatibility).
     // Atomic counters are used so the realtime PDO/DC threads can update them

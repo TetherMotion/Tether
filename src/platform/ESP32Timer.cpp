@@ -21,7 +21,7 @@ public:
     ESP32Timer() = default;
     
     ~ESP32Timer() override {
-        stop();
+        stop(false);
         if (timer_) {
             gptimer_del_timer(timer_);
             timer_ = nullptr;
@@ -126,7 +126,7 @@ public:
         return true;
     }
     
-    void stop() override {
+    void stop(bool verbose) override {
         if (!running_ || !timer_) {
             return;
         }
@@ -135,7 +135,9 @@ public:
         gptimer_disable(timer_);
         running_ = false;
         
-        TETHER_LOGI(TAG, "Timer stopped after {} cycles", (unsigned long long)cycle_count_);
+        if (verbose) {
+            TETHER_LOGI(TAG, "Timer stopped after {} cycles", (unsigned long long)cycle_count_);
+        }
     }
     
     bool isRunning() const override {

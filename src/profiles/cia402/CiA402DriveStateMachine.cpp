@@ -526,15 +526,21 @@ uint16_t CiA402Drive::getStatusword() {
 }
 
 bool CiA402Drive::enable(uint32_t timeout_ms) {
-    // Reset any fault first
+    // Reset any fault first.  Covers both Fault and FaultReactionActive —
+    // the latter still requires a fault reset before the drive can be
+    // re-enabled.  Some drives need more than one reset edge, so retry
+    // until the state leaves the fault states or the timeout expires.
     DriveState state = getDriveState();
-    if (state == DriveState::Fault) {
-        TETHER_LOGI(TAG, "{}: Resetting fault", logPrefix().c_str());
+    while (state == DriveState::Fault || state == DriveState::FaultReactionActive) {
+        TETHER_LOGI(TAG, "{}: Resetting fault (state={})", logPrefix().c_str(),
+                    static_cast<int>(state));
         if (!resetFault()) {
             return false;
         }
         Tether::Platform::Clock::instance().delayMilliseconds(100);
         state = getDriveState();
+        if (timeout_ms <= 100) break;
+        timeout_ms -= 100;
     }
 
     // Use SDO writes for the state transition sequence, not PDO.
@@ -693,6 +699,14 @@ bool CiA402Drive::writeControlword(uint16_t controlword) {
 // Public wrapper to allow immediate SDO write from other modules
 bool CiA402Drive::sendControlwordSDO(uint16_t controlword) {
     m_controlword = controlword;
+    // The cyclic PDO exchange is active while the drive is being enabled.
+    // Mirror the SDO command into the registered RxPDO buffer as well; a
+    // zero-filled PDO would otherwise overwrite the SDO controlword on the
+    // next cycle and keep the drive in Switch On Disabled.
+    if (m_pdo_registered && getECState() == ECState::Op &&
+        m_rxpdo_size >= static_cast<uint16_t>(m_controlword_pdo_offset) + sizeof(controlword)) {
+        std::memcpy(m_rxpdo_buffer + m_controlword_pdo_offset, &controlword, sizeof(controlword));
+    }
     auto result = m_master->sdoManager(m_slave_index).writeU16(
         static_cast<uint16_t>(CiA402::Register::Controlword), 0, controlword,
         {.timeout_ms = m_sdo_timeout_ms});
@@ -902,9 +916,9 @@ bool CiA402Drive::setHomingMethod(int8_t method) {
     return result.has_value();
 }
 
-bool CiA402Drive::homeToCurrentPosition(int32_t home_offset) {
-    TETHER_LOGI(TAG, "{}: Homing to current position (offset={})", 
-             logPrefix().c_str(), (long)home_offset);
+bool CiA402Drive::homeToCurrentPosition(int32_t home_offset, uint32_t timeout_ms) {
+    TETHER_LOGI(TAG, "{}: Homing to current position (offset={}, timeout={}ms)",
+             logPrefix().c_str(), (long)home_offset, (unsigned long)timeout_ms);
     
     // Set home offset
     if (home_offset != 0) {
@@ -926,7 +940,7 @@ bool CiA402Drive::homeToCurrentPosition(int32_t home_offset) {
     }
     
     // Execute homing
-    return executeHoming(5000);  // 5 second timeout for current position homing
+    return executeHoming(timeout_ms);
 }
 
 bool CiA402Drive::executeHoming(uint32_t timeout_ms) {

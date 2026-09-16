@@ -58,6 +58,9 @@ public:
     /** @brief Enable/disable verbose DC debug logging (gated by --debug dc). */
     void setDebugLogging(bool enabled) { dc_debug_ = enabled; }
 
+    /** @brief Enable/disable verbose shutdown logging (gated by --debug shutdown). */
+    void setShutdownDebug(bool enabled) { shutdown_debug_ = enabled; }
+
 private:
     DCConfig config_;
     std::atomic<DCState> state_{DCState::Disabled};
@@ -72,7 +75,8 @@ private:
     IDCTransport& transport_;
     std::unique_ptr<RealtimeLoop> realtime_loop_;
     std::function<bool()> pdo_exchange_fn_;
-    bool dc_debug_ = false;  ///< Verbose DC debug logging (enabled via --debug dc)
+    bool dc_debug_ = false;      ///< Verbose DC debug logging (enabled via --debug dc)
+    bool shutdown_debug_ = false; ///< Verbose shutdown logging (enabled via --debug shutdown)
 
     bool initialize();
     bool readSlaveCapabilities(uint16_t slave_index);

@@ -116,10 +116,6 @@ if(TETHER_DRIVE_AS715N)
 add_tether_example(as715n_sine_motion_native
     LIBRARIES tether_ethercat_master tether_cia_profiles tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
 
-# ---AS715N Sine Motion + FSoE Native Example ---
-# Adds an optional Synapticon-style FSoE safe-motion main instance to the sine loop.
-add_tether_example(as715n_sine_motion_fsoe_native
-    LIBRARIES tether_ethercat_master tether_cia_profiles tether_device_drivers tether_fsoe tether_ethercat_common tether_hal tether_common tether_examples_common)
 endif()
 
 # ---Synapticon SOMANET CST + FSoE Example ---
@@ -155,6 +151,19 @@ endif()
 if(TETHER_DRIVE_AS715N)
 add_tether_example(as715n_check_error_code
     LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# ---AS715N Sensorless Homing Example ---
+# Moves a single AS715N against a mechanical stop using a low, clamped
+# CST torque from a closed-loop velocity PI controller. Once the drive
+# stalls, it sets the current position as home (method 35) and exits.
+add_tether_example(as715n_sensorless_homing
+    LIBRARIES tether_ethercat_master tether_cia_profiles tether_controls tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
+# ---AS715N Fault Reset Example ---
+# Dedicated fault-reset utility using the AS715N-specific mechanism
+# (0x2031:01 F31.00 after clearing S-ON, or 0x2031:02 software reset).
+add_tether_example(as715n_reset_errors
+    LIBRARIES tether_ethercat_master tether_cia_profiles tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
 endif()
 
 # ---EtherCAT SII dump example ---
