@@ -76,29 +76,43 @@ struct NexcobotESC211 {
     static constexpr uint16_t kSMOutputParamIndex       = 0x1C32;
     static constexpr uint16_t kSMInputParamIndex        = 0x1C33;
 
-    // Safety status (0x4001-0x4016)
-    static constexpr uint16_t kRSAPStatusIndex                  = 0x4001;
-    static constexpr uint16_t kRSAPInformation1Index            = 0x4002;
-    static constexpr uint16_t kRSAPFaultAndDiscrepancyIndex     = 0x4003;
-    static constexpr uint16_t kSafetyInputDiscrepancyIndex        = 0x4004;
-    static constexpr uint16_t kEmergencyStopStateIndex          = 0x4005;
-    static constexpr uint16_t kProtectiveStopStateIndex         = 0x4006;
-    static constexpr uint16_t kCollaborativeInputStateIndex     = 0x4007;
-    static constexpr uint16_t kSafetyInputSummaryIndex           = 0x4008;
-    static constexpr uint16_t kOutputDiscrepancyMonitorIndex    = 0x4009;
-    static constexpr uint16_t kOutputStateMonitorIndex           = 0x400A;
-    static constexpr uint16_t kSafetyFunctionDiscrepancyIndex     = 0x400B;
-    static constexpr uint16_t kSafetyFunctionSummaryIndex        = 0x400C;
-    static constexpr uint16_t kEndpointManualReducedSpeedIndex  = 0x400D;
-    static constexpr uint16_t kSafetyTCPManualReducedSpeedIndex   = 0x400E;
-    static constexpr uint16_t kSafetyTCPSpeedStateIndex         = 0x400F;
-    static constexpr uint16_t kSafetyTCPForceStateIndex          = 0x4010;
-    static constexpr uint16_t kCartesianPositionStateIndex      = 0x4011;
-    static constexpr uint16_t kAxisPositionStateIndex             = 0x4012;
-    static constexpr uint16_t kAxisSpeedStateIndex               = 0x4013;
-    static constexpr uint16_t kAxisForceStateIndex               = 0x4014;
-    static constexpr uint16_t kRSAPStateMirrorIndex              = 0x4015;
-    static constexpr uint16_t kErrorCodeMirrorIndex              = 0x4016;
+    // Safety status / RSAP info (ESI v0.9: 0x4000-0x4023)
+    static constexpr uint16_t kRSAPStateIndex                   = 0x4000;
+    static constexpr uint16_t kMonitoringSubStateIndex           = 0x4001;
+    static constexpr uint16_t kRSAPErrorCodeIndex                = 0x4002;
+    static constexpr uint16_t kOperationModeIndex                = 0x4003;
+    static constexpr uint16_t kStopStateIndex                    = 0x4004;
+    static constexpr uint16_t kStopCategoryIndex                 = 0x4005;
+    static constexpr uint16_t kFaultAndViolationStatusIndex      = 0x4006;
+    static constexpr uint16_t kDriveStatusIndex                  = 0x4007;
+    static constexpr uint16_t kDriveValidStatusIndex             = 0x4008;
+    static constexpr uint16_t kDriveUserBitStatusIndex           = 0x4009;
+    static constexpr uint16_t kInputDiscrepancyStatusIndex       = 0x400A;
+    static constexpr uint16_t kEmergencyStopInputStateIndex      = 0x400B;
+    static constexpr uint16_t kNormalStopInputStateIndex         = 0x400C;
+    static constexpr uint16_t kProtectiveStopInputStateIndex     = 0x400D;
+    static constexpr uint16_t kEnablingDeviceInputStateIndex     = 0x400E;
+    static constexpr uint16_t kOperationModeInputStateIndex      = 0x400F;
+    static constexpr uint16_t kResetInputStateIndex              = 0x4010;
+    static constexpr uint16_t kCollaborativeInputStateIndex      = 0x4011;
+    static constexpr uint16_t kHGCInputStateIndex                = 0x4012;
+    static constexpr uint16_t kMonitoredPositionInputStateIndex  = 0x4013;
+    static constexpr uint16_t kSSMInputStateIndex                = 0x4014;
+    static constexpr uint16_t kOutputDiscrepancyStatusIndex      = 0x4015;
+    static constexpr uint16_t kSafetyOutputStateIndex            = 0x4016;
+    static constexpr uint16_t kSafetyControlFunctionStateIndex   = 0x4017;
+    static constexpr uint16_t kSafetyLimitFunctionStateIndex     = 0x4018;
+    static constexpr uint16_t kAxisPositionLimitStatusIndex      = 0x4019;
+    static constexpr uint16_t kTCPPositionLimitStatusIndex       = 0x401A;
+    static constexpr uint16_t kEndpointPositionLimitStatusIndex  = 0x401B;
+    static constexpr uint16_t kAxisSpeedLimitStatusIndex         = 0x401C;
+    static constexpr uint16_t kTCPSpeedLimitStatusIndex          = 0x401D;
+    static constexpr uint16_t kEndpointSpeedLimitStatusIndex     = 0x401E;
+    static constexpr uint16_t kAxisTorqueLimitStatusIndex        = 0x401F;
+    static constexpr uint16_t kTCPForceLimitStatusIndex          = 0x4020;
+    static constexpr uint16_t kEndpoint2ForceLimitStateIndex     = 0x4021;
+    static constexpr uint16_t kTCP0OrientationLimitStateIndex    = 0x4022;
+    static constexpr uint16_t kTCP0RobotPowerLimitStateIndex     = 0x4023;
 
     // RSAP monitoring (0x4100-0x4108)
     static constexpr uint16_t kRSAPTCP1MonitoringVelocityIndex = 0x4100;
