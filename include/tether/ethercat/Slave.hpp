@@ -464,6 +464,29 @@ public:
      */
     virtual SlaveError applyCustomPDOs();
 
+    /**
+     * @brief Register a PDO whose mapping is fixed by the slave firmware.
+     *
+     * Unlike configureCustomRxPDO() / configureCustomTxPDO(), this does
+     * NOT rewrite the PDO mapping object — the slave's own mapping is
+     * read via SDO (subindex 0 count + 0xIIIISSBB entry words) to learn
+     * the field layout and total size.  The PDO is registered so that
+     * applyCustomPDOs() assigns it to the sync manager (0x1C12/0x1C13)
+     * and allocates a process-data buffer readable via customPDOData() /
+     * customPDOField().
+     *
+     * Use for vendor-fixed PDOs — ESI-declared PDOs whose content the
+     * firmware owns (e.g. ESC211 0x1601, 0x1A01..0x1A03, and the
+     * per-channel 0x1610+n / 0x1A10+n FSoE PDOs).
+     *
+     * Must be called in PRE_OP, before applyCustomPDOs().
+     *
+     * @param pdo_index  PDO mapping object index (e.g. 0x1A02)
+     * @return SlaveError::Ok on success
+     */
+    virtual SlaveError registerExistingRxPDO(uint16_t pdo_index);
+    virtual SlaveError registerExistingTxPDO(uint16_t pdo_index);
+
     // -- Multi-PDO sync manager configuration ---------------------------------
 
     /**
@@ -509,6 +532,14 @@ public:
      * @return Pointer to the buffer, or nullptr if not found
      */
     const uint8_t* customPDOData(uint16_t pdo_index) const;
+
+    /**
+     * @brief Total mapped size in bytes of a configured/registered PDO.
+     *
+     * @param pdo_index  PDO mapping object index
+     * @return Size in bytes, or 0 if the PDO is not registered
+     */
+    uint16_t customPDOSize(uint16_t pdo_index) const;
 
     /**
      * @brief Get a typed pointer to a field within a custom PDO.
@@ -760,6 +791,10 @@ protected:
         std::vector<CustomPDOFieldLayout> fields;
         std::vector<uint8_t> buffer;
         int mapping_entry_index = -1;
+        /// OD entries synthesized from the slave's own PDO mapping by
+        /// registerExistingPDO().  Owns the objects that fields[].entry
+        /// points at so they stay valid for the lifetime of this info.
+        std::vector<ObjectDictionary::ObjectDictionaryEntry> owned_entries;
     };
     std::vector<CustomPDOInfo> custom_pdo_infos_;
 
@@ -775,6 +810,9 @@ protected:
         PDO::PDODirection direction,
         uint16_t total_size,
         std::vector<CustomPDOFieldLayout>&& fields);
+
+    SlaveError registerExistingPDO(uint16_t pdo_index,
+                                   PDO::PDODirection direction);
 };
 
 // ============================================================================
@@ -819,6 +857,8 @@ public:
     SlaveError configureCustomRxPDO(uint16_t, std::initializer_list<CustomPDOMappingEntry>) override;
     SlaveError configureCustomTxPDO(uint16_t, std::initializer_list<CustomPDOMappingEntry>) override;
     SlaveError applyCustomPDOs() override;
+    SlaveError registerExistingRxPDO(uint16_t) override;
+    SlaveError registerExistingTxPDO(uint16_t) override;
     SlaveError configureMultiPDOs(const MultiPDOAssignment&) override;
 
     SlaveError transitionTo(SlaveState) override;
