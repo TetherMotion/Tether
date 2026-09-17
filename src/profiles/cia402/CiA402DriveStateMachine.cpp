@@ -308,6 +308,14 @@ bool CiA402Drive::transitionSafeOpToOp() {
     TETHER_LOGI(TAG, "{}: Enabling PDO exchange in SAFE_OP (pre-OP)", logPrefix().c_str());
     if (m_master) {
         m_master->pdoForSlave(m_slave_index).resetStats();
+        // If the drive was already enabled via SDO in PRE_OP, mirror the
+        // current controlword into the PDO buffer so the DC loop does not
+        // start sending 0x0000 and disable the drive during SAFE_OP/OP.
+        if (m_pdo_registered &&
+            m_rxpdo_size >= static_cast<uint16_t>(m_controlword_pdo_offset) + sizeof(m_controlword)) {
+            std::memcpy(m_rxpdo_buffer + m_controlword_pdo_offset,
+                        &m_controlword, sizeof(m_controlword));
+        }
         m_master->dc().setPDOEnabled(true);
     }
 
@@ -335,69 +343,12 @@ bool CiA402Drive::transitionSafeOpToOp() {
         TETHER_LOGI(TAG, "{}: Watchdog Status=0x{:04X}", logPrefix().c_str(), wdt_status);
     }
 
-    // DIAGNOSTIC: Read PDO assignment and mode SDOs before OP request
+    // DIAGNOSTIC: Skip the pre-OP PDO/mode SDO reads.
+    // On SOMANET drives the mailbox PDI stops responding once PDO exchange is
+    // enabled in SAFE_OP, so these reads deadlock and prevent the OP request.
     if (m_master) {
-        m_master->sdoManager(m_slave_index).setDiagEnabled(true);
-        auto sm2_count_res = m_master->sdoManager(m_slave_index).readU8( 0x1C12, 0, {.timeout_ms = m_sdo_timeout_ms});
-        if (sm2_count_res.has_value())
-            TETHER_LOGI(TAG, "{}: 0x1C12:0 (SM2 PDO count) = {}", logPrefix().c_str(), sm2_count_res.value());
-        else
-            TETHER_LOGW(TAG, "{}: Failed to read 0x1C12:0", logPrefix().c_str());
-
-        auto sm2_pdo_res = m_master->sdoManager(m_slave_index).readU16( 0x1C12, 1, {.timeout_ms = m_sdo_timeout_ms});
-        if (sm2_pdo_res.has_value())
-            TETHER_LOGI(TAG, "{}: 0x1C12:1 (SM2 RxPDO) = 0x{:04X}", logPrefix().c_str(), sm2_pdo_res.value());
-        else
-            TETHER_LOGW(TAG, "{}: Failed to read 0x1C12:1", logPrefix().c_str());
-
-        if (sm2_count_res.has_value() && sm2_count_res.value() >= 2) {
-            auto sm2_pdo2_res = m_master->sdoManager(m_slave_index).readU16( 0x1C12, 2, {.timeout_ms = m_sdo_timeout_ms});
-            if (sm2_pdo2_res.has_value())
-                TETHER_LOGI(TAG, "{}: 0x1C12:2 (SM2 RxPDO #2) = 0x{:04X}", logPrefix().c_str(), sm2_pdo2_res.value());
-            else
-                TETHER_LOGW(TAG, "{}: Failed to read 0x1C12:2", logPrefix().c_str());
-        }
-
-        auto sm3_count_res = m_master->sdoManager(m_slave_index).readU8( 0x1C13, 0, {.timeout_ms = m_sdo_timeout_ms});
-        if (sm3_count_res.has_value())
-            TETHER_LOGI(TAG, "{}: 0x1C13:0 (SM3 PDO count) = {}", logPrefix().c_str(), sm3_count_res.value());
-        else
-            TETHER_LOGW(TAG, "{}: Failed to read 0x1C13:0", logPrefix().c_str());
-
-        auto sm3_pdo_res = m_master->sdoManager(m_slave_index).readU16( 0x1C13, 1, {.timeout_ms = m_sdo_timeout_ms});
-        if (sm3_pdo_res.has_value())
-            TETHER_LOGI(TAG, "{}: 0x1C13:1 (SM3 TxPDO) = 0x{:04X}", logPrefix().c_str(), sm3_pdo_res.value());
-        else
-            TETHER_LOGW(TAG, "{}: Failed to read 0x1C13:1", logPrefix().c_str());
-
-        if (sm3_count_res.has_value() && sm3_count_res.value() >= 2) {
-            auto sm3_pdo2_res = m_master->sdoManager(m_slave_index).readU16( 0x1C13, 2, {.timeout_ms = m_sdo_timeout_ms});
-            if (sm3_pdo2_res.has_value())
-                TETHER_LOGI(TAG, "{}: 0x1C13:2 (SM3 TxPDO #2) = 0x{:04X}", logPrefix().c_str(), sm3_pdo2_res.value());
-            else
-                TETHER_LOGW(TAG, "{}: Failed to read 0x1C13:2", logPrefix().c_str());
-        }
-
-        auto mode_op_res = m_master->sdoManager(m_slave_index).readU8( 0x6060, 0, {.timeout_ms = m_sdo_timeout_ms});
-        if (mode_op_res.has_value())
-            TETHER_LOGI(TAG, "{}: 0x6060 (Modes of Operation) = {}", logPrefix().c_str(), (int8_t)mode_op_res.value());
-
-        auto mode_disp_res = m_master->sdoManager(m_slave_index).readU8( 0x6061, 0, {.timeout_ms = m_sdo_timeout_ms});
-        if (mode_disp_res.has_value())
-            TETHER_LOGI(TAG, "{}: 0x6061 (Mode Display) = {}", logPrefix().c_str(), (int8_t)mode_disp_res.value());
-
-        auto supported_modes_res = m_master->sdoManager(m_slave_index).readU32( 0x6502, 0, {.timeout_ms = m_sdo_timeout_ms});
-        if (supported_modes_res.has_value())
-            TETHER_LOGI(TAG, "{}: 0x6502 (Supported Modes) = 0x{:08X}", logPrefix().c_str(), supported_modes_res.value());
-
-        auto rxpdo_count_res = m_master->sdoManager(m_slave_index).readU8( 0x1600, 0, {.timeout_ms = m_sdo_timeout_ms});
-        if (rxpdo_count_res.has_value())
-            TETHER_LOGI(TAG, "{}: 0x1600:0 (RxPDO entry count) = {}", logPrefix().c_str(), rxpdo_count_res.value());
-
-        auto txpdo_count_res = m_master->sdoManager(m_slave_index).readU8( 0x1A00, 0, {.timeout_ms = m_sdo_timeout_ms});
-        if (txpdo_count_res.has_value())
-            TETHER_LOGI(TAG, "{}: 0x1A00:0 (TxPDO entry count) = {}", logPrefix().c_str(), txpdo_count_res.value());
-        m_master->sdoManager(m_slave_index).setDiagEnabled(false);
+        TETHER_LOGI(TAG, "{}: Skipping pre-OP diagnostic SDO reads (mailbox/PDO conflict)",
+                    logPrefix().c_str());
     }
 
     // Clear any pending error by writing Error Acknowledge + OP (0x18)
@@ -532,6 +483,8 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
     // re-enabled.  Some drives need more than one reset edge, so retry
     // until the state leaves the fault states or the timeout expires.
     DriveState state = getDriveState();
+    TETHER_LOGI(TAG, "{}: enable() start state={} statusword=0x{:04X}",
+                logPrefix().c_str(), static_cast<int>(state), getStatusword());
     while (state == DriveState::Fault || state == DriveState::FaultReactionActive) {
         TETHER_LOGI(TAG, "{}: Resetting fault (state={})", logPrefix().c_str(),
                     static_cast<int>(state));
@@ -577,8 +530,9 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
             Tether::Platform::Clock::instance().delayMilliseconds(10);
             elapsed += 10;
         }
-        TETHER_LOGE(TAG, "{}: Timeout waiting for state {}",
-                    logPrefix().c_str(), getDriveStateName(target));
+        TETHER_LOGE(TAG, "{}: Timeout waiting for state {} (last state={} sw=0x{:04X})",
+                    logPrefix().c_str(), getDriveStateName(target),
+                    static_cast<int>(getDriveState()), getStatusword());
         return false;
     };
 
@@ -597,6 +551,8 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
             return false;
         }
         state = getDriveState();
+        TETHER_LOGI(TAG, "{}: after 0x06 state={} sw=0x{:04X}",
+                    logPrefix().c_str(), static_cast<int>(state), getStatusword());
     }
 
     // Switch On
@@ -607,6 +563,8 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
             return false;
         }
         state = getDriveState();
+        TETHER_LOGI(TAG, "{}: after 0x07 state={} sw=0x{:04X}",
+                    logPrefix().c_str(), static_cast<int>(state), getStatusword());
     }
 
     // Enable Operation
@@ -618,7 +576,8 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
         }
     }
 
-    TETHER_LOGI(TAG, "{}: Drive enabled successfully", logPrefix().c_str());
+    TETHER_LOGI(TAG, "{}: Drive enabled successfully (state={} sw=0x{:04X})",
+                logPrefix().c_str(), static_cast<int>(getDriveState()), getStatusword());
     return true;
 }
 
@@ -915,9 +874,15 @@ bool CiA402Drive::sendControlwordSDO(uint16_t controlword) {
         m_rxpdo_size >= static_cast<uint16_t>(m_controlword_pdo_offset) + sizeof(controlword)) {
         std::memcpy(m_rxpdo_buffer + m_controlword_pdo_offset, &controlword, sizeof(controlword));
     }
+    TETHER_LOGI(TAG, "{}: Sending controlword 0x{:04X} over SDO",
+                logPrefix().c_str(), controlword);
     auto result = m_master->sdoManager(m_slave_index).writeU16(
         static_cast<uint16_t>(CiA402::Register::Controlword), 0, controlword,
         {.timeout_ms = m_sdo_timeout_ms});
+    if (!result.has_value()) {
+        TETHER_LOGE(TAG, "{}: controlword 0x{:04X} SDO write failed",
+                    logPrefix().c_str(), controlword);
+    }
     return result.has_value();
 }
 
