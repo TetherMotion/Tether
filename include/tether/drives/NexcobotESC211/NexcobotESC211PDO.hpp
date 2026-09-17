@@ -14,7 +14,6 @@
 #include "tether/drives/NexcobotESC211/Registers/FSOERx.hpp"
 #include "tether/drives/NexcobotESC211/Registers/FSOETx.hpp"
 #include "tether/drives/NexcobotESC211/Registers/SafetyStatus.hpp"
-#include "tether/drives/NexcobotESC211/Registers/RSAPMonitoring.hpp"
 #include "tether/utils/PDO.hpp"
 
 namespace EtherCAT {
@@ -135,59 +134,76 @@ static_assert(TxPDO_1A01.field_count == TxPDO_1A01_Fields.size(),
               "TxPDO1A01 field count mismatch");
 
 // ---------------------------------------------------------------------------
-// TxPDO 0x1A02 — RSAP Info / Safety Status (30 B)
+// TxPDO 0x1A02 — RSAP Info / Safety Status (ESI v0.9: 46 entries, 55 B)
 // ---------------------------------------------------------------------------
 
-static constexpr std::array<PDOField, 22> TxPDO_1A02_Fields = {{
-    { &Reg::SafetyStatus::RSAPStatus,                    0u,  1, "SAFP Operation State" },
-    { &Reg::SafetyStatus::RSAPInformation1,              1u,  1, "SAFP Information 1" },
-    { &Reg::SafetyStatus::RSAPFaultAndDiscrepancy,       2u,  1, "SAFP Information 2" },
-    { &Reg::SafetyStatus::SafetyInputDiscrepancy,        3u,  1, "Input Discrepancy" },
-    { &Reg::SafetyStatus::EmergencyStopState,            4u,  1, "Emergency Stop Input State" },
-    { &Reg::SafetyStatus::ProtectiveStopState,           5u,  1, "Protective Stop Input State" },
-    { &Reg::SafetyStatus::CollaborativeInputState,       6u,  1, "Collaborative Input State" },
-    { &Reg::SafetyStatus::SafetyInputSummary,            7u,  1, "Input State" },
-    { &Reg::SafetyStatus::OutputDiscrepancyMonitor,       8u,  2, "Output Discrepancy" },
-    { &Reg::SafetyStatus::OutputStateMonitor,           10u,  2, "Output State" },
-    { &Reg::SafetyStatus::SafetyFunctionDiscrepancy,    12u,  1, "SAFP Limiting Functions State Discrepancy" },
-    { &Reg::SafetyStatus::SafetyFunctionSummary,         13u,  1, "SAFP Limiting Functions State" },
-    { &Reg::SafetyStatus::EndpointManualReducedSpeed,    14u,  1, "Endpoint Manual Reduced Speed State" },
-    { &Reg::SafetyStatus::SafetyTCPManualReducedSpeed,   15u,  2, "Safety TCP Manual Reduced Speed State" },
-    { &Reg::SafetyStatus::SafetyTCPSpeedState,           17u,  2, "Safety TCP Speed State" },
-    { &Reg::SafetyStatus::SafetyTCPForceState,           19u,  2, "Safety TCP Force State" },
-    { &Reg::SafetyStatus::CartesianPositionState,        21u,  2, "Safety TCP Cartesian Position State" },
-    { &Reg::SafetyStatus::AxisPositionState,             23u,  1, "Axis Position State" },
-    { &Reg::SafetyStatus::AxisSpeedState,                24u,  1, "Axis Speed State" },
-    { &Reg::SafetyStatus::AxisForceState,                25u,  1, "Axis Force State" },
-    { &Reg::SafetyStatus::RSAPStateMirror,               26u,  2, "SAFP State" },
-    { &Reg::SafetyStatus::ErrorCodeMirror,               28u,  2, "Error Code" },
+static constexpr std::array<PDOField, 46> TxPDO_1A02_Fields = {{
+    { &Reg::SafetyStatus::RSAPState,                    0u,  1, "RSAP state" },
+    { &Reg::SafetyStatus::MonitoringSubState,           1u,  1, "Sub state in MONITORING" },
+    { &Reg::SafetyStatus::ErrorCode,                    2u,  2, "Error code" },
+    { &Reg::SafetyStatus::OperationMode,                4u,  1, "Operation mode" },
+    { &Reg::SafetyStatus::StopState,                    5u,  1, "Stop state" },
+    { &Reg::SafetyStatus::StopCategory,                 6u,  1, "Stop category" },
+    { &Reg::SafetyStatus::FaultAndViolationStatus,      7u,  1, "Fault and violation status" },
+    { &Reg::SafetyStatus::DriveStatus,                  8u,  1, "Drive status" },
+    { &Reg::SafetyStatus::DrivePositionValidStatus,     9u,  1, "Drive position valid status" },
+    { &Reg::SafetyStatus::DriveVelocityValidStatus,    10u,  1, "Drive velocity valid status" },
+    { &Reg::SafetyStatus::DriveErrorStatus,            11u,  1, "Drive error status" },
+    { &Reg::SafetyStatus::DriveSTOValidStatus,         12u,  1, "Drive STO valid status" },
+    { &Reg::SafetyStatus::DriveSOSValidStatus,         13u,  1, "Drive SOS valid status" },
+    { &Reg::SafetyStatus::Drive1UserBitStatus,         14u,  1, "Drive 1 user defined bit status" },
+    { &Reg::SafetyStatus::Drive2UserBitStatus,         15u,  1, "Drive 2 user defined bit status" },
+    { &Reg::SafetyStatus::Drive3UserBitStatus,         16u,  1, "Drive 3 user defined bit status" },
+    { &Reg::SafetyStatus::Drive4UserBitStatus,         17u,  1, "Drive 4 user defined bit status" },
+    { &Reg::SafetyStatus::Drive5UserBitStatus,         18u,  1, "Drive 5 user defined bit status" },
+    { &Reg::SafetyStatus::Drive6UserBitStatus,         19u,  1, "Drive 6 user defined bit status" },
+    { &Reg::SafetyStatus::Drive7UserBitStatus,         20u,  1, "Drive 7 user defined bit status" },
+    { &Reg::SafetyStatus::InputDiscrepancyStatus,      21u,  2, "Input discrepancy status" },
+    { &Reg::SafetyStatus::EmergencyStopInputState,     23u,  1, "Emergency stop input state" },
+    { &Reg::SafetyStatus::NormalStopInputState,        24u,  1, "Normal stop input state" },
+    { &Reg::SafetyStatus::ProtectiveStopInputState,    25u,  1, "Protective stop input state" },
+    { &Reg::SafetyStatus::EnablingDeviceInputState,    26u,  1, "Enabling device input state" },
+    { &Reg::SafetyStatus::OperationModeInputState,     27u,  1, "Operation mode input state" },
+    { &Reg::SafetyStatus::ResetInputState,             28u,  1, "Reset input state" },
+    { &Reg::SafetyStatus::CollaborativeInputState,     29u,  1, "Collaborative input state" },
+    { &Reg::SafetyStatus::HGCInputState,               30u,  1, "HGC input state" },
+    { &Reg::SafetyStatus::MonitoredPositionInputState, 31u,  1, "Monitored position input state" },
+    { &Reg::SafetyStatus::SSMInputState,               32u,  1, "SSM input state" },
+    { &Reg::SafetyStatus::OutputDiscrepancyStatus,     33u,  2, "Output discrepancy status" },
+    { &Reg::SafetyStatus::SafetyOutputState,           35u,  2, "Safety output state" },
+    { &Reg::SafetyStatus::SafetyControlFunctionState,  37u,  2, "Safety control function state" },
+    { &Reg::SafetyStatus::SafetyLimitFunctionState,    39u,  2, "Safety limit function state" },
+    { &Reg::SafetyStatus::AxisPositionLimitStatus,     41u,  1, "Axis position limit status" },
+    { &Reg::SafetyStatus::TCPPositionLimitStatus,      42u,  2, "TCP position limit status" },
+    { &Reg::SafetyStatus::EndpointPositionLimitStatus, 44u,  1, "Endpoint position limit status" },
+    { &Reg::SafetyStatus::AxisSpeedLimitStatus,        45u,  1, "Axis speed limit status" },
+    { &Reg::SafetyStatus::TCPSpeedLimitStatus,         46u,  2, "TCP speed limit status" },
+    { &Reg::SafetyStatus::EndpointSpeedLimitStatus,    48u,  1, "Endpoint speed limit status" },
+    { &Reg::SafetyStatus::AxisTorqueLimitStatus,       49u,  1, "Axis torque limit status" },
+    { &Reg::SafetyStatus::TCPForceLimitStatus,         50u,  2, "TCP force limit status" },
+    { &Reg::SafetyStatus::Endpoint2ForceLimitState,    52u,  1, "Endpoint 2 force limit state" },
+    { &Reg::SafetyStatus::TCP0OrientationLimitState,   53u,  1, "TCP 0 orientation limit state" },
+    { &Reg::SafetyStatus::TCP0RobotPowerLimitState,    54u,  1, "TCP 0 robot power limit state" },
 }};
 
-static constexpr PDO TxPDO_1A02 = makePDO(0x1A02u, 30u,
+static constexpr PDO TxPDO_1A02 = makePDO(0x1A02u, 55u,
                                             TxPDO_1A02_Fields.data(),
                                             TxPDO_1A02_Fields.size());
 static_assert(TxPDO_1A02.field_count == TxPDO_1A02_Fields.size(),
               "TxPDO1A02 field count mismatch");
 
 // ---------------------------------------------------------------------------
-// TxPDO 0x1A03 — RSAP Debug (44 B)
+// TxPDO 0x1A03 — RSAP Debug (ESI v0.9: 104 entries, 416 B)
+// The debug payload is a device-defined blob of per-TCP/drive monitoring
+// values (0x4100-0x4115 records); modelled as raw byte ranges.
 // ---------------------------------------------------------------------------
 
-static constexpr std::array<PDOField, 11> TxPDO_1A03_Fields = {{
-    { &Reg::RSAPMonitoring::RSAPTCP1MonitoringVelocity,  0u,  4, "RSAP Calculate TCP Monitoring Velocity" },
-    { &Reg::RSAPMonitoring::RSAPTCP1PositionX,           4u,  4, "RSAP Calculate TCP Position X" },
-    { &Reg::RSAPMonitoring::RSAPTCP1PositionY,           8u,  4, "RSAP Calculate TCP Position Y" },
-    { nullptr,                                           12u,  4, "RSAP Calculate TCP Position Z" },
-    { nullptr,                                           16u,  4, "RSAP Calculate TCP Velocity" },
-    { nullptr,                                           20u,  4, "RSAP Calculate TCP Force" },
-    { nullptr,                                           24u,  4, "RSAP Calculate Elbow Position X" },
-    { nullptr,                                           28u,  4, "RSAP Calculate Elbow Position Y" },
-    { nullptr,                                           32u,  4, "RSAP Calculate Elbow Position Z" },
-    { nullptr,                                           36u,  4, "RSAP Calculate Elbow Velocity" },
-    { nullptr,                                           40u,  4, "RSAP Calculate Elbow Force" },
+static constexpr std::array<PDOField, 2> TxPDO_1A03_Fields = {{
+    { nullptr,   0u, 255, "RSAP debug data [0:255]" },
+    { nullptr, 255u, 161, "RSAP debug data [255:416]" },
 }};
 
-static constexpr PDO TxPDO_1A03 = makePDO(0x1A03u, 44u,
+static constexpr PDO TxPDO_1A03 = makePDO(0x1A03u, 416u,
                                             TxPDO_1A03_Fields.data(),
                                             TxPDO_1A03_Fields.size());
 static_assert(TxPDO_1A03.field_count == TxPDO_1A03_Fields.size(),
@@ -254,46 +270,52 @@ struct NexcobotESC211_TxPDO_1A01 {
 static_assert(sizeof(NexcobotESC211_TxPDO_1A01) == TxPDO_1A01.size,
               "NexcobotESC211_TxPDO_1A01 size mismatch");
 
+// ESI v0.9 layout — see TxPDO_1A02_Fields for field offsets.
 struct NexcobotESC211_TxPDO_1A02 {
-    uint8_t  safp_operation_state;
-    uint8_t  safp_information_1;
-    uint8_t  safp_information_2;
-    uint8_t  input_discrepancy;
-    uint8_t  emergency_stop_input_state;
-    uint8_t  protective_stop_input_state;
-    uint8_t  collaborative_input_state;
-    uint8_t  input_state;
-    uint16_t output_discrepancy;
-    uint16_t output_state;
-    uint8_t  safp_limiting_functions_state_discrepancy;
-    uint8_t  safp_limiting_functions_state;
-    uint8_t  endpoint_manual_reduced_speed_state;
-    uint16_t safety_tcp_manual_reduced_speed_state;
-    uint16_t safety_tcp_speed_state;
-    uint16_t safety_tcp_force_state;
-    uint16_t safety_tcp_cartesian_position_state;
-    uint8_t  axis_position_state;
-    uint8_t  axis_speed_state;
-    uint8_t  axis_force_state;
-    int16_t  safp_state;
+    uint8_t  rsap_state;
+    uint8_t  monitoring_sub_state;
     int16_t  error_code;
+    uint8_t  operation_mode;
+    uint8_t  stop_state;
+    uint8_t  stop_category;
+    uint8_t  fault_and_violation_status;
+    uint8_t  drive_status;
+    uint8_t  drive_valid_status[5];
+    uint8_t  drive_user_bit_status[7];
+    uint16_t input_discrepancy_status;
+    uint8_t  emergency_stop_input_state;
+    uint8_t  normal_stop_input_state;
+    uint8_t  protective_stop_input_state;
+    uint8_t  enabling_device_input_state;
+    uint8_t  operation_mode_input_state;
+    uint8_t  reset_input_state;
+    uint8_t  collaborative_input_state;
+    uint8_t  hgc_input_state;
+    uint8_t  monitored_position_input_state;
+    uint8_t  ssm_input_state;
+    uint16_t output_discrepancy_status;
+    uint16_t safety_output_state;
+    uint16_t safety_control_function_state;
+    uint16_t safety_limit_function_state;
+    uint8_t  axis_position_limit_status;
+    uint16_t tcp_position_limit_status;
+    uint8_t  endpoint_position_limit_status;
+    uint8_t  axis_speed_limit_status;
+    uint16_t tcp_speed_limit_status;
+    uint8_t  endpoint_speed_limit_status;
+    uint8_t  axis_torque_limit_status;
+    uint16_t tcp_force_limit_status;
+    uint8_t  endpoint2_force_limit_state;
+    uint8_t  tcp0_orientation_limit_state;
+    uint8_t  tcp0_robot_power_limit_state;
 } __attribute__((packed));
 
 static_assert(sizeof(NexcobotESC211_TxPDO_1A02) == TxPDO_1A02.size,
               "NexcobotESC211_TxPDO_1A02 size mismatch");
 
+// ESI v0.9: 416-byte device-defined RSAP debug blob (0x4100-0x4115 records).
 struct NexcobotESC211_TxPDO_1A03 {
-    uint32_t tcp_monitoring_velocity;
-    int32_t  tcp_position_x;
-    int32_t  tcp_position_y;
-    int32_t  tcp_position_z;
-    uint32_t tcp_velocity;
-    uint32_t tcp_force;
-    int32_t  elbow_position_x;
-    int32_t  elbow_position_y;
-    int32_t  elbow_position_z;
-    uint32_t elbow_velocity;
-    uint32_t elbow_force;
+    uint8_t data[416];
 } __attribute__((packed));
 
 static_assert(sizeof(NexcobotESC211_TxPDO_1A03) == TxPDO_1A03.size,
