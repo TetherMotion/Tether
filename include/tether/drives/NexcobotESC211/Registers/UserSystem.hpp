@@ -15,8 +15,8 @@ static constexpr uint16_t SystemCurrentStateIndex       = 0xF101;
 static constexpr uint16_t SystemErrorCodeIndex          = 0xF102;
 static constexpr uint16_t SystemErrorMessageIndex         = 0xF103;
 static constexpr uint16_t LastErrorCodeIndex            = 0xF104;
-static constexpr uint16_t UserPasswordInputIndex       = 0xF105;
-static constexpr uint16_t UserPasswordOutputIndex       = 0xF106;
+static constexpr uint16_t FSoEConnectionStateIndex      = 0xF105;
+static constexpr uint16_t FSoEConnectionErrorCodeIndex  = 0xF106;
 static constexpr uint16_t ESCDebugMsgIndex              = 0xF110;
 static constexpr uint16_t SystemCurrentStateMPUBIndex   = 0xF111;
 static constexpr uint16_t SystemErrorCodeMPUBIndex      = 0xF112;
@@ -210,92 +210,87 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry LastErrorCodeCount
 
 NEXCOBOT_ERRCODE_REG(1, ErrorCode_A);
 NEXCOBOT_ERRCODE_REG(2, ErrorCode_B);
-NEXCOBOT_ERRCODE_REG(3, Reserve_1);
-NEXCOBOT_ERRCODE_REG(4, Reserve_2);
+NEXCOBOT_ERRCODE_REG(3, ErrorCode_A_Core1);
+NEXCOBOT_ERRCODE_REG(4, ErrorCode_B_Core1);
 
 #undef NEXCOBOT_ERRCODE_REG
 
 // ---------------------------------------------------------------------------
-// 0xF105: User Password Input
+// 0xF105: FSoE Connection State (record, sub 1..32, UDINT each)
 // ---------------------------------------------------------------------------
 
-constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry UserPasswordInputCount = {
-    .index = UserPasswordInputIndex,
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSoEConnectionStateCount = {
+    .index = FSoEConnectionStateIndex,
     .subindex = 0x00,
-    .name = "User Password Input count",
+    .name = "FSoE Connection State count",
     .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
-    .default_value = 3,
+    .default_value = 32,
     .unit = Unit_None,
     .options_enum = nullptr,
     .min_value = 0,
-    .max_value = 3,
+    .max_value = 32,
     .modification_mode = ModificationMode::ReadOnly,
     .effective_time = EffectiveTime::Immediately,
-    .comment = "Number of entries for User Password Input",
+    .comment = "Number of entries for FSoE Connection State",
 };
 
-#define NEXCOBOT_PW_IN_REG(NUM) \
-    constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry Password_##NUM##_Input = { \
-        .index = UserPasswordInputIndex, \
+// ---------------------------------------------------------------------------
+// 0xF106: FSoE Connection Error Code (record, sub 1..32, UDINT each)
+// ---------------------------------------------------------------------------
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSoEConnectionErrorCodeCount = {
+    .index = FSoEConnectionErrorCodeIndex,
+    .subindex = 0x00,
+    .name = "FSoE Connection Error Code count",
+    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
+    .default_value = 32,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 32,
+    .modification_mode = ModificationMode::ReadOnly,
+    .effective_time = EffectiveTime::Immediately,
+    .comment = "Number of entries for FSoE Connection Error Code",
+};
+
+// Per-connection state/error entries are plain UDINT values.  ESI v0.9
+// defines subindices 1..32 ("Connection 01".."Connection 32") on both
+// 0xF105 (state) and 0xF106 (error code); NEXCOBOT_CONN_PAIR stamps the
+// matching entry in each object for one subindex.
+#define NEXCOBOT_CONN_REG(NAME, IDX, NUM) \
+    constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry NAME##_##NUM = { \
+        .index = (IDX), \
         .subindex = (NUM), \
-        .name = "Password_" #NUM "_Input", \
-        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::VisibleString, \
+        .name = "Connection " #NUM, \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned32, \
         .default_value = 0, \
         .unit = Unit_None, \
         .options_enum = nullptr, \
         .min_value = 0, \
-        .max_value = 0xFF, \
-        .modification_mode = ModificationMode::DuringOperation, \
-        .effective_time = EffectiveTime::Immediately, \
-        .comment = "User password input " #NUM " (STRING 512)", \
-    }
-
-NEXCOBOT_PW_IN_REG(1);
-NEXCOBOT_PW_IN_REG(2);
-NEXCOBOT_PW_IN_REG(3);
-
-#undef NEXCOBOT_PW_IN_REG
-
-// ---------------------------------------------------------------------------
-// 0xF106: User Password Output
-// ---------------------------------------------------------------------------
-
-constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry UserPasswordOutputCount = {
-    .index = UserPasswordOutputIndex,
-    .subindex = 0x00,
-    .name = "User Password Output count",
-    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
-    .default_value = 3,
-    .unit = Unit_None,
-    .options_enum = nullptr,
-    .min_value = 0,
-    .max_value = 3,
-    .modification_mode = ModificationMode::ReadOnly,
-    .effective_time = EffectiveTime::Immediately,
-    .comment = "Number of entries for User Password Output",
-};
-
-#define NEXCOBOT_PW_OUT_REG(NUM) \
-    constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry Password_##NUM##_Output = { \
-        .index = UserPasswordOutputIndex, \
-        .subindex = (NUM), \
-        .name = "Password_" #NUM "_Output", \
-        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::VisibleString, \
-        .default_value = 0, \
-        .unit = Unit_None, \
-        .options_enum = nullptr, \
-        .min_value = 0, \
-        .max_value = 0xFF, \
+        .max_value = 0xFFFFFFFF, \
         .modification_mode = ModificationMode::ReadOnly, \
         .effective_time = EffectiveTime::Immediately, \
-        .comment = "User password output " #NUM " (STRING 512)", \
+        .comment = "FSoE connection " #NUM " state/error code", \
     }
 
-NEXCOBOT_PW_OUT_REG(1);
-NEXCOBOT_PW_OUT_REG(2);
-NEXCOBOT_PW_OUT_REG(3);
+#define NEXCOBOT_CONN_PAIR(NUM) \
+    NEXCOBOT_CONN_REG(FSoEConnectionState,     FSoEConnectionStateIndex,     NUM); \
+    NEXCOBOT_CONN_REG(FSoEConnectionErrorCode, FSoEConnectionErrorCodeIndex, NUM)
 
-#undef NEXCOBOT_PW_OUT_REG
+NEXCOBOT_CONN_PAIR(1);  NEXCOBOT_CONN_PAIR(2);  NEXCOBOT_CONN_PAIR(3);
+NEXCOBOT_CONN_PAIR(4);  NEXCOBOT_CONN_PAIR(5);  NEXCOBOT_CONN_PAIR(6);
+NEXCOBOT_CONN_PAIR(7);  NEXCOBOT_CONN_PAIR(8);  NEXCOBOT_CONN_PAIR(9);
+NEXCOBOT_CONN_PAIR(10); NEXCOBOT_CONN_PAIR(11); NEXCOBOT_CONN_PAIR(12);
+NEXCOBOT_CONN_PAIR(13); NEXCOBOT_CONN_PAIR(14); NEXCOBOT_CONN_PAIR(15);
+NEXCOBOT_CONN_PAIR(16); NEXCOBOT_CONN_PAIR(17); NEXCOBOT_CONN_PAIR(18);
+NEXCOBOT_CONN_PAIR(19); NEXCOBOT_CONN_PAIR(20); NEXCOBOT_CONN_PAIR(21);
+NEXCOBOT_CONN_PAIR(22); NEXCOBOT_CONN_PAIR(23); NEXCOBOT_CONN_PAIR(24);
+NEXCOBOT_CONN_PAIR(25); NEXCOBOT_CONN_PAIR(26); NEXCOBOT_CONN_PAIR(27);
+NEXCOBOT_CONN_PAIR(28); NEXCOBOT_CONN_PAIR(29); NEXCOBOT_CONN_PAIR(30);
+NEXCOBOT_CONN_PAIR(31); NEXCOBOT_CONN_PAIR(32);
+
+#undef NEXCOBOT_CONN_PAIR
+#undef NEXCOBOT_CONN_REG
 
 // ---------------------------------------------------------------------------
 // 0xF110: ESC Debug Msg
@@ -400,16 +395,24 @@ inline const RegisterList kRegisterList = {
     &LastErrorCodeCount,
     &LastErrorCode_ErrorCode_A,
     &LastErrorCode_ErrorCode_B,
-    &LastErrorCode_Reserve_1,
-    &LastErrorCode_Reserve_2,
-    &UserPasswordInputCount,
-    &Password_1_Input,
-    &Password_2_Input,
-    &Password_3_Input,
-    &UserPasswordOutputCount,
-    &Password_1_Output,
-    &Password_2_Output,
-    &Password_3_Output,
+    &LastErrorCode_ErrorCode_A_Core1,
+    &LastErrorCode_ErrorCode_B_Core1,
+    &FSoEConnectionStateCount,
+    &FSoEConnectionErrorCodeCount,
+#define NEXCOBOT_CONN_LIST(NUM) \
+    &FSoEConnectionState_##NUM, &FSoEConnectionErrorCode_##NUM,
+    NEXCOBOT_CONN_LIST(1)  NEXCOBOT_CONN_LIST(2)  NEXCOBOT_CONN_LIST(3)
+    NEXCOBOT_CONN_LIST(4)  NEXCOBOT_CONN_LIST(5)  NEXCOBOT_CONN_LIST(6)
+    NEXCOBOT_CONN_LIST(7)  NEXCOBOT_CONN_LIST(8)  NEXCOBOT_CONN_LIST(9)
+    NEXCOBOT_CONN_LIST(10) NEXCOBOT_CONN_LIST(11) NEXCOBOT_CONN_LIST(12)
+    NEXCOBOT_CONN_LIST(13) NEXCOBOT_CONN_LIST(14) NEXCOBOT_CONN_LIST(15)
+    NEXCOBOT_CONN_LIST(16) NEXCOBOT_CONN_LIST(17) NEXCOBOT_CONN_LIST(18)
+    NEXCOBOT_CONN_LIST(19) NEXCOBOT_CONN_LIST(20) NEXCOBOT_CONN_LIST(21)
+    NEXCOBOT_CONN_LIST(22) NEXCOBOT_CONN_LIST(23) NEXCOBOT_CONN_LIST(24)
+    NEXCOBOT_CONN_LIST(25) NEXCOBOT_CONN_LIST(26) NEXCOBOT_CONN_LIST(27)
+    NEXCOBOT_CONN_LIST(28) NEXCOBOT_CONN_LIST(29) NEXCOBOT_CONN_LIST(30)
+    NEXCOBOT_CONN_LIST(31) NEXCOBOT_CONN_LIST(32)
+#undef NEXCOBOT_CONN_LIST
     &ESCDebugMsgCount,
     &DebugMsg_Msg01,
     &DebugMsg_Msg02,

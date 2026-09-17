@@ -134,8 +134,8 @@ struct NexcobotESC211 {
     static constexpr uint16_t kSystemErrorCodeIndex      = 0xF102;
     static constexpr uint16_t kSystemErrorMessageIndex    = 0xF103;
     static constexpr uint16_t kLastErrorCodeIndex        = 0xF104;
-    static constexpr uint16_t kUserPasswordInputIndex    = 0xF105;
-    static constexpr uint16_t kUserPasswordOutputIndex   = 0xF106;
+    static constexpr uint16_t kFSoEConnectionStateIndex  = 0xF105;
+    static constexpr uint16_t kFSoEConnectionErrorCodeIndex = 0xF106;
     static constexpr uint16_t kESCDebugMsgIndex          = 0xF110;
     static constexpr uint16_t kSystemCurrentStateMPUBIndex = 0xF111;
     static constexpr uint16_t kSystemErrorCodeMPUBIndex  = 0xF112;

@@ -290,6 +290,18 @@ inline BitLabel kEmergencyStopInputStateBitLabels[] = {
     BitLabel::bitIfOn("EmergencyStop7State",     1u << 7),
 };
 
+// 0x400C: Normal stop input state
+inline BitLabel kNormalStopInputStateBitLabels[] = {
+    BitLabel::bitIfOn("NormalStop1State", 1u << 0),
+    BitLabel::bitIfOn("NormalStop2State", 1u << 1),
+    BitLabel::bitIfOn("NormalStop3State", 1u << 2),
+    BitLabel::bitIfOn("NormalStop4State", 1u << 3),
+    BitLabel::bitIfOn("NormalStop5State", 1u << 4),
+    BitLabel::bitIfOn("NormalStop6State", 1u << 5),
+    BitLabel::bitIfOn("NormalStop7State", 1u << 6),
+    BitLabel::bitIfOn("NormalStop8State", 1u << 7),
+};
+
 // 0x400D: Protective stop input state
 inline BitLabel kProtectiveStopInputStateBitLabels[] = {
     BitLabel::bitIfOn("ProtectiveStop1State", 1u << 0),
@@ -302,6 +314,38 @@ inline BitLabel kProtectiveStopInputStateBitLabels[] = {
     BitLabel::bitIfOn("ProtectiveStop8State", 1u << 7),
 };
 
+// 0x400E: Enabling device input state
+inline BitLabel kEnablingDeviceInputStateBitLabels[] = {
+    BitLabel::bitIfOn("EnablingDevice1State", 1u << 0),
+    BitLabel::bitIfOn("EnablingDevice2State", 1u << 1),
+    BitLabel::bitIfOn("EnablingDevice3State", 1u << 2),
+    BitLabel::bitIfOn("EnablingDevice4State", 1u << 3),
+    BitLabel::bitIfOn("EnablingDevice5State", 1u << 4),
+    BitLabel::bitIfOn("EnablingDevice6State", 1u << 5),
+    BitLabel::bitIfOn("EnablingDevice7State", 1u << 6),
+    BitLabel::bitIfOn("EnablingDevice8State", 1u << 7),
+};
+
+// 0x400F: Operation mode input state
+inline BitLabel kOperationModeInputStateBitLabels[] = {
+    BitLabel::bitIfOn("InT1Mode",  1u << 0),
+    BitLabel::bitIfOn("InT2Mode",  1u << 1),
+    BitLabel::bitIfOn("InAutoMode", 1u << 2),
+    BitLabel::bitIfOn("InExtMode", 1u << 3),
+};
+
+// 0x4010: Reset input state
+inline BitLabel kResetInputStateBitLabels[] = {
+    BitLabel::bitIfOn("Reset1State", 1u << 0),
+    BitLabel::bitIfOn("Reset2State", 1u << 1),
+    BitLabel::bitIfOn("Reset3State", 1u << 2),
+    BitLabel::bitIfOn("Reset4State", 1u << 3),
+    BitLabel::bitIfOn("Reset5State", 1u << 4),
+    BitLabel::bitIfOn("Reset6State", 1u << 5),
+    BitLabel::bitIfOn("Reset7State", 1u << 6),
+    BitLabel::bitIfOn("Reset8State", 1u << 7),
+};
+
 // 0x4011: Collaborative input state
 inline BitLabel kCollaborativeInputStateBitLabels[] = {
     BitLabel::bitIfOn("Collaborative1State", 1u << 0),
@@ -312,6 +356,42 @@ inline BitLabel kCollaborativeInputStateBitLabels[] = {
     BitLabel::bitIfOn("Collaborative6State", 1u << 5),
     BitLabel::bitIfOn("Collaborative7State", 1u << 6),
     BitLabel::bitIfOn("Collaborative8State", 1u << 7),
+};
+
+// 0x4012: HGC (hand guiding) input state
+inline BitLabel kHGCInputStateBitLabels[] = {
+    BitLabel::bitIfOn("HGC1State", 1u << 0),
+    BitLabel::bitIfOn("HGC2State", 1u << 1),
+    BitLabel::bitIfOn("HGC3State", 1u << 2),
+    BitLabel::bitIfOn("HGC4State", 1u << 3),
+    BitLabel::bitIfOn("HGC5State", 1u << 4),
+    BitLabel::bitIfOn("HGC6State", 1u << 5),
+    BitLabel::bitIfOn("HGC7State", 1u << 6),
+    BitLabel::bitIfOn("HGC8State", 1u << 7),
+};
+
+// 0x4013: Monitored position input state
+inline BitLabel kMonitoredPositionInputStateBitLabels[] = {
+    BitLabel::bitIfOn("MonitoredPosition1State", 1u << 0),
+    BitLabel::bitIfOn("MonitoredPosition2State", 1u << 1),
+    BitLabel::bitIfOn("MonitoredPosition3State", 1u << 2),
+    BitLabel::bitIfOn("MonitoredPosition4State", 1u << 3),
+    BitLabel::bitIfOn("MonitoredPosition5State", 1u << 4),
+    BitLabel::bitIfOn("MonitoredPosition6State", 1u << 5),
+    BitLabel::bitIfOn("MonitoredPosition7State", 1u << 6),
+    BitLabel::bitIfOn("MonitoredPosition8State", 1u << 7),
+};
+
+// 0x4014: SSM (safe speed monitor) input state
+inline BitLabel kSSMInputStateBitLabels[] = {
+    BitLabel::bitIfOn("SSM1State", 1u << 0),
+    BitLabel::bitIfOn("SSM2State", 1u << 1),
+    BitLabel::bitIfOn("SSM3State", 1u << 2),
+    BitLabel::bitIfOn("SSM4State", 1u << 3),
+    BitLabel::bitIfOn("SSM5State", 1u << 4),
+    BitLabel::bitIfOn("SSM6State", 1u << 5),
+    BitLabel::bitIfOn("SSM7State", 1u << 6),
+    BitLabel::bitIfOn("SSM8State", 1u << 7),
 };
 
 // 0x4015: Output discrepancy status
@@ -459,8 +539,15 @@ inline std::span<const BitLabel> bitLabelsFor(uint16_t index) {
         case DriveValidStatusIndex:            return std::span(kDriveStatusBitLabels);
         case InputDiscrepancyStatusIndex:      return std::span(kInputDiscrepancyStatusBitLabels);
         case EmergencyStopInputStateIndex:     return std::span(kEmergencyStopInputStateBitLabels);
+        case NormalStopInputStateIndex:        return std::span(kNormalStopInputStateBitLabels);
         case ProtectiveStopInputStateIndex:    return std::span(kProtectiveStopInputStateBitLabels);
+        case EnablingDeviceInputStateIndex:    return std::span(kEnablingDeviceInputStateBitLabels);
+        case OperationModeInputStateIndex:     return std::span(kOperationModeInputStateBitLabels);
+        case ResetInputStateIndex:             return std::span(kResetInputStateBitLabels);
         case CollaborativeInputStateIndex:     return std::span(kCollaborativeInputStateBitLabels);
+        case HGCInputStateIndex:               return std::span(kHGCInputStateBitLabels);
+        case MonitoredPositionInputStateIndex: return std::span(kMonitoredPositionInputStateBitLabels);
+        case SSMInputStateIndex:               return std::span(kSSMInputStateBitLabels);
         case OutputDiscrepancyStatusIndex:     return std::span(kOutputDiscrepancyStatusBitLabels);
         case SafetyOutputStateIndex:           return std::span(kSafetyOutputStateBitLabels);
         case SafetyLimitFunctionStateIndex:    return std::span(kSafetyLimitFunctionStateBitLabels);
