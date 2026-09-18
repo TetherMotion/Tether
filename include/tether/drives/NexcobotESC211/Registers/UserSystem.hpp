@@ -34,6 +34,24 @@ static constexpr uint16_t EthernetIPIndex               = 0xF701;
 static constexpr uint16_t EthernetMaskIndex             = 0xF702;
 static constexpr uint16_t EthernetGatewayIndex          = 0xF703;
 
+// Factory test / diagnostic objects (0x8100-0x8420, 0xF500-0xF521)
+static constexpr uint16_t TestSettingIndex              = 0x8100;
+static constexpr uint16_t TestSettingWDTIndex           = 0x8110;
+static constexpr uint16_t ConfigAliasSettingIndex       = 0x8120;
+static constexpr uint16_t SDRAMTestIndex                = 0x8200;
+static constexpr uint16_t DIOTestConfigIndex            = 0x8300;
+static constexpr uint16_t TempSensorIndex               = 0x8400;
+static constexpr uint16_t MCUALM73Index                 = 0x8401;
+static constexpr uint16_t MCUBLM73Index                 = 0x8402;
+static constexpr uint16_t MCUALM73SelectIndex           = 0x8403;
+static constexpr uint16_t MCUTempFITIndex               = 0x8410;
+static constexpr uint16_t MCUWatchdogIndex              = 0x8420;
+static constexpr uint16_t TestFullFNIDataIndex          = 0xF500;
+static constexpr uint16_t TestFullSPARA0Data1Index      = 0xF510;
+static constexpr uint16_t TestFullSPARA0Data2Index      = 0xF511;
+static constexpr uint16_t TestFullSPARA1Data1Index      = 0xF520;
+static constexpr uint16_t TestFullSPARA1Data2Index      = 0xF521;
+
 // ---------------------------------------------------------------------------
 // Control command values for 0xF100:01 (Control Command)
 // ---------------------------------------------------------------------------
@@ -700,6 +718,114 @@ NEXCOBOT_ETH_REG(EthernetGateway, EthernetGatewayIndex, "Ethernet Gateway", "3")
 
 #undef NEXCOBOT_ETH_REG
 
+// ---------------------------------------------------------------------------
+// Factory test / diagnostic objects (0x8100-0x8420) — vendor-internal, modeled
+// for dictionary completeness.  Each is a record: sub0 USINT count + entries.
+// ---------------------------------------------------------------------------
+
+#define NEXCOBOT_CNT_REG(NAME, IDX, CNT, DESC) \
+    constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry NAME = { \
+        .index = (IDX), .subindex = 0x00, .name = DESC " count", \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8, \
+        .default_value = (CNT), .unit = Unit_None, .options_enum = nullptr, \
+        .min_value = 0, .max_value = (CNT), \
+        .modification_mode = ModificationMode::ReadOnly, \
+        .effective_time = EffectiveTime::Immediately, \
+        .comment = "Number of entries for " DESC, \
+    }
+
+#define NEXCOBOT_SUB_REG(NAME, IDX, SUB, DT, MAXV, DESC) \
+    constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry NAME = { \
+        .index = (IDX), .subindex = (SUB), .name = (DESC), \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::DT, \
+        .default_value = 0, .unit = Unit_None, .options_enum = nullptr, \
+        .min_value = 0, .max_value = (MAXV), \
+        .modification_mode = ModificationMode::DuringOperation, \
+        .effective_time = EffectiveTime::Immediately, \
+        .comment = (DESC), \
+    }
+
+// 0x8100: Test Setting (4x UDINT)
+NEXCOBOT_CNT_REG(TestSettingCount, TestSettingIndex, 4, "Test Setting");
+NEXCOBOT_SUB_REG(TestSetting1, TestSettingIndex, 1, Unsigned32, 0xFFFFFFFF, "Setting1");
+NEXCOBOT_SUB_REG(TestSetting2, TestSettingIndex, 2, Unsigned32, 0xFFFFFFFF, "Setting2");
+NEXCOBOT_SUB_REG(TestSetting3, TestSettingIndex, 3, Unsigned32, 0xFFFFFFFF, "Setting3");
+NEXCOBOT_SUB_REG(TestSetting4, TestSettingIndex, 4, Unsigned32, 0xFFFFFFFF, "Setting4");
+
+// 0x8110: Test Setting (WDT) — same record layout as 0x8300
+NEXCOBOT_CNT_REG(TestSettingWDTCount, TestSettingWDTIndex, 4, "Test Setting (WDT)");
+NEXCOBOT_SUB_REG(WDT_DI_Test_Setting, TestSettingWDTIndex, 1, Unsigned32, 0xFFFFFFFF, "DI_Test_Setting");
+NEXCOBOT_SUB_REG(WDT_DO_Test_Setting, TestSettingWDTIndex, 2, Unsigned32, 0xFFFFFFFF, "DO_Test_Setting");
+NEXCOBOT_SUB_REG(WDT_DI_Timeout,      TestSettingWDTIndex, 3, Unsigned32, 0xFFFFFFFF, "DI_Timeout");
+NEXCOBOT_SUB_REG(WDT_DO_Timeout,      TestSettingWDTIndex, 4, Unsigned32, 0xFFFFFFFF, "DO_Timeout");
+
+// 0x8120: Config Alias Setting (4x UINT)
+NEXCOBOT_CNT_REG(ConfigAliasSettingCount, ConfigAliasSettingIndex, 4, "Config Alias Setting");
+NEXCOBOT_SUB_REG(ConfigAliasCommand,    ConfigAliasSettingIndex, 1, Unsigned16, 0xFFFF, "Command");
+NEXCOBOT_SUB_REG(ConfigAliasAddress,    ConfigAliasSettingIndex, 2, Unsigned16, 0xFFFF, "Address Value");
+NEXCOBOT_SUB_REG(ConfigAliasStatus,     ConfigAliasSettingIndex, 3, Unsigned16, 0xFFFF, "Status");
+NEXCOBOT_SUB_REG(ESCConfigAlias,        ConfigAliasSettingIndex, 4, Unsigned16, 0xFFFF, "ESC Config Alias");
+
+// 0x8200: SDRAM Test (4x UDINT, same layout as 0x8100)
+NEXCOBOT_CNT_REG(SDRAMTestCount, SDRAMTestIndex, 4, "SDRAM Test");
+NEXCOBOT_SUB_REG(SDRAMSetting1, SDRAMTestIndex, 1, Unsigned32, 0xFFFFFFFF, "Setting1");
+NEXCOBOT_SUB_REG(SDRAMSetting2, SDRAMTestIndex, 2, Unsigned32, 0xFFFFFFFF, "Setting2");
+NEXCOBOT_SUB_REG(SDRAMSetting3, SDRAMTestIndex, 3, Unsigned32, 0xFFFFFFFF, "Setting3");
+NEXCOBOT_SUB_REG(SDRAMSetting4, SDRAMTestIndex, 4, Unsigned32, 0xFFFFFFFF, "Setting4");
+
+// 0x8300: DIO Test Config (4x UDINT)
+NEXCOBOT_CNT_REG(DIOTestConfigCount, DIOTestConfigIndex, 4, "DIO Test Config");
+NEXCOBOT_SUB_REG(DIO_DI_Test_Setting, DIOTestConfigIndex, 1, Unsigned32, 0xFFFFFFFF, "DI_Test_Setting");
+NEXCOBOT_SUB_REG(DIO_DO_Test_Setting, DIOTestConfigIndex, 2, Unsigned32, 0xFFFFFFFF, "DO_Test_Setting");
+NEXCOBOT_SUB_REG(DIO_DI_Timeout,      DIOTestConfigIndex, 3, Unsigned32, 0xFFFFFFFF, "DI_Timeout");
+NEXCOBOT_SUB_REG(DIO_DO_Timeout,      DIOTestConfigIndex, 4, Unsigned32, 0xFFFFFFFF, "DO_Timeout");
+
+// 0x8400: Temp_Sensor (3x REAL32 + UDINT reserve)
+NEXCOBOT_CNT_REG(TempSensorCount, TempSensorIndex, 4, "Temp_Sensor");
+NEXCOBOT_SUB_REG(SystemTemperature, TempSensorIndex, 1, Real32, 0xFFFFFFFF, "System Temperature");
+NEXCOBOT_SUB_REG(MCUATemperature,   TempSensorIndex, 2, Real32, 0xFFFFFFFF, "MCU_A Temperature");
+NEXCOBOT_SUB_REG(MCUBTemperature,   TempSensorIndex, 3, Real32, 0xFFFFFFFF, "MCU_B Temperature");
+NEXCOBOT_SUB_REG(TempSensorReserve, TempSensorIndex, 4, Unsigned32, 0xFFFFFFFF, "Reserve");
+
+// 0x8401/0x8402: MCUA/B LM73 (5x UINT)
+NEXCOBOT_CNT_REG(MCUALM73Count, MCUALM73Index, 5, "MCUA_LM73");
+NEXCOBOT_SUB_REG(MCUALM73Control,  MCUALM73Index, 1, Unsigned16, 0xFFFF, "Control");
+NEXCOBOT_SUB_REG(MCUALM73Status,   MCUALM73Index, 2, Unsigned16, 0xFFFF, "Status");
+NEXCOBOT_SUB_REG(MCUALM73WriteU16, MCUALM73Index, 3, Unsigned16, 0xFFFF, "Write_U16");
+NEXCOBOT_SUB_REG(MCUALM73ReadU16,  MCUALM73Index, 4, Unsigned16, 0xFFFF, "Read_U16");
+NEXCOBOT_SUB_REG(MCUALM73Reserve,  MCUALM73Index, 5, Unsigned16, 0xFFFF, "Reserve");
+
+NEXCOBOT_CNT_REG(MCUBLM73Count, MCUBLM73Index, 5, "MCUB_LM73");
+NEXCOBOT_SUB_REG(MCUBLM73Control,  MCUBLM73Index, 1, Unsigned16, 0xFFFF, "Control");
+NEXCOBOT_SUB_REG(MCUBLM73Status,   MCUBLM73Index, 2, Unsigned16, 0xFFFF, "Status");
+NEXCOBOT_SUB_REG(MCUBLM73WriteU16, MCUBLM73Index, 3, Unsigned16, 0xFFFF, "Write_U16");
+NEXCOBOT_SUB_REG(MCUBLM73ReadU16,  MCUBLM73Index, 4, Unsigned16, 0xFFFF, "Read_U16");
+NEXCOBOT_SUB_REG(MCUBLM73Reserve,  MCUBLM73Index, 5, Unsigned16, 0xFFFF, "Reserve");
+
+// 0x8403: MCUA_LM73_Select (UINT)
+NEXCOBOT_SUB_REG(MCUALM73Select, MCUALM73SelectIndex, 0, Unsigned16, 0xFFFF, "MCUA_LM73_Select");
+
+// 0x8410: MCU_TempFIT (3x UINT)
+NEXCOBOT_CNT_REG(MCUTempFITCount, MCUTempFITIndex, 3, "MCU_TempFIT");
+NEXCOBOT_SUB_REG(SetMCUA_Temp, MCUTempFITIndex, 1, Unsigned16, 0xFFFF, "Set_MCUA_Temp");
+NEXCOBOT_SUB_REG(SetMCUBTemp, MCUTempFITIndex, 2, Unsigned16, 0xFFFF, "Set_MCUB_Temp");
+NEXCOBOT_SUB_REG(TempFlag,    MCUTempFITIndex, 3, Unsigned16, 0xFFFF, "Temp_Flag");
+
+// 0x8420: MCU_Watchdog (2x UINT)
+NEXCOBOT_CNT_REG(MCUWatchdogCount, MCUWatchdogIndex, 2, "MCU_Watchdog");
+NEXCOBOT_SUB_REG(SetMCUAWatchdog, MCUWatchdogIndex, 1, Unsigned16, 0xFFFF, "Set_MCUA_Watchdog");
+NEXCOBOT_SUB_REG(SetMCUBWatchdog, MCUWatchdogIndex, 2, Unsigned16, 0xFFFF, "Set_MCUB_Watchdog");
+
+// 0xF500-0xF521: Test full data inputs (large byte arrays)
+NEXCOBOT_SUB_REG(TestFullFNIData,     TestFullFNIDataIndex,     0, OctetString, 0xFF, "Test: Full FNI Data Input");
+NEXCOBOT_SUB_REG(TestFullSPARA0Data1, TestFullSPARA0Data1Index, 0, OctetString, 0xFF, "Test: Full SPARA[0] Data Input 1");
+NEXCOBOT_SUB_REG(TestFullSPARA0Data2, TestFullSPARA0Data2Index, 0, OctetString, 0xFF, "Test: Full SPARA[0] Data Input 2");
+NEXCOBOT_SUB_REG(TestFullSPARA1Data1, TestFullSPARA1Data1Index, 0, OctetString, 0xFF, "Test: Full SPARA[1] Data Input 1");
+NEXCOBOT_SUB_REG(TestFullSPARA1Data2, TestFullSPARA1Data2Index, 0, OctetString, 0xFF, "Test: Full SPARA[1] Data Input 2");
+
+#undef NEXCOBOT_CNT_REG
+#undef NEXCOBOT_SUB_REG
+
 inline const RegisterList kRegisterList = {
     &UserControlCount,
     &ControlCommand,
@@ -810,6 +936,29 @@ inline const RegisterList kRegisterList = {
     &SRAMSParaNum, &SDRAMSParaNum, &RxPDOSize,
     &AdminMode,
     &EthernetMAC, &EthernetIP, &EthernetMask, &EthernetGateway,
+    &TestSettingCount,
+    &TestSetting1, &TestSetting2, &TestSetting3, &TestSetting4,
+    &TestSettingWDTCount,
+    &WDT_DI_Test_Setting, &WDT_DO_Test_Setting, &WDT_DI_Timeout, &WDT_DO_Timeout,
+    &ConfigAliasSettingCount,
+    &ConfigAliasCommand, &ConfigAliasAddress, &ConfigAliasStatus, &ESCConfigAlias,
+    &SDRAMTestCount,
+    &SDRAMSetting1, &SDRAMSetting2, &SDRAMSetting3, &SDRAMSetting4,
+    &DIOTestConfigCount,
+    &DIO_DI_Test_Setting, &DIO_DO_Test_Setting, &DIO_DI_Timeout, &DIO_DO_Timeout,
+    &TempSensorCount,
+    &SystemTemperature, &MCUATemperature, &MCUBTemperature, &TempSensorReserve,
+    &MCUALM73Count,
+    &MCUALM73Control, &MCUALM73Status, &MCUALM73WriteU16, &MCUALM73ReadU16, &MCUALM73Reserve,
+    &MCUBLM73Count,
+    &MCUBLM73Control, &MCUBLM73Status, &MCUBLM73WriteU16, &MCUBLM73ReadU16, &MCUBLM73Reserve,
+    &MCUALM73Select,
+    &MCUTempFITCount,
+    &SetMCUA_Temp, &SetMCUBTemp, &TempFlag,
+    &MCUWatchdogCount,
+    &SetMCUAWatchdog, &SetMCUBWatchdog,
+    &TestFullFNIData, &TestFullSPARA0Data1, &TestFullSPARA0Data2,
+    &TestFullSPARA1Data1, &TestFullSPARA1Data2,
 };
 
 } // namespace UserSystem
