@@ -19,7 +19,6 @@
 #include <cstdint>
 
 #include "tether/drives/NexcobotESC211/NexcobotESC211Registers.hpp"
-#include "tether/drives/NexcobotESC211/NexcobotESC211PDO.hpp"
 
 namespace EtherCAT {
 namespace Drives {

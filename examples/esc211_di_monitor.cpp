@@ -27,9 +27,6 @@
 #include <clocale>
 
 #include "tether/drives/NexcobotESC211/NexcobotESC211Registers.hpp"
-#include "tether/drives/NexcobotESC211/NexcobotESC211PDO.hpp"
-#include "tether/drives/NexcobotESC211/Registers/FSOERx.hpp"
-#include "tether/drives/NexcobotESC211/Registers/FSOETx.hpp"
 
 // ncurses defines OK/ERR as macros; undefine them before Tether headers
 // that use Error::OK are parsed.
@@ -49,8 +46,6 @@
 
 #include "common/ExampleHelpers.hpp"
 #include "common/EtherCATHostSetup.hpp"
-
-namespace Reg = EtherCAT::Drives::Registers::NexcobotESC211;
 
 static const char* TAG = "esc211_di_monitor";
 static std::atomic<bool> g_cancel{false};
@@ -150,34 +145,6 @@ static void drawScreen(const DIState& state) {
     mvprintw(16, 0, "Read count: %llu  di_val=0x%08X",
              static_cast<unsigned long long>(state.read_count), state.last_safe_di);
     refresh();
-}
-
-// ---------------------------------------------------------------------------
-// Identity helper
-// ---------------------------------------------------------------------------
-
-static void readIdentityObject(EtherCAT::Slave& sl) {
-    uint32_t vendor_id = 0;
-    uint32_t product_code = 0;
-    uint32_t revision = 0;
-    uint32_t serial = 0;
-
-    bool identity_ok = true;
-    if (sl.sdoReadU32(0x1018, 1, vendor_id) != EtherCAT::SlaveError::Ok) { identity_ok = false; }
-    if (sl.sdoReadU32(0x1018, 2, product_code) != EtherCAT::SlaveError::Ok) { identity_ok = false; }
-    if (sl.sdoReadU32(0x1018, 3, revision) != EtherCAT::SlaveError::Ok) { identity_ok = false; }
-    if (sl.sdoReadU32(0x1018, 4, serial) != EtherCAT::SlaveError::Ok) { identity_ok = false; }
-
-    if (!identity_ok) {
-        TETHER_LOGE(TAG, "Failed to read Identity Object 0x1018");
-    } else {
-        std::cout << "=== Identity Object (0x1018) ===" << "\n";
-        std::cout << "Vendor ID:    0x" << std::hex << vendor_id << std::dec << "\n";
-        std::cout << "Product Code: 0x" << std::hex << product_code << std::dec << "\n";
-        std::cout << "Revision:     0x" << std::hex << revision << std::dec << "\n";
-        std::cout << "Serial:       0x" << std::hex << serial << std::dec << "\n";
-        std::cout.flush();
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -410,8 +377,6 @@ int main(int argc, char** argv) {
 
     poller.start();
     TETHER_LOGI(TAG, "AL status poller started (interval={} ms)", poller.pollIntervalMs());
-
-    // readIdentityObject(sl);
 
     // ESI v0.9 PDOs are vendor-fixed: read each PDO's own mapping via SDO
     // (registerExisting*PDO) and only assign it in 0x1C12/0x1C13.
