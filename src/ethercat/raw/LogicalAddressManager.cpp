@@ -430,9 +430,18 @@ bool LogicalAddressManager::exchangeLRWImpl(const PDO::PDOMapping& mapping,
     const uint16_t adp = static_cast<uint16_t>(logical_addr & 0xFFFF);
     const uint16_t ado = static_cast<uint16_t>((logical_addr >> 16) & 0xFFFF);
 
+    // Pre-register the response waiter BEFORE sending: the response can
+    // return faster than we can register, and an unregistered response is
+    // dropped as "unrouted" followed by a spurious timeout.
+    RxDatagram resp;
+    const size_t slot = transport_.preRegisterResponseWaiter(
+        idx, resp.data, sizeof(resp.data));
+    const bool have_slot = (slot != IPDOTransport::kPreRegInvalid);
+
     if (!transport_.sendSingleDatagram(Command::LRW, idx, adp, ado,
                                         payload, static_cast<uint16_t>(length),
                                         true)) {
+        if (have_slot) transport_.waitForPreRegistered(slot, 0, resp);
         if (!transport_.isCancelRequested()) {
             TETHER_LOGE(TAG, "exchangeLRW: send failed");
         }
@@ -441,8 +450,10 @@ bool LogicalAddressManager::exchangeLRWImpl(const PDO::PDOMapping& mapping,
     }
 
     // Wait for response
-    RxDatagram resp;
-    if (!transport_.waitForResponseIdx(idx, 10, resp)) {
+    const bool got_resp = have_slot
+        ? transport_.waitForPreRegistered(slot, 10, resp)
+        : transport_.waitForResponseIdx(idx, 10, resp);
+    if (!got_resp) {
         TETHER_LOGE(TAG, "exchangeLRW: response timeout");
         stats_.timeout_errors++;
         return false;
@@ -541,17 +552,26 @@ bool LogicalAddressManager::exchangeLRWForSlaves(const PDO::PDOMapping& mapping,
     const uint16_t adp = static_cast<uint16_t>(logical_addr & 0xFFFF);
     const uint16_t ado = static_cast<uint16_t>((logical_addr >> 16) & 0xFFFF);
 
+    // Pre-register the response waiter BEFORE sending (see exchangeLRWImpl).
+    RxDatagram resp;
+    const size_t slot = transport_.preRegisterResponseWaiter(
+        idx, resp.data, sizeof(resp.data));
+    const bool have_slot = (slot != IPDOTransport::kPreRegInvalid);
+
     if (!transport_.sendSingleDatagram(Command::LRW, idx, adp, ado,
                                         payload, static_cast<uint16_t>(total_data),
                                         true)) {
+        if (have_slot) transport_.waitForPreRegistered(slot, 0, resp);
         TETHER_LOGE(TAG, "exchangeLRWForSlaves: send failed (mask=0x{:08X})",
                     static_cast<unsigned long>(slave_mask));
         stats_.send_errors++;
         return false;
     }
 
-    RxDatagram resp;
-    if (!transport_.waitForResponseIdx(idx, 10, resp)) {
+    const bool got_resp = have_slot
+        ? transport_.waitForPreRegistered(slot, 10, resp)
+        : transport_.waitForResponseIdx(idx, 10, resp);
+    if (!got_resp) {
         TETHER_LOGE(TAG, "exchangeLRWForSlaves: response timeout");
         stats_.timeout_errors++;
         return false;
