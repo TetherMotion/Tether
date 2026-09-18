@@ -334,11 +334,14 @@ TEST(FSoEOddLengthFrameRegression, OddCRCVerified) {
 }
 
 // ============================================================================
-// findFSoEFrameLength — recover the valid frame length from a buffer
+// FSoEFrameScanner — offline frame length detection and buffer scanning
 // ============================================================================
+
+using Scanner = CRC::FSoEFrameScanner;
 
 TEST(FSoEFrameLengthDetection, ExactSizeBuffer) {
     // Buffer holds exactly the frame — the frame's own size is returned.
+    Scanner scanner;
     for (size_t data_len = 1; data_len <= 18; ++data_len) {
         std::vector<uint8_t> data(data_len);
         for (size_t i = 0; i < data_len; ++i)
@@ -349,7 +352,7 @@ TEST(FSoEFrameLengthDetection, ExactSizeBuffer) {
             frame, Command::ProcessData, data.data(), data_len, 0x1234);
         ASSERT_GT(frame_size, 0u);
 
-        EXPECT_EQ(CRC::findFSoEFrameLength(frame, frame_size), frame_size)
+        EXPECT_EQ(scanner.findFrameLength(frame, frame_size), frame_size)
             << "Failed for data_len=" << data_len;
     }
 }
@@ -365,7 +368,8 @@ TEST(FSoEFrameLengthDetection, FrameWithTrailingPadding) {
     // Fill the tail with non-zero garbage.
     for (size_t i = frame_size; i < sizeof(buf); ++i) buf[i] = 0xA5;
 
-    EXPECT_EQ(CRC::findFSoEFrameLength(buf, sizeof(buf)), frame_size);
+    Scanner scanner;
+    EXPECT_EQ(scanner.findFrameLength(buf, sizeof(buf)), frame_size);
 }
 
 TEST(FSoEFrameLengthDetection, CorruptedFrameReturnsZero) {
@@ -379,7 +383,8 @@ TEST(FSoEFrameLengthDetection, CorruptedFrameReturnsZero) {
     // Corrupt every CRC-bearing region.
     for (size_t i = 1; i < frame_size; ++i) frame[i] ^= 0xFF;
 
-    EXPECT_EQ(CRC::findFSoEFrameLength(frame, frame_size, 0, 0, 0x1234), 0u);
+    Scanner scanner({.expected_conn_id = 0x1234});
+    EXPECT_EQ(scanner.findFrameLength(frame, frame_size), 0u);
 }
 
 TEST(FSoEFrameLengthDetection, ConnIdFilter) {
@@ -390,15 +395,19 @@ TEST(FSoEFrameLengthDetection, ConnIdFilter) {
     ASSERT_GT(frame_size, 0u);
 
     // Matching ConnID → found; wrong ConnID → not found.
-    EXPECT_EQ(CRC::findFSoEFrameLength(frame, frame_size, 0, 0, 0xABCD),
+    EXPECT_EQ(Scanner({.expected_conn_id = 0xABCD})
+                  .findFrameLength(frame, frame_size),
               frame_size);
-    EXPECT_EQ(CRC::findFSoEFrameLength(frame, frame_size, 0, 0, 0x1234), 0u);
+    EXPECT_EQ(Scanner({.expected_conn_id = 0x1234})
+                  .findFrameLength(frame, frame_size),
+              0u);
 }
 
 TEST(FSoEFrameLengthDetection, ResetFrame) {
     // A bare 3-byte Reset frame verifies only as the last-resort case.
     uint8_t frame[8] = {Command::Reset, 0x00, 0x00};
-    EXPECT_EQ(CRC::findFSoEFrameLength(frame, 3), CRC::MIN_FSOE_FRAME_SIZE);
+    Scanner scanner;
+    EXPECT_EQ(scanner.findFrameLength(frame, 3), CRC::MIN_FSOE_FRAME_SIZE);
 }
 
 TEST(FSoEFrameLengthDetection, WrongStartCrcOrSeqFails) {
@@ -411,17 +420,19 @@ TEST(FSoEFrameLengthDetection, WrongStartCrcOrSeqFails) {
     ASSERT_GT(frame_size, 0u);
 
     // Correct inheritance parameters → found.
-    EXPECT_EQ(CRC::findFSoEFrameLength(frame, frame_size, 0x1111, 0x2222,
-                                       0x1234),
+    EXPECT_EQ(Scanner({.start_crc = 0x1111, .seq_no = 0x2222,
+                       .expected_conn_id = 0x1234})
+                  .findFrameLength(frame, frame_size),
               frame_size);
     // Wrong start_crc → CRC0 mismatch → not found.
-    EXPECT_EQ(CRC::findFSoEFrameLength(frame, frame_size, 0x9999, 0x2222,
-                                       0x1234),
+    EXPECT_EQ(Scanner({.start_crc = 0x9999, .seq_no = 0x2222,
+                       .expected_conn_id = 0x1234})
+                  .findFrameLength(frame, frame_size),
               0u);
 }
 
 // ============================================================================
-// findFSoEFrame — locate a frame inside a larger binary dataset
+// FSoEFrameScanner::findFrame — locate a frame in a larger binary dataset
 // ============================================================================
 
 TEST(FSoEFrameScan, FindsFrameAtUnknownOffset) {
@@ -435,7 +446,8 @@ TEST(FSoEFrameScan, FindsFrameAtUnknownOffset) {
                                              data, sizeof(data), 0x1234);
     ASSERT_GT(frame_size, 0u);
 
-    auto m = CRC::findFSoEFrame(buf, sizeof(buf), 4, 0, 0, 0, 0x1234);
+    Scanner scanner({.expected_conn_id = 0x1234});
+    auto m = scanner.findFrame(buf, sizeof(buf));
     ASSERT_TRUE(m.found);
     EXPECT_EQ(m.offset, kOffset);
     EXPECT_EQ(m.length, frame_size);
@@ -452,8 +464,9 @@ TEST(FSoEFrameScan, ExpectedLenFastPath) {
                                              data, sizeof(data), 0xABCD);
     ASSERT_GT(frame_size, 0u);
 
-    auto m = CRC::findFSoEFrame(buf, sizeof(buf), 4, frame_size,
-                                 0, 0, 0xABCD);
+    Scanner scanner({.expected_conn_id = 0xABCD,
+                     .expected_len = frame_size});
+    auto m = scanner.findFrame(buf, sizeof(buf));
     ASSERT_TRUE(m.found);
     EXPECT_EQ(m.offset, kOffset);
     EXPECT_EQ(m.length, frame_size);
@@ -464,7 +477,8 @@ TEST(FSoEFrameScan, NoFrameReturnsNotFound) {
     uint8_t buf[64];
     for (size_t i = 0; i < sizeof(buf); ++i)
         buf[i] = static_cast<uint8_t>(i * 37 + 5);
-    auto m = CRC::findFSoEFrame(buf, sizeof(buf), 4, 0, 0, 0, 0x1234);
+    Scanner scanner({.expected_conn_id = 0x1234});
+    auto m = scanner.findFrame(buf, sizeof(buf));
     EXPECT_FALSE(m.found);
 }
 
@@ -480,13 +494,13 @@ TEST(FSoEFrameScan, FindsMultipleFramesSequentially) {
                                      d2, sizeof(d2), 0x1111);
     ASSERT_GT(s1 * s2, 0u);
 
-    auto m1 = CRC::findFSoEFrame(buf, s1 + s2, 4, 0, 0, 0, 0x1111);
+    Scanner scanner({.expected_conn_id = 0x1111});
+    auto m1 = scanner.findFrame(buf, s1 + s2);
     ASSERT_TRUE(m1.found);
     EXPECT_EQ(m1.offset, 0u);
     EXPECT_EQ(m1.length, s1);
 
-    auto m2 = CRC::findFSoEFrame(buf, s1 + s2, 4, 0, 0, 0, 0x1111,
-                                  m1.offset + 1);
+    auto m2 = scanner.findFrame(buf, s1 + s2, m1.offset + 1);
     ASSERT_TRUE(m2.found);
     EXPECT_EQ(m2.offset, s1);
     EXPECT_EQ(m2.length, s2);
@@ -505,10 +519,12 @@ TEST(FSoEFrameScan, MinFrameLenExcludesShortMatches) {
     ASSERT_EQ(frame_size, 6u);
 
     // min_frame_len = 7 excludes the 6-byte frame.
-    auto m = CRC::findFSoEFrame(buf, sizeof(buf), 7, 0, 0, 0, 0x1234);
+    Scanner strict({.expected_conn_id = 0x1234, .min_frame_len = 7});
+    auto m = strict.findFrame(buf, sizeof(buf));
     EXPECT_FALSE(m.found);
     // min_frame_len = 6 accepts it.
-    m = CRC::findFSoEFrame(buf, sizeof(buf), 6, 0, 0, 0, 0x1234);
+    Scanner relaxed({.expected_conn_id = 0x1234, .min_frame_len = 6});
+    m = relaxed.findFrame(buf, sizeof(buf));
     ASSERT_TRUE(m.found);
     EXPECT_EQ(m.offset, kOffset);
 }

@@ -729,73 +729,37 @@ inline bool parseFSoEFrame(const uint8_t* frame, size_t frame_len,
     return true;
 }
 
-/// Find the length for which an FSoE frame's CRCs verify.
-///
-/// The FSoE PDU carries no length field — its size is implicitly agreed via
-/// the configured safe-data length.  When the receive buffer may be longer
-/// than the actual PDU (e.g. a fixed-size PDO slot with trailing padding,
-/// or an unknown sender configuration), this function scans candidate
-/// frame sizes and returns the longest one whose CRCs verify.
-///
-/// Candidate sizes are tried from max_len downwards.  Only structurally
-/// valid sizes are tested (see fsoeDataLen: 3-byte Reset frame, then sizes
-/// of the form 4k+2 / 4k+3).  Returning the LONGEST match (rather than the
-/// first) is deliberate: a 3-byte Reset frame has no CRC and therefore
-/// "verifies" vacuously for any buffer, so it is only returned when no
-/// longer candidate verifies.
-///
-/// @param frame             Input buffer containing an FSoE frame as a
-///                          prefix (may have trailing bytes beyond it).
-/// @param max_len           Number of valid bytes in the buffer; candidates
-///                          larger than this are not tried.  Capped at the
-///                          largest frame parseFSoEFrame supports
-///                          (fsoeFrameSize(MAX_PARSE_DATA_SIZE)).
-/// @param start_crc         Previous frame's CRC0 (CRC inheritance).  0 for
-///                          the very first frame.
-/// @param seq_no            Expected sequence number.
-/// @param expected_conn_id  If >= 0, only lengths whose parsed ConnID equals
-///                          this value are accepted (helps disambiguate when
-///                          multiple lengths could spuriously verify).
-/// @return The verified frame length in bytes, or 0 if no candidate length
-///         passes CRC verification.
-inline size_t findFSoEFrameLength(const uint8_t* frame, size_t max_len,
-                                   uint16_t start_crc = 0,
-                                   uint16_t seq_no = 0,
-                                   int expected_conn_id = -1) {
-    if (!frame || max_len < MIN_FSOE_FRAME_SIZE) return 0;
+// ---------------------------------------------------------------------------
+// FSoEFrameScanner — offline frame detection in arbitrary binary data
+// ---------------------------------------------------------------------------
+//
+// ============================================================================
+// SAFETY WARNING — READ BEFORE USE
+// ============================================================================
+//
+// The functions in this class perform an EXHAUSTIVE, UNAUTHENTICATED search:
+// they try many offsets/lengths and accept whatever happens to pass CRC
+// verification.  A random or adversarial blob of data has a non-negligible
+// chance of containing a byte sequence that verifies (each CRC check has a
+// ~2^-16 false-positive rate, multiplied by every candidate tried).
+//
+// Therefore, to preserve the safety guarantees of FSoE:
+//
+//   *** These functions MUST NOT be used dynamically on received data. ***
+//   *** They may only be used ONCE per buffer (e.g. a one-time scan of   ***
+//   *** a captured dump or commissioning snapshot), never in the cyclic ***
+//   *** RX path and never to "resynchronize" a live connection.          ***
+//
+// Accepting a spuriously-verifying "frame" found inside otherwise likely
+// data would break the FSoE integrity guarantees — the protocol relies on
+// each frame being validated exactly once at its expected position.  Using
+// this scanner on live RX data turns a probabilistic search into a frame
+// acceptance mechanism, which is precisely what the CRC chain is designed
+// to prevent.  The cyclic receive path must always use parseFSoEFrame()
+// with the configured, fixed frame length.
+// ============================================================================
 
-    // parseFSoEFrame rejects data_len > MAX_PARSE_DATA_SIZE, so larger
-    // candidates can never verify — cap the scan.
-    const size_t hard_max = fsoeFrameSize(MAX_PARSE_DATA_SIZE);
-    if (max_len > hard_max) max_len = hard_max;
-
-    uint8_t cmd = 0;
-    size_t data_len = 0;
-    uint16_t conn_id = 0;
-
-    // Try CRC-bearing candidates longest-first.
-    for (size_t len = max_len; len > MIN_FSOE_FRAME_SIZE; --len) {
-        if (fsoeDataLen(len) == 0) continue;  // structurally invalid size
-        if (!parseFSoEFrame(frame, len, cmd, {}, data_len, conn_id,
-                            start_crc, seq_no))
-            continue;
-        if (expected_conn_id >= 0 &&
-            conn_id != static_cast<uint16_t>(expected_conn_id))
-            continue;
-        return len;
-    }
-
-    // Last resort: the 3-byte Reset frame (CMD + ConnID, no CRC).
-    if (parseFSoEFrame(frame, MIN_FSOE_FRAME_SIZE, cmd, {}, data_len,
-                       conn_id, start_crc, seq_no) &&
-        (expected_conn_id < 0 ||
-         conn_id == static_cast<uint16_t>(expected_conn_id))) {
-        return MIN_FSOE_FRAME_SIZE;
-    }
-    return 0;
-}
-
-/// Result of findFSoEFrame: location and length of a verified FSoE frame
+/// Result of a frame scan: location and length of a verified FSoE frame
 /// inside a larger buffer.
 struct FSoEFrameMatch {
     size_t offset = 0;     ///< Byte offset of the frame's CMD byte
@@ -805,90 +769,165 @@ struct FSoEFrameMatch {
     bool found = false;    ///< true if a frame was found
 };
 
-/// Scan a binary buffer for the first FSoE frame whose CRCs verify.
+/// Offline scanner that locates CRC-verified FSoE frames in binary data.
 ///
-/// Slides a window over the buffer and applies the same verification as
-/// findFSoEFrameLength at every offset.  Useful for locating FSoE PDUs in
-/// captured traffic, PDO dumps, or other binary datasets where the frame's
-/// position is unknown.
+/// The FSoE PDU carries no length field — its size is implicitly agreed via
+/// the configured safe-data length.  This class recovers the position and
+/// length of a frame when they are not known a priori.
 ///
-/// @param data              Buffer to scan.
-/// @param data_len          Number of valid bytes in the buffer.
-/// @param min_frame_len     Only accept verified frames at least this long.
-///                          Defaults to MIN_FSOE_FRAME_SIZE+1 so the CRC-less
-///                          3-byte Reset frame — which matches vacuously at
-///                          every offset — is excluded.  Pass
-///                          MIN_FSOE_FRAME_SIZE (with expected_conn_id to
-///                          disambiguate) to also detect Reset frames.
-/// @param expected_len      If non-zero, only this exact frame length is
-///                          tried at each offset (fast path when the frame
-///                          size is known).
-/// @param start_crc         Previous frame's CRC0 (CRC inheritance).  0 if
-///                          unknown / first frame — note that frames whose
-///                          CRC0 was chained from a preceding frame will
-///                          only verify with the correct start_crc.
-/// @param seq_no            Expected sequence number.
-/// @param expected_conn_id  If >= 0, only frames whose ConnID equals this
-///                          value are accepted.
-/// @param start_offset      Byte offset to begin scanning at (default 0).
-///                          To find subsequent frames, call again with
-///                          match.offset + 1.
-/// @return FSoEFrameMatch with found=true on success, found=false otherwise.
-inline FSoEFrameMatch findFSoEFrame(const uint8_t* data, size_t data_len,
-                                     size_t min_frame_len = MIN_FSOE_FRAME_SIZE + 1,
-                                     size_t expected_len = 0,
-                                     uint16_t start_crc = 0,
-                                     uint16_t seq_no = 0,
-                                     int expected_conn_id = -1,
-                                     size_t start_offset = 0) {
-    FSoEFrameMatch match{};
-    if (!data || data_len < MIN_FSOE_FRAME_SIZE) return match;
-    if (min_frame_len < MIN_FSOE_FRAME_SIZE) min_frame_len = MIN_FSOE_FRAME_SIZE;
+/// OFFLINE / ONE-SHOT USE ONLY — see the safety warning above.  Do NOT use
+/// on live received data.
+///
+/// Usage:
+///   FSoEFrameScanner scanner({.expected_conn_id = 0x1234});
+///   auto m = scanner.findFrame(dump, dump_len);          // first match
+///   auto n = scanner.findFrame(dump, dump_len, m.offset + 1);  // next
+class FSoEFrameScanner {
+public:
+    /// Scanner configuration (CRC-inheritance inputs and match filters).
+    struct Config {
+        uint16_t start_crc = 0;  ///< Previous frame's CRC0.  0 if unknown /
+                                 ///< first frame — frames chained from a
+                                 ///< predecessor only verify with the
+                                 ///< correct start_crc.
+        uint16_t seq_no = 0;     ///< Expected sequence number.
+        int expected_conn_id = -1;  ///< If >= 0, only frames whose ConnID
+                                    ///< equals this value are accepted
+                                    ///< (strongly recommended — it is the
+                                    ///< main disambiguator against spurious
+                                    ///< CRC hits).
+        /// Only accept verified frames at least this long.  Defaults to
+        /// MIN_FSOE_FRAME_SIZE+1 so the CRC-less 3-byte Reset frame — which
+        /// matches vacuously at every offset — is excluded.  Set to
+        /// MIN_FSOE_FRAME_SIZE (with expected_conn_id) to also detect
+        /// Reset frames.
+        size_t min_frame_len = MIN_FSOE_FRAME_SIZE + 1;
+        /// If non-zero, only this exact frame length is tried at each
+        /// offset (fast path when the frame size is known).
+        size_t expected_len = 0;
+    };
 
-    for (size_t off = start_offset;
-         off + MIN_FSOE_FRAME_SIZE <= data_len; ++off) {
-        const uint8_t* p = data + off;
-        const size_t remaining = data_len - off;
+    constexpr FSoEFrameScanner() = default;
+    explicit constexpr FSoEFrameScanner(Config cfg) : cfg_(cfg) {}
 
-        if (expected_len != 0) {
-            // Fast path: try only the expected length at this offset.
-            if (expected_len < min_frame_len || expected_len > remaining)
+    /// Find the length for which an FSoE frame's CRCs verify.
+    ///
+    /// Scans candidate frame sizes and returns the longest one whose CRCs
+    /// verify.  Candidates are tried from max_len downwards; only
+    /// structurally valid sizes are tested (see fsoeDataLen: 3-byte Reset
+    /// frame, then sizes of the form 4k+2 / 4k+3).  Returning the LONGEST
+    /// match is deliberate: a 3-byte Reset frame has no CRC and therefore
+    /// "verifies" vacuously for any buffer, so it is only returned when no
+    /// longer candidate verifies.
+    ///
+    /// @param frame    Input buffer containing an FSoE frame as a prefix
+    ///                 (may have trailing bytes beyond it).
+    /// @param max_len  Number of valid bytes in the buffer.  Capped at the
+    ///                 largest frame parseFSoEFrame supports
+    ///                 (fsoeFrameSize(MAX_PARSE_DATA_SIZE)).
+    /// @return The verified frame length in bytes, or 0 if no candidate
+    ///         length passes CRC verification (and the configured filters).
+    size_t findFrameLength(const uint8_t* frame, size_t max_len) const {
+        if (!frame || max_len < MIN_FSOE_FRAME_SIZE) return 0;
+
+        // parseFSoEFrame rejects data_len > MAX_PARSE_DATA_SIZE, so larger
+        // candidates can never verify — cap the scan.
+        const size_t hard_max = fsoeFrameSize(MAX_PARSE_DATA_SIZE);
+        if (max_len > hard_max) max_len = hard_max;
+
+        uint8_t cmd = 0;
+        size_t data_len = 0;
+        uint16_t conn_id = 0;
+
+        // Try CRC-bearing candidates longest-first.
+        for (size_t len = max_len; len > MIN_FSOE_FRAME_SIZE; --len) {
+            if (fsoeDataLen(len) == 0) continue;  // structurally invalid
+            if (!parseFSoEFrame(frame, len, cmd, {}, data_len, conn_id,
+                                cfg_.start_crc, cfg_.seq_no))
                 continue;
+            if (!connIdMatches(conn_id)) continue;
+            return len;
+        }
+
+        // Last resort: the 3-byte Reset frame (CMD + ConnID, no CRC).
+        if (parseFSoEFrame(frame, MIN_FSOE_FRAME_SIZE, cmd, {}, data_len,
+                           conn_id, cfg_.start_crc, cfg_.seq_no) &&
+            connIdMatches(conn_id)) {
+            return MIN_FSOE_FRAME_SIZE;
+        }
+        return 0;
+    }
+
+    /// Scan a binary buffer for the first FSoE frame whose CRCs verify.
+    ///
+    /// Slides a window over the buffer and applies findFrameLength() at
+    /// every offset.
+    ///
+    /// @param data          Buffer to scan.
+    /// @param data_len      Number of valid bytes in the buffer.
+    /// @param start_offset  Byte offset to begin scanning at (default 0).
+    ///                      To find subsequent frames, call again with
+    ///                      match.offset + 1.
+    /// @return FSoEFrameMatch with found=true on success.
+    FSoEFrameMatch findFrame(const uint8_t* data, size_t data_len,
+                              size_t start_offset = 0) const {
+        FSoEFrameMatch match{};
+        if (!data || data_len < MIN_FSOE_FRAME_SIZE) return match;
+        size_t min_len = cfg_.min_frame_len;
+        if (min_len < MIN_FSOE_FRAME_SIZE) min_len = MIN_FSOE_FRAME_SIZE;
+
+        for (size_t off = start_offset;
+             off + MIN_FSOE_FRAME_SIZE <= data_len; ++off) {
+            const uint8_t* p = data + off;
+            const size_t remaining = data_len - off;
+
+            if (cfg_.expected_len != 0) {
+                // Fast path: try only the expected length at this offset.
+                if (cfg_.expected_len < min_len ||
+                    cfg_.expected_len > remaining)
+                    continue;
+                uint8_t cmd = 0;
+                size_t dlen = 0;
+                uint16_t conn = 0;
+                if (!parseFSoEFrame(p, cfg_.expected_len, cmd, {}, dlen,
+                                    conn, cfg_.start_crc, cfg_.seq_no))
+                    continue;
+                if (!connIdMatches(conn)) continue;
+                match.offset = off;
+                match.length = cfg_.expected_len;
+                match.conn_id = conn;
+                match.command = cmd;
+                match.found = true;
+                return match;
+            }
+
+            // General path: find the longest verifying length here.
+            size_t len = findFrameLength(p, remaining);
+            if (len < min_len) continue;
+            // Re-extract cmd/conn for the match record.
             uint8_t cmd = 0;
             size_t dlen = 0;
             uint16_t conn = 0;
-            if (!parseFSoEFrame(p, expected_len, cmd, {}, dlen, conn,
-                                start_crc, seq_no))
-                continue;
-            if (expected_conn_id >= 0 &&
-                conn != static_cast<uint16_t>(expected_conn_id))
-                continue;
+            parseFSoEFrame(p, len, cmd, {}, dlen, conn,
+                           cfg_.start_crc, cfg_.seq_no);
             match.offset = off;
-            match.length = expected_len;
+            match.length = len;
             match.conn_id = conn;
             match.command = cmd;
             match.found = true;
             return match;
         }
-
-        // General path: find the longest verifying length at this offset.
-        size_t len = findFSoEFrameLength(p, remaining, start_crc, seq_no,
-                                          expected_conn_id);
-        if (len < min_frame_len) continue;
-        // Re-extract cmd/conn for the match record.
-        uint8_t cmd = 0;
-        size_t dlen = 0;
-        uint16_t conn = 0;
-        parseFSoEFrame(p, len, cmd, {}, dlen, conn, start_crc, seq_no);
-        match.offset = off;
-        match.length = len;
-        match.conn_id = conn;
-        match.command = cmd;
-        match.found = true;
         return match;
     }
-    return match;
-}
+
+private:
+    bool connIdMatches(uint16_t conn_id) const {
+        return cfg_.expected_conn_id < 0 ||
+               conn_id == static_cast<uint16_t>(cfg_.expected_conn_id);
+    }
+
+    Config cfg_;
+};
 
 // ---------------------------------------------------------------------------
 // Backward-compatible standard CRC-16 (for parameter CRC computation)
