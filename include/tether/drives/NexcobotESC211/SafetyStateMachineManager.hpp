@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <functional>
 #include <stop_token>
+#include <string>
 
 #include "tether/drives/NexcobotESC211/ConfigManager.hpp"
 #include "tether/drives/NexcobotESC211/ControlCommandChannel.hpp"
@@ -75,6 +76,9 @@ public:
         // Timeout for the post-start MONITORING state wait.
         std::chrono::milliseconds monitoring_state_timeout;
         uint32_t max_command_retries = 0;
+        /// Admin password entered on the device (0xF105) before privileged
+        /// commands; enables automatic login+retry on access-denied.
+        std::string admin_password;
         Config()
             : command_timeout(10000)
             , poll_interval(20)
@@ -129,6 +133,11 @@ public:
     /// Set a stop_token for cooperative cancellation.  When stop is
     /// requested on the token, all polling loops abort immediately.
     void setStopToken(std::stop_token token);
+
+    /// Set the admin password on both command channels (0xF100 command
+    /// channel and the ConfigManager's channel).  Overrides
+    /// Config::admin_password.
+    void setAdminPassword(std::string password);
 
 private:
     using ControlCommandCode = EtherCAT::Drives::Registers::NexcobotESC211::UserSystem::ControlCommandCode;
