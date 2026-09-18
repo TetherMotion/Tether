@@ -1165,4 +1165,207 @@ inline bool parseFSoEFrameWithCollisionAvoidance(
     return false;
 }
 
+// ---------------------------------------------------------------------------
+// Native CRC-chain resynchronization
+// ---------------------------------------------------------------------------
+
+/// Solve a 16-bit affine CRC system: find x such that f(x) == target,
+/// where f(x) = eval(x) is affine over GF(2) (f(x) = M·x ⊕ f(0)).
+/// Returns true and sets out_x when a (unique or minimum-norm) solution
+/// exists; false if the system is inconsistent.
+namespace detail {
+inline bool solveCrcAffine16(auto&& eval, uint16_t target, uint16_t& out_x) {
+    // rows[e] = 16-bit coefficient mask for output bit e; rhs[e] = RHS bit.
+    uint16_t rows[16] = {};
+    uint8_t  rhs[16]  = {};
+    const uint16_t base = eval(0);
+    const uint16_t r = static_cast<uint16_t>(target ^ base);
+    for (int b = 0; b < 16; ++b) {
+        rhs[b] = static_cast<uint8_t>((r >> b) & 1);
+        uint16_t coeff = 0;
+        for (int j = 0; j < 16; ++j) {
+            if ((static_cast<uint16_t>(eval(static_cast<uint16_t>(1u << j))
+                     ^ base) >> b) & 1)
+                coeff |= static_cast<uint16_t>(1u << j);
+        }
+        rows[b] = coeff;
+    }
+    int pivot_col[16];
+    for (int v = 0; v < 16; ++v) pivot_col[v] = -1;
+    int r_sel = 0;
+    for (int v = 0; v < 16 && r_sel < 16; ++v) {
+        int p = -1;
+        for (int e = r_sel; e < 16; ++e) {
+            if ((rows[e] >> v) & 1) { p = e; break; }
+        }
+        if (p < 0) continue;
+        std::swap(rows[p], rows[r_sel]);
+        std::swap(rhs[p], rhs[r_sel]);
+        for (int e = 0; e < 16; ++e) {
+            if (e != r_sel && ((rows[e] >> v) & 1)) {
+                rows[e] ^= rows[r_sel];
+                rhs[e] ^= rhs[r_sel];
+            }
+        }
+        pivot_col[v] = r_sel;
+        ++r_sel;
+    }
+    for (int e = 0; e < 16; ++e) {
+        if (rows[e] == 0 && rhs[e] != 0) return false;
+    }
+    uint16_t x = 0;
+    for (int v = 0; v < 16; ++v) {
+        if (pivot_col[v] >= 0 && rhs[pivot_col[v]])
+            x |= static_cast<uint16_t>(1u << v);
+    }
+    out_x = x;
+    return true;
+}
+} // namespace detail
+
+/// Recover the CRC-chain seed a frame was generated with, directly from
+/// the frame's own stored CRCs — "native" resynchronization.
+///
+/// Every stored CRC is an affine function of the shared 16-bit
+/// `crc_common` state (CRC16 over startCrc ‖ connId ‖ seqNo ‖ cmd).  The
+/// individual (startCrc, seqNo) pair is *not* identifiable — all seeds
+/// producing the same crc_common generate identical frames — so the solve
+/// works in two steps:
+///
+///   1. Invert the trailing data-byte updates on stored CRC0 to recover
+///      crc_common exactly (16 unknowns, GF(2) affine solve — always
+///      solvable because byte-append steps are invertible).
+///   2. Verify every additional stored segment CRC against
+///      computeCrcI(crc_common, …).  A frame with N stored CRCs yields
+///      N−1 independent 16-bit verifications — genuine corruption
+///      detection for N ≥ 2 (data_len ≥ 3).  For N = 1 (data_len ≤ 2)
+///      there is no independent check and any consistent frame is
+///      accepted — structural validity only.
+///   3. Recover an *equivalent* sequence number: the seqNo such that
+///      computeCrcCommon(0, connId, seqNo, cmd) == crc_common (another
+///      invertible affine solve, startCrc fixed to 0).  The returned
+///      (0, seqNo) seed is functionally identical to the master's real
+///      seed for this frame, but is a representative — it is not
+///      guaranteed to equal the master's actual seqNo.  Callers should
+///      therefore re-resync each frame while the mode is active rather
+///      than assuming the recovered seq tracks the master's counter.
+///
+/// Typical use: a slave that joins a running connection mid-stream (or
+/// missed a state-transition frame and lost the inherited CRC chain) can
+/// verify-and-accept the next valid frame and continue.
+///
+/// @param frame         Input frame bytes (must contain ≥ 1 CRC segment).
+/// @param frame_len     Frame length in bytes.
+/// @param out_start_crc Receives the equivalent seed's startCrc (always 0).
+/// @param out_seq_no    Receives the equivalent sequence number.
+/// @return true if the frame verifies under the recovered crc_common.
+inline bool resyncSolveSeed(const uint8_t* frame, size_t frame_len,
+                            uint16_t& out_start_crc, uint16_t& out_seq_no) {
+    uint8_t cmd = 0;
+    uint16_t conn_id = 0;
+    size_t data_len = 0;
+    uint8_t data[MAX_PARSE_DATA_SIZE] = {};
+    if (!extractFSoEFrame(frame, frame_len, cmd,
+                          std::span<uint8_t>(data, sizeof(data)),
+                          data_len, conn_id)) {
+        return false;
+    }
+    if (data_len == 0) {
+        // Reset frame: no CRCs to solve — nothing to resync.
+        return false;
+    }
+
+    const int pduSize = static_cast<int>(frame_len);
+    const int firstData = (pduSize > 6) ? 2 : 1;
+    const int numExtra =
+        (static_cast<int>(data_len) - firstData + 1) / 2;
+
+    // Step 1 — recover crc_common by inverting the data-byte updates
+    // appended to it for CRC0:  crc0 = updateCrc*(crc_common, data[0..]).
+    const uint16_t stored_crc0 = (pduSize <= 6)
+        ? static_cast<uint16_t>(frame[2]) |
+              (static_cast<uint16_t>(frame[3]) << 8)
+        : static_cast<uint16_t>(frame[3]) |
+              (static_cast<uint16_t>(frame[4]) << 8);
+    auto crc0_of_common = [&](uint16_t common) {
+        uint16_t crc = common;
+        for (int i = 0; i < firstData; ++i)
+            crc = updateCrc(crc, data[i]);
+        return crc;
+    };
+    uint16_t crc_common = 0;
+    if (!detail::solveCrcAffine16(crc0_of_common, stored_crc0, crc_common))
+        return false;
+
+    // Step 2 — verify all additional segment CRCs against the recovered
+    // crc_common.  Each is an independent 16-bit check on the frame.
+    size_t crc_off = (pduSize <= 6) ? 0 : 7;  // first segment CRC offset
+    for (int i = 1; i <= numExtra; ++i) {
+        const uint16_t stored_i =
+            static_cast<uint16_t>(frame[crc_off]) |
+            (static_cast<uint16_t>(frame[crc_off + 1]) << 8);
+        const int pos = firstData + (i - 1) * 2;
+        const uint8_t d0 = data[pos];
+        const uint8_t d1 =
+            (pos + 1 < static_cast<int>(data_len)) ? data[pos + 1] : 0;
+        if (stored_i != computeCrcI(crc_common,
+                                    static_cast<uint16_t>(i), d0, d1))
+            return false;
+        crc_off += (pos + 1 < static_cast<int>(data_len)) ? 4 : 3;
+    }
+
+    // Step 3 — recover an equivalent seqNo: solve
+    //   computeCrcCommon(0, conn_id, seq, cmd) == crc_common
+    // for seq (startCrc = 0).  Invertible because seq enters the CRC as a
+    // full 16-bit word (multiplication by x^k mod P — a bijection).
+    auto common_of_seq = [&](uint16_t seq) {
+        return computeCrcCommon(0, conn_id, seq, cmd);
+    };
+    uint16_t seq = 0;
+    if (!detail::solveCrcAffine16(common_of_seq, crc_common, seq))
+        return false;
+
+    out_start_crc = 0;
+    out_seq_no = seq;
+    return true;
+}
+
+/// Parse an FSoE frame in CRC-resync mode.
+///
+/// Recovers the frame's crc_common from its stored CRCs and verifies all
+/// additional segment CRCs against it (resyncSolveSeed), then runs the
+/// full parseFSoEFrame() verification with the equivalent (0, seqNo)
+/// seed.  Succeeds only when every stored CRC is reproduced — frames
+/// with ≥ 2 CRC segments (data_len ≥ 3) get genuine independent
+/// verification; shorter frames are accepted on structural validity
+/// alone (documented in resyncSolveSeed).
+///
+/// @param out_start_crc  If non-null, receives the equivalent startCrc
+///                       (always 0 — see resyncSolveSeed).
+/// @param out_seq_used   If non-null, receives the equivalent seqNo.
+/// @return true if the seed was solved and the frame verifies with it.
+inline bool parseFSoEFrameResync(
+    const uint8_t* frame, size_t frame_len,
+    uint8_t& out_cmd,
+    std::span<uint8_t> out_data, size_t& out_data_len,
+    uint16_t& out_conn_id,
+    uint16_t* out_crc0 = nullptr,
+    uint16_t* out_start_crc = nullptr,
+    uint16_t* out_seq_used = nullptr,
+    CrcErrorDetail* out_crc_error = nullptr) {
+    uint16_t start_crc = 0, seq_no = 0;
+    if (!resyncSolveSeed(frame, frame_len, start_crc, seq_no)) {
+        if (out_crc_error) out_crc_error->valid = false;
+        return false;
+    }
+    if (!parseFSoEFrame(frame, frame_len, out_cmd, out_data, out_data_len,
+                        out_conn_id, start_crc, seq_no,
+                        out_crc0, out_crc_error)) {
+        return false;
+    }
+    if (out_start_crc) *out_start_crc = start_crc;
+    if (out_seq_used) *out_seq_used = seq_no;
+    return true;
+}
+
 } // namespace FSoE::CRC

@@ -94,6 +94,22 @@ struct ServoEmulatorConfig {
     int16_t analog_input_value = 0;
     bool accept_any_connection_id = false;
 
+    // CRC model for state-transition frames.  When true, a frame that
+    // fails the inherited CRC chain is retried with a fresh chain
+    // (start_crc=0, seq=initialSeqNo) — matching masters like the
+    // ESC211 that reset the CRC chain at each state transition, and
+    // letting the slave re-synchronize after a missed transition.
+    bool reset_crc_on_state_transition = false;
+
+    // Native CRC-chain resynchronization (opt-in).  When a received
+    // frame fails CRC verification, the slave solves the exact
+    // (startCrc, seqNo) seed from the frame's own CRCs (a GF(2) linear
+    // solve — FSoESlaveConfig::crcResyncEnabled) and re-anchors its
+    // sequence tracking, so a slave that joined mid-stream or missed a
+    // state-transition frame can synchronize and continue.  Intended
+    // for emulator/test use — see the safety note in FSoESlaveConfig.
+    bool crc_resync = false;
+
     // When true, the master→slave STO bit is interpreted as
     // one-active (bit=1 → STO active) instead of the standard
     // zero-active (bit=0 → STO active) semantics.  Only takes effect

@@ -400,6 +400,8 @@ void MainInstance::clearPulseBits()
     slave_config.treatTimeoutAsCritical = true;
     slave_config.treatConnIdErrorAsCritical = true;
     slave_config.acceptAnyConnectionId = accept_any_connection_id;
+    slave_config.resetCrcOnStateTransition = reset_crc_on_state_transition;
+    slave_config.crcResyncEnabled = crc_resync;
     slave_config.enableDiagnostics = true;
     slave_config.maxErrorLogEntries = 100;
     // ETG.5100 §8.1.3.4: sequence numbers start at 1 (0 is never used).
