@@ -176,6 +176,19 @@ protected:
     void SetUp() override {
         mgr.init();
 
+        // Route the pre-registered wait path back through waitForResponseIdx
+        // so existing expectations keep working while exercising the
+        // pre-registration code path (pre-registered slot 0).
+        ON_CALL(transport, preRegisterResponseWaiter(_, _, _))
+            .WillByDefault(Invoke([this](uint8_t idx, uint8_t*, size_t) -> size_t {
+                last_idx_ = idx;
+                return 0;
+            }));
+        ON_CALL(transport, waitForPreRegistered(_, _, _))
+            .WillByDefault(Invoke([this](size_t, unsigned int t, RxDatagram& out) -> bool {
+                return transport.waitForResponseIdx(last_idx_, t, out);
+            }));
+
         // Configure one slave with 4-byte RxPDO and 8-byte TxPDO
         SlaveConfig configs[kMaxPDOSlaves] = {};
         configs[0].configured = true;
@@ -194,6 +207,7 @@ protected:
 
     uint32_t rx_buf;
     uint64_t tx_buf;
+    uint8_t last_idx_ = 0;
 };
 
 TEST_F(LRWExchangeTest, ExchangeAllLRWSuccess) {
@@ -239,6 +253,46 @@ TEST_F(LRWExchangeTest, ExchangeAllLRWSuccess) {
     EXPECT_EQ(tx_bytes[5], 0x66);
     EXPECT_EQ(tx_bytes[6], 0x77);
     EXPECT_EQ(tx_bytes[7], 0x88);
+}
+
+TEST_F(LRWExchangeTest, WaiterRegisteredBeforeSend) {
+    // Regression: the response waiter must be pre-registered BEFORE the LRW
+    // frame is sent.  A response that returns before registration is dropped
+    // as "unrouted" and causes a spurious timeout.
+    ::testing::Sequence seq;
+    EXPECT_CALL(transport, allocIdx()).WillOnce(Return(42));
+    EXPECT_CALL(transport, preRegisterResponseWaiter(42, _, _))
+        .InSequence(seq)
+        .WillOnce(Return(0));
+    EXPECT_CALL(transport, sendSingleDatagram(Command::LRW, 42, 0, 1, _, _, true))
+        .InSequence(seq)
+        .WillOnce(Return(true));
+    EXPECT_CALL(transport, waitForPreRegistered(0, _, _))
+        .WillOnce(Invoke([](size_t, unsigned int, RxDatagram& out) -> bool {
+            out.wkc = 1;
+            out.datalen = 12;
+            return true;
+        }));
+
+    EXPECT_TRUE(mgr.exchangeAllLRW(mapping));
+}
+
+TEST_F(LRWExchangeTest, PreRegisterUnsupportedFallsBack) {
+    // If the transport does not support pre-registration, the exchange must
+    // fall back to waitForResponseIdx.
+    EXPECT_CALL(transport, preRegisterResponseWaiter(_, _, _))
+        .WillOnce(Return(IPDOTransport::kPreRegInvalid));
+    EXPECT_CALL(transport, allocIdx()).WillOnce(Return(42));
+    EXPECT_CALL(transport, sendSingleDatagram(_, _, _, _, _, _, _))
+        .WillOnce(Return(true));
+    EXPECT_CALL(transport, waitForResponseIdx(42, _, _))
+        .WillOnce(Invoke([](uint8_t, unsigned int, RxDatagram& out) -> bool {
+            out.wkc = 1;
+            out.datalen = 12;
+            return true;
+        }));
+
+    EXPECT_TRUE(mgr.exchangeAllLRW(mapping));
 }
 
 TEST_F(LRWExchangeTest, ExchangeAllLRWWkcError) {
