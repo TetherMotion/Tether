@@ -1001,6 +1001,19 @@ public:
                                         size_t buffer_size);
     WaitResult waitForPreRegistered(size_t slot, uint32_t timeout_ms);
 
+    // ---- Frame capacity ----------------------------------------------------
+
+#if TETHER_ENABLE_UDP_ENCAPSULATION
+    /// @return max EtherCAT payload bytes per frame, accounting for UDP overhead.
+    size_t maxEtherCATPayloadPerFrame() const;
+#else
+    /// @return max EtherCAT payload bytes per frame.
+    size_t maxEtherCATPayloadPerFrame() const {
+        if (!transport_) return 1498;
+        return transport_->maxEtherCATPayloadPerFrame();
+    }
+#endif
+
 private:
     friend class SlaveDiscoveryManager;
 
@@ -1037,18 +1050,11 @@ private:
                           uint8_t* out_buf, size_t out_cap, size_t* out_len) const;
     /// Send a frame via iface_.send(), applying UDP encapsulation if enabled.
     bool sendWithEncapsulation(const uint8_t* frame, size_t len);
-    /// @return max EtherCAT payload bytes per frame, accounting for UDP overhead.
-    size_t maxEtherCATPayloadPerFrame() const;
 #else
     /// Without UDP encapsulation, sendWithEncapsulation delegates to transport_.
     bool sendWithEncapsulation(const uint8_t* frame, size_t len) {
         if (!transport_) return iface_.send ? iface_.send(frame, len) : false;
         return transport_->send(frame, len);
-    }
-    /// @return max EtherCAT payload bytes per frame.
-    size_t maxEtherCATPayloadPerFrame() const {
-        if (!transport_) return 1498;
-        return transport_->maxEtherCATPayloadPerFrame();
     }
 #endif
 

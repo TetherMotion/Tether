@@ -6,6 +6,7 @@
 #include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/ethercat/Types.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 
@@ -295,38 +296,113 @@ LogicalAddressManager::Stats LogicalAddressManager::getStats() const { return st
 void LogicalAddressManager::resetStats() { stats_ = Stats{}; }
 
 // ============================================================================
-// exchangeAllLRW
+// exchangeAllLRW / exchangeLRWSlice
 // ============================================================================
 
 bool LogicalAddressManager::exchangeAllLRW(const PDO::PDOMapping& mapping) {
+    return exchangeLRWImpl(mapping, 0,
+                           total_rxpdo_bytes_ + total_txpdo_bytes_,
+                           /*enforce_slice_limit=*/false);
+}
+
+bool LogicalAddressManager::exchangeLRWSlice(const PDO::PDOMapping& mapping,
+                                             uint32_t offset, uint32_t length) {
+    return exchangeLRWImpl(mapping, offset, length,
+                           /*enforce_slice_limit=*/true);
+}
+
+uint32_t LogicalAddressManager::maxSliceLength() const {
+    // One LRW datagram = frame payload minus the per-datagram wire overhead
+    // (datagram header: cmd+idx+adp+ado+len/flags+irq = 10 B, plus WKC = 2 B).
+    static constexpr uint32_t kDatagramOverhead = 12;
+    const size_t frame = transport_.maxEtherCATPayloadPerFrame();
+    return frame > kDatagramOverhead
+         ? static_cast<uint32_t>(frame - kDatagramOverhead)
+         : 0u;
+}
+
+std::vector<LogicalAddressManager::EntrySlice>
+LogicalAddressManager::describeEntries(const PDO::PDOMapping& mapping) const {
+    std::vector<EntrySlice> out;
+    if (!initialized_ || slave_count_ == 0) return out;
+    out.reserve(mapping.entry_count());
+
+    std::array<uint32_t, PDO::kMaxPDOSlaves> rx_running{};
+    std::array<uint32_t, PDO::kMaxPDOSlaves> tx_running{};
+
+    for (size_t i = 0; i < mapping.entry_count(); i++) {
+        const PDO::PDOEntry* e = mapping.get_entry(i);
+        if (!e || !e->enabled) continue;
+        if (e->slave_index >= slave_count_) continue;
+        if (!addr_map_[e->slave_index].active) continue;
+
+        const auto& addr = addr_map_[e->slave_index];
+        EntrySlice s;
+        s.entry_index = i;
+        s.slave_index = e->slave_index;
+        s.pdo_index   = e->pdo_index;
+        s.direction   = e->direction;
+        s.length      = e->data_size;
+        if (e->direction == PDO::PDODirection::RxPDO) {
+            s.offset = addr.rxpdo_logical_addr - base_logical_addr_
+                     + rx_running[e->slave_index];
+            rx_running[e->slave_index] += e->data_size;
+        } else {
+            s.offset = addr.txpdo_logical_addr - base_logical_addr_
+                     + tx_running[e->slave_index];
+            tx_running[e->slave_index] += e->data_size;
+        }
+        out.push_back(s);
+    }
+    return out;
+}
+
+bool LogicalAddressManager::exchangeLRWImpl(const PDO::PDOMapping& mapping,
+                                            uint32_t offset, uint32_t length,
+                                            bool enforce_slice_limit) {
     if (!initialized_ || slave_count_ == 0) {
-        TETHER_LOGW(TAG, "exchangeAllLRW: not initialized or no slaves");
+        TETHER_LOGW(TAG, "exchangeLRW: not initialized or no slaves");
         stats_.send_errors++;
         return false;
     }
 
+    static constexpr size_t kMaxLRWPayload = PDO::kMaxPDOSize * PDO::kMaxPDOSlaves;
     const uint32_t total_data = total_rxpdo_bytes_ + total_txpdo_bytes_;
-    if (total_data == 0) return true;
-    if (total_data > PDO::kMaxPDOSize * PDO::kMaxPDOSlaves) {
+    if (length == 0) return true;
+
+    if (total_data > kMaxLRWPayload) {
         TETHER_LOGE(TAG,
-            "exchangeAllLRW: total data {} exceeds Tether internal buffer capacity "
+            "exchangeLRW: total data {} exceeds Tether internal buffer capacity "
             "(max={} = {} bytes/slave * {} slaves). This is a Tether limit, not a slave limit. "
             "Increase ECAT_PDO_MAX_BUFFER_SIZE or ECAT_PDO_MAX_SLAVES in TetherConfig.hpp.",
-            total_data, PDO::kMaxPDOSize * PDO::kMaxPDOSlaves,
+            total_data, kMaxLRWPayload,
             PDO::kMaxPDOSize, PDO::kMaxPDOSlaves);
         stats_.send_errors++;
         return false;
     }
+    if (static_cast<uint64_t>(offset) + length > total_data) {
+        TETHER_LOGE(TAG, "exchangeLRW: slice [{}, {}) out of range (total={})",
+                    offset, offset + length, total_data);
+        stats_.send_errors++;
+        return false;
+    }
+    if (enforce_slice_limit && length > maxSliceLength()) {
+        TETHER_LOGE(TAG,
+            "exchangeLRW: slice length {} exceeds one datagram ({}); "
+            "split the exchange into several exchangeLRWSlice() calls",
+            length, maxSliceLength());
+        stats_.send_errors++;
+        return false;
+    }
 
-    // Build payload: RxPDO data + TxPDO space
-    // Max payload = all slaves * max PDO size
-    static constexpr size_t kMaxLRWPayload = PDO::kMaxPDOSize * PDO::kMaxPDOSlaves;
+    // Build payload covering only [offset, offset+length).
     uint8_t payload[kMaxLRWPayload];
-    std::memset(payload, 0, total_data);
+    std::memset(payload, 0, length);
+    const uint32_t slice_end = offset + length;
 
-    // Fill RxPDO (write) portion from app buffers
-    // Track per-slave running offset so multiple PDO entries on the same
-    // slave are placed at consecutive positions within the slave's region.
+    // Fill RxPDO (write) portion from app buffers of entries intersecting the
+    // slice.  Per-slave running offset places multiple PDO entries on the same
+    // slave at consecutive positions within the slave's region.
     std::array<uint32_t, PDO::kMaxPDOSlaves> rx_running{};
     for (size_t i = 0; i < mapping.entry_count(); i++) {
         const PDO::PDOEntry* e = mapping.get_entry(i);
@@ -335,26 +411,30 @@ bool LogicalAddressManager::exchangeAllLRW(const PDO::PDOMapping& mapping) {
         if (!addr_map_[e->slave_index].active) continue;
 
         const auto& addr = addr_map_[e->slave_index];
-        const uint32_t offset = addr.rxpdo_logical_addr - base_logical_addr_
-                              + rx_running[e->slave_index];
+        const uint32_t entry_off = addr.rxpdo_logical_addr - base_logical_addr_
+                                 + rx_running[e->slave_index];
         rx_running[e->slave_index] += e->data_size;
-        if (e->app_buffer && e->data_size > 0 &&
-            offset + e->data_size <= total_rxpdo_bytes_) {
-            std::memcpy(payload + offset, e->app_buffer, e->data_size);
-        }
+        if (!e->app_buffer || e->data_size == 0) continue;
+
+        const uint32_t lo = std::max(entry_off, offset);
+        const uint32_t hi = std::min(entry_off + e->data_size, slice_end);
+        if (lo >= hi) continue;
+        std::memcpy(payload + (lo - offset),
+                    static_cast<const uint8_t*>(e->app_buffer) + (lo - entry_off),
+                    hi - lo);
     }
 
-    // Send LRW datagram
+    // Send LRW datagram for the slice (logical address = base + offset).
     const uint8_t idx = transport_.allocIdx();
-    const uint32_t logical_addr = base_logical_addr_; // RxPDO region starts at base
+    const uint32_t logical_addr = base_logical_addr_ + offset;
     const uint16_t adp = static_cast<uint16_t>(logical_addr & 0xFFFF);
     const uint16_t ado = static_cast<uint16_t>((logical_addr >> 16) & 0xFFFF);
 
     if (!transport_.sendSingleDatagram(Command::LRW, idx, adp, ado,
-                                        payload, static_cast<uint16_t>(total_data),
+                                        payload, static_cast<uint16_t>(length),
                                         true)) {
         if (!transport_.isCancelRequested()) {
-            TETHER_LOGE(TAG, "exchangeAllLRW: send failed");
+            TETHER_LOGE(TAG, "exchangeLRW: send failed");
         }
         stats_.send_errors++;
         return false;
@@ -363,22 +443,22 @@ bool LogicalAddressManager::exchangeAllLRW(const PDO::PDOMapping& mapping) {
     // Wait for response
     RxDatagram resp;
     if (!transport_.waitForResponseIdx(idx, 10, resp)) {
-        TETHER_LOGE(TAG, "exchangeAllLRW: response timeout");
+        TETHER_LOGE(TAG, "exchangeLRW: response timeout");
         stats_.timeout_errors++;
         return false;
     }
 
     if (resp.wkc == 0) {
-        TETHER_LOGW(TAG, "exchangeAllLRW: WKC=0");
+        TETHER_LOGW(TAG, "exchangeLRW: WKC=0");
         stats_.wkc_errors++;
         return false;
     }
 
-    // Extract TxPDO (read) data from response into app buffers
-    // Track per-slave running offset so multiple PDO entries on the same
-    // slave are read from consecutive positions within the slave's region.
-    if (resp.datalen >= total_data) {
-        const uint8_t* rx_data = resp.data + total_rxpdo_bytes_;
+    // Extract TxPDO (read) data from the response for entries intersecting
+    // the slice.  Entry offsets are absolute within the process image, which
+    // matches the LRW response payload (Rx region then Tx region).
+    if (resp.datalen >= length) {
+        const uint8_t* rx_data = resp.data;
         std::array<uint32_t, PDO::kMaxPDOSlaves> tx_running{};
         for (size_t i = 0; i < mapping.entry_count(); i++) {
             const PDO::PDOEntry* e = mapping.get_entry(i);
@@ -387,14 +467,16 @@ bool LogicalAddressManager::exchangeAllLRW(const PDO::PDOMapping& mapping) {
             if (!addr_map_[e->slave_index].active) continue;
 
             const auto& addr = addr_map_[e->slave_index];
-            const uint32_t offset = addr.txpdo_logical_addr - base_logical_addr_
-                                  - total_rxpdo_bytes_
-                                  + tx_running[e->slave_index];
+            const uint32_t entry_off = addr.txpdo_logical_addr - base_logical_addr_
+                                     + tx_running[e->slave_index];
             tx_running[e->slave_index] += e->data_size;
-            if (e->app_buffer && e->data_size > 0 &&
-                offset + e->data_size <= total_txpdo_bytes_) {
-                std::memcpy(e->app_buffer, rx_data + offset, e->data_size);
-            }
+            if (!e->app_buffer || e->data_size == 0) continue;
+
+            const uint32_t lo = std::max(entry_off, offset);
+            const uint32_t hi = std::min(entry_off + e->data_size, slice_end);
+            if (lo >= hi) continue;
+            std::memcpy(static_cast<uint8_t*>(e->app_buffer) + (lo - entry_off),
+                        rx_data + (lo - offset), hi - lo);
         }
     }
 

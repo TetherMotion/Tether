@@ -1370,6 +1370,38 @@ bool PDOManager::exchangeAll() {
     return receiveAll();
 }
 
+bool PDOManager::exchangeLRWSlice(uint32_t offset, uint32_t length) {
+    if (!logical_addr_mgr_ || !logical_addr_mgr_->isInitialized()) {
+        TETHER_LOGW(TAG, "exchangeLRWSlice: no logical address manager");
+        return false;
+    }
+    const bool ok = logical_addr_mgr_->exchangeLRWSlice(mapping_, offset, length);
+    if (ok) {
+        // Mirror sendAll()'s per-slave exchange counters so the OP-transition
+        // "PDO exchange happened" check sees the traffic (req/reply > 0).
+        const uint32_t end = offset + length;
+        for (const auto& s : logical_addr_mgr_->describeEntries(mapping_)) {
+            if (s.slave_index >= PDO::kMaxPDOSlaves) continue;
+            if (s.offset >= end || s.offset + s.length <= offset) continue;
+            if (s.direction == PDO::PDODirection::RxPDO)
+                slave_configs_[s.slave_index].pdo_request_count++;
+            else
+                slave_configs_[s.slave_index].pdo_reply_count++;
+        }
+    }
+    return ok;
+}
+
+uint32_t PDOManager::maxLogicalSliceLength() const {
+    if (!logical_addr_mgr_ || !logical_addr_mgr_->isInitialized()) return 0;
+    return logical_addr_mgr_->maxSliceLength();
+}
+
+std::vector<PDO::LogicalEntrySlice> PDOManager::describeLogicalEntries() const {
+    if (!logical_addr_mgr_ || !logical_addr_mgr_->isInitialized()) return {};
+    return logical_addr_mgr_->describeEntries(mapping_);
+}
+
 // ============================================================================
 // Exchange modes (formerly pdo_logical.cpp)
 // ============================================================================

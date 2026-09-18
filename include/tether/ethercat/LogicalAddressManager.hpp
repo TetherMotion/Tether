@@ -133,6 +133,40 @@ public:
      */
     bool exchangeLRWForSlaves(const PDO::PDOMapping& mapping, uint32_t slave_mask);
 
+    // ----- Partial LRW exchange (logical-address slices) -----
+
+    /// Logical placement of one enabled PDO entry (see PDO::LogicalEntrySlice).
+    using EntrySlice = PDO::LogicalEntrySlice;
+
+    /// Maximum slice length that fits in a single LRW datagram (one frame).
+    uint32_t maxSliceLength() const;
+
+    /**
+     * @brief Exchange one contiguous slice of the logical process image.
+     *
+     * Sends a single LRW datagram covering [offset, offset+length) relative
+     * to the base logical address.  RxPDO app buffers of mapping entries that
+     * intersect the slice are written and TxPDO app buffers are updated;
+     * entries outside the slice are left untouched.  Call it several times
+     * with different slices to exchange a process image larger than one
+     * Ethernet frame as several datagrams (partial reads — e.g. a FSoE region
+     * and a separate RSAP/debug region) instead of splitting a single frame.
+     *
+     * @param mapping  PDOMapping with all PDO entries
+     * @param offset   Byte offset from the base logical address
+     * @param length   Number of bytes (must be <= maxSliceLength())
+     * @return true on success
+     */
+    bool exchangeLRWSlice(const PDO::PDOMapping& mapping,
+                          uint32_t offset, uint32_t length);
+
+    /// @brief Describe the logical placement of every enabled PDO entry.
+    ///
+    /// Lets a caller compose slices from the PDO layout (e.g. group the FSoE
+    /// PDOs apart from the RSAP/debug PDOs) without knowing the internal
+    /// address map.
+    std::vector<EntrySlice> describeEntries(const PDO::PDOMapping& mapping) const;
+
     // ----- Statistics -----
 
     struct Stats {
@@ -202,6 +236,14 @@ private:
     bool     initialized_{false};
     std::function<std::string(uint16_t)> prefix_provider_;
     std::atomic<const EtherCATMasterDebugFlags*> debug_flags_{nullptr};
+
+    /// Shared implementation for exchangeAllLRW() (whole image) and
+    /// exchangeLRWSlice() (partial).  @p enforce_slice_limit rejects slices
+    /// larger than one datagram; the whole-image path leaves it off so it
+    /// keeps the transport's own frame-size diagnostic.
+    bool exchangeLRWImpl(const PDO::PDOMapping& mapping,
+                         uint32_t offset, uint32_t length,
+                         bool enforce_slice_limit);
 
     /// Build the log prefix for a slave (uses prefix_provider_ if set, else default)
     std::string slavePrefix(uint16_t idx) const {
