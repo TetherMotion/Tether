@@ -27,6 +27,7 @@ SafetyStateMachineManager::SafetyStateMachineManager(EtherCAT::Slave& slave,
                    .poll_interval = config.poll_interval,
                    .pre_command_reset_delay = std::chrono::milliseconds(100),
                    .post_command_reset = false,  // SSM does NOT reset after commands
+                   .admin_password = config.admin_password,
                },
                tag),
       config_manager_(slave,
@@ -37,7 +38,11 @@ SafetyStateMachineManager::SafetyStateMachineManager(EtherCAT::Slave& slave,
                           .post_flash_load_settle = std::chrono::milliseconds(500),
                           .post_command_reset = false,
                       },
-                      tag) {}
+                      tag) {
+    if (!config.admin_password.empty()) {
+        config_manager_.channel().setAdminPassword(config.admin_password);
+    }
+}
 
 // --- Result conversion ---
 
@@ -219,6 +224,11 @@ void SafetyStateMachineManager::setStopToken(std::stop_token token) {
     stop_token_ = token;
     channel_.setStopToken(token);
     config_manager_.setStopToken(token);
+}
+
+void SafetyStateMachineManager::setAdminPassword(std::string password) {
+    channel_.setAdminPassword(password);
+    config_manager_.channel().setAdminPassword(std::move(password));
 }
 
 // --- Strings ---

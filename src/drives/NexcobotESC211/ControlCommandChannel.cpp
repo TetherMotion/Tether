@@ -1,5 +1,7 @@
 #include "tether/drives/NexcobotESC211/ControlCommandChannel.hpp"
 
+#include <cstdlib>
+
 #include "logging/Logger.hpp"
 
 namespace EtherCAT {
@@ -39,7 +41,8 @@ bool ControlCommandChannel::matchOngoingOrDone(uint32_t /*cmdCode*/, uint32_t re
 ControlCommandChannel::ControlCommandChannel(EtherCAT::Slave& slave,
                                              Config config,
                                              const char* tag)
-    : channel_(
+    : slave_(slave),
+      channel_(
           slave,
           EtherCAT::SdoCommandChannel::Config{
               .command_index      = UserSystem::UserControlIndex,
@@ -61,7 +64,8 @@ ControlCommandChannel::ControlCommandChannel(EtherCAT::Slave& slave,
                   static_cast<uint32_t>(CommandResponseCode::Failed),
           },
           tag),
-      tag_(tag) {
+      tag_(tag),
+      admin_password_(config.admin_password) {
     channel_.setResponseNamer(
         [](uint32_t v) { return std::string(responseName(v)); });
 }
@@ -100,8 +104,100 @@ ControlCommandChannel::sendAndWait(ControlCommandCode cmd,
                                    const ResponseMatcher& matcher,
                                    std::chrono::milliseconds timeout) {
     const auto effective = matcher ? matcher : ResponseMatcher(matchDone);
-    return mapResult(channel_.sendAndWait(static_cast<uint32_t>(cmd),
-                                          effective, timeout));
+    auto result = mapResult(channel_.sendAndWait(static_cast<uint32_t>(cmd),
+                                                 effective, timeout));
+
+    // Access-denied retry: privileged commands are rejected until an
+    // admin password has been entered on the device.  When a password
+    // is configured, perform the 0xF105 login once and retry.
+    if (result == Result::Failed &&
+        !admin_password_.empty() && !admin_logged_in_ &&
+        channel_.readErrorCode() == kAccessDeniedError) {
+        TETHER_LOGI(tag_,
+                    "Command {} denied (login required) — entering admin "
+                    "password via 0xF105 and retrying",
+                    static_cast<uint32_t>(cmd));
+        if (adminLogin()) {
+            result = mapResult(channel_.sendAndWait(static_cast<uint32_t>(cmd),
+                                                    effective, timeout));
+        } else {
+            TETHER_LOGE(tag_, "Admin login failed — command {} stays denied",
+                        static_cast<uint32_t>(cmd));
+        }
+    }
+    return result;
+}
+
+// --- Admin login ---
+
+bool ControlCommandChannel::adminLogin() {
+    if (admin_password_.empty()) {
+        TETHER_LOGW(tag_, "adminLogin: no admin password configured");
+        return false;
+    }
+
+    constexpr uint16_t kPasswordIndex = 0xF105;   // password entry object
+    constexpr uint16_t kAdminModeIndex = 0xF610;  // admin mode flag
+
+    // 1. Enter the password: visible-string write to 0xF105:0x01,
+    //    then fallbacks (subindex 0x00, then numeric U32).
+    auto err = slave_.sdoWrite(kPasswordIndex, 0x01,
+                               admin_password_.data(),
+                               admin_password_.size());
+    if (err != EtherCAT::SlaveError::Ok) {
+        TETHER_LOGW(tag_, "Admin login: 0xF105:0x01 write failed ({}) — "
+                    "trying subindex 0x00",
+                    EtherCAT::slaveErrorToString(err));
+        err = slave_.sdoWrite(kPasswordIndex, 0x00,
+                              admin_password_.data(),
+                              admin_password_.size());
+    }
+    if (err != EtherCAT::SlaveError::Ok) {
+        // Numeric password fallback: some firmware takes a U32.
+        uint32_t numeric = 0;
+        const char* p = admin_password_.c_str();
+        char* end = nullptr;
+        const auto v = std::strtoul(p, &end, 0);
+        if (end != p && *end == '\0') {
+            numeric = static_cast<uint32_t>(v);
+            TETHER_LOGW(tag_, "Admin login: string write failed — "
+                        "trying numeric U32 write ({})", numeric);
+            err = slave_.sdoWriteU32(kPasswordIndex, 0x01, numeric);
+        }
+    }
+    if (err != EtherCAT::SlaveError::Ok) {
+        TETHER_LOGE(tag_, "Admin login: password write to 0xF105 failed: {}",
+                    EtherCAT::slaveErrorToString(err));
+        return false;
+    }
+    TETHER_LOGI(tag_, "Admin login: password written to 0xF105 — "
+                "checking admin mode (0xF610)...");
+
+    // 2. Verify the privilege level via the Admin Mode flag.
+    bool admin_read_ok = false;
+    const Result r = mapResult(channel_.pollUntil(
+        kAdminModeIndex, 0x00,
+        [&admin_read_ok](uint32_t v) {
+            admin_read_ok = true;
+            return v != 0;
+        },
+        std::chrono::milliseconds(2000)));
+    if (r == Result::Success) {
+        admin_logged_in_ = true;
+        TETHER_LOGI(tag_, "Admin login: admin mode active (0xF610 set)");
+        return true;
+    }
+    if (!admin_read_ok) {
+        // 0xF610 is not readable on this firmware — accept the write and
+        // let the retried command be the verdict.
+        TETHER_LOGW(tag_, "Admin login: 0xF610 not readable — assuming "
+                    "password accepted");
+        admin_logged_in_ = true;
+        return true;
+    }
+    TETHER_LOGE(tag_, "Admin login: admin mode flag stayed 0 — "
+                "password rejected");
+    return false;
 }
 
 uint32_t ControlCommandChannel::readErrorCode() {
