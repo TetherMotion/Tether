@@ -1337,6 +1337,29 @@ SlaveError Slave::registerExistingPDO(uint16_t pdo_index,
         return SlaveError::PDOMappingFailed;
     }
 
+    // Read all mapping entries first so an uninitialized mapping (device
+    // reports a count but every entry is 0x00000000) can be reported as
+    // such instead of failing the byte-alignment check.
+    std::vector<uint32_t> raw_entries;
+    raw_entries.reserve(count);
+    bool any_nonzero = false;
+    for (uint8_t sub = 1; sub <= count; ++sub) {
+        auto entry_r = sdo.readU32(pdo_index, sub);
+        if (!entry_r.has_value()) {
+            TETHER_LOGE(TAG, "{}: Failed to read {} 0x{:04X} mapping entry {}",
+                        logPrefix().c_str(), dir_str, pdo_index, sub);
+            return SlaveError::SDOError;
+        }
+        raw_entries.push_back(*entry_r);
+        any_nonzero |= (*entry_r != 0);
+    }
+    if (!any_nonzero) {
+        TETHER_LOGE(TAG, "{}: {} 0x{:04X} mapping is uninitialized/empty — "
+                    "all {} entries are 0x0000:00, 0 bits",
+                    logPrefix().c_str(), dir_str, pdo_index, count);
+        return SlaveError::PDOMappingFailed;
+    }
+
     CustomPDOInfo info;
     info.pdo_index = pdo_index;
     info.direction = direction;
@@ -1346,16 +1369,17 @@ SlaveError Slave::registerExistingPDO(uint16_t pdo_index,
 
     uint32_t bit_offset = 0;
     for (uint8_t sub = 1; sub <= count; ++sub) {
-        auto entry_r = sdo.readU32(pdo_index, sub);
-        if (!entry_r.has_value()) {
-            TETHER_LOGE(TAG, "{}: Failed to read {} 0x{:04X} mapping entry {}",
-                        logPrefix().c_str(), dir_str, pdo_index, sub);
-            return SlaveError::SDOError;
-        }
-        const uint32_t v = *entry_r;
+        const uint32_t v = raw_entries[sub - 1];
         const uint16_t obj_idx = static_cast<uint16_t>(v >> 16);
         const uint8_t  obj_sub = static_cast<uint8_t>((v >> 8) & 0xFF);
         const uint8_t  bits    = static_cast<uint8_t>(v & 0xFF);
+
+        if (v == 0) {
+            TETHER_LOGE(TAG, "{}: {} 0x{:04X} entry {} is all-zeros "
+                        "(0x0000:00, 0 bits) — uninitialized entry",
+                        logPrefix().c_str(), dir_str, pdo_index, sub);
+            return SlaveError::PDOMappingFailed;
+        }
 
         if (bits == 0 || (bits % 8) != 0 || (bit_offset % 8) != 0) {
             TETHER_LOGE(TAG, "{}: {} 0x{:04X} entry {} (0x{:04X}:{:02X}, {} bits) "
