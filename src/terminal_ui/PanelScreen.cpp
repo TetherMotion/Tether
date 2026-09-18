@@ -109,8 +109,13 @@ void PanelScreen::run(std::atomic<bool>& cancel, double durationSec) {
                      filter_buf.c_str());
         } else {
             const char* vh = "";
+            std::string dyn_hints;
             if (active_ < hooks_.views.size() &&
-                !hooks_.views[active_].keyHints.empty())
+                hooks_.views[active_].keyHintsFn) {
+                dyn_hints = hooks_.views[active_].keyHintsFn();
+                vh = dyn_hints.c_str();
+            } else if (active_ < hooks_.views.size() &&
+                       !hooks_.views[active_].keyHints.empty())
                 vh = hooks_.views[active_].keyHints.c_str();
             else if (!hooks_.keyHints.empty())
                 vh = hooks_.keyHints.c_str();

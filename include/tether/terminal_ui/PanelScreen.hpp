@@ -47,6 +47,11 @@ struct PanelView {
 
     /// Extra text appended to the footer key hints while active.
     std::string keyHints;
+
+    /// Dynamic hint provider — evaluated every frame, takes precedence
+    /// over the static `keyHints` (e.g. widgets whose hints change with
+    /// state, like an open overlay or prompt).
+    std::function<std::string()> keyHintsFn;
 };
 
 struct PanelScreenHooks {
