@@ -4,9 +4,12 @@
  *
  * Interfaces to a Synapticon SOMANET drive (Vendor 0x22D2, CiA 402 firmware
  * v5.1.x) and runs the FSoE safe-motion protocol over the drive's safety
- * PDOs (RxPDO 0x1700 / TxPDO 0x1B00).  No CiA 402 motion is performed  -
- * the drive is never enabled and no torque/velocity/position commands are
- * sent.  Use synapticon_cst for CST motion without FSoE.
+ * PDOs (RxPDO 0x1700 / TxPDO 0x1B00).  By default no CiA 402 motion is
+ * performed  -  the drive is never enabled and no torque/velocity/position
+ * commands are sent.  Pass --torque-nm to enable CST sine-torque motion
+ * (same algorithm as synapticon_cst): the torque command is gated on the
+ * FSoE status reporting STO off / motion allowed, and the drive is only
+ * enabled once the brake has been released.
  *
  * On startup the slave is automatically reset to INIT if it is currently
  * in a higher ESM state (e.g. left over from a previous run that didn't
@@ -46,11 +49,14 @@
  *   ./synapticon_cst_fsoe --sto 1 --sbc 1               # raw STO bit=1, SBC bit=1
  *   ./synapticon_cst_fsoe --sto 1 --sos 1 --sbc 1       # raw STO/SOS/SBC bit=1
  *   ./synapticon_cst_fsoe --diagnostics-after 5         # FSoE 5s, then CoE diagnostics + exit
+ *   ./synapticon_cst_fsoe --torque-nm 1.0 --freq-hz 0.5 # FSoE + 1 Nm P-P CST sine torque
+ *   ./synapticon_cst_fsoe --torque-nm 1.0 --rated-torque-mnm 4200  # override rated torque
  */
 
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -58,6 +64,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "DS402ExampleSupport.hpp"
 #include "common/ExampleHelpers.hpp"
@@ -198,6 +205,113 @@ constexpr size_t kFSoETxPDOOffset   = 0;                    // FSoE first
 constexpr size_t kSM2TotalLen = EtherCAT::Drives::SynapticonPDO::kSM2CombinedSize;   // 46
 
 using FSoEMain = EtherCAT::Drives::Synapticon::SafeMotion::MainInstance;
+
+// ============================================================================
+// Sine-wave torque motion controller for CST mode (--torque-nm)
+// ============================================================================
+//
+// Same algorithm as synapticon_cst's SineTorqueController: generates a
+// sinusoidal torque command at the specified frequency and peak-to-peak
+// amplitude, converted from Nm to CiA 402 per-mille units (0.1% of rated
+// torque) using the motor's rated torque (object 0x6076, in mNm):
+//
+//   target_torque_permille = (torque_Nm * 1'000'000) / rated_torque_mNm
+//
+// Two differences from the non-FSoE variant:
+//   - The motion RxPDO (0x1600) is not at buffer offset 0  -  the FSoE PDO
+//     (0x1700) comes first in the combined SM2 buffer, so all writes go
+//     through rx_pdo_offset.
+//   - Torque output is gated on the FSoE link: while the connection is not
+//     operational or the drive reports motion not allowed (STO/SS1/SOS
+//     active), the commanded torque is forced to zero.  The controlword is
+//     still written so the CiA 402 enable sequence can proceed once the
+//     safety layer clears.
+
+class SineTorqueController final : public EtherCAT::DS402Master::IDriveMotionController {
+public:
+    /// @param amplitude_nm   Peak torque amplitude in Nm (half of peak-to-peak)
+    /// @param frequency_hz   Sine frequency in Hz
+    /// @param rated_torque_mnm  Motor rated torque in mNm (from object 0x6076)
+    /// @param rx_pdo_offset  Byte offset of the motion RxPDO (0x1600) in the
+    ///                       combined PDO buffer (after the FSoE PDO)
+    /// @param fsoe_main      FSoE main instance used to gate torque output
+    SineTorqueController(double amplitude_nm, double frequency_hz,
+                         uint32_t rated_torque_mnm, size_t rx_pdo_offset,
+                         const FSoEMain& fsoe_main)
+        : amplitude_nm_(amplitude_nm)
+        , frequency_hz_(frequency_hz)
+        , rated_torque_mnm_(rated_torque_mnm)
+        , rx_pdo_offset_(rx_pdo_offset)
+        , fsoe_main_(fsoe_main)
+    {
+        // Pre-compute the per-mille scaling factor:
+        //   permille = Nm * 1e6 / mNm
+        if (rated_torque_mnm > 0) {
+            nm_to_permille_ = 1'000'000.0 / static_cast<double>(rated_torque_mnm);
+        }
+    }
+
+    bool start(EtherCAT::CiA402Drive& drive) override {
+        return drive.setOperatingMode(CiA402::OperatingMode::CyclicSyncTorque);
+    }
+
+    void stop(EtherCAT::CiA402Drive&) override {}
+
+    bool update(EtherCAT::CiA402Drive& drive, double dt_seconds) override {
+        auto* base = static_cast<uint8_t*>(drive.getRxPDOBuffer());
+        if (base == nullptr) return false;
+        auto* rx = reinterpret_cast<RxPDO*>(base + rx_pdo_offset_);
+
+        // Advance the phase accumulator
+        elapsed_s_ += dt_seconds;
+
+        // Compute the sine torque command in Nm, then convert to per-mille
+        double torque_nm =
+            amplitude_nm_ * std::sin(2.0 * M_PI * frequency_hz_ * elapsed_s_);
+
+        // Gate on the FSoE status: no torque unless the connection is
+        // operational and the drive reports motion allowed (STO off).
+        const auto conn_status = fsoe_main_.rawConnection().getStatus();
+        const bool motion_ok =
+            conn_status.isOperational() &&
+            fsoe_main_.hasStatus() &&
+            fsoe_main_.status().motionAllowed();
+        if (!motion_ok) {
+            torque_nm = 0.0;
+        }
+
+        const double torque_permille = torque_nm * nm_to_permille_;
+
+        // Clamp to INT16 range (-32768..32767 per-mille = ±3276.8% rated)
+        constexpr double kMaxPermille = 32767.0;
+        constexpr double kMinPermille = -32768.0;
+        const double clamped = (torque_permille > kMaxPermille) ? kMaxPermille :
+                               (torque_permille < kMinPermille) ? kMinPermille :
+                               torque_permille;
+
+        rx->controlword = static_cast<uint16_t>(CiA402::ControlWord::ENABLE_OPERATION);
+        rx->modes_of_operation = CiA402::OperatingMode::CyclicSyncTorque;
+        rx->target_torque = static_cast<int16_t>(clamped);
+        rx->target_velocity = 0;
+        rx->target_position = 0;
+
+        last_torque_nm_ = torque_nm;
+        return true;
+    }
+
+    /// Returns the most recently commanded torque in Nm (for diagnostics)
+    double lastTorqueNm() const { return last_torque_nm_; }
+
+private:
+    double   amplitude_nm_      = 0.0;
+    double   frequency_hz_      = 0.0;
+    uint32_t rated_torque_mnm_  = 0;
+    size_t   rx_pdo_offset_     = 0;
+    const FSoEMain& fsoe_main_;
+    double   nm_to_permille_    = 0.0;  // per-mille per Nm
+    double   elapsed_s_         = 0.0;
+    double   last_torque_nm_    = 0.0;
+};
 
 // Reusable FSoE PDO decoding/logging helpers (from the Synapticon FSoE driver).
 namespace fsoe_dbg = EtherCAT::Drives::Synapticon::FSoEDebug;
@@ -775,6 +889,9 @@ struct Args {
     double diagnostics_after = 0.0;
     ///< FSoE status-frame variant: "lw1" (31 B frame) or "lw2" (35 B frame).
     std::string fsoe_frame = "lw2";
+    double torque_pp_nm = 0.0;       ///< Peak-to-peak CST sine torque in Nm (0 = no motion)
+    double freq_hz = 0.5;            ///< Sine torque frequency in Hz
+    uint32_t rated_torque_mnm = 0;   ///< Motor rated torque in mNm (0 = auto-detect from 0x6076)
 };
 
 bool parseArgs(int argc, char** argv, Args& out) {
@@ -848,6 +965,21 @@ bool parseArgs(int argc, char** argv, Args& out) {
               "'lw1' = 31-byte frame, 'lw2' = 35-byte frame (safe torque "
               "data + CRC appended, default). Must match the drive's "
               "safety parameter set.");
+    program.add_argument("--torque-nm")
+        .scan<'g', double>()
+        .default_value(0.0)
+        .help("Peak-to-peak CST sine torque amplitude in Nm. "
+              "Default 0 = FSoE-only, no motion. When > 0 the drive is "
+              "enabled in CST mode once FSoE reports motion allowed and "
+              "the brake is released.");
+    program.add_argument("--freq-hz")
+        .scan<'g', double>()
+        .default_value(0.5)
+        .help("Sine torque frequency in Hz (default 0.5)");
+    program.add_argument("--rated-torque-mnm")
+        .scan<'i', int>()
+        .default_value(static_cast<int>(0))
+        .help("Motor rated torque in mNm (0 = auto-detect from object 0x6076)");
 
     try {
         program.parse_args(argc, argv);
@@ -873,6 +1005,13 @@ bool parseArgs(int argc, char** argv, Args& out) {
     if (out.fsoe_frame != "lw1" && out.fsoe_frame != "lw2") {
         std::cerr << "Invalid --fsoe-frame '" << out.fsoe_frame
                   << "' (expected 'lw1' or 'lw2')\n";
+        return false;
+    }
+    out.torque_pp_nm = program.get<double>("--torque-nm");
+    out.freq_hz = program.get<double>("--freq-hz");
+    out.rated_torque_mnm = static_cast<uint32_t>(program.get<int>("--rated-torque-mnm"));
+    if (out.torque_pp_nm < 0.0) {
+        std::cerr << "--torque-nm must be >= 0\n";
         return false;
     }
     if (!Tether::Examples::parseVlanArgs(
@@ -1156,6 +1295,76 @@ int main(int argc, char** argv) {
         TETHER_LOGI(TAG, "===== End ETG.5000/5001 objects =====");
     }
 
+    // --- Sync configured module ident list (0xF030) to detected (0xF050) ---
+    // The slave validates the module list during the PRE-OP -> SAFE-OP
+    // transition and rejects SAFE-OP with AL status 0x0070 when they differ
+    // (e.g. firmware 5.6.6 reports ident 0x22D20003 "FSoE Module with safe
+    // Torque" while the stored configuration expects 0x22D20001).  The
+    // SOMANET ESI marks the ident list as downloadable
+    // (DownloadModuleIdentList="1"), so writing the detected list into
+    // 0xF030 is the intended fix.
+    {
+        auto& slave = master.ethercatMaster().slave(slave_idx);
+        constexpr uint16_t kCfgIdentIdx = 0xF030;
+        constexpr uint16_t kDetIdentIdx = 0xF050;
+
+        auto readIdentList = [&](uint16_t index, std::vector<uint32_t>& out) -> bool {
+            out.clear();
+            uint8_t count = 0;
+            if (slave.sdoReadU8(index, 0x00, count) != EtherCAT::SlaveError::Ok)
+                return false;
+            for (uint8_t i = 1; i <= count; ++i) {
+                uint32_t ident = 0;
+                if (slave.sdoReadU32(index, i, ident) != EtherCAT::SlaveError::Ok)
+                    return false;
+                out.push_back(ident);
+            }
+            return true;
+        };
+
+        std::vector<uint32_t> configured, detected;
+        if (readIdentList(kCfgIdentIdx, configured) &&
+            readIdentList(kDetIdentIdx, detected)) {
+            if (configured != detected) {
+                TETHER_LOGW(TAG,
+                    "Module ident MISMATCH (slave {}): "
+                    "configured 0xF030 = [{}] vs detected 0xF050 = [{}].  "
+                    "Updating configured list to match detected modules "
+                    "(otherwise SAFE-OP is rejected with AL 0x0070)...",
+                    slave_idx,
+                    [&]{ std::string r; for (auto v : configured) r += std::format("0x{:08X} ", v); return r; }(),
+                    [&]{ std::string r; for (auto v : detected) r += std::format("0x{:08X} ", v); return r; }());
+
+                // Standard CoE list write: clear sub0, write entries,
+                // then set sub0 to the entry count.
+                bool write_ok =
+                    slave.sdoWriteU8(kCfgIdentIdx, 0x00, 0) == EtherCAT::SlaveError::Ok;
+                for (size_t i = 0; write_ok && i < detected.size(); ++i) {
+                    write_ok = slave.sdoWriteU32(kCfgIdentIdx,
+                                                 static_cast<uint8_t>(i + 1),
+                                                 detected[i]) == EtherCAT::SlaveError::Ok;
+                }
+                if (write_ok) {
+                    write_ok = slave.sdoWriteU8(kCfgIdentIdx, 0x00,
+                        static_cast<uint8_t>(detected.size())) == EtherCAT::SlaveError::Ok;
+                }
+                if (write_ok) {
+                    TETHER_LOGI(TAG,
+                        "Configured module ident list updated ({} entries)",
+                        detected.size());
+                } else {
+                    TETHER_LOGW(TAG,
+                        "Failed to update 0xF030 — "
+                        "SAFE-OP will likely be rejected (AL 0x0070)");
+                }
+            }
+        } else {
+            TETHER_LOGW(TAG,
+                "Could not read module ident lists (0xF030/0xF050) — "
+                "skipping ident sync");
+        }
+    }
+
     // --- Read FSoE safety address (0xF980:1) for verification ---
     // Object 0xF980:1 contains the safety address configured on the drive.
     // For Synapticon SOMANET drives, the FSoE connection ID must match this
@@ -1280,6 +1489,18 @@ int main(int argc, char** argv) {
             return 3;
         }
         TETHER_LOGI(TAG, "Slave {} transitioned to OP with combined FSoE+motion PDOs", slave_idx);
+
+        // --- DC reconfigure (SYNC0 for the safety module's SM sampling) ---
+        // Without SYNC0 the drive firmware samples the SM input region
+        // asynchronously to the LRW arrival, so it can read a frame that is
+        // half old / half new — the FSoE slave then never produces valid
+        // output (all zeros / garbage in the TxPDO FSoE region).
+        if (!master.ethercatMaster().dc().reconfigureSync(slave_idx)) {
+            TETHER_LOGW(TAG,
+                "DC reconfiguration failed on slave {} — continuing anyway",
+                slave_idx);
+        }
+        Tether::Platform::Clock::instance().delayMilliseconds(50);
 
         // --- Comprehensive safety diagnostics ---
         // Query all safety-related objects via SDO before starting the PDO
@@ -1589,9 +1810,25 @@ int main(int argc, char** argv) {
             offsetof(EtherCAT::Drives::SynapticonPDO::SOMANET_RxPDO_1600,
                     modes_of_operation);
         drive.setOpmodePDOOffset(static_cast<int>(opmode_offset));
+
+        // Velocity field offsets for controlledShutdown()'s CSV stop
+        // phase — the motion PDOs sit behind the FSoE PDO, so the struct
+        // member offsets are shifted by the PDO base offsets.
+        drive.setTargetVelocityPDOOffset(static_cast<int>(
+            kMotionRxPDOOffset +
+            offsetof(EtherCAT::Drives::SynapticonPDO::SOMANET_RxPDO_1600,
+                     target_velocity)));
+        drive.setActualVelocityPDOOffset(static_cast<int>(
+            motion_tx_pdo_offset +
+            offsetof(EtherCAT::Drives::SynapticonPDO::SOMANET_TxPDO_1A00,
+                     velocity_actual)));
+
         TETHER_LOGI(TAG,
-            "PDO offsets: controlword={} statusword={} opmode={}",
-            kMotionRxPDOOffset, motion_tx_pdo_offset, opmode_offset);
+            "PDO offsets: controlword={} statusword={} opmode={} "
+            "target_velocity={} velocity_actual={}",
+            kMotionRxPDOOffset, motion_tx_pdo_offset, opmode_offset,
+            drive.targetVelocityPDOOffset(),
+            drive.actualVelocityPDOOffset());
     }
 
     // --- Brake release ---
@@ -1603,6 +1840,7 @@ int main(int argc, char** argv) {
     // See: https://doc.synapticon.com/node/sw5.1/objects_html/2xxx/2004.html
     uint64_t fsoe_data_time_ms = 0;  // timestamp when FSoE Data state was reached
     bool brake_released = false;
+    bool drive_enabled = false;      // set once enableDrive() succeeds (motion mode)
 
     // --- Set up FSoE safe-motion (real drive via PDOs) ---
     std::unique_ptr<FSoEMain> fsoe_main;
@@ -1972,10 +2210,76 @@ int main(int argc, char** argv) {
             debug_fsoe_crc ? "+crc" : "");
     }
 
+    // --- Optional CST sine-torque motion (--torque-nm) ---
+    // The motion controller must be installed BEFORE the realtime loop
+    // starts: DS402Master::motion_controllers_ is mutated here (main
+    // thread) and iterated by the loop thread, so adding a controller
+    // while the loop runs is not safe.
+    //
+    // The controller writes the controlword/modes_of_operation every
+    // cycle so the CiA 402 enable sequence can proceed, but forces
+    // target_torque to zero until the FSoE link is operational and the
+    // drive reports motion allowed.  The drive is only enabled (and the
+    // brake released) from the run loop below once the FSoE status
+    // confirms STO=off and SBC=off.
+    bool motion_active = false;
+    if (args.torque_pp_nm > 0.0) {
+        // Read motor rated torque (0x6076) for Nm→per-mille conversion.
+        // CiA 402 target_torque (0x6071) is in per-mille (0.1%) of rated
+        // torque; 0x6076 (Motor Rated Torque) is in mNm.
+        uint32_t rated_torque_mnm = args.rated_torque_mnm;
+        if (rated_torque_mnm == 0) {
+            auto& sdo_mgr = master.ethercatMaster().sdoManager(slave_idx);
+            auto rated = sdo_mgr.readU32(0x6076, 0, {.timeout_ms = kSdoTimeoutMs});
+            if (rated.has_value() && rated.value() > 0) {
+                rated_torque_mnm = rated.value();
+                TETHER_LOGI(TAG,
+                    "Motor rated torque (0x6076) = {} mNm ({:.3f} Nm)",
+                    rated_torque_mnm, rated_torque_mnm / 1000.0);
+            } else {
+                TETHER_LOGE(TAG,
+                    "Failed to read motor rated torque (0x6076) via SDO  —  "
+                    "cannot convert Nm to per-mille.  Use --rated-torque-mnm "
+                    "to specify it manually.");
+                master.stopDistributedClocks();
+                Tether::Examples::shutdownSingleDrive(master, slave_idx);
+                Tether::Examples::stopHostMasterSession(master, session);
+                return 3;
+            }
+        } else {
+            TETHER_LOGI(TAG,
+                "Using --rated-torque-mnm = {} mNm ({:.3f} Nm)",
+                rated_torque_mnm, rated_torque_mnm / 1000.0);
+        }
+
+        // Amplitude is half the peak-to-peak value (±torque_pp_nm/2).
+        const double amplitude_nm = args.torque_pp_nm / 2.0;
+        TETHER_LOGI(TAG,
+            "Sine torque: {:.3f} Nm P-P ({:.3f} Nm amplitude) at {:.3f} Hz, "
+            "rated torque {} mNm -> {:.1f} per-mille peak "
+            "(gated on FSoE motion-allowed)",
+            args.torque_pp_nm, amplitude_nm, args.freq_hz,
+            rated_torque_mnm,
+            amplitude_nm * 1'000'000.0 / static_cast<double>(rated_torque_mnm));
+
+        if (!master.addMotionController(
+                slave_idx,
+                std::make_unique<SineTorqueController>(
+                    amplitude_nm, args.freq_hz, rated_torque_mnm,
+                    kMotionRxPDOOffset, *fsoe_main))) {
+            TETHER_LOGE(TAG, "Failed to add sine torque controller");
+            master.stopDistributedClocks();
+            Tether::Examples::shutdownSingleDrive(master, slave_idx);
+            Tether::Examples::stopHostMasterSession(master, session);
+            return 4;
+        }
+        motion_active = true;
+    }
+
     // --- Start realtime motion loop ---
     // The cyclic-task scheduler (which runs FSoEPDOExchangeTask) is driven
-    // by the realtime motion loop even though no motion controller is
-    // installed  -  the loop is what actually exchanges the FSoE PDOs.
+    // by the realtime motion loop; the loop is what actually exchanges the
+    // FSoE PDOs (and the motion PDOs when --torque-nm is given).
     EtherCAT::Master::RealtimeMotionLoopConfig loop_config;
     loop_config.cycle_period_us = 1000;
     loop_config.sync_interval_cycles = 10;
@@ -2032,9 +2336,16 @@ int main(int argc, char** argv) {
     // operation, suppress all FSoE debug output, run full safety
     // diagnostics via CoE (SDO reads), then exit immediately.
     if (rc == 0) {
-        TETHER_LOGI(TAG,
-            "FSoE-only mode: monitoring safety state for {:.1f} s (no motion)",
-            args.duration);
+        if (motion_active) {
+            TETHER_LOGI(TAG,
+                "FSoE + CST motion: {:.3f} Nm P-P at {:.3f} Hz for {:.1f} s "
+                "(waiting for STO/SBC release before enabling drive)",
+                args.torque_pp_nm, args.freq_hz, args.duration);
+        } else {
+            TETHER_LOGI(TAG,
+                "FSoE-only mode: monitoring safety state for {:.1f} s (no motion)",
+                args.duration);
+        }
 
         const auto run_start_ms = Tether::Platform::Clock::instance().getMilliseconds();
         const uint32_t run_duration_ms =
@@ -2110,6 +2421,25 @@ int main(int argc, char** argv) {
                         TETHER_LOGW(TAG,
                             "Brake disengage failed or unverified");
                     }
+
+                    // --- Enable the drive for CST motion ---
+                    // Only now — with the FSoE link in Data state, the drive
+                    // reporting motion allowed and the brake released — is
+                    // it safe to run the CiA 402 enable sequence.
+                    if (motion_active && !drive_enabled) {
+                        if (master.enableDrive(slave_idx, 5000)) {
+                            drive_enabled = true;
+                            TETHER_LOGI(TAG,
+                                "Slave {} drive enabled — CST sine torque active",
+                                slave_idx);
+                        } else {
+                            TETHER_LOGE(TAG,
+                                "Failed to enable slave {} for CST motion",
+                                slave_idx);
+                            rc = 8;
+                            break;
+                        }
+                    }
                 }
             }
 
@@ -2132,6 +2462,28 @@ int main(int argc, char** argv) {
     }
 
     // --- Stop and clean up ---
+    // In motion mode, mirror synapticon_cst's shutdown ordering:
+    //   1. Remove the motion controller so it stops overwriting the RxPDO
+    //      buffer every cycle.
+    //   2. controlledShutdown() runs the CSV stop -> disable -> brake
+    //      phases through the still-live PDO exchange.
+    //   3. Only then stop the realtime loop.
+    if (motion_active) {
+        (void)master.removeMotionController(slave_idx);
+        EtherCAT::CiA402Drive::ControlledShutdownConfig scfg;
+        scfg.stop_mode     = EtherCAT::CiA402Drive::ShutdownStopMode::FixedTimeVelocity;
+        scfg.stop_time_ms  = 500;
+        scfg.standstill_ms = 25;
+        // The SOMANET auto-engages its holding brake when the drive leaves
+        // Operation Enabled; phase 3 ensures the engaged state.
+        scfg.brake_action = [&master, slave_idx] {
+            auto& sdo = master.ethercatMaster().sdoManager(slave_idx);
+            return EtherCAT::Drives::Synapticon::BrakeControl::engageBrake(sdo);
+        };
+        if (!drive.controlledShutdown(scfg)) {
+            TETHER_LOGW(TAG, "Controlled shutdown reported errors");
+        }
+    }
     master.stopMotionControlLoop();
     master.clearCyclicTasks();
 
