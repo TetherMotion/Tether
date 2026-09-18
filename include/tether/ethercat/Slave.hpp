@@ -37,9 +37,10 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <vector>
-#include <optional>
 
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
@@ -455,6 +456,21 @@ public:
         std::initializer_list<CustomPDOMappingEntry> entries);
 
     /**
+     * @brief Define a custom TxPDO/RxPDO mapping from a span of register
+     * entries (same as the initializer-list overload, but accepts
+     * dynamically-built entry tables — e.g. generated from an ESI).
+     *
+     * @param pdo_index   PDO mapping object index (e.g. 0x1A01)
+     * @param entries     Span of CustomPDOMappingEntry (register pointers)
+     * @param direction   PDO::PDODirection::TxPDO or RxPDO
+     * @return SlaveError::Ok on success
+     */
+    virtual SlaveError configureCustomTxPDO(
+        uint16_t pdo_index,
+        std::span<const CustomPDOMappingEntry> entries,
+        PDO::PDODirection direction);
+
+    /**
      * @brief Register PDO buffers and assign PDOs to sync managers.
      *
      * Must be called after configureCustomRxPDO / configureCustomTxPDO,
@@ -802,7 +818,7 @@ protected:
 
     SlaveError configureCustomTxPDO(
         uint16_t pdo_index,
-        std::initializer_list<CustomPDOMappingEntry> entries,
+        std::span<const CustomPDOMappingEntry> entries,
         PDO::PDODirection direction);
 
     void storeCustomPDOInfo(
