@@ -1010,6 +1010,28 @@ bool PDOManager::sendAll() {
     // LRW path: atomic exchange, can't be split
     if (logical_addr_mgr_ && logical_addr_mgr_->isInitialized()) {
         split_state_.lrw_mode = true;
+
+        // A process image larger than one Ethernet frame cannot be sent
+        // as a single LRW datagram.  Exchange it in contiguous logical-
+        // address slices, split at the RxPDO/TxPDO boundary (partial
+        // reads — see LogicalAddressManager::exchangeLRWSlice()).
+        const uint32_t max_len = logical_addr_mgr_->maxSliceLength();
+        const uint32_t total   = logical_addr_mgr_->totalLogicalSize();
+        if (max_len != 0 && total > max_len) {
+            const uint32_t rx_total = logical_addr_mgr_->totalRxPDOBytes();
+            bool ok = true;
+            for (uint32_t off = 0; off < total; ) {
+                uint32_t len = std::min(max_len, total - off);
+                if (off < rx_total && off + len > rx_total) len = rx_total - off;
+                // exchangeLRWSlice() mirrors the per-slave exchange
+                // counters for intersected entries.
+                ok = exchangeLRWSlice(off, len) && ok;
+                off += len;
+            }
+            split_state_.send_phase_ok = ok;
+            return ok;
+        }
+
         split_state_.send_phase_ok = logical_addr_mgr_->exchangeAllLRW(mapping_);
         if (split_state_.send_phase_ok) {
             for (size_t i = 0; i < mapping_.entry_count(); i++) {

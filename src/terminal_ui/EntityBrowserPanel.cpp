@@ -5,6 +5,8 @@
 
 #include <ncurses.h>
 
+#include <cstdio>
+
 #include "tether/terminal_ui/EntityBrowserPanel.hpp"
 #include "tether/terminal_ui/TablePanel.hpp"
 
@@ -65,6 +67,9 @@ void EntityBrowserPanel::render(int top, int bottom) {
                  "press Enter/r to read registers");
     attroff(COLOR_PAIR(PalMuted));
 
+    // Overlays draw on top of everything.
+    overlay_host_.render(top, bottom);
+
     // Modal prompt on the last row.
     if (prompt_ != Prompt::None) {
         attron(COLOR_PAIR(PalHint));
@@ -88,7 +93,44 @@ void EntityBrowserPanel::commitPrompt() {
     prompt_buf_.clear();
 }
 
+std::string EntityBrowserPanel::keyHints() const {
+    if (!overlays_.empty()) return overlay_host_.keyHints();
+    std::string h = "e:focus Enter/r:read /:search f:filter x:clear a:auto";
+    for (const auto& a : actions_) {
+        h += ' ';
+        h += a.label;
+    }
+    return h;
+}
+
+std::unique_ptr<UI::Overlay> makeEntityInfoOverlay(UI::EntityBrowser& b) {
+    const UI::SlaveEntity* e = b.selectedEntity();
+    if (!e) {
+        return std::make_unique<UI::TextOverlay>(
+            "Entity info", std::vector<std::string>{"no entity selected"});
+    }
+    std::vector<std::string> lines = {
+        "index:     " + std::to_string(e->index),
+        "name:      " + e->name,
+        "state:     " + e->state,
+        "status:    0x" + ([&]{ char b_[8]; snprintf(b_, 8, "%04X", e->status_code); return std::string{b_}; })(),
+        std::string("error:     ") + (e->error ? "yes" : "no"),
+        std::string("suspended: ") + (e->suspended ? "yes" : "no"),
+        "",
+        e->detail,
+    };
+    if (!b.registerStatus().empty()) {
+        lines.push_back("");
+        lines.push_back("registers: " + b.registerStatus());
+    }
+    return std::make_unique<UI::TextOverlay>(
+        "Entity " + std::to_string(e->index), std::move(lines));
+}
+
 bool EntityBrowserPanel::handleKey(int key) {
+    // Overlays consume all keys until closed.
+    if (!overlays_.empty()) return overlay_host_.handleKey(key);
+
     // Prompt mode consumes everything except Enter/Esc.
     if (prompt_ != Prompt::None) {
         if (key == '\n' || key == KEY_ENTER) { commitPrompt(); return true; }
@@ -105,6 +147,14 @@ bool EntityBrowserPanel::handleKey(int key) {
             return true;
         }
         return true;   // swallow everything else while prompting
+    }
+
+    // App-registered actions get first pick.
+    for (const auto& a : actions_) {
+        if (a.key == key) {
+            if (a.invoke) a.invoke();
+            return true;
+        }
     }
 
     const int page = 8;
