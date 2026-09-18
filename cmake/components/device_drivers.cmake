@@ -29,7 +29,8 @@ endif()
 
 if(TETHER_DRIVE_NEXCOBOT_ESC211)
     file(GLOB NEXCOBOT_ESC211_SOURCES CONFIGURE_DEPENDS
-        "${TETHER_ROOT}/src/drives/NexcobotESC211Errors.cpp")
+        "${TETHER_ROOT}/src/drives/NexcobotESC211Errors.cpp"
+        "${TETHER_ROOT}/src/drives/NexcobotESC211/*.cpp")
     list(APPEND TETHER_DEVICE_DRIVERS_SOURCES ${NEXCOBOT_ESC211_SOURCES})
 endif()
 
