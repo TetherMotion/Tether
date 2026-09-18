@@ -140,17 +140,22 @@ struct NexcobotESC211 {
     static constexpr uint16_t kESCDebugMsgIndex          = 0xF110;
     static constexpr uint16_t kSystemCurrentStateMPUBIndex = 0xF111;
     static constexpr uint16_t kSystemErrorCodeMPUBIndex  = 0xF112;
+    static constexpr uint16_t kLogMsgIndex              = 0xF120;
+    static constexpr uint16_t kCore1AppCycTimeIndex     = 0xF121;
 
-    // Bulk data (0xF200-0xF222)
+    // Bulk data (0xF200-0xF223)
     static constexpr uint16_t kTempFNIDataIndex     = 0xF200;
     static constexpr uint16_t kActiveFNIDataIndex   = 0xF201;
     static constexpr uint16_t kActiveFNIDataCRCIndex = 0xF202;
+    static constexpr uint16_t kFNIDataSizeIndex     = 0xF203;
     static constexpr uint16_t kRSPDataInputIndex    = 0xF210;
     static constexpr uint16_t kRSPDataOutputIndex   = 0xF211;
     static constexpr uint16_t kRSPDataCRCIndex      = 0xF212;
+    static constexpr uint16_t kRSPDataSourceIndex   = 0xF213;
     static constexpr uint16_t kSDDDataInputIndex    = 0xF220;
     static constexpr uint16_t kSDDDataOutputIndex   = 0xF221;
     static constexpr uint16_t kSDDDataCRCIndex      = 0xF222;
+    static constexpr uint16_t kSDDDataSourceIndex   = 0xF223;
 
     // FSOE Rx (0x6000-0x6052)
     static constexpr uint16_t kFSOESafetyPDURxIndex = 0x6000;
@@ -166,10 +171,11 @@ struct NexcobotESC211 {
     static constexpr uint16_t kFSOEFrameFSoE0Index  = 0x6100;
     static constexpr uint16_t kFSOESafeDataFSoE0Index = 0x6101;
 
-    // FSOE Tx (0x7000-0x7020)
+    // FSOE Tx (0x7000-0x7030)
     static constexpr uint16_t kFSOESafetyPDUTxIndex = 0x7000;
     static constexpr uint16_t kOutputCounterIndex   = 0x7010;
     static constexpr uint16_t kSAFE_DOIndex         = 0x7020;
+    static constexpr uint16_t kDITestPinIndex       = 0x7030;
 
     // FSOE Tx channels (0x7100-0x7171)
     static constexpr uint16_t kFSOEFrameTxFSoE0Index  = 0x7100;

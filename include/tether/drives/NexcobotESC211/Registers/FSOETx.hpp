@@ -12,6 +12,7 @@ namespace FSOETx {
 static constexpr uint16_t FSOESafetyPDUTxIndex  = 0x7000;
 static constexpr uint16_t OutputCounterIndex     = 0x7010;
 static constexpr uint16_t SAFE_DOIndex           = 0x7020;
+static constexpr uint16_t DITestPinIndex         = 0x7030;
 
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSOESafetyPDUTxCount = {
     .index = FSOESafetyPDUTxIndex, .subindex = 0x00,
@@ -54,6 +55,7 @@ NEXCOBOT_TXPDU_REG(13); NEXCOBOT_TXPDU_REG(14); NEXCOBOT_TXPDU_REG(15); NEXCOBOT
 
 NEXCOBOT_UDINT_REG(OutputCounter, OutputCounterIndex, "OutputCounter");
 NEXCOBOT_UDINT_REG(SAFE_DO,      SAFE_DOIndex,       "SAFE_DO");
+NEXCOBOT_UDINT_REG(DITestPin,    DITestPinIndex,     "DI Test Pin");
 
 #undef NEXCOBOT_UDINT_REG
 
@@ -244,7 +246,7 @@ inline const RegisterList kRegisterList = {
     &FSOETxPDU_5, &FSOETxPDU_6, &FSOETxPDU_7, &FSOETxPDU_8,
     &FSOETxPDU_9, &FSOETxPDU_10, &FSOETxPDU_11, &FSOETxPDU_12,
     &FSOETxPDU_13, &FSOETxPDU_14, &FSOETxPDU_15, &FSOETxPDU_16,
-    &OutputCounter, &SAFE_DO,
+    &OutputCounter, &SAFE_DO, &DITestPin,
     &FSOETx0_FrameCount, &FSOETx0_Cmd, &FSOETx0_ConnID,
     &FSOETx0_CRC0, &FSOETx0_CRC1, &FSOETx0_CRC2, &FSOETx0_CRC3,
     &FSOETx0_CRC4, &FSOETx0_CRC5, &FSOETx0_CRC6, &FSOETx0_CRC7,

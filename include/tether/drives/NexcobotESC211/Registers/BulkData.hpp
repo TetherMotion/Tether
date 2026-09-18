@@ -12,12 +12,15 @@ namespace BulkData {
 static constexpr uint16_t TempFNIDataIndex        = 0xF200;
 static constexpr uint16_t ActiveFNIDataIndex      = 0xF201;
 static constexpr uint16_t ActiveFNIDataCRCIndex   = 0xF202;
+static constexpr uint16_t FNIDataSizeIndex        = 0xF203;
 static constexpr uint16_t RSPDataInputIndex       = 0xF210;
 static constexpr uint16_t RSPDataOutputIndex       = 0xF211;
 static constexpr uint16_t RSPDataCRCIndex         = 0xF212;
+static constexpr uint16_t RSPDataSourceIndex      = 0xF213;
 static constexpr uint16_t SDDDataInputIndex        = 0xF220;
 static constexpr uint16_t SDDDataOutputIndex       = 0xF221;
 static constexpr uint16_t SDDDataCRCIndex          = 0xF222;
+static constexpr uint16_t SDDDataSourceIndex      = 0xF223;
 
 // ---------------------------------------------------------------------------
 // 0xF200: Temp. FNI Data
@@ -128,6 +131,25 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry ActiveFNIDataCRC =
     .modification_mode = ModificationMode::ReadOnly,
     .effective_time = EffectiveTime::Immediately,
     .comment = "Active FNI data CRC",
+};
+
+// ---------------------------------------------------------------------------
+// 0xF203: FNI Data Size
+// ---------------------------------------------------------------------------
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FNIDataSize = {
+    .index = FNIDataSizeIndex,
+    .subindex = 0x00,
+    .name = "FNI Data Size",
+    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned32,
+    .default_value = 0,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 0xFFFFFFFF,
+    .modification_mode = ModificationMode::ReadOnly,
+    .effective_time = EffectiveTime::Immediately,
+    .comment = "FNI data size",
 };
 
 // ---------------------------------------------------------------------------
@@ -322,6 +344,25 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry RSPDataCRC = {
 };
 
 // ---------------------------------------------------------------------------
+// 0xF213: RSP Data Source
+// ---------------------------------------------------------------------------
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry RSPDataSource = {
+    .index = RSPDataSourceIndex,
+    .subindex = 0x00,
+    .name = "RSP Data Source",
+    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned32,
+    .default_value = 0,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 0xFFFFFFFF,
+    .modification_mode = ModificationMode::ReadOnly,
+    .effective_time = EffectiveTime::Immediately,
+    .comment = "RSP data source (block shown by RSP objects)",
+};
+
+// ---------------------------------------------------------------------------
 // 0xF220: SDD Data Input
 // ---------------------------------------------------------------------------
 
@@ -464,6 +505,25 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry SDDDataCRC = {
     .comment = "SDD data CRC",
 };
 
+// ---------------------------------------------------------------------------
+// 0xF223: SDD Data Source
+// ---------------------------------------------------------------------------
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry SDDDataSource = {
+    .index = SDDDataSourceIndex,
+    .subindex = 0x00,
+    .name = "SDD Data Source",
+    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned32,
+    .default_value = 0,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 0xFFFFFFFF,
+    .modification_mode = ModificationMode::ReadOnly,
+    .effective_time = EffectiveTime::Immediately,
+    .comment = "SDD data source (block shown by SDD objects)",
+};
+
 inline const RegisterList kRegisterList = {
     &TempFNIDataCount,
     &TempFNISection_1, &TempFNISection_2, &TempFNISection_3, &TempFNISection_4,
@@ -472,6 +532,7 @@ inline const RegisterList kRegisterList = {
     &ActiveFNISection_1, &ActiveFNISection_2, &ActiveFNISection_3, &ActiveFNISection_4,
     &ActiveFNISection_5, &ActiveFNISection_6, &ActiveFNISection_7, &ActiveFNISection_8,
     &ActiveFNIDataCRC,
+    &FNIDataSize,
     &RSPDataInputCount,
     &RSPDataInputSection_1, &RSPDataInputSection_2, &RSPDataInputSection_3, &RSPDataInputSection_4,
     &RSPDataInputSection_5, &RSPDataInputSection_6, &RSPDataInputSection_7, &RSPDataInputSection_8,
@@ -499,6 +560,7 @@ inline const RegisterList kRegisterList = {
     &RSPDataOutputSection_41, &RSPDataOutputSection_42, &RSPDataOutputSection_43, &RSPDataOutputSection_44,
     &RSPDataOutputSection_45, &RSPDataOutputSection_46, &RSPDataOutputSection_47, &RSPDataOutputSection_48,
     &RSPDataCRC,
+    &RSPDataSource,
     &SDDDataInputCount,
     &SDDDataInputSection_1, &SDDDataInputSection_2, &SDDDataInputSection_3, &SDDDataInputSection_4,
     &SDDDataInputSection_5, &SDDDataInputSection_6, &SDDDataInputSection_7, &SDDDataInputSection_8,
@@ -514,6 +576,7 @@ inline const RegisterList kRegisterList = {
     &SDDDataOutputSection_17, &SDDDataOutputSection_18, &SDDDataOutputSection_19, &SDDDataOutputSection_20,
     &SDDDataOutputSection_21, &SDDDataOutputSection_22, &SDDDataOutputSection_23, &SDDDataOutputSection_24,
     &SDDDataCRC,
+    &SDDDataSource,
 };
 
 } // namespace BulkData

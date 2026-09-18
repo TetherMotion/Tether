@@ -20,6 +20,8 @@ static constexpr uint16_t FSoEConnectionErrorCodeIndex  = 0xF106;
 static constexpr uint16_t ESCDebugMsgIndex              = 0xF110;
 static constexpr uint16_t SystemCurrentStateMPUBIndex   = 0xF111;
 static constexpr uint16_t SystemErrorCodeMPUBIndex      = 0xF112;
+static constexpr uint16_t LogMsgIndex                   = 0xF120;
+static constexpr uint16_t Core1AppCycTimeIndex          = 0xF121;
 
 // ---------------------------------------------------------------------------
 // Control command values for 0xF100:01 (Control Command)
@@ -324,7 +326,7 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry ESCDebugMsgCount =
         .max_value = 0xFF, \
         .modification_mode = ModificationMode::ReadOnly, \
         .effective_time = EffectiveTime::Immediately, \
-        .comment = "ESC debug message " #NAME " (STRING 512)", \
+        .comment = "ESC debug message " #NAME " (STRING 64)", \
     }
 
 NEXCOBOT_DBG_MSG_REG(1,  Msg01);
@@ -384,6 +386,131 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry SystemErrorCodeMPU
     .comment = "System error code (MPU_B)",
 };
 
+// ---------------------------------------------------------------------------
+// 0xF120: Log Msg (record, sub 1..128, STRING(128) each)
+// ---------------------------------------------------------------------------
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry LogMsgCount = {
+    .index = LogMsgIndex,
+    .subindex = 0x00,
+    .name = "Log Msg count",
+    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
+    .default_value = 128,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 128,
+    .modification_mode = ModificationMode::ReadOnly,
+    .effective_time = EffectiveTime::Immediately,
+    .comment = "Number of entries for Log Msg",
+};
+
+#define NEXCOBOT_LOG_MSG_REG(NUM) \
+    constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry LogMsg_##NUM = { \
+        .index = LogMsgIndex, \
+        .subindex = (NUM), \
+        .name = "Log Msg " #NUM, \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::VisibleString, \
+        .default_value = 0, \
+        .unit = Unit_None, \
+        .options_enum = nullptr, \
+        .min_value = 0, \
+        .max_value = 0xFF, \
+        .modification_mode = ModificationMode::ReadOnly, \
+        .effective_time = EffectiveTime::Immediately, \
+        .comment = "Log message " #NUM " (STRING 128)", \
+    }
+
+NEXCOBOT_LOG_MSG_REG(1);   NEXCOBOT_LOG_MSG_REG(2);   NEXCOBOT_LOG_MSG_REG(3);
+NEXCOBOT_LOG_MSG_REG(4);   NEXCOBOT_LOG_MSG_REG(5);   NEXCOBOT_LOG_MSG_REG(6);
+NEXCOBOT_LOG_MSG_REG(7);   NEXCOBOT_LOG_MSG_REG(8);   NEXCOBOT_LOG_MSG_REG(9);
+NEXCOBOT_LOG_MSG_REG(10);  NEXCOBOT_LOG_MSG_REG(11);  NEXCOBOT_LOG_MSG_REG(12);
+NEXCOBOT_LOG_MSG_REG(13);  NEXCOBOT_LOG_MSG_REG(14);  NEXCOBOT_LOG_MSG_REG(15);
+NEXCOBOT_LOG_MSG_REG(16);  NEXCOBOT_LOG_MSG_REG(17);  NEXCOBOT_LOG_MSG_REG(18);
+NEXCOBOT_LOG_MSG_REG(19);  NEXCOBOT_LOG_MSG_REG(20);  NEXCOBOT_LOG_MSG_REG(21);
+NEXCOBOT_LOG_MSG_REG(22);  NEXCOBOT_LOG_MSG_REG(23);  NEXCOBOT_LOG_MSG_REG(24);
+NEXCOBOT_LOG_MSG_REG(25);  NEXCOBOT_LOG_MSG_REG(26);  NEXCOBOT_LOG_MSG_REG(27);
+NEXCOBOT_LOG_MSG_REG(28);  NEXCOBOT_LOG_MSG_REG(29);  NEXCOBOT_LOG_MSG_REG(30);
+NEXCOBOT_LOG_MSG_REG(31);  NEXCOBOT_LOG_MSG_REG(32);  NEXCOBOT_LOG_MSG_REG(33);
+NEXCOBOT_LOG_MSG_REG(34);  NEXCOBOT_LOG_MSG_REG(35);  NEXCOBOT_LOG_MSG_REG(36);
+NEXCOBOT_LOG_MSG_REG(37);  NEXCOBOT_LOG_MSG_REG(38);  NEXCOBOT_LOG_MSG_REG(39);
+NEXCOBOT_LOG_MSG_REG(40);  NEXCOBOT_LOG_MSG_REG(41);  NEXCOBOT_LOG_MSG_REG(42);
+NEXCOBOT_LOG_MSG_REG(43);  NEXCOBOT_LOG_MSG_REG(44);  NEXCOBOT_LOG_MSG_REG(45);
+NEXCOBOT_LOG_MSG_REG(46);  NEXCOBOT_LOG_MSG_REG(47);  NEXCOBOT_LOG_MSG_REG(48);
+NEXCOBOT_LOG_MSG_REG(49);  NEXCOBOT_LOG_MSG_REG(50);  NEXCOBOT_LOG_MSG_REG(51);
+NEXCOBOT_LOG_MSG_REG(52);  NEXCOBOT_LOG_MSG_REG(53);  NEXCOBOT_LOG_MSG_REG(54);
+NEXCOBOT_LOG_MSG_REG(55);  NEXCOBOT_LOG_MSG_REG(56);  NEXCOBOT_LOG_MSG_REG(57);
+NEXCOBOT_LOG_MSG_REG(58);  NEXCOBOT_LOG_MSG_REG(59);  NEXCOBOT_LOG_MSG_REG(60);
+NEXCOBOT_LOG_MSG_REG(61);  NEXCOBOT_LOG_MSG_REG(62);  NEXCOBOT_LOG_MSG_REG(63);
+NEXCOBOT_LOG_MSG_REG(64);  NEXCOBOT_LOG_MSG_REG(65);  NEXCOBOT_LOG_MSG_REG(66);
+NEXCOBOT_LOG_MSG_REG(67);  NEXCOBOT_LOG_MSG_REG(68);  NEXCOBOT_LOG_MSG_REG(69);
+NEXCOBOT_LOG_MSG_REG(70);  NEXCOBOT_LOG_MSG_REG(71);  NEXCOBOT_LOG_MSG_REG(72);
+NEXCOBOT_LOG_MSG_REG(73);  NEXCOBOT_LOG_MSG_REG(74);  NEXCOBOT_LOG_MSG_REG(75);
+NEXCOBOT_LOG_MSG_REG(76);  NEXCOBOT_LOG_MSG_REG(77);  NEXCOBOT_LOG_MSG_REG(78);
+NEXCOBOT_LOG_MSG_REG(79);  NEXCOBOT_LOG_MSG_REG(80);  NEXCOBOT_LOG_MSG_REG(81);
+NEXCOBOT_LOG_MSG_REG(82);  NEXCOBOT_LOG_MSG_REG(83);  NEXCOBOT_LOG_MSG_REG(84);
+NEXCOBOT_LOG_MSG_REG(85);  NEXCOBOT_LOG_MSG_REG(86);  NEXCOBOT_LOG_MSG_REG(87);
+NEXCOBOT_LOG_MSG_REG(88);  NEXCOBOT_LOG_MSG_REG(89);  NEXCOBOT_LOG_MSG_REG(90);
+NEXCOBOT_LOG_MSG_REG(91);  NEXCOBOT_LOG_MSG_REG(92);  NEXCOBOT_LOG_MSG_REG(93);
+NEXCOBOT_LOG_MSG_REG(94);  NEXCOBOT_LOG_MSG_REG(95);  NEXCOBOT_LOG_MSG_REG(96);
+NEXCOBOT_LOG_MSG_REG(97);  NEXCOBOT_LOG_MSG_REG(98);  NEXCOBOT_LOG_MSG_REG(99);
+NEXCOBOT_LOG_MSG_REG(100); NEXCOBOT_LOG_MSG_REG(101); NEXCOBOT_LOG_MSG_REG(102);
+NEXCOBOT_LOG_MSG_REG(103); NEXCOBOT_LOG_MSG_REG(104); NEXCOBOT_LOG_MSG_REG(105);
+NEXCOBOT_LOG_MSG_REG(106); NEXCOBOT_LOG_MSG_REG(107); NEXCOBOT_LOG_MSG_REG(108);
+NEXCOBOT_LOG_MSG_REG(109); NEXCOBOT_LOG_MSG_REG(110); NEXCOBOT_LOG_MSG_REG(111);
+NEXCOBOT_LOG_MSG_REG(112); NEXCOBOT_LOG_MSG_REG(113); NEXCOBOT_LOG_MSG_REG(114);
+NEXCOBOT_LOG_MSG_REG(115); NEXCOBOT_LOG_MSG_REG(116); NEXCOBOT_LOG_MSG_REG(117);
+NEXCOBOT_LOG_MSG_REG(118); NEXCOBOT_LOG_MSG_REG(119); NEXCOBOT_LOG_MSG_REG(120);
+NEXCOBOT_LOG_MSG_REG(121); NEXCOBOT_LOG_MSG_REG(122); NEXCOBOT_LOG_MSG_REG(123);
+NEXCOBOT_LOG_MSG_REG(124); NEXCOBOT_LOG_MSG_REG(125); NEXCOBOT_LOG_MSG_REG(126);
+NEXCOBOT_LOG_MSG_REG(127); NEXCOBOT_LOG_MSG_REG(128);
+
+#undef NEXCOBOT_LOG_MSG_REG
+
+// ---------------------------------------------------------------------------
+// 0xF121: Core1 App Cyc Time (us) (record, sub 1..12, AppN Cur/Max UDINT)
+// ---------------------------------------------------------------------------
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry Core1AppCycTimeCount = {
+    .index = Core1AppCycTimeIndex,
+    .subindex = 0x00,
+    .name = "Core1 App Cyc Time count",
+    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
+    .default_value = 12,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 12,
+    .modification_mode = ModificationMode::ReadOnly,
+    .effective_time = EffectiveTime::Immediately,
+    .comment = "Number of entries for Core1 App Cyc Time (us)",
+};
+
+#define NEXCOBOT_CYC_REG(NUM, NAME) \
+    constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry Core1AppCycTime_##NAME = { \
+        .index = Core1AppCycTimeIndex, \
+        .subindex = (NUM), \
+        .name = "Core1 App Cyc Time " #NAME, \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned32, \
+        .default_value = 0, \
+        .unit = Unit_None, \
+        .options_enum = nullptr, \
+        .min_value = 0, \
+        .max_value = 0xFFFFFFFF, \
+        .modification_mode = ModificationMode::ReadOnly, \
+        .effective_time = EffectiveTime::Immediately, \
+        .comment = "Core1 application cycle time " #NAME " (us)", \
+    }
+
+NEXCOBOT_CYC_REG(1,  App1Cur); NEXCOBOT_CYC_REG(2,  App1Max);
+NEXCOBOT_CYC_REG(3,  App2Cur); NEXCOBOT_CYC_REG(4,  App2Max);
+NEXCOBOT_CYC_REG(5,  App3Cur); NEXCOBOT_CYC_REG(6,  App3Max);
+NEXCOBOT_CYC_REG(7,  App4Cur); NEXCOBOT_CYC_REG(8,  App4Max);
+NEXCOBOT_CYC_REG(9,  App5Cur); NEXCOBOT_CYC_REG(10, App5Max);
+NEXCOBOT_CYC_REG(11, App6Cur); NEXCOBOT_CYC_REG(12, App6Max);
+
+#undef NEXCOBOT_CYC_REG
+
 inline const RegisterList kRegisterList = {
     &UserControlCount,
     &ControlCommand,
@@ -432,6 +559,59 @@ inline const RegisterList kRegisterList = {
     &DebugMsg_Err06,
     &SystemCurrentStateMPUB,
     &SystemErrorCodeMPUB,
+    &LogMsgCount,
+#define NEXCOBOT_LOG_LIST(NUM) &LogMsg_##NUM,
+    NEXCOBOT_LOG_LIST(1)   NEXCOBOT_LOG_LIST(2)   NEXCOBOT_LOG_LIST(3)
+    NEXCOBOT_LOG_LIST(4)   NEXCOBOT_LOG_LIST(5)   NEXCOBOT_LOG_LIST(6)
+    NEXCOBOT_LOG_LIST(7)   NEXCOBOT_LOG_LIST(8)   NEXCOBOT_LOG_LIST(9)
+    NEXCOBOT_LOG_LIST(10)  NEXCOBOT_LOG_LIST(11)  NEXCOBOT_LOG_LIST(12)
+    NEXCOBOT_LOG_LIST(13)  NEXCOBOT_LOG_LIST(14)  NEXCOBOT_LOG_LIST(15)
+    NEXCOBOT_LOG_LIST(16)  NEXCOBOT_LOG_LIST(17)  NEXCOBOT_LOG_LIST(18)
+    NEXCOBOT_LOG_LIST(19)  NEXCOBOT_LOG_LIST(20)  NEXCOBOT_LOG_LIST(21)
+    NEXCOBOT_LOG_LIST(22)  NEXCOBOT_LOG_LIST(23)  NEXCOBOT_LOG_LIST(24)
+    NEXCOBOT_LOG_LIST(25)  NEXCOBOT_LOG_LIST(26)  NEXCOBOT_LOG_LIST(27)
+    NEXCOBOT_LOG_LIST(28)  NEXCOBOT_LOG_LIST(29)  NEXCOBOT_LOG_LIST(30)
+    NEXCOBOT_LOG_LIST(31)  NEXCOBOT_LOG_LIST(32)  NEXCOBOT_LOG_LIST(33)
+    NEXCOBOT_LOG_LIST(34)  NEXCOBOT_LOG_LIST(35)  NEXCOBOT_LOG_LIST(36)
+    NEXCOBOT_LOG_LIST(37)  NEXCOBOT_LOG_LIST(38)  NEXCOBOT_LOG_LIST(39)
+    NEXCOBOT_LOG_LIST(40)  NEXCOBOT_LOG_LIST(41)  NEXCOBOT_LOG_LIST(42)
+    NEXCOBOT_LOG_LIST(43)  NEXCOBOT_LOG_LIST(44)  NEXCOBOT_LOG_LIST(45)
+    NEXCOBOT_LOG_LIST(46)  NEXCOBOT_LOG_LIST(47)  NEXCOBOT_LOG_LIST(48)
+    NEXCOBOT_LOG_LIST(49)  NEXCOBOT_LOG_LIST(50)  NEXCOBOT_LOG_LIST(51)
+    NEXCOBOT_LOG_LIST(52)  NEXCOBOT_LOG_LIST(53)  NEXCOBOT_LOG_LIST(54)
+    NEXCOBOT_LOG_LIST(55)  NEXCOBOT_LOG_LIST(56)  NEXCOBOT_LOG_LIST(57)
+    NEXCOBOT_LOG_LIST(58)  NEXCOBOT_LOG_LIST(59)  NEXCOBOT_LOG_LIST(60)
+    NEXCOBOT_LOG_LIST(61)  NEXCOBOT_LOG_LIST(62)  NEXCOBOT_LOG_LIST(63)
+    NEXCOBOT_LOG_LIST(64)  NEXCOBOT_LOG_LIST(65)  NEXCOBOT_LOG_LIST(66)
+    NEXCOBOT_LOG_LIST(67)  NEXCOBOT_LOG_LIST(68)  NEXCOBOT_LOG_LIST(69)
+    NEXCOBOT_LOG_LIST(70)  NEXCOBOT_LOG_LIST(71)  NEXCOBOT_LOG_LIST(72)
+    NEXCOBOT_LOG_LIST(73)  NEXCOBOT_LOG_LIST(74)  NEXCOBOT_LOG_LIST(75)
+    NEXCOBOT_LOG_LIST(76)  NEXCOBOT_LOG_LIST(77)  NEXCOBOT_LOG_LIST(78)
+    NEXCOBOT_LOG_LIST(79)  NEXCOBOT_LOG_LIST(80)  NEXCOBOT_LOG_LIST(81)
+    NEXCOBOT_LOG_LIST(82)  NEXCOBOT_LOG_LIST(83)  NEXCOBOT_LOG_LIST(84)
+    NEXCOBOT_LOG_LIST(85)  NEXCOBOT_LOG_LIST(86)  NEXCOBOT_LOG_LIST(87)
+    NEXCOBOT_LOG_LIST(88)  NEXCOBOT_LOG_LIST(89)  NEXCOBOT_LOG_LIST(90)
+    NEXCOBOT_LOG_LIST(91)  NEXCOBOT_LOG_LIST(92)  NEXCOBOT_LOG_LIST(93)
+    NEXCOBOT_LOG_LIST(94)  NEXCOBOT_LOG_LIST(95)  NEXCOBOT_LOG_LIST(96)
+    NEXCOBOT_LOG_LIST(97)  NEXCOBOT_LOG_LIST(98)  NEXCOBOT_LOG_LIST(99)
+    NEXCOBOT_LOG_LIST(100) NEXCOBOT_LOG_LIST(101) NEXCOBOT_LOG_LIST(102)
+    NEXCOBOT_LOG_LIST(103) NEXCOBOT_LOG_LIST(104) NEXCOBOT_LOG_LIST(105)
+    NEXCOBOT_LOG_LIST(106) NEXCOBOT_LOG_LIST(107) NEXCOBOT_LOG_LIST(108)
+    NEXCOBOT_LOG_LIST(109) NEXCOBOT_LOG_LIST(110) NEXCOBOT_LOG_LIST(111)
+    NEXCOBOT_LOG_LIST(112) NEXCOBOT_LOG_LIST(113) NEXCOBOT_LOG_LIST(114)
+    NEXCOBOT_LOG_LIST(115) NEXCOBOT_LOG_LIST(116) NEXCOBOT_LOG_LIST(117)
+    NEXCOBOT_LOG_LIST(118) NEXCOBOT_LOG_LIST(119) NEXCOBOT_LOG_LIST(120)
+    NEXCOBOT_LOG_LIST(121) NEXCOBOT_LOG_LIST(122) NEXCOBOT_LOG_LIST(123)
+    NEXCOBOT_LOG_LIST(124) NEXCOBOT_LOG_LIST(125) NEXCOBOT_LOG_LIST(126)
+    NEXCOBOT_LOG_LIST(127) NEXCOBOT_LOG_LIST(128)
+#undef NEXCOBOT_LOG_LIST
+    &Core1AppCycTimeCount,
+    &Core1AppCycTime_App1Cur, &Core1AppCycTime_App1Max,
+    &Core1AppCycTime_App2Cur, &Core1AppCycTime_App2Max,
+    &Core1AppCycTime_App3Cur, &Core1AppCycTime_App3Max,
+    &Core1AppCycTime_App4Cur, &Core1AppCycTime_App4Max,
+    &Core1AppCycTime_App5Cur, &Core1AppCycTime_App5Max,
+    &Core1AppCycTime_App6Cur, &Core1AppCycTime_App6Max,
 };
 
 } // namespace UserSystem
