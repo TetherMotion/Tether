@@ -42,6 +42,10 @@ jobs:
           -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
           -DTETHER_BUILD_EXTRACT_ESI=OFF
         cmake --build build --parallel $(nproc)
+        # Test executables are EXCLUDE_FROM_ALL; without this the
+        # gtest_discover_tests post-build step never runs and ctest only
+        # sees <name>_NOT_BUILT placeholder tests.
+        cmake --build build --target tests --parallel $(nproc)
     
     - name: Upload build artifact
       uses: actions/upload-artifact@v7
@@ -83,6 +87,7 @@ jobs:
           -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
           -DTETHER_BUILD_EXTRACT_ESI=OFF
         cmake --build build-static --parallel $(nproc)
+        cmake --build build-static --target tests --parallel $(nproc)
 
     - name: Upload static build artifact
       uses: actions/upload-artifact@v7
@@ -133,6 +138,7 @@ jobs:
           -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
           -DTETHER_BUILD_EXTRACT_ESI=OFF
         cmake --build build --parallel $(nproc)
+        cmake --build build --target tests --parallel $(nproc)
 
   integration-tests:
     name: Run Integration Tests
@@ -240,6 +246,9 @@ jobs:
           -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
           -DTETHER_BUILD_EXTRACT_ESI=OFF
         cmake --build build-coverage --parallel $(nproc)
+        # Test executables are EXCLUDE_FROM_ALL; build them explicitly so
+        # ctest can run them instead of <name>_NOT_BUILT placeholders.
+        cmake --build build-coverage --target tests --parallel $(nproc)
     
     - name: Run tests
       run: .github/scripts/run_ctest.sh build-coverage
@@ -347,11 +356,14 @@ jobs:
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           
-        # Build every test target that the project defines. The per-module
-        # target names are split (e.g. tether_control_core_tests,
-        # tether_simulation_systems_tests, ...) so building "all" is the
-        # robust way to pick up every module test executable.
+        # Build the project. The per-module test targets are split
+        # (e.g. tether_control_core_tests, tether_simulation_systems_tests)
+        # and are all reachable through the `tests` target below.
         cmake --build build-asan --parallel $(nproc)
+        # Test executables are EXCLUDE_FROM_ALL, so the `all` target above
+        # does NOT build them. Build the `tests` target explicitly —
+        # otherwise ctest only finds <name>_NOT_BUILT placeholders.
+        cmake --build build-asan --target tests --parallel $(nproc)
     
     - name: Run all module tests with ASAN
       run: |
@@ -423,11 +435,14 @@ jobs:
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           
-        # Build every test target that the project defines. The per-module
-        # target names are split (e.g. tether_control_core_tests,
-        # tether_simulation_systems_tests, ...) so building "all" is the
-        # robust way to pick up every module test executable.
+        # Build the project. The per-module test targets are split
+        # (e.g. tether_control_core_tests, tether_simulation_systems_tests)
+        # and are all reachable through the `tests` target below.
         cmake --build build-tsan --parallel $(nproc)
+        # Test executables are EXCLUDE_FROM_ALL, so the `all` target above
+        # does NOT build them. Build the `tests` target explicitly —
+        # otherwise ctest only finds <name>_NOT_BUILT placeholders.
+        cmake --build build-tsan --target tests --parallel $(nproc)
     
     - name: Run all module tests with TSAN
       run: |
