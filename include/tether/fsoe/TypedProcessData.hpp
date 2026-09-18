@@ -1,9 +1,11 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <functional>
 #include <optional>
+#include <span>
 
 #include "tether/fsoe/FSoEMasterConnection.hpp"
 #include "tether/fsoe/FSoESlave.hpp"
@@ -27,12 +29,18 @@ public:
 
     std::optional<SlaveToMainPayload> read() const
     {
+        // The codec buffer holds the maximum slave→main safe-data size;
+        // the connection may be configured for a smaller variant (e.g.
+        // Synapticon LW1 vs LW2), so compare against the configured size.
         std::array<uint8_t, Codec::kSlaveToMainSize> bytes{};
-        if (connection_.readInputProcessData(bytes) != bytes.size()) {
+        const size_t expected = connection_.getConfig().input_size;
+        const size_t n = connection_.readInputProcessData(bytes);
+        if (n != expected) {
             return std::nullopt;
         }
 
-        return Codec::decodeSlaveToMain(bytes);
+        return Codec::decodeSlaveToMain(
+            std::span<const uint8_t>(bytes.data(), n));
     }
 
     bool exchangeWith(FSoESlave& slave, uint64_t current_time_ms)
@@ -153,9 +161,15 @@ public:
 
     bool publish(const SlaveToMainPayload& payload)
     {
+        // Publish exactly the configured safe-input size — the codec
+        // buffer holds the maximum size, but the slave may be configured
+        // for a smaller variant (e.g. Synapticon LW1 vs LW2).
         std::array<uint8_t, Codec::kSlaveToMainSize> bytes{};
-        Codec::encodeSlaveToMain(payload, bytes);
-        return slave_.writeInputProcessData(bytes);
+        const size_t n = std::min<size_t>(
+            bytes.size(), slave_.getConfig().safeInputSize);
+        const std::span<uint8_t> out(bytes.data(), n);
+        Codec::encodeSlaveToMain(payload, out);
+        return slave_.writeInputProcessData(out);
     }
 
     std::optional<MainToSlavePayload> consume() const

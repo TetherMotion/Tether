@@ -103,7 +103,7 @@ bool Status::motionAllowed() const
 }
 
 void Codec::encodeMainToSlave(const Command& command,
-                              std::array<uint8_t, kMainToSlaveSize>& bytes)
+                              std::span<uint8_t> bytes)
 {
     uint16_t control_word0 = 0;
     uint16_t control_word1 = 0;
@@ -127,7 +127,7 @@ void Codec::encodeMainToSlave(const Command& command,
 }
 
 std::optional<Command> Codec::decodeMainToSlave(
-    const std::array<uint8_t, kMainToSlaveSize>& bytes)
+    std::span<const uint8_t> bytes)
 {
     Command command;
     const uint16_t control_word0 = readWord(bytes.data());
@@ -151,7 +151,7 @@ std::optional<Command> Codec::decodeMainToSlave(
 }
 
 void Codec::encodeSlaveToMain(const Status& status,
-                              std::array<uint8_t, kSlaveToMainSize>& bytes)
+                              std::span<uint8_t> bytes)
 {
     uint16_t status_word0 = 0;
     uint16_t status_word1 = 0;
@@ -187,11 +187,19 @@ void Codec::encodeSlaveToMain(const Status& status,
     writeWord(bytes.data() + 8, static_cast<uint16_t>(status.safe_velocity & 0xFFFF));
     writeWord(bytes.data() + 10, static_cast<uint16_t>((status.safe_velocity >> 16) & 0xFFFF));
     writeWord(bytes.data() + 12, static_cast<uint16_t>(status.safe_analog_input));
+    // LW2 frame variant: the "safe torque data" word is appended after
+    // the analog word (safe-data bytes 14-15).  Absent in LW1 (14 bytes).
+    if (bytes.size() >= kSlaveToMainSize) {
+        writeWord(bytes.data() + 14, static_cast<uint16_t>(status.safe_torque));
+    }
 }
 
 std::optional<Status> Codec::decodeSlaveToMain(
-    const std::array<uint8_t, kSlaveToMainSize>& bytes)
+    std::span<const uint8_t> bytes)
 {
+    if (bytes.size() < kSlaveToMainSizeLW1) {
+        return std::nullopt;
+    }
     Status status;
     const uint16_t status_word0 = readWord(bytes.data());
     const uint16_t status_word1 = readWord(bytes.data() + 2);
@@ -222,6 +230,10 @@ std::optional<Status> Codec::decodeSlaveToMain(
     status.safe_position = static_cast<int32_t>(position);
     status.safe_velocity = static_cast<int32_t>(velocity);
     status.safe_analog_input = static_cast<int16_t>(readWord(bytes.data() + 12));
+    // LW2 frame variant: safe torque data word (safe-data bytes 14-15).
+    if (bytes.size() >= kSlaveToMainSize) {
+        status.safe_torque = static_cast<int16_t>(readWord(bytes.data() + 14));
+    }
     return status;
 }
 
@@ -236,7 +248,7 @@ MainInstance::MainInstance(const MainConfig& config)
         cfg.watchdog_timeout_ms = config.watchdog_time_ms;
         cfg.conn_timeout_ms = 1000;
         cfg.safety_level = ::FSoE::SIL::SIL2;
-        cfg.input_size = static_cast<uint8_t>(Codec::kSlaveToMainSize);
+        cfg.input_size = PDO::fsoeSafeDataSize(config.frame_variant);
         cfg.output_size = static_cast<uint8_t>(Codec::kMainToSlaveSize);
         // The master MUST stay in Reset state, sending Reset(0x2A) frames
         // until the slave actually responds with a valid FSoE frame.
@@ -389,7 +401,9 @@ void MainInstance::clearPulseBits()
     slave_config.watchdogTimeoutMs = watchdog_time_ms;
     slave_config.connectionTimeoutMs = 1000;
     slave_config.sessionTimeoutMs = 5000;
-    slave_config.safeInputSize = static_cast<uint8_t>(Codec::kSlaveToMainSize);
+    slave_config.safeInputSize = safe_input_size_override != 0
+        ? safe_input_size_override
+        : PDO::fsoeSafeDataSize(frame_variant);
     slave_config.safeOutputSize = static_cast<uint8_t>(Codec::kMainToSlaveSize);
     slave_config.autoRecoveryEnabled = true;
     slave_config.recoveryDelayMs = 1000;

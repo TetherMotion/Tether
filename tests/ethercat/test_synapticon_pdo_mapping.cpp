@@ -228,6 +228,49 @@ TEST(SynapticonMultiPDOAssignmentTest, CombinedAssignmentSM3) {
 }
 
 // ============================================================================
+// Part 6b: FSoE frame variants — LW1 (31 B) vs LW2 (35 B)
+// ============================================================================
+
+TEST(SynapticonMultiPDOAssignmentTest, FSoEFrameVariantSizes) {
+    EXPECT_EQ(fsoeTxPDOSize(FSoEFrameVariant::LW1), 31u);
+    EXPECT_EQ(fsoeTxPDOSize(FSoEFrameVariant::LW2), 35u);
+    EXPECT_EQ(fsoeSafeDataSize(FSoEFrameVariant::LW1), 14u);
+    EXPECT_EQ(fsoeSafeDataSize(FSoEFrameVariant::LW2), 16u);
+    EXPECT_EQ(motionTxPDOOffset(FSoEFrameVariant::LW1), 31u);
+    EXPECT_EQ(motionTxPDOOffset(FSoEFrameVariant::LW2), 35u);
+    EXPECT_EQ(sm3CombinedSize(FSoEFrameVariant::LW1), 78u);
+    EXPECT_EQ(sm3CombinedSize(FSoEFrameVariant::LW2), 82u);
+    EXPECT_EQ(sizeof(SOMANET_TxPDO_1B00_LW1), 31u);
+    EXPECT_EQ(sizeof(SOMANET_TxPDO_1B00), 35u);
+}
+
+TEST(SynapticonMultiPDOAssignmentTest, FSoEAssignmentLW1) {
+    auto assignment = makeFSoEPDOAssignment(FSoEFrameVariant::LW1);
+    const auto& sm3 = assignment.sm_configs[1];
+    ASSERT_EQ(sm3.pdo_mappings.size(), 1u);
+    EXPECT_EQ(sm3.pdo_mappings[0].pdo_index, 0x1B00u);
+    EXPECT_EQ(sm3.pdo_mappings[0].size_bytes, 31u);
+}
+
+TEST(SynapticonMultiPDOAssignmentTest, CombinedAssignmentLW1) {
+    auto assignment = makeCombinedPDOAssignment(FSoEFrameVariant::LW1);
+    const auto& sm3 = assignment.sm_configs[1];
+    ASSERT_EQ(sm3.pdo_mappings.size(), 5u);
+    EXPECT_EQ(sm3.pdo_mappings[0].pdo_index, 0x1B00u);  // FSoE first
+    EXPECT_EQ(sm3.pdo_mappings[0].size_bytes, 31u);
+
+    uint16_t total = 0;
+    for (const auto& p : sm3.pdo_mappings) total += p.size_bytes;
+    EXPECT_EQ(total, 78u);  // 31 + 47
+}
+
+TEST(SynapticonMultiPDOAssignmentTest, CustomAssignmentFSoEIndicesLW1) {
+    auto assignment = makePDOAssignment({0x1700}, {0x1B00}, FSoEFrameVariant::LW1);
+    EXPECT_EQ(assignment.sm_configs[1].pdo_mappings[0].pdo_index, 0x1B00u);
+    EXPECT_EQ(assignment.sm_configs[1].pdo_mappings[0].size_bytes, 31u);
+}
+
+// ============================================================================
 // Part 7: Multi-PDO Assignment Builders — CST Mode
 // ============================================================================
 

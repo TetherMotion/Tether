@@ -13,7 +13,8 @@
  * │    0x1600 = 19 bytes, 0x1601 = 8 bytes, 0x1602 = 8 bytes            │
  * │    0x1A00 = 13 bytes, 0x1A01 = 12 bytes, 0x1A02 = 4 bytes,         │
  * │    0x1A03 = 18 bytes                                                │
- * │    0x1700 = 11 bytes (FSoE RxPDO), 0x1B00 = 35 bytes (FSoE TxPDO)  │
+ * │    0x1700 = 11 bytes (FSoE RxPDO)                                 │
+ * │    0x1B00 = 35 bytes (FSoE TxPDO, LW2) / 31 bytes (LW1 variant)   │
  * │                                                                      │
  * │  COMBINED PDO CONFIGURATION (FSoE + motion):                         │
  * │  ┌─────────────────────────────────────────────────────────────┐    │
@@ -242,6 +243,53 @@ struct SOMANET_RxPDO_1700 {
 static_assert(sizeof(SOMANET_RxPDO_1700) == 11, "SOMANET_RxPDO_1700 size mismatch");
 
 // ============================================================================
+// FSoE frame variants — LW1 (31 bytes) vs LW2 (35 bytes)
+// ============================================================================
+//
+// The Synapticon Safe Motion Module supports two TxPDO 0x1B00 wire layouts:
+//   LW1 (31 bytes): 7 CRC-interleaved safe-data words — no safe torque.
+//   LW2 (35 bytes): identical to LW1 plus a "safe torque data" word
+//                   (0x6616:00) and its CRC (CRC_7) appended before the
+//                   FSoE ConnectionID.
+// The variant is configured per slave in the drive's safety parameter set;
+// the master must use the matching frame size for the PDO assignment and
+// the FSoE connection's slave→master safe-data size (14 vs 16 bytes).
+enum class FSoEFrameVariant : uint8_t { LW1, LW2 };
+
+/// Flag-bit constants shared by the LW1 and LW2 TxPDO 0x1B00 layouts
+/// (the flag fields occupy the same offsets in both variants).
+struct SOMANET_TxPDO_1B00_Bits {
+    // Safety state flag bit positions
+    static constexpr uint16_t kSTOState        = 1u << 0;
+    static constexpr uint16_t kSOSState        = 1u << 3;
+    static constexpr uint16_t kErrorState      = 1u << 7;
+    static constexpr uint16_t kSS1State        = 1u << 8;
+    static constexpr uint16_t kSS2State        = 1u << 9;
+    static constexpr uint16_t kSLSInstance1    = 1u << 12;
+    static constexpr uint16_t kSLSInstance2    = 1u << 13;
+    static constexpr uint16_t kSLSInstance3    = 1u << 14;
+    static constexpr uint16_t kSLSInstance4    = 1u << 15;
+
+    // Diagnostic flag bit positions
+    static constexpr uint16_t kRestartAckReq       = 1u << 0;
+    static constexpr uint16_t kSBCState            = 1u << 1;
+    static constexpr uint16_t kTemperatureWarning  = 1u << 2;
+    static constexpr uint16_t kSafePositionValid   = 1u << 3;
+    static constexpr uint16_t kSafeSpeedValid      = 1u << 4;
+    static constexpr uint16_t kSafeTorqueValid     = 1u << 5;
+    static constexpr uint16_t kSafeTorqueSignValid = 1u << 6;
+    static constexpr uint16_t kSLTState            = 1u << 7;
+    static constexpr uint16_t kSafeInput1          = 1u << 8;
+    static constexpr uint16_t kSafeInput2          = 1u << 9;
+    static constexpr uint16_t kSafeInput3          = 1u << 10;
+    static constexpr uint16_t kSafeInput4          = 1u << 11;
+    static constexpr uint16_t kSafeOutputMonitor1  = 1u << 12;
+    static constexpr uint16_t kSafeOutputMonitor2  = 1u << 13;
+    static constexpr uint16_t kAnalogDiagActive    = 1u << 14;
+    static constexpr uint16_t kAnalogValueValid    = 1u << 15;
+};
+
+// ============================================================================
 // FSoE TxPDO 0x1B00 — Slave -> Master, 35 bytes (LW2 with safe torque)
 // Status (Drive to PLC) — FSoE safety status frame
 //
@@ -293,7 +341,7 @@ static_assert(sizeof(SOMANET_RxPDO_1700) == 11, "SOMANET_RxPDO_1700 size mismatc
 //   Bytes 33-34:  FSoE ConnectionID (16 bits)
 // ============================================================================
 
-struct SOMANET_TxPDO_1B00 {
+struct SOMANET_TxPDO_1B00 : SOMANET_TxPDO_1B00_Bits {
     uint8_t  fsoe_command;              ///< 0x6760:1 FSoE Command
     uint16_t safety_state_flags;        ///< Bit-packed: STO/SOS/SS1/SS2/SLS/Error
     uint16_t fsoe_crc_0;                ///< 0x6760:3 FSoE CRC_0
@@ -312,41 +360,75 @@ struct SOMANET_TxPDO_1B00 {
     uint16_t safe_torque_actual;        ///< 0x6616:00 Safe torque actual value (Status Word 7)
     uint16_t fsoe_crc_7;                ///< FSoE CRC_7 (Safe torque)
     uint16_t fsoe_connection_id;        ///< 0x6760:2 FSoE ConnectionID
-
-    // Safety state flag bit positions
-    static constexpr uint16_t kSTOState        = 1u << 0;
-    static constexpr uint16_t kSOSState        = 1u << 3;
-    static constexpr uint16_t kErrorState      = 1u << 7;
-    static constexpr uint16_t kSS1State        = 1u << 8;
-    static constexpr uint16_t kSS2State        = 1u << 9;
-    static constexpr uint16_t kSLSInstance1    = 1u << 12;
-    static constexpr uint16_t kSLSInstance2    = 1u << 13;
-    static constexpr uint16_t kSLSInstance3    = 1u << 14;
-    static constexpr uint16_t kSLSInstance4    = 1u << 15;
-
-    // Diagnostic flag bit positions
-    static constexpr uint16_t kRestartAckReq       = 1u << 0;
-    static constexpr uint16_t kSBCState            = 1u << 1;
-    static constexpr uint16_t kTemperatureWarning  = 1u << 2;
-    static constexpr uint16_t kSafePositionValid   = 1u << 3;
-    static constexpr uint16_t kSafeSpeedValid      = 1u << 4;
-    static constexpr uint16_t kSafeTorqueValid     = 1u << 5;
-    static constexpr uint16_t kSafeTorqueSignValid = 1u << 6;
-    static constexpr uint16_t kSLTState            = 1u << 7;
-    static constexpr uint16_t kSafeInput1          = 1u << 8;
-    static constexpr uint16_t kSafeInput2          = 1u << 9;
-    static constexpr uint16_t kSafeInput3          = 1u << 10;
-    static constexpr uint16_t kSafeInput4          = 1u << 11;
-    static constexpr uint16_t kSafeOutputMonitor1  = 1u << 12;
-    static constexpr uint16_t kSafeOutputMonitor2  = 1u << 13;
-    static constexpr uint16_t kAnalogDiagActive    = 1u << 14;
-    static constexpr uint16_t kAnalogValueValid    = 1u << 15;
 } __attribute__((packed));
 
 static_assert(sizeof(SOMANET_TxPDO_1B00) == 35, "SOMANET_TxPDO_1B00 size mismatch");
 
+// ============================================================================
+// FSoE TxPDO 0x1B00 — Slave -> Master, 31 bytes (LW1, no safe torque)
+// ============================================================================
+//
+// Identical to the LW2 layout minus the trailing "safe torque data" word
+// (0x6616:00) and its CRC (CRC_7): the FSoE ConnectionID directly follows
+// CRC_6.  All flag fields sit at the same offsets as in LW2.
+struct SOMANET_TxPDO_1B00_LW1 : SOMANET_TxPDO_1B00_Bits {
+    uint8_t  fsoe_command;              ///< 0x6760:1 FSoE Command
+    uint16_t safety_state_flags;        ///< Bit-packed: STO/SOS/SS1/SS2/SLS/Error
+    uint16_t fsoe_crc_0;                ///< 0x6760:3 FSoE CRC_0
+    uint16_t diagnostic_flags;          ///< Bit-packed: diag/safe I/O status
+    uint16_t fsoe_crc_1;                ///< 0x6760:4 FSoE CRC_1
+    uint16_t safe_position_single_turn; ///< 0x6611:11 Safe position single-turn value (Status Word 2)
+    uint16_t fsoe_crc_2;                ///< 0x6760:5 FSoE CRC_2
+    uint16_t safe_position_multi_turn;  ///< 0x6611:00 Safe position multiturn value (Status Word 3)
+    uint16_t fsoe_crc_3;                ///< 0x6760:6 FSoE CRC_3
+    uint16_t safe_velocity_low;         ///< 0x6613:00 Safe velocity part low (Status Word 4)
+    uint16_t fsoe_crc_4;                ///< 0x6760:7 FSoE CRC_4
+    uint16_t safe_velocity_high;        ///< 0x6613:00 Safe velocity part high (Status Word 5)
+    uint16_t fsoe_crc_5;                ///< 0x6760:8 FSoE CRC_5
+    uint16_t safe_analog_value;         ///< 0x2605:03 Safe scaled analog input (Status Word 6)
+    uint16_t fsoe_crc_6;                ///< 0x6760:9 FSoE CRC_6
+    uint16_t fsoe_connection_id;        ///< 0x6760:2 FSoE ConnectionID
+} __attribute__((packed));
+
+static_assert(sizeof(SOMANET_TxPDO_1B00_LW1) == 31, "SOMANET_TxPDO_1B00_LW1 size mismatch");
+
 static constexpr PDODescriptor RxPDO_1700 = { 0x1700, sizeof(SOMANET_RxPDO_1700) };
 static constexpr PDODescriptor TxPDO_1B00 = { 0x1B00, sizeof(SOMANET_TxPDO_1B00) };
+static constexpr PDODescriptor TxPDO_1B00_LW1 = { 0x1B00, sizeof(SOMANET_TxPDO_1B00_LW1) };
+
+// ============================================================================
+// FSoE frame-variant helpers
+// ============================================================================
+
+/// TxPDO 0x1B00 descriptor for the given frame variant (LW1=31B, LW2=35B).
+constexpr const PDODescriptor& fsoeTxPDO(FSoEFrameVariant variant) {
+    return variant == FSoEFrameVariant::LW2 ? TxPDO_1B00 : TxPDO_1B00_LW1;
+}
+
+/// Encoded FSoE TxPDO frame size in bytes (31 or 35).
+constexpr uint16_t fsoeTxPDOSize(FSoEFrameVariant variant) {
+    return fsoeTxPDO(variant).size;
+}
+
+/// Slave->master safe-data byte count carried inside the FSoE frame
+/// (excludes the command byte, CRCs and ConnectionID):
+/// LW1 = 14, LW2 = 16 (adds the 2-byte safe torque data).
+constexpr uint8_t fsoeSafeDataSize(FSoEFrameVariant variant) {
+    return variant == FSoEFrameVariant::LW2 ? 16 : 14;
+}
+
+/// Motion PDO offset within SM3 for a given frame variant
+/// (FSoE PDO comes first at offset 0).
+constexpr uint16_t motionTxPDOOffset(FSoEFrameVariant variant) {
+    return fsoeTxPDOSize(variant);
+}
+
+/// Combined SM3 length (FSoE + all motion PDOs) for a given frame variant.
+constexpr uint16_t sm3CombinedSize(FSoEFrameVariant variant) {
+    return static_cast<uint16_t>(
+        fsoeTxPDOSize(variant) + TxPDO_1A00.size + TxPDO_1A01.size +
+        TxPDO_1A02.size + TxPDO_1A03.size);
+}
 
 // ============================================================================
 // Sync Manager constants (from ESI Sm elements)
@@ -382,13 +464,15 @@ constexpr uint16_t kFSoERxPDOOffset = 0;
 constexpr uint16_t kMotionRxPDOOffset = RxPDO_1700.size;   // 11
 /// FSoE PDO offset within SM3 — FSoE comes FIRST (offset 0).
 constexpr uint16_t kFSoETxPDOOffset = 0;
-/// Motion PDO offset within SM3 (after FSoE TxPDO)
-constexpr uint16_t kMotionTxPDOOffset = TxPDO_1B00.size;   // 31
+/// Motion PDO offset within SM3 (after FSoE TxPDO) — LW2 variant.
+/// For LW1 use motionTxPDOOffset(FSoEFrameVariant::LW1) (31).
+constexpr uint16_t kMotionTxPDOOffset = TxPDO_1B00.size;   // 35
 
 /// Combined SM2 length: FSoE + motion PDOs
 constexpr uint16_t kSM2CombinedSize = RxPDO_1700.size + kSM2TotalSize;   // 11 + 35 = 46
-/// Combined SM3 length: FSoE + motion PDOs
-constexpr uint16_t kSM3CombinedSize = TxPDO_1B00.size + kSM3TotalSize;   // 31 + 47 = 78
+/// Combined SM3 length: FSoE + motion PDOs — LW2 variant.
+/// For LW1 use sm3CombinedSize(FSoEFrameVariant::LW1) (31 + 47 = 78).
+constexpr uint16_t kSM3CombinedSize = TxPDO_1B00.size + kSM3TotalSize;   // 35 + 47 = 82
 
 // ============================================================================
 // Multi-PDO Assignment Builders
@@ -447,10 +531,13 @@ inline Slave::MultiPDOAssignment makeStandardPDOAssignment() {
 
 /// Build a MultiPDOAssignment with only FSoE safety PDOs.
 /// SM2: 0x1700 (11 bytes)
-/// SM3: 0x1B00 (35 bytes)
+/// SM3: 0x1B00 (35 bytes for LW2, 31 bytes for LW1)
 ///
+/// @param fsoe_frame  FSoE status-frame variant the slave is configured
+///                    with (LW2 = safe torque data appended, LW1 = without).
 /// FSoE PDOs are written explicitly to 0x1C12/0x1C13 (fixed=false).
-inline Slave::MultiPDOAssignment makeFSoEPDOAssignment() {
+inline Slave::MultiPDOAssignment makeFSoEPDOAssignment(
+    FSoEFrameVariant fsoe_frame = FSoEFrameVariant::LW2) {
     Slave::MultiPDOAssignment assignment;
 
     // SM2 — FSoE Control (master -> slave)
@@ -469,7 +556,7 @@ inline Slave::MultiPDOAssignment makeFSoEPDOAssignment() {
     sm3.phys_start_addr = kSM3PhysAddr;
     sm3.control_byte = kSM3ControlByte;
     sm3.pdo_mappings = {
-        {TxPDO_1B00.index, TxPDO_1B00.size, false},   // not fixed — written explicitly
+        {fsoeTxPDO(fsoe_frame).index, fsoeTxPDOSize(fsoe_frame), false},   // not fixed — written explicitly
     };
     assignment.sm_configs.push_back(std::move(sm3));
 
@@ -487,12 +574,15 @@ inline Slave::MultiPDOAssignment makeFSoEPDOAssignment() {
 /// See: https://doc.synapticon.com/circulo_safe_motion/smm/ecat_fsoe_issues.htm
 ///
 /// SM2 (Rx): [0x1700 (11B)][0x1600 (19B)][0x1601 (8B)][0x1602 (8B)] = 46 bytes
-/// SM3 (Tx): [0x1B00 (35B)][0x1A00 (13B)][0x1A01 (12B)][0x1A02 (4B)][0x1A03 (18B)] = 82 bytes
+/// SM3 (Tx): [0x1B00 (35B LW2 / 31B LW1)][0x1A00 (13B)][0x1A01 (12B)][0x1A02 (4B)][0x1A03 (18B)] = 82 / 78 bytes
 ///
+/// @param fsoe_frame  FSoE status-frame variant the slave is configured
+///                    with (LW2 = safe torque data appended, LW1 = without).
 /// ALL PDOs (including FSoE) are written explicitly to 0x1C12/0x1C13.
 /// SM register length = totalLength() (all PDOs).
 /// FMMU length = totalLength() (all PDOs).
-inline Slave::MultiPDOAssignment makeCombinedPDOAssignment() {
+inline Slave::MultiPDOAssignment makeCombinedPDOAssignment(
+    FSoEFrameVariant fsoe_frame = FSoEFrameVariant::LW2) {
     Slave::MultiPDOAssignment assignment;
 
     // SM2 — FSoE Control + Outputs (master -> slave)
@@ -516,7 +606,7 @@ inline Slave::MultiPDOAssignment makeCombinedPDOAssignment() {
     sm3.phys_start_addr = kSM3PhysAddr;
     sm3.control_byte = kSM3ControlByte;
     sm3.pdo_mappings = {
-        {TxPDO_1B00.index, TxPDO_1B00.size, false},   // FSoE first (35B)
+        {fsoeTxPDO(fsoe_frame).index, fsoeTxPDOSize(fsoe_frame), false},   // FSoE first (35B LW2 / 31B LW1)
         {TxPDO_1A00.index, TxPDO_1A00.size, false},   // 13B
         {TxPDO_1A01.index, TxPDO_1A01.size, false},   // 12B
         {TxPDO_1A02.index, TxPDO_1A02.size, false},   // 4B
@@ -563,9 +653,11 @@ inline Slave::MultiPDOAssignment makeCSTModePDOAssignment() {
 ///
 /// @param rxpdo_indices  PDO indices to assign to SM2 (outputs)
 /// @param txpdo_indices  PDO indices to assign to SM3 (inputs)
+/// @param fsoe_frame     FSoE status-frame variant used for the 0x1B00 size
 inline Slave::MultiPDOAssignment makePDOAssignment(
     std::initializer_list<uint16_t> rxpdo_indices,
-    std::initializer_list<uint16_t> txpdo_indices) {
+    std::initializer_list<uint16_t> txpdo_indices,
+    FSoEFrameVariant fsoe_frame = FSoEFrameVariant::LW2) {
 
     Slave::MultiPDOAssignment assignment;
 
@@ -604,7 +696,7 @@ inline Slave::MultiPDOAssignment makePDOAssignment(
                 case 0x1A01: sz = TxPDO_1A01.size; break;
                 case 0x1A02: sz = TxPDO_1A02.size; break;
                 case 0x1A03: sz = TxPDO_1A03.size; break;
-                case 0x1B00: sz = TxPDO_1B00.size; break;
+                case 0x1B00: sz = fsoeTxPDOSize(fsoe_frame); break;
                 default: continue;  // skip unknown
             }
             sm3.pdo_mappings.push_back({idx, sz, false});  // fixed=false

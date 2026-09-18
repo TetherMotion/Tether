@@ -278,12 +278,18 @@ public:
     /// Uses makeCombinedPDOAssignment() (FSoE + CiA 402 PDOs, FSoE first).
     /// Does NOT enable the drive or disengage the brake — those are
     /// FSoE-gated and must be called after the FSoE state machine reaches Data.
+    /// @param fsoe_frame  FSoE status-frame variant the slave is configured
+    ///                    with (LW2 = 35-byte TxPDO with safe torque data,
+    ///                    LW1 = 31-byte TxPDO).
     /// @return true on success.
-    bool initCombined() {
+    bool initCombined(
+        SynapticonPDO::FSoEFrameVariant fsoe_frame =
+            SynapticonPDO::FSoEFrameVariant::LW2) {
         if (!resetToInit()) return false;
         if (!configureMailbox()) return false;
         if (!transitionToPreOp()) return false;
-        if (!configurePDOsAndOp(SynapticonPDO::makeCombinedPDOAssignment())) return false;
+        if (!configurePDOsAndOp(
+                SynapticonPDO::makeCombinedPDOAssignment(fsoe_frame))) return false;
         return true;
     }
 
