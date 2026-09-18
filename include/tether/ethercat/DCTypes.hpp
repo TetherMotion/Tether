@@ -29,6 +29,50 @@ struct SlaveTimeInfo {
     bool     dc_active;
 };
 
+/**
+ * @brief Latched per-port receive times of one slave (registers 0x0900-0x090F)
+ *
+ * Filled by a single broadcast latch frame so all values refer to the
+ * same EtherCAT frame. The port with the smallest non-zero receive time
+ * is the entry port (facing the master); every other port that saw the
+ * frame is a downstream port leading to a child subtree.
+ */
+struct DCPortInfo {
+    uint32_t recv_time_ns[4] = {};  ///< Latched receive time per port; 0 = port saw no frame
+    uint8_t  active_port_mask = 0;  ///< Bit p set => port p latched a non-zero receive time
+    int8_t   entry_port = -1;       ///< Upstream port (smallest recv time); -1 = unknown
+};
+
+/**
+ * @brief Position of one slave in the measured DC topology
+ *
+ * The EtherCAT position index (auto-increment order) defines the order in
+ * which frames reach slaves. The parent link and parent port describe
+ * which earlier slave forwards frames to this slave and through which of
+ * its ports — this is reconstructed from the latched receive times, so
+ * branched (multi-port) topologies are handled, not just linear chains.
+ */
+struct DCLinkInfo {
+    int16_t  parent = -1;          ///< Parent slave index; -1 = directly at the master
+    int8_t   parent_port = -1;     ///< Downstream port on the parent leading to this slave
+    uint32_t link_delay_ns = 0;    ///< Measured one-way delay parent -> this slave
+    uint32_t subtree_time_ns = 0;  ///< Time the latch frame spent inside this slave's subtree
+    uint32_t total_delay_ns = 0;   ///< Accumulated delay from the reference clock (written to 0x0928)
+    bool     timing_valid = false; ///< Receive-time registers could be read and were non-zero
+};
+
+/**
+ * @brief Measured DC topology of the whole segment
+ *
+ * Filled during initialize() by the propagation-delay measurement.
+ * Exposed read-only via EtherCATDC::topology() for diagnostics and tests.
+ */
+struct DCTopology {
+    DCPortInfo ports[kMaxDCSlaves];
+    DCLinkInfo links[kMaxDCSlaves];
+    int16_t    reference = -1;     ///< Index of the DC reference clock slave; -1 = none
+};
+
 struct DCLoopStats {
     uint64_t cycle_count;
     uint64_t sync_count;

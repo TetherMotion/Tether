@@ -304,46 +304,62 @@ bool EtherCATDC::initialize() {
 
         if (readSlaveCapabilities(i)) {
             dc_capable_count++;
-
-            // Calculate propagation delay
-            if (!calcPropagationDelay(i)) {
-                TETHER_LOGW(TAG, "Slave[{}]: propagation delay calculation failed", i);
-            }
-
-            // Calculate offset from master
-            const uint64_t master_time = getMasterTimeNs();
-            slaves_[i].offset_to_master_ns =
-                static_cast<int64_t>(slaves_[i].system_time_ns) - static_cast<int64_t>(master_time);
-
-            if (dc_debug_) {
-                TETHER_LOGI(TAG, "Slave[{}]: offset={} ns, delay={} ns",
-                         i, (long long)slaves_[i].offset_to_master_ns,
-                         slaves_[i].propagation_delay_ns);
-            }
-            
-            // Write system time offset
-            if (!writeSystemTimeOffset(i, -slaves_[i].offset_to_master_ns)) {
-                TETHER_LOGW(TAG, "Slave[{}]: failed to write time offset", i);
-            }
-            
-            // Configure SYNC signals
-            if (!configureSyncSignals(i)) {
-                TETHER_LOGW(TAG, "Slave[{}]: SYNC configuration failed", i);
-            }
         } else {
             TETHER_LOGW(TAG, "Slave[{}]: DC capability read failed or not supported", i);
         }
     }
-    
+
     if (dc_debug_) {
         TETHER_LOGI(TAG, "Found {} DC-capable slaves out of {} total",
                  dc_capable_count, slave_count_);
     }
-    
+
     if (dc_capable_count == 0) {
         TETHER_LOGW(TAG, "No DC-capable slaves found, DC sync disabled");
         state_.store(DCState::Disabled, std::memory_order_release);
         return false;
+    }
+
+    // Select the DC reference clock: the first DC-capable slave in the
+    // chain. All other slaves are synchronized to the same time base;
+    // the reference slave is also the address target for the broadcast
+    // sync datagram (it is reached first by every frame).
+    reference_slave_ = -1;
+    for (uint16_t i = 0; i < slave_count_; i++) {
+        if (slaves_[i].dc_supported) { reference_slave_ = static_cast<int16_t>(i); break; }
+    }
+
+    // Measure propagation delays from the ESC receive-time registers and
+    // program each slave's System Time Transmission Delay (0x0928).
+    if (!measurePropagationDelays()) {
+        TETHER_LOGW(TAG, "Propagation delay measurement failed, using fallback estimates");
+    }
+    for (uint16_t i = 0; i < slave_count_; i++) {
+        if (!slaves_[i].dc_supported) continue;
+        writeSystemTimeDelay(i, slaves_[i].propagation_delay_ns);
+    }
+
+    // Program each slave's System Time Offset (0x0920) so that all DC
+    // system times equal the master clock.
+    for (uint16_t i = 0; i < slave_count_; i++) {
+        if (!slaves_[i].dc_supported) continue;
+        if (!programSystemTimeOffset(i)) {
+            TETHER_LOGW(TAG, "Slave[{}]: failed to write time offset", i);
+        }
+    }
+
+    // Configure SYNC signals last: the start time is programmed before
+    // the sync unit is activated (see configureSyncSignals).
+    for (uint16_t i = 0; i < slave_count_; i++) {
+        if (!slaves_[i].dc_supported) continue;
+        if (dc_debug_) {
+            TETHER_LOGI(TAG, "Slave[{}]: offset={} ns, delay={} ns",
+                     i, (long long)slaves_[i].offset_to_master_ns,
+                     slaves_[i].propagation_delay_ns);
+        }
+        if (!configureSyncSignals(i)) {
+            TETHER_LOGW(TAG, "Slave[{}]: SYNC configuration failed", i);
+        }
     }
 
     // Initialization succeeded; remain stopped until start() is called.
@@ -384,13 +400,274 @@ bool EtherCATDC::readSlaveCapabilities(uint16_t slave_index) {
     return info.dc_supported;
 }
 
-bool EtherCATDC::calcPropagationDelay(uint16_t slave_index) {
+// ============================================================================
+// Propagation-delay measurement and topology reconstruction
+// ============================================================================
+//
+// A single broadcast write to the Receive Time register block (0x0900)
+// makes every ESC latch the local receive time of each of its ports for
+// that same frame. The latched snapshots are read back per slave and
+// used to reconstruct the physical topology and per-link delays:
+//
+// - The port with the smallest non-zero receive time is the entry port
+//   (facing the master). Every other port that saw the frame is a
+//   downstream port: the frame returned through it after visiting the
+//   attached child subtree.
+// - Each downstream port of a slave is claimed by exactly one direct
+//   child. Because position indices follow frame order, a child's parent
+//   is always the nearest preceding slave that still has an unclaimed
+//   downstream port. Children attach in ascending port order.
+// - For slave i attached to parent p via parent port pp:
+//     dt3 = rt[p][pp] - rt[p][prev(p,pp)]   round-trip through i's subtree
+//     dt1 = max rt[i] - rt[i][entry]       time spent inside i's subtree
+//     dt2 = rt[p][prev] - rt[p][entry(p)]  time consumed by earlier
+//                                          sibling subtrees of p
+//     delay(i) = delay(p) + dt2 + (dt3 - dt1) / 2
+//   where prev(p,pp) is the port visited just before pp on p (the entry
+//   port for a first child). All differences use wrapping int32 math.
+//
+// Slaves whose receive-time registers cannot be read keep the topology
+// intact: they are assumed to forward on a single implicit downstream
+// port and contribute a small fixed estimate.
+
+namespace {
+
+/// Fallback per-link delay when registers cannot be measured (ns).
+constexpr uint32_t kFallbackLinkDelayNs = 150;
+
+/// Wrapping 32-bit time difference (receive-time registers are 32-bit).
+inline int32_t rt_diff(uint32_t a, uint32_t b) {
+    return static_cast<int32_t>(a - b);
+}
+
+} // namespace
+
+bool EtherCATDC::measurePropagationDelays() {
+    if (reference_slave_ < 0) {
+        return false;
+    }
+    topology_ = DCTopology{};
+    topology_.reference = reference_slave_;
+
+    // Latch all port receive times at the same instant across the chain.
+    const uint8_t latch[4] = {0, 0, 0, 0};
+    transport_.sendSyncDatagram(static_cast<uint16_t>(reference_slave_),
+                              toUInt16(DCRegisters::DCRecvTimes),
+                              latch, sizeof(latch));
+
+    // ---- Phase 1: read latched port times, find entry/active ports ----
+    for (uint16_t i = 0; i < slave_count_; i++) {
+        DCPortInfo& pi = topology_.ports[i];
+        DCLinkInfo& li = topology_.links[i];
+
+        uint32_t rt[4] = {0, 0, 0, 0};
+        if (transport_.readRegister(i, toUInt16(DCRegisters::DCRecvTimes),
+                                    rt, sizeof(rt), 200)) {
+            for (int p = 0; p < 4; p++) {
+                pi.recv_time_ns[p] = rt[p];
+                if (rt[p] != 0) pi.active_port_mask |= static_cast<uint8_t>(1u << p);
+            }
+        }
+        li.timing_valid = (pi.active_port_mask != 0);
+        if (!li.timing_valid) {
+            TETHER_LOGW(TAG, "Slave[{}]: receive times unreadable, "
+                        "assuming single downstream port", i);
+        }
+
+        // Entry port = active port with the earliest receive time.
+        int entry = -1;
+        for (int p = 0; p < 4; p++) {
+            if (!(pi.active_port_mask & (1u << p))) continue;
+            if (entry < 0 || rt_diff(rt[p], rt[entry]) < 0) entry = p;
+        }
+        pi.entry_port = static_cast<int8_t>(entry >= 0 ? entry : 0);
+    }
+
+    // Downstream ports of slave s: active ports other than the entry
+    // port. Their visit order is the ascending order of the latched
+    // receive times (the frame returns through them one subtree after
+    // another). Slaves with unreadable timing get one implicit port so
+    // a linear chain behind them stays connected.
+    auto downstream_ports = [this](uint16_t s, int* out) -> int {
+        const DCPortInfo& pi = topology_.ports[s];
+        if (!topology_.links[s].timing_valid) {
+            out[0] = 1; // virtual port
+            return 1;
+        }
+        int n = 0;
+        for (int p = 0; p < 4; p++) {
+            if (p == pi.entry_port) continue;
+            if (pi.active_port_mask & (1u << p)) out[n++] = p;
+        }
+        // sort by latched receive time (insertion sort, n <= 3)
+        for (int a = 1; a < n; a++) {
+            const int port = out[a];
+            int b = a;
+            while (b > 0 && rt_diff(pi.recv_time_ns[port],
+                                    pi.recv_time_ns[out[b - 1]]) < 0) {
+                out[b] = out[b - 1];
+                --b;
+            }
+            out[b] = port;
+        }
+        return n;
+    };
+
+    // ---- Phase 2: assign parents --------------------------------------
+    // claimed[s] = how many downstream ports of s are already taken.
+    uint8_t claimed[kMaxDCSlaves] = {};
+    for (uint16_t i = 1; i < slave_count_; i++) {
+        int16_t parent = -1;
+        for (int16_t j = static_cast<int16_t>(i) - 1; j >= 0; j--) {
+            int ports[3];
+            const int n = downstream_ports(static_cast<uint16_t>(j), ports);
+            if (claimed[j] < n) {
+                parent = j;
+                topology_.links[i].parent_port =
+                    static_cast<int8_t>(ports[claimed[j]]);
+                claimed[j]++;
+                break;
+            }
+        }
+        topology_.links[i].parent = parent;
+        if (parent < 0) {
+            TETHER_LOGW(TAG, "Slave[{}]: no parent port found, "
+                        "topology broken", i);
+        }
+    }
+
+    // ---- Phase 3: per-link and accumulated delays ---------------------
+    for (uint16_t i = 0; i < slave_count_; i++) {
+        DCLinkInfo& li = topology_.links[i];
+        const DCPortInfo& pi = topology_.ports[i];
+
+        // Time the latch frame spent inside this slave's subtree
+        // (entry port -> return through the last downstream port).
+        if (li.timing_valid) {
+            uint32_t rt_max = pi.recv_time_ns[pi.entry_port];
+            for (int p = 0; p < 4; p++) {
+                if ((pi.active_port_mask & (1u << p)) &&
+                    rt_diff(pi.recv_time_ns[p], rt_max) > 0) {
+                    rt_max = pi.recv_time_ns[p];
+                }
+            }
+            li.subtree_time_ns = static_cast<uint32_t>(
+                std::max<int32_t>(0, rt_diff(rt_max, pi.recv_time_ns[pi.entry_port])));
+        }
+
+        const int16_t parent = li.parent;
+        const uint32_t parent_delay =
+            (parent >= 0) ? topology_.links[parent].total_delay_ns : 0;
+
+        if (parent < 0) {
+            li.total_delay_ns = 0;
+        } else if (!li.timing_valid ||
+                   !topology_.links[parent].timing_valid) {
+            li.link_delay_ns = kFallbackLinkDelayNs;
+            li.total_delay_ns = parent_delay + kFallbackLinkDelayNs;
+        } else {
+            const DCPortInfo& pp = topology_.ports[parent];
+            const int pport = li.parent_port;
+
+            // Port visited just before pport on the parent: the active
+            // port with the largest receive time below rt[pport].
+            int prev = pp.entry_port;
+            for (int p = 0; p < 4; p++) {
+                if (p == pport || !(pp.active_port_mask & (1u << p))) continue;
+                if (rt_diff(pp.recv_time_ns[p], pp.recv_time_ns[pport]) < 0 &&
+                    rt_diff(pp.recv_time_ns[p], pp.recv_time_ns[prev]) > 0) {
+                    prev = p;
+                }
+            }
+
+            const int32_t dt3 = rt_diff(pp.recv_time_ns[pport],
+                                        pp.recv_time_ns[prev]);
+            const int32_t dt1 = static_cast<int32_t>(li.subtree_time_ns);
+            const int32_t dt2 = (prev != pp.entry_port)
+                ? rt_diff(pp.recv_time_ns[prev], pp.recv_time_ns[pp.entry_port])
+                : 0;
+
+            int32_t wire = (dt3 - dt1) / 2;
+            if (wire < 0) wire = 0;
+            li.link_delay_ns = static_cast<uint32_t>(wire);
+            li.total_delay_ns = parent_delay +
+                static_cast<uint32_t>(std::max<int32_t>(0, dt2)) +
+                li.link_delay_ns;
+        }
+
+        if (dc_debug_) {
+            TETHER_LOGI(TAG, "Slave[{}]: parent={} port={} entry={} "
+                        "link={} ns subtree={} ns total={} ns",
+                     i, li.parent, li.parent_port, pi.entry_port,
+                     li.link_delay_ns, li.subtree_time_ns, li.total_delay_ns);
+        }
+    }
+
+    // ---- Phase 4: normalize to the reference clock ---------------------
+    // 0x0928 holds the transmission delay from the DC reference clock to
+    // the slave. Delays computed above are relative to the first slave;
+    // rebase them on the reference. Slaves upstream of the reference get
+    // 0 (they see the frame earlier; unsigned register, residual bias is
+    // absorbed by the ESC drift compensation).
+    const uint32_t ref_delay = topology_.links[reference_slave_].total_delay_ns;
+    for (uint16_t i = 0; i < slave_count_; i++) {
+        const int32_t rel = rt_diff(topology_.links[i].total_delay_ns, ref_delay);
+        topology_.links[i].total_delay_ns =
+            static_cast<uint32_t>(std::max<int32_t>(0, rel));
+        slaves_[i].propagation_delay_ns = topology_.links[i].total_delay_ns;
+    }
+    return true;
+}
+
+bool EtherCATDC::writeSystemTimeDelay(uint16_t slave_index, uint32_t delay_ns) {
     if (slave_index >= slave_count_) {
         return false;
     }
-    
-    slaves_[slave_index].propagation_delay_ns = (slave_index == 0) ? 0 : 150 * slave_index;
-    return true;
+    uint32_t delay_le = host_to_le32(delay_ns);
+    return transport_.writeRegister(slave_index, toUInt16(DCRegisters::DCSysTxTime),
+                                    &delay_le, sizeof(delay_le), 200);
+}
+
+// Program 0x0920 so the slave's system time equals the master clock.
+// The value read from 0x0910 already includes whatever offset is
+// currently programmed, so the old 0x0920 offset must be subtracted
+// first — otherwise a stale offset from a previous run produces a wrong
+// new offset (and a saturated System Time Difference register).
+bool EtherCATDC::programSystemTimeOffset(uint16_t slave_index) {
+    if (slave_index >= slave_count_) {
+        return false;
+    }
+
+    uint8_t sys_bytes[8] = {0};
+    if (!transport_.readRegister(slave_index, toUInt16(DCRegisters::DCSysTime),
+                                 sys_bytes, sizeof(sys_bytes), 200)) {
+        return false;
+    }
+    uint64_t sys_time = 0;
+    for (int j = 7; j >= 0; j--) {
+        sys_time = (sys_time << 8) | sys_bytes[j];
+    }
+
+    int64_t old_offset = 0;
+    uint8_t off_bytes[8] = {0};
+    if (transport_.readRegister(slave_index, toUInt16(DCRegisters::DCSysOffset),
+                                off_bytes, sizeof(off_bytes), 200)) {
+        uint64_t off_u = 0;
+        for (int j = 7; j >= 0; j--) {
+            off_u = (off_u << 8) | off_bytes[j];
+        }
+        old_offset = static_cast<int64_t>(off_u);
+    }
+
+    // local time = system time - old offset; new offset = master - local
+    const int64_t local_time = static_cast<int64_t>(sys_time) - old_offset;
+    const uint64_t master_time = getMasterTimeNs();
+    const int64_t new_offset = static_cast<int64_t>(master_time) - local_time;
+
+    slaves_[slave_index].offset_to_master_ns = local_time - static_cast<int64_t>(master_time);
+    slaves_[slave_index].system_time_ns = sys_time;
+
+    return writeSystemTimeOffset(slave_index, new_offset);
 }
 
 bool EtherCATDC::writeSystemTimeOffset(uint16_t slave_index, int64_t offset) {
@@ -428,54 +705,61 @@ bool EtherCATDC::writeRegister(uint16_t slave_index, DCRegisters reg, const void
 }
 
 
-bool EtherCATDC::updateSyncStartTime() {
-    for (uint16_t i = 0; i < slave_count_; i++) {
-        if (!slaves_[i].dc_supported || !slaves_[i].dc_active) continue;
+// Program the SYNC0 start time of a single slave. Called BEFORE the
+// sync unit is activated so the ESC never generates SYNC pulses from a
+// stale start time, and so configuring one slave never rewrites the
+// start times of previously configured slaves.
+bool EtherCATDC::updateSyncStartTime(uint16_t slave_index) {
+    if (slave_index >= slave_count_ || !slaves_[slave_index].dc_supported) {
+        return false;
+    }
 
-        // Read the slave's current local DC System Time
-        uint8_t sysTime[8] = {0};
-        if (!transport_.readRegister(i, toUInt16(DCRegisters::DCSysTime), sysTime, sizeof(sysTime), 200)) {
-            TETHER_LOGW(TAG, "Slave[{}]: Failed to read DC SysTime", i);
-            continue;
-        }
+    // Read the slave's current local DC System Time
+    uint8_t sysTime[8] = {0};
+    if (!transport_.readRegister(slave_index, toUInt16(DCRegisters::DCSysTime),
+                                 sysTime, sizeof(sysTime), 200)) {
+        TETHER_LOGW(TAG, "Slave[{}]: Failed to read DC SysTime", slave_index);
+        return false;
+    }
 
-        uint64_t slave_time = 0;
-        for (int j = 7; j >= 0; j--) {
-            slave_time = (slave_time << 8) | sysTime[j];
-        }
+    uint64_t slave_time = 0;
+    for (int j = 7; j >= 0; j--) {
+        slave_time = (slave_time << 8) | sysTime[j];
+    }
 
-        // Set start time = current slave time + 10 cycle times (well in the future)
-        uint64_t start_time = slave_time + config_.sync0_cycle_time_ns * 10;
+    // Set start time = current slave time + 10 cycle times (well in the future)
+    uint64_t start_time = slave_time + config_.sync0_cycle_time_ns * 10;
 
-        // Align to cycle boundary
-        if (config_.sync0_cycle_time_ns > 0) {
-            start_time = ((start_time / config_.sync0_cycle_time_ns) + 1)
-                         * config_.sync0_cycle_time_ns;
-        }
+    // Align to cycle boundary
+    if (config_.sync0_cycle_time_ns > 0) {
+        start_time = ((start_time / config_.sync0_cycle_time_ns) + 1)
+                     * config_.sync0_cycle_time_ns;
+    }
 
-        // Apply SYNC0 shift (offset from cycle boundary)
-        if (config_.sync0_shift_ns > 0) {
-            start_time += static_cast<uint64_t>(config_.sync0_shift_ns);
-        }
+    // Apply SYNC0 shift (offset from cycle boundary)
+    if (config_.sync0_shift_ns > 0) {
+        start_time += static_cast<uint64_t>(config_.sync0_shift_ns);
+    }
 
-        uint8_t start_bytes[8];
-        uint64_t st = start_time;
-        for (int j = 0; j < 8; j++) {
-            start_bytes[j] = static_cast<uint8_t>(st & 0xFF);
-            st >>= 8;
-        }
+    uint8_t start_bytes[8];
+    uint64_t st = start_time;
+    for (int j = 0; j < 8; j++) {
+        start_bytes[j] = static_cast<uint8_t>(st & 0xFF);
+        st >>= 8;
+    }
 
-        if (!transport_.writeRegister(i, toUInt16(DCRegisters::DCStart0),
-                                       start_bytes, sizeof(start_bytes), 200)) {
-            TETHER_LOGW(TAG, "Slave[{}]: Failed to write SYNC0 start time", i);
-            continue;
-        }
+    if (!transport_.writeRegister(slave_index, toUInt16(DCRegisters::DCStart0),
+                                   start_bytes, sizeof(start_bytes), 200)) {
+        TETHER_LOGW(TAG, "Slave[{}]: Failed to write SYNC0 start time", slave_index);
+        return false;
+    }
 
-        if (dc_debug_) {
-            TETHER_LOGI(TAG, "Slave[{}]: SYNC0 start={} (delta={} ns)",
-                     i, (unsigned long long)start_time,
-                     (unsigned long long)(start_time - slave_time));
-        }
+    slaves_[slave_index].sync0_start_time_ns = start_time;
+
+    if (dc_debug_) {
+        TETHER_LOGI(TAG, "Slave[{}]: SYNC0 start={} (delta={} ns)",
+                 slave_index, (unsigned long long)start_time,
+                 (unsigned long long)(start_time - slave_time));
     }
     return true;
 }
@@ -503,31 +787,35 @@ bool EtherCATDC::configureSyncSignals(uint16_t slave_index) {
                                   &cycle1_le, sizeof(cycle1_le), 200);
     }
 
-    // Activate SYNC with the configured signals and Auto-Activation bit set.
+    // Program the SYNC start time while the sync unit is still disabled.
+    updateSyncStartTime(slave_index);
+
+    // Activate SYNC last, with the configured signals and Auto-Activation
+    // bit set — cyclic operation begins when system time reaches the
+    // programmed start time.
     transport_.writeRegister(slave_index, toUInt16(DCRegisters::DCSyncAct),
                               &sync_act, sizeof(sync_act), 200);
 
-    // Mark active BEFORE writing start time (updateSyncStartTime checks dc_active)
     slaves_[slave_index].dc_active = true;
-
-    // Set the SYNC0 start time AFTER activating the sync unit.
-    updateSyncStartTime();
 
     return true;
 }
 
 bool EtherCATDC::sendSyncFrame() {
-    const uint64_t master_ns = getMasterTimeNs();
-    bool all_ok = true;
-    for (uint16_t i = 0; i < slave_count_; i++) {
-        if (slaves_[i].dc_supported && slaves_[i].dc_active) {
-            if (!transport_.sendSyncDatagram(i, toUInt16(DCRegisters::DCSysTime),
-                                              &master_ns, sizeof(master_ns))) {
-                all_ok = false;
-            }
-        }
+    if (reference_slave_ < 0) {
+        return false;
     }
-    return all_ok;
+    const uint64_t master_ns = getMasterTimeNs();
+    // A single broadcast (BWR) datagram reaches every slave in one pass.
+    // Each DC slave compares the transmitted time plus its programmed
+    // transmission delay (0x0928) against its local system time; the
+    // resulting System Time Difference (0x092C) drives the ESC's own
+    // drift compensation. Sending separate per-slave datagrams with one
+    // host timestamp would ignore each slave's position in the chain
+    // and the frame's propagation through it.
+    return transport_.sendSyncDatagram(static_cast<uint16_t>(reference_slave_),
+                                       toUInt16(DCRegisters::DCSysTime),
+                                       &master_ns, sizeof(master_ns));
 }
 
 void EtherCATDC::readSyncConfig(uint16_t slave_index) {
