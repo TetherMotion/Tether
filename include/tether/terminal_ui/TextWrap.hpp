@@ -32,5 +32,11 @@ inline std::vector<std::string> wrapText(const std::string& text, int width) {
     return lines;
 }
 
+/// Pad or truncate a string to a fixed display width (byte count).
+inline std::string padToWidth(const std::string& s, size_t w) {
+    if (s.size() >= w) return s.substr(0, w);
+    return s + std::string(w - s.size(), ' ');
+}
+
 } // namespace TUI
 } // namespace Tether
