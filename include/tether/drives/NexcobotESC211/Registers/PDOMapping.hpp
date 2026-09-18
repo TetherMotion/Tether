@@ -17,7 +17,7 @@ namespace PDOMapping {
 static constexpr uint16_t RxPDOMapFSOEIndex        = 0x1600;
 static constexpr uint16_t RxPDOMapIndex            = 0x1601;
 static constexpr uint16_t RxPDOMapFSoE0Index       = 0x1610;
-static constexpr uint16_t RxPDOMapFSoE7Index       = 0x1617;
+static constexpr uint16_t RxPDOMapFSoE31Index      = 0x162F;
 
 // 0x1600: RxPDO-Map_FSOE (16 mapping entries)
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry RxPDOMapFSOECount = {
@@ -35,42 +35,43 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry RxPDOMapFSOECount 
     .comment = "Number of mapped objects in RxPDO-Map_FSOE (0x1600)",
 };
 
-// 0x1601: RxPDO-Map (8 mapping entries)
+// 0x1601: RxPDO-Map (2 mapping entries: OutputCounter + SAFE_DO)
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry RxPDOMapCount = {
     .index = RxPDOMapIndex,
     .subindex = 0x00,
     .name = "RxPDO-Map number of entries",
     .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
-    .default_value = 8,
+    .default_value = 2,
     .unit = Unit_None,
     .options_enum = nullptr,
     .min_value = 0,
-    .max_value = 8,
+    .max_value = 2,
     .modification_mode = ModificationMode::DuringOperation,
     .effective_time = EffectiveTime::Immediately,
     .comment = "Number of mapped objects in RxPDO-Map (0x1601)",
 };
 
-// 0x1610-0x1617: RxPDO-Map-FSoE0..FSoE7 (18 mapping entries each)
+// 0x1610-0x162F: RxPDO-Map-FSoE0..FSoE31 (2 mapping entries each:
+// 0x6000:1 (248b) + 0x6000:2 (96b) = 344b / 43B per ESI v0.9)
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry RxPDOMapFSoECount = {
     .index = RxPDOMapFSoE0Index,
     .subindex = 0x00,
     .name = "RxPDO-Map-FSoE number of entries",
     .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
-    .default_value = 18,
+    .default_value = 2,
     .unit = Unit_None,
     .options_enum = nullptr,
     .min_value = 0,
-    .max_value = 18,
+    .max_value = 2,
     .modification_mode = ModificationMode::DuringOperation,
     .effective_time = EffectiveTime::Immediately,
-    .comment = "Number of mapped objects in RxPDO-Map-FSoE (0x1610-0x1617)",
+    .comment = "Number of mapped objects in RxPDO-Map-FSoE (0x1610-0x162F)",
 };
 
 // Subindex helpers for RxPDO mapping entries (each entry is Unsigned32)
 static constexpr uint8_t kRxPDOMapMaxEntriesFSOE   = 16;
-static constexpr uint8_t kRxPDOMapMaxEntries       = 8;
-static constexpr uint8_t kRxPDOMapMaxEntriesFSoE = 18;
+static constexpr uint8_t kRxPDOMapMaxEntries       = 2;
+static constexpr uint8_t kRxPDOMapMaxEntriesFSoE   = 2;
 
 // ---------------------------------------------------------------------------
 // TxPDO Mapping Objects
@@ -81,7 +82,7 @@ static constexpr uint16_t TxPDOMapIndex            = 0x1A01;
 static constexpr uint16_t TxPDORSAPInfoIndex       = 0x1A02;
 static constexpr uint16_t TxPDORSAPDebugIndex     = 0x1A03;
 static constexpr uint16_t TxPDOMapFSoE0Index       = 0x1A10;
-static constexpr uint16_t TxPDOMapFSoE7Index       = 0x1A17;
+static constexpr uint16_t TxPDOMapFSoE31Index      = 0x1A2F;
 
 // 0x1A00: TxPDO-Map-FSoE (16 mapping entries)
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry TxPDOMapFSOECount = {
