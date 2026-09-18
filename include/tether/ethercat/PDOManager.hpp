@@ -155,6 +155,19 @@ struct PDOEntry {
     uint32_t success_count;
 };
 
+/// Logical placement of one enabled PDO entry within the process image,
+/// using the layout of the logical LRW exchange.  Lets a caller compose
+/// partial-read slices (e.g. group the FSoE PDOs apart from the RSAP/debug
+/// PDOs) without knowing the internal address map.
+struct LogicalEntrySlice {
+    size_t       entry_index{0};   ///< index into PDOMapping
+    uint16_t     slave_index{0};
+    uint16_t     pdo_index{0};
+    PDODirection direction{PDODirection::RxPDO};
+    uint32_t     offset{0};        ///< byte offset from the base logical address
+    uint16_t     length{0};
+};
+
 // ============================================================================
 // PDO Mapping Manager (value type – no transport dependency)
 // ============================================================================
@@ -332,6 +345,10 @@ public:
     /// @return true if cancellation has been requested (e.g. during shutdown).
     /// Used by callers to suppress error logging when failures are expected.
     virtual bool isCancelRequested() const { return false; }
+
+    /// Maximum EtherCAT payload bytes that fit in one Ethernet frame,
+    /// including per-datagram overhead.  Used to size partial LRW slices.
+    virtual size_t maxEtherCATPayloadPerFrame() const { return 1498; }
 };
 
 // ============================================================================
@@ -403,6 +420,19 @@ public:
     // For LRW mode, sendAll() does the full atomic exchange; receiveAll() is a no-op.
     bool sendAll();
     bool receiveAll();
+
+    // ----- Partial LRW exchange (logical-address slices) -----
+    // Requires a logical address manager (setLogicalAddressManager()).
+    // Allows a process image larger than one Ethernet frame to be exchanged
+    // as several datagrams (partial reads) instead of splitting a frame —
+    // e.g. a FSoE region and a separate RSAP/debug region.  These bypass the
+    // sendAll()/receiveAll() split state (they are self-contained atomic
+    // LRW exchanges).
+    bool exchangeLRWSlice(uint32_t offset, uint32_t length);
+    /// Maximum slice length that fits one LRW datagram (0 if unavailable).
+    uint32_t maxLogicalSliceLength() const;
+    /// Logical placement of every enabled PDO entry (empty if unavailable).
+    std::vector<PDO::LogicalEntrySlice> describeLogicalEntries() const;
 
     // ----- Callback mode (Mode 3) -----
     // Per-entry callbacks fire during sendAll()/receiveAll() on the calling thread.

@@ -332,3 +332,40 @@ cmake --build build --target tether_ethercat_supervisor_tests -j8
 - `src/profiles/cia402/DS402Master.cpp` — DS402 integration + recovery handler
 - `tests/ethercat/test_slave_supervisor.cpp` — Unit tests (32 tests)
 
+
+## Partial LRW exchange (logical-address slices)
+
+A process image larger than one Ethernet frame cannot be sent as a single
+LRW datagram.  Instead of splitting the frame, the logical address space can
+be exchanged in contiguous **slices**, each a separate LRW datagram:
+
+- `LogicalAddressManager::exchangeLRWSlice(mapping, offset, length)` — LRW
+  over `[offset, offset+length)` from the base logical address; only PDO
+  entries intersecting the slice are written (RxPDO) / updated (TxPDO).
+- `LogicalAddressManager::describeEntries(mapping)` — logical placement
+  (`offset`/`length`/`pdo_index`/`direction`) of every enabled entry.
+- `LogicalAddressManager::maxSliceLength()` — largest slice fitting one
+  datagram (`maxEtherCATPayloadPerFrame() - 12`).
+- `PDOManager::exchangeLRWSlice()` / `describeLogicalEntries()` /
+  `maxLogicalSliceLength()` — the same through the PDO manager facade
+  (requires `setLogicalAddressManager()`; `exchangeLRWSlice()` keeps the
+  per-slave request/reply counters that the OP-transition check reads).
+
+`IPDOTransport::maxEtherCATPayloadPerFrame()` (default 1498) reports the
+frame capacity; `MasterPDOTransport` overrides it from the `Master`.
+
+Example — exchange the RxPDO region and the TxPDO region separately:
+
+```cpp
+auto* lam = pdo.logicalAddressManager();
+const uint32_t rx = lam->totalRxPDOBytes();
+const uint32_t total = lam->totalLogicalSize();
+for (uint32_t off = 0; off < total; ) {
+    uint32_t len = std::min<uint32_t>(pdo.maxLogicalSliceLength(), total - off);
+    if (off < rx && off + len > rx) len = rx - off;   // end at the Rx/Tx boundary
+    pdo.exchangeLRWSlice(off, len);
+    off += len;
+}
+```
+
+Tests: `tests/ethercat/test_logical_address_manager.cpp` (`tether_ethercat_pdo_tests`).

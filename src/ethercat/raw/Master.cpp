@@ -301,6 +301,10 @@ public:
         return master_.isCancelRequested();
     }
 
+    size_t maxEtherCATPayloadPerFrame() const override {
+        return master_.maxEtherCATPayloadPerFrame();
+    }
+
 private:
     Master& master_;
 };

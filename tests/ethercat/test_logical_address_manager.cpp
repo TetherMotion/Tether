@@ -399,6 +399,124 @@ TEST_F(LRWExchangeTest, EmptyMappingReturnsTrue) {
 }
 
 // ============================================================================
+// Partial LRW slice tests
+// ============================================================================
+
+TEST_F(LRWExchangeTest, MaxSliceLengthAccountsForDatagramOverhead) {
+    // Mock transport default frame payload is 1498 → 1498 - 12 = 1486.
+    EXPECT_EQ(mgr.maxSliceLength(), 1486u);
+}
+
+TEST_F(LRWExchangeTest, DescribeEntries) {
+    auto entries = mgr.describeEntries(mapping);
+    ASSERT_EQ(entries.size(), 2u);
+    EXPECT_EQ(entries[0].pdo_index, 0x1600u);
+    EXPECT_EQ(entries[0].direction, PDODirection::RxPDO);
+    EXPECT_EQ(entries[0].offset, 0u);
+    EXPECT_EQ(entries[0].length, 4u);
+    EXPECT_EQ(entries[1].pdo_index, 0x1A00u);
+    EXPECT_EQ(entries[1].direction, PDODirection::TxPDO);
+    EXPECT_EQ(entries[1].offset, 4u);
+    EXPECT_EQ(entries[1].length, 8u);
+}
+
+TEST_F(LRWExchangeTest, ExchangeLRWSliceTxOnly) {
+    uint8_t captured[64];
+    uint16_t captured_len = 0;
+
+    // Slice [4,12) is the TxPDO region: logical address base+4.
+    EXPECT_CALL(transport, allocIdx()).WillOnce(Return(7));
+    EXPECT_CALL(transport, sendSingleDatagram(Command::LRW, 7, 0x0004, 0x0001, _, 8, true))
+        .WillOnce(Invoke([&](Command, uint8_t, uint16_t, uint16_t,
+                              const void* data, uint16_t datalen, bool) -> bool {
+            std::memcpy(captured, data, datalen);
+            captured_len = datalen;
+            return true;
+        }));
+    EXPECT_CALL(transport, waitForResponseIdx(7, _, _))
+        .WillOnce(Invoke([&](uint8_t, unsigned int, RxDatagram& out) -> bool {
+            out.wkc = 1;
+            out.datalen = 8;
+            uint8_t resp[8] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
+            std::memcpy(out.data, resp, 8);
+            return true;
+        }));
+
+    EXPECT_TRUE(mgr.exchangeLRWSlice(mapping, 4, 8));
+
+    EXPECT_EQ(captured_len, 8u);
+    // RxPDO entry lies outside the slice and must be untouched.
+    EXPECT_EQ(rx_buf, 0xAABBCCDDu);
+    uint8_t* tb = reinterpret_cast<uint8_t*>(&tx_buf);
+    EXPECT_EQ(tb[0], 0x11);
+    EXPECT_EQ(tb[7], 0x88);
+}
+
+TEST_F(LRWExchangeTest, ExchangeLRWSliceRxOnly) {
+    uint8_t captured[64];
+    uint16_t captured_len = 0;
+
+    // Slice [0,4) is the RxPDO region.
+    EXPECT_CALL(transport, allocIdx()).WillOnce(Return(9));
+    EXPECT_CALL(transport, sendSingleDatagram(Command::LRW, 9, 0x0000, 0x0001, _, 4, true))
+        .WillOnce(Invoke([&](Command, uint8_t, uint16_t, uint16_t,
+                              const void* data, uint16_t datalen, bool) -> bool {
+            std::memcpy(captured, data, datalen);
+            captured_len = datalen;
+            return true;
+        }));
+    EXPECT_CALL(transport, waitForResponseIdx(9, _, _))
+        .WillOnce(Invoke([&](uint8_t, unsigned int, RxDatagram& out) -> bool {
+            out.wkc = 1;
+            out.datalen = 4;
+            std::memset(out.data, 0, 4);
+            return true;
+        }));
+
+    EXPECT_TRUE(mgr.exchangeLRWSlice(mapping, 0, 4));
+
+    EXPECT_EQ(captured_len, 4u);
+    EXPECT_EQ(captured[0], 0xDD);  // rx_buf 0xAABBCCDD little-endian
+    // TxPDO entry lies outside the slice and must be untouched.
+    EXPECT_EQ(tx_buf, 0u);
+}
+
+TEST_F(LRWExchangeTest, ExchangeLRWSliceRejectsTooLarge) {
+    EXPECT_FALSE(mgr.exchangeLRWSlice(mapping, 0, mgr.maxSliceLength() + 1));
+    EXPECT_EQ(mgr.getStats().send_errors, 1u);
+}
+
+TEST_F(LRWExchangeTest, ExchangeLRWSliceOutOfRange) {
+    EXPECT_FALSE(mgr.exchangeLRWSlice(mapping, 8, 8));  // total image is 12
+    EXPECT_EQ(mgr.getStats().send_errors, 1u);
+}
+
+TEST_F(LRWExchangeTest, ExchangeLRWSliceComposesWholeImage) {
+    // Two slices covering the whole 12-byte image, exchanged separately.
+    EXPECT_CALL(transport, allocIdx())
+        .WillOnce(Return(1))
+        .WillOnce(Return(2));
+    EXPECT_CALL(transport, sendSingleDatagram(Command::LRW, 1, 0x0000, 0x0001, _, 4, true))
+        .WillOnce(Return(true));
+    EXPECT_CALL(transport, sendSingleDatagram(Command::LRW, 2, 0x0004, 0x0001, _, 8, true))
+        .WillOnce(Return(true));
+    EXPECT_CALL(transport, waitForResponseIdx(1, _, _))
+        .WillOnce(Invoke([&](uint8_t, unsigned int, RxDatagram& out) -> bool {
+            out.wkc = 1; out.datalen = 4; std::memset(out.data, 0, 4); return true;
+        }));
+    EXPECT_CALL(transport, waitForResponseIdx(2, _, _))
+        .WillOnce(Invoke([&](uint8_t, unsigned int, RxDatagram& out) -> bool {
+            out.wkc = 1; out.datalen = 8; std::memset(out.data, 0xCD, 8); return true;
+        }));
+
+    EXPECT_TRUE(mgr.exchangeLRWSlice(mapping, 0, 4));
+    EXPECT_TRUE(mgr.exchangeLRWSlice(mapping, 4, 8));
+
+    uint8_t* tb = reinterpret_cast<uint8_t*>(&tx_buf);
+    for (int i = 0; i < 8; i++) EXPECT_EQ(tb[i], 0xCD);
+}
+
+// ============================================================================
 // Stats tests
 // ============================================================================
 
