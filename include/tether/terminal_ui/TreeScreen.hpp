@@ -21,6 +21,14 @@
  * key the tree did not consume (e.g. Enter to step a demo).  'q', 'Q' and
  * Escape quit the loop; run() also returns when `cancel` is set or the
  * duration elapses.
+ *
+ * When no renderDetail hook is installed, the detail pane shows
+ * node.detail word-wrapped to the pane width and scrollable with
+ * 'u'/'d'/PgUp/PgDn (the scroll keys are consumed internally — apps
+ * providing their own renderDetail keep full control of scrolling).
+ *
+ * openLinePrompt() opens a modal one-line text prompt (see LinePrompt.hpp)
+ * that takes over key input and the detail pane until Enter or Esc.
  */
 
 #pragma once
@@ -29,6 +37,7 @@
 #include <functional>
 #include <string>
 
+#include "tether/terminal_ui/LinePrompt.hpp"
 #include "tether/terminal_ui/LogPane.hpp"
 #include "tether/terminal_ui/Session.hpp"
 #include "tether/terminal_ui/TreeView.hpp"
@@ -81,12 +90,38 @@ public:
     /// Access to the captured log pane (add application lines).
     LogPane& log() { return log_; }
 
+    /// Open a modal one-line input prompt (see LinePromptSpec).  While a
+    /// prompt is active it consumes all keys and renders in the detail
+    /// pane instead of the node detail.
+    void openLinePrompt(LinePromptSpec spec);
+    /// Close the prompt without committing (e.g. from onTick).
+    void closeLinePrompt() { prompt_active_ = false; }
+    /// True while a line prompt is open.
+    bool promptActive() const { return prompt_active_; }
+    /// Current prompt buffer (for live filtering while typing).
+    const std::string& promptText() const { return prompt_buf_; }
+
 private:
+    void renderWrappedDetail(TermWindow* win, const TreeNode& node);
+    void renderPrompt(TermWindow* win);
+    /// Feed a key to the open prompt (called for every key while active).
+    void handlePromptKey(int key);
+
     Session      session_;
     TreeView     tree_;
     LogPane      log_;
     std::string  title_;
     TreeScreenHooks hooks_;
+
+    // Line prompt state (modal).
+    bool           prompt_active_ = false;
+    LinePromptSpec prompt_spec_;
+    std::string    prompt_buf_;
+
+    // Built-in detail renderer state — scroll offset + the node it was
+    // last rendered for (scroll resets when the selection changes).
+    int              detail_scroll_ = 0;
+    const TreeNode*  detail_last_sel_ = nullptr;
 };
 
 } // namespace TUI
