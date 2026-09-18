@@ -100,85 +100,92 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry TxPDOMapFSOECount 
     .comment = "Number of mapped objects in TxPDO-Map-FSoE (0x1A00)",
 };
 
-// 0x1A01: TxPDO-Map (8 mapping entries)
+// 0x1A01: TxPDO-Map (7 mapping entries: InputCounter, SAFE_DI,
+// Power_Status, DO_Monitor, DO_Value(Actual), DI_Value, DO_Command)
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry TxPDOMapCount = {
     .index = TxPDOMapIndex,
     .subindex = 0x00,
     .name = "TxPDO-Map number of entries",
     .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
-    .default_value = 8,
+    .default_value = 7,
     .unit = Unit_None,
     .options_enum = nullptr,
     .min_value = 0,
-    .max_value = 8,
+    .max_value = 7,
     .modification_mode = ModificationMode::DuringOperation,
     .effective_time = EffectiveTime::Immediately,
     .comment = "Number of mapped objects in TxPDO-Map (0x1A01)",
 };
 
-// 0x1A02: TxPDO-RSAP-Info (32 mapping entries)
+// 0x1A02: TxPDO-RSAP-Info (46 mapping entries)
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry TxPDORSAPInfoCount = {
     .index = TxPDORSAPInfoIndex,
     .subindex = 0x00,
     .name = "TxPDO-RSAP-Info number of entries",
     .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
-    .default_value = 32,
+    .default_value = 46,
     .unit = Unit_None,
     .options_enum = nullptr,
     .min_value = 0,
-    .max_value = 32,
+    .max_value = 46,
     .modification_mode = ModificationMode::DuringOperation,
     .effective_time = EffectiveTime::Immediately,
     .comment = "Number of mapped objects in TxPDO-RSAP-Info (0x1A02)",
 };
 
-// 0x1A03: TxPDO-RSAP-Debug (11 mapping entries)
+// 0x1A03: TxPDO-RSAP-Debug (104 mapping entries)
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry TxPDORSAPDebugCount = {
     .index = TxPDORSAPDebugIndex,
     .subindex = 0x00,
     .name = "TxPDO-RSAP-Debug number of entries",
     .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
-    .default_value = 11,
+    .default_value = 104,
     .unit = Unit_None,
     .options_enum = nullptr,
     .min_value = 0,
-    .max_value = 11,
+    .max_value = 104,
     .modification_mode = ModificationMode::DuringOperation,
     .effective_time = EffectiveTime::Immediately,
     .comment = "Number of mapped objects in TxPDO-RSAP-Debug (0x1A03)",
 };
 
-// 0x1A10-0x1A17: TxPDO-Map-FSoE0..FSoE7 (18 mapping entries each)
+// 0x1A10-0x1A2F: TxPDO-Map-FSoE0..FSoE31 (2 mapping entries each:
+// 0x7000:1 (248b) + 0x7000:2 (96b) = 344b / 43B per ESI v0.9)
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry TxPDOMapFSoECount = {
     .index = TxPDOMapFSoE0Index,
     .subindex = 0x00,
     .name = "TxPDO-Map-FSoE number of entries",
     .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
-    .default_value = 18,
+    .default_value = 2,
     .unit = Unit_None,
     .options_enum = nullptr,
     .min_value = 0,
-    .max_value = 18,
+    .max_value = 2,
     .modification_mode = ModificationMode::DuringOperation,
     .effective_time = EffectiveTime::Immediately,
-    .comment = "Number of mapped objects in TxPDO-Map-FSoE (0x1A10-0x1A17)",
+    .comment = "Number of mapped objects in TxPDO-Map-FSoE (0x1A10-0x1A2F)",
 };
 
 // Subindex helpers for TxPDO mapping entries
 static constexpr uint8_t kTxPDOMapMaxEntriesFSOE     = 16;
-static constexpr uint8_t kTxPDOMapMaxEntries         = 8;
-static constexpr uint8_t kTxPDORSAPInfoMaxEntries    = 32;
-static constexpr uint8_t kTxPDORSAPDebugMaxEntries   = 11;
-static constexpr uint8_t kTxPDOMapMaxEntriesFSoE     = 18;
+static constexpr uint8_t kTxPDOMapMaxEntries         = 7;
+static constexpr uint8_t kTxPDORSAPInfoMaxEntries    = 46;
+static constexpr uint8_t kTxPDORSAPDebugMaxEntries   = 104;
+static constexpr uint8_t kTxPDOMapMaxEntriesFSoE     = 2;
 
 // All PDO mapping object indices in arrays for iteration
-static constexpr std::array<uint16_t, 8> RxPDOMapFSoEIndices = {
-    0x1610, 0x1611, 0x1612, 0x1613, 0x1614, 0x1615, 0x1616, 0x1617
-};
+// (ESI v0.9 defines FSoE0..FSoE31 maps: 0x1610-0x162F / 0x1A10-0x1A2F)
+static constexpr std::array<uint16_t, 32> RxPDOMapFSoEIndices = [] {
+    std::array<uint16_t, 32> a{};
+    for (uint16_t i = 0; i < 32; ++i) a[i] = static_cast<uint16_t>(0x1610 + i);
+    return a;
+}();
 
-static constexpr std::array<uint16_t, 8> TxPDOMapFSoEIndices = {
-    0x1A10, 0x1A11, 0x1A12, 0x1A13, 0x1A14, 0x1A15, 0x1A16, 0x1A17
-};
+static constexpr std::array<uint16_t, 32> TxPDOMapFSoEIndices = [] {
+    std::array<uint16_t, 32> a{};
+    for (uint16_t i = 0; i < 32; ++i) a[i] = static_cast<uint16_t>(0x1A10 + i);
+    return a;
+}();
 
 inline const RegisterList kRegisterList = {
     &RxPDOMapFSOECount,
