@@ -347,11 +347,15 @@ inline void dumpRxPDO(const char* tag, const SynapticonPDO::SOMANET_RxPDO_1700& 
     TETHER_LOGI(tag, "  raw: {}", hex);
 }
 
-/// Decode the slave→master FSoE frame from the Synapticon TxPDO 0x1B00 struct.
+/// Decode the slave→master FSoE frame from a Synapticon TxPDO 0x1B00
+/// struct — works for both variants (SOMANET_TxPDO_1B00 LW2 and
+/// SOMANET_TxPDO_1B00_LW1; the LW1 struct has no safe_torque_actual /
+/// fsoe_crc_7).
 ///
 /// In the slave→master direction, all flags use **one-active** encoding
 /// (bit=1 → active, bit=0 → inactive).  No inversion needed.
-inline void dumpTxPDO(const char* tag, const SynapticonPDO::SOMANET_TxPDO_1B00& tx) {
+template<typename TxPDO_t>
+inline void dumpTxPDO(const char* tag, const TxPDO_t& tx) {
     ColoredBitsetFormatter sflags_fmt{kTxSafetyStateLabels};
     ColoredBitsetFormatter dflags_fmt{kTxDiagnosticLabels};
 
@@ -366,18 +370,36 @@ inline void dumpTxPDO(const char* tag, const SynapticonPDO::SOMANET_TxPDO_1B00& 
     TETHER_LOGI(tag, "  diag=0x{:04X}  {}",
                 tx.diagnostic_flags, dflags_fmt.format(tx.diagnostic_flags));
 
-    TETHER_LOGI(tag,
-        "  crc0=0x{:04X} crc1=0x{:04X} crc2=0x{:04X} crc3=0x{:04X} "
-        "crc4=0x{:04X} crc5=0x{:04X} crc6=0x{:04X} crc7=0x{:04X}",
-        tx.fsoe_crc_0, tx.fsoe_crc_1, tx.fsoe_crc_2, tx.fsoe_crc_3,
-        tx.fsoe_crc_4, tx.fsoe_crc_5, tx.fsoe_crc_6, tx.fsoe_crc_7);
-    TETHER_LOGI(tag,
-        "  safe_pos_single=0x{:04X}  safe_pos_multi=0x{:04X}  "
-        "safe_vel_low=0x{:04X}  safe_vel_high=0x{:04X}  "
-        "safe_analog=0x{:04X}  safe_torque=0x{:04X}",
-        tx.safe_position_single_turn, tx.safe_position_multi_turn,
-        tx.safe_velocity_low, tx.safe_velocity_high,
-        tx.safe_analog_value, tx.safe_torque_actual);
+    if constexpr (requires { tx.fsoe_crc_7; }) {
+        TETHER_LOGI(tag,
+            "  crc0=0x{:04X} crc1=0x{:04X} crc2=0x{:04X} crc3=0x{:04X} "
+            "crc4=0x{:04X} crc5=0x{:04X} crc6=0x{:04X} crc7=0x{:04X}",
+            tx.fsoe_crc_0, tx.fsoe_crc_1, tx.fsoe_crc_2, tx.fsoe_crc_3,
+            tx.fsoe_crc_4, tx.fsoe_crc_5, tx.fsoe_crc_6, tx.fsoe_crc_7);
+    } else {
+        TETHER_LOGI(tag,
+            "  crc0=0x{:04X} crc1=0x{:04X} crc2=0x{:04X} crc3=0x{:04X} "
+            "crc4=0x{:04X} crc5=0x{:04X} crc6=0x{:04X}",
+            tx.fsoe_crc_0, tx.fsoe_crc_1, tx.fsoe_crc_2, tx.fsoe_crc_3,
+            tx.fsoe_crc_4, tx.fsoe_crc_5, tx.fsoe_crc_6);
+    }
+    if constexpr (requires { tx.safe_torque_actual; }) {
+        TETHER_LOGI(tag,
+            "  safe_pos_single=0x{:04X}  safe_pos_multi=0x{:04X}  "
+            "safe_vel_low=0x{:04X}  safe_vel_high=0x{:04X}  "
+            "safe_analog=0x{:04X}  safe_torque=0x{:04X}",
+            tx.safe_position_single_turn, tx.safe_position_multi_turn,
+            tx.safe_velocity_low, tx.safe_velocity_high,
+            tx.safe_analog_value, tx.safe_torque_actual);
+    } else {
+        TETHER_LOGI(tag,
+            "  safe_pos_single=0x{:04X}  safe_pos_multi=0x{:04X}  "
+            "safe_vel_low=0x{:04X}  safe_vel_high=0x{:04X}  "
+            "safe_analog=0x{:04X}",
+            tx.safe_position_single_turn, tx.safe_position_multi_turn,
+            tx.safe_velocity_low, tx.safe_velocity_high,
+            tx.safe_analog_value);
+    }
 
     // --- Raw hex LAST ---
     char hex[128];
@@ -395,19 +417,33 @@ inline void dumpTxPDO(const char* tag, const SynapticonPDO::SOMANET_TxPDO_1B00& 
 
 /// Compact one-line decode of the slave→master TxPDO (0x1B00).
 /// Shows all safety state flags + diagnostic flags + command + safe position + velocity + torque.
+/// Works for both frame variants (LW2 shows trq, LW1 omits it).
+template<typename TxPDO_t>
 inline void dumpTxPDOFrame(const char* tag,
-                           const SynapticonPDO::SOMANET_TxPDO_1B00& tx) {
+                           const TxPDO_t& tx) {
     ColoredBitsetFormatter sflags_fmt{kTxSafetyStateLabels};
     ColoredBitsetFormatter dflags_fmt{kTxDiagnosticLabels};
-    TETHER_LOGI(tag,
-        "[fsoe-frame] RX←slave TxPDO 0x1B00 ({} bytes):  "
-        "{}  {}  cmd={}  conn_id=0x{:04X}  "
-        "pos=0x{:04X}/0x{:04X}  vel=0x{:04X}/0x{:04X}  trq=0x{:04X}",
-        sizeof(tx), sflags_fmt.format(tx.safety_state_flags),
-        dflags_fmt.format(tx.diagnostic_flags),
-        FSoE::fsoeCommandName(tx.fsoe_command), tx.fsoe_connection_id,
-        tx.safe_position_single_turn, tx.safe_position_multi_turn,
-        tx.safe_velocity_low, tx.safe_velocity_high, tx.safe_torque_actual);
+    if constexpr (requires { tx.safe_torque_actual; }) {
+        TETHER_LOGI(tag,
+            "[fsoe-frame] RX←slave TxPDO 0x1B00 ({} bytes):  "
+            "{}  {}  cmd={}  conn_id=0x{:04X}  "
+            "pos=0x{:04X}/0x{:04X}  vel=0x{:04X}/0x{:04X}  trq=0x{:04X}",
+            sizeof(tx), sflags_fmt.format(tx.safety_state_flags),
+            dflags_fmt.format(tx.diagnostic_flags),
+            FSoE::fsoeCommandName(tx.fsoe_command), tx.fsoe_connection_id,
+            tx.safe_position_single_turn, tx.safe_position_multi_turn,
+            tx.safe_velocity_low, tx.safe_velocity_high, tx.safe_torque_actual);
+    } else {
+        TETHER_LOGI(tag,
+            "[fsoe-frame] RX←slave TxPDO 0x1B00 ({} bytes):  "
+            "{}  {}  cmd={}  conn_id=0x{:04X}  "
+            "pos=0x{:04X}/0x{:04X}  vel=0x{:04X}/0x{:04X}",
+            sizeof(tx), sflags_fmt.format(tx.safety_state_flags),
+            dflags_fmt.format(tx.diagnostic_flags),
+            FSoE::fsoeCommandName(tx.fsoe_command), tx.fsoe_connection_id,
+            tx.safe_position_single_turn, tx.safe_position_multi_turn,
+            tx.safe_velocity_low, tx.safe_velocity_high);
+    }
 }
 
 /// Compact one-line decode of the master→slave RxPDO (0x1700).
@@ -434,8 +470,10 @@ inline void dumpRxPDOFrame(const char* tag,
 
 /// One-line summary of the slave→master TxPDO (0x1B00).
 /// All flags use one-active encoding (bit=1 → active/safe).
+/// Works for both frame variants (LW1 and LW2).
+template<typename TxPDO_t>
 inline void dumpTxPDOSummary(const char* tag,
-                             const SynapticonPDO::SOMANET_TxPDO_1B00& tx) {
+                             const TxPDO_t& tx) {
     ColoredBitsetFormatter sflags_fmt{kTxSafetyStateLabels};
     ColoredBitsetFormatter dflags_fmt{kTxDiagnosticLabels};
     char hex[128];

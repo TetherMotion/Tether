@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <span>
 
 #include "tether/drives/Synapticon/SynapticonPDO.hpp"
 #include "tether/fsoe/FSoESlaveEmulator.hpp"
@@ -65,6 +66,8 @@ struct Status {
     int32_t safe_position = 0;
     int32_t safe_velocity = 0;
     int16_t safe_analog_input = 0;
+    /// LW2 frame variant only — stays 0 when the slave uses LW1 framing.
+    int16_t safe_torque = 0;
 
     bool motionAllowed() const;
 };
@@ -76,6 +79,11 @@ struct MainConfig {
     uint16_t master_address = 0x0001;
     uint16_t watchdog_time_ms = Timing::kMinimumWatchdogTimeMs;
     bool feature_enabled = false;
+    /// FSoE status-frame variant the slave is configured with:
+    /// LW1 = 31-byte frame (14 safe-data bytes), LW2 = 35-byte frame
+    /// (16 safe-data bytes — safe torque data appended).  Must match the
+    /// TxPDO 0x1B00 size used in the PDO assignment.
+    PDO::FSoEFrameVariant frame_variant = PDO::FSoEFrameVariant::LW1;
 };
 
 struct ServoEmulatorConfig {
@@ -101,6 +109,18 @@ struct ServoEmulatorConfig {
     // letting the slave re-synchronize after a missed transition.
     bool reset_crc_on_state_transition = false;
 
+    /// FSoE status-frame variant this slave emulates:
+    /// LW1 = 31-byte frame (14 safe-data bytes), LW2 = 35-byte frame
+    /// (16 safe-data bytes — safe torque data appended).
+    PDO::FSoEFrameVariant frame_variant = PDO::FSoEFrameVariant::LW1;
+
+    // Override the slave→master safe-data size (bytes).  0 (default)
+    // derives the size from frame_variant (14 for LW1, 16 for LW2).
+    // Set this when the FNI configures a different response frame size —
+    // e.g. the ESC211's channels 3-4 carry 16 safe-data bytes (35-byte
+    // wire frame) instead of 14 (31-byte).
+    uint8_t safe_input_size_override = 0;
+
     // Native CRC-chain resynchronization (opt-in).  When a received
     // frame fails CRC verification, the slave solves the exact
     // (startCrc, seqNo) seed from the frame's own CRCs (a GF(2) linear
@@ -121,17 +141,28 @@ struct ServoEmulatorConfig {
 
 struct Codec {
     static constexpr std::size_t kMainToSlaveSize = 4;
-    static constexpr std::size_t kSlaveToMainSize = 14;
+    /// Maximum slave→master safe-data size (LW2).  LW1 uses the first
+    /// kSlaveToMainSizeLW1 bytes — encode/decode take spans so the same
+    /// codec serves both frame variants.
+    static constexpr std::size_t kSlaveToMainSize = 16;
+    /// Slave→master safe-data size for the LW1 frame variant (no safe
+    /// torque data).
+    static constexpr std::size_t kSlaveToMainSizeLW1 = 14;
 
     static void encodeMainToSlave(const Command& command,
-                                  std::array<uint8_t, kMainToSlaveSize>& bytes);
+                                  std::span<uint8_t> bytes);
     static std::optional<Command> decodeMainToSlave(
-        const std::array<uint8_t, kMainToSlaveSize>& bytes);
+        std::span<const uint8_t> bytes);
 
+    /// Encode the slave→master safe data.  The first 14 bytes are the
+    /// LW1 payload; when @p bytes has room for 16 (LW2) the safe-torque
+    /// word is appended.
     static void encodeSlaveToMain(const Status& status,
-                                  std::array<uint8_t, kSlaveToMainSize>& bytes);
+                                  std::span<uint8_t> bytes);
+    /// Decode slave→master safe data.  Requires at least 14 bytes (LW1);
+    /// with 16 bytes (LW2) the safe-torque word is decoded as well.
     static std::optional<Status> decodeSlaveToMain(
-        const std::array<uint8_t, kSlaveToMainSize>& bytes);
+        std::span<const uint8_t> bytes);
 
     /// Command→status bit-mirror table for the SOMANET SafeMotion wire
     /// format.  The FSoE master (e.g. ESC211) expects each master→slave

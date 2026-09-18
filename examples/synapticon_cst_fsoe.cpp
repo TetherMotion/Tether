@@ -177,19 +177,25 @@ using RxPDO = EtherCAT::Drives::SynapticonPDO::SOMANET_RxPDO_1600;
 using TxPDO = EtherCAT::Drives::SynapticonPDO::SOMANET_TxPDO_1A00;
 using FSoERxPDO = EtherCAT::Drives::SynapticonPDO::SOMANET_RxPDO_1700;
 using FSoETxPDO = EtherCAT::Drives::SynapticonPDO::SOMANET_TxPDO_1B00;
+using FSoETxPDOLW1 = EtherCAT::Drives::SynapticonPDO::SOMANET_TxPDO_1B00_LW1;
+using FSoEFrameVariant = EtherCAT::Drives::SynapticonPDO::FSoEFrameVariant;
 
 // PDO offsets within the combined PDO buffer.
 // FSoE PDOs come FIRST (offset 0), motion PDOs follow after the FSoE PDO.
 //   SM2: 0x1700 (11B) first, then 0x1600 (19B) at offset 11
-//   SM3: 0x1B00 (35B) first, then 0x1A00 (13B) at offset 35
+//   SM3: 0x1B00 (35B LW2 / 31B LW1) first, then 0x1A00 (13B)
+//
+// The slave→master FSoE frame size depends on the configured frame
+// variant (--fsoe-frame lw1|lw2): LW2 carries a 2-byte "safe torque data"
+// word + CRC appended before the ConnectionID (35 bytes), LW1 does not
+// (31 bytes).  The FSoE TxPDO size, the motion TxPDO offset and the SM3
+// total length are therefore runtime values derived from the variant.
 constexpr size_t kFSoERxPDOOffset   = 0;                    // FSoE first
 constexpr size_t kMotionRxPDOOffset = sizeof(FSoERxPDO);    // 11 bytes
 constexpr size_t kFSoETxPDOOffset   = 0;                    // FSoE first
-constexpr size_t kMotionTxPDOOffset = sizeof(FSoETxPDO);    // 35 bytes (LW2 with safe torque)
 
-// Total SM lengths (full combined: FSoE + all motion PDOs).
+// Total SM2 length (FSoE + all motion PDOs — same for both variants).
 constexpr size_t kSM2TotalLen = EtherCAT::Drives::SynapticonPDO::kSM2CombinedSize;   // 46
-constexpr size_t kSM3TotalLen = EtherCAT::Drives::SynapticonPDO::kSM3CombinedSize;   // 82
 
 using FSoEMain = EtherCAT::Drives::Synapticon::SafeMotion::MainInstance;
 
@@ -220,10 +226,12 @@ class FSoEDiagnosticsTask final : public EtherCAT::DS402Master::ICyclicTask {
 public:
     FSoEDiagnosticsTask(uint16_t slave_index,
                         FSoEMain& fsoe_main,
-                        uint32_t interval_ms)
+                        uint32_t interval_ms,
+                        size_t motion_tx_pdo_offset)
         : slave_index_(slave_index)
         , fsoe_main_(fsoe_main)
         , interval_ms_(interval_ms)
+        , motion_tx_pdo_offset_(motion_tx_pdo_offset)
     {
     }
 
@@ -235,9 +243,9 @@ public:
         auto* drive = master.driveBySlaveIndex(slave_index_);
         if (drive == nullptr) return true;
 
-        // Motion PDO is at offset kMotionTxPDOOffset (FSoE comes first, motion second)
+        // Motion PDO is at motion_tx_pdo_offset_ (FSoE comes first, motion second)
         auto* tx = reinterpret_cast<const TxPDO*>(
-            static_cast<const uint8_t*>(drive->getTxPDOBuffer()) + kMotionTxPDOOffset);
+            static_cast<const uint8_t*>(drive->getTxPDOBuffer()) + motion_tx_pdo_offset_);
         // Also read the commanded target_torque from the RxPDO for comparison
         auto* rx = reinterpret_cast<const RxPDO*>(
             static_cast<const uint8_t*>(drive->getRxPDOBuffer()) + kMotionRxPDOOffset);
@@ -310,6 +318,7 @@ private:
     uint16_t slave_index_;
     FSoEMain& fsoe_main_;
     uint32_t interval_ms_;
+    size_t motion_tx_pdo_offset_;
     uint64_t elapsed_ms_ = 0;
     uint64_t last_print_ms_ = 0;
 };
@@ -448,6 +457,8 @@ public:
                         FSoEMain& main_instance,
                         size_t rx_pdo_offset,
                         size_t tx_pdo_offset,
+                        FSoEFrameVariant fsoe_variant,
+                        size_t sm3_total_len,
                         bool debug_raw = false,
                         bool debug_frame = false,
                         bool debug_wire = false)
@@ -455,6 +466,9 @@ public:
         , main_instance_(main_instance)
         , rx_pdo_offset_(rx_pdo_offset)
         , tx_pdo_offset_(tx_pdo_offset)
+        , fsoe_variant_(fsoe_variant)
+        , fsoe_tx_size_(EtherCAT::Drives::SynapticonPDO::fsoeTxPDOSize(fsoe_variant))
+        , sm3_total_len_(sm3_total_len)
         , debug_raw_(debug_raw)
         , debug_frame_(debug_frame)
         , debug_wire_(debug_wire)
@@ -496,26 +510,36 @@ public:
         // content changes.  Compares the current TxPDO (slave-to-master) and
         // RxPDO (master-to-slave) FSoE regions against the last seen copies.
         const bool tx_changed = (debug_raw_ || debug_frame_) &&
-            std::memcmp(tx_buffer, last_tx_.data(), sizeof(FSoETxPDO)) != 0;
+            std::memcmp(tx_buffer, last_tx_.data(), fsoe_tx_size_) != 0;
         if (tx_changed) {
-            std::memcpy(last_tx_.data(), tx_buffer, sizeof(FSoETxPDO));
+            std::memcpy(last_tx_.data(), tx_buffer, fsoe_tx_size_);
         }
 
         // --debug fsoe-raw: verbose multi-line struct dump (CRCs, raw hex, etc.)
         if (debug_raw_ && tx_changed) {
-            const auto* tx_pdo = reinterpret_cast<const FSoETxPDO*>(tx_buffer);
-            fsoe_dbg::dumpTxPDO(TAG, *tx_pdo);
+            if (fsoe_variant_ == FSoEFrameVariant::LW2) {
+                fsoe_dbg::dumpTxPDO(TAG,
+                    *reinterpret_cast<const FSoETxPDO*>(tx_buffer));
+            } else {
+                fsoe_dbg::dumpTxPDO(TAG,
+                    *reinterpret_cast<const FSoETxPDOLW1*>(tx_buffer));
+            }
         }
 
         // --debug fsoe-frame: compact one-line interpretation on change
         if (debug_frame_ && tx_changed) {
-            const auto* tx_pdo = reinterpret_cast<const FSoETxPDO*>(tx_buffer);
-            fsoe_dbg::dumpTxPDOFrame(TAG, *tx_pdo);
+            if (fsoe_variant_ == FSoEFrameVariant::LW2) {
+                fsoe_dbg::dumpTxPDOFrame(TAG,
+                    *reinterpret_cast<const FSoETxPDO*>(tx_buffer));
+            } else {
+                fsoe_dbg::dumpTxPDOFrame(TAG,
+                    *reinterpret_cast<const FSoETxPDOLW1*>(tx_buffer));
+            }
         }
 
         const bool ok = main_instance_.exchangeViaPDO(
             rx_buffer, sizeof(FSoERxPDO),
-            tx_buffer, sizeof(FSoETxPDO),
+            tx_buffer, fsoe_tx_size_,
             elapsed_time_ms_);
 
         // RxPDO (master-to-slave) is checked AFTER exchangeViaPDO -- it
@@ -552,18 +576,22 @@ private:
     FSoEMain& main_instance_;
     size_t rx_pdo_offset_;
     size_t tx_pdo_offset_;
+    FSoEFrameVariant fsoe_variant_;
+    size_t fsoe_tx_size_;
+    size_t sm3_total_len_;
     bool debug_raw_ = false;
     bool debug_frame_ = false;
     bool debug_wire_ = false;
     uint64_t elapsed_time_ms_ = 0;
     uint32_t cycle_count_ = 0;
-    // Last-seen FSoE PDO content for change detection
+    // Last-seen FSoE PDO content for change detection (max frame size —
+    // only the first fsoe_tx_size_ bytes are compared/copied)
     std::array<uint8_t, sizeof(FSoETxPDO)> last_tx_{};
     std::array<uint8_t, sizeof(FSoERxPDO)> last_rx_{};
 
     void dumpWire(const uint8_t* tx_buffer, const uint8_t* rx_buffer) {
         fsoe_dbg::dumpWire("fsoe-wire", tx_buffer, rx_buffer,
-                           kSM2TotalLen, kSM3TotalLen, cycle_count_);
+                           kSM2TotalLen, sm3_total_len_, cycle_count_);
         cycle_count_++;
     }
 };
@@ -745,6 +773,8 @@ struct Args {
     int sbc_override = -1;
     ///< After N seconds, run full safety diagnostics via CoE then exit. 0 = disabled.
     double diagnostics_after = 0.0;
+    ///< FSoE status-frame variant: "lw1" (31 B frame) or "lw2" (35 B frame).
+    std::string fsoe_frame = "lw2";
 };
 
 bool parseArgs(int argc, char** argv, Args& out) {
@@ -812,6 +842,12 @@ bool parseArgs(int argc, char** argv, Args& out) {
               "via CoE (SDO reads of safety objects), then exit. "
               "FSoE output is suppressed during diagnostics to keep the "
               "output clean. 0 = disabled (default).");
+    program.add_argument("--fsoe-frame")
+        .default_value(std::string("lw2"))
+        .help("FSoE status-frame variant the slave is configured with: "
+              "'lw1' = 31-byte frame, 'lw2' = 35-byte frame (safe torque "
+              "data + CRC appended, default). Must match the drive's "
+              "safety parameter set.");
 
     try {
         program.parse_args(argc, argv);
@@ -833,6 +869,12 @@ bool parseArgs(int argc, char** argv, Args& out) {
     out.sos_override = program.get<int>("--sos");
     out.sbc_override = program.get<int>("--sbc");
     out.diagnostics_after = program.get<double>("--diagnostics-after");
+    out.fsoe_frame = program.get<std::string>("--fsoe-frame");
+    if (out.fsoe_frame != "lw1" && out.fsoe_frame != "lw2") {
+        std::cerr << "Invalid --fsoe-frame '" << out.fsoe_frame
+                  << "' (expected 'lw1' or 'lw2')\n";
+        return false;
+    }
     if (!Tether::Examples::parseVlanArgs(
             program.get<std::string>("--rx-vlan"),
             program.get<std::string>("--tx-vlan"),
@@ -866,12 +908,26 @@ int main(int argc, char** argv) {
     }
     const uint16_t slave_idx = static_cast<uint16_t>(args.slave_index);
 
+    // FSoE frame variant (--fsoe-frame): selects the slave→master frame
+    // layout — LW2 (35 B, safe torque data appended) or LW1 (31 B).
+    // Everything derived from the TxPDO 0x1B00 size (motion PDO offset,
+    // SM3 length, connection input size) follows the variant.
+    const FSoEFrameVariant fsoe_variant =
+        args.fsoe_frame == "lw2" ? FSoEFrameVariant::LW2 : FSoEFrameVariant::LW1;
+    const size_t fsoe_tx_size =
+        EtherCAT::Drives::SynapticonPDO::fsoeTxPDOSize(fsoe_variant);
+    const size_t motion_tx_pdo_offset =
+        EtherCAT::Drives::SynapticonPDO::motionTxPDOOffset(fsoe_variant);
+    const size_t sm3_total_len =
+        EtherCAT::Drives::SynapticonPDO::sm3CombinedSize(fsoe_variant);
+
     Tether::Platform::ensureRealtimeKernelOrExit();
 
     TETHER_LOGI(TAG,
         "synapticon_cst_fsoe  —  interface={} slave={} duration={:.1f} dc_sync={} debug='{}' "
         "conn_id=0x{:04X} safety_addr=0x{:04X} "
-        "sto_override={} sos_override={} sbc_override={} diagnostics_after={:.1f}",
+        "sto_override={} sos_override={} sbc_override={} diagnostics_after={:.1f} "
+        "fsoe_frame={} ({} B)",
         args.interface.c_str(), slave_idx, args.duration,
         args.enable_dc_sync ? "on" : "off",
         args.debug.c_str(),
@@ -879,7 +935,8 @@ int main(int argc, char** argv) {
         args.sto_override < 0 ? "default" : std::to_string(args.sto_override).c_str(),
         args.sos_override < 0 ? "default" : std::to_string(args.sos_override).c_str(),
         args.sbc_override < 0 ? "default" : std::to_string(args.sbc_override).c_str(),
-        args.diagnostics_after);
+        args.diagnostics_after,
+        args.fsoe_frame.c_str(), fsoe_tx_size);
 
     // --- Start EtherCAT master ---
     EtherCAT::DS402Master master;
@@ -1194,17 +1251,18 @@ int main(int argc, char** argv) {
         // FSoE PDOs come FIRST (critical for the Synapticon ESC bug  -  see
         // comment above).
         const auto assignment =
-            EtherCAT::Drives::SynapticonPDO::makeCombinedPDOAssignment();
+            EtherCAT::Drives::SynapticonPDO::makeCombinedPDOAssignment(fsoe_variant);
 
         TETHER_LOGI(TAG,
             "Transitioning to OP with combined FSoE+motion PDO mapping: "
             "SM2={} bytes (FSoE {}B + motion {}B), "
-            "SM3={} bytes (FSoE {}B + motion {}B)",
+            "SM3={} bytes (FSoE {}B [{}] + motion {}B)",
             static_cast<uint16_t>(kSM2TotalLen),
             static_cast<uint16_t>(sizeof(FSoERxPDO)),
             EtherCAT::Drives::SynapticonPDO::kSM2TotalSize,
-            static_cast<uint16_t>(kSM3TotalLen),
-            static_cast<uint16_t>(sizeof(FSoETxPDO)),
+            static_cast<uint16_t>(sm3_total_len),
+            static_cast<uint16_t>(fsoe_tx_size),
+            args.fsoe_frame == "lw2" ? "LW2" : "LW1",
             EtherCAT::Drives::SynapticonPDO::kSM3TotalSize);
 
         // Note: Safety parameters (0x2620, 0x2641, etc.) are configured on the
@@ -1515,16 +1573,17 @@ int main(int argc, char** argv) {
     }
 
     // --- Configure PDO-based field offsets ---
-    // The motion PDO is at kMotionRxPDOOffset / kMotionTxPDOOffset in the
-    // combined buffer (after the FSoE PDO).  These offsets keep the drive
-    // object's statusword/controlword decoding consistent with the buffer
-    // layout even though no motion commands are sent.
+    // The motion PDO is at kMotionRxPDOOffset / motion_tx_pdo_offset in the
+    // combined buffer (after the FSoE PDO — the Tx offset depends on the
+    // FSoE frame variant).  These offsets keep the drive object's
+    // statusword/controlword decoding consistent with the buffer layout
+    // even though no motion commands are sent.
     {
         // Controlword (0x6040) is at the start of the motion RxPDO
         drive.setControlwordPDOOffset(static_cast<int>(kMotionRxPDOOffset));
 
         // Statusword (0x6041) is at the start of the motion TxPDO
-        drive.setStatuswordPDOOffset(static_cast<int>(kMotionTxPDOOffset));
+        drive.setStatuswordPDOOffset(static_cast<int>(motion_tx_pdo_offset));
 
         const size_t opmode_offset = kMotionRxPDOOffset +
             offsetof(EtherCAT::Drives::SynapticonPDO::SOMANET_RxPDO_1600,
@@ -1532,7 +1591,7 @@ int main(int argc, char** argv) {
         drive.setOpmodePDOOffset(static_cast<int>(opmode_offset));
         TETHER_LOGI(TAG,
             "PDO offsets: controlword={} statusword={} opmode={}",
-            kMotionRxPDOOffset, kMotionTxPDOOffset, opmode_offset);
+            kMotionRxPDOOffset, motion_tx_pdo_offset, opmode_offset);
     }
 
     // --- Brake release ---
@@ -1591,6 +1650,7 @@ int main(int argc, char** argv) {
         main_config.connection_id = args.connection_id;    // FSoE connection ID
         main_config.master_address = 0x0001;
         main_config.watchdog_time_ms = args.watchdog_ms;
+        main_config.frame_variant = fsoe_variant;
 
         fsoe_main = std::make_unique<FSoEMain>(main_config);
 
@@ -1865,6 +1925,7 @@ int main(int argc, char** argv) {
         auto fsoe_task = std::make_unique<FSoEPDOExchangeTask>(
             slave_idx, *fsoe_main,
             kFSoERxPDOOffset, kFSoETxPDOOffset,
+            fsoe_variant, sm3_total_len,
             debug_fsoe_raw, debug_fsoe_frame, debug_fsoe_wire);
         fsoe_task_ptr = fsoe_task.get();
         if (!master.addCyclicTask(std::move(fsoe_task))) {
@@ -1879,7 +1940,8 @@ int main(int argc, char** argv) {
         // Add diagnostics task
         if (!master.addCyclicTask(
                 std::make_unique<FSoEDiagnosticsTask>(
-                    slave_idx, *fsoe_main, args.diag_interval_ms))) {
+                    slave_idx, *fsoe_main, args.diag_interval_ms,
+                    motion_tx_pdo_offset))) {
             TETHER_LOGW(TAG, "Failed to add FSoE diagnostics task (non-fatal)");
         }
 
