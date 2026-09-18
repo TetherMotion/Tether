@@ -60,7 +60,7 @@ struct NexcobotESC211 {
     static constexpr uint16_t kRxPDOMapFSOEIndex        = 0x1600;
     static constexpr uint16_t kRxPDOMapIndex            = 0x1601;
     static constexpr uint16_t kRxPDOMapFSoE0Index       = 0x1610;
-    static constexpr uint16_t kRxPDOMapFSoE7Index       = 0x1617;
+    static constexpr uint16_t kRxPDOMapFSoE31Index      = 0x162F;
 
     // TxPDO mapping indices
     static constexpr uint16_t kTxPDOMapFSOEIndex        = 0x1A00;
@@ -68,7 +68,7 @@ struct NexcobotESC211 {
     static constexpr uint16_t kTxPDORSAPInfoIndex       = 0x1A02;
     static constexpr uint16_t kTxPDORSAPDebugIndex      = 0x1A03;
     static constexpr uint16_t kTxPDOMapFSoE0Index       = 0x1A10;
-    static constexpr uint16_t kTxPDOMapFSoE7Index       = 0x1A17;
+    static constexpr uint16_t kTxPDOMapFSoE31Index      = 0x1A2F;
 
     // Sync Manager / PDO assignment
     static constexpr uint16_t kRxPDOAssignmentIndex    = 0x1C12;
