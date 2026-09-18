@@ -34,6 +34,20 @@ inline const char* fsoeCommandShortName(uint8_t cmd) {
     }
 }
 
+/// Map an FSoE command byte to the connection state it belongs to
+/// (FSoE::ConnectionState::*).  Unknown commands map to Error.
+inline uint8_t fsoeStateFromCommand(uint8_t cmd) {
+    switch (cmd) {
+        case FSoE::Command::Reset:         return FSoE::ConnectionState::Reset;
+        case FSoE::Command::Session:       return FSoE::ConnectionState::Session;
+        case FSoE::Command::Connection:    return FSoE::ConnectionState::Connection;
+        case FSoE::Command::Parameter:     return FSoE::ConnectionState::Parameter;
+        case FSoE::Command::ProcessData:   return FSoE::ConnectionState::Data;
+        case FSoE::Command::FailSafeData:  return FSoE::ConnectionState::FailSafe;
+        default:                            return FSoE::ConnectionState::Error;
+    }
+}
+
 /// Decode the FSoE connection state to a human-readable name.
 inline const char* fsoeStateName(uint8_t state) {
     switch (state) {
