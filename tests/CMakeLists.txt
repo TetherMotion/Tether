@@ -1043,10 +1043,12 @@ create_ethercat_test(coverage
         ethercat/test_voe_eoe.cpp
         ethercat/test_dc_manager_coverage.cpp
         ethercat/test_dc_utils.cpp
+        ethercat/test_sdo_polling.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/SlaveEmulator.cpp
         ../src/ethercat/ConditionalPacketRouter.cpp
         ../src/ethercat/TransactionRouter.cpp
+        ../src/ethercat/SdoCommandChannel.cpp
     LIBS tether_ethercat_master;tether_cia_profiles
     DEFS TETHER_COMPILE_MASTER=1
 )

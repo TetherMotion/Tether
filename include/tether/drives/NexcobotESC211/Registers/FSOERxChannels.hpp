@@ -37,7 +37,7 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSOE0_FSoECommand 
 };
 
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSOE0_ConnectionID = {
-    .index = FSOEFrameFSoE0Index, .subindex = 0x02, .name = "FSoE0 Connection ID",
+    .index = FSOEFrameFSoE0Index, .subindex = 0x03, .name = "FSoE0 Connection ID",
     .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned16,
     .default_value = 0, .unit = Unit_None, .options_enum = nullptr,
     .min_value = 0, .max_value = 0xFFFF,
@@ -47,13 +47,13 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSOE0_ConnectionID
 
 #define NEXCOBOT_FSOE0_CRC(N) \
     constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSOE0_CRC_##N = { \
-        .index = FSOEFrameFSoE0Index, .subindex = (N + 2), .name = "FSoE0 crc_" #N, \
-        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8, \
+        .index = FSOEFrameFSoE0Index, .subindex = (N + 4), .name = "FSoE0 crc_" #N, \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned16, \
         .default_value = 0, .unit = Unit_None, .options_enum = nullptr, \
-        .min_value = 0, .max_value = 0xFF, \
+        .min_value = 0, .max_value = 0xFFFF, \
         .modification_mode = ModificationMode::ReadOnly, \
         .effective_time = EffectiveTime::Immediately, \
-        .comment = "FSoE0 CRC byte " #N, \
+        .comment = "FSoE0 CRC word " #N, \
     }
 
 NEXCOBOT_FSOE0_CRC(0); NEXCOBOT_FSOE0_CRC(1); NEXCOBOT_FSOE0_CRC(2); NEXCOBOT_FSOE0_CRC(3);
@@ -63,7 +63,7 @@ NEXCOBOT_FSOE0_CRC(4); NEXCOBOT_FSOE0_CRC(5); NEXCOBOT_FSOE0_CRC(6); NEXCOBOT_FS
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSOESafeDataFSoE0Count = {
     .index = FSOESafeDataFSoE0Index, .subindex = 0x00,
     .name = "FSOE Master SafeData (FSoE0) count",
-    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
+    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned16,
     .default_value = 8, .unit = Unit_None, .options_enum = nullptr,
     .min_value = 0, .max_value = 8,
     .modification_mode = ModificationMode::ReadOnly,
@@ -110,7 +110,7 @@ NEXCOBOT_FSOE0_DATA(5); NEXCOBOT_FSOE0_DATA(6); NEXCOBOT_FSOE0_DATA(7); NEXCOBOT
         .effective_time = EffectiveTime::Immediately, .comment = "FSoE" #CH " command byte", \
     }; \
     constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSOE##CH##_ConnID = { \
-        .index = (FRAME_IDX), .subindex = 0x02, .name = "FSoE" #CH " Connection ID", \
+        .index = (FRAME_IDX), .subindex = 0x03, .name = "FSoE" #CH " Connection ID", \
         .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned16, \
         .default_value = 0, .unit = Unit_None, .options_enum = nullptr, \
         .min_value = 0, .max_value = 0xFFFF, \
@@ -118,68 +118,68 @@ NEXCOBOT_FSOE0_DATA(5); NEXCOBOT_FSOE0_DATA(6); NEXCOBOT_FSOE0_DATA(7); NEXCOBOT
         .effective_time = EffectiveTime::Immediately, .comment = "FSoE" #CH " connection ID", \
     }; \
     constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSOE##CH##_CRC0 = { \
-        .index = (FRAME_IDX), .subindex = 0x03, .name = "FSoE" #CH " crc_0", \
-        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8, \
+        .index = (FRAME_IDX), .subindex = 0x04, .name = "FSoE" #CH " crc_0", \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned16, \
         .default_value = 0, .unit = Unit_None, .options_enum = nullptr, \
-        .min_value = 0, .max_value = 0xFF, \
+        .min_value = 0, .max_value = 0xFFFF, \
         .modification_mode = ModificationMode::ReadOnly, \
-        .effective_time = EffectiveTime::Immediately, .comment = "FSoE" #CH " CRC byte 0", \
+        .effective_time = EffectiveTime::Immediately, .comment = "FSoE" #CH " CRC word 0", \
     }; \
     constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSOE##CH##_CRC1 = { \
-        .index = (FRAME_IDX), .subindex = 0x04, .name = "FSoE" #CH " crc_1", \
-        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8, \
+        .index = (FRAME_IDX), .subindex = 0x05, .name = "FSoE" #CH " crc_1", \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned16, \
         .default_value = 0, .unit = Unit_None, .options_enum = nullptr, \
-        .min_value = 0, .max_value = 0xFF, \
+        .min_value = 0, .max_value = 0xFFFF, \
         .modification_mode = ModificationMode::ReadOnly, \
-        .effective_time = EffectiveTime::Immediately, .comment = "FSoE" #CH " CRC byte 1", \
+        .effective_time = EffectiveTime::Immediately, .comment = "FSoE" #CH " CRC word 1", \
     }; \
     constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSOE##CH##_CRC2 = { \
-        .index = (FRAME_IDX), .subindex = 0x05, .name = "FSoE" #CH " crc_2", \
-        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8, \
+        .index = (FRAME_IDX), .subindex = 0x06, .name = "FSoE" #CH " crc_2", \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned16, \
         .default_value = 0, .unit = Unit_None, .options_enum = nullptr, \
-        .min_value = 0, .max_value = 0xFF, \
+        .min_value = 0, .max_value = 0xFFFF, \
         .modification_mode = ModificationMode::ReadOnly, \
-        .effective_time = EffectiveTime::Immediately, .comment = "FSoE" #CH " CRC byte 2", \
+        .effective_time = EffectiveTime::Immediately, .comment = "FSoE" #CH " CRC word 2", \
     }; \
     constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSOE##CH##_CRC3 = { \
-        .index = (FRAME_IDX), .subindex = 0x06, .name = "FSoE" #CH " crc_3", \
-        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8, \
+        .index = (FRAME_IDX), .subindex = 0x07, .name = "FSoE" #CH " crc_3", \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned16, \
         .default_value = 0, .unit = Unit_None, .options_enum = nullptr, \
-        .min_value = 0, .max_value = 0xFF, \
+        .min_value = 0, .max_value = 0xFFFF, \
         .modification_mode = ModificationMode::ReadOnly, \
-        .effective_time = EffectiveTime::Immediately, .comment = "FSoE" #CH " CRC byte 3", \
+        .effective_time = EffectiveTime::Immediately, .comment = "FSoE" #CH " CRC word 3", \
     }; \
     constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSOE##CH##_CRC4 = { \
-        .index = (FRAME_IDX), .subindex = 0x07, .name = "FSoE" #CH " crc_4", \
-        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8, \
+        .index = (FRAME_IDX), .subindex = 0x08, .name = "FSoE" #CH " crc_4", \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned16, \
         .default_value = 0, .unit = Unit_None, .options_enum = nullptr, \
-        .min_value = 0, .max_value = 0xFF, \
+        .min_value = 0, .max_value = 0xFFFF, \
         .modification_mode = ModificationMode::ReadOnly, \
-        .effective_time = EffectiveTime::Immediately, .comment = "FSoE" #CH " CRC byte 4", \
+        .effective_time = EffectiveTime::Immediately, .comment = "FSoE" #CH " CRC word 4", \
     }; \
     constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSOE##CH##_CRC5 = { \
-        .index = (FRAME_IDX), .subindex = 0x08, .name = "FSoE" #CH " crc_5", \
-        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8, \
+        .index = (FRAME_IDX), .subindex = 0x09, .name = "FSoE" #CH " crc_5", \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned16, \
         .default_value = 0, .unit = Unit_None, .options_enum = nullptr, \
-        .min_value = 0, .max_value = 0xFF, \
+        .min_value = 0, .max_value = 0xFFFF, \
         .modification_mode = ModificationMode::ReadOnly, \
-        .effective_time = EffectiveTime::Immediately, .comment = "FSoE" #CH " CRC byte 5", \
+        .effective_time = EffectiveTime::Immediately, .comment = "FSoE" #CH " CRC word 5", \
     }; \
     constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSOE##CH##_CRC6 = { \
-        .index = (FRAME_IDX), .subindex = 0x09, .name = "FSoE" #CH " crc_6", \
-        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8, \
+        .index = (FRAME_IDX), .subindex = 0x0A, .name = "FSoE" #CH " crc_6", \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned16, \
         .default_value = 0, .unit = Unit_None, .options_enum = nullptr, \
-        .min_value = 0, .max_value = 0xFF, \
+        .min_value = 0, .max_value = 0xFFFF, \
         .modification_mode = ModificationMode::ReadOnly, \
-        .effective_time = EffectiveTime::Immediately, .comment = "FSoE" #CH " CRC byte 6", \
+        .effective_time = EffectiveTime::Immediately, .comment = "FSoE" #CH " CRC word 6", \
     }; \
     constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSOE##CH##_CRC7 = { \
-        .index = (FRAME_IDX), .subindex = 0x0A, .name = "FSoE" #CH " crc_7", \
-        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8, \
+        .index = (FRAME_IDX), .subindex = 0x0B, .name = "FSoE" #CH " crc_7", \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned16, \
         .default_value = 0, .unit = Unit_None, .options_enum = nullptr, \
-        .min_value = 0, .max_value = 0xFF, \
+        .min_value = 0, .max_value = 0xFFFF, \
         .modification_mode = ModificationMode::ReadOnly, \
-        .effective_time = EffectiveTime::Immediately, .comment = "FSoE" #CH " CRC byte 7", \
+        .effective_time = EffectiveTime::Immediately, .comment = "FSoE" #CH " CRC word 7", \
     }; \
     constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FSOE##CH##_SafeCount = { \
         .index = (SAFE_IDX), .subindex = 0x00, \
