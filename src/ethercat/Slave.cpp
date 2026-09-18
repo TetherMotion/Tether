@@ -1200,19 +1200,23 @@ SlaveError Slave::configureCustomRxPDO(
     uint16_t pdo_index,
     std::initializer_list<CustomPDOMappingEntry> entries)
 {
-    return configureCustomTxPDO(pdo_index, entries, PDO::PDODirection::RxPDO);
+    return configureCustomTxPDO(pdo_index,
+                                std::span<const CustomPDOMappingEntry>(entries),
+                                PDO::PDODirection::RxPDO);
 }
 
 SlaveError Slave::configureCustomTxPDO(
     uint16_t pdo_index,
     std::initializer_list<CustomPDOMappingEntry> entries)
 {
-    return configureCustomTxPDO(pdo_index, entries, PDO::PDODirection::TxPDO);
+    return configureCustomTxPDO(pdo_index,
+                                std::span<const CustomPDOMappingEntry>(entries),
+                                PDO::PDODirection::TxPDO);
 }
 
 SlaveError Slave::configureCustomTxPDO(
     uint16_t pdo_index,
-    std::initializer_list<CustomPDOMappingEntry> entries,
+    std::span<const CustomPDOMappingEntry> entries,
     PDO::PDODirection direction)
 {
     if (entries.size() == 0) {
@@ -1427,6 +1431,10 @@ SlaveError Slave::registerExistingPDO(uint16_t pdo_index,
     }
     custom_pdo_infos_.push_back(std::move(info));
     return SlaveError::Ok;
+}
+
+void Slave::clearCustomPDOs() {
+    custom_pdo_infos_.clear();
 }
 
 SlaveError Slave::applyCustomPDOs() {
@@ -1923,6 +1931,10 @@ SlaveError NonExistingSlave::configureCustomRxPDO(uint16_t, std::initializer_lis
 SlaveError NonExistingSlave::configureCustomTxPDO(uint16_t, std::initializer_list<CustomPDOMappingEntry>) {
     logCritical("configureCustomTxPDO"); return SlaveError::SlaveNotFound;
 }
+SlaveError NonExistingSlave::configureCustomTxPDO(
+    uint16_t, std::span<const CustomPDOMappingEntry>, PDO::PDODirection) {
+    logCritical("configureCustomTxPDO"); return SlaveError::SlaveNotFound;
+}
 SlaveError NonExistingSlave::registerExistingRxPDO(uint16_t) {
     logCritical("registerExistingRxPDO"); return SlaveError::SlaveNotFound;
 }
@@ -1931,6 +1943,9 @@ SlaveError NonExistingSlave::registerExistingTxPDO(uint16_t) {
 }
 SlaveError NonExistingSlave::applyCustomPDOs() {
     logCritical("applyCustomPDOs"); return SlaveError::SlaveNotFound;
+}
+void NonExistingSlave::clearCustomPDOs() {
+    logCritical("clearCustomPDOs");
 }
 SlaveError NonExistingSlave::configureMultiPDOs(const MultiPDOAssignment&) {
     logCritical("configureMultiPDOs"); return SlaveError::SlaveNotFound;

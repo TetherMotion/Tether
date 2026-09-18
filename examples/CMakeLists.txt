@@ -211,6 +211,15 @@ add_tether_example(beckhoff_output_toggle
 add_tether_example(beckhoff_input_monitor
     LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
 
+# --- Generic PDO mapping probe ---
+# Tests how a slave's PDO mapping objects react to arbitrary configurations:
+# writes Rx/Tx PDOs with custom entries, requests SAFE-OP with a short
+# timeout, and reports the AL status code (e.g. 0x0024 Invalid input
+# mapping).  Supports entry-count / bit-size / total-size sweeps and a
+# negative battery, with an A-B-A integrity re-check after every failure.
+add_tether_example(pdo_mapping_probe
+    LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common tether_examples_common)
+
 # --- Beckhoff analog input terminal monitor ---
 # Auto-detects all EL3xxx analog-input terminals via the
 # MultiAnalogInputTerminal driver (mailbox + SM3 process inputs, per-channel
@@ -357,12 +366,12 @@ endif()
 # Reads Safety DI A/B via CoE/SDO and renders a live ncurses panel
 if(TETHER_DRIVE_NEXCOBOT_ESC211)
 find_package(Curses)
-if(CURSES_FOUND)
+if(CURSES_FOUND AND TARGET tether_terminal_ui)
     add_tether_example(esc211_di_monitor
-        LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common ${CURSES_LIBRARIES})
+        LIBRARIES tether_ethercat_master tether_device_drivers tether_terminal_ui tether_ethercat_common tether_hal tether_common tether_examples_common ${CURSES_LIBRARIES})
     target_include_directories(esc211_di_monitor PRIVATE ${CURSES_INCLUDE_DIRS})
 else()
-    message(STATUS "ncurses not found; skipping esc211_di_monitor")
+    message(STATUS "ncurses/tether_terminal_ui not found; skipping esc211_di_monitor")
 endif()
 endif()
 
