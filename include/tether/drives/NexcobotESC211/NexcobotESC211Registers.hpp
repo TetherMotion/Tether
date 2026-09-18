@@ -114,15 +114,16 @@ struct NexcobotESC211 {
     static constexpr uint16_t kTCP0OrientationLimitStateIndex    = 0x4022;
     static constexpr uint16_t kTCP0RobotPowerLimitStateIndex     = 0x4023;
 
-    // RSAP monitoring (0x4100-0x4108)
-    static constexpr uint16_t kRSAPTCP1MonitoringVelocityIndex = 0x4100;
-    static constexpr uint16_t kRSAPCalculateTCP1Index          = 0x4101;
-    static constexpr uint16_t kRSAPCalculateTCPForceIndex    = 0x4108;
+    // RSAP monitoring (0x4100-0x4115, see RSAPMonitoring.hpp)
+    static constexpr uint16_t kTCP0PositionCalculatedIndex    = 0x4100;
+    static constexpr uint16_t kTCPMonitoringSpeedLimitIndex   = 0x4101;
+    static constexpr uint16_t kTCPMonitoringForceLimitIndex   = 0x4103;
+    static constexpr uint16_t kTCPMonitoringPowerLimitIndex   = 0x4106;
+    static constexpr uint16_t kAxisLeverArmLengthTCP0Index    = 0x4115;
 
-    // Safety I/O (0x4200-0x4202)
-    static constexpr uint16_t kSafetyInputAIndex  = 0x4200;
-    static constexpr uint16_t kSafetyInputBIndex  = 0x4201;
-    static constexpr uint16_t kSafetyOutputIndex    = 0x4202;
+    // RSAP version build (ESI v0.9 removed the old 0x4200-0x4202 safety I/O
+    // channel setting records; only the STRING(16) version object remains)
+    static constexpr uint16_t kRSAPVersionBuildIndex = 0x4200;
 
     // Modular device profile (0xF000-0xF010)
     static constexpr uint16_t kModularDeviceProfileIndex = 0xF000;

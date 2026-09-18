@@ -36,6 +36,7 @@
 #include <ncurses.h>
 #undef OK
 #undef ERR
+#include "tether/ethercat/ALResetController.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
 #include "tether/ethercat/Types.hpp"
@@ -328,6 +329,20 @@ int main(int argc, char** argv) {
     expected_id.product_code = EtherCAT::Drives::NexcobotESC211::kProductCode;
     master.verifySlaveIdentity(static_cast<uint16_t>(slave_idx), expected_id, false, TAG);
 
+    // Force slave to INIT before any configuration.  This ensures a clean
+    // starting state regardless of what the slave firmware was doing before
+    // (e.g. stuck in PRE-OP with stale mailbox data from a previous run,
+    // or in an error state after a failed init).
+    TETHER_LOGI(TAG, "Forcing slave {} to INIT before configuration...", slave_idx);
+    {
+        EtherCAT::ALResetController reset_ctrl(master);
+        auto reset_result = reset_ctrl.resetSlave(static_cast<uint16_t>(slave_idx), 0x01, 50, 50);
+        if (!reset_result.success) {
+            TETHER_LOGW(TAG, "AL reset to INIT failed (AL_STATUS=0x{:04X}, code=0x{:04X}) — continuing",
+                        reset_result.final_al_status, reset_result.final_al_status_code);
+        }
+    }
+
     TETHER_LOGI(TAG, "Configuring mailbox for slave {}...", slave_idx);
     EtherCAT::SlaveError mb_err;
 #if TETHER_HAVE_ESI
@@ -398,29 +413,23 @@ int main(int argc, char** argv) {
 
     // readIdentityObject(sl);
 
-    // Configure custom RxPDO 0x1601 (OutputCounter + SAFE_DO = 8 B)
-    auto rx_err = sl.configureCustomRxPDO(0x1601, {
-        {&Reg::FSOETx::OutputCounter},   // 0x7010, 4 bytes (Unsigned32)
-        {&Reg::FSOETx::SAFE_DO},         // 0x7020, 4 bytes (Unsigned32)
-    });
+    // ESI v0.9 PDOs are vendor-fixed: read each PDO's own mapping via SDO
+    // (registerExisting*PDO) and only assign it in 0x1C12/0x1C13.
+    //   RxPDO 0x1601: OutputCounter (0x7010) + SAFE_DO (0x7020) = 8 B
+    //   TxPDO 0x1A01: InputCounter (0x6010), SAFE_DI (0x6020), Power_Status
+    //                 (0x6030), DO_Monitor (0x6040), DO_Valu (0x6050),
+    //                 DI_Valu (0x6051), DO_Command (0x6052) = 7 x UDINT = 28 B
+    auto rx_err = sl.registerExistingRxPDO(0x1601);
     if (rx_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "Custom RxPDO config failed: {}", EtherCAT::slaveErrorToString(rx_err));
+        TETHER_LOGE(TAG, "RxPDO 0x1601 registration failed: {}", EtherCAT::slaveErrorToString(rx_err));
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 7;
     }
 
-    // Configure custom TxPDO 0x1A01 (6 entries, 24 B  -  DO_Command dropped)
-    auto tx_err = sl.configureCustomTxPDO(0x1A01, {
-        {&Reg::FSOERx::InputCounter},    // 0x6010, 4 bytes
-        {&Reg::FSOERx::SAFE_DI},         // 0x6020, 4 bytes
-        {&Reg::FSOERx::PowerStatus},     // 0x6030, 4 bytes
-        {&Reg::FSOERx::DOMonitor},       // 0x6040, 4 bytes
-        {&Reg::FSOERx::DOValueActual},   // 0x6050, 4 bytes
-        {&Reg::FSOERx::DIValue},         // 0x6051, 4 bytes
-    });
+    auto tx_err = sl.registerExistingTxPDO(0x1A01);
     if (tx_err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(TAG, "Custom TxPDO config failed: {}", EtherCAT::slaveErrorToString(tx_err));
+        TETHER_LOGE(TAG, "TxPDO 0x1A01 registration failed: {}", EtherCAT::slaveErrorToString(tx_err));
         master.stop();
         Tether::Examples::shutdownHostEthernet(session);
         return 7;
@@ -459,8 +468,27 @@ int main(int argc, char** argv) {
     auto next_time = steady_clock::now();
     uint64_t cycle = 0;
 
-    // Helper: exchange PDOs and return raw TxPDO buffer
+    // Helper: bump the OutputCounter heartbeat (RxPDO 0x1601 field 0), then
+    // exchange PDOs and return the raw TxPDO buffer.
     auto getTxPDO = [&]() -> const uint8_t* {
+        auto& mapping = master.pdo().mapping();
+        for (size_t i = 0; i < mapping.entry_count(); ++i) {
+            auto* e = mapping.get_entry_mut(i);
+            if (e && e->slave_index == static_cast<uint16_t>(slave_idx) &&
+                e->direction == EtherCAT::PDO::PDODirection::RxPDO &&
+                e->pdo_index == 0x1601 && e->app_buffer && e->data_size >= 4) {
+                auto* p = static_cast<uint8_t*>(e->app_buffer);
+                uint32_t n = static_cast<uint32_t>(p[0]) |
+                             (static_cast<uint32_t>(p[1]) << 8) |
+                             (static_cast<uint32_t>(p[2]) << 16) |
+                             (static_cast<uint32_t>(p[3]) << 24);
+                ++n;
+                p[0] = static_cast<uint8_t>(n);
+                p[1] = static_cast<uint8_t>(n >> 8);
+                p[2] = static_cast<uint8_t>(n >> 16);
+                p[3] = static_cast<uint8_t>(n >> 24);
+            }
+        }
         if (!master.pdo().exchangeAll()) return nullptr;
         return sl.customPDOData(0x1A01);
     };
@@ -476,6 +504,7 @@ int main(int argc, char** argv) {
                 auto do_mon  = *sl.customPDOField<uint32_t>(0x1A01, 3);
                 auto do_val  = *sl.customPDOField<uint32_t>(0x1A01, 4);
                 auto di_val  = *sl.customPDOField<uint32_t>(0x1A01, 5);
+                auto do_cmd  = *sl.customPDOField<uint32_t>(0x1A01, 6);
                 std::cout << "cycle=" << std::dec << cycle
                           << " ic=0x" << std::hex << ic
                           << " safe_di=0x" << safe_di
@@ -483,6 +512,7 @@ int main(int argc, char** argv) {
                           << " do_mon=0x" << do_mon
                           << " do_val=0x" << do_val
                           << " di_val=0x" << di_val
+                          << " do_cmd=0x" << do_cmd
                           << std::dec << "\n";
                 std::cout.flush();
             } else {
