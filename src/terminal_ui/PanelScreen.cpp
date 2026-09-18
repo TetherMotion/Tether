@@ -34,6 +34,8 @@ void PanelScreen::run(std::atomic<bool>& cancel, double durationSec) {
     };
 
     int footerY = layout();
+    bool filter_editing = false;
+    std::string filter_buf;
 
     while (!cancel.load()) {
         const double elapsed = std::chrono::duration<double>(
@@ -52,9 +54,16 @@ void PanelScreen::run(std::atomic<bool>& cancel, double durationSec) {
 
         // ---- Footer -----------------------------------------------------
         if (session_.colors()) attron(COLOR_PAIR(PalHint));
-        mvprintw(footerY, 0, " q: quit  PgUp/PgDn/End: log%s%s",
+        if (filter_editing) {
+            mvprintw(footerY, 0,
+                     " filter: %s_   (level>=warn  tag=x  !tag=y  text=z"
+                     "  | Enter: apply  Esc: cancel  empty: clear)",
+                     filter_buf.c_str());
+        } else {
+            mvprintw(footerY, 0, " q: quit  PgUp/PgDn/End: log  f: filter%s%s",
                  hooks_.keyHints.empty() ? "" : "  ",
                  hooks_.keyHints.c_str());
+        }
         if (session_.colors()) attroff(COLOR_PAIR(PalHint));
 
         // ---- Separator above the log pane -------------------------------
@@ -78,6 +87,27 @@ void PanelScreen::run(std::atomic<bool>& cancel, double durationSec) {
 
         // ---- Input ------------------------------------------------------
         const int key = session_.pollKey(50);
+        // Modal filter editor: 'f' opens it, every key goes to the
+        // expression buffer until Enter (apply) or Esc (cancel).
+        if (filter_editing) {
+            if (key == 27) { filter_editing = false; continue; }
+            if (key == '\n' || key == '\r' || key == KEY_ENTER) {
+                filter_editing = false;
+                if (filter_buf.empty()) log_.clearViewFilter();
+                else log_.setViewFilter(LogFilter::parse(filter_buf));
+                log_.scrollToEnd();
+                continue;
+            }
+            if (key == KEY_BACKSPACE || key == 127 || key == '\b') {
+                if (!filter_buf.empty()) filter_buf.pop_back();
+                continue;
+            }
+            if (key >= 32 && key <= 126) {
+                filter_buf += static_cast<char>(key);
+            }
+            continue;
+        }
+        if (key == 'f') { filter_editing = true; filter_buf.clear(); continue; }
         if (key == KEY_PPAGE) {
             log_.scrollLines(-static_cast<int>(log_.maxLines()));
             continue;

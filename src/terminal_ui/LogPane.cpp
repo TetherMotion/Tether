@@ -6,7 +6,9 @@
 #include "tether/terminal_ui/LogPane.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cwchar>
+#include <sstream>
 
 #include <ncurses.h>
 
@@ -42,6 +44,76 @@ static short levelColor(Platform::LogLevel level, short infoColor) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// LogFilter
+// ---------------------------------------------------------------------------
+
+bool LogFilter::matches(const LogEntry& e) const {
+    if (min_level != Platform::LogLevel::None && e.level > min_level)
+        return false;
+    if (!include_tags.empty() &&
+        include_tags.find(e.tag) == include_tags.end())
+        return false;
+    if (exclude_tags.find(e.tag) != exclude_tags.end())
+        return false;
+    if (!contains.empty() &&
+        e.text.find(contains) == std::string::npos)
+        return false;
+    return true;
+}
+
+namespace {
+
+Platform::LogLevel parseLevelName(const std::string& s) {
+    if (s == "none")    return Platform::LogLevel::None;
+    if (s == "error" || s == "err" || s == "e")
+        return Platform::LogLevel::Error;
+    if (s == "warn" || s == "warning" || s == "w")
+        return Platform::LogLevel::Warn;
+    if (s == "info" || s == "i") return Platform::LogLevel::Info;
+    if (s == "debug" || s == "d") return Platform::LogLevel::Debug;
+    if (s == "verbose" || s == "v") return Platform::LogLevel::Verbose;
+    return Platform::LogLevel::None;
+}
+
+std::string toLower(std::string s) {
+    for (auto& c : s) c = static_cast<char>(std::tolower(c));
+    return s;
+}
+
+} // namespace
+
+LogFilter LogFilter::parse(const std::string& expr) {
+    LogFilter f;
+    std::istringstream iss(expr);
+    std::string term;
+    while (iss >> term) {
+        if (term.empty()) continue;
+        const std::string lower = toLower(term);
+        const auto sep = lower.find_first_of("=:");
+        const std::string key = sep == std::string::npos
+                              ? lower : lower.substr(0, sep);
+        const std::string val = sep == std::string::npos
+                              ? "" : term.substr(sep + 1);
+
+        if (key == "level" || key == "level>" || key == "lvl" ||
+            key == "min") {
+            const auto lvl = parseLevelName(toLower(val));
+            if (lvl != Platform::LogLevel::None) f.min_level = lvl;
+        } else if (key == "tag" || key == "+tag") {
+            if (!val.empty()) f.include_tags.insert(val);
+        } else if (key == "!tag" || key == "-tag" || key == "notag") {
+            if (!val.empty()) f.exclude_tags.insert(val);
+        } else if (key == "text" || key == "contains" || key == "grep") {
+            f.contains = val;
+        } else if (sep == std::string::npos) {
+            // Bare word — substring match (same as text=word).
+            f.contains = term;
+        }
+    }
+    return f;
+}
+
 namespace {
 size_t g_defaultCapacity = TETHER_TUI_LOGPANE_CAPACITY;
 }
@@ -59,7 +131,7 @@ void LogPane::attach() {
         [this](Platform::LogLevel level, const char* tag, const char* msg) {
             static const char* lv[] = {"", "E", "W", "I", "D", "V"};
             const char* l = lv[std::min<int>(static_cast<int>(level), 5)];
-            addLine(std::string(l) + " " + tag + ": " + msg, level);
+            addLine(std::string(l) + " " + tag + ": " + msg, level, tag);
         });
 }
 
@@ -74,9 +146,14 @@ void LogPane::addLine(std::string line) {
 }
 
 void LogPane::addLine(std::string line, Platform::LogLevel level) {
+    addLine(std::move(line), level, {});
+}
+
+void LogPane::addLine(std::string line, Platform::LogLevel level,
+                      std::string tag) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (level > min_level_) return;   // ingest filter
-    lines_.push_back({std::move(line), level});
+    lines_.push_back({std::move(line), level, std::move(tag)});
     while (lines_.size() > capacity_) lines_.pop_front();
 }
 
@@ -98,18 +175,43 @@ void LogPane::setMinLevel(Platform::LogLevel level) {
     min_level_ = level;
 }
 
+void LogPane::setViewFilter(const LogFilter& f) { view_filter_ = f; }
+
 void LogPane::setViewLevel(Platform::LogLevel level) {
-    view_level_ = level;
+    view_filter_.min_level = level;
 }
 
 void LogPane::setViewTag(const std::string& substr) {
-    view_tag_ = substr;
+    view_filter_.contains = substr;
 }
 
-void LogPane::clearViewFilter() {
-    view_level_ = Platform::LogLevel::None;
-    view_tag_.clear();
+void LogPane::includeTag(const std::string& tag, bool on) {
+    if (on) {
+        view_filter_.include_tags.insert(tag);
+        view_filter_.exclude_tags.erase(tag);
+    } else {
+        view_filter_.include_tags.erase(tag);
+    }
 }
+
+void LogPane::excludeTag(const std::string& tag, bool on) {
+    if (on) {
+        view_filter_.exclude_tags.insert(tag);
+        view_filter_.include_tags.erase(tag);
+    } else {
+        view_filter_.exclude_tags.erase(tag);
+    }
+}
+
+std::vector<std::string> LogPane::knownTags() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::unordered_set<std::string> seen;
+    for (const auto& e : lines_)
+        if (!e.tag.empty()) seen.insert(e.tag);
+    return {seen.begin(), seen.end()};
+}
+
+void LogPane::clearViewFilter() { view_filter_.clear(); }
 
 void LogPane::scrollLines(int delta) {
     // Note: deliberately takes no lock — size() may race by a line or
@@ -136,24 +238,18 @@ void LogPane::render(TermWindow* w, short colorPair) {
     getmaxyx(win, h, width);
     if (h <= 0 || width <= 0) return;
 
-    std::deque<Entry> copy;
+    std::deque<LogEntry> copy;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         copy = lines_;
     }
-    // Apply the view filter (level + text substring).  Scroll offsets
-    // count matching lines only.
+    // Apply the view filter — works identically on the existing
+    // scrollback (history) and on lines appended afterwards (live).
+    // Scroll offsets count matching lines only.
     if (filtered()) {
-        std::deque<Entry> kept;
-        for (const auto& e : copy) {
-            if (view_level_ != Platform::LogLevel::None &&
-                e.level > view_level_)
-                continue;
-            if (!view_tag_.empty() &&
-                e.text.find(view_tag_) == std::string::npos)
-                continue;
-            kept.push_back(e);
-        }
+        std::deque<LogEntry> kept;
+        for (const auto& e : copy)
+            if (view_filter_.matches(e)) kept.push_back(e);
         copy = std::move(kept);
     }
     const size_t total = copy.size();

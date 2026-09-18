@@ -20,6 +20,8 @@
 #include <deque>
 #include <mutex>
 #include <string>
+#include <unordered_set>
+#include <vector>
 
 #include "logging/Logger.hpp"
 #include "tether/terminal_ui/Session.hpp"
@@ -33,6 +35,46 @@
 
 namespace Tether {
 namespace TUI {
+
+/// One captured log line with its facets (level + module tag) for
+/// multi-facet filtering.
+struct LogEntry {
+    std::string        text;   ///< full rendered line "I tag: msg"
+    Platform::LogLevel level = Platform::LogLevel::Info;
+    std::string        tag;    ///< module tag ("" when unknown)
+};
+
+/// Multi-facet view filter for LogPane — all facets AND together:
+///   level  : keep lines with severity >= min_level (None = no limit)
+///   include_tags : empty = keep all; otherwise tag must be in the set
+///   exclude_tags : tag must NOT be in the set (wins over include)
+///   contains : non-empty substring the full line must contain
+///
+/// Applied at render time, so it filters the existing scrollback
+/// (history) as well as every line captured afterwards (live).
+struct LogFilter {
+    Platform::LogLevel            min_level = Platform::LogLevel::None;
+    std::unordered_set<std::string> include_tags;
+    std::unordered_set<std::string> exclude_tags;
+    std::string                   contains;
+
+    bool active() const {
+        return min_level != Platform::LogLevel::None ||
+               !include_tags.empty() || !exclude_tags.empty() ||
+               !contains.empty();
+    }
+    bool matches(const LogEntry& e) const;
+    void clear() { *this = LogFilter{}; }
+
+    /// Parse a filter expression of space-separated terms:
+    ///   "level>=warn" / "min=error"   — minimum severity
+    ///   "tag=fsoe" / "+tag=fsoe"      — include module tag (repeatable)
+    ///   "!tag=mailbox" / "-tag=x"     — exclude module tag (repeatable)
+    ///   "text=stuck"                  — substring
+    ///   <bare word>                   — substring (same as text=word)
+    /// Unknown level names / malformed terms are ignored.
+    static LogFilter parse(const std::string& expr);
+};
 
 class LogPane {
 public:
@@ -56,6 +98,9 @@ public:
     void addLine(std::string line);
     /// Append a line with an explicit severity for coloring.
     void addLine(std::string line, Platform::LogLevel level);
+    /// Append a fully-faceted entry (level + module tag).
+    void addLine(std::string line, Platform::LogLevel level,
+                 std::string tag);
 
     /// Scroll the view.  Positive delta moves toward newer lines,
     /// negative toward older.  Any nonzero offset disables following
@@ -87,19 +132,23 @@ public:
     /// Ingest filter: drop lines below this level at capture time
     /// (they never enter the buffer).  Default Verbose = keep all.
     void setMinLevel(Platform::LogLevel level);
-    /// View filter: render only lines at or above this severity.
-    /// LogLevel::None disables the level filter.
+    /// Multi-facet view filter — applies live to new lines and
+    /// retroactively to the scrollback on every render.
+    void setViewFilter(const LogFilter& f);
+    const LogFilter& viewFilter() const { return view_filter_; }
+    /// Convenience single-facet helpers (merge into the view filter).
     void setViewLevel(Platform::LogLevel level);
-    /// View filter: render only lines containing `substr`
-    /// (case-sensitive; empty string disables the text filter).
     void setViewTag(const std::string& substr);
-    /// Reset all view filters (level + text).
+    /// Module filtering helpers: add/remove a tag in the include or
+    /// exclude set of the view filter.
+    void includeTag(const std::string& tag, bool on = true);
+    void excludeTag(const std::string& tag, bool on = true);
+    /// All module tags seen so far (for building filter UIs).
+    std::vector<std::string> knownTags() const;
+    /// Reset all view filters (level + tags + text).
     void clearViewFilter();
     /// True when a view filter is active.
-    bool filtered() const {
-        return view_level_ != Platform::LogLevel::None ||
-               !view_tag_.empty();
-    }
+    bool filtered() const { return view_filter_.active(); }
 
     /// On-screen view height (kept under the old name — the screens use
     /// it to size the log window).
@@ -108,18 +157,12 @@ public:
     size_t size() const;
 
 private:
-    struct Entry {
-        std::string        text;
-        Platform::LogLevel level;
-    };
-
-    std::deque<Entry> lines_;
+    std::deque<LogEntry> lines_;
     mutable std::mutex mutex_;
     size_t            viewHeight_;
     size_t            capacity_;
     Platform::LogLevel min_level_ = Platform::LogLevel::Verbose;
-    Platform::LogLevel view_level_ = Platform::LogLevel::None;
-    std::string       view_tag_;
+    LogFilter         view_filter_;
     /// Lines hidden below the view bottom (0 = following newest).
     /// Only mutated by the UI thread; read without a lock is fine.
     size_t            scrollOffset_ = 0;
