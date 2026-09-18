@@ -150,7 +150,8 @@ void TreeScreen::run(std::atomic<bool>& cancel, double durationSec) {
         // ---- Footer -----------------------------------------------------
         if (session_.colors()) attron(COLOR_PAIR(PalHint));
         mvprintw(footerY, 0,
-                 " arrows: navigate  left/right: fold  q: quit%s%s",
+                 " arrows: navigate  left/right: fold  q: quit"
+                 "  S-Up/S-Dn/End: log%s%s",
                  hooks_.keyHints.empty() ? "" : "  ",
                  hooks_.keyHints.c_str());
         if (session_.colors()) attroff(COLOR_PAIR(PalHint));
@@ -192,7 +193,7 @@ void TreeScreen::run(std::atomic<bool>& cancel, double durationSec) {
         }
         wnoutrefresh(static_cast<WINDOW*>(detailWin));
 
-        log_.render(logWin, PalError);
+        log_.render(logWin);
         wnoutrefresh(static_cast<WINDOW*>(logWin));
 
         doupdate();
@@ -203,6 +204,11 @@ void TreeScreen::run(std::atomic<bool>& cancel, double durationSec) {
         // An open line prompt is modal: every key goes to it — including
         // 'q'/'Q' (printable → appended) and Esc (cancels the prompt).
         if (prompt_active_) { handlePromptKey(key); continue; }
+        // Shift-Up/Down scroll the captured log (PgUp/PgDn already
+        // scroll the detail pane); End jumps back to the newest line.
+        if (key == KEY_SR) { log_.scrollLines(-1); continue; }
+        if (key == KEY_SF) { log_.scrollLines(1); continue; }
+        if (key == KEY_END) { log_.scrollToEnd(); continue; }
         if (key == 'q' || key == 'Q' || key == 27) {
             if (hooks_.quitGuard && hooks_.quitGuard()) {
                 if (hooks_.onKey) hooks_.onKey(key);

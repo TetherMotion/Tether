@@ -52,7 +52,7 @@ void PanelScreen::run(std::atomic<bool>& cancel, double durationSec) {
 
         // ---- Footer -----------------------------------------------------
         if (session_.colors()) attron(COLOR_PAIR(PalHint));
-        mvprintw(footerY, 0, " q: quit%s%s",
+        mvprintw(footerY, 0, " q: quit  PgUp/PgDn/End: log%s%s",
                  hooks_.keyHints.empty() ? "" : "  ",
                  hooks_.keyHints.c_str());
         if (session_.colors()) attroff(COLOR_PAIR(PalHint));
@@ -72,12 +72,21 @@ void PanelScreen::run(std::atomic<bool>& cancel, double durationSec) {
 
         // Push stdscr first, then the log subwindow, one physical update.
         wnoutrefresh(stdscr);
-        log_.render(logWin, PalError);
+        log_.render(logWin);
         wnoutrefresh(static_cast<WINDOW*>(logWin));
         doupdate();
 
         // ---- Input ------------------------------------------------------
         const int key = session_.pollKey(50);
+        if (key == KEY_PPAGE) {
+            log_.scrollLines(-static_cast<int>(log_.maxLines()));
+            continue;
+        }
+        if (key == KEY_NPAGE) {
+            log_.scrollLines(static_cast<int>(log_.maxLines()));
+            continue;
+        }
+        if (key == KEY_END) { log_.scrollToEnd(); continue; }
         if (key == 'q' || key == 'Q' || key == 27) {
             if (hooks_.quitGuard && hooks_.quitGuard()) {
                 if (hooks_.onKey) hooks_.onKey(key);
