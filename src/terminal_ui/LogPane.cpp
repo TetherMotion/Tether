@@ -42,8 +42,13 @@ static short levelColor(Platform::LogLevel level, short infoColor) {
     }
 }
 
+namespace {
+size_t g_defaultCapacity = TETHER_TUI_LOGPANE_CAPACITY;
+}
+
 LogPane::LogPane(size_t viewHeight, size_t capacity)
-    : viewHeight_(viewHeight), capacity_(capacity) {}
+    : viewHeight_(viewHeight),
+      capacity_(capacity ? capacity : g_defaultCapacity) {}
 
 LogPane::~LogPane() { release(); }
 
@@ -70,8 +75,40 @@ void LogPane::addLine(std::string line) {
 
 void LogPane::addLine(std::string line, Platform::LogLevel level) {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (level > min_level_) return;   // ingest filter
     lines_.push_back({std::move(line), level});
     while (lines_.size() > capacity_) lines_.pop_front();
+}
+
+void LogPane::setCapacity(size_t capacity) {
+    if (capacity == 0) capacity = 1;
+    std::lock_guard<std::mutex> lock(mutex_);
+    capacity_ = capacity;
+    while (lines_.size() > capacity_) lines_.pop_front();
+}
+
+void LogPane::setDefaultCapacity(size_t capacity) {
+    g_defaultCapacity = capacity ? capacity : 1;
+}
+
+size_t LogPane::defaultCapacity() { return g_defaultCapacity; }
+
+void LogPane::setMinLevel(Platform::LogLevel level) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    min_level_ = level;
+}
+
+void LogPane::setViewLevel(Platform::LogLevel level) {
+    view_level_ = level;
+}
+
+void LogPane::setViewTag(const std::string& substr) {
+    view_tag_ = substr;
+}
+
+void LogPane::clearViewFilter() {
+    view_level_ = Platform::LogLevel::None;
+    view_tag_.clear();
 }
 
 void LogPane::scrollLines(int delta) {
@@ -104,6 +141,21 @@ void LogPane::render(TermWindow* w, short colorPair) {
         std::lock_guard<std::mutex> lock(mutex_);
         copy = lines_;
     }
+    // Apply the view filter (level + text substring).  Scroll offsets
+    // count matching lines only.
+    if (filtered()) {
+        std::deque<Entry> kept;
+        for (const auto& e : copy) {
+            if (view_level_ != Platform::LogLevel::None &&
+                e.level > view_level_)
+                continue;
+            if (!view_tag_.empty() &&
+                e.text.find(view_tag_) == std::string::npos)
+                continue;
+            kept.push_back(e);
+        }
+        copy = std::move(kept);
+    }
     const size_t total = copy.size();
     // Clamp the offset to what actually exists (lines may have been
     // appended or evicted since the last render).
@@ -123,11 +175,16 @@ void LogPane::render(TermWindow* w, short colorPair) {
                   utf8Trunc(copy[i].text, width - 1).c_str());
         if (cp != PalNone) wattroff(win, COLOR_PAIR(cp));
     }
-    // Scroll indicator on the last row when not following.
-    if (scrollOffset_ > 0 && h > 0) {
+    // Scroll/filter indicator on the last row.
+    if (h > 0 && (scrollOffset_ > 0 || filtered())) {
+        std::string ind;
+        if (scrollOffset_ > 0) ind = " scroll -" + std::to_string(scrollOffset_) + " ";
+        if (filtered())        ind += " filtered ";
         wattron(win, COLOR_PAIR(PalHint) | A_REVERSE);
-        mvwprintw(win, h - 1, width > 18 ? width - 18 : 0,
-                  " scroll -%zu ", scrollOffset_);
+        mvwprintw(win, h - 1,
+                  width > static_cast<int>(ind.size()) + 1
+                      ? width - static_cast<int>(ind.size()) - 1 : 0,
+                  "%s", ind.c_str());
         wattroff(win, COLOR_PAIR(PalHint) | A_REVERSE);
     }
 }
