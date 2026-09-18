@@ -129,7 +129,7 @@ struct NexcobotESC211 {
     static constexpr uint16_t kModularDeviceProfileIndex = 0xF000;
     static constexpr uint16_t kModuleProfileListIndex    = 0xF010;
 
-    // User / system (0xF100-0xF112)
+    // User / system (0xF100-0xF703)
     static constexpr uint16_t kUserControlIndex           = 0xF100;
     static constexpr uint16_t kSystemCurrentStateIndex    = 0xF101;
     static constexpr uint16_t kSystemErrorCodeIndex      = 0xF102;

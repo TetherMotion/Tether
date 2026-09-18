@@ -9,10 +9,53 @@ namespace Registers {
 namespace NexcobotESC211 {
 namespace SyncManager {
 
+static constexpr uint16_t SMTypeIndex          = 0x1C00;
 static constexpr uint16_t RxPDOAssignmentIndex = 0x1C12;
 static constexpr uint16_t TxPDOAssignmentIndex = 0x1C13;
 static constexpr uint16_t SMOutputParamIndex   = 0x1C32;
 static constexpr uint16_t SMInputParamIndex    = 0x1C33;
+
+// ---------------------------------------------------------------------------
+// 0x1C00: Sync manager type
+// ---------------------------------------------------------------------------
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry SMTypeCount = {
+    .index = SMTypeIndex,
+    .subindex = 0x00,
+    .name = "Sync manager type count",
+    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
+    .default_value = 4,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 255,
+    .modification_mode = ModificationMode::ReadOnly,
+    .effective_time = EffectiveTime::Immediately,
+    .comment = "Number of sync manager channels",
+};
+
+#define NEXCOBOT_SM_TYPE_REG(NUM) \
+    constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry SMType_##NUM = { \
+        .index = SMTypeIndex, \
+        .subindex = (NUM), \
+        .name = "Sync manager " #NUM " type", \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8, \
+        .default_value = 0, \
+        .unit = Unit_None, \
+        .options_enum = nullptr, \
+        .min_value = 0, \
+        .max_value = 4, \
+        .modification_mode = ModificationMode::ReadOnly, \
+        .effective_time = EffectiveTime::Immediately, \
+        .comment = "Sync manager " #NUM " type (1=MbxRx 2=MbxTx 3=Outputs 4=Inputs)", \
+    }
+
+NEXCOBOT_SM_TYPE_REG(1);
+NEXCOBOT_SM_TYPE_REG(2);
+NEXCOBOT_SM_TYPE_REG(3);
+NEXCOBOT_SM_TYPE_REG(4);
+
+#undef NEXCOBOT_SM_TYPE_REG
 
 // ---------------------------------------------------------------------------
 // 0x1C12: RxPDO Assignment
@@ -481,6 +524,8 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry SMInputSyncError =
 };
 
 inline const RegisterList kRegisterList = {
+    &SMTypeCount,
+    &SMType_1, &SMType_2, &SMType_3, &SMType_4,
     &RxPDOAssignmentCount,
     &RxPDOAssignment1,
     &TxPDOAssignmentCount,
