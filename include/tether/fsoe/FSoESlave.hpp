@@ -189,6 +189,27 @@ struct FSoESlaveConfig {
     // the Synapticon master's behavior.
     bool resetCrcOnStateTransition = false;
 
+    /// Native CRC-chain resynchronization (opt-in, default off).
+    ///
+    /// When a received frame fails CRC verification, the slave solves the
+    /// (startCrc, seqNo) seed directly from the frame's own stored CRCs —
+    /// computeAllCrcs() is affine in the 32 seed bits, so the seed is a
+    /// GF(2) linear solve (CRC::resyncSolveSeed).  The solved seed is then
+    /// used for the full frame verification, and the slave's sequence
+    /// tracking is updated to the recovered seqNo so subsequent frames
+    /// verify normally again.
+    ///
+    /// Use this when the slave may join a running connection mid-stream or
+    /// miss a state-transition frame: without resync the inherited CRC
+    /// chain is permanently desynced and every frame is rejected.
+    ///
+    /// Security/robustness note: for frames with fewer than 3 CRC segments
+    /// (data_len ≤ 4) the solve consumes every equation, so the resynced
+    /// frame is accepted on structural consistency alone — see the
+    /// resyncSolveSeed() documentation in FSoECRC.hpp.  The mode is
+    /// intended for emulators/test setups, not fail-safe production use.
+    bool crcResyncEnabled = false;
+
     // Parameter CRC verification (0 = skip verification)
     uint16_t expectedParameterCRC = 0;
     

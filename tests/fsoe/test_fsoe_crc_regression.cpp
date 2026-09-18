@@ -528,3 +528,88 @@ TEST(FSoEFrameScan, MinFrameLenExcludesShortMatches) {
     ASSERT_TRUE(m.found);
     EXPECT_EQ(m.offset, kOffset);
 }
+
+// ---------------------------------------------------------------------------
+// Native CRC resync (resyncSolveSeed / parseFSoEFrameResync)
+// ---------------------------------------------------------------------------
+
+TEST(FSoECRCResync, SolvesEquivalentSeedFromFrame) {
+    // Build a frame with a nontrivial (startCrc, seqNo) seed.  The pair
+    // is not identifiable (only crc_common is), so the solver returns an
+    // equivalent (0, seq) seed that must verify the frame identically.
+    uint8_t data[] = {0x11, 0x22, 0x33, 0x44};   // 4 data bytes -> 2 CRCs
+    uint8_t frame[64];
+    const uint16_t kStart = 0xBEEF, kSeq = 0x1234, kConn = 0x0007;
+    size_t len = CRC::buildFSoEFrame(frame, Command::ProcessData,
+                                      data, sizeof(data), kConn,
+                                      kStart, kSeq);
+    ASSERT_EQ(len, 11u);
+
+    uint16_t start = 0, seq = 0;
+    ASSERT_TRUE(CRC::resyncSolveSeed(frame, len, start, seq));
+    EXPECT_EQ(start, 0u);
+
+    // The equivalent seed must make the full parser accept the frame.
+    uint8_t cmd = 0;
+    uint16_t conn_id = 0;
+    size_t data_len = 0;
+    ASSERT_TRUE(CRC::parseFSoEFrame(frame, len, cmd, {}, data_len,
+                                    conn_id, start, seq));
+    EXPECT_EQ(conn_id, kConn);
+}
+
+TEST(FSoECRCResync, SolvedSeedParsesFrame) {
+    uint8_t data[] = {0xDE, 0xAD, 0xBE, 0xEF};
+    uint8_t frame[64];
+    size_t len = CRC::buildFSoEFrame(frame, Command::ProcessData,
+                                      data, sizeof(data), 0x0005,
+                                      0x7777, 0x4242);
+
+    uint8_t cmd = 0;
+    uint16_t conn_id = 0, crc0 = 0, start = 0, seq = 0;
+    size_t data_len = 0;
+    uint8_t out_data[18] = {};
+    ASSERT_TRUE(CRC::parseFSoEFrameResync(
+        frame, len, cmd, std::span<uint8_t>(out_data, sizeof(out_data)),
+        data_len, conn_id, &crc0, &start, &seq));
+    EXPECT_EQ(cmd, Command::ProcessData);
+    EXPECT_EQ(conn_id, 0x0005);
+    EXPECT_EQ(data_len, 4u);
+    EXPECT_EQ(out_data[0], 0xDE);
+    EXPECT_EQ(out_data[3], 0xEF);
+}
+
+TEST(FSoECRCResync, MultiCrcFrameVerifiesExtraSegments) {
+    // 6 data bytes -> 3 stored CRCs: segments 2+ provide independent
+    // verification of the recovered crc_common.
+    uint8_t data[] = {1, 2, 3, 4, 5, 6};
+    uint8_t frame[64];
+    size_t len = CRC::buildFSoEFrame(frame, Command::ProcessData,
+                                      data, sizeof(data), 0x0003,
+                                      0xABCD, 0x00EF);
+    ASSERT_EQ(len, 15u);
+
+    uint16_t start = 0, seq = 0;
+    ASSERT_TRUE(CRC::resyncSolveSeed(frame, len, start, seq));
+
+    // Corrupting a trailing segment CRC must fail the verification —
+    // the solve anchors on CRC0 but CRC1/CRC2 are checked independently.
+    frame[7] ^= 0xFF;  // CRC1 low byte
+    EXPECT_FALSE(CRC::resyncSolveSeed(frame, len, start, seq));
+    uint8_t cmd = 0;
+    uint16_t conn_id = 0;
+    size_t data_len = 0;
+    EXPECT_FALSE(CRC::parseFSoEFrameResync(frame, len, cmd, {},
+                                          data_len, conn_id));
+}
+
+TEST(FSoECRCResync, RejectsStructurallyInvalidFrame) {
+    uint8_t garbage[11] = {0xFF, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    uint8_t cmd = 0;
+    uint16_t conn_id = 0;
+    size_t data_len = 0;
+    // Even if a seed solves, an invalid command must not pass the full
+    // parse (parseFSoEFrame validates the command byte).
+    EXPECT_FALSE(CRC::parseFSoEFrameResync(garbage, sizeof(garbage),
+                                           cmd, {}, data_len, conn_id));
+}

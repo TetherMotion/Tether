@@ -753,11 +753,44 @@ bool FSoESlave::validateFrame(const uint8_t* data, size_t len) {
     // buildResetResponse can use it for collision avoidance.  The ESC211
     // sends Reset frames with safe data (11 bytes, not 3), so they have
     // CRCs that must be captured.
-    if (!CRC::parseFSoEFrameWithCollisionAvoidance(
+    bool parsed = CRC::parseFSoEFrameWithCollisionAvoidance(
             data, len, cmd, {}, data_len, conn_id,
             parse_start_crc, parse_seq_no,
             &last_rx_crc0_,  // always capture CRC0 for collision avoidance
-            &seq_used, &crc_error_detail)) {
+            &seq_used, &crc_error_detail);
+
+    // CRC-chain resync: the ESC211 master resets its CRC chain at each
+    // state transition (start_crc=0, seq=initialSeqNo).  If the slave
+    // missed the transition frame its inherited chain is desynced and
+    // every subsequent frame fails — retry once with a fresh chain so
+    // the slave can re-synchronize instead of being stuck in RESET.
+    if (!parsed && config_.resetCrcOnStateTransition) {
+        CRC::CrcErrorDetail retry_detail{};
+        parsed = CRC::parseFSoEFrameWithCollisionAvoidance(
+            data, len, cmd, {}, data_len, conn_id,
+            0, config_.initialSeqNo,
+            &last_rx_crc0_, &seq_used, &retry_detail);
+        if (parsed) {
+            crc_error_detail = retry_detail;
+        }
+    }
+
+    // Native CRC resync (opt-in): recover the master's exact
+    // (startCrc, seqNo) seed from the frame's own stored CRCs — a GF(2)
+    // linear solve — then re-verify the frame with it.  On success the
+    // slave's sequence tracking adopts the recovered seq so the chain is
+    // synchronized again.  See FSoESlaveConfig::crcResyncEnabled.
+    if (!parsed && config_.crcResyncEnabled) {
+        CRC::CrcErrorDetail resync_detail{};
+        parsed = CRC::parseFSoEFrameResync(
+            data, len, cmd, {}, data_len, conn_id,
+            &last_rx_crc0_, nullptr, &seq_used, &resync_detail);
+        if (parsed) {
+            crc_error_detail = resync_detail;
+        }
+    }
+
+    if (!parsed) {
         FSoEErrorDetail detail;
         if (crc_error_detail.valid) {
             detail.crc_valid = true;

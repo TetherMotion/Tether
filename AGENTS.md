@@ -369,3 +369,13 @@ for (uint32_t off = 0; off < total; ) {
 ```
 
 Tests: `tests/ethercat/test_logical_address_manager.cpp` (`tether_ethercat_pdo_tests`).
+
+## FSoE native CRC resynchronization
+
+Opt-in slave-side recovery for a lost CRC chain (slave joins mid-stream or
+misses a master's chain-reset at a state transition):
+`FSoESlaveConfig::crcResyncEnabled` / `ServoEmulatorConfig::crc_resync`.
+`FSoE::CRC::resyncSolveSeed` recovers the frame's `crc_common` via a GF(2)
+affine solve and verifies the remaining segment CRCs; `(startCrc, seqNo)`
+is not identifiable so resync is per-frame.  Off by default — see
+`docs/FSoECrcResync.md`.
