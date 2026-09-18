@@ -33,13 +33,18 @@ bool RawDCTransport::writeRegister(uint16_t slave_index, uint16_t reg_addr,
 bool RawDCTransport::sendSyncDatagram(uint16_t slave_index, uint16_t reg_addr,
                                        const void* data, uint16_t size)
 {
-    const uint16_t adp = Master::adpForSlaveIndex(slave_index);
+    // Broadcast Write reaches every slave in a single frame. Each DC
+    // slave between the master and the end of the chain evaluates the
+    // transmitted value against its local clock, compensated by its own
+    // programmed transmission delay (0x0928). The slave_index argument
+    // is kept for interface compatibility only.
+    (void)slave_index;
     // Use kFireAndForgetIdx so the response is handled as fire-and-forget
     // and doesn't flood the packet router with "unrouted" warnings.
     return master_.sendSingleDatagram(
-        Command::ARMW,
+        Command::BWR,
         Master::kFireAndForgetIdx,
-        adp,
+        0,
         reg_addr,
         data,
         size,

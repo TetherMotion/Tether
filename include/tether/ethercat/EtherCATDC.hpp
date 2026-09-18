@@ -46,6 +46,10 @@ public:
     virtual bool isPDOEnabled() const;
     virtual bool isSlaveSupported(uint16_t slave_index) const;
     virtual int64_t getSlaveOffset(uint16_t slave_index) const;
+    /** @brief Measured DC topology (valid after a successful init()). */
+    const DCTopology& topology() const { return topology_; }
+    /** @brief Index of the DC reference clock slave; -1 when not initialized. */
+    int16_t referenceSlave() const { return reference_slave_; }
     virtual void readSyncConfig(uint16_t slave_index);
     virtual bool reconfigureSync(uint16_t slave_index);
     virtual uint64_t getMasterTimeNs();
@@ -75,15 +79,19 @@ private:
     IDCTransport& transport_;
     std::unique_ptr<RealtimeLoop> realtime_loop_;
     std::function<bool()> pdo_exchange_fn_;
+    int16_t reference_slave_ = -1; ///< First DC-capable slave (DC reference clock); -1 = none
+    DCTopology topology_{};        ///< Measured segment topology + per-link delays
     bool dc_debug_ = false;      ///< Verbose DC debug logging (enabled via --debug dc)
     bool shutdown_debug_ = false; ///< Verbose shutdown logging (enabled via --debug shutdown)
 
     bool initialize();
     bool readSlaveCapabilities(uint16_t slave_index);
-    bool calcPropagationDelay(uint16_t slave_index);
+    bool measurePropagationDelays();
+    bool writeSystemTimeDelay(uint16_t slave_index, uint32_t delay_ns);
+    bool programSystemTimeOffset(uint16_t slave_index);
     bool writeSystemTimeOffset(uint16_t slave_index, int64_t offset);
     bool configureSyncSignals(uint16_t slave_index);
-    bool updateSyncStartTime();
+    bool updateSyncStartTime(uint16_t slave_index);
 };
 
 /**

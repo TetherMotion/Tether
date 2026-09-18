@@ -107,6 +107,35 @@ public:
         read_responses[{slave_index, REG_DCSYSTIME}] = data;
     }
 
+    /// Set a 64-bit response for an arbitrary register
+    void setSlaveRegister64(uint16_t slave_index, uint16_t reg, uint64_t value) {
+        std::vector<uint8_t> data(8);
+        for (int i = 0; i < 8; i++) {
+            data[i] = static_cast<uint8_t>((value >> (i * 8)) & 0xFF);
+        }
+        read_responses[{slave_index, reg}] = data;
+    }
+
+    /// Set the latched per-port receive times a slave reports via 0x0900
+    void setSlaveRecvTimes(uint16_t slave_index, const uint32_t rt[4]) {
+        std::vector<uint8_t> data(16);
+        for (int p = 0; p < 4; p++) {
+            for (int b = 0; b < 4; b++) {
+                data[p * 4 + b] = static_cast<uint8_t>((rt[p] >> (b * 8)) & 0xFF);
+            }
+        }
+        read_responses[{slave_index, REG_DCRECVTIMES}] = data;
+    }
+
+    /// Find the last write op to a given register on a given slave
+    const Op* findWrite(uint16_t slave_index, uint16_t reg) const {
+        for (auto it = ops.rbegin(); it != ops.rend(); ++it) {
+            if (it->type == Op::Write && it->slave_index == slave_index &&
+                it->reg_addr == reg) return &*it;
+        }
+        return nullptr;
+    }
+
     /// Count operations of a given type
     size_t countOps(Op::Type type) const {
         return static_cast<size_t>(
@@ -601,6 +630,158 @@ TEST(DCStatsTest, StatsAccumulateWhileRunning) {
 
     auto stats = dc.getStats();
     EXPECT_GT(stats.cycle_count, 0u);
+}
+
+// ============================================================================
+// DC Topology / Propagation Delay Tests
+// ============================================================================
+//
+// The receive-time fixtures below emulate one latched broadcast frame:
+// rt[p] is the time the frame was received at port p. Port 0 is the
+// entry port; a port with a later rt is a downstream port the frame
+// returned through.
+
+class DCTopologyTest : public ::testing::Test {
+protected:
+    RecordingDCTransport transport_;
+};
+
+TEST_F(DCTopologyTest, LinearChainDelays) {
+    // 3 slaves in a line: 0 -- 1 -- 2
+    transport_.setSlaveSystemTime(0, 1000000000ULL);
+    transport_.setSlaveSystemTime(1, 1000000000ULL);
+    transport_.setSlaveSystemTime(2, 1000000000ULL);
+
+    const uint32_t rt0[4] = {1000, 6000, 0, 0};
+    const uint32_t rt1[4] = {1400, 5000, 0, 0};
+    const uint32_t rt2[4] = {1800, 0, 0, 0};
+    transport_.setSlaveRecvTimes(0, rt0);
+    transport_.setSlaveRecvTimes(1, rt1);
+    transport_.setSlaveRecvTimes(2, rt2);
+
+    EtherCATDC dc(transport_, 3);
+    ASSERT_TRUE(dc.init());
+
+    const auto& topo = dc.topology();
+    EXPECT_EQ(dc.referenceSlave(), 0);
+
+    // slave1: parent 0 port 1; dt3=6000-1000=5000, dt1=5000-1400=3600
+    // -> wire = (5000-3600)/2 = 700
+    EXPECT_EQ(topo.links[1].parent, 0);
+    EXPECT_EQ(topo.links[1].parent_port, 1);
+    EXPECT_EQ(topo.links[1].link_delay_ns, 700u);
+    EXPECT_EQ(topo.links[1].total_delay_ns, 700u);
+
+    // slave2: parent 1 port 1; dt3=5000-1400=3600, dt1=0 -> wire = 1800
+    EXPECT_EQ(topo.links[2].parent, 1);
+    EXPECT_EQ(topo.links[2].parent_port, 1);
+    EXPECT_EQ(topo.links[2].link_delay_ns, 1800u);
+    EXPECT_EQ(topo.links[2].total_delay_ns, 2500u);
+
+    // 0x0928 must carry the accumulated delay for each slave
+    const auto* w1 = transport_.findWrite(1, toUInt16(DCRegisters::DCSysTxTime));
+    ASSERT_NE(w1, nullptr);
+    uint32_t d1 = 0;
+    std::memcpy(&d1, w1->data.data(), 4);
+    EXPECT_EQ(d1, 700u);
+
+    const auto* w2 = transport_.findWrite(2, toUInt16(DCRegisters::DCSysTxTime));
+    ASSERT_NE(w2, nullptr);
+    uint32_t d2 = 0;
+    std::memcpy(&d2, w2->data.data(), 4);
+    EXPECT_EQ(d2, 2500u);
+}
+
+TEST_F(DCTopologyTest, BranchedTopology) {
+    // slave0 has two child subtrees: port1 -> {1 -> 2}, port2 -> {3}
+    transport_.setSlaveSystemTime(0, 1000000000ULL);
+    transport_.setSlaveSystemTime(1, 1000000000ULL);
+    transport_.setSlaveSystemTime(2, 1000000000ULL);
+    transport_.setSlaveSystemTime(3, 1000000000ULL);
+
+    const uint32_t rt0[4] = {1000, 8000, 16000, 0};
+    const uint32_t rt1[4] = {1400, 6000, 0, 0};
+    const uint32_t rt2[4] = {2000, 0, 0, 0};
+    const uint32_t rt3[4] = {9000, 0, 0, 0};
+    transport_.setSlaveRecvTimes(0, rt0);
+    transport_.setSlaveRecvTimes(1, rt1);
+    transport_.setSlaveRecvTimes(2, rt2);
+    transport_.setSlaveRecvTimes(3, rt3);
+
+    EtherCATDC dc(transport_, 4);
+    ASSERT_TRUE(dc.init());
+
+    const auto& topo = dc.topology();
+
+    // slave1: first child of 0 on port 1
+    EXPECT_EQ(topo.links[1].parent, 0);
+    EXPECT_EQ(topo.links[1].parent_port, 1);
+    // dt3=8000-1000=7000, dt1=6000-1400=4600 -> wire=1200
+    EXPECT_EQ(topo.links[1].total_delay_ns, 1200u);
+
+    // slave2: child of 1 on port 1; wire=(6000-1400)/2=2300
+    EXPECT_EQ(topo.links[2].parent, 1);
+    EXPECT_EQ(topo.links[2].parent_port, 1);
+    EXPECT_EQ(topo.links[2].total_delay_ns, 3500u);
+
+    // slave3: second child of 0 on port 2. prev port = 1:
+    // dt3=16000-8000=8000 -> wire=4000; dt2=8000-1000=7000
+    EXPECT_EQ(topo.links[3].parent, 0);
+    EXPECT_EQ(topo.links[3].parent_port, 2);
+    EXPECT_EQ(topo.links[3].total_delay_ns, 11000u);
+}
+
+TEST_F(DCTopologyTest, UnreadableSlaveKeepsChainConnected) {
+    // slave1's receive times cannot be read -> virtual downstream port,
+    // fallback link delays, chain stays connected to slave2.
+    transport_.setSlaveSystemTime(0, 1000000000ULL);
+    transport_.setSlaveSystemTime(1, 1000000000ULL);
+    transport_.setSlaveSystemTime(2, 1000000000ULL);
+
+    const uint32_t rt0[4] = {1000, 6000, 0, 0};
+    const uint32_t rt2[4] = {1800, 0, 0, 0};
+    transport_.setSlaveRecvTimes(0, rt0);
+    transport_.setSlaveRecvTimes(2, rt2);
+    // no recv times for slave 1 -> timing_valid = false
+
+    EtherCATDC dc(transport_, 3);
+    ASSERT_TRUE(dc.init());
+
+    const auto& topo = dc.topology();
+    EXPECT_FALSE(topo.links[1].timing_valid);
+    EXPECT_EQ(topo.links[2].parent, 1);  // still attached through slave 1
+    EXPECT_EQ(topo.links[1].total_delay_ns, 150u);
+    EXPECT_EQ(topo.links[2].total_delay_ns, 300u);
+}
+
+// ============================================================================
+// Stale System-Time-Offset Regression Test
+// ============================================================================
+
+TEST(DCOffsetTest, StaleOffsetIsCompensated) {
+    RecordingDCTransport transport;
+    transport.current_time_ns = 1000000000ULL; // master = 1 s
+
+    // Slave reports system time = local + stale offset.
+    // local = 500 ms, stale offset = +400 ms -> 0x0910 reads 900 ms.
+    const uint64_t stale_offset = 400000000ULL;
+    transport.setSlaveSystemTime(0, 900000000ULL);
+    transport.setSlaveRegister64(0, toUInt16(DCRegisters::DCSysOffset), stale_offset);
+
+    const uint32_t rt0[4] = {1000, 0, 0, 0};
+    transport.setSlaveRecvTimes(0, rt0);
+
+    EtherCATDC dc(transport, 1);
+    ASSERT_TRUE(dc.init());
+
+    // Written offset must be master - local = 1e9 - 5e8 = 5e8.
+    // The old buggy formula (master - system_time) would write 1e8.
+    const auto* w = transport.findWrite(0, toUInt16(DCRegisters::DCSysOffset));
+    ASSERT_NE(w, nullptr);
+    ASSERT_EQ(w->data.size(), 8u);
+    uint64_t written = 0;
+    std::memcpy(&written, w->data.data(), 8);
+    EXPECT_EQ(written, 500000000ULL);
 }
 
 // ============================================================================

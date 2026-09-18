@@ -54,12 +54,16 @@ public:
                                unsigned int timeout_ms = 200) = 0;
 
     /**
-     * @brief Send a DC synchronization datagram (ARMW/FRMW)
+     * @brief Send a DC synchronization datagram (broadcast write)
      *
-     * Sends a sync datagram to the reference slave. The transport
-     * handles frame construction, index allocation, and transmission.
+     * Sends a single datagram that reaches every slave in the chain in
+     * one pass (broadcast write). Each DC slave evaluates the written
+     * value against its local clock using its programmed transmission
+     * delay (0x0928). Also used with reg_addr = 0x0900 to latch all port
+     * receive times simultaneously during propagation-delay measurement.
      *
-     * @param slave_index Zero-based slave index (reference clock slave)
+     * @param slave_index Zero-based index of the DC reference clock slave
+     *                    (informational; the frame is broadcast)
      * @param reg_addr    Register address (typically 0x0910 DC_SYSTIME)
      * @param data        Time data to write
      * @param size        Number of bytes
