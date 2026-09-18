@@ -11,28 +11,34 @@
 //     0x1A00    flat FSoE SafetyPDU map, 496 B              [flat_fsoe_maps]
 //     0x1A01    status: InputCounter/SAFE_DI/PowerStatus/DO_Monitor/
 //               DO_Value/DI_Value/DO_Command (7 x UDINT)    ESI mandatory
-//     0x1A02    RSAP-Info                                   ESI SM3 default
-//     0x1A03    RSAP-Debug                                  ESI SM3 default
+//     0x1A02    RSAP-Info: 32 x UDINT (0x4100-0x4108)        mappable subset
 //     0x1A10+k  per-channel FSoE-k PDO                      k < fsoe_channels
 //
-// The flat maps are rewritten explicitly — the ESC211 accepts mapping
-// writes for 0x1600/0x1A00 and the content matches the ESI (all 16
-// 0x6000/0x7000 subitems of 31 bytes each).
+// Every PDO is WRITTEN explicitly from software — the device's EEPROM copy
+// of these mapping objects can be stale after a firmware/ESI update
+// (observed: 0x1601 = 1 entry instead of 2, 0x1A01 = 1 entry instead of 7,
+// 0x1A02 with a 0-bit padding entry, 0x1A03 empty) and trusting it breaks
+// applyCustomPDOs().
 //
-// Every other PDO is vendor-fixed: the device's own mapping is read back
-// via SDO (registerExisting*PDO) and only the SM assignment (0x1C12 /
-// 0x1C13) is written — never the PDO's contents.  This is robust across
-// firmware/ESI revisions (e.g. the RSAP PDOs grew between ESI releases);
-// an optional PDO the device does not declare is skipped with a warning.
+// NOTE — the ESI v0.9 file declares more than the current firmware accepts
+// (see ESC211-PDO-Restrictions.md at the repo root):
+//   * 0x1A03 (RSAP-Debug, 104 x UDINT) does NOT exist as a usable PDO on
+//     the current firmware; it is deliberately not configured here.
+//   * 0x1A02 nominally maps the 0x4000-0x4023 status objects, but those are
+//     not PDO-mappable; the firmware accepts only the 32-entry mappable
+//     subset of the 0x4100-0x4108 calculated-values/monitoring objects.
+//   * the TxPDO (SM3) process-image total is capped at 1194 bytes.
 //
 // Call in PRE-OP, then applyCustomPDOs() + configurePDOSyncManagers().
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #include "tether/ethercat/Slave.hpp"
 #include "tether/ethercat/PDOManager.hpp"
@@ -51,6 +57,67 @@ namespace Drives {
 namespace ESC211 {
 
 namespace Reg = EtherCAT::Drives::Registers::NexcobotESC211;
+
+// ---------------------------------------------------------------------------
+// ESI v0.9 PDO mapping entry tables
+//
+// The master WRITES these mapping objects (0x1601/0x1A01/0x1A02,
+// per-channel 0x1610+k/0x1A10+k) explicitly instead of trusting the
+// device's EEPROM copy: after a firmware/ESI update the EEPROM mappings
+// can be stale (wrong entry counts, 0-bit padding entries, or empty
+// mappings) which breaks applyCustomPDOs().
+// ---------------------------------------------------------------------------
+
+/// (index, first_sub, count) descriptor for the mappable RSAP-Info
+/// entries in TxPDO 0x1A02 (every entry is a 32-bit UDINT).
+struct RsapInfoSpec {
+    uint16_t index;
+    uint8_t first_sub;
+    uint8_t count;
+};
+
+/// Record layout of TxPDO 0x1A02 (RSAP-Info) accepted by the current ESC211
+/// firmware: 32 x UDINT mapping the 0x4100-0x4108 calculated-values /
+/// monitoring-limit objects.  The ESI's nominal 0x4000-0x4023 status-object
+/// mapping is NOT PDO-mappable on this firmware and must not be written.
+/// See ESC211-PDO-Restrictions.md.
+inline constexpr RsapInfoSpec kRsapInfoSpecs[] = {
+    {0x4100, 1, 6},   // TCP 0 Position Calculated
+    {0x4101, 0, 1},   // TCP Monitoring Speed Limit
+    {0x4102, 1, 9},   // TCP 0 Speed Calculated
+    {0x4103, 0, 1},   // TCP Monitoring Force Limit
+    {0x4104, 1, 9},   // TCP Force Calculated
+    {0x4105, 1, 3},   // TCP 0 Force Vector Calculated
+    {0x4106, 0, 1},   // TCP Monitoring Power Limit
+    {0x4107, 0, 1},   // TCP 0 Power Calculated
+    {0x4108, 0, 1},   // Endpoints Monitoring Speed Limit
+};
+
+/// constexpr-generated ObjectDictionaryEntry table for the 32 mappable
+/// RSAP-Info mapping entries (index:subindex, all 32-bit).
+inline constexpr auto kRsapInfoEntries = [] {
+    std::array<::EtherCAT::ObjectDictionary::ObjectDictionaryEntry, 32> a{};
+    size_t k = 0;
+    for (const auto& spec : kRsapInfoSpecs) {
+        for (uint8_t sub = 0; sub < spec.count; ++sub) {
+            a[k++] = ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry{
+                .index = spec.index,
+                .subindex = static_cast<uint8_t>(spec.first_sub + sub),
+                .name = "RSAP info value",
+                .data_type = ::EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned32,
+                .default_value = 0,
+                .unit = ::EtherCAT::ObjectDictionary::Unit_None,
+                .options_enum = nullptr,
+                .min_value = 0,
+                .max_value = 0xFFFFFFFF,
+                .modification_mode = ::EtherCAT::ObjectDictionary::ModificationMode::ReadOnly,
+                .effective_time = ::EtherCAT::ObjectDictionary::EffectiveTime::Immediately,
+                .comment = nullptr,
+            };
+        }
+    }
+    return a;
+}();
 
 /// Assign the ESC211 SM2/SM3 PDOs per the ESI.  @p flat_fsoe_maps adds
 /// the raw 496-byte FSoE SafetyPDU blocks (0x1600/0x1A00) — needed by
@@ -85,17 +152,31 @@ inline bool configureEsc211PdoAssignment(EtherCAT::Slave& s,
         }
     }
 
-    // 0x1601: mandatory general output PDO (OutputCounter + SAFE_DO).
-    if (auto err = s.registerExistingRxPDO(0x1601); err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(tag, "Register RxPDO 0x1601 failed: {}",
-                    EtherCAT::slaveErrorToString(err));
-        return false;
+    // 0x1601: mandatory general output PDO (OutputCounter 0x7010 +
+    // SAFE_DO 0x7020, 2 x UDINT = 8 bytes).  Written explicitly — the
+    // device's EEPROM copy can be stale after a firmware/ESI update.
+    {
+        auto err = s.configureCustomRxPDO(0x1601, {
+            {&Reg::FSOETx::OutputCounter, 4},
+            {&Reg::FSOETx::SAFE_DO,       4},
+        });
+        if (err != EtherCAT::SlaveError::Ok) {
+            TETHER_LOGE(tag, "Custom RxPDO 0x1601 config failed: {}",
+                        EtherCAT::slaveErrorToString(err));
+            return false;
+        }
     }
 
+    // 0x1610+k: per-channel FSoE PDO — raw PDU image 0x6000:1 (248b =
+    // 31 B) + 0x6000:2 (96b = 12 B) = 43 B per ESI v0.9.  Optional.
     for (size_t k = 0; k < fsoe_channels; ++k) {
         const auto idx = static_cast<uint16_t>(0x1610 + k);
-        if (auto err = s.registerExistingRxPDO(idx); err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGW(tag, "RxPDO 0x{:04X} (FSoE{}) not available: {} — skipped",
+        auto err = s.configureCustomRxPDO(idx, {
+            {&Reg::FSOERx::FSOERxPDU_1, 31},
+            {&Reg::FSOERx::FSOERxPDU_2, 12},
+        });
+        if (err != EtherCAT::SlaveError::Ok) {
+            TETHER_LOGW(tag, "RxPDO 0x{:04X} (FSoE{}) config failed: {} — skipped",
                         idx, k, EtherCAT::slaveErrorToString(err));
         }
     }
@@ -121,26 +202,57 @@ inline bool configureEsc211PdoAssignment(EtherCAT::Slave& s,
         }
     }
 
-    // 0x1A01: mandatory status PDO (InputCounter, SAFE_DI, PowerStatus,
-    //         DO_Monitor, DO_Value, DI_Value, DO_Command).
-    if (auto err = s.registerExistingTxPDO(0x1A01); err != EtherCAT::SlaveError::Ok) {
-        TETHER_LOGE(tag, "Register TxPDO 0x1A01 failed: {}",
-                    EtherCAT::slaveErrorToString(err));
-        return false;
-    }
-
-    // 0x1A02 RSAP-Info, 0x1A03 RSAP-Debug — ESI SM3 defaults, optional.
-    for (uint16_t idx : {0x1A02, 0x1A03}) {
-        if (auto err = s.registerExistingTxPDO(idx); err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGW(tag, "TxPDO 0x{:04X} (RSAP) not available: {} — skipped",
-                        idx, EtherCAT::slaveErrorToString(err));
+    // 0x1A01: mandatory status PDO — InputCounter 0x6010, SAFE_DI 0x6020,
+    // Power_Status 0x6030, DO_Monitor 0x6040, DO_Valu 0x6050, DI_Valu
+    // 0x6051, DO_Command 0x6052 (7 x UDINT = 28 bytes).  Written
+    // explicitly — the EEPROM copy may be a stale single-entry mapping.
+    {
+        auto err = s.configureCustomTxPDO(0x1A01, {
+            {&Reg::FSOERx::InputCounter,   4},
+            {&Reg::FSOERx::SAFE_DI,        4},
+            {&Reg::FSOERx::PowerStatus,    4},
+            {&Reg::FSOERx::DOMonitor,      4},
+            {&Reg::FSOERx::DOValueActual,  4},
+            {&Reg::FSOERx::DIValue,        4},
+            {&Reg::FSOERx::DOCommand,      4},
+        });
+        if (err != EtherCAT::SlaveError::Ok) {
+            TETHER_LOGE(tag, "Custom TxPDO 0x1A01 config failed: {}",
+                        EtherCAT::slaveErrorToString(err));
+            return false;
         }
     }
 
+    // 0x1A02 RSAP-Info — the 32 mappable 0x4100-0x4108 UDINTs accepted by
+    // the current firmware (the ESI's nominal 0x4000-0x4023 status-object
+    // mapping is NOT PDO-mappable; see ESC211-PDO-Restrictions.md).  The
+    // ESI-declared 0x1A03 RSAP-Debug PDO does not exist on this firmware
+    // and is deliberately not configured.  Optional: a device that does not
+    // declare the PDO rejects the write.
+    {
+        std::vector<EtherCAT::CustomPDOMappingEntry> entries;
+        entries.reserve(kRsapInfoEntries.size());
+        for (const auto& e : kRsapInfoEntries) {
+            entries.emplace_back(&e, 4);
+        }
+        auto err = s.configureCustomTxPDO(0x1A02, entries,
+                                          EtherCAT::PDO::PDODirection::TxPDO);
+        if (err != EtherCAT::SlaveError::Ok) {
+            TETHER_LOGW(tag, "TxPDO 0x1A02 (RSAP-Info) config failed: {} — skipped",
+                        EtherCAT::slaveErrorToString(err));
+        }
+    }
+
+    // 0x1A10+k: per-channel FSoE PDO — raw PDU image 0x7000:1 (248b =
+    // 31 B) + 0x7000:2 (96b = 12 B) = 43 B per ESI v0.9.  Optional.
     for (size_t k = 0; k < fsoe_channels; ++k) {
         const auto idx = static_cast<uint16_t>(0x1A10 + k);
-        if (auto err = s.registerExistingTxPDO(idx); err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGW(tag, "TxPDO 0x{:04X} (FSoE{}) not available: {} — skipped",
+        auto err = s.configureCustomTxPDO(idx, {
+            {&Reg::FSOETx::FSOETxPDU_1, 31},
+            {&Reg::FSOETx::FSOETxPDU_2, 12},
+        });
+        if (err != EtherCAT::SlaveError::Ok) {
+            TETHER_LOGW(tag, "TxPDO 0x{:04X} (FSoE{}) config failed: {} — skipped",
                         idx, k, EtherCAT::slaveErrorToString(err));
         }
     }

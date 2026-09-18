@@ -481,6 +481,17 @@ public:
     virtual SlaveError applyCustomPDOs();
 
     /**
+     * @brief Drop all locally-registered custom PDOs (configureCustomRxPDO /
+     * configureCustomTxPDO / registerExisting*PDO results).
+     *
+     * The device's mapping objects are NOT touched — this only forgets the
+     * master-side registration so a subsequent configureCustom*PDO() +
+     * applyCustomPDOs() cycle starts from a clean slate (used by the PDO
+     * mapping probe to test many configurations in one session).
+     */
+    virtual void clearCustomPDOs();
+
+    /**
      * @brief Register a PDO whose mapping is fixed by the slave firmware.
      *
      * Unlike configureCustomRxPDO() / configureCustomTxPDO(), this does
@@ -816,11 +827,6 @@ protected:
 
     const uint8_t* customPDOFieldRaw(uint16_t pdo_index, size_t field_index) const;
 
-    SlaveError configureCustomTxPDO(
-        uint16_t pdo_index,
-        std::span<const CustomPDOMappingEntry> entries,
-        PDO::PDODirection direction);
-
     void storeCustomPDOInfo(
         uint16_t pdo_index,
         PDO::PDODirection direction,
@@ -872,7 +878,10 @@ public:
 
     SlaveError configureCustomRxPDO(uint16_t, std::initializer_list<CustomPDOMappingEntry>) override;
     SlaveError configureCustomTxPDO(uint16_t, std::initializer_list<CustomPDOMappingEntry>) override;
+    SlaveError configureCustomTxPDO(uint16_t, std::span<const CustomPDOMappingEntry>,
+                                    PDO::PDODirection) override;
     SlaveError applyCustomPDOs() override;
+    void clearCustomPDOs() override;
     SlaveError registerExistingRxPDO(uint16_t) override;
     SlaveError registerExistingTxPDO(uint16_t) override;
     SlaveError configureMultiPDOs(const MultiPDOAssignment&) override;
