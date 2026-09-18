@@ -3,9 +3,11 @@
 // Shared ESC211 SM2/SM3 process-data assignment per ESI v0.9 (RSAPTest):
 //
 //   SM2 (host -> ESC211):
-//     0x1600    flat FSoE SafetyPDU map, 16 x 31 B = 496 B  [flat_fsoe_maps]
 //     0x1601    OutputCounter + SAFE_DO (8 B)               ESI mandatory
-//     0x1610+k  per-channel FSoE-k PDO                      k < fsoe_channels
+//     0x1610+k  per-channel FSoE-k PDO — structured objects
+//               0x6100+16k (FSoE command/conn-id/crc0-7, 19 B) +
+//               0x6101+16k (safe data words, 16 B) = 35 B per channel
+//                                                             k < fsoe_channels
 //
 //   SM3 (ESC211 -> host):
 //     0x1A00    flat FSoE SafetyPDU map, 496 B              [flat_fsoe_maps]
@@ -31,12 +33,14 @@
 //
 // Call in PRE-OP, then applyCustomPDOs() + configurePDOSyncManagers().
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <span>
 #include <thread>
 #include <vector>
 
@@ -119,10 +123,72 @@ inline constexpr auto kRsapInfoEntries = [] {
     return a;
 }();
 
+/// Per-channel FSoE frame-object mapping entries for the 0x1610+k RxPDOs.
+///
+/// Instead of the contiguous 0x6000 SafetyPDU buffer (whose fixed 31-byte
+/// sections overlap for 35-byte responses), each channel's response is
+/// delivered through its own structured objects:
+///   0x6100+16k  FSOE Master Frame k  (sub1 cmd, sub3 conn_id, sub4-11 crc_0-7)
+///   0x6101+16k  FSOE Master Frame k_Data (sub1-8 safe-data words)
+///
+/// The entries are mapped in WIRE order —
+///   [cmd][data_i][crc_i] x nsegs ... [conn_id]
+/// so the resulting PDO slot is a verbatim FSoE wire frame of
+/// 4*nsegs + 3 bytes (31 B for 7 segments, 35 B for 8).
+///
+/// Table layout: kFsoeChannelEntries[k][j], j =
+///   0      cmd        (0x61n0:1)
+///   1..8   data_1..8   (0x61n1:1..8)
+///   9..16  crc_0..7    (0x61n0:4..11)
+///   17     conn_id     (0x61n0:3)
+inline constexpr size_t kFsoeChannelEntryCmd = 0;
+inline constexpr size_t kFsoeChannelEntryDataBase = 1;   // +seg
+inline constexpr size_t kFsoeChannelEntryCrcBase = 9;    // +seg
+inline constexpr size_t kFsoeChannelEntryConnId = 17;
+inline constexpr size_t kFsoeChannelEntryCount = 18;
+
+inline constexpr auto kFsoeChannelEntries = [] {
+    namespace OD = ::EtherCAT::ObjectDictionary;
+    std::array<std::array<OD::ObjectDictionaryEntry, kFsoeChannelEntryCount>, 8> a{};
+    for (size_t k = 0; k < 8; ++k) {
+        const uint16_t frame_idx = static_cast<uint16_t>(0x6100 + 0x10 * k);
+        const uint16_t data_idx  = static_cast<uint16_t>(0x6101 + 0x10 * k);
+        auto mk = [&](uint16_t idx, uint8_t sub, const char* name,
+                      OD::ObjectDictionaryDataType type) {
+            return OD::ObjectDictionaryEntry{
+                .index = idx, .subindex = sub, .name = name,
+                .data_type = type,
+                .default_value = 0, .unit = OD::Unit_None,
+                .options_enum = nullptr,
+                .min_value = 0, .max_value = 0xFFFF,
+                .modification_mode = OD::ModificationMode::ReadOnly,
+                .effective_time = OD::EffectiveTime::Immediately,
+                .comment = nullptr,
+            };
+        };
+        a[k][kFsoeChannelEntryCmd] =
+            mk(frame_idx, 1, "FSoE command", OD::ObjectDictionaryDataType::Unsigned8);
+        for (uint8_t i = 0; i < 8; ++i) {
+            a[k][kFsoeChannelEntryDataBase + i] =
+                mk(data_idx, static_cast<uint8_t>(1 + i), "FSoE safe data",
+                   OD::ObjectDictionaryDataType::Unsigned16);
+            a[k][kFsoeChannelEntryCrcBase + i] =
+                mk(frame_idx, static_cast<uint8_t>(4 + i), "FSoE CRC",
+                   OD::ObjectDictionaryDataType::Unsigned16);
+        }
+        a[k][kFsoeChannelEntryConnId] =
+            mk(frame_idx, 3, "FSoE connection ID", OD::ObjectDictionaryDataType::Unsigned16);
+    }
+    return a;
+}();
+
 /// Assign the ESC211 SM2/SM3 PDOs per the ESI.  @p flat_fsoe_maps adds
-/// the raw 496-byte FSoE SafetyPDU blocks (0x1600/0x1A00) — needed by
-/// applications that relay the raw FSoE frames.  @p fsoe_channels is the
-/// number of per-channel PDOs (0x1610+k / 0x1A10+k) to assign.
+/// the raw 496-byte FSoE SafetyPDU TxPDO block (0x1A00) — needed by
+/// applications that read the raw master->slave FSoE command frames.
+/// @p fsoe_channels is the number of per-channel PDOs (0x1610+k /
+/// 0x1A10+k) to assign.  Each 0x1610+k maps channel k's structured
+/// frame objects (0x6100+16k / 0x6101+16k) in wire order, sized to
+/// resp_pdu_lens[k] (default 35 B when empty or out of range).
 ///
 /// Returns false when a mandatory part fails; optional PDOs (RSAP,
 /// per-channel) that the device does not declare are skipped with a
@@ -130,27 +196,13 @@ inline constexpr auto kRsapInfoEntries = [] {
 inline bool configureEsc211PdoAssignment(EtherCAT::Slave& s,
                                          const char* tag,
                                          bool flat_fsoe_maps,
-                                         size_t fsoe_channels) {
+                                         size_t fsoe_channels,
+                                         std::span<const uint16_t> resp_pdu_lens = {}) {
     // ---- SM2 (RxPDO, host -> ESC211) --------------------------------------
-
-    if (flat_fsoe_maps) {
-        // 0x1600: 16 x 31-byte FSoE SafetyPDU sections (0x6000:01..10).
-        auto err = s.configureCustomRxPDO(0x1600, {
-            {&Reg::FSOERx::FSOERxPDU_1,  31}, {&Reg::FSOERx::FSOERxPDU_2,  31},
-            {&Reg::FSOERx::FSOERxPDU_3,  31}, {&Reg::FSOERx::FSOERxPDU_4,  31},
-            {&Reg::FSOERx::FSOERxPDU_5,  31}, {&Reg::FSOERx::FSOERxPDU_6,  31},
-            {&Reg::FSOERx::FSOERxPDU_7,  31}, {&Reg::FSOERx::FSOERxPDU_8,  31},
-            {&Reg::FSOERx::FSOERxPDU_9,  31}, {&Reg::FSOERx::FSOERxPDU_10, 31},
-            {&Reg::FSOERx::FSOERxPDU_11, 31}, {&Reg::FSOERx::FSOERxPDU_12, 31},
-            {&Reg::FSOERx::FSOERxPDU_13, 31}, {&Reg::FSOERx::FSOERxPDU_14, 31},
-            {&Reg::FSOERx::FSOERxPDU_15, 31}, {&Reg::FSOERx::FSOERxPDU_16, 31},
-        });
-        if (err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGE(tag, "Custom RxPDO 0x1600 config failed: {}",
-                        EtherCAT::slaveErrorToString(err));
-            return false;
-        }
-    }
+    // The flat 0x1600 map (16 x 31-byte 0x6000 sections) is intentionally
+    // NOT assigned: each channel's response is delivered through its own
+    // per-channel PDO 0x1610+k mapping the structured frame objects
+    // (0x6100+16k / 0x6101+16k) — see below.
 
     // 0x1601: mandatory general output PDO (OutputCounter 0x7010 +
     // SAFE_DO 0x7020, 2 x UDINT = 8 bytes).  Written explicitly — the
@@ -167,14 +219,30 @@ inline bool configureEsc211PdoAssignment(EtherCAT::Slave& s,
         }
     }
 
-    // 0x1610+k: per-channel FSoE PDO — raw PDU image 0x6000:1 (248b =
-    // 31 B) + 0x6000:2 (96b = 12 B) = 43 B per ESI v0.9.  Optional.
-    for (size_t k = 0; k < fsoe_channels; ++k) {
+    // 0x1610+k: per-channel FSoE response PDO — the channel's structured
+    // frame objects (0x6100+16k frame + 0x6101+16k safe data) mapped in
+    // WIRE order [cmd][data_i][crc_i] x nsegs [conn_id], so the PDO slot
+    // carries a verbatim FSoE wire frame of 4*nsegs + 3 bytes.
+    // nsegs = (resp_pdu_lens[k] - 3) / 4 -> 7 for a 31-B (LW1) frame,
+    // 8 for a 35-B (LW2) frame; defaults to 8.  Optional.
+    for (size_t k = 0; k < fsoe_channels && k < kFsoeChannelEntries.size(); ++k) {
         const auto idx = static_cast<uint16_t>(0x1610 + k);
-        auto err = s.configureCustomRxPDO(idx, {
-            {&Reg::FSOERx::FSOERxPDU_1, 31},
-            {&Reg::FSOERx::FSOERxPDU_2, 12},
-        });
+        const auto& ce = kFsoeChannelEntries[k];
+        size_t nsegs = 8;
+        if (k < resp_pdu_lens.size() && resp_pdu_lens[k] >= 3) {
+            nsegs = std::min<size_t>((resp_pdu_lens[k] - 3) / 4, 8);
+        }
+        std::vector<EtherCAT::CustomPDOMappingEntry> entries;
+        entries.reserve(2 + 2 * nsegs);
+        entries.emplace_back(&ce[kFsoeChannelEntryCmd], 1);
+        for (size_t i = 0; i < nsegs; ++i) {
+            entries.emplace_back(&ce[kFsoeChannelEntryDataBase + i], 2);
+            entries.emplace_back(&ce[kFsoeChannelEntryCrcBase + i], 2);
+        }
+        entries.emplace_back(&ce[kFsoeChannelEntryConnId], 2);
+        auto err = s.configureCustomTxPDO(
+            idx, std::span<const EtherCAT::CustomPDOMappingEntry>(entries),
+            EtherCAT::PDO::PDODirection::RxPDO);
         if (err != EtherCAT::SlaveError::Ok) {
             TETHER_LOGW(tag, "RxPDO 0x{:04X} (FSoE{}) config failed: {} — skipped",
                         idx, k, EtherCAT::slaveErrorToString(err));
@@ -307,6 +375,11 @@ struct Esc211InitConfig {
     bool flat_fsoe_maps = false;
     size_t fsoe_channels = 0;
 
+    /// Per-channel response (slave->master) wire-frame lengths for the
+    /// 0x1610+k PDOs — 31 for LW1 channels, 35 for LW2.  Entries left at
+    /// 0 default to 35 B (8 data/CRC segments).
+    std::array<uint16_t, 8> fsoe_resp_pdu_len{};
+
     /// Drain stale SM1 mailbox data after the PRE-OP transition.
     bool drain_mailbox = false;
 
@@ -421,7 +494,10 @@ inline bool initEsc211ToSafeOp(EtherCAT::Master& master,
     {
         auto g = lock();
         if (!configureEsc211PdoAssignment(s, tag, cfg.flat_fsoe_maps,
-                                        cfg.fsoe_channels)) {
+                                        cfg.fsoe_channels,
+                                        std::span<const uint16_t>(
+                                            cfg.fsoe_resp_pdu_len.data(),
+                                            cfg.fsoe_resp_pdu_len.size()))) {
             TETHER_LOGE(tag, "ESI PDO assignment failed");
             return false;
         }
