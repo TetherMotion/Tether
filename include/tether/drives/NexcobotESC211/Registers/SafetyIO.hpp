@@ -25,8 +25,33 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry RSAPVersionBuild =
     .comment = "RSAP version build (STRING(16))",
 };
 
+// ---------------------------------------------------------------------------
+// 0xA008 / 0xA009: DI / DO Diagnosis Error (16-byte arrays)
+// ---------------------------------------------------------------------------
+
+static constexpr uint16_t DIDiagnosisErrorIndex = 0xA008;
+static constexpr uint16_t DODiagnosisErrorIndex = 0xA009;
+
+#define NEXCOBOT_DIAG_REG(NAME, IDX, DESC) \
+    constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry NAME = { \
+        .index = (IDX), .subindex = 0x00, .name = (DESC), \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::OctetString, \
+        .default_value = 0, .unit = Unit_None, .options_enum = nullptr, \
+        .min_value = 0, .max_value = 0xFF, \
+        .modification_mode = ModificationMode::ReadOnly, \
+        .effective_time = EffectiveTime::Immediately, \
+        .comment = DESC " (ARRAY[0..15] OF BYTE)", \
+    }
+
+NEXCOBOT_DIAG_REG(DIDiagnosisError, DIDiagnosisErrorIndex, "DI Diagnosis Error");
+NEXCOBOT_DIAG_REG(DODiagnosisError, DODiagnosisErrorIndex, "DO Diagnosis Error");
+
+#undef NEXCOBOT_DIAG_REG
+
 inline const RegisterList kRegisterList = {
     &RSAPVersionBuild,
+    &DIDiagnosisError,
+    &DODiagnosisError,
 };
 
 } // namespace SafetyIO

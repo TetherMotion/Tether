@@ -15,6 +15,7 @@ namespace Identity {
 
 static constexpr uint16_t ErrorSettingsIndex      = 0x10F1;
 static constexpr uint16_t TimestampObjectIndex    = 0x10F8;
+static constexpr uint16_t DeviceSWVersionIndex    = 0x2001;
 
 // ---------------------------------------------------------------------------
 // 0x10F1: Error Settings
@@ -85,6 +86,55 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry TimestampObject = 
 };
 
 // ---------------------------------------------------------------------------
+// 0x2001: Device SW Version (record, sub 1..2, UDINT each)
+// ---------------------------------------------------------------------------
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry DeviceSWVersionCount = {
+    .index = DeviceSWVersionIndex,
+    .subindex = 0x00,
+    .name = "Device SW Version count",
+    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
+    .default_value = 2,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 2,
+    .modification_mode = ModificationMode::ReadOnly,
+    .effective_time = EffectiveTime::Immediately,
+    .comment = "Number of entries for Device SW Version",
+};
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry DeviceSWVersionA = {
+    .index = DeviceSWVersionIndex,
+    .subindex = 0x01,
+    .name = "SW_Version_A",
+    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned32,
+    .default_value = 0,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 0xFFFFFFFF,
+    .modification_mode = ModificationMode::ReadOnly,
+    .effective_time = EffectiveTime::Immediately,
+    .comment = "Device software version (MCU_A)",
+};
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry DeviceSWVersionB = {
+    .index = DeviceSWVersionIndex,
+    .subindex = 0x02,
+    .name = "SW_Version_B",
+    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned32,
+    .default_value = 0,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 0xFFFFFFFF,
+    .modification_mode = ModificationMode::ReadOnly,
+    .effective_time = EffectiveTime::Immediately,
+    .comment = "Device software version (MCU_B)",
+};
+
+// ---------------------------------------------------------------------------
 // Device identification (from ESI/SII dump)
 // ---------------------------------------------------------------------------
 
@@ -96,6 +146,9 @@ inline const RegisterList kRegisterList = {
     &LocalErrorReaction,
     &SyncErrorCounterLimit,
     &TimestampObject,
+    &DeviceSWVersionCount,
+    &DeviceSWVersionA,
+    &DeviceSWVersionB,
 };
 
 } // namespace Identity

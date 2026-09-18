@@ -22,6 +22,17 @@ static constexpr uint16_t SystemCurrentStateMPUBIndex   = 0xF111;
 static constexpr uint16_t SystemErrorCodeMPUBIndex      = 0xF112;
 static constexpr uint16_t LogMsgIndex                   = 0xF120;
 static constexpr uint16_t Core1AppCycTimeIndex          = 0xF121;
+static constexpr uint16_t MasterCtrlInputCommandIndex   = 0xF400;
+static constexpr uint16_t UserAppCommandIndex           = 0xF401;
+static constexpr uint16_t PasswordInputIndex            = 0xF600;
+static constexpr uint16_t CTProjectNameIndex            = 0xF601;
+static constexpr uint16_t CTVersionIndex                = 0xF602;
+static constexpr uint16_t UserSettingIndex              = 0xF605;
+static constexpr uint16_t AdminModeIndex                = 0xF610;
+static constexpr uint16_t EthernetMACIndex              = 0xF700;
+static constexpr uint16_t EthernetIPIndex               = 0xF701;
+static constexpr uint16_t EthernetMaskIndex             = 0xF702;
+static constexpr uint16_t EthernetGatewayIndex          = 0xF703;
 
 // ---------------------------------------------------------------------------
 // Control command values for 0xF100:01 (Control Command)
@@ -511,6 +522,184 @@ NEXCOBOT_CYC_REG(11, App6Cur); NEXCOBOT_CYC_REG(12, App6Max);
 
 #undef NEXCOBOT_CYC_REG
 
+// ---------------------------------------------------------------------------
+// 0xF400: Master Controller Input Command (record, sub1 Operation Mode Control)
+// ---------------------------------------------------------------------------
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry MasterCtrlInputCommandCount = {
+    .index = MasterCtrlInputCommandIndex,
+    .subindex = 0x00,
+    .name = "Master Controller Input Command count",
+    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
+    .default_value = 1,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 1,
+    .modification_mode = ModificationMode::ReadOnly,
+    .effective_time = EffectiveTime::Immediately,
+    .comment = "Number of entries for Master Controller Input Command",
+};
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry OperationModeControl = {
+    .index = MasterCtrlInputCommandIndex,
+    .subindex = 0x01,
+    .name = "Operation Mode Control",
+    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
+    .default_value = 0,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 0xFF,
+    .modification_mode = ModificationMode::DuringOperation,
+    .effective_time = EffectiveTime::Immediately,
+    .comment = "Operation mode control command",
+};
+
+// ---------------------------------------------------------------------------
+// 0xF401: User Application Command (record, sub 1..3 USINT)
+// ---------------------------------------------------------------------------
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry UserAppCommandCount = {
+    .index = UserAppCommandIndex,
+    .subindex = 0x00,
+    .name = "User Application Command count",
+    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
+    .default_value = 3,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 3,
+    .modification_mode = ModificationMode::ReadOnly,
+    .effective_time = EffectiveTime::Immediately,
+    .comment = "Number of entries for User Application Command (Reserve)",
+};
+
+#define NEXCOBOT_USERCMD_REG(NUM) \
+    constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry UserCommand_##NUM = { \
+        .index = UserAppCommandIndex, \
+        .subindex = (NUM), \
+        .name = "User Command " #NUM, \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8, \
+        .default_value = 0, \
+        .unit = Unit_None, \
+        .options_enum = nullptr, \
+        .min_value = 0, \
+        .max_value = 0xFF, \
+        .modification_mode = ModificationMode::DuringOperation, \
+        .effective_time = EffectiveTime::Immediately, \
+        .comment = "User application command " #NUM, \
+    }
+
+NEXCOBOT_USERCMD_REG(1);
+NEXCOBOT_USERCMD_REG(2);
+NEXCOBOT_USERCMD_REG(3);
+
+#undef NEXCOBOT_USERCMD_REG
+
+// ---------------------------------------------------------------------------
+// 0xF600-0xF602: Password / CT project info (STRING(64) each)
+// ---------------------------------------------------------------------------
+
+#define NEXCOBOT_STR64_REG(NAME, IDX, DESC) \
+    constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry NAME = { \
+        .index = (IDX), .subindex = 0x00, .name = (DESC), \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::VisibleString, \
+        .default_value = 0, .unit = Unit_None, .options_enum = nullptr, \
+        .min_value = 0, .max_value = 0xFF, \
+        .modification_mode = ModificationMode::ReadOnly, \
+        .effective_time = EffectiveTime::Immediately, \
+        .comment = DESC " (STRING(64))", \
+    }
+
+NEXCOBOT_STR64_REG(PasswordInput,  PasswordInputIndex,  "Password Input");
+NEXCOBOT_STR64_REG(CTProjectName,  CTProjectNameIndex,  "CT Project Name");
+NEXCOBOT_STR64_REG(CTVersion,      CTVersionIndex,      "CT Version");
+
+#undef NEXCOBOT_STR64_REG
+
+// ---------------------------------------------------------------------------
+// 0xF605: User Setting (record, sub 1..3 UINT)
+// ---------------------------------------------------------------------------
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry UserSettingCount = {
+    .index = UserSettingIndex,
+    .subindex = 0x00,
+    .name = "User Setting count",
+    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
+    .default_value = 3,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 3,
+    .modification_mode = ModificationMode::ReadOnly,
+    .effective_time = EffectiveTime::Immediately,
+    .comment = "Number of entries for User Setting",
+};
+
+#define NEXCOBOT_USET_REG(SUB, NAME, DESC) \
+    constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry NAME = { \
+        .index = UserSettingIndex, \
+        .subindex = (SUB), \
+        .name = (DESC), \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned16, \
+        .default_value = 0, \
+        .unit = Unit_None, \
+        .options_enum = nullptr, \
+        .min_value = 0, \
+        .max_value = 0xFFFF, \
+        .modification_mode = ModificationMode::ReadOnly, \
+        .effective_time = EffectiveTime::Immediately, \
+        .comment = (DESC), \
+    }
+
+NEXCOBOT_USET_REG(1, SRAMSParaNum,  "SRAM SPara Num");
+NEXCOBOT_USET_REG(2, SDRAMSParaNum, "SDRAM SPara Num");
+NEXCOBOT_USET_REG(3, RxPDOSize,     "RxPDO Size");
+
+#undef NEXCOBOT_USET_REG
+
+// ---------------------------------------------------------------------------
+// 0xF610: Admin Mode
+// ---------------------------------------------------------------------------
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry AdminMode = {
+    .index = AdminModeIndex,
+    .subindex = 0x00,
+    .name = "Admin Mode",
+    .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::Unsigned8,
+    .default_value = 0,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 0xFF,
+    .modification_mode = ModificationMode::ReadOnly,
+    .effective_time = EffectiveTime::Immediately,
+    .comment = "Admin mode flag",
+};
+
+// ---------------------------------------------------------------------------
+// 0xF700-0xF703: Ethernet settings (byte arrays)
+// ---------------------------------------------------------------------------
+
+#define NEXCOBOT_ETH_REG(NAME, IDX, DESC, LEN) \
+    constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry NAME = { \
+        .index = (IDX), .subindex = 0x00, .name = (DESC), \
+        .data_type = EtherCAT::ObjectDictionary::ObjectDictionaryDataType::OctetString, \
+        .default_value = 0, .unit = Unit_None, .options_enum = nullptr, \
+        .min_value = 0, .max_value = 0xFF, \
+        .modification_mode = ModificationMode::DuringOperation, \
+        .effective_time = EffectiveTime::Immediately, \
+        .comment = DESC " (ARRAY[0.." LEN "] OF BYTE)", \
+    }
+
+NEXCOBOT_ETH_REG(EthernetMAC,     EthernetMACIndex,     "Ethernet MAC",     "5");
+NEXCOBOT_ETH_REG(EthernetIP,      EthernetIPIndex,      "Ethernet IP",      "3");
+NEXCOBOT_ETH_REG(EthernetMask,    EthernetMaskIndex,    "Ethernet Mask",    "3");
+NEXCOBOT_ETH_REG(EthernetGateway, EthernetGatewayIndex, "Ethernet Gateway", "3");
+
+#undef NEXCOBOT_ETH_REG
+
 inline const RegisterList kRegisterList = {
     &UserControlCount,
     &ControlCommand,
@@ -612,6 +801,15 @@ inline const RegisterList kRegisterList = {
     &Core1AppCycTime_App4Cur, &Core1AppCycTime_App4Max,
     &Core1AppCycTime_App5Cur, &Core1AppCycTime_App5Max,
     &Core1AppCycTime_App6Cur, &Core1AppCycTime_App6Max,
+    &MasterCtrlInputCommandCount,
+    &OperationModeControl,
+    &UserAppCommandCount,
+    &UserCommand_1, &UserCommand_2, &UserCommand_3,
+    &PasswordInput, &CTProjectName, &CTVersion,
+    &UserSettingCount,
+    &SRAMSParaNum, &SDRAMSParaNum, &RxPDOSize,
+    &AdminMode,
+    &EthernetMAC, &EthernetIP, &EthernetMask, &EthernetGateway,
 };
 
 } // namespace UserSystem
