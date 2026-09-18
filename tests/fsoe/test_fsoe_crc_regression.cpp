@@ -332,3 +332,183 @@ TEST(FSoEOddLengthFrameRegression, OddCRCVerified) {
     EXPECT_FALSE(CRC::parseFSoEFrame(frame, frame_size, out_cmd, out_data,
                                       out_data_len, out_conn_id));
 }
+
+// ============================================================================
+// findFSoEFrameLength — recover the valid frame length from a buffer
+// ============================================================================
+
+TEST(FSoEFrameLengthDetection, ExactSizeBuffer) {
+    // Buffer holds exactly the frame — the frame's own size is returned.
+    for (size_t data_len = 1; data_len <= 18; ++data_len) {
+        std::vector<uint8_t> data(data_len);
+        for (size_t i = 0; i < data_len; ++i)
+            data[i] = static_cast<uint8_t>(0x40 + i);
+
+        uint8_t frame[64];
+        size_t frame_size = CRC::buildFSoEFrame(
+            frame, Command::ProcessData, data.data(), data_len, 0x1234);
+        ASSERT_GT(frame_size, 0u);
+
+        EXPECT_EQ(CRC::findFSoEFrameLength(frame, frame_size), frame_size)
+            << "Failed for data_len=" << data_len;
+    }
+}
+
+TEST(FSoEFrameLengthDetection, FrameWithTrailingPadding) {
+    // Frame followed by garbage padding (e.g. oversized PDO slot) — the
+    // function must still find the true frame length.
+    uint8_t data[] = {0x11, 0x22, 0x33, 0x44};
+    uint8_t buf[64] = {0};
+    size_t frame_size = CRC::buildFSoEFrame(buf, Command::ProcessData,
+                                             data, sizeof(data), 0x5678);
+    ASSERT_GT(frame_size, 0u);
+    // Fill the tail with non-zero garbage.
+    for (size_t i = frame_size; i < sizeof(buf); ++i) buf[i] = 0xA5;
+
+    EXPECT_EQ(CRC::findFSoEFrameLength(buf, sizeof(buf)), frame_size);
+}
+
+TEST(FSoEFrameLengthDetection, CorruptedFrameReturnsZero) {
+    // No candidate length verifies → 0 (the vacuous 3-byte Reset case is
+    // filtered out by expected_conn_id).
+    uint8_t data[] = {0xDE, 0xAD, 0xBE, 0xEF};
+    uint8_t frame[64];
+    size_t frame_size = CRC::buildFSoEFrame(frame, Command::ProcessData,
+                                             data, sizeof(data), 0x1234);
+    ASSERT_GT(frame_size, 0u);
+    // Corrupt every CRC-bearing region.
+    for (size_t i = 1; i < frame_size; ++i) frame[i] ^= 0xFF;
+
+    EXPECT_EQ(CRC::findFSoEFrameLength(frame, frame_size, 0, 0, 0x1234), 0u);
+}
+
+TEST(FSoEFrameLengthDetection, ConnIdFilter) {
+    uint8_t data[] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
+    uint8_t frame[64];
+    size_t frame_size = CRC::buildFSoEFrame(frame, Command::ProcessData,
+                                             data, sizeof(data), 0xABCD);
+    ASSERT_GT(frame_size, 0u);
+
+    // Matching ConnID → found; wrong ConnID → not found.
+    EXPECT_EQ(CRC::findFSoEFrameLength(frame, frame_size, 0, 0, 0xABCD),
+              frame_size);
+    EXPECT_EQ(CRC::findFSoEFrameLength(frame, frame_size, 0, 0, 0x1234), 0u);
+}
+
+TEST(FSoEFrameLengthDetection, ResetFrame) {
+    // A bare 3-byte Reset frame verifies only as the last-resort case.
+    uint8_t frame[8] = {Command::Reset, 0x00, 0x00};
+    EXPECT_EQ(CRC::findFSoEFrameLength(frame, 3), CRC::MIN_FSOE_FRAME_SIZE);
+}
+
+TEST(FSoEFrameLengthDetection, WrongStartCrcOrSeqFails) {
+    uint8_t data[] = {0x10, 0x20, 0x30, 0x40};
+    uint8_t frame[64];
+    size_t frame_size = CRC::buildFSoEFrame(frame, Command::ProcessData,
+                                             data, sizeof(data), 0x1234,
+                                             /*start_crc=*/0x1111,
+                                             /*seq_no=*/0x2222);
+    ASSERT_GT(frame_size, 0u);
+
+    // Correct inheritance parameters → found.
+    EXPECT_EQ(CRC::findFSoEFrameLength(frame, frame_size, 0x1111, 0x2222,
+                                       0x1234),
+              frame_size);
+    // Wrong start_crc → CRC0 mismatch → not found.
+    EXPECT_EQ(CRC::findFSoEFrameLength(frame, frame_size, 0x9999, 0x2222,
+                                       0x1234),
+              0u);
+}
+
+// ============================================================================
+// findFSoEFrame — locate a frame inside a larger binary dataset
+// ============================================================================
+
+TEST(FSoEFrameScan, FindsFrameAtUnknownOffset) {
+    // Embed a frame in garbage at a nonzero offset.
+    uint8_t data[] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+    uint8_t buf[128];
+    for (auto& b : buf) b = 0x77;
+    const size_t kOffset = 42;
+    size_t frame_size = CRC::buildFSoEFrame(buf + kOffset,
+                                             Command::ProcessData,
+                                             data, sizeof(data), 0x1234);
+    ASSERT_GT(frame_size, 0u);
+
+    auto m = CRC::findFSoEFrame(buf, sizeof(buf), 4, 0, 0, 0, 0x1234);
+    ASSERT_TRUE(m.found);
+    EXPECT_EQ(m.offset, kOffset);
+    EXPECT_EQ(m.length, frame_size);
+    EXPECT_EQ(m.conn_id, 0x1234);
+    EXPECT_EQ(m.command, Command::ProcessData);
+}
+
+TEST(FSoEFrameScan, ExpectedLenFastPath) {
+    uint8_t data[] = {0x01, 0x02};
+    uint8_t buf[64];
+    for (auto& b : buf) b = 0x00;
+    const size_t kOffset = 10;
+    size_t frame_size = CRC::buildFSoEFrame(buf + kOffset, Command::Session,
+                                             data, sizeof(data), 0xABCD);
+    ASSERT_GT(frame_size, 0u);
+
+    auto m = CRC::findFSoEFrame(buf, sizeof(buf), 4, frame_size,
+                                 0, 0, 0xABCD);
+    ASSERT_TRUE(m.found);
+    EXPECT_EQ(m.offset, kOffset);
+    EXPECT_EQ(m.length, frame_size);
+}
+
+TEST(FSoEFrameScan, NoFrameReturnsNotFound) {
+    // Pure garbage — astronomically unlikely to contain a verifying frame.
+    uint8_t buf[64];
+    for (size_t i = 0; i < sizeof(buf); ++i)
+        buf[i] = static_cast<uint8_t>(i * 37 + 5);
+    auto m = CRC::findFSoEFrame(buf, sizeof(buf), 4, 0, 0, 0, 0x1234);
+    EXPECT_FALSE(m.found);
+}
+
+TEST(FSoEFrameScan, FindsMultipleFramesSequentially) {
+    // Two frames back-to-back (same start_crc/seq → independent chains).
+    uint8_t d1[] = {0xAA, 0xBB};
+    uint8_t d2[] = {0xCC, 0xDD};
+    uint8_t buf[64];
+    for (auto& b : buf) b = 0x00;
+    size_t s1 = CRC::buildFSoEFrame(buf, Command::ProcessData,
+                                     d1, sizeof(d1), 0x1111);
+    size_t s2 = CRC::buildFSoEFrame(buf + s1, Command::ProcessData,
+                                     d2, sizeof(d2), 0x1111);
+    ASSERT_GT(s1 * s2, 0u);
+
+    auto m1 = CRC::findFSoEFrame(buf, s1 + s2, 4, 0, 0, 0, 0x1111);
+    ASSERT_TRUE(m1.found);
+    EXPECT_EQ(m1.offset, 0u);
+    EXPECT_EQ(m1.length, s1);
+
+    auto m2 = CRC::findFSoEFrame(buf, s1 + s2, 4, 0, 0, 0, 0x1111,
+                                  m1.offset + 1);
+    ASSERT_TRUE(m2.found);
+    EXPECT_EQ(m2.offset, s1);
+    EXPECT_EQ(m2.length, s2);
+}
+
+TEST(FSoEFrameScan, MinFrameLenExcludesShortMatches) {
+    // A short valid frame embedded in the buffer must be skipped when
+    // min_frame_len exceeds its size.
+    uint8_t data[] = {0x5A};
+    uint8_t buf[64];
+    for (auto& b : buf) b = 0x33;
+    const size_t kOffset = 20;
+    size_t frame_size = CRC::buildFSoEFrame(buf + kOffset,
+                                             Command::ProcessData,
+                                             data, sizeof(data), 0x1234);
+    ASSERT_EQ(frame_size, 6u);
+
+    // min_frame_len = 7 excludes the 6-byte frame.
+    auto m = CRC::findFSoEFrame(buf, sizeof(buf), 7, 0, 0, 0, 0x1234);
+    EXPECT_FALSE(m.found);
+    // min_frame_len = 6 accepts it.
+    m = CRC::findFSoEFrame(buf, sizeof(buf), 6, 0, 0, 0, 0x1234);
+    ASSERT_TRUE(m.found);
+    EXPECT_EQ(m.offset, kOffset);
+}
