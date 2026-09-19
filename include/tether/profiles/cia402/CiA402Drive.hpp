@@ -229,6 +229,11 @@ public:
     bool disable();
     bool quickStop();
     bool resetFault();
+    /// Fault-reset toggle with Enable Operation (0x000F) kept asserted:
+    /// 0x000F -> 0x008F -> 0x000F.  Benign for drives that ignore the
+    /// bit-7 edge and lets drives that honor it re-enable without the
+    /// enable bits ever dropping.
+    bool resetFaultKeepEnabled();
 
     /// How enable() clears an active fault before running the enable
     /// sequence.
