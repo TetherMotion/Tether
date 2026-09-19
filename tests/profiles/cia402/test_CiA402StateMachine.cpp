@@ -14,39 +14,39 @@ using namespace CiA402;
 // ============================================================================
 
 TEST(ControlWordTest, Shutdown) {
-    EXPECT_EQ(ControlWord::Shutdown(), 0x0006u);
+    EXPECT_EQ(ControlWords::Shutdown(), 0x0006u);
 }
 
 TEST(ControlWordTest, SwitchOn) {
-    EXPECT_EQ(ControlWord::SwitchOn(), 0x0007u);
+    EXPECT_EQ(ControlWords::SwitchOn(), 0x0007u);
 }
 
 TEST(ControlWordTest, SwitchOnEnable) {
-    EXPECT_EQ(ControlWord::SwitchOnEnable(), 0x000Fu);
+    EXPECT_EQ(ControlWords::SwitchOnEnable(), 0x000Fu);
 }
 
 TEST(ControlWordTest, DisableVoltage) {
-    EXPECT_EQ(ControlWord::DisableVoltage(), 0x0000u);
+    EXPECT_EQ(ControlWords::DisableVoltage(), 0x0000u);
 }
 
 TEST(ControlWordTest, QuickStop) {
-    EXPECT_EQ(ControlWord::QuickStop(), 0x0002u);
+    EXPECT_EQ(ControlWords::QuickStop(), 0x0002u);
 }
 
 TEST(ControlWordTest, DisableOperation) {
-    EXPECT_EQ(ControlWord::DisableOperation(), 0x0007u);
+    EXPECT_EQ(ControlWords::DisableOperation(), 0x0007u);
 }
 
 TEST(ControlWordTest, EnableOperation) {
-    EXPECT_EQ(ControlWord::EnableOperation(), 0x000Fu);
+    EXPECT_EQ(ControlWords::EnableOperation(), 0x000Fu);
 }
 
 TEST(ControlWordTest, FaultReset) {
-    EXPECT_EQ(ControlWord::FaultReset(), 0x0080u);
+    EXPECT_EQ(ControlWords::FaultReset(), 0x0080u);
 }
 
 TEST(ControlWordTest, TransitionMask) {
-    EXPECT_EQ(ControlWord::TransitionMask(), 0x008Fu);
+    EXPECT_EQ(ControlWords::TransitionMask(), 0x008Fu);
 }
 
 // ============================================================================

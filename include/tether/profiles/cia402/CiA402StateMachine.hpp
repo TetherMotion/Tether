@@ -339,74 +339,78 @@ private:
 // ============================================================================
 
 /**
- * @brief Build control word for state transition
+ * @brief Build control word for state transition.
+ *
+ * Named ControlWords (plural): `enum class CiA402::ControlWord` in
+ * CiA402Defs.hpp holds the underlying values; these helpers return them
+ * as raw uint16_t command words.
  */
-namespace ControlWord {
+namespace ControlWords {
 
 /**
  * @brief Shutdown: go to Ready to Switch On
  */
 constexpr uint16_t Shutdown() {
-    return 0x0006;  // xxxx.xxxx.0xxx.0110
+    return static_cast<uint16_t>(ControlWord::Shutdown);  // xxxx.xxxx.0xxx.0110
 }
 
 /**
  * @brief Switch On: go to Switched On
  */
 constexpr uint16_t SwitchOn() {
-    return 0x0007;  // xxxx.xxxx.0xxx.0111
+    return static_cast<uint16_t>(ControlWord::SwitchOn);  // xxxx.xxxx.0xxx.0111
 }
 
 /**
  * @brief Switch On + Enable: go to Operation Enabled
  */
 constexpr uint16_t SwitchOnEnable() {
-    return 0x000F;  // xxxx.xxxx.0xxx.1111
+    return static_cast<uint16_t>(ControlWord::EnableOperation);  // xxxx.xxxx.0xxx.1111
 }
 
 /**
  * @brief Disable Voltage: go to Switch On Disabled
  */
 constexpr uint16_t DisableVoltage() {
-    return 0x0000;  // xxxx.xxxx.0xxx.xx0x
+    return static_cast<uint16_t>(ControlWord::DisableVoltage);  // xxxx.xxxx.0xxx.xx0x
 }
 
 /**
  * @brief Quick Stop
  */
 constexpr uint16_t QuickStop() {
-    return 0x0002;  // xxxx.xxxx.0xxx.x01x
+    return static_cast<uint16_t>(ControlWord::QuickStop);  // xxxx.xxxx.0xxx.x01x
 }
 
 /**
  * @brief Disable Operation: go to Switched On
  */
 constexpr uint16_t DisableOperation() {
-    return 0x0007;  // xxxx.xxxx.0xxx.0111
+    return static_cast<uint16_t>(ControlWord::SwitchOn);  // xxxx.xxxx.0xxx.0111
 }
 
 /**
  * @brief Enable Operation: go to Operation Enabled
  */
 constexpr uint16_t EnableOperation() {
-    return 0x000F;  // xxxx.xxxx.0xxx.1111
+    return static_cast<uint16_t>(ControlWord::EnableOperation);  // xxxx.xxxx.0xxx.1111
 }
 
 /**
  * @brief Fault Reset
  */
 constexpr uint16_t FaultReset() {
-    return 0x0080;  // xxxx.xxxx.1xxx.xxxx
+    return static_cast<uint16_t>(ControlWord::FaultReset);  // xxxx.xxxx.1xxx.xxxx
 }
 
 /**
  * @brief Mask for state transition bits
  */
 constexpr uint16_t TransitionMask() {
-    return 0x008F;  // Bits 0-3 and 7
+    return ControlWordTransitionMask;  // Bits 0-3 and 7
 }
 
-} // namespace ControlWord
+} // namespace ControlWords
 
 // ============================================================================
 // Status Word Decoders

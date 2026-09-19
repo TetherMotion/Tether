@@ -39,12 +39,16 @@ namespace CiA402 {
  * @brief Convenience ControlWord values (CiA 402)
  */
 enum class ControlWord : uint16_t {
-    DISABLE_VOLTAGE = 0x0000,
-    SHUTDOWN = 0x0006,
-    SWITCH_ON = 0x0007,
-    ENABLE_OPERATION = 0x000F,
-    FAULT_RESET = 0x0080,
+    DisableVoltage    = 0x0000,
+    QuickStop         = 0x0002,
+    Shutdown          = 0x0006,
+    SwitchOn          = 0x0007,
+    EnableOperation   = 0x000F,
+    FaultReset        = 0x0080,
 };
+
+/// Bits 0-3 and 7 of the controlword carry the state-transition command.
+inline constexpr uint16_t ControlWordTransitionMask = 0x008F;
 
 enum class Register : uint16_t {
     // ========================================================================
@@ -558,16 +562,22 @@ enum class Register : uint16_t {
 // Operating Mode Values
 // ============================================================================
 
-namespace OperatingMode {
-    constexpr int8_t ProfilePosition        = 1;   // PP
-    constexpr int8_t ProfileVelocity        = 3;   // PV
-    constexpr int8_t ProfileTorque          = 4;   // TQ
-    constexpr int8_t Homing                 = 6;   // HM
-    constexpr int8_t InterpolatedPosition   = 7;   // IP
-    constexpr int8_t CyclicSyncPosition     = 8;   // CSP
-    constexpr int8_t CyclicSyncVelocity     = 9;   // CSV
-    constexpr int8_t CyclicSyncTorque       = 10;  // CST
-}
+// Single definition of the CiA 402 operating modes (0x6060).  Lives here so
+// both this header and CiA402Config.hpp (which includes this file) share one
+// type.  Use static_cast<int8_t>(...) where the raw mode byte is needed.
+enum class OperatingMode : int8_t {
+    NoMode               = 0,
+    ProfilePosition      = 1,   // PP
+    Velocity             = 2,   // VL
+    ProfileVelocity      = 3,   // PV
+    ProfileTorque        = 4,   // TQ
+    Reserved             = 5,
+    Homing               = 6,   // HM
+    InterpolatedPosition = 7,   // IP
+    CyclicSyncPosition   = 8,   // CSP
+    CyclicSyncVelocity   = 9,   // CSV
+    CyclicSyncTorque     = 10,  // CST
+};
 
 // ============================================================================
 // Subindexes

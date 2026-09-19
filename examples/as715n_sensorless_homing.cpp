@@ -231,8 +231,8 @@ bool configureAndEnableDrive(EtherCAT::DS402Master& master, const SensorlessHomi
     }
 
     const int8_t op_mode = args.use_csv_mode
-        ? CiA402::OperatingMode::CyclicSyncVelocity
-        : CiA402::OperatingMode::CyclicSyncTorque;
+        ? static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncVelocity)
+        : static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncTorque);
     if (!init.drive().setOperatingMode(op_mode)) {
         TETHER_LOGE(TAG, "Failed to set operating mode {}", static_cast<int>(op_mode));
         return false;

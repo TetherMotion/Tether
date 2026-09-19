@@ -16,7 +16,7 @@
  *   // ... start host session, discover slaves, start DC ...
  *   EtherCAT::Drives::AS715N::AS715NDriveInitializer init(master, slave_idx, "my_example");
  *   if (!init.init()) return 1;
- *   if (!init.drive().setOperatingMode(CiA402::OperatingMode::CyclicSyncVelocity)) return 2;
+ *   if (!init.drive().setOperatingMode(static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncVelocity))) return 2;
  *   if (!init.enableDrive()) return 3;
  * @endcode
  */

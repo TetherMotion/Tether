@@ -92,31 +92,31 @@ TEST(StatusWordDecodeTest, HomingError) {
 // ============================================================================
 
 TEST(ControlWordTest, ShutdownValue) {
-    EXPECT_EQ(ControlWord::Shutdown(), 0x0006);
+    EXPECT_EQ(ControlWords::Shutdown(), 0x0006);
 }
 
 TEST(ControlWordTest, SwitchOnValue) {
-    EXPECT_EQ(ControlWord::SwitchOn(), 0x0007);
+    EXPECT_EQ(ControlWords::SwitchOn(), 0x0007);
 }
 
 TEST(ControlWordTest, SwitchOnEnableValue) {
-    EXPECT_EQ(ControlWord::SwitchOnEnable(), 0x000F);
+    EXPECT_EQ(ControlWords::SwitchOnEnable(), 0x000F);
 }
 
 TEST(ControlWordTest, DisableVoltageValue) {
-    EXPECT_EQ(ControlWord::DisableVoltage(), 0x0000);
+    EXPECT_EQ(ControlWords::DisableVoltage(), 0x0000);
 }
 
 TEST(ControlWordTest, QuickStopValue) {
-    EXPECT_EQ(ControlWord::QuickStop(), 0x0002);
+    EXPECT_EQ(ControlWords::QuickStop(), 0x0002);
 }
 
 TEST(ControlWordTest, FaultResetValue) {
-    EXPECT_EQ(ControlWord::FaultReset(), 0x0080);
+    EXPECT_EQ(ControlWords::FaultReset(), 0x0080);
 }
 
 TEST(ControlWordTest, TransitionMaskValue) {
-    EXPECT_EQ(ControlWord::TransitionMask(), 0x008F);
+    EXPECT_EQ(ControlWords::TransitionMask(), 0x008F);
 }
 
 // ============================================================================
@@ -215,10 +215,10 @@ TEST_F(StateMachineTest, IsLimitActive) {
 
 TEST_F(StateMachineTest, ExecuteTransition) {
     sm_->update();
-    bool ok = sm_->executeTransition(ControlWord::Shutdown());
+    bool ok = sm_->executeTransition(ControlWords::Shutdown());
     EXPECT_TRUE(ok);
-    EXPECT_EQ(last_control_word_ & ControlWord::TransitionMask(), 
-              ControlWord::Shutdown());
+    EXPECT_EQ(last_control_word_ & ControlWords::TransitionMask(), 
+              ControlWords::Shutdown());
 }
 
 TEST_F(StateMachineTest, QuickStop) {

@@ -14,6 +14,7 @@
  *
  * Usage:
  *   ./as715n_reset_errors -i eth0                 # reset active fault
+ *   ./as715n_reset_errors -i eth0 --force         # reset even if no fault is reported
  *   ./as715n_reset_errors -i eth0 --software-reset # full drive software reset
  */
 
@@ -34,7 +35,7 @@ constexpr uint16_t kSlaveIndex = 0;
 using EtherCAT::Drives::AS715NFaultHandler;
 using EtherCAT::Drives::AS715NError;
 
-int resetErrors(EtherCAT::DS402Master& master, bool software_reset)
+int resetErrors(EtherCAT::DS402Master& master, bool software_reset, bool force)
 {
     auto& sdo = master.ethercatMaster().sdoManager(kSlaveIndex);
 
@@ -57,8 +58,12 @@ int resetErrors(EtherCAT::DS402Master& master, bool software_reset)
         AS715NFaultHandler::checkFault(sdo, kSlaveIndex, &mfr_error, &cia402_error);
 
     if (!has_fault) {
-        TETHER_LOGI(TAG, "Slave {} reports no fault — nothing to reset", kSlaveIndex);
-        return 0;
+        if (!force) {
+            TETHER_LOGI(TAG, "Slave {} reports no fault — nothing to reset", kSlaveIndex);
+            return 0;
+        }
+        TETHER_LOGI(TAG, "Slave {} reports no fault — forcing reset anyway",
+                    kSlaveIndex);
     }
 
     // The A6-EC manual requires S-ON (controlword bit 0) to be off before
@@ -85,13 +90,18 @@ int resetErrors(EtherCAT::DS402Master& master, bool software_reset)
     // uses the plain 0x2031:01 fault reset.
     const AS715NError err = AS715NError::parse(mfr_error);
     bool reset_ok;
-    if (err.isDCSyncError()) {
+    if (has_fault && err.isDCSyncError()) {
         TETHER_LOGI(TAG, "DC sync error {} — using handleNoSyncError()", err.name);
         reset_ok = AS715NFaultHandler::handleNoSyncError(sdo, kSlaveIndex, 3);
-    } else if (!err.is_recoverable) {
-        TETHER_LOGE(TAG, "Error {} is marked non-recoverable — refusing reset", err.name);
+    } else if (has_fault && !err.is_recoverable && !force) {
+        TETHER_LOGE(TAG, "Error {} is marked non-recoverable — refusing reset "
+                         "(use --force to override)", err.name);
         return 4;
     } else {
+        if (has_fault && !err.is_recoverable) {
+            TETHER_LOGW(TAG, "Error {} is marked non-recoverable — forcing reset",
+                        err.name);
+        }
         reset_ok = AS715NFaultHandler::resetFault(sdo, kSlaveIndex);
     }
 
@@ -116,6 +126,11 @@ int main(int argc, char** argv)
         .implicit_value(true)
         .help("Perform a full software reset via 0x2031:02 (F31.02) instead of "
               "a fault reset");
+    program.add_argument("--force")
+        .default_value(false)
+        .implicit_value(true)
+        .help("Attempt the fault reset even when no fault is reported or the "
+              "error is marked non-recoverable");
 
     try {
         program.parse_args(argc, argv);
@@ -130,6 +145,7 @@ int main(int argc, char** argv)
         return 1;
     }
     const bool software_reset = program.get<bool>("--software-reset");
+    const bool force = program.get<bool>("--force");
 
     Tether::Platform::ensureRealtimeKernelOrExit();
 
@@ -163,7 +179,7 @@ int main(int argc, char** argv)
         return 3;
     }
 
-    const int rc = resetErrors(master, software_reset);
+    const int rc = resetErrors(master, software_reset, force);
 
     Tether::Examples::stopHostMasterSession(master, session);
     return rc;
