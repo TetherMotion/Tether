@@ -79,6 +79,7 @@
 #include <vector>
 
 #include "tether/platform/EspCompat.hpp"
+#include "tether/ethercat/FaultDetection.hpp"  // canonical ALStatusCode enum
 
 namespace EtherCAT {
 
@@ -155,62 +156,10 @@ namespace ALControl {
     constexpr uint16_t ESCReset        = 0x0040;  ///< ESC hardware reset (specific ESCs)
 }
 
-/**
- * @brief AL Status Code categories
- */
-namespace ALStatusCode {
-    // No error
-    constexpr uint16_t NoError                = 0x0000;
-    
-    // General errors (0x0001-0x000F)
-    constexpr uint16_t UnspecifiedError       = 0x0001;
-    constexpr uint16_t NoMemory               = 0x0002;
-    
-    // State transition errors (0x0011-0x001F)
-    constexpr uint16_t InvalidStateChange     = 0x0011;
-    constexpr uint16_t UnknownStateRequested  = 0x0012;
-    constexpr uint16_t BootNotSupported       = 0x0013;
-    constexpr uint16_t NoValidFirmware        = 0x0014;
-    constexpr uint16_t InvalidMailboxConfig   = 0x0015;
-    constexpr uint16_t InvalidMailboxConfig2  = 0x0016;
-    constexpr uint16_t InvalidSMConfig        = 0x0017;
-    constexpr uint16_t NoValidInputs          = 0x0018;
-    constexpr uint16_t NoValidOutputs         = 0x0019;
-    constexpr uint16_t SyncError              = 0x001A;
-    constexpr uint16_t SMWatchdog             = 0x001B;
-    constexpr uint16_t InvalidSMTypes         = 0x001C;
-    constexpr uint16_t InvalidOutputConfig    = 0x001D;
-    constexpr uint16_t InvalidInputConfig     = 0x001E;
-    constexpr uint16_t InvalidWatchdogConfig  = 0x001F;
-    
-    // Application errors (0x0020-0x003F)
-    constexpr uint16_t SlaveNeedsColdStart    = 0x0020;
-    constexpr uint16_t SlaveNeedsInit         = 0x0021;
-    constexpr uint16_t SlaveNeedsPreOp        = 0x0022;
-    constexpr uint16_t SlaveNeedsSafeOp       = 0x0023;
-    constexpr uint16_t InvalidInputMapping    = 0x0024;
-    constexpr uint16_t InvalidOutputMapping   = 0x0025;
-    constexpr uint16_t InconsistentSettings   = 0x0026;
-    constexpr uint16_t FreeRunNotSupported    = 0x0027;
-    constexpr uint16_t SyncNotSupported       = 0x0028;
-    constexpr uint16_t FreeRunNeeds3BufferMode = 0x0029;
-    constexpr uint16_t BackgroundWatchdog     = 0x002A;
-    constexpr uint16_t NoValidInputsOutputs   = 0x002B;
-    constexpr uint16_t FatalSyncError         = 0x002C;
-    constexpr uint16_t NoSyncError            = 0x002D;
-    constexpr uint16_t InvalidDCCycleTime     = 0x0030;
-    constexpr uint16_t InvalidDCSync0Time     = 0x0031;
-    constexpr uint16_t InvalidDCSync1Time     = 0x0032;
-    constexpr uint16_t MBXAoeError            = 0x0033;
-    constexpr uint16_t MBXEoeError            = 0x0034;
-    constexpr uint16_t MBXCoeError            = 0x0035;
-    constexpr uint16_t MBXFoeError            = 0x0036;
-    constexpr uint16_t MBXSoeError            = 0x0037;
-    constexpr uint16_t MBXVoeError            = 0x003E;
-    
-    // Vendor specific (0x8000-0xFFFF)
-    constexpr uint16_t VendorSpecificStart    = 0x8000;
-}
+// NOTE: AL status codes live in the canonical enum EtherCAT::ALStatusCode
+// (tether/ethercat/FaultDetection.hpp). The former constants namespace here
+// was removed to eliminate the duplicate definition; the enum provides
+// compatibility aliases for the old names (e.g. ALStatusCode::SyncError).
 
 /**
  * @brief Get human-readable name for AL Status Code

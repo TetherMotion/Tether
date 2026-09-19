@@ -41,7 +41,7 @@ TEST(WaitResult_Header, Helpers) {
 TEST(Types_Header, CompileTimeConstants) {
     // Basic compile-time checks for constants
     EXPECT_EQ(ALControl::StateMask & ALControl::AckError, 0x0000u);
-    EXPECT_GE(ALStatusCode::VendorSpecificStart, 0x8000u);
+    EXPECT_GE(static_cast<uint16_t>(ALStatusCode::VendorSpecificStart), 0x8000u);
 
     // Ensure PacketFilter size is reasonable (sanity compile check)
     EXPECT_LT(sizeof(PacketFilter), 200u);

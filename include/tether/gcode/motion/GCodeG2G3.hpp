@@ -198,7 +198,7 @@
 namespace GCode {
 
 // Forward declarations
-class MachineState;
+struct MachineState;
 class MotionPlanner;
 class VariableSystem;
 

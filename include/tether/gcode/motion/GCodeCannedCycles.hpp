@@ -337,7 +337,7 @@
 namespace GCode {
 
 // Forward declarations
-class MachineState;
+struct MachineState;
 class VariableSystem;
 
 // ============================================================================
