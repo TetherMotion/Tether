@@ -12,7 +12,7 @@
 namespace {
 
 constexpr const char* TAG = "dynadrive_sine";
-constexpr uint16_t kSlaveIndex = 6;
+constexpr int kDefaultSlaveIndex = 6;
 constexpr double kTwoPi = 6.28318530717958647692;
 
 // ============================================================================
@@ -67,7 +67,8 @@ private:
 // Run Sine Motion
 // ============================================================================
 
-int runSineMotion(EtherCAT::DS402Master& master, double duration_seconds)
+int runSineMotion(EtherCAT::DS402Master& master, uint16_t slave_index,
+                  double duration_seconds)
 {
     constexpr double kAmplitudeDegrees = 45.0;
     constexpr double kFrequencyHz = 0.25;
@@ -76,7 +77,7 @@ int runSineMotion(EtherCAT::DS402Master& master, double duration_seconds)
     config.amplitude = kAmplitudeDegrees * (kTwoPi / 360.0);
 
     if (!master.addMotionController(
-            kSlaveIndex,
+            slave_index,
             std::make_unique<DynaDriveSineMotionController>(config))) {
         return 2;
     }
@@ -86,14 +87,14 @@ int runSineMotion(EtherCAT::DS402Master& master, double duration_seconds)
     loop_config.sync_interval_cycles = 10;
     loop_config.enable_dc_synchronization = false;
     if (!master.startRealtimeMotionControlLoop(loop_config)) {
-        (void)master.removeMotionController(kSlaveIndex);
+        (void)master.removeMotionController(slave_index);
         return 3;
     }
 
     Tether::Platform::Clock::instance().delayMilliseconds(
         static_cast<uint32_t>(duration_seconds * 1000.0));
     master.stopMotionControlLoop();
-    (void)master.removeMotionController(kSlaveIndex);
+    (void)master.removeMotionController(slave_index);
     return 0;
 }
 
@@ -101,22 +102,22 @@ int runSineMotion(EtherCAT::DS402Master& master, double duration_seconds)
 // Configure Drive
 // ============================================================================
 
-bool configureDrive(EtherCAT::DS402Master& master)
+bool configureDrive(EtherCAT::DS402Master& master, uint16_t slave_index)
 {
     if (master.ethercatMaster().discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
         TETHER_LOGW(TAG, "No slaves discovered");
     }
 
-    const uint16_t minimum_drive_count = static_cast<uint16_t>(kSlaveIndex + 1);
+    const uint16_t minimum_drive_count = static_cast<uint16_t>(slave_index + 1);
     if (!master.waitForDriveCount(minimum_drive_count, 2000)) {
         TETHER_LOGE(TAG, "Timed out waiting for {} drive(s)", minimum_drive_count);
         return false;
     }
 
-    master.setSlaveAsDynaDrive(kSlaveIndex);
+    master.setSlaveAsDynaDrive(slave_index);
 
     EtherCAT::DS402Master::DriveConfiguration config;
-    config.slave_index  = kSlaveIndex;
+    config.slave_index  = slave_index;
     config.rxpdo_index = EtherCAT::Drives::DynaDrive_pdo::RxPDO_1603.index;
     config.txpdo_index = EtherCAT::Drives::DynaDrive_pdo::TxPDO_1A04.index;
     config.rxpdo_size  = EtherCAT::Drives::DynaDrive_pdo::RxPDO_1603.size;
@@ -126,12 +127,12 @@ bool configureDrive(EtherCAT::DS402Master& master)
     config.sdo_timeout_ms = 3000;
 
     if (!master.configureDrive(config)) {
-        TETHER_LOGE(TAG, "Failed to configure slave {}", kSlaveIndex);
+        TETHER_LOGE(TAG, "Failed to configure slave {}", slave_index);
         return false;
     }
 
-    if (!master.enableDrive(kSlaveIndex, 10000)) {
-        TETHER_LOGE(TAG, "Failed to enable slave {}", kSlaveIndex);
+    if (!master.enableDrive(slave_index, 10000)) {
+        TETHER_LOGE(TAG, "Failed to enable slave {}", slave_index);
         return false;
     }
 
@@ -143,7 +144,8 @@ bool configureDrive(EtherCAT::DS402Master& master)
 int main(int argc, char** argv)
 {
     Tether::Examples::MotionNativeArgs args;
-    if (!Tether::Examples::parseMotionNativeArgs(argc, argv, "dynadrive_sine_motion_native", args)) {
+    if (!Tether::Examples::parseMotionNativeArgs(argc, argv, "dynadrive_sine_motion_native", args,
+                                               kDefaultSlaveIndex)) {
         return 1;
     }
 
@@ -155,12 +157,13 @@ int main(int argc, char** argv)
         return 2;
     }
 
+    const uint16_t slave_index = static_cast<uint16_t>(args.slave_index);
     int rc = 0;
-    if (!configureDrive(master)) {
+    if (!configureDrive(master, slave_index)) {
         rc = 3;
     } else {
-        rc = runSineMotion(master, args.duration);
-        (void)master.disableDrive(kSlaveIndex);
+        rc = runSineMotion(master, slave_index, args.duration);
+        (void)master.disableDrive(slave_index);
     }
 
     Tether::Examples::stopHostMasterSession(master, session);

@@ -23,7 +23,6 @@
 namespace {
 
 constexpr const char* TAG = "as715n_sine";
-constexpr uint16_t kSlaveIndex = 0;
 constexpr double kTwoPi = 6.28318530717958647692;
 constexpr double kFrequencyHz = 0.25;
 
@@ -148,9 +147,10 @@ CyclicTarget modeToTarget(const std::string& mode)
 /// the SDO read itself fails), de-duplicated so a persistent fault is reported
 /// once per value change rather than once per second.  Silent while healthy.
 void faultMonitorLoop(EtherCAT::DS402Master& master,
+                      uint16_t slave_index,
                       const std::atomic<bool>& stop)
 {
-    auto& sdo = master.ethercatMaster().sdoManager(kSlaveIndex);
+    auto& sdo = master.ethercatMaster().sdoManager(slave_index);
     const EtherCAT::CoE::CoETransactionOptions options{.timeout_ms = 1000};
     uint32_t last_reported = 0xFFFFFFFFu;  // (sw<<16)|mfr_ext of last report
     bool fault_active = false;
@@ -161,9 +161,9 @@ void faultMonitorLoop(EtherCAT::DS402Master& master,
         } else if (*sw & 0x0008) {
             using EtherCAT::Drives::AS715NFaultHandler;
             const auto mfr =
-                AS715NFaultHandler::readManufacturerFaultExtended(sdo, kSlaveIndex);
+                AS715NFaultHandler::readManufacturerFaultExtended(sdo, slave_index);
             const uint16_t cia =
-                AS715NFaultHandler::readCiA402Error(sdo, kSlaveIndex);
+                AS715NFaultHandler::readCiA402Error(sdo, slave_index);
             const uint32_t key = (static_cast<uint32_t>(*sw) << 16)
                                | mfr.external_code;
             if (key != last_reported) {
@@ -191,6 +191,7 @@ void faultMonitorLoop(EtherCAT::DS402Master& master,
 }
 
 int runSineMotion(EtherCAT::DS402Master& master,
+                  uint16_t slave_index,
                   const Tether::Examples::MotionNativeArgs& args,
                   CyclicTarget target)
 {
@@ -214,7 +215,7 @@ int runSineMotion(EtherCAT::DS402Master& master,
     // reported during the whole run, not only during cyclic motion.
     std::atomic<bool> monitor_stop{false};
     std::thread fault_monitor(faultMonitorLoop, std::ref(master),
-                              std::cref(monitor_stop));
+                              slave_index, std::cref(monitor_stop));
 
     EtherCAT::Master::RealtimeMotionLoopConfig loop_config;
     loop_config.cycle_period_us = 1000;
@@ -222,7 +223,7 @@ int runSineMotion(EtherCAT::DS402Master& master,
     loop_config.enable_dc_synchronization = true;
     // For CSP, set the current position as home before moving.
     if (target == CyclicTarget::Position) {
-        auto* drive = master.driveBySlaveIndex(kSlaveIndex);
+        auto* drive = master.driveBySlaveIndex(slave_index);
         if (!drive || !drive->homeToCurrentPosition()) {
             TETHER_LOGE(TAG, "Failed to set current position as home");
             monitor_stop.store(true);
@@ -235,7 +236,7 @@ int runSineMotion(EtherCAT::DS402Master& master,
     // cyclic frame.  The motion controller only writes controlword, mode and
     // the active setpoint, so these fields must be initialised once here —
     // otherwise the drive clamps output torque (and profile speed) to zero.
-    if (auto* drive = master.driveBySlaveIndex(kSlaveIndex)) {
+    if (auto* drive = master.driveBySlaveIndex(slave_index)) {
         if (auto* rx = drive->rxPDO<EtherCAT::Drives::AS715N_pdo::AS715N_RxPDO_1704>()) {
             rx->positive_torque_limit = 1000;  // 100.0% of rated torque
             rx->negative_torque_limit = 1000;  // 100.0% of rated torque
@@ -257,7 +258,7 @@ int runSineMotion(EtherCAT::DS402Master& master,
         controller = std::move(inner);
     }
 
-    if (!master.addMotionController(kSlaveIndex, std::move(controller))) {
+    if (!master.addMotionController(slave_index, std::move(controller))) {
         TETHER_LOGE(TAG, "Failed to add {} sine motion controller",
                     target == CyclicTarget::Position ? "CSP" :
                     (target == CyclicTarget::Velocity ? "CSV" : "CST"));
@@ -271,7 +272,7 @@ int runSineMotion(EtherCAT::DS402Master& master,
         TETHER_LOGE(TAG, "Failed to start realtime motion control loop");
         monitor_stop.store(true);
         fault_monitor.join();
-        (void)master.removeMotionController(kSlaveIndex);
+        (void)master.removeMotionController(slave_index);
         return 3;
     }
 
@@ -280,7 +281,7 @@ int runSineMotion(EtherCAT::DS402Master& master,
     master.stopMotionControlLoop();
     monitor_stop.store(true);
     fault_monitor.join();
-    (void)master.removeMotionController(kSlaveIndex);
+    (void)master.removeMotionController(slave_index);
     return 0;
 }
 
@@ -288,9 +289,9 @@ int runSineMotion(EtherCAT::DS402Master& master,
 /// statusword (0x6041) sits at byte offset 2 — the position the wire logger
 /// and CiA402Drive decode it from.  The mapping is never rewritten by
 /// configureMultiPDOs(), so this verifies the drive's factory layout.
-bool verifyTxPDOMapping(EtherCAT::DS402Master& master)
+bool verifyTxPDOMapping(EtherCAT::DS402Master& master, uint16_t slave_index)
 {
-    auto& sdo = master.ethercatMaster().sdoManager(kSlaveIndex);
+    auto& sdo = master.ethercatMaster().sdoManager(slave_index);
     const EtherCAT::CoE::CoETransactionOptions options{.timeout_ms = 1000};
 
     const auto count = sdo.readU8(0x1B04, 0x00, options);
@@ -327,9 +328,9 @@ bool verifyTxPDOMapping(EtherCAT::DS402Master& master)
     return true;
 }
 
-bool configureDrive(EtherCAT::DS402Master& master)
+bool configureDrive(EtherCAT::DS402Master& master, uint16_t slave_index)
 {
-    EtherCAT::Drives::AS715N::AS715NDriveInitializer init(master, kSlaveIndex, TAG);
+    EtherCAT::Drives::AS715N::AS715NDriveInitializer init(master, slave_index, TAG);
 
     // Use RxPDO 0x1704/TxPDO 0x1B04 because 0x1704 carries TargetTorque,
     // TargetPosition and TargetVelocity, so one mapping serves CSP, CSV and CST.
@@ -342,9 +343,38 @@ bool configureDrive(EtherCAT::DS402Master& master)
         return false;
     }
 
-    if (!verifyTxPDOMapping(master)) {
+    if (!verifyTxPDOMapping(master, slave_index)) {
         TETHER_LOGE(TAG, "TxPDO 0x1B04 mapping verification failed");
         return false;
+    }
+
+    // The AS715N does not clear faults via the CiA402 controlword reset bit —
+    // the A6-EC manual requires S-ON cleared first, then a fault reset via
+    // F31.00 (0x2031:01), with a dedicated sequence for DC sync errors.
+    {
+        using EtherCAT::Drives::AS715NError;
+        using EtherCAT::Drives::AS715NFaultHandler;
+        auto& sdo = master.ethercatMaster().sdoManager(slave_index);
+        uint16_t mfr_error = 0, cia402_error = 0;
+        if (AS715NFaultHandler::checkFault(sdo, slave_index, &mfr_error, &cia402_error)) {
+            auto cw = sdo.readU16(0x6040, 0x00, {.timeout_ms = 3000});
+            if (cw.has_value() && (*cw & 0x0001u)) {
+                (void)sdo.writeU16(0x6040, 0x00,
+                                   static_cast<uint16_t>(*cw & ~0x0001u),
+                                   {.timeout_ms = 3000});
+                Tether::Platform::Clock::instance().delayMilliseconds(50);
+            }
+            const auto err = AS715NError::parse(mfr_error);
+            const bool cleared = err.isDCSyncError()
+                ? AS715NFaultHandler::handleNoSyncError(sdo, slave_index, 3)
+                : AS715NFaultHandler::resetFault(sdo, slave_index);
+            if (!cleared) {
+                TETHER_LOGE(TAG, "Fault reset failed (mfr=0x{:04X} cia=0x{:04X})",
+                            mfr_error, cia402_error);
+                return false;
+            }
+            TETHER_LOGI(TAG, "Fault cleared — proceeding with enable");
+        }
     }
 
     if (!init.enableDrive()) {
@@ -355,9 +385,9 @@ bool configureDrive(EtherCAT::DS402Master& master)
     return true;
 }
 
-void readAndPrint2006_08(EtherCAT::DS402Master& master)
+void readAndPrint2006_08(EtherCAT::DS402Master& master, uint16_t slave_index)
 {
-    auto& coe = master.ethercatMaster().sdoManager(kSlaveIndex);
+    auto& coe = master.ethercatMaster().sdoManager(slave_index);
     EtherCAT::CoE::CoETransactionOptions options;
     options.timeout_ms = 1000;
     options.max_retries = 3;
@@ -408,7 +438,8 @@ int main(int argc, char** argv)
         TETHER_LOGW(TAG, "No slaves discovered");
     }
 
-    const uint16_t minimum_drive_count = static_cast<uint16_t>(kSlaveIndex + 1);
+    const uint16_t slave_index = static_cast<uint16_t>(args.slave_index);
+    const uint16_t minimum_drive_count = static_cast<uint16_t>(slave_index + 1);
     if (!master.waitForDriveCount(minimum_drive_count, 2000)) {
         TETHER_LOGE(TAG, "Timed out waiting for {} drive(s)", minimum_drive_count);
         Tether::Examples::stopHostMasterSession(master, session);
@@ -430,12 +461,12 @@ int main(int argc, char** argv)
     }
 
     int rc = 0;
-    if (!configureDrive(master)) {
+    if (!configureDrive(master, slave_index)) {
         rc = 3;
     } else {
-        readAndPrint2006_08(master);
-        rc = runSineMotion(master, args, target);
-        Tether::Examples::shutdownSingleDrive(master, kSlaveIndex);
+        readAndPrint2006_08(master, slave_index);
+        rc = runSineMotion(master, slave_index, args, target);
+        Tether::Examples::shutdownSingleDrive(master, slave_index);
     }
 
     Tether::Examples::stopHostMasterSession(master, session);

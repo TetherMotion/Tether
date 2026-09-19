@@ -222,6 +222,7 @@ inline void shutdownSingleDrive(EtherCAT::DS402Master& master, uint16_t slave_in
 
 struct MotionNativeArgs {
     std::string interface;
+    int slave_index = 0;
     double duration = 10.0;
     std::string mode = "csv";
     double position_amplitude = 30000.0;   // encoder counts (CSP)
@@ -245,10 +246,15 @@ struct MotionNativeArgs {
 ///   -f/--frequency Sine frequency in Hz
 inline bool parseMotionNativeArgs(int argc, char** argv,
                                   const char* program_name,
-                                  MotionNativeArgs& out)
+                                  MotionNativeArgs& out,
+                                  int default_slave = 0)
 {
     argparse::ArgumentParser program(program_name, "1.0", argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
+    program.add_argument("-s", "--slave")
+        .scan<'i', int>()
+        .default_value(default_slave)
+        .help("EtherCAT slave index (bus position)");
     program.add_argument("-d", "--duration").scan<'g', double>().default_value(10.0);
     program.add_argument("-m", "--mode").default_value(std::string("csv"));
     program.add_argument("-p", "--position")
@@ -281,6 +287,11 @@ inline bool parseMotionNativeArgs(int argc, char** argv,
     out.interface = Tether::Examples::resolveInterface(
         program.get<std::string>("--interface"), program_name);
     if (out.interface.empty()) {
+        return false;
+    }
+    out.slave_index = program.get<int>("--slave");
+    if (out.slave_index < 0 || out.slave_index > 65535) {
+        std::cerr << "--slave must be in range [0, 65535]\n";
         return false;
     }
     out.duration = program.get<double>("--duration");

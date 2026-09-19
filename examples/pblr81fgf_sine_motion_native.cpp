@@ -12,10 +12,10 @@
 namespace {
 
 constexpr const char* TAG = "pblr_sine";
-constexpr uint16_t kSlaveIndex = 0;
 constexpr double kCountsPerRevolution = 131072.0;
 
-int runSineMotion(EtherCAT::DS402Master& master, double duration_seconds)
+int runSineMotion(EtherCAT::DS402Master& master, uint16_t slave_index,
+                  double duration_seconds)
 {
     constexpr double kAmplitudeDegrees = 90.0;
     constexpr double kFrequencyHz = 0.2;
@@ -24,7 +24,7 @@ int runSineMotion(EtherCAT::DS402Master& master, double duration_seconds)
     config.amplitude = kAmplitudeDegrees;
 
     if (!master.addMotionController<EtherCAT::Drives::PBLR81FGF::PBLR81FGF_RxPDO_1600>(
-            kSlaveIndex,
+            slave_index,
             EtherCAT::DS402Master::CyclicTarget::Position,
             std::make_unique<tether::control::SineMotionController>(config),
             kCountsPerRevolution / 360.0)) {
@@ -36,26 +36,26 @@ int runSineMotion(EtherCAT::DS402Master& master, double duration_seconds)
     loop_config.sync_interval_cycles = 10;
     loop_config.enable_dc_synchronization = true;
     if (!master.startRealtimeMotionControlLoop(loop_config)) {
-        (void)master.removeMotionController(kSlaveIndex);
+        (void)master.removeMotionController(slave_index);
         return 3;
     }
 
     Tether::Platform::Clock::instance().delayMilliseconds(
         static_cast<uint32_t>(duration_seconds * 1000.0));
     master.stopMotionControlLoop();
-    (void)master.removeMotionController(kSlaveIndex);
+    (void)master.removeMotionController(slave_index);
     return 0;
 }
 
-bool configureDrive(EtherCAT::DS402Master& master)
+bool configureDrive(EtherCAT::DS402Master& master, uint16_t slave_index)
 {
     Tether::Examples::SingleDriveExampleConfig config;
-    config.drive.slave_index = kSlaveIndex;
+    config.drive.slave_index = slave_index;
     config.drive.rxpdo_index = EtherCAT::Drives::PBLR81FGF::RxPDO_1600.index;
     config.drive.txpdo_index = EtherCAT::Drives::PBLR81FGF::TxPDO_1A00.index;
     config.drive.rxpdo_size = EtherCAT::Drives::PBLR81FGF::RxPDO_1600.size;
     config.drive.txpdo_size = EtherCAT::Drives::PBLR81FGF::TxPDO_1A00.size;
-    config.drive.operating_mode = CiA402::OperatingMode::CyclicSyncPosition;
+    config.drive.operating_mode = static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncPosition);
     return Tether::Examples::configureAndEnableSingleDrive(master, config, TAG);
 }
 
@@ -76,12 +76,13 @@ int main(int argc, char** argv)
         return 2;
     }
 
+    const uint16_t slave_index = static_cast<uint16_t>(args.slave_index);
     int rc = 0;
-    if (!configureDrive(master)) {
+    if (!configureDrive(master, slave_index)) {
         rc = 3;
     } else {
-        rc = runSineMotion(master, args.duration);
-        Tether::Examples::shutdownSingleDrive(master, kSlaveIndex);
+        rc = runSineMotion(master, slave_index, args.duration);
+        Tether::Examples::shutdownSingleDrive(master, slave_index);
     }
 
     Tether::Examples::stopHostMasterSession(master, session);
