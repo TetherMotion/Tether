@@ -172,15 +172,59 @@ public:
         return true;
     }
 
+    /// Which fault-reset procedure the fault handler runs for a given
+    /// condition.  Installed via setFaultResetPolicy().
+    enum class FaultResetAction : uint8_t {
+        /// Do nothing — leave the fault latched (enable() keeps retrying
+        /// until its timeout).
+        None,
+        /// Benign controlword FLTR (bit-7) toggle with Enable Operation
+        /// kept asserted (0x0F -> 0x8F -> 0x0F).  The AS715N probably
+        /// ignores it, but it is safe while the drive still runs.
+        FltrToggle,
+        /// CiA402 standard bit-7 edge on the current controlword.
+        FltrStandard,
+        /// AS715N F31.00 (0x2031:01) sequence — clears S-ON first per the
+        /// A6-EC manual, so it briefly disables the drive.
+        F31Sequence,
+    };
+
+    /// Policy controlling which reset procedure runs when.  The fault
+    /// handler is invoked from CiA402Drive::enable()'s fault loop; the
+    /// condition is evaluated on every invocation.
+    struct FaultResetPolicy {
+        /// Action for real manufacturer faults (0x203F external != 0).
+        FaultResetAction mfr_error_action = FaultResetAction::F31Sequence;
+        /// Action for phantom faults (statusword fault bit set but
+        /// 0x203F = NoError) while the drive is not provably stuck.
+        FaultResetAction phantom_action = FaultResetAction::FltrToggle;
+        /// Action for a stuck phantom fault: fault bit set AND the drive
+        /// disabled (Fault / FaultReactionActive / SwitchOnDisabled /
+        /// NotReadyToSwitchOn) even though the enable controlword
+        /// (0x000F) was commanded.
+        FaultResetAction stuck_action = FaultResetAction::F31Sequence;
+        /// Also treat a phantom fault as stuck after this many handler
+        /// invocations (0 = disabled — only the statusword condition
+        /// counts).
+        uint32_t stuck_after_attempts = 0;
+    };
+
+    void setFaultResetPolicy(const FaultResetPolicy& policy) {
+        fault_reset_policy_ = policy;
+    }
+    const FaultResetPolicy& faultResetPolicy() const { return fault_reset_policy_; }
+
     /// @brief Enable the drive (CiA 402 state machine).
     ///
-    /// Installs the AS715N fault reset (F31.00 / 0x2031:01) as the drive's
-    /// fault-reset handler: the AS715N does NOT clear faults via the CiA402
-    /// controlword bit-7 edge, so enable()'s fault loop would otherwise
-    /// retry a no-op until timeout.
+    /// Installs the AS715N fault reset as the drive's fault-reset handler:
+    /// the AS715N does NOT clear faults via the CiA402 controlword bit-7
+    /// edge, so enable()'s fault loop would otherwise retry a no-op until
+    /// timeout.  Which procedure runs for which condition is controlled
+    /// by setFaultResetPolicy().
     /// @param timeout_ms  Timeout for each state transition (default 5000)
     /// @return true on success
     bool enableDrive(uint32_t timeout_ms = 5000) {
+        fault_reset_attempts_ = 0;
         auto& drive = master_.ensureDrive(slave_idx_);
         drive.setFaultResetCallback([this](CiA402Drive& d) {
             return as715nFaultReset(d);
@@ -247,30 +291,75 @@ public:
 
 private:
     /// Fault reset invoked from CiA402Drive::enable()'s fault loop.
-    /// The F31.00 (0x2031:01) sequence only runs when the manufacturer
-    /// error code (0x203F external) is nonzero — a statusword fault with
-    /// 0x203F = NoError (e.g. a pure CiA402 fault like 0x603F=0x8700)
-    /// falls back to the standard controlword bit-7 edge instead.
+    /// Evaluates the fault condition (manufacturer error vs. phantom vs.
+    /// stuck phantom) and runs the procedure selected by the policy.
     bool as715nFaultReset(CiA402Drive& drive) {
         auto& sdo_mgr = sdo();
         const uint16_t mfr =
             AS715NFaultHandler::readManufacturerFault(sdo_mgr, slave_idx_);
-        if (mfr == 0) {
-            return drive.resetFault();
+        ++fault_reset_attempts_;
+
+        if (mfr != 0) {
+            return runFaultResetAction(fault_reset_policy_.mfr_error_action,
+                                       drive, sdo_mgr);
         }
-        // Per the A6-EC manual the S-ON bit must be cleared before the
-        // F31.00 0->1->0 sequence is accepted.
-        auto cw = sdo_mgr.readU16(0x6040, 0x00, {.timeout_ms = 3000});
-        if (cw.has_value() && (*cw & 0x0001u)) {
-            (void)sdo_mgr.writeU16(0x6040, 0x00,
-                                   static_cast<uint16_t>(*cw & ~0x0001u),
-                                   {.timeout_ms = 3000});
-            drive.setControlword(static_cast<uint16_t>(*cw & ~0x0001u));
-            Tether::Platform::Clock::instance().delayMilliseconds(50);
+
+        // Phantom fault: statusword fault bit set but no manufacturer
+        // error.  Stuck = drive disabled (faulted / not switchable on)
+        // even though Enable Operation (0x000F) was commanded.
+        const DriveState st = drive.getDriveState();
+        const bool drive_disabled =
+            st == DriveState::Fault || st == DriveState::FaultReactionActive ||
+            st == DriveState::SwitchOnDisabled ||
+            st == DriveState::NotReadyToSwitchOn;
+        const bool enable_commanded =
+            (drive.getControlword() & 0x000F) == 0x000F;
+        const bool stuck =
+            (drive_disabled && enable_commanded) ||
+            (fault_reset_policy_.stuck_after_attempts != 0 &&
+             fault_reset_attempts_ >= fault_reset_policy_.stuck_after_attempts);
+
+        if (stuck) {
+            TETHER_LOGW(tag_, "Slave {}: phantom fault stuck (state={} "
+                              "sw=0x{:04X} cw=0x{:04X} attempts={})",
+                        slave_idx_, static_cast<int>(st),
+                        drive.getStatusword(), drive.getControlword(),
+                        fault_reset_attempts_);
+            return runFaultResetAction(fault_reset_policy_.stuck_action,
+                                       drive, sdo_mgr);
         }
-        return AS715NFaultHandler::resetFault(sdo_mgr, slave_idx_);
+        return runFaultResetAction(fault_reset_policy_.phantom_action,
+                                   drive, sdo_mgr);
     }
 
+    bool runFaultResetAction(FaultResetAction action, CiA402Drive& drive,
+                             CoE::CoEManager& sdo_mgr) {
+        switch (action) {
+            case FaultResetAction::None:
+                return true;
+            case FaultResetAction::FltrToggle:
+                return drive.resetFaultKeepEnabled();
+            case FaultResetAction::FltrStandard:
+                return drive.resetFault();
+            case FaultResetAction::F31Sequence:
+                // Per the A6-EC manual the S-ON bit must be cleared before
+                // the F31.00 0->1->0 sequence is accepted.
+                if (auto cw = sdo_mgr.readU16(0x6040, 0x00, {.timeout_ms = 3000});
+                    cw.has_value() && (*cw & 0x0001u)) {
+                    (void)sdo_mgr.writeU16(
+                        0x6040, 0x00,
+                        static_cast<uint16_t>(*cw & ~0x0001u),
+                        {.timeout_ms = 3000});
+                    drive.setControlword(static_cast<uint16_t>(*cw & ~0x0001u));
+                    Tether::Platform::Clock::instance().delayMilliseconds(50);
+                }
+                return AS715NFaultHandler::resetFault(sdo_mgr, slave_idx_);
+        }
+        return false;
+    }
+
+    uint32_t fault_reset_attempts_ = 0;
+    FaultResetPolicy fault_reset_policy_;
     DS402Master& master_;
     uint16_t slave_idx_;
     const char* tag_;
