@@ -37,7 +37,7 @@ namespace {
 using HomingCtrl =
     SensorlessTorqueHomingController<AS715N_RxPDO_1702, AS715N_TxPDO_1B04>;
 
-constexpr int8_t kOpModeCSV = CiA402::OperatingMode::CyclicSyncVelocity;
+constexpr int8_t kOpModeCSV = static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncVelocity);
 constexpr uint16_t kSwOpEnabled =
     static_cast<uint16_t>(CiA402::StatuswordBits::OperationEnabled) | 0x1630u;
 

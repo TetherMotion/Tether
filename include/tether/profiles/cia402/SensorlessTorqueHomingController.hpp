@@ -245,10 +245,10 @@ public:
         }
 
         const int8_t op_mode = config_.use_csv_mode
-            ? CiA402::OperatingMode::CyclicSyncVelocity
-            : CiA402::OperatingMode::CyclicSyncTorque;
+            ? static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncVelocity)
+            : static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncTorque);
 
-        rx->controlword = static_cast<uint16_t>(CiA402::ControlWord::ENABLE_OPERATION);
+        rx->controlword = static_cast<uint16_t>(CiA402::ControlWord::EnableOperation);
         rx->modes_of_operation = op_mode;
 
         if constexpr (requires(RxPDO& p) { p.target_position; }) {

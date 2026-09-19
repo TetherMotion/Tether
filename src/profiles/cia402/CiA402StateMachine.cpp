@@ -140,8 +140,8 @@ TransitionResult StateMachine::requestState(State targetState, uint32_t timeoutM
         uint16_t newControlWord = calculateControlWord(m_currentState, nextState);
         
         // Preserve non-transition bits
-        m_controlWord = (m_controlWord & ~ControlWord::TransitionMask()) | 
-                        (newControlWord & ControlWord::TransitionMask());
+        m_controlWord = (m_controlWord & ~ControlWords::TransitionMask()) | 
+                        (newControlWord & ControlWords::TransitionMask());
         
         // Set halt bit if needed
         if (m_haltActive) {
@@ -169,8 +169,8 @@ bool StateMachine::executeTransition(uint16_t controlWordMask) {
         return false;
     }
     
-    m_controlWord = (m_controlWord & ~ControlWord::TransitionMask()) | 
-                    (controlWordMask & ControlWord::TransitionMask());
+    m_controlWord = (m_controlWord & ~ControlWords::TransitionMask()) | 
+                    (controlWordMask & ControlWords::TransitionMask());
     m_writeControl(m_controlWord);
     return true;
 }
@@ -246,57 +246,57 @@ uint16_t StateMachine::calculateControlWord(State currentState, State targetStat
     switch (currentState) {
         case State::SwitchOnDisabled:
             if (targetState == State::ReadyToSwitchOn) {
-                return ControlWord::Shutdown();
+                return ControlWords::Shutdown();
             }
             break;
             
         case State::ReadyToSwitchOn:
             if (targetState == State::SwitchedOn) {
-                return ControlWord::SwitchOn();
+                return ControlWords::SwitchOn();
             }
             if (targetState == State::SwitchOnDisabled) {
-                return ControlWord::DisableVoltage();
+                return ControlWords::DisableVoltage();
             }
             if (targetState == State::OperationEnabled) {
-                return ControlWord::SwitchOnEnable();
+                return ControlWords::SwitchOnEnable();
             }
             break;
             
         case State::SwitchedOn:
             if (targetState == State::OperationEnabled) {
-                return ControlWord::EnableOperation();
+                return ControlWords::EnableOperation();
             }
             if (targetState == State::ReadyToSwitchOn) {
-                return ControlWord::Shutdown();
+                return ControlWords::Shutdown();
             }
             if (targetState == State::SwitchOnDisabled) {
-                return ControlWord::DisableVoltage();
+                return ControlWords::DisableVoltage();
             }
             break;
             
         case State::OperationEnabled:
             if (targetState == State::SwitchedOn) {
-                return ControlWord::DisableOperation();
+                return ControlWords::DisableOperation();
             }
             if (targetState == State::ReadyToSwitchOn) {
-                return ControlWord::Shutdown();
+                return ControlWords::Shutdown();
             }
             if (targetState == State::SwitchOnDisabled) {
-                return ControlWord::DisableVoltage();
+                return ControlWords::DisableVoltage();
             }
             if (targetState == State::QuickStopActive) {
-                return ControlWord::QuickStop();
+                return ControlWords::QuickStop();
             }
             break;
             
         case State::QuickStopActive:
             if (targetState == State::SwitchOnDisabled) {
-                return ControlWord::DisableVoltage();
+                return ControlWords::DisableVoltage();
             }
             break;
             
         case State::Fault:
-            return ControlWord::FaultReset();
+            return ControlWords::FaultReset();
             
         default:
             break;
@@ -310,8 +310,8 @@ bool StateMachine::quickStop() {
         return false;
     }
     
-    m_controlWord = (m_controlWord & ~ControlWord::TransitionMask()) | 
-                    ControlWord::QuickStop();
+    m_controlWord = (m_controlWord & ~ControlWords::TransitionMask()) | 
+                    ControlWords::QuickStop();
     m_writeControl(m_controlWord);
     
     TETHER_LOGI(TAG, "Quick stop initiated");

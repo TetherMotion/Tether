@@ -29,7 +29,7 @@ public:
         initialized_ = false;
         segment_index_ = 1;
         phase_time_ = 0.0;
-        return drive.setOperatingMode(CiA402::OperatingMode::CyclicSyncPosition);
+        return drive.setOperatingMode(static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncPosition));
     }
 
     void stop(EtherCAT::CiA402Drive&) override {}
@@ -74,8 +74,8 @@ public:
             }
         }
 
-        rx->controlword = static_cast<uint16_t>(CiA402::ControlWord::ENABLE_OPERATION);
-        rx->modes_of_operation = CiA402::OperatingMode::CyclicSyncPosition;
+        rx->controlword = static_cast<uint16_t>(CiA402::ControlWord::EnableOperation);
+        rx->modes_of_operation = static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncPosition);
         rx->target_position = current_target_;
         rx->target_velocity = 0;
         return true;
@@ -120,7 +120,7 @@ bool configureDrive(EtherCAT::DS402Master& master)
     config.drive.txpdo_index = EtherCAT::Drives::PBLR81FGF::TxPDO_1A00.index;
     config.drive.rxpdo_size = EtherCAT::Drives::PBLR81FGF::RxPDO_1600.size;
     config.drive.txpdo_size = EtherCAT::Drives::PBLR81FGF::TxPDO_1A00.size;
-    config.drive.operating_mode = CiA402::OperatingMode::CyclicSyncPosition;
+    config.drive.operating_mode = static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncPosition);
     return Tether::Examples::configureAndEnableSingleDrive(master, config, TAG);
 }
 

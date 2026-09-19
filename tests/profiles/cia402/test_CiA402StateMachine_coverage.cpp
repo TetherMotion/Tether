@@ -54,20 +54,20 @@ private:
         uint16_t masked = controlWord_ & 0x008F;
         
         // Simulate CiA402 state machine response
-        if (masked == ControlWord::Shutdown()) {
+        if (masked == ControlWords::Shutdown()) {
             statusWord_ = 0x0021; // ReadyToSwitchOn
-        } else if (masked == ControlWord::SwitchOn()) {
+        } else if (masked == ControlWords::SwitchOn()) {
             statusWord_ = 0x0023; // SwitchedOn
-        } else if (masked == ControlWord::EnableOperation() || 
-                   masked == ControlWord::SwitchOnEnable()) {
+        } else if (masked == ControlWords::EnableOperation() || 
+                   masked == ControlWords::SwitchOnEnable()) {
             statusWord_ = 0x0027; // OperationEnabled
-        } else if (masked == ControlWord::DisableVoltage()) {
+        } else if (masked == ControlWords::DisableVoltage()) {
             statusWord_ = 0x0040; // SwitchOnDisabled
-        } else if (masked == ControlWord::QuickStop()) {
+        } else if (masked == ControlWords::QuickStop()) {
             statusWord_ = 0x0007; // QuickStopActive
-        } else if (masked == ControlWord::FaultReset()) {
+        } else if (masked == ControlWords::FaultReset()) {
             statusWord_ = 0x0040; // SwitchOnDisabled after fault reset
-        } else if (masked == ControlWord::DisableOperation()) {
+        } else if (masked == ControlWords::DisableOperation()) {
             statusWord_ = 0x0023; // SwitchedOn
         }
     }
@@ -267,22 +267,22 @@ TEST_F(SMCovTest, RequestState_RTSO_to_OpEnabled) {
 
 TEST_F(SMCovTest, ExecuteTransition_NoCallback) {
     StateMachine bare;
-    EXPECT_FALSE(bare.executeTransition(ControlWord::Shutdown()));
+    EXPECT_FALSE(bare.executeTransition(ControlWords::Shutdown()));
 }
 
 TEST_F(SMCovTest, ExecuteTransition_Shutdown) {
     sm_.update();
-    EXPECT_TRUE(sm_.executeTransition(ControlWord::Shutdown()));
-    EXPECT_EQ(sim_.getLastControl() & ControlWord::TransitionMask(),
-              ControlWord::Shutdown());
+    EXPECT_TRUE(sm_.executeTransition(ControlWords::Shutdown()));
+    EXPECT_EQ(sim_.getLastControl() & ControlWords::TransitionMask(),
+              ControlWords::Shutdown());
 }
 
 TEST_F(SMCovTest, ExecuteTransition_SwitchOn) {
-    EXPECT_TRUE(sm_.executeTransition(ControlWord::SwitchOn()));
+    EXPECT_TRUE(sm_.executeTransition(ControlWords::SwitchOn()));
 }
 
 TEST_F(SMCovTest, ExecuteTransition_EnableOperation) {
-    EXPECT_TRUE(sm_.executeTransition(ControlWord::EnableOperation()));
+    EXPECT_TRUE(sm_.executeTransition(ControlWords::EnableOperation()));
 }
 
 // ============================================================================
@@ -629,15 +629,15 @@ TEST_F(SMCovTest, DecodeState_FaultReactionActive) {
 // ============================================================================
 
 TEST(CWBuilderTest, AllValues) {
-    EXPECT_EQ(ControlWord::Shutdown(), 0x0006);
-    EXPECT_EQ(ControlWord::SwitchOn(), 0x0007);
-    EXPECT_EQ(ControlWord::SwitchOnEnable(), 0x000F);
-    EXPECT_EQ(ControlWord::DisableVoltage(), 0x0000);
-    EXPECT_EQ(ControlWord::QuickStop(), 0x0002);
-    EXPECT_EQ(ControlWord::DisableOperation(), 0x0007);
-    EXPECT_EQ(ControlWord::EnableOperation(), 0x000F);
-    EXPECT_EQ(ControlWord::FaultReset(), 0x0080);
-    EXPECT_EQ(ControlWord::TransitionMask(), 0x008F);
+    EXPECT_EQ(ControlWords::Shutdown(), 0x0006);
+    EXPECT_EQ(ControlWords::SwitchOn(), 0x0007);
+    EXPECT_EQ(ControlWords::SwitchOnEnable(), 0x000F);
+    EXPECT_EQ(ControlWords::DisableVoltage(), 0x0000);
+    EXPECT_EQ(ControlWords::QuickStop(), 0x0002);
+    EXPECT_EQ(ControlWords::DisableOperation(), 0x0007);
+    EXPECT_EQ(ControlWords::EnableOperation(), 0x000F);
+    EXPECT_EQ(ControlWords::FaultReset(), 0x0080);
+    EXPECT_EQ(ControlWords::TransitionMask(), 0x008F);
 }
 
 // ============================================================================
@@ -770,9 +770,9 @@ TEST_F(SMCovTest, CalculateControlWord_FromFault) {
     sim_.setStatusWord(0x0008); // Fault
     sm_.update();
     // Execute a transition - from fault, any target gets FaultReset
-    sm_.executeTransition(ControlWord::FaultReset());
-    EXPECT_EQ(sim_.getLastControl() & ControlWord::TransitionMask(), 
-              ControlWord::FaultReset());
+    sm_.executeTransition(ControlWords::FaultReset());
+    EXPECT_EQ(sim_.getLastControl() & ControlWords::TransitionMask(), 
+              ControlWords::FaultReset());
 }
 
 // ============================================================================

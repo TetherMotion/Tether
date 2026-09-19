@@ -57,6 +57,7 @@
 #pragma once
 
 #include "tether/common/MotionTypes.hpp"
+#include "tether/profiles/cia301/CiA402Defs.hpp"
 
 #include <cstdint>
 #include <cstddef>
@@ -638,21 +639,11 @@ enum class State : uint8_t {
 };
 
 /**
- * @brief CiA 402 operating modes
+ * @brief CiA 402 operating modes (0x6060)
+ *
+ * Defined in CiA402Defs.hpp (included above) so both headers share a single
+ * definition.
  */
-enum class OperatingMode : int8_t {
-    NoMode              = 0,
-    ProfilePosition     = 1,    ///< Profile position mode (PP)
-    Velocity            = 2,    ///< Velocity mode (VL)
-    ProfileVelocity     = 3,    ///< Profile velocity mode (PV)
-    ProfileTorque       = 4,    ///< Profile torque mode (PT)
-    Reserved            = 5,
-    Homing              = 6,    ///< Homing mode (HM)
-    InterpolatedPosition = 7,   ///< Interpolated position mode (IP)
-    CyclicSyncPosition  = 8,    ///< Cyclic synchronous position mode (CSP)
-    CyclicSyncVelocity  = 9,    ///< Cyclic synchronous velocity mode (CSV)
-    CyclicSyncTorque    = 10,   ///< Cyclic synchronous torque mode (CST)
-};
 
 /**
  * @brief Homing methods as per CiA 402

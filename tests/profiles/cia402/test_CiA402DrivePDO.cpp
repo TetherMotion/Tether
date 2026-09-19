@@ -128,11 +128,11 @@ TEST(DescribeControlwordTest, ReturnNotEmpty) {
 // ============================================================================
 
 TEST(EtherCATControlWordTest, Values) {
-    EXPECT_EQ(static_cast<uint16_t>(ControlWord::DISABLE_VOLTAGE), 0x0000u);
-    EXPECT_EQ(static_cast<uint16_t>(ControlWord::SHUTDOWN), 0x0006u);
-    EXPECT_EQ(static_cast<uint16_t>(ControlWord::SWITCH_ON), 0x0007u);
-    EXPECT_EQ(static_cast<uint16_t>(ControlWord::ENABLE_OPERATION), 0x000Fu);
-    EXPECT_EQ(static_cast<uint16_t>(ControlWord::FAULT_RESET), 0x0080u);
+    EXPECT_EQ(static_cast<uint16_t>(ControlWord::DisableVoltage), 0x0000u);
+    EXPECT_EQ(static_cast<uint16_t>(ControlWord::Shutdown), 0x0006u);
+    EXPECT_EQ(static_cast<uint16_t>(ControlWord::SwitchOn), 0x0007u);
+    EXPECT_EQ(static_cast<uint16_t>(ControlWord::EnableOperation), 0x000Fu);
+    EXPECT_EQ(static_cast<uint16_t>(ControlWord::FaultReset), 0x0080u);
 }
 
 // ============================================================================

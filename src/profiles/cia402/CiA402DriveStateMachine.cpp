@@ -7,6 +7,7 @@
  */
 
 #include "tether/profiles/cia402/CiA402Drive.hpp"
+#include "tether/profiles/cia402/CiA402Config.hpp"
 #include "tether/profiles/cia402/CiA402StateUtils.hpp"
 #include "tether/profiles/cia402/DynaDriveController.hpp"
 #include "tether/ethercat/Master.hpp"
@@ -21,6 +22,8 @@
 #include <cstring>
 #include <cmath>
 #include <bit>
+#include <format>
+#include <string>
 
 static const char* TAG = "CiA402StateMachine";
 
@@ -488,10 +491,28 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
     // Check the raw fault bit as well: vendor-specific statusword encodings
     // can set bit 3 without matching the canonical Fault/FaultReactionActive
     // patterns (e.g. AS715N 0xCA4B decodes to Unknown and would skip this).
+    uint16_t last_fault_code = 0xFFFF;
     while (state == DriveState::Fault || state == DriveState::FaultReactionActive ||
            (getStatusword() & CiA402::StatuswordBits::Fault) != 0) {
         TETHER_LOGI(TAG, "{}: Resetting fault (state={})", logPrefix().c_str(),
                     static_cast<int>(state));
+        // Actively read the CiA 402 error code so the log records which
+        // fault is being reset, not just that a fault exists.  Re-report
+        // if the code changes between attempts.
+        auto fault_code = m_master->sdoManager(m_slave_index).readU16(
+            static_cast<uint16_t>(CiA402::Register::ErrorCode), 0,
+            {.timeout_ms = m_sdo_timeout_ms});
+        if (fault_code.has_value()) {
+            if (*fault_code != last_fault_code) {
+                last_fault_code = *fault_code;
+                TETHER_LOGE(TAG, "{}: Fault code (0x603F) = 0x{:04X}: {}",
+                            logPrefix().c_str(), *fault_code,
+                            CiA402::errorToString(*fault_code));
+            }
+        } else if (last_fault_code == 0xFFFF) {
+            TETHER_LOGW(TAG, "{}: Fault active but 0x603F read failed",
+                        logPrefix().c_str());
+        }
         if (!resetFault()) {
             return false;
         }
@@ -522,8 +543,15 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
             }
             if (cur == DriveState::Fault ||
                 cur == DriveState::FaultReactionActive) {
-                TETHER_LOGE(TAG, "{}: Fault during state transition",
-                            logPrefix().c_str());
+                auto fault_code = m_master->sdoManager(m_slave_index).readU16(
+                    static_cast<uint16_t>(CiA402::Register::ErrorCode), 0,
+                    {.timeout_ms = m_sdo_timeout_ms});
+                TETHER_LOGE(TAG, "{}: Fault during state transition (0x603F={})",
+                            logPrefix().c_str(),
+                            fault_code.has_value()
+                                ? std::format("0x{:04X} {}", *fault_code,
+                                              CiA402::errorToString(*fault_code))
+                                : std::string("unreadable"));
                 return false;
             }
             if (m_master->isCancelRequested()) {
@@ -591,6 +619,16 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
         TETHER_LOGE(TAG, "{}: enable() did not reach Operation Enabled "
                          "(state={} sw=0x{:04X})",
                     logPrefix().c_str(), static_cast<int>(state), getStatusword());
+        if ((getStatusword() & CiA402::StatuswordBits::Fault) != 0) {
+            auto fault_code = m_master->sdoManager(m_slave_index).readU16(
+                static_cast<uint16_t>(CiA402::Register::ErrorCode), 0,
+                {.timeout_ms = m_sdo_timeout_ms});
+            if (fault_code.has_value()) {
+                TETHER_LOGE(TAG, "{}: Fault code (0x603F) = 0x{:04X}: {}",
+                            logPrefix().c_str(), *fault_code,
+                            CiA402::errorToString(*fault_code));
+            }
+        }
         return false;
     }
 
@@ -686,19 +724,19 @@ bool CiA402Drive::controlledShutdown(const ControlledShutdownConfig& cfg) {
         // loop actively holds the deceleration demand.
         if (pdo_live) {
             const uint16_t en =
-                static_cast<uint16_t>(ControlWord::ENABLE_OPERATION);
+                static_cast<uint16_t>(ControlWord::EnableOperation);
             if (static_cast<size_t>(m_controlword_pdo_offset) + sizeof(en) <=
                 static_cast<size_t>(m_rxpdo_size)) {
                 std::memcpy(m_rxpdo_buffer + m_controlword_pdo_offset, &en,
                             sizeof(en));
                 m_controlword = en;
             }
-            setOperatingModePDO(CiA402::OperatingMode::CyclicSyncVelocity);
+            setOperatingModePDO(static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncVelocity));
         } else {
             TETHER_LOGW(TAG,
                 "{}: PDO exchange not live — controlled stop via SDO",
                 logPrefix().c_str());
-            setOperatingModeSDO(CiA402::OperatingMode::CyclicSyncVelocity);
+            setOperatingModeSDO(static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncVelocity));
         }
 
         // Ramp duration per stop strategy.

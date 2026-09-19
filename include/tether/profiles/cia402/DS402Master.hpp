@@ -115,11 +115,11 @@ public:
         int8_t modeForTarget() const {
             switch (target_) {
                 case CyclicTarget::Position:
-                    return CiA402::OperatingMode::CyclicSyncPosition;
+                    return static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncPosition);
                 case CyclicTarget::Velocity:
-                    return CiA402::OperatingMode::CyclicSyncVelocity;
+                    return static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncVelocity);
                 case CyclicTarget::Torque:
-                    return CiA402::OperatingMode::CyclicSyncTorque;
+                    return static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncTorque);
             }
 
             return 0;
@@ -129,7 +129,7 @@ public:
         std::unique_ptr<tether::common::ISetpointSource> controller_;
         double scale_{1.0};
         std::atomic<uint16_t> desired_controlword_{
-            static_cast<uint16_t>(ControlWord::ENABLE_OPERATION)};
+            static_cast<uint16_t>(ControlWord::EnableOperation)};
     };
 
     struct DriveConfiguration {

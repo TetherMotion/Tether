@@ -252,7 +252,7 @@ public:
     }
 
     bool start(EtherCAT::CiA402Drive& drive) override {
-        return drive.setOperatingMode(CiA402::OperatingMode::CyclicSyncTorque);
+        return drive.setOperatingMode(static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncTorque));
     }
 
     void stop(EtherCAT::CiA402Drive&) override {}
@@ -289,8 +289,8 @@ public:
                                (torque_permille < kMinPermille) ? kMinPermille :
                                torque_permille;
 
-        rx->controlword = static_cast<uint16_t>(CiA402::ControlWord::ENABLE_OPERATION);
-        rx->modes_of_operation = CiA402::OperatingMode::CyclicSyncTorque;
+        rx->controlword = static_cast<uint16_t>(CiA402::ControlWord::EnableOperation);
+        rx->modes_of_operation = static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncTorque);
         rx->target_torque = static_cast<int16_t>(clamped);
         rx->target_velocity = 0;
         rx->target_position = 0;

@@ -66,13 +66,8 @@ class Master;
 
 namespace EtherCAT {
 
-enum class ControlWord : uint16_t {
-    DISABLE_VOLTAGE    = 0x0000,
-    SHUTDOWN           = 0x0006,
-    SWITCH_ON          = 0x0007,
-    ENABLE_OPERATION   = 0x000F,
-    FAULT_RESET        = 0x0080,
-};
+// Alias for the canonical controlword command values in CiA402Defs.hpp.
+using ControlWord = CiA402::ControlWord;
 
 // ============================================================================
 // CiA 402 Drive Controller
@@ -398,11 +393,11 @@ public:
     bool setOperatingModePDO(int8_t mode);
 
     int8_t getOperatingMode();
-    bool setModeCSP() { return setOperatingMode(CiA402::OperatingMode::CyclicSyncPosition); }
-    bool setModeCSV() { return setOperatingMode(CiA402::OperatingMode::CyclicSyncVelocity); }
-    bool setModeCST() { return setOperatingMode(CiA402::OperatingMode::CyclicSyncTorque); }
-    bool setModePP()  { return setOperatingMode(CiA402::OperatingMode::ProfilePosition); }
-    bool setModeHM()  { return setOperatingMode(CiA402::OperatingMode::Homing); }
+    bool setModeCSP() { return setOperatingMode(static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncPosition)); }
+    bool setModeCSV() { return setOperatingMode(static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncVelocity)); }
+    bool setModeCST() { return setOperatingMode(static_cast<int8_t>(CiA402::OperatingMode::CyclicSyncTorque)); }
+    bool setModePP()  { return setOperatingMode(static_cast<int8_t>(CiA402::OperatingMode::ProfilePosition)); }
+    bool setModeHM()  { return setOperatingMode(static_cast<int8_t>(CiA402::OperatingMode::Homing)); }
 
     // ========================================================================
     // Homing (SDO-based)
