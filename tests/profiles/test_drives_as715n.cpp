@@ -177,36 +177,37 @@ TEST(AS715NErrorTest, FormatDecimalLookingNibbles) {
 // ============================================================================
 
 TEST(AS715NRegistersTest, VendorAndProduct) {
-    EXPECT_EQ(AS715N::kVendorId, 0x00400000u);
-    EXPECT_EQ(AS715N::kProductCode, 0x00000715u);
+    EXPECT_EQ(AS715NDevice::kVendorId, 0x00400000u);
+    EXPECT_EQ(AS715NDevice::kProductCode, 0x00000715u);
 }
 
 TEST(AS715NRegistersTest, ManufacturerFaultIndex) {
-    EXPECT_EQ(AS715N::kManufacturerFaultIndex, 0x203Fu);
-    EXPECT_EQ(AS715N::kCiA402ErrorIndex, 0x603Fu);
+    EXPECT_EQ(AS715NDevice::kManufacturerFaultIndex, 0x203Fu);
+    EXPECT_EQ(AS715NDevice::kCiA402ErrorIndex, 0x603Fu);
 }
 
 TEST(AS715NRegistersTest, RunningMonitoringIndex) {
-    EXPECT_EQ(AS715N::kRunningMonitoringIndex, 0x2040u);
-    EXPECT_NE(AS715N::kU40_PhaseCurrentRms_SubIndex, 0u);
-    EXPECT_NE(AS715N::kU40_PositionDeviation_SubIndex, 0u);
-    EXPECT_NE(AS715N::kU40_HeatsinkTemperature_SubIndex, 0u);
+    EXPECT_EQ(AS715NDevice::kRunningMonitoringIndex, 0x2040u);
+    EXPECT_NE(AS715NDevice::kU40_PhaseCurrentRms_SubIndex, 0u);
+    EXPECT_NE(AS715NDevice::kU40_PositionDeviation_SubIndex, 0u);
+    EXPECT_NE(AS715NDevice::kU40_HeatsinkTemperature_SubIndex, 0u);
 }
 
 TEST(AS715NRegistersTest, DigitalOutputIndex) {
-    EXPECT_EQ(AS715N::kForcedPhysicalDOIndex, 0x60FEu);
-    EXPECT_EQ(AS715N::kForcedPhysicalDO_SubIndex, 0x01u);
+    EXPECT_EQ(AS715NDevice::kForcedPhysicalDOIndex, 0x60FEu);
+    EXPECT_EQ(AS715NDevice::kForcedPhysicalDO_SubIndex, 0x01u);
 }
 
 TEST(AS715NRegistersTest, ControlInProgressIndex) {
-    EXPECT_EQ(AS715N::kControlInProgressIndex, 0x2031u);
-    EXPECT_EQ(AS715N::kFaultResetSubIndex, 0x01u);
+    EXPECT_EQ(AS715NDevice::kControlInProgressIndex, 0x2031u);
+    EXPECT_EQ(AS715NDevice::kFaultResetSubIndex, 0x01u);
 }
 
-TEST(AS715NRegistersTest, DeviceAlias) {
-    // AS715NDevice is a type alias for AS715N
-    EXPECT_EQ(AS715NDevice::kVendorId, AS715N::kVendorId);
-    EXPECT_EQ(AS715NDevice::kProductCode, AS715N::kProductCode);
+TEST(AS715NRegistersTest, DeviceConstants) {
+    // AS715NDevice is the constants struct; `AS715N` is now the namespace
+    // containing AS715NDriveInitializer.
+    EXPECT_EQ(AS715NDevice::kVendorId, 0x00400000u);
+    EXPECT_EQ(AS715NDevice::kProductCode, 0x00000715u);
 }
 
 // ============================================================================

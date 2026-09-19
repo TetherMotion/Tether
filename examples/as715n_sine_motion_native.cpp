@@ -3,13 +3,16 @@
 #include <cstdlib>
 #include <cctype>
 #include <cstdio>
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <string>
+#include <thread>
 #include <algorithm>
 
 #include "DS402ExampleSupport.hpp"
 #include "tether/control/SineMotionController.hpp"
+#include "tether/drives/AS715N.hpp"
 #include "tether/drives/AS715N/AS715NDriveInitializer.hpp"
 #include "tether/drives/AS715N/AS715NPDO.hpp"
 #include "tether/ethercat/CoEManager.hpp"
@@ -140,6 +143,53 @@ CyclicTarget modeToTarget(const std::string& mode)
     return CyclicTarget::Velocity;
 }
 
+/// Polls the AS715N fault registers via CoE once per second while the motion
+/// loop runs.  Prints a report only when the statusword fault bit is set (or
+/// the SDO read itself fails), de-duplicated so a persistent fault is reported
+/// once per value change rather than once per second.  Silent while healthy.
+void faultMonitorLoop(EtherCAT::DS402Master& master,
+                      const std::atomic<bool>& stop)
+{
+    auto& sdo = master.ethercatMaster().sdoManager(kSlaveIndex);
+    const EtherCAT::CoE::CoETransactionOptions options{.timeout_ms = 1000};
+    uint32_t last_reported = 0xFFFFFFFFu;  // (sw<<16)|mfr_ext of last report
+    bool fault_active = false;
+    while (!stop.load(std::memory_order_relaxed)) {
+        auto sw = sdo.readU16(0x6041, 0x00, options);
+        if (!sw.has_value()) {
+            TETHER_LOGW(TAG, "Fault monitor: statusword SDO read failed");
+        } else if (*sw & 0x0008) {
+            using EtherCAT::Drives::AS715NFaultHandler;
+            const auto mfr =
+                AS715NFaultHandler::readManufacturerFaultExtended(sdo, kSlaveIndex);
+            const uint16_t cia =
+                AS715NFaultHandler::readCiA402Error(sdo, kSlaveIndex);
+            const uint32_t key = (static_cast<uint32_t>(*sw) << 16)
+                               | mfr.external_code;
+            if (key != last_reported) {
+                last_reported = key;
+                const auto err = EtherCAT::Drives::AS715NError::parse(
+                    mfr.external_code);
+                TETHER_LOGE(TAG,
+                            "DRIVE FAULT: statusword=0x{:04X} "
+                            "0x203F ext=0x{:04X} int=0x{:04X} ({} \"{}\") "
+                            "0x603F=0x{:04X}",
+                            *sw, mfr.external_code, mfr.internal_code, err.name,
+                            err.description ? err.description : "(none)", cia);
+            }
+            fault_active = true;
+        } else if (fault_active) {
+            fault_active = false;
+            last_reported = 0xFFFFFFFFu;
+            TETHER_LOGI(TAG, "Fault monitor: fault cleared (statusword=0x{:04X})",
+                        *sw);
+        }
+        for (int i = 0; i < 10 && !stop.load(std::memory_order_relaxed); ++i) {
+            Tether::Platform::Clock::instance().delayMilliseconds(100);
+        }
+    }
+}
+
 int runSineMotion(EtherCAT::DS402Master& master,
                   const Tether::Examples::MotionNativeArgs& args,
                   CyclicTarget target)
@@ -215,11 +265,60 @@ int runSineMotion(EtherCAT::DS402Master& master,
         return 3;
     }
 
+    std::atomic<bool> monitor_stop{false};
+    std::thread fault_monitor(faultMonitorLoop, std::ref(master),
+                              std::cref(monitor_stop));
+
     Tether::Platform::Clock::instance().delayMilliseconds(
         static_cast<uint32_t>(args.duration * 1000.0));
     master.stopMotionControlLoop();
+    monitor_stop.store(true);
+    fault_monitor.join();
     (void)master.removeMotionController(kSlaveIndex);
     return 0;
+}
+
+/// Reads the drive's actual 0x1B04 TxPDO mapping via SDO and checks that the
+/// statusword (0x6041) sits at byte offset 2 — the position the wire logger
+/// and CiA402Drive decode it from.  The mapping is never rewritten by
+/// configureMultiPDOs(), so this verifies the drive's factory layout.
+bool verifyTxPDOMapping(EtherCAT::DS402Master& master)
+{
+    auto& sdo = master.ethercatMaster().sdoManager(kSlaveIndex);
+    const EtherCAT::CoE::CoETransactionOptions options{.timeout_ms = 1000};
+
+    const auto count = sdo.readU8(0x1B04, 0x00, options);
+    if (!count.has_value() || *count == 0) {
+        TETHER_LOGE(TAG, "Failed to read 0x1B04 mapping count");
+        return false;
+    }
+
+    uint32_t byte_offset = 0;
+    bool statusword_ok = false;
+    for (uint8_t sub = 1; sub <= *count; ++sub) {
+        const auto e = sdo.readU32(0x1B04, sub, options);
+        if (!e.has_value()) {
+            TETHER_LOGE(TAG, "Failed to read 0x1B04:{} mapping entry", sub);
+            return false;
+        }
+        const uint16_t idx  = static_cast<uint16_t>(*e >> 16);
+        const uint8_t  subi = static_cast<uint8_t>((*e >> 8) & 0xFF);
+        const uint8_t  bits = static_cast<uint8_t>(*e & 0xFF);
+        TETHER_LOGI(TAG, "0x1B04[{}]: 0x{:04X}:{:02X} {} bits @ byte {}",
+                    sub, idx, subi, bits, byte_offset);
+        if (idx == 0x6041) {
+            statusword_ok = (byte_offset == 2 && bits == 16);
+        }
+        byte_offset += bits / 8;
+    }
+
+    if (!statusword_ok) {
+        TETHER_LOGE(TAG, "0x6041 NOT at TxPDO byte 2 — decoded statusword "
+                         "values are unreliable!");
+        return false;
+    }
+    TETHER_LOGI(TAG, "TxPDO 0x1B04 mapping verified: statusword at byte 2");
+    return true;
 }
 
 bool configureDrive(EtherCAT::DS402Master& master)
@@ -234,6 +333,11 @@ bool configureDrive(EtherCAT::DS402Master& master)
 
     if (!init.init(assignment)) {
         TETHER_LOGE(TAG, "AS715N drive initialization failed");
+        return false;
+    }
+
+    if (!verifyTxPDOMapping(master)) {
+        TETHER_LOGE(TAG, "TxPDO 0x1B04 mapping verification failed");
         return false;
     }
 

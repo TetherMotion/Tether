@@ -56,7 +56,7 @@ inline const RegisterListOfLists kAllRegisterLists = {
 
 } // namespace AS715NRegisters
 
-struct AS715N {
+struct AS715NDevice {
     static constexpr uint32_t kVendorId = 0x00400000;     // ANCTL
     static constexpr uint32_t kProductCode = 0x00000715;  // AS715N
 
@@ -82,9 +82,6 @@ struct AS715N {
     static inline const auto& kAllRegisterLists = AS715NRegisters::kAllRegisterLists;
 };
 
-
-// Backwards-compatible type alias used throughout the codebase
-using AS715NDevice = AS715N;
 
 struct AS715NManufacturerFault203F {
     uint16_t internal_code = 0;
