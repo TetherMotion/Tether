@@ -485,7 +485,11 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
     DriveState state = getDriveState();
     TETHER_LOGI(TAG, "{}: enable() start state={} statusword=0x{:04X}",
                 logPrefix().c_str(), static_cast<int>(state), getStatusword());
-    while (state == DriveState::Fault || state == DriveState::FaultReactionActive) {
+    // Check the raw fault bit as well: vendor-specific statusword encodings
+    // can set bit 3 without matching the canonical Fault/FaultReactionActive
+    // patterns (e.g. AS715N 0xCA4B decodes to Unknown and would skip this).
+    while (state == DriveState::Fault || state == DriveState::FaultReactionActive ||
+           (getStatusword() & CiA402::StatuswordBits::Fault) != 0) {
         TETHER_LOGI(TAG, "{}: Resetting fault (state={})", logPrefix().c_str(),
                     static_cast<int>(state));
         if (!resetFault()) {
@@ -544,7 +548,10 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
     // dictionary (0x6040) and are not affected by PDO buffer contents.
 
     // Shutdown (Ready to Switch On)
-    if (state == DriveState::SwitchOnDisabled) {
+    // Unknown (vendor-specific statusword encoding) still gets each
+    // transition: the drive either accepts it and reports a real state, or
+    // the wait times out and enable() fails instead of passing silently.
+    if (state == DriveState::SwitchOnDisabled || state == DriveState::Unknown) {
         m_controlword = 0x0006;  // Shutdown
         sendControlwordSDO(m_controlword);
         if (!waitAtLeast(DriveState::ReadyToSwitchOn, timeout_ms)) {
@@ -556,7 +563,7 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
     }
 
     // Switch On
-    if (state == DriveState::ReadyToSwitchOn) {
+    if (state == DriveState::ReadyToSwitchOn || state == DriveState::Unknown) {
         m_controlword = 0x0007;  // Switch On
         sendControlwordSDO(m_controlword);
         if (!waitAtLeast(DriveState::SwitchedOn, timeout_ms)) {
@@ -568,12 +575,23 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
     }
 
     // Enable Operation
-    if (state == DriveState::SwitchedOn) {
+    if (state == DriveState::SwitchedOn || state == DriveState::Unknown) {
         m_controlword = 0x000F;  // Enable Operation
         sendControlwordSDO(m_controlword);
         if (!waitAtLeast(DriveState::OperationEnabled, timeout_ms)) {
             return false;
         }
+    }
+
+    // Final verification — previously any non-path state (QuickStop,
+    // NotReadyToSwitchOn, unresponsive Unknown) fell through to the success
+    // log without the drive ever being enabled.
+    state = getDriveState();
+    if (state != DriveState::OperationEnabled) {
+        TETHER_LOGE(TAG, "{}: enable() did not reach Operation Enabled "
+                         "(state={} sw=0x{:04X})",
+                    logPrefix().c_str(), static_cast<int>(state), getStatusword());
+        return false;
     }
 
     TETHER_LOGI(TAG, "{}: Drive enabled successfully (state={} sw=0x{:04X})",
@@ -1117,15 +1135,24 @@ bool CiA402Drive::homeToCurrentPosition(int32_t home_offset, uint32_t timeout_ms
 }
 
 bool CiA402Drive::executeHoming(uint32_t timeout_ms) {
-    // Start homing (set bit 4)
-    m_controlword |= CiA402::ControlwordBits::HomingOperationStart;
-    writeControlword(m_controlword);
-    
-    // Wait for homing complete
+    // Start homing (set bit 4) while keeping the enable bits set — the drive
+    // ignores the homing-start bit unless it remains Operation Enabled, and
+    // m_controlword may be stale/zero if enable() took no transition steps.
+    m_controlword |= CiA402::ControlwordBits::SwitchOn |
+                     CiA402::ControlwordBits::EnableVoltage |
+                     CiA402::ControlwordBits::QuickStop |
+                     CiA402::ControlwordBits::EnableOperation |
+                     CiA402::ControlwordBits::HomingOperationStart;
+
+    // Wait for homing complete.  Re-assert the controlword on every poll so
+    // the PDO buffer continuously carries the desired state — a single write
+    // can otherwise be overwritten or left stale while no motion controller
+    // is driving the cyclic update.
     uint32_t elapsed = 0;
     const uint32_t poll_interval = 50;
-    
+
     while (elapsed < timeout_ms) {
+        writeControlword(m_controlword);
         if (isHomingComplete()) {
             TETHER_LOGI(TAG, "{}: Homing complete", logPrefix().c_str());
             m_controlword &= ~CiA402::ControlwordBits::HomingOperationStart;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <utility>
@@ -59,6 +60,17 @@ public:
             controller_->stopImmediate();
         }
 
+        /// Set the controlword the cyclic update asserts every cycle.
+        /// Defaults to ENABLE_OPERATION; the motion loop re-writes it each
+        /// cycle so one-shot SDO/PDO writes cannot leave a stale value (e.g.
+        /// a bare homing-start bit with the enable bits cleared) on the wire.
+        void setDesiredControlword(uint16_t cw) {
+            desired_controlword_.store(cw, std::memory_order_relaxed);
+        }
+        uint16_t desiredControlword() const {
+            return desired_controlword_.load(std::memory_order_relaxed);
+        }
+
         bool update(CiA402Drive& drive, double dt_seconds) override {
             auto* rx = drive.rxPDO<RxPDO>();
             if (rx == nullptr) {
@@ -66,7 +78,7 @@ public:
             }
 
             controller_->update(dt_seconds);
-            rx->controlword = static_cast<uint16_t>(ControlWord::ENABLE_OPERATION);
+            rx->controlword = desired_controlword_.load(std::memory_order_relaxed);
             rx->modes_of_operation = modeForTarget();
 
             switch (target_) {
@@ -116,6 +128,8 @@ public:
         CyclicTarget target_;
         std::unique_ptr<tether::common::ISetpointSource> controller_;
         double scale_{1.0};
+        std::atomic<uint16_t> desired_controlword_{
+            static_cast<uint16_t>(ControlWord::ENABLE_OPERATION)};
     };
 
     struct DriveConfiguration {
