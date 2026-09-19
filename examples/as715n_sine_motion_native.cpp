@@ -210,6 +210,12 @@ int runSineMotion(EtherCAT::DS402Master& master,
             break;
     }
 
+    // Start the CoE fault monitor before homing/motion so drive faults are
+    // reported during the whole run, not only during cyclic motion.
+    std::atomic<bool> monitor_stop{false};
+    std::thread fault_monitor(faultMonitorLoop, std::ref(master),
+                              std::cref(monitor_stop));
+
     EtherCAT::Master::RealtimeMotionLoopConfig loop_config;
     loop_config.cycle_period_us = 1000;
     loop_config.sync_interval_cycles = 10;
@@ -219,6 +225,8 @@ int runSineMotion(EtherCAT::DS402Master& master,
         auto* drive = master.driveBySlaveIndex(kSlaveIndex);
         if (!drive || !drive->homeToCurrentPosition()) {
             TETHER_LOGE(TAG, "Failed to set current position as home");
+            monitor_stop.store(true);
+            fault_monitor.join();
             return 5;
         }
     }
@@ -261,13 +269,11 @@ int runSineMotion(EtherCAT::DS402Master& master,
     // is not safe to modify concurrently with that update.
     if (!master.startRealtimeMotionControlLoop(loop_config)) {
         TETHER_LOGE(TAG, "Failed to start realtime motion control loop");
+        monitor_stop.store(true);
+        fault_monitor.join();
         (void)master.removeMotionController(kSlaveIndex);
         return 3;
     }
-
-    std::atomic<bool> monitor_stop{false};
-    std::thread fault_monitor(faultMonitorLoop, std::ref(master),
-                              std::cref(monitor_stop));
 
     Tether::Platform::Clock::instance().delayMilliseconds(
         static_cast<uint32_t>(args.duration * 1000.0));
