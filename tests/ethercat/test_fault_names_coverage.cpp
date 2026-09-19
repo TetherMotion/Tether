@@ -48,11 +48,14 @@ TEST(ALStatusCodeNames, AllEnumCases) {
     EXPECT_STREQ(getALStatusCodeName(ALStatusCode::FatalSyncError), "Fatal sync error");
     EXPECT_STREQ(getALStatusCodeName(ALStatusCode::NoSyncError), "No sync error (Err74.1)");
     EXPECT_STREQ(getALStatusCodeName(ALStatusCode::InvalidDCConfig), "Invalid DC configuration");
-    EXPECT_STREQ(getALStatusCodeName(ALStatusCode::InvalidDCSyncUnit), "Invalid DC sync unit");
-    EXPECT_STREQ(getALStatusCodeName(ALStatusCode::InvalidDCCycleTime), "Invalid DC cycle time");
     EXPECT_STREQ(getALStatusCodeName(ALStatusCode::InvalidDCLatchConfig), "Invalid DC latch configuration");
     EXPECT_STREQ(getALStatusCodeName(ALStatusCode::PLLError), "PLL error");
-    EXPECT_STREQ(getALStatusCodeName(ALStatusCode::DCSync1CycleTime), "DC SYNC1 cycle time");
+    EXPECT_STREQ(getALStatusCodeName(ALStatusCode::DCSyncIOError), "DC sync I/O error");
+    EXPECT_STREQ(getALStatusCodeName(ALStatusCode::DCSyncTimeoutError), "DC sync timeout error");
+    EXPECT_STREQ(getALStatusCodeName(ALStatusCode::InvalidDCCycleTime), "Invalid DC cycle time");
+    EXPECT_STREQ(getALStatusCodeName(ALStatusCode::InvalidDCSync0Time), "DC SYNC0 cycle time");
+    EXPECT_STREQ(getALStatusCodeName(ALStatusCode::InvalidDCSync1Time), "DC SYNC1 cycle time");
+    EXPECT_STREQ(getALStatusCodeName(ALStatusCode::MBoxAoE), "Mailbox AoE error");
     EXPECT_STREQ(getALStatusCodeName(ALStatusCode::MBoxEoE), "Mailbox EoE error");
     EXPECT_STREQ(getALStatusCodeName(ALStatusCode::MBoxCoE), "Mailbox CoE error");
     EXPECT_STREQ(getALStatusCodeName(ALStatusCode::MBoxFoE), "Mailbox FoE error");

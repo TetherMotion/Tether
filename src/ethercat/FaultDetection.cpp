@@ -54,11 +54,14 @@ const char* getALStatusCodeName(ALStatusCode code) {
         case ALStatusCode::FatalSyncError: return "Fatal sync error";
         case ALStatusCode::NoSyncError: return "No sync error (Err74.1)";
         case ALStatusCode::InvalidDCConfig: return "Invalid DC configuration";
-        case ALStatusCode::InvalidDCSyncUnit: return "Invalid DC sync unit";
-        case ALStatusCode::InvalidDCCycleTime: return "Invalid DC cycle time";
         case ALStatusCode::InvalidDCLatchConfig: return "Invalid DC latch configuration";
         case ALStatusCode::PLLError: return "PLL error";
-        case ALStatusCode::DCSync1CycleTime: return "DC SYNC1 cycle time";
+        case ALStatusCode::DCSyncIOError: return "DC sync I/O error";
+        case ALStatusCode::DCSyncTimeoutError: return "DC sync timeout error";
+        case ALStatusCode::InvalidDCCycleTime: return "Invalid DC cycle time";
+        case ALStatusCode::InvalidDCSync0Time: return "DC SYNC0 cycle time";
+        case ALStatusCode::InvalidDCSync1Time: return "DC SYNC1 cycle time";
+        case ALStatusCode::MBoxAoE: return "Mailbox AoE error";
         case ALStatusCode::MBoxEoE: return "Mailbox EoE error";
         case ALStatusCode::MBoxCoE: return "Mailbox CoE error";
         case ALStatusCode::MBoxFoE: return "Mailbox FoE error";

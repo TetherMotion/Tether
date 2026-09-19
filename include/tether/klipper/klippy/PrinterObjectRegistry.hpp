@@ -35,7 +35,7 @@ namespace tether::klipper::klippy {
 
 // Forward declarations
 class KlippyUdsServer;
-class KlippyInstanceConfig;
+struct KlippyInstanceConfig;
 
 /// @brief Printer object storage and setup for KlippyInstance.
 ///
