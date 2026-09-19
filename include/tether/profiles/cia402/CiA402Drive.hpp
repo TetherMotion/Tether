@@ -229,6 +229,36 @@ public:
     bool disable();
     bool quickStop();
     bool resetFault();
+
+    /// How enable() clears an active fault before running the enable
+    /// sequence.
+    enum class FaultResetMode : uint8_t {
+        /// CiA 402 default: rising edge on controlword bit 7 while the
+        /// current controlword is otherwise unchanged.
+        Standard,
+        /// Keep Enable Operation asserted: the fault-reset bit is toggled
+        /// on top of 0x000F, so drives that clear faults on the bit-7 edge
+        /// while enabled (or that re-enable automatically) never see the
+        /// enable bits drop.
+        KeepEnabled,
+        /// Drive-specific reset installed via setFaultResetCallback()
+        /// (e.g. AS715N, which requires the F31.00 / 0x2031:01 sequence
+        /// instead of the controlword bit).
+        Custom,
+    };
+
+    void setFaultResetMode(FaultResetMode mode) { m_fault_reset_mode = mode; }
+    FaultResetMode faultResetMode() const { return m_fault_reset_mode; }
+
+    /// Install a drive-specific fault reset.  Called from enable()'s
+    /// fault-clearing loop instead of the controlword bit-7 toggle.
+    /// Setting a callback implies FaultResetMode::Custom; passing nullptr
+    /// reverts to Standard.
+    void setFaultResetCallback(std::function<bool(CiA402Drive&)> cb) {
+        m_fault_reset_cb = std::move(cb);
+        m_fault_reset_mode = m_fault_reset_cb ? FaultResetMode::Custom
+                                              : FaultResetMode::Standard;
+    }
     bool isEnabled();
     bool isFaulted();
     bool isTargetReached();
@@ -413,6 +443,9 @@ private:
     bool writeControlword(uint16_t controlword);
     bool readStatusword(uint16_t& statusword);
     bool waitForDriveState(DriveState target, uint32_t timeout_ms);
+    /// Fault reset used by enable()'s fault-clearing loop; dispatches on
+    /// m_fault_reset_mode (Standard/KeepEnabled/Custom).
+    bool performFaultReset();
 
     /// Common SAFE_OP → OP tail: DC reconfig, PDO enable, diagnostics, OP request.
     /// Called by both transitionToOp() variants after SM/FMMU configuration.
@@ -441,6 +474,10 @@ private:
     // SDO-based state (used by enable / disable helpers)
     uint16_t m_controlword{0};
     uint16_t m_statusword{0};
+
+    // Fault-reset behaviour for enable()
+    FaultResetMode m_fault_reset_mode{FaultResetMode::Standard};
+    std::function<bool(CiA402Drive&)> m_fault_reset_cb;
 
     // PDO-based operating mode offset (-1 = not configured, use SDO)
     int m_opmode_pdo_offset{-1};

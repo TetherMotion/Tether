@@ -513,7 +513,7 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
             TETHER_LOGW(TAG, "{}: Fault active but 0x603F read failed",
                         logPrefix().c_str());
         }
-        if (!resetFault()) {
+        if (!performFaultReset()) {
             return false;
         }
         if (m_master->isCancelRequested()) {
@@ -657,6 +657,32 @@ bool CiA402Drive::resetFault() {
     Tether::Platform::Clock::instance().delayMilliseconds(10);
     m_controlword &= ~0x0080;
     return writeControlword(m_controlword);
+}
+
+bool CiA402Drive::performFaultReset() {
+    switch (m_fault_reset_mode) {
+        case FaultResetMode::KeepEnabled:
+            // Toggle the fault-reset bit while keeping Enable Operation
+            // (0x000F) asserted: drives that clear faults on the bit-7 edge
+            // while enabled — or that re-enable automatically once the
+            // fault clears — never see the enable bits drop.
+            m_controlword = 0x000F;
+            writeControlword(m_controlword);
+            Tether::Platform::Clock::instance().delayMilliseconds(10);
+            m_controlword = 0x008F;
+            writeControlword(m_controlword);
+            Tether::Platform::Clock::instance().delayMilliseconds(10);
+            m_controlword = 0x000F;
+            return writeControlword(m_controlword);
+        case FaultResetMode::Custom:
+            if (m_fault_reset_cb) {
+                return m_fault_reset_cb(*this);
+            }
+            return resetFault();
+        case FaultResetMode::Standard:
+        default:
+            return resetFault();
+    }
 }
 
 bool CiA402Drive::controlledShutdown(const ControlledShutdownConfig& cfg) {

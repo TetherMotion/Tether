@@ -88,19 +88,27 @@ int resetErrors(EtherCAT::DS402Master& master, bool software_reset, bool force)
 
     // DC sync errors get the specialised recovery sequence; everything else
     // uses the plain 0x2031:01 fault reset.
+    // The fault classification only applies when a real manufacturer error
+    // code is present.  The statusword fault bit can be set with 0x203F = 0
+    // (NoError) — e.g. a CiA402 communication fault (0x603F=0x8700) — which
+    // must still be reset via the plain F31.00 sequence.
     const AS715NError err = AS715NError::parse(mfr_error);
+    const bool has_mfr_error = has_fault && mfr_error != 0;
     bool reset_ok;
-    if (has_fault && err.isDCSyncError()) {
+    if (has_mfr_error && err.isDCSyncError()) {
         TETHER_LOGI(TAG, "DC sync error {} — using handleNoSyncError()", err.name);
         reset_ok = AS715NFaultHandler::handleNoSyncError(sdo, kSlaveIndex, 3);
-    } else if (has_fault && !err.is_recoverable && !force) {
+    } else if (has_mfr_error && !err.is_recoverable && !force) {
         TETHER_LOGE(TAG, "Error {} is marked non-recoverable — refusing reset "
                          "(use --force to override)", err.name);
         return 4;
     } else {
-        if (has_fault && !err.is_recoverable) {
+        if (has_mfr_error && !err.is_recoverable) {
             TETHER_LOGW(TAG, "Error {} is marked non-recoverable — forcing reset",
                         err.name);
+        } else if (has_fault && !has_mfr_error) {
+            TETHER_LOGI(TAG, "Fault bit set but no manufacturer error "
+                             "(0x603F=0x{:04X}) — plain reset", cia402_error);
         }
         reset_ok = AS715NFaultHandler::resetFault(sdo, kSlaveIndex);
     }

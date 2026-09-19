@@ -27,12 +27,14 @@
 #include <chrono>
 #include <thread>
 
+#include "tether/drives/AS715N.hpp"
 #include "tether/drives/AS715N/AS715NPDO.hpp"
 #include "tether/ethercat/ALResetController.hpp"
 #include "tether/ethercat/CoEManager.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
 #include "tether/ethercat/Types.hpp"
+#include "tether/platform/EspCompat.hpp"
 #include "tether/profiles/cia402/CiA402Drive.hpp"
 #include "tether/profiles/cia402/DS402Master.hpp"
 
@@ -171,9 +173,18 @@ public:
     }
 
     /// @brief Enable the drive (CiA 402 state machine).
+    ///
+    /// Installs the AS715N fault reset (F31.00 / 0x2031:01) as the drive's
+    /// fault-reset handler: the AS715N does NOT clear faults via the CiA402
+    /// controlword bit-7 edge, so enable()'s fault loop would otherwise
+    /// retry a no-op until timeout.
     /// @param timeout_ms  Timeout for each state transition (default 5000)
     /// @return true on success
     bool enableDrive(uint32_t timeout_ms = 5000) {
+        auto& drive = master_.ensureDrive(slave_idx_);
+        drive.setFaultResetCallback([this](CiA402Drive& d) {
+            return as715nFaultReset(d);
+        });
         if (!master_.enableDrive(slave_idx_, timeout_ms)) {
             TETHER_LOGE(tag_, "Drive enable failed for slave {}", slave_idx_);
             return false;
@@ -235,6 +246,31 @@ public:
     uint16_t slaveIndex() const { return slave_idx_; }
 
 private:
+    /// Fault reset invoked from CiA402Drive::enable()'s fault loop.
+    /// The F31.00 (0x2031:01) sequence only runs when the manufacturer
+    /// error code (0x203F external) is nonzero — a statusword fault with
+    /// 0x203F = NoError (e.g. a pure CiA402 fault like 0x603F=0x8700)
+    /// falls back to the standard controlword bit-7 edge instead.
+    bool as715nFaultReset(CiA402Drive& drive) {
+        auto& sdo_mgr = sdo();
+        const uint16_t mfr =
+            AS715NFaultHandler::readManufacturerFault(sdo_mgr, slave_idx_);
+        if (mfr == 0) {
+            return drive.resetFault();
+        }
+        // Per the A6-EC manual the S-ON bit must be cleared before the
+        // F31.00 0->1->0 sequence is accepted.
+        auto cw = sdo_mgr.readU16(0x6040, 0x00, {.timeout_ms = 3000});
+        if (cw.has_value() && (*cw & 0x0001u)) {
+            (void)sdo_mgr.writeU16(0x6040, 0x00,
+                                   static_cast<uint16_t>(*cw & ~0x0001u),
+                                   {.timeout_ms = 3000});
+            drive.setControlword(static_cast<uint16_t>(*cw & ~0x0001u));
+            Tether::Platform::Clock::instance().delayMilliseconds(50);
+        }
+        return AS715NFaultHandler::resetFault(sdo_mgr, slave_idx_);
+    }
+
     DS402Master& master_;
     uint16_t slave_idx_;
     const char* tag_;
