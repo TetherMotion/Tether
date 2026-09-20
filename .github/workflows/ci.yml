@@ -521,7 +521,11 @@ jobs:
     - name: Generate Doxygen XML
       # Breathe consumes the XML at build/xml (see docs/conf.py
       # breathe_projects); XML_OUTPUT in the Doxyfile matches that path.
-      run: doxygen Doxyfile
+      # Doxygen cannot create nested output directories, so the parent
+      # build/ dir (gitignored, absent on fresh clones) must exist first.
+      run: |
+        mkdir -p build/xml
+        doxygen Doxyfile
 
     - name: Build HTML documentation
       # -W --keep-going: treat Sphinx/Breathe warnings (missing toctree
