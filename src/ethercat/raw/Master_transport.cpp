@@ -965,6 +965,7 @@ void Master::depositCyclicSlot(uint8_t slot_idx, Command cmd,
     s.ado     = ado;
     s.datalen = datalen;
     s.wkc     = wkc;
+    s.stamp_ns = Tether::Platform::Clock::instance().getMicroseconds() * 1000;
     if (datalen > 0) {
         std::memcpy(s.data, payload,
                     std::min<size_t>(datalen, sizeof(s.data)));
@@ -974,8 +975,12 @@ void Master::depositCyclicSlot(uint8_t slot_idx, Command cmd,
 
 #ifdef __linux__
     // Wake a cyclic thread blocked in ppoll() — needed when the poll thread
-    // won the recv race and this deposit happened on the "wrong" fd.
-    if (cyclic_notify_fd_ >= 0) {
+    // won the recv race and this deposit happened on the "wrong" fd.  The
+    // write is gated on a registered waiter: with the BPF demux working,
+    // deposits almost never coincide with a sleep, so the idle path pays
+    // no syscall per frame.
+    if (cyclic_notify_fd_ >= 0 &&
+        cyclic_waiters_.load(std::memory_order_acquire) > 0) {
         const uint64_t one = 1;
         ssize_t r = ::write(cyclic_notify_fd_, &one, sizeof(one));
         (void)r;  // EAGAIN (counter saturated) is fine — waiter already woken
@@ -986,7 +991,8 @@ void Master::depositCyclicSlot(uint8_t slot_idx, Command cmd,
 void Master::publishCyclicSlotView(uint8_t slot_idx, Command cmd,
                                    uint16_t adp, uint16_t ado,
                                    const uint8_t* payload, uint16_t datalen,
-                                   uint16_t wkc, uint32_t cookie)
+                                   uint16_t wkc, uint32_t cookie,
+                                   uint64_t stamp_ns)
 {
     auto& s = cyclic_slots_[slot_idx];
     if (s.cookie >= 0 && cyclic_channel_) {
@@ -999,10 +1005,14 @@ void Master::publishCyclicSlotView(uint8_t slot_idx, Command cmd,
     s.ado     = ado;
     s.datalen = datalen;
     s.wkc     = wkc;
+    // The channel's kernel stamp when present, else stamp at deposit.
+    s.stamp_ns = stamp_ns ? stamp_ns
+        : Tether::Platform::Clock::instance().getMicroseconds() * 1000;
     s.seq.fetch_add(1, std::memory_order_release);
 
 #ifdef __linux__
-    if (cyclic_notify_fd_ >= 0) {
+    if (cyclic_notify_fd_ >= 0 &&
+        cyclic_waiters_.load(std::memory_order_acquire) > 0) {
         const uint64_t one = 1;
         ssize_t r = ::write(cyclic_notify_fd_, &one, sizeof(one));
         (void)r;
@@ -1203,7 +1213,7 @@ void Master::dispatchChannelFrame(const CyclicFrameView& v)
         cyclic_channel_->rxHold(v.cookie);
         publishCyclicSlotView(idx - IPDOTransport::kCyclicSlotBase,
                               static_cast<Command>(cmd), adp, ado,
-                              f + data_off, dl, wkc, v.cookie);
+                              f + data_off, dl, wkc, v.cookie, v.stamp_ns);
         rem -= dgt; off += dgt;
         if (!more) break;
     }
@@ -1226,6 +1236,7 @@ bool Master::waitCyclicSlotView(uint8_t slot, uint64_t token,
             out.ado     = s.ado;
             out.datalen = s.datalen;
             out.wkc     = s.wkc;
+            out.stamp_ns = s.stamp_ns;
             out.payload = s.payload ? s.payload : s.data;
             const int64_t cookie = s.cookie;
             out.cookie  = cookie >= 0 ? static_cast<uint32_t>(cookie) : 0;
@@ -1244,88 +1255,120 @@ bool Master::waitCyclicSlotView(uint8_t slot, uint64_t token,
         return read_slot();
     }
 
-    // Channel path: drain the cyclic ring/socket directly — cyclic frames
-    // publish slot views, stray async frames go to the normal parser.
-    if (cyclic_channel_) {
-        CyclicFrameView views[8];
-        while (true) {
-            if (s.seq.load(std::memory_order_acquire) != token) {
-                return read_slot();
-            }
-            if (cancel_requested_.load(std::memory_order_acquire)) return false;
-            const int64_t now_ns = clock.getMicroseconds() * 1000;
-            const int64_t remain = deadline_ns - now_ns;
-            if (remain <= 0) return false;
+    // Register as a waiter BEFORE any blocking point so a deposit landing
+    // between the fast-path check and the sleep still wakes us (deposit
+    // paths write the eventfd only while cyclic_waiters_ > 0).  The seq
+    // re-check inside the loop covers deposits that raced ahead of the
+    // registration.
+    struct WaiterGuard {
+        std::atomic<int>& c;
+        ~WaiterGuard() { c.fetch_sub(1, std::memory_order_acq_rel); }
+    } waiter_guard{cyclic_waiters_};
+    cyclic_waiters_.fetch_add(1, std::memory_order_acq_rel);
 
-            const int n = cyclic_channel_->rxPoll(
-                views, 8, static_cast<uint32_t>(remain));
-            for (int i = 0; i < n; ++i) {
-                dispatchChannelFrame(views[i]);
-            }
-        }
-    }
-
-    // Software path: ppoll on deposit-eventfd + optional direct socket drain.
+    // Unified wait: one ppoll over every wake source — the deposit eventfd
+    // (covers frames consumed by the poll thread / socket-B deposits when
+    // the BPF is absent) and the wire fd (the channel's own socket, or the
+    // iface socket on the no-channel path).
 #ifdef __linux__
     struct pollfd fds[2];
     nfds_t nfds = 0;
-    int efd_pos = -1, sock_pos = -1;
+    int efd_pos = -1, wire_pos = -1;
     if (cyclic_notify_fd_ >= 0) {
         efd_pos = static_cast<int>(nfds);
         fds[nfds++] = { cyclic_notify_fd_, POLLIN, 0 };
     }
-    const int sockfd = iface_.receive
-        ? static_cast<int>(reinterpret_cast<intptr_t>(iface_.native_handle))
-        : -1;
-    if (sockfd >= 0) {
-        sock_pos = static_cast<int>(nfds);
-        fds[nfds++] = { sockfd, POLLIN, 0 };
+    int wire_fd = -1;
+    if (cyclic_channel_) {
+        wire_fd = cyclic_channel_->fd();
+    } else if (iface_.receive) {
+        wire_fd = static_cast<int>(
+            reinterpret_cast<intptr_t>(iface_.native_handle));
     }
-
-    while (nfds > 0) {
-        if (s.seq.load(std::memory_order_acquire) != token) {
-            return read_slot();
-        }
-        if (cancel_requested_.load(std::memory_order_acquire)) return false;
-        const int64_t now_ns = clock.getMicroseconds() * 1000;
-        const int64_t remain = deadline_ns - now_ns;
-        if (remain <= 0) return false;
-
-        struct timespec ts;
-        ts.tv_sec  = remain / 1'000'000'000LL;
-        ts.tv_nsec = remain % 1'000'000'000LL;
-        int ret = ppoll(fds, nfds, &ts, nullptr);
-        if (ret < 0) {
-            if (errno == EINTR) continue;
-            return false;
-        }
-        if (ret == 0) return false;  // deadline reached
-
-        if (sock_pos >= 0 && (fds[sock_pos].revents & POLLIN)) {
-            uint8_t buf[1600];
-            size_t n = 0;
-            while (iface_.receive(buf, sizeof(buf), &n)) {
-                if (n > 0) handleRxFrame(buf, n);
-                n = 0;
-            }
-        }
-        if (efd_pos >= 0 && (fds[efd_pos].revents & POLLIN)) {
-            uint64_t v;
-            ssize_t r = ::read(cyclic_notify_fd_, &v, sizeof(v));
-            (void)r;
-        }
+    if (wire_fd >= 0) {
+        wire_pos = static_cast<int>(nfds);
+        fds[nfds++] = { wire_fd, POLLIN, 0 };
     }
 #endif
 
-    // Fallback: bounded spin on the sequence counter (no fd wake-up path —
-    // e.g. eventfd unavailable, or non-Linux).  Bounded by the deadline so
-    // a dead link cannot wedge the cyclic thread.
     while (true) {
         if (s.seq.load(std::memory_order_acquire) != token) {
             return read_slot();
         }
         if (cancel_requested_.load(std::memory_order_acquire)) return false;
-        if (clock.getMicroseconds() * 1000 >= deadline_ns) return false;
+        const int64_t now_ns = clock.getMicroseconds() * 1000;
+        int64_t remain = deadline_ns - now_ns;
+        if (remain <= 0) return false;
+
+        if (cyclic_channel_) {
+            // Spin phase: the ring backend's rxPending() is pure memory
+            // reads — a NIC DMA write becomes visible before the kernel
+            // could ever wake a ppoll() sleeper.  Shares the deadline
+            // budget; skipped entirely when rx_spin_ns_ == 0.
+            const uint32_t spin_ns = rx_spin_ns_;
+            if (spin_ns > 0) {
+                const int64_t spin_end = now_ns +
+                    std::min<int64_t>(remain, spin_ns);
+                while (clock.getMicroseconds() * 1000 < spin_end) {
+                    if (s.seq.load(std::memory_order_acquire) != token) {
+                        return read_slot();
+                    }
+                    if (cyclic_channel_->rxPending()) break;
+                }
+            }
+            CyclicFrameView views[8];
+            const int n = cyclic_channel_->rxPoll(views, 8, 0);
+            for (int i = 0; i < n; ++i) dispatchChannelFrame(views[i]);
+            if (n > 0) continue;      // re-check slots before sleeping
+        }
+
+#ifdef __linux__
+        if (nfds > 0) {
+            const int64_t remain2 = deadline_ns -
+                                    clock.getMicroseconds() * 1000;
+            if (remain2 <= 0) continue;   // deadline check at loop top
+            struct timespec ts;
+            ts.tv_sec  = remain2 / 1'000'000'000LL;
+            ts.tv_nsec = remain2 % 1'000'000'000LL;
+            const int ret = ppoll(fds, nfds, &ts, nullptr);
+            if (ret < 0) {
+                if (errno == EINTR) continue;
+                return false;
+            }
+            if (ret == 0) return false;  // deadline reached
+
+            if (wire_pos >= 0 && (fds[wire_pos].revents & POLLIN)) {
+                if (cyclic_channel_) {
+                    CyclicFrameView views[8];
+                    const int n = cyclic_channel_->rxPoll(views, 8, 0);
+                    for (int i = 0; i < n; ++i)
+                        dispatchChannelFrame(views[i]);
+                } else {
+                    // Bounded drain: an async burst must not burn the
+                    // whole RX budget — POLLIN stays asserted so the
+                    // remaining frames are handled next iteration.
+                    uint8_t buf[1600];
+                    for (int i = 0; i < 8; ++i) {
+                        size_t n = 0;
+                        if (!iface_.receive(buf, sizeof(buf), &n) || n == 0)
+                            break;
+                        handleRxFrame(buf, n);
+                    }
+                }
+            }
+            if (efd_pos >= 0 && (fds[efd_pos].revents & POLLIN)) {
+                uint64_t v;
+                ssize_t r = ::read(cyclic_notify_fd_, &v, sizeof(v));
+                (void)r;
+            }
+            continue;
+        }
+#endif
+
+        // No fd wake-up path (non-Linux / no eventfd / no wire fd): loop —
+        // a bounded spin on the sequence counter plus channel drain, with
+        // the seq/cancel/deadline checks at the top bounding it so a dead
+        // link cannot wedge the cyclic thread.
     }
 }
 

@@ -1095,6 +1095,7 @@ tether_add_test_executable(tether_ethercat_master_tests
     ethercat/test_slave_discovery_manager.cpp
     ethercat/test_transaction_router_waitany.cpp
     ethercat/test_cyclic_channel.cpp
+    ethercat/test_cyclic_executive.cpp
 )
 
 target_include_directories(tether_ethercat_master_tests PRIVATE

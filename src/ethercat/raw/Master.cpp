@@ -25,6 +25,8 @@
 #include "tether/fmmu/FMMUConfiguration.hpp"
 #include "raw/internal.hpp"
 #include "tether/platform/Platform.hpp"
+#include "tether/platform/RtMemory.hpp"
+#include "tether/platform/CpuIsolation.hpp"
 
 #include <thread>
 #include <chrono>
@@ -699,6 +701,55 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
     CyclicExecutive::Config exec_cfg = config.exec;
     exec_cfg.cycle_period_us    = config.cycle_period_us;
     exec_cfg.dc_interval_cycles = config.sync_interval_cycles;
+    rx_spin_ns_ = config.rx_spin_ns;
+
+    // ---- Runtime CPU isolation (opt-in) --------------------------------
+    // Claim CPUs for the RT threads before computing affinities.  Claims
+    // are released by stopCyclicLoop() and at process exit.
+    if (config.cpu_isolation.enabled) {
+        auto& iso = Tether::Platform::CpuIsolation::instance();
+        Tether::Platform::CpuIsolation::Spec spec;
+        spec.prefer_isolated = config.cpu_isolation.prefer_isolated;
+        spec.avoid_cpu0      = config.cpu_isolation.avoid_cpu0;
+
+        spec.requested_cpu = config.cpu_isolation.cyclic_cpu;
+        auto c = iso.claim(spec);
+        if (c.valid()) {
+            cyclic_cpu_claim_      = c.cpu;
+            exec_cfg.cpu_affinity  = c.cpu;
+        } else if (config.cpu_isolation.cyclic_cpu >= 0) {
+            TETHER_LOGW(TAG, "CPU isolation: cyclic CPU {} claim denied — "
+                             "running unpinned",
+                        config.cpu_isolation.cyclic_cpu);
+        }
+
+        if (exec_cfg.dc_placement ==
+            CyclicExecutive::DCPlacement::DedicatedThread) {
+            spec.requested_cpu = config.cpu_isolation.dc_cpu;
+            auto d = iso.claim(spec);
+            if (d.valid()) {
+                dc_cpu_claim_            = d.cpu;
+                exec_cfg.dc_cpu_affinity = d.cpu;
+            } else if (config.cpu_isolation.dc_cpu >= 0) {
+                TETHER_LOGW(TAG, "CPU isolation: DC CPU {} claim denied",
+                            config.cpu_isolation.dc_cpu);
+            }
+        }
+    }
+
+    // ---- Memory locking (each section independently opt-out-able) ------
+    if (config.memory_lock.lock_all_process) {
+        Tether::Platform::lockAllMemory();
+    }
+    if (exec_cfg.stack_prefault_bytes == 0 &&
+        config.memory_lock.stack_prefault_bytes > 0) {
+        exec_cfg.stack_prefault_bytes =
+            config.memory_lock.stack_prefault_bytes;
+    }
+    if (!config.memory_lock.prefault_stack) {
+        exec_cfg.stack_prefault_bytes = 0;
+    }
+
     if (config.enable_dc_synchronization &&
         exec_cfg.dc_placement == CyclicExecutive::DCPlacement::Disabled) {
         // Caller asked for DC sync but left placement at a disabled value —
@@ -714,11 +765,25 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
 
     // Exchange: LRW process image via the reserved-slot fast path when the
     // transport supports it, falling back to the router path otherwise.
-    CyclicExecutive::TaskFn exchange_fn = [this]() -> bool {
+    // Split placements run the send half at Exchange and the collect half
+    // in a later phase — the wire round-trip overlaps the work between.
+    const bool split_exchange =
+        config.exchange_placement != ExchangePlacement::Atomic;
+    const uint32_t cyclic_rx_budget_ns =
+        std::min<uint32_t>(200'000, config.cycle_period_us * 900);
+
+    CyclicExecutive::TaskFn exchange_fn = [this, split_exchange,
+                                           cyclic_rx_budget_ns]() -> bool {
         bool ok = true;
         if (pdo_) {
             if (logical_addr_mgr_ && logical_addr_mgr_->isInitialized()) {
-                ok = pdo_->exchangeAllLRWCyclic(200'000, &process_image_);
+                if (split_exchange) {
+                    ok = pdo_->cyclicSend(&process_image_,
+                                          cyclic_rx_budget_ns);
+                } else {
+                    ok = pdo_->exchangeAllLRWCyclic(cyclic_rx_budget_ns,
+                                                    &process_image_);
+                }
             } else {
                 ok = pdo_->exchangeAll();
             }
@@ -728,6 +793,13 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
         }
         return ok;
     };
+
+    CyclicExecutive::TaskFn collect_fn;
+    if (split_exchange) {
+        collect_fn = [this]() -> bool {
+            return !pdo_ || pdo_->cyclicCollect(&process_image_);
+        };
+    }
 
     CyclicExecutive::TaskFn dc_fn;
     if (config.enable_dc_synchronization) {
@@ -767,9 +839,10 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
             ifindex = sll.sll_ifindex;
         }
         CyclicChannelConfig cc;
-        cc.ifindex   = ifindex;
-        cc.async_fd  = fd;
-        cc.wire_mode = config.wire_mode;
+        cc.ifindex    = ifindex;
+        cc.async_fd   = fd;
+        cc.wire_mode  = config.wire_mode;
+        cc.rx_spin_ns = config.rx_spin_ns;
         cyclic_channel_ = createCyclicChannel(cc);
         if (!cyclic_channel_) {
             TETHER_LOGW(TAG, "cyclic channel unavailable — using software "
@@ -786,16 +859,37 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
     }
     if (mode != ImageMode::Buffered && pdo_ &&
         logical_addr_mgr_ && logical_addr_mgr_->isInitialized()) {
-        if (pdo_->configureProcessImage(process_image_, mode)) {
+        const char* shm = config.shm_image_name.empty()
+                        ? nullptr : config.shm_image_name.c_str();
+        if (pdo_->configureProcessImage(process_image_, mode, shm)) {
             active_image_mode_ = mode;
-            TETHER_LOGI(TAG, "process image active: mode={} rx={}B tx={}B",
+            TETHER_LOGI(TAG, "process image active: mode={} rx={}B tx={}B{}",
                         static_cast<int>(mode),
                         process_image_.outputBytes(),
-                        process_image_.inputBytes());
+                        process_image_.inputBytes(),
+                        process_image_.shmBacked() ? " [shm]" : "");
         } else {
             TETHER_LOGW(TAG, "process image configure failed — "
                              "buffered exchange");
         }
+    }
+    if (pdo_) {
+        pdo_->setCyclicStrictWkc(config.strict_wkc);
+    }
+
+    // ---- Memory locking: image + cyclic buffers (opt-out sections) -----
+    if (config.memory_lock.lock_image && process_image_.configured()) {
+        // Lock whatever backing regions the configured mode uses.
+        if (uint8_t* w = process_image_.outputWrite())
+            Tether::Platform::lockMemory(w, process_image_.imageBytes());
+        if (uint8_t* b = process_image_.inputWriteBank())
+            Tether::Platform::lockMemory(b, process_image_.imageBytes());
+    }
+    if (config.memory_lock.lock_slots) {
+        Tether::Platform::lockMemory(cyclic_slots_.data(),
+                                     sizeof(cyclic_slots_));
+        Tether::Platform::lockMemory(cyclic_tx_buf_,
+                                     sizeof(cyclic_tx_buf_));
     }
 
     cyclic_loop_ = std::make_unique<CyclicExecutive>(
@@ -813,6 +907,17 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
             });
     }
 
+    // Split-phase collect task — the send half already ran at Exchange;
+    // collect lands at the configured placement so the wire round-trip
+    // overlaps the phases in between.
+    if (collect_fn) {
+        const TaskPhase collect_phase =
+            (config.exchange_placement == ExchangePlacement::SplitLate)
+                ? TaskPhase::Diagnostics
+                : TaskPhase::PostExchange;
+        cyclic_loop_->addTask(collect_phase, std::move(collect_fn));
+    }
+
     return cyclic_loop_->start();
 }
 
@@ -821,6 +926,13 @@ void Master::stopCyclicLoop()
     if (cyclic_loop_) {
         cyclic_loop_->stop();
         cyclic_loop_.reset();
+    }
+    // Release runtime CPU claims before the threads' affinity becomes
+    // meaningless — claims are also auto-released at process exit.
+    if (cyclic_cpu_claim_ >= 0 || dc_cpu_claim_ >= 0) {
+        auto& iso = Tether::Platform::CpuIsolation::instance();
+        if (cyclic_cpu_claim_ >= 0) { iso.release(cyclic_cpu_claim_); cyclic_cpu_claim_ = -1; }
+        if (dc_cpu_claim_ >= 0)     { iso.release(dc_cpu_claim_);     dc_cpu_claim_ = -1; }
     }
     // Drop the held input-view cookie before the channel dies.
     process_image_.configure({});

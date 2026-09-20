@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -146,6 +147,34 @@ public:
     bool exchangeAllLRWCyclic(const PDO::PDOMapping& mapping,
                               uint32_t rx_timeout_ns = 200'000,
                               ProcessImage* image = nullptr);
+
+    /**
+     * @brief Split-phase halves of exchangeAllLRWCyclic().
+     *
+     * cyclicSend() gathers outputs and emits all LRW slice datagrams,
+     * recording the per-slot sequence tokens.  cyclicCollect() waits for
+     * the responses against a deadline anchored at send time, validates
+     * WKC, publishes the input image and scatters buffered entries.
+     *
+     * Images larger than one frame are sliced automatically across cyclic
+     * slots 0..N (one LRW datagram each — see the wire-time note in
+     * docs/CyclicRealtimeTransport.md).
+     *
+     * Between cyclicSend() and cyclicCollect() no other cyclic exchange
+     * may be started; cyclicExchangePending() reports the open half.
+     */
+    bool cyclicSend(const PDO::PDOMapping& mapping, ProcessImage* image,
+                    uint32_t rx_timeout_ns);
+    bool cyclicCollect(const PDO::PDOMapping& mapping, ProcessImage* image);
+    bool cyclicExchangePending() const { return cyclic_pending_count_ > 0; }
+
+    /// Slices the current image occupies (1 = single-frame exchange).
+    uint8_t cyclicSliceCount() const { return cyclic_slice_count_; }
+
+    /// Strict WKC verify (default on): after the first successful exchange
+    /// the per-slice response WKC is learned; later mismatches count as
+    /// wkc_errors.  Disable when slaves legitimately vary their WKC.
+    void setStrictWkc(bool strict) { strict_wkc_ = strict; }
 
     /**
      * @brief Compute each mapping entry's byte offset in the LRW process
@@ -289,6 +318,20 @@ private:
     std::unique_ptr<uint8_t[]> cyclic_payload_;
     uint32_t cyclic_payload_size_{0};
     void ensureCyclicPayload(uint32_t size);
+
+    // ---- Cyclic slice / split-phase state (cyclic thread only) ----
+    static constexpr size_t kMaxCyclicSlices = IPDOTransport::kNumCyclicSlots;
+    struct PendingSlice { uint64_t token; uint32_t off; uint32_t len; };
+    std::array<PendingSlice, kMaxCyclicSlices> cyclic_pending_{};
+    uint8_t  cyclic_pending_count_{0};   ///< slices awaiting collect
+    uint8_t  cyclic_slice_count_{1};     ///< slices needed for the image
+    uint64_t cyclic_deadline_ns_{0};     ///< collect deadline (mono ns)
+    ProcessImage* pending_image_{nullptr};
+
+    /// Expected-WKC learn/verify (per slice; learned on first success).
+    std::array<uint16_t, kMaxCyclicSlices> expected_wkc_{};
+    bool expected_wkc_valid_{false};
+    bool strict_wkc_{true};
 
     /// Build the log prefix for a slave (uses prefix_provider_ if set, else default)
     std::string slavePrefix(uint16_t idx) const {

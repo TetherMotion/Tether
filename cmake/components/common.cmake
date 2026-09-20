@@ -4,6 +4,8 @@
 set(TETHER_COMMON_SOURCES
     ${TETHER_ROOT}/src/platform/Platform.cpp
     ${TETHER_ROOT}/src/platform/HostTimer.cpp
+    ${TETHER_ROOT}/src/platform/RtMemory.cpp
+    ${TETHER_ROOT}/src/platform/CpuIsolation.cpp
     ${TETHER_ROOT}/src/logging/Logger.cpp
     ${TETHER_ROOT}/src/logging/DeduplicatingLogger.cpp
     ${TETHER_ROOT}/src/common/MotionProfile.cpp
@@ -28,6 +30,8 @@ set(TETHER_COMMON_HEADERS
     ${TETHER_ROOT}/include/tether/platform/Platform.hpp
     ${TETHER_ROOT}/include/tether/platform/ESPStubs.hpp
     ${TETHER_ROOT}/include/tether/platform/IPlatformTimer.hpp
+    ${TETHER_ROOT}/include/tether/platform/RtMemory.hpp
+    ${TETHER_ROOT}/include/tether/platform/CpuIsolation.hpp
 )
 
 # Create variant targets

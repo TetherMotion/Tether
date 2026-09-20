@@ -1435,8 +1435,45 @@ bool PDOManager::exchangeAllLRWCyclic(uint32_t rx_timeout_ns,
     return ok;
 }
 
+bool PDOManager::cyclicSend(ProcessImage* image, uint32_t rx_timeout_ns) {
+    if (!logical_addr_mgr_ || !logical_addr_mgr_->isInitialized()) {
+        return exchangeAll();
+    }
+    return logical_addr_mgr_->cyclicSend(mapping_, image, rx_timeout_ns);
+}
+
+bool PDOManager::cyclicCollect(ProcessImage* image) {
+    if (!logical_addr_mgr_ || !logical_addr_mgr_->isInitialized()) {
+        return true;
+    }
+    const bool ok = logical_addr_mgr_->cyclicCollect(mapping_, image);
+    if (ok) {
+        for (const auto& s : logical_addr_mgr_->describeEntries(mapping_)) {
+            if (s.slave_index >= PDO::kMaxPDOSlaves) continue;
+            if (s.direction == PDO::PDODirection::RxPDO)
+                slave_configs_[s.slave_index].pdo_request_count++;
+            else
+                slave_configs_[s.slave_index].pdo_reply_count++;
+        }
+    }
+    return ok;
+}
+
+bool PDOManager::cyclicExchangePending() const {
+    return logical_addr_mgr_ && logical_addr_mgr_->cyclicExchangePending();
+}
+
+uint8_t PDOManager::cyclicSliceCount() const {
+    return logical_addr_mgr_ ? logical_addr_mgr_->cyclicSliceCount() : 0;
+}
+
+void PDOManager::setCyclicStrictWkc(bool strict) {
+    if (logical_addr_mgr_) logical_addr_mgr_->setStrictWkc(strict);
+}
+
 bool PDOManager::configureProcessImage(ProcessImage& image,
-                                       ImageMode mode) {
+                                       ImageMode mode,
+                                       const char* shm_name) {
     if (!logical_addr_mgr_ || !logical_addr_mgr_->isInitialized()) {
         return false;
     }
@@ -1449,6 +1486,7 @@ bool PDOManager::configureProcessImage(ProcessImage& image,
     cfg.tx_bytes      = logical_addr_mgr_->totalTxPDOBytes();
     cfg.entry_offsets = offsets;
     cfg.entry_count   = n;
+    cfg.shm_name      = shm_name;
     return image.configure(cfg);
 }
 

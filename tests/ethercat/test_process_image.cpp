@@ -68,23 +68,46 @@ public:
     bool           resp_ok = true;
     int            wait_calls = 0;
 
-    bool supportsCyclicFastPath() const override { return true; }
-    uint64_t cyclicSlotToken(uint8_t) override { return 0; }
+    // Per-slot send capture + per-slot responses (multi-slice tests).
+    static constexpr int kSlots = 8;
+    int            send_count = 0;
+    uint8_t        sent_slot[kSlots]  = {};
+    uint16_t       sent_adp[kSlots]   = {};
+    uint16_t       sent_ado[kSlots]   = {};
+    uint16_t       sent_len_[kSlots]  = {};
+    uint8_t        sent_data[kSlots][1600] = {};
+    bool           per_slot_resp = false;
+    CyclicSlotView resp_slots[kSlots] = {};
+    uint8_t        resp_slot_data[kSlots][1600] = {};
+    size_t         fake_frame_payload = 0;   // 0 → default 1498
 
-    bool sendCyclicDatagram(Command, uint8_t, uint16_t, uint16_t,
+    bool supportsCyclicFastPath() const override { return true; }
+    uint64_t cyclicSlotToken(uint8_t slot) override { return slot; }
+    size_t maxEtherCATPayloadPerFrame() const override {
+        return fake_frame_payload ? fake_frame_payload : 1498;
+    }
+
+    bool sendCyclicDatagram(Command, uint8_t slot, uint16_t adp,
+                            uint16_t ado,
                             const void* data, uint16_t datalen,
                             bool) override {
         if (!send_ok) return false;
         std::memcpy(last_sent_frame, data, datalen);
         last_sent_len = datalen;
+        if (send_count < kSlots) {
+            const int i = send_count++;
+            sent_slot[i] = slot; sent_adp[i] = adp; sent_ado[i] = ado;
+            sent_len_[i] = datalen;
+            std::memcpy(sent_data[i], data, datalen);
+        }
         return true;
     }
 
-    bool waitCyclicSlotView(uint8_t, uint64_t, uint32_t,
+    bool waitCyclicSlotView(uint8_t slot, uint64_t, uint32_t,
                             CyclicSlotView& out) override {
         ++wait_calls;
         if (!resp_ok) return false;
-        out = resp_view;
+        out = per_slot_resp ? resp_slots[slot] : resp_view;
         return true;
     }
 
@@ -573,3 +596,295 @@ TEST_F(ProcessImageTest, TimeoutFails) {
     EXPECT_FALSE(mgr.exchangeAllLRWCyclic(mapping, 200'000, nullptr));
     EXPECT_EQ(mgr.getStats().timeout_errors, 1u);
 }
+
+// ============================================================================
+// Multi-slice cyclic exchange (image > one frame)
+// ============================================================================
+
+TEST_F(ProcessImageTest, MultiSliceSplitsImageAcrossSlots) {
+    // 16-byte image, 8-byte slices → 2 slots.
+    transport.fake_frame_payload = 20;   // maxSlice = 20 - 12 = 8
+    ProcessImage img;
+    ProcessImage::Config cfg;
+    cfg.mode = ImageMode::Direct;
+    cfg.rx_bytes = 8; cfg.tx_bytes = 8;
+    int32_t offs[2] = {0, 8};
+    cfg.entry_offsets = offs; cfg.entry_count = 2;
+    ASSERT_TRUE(img.configure(cfg));
+
+    uint8_t* out = img.outputWrite();
+    ASSERT_NE(out, nullptr);
+    for (int i = 0; i < 8; ++i) out[i] = 0xA0 + i;
+
+    transport.per_slot_resp = true;
+    for (int s = 0; s < 2; ++s) {
+        for (int i = 0; i < 8; ++i)
+            transport.resp_slot_data[s][i] = 0x10 * s + i;
+        transport.resp_slot_data[s][8] = 0xEE;
+        transport.resp_slots[s].payload = transport.resp_slot_data[s];
+        transport.resp_slots[s].datalen = 8;
+        transport.resp_slots[s].wkc     = 2;
+    }
+
+    ASSERT_TRUE(mgr.exchangeAllLRWCyclic(mapping, 200'000, &img));
+    EXPECT_EQ(mgr.cyclicSliceCount(), 2);
+    ASSERT_EQ(transport.send_count, 2);
+    EXPECT_EQ(transport.sent_slot[0], 0);
+    EXPECT_EQ(transport.sent_slot[1], 1);
+    EXPECT_EQ(transport.sent_len_[0], 8);
+    EXPECT_EQ(transport.sent_len_[1], 8);
+    // Slice 1's logical address = base + 8 → adp low word differs by 8.
+    EXPECT_EQ(transport.sent_adp[1],
+              static_cast<uint16_t>(transport.sent_adp[0] + 8));
+
+    // Input image assembled across both slices, one publish.
+    const uint8_t* in = img.inputRead();
+    ASSERT_NE(in, nullptr);
+    for (int i = 0; i < 8; ++i) EXPECT_EQ(in[i], i);
+    for (int i = 0; i < 8; ++i) EXPECT_EQ(in[8 + i], 0x10 + i);
+    EXPECT_EQ(img.inputSeq(), 1u);
+}
+
+TEST_F(ProcessImageTest, SplitPhaseSendDoesNotWaitThenCollect) {
+    ProcessImage img;
+    ProcessImage::Config cfg;
+    cfg.mode = ImageMode::Direct;
+    cfg.rx_bytes = 8; cfg.tx_bytes = 8;
+    int32_t offs[2] = {0, 8};
+    cfg.entry_offsets = offs; cfg.entry_count = 2;
+    ASSERT_TRUE(img.configure(cfg));
+
+    transport.resp_view.payload = transport.resp_data;
+    transport.resp_view.datalen = 16;
+    transport.resp_view.wkc     = 1;
+
+    ASSERT_TRUE(mgr.cyclicSend(mapping, &img, 200'000));
+    EXPECT_TRUE(mgr.cyclicExchangePending());
+    EXPECT_EQ(transport.wait_calls, 0);   // send must not block
+    EXPECT_EQ(transport.send_count, 1);
+
+    ASSERT_TRUE(mgr.cyclicCollect(mapping, &img));
+    EXPECT_FALSE(mgr.cyclicExchangePending());
+    EXPECT_EQ(transport.wait_calls, 1);
+    EXPECT_EQ(img.inputSeq(), 1u);
+}
+
+TEST_F(ProcessImageTest, ExpectedWkcLearnedThenEnforced) {
+    ProcessImage img;
+    ProcessImage::Config cfg;
+    cfg.mode = ImageMode::Direct;
+    cfg.rx_bytes = 8; cfg.tx_bytes = 8;
+    int32_t offs[2] = {0, 8};
+    cfg.entry_offsets = offs; cfg.entry_count = 2;
+    ASSERT_TRUE(img.configure(cfg));
+    mgr.setStrictWkc(true);
+
+    // First exchange learns the expected WKC.
+    transport.resp_view.payload = transport.resp_data;
+    transport.resp_view.datalen = 16;
+    transport.resp_view.wkc     = 3;
+    ASSERT_TRUE(mgr.exchangeAllLRWCyclic(mapping, 200'000, &img));
+
+    // A later exchange with a different WKC (partial slave dropout)
+    // must fail — wkc==0 alone cannot catch this.
+    transport.resp_view.wkc = 2;
+    EXPECT_FALSE(mgr.exchangeAllLRWCyclic(mapping, 200'000, &img));
+    EXPECT_GE(mgr.getStats().wkc_errors, 1u);
+}
+
+TEST_F(ProcessImageTest, StrictWkcOffAcceptsVaryingWkc) {
+    ProcessImage img;
+    ProcessImage::Config cfg;
+    cfg.mode = ImageMode::Direct;
+    cfg.rx_bytes = 8; cfg.tx_bytes = 8;
+    int32_t offs[2] = {0, 8};
+    cfg.entry_offsets = offs; cfg.entry_count = 2;
+    ASSERT_TRUE(img.configure(cfg));
+    mgr.setStrictWkc(false);
+
+    transport.resp_view.payload = transport.resp_data;
+    transport.resp_view.datalen = 16;
+    transport.resp_view.wkc     = 3;
+    ASSERT_TRUE(mgr.exchangeAllLRWCyclic(mapping, 200'000, &img));
+    transport.resp_view.wkc = 7;
+    EXPECT_TRUE(mgr.exchangeAllLRWCyclic(mapping, 200'000, &img));
+    transport.resp_view.wkc = 0;
+    EXPECT_FALSE(mgr.exchangeAllLRWCyclic(mapping, 200'000, &img));
+}
+
+TEST_F(ProcessImageTest, OversizedImageBeyondSlotCountFailsClean) {
+    // 16-byte image, 2-byte slices → 8 slices needed but kNumCyclicSlots=6.
+    transport.fake_frame_payload = 14;   // maxSlice = 2
+    EXPECT_FALSE(mgr.exchangeAllLRWCyclic(mapping, 200'000, nullptr));
+    EXPECT_GE(mgr.getStats().send_errors, 1u);
+}
+
+// ============================================================================
+// commitInput / waitInput (multi-part publish + external cycle tick)
+// ============================================================================
+
+TEST_F(ProcessImageTest, CommitInputPublishesStagedBankOnce) {
+    ProcessImage img;
+    ProcessImage::Config cfg;
+    cfg.mode = ImageMode::Direct;
+    cfg.rx_bytes = 8; cfg.tx_bytes = 8;
+    ASSERT_TRUE(img.configure(cfg));
+
+    uint8_t* bank = img.inputWriteBank();
+    ASSERT_NE(bank, nullptr);
+    std::memset(bank, 0xCC, 16);
+    bank[3] = 0x42;
+    img.commitInput();
+
+    const uint8_t* in = img.inputRead();
+    ASSERT_NE(in, nullptr);
+    EXPECT_EQ(in[3], 0x42);
+    EXPECT_EQ(in[0], 0xCC);
+    EXPECT_EQ(img.inputSeq(), 1u);
+}
+
+TEST_F(ProcessImageTest, WaitInputWakesOnPublish) {
+    ProcessImage img;
+    ProcessImage::Config cfg;
+    cfg.mode = ImageMode::Direct;
+    cfg.rx_bytes = 8; cfg.tx_bytes = 8;
+    ASSERT_TRUE(img.configure(cfg));
+
+    std::atomic<bool> woke{false};
+    const uint64_t seq0 = img.inputSeq();
+    std::thread waiter([&] {
+        woke = img.waitInput(seq0, 2'000'000'000u);  // 5 s budget
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    img.commitInput();
+    waiter.join();
+    EXPECT_TRUE(woke);
+}
+
+TEST_F(ProcessImageTest, WaitInputReturnsImmediatelyOnNewSeq) {
+    ProcessImage img;
+    ProcessImage::Config cfg;
+    cfg.mode = ImageMode::Direct;
+    cfg.rx_bytes = 8; cfg.tx_bytes = 8;
+    ASSERT_TRUE(img.configure(cfg));
+    img.commitInput();
+    // seq already advanced past 0 — returns instantly.
+    EXPECT_TRUE(img.waitInput(0, 1'000'000));
+}
+
+TEST_F(ProcessImageTest, WaitInputTimesOutCleanly) {
+    ProcessImage img;
+    ProcessImage::Config cfg;
+    cfg.mode = ImageMode::Direct;
+    cfg.rx_bytes = 8; cfg.tx_bytes = 8;
+    ASSERT_TRUE(img.configure(cfg));
+    const uint64_t seq = img.inputSeq();
+    const auto t0 = std::chrono::steady_clock::now();
+    EXPECT_FALSE(img.waitInput(seq, 5'000'000));  // 5 ms
+    const auto el = std::chrono::steady_clock::now() - t0;
+    EXPECT_LT(el, std::chrono::milliseconds(500));
+}
+
+// ============================================================================
+// EntryHandle — epoch-checked entry access
+// ============================================================================
+
+TEST_F(ProcessImageTest, EntryHandleResolvesAndInvalidates) {
+    ProcessImage img;
+    ProcessImage::Config cfg;
+    cfg.mode = ImageMode::Direct;
+    cfg.rx_bytes = 8; cfg.tx_bytes = 8;
+    int32_t offs[2] = {0, 8};
+    cfg.entry_offsets = offs; cfg.entry_count = 2;
+    ASSERT_TRUE(img.configure(cfg));
+
+    EntryHandle h = img.entryHandle(0);
+    ASSERT_TRUE(h.valid());
+    ASSERT_TRUE(h.imageMapped());
+    EXPECT_EQ(h.offset, 0);
+
+    uint8_t* p = img.outputPtrRaw(h);
+    ASSERT_NE(p, nullptr);
+    p[0] = 0x77;
+    EXPECT_EQ(img.outputWrite()[0], 0x77);
+
+    // Reconfigure → epoch bumps → the stale handle refuses to resolve.
+    ASSERT_TRUE(img.configure(cfg));
+    EXPECT_EQ(img.outputPtrRaw(h), nullptr);
+
+    // Fresh handle resolves again.
+    EntryHandle h2 = img.entryHandle(0);
+    EXPECT_NE(img.outputPtrRaw(h2), nullptr);
+}
+
+TEST_F(ProcessImageTest, EntryHandleOutOfRangeIsInvalid) {
+    ProcessImage img;
+    ProcessImage::Config cfg;
+    cfg.mode = ImageMode::Direct;
+    cfg.rx_bytes = 8; cfg.tx_bytes = 8;
+    int32_t offs[1] = {0};
+    cfg.entry_offsets = offs; cfg.entry_count = 1;
+    ASSERT_TRUE(img.configure(cfg));
+    EXPECT_FALSE(img.entryHandle(7).valid());
+}
+
+// ============================================================================
+// shm export + attach (process-external motion source)
+// ============================================================================
+
+#ifdef __linux__
+TEST_F(ProcessImageTest, ShmExportAndAttachShareRegions) {
+    const char* name = "tether-test-img";
+    ProcessImage::Config cfg;
+    cfg.mode = ImageMode::Direct;
+    cfg.rx_bytes = 8; cfg.tx_bytes = 8;
+    cfg.shm_name = name;
+
+    ProcessImage server;
+    ASSERT_TRUE(server.configure(cfg));
+    ASSERT_TRUE(server.shmBacked());
+
+    ProcessImage client;
+    ASSERT_TRUE(client.attachShared(name));
+    ASSERT_TRUE(client.shmBacked());
+    EXPECT_EQ(client.outputBytes(), 8u);
+    EXPECT_EQ(client.inputBytes(), 8u);
+
+    // Client writes outputs — server's acquireSendImage sees them.
+    uint8_t* cout = client.outputWrite();
+    ASSERT_NE(cout, nullptr);
+    cout[2] = 0x5A;
+    const uint8_t* sout = server.acquireSendImage();
+    ASSERT_NE(sout, nullptr);
+    EXPECT_EQ(sout[2], 0x5A);
+
+    // Server publishes inputs — client's inputRead sees them.
+    uint8_t* bank = server.inputWriteBank();
+    bank[9] = 0xB7;
+    server.commitInput();
+    const uint8_t* cin = client.inputRead();
+    ASSERT_NE(cin, nullptr);
+    EXPECT_EQ(cin[9], 0xB7);
+
+    // Cross-"process" wait: client waits on seq, server publish wakes it.
+    std::atomic<bool> woke{false};
+    const uint64_t seq0 = client.inputSeq();
+    std::thread waiter([&] {
+        woke = client.waitInput(seq0, 2'000'000'000u);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    server.commitInput();
+    waiter.join();
+    EXPECT_TRUE(woke);
+
+    // commitOutputs on the attached side bumps the shm output counter.
+    const uint32_t oseq = server.outputSeq();
+    client.commitOutputs();
+    EXPECT_EQ(server.outputSeq(), oseq + 1);
+}
+
+TEST_F(ProcessImageTest, AttachSharedBadNameFails) {
+    ProcessImage img;
+    EXPECT_FALSE(img.attachShared("tether-nonexistent-image-xyz"));
+}
+#endif

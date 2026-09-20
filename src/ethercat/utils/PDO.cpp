@@ -121,7 +121,7 @@ std::string pdoToString(bool is_tx,
 
         if (f.size == 1 || f.size == 2 || f.size == 4 || f.size == 8) {
             const int64_t sval = signExtend(raw, f.size);
-            appendf(out, "    %s (0x%04X:%u, off=%u, sz=%u): 0x%0*" PRIX64 " ({})\n",
+            appendf(out, "    %s (0x%04X:%u, off=%u, sz=%u): 0x%0*" PRIX64 " (%" PRId64 ")\n",
                     desc, f.index, static_cast<unsigned>(f.subindex),
                     static_cast<unsigned>(f.offset), static_cast<unsigned>(f.size),
                     width, raw, sval);

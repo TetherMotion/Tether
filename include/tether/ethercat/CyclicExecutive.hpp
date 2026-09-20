@@ -58,6 +58,14 @@ public:
                           ///< dc_interval_cycles-th cycle
     };
 
+    /// Kernel scheduling class for the cyclic thread.
+    enum class SchedClass : uint8_t {
+        Fifo,       ///< SCHED_FIFO @ priority — needs CAP_SYS_NICE
+        Deadline,   ///< SCHED_DEADLINE CBS (runtime/deadline/period) —
+                    ///< works on vanilla kernels, bounds runaway-RT damage.
+                    ///< Falls back to Fifo with a logged warning.
+    };
+
     struct Config {
         uint32_t cycle_period_us = 1000;   ///< Cyclic period in µs
 
@@ -66,6 +74,22 @@ public:
         size_t   stack_size   = 262144;    ///< Cyclic thread stack bytes
         SleepMode sleep_mode  = SleepMode::Nanosleep;
         uint32_t spin_window_us = 50;      ///< HybridSpin: busy-wait tail in µs
+
+        /// Scheduling class for the cyclic thread (DC thread always uses
+        /// SCHED_FIFO — its budget is a single short frame).
+        SchedClass sched_class = SchedClass::Fifo;
+        /// SCHED_DEADLINE parameters (ns).  0 → runtime = period/2,
+        /// deadline = period.  Only used when sched_class == Deadline.
+        uint64_t dl_runtime_ns  = 0;
+        uint64_t dl_deadline_ns = 0;
+
+        /// Pre-fault the cyclic thread's stack at thread start (avoids
+        /// first-touch page faults mid-cycle).  Bytes to descend.
+        uint32_t stack_prefault_bytes = 128 * 1024;
+        /// Kill the kernel's ~50 µs timer slack on this thread — only
+        /// matters when SCHED_FIFO could not be acquired (RT tasks skip
+        /// slack already), but it is free insurance on the degraded path.
+        bool     low_timer_slack = true;
 
         // ---- DC synchronisation ----
         DCPlacement dc_placement      = DCPlacement::DedicatedThread;

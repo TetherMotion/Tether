@@ -303,6 +303,37 @@ public:
     // Uses the reserved-index cyclic fast path for the PDO exchange when the
     // transport supports it (responses deposited into fixed slots — no
     // TransactionRouter round-trip).
+    /// Which CPUs to claim for the RT threads (opt-in runtime isolation).
+    struct CpuIsolationConfig {
+        bool enabled      = false;
+        int  cyclic_cpu   = -1;    ///< >=0: pin cyclic thread to this CPU
+        int  dc_cpu       = -1;    ///< >=0: pin DC thread to this CPU
+        bool prefer_isolated = true;  ///< prefer /sys-isolated CPUs
+        bool avoid_cpu0      = true;  ///< CPU0 handles most default IRQs
+    };
+
+    /// Granular memory locking — each flag is an independent opt-out.
+    /// Locking is best-effort: failures are logged, never fatal.
+    struct MemoryLockConfig {
+        bool lock_all_process = false;  ///< mlockall(CURRENT|FUTURE) — most
+                                        ///< thorough, least selective
+        bool lock_image       = true;   ///< ProcessImage buffers
+        bool lock_slots       = true;   ///< cyclic slot bank + TX staging
+        bool prefault_stack   = true;   ///< pre-touch cyclic thread stack
+        uint32_t stack_prefault_bytes = 0;  ///< 0 → conservative default
+    };
+
+    /// Where in the phase pipeline the exchange's collect half runs when
+    /// split_exchange is set.  Atomic keeps send+collect in one step.
+    enum class ExchangePlacement : uint8_t {
+        Atomic,   ///< send+wait in the Exchange phase (default)
+        Split,    ///< send at Exchange; collect at PostExchange — the wire
+                  ///< round-trip overlaps the work in between
+        SplitLate ///< send at Exchange; collect at Diagnostics — maximum
+                  ///< overlap; only valid when nothing in-loop reads the
+                  ///< fresh inputs (external motion source use case)
+    };
+
     struct CyclicLoopConfig {
         uint32_t cycle_period_us{1000};
         bool     enable_dc_synchronization{false};
@@ -324,6 +355,32 @@ public:
         /// Process-image exposure mode (see ProcessImage.hpp).
         /// Buffered keeps the legacy per-entry app_buffer exchange.
         ImageMode image_mode{ImageMode::Buffered};
+
+        /// Exchange phase split — Split* overlaps the wire round-trip
+        /// with intermediate phases (see ExchangePlacement).
+        ExchangePlacement exchange_placement{ExchangePlacement::Atomic};
+
+        /// RX spin window (ns) inside the cyclic slot wait: polls the
+        /// slot seq + channel rxPending() (memory reads — ring DMA writes
+        /// are visible without a syscall) before blocking in ppoll.
+        /// Shares the response deadline budget.  0 disables.
+        uint32_t rx_spin_ns{0};
+
+        /// Runtime CPU claims for the cyclic/DC threads (opt-in).
+        CpuIsolationConfig cpu_isolation{};
+
+        /// Memory locking sections — each flag independently opt-out-able.
+        MemoryLockConfig memory_lock{};
+
+        /// Optional shared-memory export of the process image for a
+        /// process-external motion source (shm_open name, e.g.
+        /// "tether-img").  Empty = in-process only.
+        std::string shm_image_name{};
+
+        /// When true (default), a response WKC that differs from the
+        /// learned expected value is counted as an error — catches partial
+        /// slave dropout, which wkc==0 alone cannot see.
+        bool strict_wkc{true};
     };
 
     /// Process image — valid once the cyclic loop is running with an
@@ -1127,10 +1184,12 @@ private:
                            uint16_t wkc);
     /// View-mode deposit: payload points into channel-owned memory held by
     /// `cookie`.  The previous held cookie (if any) is released.
+    /// `stamp_ns` carries the frame's kernel timestamp (0 → deposit-time).
     void publishCyclicSlotView(uint8_t slot_idx, Command cmd,
                                uint16_t adp, uint16_t ado,
                                const uint8_t* payload, uint16_t datalen,
-                               uint16_t wkc, uint32_t cookie);
+                               uint16_t wkc, uint32_t cookie,
+                               uint64_t stamp_ns = 0);
     /// Route a frame received on the cyclic channel: pure-cyclic frames
     /// publish slot views, mixed/async frames go to the parser.
     void dispatchChannelFrame(const CyclicFrameView& view);
@@ -1197,6 +1256,9 @@ private:
         const uint8_t* payload{nullptr};
         /// Channel cookie of the held view; -1 = copy mode / none.
         int64_t cookie{-1};
+        /// Frame arrival timestamp (kernel stamp when the channel provides
+        /// one, else monotonic now at deposit).
+        uint64_t stamp_ns{0};
         uint8_t  data[1486];
     };
     std::array<CyclicRxSlot, kNumCyclicSlots> cyclic_slots_{};
@@ -1210,10 +1272,25 @@ private:
     /// Persistent cyclic TX frame buffer — avoids a 1514-byte zeroed stack
     /// buffer per cycle.  Only the cyclic thread writes it.
     uint8_t cyclic_tx_buf_[1514] = {};
-    /// Linux eventfd signalled on every cyclic-slot deposit so a blocked
-    /// cyclic waiter wakes immediately even when the poll thread consumed
-    /// the frame.  -1 when unavailable / non-Linux.
+    /// Linux eventfd signalled on cyclic-slot deposits *while a waiter is
+    /// registered* (cyclic_waiters_ > 0) so a blocked cyclic waiter wakes
+    /// immediately even when the poll thread consumed the frame.  Writes
+    /// are suppressed when nobody can be sleeping on it — an idle cyclic
+    /// loop therefore pays no syscall per deposit.  -1 when unavailable.
     int cyclic_notify_fd_ = -1;
+    /// Number of threads currently inside a cyclic-slot wait — gates the
+    /// eventfd write in the deposit/publish paths.
+    std::atomic<int> cyclic_waiters_{0};
+    /// Spin window applied in waitCyclicSlotView before blocking: polls
+    /// the slot sequence word and channel rxPending() — pure memory reads,
+    /// so a ring-slot DMA write is visible with zero syscalls.  From
+    /// CyclicLoopConfig::rx_spin_ns; 0 disables.
+    uint32_t rx_spin_ns_ = 0;
+
+    /// CPU claims held while the cyclic loop runs (CpuIsolationConfig);
+    /// -1 = no claim.  Released by stopCyclicLoop() / ~Master().
+    int cyclic_cpu_claim_ = -1;
+    int dc_cpu_claim_     = -1;
 
 #if TETHER_ENABLE_UDP_ENCAPSULATION
     // IP identification counter for UDP encapsulation

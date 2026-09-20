@@ -139,6 +139,16 @@ public:
     virtual int  rxPoll(CyclicFrameView* views, int max_views,
                         uint32_t timeout_ns) = 0;
 
+    /**
+     * @brief Cheap non-syscall check: is at least one frame pending?
+     *
+     * Ring backend: scans slot headers (memory reads — used for spin waits
+     * that see a DMA write with zero syscalls and zero scheduler latency).
+     * Socket backend: returns false (frames are kernel-internal until
+     * recv — cannot be memory-polled).
+     */
+    virtual bool rxPending() const { return false; }
+
     /// Pin a view's buffer beyond the next rxPoll (refcount ++).
     virtual void rxHold(uint32_t cookie)   = 0;
     /// Drop one hold (refcount --; buffer frees when it reaches 0).
@@ -158,6 +168,13 @@ public:
      *        not lost frames.  0 on backends without a bounded bank.
      */
     virtual uint64_t droppedRx() const { return 0; }
+    /**
+     * @brief txCommitFrame() calls whose kernel kick was deferred (TX queue
+     *        full — the slot stays queued and flushes on the next kick).
+     *        A rising count means cyclic frames are leaving late: a
+     *        deadline-relevant event worth surfacing in stats.
+     */
+    virtual uint64_t txDeferred() const { return 0; }
 };
 
 // ============================================================================
@@ -170,6 +187,16 @@ struct CyclicChannelConfig {
 
     uint32_t rx_ring_blocks = 128;     ///< PACKET_RX_RING blocks (4 KiB each)
     uint32_t tx_ring_blocks = 16;      ///< PACKET_TX_RING blocks
+
+    /**
+     * @brief Spin window applied inside rxPoll() before falling back to a
+     *        blocking wait: the ring backend busy-polls slot memory for up
+     *        to this long — the frame is visible the instant the NIC's DMA
+     *        writes it, with no syscall and no scheduler wake.  0 disables.
+     *        Socket backend ignores this (kernel-internal frames cannot be
+     *        memory-polled).  Keep the window well under the RX budget.
+     */
+    uint32_t rx_spin_ns = 0;
 
     int      async_fd = -1;            ///< async socket (socket B) — the mirror
                                        ///< BPF is attached here when >= 0
@@ -247,7 +274,24 @@ std::unique_ptr<ICyclicChannel> createCyclicSocketChannelForFd(
  */
 std::unique_ptr<ICyclicChannel> createCyclicRingChannelForFd(
     int fd, int ifindex, uint32_t rx_ring_blocks = 128,
-    uint32_t tx_ring_blocks = 16);
+    uint32_t tx_ring_blocks = 16, uint32_t rx_spin_ns = 0);
+
+/**
+ * @brief Test seam: ring backend over caller-provided ring buffers.
+ *
+ * `rx_ring`/`tx_ring` point to caller-owned memory laid out as
+ * `tpacket2_hdr`-sized frames (`frame_size` bytes per frame, `frames`
+ * slots).  The channel borrows the memory — it is never unmapped or
+ * freed.  `fd` is used only for the TX kick (a datagram socketpair fd
+ * suffices) and for `fd()`/ppoll wake-ups.  Lets tests drive the
+ * walk/hold/cursor machinery without CAP_NET_RAW.  Returns nullptr on
+ * invalid geometry or non-Linux builds.
+ */
+std::unique_ptr<ICyclicChannel> createCyclicRingChannelForMemory(
+    int fd, int ifindex,
+    void* rx_ring, uint32_t rx_frame_size, uint32_t rx_frames,
+    void* tx_ring, uint32_t tx_frame_size, uint32_t tx_frames,
+    uint32_t rx_spin_ns = 0);
 
 /**
  * @brief Zero-copy view of a published cyclic-slot response payload.
@@ -267,6 +311,9 @@ struct CyclicSlotView {
     /// Channel cookie + owner for held views; nullptr/0 for inline copies.
     uint32_t        cookie  = 0;
     ICyclicChannel* channel = nullptr;
+    /// Frame arrival timestamp (kernel stamp when available, else the
+    /// deposit's monotonic now).
+    uint64_t        stamp_ns = 0;
 };
 
 } // namespace EtherCAT

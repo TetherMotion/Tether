@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <ctime>
 
 namespace EtherCAT {
 
@@ -366,10 +367,29 @@ size_t LogicalAddressManager::computeImageOffsets(
     return n;
 }
 
+static uint64_t monoNowNs() {
+    timespec ts{};
+    ::clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ull
+         + static_cast<uint64_t>(ts.tv_nsec);
+}
+
 bool LogicalAddressManager::exchangeAllLRWCyclic(const PDO::PDOMapping& mapping,
                                                  uint32_t rx_timeout_ns,
                                                  ProcessImage* image) {
+    if (!cyclicSend(mapping, image, rx_timeout_ns)) return false;
+    return cyclicCollect(mapping, image);
+}
+
+// ============================================================================
+// cyclicSend — gather outputs + emit all LRW slices
+// ============================================================================
+
+bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
+                                       ProcessImage* image,
+                                       uint32_t rx_timeout_ns) {
     if (!transport_.supportsCyclicFastPath()) {
+        // Legacy path stays atomic — no split support.
         return exchangeAllLRW(mapping);
     }
     if (!initialized_ || slave_count_ == 0) {
@@ -386,16 +406,26 @@ bool LogicalAddressManager::exchangeAllLRWCyclic(const PDO::PDOMapping& mapping,
         }
     }
 
+    // Slice count: one LRW datagram per maxSliceLength()-sized chunk,
+    // sent on cyclic slots 0..N-1.  Wire time is the real constraint —
+    // at 100 Mbit/s a max-size frame costs ~120 µs on the wire.
+    const uint32_t max_slice = maxSliceLength();
+    uint32_t nslices = max_slice ? (total_data + max_slice - 1) / max_slice
+                                 : kMaxCyclicSlices + 1;
+    if (nslices > kMaxCyclicSlices) {
+        TETHER_LOGE(TAG, "cyclic image {}B needs {} slices > {} slots — "
+                         "cannot exchange (raise slot count or shrink "
+                         "the image)", total_data, nslices,
+                    kMaxCyclicSlices);
+        stats_.send_errors++;
+        return false;
+    }
+    cyclic_slice_count_ = static_cast<uint8_t>(nslices);
+
     const bool img_active = image && image->configured() &&
                             image->mode() != ImageMode::Buffered;
 
     // ---- Choose the TX payload ------------------------------------------
-    // Buffered/legacy: staged cyclic_payload_, memset + full app_buffer
-    // gather (unchanged semantics).
-    // Image modes: the image's send buffer (Direct/TripleBuffered) or the
-    // acquired TX frame's payload region (Rotating); only forced-buffered
-    // entries (-1 offsets) are gathered from app_buffer — image-mapped
-    // entries are already written in place by the application.
     uint8_t* payload         = cyclic_payload_.get();
     uint8_t* rotating_frame  = nullptr;
     bool     rotating_send   = false;
@@ -403,21 +433,25 @@ bool LogicalAddressManager::exchangeAllLRWCyclic(const PDO::PDOMapping& mapping,
     if (img_active && image->mode() == ImageMode::Rotating) {
         rotating_frame = image->rotatingFrameBase();
         if (!rotating_frame) {
-            // First cycle (or ring underflow last cycle): acquire now so
-            // outputWrite() becomes valid for the remainder of this cycle.
             rotating_frame = transport_.acquireCyclicTxFrame();
             image->attachTxFrame(rotating_frame);
         }
-        if (rotating_frame) {
+        if (rotating_frame && nslices == 1) {
             payload        = rotating_frame + kCyclicFramePayloadOff;
             rotating_send  = true;
+        } else if (rotating_frame) {
+            // Rotating cannot span multiple frames — stage instead.
+            TETHER_LOGW(TAG, "Rotating mode with {} slices — staging "
+                             "payload instead (image > one frame)",
+                        nslices);
+            payload = const_cast<uint8_t*>(image->acquireSendImage());
+            rotating_frame = nullptr;
         }
     } else if (img_active) {
         payload = const_cast<uint8_t*>(image->acquireSendImage());
     }
 
     if (!payload) {
-        // Rotating with no channel or an exhausted ring — legacy fallback.
         payload = cyclic_payload_.get();
         rotating_send = false;
     }
@@ -428,9 +462,7 @@ bool LogicalAddressManager::exchangeAllLRWCyclic(const PDO::PDOMapping& mapping,
 
     // Gather RxPDO bytes from app buffers for entries that are NOT image
     // mapped (all entries on the legacy path; only -1-offset entries in
-    // image modes).  No memset on image paths: unwritten regions carry
-    // stale bytes forward — the Rotating full-refresh contract documents
-    // that as intended behaviour.
+    // image modes).
     std::array<uint32_t, PDO::kMaxPDOSlaves> rx_running{};
     for (size_t i = 0; i < mapping.entry_count(); i++) {
         const PDO::PDOEntry* e = mapping.get_entry(i);
@@ -449,84 +481,158 @@ bool LogicalAddressManager::exchangeAllLRWCyclic(const PDO::PDOMapping& mapping,
         std::memcpy(payload + entry_off, e->app_buffer, e->data_size);
     }
 
-    const uint32_t logical_addr = base_logical_addr_;
-    const uint16_t adp = static_cast<uint16_t>(logical_addr & 0xFFFF);
-    const uint16_t ado = static_cast<uint16_t>((logical_addr >> 16) & 0xFFFF);
+    // ---- Emit slices -----------------------------------------------------
+    // Collect the response deadline once — the collect half shares it
+    // regardless of when it runs (split-phase overlap).
+    cyclic_deadline_ns_ = monoNowNs() + rx_timeout_ns;
+    cyclic_pending_count_ = 0;
+    pending_image_ = image;
 
-    // Reserved slot 0 for the primary cyclic LRW exchange.
-    constexpr uint8_t kSlot = 0;
-    const uint64_t token = transport_.cyclicSlotToken(kSlot);
+    for (uint32_t s = 0; s < nslices; ++s) {
+        const uint32_t off = s * max_slice;
+        const uint32_t len = std::min(max_slice, total_data - off);
+        const uint32_t logical_addr = base_logical_addr_ + off;
+        const uint16_t adp = static_cast<uint16_t>(logical_addr & 0xFFFF);
+        const uint16_t ado = static_cast<uint16_t>((logical_addr >> 16)
+                                                 & 0xFFFF);
+        const uint8_t slot = static_cast<uint8_t>(s);
 
-    bool sent;
-    if (rotating_send) {
-        // Payload already lives inside the channel TX frame — compose the
-        // header in place, append WKC, commit.  Zero copies end to end.
-        transport_.composeCyclicHeader(rotating_frame, Command::LRW, kSlot,
-                                       adp, ado,
-                                       static_cast<uint16_t>(total_data),
-                                       true);
-        *reinterpret_cast<uint16_t*>(
-            rotating_frame + kCyclicFramePayloadOff + total_data) = 0;
-        image->detachTxFrame();
-        sent = transport_.sendCyclicFrame(
-            kCyclicFramePayloadOff + total_data + sizeof(uint16_t));
-        // Attach next cycle's frame so outputWrite() stays valid for the
-        // remainder of this cycle and the next.
-        image->attachTxFrame(transport_.acquireCyclicTxFrame());
-    } else {
-        sent = transport_.sendCyclicDatagram(Command::LRW, kSlot, adp, ado,
-                                             payload,
-                                             static_cast<uint16_t>(total_data),
-                                             true);
-    }
-    if (!sent) {
-        stats_.send_errors++;
-        return false;
-    }
+        cyclic_pending_[s].token = transport_.cyclicSlotToken(slot);
+        cyclic_pending_[s].off   = off;
+        cyclic_pending_[s].len   = len;
 
-    CyclicSlotView resp{};
-    if (!transport_.waitCyclicSlotView(kSlot, token, rx_timeout_ns, resp)) {
-        stats_.timeout_errors++;
-        return false;
-    }
-    if (resp.wkc == 0) {
-        stats_.wkc_errors++;
-        return false;
-    }
-
-    // Publish the received payload as the input image (zero-copy view when
-    // a channel holds it, owned-bank copy otherwise).
-    if (img_active && resp.payload) {
-        if (resp.channel) {
-            image->publishInputView(resp.payload, resp.datalen,
-                                    resp.cookie, resp.channel);
+        bool sent;
+        if (rotating_send) {
+            transport_.composeCyclicHeader(rotating_frame, Command::LRW,
+                                           slot, adp, ado,
+                                           static_cast<uint16_t>(len),
+                                           true);
+            *reinterpret_cast<uint16_t*>(
+                rotating_frame + kCyclicFramePayloadOff + len) = 0;
+            image->detachTxFrame();
+            sent = transport_.sendCyclicFrame(
+                kCyclicFramePayloadOff + len + sizeof(uint16_t));
+            image->attachTxFrame(transport_.acquireCyclicTxFrame());
+            rotating_send = false;   // single-slice path only
         } else {
-            image->publishInputCopy(resp.payload, resp.datalen);
+            sent = transport_.sendCyclicDatagram(
+                Command::LRW, slot, adp, ado, payload + off,
+                static_cast<uint16_t>(len), true);
+        }
+        if (!sent) {
+            stats_.send_errors++;
+            cyclic_pending_count_ = 0;
+            pending_image_ = nullptr;
+            return false;
+        }
+        ++cyclic_pending_count_;
+    }
+    return true;
+}
+
+// ============================================================================
+// cyclicCollect — wait slices, verify WKC, publish + scatter
+// ============================================================================
+
+bool LogicalAddressManager::cyclicCollect(const PDO::PDOMapping& mapping,
+                                          ProcessImage* image) {
+    if (!transport_.supportsCyclicFastPath()) {
+        return true;   // cyclicSend already ran the atomic legacy exchange
+    }
+    const uint32_t total_data = total_rxpdo_bytes_ + total_txpdo_bytes_;
+    const uint8_t nslices = cyclic_pending_count_;
+    if (nslices == 0) return total_data == 0;
+    image = pending_image_;
+    const bool img_active = image && image->configured() &&
+                            image->mode() != ImageMode::Buffered;
+
+    bool ok = true;
+    bool wkc_learn = !expected_wkc_valid_;
+    std::array<const CyclicSlotView*, kMaxCyclicSlices> resps{};
+    std::array<CyclicSlotView, kMaxCyclicSlices> views{};
+
+    for (uint8_t s = 0; s < nslices; ++s) {
+        const auto& pend = cyclic_pending_[s];
+        const uint64_t now = monoNowNs();
+        const uint32_t remaining = now < cyclic_deadline_ns_
+            ? static_cast<uint32_t>(cyclic_deadline_ns_ - now) : 0;
+
+        if (!transport_.waitCyclicSlotView(s, pend.token, remaining,
+                                           views[s])) {
+            stats_.timeout_errors++;
+            ok = false;
+            break;
+        }
+        const CyclicSlotView& resp = views[s];
+        if (resp.wkc == 0 ||
+            (!wkc_learn && strict_wkc_ && resp.wkc != expected_wkc_[s])) {
+            stats_.wkc_errors++;
+            ok = false;
+            // keep draining remaining slices so slots don't go stale
+            continue;
+        }
+        if (wkc_learn) expected_wkc_[s] = resp.wkc;
+        resps[s] = &views[s];
+    }
+    cyclic_pending_count_ = 0;
+    pending_image_ = nullptr;
+    if (wkc_learn && ok) expected_wkc_valid_ = true;
+    if (!ok) return false;
+
+    // ---- Publish the input image --------------------------------------
+    if (img_active) {
+        if (nslices == 1 && resps[0] && resps[0]->payload) {
+            const CyclicSlotView& resp = *resps[0];
+            if (resp.channel) {
+                image->publishInputView(resp.payload, resp.datalen,
+                                        resp.cookie, resp.channel);
+            } else {
+                image->publishInputCopy(resp.payload, resp.datalen);
+            }
+        } else {
+            // Multi-slice: stage each slice at its offset, one publish.
+            uint8_t* bank = image->inputWriteBank();
+            if (bank) {
+                for (uint8_t s = 0; s < nslices; ++s) {
+                    if (!resps[s] || !resps[s]->payload) continue;
+                    const uint32_t off = cyclic_pending_[s].off;
+                    const uint32_t n = std::min<uint32_t>(resps[s]->datalen,
+                                                          total_data - off);
+                    std::memcpy(bank + off, resps[s]->payload, n);
+                }
+                image->commitInput();
+            }
         }
     }
 
-    // Scatter TxPDO (read) data back into app buffers — only for entries
-    // that are NOT image mapped (image-mapped entries are read via
-    // inputRead()/inputPtr()).
-    if (resp.datalen >= total_data && resp.payload) {
-        const uint8_t* rx_data = resp.payload;
-        std::array<uint32_t, PDO::kMaxPDOSlaves> tx_running{};
-        for (size_t i = 0; i < mapping.entry_count(); i++) {
-            const PDO::PDOEntry* e = mapping.get_entry(i);
-            if (!e || !e->enabled || e->direction != PDO::PDODirection::TxPDO) continue;
-            if (e->slave_index >= slave_count_) continue;
-            if (!addr_map_[e->slave_index].active) continue;
+    // ---- Scatter TxPDO data into app buffers (non-image entries) ------
+    std::array<uint32_t, PDO::kMaxPDOSlaves> tx_running{};
+    for (size_t i = 0; i < mapping.entry_count(); i++) {
+        const PDO::PDOEntry* e = mapping.get_entry(i);
+        if (!e || !e->enabled || e->direction != PDO::PDODirection::TxPDO) continue;
+        if (e->slave_index >= slave_count_) continue;
+        if (!addr_map_[e->slave_index].active) continue;
 
-            const auto& addr = addr_map_[e->slave_index];
-            const uint32_t entry_off = addr.txpdo_logical_addr - base_logical_addr_
-                                     + tx_running[e->slave_index];
-            tx_running[e->slave_index] += e->data_size;
-            if (!e->app_buffer || e->data_size == 0) continue;
-            if (entry_off + e->data_size > resp.datalen) break;
-            if (img_active && image->entryOffset(i) >= 0) continue;
+        const auto& addr = addr_map_[e->slave_index];
+        const uint32_t entry_off = addr.txpdo_logical_addr - base_logical_addr_
+                                 + tx_running[e->slave_index];
+        tx_running[e->slave_index] += e->data_size;
+        if (!e->app_buffer || e->data_size == 0) continue;
+        if (img_active && image->entryOffset(i) >= 0) continue;
 
-            std::memcpy(static_cast<uint8_t*>(e->app_buffer),
-                        rx_data + entry_off, e->data_size);
+        // Copy from whichever slice(s) cover the entry range.
+        uint32_t done = 0;
+        for (uint8_t s = 0; s < nslices && done < e->data_size; ++s) {
+            if (!resps[s] || !resps[s]->payload) continue;
+            const uint32_t s0 = cyclic_pending_[s].off;
+            const uint32_t s1 = s0 + resps[s]->datalen;
+            const uint32_t e0 = entry_off, e1 = entry_off + e->data_size;
+            if (e0 >= s1 || s0 >= e1) continue;
+            const uint32_t lo = std::max(e0, s0);
+            const uint32_t hi = std::min(e1, s1);
+            std::memcpy(static_cast<uint8_t*>(e->app_buffer) + (lo - e0),
+                        resps[s]->payload + (lo - s0), hi - lo);
+            done += hi - lo;
         }
     }
 

@@ -556,14 +556,40 @@ public:
                               ProcessImage* image = nullptr);
 
     /**
+     * @brief Split-phase halves of exchangeAllLRWCyclic()
+     *        (ExchangePlacement != Atomic).
+     *
+     * cyclicSend() emits the LRW slice datagram(s); cyclicCollect()
+     * waits/publishes/scatters against the deadline anchored at send
+     * time.  Collect mirrors the per-slave PDO counters.  Without a
+     * logical address manager cyclicSend falls back to the atomic
+     * exchangeAll() and cyclicCollect() is a no-op.
+     */
+    bool cyclicSend(ProcessImage* image, uint32_t rx_timeout_ns = 200'000);
+    bool cyclicCollect(ProcessImage* image);
+    bool cyclicExchangePending() const;
+
+    /// Slices the current image occupies on the wire (1 = single frame).
+    uint8_t cyclicSliceCount() const;
+
+    /// Strict per-slice WKC verify — see LogicalAddressManager::setStrictWkc.
+    void setCyclicStrictWkc(bool strict);
+
+    /**
      * @brief Configure @p image for the current PDO mapping in @p mode.
      *
      * Computes each enabled entry's byte offset in the LRW process image;
      * entries sharing a byte with a neighbour or flagged
      * `PDOEntry::image_exclude` stay buffered (offset -1).
      * Requires an initialized LogicalAddressManager.
+     *
+     * @param shm_name  Optional POSIX shm export — the image's regions
+     *        live in a shared segment a process-external motion source
+     *        can ProcessImage::attachShared() to.  Forces Direct-mode
+     *        semantics.
      */
-    bool configureProcessImage(ProcessImage& image, ImageMode mode);
+    bool configureProcessImage(ProcessImage& image, ImageMode mode,
+                               const char* shm_name = nullptr);
 
     // ----- Callback mode (Mode 3) -----
     // Per-entry callbacks fire during sendAll()/receiveAll() on the calling thread.

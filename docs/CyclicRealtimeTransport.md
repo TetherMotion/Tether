@@ -444,34 +444,121 @@ Typed accessors `outputPtr<T>(entry_idx)` / `inputPtr<T>(entry_idx)` combine
 offset lookup + bounds check; `epoch()` bumps on every `configure()` so
 cached offsets/pointers can be validated across re-mapping.
 
+### 6.4 `EntryHandle` — epoch-checked entry references
+
+`entryHandle(i)` returns a small value object `{index, offset, epoch}`
+that stays meaningful across reconfiguration: `handle.valid()` is false
+for unmapped entries, and resolving a handle whose `epoch` no longer
+matches `image.epoch()` returns `nullptr` instead of a dangling pointer.
+This is the safe replacement for caching `outputPtr`/`inputPtr` results
+across a remap — the pointer itself can move, the handle cannot lie.
+
+### 6.5 `waitInput` — cycle-tick for external motion threads
+
+`waitInput(seq, timeout_ns)` blocks until `inputSeq()` advances past
+`seq` — a kernel-blocked phase-lock to cycle completion for external
+motion sources.  Implemented on a futex word shared with the publish
+path: the publisher wakes waiters only when a waiter is registered, so
+an idle loop pays nothing.  Returns `false` on timeout or when the image
+is reconfigured underneath the waiter (epoch bump is observable).
+
+For an *in-process* external source this replaces polling `inputSeq()`
+on an unsynchronized timer — which otherwise adds up to a full period of
+setpoint staleness.
+
+### 6.6 Shared-memory image — process-external motion sources
+
+`configure(cfg, shm_name)` exports the image through POSIX shared memory
+(`shm_open("/tether_img_<name>")`): a fixed header + output region +
+input region + atomic sequence/futex words, laid out so a second process
+can `attach()` and use the same `outputWrite`/`inputRead`/`waitInput`
+APIs — same semantics as in-process, including the futex wake on
+publish.  This is the Klipper-host model: Tether owns the wire, a
+separate motion process owns setpoints.
+
+| | |
+|---|---|
+| Magic / version | `0x54494D47` (`TIMG`) / `1` — attach validates both |
+| Owner | `configure` creates + owns; destructor `shm_unlink`s when the last owner detaches |
+| Attacher | `attachProcessImage(shm_name)` — maps the same layout; `detach()` only unmaps |
+| Sync | header carries `in_seq`/`out_seq` (futex words) + `in_waiters`/`out_waiters` |
+
+Limitations: the shm mode serves the `Buffered`-style accessor contract
+(flat output/input regions); multi-buffered modes are in-process only.
+An attacher that outlives the exporter keeps a valid map but a dead
+sequence counter — attachers should treat stalled `in_seq` as link-down.
+Owner-unlink races with a *new* attacher arriving between unlink checks
+are a documented edge — see QUESTIONS.md.
+
 ---
 
 ## 7. Master integration
 
-### 7.1 Exchange flow (`LogicalAddressManager::exchangeAllLRWCyclic`)
+### 7.1 Exchange flow — atomic or split-phase, single or multi-slice
 
-1. Pick the TX payload:
-   * `Rotating` → the payload region of the acquired TX frame
-     (`image->rotatingFrameBase()`, acquiring + attaching on first use).
-   * `Direct`/`Double`/`TripleBuffered` → `image->acquireSendImage()`.
-   * Buffered/fallback → the persistent `cyclic_payload_` staging buffer
-     (memset + full gather, legacy semantics).
-2. Gather RxPDO `app_buffer` bytes for **forced-buffered entries only**
-   (`entryOffset(i) < 0`).  No memset on image paths — unwritten regions
-   carry stale bytes forward, which is exactly the Rotating/DoubleBuffered
-   contract.
-3. Send on reserved slot 0:
-   * Rotating → `composeCyclicHeader` into the frame + `sendCyclicFrame`;
-     then attach next cycle's frame so `outputWrite()` stays valid.
-   * Otherwise → `sendCyclicDatagram` → channel `txSendParts` (socket:
-     `sendmsg` iovec, zero payload copies) or legacy `sendWithEncapsulation`.
-4. `waitCyclicSlotView(slot, token, timeout)` — see below.
-5. Publish the response payload as the input image (`publishInputView` when
-   a channel holds it, else `publishInputCopy`).
-6. Scatter TxPDO bytes into `app_buffer` for forced-buffered entries only.
+The cyclic LRW exchange is split into two halves so the wire round-trip
+can overlap with in-loop work:
 
-WKC == 0 and timeout are still counted and reported as failures — unchanged
-semantics.
+* **`cyclicSend()`** — gather + transmit all slices, anchor the collection
+  deadline, remember per-slice slot tokens.
+* **`cyclicCollect()`** — wait each slice against the *send-anchored*
+  deadline, validate WKC, publish the input image once, scatter
+  forced-buffered entries.
+
+`exchangeAllLRWCyclic()` = `cyclicSend(); cyclicCollect();` — the atomic
+default.  `CyclicLoopConfig::exchange_placement` selects the overlap:
+
+| `ExchangePlacement` | send | collect | use when |
+|---|---|---|---|
+| `Atomic` | Exchange phase | Exchange phase | default; in-loop motion reading fresh inputs |
+| `Split` | Exchange | PostExchange | wire RTT overlaps intermediate phases |
+| `SplitLate` | Exchange | Diagnostics | maximum overlap; inputs one phase staler |
+
+With `motion_in_loop = false` (external motion source) `Split` is pure
+win: the ~10–30 µs wire round-trip stops consuming the wait budget.
+
+#### Send half
+
+1. Pick the TX payload per slice:
+   * `Rotating` (single-slice only) → the payload region of the acquired
+     TX frame (`image->rotatingFrameBase()`).
+   * `Direct`/`Double`/`TripleBuffered` → `image->acquireSendImage()`
+     (multi-slice sends disjoint `[off, off+len)` windows of it).
+   * Buffered/fallback → the persistent `cyclic_payload_` staging buffer.
+2. Gather RxPDO `app_buffer` bytes for **forced-buffered entries
+   intersecting each slice** only.
+3. Send slice *k* on reserved slot *k*: `sendCyclicDatagram` → channel
+   `txSendParts` (socket: `sendmsg` iovec; ring: zero-copy TX slot), or
+   Rotating → `composeCyclicHeader` + `sendCyclicFrame`.
+
+#### Collect half
+
+4. `waitCyclicSlotView(k, token_k, deadline)` per slice — one absolute
+   deadline anchored at send time covers the whole frame's flight.
+5. **WKC validation**: WKC == 0 is always a failure.  On the first
+   successful exchange each slice *learns* its expected WKC; with
+   `strict_wkc` enabled, later mismatches are counted as errors (a dead
+   slave or dropped slice shows up immediately instead of silently
+   shipping stale inputs).  `setCyclicStrictWkc(false)` disables the
+   mismatch check for systems where WKC legitimately varies.
+6. Publish the input image **once** from all slices
+   (`publishInputParts` — view references where the channel holds them,
+   copy-bank staging otherwise), then scatter forced-buffered TxPDO
+   entries.
+
+#### Multi-slice images
+
+`total_data` is divided into `ceil(total / maxSliceLength())` slices —
+`maxSliceLength()` = `maxEtherCATPayloadPerFrame() − 12` (LRW header).
+A slice is one LRW datagram on one reserved slot; slices of one frame
+travel together when they fit (multi-datagram cyclic frames dispatch to
+all their slots — §7.2).
+
+Limits: at most `kNumCyclicSlots` (6) slices ⇒ ~8.6 KiB of image;
+`configureProcessImage` fails loudly at startup when the image exceeds
+that instead of failing every cycle.  `Rotating` cannot span frames —
+multi-slice falls back to staged send (logged).  Each slice's WKC is
+learned independently since different slaves respond per slice.
 
 ### 7.2 `dispatchChannelFrame` — frame classification
 
@@ -488,46 +575,76 @@ walks the datagram chain (honouring the `more` flag and bounds):
   which deposits cyclic datagrams by copy and routes async ones.  Nothing
   is ever lost to misclassification.
 
-### 7.3 `waitCyclicSlotView` — the wait hierarchy
+### 7.3 `waitCyclicSlotView` — one unified wait point
 
-The wait tries, in order:
+The wait is a single loop over *all* wake sources, not a chain of
+different mechanisms:
 
 1. **Fast path** — `seq != token` already → seqlock-read the slot (bounded
    8-try re-check; a second publish mid-read is detected and retried).
-2. **Channel drain** — when a channel exists, the cyclic thread calls
-   `rxPoll` itself with the remaining deadline and dispatches every frame.
-   This is the zero-hop path: the RT thread receives its own response.
-3. **Software path** — `ppoll()` on `{deposit eventfd, iface socket}`:
-   the eventfd is written by `depositCyclicSlot`/`publishCyclicSlotView` so
-   a poll thread that won the recv race still wakes the waiter immediately;
-   the socket fd is drained inline when readable (direct-recv fallback).
-4. **Bounded spin** — no fds available (non-Linux, no eventfd) → spin on
-   `seq` until the deadline.  Bounded so a dead link cannot wedge the
-   cyclic thread.
+2. **Waiter registration** — `cyclic_waiters_` is incremented *before* any
+   blocking point, so a deposit landing between the fast-path check and
+   the sleep still wakes us: deposit paths write the eventfd **only while
+   a waiter is registered** — idle operation pays zero wakeup syscalls.
+3. **RX spin window** (channel + `rx_spin_ns` configured) — busy-poll
+   `rxPending()` for up to the spin budget.  On the ring backend this is
+   pure memory reads: a NIC DMA write is visible *before* the kernel could
+   schedule a `ppoll` wake — the lowest-latency receive path, and what
+   makes a fully syscall-free cycle possible on a dedicated core.
+4. **Channel drain** — `rxPoll(views, 8, 0)` each iteration; dispatched
+   frames deposit inline.  The cyclic thread receives its own response —
+   zero hops.
+5. **`ppoll(eventfd ∪ wire fd)`** — one sleep covers every wake source:
+   the deposit eventfd (poll-thread deposits when the BPF is absent or
+   failed), and the wire fd itself (channel socket, or the iface socket
+   on the no-channel software path — drained inline, **bounded to 8
+   frames per wake** so an async burst cannot burn the cyclic thread's
+   RX budget; `POLLIN` stays asserted for the rest).
+6. **Portable fallback** — no fds at all (non-Linux, no eventfd): a
+   bounded seq-counter spin until the deadline.
 
-Cancellation (`cancel_requested_`) is checked in every loop.
+Cancellation (`cancel_requested_`) and the absolute deadline are checked
+at the top of every iteration — a dead link or shutdown can never wedge
+the cyclic thread.
 
-`waitCyclicSlot` (the old `RxDatagram`-copy API) is now a thin wrapper that
+`waitCyclicSlot` (the old `RxDatagram`-copy API) is a thin wrapper that
 copies the view out — legacy callers keep working.
 
 ### 7.4 Lifecycle (`startCyclicLoop` / `stopCyclicLoop`)
 
-`startCyclicLoop`:
+`startCyclicLoop`, in order:
 
-* Creates the channel only when the transport exposes a raw fd:
-  `iface_.receive && iface_.native_handle && !isUdpEncapsulationEnabled()`.
-  VLAN and UDP-encapsulated transports keep the software path.
-* Derives `ifindex` via `getsockname()` on the iface fd; passes it as
-  `async_fd` so the mirror BPF lands on socket B.
-* `ImageMode::Rotating` without a channel degrades to `Direct` (logged).
-* `configureProcessImage` pulls `computeImageOffsets` + total rx/tx bytes
-  from the LAM; failure → Buffered (logged).
-* The exchange closure calls `exchangeAllLRWCyclic(200 µs, &process_image_)`.
+1. **CPU claims** (`cpu_isolation.enabled`, opt-in): the runtime allocator
+   claims `cyclic_cpu`/`dc_cpu` (explicit or auto-selected, preferring
+   kernel-isolated CPUs and never taking the last CPU).  Selected CPUs
+   become the executive/DC affinities — see §8.
+2. **Realtime scheduling**: `SchedClass::Deadline` → `sched_setattr`
+   `SCHED_DEADLINE` (runtime = period/2, deadline = period when
+   unspecified); failure logs and falls back to `SCHED_FIFO`; FIFO failure
+   logs and runs unprivileged — never silent.
+3. **Memory hardening** (`memory_lock` opt-outs, all independent):
+   `lock_all_process` → `mlockall(MCL_CURRENT|FUTURE)`;
+   `prefault_stack` → the cyclic thread pre-touches its stack;
+   `lock_image` / `lock_slots` → `mlock` on the image buffers and the
+   cyclic slot/TX staging.  All failures are logged, never fatal
+   (missing `CAP_IPC_LOCK` just runs demand-paged).
+4. **Channel** — created only when the transport exposes a raw fd:
+   `iface_.receive && iface_.native_handle && !isUdpEncapsulationEnabled()`.
+   `ifindex` via `getsockname()`; `async_fd` carries the mirror BPF to
+   socket B.  `rx_spin_ns` forwarded from the config.
+5. **Process image** — `configureProcessImage(mode, rx_bytes, tx_bytes,
+   shm_name)`: `computeImageOffsets` + sizes from the LAM; failure →
+   Buffered.  `Rotating` without a channel degrades to `Direct` (logged).
+   `shm_name` non-empty exports the image (§6.6).
+6. **Exchange wiring** — `Atomic` → one exchange closure;
+   `Split`/`SplitLate` → send in Exchange phase + a collect task in
+   PostExchange/Diagnostics.  `strict_wkc` forwarded to the LAM.
+   The exchange closure calls `exchangeAllLRWCyclic(200 µs, &process_image_)`.
 
 `stopCyclicLoop`: stops the executive, `process_image_.configure({})`
 (releases the held input cookie *before* the channel dies), releases every
-slot's held cookie, then destroys the channel.  Order matters — the
-channel must outlive every cookie it issued.
+slot's held cookie, destroys the channel, then **releases the CPU claims**
+— the `atexit` hook covers abnormal exit.
 
 ### 7.5 Test seam
 
@@ -537,7 +654,102 @@ is testable with a scripted `ICyclicChannel`, no raw sockets needed.
 
 ---
 
-## 8. Correctness & fallback hierarchy
+## 8. Realtime platform layer
+
+The wire machinery only pays off if the cyclic thread is actually
+scheduled deterministically.  Three opt-in platform services cover the
+remaining jitter sources — all degrade loudly, never silently.
+
+### 8.1 Scheduling — `CyclicExecutive`
+
+| Config | Effect |
+|---|---|
+| `sleep_mode = Nanosleep` | `clock_nanosleep(TIMER_ABSTIME)` to the next tick — baseline |
+| `sleep_mode = HybridSpin` | sleep until `spin_window_us` before the tick, then busy-poll — wake jitter ≈ 0 at the cost of the spin window's CPU |
+| `sched_class = Fifo` | `SCHED_FIFO` at `priority`; failure logged, thread runs on |
+| `sched_class = Deadline` | `sched_setattr(SCHED_DEADLINE)`: period = cycle, runtime = `dl_runtime_ns` (default period/2), deadline = `dl_deadline_ns` (default period).  Failure → FIFO fallback (logged) |
+| `low_timer_slack` | `PR_SET_TIMERSLACK=1ns` — removes the ~50 µs default slack on `nanosleep`/`ppoll` timeouts that dominates 250 µs cycles under non-RT scheduling |
+| `stack_prefault_bytes` | per-thread stack pre-touch before the loop starts |
+
+`SCHED_DEADLINE` is the notable option: CBS reserves the cyclic thread's
+budget on a **vanilla** kernel — no PREEMPT_RT needed — and bounds the
+damage if the RT thread itself overruns (it gets throttled, not the
+system).  `HostDeadlineTimer` implements the hybrid sleep/spin boundary.
+
+### 8.2 `RtMemory` — granular memory locking
+
+A minor page fault mid-cycle is 1–10 µs of jitter; without locking, pages
+can also be evicted under memory pressure and fault *every* cycle.
+`src/platform/RtMemory.cpp` provides:
+
+* `lockAllMemory()` — `mlockall(MCL_CURRENT | MCL_FUTURE)`
+* `lockMemory(addr, len)` / `unlockMemory` — per-section `mlock`
+* `prefaultMemory(addr, len)` — touch pages without pinning them
+* `prefaultCurrentStack(bytes)` — stack pre-touch at thread start
+* `setCurrentThreadTimerSlack(ns)`
+
+`Master::MemoryLockConfig` gates each section independently — the user
+opts *out* per section, not in:
+
+| Flag | Section | Default |
+|---|---|---|
+| `lock_all_process` | whole-process `mlockall` | off — heaviest hammer, opt in |
+| `lock_image` | process-image backing memory | on |
+| `lock_slots` | cyclic slot bank + TX staging | on |
+| `prefault_stack` | cyclic-thread stack pre-touch | on |
+
+Every operation is **best effort**: failure is logged (`CAP_IPC_LOCK`,
+`RLIMIT_MEMLOCK`) and never fatal — an unprivileged process simply runs
+demand-paged.
+
+### 8.3 `CpuIsolation` — runtime CPU claiming
+
+`src/platform/CpuIsolation.cpp` implements **opt-in, best-effort CPU
+claiming** for systems without boot-time `isolcpus`:
+
+* `Spec{cpu=-1|explicit, role}` — `claim(spec)` returns a RAII `Claim`
+  (`valid()` = got a CPU).  `cpu < 0` → auto-select.
+* Selection order: kernel-isolated CPUs (`/sys/devices/system/cpu/isolated`)
+  first, then online CPUs — skipping CPU 0 when `avoid_cpu0` (IRQ landing
+  zone) and **never claiming the last available CPU** — the rest of the
+  system always keeps capacity.
+* Claims are process-local reservations: `sched_setaffinity` pins the
+  thread, and the allocator tracks its own claims to avoid
+  double-assigning.  It detects *kernel* isolation but cannot create it —
+  a claimed CPU still runs other tasks' spillover; true isolation needs
+  `isolcpus=` or cpusets at boot.  Degraded claims are logged as such.
+* `stopCyclicLoop` releases claims; an `atexit` handler releases
+  everything the process still holds on abnormal exit.
+
+```cpp
+cfg.cpu_isolation.enabled       = true;
+cfg.cpu_isolation.cyclic_cpu    = 3;      // or -1 → auto
+cfg.cpu_isolation.dc_cpu        = -1;     // auto, prefer isolated
+cfg.cpu_isolation.prefer_isolated = true;
+cfg.cpu_isolation.avoid_cpu0    = true;
+```
+
+### 8.4 What this buys at 4 kHz
+
+On a suitable deployment (Pi 4/5-class PCIe NIC, PREEMPT_RT or
+SCHED_DEADLINE fallback, claimed/isolated core, IRQs steered away,
+performance governor):
+
+```
+wake:     HybridSpin / deadline      ~0–2 µs   (vs 5–50 µs nanosleep)
+TX:       1 syscall (ring kick/sendmsg)         irreducible
+RX wait:  spin on rxPending          ~0        (vs 2–15 µs sched wake)
+notify:   gated eventfd              0         (vs 1 write per publish)
+faults:   mlock + prefault           ~0        (vs 1–10 µs per fault)
+```
+
+The cycle boundary becomes **syscall-free except the TX kick** on a
+claimed core — the difference between occasional 100 µs+ excursions and
+holding ~10–30 µs worst-case at 250 µs periods.
+
+---
+
+## 9. Correctness & fallback hierarchy
 
 Every acceleration layer degrades independently:
 
@@ -563,9 +775,9 @@ Invariants that hold on *every* level:
 
 ---
 
-## 9. Limitations & hazards
+## 10. Limitations & hazards
 
-### 9.1 Platform / privilege
+### 10.1 Platform / privilege
 
 * **`CAP_NET_RAW` is required** for any channel (AF_PACKET).  Without it the
   master silently runs the software path — same semantics, more copies.
@@ -585,25 +797,43 @@ Invariants that hold on *every* level:
 * **Two sockets** means two AF_PACKET fds and two binds; on systems where
   socket count is restricted this can matter.
 
-### 9.2 Mechanism limits
+### 10.2 Mechanism limits
 
-* **TPACKET_V2 linear scan.**  `walkRing` scans all RX slots per call —
-  O(`rx_frames`) ≈ 256 header checks worst case.  At our rates (a handful
-  of frames per cycle) this is microseconds of predictable work, but it is
-  not a cursor-based ring walk.
+* **TPACKET_V2 walk is resume-cursor based.**  `walkRing` makes one
+  wrap-around pass per call, emitting from `rx_cursor_` and recycling
+  consumed-and-unheld slots anywhere in the ring.  A quiescent poll is
+  O(frames-since-last-poll) emit work plus O(`rx_frames`) of cheap
+  flag checks — a handful of microseconds worst case, not a rescan of
+  live frames.
 * **Frame size ceiling.**  Bank/ring slots are sized for 1600 B frames;
   jumbo frames are not supported.  `txSendParts`/`txCommitFrame` reject
   over-capacity compositions.
 * **Bank exhaustion** on the socket backend defers delivery (frames stay
   kernel-queued) and bumps `droppedRx()` — monitor it if you hold views.
-* **`stamp_ns` precision.**  Ring backend uses kernel (optionally hardware)
-  timestamps; socket backend uses `CLOCK_MONOTONIC` at `recvfrom` time.
-  For wire-time jitter measurement prefer the ring backend.
-* **Software timestamps** are taken in the RX path; the latency includes
-  scheduling delay.  `SIOCSHWTSTAMP`-grade hardware timestamps are a
-  possible extension (V2 metadata carries them when enabled).
+* **`stamp_ns` precision.**  Ring backend stamps are kernel-provided
+  (`tpacket2_hdr::tp_sec/tp_nsec`); the socket backend reads
+  `SCM_TIMESTAMPNS` from `recvmsg` — also a kernel stamp taken at driver
+  RX, not a `clock_gettime` in userspace.  Software-deposit copies carry
+  a monotonic stamp taken at deposit.  `SIOCSHWTSTAMP`-grade *hardware*
+  timestamps are a possible extension (V2 metadata carries them when
+  enabled).
+* **Slice ceiling.**  At most `kNumCyclicSlots` (6) LRW datagrams per
+  cycle ⇒ ~8.6 KiB of process image; `configureProcessImage` refuses
+  larger images at startup.  Multi-slice frames also multiply wire time:
+  N near-MTU datagrams at 100 Mbit/s can exceed a 250 µs budget — see
+  QUESTIONS.md.
+* **Rotating can't span slices** — a rotating image maps one frame, so
+  multi-slice images fall back to a staged send (logged at configure).
+* **Deferred TX is counted, not hidden.**  A ring `txCommitFrame` whose
+  kick hits `EAGAIN` returns success but bumps `txDeferred()` — the frame
+  flushes on the next kick, i.e. *late*.  At 4 kHz a nonzero count is a
+  deadline event worth alarming on.
+* **RX spin window burns CPU.**  `rx_spin_ns` is a busy-poll inside the
+  deadline budget — it trades idle CPU for wake latency.  On a shared
+  (non-isolated) core it can starve the very threads you need; pair it
+  with CPU claiming.
 
-### 9.3 Application contract hazards
+### 10.3 Application contract hazards
 
 * **Rotating mode sends stale bytes** if the writer doesn't fully refresh —
   by design; there is no memset or versioning on that path.  A stalled
@@ -626,9 +856,41 @@ Invariants that hold on *every* level:
   can't be made safe.
 * **Ordering between sockets** is not globally serialized (§5.3).
 
+### 10.4 Realtime platform limits
+
+* **CPU claims are reservations, not isolation.**  `CpuIsolation` pins
+  threads via affinity and tracks process-local claims — it cannot stop
+  the rest of the system from running on a claimed CPU.  True isolation
+  needs `isolcpus=`/`rcu_nocbs=` or cpuset cgroups at boot; the allocator
+  detects and prefers such CPUs when they exist.  Every degraded claim
+  is logged.
+* **`SCHED_DEADLINE` needs kernel support** (`CONFIG_SCHED_DEADLINE`,
+  and admission control must accept the runtime/period — a `runtime`
+  near `period` on a busy CPU fails `sched_setattr` with `EBUSY`).
+  Failure falls back to `SCHED_FIFO` with a logged warning.
+* **mlock needs `CAP_IPC_LOCK`/`RLIMIT_MEMLOCK`** — without them every
+  lock call logs and the loop runs demand-paged.  Nothing is fatal, by
+  design.
+* **Split exchange changes input freshness ordering.**  `Split` collects
+  after intermediate phases — an in-loop motion callback that reads
+  *this* cycle's inputs must use `Atomic` (or accept one-phase-stale
+  data).  `SplitLate` collects in Diagnostics — freshest for the *next*
+  cycle only.
+* **Strict WKC learns on the first good frame.**  The learn happens on
+  the first successful exchange, so a mismatch is only detectable after
+  that baseline exists — a slave dead from power-on still surfaces as
+  WKC == 0, but a wrong-but-nonzero first WKC would be learned as
+  expected.  Reconfigure resets the learned values.
+* **shm image is Buffered-contract only** and survives its exporter in a
+  degraded state (§6.6): a live map with a dead sequence counter.
+  `waitInput` timeouts are the attach-side detection path.
+* **`waitInput` is level-triggered on `inputSeq`** — a caller that is
+  more than one publish behind returns immediately; it is a cycle-tick,
+  not a per-frame queue.
+
 ---
 
-## 10. Rationale — decisions and alternatives considered
+## 11. Rationale — decisions and alternatives considered
 
 **Why a channel abstraction instead of #ifdef'd fast paths?**
 The platform datapaths are genuinely different (AF_PACKET rings vs. ESP32
@@ -683,11 +945,13 @@ budget.  Zero-copy is the enabler; deterministic ownership is the point.
 
 ---
 
-## 11. Testing & verification
+## 12. Testing & verification
 
-Tests live in `tests/ethercat/test_cyclic_channel.cpp` (35 tests) and
-`tests/ethercat/test_process_image.cpp` (21 tests), in the
-`tether_ethercat_master_tests` / `tether_ethercat_pdo_tests` targets.
+Tests live in `tests/ethercat/test_cyclic_channel.cpp`,
+`tests/ethercat/test_process_image.cpp`, and
+`tests/platform/test_rt_platform.cpp`, in the
+`tether_ethercat_master_tests` / `tether_ethercat_pdo_tests` /
+`tether_platform_tests` targets.
 
 ### What is proven where
 
@@ -695,9 +959,12 @@ Tests live in `tests/ethercat/test_cyclic_channel.cpp` (35 tests) and
 |---|---|---|
 | BPF program correctness | userspace cBPF interpreter over the exact exported instruction bytes (`cyclicChannelBpfProgram`) | accept/reject at boundary indexes 0xF7/0xF8/0xFD/0xFE, non-ECAT EtherTypes, short frames |
 | BPF **kernel execution** | same bytes attached via `SO_ATTACH_FILTER` to an `AF_UNIX` datagram socketpair — the real kernel verifier+interpreter, no privileges needed | accept/reject behaviour in-kernel |
-| Socket channel | `createCyclicSocketChannelForFd` over `AF_UNIX` sockets | rxPoll delivery/timeout/nonblock, bank exhaustion + `droppedRx`, hold/release lifecycle, invalid cookies, TX failure paths, `txSendParts` staging + oversize + null-payload |
-| Master fast path | `MasterCyclicTestAccess` + scripted channel | software deposit copy path, view publish + cookie release, mixed-frame → parser routing, short-frame ignore, `txSendParts` composition, timeout + cancellation, header layout |
-| ProcessImage / LAM | `configure()` + fake `IPDOTransport` | all 5 modes, carry-forward, commit gating, rotating attach/detach, publish view/copy + seq, entry offsets + exclusions, epoch, WKC/timeout failures, forced-buffered gather/scatter |
+| Socket channel | `createCyclicSocketChannelForFd` over `AF_UNIX` sockets | rxPoll delivery/timeout/nonblock, bank exhaustion + `droppedRx`, hold/release lifecycle, invalid cookies, TX failure paths, `txSendParts` staging + oversize + null-payload, `recvmsg`/`SCM_TIMESTAMPNS` stamps |
+| Ring channel | `createCyclicRingChannelForMemory` — synthetic `tpacket2_hdr` layout on caller memory, socketpair fd for kick/poll | slot emit + kernel stamps, consume→recycle, hold pins/release frees, double-release clamp, resume cursor, `rxPending` semantics, TX acquire/commit/pad/exhaustion, EAGAIN → `txDeferred`, poll deadline, spin-window late delivery |
+| Wait path | `MasterCyclicTestAccess` + scriptable channel/`iface_.receive` | seq fast path, eventfd waiter wake, no-missed-deposit race, bounded 8-frame drain, channel spin phase + deadline + cancel, `stamp_ns` propagation |
+| Master fast path | `MasterCyclicTestAccess` + scripted channel | software deposit copy path, view publish + cookie release, mixed-frame → parser routing, short-frame ignore, `txSendParts` composition, header layout |
+| ProcessImage / LAM | `configure()` + fake `IPDOTransport` | all 5 modes, carry-forward, commit gating, rotating attach/detach, publish view/copy/parts + seq, entry offsets + exclusions, `EntryHandle` epoch invalidation, `waitInput` wake/timeout/reconfigure, shm export + attach lifecycle, multi-slice send/collect, strict-WKC learn + mismatch, forced-buffered gather/scatter |
+| Rt platform | `test_rt_platform.cpp` | `CpuIsolation` claim/release/auto-select/leave-one-free/explicit + conflict, `RtMemory` lock/prefault/slack best-effort paths |
 | **Live kernel demux + rings** | `LivePacketTest` on loopback: two real AF_PACKET sockets with opposite filters, real ring RX/TX, factory `Auto` | **auto-skipped without `CAP_NET_RAW`** — runs in privileged CI |
 | Factory validation | `CyclicChannelFactory.InvalidIfindexFails` — fails before socket creation | unconditional |
 
@@ -705,21 +972,24 @@ Tests live in `tests/ethercat/test_cyclic_channel.cpp` (35 tests) and
 
 The container/CI matrix matters: `AF_UNIX` sockets accept `SO_ATTACH_FILTER`
 without privileges, which is what makes the kernel-BPF tests runnable
-everywhere.  `createCyclicSocketChannelForFd` /
-`createCyclicRingChannelForFd` exist so backends are exercisable over
-caller-provided fds.  The live AF_PACKET tests (`KernelDemuxOnLoopback`,
-`RingChannelRxAndTx`, `FactoryAutoOnLoopback`, `AsyncFilterAttachViaConfig`)
-gate on a runtime `CAP_NET_RAW` probe and `GTEST_SKIP()` — they are real
-integration coverage where privileges exist, and honest skips where they
-don't.
+everywhere.  Three seams keep the rest testable: `createCyclicSocketChannelForFd` /
+`createCyclicRingChannelForFd` (caller-provided fds),
+`createCyclicRingChannelForMemory` (caller-provided ring buffers — the
+ring walk/hold/cursor machinery runs on synthetic `tpacket2_hdr` slots,
+no AF_PACKET needed).  The live AF_PACKET tests
+(`KernelDemuxOnLoopback`, `RingChannelRxAndTx`, `FactoryAutoOnLoopback`,
+`AsyncFilterAttachViaConfig`) gate on a runtime `CAP_NET_RAW` probe and
+`GTEST_SKIP()` — they are real integration coverage where privileges
+exist, and honest skips where they don't.
 
 A skipped live test is **not** claimed as live AF_PACKET coverage — the
 kernel-verifier path (AF_UNIX attach) plus the userspace VM over the exact
-instruction bytes is the proof that runs unconditionally.
+instruction bytes plus the memory-seam ring tests is the proof that runs
+unconditionally.
 
 ---
 
-## 12. API quick reference
+## 13. API quick reference
 
 ```cpp
 // --- Configure ---------------------------------------------------------
@@ -728,6 +998,16 @@ cfg.cycle_period_us = 250;                       // 4 kHz
 cfg.wire_mode  = CyclicWireMode::Auto;           // ring → socket → software
 cfg.image_mode = ImageMode::DoubleBuffered;      // or Rotating / Triple / Direct
 cfg.motion_in_loop = false;                      // external motion source
+cfg.rx_spin_ns = 30'000;                         // ring busy-poll window
+cfg.exchange_placement = Master::ExchangePlacement::Split;
+cfg.strict_wkc = true;                           // verify learned WKC
+cfg.sched_class = Master::SchedClass::Deadline;  // or Fifo
+cfg.shm_image_name = "printer0";                 // export to motion proc
+
+cfg.cpu_isolation.enabled   = true;              // opt-in CPU claiming
+cfg.cpu_isolation.cyclic_cpu = -1;               // auto-select
+cfg.memory_lock.lock_image  = true;              // per-section opt-out
+cfg.memory_lock.lock_all_process = false;        // heaviest, off default
 master.startCyclicLoop(cfg);
 
 // --- Writer thread (any thread) ----------------------------------------
@@ -746,29 +1026,46 @@ const uint64_t s = img.inputSeq();               // bump = new frame
 if (const uint8_t* in = img.inputRead())
     int32_t pos = *img.inputPtr<int32_t>(status_pos_entry);
 
+// --- Cycle-tick wait (external motion thread) ----------------------------
+img.waitInput(s, /*timeout_ns*/ 1'000'000);      // futex-blocked tick
+
+// --- Process-external attach (motion process side) ----------------------
+ProcessImage remote;
+remote.attachProcessImage("printer0");           // same accessors + waitInput
+
 // --- Entry offsets (stable within an epoch) -----------------------------
 const int32_t off = img.entryOffset(entry_idx);  // -1 = app_buffer path
 const uint32_t ep = img.epoch();                 // changes on reconfigure
+auto h = img.entryHandle(entry_idx);             // epoch-checked reference
+// ...later, even across a remap:
+if (int32_t* p = img.outputPtr<int32_t>(h)) *p = target;  // nullptr if stale
 ```
 
 `PDOManager::configureProcessImage()` is called internally by
 `startCyclicLoop`; `PDOEntry::image_exclude` is the per-entry opt-out (set
 it for FSoE-managed PDOs).  `Master::cyclicChannel()` exposes the active
-channel for diagnostics (`backendName()`, `zeroCopy()`, `droppedRx()`).
+channel for diagnostics (`backendName()`, `zeroCopy()`, `droppedRx()`,
+`txDeferred()`).
 
 ---
 
-## 13. Source map
+## 14. Source map
 
 | File | Contents |
 |---|---|
-| `include/tether/ethercat/CyclicChannel.hpp` | `ICyclicChannel`, views, modes, config, factories, BPF access |
-| `src/ethercat/raw/CyclicChannel_linux.cpp` | BPF programs, `LinuxSocketChannel`, `LinuxRingChannel`, factory, non-Linux stubs |
-| `include/tether/ethercat/ProcessImage.hpp` / `src/ethercat/ProcessImage.cpp` | image modes, buffers, publish/hold, entry offsets |
-| `src/ethercat/raw/Master_transport.cpp` | `depositCyclicSlot`, `publishCyclicSlotView`, `dispatchChannelFrame`, `waitCyclicSlotView`, `sendCyclicDatagram`/`sendCyclicFrame`/`composeCyclicHeader` |
-| `src/ethercat/raw/Master.cpp` | `startCyclicLoop`/`stopCyclicLoop` wiring, `MasterPDOTransport` forwards |
-| `src/ethercat/raw/LogicalAddressManager.cpp` | `computeImageOffsets`, `exchangeAllLRWCyclic` |
+| `include/tether/ethercat/CyclicChannel.hpp` | `ICyclicChannel`, views, modes, config, factories, BPF access, `CyclicSlotView` |
+| `src/ethercat/raw/CyclicChannel_linux.cpp` | BPF programs, `LinuxSocketChannel`, `LinuxRingChannel`, `recvmsg` stamps, ring cursors/holds, `txDeferred`, factories, test seams, non-Linux stubs |
+| `include/tether/ethercat/ProcessImage.hpp` / `src/ethercat/ProcessImage.cpp` | image modes, buffers, publish/hold/parts, `EntryHandle`, `waitInput` futex, shm export/attach, entry offsets |
+| `src/ethercat/raw/Master_transport.cpp` | `depositCyclicSlot`, `publishCyclicSlotView`, `dispatchChannelFrame`, unified `waitCyclicSlotView`, `sendCyclicDatagram`/`sendCyclicFrame`/`composeCyclicHeader` |
+| `src/ethercat/raw/Master.cpp` | `startCyclicLoop`/`stopCyclicLoop` wiring: CPU claims, mlock sections, sched class, split placement, shm name, `MasterPDOTransport` forwards |
+| `src/ethercat/raw/LogicalAddressManager.cpp` | `computeImageOffsets`, `cyclicSend`/`cyclicCollect` (multi-slice), expected-WKC learn/verify, `maxSliceLength` |
+| `include/tether/platform/RtMemory.hpp` / `src/platform/RtMemory.cpp` | `lockAllMemory`, `lockMemory`, `prefault*`, timer slack — best-effort RT hardening |
+| `include/tether/platform/CpuIsolation.hpp` / `src/platform/CpuIsolation.cpp` | runtime CPU claim allocator, RAII `Claim`, `atexit` release |
+| `include/tether/platform/Platform.hpp` / `src/platform/Platform.cpp` | `setCurrentThreadDeadline` (`SCHED_DEADLINE` via `sched_setattr`) |
+| `include/tether/ethercat/CyclicExecutive.hpp` / `src/ethercat/CyclicExecutive.cpp` | `SleepMode`, `SchedClass`, phase tasks, prefault + slack at thread start |
 | `include/tether/ethercat/PDOManager.hpp` | `PDOEntry::image_exclude`, `IPDOTransport` cyclic API |
-| `include/tether/ethercat/Master.hpp` | `CyclicLoopConfig::{wire_mode,image_mode}`, slot bank, test seam |
-| `tests/ethercat/test_cyclic_channel.cpp` | BPF VM + kernel + socket + Master + live tests |
-| `tests/ethercat/test_process_image.cpp` | image modes + LAM exchange tests |
+| `include/tether/ethercat/Master.hpp` | `CyclicLoopConfig` (wire/image/sched/mlock/cpu-iso/split/shm/strict-wkc), slot bank, test seam |
+| `tests/ethercat/test_cyclic_channel.cpp` | BPF VM + kernel BPF + socket channel + ring-memory + wait-path + Master + live tests |
+| `tests/ethercat/test_process_image.cpp` | image modes + LAM exchange + handles + waitInput + shm |
+| `tests/platform/test_rt_platform.cpp` | `CpuIsolation` claims + `RtMemory` best-effort paths |
+| `QUESTIONS.md` | open design questions deferred from the FastLoop review |

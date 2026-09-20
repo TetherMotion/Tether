@@ -134,6 +134,24 @@ bool isLinux();
  */
 bool setCurrentThreadRealtime(int priority = -1);
 
+/**
+ * @brief Move the calling thread to SCHED_DEADLINE (Linux CBS).
+ *
+ * Guarantees the thread @p runtime_ns of CPU every @p period_ns with the
+ * work finishing by @p deadline_ns — a bandwidth guarantee that works on
+ * *vanilla* kernels (no PREEMPT_RT needed) and bounds the damage when an
+ * RT thread itself misbehaves.  Requires no privilege beyond what
+ * sched_setattr allows (usually none on mainline, some kernels gate it).
+ *
+ * @param runtime_ns  CPU budget per period (0 → caller derives)
+ * @param deadline_ns relative deadline (0 → = period)
+ * @param period_ns   reservation period
+ * @return true on success; false (caller should fall back to SCHED_FIFO)
+ *         when sched_setattr is unavailable or rejected.
+ */
+bool setCurrentThreadDeadline(uint64_t runtime_ns, uint64_t deadline_ns,
+                              uint64_t period_ns);
+
 //=============================================================================
 // Realtime Kernel Detection
 //=============================================================================
