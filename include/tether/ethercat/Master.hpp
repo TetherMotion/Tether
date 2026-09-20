@@ -46,6 +46,7 @@
 #include "tether/ethercat/DebugGate.hpp"
 #include "tether/ethercat/CyclicChannel.hpp"
 #include "tether/ethercat/CyclicExecutive.hpp"
+#include "tether/ethercat/AsyncCyclicLoop.hpp"
 #include "tether/ethercat/ProcessImage.hpp"
 #include "tether/ethercat/EtherCATTransport.hpp"
 #include "tether/ethercat/SlaveIdentity.hpp"
@@ -383,6 +384,48 @@ public:
         bool strict_wkc{true};
     };
 
+    /**
+     * @brief Async RT loop — send-on-change for externally-clocked RxPDO
+     *        producers.
+     *
+     * Unlike the cyclic loop there is no free-running exchange deadline:
+     * the producer calls processImage().commitOutputs() then
+     * triggerSend(), and the loop wires that edge to cyclicSend().  TxPDO
+     * collection is either per-send (CollectMode::OnSend) or on its own
+     * tick (CollectMode::Periodic).  Mutually exclusive with the cyclic
+     * loop — starting one stops the other.
+     */
+    struct AsyncLoopConfig {
+        /// TxPDO collection policy (see AsyncCyclicLoop::CollectMode).
+        AsyncCyclicLoop::CollectMode collect_mode{
+            AsyncCyclicLoop::CollectMode::OnSend};
+        /// Periodic collect tick (µs) — CollectMode::Periodic only.
+        uint32_t collect_period_us{1000};
+        /// Trigger rate limiter (ns): closer triggers coalesce into one
+        /// trailing send carrying the latest committed image.  0 = a send
+        /// per trigger.
+        uint32_t min_send_interval_ns{0};
+        /// OnSend only: collect at least this often while no triggers
+        /// arrive — a wire keep-alive for slave watchdogs.  0 = off.
+        uint32_t max_idle_ns{0};
+        /// Wire wait budget per send (ns).
+        uint32_t rx_timeout_ns{200'000};
+
+        /// Threading/timing options — priority, affinity, sched class,
+        /// stack prefault, timer slack.
+        AsyncCyclicLoop::Config exec{};
+
+        /// Same datapath knobs as CyclicLoopConfig.
+        CyclicWireMode wire_mode{CyclicWireMode::Auto};
+        ImageMode      image_mode{ImageMode::Buffered};
+        uint32_t       rx_spin_ns{0};
+        std::string    shm_image_name{};
+        bool           strict_wkc{true};
+
+        CpuIsolationConfig cpu_isolation{};
+        MemoryLockConfig   memory_lock{};
+    };
+
     /// Process image — valid once the cyclic loop is running with an
     /// image_mode other than Buffered.  Safe to cache the reference;
     /// epoch() changes on re-configuration.
@@ -393,6 +436,14 @@ public:
     void stopCyclicLoop();
     bool isCyclicLoopRunning() const;
     CyclicExecutive::Stats getCyclicLoopStats() const;
+
+    /// Async send-on-change loop — see AsyncLoopConfig.  Explicitly
+    /// separate from startCyclicLoop: the user chooses the loop model.
+    bool startAsyncLoop() { return startAsyncLoop(AsyncLoopConfig{}); }
+    bool startAsyncLoop(const AsyncLoopConfig& config);
+    void stopAsyncLoop();
+    bool isAsyncLoopRunning() const;
+    AsyncCyclicLoop::Stats getAsyncLoopStats() const;
 
     // ---- Frame handling ----------------------------------------------------
 
@@ -1263,6 +1314,8 @@ private:
     };
     std::array<CyclicRxSlot, kNumCyclicSlots> cyclic_slots_{};
     std::unique_ptr<CyclicExecutive> cyclic_loop_;
+    /// Async send-on-change loop — mutually exclusive with cyclic_loop_.
+    std::unique_ptr<AsyncCyclicLoop> async_loop_;
     /// Datapath channel (Linux: socket or PACKET_MMAP ring backend).
     /// Created by startCyclicLoop() when the transport exposes a raw fd;
     /// nullptr → software deposit path (unchanged behaviour).
@@ -1291,6 +1344,16 @@ private:
     /// -1 = no claim.  Released by stopCyclicLoop() / ~Master().
     int cyclic_cpu_claim_ = -1;
     int dc_cpu_claim_     = -1;
+    /// CPU claim held while the async loop runs; -1 = none.
+    int async_cpu_claim_  = -1;
+
+    /// Shared datapath bring-up/teardown used by startCyclicLoop() and
+    /// startAsyncLoop(): cyclic channel, process image, strict-WKC, and
+    /// the lockable image/slot sections.
+    void setupCyclicDatapath(CyclicWireMode wire_mode, ImageMode image_mode,
+                             const std::string& shm_name, uint32_t rx_spin_ns,
+                             bool strict_wkc, const MemoryLockConfig& memlock);
+    void teardownCyclicDatapath();
 
 #if TETHER_ENABLE_UDP_ENCAPSULATION
     // IP identification counter for UDP encapsulation

@@ -66,9 +66,13 @@ bool ProcessImage::configure(const Config& cfg) {
     pub_waiters_ = &in_waiters_;
     futex_shared_ = false;
     shm_out_seq_ = nullptr;
+    shm_send_seq_ = nullptr;
+    shm_send_waiters_ = nullptr;
     shm_attached_ = false;
     in_pub_ctr_.store(0, std::memory_order_release);
     in_waiters_.store(0, std::memory_order_release);
+    send_seq_.store(0, std::memory_order_release);
+    send_waiters_.store(0, std::memory_order_release);
 
     if (size_ == 0 || mode_ == ImageMode::Buffered) {
         mode_ = ImageMode::Buffered;
@@ -169,6 +173,7 @@ bool ProcessImage::mapShm(const char* name, bool create,
         hdr->epoch        = epoch_.load(std::memory_order_acquire) + 1;
         hdr->in_seq.store(0);  hdr->in_waiters.store(0);
         hdr->out_seq.store(0); hdr->out_waiters.store(0);
+        hdr->send_seq.store(0); hdr->send_waiters.store(0);
 
         shm_map_      = map;
         shm_map_len_  = total;
@@ -180,6 +185,8 @@ bool ProcessImage::mapShm(const char* name, bool create,
         pub_ctr_     = &hdr->in_seq;
         pub_waiters_ = &hdr->in_waiters;
         shm_out_seq_ = &hdr->out_seq;
+        shm_send_seq_ = &hdr->send_seq;
+        shm_send_waiters_ = &hdr->send_waiters;
         ext_in_seq_  = &hdr->in_seq;
         futex_shared_ = true;
         TETHER_LOGI(TAG, "process image exported via shm '{}' "
@@ -229,6 +236,8 @@ bool ProcessImage::mapShm(const char* name, bool create,
     pub_ctr_     = &hdr->in_seq;
     pub_waiters_ = &hdr->in_waiters;
     shm_out_seq_ = &hdr->out_seq;
+    shm_send_seq_ = &hdr->send_seq;
+    shm_send_waiters_ = &hdr->send_waiters;
     ext_in_seq_  = &hdr->in_seq;
     futex_shared_ = true;
     return true;
@@ -263,6 +272,8 @@ void ProcessImage::releaseShm() {
     shm_out_ = nullptr;
     shm_in_  = nullptr;
     shm_out_seq_ = nullptr;
+    shm_send_seq_ = nullptr;
+    shm_send_waiters_ = nullptr;
     ext_in_seq_  = nullptr;
     pub_ctr_     = &in_pub_ctr_;
     pub_waiters_ = &in_waiters_;
@@ -310,29 +321,113 @@ void ProcessImage::publishNotify() {
     }
 }
 
-void ProcessImage::futexWakeAll() {
+void ProcessImage::futexWakeAllOn(std::atomic<uint32_t>* word) {
 #ifdef __linux__
+    // Shared word (shm) needs the non-private futex op so a *different*
+    // process's waiters wake — FUTEX_WAKE_PRIVATE keys on the caller's mm.
     const int op = futex_shared_ ? FUTEX_WAKE : FUTEX_WAKE_PRIVATE;
     ::syscall(SYS_futex,
-              reinterpret_cast<uint32_t*>(pub_ctr_), op,
+              reinterpret_cast<uint32_t*>(word), op,
               INT32_MAX, nullptr, nullptr, 0);
+#else
+    (void)word;
+#endif
+}
+
+void ProcessImage::futexWakeAll() {
+    futexWakeAllOn(pub_ctr_);
+}
+
+bool ProcessImage::futexWaitOn(std::atomic<uint32_t>* word,
+                               uint32_t expected, int64_t timeout_ns) {
+#ifdef __linux__
+    timespec ts{};
+    timespec* tsp = nullptr;
+    if (timeout_ns >= 0) {
+        ts.tv_sec  = timeout_ns / 1'000'000'000;
+        ts.tv_nsec = timeout_ns % 1'000'000'000;
+        tsp = &ts;
+    }
+    const int op = futex_shared_ ? FUTEX_WAIT : FUTEX_WAIT_PRIVATE;
+    const long r = ::syscall(SYS_futex,
+                             reinterpret_cast<uint32_t*>(word), op,
+                             expected, tsp, nullptr, 0);
+    return r == 0;
+#else
+    (void)word; (void)expected; (void)timeout_ns;
+    return false;
 #endif
 }
 
 bool ProcessImage::futexWait(uint32_t expected, uint32_t timeout_ns) {
+    return futexWaitOn(pub_ctr_, expected, timeout_ns);
+}
+
+// ============================================================================
+// Async send trigger — wait/wake
+// ============================================================================
+
+void ProcessImage::sendWakeAll() {
+    // In-process word: C++20 atomic::notify (a private futex wake — matches
+    // the private waits in waitSend).  shm word: raw shared FUTEX_WAKE so a
+    // waitSend() in the *exporting* process wakes across the boundary.
 #ifdef __linux__
-    timespec ts{};
-    ts.tv_sec  = timeout_ns / 1'000'000'000u;
-    ts.tv_nsec = timeout_ns % 1'000'000'000u;
-    const int op = futex_shared_ ? FUTEX_WAIT : FUTEX_WAIT_PRIVATE;
-    const long r = ::syscall(SYS_futex,
-                             reinterpret_cast<uint32_t*>(pub_ctr_), op,
-                             expected, &ts, nullptr, 0);
-    return r == 0;
-#else
-    (void)expected; (void)timeout_ns;
-    return false;
+    if (futex_shared_) {
+        futexWakeAllOn(sendSeqWord());
+        return;
+    }
 #endif
+#if defined(__cpp_lib_atomic_wait) && __cpp_lib_atomic_wait >= 201907L
+    sendSeqWord()->notify_all();
+#else
+    futexWakeAllOn(sendSeqWord());
+#endif
+}
+
+bool ProcessImage::waitSend(uint32_t last_seq, uint64_t timeout_ns) {
+    auto* w   = sendSeqWord();
+    auto* wt  = sendWaitersWord();
+    if (w->load(std::memory_order_acquire) != last_seq) return true;
+    // Register before re-checking — a triggerSend() landing between the
+    // first check and the registration bumps the word, which the loop's
+    // re-check then observes.
+    wt->fetch_add(1, std::memory_order_acq_rel);
+    // Relative timeout → internal absolute deadline (CLOCK_MONOTONIC).
+    // Overflow-safe: a timeout that would wrap means "effectively never".
+    const uint64_t deadline =
+        (timeout_ns == UINT64_MAX) ? UINT64_MAX
+        : (timeout_ns >= UINT64_MAX - monoNowNs() ? UINT64_MAX
+                                                  : monoNowNs() + timeout_ns);
+    bool got = false;
+    for (;;) {
+        const uint32_t cur = w->load(std::memory_order_acquire);
+        if (cur != last_seq) { got = true; break; }
+        if (deadline == UINT64_MAX) {
+#if defined(__cpp_lib_atomic_wait) && __cpp_lib_atomic_wait >= 201907L
+            // In-process word: C++20 atomic wait — the requested mechanism.
+            if (!futex_shared_) { w->wait(cur); continue; }
+#endif
+#ifdef __linux__
+            futexWaitOn(w, cur, -1);              // shared/unbounded futex
+#else
+            std::this_thread::yield();
+#endif
+        } else {
+            const uint64_t now = monoNowNs();
+            if (now >= deadline) break;
+#ifdef __linux__
+            // Clamp absurdly-far budgets to untimed rather than letting
+            // the u64→i64 conversion wrap negative.
+            const uint64_t delta = deadline - now;
+            futexWaitOn(w, cur, delta > static_cast<uint64_t>(INT64_MAX)
+                                    ? -1 : static_cast<int64_t>(delta));
+#else
+            std::this_thread::yield();
+#endif
+        }
+    }
+    wt->fetch_sub(1, std::memory_order_acq_rel);
+    return got;
 }
 
 bool ProcessImage::waitInput(uint64_t last_seq, uint32_t timeout_ns) {

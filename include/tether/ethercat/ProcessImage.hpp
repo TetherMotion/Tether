@@ -108,7 +108,9 @@ struct ShmImageHeader {
     std::atomic<uint32_t> in_waiters;  ///< registered input waiters
     std::atomic<uint32_t> out_seq;     ///< output commit counter
     std::atomic<uint32_t> out_waiters; ///< registered output waiters
-    uint32_t reserved[14];
+    std::atomic<uint32_t> send_seq;    ///< async-loop send-request counter
+    std::atomic<uint32_t> send_waiters;///< registered send waiters
+    uint32_t reserved[12];
 };
 inline constexpr uint32_t kShmMagic   = 0x54494D47;  ///< 'TIMG'
 inline constexpr uint32_t kShmVersion = 1;
@@ -450,6 +452,48 @@ public:
             : out_seq_.load(std::memory_order_acquire);
     }
 
+    // ====================================================================
+    // Async-loop send trigger (producer side: any thread/process)
+    // ====================================================================
+
+    /**
+     * @brief Request an asynchronous RxPDO send — the "on change" edge for
+     *        the AsyncCyclicLoop.
+     *
+     * The producer commits its new output data (commitOutputs() first),
+     * then calls triggerSend() to fire the wire send.  Deliberately
+     * separate from commitOutputs(): committing means "data ready" in
+     * *every* loop mode and must not imply a send — the cyclic loop
+     * transmits on its own deadline regardless.  Bumps sendSeq() and
+     * wakes any waitSend() sleeper (cross-process when shm-backed).
+     */
+    void triggerSend() {
+        auto* w = sendSeqWord();
+        w->fetch_add(1, std::memory_order_release);
+        // Only pay the wake syscall when a waiter is registered — the
+        // waiter registers before re-checking the word, so a trigger
+        // landing between the check and the registration is still seen.
+        if (sendWaitersWord()->load(std::memory_order_acquire) > 0)
+            sendWakeAll();
+    }
+
+    /// Send-request counter — bumped once per triggerSend().
+    uint32_t sendSeq() const {
+        return sendSeqWord()->load(std::memory_order_acquire);
+    }
+
+    /**
+     * @brief Block until sendSeq() differs from @p last_seq or
+     *        @p timeout_ns elapses — a *relative* timeout, so callers in
+     *        any clock domain can pass their remaining budget directly.
+     *
+     * timeout_ns == UINT64_MAX waits indefinitely (C++20 atomic::wait
+     *        in-process; shared FUTEX_WAIT when shm-backed).  Returns true
+     *        when the send-request counter changed — callers re-check
+     *        their own stop flag before acting on the wake.
+     */
+    bool waitSend(uint32_t last_seq, uint64_t timeout_ns);
+
 private:
     static uint8_t swapRoles(uint8_t s, int a, int b) {
         const uint8_t va = (s >> a) & 3, vb = (s >> b) & 3;
@@ -460,6 +504,22 @@ private:
     void publishNotify();          // seq bump + futex wake
     void futexWakeAll();
     bool futexWait(uint32_t expected, uint32_t timeout_ns);
+    // Word-addressable variants — send trigger + shm paths.
+    void futexWakeAllOn(std::atomic<uint32_t>* word);
+    bool futexWaitOn(std::atomic<uint32_t>* word, uint32_t expected,
+                     int64_t timeout_ns);   // <0 → untimed
+    void sendWakeAll();
+    /// Active send-request word: shm header field when backed, else the
+    /// in-process member.  Non-const — producers bump it.
+    std::atomic<uint32_t>* sendSeqWord() {
+        return shm_send_seq_ ? shm_send_seq_ : &send_seq_;
+    }
+    const std::atomic<uint32_t>* sendSeqWord() const {
+        return shm_send_seq_ ? shm_send_seq_ : &send_seq_;
+    }
+    std::atomic<uint32_t>* sendWaitersWord() {
+        return shm_send_waiters_ ? shm_send_waiters_ : &send_waiters_;
+    }
     void releaseShm();
     bool mapShm(const char* name, bool create, uint32_t rx, uint32_t tx);
 
@@ -500,6 +560,11 @@ private:
     /// when shm-backed so inputSeq() sees the exporting process's count.
     const std::atomic<uint32_t>* ext_in_seq_ = nullptr;
     std::atomic<uint32_t>  out_seq_{0};
+    // Async send trigger — in-process word + waiters; shm aliases set by
+    // mapShm so a process-external producer's triggerSend() wakes the
+    // master's loop via shared futex.
+    std::atomic<uint32_t>  send_seq_{0};
+    std::atomic<uint32_t>  send_waiters_{0};
     bool futex_shared_ = false;
 
     // shm export/attach state (all null/-1 when not backed)
@@ -512,6 +577,8 @@ private:
     uint8_t* shm_out_ = nullptr;      ///< shm output region
     uint8_t* shm_in_  = nullptr;      ///< shm input region
     std::atomic<uint32_t>* shm_out_seq_ = nullptr;
+    std::atomic<uint32_t>* shm_send_seq_ = nullptr;
+    std::atomic<uint32_t>* shm_send_waiters_ = nullptr;
 
     int32_t entry_off_[kMaxEntries] = {};
     size_t  entry_count_ = 0;

@@ -1140,6 +1140,81 @@ TEST_F(RtVethTest, CyclicExecutiveExchangeOverWireAtFifo) {
     ::close(peer);
 }
 
+// 10. AsyncCyclicLoop on a real wire — triggerSend() wakes the loop →
+//     ring TX → veth → peer echo → RX ring → collect.  Proves the
+//     event-driven send-on-change path drives a real kernel channel
+//     end-to-end (the cyclic equivalent of the free-running test above).
+TEST_F(RtVethTest, AsyncLoopTriggerDrivesWireExchange) {
+    auto ch = createCyclicRingChannelForFd(
+        openBoundPacketSocket(veth_.ifA, kEtherCat, /*ignore_outgoing*/true),
+        veth_.ifA, 32, 8);
+    ASSERT_NE(ch, nullptr);
+    ICyclicChannel* chp = ch.get();
+
+    ProcessImage img;
+    ProcessImage::Config ic;
+    ic.mode = ImageMode::Direct;
+    ic.rx_bytes = 8; ic.tx_bytes = 8;
+    ASSERT_TRUE(img.configure(ic));
+
+    int peer = openBoundPacketSocket(veth_.ifB, kEtherCat);
+    ASSERT_GE(peer, 0);
+    std::atomic<bool> run{true};
+    std::thread responder([&] {
+        uint8_t b[2048];
+        while (run.load()) {
+            ssize_t n = recvOne(peer, b, sizeof(b), 50);
+            if (n > 0 && n >= 18 && b[17] >= 0xF8 && b[17] <= 0xFD)
+                sendRaw(peer, veth_.ifB, b, (size_t)n);
+        }
+    });
+
+    std::atomic<int> echoes{0};
+    AsyncCyclicLoop::Config acfg;
+    acfg.collect_mode = AsyncCyclicLoop::CollectMode::OnSend;
+    acfg.priority     = 60;
+    AsyncCyclicLoop loop(img,
+        // send: commit one cyclic frame onto the wire.
+        [&]() -> bool {
+            uint8_t* f = chp->txAcquire();
+            if (!f) return false;
+            const uint8_t pay[4] = {0xAA,0xBB,0xCC,0xDD};
+            buildEcatFrame(f, 0x0C, 0xF8, 0, 0, pay, 4, 0);
+            return chp->txCommitFrame(60);
+        },
+        // collect: pull the peer's echo out of the RX ring.
+        [&]() -> bool {
+            CyclicFrameView v[2];
+            if (chp->rxPoll(v, 2, 1'500'000) >= 1 &&   // 1.5 ms window
+                v[0].frame_len >= 18 && v[0].frame[17] == 0xF8)
+                ++echoes;
+            return true;
+        },
+        nullptr, acfg);
+    ASSERT_TRUE(loop.start());
+
+    // Each trigger → one wire frame → one echo.  Space them so each is a
+    // distinct wake — back-to-back triggers legitimately coalesce.
+    for (int i = 1; i <= 3; ++i) {
+        img.triggerSend();
+        ASSERT_TRUE(waitFor([&] {
+            return loop.getStats().sends >= static_cast<uint64_t>(i);
+        }, 5'000ms));
+    }
+    ASSERT_TRUE(waitFor([&] { return echoes.load() >= 1; }, 5'000ms));
+
+    loop.stop();
+    run = false;
+    responder.join();
+
+    const auto st = loop.getStats();
+    EXPECT_EQ(st.sends, 3u);
+    EXPECT_EQ(st.collects, 3u);            // OnSend: paired per send
+    EXPECT_EQ(st.send_errors, 0u);
+    EXPECT_GE(echoes.load(), 1);           // a real echo came back via RX
+    ::close(peer);
+}
+
 } // namespace
 
 #else  // !__linux__
