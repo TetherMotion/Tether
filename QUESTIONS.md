@@ -132,3 +132,32 @@ before the API hardens, or a known limit that needs platform validation.
     deadline and cancellation, but on a loaded non-RT system it can burn
     a whole budget spinning.  Should it yield (`sched_yield`) between
     checks on the portable path?
+
+## Async send-on-change loop (FastLoop)
+
+23. **Async + DC is a structural mismatch — currently only documented.**
+    `AsyncLoopConfig` has no DC knob, so a drive needing periodic sync
+    frames just starves its watchdog unless `max_idle_ns` keep-alives
+    happen to suffice.  Should `startAsyncLoop` hard-fail (or warn) when
+    `dc_->getState() != Disabled`, or when slaves were configured with
+    SyncManager watchdogs?
+
+24. **No trigger→wire latency supervision in async mode.**  The cyclic
+    loop has jitter monitors; the async loop tracks work duration but not
+    `triggerSend()` → TX-commit latency.  Add a `max_send_latency_ns`
+    stat / alarm threshold, or is `getAsyncLoopStats()` enough?
+
+25. **`send_waiters` leaks on waiter crash (shm path).**  A crashed
+    waitSend leaves `send_waiters > 0` → producers pay a wasted
+    FUTEX_WAKE forever.  Harmless but untracked — reclaim via a waiters
+    epoch, or accept the wasted wake?
+
+26. **Multiple producers share one `send_seq`.**  N trigger sources
+    coalesce onto a single counter — no per-producer attribution, and a
+    burst across producers merges exactly like a burst from one.  By
+    design (latest image wins), but per-producer accounting might matter
+    for diagnostics.
+
+27. **`triggerSend()` under a running cyclic loop is a silent no-op.**
+    The seq bumps but nothing consumes it.  A one-shot warning ("async
+    trigger while cyclic loop owns the wire") could catch API misuse.

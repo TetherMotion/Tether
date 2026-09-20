@@ -573,6 +573,7 @@ void Master::stop()
     const bool was_running = running_.load(std::memory_order_acquire);
     requestCancel();  // sets cancel flag + wakes packet router waiters
     stopMotionControlLoop();
+    stopAsyncLoop();
     stopCyclicLoop();
     if (slave_supervisor_) {
         slave_supervisor_->stop();
@@ -694,6 +695,7 @@ bool Master::isMotionControlLoopRunning() const
 
 bool Master::startCyclicLoop(const CyclicLoopConfig& config)
 {
+    stopAsyncLoop();   // mutually exclusive — the user picks the loop model
     stopCyclicLoop();
     stopMotionControlLoop();
     clearCancel();
@@ -818,79 +820,10 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
         };
     }
 
-    // ---- Cyclic channel + process image ----------------------------------
-    // The channel needs a raw AF_PACKET fd — only the direct-EtherCAT path
-    // exposes one (iface_.receive/native_handle are stripped for VLAN and
-    // absent under UDP encapsulation or polling transports).
-    cyclic_channel_.reset();
-    active_image_mode_ = ImageMode::Buffered;
-    process_image_.configure({});
-
-#ifdef __linux__
-    if (iface_.receive && iface_.native_handle &&
-        !isUdpEncapsulationEnabled()) {
-        const int fd = static_cast<int>(
-            reinterpret_cast<intptr_t>(iface_.native_handle));
-        sockaddr_ll sll{};
-        socklen_t sll_len = sizeof(sll);
-        int ifindex = 0;
-        if (::getsockname(fd, reinterpret_cast<sockaddr*>(&sll),
-                          &sll_len) == 0) {
-            ifindex = sll.sll_ifindex;
-        }
-        CyclicChannelConfig cc;
-        cc.ifindex    = ifindex;
-        cc.async_fd   = fd;
-        cc.wire_mode  = config.wire_mode;
-        cc.rx_spin_ns = config.rx_spin_ns;
-        cyclic_channel_ = createCyclicChannel(cc);
-        if (!cyclic_channel_) {
-            TETHER_LOGW(TAG, "cyclic channel unavailable — using software "
-                             "deposit path (no ring/BPF acceleration)");
-        }
-    }
-#endif
-
-    ImageMode mode = config.image_mode;
-    if (mode == ImageMode::Rotating && !cyclic_channel_) {
-        TETHER_LOGW(TAG, "Rotating image mode requires a cyclic channel — "
-                         "falling back to Direct");
-        mode = ImageMode::Direct;
-    }
-    if (mode != ImageMode::Buffered && pdo_ &&
-        logical_addr_mgr_ && logical_addr_mgr_->isInitialized()) {
-        const char* shm = config.shm_image_name.empty()
-                        ? nullptr : config.shm_image_name.c_str();
-        if (pdo_->configureProcessImage(process_image_, mode, shm)) {
-            active_image_mode_ = mode;
-            TETHER_LOGI(TAG, "process image active: mode={} rx={}B tx={}B{}",
-                        static_cast<int>(mode),
-                        process_image_.outputBytes(),
-                        process_image_.inputBytes(),
-                        process_image_.shmBacked() ? " [shm]" : "");
-        } else {
-            TETHER_LOGW(TAG, "process image configure failed — "
-                             "buffered exchange");
-        }
-    }
-    if (pdo_) {
-        pdo_->setCyclicStrictWkc(config.strict_wkc);
-    }
-
-    // ---- Memory locking: image + cyclic buffers (opt-out sections) -----
-    if (config.memory_lock.lock_image && process_image_.configured()) {
-        // Lock whatever backing regions the configured mode uses.
-        if (uint8_t* w = process_image_.outputWrite())
-            Tether::Platform::lockMemory(w, process_image_.imageBytes());
-        if (uint8_t* b = process_image_.inputWriteBank())
-            Tether::Platform::lockMemory(b, process_image_.imageBytes());
-    }
-    if (config.memory_lock.lock_slots) {
-        Tether::Platform::lockMemory(cyclic_slots_.data(),
-                                     sizeof(cyclic_slots_));
-        Tether::Platform::lockMemory(cyclic_tx_buf_,
-                                     sizeof(cyclic_tx_buf_));
-    }
+    // ---- Cyclic channel + process image + lockable sections ------------
+    setupCyclicDatapath(config.wire_mode, config.image_mode,
+                        config.shm_image_name, config.rx_spin_ns,
+                        config.strict_wkc, config.memory_lock);
 
     cyclic_loop_ = std::make_unique<CyclicExecutive>(
         std::move(exchange_fn), std::move(dc_fn), std::move(time_fn), exec_cfg);
@@ -923,6 +856,9 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
 
 void Master::stopCyclicLoop()
 {
+    // The shared datapath may belong to the async loop — only tear it
+    // down when the cyclic loop owned it (its thread is dead by then).
+    const bool owned_datapath = cyclic_loop_ != nullptr;
     if (cyclic_loop_) {
         cyclic_loop_->stop();
         cyclic_loop_.reset();
@@ -934,6 +870,217 @@ void Master::stopCyclicLoop()
         if (cyclic_cpu_claim_ >= 0) { iso.release(cyclic_cpu_claim_); cyclic_cpu_claim_ = -1; }
         if (dc_cpu_claim_ >= 0)     { iso.release(dc_cpu_claim_);     dc_cpu_claim_ = -1; }
     }
+    if (owned_datapath) {
+        teardownCyclicDatapath();
+    }
+}
+
+bool Master::isCyclicLoopRunning() const
+{
+    return cyclic_loop_ && cyclic_loop_->isRunning();
+}
+
+CyclicExecutive::Stats Master::getCyclicLoopStats() const
+{
+    return cyclic_loop_ ? cyclic_loop_->getStats() : CyclicExecutive::Stats{};
+}
+
+// ============================================================================
+// Async send-on-change loop — external-producer RxPDO source
+// ============================================================================
+
+bool Master::startAsyncLoop(const AsyncLoopConfig& config)
+{
+    // Mutually exclusive with the cyclic loop — the user picks the model.
+    // Async first: its thread blocks on process_image_'s send word, which
+    // the shared datapath teardown reconfigures — the thread must be dead
+    // before any teardown runs, or waitSend reads unmapped shm.
+    stopAsyncLoop();
+    stopCyclicLoop();
+    stopMotionControlLoop();
+    clearCancel();
+
+    AsyncCyclicLoop::Config ecfg = config.exec;
+    ecfg.collect_mode         = config.collect_mode;
+    ecfg.collect_period_us    = config.collect_period_us;
+    ecfg.min_send_interval_ns = config.min_send_interval_ns;
+    ecfg.max_idle_ns          = config.max_idle_ns;
+    rx_spin_ns_ = config.rx_spin_ns;
+
+    // ---- Runtime CPU isolation (opt-in; single async thread) -----------
+    if (config.cpu_isolation.enabled) {
+        auto& iso = Tether::Platform::CpuIsolation::instance();
+        Tether::Platform::CpuIsolation::Spec spec;
+        spec.prefer_isolated = config.cpu_isolation.prefer_isolated;
+        spec.avoid_cpu0      = config.cpu_isolation.avoid_cpu0;
+        spec.requested_cpu   = config.cpu_isolation.cyclic_cpu;
+        auto c = iso.claim(spec);
+        if (c.valid()) {
+            async_cpu_claim_    = c.cpu;
+            ecfg.cpu_affinity   = c.cpu;
+        } else if (config.cpu_isolation.cyclic_cpu >= 0) {
+            TETHER_LOGW(TAG, "CPU isolation: async CPU {} claim denied — "
+                             "running unpinned",
+                        config.cpu_isolation.cyclic_cpu);
+        }
+    }
+
+    // ---- Memory locking (each section independently opt-out-able) ------
+    if (config.memory_lock.lock_all_process) {
+        Tether::Platform::lockAllMemory();
+    }
+    if (ecfg.stack_prefault_bytes == 0 &&
+        config.memory_lock.stack_prefault_bytes > 0) {
+        ecfg.stack_prefault_bytes = config.memory_lock.stack_prefault_bytes;
+    }
+    if (!config.memory_lock.prefault_stack) {
+        ecfg.stack_prefault_bytes = 0;
+    }
+
+    // ---- Cyclic channel + process image + lockable sections ------------
+    setupCyclicDatapath(config.wire_mode, config.image_mode,
+                        config.shm_image_name, config.rx_spin_ns,
+                        config.strict_wkc, config.memory_lock);
+
+    // Send: one RxPDO shot per trigger.  cyclicSend() falls back to the
+    // atomic exchange when no logical address manager is configured.
+    AsyncCyclicLoop::TaskFn send_fn =
+        [this, rx_timeout = config.rx_timeout_ns]() -> bool {
+            bool ok = true;
+            if (pdo_) {
+                if (logical_addr_mgr_ && logical_addr_mgr_->isInitialized()) {
+                    ok = pdo_->cyclicSend(&process_image_, rx_timeout);
+                } else {
+                    ok = pdo_->exchangeAll();
+                }
+            }
+            for (auto& g : pdo_groups_) {
+                if (g.pdo) ok = g.pdo->exchangeAll() && ok;
+            }
+            return ok;
+        };
+    AsyncCyclicLoop::TaskFn collect_fn = [this]() -> bool {
+        return !pdo_ || pdo_->cyclicCollect(&process_image_);
+    };
+
+    async_loop_ = std::make_unique<AsyncCyclicLoop>(
+        process_image_, std::move(send_fn), std::move(collect_fn),
+        AsyncCyclicLoop::TimeFunc{}, ecfg);
+    return async_loop_->start();
+}
+
+void Master::stopAsyncLoop()
+{
+    // The shared datapath may belong to the cyclic loop — only tear it
+    // down when the async loop owned it (its thread is dead by then).
+    if (async_loop_) {
+        async_loop_->stop();
+        async_loop_.reset();
+        teardownCyclicDatapath();
+    }
+    if (async_cpu_claim_ >= 0) {
+        Tether::Platform::CpuIsolation::instance().release(async_cpu_claim_);
+        async_cpu_claim_ = -1;
+    }
+}
+
+bool Master::isAsyncLoopRunning() const
+{
+    return async_loop_ && async_loop_->isRunning();
+}
+
+AsyncCyclicLoop::Stats Master::getAsyncLoopStats() const
+{
+    return async_loop_ ? async_loop_->getStats() : AsyncCyclicLoop::Stats{};
+}
+
+// ============================================================================
+// Shared cyclic datapath bring-up/teardown (cyclic + async loops)
+// ============================================================================
+
+void Master::setupCyclicDatapath(CyclicWireMode wire_mode,
+                                 ImageMode image_mode,
+                                 const std::string& shm_image_name,
+                                 uint32_t rx_spin_ns,
+                                 bool strict_wkc,
+                                 const MemoryLockConfig& memlock)
+{
+    // The channel needs a raw AF_PACKET fd — only the direct-EtherCAT path
+    // exposes one (iface_.receive/native_handle are stripped for VLAN and
+    // absent under UDP encapsulation or polling transports).
+    cyclic_channel_.reset();
+    active_image_mode_ = ImageMode::Buffered;
+    process_image_.configure({});
+
+#ifdef __linux__
+    if (iface_.receive && iface_.native_handle &&
+        !isUdpEncapsulationEnabled()) {
+        const int fd = static_cast<int>(
+            reinterpret_cast<intptr_t>(iface_.native_handle));
+        sockaddr_ll sll{};
+        socklen_t sll_len = sizeof(sll);
+        int ifindex = 0;
+        if (::getsockname(fd, reinterpret_cast<sockaddr*>(&sll),
+                          &sll_len) == 0) {
+            ifindex = sll.sll_ifindex;
+        }
+        CyclicChannelConfig cc;
+        cc.ifindex    = ifindex;
+        cc.async_fd   = fd;
+        cc.wire_mode  = wire_mode;
+        cc.rx_spin_ns = rx_spin_ns;
+        cyclic_channel_ = createCyclicChannel(cc);
+        if (!cyclic_channel_) {
+            TETHER_LOGW(TAG, "cyclic channel unavailable — using software "
+                             "deposit path (no ring/BPF acceleration)");
+        }
+    }
+#endif
+
+    ImageMode mode = image_mode;
+    if (mode == ImageMode::Rotating && !cyclic_channel_) {
+        TETHER_LOGW(TAG, "Rotating image mode requires a cyclic channel — "
+                         "falling back to Direct");
+        mode = ImageMode::Direct;
+    }
+    if (mode != ImageMode::Buffered && pdo_ &&
+        logical_addr_mgr_ && logical_addr_mgr_->isInitialized()) {
+        const char* shm = shm_image_name.empty()
+                        ? nullptr : shm_image_name.c_str();
+        if (pdo_->configureProcessImage(process_image_, mode, shm)) {
+            active_image_mode_ = mode;
+            TETHER_LOGI(TAG, "process image active: mode={} rx={}B tx={}B{}",
+                        static_cast<int>(mode),
+                        process_image_.outputBytes(),
+                        process_image_.inputBytes(),
+                        process_image_.shmBacked() ? " [shm]" : "");
+        } else {
+            TETHER_LOGW(TAG, "process image configure failed — "
+                             "buffered exchange");
+        }
+    }
+    if (pdo_) {
+        pdo_->setCyclicStrictWkc(strict_wkc);
+    }
+
+    // ---- Memory locking: image + cyclic buffers (opt-out sections) -----
+    if (memlock.lock_image && process_image_.configured()) {
+        // Lock whatever backing regions the configured mode uses.
+        if (uint8_t* w = process_image_.outputWrite())
+            Tether::Platform::lockMemory(w, process_image_.imageBytes());
+        if (uint8_t* b = process_image_.inputWriteBank())
+            Tether::Platform::lockMemory(b, process_image_.imageBytes());
+    }
+    if (memlock.lock_slots) {
+        Tether::Platform::lockMemory(cyclic_slots_.data(),
+                                     sizeof(cyclic_slots_));
+        Tether::Platform::lockMemory(cyclic_tx_buf_,
+                                     sizeof(cyclic_tx_buf_));
+    }
+}
+
+void Master::teardownCyclicDatapath()
+{
     // Drop the held input-view cookie before the channel dies.
     process_image_.configure({});
     // Release ring/bank cookies held by the cyclic slots, then tear down.
@@ -948,16 +1095,6 @@ void Master::stopCyclicLoop()
     }
     cyclic_channel_.reset();
     active_image_mode_ = ImageMode::Buffered;
-}
-
-bool Master::isCyclicLoopRunning() const
-{
-    return cyclic_loop_ && cyclic_loop_->isRunning();
-}
-
-CyclicExecutive::Stats Master::getCyclicLoopStats() const
-{
-    return cyclic_loop_ ? cyclic_loop_->getStats() : CyclicExecutive::Stats{};
 }
 
 // ============================================================================

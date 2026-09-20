@@ -652,6 +652,60 @@ slot's held cookie, destroys the channel, then **releases the CPU claims**
 and `dispatchChannelFrame` to tests — the whole publish/release lifecycle
 is testable with a scripted `ICyclicChannel`, no raw sockets needed.
 
+### 7.6 Async send-on-change loop (`startAsyncLoop`)
+
+The deadline-driven executive is the wrong shape for producers whose RxPDO
+data is clocked *externally* — a motion planner, a fieldbus gateway, a
+simulation tick.  `startAsyncLoop` is the explicit alternative: an
+event-driven sibling that transmits **on producer trigger**, never on a
+free-running period.  The two loops are mutually exclusive — starting one
+stops the other; the user picks the model deliberately.
+
+**Producer contract** — deliberately two calls:
+
+```cpp
+img.commitOutputs();   // publish the new output image (unchanged semantics)
+img.triggerSend();     // "send it now" — bumps send_seq, wakes the loop
+```
+
+`commitOutputs()` stays send-neutral in every loop mode — the cyclic loop
+transmits on its own deadline regardless.  `triggerSend()` is the *change
+edge*: it bumps a dedicated `send_seq` counter and wakes `waitSend()` —
+C++20 `std::atomic::wait`/`notify_all` for the in-process word, a **shared
+`FUTEX_WAIT`/`WAKE`** pair when the image is shm-backed, so a
+process-external producer attached via `attachProcessImage()` drives the
+master's wire directly (§6.6).
+
+**TxPDO collection policy** (`AsyncLoopConfig::collect_mode`):
+
+- `OnSend` — every triggered send is immediately followed by a collect:
+  one wire exchange per producer edge (TxPDO-synchronous).
+- `Periodic` — collects run on their own `collect_period_us` deadline
+  (e.g. 1 kHz) independent of sends: inputs stream at a fixed rate while
+  outputs fire on change.
+
+Both actions serialize on the single loop thread — the channel stays
+lock-free, and a periodic collect can never collide with an in-flight
+send.  Sends are strictly send-on-change: a periodic tick never piggybacks
+a pending send.
+
+**Coalescing** — triggers that arrive while a send is in flight (or closer
+than `min_send_interval_ns`) merge into one trailing send carrying the
+latest committed image (`sends_coalesced` stat).  Send-latest is the
+correct realtime policy: a superseded image is dead data on the wire.
+
+**Keep-alive** — `max_idle_ns` (OnSend only): when the producer goes
+silent for that long, a collect-only exchange ticks so slaves'
+SyncManager/DC watchdogs stay fed.  Drives needing strict DC periodicity
+belong on `CyclicExecutive` — async + DC is a mismatch by construction.
+
+`AsyncLoopConfig` carries the same datapath knobs as `CyclicLoopConfig`
+(`wire_mode`, `image_mode`, `rx_spin_ns`, `shm_image_name`, `strict_wkc`,
+`cpu_isolation`, `memory_lock`, scheduling class/priority) — the channel,
+image, CPU-claim, and mlock setup is shared verbatim with the cyclic path
+(`setupCyclicDatapath`/`teardownCyclicDatapath`).  `stopAsyncLoop`/
+`Master::stop` release the async CPU claim identically.
+
 ---
 
 ## 8. Realtime platform layer
@@ -949,6 +1003,7 @@ budget.  Zero-copy is the enabler; deterministic ownership is the point.
 
 Tests live in `tests/ethercat/test_cyclic_channel.cpp`,
 `tests/ethercat/test_process_image.cpp`,
+`tests/ethercat/test_async_loop.cpp`,
 `tests/ethercat/test_rt_privileged.cpp`, and
 `tests/platform/test_rt_platform.cpp`, in the
 `tether_ethercat_master_tests` / `tether_ethercat_pdo_tests` /
@@ -966,6 +1021,7 @@ Tests live in `tests/ethercat/test_cyclic_channel.cpp`,
 | Master fast path | `MasterCyclicTestAccess` + scripted channel | software deposit copy path, view publish + cookie release, mixed-frame → parser routing, short-frame ignore, `txSendParts` composition, header layout |
 | ProcessImage / LAM | `configure()` + fake `IPDOTransport` | all 5 modes, carry-forward, commit gating, rotating attach/detach, publish view/copy/parts + seq, entry offsets + exclusions, `EntryHandle` epoch invalidation, `waitInput` wake/timeout/reconfigure, shm export + attach lifecycle, multi-slice send/collect, strict-WKC learn + mismatch, forced-buffered gather/scatter |
 | Rt platform | `test_rt_platform.cpp` | `CpuIsolation` claim/release/auto-select/leave-one-free/explicit + conflict, `RtMemory` lock/prefault/slack best-effort paths |
+| Async send-on-change | `test_async_loop.cpp` + `RtVethTest.AsyncLoopTriggerDrivesWireExchange` | `triggerSend`/`waitSend`/`sendSeq` (in-process atomic wait + shm futex), OnSend send+collect per edge, Periodic independent tick, rate-limit + burst coalescing, idle keep-alive, stop-from-wait, double-start, Master lifecycle + cyclic/async mutual exclusion, **real wire**: trigger → ring TX → veth echo → RX collect |
 | **Live kernel demux + rings** | `LivePacketTest` on loopback: two real AF_PACKET sockets with opposite filters, real ring RX/TX, factory `Auto` | **auto-skipped without `CAP_NET_RAW`** — runs in privileged CI |
 | **Privileged end-to-end** | `test_rt_privileged.cpp` under `runec` — see below | real veth wire, kernel rings, SCHED_FIFO/DEADLINE, CPU claims |
 | Factory validation | `CyclicChannelFactory.InvalidIfindexFails` — fails before socket creation | unconditional |
@@ -1078,6 +1134,27 @@ const uint32_t ep = img.epoch();                 // changes on reconfigure
 auto h = img.entryHandle(entry_idx);             // epoch-checked reference
 // ...later, even across a remap:
 if (int32_t* p = img.outputPtr<int32_t>(h)) *p = target;  // nullptr if stale
+
+// --- Async send-on-change loop (external-clock producers) --------------
+Master::AsyncLoopConfig acfg;
+acfg.collect_mode      = AsyncCyclicLoop::CollectMode::OnSend;   // or Periodic
+acfg.collect_period_us = 1000;                 // Periodic tick (µs)
+acfg.min_send_interval_ns = 0;                 // burst coalescing window
+acfg.max_idle_ns       = 20'000'000;           // OnSend keep-alive (0=off)
+acfg.wire_mode   = CyclicWireMode::Auto;
+acfg.image_mode  = ImageMode::Direct;
+acfg.exec.priority    = 80;
+acfg.exec.sched_class = Master::SchedClass::Fifo;
+acfg.cpu_isolation.enabled = true;             // same opt-in claims
+master.startAsyncLoop(acfg);                   // mutually exclusive w/ cyclic
+
+// Producer side (same process, or shm-attached process):
+img.commitOutputs();
+img.triggerSend();                             // the send edge
+
+auto ast = master.getAsyncLoopStats();         // wakes/sends/coalesced/
+                                               // collects/idle_collects
+master.stopAsyncLoop();
 ```
 
 `PDOManager::configureProcessImage()` is called internally by
@@ -1094,9 +1171,10 @@ channel for diagnostics (`backendName()`, `zeroCopy()`, `droppedRx()`,
 |---|---|
 | `include/tether/ethercat/CyclicChannel.hpp` | `ICyclicChannel`, views, modes, config, factories, BPF access, `CyclicSlotView` |
 | `src/ethercat/raw/CyclicChannel_linux.cpp` | BPF programs, `LinuxSocketChannel`, `LinuxRingChannel`, `recvmsg` stamps, ring cursors/holds, `txDeferred`, factories, test seams, non-Linux stubs |
-| `include/tether/ethercat/ProcessImage.hpp` / `src/ethercat/ProcessImage.cpp` | image modes, buffers, publish/hold/parts, `EntryHandle`, `waitInput` futex, shm export/attach, entry offsets |
+| `include/tether/ethercat/ProcessImage.hpp` / `src/ethercat/ProcessImage.cpp` | image modes, buffers, publish/hold/parts, `EntryHandle`, `waitInput` futex, `triggerSend`/`waitSend`/`sendSeq` trigger words, shm export/attach, entry offsets |
+| `include/tether/ethercat/AsyncCyclicLoop.hpp` / `src/ethercat/AsyncCyclicLoop.cpp` | event-driven send-on-change loop: `CollectMode` (OnSend/Periodic), rate-limit coalescing, idle keep-alive, RT plumbing |
 | `src/ethercat/raw/Master_transport.cpp` | `depositCyclicSlot`, `publishCyclicSlotView`, `dispatchChannelFrame`, unified `waitCyclicSlotView`, `sendCyclicDatagram`/`sendCyclicFrame`/`composeCyclicHeader` |
-| `src/ethercat/raw/Master.cpp` | `startCyclicLoop`/`stopCyclicLoop` wiring: CPU claims, mlock sections, sched class, split placement, shm name, `MasterPDOTransport` forwards |
+| `src/ethercat/raw/Master.cpp` | `startCyclicLoop`/`stopCyclicLoop` + `startAsyncLoop`/`stopAsyncLoop` wiring: CPU claims, mlock sections, sched class, split placement, shm name, mutual exclusion, `MasterPDOTransport` forwards |
 | `src/ethercat/raw/LogicalAddressManager.cpp` | `computeImageOffsets`, `cyclicSend`/`cyclicCollect` (multi-slice), expected-WKC learn/verify, `maxSliceLength` |
 | `include/tether/platform/RtMemory.hpp` / `src/platform/RtMemory.cpp` | `lockAllMemory`, `lockMemory`, `prefault*`, timer slack — best-effort RT hardening |
 | `include/tether/platform/CpuIsolation.hpp` / `src/platform/CpuIsolation.cpp` | runtime CPU claim allocator, RAII `Claim`, `atexit` release |
@@ -1105,7 +1183,8 @@ channel for diagnostics (`backendName()`, `zeroCopy()`, `droppedRx()`,
 | `include/tether/ethercat/PDOManager.hpp` | `PDOEntry::image_exclude`, `IPDOTransport` cyclic API |
 | `include/tether/ethercat/Master.hpp` | `CyclicLoopConfig` (wire/image/sched/mlock/cpu-iso/split/shm/strict-wkc), slot bank, test seam |
 | `tests/ethercat/test_cyclic_channel.cpp` | BPF VM + kernel BPF + socket channel + ring-memory + wait-path + Master + live tests |
-| `tests/ethercat/test_rt_privileged.cpp` | privileged suite: real veth wire, kernel rings, demux, Master wait, CyclicExecutive, sched/CPU/mem (run under `runec`) |
+| `tests/ethercat/test_rt_privileged.cpp` | privileged suite: real veth wire, kernel rings, demux, Master wait, CyclicExecutive, AsyncCyclicLoop-over-wire, sched/CPU/mem (run under `runec`) |
 | `tests/ethercat/test_process_image.cpp` | image modes + LAM exchange + handles + waitInput + shm |
+| `tests/ethercat/test_async_loop.cpp` | trigger/wait/coalesce, both collect modes, idle keep-alive, shm cross-process trigger, Master async lifecycle |
 | `tests/platform/test_rt_platform.cpp` | `CpuIsolation` claims + `RtMemory` best-effort paths |
 | `QUESTIONS.md` | open design questions deferred from the FastLoop review |
