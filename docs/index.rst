@@ -7,7 +7,7 @@ Welcome to the Tether library documentation. Tether is a modular C++ library for
    :maxdepth: 2
    :caption: API Reference
 
-   api
+   api/library_root
 
 .. toctree::
    :maxdepth: 2

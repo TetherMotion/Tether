@@ -1,9 +1,11 @@
 # Sphinx documentation system
 sphinx>=7.0.0
-sphinx-rtd-theme>=2.0.0
 
 # Breathe extension for integrating Doxygen XML with Sphinx
 breathe>=4.35.0
+
+# Exhale: auto-generates the C++ API .rst tree from Doxygen XML
+exhale>=0.3.7
 
 # MyST-Parser for Markdown support in Sphinx
 myst-parser>=2.0.0

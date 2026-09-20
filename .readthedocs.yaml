@@ -9,17 +9,12 @@ build:
   os: ubuntu-24.04
   tools:
     python: "3.13"
-  # Doxygen is required to generate the XML consumed by Breathe
+  # Doxygen is invoked by Exhale during the Sphinx build
+  # (exhaleExecutesDoxygen in docs/conf.py); graphviz is installed for
+  # future inheritance/collaboration diagrams.
   apt_packages:
     - doxygen
-  jobs:
-    # Breathe reads Doxygen XML from build/xml (see breathe_projects in
-    # docs/conf.py); the Doxyfile's XML_OUTPUT matches that path.
-    # Doxygen cannot create nested output directories, so the parent
-    # build/ dir (gitignored, absent on fresh clones) must exist first.
-    pre_build:
-      - mkdir -p build/xml
-      - doxygen Doxyfile
+    - graphviz
 
 # Build documentation in the "docs/" directory with Sphinx
 sphinx:
