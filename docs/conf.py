@@ -103,7 +103,7 @@ exhale_args = {
     # Exhale executes Doxygen during the Sphinx build — no separate step needed
     'exhaleExecutesDoxygen': True,
     'exhaleDoxygenStdin': '''
-        INPUT                  = ../include/tether ../src
+        INPUT                  = ../include/tether
         FILE_PATTERNS          = *.h *.hpp *.c *.cpp
         RECURSIVE              = YES
         EXCLUDE_PATTERNS       = */tests/* */test_* *_test.cpp *_test.h
