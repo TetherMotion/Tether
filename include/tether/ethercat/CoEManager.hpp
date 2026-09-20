@@ -11,7 +11,7 @@
 #pragma once
 
 #include "tether/ethercat/CoETypes.hpp"
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/SDOManager.hpp" // ISDOTransport, SDORequest, SDOResponse
 #include "logging/Logger.hpp"

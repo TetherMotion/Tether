@@ -4,7 +4,7 @@
  */
 
 #include "tether/ethercat/FoE.hpp"
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 
 #if ECAT_FEATURE_FOE_ENABLED
 

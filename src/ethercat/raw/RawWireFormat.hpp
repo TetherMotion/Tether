@@ -17,7 +17,7 @@
 #include "tether/platform/Platform.hpp"
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/SMRegisters.hpp"
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 
 namespace EtherCAT {
 namespace Raw {

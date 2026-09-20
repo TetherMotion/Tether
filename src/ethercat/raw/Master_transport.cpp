@@ -15,7 +15,7 @@
 #include "tether/ethercat/RealtimeLoop.hpp"
 #include "tether/ethercat/SyncManagerValidation.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 #include "tether/sii/SIIParser.hpp"
 #include "tether/fmmu/FMMUConfiguration.hpp"
 #include "raw/internal.hpp"
@@ -415,7 +415,7 @@ bool Master::sendSingleDatagram(Command cmd, uint8_t idx,
         if (last_errno != 0) {
             std::snprintf(msg, sizeof(msg),
                           "NetworkInterface::send failed after %d retries (cmd=%s idx=%u adp=0x%04X ado=0x%04X datalen=%u frame_len=%u errno=%d:%s). "
-                          "Tether TX retry limit is %d (ECAT_TX_MAX_RETRIES in TetherConfig.hpp).",
+                          "Tether TX retry limit is %d (ECAT_TX_MAX_RETRIES in EtherCATConfig.hpp).",
                           kMaxTxRetries + 1,
                           commandToString(cmd),
                           static_cast<unsigned>(idx),
@@ -429,7 +429,7 @@ bool Master::sendSingleDatagram(Command cmd, uint8_t idx,
         } else {
             std::snprintf(msg, sizeof(msg),
                           "NetworkInterface::send failed after %d retries (cmd=%s idx=%u adp=0x%04X ado=0x%04X datalen=%u frame_len=%u errno=0). "
-                          "Tether TX retry limit is %d (ECAT_TX_MAX_RETRIES in TetherConfig.hpp).",
+                          "Tether TX retry limit is %d (ECAT_TX_MAX_RETRIES in EtherCATConfig.hpp).",
                           kMaxTxRetries + 1,
                           commandToString(cmd),
                           static_cast<unsigned>(idx),

@@ -4,7 +4,7 @@
  */
 
 #include "VoE.hpp"
-#include "TetherConfig.hpp"
+#include "EtherCATConfig.hpp"
 
 #if ECAT_FEATURE_VOE_ENABLED
 

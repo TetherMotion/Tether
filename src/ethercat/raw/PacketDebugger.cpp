@@ -15,7 +15,7 @@
 #include "PacketDebugger.hpp"
 
 #include "tether/ethercat/Types.hpp"        // EthernetHeader, FrameHeader, DatagramHeader, commandToString
-#include "tether/ethercat/TetherConfig.hpp" // TETHER_ENABLE_UDP_ENCAPSULATION
+#include "tether/ethercat/EtherCATConfig.hpp" // TETHER_ENABLE_UDP_ENCAPSULATION
 #include "tether/packet_interpreters/CoE.hpp"
 #include "tether/platform/Platform.hpp"     // TETHER_LOGI
 

@@ -46,7 +46,7 @@
 #include "tether/ethercat/DebugGate.hpp"
 #include "tether/ethercat/EtherCATTransport.hpp"
 #include "tether/ethercat/SlaveIdentity.hpp"
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 #if TETHER_ENABLE_SII
 #include "tether/sii/SIIManager.hpp"
 #endif

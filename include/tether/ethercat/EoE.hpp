@@ -156,12 +156,12 @@
  * EoE runs in a dedicated background task. Frame transmission is thread-safe.
  * Receive callbacks are invoked from the EoE task context.
  * 
- * @note Configure EoE in TetherConfig.hpp with ECAT_FEATURE_EOE_ENABLED
+ * @note Configure EoE in EtherCATConfig.hpp with ECAT_FEATURE_EOE_ENABLED
  */
 
 #pragma once
 
-#include "TetherConfig.hpp"
+#include "EtherCATConfig.hpp"
 
 #if ECAT_FEATURE_EOE_ENABLED
 

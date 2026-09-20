@@ -107,7 +107,7 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
         TETHER_LOGE(TAG,
             "Slave mailbox size exceeds Tether safety ceiling "
             "(wr={} rd={}, needed={}, ceiling={} bytes). "
-            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= {}.",
+            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in EtherCATConfig.hpp to >= {}.",
             mbxWriteLen, mbxReadLen, buf_size,
             static_cast<unsigned>(kRawSDOMbxBufferSize), buf_size);
         return false;
@@ -380,7 +380,7 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
         TETHER_LOGE(TAG,
             "Slave mailbox size exceeds Tether safety ceiling "
             "(wr={} rd={}, needed={}, ceiling={} bytes). "
-            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= {}.",
+            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in EtherCATConfig.hpp to >= {}.",
             mbxWriteLen, mbxReadLen, buf_size,
             static_cast<unsigned>(kRawSDOMbxBufferSize), buf_size);
         return false;
@@ -619,7 +619,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
         TETHER_LOGE(TAG,
             "Slave mailbox size exceeds Tether safety ceiling "
             "(wr={} rd={}, needed={}, ceiling={} bytes). "
-            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp to >= {}.",
+            "Increase ECAT_RAW_SDO_MBX_BUFFER_SIZE in EtherCATConfig.hpp to >= {}.",
             mbxWriteLen, mbxReadLen, buf_size,
             static_cast<unsigned>(kRawSDOMbxBufferSize), buf_size);
         return false;

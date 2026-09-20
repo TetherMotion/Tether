@@ -44,7 +44,7 @@
 
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 #if TETHER_ENABLE_SII
 #include "tether/sii/SIIManager.hpp"
 #endif

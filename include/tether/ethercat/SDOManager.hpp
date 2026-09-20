@@ -58,7 +58,7 @@
 #include <functional>
 
 #include "tether/ethercat/Types.hpp"
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 #include "tether/ethercat/SDOAbortCodes.hpp"
 #ifdef ESP_PLATFORM
 #include "esp_eth_driver.h"

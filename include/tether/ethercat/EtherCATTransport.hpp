@@ -19,7 +19,7 @@
 #include "tether/ethercat/Types.hpp"
 
 #if TETHER_ENABLE_UDP_ENCAPSULATION
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 #endif
 
 #include <atomic>

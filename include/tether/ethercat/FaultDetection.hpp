@@ -45,7 +45,7 @@
 #include <algorithm>
 #include <format>
 #include <string>
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 
 namespace EtherCAT {
 

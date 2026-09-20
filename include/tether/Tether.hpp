@@ -14,7 +14,7 @@
 #endif
 
 // GCode Interpreter
-#ifdef TETHER_ENABLE_GCODE
+#if TETHER_ENABLE_GCODE
 #include "tether/gcode/GCodeParser.hpp"
 #include "tether/gcode/GCodeInterpreter.hpp"
 #include "tether/gcode/motion/InterpolationStrategy.hpp"
@@ -22,7 +22,7 @@
 #endif
 
 // CiA 402 Drive Profile
-#ifdef TETHER_ENABLE_CIA402
+#if TETHER_ENABLE_CIA402
 #include "tether/cia402/CiA402Drive.hpp"
 #include "tether/cia402/CiA402StateMachine.hpp"
 #include "tether/cia402/MotorModel.hpp"
@@ -31,18 +31,18 @@
 #endif
 
 // Motion Control
-#ifdef TETHER_ENABLE_MOTION
+#if TETHER_ENABLE_MOTION
 #include "tether/motion/MotionGenerator.hpp"
 #endif
 
 // Control Algorithms
-#ifdef TETHER_ENABLE_CONTROL
+#if TETHER_ENABLE_CONTROL
 #include "tether/control/PIDControllers.hpp"
 #include "tether/control/Controllers.hpp"
 #endif
 
 // FSoE (Functional Safety over EtherCAT)
-#ifdef TETHER_ENABLE_FSOE
+#if TETHER_ENABLE_FSOE
 #include "tether/fsoe/FSoESlave.hpp"
 #include "tether/fsoe/FSoEMasterConnection.hpp"
 #include "tether/fsoe/FSoEMaster.hpp"
@@ -51,7 +51,7 @@
 #endif
 
 // HAL (Hardware Abstraction Layer)
-#ifdef TETHER_ENABLE_HAL
+#if TETHER_ENABLE_HAL
 #include "tether/hal/HAL.hpp"
 #include "tether/hal/IClock.hpp"
 #include "tether/hal/IEthernet.hpp"
@@ -59,7 +59,7 @@
 #endif
 
 // Kinematics (robotics + printer kinematics models)
-#ifdef TETHER_ENABLE_KINEMATICS
+#if TETHER_ENABLE_KINEMATICS
 #include "tether/kinematics/ForwardKinematics.hpp"
 #include "tether/kinematics/ForwardDynamics.hpp"
 #include "tether/kinematics/PrinterKinematics.hpp"
@@ -69,14 +69,14 @@
 #endif
 
 // EtherCAT
-#ifdef TETHER_ENABLE_ETHERCAT
+#if TETHER_ENABLE_ETHERCAT
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/SDOManager.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 #endif
 
 // Klipper protocol
-#ifdef TETHER_ENABLE_KLIPPER
+#if TETHER_ENABLE_KLIPPER
 #include "tether/klipper/protocol/Crc16.hpp"
 #include "tether/klipper/protocol/Vlq.hpp"
 #include "tether/klipper/protocol/MessageBlock.hpp"
@@ -89,7 +89,7 @@
 #include "tether/klipper/transport/LoopbackTransport.hpp"
 #include "tether/klipper/transport/PipeTransport.hpp"
 #include "tether/klipper/transport/TcpStreamTransport.hpp"
-#ifdef TETHER_ENABLE_KLIPPER_CAN
+#if TETHER_ENABLE_KLIPPER_CAN
 #include "tether/klipper/transport/CanTransport.hpp"
 #include "tether/hal/ICan.hpp"
 #endif

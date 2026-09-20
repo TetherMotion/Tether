@@ -3,6 +3,13 @@
 #include <chrono>
 #include <thread>
 
+// Generated feature flags — TETHER_ENABLE_ETHERCAT may arrive as a compile
+// definition (defined/absent) or via the generated header (always defined as
+// 0 or 1). Test the VALUE: an undefined identifier is 0 in #if.
+#if __has_include("tether/TetherConfig.hpp")
+#include "tether/TetherConfig.hpp"
+#endif
+
 // Forward declarations for minimal host stubs when EtherCAT types are not available
 namespace EtherCAT {
 namespace Platform {
@@ -12,7 +19,7 @@ namespace Platform {
 }
 }
 
-#if !defined(TETHER_ENABLE_ETHERCAT) && !defined(TETHER_COMPILE_MASTER)
+#if !TETHER_ENABLE_ETHERCAT && !defined(TETHER_COMPILE_MASTER)
 
 // Host-only minimal stubs. These are excluded when building the full EtherCAT
 // master (TETHER_COMPILE_MASTER=1) to avoid duplicate symbol definitions.
@@ -50,7 +57,7 @@ bool ReadWatchdogStatus(uint16_t slave_index, uint8_t& wd_status, uint8_t& pdi_c
 
 
 
-#endif // !TETHER_ENABLE_ETHERCAT && !TETHER_COMPILE_MASTER
+#endif // !TETHER_ENABLE_ETHERCAT && !defined(TETHER_COMPILE_MASTER)
 
 // SDO helpers often implemented on the raw layer - provide minimal stubs (always present)
 extern "C" bool ecm_sdo_read(uint16_t slave_addr, uint16_t index, uint8_t subindex, void* data, size_t len, bool use_configured_addr) {

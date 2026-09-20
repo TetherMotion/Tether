@@ -59,7 +59,7 @@
 #include <bit>
 
 #include "tether/ethercat/SMRegisters.hpp"
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 #include "tether/sii/SIILogger.hpp"
 
 namespace EtherCAT {

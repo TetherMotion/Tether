@@ -25,7 +25,23 @@ if(ESP_PLATFORM)
 endif()
 
 cmake_minimum_required(VERSION 3.16)
-project(Tether VERSION 2.0.0 LANGUAGES C CXX)
+
+# Refuse in-tree configures: configure_file() writes generated headers (e.g.
+# include/tether/TetherConfig.hpp) into CMAKE_CURRENT_BINARY_DIR, which for an
+# in-tree build is the source tree. The stale generated copy then shadows the
+# real one for other targets — and historically kept getting committed even
+# though it is a build artifact. Out-of-source builds only.
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_CURRENT_BINARY_DIR)
+    message(FATAL_ERROR
+        "In-tree builds are not supported.\n"
+        "Please configure into a separate build directory, e.g.:\n"
+        "  cmake -B build\n"
+        "(If you previously configured in-tree, remove CMakeCache.txt and CMakeFiles/ first.)"
+    )
+endif()
+
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/TetherVersion.cmake)
+project(Tether VERSION ${TETHER_VERSION} LANGUAGES C CXX)
 
 # =============================================================================
 # Git Submodule Check
@@ -572,11 +588,42 @@ else()
     endforeach()
 endif()
 
+# =============================================================================
+# Generated config header (tether/TetherConfig.hpp)
+# =============================================================================
+# TetherConfig.hpp.in exposes TETHER_ENABLE_* macros, but the component
+# options above are named TETHER_BUILD_* for historical reasons. Map the
+# BUILD_* options onto the ENABLE_* names so the generated header reflects
+# what is actually being built. Options that already use the ENABLE_* name
+# (TETHER_ENABLE_CIA*, TETHER_ENABLE_SII, TETHER_ENABLE_KLIPPER_CAN/HTTP,
+# TETHER_ENABLE_PRESSURE_ADVANCE) are read by configure_file() directly.
+set(TETHER_ENABLE_ETHERCAT   ${TETHER_BUILD_ETHERCAT_MASTER})
+set(TETHER_ENABLE_GCODE      ${TETHER_BUILD_GCODE})
+set(TETHER_ENABLE_MOTION     ${TETHER_BUILD_MOTION_CONTROL})
+set(TETHER_ENABLE_CONTROL    ${TETHER_BUILD_CONTROLS})
+set(TETHER_ENABLE_FSOE       ${TETHER_BUILD_FSOE})
+set(TETHER_ENABLE_HAL        ${TETHER_BUILD_HAL})
+set(TETHER_ENABLE_KINEMATICS ${TETHER_BUILD_KINEMATICS})
+set(TETHER_ENABLE_KLIPPER    ${TETHER_BUILD_KLIPPER})
+# HAL backends: ESP32 builds never reach this file (ESP_PLATFORM returns
+# early); there is no STM32 HAL yet.
+set(TETHER_ENABLE_ESP32_HAL  OFF)
+set(TETHER_ENABLE_STM32_HAL  OFF)
+set(TETHER_ENABLE_LINUX_HAL  ${TETHER_PLATFORM_LINUX})
+
 # Generate config header
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/include/tether/TetherConfig.hpp.in
     ${CMAKE_CURRENT_BINARY_DIR}/include/tether/TetherConfig.hpp
 )
+
+# The generated header must win over any stale copy in the source tree for
+# EVERY target in this directory and below (components, tests, examples).
+# Directory-scope BEFORE applies to all targets created after this point,
+# unlike the per-target include dirs in cmake/components/*.cmake which are
+# inconsistent. CMAKE_CURRENT_BINARY_DIR (not CMAKE_BINARY_DIR) resolves to
+# the correct directory when Tether is used via add_subdirectory().
+include_directories(BEFORE "${CMAKE_CURRENT_BINARY_DIR}/include")
 
 # =============================================================================
 # Include Component CMake Files

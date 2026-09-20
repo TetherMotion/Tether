@@ -18,7 +18,7 @@
 #include <cstdint>
 #include <cstddef>
 
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 #include "tether/ethercat/SMRegisters.hpp"
 
 namespace EtherCAT {
@@ -27,7 +27,7 @@ namespace Raw {
 constexpr uint8_t FIRE_AND_FORGET_IDX = 0xFE;
 
 // Safety ceiling for the raw SDO layer's dynamically-allocated mailbox
-// buffer. Configurable via ECAT_RAW_SDO_MBX_BUFFER_SIZE in TetherConfig.hpp.
+// buffer. Configurable via ECAT_RAW_SDO_MBX_BUFFER_SIZE in EtherCATConfig.hpp.
 // The actual buffer is allocated per-call to match the slave's reported
 // mailbox size (max of SM0/SM1 length); this constant caps that allocation
 // to guard against corrupted or malicious slaves reporting absurd sizes.

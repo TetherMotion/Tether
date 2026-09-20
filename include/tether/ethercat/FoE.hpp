@@ -18,12 +18,12 @@
  * with a mock transport and supporting multiple independent instances
  * (no global state, no singletons).
  * 
- * @note Configure FoE in TetherConfig.hpp with ECAT_FEATURE_FOE_ENABLED
+ * @note Configure FoE in EtherCATConfig.hpp with ECAT_FEATURE_FOE_ENABLED
  */
 
 #pragma once
 
-#include "TetherConfig.hpp"
+#include "EtherCATConfig.hpp"
 
 #if ECAT_FEATURE_FOE_ENABLED
 

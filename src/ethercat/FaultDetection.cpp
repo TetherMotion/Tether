@@ -237,7 +237,7 @@ bool FaultDetector::init(uint16_t slave_count) {
     if (slave_count > kMaxSlaves) {
         TETHER_LOGW("fault", "Slave count {} exceeds Tether fault detection max {} — clamping. "
                      "This is a Tether limit, not a slave limit. "
-                     "Increase ECAT_FAULT_DETECTION_MAX_SLAVES in TetherConfig.hpp.",
+                     "Increase ECAT_FAULT_DETECTION_MAX_SLAVES in EtherCATConfig.hpp.",
                      static_cast<unsigned>(slave_count), kMaxSlaves);
     }
     slave_count_ = std::min(slave_count, static_cast<uint16_t>(kMaxSlaves));

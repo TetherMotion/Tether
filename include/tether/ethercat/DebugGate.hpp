@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 
 #if TETHER_DEBUG_GATE_ENABLED
 

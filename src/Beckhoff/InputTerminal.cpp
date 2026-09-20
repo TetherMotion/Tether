@@ -39,7 +39,7 @@
 #include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 #include "tether/fmmu/FMMUManager.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include "tether/platform/Platform.hpp"

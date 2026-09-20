@@ -78,7 +78,7 @@
 
 #pragma once
 
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 
 #if TETHER_ENABLE_SII
 
